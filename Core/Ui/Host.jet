@@ -1,6 +1,7 @@
 use {
     core: core
     host_path: __core_files_path_components
+    internal.[file_dialog, granted_path, provider_record]
 }
 // core.ui.host — typed host capability leaves for dialogs and metadata.
 //
@@ -184,13 +185,6 @@ save_request: fn(grant: UIFSGrant) -> UIFileDialogRequest Never! {
     UIFileDialogRequest{kind: .Save, title: "Save File", grant: grant, initial_directory: None, filters: [UIFileFilter]{}, allow_multiple: false}
 }
 
-// The provider record of `fields`.
-provider_record: fn(fields: [String]) -> String Never! {
-    out := ""
-    loop field in fields -> out = "{out}{field.bytes().len()}:{field}"
-    out
-}
-
 // The fields of a provider record, or None when it is malformed.
 provider_record_fields: fn(record: String) -> [String]? Never! {
     raw: record.bytes()
@@ -215,49 +209,59 @@ provider_record_fields: fn(record: String) -> [String]? Never! {
     Val(fields)
 }
 
-// One dialog: validate the request, ask the provider, then check that every
-// selected path lies inside the request's grant.
-file_dialog: fn(request: UIFileDialogRequest, kind: UIFileDialogKind) -> UIFileDialogSelection UIHostError! {
-    opening: kind == .Open
-    name: if opening -> "open" else -> "save"
-    if request.kind != kind -> return Err(UIHostError.InvalidRequest("{name}_file takes {name} dialog requests only"))
-    access: if opening -> UIFSAccess.Read else -> UIFSAccess.Write
-    needed: if opening -> U8{1} else -> U8{2}
-    granted: request.grant.rights.bits.bit_and(needed) != U8{0}
-    dialog: if opening -> "Open" else -> "Save"
-    right: if opening -> "Read" else -> "Write"
-    if !granted -> return Err(UIHostError.ResourceDenied("dialog {dialog} requires {right} access"))
-    if !opening && request.allow_multiple -> return Err(UIHostError.InvalidRequest("save dialogs cannot select multiple files"))
-    if request.initial_directory == .Val(initial) {
-        if initial.grant_root != request.grant.root || initial.access != access -> return Err(UIHostError.ResourceDenied("initial directory is outside the dialog grant"))
+// How a dialog request meets the provider: not part of the host surface.
+priv internal: module {
+    // The provider record of `fields`.
+    provider_record: fn(fields: [String]) -> String Never! {
+        out := ""
+        loop field in fields -> out = "{out}{field.bytes().len()}:{field}"
+        out
     }
-    if !core.ui.host.__capability(0) -> return Err(UIHostError.CapabilityUnavailable{capability: "FileDialog"})
-    wire := [String]{request.title.copy(), request.grant.root.copy(), if request.allow_multiple -> "1" else -> "0"}
-    loop filter in request.filters {
-        loop extension in filter.extensions -> wire.push(extension.copy())
-    }
-    token: core.ui.host.__dialog_request(if opening -> 0 else -> 1, provider_record(wire))
-    if token < 0 -> return Err(UIHostError.HostFailure{service: "FileDialog", message: "the provider refused the dialog request"})
-    answer: core.ui.host.__dialog_result(token) ?? return Err(UIHostError.HostFailure{service: "FileDialog", message: "the provider returned no dialog result"})
-    items: provider_record_fields(answer) ?? return Err(UIHostError.HostFailure{service: "FileDialog", message: "the provider's dialog result is not a provider record"})
-    if items.len() == 0 -> return Err(UIHostError.HostFailure{service: "FileDialog", message: "the provider's dialog result has no status"})
-    if items[0] == "cancelled" -> return Err(UIHostError.Cancelled(.User))
-    if items[0] != "selected" -> return Err(UIHostError.HostFailure{service: "FileDialog", message: "the provider returned an unknown dialog status `{items[0]}`"})
-    if items.len() < 2 -> return Err(UIHostError.InvalidRequest("a completed file dialog must select at least one file"))
-    if !request.allow_multiple && items.len() > 2 -> return Err(UIHostError.InvalidRequest("a single-selection dialog returned multiple files"))
-    files := [UIGrantedPath]{}
-    loop index in 1..<items.len() -> files.push(granted_path(request.grant, items[index], access))
-    Ok(UIFileDialogSelection{files: files})
-}
 
-// A selected path, normalized, inside its grant's root.
-granted_path: fn(grant: UIFSGrant, path: String, access: UIFSAccess) -> UIGrantedPath UIHostError! {
-    scoped: fs_grant(path, grant.rights)
-    root: grant.root
-    prefix: if root.ends_with("/") -> root.copy() else -> "{root}/"
-    inside: scoped.root == root || scoped.root.starts_with(prefix) || (root == "." && !scoped.root.starts_with("/"))
-    if !inside -> return Err(UIHostError.ResourceDenied("file dialog selection `{path}` is outside its grant"))
-    Ok(UIGrantedPath{path: scoped.root, grant_root: root.copy(), access: access})
+    // One dialog: validate the request, ask the provider, then check that every
+    // selected path lies inside the request's grant.
+    file_dialog: fn(request: UIFileDialogRequest, kind: UIFileDialogKind) -> UIFileDialogSelection UIHostError! {
+        opening: kind == .Open
+        name: if opening -> "open" else -> "save"
+        if request.kind != kind -> return Err(UIHostError.InvalidRequest("{name}_file takes {name} dialog requests only"))
+        access: if opening -> UIFSAccess.Read else -> UIFSAccess.Write
+        needed: if opening -> U8{1} else -> U8{2}
+        granted: request.grant.rights.bits.bit_and(needed) != U8{0}
+        dialog: if opening -> "Open" else -> "Save"
+        right: if opening -> "Read" else -> "Write"
+        if !granted -> return Err(UIHostError.ResourceDenied("dialog {dialog} requires {right} access"))
+        if !opening && request.allow_multiple -> return Err(UIHostError.InvalidRequest("save dialogs cannot select multiple files"))
+        if request.initial_directory == .Val(initial) {
+            if initial.grant_root != request.grant.root || initial.access != access -> return Err(UIHostError.ResourceDenied("initial directory is outside the dialog grant"))
+        }
+        if !core.ui.host.__capability(0) -> return Err(UIHostError.CapabilityUnavailable{capability: "FileDialog"})
+        wire := [String]{request.title.copy(), request.grant.root.copy(), if request.allow_multiple -> "1" else -> "0"}
+        loop filter in request.filters {
+            loop extension in filter.extensions -> wire.push(extension.copy())
+        }
+        token: core.ui.host.__dialog_request(if opening -> 0 else -> 1, provider_record(wire))
+        if token < 0 -> return Err(UIHostError.HostFailure{service: "FileDialog", message: "the provider refused the dialog request"})
+        answer: core.ui.host.__dialog_result(token) ?? return Err(UIHostError.HostFailure{service: "FileDialog", message: "the provider returned no dialog result"})
+        items: provider_record_fields(answer) ?? return Err(UIHostError.HostFailure{service: "FileDialog", message: "the provider's dialog result is not a provider record"})
+        if items.len() == 0 -> return Err(UIHostError.HostFailure{service: "FileDialog", message: "the provider's dialog result has no status"})
+        if items[0] == "cancelled" -> return Err(UIHostError.Cancelled(.User))
+        if items[0] != "selected" -> return Err(UIHostError.HostFailure{service: "FileDialog", message: "the provider returned an unknown dialog status `{items[0]}`"})
+        if items.len() < 2 -> return Err(UIHostError.InvalidRequest("a completed file dialog must select at least one file"))
+        if !request.allow_multiple && items.len() > 2 -> return Err(UIHostError.InvalidRequest("a single-selection dialog returned multiple files"))
+        files := [UIGrantedPath]{}
+        loop index in 1..<items.len() -> files.push(granted_path(request.grant, items[index], access))
+        Ok(UIFileDialogSelection{files: files})
+    }
+
+    // A selected path, normalized, inside its grant's root.
+    granted_path: fn(grant: UIFSGrant, path: String, access: UIFSAccess) -> UIGrantedPath UIHostError! {
+        scoped: fs_grant(path, grant.rights)
+        root: grant.root
+        prefix: if root.ends_with("/") -> root.copy() else -> "{root}/"
+        inside: scoped.root == root || scoped.root.starts_with(prefix) || (root == "." && !scoped.root.starts_with("/"))
+        if !inside -> return Err(UIHostError.ResourceDenied("file dialog selection `{path}` is outside its grant"))
+        Ok(UIGrantedPath{path: scoped.root, grant_root: root.copy(), access: access})
+    }
 }
 
 file_filter: fn(label: String, extensions: [String], mime_types: [String]) -> UIFileFilter UIHostError! {
