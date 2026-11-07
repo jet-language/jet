@@ -12,10 +12,39 @@ use {
 }
 
 // Whether CBOR major type 0 or 1 holds `n`: their argument is at most
-// 2^64-1, so they reach 2^64-1 and -2^64. A wider Int has no CBOR integer.
+// 2^64-1, so they reach 2^64-1 and -2^64. A wider Int is a bignum.
 integer_fits: fn(n: Int) -> Bool Never! {
     n >= -18446744073709551616 && n <= 18446744073709551615
 }
+
+// The bignum payload of `magnitude` (> 0): its big-endian bytes with no
+// leading zero (RFC 8949 §3.4.3). Tag 2 carries a wide n >= 0 as n, tag 3 a
+// wide n < 0 as -1 - n.
+bignum_bytes: fn(magnitude: Int) -> [U8] Never! {
+    reversed := [U8]{}
+    rest := magnitude
+    loop rest > 0 {
+        reversed.push(U8{rest.bit_and(255)})
+        rest = rest >> 8
+    }
+    out := [U8]{}
+    loop i in 0..<reversed.len() -> out.push(reversed[reversed.len() - 1 - i])
+    out
+}
+
+// The exact Int a CBOR bignum's big-endian `bytes` hold: tag 2 the unsigned
+// value, tag 3 (`negative`) minus one minus it.
+bignum_value: fn(bytes: [U8], negative: Bool) -> Int Never! {
+    magnitude := 0
+    loop byte in bytes -> magnitude = magnitude * 256 + Int.from_u8(byte)
+    if negative -> -magnitude - 1 else -> magnitude
+}
+
+// The CBOR head byte of a bignum: tag 2 for a wide n >= 0, tag 3 below.
+bignum_head: fn(n: Int) -> U8 Never! { if n >= 0 -> U8{194} else -> U8{195} }
+
+// The bignum magnitude of a wide `n`: n itself, or -1 - n below zero.
+bignum_magnitude: fn(n: Int) -> Int Never! { if n >= 0 -> n else -> -(n + 1) }
 
 // Exact representability, rather than a rounded conversion, selects the RFC
 // preferred float width. Inexact values retain all their original f64 bits.
@@ -164,12 +193,17 @@ impl Parser {
     }
 
     // Tag 0 (RFC 3339 text) and tag 1 (epoch seconds, Int or Float) are
-    // DateTime; every other tag is Unsupported.
-    datetime: fn(&self, input: [U8], additional: Int, start: Int, depth: Int, path: String) -> Dyn CBORError! {
+    // DateTime; tags 2 and 3 (bignums over a byte string) are exact Ints, the
+    // one integer case; every other tag is Unsupported.
+    tagged: fn(&self, input: [U8], additional: Int, start: Int, depth: Int, path: String) -> Dyn CBORError! {
         tag_number: self.argument(input, additional, start, path) ?? return Err(err)
-        if tag_number > 1 -> return Err(failure(.Unsupported, start, path, "only CBOR date-time tags 0 and 1 are supported"))
-        if depth + 1 > self.options.max_depth -> return Err(failure(.Limit, start, path, "CBOR date-time tag exceeds max_depth"))
+        if tag_number > 3 -> return Err(failure(.Unsupported, start, path, "only CBOR date-time tags 0 and 1 and bignum tags 2 and 3 are supported"))
+        if depth + 1 > self.options.max_depth -> return Err(failure(.Limit, start, path, "CBOR tag exceeds max_depth"))
         inner: self.value(input, depth + 1, path) ?? return Err(err)
+        if tag_number >= 2 {
+            if inner == .Bytes(bytes) -> return Ok(Dyn.Int(bignum_value(bytes, tag_number == 3)))
+            return Err(failure(.Syntax, start, path, "a CBOR bignum tag holds a byte string"))
+        }
         if tag_number == 0 {
             if inner == .Text(_) {
                 stamp: inner.decode<ZonedDateTime>() ?? return Err(failure(.Unsupported, start, path, "invalid CBOR date-time tag payload"))
@@ -324,7 +358,7 @@ impl Parser {
         if major == 2 || major == 3 -> return self.string(input, additional, start, depth, path, major)
         if major == 4 -> return self.array(input, additional, start, depth, path)
         if major == 5 -> return self.object(input, additional, start, depth, path)
-        if major == 6 -> return self.datetime(input, additional, start, depth, path)
+        if major == 6 -> return self.tagged(input, additional, start, depth, path)
         if additional == 20 -> return Ok(Dyn.Bool(false))
         if additional == 21 -> return Ok(Dyn.Bool(true))
         if additional == 22 -> return Ok(Dyn.Null)

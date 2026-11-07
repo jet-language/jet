@@ -99,18 +99,10 @@ unsupported: fn(path: String, reason: String) -> CBORError Never! {
 validate: fn(value: Dyn, path: String) CBORError! {
     #Unsafe("inspect private typed carriers without changing public Dyn variants") {
         if value == {
-            .Int(n) -> {
-                if !parser.integer_fits(n) -> return Err(unsupported(path, "Int {n} is outside the CBOR integer range -2^64..2^64-1"))
-            }
             .Number(_) -> {
-                if value.decode<Int>() == {
-                    .Ok(n) -> {
-                        if !parser.integer_fits(n) -> return Err(unsupported(path, "number {value} is outside the CBOR integer range -2^64..2^64-1"))
-                    }
-                    .Err(_) -> {
-                        number: value.decode<Float>() ?? return Err(unsupported(path, "number {value} is outside the CBOR Int and float64 range"))
-                        if !math.is_finite(number) -> return Err(unsupported(path, "number {value} is outside the CBOR Int and float64 range"))
-                    }
+                if value.decode<Int>() == .Err(_) {
+                    number: value.decode<Float>() ?? return Err(unsupported(path, "number {value} is outside the CBOR Int and float64 range"))
+                    if !math.is_finite(number) -> return Err(unsupported(path, "number {value} is outside the CBOR Int and float64 range"))
                 }
             }
             .Array(items) -> {
@@ -175,9 +167,18 @@ encode_value: fn(value: Dyn, out: &[U8], canonical: Bool) CBORError! {
         if value == {
             .Null -> out.push(U8{246})
             .Bool(b) -> out.push(if b -> U8{245} else -> U8{244})
+            // An Int past major types 0 and 1 is a bignum: tag 2 or 3 over
+            // its big-endian magnitude (parser.bignum_bytes).
             .Int(n) -> {
-                if n >= 0 -> append_length(out, 0, n)
-                else -> append_length(out, 1, -(n + 1))
+                if parser.integer_fits(n) {
+                    if n >= 0 -> append_length(out, 0, n)
+                    else -> append_length(out, 1, -(n + 1))
+                } else {
+                    out.push(parser.bignum_head(n))
+                    magnitude: parser.bignum_bytes(parser.bignum_magnitude(n))
+                    append_length(out, 2, magnitude.len())
+                    loop byte in magnitude -> out.push(byte)
+                }
             }
             .Float(n) -> append_float(out, n)
             // A validated Number lexeme is its exact Int when integral, else its float64.
@@ -288,9 +289,11 @@ priv typed_errors: module {
     assert_eq(parse([U8]{27, 255, 255, 255, 255, 255, 255, 255, 255}), Ok(Dyn.Int(18446744073709551615)))
     assert_eq(parse([U8]{59, 255, 255, 255, 255, 255, 255, 255, 255}), Ok(Dyn.Int(-18446744073709551616)))
     assert_eq(to_bytes(Dyn.Int(-18446744073709551616)), Ok([U8]{59, 255, 255, 255, 255, 255, 255, 255, 255}))
-    // A wider Int has no CBOR integer: refused, never truncated.
-    if to_bytes(Dyn.Int(18446744073709551616)) == .Err(error) -> assert(error.kind == .Unsupported) else -> panic("2^64 encoded")
-    if to_bytes(Dyn.Int(-18446744073709551617)) == .Err(error) -> assert(error.kind == .Unsupported) else -> panic("-2^64-1 encoded")
+    // A wider Int is a bignum, tag 2 or tag 3 over its big-endian magnitude.
+    assert_eq(to_bytes(Dyn.Int(18446744073709551616)), Ok([U8]{194, 73, 1, 0, 0, 0, 0, 0, 0, 0, 0}))
+    assert_eq(to_bytes(Dyn.Int(-18446744073709551617)), Ok([U8]{195, 73, 1, 0, 0, 0, 0, 0, 0, 0, 0}))
+    assert_eq(parse([U8]{194, 73, 1, 0, 0, 0, 0, 0, 0, 0, 0}), Ok(Dyn.Int(18446744073709551616)))
+    assert_eq(parse([U8]{195, 73, 1, 0, 0, 0, 0, 0, 0, 0, 0}), Ok(Dyn.Int(-18446744073709551617)))
     // Two separately built 2^128+1 trees are equal; a neighbour is not.
     wide: 340282366920938463463374607431768211457
     left: Dyn.Array([Dyn]{Dyn.Int(wide)})

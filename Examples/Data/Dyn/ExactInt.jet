@@ -2,8 +2,11 @@
 // one integer case and no second numeric variant. CBOR major types 0 and 1
 // carry arguments up to 2^64-1, so they reach 2^64-1 and -2^64; those past the
 // machine range decode exactly, whole or streamed, and two separately built
-// 2^128+1 trees are equal. A wider Int has no CBOR integer, so both writers
-// refuse it rather than truncate it.
+// 2^128+1 trees are equal. A wider value travels as a bignum (tag 2, or tag 3
+// below zero, over its big-endian magnitude): it decodes to the same Int case,
+// two decoded 2^128+1 bignums are equal trees, and the whole-value writer
+// writes a wider Int as one. The streaming DataEvent rail carries no tags, so
+// its writer refuses a wider Int rather than truncate it.
 package: {
     name: "exact_int"
     authority: { allow: [Env, FS, FS.Read, FS.Write, IO] }
@@ -47,6 +50,31 @@ run: fn() {
     if cbor.to_bytes(Dyn.Int(18446744073709551616)) == {
         .Ok(bytes) -> print("2^64 as CBOR: {bytes}")
         .Err(failure) -> print("2^64 as CBOR: {failure}")
+    }
+
+    // Tag 2 (0xc2) over the 17 bytes 01 00 .. 00 01 is 2^128+1; tag 3 (0xc3)
+    // over the same bytes is -1 - (2^128+1).
+    magnitude := [U8]{1}
+    loop _ in 0..<15 -> magnitude.push(U8{0})
+    magnitude.push(U8{1})
+    positive := [U8]{194, 81}
+    negative := [U8]{195, 81}
+    loop byte in magnitude {
+        positive.push(byte)
+        negative.push(byte)
+    }
+    first: cbor.parse(positive) ?? panic("bignum: {err}")
+    second: cbor.parse(positive) ?? panic("bignum: {err}")
+    below: cbor.parse(negative) ?? panic("negative bignum: {err}")
+    print("bignum 2^128+1: {kind(first)}")
+    print("negative bignum: {kind(below)}")
+    print("decoded bignums equal: {Dyn.Array([Dyn]{first}) == Dyn.Array([Dyn]{second})}")
+    print("bignum == Dyn.Int(2^128+1): {first == Dyn.Int(wide)}")
+    print("bignum round trip: {(cbor.to_bytes(first) ?? panic("cbor")) == positive}")
+    print("negative round trip: {(cbor.to_bytes(below) ?? panic("cbor")) == negative}")
+    if cbor.parse([U8]{194, 97, 120}) == {
+        .Ok(tree) -> print("bignum over text: {kind(tree)}")
+        .Err(failure) -> print("bignum over text: {failure}")
     }
 
     scratch: files.temp_dir("exact-int") ?? panic("temp")

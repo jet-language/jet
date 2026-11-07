@@ -3343,13 +3343,18 @@ error is reported by the ordinary compile-time-stop diagnostic.
 
 ### `core.encoding.cbor` — bounded CBOR
 
-`core.encoding.cbor` handles RFC 8949 integer, text, array, map, simple,
-and float16/32/64 values, including indefinite strings and containers.
-Dynamic `parse` rejects byte strings; typed `decode<[U8]>` preserves them.
+`core.encoding.cbor` handles RFC 8949 integer, byte string, text, array,
+map, simple, and float16/32/64 values, including indefinite strings and
+containers. A byte string is `Dyn.Bytes`. Integers are exact `Dyn.Int`
+values: major types 0 and 1 reach -2^64 and 2^64-1, and a wider value is a
+bignum (tag 2, or tag 3 below zero, over its big-endian magnitude), which
+`parse` decodes to the same `Int` case and `to_bytes` writes. The streaming
+writer carries no tags, so it refuses an `Int` past major types 0 and 1.
 Tags other than the date-time tags 0 and 1 (which decode to `DateTime`) and
-duplicate text map keys are unsupported. Canonical mode requires
-shortest arguments and float widths, a canonical NaN, definite containers,
-and bytewise map-key order. Encoding uses the shortest exact float width.
+the bignum tags, and duplicate text map keys, are unsupported. Canonical
+mode requires shortest arguments and float widths, a canonical NaN, definite
+containers, and bytewise map-key order. Encoding uses the shortest exact
+float width.
 Whole-value parsing and preferred float-width checks share a sealed source
 part; its helper functions are not exports of the public CBOR module.
 

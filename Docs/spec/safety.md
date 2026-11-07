@@ -5440,7 +5440,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Core",
       "file": "Core/Encoding/Cbor.jet",
-      "line": 174,
+      "line": 166,
       "column": 5,
       "reason": "validated private carriers retain byte strings for typed Encode"
     },
@@ -10361,7 +10361,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Core | Core/Db/Db.jet | 1919:5 | "all test handles have reached Close before reading SQLite's allocator counter" |
 | Core | Core/Db/Db.jet | 1924:5 | "failed opens, including non-null error handles, have already reached Close" |
 | Core | Core/Encoding/Cbor.jet | 100:5 | "inspect private typed carriers without changing public Dyn variants" |
-| Core | Core/Encoding/Cbor.jet | 174:5 | "validated private carriers retain byte strings for typed Encode" |
+| Core | Core/Encoding/Cbor.jet | 166:5 | "validated private carriers retain byte strings for typed Encode" |
 | Core | Core/Encoding/CborStream.jet | 218:9 | "the retained key copies exactly the already validated text bytes" |
 | Core | Core/Encoding/CborStream.jet | 320:17 | "the exact CBOR text allocation passed strict UTF-8 validation" |
 | Core | Core/Encoding/Csv.jet | 141:9 | "input is a String; original complete UTF-8 scalars and ASCII quote escapes entered the field" |
