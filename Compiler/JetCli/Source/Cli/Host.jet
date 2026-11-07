@@ -3260,7 +3260,9 @@ jet_cli_execute: fn(plan: &&JetCLIPlan, trace_sink: JetCLITraceSink?{None}, reco
 
 // Stock `jet dev`: build and run the program; when any source of its package
 // changes, stop it, rebuild and run it again. A build with errors prints them and
-// waits for the next change. Ends only when the user stops it.
+// waits for the next change. A source it can't securely read refuses the first
+// build and ends `jet dev`, as it ends `jet run`. Otherwise it ends only when the
+// user stops it.
 JetCLIDevConfigured: enum {
     Config(config: JetDriverDevConfig)
     Refused(output: JetDriverVerbOutput)
@@ -3285,6 +3287,7 @@ jet_cli_dev_config: fn(file: String, source: String, color: Bool, threads: Int?)
 jet_cli_dev_loop: fn(file: String, entry: String?, color: Bool, options: BuildOptions, verbose: Bool, json: Bool, threads: Int?, program_args: [String], invocation: JetCLIInvocationAuthority?, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
     root: jet_cli_manifest_root(jet_cli_parent(file) ?? ".") ?? (jet_cli_parent(file) ?? ".")
     hot_noted := false
+    first := true
     loop {
         source: cli_files.read(file) ?? ""
         config := jet_driver_dev_config_stock()
@@ -3304,9 +3307,14 @@ jet_cli_dev_loop: fn(file: String, entry: String?, color: Bool, options: BuildOp
         }
         compiled := jet_cli_compile_executable_file(file, entry, color, threads, options, trace_sink)
         if compiled.move() == {
-            .Refused(refusal) -> if configured -> cli_term.eprint(refusal.stderr)
+            .Refused(refusal) -> {
+                // jet_cli_dev_config printed the same refusal when it refused too.
+                if first -> return JetDriverVerbOutput{stdout: "", stderr: if configured -> refusal.stderr else -> "", exit_code: refusal.exit_code}
+                if configured -> cli_term.eprint(refusal.stderr)
+            }
             .Checked(result, inputs, snapshot) -> if configured -> child = jet_cli_dev_start(jet_cli_run_build(file, source, color, options, verbose, json, invocation, result, inputs, snapshot), file, program_args, config.port, options, invocation, verbose, color)
         }
+        first = false
         cli_term.eprint("jet dev: watching {root} (Ctrl-C to stop)")
         loop jet_cli_dev_stamp(root, config.watch) == stamp -> cli_time.sleep(200ms)
         if child == {
