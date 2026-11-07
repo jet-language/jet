@@ -9156,6 +9156,9 @@ sema_finalize_graph: fn(resolved: &&SemaRegistrationGraph, trail: &SemaGraphTrai
         loop diagnostic in module_result.diagnostics -> diagnostics.push(diagnostic)
         if !module_result.complete -> complete = false
     }
+    // The C-safe export law reads the solved carriers: an `#Export(c)` that
+    // declares no carrier is refused when its body infers one.
+    if sema_guest_check_export_failures(final_graph, modules, diagnostics) -> complete = false
     // The failure-domain obligations recorded against unannotated callees
     // are discharged or emitted.
     infallible_keys := [String:Bool]{}

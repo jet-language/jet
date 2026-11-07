@@ -33,7 +33,9 @@ if (mode === 'assemble') {
     mkdirSync(join(unit, 'Source'), { recursive: true });
     const sourcePath = `tests/run/Ownership/${c.example}.jet`;
     let source = readFileSync(join(root, sourcePath), 'utf8');
-    if (!c.native) source = source.replace('run: fn()', '#Export(c) run: fn()');
+    // A C export is infallible: the library entry and the helper it calls
+    // declare `Never!`, so the panic is the only way out (a process Stop).
+    if (!c.native) source = source.replace('fail: fn()', 'fail: fn() Never!').replace('run: fn()', '#Export(c) run: fn() Never!');
     if (c.cleanupPanic) source = source.replace('close: fn(&&self) { print("close {self.name}") }', 'close: fn(&&self) {\n    print("close {self.name}")\n    if self.name == "second" -> panic("close stop")\n}');
     if (c.cleanupCancel) {
       source = 'use tasks: core.tasks\n' + source.replace('run: fn()', 'scoped: fn()').replace('close: fn(&&self) { print("close {self.name}") }', 'close: fn(&&self) {\n    print("close {self.name}")\n    tasks.yield_now()\n}')
