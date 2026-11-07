@@ -27,8 +27,15 @@ ir_shared_guard_wait: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, gu
     out: ir_out_slot(m, b, 1)
     mode: ir_word_const(m, b, if editable -> 1 else -> 0)
     word_row: ir_word_row(m)
-    status: ir_runtime(m, b, "jet_rt_native_shared_guard_wait", [Int]{token, mode, wake, closure, invoke, out}, word_row)
+    // The call's stop check follows the write-back: a cancelled wait leaves
+    // the token unheld, and the stop edge drops the guard from its slot, so
+    // that slot must hold the rewritten token, not the held one.
+    status: ir_fresh_temp(m, b, word_row)
+    args: [Int]{token, mode, wake, closure, invoke, out}
+    start: ir_args(b.f, args)
+    ir_emit(b.f, IROp.CallRuntime, status, ir_intern_name(m, "jet_rt_native_shared_guard_wait"), start, args.len(), b.line)
     loop back in backs -> ir_emit(b.f, IROp.Load, back.slot, back.cell, 0, -1, b.line)
+    ir_stop_check(m, b)
     ir_release(m, b, wake)
     ir_release(m, b, closure)
     result: ir_temp(m, b, row)

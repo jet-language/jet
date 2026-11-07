@@ -311,6 +311,9 @@ shared_guard_payload: fn(guard: I64) -> I64 {
 
 #Export(c) jet_rt_native_shared_edit_guard_edit: fn(guard: I64) -> I64 { shared_guard_payload(guard) }
 
+// The slot a guard lends, whichever permit it holds.
+#Export(c) jet_rt_native_shared_guard_payload: fn(guard: I64) -> I64 { shared_guard_payload(guard) }
+
 #Export(c) jet_rt_native_shared_guard_revision: fn(guard: I64) -> I64 {
     root: shared_guard_root(guard)
     if !shared_guard_held(root) {
@@ -346,6 +349,18 @@ shared_guard_payload: fn(guard: I64) -> I64 {
     // The payload's final drop glue may reenter Shared. The permit and guard
     // owner must already be released before generation exhaustion is delivered.
     if exhausted -> shared_revision_stop()
+}
+
+// A SharedGuard value's drop, whichever permit it holds. A held edit permit
+// is the cell's only holder, so the writer word set at its acquisition names
+// it; a read permit leaves that word 0 until it is released.
+#Export(c) jet_rt_native_shared_guard_drop: fn(guard: I64) {
+    root: shared_guard_root(guard)
+    editing: shared_guard_held(root) && sync_load(wrapping(shared_guard_cell(root) + I64{32})) == (I64{1})
+    if {
+        editing -> jet_rt_native_shared_edit_guard_drop(guard)
+        else -> jet_rt_native_shared_read_guard_drop(guard)
+    }
 }
 
 #Export(c) jet_rt_native_shared_clone: fn(shared: I64) -> I64 {

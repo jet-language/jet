@@ -204,10 +204,13 @@ ir_value_type_in: fn(m: &IRModule, p: IRProgram, ty: Type, laying: [String]) -> 
 }
 
 ir_value_type_laid: fn(m: &IRModule, p: IRProgram, ty: Type, laying: [String]) -> Int? Never! {
-    if ir_shared_guard_editable(ty) == .Val(editable) {
-        // An owned runtime permit with no Clone; which permit its drop
-        // releases follows its checked read/edit provenance.
-        drop: if editable -> "jet_rt_native_shared_edit_guard_drop" else -> "jet_rt_native_shared_read_guard_drop"
+    if ir_shared_guard_inner(ty) != None {
+        // An owned runtime permit with no Clone. A spelled `SharedGuard<T>`
+        // (a parameter, result, field or payload) holds whichever permit was
+        // moved into it, so its drop asks the permit which one it is. The
+        // drop is part of the key: ir_intern_type matches rows by layout, and
+        // a plain pointer row of the same carrier would lose the drop.
+        drop: "jet_rt_native_shared_guard_drop"
         return Val(ir_intern_type(m, "{drop}:{type_carrier_identity(ty)}", ir_owned_layout(IRTypeKind.Pointer, ty, drop, "")))
     }
     if ty == .Apply(name, args) {
@@ -1973,11 +1976,9 @@ IRMember: struct { name: String, offset: Int, ty: Int, boxed: Bool{false}, redac
 // cannot be laid out.
 ir_struct_members: fn(m: &IRModule, p: IRProgram, row: Int, args: [Type]) -> [IRMember]? Never! {
     // Memoized by the instance's arguments in the terms of the instance
-    // being built, as its member types are laid out. A SharedGuard argument's
-    // member row follows its read/edit tag, which the identity does not spell.
+    // being built, as its member types are laid out.
     bound: args.copy()
     memo: ir_instance_identity(p.types[row].key, bound)
-    if memo.contains("SharedGuard<") -> return ir_struct_members_in(m, p, row, bound, [String]{}, true)
     if ir_members_memo(m, m.struct_members, memo) == .Val(known) -> return Val(known)
     found: ir_struct_members_in(m, p, row, bound, [String]{}, true) ?? return None
     name_rows_set(m.struct_members, memo, m.member_lists.len())
@@ -3337,8 +3338,7 @@ ir_carrier_type: fn(ty: Type) -> Bool Never! {
 // (applied to the instance arguments `args`), laid out from byte 8; a
 // recursive edge holds an 8-byte wrapper box pointer. Memoized in
 // m.variant_members by the instance's arguments in the terms of the instance
-// being built, as ir_struct_members is (a SharedGuard argument's row follows
-// its unspelled read/edit tag).
+// being built, as ir_struct_members is.
 ir_variant_members: fn(m: &IRModule, p: IRProgram, row: Int, args: [Type], index: Int) -> [IRMember]? Never! {
     bound: args.copy()
     identity: "{row}|{ir_instance_identity(p.types[row].key, bound)}"
@@ -3346,7 +3346,6 @@ ir_variant_members: fn(m: &IRModule, p: IRProgram, row: Int, args: [Type], index
 }
 
 ir_variant_members_bound: fn(m: &IRModule, p: IRProgram, row: Int, bound: [Type], identity: String, index: Int) -> [IRMember]? Never! {
-    if identity.contains("SharedGuard<") -> return ir_variant_members_laid(m, p, row, bound, index)
     memo: "{identity}#{index}"
     if ir_members_memo(m, m.variant_members, memo) == .Val(known) -> return Val(known)
     found: ir_variant_members_laid(m, p, row, bound, index) ?? return None
@@ -3401,8 +3400,7 @@ ir_variant_members_laid: fn(m: &IRModule, p: IRProgram, row: Int, args: [Type], 
 ir_enum_box_size: fn(m: &IRModule, p: IRProgram, row: Int, args: [Type]) -> Int? Never! {
     bound: args.copy()
     identity: "{row}|{ir_instance_identity(p.types[row].key, bound)}"
-    guarded: identity.contains("SharedGuard<")
-    if !guarded && name_rows_value(m.enum_sizes, identity) == .Val(known) -> return Val(known)
+    if name_rows_value(m.enum_sizes, identity) == .Val(known) -> return Val(known)
     end := 8
     if p.types[row].kind == .Enum(variants, _) {
         loop index in 0..<variants.len() {
@@ -3414,7 +3412,7 @@ ir_enum_box_size: fn(m: &IRModule, p: IRProgram, row: Int, args: [Type]) -> Int?
         }
     }
     size: ir_align8(end)
-    if !guarded -> name_rows_set(m.enum_sizes, identity, size)
+    name_rows_set(m.enum_sizes, identity, size)
     Val(size)
 }
 
