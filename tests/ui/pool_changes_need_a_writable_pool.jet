@@ -1,0 +1,25 @@
+// #6569: `add`, `remove` and `pool[id] = v` change the pool, so they need a
+// writable pool (a `:=` binding or a `&` parameter, spec "Pools"). Through a
+// read-only `Pool<T>` parameter each one is the changeability error.
+Player: struct {
+    name: String
+}
+
+retire: fn(world: Pool<Player>, id: ID<Player>) {
+    world.remove(id).drop("only the refusal matters here")
+}
+
+recruit: fn(world: Pool<Player>) -> ID<Player> {
+    world.add(Player{name: "Ash"})
+}
+
+rename: fn(world: Pool<Player>, id: ID<Player>) {
+    world[id] = Player{name: "Rem"}
+}
+
+run: fn() {
+    world := Pool<Player>.new()
+    kai: world.add(Player{name: "Kai"})
+    retire(world, kai)
+    rename(world, recruit(world))
+}
