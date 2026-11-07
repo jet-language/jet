@@ -1,0 +1,75 @@
+// A Dyn integer is an exact Jet Int, as wide as the value needs, so there is
+// one integer case and no second numeric variant. CBOR major types 0 and 1
+// carry arguments up to 2^64-1, so they reach 2^64-1 and -2^64; those past the
+// machine range decode exactly, whole or streamed, and two separately built
+// 2^128+1 trees are equal. A wider Int has no CBOR integer, so both writers
+// refuse it rather than truncate it.
+package: {
+    name: "exact_int"
+    authority: { allow: [Env, FS, FS.Read, FS.Write, IO] }
+}
+
+use {
+    cbor: core.encoding.cbor
+    json: core.encoding.json
+    files: core.files
+}
+
+kind: fn(tree: Dyn) -> String {
+    if tree == {
+        .Int(value) -> "Int {value}"
+        .Float(value) -> "Float {value}"
+        .Number(text) -> "Number {text}"
+        else -> "other"
+    }
+}
+
+run: fn() {
+    // 0x1b: major type 0 with an 8-byte argument; 0x3b: major type 1.
+    above: cbor.parse([U8]{27, 128, 0, 0, 0, 0, 0, 0, 0}) ?? panic("2^63: {err}")
+    top: cbor.parse([U8]{27, 255, 255, 255, 255, 255, 255, 255, 255}) ?? panic("2^64-1: {err}")
+    bottom: cbor.parse([U8]{59, 255, 255, 255, 255, 255, 255, 255, 255}) ?? panic("-2^64: {err}")
+    print("2^63: {kind(above)}")
+    print("2^64-1: {kind(top)}")
+    print("-2^64: {kind(bottom)}")
+    print("2^63 == Dyn.Int(2^63): {above == Dyn.Int(9223372036854775808)}")
+    print("re-encoded 2^63: {cbor.to_bytes(above) ?? panic("cbor")}")
+    print("re-encoded -2^64: {cbor.to_bytes(bottom) ?? panic("cbor")}")
+
+    wide: 340282366920938463463374607431768211457
+    left: Dyn.Array([Dyn]{Dyn.Int(wide)})
+    right: Dyn.Array([Dyn]{Dyn.Int(340282366920938463463374607431768211456 + 1)})
+    neighbour: Dyn.Array([Dyn]{Dyn.Int(wide + 1)})
+    print("2^128+1 trees equal: {left == right}")
+    print("neighbour equal: {left == neighbour}")
+    print("ordered: {Dyn.Int(wide) < Dyn.Int(wide + 1)}")
+    print("json: {json.to_string(left) ?? panic("json")}")
+    if cbor.to_bytes(Dyn.Int(18446744073709551616)) == {
+        .Ok(bytes) -> print("2^64 as CBOR: {bytes}")
+        .Err(failure) -> print("2^64 as CBOR: {failure}")
+    }
+
+    scratch: files.temp_dir("exact-int") ?? panic("temp")
+    path: files.join(scratch.path, "wide.cbor")
+    files.write_bytes(path, [U8]{130, 27, 255, 255, 255, 255, 255, 255, 255, 255, 59, 255, 255, 255, 255, 255, 255, 255, 255}) ?? panic("fixture")
+    input: files.open(path) ?? panic("open")
+    source := cbor.reader(input) ?? panic("reader")
+    loop {
+        if source.next() == {
+            .Ok(next) -> {
+                event: next ?? break
+                if event == {
+                    .Int(value) -> print("streamed Int {value}")
+                    else -> {}
+                }
+            }
+            .Err(failure) -> panic("stream: {failure.reason}")
+        }
+    }
+    output: files.create(files.join(scratch.path, "out.cbor")) ?? panic("create")
+    sink := cbor.writer(output) ?? panic("writer")
+    if sink.write(DataEvent.Int(18446744073709551616)) == {
+        .Ok(_) -> print("2^64 streamed as CBOR")
+        .Err(failure) -> print("2^64 stream write: {failure.reason}")
+    }
+}

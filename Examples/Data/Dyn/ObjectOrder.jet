@@ -1,0 +1,57 @@
+// A Dyn object keeps its fields in arrival order (D-DATATREE-ORDER1): the
+// `Object` payload is the ordered pair list `[(key: String, value: Dyn)]`.
+// `==` compares fields in order, `equal_unordered` ignores the order, and the
+// canonical writer sorts a view without changing the object. Language Maps
+// stay sorted, so a Map value bound first contributes its sorted order.
+package: {
+    name: "object_order"
+    authority: { allow: [Env, FS.Read, IO] }
+}
+
+use json: core.encoding.json
+
+run: fn() {
+    built: Dyn.Object([(key: "z", value: Dyn.Text("last")), (key: "a", value: Dyn.Text("first"))])
+    print("built: {json.to_string(built) ?? panic("json")}")
+    parsed: json.parse("{{\"z\":\"last\",\"a\":\"first\"}}") ?? panic("parse")
+    print("parsed: {json.to_string(parsed) ?? panic("json")}")
+    print("parsed == built: {parsed == built}")
+
+    flipped: Dyn.Object([(key: "a", value: Dyn.Text("first")), (key: "z", value: Dyn.Text("last"))])
+    print("built == flipped: {built == flipped}")
+    print("equal_unordered: {built.equal_unordered(flipped)}")
+
+    if built == {
+        .Object(fields) -> {
+            keys := [String]{}
+            loop field in fields -> keys.push(field.key.copy())
+            print("fields: {keys}")
+        }
+        else -> print("not an object")
+    }
+
+    // A new key appends; a write to an existing key keeps its position.
+    row := Dyn.object()
+    row["z"] = Dyn.Int(1)
+    row["a"] = Dyn.Int(2)
+    row["z"] = Dyn.Int(3)
+    print("written: {json.to_string(row) ?? panic("json")}")
+
+    // The canonical writer sorts a view; the object keeps its order.
+    print("canonical: {json.canonical(built) ?? panic("canonical")}")
+    print("after canonical: {json.to_string(built) ?? panic("json")}")
+
+    // A repeated name is a parse error unless duplicates are allowed, which
+    // keep the later value at the first name's position.
+    if json.parse("{{\"z\":1,\"a\":2,\"z\":3}}") == {
+        .Ok(_) -> print("duplicate: accepted")
+        .Err(error) -> print("duplicate: {error.kind == .Syntax}")
+    }
+    allowed: json.parse_allow_duplicates("{{\"z\":1,\"a\":2,\"z\":3}}") ?? panic("allow")
+    print("allowed: {json.to_string(allowed) ?? panic("json")}")
+
+    // Language Maps stay sorted: a Map value contributes its sorted order.
+    map: [String: Dyn]{"z": Dyn.Int(1), "a": Dyn.Int(2)}
+    print("map keys: {map.keys().to_list()}")
+    print("from map: {json.to_string(Dyn.Object(map)) ?? panic("json")}")
+}

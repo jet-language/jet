@@ -5440,7 +5440,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Core",
       "file": "Core/Encoding/Cbor.jet",
-      "line": 169,
+      "line": 174,
       "column": 5,
       "reason": "validated private carriers retain byte strings for typed Encode"
     },
@@ -5454,7 +5454,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Core",
       "file": "Core/Encoding/CborStream.jet",
-      "line": 321,
+      "line": 320,
       "column": 17,
       "reason": "the exact CBOR text allocation passed strict UTF-8 validation"
     },
@@ -10361,9 +10361,9 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Core | Core/Db/Db.jet | 1919:5 | "all test handles have reached Close before reading SQLite's allocator counter" |
 | Core | Core/Db/Db.jet | 1924:5 | "failed opens, including non-null error handles, have already reached Close" |
 | Core | Core/Encoding/Cbor.jet | 100:5 | "inspect private typed carriers without changing public Dyn variants" |
-| Core | Core/Encoding/Cbor.jet | 169:5 | "validated private carriers retain byte strings for typed Encode" |
+| Core | Core/Encoding/Cbor.jet | 174:5 | "validated private carriers retain byte strings for typed Encode" |
 | Core | Core/Encoding/CborStream.jet | 218:9 | "the retained key copies exactly the already validated text bytes" |
-| Core | Core/Encoding/CborStream.jet | 321:17 | "the exact CBOR text allocation passed strict UTF-8 validation" |
+| Core | Core/Encoding/CborStream.jet | 320:17 | "the exact CBOR text allocation passed strict UTF-8 validation" |
 | Core | Core/Encoding/Csv.jet | 141:9 | "input is a String; original complete UTF-8 scalars and ASCII quote escapes entered the field" |
 | Core | Core/Encoding/Csv.jet | 379:5 | "the exact owned query bytes passed the shared strict UTF-8 validator" |
 | Core | Core/Encoding/Csv.jet | 399:5 | "a String's bytes cut at scalar boundaries, plus ASCII quotes, are complete UTF-8" |

@@ -99,9 +99,14 @@ unsupported: fn(path: String, reason: String) -> CBORError Never! {
 validate: fn(value: Dyn, path: String) CBORError! {
     #Unsafe("inspect private typed carriers without changing public Dyn variants") {
         if value == {
+            .Int(n) -> {
+                if !parser.integer_fits(n) -> return Err(unsupported(path, "Int {n} is outside the CBOR integer range -2^64..2^64-1"))
+            }
             .Number(_) -> {
                 if value.decode<Int>() == {
-                    .Ok(_) -> {}
+                    .Ok(n) -> {
+                        if !parser.integer_fits(n) -> return Err(unsupported(path, "number {value} is outside the CBOR integer range -2^64..2^64-1"))
+                    }
                     .Err(_) -> {
                         number: value.decode<Float>() ?? return Err(unsupported(path, "number {value} is outside the CBOR Int and float64 range"))
                         if !math.is_finite(number) -> return Err(unsupported(path, "number {value} is outside the CBOR Int and float64 range"))
@@ -277,10 +282,15 @@ priv typed_errors: module {
     if parse([U8]{1, 2}) == .Err(error) -> assert(error.kind == .TrailingData) else -> panic("trailing root accepted")
 }
 
-#Test("CBOR major type 0 above I64 stays an exact Int and wide Int trees compare equal") {
+#Test("CBOR major types 0 and 1 stay exact Ints out to 2^64-1 and -2^64, and wide Int trees compare equal") {
     // #4362: 2^63 and 2^64-1 decode exactly into the one `Dyn.Int` case.
     assert_eq(parse([U8]{27, 128, 0, 0, 0, 0, 0, 0, 0}), Ok(Dyn.Int(9223372036854775808)))
     assert_eq(parse([U8]{27, 255, 255, 255, 255, 255, 255, 255, 255}), Ok(Dyn.Int(18446744073709551615)))
+    assert_eq(parse([U8]{59, 255, 255, 255, 255, 255, 255, 255, 255}), Ok(Dyn.Int(-18446744073709551616)))
+    assert_eq(to_bytes(Dyn.Int(-18446744073709551616)), Ok([U8]{59, 255, 255, 255, 255, 255, 255, 255, 255}))
+    // A wider Int has no CBOR integer: refused, never truncated.
+    if to_bytes(Dyn.Int(18446744073709551616)) == .Err(error) -> assert(error.kind == .Unsupported) else -> panic("2^64 encoded")
+    if to_bytes(Dyn.Int(-18446744073709551617)) == .Err(error) -> assert(error.kind == .Unsupported) else -> panic("-2^64-1 encoded")
     // Two separately built 2^128+1 trees are equal; a neighbour is not.
     wide: 340282366920938463463374607431768211457
     left: Dyn.Array([Dyn]{Dyn.Int(wide)})
@@ -365,4 +375,17 @@ priv typed_errors: module {
     limited.write(DataEvent.ArrayStart) ?? panic("start")
     limited.write(DataEvent.Int(1)) ?? panic("item")
     if limited.write(DataEvent.ArrayEnd) == .Err(failure) -> assert_eq(failure.reason, "max_total_bytes 1 exceeded") else -> panic("root wire limit must fail")
+}
+
+#Test("CBOR stream reads integers out to 2^64-1 and -2^64 and refuses to write a wider Int") {
+    dir: core.files.temp_dir("jet-cbor-wide") ?? panic("temp")
+    path: "{dir.path}/wide.cbor"
+    core.files.write_bytes(path, [U8]{130, 27, 255, 255, 255, 255, 255, 255, 255, 255, 59, 255, 255, 255, 255, 255, 255, 255, 255}) ?? panic("fixture")
+    input: core.files.open(path) ?? panic("open")
+    source := reader(input) ?? panic("reader")
+    expected: [DataEvent]{.ArrayStart, .Int(18446744073709551615), .Int(-18446744073709551616), .ArrayEnd}
+    loop event in expected -> assert_eq(source.next(), Ok(Val(event)))
+    output: core.files.create("{dir.path}/out.cbor") ?? panic("create")
+    sink := writer(output) ?? panic("writer")
+    if sink.write(DataEvent.Int(18446744073709551616)) == .Err(failure) -> assert_eq(failure.kind, .Unsupported) else -> panic("2^64 written")
 }
