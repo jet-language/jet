@@ -3494,7 +3494,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/ProcessExecutionCollect.jet",
-      "line": 446,
+      "line": 449,
       "column": 13,
       "reason": "the child mutex holds the capture builder's initialized bytes"
     },
@@ -10083,7 +10083,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/PluginHost.jet | 105:5 | "the linked guest entry reads the live instance and argument area only for this synchronous call" |
 | Compiler | Compiler/JetRuntime/Source/ProcessExecutionCollect.jet | 335:9 | "ok is the canonical writable Bool output slot" |
 | Compiler | Compiler/JetRuntime/Source/ProcessExecutionCollect.jet | 343:5 | "ok lends exactly the C ABI Bool byte" |
-| Compiler | Compiler/JetRuntime/Source/ProcessExecutionCollect.jet | 446:13 | "the child mutex holds the capture builder's initialized bytes" |
+| Compiler | Compiler/JetRuntime/Source/ProcessExecutionCollect.jet | 449:13 | "the child mutex holds the capture builder's initialized bytes" |
 | Compiler | Compiler/JetRuntime/Source/ProcessRoutes.jet | 112:5 | "supported_out lends exactly one writable C bool byte; Linux implements F_DUPFD_CLOEXEC" |
 | Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 33:9 | "written under the scheduler root mutex" |
 | Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 245:5 | "an idempotent install: every writer stores the same code address" |

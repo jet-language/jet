@@ -692,6 +692,14 @@ row_ids: fn(rows: [SuiteRow]) -> [String] Never! {
     assert_eq(refused.status, "FAIL")
 }
 
+#Test("a row the candidate passes on its retry is flaky, not untracked") {
+    before: [SuiteRow]{kit_row("a.jet", "o0", "PASS"), kit_row("b.jet", "o0", "PASS"), kit_row("c.jet", "o0", "FAIL")}
+    after: [SuiteRow]{kit_row("a.jet", "o0", "TIMEOUT"), kit_row("b.jet", "o0", "TIMEOUT"), kit_row("c.jet", "o0", "TIMEOUT")}
+    result: compare_suites(before, after, [SuiteRow]{kit_row("a.jet", "o0", "PASS"), kit_row("b.jet", "o0", "TIMEOUT")}, [Disposition]{})
+    assert_eq(row_ids(result.flaky), [String]{"a.jet"})
+    assert_eq(row_ids(result.untracked), [String]{"b.jet", "c.jet"})
+}
+
 #Test("a dispositioned lost row is tracked by its card, not untracked") {
     before: [SuiteRow]{kit_row("a.jet", "o0", "PASS"), kit_row("b.jet", "o0", "PASS")}
     after: [SuiteRow]{kit_row("a.jet", "o0", "FAIL"), kit_row("b.jet", "o0", "FAIL")}

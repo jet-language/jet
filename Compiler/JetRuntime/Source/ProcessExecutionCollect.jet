@@ -348,6 +348,9 @@ process_execution_signal: fn(child: I64, signal: I64, err: I64) -> I64 {
     if (sync_load(wrapping(child + I64{120})).bit_and(I64{2}) != I64{0}) -> return I64{1}
     if (fd_word(native, I64{16}) == I64{1}) -> return I64{1}
     result: host_call(I64{62}, -fd_word(native, I64{8}), signal, I64{0})
+    // ESRCH: the group has nobody left to signal, because the child already
+    // exited and was reaped. Signalling a finished child succeeds.
+    if (result == I64{-3}) -> return I64{1}
     if (result < I64{0}) -> return process_execution_error(fd_word(child, I64{24}), HOST_IO_OP_CLOSE, host_errno_cause(-result), err)
     I64{1}
 }

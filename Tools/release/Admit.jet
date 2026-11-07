@@ -329,12 +329,14 @@ compare_suites: fn(before_rows: [SuiteRow], after_rows: [SuiteRow], retry: [Suit
         now: after_rows[after.at.get(key) ?? 0]
         if !before.at.has_key(key) && passes(now.status) -> out.added.push(now.copy())
     }
-    // A dispositioned lost row is tracked by its card, so it does not count
-    // as untracked.
+    // A dispositioned lost row is tracked by its card, and a flaky row (one
+    // the release passes and the candidate passes on its retry) is reported
+    // as flaky, so neither counts as untracked.
     tracked := [String: Bool]{}
     loop lost in out.lost {
         if lost.disposed -> tracked[row_key(lost.suite, lost.id, lost.tier)] = true
     }
+    loop row in out.flaky -> tracked[row_key(row.suite, row.id, row.tier)] = true
     loop item in after_rows {
         if is_untracked(item.status) && !tracked.has_key(row_key(item.suite, item.id, item.tier)) -> out.untracked.push(item.copy())
     }
