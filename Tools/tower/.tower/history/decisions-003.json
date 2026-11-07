@@ -13074,6 +13074,164 @@
       "outcome": "A",
       "ratifiedAt": "2026-10-29",
       "retiredAt": "2026-11-06T21:43:21.371Z"
+    },
+    {
+      "id": "D-INT-PARSE-STRICT1",
+      "cardId": "c015c9bh",
+      "group": "corelib",
+      "title": "Whether Int.parse accepts a leading plus sign and surrounding spaces",
+      "situation": "",
+      "gist": "Should Int.parse accept only an optional minus sign and digits, refusing \"+5\" and \" 5\"?",
+      "lesson": "Int.parse turns text into a whole number. It also reads command-line numbers. Today it accepts \"+5\" and lets some stray spaces through, and no spec line says whether it should.",
+      "explainer": "",
+      "story": "Sam runs `tool --count ' 5'` after a copy-paste. Today the space slips through and the tool runs with 5. Under A and B the tool says ' 5' is not a whole number, so the stray space is caught. Under C it keeps working.",
+      "inWild": "Rust: \"+5\".parse::<i64>() is Ok(5), \" 5\".parse() is an error. Source: https://doc.rust-lang.org/std/primitive.i64.html#method.from_str_radix\n\nGo: strconv.Atoi(\"+5\") is 5, strconv.Atoi(\" 5\") is an error. Source: https://pkg.go.dev/strconv#Atoi",
+      "detail": "Core/Text/Parse.jet parse_int_base accepts an optional '-' or '+' then digits in the base. Int is exact (arbitrary precision), so very large values are correct and are not errors. core.args reads every Int option and argument through Int.parse (Args.jet), so the rule also decides what a command line accepts. No spec line covers sign or space handling.\n\nUnder B, the grammar is: optional '-', then one or more digits; nothing else. \"+5\", \" 5\", \"5 \" and \"\" all return None, and core.args reports the usual 'not a whole number' error.\n\nUnder A, '+' stays accepted, and spaces are refused. Two pieces remove the cost of refusing spaces. Core's typed row decoders (CSV and TSV) accept spaces around a number in an Int column, as pandas does, because such a column cannot hold a meaningful space. core.args names the stray space in its error, so a command-line typo explains itself.\n\nUnder C, today's text stays: '+' accepted, and surrounding spaces trimmed.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Plus allowed, spaces refused",
+          "detail": "`[+-]?digits` parses; spaces return None. Typed CSV and TSV Int columns still accept padding, and core.args names a stray space in its error.",
+          "technical": "Keep the '+' branch; refuse whitespace. Typed row decoders trim an Int column before Int.parse. core.args reports \"has a space\" for a padded number. Corelib cases cover each rule.",
+          "code": "Int.parse(\"+5\")   // Val(5)\nInt.parse(\" 5\")   // None"
+        },
+        {
+          "key": "B",
+          "name": "Strict: optional minus, then digits",
+          "detail": "Only `-?digits` parses. A plus sign or any space returns None.",
+          "technical": "parse_int_base drops the '+' branch; a doc comment states the grammar; a corelib case covers \"+5\", \" 5\", \"5 \", \"-0\" and a 30-digit value.",
+          "code": "Int.parse(\"5\")    // Val(5)\nInt.parse(\"+5\")   // None\nInt.parse(\" 5\")   // None"
+        },
+        {
+          "key": "C",
+          "name": "Lenient: plus and surrounding spaces",
+          "detail": "Spaces around the number are trimmed, and a plus sign is accepted.",
+          "technical": "Trim ASCII whitespace before parsing; document it.",
+          "code": "Int.parse(\" +5 \")  // Val(5)"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Accepts a leading '+', refuses spaces. Source: https://doc.rust-lang.org/std/primitive.i64.html#method.from_str_radix",
+          "code": "\"+5\".parse::<i64>()  // Ok(5)"
+        },
+        {
+          "lang": "Go",
+          "note": "Accepts a leading '+', refuses spaces. Source: https://pkg.go.dev/strconv#Atoi",
+          "code": "strconv.Atoi(\" 5\")  // error"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "It matches Rust and Go, so numbers written with a plus sign keep working, while stray spaces from copy-paste are caught.",
+        "gains": [
+          "Stray spaces in a command-line number become a clear error that names the space.",
+          "Text that other tools write with '+5' still parses.",
+          "Padded number columns in CSV and TSV files still decode with no extra code."
+        ],
+        "losses": [],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Refusing '+5' breaks text from tools that print an explicit sign, with little safety gain."
+          },
+          {
+            "key": "C",
+            "reason": "Silently trimming hides copy-paste mistakes on the command line."
+          }
+        ],
+        "tradeoff": "None left: padded files decode as before, and only hand-sliced text sees the stricter rule."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should Int.parse accept \"+5\" and refuse \" 5\", like Rust and Go?",
+        "lesson": "Int.parse turns text into a whole number, including command-line numbers. Today it accepts \"+5\" and lets stray spaces slip through. No spec line decides it. Which rule should it follow?",
+        "trio": {
+          "current": {
+            "note": "A plus sign is accepted, and a stray space can slip through.",
+            "code": "Int.parse(\"+5\")   // Val(5)\ntool --count ' 5'   // runs with 5"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "Accepts a leading '+', refuses spaces. Source: https://doc.rust-lang.org/std/primitive.i64.html#method.from_str_radix",
+            "code": "\"+5\".parse::<i64>()  // Ok(5)"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Plus allowed, spaces refused",
+            "gist": "\"+5\" parses; \" 5\" returns None.",
+            "gains": [
+              "Matches Rust and Go; catches stray spaces.",
+              "Padded CSV columns still decode."
+            ],
+            "losses": [],
+            "proposed": {
+              "code": "Int.parse(\"+5\")   // Val(5)\nInt.parse(\" 5\")   // None"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Strict: minus and digits only",
+            "gist": "\"+5\" and \" 5\" both return None.",
+            "gains": [
+              "The smallest rule."
+            ],
+            "losses": [
+              "\"+5\" from other tools stops parsing."
+            ],
+            "proposed": {
+              "code": "Int.parse(\"+5\")   // None"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Lenient: trim and allow plus",
+            "gist": "\" +5 \" parses as 5.",
+            "gains": [
+              "Most text parses."
+            ],
+            "losses": [
+              "Hides copy-paste mistakes."
+            ],
+            "proposed": {
+              "code": "Int.parse(\" +5 \")  // Val(5)"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "It matches Rust and Go and catches stray spaces on the command line.",
+          "gains": [
+            "Clear errors for stray spaces; '+5' keeps working; padded CSV columns still decode."
+          ],
+          "losses": [],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Breaks '+5' with little safety gain."
+            },
+            {
+              "key": "C",
+              "reason": "Hides copy-paste mistakes."
+            }
+          ],
+          "tradeoff": "None left: typed decoders keep accepting padded columns."
+        }
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-11-01T17:28:38.323Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-01",
+      "retiredAt": "2026-11-07T10:32:35.036Z"
     }
   ]
 }

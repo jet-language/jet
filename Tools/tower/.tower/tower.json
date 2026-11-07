@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6672,
-    "rev": 95697,
+    "nextNum": 6673,
+    "rev": 95700,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -89447,54 +89447,6 @@
       "updatedBy": "Main"
     },
     {
-      "id": "c015c9bh",
-      "num": 6545,
-      "title": "#CLI Int argument past I64 runs forever instead of failing; ' 5' and '+5' are accepted",
-      "body": "Found by AsmPar-1 on 2026-11-01 while building the embedded-data asm reference. For a typed CLI Int argument, --ticks 9223372036854775808, 18446744073709551617 or 99999999999999999999 makes the program run forever. It should exit with the usage error saying --ticks expects an Int. Leading-space ' 5' and plus-sign '+5' are also accepted, where core.args should parse Int with the same strict rules as Int.parse. The root is in the core.args Int conversion, which is shared by every tier.",
-      "kind": "bug",
-      "track": "sidequest",
-      "epoch": null,
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P1",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "A typed CLI Int argument outside I64, or with leading/trailing space or a plus sign, exits with the core.args usage error naming the flag, the same way on O0/O1/O2. A cases row covers the three overflow values plus ' 5' and '+5', and the in-range values still parse.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Retargeted to c2: the premise is false. Int is exact (no I64 bound), Int.parse trims Unicode whitespace and accepts '+' by design (Compiler/JetRuntime/Source/IntParse.jet numeric_trim_start/end), and core.args already decodes Int flags with Int.parse (Core/Args/Args.jet __cli_is_int, __cli_int_of). A huge --ticks is a valid exact Int, so a program that loops that many times is correct, not hung. Giving CLI flags stricter rules than Int.parse would create a second Int text grammar (I8).",
-          "at": "2026-11-04T10:29:26.431Z"
-        },
-        {
-          "n": 2,
-          "text": "A typed CLI Int flag decodes with exactly Int.parse's rules on O0, O1 and O2. Int is exact, so 9223372036854775808, 18446744073709551617 and 99999999999999999999 decode to those exact numbers, and ' 5' and '+5' give what Int.parse gives (5). A cases row covers the three big values, ' 5', '+5' and a negative value.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Commit 83c4c6521b (Main-32): tests/cases/cli/cli_int_flags_decode_with_int_parse_rules.case PASS (cases --filter cli_int_flags: 1 PASS, 0 FAIL). It covers 9223372036854775808 at O0, 18446744073709551617 at O1, 99999999999999999999 at O2, ' 5' at O0, '+5' at O2 and -12 at O1, each printing the exact decoded value. A direct probe shows Int.parse gives the same values for the same inputs.",
-          "at": "2026-11-04T10:29:26.972Z"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "goals": [],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-01T15:27:14.866Z",
-      "updated": "2026-11-04T10:29:28.061Z",
-      "updatedBy": "Main",
-      "completedAt": "2026-11-04T10:29:28.061Z"
-    },
-    {
       "id": "c0zy9mhn",
       "num": 6548,
       "title": "Function-value copy: does f.copy() of an escaping closure share its captured state, give an independent copy, or get refused?",
@@ -98131,6 +98083,11 @@
         {
           "at": "2026-11-07",
           "by": "Main",
+          "text": "dca47438a1 landed the user-callable rule (ratchet 4825 to 4002; --check prints 'excluded: 853 declarations (64 extern, 789 reserved __ names)'; CoreCoverage #Tests 16/16), and 53edc3789a made 2 core.data helpers private (untested 32 to 20). In the lander: the chacha20 and sha/load crypto helpers made private; they aren't exported items (UnknownCoreItem), the public route is xchacha20poly1305_*, the 2 crypto KAT cases PASS and the 6 Examples/Crypto goldens pass on o0-o2 (untested 20 to 8). Remaining: #Tests for 8 public functions."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
           "text": "PortsLead-2 landings: d4534c678a (10 ui.host ime/drag_drop/shortcuts helpers made private, 88 to 78), e23b797ef8 (Ui/Host.jet helpers made private, and provider_record_fields tested through web_build/ui_host_provider_answers_are_core_owned, 78 to 74), 19875cde22 (13 core.compute ad_* helpers made private, 74 to 61). Queued in the lander: the user-callable rule in CoreCoverage.jet, under which reserved dunder hooks (789) and C externs (64) leave the denominator, with an excluded line in --check; the ratchet goes 4825 to 4002, never up, and untested 61 to 32. Also queued: core.data quantile_select and rank_order made private (32 to 20). Remaining: crypto helpers, then #Tests for 8 real API functions."
         },
         {
@@ -98158,7 +98115,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T08:50:40.290Z",
-      "updated": "2026-11-07T10:25:21.443Z",
+      "updated": "2026-11-07T10:32:34.898Z",
       "updatedBy": "Main",
       "criteriaLastN": 1
     },
@@ -98474,6 +98431,47 @@
       "updated": "2026-11-07T10:28:24.828Z",
       "updatedBy": "Main",
       "criteriaLastN": 2
+    },
+    {
+      "id": "c0jstfps",
+      "num": 6672,
+      "title": "Miscompile: a write through &list[i] to a handle-row element (Decimal) never reaches the list",
+      "body": "Found by MechD-3 (#6651 group D). With values := [1.5, 2.5, 3.5] (Decimal), first: &values[0]; first = 4.5; first += 1.25 leaves the list unchanged. jet run exits 0 and prints 1.5/3.5 where 5.75/6.75 is required. Cause: in BuildExpr.jet, ir_bind_pin binds a write pin of a handle-row place as a copy (ir_bind_local), because only scalar rows get the ir_scalar_window address alias. The Int list case is correct. Case: tests/cases/dev_parts_routine/numeric_singleton_splits_match_resident_jit_and_aot_without_fallback.case.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A write pin of any non-scalar (handle-row) place binds as an address alias, so assignment and compound assignment through it reach the owner on o0, o1 and o2. numeric_singleton_splits_match_resident_jit_and_aot_without_fallback prints 5.75/6.75 and passes, and its KF line is removed. A golden or case covers &list[i] writes for Decimal, String and a struct element.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T10:38:05.604Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G10"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-07T10:37:56.047Z",
+      "updated": "2026-11-07T10:38:05.604Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1
     }
   ],
   "decisions": [
@@ -171481,163 +171479,6 @@
       "ratifiedAt": "2026-11-01"
     },
     {
-      "id": "D-INT-PARSE-STRICT1",
-      "cardId": "c015c9bh",
-      "group": "corelib",
-      "title": "Whether Int.parse accepts a leading plus sign and surrounding spaces",
-      "situation": "",
-      "gist": "Should Int.parse accept only an optional minus sign and digits, refusing \"+5\" and \" 5\"?",
-      "lesson": "Int.parse turns text into a whole number. It also reads command-line numbers. Today it accepts \"+5\" and lets some stray spaces through, and no spec line says whether it should.",
-      "explainer": "",
-      "story": "Sam runs `tool --count ' 5'` after a copy-paste. Today the space slips through and the tool runs with 5. Under A and B the tool says ' 5' is not a whole number, so the stray space is caught. Under C it keeps working.",
-      "inWild": "Rust: \"+5\".parse::<i64>() is Ok(5), \" 5\".parse() is an error. Source: https://doc.rust-lang.org/std/primitive.i64.html#method.from_str_radix\n\nGo: strconv.Atoi(\"+5\") is 5, strconv.Atoi(\" 5\") is an error. Source: https://pkg.go.dev/strconv#Atoi",
-      "detail": "Core/Text/Parse.jet parse_int_base accepts an optional '-' or '+' then digits in the base. Int is exact (arbitrary precision), so very large values are correct and are not errors. core.args reads every Int option and argument through Int.parse (Args.jet), so the rule also decides what a command line accepts. No spec line covers sign or space handling.\n\nUnder B, the grammar is: optional '-', then one or more digits; nothing else. \"+5\", \" 5\", \"5 \" and \"\" all return None, and core.args reports the usual 'not a whole number' error.\n\nUnder A, '+' stays accepted, and spaces are refused. Two pieces remove the cost of refusing spaces. Core's typed row decoders (CSV and TSV) accept spaces around a number in an Int column, as pandas does, because such a column cannot hold a meaningful space. core.args names the stray space in its error, so a command-line typo explains itself.\n\nUnder C, today's text stays: '+' accepted, and surrounding spaces trimmed.",
-      "options": [
-        {
-          "key": "A",
-          "name": "Plus allowed, spaces refused",
-          "detail": "`[+-]?digits` parses; spaces return None. Typed CSV and TSV Int columns still accept padding, and core.args names a stray space in its error.",
-          "technical": "Keep the '+' branch; refuse whitespace. Typed row decoders trim an Int column before Int.parse. core.args reports \"has a space\" for a padded number. Corelib cases cover each rule.",
-          "code": "Int.parse(\"+5\")   // Val(5)\nInt.parse(\" 5\")   // None"
-        },
-        {
-          "key": "B",
-          "name": "Strict: optional minus, then digits",
-          "detail": "Only `-?digits` parses. A plus sign or any space returns None.",
-          "technical": "parse_int_base drops the '+' branch; a doc comment states the grammar; a corelib case covers \"+5\", \" 5\", \"5 \", \"-0\" and a 30-digit value.",
-          "code": "Int.parse(\"5\")    // Val(5)\nInt.parse(\"+5\")   // None\nInt.parse(\" 5\")   // None"
-        },
-        {
-          "key": "C",
-          "name": "Lenient: plus and surrounding spaces",
-          "detail": "Spaces around the number are trimmed, and a plus sign is accepted.",
-          "technical": "Trim ASCII whitespace before parsing; document it.",
-          "code": "Int.parse(\" +5 \")  // Val(5)"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "Rust",
-          "note": "Accepts a leading '+', refuses spaces. Source: https://doc.rust-lang.org/std/primitive.i64.html#method.from_str_radix",
-          "code": "\"+5\".parse::<i64>()  // Ok(5)"
-        },
-        {
-          "lang": "Go",
-          "note": "Accepts a leading '+', refuses spaces. Source: https://pkg.go.dev/strconv#Atoi",
-          "code": "strconv.Atoi(\" 5\")  // error"
-        }
-      ],
-      "rec": "A",
-      "recommendation": {
-        "why": "It matches Rust and Go, so numbers written with a plus sign keep working, while stray spaces from copy-paste are caught.",
-        "gains": [
-          "Stray spaces in a command-line number become a clear error that names the space.",
-          "Text that other tools write with '+5' still parses.",
-          "Padded number columns in CSV and TSV files still decode with no extra code."
-        ],
-        "losses": [],
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "Refusing '+5' breaks text from tools that print an explicit sign, with little safety gain."
-          },
-          {
-            "key": "C",
-            "reason": "Silently trimming hides copy-paste mistakes on the command line."
-          }
-        ],
-        "tradeoff": "None left: padded files decode as before, and only hand-sliced text sees the stricter rule."
-      },
-      "hybrid": null,
-      "ballotMode": "short",
-      "shortAuthorizedBy": null,
-      "ballotProcessVersion": 5,
-      "reviewPasses": null,
-      "checkInstructions": null,
-      "surface": {
-        "gist": "Should Int.parse accept \"+5\" and refuse \" 5\", like Rust and Go?",
-        "lesson": "Int.parse turns text into a whole number, including command-line numbers. Today it accepts \"+5\" and lets stray spaces slip through. No spec line decides it. Which rule should it follow?",
-        "trio": {
-          "current": {
-            "note": "A plus sign is accepted, and a stray space can slip through.",
-            "code": "Int.parse(\"+5\")   // Val(5)\ntool --count ' 5'   // runs with 5"
-          },
-          "wild": {
-            "lang": "Rust",
-            "note": "Accepts a leading '+', refuses spaces. Source: https://doc.rust-lang.org/std/primitive.i64.html#method.from_str_radix",
-            "code": "\"+5\".parse::<i64>()  // Ok(5)"
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "Plus allowed, spaces refused",
-            "gist": "\"+5\" parses; \" 5\" returns None.",
-            "gains": [
-              "Matches Rust and Go; catches stray spaces.",
-              "Padded CSV columns still decode."
-            ],
-            "losses": [],
-            "proposed": {
-              "code": "Int.parse(\"+5\")   // Val(5)\nInt.parse(\" 5\")   // None"
-            }
-          },
-          {
-            "key": "B",
-            "name": "Strict: minus and digits only",
-            "gist": "\"+5\" and \" 5\" both return None.",
-            "gains": [
-              "The smallest rule."
-            ],
-            "losses": [
-              "\"+5\" from other tools stops parsing."
-            ],
-            "proposed": {
-              "code": "Int.parse(\"+5\")   // None"
-            }
-          },
-          {
-            "key": "C",
-            "name": "Lenient: trim and allow plus",
-            "gist": "\" +5 \" parses as 5.",
-            "gains": [
-              "Most text parses."
-            ],
-            "losses": [
-              "Hides copy-paste mistakes."
-            ],
-            "proposed": {
-              "code": "Int.parse(\" +5 \")  // Val(5)"
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "It matches Rust and Go and catches stray spaces on the command line.",
-          "gains": [
-            "Clear errors for stray spaces; '+5' keeps working; padded CSV columns still decode."
-          ],
-          "losses": [],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "Breaks '+5' with little safety gain."
-            },
-            {
-              "key": "C",
-              "reason": "Hides copy-paste mistakes."
-            }
-          ],
-          "tradeoff": "None left: typed decoders keep accepting padded columns."
-        }
-      },
-      "draft": false,
-      "status": "ratified",
-      "created": "2026-11-01T17:28:38.323Z",
-      "outcome": "A",
-      "ratifiedAt": "2026-11-01"
-    },
-    {
       "id": "D-USE-MEMBERS1",
       "cardId": "c0rodlty",
       "group": "syntax",
@@ -186377,6 +186218,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-07T10:38:05.604Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0jstfps",
+      "note": "#1 A write pin of any non-scalar (handle-row) place binds as an"
+    },
+    {
+      "at": "2026-11-07T10:37:56.047Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0jstfps",
+      "note": "Miscompile: a write through &list[i] to a handle-row element (Decimal) never reaches the list"
+    },
+    {
+      "at": "2026-11-07T10:32:34.898Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c005c3wh",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-07T10:28:26.472Z",
       "by": "Main",

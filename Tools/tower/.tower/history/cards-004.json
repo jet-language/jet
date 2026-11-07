@@ -83955,6 +83955,56 @@
       "completedAt": "2026-11-04T10:25:32.334Z",
       "questions": [],
       "retiredAt": "2026-11-07T10:27:48.216Z"
+    },
+    {
+      "id": "c015c9bh",
+      "num": 6545,
+      "title": "#CLI Int argument past I64 runs forever instead of failing; ' 5' and '+5' are accepted",
+      "body": "Found by AsmPar-1 on 2026-11-01 while building the embedded-data asm reference. For a typed CLI Int argument, --ticks 9223372036854775808, 18446744073709551617 or 99999999999999999999 makes the program run forever. It should exit with the usage error saying --ticks expects an Int. Leading-space ' 5' and plus-sign '+5' are also accepted, where core.args should parse Int with the same strict rules as Int.parse. The root is in the core.args Int conversion, which is shared by every tier.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A typed CLI Int argument outside I64, or with leading/trailing space or a plus sign, exits with the core.args usage error naming the flag, the same way on O0/O1/O2. A cases row covers the three overflow values plus ' 5' and '+5', and the in-range values still parse.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Retargeted to c2: the premise is false. Int is exact (no I64 bound), Int.parse trims Unicode whitespace and accepts '+' by design (Compiler/JetRuntime/Source/IntParse.jet numeric_trim_start/end), and core.args already decodes Int flags with Int.parse (Core/Args/Args.jet __cli_is_int, __cli_int_of). A huge --ticks is a valid exact Int, so a program that loops that many times is correct, not hung. Giving CLI flags stricter rules than Int.parse would create a second Int text grammar (I8).",
+          "at": "2026-11-04T10:29:26.431Z"
+        },
+        {
+          "n": 2,
+          "text": "A typed CLI Int flag decodes with exactly Int.parse's rules on O0, O1 and O2. Int is exact, so 9223372036854775808, 18446744073709551617 and 99999999999999999999 decode to those exact numbers, and ' 5' and '+5' give what Int.parse gives (5). A cases row covers the three big values, ' 5', '+5' and a negative value.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Commit 83c4c6521b (Main-32): tests/cases/cli/cli_int_flags_decode_with_int_parse_rules.case PASS (cases --filter cli_int_flags: 1 PASS, 0 FAIL). It covers 9223372036854775808 at O0, 18446744073709551617 at O1, 99999999999999999999 at O2, ' 5' at O0, '+5' at O2 and -12 at O1, each printing the exact decoded value. A direct probe shows Int.parse gives the same values for the same inputs.",
+          "at": "2026-11-04T10:29:26.972Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-01T15:27:14.866Z",
+      "updated": "2026-11-04T10:29:28.061Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-11-04T10:29:28.061Z",
+      "questions": [],
+      "retiredAt": "2026-11-07T10:32:35.035Z"
     }
   ]
 }
