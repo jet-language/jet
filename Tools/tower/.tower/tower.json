@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6675,
-    "rev": 95789,
+    "nextNum": 6676,
+    "rev": 95796,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -98775,6 +98775,95 @@
       "updated": "2026-11-07T10:54:41.621Z",
       "updatedBy": "Main",
       "criteriaLastN": 1
+    },
+    {
+      "id": "c0b4rnem",
+      "num": 6675,
+      "title": "Transpile Jet to other languages through target libraries (C, Wasm, Rust), so the compiler always has a recent portable seed",
+      "body": "Owner request (2026-11-07), long horizon.\n\nGoal: Jet source can be exported (transpiled) to another language, such as C, WebAssembly or Rust. Each target is defined by an ordinary Jet library (one file or package per target) that any package can write, so targets are pluggable rather than built into the compiler. A command takes Jet source and a target library and writes that language's version of the program.\n\nWhy:\n1. Bootstrap durability. Exporting the compiler's own source to C or Wasm gives a recent, buildable seed for any machine at any time, so a seed never goes stale and a Jet compiler can always be rebuilt from what most machines already have (a C compiler or a Wasm runtime).\n2. Onboarding and installation. A new user or platform builds Jet from the exported C or Wasm with the toolchain they already have, with no prebuilt binary download.\n3. Interop. A Jet library can be handed to a C, Rust or Wasm codebase as source.\n\nShape (direction, not yet ratified):\n- A target library consumes the checked program from the compiler-as-a-library (philosophy priority 5: the language is a library), at the IR level that already carries sema's facts (I3), and emits text in the target language.\n- The exported program keeps Jet's meaning: memory and type safety, fault reports and error behavior are the same as the native tiers (I1, I9), and the Prelude and runtime are exported with it rather than re-implemented.\n- Targets are libraries, not compiler hooks: no private seam only first-party targets can use.\n\nRelated: #6186 (portable Wasm seed bootstrapped with a C compiler: the bootstrap outcome this would serve), #5201 (JetIR to JS/Wasm backend), #6345 (portable target better than Wasm), #6508 (exporting Jet to C, Python and JavaScript through FFI).\n\nOwner gates before building: the command's name and flags, the target-library API, and which targets are first-party. These go on a Tower ballot with same-program alternatives. An adversarial design review (Docs/audits) must test every claim first, including whether exported C or Wasm can keep I1 and I9 meaning, and how it compares with existing source-to-source compilers and bootstrap chains (for example Nim and Vala emitting C, Zig's Wasm-plus-C bootstrap, and mrustc and GNU Mes for Rust and Guix).",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "An adversarial design review in Docs/audits tests every claimed strength (bootstrap durability, onboarding, interop, kept meaning) against existing source-to-source compilers and bootstrap chains, and every gap it finds is on a card or ballot.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T16:22:07.881Z"
+        },
+        {
+          "n": 2,
+          "text": "A ratified Tower ballot fixes the command's name and flags, the target-library API (what a target receives from the checked program and how it emits text), and the first-party targets, with same-program alternatives and beginner and expert paths.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T16:22:09.119Z"
+        },
+        {
+          "n": 3,
+          "text": "A target is an ordinary Jet library that any package can write, using only public compiler-library seams. A third-party test target built outside the repository exports a program as well as a first-party one does.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T16:22:10.147Z"
+        },
+        {
+          "n": 4,
+          "text": "Exporting a program to C and building it with a stock C compiler gives the same stdout, stderr and exit code as jet run at O0, O1 and O2 for every executable example, with memory safety, fault reports and error behavior unchanged.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T16:22:11.035Z"
+        },
+        {
+          "n": 5,
+          "text": "Exporting the compiler's own source to C (and to Wasm) gives a compiler that, built with only a C compiler (or a Wasm runtime), compiles the same tree to a byte-identical stage-2 compiler: a portable seed for every release, linked with #6186.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T16:22:11.991Z"
+        },
+        {
+          "n": 6,
+          "text": "Install docs describe building Jet from the exported seed with a stock C compiler, and a fresh machine with no Jet binary follows them to a working jet.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T16:22:13.251Z"
+        }
+      ],
+      "refs": [
+        "#6186",
+        "#5201",
+        "#6345",
+        "#6508"
+      ],
+      "tags": [],
+      "goals": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-07T16:22:00.126Z",
+      "updated": "2026-11-07T16:22:13.251Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 6
     }
   ],
   "decisions": [
@@ -186368,6 +186457,55 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-07T16:22:13.251Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0b4rnem",
+      "note": "#6 Install docs describe building Jet from the exported seed wi"
+    },
+    {
+      "at": "2026-11-07T16:22:11.991Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0b4rnem",
+      "note": "#5 Exporting the compiler's own source to C (and to Wasm) gives"
+    },
+    {
+      "at": "2026-11-07T16:22:11.035Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0b4rnem",
+      "note": "#4 Exporting a program to C and building it with a stock C comp"
+    },
+    {
+      "at": "2026-11-07T16:22:10.147Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0b4rnem",
+      "note": "#3 A target is an ordinary Jet library that any package can wri"
+    },
+    {
+      "at": "2026-11-07T16:22:09.119Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0b4rnem",
+      "note": "#2 A ratified Tower ballot fixes the command's name and flags, "
+    },
+    {
+      "at": "2026-11-07T16:22:07.881Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0b4rnem",
+      "note": "#1 An adversarial design review in Docs/audits tests every clai"
+    },
+    {
+      "at": "2026-11-07T16:22:00.126Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0b4rnem",
+      "note": "Transpile Jet to other languages through target libraries (C, Wasm, Rust), so the compiler always has a recent portable seed"
+    },
     {
       "at": "2026-11-07T16:17:46.853Z",
       "by": "Main",
