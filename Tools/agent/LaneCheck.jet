@@ -9,6 +9,12 @@
 // The default run checks the whole compiler project (Compiler/, the unit the
 // native self-host builds) with JET_KEEP_GOING=1, so every error in every item
 // is reported at once. A path argument checks that file or project instead.
+// A path under Compiler/JetRuntime is checked in its assembled mode (#6670):
+// the one unit Compiler/JetRuntime/sources.list assembles, as the runtime
+// build (Compiler/JetRuntime/Tests/check-runtime.mjs) assembles it, with each
+// diagnostic located at the listed source line it came from. A shared source
+// the list also names (Compiler/JetBackend/Source/OS/*.jet) is checked in its
+// own package and in the assembled unit.
 // Every mode first runs the personal-information guard (#6564 c5),
 // Jetpack/Bootstrap's assembly check, which refuses an unlisted Jetpack source
 // or a drifted compiler slice, the unsafe-region ratchet in --check mode
@@ -212,7 +218,15 @@ compiler_check: fn(repo: String, args: [String]) -[Env, Exec, FS, IO, Time, Time
     // The log exists from the start and its .rc only once the check ends, so a
     // killed check leaves a log without a status: incomplete, never success.
     files.write(log, "") ?? term.eprint("lane-check: cannot write {log}: {err}")
-    ran: run_check(repo, jet, target, scratch)
+    root: files.realpath(repo) ?? repo.copy()
+    relative: if target.starts_with("{root}/") -> target.removeprefix("{root}/") else -> ""
+    runtime_owned: relative == RUNTIME_TREE || relative.starts_with("{RUNTIME_TREE}/")
+    runtime_shared: !runtime_owned && relative != "" && runtime_sources(repo).paths.contains(relative)
+    ran := if runtime_owned -> runtime_check(repo, jet, scratch) else -> run_check(repo, jet, target, scratch)
+    if runtime_shared {
+        assembled: runtime_check(repo, jet, scratch)
+        ran = Ran{code: if ran.code != 0 -> ran.code else -> assembled.code, text: "{ran.text}{assembled.text}"}
+    }
     held.clear()
     files.write(log, ran.text) ?? term.eprint("lane-check: cannot write {log}: {err}")
     files.write("{log}.rc", "{ran.code}\n") ?? term.eprint("lane-check: cannot write {log}.rc: {err}")
@@ -327,6 +341,184 @@ file_of: fn(location: String) -> String Never! {
         return parts[0..<parts.len() - 2].join(":")
     }
     location.copy()
+}
+
+// --- assembled runtime ------------------------------------------------------
+
+RUNTIME_TREE: "Compiler/JetRuntime"
+RUNTIME_SOURCES: "Compiler/JetRuntime/sources.list"
+RUNTIME_PACKAGE: "Compiler/JetRuntime/package.jet"
+
+// Where one line of the assembled runtime unit came from: a listed source and
+// its 1-based line, or no path for the unit's Core import header.
+UnitLine: struct {
+    path: String
+    line: Int
+}
+
+RuntimeUnit: struct {
+    text: String
+    lines: [UnitLine]
+    problem: String
+}
+
+// The runtime's explicit source manifest: every non-empty, non-comment line,
+// none twice.
+runtime_sources: fn(repo: String) -[FS]> (paths: [String], problem: String) Never! {
+    paths := [String]{}
+    text: files.read("{repo}/{RUNTIME_SOURCES}") ?? return (paths: paths, problem: "cannot read {RUNTIME_SOURCES}: {err}")
+    loop raw in text.split("\n") {
+        line: raw.trim()
+        if line == "" || line.starts_with("#") -> next
+        if paths.contains(line) -> return (paths: [String]{}, problem: "{RUNTIME_SOURCES} lists {line} twice")
+        paths.push(line.copy())
+    }
+    if paths.len() == 0 -> return (paths: paths, problem: "{RUNTIME_SOURCES} lists no source")
+    (paths: paths, problem: "")
+}
+
+runtime_unit: fn(repo: String) -[FS]> RuntimeUnit Never! {
+    listed: runtime_sources(repo)
+    if listed.problem != "" -> return RuntimeUnit{text: "", lines: [UnitLine]{}, problem: listed.problem}
+    texts := [String]{}
+    loop path in listed.paths {
+        text: files.read("{repo}/{path}") ?? return RuntimeUnit{text: "", lines: [UnitLine]{}, problem: "cannot read {path}: {err}"}
+        texts.push(text)
+    }
+    assemble_runtime(listed.paths, texts)
+}
+
+// The runtime unit check-runtime.mjs assembles: each listed source with its
+// `use` lines (and a multi-line `use x.[` continuation) dropped behind a
+// `// [unit source: PATH]` line, after the distinct Core imports they named
+// and one blank line.
+assemble_runtime: fn(paths: [String], texts: [String]) -> RuntimeUnit Never! {
+    uses := [String]{}
+    body := [String]{}
+    origins := [UnitLine]{}
+    loop index in 0..<paths.len() {
+        path: paths[index]
+        body.push("// [unit source: {path}]")
+        origins.push(UnitLine{path: path.copy(), line: 1})
+        importing := false
+        number := 0
+        loop line in unblock_uses(texts[index]).split("\n") {
+            number += 1
+            if line.starts_with("use ") {
+                if core_use(line) && !uses.contains(line) -> uses.push(line.copy())
+                importing = line.contains("[") && !line.contains("]")
+                next
+            }
+            if importing {
+                if line.contains("]") -> importing = false
+                next
+            }
+            body.push(line.copy())
+            origins.push(UnitLine{path: path.copy(), line: number})
+        }
+    }
+    lines := [UnitLine]{}
+    loop _ in 0..<(uses.len() + 1) -> lines.push(UnitLine{path: "", line: 0})
+    lines.extend(origins)
+    text := uses.copy()
+    text.push("")
+    text.extend(body)
+    RuntimeUnit{text: text.join("\n"), lines: lines, problem: ""}
+}
+
+// `use core.x` or `use alias: core.x`.
+core_use: fn(line: String) -> Bool Never! {
+    rest: line.removeprefix("use ")
+    if rest.starts_with("core.") -> return true
+    parts: rest.partition(": ")
+    parts.sep != "" && parts.head != "" && parts.head.bytes().all(b -> word_byte(b)) && parts.tail.starts_with("core.")
+}
+
+word_byte: fn(b: U8) -> Bool Never! {
+    (b >= (U8{48}) && b <= (U8{57})) || (b >= (U8{65}) && b <= (U8{90})) || (b >= (U8{97}) && b <= (U8{122})) || b == (U8{95})
+}
+
+space_byte: fn(b: U8) -> Bool Never! { b == (U8{32}) || b == (U8{9}) || b == (U8{10}) || b == (U8{13}) || b == (U8{11}) || b == (U8{12}) }
+
+// A `use { … }` block rewritten as one `use` line per row, keeping every line:
+// `use {` and its `}` turn to spaces and each row's last four columns of
+// indentation become `use `. `pub use { … }` stays as written.
+unblock_uses: fn(text: String) -> String Never! {
+    lines := text.split("\n").to_list()
+    indent := ""
+    open := false
+    depth := 0
+    loop at in 0..<lines.len() {
+        line: lines[at].copy()
+        if !open {
+            trimmed: line.trim_start()
+            lead: line.removesuffix(trimmed)
+            if lead.bytes().all(b -> space_byte(b)) && trimmed.starts_with("use {{") && trimmed.removeprefix("use {{").trim() == "" {
+                indent = lead.copy()
+                open = true
+                lines[at] = " ".repeat(line.len())
+            }
+            next
+        }
+        closer: "{indent}}}"
+        if depth == 0 && line.trim_end() == closer {
+            open = false
+            lines[at] = " ".repeat(line.len())
+            next
+        }
+        row: "{indent}    "
+        if depth == 0 && line.starts_with(row) {
+            rest: line.removeprefix(row)
+            first: if rest.count_bytes() > 0 -> rest.bytes()[0] else -> U8{0}
+            if (first >= (U8{65}) && first <= (U8{90})) || (first >= (U8{97}) && first <= (U8{122})) || first == (U8{95}) || first == (U8{34}) -> lines[at] = "{indent}use {rest}"
+        }
+        loop b in line.partition("//").head.bytes() {
+            if b == (U8{91}) -> depth += 1
+            if b == (U8{93}) -> depth -= 1
+        }
+    }
+    lines.join("\n")
+}
+
+// The assembled unit checked beside a copy of the runtime's package.jet, with
+// every location in the unit moved to the source line it came from.
+runtime_check: fn(repo: String, jet: String, scratch: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Ran Never! {
+    unit: runtime_unit(repo)
+    if unit.problem != "" -> return Ran{code: 1, text: "lane-check: the runtime unit cannot be assembled: {unit.problem}\n"}
+    dir: "{scratch}/runtime-unit.{sys.pid()}"
+    files.create_dir_all(dir) ?? return Ran{code: 1, text: "lane-check: cannot create {dir}: {err}\n"}
+    manifest: files.read("{repo}/{RUNTIME_PACKAGE}") ?? return Ran{code: 1, text: "lane-check: cannot read {RUNTIME_PACKAGE}: {err}\n"}
+    files.write("{dir}/package.jet", manifest) ?? return Ran{code: 1, text: "lane-check: cannot write {dir}/package.jet: {err}\n"}
+    path: "{dir}/unit.jet"
+    files.write(path, unit.text) ?? return Ran{code: 1, text: "lane-check: cannot write {path}: {err}\n"}
+    term.eprint("lane-check: assembled runtime unit: {path}")
+    ran: run_check(repo, jet, path, scratch)
+    Ran{code: ran.code, text: runtime_locations(ran.text, path, unit.lines)}
+}
+
+// The compiler output with each `--> unit.jet:LINE:COL` naming the listed
+// source and line instead.
+runtime_locations: fn(text: String, unit_path: String, lines: [UnitLine]) -> String Never! {
+    out := [String]{}
+    loop line in text.split("\n") {
+        trimmed: line.trim_start()
+        location: trimmed.removeprefix("-->").trim().partition(" ")
+        file: file_of(location.head)
+        parts: location.head.split(":").to_list()
+        if !trimmed.starts_with("-->") || file == location.head || (file != unit_path && !unit_path.ends_with("/{file}")) {
+            out.push(line.copy())
+            next
+        }
+        number: int_or(parts[parts.len() - 2], -1)
+        if number < 1 || number > lines.len() || lines[number - 1].path == "" {
+            out.push(line.copy())
+            next
+        }
+        origin: lines[number - 1]
+        tail: if location.sep == "" -> "" else -> " {location.tail}"
+        out.push("{line.removesuffix(trimmed)}--> {origin.path}:{origin.line}:{parts[parts.len() - 1]}{tail}")
+    }
+    out.join("\n")
 }
 
 // --- personal-information guard ---------------------------------------------
@@ -602,4 +794,18 @@ first_hit: fn(dir: String, file: String, args: [String], flags: [String]) -[Exec
     loop rule in generic -> assert(rule.kind == "path")
     assert_eq(unescape_mount("/mnt/my\\040disk"), "/mnt/my disk")
     assert_eq(noreply_handle("someone@example.com"), "")
+}
+
+#Test("the runtime unit drops imports behind source markers and maps locations back") {
+    alloc: "use core.mem\nuse {{\n    jet_backend.[\n        os_store_i64,\n    ]\n    m: core.mem\n}}\nalloc: fn() {{}}\n"
+    text: "use core.mem\nuse jet_runtime.Alloc\ntext: fn() {{}}\n"
+    unit: assemble_runtime([String]{"R/Alloc.jet", "R/Text.jet"}, [String]{alloc, text})
+    assert_eq(unit.text, "use core.mem\nuse m: core.mem\n\n// [unit source: R/Alloc.jet]\n     \n \nalloc: fn() {{}}\n\n// [unit source: R/Text.jet]\ntext: fn() {{}}\n")
+    assert_eq(unit.lines.len(), 11)
+    assert_eq(unit.lines[6].path, "R/Alloc.jet")
+    assert_eq(unit.lines[6].line, 8)
+    assert_eq(unit.lines[9].line, 3)
+    assert(core_use("use core.files") && core_use("use cf: core.files") && !core_use("use jet_backend.x") && !core_use("use a b: core.x"))
+    moved: runtime_locations("Error [jet.UnknownFunction]: no\n  --> /s/unit.jet:10:5 here\n  --> other.jet:9:5\n  --> /s/unit.jet:1:1\n", "/s/unit.jet", unit.lines)
+    assert_eq(moved, "Error [jet.UnknownFunction]: no\n  --> R/Text.jet:3:5 here\n  --> other.jet:9:5\n  --> /s/unit.jet:1:1\n")
 }
