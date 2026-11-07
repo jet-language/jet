@@ -60,7 +60,10 @@
 //
 // `precommit` runs the census for a commit touching FILE... when one of them
 // is a compiler input (or a runtime, backend, Core or Jetpack source or a
-// sources.list), with every pass, and prints PRECOMMIT OK or PRECOMMIT FAILED.
+// sources.list), with every pass, then, for every commit, the repository
+// ratchets `--check` in the worktree with the seed (RATCHETS: the unsafe-region
+// baseline in Docs/spec/safety.md and the Core coverage list). Every pass runs
+// and reports its rows; it prints PRECOMMIT OK or PRECOMMIT FAILED.
 //
 // `prescreen` is the lander's admission check of one job: PATCH, after the
 // EARLIER_PATCHes already admitted, applied to an export of HEAD, then the
@@ -108,6 +111,8 @@ GENERATED_VIEWS: [String]{"Compiler/JetCli/Source/Cli/CoreSources.jet", "Compile
 HEAVY_MEMORY: "32G"
 HEAVY_CPUS: "16-27"
 HEAVY_STACK: "--stack=1073741824:1073741824"
+// The ratchets every commit keeps, each run as `jet TOOL --check`.
+RATCHETS: [String]{"Tools/agent/UnsafeRatchet.jet", "Tools/agent/CoreCoverage.jet"}
 
 run: fn() {
     args: process.args()
@@ -1303,12 +1308,41 @@ precommit_main: fn(args: [String]) -[Exec, Env, FS, IO, Time, Time.Wait]> Int Ne
     loop path in args {
         if census_input(worktree, path, roots) -> needed = true
     }
-    if needed && census(args, Passes{build: true, selfcheck: true}) != 0 {
+    census_failed: needed && census(args, Passes{build: true, selfcheck: true}) != 0
+    ratchets_failed: ratchets(worktree) != 0
+    if census_failed || ratchets_failed {
         print("PRECOMMIT FAILED")
         return 1
     }
     print("PRECOMMIT OK")
     0
+}
+
+// Each of RATCHETS `--check`ed in `worktree` with the seed; the number that
+// failed. A failure prints the tool's output.
+ratchets: fn(worktree: String) -[Exec, Env, FS, IO, Time.Wait]> Int Never! {
+    compiler_dir: seed_dir()
+    identity: read_identity(compiler_dir)
+    failed := 0
+    loop tool in RATCHETS {
+        spec := process.cmd([String]{"{compiler_dir}/jet", tool, "--check"}).cwd(worktree).env("JET_TOOLCHAIN_ROOT", worktree).output_limit(268435456)
+        if identity != "" -> spec = spec.env("JET_COMPILER_IDENTITY", identity)
+        receipt: spec.run() ?? {
+            print("PRECOMMIT: {tool} cannot start: {err}")
+            failed += 1
+            next
+        }
+        if receipt.code == 0 && receipt.signal == None {
+            print("ratchet {tool} ok")
+            next
+        }
+        failed += 1
+        lines := [String]{}
+        loop line in process.combined_output(receipt).trim_end().split("\n") -> lines.push(line.copy())
+        show(lines, 40)
+        print("PRECOMMIT: {tool} --check failed (exit {receipt.code})")
+    }
+    failed
 }
 
 prescreen_main: fn(args: [String]) -[Exec, Env, FS, IO, Time.Wait]> Int Never! {
