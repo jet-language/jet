@@ -375,6 +375,10 @@ IRProgram: struct {
     // JetRuntime TestContracts.jet): true only for a test image
     // (ir_build_tests), whose records `jet prove` reads.
     contract_records: Bool{false}
+    // `jet test --coverage`: the functions whose entry records its line
+    // (ir_coverage_probe), by checked function key; empty for every other
+    // build.
+    coverage: [String:Int]{[String:Int]{}}
     // The ordinal of each `task` spawn site among its file's spawn sites in
     // source order, by "{source file}:{span start}" (ir_spawn_sites): the
     // "spawn site N" of task reports.
@@ -2235,6 +2239,7 @@ ir_route_can_stop: fn(symbol: String) -> Bool Never! {
         "jet_ctx_push_deadline" | "jet_ctx_pop_deadline" -> false
         "jet_term_mode_enter" | "jet_term_mode_leave" -> false
         "jet_rt_sentry_scope_enter" | "jet_rt_sentry_policy_enter" | "jet_rt_sentry_scope_leave" | "jet_rt_sentry_frame_enter" | "jet_rt_sentry_frame_leave" | "jet_rt_sentry_register_stack_allocation" -> false
+        "jet_rt_coverage_function" -> false
         "jet_rt_native_closure_retain" | "jet_rt_native_closure_unref" -> false
         "jet_rt_native_shared_downgrade" | "jet_rt_native_shared_weak_upgrade" | "jet_rt_shared_owner_strong_count" -> false
         // A rollback hook's failure is taken by _leave (BuildTransact.jet ir_transaction_walk).

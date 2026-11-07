@@ -48,8 +48,10 @@ IROutputCheck: struct { name: String, key: String }
 // The harness `jet test` runs: `tests` in run order, then (unfiltered) each
 // of `checks`. `serial` streams each test's record before spawning the next;
 // otherwise every test is spawned before any is joined. `stock`
-// (`--show-default`) never calls the package's `test: fn`.
-IRTestHarness: struct { tests: [IRTestCase], checks: [IROutputCheck], serial: Bool, stock: Bool{false} }
+// (`--show-default`) never calls the package's `test: fn`. `coverage` (`jet
+// test --coverage`) names the functions whose entry records its line, by
+// checked key (IRProgram.coverage).
+IRTestHarness: struct { tests: [IRTestCase], checks: [IROutputCheck], serial: Bool, stock: Bool{false}, coverage: [String:Int]{[String:Int]{}} }
 
 // Builds `harness` and every function it reaches, keeping `checks`
 // (ir_bounds_mode).
@@ -58,6 +60,7 @@ ir_build_tests: fn(functions: &&[FnBody], decls: DeclTable, type_defs: &&[TTypeD
     p.checks = checks
     p.sentries = true
     p.contract_records = true
+    p.coverage = harness.coverage.copy()
     ir_foreign_index(p, foreign, decls)
     m := ir_module_for(p)
     failures := [IRBuildFailure]{}
@@ -84,6 +87,15 @@ ir_build_tests: fn(functions: &&[FnBody], decls: DeclTable, type_defs: &&[TTypeD
     _: ir_build_queue(m, p, failures, built)
     ir_drop_glues(m, p)
     IRBuildResult{program: ir_merge_serial(m), failures: failures}
+}
+
+// `jet test --coverage`: a probed function's entry hands its line to the
+// runtime (JetRuntime Coverage.jet), which records the first entry of each
+// line in the test process.
+ir_coverage_probe: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, function: FnBody) Never! {
+    line: p.coverage.get(function.key) ?? return
+    word: ir_word_const(m, b, line)
+    _: ir_runtime(m, b, "jet_rt_coverage_function", [Int]{word}, -1)
 }
 
 // The package's `test: fn(t: Test)`, when it has one: the project's test

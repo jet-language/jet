@@ -1878,11 +1878,15 @@ jet_cli_test_result: fn(file: String, source: String, doctests: [JetCLIDoctestFi
             checks.push(IROutputCheck{name: check.name, key: check.function.key})
         }
     }
+    // `coverage` probes the tested file's own functions (TestCoverage.jet).
+    coverage: test_settings_on(options.settings, "coverage")
+    covered: if coverage -> jet_cli_coverage_functions(file, plan.functions, plan.tests, loop check in plan.output_checks -> check.function.key.copy()) else -> [JetCLICoverageFunction]{}
     harness: IRTestHarness{
         tests: loop test in native_tests -> IRTestCase{id: Int.from_u64(test.id), key: test.key, name: test.name, expected_failure: test.expected_failure, faults: test.faults},
         checks: checks,
         serial: options.serial,
         stock: options.stock,
+        coverage: jet_cli_coverage_probes(covered),
     }
     // The package's `test: fn(t: Test)` runs first, and says so, unless
     // `--show-default` chose the stock harness; a code suite's child always
@@ -1933,6 +1937,9 @@ jet_cli_test_result: fn(file: String, source: String, doctests: [JetCLIDoctestFi
     if generated_seed == .Val(seed) -> spec = spec.env("JET_PROP_SEED", seed)
     spec = spec.env("JET_TEST_CAPTURE", options.capture)
     if measure != None -> spec = spec.env("JET_TEST_MEASURE", "1")
+    // Every test process appends the lines it entered to one file.
+    coverage_path: "{build_dir}/{stem}.coverage"
+    if coverage -> spec = spec.env(JET_CLI_COVERAGE_ENV, coverage_path)
     // Under `jet prove --capture-sensitive` the tests read the user's
     // terminal, and the runtime journals every stdin read.
     if cli_sys.get(JET_CLI_REPLAY_CAPTURE_ENV) != None -> spec = spec.stdin(.Inherit)
@@ -1944,10 +1951,10 @@ jet_cli_test_result: fn(file: String, source: String, doctests: [JetCLIDoctestFi
     // The children's outcome records stay in memory: no test writes the disk.
     records_path: "{jet_cli_native_test_records_dir(build_dir)}/{stem}.records"
     // A plain run goes through the test-result store (TestReuse.jet): a
-    // snapshot update, a measured or a code-suite run, a recorded one, or one
-    // `jet prove` captures always runs.
+    // snapshot update, a measured, coverage or code-suite run, a recorded
+    // one, or one `jet prove` captures always runs.
     reuse := JetCLITestReuse?{None}
-    if !options.update_snapshots && measure == None && !code_suite && replay_record == None && cli_sys.get(JET_CLI_REPLAY_CAPTURE_ENV) == None {
+    if !options.update_snapshots && measure == None && !coverage && !code_suite && replay_record == None && cli_sys.get(JET_CLI_REPLAY_CAPTURE_ENV) == None {
         names: (loop test in native_tests -> test.key).join(",")
         settings: "{options.filter ?? "-"}\n{options.shuffle_seed ?? "-"}\n{options.serial}\n{options.trace_tiers}\n{options.capture}\n{options.project_root ?? "-"}\n{options.docs}\n{limit_setting ?? -1}\n{iterations ?? "-"}\n{generated_seed ?? "-"}\n{names}\n{check_names.join(",")}"
         reuse = jet_cli_test_reuse_at(root, binary, settings, records_path)
@@ -1955,7 +1962,13 @@ jet_cli_test_result: fn(file: String, source: String, doctests: [JetCLIDoctestFi
     how := JetCLITestReuseHow.Plain
     run: jet_cli_test_reuse_run(reuse, options.fresh, how, spec, native_tests, check_names, jet_cli_native_test_unrun_check_report, options.serial, records_path, time_limit) ?? {
         cli_files.remove(binary).drop("the native run already failed")
+        if coverage -> cli_files.remove(coverage_path).drop("the native run already failed")
         return jet_cli_ice(err.message)
+    }
+    covered_report := ""
+    if coverage {
+        hits: jet_cli_coverage_hits(coverage_path)
+        covered_report = if options.json -> jet_cli_coverage_status(file, covered, hits) else -> jet_cli_coverage_text(file, covered, hits)
     }
     wires := [String]{}
     loop wire in run.wires -> wires.push(wire)
@@ -2021,15 +2034,15 @@ jet_cli_test_result: fn(file: String, source: String, doctests: [JetCLIDoctestFi
         below := ""
         if outcome.below == .Val(diagnostic) -> below = diagnostic_render_all("", "", [Diagnostic]{diagnostic}, color)
         floor_exit: if outcome.below != None && exit_code == JET_DRIVER_EXIT_OK -> JET_DRIVER_EXIT_USER_ERROR else -> exit_code
-        // Under `--json` the status line is the whole stdout; the report moves to stderr,
-        // and E2942 rides in the status's `reports`.
-        if options.json -> return JetDriverVerbOutput{stdout: "{outcome.status}\n", stderr: "{stdout}{stderr}{notice}", exit_code: floor_exit}
-        return JetDriverVerbOutput{stdout: stdout, stderr: "{stderr}{notice}{below}", exit_code: floor_exit}
+        // Under `--json` the status line (and coverage's) is the whole stdout;
+        // the report moves to stderr, and E2942 rides in the status's `reports`.
+        if options.json -> return JetDriverVerbOutput{stdout: "{outcome.status}\n{covered_report}", stderr: "{stdout}{stderr}{notice}", exit_code: floor_exit}
+        return JetDriverVerbOutput{stdout: "{stdout}{covered_report}", stderr: "{stderr}{notice}{below}", exit_code: floor_exit}
     }
     rendered: (loop record in records -> jet_cli_measure_render(record, options.json)).join("")
     // Under `--json` the record lines are the whole stdout; the report moves to stderr.
-    if options.json -> return JetDriverVerbOutput{stdout: rendered, stderr: "{stdout}{stderr}", exit_code: exit_code}
-    JetDriverVerbOutput{stdout: "{stdout}{rendered}", stderr: stderr, exit_code: exit_code}
+    if options.json -> return JetDriverVerbOutput{stdout: "{rendered}{covered_report}", stderr: "{stdout}{stderr}", exit_code: exit_code}
+    JetDriverVerbOutput{stdout: "{stdout}{rendered}{covered_report}", stderr: stderr, exit_code: exit_code}
 }
 
 // The tests of shard I of N (the `shard` setting): from the I-th of them in

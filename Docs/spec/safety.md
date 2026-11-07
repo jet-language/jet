@@ -214,9 +214,9 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1336,
+  "total": 1337,
   "counts": {
-    "Compiler": 677,
+    "Compiler": 678,
     "Core": 186,
     "Docs": 8,
     "Examples": 35,
@@ -1869,6 +1869,13 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
       "line": 8,
       "column": 5,
       "reason": "caller holds this native CMS mutex and owns the initialized four-byte counter"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Source/Coverage.jet",
+      "line": 20,
+      "column": 5,
+      "reason": "runtime-init runs before any other thread exists"
     },
     {
       "package": "Compiler",
@@ -9585,14 +9592,14 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 
 | crate/package | regions |
 | --- | ---: |
-| Compiler | 677 |
+| Compiler | 678 |
 | Core | 186 |
 | Docs | 8 |
 | Examples | 35 |
 | Jetpack | 9 |
 | Tools | 7 |
 | tests | 414 |
-| **total** | **1336** |
+| **total** | **1337** |
 
 ### Regions
 
@@ -9833,6 +9840,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/ComptimeServe.jet | 161:5 | "the serve entry runs once, on the image's only thread, before it serves" |
 | Compiler | Compiler/JetRuntime/Source/ComptimeServe.jet | 207:5 | "the serve entry installed this runtime export, whose System V signature takes these five words" |
 | Compiler | Compiler/JetRuntime/Source/CountMinSketch.jet | 8:5 | "caller holds this native CMS mutex and owns the initialized four-byte counter" |
+| Compiler | Compiler/JetRuntime/Source/Coverage.jet | 20:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/CryptoEntropy.jet | 20:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/CryptoEntropy.jet | 51:13 | "the test/fault harness owns the synchronous callback and context until reset; the callback borrows only this writable suffix" |
 | Compiler | Compiler/JetRuntime/Source/CryptoEntropy.jet | 56:5 | "Linux getrandom flags0 writes only the exclusively borrowed writable span and retains no address; kernel negative errno is preserved" |

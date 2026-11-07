@@ -85,6 +85,8 @@ jet_cli_test_setting_source: fn(settings: [TestSetting], name: String) -> String
 // `seed` steer the generated grade, so each needs `grade`; a `cases` file
 // must be readable and a `results` file writable before any test runs.
 jet_cli_test_settings_refusal: fn(settings: [TestSetting], corpus: Bool, color: Bool) -[FS]> JetCLIPlan? Never! {
+    // Only a native test run is instrumented; a corpus row never is.
+    if corpus && test_settings_on(settings, "coverage") -> return Val(jet_cli_not_ported("test --coverage", color))
     update: test_settings_on(settings, "update_snapshots")
     blessing: "`update_snapshots` ({jet_cli_test_setting_source(settings, "update_snapshots")})"
     if update && test_settings_on(settings, "list") {

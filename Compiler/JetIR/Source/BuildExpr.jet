@@ -35,6 +35,7 @@ ir_build_function: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, function: FnBod
         if ir_failed(b) -> return
         if ir_param_slot(m, p, b, param_ty, param.convention == .Write, param.convention == .Move, param.local.name) == None -> return ir_fail(b, param.span, "parameter type {ir_type_name(param_ty)}")
     }
+    ir_coverage_probe(m, p, b, function)
     if ir_generator_element(p, b, function) == .Val(element) -> return ir_build_generator(m, p, b, function, element)
     if ir_failed(b) -> return
     ir_arm_params(m, p, b, function)
