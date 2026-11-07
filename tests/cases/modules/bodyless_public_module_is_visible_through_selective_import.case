@@ -1,0 +1,11 @@
+# Port of tests/modules.rs::bodyless_public_module_is_visible_through_selective_import (53-78, 581-583):
+# a bodyless public module declared in lib.jet is reachable through `use lib.[helper]`.
+# The original ran the release build, the default run and a forced interpreter; the
+# CLI has no forced-interpreter mode, so the default and release runs carry the contract.
+fixture: bodyless_public_module_is_visible_through_selective_import/input
+step: jet run run.jet
+exit: 0
+stdout: = "visible\n"
+step: jet run --release run.jet
+exit: 0
+stdout: = "visible\n"
