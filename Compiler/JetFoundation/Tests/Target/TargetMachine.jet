@@ -1,15 +1,16 @@
 use {
     jet_foundation.[
-        ByteSize, MMIOAccess, MemoryRegion, ProviderContract, ProviderLimits,
+        ByteSize, Diagnostic, MMIOAccess, MemoryRegion, ProviderContract, ProviderLimits,
         RuntimeLayer, SVDProvenance, SizeBudgetReport, TargetCapability,
         TargetDMAChannelFact, TargetInterruptFact, TargetMachine, TargetMachineError,
         TargetRegisterBlockFact, TargetRegisterFact, TargetUnsafeGate, jet_target_abi_c,
-        jet_target_allocator_json, jet_target_capabilities_for_core_usage,
+        jet_target_allocator_json, jet_target_capabilities_for_core_usage, jet_target_capability_name,
         jet_target_environment_identity, jet_target_hardware_empty, jet_target_hardware_validate,
-        jet_target_layout_cache_identity, jet_target_machine_bare_metal, jet_target_machine_error_debug,
+        jet_target_layout_cache_identity, jet_target_machine_bare_metal, jet_target_machine_board_sensor_v1,
+        jet_target_machine_diagnostics, jet_target_machine_error_debug, jet_target_machine_error_diagnostic,
         jet_target_machine_errors_debug, jet_target_machine_hosted,
-        jet_target_machine_provides_capability, jet_target_machine_use_default,
-        jet_target_machine_use_from_core_apis, jet_target_machine_validate,
+        jet_target_machine_provides_capability, jet_target_machine_supports_execution_tier,
+        jet_target_machine_use_default, jet_target_machine_use_from_core_apis, jet_target_machine_validate,
         jet_target_machine_wasm_browser, jet_target_machine_wasm_no_os, jet_target_machine_wasm_wasi,
         jet_target_max_runtime_layer, jet_target_memory_region_new, jet_target_no_whitespace,
         jet_target_provider_identity, jet_target_provider_valid, jet_target_validate_allocator,
@@ -398,4 +399,183 @@ target_test_provider: fn(name: String, hash: String) -> ProviderContract Never! 
     errors := [TargetMachineError]{}
     jet_target_validate_ram_budget(machine, usage, errors)
     assert(errors.is_empty())
+}
+
+// Rust target_machines.rs sensor_machine: board.sensor_v1 with the MMIO range
+// the compile-path volatile tests use and an explicit linker and allocator.
+target_test_sensor_machine: fn() -> TargetMachine Never! {
+    machine := jet_target_machine_board_sensor_v1("0.0.1")
+    machine.memory = [MemoryRegion]{
+        jet_target_memory_region_new("flash", 0x08000000, ByteSize{bytes: 524288}, .Flash, .Rx),
+        jet_target_memory_region_new("ram", 0x20000000, ByteSize{bytes: 65536}, .Ram, .Rw),
+        jet_target_memory_region_new("peripherals", 0x40000000, ByteSize{bytes: 1048576}, .MMIO, .Rw),
+    }
+    machine.linker = .File{path: "vendor/memory.x", sha256: "sha256:abc123"}
+    machine.allocator = .Fixed{region: "ram", size: ByteSize{bytes: 8192}}
+    machine.panic = .Abort
+    machine
+}
+target_test_named_provider: fn(name: String) -> ProviderContract Never! {
+    target_test_provider("tests.target.{name}", "sha256:tests-target-{name}")
+}
+// The sensor machine with `provider` behind `capability`.
+target_test_set_provider: fn(capability: TargetCapability, provider: ProviderContract) -> TargetMachine Never! {
+    machine := target_test_sensor_machine()
+    read: target_test_named_provider("io-read")
+    write: target_test_named_provider("io-write")
+    report: target_test_named_provider("panic-report")
+    if capability == {
+        .MMIO -> machine.mmio = .Provider{provider: provider}
+        .TimeWall -> machine.wall_clock = .Provider{provider: provider}
+        .TimeMonotonic -> machine.monotonic_clock = .Provider{provider: provider}
+        .TimeZoneData -> machine.zone_data = .Provider{provider: provider}
+        .TimeSleep -> machine.sleep = .Provider{provider: provider}
+        .Entropy -> machine.entropy = .Provider{provider: provider}
+        .Scheduler -> machine.scheduler = .Cooperative{provider: provider}
+        .IORead -> machine.byte_sink = .Provider{read: Val(provider), write: Val(write), report: Val(report)}
+        .IOWrite -> machine.byte_sink = .Provider{read: Val(read), write: Val(provider), report: Val(report)}
+        .PanicReport -> machine.byte_sink = .Provider{read: Val(read), write: Val(write), report: Val(provider)}
+        .Allocator -> machine.allocator = .Provider{provider: provider}
+        .Startup -> machine.startup = .Generated{provider: provider}
+        else -> panic("no provider fact case for {jet_target_capability_name(capability)}")
+    }
+    machine
+}
+// The sensor machine with no provider behind `capability`.
+target_test_clear_provider: fn(capability: TargetCapability) -> TargetMachine Never! {
+    machine := target_test_sensor_machine()
+    read: Val(target_test_named_provider("io-read"))
+    write: Val(target_test_named_provider("io-write"))
+    report: Val(target_test_named_provider("panic-report"))
+    if capability == {
+        .MMIO -> machine.mmio = .NoMMIO
+        .TimeWall -> machine.wall_clock = .NoClock
+        .TimeMonotonic -> machine.monotonic_clock = .NoClock
+        .TimeZoneData -> machine.zone_data = .NoClock
+        .TimeSleep -> machine.sleep = .NoClock
+        .Entropy -> machine.entropy = .NoEntropy
+        .Scheduler -> machine.scheduler = .NoScheduler
+        .IORead -> machine.byte_sink = .Provider{read: None, write: write, report: report}
+        .IOWrite -> machine.byte_sink = .Provider{read: read, write: None, report: report}
+        .PanicReport -> machine.byte_sink = .Provider{read: read, write: write, report: None}
+        .Allocator -> machine.allocator = .NoAllocator
+        .Startup -> machine.startup = .Unspecified
+        else -> panic("no provider fact case for {jet_target_capability_name(capability)}")
+    }
+    machine
+}
+target_test_has_code: fn(diagnostics: [Diagnostic], code: String) -> Bool Never! {
+    loop diagnostic in diagnostics {
+        if diagnostic.code == code -> return true
+    }
+    false
+}
+target_test_has_invalid_provider: fn(errors: [TargetMachineError], capability: TargetCapability) -> Bool Never! {
+    loop error in errors {
+        if error == .InvalidProviderContract(found, _, _) && found == jet_target_capability_name(capability) -> return true
+    }
+    false
+}
+target_test_assert_row: fn(diagnostics: [Diagnostic], code: String, what: String, why: String, fix: String) Never! {
+    loop diagnostic in diagnostics {
+        if diagnostic.code == code {
+            assert_eq(diagnostic.what, what)
+            assert_eq(diagnostic.why, why)
+            assert_eq(diagnostic.fix, fix)
+            return
+        }
+    }
+    panic("missing {code} diagnostic")
+}
+
+// Rust jet-sema TargetMachine.rs target_machine_rows_are_registered_and_stable.
+#Test("target_machine_rows_are_registered_and_stable") {
+    machine := jet_target_machine_wasm_no_os("0.0.1")
+    target_test_assert_row(jet_target_machine_diagnostics(machine, jet_target_machine_use_from_core_apis([String]{"core.files"})), "E3310",
+        "Prelude part `core.files` needs the `hosted` runtime layer, but target `wasm.no-os` provides `core`.",
+        "The complete semantic Prelude closure includes `core.files`; a target cannot emit a higher layer or substitute a second Prelude.",
+        "Select a typed target with `hosted` support, or remove `core.files` from the reachable closure.")
+    wall := jet_target_machine_use_default()
+    wall.required_capabilities = [TargetCapability]{.TimeWall}
+    target_test_assert_row(jet_target_machine_diagnostics(machine, wall), "E3311",
+        "Target `wasm.no-os` lacks the required `Time.Wall` capability.",
+        "The selected target profile must state each machine service separately; a target triple cannot imply a UART, clock, entropy source, scheduler, allocator, startup provider, or MMIO device.",
+        "Select a typed target profile with a `Time.Wall` provider, or remove the reachable operation.")
+    invalid_provider := jet_target_machine_wasm_no_os("0.0.1")
+    invalid_provider.monotonic_clock = .Provider{provider: target_test_provider("", "not-a-digest")}
+    monotonic := jet_target_machine_use_default()
+    monotonic.required_capabilities = [TargetCapability]{.TimeMonotonic}
+    target_test_assert_row(jet_target_machine_diagnostics(invalid_provider, monotonic), "E3312",
+        "Provider `` for `Time.Monotonic` on target `wasm.no-os` has invalid digest `not-a-digest`.",
+        "Every selected provider needs a stable identity and sha256 provenance so artifacts cannot reuse changed target behavior.",
+        "Declare a nonempty provider identity and a `sha256:` digest for `Time.Monotonic`.")
+    mmio := jet_target_machine_use_default()
+    mmio.mmio = [MMIOAccess]{MMIOAccess{address: 0x10, size: ByteSize{bytes: 4}, unsafe_gate: Val(TargetUnsafeGate{reason: "probe"})}}
+    target_test_assert_row(jet_target_machine_diagnostics(machine, mmio), "E3313",
+        "Target `wasm.no-os` has an MMIO fact failure: address 0x10 (4 bytes) is outside a declared MMIO region.",
+        "MMIO addresses must lie inside a declared MMIO region and every access must carry a nonempty `#Unsafe` reason.",
+        "Declare a matching MMIO provider and region, then place the access inside `#Unsafe(\"reason\")`.")
+    target_test_assert_row(jet_target_machine_diagnostics(jet_target_machine_bare_metal("broken", "", "0.0.1"), jet_target_machine_use_default()), "E3314",
+        "Target `broken` has an invalid `target triple` fact: the selected target triple is empty.",
+        "Target memory, linker, allocator, panic, startup, and execution facts are explicit inputs to sema and cannot be recovered safely from a triple.",
+        "Select a complete typed target profile and correct the `target triple` declaration.")
+}
+
+// Rust target_machines.rs target_provider_fact_matrix_covers_present_missing_and_malformed.
+#Test("target_provider_fact_matrix_covers_present_missing_and_malformed") {
+    names: [String]{"MMIO", "Time.Wall", "Time.Monotonic", "Time.ZoneData", "Time.Sleep", "Rand.Entropy", "Target.Scheduler", "IO.Read", "IO.Write", "Panic.Report", "Target.Allocator", "Target.Startup"}
+    capabilities: [TargetCapability]{.MMIO, .TimeWall, .TimeMonotonic, .TimeZoneData, .TimeSleep, .Entropy, .Scheduler, .IORead, .IOWrite, .PanicReport, .Allocator, .Startup}
+    malformed_providers: [ProviderContract]{target_test_provider("", "not-a-digest"), target_test_provider("tests.target.invalid", ""), target_test_provider("tests.target.invalid", "sha256:")}
+    loop (at, capability) in capabilities {
+        usage := jet_target_machine_use_default()
+        usage.required_capabilities = [TargetCapability]{capability}
+        if capability == .Allocator -> usage.heap_required = true
+        present: target_test_set_provider(capability, target_test_named_provider(names[at]))
+        assert_eq(jet_target_machine_errors_debug(jet_target_machine_validate(present, usage)), "[]")
+        assert(jet_target_machine_diagnostics(present, usage).is_empty())
+        missing: target_test_clear_provider(capability)
+        errors: jet_target_machine_validate(missing, usage)
+        if capability == .Allocator {
+            assert(errors.contains(.HeapRequiresAllocator))
+            assert(target_test_has_code(jet_target_machine_diagnostics(missing, usage), "E3303"))
+        } else {
+            assert(errors.contains(.MissingTargetCapability{capability: jet_target_capability_name(capability)}))
+            assert(target_test_has_code(jet_target_machine_diagnostics(missing, usage), "E3311"))
+        }
+        loop provider in malformed_providers {
+            malformed: target_test_set_provider(capability, provider)
+            assert(target_test_has_invalid_provider(jet_target_machine_validate(malformed, usage), capability))
+            assert(target_test_has_code(jet_target_machine_diagnostics(malformed, usage), "E3312"))
+        }
+    }
+}
+
+// Rust target_machines.rs panic_policy_matrix_covers_explicit_missing_and_malformed.
+#Test("panic_policy_matrix_covers_explicit_missing_and_malformed") {
+    usage: jet_target_machine_use_default()
+    present := target_test_sensor_machine()
+    present.panic = .Abort
+    assert(jet_target_machine_validate(present, usage).is_empty())
+    assert(jet_target_machine_diagnostics(present, usage).is_empty())
+    missing := target_test_sensor_machine()
+    missing.panic = .Unspecified
+    assert(jet_target_machine_validate(missing, usage).contains(.MissingPanicPolicy))
+    assert(target_test_has_code(jet_target_machine_diagnostics(missing, usage), "E3314"))
+    malformed := target_test_sensor_machine()
+    malformed.panic = .Report{provider: target_test_provider("", "not-a-digest")}
+    assert(target_test_has_invalid_provider(jet_target_machine_validate(malformed, usage), .PanicReport))
+    assert(target_test_has_code(jet_target_machine_diagnostics(malformed, usage), "E3312"))
+}
+
+// Rust target_machines.rs no_os_machine_rejects_dev_explicitly (data half):
+// a no-OS machine refuses the Dev tier and keeps AOT; hosted keeps both.
+#Test("no_os_machine_rejects_dev_explicitly") {
+    sensor: target_test_sensor_machine()
+    assert_eq(jet_target_machine_supports_execution_tier(sensor, .Dev), TargetMachineError?{Val(.ExecutionTierUnsupported{tier: "dev", machine: "board.sensor_v1"})})
+    assert_eq(jet_target_machine_supports_execution_tier(sensor, .AOT), TargetMachineError?{None})
+    hosted: jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.0.1")
+    assert_eq(jet_target_machine_supports_execution_tier(hosted, .Dev), TargetMachineError?{None})
+    refusal: jet_target_machine_error_diagnostic(sensor, .ExecutionTierUnsupported{tier: "dev", machine: "board.sensor_v1"})
+    assert_eq(refusal.code, "E3314")
+    assert_eq(refusal.what, "Target `board.sensor_v1` has an invalid `execution` fact: target machine `board.sensor_v1` does not support the `dev` tier.")
 }

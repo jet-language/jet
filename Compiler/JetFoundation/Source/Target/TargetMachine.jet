@@ -1307,3 +1307,168 @@ jet_target_machine_wasm_no_os: fn(package_version: String) -> TargetMachine Neve
     machine.startup = .Generated{provider: jet_target_wasm_provider("wasm.no-os.startup", "wasm-no-os-startup")}
     machine
 }
+
+// Rust ExecutionTier: the tier a selected machine runs a program on.
+TargetExecutionTier: enum { AOT Dev }
+
+jet_target_execution_tier_name: fn(tier: TargetExecutionTier) -> String Never! {
+    if tier == {
+        .AOT -> "aot"
+        .Dev -> "dev"
+    }
+}
+
+// Rust TargetMachine::supports_execution_tier: no-OS machines are AOT-only;
+// hosted ones keep Dev.
+jet_target_machine_supports_execution_tier: fn(machine: TargetMachine, tier: TargetExecutionTier) -> TargetMachineError? Never! {
+    if machine.no_os && tier == .Dev -> return Val(.ExecutionTierUnsupported{tier: jet_target_execution_tier_name(tier), machine: machine.name})
+    None
+}
+
+// Rust jet-sema check_target_machine: every validation error of `machine`
+// for `usage` as its registered target diagnostic (E3303, E3310-E3314), so
+// human and machine output share one diagnostic contract.
+jet_target_machine_diagnostics: fn(machine: TargetMachine, usage: TargetMachineUse) -> [Diagnostic] Never! {
+    loop error in jet_target_machine_validate(machine, usage) -> jet_target_machine_error_diagnostic(machine, error)
+}
+
+// The machine's name, or its triple when the name is blank.
+jet_target_machine_display_name: fn(machine: TargetMachine) -> String Never! {
+    if machine.name.trim().is_empty() -> machine.triple else -> machine.name
+}
+
+// One registry row's What, Why and Fix with each `{names[i]}` placeholder
+// filled in with `values[i]`.
+jet_target_registry_diagnostic: fn(code: String, names: [String], values: [String]) -> Diagnostic Never! {
+    row: diagnostic_registry_row(code) ?? panic("{code} is not registered")
+    what := row.what
+    why := row.why
+    fix := row.fix
+    loop (at, name) in names {
+        what = what.replace("{{{name}}}", values[at])
+        why = why.replace("{{{name}}}", values[at])
+        fix = fix.replace("{{{name}}}", values[at])
+    }
+    diagnostic_from_registry(code, None, what, why, fix)
+}
+
+// `0x` and the address in uppercase hex, as Rust `{address:X}`.
+jet_target_address_hex: fn(address: Int) -> String Never! {
+    "0x{diagnostic_lower_hex(address, 1).to_upper()}"
+}
+
+jet_target_mmio_diagnostic: fn(target: String, detail: String) -> Diagnostic Never! {
+    jet_target_registry_diagnostic("E3313", [String]{"target", "detail"}, [String]{target, detail})
+}
+
+jet_target_machine_error_diagnostic: fn(machine: TargetMachine, error: TargetMachineError) -> Diagnostic Never! {
+    target: jet_target_machine_display_name(machine)
+    if error == {
+        .CoreAPIUnavailable(api, required, available) -> jet_target_registry_diagnostic("E3310", [String]{"api", "required", "available", "target"}, [String]{api, jet_ring_layer_name(required), jet_ring_layer_name(available), target})
+        .HeapRequiresAllocator | .MissingAllocatorPolicy -> jet_target_registry_diagnostic("E3303", [String]{}, [String]{})
+        .MissingTargetCapability(capability) | .HostedCapabilityRequiresOS(capability) -> jet_target_registry_diagnostic("E3311", [String]{"target", "capability"}, [String]{target, capability})
+        .InvalidProviderContract(capability, provider, sha256) -> jet_target_registry_diagnostic("E3312", [String]{"target", "capability", "provider", "sha256"}, [String]{target, capability, provider, sha256})
+        .MMIOOutsideRegion(address, size_bytes) -> jet_target_mmio_diagnostic(target, "address {jet_target_address_hex(address)} ({size_bytes} bytes) is outside a declared MMIO region")
+        .MMIOMissingUnsafeGate(address) -> jet_target_mmio_diagnostic(target, "address {jet_target_address_hex(address)} has no #Unsafe gate")
+        .MMIOEmptyUnsafeReason(address) -> jet_target_mmio_diagnostic(target, "address {jet_target_address_hex(address)} has an empty #Unsafe reason")
+        else -> jet_target_registry_diagnostic("E3314", [String]{"target", "fact", "detail"}, [String]{target, jet_target_fact_name(error), jet_target_fact_detail(error)})
+    }
+}
+
+jet_target_memory_kind_label: fn(kind: MemoryKind) -> String Never! {
+    if kind == {
+        .Flash -> "flash"
+        .Ram -> "RAM"
+        .MMIO -> "MMIO"
+        .Reserved -> "reserved"
+    }
+}
+
+jet_target_dma_owner_label: fn(owner: TargetDMAOwner) -> String Never! {
+    if owner == {
+        .CPU -> "CPU"
+        .Device -> "device"
+    }
+}
+
+// The fact an E3314 target fact error names (Rust generic_detail's first
+// half).
+jet_target_fact_name: fn(error: TargetMachineError) -> String Never! {
+    if error == {
+        .MissingTargetTriple -> "target triple"
+        .MissingMemoryKind(_) | .DuplicateMemoryRegion(_) | .EmptyMemoryRegion(_) | .MemoryAddressOverflow(_) | .OverlappingMemoryRegions(_, _) | .RamOverflow(_, _) -> "memory"
+        .MissingLinkerInput | .LinkerFileMissingPath | .LinkerFileMissingHash(_) | .HostedHasNoLinkerScript -> "linker"
+        .AllocatorRegionUnknown(_) | .AllocatorRegionNotRam(_) | .AllocatorRegionTooSmall(_, _, _) | .HostedAllocatorRequiresOS -> "allocator"
+        .MissingPanicPolicy -> "panic"
+        .HostedHasNoStartup | .UnsupportedStartupTriple(_) -> "startup"
+        .ExecutionTierUnsupported(_, _) -> "execution"
+        .FirmwareToolchainMissing(_) -> "toolchain"
+        .FirmwareBuildFailed(_) -> "firmware"
+        .SizeBudgetExceeded(_) -> "size budget"
+        .HardwareFactsMissingSVD | .InvalidHardwareSVD(_, _) | .HardwareFactEmptyName(_) -> "hardware profile"
+        .DuplicateRegisterBlock(_) | .RegisterBlockEmpty(_) | .RegisterBlockAddressOverflow(_) | .RegisterBlockOutsideRegion(_, _, _) | .DuplicateRegister(_, _) | .RegisterAddressOverflow(_, _) | .RegisterOutsideBlock(_, _) | .UnknownRegisterBlock(_) | .UnknownRegister(_, _) | .RegisterWidthMismatch(_, _, _, _) | .RegisterReadDenied(_, _) | .RegisterWriteDenied(_, _) -> "registers"
+        .DuplicateInterrupt(_) | .DuplicateInterruptVector(_) | .InvalidInterruptEffect(_, _) | .UnknownInterrupt(_) | .InterruptEffectForbidden(_, _, _) | .InterruptHandlerUnbounded(_, _) -> "interrupts"
+        .DuplicateDMAChannel(_) | .DuplicateDMAChannelNumber(_) | .DMATransferSizeZero(_) | .UnknownDMAChannel(_) | .DMAOwnershipMismatch(_, _, _, _) | .DMAStartWhileInFlight(_, _) | .DMAWaitWithoutTransfer(_, _) | .DMABufferUnavailable(_, _) | .DMAWaitChannelMismatch(_, _) -> "DMA"
+        else -> "target"
+    }
+}
+
+// What is wrong with the fact jet_target_fact_name names (Rust
+// generic_detail's second half).
+jet_target_fact_detail: fn(error: TargetMachineError) -> String Never! {
+    if error == {
+        .MissingTargetTriple -> "the selected target triple is empty"
+        .MissingMemoryKind(kind) -> "the target is missing a {jet_target_memory_kind_label(kind)} memory region"
+        .DuplicateMemoryRegion(name) -> "memory region `{name}` is declared more than once"
+        .EmptyMemoryRegion(name) -> "memory region `{name}` has zero size"
+        .MemoryAddressOverflow(name) -> "memory region `{name}` overflows the address space"
+        .OverlappingMemoryRegions(first, second) -> "memory regions `{first}` and `{second}` overlap"
+        .MissingLinkerInput -> "the no-OS target has no linker input"
+        .LinkerFileMissingPath -> "the linker file path is empty"
+        .LinkerFileMissingHash(path) -> "linker file `{path}` has no valid sha256 provenance"
+        .AllocatorRegionUnknown(region) -> "allocator region `{region}` does not exist"
+        .AllocatorRegionNotRam(region) -> "allocator region `{region}` is not RAM"
+        .AllocatorRegionTooSmall(region, requested_bytes, available_bytes) -> "allocator region `{region}` has {available_bytes} bytes but needs {requested_bytes}"
+        .HostedAllocatorRequiresOS -> "a hosted system allocator cannot be selected on a no-OS target"
+        .MissingPanicPolicy -> "the no-OS target has no panic policy"
+        .RamOverflow(used_bytes, ram_bytes) -> "RAM use ({used_bytes} bytes) exceeds {ram_bytes} bytes"
+        .HostedHasNoLinkerScript -> "hosted targets do not have a generated linker script"
+        .HostedHasNoStartup -> "hosted targets do not have generated startup glue"
+        .UnsupportedStartupTriple(triple) -> "target triple `{triple}` has no startup generator"
+        .ExecutionTierUnsupported(tier, machine_name) -> "target machine `{machine_name}` does not support the `{tier}` tier"
+        .FirmwareToolchainMissing(tool) -> "required firmware tool `{tool}` is unavailable"
+        .FirmwareBuildFailed(detail) -> detail
+        .SizeBudgetExceeded(report) -> "artifact={report.artifact_bytes} flash={report.flash_bytes} ram={report.ram_bytes} used_ram={report.ram_used_bytes}"
+        .HardwareFactsMissingSVD -> "register, interrupt, or DMA facts require SVD provenance"
+        .InvalidHardwareSVD(source, sha256) -> "SVD `{source}` has invalid sha256 provenance `{sha256}`"
+        .HardwareFactEmptyName(kind) -> "{kind} fact has an empty name"
+        .DuplicateRegisterBlock(name) -> "register block `{name}` is declared more than once"
+        .RegisterBlockEmpty(name) -> "register block `{name}` has zero size"
+        .RegisterBlockAddressOverflow(name) -> "register block `{name}` overflows the address space"
+        .RegisterBlockOutsideRegion(name, address, size_bytes) -> "register block `{name}` at {jet_target_address_hex(address)} ({size_bytes} bytes) is outside a declared MMIO region"
+        .DuplicateRegister(block, register) -> "register `{register}` is declared more than once in `{block}`"
+        .RegisterAddressOverflow(block, register) -> "register `{block}.{register}` overflows the address space"
+        .RegisterOutsideBlock(block, register) -> "register `{block}.{register}` lies outside its block"
+        .UnknownRegisterBlock(block) -> "register block `{block}` is not in the target SVD"
+        .UnknownRegister(block, register) -> "register `{block}.{register}` is not in the target SVD"
+        .RegisterWidthMismatch(block, register, expected, actual) -> "`{block}.{register}` requires {jet_target_register_width_name(expected)} but operation requested {jet_target_register_width_name(actual)}"
+        .RegisterReadDenied(block, register) -> "register `{block}.{register}` is not readable"
+        .RegisterWriteDenied(block, register) -> "register `{block}.{register}` is not writable"
+        .DuplicateInterrupt(name) -> "interrupt `{name}` is declared more than once"
+        .DuplicateInterruptVector(vector) -> "interrupt vector {vector} is declared more than once"
+        .InvalidInterruptEffect(interrupt, effect_name) -> "interrupt `{interrupt}` has invalid effect `{effect_name}`"
+        .UnknownInterrupt(interrupt) -> "interrupt `{interrupt}` is not in the target vector table"
+        .InterruptEffectForbidden(interrupt, handler, effect_name) -> "handler `{handler}` for `{interrupt}` uses forbidden effect `{effect_name}`"
+        .InterruptHandlerUnbounded(interrupt, handler) -> "handler `{handler}` for `{interrupt}` is not bounded"
+        .DuplicateDMAChannel(name) -> "DMA channel `{name}` is declared more than once"
+        .DuplicateDMAChannelNumber(channel) -> "DMA channel number {channel} is declared more than once"
+        .DMATransferSizeZero(channel) -> "DMA channel `{channel}` has a zero transfer limit"
+        .UnknownDMAChannel(channel) -> "DMA channel `{channel}` is not in the target profile"
+        .DMAOwnershipMismatch(channel, buffer, expected, actual) -> "DMA `{channel}` buffer `{buffer}` expects {jet_target_dma_owner_label(expected)} ownership, got {jet_target_dma_owner_label(actual)}"
+        .DMAStartWhileInFlight(channel, buffer) -> "DMA `{channel}` cannot start while buffer `{buffer}` is in flight"
+        .DMAWaitWithoutTransfer(channel, buffer) -> "DMA `{channel}` cannot wait for buffer `{buffer}` before start"
+        .DMABufferUnavailable(channel, buffer) -> "buffer `{buffer}` is unavailable while DMA `{channel}` owns it"
+        .DMAWaitChannelMismatch(channel, buffer) -> "DMA `{channel}` does not own in-flight buffer `{buffer}`"
+        else -> "the selected target fact is invalid"
+    }
+}
