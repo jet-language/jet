@@ -1,6 +1,11 @@
 // Real GNU-as objects, not a hand-built LinkContext or a mocked export registry.
-// run-runtime-pack-roots.mjs prepares the isolated input files.
-use files: core.files
+// Run from the directory holding runtime.o, archive.o, consumer.o, missing.o
+// (this package's runtime-pack-roots-*.s, assembled) and runtime.a.
+use {
+    files: core.files
+    jet_backend.[LINK_BASE, LINK_NOLIBC_SUFFIX, LINK_UNDEF, LinkContext, link_context, link_cstr, link_load_inputs, link_pack_rust_symbol, link_sec_name, link_sym_at, link_sym_shndx, link_u32, link_u8, x64_link_executable, x64_link_runtime_pack]
+    jet_foundation.[compiler_threads_single]
+}
 
 pack_roots_symbol: fn(c: LinkContext, name: String) -> Int Never! {
     loop k in 1..<c.obj_sym_count[0] {

@@ -40,11 +40,12 @@ KIT_PACKAGE: "Compiler"
 KIT_PROFILE: "registries"
 RT: "Compiler/JetRuntime/Tests/"
 BE: "Compiler/JetBackend/Tests/"
+// The runtime-pack-roots-NAME.s inputs of the Link fixtures.
+PACK_ROOTS_INPUTS: [String]{"object", "archive", "consumer", "missing"}
 TEST_SCHEMA: "jet.test.v1"
 REGISTRY_TIMEOUT_MS: 3500000
 TRANSPORT_TIMEOUT_MS: 600000
 REGISTRY_PACKAGE: "name: \"compiler_registry\"\nversion: \"0.0.1\"\nedition: \"2026\"\n"
-TRANSPORT_PACKAGE: "name: \"compiler_registry_transport\"\nversion: \"0.0.1\"\nedition: \"2026\"\nauthority: {{ allow: [Env, Exec, Exec.Args, FS, IO, Mem.Alloc, Time.Wait, FFI] }}\n"
 // The C host of a plain transport: it registers the process arguments a stop
 // reports, attaches the main thread and runs the fragment's exported entry.
 PLAIN_DRIVER: "#include <stdint.h>\nextern char **environ;\nextern void jet_rt_host_arguments(int64_t,char **,char **);\nextern void jet_rt_thread_attach(void),jet_rt_thread_detach(void);\nextern void jet_rt_plain_fixture(void);\nint main(int argc,char **argv) {{ jet_rt_host_arguments(argc,argv,environ); jet_rt_thread_attach(); jet_rt_plain_fixture(); jet_rt_thread_detach(); return 0; }}\n"
@@ -776,11 +777,33 @@ specification: fn(id: String) -> Spec? Never! {
         found.blocked = "No registered transport for {id}; the source must not be counted without an exact native verdict"
         return Val(found)
     }
+    // A CLI behavior runner: `jet run RUNNER -- <jet> <scratch>` from the
+    // repository root prints exactly its verdict.
+    if id == "JetCli/Tests/RunKeep" {
+        found := spec("cli", "RunKeep", "Compiler/JetCli/Tests/RunKeep.fixture/RunKeep.jet")
+        found.expected = "run-keep: reuse, source/Core/compiler rebuilds, stop parity and the 64-program cap: ok\n"
+        return Val(found)
+    }
+    if id == "JetCli/Tests/RunCFfi" {
+        found := spec("cli", "RunCFfi", "Compiler/JetCli/Tests/RunCFfi.jet")
+        // The expected stream of the example it runs at both tiers, beside
+        // the vendored SQLite fixture.
+        found.witness = "Examples/Interop/FFI/NativeC.out"
+        found.expected = "native_c: native O0/O2 identical\nsqlite3/Fixture: native O0/O2 identical\n"
+        return Val(found)
+    }
     if !id.starts_with("JetBackend/Tests/") -> return None
     name: id.removeprefix("JetBackend/Tests/")
-    if name == "LinkIndexes" -> return Val(spec("indices", "", "{BE}run-link.mjs"))
-    if name == "LinkPackRoots" -> return Val(spec("roots", "", "{BE}run-runtime-pack-roots.mjs"))
-    if name == "LinkRuntime" -> return Val(spec("link", "", "{BE}run-link.mjs"))
+    if name == "LinkIndexes" -> return Val(spec("indices", "", "{BE}LinkIndexes.fixture/LinkIndexes.jet"))
+    if name == "LinkPackRoots" -> return Val(spec("roots", "", "{BE}LinkPackRoots.fixture/LinkPackRoots.jet"))
+    if name == "LinkRuntime" -> return Val(spec("link", "", "{BE}LinkRuntime.fixture/LinkRuntime.jet"))
+    if name == "NativeInlineC" {
+        found := spec("cli", name, "{BE}NativeInlineC.fixture/NativeInlineC.jet")
+        // The program it builds twice, once with its shared definition removed.
+        found.witness = "tests/fixtures/native_inline_c_shared_state.jet"
+        found.expected = "native inline C shared state and whole-bridge refusal: passed\n"
+        return Val(found)
+    }
     None
 }
 
@@ -795,9 +818,9 @@ spec_dyn: fn(found: Spec, runner_sha256: String) -> Dyn Never! {
         entries["runner"] = Dyn.Text(found.runner.copy())
     } else {
         entries["name"] = Dyn.Text(found.name.copy())
+        if found.kind == "plain" || found.kind == "cli" -> entries["expected"] = Dyn.Text(found.expected.copy())
         if found.kind == "plain" {
             entries["call"] = if found.call == .Val(call) -> Dyn.Text(call.copy()) else -> Dyn.Null
-            entries["expected"] = Dyn.Text(found.expected.copy())
             entries["fragments"] = texts(found.fragments)
         }
         entries["runner"] = Dyn.Text(found.runner.copy())
@@ -847,6 +870,12 @@ prepare_transport: fn(repo: String, registry: Registry, out: String, adapter: St
     }
     witness: "{home}.c"
     if found.kind == "c" && files.exists("{repo}/{witness}") -> sources.push(witness)
+    if found.kind == "indices" || found.kind == "roots" || found.kind == "link" || found.kind == "cli" {
+        sources.push("{files.dirname(found.runner)}/package.jet")
+        if found.kind == "roots" || found.kind == "link" {
+            loop name in PACK_ROOTS_INPUTS -> sources.push("{BE}LinkPackRoots.fixture/runtime-pack-roots-{name}.s")
+        }
+    }
     entry := [String: Dyn]{
         "id": Dyn.Text(id.copy()),
         "package": Dyn.Text(row.package.copy()),
@@ -1123,20 +1152,6 @@ front: fn(lane: &Lane, args: [String], prefix: String, cwd: String, extra: [Sett
     Ok(())
 }
 
-// Build `file` as a native program in `root` and return a fresh copy of it.
-compile: fn(lane: &Lane, file: String, root: String, prefix: String) -[Env, Exec, FS, IO, Time, Time.Wait]> String Problem! {
-    if !files.exists("{root}/package.jet") -> files.write("{root}/package.jet", TRANSPORT_PACKAGE) ?? return Err(problem("`{root}/package.jet` cannot be written: {err}"))
-    built: "{root}/.jet/build/{files.basename(file).removesuffix(".jet")}"
-    loop path in ([String]{built, "{prefix}.exe", "{prefix}.issues", "{prefix}.pack-issues"}) {
-        if files.exists(path) -> files.remove(path) ?? return Err(problem("`{path}` cannot be removed: {err}"))
-    }
-    front(lane, [String]{"build", file}, prefix, root, [Setting]{}) ?? return Err(err)
-    if !files.exists(built) -> return Err(problem("native build did not emit a fresh executable"))
-    files.copy(built, "{prefix}.exe") ?? return Err(problem("`{prefix}.exe` cannot be written: {err}"))
-    files.set_mode("{prefix}.exe", 0o755) ?? return Err(problem("`{prefix}.exe` cannot be made executable: {err}"))
-    "{prefix}.exe"
-}
-
 // Lower `file` as a native library through `jet doc`, the runtime-library
 // seam (`jet check` lowers no #Export(c) body): the front-end hook writes its
 // object, exports, ABI, thread and issue files beside `prefix`.
@@ -1153,14 +1168,6 @@ library: fn(lane: &Lane, file: String, prefix: String, lifecycle: String, export
         if !files.exists("{prefix}{suffix}") -> return Err(problem("native library hook omitted {suffix}"))
     }
     Ok(())
-}
-
-program: fn(lane: &Lane, file: String, expected: String) Problem! -[Env, Exec, FS, IO, Time, Time.Wait]> {
-    root: files.dirname(file)
-    binary: compile(lane, file, root, "{root}/registry-native") ?? return Err(err)
-    cwd: lane.out.copy()
-    ran: execute(lane, binary, [String]{}, cwd, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
-    exact(ran, expected, "") ?? return Err(err)
 }
 
 // The runtime imports jet_rt_fault_report, which Jet's linker writes into each
@@ -1181,6 +1188,19 @@ fault_report: fn(lane: &Lane) -[Env, Exec, FS, IO, Time, Time.Wait]> String Prob
     files.write(report, "    .text\n    .globl jet_rt_fault_report\n    .type jet_rt_fault_report, @function\njet_rt_fault_report:\n    .include \"{repo}/Compiler/JetRuntime/Assets/FaultReport/report.S\"\n    .size jet_rt_fault_report, . - jet_rt_fault_report\n") ?? return Err(problem("`{report}` cannot be written: {err}"))
     execute(lane, "as", [String]{"--64", "-o", report_object, report}, cwd, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
     report_object
+}
+
+// The real GNU-as inputs of the runtime-pack fixtures, assembled into the
+// lane: runtime.o, archive.o, consumer.o, missing.o and runtime.a.
+pack_roots_inputs: fn(lane: &Lane) Problem! -[Env, Exec, FS, IO, Time, Time.Wait]> {
+    cwd: lane.out.copy()
+    loop name in PACK_ROOTS_INPUTS {
+        object: if name == "object" -> "runtime.o" else -> "{name}.o"
+        source: "{lane.repo}/{BE}LinkPackRoots.fixture/runtime-pack-roots-{name}.s"
+        execute(lane, "as", [String]{"--64", "-o", "{cwd}/{object}", source}, cwd, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
+    }
+    execute(lane, "ar", [String]{"rcs", "{cwd}/runtime.a", "{cwd}/archive.o"}, cwd, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
+    Ok(())
 }
 
 // A committed Jet runner, run from the repository root by the lane's jet:
@@ -1363,23 +1383,26 @@ drive: fn(lane: &Lane, found: Spec) Problem! -[Env, Exec, FS, IO, Time, Time.Wai
     }
     if found.kind == "c" -> return c_verdict(lane, found)
     if found.kind == "runner" -> return runner_verdict(lane, found)
-    if found.kind == "indices" {
-        node(lane, found.runner, [String]{out, "--indices"}) ?? return Err(err)
-        return program(lane, "{out}/unit.jet", "link section indexes: pass\n")
+    if found.kind == "indices" || found.kind == "roots" {
+        if found.kind == "roots" -> pack_roots_inputs(lane) ?? return Err(err)
+        expected: if found.kind == "indices" -> "link section indexes: pass\n" else -> "runtime pack object roots: pass\n"
+        ran: execute(lane, staged, [String]{"run", "{repo}/{found.runner}"}, out, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
+        exact(ran, expected, "") ?? return Err(err)
+        if found.kind == "indices" -> return Ok(())
+    }
+    if found.kind == "link" {
+        pack_roots_inputs(lane) ?? return Err(err)
+        linked: execute(lane, staged, [String]{"run", "{repo}/{found.runner}", "--", "{out}/consumer", "{out}/consumer.o", "{out}/runtime.o", "{out}/runtime.a"}, out, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
+        receipt: regex.compile("linked .+: [0-9]+ bytes; read [0-9]+ ms, link [0-9]+ ms, write [0-9]+ ms\\n") ?? return Err(problem("linker pattern: {err}"))
+        if !receipt.full_match(linked.stdout) || linked.stderr != "" -> return Err(problem("linker artifact receipt differs"))
     }
     if found.kind == "roots" || found.kind == "link" {
-        node(lane, "{BE}run-runtime-pack-roots.mjs", [String]{out, "--prepare-only"}) ?? return Err(err)
-        if found.kind == "roots" {
-            program(lane, "{out}/unit.jet", "runtime pack object roots: pass\n") ?? return Err(err)
-        } else {
-            node(lane, found.runner, [String]{out}) ?? return Err(err)
-            binary: compile(lane, "{out}/unit.jet", out, "{out}/link-native") ?? return Err(err)
-            linked: execute(lane, binary, [String]{"{out}/consumer", "{out}/consumer.o", "{out}/runtime.o", "{out}/runtime.a"}, out, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
-            receipt: regex.compile("linked .+: [0-9]+ bytes; read [0-9]+ ms, link [0-9]+ ms, write [0-9]+ ms\\n") ?? return Err(problem("linker pattern: {err}"))
-            if !receipt.full_match(linked.stdout) || linked.stderr != "" -> return Err(problem("linker artifact receipt differs"))
-        }
         consumer: execute(lane, "{out}/consumer", [String]{}, out, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
         return exact(consumer, "", "")
+    }
+    if found.kind == "cli" {
+        ran: execute(lane, staged, [String]{"run", "{repo}/{found.runner}", "--", staged.copy(), "{out}/scratch"}, repo, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
+        return exact(ran, found.expected, "")
     }
     Err(problem("unimplemented transport {found.kind}"))
 }

@@ -102,11 +102,8 @@ that links the runtime object runs on the checked heap, which calls them for
 every block it hands out or takes back, the runtime's own included. A
 link-time `--wrap=jet_rt_free` does not see those: the runtime object binds its
 internal calls section-relative.
-Native scan proofs run the `scan.cases` programs with the native CLI against
-their goldens and require the fresh Jet object/pack. Saved reference and
-evaluator TSVs are optional, explicitly named `--frozen-reference` and
-`--frozen-evaluator` inputs; a live retired tier is never a prerequisite for
-the raw ABI and Float-bit witnesses.
+The raw scan ABI and Float-bit witness (`Compiler/JetRuntime/Tests/scan-fixture.c`)
+has no runner; the `scan.cases` programs run with their expected streams.
 Official BLAKE3 fixtures regenerate from the team vectors alone, outside the
 immutable proof source, without reading a retired runtime implementation.
 Native runtime exit corpora accept `--results` pointing to the one Jet-front
@@ -169,7 +166,8 @@ hidden/internal definitions and implementation names do not become export
 roots; C archive members pulled to satisfy exports remain private dependencies.
 Rust-mangled symbols and Rust allocator providers are rejected. A pack requires
 a standalone runtime object, never just archives.
-`Compiler/JetBackend/Tests/run-runtime-pack-roots.mjs` exercises this boundary
+The `LinkPackRoots` row of `Tools/agent/CompilerRegistries.jet`
+(`Compiler/JetBackend/Tests/LinkPackRoots.fixture`) exercises this boundary
 with real objects, an archive and a consumer, including an unreferenced export.
 
 `jet Tools/packaging/PrebuildRuntime.jet <hosted-jet>` assembles the canonical

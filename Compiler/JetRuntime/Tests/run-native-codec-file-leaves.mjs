@@ -102,11 +102,10 @@ const source = join(root, 'Compiler/JetRuntime/Tests/NativeCodecFileLeavesWitnes
 const sourceHandle = fileObject(source), compilerHandle = fileObject(jet);
 const crt = ['crt1.o', 'crti.o', 'crtn.o'].map(name => ({ path: resolve(musl, name), handle: fileObject(resolve(musl, name)) }));
 receipt('admission.json', { runtimeDirectory, runtimeKey: admitted.key, provenance: admitted.provenance, publishedObject, linkedObject: object, object: objectHandle, compiler: { path: jet, object: compilerHandle }, witness: { path: source, object: sourceHandle }, u8Stride: stride, abiSources: [dataAbi, collections].map(({ path, handle }) => ({ path, handle })), archives: archiveInputs, crt });
-const cObject = join(out, 'codec-file-leaves.o'), link = join(out, 'link');
+const cObject = join(out, 'codec-file-leaves.o');
 command('compile', join(root, 'Tools/agent/JetEnv.jet'), [nativeCCompiler, '-std=c11', '-O1', '-fno-stack-protector', '-fno-PIE', '-fno-builtin', '-Wall', '-Wextra', '-Werror', '-pedantic', ...macros, '-c', source, '-o', cObject]);
-command('assemble-linker', process.execPath, [join(root, 'Compiler/JetBackend/Tests/run-link.mjs'), link]);
 const executable = join(out, 'native-codec-file-leaves');
-command('link', jet, ['run', join(link, 'unit.jet'), '--', executable, crt[0].path, crt[1].path, cObject, object, ...archiveInputs.map(row => row.path), crt[2].path], link);
+command('link', jet, ['run', join(root, 'Compiler/JetBackend/Tests/LinkRuntime.fixture/LinkRuntime.jet'), '--', executable, crt[0].path, crt[1].path, cObject, object, ...archiveInputs.map(row => row.path), crt[2].path], out);
 for (const row of [...archiveInputs, ...crt]) if (fileObject(row.path) !== row.handle) throw Error(`C platform input changed during link: ${row.path}`);
 for (const row of [dataAbi, collections]) if (fileObject(join(root, row.path)) !== row.handle) throw Error(`canonical ABI source changed during proof: ${row.path}`);
 if (fileObject(source) !== sourceHandle || fileObject(jet) !== compilerHandle || fileObject(object) !== objectHandle) throw Error('witness, compiler, or admitted object changed during proof');

@@ -44,8 +44,8 @@ if (mode === 'assemble') {
     const source = [...imports, '', ...bodies].join('\n');
     writeFileSync(join(unit, 'Source/Fixture.jet'), source);
     writeFileSync(join(unit, 'package.jet'), readFileSync(join(root, 'Compiler/JetRuntime/package.jet')));
-    // The runtime's own exports and the fixtures' KAT exports, as
-    // run-residue-fixtures.mjs derives them from the same sources.
+    // The runtime's own exports and the fixtures' KAT exports, derived from
+    // the same sources.
     const names = [...source.matchAll(/^#Export\(c\)\s+(\w+): fn\(/gmu)].map(match => match[1]);
     if (new Set(names).size !== names.length) throw Error('duplicate fixture export');
     const init = new Map([...source.matchAll(/^\/\/ runtime-init: (\d+)(?: when \S+)?\n#Export\(c\) (\w+): fn\b/gmu)].map(match => [match[2], match[1]]));

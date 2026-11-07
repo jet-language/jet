@@ -660,9 +660,11 @@ script alone, and the source walk of a package leaves every script out.
 applies to scripts and to any other file. There is one program per entry file
 and profile. Its record names the toolchain it was built with (the compiler,
 runtime pack and Core source file identities) and a hash of its source
-snapshot: the source files and the tree's directories. Other files in the
-tree, such as one the program writes beside its source, are not compile
-inputs and don't change the hash. A rerun with the same toolchain and sources
+snapshot: the source files and the directories the source walk enters. Other
+files in the tree, such as one the program writes beside its source, and
+directories the walk skips, such as the `.jet` directory a stopping program
+writes its fault report into, are not compile inputs and don't change the
+hash. A rerun with the same toolchain and sources
 runs the kept program without compiling. Any change, including a different
 compiler, compiles again and replaces the kept program. The cache holds at
 most 64 programs; keeping another removes the least recently run one. A

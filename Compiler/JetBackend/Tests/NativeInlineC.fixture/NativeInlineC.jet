@@ -1,0 +1,63 @@
+#!/usr/bin/env jet
+// Two #FFI(c) bodies share C state across translation units: the native link
+// (jet_cli_native_inline_c) compiles both, proves the whole inline bridge with
+// undefined symbols refused, archives it and links it. A body that references
+// a symbol no inline unit defines must be refused before linking, and leave no
+// executable behind.
+// Usage: jet run Compiler/JetBackend/Tests/NativeInlineC.fixture/NativeInlineC.jet -- <jet> <scratch>
+// Run from the repository root: the fixture is read from the working directory.
+// It prints one line, the CompilerRegistries row's exact verdict.
+use {
+    files: core.files
+    process: core.process
+    term: core.term
+}
+
+FIXTURE: "tests/fixtures/native_inline_c_shared_state.jet"
+DEFINED: "int64_t jet_fixture_shared_counter = 0;"
+DECLARED: "extern int64_t jet_fixture_shared_counter;"
+
+fail: fn(message: String) -> Never {
+    term.eprint(message)
+    process.exit(1)
+}
+
+// One finished `jet build`; its executable is `{folder}/.jet/build/main`.
+Built: struct {
+    folder: String
+    code: Int
+    signal: Int
+    errors: String
+}
+
+build: fn(jet: String, scratch: String, name: String, source: String) -> Built {
+    folder: "{scratch}/{name}"
+    files.create_dir_all(folder.copy()) ?? fail("cannot create {folder}: {err}")
+    files.write("{folder}/main.jet", source.copy()) ?? fail("cannot write {folder}/main.jet: {err}")
+    manifest: "name: \"{name}\"\nversion: \"0.0.1\"\nauthority: {{ allow: [FFI.C, IO, Mem.Alloc] }}\n"
+    files.write("{folder}/package.jet", manifest) ?? fail("cannot write {folder}/package.jet: {err}")
+    receipt: process.cmd([String]{jet.copy(), "build", "main.jet"}).cwd(folder.copy()).env("NO_COLOR", "1").run() ?? fail("jet build failed to start: {err}")
+    Built{folder: folder.copy(), code: receipt.code, signal: receipt.signal ?? 0, errors: "{receipt.output}{receipt.errors}"}
+}
+
+run: fn() {
+    args: process.args()
+    if args.len() != 2 -> fail("usage: NativeInlineC.jet <jet> <scratch>")
+    jet: files.absolute(args[0].copy()) ?? fail("cannot resolve {args[0]}: {err}")
+    scratch: files.absolute(args[1].copy()) ?? fail("cannot resolve {args[1]}: {err}")
+    shared: files.read(FIXTURE) ?? fail("cannot read {FIXTURE}: {err}")
+    if !shared.contains(DEFINED) -> fail("{FIXTURE} no longer defines the shared counter")
+
+    ok: build(jet, scratch, "native_inline_c_shared_state", shared)
+    if ok.code != 0 || ok.signal != 0 -> fail("shared-state build failed: code={ok.code} signal={ok.signal}\n{ok.errors}")
+    ran: process.cmd([String]{"{ok.folder}/.jet/build/main"}).run() ?? fail("the built program failed to start: {err}")
+    if ran.code != 0 || (ran.signal ?? 0) != 0 -> fail("the built program failed: code={ran.code}\n{ran.errors}")
+    if ran.output != "bump=42 peek=42\n" -> fail("the built program printed {ran.output.debug()}")
+
+    missing: build(jet, scratch, "native_inline_c_missing_definition", shared.replace(DEFINED, DECLARED))
+    if missing.code == 0 -> fail("an unresolved inline C symbol built")
+    if !missing.errors.contains("inline C bodies leave undefined symbols") -> fail("the refusal does not name undefined symbols:\n{missing.errors}")
+    if !missing.errors.contains("jet_fixture_shared_counter") -> fail("the refusal does not name the missing symbol:\n{missing.errors}")
+    if files.exists("{missing.folder}/.jet/build/main") -> fail("a refusal left an executable")
+    print("native inline C shared state and whole-bridge refusal: passed")
+}
