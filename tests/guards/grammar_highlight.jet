@@ -221,11 +221,15 @@ gh_query_string_literals: fn(query: String) -> [String] {
     out
 }
 
-gh_keyword_list: fn() -> [String] {
+gh_keyword_list: fn() -> [String] { gh_registry_list("JET_KEYWORD_LIST") }
+
+// The words of a `NAME: [String]{ CONSTANT, … }` list in PackageFiles.jet,
+// each constant resolved to its spelling.
+gh_registry_list: fn(list: String) -> [String] {
     source: gh_read("{GH_SYNTAX_DIR}/PackageFiles.jet")
-    start: gh_index(source, "JET_KEYWORD_LIST: [String]{{") ?? panic("missing JET_KEYWORD_LIST")
+    start: gh_index(source, "{list}: [String]{{") ?? panic("missing {list}")
     body: gh_slice(source, start, source.count_bytes())
-    end: gh_index(body, "\n}}") ?? panic("unterminated JET_KEYWORD_LIST")
+    end: gh_index(body, "\n}}") ?? panic("unterminated {list}")
     constants: gh_constants()
     words := [String]{}
     loop raw in gh_slice(body, 0, end).split("\n") {
@@ -234,7 +238,7 @@ gh_keyword_list: fn() -> [String] {
         if line == "" || line.starts_with("//") -> next
         words.push(gh_resolve(constants, line.copy()))
     }
-    assert(words.len() > 20, "JET_KEYWORD_LIST must be readable")
+    assert(words.len() > 0, "{list} must be readable")
     words
 }
 
@@ -364,4 +368,55 @@ gh_grammar_keyword_words: fn() -> [String] {
         if gh_has(words, constant.value) && !gh_has(keywords, constant.value) && !gh_has(intruders, constant.value) -> intruders.push(constant.value)
     }
     assert_eq(intruders.join(" "), "")
+}
+
+// The registry constants named in `names` that `words` holds (`wanted`) or
+// lacks (`!wanted`), as `NAME (spelling)`.
+gh_listed: fn(words: [String], names: [String], wanted: Bool) -> String {
+    constants: gh_constants()
+    found := [String]{}
+    loop name in names {
+        spelling: gh_resolve(constants, name)
+        if gh_has(words, spelling) == wanted -> found.push("{name} ({spelling})")
+    }
+    found.join(" ")
+}
+
+// tests/lsp.rs:5710 c44_lsp_keywords_derive_from_syntax: the keyword list LSP
+// completion and rename read holds the real keywords and no foreign teaching
+// word or contextual literal.
+#Test("lsp_keywords_derive_from_syntax") {
+    keywords: gh_keyword_list()
+    required: [String]{"KW_FN", "KW_PUB", "KW_USE", "KW_IF", "KW_ELSE", "KW_LOOP", "KW_RETURN", "KW_STRUCT", "KW_ENUM", "KW_IMPL", "KW_UNSAFE", "KW_TEST", "KW_TODO", "LIT_TRUE", "LIT_FALSE", "LIT_NULL", "KW_DISTINCT", "KW_MODULE"}
+    assert_eq(gh_listed(keywords, required, false), "")
+    banned: [String]{"FOREIGN_SWITCH", "FOREIGN_IMPORT", "FOREIGN_OR_FALLBACK", "FOREIGN_WHILE", "FOREIGN_FOR", "FOREIGN_MATCH", "FOREIGN_CLASS", "LIT_VALUE", "LIT_OK", "LIT_ERR"}
+    assert_eq(gh_listed(keywords, banned, true), "")
+}
+
+// tests/lsp.rs:5782 c44_lsp_types_derive_from_syntax: the built-in type list
+// holds the types a user writes and not the retired `Result`.
+#Test("lsp_types_derive_from_syntax") {
+    types: gh_registry_list("JET_TYPE_LIST")
+    required: [String]{"TYPE_INT", "TYPE_FLOAT", "TYPE_BOOL", "TYPE_STRING", "TYPE_CHAR", "TYPE_SHARED", "TYPE_HASH_MAP", "TYPE_BTREE_MAP", "TYPE_QUEUE", "TYPE_SET"}
+    assert_eq(gh_listed(types, required, false), "")
+    assert_eq(gh_listed(types, [String]{"TYPE_RESULT"}, true), "")
+}
+
+// tests/lsp.rs:5528 c40_value_literal_is_not_a_keyword: `Val` is a literal
+// (D-OPT-SPELL1), so rename and completion don't treat it as a keyword.
+#Test("lsp_value_literal_is_not_a_keyword") {
+    assert_eq(gh_resolve(gh_constants(), "LIT_VALUE"), "Val")
+    assert(!gh_has(gh_keyword_list(), "Val"), "LIT_VALUE must stay out of JET_KEYWORD_LIST")
+}
+
+// tests/lsp.rs:5814 c44_impure_builtins_complete: the impure builtins sema and
+// comptime purity share name every stdout, stderr and stdin builtin.
+#Test("lsp_impure_builtins_complete") {
+    builtins: gh_registry_list("IMPURE_BUILTINS")
+    missing := [String]{}
+    required: [String]{"print", "input", "eprint", "read_all_input"}
+    loop name in required {
+        if !gh_has(builtins, name) -> missing.push(name)
+    }
+    assert_eq(missing.join(" "), "")
 }
