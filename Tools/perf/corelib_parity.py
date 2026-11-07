@@ -38,7 +38,7 @@ CORE_REGISTRY = ROOT / "Compiler/Prelude/Core.jet"
 CORE_SOURCE = ROOT / "Core"
 JET_ENV = ROOT / "Tools/agent/jet-env"
 LEDGER_CHECK = ROOT / "Tools/agent/check-core-surface-ledger.mjs"
-CONFORMANCE = ROOT / "Tools/agent/core-conformance.mjs"
+HARDENING = ROOT / "Tools/hardening/Main.jet"
 SCRATCH_ROOT = Path.home() / ".cache" / "jet-dev" / "corelib-parity"
 
 
@@ -152,27 +152,28 @@ def source_matrix() -> dict[str, object]:
 
 
 def conformance_matrix() -> dict[str, object]:
-    completed = run([str(JET_ENV), "node", str(CONFORMANCE), "--check"])
-    output = (completed.stdout + completed.stderr).strip()
-    first = output.splitlines()[0] if output else ""
-    match = re.search(
-        r"denominator:\s+(\d+) public function\(s\);\s+(\d+) program\(s\);\s+(\d+) carve-out\(s\);\s+(\d+) uncovered row\(s\)",
-        first,
-    )
-    result: dict[str, object] = {
-        "exit": completed.returncode,
-        "summary": first,
-        "uncovered": None,
-    }
-    if match:
-        result.update(
-            {
-                "public_functions": int(match.group(1)),
-                "programs": int(match.group(2)),
-                "carve_outs": int(match.group(3)),
-                "uncovered": int(match.group(4)),
-            }
-        )
+    """Row statuses from a fresh Tools/hardening manifest; uncovered is every
+    row that is neither covered by a valid witness nor owner-excluded."""
+    SCRATCH_ROOT.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix=".core-parity-conformance-", dir=SCRATCH_ROOT) as raw:
+        manifest = Path(raw) / "hardening-manifest.json"
+        completed = run([str(JET_ENV), "jet", "run", str(HARDENING), "--", "--write", str(manifest)])
+        output = (completed.stdout + completed.stderr).strip()
+        result: dict[str, object] = {
+            "exit": completed.returncode,
+            "summary": output.splitlines()[0] if output else "",
+            "uncovered": None,
+        }
+        if completed.returncode == 0 and manifest.is_file():
+            rows = json.loads(manifest.read_text(encoding="utf-8"))["rows"]
+            statuses = Counter(row["status"] for row in rows)
+            result.update(
+                {
+                    "rows": len(rows),
+                    "statuses": dict(sorted(statuses.items())),
+                    "uncovered": len(rows) - statuses["covered"] - statuses["excluded"],
+                }
+            )
     return result
 
 
