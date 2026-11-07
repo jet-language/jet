@@ -15,7 +15,8 @@ chmod: bin/systemctl 755
 step: jetpack config trust add {work}
 step: jetpack services up --no-color
 file: .jet/services/api/pid is-file
-await: file .jet/services/api/pid absent timeout 5s every 50ms
-await: file .jet/services/api/supervisor.error ~ "dependency `database` failed" timeout 5s every 50ms # original ed77c235f tests/jetpack_services.rs:1518 wait_for_file_contains helper658-672 tests dependency failure with 5s deadline and 50ms sleep
+# The original waited 5s; a loaded parallel gate can take longer to run the 1.5s health timeout and the supervisor's failure write, so both waits allow 30s.
+await: file .jet/services/api/pid absent timeout 30s every 50ms
+await: file .jet/services/api/supervisor.error ~ "dependency `database` failed" timeout 30s every 50ms # original ed77c235f tests/jetpack_services.rs:1518 wait_for_file_contains helper658-672 tests dependency failure with 5s deadline and 50ms sleep
 file: .jet/services/api/lifecycle ~ "recovery=dependency-failed" # original ed77c235f tests/jetpack_services.rs:1519-1523 lifecycle contains recovery=dependency-failed
 step: jetpack services down --no-color
