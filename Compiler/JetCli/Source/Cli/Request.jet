@@ -1385,7 +1385,10 @@ jet_cli_compile_prepared: fn(prepared: &&JetCLIPrepared, input_log: Shared<JetDr
             selected.setting_overrides = settings
             if profile != "" -> selected.profile = profile
             selected.prelude_entry = prelude
-            library_prefix: cli_sys.get("JET_FRONT_LIBRARY_OBJECT_OUTPUT")
+            // The runtime-library seam is `jet doc`'s (Host.jet jet_cli_doc_result):
+            // a check, test or build under a stray JET_FRONT_LIBRARY_OBJECT_OUTPUT
+            // stays that verb's compile.
+            library_prefix: if selected.mode == JetDriverCompileMode.Doc -> cli_sys.get("JET_FRONT_LIBRARY_OBJECT_OUTPUT") else -> None
             // copy: a three-field row; the request moves into the compiler below.
             compiler_threads: selected.compiler_threads.copy()
             result := if library_prefix == .Val(prefix) -> jet_cli_runtime_library(jet_cli_lowering_inputs(selected, trace_sink), prefix, cli_sys.get("JET_FRONT_LIBRARY_LIFECYCLE"), compiler_threads) else -> jet_cli_compile_request(selected, trace_sink)
