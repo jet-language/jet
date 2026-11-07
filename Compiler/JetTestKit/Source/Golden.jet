@@ -401,9 +401,11 @@ kit_golden_run_suite: fn(entry: KitEntry, context: KitCtx) -> [KitOutcome] {
         bless.first_tier = index == 0
         outcome := kit_golden_run_entry(entry, tier, context.env, scratch, bless)
         outcome.tier = if independent -> "-" else -> tier_name
-        files.remove_all(scratch) ?? {
+        // A tier's jetpack seals what it stores in the scratch Hangar (the C
+        // toolchain pack a native C link fetches) read-only.
+        kit_exec_remove_tree(scratch) ?? {
             outcome.verdict = kit_expect_verdict("ERROR", "remove tier scratch: {err}")
-            ()
+            false
         }
         results.push(kit_cases_known_verdict(outcome, annotation))
     }

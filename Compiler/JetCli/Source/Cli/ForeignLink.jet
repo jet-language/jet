@@ -4,10 +4,12 @@
 // the one native C policy (NativeCPolicy.jet).
 use {
     cli_files: core.files
+    cli_json: core.encoding.json
     cli_process: core.process
     cli_sys: core.sys
     jet_driver.[JetDriverAuthorizedSourceSnapshot, JetDriverCDependency, JetDriverForeignLinkFacts, JetDriverInlineC, jet_driver_c_dependencies]
     jet_foundation.[BuildOptions, Type, build_options_list, sha256_bytes, sha256_hex_bytes]
+    jet_pkg_model.[COMPILER_VERSION]
 }
 
 #Error
@@ -96,15 +98,68 @@ jet_cli_native_c_run_all: fn(commands: [[String]]) -[Env, Exec, Time.Wait]> [Jet
     outcomes
 }
 
-// The selected C compiler and archiver for the native x86-64 linker.
-JetCLINativeCTools: struct { compiler: String, archiver: String, target: String }
+// The C compiler and archiver for the native x86-64 linker. `flags` select
+// the compiler's target, sysroot and headers and follow the compiler in
+// every command; `link_flags` follow them in the inline C proof link.
+JetCLINativeCTools: struct { compiler: String, archiver: String, target: String, flags: [String], link_flags: [String] }
 
+// The pack's glibc target: the ABI a host `cc` compiles for, whose sysroot
+// carries the link stubs the inline C proof link resolves against.
+JET_CLI_NATIVE_C_PACK_TARGET: "x86_64-unknown-linux-gnu"
+
+// One meaning on every tier: `CC`/`AR`, when set, name the host tools;
+// otherwise the C toolchain pack this jet ships (clang, lld and llvm-ar):
+// the unpacked pack `JET_CC_PACK_ROOT` names, else the one its `jetpack`
+// engine fetches. A host `cc`/`ar` on PATH only serves a jet with no engine
+// of its own version beside it.
 jet_cli_native_c_tools: fn() -[FS, Env, Exec, Time.Wait]> JetCLINativeCTools JetCLIForeignLinkError! {
-    compiler: cli_process.which(cli_sys.get("CC") ?? "cc") ?? return Err(jet_cli_foreign_link_error("the C compiler is not installed"))
-    archiver: cli_process.which(cli_sys.get("AR") ?? "ar") ?? return Err(jet_cli_foreign_link_error("the C archiver is not installed"))
+    named: cli_sys.get("CC") != None || cli_sys.get("AR") != None
+    if !named {
+        if cli_sys.get("JET_CC_PACK_ROOT") == .Val(root) && root != "" -> return Ok(jet_cli_native_c_pack_at(root))
+        if jet_cli_find_engine_binary(JET_CLI_JETPACK_BINARY) == .Val(engine) {
+            if jet_cli_query_engine_protocol(engine) == Val(COMPILER_VERSION) -> return Ok(jet_cli_native_c_pack_at(jet_cli_native_c_pack_root(engine) ?? return Err(err)))
+        }
+    }
+    compiler: cli_process.which(cli_sys.get("CC") ?? "cc") ?? return Err(jet_cli_foreign_link_error("the C compiler is not installed, and no `jetpack` engine of this jet's version ships beside it to provide jet's C toolchain pack"))
+    archiver: cli_process.which(cli_sys.get("AR") ?? "ar") ?? return Err(jet_cli_foreign_link_error("the C archiver is not installed, and no `jetpack` engine of this jet's version ships beside it to provide jet's C toolchain pack"))
     target: cli_process.cmd([String]{compiler, "-dumpmachine"}).run() ?? return Err(jet_cli_foreign_link_error("couldn't query C compiler target: {err}"))
     if !target.success || !target.output.trim().starts_with("x86_64") -> return Err(jet_cli_foreign_link_error("C compiler must target x86_64 for the native linker: {target.output}{target.errors}"))
-    Ok(JetCLINativeCTools{compiler: compiler, archiver: archiver, target: target.output})
+    Ok(JetCLINativeCTools{compiler: compiler, archiver: archiver, target: target.output, flags: [String]{}, link_flags: [String]{}})
+}
+
+// The pack root `engine` names, as `jet cc` reaches the pack: the engine
+// puts the pack in the Hangar (verifying a copy already there).
+jet_cli_native_c_pack_root: fn(engine: String) -[FS, Env, Exec, Time.Wait]> String JetCLIForeignLinkError! {
+    receipt: cli_process.cmd([String]{engine, "env", "fetch-toolchain", "--json"}).run() ?? return Err(jet_cli_foreign_link_error("couldn't run `{engine} env fetch-toolchain`: {err}"))
+    if !receipt.success -> return Err(jet_cli_foreign_link_error("jet's C toolchain pack is unavailable: {receipt.errors.trim()}"))
+    value: cli_json.parse(receipt.output) ?? return Err(jet_cli_foreign_link_error("`{engine} env fetch-toolchain --json` printed no JSON: {err.reason}"))
+    root := ""
+    if value == .Object(fields) {
+        loop field in fields {
+            if field.key == "root" && field.value == .Text(text) -> root = text.copy()
+        }
+    }
+    if root == "" -> return Err(jet_cli_foreign_link_error("`{engine} env fetch-toolchain --json` named no pack root"))
+    Ok(root)
+}
+
+// The tools of the unpacked pack at `root`, for its glibc target.
+jet_cli_native_c_pack_at: fn(root: String) -> JetCLINativeCTools Never! {
+    sysroot: "{root}/glibc/{JET_CLI_NATIVE_C_PACK_TARGET}"
+    JetCLINativeCTools{
+        compiler: "{root}/bin/clang",
+        archiver: "{root}/bin/llvm-ar",
+        target: JET_CLI_NATIVE_C_PACK_TARGET,
+        flags: [String]{"--target={JET_CLI_NATIVE_C_PACK_TARGET}", "--sysroot={sysroot}", "-resource-dir={root}/lib/clang/21"},
+        link_flags: [String]{"-fuse-ld=lld", "--rtlib=compiler-rt", "--unwindlib=none"}
+    }
+}
+
+// `tools.compiler` and its target flags, the head of every C compiler command.
+jet_cli_native_c_argv: fn(tools: JetCLINativeCTools) -> [String] Never! {
+    argv := [String]{tools.compiler.copy()}
+    loop flag in tools.flags -> argv.push(flag.copy())
+    argv
 }
 
 // Hash the compiler/archiver bytes, target, every flag (policy included) and
@@ -119,6 +174,7 @@ jet_cli_native_c_identity: fn(identity: &[U8], schema: String, tools: JetCLINati
         content: cli_files.read_bytes(tool) ?? return Err(jet_cli_foreign_link_error("couldn't read C tool `{tool}`: {err}"))
         jet_cli_foreign_hash_field(identity, if index == 0 -> "compiler" else -> "archiver", content)
     }
+    loop flag in tools.flags -> jet_cli_foreign_hash_field(identity, "tool-flag", flag.bytes())
     loop flag in flags -> jet_cli_foreign_hash_field(identity, "flag", flag.bytes())
     loop flag in JET_CLI_NATIVE_C_FLAGS -> jet_cli_foreign_hash_field(identity, "policy-flag", flag.bytes())
     loop feature in JET_CLI_NATIVE_C_HARDENING_REMOVED -> jet_cli_foreign_hash_field(identity, "policy-hardening-removed", feature.bytes())
@@ -210,7 +266,7 @@ jet_cli_foreign_compile: fn(lib: String, directory: String, cache: String) -[FS,
     // (jet_cli_native_c_run_all); their outputs are read in unit order.
     commands := [[String]]{}
     loop source in sources {
-        argv := [String]{tools.compiler}
+        argv := jet_cli_native_c_argv(tools)
         loop flag in flags -> argv.push(flag)
         loop flag in ([String]{"-ffile-prefix-map={directory}=/jet/c", "-I", directory, "-E", "-P", source}) -> argv.push(flag)
         commands.push(argv)
@@ -244,7 +300,7 @@ jet_cli_foreign_compile: fn(lib: String, directory: String, cache: String) -[FS,
             break
         }
         object: "{temporary}/{index}.o"
-        argv := [String]{tools.compiler}
+        argv := jet_cli_native_c_argv(tools)
         loop flag in flags -> argv.push(flag)
         loop flag in ([String]{jet_cli_native_c_build_map(temporary), "-c", staged_source, "-o", object}) -> argv.push(flag)
         compiles.push(argv)
@@ -332,7 +388,7 @@ jet_cli_native_inline_c: fn(facts: JetDriverForeignLinkFacts, cache: String) -[F
             staging_failure = Val("couldn't stage inline C source: {err}")
             break
         }
-        argv := [String]{tools.compiler}
+        argv := jet_cli_native_c_argv(tools)
         loop flag in flags -> argv.push(flag)
         loop flag in ([String]{jet_cli_native_c_build_map(probe), "-E", "-P", source}) -> argv.push(flag)
         commands.push(argv)
@@ -362,7 +418,7 @@ jet_cli_native_inline_c: fn(facts: JetDriverForeignLinkFacts, cache: String) -[F
     loop index in 0..<units.len() {
         source: "{temporary}/inline_{index}.c"
         object: "{temporary}/inline_{index}.o"
-        argv := [String]{tools.compiler}
+        argv := jet_cli_native_c_argv(tools)
         loop flag in flags -> argv.push(flag)
         loop flag in ([String]{jet_cli_native_c_build_map(temporary), "-c", source, "-o", object}) -> argv.push(flag)
         compiles.push(argv)
@@ -372,7 +428,9 @@ jet_cli_native_inline_c: fn(facts: JetDriverForeignLinkFacts, cache: String) -[F
         receipt: outcome.receipt ?? return Err(jet_cli_foreign_link_error("couldn't compile inline C: {outcome.failure}"))
         if !receipt.success -> return Err(jet_cli_foreign_link_error("C compiler rejected inline C unit {index}: {receipt.errors}"))
     }
-    proof := [String]{tools.compiler, "-shared", "-Wl,--no-undefined"}
+    proof := jet_cli_native_c_argv(tools)
+    loop word in tools.link_flags -> proof.push(word.copy())
+    loop word in ([String]{"-shared", "-Wl,--no-undefined"}) -> proof.push(word)
     loop object in objects -> proof.push(object)
     loop word in ([String]{"-o", "{temporary}/inline_bridge.so"}) -> proof.push(word)
     linked: cli_process.cmd(proof).run() ?? return Err(jet_cli_foreign_link_error("couldn't link the inline C proof: {err}"))
@@ -390,8 +448,10 @@ jet_cli_foreign_static_archive: fn(lib: String, directories: [String], cache: St
     // A declared local source directory is a source provider, not a request
     // to silently link a similarly named installed library.
     if source_provider && directories.len() > 0 -> return jet_cli_foreign_compile(name, directories[0], cache)
-    compiler: cli_sys.get("CC") ?? "cc"
-    receipt: cli_process.cmd([String]{compiler, "-print-file-name=lib{name}.a"}).run() ?? return Err(jet_cli_foreign_link_error("couldn't find C archive `{name}`: {err}"))
+    tools: jet_cli_native_c_tools() ?? return Err(err)
+    probe := jet_cli_native_c_argv(tools)
+    probe.push("-print-file-name=lib{name}.a")
+    receipt: cli_process.cmd(probe).run() ?? return Err(jet_cli_foreign_link_error("couldn't find C archive `{name}`: {err}"))
     path: receipt.output.trim()
     if !receipt.success || path == ("lib{name}.a") || !cli_files.is_file(path) -> return Err(jet_cli_foreign_link_error("C static archive `{name}` was not found"))
     Ok(path)
@@ -556,8 +616,10 @@ jet_cli_foreign_platform_archive: fn(runtime_dir: String, name: String) -[FS, En
         musl: cli_sys.get("JET_PACK_MUSL_LIB") ?? return Err(jet_cli_foreign_link_error("the toolchain's musl libc.a was not packaged for foreign programs"))
         return Ok("{musl}/libc.a")
     }
-    compiler: cli_sys.get("CC") ?? "cc"
-    receipt: cli_process.cmd([String]{compiler, "-print-file-name={name}"}).run() ?? return Err(jet_cli_foreign_link_error("couldn't locate the C compiler's `{name}`: {err}"))
+    tools: jet_cli_native_c_tools() ?? return Err(err)
+    probe := jet_cli_native_c_argv(tools)
+    probe.push("-print-file-name={name}")
+    receipt: cli_process.cmd(probe).run() ?? return Err(jet_cli_foreign_link_error("couldn't locate the C compiler's `{name}`: {err}"))
     if !receipt.success -> return Err(jet_cli_foreign_link_error("couldn't locate the C compiler's `{name}`: {receipt.errors}"))
     path: receipt.output.trim()
     if path == name || !cli_files.is_file(path) -> return Err(jet_cli_foreign_link_error("the C compiler did not provide `{name}`"))

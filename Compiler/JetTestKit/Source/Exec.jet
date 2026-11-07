@@ -121,6 +121,7 @@ kit_exec_base_value: fn(name: String, env: KitEnv, scratch: String) -> String? {
         name == "JETPACK_ROOT" -> Val(files.join(scratch, "jetpack"))
         // The `jet` under test runs its engine verbs with the run's jetpack.
         name == "JETPACK_BIN" -> if env.jetpack != "" -> Val(env.jetpack) else -> sys.get(name)
+        name == "JET_CC_PACK_ROOT" -> if env.cc_pack != "" -> Val(env.cc_pack) else -> sys.get(name)
         name == "JET_SCHEMA_CACHE_DIR" -> Val(files.join(scratch, "schema"))
         else -> sys.get(name)
     }
@@ -156,6 +157,7 @@ kit_exec_spec: fn(env: KitEnv, argv: [String], cwd: String, scratch: String, ove
             .env("XDG_STATE_HOME", kit_exec_base_value("XDG_STATE_HOME", env, scratch) ?? "")
             .env("JETPACK_ROOT", kit_exec_base_value("JETPACK_ROOT", env, scratch) ?? "")
             .env("JETPACK_BIN", kit_exec_base_value("JETPACK_BIN", env, scratch) ?? "")
+            .env("JET_CC_PACK_ROOT", kit_exec_base_value("JET_CC_PACK_ROOT", env, scratch) ?? "")
             .env("JET_SCHEMA_CACHE_DIR", kit_exec_base_value("JET_SCHEMA_CACHE_DIR", env, scratch) ?? "")
             .env("JET_TOOLCHAIN_ROOT", kit_exec_base_value("JET_TOOLCHAIN_ROOT", env, scratch) ?? "")
     }
