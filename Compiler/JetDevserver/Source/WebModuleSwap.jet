@@ -44,8 +44,7 @@ impl WebStateValue {
     }
 }
 
-// Declaration order is the canonical state order.
-WebStateKind: enum { Signal Store QueryCache FormDraft Scroll Focus Island }
+// WebStateKind's row order in Vocabulary.tsv is the canonical state order.
 impl WebStateKind {
     as_str: fn(self) -> String {
         if self == {
@@ -249,12 +248,6 @@ impl WebModuleSwapSnapshot {
     }
 }
 
-WebModuleSwapReasonCode: enum {
-    NoChange SourceRevisionChanged BuildRevisionChanged ModuleBodyChanged ModuleAdded ModuleRemoved ModuleIdentityChanged
-    ModuleInterfaceChanged PageIdentityChanged StateAdded StateRemoved StateRetentionFresh SignalTypeChanged
-    StoreTypeChanged QueryCacheTypeChanged FormDraftTypeChanged ScrollTypeChanged FocusTypeChanged IslandTypeChanged
-    IslandIdentityChanged IdentityMismatch SemanticIncompatible StalePlan NothingToRollback
-}
 impl WebModuleSwapReasonCode {
     as_str: fn(self) -> String {
         if self == {
@@ -409,7 +402,6 @@ impl WebModuleSwapPlan {
     }
 }
 
-WebModuleSwapOperation: enum { Pause Apply Commit Rollback Restart }
 impl WebModuleSwapOperation {
     as_str: fn(self) -> String {
         if self == {
@@ -423,7 +415,6 @@ impl WebModuleSwapOperation {
 }
 impl WebModuleSwapOperation.Display { display: fn(&&self) -> String { self.as_str() } }
 
-WebModuleSwapPhase: enum { Committed Paused Applied }
 impl WebModuleSwapPhase {
     as_str: fn(self) -> String {
         if self == {
@@ -435,7 +426,6 @@ impl WebModuleSwapPhase {
 }
 impl WebModuleSwapPhase.Display { display: fn(&&self) -> String { self.as_str() } }
 
-WebModuleSwapReceiptStatus: enum { Paused Applied Committed RolledBack Restarted }
 impl WebModuleSwapReceiptStatus {
     as_str: fn(self) -> String {
         if self == {

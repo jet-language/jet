@@ -1,5 +1,9 @@
 // Style facts only; widget trees, focus, cursor and application model remain with the host.
-use jet_foundation.[foundation_json_escape, foundation_parse_protocol_json_with_limit, sha256_bytes, sha256_hex, sha256_hex_bytes]
+use {
+    jet_foundation.[foundation_json_escape, foundation_parse_protocol_json_with_limit, sha256_bytes, sha256_hex, sha256_hex_bytes]
+    jetpack_foundation.[ColorChoice]
+    core.tui.[TUIColorProfile]
+}
 
 TERMINAL_STYLE_PROTOCOL: String{"jet.devtools.v1"}
 MAX_TERMINAL_STYLE_SOURCE_BYTES: Int{65536}
@@ -12,7 +16,6 @@ MAX_TERMINAL_STYLE_NOTIFICATIONS: Int{256}
 MAX_TERMINAL_STYLE_REQUEST_BYTES: Int{262144}
 MAX_TERMINAL_STYLE_REVISION: Int{9223372036854775807}
 
-TerminalStyleErrorCode: enum { SourceTooLarge InvalidSourceIdentity InvalidDependency InvalidFingerprint InvalidStyle TooManyDependencies TooManyRoles RevisionOverflow }
 impl TerminalStyleErrorCode {
     as_str: fn(self) -> String {
         if self == {
@@ -35,50 +38,28 @@ terminal_style_fact_error: fn(code: TerminalStyleErrorCode, message: String) -> 
     TerminalStyleFactError{code: code, message: terminal_style_bounded_text(message, MAX_TERMINAL_STYLE_ERROR_BYTES)}
 }
 
-TerminalColorProfile: enum { Monochrome Ansi16 Ansi256 TrueColor }
-impl TerminalColorProfile {
-    as_str: fn(self) -> String {
-        if self == {
-            .Monochrome -> "monochrome"
-            .Ansi16 -> "ansi16"
-            .Ansi256 -> "ansi256"
-            .TrueColor -> "truecolor"
-        }
-    }
-    parse: fn(value: String) -> TerminalColorProfile? {
-        if value.trim().to_ascii_lower() == {
-            "monochrome" -> Val(TerminalColorProfile.Monochrome)
-            "ansi16" -> Val(TerminalColorProfile.Ansi16)
-            "ansi256" -> Val(TerminalColorProfile.Ansi256)
-            "truecolor" -> Val(TerminalColorProfile.TrueColor)
-            else -> None
-        }
+// The wire text of a colour profile; `ASCII` is the no-colour profile.
+terminal_color_profile_text: fn(profile: TUIColorProfile) -> String {
+    if profile == {
+        .ASCII -> "monochrome"
+        .ANSI16 -> "ansi16"
+        .ANSI256 -> "ansi256"
+        .TrueColor -> "truecolor"
     }
 }
 
-TerminalColorMode: enum { Auto Always Never }
-impl TerminalColorMode {
-    as_str: fn(self) -> String {
-        if self == {
-            .Auto -> "auto"
-            .Always -> "always"
-            .Never -> "never"
-        }
-    }
-    // Anything but `always` or `never` means auto.
-    parse: fn(value: String) -> TerminalColorMode {
-        if value.trim().to_ascii_lower() == {
-            "always" -> .Always
-            "never" -> .Never
-            else -> .Auto
-        }
+terminal_color_choice_text: fn(choice: ColorChoice) -> String {
+    if choice == {
+        .Auto -> "auto"
+        .Always -> "always"
+        .Never -> "never"
     }
 }
 
-TerminalCapabilityFacts: struct { profile: TerminalColorProfile, mode: TerminalColorMode, is_tty: Bool, term_is_dumb: Bool, no_color: Bool }
-TERMINAL_CAPABILITY_DEFAULT: TerminalCapabilityFacts{TerminalCapabilityFacts{profile: .Monochrome, mode: .Auto, is_tty: false, term_is_dumb: true, no_color: false}}
+TerminalCapabilityFacts: struct { profile: TUIColorProfile, mode: ColorChoice, is_tty: Bool, term_is_dumb: Bool, no_color: Bool }
+TERMINAL_CAPABILITY_DEFAULT: TerminalCapabilityFacts{TerminalCapabilityFacts{profile: .ASCII, mode: .Auto, is_tty: false, term_is_dumb: true, no_color: false}}
 impl TerminalCapabilityFacts {
-    from_environment: fn(term: String?, colorterm: String?, is_tty: Bool, no_color: Bool, mode: TerminalColorMode) -> TerminalCapabilityFacts {
+    from_environment: fn(term: String?, colorterm: String?, is_tty: Bool, no_color: Bool, mode: ColorChoice) -> TerminalCapabilityFacts {
         term_name: (term ?? "").trim().to_ascii_lower()
         colorterm_name: (colorterm ?? "").trim().to_ascii_lower()
         term_is_dumb: term_name == "dumb"
@@ -87,13 +68,13 @@ impl TerminalCapabilityFacts {
             .Never -> false
             .Auto -> is_tty && !term_is_dumb && !no_color
         }
-        profile := TerminalColorProfile.Ansi16
+        profile := TUIColorProfile.ANSI16
         if !enabled {
-            profile = .Monochrome
+            profile = .ASCII
         } else if colorterm_name == "truecolor" || colorterm_name == "24bit" {
             profile = .TrueColor
         } else if term_name.contains("256color") {
-            profile = .Ansi256
+            profile = .ANSI256
         }
         TerminalCapabilityFacts{profile: profile, mode: mode, is_tty: is_tty, term_is_dumb: term_is_dumb, no_color: no_color}
     }
@@ -108,17 +89,16 @@ impl TerminalCapabilityFacts {
         canonical := [U8]{}
         canonical.extend("terminal-capabilities-v1".bytes())
         canonical.push(0)
-        canonical.extend("profile={self.profile.as_str()};mode={self.mode.as_str()};tty={terminal_style_flag(self.is_tty)};dumb={terminal_style_flag(self.term_is_dumb)};no_color={terminal_style_flag(self.no_color)};".bytes())
+        canonical.extend("profile={terminal_color_profile_text(self.profile)};mode={terminal_color_choice_text(self.mode)};tty={terminal_style_flag(self.is_tty)};dumb={terminal_style_flag(self.term_is_dumb)};no_color={terminal_style_flag(self.no_color)};".bytes())
         terminal_style_digest(canonical)
     }
 }
 
-TerminalStyleDependencyKind: enum { Source Capability Layout ValueType }
 impl TerminalStyleDependencyKind {
     as_str: fn(self) -> String {
         if self == {
             .Source -> "source"
-            .Capability -> "capability"
+            .TerminalCapability -> "capability"
             .Layout -> "layout"
             .ValueType -> "value_type"
         }
@@ -127,7 +107,7 @@ impl TerminalStyleDependencyKind {
     rank: fn(self) -> Int {
         if self == {
             .Source -> 0
-            .Capability -> 1
+            .TerminalCapability -> 1
             .Layout -> 2
             .ValueType -> 3
         }
@@ -135,7 +115,7 @@ impl TerminalStyleDependencyKind {
     parse: fn(value: String) -> TerminalStyleDependencyKind? {
         if value == {
             "source" -> Val(TerminalStyleDependencyKind.Source)
-            "capability" -> Val(TerminalStyleDependencyKind.Capability)
+            "capability" -> Val(TerminalStyleDependencyKind.TerminalCapability)
             "layout" -> Val(TerminalStyleDependencyKind.Layout)
             "value_type" -> Val(TerminalStyleDependencyKind.ValueType)
             else -> None
@@ -267,7 +247,6 @@ impl TerminalStyleEdit {
     }
 }
 
-TerminalStyleRole: enum { Accent Dim Success Warn Error Invert Border Bold }
 impl TerminalStyleRole {
     as_str: fn(self) -> String {
         if self == {
@@ -407,7 +386,6 @@ impl TerminalStyleSnapshot {
     }
 }
 
-TerminalStyleRestartReason: enum { SourceIdentityChanged LayoutFingerprintChanged TypeFingerprintChanged }
 impl TerminalStyleRestartReason {
     as_str: fn(self) -> String {
         if self == {
@@ -418,7 +396,6 @@ impl TerminalStyleRestartReason {
     }
 }
 
-TerminalStyleChangeKind: enum { Initial Unchanged StyleOnly CapabilityOnly RestartRequired(reason: TerminalStyleRestartReason) Invalid }
 impl TerminalStyleChangeKind {
     as_str: fn(self) -> String {
         if self == {
@@ -697,7 +674,6 @@ impl TerminalStyleHostSource {
     }
 }
 
-TerminalStyleHostUnavailableReason: enum { SourceNotInjected NoStyleApplied MalformedRequest MissingSource }
 impl TerminalStyleHostUnavailableReason {
     as_str: fn(self) -> String {
         if self == {
@@ -722,12 +698,6 @@ impl TerminalStyleHostRejection {
     }
 }
 
-#Error
-TerminalStyleHostOutcome: enum {
-    Applied(revision: Int, change: TerminalStyleChangeKind)
-    Unavailable(reason: TerminalStyleHostUnavailableReason)
-    Rejected(rejection: TerminalStyleHostRejection)
-}
 // The typed outcome and its jet.devtools.v1 event JSON.
 TerminalStyleHostResponse: struct { outcome: TerminalStyleHostOutcome, event: String }
 

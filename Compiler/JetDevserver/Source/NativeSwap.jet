@@ -74,7 +74,6 @@ impl NativeSwapExecutable {
     }
 }
 
-NativeSwapCodePolicy: enum { Replace Restart Reject }
 impl NativeSwapCodePolicy {
     as_str: fn(self) -> String {
         if self == {
@@ -84,7 +83,6 @@ impl NativeSwapCodePolicy {
         }
     }
 }
-NativeSwapDataPolicy: enum { Preserve Replace Migrate Restart Reject }
 impl NativeSwapDataPolicy {
     as_str: fn(self) -> String {
         if self == {
@@ -114,7 +112,6 @@ impl NativeSwapQuiescencePolicy {
         }
     }
 }
-NativeSwapRelocationStrategy: enum { StableIdentity RebindByIdentity Restart Reject }
 impl NativeSwapRelocationStrategy {
     as_str: fn(self) -> String {
         if self == {
@@ -127,7 +124,6 @@ impl NativeSwapRelocationStrategy {
     permits_in_place: fn(self) -> Bool { self == .StableIdentity || self == .RebindByIdentity }
 }
 impl NativeSwapRelocationStrategy.Display { display: fn(&&self) -> String { self.as_str() } }
-NativeSwapLinkStrategy: enum { ReuseResident Relink Restart Reject }
 impl NativeSwapLinkStrategy {
     as_str: fn(self) -> String {
         if self == {
@@ -181,14 +177,6 @@ impl NativeSwapQuiescence {
 }
 
 // `Unblocked` is the fact a compatible plan carries; it renders as "none".
-NativeSwapBlockingFact: enum {
-    Unblocked InvalidIdentity InvalidRevision SourceIdentityChanged CodeRevisionUnsupported DataRevisionUnsupported
-    IncompatibleType ConnectionHandleStale LayoutChanged UnsafeEdit RestartRequired ListenerHandleMissing
-    ListenerHandleIncompatible ListenerHandleStale ConnectionHandleMissing ConnectionHandleIncompatible
-    ConnectionListenerNotPreserved DuplicateIdentity FactLimit QuiescenceRequired RelocationUnsupported
-    LinkStrategyUnsupported StaleReference StalePlan InvalidPhase CompileFailed MigrationFailed
-    RollbackUnavailable CapabilityUnavailable
-}
 impl NativeSwapBlockingFact {
     as_str: fn(self) -> String {
         if self == {
@@ -232,7 +220,6 @@ impl NativeSwapBlockingFact {
 }
 impl NativeSwapBlockingFact.Display { display: fn(&&self) -> String { self.as_str() } }
 
-NativeSwapDisposition: enum { Swap Restart Rejected }
 impl NativeSwapDisposition {
     as_str: fn(self) -> String {
         if self == {
@@ -506,7 +493,6 @@ impl NativeSwapPlan {
     }
 }
 
-NativeSwapOutcome: enum { Committed RolledBack Rejected RestartRequired }
 impl NativeSwapOutcome {
     as_str: fn(self) -> String {
         if self == {
@@ -546,7 +532,6 @@ impl NativeSwapReceipt {
     }
 }
 
-NativeSwapPhase: enum { Ready Paused Applied }
 impl NativeSwapPhase {
     as_str: fn(self) -> String {
         if self == {

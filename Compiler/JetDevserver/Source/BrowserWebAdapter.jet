@@ -8,11 +8,11 @@ use {
     jet_foundation.[
         foundation_json_escape,
     ]
-    jet_devserver.BrowserHost.[BrowserActionGrant, BrowserDock, BrowserHost, BrowserHostAction, BrowserHostEffect, BrowserHostError, BrowserHostEvent, BrowserHtmlElement, BrowserNode, BrowserNodeKind, BrowserPanelFact, BrowserPanelView, BrowserPlacement, BrowserReconnectCursor, BrowserSelection, BrowserSessionState, BrowserSourceGrant, BrowserSourceLocation, MAX_BROWSER_TEXT, MAX_BROWSER_VALUE]
+    jet_devserver.BrowserHost.[BrowserActionGrant, BrowserHost, BrowserHostAction, BrowserHostEffect, BrowserHostError, BrowserHostEvent, BrowserHtmlElement, BrowserNode, BrowserPanelFact, BrowserPanelView, BrowserPlacement, BrowserReconnectCursor, BrowserSelection, BrowserSourceGrant, BrowserSourceLocation, MAX_BROWSER_TEXT, MAX_BROWSER_VALUE]
     jet_devserver.Devtools.[JetDevtoolsHostKind, JetDevtoolsPanelCapability, JetDevtoolsPanelProjection]
     jet_devserver.Session.[DevtoolsProjection, DevtoolsStatusFact, ResidentDevSession, JET_DEVTOOLS_PROTOCOL]
     jet_devserver.WebModuleSwap.[WebFocusFact, WebFormDraftFact, WebIslandFact, WebModuleSwapReceipt, WebModuleSwapSnapshot, WebModuleSwapState, WebModuleSwapStateFact, WebQueryCacheFact, WebScrollFact, WebSignalFact, WebStateValue, WebStoreFact]
-    jet_devserver.[MAX_REQUEST_BODY_BYTES]
+    jet_devserver.[BrowserSessionState, DevtoolsDock, DevtoolsNodeKind, MAX_REQUEST_BODY_BYTES]
     core.encoding.[Dyn]
     core.devtools.runtime.kernel_devtools_panel_catalog.[JetDevtoolsPanelCapability]
 }
@@ -1019,7 +1019,8 @@ parse_placement: fn(value: Dyn) -> BrowserPlacement Err! {
         else -> .Err("unknown browser placement `{text}`")
     }
 }
-parse_dock: fn(value: String) -> BrowserDock Err! {
+// The browser docks a panel left, right, bottom or floating; it has no top dock.
+parse_dock: fn(value: String) -> DevtoolsDock Err! {
     if value == {
         "left" -> .Ok(.Left)
         "right" -> .Ok(.Right)

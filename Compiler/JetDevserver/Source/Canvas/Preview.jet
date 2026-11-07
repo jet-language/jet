@@ -2,6 +2,7 @@
 use {
     time: core.time
     jet_foundation.[JetDevtoolsSourceSpan, foundation_json_escape, jettrace_has_control]
+    core.ui.[UIPreviewDevice]
 }
 
 CANVAS_PREVIEW_SCHEMA_VERSION: Int{1}
@@ -53,31 +54,22 @@ impl CanvasPreviewKind {
     }
 }
 
-CanvasPreviewDevice: enum {
-    Phone
-    Tablet
-    Desktop
-    Custom(name: String)
-}
-impl CanvasPreviewDevice {
-    as_str: fn(self) -> String {
-        if self == {
-            .Phone -> "phone"
-            .Tablet -> "tablet"
-            .Desktop -> "desktop"
-            .Custom(name) -> name
-        }
+canvas_preview_device_text: fn(device: UIPreviewDevice) -> String {
+    if device == {
+        .Phone -> "phone"
+        .Tablet -> "tablet"
+        .Desktop -> "desktop"
     }
 }
 
 CanvasPreviewViewport: struct {
-    device: CanvasPreviewDevice
+    device: UIPreviewDevice
     width: Int
     height: Int
     scale: Int
 }
 impl CanvasPreviewViewport {
-    new: fn(device: CanvasPreviewDevice, width: Int, height: Int, scale: Int) -> CanvasPreviewViewport CanvasPreviewError! {
+    new: fn(device: UIPreviewDevice, width: Int, height: Int, scale: Int) -> CanvasPreviewViewport CanvasPreviewError! {
         viewport: CanvasPreviewViewport{device: device, width: width, height: height, scale: scale}
         viewport.validate()
         viewport
@@ -89,17 +81,9 @@ impl CanvasPreviewViewport {
         if self.width <= 0 || self.height <= 0 -> return Err(CanvasPreviewError.InvalidViewport(reason: "viewport dimensions must be positive"))
         if self.width > CANVAS_PREVIEW_MAX_DIMENSION || self.height > CANVAS_PREVIEW_MAX_DIMENSION -> return Err(CanvasPreviewError.InvalidViewport(reason: "viewport dimension exceeds the preview bound"))
         if self.scale <= 0 || self.scale > CANVAS_PREVIEW_MAX_SCALE -> return Err(CanvasPreviewError.InvalidViewport(reason: "viewport scale is outside the preview bound"))
-        if self.device == .Custom(name) -> preview_text(name, "viewport device", 128)
     }
 }
 
-CanvasPreviewTheme: enum {
-    System
-    Light
-    Dark
-    HighContrast
-    Custom(name: String)
-}
 impl CanvasPreviewTheme {
     as_str: fn(self) -> String {
         if self == {
@@ -112,14 +96,6 @@ impl CanvasPreviewTheme {
     }
 }
 
-CanvasPreviewAccessibility: enum {
-    Default
-    ReducedMotion
-    LargeText
-    HighContrast
-    ScreenReader
-    Custom(name: String)
-}
 impl CanvasPreviewAccessibility {
     as_str: fn(self) -> String {
         if self == {
@@ -133,15 +109,6 @@ impl CanvasPreviewAccessibility {
     }
 }
 
-CanvasPreviewLifecycle: enum {
-    Initial
-    Loading
-    Loaded
-    Empty
-    Error
-    Offline
-    Custom(name: String)
-}
 impl CanvasPreviewLifecycle {
     as_str: fn(self) -> String {
         if self == {
@@ -172,13 +139,6 @@ impl CanvasPreviewTraits {
     }
 }
 
-CanvasPreviewEffect: enum {
-    Read(capability: String)
-    Write(capability: String)
-    Network(capability: String)
-    Clock
-    Custom(capability: String)
-}
 impl CanvasPreviewEffect {
     capability: fn(self) -> String {
         if self == {
@@ -237,12 +197,6 @@ impl CanvasPreviewAuthority {
     }
 }
 
-CanvasPreviewInput: enum {
-    Text(value: String)
-    Bool(value: Bool)
-    Integer(value: Int)
-    Float(value: Float)
-}
 impl CanvasPreviewInput {
     validate: fn(self) CanvasPreviewError! {
         if self == .Text(value) -> preview_text(value, "preview input", CANVAS_PREVIEW_MAX_INPUT_BYTES)
@@ -393,14 +347,6 @@ impl CanvasPreviewPolicy {
     }
 }
 
-CanvasPreviewStatus: enum {
-    Unrendered
-    Building
-    Ready
-    Error
-    Stale
-    Closed
-}
 impl CanvasPreviewStatus {
     as_str: fn(self) -> String {
         if self == {
@@ -812,7 +758,7 @@ impl CanvasPreviewRegistry {
         descriptors := [String]{}
         loop descriptor in self.sorted_descriptors() {
             viewport: descriptor.viewport
-            descriptors.push("{{\"name\":\"{foundation_json_escape(descriptor.name)}\",\"kind\":\"{descriptor.kind.as_str()}\",\"callback\":\"{foundation_json_escape(descriptor.callback.id)}\",\"source\":{descriptor.source.to_json()},\"viewport\":{{\"device\":\"{foundation_json_escape(viewport.device.as_str())}\",\"width\":{viewport.width},\"height\":{viewport.height},\"scale\":{viewport.scale}}},\"selected\":{self.selected.contains(descriptor.name)}}}")
+            descriptors.push("{{\"name\":\"{foundation_json_escape(descriptor.name)}\",\"kind\":\"{descriptor.kind.as_str()}\",\"callback\":\"{foundation_json_escape(descriptor.callback.id)}\",\"source\":{descriptor.source.to_json()},\"viewport\":{{\"device\":\"{canvas_preview_device_text(viewport.device)}\",\"width\":{viewport.width},\"height\":{viewport.height},\"scale\":{viewport.scale}}},\"selected\":{self.selected.contains(descriptor.name)}}}")
         }
         selected := [String]{}
         loop name in self.selected -> selected.push("\"{foundation_json_escape(name)}\"")
@@ -820,38 +766,6 @@ impl CanvasPreviewRegistry {
     }
 }
 
-CanvasPreviewError: enum {
-    InvalidText(field: String, reason: String)
-    InvalidSource(reason: String)
-    InvalidViewport(reason: String)
-    InvalidInput(reason: String)
-    InvalidPolicy
-    TooManyPreviews
-    TooManySelected
-    TooManyContexts
-    TooManyInputs
-    DuplicatePreview(name: String)
-    UnknownPreview(name: String)
-    DuplicateContext(id: String)
-    UnknownContext(id: String)
-    DuplicateInput(name: String)
-    InputBudgetExceeded
-    AuthorityWidened
-    AuthorityRequired
-    CapabilityDenied(capability: String)
-    EffectSetMismatch
-    LoopbackRequired
-    Unauthorized
-    TooManyClients
-    StaleConnection
-    InvalidCursor
-    FrameTooLarge
-    ResidentBudgetExceeded
-    SourceMismatch
-    ContextSourceMismatch
-    RenderFailed
-    SessionClosed
-}
 impl CanvasPreviewError {
     message: fn(self) -> String {
         if self == {

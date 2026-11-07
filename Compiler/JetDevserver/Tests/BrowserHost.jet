@@ -1,5 +1,5 @@
 browser_test_panel: fn(status: String) -> BrowserPanelFact {
-    nodes: [BrowserNode]{BrowserNode.new("go", BrowserNodeKind.Action, "Go"), BrowserNode.new("source", BrowserNodeKind.Text, "Source")}
+    nodes: [BrowserNode]{BrowserNode.new("go", DevtoolsNodeKind.Action, "Go"), BrowserNode.new("source", DevtoolsNodeKind.Text, "Source")}
     BrowserPanelFact.new("build", "Build", 12, status, nodes)
 }
 browser_test_event: fn(session: String, revision: Int, sequence: Int, status: String) -> BrowserHostEvent {
@@ -35,13 +35,13 @@ browser_test_event: fn(session: String, revision: Int, sequence: Int, status: St
     _: host.dispatch(BrowserHostAction.OpenPanel(placement: BrowserPlacement.InApp, panel_id: "build")) ?? panic("open in-app")
     _: host.dispatch(BrowserHostAction.OpenPanel(placement: BrowserPlacement.Workbench, panel_id: "build")) ?? panic("open workbench")
     host.select("build", Val("source")) ?? panic("select")
-    _: host.dispatch(BrowserHostAction.DockPanel(placement: BrowserPlacement.Workbench, panel_id: "build", dock: BrowserDock.Right)) ?? panic("dock")
+    _: host.dispatch(BrowserHostAction.DockPanel(placement: BrowserPlacement.Workbench, panel_id: "build", dock: DevtoolsDock.Right)) ?? panic("dock")
     in_app: host.view_model(BrowserPlacement.InApp)
     workbench: host.view_model(BrowserPlacement.Workbench)
     assert(in_app.panels[0].open)
     assert(workbench.panels[0].open)
-    assert_eq(in_app.panels[0].dock, BrowserDock.Left)
-    assert_eq(workbench.panels[0].dock, BrowserDock.Right)
+    assert_eq(in_app.panels[0].dock, DevtoolsDock.Left)
+    assert_eq(workbench.panels[0].dock, DevtoolsDock.Right)
     assert_eq(in_app.selection, workbench.selection)
     assert_eq(in_app.route, "/__jet_devtools")
     assert_eq(workbench.route, "/__jet_devtools/workbench")

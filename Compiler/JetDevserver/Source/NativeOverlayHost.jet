@@ -15,15 +15,13 @@ NativeOverlayHostError: struct { message: String }
 impl NativeOverlayHostError.Display { display: fn(&&self) -> String { self.message } }
 native_overlay_error: fn(message: String) -> NativeOverlayHostError { NativeOverlayHostError{message: message} }
 
-NativeOverlayNodeKind: enum { Text Status Table Tree Chart Action }
-// Projects grant requirements; never grants or executes an action.
-NativeOverlayGrant: enum { Observe Interact Control }
+// Projects an action's required NativeOverlayGrant; never grants or executes an action.
 NativeOverlayAction: struct { action_id: String, required_grant: NativeOverlayGrant }
 
 // Values are optional; no recovery of unpublished observation payloads.
 NativeOverlayNode: struct {
     id: String
-    kind: NativeOverlayNodeKind
+    kind: DevtoolsNodeKind
     label: String
     value: String?
     status: String?
@@ -31,7 +29,7 @@ NativeOverlayNode: struct {
     action: NativeOverlayAction?
 }
 impl NativeOverlayNode {
-    new: fn(id: String, kind: NativeOverlayNodeKind, label: String) -> NativeOverlayNode {
+    new: fn(id: String, kind: DevtoolsNodeKind, label: String) -> NativeOverlayNode {
         NativeOverlayNode{id: id, kind: kind, label: label, value: None, status: None, children: [NativeOverlayNode]{}, action: None}
     }
     text: fn(id: String, label: String) -> NativeOverlayNode { NativeOverlayNode.new(id, .Text, label) }
@@ -140,7 +138,7 @@ impl NativeOverlayViewport {
         if self.width > MAX_OVERLAY_COORDINATE || self.height > MAX_OVERLAY_COORDINATE -> return Err(native_overlay_error("native overlay viewport exceeds coordinate range"))
         if self.scale_milli <= 0 || self.scale_milli > 10000 -> return Err(native_overlay_error("native overlay scale must be between 1 and 10000 milli-units"))
     }
-    overlay_rect: fn(self, dock: NativeOverlayDock) -> NativeOverlayRect {
+    overlay_rect: fn(self, dock: DevtoolsDock) -> NativeOverlayRect {
         width: self.scaled_extent(480, self.width)
         height: self.scaled_extent(360, self.height)
         if dock == {
@@ -165,13 +163,12 @@ impl NativeOverlayRect {
     contains: fn(self, x: Int, y: Int) -> Bool { x >= self.x && y >= self.y && x < self.x + self.width && y < self.y + self.height }
 }
 
-NativeOverlayDock: enum { Floating Left Right Top Bottom }
-NativeOverlayState: struct { open: Bool, dock: NativeOverlayDock, focused: Bool }
+NativeOverlayState: struct { open: Bool, dock: DevtoolsDock, focused: Bool }
 
 NativeOverlayInput: enum {
     Toggle
     Close
-    Dock(dock: NativeOverlayDock)
+    Dock(dock: DevtoolsDock)
     Focus(focused: Bool)
     Key(code: String, pressed: Bool)
     Gamepad(gamepad: Int, control: String, pressed: Bool)
@@ -189,7 +186,7 @@ NativeOverlayFrame: struct {
     sequence: Int
     observed_at_ms: Int
     open: Bool
-    dock: NativeOverlayDock
+    dock: DevtoolsDock
     focused: Bool
     viewport: NativeOverlayViewport
     bounds: NativeOverlayRect
@@ -290,7 +287,7 @@ impl NativeOverlayHost {
         if self.release_build -> return
         if self.state.open -> self.close() else -> self.open()
     }
-    set_dock: fn(&self, dock: NativeOverlayDock) {
+    set_dock: fn(&self, dock: DevtoolsDock) {
         self.state.dock = dock
         self.push_frame()
     }

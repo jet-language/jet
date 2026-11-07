@@ -21,9 +21,10 @@ cheap.push(start('check-core-source-rows', [jet, 'Tools/agent/CoreSourceRows.jet
 cheap.push(start('check-diagnostic-rows', [jet, 'Tools/agent/DiagnosticRows.jet', '--check']));
 cheap.push(start('check-lexer-keyword-rows', [jet, 'Tools/agent/LexerKeywordRows.jet', '--check']));
 cheap.push(start('check-owned-trait-rows', [jet, 'Tools/agent/OwnedTraitRows.jet', '--check']));
+cheap.push(start('check-vocabulary-rows', [jet, 'Tools/agent/VocabularyRows.jet', '--check']));
 cheap.push(start('stop-exports-test', [node, '--test', 'Tools/agent/gen-runtime-stop-exports.test.mjs']));
 cheap.push(start('trap-messages-test', [node, '--test', 'Tools/agent/gen-runtime-trap-messages.test.mjs']));
-for (const tool of ['LexerKeywordRows', 'UnicodeNameAsset', 'AgentDocFlags', 'DecisionIndex', 'UnsafeRatchet', 'DiagnosticRows', 'OwnedTraitRows', 'ProofSource']) {
+for (const tool of ['LexerKeywordRows', 'UnicodeNameAsset', 'AgentDocFlags', 'DecisionIndex', 'UnsafeRatchet', 'DiagnosticRows', 'OwnedTraitRows', 'ProofSource', 'VocabularyRows']) {
   cheap.push(start(`${tool}-test`, [jet, 'test', `Tools/agent/${tool}.jet`]));
 }
 cheap.push(start('compiler-packages', [node, '--test', 'Tools/agent/compiler-packages.test.mjs']));

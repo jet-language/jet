@@ -1,3 +1,8 @@
+use {
+    jetpack_foundation.[ColorChoice]
+    core.tui.[TUIColorProfile]
+}
+
 terminal_style_test_edit: fn(source: String) -> TerminalStyleEdit { TerminalStyleEdit.new("app/style", source) }
 terminal_style_test_bytes: fn(text: String) -> [U8] {
     out := [U8]{}
@@ -12,14 +17,14 @@ terminal_style_test_adapter: fn() -> TerminalStyleHostAdapter {
 }
 
 #Test("capability_facts_are_deterministic_and_follow_explicit_policy") {
-    ansi256: TerminalCapabilityFacts.from_environment(Val("xterm-256color"), None, true, false, TerminalColorMode.Auto)
-    assert_eq(ansi256.profile, TerminalColorProfile.Ansi256)
+    ansi256: TerminalCapabilityFacts.from_environment(Val("xterm-256color"), None, true, false, ColorChoice.Auto)
+    assert_eq(ansi256.profile, TUIColorProfile.ANSI256)
     assert(ansi256.color_enabled())
-    dumb: TerminalCapabilityFacts.from_environment(Val("dumb"), Val("truecolor"), true, false, TerminalColorMode.Auto)
-    assert_eq(dumb.profile, TerminalColorProfile.Monochrome)
+    dumb: TerminalCapabilityFacts.from_environment(Val("dumb"), Val("truecolor"), true, false, ColorChoice.Auto)
+    assert_eq(dumb.profile, TUIColorProfile.ASCII)
     assert(!dumb.color_enabled())
-    forced: TerminalCapabilityFacts.from_environment(Val("dumb"), None, false, true, TerminalColorMode.Always)
-    assert_eq(forced.profile, TerminalColorProfile.Ansi16)
+    forced: TerminalCapabilityFacts.from_environment(Val("dumb"), None, false, true, ColorChoice.Always)
+    assert_eq(forced.profile, TUIColorProfile.ANSI16)
     assert(forced.color_enabled())
     assert_eq(ansi256.fingerprint(), ansi256.fingerprint())
 }
@@ -76,8 +81,8 @@ terminal_style_test_adapter: fn() -> TerminalStyleHostAdapter {
 }
 #Test("capability_change_applies_but_layout_or_type_change_requires_restart") {
     reload := TerminalStyleReload.new()
-    base: TerminalCapabilityFacts.from_environment(Val("xterm-256color"), None, true, false, TerminalColorMode.Auto)
-    plain: TerminalCapabilityFacts.from_environment(Val("dumb"), None, true, false, TerminalColorMode.Auto)
+    base: TerminalCapabilityFacts.from_environment(Val("xterm-256color"), None, true, false, ColorChoice.Auto)
+    plain: TerminalCapabilityFacts.from_environment(Val("dumb"), None, true, false, ColorChoice.Auto)
     first: reload.reload(terminal_style_test_edit("accent=red").with_capabilities(base))
     assert_eq(first.revision, 1)
     capability: reload.reload(terminal_style_test_edit("accent=red").with_capabilities(plain))

@@ -758,13 +758,13 @@ validate_optional_text: fn(value: String?, field: String, limit: Int) WebErrorPa
     if web_error_has_disallowed_control(text) -> return Err(WebErrorPageError.ControlCharacter(field: field))
     if contains_sensitive_marker(text) -> return Err(WebErrorPageError.UnsafeContent(field: field))
 }
-WEB_ERROR_SENSITIVE_MARKERS: [String]{[String]{"password=", "password:", "secret=", "secret:", "authorization:", "authorization=", "bearer ", "api_key", "apikey", "access_token", "client_secret", "private_key", "set-cookie", "cookie:", "sk_live_", "ghp_", "xoxb-"}}
 contains_sensitive_marker: fn(value: String) -> Bool {
     lower: value.to_ascii_lower()
-    loop marker in WEB_ERROR_SENSITIVE_MARKERS {
-        if lower.contains(marker) -> return true
-    }
-    false
+    lower.contains("password=") || lower.contains("password:") || lower.contains("secret=") || lower.contains("secret:")
+        || lower.contains("authorization:") || lower.contains("authorization=") || lower.contains("bearer ")
+        || lower.contains("api_key") || lower.contains("apikey") || lower.contains("access_token") || lower.contains("client_secret")
+        || lower.contains("private_key") || lower.contains("set-cookie") || lower.contains("cookie:")
+        || lower.contains("sk_live_") || lower.contains("ghp_") || lower.contains("xoxb-")
 }
 validate_href: fn(value: String) WebErrorPageError! {
     if value == "" -> return Err(WebErrorPageError.EmptyField(field: "action href"))

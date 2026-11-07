@@ -173,20 +173,8 @@ impl TerminalFocus {
     item: fn(panel_id: String, item_key: String) -> TerminalFocus { TerminalFocus{panel_id: Val(panel_id), item_key: Val(item_key)} }
 }
 
-// `Character` holds the one typed character.
-TerminalKey: enum { Tab BackTab Up Down Left Right Enter Escape Character(text: String) }
+// A key press; `TerminalKey.Character` holds the one typed character.
 TerminalInput: enum { Key(key: TerminalKey) Resize(viewport: TerminalViewport) }
-TerminalAction: enum {
-    FocusPanel(panel_id: String)
-    Inspect(panel_id: String, item_key: String)
-    ReturnToPanel
-    MoveCursor(cursor: Int)
-    Rerun
-    Restart
-    FocusJob
-    Quit
-    Ignored
-}
 impl TerminalAction {
     label: fn(self) -> String {
         if self == {
@@ -204,7 +192,6 @@ impl TerminalAction {
 }
 TerminalKeyboardState: struct { last_key: TerminalKey?, last_action: TerminalAction? }
 
-TerminalFreshness: enum { Empty Fresh Stale }
 impl TerminalFreshness {
     label: fn(self) -> String {
         if self == {
@@ -215,7 +202,6 @@ impl TerminalFreshness {
     }
 }
 
-TerminalNodeKind: enum { Root Panel Table Text Status }
 TerminalStatus: struct { label: String, detail: String, freshness: TerminalFreshness }
 TerminalTableRow: struct { key: String, cells: [String] }
 TerminalTable: struct { columns: [String], rows: [TerminalTableRow] }
@@ -336,11 +322,6 @@ impl TerminalFrame {
     }
 }
 
-TerminalDiffOperation: enum {
-    Insert(id: String, node: TerminalNode)
-    Remove(id: String)
-    Replace(id: String, node: TerminalNode)
-}
 TerminalDiff: struct {
     from_revision: String
     to_revision: String

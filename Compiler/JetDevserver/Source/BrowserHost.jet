@@ -33,8 +33,7 @@ impl BrowserPlacement {
     }
 }
 
-BrowserNodeKind: enum { Text Status Table Tree Chart Action }
-impl BrowserNodeKind {
+impl DevtoolsNodeKind {
     as_str: fn(self) -> String {
         if self == {
             .Text -> "text"
@@ -47,19 +46,18 @@ impl BrowserNodeKind {
     }
 }
 
-BrowserDock: enum { Left Right Bottom Floating }
-impl BrowserDock {
+impl DevtoolsDock {
     as_str: fn(self) -> String {
         if self == {
+            .Floating -> "floating"
             .Left -> "left"
             .Right -> "right"
+            .Top -> "top"
             .Bottom -> "bottom"
-            .Floating -> "floating"
         }
     }
 }
 
-BrowserSessionState: enum { Idle Building BuildFailed RuntimeFailure HotReload TestsFailing }
 impl BrowserSessionState {
     as_str: fn(self) -> String {
         if self == {
@@ -98,9 +96,9 @@ BrowserSourceGrant: struct { session_id: String, revision: Int, panel_id: String
 // Action invocation is granted for one session revision, panel, node and action.
 BrowserActionGrant: struct { session_id: String, revision: Int, panel_id: String, node_id: String, action_id: String }
 
-BrowserNode: struct { id: String, kind: BrowserNodeKind, label: String, value: String?, status: String?, children: [BrowserNode] }
+BrowserNode: struct { id: String, kind: DevtoolsNodeKind, label: String, value: String?, status: String?, children: [BrowserNode] }
 impl BrowserNode {
-    new: fn(id: String, kind: BrowserNodeKind, label: String) -> BrowserNode {
+    new: fn(id: String, kind: DevtoolsNodeKind, label: String) -> BrowserNode {
         BrowserNode{id: id, kind: kind, label: label, value: None, status: None, children: [BrowserNode]{}}
     }
     with_value: fn(self, value: String) -> BrowserNode {
@@ -164,14 +162,14 @@ BrowserSelection: struct { panel_id: String, node_id: String? }
 BrowserHostAction: enum {
     OpenPanel(placement: BrowserPlacement, panel_id: String)
     ClosePanel(placement: BrowserPlacement, panel_id: String)
-    DockPanel(placement: BrowserPlacement, panel_id: String, dock: BrowserDock)
+    DockPanel(placement: BrowserPlacement, panel_id: String, dock: DevtoolsDock)
     NavigateSource(placement: BrowserPlacement, panel_id: String, node_id: String, grant: BrowserSourceGrant)
     InvokeAction(placement: BrowserPlacement, panel_id: String, node_id: String, action_id: String, grant: BrowserActionGrant)
 }
 BrowserHostEffect: enum {
     PanelOpened(placement: BrowserPlacement, panel_id: String)
     PanelClosed(placement: BrowserPlacement, panel_id: String)
-    PanelDocked(placement: BrowserPlacement, panel_id: String, dock: BrowserDock)
+    PanelDocked(placement: BrowserPlacement, panel_id: String, dock: DevtoolsDock)
     SourceNavigated(placement: BrowserPlacement, panel_id: String, node_id: String, source: BrowserSourceLocation)
     ActionInvoked(placement: BrowserPlacement, panel_id: String, node_id: String, action_id: String)
 }
@@ -205,7 +203,7 @@ BrowserPanelView: struct {
     status: String
     cursor: Int?
     open: Bool
-    dock: BrowserDock
+    dock: DevtoolsDock
     nodes: [BrowserNode]
 }
 
@@ -243,7 +241,7 @@ impl BrowserHostError {
 impl BrowserHostError.Display { display: fn(&&self) -> String { self.message() } }
 
 // Layout is indexed by BrowserPlacement.index(): in-app, then workbench.
-BrowserPanelLayout: struct { open: Bool, dock: BrowserDock }
+BrowserPanelLayout: struct { open: Bool, dock: DevtoolsDock }
 BrowserPanelState: struct { fact: BrowserPanelFact, layout: [BrowserPanelLayout] }
 
 BrowserHost: struct {
@@ -350,7 +348,7 @@ impl BrowserHost {
         }
         BrowserHostEffect.PanelClosed(placement: placement, panel_id: panel_id)
     }
-    dock_panel: fn(&self, placement: BrowserPlacement, panel_id: String, dock: BrowserDock) -> BrowserHostEffect BrowserHostError! {
+    dock_panel: fn(&self, placement: BrowserPlacement, panel_id: String, dock: DevtoolsDock) -> BrowserHostEffect BrowserHostError! {
         panel := self.panels.get(panel_id) ?? return Err(BrowserHostError.UnknownPanel(panel_id: panel_id))
         panel.layout[placement.index()].dock = dock
         self.panels[panel_id] = panel
