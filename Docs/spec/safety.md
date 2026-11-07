@@ -2080,7 +2080,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/FilesStreams.jet",
-      "line": 24,
+      "line": 34,
       "column": 9,
       "reason": "the freshly opened owned descriptor and the 128-byte stat fact row are live for fstat"
     },
@@ -2381,56 +2381,56 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostHeldDirectory.jet",
-      "line": 179,
+      "line": 206,
       "column": 13,
       "reason": "the owned walk descriptor and terminated part live through openat"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostHeldDirectory.jet",
-      "line": 238,
+      "line": 265,
       "column": 13,
       "reason": "the walk directory and terminated final part live through openat"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostHeldDirectory.jet",
-      "line": 433,
+      "line": 460,
       "column": 5,
       "reason": "the terminated borrowed path and the 256-byte statx buffer are live for the syscall"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostHeldDirectory.jet",
-      "line": 539,
+      "line": 566,
       "column": 13,
       "reason": "the walk directory and terminated final part live through O_PATH|O_NOFOLLOW|O_CLOEXEC openat"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostHeldDirectory.jet",
-      "line": 547,
+      "line": 574,
       "column": 17,
       "reason": "the owned O_PATH descriptor and the caller's 128-byte stat facts live through fstat"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostHeldDirectory.jet",
-      "line": 554,
+      "line": 581,
       "column": 21,
       "reason": "the owned O_PATH descriptor, birth's zeroed empty pathname and three writable words live through statx"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostHeldDirectory.jet",
-      "line": 622,
+      "line": 658,
       "column": 5,
       "reason": "both walk directories and terminated final parts live through renameat/renameat2"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostHeldDirectory.jet",
-      "line": 636,
+      "line": 672,
       "column": 9,
       "reason": "both walk directories and terminated final parts live through linkat"
     },
@@ -9881,7 +9881,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/FaultAllocation.jet | 21:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/FaultSchedule.jet | 32:9 | "an idempotent install: every writer stores the same code address" |
 | Compiler | Compiler/JetRuntime/Source/FilesPathOps.jet | 35:5 | "the terminated raw path and the 128-byte stat fact row are live for the syscall" |
-| Compiler | Compiler/JetRuntime/Source/FilesStreams.jet | 24:9 | "the freshly opened owned descriptor and the 128-byte stat fact row are live for fstat" |
+| Compiler | Compiler/JetRuntime/Source/FilesStreams.jet | 34:9 | "the freshly opened owned descriptor and the 128-byte stat fact row are live for fstat" |
 | Compiler | Compiler/JetRuntime/Source/FilesWalk.jet | 33:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/GeometryGlue.jet | 4:5 | "borrows an initialized aligned word inside a live native geometry carrier" |
 | Compiler | Compiler/JetRuntime/Source/GeometryGlue.jet | 7:5 | "owns a writable aligned word in a fresh native geometry carrier" |
@@ -9924,14 +9924,14 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/HostFiles.jet | 649:5 | "held directory duplicates and terminated names prevent any descriptor-close/reuse race during renameat2" |
 | Compiler | Compiler/JetRuntime/Source/HostFiles.jet | 669:9 | "the held fd and stack-local source-validated winsize word live only through ioctl" |
 | Compiler | Compiler/JetRuntime/Source/HostHeldDirectory.jet | 15:5 | "runtime-init runs before any other thread exists" |
-| Compiler | Compiler/JetRuntime/Source/HostHeldDirectory.jet | 179:13 | "the owned walk descriptor and terminated part live through openat" |
-| Compiler | Compiler/JetRuntime/Source/HostHeldDirectory.jet | 238:13 | "the walk directory and terminated final part live through openat" |
-| Compiler | Compiler/JetRuntime/Source/HostHeldDirectory.jet | 433:5 | "the terminated borrowed path and the 256-byte statx buffer are live for the syscall" |
-| Compiler | Compiler/JetRuntime/Source/HostHeldDirectory.jet | 539:13 | "the walk directory and terminated final part live through O_PATH&#124;O_NOFOLLOW&#124;O_CLOEXEC openat" |
-| Compiler | Compiler/JetRuntime/Source/HostHeldDirectory.jet | 547:17 | "the owned O_PATH descriptor and the caller's 128-byte stat facts live through fstat" |
-| Compiler | Compiler/JetRuntime/Source/HostHeldDirectory.jet | 554:21 | "the owned O_PATH descriptor, birth's zeroed empty pathname and three writable words live through statx" |
-| Compiler | Compiler/JetRuntime/Source/HostHeldDirectory.jet | 622:5 | "both walk directories and terminated final parts live through renameat/renameat2" |
-| Compiler | Compiler/JetRuntime/Source/HostHeldDirectory.jet | 636:9 | "both walk directories and terminated final parts live through linkat" |
+| Compiler | Compiler/JetRuntime/Source/HostHeldDirectory.jet | 206:13 | "the owned walk descriptor and terminated part live through openat" |
+| Compiler | Compiler/JetRuntime/Source/HostHeldDirectory.jet | 265:13 | "the walk directory and terminated final part live through openat" |
+| Compiler | Compiler/JetRuntime/Source/HostHeldDirectory.jet | 460:5 | "the terminated borrowed path and the 256-byte statx buffer are live for the syscall" |
+| Compiler | Compiler/JetRuntime/Source/HostHeldDirectory.jet | 566:13 | "the walk directory and terminated final part live through O_PATH&#124;O_NOFOLLOW&#124;O_CLOEXEC openat" |
+| Compiler | Compiler/JetRuntime/Source/HostHeldDirectory.jet | 574:17 | "the owned O_PATH descriptor and the caller's 128-byte stat facts live through fstat" |
+| Compiler | Compiler/JetRuntime/Source/HostHeldDirectory.jet | 581:21 | "the owned O_PATH descriptor, birth's zeroed empty pathname and three writable words live through statx" |
+| Compiler | Compiler/JetRuntime/Source/HostHeldDirectory.jet | 658:5 | "both walk directories and terminated final parts live through renameat/renameat2" |
+| Compiler | Compiler/JetRuntime/Source/HostHeldDirectory.jet | 672:9 | "both walk directories and terminated final parts live through linkat" |
 | Compiler | Compiler/JetRuntime/Source/HostIO.jet | 21:5 | "value transfers one 56-byte error header and its nullable owned E4 text children" |
 | Compiler | Compiler/JetRuntime/Source/HostIO.jet | 32:5 | "value borrows the complete error header; result exclusively owns 56 fresh bytes" |
 | Compiler | Compiler/JetRuntime/Source/HostIO.jet | 68:5 | "value exclusively owns a new initialized IOError with two owned text children; error lends the caller's pointer slot" |
