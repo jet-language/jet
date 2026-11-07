@@ -297,9 +297,9 @@ ir_set_symbol: fn(symbol: String) -> String Never! {
 
 // A Set builtin by its route symbol: from, len, capacity, is_empty, first,
 // last, max, shuffle, to_list, sort, values, has, insert/add, remove, pop,
-// replace, equal, union, intersection, difference, symmetric_difference,
-// is_subset, is_superset and is_disjoint; None when the builder does not
-// lower `symbol` on Sets.
+// replace, clear, equal, union, intersection, difference,
+// symmetric_difference, is_subset, is_superset and is_disjoint; None when
+// the builder does not lower `symbol` on Sets.
 ir_set_builtin: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, route: String, subject: Int, operands: [Int], span: Span) -> Int? Never! {
     symbol: ir_set_symbol(route)
     if symbol == "jet_set_from" || symbol == "jet_iter_to_set" {
@@ -407,6 +407,19 @@ ir_set_builtin: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, route: S
         ir_walk_close(m, b, walk)
         ir_release(m, b, other)
         return Val(result)
+    }
+    // `clear()`: each key drops and the Set is left empty; its buffer stays
+    // for later inserts, as the Map's `clear` does.
+    if symbol == "std::collections::HashSet::clear" || symbol == "std::collections::BTreeSet::clear" {
+        if operands.len() != 1 -> return Val(ir_fail_slot(b, span, "Set clear with {operands.len() - 1} arguments"))
+        if m.types[shape.key.ty].drop != "" {
+            walk: ir_walk_open(m, b, subject, shape.entry)
+            ir_emit(b.f, IROp.Drop, -1, walk.item, -1, -1, b.line)
+            ir_walk_close(m, b, walk)
+        }
+        zero: ir_word_const(m, b, 0)
+        ir_emit(b.f, IROp.Store, -1, subject, 0, zero, b.line)
+        return Val(-1)
     }
     keyed: symbol == "jet_set_remove" || symbol == "jet_set_pop_kernel" || symbol == "jet_set_replace_kernel"
     if !keyed && symbol != "jet_set_has" && symbol != "jet_set_insert" -> return None

@@ -1669,8 +1669,13 @@ ir_expr: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> Int N
             loop field in fields {
                 member: ir_member_of(m, p, b, storage, field.field.name) ?? return ir_fail_slot(b, span, "field: struct {field.field.name}")
                 // A member of a field's structural union is boxed as that
-                // union.
-                value: ir_value_as(m, p, b, field.value, member.ty, span)
+                // union, by the member's checked type: a distinct member
+                // (`Usd: distinct Int`) shares its base's value row.
+                member_ty: m.types[member.ty].ty.copy()
+                field_ty: ir_ty(p, b, field.value)
+                widened := ir_untag(member_ty) == .Union(_) && !ir_never_type(field_ty)
+                if ir_untag(field_ty) == .Union(_) -> widened = false
+                value: if widened -> ir_widen_union(m, p, b, field.value, member_ty, span) else -> ir_value_as(m, p, b, field.value, member.ty, span)
                 if ir_failed(b) -> return -1
                 if value < 0 -> return ir_fail_slot(b, span, "Unit struct field")
                 ir_member_write(m, p, b, storage, member, value)

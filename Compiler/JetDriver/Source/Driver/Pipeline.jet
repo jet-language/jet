@@ -1768,28 +1768,34 @@ jet_driver_comptime_checked_text_source_add: fn(sources: &[SemaComptimeItemSourc
 // Each function joins the first module with its identity, in place: the
 // module is found through one identity map instead of copying every module
 // passed while searching, and edited without copying it out and back. An
-// incomplete result fails the merge before any module changes. The caller
+// incomplete result fails the merge before any module changes, and the
+// failure names the staged function and why it could not join. The caller
 // builds the bundle's name facts afterwards (jet_driver_merged_names).
-jet_driver_merge_checked_text_functions: fn(graph: &SemaGraphResult, functions: [SemaComptimeFunctionResult]) -> Bool Never! {
+jet_driver_merge_checked_text_functions: fn(graph: &SemaGraphResult, functions: [SemaComptimeFunctionResult]) -> String? Never! {
     module_rows := [String:Int]{}
     loop (index, graph_module) in graph.modules {
         if module_rows.get(graph_module.module_identity) == None -> module_rows[graph_module.module_identity] = index
     }
     loop checked in functions {
-        function: checked.function ?? return false
-        module_index: module_rows.get(checked.module_identity) ?? return false
+        function: checked.function ?? return Val("staged function `{checked.function_key}` of `{checked.module_identity}` has no checked body")
+        module_index: module_rows.get(checked.module_identity) ?? return Val("staged function `{function.key}` names module `{checked.module_identity}`, which the checked graph does not hold")
         duplicate := false
         loop existing_index in 0..<graph.modules[module_index].functions.len() {
             existing: graph.modules[module_index].functions[existing_index]
             if existing.key == function.key -> duplicate = true
         }
         if duplicate -> next
-        if !checked.complete -> return false
-        if !sema_comptime_append_checked_function_to_module(checked, graph.modules[module_index]) -> return false
+        if !checked.complete {
+            reasons := ""
+            loop reason in checked.incomplete_reasons -> reasons = if reasons == "" -> reason.copy() else -> "{reasons}; {reason}"
+            loop diagnostic in checked.diagnostics -> reasons = if reasons == "" -> diagnostic.what.copy() else -> "{reasons}; {diagnostic.what}"
+            return Val("staged function `{function.key}` did not finish checking{if reasons == "" -> "" else -> ": {reasons}"}")
+        }
+        if !sema_comptime_append_checked_function_to_module(checked, graph.modules[module_index]) -> return Val("staged function `{function.key}` could not join module `{checked.module_identity}`")
         loop fact in checked.call_facts -> graph.call_facts.push(fact.copy())
         loop request in checked.calls -> graph.comptime_requests.push(request.copy())
     }
-    true
+    None
 }
 
 // Adds the startup function of every constant computed at startup
@@ -3957,9 +3963,9 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
         registration_graph = jet_driver_merged_names(checked_graph, registration_graph, request.compiler_threads)
     }
     jet_driver_trace_step_end(request.trace_sink, "driver.prelower.merge", comptime_functions.len())
-    if !merged {
-        if !kg.enabled -> return jet_driver_compile_internal_result(load, trace, "staged method closure lost its checked function or registered owner")
-        jet_driver_keep_going_row(kg, "comptime.validate", "-", "ICE", "staged method closure lost its checked function or registered owner", "-")
+    if merged == .Val(problem) {
+        if !kg.enabled -> return jet_driver_compile_internal_result(load, trace, problem)
+        jet_driver_keep_going_row(kg, "comptime.validate", "-", "ICE", problem, "-")
     }
     // The merge was the staged closures' last reader.
     comptime_functions = [SemaComptimeFunctionResult]{}
