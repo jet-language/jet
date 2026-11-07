@@ -1,17 +1,4 @@
-Error [jet.BareQuestionMark]: A bare `?` has no meaning.
-  --> tests/ui/build_action_ungranted.jet:4:96
-    |
-  4 |         action :: b.action("stamp", [], ["stamp"], ["sh", "-c", "printf ok > stamp"], ["Exec"])?
-    |                                                                                                ^
- Why: Fallible calls propagate automatically; `?(text)` is reserved for adding one failure-context frame.
- Fix: Remove the trailing `?`, or write `?(text)` to add one context frame.
-More: jet-lang.dev/e/E-ERR-PROPAGATE
-
-Error [jet.BareQuestionMark]: A bare `?` has no meaning.
-  --> tests/ui/build_action_ungranted.jet:5:81
-    |
-  5 |         app :: b.add_executable("app", ["build_action_ungranted.jet"], [action])?
-    |                                                                                 ^
- Why: Fallible calls propagate automatically; `?(text)` is reserved for adding one failure-context frame.
- Fix: Remove the trailing `?`, or write `?(text)` to add one context frame.
-More: jet-lang.dev/e/E-ERR-PROPAGATE
+Error [jet.BuildAuthorityDenied]: Build action `stamp` needs `Exec`, which this build does not grant
+ Why: Build authority must pass all three independent checks before any probe or action executes.
+ Fix: Grant it with `--allow=Exec` or in package or workspace policy; `build: fn` declares the effect and makes the call inside `#Impure("reason")`
+More: jet-lang.dev/e/E3503

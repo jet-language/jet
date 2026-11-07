@@ -87,6 +87,7 @@ kit_ui_test_run: fn(code: Int, stderr: String) -> KitRun {
     assert_eq(granted.refused, "")
     assert_eq(granted.argv, ["build", "tests/ui/b.jet", "--allow=Exec"])
     assert_eq(granted.streams, "stderr")
+    assert_eq(kit_ui_invocation("// @programmable_build\n// @build_locked\n", "tests/ui/b/run.jet", false).argv, ["build", "tests/ui/b/run.jet", "--locked"])
     assert_eq(kit_ui_arg("// @check_cli\n// @check_cli ignored\n", "check_cli"), Val("ignored"))
 }
 

@@ -16,6 +16,9 @@ kit_ui_directives: fn() -> [KitUIDirective] {
         // A programmable build entry's `jet build` under the invocation grants
         // the directive spells, as `--allow` takes them (`@build_grants Exec`).
         {name: "build_grants", argv: ["build", "$file", "--allow=$arg"], parent: false, exit: "nonzero", streams: "stderr", capability: ""},
+        // `jet build --locked` of a project whose staged `state/lock` records
+        // the generated-input hashes the build must match (E3512 on drift).
+        {name: "build_locked", argv: ["build", "$file", "--locked"], parent: false, exit: "nonzero", streams: "both", capability: ""},
         {name: "jetpack_e1250", argv: ["build", "main.jet", "--offline"], parent: true, exit: "nonzero", streams: "both", capability: ""},
         {name: "web_target", argv: ["build", "$file", "--target=web"], parent: false, exit: "any", streams: "rendered-both", capability: ""},
         {name: "web_run", argv: ["run", "$file"], parent: false, exit: "any", streams: "both", capability: ""},
@@ -33,7 +36,7 @@ kit_ui_directives: fn() -> [KitUIDirective] {
         // runs it, and one with none is refused (kit_ui_invocation).
         {name: "programmable_build", argv: [], parent: false, exit: "any", streams: "", capability: ""}
     }
-    loop name in ["env_facet_missing", "workspace_lock_e1202", "jetlib_version_mismatch", "jetlib_effect_refused", "library_invalid_binding", "parent_control_cancel", "no-os", "build_locked", "jetpack_hangar_digest_mismatch", "jetpack_retired_store_verbs", "target", "cost_cli"] {
+    loop name in ["env_facet_missing", "workspace_lock_e1202", "jetlib_version_mismatch", "jetlib_effect_refused", "library_invalid_binding", "parent_control_cancel", "no-os", "jetpack_hangar_digest_mismatch", "jetpack_retired_store_verbs", "target", "cost_cli"] {
         rows.push(KitUIDirective{name: name, argv: [], parent: false, exit: "any", streams: "", capability: "missing CLI fixture API: {name}"})
     }
     rows

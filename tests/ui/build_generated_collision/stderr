@@ -1,17 +1,11 @@
-Error [jet.BareQuestionMark]: Bare `?` propagation is retired.
-  --> tests/ui/build_generated_collision/run.jet:7:6
+Error [jet.UseTargetNotFound]: Can't find the file `./.jet/generated/main/collision`
+  --> tests/ui/build_generated_collision/run.jet:3:18
     |
-  7 |     }?
-    |      ^
- Why: Fallible calls propagate automatically; `?(text)` is reserved for adding one failure-context frame.
- Fix: Remove the trailing `?`, or write `?(text)` to add one context frame.
-More: jet-lang.dev/e/E-ERR-PROPAGATE
+  3 | use handwritten: "./.jet/generated/main/collision"
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ Why: A file import path must point at an existing `.jet` file next to this file's tree
+ Fix: Create `./.jet/generated/main/collision.jet`, or fix the path in `use "./.jet/generated/main/collision"` (authority path `.jet/generated/main/collision.jet` is missing)
+More: jet-lang.dev/e/E0603
 
-Error [jet.BareQuestionMark]: Bare `?` propagation is retired.
-  --> tests/ui/build_generated_collision/run.jet:8:90
-    |
-  8 |     app :: b.add_executable("app", ["main.jet", ".jet/generated/main/collision.jet"], [])?
-    |                                                                                          ^
- Why: Fallible calls propagate automatically; `?(text)` is reserved for adding one failure-context frame.
- Fix: Remove the trailing `?`, or write `?(text)` to add one context frame.
-More: jet-lang.dev/e/E-ERR-PROPAGATE
+1 problem found
+run `jet explain E0603` to learn more

@@ -1,26 +1,11 @@
-Error [jet.BareQuestionMark]: Bare `?` propagation is retired.
-  --> tests/ui/build_generated_cycle/run.jet:5:6
+Error [jet.GenerationCycle]: Build plan is invalid: generation rounds form a cycle: module `alpha` is generated twice
+  --> tests/ui/build_generated_cycle/run.jet:7:7
     |
-  5 |     }?
-    |      ^
- Why: Fallible calls propagate automatically; `?(text)` is reserved for adding one failure-context frame.
- Fix: Remove the trailing `?`, or write `?(text)` to add one context frame.
-More: jet-lang.dev/e/E-ERR-PROPAGATE
+  7 |     b.generate("alpha") {
+    |       ^^^^^^^^
+ Why: Generated source must reach a bounded deterministic order, not loop until quiescent
+ Fix: Break the dependency between these generators or give each generated module one owner
+More: jet-lang.dev/e/E3511
 
-Error [jet.BareQuestionMark]: Bare `?` propagation is retired.
-  --> tests/ui/build_generated_cycle/run.jet:8:6
-    |
-  8 |     }?
-    |      ^
- Why: Fallible calls propagate automatically; `?(text)` is reserved for adding one failure-context frame.
- Fix: Remove the trailing `?`, or write `?(text)` to add one context frame.
-More: jet-lang.dev/e/E-ERR-PROPAGATE
-
-Error [jet.BareQuestionMark]: Bare `?` propagation is retired.
-  --> tests/ui/build_generated_cycle/run.jet:9:118
-    |
-  9 |     app :: b.add_executable("app", ["main.jet", ".jet/generated/main/alpha.jet", ".jet/generated/main/beta.jet"], [])?
-    |                                                                                                                      ^
- Why: Fallible calls propagate automatically; `?(text)` is reserved for adding one failure-context frame.
- Fix: Remove the trailing `?`, or write `?(text)` to add one context frame.
-More: jet-lang.dev/e/E-ERR-PROPAGATE
+1 problem found
+run `jet explain E3511` to learn more
