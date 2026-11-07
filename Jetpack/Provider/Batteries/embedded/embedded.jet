@@ -416,79 +416,65 @@ control_account: fn(state: &ControlState, work_us: Int) -> Bool {
 
 control_timing_status: fn() -> String { return "deadline comparison is accounting, not WCET proof" }
 
-SlotState: enum {
-    Empty
-    Pending(Int)
-    Confirmed(Int)
-    Rejected(Int)
-}
-
+// The trial slot holds at most one staged image: the verifier's verdict on it,
+// then whether confirm_trial accepted it for activation.
 SlotPolicy: struct {
     active: Int
-    trial: SlotState
+    staged: Bool
+    trial: Int
+    authenticated: Bool
+    confirmed: Bool
     rollback_count: Int
 }
 
 slot_policy: fn(active: Int) -> SlotPolicy {
-    return SlotPolicy{active: active, trial: SlotState.Empty, rollback_count: 0}
+    return SlotPolicy{active: active, staged: false, trial: 0, authenticated: false, confirmed: false, rollback_count: 0}
 }
 
 // Authentication is an input from the image verifier. Keeping this policy
 // separate from flash persistence avoids claiming a signer or bootloader
 // that the current Core API does not provide.
 stage_image: fn(slots: &SlotPolicy, image_digest: Int, authenticated: Bool) -> Bool {
-    if !authenticated {
-        slots.trial = SlotState.Rejected(image_digest)
-        return false
-    }
-    slots.trial = SlotState.Pending(image_digest)
-    return true
+    slots.staged = true
+    slots.trial = image_digest
+    slots.authenticated = authenticated
+    slots.confirmed = false
+    return authenticated
 }
 
 confirm_trial: fn(slots: &SlotPolicy) -> Bool {
-    if slots.trial == {
-        .Pending(digest) -> {
-            slots.trial = SlotState.Confirmed(digest)
-            return true
-        }
-        else -> return false
-    }
+    if !slots.staged || !slots.authenticated || slots.confirmed -> return false
+    slots.confirmed = true
+    return true
+}
+
+slot_clear: fn(slots: &SlotPolicy) {
+    slots.staged = false
+    slots.trial = 0
+    slots.authenticated = false
+    slots.confirmed = false
 }
 
 activate_confirmed: fn(slots: &SlotPolicy) -> Bool {
-    if slots.trial == {
-        .Confirmed(digest) -> {
-            slots.active = digest
-            slots.trial = SlotState.Empty
-            return true
-        }
-        else -> return false
-    }
+    if !slots.staged || !slots.confirmed -> return false
+    slots.active = slots.trial
+    slot_clear(slots)
+    return true
 }
 
+// A pending or rejected image rolls back; a confirmed one only activates.
 rollback_trial: fn(slots: &SlotPolicy) -> Bool {
-    if slots.trial == {
-        .Pending(_) -> {
-            slots.trial = SlotState.Empty
-            slots.rollback_count += 1
-            return true
-        }
-        .Rejected(_) -> {
-            slots.trial = SlotState.Empty
-            slots.rollback_count += 1
-            return true
-        }
-        else -> return false
-    }
+    if !slots.staged || slots.confirmed -> return false
+    slot_clear(slots)
+    slots.rollback_count += 1
+    return true
 }
 
 slot_state: fn(slots: &SlotPolicy) -> String {
-    if slots.trial == {
-        .Empty -> return "empty"
-        .Pending(_) -> return "pending"
-        .Confirmed(_) -> return "confirmed"
-        .Rejected(_) -> return "rejected"
-    }
+    if !slots.staged -> return "empty"
+    if !slots.authenticated -> return "rejected"
+    if slots.confirmed -> return "confirmed"
+    return "pending"
 }
 
 // A receipt is only reproducible after real build, programmer, and debug
