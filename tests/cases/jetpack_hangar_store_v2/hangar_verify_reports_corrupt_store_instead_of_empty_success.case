@@ -3,15 +3,18 @@
 # Claim: stdout does not contain no hangar object (rs:1574)
 # Claim: the source payload is unchanged (rs:1575-1578)
 # Fixture migrated: the Rust jet-binary verify (rs:1544) runs as `jetpack hangar verify`; `jet hangar` is not a jet command on current dev (E2101)
-# step-2.sh is the Rust journal corruption (rs:1535-1542); step-4.sh restores it (rs:1556) and checks the payload.
+# The capture and setup lines after the ingest are the Rust journal corruption (rs:1535-1542); the copy back restores it (rs:1556).
 fixture: hangar_verify_reports_corrupt_store_instead_of_empty_success.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
 env: JETPACK_ROOT={work}/jetpack
 step: jetpack hangar ingest source --name verify-corrupt --ref verify-corrupt@fixture --no-color
 exit: 0 # rs:1515-1529 exit 0
-step: sh {work}/step-2.sh
-exit: 0 # rs:1535-1542 corrupt the committed closure transaction
+# rs:1535-1542 overwrite the committed closure transaction, keeping its bytes
+capture: txn = sole-entry jetpack/hangar/closure-db/journal ext = "txn"
+chmod: {cap:txn} 0644
+copy: {cap:txn} journal.original
+write: {cap:txn} = "corrupt closure journal"
 step: jetpack hangar verify verify-corrupt@fixture --json --no-color
 exit: 2 # rs:1544-1574
 stdout: ~ "\"schema\":\"jet.report/v3\"" # rs:1544-1574
@@ -19,5 +22,5 @@ stdout: ~ "\"code\":\"E1340\"" # rs:1544-1574
 stdout: ~ "\"what\":\"could not read the Hangar\"" # rs:1544-1574
 stdout: !~ "no hangar object" # rs:1574
 stderr: empty # rs:1564-1568 JSON verify leaks no stderr
-step: sh {work}/step-4.sh
-exit: 0 # rs:1556,1575-1578 journal restored; payload unchanged
+copy: journal.original {cap:txn} # rs:1556 restore the journal
+file: source/payload = "live bytes" # rs:1575-1578 payload unchanged

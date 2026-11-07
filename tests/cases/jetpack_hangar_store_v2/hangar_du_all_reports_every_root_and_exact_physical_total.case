@@ -1,8 +1,9 @@
 # tests/jetpack_criterion4.rs::hangar_du_all_reports_every_root_and_exact_physical_total at tests/jetpack_criterion4.rs:34; hand-port
 # Claim: `hangar du --all --json` exits 0 and reports both sibling roots jet-omp and jet-omp2 plus the shared CAS path (rs:46-82)
 # Claim: total_bytes equals the allocated bytes (st_blocks * 512, each inode once) of shared-cas, jet-omp/hangar and jet-omp2/hangar (rs:84-96)
-# step-1.sh writes the Rust payloads (rs:39-44); step-3.sh is measured_bytes (rs:16-30) as `du -scB1`, which counts
-# st_blocks * 512 per inode once across its arguments. The Rust test parsed jet.report/v1; the du result is now
+# The fixture holds the Rust payloads (rs:39-44); measured.jet is measured_bytes (rs:16-30): st_blocks * 512 per
+# inode once across its roots, directories included. It runs on its own Jetpack root and store so the jet run
+# adds nothing to the measured roots. The Rust test parsed jet.report/v1; the du result is now
 # STATUS_SCHEMA jet.status/v1 (Jetpack/Foundation/Source/Report.jet).
 requires: os-name:linux
 fixture: hangar_du_all_reports_every_root_and_exact_physical_total.fixture
@@ -13,8 +14,7 @@ env: HOME={work}
 env: XDG_DATA_HOME={work}/data
 env: XDG_STATE_HOME={work}/state
 env: XDG_CACHE_HOME={work}
-step: sh {work}/step-1.sh
-exit: 0 # rs:39-44
+# rs:39-44 the payloads are fixture files
 step: jetpack hangar du --all --json --no-color
 exit: 0 # rs:56-61
 stdout: ~ "\"schema\":\"jet.status/v1\"" # rs:62 the du result
@@ -22,7 +22,10 @@ stdout: ~ "\"root\":\"{work}/jet-omp\"" # rs:64-66
 stdout: ~ "\"root\":\"{work}/jet-omp2\"" # rs:67-72
 json: stdout doc $.shared_cas.path = "{work}/shared-cas" # rs:73-82
 capture: total stdout doc $.total_bytes
-step: sh {work}/step-3.sh
+step: jet run --allow=FS.Read measured.jet
+env: JETPACK_ROOT={work}/tools/jetpack
+env: JET_STORE_DIR={work}/tools/store
+unset: JETPACK_SHARED_CAS
 exit: 0 # rs:84-87 measured_bytes over the shared CAS and both hangars
 capture: measured = text stdout.trim
 cap:total: = {cap:measured} # rs:88-96 total_bytes is the exact physical total
