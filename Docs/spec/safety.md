@@ -4953,14 +4953,14 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetTestKit/Source/Exec.jet",
-      "line": 356,
+      "line": 390,
       "column": 5,
       "reason": "the testkit stops its own step child at the resident-memory guard"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetTestKit/Source/Exec.jet",
-      "line": 541,
+      "line": 575,
       "column": 9,
       "reason": "the testkit stops a process its own case left running in the case scratch"
     },
@@ -10315,8 +10315,8 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetSema/Tests/ScalarGlobalFixtures.jet | 21:5 | "single-threaded test: plain module writes of each scalar type" |
 | Compiler | Compiler/JetSema/Tests/XmlCheckerRootsFixtures.jet | 10:5 | "no raw operations in this regression" |
 | Compiler | Compiler/JetSema/Tests/XmlCheckerRootsFixtures.jet | 11:9 | "nested tail retains its value grammar" |
-| Compiler | Compiler/JetTestKit/Source/Exec.jet | 356:5 | "the testkit stops its own step child at the resident-memory guard" |
-| Compiler | Compiler/JetTestKit/Source/Exec.jet | 541:9 | "the testkit stops a process its own case left running in the case scratch" |
+| Compiler | Compiler/JetTestKit/Source/Exec.jet | 390:5 | "the testkit stops its own step child at the resident-memory guard" |
+| Compiler | Compiler/JetTestKit/Source/Exec.jet | 575:9 | "the testkit stops a process its own case left running in the case scratch" |
 | Compiler | Compiler/JetTestKit/Source/StepsControl.jet | 133:5 | "kill(pid, 0) observes the case-owned child without sending a signal" |
 | Compiler | Compiler/JetTestKit/Source/StepsSessions.jet | 363:5 | "the case explicitly authorizes signalling its own spawned child" |
 | Core | Core/Auth/Auth.jet | 113:5 | "auth PASETO v4.public verification uses the fixed Ed25519 primitive" |

@@ -128,9 +128,11 @@ kit_exec_base_value: fn(name: String, env: KitEnv, scratch: String) -> String? {
 
 // Inherit the caller's environment, removing only the compiler-extension hook.
 // Cache roots are run-wide; temporary, schema, jetpack and home roots are
-// case-local. Callers check kit_exec_home_refusal before spawning.
+// case-local. Callers check kit_exec_home_refusal before spawning. Output is
+// streamed, not text-captured: a child may write any bytes, so the kit reads
+// them as bytes and its receipt text is lossy instead of a failed wait.
 kit_exec_spec: fn(env: KitEnv, argv: [String], cwd: String, scratch: String, overlay: [KitEnvVar]) -> ProcessSpec {
-    spec := process.cmd(argv).cwd(cwd).stdout(.Capture).stderr(.Capture).stdin(.Stream).timeout(env.timeout)
+    spec := process.cmd(argv).cwd(cwd).stdout(.Stream).stderr(.Stream).stdin(.Stream).timeout(env.timeout)
     if env.env_clear -> spec = spec.env_clear()
     else {
         spec = spec.env_remove("JET_COMPILER_EXTENSION")
@@ -284,7 +286,14 @@ kit_exec_run: fn(env: KitEnv, argv: [String], cwd: String, scratch: String, stdi
         .None -> child.stdin.close()
     }
     kit_exec_wait(child, watched, started, -1)
+    // Every output byte, read before the wait detaches the readers.
+    output := [U8]{}
+    errors := [U8]{}
+    read_error := kit_exec_read_stdout(child.stdout, output)
+    errors_read: kit_exec_read_stderr(child.stderr, errors)
+    if read_error == "" -> read_error = errors_read
     receipt: child.wait() ?? return kit_exec_failed("wait: {err}")
+    if read_error != "" -> return kit_exec_failed(read_error)
     // The entry's claim: the child's resident peak and, on a memory-backed
     // scratch, the files the row holds once it is done.
     if env.peak == .Val(cell) {
@@ -292,9 +301,34 @@ kit_exec_run: fn(env: KitEnv, argv: [String], cwd: String, scratch: String, stdi
         permit := cell.guard_edit()
         if held > permit.value.bytes -> permit.value.bytes = held
     }
-    run := kit_exec_receipt(receipt, started.elapsed().ns, if input_error == "" -> "" else -> kit_exec_input_detail(input_error, receipt.code, receipt.errors))
+    errors_text: kit_steps_utf8_lossy(errors)
+    run := kit_exec_receipt(receipt, started.elapsed().ns, if input_error == "" -> "" else -> kit_exec_input_detail(input_error, receipt.code, errors_text))
+    run.stdout = kit_steps_utf8_lossy(output)
+    run.stderr = errors_text
+    run.stdout_bytes = Val(output)
+    run.stderr_bytes = Val(errors)
     if watched.killed -> run.limit_hit = "memory"
     run
+}
+
+// The collector holds each output whole, so reading one to its end before the
+// other cannot stall the child.
+kit_exec_read_stdout: fn(stream: ProcessStdoutStream, bytes: &[U8]) -> String {
+    loop {
+        chunk: stream.read(1048576) ?? return "read stdout: {err}"
+        if chunk.len() == 0 -> return ""
+        bytes.extend(chunk)
+    }
+    ""
+}
+
+kit_exec_read_stderr: fn(stream: ProcessStderrStream, bytes: &[U8]) -> String {
+    loop {
+        chunk: stream.read(1048576) ?? return "read stderr: {err}"
+        if chunk.len() == 0 -> return ""
+        bytes.extend(chunk)
+    }
+    ""
 }
 
 // Waits on this task until the child exits or, when `until` is not negative,

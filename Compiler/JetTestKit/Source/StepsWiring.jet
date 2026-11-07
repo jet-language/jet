@@ -99,17 +99,20 @@ kit_steps_wiring_valid: fn(key: String, original: String) -> Bool {
     words.len() == 3 && kit_steps_terminal_size(words[0]) && words[1] == "at" && kit_steps_offset_ns(words[2]) != None
 }
 
-// Core Capture drains concurrently. Null discards at this boundary; its fd-type
+// The Core collector drains concurrently. Null discards at this boundary; its fd-type
 // and 64 MiB lifetime-budget differences require process-null-fd refusal where
 // the original observes either. File wiring is observable only after completion;
 // a live observation requires process-file-fd instead.
 kit_steps_wiring_finish: fn(step: KitStep, context: KitStepCtx, state: KitStepState) -> KitStepResult {
     result := state
-    loop pair in [[step.stdout_target, result.last.stdout], [step.stderr_target, result.last.stderr]] {
-        if pair[0] == "" || pair[0] == "null" -> next
-        path: kit_steps_work_path(pair[0], context.env, context.work, context.scratch, state.built) ?? return kit_steps_action_error(state, "output file escapes work")
+    loop stream in ["stdout", "stderr"] {
+        target: if stream == "stdout" -> step.stdout_target else -> step.stderr_target
+        if target == "" || target == "null" -> next
+        path: kit_steps_work_path(target, context.env, context.work, context.scratch, state.built) ?? return kit_steps_action_error(state, "output file escapes work")
         files.create_dir_all(files.dirname(path)) ?? return kit_steps_action_error(state, "output file parent: {err}")
-        files.write(path, pair[1]) ?? return kit_steps_action_error(state, "output file write: {err}")
+        // The file holds the bytes the child wrote, not their decoding.
+        bytes: if stream == "stdout" -> result.last.stdout_bytes ?? result.last.stdout.bytes() else -> result.last.stderr_bytes ?? result.last.stderr.bytes()
+        files.write_bytes(path, bytes) ?? return kit_steps_action_error(state, "output file write: {err}")
     }
     if step.stdout_target == "null" -> result.last.stdout = ""
     if step.stderr_target == "null" -> result.last.stderr = ""
