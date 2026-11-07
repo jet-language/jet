@@ -1,0 +1,16 @@
+# `jet --help` and `jet help` name the version `jet --version` prints:
+# {jet-semver} is read from the `jet --version` banner of the jet under test.
+step: jet --version
+normalize: replace {jet-semver} "VERSION"
+exit: 0
+stdout: ^= "Jet VERSION\n" # the release lines after the version are not part of this claim
+step: jet --help
+env: NO_COLOR=1
+normalize: replace {jet-semver} "VERSION"
+exit: 0
+stdout: ^= "Welcome to Jet! (vVERSION)\n" # the banner names the version; the command list is help_lists_commands_by_frequency_rank's claim
+step: jet help
+env: NO_COLOR=1
+normalize: replace {jet-semver} "VERSION"
+exit: 0
+stdout: ^= "Welcome to Jet! (vVERSION)\n" # the banner names the version; the command list is help_lists_commands_by_frequency_rank's claim
