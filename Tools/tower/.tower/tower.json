@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6669,
-    "rev": 95682,
+    "nextNum": 6670,
+    "rev": 95686,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -97481,11 +97481,11 @@
         {
           "n": 6,
           "text": "These test packages compile and pass, or are deleted when dead: Compiler/JetSema/Tests (40 problems), Compiler/JetDriver/Tests (6), Compiler/JetRepl/Tests (51), Compiler/JetCli/Commands (12) and Compiler/JetCli/Commands/Tests (94), Compiler/JetImpact/Tests (path dependency jet_env_model escapes its parent), Compiler/JetFoundation/Data (6), Compiler/JetTestKit/Probes (inline Package facts beside package.jet).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T05:21:19.378Z"
+          "evidence": "PortsLead-2 on dev ccfbacc571, jet test with JET_BIN set: JetSema/Tests 27/0, JetDriver/Tests 19/0, JetCli/Commands/Tests 49/0, JetImpact/Tests 8/0, JetTestKit/Probes 1/0. JetCli/Commands and JetFoundation/Data have no tests and exit 0; JetRepl/Tests no longer exists. No KF line on dev for any of them. The fixes landed in 0b2a48df2c, 4af5a352ef and d16f96e61e.",
+          "at": "2026-11-07T10:02:28.489Z"
         },
         {
           "n": 7,
@@ -97508,11 +97508,11 @@
         {
           "n": 9,
           "text": "The package rows that fail on dev a499bfc612 in jet test Compiler --profile packages (CoreCliLead-2 bare run, 2146 rows) pass or are deleted when dead. Rows: Compiler/JetBackend/Tests (no run.jet or #Test: delete), Compiler/JetImpact (PathDependencyEscape jet_env_model), Compiler/JetRuntime (UnknownFunction os_store_i64; the runtime has to be tested in the mode it is built in), Compiler/Prelude (ReservedDunderName __live_arg; likewise), and Jetpack/Publication/Tests (api_diff_detects_removed_fn, api_diff_detects_changed_signature, 'api snapshot rows keep each line as its signature'). Package rows that need a tool outside the release environment (node, ssh) either stop needing it or declare it as a host requirement and SKIP-HOST, like the cases suite's tool: rows.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T08:48:43.492Z"
+          "evidence": "d16f96e61e (PortsLead-2): JetImpact declares jet_env_model (jet test exits 0). JetRuntime and Prelude are ASSEMBLED_PACKAGES in Compiler/test.jet and report skipped rows: JetRuntime is assembled by the chain and its registries run in the registries profile; Prelude is embedded and has no #Test. The dead JetBackend/Tests run-script is replaced by a real #Test, NativeOutputDiagnostic.jet, whose failure is a product defect now on #6669. Publication's 35 API-row literals are restored to the rows sema emits, and the 3 target rows PASS (298/1; the 1 needs JET_BIN, which the suite sets). 7 KF lines dropped. LaneCheck CHECK OK. Confirm in the next batch's packages profile.",
+          "at": "2026-11-07T10:02:27.621Z"
         }
       ],
       "refs": [],
@@ -97523,7 +97523,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T05:21:14.209Z",
-      "updated": "2026-11-07T09:34:09.537Z",
+      "updated": "2026-11-07T10:02:28.489Z",
       "updatedBy": "Main",
       "criteriaLastN": 9
     },
@@ -98437,6 +98437,47 @@
       "needsAcceptance": false,
       "created": "2026-11-07T09:39:23.169Z",
       "updated": "2026-11-07T09:39:33.324Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1
+    },
+    {
+      "id": "c0x5m1jn",
+      "num": 6669,
+      "title": "Native output check report renders from E3015, which is now UnhandledEntryFailure: no registered row for 'Output check not run'",
+      "body": "Found by PortsLead-2 in d16f96e61e (#6649 c9). The host renders the not-run output check report from registered row E3015, but E3015 is now jet.UnhandledEntryFailure, and no registered diagnostic has the 'Output check not run…' text. tests/cli/native_output_check_fatal.txt and test-native-test-contract.mjs still expect that text. Compiler/JetBackend/Tests/NativeOutputDiagnostic.jet (a new #Test) fails on it and carries a KF line. I4: every diagnostic needs its own registered code, what/why/fix text and a UI snapshot.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The not-run output check report has its own registered diagnostic (code, what/why/fix, UI snapshot), and the host renders it from that code. Compiler/JetBackend/Tests/NativeOutputDiagnostic.jet passes and its KF line is removed; tests/cli/native_output_check_fatal.txt matches the registered text; test-native-test-contract.mjs is ported or deleted with its #6035 group.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T10:02:26.801Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G5"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-07T10:02:14.900Z",
+      "updated": "2026-11-07T10:02:26.801Z",
       "updatedBy": "Main",
       "criteriaLastN": 1
     }
@@ -186342,6 +186383,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-07T10:02:28.489Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c08512l6",
+      "note": "#6"
+    },
+    {
+      "at": "2026-11-07T10:02:27.621Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c08512l6",
+      "note": "#9"
+    },
+    {
+      "at": "2026-11-07T10:02:26.802Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0x5m1jn",
+      "note": "#1 The not-run output check report has its own registered diagn"
+    },
+    {
+      "at": "2026-11-07T10:02:14.901Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0x5m1jn",
+      "note": "Native output check report renders from E3015, which is now UnhandledEntryFailure: no registered row for 'Output check not run'"
+    },
     {
       "at": "2026-11-07T10:00:29.093Z",
       "by": "Main",
