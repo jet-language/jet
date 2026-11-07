@@ -9000,7 +9000,7 @@ sema_finalize_graph: fn(resolved: &&SemaRegistrationGraph, trail: &SemaGraphTrai
     resolved_graph.derive_checked = [String:Bool]{}
     incremental: if session == .Val(_) -> true else -> false
     web_checks: sema_web_partition_active(resolved_graph)
-    sema_core_demand_index(resolved_graph, (resolved_graph.check_tests || resolved_graph.core_lowering_roots != None) && !resolved_graph.retain_programs && !incremental && !web_checks)
+    sema_core_demand_index(resolved_graph, (resolved_graph.check_tests || resolved_graph.core_lowering_roots != None || resolved_graph.retained_core_demand) && (!resolved_graph.retain_programs || resolved_graph.retained_core_demand) && !incremental && !web_checks)
     all_modules: loop module_index in 0..<resolved_graph.modules.len() -> module_index
     modules := [SemaGraphModuleResult]{}
     // The body pass's facts serve the codec and derive waves after it while

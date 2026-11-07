@@ -3624,8 +3624,10 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     registration_graph.plugin_facts = jet_driver_plugin_facts(request)
     if request.mode == JetDriverCompileMode.Check -> registration_graph.check_tests = true
     if checked_projection || request.mode == JetDriverCompileMode.Doc -> registration_graph.retain_programs = true
-    // A compile that lowers checks Core bodies on demand (CoreDemand.jet);
-    // JET_KEEP_GOING checks every body.
+    if request.doc_core_on_demand -> registration_graph.retained_core_demand = true
+    // A compile that lowers, a Check compile and a `doc_core_on_demand` Doc
+    // compile check Core bodies on demand (CoreDemand.jet); JET_KEEP_GOING
+    // checks every body.
     lowers: request.mode == JetDriverCompileMode.Program || request.mode == JetDriverCompileMode.Test || request.mode == JetDriverCompileMode.Eval || request.mode == JetDriverCompileMode.RootRun
     if lowers && !kg.enabled -> registration_graph.core_lowering_roots = Val(jet_driver_core_lowering_roots(registration_graph))
     if registration_graph.internal_problem != None {

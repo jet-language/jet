@@ -31,9 +31,23 @@ jet_cli_fix_round: fn(fixes: [JetCLIFix], repairs: [JetCLIFix], all: Bool) -> Je
     JetCLIFixRound{fixes: usable_repairs, held: true}
 }
 
+// The Doc compile of `file` with its bytes replaced by `source` that a
+// `jet fix` query reads: the entry's diagnostics and definition facts alone,
+// so Core bodies wait for demand (JetDriverCompileRequest.doc_core_on_demand).
+jet_cli_fix_compile: fn(file: String, source: String) -> JetCLICompiled {
+    if jet_cli_prepare_overlays(file, file, [JetCLIOverlay]{JetCLIOverlay{path: file, source: source}}, false, None, JetDriverCompileMode.Doc) == {
+        .Refused(output) -> JetCLICompiled.Refused{output: output.move()}
+        .Prepared(request, snapshot) -> {
+            demanded := request.move()
+            demanded.doc_core_on_demand = true
+            jet_cli_compile_prepared(JetCLIPrepared.Prepared{request: demanded.move(), snapshot: snapshot.move()}, None, None)
+        }
+    }
+}
+
 jet_cli_fix_collect: fn(file: String, source: String, all: Bool) -> JetCLIFixQuery {
     diagnostics := [Diagnostic]{}
-    if jet_cli_compile_entry(file, false, None, JetDriverCompileMode.Doc, Val(source), None) == {
+    if jet_cli_fix_compile(file, source) == {
         .Refused(output) -> return JetCLIFixQuery.Refused{output: output}
         .Compiled(result, snapshot) -> {
             if result.internal_problem == .Val(problem) -> return JetCLIFixQuery.Refused{output: jet_cli_ice(problem)}
