@@ -1,5 +1,6 @@
 // Native allocation rail witnesses. All diagnostic/status bytes are observed
-// by run-world-sentry-fixtures.mjs; returning zero is not a fake OOM fallback.
+// by the world/sentry plain transport (Tools/agent/CompilerRegistries.jet);
+// returning zero is not a fake OOM fallback.
 alloc_policy_tracker_empty: fn() -> Bool {
     #Unsafe("the single-threaded fixture reads the process-lifetime tracked-node count after all its payloads were freed") {
         return os_load_i64(wrapping(alloc_root + I64{200})) == I64{0}

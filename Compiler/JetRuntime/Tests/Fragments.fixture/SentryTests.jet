@@ -176,6 +176,21 @@ sentry_test_report_exit: fn() {
     sentry_test_require(jet_rt_sentry_check(value + I64{1}, I64{8}, I64{8}, I64{1}) == I64{3})
     sentry_test_require(sentry_remainder(I64{-1}, I64{3}) == I64{0})
     sentry_test_require(jet_rt_sentry_check(I64{-1}, I64{2}, I64{1}, I64{0}) == I64{1})
+    // At one address the newest registration wins. A live registration made
+    // after an expiry shadows it: an over-read is a live-range boundary.
+    sentry_test_reset()
+    jet_rt_sentry_register_allocation(value, I64{8})
+    jet_rt_sentry_quarantine(value, I64{8})
+    jet_rt_sentry_register_allocation(value, I64{8})
+    sentry_test_require(jet_rt_sentry_check(value, I64{9}, I64{8}, I64{1}) == I64{5})
+    sentry_test_require(jet_rt_sentry_check(value, I64{8}, I64{8}, I64{1}) == I64{0})
+    // An expiry recorded after a live registration still reports expired.
+    sentry_test_reset()
+    jet_rt_sentry_register_allocation(value, I64{8})
+    frame = jet_rt_sentry_frame_enter()
+    jet_rt_sentry_register_stack_allocation(value, I64{8})
+    jet_rt_sentry_frame_leave(frame)
+    sentry_test_require(jet_rt_sentry_check(value, I64{9}, I64{8}, I64{1}) == I64{4})
     sentry_test_leave(save)
     sentry_test_reset()
     jet_rt_free(value, I64{16}, I64{8})
@@ -199,28 +214,6 @@ sentry_test_report_exit: fn() {
     sentry_test_leave(save)
     jet_rt_free(value, I64{8}, I64{8})
     jet_rt_free(save, I64{80}, I64{8})
-    I64{0}
-}
-
-#Export(c) jet_rt_sentry_fixture_inline: fn(callback: I64) -> I64 {
-    sentry_test_reset()
-    root: scheduler_control_new()
-    save: jet_rt_alloc(I64{32}, I64{8})
-    scheduler_control_enter(root, save)
-    body: scheduler_body_enter()
-    #Unsafe("the checked Source callback uses the exact two-word native ABI") {
-        _ := os_call2_i64(callback, I64{0}, I64{0})
-    }
-    sentry_test_require(jet_rt_session_status() == I64{5})
-    sentry_test_require(sync_load(sentry_root + I64{88}) == I64{0})
-    sentry_test_require(sentry_current_frame() == I64{0})
-    record: scheduler_control_take_stop(root)
-    sentry_test_require(sync_load(record + I64{48}) == I64{1})
-    scheduler_stop_drop(record)
-    scheduler_body_leave(body)
-    scheduler_control_leave(save)
-    scheduler_control_drop(root)
-    jet_rt_free(save, I64{32}, I64{8})
     I64{0}
 }
 // The real non-stopping source-gate witness.

@@ -54,6 +54,10 @@ ROOT_PRIMARY_ORDER: " _-,;:!?.'\"()[]{{}}@*/\\&#%`^+<=>|~$0123456789abcdefghijkl
 CRYPTO: [String]{"AgeCodec", "AgeV1", "CryptoAead", "CryptoChaCha", "CryptoEd25519", "CryptoEd25519Signature", "CryptoEntropy", "CryptoHash", "CryptoHkdf", "CryptoOsEntropy", "CryptoWipe", "CryptoX25519", "Sha256"}
 C_FIXTURES: [String]{"EnvironmentLeaves", "FaultSchedule", "IterCharge", "ProgressState", "HostFault", "FloatBits", "TerminalColor", "TrapReport", "VaultHooks", "VaultProvider", "Thread", "HostSpawn", "CompilerEnv", "CompilerRoutes", "CompilerNeededJSON", "CompilerNeededURL", "CompilerNeededMathText", "DynNative"}
 FOUR_MODES: [String]{"assemble", "lower", "link", "run"}
+// The fragments the world/sentry C host drives, composed into one unit in
+// this order, and the C hosts that link against the same object.
+WORLD_SENTRY: [String]{"World", "Sentry", "TestScope", "AllocationPolicy"}
+WORLD_SENTRY_LINKED: [String]{"LogicalEnvironmentTests", "LinkNativeTests"}
 
 #Error
 Problem: struct {
@@ -118,6 +122,7 @@ Kit: struct {
 
 // How a native registry is driven: the runner under Compiler/*/Tests and the
 // verdict that admits it. `blocked` names a registry without a transport.
+// `fragments` names the fragments a plain transport's unit composes.
 Spec: struct {
     kind: String
     name: String
@@ -129,6 +134,7 @@ Spec: struct {
     witness: String
     expected_file: String
     blocked: String
+    fragments: [String]
 }
 
 Runtime: struct {
@@ -653,7 +659,7 @@ strip_imports: fn(text: String) -[Exec, IO]> String Never! {
 // --- transports ---------------------------------------------------------------
 
 spec: fn(kind: String, name: String, runner: String) -> Spec Never! {
-    Spec{kind: kind, name: name, runner: runner, modes: [String]{}, crypto: false, call: None, expected: "", witness: "", expected_file: "", blocked: ""}
+    Spec{kind: kind, name: name, runner: runner, modes: [String]{}, crypto: false, call: None, expected: "", witness: "", expected_file: "", blocked: "", fragments: [String]{}}
 }
 
 specification: fn(id: String) -> Spec? Never! {
@@ -677,6 +683,7 @@ specification: fn(id: String) -> Spec? Never! {
             "TestSuite" -> Val((call: None, witness: "{RT}test-suite-fixture.c", expected: "test suite: ok\n"))
             "Parallel" -> Val((call: None, witness: "{RT}parallel-fixture.c", expected: ""))
             "Scheduler" -> Val((call: None, witness: "{RT}scheduler-fixture.c", expected: ""))
+            "World" | "Sentry" | "TestScope" | "AllocationPolicy" -> Val((call: None, witness: "{RT}world-sentry-fixture.c", expected: ""))
             else -> None
         }
         if plain == .Val(table) {
@@ -684,6 +691,7 @@ specification: fn(id: String) -> Spec? Never! {
             found.call = table.call.copy()
             found.witness = table.witness.copy()
             found.expected = table.expected.copy()
+            found.fragments = if WORLD_SENTRY.contains(name) -> WORLD_SENTRY.copy() else -> [String]{name.copy()}
             return Val(found)
         }
         if ([String]{"CodecCSV", "CodecEnv", "DynCodec", "CompilerFileLeaves"}).contains(name) -> return Val(spec("codec-fixture", name, "{RT}run-native-codec-file-leaves.mjs"))
@@ -700,7 +708,6 @@ specification: fn(id: String) -> Spec? Never! {
             return Val(found)
         }
         suite: if name == {
-            "AllocationPolicy" | "World" | "Sentry" | "SentryInline" | "TestScope" -> Val((runner: "run-world-sentry-fixtures.mjs", modes: FOUR_MODES.copy()))
             "Channel" -> Val((runner: "run-channel-fixtures.mjs", modes: FOUR_MODES.copy()))
             "Stm" -> Val((runner: "run-channel-fixtures.mjs", modes: [String]{"assemble-stm", "lower", "link-stm", "run-stm"}))
             "Sync" -> Val((runner: "run-channel-fixtures.mjs", modes: [String]{"assemble-sync", "lower", "link-sync", "run-sync"}))
@@ -742,6 +749,7 @@ spec_dyn: fn(found: Spec, runner_sha256: String) -> Dyn Never! {
         if found.kind == "plain" {
             entries["call"] = if found.call == .Val(call) -> Dyn.Text(call.copy()) else -> Dyn.Null
             entries["expected"] = Dyn.Text(found.expected.copy())
+            entries["fragments"] = texts(found.fragments)
         }
         entries["runner"] = Dyn.Text(found.runner.copy())
         if found.witness != "" -> entries["witness"] = Dyn.Text(found.witness.copy())
@@ -766,6 +774,13 @@ prepare_transport: fn(repo: String, row: Census, out: String, adapter: String) -
     sources := [String]{row.source.copy()}
     if found.witness != "" -> sources.push(found.witness.copy())
     if found.expected_file != "" -> sources.push(found.expected_file.copy())
+    loop name in found.fragments {
+        fragment: "{RT}Fragments.fixture/{name}Tests.jet"
+        if !sources.contains(fragment) -> sources.push(fragment)
+    }
+    if found.fragments == WORLD_SENTRY {
+        loop name in WORLD_SENTRY_LINKED -> sources.push("{RT}{name}.c")
+    }
     witness: "{home.removesuffix(".jet")}.c"
     if found.kind == "c" && files.exists("{repo}/{witness}") -> sources.push(witness)
     entry := [String: Dyn]{
@@ -1215,7 +1230,12 @@ drive: fn(lane: &Lane, found: Spec) Problem! -[Env, Exec, FS, IO, Time, Time.Wai
         raw: "{out}/raw"
         native: "{out}/native"
         files.create_dir_all("{native}/Source") ?? return Err(problem("`{native}/Source` cannot be created: {err}"))
-        jet_tool(lane, found.runner, [String]{"--root", repo, "runtime-unit", raw, "--test", found.name}) ?? return Err(err)
+        unit_args := [String]{"--root", repo, "runtime-unit", raw}
+        loop name in found.fragments {
+            unit_args.push("--test")
+            unit_args.push(name.copy())
+        }
+        jet_tool(lane, found.runner, unit_args) ?? return Err(err)
         unit: files.read("{raw}/unit.jet") ?? return Err(problem("`{raw}/unit.jet` cannot be read: {err}"))
         entry: if found.call == .Val(call) -> "\n#Export(c) jet_rt_plain_fixture: fn() {{ {call}() }}\n" else -> ""
         if entry == "" && found.witness == "" -> return Err(problem("plain transport {found.name} names no entry"))
@@ -1242,6 +1262,7 @@ drive: fn(lane: &Lane, found: Spec) Problem! -[Env, Exec, FS, IO, Time, Time.Wai
         binary: "{native}/driver"
         link(lane, driver, "{native}/fixture.o", binary) ?? return Err(err)
         if found.name == "Scheduler" -> return scheduler_verdict(lane, binary)
+        if found.fragments == WORLD_SENTRY -> return world_sentry_verdict(lane, binary, "{native}/fixture.o")
         ran: execute(lane, binary, [String]{}, out, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
         return exact(ran, found.expected, "")
     }
@@ -1283,6 +1304,72 @@ scheduler_verdict: fn(lane: &Lane, binary: String) Problem! -[Env, Exec, FS, IO,
     footer: trap_literal(repo, "trap_footer_e3001") ?? return Err(err)
     panicked: execute(lane, binary, [String]{"root-panic"}, out, [Setting]{}, 70, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
     exact(panicked, "", "{header}{cancelled}{prelude}{footer}")
+}
+
+// The world/sentry host runs the world, sentry, test-scope and allocation
+// policy witnesses silently under a memory ledger, and its source gate
+// silently. Its `ledger` mode records one expired-stack row through a normal
+// return, `ledger-stop` the same row through the R0802 stop with one
+// `exit: 70` line; the two ledgers are byte-equal, each a fresh owner-only
+// file (0600) in an owner-only directory (0700). The logical-environment and
+// link-native hosts link against the same object. Every failure is reported.
+world_sentry_verdict: fn(lane: &Lane, binary: String, object: String) Problem! -[Env, Exec, FS, IO, Time, Time.Wait]> {
+    out: lane.out.copy()
+    repo: lane.repo.copy()
+    failures := [String]{}
+    loop name in WORLD_SENTRY_LINKED {
+        link(lane, "{repo}/{RT}{name}.c", object, "{out}/native/{name}") ?? failures.push("{name} link: {err.message}")
+    }
+    ledgers: "{out}/ledgers"
+    files.remove_all(ledgers) ?? ()
+    silent: Setting{name: "JET_MEMORY_LEDGER", value: "{ledgers}/checks/ledger.jsonl"}
+    failures.extend(step_failures("witnesses", execute(lane, binary, [String]{}, out, [Setting]{silent}, 0, TRANSPORT_TIMEOUT_MS), "", ""))
+    failures.extend(step_failures("source-gate", execute(lane, binary, [String]{"source-gate"}, out, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS), "", ""))
+    returned: "{ledgers}/return/ledger.jsonl"
+    stopped: "{ledgers}/stop/ledger.jsonl"
+    recorded: Setting{name: "JET_MEMORY_LEDGER", value: returned.copy()}
+    failures.extend(step_failures("ledger", execute(lane, binary, [String]{"ledger"}, out, [Setting]{recorded}, 0, TRANSPORT_TIMEOUT_MS), "*", "*"))
+    stopping: Setting{name: "JET_MEMORY_LEDGER", value: stopped.copy()}
+    failures.extend(step_failures("ledger-stop", execute(lane, binary, [String]{"ledger-stop"}, out, [Setting]{stopping}, 70, TRANSPORT_TIMEOUT_MS), "", "R0802"))
+    texts := [String]{}
+    loop path in ([String]{returned, stopped}) {
+        text: files.read(path) ?? {
+            failures.push("`{path}` cannot be read: {err}")
+            next
+        }
+        if text == "" || text.trim_end().split("\n").to_list().len() != 1 -> failures.push("`{path}` does not hold exactly one ledger row")
+        file_mode: (files.stat(path) ?? return Err(problem("`{path}` cannot be inspected: {err}"))).mode % 512
+        dir_mode: (files.stat(files.dirname(path)) ?? return Err(problem("`{files.dirname(path)}` cannot be inspected: {err}"))).mode % 512
+        if file_mode != 384 || dir_mode != 448 -> failures.push("`{path}` is not an owner-only file (0600) in an owner-only directory (0700)")
+        texts.push(text)
+    }
+    if texts.len() == 2 && texts[0] != texts[1] -> failures.push("the returned and stopped ledgers differ")
+    if failures.len() > 0 -> return Err(problem("world/sentry verdict: {failures.join("; ")}"))
+    Ok(())
+}
+
+// Why a world/sentry step failed: its run failed, or its stdout is not
+// `stdout`, or its stderr is not `stderr` ("*" admits any output). A stderr of
+// "R0802" is the sentry stop report: it names R0802 and holds exactly one
+// `exit: 70` line.
+step_failures: fn(step: String, result: Ran Problem!, stdout: String, stderr: String) -> [String] Never! {
+    ran: if result == {
+        .Ok(done) -> done
+        .Err(failed) -> return [String]{"{step}: {failed.message}"}
+    }
+    failures := [String]{}
+    if stdout != "*" && ran.stdout != stdout -> failures.push("{step}: stdout {json.dumps(Dyn.Text(ran.stdout.copy())) ?? ""} is not {json.dumps(Dyn.Text(stdout.copy())) ?? ""}")
+    if stderr == "R0802" {
+        exits := [String]{}
+        loop line in ran.stderr.split("\n") {
+            if line.starts_with("exit: ") -> exits.push(line.copy())
+        }
+        if !ran.stderr.contains("R0802") -> failures.push("{step}: the stop report does not name R0802")
+        if exits.len() != 1 || exits[0] != "exit: 70" -> failures.push("{step}: the report's exit lines [{exits.join(" | ")}] are not one `exit: 70`")
+    } else if stderr != "*" && ran.stderr != stderr {
+        failures.push("{step}: stderr {json.dumps(Dyn.Text(ran.stderr.copy())) ?? ""} is not {json.dumps(Dyn.Text(stderr.copy())) ?? ""}")
+    }
+    failures
 }
 
 crypto_verdict: fn(lane: &Lane) Problem! -[Env, Exec, FS, IO, Time, Time.Wait]> {
@@ -1973,7 +2060,7 @@ shard_ids: fn(entries: [Dyn], shard: String) -> [String] Never! {
 
 #Test("a plain transport runs its generated entry driver or its committed C host") {
     repo: test_repo()
-    loop name in ([String]{"Alloc", "TestSuite", "Parallel", "Scheduler"}) {
+    loop name in ([String]{"Alloc", "TestSuite", "Parallel", "Scheduler", "World", "Sentry", "TestScope", "AllocationPolicy"}) {
         row: Census{package: "JetRuntime", source: "Compiler/JetRuntime/Tests/Fragments.fixture/{name}Tests.jet", sha256: "", names: [String]{}, entry: false, role: "registry"}
         entry: prepare_transport(repo, row, "/native/registries", "{repo}{TOOL}") ?? panic("{name}: no transport")
         transport: field(entry, "transport")
@@ -1982,13 +2069,27 @@ shard_ids: fn(entries: [Dyn], shard: String) -> [String] Never! {
         if name == "Alloc" {
             assert_eq(text_field(transport, "call"), "alloc_tests")
             assert(field(transport, "witness") == Dyn.Null)
+            assert(field(transport, "fragments") == texts([String]{"Alloc"}))
             next
         }
-        host: if name == "TestSuite" -> "Compiler/JetRuntime/Tests/test-suite-fixture.c" else -> "Compiler/JetRuntime/Tests/{name.lower()}-fixture.c"
+        host: if name == {
+            "TestSuite" -> "Compiler/JetRuntime/Tests/test-suite-fixture.c"
+            "Parallel" | "Scheduler" -> "Compiler/JetRuntime/Tests/{name.lower()}-fixture.c"
+            else -> "Compiler/JetRuntime/Tests/world-sentry-fixture.c"
+        }
         assert(field(transport, "call") == Dyn.Null)
         assert_eq(text_field(transport, "witness"), host)
         assert_eq(text_field(transport, "expected"), if name == "TestSuite" -> "test suite: ok\n" else -> "")
-        assert(array_field(entry, "sources").contains(Dyn.Text(host)))
+        sources: array_field(entry, "sources")
+        assert(sources.contains(Dyn.Text(host)))
+        if WORLD_SENTRY.contains(name) {
+            // Every composed fragment and every linked host pins the row.
+            assert(field(transport, "fragments") == texts(WORLD_SENTRY))
+            loop fragment in WORLD_SENTRY -> assert(sources.contains(Dyn.Text("Compiler/JetRuntime/Tests/Fragments.fixture/{fragment}Tests.jet")))
+            loop linked in WORLD_SENTRY_LINKED -> assert(sources.contains(Dyn.Text("Compiler/JetRuntime/Tests/{linked}.c")))
+        } else {
+            assert(field(transport, "fragments") == texts([String]{name.copy()}))
+        }
     }
 }
 

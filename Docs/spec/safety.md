@@ -211,9 +211,9 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1342,
+  "total": 1339,
   "counts": {
-    "Compiler": 679,
+    "Compiler": 676,
     "Core": 186,
     "Docs": 8,
     "Examples": 35,
@@ -4684,7 +4684,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Tests/Fragments.fixture/AllocationPolicyTests.jet",
-      "line": 4,
+      "line": 5,
       "column": 5,
       "reason": "the single-threaded fixture reads the process-lifetime tracked-node count after all its payloads were freed"
     },
@@ -4855,27 +4855,6 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
       "line": 280,
       "column": 5,
       "reason": "this isolated native witness writes its17B success literal and exits without introducing any text or collection runtime dependency"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Tests/Fragments.fixture/SentryInlineTests.jet",
-      "line": 8,
-      "column": 1,
-      "reason": "the raw pointer deliberately escapes its frame for the sentry witness"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Tests/Fragments.fixture/SentryInlineTests.jet",
-      "line": 14,
-      "column": 1,
-      "reason": "an expired inline raw read must stop before any pointee byte is loaded"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Tests/Fragments.fixture/SentryTests.jet",
-      "line": 211,
-      "column": 5,
-      "reason": "the checked Source callback uses the exact two-word native ABI"
     },
     {
       "package": "Compiler",
@@ -9624,14 +9603,14 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 
 | crate/package | regions |
 | --- | ---: |
-| Compiler | 679 |
+| Compiler | 676 |
 | Core | 186 |
 | Docs | 8 |
 | Examples | 35 |
 | Jetpack | 9 |
 | Tools | 7 |
 | tests | 418 |
-| **total** | **1342** |
+| **total** | **1339** |
 
 ### Regions
 
@@ -10274,7 +10253,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 371:5 | "row is this thread's own cache row" |
 | Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 380:5 | "the test owns this fresh align-8 block and its header words" |
 | Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 462:5 | "the exact success line is two bounded stack words written to stdout" |
-| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocationPolicyTests.jet | 4:5 | "the single-threaded fixture reads the process-lifetime tracked-node count after all its payloads were freed" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocationPolicyTests.jet | 5:5 | "the single-threaded fixture reads the process-lifetime tracked-node count after all its payloads were freed" |
 | Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/EnvOverlayKernel.jet | 6:5 | "failed witness terminates its isolated real-runtime process" |
 | Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SchedulerTests.jet | 5:5 | "an isolated failed scheduler witness exits with no further runtime cleanup" |
 | Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SchedulerTests.jet | 209:5 | "fixture byte writes stay within owned 19/20-byte text buffers" |
@@ -10299,9 +10278,6 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet | 240:5 | "both buffers are this test's fresh live allocations of bytes bytes" |
 | Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet | 256:5 | "the scrub marked the process ending and this single-threaded witness goes on, so it clears the flag; kept is a live Secret header and kept_data its live buffer; the scrub only zeroes the buffer" |
 | Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet | 280:5 | "this isolated native witness writes its17B success literal and exits without introducing any text or collection runtime dependency" |
-| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SentryInlineTests.jet | 8:1 | "the raw pointer deliberately escapes its frame for the sentry witness" |
-| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SentryInlineTests.jet | 14:1 | "an expired inline raw read must stop before any pointee byte is loaded" |
-| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SentryTests.jet | 211:5 | "the checked Source callback uses the exact two-word native ABI" |
 | Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/TextTests.jet | 6:5 | "a failed text runtime witness terminates only its isolated process" |
 | Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/ThreadTests.jet | 8:5 | "a failed isolated runtime witness ends the process without allocation or libc" |
 | Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/ThreadTests.jet | 36:5 | "gettid verifies identity without trusting the TCB under test" |

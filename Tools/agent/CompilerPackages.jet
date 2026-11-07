@@ -11,7 +11,7 @@
 //   jet Tools/agent/CompilerPackages.jet [--root DIR] select FILE...
 //   jet Tools/agent/CompilerPackages.jet [--root DIR] identity
 //   jet Tools/agent/CompilerPackages.jet [--root DIR] unblock FILE...|-
-//   jet Tools/agent/CompilerPackages.jet [--root DIR] runtime-unit OUT [--test NAME]
+//   jet Tools/agent/CompilerPackages.jet [--root DIR] runtime-unit OUT [--test NAME]...
 //   jet Tools/agent/CompilerPackages.jet [--root DIR] unit [ENTRY]...
 //   jet Tools/agent/CompilerPackages.jet [--root DIR] unit-inputs [ENTRY]...
 //
@@ -53,9 +53,10 @@
 // Compiler/JetRuntime/sources.list source, unblocked, after a
 // `// [unit source: PATH]` line, its Core `use` lines dropped and gathered
 // once each, in first-seen order, at the head of the unit, and its other
-// `use` lines dropped. `--test NAME` appends the fragment
-// Compiler/JetRuntime/Tests/Fragments.fixture/NAMETests.jet and writes a test
-// package of the driver's one edition instead of the runtime's package.jet.
+// `use` lines dropped. Each `--test NAME` appends the fragment
+// Compiler/JetRuntime/Tests/Fragments.fixture/NAMETests.jet, in order, and
+// any `--test` writes a test package of the driver's one edition instead of
+// the runtime's package.jet.
 //
 // `unit` writes one namespace of the member files of the packages at the
 // ENTRYs and of every package they depend on, for focused fixtures that
@@ -130,7 +131,7 @@ usage: fn() -[Exec, IO]> Never {
     term.eprint("       jet Tools/agent/CompilerPackages.jet [--root DIR] select FILE...")
     term.eprint("       jet Tools/agent/CompilerPackages.jet [--root DIR] identity")
     term.eprint("       jet Tools/agent/CompilerPackages.jet [--root DIR] unblock FILE...|-")
-    term.eprint("       jet Tools/agent/CompilerPackages.jet [--root DIR] runtime-unit OUT [--test NAME]")
+    term.eprint("       jet Tools/agent/CompilerPackages.jet [--root DIR] runtime-unit OUT [--test NAME]...")
     term.eprint("       jet Tools/agent/CompilerPackages.jet [--root DIR] unit|unit-inputs [ENTRY]...")
     process.exit(2)
 }
@@ -202,10 +203,25 @@ RUNTIME_PACKAGE: "Compiler/JetRuntime/package.jet"
 RUNTIME_FRAGMENTS: "Compiler/JetRuntime/Tests/Fragments.fixture"
 DRIVER_LOADER: "Compiler/JetDriver/Source/Driver/Loader.jet"
 
-// `runtime-unit OUT [--test NAME]`: writes OUT/unit.jet and OUT/package.jet
-// and returns OUT/unit.jet.
+// The fragment names of `runtime-unit OUT [--test NAME]...`, in order; None
+// when the arguments are not that shape or name a fragment twice.
+runtime_unit_tests: fn(args: [String]) -> [String]? Never! {
+    if args.len() % 2 != 1 -> return None
+    tests := [String]{}
+    at := 1
+    loop at < args.len() {
+        if args[at] != "--test" || !is_type_name(args[at + 1]) || tests.contains(args[at + 1]) -> return None
+        tests.push(args[at + 1].copy())
+        at += 2
+    }
+    Val(tests)
+}
+
+// `runtime-unit OUT [--test NAME]...`: writes OUT/unit.jet and OUT/package.jet
+// and returns OUT/unit.jet. Each `--test NAME` composes the fragment
+// NAMETests.jet, in order.
 runtime_unit: fn(root: String, args: [String]) -[Exec, FS, IO]> String PackagesError! {
-    if args.len() != 1 && !(args.len() == 3 && args[1] == "--test" && is_type_name(args[2])) -> usage()
+    tests: runtime_unit_tests(args) ?? usage()
     out: args[0]
     listed: files.read(files.join(root, RUNTIME_SOURCES)) ?? return Err(PackagesError{message: "`{RUNTIME_SOURCES}` cannot be read: {err}"})
     paths := [String]{}
@@ -216,7 +232,7 @@ runtime_unit: fn(root: String, args: [String]) -[Exec, FS, IO]> String PackagesE
         paths.push(line.copy())
     }
     if paths.len() == 0 -> return Err(PackagesError{message: "`{RUNTIME_SOURCES}` lists no source"})
-    if args.len() == 3 -> paths.push("{RUNTIME_FRAGMENTS}/{args[2]}Tests.jet")
+    loop name in tests -> paths.push("{RUNTIME_FRAGMENTS}/{name}Tests.jet")
     uses := [String]{}
     bodies := [String]{}
     loop path in paths {
@@ -238,7 +254,7 @@ runtime_unit: fn(root: String, args: [String]) -[Exec, FS, IO]> String PackagesE
         bodies.push("// [unit source: {path}]\n{kept.join("\n")}")
     }
     package := ""
-    if args.len() == 3 {
+    if tests.len() > 0 {
         // A test unit takes the one language edition the driver accepts.
         loader: files.read(files.join(root, DRIVER_LOADER)) ?? return Err(PackagesError{message: "`{DRIVER_LOADER}` cannot be read: {err}"})
         edition := ""
@@ -978,6 +994,12 @@ unblock_uses: fn(text: String) -> String Never! {
     assert(!is_type_name("lower"))
     assert(!is_type_name(""))
     assert(!is_type_name("Bad-Name"))
+    assert(runtime_unit_tests([String]{"out"}) == Val([String]{}))
+    assert(runtime_unit_tests([String]{"out", "--test", "World", "--test", "Sentry"}) == Val([String]{"World", "Sentry"}))
+    assert(runtime_unit_tests([String]{"out", "--test", "World", "--test", "World"}) == None)
+    assert(runtime_unit_tests([String]{"out", "--test"}) == None)
+    assert(runtime_unit_tests([String]{"out", "--test", "lower"}) == None)
+    assert(runtime_unit_tests([String]{"out", "--tests", "World"}) == None)
     assert(is_core_use("use core.files"))
     assert(is_core_use("use fs: core.files"))
     assert(is_core_use("use core.text.[Text, Rune]"))
