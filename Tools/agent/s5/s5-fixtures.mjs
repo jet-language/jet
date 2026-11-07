@@ -15,16 +15,17 @@ const node = process.execPath, T = 'Compiler/JetRuntime/Tests';
 const build = process.env.S5_BUILD, RT = process.env.S5_RUNTIME;
 const jetc0 = path.join(build, 'jetc0'), jet = path.join(build, 'jet');
 const object = path.join(RT, 'runtime', 'jet_runtime_jet.o');
-let pack;
+let pack, runtimeDir;
 if (P.ready) {
-  try { pack = readSharedPack({directory: process.env.S5_SHARED_PACK_DIRECTORY, head: P.head, source: W}).pack; }
+  try { ({pack, runtimeDir} = readSharedPack({directory: process.env.S5_SHARED_PACK_DIRECTORY, head: P.head, source: W})); }
   catch (error) { blocked('shared-runtime-publication', error.message); P.ready = false; }
 }
 const provenance = path.join(RT, 'provenance.json');
 const inputs = process.env.S5_INPUTS;
 const hash = file => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 const sys = ['-lpthread', '-ldl', '-lm'];
-const env = {JET: jet, JET_RUNTIME_JET_OBJECT: object, JET_RUNTIME_PACK: pack,
+// Front runners lower fixtures with the candidate native CLI (jet-front.mjs).
+const env = {JET: jet, JET_FRONT_JETC0: jetc0, JET_RUNTIME_JET_OBJECT: object, JET_RUNTIME_PACK: pack,
   JET_CHECKER: jet, CC: 'cc', NM: 'nm', LD: 'ld', COMPOSED_SHA: P.head};
 const out = name => path.join(D, name), r = (file, ...args) => [node, `${T}/${file}.mjs`, ...args];
 const registry = new Map(), executed = new Map();
@@ -98,6 +99,15 @@ add('run-io-witness',[r('run-io-witness',binary('IOWitness'))],[binary('IOWitnes
 add('run-execution-fixtures',[r('run-execution-fixtures',binary('execution-fixture'))],[binary('execution-fixture')]);
 modes('run-alloc-cache-witness', ['assemble','lower','audit','link','run'], front);
 add('run-tdigest-witness',[r('run-tdigest-witness',out('tdigest-witness'),object)],runtime);
+add('run-alloc-observer-witness',[r('run-alloc-observer-witness',out('alloc-observer'),object)],runtime);
+for (const runner of ['run-files-walk-fixtures','run-host-parallelism-fixtures']) modes(runner, ['assemble','lower','audit','link','run'], front);
+// Pack-route runners link with the shared native CLI and its runtime directory.
+const packRoute = (runner, tests) => add(runner, [undefined, ...tests].map((test, index) => r(runner, out(`${runner}-${index}`), jet, runtimeDir, ...(test ? ['--test', test] : []))), [jet, runtimeDir]);
+packRoute('run-native-codec-file-leaves', ['CodecCSV','CodecEnv','DynCodec','CompilerFileLeaves']);
+packRoute('run-native-tcp-routes', []);
+packRoute('run-process-witnesses', ['ProcessExecution','TerminalProcess']);
+add('run-scan-goldens',[r('run-scan-goldens',out('scan-goldens'))],[...front,pack]);
+add('test-runtime-abi-symbols',[r('test-runtime-abi-symbols')]);
 
 // Generator runners operate only in fresh writable data copies outside W.
 for (const runner of ['generate-ed25519-headers','generate-rfc8032-fixtures']) {

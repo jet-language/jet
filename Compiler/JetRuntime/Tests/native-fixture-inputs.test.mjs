@@ -12,15 +12,13 @@ function scratch(body) {
   try { body(directory); } finally { rmSync(directory, {recursive: true, force: true}); }
 }
 function scan(directory, optional = []) {
-  const native = path.join(directory, 'native.tsv');
-  writeFileSync(native, readFileSync(path.join(here, 'scan.cases'), 'utf8').trim().split('\n').map(stem => `${stem}\tpass`).join('\n') + '\n');
   const env = {...process.env};
   delete env.JET_RUNTIME_JET_OBJECT;
   delete env.JET_RUNTIME_PACK;
-  return spawnSync(process.execPath, [path.join(here, 'run-scan-goldens.mjs'), path.join(directory, 'out'), native, ...optional], {env, encoding: 'utf8'});
+  return spawnSync(process.execPath, [path.join(here, 'run-scan-goldens.mjs'), path.join(directory, 'out'), ...optional], {env, encoding: 'utf8'});
 }
 
-test('native scan CLI does not require retired tier receipts', () => scratch(directory => {
+test('native scan CLI takes no tier receipt', () => scratch(directory => {
   const result = scan(directory);
   assert.equal(result.status, 1);
   // This is an input-grammar fixture, not a native execution claim: it must

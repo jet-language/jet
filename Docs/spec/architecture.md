@@ -107,10 +107,11 @@ every block it hands out or takes back, the runtime's own included. A
 link-time `--wrap=jet_rt_free` does not see those: the runtime object binds its
 internal calls section-relative. `run-alloc-observer-witness.mjs` is the
 negative control: its leak mode keeps one buffer and must fail.
-Native scan proofs require the current native `scan.cases` receipt and the
-fresh Jet object/pack. Saved reference and evaluator TSVs are optional,
-explicitly named `--frozen-reference` and `--frozen-evaluator` inputs; a live
-retired tier is never a prerequisite for the raw ABI and Float-bit witnesses.
+Native scan proofs run the `scan.cases` programs with the native CLI against
+their goldens and require the fresh Jet object/pack. Saved reference and
+evaluator TSVs are optional, explicitly named `--frozen-reference` and
+`--frozen-evaluator` inputs; a live retired tier is never a prerequisite for
+the raw ABI and Float-bit witnesses.
 Official BLAKE3 fixtures regenerate from the team vectors alone, outside the
 immutable proof source, without reading a retired runtime implementation.
 Native runtime exit corpora accept `--results` pointing to the one Jet-front
