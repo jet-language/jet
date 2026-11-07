@@ -1,0 +1,40 @@
+// Float display at the IEEE edges (#4599 c7). This replaces the deleted
+// run-display-goldens.mjs cell, which compared the runtime's Float text with a
+// frozen Rust capture. The Jet golden is now the oracle. Every finite cell's
+// text must also parse back to the same bits, so the display is the shortest
+// text that round-trips.
+use math: core.math
+
+edge_cells: fn() -> [Float] {
+    cells: [Float]{
+        0.0, 1.0, 0.1, 0.3, 0.5, 1.5, 2.5, 0.125, 0.375, 1.25, 1.75, 100.0,
+        1.0e-4, 1.0e-5, 1.0e-7, 1.0e15, 1.0e16, 1.0e21, 1.0e100, 1.0e308,
+        9007199254740992.0, 9007199254740994.0, 123456789.125, 2.0 / 3.0,
+        2.2250738585072014e-308,
+        // The smallest subnormal, the largest subnormal, the smallest normal
+        // and the largest finite value.
+        math.from_bits(1), math.from_bits(4503599627370495),
+        math.from_bits(4503599627370496), math.from_bits(9218868437227405311),
+    }
+    signed := [Float]{}
+    loop value in cells {
+        signed.push(value)
+        signed.push(-value)
+    }
+    signed
+}
+
+run: fn() {
+    loop value in edge_cells() {
+        text: "{value}"
+        back: Float.parse(text) ?? panic("display text {text} does not parse")
+        same: math.to_bits(back) == math.to_bits(value)
+        print("{text} {if same -> "round-trips" else -> "CHANGES BITS"}")
+    }
+    infinity: math.from_bits(9218868437227405312)
+    nan: math.from_bits(9221120237041090560)
+    print("{infinity} {-infinity} {nan}")
+    // F32 prints its own shortest binary32 text, not the widened binary64's.
+    narrow: [F32]{F32{0.1}, F32{0.5}, F32{16777216.0}, F32{3.4028235e38}, F32{1.17549435e-38}, F32{1.0e-45}}
+    loop value in narrow -> print("{value} {-value}")
+}
