@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6643,
-    "rev": 95425,
+    "nextNum": 6649,
+    "rev": 95438,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -49684,11 +49684,11 @@
         {
           "n": 4,
           "text": "Both suspected CLI-fixture defects are fixed: tests/cases/cli_parts_commands/check_fixed_dynamic_size_reports_e0103_without_internal_failure.case and tests/cases/cli_parts_commands/check_receipt_invalidates_when_higher_priority_entry_appears.case pass.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T04:59:43.438Z"
+          "evidence": "Fixed by 7fb2b1cb85, 22c9a04985 and 7c3d88a56e. Batch vb9 (s1 at dev 6a31fd6143, Main): both cases PASS. PortsLead-2 also shows both PASS on its s1 (base 01c7879e02).",
+          "at": "2026-11-07T04:59:44.845Z"
         },
         {
           "n": 5,
@@ -50617,7 +50617,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-05T10:55:41.702Z",
-      "updated": "2026-11-07T04:59:43.438Z",
+      "updated": "2026-11-07T04:59:44.845Z",
       "updatedBy": "Main",
       "goals": [
         "G1",
@@ -96992,6 +96992,252 @@
       "updated": "2026-11-07T03:23:40.040Z",
       "updatedBy": "Main",
       "criteriaLastN": 3
+    },
+    {
+      "id": "c0x1npws",
+      "num": 6643,
+      "title": "comptime: a pure generator that only yields fails E3410 at compile time",
+      "body": "A generator whose body only yields values (no effects) is refused with E3410 when it is evaluated at compile time, though it is pure and runs fine at run time. Comptime must run it with the same meaning as O0 (I9).",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A case under tests/cases/comptime_sequence_parity evaluates a pure yield-only generator at compile time and at run time; both print the same values on O0, O1 and O2, and no E3410 is reported.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T05:00:22.756Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G6"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-07T05:00:21.888Z",
+      "updated": "2026-11-07T05:00:22.756Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1
+    },
+    {
+      "id": "c0txcsfz",
+      "num": 6644,
+      "title": "core.json: decode coerces a JSON string into a scalar field instead of refusing",
+      "body": "json.decode into a struct with an Int, Float or Bool field accepts a JSON string such as \"42\" and converts it, instead of reporting a type mismatch. Decoding must be exact.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A case decodes {\"n\": \"42\"} into a struct with n: Int and gets the registered decode type-mismatch error naming the field and the JSON type; {\"n\": 42} still decodes. Passes on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T05:00:24.762Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G3"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-07T05:00:23.876Z",
+      "updated": "2026-11-07T05:00:24.762Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1
+    },
+    {
+      "id": "c0swo1p3",
+      "num": 6645,
+      "title": "core.files: exists() is true for a broken symlink",
+      "body": "files.exists(path) follows the link target's existence inconsistently: on a symlink whose target is missing it returns true. The contract must state whether exists follows links, and the code must match it.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A case creates a symlink to a missing target: files.exists follows the link and returns false, and the link-level query (the Core API that does not follow links) returns true. The rule is stated in the core.files doc comment. Passes on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T05:00:26.854Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G3"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-07T05:00:25.991Z",
+      "updated": "2026-11-07T05:00:26.854Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1
+    },
+    {
+      "id": "c0s2gaqp",
+      "num": 6646,
+      "title": "jetpack: Nix store cache admission is unverified for provider closures",
+      "body": "Jetpack admits Nix-provided closures (c@nixpkgs deps) into its cache without a test that proves admission is content-checked and fails closed on a tampered or missing path.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A jetpack case realizes a c@nixpkgs dependency into the cache, then corrupts the cached entry; the next build refuses it with a registered diagnostic and re-admits it only after a clean realize.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T05:00:29.049Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G7"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-07T05:00:28.117Z",
+      "updated": "2026-11-07T05:00:29.049Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1
+    },
+    {
+      "id": "c0sqrxrd",
+      "num": 6647,
+      "title": "jet check reaches only the Core bodies a program calls",
+      "body": "jet check type-checks the bodies of Core functions only when the checked program calls them, so a Core body with a type error passes jet check of Core-using programs and of Core itself. Checking Core must check every body.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "jet check Core (keep-going) checks every function body in Core: a scratch copy with a type error placed in an uncalled Core function reports it, and the census-snap check phase covers every Core body.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T05:00:31.255Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G3"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-07T05:00:30.335Z",
+      "updated": "2026-11-07T05:00:31.255Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1
+    },
+    {
+      "id": "c0pr0hh0",
+      "num": 6648,
+      "title": "FFI rows time out on a cold build cache (first row of each suite run)",
+      "body": "In batches vb9 and ffi6109 (s1 at 6a31fd6143 and 6109b7f72f), whichever FFI row runs first on a cold cache hits the suite's wall-clock limit, and the same row passes on the next tier or run: Bridges and FFI.jet o0 TIMEOUT with o1/o2 PASS; ffi_bad_path, ffi_bad_type, rust_extern_std_round_trip, ffi_runtime_stop_keeps_one_jet_source_frame and transact_ffi_with_undo TIMEOUT once and PASS on retry or at --time-limit=900s (PortsLead-2). The cold cost (C toolchain or Rust helper-crate realization) is charged to one row's wall clock. A fresh clone or release gate can fail on it.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "On a cold test state (empty JET_TEST_STATE_DIR and FFI caches), jet test Compiler --profile golden, ui and cases run over the FFI rows (Foundations/Bridges, Interop/FFI, tests/ui/ffi_*, tests/cases/ffi_rust, ffi_runtime_stop_keeps_one_jet_source_frame, transact_ffi_with_undo_registers_rollback_hook) report 0 TIMEOUT with the default limits: the shared cold realization is done once, before the rows, and is not charged to any row's wall clock.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T05:00:55.882Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G1"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-07T05:00:47.568Z",
+      "updated": "2026-11-07T05:00:55.883Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1
     }
   ],
   "decisions": [
@@ -184895,6 +185141,97 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-07T05:00:55.883Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0pr0hh0",
+      "note": "#1 On a cold test state (empty JET_TEST_STATE_DIR and FFI cache"
+    },
+    {
+      "at": "2026-11-07T05:00:47.568Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0pr0hh0",
+      "note": "FFI rows time out on a cold build cache (first row of each suite run)"
+    },
+    {
+      "at": "2026-11-07T05:00:31.255Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0sqrxrd",
+      "note": "#1 jet check Core (keep-going) checks every function body in Co"
+    },
+    {
+      "at": "2026-11-07T05:00:30.335Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0sqrxrd",
+      "note": "jet check reaches only the Core bodies a program calls"
+    },
+    {
+      "at": "2026-11-07T05:00:29.049Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0s2gaqp",
+      "note": "#1 A jetpack case realizes a c@nixpkgs dependency into the cach"
+    },
+    {
+      "at": "2026-11-07T05:00:28.118Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0s2gaqp",
+      "note": "jetpack: Nix store cache admission is unverified for provider closures"
+    },
+    {
+      "at": "2026-11-07T05:00:26.854Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0swo1p3",
+      "note": "#1 A case creates a symlink to a missing target: files.exists f"
+    },
+    {
+      "at": "2026-11-07T05:00:25.991Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0swo1p3",
+      "note": "core.files: exists() is true for a broken symlink"
+    },
+    {
+      "at": "2026-11-07T05:00:24.762Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0txcsfz",
+      "note": "#1 A case decodes {\"n\": \"42\"} into a struct with n: Int and get"
+    },
+    {
+      "at": "2026-11-07T05:00:23.876Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0txcsfz",
+      "note": "core.json: decode coerces a JSON string into a scalar field instead of refusing"
+    },
+    {
+      "at": "2026-11-07T05:00:22.756Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0x1npws",
+      "note": "#1 A case under tests/cases/comptime_sequence_parity evaluates "
+    },
+    {
+      "at": "2026-11-07T05:00:21.888Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0x1npws",
+      "note": "comptime: a pure generator that only yields fails E3410 at compile time"
+    },
+    {
+      "at": "2026-11-07T04:59:44.845Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0max8v8",
+      "note": "#4"
+    },
     {
       "at": "2026-11-07T04:59:43.438Z",
       "by": "Main",
