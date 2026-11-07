@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6634,
-    "rev": 94328,
+    "rev": 94350,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -37941,6 +37941,11 @@
         {
           "at": "2026-11-07",
           "by": "Main",
+          "text": "Unlanded (PortsLead, 2026-11-06, parked when the card moved to G7): c46 EncodingError threading, base 9b0d323b89, uncommitted in $JET_SCRATCH_ROOT/lanes/PortsLead/t. Done there: pkg_json_render returns EncodingError, pkg_json_quote is the single quoter, threaded through Nix fallback/index, discovery, federation (as conflicts/losses), MCP, BuildAttempts, ChannelManifest, Cache, Importers, MigrationCoverage. Left: ProviderFacts.to_json/digest/explain_lines and their ~30 callers (Profile*, CacheIdentity, ProviderDocument, PackageProfiles, Store Explain*, tests); jpcheck shows 4 errors, all on that ripple."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
           "text": "Owner 2026-11-06: Jetpack is package-management work, so this card moves whole from G2 to G7 (it no longer gates Rust removal or self-hosting)."
         },
         {
@@ -40177,7 +40182,7 @@
       "parentId": "c0v95zs3",
       "needsAcceptance": false,
       "created": "2026-09-27T23:27:03.232Z",
-      "updated": "2026-11-07T02:29:05.486Z",
+      "updated": "2026-11-07T02:31:02.324Z",
       "updatedBy": "Main",
       "goals": [
         "G7"
@@ -54861,11 +54866,11 @@
         {
           "n": 1,
           "text": "Every remaining active Rust-authored toolchain/runtime/provider/test source is ported to the canonical Jet path, and all in-repository callers, schemas, artifacts and explanations migrate in one cutover; no Rust remnants, policy-free Rust leaves, legacy execution fallback or parallel runtime is required by the shipped Jet-native path. Out of scope here: the JetDevserver, JetLSP and JetSemIndex sources (ported under #6582 and #6386, G5) and the Jetpack crates (#3590 and #6632, G7).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T02:29:20.809Z"
+          "evidence": "On dev 2c40493778, git ls-files lists 64 .rs files: 59 benchmark peers (Tools/gauntlet, Tools/perf, tests/compiled_workloads/adapters/peer), the Rust FFI example Examples/Interop/FFI/Projections/Rust/host.rs, and the Zed extension Tools/editors/zed/wasm-src (Zed loads extensions only as Rust-built wasm). No toolchain, runtime, provider or test source is Rust, and no Cargo workspace builds anything the shipped path needs.",
+          "at": "2026-11-07T02:39:57.031Z"
         },
         {
           "n": 2,
@@ -55113,11 +55118,12 @@
         {
           "n": 30,
           "text": "(was #5078) Rust exit E1: reconcile origin/port/main (638 Jet files absent from master)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T04:39:42.914Z"
+          "evidence": "There is no port branch left to reconcile (git branch -a has no *port*; origin/port does not exist); the Rust removal finished on dev.",
+          "at": "2026-11-07T02:39:58.447Z",
+          "closure": "obsolete"
         },
         {
           "n": 31,
@@ -55181,33 +55187,6 @@
           "verifiedBy": null,
           "evidence": "Duplicate of #4717 c30 (integrate the retired port branch, commit 61693bcbd7, into dev). Research3 census of goals 1-2 (2026-11-04, tree 3ba4a57a78, jet 9942f58d47; $JET_SCRATCH_ROOT/lanes/Main/briefs/g14-g15-census.tsv)",
           "at": "2026-11-04T22:18:30.663Z"
-        },
-        {
-          "n": 38,
-          "text": "(was #4766) census checked into the gate as a guard (a code emitted only by the Rust front fails the guard), all MISSING rows carded or fixed, zero silent drops at cutover.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T04:39:56.631Z"
-        },
-        {
-          "n": 39,
-          "text": "(was #4766) (was #3898) Parity: Item-level declaration rules missing in JetSema: [#4023] carry over #3899 (#Test scope and test-runner rules), #3900 (task detach/freeze) and #3905 (doctest E2901).",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T04:39:57.639Z"
-        },
-        {
-          "n": 40,
-          "text": "(was #4766) (was #3924) Parity: #CLI derive checks (CheckerCli, E1305-E1347) missing in JetSema",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T04:39:58.614Z"
         },
         {
           "n": 41,
@@ -55282,24 +55261,6 @@
           "at": "2026-11-04T19:42:42.919Z"
         },
         {
-          "n": 49,
-          "text": "(was #4766) (was #3893) [#4024] carry over the criteria of #3903 (assert_eq(x, None); L0528 on generated bodies), #3904 (nested-pattern coverage beyond single-slot payloads) and #3907 (serde E2408/E2414/E2415).",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T04:40:09.084Z"
-        },
-        {
-          "n": 50,
-          "text": "(was #4766) (was #3893) [#4030] run the paired fixtures for six written ports with the admitted `jet` (stage-2 output of `jet build Compiler`): #3887 E0433, #3896 Display/Debug interpolation checks, #3910 module-graph diagnostics, #3957 test/fuzz/coverage harness artifacts, #3979 Shared owner methods, and #3981 JetEval core.encoding and edition binding.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T04:40:10.299Z"
-        },
-        {
           "n": 51,
           "text": "(was #4766) (was #3908) [#3862] Compiler/ is checked as a module graph, not as one assembled compiler.jet. Assembly entry tooling is retired once replaced. Module-level invalidation is proved (edit recheck, not whole-unit), and the sema slice stays under the memory cap.",
           "status": "open",
@@ -55336,15 +55297,6 @@
           "at": "2026-11-05T21:10:13.329Z"
         },
         {
-          "n": 55,
-          "text": "(was #4766) (was #3913) [#3913] the remaining effect-system codes (package purity, determinism, policy) on the Jet fixture matrix.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T04:40:15.316Z"
-        },
-        {
           "n": 56,
           "text": "(was #4766) (was #3913) [#3914] memory rights-tree denial (MemoryFacts, E0921), with signed-summary and open-world negative paths.",
           "status": "open",
@@ -55361,15 +55313,6 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-10-31T04:40:17.336Z"
-        },
-        {
-          "n": 58,
-          "text": "(was #4766) (was #3913) [#3977] A path dependency under the project folder is not checked against the root's policy.unsafe, policy.effects or policy.expert (one fixture each). Module-to-package attribution uses one shared longest-dep-root helper.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T04:40:18.299Z"
         },
         {
           "n": 59,
@@ -55433,15 +55376,6 @@
           "verifiedBy": null,
           "evidence": "100b8b4d70: three new ownership ui rows pass (Close copied into two literals, ^holder.field partial move, take from a borrowed parameter field). Chain fixed point; ui full lost 0 (+24 FAIL to PASS), golden lost 0, sized cases (412 ids) lost 0.",
           "at": "2026-11-05T09:34:07.715Z"
-        },
-        {
-          "n": 66,
-          "text": "(was #4766) (was #3919) [#4111] L0501-L0510 (except L0507, owned by #3681), L0511-L0520, L0521-L0531 and L2510, each implemented with paired positive and negative fixtures and logged commands.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T04:40:26.151Z"
         },
         {
           "n": 67,
@@ -55829,7 +55763,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-06T10:08:37.412Z",
-      "updated": "2026-11-07T02:29:20.809Z",
+      "updated": "2026-11-07T02:40:14.148Z",
       "updatedBy": "Main",
       "goals": [
         "G14",
@@ -69683,242 +69617,6 @@
       "updated": "2026-11-06T17:56:52.701Z",
       "updatedBy": "Main",
       "goals": []
-    },
-    {
-      "id": "c01nrtiq",
-      "num": 5990,
-      "title": "Map: Sema: unknown names, cross-module identity and generic substitution",
-      "body": "Destination: Unknown names are reported; types, enums, generics and functions keep one identity across files and modules.\nNotes: Batch B03 of the 2026-10-28 board consolidation (TowerDedup). One worker (opus), one build, one proof run: cd <worktree> && JET=$JET Tools/agent/jet-env jet test Tools/testkit \"suite ui\" (add each card's repro as a tests/ui fixture first; both halves: rejected program and accepted fix) ; plus the multi-module goldens named in #4608/#4609. Order: #4608 #4609 #5948 #4381 #4459 #4618 #4651 #4780 #5040 #5076 #5470 #5619 #5841 #4188 #4610 #4968 #4975 #5081 #5621.\nDecisions so far: none linked to member cards.\nFog: no criteria yet on #4780 #4608 #4609 #4610 #4618 #5470 #4968 #5081 #4651 #5040 #4975 #5076 #5841 #5619 #5621 (proposals in consolidate-plan.json no_criteria).\nOut of scope: cards outside this list; other batches of the consolidation plan.",
-      "kind": "task",
-      "track": "epoch",
-      "epoch": "e3",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P0",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-03",
-          "by": "Main",
-          "text": "c11 progress, dev 87b540ff60 (Main-23): rules before a lowercase module binding attach to its declaration site (E0355 with the row fix); expression test names (#Test(NAME), generic #Test(label)) fold to their compile-time string, so jet test runs them and E0105 sees duplicates; [T#N] indexes read sized-integer and distinct-range intervals (E0965 when outside 0..N-1); #Unsafe(reason) accepts a String binding; fmt keeps #HTML(PAGE); #Invariant fix names the range form. All 28 marker_rule_signatures cases pass; 8 known-failing rows removed (7 marker_rule_signatures + marker_registry_coverage/invariant_marker_is_retired_to_the_interval_range_form). Proof: cases sweep in 16 shards new vs base ff1c1f1f90: only FAIL->PASS changes; UI full new vs base: only marker_retired_invariant (re-blessed from syntax-decisions.md:1545-1548); s2==s3 fixed point; lane-check CHECK OK. Remaining for c11: E0930 for a wrong-typed source rule argument (marker_declarations/source_rule_rejects_a_wrong_typed_argument, marker_groups_modules/every_custom_member_expanded_at_one_span_keeps_its_target_and_signature)."
-        },
-        {
-          "at": "2026-11-03",
-          "by": "Main",
-          "text": "c11 progress, dev ff1c1f1f90 (Main-22): every builtin rule site is checked against its row (E0355), the repeat check runs in the module marker pass (E0999, first application labelled), and parser rewind drops statement rules recorded by an undone parse (the false #Unsafe duplicate). Now passing, known-failing rows removed: marker_declarations/source_rule_rejects_a_non_repeatable_duplicate, marker_groups_modules/local_group_expands_before_ordinary_applicability_and_argument_checks, marker_groups_modules/overlapping_groups_and_direct_members_share_the_duplicate_check, marker_rule_signatures/{arithmetic_policy_accepts_only_declared_sites_and_modes, field_and_variant_sites_reject_every_non_applicable_example, method_markers_share_the_ordered_registry_collector}, UI tests/ui/job_on_method. Full UI vs base: +1/-0; goldens errors/effect/marker/unsafe identical. c11 rows still open: a_constant_only_row_teaches_the_marked_binding, block_string_rules_use_local_semantic_types, formatter_preserves_static_rule_expressions, generic_instances_materialize_distinct_test_names, invariant_marker_is_retired_in_favor_of_range_types, resolved_test_names_keep_duplicate_identity, sized_and_named_range_failures_share_the_index_error_shape."
-        },
-        {
-          "at": "2026-11-03",
-          "by": "Main",
-          "text": "c7 census 2026-11-03 (base 5eeacdd26d). Item 1 is fixed: an external header 'fn Point.debug_string(self)' beside 'derive T.DebugText' now gives E0105, not the ICE. Its own fixture, tests/ui/derive_generated_collision_external_header, lands in Main-20. Per commit a79059cd4e, the other snapshots are cffi_callback_bound_method, cffi_callback_effect, cffi_callback_generic and cffi_callback_nullable. All four still carry retired-syntax expectations: E0065/E0068 lines, fn(I32) I32 -[]> spellings, E-ERR-SUFFIX. Actual today: (a) bound_method gives E0302 only. Jet has no method values: 'inc.apply' and 'Incrementer.apply' are both E0302. The snapshot's E3216 followed a value that never formed. (b) effect gives E0112 'wants fn(I32) -[]> I32, but this is fn(I32) -> I32'; the snapshot also wanted E3203 at the same span. (c) generic gives E0112 with fn(T) -[]> T; the snapshot also wanted E3203. (d) nullable gives E3203 for (fn(I32) -[]> I32)?; the snapshot holds only the retired E-ERR-SUFFIX. No spec line decides whether E3203 must follow E0112 for a callback, or whether a nullable C callback is legal. So these need the #6425 E3203 port or an owner ruling before any re-bless."
-        },
-        {
-          "at": "2026-11-03",
-          "by": "Main",
-          "text": "c5 probe 2026-11-03: the false E0904 (caller T spelled like callee T) is gone on base 5eeacdd26d. The solver renames a shadowed callee parameter to T#callee. 'y :: f(x?)' inside g<T>(x: T?) gives 4/0 on O0 and --release. A tail call 'f(x)' into a T? slot still gave E0113 'This value is T?, but g returns T?', also for concrete Int?. The cause: sema_stmt_return_probed_carrier routed by the callee's declared result T (not a carrier), which took the payload route. Fixed in Main-20 by probing direct calls whose declared result is not a carrier; the new golden generics/caller_parameter_same_name passes on o0/o1/o2. Remaining finding: the T E! slot, 'fn h(x: Int Err!) -> Int Err! { f(x) }', is still E0113 'This value is Int, but h returns Int'; sema_stmt_return_call_widening takes over first. Separate finding: 'fn id(value: Int?) -> Int? { value }' is E0120 (not moved)."
-        },
-        {
-          "at": "2026-11-03",
-          "by": "Main",
-          "text": "2026-11-02 Main: added c13: The App graph checks are ported to the Jet front: route collision (E2807), convention-file problems (E2806), the statically known handler text of E2810, and the browser-target capability check, so tests/ui/{web_app_route_collision, web_app_routes_bracket, web_app_routes_commented, web_app_routes_same_words, web_app_routes_stray, web_app_dynamic_route, app_capability_target} match their snapshots and leave Tools/testkit/known-failing.tsv; and Examples/features/web/tanstack_start/run.jet builds for web without E0102 on WebFormValidationChain.render. Why: c8's ICE is fixed, but those seven UI rows stayed known-failing under it. With the ICE gone they show the real gap: E2806 and E2807 are registered but never emitted (the Rust App.rs graph extraction was never ported), and tanstack_start stops on an E0102."
-        },
-        {
-          "at": "2026-10-28",
-          "by": "CardTrim",
-          "text": "Folded #5841 \"self-hosted checker: #Label/#Trace function markers ICE (marker_groups example)\" (CardTrim 2026-10-28: single-root bug step of map #5990 (Map: Sema: unknown names, cross-module identity and generic); 1 criteria, 0 ratified decisions). Body: Found by O0Load 2026-10-23 after the #5672 marker_groups fix (inline module now lowered): the marker_groups example now ICEs 'function marker #Label/#Trace is not supported by the self-hosted checker'. Related to #5802 (the marker_groups golden). Acceptance: marker_groups matches its golden on run and build; #5802 closes with it. Owner: O0Load after #5839."
-        },
-        {
-          "at": "2026-10-28",
-          "by": "CardTrim",
-          "text": "Folded #5621 \"Marker rule signatures and declarations accept or reject the wrong programs\" (CardTrim 2026-10-28: single-root bug step of map #5990 (Map: Sema: unknown names, cross-module identity and generic); 0 criteria, 0 ratified decisions). Body: Rust-test port SA2: marker_rule_signatures x12 (exit 0 where 1 is expected, exit 1 where 0 is expected, stderr stream predicate mismatches) and marker_declarations source_rule_rejects_a_non_repeatable_duplicate (a non-repeatable duplicate marker is accepted; exit 0, expected 1). Per-case detail in kit-SA2.json."
-        },
-        {
-          "at": "2026-10-28",
-          "by": "CardTrim",
-          "text": "Folded #5619 \"ICE (exit 101) in marker rule signature checking\" (CardTrim 2026-10-28: single-root bug step of map #5990 (Map: Sema: unknown names, cross-module identity and generic); 0 criteria, 0 ratified decisions). Body: Rust-test port slice SA2 (kit-SA2, $JET_RUN_ROOT/RustTestsA/SA2/kf.tsv): 13 cases crash the compiler with exit 101 while checking marker signatures: marker_rule_signatures x12 (arithmetic_policy, contract_messages, html_marker, int_rule_arguments, method_markers, parser_binds_authoritative_matrix, qualified_state_namespace, retired_bench_marker, static_string_products x3 resolve_before_consumers/report_one_shared_type_error/reject_nonstatic) and marker_declarations repeated_scheduler_fact_registration. An ICE (I2); find the shared crash site, fix it, and collect every case in one pass."
-        },
-        {
-          "at": "2026-10-28",
-          "by": "CardTrim",
-          "text": "Folded #5470 \"JetIR resolves records by leaf name: two modules with a same-named struct collide (E2104/E0956)\" (CardTrim 2026-10-28: single-root bug step of map #5990 (Map: Sema: unknown names, cross-module identity and generic); 1 criteria, 0 ratified decisions). Body: Found 2026-10-23 by the Regex lane. The IR build resolves a private struct by its leaf name across modules. When core.regex and core.encoding.json are both linked, each declaring a private struct Parser, the s1 build fails with ir.build E2104 field i of <corelib>/core.regex::Parser (also fields nodes, kids). Likely the same root as the cbor comptime_diff E0956 'field index of Parser' (CborParse.jet also declares Parser). Probably hits user programs whose modules share a struct name. Fix: record identity keyed by owning module (canonical path), everywhere JetIR/backend look up records, field layouts and drop or clone helpers. Workaround already in Regex patch 2 (renamed to PatternParser); rev"
-        },
-        {
-          "at": "2026-10-28",
-          "by": "CardTrim",
-          "text": "Folded #5081 \"Jet sema ICEs on #Target(Web) app programs (unsupported program forms default target / applied rules)\" (CardTrim 2026-10-28: single-root bug step of map #5990 (Map: Sema: unknown names, cross-module identity and generic); 0 criteria, 0 ratified decisions). Body: Every #Target(Web) program checked by the Jet-hosted compiler ends in an internal compiler error: 'semantic declaration checking did not return a complete resolved package graph; unsupported program form default target / applied rules'. Affects Examples/features/web/{app_hello,forms_table,web_app,ui_showcase,tanstack_start} (pre-existing at base bc5e44948) and tests/ui/{app_capability_target,web_app_dynamic_route,web_app_route_collision,web_app_routes_bracket,web_app_routes_commented,web_app_routes_same_words,web_app_routes_stray}. Found by fixture gate 1 of the B2 release chain (5e80b4278). The Jet sema lacks the web target program forms the Rust tier had. Known-failing until ported."
-        },
-        {
-          "at": "2026-10-28",
-          "by": "CardTrim",
-          "text": "Folded #5076 \"Self-hosted checker: external method headers and #Import module members (4 UI snapshots never matched the Jet front)\" (CardTrim 2026-10-28: single-root bug step of map #5990 (Map: Sema: unknown names, cross-module identity and generic); 0 criteria, 0 ratified decisions). Body: Found in r16, where the retired-syntax tests were migrated to canonical syntax. Under the old retired spellings these UI tests stopped at parse errors, so their later diagnostics (from Rust-era snapshots) were never produced by the Jet front end. 1. `fn Point.debug_string(self) -> String { … }` beside a `derive T.DebugText` crashes the compiler: `semantic body rechecking did not return a complete resolved package graph … the external method header fn Type.debug_string is not normalized into an impl by the self-hosted checker yet`. This is I2. tests/ui/derive_generated_collision now uses an in-body method; the ICE needs its own fixture once fixed. 2. tests/ui/cffi_callback_bound_method: `#Imp"
-        },
-        {
-          "at": "2026-10-28",
-          "by": "CardTrim",
-          "text": "Folded #5040 \"Native compiler: calling a function value with an inferred fn type gets the maximal effect row (E1803 native-only)\" (CardTrim 2026-10-28: single-root bug step of map #5990 (Map: Sema: unknown names, cross-module identity and generic); 0 criteria, 0 ratified decisions). Body: Native-compiled compiler (r27 stage1) reports E1803 'Application authority is undecided for Browser, DB, Env, …' for programs that call a function value whose fn type is inferred (no explicit effect row): f :: double; f(3) (repro $JET_SCRATCH_ROOT/discovery/auth/a), an immediately-invoked lambda (b), and a lambda stored in a struct field (d). The factory-built compiler accepts them. Passing a lambda as a parameter (c) and every shape with an explicit row (-[]>, -[FS, Env]>) are fine natively: probes $JET_SCRATCH_ROOT/discovery/auth/p1,p2,p3 build and run (42, 7, 8). Affects 4 native-only example failures (basics/callbacks, closure_capture_writes, local_lambda_calls, +1; $JET_SCRATCH_ROOT/discovery"
-        },
-        {
-          "at": "2026-10-28",
-          "by": "CardTrim",
-          "text": "Folded #4975 \"sema: generic binding occurs check diverges from Rust unify_types\" (CardTrim 2026-10-28: single-root bug step of map #5990 (Map: Sema: unknown names, cross-module identity and generic); 0 criteria, 0 ratified decisions). Body: Jet sema_inference_bind (Compiler/JetSema/Source/Sema/Inference/Solver.jet) rejects a binding whose value mentions the parameter's own name; Rust unify_types (crates/jet-foundation/src/Generics.rs) has no occurs check. A caller parameter spelled like the callee's is concrete evidence, not a cycle: inside g<T>, f(x?) for f<T>(value: T) gives a false E0904. Caveat shared with Rust: without the check, T bound to the caller's T? plus later evidence for T recurses forever (E3012 in Jet). Proposed: drop the occurs check (branch coremathsema4, d0dd8c47d) and guard sema_inference_unify_inner so only the expected (callee) side is substituted; land the same guard in Rust. Probes: /tmp/cms/runz9.sh wit"
-        },
-        {
-          "at": "2026-10-28",
-          "by": "CardTrim",
-          "text": "Folded #4968 \"Split identity for source-owned Stdout/Stderr: in-module method calls get no call-graph edge (missing checked function target)\" (CardTrim 2026-10-28: single-root task step of map #5990 (Map: Sema: unknown names, cross-module identity and generic); 0 criteria, 0 ratified decisions). Body: Found by HandleCarrier (2026-10-11) after stage0 r17k failed lowering at Core/term/term.jet:106 (print -> Stdout.write_line). 98b134147 removed only the canonical Stdout/Stderr arms from core_file_handle_dispatch_name (core_types.rs:3472-3473); the bare arms remain. Inside core.term the receiver is bare \"Stdout\" (fixed_sigs.rs:2017 core.term.stdout() -> Named(\"Stdout\")), so sema takes the native file_handle_method_return path (method_calls.rs:5157-5175) which records no name-ledger reference, while TIR lowers the call as the source method; cost_call_graph (TIR/mod.rs:10628) has no edge, the target is never reachable. eprint (&out.write) has the same gap, hidden because JetCli roots Stderr::w"
-        },
-        {
-          "at": "2026-10-28",
-          "by": "CardTrim",
-          "text": "Folded #4651 \"Compiler crash: net.error_message / net.error_name under default jet run (Examples/features/net/net_lifecycle.jet)\" (CardTrim 2026-10-28: single-root bug step of map #5990 (Map: Sema: unknown names, cross-module identity and generic); 1 criteria, 0 ratified decisions). Body: Proven by APICompWeb on dev-05ea86f65: calling net.error_message or net.error_name crashes the compiler under the default jet run; Examples/features/net/net_lifecycle.jet hits the same crash. Criteria: no ICE (I2); the example passes on every tier; regression golden. Recheck after the JIT removal lands, since default jet run becomes build + exec."
-        },
-        {
-          "at": "2026-10-28",
-          "by": "CardTrim",
-          "text": "Folded #4618 \"Self-hosted compiler panics on the SP02 cases\" (CardTrim 2026-10-28: single-root bug step of map #5990 (Map: Sema: unknown names, cross-module identity and generic); 1 criteria, 0 ratified decisions). Body: The self-hosted Jet compiler must not panic on the SP02 cases listed in this card's evidence. Each case must yield its registered diagnostic or the spec result on every tier. Oracle: the spec and registered diagnostics, not the Rust jet. Proof: one golden or UI snapshot per case. If a failing path is TIR-hosted, it is covered by cutover B #5073. Earlier text, kept for reference (Rust-era homes such as Rust crates, TIR/MIR/LIR, the JIT and generated Rust are retired): Found 2026-10-05 by FE-Image2 checking SP02 84-case coverage: these 4 cases produce no receipt/output on both the candP15 baseline and the lazy-image candidate (identical first panic causes), so the self-hosted compiler panics o"
-        },
-        {
-          "at": "2026-10-28",
-          "by": "CardTrim",
-          "text": "Folded #4610 \"Self-hosted compiler: small defects from scaling probes\" (CardTrim 2026-10-28: single-root bug step of map #5990 (Map: Sema: unknown names, cross-module identity and generic); 1 criteria, 0 ratified decisions). Body: Fix the small defects found by ScalingGate probes in the self-hosted Compiler/: local-struct lambda annotation (E0108), type-parameter result inference (E0904), use core.time (E0312/E0109), spurious L0101 after propagation. Startup cost is out of scope (FE-Image). Acceptance: each item has a repro and a regression example. Earlier text, kept for reference (Rust-era homes such as Rust crates, TIR/MIR/LIR, the JIT and generated Rust are retired): Found 2026-10-05 by ScalingGate small probes on candP15 jetc0 ($JET_STATE_ROOT/speed/SCALING-REPORT.md). Startup cost is being addressed by FE-Image (lazy compiler image). Each item: repro, root fix, regression example."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "(was #4610) Self-hosted compiler: small defects from scaling probes: each item has a repro and a regression example.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev 16057bca5c (Main-20). Each scaling-probe defect has a repro and a regression example that passes on every tier in wave 40: open failure-union messages -> Examples/features/errors/inferred_failure_union_open; generic parameter/caller name collision -> Examples/features/generics/caller_parameter_same_name; result parameter inference -> Examples/features/generics/result_parameter_inference; propagated failure flagged as unused local -> tests/cases/liveness_lints/propagated_failure_is_never_an_unused_local.case; generic tail call -> golden time/time_order.",
-          "at": "2026-11-03T21:40:47.704Z"
-        },
-        {
-          "n": 2,
-          "text": "(was #4618) Self-hosted compiler panics on the SP02 cases: one golden or UI snapshot per case. If a failing path is TIR-hosted, it is covered by cutover B #5073.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "SP02 cases from the folded #4618 title (inferred_failure_union, rollback_trait, never_return_generic, declared_text_block_check_failure). On dev 16057bca5c none panics and each matches its proof: golden Examples/features/errors/inferred_failure_union PASS o0/o1/o2; golden Examples/features/errors/rollback_trait PASS o0/o1/o2; UI tests/ui/never_return_generic PASS; UI tests/ui/declared_text_block_check_failure PASS (testkit runs 2026-11-03, q/sg golden-gb_errors and ui-ub).",
-          "at": "2026-11-03T21:45:30.094Z"
-        },
-        {
-          "n": 3,
-          "text": "(was #4651) Compiler crash: net.error_message / net.error_name under default jet run (Examples/features/net/net_lifecycle.jet): Examples/features/net/net_lifecycle.jet match their goldens on o0 (jet run) and o1 (jet build), or the error becomes the intended",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Proved 2026-11-03 by Main with the admitted base compiler for HEAD 5eeacdd26d ($JET_SCRATCH_ROOT/discovery/base/5eeacdd26d…), testkit golden suite. Examples/features/net/net_lifecycle.jet PASS against its golden on o0 (jet run), o1 (jet build) and o2 (--release): 3 PASS, 0 FAIL, no crash in net.error_message or net.error_name.",
-          "at": "2026-11-03T11:13:26.442Z"
-        },
-        {
-          "n": 4,
-          "text": "(was #4968) Split identity for source-owned Stdout/Stderr: in-module method calls get no call-graph edge (missing checked function target)",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "The defect was in the Rust front (core_types.rs core_file_handle_dispatch_name and the fixed_sigs.rs bare Stdout arm), which is gone. In the Jet front, the in-module call Core/Term/Term.jet:102-104 (print -> out.write_line on the source-owned Stdout) gets its checked function target and lowers. On HEAD a4bbbbe987 with its published jet, a probe calling term.print, term.stdout().write_line and term.stderr().write_line prints all three lines on o0 (jet run), o1 (jet build) and o2 (jet build --release). The golden Examples/features/io/terminal_parity.jet, which writes through Stdout.write_line and Stderr.write_line, passed in wave 36 (goldens 1207/0 regressions, landed through 26fa6cd102), as does every golden that prints through core.term.",
-          "at": "2026-11-03T02:53:06.286Z"
-        },
-        {
-          "n": 5,
-          "text": "(was #4975) sema: generic binding occurs check diverges from Rust unify_types",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "The Rust-divergent occurs check is gone. d154e10dc9 makes a callee type parameter spelled like a caller's in-scope parameter a separate solver variable (Compiler/JetSema/Source/Sema/Inference/Solver.jet SEMA_INFERENCE_CALLEE_SUFFIX, sema_inference_callee_renames). Inside g<T>, f(x?) for f<T>(value: T) now binds the callee T to the caller's T? instead of a false E0904, and conflicting evidence does not recurse into E3012. Landed 2ba0d540c4 (Main-16) pins this: tests/cases/generics/callee_parameter_spelled_like_the_callers_binds_to_the_callers_type.case runs wrap<T> with the caller's T, T? and [T] and pair<T> with (T?, T) at --optimize=none, basic and full. On HEAD 2ba0d540c4 published jet: 1 passed, stdout 5 and 5, stderr empty.",
-          "at": "2026-11-03T02:56:42.791Z"
-        },
-        {
-          "n": 6,
-          "text": "(was #5040) Native compiler: calling a function value with an inferred fn type gets the maximal effect row (E1803 native-only)",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "CardClose-1 2026-10-31 (wave 9b tree): w11 loose script p/fnval5990.jet (no grants) calls inferred-type lambda values directly, via a fn(Int) -> Int parameter, via a named-fn value and from a list in a loop: prints `8 5 12 12` / `total=31` exit 0 on jet run o0/o1/o2 and on the jet build binary; no E1803 (no maximal effect row)",
-          "at": "2026-10-31T17:25:52.693Z"
-        },
-        {
-          "n": 7,
-          "text": "(was #5076) Self-hosted checker: external method headers and #Import module members (4 UI snapshots never matched the Jet front)",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "b15c8be6b1 (Main-25): C callback arguments checked at the call site; lane-check CHECK OK on export lc25; full UI ui-ui25b vs ui-ui24 only improvements (8 cffi_callback rows to PASS); cases --filter ffi 62 rows 0 changes; 4 known-failing rows removed",
-          "at": "2026-11-04T00:42:33.510Z"
-        },
-        {
-          "n": 8,
-          "text": "(was #5081) Jet sema ICEs on #Target(Web) app programs (unsupported program forms default target / applied rules)",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "On HEAD 26fa6cd102 with its published jet, no #Target(Web) app program from #5081's list ends in an internal compiler error any more; the 'unsupported program form default target / applied rules' incomplete-graph path is gone. jet check exits: Examples/features/web/{app_hello, forms_table, web_app, ui_showcase} 0; tests/ui/{web_app_route_collision, web_app_routes_bracket, web_app_routes_commented, web_app_routes_same_words, web_app_routes_stray} 0; tests/ui/{web_app_dynamic_route, app_capability_target} 1 with user diagnostics (E2810, E-WEB-CROSS-PARTITION). None exits 101. jet build --target=web: app_hello, forms_table, web_app and ui_showcase exit 0; tanstack_start/run exits 1 with E0102 (a user diagnostic, not an ICE). Every other Examples/features/web/*.jet checks with exit 0 except state_surface (E1004, no native golden). The UI snapshot mismatches and the tanstack E0102 that the ICE was hiding are tracked as c13.",
-          "at": "2026-11-03T02:51:13.031Z"
-        },
-        {
-          "n": 9,
-          "text": "(was #5470) JetIR resolves records by leaf name: two modules with a same-named struct collide (E2104/E0956): a two-module user example, each module with a private struct Parser with different fields,",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Proved 2026-11-03 by Main with the admitted base compiler for HEAD 5eeacdd26d. A two-module user program $JET_SCRATCH_ROOT/lanes/Main/probe/parser2 (left.jet: struct Parser{text, at}; right.jet: struct Parser{depth, name, strict}; each used only inside its module; run.jet uses both) prints 'left alpha' and 'right gamma 3 true' on jet run (o0), jet build (o1, .jet/build/run) and jet run --release (o2), with no E2104 or E0956. The shipped example Examples/features/modules/same_type_names (left and right each declare HexError with different fields) passes its golden on o0, o1 and o2 (testkit golden: 3 PASS, 0 FAIL).",
-          "at": "2026-11-03T11:14:31.012Z"
-        },
-        {
-          "n": 10,
-          "text": "(was #5619) ICE (exit 101) in marker rule signature checking",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Proved 2026-11-03 by Main with the admitted base compiler for HEAD 5eeacdd26d (testkit cases --filter marker_rule_signatures and --filter marker_declarations; 0 exit-101 results). Of the 13 cases #5619 listed as ICEs, these 9 now PASS: contract_messages, html_marker, int_rule_arguments, qualified_state_namespace, retired_bench_marker, all three static_string_products cases, and marker_declarations/repeated_scheduler_fact_registration. arithmetic_policy and method_markers no longer crash: they exit 0 where 1 is expected, the wrong-accept class owned by c11 (#5621). Their known-failing rows are retagged to that reason in the next Main patch. parser_binds_authoritative_matrix no longer exists in tests/cases.",
-          "at": "2026-11-03T11:15:37.430Z"
-        },
-        {
-          "n": 11,
-          "text": "(was #5621) Marker rule signatures and declarations accept or reject the wrong programs",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed in 87b540ff60 (rule expressions the marker cases name) and 256511ca29 (source-declared rule arguments checked against their signature, E0930). Proof: 16-shard cases sweep c24n vs c23n baseline: marker_declarations/source_rule_rejects_a_wrong_typed_argument and marker_groups_modules/every_custom_member_expanded_at_one_span... KNOWN-FAILING->PASS, marker_registry_coverage/invariant_marker... UNEXPECTED-PASS->PASS, no regressions (the one dev_parts_routine watcher flake passes 2/2 on the same compiler and on base); full UI ui-ui24 vs ui-ui23n only improvements; full chain FIXED_POINT; lane-check CHECK OK.",
-          "at": "2026-11-04T00:13:59.346Z"
-        },
-        {
-          "n": 12,
-          "text": "(was #5841) self-hosted checker: #Label/#Trace function markers ICE (marker_groups example): marker_groups matches its golden on run and build; #5802 closes with it. Owner: O0Load after #5839.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Proved 2026-11-03 by Main with the admitted base compiler for HEAD 5eeacdd26d ($JET_SCRATCH_ROOT/discovery/base/5eeacdd26d…), testkit golden suite. Examples/features/modules/marker_groups/run.jet PASS against its golden on o0, o1 and o2 (3 PASS, 0 FAIL); no #Label/#Trace marker ICE. #5802 is already done.",
-          "at": "2026-11-03T11:13:27.247Z"
-        },
-        {
-          "n": 13,
-          "text": "The App graph checks are ported to the Jet front: route collision (E2807), convention-file problems (E2806), the statically known handler text of E2810, and the browser-target capability check, so tests/ui/{web_app_route_collision, web_app_routes_bracket, web_app_routes_commented, web_app_routes_same_words, web_app_routes_stray, web_app_dynamic_route, app_capability_target} match their snapshots and leave Tools/testkit/known-failing.tsv; and Examples/features/web/tanstack_start/run.jet builds for web without E0102 on WebFormValidationChain.render.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "657d0c5553 (Main-26): App graph checks ported (E2807 collision, E2806 convention files, E2810 handler text from route-directory listings; E-APP-TARGET-FEATURE browser capability check). tests/ui web_app_route_collision, web_app_routes_bracket, web_app_routes_commented, web_app_routes_same_words, web_app_routes_stray, web_app_dynamic_route, app_capability_target PASS and their known-failing.tsv rows removed (full UI ui-ui27: PASS 1916, 0 regressions vs ui-ui26). The reference app (renamed Examples/features/web/jet_web_framework pending D-WEB-NAME1) builds with jet build --target web, exit 0, no E0102 on WebFormValidationChain.render; its golden PASSes at o0/o1/o2. Cases 16-shard sweep vs c24n: 2 FAIL->PASS, 1 timing flake (watching_dev_deopts passes 3/3 isolated). FIXED_POINT s2==s3; lane-check CHECK OK on clean export lc26.",
-          "at": "2026-11-04T02:38:08.849Z"
-        }
-      ],
-      "refs": [],
-      "tags": [
-        "wayfinder:map",
-        "consolidation-2026-10-28"
-      ],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-10-28T11:41:40.640Z",
-      "updated": "2026-11-04T02:38:16.197Z",
-      "updatedBy": "Main",
-      "goals": [],
-      "completedAt": "2026-11-04T02:38:16.197Z"
     },
     {
       "id": "c0jwqaa5",
@@ -88464,6 +88162,78 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-06T07:36:14.295Z"
+        },
+        {
+          "n": 8,
+          "text": "(moved from #4717 c38) (was #4766) census checked into the gate as a guard (a code emitted only by the Rust front fails the guard), all MISSING rows carded or fixed, zero silent drops at cutover.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T02:39:59.475Z"
+        },
+        {
+          "n": 9,
+          "text": "(moved from #4717 c39) (was #4766) (was #3898) Parity: Item-level declaration rules missing in JetSema: [#4023] carry over #3899 (#Test scope and test-runner rules), #3900 (task detach/freeze) and #3905 (doctest E2901).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T02:40:01.377Z"
+        },
+        {
+          "n": 10,
+          "text": "(moved from #4717 c40) (was #4766) (was #3924) Parity: #CLI derive checks (CheckerCli, E1305-E1347) missing in JetSema",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T02:40:03.374Z"
+        },
+        {
+          "n": 11,
+          "text": "(moved from #4717 c49) (was #4766) (was #3893) [#4024] carry over the criteria of #3903 (assert_eq(x, None); L0528 on generated bodies), #3904 (nested-pattern coverage beyond single-slot payloads) and #3907 (serde E2408/E2414/E2415).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T02:40:05.314Z"
+        },
+        {
+          "n": 12,
+          "text": "(moved from #4717 c50) (was #4766) (was #3893) [#4030] run the paired fixtures for six written ports with the admitted `jet` (stage-2 output of `jet build Compiler`): #3887 E0433, #3896 Display/Debug interpolation checks, #3910 module-graph diagnostics, #3957 test/fuzz/coverage harness artifacts, #3979 Shared owner methods, and #3981 JetEval core.encoding and edition binding.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T02:40:07.346Z"
+        },
+        {
+          "n": 13,
+          "text": "(moved from #4717 c55) (was #4766) (was #3913) [#3913] the remaining effect-system codes (package purity, determinism, policy) on the Jet fixture matrix.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T02:40:09.356Z"
+        },
+        {
+          "n": 14,
+          "text": "(moved from #4717 c58) (was #4766) (was #3913) [#3977] A path dependency under the project folder is not checked against the root's policy.unsafe, policy.effects or policy.expert (one fixture each). Module-to-package attribution uses one shared longest-dep-root helper.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T02:40:11.372Z"
+        },
+        {
+          "n": 15,
+          "text": "(moved from #4717 c66) (was #4766) (was #3919) [#4111] L0501-L0510 (except L0507, owned by #3681), L0511-L0520, L0521-L0531 and L2510, each implemented with paired positive and negative fixtures and logged commands.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T02:40:13.212Z"
         }
       ],
       "refs": [
@@ -88478,8 +88248,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T07:25:24.208Z",
-      "updated": "2026-11-07T02:07:00.791Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-07T02:40:13.212Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 15
     },
     {
       "id": "c0y97gu6",
@@ -97922,6 +97693,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-07T01:52:15.726Z"
+        },
+        {
+          "n": 8,
+          "text": "jet_foundation's package tests pass: the 3 failures on dev d86d7ead37 (DiagnosticFormat sentence-case; GatesLints at Policy/GatesLints.jet:44; OwnedTraits at WebGraph.jet:388 with JetIR Build.jet:677) are fixed at their roots.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T02:34:12.707Z"
         }
       ],
       "refs": [],
@@ -97932,8 +97712,9 @@
       "parentId": "c0pgowhn",
       "needsAcceptance": false,
       "created": "2026-11-07T01:50:34.932Z",
-      "updated": "2026-11-07T01:52:15.726Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-07T02:34:12.708Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 8
     },
     {
       "id": "c00tcdfc",
@@ -97952,7 +97733,18 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "MechC landed 19d19cb61f toward c73 (was #6096 c32): two model-level BuildRecipe staged-plan tests in Jetpack/PackageModel/Tests/BuildRecipe.jet (staged validation rejects undeclared tool/effect/platform and escaping output; staged lock and identity ignore authority declaration order). The production-path half (staged_plan_action_production_path_is_deterministic_and_complete) is not ported. Awaits the batch proof."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "Unlanded (PortsLead, 2026-11-06): RecipePlan.jet (~29 KB, fully written, not yet in Jetpack/Bootstrap/sources.list) is parked at $JET_SCRATCH_ROOT/lanes/PortsLead/parked/; it is the recipe staged-plan admission for c84-c91/c112-c118-era rows (D-BUILD-CORE1 seam)."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -98755,7 +98547,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T02:16:33.944Z",
-      "updated": "2026-11-07T02:28:39.498Z",
+      "updated": "2026-11-07T02:37:55.428Z",
       "updatedBy": "Main",
       "criteriaLastN": 88
     },
@@ -186701,6 +186493,160 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-07T02:40:14.148Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0rqi33c",
+      "note": "#66: Moved to #6425 c15 (G5, errors and lints) at the owner's direction on 2026-11-06: Rust removal is finished, and this is parity work, not removal.; was [open]: (was #4766) (was #3919) [#4111] L0501-L0510 (except L0507, owned by #3681), L0511-L0520, L0521-L0531 and L2510, each implemented with paired positive and negative fixtures and logged commands."
+    },
+    {
+      "at": "2026-11-07T02:40:13.212Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c01oyhqk",
+      "note": "#15 (moved from #4717 c66) (was #4766) (was #3919) [#4111] L0501"
+    },
+    {
+      "at": "2026-11-07T02:40:12.284Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0rqi33c",
+      "note": "#58: Moved to #6425 c14 (G5, errors and lints) at the owner's direction on 2026-11-06: Rust removal is finished, and this is parity work, not removal.; was [open]: (was #4766) (was #3913) [#3977] A path dependency under the project folder is not checked against the root's policy.unsafe, policy.effects or policy.expert (one fixture each). Module-to-package attrib"
+    },
+    {
+      "at": "2026-11-07T02:40:11.372Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c01oyhqk",
+      "note": "#14 (moved from #4717 c58) (was #4766) (was #3913) [#3977] A pat"
+    },
+    {
+      "at": "2026-11-07T02:40:10.360Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0rqi33c",
+      "note": "#55: Moved to #6425 c13 (G5, errors and lints) at the owner's direction on 2026-11-06: Rust removal is finished, and this is parity work, not removal.; was [open]: (was #4766) (was #3913) [#3913] the remaining effect-system codes (package purity, determinism, policy) on the Jet fixture matrix."
+    },
+    {
+      "at": "2026-11-07T02:40:09.356Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c01oyhqk",
+      "note": "#13 (moved from #4717 c55) (was #4766) (was #3913) [#3913] the r"
+    },
+    {
+      "at": "2026-11-07T02:40:08.336Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0rqi33c",
+      "note": "#50: Moved to #6425 c12 (G5, errors and lints) at the owner's direction on 2026-11-06: Rust removal is finished, and this is parity work, not removal.; was [open]: (was #4766) (was #3893) [#4030] run the paired fixtures for six written ports with the admitted `jet` (stage-2 output of `jet build Compiler`): #3887 E0433, #3896 Display/Debug interpolation checks, #"
+    },
+    {
+      "at": "2026-11-07T02:40:07.346Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c01oyhqk",
+      "note": "#12 (moved from #4717 c50) (was #4766) (was #3893) [#4030] run t"
+    },
+    {
+      "at": "2026-11-07T02:40:06.382Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0rqi33c",
+      "note": "#49: Moved to #6425 c11 (G5, errors and lints) at the owner's direction on 2026-11-06: Rust removal is finished, and this is parity work, not removal.; was [open]: (was #4766) (was #3893) [#4024] carry over the criteria of #3903 (assert_eq(x, None); L0528 on generated bodies), #3904 (nested-pattern coverage beyond single-slot payloads) and #3907 (serde E2408/E24"
+    },
+    {
+      "at": "2026-11-07T02:40:05.314Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c01oyhqk",
+      "note": "#11 (moved from #4717 c49) (was #4766) (was #3893) [#4024] carry"
+    },
+    {
+      "at": "2026-11-07T02:40:04.343Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0rqi33c",
+      "note": "#40: Moved to #6425 c10 (G5, errors and lints) at the owner's direction on 2026-11-06: Rust removal is finished, and this is parity work, not removal.; was [open]: (was #4766) (was #3924) Parity: #CLI derive checks (CheckerCli, E1305-E1347) missing in JetSema"
+    },
+    {
+      "at": "2026-11-07T02:40:03.374Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c01oyhqk",
+      "note": "#10 (moved from #4717 c40) (was #4766) (was #3924) Parity: #CLI "
+    },
+    {
+      "at": "2026-11-07T02:40:02.401Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0rqi33c",
+      "note": "#39: Moved to #6425 c9 (G5, errors and lints) at the owner's direction on 2026-11-06: Rust removal is finished, and this is parity work, not removal.; was [open]: (was #4766) (was #3898) Parity: Item-level declaration rules missing in JetSema: [#4023] carry over #3899 (#Test scope and test-runner rules), #3900 (task detach/freeze) and #3905 (doctest E2901)."
+    },
+    {
+      "at": "2026-11-07T02:40:01.378Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c01oyhqk",
+      "note": "#9 (moved from #4717 c39) (was #4766) (was #3898) Parity: Item-"
+    },
+    {
+      "at": "2026-11-07T02:40:00.418Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0rqi33c",
+      "note": "#38: Moved to #6425 c8 (G5, errors and lints) at the owner's direction on 2026-11-06: Rust removal is finished, and this is parity work, not removal.; was [open]: (was #4766) census checked into the gate as a guard (a code emitted only by the Rust front fails the guard), all MISSING rows carded or fixed, zero silent drops at cutover."
+    },
+    {
+      "at": "2026-11-07T02:39:59.475Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c01oyhqk",
+      "note": "#8 (moved from #4717 c38) (was #4766) census checked into the g"
+    },
+    {
+      "at": "2026-11-07T02:39:58.447Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0rqi33c",
+      "note": "#30"
+    },
+    {
+      "at": "2026-11-07T02:39:57.031Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0rqi33c",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-07T02:37:55.428Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c00tcdfc",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-07T02:34:12.708Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0tltpjp",
+      "note": "#8 jet_foundation's package tests pass: the 3 failures on dev d"
+    },
+    {
+      "at": "2026-11-07T02:31:03.281Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c00tcdfc",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-07T02:31:02.325Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0uwol3w",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-07T02:29:23.106Z",
       "by": "Main",
