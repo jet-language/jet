@@ -1,10 +1,10 @@
-// `jet budget check`'s measurement (Rust `build_report`) and its projection
-// (Rust `emit_check`). Each applicable budget carries its provider's host
-// identity and a context key over the subject, toolchain and provider; its
-// samples come from its provider and its decision from the budget engine's
-// `perf_evaluate`. The CompilerFacts provider measures the facts of the
-// checked program the driver hands over; BuildArtifact and ServiceProbe
-// measure the inputs BudgetProviders.jet gathers.
+// `jet budget check`'s measurement and its projection. Each applicable
+// budget carries its provider's host identity and a context key over the
+// subject, toolchain and provider; its samples come from its provider and
+// its decision from the budget engine's `perf_evaluate`. The CompilerFacts
+// provider measures the facts of the checked program the driver hands over;
+// BuildArtifact and ServiceProbe measure the inputs BudgetProviders.jet
+// gathers.
 use {
     cli_files: core.files
     cli_sys: core.sys
@@ -19,7 +19,8 @@ use {
     jet_sema.[BudgetAxis, BudgetQuantity, sema_budget_ascii_lower, sema_budget_provider_identity, sema_budget_provider_kind]
 }
 
-// The providers a budget may name (Rust `build_report`'s command-owned set).
+// The providers a budget may name; a provider outside this set is a tool
+// failure, and one inside it that this `jet` can't measure yet is E2104.
 JET_CLI_BUDGET_PROVIDERS: [String]{"CompilerFacts", "BuildArtifact", "BenchMeasurement", "AllocationProbe", "ServiceProbe", "SceneProbe", "CompilerProbe"}
 
 // One budget before its evaluation: its measurement fields but samples,
@@ -38,7 +39,7 @@ JetCLIBudgetMeasured: struct {
     enforcement: PerfEnforcement
 }
 
-// One evaluated budget (Rust `ResultRow`).
+// One evaluated budget, as the result rows and diagnostics show it.
 JetCLIBudgetResult: struct {
     id: String
     name: String
@@ -60,7 +61,7 @@ JetCLIBudgetResult: struct {
     reason: String
 }
 
-// A verified report and its results (Rust `BuiltReport`).
+// A verified report, its canonical bytes, and its results.
 JetCLIBudgetBuilt: struct {
     report: CanonicalJSON
     bytes: [U8]
@@ -69,7 +70,7 @@ JetCLIBudgetBuilt: struct {
     fail: Int
 }
 
-// Rust `build_report` for budgets measured without history: `ordered` is
+// The report over budgets measured without history: `ordered` is
 // sorted by name, `toolchain` the running compiler's identity, `artifact`
 // the built program when a BuildArtifact budget sizes it, and `services`
 // the collected ServiceProbe readiness samples.
@@ -173,14 +174,14 @@ jet_cli_budget_fields: fn(value: CanonicalJSON) -> [CanonicalJSONField] Never! {
     [CanonicalJSONField]{}
 }
 
-// Rust `package_name`: the package the manifest names, else `package`.
+// The package the manifest names, else `package`.
 jet_cli_budget_package: fn(root: String) -> String Never! {
     if jet_cli_root_manifest(root) == .Val(manifest) -> return manifest.name.copy() // copy: the manifest is dropped here.
     "package"
 }
 
-// Rust `measurement_base`: everything of one measurement but its samples,
-// context key and decision.
+// Everything of one measurement but its samples, context key and decision,
+// which depend on the subject and the provider's samples.
 jet_cli_budget_base: fn(located: JetDriverBudgetSpec, provider: CanonicalJSON, package: String, prefix: String, profile: String) -> JetCLIBudgetMeasured JetCLIBudgetFailure! {
     spec: located.spec
     metric_name: sema_budget_provider_kind(spec.metric)
@@ -263,7 +264,7 @@ jet_cli_budget_measurement: fn(row: JetCLIBudgetMeasured, decision: CanonicalJSO
     perf_report_object_new(fields)
 }
 
-// Rust `axis`.
+// An applicability axis as the report records it: the names it admits.
 jet_cli_budget_axis: fn(axis: BudgetAxis, current: String) -> [CanonicalJSON] Never! {
     if axis == {
         .Current -> [CanonicalJSON]{CanonicalJSON.String(current.copy())} // copy: the caller keeps the current name.
@@ -272,7 +273,7 @@ jet_cli_budget_axis: fn(axis: BudgetAxis, current: String) -> [CanonicalJSON] Ne
     }
 }
 
-// Rust `percentile`: the estimator a metric's percentile names.
+// The estimator a metric's percentile names.
 jet_cli_budget_percentile: fn(name: String?) -> PerfPercentile? Never! {
     text: name ?? return None
     if text == {
@@ -285,7 +286,8 @@ jet_cli_budget_percentile: fn(name: String?) -> PerfPercentile? Never! {
     }
 }
 
-// Rust `metric_percentile`: `p50` for `BenchTime(P50)`.
+// The percentile a metric names, as the report spells it: `p50` for
+// `BenchTime(P50)`.
 jet_cli_budget_percentile_name: fn(metric: String) -> String? Never! {
     raw: sema_budget_provider_identity(metric) ?? return None
     if raw == {
@@ -298,7 +300,7 @@ jet_cli_budget_percentile_name: fn(metric: String) -> String? Never! {
     }
 }
 
-// Rust `metric_unit`.
+// The unit the report records for a metric's samples.
 jet_cli_budget_metric_unit: fn(metric: String) -> String Never! {
     if sema_budget_provider_kind(metric) == {
         "BinarySize" | "ArtifactSize" | "MemoryHighWater" | "AllocationBytes" | "SceneAssetBytes" -> "Bytes"
@@ -308,7 +310,7 @@ jet_cli_budget_metric_unit: fn(metric: String) -> String Never! {
     }
 }
 
-// Rust `quantity`: an absolute limit as an exact rational.
+// An absolute limit as an exact rational.
 jet_cli_budget_quantity: fn(value: BudgetQuantity) -> PerfRational JetCLIBudgetFailure! {
     if value == {
         .DurationNs(count) -> Ok(perf_rational_integer(count))
@@ -319,7 +321,7 @@ jet_cli_budget_quantity: fn(value: BudgetQuantity) -> PerfRational JetCLIBudgetF
     }
 }
 
-// Rust `compiler_fact`: the CompilerFacts value `metric` names.
+// The CompilerFacts value `metric` names.
 jet_cli_budget_compiler_fact: fn(metric: String, facts: JetDriverBudgetFacts) -> Int JetCLIBudgetFailure! {
     if metric == {
         "PublicApiItems" -> Ok(facts.public_api_items)
@@ -333,8 +335,8 @@ jet_cli_budget_compiler_fact: fn(metric: String, facts: JetDriverBudgetFacts) ->
     }
 }
 
-// Rust `provider`: the host identity a measurement is taken under, with its
-// fingerprint over every other field.
+// The host identity a measurement is taken under, with its fingerprint over
+// every other field; history is comparable only under the same identity.
 jet_cli_budget_provider: fn(provider: String) -> CanonicalJSON JetCLIBudgetFailure! {
     kind: sema_budget_provider_kind(provider)
     protocol: jet_cli_budget_provider_version(kind)
@@ -366,7 +368,7 @@ jet_cli_budget_provider: fn(provider: String) -> CanonicalJSON JetCLIBudgetFailu
     Ok(perf_report_object_new(fields))
 }
 
-// Rust `proc_value`: the trimmed value of the first `key: value` line.
+// The trimmed value of the first `key: value` line of a `/proc` file.
 jet_cli_budget_proc_value: fn(text: String, key: String) -> String? Never! {
     loop line in text.lines() {
         if line.split_once(":") == .Val(pair) {
@@ -376,7 +378,7 @@ jet_cli_budget_proc_value: fn(text: String, key: String) -> String? Never! {
     None
 }
 
-// Rust `read_trimmed`.
+// The trimmed text of the host file `path`; `label` names it in the failure.
 jet_cli_budget_read_trimmed: fn(path: String, label: String) -> String JetCLIBudgetFailure! {
     text: cli_files.read(path) ?? return Err(jet_cli_budget_failure("cannot read {label}: {jet_cli_io_error_text(err)}"))
     value: text.trim()
@@ -384,7 +386,7 @@ jet_cli_budget_read_trimmed: fn(path: String, label: String) -> String JetCLIBud
     Ok(value)
 }
 
-// Rust `trend_json` over no history: the insufficient trend.
+// The trend of a measurement without history: insufficient.
 jet_cli_budget_trend: fn(direction: PerfDirection) -> CanonicalJSON JetCLIBudgetFailure! {
     trend: perf_trend([String]{}, [PerfRational]{}, direction) ?? return Err(jet_cli_budget_failure(err.message))
     label: if trend.label == {
@@ -432,8 +434,8 @@ jet_cli_budget_direction_name: fn(direction: PerfDirection) -> String Never! {
     if direction == PerfDirection.HigherIsBetter -> "higher_is_better" else -> "lower_is_better"
 }
 
-// Rust `result_rank`: regressions first, then missing evidence, warnings,
-// and passes.
+// The order results are shown in: regressions first, then missing evidence,
+// warnings, and passes.
 jet_cli_budget_result_rank: fn(row: JetCLIBudgetResult) -> Int Never! {
     if row.outcome == PerfPolicyOutcome.Fail {
         if row.evidence == PerfEvidence.Unavailable -> return 2
@@ -443,8 +445,7 @@ jet_cli_budget_result_rank: fn(row: JetCLIBudgetResult) -> Int Never! {
     5
 }
 
-// Rust `diagnostic_parts`: the code, message and fix of a result that did
-// not pass.
+// The code, message and fix of a result that did not pass.
 jet_cli_budget_diagnostic: fn(row: JetCLIBudgetResult) -> (code: String, message: String, fix: String) Never! {
     if row.evidence == PerfEvidence.Unavailable {
         return (code: "E2906", message: "performance budget {row.name} has no usable evidence", fix: "correct the provider evidence or bootstrap only when absent or stale evidence is eligible")
@@ -453,7 +454,7 @@ jet_cli_budget_diagnostic: fn(row: JetCLIBudgetResult) -> (code: String, message
     (code: "E2907", message: "performance budget {row.name} {verdict}", fix: "improve the measured behavior, inspect `jet budget check --verbose`, or record an explicit exception")
 }
 
-// Rust `result_json`.
+// One result row of the `budget` status.
 jet_cli_budget_result_json: fn(row: JetCLIBudgetResult) -> CanonicalJSON Never! {
     code: if row.outcome == PerfPolicyOutcome.Pass -> CanonicalJSON.Null else -> CanonicalJSON.String(jet_cli_budget_diagnostic(row).code)
     status: if row.evidence == PerfEvidence.Unavailable && row.outcome == PerfPolicyOutcome.Fail -> "unavailable" else -> jet_cli_budget_outcome_name(row.outcome)
@@ -482,12 +483,12 @@ jet_cli_budget_result_json: fn(row: JetCLIBudgetResult) -> CanonicalJSON Never! 
     })
 }
 
-// Rust `count`.
+// `count` with the singular or plural noun.
 jet_cli_budget_count: fn(count: Int, one: String, many: String) -> String Never! {
     "{count} {if count == 1 -> one else -> many}"
 }
 
-// Rust `emit_check`: the status envelope under `--json`; otherwise each
+// The `check` projection: the status envelope under `--json`; otherwise each
 // result that did not pass as a diagnostic (and a GitHub annotation when
 // asked for), the verbose rows, and the one-line summary. Exit 1 when a
 // budget failed.
@@ -551,8 +552,8 @@ jet_cli_budget_emit: fn(options: JetCLIBudgetOptions, built: JetCLIBudgetBuilt, 
     JetDriverVerbOutput{stdout: "", stderr: stderr, exit_code: exit_code}
 }
 
-// Rust `emit_json`: the `budget` status of a built report, with the update
-// plan (Null for `check`) and whether it was applied.
+// The `budget` status of a built report, with the update plan (Null for
+// `check`) and whether it was applied.
 jet_cli_budget_json: fn(options: JetCLIBudgetOptions, built: JetCLIBudgetBuilt, report_path: String, plan: JetCLIStatusValue, applied: Bool, exit_code: Int) -> JetDriverVerbOutput {
     failed := false
     unavailable := false

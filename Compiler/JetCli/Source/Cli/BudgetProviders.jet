@@ -1,8 +1,8 @@
 // The provider inputs `jet budget check` gathers before it measures: the
-// selected native artifact the BuildArtifact provider sizes (Rust
-// `build_selected_artifact`), and the service readiness samples the
-// `jetpack` engine's internal ServiceProbe transport takes (Rust
-// `collect_service_evidence`).
+// native artifact a BuildArtifact budget sizes, built by this `jet`, and the
+// service readiness samples the `jetpack` engine's internal ServiceProbe
+// transport takes. Both are gathered once per run, before any sample is
+// recorded, so a run that can't gather them writes no report.
 use {
     providers_crypto: core.crypto
     providers_hex: core.encoding.hex
@@ -15,7 +15,7 @@ use {
     jet_pkg_model.[COMPILER_VERSION]
 }
 
-// The samples a ServiceProbe row carries (Rust `ServiceEvidence`).
+// The samples a ServiceProbe row carries: one per down-up-ready trial.
 JET_CLI_BUDGET_SERVICE_SAMPLES: 20
 
 // The built artifact: its path, size in bytes and SHA-256.
@@ -31,9 +31,10 @@ JetCLIBudgetService: struct {
     samples: [Int]
 }
 
-// Rust `build_selected_artifact`: this `jet` builds the project entry in its
-// root within the 120-second build deadline, and the artifact is the
-// regular file `.jet/build/<stem>` that build leaves.
+// The selected artifact: this `jet` builds the project entry in its root
+// within a 120-second deadline, and the artifact is the regular file
+// `.jet/build/<stem>` that build leaves. A symlink is refused, so the size
+// and hash are of the file the build wrote.
 jet_cli_budget_build_artifact: fn(root: String, entry: String) -> JetCLIBudgetArtifact JetCLIBudgetFailure! {
     receipt: cli_process.cmd([String]{cli_sys.executable(), "build", entry}).cwd(root).stdout(.Capture).stderr(.Capture).timeout(120s).run() ?? return Err(jet_cli_budget_failure("cannot start selected artifact build: {jet_cli_io_error_text(err)}"))
     if receipt.timed_out -> return Err(jet_cli_budget_failure("selected artifact build exceeded 120 second build deadline"))
@@ -45,8 +46,8 @@ jet_cli_budget_build_artifact: fn(root: String, entry: String) -> JetCLIBudgetAr
     Ok(JetCLIBudgetArtifact{path: path, bytes: bytes.len(), sha256: providers_crypto.sha256(bytes).hex()})
 }
 
-// Rust `collect_service_evidence` for the service `name`: evidence that
-// can't be collected fails the run, which names `jet dev` as the way to
+// The readiness evidence of the service `name`. Evidence that can't be
+// collected fails the run, and the failure names `jet dev` as the way to
 // refresh it.
 jet_cli_budget_service: fn(root: String, name: String) -> JetCLIBudgetService JetCLIBudgetFailure! {
     samples: jet_cli_budget_probe_service(root, name) ?? return Err(jet_cli_budget_failure("ServiceProbe `{name}` was not collected: {err.message}; run `jet dev <file>` to refresh service evidence"))
@@ -78,7 +79,7 @@ jet_cli_budget_probe_service: fn(root: String, name: String) -> [Int] JetCLIBudg
     Ok(samples)
 }
 
-// Rust's provider events for one row: the CompilerFacts value, the built
+// The samples of one budget row: the CompilerFacts value, the built
 // artifact's size, or the service's readiness samples.
 jet_cli_budget_samples: fn(spec: BudgetSpec, facts: JetDriverBudgetFacts, artifact: JetCLIBudgetArtifact?, services: [JetCLIBudgetService]) -> [PerfRational] JetCLIBudgetFailure! {
     if sema_budget_provider_kind(spec.provider) == {
@@ -102,7 +103,9 @@ jet_cli_budget_samples: fn(spec: BudgetSpec, facts: JetDriverBudgetFacts, artifa
     Ok([PerfRational]{perf_rational_integer(value)})
 }
 
-// Rust `provider`'s version and isolation for the provider kind `kind`.
+// The measurement protocol and isolation recorded in the provider identity
+// of kind `kind`; a report is comparable only with history taken under the
+// same protocol.
 jet_cli_budget_provider_version: fn(kind: String) -> (version: String, isolation: String) Never! {
     if kind == {
         "BuildArtifact" -> (version: "jet-artifact-footprint-v1-first-line-vmhwm-trials-20", isolation: "fresh-child-process-per-trial")
@@ -111,8 +114,8 @@ jet_cli_budget_provider_version: fn(kind: String) -> (version: String, isolation
     }
 }
 
-// Rust `subject`'s artifact: its size and SHA-256, Null when no budget
-// measures one.
+// The report subject's artifact: its size and SHA-256, Null when no budget
+// sizes one.
 jet_cli_budget_artifact_json: fn(artifact: JetCLIBudgetArtifact?) -> CanonicalJSON Never! {
     built: artifact ?? return CanonicalJSON.Null
     perf_report_object_new([CanonicalJSONField]{

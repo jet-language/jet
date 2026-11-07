@@ -1,4 +1,4 @@
-// The performance baseline store's update half (Rust `BudgetStore`). The
+// The performance baseline store's update half. The
 // manifest `.jet/perf/baselines/names/<name>.json` chains every accepted
 // report by content hash through audited generations, and
 // `.jet/perf/baselines/objects/<report_id>.json` keeps each accepted report
@@ -14,13 +14,13 @@ use {
 JET_CLI_BUDGET_STALE_SECONDS: 2592000
 JET_CLI_BUDGET_MANIFEST_SCHEMA: "jet.budget-manifest"
 JET_CLI_BUDGET_AUDIT_KEYS: [String]{"accepted_at", "actor_label", "audit_id", "flags", "kind", "prior_head_report_id", "prior_state_id", "reason", "report_id"}
-// Rust `compatible`: the measurement, content and subject fields a prior
+// The measurement, content and subject fields a prior
 // generation must share with the candidate.
 JET_CLI_BUDGET_COMPATIBLE_MEASUREMENT: [String]{"budget_spec_sha256", "metric", "unit", "direction", "comparison", "target_class", "provider", "context_key"}
 JET_CLI_BUDGET_COMPATIBLE_CONTENT: [String]{"toolchain", "privacy"}
 JET_CLI_BUDGET_COMPATIBLE_SUBJECT: [String]{"target_triple", "target_class", "profile"}
 
-// How an update accepts its report (Rust `UpdateKind`); a bootstrap and an
+// How an update accepts its report; a bootstrap and an
 // accepted regression carry their reason.
 JetCLIBudgetUpdateKind: enum {
     Pass
@@ -28,7 +28,7 @@ JetCLIBudgetUpdateKind: enum {
     AcceptRegression(String)
 }
 
-// A planned update (Rust `UpdatePlan`): the manifest and head it was planned
+// A planned update: the manifest and head it was planned
 // against, which the apply re-checks under the lock.
 JetCLIBudgetUpdatePlan: struct {
     baseline: String
@@ -39,7 +39,7 @@ JetCLIBudgetUpdatePlan: struct {
     kind: JetCLIBudgetUpdateKind
 }
 
-// Rust `plan_update` over the verified report `report`; nothing is written.
+// The update plan over the verified report `report`; nothing is written.
 jet_cli_budget_plan_update: fn(root: String, baseline: String, report: CanonicalJSON, report_id: String, kind: JetCLIBudgetUpdateKind, accepted_at: String) -> JetCLIBudgetUpdatePlan JetCLIBudgetFailure! {
     jet_cli_budget_store_kind(kind) ?? return Err(err)
     _: jet_cli_budget_store_seconds(accepted_at) ?? return Err(err)
@@ -59,7 +59,7 @@ jet_cli_budget_plan_update: fn(root: String, baseline: String, report: Canonical
     Ok(JetCLIBudgetUpdatePlan{baseline: baseline.copy(), report_id: report_id.copy(), prior_manifest_id: prior_manifest, prior_head_report_id: prior_head, accepted_at: accepted_at.copy(), kind: kind.copy()})
 }
 
-// Rust `apply_update`: under the baselines lock the manifest must still be
+// Applies a plan: under the baselines lock the manifest must still be
 // the planned one; the report object is published immutably, then the next
 // manifest replaces the current one atomically.
 jet_cli_budget_apply_update: fn(root: String, plan: JetCLIBudgetUpdatePlan, report: CanonicalJSON, bytes: [U8]) JetCLIBudgetFailure! {
@@ -67,7 +67,7 @@ jet_cli_budget_apply_update: fn(root: String, plan: JetCLIBudgetUpdatePlan, repo
     _: jet_cli_budget_store_seconds(plan.accepted_at) ?? return Err(err)
     _: JetCLIRootedDirectory.open(root, [String]{".jet", "perf", "baselines"}, true) ?? return Err(jet_cli_budget_failure(err.message))
     locks: JetCLIRootedDirectory.open(root, [String]{".jet", "perf", "baselines", "locks"}, true) ?? return Err(jet_cli_budget_failure(err.message))
-    // One lock over the whole store stands for Rust's global and per-name locks.
+    // One lock over the whole store serializes every baseline's update.
     _owner: locks.lock("budget baseline") ?? return Err(jet_cli_budget_failure(err.message))
     current: jet_cli_budget_store_read_manifest(root, plan.baseline) ?? return Err(err)
     manifest_id := String?{None}
@@ -92,7 +92,7 @@ jet_cli_budget_store_is_bootstrap: fn(kind: JetCLIBudgetUpdateKind) -> Bool Neve
     false
 }
 
-// Rust `validate_kind`.
+// An update kind's reason, when it carries one, is well formed.
 jet_cli_budget_store_kind: fn(kind: JetCLIBudgetUpdateKind) JetCLIBudgetFailure! {
     if kind == {
         .Pass -> {}
@@ -101,7 +101,7 @@ jet_cli_budget_store_kind: fn(kind: JetCLIBudgetUpdateKind) JetCLIBudgetFailure!
     }
 }
 
-// Rust `normalize_reason`.
+// An acceptance reason is trimmed, control-free and 1..=512 scalars.
 jet_cli_budget_store_reason: fn(value: String) JetCLIBudgetFailure! {
     if value.is_empty() || store_text.trim(value) != value || store_text.scalar_count(value) > 512 || store_text.has_control(value) {
         return Err(jet_cli_budget_failure("acceptance reason must be trimmed, control-free, and 1..=512 scalars"))
@@ -109,7 +109,8 @@ jet_cli_budget_store_reason: fn(value: String) JetCLIBudgetFailure! {
     if store_text.nfc(value) != value -> return Err(jet_cli_budget_failure("acceptance reason must be NFC"))
 }
 
-// Rust `validate_update_evidence`.
+// The report's evidence admits the update kind: a regression advances the
+// baseline only when accepted with a reason.
 jet_cli_budget_store_evidence_check: fn(measurements: [CanonicalJSON], kind: JetCLIBudgetUpdateKind) JetCLIBudgetFailure! {
     if measurements.len() == 0 -> return Err(jet_cli_budget_failure("update report has no measurements"))
     regressed := false
@@ -132,7 +133,7 @@ jet_cli_budget_store_evidence_check: fn(measurements: [CanonicalJSON], kind: Jet
     if kind == .AcceptRegression(_) -> return Err(jet_cli_budget_failure("accept-regression requires regression or inconclusive evidence"))
 }
 
-// Rust `validate_update_eligibility`: comparisons name this baseline, a
+// Whether the report may advance `baseline`: comparisons name this baseline, a
 // deterministic measurement advances only over compatible fresh history, and
 // a bootstrap replaces only stale history.
 jet_cli_budget_store_eligible: fn(root: String, baseline: String, report: CanonicalJSON, measurements: [CanonicalJSON], kind: JetCLIBudgetUpdateKind, current: CanonicalJSON, at: String) JetCLIBudgetFailure! {
@@ -177,7 +178,7 @@ JetCLIBudgetHistory: enum {
     Stale
 }
 
-// Rust `compatible_generation`: the newest generation whose measurement of
+// The newest generation whose measurement of
 // the candidate's budget is compatible, and whether it is stale; Absent when
 // none is, or when the newest is stale and `include_stale` is false.
 jet_cli_budget_store_generation: fn(root: String, manifest: CanonicalJSON, content: CanonicalJSON, candidate: CanonicalJSON, at: String, include_stale: Bool) -> JetCLIBudgetHistory JetCLIBudgetFailure! {
@@ -214,7 +215,7 @@ jet_cli_budget_store_generation: fn(root: String, manifest: CanonicalJSON, conte
     Ok(JetCLIBudgetHistory.Absent)
 }
 
-// Rust `compatible`.
+// Whether two measurements, with their report contents, are comparable.
 jet_cli_budget_store_compatible: fn(left_content: CanonicalJSON, left: CanonicalJSON, right_content: CanonicalJSON, right: CanonicalJSON) -> Bool Never! {
     loop key in JET_CLI_BUDGET_COMPATIBLE_MEASUREMENT {
         if !jet_cli_budget_store_same(left, right, key) -> return false
@@ -245,7 +246,7 @@ jet_cli_budget_store_same: fn(left: CanonicalJSON, right: CanonicalJSON, key: St
     right_at == None
 }
 
-// Rust `stale_after_seconds`.
+// How old history may be before it is stale, from the measurement's policy.
 jet_cli_budget_store_stale_after: fn(measurement: CanonicalJSON) -> Int JetCLIBudgetFailure! {
     policy: jet_cli_budget_store_get(measurement, "policy") ?? return Err(jet_cli_budget_failure("measurement policy is invalid"))
     if policy == {
@@ -255,7 +256,7 @@ jet_cli_budget_store_stale_after: fn(measurement: CanonicalJSON) -> Int JetCLIBu
     }
 }
 
-// Rust `next_manifest`: the current generations and one new audited
+// The next manifest: the current generations and one new audited
 // generation whose CAS links name the current manifest and head.
 jet_cli_budget_store_next_manifest: fn(current: CanonicalJSON, plan: JetCLIBudgetUpdatePlan) -> CanonicalJSON JetCLIBudgetFailure! {
     kind_name := "pass"
@@ -315,7 +316,7 @@ jet_cli_budget_store_next_manifest: fn(current: CanonicalJSON, plan: JetCLIBudge
     }))
 }
 
-// Rust `read_manifest_optional`: Null when the baseline has no manifest.
+// The current manifest of `baseline`; Null when the baseline has none.
 jet_cli_budget_store_read_manifest: fn(root: String, baseline: String) -> CanonicalJSON JetCLIBudgetFailure! {
     parts: jet_cli_budget_store_manifest_dir(baseline)
     present: JetCLIRootedDirectory.present(root, parts) ?? return Err(jet_cli_budget_failure(err.message))
@@ -329,7 +330,8 @@ jet_cli_budget_store_read_manifest: fn(root: String, baseline: String) -> Canoni
     jet_cli_budget_store_verify_manifest(bytes, baseline)
 }
 
-// Rust `manifest_parent`: `ci/linux` lives at `names/ci/linux.json`.
+// The directory of a baseline's manifest: `ci/linux` lives at
+// `names/ci/linux.json`.
 jet_cli_budget_store_manifest_dir: fn(baseline: String) -> [String] Never! {
     parts := [String]{".jet", "perf", "baselines", "names"}
     segments: baseline.split("/").to_list()
@@ -342,7 +344,7 @@ jet_cli_budget_store_manifest_name: fn(baseline: String) -> String Never! {
     "{segments[segments.len() - 1]}.json"
 }
 
-// Rust `verify_manifest`: the exact wrapper, its content hash, and the audited
+// A verified manifest: the exact wrapper, its content hash, and the audited
 // CAS chain of every generation.
 jet_cli_budget_store_verify_manifest: fn(bytes: [U8], expected_name: String) -> CanonicalJSON JetCLIBudgetFailure! {
     value: canonical_json_parse(bytes) ?? return Err(jet_cli_budget_failure("invalid manifest: {err.message}"))
@@ -433,7 +435,7 @@ jet_cli_budget_store_measurements: fn(report: CanonicalJSON) -> [CanonicalJSON] 
     jet_cli_budget_store_array(content, "measurements", "measurements")
 }
 
-// Rust `measurement`, where a missing or repeated budget is skipped: the one
+// The measurement of a budget, where a missing or repeated budget is skipped: the one
 // measurement of `budget_id` in `content`.
 jet_cli_budget_store_measurement: fn(content: CanonicalJSON, budget_id: String) -> CanonicalJSON? Never! {
     rows: jet_cli_budget_store_array(content, "measurements", "measurements") ?? return None
@@ -455,7 +457,7 @@ jet_cli_budget_store_evidence: fn(measurement: CanonicalJSON) -> String JetCLIBu
     Err(jet_cli_budget_failure("decision is not an object"))
 }
 
-// Rust `timestamp_seconds` over `timestamp_parts`: RFC 3339 UTC with nine
+// A timestamp as RFC 3339 UTC with nine
 // fractional digits, as Unix seconds.
 jet_cli_budget_store_seconds: fn(value: String) -> Int JetCLIBudgetFailure! {
     bytes: value.bytes()
@@ -530,7 +532,7 @@ jet_cli_budget_store_get: fn(value: CanonicalJSON, key: String) -> CanonicalJSON
     None
 }
 
-// Rust `exact_object`: an object with exactly `keys`.
+// Whether `value` is an object with exactly `keys`.
 jet_cli_budget_store_exact: fn(value: CanonicalJSON, name: String, keys: [String]) JetCLIBudgetFailure! {
     if value == .Object(fields) {
         if fields.len() == keys.len() {
@@ -544,7 +546,7 @@ jet_cli_budget_store_exact: fn(value: CanonicalJSON, name: String, keys: [String
     Err(jet_cli_budget_failure("{name} has missing or unknown fields"))
 }
 
-// Rust `require_text`.
+// The text field `key` of `value` must be `expected`.
 jet_cli_budget_store_require: fn(value: CanonicalJSON, key: String, expected: String) JetCLIBudgetFailure! {
     found: jet_cli_budget_store_text(value, key, key) ?? return Err(err)
     if found != expected -> return Err(jet_cli_budget_failure("{key} must be `{expected}`"))

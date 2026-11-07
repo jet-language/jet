@@ -141,7 +141,7 @@ jet_cli_budget_run: fn(options: JetCLIBudgetOptions, root: String, entry: String
             prefix: jet_cli_entry_join(root, "")
             loop held in snapshot.roots {
                 // The measured members are the program modules; a manifest is
-                // not one (Rust `subject` reads `bundle.modules`).
+                // not one.
                 loop file in held.files {
                     if !file.path.ends_with(".jet") || jet_cli_fmt_is_package_manifest_file(file.path) || jet_cli_fmt_is_typed_package_source(file.source, file.path) -> next
                     sources.push(JetCLIBudgetSource{path: file.path.removeprefix(prefix), sha256: budget_crypto.sha256(file.source.bytes()).hex()})
@@ -152,8 +152,8 @@ jet_cli_budget_run: fn(options: JetCLIBudgetOptions, root: String, entry: String
     }
 }
 
-// Rust `applicable(spec, "native", profile)`: `profile` is the one the
-// measured compile selected.
+// Whether a budget applies to this native run: its target and profile axes
+// admit `native` and `profile`, the one the measured compile selected.
 jet_cli_budget_applies: fn(spec: BudgetSpec, profile: String) -> Bool Never! {
     jet_cli_budget_axis_applies(spec.applicability.targets, "native", "Native") && jet_cli_budget_axis_applies(spec.applicability.profiles, profile, jet_cli_budget_title(profile))
 }
@@ -177,7 +177,7 @@ jet_cli_budget_axis_applies: fn(axis: BudgetAxis, current: String, title: String
     true
 }
 
-// Rust `build_report` and `emit_check` over the applicable specs `active`:
+// The measurement and projection over the applicable specs `active`:
 // the toolchain identity first, then each CompilerProbe workload resolved
 // and each ServiceProbe service's readiness collected, then the refusal of
 // what this `jet` can't measure, then the selected artifact built when a
@@ -232,9 +232,9 @@ jet_cli_budget_check: fn(options: JetCLIBudgetOptions, root: String, entry: Stri
     jet_cli_budget_emit(options, built, report_path, created)
 }
 
-// Rust `compile_descriptor`: a CompilerProbe workload the resident compiler
-// can't run, or whose edit patch is unreadable, is refused before anything
-// is measured.
+// A CompilerProbe workload the resident compiler can't run, or whose edit
+// patch is unreadable, is refused before anything is measured, so a report
+// never records a workload that did not run.
 jet_cli_budget_compile_workload: fn(root: String, spec: BudgetSpec, profile: String) JetCLIBudgetFailure! {
     workload: spec.compile_workload ?? return Err(jet_cli_budget_failure("CompilerProbe budget `{spec.name}` has no resolved workload"))
     if !(workload.mode == "Clean" || workload.mode == "NoChange" || workload.mode == "Edit") || workload.target == "" || profile == "" -> return Err(jet_cli_budget_failure("compile workload has an unsupported mode, empty target, or empty profile"))
@@ -261,8 +261,8 @@ jet_cli_budget_compile_workload: fn(root: String, spec: BudgetSpec, profile: Str
     }
 }
 
-// Rust `validate_compile_profile`: a stock profile, or one the package's
-// `build` block declares.
+// Whether `profile` is a stock profile, or one the package's `build` block
+// declares.
 jet_cli_budget_compile_profile: fn(root: String, profile: String) -> Bool {
     if profile == "dev" || profile == "release" || profile == "debug" || profile == "ci" || profile == "small" -> return true
     manifest: jet_cli_root_manifest(root) ?? return false
@@ -272,8 +272,8 @@ jet_cli_budget_compile_profile: fn(root: String, profile: String) -> Bool {
     false
 }
 
-// Rust `run`'s update half over a report that may advance the baseline: the
-// plan is shown first, and only `--yes`, or `y` at the prompt on a terminal,
+// `jet budget update` over a report that may advance the baseline: the plan
+// is shown first, and only `--yes`, or `y` at the prompt on a terminal,
 // writes the report and advances the baseline.
 jet_cli_budget_update: fn(options: JetCLIBudgetOptions, root: String, built: JetCLIBudgetBuilt, report_path: String, color: Bool) -> JetDriverVerbOutput {
     baseline: options.baseline ?? ""
@@ -321,7 +321,7 @@ jet_cli_budget_update: fn(options: JetCLIBudgetOptions, root: String, built: Jet
     JetDriverVerbOutput{stdout: "", stderr: stderr, exit_code: JET_DRIVER_EXIT_OK}
 }
 
-// Rust `confirm_update`: `y` or `yes`, in any case, applies.
+// The terminal confirmation: `y` or `yes`, in any case, applies.
 jet_cli_budget_confirm: fn() -> Bool {
     console := budget_term.stderr()
     console.write("Apply? [y/N] ").drop("budget prompt")
@@ -331,7 +331,7 @@ jet_cli_budget_confirm: fn() -> Bool {
     word == "y" || word == "yes"
 }
 
-// Rust `plan_row`.
+// One row of the update plan: what is written where, and the head it moves from.
 jet_cli_budget_plan_row: fn(operation: String, artifact: String, path: String, from_id: String?, id: String) -> JetCLIStatusValue Never! {
     // copy: the plan keeps its prior head and the report its id.
     from_value: if from_id == .Val(prior) -> jet_cli_status_text(prior.copy()) else -> JetCLIStatusValue.Null
@@ -345,15 +345,15 @@ jet_cli_budget_plan_row: fn(operation: String, artifact: String, path: String, f
     })
 }
 
-// Rust `write_report`: the report, published immutably; true when this run
-// created it.
+// The report, published immutably; true when this run created it, false
+// when an identical report was already there.
 jet_cli_budget_publish_report: fn(root: String, built: JetCLIBudgetBuilt) -> Bool JetCLIBudgetFailure! {
     held: JetCLIRootedDirectory.open(root, [String]{".jet", "perf", "reports"}, true) ?? return Err(jet_cli_budget_failure("report write refused: {err.message}"))
     created: held.publish_immutable("{built.report_id}.json", built.bytes, None, JET_CLI_BUDGET_REPORT_LIMIT) ?? return Err(jet_cli_budget_failure("report write refused: {err.message}"))
     Ok(created)
 }
 
-// Rust `inspect_report`: whether publishing the report would create it.
+// Whether publishing the report would create it.
 jet_cli_budget_report_created: fn(root: String, built: JetCLIBudgetBuilt) -> Bool JetCLIBudgetFailure! {
     parts: [String]{".jet", "perf", "reports"}
     present: JetCLIRootedDirectory.present(root, parts) ?? return Err(jet_cli_budget_failure(err.message))
@@ -372,8 +372,8 @@ jet_cli_budget_accept: fn(root: String, plan: JetCLIBudgetUpdatePlan, built: Jet
     jet_cli_budget_apply_update(root, plan, built.report, built.bytes) ?? return Err(jet_cli_budget_failure("baseline apply refused: {err.message}"))
 }
 
-// Rust `subject`: the measured member sources, sorted, the built artifact
-// (Null when no budget sizes one), the profile, and the target.
+// The report subject: the measured member sources, sorted, the built
+// artifact (Null when no budget sizes one), the profile, and the target.
 jet_cli_budget_subject: fn(root: String, sources: [JetCLIBudgetSource], measured_start: String, measured_end: String, profile: String, artifact: CanonicalJSON) -> CanonicalJSON {
     ordered := sources
     ordered = loop fresh in ordered -> fresh
@@ -395,8 +395,9 @@ jet_cli_budget_subject: fn(root: String, sources: [JetCLIBudgetSource], measured
     })
 }
 
-// Rust `toolchain`: the running compiler's SHA-256, this `jet`'s version, the
-// runtime pack it links and the Core sources it compiles, and their digest.
+// The toolchain identity: the running compiler's SHA-256, this `jet`'s
+// version, the runtime pack it links and the Core sources it compiles, and
+// their digest. History taken under another toolchain is not comparable.
 jet_cli_budget_toolchain: fn(entry: String) -> CanonicalJSON JetCLIBudgetFailure! {
     executable: cli_sys.executable()
     compiler_bytes: cli_files.read_bytes(executable) ?? return Err(jet_cli_budget_failure("jet cannot hash running compiler executable `{executable}`: {jet_cli_io_error_text(err)}"))
@@ -430,7 +431,8 @@ jet_cli_budget_stdlib_id: fn(entry: String) -> String? {
     Val(budget_crypto.sha256(framed).hex())
 }
 
-// Rust `privacy_json`.
+// The report's privacy statement: what it retains, and that it records
+// workspace-relative paths only.
 jet_cli_budget_privacy: fn() -> CanonicalJSON Never! {
     perf_report_object_new([CanonicalJSONField]{
         CanonicalJSONField{key: "excluded", value: CanonicalJSON.Array([CanonicalJSON]{})},
@@ -468,7 +470,7 @@ jet_cli_budget_failed_status: fn(command: String, diagnostics: [String], failure
     "{jet_cli_status_render(command, false, [JetCLIStatusField]{jet_cli_status_field("budget", budget)})}\n"
 }
 
-// Rust `compiler_failure`: the entry's check failed before any budget ran.
+// The entry's check failed before any budget ran.
 jet_cli_budget_compiler_failure: fn(options: JetCLIBudgetOptions, entry: String, diagnostics: [Diagnostic], color: Bool) -> JetDriverVerbOutput {
     source: cli_files.read(entry) ?? ""
     if options.json {
@@ -479,13 +481,13 @@ jet_cli_budget_compiler_failure: fn(options: JetCLIBudgetOptions, entry: String,
     JetDriverVerbOutput{stdout: "", stderr: diagnostic_render_all(entry, source, diagnostics, color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
 }
 
-// Rust `tool_failure`: E2908 before a valid report was produced.
+// A tool failure: E2908 before a valid report was produced.
 jet_cli_budget_tool_failure: fn(options: JetCLIBudgetOptions, why: String, color: Bool) -> JetDriverVerbOutput Never! {
     jet_cli_budget_failure_output(options, why, "budget command failed before a valid report was produced", color)
 }
 
-// Rust `tool_failure_with_report`: E2908 after the report `report_id` was
-// built but before it was accepted.
+// A tool failure after the report `report_id` was built but before it was
+// accepted: E2908 naming the unaccepted report.
 jet_cli_budget_report_failure: fn(options: JetCLIBudgetOptions, report_id: String, why: String, color: Bool) -> JetDriverVerbOutput Never! {
     jet_cli_budget_failure_output(options, why, "budget command failed · report {report_id} was not accepted", color)
 }
