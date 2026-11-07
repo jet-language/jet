@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6675,
-    "rev": 95759,
+    "rev": 95761,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -61397,6 +61397,11 @@
         {
           "at": "2026-11-07",
           "by": "Main",
+          "text": "784485df5d (CoreCliLead-2): the inferred-carrier form is done. tests/ui/cffi_e3203_export_inferred_failure is red on the old s1 (it reported Int Never! and Never! as non-C types and said nothing about twice) and green on the new one (one E3203 NonCAbiType at 6:12, 'twice can fail: its body infers the carrier Int Err!'). The 33 cffi_ ui neighbours pass. RuntimeLibraryFeed.jet passes 100/100 with JET set, including 'an exported run: fn builds as a library export'. Interop/FFI goldens: 15 PASS, 3 KF (#6418). Still open: a carrier declared on a library component signature still reaches BuildLibrary's message. 2fcbdfed8c removed the bogus entry_key ICE in the library feed."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
           "text": "Triage at 8583f858a0 (PortsLead-2): c1, c14, c35-37, c65, c92, c93, c95 and c96 met; c11 obsolete. Open gaps:\n- c2: the sema gate admits any fn named build (compiler_api/an_unselected_runtime_named_build_cannot_use_the_compiler_api).\n- c3: jet profile is not a command (store_generations_empty, store_record_generation; #5694 root).\n- c5: there is no runtime route jet_rt_handle_field_jet_file_reader_path for FileReader.path (2 rows), plus 1 row under #6462. The metadata predicates are fixed in 8583f858a0.\n- c6: package.jet unknown fields are not reported by jet check (E1215), plus the c2 row, #6386 and #4260. Inline package E1215 and semindex are fixed in 8583f858a0.\n- c9: no Jet linker override (RUSTC_LINKER, L2101), build replay prints no 'up to date:', host cc (#6662), parallel_check (#4310).\n- c13: core.process run/workspace (#6419, 11 rows), comptime Authority value, E0712 narrowing outside held rights (now a runtime panic), erased devtools E1414, script confirm prompt (E1803).\n- c56: taskgroup_cannot_escape_in_a_closure lacks FailureDomainMismatch.\nMoved from G1 to G3. This card is the ledger of ported cases that fail on Jet; each remaining row is a product or language gap. They stay tracked (KF lines name this card), which is all #6096 c65 needs from it."
         },
         {
@@ -62500,6 +62505,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-07T13:08:15.856Z"
+        },
+        {
+          "n": 98,
+          "text": "Sema refuses every #Export(c) or library export that can fail (an inferred failure carrier, or a carrier written on the export or on a library component signature) with E3203 at the export's name, and Never! is the infallible spelling. Codegen's check in Compiler/JetIR/Source/BuildLibrary.jet (ir_infallible, 'a native C export is infallible') becomes an internal assertion that checked code never reaches, so no input gets a user error from codegen or an exit 101 there. ui snapshots cover each form.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T14:13:52.898Z"
         }
       ],
       "refs": [],
@@ -62509,12 +62523,12 @@
       "parentId": "c0rqi33c",
       "needsAcceptance": false,
       "created": "2026-10-23T06:35:31.835Z",
-      "updated": "2026-11-07T13:08:15.856Z",
+      "updated": "2026-11-07T14:13:54.196Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
       ],
-      "criteriaLastN": 97
+      "criteriaLastN": 98
     },
     {
       "id": "c00tizy7",
@@ -186184,6 +186198,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-07T14:13:54.196Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0h18kyi",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-07T14:13:52.898Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0h18kyi",
+      "note": "#98 Sema refuses every #Export(c) or library export that can fai"
+    },
     {
       "at": "2026-11-07T14:00:54.987Z",
       "by": "Main",
