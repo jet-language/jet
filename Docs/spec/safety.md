@@ -6598,8 +6598,8 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Jetpack",
       "file": "Jetpack/Provider/Batteries/embedded/embedded.jet",
-      "line": 181,
-      "column": 9,
+      "line": 183,
+      "column": 5,
       "reason": "host replay uses a stack cell for the CMSDK UART0 control register and never dereferences the target address"
     },
     {
@@ -10522,7 +10522,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Examples | Examples/Text/CheckedText/CheckedTextType.jet | 20:5 | "checked text example output" |
 | Jetpack | Jetpack/Foundation/Source/TreeHash.jet | 569:9 | "the authority retains the held directory until the process provider duplicates its descriptor; the child descriptor slot is supplied by the compiler" |
 | Jetpack | Jetpack/Foundation/Source/TreeHash.jet | 745:5 | "source-store linkat uses the live held reader and directory, a validated plain name, and no source pathname; raw syscall facts are classified here" |
-| Jetpack | Jetpack/Provider/Batteries/embedded/embedded.jet | 181:9 | "host replay uses a stack cell for the CMSDK UART0 control register and never dereferences the target address" |
+| Jetpack | Jetpack/Provider/Batteries/embedded/embedded.jet | 183:5 | "host replay uses a stack cell for the CMSDK UART0 control register and never dereferences the target address" |
 | Jetpack | Jetpack/Publication/Source/Sign.jet | 67:5 | "export a fresh Core signing seed only to descriptor-relative owner-only key publication; the Core key owner is wiped on every outcome" |
 | Jetpack | Jetpack/Publication/Source/Sign.jet | 122:5 | "import the protected seed into Core signing without a second raw-secret copy; close the temporary Core Secret on success and failure" |
 | Jetpack | Jetpack/Publication/Source/Sign.jet | 146:5 | "package author signatures require Core's strict Ed25519 verification; no raw verifier or helper process" |
