@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6679,
-    "rev": 95853,
+    "rev": 95861,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -73386,7 +73386,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "MechD-3 stopped (2-agent cap); nothing of this landed. Its proposed design: add fs.walk_iter(root, ignore:) and walk_files_iter, which return an Iterable of Result<WalkEntry, IOError>, walk depth-first keeping only the open directories on the current path, and sort siblings per directory, so the order is by path component (the order __walk_before uses for errors, and walkdir's sort_by_file_name). walk and walk_files keep their signatures and collect over it, which removes the BFS queue and the global string sort. Visible change: 'a/b' now sorts before 'a.txt' and 'a-c'. walk_iter is new public API and the order change is product behavior, so this needs an owner ballot before it is built."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -73418,7 +73424,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T22:33:22.602Z",
-      "updated": "2026-10-29T01:43:54.042Z",
+      "updated": "2026-11-07T20:58:59.011Z",
       "updatedBy": "Main",
       "goals": [
         "G4"
@@ -90587,6 +90593,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "Likely root: #6677. The faulting statement compares '&executables[index].file == .Val(input)': it widens the borrowed FileReader into an Option union, and before 060bbcd0f1 and 8ac163916e the widened value was moved and dropped, which closes the caller's handle (the 'corrupt after' bisect). Re-run the claim with a0_034, the first seed carrying both fixes, before any other work on this card."
+        },
+        {
           "at": "2026-11-06",
           "by": "Main",
           "text": "Deconfliction 2026-11-06: reworded to match I9 tiers O0, O1, O2 and web (D-EXEC1, D-EXEC2=A: no interpreter or JIT)."
@@ -90616,7 +90627,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-04T10:39:48.294Z",
-      "updated": "2026-11-07T03:10:17.949Z",
+      "updated": "2026-11-07T20:54:55.771Z",
       "updatedBy": "Main"
     },
     {
@@ -92031,7 +92042,7 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -92040,6 +92051,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "Consuming-method drop is correct on every tier; pinned by the case at f080cc6bde."
+        },
         {
           "at": "2026-11-06",
           "by": "Main",
@@ -92050,11 +92066,11 @@
         {
           "n": 1,
           "text": "A consuming method drops self: after calling it on a struct holding a [TCPListener], the port rebinds, proven by a case on O0, O1 and O2 (the JetpackStore repro prints only `rebind ok`).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T03:30:22.144Z"
+          "evidence": "f080cc6bde: tests/cases/resource_close/consuming_method_drops_self_and_its_listener.case (the repro in current syntax: fn(&&self) consuming methods on a struct holding [TCPListener], plus a free fn) prints only 'rebind ok' on jet run (O0), jet build (O1) and jet build --release (O2); jet test Compiler --profile cases --filter consuming_method_drops_self PASS 1/1 on dev with seed a0_033.",
+          "at": "2026-11-07T21:02:23.771Z"
         }
       ],
       "refs": [],
@@ -92065,9 +92081,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-05T21:32:45.696Z",
-      "updated": "2026-11-07T03:30:22.144Z",
+      "updated": "2026-11-07T21:02:26.553Z",
       "updatedBy": "Main",
-      "criteriaLastN": 1
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-07T21:02:26.553Z"
     },
     {
       "id": "c0tc8fct",
@@ -92159,7 +92176,7 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -92167,16 +92184,22 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "Passes on dev 2d561d3e15; the regression was fixed upstream."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "`jet test Compiler/JetCli` passes 'budget view projects only reports of the requested sources', fixed at the root that broke it.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T03:30:24.357Z"
+          "evidence": "2d561d3e15: jet test Compiler/JetCli --filter 'budget view' with seed a0_033 -> 'budget view projects only reports of the requested sources: pass', 1 passed, 0 failed.",
+          "at": "2026-11-07T20:44:39.560Z"
         }
       ],
       "refs": [],
@@ -92187,9 +92210,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-05T21:51:32.590Z",
-      "updated": "2026-11-07T03:30:24.357Z",
+      "updated": "2026-11-07T20:44:41.218Z",
       "updatedBy": "Main",
-      "criteriaLastN": 1
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-07T20:44:41.218Z"
     },
     {
       "id": "c0ca4l7i",
@@ -97984,7 +98008,7 @@
       "track": "epoch",
       "epoch": "e4",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -97992,16 +98016,22 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "The ELF writer emits .text; the case pins it."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "objdump -d on a jet-built hello binary lists a .text section with disassembly of main; a case pins it.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T06:58:33.383Z"
+          "evidence": "a41d925827 + cd023c35d1: tests/cases/debug/objdump_disassembles_main_from_text_section.case builds hello; objdump -h lists .text (PROGBITS AX at 0x401000) and objdump -d disassembles <main>:. jet test Compiler --profile cases --filter objdump_disassembles_main (seed a0_033, llvm objdump) PASS 1/1.",
+          "at": "2026-11-07T20:49:44.712Z"
         }
       ],
       "refs": [],
@@ -98012,9 +98042,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T06:58:20.248Z",
-      "updated": "2026-11-07T06:58:33.383Z",
+      "updated": "2026-11-07T20:49:47.963Z",
       "updatedBy": "Main",
-      "criteriaLastN": 1
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-07T20:49:47.963Z"
     },
     {
       "id": "c031tdlb",
@@ -186826,6 +186857,62 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-07T21:02:26.553Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0qowqlz",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-07T21:02:23.771Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0qowqlz",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-07T20:58:59.011Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c08m4yum",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-07T20:54:55.771Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0a2monf",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-07T20:49:47.963Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0o6f5xn",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-07T20:49:44.712Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0o6f5xn",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-07T20:44:41.219Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0fgw1zd",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-07T20:44:39.560Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0fgw1zd",
+      "note": "#1"
+    },
     {
       "at": "2026-11-07T20:37:47.477Z",
       "by": "Main",
