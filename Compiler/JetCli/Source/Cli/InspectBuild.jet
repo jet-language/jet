@@ -17,7 +17,7 @@ use {
     build_files: core.files
     build_math: core.math
     jetpack_artifact_store.[BuildNodeRecord, BuildRecord, ObjectHandle]
-    jet_build_session.[BuildPlanExecution, BuildPlanSelection, BuildSessionGeneratedModule, BuildSessionOption, BuildSessionPlan, BuildSessionValue, build_plan_contributions, build_plan_execution, build_plan_generated, build_plan_selection]
+    jet_build_session.[BuildPlanExecutable, BuildPlanExecution, BuildPlanSelection, BuildSessionGeneratedModule, BuildSessionOption, BuildSessionPlan, BuildSessionValue, build_plan_contributions, build_plan_execution, build_plan_generated, build_plan_selection]
     jet_pkg_model.[
         ContributionLayer, FactContribution, FactValue, LockError, LockedBuildContribution, PackageFacts, SourceScope,
         BuildStamp, ComptimeInput, pkg_lock_build_stamp, pkg_lock_load, pkg_lock_locked_build_contribution_set, pkg_lock_record_build_contributions, pkg_lock_record_generated_inputs, pkg_lock_sorted_contributions, pkg_manifest_parse, pkg_sha256_hex,
@@ -167,10 +167,26 @@ jet_cli_build_package_as: fn(file: String, color: Bool, options: BuildOptions, b
         return jet_cli_build_failed("`jet build` writes a web build of one entry file, not of a package's `build: fn` targets", jet_cli_why("E2105"), "build the entry file with `jet build --target web <file>`", color)
     }
     root: jet_cli_parent(build_files.realpath(file) ?? file) ?? "."
+    graph: execution ?? return jet_cli_ice("the completed build query has no plan")
+    // Every source a selected target declares exists before any action runs or
+    // the lock is written, so a missing one leaves neither behind. A source a
+    // build action declares as its output is the action's to produce: the
+    // target's compile reads it after the graph runs.
+    produced := [String]{}
+    loop action in graph.actions {
+        loop output in action.outputs -> produced.push(output.copy())
+    }
+    missing: jet_cli_build_missing_sources(root, selected, generated, produced)
+    if missing.len() > 0 {
+        return jet_cli_build_failed("{if missing.len() == 1 -> "a build target source doesn't" else -> "{missing.len()} build target sources don't"} exist: {missing.join(", ")}", jet_cli_why("E2105"), "create the file, or remove it from the target's sources in `build: fn`", color)
+    }
     generated_inputs: jet_cli_generated_lock_inputs(generated)
     if locked {
         if pkg_lock_record_generated_inputs(root, generated_inputs, true, BuildStamp.default()) == .Err(error) -> return jet_cli_lock_refusal(error, color)
     }
+    shadowed: jet_cli_generated_shadow(root, generated, color)
+    // copy: `shadowed` is a payload view of the check's result.
+    if shadowed == .Val(refusal) -> return refusal.copy()
     if build_options_value(selected_options, "write_generated") == "on" {
         loop source_file in generated {
             path: jet_cli_entry_join(root, source_file.path)
@@ -179,19 +195,18 @@ jet_cli_build_package_as: fn(file: String, color: Bool, options: BuildOptions, b
             build_files.write(path, source_file.source) ?? return jet_cli_build_failed("couldn't write the generated source `{path}`: {err}", jet_cli_why("E2105"), "make `{directory}` writable, or build with `--write-generated=off`", color)
         }
     }
-    graph: execution ?? return jet_cli_ice("the completed build query has no plan")
     // copy: `failed` is a payload view of the execution's result.
     if jet_cli_build_execute(graph, root, policy, invocation, member, color) == .Val(failed) -> return failed.copy()
     loop executable in selected.executables {
         source_path: jet_cli_entry_join(root, executable.source)
         source: build_files.read(source_path) ?? return jet_cli_build_failed("couldn't read the target source `{source_path}`: {err}", jet_cli_why("E2105"), "correct the source path given to `b.add_executable`", color)
-        built: jet_cli_compile_target(source_path, executable.name, source, target_generated, color, selected_options.copy(), threads, invocation, trace_sink)
+        built: jet_cli_compile_target(source_path, executable.name, source, executable.sources, target_generated, color, selected_options.copy(), threads, invocation, trace_sink)
         if built.exit_code != JET_DRIVER_EXIT_OK -> return built
     }
     loop library in selected.libraries {
         source_path: jet_cli_entry_join(root, library.source)
         source: build_files.read(source_path) ?? return jet_cli_build_failed("couldn't read the target source `{source_path}`: {err}", jet_cli_why("E2105"), "correct the source path given to `b.add_library`", color)
-        checked: jet_cli_check_library(source_path, source, color, threads, trace_sink)
+        checked: jet_cli_check_library(source_path, source, library.sources, target_generated, color, threads, trace_sink)
         if checked.exit_code != JET_DRIVER_EXIT_OK -> return checked
     }
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
@@ -200,7 +215,7 @@ jet_cli_build_package_as: fn(file: String, color: Bool, options: BuildOptions, b
     if selected.executables.len() == 0 {
         source: build_files.read(file) ?? ""
         if jet_cli_top_level_function_lines(source, "run").len() > 0 {
-            output = jet_cli_compile_target(file, jet_cli_stem(file), source, target_generated, color, selected_options.copy(), threads, invocation, trace_sink)
+            output = jet_cli_compile_target(file, jet_cli_stem(file), source, [String]{}, target_generated, color, selected_options.copy(), threads, invocation, trace_sink)
             if output.exit_code != JET_DRIVER_EXIT_OK -> return output
         }
     }
@@ -211,12 +226,61 @@ jet_cli_build_package_as: fn(file: String, color: Bool, options: BuildOptions, b
     output
 }
 
+// The sources the selected targets declare that are neither a file under
+// `root`, a module `build: fn` generated, nor an output a build action
+// produces (`produced`), each as "`path` of `target`".
+jet_cli_build_missing_sources: fn(root: String, selected: BuildPlanSelection, generated: [BuildSessionGeneratedModule], produced: [String]) -[FS]> [String] Never! {
+    missing := [String]{}
+    loop target in selected.executables -> jet_cli_build_missing_target_sources(root, target, generated, produced, missing)
+    loop target in selected.libraries -> jet_cli_build_missing_target_sources(root, target, generated, produced, missing)
+    missing
+}
+
+jet_cli_build_missing_target_sources: fn(root: String, target: BuildPlanExecutable, generated: [BuildSessionGeneratedModule], produced: [String], missing: &[String]) Never! -[FS]> {
+    loop source in target.sources {
+        if produced.contains(source) || build_files.exists(jet_cli_entry_join(root, source)) -> next
+        made: loop made_module in generated {
+            if made_module.path == source -> break true
+        } ?? false
+        if !made -> missing.push("`{source}` of `{target.name}`")
+    }
+}
+
 // The `[[comptime_inputs]]` rows of `generated`: each source's package-relative
 // path and the SHA-256 of its bytes.
 jet_cli_generated_lock_inputs: fn(generated: [BuildSessionGeneratedModule]) -> [ComptimeInput] Never! {
     inputs := [ComptimeInput]{}
     loop source_file in generated -> inputs.push(ComptimeInput{path: source_file.path.copy(), hash: "sha256:{pkg_sha256_hex(source_file.source.bytes())}"})
     inputs
+}
+
+// E3510 for the first generated module whose managed `.jet/generated/` path
+// already holds something Jet didn't write there: a symlink on the way, a
+// non-file, or a file whose bytes are neither this build's source nor the
+// `[[comptime_inputs]]` hash the lock recorded for that path. Generation is
+// additive, so a hand-written file is never overwritten or shadowed.
+jet_cli_generated_shadow: fn(root: String, generated: [BuildSessionGeneratedModule], color: Bool) -[FS]> JetDriverVerbOutput? Never! {
+    recorded: if pkg_lock_load(root) == .Val(lock) -> lock.comptime_inputs.copy() else -> [ComptimeInput]{}
+    loop source_file in generated {
+        path: jet_cli_entry_join(root, source_file.path)
+        prefix := root.copy()
+        linked: loop part in source_file.path.split("/") {
+            prefix = jet_cli_entry_join(prefix, part)
+            if build_files.is_symlink(prefix) -> break true
+        } ?? false
+        if !linked && !build_files.exists(path) -> next
+        if !linked && build_files.is_file(path) {
+            on_disk: build_files.read(path) ?? ""
+            if on_disk == source_file.source -> next
+            digest: "sha256:{pkg_sha256_hex(on_disk.bytes())}"
+            managed: loop input in recorded {
+                if input.path == source_file.path && input.hash == digest -> break true
+            } ?? false
+            if managed -> next
+        }
+        return Val(jet_cli_report_output("", "E3510", "`b.generate(\"{source_file.name}\")` would shadow the module at `{source_file.path}`", "generation is additive: what you wrote is always what compiles", "rename the generated module, or delete the hand-written one", color, JET_DRIVER_EXIT_USER_ERROR))
+    }
+    None
 }
 
 // `jet build` of a workspace index builds its members before its own plan,
@@ -249,7 +313,7 @@ jet_cli_build_workspace_members: fn(file: String, color: Bool, options: BuildOpt
         } else {
             source: build_files.read(found.path) ?? next
             if jet_cli_top_level_function_lines(source, "run").len() == 0 -> next
-            built = jet_cli_compile_target(found.path, jet_cli_stem(found.path), source, [JetDriverGeneratedModule]{}, color, options.copy(), threads, None, trace_sink)
+            built = jet_cli_compile_target(found.path, jet_cli_stem(found.path), source, [String]{}, [JetDriverGeneratedModule]{}, color, options.copy(), threads, None, trace_sink)
         }
         if built.exit_code != JET_DRIVER_EXIT_OK -> return built
     }
@@ -324,23 +388,31 @@ jet_cli_workspace_member_needs: fn(directory: String, directories: [String]) -[F
     needs
 }
 
-// A library target builds as its importers compile it: its source checks
-// clean and nothing is written, so a clean check prints nothing.
-jet_cli_check_library: fn(file: String, source: String, color: Bool, threads: Int?, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
-    output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-    compiled: jet_cli_compile_entry(file, color, threads, JetDriverCompileMode.Check, None, trace_sink)
-    if compiled == {
-        .Refused(refusal) -> output = refusal.move()
-        .Compiled(result, snapshot) -> {
-            errors: jet_driver_present_diagnostics(jet_cli_errors(result.diagnostics), snapshot, result.generated_source_files)
-            if errors.len() > 0 {
-                output = JetDriverVerbOutput{stdout: "", stderr: diagnostic_render_all(file, source, errors, color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
-            } else if result.internal_problem == .Val(problem) {
-                output = jet_cli_ice(problem)
+// A library target builds as its importers compile it: its source, with the
+// other sources it lists (`sources`) and the generated modules, checks clean
+// and nothing is written, so a clean check prints nothing.
+jet_cli_check_library: fn(file: String, source: String, sources: [String], generated: [JetDriverGeneratedModule], color: Bool, threads: Int?, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
+    if trace_sink == .Val(sink) -> sink.begin("sources", "", -1, -1)
+    prepared: jet_cli_prepare_overlays(file, file, [JetCLIOverlay]{}, color, threads, JetDriverCompileMode.Check)
+    if trace_sink == .Val(sink) -> sink.end("sources", jet_cli_prepared_file_count(prepared))
+    if prepared.move() == {
+        .Refused(refusal) -> refusal
+        .Prepared(request, snapshot) -> {
+            with_sources := request
+            with_sources.generated_modules = generated
+            with_sources.target_sources = sources
+            compiled: jet_cli_compile_prepared(JetCLIPrepared.Prepared{request: with_sources.move(), snapshot: snapshot}, None, trace_sink)
+            if compiled == {
+                .Refused(refusal) -> refusal.move()
+                .Compiled(result, checked_snapshot) -> {
+                    errors: jet_driver_present_diagnostics(jet_cli_errors(result.diagnostics), checked_snapshot, result.generated_source_files)
+                    if errors.len() > 0 -> return JetDriverVerbOutput{stdout: "", stderr: diagnostic_render_all(file, source, errors, color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+                    if result.internal_problem == .Val(problem) -> return jet_cli_ice(problem)
+                    JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+                }
             }
         }
     }
-    output
 }
 
 // The entry root's package when its manifest declares `settings:`. The values

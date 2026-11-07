@@ -28,7 +28,7 @@ author corpus code. Workers do not run the harness; they type-check with
 
 ## Environment
 
-Run everything through `Tools/agent/jet-env`. Follow `AGENTS.md` target-dir
+Run everything through `Tools/agent/JetEnv.jet`. Follow `AGENTS.md` target-dir
 laws: never use `/tmp` targets, use the checkout's own `target/`, and respect cap
 checks. A missing competitor toolchain is an owner-visible flake change, not a
 silent skip.

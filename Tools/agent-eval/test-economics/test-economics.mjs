@@ -756,7 +756,7 @@ function positiveControlFixture() {
     registry_snapshot_hash: candidate.registry_snapshot_hash,
     config_hash: candidate.config_hash,
     tier: "aot",
-    tier_command: "Tools/agent/jet-env jet run {source}",
+    tier_command: "Tools/agent/JetEnv.jet jet run {source}",
     source_sha256: "sha256:control-source",
     stdout_bytes: "base64:b2s=",
     stderr_bytes: "base64:",

@@ -2,25 +2,35 @@
 # Claim: with a ceiling 2 MiB under the current logical footprint, admitting a new object evicts the oldest
 # unreferenced object first, keeps the newer one, and leaves the Hangar at or under the ceiling (rs:1757-1785)
 # Migrated: the Rust API Store::ingest_tree is `jetpack hangar ingest`. The Rust test backdated last_used_at to 1
-# and 2 through a test seam with no CLI; here the two ingests run one second apart (step-3.sh), so the oldest
-# object has the older last_used_at, which is the order the eviction reads. step-5.sh writes the ceiling and
-# step-7.sh checks the result with the Rust logical_bytes rule (rs:1715-1726: lstat size of every non-directory).
+# and 2 through a test seam with no CLI; here the two ingests run one second apart, so the oldest
+# object has the older last_used_at, which is the order the eviction reads. The fixture's quota.jet writes the
+# payloads and the ceiling and checks the result with the Rust logical_bytes rule (rs:1715-1726: lstat size of
+# every non-directory); it runs on its own Jetpack root and store so the jet runs add nothing to root/hangar.
 requires: os:unix
 fixture: hangar_quota_evicts_oldest_unreferenced_before_publishing_past_ceiling.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
 env: JETPACK_ROOT={work}/root
-step: sh {work}/step-1.sh
+step: jet run --allow=FS quota.jet payloads
+env: JETPACK_ROOT={work}/tools/jetpack
+env: JET_STORE_DIR={work}/tools/store
 exit: 0 # rs:1733-1734 4 MiB, 4 MiB and 64 KiB payloads
 step: jetpack hangar ingest quota-source-oldest --name quota-oldest --ref quota@fixture#oldest --no-color
 exit: 0 # rs:1759
-step: sh {work}/step-3.sh
-exit: 0 # rs:1761-1762 the oldest object is used first
+# rs:1761-1762 last_used_at is in seconds; one second apart makes the oldest object strictly older
+sleep: 1s
 step: jetpack hangar ingest quota-source-newer --name quota-newer --ref quota@fixture#newer --no-color
 exit: 0 # rs:1760
-step: sh {work}/step-5.sh
+step: jet run --allow=FS quota.jet ceiling
+env: JETPACK_ROOT={work}/tools/jetpack
+env: JET_STORE_DIR={work}/tools/store
 exit: 0 # rs:1764-1772 ceiling = footprint - 2 MiB, below the footprint
 step: jetpack hangar ingest quota-source-admitted --name quota-admitted --ref quota@fixture#admitted --no-color
 exit: 0 # rs:1774
-step: sh {work}/step-7.sh
-exit: 0 # rs:1775-1782 at or under the ceiling; oldest evicted, newer and admitted kept
+step: jet run --allow=FS quota.jet check
+env: JETPACK_ROOT={work}/tools/jetpack
+env: JET_STORE_DIR={work}/tools/store
+exit: 0 # rs:1775-1778 at or under the ceiling
+entries: root/hangar name ^= "quota-oldest-" = 0 # rs:1779-1782 the oldest object is evicted
+entries: root/hangar name ^= "quota-newer-" = 1 # rs:1779-1782 the newer object is kept
+entries: root/hangar name ^= "quota-admitted-" = 1 # rs:1779-1782 the admitted object is kept

@@ -1,6 +1,7 @@
 use s6_output_files: core.files
 
 #Test("outputs build example has no convention entry filename") {
+    guards_enter_root()
     root: "Examples/Modules/Packages/OutputsBuild"
     assert(!s6_output_files.is_file("{root}/main.jet"))
     assert(!s6_output_files.is_file("{root}/run.jet"))
@@ -14,6 +15,7 @@ use s6_output_files: core.files
 // manifest names is a top-level callable of the nested file, and no top-level
 // `run` callable is left for the runner to fall back to.
 #Test("nested outputs entry has no fallback run callable") {
+    guards_enter_root()
     root: "tests/cases/package_outputs/nested_outputs_entry_invokes_leaf_on_every_run_tier.fixture"
     assert(!s6_output_files.is_file("{root}/runner.jet"))
     assert(s6_output_files.is_file("{root}/src/cli/main.jet"))

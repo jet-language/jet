@@ -39,6 +39,7 @@ use {
         core_bare_source_module,
         core_module_export,
         core_module_has_member,
+        owned_trait,
         core_module_has_type,
         diagnostic_with_source_path,
         jet_ring_parse_manifest_layer,
@@ -101,6 +102,8 @@ use {
         sema_effect_parse_name,
         sema_effect_root,
         sema_registration_unit_family_type_names,
+        sema_marker_rules_applied_row,
+        sema_core_error_family_member,
         sema_source_words,
         sema_source_wanted_words,
         sema_unknown_module_alias,
@@ -1689,19 +1692,20 @@ jet_driver_build_source_catalog: fn(request: JetDriverCompileRequest) -> JetDriv
     }
     // Handwritten code uses what its `build: fn` generates by name (spec
     // "Programmable builds"): in a package without a manifest, the entry file
-    // joins the namespace of the modules generated for its package.
+    // joins the namespace of the modules generated for its package, and so
+    // does every other source a build target lists beside it.
     entry_generates: loop generated in request.generated_modules {
         if generated.package_identity == entry_package_identity -> break true
     } ?? false
-    if entry_generates {
+    root_row: entry_root_index ?? -1
+    if (entry_generates || request.target_sources.len() > 0) && root_row >= 0 && packages[root_row].manifest_path == None {
         loop index in 0..<source_units.len() {
-            if source_units[index].path != entry_display || source_units[index].root_identity != snapshot.entry_root_identity || source_units[index].in_namespace -> next
-            root_row: entry_root_index ?? -1
-            if root_row >= 0 && packages[root_row].manifest_path == None {
-                unit := source_units[index]
-                unit.in_namespace = true
-                source_units[index] = unit
-            }
+            if source_units[index].root_identity != snapshot.entry_root_identity || source_units[index].in_namespace -> next
+            listed: source_units[index].source_origin == SemaSourceOrigin.Snapshot && request.target_sources.contains(source_units[index].relative_path)
+            if source_units[index].path != entry_display && !listed -> next
+            unit := source_units[index]
+            unit.in_namespace = true
+            source_units[index] = unit
         }
     }
     JetDriverSourceCatalogResult{
@@ -3331,6 +3335,10 @@ JetDriverCoreIdentifierDemand: struct {
     // unit conversions lower to their `Core/Math/Math.jet` exact-conversion
     // helpers, so core.math loads.
     unit_family: Bool{false}
+    // A `Dest.from_<unit>_rounded(…)` call: a rounded conversion across a
+    // measured unit wraps its scalar in a `core.units` Measurement
+    // (`__measurement_result`), so core.units loads.
+    rounded_conversion: Bool{false}
     // A generic `.decode<T>()` call or a `FieldError.under(…)` call: Dyn decode
     // and `FieldError.under` lower to their `Core/Encoding/Encoding.jet` helpers
     // (BuildDyn.jet ir_dyn_decode, ir_decode_under), so core.encoding loads.
@@ -3466,7 +3474,10 @@ jet_driver_collect_core_identifier_demand_ids: fn(tokens: [Token], tables: Token
             if index > from + 1 && tokens[index - 1].kind == TOKEN_DOT && tokens[index - 2].kind == TOKEN_IDENT && index + 1 < to && tokens[index + 1].kind == TOKEN_LPAREN && token_decoded(tables, tokens[index]).starts_with("from_") {
                 receiver: token_decoded(tables, tokens[index - 2])
                 first: Int.from_u8(receiver.bytes()[0])
-                if first >= 65 && first <= 90 -> demand.unit_family = true
+                if first >= 65 && first <= 90 {
+                    demand.unit_family = true
+                    if token_decoded(tables, tokens[index]).ends_with("_rounded") -> demand.rounded_conversion = true
+                }
             }
             if (name == names.pattern_matches_name || name == names.pattern_match_name) && index > from && tokens[index - 1].kind == TOKEN_DOT && index + 1 < to && tokens[index + 1].kind == TOKEN_LPAREN -> demand.regex_source = true
             if name == names.test_suite_name && index > from && tokens[index - 1].kind == TOKEN_DOT && index + 1 < to && tokens[index + 1].kind == TOKEN_LPAREN -> demand.test_suite = true
@@ -3578,6 +3589,7 @@ jet_driver_collect_core_identifier_demand_threads: fn(input: &&Lexed, runs: [Int
         if output.stream_event_time -> demand.stream_event_time = true
         if output.codec_decode -> demand.codec_decode = true
         if output.unit_family -> demand.unit_family = true
+        if output.rounded_conversion -> demand.rounded_conversion = true
         loop bare in output.bare_names {
             if !demand.bare_names.contains(bare) -> demand.bare_names.push(bare)
         }
@@ -3687,6 +3699,9 @@ JetDriverParseJob: enum {
     Source(text: String)
     // A byte-identical installed runtime entry; keeps its own test controls.
     RuntimeEntry(text: String)
+    // A Compiler/Prelude source checked as the compiler embeds it
+    // (`jet check --prelude`).
+    Prelude(text: String)
     // An embedded Core module; runtime units retain every function.
     Core(text: String, module_name: String, owned_members: [String], runtime: Bool)
     // A Core unit whose row is out of range: an empty program.
@@ -3717,12 +3732,13 @@ jet_driver_source_unit_text: fn(request: JetDriverCompileRequest, unit: JetDrive
 jet_driver_is_build_manifest: fn(relative_path: String, source: String) -> Bool Never! {
     relative_path == "package.jet" && pkg_build_entry_source(source) != None
 }
-jet_driver_parse_job: fn(request: JetDriverCompileRequest, unit: JetDriverSourceUnit, runtime_entry: Bool) -> JetDriverParseJob {
+jet_driver_parse_job: fn(request: JetDriverCompileRequest, unit: JetDriverSourceUnit, runtime_entry: Bool, prelude_entry: Bool) -> JetDriverParseJob {
     if !jet_driver_unit_is_core(unit) {
         text: jet_driver_source_unit_text(request, unit) ?? return JetDriverParseJob.Missing
         // A `package.jet` unit parses as its `build: fn` declarations alone, at
         // their own byte offsets (the manifest blocks are blanked).
         parsed_text: if unit.source_origin == SemaSourceOrigin.Snapshot && jet_driver_is_build_manifest(unit.relative_path, text) -> pkg_build_entry_source(text) ?? text else -> text
+        if prelude_entry -> return JetDriverParseJob.Prelude{text: parsed_text}
         if runtime_entry -> return JetDriverParseJob.RuntimeEntry{text: parsed_text}
         return JetDriverParseJob.Source{text: parsed_text}
     }
@@ -3735,6 +3751,7 @@ jet_driver_parse_job_bytes: fn(job: JetDriverParseJob) -> Int Never! {
     if job == {
         .Source(text) -> text.len()
         .RuntimeEntry(text) -> text.len()
+        .Prelude(text) -> text.len()
         .Core(text, _, _, _) -> text.len()
         .Missing -> 0
     }
@@ -3747,6 +3764,7 @@ jet_driver_parse_one: fn(job: JetDriverParseJob, threads: CompilerThreads) -> Je
     if job == {
         .Source(text) -> jet_driver_parse_user_unit_threads(text, true, threads)
         .RuntimeEntry(text) -> jet_driver_parse_core_source(text, "", [String]{}, true, true, threads)
+        .Prelude(text) -> jet_driver_parse_prelude_source(text, threads)
         .Core(text, module_name, owned_members, runtime) -> jet_driver_parse_core_source(text, module_name, owned_members, runtime, false, threads)
         .Missing -> JetDriverParsedUnit{parsed: ParseResult{program: ast_program(), diagnostics: [Diagnostic]{}}, demand: jet_driver_empty_core_identifier_demand()}
     }
@@ -3791,6 +3809,79 @@ jet_driver_parse_core_source: fn(text: String, module_name: String, owned_member
         if diagnostic.severity != DIAGNOSTIC_LINT -> diagnostics.push(diagnostic)
     }
     JetDriverParsedUnit{parsed: ParseResult{program: parsed.program.move(), diagnostics: diagnostics.move()}, demand: demand.move(), lines: lines, tokens: tokens, line_starts: lexed.line_starts.move(), words: Val(words.move())}
+}
+
+// `jet check --prelude`: a Compiler/Prelude source parsed as the compiler
+// parses its embedded texts (generated lexing, so `__` names are its own) and
+// checked as the compiler embeds it. An item the compiler embeds as a row is
+// checked as that row and leaves the program; every other item is checked as
+// the entry module's own:
+// - a marker declaration must build its marker rule row (MarkerModules.jet
+//   drops one that does not), and its declaring struct leaves;
+// - effect declarations and effect implementations are the canonical effect
+//   module, whose compiler copy CoreSourceRows.jet --check holds equal;
+// - a trait with an OWNED_TRAITS row is that row (OwnedTraitRows.jet --check);
+// - a struct with an `impl Diagnostic` block is a DIAGNOSTICS row
+//   (DiagnosticRows.jet --check);
+// - `CORE_CALL_EXTENSIONS` is CORE_CALLS rows (CoreSourceRows.jet --check);
+// - the default `Err` struct is the marked declaration of the compiler's
+//   original error module (Items.jet sema_registration_original_error_module,
+//   whose copy PreludeSources.jet --check holds equal);
+// - an `impl X -> Err` conversion is a Core error family row: the compiler
+//   injects the `return Err("{self}")` routine for a family member
+//   (FailureLaw.jet), so X must be one and the target `Err`.
+jet_driver_parse_prelude_source: fn(text: String, threads: CompilerThreads) -> JetDriverParsedUnit {
+    unit := jet_driver_parse_core_source(text, "", [String]{}, true, true, threads)
+    unit.parsed.program.items = jet_driver_prelude_checked_items(unit.parsed.program.items, "", text, unit.parsed.diagnostics)
+    unit
+}
+
+// The items of one Prelude module body that are not embedded rows, with an
+// error for each marker declaration that builds no rule. `prefix` qualifies
+// a nested module's trait names (`Literal.Int`).
+jet_driver_prelude_checked_items: fn(items: [Item], prefix: String, text: String, diagnostics: &[Diagnostic]) -> [Item] {
+    kept := [Item]{}
+    loop item in items {
+        if item == {
+            .MarkerDecl(declaration) -> {
+                if sema_marker_rules_applied_row(declaration, text) == .Val(_) -> next
+                diagnostics.push(jet_driver_diagnostic("E0003", declaration.name_span, "marker `#{declaration.name}` builds no marker rule", "the compiler embeds each Prelude marker declaration as a marker rule row and drops one whose `impl Marker` settings it cannot read", "write the declaration's sites, scopes and settings in the spelling the other Prelude markers use"))
+                next
+            }
+            .EffectDecl(_) -> next
+            .Struct(definition) -> {
+                if definition.marker == .Val(_) || definition.effect_impl == .Val(_) || definition.trait_impls.any(block -> block.trait_name == "Diagnostic") -> next
+                if prefix == "" && definition.name == "Err" -> next
+            }
+            .ErrorConv(definition) -> {
+                if definition.to_ty == "Err" && sema_core_error_family_member(definition.from_ty) -> next
+                diagnostics.push(jet_driver_diagnostic("E0003", definition.from_span, "`impl {definition.from_ty} -> {definition.to_ty}` is no Core error family conversion", "the compiler injects each Prelude conversion as the `return Err(\"{{self}}\")` routine of a JET_CORE_ERROR_FAMILY member (FailureLaw.jet) into the default `Err`", "convert a family member into `Err`, or add the type to JET_CORE_ERROR_FAMILY"))
+                next
+            }
+            .Enum(definition) -> {
+                if definition.effect_impl == .Val(_) -> next
+            }
+            .Trait(definition) -> {
+                if owned_trait("{prefix}{definition.name}") != None -> next
+            }
+            .Const(definition) -> {
+                if definition.name == "CORE_CALL_EXTENSIONS" -> next
+            }
+            .CodeModule(code_module) -> {
+                if code_module.body == .Val(body) {
+                    nested: jet_driver_prelude_checked_items(body, "{prefix}{code_module.name}.", text, diagnostics)
+                    if nested.len() == 0 -> next
+                    rebuilt := code_module.copy()
+                    rebuilt.body = Val(nested)
+                    kept.push(Item.CodeModule{value: rebuilt.move()})
+                    next
+                }
+            }
+            else -> {}
+        }
+        kept.push(item.copy())
+    }
+    kept
 }
 
 // The runtime unit row (`core.<area>.runtime.<unit>`) a Core import path
@@ -4102,8 +4193,9 @@ JET_DRIVER_PARSE_SCRATCH_PER_BYTE: 64
 // the load loop pops them in queue order. Parsing reads nothing but each
 // unit's own text, so the waves give the same programs and diagnostics as
 // parsing each unit when the loop reaches it.
-// `runtime_entry` is the source-unit index of an exact runtime entry, or -1.
-jet_driver_parse_wave: fn(request: JetDriverCompileRequest, source_units: [JetDriverSourceUnit], pending: [Int], first: Int, runtime_entry: Int) -> [JetDriverParsedUnit] {
+// `runtime_entry` is the source-unit index of an exact runtime entry, or -1;
+// `prelude_entry` is the index of a `jet check --prelude` entry, or -1.
+jet_driver_parse_wave: fn(request: JetDriverCompileRequest, source_units: [JetDriverSourceUnit], pending: [Int], first: Int, runtime_entry: Int, prelude_entry: Int) -> [JetDriverParsedUnit] {
     jobs := [JetDriverParseJob]{}
     weights := [Int]{}
     total := 0
@@ -4115,7 +4207,7 @@ jet_driver_parse_wave: fn(request: JetDriverCompileRequest, source_units: [JetDr
     // Whether each job, in `pending` order, is a user source (tracing only).
     user_jobs := [Bool]{}
     loop position in first..<pending.len() {
-        job: jet_driver_parse_job(request, source_units[pending[position]], pending[position] == runtime_entry)
+        job: jet_driver_parse_job(request, source_units[pending[position]], pending[position] == runtime_entry, pending[position] == prelude_entry)
         bytes: jet_driver_parse_job_bytes(job)
         weights.push(bytes)
         total += bytes
@@ -4136,6 +4228,11 @@ jet_driver_parse_wave: fn(request: JetDriverCompileRequest, source_units: [JetDr
                 .RuntimeEntry(text) -> {
                     core_input_bytes += text.count_bytes()
                     core_source_units += 1
+                }
+                .Prelude(text) -> {
+                    user_input_bytes += text.count_bytes()
+                    user_source_units += 1
+                    user_job = true
                 }
                 .Core(text, _, _, _) -> {
                     core_input_bytes += text.count_bytes()
@@ -4607,7 +4704,7 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
         if parsed.len() == 0 {
             wave_size: pending.len() - pending_index
             if request.trace_sink == .Val(sink) -> sink.begin("parse", if wave_size == 1 -> source_units[pending[pending_index]].relative_path else -> "{wave_size} files", pending_index, pending.len())
-            parsed = jet_driver_parse_wave(request, source_units, pending, pending_index, if entry_module != "" -> entry_index ?? 0 else -> -1)
+            parsed = jet_driver_parse_wave(request, source_units, pending, pending_index, if entry_module != "" -> entry_index ?? 0 else -> -1, if request.prelude_entry -> entry_index ?? 0 else -> -1)
             if request.trace_sink == .Val(sink) {
                 items := 0
                 loop wave_result in parsed -> items += wave_result.parsed.program.items.len()
@@ -4686,6 +4783,17 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
             jet_driver_reach_open(reach, "core.math")
             owner_index: jet_driver_core_unit(source_units, queued, pending, generated_records, request.core_sources, "core.math", importer_core, entry_module, entry_index ?? 0, Span{start: 0, end: 0}, diagnostics)
             if owner_index == .Val(index) {
+                if !queued[index] {
+                    queued[index] = true
+                    pending.push(index)
+                }
+            }
+        }
+        if demand.rounded_conversion {
+            if !bare_modules.contains("core.units") -> bare_modules.push("core.units")
+            jet_driver_reach_open(reach, "core.units")
+            units_index: jet_driver_core_unit(source_units, queued, pending, generated_records, request.core_sources, "core.units", importer_core, entry_module, entry_index ?? 0, Span{start: 0, end: 0}, diagnostics)
+            if units_index == .Val(index) {
                 if !queued[index] {
                     queued[index] = true
                     pending.push(index)

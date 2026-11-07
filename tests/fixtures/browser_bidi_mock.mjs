@@ -4,12 +4,15 @@
 // and exits 1, the way the Rust server thread panicked and failed `server.join().unwrap()`.
 //
 // node browser_bidi_mock.mjs <mode> <port> [spec.json]
+//   Once listening, the mock writes LABEL.ready in its working directory (LABEL: the spec's basename
+//   without .json, or the mode when there is no spec); a case awaits it before its client connects.
 //   script      replies from spec.json (see runScript)
 //   handshake   run_handshake: spec.json {"status": RESULT, "expect_session": BOOL}
 //   malformed-session, event-storm, continuous-events
 //   hostile-malformed, hostile-mismatched-id, hostile-protocol-error, hostile-timeout, hostile-no-cdp
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { basename } from 'node:path';
 import { createServer } from 'node:net';
 
 const [mode, portText, specPath] = process.argv.slice(2);
@@ -226,4 +229,5 @@ const server = createServer({ allowHalfOpen: false }, async (socket) => {
   await run(peer);
   socket.end(() => process.exit(0));
 });
-server.listen(Number(portText), '127.0.0.1');
+const label = specPath ? basename(specPath, '.json') : mode;
+server.listen(Number(portText), '127.0.0.1', () => writeFileSync(`${label}.ready`, ''));

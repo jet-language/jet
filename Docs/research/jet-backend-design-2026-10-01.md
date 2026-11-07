@@ -2708,13 +2708,14 @@ The consolidated proof consumers are `Tests/check-front-feed-results.mjs`
 (exact full398 selection, no lost native passes, zero wrong outcomes; reports
 both pass counts, every differing verdict/detail and ranked diagnostic roots),
 `Tests/test-native-test-host.mjs` (three Examples and canonical capture,
-filter, serial and shuffle policies), and `Tests/test-native-test-contract.mjs`
-(output checks observe joined batch state; a fatal child preserves completed
-outcomes and reruns only unreported bodies, never output checks). The registered
-E3015 what/why/fix snapshot is exercised by
-`Tests/TestNativeOutputDiagnostic.jet`. These consumers require the real
-composed candidate, host and matching runtime pack; metadata-only checks do
-not admit execution parity.
+filter, serial and shuffle policies), and the `tests/cases/output_callable`
+rows `output_check_observes_the_joined_batch_state` and
+`fatal_batch_reports_its_output_check_as_not_run` (output checks observe joined
+batch state; a fatal child preserves completed outcomes and reruns only
+unreported bodies, never output checks). The registered E3016 what/why/fix
+snapshot is exercised by `Tests/NativeOutputDiagnostic.jet`. These consumers
+require the real composed candidate, host and matching runtime pack;
+metadata-only checks do not admit execution parity.
 Its registered What line starts `Output check not run:` in sentence case,
 matching the canonical snapshot and the shared user-facing case-law gate.
 
@@ -3708,7 +3709,7 @@ the existing signed-decimal builder helper.
 derives compiled with pinned rustc 1.97.1
 (`8bab26f4f68e0e26f0bb7960be334d5b520ea452`): all variants, all Budget limits,
 empty/two-frame faults and text/control/Unicode escapes. The offline
-`Tools/agent/gen-plugin-debug-goldens.mjs` packages those oracle outputs for
+`Tools/agent/PluginDebugGoldens.jet` packages those oracle outputs for
 `PluginErrorWitness.c`. The C client uses valid native allocations, requires
 free interception, checks recursive clone independence, inactive-word
 behavior, derived equality and separately owned render results. Expected

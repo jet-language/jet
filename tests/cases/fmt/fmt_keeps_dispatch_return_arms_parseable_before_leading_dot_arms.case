@@ -9,8 +9,6 @@ env: JET_STORE_DIR={work}/cache
 env: JETPACK_ROOT={work}/jetpack
 step: jet fmt dispatch/run.jet
 exit: 0 # tests/fmt.rs:682-694 formats
-step: sh {work}/step-2.sh
-exit: 0 # tests/fmt.rs:695-698
-stdout: ~ ".Err(error) -> return error_result(error.message)" # tests/fmt.rs:695-698
+file: dispatch/run.jet ~ ".Err(error) -> return error_result(error.message)" # tests/fmt.rs:695-698
 step: jet fmt --check dispatch/run.jet
 exit: 0 # tests/fmt.rs:700-710 output reparses and is idempotent

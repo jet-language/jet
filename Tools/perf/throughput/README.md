@@ -9,7 +9,7 @@ Dependency-free Node; Linux `/proc`; GNU time for exact tree rusage.
 # quick lane: bench30k frontend, 3 samples, against quick-baseline.json
 node Tools/perf/throughput/harness.mjs --compiler jet=PATH --compiler-profile TEXT
 # full lane: bench300k + selfhost, 5 samples, golden run
-Tools/agent/jet-env node Tools/perf/throughput/harness.mjs --lane full --compiler jet=PATH --compiler-profile TEXT
+Tools/agent/JetEnv.jet node Tools/perf/throughput/harness.mjs --lane full --compiler jet=PATH --compiler-profile TEXT
 node --test Tools/perf/throughput/throughput.test.mjs
 ```
 
@@ -22,7 +22,7 @@ Programs: `bench300k` and `bench30k` come from
 (`Tools/perf/scaling/mixed.mjs`); `bench.json` pins their package digest,
 golden stdout and shape, and the harness fails closed when a regenerated
 program differs. `selfhost` is `jet build Compiler` over a copy of the
-compiler's packages of `--source-tree` (`Tools/agent/compiler-packages.mjs`),
+compiler's packages of `--source-tree` (`Tools/agent/CompilerPackages.jet`),
 with that tree's Core.
 
 Each sample: a fresh copy of the program at one fixed path, an empty

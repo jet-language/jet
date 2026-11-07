@@ -13,7 +13,7 @@ Before running, read [`_shared/audit-dispositions.md`](../_shared/audit-disposit
 
 ## Scope and evidence
 
-At activation, record the target surface and its reachable corpus. Search live specs, examples, stdlib, CLI/tooling, and direct analogues that explain the target. Include dependencies needed to understand it, not unrelated Jet. Prefer `Tools/agent/jet-env` and repository search over memory. Use the standing-lens sections relevant to this scope and probe the running binary when a claim is executable.
+At activation, record the target surface and its reachable corpus. Search live specs, examples, stdlib, CLI/tooling, and direct analogues that explain the target. Include dependencies needed to understand it, not unrelated Jet. Prefer `Tools/agent/JetEnv.jet` and repository search over memory. Use the standing-lens sections relevant to this scope and probe the running binary when a claim is executable.
 
 ## Ten-category sweep
 

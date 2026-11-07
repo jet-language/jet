@@ -8,8 +8,8 @@ capabilities and effects are exposed, and what evidence makes an export
 complete. The declaration registry is
 [`Core.jet`](../../Compiler/Prelude/Core.jet); Jet source bodies
 are under [`Core/`](../../Core/). Generated call and module views are derived
-from those inputs by the [Core table generator](../../Tools/agent/gen-core-tables.mjs).
-The [surface ledger](../../tests/core_surface_ledger.rs) checks selected
+from those inputs by the [Core table generator](../../Tools/agent/CoreSourceRows.jet).
+The [surface ledger](../../Tools/agent/CoreSurfaceLedger.jet) checks selected
 identity rows; runnable provider examples live under
 [`Examples/`](../../Examples/).
 
@@ -81,14 +81,16 @@ deadlines do not interrupt those
 closes. A new panic during cleanup with a pending Stop is process-fatal (70),
 the same abort a panic during unwinding gets. No additional TLS state
 or specialized plain cleanup call graph is introduced.
-The Source acceptance runner
-`Compiler/JetBackend/Tests/run-trap-source-fixtures.mjs` reuses the registered
-`defer close(resource)` examples, checking native task publication, plain
-task/root fatal report parity, LIFO closes exactly once, cancellation held
-through closing and delivered at the next wait, fatal panic inside closing,
-and the plain no-task output against its existing byte golden. Its
-`assemble/lower/link/run` modes require the fresh composed runtime for execution;
-source parsing alone is not a behavioral receipt.
+Gated rows prove these rules on every tier:
+- the goldens `tests/run/Ownership/ReleaseDeferPanic` and `ReleaseDeferLifo` and
+  the case `resource_close/cleanup_runs_once_in_lifo_order_on_all_scope_exits`
+  prove that the registered closes run once, in LIFO order, on every exit;
+- the golden `tests/run/Ownership/ReleaseDeferClosePanic` proves that a panic
+  inside a close is process-fatal;
+- the case `task_control_tiers/a_cancel_at_cleanup_entry_waits_out_the_close_on_every_tier`
+  proves that a cancel arriving at cleanup entry waits until the close
+  finishes, then stops the task at its next wait.
+Both rows are known-failing under #5989.
 
 Native expectation probes consume only a pending panic with a recorded raw
 `E3001`, `E3010`, `E3011` or `R0801`–`R0803` stop in the innermost matching
@@ -575,10 +577,10 @@ An `atexit` handler belongs to the process, not to its registering thread: it
 survives that thread's exit and runs, once and in registration order, at the
 process exit's handler step. One process queue holds every handler; its lock
 covers append and batch claim only, and each claimed batch runs outside it.
-`Compiler/JetRuntime/Tests/run-scheduler-fixtures.mjs` compiles the actual
+The Scheduler row of `Tools/agent/CompilerRegistries.jet` compiles the actual
 runtime with Jet callback assertions and uses C only to transport callback
-addresses. Its run phase covers one-, two- and eight-worker pools; root panic
-is compared byte-for-byte to a supplied freshly rendered Rust-tier reference.
+addresses. It runs one-, two- and eight-worker pools; root panic is compared
+byte-for-byte to the golden composed from the committed report literals.
 The shared native affinity probe `scheduler_available_parallelism(fallback)`
 does not read the pool override: the worker pool retains its override and
 fallback 4, while joined parallel walking supplies fallback 1.

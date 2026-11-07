@@ -126,11 +126,13 @@ kit_cases_known_verdict: fn(outcome: KitOutcome, annotation: String) -> KitOutco
 }
 
 // A failure the product owns, which a ledger row may annotate. Beyond FAIL,
-// that is an ICE, a signal death, or a child that exited without reading its
-// scripted input (the product left before the case could drive it), never a
-// kit fault such as a spawn or wait error.
+// that is a refusal of the input as not supported (a build that says a call is
+// not built yet, where the same row run at O0 fails), an ICE, a signal death,
+// or a child that exited without reading its scripted input (the product left
+// before the case could drive it), never a kit fault such as a spawn or wait
+// error.
 kit_cases_owned_failure: fn(verdict: KitVerdict) -> Bool {
-    if verdict.status == "FAIL" -> return true
+    if verdict.status == "FAIL" || verdict.status == "UNSUPPORTED" -> return true
     verdict.status == "ERROR" && (verdict.detail.contains("internal compiler error (exit 101)") || verdict.detail.contains("child terminated by signal") || verdict.detail.contains("without reading it"))
 }
 

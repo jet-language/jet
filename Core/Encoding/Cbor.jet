@@ -7,6 +7,7 @@ use {
     parser: __core_encoding_cbor_parse
     codec: __core_encoding_cbor_stream
     core.files.[FileReader, FileWriter]
+    typed_errors.[typed_parse_error]
 }
 
 CBORReader: struct {
@@ -99,12 +100,9 @@ validate: fn(value: Dyn, path: String) CBORError! {
     #Unsafe("inspect private typed carriers without changing public Dyn variants") {
         if value == {
             .Number(_) -> {
-                if value.decode<Int>() == {
-                    .Ok(_) -> {}
-                    .Err(_) -> {
-                        number: value.decode<Float>() ?? return Err(unsupported(path, "number {value} is outside the CBOR Int and float64 range"))
-                        if !math.is_finite(number) -> return Err(unsupported(path, "number {value} is outside the CBOR Int and float64 range"))
-                    }
+                if value.decode<Int>() == .Err(_) {
+                    number: value.decode<Float>() ?? return Err(unsupported(path, "number {value} is outside the CBOR Int and float64 range"))
+                    if !math.is_finite(number) -> return Err(unsupported(path, "number {value} is outside the CBOR Int and float64 range"))
                 }
             }
             .Array(items) -> {
@@ -169,9 +167,18 @@ encode_value: fn(value: Dyn, out: &[U8], canonical: Bool) CBORError! {
         if value == {
             .Null -> out.push(U8{246})
             .Bool(b) -> out.push(if b -> U8{245} else -> U8{244})
+            // An Int past major types 0 and 1 is a bignum: tag 2 or 3 over
+            // its big-endian magnitude (parser.bignum_bytes).
             .Int(n) -> {
-                if n >= 0 -> append_length(out, 0, n)
-                else -> append_length(out, 1, -(n + 1))
+                if parser.integer_fits(n) {
+                    if n >= 0 -> append_length(out, 0, n)
+                    else -> append_length(out, 1, -(n + 1))
+                } else {
+                    out.push(parser.bignum_head(n))
+                    magnitude: parser.bignum_bytes(parser.bignum_magnitude(n))
+                    append_length(out, 2, magnitude.len())
+                    loop byte in magnitude -> out.push(byte)
+                }
             }
             .Float(n) -> append_float(out, n)
             // A validated Number lexeme is its exact Int when integral, else its float64.
@@ -260,8 +267,12 @@ decode: fn<Target: Decode>(bytes: [U8], options: CBOROptions{CBOROptions.safe()}
     Ok(value)
 }
 
-typed_parse_error: fn(error: CBORError) -> FieldError Never! {
-    FieldError{path: error.path.removeprefix("$"), reason: "CBOR {error.kind_name()} at byte {error.byte_offset}: {error.reason}"}
+// The parse failure behind `decode<T>`, as one FieldError: not part of the
+// cbor surface.
+priv typed_errors: module {
+    typed_parse_error: fn(error: CBORError) -> FieldError Never! {
+        FieldError{path: error.path.removeprefix("$"), reason: "CBOR {error.kind_name()} at byte {error.byte_offset}: {error.reason}"}
+    }
 }
 
 #Test("CBOR whole-value parser preserves limits and indefinite forms") {
@@ -272,10 +283,17 @@ typed_parse_error: fn(error: CBORError) -> FieldError Never! {
     if parse([U8]{1, 2}) == .Err(error) -> assert(error.kind == .TrailingData) else -> panic("trailing root accepted")
 }
 
-#Test("CBOR major type 0 above I64 stays an exact Int and wide Int trees compare equal") {
+#Test("CBOR major types 0 and 1 stay exact Ints out to 2^64-1 and -2^64, and wide Int trees compare equal") {
     // #4362: 2^63 and 2^64-1 decode exactly into the one `Dyn.Int` case.
     assert_eq(parse([U8]{27, 128, 0, 0, 0, 0, 0, 0, 0}), Ok(Dyn.Int(9223372036854775808)))
     assert_eq(parse([U8]{27, 255, 255, 255, 255, 255, 255, 255, 255}), Ok(Dyn.Int(18446744073709551615)))
+    assert_eq(parse([U8]{59, 255, 255, 255, 255, 255, 255, 255, 255}), Ok(Dyn.Int(-18446744073709551616)))
+    assert_eq(to_bytes(Dyn.Int(-18446744073709551616)), Ok([U8]{59, 255, 255, 255, 255, 255, 255, 255, 255}))
+    // A wider Int is a bignum, tag 2 or tag 3 over its big-endian magnitude.
+    assert_eq(to_bytes(Dyn.Int(18446744073709551616)), Ok([U8]{194, 73, 1, 0, 0, 0, 0, 0, 0, 0, 0}))
+    assert_eq(to_bytes(Dyn.Int(-18446744073709551617)), Ok([U8]{195, 73, 1, 0, 0, 0, 0, 0, 0, 0, 0}))
+    assert_eq(parse([U8]{194, 73, 1, 0, 0, 0, 0, 0, 0, 0, 0}), Ok(Dyn.Int(18446744073709551616)))
+    assert_eq(parse([U8]{195, 73, 1, 0, 0, 0, 0, 0, 0, 0, 0}), Ok(Dyn.Int(-18446744073709551617)))
     // Two separately built 2^128+1 trees are equal; a neighbour is not.
     wide: 340282366920938463463374607431768211457
     left: Dyn.Array([Dyn]{Dyn.Int(wide)})
@@ -360,4 +378,17 @@ typed_parse_error: fn(error: CBORError) -> FieldError Never! {
     limited.write(DataEvent.ArrayStart) ?? panic("start")
     limited.write(DataEvent.Int(1)) ?? panic("item")
     if limited.write(DataEvent.ArrayEnd) == .Err(failure) -> assert_eq(failure.reason, "max_total_bytes 1 exceeded") else -> panic("root wire limit must fail")
+}
+
+#Test("CBOR stream reads integers out to 2^64-1 and -2^64 and refuses to write a wider Int") {
+    dir: core.files.temp_dir("jet-cbor-wide") ?? panic("temp")
+    path: "{dir.path}/wide.cbor"
+    core.files.write_bytes(path, [U8]{130, 27, 255, 255, 255, 255, 255, 255, 255, 255, 59, 255, 255, 255, 255, 255, 255, 255, 255}) ?? panic("fixture")
+    input: core.files.open(path) ?? panic("open")
+    source := reader(input) ?? panic("reader")
+    expected: [DataEvent]{.ArrayStart, .Int(18446744073709551615), .Int(-18446744073709551616), .ArrayEnd}
+    loop event in expected -> assert_eq(source.next(), Ok(Val(event)))
+    output: core.files.create("{dir.path}/out.cbor") ?? panic("create")
+    sink := writer(output) ?? panic("writer")
+    if sink.write(DataEvent.Int(18446744073709551616)) == .Err(failure) -> assert_eq(failure.kind, .Unsupported) else -> panic("2^64 written")
 }

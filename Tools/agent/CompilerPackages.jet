@@ -1,0 +1,1084 @@
+#!/usr/bin/env jet
+// The Jet compiler in package form: the packages `jet build Compiler` compiles
+// (Compiler/JetCli and every package its package.jet path dependencies reach),
+// their member source files, the inputs that make up the compiler's source
+// identity, and the one-namespace units the focused compiler fixtures build.
+//
+//   jet Tools/agent/CompilerPackages.jet [--root DIR] packages [ENTRY]
+//   jet Tools/agent/CompilerPackages.jet [--root DIR] sources [ENTRY]
+//   jet Tools/agent/CompilerPackages.jet [--root DIR] roots
+//   jet Tools/agent/CompilerPackages.jet [--root DIR] inputs
+//   jet Tools/agent/CompilerPackages.jet [--root DIR] select FILE...
+//   jet Tools/agent/CompilerPackages.jet [--root DIR] identity
+//   jet Tools/agent/CompilerPackages.jet [--root DIR] unblock FILE...|-
+//   jet Tools/agent/CompilerPackages.jet [--root DIR] runtime-unit OUT [--test NAME]...
+//   jet Tools/agent/CompilerPackages.jet [--root DIR] unit [ENTRY]...
+//   jet Tools/agent/CompilerPackages.jet [--root DIR] unit-inputs [ENTRY]...
+//
+// DIR is the repository (default: the working directory); every ENTRY and
+// FILE is relative to it, and so is every path printed except unit-inputs'
+// targets. An ENTRY is a package directory; the default is Compiler/JetCli.
+//
+// `packages` prints `NAME<TAB>DIRECTORY` for ENTRY and every package it
+// depends on, in dependency order (each package after the ones it depends
+// on). `sources` prints `NAME<TAB>DIRECTORY<TAB>FILE` for each member `.jet`
+// file of those packages, in package order and sorted within a package: the
+// sources `jet build Compiler` compiles. Membership follows the driver's
+// source walk (JetCli Request.jet `jet_cli_walk_held_sources`): every `.jet`
+// file under the package directory, recursively, except dot names, the
+// skipped build names, symlinks, `#!` scripts, the reserved manifest names,
+// and directories that are projects of their own (they hold a package.jet,
+// pkg.jet, workspace.jet or .jet/lock).
+//
+// `roots` prints the roots of the compiler's source identity: the workspace
+// files, every compiler package directory, and Core (the toolchain sources
+// the compiler reads through JET_TOOLCHAIN_ROOT). `inputs` prints every file
+// under them, sorted by bytes: the workspace files, each package tree (all
+// files, so data a package reads at compile time counts), and every file
+// under Core except dot names. `select` prints the FILEs that are compiler
+// inputs, in argument order; a FILE need not exist (a deleted member is
+// still an input path), and it is judged with the walk's exclusions.
+// `identity` prints the compiler's source identity,
+// `<binary>@<version>#<sha256>`: the sha256 is over the domain, a NUL, then
+// each input in byte order as its path and its bytes, each after its 8-byte
+// big-endian length.
+//
+// `unblock` writes each FILE's text with every `use { … }` block rewritten as
+// one `use` line per row, keeping every line and byte offset, each text
+// followed by a NUL byte. With `-` it reads the texts from stdin instead,
+// each followed by a NUL byte, and writes them back the same way.
+//
+// `runtime-unit` writes the runtime's one-namespace unit, OUT/unit.jet, and
+// its OUT/package.jet, then prints OUT/unit.jet (OUT is used as given): each
+// Compiler/JetRuntime/sources.list source, unblocked, after a
+// `// [unit source: PATH]` line, its Core `use` lines dropped and gathered
+// once each, in first-seen order, at the head of the unit, and its other
+// `use` lines dropped. Each `--test NAME` appends the fragment
+// Compiler/JetRuntime/Tests/Fragments.fixture/NAMETests.jet, in order, and
+// any `--test` writes a test package of the driver's one edition instead of
+// the runtime's package.jet.
+//
+// `unit` writes one namespace of the member files of the packages at the
+// ENTRYs and of every package they depend on, for focused fixtures that
+// compile production code with a fixture appended: each package `use` line is
+// blanked to spaces (offsets and lines stay those of the source), and a Core
+// import repeated in a later file is blanked too. Files are in package
+// dependency order; a package's own entry (its root `run.jet`) stays out, so
+// the fixture supplies the unit's entry. A top-level name two files declare
+// is refused, every one at once. `unit-inputs` prints `LITERAL<TAB>TARGET`
+// for the comptime inputs (`embed_file`/`embed_bytes`) of that unit's files:
+// each literal, relative to its own file, and the absolute file it names
+// there. A literal two files resolve to different files is refused, every one
+// at once; a literal naming no file (a comment's example) is left out.
+//
+// Exit: 0 done; 1 a refused tree, printed; 2 usage.
+use {
+    crypto: core.crypto
+    files: core.files
+    process: core.process
+    term: core.term
+}
+
+ENTRY_PACKAGE: "Compiler/JetCli"
+// The workspace files `jet build Compiler` reads beside the packages.
+WORKSPACE_FILES: [String]{"Compiler/package.jet", "Compiler/build.jet"}
+SKIPPED_NAMES: [String]{"target", "build", "node_modules", "bin"}
+PROJECT_MARKERS: [String]{"package.jet", "pkg.jet", "workspace.jet", ".jet/lock"}
+RESERVED_SOURCE_NAMES: [String]{"package.jet", "pkg.jet", "env.jet", "config.jet", "workspace.jet"}
+SOURCE_DOMAIN: "jet.compiler-source.v2"
+
+#Error
+PackagesError: struct {
+    message: String
+}
+
+Package: struct {
+    name: String
+    // Repo-relative.
+    directory: String
+}
+
+Sources: struct {
+    name: String
+    directory: String
+    files: [String]
+}
+
+UnitFile: struct {
+    path: String
+    text: String
+}
+
+run: fn() {
+    args: process.args()
+    root := files.cwd() ?? "."
+    at := 0
+    if args.len() >= 2 && args[0] == "--root" {
+        root = args[1]
+        at = 2
+    }
+    if at >= args.len() -> usage()
+    rest: args[(at + 1)..<args.len()]
+    if command(root, args[at], rest) == .Err(error) {
+        term.eprint("CompilerPackages: {error.message}")
+        process.exit(1)
+    }
+}
+
+usage: fn() -[Exec, IO]> Never {
+    term.eprint("usage: jet Tools/agent/CompilerPackages.jet [--root DIR] packages|sources [ENTRY]")
+    term.eprint("       jet Tools/agent/CompilerPackages.jet [--root DIR] roots|inputs")
+    term.eprint("       jet Tools/agent/CompilerPackages.jet [--root DIR] select FILE...")
+    term.eprint("       jet Tools/agent/CompilerPackages.jet [--root DIR] identity")
+    term.eprint("       jet Tools/agent/CompilerPackages.jet [--root DIR] unblock FILE...|-")
+    term.eprint("       jet Tools/agent/CompilerPackages.jet [--root DIR] runtime-unit OUT [--test NAME]...")
+    term.eprint("       jet Tools/agent/CompilerPackages.jet [--root DIR] unit|unit-inputs [ENTRY]...")
+    process.exit(2)
+}
+
+command: fn(root: String, name: String, args: [String]) PackagesError! -[Env, Exec, FS, IO, Time.Wait]> {
+    out := term.stdout()
+    if name == {
+        "packages" -> {
+            loop found in compiler_packages(root, one_entry(args)) -> print("{found.name}\t{found.directory}")
+        }
+        "sources" -> {
+            loop package in compiler_sources(root, compiler_packages(root, one_entry(args))) {
+                loop path in package.files -> print("{package.name}\t{package.directory}\t{path}")
+            }
+        }
+        "roots" -> {
+            no_arguments(args)
+            loop path in compiler_input_roots(compiler_packages(root, ENTRY_PACKAGE)) -> print(path)
+        }
+        "inputs" -> {
+            no_arguments(args)
+            loop path in compiler_inputs(root, compiler_input_roots(compiler_packages(root, ENTRY_PACKAGE))) -> print(path)
+        }
+        "select" -> {
+            roots: compiler_input_roots(compiler_packages(root, ENTRY_PACKAGE))
+            loop path in args {
+                if is_compiler_input(root, path, roots) -> print(path)
+            }
+        }
+        "identity" -> {
+            no_arguments(args)
+            print(compiler_source_identity(root))
+        }
+        "unblock" -> {
+            texts := [String]{}
+            if {
+                args.len() == 1 && args[0] == "-" -> texts = framed_texts(term.read_all_input() ?? return Err(PackagesError{message: "stdin: {err}"}))
+                else -> {
+                    loop path in args -> texts.push(files.read(files.join(root, path)) ?? return Err(PackagesError{message: "`{path}` cannot be read: {err}"}))
+                }
+            }
+            loop text in texts {
+                bytes := unblock_uses(text).bytes()
+                bytes.push(U8{0})
+                out.write_bytes(bytes) ?? return Err(PackagesError{message: "stdout: {err}"})
+            }
+        }
+        "runtime-unit" -> print(runtime_unit(root, args) ?? return Err(err))
+        "unit" -> out.write(compiler_fixture_unit(root, entries(args))) ?? return Err(PackagesError{message: "stdout: {err}"})
+        "unit-inputs" -> {
+            loop input in compiler_fixture_inputs(root, entries(args)) -> print("{input.path}\t{input.text}")
+        }
+        else -> usage()
+    }
+    Ok(())
+}
+
+// The texts of `input`, each followed by a NUL byte.
+framed_texts: fn(input: String) -> [String] PackagesError! {
+    nul: String.from_bytes([U8]{U8{0}}) ?? ""
+    if input != "" && !input.ends_with(nul) -> return Err(PackagesError{message: "stdin: the last text is not followed by a NUL byte"})
+    texts := input.split(nul).to_list()
+    _ := texts.pop()
+    texts
+}
+
+RUNTIME_SOURCES: "Compiler/JetRuntime/sources.list"
+RUNTIME_PACKAGE: "Compiler/JetRuntime/package.jet"
+RUNTIME_FRAGMENTS: "Compiler/JetRuntime/Tests/Fragments.fixture"
+DRIVER_LOADER: "Compiler/JetDriver/Source/Driver/Loader.jet"
+
+// The fragment names of `runtime-unit OUT [--test NAME]...`, in order; None
+// when the arguments are not that shape or name a fragment twice.
+runtime_unit_tests: fn(args: [String]) -> [String]? Never! {
+    if args.len() % 2 != 1 -> return None
+    tests := [String]{}
+    at := 1
+    loop at < args.len() {
+        if args[at] != "--test" || !is_type_name(args[at + 1]) || tests.contains(args[at + 1]) -> return None
+        tests.push(args[at + 1].copy())
+        at += 2
+    }
+    Val(tests)
+}
+
+// `runtime-unit OUT [--test NAME]...`: writes OUT/unit.jet and OUT/package.jet
+// and returns OUT/unit.jet. Each `--test NAME` composes the fragment
+// NAMETests.jet, in order.
+runtime_unit: fn(root: String, args: [String]) -[Exec, FS, IO]> String PackagesError! {
+    tests: runtime_unit_tests(args) ?? usage()
+    out: args[0]
+    listed: files.read(files.join(root, RUNTIME_SOURCES)) ?? return Err(PackagesError{message: "`{RUNTIME_SOURCES}` cannot be read: {err}"})
+    paths := [String]{}
+    loop row in listed.split("\n") {
+        line: row.trim()
+        if line == "" || line.starts_with("#") -> next
+        if paths.contains(line) -> return Err(PackagesError{message: "`{RUNTIME_SOURCES}` lists `{line}` twice"})
+        paths.push(line.copy())
+    }
+    if paths.len() == 0 -> return Err(PackagesError{message: "`{RUNTIME_SOURCES}` lists no source"})
+    loop name in tests -> paths.push("{RUNTIME_FRAGMENTS}/{name}Tests.jet")
+    uses := [String]{}
+    bodies := [String]{}
+    loop path in paths {
+        text: files.read(files.join(root, path)) ?? return Err(PackagesError{message: "`{path}` cannot be read: {err}"})
+        importing := false
+        kept := [String]{}
+        loop line in unblock_uses(text).split("\n") {
+            if line.starts_with("use ") {
+                if is_core_use(line) && !uses.contains(line) -> uses.push(line.copy())
+                importing = line.contains("[") && !line.contains("]")
+                next
+            }
+            if importing {
+                if line.contains("]") -> importing = false
+                next
+            }
+            kept.push(line.copy())
+        }
+        bodies.push("// [unit source: {path}]\n{kept.join("\n")}")
+    }
+    package := ""
+    if tests.len() > 0 {
+        // A test unit takes the one language edition the driver accepts.
+        loader: files.read(files.join(root, DRIVER_LOADER)) ?? return Err(PackagesError{message: "`{DRIVER_LOADER}` cannot be read: {err}"})
+        edition := ""
+        loop line in loader.split("\n") {
+            value: line.removeprefix("JET_DRIVER_EDITION: \"")
+            if value.len() < line.len() && value.len() > 1 && value.ends_with("\"") && !value.removesuffix("\"").contains("\"") {
+                edition = value.removesuffix("\"")
+                break
+            }
+        }
+        if edition == "" -> return Err(PackagesError{message: "JET_DRIVER_EDITION is not found in `{DRIVER_LOADER}`"})
+        package = "name: \"jet_runtime_tests\"\nversion: \"0.0.1\"\nedition: \"{edition}\"\n"
+    } else {
+        package = files.read(files.join(root, RUNTIME_PACKAGE)) ?? return Err(PackagesError{message: "`{RUNTIME_PACKAGE}` cannot be read: {err}"})
+    }
+    files.create_dir_all(out) ?? return Err(PackagesError{message: "`{out}` cannot be created: {err}"})
+    unit := uses.copy()
+    unit.push("")
+    unit.extend(bodies)
+    unit_path: files.join(out, "unit.jet")
+    files.write(unit_path, unit.join("\n")) ?? return Err(PackagesError{message: "`{unit_path}` cannot be written: {err}"})
+    files.write(files.join(out, "package.jet"), package) ?? return Err(PackagesError{message: "`{out}/package.jet` cannot be written: {err}"})
+    Ok(unit_path)
+}
+
+// `^[A-Z][A-Za-z0-9]*$`.
+is_type_name: fn(text: String) -> Bool Never! {
+    raw: text.bytes()
+    if raw.len() == 0 -> return false
+    first: Int.from_u8(raw[0])
+    if first < 65 || first > 90 -> return false
+    loop byte in raw {
+        code: Int.from_u8(byte)
+        if !((code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122)) -> return false
+    }
+    true
+}
+
+one_entry: fn(args: [String]) -[Exec, IO]> String Never! {
+    if args.len() > 1 -> usage()
+    if args.len() == 1 -> args[0] else -> ENTRY_PACKAGE
+}
+
+entries: fn(args: [String]) -> [String] Never! {
+    if args.len() == 0 -> [String]{ENTRY_PACKAGE} else -> args
+}
+
+no_arguments: fn(args: [String]) -[Exec, IO]> {
+    if args.len() > 0 -> usage()
+}
+
+// --- packages -------------------------------------------------------------------
+
+is_project: fn(directory: String) -[FS]> Bool Never! {
+    loop marker in PROJECT_MARKERS {
+        if files.exists(files.join(directory, marker)) -> return true
+    }
+    false
+}
+
+// Every file of the package tree at the repo-relative `directory`, of any
+// extension, repo-relative and sorted: the driver's walk before its `.jet`
+// filter.
+package_tree: fn(repo: String, directory: String) -[FS]> [String] PackagesError! {
+    found := [String]{}
+    walk_tree(repo, directory, found)
+    found
+}
+
+walk_tree: fn(repo: String, directory: String, found: &[String]) PackagesError! -[FS]> {
+    listed: files.list_dir(files.join(repo, directory)) ?? return Err(PackagesError{message: "`{directory}` cannot be listed: {err}"})
+    names := [String]{}
+    loop entry in listed -> names.push(entry.name)
+    names.sort()
+    loop name in names {
+        if name.starts_with(".") || SKIPPED_NAMES.contains(name) -> next
+        child: "{directory}/{name}"
+        path: files.join(repo, child)
+        if files.is_symlink(path) -> next
+        if files.is_dir(path) {
+            if !is_project(path) -> walk_tree(repo, child, found)
+            next
+        }
+        if files.is_file(path) -> found.push(child)
+    }
+    Ok(())
+}
+
+// The value of the first `KEY: "VALUE"` line of `text`, "" when there is none.
+quoted_line: fn(text: String, key: String) -> String Never! {
+    loop line in text.lines() {
+        if !line.starts_with("{key}:") -> next
+        rest: line.removeprefix("{key}:").trim()
+        if !rest.starts_with("\"") -> next
+        value: rest.removeprefix("\"").partition("\"")
+        if value.sep != "" && value.head != "" -> return value.head
+    }
+    ""
+}
+
+// The relative paths of a package.jet's `deps: { ... }` block: each row
+// `name: ./Dir` or `name: ../Dir` (a registry version is no path).
+manifest_deps: fn(text: String) -> [String] Never! {
+    rows := [String]{}
+    inside := false
+    closed := false
+    loop line in text.lines() {
+        current := line
+        if !inside {
+            if !line.starts_with("deps:") -> next
+            rest: line.removeprefix("deps:").trim()
+            if !rest.starts_with("{{") -> next
+            inside = true
+            current = rest.removeprefix("{{")
+        }
+        cut: current.partition("}}")
+        rows.push(cut.head)
+        if cut.sep != "" {
+            closed = true
+            break
+        }
+    }
+    paths := [String]{}
+    if !closed -> return paths
+    loop row in rows {
+        path: dep_path(row)
+        if path != "" -> paths.push(path)
+    }
+    paths
+}
+
+// The path of one `deps` row, "" when the row names no path.
+dep_path: fn(row: String) -> String Never! {
+    line: row.trim()
+    entry: if line.ends_with(",") -> line.removesuffix(",").trim() else -> line
+    parts: entry.partition(":")
+    if parts.sep == "" || !is_word(parts.head) -> return ""
+    value: parts.tail.trim()
+    if value == "." || value == ".." -> return value
+    if !value.starts_with("./") && !value.starts_with("../") -> return ""
+    if value.contains(",") || value.contains(" ") || value.contains("\t") -> return ""
+    value
+}
+
+is_word: fn(text: String) -> Bool Never! {
+    if text == "" -> return false
+    loop byte in text.bytes() {
+        if !is_ident_byte(byte) -> return false
+    }
+    true
+}
+
+is_ident_start: fn(byte: U8) -> Bool Never! {
+    code: Int.from_u8(byte)
+    (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95
+}
+
+is_ident_byte: fn(byte: U8) -> Bool Never! {
+    code: Int.from_u8(byte)
+    is_ident_start(byte) || (code >= 48 && code <= 57)
+}
+
+// `path` joined to `directory` and normalized; "" when a `..` climbs above
+// the start. An absolute `path` stands alone.
+normalize_join: fn(directory: String, path: String) -> String Never! {
+    whole: if path.starts_with("/") -> path else -> "{directory}/{path}"
+    parts := [String]{}
+    loop part in whole.split("/") {
+        if part == "" || part == "." -> next
+        if part == ".." {
+            if parts.len() == 0 -> return ""
+            _ := parts.pop()
+            next
+        }
+        parts.push(part)
+    }
+    joined: parts.join("/")
+    if whole.starts_with("/") -> "/{joined}" else -> joined
+}
+
+// The packages `entry` (a repo-relative package directory) depends on, itself
+// included, in dependency order: every package after the packages it
+// depends on.
+compiler_packages: fn(repo: String, entry: String) -[FS]> [Package] PackagesError! {
+    packages := [Package]{}
+    visiting := [String]{}
+    visit_package(repo, normalize_join(".", entry), packages, visiting)
+    packages
+}
+
+visit_package: fn(repo: String, directory: String, packages: &[Package], visiting: &[String]) PackagesError! -[FS]> {
+    manifest: files.read(files.join(repo, "{directory}/package.jet")) ?? return Err(PackagesError{message: "{directory}/package.jet cannot be read: {err}"})
+    name: quoted_line(manifest, "name")
+    if name == "" -> return Err(PackagesError{message: "{directory}/package.jet names no package"})
+    loop known in packages {
+        if known.name == name -> return Ok(())
+    }
+    if visiting.contains(name) -> return Err(PackagesError{message: "package dependency cycle through {name}"})
+    visiting.push(name.copy()) // copy: the package row below keeps the name too
+    loop path in manifest_deps(manifest) {
+        target: normalize_join(directory, path)
+        if target == "" -> return Err(PackagesError{message: "{directory}/package.jet names a dependency outside the repository: {path}"})
+        visit_package(repo, target, packages, visiting)
+    }
+    packages.push(Package{name: name, directory: directory})
+    Ok(())
+}
+
+// The member `.jet` files of each package, repo-relative, in package
+// dependency order and sorted within a package.
+compiler_sources: fn(repo: String, packages: [Package]) -[FS]> [Sources] PackagesError! {
+    out := [Sources]{}
+    loop package in packages {
+        members := [String]{}
+        loop path in package_tree(repo, package.directory) {
+            base: path.rpartition("/").tail
+            if !base.ends_with(".jet") || RESERVED_SOURCE_NAMES.contains(base) -> next
+            bytes: files.read_bytes(files.join(repo, path)) ?? return Err(PackagesError{message: "`{path}` cannot be read: {err}"})
+            if bytes.len() >= 3 && bytes[0] == (U8{35}) && bytes[1] == (U8{33}) && bytes[2] == (U8{47}) -> next
+            members.push(path)
+        }
+        out.push(Sources{name: package.name, directory: package.directory, files: members})
+    }
+    out
+}
+
+compiler_input_roots: fn(packages: [Package]) -> [String] Never! {
+    roots := [String]{}
+    loop path in WORKSPACE_FILES -> roots.push(path)
+    loop found in packages -> roots.push(found.directory)
+    roots.push("Core")
+    roots
+}
+
+compiler_inputs: fn(repo: String, roots: [String]) -[FS]> [String] PackagesError! {
+    found := [String]{}
+    loop path in roots {
+        whole: files.join(repo, path)
+        if !files.exists(whole) -> next
+        if files.is_file(whole) {
+            found.push(path.copy()) // copy: `roots` keeps its rows
+            next
+        }
+        found.extend(package_tree(repo, path))
+    }
+    found.sort()
+    unique := [String]{}
+    loop path in found {
+        if unique.len() > 0 && unique[unique.len() - 1] == path -> next
+        unique.push(path)
+    }
+    unique
+}
+
+// Whether the repo-relative `path` (which may no longer exist) is a compiler
+// input under `roots`: the same exclusions as the walk, judged on the path.
+is_compiler_input: fn(repo: String, path: String, roots: [String]) -[FS]> Bool Never! {
+    loop input in roots {
+        if path == input -> return true
+        if !path.starts_with("{input}/") -> next
+        parts: path.removeprefix("{input}/").split("/").to_list()
+        skipped := false
+        loop part in parts {
+            if part.starts_with(".") || SKIPPED_NAMES.contains(part) -> skipped = true
+        }
+        if skipped -> next
+        directory := files.join(repo, input)
+        project := false
+        loop at in 0..<(parts.len() - 1) {
+            directory = files.join(directory, parts[at])
+            if is_project(directory) -> project = true
+        }
+        if !project -> return true
+    }
+    false
+}
+
+push_u64: fn(out: &[U8], value: Int) {
+    digits := [U8]{}
+    rest := value
+    loop _ in 0..<8 {
+        digits.push(U8.from_int(rest % 256) ?? U8{0})
+        rest /%= 256
+    }
+    loop at in 0..<8 -> out.push(digits[7 - at])
+}
+
+// The compiler's source identity of `repo`:
+// `<binary>@<version>#<sha256>` over the domain, a NUL, then each input in
+// byte order as its path and its bytes, each after its 8-byte big-endian length.
+compiler_source_identity: fn(repo: String) -[FS]> String PackagesError! {
+    inputs: compiler_inputs(repo, compiler_input_roots(compiler_packages(repo, ENTRY_PACKAGE)))
+    message := [U8]{}
+    message.extend(SOURCE_DOMAIN.bytes())
+    message.push(U8{0})
+    loop path in inputs {
+        bytes: files.read_bytes(files.join(repo, path)) ?? return Err(PackagesError{message: "`{path}` cannot be read: {err}"})
+        key: path.bytes()
+        push_u64(message, key.len())
+        message.extend(key)
+        push_u64(message, bytes.len())
+        message.extend(bytes)
+    }
+    registry: "Compiler/JetCli/Source/Cli/Registry.jet"
+    manifest: "Jetpack/PackageModel/Source/Manifest/Manifest.jet"
+    binary: quoted_line(files.read(files.join(repo, registry)) ?? "", "JET_CLI_BINARY")
+    version: quoted_line(files.read(files.join(repo, manifest)) ?? "", "COMPILER_VERSION")
+    if binary == "" -> return Err(PackagesError{message: "{registry} declares no JET_CLI_BINARY"})
+    if version == "" -> return Err(PackagesError{message: "{manifest} declares no COMPILER_VERSION"})
+    "{binary}@{version}#{crypto.sha256(message).hex()}"
+}
+
+// --- fixture units ----------------------------------------------------------
+
+// The packages of every ENTRY and their dependencies, each once, in the
+// order they are first reached.
+entry_packages: fn(repo: String, entries: [String]) -[FS]> [Package] PackagesError! {
+    out := [Package]{}
+    loop entry in entries {
+        loop found in compiler_packages(repo, entry) {
+            known := false
+            loop have in out {
+                if have.name == found.name -> known = true
+            }
+            if !known -> out.push(found)
+        }
+    }
+    out
+}
+
+// The library members of `packages`: their sources without each package's
+// root `run.jet`.
+fixture_files: fn(repo: String, packages: [Package]) -[FS]> [String] PackagesError! {
+    out := [String]{}
+    loop package in compiler_sources(repo, packages) {
+        entry: "{package.directory}/run.jet"
+        loop path in package.files {
+            if path != entry -> out.push(path)
+        }
+    }
+    out
+}
+
+compiler_fixture_unit: fn(repo: String, entries: [String]) -[FS]> String PackagesError! {
+    packages: entry_packages(repo, entries)
+    names := [String]{}
+    loop found in compiler_packages(repo, ENTRY_PACKAGE) -> names.push(found.name)
+    loop found in packages {
+        if !names.contains(found.name) -> names.push(found.name)
+    }
+    units := [UnitFile]{}
+    loop path in fixture_files(repo, packages) {
+        text: files.read(files.join(repo, path)) ?? return Err(PackagesError{message: "`{path}` cannot be read: {err}"})
+        units.push(UnitFile{path: path, text: text})
+    }
+    fixture_unit(units, names)
+}
+
+// `units` joined into one namespace, blanking `use` lines of the packages
+// `names` and repeated Core imports. Packages keep separate namespaces in a
+// real build, so a top-level name two files declare cannot share this one:
+// every such name is refused at once, with its files.
+fixture_unit: fn(units: [UnitFile], names: [String]) -> String PackagesError! {
+    seen_imports := [String: Bool]{}
+    seen_members := [String: Bool]{}
+    owner_at := [String: Int]{}
+    owner_names := [String]{}
+    owner_paths := [[String]]{}
+    out := [U8]{}
+    loop unit in units {
+        packages_blanked: blank_package_imports(unblock_uses(unit.text), names)
+        members_kept: blank_repeated_members(packages_blanked, seen_members)
+        text: blank_repeated_imports(members_kept, seen_imports)
+        loop line in text.split("\n") {
+            name: declared_name(line)
+            if name == "" -> next
+            slot: owner_at.get(name) ?? -1
+            if {
+                slot >= 0 -> owner_paths[slot].push(unit.path.copy()) // copy: every name of the file records it
+                else -> {
+                    owner_at[name] = owner_names.len()
+                    owner_names.push(name)
+                    owner_paths.push([String]{unit.path.copy()}) // copy: every name of the file records it
+                }
+            }
+        }
+        out.extend(text.bytes())
+        if !text.ends_with("\n") -> out.push(U8{10})
+    }
+    clashes := [String]{}
+    loop at in 0..<owner_names.len() {
+        if owner_paths[at].len() > 1 -> clashes.push("{owner_names[at]}: {owner_paths[at].join(", ")}")
+    }
+    if clashes.len() > 0 -> return Err(PackagesError{message: "fixture unit: {clashes.len()} top-level name(s) declared in more than one file:\n{clashes.join("\n")}"})
+    String.from_bytes(out) ?? ""
+}
+
+// The name a line declares at the top level (`name: ` or `pub name: ` at
+// its start), "" when it declares none.
+declared_name: fn(line: String) -> String Never! {
+    if line.starts_with("pub ") {
+        name: ident_colon(line.bytes(), 4)
+        if name != "" -> return name
+    }
+    ident_colon(line.bytes(), 0)
+}
+
+// The identifier at `at` of `raw` when `: ` follows it, else "".
+ident_colon: fn(raw: [U8], at: Int) -> String Never! {
+    end: ident_end(raw, at)
+    if end == at || end + 1 >= raw.len() || raw[end] != (U8{58}) || raw[end + 1] != (U8{32}) -> return ""
+    text_of(raw, at, end)
+}
+
+// The end of the identifier starting at `at` of `raw` (`at` when none does).
+ident_end: fn(raw: [U8], at: Int) -> Int Never! {
+    if at >= raw.len() || !is_ident_start(raw[at]) -> return at
+    end := at + 1
+    loop end < raw.len() && is_ident_byte(raw[end]) -> end += 1
+    end
+}
+
+text_of: fn(raw: [U8], start: Int, end: Int) -> String Never! {
+    if start >= end -> return ""
+    String.from_bytes(raw.slice(start, end)) ?? ""
+}
+
+starts_at: fn(raw: [U8], at: Int, prefix: String) -> Bool Never! {
+    want: prefix.bytes()
+    if at + want.len() > raw.len() -> return false
+    loop k in 0..<want.len() {
+        if raw[at + k] != want[k] -> return false
+    }
+    true
+}
+
+// The offset of the first `byte` of `raw` at or after `from`, -1 when none.
+find_byte: fn(raw: [U8], from: Int, byte: U8) -> Int Never! {
+    at := from
+    loop at < raw.len() {
+        if raw[at] == byte -> return at
+        at += 1
+    }
+    -1
+}
+
+// The offset after the line holding `at` (after its newline), or the end.
+next_line: fn(raw: [U8], at: Int) -> Int Never! {
+    newline: find_byte(raw, at, U8{10})
+    if newline < 0 -> raw.len() else -> newline + 1
+}
+
+// `text` with every character but a newline turned to spaces, one space per
+// UTF-16 unit, as the node tooling's fixture units blanked them.
+blank: fn(text: String) -> String Never! {
+    out := [U8]{}
+    blank_into(out, text.bytes(), 0, text.bytes().len())
+    String.from_bytes(out) ?? ""
+}
+
+blank_into: fn(out: &[U8], raw: [U8], start: Int, end: Int) Never! {
+    loop at in start..<end {
+        code: Int.from_u8(raw[at])
+        if {
+            code == 10 -> out.push(U8{10})
+            code < 128 || (code >= 192 && code < 240) -> out.push(U8{32})
+            code >= 240 -> {
+                out.push(U8{32})
+                out.push(U8{32})
+            }
+        }
+    }
+}
+
+copy_into: fn(out: &[U8], raw: [U8], start: Int, end: Int) Never! {
+    loop at in start..<end -> out.push(raw[at])
+}
+
+// The end of a package import starting at line start `at`: `use NAME.[…]`
+// through its `]`, or `use NAME.member` with only blanks after it up to the
+// end of its line. -1 when the line starts no package import.
+package_import_end: fn(raw: [U8], at: Int, names: [String]) -> Int Never! {
+    if !starts_at(raw, at, "use ") -> return -1
+    loop name in names {
+        if !starts_at(raw, at + 4, "{name}.") -> next
+        after: at + 4 + name.bytes().len() + 1
+        if after < raw.len() && raw[after] == (U8{91}) {
+            close: find_byte(raw, after + 1, U8{93})
+            return if close < 0 -> -1 else -> close + 1
+        }
+        end := ident_end(raw, after)
+        if end == after -> return -1
+        loop end < raw.len() && (raw[end] == (U8{32}) || raw[end] == (U8{9})) -> end += 1
+        if end < raw.len() && raw[end] != (U8{10}) -> return -1
+        return end
+    }
+    -1
+}
+
+blank_package_imports: fn(text: String, names: [String]) -> String Never! {
+    raw: text.bytes()
+    out := [U8]{}
+    at := 0
+    loop at < raw.len() {
+        end: package_import_end(raw, at, names)
+        start: if end >= 0 -> end else -> at
+        if end >= 0 -> blank_into(out, raw, at, end)
+        stop: next_line(raw, start)
+        copy_into(out, raw, start, stop)
+        at = stop
+    }
+    String.from_bytes(out) ?? ""
+}
+
+// A grouped Core import at line start `at`: `use core(.member)*.[…]`, with the
+// offset of its `[` and the offset after its `]`; None when the line starts
+// none.
+CoreGroup: struct {
+    module_end: Int
+    open: Int
+    end: Int
+}
+
+core_group: fn(raw: [U8], at: Int) -> CoreGroup? Never! {
+    if !starts_at(raw, at, "use core") -> return None
+    cursor := at + 8
+    loop cursor + 1 < raw.len() && raw[cursor] == (U8{46}) && is_ident_start(raw[cursor + 1]) -> cursor = ident_end(raw, cursor + 1)
+    if !starts_at(raw, cursor, ".[") -> return None
+    close: find_byte(raw, cursor + 2, U8{93})
+    if close < 0 -> return None
+    Val(CoreGroup{module_end: cursor, open: cursor + 1, end: close + 1})
+}
+
+// A repeated member of a grouped Core import is blanked, keeping every
+// surviving token at its offset; forms this does not recognize stay as written.
+blank_repeated_members: fn(text: String, seen: &[String: Bool]) -> String Never! {
+    raw: text.bytes()
+    out := [U8]{}
+    at := 0
+    loop at < raw.len() {
+        start := at
+        if core_group(raw, at) == .Val(group) {
+            path: text_of(raw, at + 4, group.module_end)
+            whole: text_of(raw, at, group.end)
+            members: text_of(raw, group.open + 1, group.end - 1)
+            out.extend(member_imports(whole, path, members, seen).bytes())
+            start = group.end
+        }
+        stop: next_line(raw, start)
+        copy_into(out, raw, start, stop)
+        at = stop
+    }
+    String.from_bytes(out) ?? ""
+}
+
+member_imports: fn(whole: String, path: String, members: String, seen: &[String: Bool]) -> String Never! {
+    parts: members.split(",").to_list()
+    bindings := [String]{}
+    loop part in parts {
+        name: part.trim()
+        if name == "" {
+            bindings.push("")
+            next
+        }
+        if ident_end(name.bytes(), 0) != name.bytes().len() -> return whole.copy() // copy: an unrecognized form stays as written
+        bindings.push(name)
+    }
+    removed := false
+    kept := [Bool]{}
+    loop binding in bindings {
+        if binding == "" {
+            kept.push(false)
+            next
+        }
+        key: "{path}.{binding}"
+        if seen.get(key) ?? false {
+            removed = true
+            kept.push(false)
+            next
+        }
+        seen[key] = true
+        kept.push(true)
+    }
+    if !removed -> return whole.copy() // copy: nothing repeated, the import stays as written
+    last := -1
+    loop index in 0..<kept.len() {
+        if kept[index] -> last = index
+    }
+    if last < 0 -> return blank(whole)
+    rewritten := ""
+    loop index in 0..<parts.len() {
+        piece: if kept[index] -> parts[index] else -> blank(parts[index])
+        separator: if {
+            index == parts.len() - 1 -> ""
+            kept[index] && index < last -> ","
+            else -> " "
+        }
+        rewritten = "{rewritten}{piece}{separator}"
+    }
+    "{whole.partition("[").head}[{rewritten}]"
+}
+
+// A single-line Core import: `use core.x` or `use alias: core.x`, with no `[`.
+is_core_import_line: fn(line: String) -> Bool Never! { is_core_use(line) && !line.contains("[") }
+
+// A `use core.x` or `use alias: core.x` line, member list or not.
+is_core_use: fn(line: String) -> Bool Never! {
+    raw: line.bytes()
+    if !starts_at(raw, 0, "use ") -> return false
+    at := 4
+    alias: ident_end(raw, 4)
+    if alias > 4 && starts_at(raw, alias, ": ") && starts_at(raw, alias + 2, "core.") {
+        at = alias + 2
+    }
+    starts_at(raw, at, "core.")
+}
+
+// A Core import line repeated from an earlier file (or line) is blanked.
+blank_repeated_imports: fn(text: String, seen: &[String: Bool]) -> String Never! {
+    lines := [String]{}
+    loop line in text.split("\n") {
+        if is_core_import_line(line) {
+            key: line.trim_end()
+            if seen.get(key) ?? false {
+                lines.push(blank(line))
+                next
+            }
+            seen[key] = true
+        }
+        lines.push(line)
+    }
+    lines.join("\n")
+}
+
+// The comptime inputs of the fixture unit of `entries`.
+compiler_fixture_inputs: fn(repo: String, entries: [String]) -[Env, FS]> [UnitFile] PackagesError! {
+    root: normalize_join(".", files.absolute(repo) ?? repo)
+    packages: entry_packages(repo, entries)
+    inputs := [UnitFile]{}
+    at := [String: Int]{}
+    clashes := [String]{}
+    loop path in fixture_files(repo, packages) {
+        text: files.read(files.join(repo, path)) ?? return Err(PackagesError{message: "`{path}` cannot be read: {err}"})
+        loop literal in embed_literals(text) {
+            target: normalize_join("{root}/{path.rpartition("/").head}", literal)
+            if target == "" || !files.exists(target) -> next
+            slot: at.get(literal) ?? -1
+            if slot < 0 {
+                at[literal] = inputs.len()
+                inputs.push(UnitFile{path: literal, text: target})
+                next
+            }
+            known: inputs[slot].text
+            if known != target -> clashes.push("{literal}: {known.removeprefix("{root}/")}, {target.removeprefix("{root}/")}")
+            inputs[slot] = UnitFile{path: literal, text: target}
+        }
+    }
+    if clashes.len() > 0 -> return Err(PackagesError{message: "fixture unit: {clashes.len()} comptime input name(s) resolve to more than one file:\n{clashes.join("\n")}"})
+    inputs
+}
+
+// Each literal of `embed_file("…")` or `embed_bytes("…")` in `text` (a
+// whole-word call; a literal holding `\`, `{` or `}` is no path).
+embed_literals: fn(text: String) -> [String] Never! {
+    raw: text.bytes()
+    out := [String]{}
+    at := 0
+    loop at < raw.len() {
+        open := -1
+        if starts_at(raw, at, "embed_file(\"") -> open = at + 12
+        if starts_at(raw, at, "embed_bytes(\"") -> open = at + 13
+        if open < 0 || (at > 0 && is_ident_byte(raw[at - 1])) {
+            at += 1
+            next
+        }
+        end := open
+        loop end < raw.len() && raw[end] != (U8{34}) && raw[end] != (U8{92}) && raw[end] != (U8{123}) && raw[end] != (U8{125}) -> end += 1
+        if end > open && starts_at(raw, end, "\")") {
+            out.push(text_of(raw, open, end))
+            at = end + 2
+            next
+        }
+        at += 1
+    }
+    out
+}
+
+// --- use blocks ---------------------------------------------------------------
+
+is_space: fn(b: U8) -> Bool Never! { b == (U8{32}) || b == (U8{9}) || b == (U8{10}) || b == (U8{13}) || b == (U8{11}) || b == (U8{12}) }
+
+// A `use { … }` block (#6542) rewritten as one `use` line per row, keeping
+// every line and byte offset: `use {` and its `}` turn to spaces and each
+// row's last four columns of indentation become `use `. Line-based import
+// scans then see the single-line form. `pub use { … }` blocks stay as written.
+unblock_uses: fn(text: String) -> String Never! {
+    lines := text.split("\n").to_list()
+    indent := ""
+    open := false
+    depth := 0
+    loop at in 0..<lines.len() {
+        line: lines[at]
+        if !open {
+            trimmed: line.trim_start()
+            lead: line.removesuffix(trimmed)
+            if lead.bytes().all(b -> is_space(b)) && trimmed.starts_with("use {{") && trimmed.removeprefix("use {{").trim() == "" {
+                indent = lead
+                open = true
+                lines[at] = blank(line)
+            }
+            next
+        }
+        closer: "{indent}}}"
+        if depth == 0 && line.trim_end() == closer {
+            open = false
+            lines[at] = blank(line)
+            next
+        }
+        row: "{indent}    "
+        if depth == 0 && line.starts_with(row) {
+            rest: line.removeprefix(row)
+            first: if rest.count_bytes() > 0 -> rest.bytes()[0] else -> U8{0}
+            if is_ident_start(first) || first == (U8{34}) -> lines[at] = "{indent}use {rest}"
+        }
+        code: line.partition("//").head
+        loop b in code.bytes() {
+            if b == (U8{91}) -> depth += 1
+            if b == (U8{93}) -> depth -= 1
+        }
+    }
+    lines.join("\n")
+}
+
+#Test("runtime-unit accepts only type-shaped test names and Core uses") {
+    assert(is_type_name("Alloc"))
+    assert(is_type_name("Fmt2"))
+    assert(!is_type_name("lower"))
+    assert(!is_type_name(""))
+    assert(!is_type_name("Bad-Name"))
+    assert(runtime_unit_tests([String]{"out"}) == Val([String]{}))
+    assert(runtime_unit_tests([String]{"out", "--test", "World", "--test", "Sentry"}) == Val([String]{"World", "Sentry"}))
+    assert(runtime_unit_tests([String]{"out", "--test", "World", "--test", "World"}) == None)
+    assert(runtime_unit_tests([String]{"out", "--test"}) == None)
+    assert(runtime_unit_tests([String]{"out", "--test", "lower"}) == None)
+    assert(runtime_unit_tests([String]{"out", "--tests", "World"}) == None)
+    assert(is_core_use("use core.files"))
+    assert(is_core_use("use fs: core.files"))
+    assert(is_core_use("use core.text.[Text, Rune]"))
+    assert(!is_core_use("use jet_lexer.[lex]"))
+    assert(!is_core_use("pub use core.sys"))
+}
+
+#Test("unblock_uses keeps every offset and leaves pub blocks") {
+    source: "use {{\n    jet_lexer.[\n        lex,\n    ]\n    // note\n    fs: core.files\n}}\npub use {{\n    core.sys\n}}\nm: module {{\n    use {{\n        core.term\n    }}\n}}\n"
+    flat: unblock_uses(source)
+    assert_eq(flat.count_bytes(), source.count_bytes())
+    assert_eq(flat, "     \nuse jet_lexer.[\n        lex,\n    ]\n    // note\nuse fs: core.files\n \npub use {{\n    core.sys\n}}\nm: module {{\n         \n    use core.term\n     \n}}\n")
+}
+
+#Test("a fixture unit blanks package imports and repeated Core imports in place") {
+    units: [UnitFile]{
+        UnitFile{path: "Compiler/JetFoundation/Source/Found.jet", text: "use files: core.files\nuse core.text.[Text, Rune]\nfound: fn() {{}}"},
+        UnitFile{path: "Compiler/JetFoundation/Source/More.jet", text: "use {{\n    core.text.[Rune, Glyph]\n    files: core.files\n}}\nmore: fn() {{}}\n"},
+        UnitFile{path: "Compiler/JetCli/Source/Cli.jet", text: "use jet_foundation.[found]\nuse jet_foundation.Row  \nuse files: core.files\ncli: fn() {{ found() }}\n"},
+    }
+    unit: fixture_unit(units, [String]{"jet_foundation", "jet_cli"}) ?? panic("the unit was refused: {err.message}")
+    assert(!unit.contains("use jet_foundation"))
+    assert_eq(unit.split("use files: core.files").to_list().len(), 2)
+    assert(unit.contains("use core.text.[Text, Rune]"))
+    assert(unit.contains("use core.text.[      Glyph]"))
+    assert(unit.contains("found: fn() {{}}\n     \n"))
+}
+
+#Test("a fixture unit refuses every top-level name two files declare") {
+    units: [UnitFile]{
+        UnitFile{path: "Compiler/JetFoundation/Source/Found.jet", text: "rows: fn() {{}}\nShape: struct {{}}\n"},
+        UnitFile{path: "Compiler/JetCli/Source/Cli.jet", text: "rows: fn() {{}}\npub Shape: struct {{}}\ncli: fn() {{}}\n"},
+    }
+    if fixture_unit(units, [String]{"jet_foundation", "jet_cli"}) == {
+        .Err(error) -> assert_eq(error.message, "fixture unit: 2 top-level name(s) declared in more than one file:\nrows: Compiler/JetFoundation/Source/Found.jet, Compiler/JetCli/Source/Cli.jet\nShape: Compiler/JetFoundation/Source/Found.jet, Compiler/JetCli/Source/Cli.jet")
+        .Ok(_) -> assert(false)
+    }
+}
+
+#Test("package manifests name their path dependencies") {
+    manifest: "name: \"jet_cli\"\nversion: \"0.0.1\"\ndeps: {{\n    jet_sema: ../JetSema,\n    shared: ../../Jetpack/Shared,\n    remote: \"1.2\",\n}}\n"
+    assert_eq(quoted_line(manifest, "name"), "jet_cli")
+    assert_eq(manifest_deps(manifest).join(","), "../JetSema,../../Jetpack/Shared")
+    assert_eq(manifest_deps("name: \"x\"\ndeps: {{ a: ./A, b: ../B }}\n").join(","), "")
+    assert_eq(manifest_deps("name: \"x\"\ndeps: {{ a: ./A }}\n").join(","), "./A")
+    assert_eq(normalize_join("Compiler/JetCli", "../../Jetpack/Shared"), "Jetpack/Shared")
+    assert_eq(normalize_join("Compiler", "./JetCli/."), "Compiler/JetCli")
+    assert_eq(normalize_join("Compiler", "../../x"), "")
+}
+
+#Test("the source identity hashes every compiler input and skips nested projects") {
+    repo: files.mkdtemp("packages-identity") ?? panic("a temporary directory cannot be made: {err}")
+    fixture: [String]{
+        "Compiler/package.jet", "workspace\n",
+        "Compiler/JetCli/package.jet", "name: \"jet_cli\"\ndeps: {{\n    jet_lexer: ../JetLexer,\n    remote: \"1.2\",\n}}\n",
+        "Compiler/JetCli/Source/Cli/Registry.jet", "JET_CLI_BINARY: \"jet\"\n",
+        "Compiler/JetLexer/package.jet", "name: \"jet_lexer\"\n",
+        "Compiler/JetLexer/Fixture/package.jet", "name: \"fixture\"\n",
+        "Core/Text.jet", "text: 1\n",
+        "Jetpack/PackageModel/Source/Manifest/Manifest.jet", "COMPILER_VERSION: \"0.1.0\"\n",
+    }
+    loop at in 0..<(fixture.len() /% 2) {
+        path: files.join(repo, fixture[2 * at])
+        files.create_dir_all(files.dirname(path)) ?? panic("{path}: {err}")
+        files.write(path, fixture[2 * at + 1]) ?? panic("{path}: {err}")
+    }
+    packages: compiler_packages(repo, ENTRY_PACKAGE) ?? panic(err.message)
+    roots: compiler_input_roots(packages)
+    assert_eq(roots.join(","), "Compiler/package.jet,Compiler/build.jet,Compiler/JetLexer,Compiler/JetCli,Core")
+    assert(is_compiler_input(repo, "Compiler/JetLexer/package.jet", roots))
+    assert(!is_compiler_input(repo, "Compiler/JetLexer/Fixture/package.jet", roots))
+    assert(!is_compiler_input(repo, "Compiler/JetCli/build/x.jet", roots))
+    assert(!is_compiler_input(repo, "Tools/agent/Land.jet", roots))
+    // The same tree's identity from the retired preflight-receipt.mjs.
+    assert_eq(compiler_source_identity(repo) ?? panic(err.message), "jet@0.1.0#279f8e70cba754d961303c99ddc59203a72c4255815cb9c181cfa34779113217")
+    files.remove_all(repo) ?? ()
+}
+
+#Test("comptime inputs are whole-word embed calls of plain literals") {
+    text: "a: embed_file(\"data/x.txt\")\nb: embed_bytes(\"../y.bin\")\nc: my_embed_file(\"no\")\nd: embed_file(\"{{name}}\")\n"
+    assert_eq(embed_literals(text).join(","), "data/x.txt,../y.bin")
+}

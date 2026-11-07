@@ -16,7 +16,7 @@ For each of the five layers, read its executable home and record one ledger row:
 | Clicks | Laws that already land. Celebrate them; they are findings too. |
 | Latent clicks | A law the layer almost obeys, with the exceptions that block it. |
 
-Count from registries and source, not from specs or docs. Retired, reserved, and parser-accepted-but-ignored forms count as parts with that fact attached, because a user can meet them. Probe the running binary through `Tools/agent/jet-env` whenever a count depends on behavior rather than a table. Mark a field `unknown` with a reason instead of estimating it.
+Count from registries and source, not from specs or docs. Retired, reserved, and parser-accepted-but-ignored forms count as parts with that fact attached, because a user can meet them. Probe the running binary through `Tools/agent/JetEnv.jet` whenever a count depends on behavior rather than a table. Mark a field `unknown` with a reason instead of estimating it.
 
 Diagnostics get extra attention because grouping is their whole shape: count the code shapes, the prefixes, the numeric ranges and what each range means, gaps and strays inside a range, and whether a reader can guess a code's family from its number.
 

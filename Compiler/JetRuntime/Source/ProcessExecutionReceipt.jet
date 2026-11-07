@@ -71,7 +71,7 @@ process_execution_input_digest: fn(spec: I64) -> I64 {
     digest
 }
 process_execution_mode: fn(mode: I64) -> I64 {
-    if (mode == PROCESS_STREAM_CAPTURE) -> rt_static_text("capture") else -> if (mode == HOST_PROCESS_STREAM_INHERIT) -> rt_static_text("inherit") else -> rt_static_text("stream")
+    if (mode == PROCESS_STREAM_CAPTURE) -> rt_static_text("capture") else -> if (mode == HOST_PROCESS_STREAM_INHERIT) -> rt_static_text("inherit") else -> if (mode == PROCESS_STREAM_STDOUT) -> rt_static_text("stdout") else -> rt_static_text("stream")
 }
 process_execution_decimal: fn(value: I64) -> I64 {
     text: jet_rt_string_builder_new()
@@ -141,6 +141,24 @@ process_execution_policy_digest: fn(spec: I64) -> I64 {
     process_execution_material_field(text, rt_static_text("stderr"), process_execution_mode(fd_word(spec, PROCESS_SPEC_STDERR)))
     process_execution_material_field(text, rt_static_text("detached"), if (fd_word(spec, PROCESS_SPEC_DETACHED).bit_and(I64{255}) == I64{0}) -> rt_static_text("false") else -> rt_static_text("true"))
     process_execution_material_field(text, rt_static_text("terminal"), if (fd_word(spec, PROCESS_SPEC_TERMINAL) == I64{0}) -> rt_static_text("none") else -> rt_static_text("requested"))
+    // Only a spec that pins CPUs, sets an I/O priority or asks for a memory
+    // scope adds those fields, so every other digest stays.
+    cpus: fd_word(spec, PROCESS_SPEC_CPU_AFFINITY)
+    if (cpus != I64{0}) {
+        affinity: process_execution_affinity_text(cpus)
+        process_execution_material_field(text, rt_static_text("cpu-affinity"), affinity)
+        jet_rt_string_drop(affinity)
+    }
+    io_priority: process_execution_io_priority_text(spec)
+    if (io_priority != I64{0}) {
+        process_execution_material_field(text, rt_static_text("io-priority"), io_priority)
+        jet_rt_string_drop(io_priority)
+    }
+    if (fd_word(spec, PROCESS_SPEC_MEMORY_SCOPE) != I64{0}) {
+        scope: process_execution_decimal(fd_word(spec, PROCESS_SPEC_MEMORY_SCOPE_BYTES))
+        process_execution_material_field(text, rt_static_text("memory-scope"), scope)
+        jet_rt_string_drop(scope)
+    }
     material: jet_rt_string_builder_finish(text)
     digest: process_execution_hash(material)
     jet_rt_string_drop(material)
@@ -165,6 +183,31 @@ process_execution_limits: fn(spec: I64) -> I64 {
         at += I64{1}
     }
     process_text_list_drop(keys, false)
+    // `cpu-affinity=0-3,8`, only when the spec pins CPUs.
+    cpus: fd_word(spec, PROCESS_SPEC_CPU_AFFINITY)
+    if (cpus != I64{0}) {
+        affinity: process_execution_affinity_text(cpus)
+        entry: scheduler_text_concat(rt_static_text("cpu-affinity="), affinity)
+        process_text_list_push(list, entry)
+        jet_rt_string_drop(entry)
+        jet_rt_string_drop(affinity)
+    }
+    // `io-priority=idle` or `io-priority=best-effort:N`, only when set.
+    io_priority: process_execution_io_priority_text(spec)
+    if (io_priority != I64{0}) {
+        entry: scheduler_text_concat(rt_static_text("io-priority="), io_priority)
+        process_text_list_push(list, entry)
+        jet_rt_string_drop(entry)
+        jet_rt_string_drop(io_priority)
+    }
+    // `memory-scope=<bytes>`, only when the spec asks for one.
+    if (fd_word(spec, PROCESS_SPEC_MEMORY_SCOPE) != I64{0}) {
+        scope: process_execution_decimal(fd_word(spec, PROCESS_SPEC_MEMORY_SCOPE_BYTES))
+        entry: scheduler_text_concat(rt_static_text("memory-scope="), scope)
+        process_text_list_push(list, entry)
+        jet_rt_string_drop(entry)
+        jet_rt_string_drop(scope)
+    }
     list
 }
 // Policy secret values first, then secret-named environment values.
@@ -265,7 +308,9 @@ process_execution_receipt: fn(child: I64, status: I64) -> I64 {
     // A run past its timeout is never a success, even when the child itself
     // exited 0 before a lingering descendant's output held it past the limit.
     timed_out: fd_word(child, I64{104}) != I64{0}
-    receipt: process_receipt_build(spec, fd_word(process_execution_native(child), I64{8}), code, status == I64{0} && !timed_out, signal, timed_out, output, errors, secrets)
+    native: process_execution_native(child)
+    receipt: process_receipt_build(spec, fd_word(native, I64{8}), code, status == I64{0} && !timed_out, signal, timed_out, output, errors, secrets)
+    process_receipt_usage(receipt, fd_word(native, I64{72}), fd_word(native, I64{80}), fd_word(native, I64{88}))
     jet_rt_string_drop(output)
     jet_rt_string_drop(errors)
     process_text_list_drop(secrets, false)
@@ -276,8 +321,8 @@ process_execution_receipt: fn(child: I64, status: I64) -> I64 {
 // environment secrets. An authority-bound receipt names the backend that ran it
 // and is always redacted. signal 0 is Absent.
 process_receipt_build: fn(spec: I64, pid: I64, code: I64, success: Bool, signal: I64, timed_out: Bool, output: I64, errors: I64, secrets: I64) -> I64 {
-    receipt: jet_rt_alloc(I64{144}, I64{8})
-    coll_zero(receipt, I64{144})
+    receipt: jet_rt_alloc(PROCESS_RECEIPT_BYTES, I64{8})
+    coll_zero(receipt, PROCESS_RECEIPT_BYTES)
     fd_put(receipt, I64{0}, jet_int_owned_from_i64(code))
     fd_put(receipt, I64{24}, if success -> { I64{1} } else -> { I64{0} })
     fd_put(receipt, I64{32}, if (signal != I64{0}) -> jet_int_owned_from_i64(signal) else -> INT_OPTION_NONE)
@@ -316,7 +361,21 @@ process_receipt_build: fn(spec: I64, pid: I64, code: I64, success: Bool, signal:
     fd_put(receipt, I64{120}, if (bound || fd_word(secrets, I64{0}) != I64{0}) -> { I64{1} } else -> { I64{0} })
     fd_put(receipt, I64{128}, jet_int_owned_from_i64(pid))
     fd_put(receipt, I64{136}, if timed_out -> { PROCESS_RESOURCE_WALL_TIME } else -> { INT_OPTION_NONE })
+    fd_put(receipt, I64{144}, INT_OPTION_NONE)
+    fd_put(receipt, I64{152}, INT_OPTION_NONE)
+    fd_put(receipt, I64{160}, INT_OPTION_NONE)
     receipt
+}
+// A reap's rusage on the receipt: peak_memory_bytes from ru_maxrss (KiB, the
+// largest single process) or, under a memory_scope, the scope's memory.peak
+// (all its processes together, rounded up to KiB); user_cpu_ns and
+// system_cpu_ns of the child and the descendants it waited for. A negative
+// word (not reaped here) leaves all three absent.
+process_receipt_usage: fn(receipt: I64, peak_kib: I64, user_ns: I64, system_ns: I64) {
+    if (peak_kib < I64{0} || user_ns < I64{0} || system_ns < I64{0}) -> return
+    fd_put(receipt, I64{144}, jet_int_owned_from_i64(peak_kib * I64{1024}))
+    fd_put(receipt, I64{152}, jet_int_owned_from_i64(user_ns))
+    fd_put(receipt, I64{160}, jet_int_owned_from_i64(system_ns))
 }
 // String::from_utf8 is strict in both Rust collection lanes. The scanner's
 // negative width is Utf8Error.error_len; a truncated valid prefix has None.

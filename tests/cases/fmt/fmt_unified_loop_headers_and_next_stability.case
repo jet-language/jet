@@ -8,15 +8,13 @@ env: JET_STORE_DIR={work}/cache
 env: JETPACK_ROOT={work}/jetpack
 step: jet fmt a.jet
 exit: 0 # tests/fmt.rs:3118 formats
-step: sh {work}/step-2.sh
-exit: 0 # tests/fmt.rs:3108-3114 needles kept
-stdout: ~ "next: fn()" # tests/fmt.rs:3108-3114 needles kept
-stdout: ~ "next()" # tests/fmt.rs:3108-3114 needles kept
-stdout: ~ ".next()" # tests/fmt.rs:3108-3114 needles kept
-stdout: ~ "?? (next)" # tests/fmt.rs:3108-3114 needles kept
-stdout: ~ "loop item in [1, 2, 3], 2" # tests/fmt.rs:3108-3114 needles kept
-stdout: ~ "?? next" # tests/fmt.rs:3108-3114 needles kept
-stdout: ~ "if value == 1 -> next" # tests/fmt.rs:3108-3114 needles kept
+file: a.jet ~ "next: fn()" # tests/fmt.rs:3108-3114 needles kept
+file: a.jet ~ "next()" # tests/fmt.rs:3108-3114 needles kept
+file: a.jet ~ ".next()" # tests/fmt.rs:3108-3114 needles kept
+file: a.jet ~ "?? (next)" # tests/fmt.rs:3108-3114 needles kept
+file: a.jet ~ "loop item in [1, 2, 3], 2" # tests/fmt.rs:3108-3114 needles kept
+file: a.jet ~ "?? next" # tests/fmt.rs:3108-3114 needles kept
+file: a.jet ~ "if value == 1 -> next" # tests/fmt.rs:3108-3114 needles kept
 step: jet fmt --check a.jet
 exit: 0 # tests/fmt.rs:3119-3120 stable
 step: jet fmt b1.jet

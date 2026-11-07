@@ -1,5 +1,10 @@
-// HostParallelism fixture hooks driven by HostParallelismWitness.c: the cgroup quota (I64 max = unlimited) and the online-list
-// count under a fake root. Not Core API.
+// Composed with the Jet-only runtime by the CompilerRegistries plain row
+// JetRuntime/Tests/HostParallelismTests: host_parallelism_tests builds fake
+// procfs/sysfs trees under TMPDIR, the row's own scratch, and checks the one
+// native probe against them. Expected values follow Rust std 1.96
+// library/std/src/sys/thread/unix.rs available_parallelism + cgroups::quota.
+// The hooks below are the cgroup quota (I64 max = unlimited) and the
+// online-list count under a fake root. Not Core API.
 #Export(c) jet_rt_host_cpu_quota_fixture: fn(root: I64, root_len: I64) -> I64 {
     ctx: cpu_ctx_new(root, root_len)
     quota: cpu_quota(ctx)
@@ -14,4 +19,174 @@
 }
 #Export(c) jet_rt_host_cpu_parallelism_fixture: fn(root: I64, root_len: I64) -> I64 {
     cpu_available_parallelism(root, root_len)
+}
+
+// A failed check stops the process (status 101) with what failed on stderr.
+host_parallelism_require: fn(ok: Bool, what: I64) {
+    if ok -> return
+    jet_rt_unreachable(rt_text_data(what), rt_text_len(what))
+}
+
+host_parallelism_join: fn(left: I64, separator: I64, right: I64) -> I64 {
+    text: jet_rt_string_builder_new()
+    jet_rt_string_builder_push(text, left)
+    jet_rt_string_builder_push(text, separator)
+    jet_rt_string_builder_push(text, right)
+    jet_rt_string_builder_finish(text)
+}
+
+host_parallelism_dirs: fn(path: I64, error: I64) {
+    host_parallelism_require(jet_files_create_dirs_os(path, error) == I64{1}, host_parallelism_join(rt_static_text("host parallelism: cannot create "), path, rt_static_text("")))
+}
+
+// Writes `length` bytes at `data` to root/directory/name, creating directory.
+host_parallelism_put_bytes: fn(root: I64, directory: I64, name: I64, data: I64, length: I64, error: I64) {
+    parent: host_parallelism_join(root, rt_static_text("/"), directory)
+    host_parallelism_dirs(parent, error)
+    path: host_parallelism_join(parent, rt_static_text("/"), name)
+    bytes: jet_rt_alloc(length * RT_HOST_U8_STRIDE + I64{1}, I64{8})
+    at := I64{0}
+    loop at < length {
+        host_u8_put(bytes, at, rt_text_byte(data + at))
+        at += I64{1}
+    }
+    written: jet_files_write_bytes_os(path, bytes, length, error) == I64{1}
+    jet_rt_free(bytes, length * RT_HOST_U8_STRIDE + I64{1}, I64{8})
+    host_parallelism_require(written, host_parallelism_join(rt_static_text("host parallelism: cannot write "), path, rt_static_text("")))
+}
+
+host_parallelism_put: fn(root: I64, directory: I64, name: I64, text: I64, error: I64) {
+    host_parallelism_put_bytes(root, directory, name, rt_text_data(text), rt_text_len(text), error)
+}
+
+host_parallelism_fresh: fn(base: I64, name: I64, error: I64) -> I64 {
+    root: host_parallelism_join(base, rt_static_text("/"), name)
+    host_parallelism_dirs(root, error)
+    root
+}
+
+host_parallelism_quota: fn(root: I64) -> I64 {
+    jet_rt_host_cpu_quota_fixture(rt_text_data(root), rt_text_len(root))
+}
+
+host_parallelism_expect: fn(name: I64, actual: I64, expected: I64) {
+    host_parallelism_require(actual == expected, host_parallelism_join(rt_static_text("host parallelism: "), name, rt_static_text(" differs from the expected value")))
+}
+
+// The real affinity count, read independently of sched_getaffinity from the
+// Cpus_allowed_list line of /proc/self/status and counted as an online list
+// under `root`; 0 when the line is missing.
+host_parallelism_allowed: fn(root: I64, error: I64) -> I64 {
+    ctx: cpu_ctx_new(rt_text_data(rt_static_text("")), I64{0})
+    cpu_path_set_text(ctx, rt_static_text("/proc/self/status"))
+    host_parallelism_require(cpu_read(ctx), rt_static_text("host parallelism: /proc/self/status cannot be read"))
+    data: cpu_word(wrapping(ctx + CPU_CTX_FILE))
+    length: cpu_word(wrapping(ctx + CPU_CTX_FILE_LEN))
+    key: rt_static_text("Cpus_allowed_list:")
+    count := I64{0}
+    at := I64{0}
+    loop at < length {
+        end: cpu_find(data, at, length, I64{10})
+        if (end - at >= rt_text_len(key) && rt_text_equal_bytes(wrapping(data + at), rt_text_data(key), rt_text_len(key))) {
+            value := at + rt_text_len(key)
+            loop value < end && cpu_space(rt_text_byte(wrapping(data + value))) { value += I64{1} }
+            // Keep the newline so the list reads as the sysfs file does.
+            host_parallelism_put_bytes(root, rt_static_text("sys/devices/system/cpu"), rt_static_text("online"), wrapping(data + value), end - value + I64{1}, error)
+            count = jet_rt_host_cpu_online_fixture(rt_text_data(root), rt_text_len(root))
+            break
+        }
+        at = end + I64{1}
+    }
+    cpu_ctx_drop(ctx)
+    count
+}
+
+host_parallelism_tests: fn() {
+    error: jet_rt_alloc(I64{16}, I64{8})
+    scratch: rt_env_get(rt_static_text("TMPDIR"))
+    host_parallelism_require(scratch != I64{0}, rt_static_text("host parallelism: TMPDIR names no scratch directory"))
+    base: host_parallelism_join(scratch, rt_static_text("/"), rt_static_text("jet-cpu"))
+    if (jet_std_fs_remove_all_raw(base, true, error) != I64{1}) -> jet_rt_handle_drop_io_error(rt_text_word(error))
+    root := I64{0}
+
+    // v2: limits are read from the group and every ancestor; the minimum wins.
+    root = host_parallelism_fresh(base, rt_static_text("v2"), error)
+    host_parallelism_put(root, rt_static_text("proc/self"), rt_static_text("cgroup"), rt_static_text("0::/a/b\n"), error)
+    host_parallelism_put(root, rt_static_text("sys/fs/cgroup/a/b"), rt_static_text("cgroup.controllers"), rt_static_text("cpu\n"), error)
+    host_parallelism_put(root, rt_static_text("sys/fs/cgroup/a/b"), rt_static_text("cpu.max"), rt_static_text("max 100000\n"), error)
+    host_parallelism_put(root, rt_static_text("sys/fs/cgroup/a"), rt_static_text("cpu.max"), rt_static_text("250000 100000\n"), error)
+    host_parallelism_put(root, rt_static_text("sys/fs/cgroup"), rt_static_text("cpu.max"), rt_static_text("900000 100000\n"), error)
+    host_parallelism_expect(rt_static_text("v2 ancestor minimum"), host_parallelism_quota(root), I64{2})
+
+    // v2 without cgroup.controllers is not cgroup2: unlimited.
+    root = host_parallelism_fresh(base, rt_static_text("v2-missing"), error)
+    host_parallelism_put(root, rt_static_text("proc/self"), rt_static_text("cgroup"), rt_static_text("0::/a\n"), error)
+    host_parallelism_put(root, rt_static_text("sys/fs/cgroup/a"), rt_static_text("cpu.max"), rt_static_text("100000 100000\n"), error)
+    host_parallelism_expect(rt_static_text("v2 no controllers"), host_parallelism_quota(root), CPU_UNLIMITED)
+
+    // A cpu.max with one field ends the walk (try `?`), keeping prior quota.
+    root = host_parallelism_fresh(base, rt_static_text("v2-abort"), error)
+    host_parallelism_put(root, rt_static_text("proc/self"), rt_static_text("cgroup"), rt_static_text("0::/a\n"), error)
+    host_parallelism_put(root, rt_static_text("sys/fs/cgroup/a"), rt_static_text("cgroup.controllers"), rt_static_text("cpu\n"), error)
+    host_parallelism_put(root, rt_static_text("sys/fs/cgroup/a"), rt_static_text("cpu.max"), rt_static_text("max\n"), error)
+    host_parallelism_put(root, rt_static_text("sys/fs/cgroup"), rt_static_text("cpu.max"), rt_static_text("100000 100000\n"), error)
+    host_parallelism_expect(rt_static_text("v2 malformed aborts"), host_parallelism_quota(root), CPU_UNLIMITED)
+
+    // Quota rounds down and may be 0; available_parallelism clamps it to 1.
+    root = host_parallelism_fresh(base, rt_static_text("v2-zero"), error)
+    host_parallelism_put(root, rt_static_text("proc/self"), rt_static_text("cgroup"), rt_static_text("0::/\n"), error)
+    host_parallelism_put(root, rt_static_text("sys/fs/cgroup"), rt_static_text("cgroup.controllers"), rt_static_text("cpu\n"), error)
+    host_parallelism_put(root, rt_static_text("sys/fs/cgroup"), rt_static_text("cpu.max"), rt_static_text("50000 100000\n"), error)
+    host_parallelism_expect(rt_static_text("v2 root fractional"), host_parallelism_quota(root), I64{0})
+    host_parallelism_expect(rt_static_text("clamped parallelism"), jet_rt_host_cpu_parallelism_fixture(rt_text_data(root), rt_text_len(root)), I64{1})
+
+    // v1 controller line trumps a later v2 line; cpu,cpuacct mount guess.
+    root = host_parallelism_fresh(base, rt_static_text("v1"), error)
+    host_parallelism_put(root, rt_static_text("proc/self"), rt_static_text("cgroup"), rt_static_text("4:cpu,cpuacct:/g\n0::/\n"), error)
+    host_parallelism_put(root, rt_static_text("sys/fs/cgroup/cpu,cpuacct/g"), rt_static_text("cpu.cfs_quota_us"), rt_static_text("300000\n"), error)
+    host_parallelism_put(root, rt_static_text("sys/fs/cgroup/cpu,cpuacct/g"), rt_static_text("cpu.cfs_period_us"), rt_static_text("100000\n"), error)
+    host_parallelism_put(root, rt_static_text("sys/fs/cgroup/cpu,cpuacct"), rt_static_text("cpu.cfs_quota_us"), rt_static_text("-1\n"), error)
+    host_parallelism_put(root, rt_static_text("sys/fs/cgroup/cpu,cpuacct"), rt_static_text("cpu.cfs_period_us"), rt_static_text("100000\n"), error)
+    host_parallelism_expect(rt_static_text("v1 cpu,cpuacct"), host_parallelism_quota(root), I64{3})
+
+    // v1 bind mount found through mountinfo; the bound root is trimmed.
+    root = host_parallelism_fresh(base, rt_static_text("v1-mountinfo"), error)
+    host_parallelism_put(root, rt_static_text("proc/self"), rt_static_text("cgroup"), rt_static_text("3:cpu:/docker/x\n"), error)
+    host_parallelism_put(root, rt_static_text("proc/self"), rt_static_text("mountinfo"), rt_static_text("22 1 0:20 / /proc rw - proc proc rw\n35 25 0:30 /docker /mnt/cg rw,nosuid - cgroup cgroup rw,cpu,cpuacct\n"), error)
+    host_parallelism_put(root, rt_static_text("mnt/cg/x"), rt_static_text("cpu.cfs_quota_us"), rt_static_text("150000\n"), error)
+    host_parallelism_put(root, rt_static_text("mnt/cg/x"), rt_static_text("cpu.cfs_period_us"), rt_static_text("100000\n"), error)
+    host_parallelism_expect(rt_static_text("v1 mountinfo"), host_parallelism_quota(root), I64{1})
+
+    // A malformed mountinfo line (fewer than eight fields) aborts the scan.
+    root = host_parallelism_fresh(base, rt_static_text("v1-short"), error)
+    host_parallelism_put(root, rt_static_text("proc/self"), rt_static_text("cgroup"), rt_static_text("3:cpu:/x\n"), error)
+    host_parallelism_put(root, rt_static_text("proc/self"), rt_static_text("mountinfo"), rt_static_text("1 2 3\n35 25 0:30 / /mnt/cg rw - cgroup cgroup rw,cpu\n"), error)
+    host_parallelism_put(root, rt_static_text("mnt/cg/x"), rt_static_text("cpu.cfs_quota_us"), rt_static_text("100000\n"), error)
+    host_parallelism_put(root, rt_static_text("mnt/cg/x"), rt_static_text("cpu.cfs_period_us"), rt_static_text("100000\n"), error)
+    host_parallelism_expect(rt_static_text("v1 short mountinfo"), host_parallelism_quota(root), CPU_UNLIMITED)
+
+    // No cpu controller and no v2 line, or no cgroup file at all.
+    root = host_parallelism_fresh(base, rt_static_text("none"), error)
+    host_parallelism_put(root, rt_static_text("proc/self"), rt_static_text("cgroup"), rt_static_text("2:memory:/m\n"), error)
+    host_parallelism_expect(rt_static_text("no cpu controller"), host_parallelism_quota(root), CPU_UNLIMITED)
+    root = host_parallelism_fresh(base, rt_static_text("absent"), error)
+    host_parallelism_expect(rt_static_text("no cgroup file"), host_parallelism_quota(root), CPU_UNLIMITED)
+
+    // glibc _SC_NPROCESSORS_ONLN online list.
+    root = host_parallelism_fresh(base, rt_static_text("online"), error)
+    host_parallelism_put(root, rt_static_text("sys/devices/system/cpu"), rt_static_text("online"), rt_static_text("0-3,8,10-11\n"), error)
+    host_parallelism_expect(rt_static_text("online list"), jet_rt_host_cpu_online_fixture(rt_text_data(root), rt_text_len(root)), I64{7})
+
+    // Production probe: the real affinity count under the real cgroup quota.
+    root = host_parallelism_fresh(base, rt_static_text("real"), error)
+    expected := host_parallelism_allowed(root, error)
+    host_parallelism_require(expected > I64{0}, rt_static_text("host parallelism: /proc/self/status has no Cpus_allowed_list"))
+    empty: rt_static_text("")
+    real_quota := jet_rt_host_cpu_quota_fixture(rt_text_data(empty), I64{0})
+    if (real_quota < I64{1}) { real_quota = I64{1} }
+    if (real_quota < expected) { expected = real_quota }
+    host_parallelism_expect(rt_static_text("real probe"), jet_rt_host_cpu_parallelism_fixture(rt_text_data(empty), I64{0}), expected)
+
+    host_parallelism_require(jet_std_fs_remove_all_raw(base, true, error) == I64{1}, rt_static_text("host parallelism: the scratch trees cannot be removed"))
+    jet_rt_free(error, I64{16}, I64{8})
 }

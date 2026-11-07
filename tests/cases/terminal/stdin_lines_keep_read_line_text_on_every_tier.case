@@ -1,8 +1,8 @@
 # #6444/#6541: `loop line in io.stdin().lines()` over a fresh handle (the direct read)
 # and over a kept handle (the eager line source) keeps every line's text on each
 # tier: a 70001-byte line, a `stop` break, and an invalid UTF-8 line, which
-# stops with the read error instead of growing without bound (#6541). The shell
-# redirects bad.stdin: the testkit reads a `stdin:` file as UTF-8 text. A process
+# stops with the read error instead of growing without bound (#6541). The
+# testkit feeds a `stdin:` file as its exact bytes, invalid UTF-8 included. A process
 # line source (`child.stdout.lines()`, the same lazy.line_next) stops on its
 # invalid UTF-8 line the same way, and so does a file line source
 # (`files.open(path).lines()`), which grew without bound before #6541.
@@ -23,9 +23,9 @@ limit: time=120
 exit: 0
 stdout: = stdin_lines_keep_read_line_text_on_every_tier.main-stop.out
 stderr: empty
-step main_bad_default: sh -c "exec {jet} run --quiet main.jet < {work}/bad.stdin"
+step main_bad_default: jet run --quiet main.jet
 cwd: main
-stdin: null
+stdin: {work}/bad.stdin
 limit: time=60
 exit: 70
 stdout: = stdin_lines_keep_read_line_text_on_every_tier.main-bad.out # the line before the bad one runs the body
@@ -44,9 +44,9 @@ limit: time=120
 exit: 0
 stdout: = stdin_lines_keep_read_line_text_on_every_tier.main-stop.out
 stderr: empty
-step main_bad_release: sh -c "exec {jet} run --quiet --release main.jet < {work}/bad.stdin"
+step main_bad_release: jet run --quiet --release main.jet
 cwd: main
-stdin: null
+stdin: {work}/bad.stdin
 limit: time=60
 exit: 70
 stdout: = stdin_lines_keep_read_line_text_on_every_tier.main-bad.out # the line before the bad one runs the body
@@ -65,9 +65,9 @@ limit: time=120
 exit: 0
 stdout: = stdin_lines_keep_read_line_text_on_every_tier.kept-stop.out
 stderr: empty
-step kept_bad_default: sh -c "exec {jet} run --quiet kept.jet < {work}/bad.stdin"
+step kept_bad_default: jet run --quiet kept.jet
 cwd: kept
-stdin: null
+stdin: {work}/bad.stdin
 limit: time=60
 exit: 70
 stdout: empty # the kept handle reads every line before the body runs
@@ -86,9 +86,9 @@ limit: time=120
 exit: 0
 stdout: = stdin_lines_keep_read_line_text_on_every_tier.kept-stop.out
 stderr: empty
-step kept_bad_release: sh -c "exec {jet} run --quiet --release kept.jet < {work}/bad.stdin"
+step kept_bad_release: jet run --quiet --release kept.jet
 cwd: kept
-stdin: null
+stdin: {work}/bad.stdin
 limit: time=60
 exit: 70
 stdout: empty # the kept handle reads every line before the body runs

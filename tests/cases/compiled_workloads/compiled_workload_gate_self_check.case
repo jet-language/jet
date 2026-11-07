@@ -1,6 +1,8 @@
 # Card #1414: the compiled-workload release gate must fail closed. The validator self-check must exit 0; streams are not asserted.
 requires: tool:node
 env: JET={jet}
+# The self-check takes about 19 s alone and up to 97 s under full-kit load; #6610 cuts the cost and removes this timeout.
 step: jet {root}/Tools/ci/CompiledWorkloads.jet self-check
+timeout: 180s
 env: TMPDIR={work}
 exit: 0

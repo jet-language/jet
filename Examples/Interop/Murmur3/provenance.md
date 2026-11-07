@@ -62,7 +62,7 @@ Commands were run from the repository root with
 Command:
 
 ```sh
-TMPDIR="$JET_STATE_ROOT/scratch" Tools/agent/jet-env cc -std=c11 -Wall -Wextra -Werror Examples/Interop/Murmur3/corpus/murmur3_x86_32.c Examples/Interop/Murmur3/corpus/oracle.c -o "$JET_STATE_ROOT/scratch/murmur3-oracle" && "$JET_STATE_ROOT/scratch/murmur3-oracle"
+TMPDIR="$JET_STATE_ROOT/scratch" Tools/agent/JetEnv.jet cc -std=c11 -Wall -Wextra -Werror Examples/Interop/Murmur3/corpus/murmur3_x86_32.c Examples/Interop/Murmur3/corpus/oracle.c -o "$JET_STATE_ROOT/scratch/murmur3-oracle" && "$JET_STATE_ROOT/scratch/murmur3-oracle"
 ```
 
 Exit status: `0`.
@@ -86,7 +86,7 @@ Exact stdout:
 Command:
 
 ```sh
-TMPDIR="$JET_STATE_ROOT/scratch" Tools/agent/jet-env jet test --serial --show-default Examples/Interop/Murmur3/run.jet
+TMPDIR="$JET_STATE_ROOT/scratch" Tools/agent/JetEnv.jet jet test --serial --show-default Examples/Interop/Murmur3/run.jet
 ```
 
 Result:
@@ -101,7 +101,7 @@ MurmurHash3 x86 32 vectors: pass
 Command:
 
 ```sh
-golden_actual="$JET_STATE_ROOT/scratch/murmur3-golden.out"; TMPDIR="$JET_STATE_ROOT/scratch" Tools/agent/jet-env jet run Examples/Interop/Murmur3/run.jet > "$golden_actual" && cmp "$golden_actual" Examples/Interop/Murmur3.out
+golden_actual="$JET_STATE_ROOT/scratch/murmur3-golden.out"; TMPDIR="$JET_STATE_ROOT/scratch" Tools/agent/JetEnv.jet jet run Examples/Interop/Murmur3/run.jet > "$golden_actual" && cmp "$golden_actual" Examples/Interop/Murmur3.out
 ```
 
 Result: exit status `0`; `cmp` found the run output byte-for-byte equal to the
@@ -112,7 +112,7 @@ golden file. The nine output lines are the oracle stdout above.
 Command:
 
 ```sh
-TMPDIR="$JET_STATE_ROOT/scratch" Tools/agent/jet-env jet prove Examples/Interop/Murmur3/run.jet --json
+TMPDIR="$JET_STATE_ROOT/scratch" Tools/agent/JetEnv.jet jet prove Examples/Interop/Murmur3/run.jet --json
 ```
 
 The exact machine result was `"result":"pass"` with `"exitCode":0`.
@@ -123,7 +123,7 @@ test: `"frontEnd":{"failed":0,"proved":4,"selected":4,"skipped":0}` and
 The repository-wide filtered Cargo golden harness command was also attempted:
 
 ```sh
-TMPDIR="$JET_STATE_ROOT/scratch" JET_GOLDEN_FILTER=ports/murmur3_x86_32 Tools/agent/jet-env cargo test --test golden examples_compile_and_run -- --nocapture
+TMPDIR="$JET_STATE_ROOT/scratch" JET_GOLDEN_FILTER=ports/murmur3_x86_32 Tools/agent/JetEnv.jet cargo test --test golden examples_compile_and_run -- --nocapture
 ```
 
 It did not reach the test because unrelated concurrent Cargo processes held

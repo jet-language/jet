@@ -14,7 +14,10 @@ WorkloadArgs: struct {
 run: fn(args: WorkloadArgs) {
     input: args.input
     jet: env.get("JET_CORPUS_JET") ?? panic("missing Jet CLI")
-    project := "project"
+    // The copy goes outside this adapter's package: inside it, the copied
+    // sources would be files of that package and share its namespace.
+    scratch: fs.tmpdir("jet-semantic-edit-") ?? panic("cannot create scratch directory")
+    project: "{scratch}/project"
     fs.copy_dir(input, project) ?? panic("cannot copy input project")
     object := "{project}/migration.codemod.json"
     result: process.cmd([String]{jet.copy(), "inspect", "codemod", "apply", object, "--yes"})
@@ -25,5 +28,5 @@ run: fn(args: WorkloadArgs) {
     if result.timed_out || result.code != 0 -> panic("codemod failed: {result.errors}")
     source: fs.read("{project}/project/examples/main.jet") ?? panic("cannot read edited source")
     print(source.trim())
-    fs.remove_all(project) ?? panic("cannot clean edited project")
+    fs.remove_all(scratch) ?? panic("cannot clean edited project")
 }

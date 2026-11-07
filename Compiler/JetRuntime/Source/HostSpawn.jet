@@ -1,10 +1,14 @@
-// Private mechanical ProcessSpec224, align8; NOT a public ProcessSpec alias.
+// Private mechanical ProcessSpec256, align8; NOT a public ProcessSpec alias.
 // cmd0; has_cwd8/cwd16; env_clear24; env_names32/env_values40/env_remove48;
 // has_stdin56/stdin64; stdout72/stderr80; has_timeout88/timeout96;
 // has_output_limit104/output_limit112; has_cpu120/cpu_ms128;
 // has_memory136/memory_bytes144; has_open152/open_files160; start_session168;
 // has_terminal176/terminal184; has_policy192/policy200; inherited_dirs208;
-// parent_death216 (PR_SET_PDEATHSIG in the child; process.run_all).
+// parent_death216 (PR_SET_PDEATHSIG in the child; process.run_all);
+// affinity224, the PROCESS_CPU_SET_BYTES sched_setaffinity mask or 0;
+// ioprio232, the ioprio_set value (class << 13 | level) or 0; has_scope240/
+// scope_procs248, the memory_scope's cgroup.procs descriptor the child
+// writes "0" to (borrowed: the caller closes it).
 // E4 texts and List24 [len,cap,data] headers are owned. Directory rows24:
 // retained FD72@0, target child fd@8, as_cwd@16. Terminal24: cols,rows,mode.
 // Optional absent children are zero; source prepares/validates all policy.
@@ -12,8 +16,11 @@
 // scriptFallback I64@16, searched I64@24 (Linux ignores searched), and Core's
 // NUL argv/env pointer columns. Source alone computes PATH and fallback policy.
 // no PATH search, environment read/write, authority, digest, or error policy.
-// Child72 shared carrier: mutex0,pid8,reaped16,status24,stdin32,stdout40,
-// stderr48,pty56,refs64. A native descriptor of -1 is absent/closed.
+// Child104 shared carrier: mutex0,pid8,reaped16,status24,stdin32,stdout40,
+// stderr48,pty56,refs64, and the reap's rusage: peak_rss_kib72,
+// user_cpu_ns80, system_cpu_ns88 (-1 until reaped); scope96, the owned
+// memory_scope directory text or 0, removed at the reap or the last drop.
+// A native descriptor of -1 is absent/closed.
 // shared aliases; last release closes streams. Source owns kill/reap/drop
 // cleanup policy and calls the corresponding raw operations explicitly.
 // Launch stage facts: 0 success,1 prepare,2 fork,3 cwd,4 descriptor mapping,
@@ -85,16 +92,17 @@ spawn_dirs_clone: fn(list: I64) -> I64 {
 }
 
 // Consumes only the owned child pointers in the source-built mechanical row;
-// the caller retains its 224-byte packing storage. This is not __spec_fields.
+// the caller retains its SPAWN_SPEC_BYTES packing storage. This is not __spec_fields.
+SPAWN_SPEC_BYTES: I64{256}
 #Export(c) jet_process_spec_take_raw: fn(words: I64) -> I64 {
-    spec: jet_rt_alloc(I64{224}, I64{8})
-    rt_text_bytes_copy(spec, words, I64{224})
+    spec: jet_rt_alloc(SPAWN_SPEC_BYTES, I64{8})
+    rt_text_bytes_copy(spec, words, SPAWN_SPEC_BYTES)
     spec
 }
 
 #Export(c) jet_process_spec_clone_raw: fn(spec: I64) -> I64 {
-    out: jet_rt_alloc(I64{224}, I64{8})
-    rt_text_bytes_copy(out, spec, I64{224})
+    out: jet_rt_alloc(SPAWN_SPEC_BYTES, I64{8})
+    rt_text_bytes_copy(out, spec, SPAWN_SPEC_BYTES)
     fd_put(out, I64{0}, spawn_text_list_clone(fd_word(spec, I64{0})))
     fd_put(out, I64{16}, if (fd_word(spec, I64{16}) == I64{0}) -> I64{0} else -> jet_rt_string_clone(fd_word(spec, I64{16})))
     fd_put(out, I64{32}, spawn_text_list_clone(fd_word(spec, I64{32})))
@@ -108,6 +116,12 @@ spawn_dirs_clone: fn(list: I64) -> I64 {
     }
     fd_put(out, I64{200}, if (fd_word(spec, I64{200}) == I64{0}) -> I64{0} else -> jet_rt_string_clone(fd_word(spec, I64{200})))
     fd_put(out, I64{208}, spawn_dirs_clone(fd_word(spec, I64{208})))
+    affinity: fd_word(spec, I64{224})
+    if (affinity != I64{0}) {
+        copied: jet_rt_alloc(PROCESS_CPU_SET_BYTES, I64{8})
+        rt_text_bytes_copy(copied, affinity, PROCESS_CPU_SET_BYTES)
+        fd_put(out, I64{224}, copied)
+    }
     out
 }
 
@@ -132,7 +146,9 @@ spawn_dirs_clone: fn(list: I64) -> I64 {
         }
         spawn_list_free(dirs, I64{24})
     }
-    jet_rt_free(spec, I64{224}, I64{8})
+    affinity: fd_word(spec, I64{224})
+    if (affinity != I64{0}) { jet_rt_free(affinity, PROCESS_CPU_SET_BYTES, I64{8}) }
+    jet_rt_free(spec, SPAWN_SPEC_BYTES, I64{8})
 }
 
 // Prepare a CLOEXEC pipe; each half is immediately moved above every child
@@ -168,8 +184,10 @@ spawn_close: fn(number: I64) {
     if (number >= I64{0}) { _ := host_call(I64{3}, number, I64{0}, I64{0}) }
 }
 
+SPAWN_CHILD_BYTES: I64{104}
+
 spawn_child_new: fn() -> I64 {
-    child: jet_rt_alloc(I64{72}, I64{8})
+    child: jet_rt_alloc(SPAWN_CHILD_BYTES, I64{8})
     fd_put(child, I64{0}, I64{0})
     fd_put(child, I64{8}, I64{0})
     fd_put(child, I64{16}, I64{0})
@@ -179,8 +197,15 @@ spawn_child_new: fn() -> I64 {
     fd_put(child, I64{48}, I64{-1})
     fd_put(child, I64{56}, I64{-1})
     fd_put(child, I64{64}, I64{1})
+    fd_put(child, I64{72}, I64{-1})
+    fd_put(child, I64{80}, I64{-1})
+    fd_put(child, I64{88}, I64{-1})
+    fd_put(child, I64{96}, I64{0})
     child
 }
+
+// One struct timeval (seconds, microseconds) of a struct rusage, in ns.
+spawn_timeval_ns: fn(at: I64) -> I64 { fd_word(at, I64{0}) * I64{1000000000} + fd_word(at, I64{8}) * I64{1000} }
 
 spawn_plan_close: fn(plan: I64, count: I64) {
     at := I64{0}
@@ -264,7 +289,7 @@ spawn_exec_errno_class: fn(result: I64) -> I64 {
 // Mirrors std::process's Unix fork+pre_exec path; the child shares the parent's
 // memory (spawn_vfork), so its only stores are the scratch error words and the
 // fallback argv slot this spawn owns.
-spawn_exec_child: fn(plan: I64, count: I64, child: I64, scratch: I64, err_read: I64, err_write: I64, candidates: I64, argv: I64, envp: I64, fallback_argv: I64, cwd: I64, dirs: I64, session: Bool, terminal: Bool, cpu: Bool, memory: Bool, files: Bool, parent: I64) {
+spawn_exec_child: fn(plan: I64, count: I64, child: I64, scratch: I64, err_read: I64, err_write: I64, candidates: I64, argv: I64, envp: I64, fallback_argv: I64, cwd: I64, dirs: I64, session: Bool, terminal: Bool, cpu: Bool, memory: Bool, files: Bool, parent: I64, affinity: I64, ioprio: I64, scope: I64) {
     spawn_close(err_read)
     spawn_close(fd_word(child, I64{32}))
     spawn_close(fd_word(child, I64{40}))
@@ -334,6 +359,17 @@ spawn_exec_child: fn(plan: I64, count: I64, child: I64, scratch: I64, err_read: 
         if (result >= I64{0} && files) {
             result = host_call(I64{160}, I64{7}, wrapping(scratch + I64{48}), I64{0})
         }
+        if (result >= I64{0} && affinity != I64{0}) {
+            result = host_call(I64{203}, I64{0}, PROCESS_CPU_SET_BYTES, affinity)
+        }
+        // ioprio_set(IOPRIO_WHO_PROCESS, this process, ioprio).
+        if (result >= I64{0} && ioprio != I64{0}) {
+            result = host_call(I64{251}, I64{1}, I64{0}, ioprio)
+        }
+        // Joins the memory_scope's main leaf: "0" names the writer.
+        if (result >= I64{0} && scope >= I64{0}) {
+            result = host_call(I64{1}, scope, rt_text_data(rt_static_text("0")), I64{1})
+        }
     }
     if (result >= I64{0}) {
         stage = I64{5}
@@ -380,13 +416,16 @@ SPAWN_CHILD_STACK: I64{131072}
 // Checked FunctionAddress intrinsic in the canonical RuntimeLibrary table.
 rt_process_spawn_child_address: fn() -> I64 { loop { jet_rt_unreachable(I64{0}, I64{0}) } }
 
-// The child entry of spawn_vfork, on its own stack. Block192: the 18
-// spawn_exec_child arguments at 0..136 (Bools as 0/1 words), all-signals
-// mask 144, the parent's saved mask 152, one kernel sigaction 160..192.
-// Like glibc's __spawni_child: every caught handler becomes SIG_DFL before
-// the parent's mask returns, so no parent handler runs on the shared memory.
+// The child entry of spawn_vfork, on its own stack. Block: the all-signals
+// mask 0, the parent's saved mask 8, one kernel sigaction 16..48, then the
+// spawn_exec_child arguments from SPAWN_BLOCK_ARGS, a word each (Bools as
+// 0/1). Like glibc's __spawni_child: every caught handler becomes SIG_DFL
+// before the parent's mask returns, so no parent handler runs on the shared
+// memory.
+SPAWN_BLOCK_ARGS: I64{48}
+SPAWN_BLOCK_BYTES: I64{216}
 #Export(c) jet_rt_process_spawn_child: fn(block: I64) -> I64 {
-    action: wrapping(block + I64{160})
+    action: wrapping(block + I64{16})
     signal := I64{1}
     loop signal <= (I64{64}) {
         if (signal != I64{9} && signal != I64{19}) {
@@ -401,9 +440,10 @@ rt_process_spawn_child_address: fn() -> I64 { loop { jet_rt_unreachable(I64{0}, 
         signal = wrapping(signal + I64{1})
     }
     #Unsafe("rt_sigprocmask reads the parent's saved mask word in this spawn's block") {
-        _ := os_syscall_i64(I64{14}, I64{2}, wrapping(block + I64{152}), I64{0}, I64{8}, I64{0}, I64{0})
+        _ := os_syscall_i64(I64{14}, I64{2}, wrapping(block + I64{8}), I64{0}, I64{8}, I64{0}, I64{0})
     }
-    spawn_exec_child(fd_word(block, I64{0}), fd_word(block, I64{8}), fd_word(block, I64{16}), fd_word(block, I64{24}), fd_word(block, I64{32}), fd_word(block, I64{40}), fd_word(block, I64{48}), fd_word(block, I64{56}), fd_word(block, I64{64}), fd_word(block, I64{72}), fd_word(block, I64{80}), fd_word(block, I64{88}), fd_word(block, I64{96}) != I64{0}, fd_word(block, I64{104}) != I64{0}, fd_word(block, I64{112}) != I64{0}, fd_word(block, I64{120}) != I64{0}, fd_word(block, I64{128}) != I64{0}, fd_word(block, I64{136}))
+    args: wrapping(block + SPAWN_BLOCK_ARGS)
+    spawn_exec_child(fd_word(args, I64{0}), fd_word(args, I64{8}), fd_word(args, I64{16}), fd_word(args, I64{24}), fd_word(args, I64{32}), fd_word(args, I64{40}), fd_word(args, I64{48}), fd_word(args, I64{56}), fd_word(args, I64{64}), fd_word(args, I64{72}), fd_word(args, I64{80}), fd_word(args, I64{88}), fd_word(args, I64{96}) != I64{0}, fd_word(args, I64{104}) != I64{0}, fd_word(args, I64{112}) != I64{0}, fd_word(args, I64{120}) != I64{0}, fd_word(args, I64{128}) != I64{0}, fd_word(args, I64{136}), fd_word(args, I64{144}), fd_word(args, I64{152}), fd_word(args, I64{160}))
     I64{0}
 }
 
@@ -414,43 +454,49 @@ spawn_flag_word: fn(flag: Bool) -> I64 { if flag -> I64{1} else -> I64{0} }
 // only this thread waits until the child's execve or exit. All signals stay
 // blocked in the parent across the clone so none is taken in the child before
 // its handlers are reset. `parent_death` arms PR_SET_PDEATHSIG in the child
-// against this process (its pid read before the clone). The pid, or a
-// negative errno.
-spawn_vfork: fn(plan: I64, count: I64, child: I64, scratch: I64, err_read: I64, err_write: I64, candidates: I64, argv: I64, envp: I64, fallback_argv: I64, cwd: I64, dirs: I64, session: Bool, terminal: Bool, cpu: Bool, memory: Bool, files: Bool, parent_death: Bool) -> I64 {
+// against this process (its pid read before the clone); a nonzero `affinity`
+// mask is the child's sched_setaffinity set, a nonzero `ioprio` its
+// ioprio_set value, and a `scope` descriptor >= 0 the memory_scope
+// cgroup.procs it joins. The pid, or a negative errno.
+spawn_vfork: fn(plan: I64, count: I64, child: I64, scratch: I64, err_read: I64, err_write: I64, candidates: I64, argv: I64, envp: I64, fallback_argv: I64, cwd: I64, dirs: I64, session: Bool, terminal: Bool, cpu: Bool, memory: Bool, files: Bool, parent_death: Bool, affinity: I64, ioprio: I64, scope: I64) -> I64 {
     stack: alloc_map_try(SPAWN_CHILD_STACK)
     if (stack == I64{0}) -> return I64{-12}
-    block: jet_rt_alloc(I64{192}, I64{8})
-    fd_put(block, I64{0}, plan)
-    fd_put(block, I64{8}, count)
-    fd_put(block, I64{16}, child)
-    fd_put(block, I64{24}, scratch)
-    fd_put(block, I64{32}, err_read)
-    fd_put(block, I64{40}, err_write)
-    fd_put(block, I64{48}, candidates)
-    fd_put(block, I64{56}, argv)
-    fd_put(block, I64{64}, envp)
-    fd_put(block, I64{72}, fallback_argv)
-    fd_put(block, I64{80}, cwd)
-    fd_put(block, I64{88}, dirs)
-    fd_put(block, I64{96}, spawn_flag_word(session))
-    fd_put(block, I64{104}, spawn_flag_word(terminal))
-    fd_put(block, I64{112}, spawn_flag_word(cpu))
-    fd_put(block, I64{120}, spawn_flag_word(memory))
-    fd_put(block, I64{128}, spawn_flag_word(files))
-    fd_put(block, I64{136}, if parent_death -> host_call(I64{39}, I64{0}, I64{0}, I64{0}) else -> I64{0})
-    fd_put(block, I64{144}, I64{-1})
-    fd_put(block, I64{152}, I64{0})
+    block: jet_rt_alloc(SPAWN_BLOCK_BYTES, I64{8})
+    fd_put(block, I64{0}, I64{-1})
+    fd_put(block, I64{8}, I64{0})
+    args: wrapping(block + SPAWN_BLOCK_ARGS)
+    fd_put(args, I64{0}, plan)
+    fd_put(args, I64{8}, count)
+    fd_put(args, I64{16}, child)
+    fd_put(args, I64{24}, scratch)
+    fd_put(args, I64{32}, err_read)
+    fd_put(args, I64{40}, err_write)
+    fd_put(args, I64{48}, candidates)
+    fd_put(args, I64{56}, argv)
+    fd_put(args, I64{64}, envp)
+    fd_put(args, I64{72}, fallback_argv)
+    fd_put(args, I64{80}, cwd)
+    fd_put(args, I64{88}, dirs)
+    fd_put(args, I64{96}, spawn_flag_word(session))
+    fd_put(args, I64{104}, spawn_flag_word(terminal))
+    fd_put(args, I64{112}, spawn_flag_word(cpu))
+    fd_put(args, I64{120}, spawn_flag_word(memory))
+    fd_put(args, I64{128}, spawn_flag_word(files))
+    fd_put(args, I64{136}, if parent_death -> host_call(I64{39}, I64{0}, I64{0}, I64{0}) else -> I64{0})
+    fd_put(args, I64{144}, affinity)
+    fd_put(args, I64{152}, ioprio)
+    fd_put(args, I64{160}, scope)
     entry: wrapping(stack + SPAWN_CHILD_STACK - I64{16})
     fd_put(entry, I64{0}, rt_process_spawn_child_address())
     fd_put(entry, I64{8}, block)
     pid := I64{-1}
     #Unsafe("mprotect makes the lowest page of this spawn's fresh mapping the guard; the masks are words of this spawn's block; the child runs only jet_rt_process_spawn_child on the mapped stack and leaves through execve or exit_group before the parent resumes") {
         _ := os_syscall_i64(I64{10}, stack, I64{4096}, I64{0}, I64{0}, I64{0}, I64{0})
-        _ := os_syscall_i64(I64{14}, I64{2}, wrapping(block + I64{144}), wrapping(block + I64{152}), I64{8}, I64{0}, I64{0})
+        _ := os_syscall_i64(I64{14}, I64{2}, block, wrapping(block + I64{8}), I64{8}, I64{0}, I64{0})
         pid = os_clone_i64(I64{16657}, entry, I64{0}, I64{0})
-        _ := os_syscall_i64(I64{14}, I64{2}, wrapping(block + I64{152}), I64{0}, I64{8}, I64{0}, I64{0})
+        _ := os_syscall_i64(I64{14}, I64{2}, wrapping(block + I64{8}), I64{0}, I64{8}, I64{0}, I64{0})
     }
-    jet_rt_free(block, I64{192}, I64{8})
+    jet_rt_free(block, SPAWN_BLOCK_BYTES, I64{8})
     alloc_unmap(stack, SPAWN_CHILD_STACK)
     pid
 }
@@ -511,13 +557,26 @@ spawn_vfork: fn(plan: I64, count: I64, child: I64, scratch: I64, err_read: I64, 
         loop index < (I64{3}) {
             mode: fd_word(spec, wrapping(I64{64} + index * I64{8}))
             target: wrapping(plan + index * I64{16})
-            // Null=3 is private prepared transport data, not a public enum arm.
-            if ((index == I64{0} && fd_word(spec, I64{56}) == I64{0}) || mode == I64{3}) {
+            // PROCESS_STREAM_NULL is private prepared transport data, not a public enum arm.
+            if ((index == I64{0} && fd_word(spec, I64{56}) == I64{0}) || mode == PROCESS_STREAM_NULL) {
                 fd_put(scratch, I64{96}, I64{7815273878500238383})
                 fd_put(scratch, I64{104}, I64{108})
                 null_fd: host_call(I64{2}, wrapping(scratch + I64{96}), I64{524288}.bit_or((if (index == I64{0}) -> I64{0} else -> I64{1})), I64{0})
                 copied: if (null_fd < I64{0}) -> null_fd else -> host_call(I64{72}, null_fd, I64{1030}, minimum)
                 spawn_close(null_fd)
+                if (copied < I64{0}) {
+                    failure = copied
+                    break
+                }
+                fd_put(target, I64{0}, copied)
+                fd_put(target, I64{8}, index)
+            } else if (mode == PROCESS_STREAM_STDOUT) {
+                // Merged output (stderr only; launch refuses it elsewhere): the
+                // child's stderr is a copy of what its stdout became, the
+                // stdout plan entry's descriptor, else the inherited fd 1, so
+                // both streams share one file description in write order.
+                stdout_source: fd_word(plan, I64{16})
+                copied: host_call(I64{72}, if (stdout_source >= I64{0}) -> stdout_source else -> I64{1}, I64{1030}, minimum)
                 if (copied < I64{0}) {
                     failure = copied
                     break
@@ -595,7 +654,7 @@ spawn_vfork: fn(plan: I64, count: I64, child: I64, scratch: I64, err_read: I64, 
     stage := fd_word(scratch, I64{64})
     if (failure == I64{0}) {
         jet_rt_stdout_flush()
-        pid = spawn_vfork(plan, count, child, scratch, err_read, err_write, candidates, argv, envp, fallback_argv, cwd, dirs, session, terminal, cpu, memory, files, fd_word(spec, I64{216}) != I64{0})
+        pid = spawn_vfork(plan, count, child, scratch, err_read, err_write, candidates, argv, envp, fallback_argv, cwd, dirs, session, terminal, cpu, memory, files, fd_word(spec, I64{216}) != I64{0}, fd_word(spec, I64{224}), fd_word(spec, I64{232}), if (fd_word(spec, I64{240}) != I64{0}) -> fd_word(spec, I64{248}) else -> I64{-1})
         if (pid < I64{0}) {
             failure = pid
             stage = I64{2}
@@ -644,7 +703,7 @@ spawn_vfork: fn(plan: I64, count: I64, child: I64, scratch: I64, err_read: I64, 
         spawn_close(fd_word(child, I64{40}))
         spawn_close(fd_word(child, I64{48}))
         spawn_close(fd_word(child, I64{56}))
-        jet_rt_free(child, I64{72}, I64{8})
+        jet_rt_free(child, SPAWN_CHILD_BYTES, I64{8})
     }
     jet_rt_free(scratch, I64{128}, I64{8})
     host_error_out(failure, stage, error)
@@ -669,11 +728,17 @@ spawn_vfork: fn(plan: I64, count: I64, child: I64, scratch: I64, err_read: I64, 
         sync_mutex_unlock(child)
         return
     }
+    // A memory_scope never reaped ends with its last handle.
+    scope: fd_word(child, I64{96})
+    if (scope != I64{0}) {
+        process_scope_remove(scope)
+        jet_rt_string_drop(scope)
+    }
     spawn_close(fd_word(child, I64{32}))
     spawn_close(fd_word(child, I64{40}))
     spawn_close(fd_word(child, I64{48}))
     spawn_close(fd_word(child, I64{56}))
-    jet_rt_free(child, I64{72}, I64{8})
+    jet_rt_free(child, SPAWN_CHILD_BYTES, I64{8})
 }
 
 #Export(c) jet_process_id_raw: fn(child: I64) -> I64 { fd_word(child, I64{8}) }
@@ -701,18 +766,38 @@ spawn_vfork: fn(plan: I64, count: I64, child: I64, scratch: I64, err_read: I64, 
         fd_put(child, I64{16}, I64{-1})
         sync_mutex_unlock(child)
         fd_put(status, I64{0}, I64{0})
+        usage: jet_rt_alloc(I64{144}, I64{8})
         result := I64{0}
         loop {
-            result = host_call(I64{61}, pid, status, if nohang -> I64{1} else -> I64{0})
+            result = host_call4(I64{61}, pid, status, if nohang -> I64{1} else -> I64{0}, usage)
             if (result != I64{-4}) { break }
+        }
+        // The reaping thread alone holds the scope (reaped is -1): the
+        // scope's memory.peak, all its processes together, replaces the
+        // child's own maxrss, then whatever still runs in it is killed.
+        peak_kib := I64{-1}
+        scope: fd_word(child, I64{96})
+        if (result > I64{0} && scope != I64{0}) {
+            fd_put(child, I64{96}, I64{0})
+            scope_peak: process_scope_peak(scope)
+            if (scope_peak >= I64{0}) {
+                peak_kib = scope_peak /% I64{1024}
+                if (scope_peak.bit_and(I64{1023}) != I64{0}) -> peak_kib += I64{1}
+            }
+            process_scope_remove(scope)
+            jet_rt_string_drop(scope)
         }
         sync_mutex_lock(child)
         if (result > I64{0}) {
             fd_put(child, I64{24}, fd_word(status, I64{0}).bit_and(I64{4294967295}))
             compiler_process_record_exit_status(pid, fd_word(child, I64{24}))
+            fd_put(child, I64{72}, if (peak_kib >= I64{0}) -> peak_kib else -> fd_word(usage, I64{32}))
+            fd_put(child, I64{80}, spawn_timeval_ns(usage))
+            fd_put(child, I64{88}, spawn_timeval_ns(wrapping(usage + I64{16})))
             fd_put(child, I64{16}, I64{1})
         } else { fd_put(child, I64{16}, I64{0}) }
         sync_mutex_unlock(child)
+        jet_rt_free(usage, I64{144}, I64{8})
         sync_wake(wrapping(child + I64{16}), I64{2147483647})
         return fd_error(result, error)
     }

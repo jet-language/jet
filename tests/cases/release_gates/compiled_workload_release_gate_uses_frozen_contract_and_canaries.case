@@ -29,7 +29,9 @@ file: gate.jet ~ "target_artifact_proof: fn(" # Original runner.contains targetA
 file: gate.jet ~ "JET_STORE_DIR" # Original runner.contains.
 file: gate.jet ~ ".jet" # Original runner.contains.
 env: JET={jet}
+# Takes about 25 s alone and over 60 s under full-kit load; #6610 cuts the cost and removes this timeout.
 step: jet {root}/Tools/ci/CompiledWorkloads.jet run --measurement-registry
+timeout: 180s
 exit: 0
 stdout: ~ "\"linux\"" # Original measurement-registry contains.
 stdout: ~ "\"macos\"" # Original measurement-registry contains.
@@ -46,4 +48,5 @@ end for
 copy: {root}/tests/cases/compiled_workloads/compiled_workload_gate_self_check.case self-check.case
 file: self-check.case ~ "Tools/ci/CompiledWorkloads.jet self-check" # Original suites.txt registers the gate self-check.
 step: jet {root}/Tools/ci/CompiledWorkloads.jet --contract
+timeout: 180s
 exit: 0

@@ -10,7 +10,8 @@ step: jet build browser_bidi_cdp_hostile.jet
 exit: 0
 session no_cdp raw: node {root}/tests/fixtures/browser_bidi_mock.mjs hostile-no-cdp {free-port:no_cdp}
 session cdp_hostile raw: node {root}/tests/fixtures/browser_bidi_mock.mjs script {free-port:cdp_hostile} cdp_hostile.json
-sleep: 500ms
+await: file hostile-no-cdp.ready timeout 30s
+await: file cdp_hostile.ready timeout 30s
 step run: built
 exit: 0
 stdout: = native_bidi_checked_expert_cdp_rejects_missing_capability_and_hostile_wire.1.out

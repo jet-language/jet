@@ -24,11 +24,15 @@ build_test_restore_env: fn(name: String, previous: String?) -[Env]> {
 // builtins only.
 BUILD_TEST_COPY_SCRIPT: "read -r line < input.txt; printf %s \"$line\" > out.txt"
 
-// A fixture that exercises the native boundary fails when the backend is
-// missing; it never passes without running anything.
-build_test_require_sandbox: fn() -[FS, Env, Exec, Time.Wait]> {
+// A fixture that exercises the native boundary needs the backend: false once
+// the claim reports SKIP-HOST for the backend's absent tool (Linux runs it
+// under bubblewrap), so the claim ends there. A present backend that fails its
+// probe fails the claim; it never passes without running anything.
+build_test_require_sandbox: fn() -[FS, Env, Exec, Time.Wait]> Bool {
+    if sys.is_linux() && kit_require_tool("bwrap") == None -> return false
     status: foundation_native_sandbox_status()
     if !status.available -> panic("this fixture needs the native sandbox backend ({status.mechanism}): {status.reason}")
+    true
 }
 
 // Rust `delayed_descendant_script`: a background descendant that holds the
@@ -160,9 +164,16 @@ build_test_plan: fn(caps: [BuildEffect], script: String) -[Rand]> HermeticBuildP
     assert(!files.exists(files.join(root, "out.txt")))
     assert(build_native_sandbox_error(plan.actions[0], NativeSandboxError.Unsupported("x")) == BuildExecutionError.SandboxUnavailable)
     assert(build_native_sandbox_error(plan.actions[0], NativeSandboxError.IO("disk")) == BuildExecutionError.IO{action: "write", detail: "disk"})
-    // The allowed neighbour: with the native backend available the same plan
-    // runs and publishes only its declared output.
-    build_test_require_sandbox()
+    files.remove_all(root).drop("test cleanup")
+}
+
+// The allowed neighbour of the refusal above, which needs the native backend.
+#Test("no unsandboxed fallback: with the backend available the same action runs and publishes only its declared output") {
+    if !build_test_require_sandbox() -> return
+    root: build_test_root("available")
+    files.write(files.join(root, "input.txt"), "input") ?? panic("input")
+    store: BuildArtifactStoreHandle.at(files.join(root, ".jet-store")) ?? panic("store")
+    plan: build_test_plan([BuildEffect]{BuildEffect.Exec}, BUILD_TEST_COPY_SCRIPT)
     result: build_execute_build_plan(plan, root, store, [BuildEffect]{BuildEffect.Exec}) ?? panic("sandboxed action should run")
     assert_eq(result.report.metrics.actions_total, 1)
     assert_eq(files.read(files.join(root, "out.txt")) ?? panic("declared output"), "input")
@@ -503,7 +514,7 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
 }
 
 #Test("action timeout: a child inside its budget completes, one past it is killed, and a pipe-holding descendant is reaped on both paths") {
-    build_test_require_sandbox()
+    if !build_test_require_sandbox() -> return
     root: build_test_root("timeout")
     bash: build_find_program_path("bash") ?? panic("bash is required for the sandbox descendant fixtures")
     exit_started: time.instant()
@@ -522,7 +533,7 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
 }
 
 #Test("probe budget: a probe inside its budget completes, one past it is killed and fails") {
-    build_test_require_sandbox()
+    if !build_test_require_sandbox() -> return
     bash: build_find_program_path("bash") ?? panic("bash is required for the sandbox probe fixture")
     quick: build_run_probe_sandboxed(bash, [String]{"-c", "exit 0"}, None, time.duration_ms(5000)) ?? panic("quick probe")
     assert(quick.success)

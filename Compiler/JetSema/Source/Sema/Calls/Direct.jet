@@ -398,7 +398,11 @@ sema_call_check_ambient_close: fn(call: Call, environment: SemaScopeEnvironment,
             return None
         }
     }
-    if !sema_stmt_move_direct(argument.expr, state, scopes, "`close`", diagnostics) -> return None
+    // `close(name)` consumes the owner exactly, like a `&&` argument: a later
+    // use of `name` is E0121 and never turns the move into a hidden copy.
+    exact: sema_ownership_unmarked_moves_name(argument.expr)
+    moved: if exact -> sema_ownership_mark_move(state, argument.expr, scopes, "`close`", diagnostics) else -> sema_stmt_move_direct(argument.expr, state, scopes, "`close`", diagnostics)
+    if !moved -> return None
     Val(sema_tree_node(Type.Named{name: "Unit"}, TExprKind.Close{value: value}, call.name_span))
 }
 
@@ -961,6 +965,7 @@ sema_call_core_direct_checked: fn(call: Call, expected: Type?, environment: Sema
     if sema_call_core_math_exact_crossing(module_name, member, call.args, environment, program, scopes, state, tail_store, context) == .Val(crossed) {
         return sema_call_try_core_direct_call(Call{name: call.name, name_span: call.name_span, type_args: call.type_args, args: crossed}, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     }
+    sema_call_core_unbuilt_note(module_name, member, call.name_span, environment, program, unbuilt)
     guard := sema_call_try_scope_guard(module_name, member, alias, call.name_span, call.args, call.name_span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if guard.handled -> return guard
     ui := sema_call_try_ui_core_call(module_name, member, alias, call.name_span, call.args, call.type_args, call.name_span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
@@ -980,7 +985,6 @@ sema_call_core_direct_checked: fn(call: Call, expected: Type?, environment: Sema
     }
     if sema_call_core_crypto_expert_gate(module_name, member, call.name_span, context, diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
     if sema_call_core_vault_build_time_gate(module_name, member, call.name_span, scopes, environment.function_name, diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
-    sema_call_core_unbuilt_note(module_name, member, call.name_span, environment, program, unbuilt)
     if sema_call_core_variadic_print(environment, program, scopes, alias, member, call.args.len(), call.name_span, context) -> return sema_call_check_ambient_print(call, environment, program, scopes, state, tail_store, context, diagnostics)
     diagnostics_before := diagnostics.len()
     route := sema_call_core_resolve_import_route(environment, program, scopes, alias, member, call.type_args, call.args.len(), sema_call_core_configured_client(call.args), call.name_span, call.name_span, context, diagnostics)
@@ -1483,6 +1487,17 @@ sema_call_direct_checked_from_target: fn(state: &SemaOwnershipState, target: Sem
     }
     result_type_raw: sema_call_signature_return(candidate.signature) ?? return None
     result_type: sema_call_resolved_type(result_type_raw, environment, program)
+    // E2104: a C import whose convention or values the native backend has no
+    // C ABI marshalling for yet (#6366) is refused by a compile that lowers
+    // the call, instead of stopping inside the IR.
+    if abi == .Val(callable_abi) && callable_abi.is_c_abi && !environment.module_identity.starts_with("<corelib>/") && sema_refuses_unbuilt(program) {
+        if program.registration_graph == .Val(graph) {
+            if sema_checked_foreign_c_marshal_gap(graph, candidate.symbol.id) == .Val(gap) {
+                diagnostics.push(sema_error("E2104", call.name_span, "calling `{call.name}` is not built yet", "This `jet` cannot yet {gap}, and no other `jet` can build it.", "Remove the `{call.name}` call for now; native C ABI marshalling for it needs its Jet implementation first (card #6366)."))
+                return None
+            }
+        }
+    }
     contract_bindings := [TStmt]{}
     contract_nodes := [TContract]{}
     // The callee's declaration is copied only when it has `pre` clauses.

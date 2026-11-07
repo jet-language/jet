@@ -4,6 +4,7 @@
 use {
     dyn_surface_files: core.files
     jet_lexer.[lex, Token, TokenTables, TOKEN_IDENT, STRING_PART_INTERPOLATION, token_decoded]
+    guards.[guards_enter_root]
 }
 
 DYN_SURFACE_PATHS: [String]{
@@ -178,6 +179,7 @@ dyn_surface_historical: fn(line: String) -> Bool {
 }
 
 #Test("dynamic_encoding_surface_uses_dyn_name") {
+    guards_enter_root()
     failures := [String]{}
     loop path in DYN_SURFACE_PATHS {
         text: dyn_surface_files.read(path) ?? panic("cannot read Dyn inventory surface {path}")
@@ -197,6 +199,7 @@ dyn_surface_historical: fn(line: String) -> Bool {
 }
 
 #Test("dyn_name_check_distinguishes_prose_and_type_names") {
+    guards_enter_root()
     lawful_rows: [String]{"| `conn.send_text(text)` | Data frames; client frames are masked |", "| Data ownership | Official UCD inputs are checked in. |"}
     loop lawful in lawful_rows -> assert(dyn_surface_markdown_lines(lawful, "Data").is_empty(), lawful)
     prohibited_spans: [String]{"`Data.Object`", "`[Data]`", "`Data?`"}

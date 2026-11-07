@@ -13,9 +13,19 @@ files_write_fault: fn(path: I64, operation: I64, error: I64) -> Bool {
 
 files_writer_path: fn(writer: I64) -> I64 { fd_word(writer, I64{24}) }
 
-// A held-directory member must be a regular file.
+// A held-directory member must be a regular file. A raw entry name that is
+// not UTF-8 is shown, in the reader's path and every error, as
+// fs_name_display shows it.
 #Export(c) jet_std_files_open_reader: fn(handle: I64, name: I64, links: I64, output: I64, error: I64) -> I64 {
-    if compiler_fs_fault(name, error) -> return I64{0}
+    display: fs_name_display(name)
+    shown: if (display == I64{0}) -> name else -> display
+    result: files_open_reader_shown(handle, name, shown, links, output, error)
+    if (display != I64{0}) -> jet_rt_string_drop(display)
+    result
+}
+
+files_open_reader_shown: fn(handle: I64, name: I64, shown: I64, links: I64, output: I64, error: I64) -> I64 {
+    if compiler_fs_fault(shown, error) -> return I64{0}
     fd: fs_open_at(handle, name, I64{0}, I64{0}, I64{-1}, links, error)
     if (fd < I64{0}) -> return I64{0}
     if (handle >= I64{0}) {
@@ -28,33 +38,59 @@ files_writer_path: fn(writer: I64) -> I64 { fd_word(writer, I64{24}) }
         jet_rt_free(facts, I64{128}, I64{8})
         if (result < I64{0}) {
             _ := host_call(I64{3}, fd, I64{0}, I64{0})
-            return compiler_fs_errno(HOST_IO_OP_READ, name, -result, error)
+            return compiler_fs_errno(HOST_IO_OP_READ, shown, -result, error)
         }
         if ((mode.bit_and(I64{61440})) != I64{32768}) {
             _ := host_call(I64{3}, fd, I64{0}, I64{0})
-            return compiler_fs_error(HOST_IO_KIND_INVALID_INPUT, HOST_IO_OP_READ, name, I64{0}, jet_rt_string_clone(rt_static_text("not a regular file; use open_directory for a directory")), error)
+            return compiler_fs_error(HOST_IO_KIND_INVALID_INPUT, HOST_IO_OP_READ, shown, I64{0}, jet_rt_string_clone(rt_static_text("not a regular file; use open_directory for a directory")), error)
         }
     }
-    rt_text_store(output, fd_new(fd, name, false))
+    rt_text_store(output, fd_new(fd, shown, false))
     I64{1}
 }
 
 // Fault, then the mapped-path refusal for a path open, then access 2 (append)
-// or 1 (truncate).
+// or 1 (truncate). A raw entry name shows as in jet_std_files_open_reader.
 #Export(c) jet_std_files_open_writer: fn(handle: I64, name: I64, append: Bool, if_exists: I64, mode: I64, links: I64, output: I64, error: I64) -> I64 {
-    if files_write_fault(name, HOST_IO_OP_WRITE, error) -> return I64{0}
-    if (handle < I64{0} && jet_std_files_writer_refusal(name, error) != I64{0}) -> return I64{0}
-    fd: fs_open_at(handle, name, if append -> I64{2} else -> I64{1}, if_exists, mode, links, error)
-    if (fd < I64{0}) -> return I64{0}
-    rt_text_store(output, fd_new(fd, name, true))
-    I64{1}
+    display: fs_name_display(name)
+    shown: if (display == I64{0}) -> name else -> display
+    result := I64{0}
+    if !files_write_fault(shown, HOST_IO_OP_WRITE, error) && !(handle < I64{0} && jet_std_files_writer_refusal(name, error) != I64{0}) {
+        fd: fs_open_at(handle, name, if append -> I64{2} else -> I64{1}, if_exists, mode, links, error)
+        if (fd >= I64{0}) {
+            rt_text_store(output, fd_new(fd, shown, true))
+            result = I64{1}
+        }
+    }
+    if (display != I64{0}) -> jet_rt_string_drop(display)
+    result
+}
+
+// The `_raw` opens (Core's Directory.open_raw and create_raw): the entry name
+// arrives as its exact bytes, which need not be UTF-8, is a runtime text only
+// for the call, and shows as fs_name_display shows it. A final link is
+// refused (links 1), never followed.
+#Export(c) jet_std_files_open_reader_raw: fn(handle: I64, data: I64, length: I64, output: I64, error: I64) -> I64 {
+    name: jet_raw_bytes_into_text(data, length)
+    result: jet_std_files_open_reader(handle, name, I64{1}, output, error)
+    jet_rt_string_drop(name)
+    result
+}
+
+#Export(c) jet_std_files_open_writer_raw: fn(handle: I64, data: I64, length: I64, if_exists: I64, mode: I64, output: I64, error: I64) -> I64 {
+    name: jet_raw_bytes_into_text(data, length)
+    result: jet_std_files_open_writer(handle, name, false, if_exists, mode, I64{1}, output, error)
+    jet_rt_string_drop(name)
+    result
 }
 
 #Export(c) jet_rt_handle_drop_jet_file_writer: fn(writer: I64) { jet_fd_drop_raw(writer) }
 #Export(c) jet_std_file_writer_path: fn(writer: I64) -> I64 { jet_fd_path_raw(writer) }
 // Out receives a read-only view (data, len, cap) with no owner word of its own:
 // a caller copies the bytes to own the path, never clones or drops the view.
+// A reader's FD72 holds its path at the writer's slot.
 #Export(c) jet_rt_handle_field_jet_file_writer_path: fn(writer: I64, out: I64) { coll_copy(files_writer_path(writer), out, I64{24}) }
+#Export(c) jet_rt_handle_field_jet_file_reader_path: fn(reader: I64, out: I64) { coll_copy(fd_word(reader, I64{24}), out, I64{24}) }
 
 FILES_WRITE_WHOLE_ZERO: I64{-4097}
 FILES_WRITE_BUFFERED_ZERO: I64{-4098}
@@ -165,6 +201,26 @@ files_writer_flush: fn(writer: I64) -> I64 {
 // share the FD72 carrier and jet_fs_stat_file's row.
 #Export(c) jet_std_file_writer_stat: fn(writer: I64, output: I64, length: I64, error: I64) -> I64 {
     jet_std_file_reader_stat(writer, output, length, error)
+}
+
+// The open file's descriptor number, a borrowed fact for
+// ProcessSpec.keep_open; a closed file is EBADF. The Core caller keeps the
+// file alive until the process leaf duplicates the descriptor.
+#Export(c) jet_std_file_reader_fd_raw: fn(reader: I64, ok: I64, error: I64) -> I64 {
+    number: jet_fd_number_raw(reader)
+    if (number < I64{0}) -> return compiler_fs_errno(HOST_IO_OP_READ, fd_word(reader, I64{24}), I64{9}, error)
+    rt_text_store(ok, jet_int_owned_from_i64(number))
+    I64{1}
+}
+
+// A writer's buffered bytes are flushed first, so the child's writes land
+// after everything this process wrote before handing the file over.
+#Export(c) jet_std_file_writer_fd_raw: fn(writer: I64, ok: I64, error: I64) -> I64 {
+    path: files_writer_path(writer)
+    if (jet_fd_number_raw(writer) < I64{0}) -> return compiler_fs_errno(HOST_IO_OP_WRITE, path, I64{9}, error)
+    failure: files_writer_flush(writer)
+    if (failure != I64{0}) -> return files_writer_failure(HOST_IO_OP_FLUSH, path, failure, error)
+    jet_std_file_reader_fd_raw(writer, ok, error)
 }
 
 // Rust `{:#o}` of an i64: the 64-bit two's complement octal digits.

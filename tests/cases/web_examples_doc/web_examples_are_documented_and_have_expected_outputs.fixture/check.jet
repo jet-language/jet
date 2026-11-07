@@ -1,0 +1,33 @@
+// Card #705: every Examples/Apps/Web/*.jet under the root `args()[0]`, in name
+// order, is named in Docs/spec/reference/web-backend-wasm.md and has a golden
+// beside it: a .out, .web.out or .harness.out stream, or a .case golden. The
+// first missing item is printed and exits 1.
+use files: core.files
+use process: core.process
+
+web_examples_missing: fn(message: String) -> Never {
+    print(message)
+    process.exit(1)
+}
+
+run: fn() {
+    root: process.args()[0]
+    web: files.join(root, "Examples/Apps/Web")
+    reference: "Docs/spec/reference/web-backend-wasm.md"
+    docs: files.read(files.join(root, reference)) ?? panic("read {reference}: {err}")
+    names := [String]{}
+    loop entry in files.list_dir(web) ?? panic("list Examples/Apps/Web: {err}") {
+        if entry.name.ends_with(".jet") -> names.push(entry.name)
+    }
+    names.sort()
+    if names.len() == 0 -> web_examples_missing("expected at least one web example")
+    loop name in names {
+        if !docs.contains(name) -> web_examples_missing("{name} missing from {reference}")
+        stem: files.stem(name)
+        golden := false
+        loop suffix in ["out", "web.out", "harness.out", "case"] {
+            if files.is_file(files.join(web, "{stem}.{suffix}")) -> golden = true
+        }
+        if !golden -> web_examples_missing("{name} has no golden under Examples/Apps/Web/")
+    }
+}

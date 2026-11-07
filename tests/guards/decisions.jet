@@ -82,6 +82,7 @@ s3_guard_tombstone_provenance: fn() {
 }
 
 #Test("tombstoned_decision_ids_carry_provenance_document_subclaims") {
+    guards_enter_root()
     s3_guard_tombstone_provenance()
 }
 
@@ -155,6 +156,7 @@ decision_id_lines: fn(path: String, out: &[String]) {
 }
 
 #Test("compiler_core_and_jetpack_cite_no_decision_ids") {
+    guards_enter_root()
     found := [String]{}
     loop root in DECISION_ID_FREE_ROOTS {
         assert(decision_files.is_dir(root), "the decision-free root {root} must exist")
@@ -170,6 +172,7 @@ decision_id_lines: fn(path: String, out: &[String]) {
 }
 
 #Test("decision_id_citation_backlog_only_shrinks") {
+    guards_enter_root()
     found := [String]{}
     loop root in DECISION_ID_BACKLOG_ROOTS -> decision_id_lines(root, found)
     print("decision-ID citation backlog: {found.len()} lines (baseline {DECISION_ID_BACKLOG})")

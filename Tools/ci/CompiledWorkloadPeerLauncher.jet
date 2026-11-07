@@ -350,9 +350,9 @@ probe_policies: fn(bwrap: String, shell: String, ip: String, launcher: String, f
         mode: if choice == .LoopbackOnly -> "--internal-loopback" else -> "--internal-disabled"
         inner := [String]{launcher.copy(), mode}
         if choice == .LoopbackOnly -> inner.push(ip.copy())
-        inner.push(shell.copy())
-        inner.push("-c")
-        inner.push("exit 0")
+        // The probe workload is the launcher itself: `--version` exits 0.
+        inner.push(launcher.copy())
+        inner.push("--version")
         argv: sandbox_argv(bwrap, shell, filter_path, root, root, choice, inner)
         named: if choice == .LoopbackOnly -> "LoopbackOnly" else -> "Disabled"
         receipt: process.cmd(argv).stdin(.Capture).stdout(.Capture).stderr(.Capture).run() ?? return Err(launch_error("Linux peer isolation unavailable: bubblewrap {named} probe failed: {err}"))
@@ -427,7 +427,9 @@ linux_base_args: fn(root: String, cwd: String, network: NetworkPolicy) -> [Strin
 // The full command line for one sandboxed run. Disabled networking runs
 // bwrap through `sh` only to open the seccomp program as descriptor 3 for
 // `--seccomp 3`; `exec` keeps one process, so bwrap is the launcher's direct
-// child and its `--die-with-parent` parent is the launcher.
+// child and its `--die-with-parent` parent is the launcher. That `sh` is a
+// named exclusion from the no-shell rule: Core's process spawn hands a child
+// descriptors 0-2 only, so no Jet spawn can give bwrap descriptor 3.
 sandbox_argv: fn(bwrap: String, shell: String, filter_path: String, root: String, cwd: String, network: NetworkPolicy, inner: [String]) -> [String] Never! {
     argv := [String]{}
     if network == .Disabled {

@@ -263,6 +263,10 @@ JetDriverCompileRequest: struct {
     // compile's are (CoreDemand.jet). `jet doc` and the other Doc readers
     // check every body.
     doc_core_on_demand: Bool{false}
+    // `jet check --prelude`: the entry unit is a Compiler/Prelude source,
+    // parsed and checked as the compiler embeds it (Loader.jet
+    // jet_driver_parse_prelude_source), not as an ordinary user module.
+    prelude_entry: Bool{false}
     // Selection is separate from compilation/lowering mode: checking validates
     // all links/defaults; running selects one address; testing selects Checks.
     output_intent: SemaOutputIntent{SemaOutputIntent.Check}
@@ -285,6 +289,11 @@ JetDriverCompileRequest: struct {
     build_output_names: [String]{[String]{}}
     capture_cost_report: Bool{false}
     generated_modules: [JetDriverGeneratedModule]{[JetDriverGeneratedModule]{}}
+    // The package-relative sources the build targets being compiled list
+    // (`b.add_executable("app", ["main.jet", "helper.jet"])`): in a package
+    // without a manifest each joins the entry's namespace, as the modules its
+    // `build: fn` generates do (jet_driver_build_source_catalog).
+    target_sources: [String]{[String]{}}
     // Raw transports remain distinct from ordinary comptime IO.
     build_inputs: JetDriverSharedBuildInputs?{None}
     build_http_inputs: JetDriverSharedBuildHTTPInputs?{None}

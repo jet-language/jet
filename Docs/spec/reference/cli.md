@@ -610,7 +610,7 @@ Core sources built into it ([`Core/EmbeddedSources.jet`](../../../Core/EmbeddedS
 see [Environment variables](environment.md)); the Core row table and the canonical effect source are generated
 into [`CoreSources.jet`](../../../Compiler/JetCli/Source/Cli/CoreSources.jet)
 by `jet Tools/agent/CoreSourceRows.jet`, which
-`node Tools/agent/check-core-surface-ledger.mjs --write` runs and `--check`
+`jet Tools/agent/CoreSurfaceLedger.jet --write` runs and `--check`
 holds current.
 
 Source snapshots enumerate held no-follow directories and read each source or
@@ -660,9 +660,11 @@ script alone, and the source walk of a package leaves every script out.
 applies to scripts and to any other file. There is one program per entry file
 and profile. Its record names the toolchain it was built with (the compiler,
 runtime pack and Core source file identities) and a hash of its source
-snapshot: the source files and the tree's directories. Other files in the
-tree, such as one the program writes beside its source, are not compile
-inputs and don't change the hash. A rerun with the same toolchain and sources
+snapshot: the source files and the directories the source walk enters. Other
+files in the tree, such as one the program writes beside its source, and
+directories the walk skips, such as the `.jet` directory a stopping program
+writes its fault report into, are not compile inputs and don't change the
+hash. A rerun with the same toolchain and sources
 runs the kept program without compiling. Any change, including a different
 compiler, compiles again and replaces the kept program. The cache holds at
 most 64 programs; keeping another removes the least recently run one. A

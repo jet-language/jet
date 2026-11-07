@@ -1,4 +1,4 @@
-// jet_process_spec_pipeline on the HostSpawn Child72 seam. Rust's drain and
+// jet_process_spec_pipeline on the HostSpawn Child104 seam. Rust's drain and
 // relay threads become one nonblocking pump on the waiting task: every stage's
 // stderr, the final stdout and each bounded relay advance whenever the wait
 // loop runs, and the task parks only when nothing moved. Stage128 rows: native0
@@ -559,10 +559,28 @@ pipeline_text: fn(builder: I64) -> I64 { rt_text_copy(rt_text_data(builder), rt_
     jet_rt_string_drop(errors)
     secrets: pipeline_secrets(specs, count)
     receipt: process_receipt_build(fd_word(specs, (count - I64{1}) * I64{8}), I64{0}, code, success, I64{0}, timed_out, output, error_text, secrets)
+    pipeline_usage(receipt, rows, count)
     process_text_list_drop(secrets, false)
     jet_rt_string_drop(output)
     jet_rt_string_drop(error_text)
     pipeline_free(top, rows)
     fd_put(ok, I64{0}, receipt)
     I64{1}
+}
+// A pipeline receipt's usage: the largest peak RSS and the summed CPU of its
+// steps, absent unless every step was reaped here.
+pipeline_usage: fn(receipt: I64, rows: I64, count: I64) {
+    peak := I64{0}
+    user := I64{0}
+    system := I64{0}
+    at := I64{0}
+    loop at < count {
+        native: fd_word(pipeline_row(rows, at), I64{0})
+        if (native == I64{0} || fd_word(native, I64{72}) < I64{0}) -> return
+        if (fd_word(native, I64{72}) > peak) -> peak = fd_word(native, I64{72})
+        user += fd_word(native, I64{80})
+        system += fd_word(native, I64{88})
+        at += I64{1}
+    }
+    process_receipt_usage(receipt, peak, user, system)
 }

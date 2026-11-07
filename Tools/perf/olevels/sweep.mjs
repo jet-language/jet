@@ -92,7 +92,7 @@ function measure(command, { cwd, env = process.env, timeoutS, scopeMem = null, c
   const bounded = ['timeout', '--kill-after=10', String(timeoutS), ...command];
   const timed = [GNU_TIME, '-f', '%U %S %M %x', '-o', timeFile, ...(cpus ? ['taskset', '-c', cpus] : []), ...bounded];
   // The scope's RuntimeMaxSec backs up `timeout`: the Jet compiler ignores SIGTERM, and `--kill-after` only reaches it while it stays in timeout's process group.
-  const full = scopeMem ? ['systemd-run', '--user', '--scope', '--quiet', '--collect', '-p', `MemoryMax=${scopeMem}`, '-p', 'MemorySwapMax=0', '-p', `RuntimeMaxSec=${timeoutS + 20}`, ...(cpus ? ['-p', `AllowedCPUs=${cpus}`] : []), ...timed] : timed;
+  const full = scopeMem ? ['systemd-run', '--user', '--scope', '--quiet', '--collect', '--expand-environment=no', '-p', `MemoryMax=${scopeMem}`, '-p', 'MemorySwapMax=0', '-p', `RuntimeMaxSec=${timeoutS + 20}`, ...(cpus ? ['-p', `AllowedCPUs=${cpus}`] : []), ...timed] : timed;
   return new Promise(done => {
     const started = process.hrtime.bigint();
     const child = spawn(full[0], full.slice(1), { cwd, env, stdio: ['ignore', 'pipe', 'pipe'] });

@@ -31,7 +31,7 @@ Grade the five agent quantities per finding: verdict fidelity, verdict latency, 
 
 ## Evidence and standing lens
 
-Search live specs, examples, stdlib, CLI, and package surfaces. Use the standing-lens sections relevant to the frozen domain set, including runtime probes and the micro sweep where they bear on the target. Do not force unrelated comparative work. Use `Tools/agent/jet-env` for representative jobs; cite paths, examples, commands, and output. Missing evidence is `unknown`, not permission to widen the run.
+Search live specs, examples, stdlib, CLI, and package surfaces. Use the standing-lens sections relevant to the frozen domain set, including runtime probes and the micro sweep where they bear on the target. Do not force unrelated comparative work. Use `Tools/agent/JetEnv.jet` for representative jobs; cite paths, examples, commands, and output. Missing evidence is `unknown`, not permission to widen the run.
 
 ## Attribute the complete Jet-owned path
 

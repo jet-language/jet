@@ -1,12 +1,11 @@
 # Claim: plugin load through a symlink that resolves outside the granted FS.Read root is rejected: stdout starts with rejected, reports the symlink message, guest never runs
-# Fixture migrated: target written as target.wat text; api snapshot api_version 1 -> 3; artifact stem target for the api alias. The hostile link is a directory link (allowed/linked -> ../outside, made with sh ln -s): the source walk refuses file links under the root (E2105) and skips directory links, so the runtime read root is what refuses it
+# Fixture migrated: target written as target.wat text; api snapshot api_version 1 -> 3; artifact stem target for the api alias. The hostile link is a directory link (allowed/linked -> ../outside, made by a symlink step): the source walk refuses file links under the root (E2105) and skips directory links, so the runtime read root is what refuses it
 # Not ported: Rust loop tier "interpreter": run_plugin_tier panics on unknown tier; only default and release are observable
 fixture: plugin_load_rejects_a_symlink_outside_the_granted_read_root.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
 env: JETPACK_ROOT={work}/jetpack
-step: sh {work}/step-1.sh
-exit: 0 # hostile symlink created outside the root
+symlink: ../outside allowed/linked
 step: jet run allowed/main.jet
 exit: 0 # default tier: exit 0, rejected, symlink message, no guest
 stdout: ~ "rejected" # default tier: exit 0, rejected, symlink message, no guest

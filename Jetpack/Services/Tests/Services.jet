@@ -122,6 +122,28 @@ services_test_has_pair: fn(command: [String], first: String, second: String) -> 
     assert(files.is_file(services_supervisor_error_path(services_service_dir(dir, "fixture"))))
 }
 
+// A failed dependency stops its live dependents once, under the state lock; a
+// dependent started after that would never be stopped, so it is refused.
+#Test("a dependent whose dependency already failed is not started") {
+    dir: services_test_scratch("dependency-already-failed")
+    database_dir: services_service_dir(dir, "database")
+    files.create_dir_all(database_dir) ?? panic("database state dir")
+    services_write_lifecycle(database_dir, services_lifecycle_for(ServiceAuthority.Unsupported, 1, ServicePhase.Failed, "service exited unexpectedly", None, [String]{})) ?? panic("write database lifecycle")
+    plan := services_test_plan("api", "sleep 30")
+    plan.after = [String]{"database"}
+    env := services_test_env()
+    error: services_test_error_of(services_up_one(services_test_host(), dir, env, plan))
+    assert(error.contains("dependency `database` failed"), error)
+    api_dir: services_service_dir(dir, "api")
+    found: services_read_lifecycle(api_dir) ? present -> present ! failure -> panic("read lifecycle")
+    facts: found ?? panic("the refused dependent must retain lifecycle facts")
+    assert_eq(facts.phase, ServicePhase.Failed)
+    assert_eq(facts.recovery, "dependency-failed")
+    assert(!files.exists(services_pid_path(api_dir)))
+    supervisor: files.read(services_supervisor_error_path(api_dir)) ?? panic("read supervisor error")
+    assert_eq(supervisor, "dependency `database` failed")
+}
+
 #Test("up is idempotent") {
     dir: services_test_scratch("up-idempotent")
     plan: services_test_plan("fixture", "sleep 30")
@@ -253,8 +275,10 @@ services_test_has_pair: fn(command: [String], first: String, second: String) -> 
     services_test_down(dir, plan)
 
     unreachable := services_test_plan("fixture2", "sleep 30")
-    // An ephemeral port that `sleep` never accepts on.
-    unreachable.ports = [Int]{0}
+    // Loopback port 1 never accepts: an unprivileged process can't listen on
+    // it, and no connect takes it as its source port. A released ephemeral
+    // port can be taken by another process's listener before the probe.
+    unreachable.ready_probe = Val(ReadyProbe.TCP{host: "127.0.0.1", port: 1})
     services_test_up(dir, unreachable)
     assert(!services_wait_healthy(dir, env, unreachable, time.duration_ms(500)), "a port that never accepts must time out, not hang")
     services_test_down(dir, unreachable)
@@ -557,6 +581,44 @@ services_test_has_pair: fn(command: [String], first: String, second: String) -> 
     assert(receipt.success, "redirected command must succeed")
     assert_eq(files.read(stdout_path) ?? panic("read stdout log"), "a b|it's \"q\"|-dash|--|$HOME|")
     assert_eq(files.read(stderr_path) ?? panic("read stderr log"), "err")
+}
+
+// systemd-run expands `$NAME` and `${NAME}` in the command it runs unless
+// told not to. The fake records the argv it receives; the service's run args
+// must arrive byte for byte, behind `--expand-environment=no`.
+#Test("a service arg with a dollar brace name reaches the fake systemd-run unchanged") {
+    if !sys.is_linux() -> return
+    dir: services_test_scratch("systemd-argv")
+    bin: files.join(dir, "bin")
+    files.create_dir_all(bin) ?? panic("create fake systemd bin")
+    fake: files.join(bin, "systemd-run")
+    files.write(fake, "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$(dirname \"$0\")/../systemd-run.argv\"\n") ?? panic("write fake systemd-run")
+    files.set_mode(fake, 0o755) ?? panic("chmod fake systemd-run")
+    run: [String]{"sh", "-c", "printf '%s|' \"$@\"", "sh", "${{X}}", "$5 price"}
+    plan: DevServicePlan{name: "fixture", enable: true, run: Val(run.copy())}
+    resolved := services_resolve(dir, plan) ?? panic("resolve fixture")
+    files.create_dir_all(resolved.data_dir) ?? panic("create service data dir")
+    env := services_test_env()
+    env.bin_dirs = [String]{bin}
+    authority: ServiceAuthority.LinuxSystemdUser{unit: "jetpack-test-fixture"}
+    spec: services_service_spec(env, plan, resolved, authority, resolved.ports.copy(), [String]{}) ?? panic("service spec")
+    receipt: spec.stdout(.Capture).stderr(.Capture).run() ?? panic("run the fake systemd-run")
+    assert(receipt.success, "the fake systemd-run must succeed")
+    args: services_lines(files.read(files.join(dir, "systemd-run.argv")) ?? panic("read the recorded argv"))
+    separator := -1
+    no_expand := false
+    loop index in 0..<args.len() {
+        if separator < 0 {
+            if args[index] == "--" -> separator = index
+            if args[index] == "--expand-environment=no" -> no_expand = true
+        }
+    }
+    assert(separator >= 0, "systemd-run gets `--` before the command: {args.join(" ")}")
+    assert(no_expand, "systemd-run must not expand the service command: {args.join(" ")}")
+    command := [String]{}
+    loop index in (separator + 1)..<args.len() -> command.push(args[index])
+    expected: services_log_redirect_argv(services_stdout_path(resolved.dir), services_stderr_path(resolved.dir), run) ?? panic("redirect argv")
+    assert_eq(command, expected)
 }
 
 #Test("windows guardian authority fails closed without Core containment") {

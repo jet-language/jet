@@ -37,7 +37,7 @@ import subprocess
 import time
 
 ROOT = Path(__file__).resolve().parents[2]
-JET_ENV = ROOT / "Tools/agent/jet-env"
+JET_ENV = ROOT / "Tools/agent/JetEnv.jet"
 STATE = Path(os.environ.get("JET_STATE_ROOT") or Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "jet-dev")
 DEFAULT_JET = STATE / "safe-jet.sh"
 SCRATCH = STATE / "enumset-bench"

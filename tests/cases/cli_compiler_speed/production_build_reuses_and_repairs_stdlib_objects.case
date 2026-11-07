@@ -31,8 +31,7 @@ stderr: ~ "cache hit -> reused cached binary" # unchanged rebuild
 step: built
 exit: 0 # unchanged output
 stdout: = production_build_reuses_and_repairs_stdlib_objects-4.out # unchanged output
-step: sh {work}/step-5.sh
-exit: 0 # edit source
+copy: variants/changed.txt main.jet
 step: jet build main.jet --profile=debug --verbose
 env: JET_STORE_DIR=store
 env: JET_STORE_CAP_BYTES=21474836480
@@ -42,8 +41,7 @@ exit: 0 # warm build of edit
 step: built
 exit: 0 # changed output
 stdout: = production_build_reuses_and_repairs_stdlib_objects-7.out # changed output
-step: sh {work}/step-8.sh
-exit: 0 # edit source again
+copy: variants/repaired.txt main.jet
 step: jet build main.jet --profile=debug --verbose
 env: JET_STORE_DIR=store
 env: JET_STORE_CAP_BYTES=21474836480

@@ -6,11 +6,12 @@
 // on stdout and an empty stderr; a stop exits nonzero with an empty stdout and the
 // golden on stderr. The first departing case ends the run with exit 1. Each run
 // is limited to 30 seconds (key: 300).
-// Build and link the witness binary in the native heavy lane first.
+// The key witness's ownership run reads the char Debug goldens for every scalar,
+// rebuilt into OUT from the tracked CharDebugPlain.ranges and pinned by sha256.
 // Usage (from the repository root):
-//   jet Compiler/JetRuntime/Tests/UiWitness.jet WITNESS OUT BINARY [ORACLE]
-// key also takes the frozen character ORACLE its ownership run reads.
+//   jet Compiler/JetRuntime/Tests/UiWitness.jet WITNESS OUT BINARY
 use {
+    crypto: core.crypto
     files: core.files
     process: core.process
     term: core.term
@@ -18,7 +19,9 @@ use {
 
 GOLDENS: "Compiler/JetRuntime/Tests"
 SHARED_STOP: "DataPlotStops-getter-variant.stderr"
-USAGE: "usage: jet Compiler/JetRuntime/Tests/UiWitness.jet WITNESS OUT BINARY [ORACLE]"
+USAGE: "usage: jet Compiler/JetRuntime/Tests/UiWitness.jet WITNESS OUT BINARY"
+PLAIN_RANGES: "CharDebugPlain.ranges"
+ORACLE_SHA256: "72a498085e0dc43fc6f9b0bc6f29482738c01ab7a35c11d72a1cfaf2504807a5"
 WITNESSES: "choices, events, form-action-error, key, raylib-metadata, view-snapshots"
 OUTPUT_MISMATCH: "byte-exact output mismatch"
 
@@ -77,7 +80,7 @@ witness: fn(key: String) -> Witness Never! {
     if key == "choices" -> return variant_stops("UI_CHOICES_WITNESS", "UiCarriersChoicesWitness.stdout", [String]{"aria-tag"}, " ", "UI choices: ownership and record-variant stop byte-identical")
     if key == "key" {
         cases: [Case]{ownership("UiKeyWitness.stdout"), stop("key-tag", 70, SHARED_STOP)}
-        return Witness{operands: "OUT UI_KEY_WITNESS FROZEN_CHAR_ORACLE", oracle: true, cases: cases, timeout: 300s, exit_gap: " ", done: "UI Key: exhaustive real-provider oracle and record-variant stop byte-identical"}
+        return Witness{operands: "OUT UI_KEY_WITNESS", oracle: true, cases: cases, timeout: 300s, exit_gap: " ", done: "UI Key: exhaustive real-provider oracle and record-variant stop byte-identical"}
     }
     Witness{operands: "", oracle: false, cases: [Case]{}, timeout: 0s, exit_gap: "", done: ""}
 }
@@ -166,14 +169,99 @@ write_file: fn(path: String, bytes: [U8]) -[FS, IO]> Bool Never! {
     }
 }
 
+byte: fn(value: Int) -> U8 Never! { U8.from_int(value) ?? U8{0} }
+
+hex_value: fn(text: String) -> Int Never! {
+    value := 0
+    loop digit in text.bytes() {
+        code: Int.from_u8(digit)
+        value = value * 16 + (if code >= 97 -> code - 87 else if code >= 65 -> code - 55 else -> code - 48)
+    }
+    value
+}
+
+lower_hex: fn(value: Int) -> String Never! {
+    digits: "0123456789abcdef".bytes()
+    reversed := [U8]{digits[value % 16]}
+    rest := value /% 16
+    loop rest > 0 {
+        reversed.push(digits[rest % 16])
+        rest = rest /% 16
+    }
+    out := [U8]{}
+    loop index in 0..<reversed.len() -> out.push(reversed[reversed.len() - 1 - index])
+    String.from_bytes_lossy(out)
+}
+
+utf8: fn(scalar: Int) -> [U8] Never! {
+    if scalar < 128 {
+        return [U8]{byte(scalar)}
+    }
+    if scalar < 2048 {
+        return [U8]{byte(192 + scalar /% 64), byte(128 + scalar % 64)}
+    }
+    if scalar < 65536 {
+        return [U8]{byte(224 + scalar /% 4096), byte(128 + (scalar /% 64) % 64), byte(128 + scalar % 64)}
+    }
+    [U8]{byte(240 + scalar /% 262144), byte(128 + (scalar /% 4096) % 64), byte(128 + (scalar /% 64) % 64), byte(128 + scalar % 64)}
+}
+
+// The Debug text of one char: \0 \t \n \r \' \\ use their short escapes, a
+// scalar CharDebugPlain.ranges lists renders as itself, and every other scalar
+// renders as \u{hex}; all of them in single quotes.
+char_debug: fn(scalar: Int, listed: Bool) -> [U8] Never! {
+    short: if scalar == {
+        0 -> "0"
+        9 -> "t"
+        10 -> "n"
+        13 -> "r"
+        39 -> "'"
+        92 -> "\\"
+        else -> ""
+    }
+    if short != "" -> return "'\\{short}'".bytes()
+    if !listed -> return "'\\u{{{lower_hex(scalar)}}}'".bytes()
+    text := [U8]{byte(39)}
+    loop part in utf8(scalar) -> text.push(part)
+    text.push(byte(39))
+    text
+}
+
+// The char Debug goldens for all 1,112,064 scalars, from the rows of
+// CharDebugPlain.ranges (`hex` or `hex..hex`): each record is the u32le scalar,
+// a u8 length, then the Debug bytes.
+char_goldens: fn(ranges: String) -> [U8] Never! {
+    starts := [Int]{}
+    ends := [Int]{}
+    loop row in ranges.trim().split("\n").to_list() {
+        bounds: row.split("..").to_list()
+        starts.push(hex_value(bounds[0]))
+        ends.push(hex_value(bounds[bounds.len() - 1]))
+    }
+    goldens := [U8]{}
+    range := 0
+    loop scalar in 0..<1114112 {
+        if scalar >= 55296 && scalar <= 57343 -> next
+        loop range < starts.len() && ends[range] < scalar {
+            range += 1
+        }
+        text: char_debug(scalar, range < starts.len() && starts[range] <= scalar)
+        goldens.push(byte(scalar % 256))
+        goldens.push(byte((scalar /% 256) % 256))
+        goldens.push(byte(scalar /% 65536))
+        goldens.push(byte(0))
+        goldens.push(byte(text.len()))
+        loop part in text -> goldens.push(part)
+    }
+    goldens
+}
+
 ui_witness: fn(args: [String]) -[Exec, Env, FS, IO, Time.Wait]> Int Never! {
     if args.len() == 0 -> return fail("{USAGE}\nWITNESS is one of: {WITNESSES}")
     key: args[0]
     spec: witness(key)
     if spec.cases.len() == 0 -> return fail("unknown witness: {key}\nWITNESS is one of: {WITNESSES}")
-    wanted: if spec.oracle -> 4 else -> 3
-    empty_operand: args.contains("")
-    if args.len() != wanted || empty_operand -> return fail("usage: jet Compiler/JetRuntime/Tests/UiWitness.jet {key} {spec.operands}")
+    if args.len() != 3 || args.contains("") -> return fail("usage: jet Compiler/JetRuntime/Tests/UiWitness.jet {key} {spec.operands}")
     cwd: files.cwd() ?? return fail("cannot read the working directory: {err}")
     out: resolve(cwd, args[1])
     binary: resolve(cwd, args[2])
@@ -181,10 +269,17 @@ ui_witness: fn(args: [String]) -[Exec, Env, FS, IO, Time.Wait]> Int Never! {
         .Ok(_) -> {}
         .Err(error) -> return fail("cannot create {out}: {error}")
     }
+    oracle: "{out}/char-debug-goldens.bin"
+    if spec.oracle {
+        ranges: files.read("{cwd}/{GOLDENS}/{PLAIN_RANGES}") ?? return fail("cannot read {GOLDENS}/{PLAIN_RANGES}: {err}")
+        goldens: char_goldens(ranges)
+        if crypto.sha256(goldens.copy()).hex() != ORACLE_SHA256 -> return fail("char Debug goldens differ from the frozen bytes")
+        if !write_file(oracle, goldens) -> return 1
+    }
     loop item in spec.cases {
         run_args := item.args.copy()
         if spec.oracle && item.status == 0 {
-            run_args = [String]{resolve(cwd, args[3])}
+            run_args = [String]{oracle.copy()}
         }
         outcome: run_binary(binary, run_args, spec.timeout)
         status: if outcome.exited -> "{outcome.status}" else -> "null"
@@ -222,5 +317,10 @@ run: fn() {
     assert_eq(witness("key").cases[1].status, 70)
     assert_eq(witness("nope").cases.len(), 0)
     assert_eq(resolve("/a/b", "../c/./d//e"), "/a/c/d/e")
+    assert_eq(String.from_bytes_lossy(char_debug(65, true)), "'A'")
+    assert_eq(String.from_bytes_lossy(char_debug(39, true)), "'\\''")
+    assert_eq(String.from_bytes_lossy(char_debug(127, false)), "'\\u{{7f}}'")
+    assert_eq(utf8(8364).len(), 3)
+    assert_eq(hex_value("10FFFF"), 1114111)
     assert_eq(resolve("/a", "/x/../y"), "/y")
 }

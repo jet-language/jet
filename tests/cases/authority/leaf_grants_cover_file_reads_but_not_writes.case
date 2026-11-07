@@ -14,13 +14,12 @@ exit: 1 # default: write refused E1803 FS.Write
 stdout: = "" # default: write refused E1803 FS.Write
 stderr: ~ "E1803" # default: write refused E1803 FS.Write
 stderr: ~ "`FS.Write`" # default: write refused E1803 FS.Write
-step: sh {work}/step-3.sh
-exit: 0 # refused write never ran (default)
+file: written.txt absent # refused write never ran (default)
 step: jet run --allow=FS writefile/writefile.jet written.txt
 exit: 0 # default: FS root covers write
 stdout: = "wrote\n" # default: FS root covers write
-step: sh {work}/step-5.sh
-exit: 0 # written content = written (default)
+file: written.txt = "written" # written content = written (default)
+remove: written.txt
 step: jet run --release --allow=FS.Read readfile/readfile.jet
 exit: 0 # release: FS.Read covers files.read
 stdout: = "read=true\n" # release: FS.Read covers files.read
@@ -29,10 +28,9 @@ exit: 1 # release: write refused E1803 FS.Write
 stdout: = "" # release: write refused E1803 FS.Write
 stderr: ~ "E1803" # release: write refused E1803 FS.Write
 stderr: ~ "`FS.Write`" # release: write refused E1803 FS.Write
-step: sh {work}/step-8.sh
-exit: 0 # refused write never ran (release)
+file: written.txt absent # refused write never ran (release)
 step: jet run --release --allow=FS writefile/writefile.jet written.txt
 exit: 0 # release: FS root covers write
 stdout: = "wrote\n" # release: FS root covers write
-step: sh {work}/step-10.sh
-exit: 0 # written content = written (release)
+file: written.txt = "written" # written content = written (release)
+remove: written.txt

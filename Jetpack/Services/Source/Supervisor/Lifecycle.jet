@@ -115,6 +115,18 @@ services_start_one_with_recovery: fn(host: ServiceHost, project_dir: String, env
     }
     previous: services_read_lifecycle(resolved.dir)
     generation: if previous == .Val(facts) -> facts.generation + 1 else -> 1
+    // A dependency's supervisor stops its live dependents under this lock when
+    // it fails, so a dependent whose dependency already failed must not start:
+    // nothing would ever stop it.
+    loop dependency in services_dependency_names(plan) {
+        facts: services_read_lifecycle(services_service_dir(project_dir, dependency)) ?? next
+        if facts.phase != ServicePhase.Failed -> next
+        message: "dependency `{dependency}` failed"
+        failed: services_lifecycle_for(ServiceAuthority.Unsupported, generation, ServicePhase.Failed, "dependency-failed", None, services_dependency_names(plan))
+        services_write_lifecycle_quiet(resolved.dir, failed)
+        services_write_atomic(services_supervisor_error_path(resolved.dir), message.bytes()).drop("supervisor error evidence is best-effort")
+        return Err(ServicesError.new("service `{plan.name}` was not started: {message}"))
+    }
     authority: services_authority_for(host, project_dir, plan, generation) ?? {
         failed: services_lifecycle_for(ServiceAuthority.Unsupported, generation, ServicePhase.Failed, "authority-unavailable", None, services_dependency_names(plan))
         services_write_lifecycle_quiet(resolved.dir, failed)
@@ -220,7 +232,10 @@ services_service_spec: fn(env: &ShellEnv, plan: DevServicePlan, resolved: &Servi
     names: envmodel_sorted_keys_of(service_env)
     argv := [String]{}
     if authority == .LinuxSystemdUser(unit) {
-        argv.extend([String]{"systemd-run", "--user", "--scope", "--collect", "--quiet", "--property=Delegate=yes", "--property=KillMode=control-group", "--unit={unit}", "--working-directory={resolved.data_dir}"})
+        // systemd-run expands `$NAME` and `${NAME}` in the command it runs,
+        // so the service's own argv (and the log redirect's `$1`) would be
+        // rewritten, an unknown name to "". The command passes through as is.
+        argv.extend([String]{"systemd-run", "--user", "--scope", "--collect", "--quiet", "--expand-environment=no", "--property=Delegate=yes", "--property=KillMode=control-group", "--unit={unit}", "--working-directory={resolved.data_dir}"})
         loop name in names -> argv.push("--setenv={name}={service_env[name]}")
         argv.push("--")
     }

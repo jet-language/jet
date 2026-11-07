@@ -31,8 +31,12 @@ extern Word jet_rt_tls_get(Word);
 extern void jet_rt_program_allocator_configure(Word, Word);
 extern void jet_rt_program_allocator_restore(Word, Word);
 extern Word jet_rt_program_allocator_fact(Word);
+extern Word jet_int_owned_to_i64(Word);
 
 static Word address(const void *p) { return (Word)(uintptr_t)p; }
+// A snapshot's iteration and result are owned exact Ints: a value outside the
+// inline range (INT64_MIN, INT64_MAX) is a counted box, read through the runtime.
+static Word exact(Word value) { return jet_int_owned_to_i64(value); }
 static Runner *runner(Word (*code)(Word, Word)) {
     Runner *box = (Runner *)(uintptr_t)jet_rt_alloc(24, 8);
     *box = (Runner){1, (Word)(uintptr_t)code,
@@ -92,10 +96,10 @@ int main(void) {
     assert(jet_test_suite_run(address(old)) == 17);
     assert(old->iteration == 0 && old->result == 0 && old->runner == address(first));
     Suite *after = snapshot();
-    assert(after->iteration == INT64_MIN && after->result == 17 && after->runner == address(second));
+    assert(exact(after->iteration) == INT64_MIN && exact(after->result) == 17 && after->runner == address(second));
     show(after, "Test { iteration: -9223372036854775808, result: 17 }");
     assert(jet_test_suite_run(address(copy)) == 17 && jet_test_suite_status() == 17);
-    assert(jet_test_suite_run(address(after)) == -3 && after->result == 17);
+    assert(jet_test_suite_run(address(after)) == -3 && exact(after->result) == 17);
     Suite *latest = snapshot();
     show(latest, "Test { iteration: 9223372036854775807, result: -3 }");
     jet_test_suite_install(address(second));
@@ -108,13 +112,16 @@ int main(void) {
     assert(jet_rt_test_suite_fixture_state() != 0);
     drop(old); drop(copy); drop(after); drop(latest);
     assert(first->refs == 1 && second->refs == 3 && child->refs == 2);
-    // Warm TLS already exists; every counted carrier must return exactly 24B.
+    // Warm TLS already exists; every counted carrier must return exactly what
+    // it took. A snapshot boxes its out-of-range exact iteration; its clone
+    // takes only its own 24B and shares that box by count.
     jet_rt_program_allocator_configure(1, 0);
     Word live = jet_rt_program_allocator_fact(2);
     Suite *counted = snapshot();
-    assert(jet_rt_program_allocator_fact(2) == live + 24);
+    Word taken = jet_rt_program_allocator_fact(2) - live;
+    assert(taken > 24);
     Suite *counted_copy = (Suite *)(uintptr_t)jet_rt_handle_clone_jet_test_suite(address(counted));
-    assert(jet_rt_program_allocator_fact(2) == live + 48);
+    assert(jet_rt_program_allocator_fact(2) == live + taken + 24);
     drop(counted); drop(counted_copy);
     assert(jet_rt_program_allocator_fact(2) == live);
     // The first worker warmed the process thread registry. A second worker

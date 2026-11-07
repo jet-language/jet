@@ -57,7 +57,10 @@ binary: module
 
 ini: module
 
-use base64: core.encoding.base64
+use {
+    base64: core.encoding.base64
+    time: core.time
+}
 
 /// Handle-free streaming events. Number is public; writers reject it as Unsupported.
 DataEvent: enum {
@@ -350,10 +353,17 @@ decode_under: fn(segment: String, error: FieldError) -> FieldError Never! {
     FieldError{path: path, reason: error.reason.copy()}
 }
 
-// The one root failure "expected {expected}, found {kind}", with the dyn_kind
-// vocabulary.
+// The one root failure "expected {expected}, found {kind}" (__dyn_kind).
 decode_expected: fn(expected: String, tree: Dyn) -> [FieldError] Never! {
-    kind: if tree == {
+    [FieldError]{FieldError{path: "", reason: "expected {expected}, found {__dyn_kind(tree)}"}}
+}
+
+// The decode diagnostic's name for a Dyn variant: the one dyn_kind
+// vocabulary. Time and Math decodes report through it, and
+// Tools/agent/RuntimeGenerators.jet generates the runtime's and the web
+// tier's tables from these arms.
+__dyn_kind: fn(tree: Dyn) -> String Never! {
+    if tree == {
         .Null -> "Null"
         .Bool(_) -> "Bool"
         .Int(_) -> "Int"
@@ -365,11 +375,37 @@ decode_expected: fn(expected: String, tree: Dyn) -> [FieldError] Never! {
         .Array(_) -> "a list"
         .Object(_) -> "an object"
     }
-    [FieldError]{FieldError{path: "", reason: "expected {expected}, found {kind}"}}
 }
 
 /// 32-bit wrap used by hashes and CBOR integer codecs. Jet `Int` is exact; mask
 /// after arithmetic to get machine-word wrapping without a second integer type.
 wrap32: fn(n: Int) -> Int Never! { n.bit_and(4294967295) }
 
+#Test("every Dyn variant has one decode kind in Core and in the runtime scalar decodes") {
+    stamp: Dyn.DateTime(time.zoned(time.from_unix_seconds(0), time.utc()))
+    trees: [(tree: Dyn, kind: String)]{
+        (tree: Dyn.Null, kind: "Null"), (tree: Dyn.Bool(true), kind: "Bool"), (tree: Dyn.Int(1), kind: "Int"),
+        (tree: Dyn.Float(1.5), kind: "Float"), (tree: Dyn.Number("1"), kind: "number"), (tree: Dyn.Text("a"), kind: "Text"),
+        (tree: Dyn.Bytes([U8]{1}), kind: "Bytes"), (tree: stamp, kind: "DateTime"),
+        (tree: Dyn.Array([Dyn]{}), kind: "a list"), (tree: Dyn.object(), kind: "an object")
+    }
+    loop entry in trees {
+        assert_eq(__dyn_kind(entry.tree), entry.kind)
+        if entry.tree.decode<[Int]>() == {
+            .Err(errors) -> assert_eq(errors[0].reason, "expected a list, found {entry.kind}")
+            .Ok(_) -> assert_eq(entry.kind, "a list")
+        }
+        if entry.tree.decode<[String: Int]>() == {
+            .Err(errors) -> assert_eq(errors[0].reason, "expected an object, found {entry.kind}")
+            .Ok(_) -> assert_eq(entry.kind, "an object")
+        }
+        // The runtime's Bool decode names a Text leaf by its Debug text.
+        if entry.kind != "Text" {
+            if entry.tree.decode<Bool>() == {
+                .Err(errors) -> assert_eq(errors[0].reason, "expected Bool, found {entry.kind}")
+                .Ok(_) -> assert_eq(entry.kind, "Bool")
+            }
+        }
+    }
+}
 

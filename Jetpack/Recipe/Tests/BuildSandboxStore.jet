@@ -7,6 +7,9 @@ recipe_sandbox_store_ctx: fn(roots: HangarRoots) -> ProviderCtx {
 
 // Ported from build_sandbox.rs:1496-1569. The build.rs marker must never be written.
 #Test("Core Cargo refuses before unavailable sandbox can run build script") {
+    // Without cargo the build refuses earlier, for the missing toolchain, so
+    // the sandbox refusal under test needs cargo present.
+    _: kit_require_tool("cargo") ?? return
     base: recipe_test_scratch("core-cargo-unavailable")
     repo: files.join(base, "repo")
     marker: files.join(base, "host-marker")
@@ -30,7 +33,7 @@ recipe_sandbox_store_ctx: fn(roots: HangarRoots) -> ProviderCtx {
     }
     recipe_sandbox_test_restore_env("JETPACK_FAKE_SANDBOX", previous)
     assert(refusal != "", "an unavailable build sandbox must refuse Core Cargo")
-    assert(refusal.contains("SandboxUnavailable"))
+    assert(refusal.contains("SandboxUnavailable"), refusal)
     assert(!files.exists(marker))
     assert(store_list(verification, roots).is_empty())
     files.remove_all(base).drop("test cleanup")
@@ -39,6 +42,9 @@ recipe_sandbox_store_ctx: fn(roots: HangarRoots) -> ProviderCtx {
 // Ported from build_sandbox.rs:1572-1658. A successful build has a private consumable lease.
 #Test("Core Cargo build is private and not published to shared cache") {
     if !sys.is_linux() -> return
+    // The build runs cargo inside the bubblewrap sandbox.
+    _: kit_require_tool("cargo") ?? return
+    _: kit_require_tool("bwrap") ?? return
     base: recipe_test_scratch("core-cargo-private")
     repo: files.join(base, "repo")
     mirror: files.join(base, "mirror")

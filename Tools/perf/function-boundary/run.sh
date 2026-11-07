@@ -40,7 +40,7 @@ if [ ${#cells[@]} -eq 0 ]; then
   done < "$manifest"
 fi
 mkdir -p "$out"
-env_run() { (cd "$root" && Tools/agent/jet-env "$@"); }
+env_run() { (cd "$root" && Tools/agent/JetEnv.jet "$@"); }
 mem_gate() {
   until [ "$(awk '/MemAvailable/ {print int($2/1048576)}' /proc/meminfo)" -ge "${FB_MEM_GATE_GB:-30}" ]; do sleep 30; done
 }
@@ -61,7 +61,7 @@ build() {
     work=$out/work/$cell-$level
     rm -rf "$work"; mkdir -p "$work"; cp "$dir/main.jet" "$work/main.jet"
     mem_gate
-    (cd "$root" && LANES_MEM=${FB_LANE_MEM:-8G} "$jet" Tools/agent/cache/Lanes.jet small Tools/agent/jet-env "$jet" build --quiet "${flag[@]}" "$work/main.jet") > "$out/$cell.$level.build.log" 2>&1
+    (cd "$root" && LANES_MEM=${FB_LANE_MEM:-8G} "$jet" Tools/agent/cache/Lanes.jet small Tools/agent/JetEnv.jet "$jet" build --quiet "${flag[@]}" "$work/main.jet") > "$out/$cell.$level.build.log" 2>&1
     if [ -x "$work/.jet/build/main" ]; then
       cp "$work/.jet/build/main" "$bin/$cell.jet-$level"
       cp "$work/.jet/build/main.rs" "$out/$cell.$level.generated.rs"

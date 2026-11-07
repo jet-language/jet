@@ -10,7 +10,8 @@ step: jet build browser_bidi_privacy_hostile.jet
 exit: 0
 session privacy_hostile raw: node {root}/tests/fixtures/browser_bidi_mock.mjs script {free-port:privacy_hostile} privacy_hostile.json
 session privacy_closed raw: node {root}/tests/fixtures/browser_bidi_mock.mjs script {free-port:privacy_closed} privacy_closed.json
-sleep: 500ms
+await: file privacy_hostile.ready timeout 30s
+await: file privacy_closed.ready timeout 30s
 step run: built
 exit: 0
 stdout: = native_bidi_privacy_receipt_hostile_and_closed_paths.1.out

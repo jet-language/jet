@@ -9,9 +9,7 @@ env: JET_STORE_DIR={work}/cache
 env: JETPACK_ROOT={work}/jetpack
 step: jet fmt run.jet
 exit: 0 # tests/fmt.rs:1068 formats
-step: sh {work}/step-2.sh
-exit: 0 # tests/fmt.rs:1069-1076
-stdout: ~ "Point{x: 1, y: 2}" # tests/fmt.rs:1069-1076
-stdout: !~ "Point {x: 1" # tests/fmt.rs:1069-1076
+file: run.jet ~ "Point{x: 1, y: 2}" # tests/fmt.rs:1069-1076
+file: run.jet !~ "Point {x: 1" # tests/fmt.rs:1069-1076
 step: jet fmt --check run.jet
 exit: 0 # tests/fmt.rs:1077-1078 stable

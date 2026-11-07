@@ -4,7 +4,7 @@ import { spawnSync } from "node:child_process";
 
 const root = dirname(new URL(import.meta.url).pathname);
 const repo = resolve(root, "../../../..");
-const jetEnv = resolve(repo, "Tools/agent/jet-env");
+const jetEnv = resolve(repo, "Tools/agent/JetEnv.jet");
 const inputPath = resolve(root, "input.jet");
 const outputPath = resolve(root, "renamed.jet");
 

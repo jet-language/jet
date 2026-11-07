@@ -9,6 +9,8 @@ use {
         Marker,
         Param,
         Span,
+        TFailureCarrier,
+        TFuncKind,
         Type,
         diagnostic_registry_row,
         type_name,
@@ -94,6 +96,17 @@ sema_guest_export_return_type: fn(return_type: Type?) -> Type? Never! {
     Val(written)
 }
 
+// The C result a signature publishes: `T Never!` is the infallible spelling of
+// a plain `T`, and `Never!` alone publishes no result.
+sema_guest_c_return_type: fn(return_type: Type?) -> Type? Never! {
+    written: return_type ?? return None
+    if written == .Result(ok, err) && err == (Type.Named{name: "Never"}) {
+        if ok == (Type.Named{name: "Unit"}) -> return None
+        return Val(ok)
+    }
+    Val(written)
+}
+
 // Rust `check_c_signature`: E3203 for a parameter or return without a stable
 // C ABI, E3202 for a by-value pointer return. Registers nothing.
 sema_guest_check_c_signature: fn(graph: SemaRegistrationGraph, module_index: Int, function: Func, diagnostics: &[Diagnostic]) -> Bool {
@@ -106,7 +119,7 @@ sema_guest_check_c_signature: fn(graph: SemaRegistrationGraph, module_index: Int
             valid = false
         }
     }
-    if function.return_type == .Val(return_type) {
+    if sema_guest_c_return_type(function.return_type) == .Val(return_type) {
         return_span: function.return_type_span ?? function.name_span
         pointer_return: if return_type == {
             .Apply(name, _) -> name == "Ptr"
@@ -245,8 +258,13 @@ sema_guest_check_surfaces: fn(graph: &SemaRegistrationGraph) {
                         failed = true
                     }
                 }
-                if module_index == entry_index && sema_function_is_guest_export(function) && !sema_guest_library_component_signature(graph, graph.modules[module_index].module_identity, function) {
-                    if !sema_guest_check_c_signature(graph, module_index, function, diagnostics) -> failed = true
+                if module_index == entry_index && sema_function_is_guest_export(function) {
+                    if sema_guest_declared_carrier(function.return_type) == .Val(carrier) {
+                        diagnostics.push(sema_guest_export_carrier_error(function, "declares the carrier `{carrier}`"))
+                        failed = true
+                    } else if !sema_guest_library_component_signature(graph, graph.modules[module_index].module_identity, function) {
+                        if !sema_guest_check_c_signature(graph, module_index, function, diagnostics) -> failed = true
+                    }
                 }
             }
         }
@@ -282,4 +300,61 @@ sema_guest_check_surfaces: fn(graph: &SemaRegistrationGraph) {
         loop diagnostic in diagnostics -> sema_registration_push_graph_diagnostic(graph, -1, diagnostic)
     }
     if failed -> graph.complete = false
+}
+
+// The failure carrier a written return declares (`T E!` with E not `Never`,
+// or `T?`), spelled as written; None for a plain `T`, `T Never!` or no
+// return.
+sema_guest_declared_carrier: fn(return_type: Type?) -> String? Never! {
+    written: return_type ?? return None
+    if written == {
+        .Result(ok, err) -> if err == (Type.Named{name: "Never"}) -> None else -> Val("{type_name(ok)} {type_name(err)}!")
+        .Option(value) -> Val("{type_name(value)}?")
+        else -> None
+    }
+}
+
+// The carrier a C export inferred, spelled as its signature would write it.
+sema_guest_carrier_text: fn(carrier: TFailureCarrier) -> String Never! {
+    if carrier == {
+        .Result(success, error) -> "{type_name(success)} {type_name(error)}!"
+        .Optional(value) -> "{type_name(value)}?"
+        .Diverges(value) -> type_name(value)
+        .Infallible -> ""
+    }
+}
+
+// E3203 at an export's name: a C export is infallible, so an `#Export(c)`
+// that can fail (`reason`: the carrier it declares or infers) has no C
+// return, whatever its parameters.
+sema_guest_export_carrier_error: fn(function: Func, reason: String) -> Diagnostic Never! {
+    what: "`#Export(c)` `{function.name}` {reason}, which is not a C-compatible return."
+    why: "`#Import` / `#Export` functions must use types with a stable C ABI at the edge, and a C export is infallible: it returns no failure carrier."
+    fix: "Handle every failure inside `{function.name}` and declare it `Never!`."
+    sema_error("E3203", function.name_span, what, why, fix)
+}
+
+// The C-safe export law over inferred carriers, after the failure solve: an
+// entry-module `#Export(c)` that declares no carrier must be infallible
+// (E3203 at its name). A declared carrier, on a C signature or a library
+// component signature alike, is already E3203 at the name
+// (sema_guest_check_surfaces). True when an export was refused.
+sema_guest_check_export_failures: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], diagnostics: &[Diagnostic]) -> Bool {
+    entry_index: sema_registration_module_index(graph, graph.entry_module_identity) ?? return false
+    if entry_index >= modules.len() -> return false
+    refused := false
+    loop item in graph.modules[entry_index].program.items {
+        if item == .Func(function) {
+            if !sema_function_is_guest_export(function) || sema_guest_declared_carrier(function.return_type) != None -> next
+            loop body in modules[entry_index].functions {
+                if body.kind != TFuncKind.TopLevel || body.name != function.name -> next
+                if body.failure_carrier != TFailureCarrier.Infallible {
+                    diagnostics.push(sema_diagnostic_with_source_location(sema_guest_export_carrier_error(function, "can fail: its body infers the carrier `{sema_guest_carrier_text(body.failure_carrier)}`"), graph.modules[entry_index].source_segments))
+                    refused = true
+                }
+                break
+            }
+        }
+    }
+    refused
 }

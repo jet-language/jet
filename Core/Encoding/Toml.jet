@@ -11,6 +11,7 @@ use {
     core.encoding.[Dyn, EncodingError, EncodingErrorKind, EncodingFormat, EncodingLimits]
     json: core.encoding.json
     stream: __core_encoding_stream
+    nesting.[enter_nesting]
 }
 
 syntax_error: fn(format: EncodingFormat, offset: Int, line: Int, column: Int, path: String, reason: String) -> EncodingError Never! {
@@ -306,7 +307,7 @@ impl TOMLParser {
 
     parse_array: fn(&self) -> Dyn EncodingError! {
         _: self.bump()
-        self.enter() ?? return Err(err)
+        enter_nesting(self) ?? return Err(err)
         items := [Dyn]{}
         loop {
             self.skip_space() ?? return Err(self.fail("TOML whitespace scan failed"))
@@ -332,7 +333,7 @@ impl TOMLParser {
 
     parse_inline_table: fn(&self) -> Dyn EncodingError! {
         _: self.bump()
-        self.enter() ?? return Err(err)
+        enter_nesting(self) ?? return Err(err)
         // Dyn objects retain insertion order and reject repeated inline keys.
         entries := Dyn.object()
         loop {
@@ -361,12 +362,6 @@ impl TOMLParser {
             if b != (U8{44}) -> return Err(self.fail("expected ',' or '}}' after a TOML inline-table value"))
             _: self.bump()
         }
-    }
-
-    enter: fn(&self) EncodingError! {
-        self.depth += 1
-        max_depth: EncodingLimits.safe().max_depth
-        if self.depth > max_depth -> return Err(self.fail("nesting exceeds max_depth ({max_depth})"))
     }
 
     parse_number_or_text: fn(&self) -> Dyn EncodingError! {
@@ -438,6 +433,17 @@ impl TOMLParser {
         if has_path(self.root, path, 0) -> return Err(self.fail("duplicate TOML key"))
         self.root = put_path(self.root, path, 0, value)
         true
+    }
+}
+
+// The nesting guard of the array and inline-table parsers: not part of the
+// toml surface.
+priv nesting: module {
+    // Opens one array or inline table, bounded by `EncodingLimits.safe().max_depth`.
+    enter_nesting: fn(parser: &TOMLParser) EncodingError! {
+        parser.depth += 1
+        max_depth: EncodingLimits.safe().max_depth
+        if parser.depth > max_depth -> return Err(parser.fail("nesting exceeds max_depth ({max_depth})"))
     }
 }
 

@@ -390,7 +390,7 @@ async function buildJetLibrary(outDir, cc, jetEnv) {
 async function buildAll(options, manifest) {
   const outDir = path.resolve(options.out);
   const cc = options.cc ?? process.env.CC ?? "cc";
-  const jetEnv = options.jetEnv ?? path.join(repoDir, "Tools/agent/jet-env");
+  const jetEnv = options.jetEnv ?? path.join(repoDir, "Tools/agent/JetEnv.jet");
   const compiler = await toolVersion(cc);
   const started = monotonicNs();
   const native = await buildNative(outDir, cc);

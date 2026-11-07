@@ -110,10 +110,10 @@ then rerun `install.sh`.
 Useful repository checks, with `JET` naming an admitted Jet executable, are:
 
 ```sh
-Tools/agent/jet-env "$JET" self devtools grammars && git diff --exit-code -- Tools/editors
-Tools/agent/jet-env "$JET" test Compiler/JetLSP
-Tools/agent/jet-env "$JET" self lsp doctor
-Tools/agent/jet-env "$JET" self lsp --bench
+Tools/agent/JetEnv.jet "$JET" self devtools grammars && git diff --exit-code -- Tools/editors
+Tools/agent/JetEnv.jet "$JET" test Compiler/JetLSP
+Tools/agent/JetEnv.jet "$JET" self lsp doctor
+Tools/agent/JetEnv.jet "$JET" self lsp --bench
 ```
 
 The benchmark reports cold, warm-hit, and warm-edit measurements plus query

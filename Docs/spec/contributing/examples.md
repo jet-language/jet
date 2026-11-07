@@ -231,7 +231,7 @@ Run the complete census with an already-built compiler from the root of a
 committed source tree:
 
 ```sh
-JET=/path/to/jet Tools/agent/jet-env jet Tools/agent/VerifyFull.jet
+JET=/path/to/jet Tools/agent/JetEnv.jet jet Tools/agent/VerifyFull.jet
 ```
 
 It pins the source to the commit of an inherited `../source.manifest.json`, or

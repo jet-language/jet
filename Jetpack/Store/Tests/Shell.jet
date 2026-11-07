@@ -25,16 +25,42 @@ env_shell_test_temp_dir: fn(prefix: String) -> String {
     files.tmpdir(prefix) ?? panic("claim temp dir")
 }
 
+// script(1) runs its `-c` command with $SHELL, else the account's login
+// shell; every command here is POSIX sh, so SHELL names sh from PATH.
+env_shell_test_sh: fn() -> String {
+    files.which("sh") ?? panic("sh is required for the PTY claims")
+}
+
+// The claims that drive bash, zsh and fish each: false once the claim reports
+// SKIP-HOST for the first absent shell, so the claim ends there.
+env_shell_test_require_shells: fn() -> Bool {
+    loop shell in ([String]{"bash", "zsh", "fish"}) {
+        if kit_require_tool(shell) == None -> return false
+    }
+    true
+}
+
+// script(1) running `shell_command` with a fresh HOME, the XDG base
+// directories unset so the shell derives its state paths from it.
+// Interactive startup writes under HOME (fish syncs its universal variables
+// to disk on every `set -U`), so a claim neither reads nor writes the
+// account's HOME, nor waits on its disk.
+env_shell_test_script: fn(shell_command: String, home: String) -> ProcessSpec {
+    process.cmd([String]{"script", "-qec", shell_command, "/dev/null"}).env("SHELL", env_shell_test_sh()).env("HOME", home).env_remove("XDG_CONFIG_HOME").env_remove("XDG_DATA_HOME").env_remove("XDG_STATE_HOME").env_remove("XDG_CACHE_HOME")
+}
+
 // Run `shell_command` under script(1) so the shell gets a real terminal,
 // feed `input`, and return stdout without carriage returns.
 env_shell_test_pty: fn(shell_command: String, input: String, no_color: Bool) -> String {
-    spec := process.cmd([String]{"script", "-qec", shell_command, "/dev/null"}).env_remove("NO_COLOR").env_remove("FORCE_COLOR")
+    home: env_shell_test_temp_dir("jetpack-shell-home")
+    spec := env_shell_test_script(shell_command, home).env_remove("NO_COLOR").env_remove("FORCE_COLOR")
     spec = if no_color -> spec.env("NO_COLOR", "").env("TERM", "dumb") else -> spec.env("TERM", "xterm-256color")
     spec = spec.stdin(.Stream).stdout(.Capture).stderr(.Capture).timeout(time.duration_seconds(10))
     child := spec.spawn() ?? panic("spawn PTY through script(1)")
     child.stdin.write_text(input) ?? panic("write PTY input")
     child.stdin.close()
     receipt: child.wait() ?? panic("wait for PTY shell")
+    files.remove_all(home).drop("test cleanup")
     if receipt.timed_out -> panic("PTY shell did not reach exit sentinel within 10s")
     if !receipt.success -> panic("stdout:\n{receipt.output}\nstderr:\n{receipt.errors}")
     receipt.output.replace(env_shell_test_cr(), "")
@@ -44,7 +70,8 @@ env_shell_test_pty: fn(shell_command: String, input: String, no_color: Bool) -> 
 // line editor separately, and prove the help selection never executes
 // before an explicit Enter.
 env_shell_test_pty_prefill_oracle: fn(shell_command: String, marker: String, trigger: String) -> String {
-    spec: process.cmd([String]{"script", "-qec", shell_command, "/dev/null"}).env("NO_COLOR", "1").env("TERM", "dumb").stdin(.Stream).stdout(.Capture).stderr(.Capture)
+    home: env_shell_test_temp_dir("jetpack-shell-home")
+    spec: env_shell_test_script(shell_command, home).env("NO_COLOR", "1").env("TERM", "dumb").stdin(.Stream).stdout(.Capture).stderr(.Capture)
     child := spec.spawn() ?? panic("spawn PTY through script(1)")
     child.stdin.write_text("echo JET_HELP_WIDGET_START\n") ?? panic("write start")
     time.sleep(time.duration_ms(250))
@@ -58,6 +85,7 @@ env_shell_test_pty_prefill_oracle: fn(shell_command: String, marker: String, tri
     child.stdin.write_text("echo JET_HELP_WIDGET_RETURNED\nexit 0\n") ?? panic("write exit")
     child.stdin.close()
     receipt: child.wait() ?? panic("wait for PTY shell")
+    files.remove_all(home).drop("test cleanup")
     if !receipt.success -> panic("stdout:\n{receipt.output}\nstderr:\n{receipt.errors}")
     transcript: receipt.output.replace(env_shell_test_cr(), "")
     assert(transcript.contains("JET_DELEGATED"), transcript)
@@ -176,6 +204,7 @@ env_shell_test_read_marker: fn(marker: String, shell: String, output: String) {
 }
 
 #Test("help prefill widgets preserve edit buffer in real shells") {
+    if !env_shell_test_require_shells() -> return
     dir: env_shell_test_temp_dir("jetpack-help-prefill-")
     marker: files.join(dir, "selected-bytes")
     fake_jet: files.join(dir, "jet")
@@ -257,6 +286,7 @@ env_shell_test_read_marker: fn(marker: String, shell: String, output: String) {
 }
 
 #Test("hostile prompt labels are not reexpanded in real shells") {
+    if !env_shell_test_require_shells() -> return
     path: sys.get("PATH") ?? ""
     backtick: "`"
 
@@ -305,11 +335,13 @@ env_shell_test_read_marker: fn(marker: String, shell: String, output: String) {
 }
 
 #Test("fish prompt receipts are colored in a real pty") {
+    _: kit_require_tool("fish") ?? return
     fish: env_shell_test_pty("TERM=dumb fish -C {env_hook_sh_quote(env_shell_fish_init("web-api", PromptPathMode.Short, PromptStripMode.Off))} -i", "echo JETPACK_CAPTURE_START\nfunction jet; sleep .3; test $argv[1] = build; end\njet build\njet test\necho JETPACK_FISH_COLOR_DONE\nexit 0\n", false)
     env_shell_test_assert_receipt_colors_after_marker(fish)
 }
 
 #Test("zsh prompt receipts are colored in a real pty") {
+    _: kit_require_tool("zsh") ?? return
     zdir: env_shell_write_temp_dir("jetpack-prompt-color-zdotdir")
     files.write(files.join(zdir, ".zshrc"), env_shell_zsh_rc("web-api", PromptPathMode.Short, PromptStripMode.Off)) ?? panic("write zshrc")
     zsh: env_shell_test_pty("ZDOTDIR={zdir} zsh -d -i", "unset zle_bracketed_paste\necho JETPACK_CAPTURE_START\nunalias jet 2>/dev/null\nunfunction jet 2>/dev/null\njet() {{ [[ $1 = build ]] }}\njet build\njet test\nexit 0\n", false)
@@ -339,7 +371,7 @@ env_shell_test_read_marker: fn(marker: String, shell: String, output: String) {
 }
 
 #Test("fish prompt pty reports real command receipts when available") {
-    process.cmd([String]{"fish", "--version"}).stdout(.Capture).stderr(.Capture).run() ?? panic("fish must be present for prompt PTY coverage")
+    _: kit_require_tool("fish") ?? return
     init: env_shell_fish_init("web-api", PromptPathMode.Short, PromptStripMode.On)
     output: env_shell_test_pty("fish --no-config -C {env_hook_sh_quote(init)} -i", "echo JETPACK_CAPTURE_START\nfunction jet; sleep .3; test $argv[1] = build; end\njet build\njet test\n{env_shell_control(7)}\n__jetpack_status_words\necho JETPACK_FISH_PTY_DONE\nexit 0\n", true)
     assert(output.contains("build ok"), output)
@@ -352,7 +384,7 @@ env_shell_test_read_marker: fn(marker: String, shell: String, output: String) {
 }
 
 #Test("zsh prompt pty exercises native hooks glance strip and no color") {
-    process.cmd([String]{"zsh", "--version"}).stdout(.Capture).stderr(.Capture).run() ?? panic("zsh must be present for prompt PTY coverage")
+    _: kit_require_tool("zsh") ?? return
     dir: env_shell_write_temp_dir("jetpack-prompt-test-zdotdir")
     files.write(files.join(dir, ".zshrc"), env_shell_zsh_rc("web-api", PromptPathMode.Short, PromptStripMode.On)) ?? panic("write zshrc")
     output: env_shell_test_pty("ZDOTDIR={dir} zsh -d -i", "unset zle_bracketed_paste\necho JETPACK_CAPTURE_START\nunalias jet 2>/dev/null\nunfunction jet 2>/dev/null\njet() {{ sleep .3; [[ $1 = build ]] }}\njet build\njet test\n{env_shell_control(7)}\n__jetpack_status_words\necho JETPACK_ZSH_PTY_DONE\nexit 0\n", true)

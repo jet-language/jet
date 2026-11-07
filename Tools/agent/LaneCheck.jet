@@ -9,8 +9,29 @@
 // The default run checks the whole compiler project (Compiler/, the unit the
 // native self-host builds) with JET_KEEP_GOING=1, so every error in every item
 // is reported at once. A path argument checks that file or project instead.
+// A path under Compiler/JetRuntime is checked in its assembled mode (#6670):
+// the one unit Compiler/JetRuntime/sources.list assembles, as the runtime
+// build (Tools/agent/CompilerPackages.jet runtime-unit) assembles it, with each
+// diagnostic located at the listed source line it came from. A shared source
+// the list also names (Compiler/JetBackend/Source/OS/*.jet) is checked in its
+// own package and in the assembled unit.
+// A Compiler/Prelude source is checked as the compiler embeds it (#6670 c1).
+// First the generator check that holds the compiler's copies of it equal to
+// it: CoreSourceRows.jet for Core.jet, CoreSourceParts.tsv, Effects.jet and
+// CoreCallExtensions.jet, the Core surface ledger for CoreSurfaceInventory.jet,
+// DiagnosticRows.jet for Diagnostics.jet, OwnedTraitRows.jet for Traits.jet
+// and core/prelude.jet, and PreludeSources.jet for Markers.jet, Derives.jet,
+// Errors.jet and Units.jet. Then every Prelude Jet file the compiler embeds
+// gets `jet check --prelude`: all but the inputs only a generator reads
+// (Core.jet, CoreSurfaceInventory.jet and the readers' core/prelude.jet); a
+// jet without that mode prints PRELUDE UNCHECKED and never CHECK OK.
+// A Core source is checked as Core, the library that may define `__` names:
+// a public module or a private part (its CoreSourceOwned.jet row) as the
+// one-import probe of its module that Tools/agent/CoreModuleCheck.jet uses,
+// with this checkout as the toolchain root; a runtime unit as itself, which
+// the compiler admits as that Core row. A Core path with no row fails.
 // Every mode first runs the personal-information guard (#6564 c5),
-// Jetpack/Bootstrap's assembly check, which refuses an unlisted Jetpack source
+// Jetpack/Bootstrap/Assemble.jet's check mode, which refuses an unlisted Jetpack source
 // or a drifted compiler slice, the unsafe-region ratchet in --check mode
 // (#6605), which refuses any #Unsafe region Docs/spec/safety.md does not
 // record, and any recorded row the checkout no longer has, and the vocabulary
@@ -73,7 +94,8 @@ run: fn() {
         print("CHECK FAILED — personal or machine information in the checkout (see above)")
         process.exit(1)
     }
-    assembly: process.cmd([String]{"node", "Jetpack/Bootstrap/assemble.mjs", "check"}).cwd(repo).env("JETPACK_WORKER", "lanecheck").run() ?? return assembly_refused("node Jetpack/Bootstrap/assemble.mjs could not start: {err}")
+    jet: env_or("JET", process.which("jet") ?? "jet")
+    assembly: process.cmd([String]{jet, "Jetpack/Bootstrap/Assemble.jet", "check"}).cwd(repo).env("JETPACK_WORKER", "lanecheck").run() ?? return assembly_refused("{jet} could not run Jetpack/Bootstrap/Assemble.jet: {err}")
     if assembly.code != 0 || assembly.signal != None -> return assembly_refused(process.combined_output(assembly).trim_end())
     unsafe_ratchet(repo)
     vocabulary_rows(repo)
@@ -85,7 +107,7 @@ run: fn() {
     process.exit(compiler_check(repo, args))
 }
 
-assembly_refused: fn(output: String) -[Exec, IO]> () {
+assembly_refused: fn(output: String) -[Exec, IO]> Never {
     print(output)
     print("CHECK FAILED — the Jetpack assembly check refused the sources (unlisted file or compiler-slice drift, see above)")
     process.exit(1)
@@ -164,6 +186,74 @@ runtime_generators: fn(repo: String) -[Env, Exec, FS, IO, Time.Wait]> Int Never!
     1
 }
 
+// --- Compiler/Prelude -------------------------------------------------------
+
+PRELUDE_TREE: "Compiler/Prelude"
+// The inputs only a generator reads (row DSLs and the readers' prelude): its
+// check is their whole check.
+PRELUDE_GENERATOR_INPUTS: [String]{"Core.jet", "CoreSourceParts.tsv", "CoreSurfaceInventory.jet", "core/prelude.jet"}
+PRELUDE_UNCHECKED: "PRELUDE UNCHECKED: needs a seed with the prelude check mode"
+
+// Whether `relative` is a Prelude source LaneCheck checks as embedded: a
+// `.jet` or `.tsv` file under Compiler/Prelude other than its package.jet.
+prelude_source: fn(relative: String) -> Bool Never! {
+    if !relative.starts_with("{PRELUDE_TREE}/") || relative.removeprefix("{PRELUDE_TREE}/") == "package.jet" -> return false
+    relative.ends_with(".jet") || relative.ends_with(".tsv")
+}
+
+// The command whose `--check` holds the compiler's copies of Prelude file
+// `name` (its path under Compiler/Prelude) equal to it, run with `jet`; empty
+// when no generator reads the file.
+prelude_generator: fn(name: String, jet: String) -> [String] Never! {
+    if name == {
+        "Core.jet" | "CoreSourceParts.tsv" | "Effects.jet" | "CoreCallExtensions.jet" -> [String]{jet, "Tools/agent/CoreSourceRows.jet", "--check"}
+        "CoreSurfaceInventory.jet" -> [String]{jet, "Tools/agent/CoreSurfaceLedger.jet", "--check"}
+        "Diagnostics.jet" -> [String]{jet, "Tools/agent/DiagnosticRows.jet", "--check"}
+        "Traits.jet" | "core/prelude.jet" -> [String]{jet, "Tools/agent/OwnedTraitRows.jet", "--check"}
+        "Markers.jet" | "Derives.jet" | "Errors.jet" | "Units.jet" -> [String]{jet, "Tools/agent/PreludeSources.jet", "--check"}
+        else -> [String]{}
+    }
+}
+
+// Whether `jet` has `jet check --prelude`: given no file, that mode alone
+// refuses with its own usage line.
+prelude_mode: fn(repo: String, jet: String) -[Exec, Time.Wait]> Bool Never! {
+    receipt: process.cmd([String]{jet, "check", "--prelude"}).cwd(repo).env("NO_COLOR", "1").run() ?? return false
+    process.combined_output(receipt).contains("`jet check --prelude` checks one Compiler/Prelude")
+}
+
+// A Prelude source (`relative`, at `target`): its generator check, then, for
+// a Prelude Jet file the compiler embeds (no generator-only input), `jet check
+// --prelude`. None when that file needs the mode and `jet` has none.
+prelude_check: fn(repo: String, jet: String, relative: String, target: String, scratch: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Ran? Never! {
+    name: relative.removeprefix("{PRELUDE_TREE}/")
+    generator: prelude_generator(name, jet)
+    text := ""
+    generated := 0
+    if generator.len() > 0 {
+        command: generator.join(" ")
+        receipt: process.cmd(generator).cwd(repo).env("JET_TOOLCHAIN_ROOT", env_or("JET_TOOLCHAIN_ROOT", repo)).output_limit(268435456).run() ?? return Val(Ran{code: 127, text: "error: {relative}: `{command}` could not start: {err}\n"})
+        output: process.combined_output(receipt)
+        text = output
+        if receipt.code != 0 || receipt.signal != None {
+            generated = 1
+            text = "{output}\nerror: {relative}: `{command}` failed: a compiler copy of it differs (see above)\n"
+        }
+    }
+    if !name.ends_with(".jet") || PRELUDE_GENERATOR_INPUTS.contains(name) -> return Val(Ran{code: generated, text: text})
+    // A generator failure is reported beside the prelude check, not instead of it.
+    if !prelude_mode(repo, jet) {
+        if generated != 0 -> return Val(Ran{code: generated, text: text})
+        return None
+    }
+    checked: run_check(repo, jet, [String]{"check", "--prelude", target}, scratch)
+    code := checked.code
+    if generated != 0 {
+        code = generated
+    }
+    Val(Ran{code: code, text: "{text}{checked.text}"})
+}
+
 // --- compiler check ---------------------------------------------------------
 
 compiler_check: fn(repo: String, args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
@@ -186,9 +276,9 @@ compiler_check: fn(repo: String, args: [String]) -[Env, Exec, FS, IO, Time, Time
     // A memory floor alone is not enough: concurrent callers can read "plenty
     // free" in the same instant and then all start together, so at most
     // JET_CHECK_SLOTS lanes hold a slot and the rest wait for one. Each check
-    // runs in its own memory-capped user scope (JET_CHECK_MEM, default 20G:
-    // the whole-compiler check measured 15.4G). A host without a systemd user
-    // session (hosted CI) sets JET_CHECK_MEM=off and relies on its own VM limit.
+    // runs with its address space capped (JET_CHECK_MEM, default 20G: the
+    // whole-compiler check measured 15.4G resident); JET_CHECK_MEM=off runs
+    // it uncapped.
     slots: int_or(env_or("JET_CHECK_SLOTS", "2"), 2)
     lockdir: "{user_cache()}/lane-check-slots"
     files.create_dir_all(lockdir) ?? {
@@ -212,7 +302,25 @@ compiler_check: fn(repo: String, args: [String]) -[Env, Exec, FS, IO, Time, Time
     // The log exists from the start and its .rc only once the check ends, so a
     // killed check leaves a log without a status: incomplete, never success.
     files.write(log, "") ?? term.eprint("lane-check: cannot write {log}: {err}")
-    ran: run_check(repo, jet, target, scratch)
+    root: files.realpath(repo) ?? repo.copy()
+    relative: if target.starts_with("{root}/") -> target.removeprefix("{root}/") else -> ""
+    runtime_owned: relative == RUNTIME_TREE || relative.starts_with("{RUNTIME_TREE}/")
+    runtime_shared: !runtime_owned && relative != "" && runtime_sources(repo).paths.contains(relative)
+    ran := Ran{code: 0, text: ""}
+    if {
+        runtime_owned -> ran = runtime_check(repo, jet, scratch)
+        prelude_source(relative) -> ran = prelude_check(repo, jet, relative, target, scratch) ?? {
+            held.clear()
+            print(PRELUDE_UNCHECKED)
+            return 1
+        }
+        relative.starts_with("Core/") && relative.ends_with(".jet") -> ran = core_check(repo, jet, relative, target, scratch)
+        else -> ran = run_check(repo, jet, [String]{"check", target}, scratch)
+    }
+    if runtime_shared {
+        assembled: runtime_check(repo, jet, scratch)
+        ran = Ran{code: if ran.code != 0 -> ran.code else -> assembled.code, text: "{ran.text}{assembled.text}"}
+    }
     held.clear()
     files.write(log, ran.text) ?? term.eprint("lane-check: cannot write {log}: {err}")
     files.write("{log}.rc", "{ran.code}\n") ?? term.eprint("lane-check: cannot write {log}.rc: {err}")
@@ -245,7 +353,29 @@ mem_available_mb: fn() -[FS]> Int Never! {
     0
 }
 
-run_check: fn(repo: String, jet: String, target: String, scratch: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Ran Never! {
+// JET_CHECK_MEM's size (`20G`, `512M`, `4096K` or bare bytes) in bytes, or
+// -1 when it is not one.
+memory_bytes: fn(text: String) -> Int Never! {
+    scale := 1
+    digits := text.copy()
+    if text.ends_with("G") {
+        scale = 1073741824
+        digits = text.removesuffix("G").copy()
+    } else if text.ends_with("M") {
+        scale = 1048576
+        digits = text.removesuffix("M").copy()
+    } else if text.ends_with("K") {
+        scale = 1024
+        digits = text.removesuffix("K").copy()
+    }
+    count: int_or(digits, -1)
+    if count <= 0 -> return -1
+    count * scale
+}
+
+// `jet` with `command` (`check TARGET` or `check --prelude TARGET`), its
+// address space capped at JET_CHECK_MEM (default 20G; `off` for none).
+run_check: fn(repo: String, jet: String, command: [String], scratch: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Ran Never! {
     floor_mb: int_or(env_or("JET_MIN_FREE_MB", "8000"), 8000)
     loop _ in 0..<90 {
         available: mem_available_mb()
@@ -254,17 +384,23 @@ run_check: fn(repo: String, jet: String, target: String, scratch: String) -[Env,
         time.sleep(10s)
     }
     memory: env_or("JET_CHECK_MEM", "20G")
-    argv := if memory == "off" -> [String]{} else -> [String]{"systemd-run", "--user", "--scope", "-q", "-p", "MemoryMax={memory}", "-p", "MemorySwapMax=0"}
-    argv.extend([String]{jet, "check", target})
-    spec: process.cmd(argv).cwd(repo).env("JET_KEEP_GOING", "1").env("TMPDIR", scratch).env("TMP", scratch).env("TEMP", scratch)
+    limit: if memory == "off" -> 0 else -> memory_bytes(memory)
+    if limit < 0 -> return Ran{code: 64, text: "lane-check: JET_CHECK_MEM must be `off` or a size such as 20G, 512M or 4096K, not `{memory}`\n"}
+    argv := [String]{jet.copy()}
+    argv.extend(command.copy())
+    spec := process.cmd(argv).cwd(repo).env("JET_KEEP_GOING", "1").env("TMPDIR", scratch).env("TMP", scratch).env("TEMP", scratch)
         .env("JET_TOOLCHAIN_ROOT", env_or("JET_TOOLCHAIN_ROOT", repo)).timeout(1800s).output_limit(1073741824)
+    if limit > 0 -> spec = spec.memory_limit(limit)
     results: process.run_all([ProcessSpec]{spec}, 1) ?? return Ran{code: 127, text: "lane-check: {argv[0]} could not start: {err}\n"}
     if results[0] == {
         .Ok(receipt) -> {
             code: if receipt.timed_out -> 124 else -> if receipt.signal == .Val(number) -> 128 + number else -> receipt.code
             Ran{code: code, text: "{receipt.output}{receipt.errors}"}
         }
-        .Err(error) -> Ran{code: 127, text: "lane-check: {argv[0]} could not start: {error}\n"}
+        .Err(error) -> if error == {
+            .ResourceLimit(_) -> Ran{code: 125, text: "lane-check: {argv[0]} stopped at its memory cap (JET_CHECK_MEM={memory}): {error}\n"}
+            else -> Ran{code: 127, text: "lane-check: {argv[0]} could not start: {error}\n"}
+        }
     }
 }
 
@@ -327,6 +463,229 @@ file_of: fn(location: String) -> String Never! {
         return parts[0..<parts.len() - 2].join(":")
     }
     location.copy()
+}
+
+// --- Core sources ------------------------------------------------------------
+
+CORE_ROWS: "Compiler/JetFoundation/Source/Registry/CoreSourceOwned.jet"
+
+// What a Core source checks as: the module whose probe loads it (a private
+// part's owner, else its own module), or itself when it is a runtime unit.
+CoreRow: struct {
+    probe_module: String
+    runtime: Bool
+}
+
+// The quoted value after `name: ` in a generated row line.
+quoted_field: fn(line: String, name: String) -> String Never! {
+    line.partition("{name}: \"").tail.partition("\"").head.copy()
+}
+
+// The CoreSourceOwned.jet row of the Core source at `relative`, or None.
+core_row: fn(registry: String, relative: String) -> CoreRow? Never! {
+    loop line in registry.split("\n") {
+        if !line.contains("CoreSourceOwnedRow{{module_name: ") || !line.contains(", path: \"{relative}\", ") -> next
+        owner: quoted_field(line, "owner")
+        return Val(CoreRow{probe_module: if owner != "" -> owner else -> quoted_field(line, "module_name"), runtime: line.contains("runtime: true}}")})
+    }
+    None
+}
+
+// CoreModuleCheck.jet's one-import probe of Core module `name`.
+core_probe_source: fn(name: String) -> String Never! {
+    "use {name}\n\nmain: fn() {{\n    print(\"ok\")\n}}\n"
+}
+
+// `relative` (a Core source) checked as the compiler loads Core: from this
+// checkout (run_check's JET_TOOLCHAIN_ROOT), with Core's privileges.
+core_check: fn(repo: String, jet: String, relative: String, target: String, scratch: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Ran Never! {
+    registry: files.read("{repo}/{CORE_ROWS}") ?? return Ran{code: 1, text: "lane-check: cannot read {CORE_ROWS}: {err}\n"}
+    row: core_row(registry, relative) ?? return Ran{code: 1, text: "lane-check: {relative} has no Core source row in {CORE_ROWS}; run jet Tools/agent/CoreSourceRows.jet\n"}
+    if row.runtime -> return run_check(repo, jet, [String]{"check", target}, scratch)
+    dir: "{scratch}/core-probe.{sys.pid()}"
+    files.create_dir_all(dir) ?? return Ran{code: 1, text: "lane-check: cannot create {dir}: {err}\n"}
+    probe: "{dir}/probe.jet"
+    files.write(probe, core_probe_source(row.probe_module)) ?? return Ran{code: 1, text: "lane-check: cannot write {probe}: {err}\n"}
+    term.eprint("lane-check: {relative} checks as Core module {row.probe_module}: {probe}")
+    run_check(repo, jet, [String]{"check", probe}, scratch)
+}
+
+// --- assembled runtime ------------------------------------------------------
+
+RUNTIME_TREE: "Compiler/JetRuntime"
+RUNTIME_SOURCES: "Compiler/JetRuntime/sources.list"
+RUNTIME_PACKAGE: "Compiler/JetRuntime/package.jet"
+
+// Where one line of the assembled runtime unit came from: a listed source and
+// its 1-based line, or no path for the unit's Core import header.
+UnitLine: struct {
+    path: String
+    line: Int
+}
+
+RuntimeUnit: struct {
+    text: String
+    lines: [UnitLine]
+    problem: String
+}
+
+// The runtime's explicit source manifest: every non-empty, non-comment line,
+// none twice.
+runtime_sources: fn(repo: String) -[FS]> (paths: [String], problem: String) Never! {
+    paths := [String]{}
+    text: files.read("{repo}/{RUNTIME_SOURCES}") ?? return (paths: paths, problem: "cannot read {RUNTIME_SOURCES}: {err}")
+    loop raw in text.split("\n") {
+        line: raw.trim()
+        if line == "" || line.starts_with("#") -> next
+        if paths.contains(line) -> return (paths: [String]{}, problem: "{RUNTIME_SOURCES} lists {line} twice")
+        paths.push(line.copy())
+    }
+    if paths.len() == 0 -> return (paths: paths, problem: "{RUNTIME_SOURCES} lists no source")
+    (paths: paths, problem: "")
+}
+
+runtime_unit: fn(repo: String) -[FS]> RuntimeUnit Never! {
+    listed: runtime_sources(repo)
+    if listed.problem != "" -> return RuntimeUnit{text: "", lines: [UnitLine]{}, problem: listed.problem}
+    texts := [String]{}
+    loop path in listed.paths {
+        text: files.read("{repo}/{path}") ?? return RuntimeUnit{text: "", lines: [UnitLine]{}, problem: "cannot read {path}: {err}"}
+        texts.push(text)
+    }
+    assemble_runtime(listed.paths, texts)
+}
+
+// The runtime unit CompilerPackages.jet runtime-unit assembles: each listed source with its
+// `use` lines (and a multi-line `use x.[` continuation) dropped behind a
+// `// [unit source: PATH]` line, after the distinct Core imports they named
+// and one blank line.
+assemble_runtime: fn(paths: [String], texts: [String]) -> RuntimeUnit Never! {
+    uses := [String]{}
+    body := [String]{}
+    origins := [UnitLine]{}
+    loop index in 0..<paths.len() {
+        path: paths[index]
+        body.push("// [unit source: {path}]")
+        origins.push(UnitLine{path: path.copy(), line: 1})
+        importing := false
+        number := 0
+        loop line in unblock_uses(texts[index]).split("\n") {
+            number += 1
+            if line.starts_with("use ") {
+                if core_use(line) && !uses.contains(line) -> uses.push(line.copy())
+                importing = line.contains("[") && !line.contains("]")
+                next
+            }
+            if importing {
+                if line.contains("]") -> importing = false
+                next
+            }
+            body.push(line.copy())
+            origins.push(UnitLine{path: path.copy(), line: number})
+        }
+    }
+    lines := [UnitLine]{}
+    loop _ in 0..<(uses.len() + 1) -> lines.push(UnitLine{path: "", line: 0})
+    lines.extend(origins)
+    text := uses.copy()
+    text.push("")
+    text.extend(body)
+    RuntimeUnit{text: text.join("\n"), lines: lines, problem: ""}
+}
+
+// `use core.x` or `use alias: core.x`.
+core_use: fn(line: String) -> Bool Never! {
+    rest: line.removeprefix("use ")
+    if rest.starts_with("core.") -> return true
+    parts: rest.partition(": ")
+    parts.sep != "" && parts.head != "" && parts.head.bytes().all(b -> word_byte(b)) && parts.tail.starts_with("core.")
+}
+
+word_byte: fn(b: U8) -> Bool Never! {
+    (b >= (U8{48}) && b <= (U8{57})) || (b >= (U8{65}) && b <= (U8{90})) || (b >= (U8{97}) && b <= (U8{122})) || b == (U8{95})
+}
+
+space_byte: fn(b: U8) -> Bool Never! { b == (U8{32}) || b == (U8{9}) || b == (U8{10}) || b == (U8{13}) || b == (U8{11}) || b == (U8{12}) }
+
+// A `use { … }` block rewritten as one `use` line per row, keeping every line:
+// `use {` and its `}` turn to spaces and each row's last four columns of
+// indentation become `use `. `pub use { … }` stays as written.
+unblock_uses: fn(text: String) -> String Never! {
+    lines := text.split("\n").to_list()
+    indent := ""
+    open := false
+    depth := 0
+    loop at in 0..<lines.len() {
+        line: lines[at].copy()
+        if !open {
+            trimmed: line.trim_start()
+            lead: line.removesuffix(trimmed)
+            if lead.bytes().all(b -> space_byte(b)) && trimmed.starts_with("use {{") && trimmed.removeprefix("use {{").trim() == "" {
+                indent = lead.copy()
+                open = true
+                lines[at] = " ".repeat(line.len())
+            }
+            next
+        }
+        closer: "{indent}}}"
+        if depth == 0 && line.trim_end() == closer {
+            open = false
+            lines[at] = " ".repeat(line.len())
+            next
+        }
+        row: "{indent}    "
+        if depth == 0 && line.starts_with(row) {
+            rest: line.removeprefix(row)
+            first: if rest.count_bytes() > 0 -> rest.bytes()[0] else -> U8{0}
+            if (first >= (U8{65}) && first <= (U8{90})) || (first >= (U8{97}) && first <= (U8{122})) || first == (U8{95}) || first == (U8{34}) -> lines[at] = "{indent}use {rest}"
+        }
+        loop b in line.partition("//").head.bytes() {
+            if b == (U8{91}) -> depth += 1
+            if b == (U8{93}) -> depth -= 1
+        }
+    }
+    lines.join("\n")
+}
+
+// The assembled unit checked beside a copy of the runtime's package.jet, with
+// every location in the unit moved to the source line it came from.
+runtime_check: fn(repo: String, jet: String, scratch: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Ran Never! {
+    unit: runtime_unit(repo)
+    if unit.problem != "" -> return Ran{code: 1, text: "lane-check: the runtime unit cannot be assembled: {unit.problem}\n"}
+    dir: "{scratch}/runtime-unit.{sys.pid()}"
+    files.create_dir_all(dir) ?? return Ran{code: 1, text: "lane-check: cannot create {dir}: {err}\n"}
+    manifest: files.read("{repo}/{RUNTIME_PACKAGE}") ?? return Ran{code: 1, text: "lane-check: cannot read {RUNTIME_PACKAGE}: {err}\n"}
+    files.write("{dir}/package.jet", manifest) ?? return Ran{code: 1, text: "lane-check: cannot write {dir}/package.jet: {err}\n"}
+    path: "{dir}/unit.jet"
+    files.write(path, unit.text) ?? return Ran{code: 1, text: "lane-check: cannot write {path}: {err}\n"}
+    term.eprint("lane-check: assembled runtime unit: {path}")
+    ran: run_check(repo, jet, [String]{"check", path}, scratch)
+    Ran{code: ran.code, text: runtime_locations(ran.text, path, unit.lines)}
+}
+
+// The compiler output with each `--> unit.jet:LINE:COL` naming the listed
+// source and line instead.
+runtime_locations: fn(text: String, unit_path: String, lines: [UnitLine]) -> String Never! {
+    out := [String]{}
+    loop line in text.split("\n") {
+        trimmed: line.trim_start()
+        location: trimmed.removeprefix("-->").trim().partition(" ")
+        file: file_of(location.head)
+        parts: location.head.split(":").to_list()
+        if !trimmed.starts_with("-->") || file == location.head || (file != unit_path && !unit_path.ends_with("/{file}")) {
+            out.push(line.copy())
+            next
+        }
+        number: int_or(parts[parts.len() - 2], -1)
+        if number < 1 || number > lines.len() || lines[number - 1].path == "" {
+            out.push(line.copy())
+            next
+        }
+        origin: lines[number - 1]
+        tail: if location.sep == "" -> "" else -> " {location.tail}"
+        out.push("{line.removesuffix(trimmed)}--> {origin.path}:{origin.line}:{parts[parts.len() - 1]}{tail}")
+    }
+    out.join("\n")
 }
 
 // --- personal-information guard ---------------------------------------------
@@ -553,9 +912,14 @@ personal_info_guard: fn(dir: String) -[Env, Exec, FS, IO, Time.Wait]> Int Never!
         shown += 1
         line := first_hit(dir, file, path_args, [String]{})
         if line == "" -> line = first_hit(dir, file, word_args, [String]{"-i"})
-        term.eprint("  {if line.len() > 200 -> line[0..<200] else -> line}")
+        term.eprint("  {hit_text(line)}")
     }
     65
+}
+
+// A hit line as the guard shows it: its first 200 bytes.
+hit_text: fn(line: String) -> String Never! {
+    if line.len() > 200 -> line[0..<200] else -> line.copy()
 }
 
 first_hit: fn(dir: String, file: String, args: [String], flags: [String]) -[Exec, Time.Wait]> String Never! {
@@ -602,4 +966,53 @@ first_hit: fn(dir: String, file: String, args: [String], flags: [String]) -[Exec
     loop rule in generic -> assert(rule.kind == "path")
     assert_eq(unescape_mount("/mnt/my\\040disk"), "/mnt/my disk")
     assert_eq(noreply_handle("someone@example.com"), "")
+}
+
+#Test("the runtime unit drops imports behind source markers and maps locations back") {
+    alloc: "use core.mem\nuse {{\n    jet_backend.[\n        os_store_i64,\n    ]\n    m: core.mem\n}}\nalloc: fn() {{}}\n"
+    text: "use core.mem\nuse jet_runtime.Alloc\ntext: fn() {{}}\n"
+    unit: assemble_runtime([String]{"R/Alloc.jet", "R/Text.jet"}, [String]{alloc, text})
+    assert_eq(unit.text, "use core.mem\nuse m: core.mem\n\n// [unit source: R/Alloc.jet]\n     \n \nalloc: fn() {{}}\n\n// [unit source: R/Text.jet]\ntext: fn() {{}}\n")
+    assert_eq(unit.lines.len(), 11)
+    assert_eq(unit.lines[6].path, "R/Alloc.jet")
+    assert_eq(unit.lines[6].line, 8)
+    assert_eq(unit.lines[9].line, 3)
+    assert(core_use("use core.files") && core_use("use cf: core.files") && !core_use("use jet_backend.x") && !core_use("use a b: core.x"))
+    moved: runtime_locations("Error [jet.UnknownFunction]: no\n  --> /s/unit.jet:10:5 here\n  --> other.jet:9:5\n  --> /s/unit.jet:1:1\n", "/s/unit.jet", unit.lines)
+    assert_eq(moved, "Error [jet.UnknownFunction]: no\n  --> R/Text.jet:3:5 here\n  --> other.jet:9:5\n  --> /s/unit.jet:1:1\n")
+}
+
+#Test("a Prelude source is routed to its generator check and the prelude mode") {
+    assert(prelude_source("Compiler/Prelude/Traits.jet") && prelude_source("Compiler/Prelude/CoreSourceParts.tsv") && prelude_source("Compiler/Prelude/core/prelude.jet"))
+    assert(!prelude_source("Compiler/Prelude/package.jet") && !prelude_source("Compiler/Prelude/Web/Core/Time.js") && !prelude_source("Compiler/Prelude") && !prelude_source("Compiler/JetCli/Source/Cli/Front.jet"))
+    assert_eq(prelude_generator("Effects.jet", "/j"), [String]{"/j", "Tools/agent/CoreSourceRows.jet", "--check"})
+    assert_eq(prelude_generator("CoreSurfaceInventory.jet", "/j"), [String]{"/j", "Tools/agent/CoreSurfaceLedger.jet", "--check"})
+    assert_eq(prelude_generator("Diagnostics.jet", "/j")[1], "Tools/agent/DiagnosticRows.jet")
+    assert_eq(prelude_generator("core/prelude.jet", "/j")[1], "Tools/agent/OwnedTraitRows.jet")
+    assert_eq(prelude_generator("Units.jet", "/j")[1], "Tools/agent/PreludeSources.jet")
+    assert_eq(prelude_generator("Facts.jet", "/j").len(), 0)
+    assert(PRELUDE_GENERATOR_INPUTS.contains("core/prelude.jet") && PRELUDE_GENERATOR_INPUTS.contains("Core.jet") && !PRELUDE_GENERATOR_INPUTS.contains("Traits.jet"))
+}
+
+#Test("a Core source checks as its module, its part's owner, or its runtime unit") {
+    registry: "    CoreSourceOwnedRow{{module_name: \"core.encoding\", alias: \"core_encoding\", path: \"Core/Encoding/Encoding.jet\", owner: \"\", owned_members: [String]{{}}, runtime: false}},\n    CoreSourceOwnedRow{{module_name: \"core.encoding.stream\", alias: \"__s\", path: \"Core/Encoding/Stream.jet\", owner: \"core.encoding\", owned_members: [String]{{}}, runtime: false}},\n    CoreSourceOwnedRow{{module_name: \"core.files.runtime.k\", alias: \"__k\", path: \"Core/Files/Runtime/K.jet\", owner: \"\", owned_members: [String]{{}}, runtime: true}},\n"
+    own: core_row(registry, "Core/Encoding/Encoding.jet") ?? panic("no module row")
+    assert_eq(own.probe_module, "core.encoding")
+    assert(!own.runtime)
+    part: core_row(registry, "Core/Encoding/Stream.jet") ?? panic("no part row")
+    assert_eq(part.probe_module, "core.encoding")
+    runtime: core_row(registry, "Core/Files/Runtime/K.jet") ?? panic("no runtime row")
+    assert(runtime.runtime)
+    assert(core_row(registry, "Core/Encoding") == None && core_row(registry, "Core/Files/Runtime/K") == None)
+    assert_eq(core_probe_source("core.encoding"), "use core.encoding\n\nmain: fn() {{\n    print(\"ok\")\n}}\n")
+}
+
+#Test("JET_CHECK_MEM sizes read as bytes; anything else is refused") {
+    assert_eq(memory_bytes("20G"), 21474836480)
+    assert_eq(memory_bytes("512M"), 536870912)
+    assert_eq(memory_bytes("4096K"), 4194304)
+    assert_eq(memory_bytes("65536"), 65536)
+    assert_eq(memory_bytes("G"), -1)
+    assert_eq(memory_bytes("0G"), -1)
+    assert_eq(memory_bytes("20GB"), -1)
 }

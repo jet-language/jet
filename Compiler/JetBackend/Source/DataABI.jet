@@ -65,8 +65,12 @@ PROCESS_RESOURCE_OUTPUT: I64{4}
 PROCESS_STREAM_STREAM: I64{0}
 PROCESS_STREAM_INHERIT: I64{1}
 PROCESS_STREAM_CAPTURE: I64{2}
+// Stdout, legal only on stderr: the child's stderr is a copy of its stdout.
+PROCESS_STREAM_STDOUT: I64{3}
+// Private prepared transport data (/dev/null), never a public enum arm.
+PROCESS_STREAM_NULL: I64{4}
 // ONE private public ProcessSpec value carrier.
-PROCESS_SPEC_BYTES: I64{144}
+PROCESS_SPEC_BYTES: I64{184}
 PROCESS_SPEC_CMD: I64{0}
 PROCESS_SPEC_CWD: I64{8}
 PROCESS_SPEC_ENV_CLEAR: I64{16}
@@ -87,6 +91,26 @@ PROCESS_SPEC_POLICY_WIRE: I64{120}
 PROCESS_SPEC_DIRECTORIES: I64{128}
 // process.run_all's private parent-death word (0/1); no public spec field.
 PROCESS_SPEC_PARENT_DEATH: I64{136}
+// `.cpu_affinity(cpus)`: an owned List24 of the asked CPUs as saturated words
+// (0 = unset), checked at launch against the PROCESS_CPU_SET_CPUS set.
+PROCESS_SPEC_CPU_AFFINITY: I64{144}
+// The runtime's affinity mask: 1024 CPUs, the 128-byte cpu_set_t
+// sched_setaffinity reads.
+PROCESS_CPU_SET_CPUS: I64{1024}
+PROCESS_CPU_SET_BYTES: I64{128}
+// `.io_idle()` / `.io_priority(level)`: the class word (PROCESS_IO_PRIORITY_UNSET, _IDLE or
+// _BEST_EFFORT) and the best-effort level as a saturated word, checked at
+// launch against 0..PROCESS_IO_PRIORITY_LEVELS-1.
+PROCESS_SPEC_IO_PRIORITY: I64{152}
+PROCESS_SPEC_IO_PRIORITY_LEVEL: I64{160}
+PROCESS_IO_PRIORITY_UNSET: I64{0}
+PROCESS_IO_PRIORITY_IDLE: I64{1}
+PROCESS_IO_PRIORITY_BEST_EFFORT: I64{2}
+PROCESS_IO_PRIORITY_LEVELS: I64{8}
+// `.memory_scope(bytes)`: 1 when set, and the cap as a saturated word,
+// checked at launch to be positive (ProcessScope.jet).
+PROCESS_SPEC_MEMORY_SCOPE: I64{168}
+PROCESS_SPEC_MEMORY_SCOPE_BYTES: I64{176}
 PROCESS_SPEC_DEFAULT_OUTPUT_LIMIT: I64{67108864}
 // Native-mapped mirrors: Core/Data/Data.jet:29,164-187, not source registrations.
 // Enum8 reuses EncodingABI's shared carrier.

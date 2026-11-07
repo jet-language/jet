@@ -1,6 +1,7 @@
 // The native library feed (the runtime pack's Jet object): the checked
-// functions of a program without an entry, rooted at the entry module's
-// `#Export(c)` functions. Its exports are exactly those rows under the C
+// functions of a program rooted at the entry module's `#Export(c)`
+// functions, never at a startup entry (a `run: fn` is one more export when
+// it is `#Export(c)`). Its exports are exactly those rows under the C
 // export law; no list, name heuristic or source scan selects them. The
 // lifecycle list (Compiler/JetRuntime/lifecycle.list) only orders the
 // constructor/destructor hooks among them. The runtime's intrinsics (float
@@ -547,11 +548,14 @@ ir_export_native_type: fn(ty: Type) -> String? Never! {
 
 // The native object has no generated boundary, so an export is an
 // infallible top-level C function: by-value primitive parameters and a
-// primitive or void result. Every problem of the signature is listed.
+// primitive or void result. Every problem of the signature is listed. Sema
+// refuses every export that can fail (E3203: sema_guest_check_surfaces for
+// a declared carrier, sema_guest_check_export_failures for an inferred one),
+// so a carrier here is a compiler defect.
 ir_export_signature_problems: fn(function: FnBody) -> [String] Never! {
     problems := [String]{}
     if !ir_top_level(function) || function.generic_params.len() != 0 -> problems.push("is not a monomorphic top-level function")
-    if !ir_infallible(function) -> problems.push("has a failure carrier; a native C export is infallible")
+    if !ir_infallible(function) -> panic("checked C export `{function.name}` has a failure carrier; sema refuses it with E3203")
     loop param in function.params {
         if param.convention == AccessConvention.Write {
             problems.push("parameter `{param.name}` is written; C exports take primitives by value")

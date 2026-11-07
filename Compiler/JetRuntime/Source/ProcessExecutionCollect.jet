@@ -1,4 +1,4 @@
-// Plain ProcessSpec collector/lifecycle on the existing Child72 syscall seam.
+// Plain ProcessSpec collector/lifecycle on the existing Child104 syscall seam.
 // ExecutionChild160 and launch/receipt metadata are owned by ProcessExecutionRoutes.
 // stop120 bits: requested=1, closed=2, explicit wait=4, group swept=8.
 process_execution_flags_add: fn(child: I64, flag: I64) {
@@ -348,6 +348,9 @@ process_execution_signal: fn(child: I64, signal: I64, err: I64) -> I64 {
     if (sync_load(wrapping(child + I64{120})).bit_and(I64{2}) != I64{0}) -> return I64{1}
     if (fd_word(native, I64{16}) == I64{1}) -> return I64{1}
     result: host_call(I64{62}, -fd_word(native, I64{8}), signal, I64{0})
+    // ESRCH: the group has nobody left to signal, because the child already
+    // exited and was reaped. Signalling a finished child succeeds.
+    if (result == I64{-3}) -> return I64{1}
     if (result < I64{0}) -> return process_execution_error(fd_word(child, I64{24}), HOST_IO_OP_CLOSE, host_errno_cause(-result), err)
     I64{1}
 }
@@ -374,7 +377,7 @@ process_execution_signal: fn(child: I64, signal: I64, err: I64) -> I64 {
 }
 
 // child.stdin is Rc<RefCell<Option<ProcessStdin>>> shared with its child. The
-// native ProcessStdin handle is the retained HostSpawn Child72; stdin32 = -1 is
+// native ProcessStdin handle is the retained HostSpawn Child104; stdin32 = -1 is
 // the taken writer, seen by every alias.
 process_stdin_closed: fn(err: I64) -> I64 {
     compiler_fs_error(HOST_IO_KIND_CLOSED, HOST_IO_OP_WRITE, rt_static_text("process stdin"), I64{0}, jet_rt_string_clone(rt_static_text("process stdin closed")), err)
@@ -384,7 +387,7 @@ process_stdin_failure: fn(errno: I64, err: I64) -> I64 {
     if (errno == I64{32} || errno == I64{107}) -> return process_stdin_closed(err)
     host_io_other_take(HOST_IO_OP_WRITE, jet_rt_string_clone(rt_static_text("process stdin")), host_errno_cause(errno), err)
 }
-// Borrowed: the field lends the child's own Child72 for the place's lifetime.
+// Borrowed: the field lends the child's own Child104 for the place's lifetime.
 #Export(c) jet_rt_handle_field_process_child_stdin: fn(child: I64) -> I64 { process_execution_native(child) }
 #Export(c) jet_rt_handle_clone_process_stdin: fn(stdin: I64) -> I64 { jet_process_retain_raw(stdin) }
 #Export(c) jet_rt_handle_drop_process_stdin: fn(stdin: I64) { jet_process_drop_raw(stdin) }
@@ -394,8 +397,8 @@ process_stdin_failure: fn(errno: I64, err: I64) -> I64 {
 // the receipt keeps every byte and the child never blocks on an unread pipe.
 #Export(c) jet_rt_handle_field_process_child_stdout: fn(child: I64) -> I64 { process_execution_pipe(child, I64{1}) }
 #Export(c) jet_rt_handle_field_process_child_stderr: fn(child: I64) -> I64 { process_execution_pipe(child, I64{2}) }
-// Some only for a child spawned on a terminal, whose Child72 holds the master
-// at 56. The session retains that Child72, so it outlives every alias of the
+// Some only for a child spawned on a terminal, whose Child104 holds the master
+// at 56. The session retains that Child104, so it outlives every alias of the
 // child; `some` receives it and the selector says whether it was written.
 #Export(c) jet_rt_handle_field_process_child_terminal: fn(child: I64, some: I64) -> I64 {
     native: process_execution_native(child)

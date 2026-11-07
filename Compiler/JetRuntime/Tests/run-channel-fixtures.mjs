@@ -6,9 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { candidateJetc0 } from '../../JetBackend/Tests/jet-front.mjs';
-import { runNativeLibrary } from '../../../Tools/agent/compiler-native-transport.mjs';
-import { parseRuntimeExports, runtimeLifecycleList } from '../../../Tools/agent/runtime-route-abi.mjs';
+import { candidateJetc0, runNativeLibrary, runtimeLifecycleList } from '../../JetBackend/Tests/jet-front.mjs';
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const [output, mode] = process.argv.slice(2);
 const parkedModes = ['prepare-native', 'prepare-seed', 'link-seed', 'run-seed', 'cross', 'fatal-reference', 'perf-reference'];
@@ -49,7 +47,7 @@ if (mode === 'assemble' || mode.startsWith('assemble-')) {
   const names = [...unit.matchAll(/^#Export\(c\)\s+(\w+): fn\(/gm)].map(m=>m[1]);
   if (new Set(names).size !== names.length) throw Error('duplicate fixture exports');
   writeFileSync(join(fixture,'Source/Fixture.jet'),unit);
-  writeFileSync(join(fixture,'lifecycle.list'),runtimeLifecycleList(parseRuntimeExports(unit,'Source/Fixture.jet')));
+  writeFileSync(join(fixture,'lifecycle.list'),runtimeLifecycleList(unit));
   writeFileSync(join(fixture,'package.jet'),read('Compiler/JetRuntime/package.jet'));
 } else if (mode === 'lower') {
   const prefix=join(fixture,'fixture');

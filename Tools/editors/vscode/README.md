@@ -161,8 +161,8 @@ From the repository root, with `JET` naming an admitted Jet executable, the
 language-server test and deterministic benchmark can be run with:
 
 ```sh
-Tools/agent/jet-env "$JET" test Compiler/JetLSP
-Tools/agent/jet-env "$JET" self lsp --bench
+Tools/agent/JetEnv.jet "$JET" test Compiler/JetLSP
+Tools/agent/JetEnv.jet "$JET" self lsp --bench
 ```
 
 The benchmark reports cold, warm-hit, and warm-edit measurements plus cache

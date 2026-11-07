@@ -4,11 +4,11 @@ Read metadata/linked primary sources with static readers; browser only when
 needed. Retrieve subtitles/comments without downloading video by default:
 
 ```sh
-Tools/agent/jet-env nix shell nixpkgs#yt-dlp --command yt-dlp \
+Tools/agent/JetEnv.jet nix shell nixpkgs#yt-dlp --command yt-dlp \
   --skip-download --write-subs --write-auto-subs --sub-langs 'en.*' \
   --sub-format json3 --write-comments --write-info-json \
   -o "$CAPTURE_ROOT/%(id)s.%(ext)s" 'VIDEO_URL'
-Tools/agent/jet-env node .agents/skills/mine-for-jet-v2/scripts/transcript.mjs \
+Tools/agent/JetEnv.jet node .agents/skills/mine-for-jet-v2/scripts/transcript.mjs \
   --input "$CAPTURE_ROOT/VIDEO_ID.en.json3" --output "$CAPTURE_ROOT/transcript.txt"
 ```
 

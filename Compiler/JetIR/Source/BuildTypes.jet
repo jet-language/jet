@@ -761,7 +761,7 @@ ir_process_member: fn(m: &IRModule, p: IRProgram, ty: Type, name: String) -> IRM
     nominal: ir_nominal_name(ir_untag(ty)) ?? return None
     handle: ir_handle_runtime(p, nominal) ?? return None
     fields: if handle.runtime == {
-        "ProcessReceipt" -> [String]{"code", "output", "errors", "success", "signal", "timed_out", "executable_identity", "argv", "input_digest", "policy_digest", "backend", "authority", "descendants", "limits", "outputs", "redacted", "pid", "limit_hit"}
+        "ProcessReceipt" -> [String]{"code", "output", "errors", "success", "signal", "timed_out", "executable_identity", "argv", "input_digest", "policy_digest", "backend", "authority", "descendants", "limits", "outputs", "redacted", "pid", "limit_hit", "peak_memory_bytes", "user_cpu_ns", "system_cpu_ns"}
         "ProcessPlan" -> [String]{"executable_identity", "argv", "input_digest", "policy_digest", "backend", "authority", "descendants", "limits", "outputs"}
         "JetTestSuite" -> [String]{"iteration", "result"}
         "JetGameScene" -> [String]{"assets", "input"}
@@ -2231,6 +2231,14 @@ ir_binary: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, op: TBinaryOp, overflow
             if ir_word_record(m, p, b.f.slot_type[right]) == .Val(right_record) -> return ir_time_binary(m, p, b, op, site, left, left_record, right, right_record, span)
         }
     }
+    // A compound update of an exact number (`first += 1.25` on a Decimal
+    // place) reaches the builder as the operator itself: it calls the
+    // core.math helper the checked `+`, `-` and `*` call.
+    precise: ir_render_precise(p, left_ty)
+    if precise != "" && (op == .Add || op == .Sub || op == .Mul) {
+        function: if op == .Add -> "add" else if op == .Sub -> "sub" else -> "mul"
+        return ir_precise_values(m, p, b, left_ty, precise, function, [Int]{left, right}, span)
+    }
     if op == .Add || op == .Sub || op == .Mul || op == .Div {
         left_slot_ty: m.types[b.f.slot_type[left]].ty.copy()
         right_slot_ty: m.types[b.f.slot_type[right]].ty.copy()
@@ -3000,8 +3008,11 @@ ir_collect_unions: fn(ty: Type, found: &[Type]) Never! {
     }
 }
 
-// The call argument `value` widened to the union `union_ty` (sema
-// widen_to_union).
+// The value `value` widened to the union `written` (sema widen_to_union) for
+// a holder that keeps it: a move parameter or a struct field. The box owns
+// its payload, as ir_store_at owns any stored value (ir_own: a copy, or the
+// move of a value that has no clone). A read argument is lent instead
+// (ir_widen_union_lent).
 ir_widen_union: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, written: Type, span: Span) -> Int Never! {
     union_ty: ir_fact(p, b, written, span)
     if ir_failed(b) -> return -1
@@ -3010,6 +3021,103 @@ ir_widen_union: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, writte
     payload: ir_value_as(m, p, b, value, member_row, span)
     if ir_failed(b) -> return -1
     ir_union_box(m, p, b, payload, value_ty, union_ty, span)
+}
+
+// A trait or union box that a read call argument lends its payload to:
+// `box_bytes` long, with the payload's bits (laid out as `row`) at `offset`
+// in it, or at 0 in `wrapper` (-1 if none), the `wrapper_bytes` box of a
+// recursive union edge. After the call, ir_box_lends_end ends the box.
+IRBoxLend: struct { boxed: Int, box_bytes: Int, wrapper: Int, wrapper_bytes: Int, row: Int, offset: Int }
+
+// The read call argument `value` widened to the union `written` (sema
+// widen_to_union) and lent to the callee (ir_union_lend).
+ir_widen_union_lent: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, written: Type, lends: &[IRBoxLend], span: Span) -> Int Never! {
+    union_ty: ir_fact(p, b, written, span)
+    if ir_failed(b) -> return -1
+    value_ty: ir_ty(p, b, value)
+    member_row: ir_value_type(m, p, value_ty) ?? return ir_type_fail(b, span, value_ty)
+    payload: ir_value_as(m, p, b, value, member_row, span)
+    if ir_failed(b) -> return -1
+    ir_union_lend(m, p, b, payload, value_ty, union_ty, lends, span)
+}
+
+// The read argument `payload` (of member type `member_ty`) as a box of the
+// union `union_ty` for one call. A fresh value, or a value without a drop,
+// is boxed as ir_union_box boxes it: the box owns the value, and the call's
+// release drops both. A value another holder keeps is lent: its bits go into
+// the box with no new owner (no clone, no move), the box is not a fresh
+// temporary, and `lends` gets its row (ir_box_lends_end). That keeps the
+// holder's drop the only drop of the value.
+ir_union_lend: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, payload: Int, member_ty: Type, union_ty: Type, lends: &[IRBoxLend], span: Span) -> Int Never! {
+    if payload < 0 || b.fresh[payload] || !ir_has_drop(m, b, payload) -> return ir_union_box(m, p, b, payload, member_ty, union_ty, span)
+    value_ty: ir_untag(member_ty)
+    boxed: ir_union_box(m, p, b, -1, value_ty, union_ty, span)
+    if ir_failed(b) -> return -1
+    b.fresh[boxed] = false
+    box_row: b.f.slot_type[boxed]
+    box_bytes: ir_box_bytes(m, p, box_row)
+    target: ir_untag(union_ty)
+    row: ir_type_def(p, ir_union_key(target)) ?? return ir_fail_slot(b, span, "union {ir_type_name(target)} without a definition")
+    index: ir_variant_index(p, row, type_union_member_tag(value_ty)) ?? return ir_fail_slot(b, span, "{ir_type_name(value_ty)} is no member of {ir_type_name(target)}")
+    members: ir_variant_members(m, p, row, [Type]{}, index) ?? return ir_fail_slot(b, span, "layout of {ir_type_name(target)}")
+    if members.len() != 1 -> return ir_fail_slot(b, span, "layout of {ir_type_name(target)}")
+    member: members[0]
+    holder := boxed
+    offset := member.offset
+    wrapper := -1
+    wrapper_bytes := 0
+    if member.boxed {
+        size: m.types[member.ty].size
+        wrapper_bytes = ir_align8(if size < 8 -> 8 else -> size)
+        pointer_row: ir_pointer_row(m)
+        wrapper = ir_box_alloc(m, b, wrapper_bytes, pointer_row)
+        b.fresh[wrapper] = false
+        ir_emit(b.f, IROp.Store, -1, boxed, member.offset, wrapper, b.line)
+        holder = wrapper
+        offset = 0
+    }
+    ir_store_lent(m, b, holder, offset, payload, member.ty)
+    lends.push(IRBoxLend{boxed: boxed, box_bytes: box_bytes, wrapper: wrapper, wrapper_bytes: wrapper_bytes, row: member.ty, offset: offset})
+    boxed
+}
+
+// Stores the bits of `payload`, laid out as `row`, at `offset` in the box
+// `holder` with no new owner (no clone, no move): the box only lends the
+// value (IRBoxLend).
+ir_store_lent: fn(m: &IRModule, b: &IRBuilder, holder: Int, offset: Int, payload: Int, row: Int) Never! {
+    if m.types[row].kind == .Aggregate {
+        address: ir_temp(m, b, row)
+        ir_emit(b.f, IROp.Offset, address, holder, offset, -1, b.line)
+        ir_emit(b.f, IROp.CopyBytes, -1, address, payload, m.types[row].size, b.line)
+    } else {
+        ir_emit(b.f, IROp.Store, -1, holder, offset, payload, b.line)
+    }
+}
+
+// Ends each box a read argument was lent to, after the call, the outermost
+// first (an Option holding a lent trait box ends before that box). The
+// call's owner is usually the box's last: the box (and its wrapper) is freed
+// and the payload stays with its holder alone. A callee that kept a share of
+// the box (`v.copy()` of a union parameter) leaves the box to that share, so
+// the payload bits in it get an owner of their own (ir_copy_fixup_at). Sema
+// refuses a copy of a value with no clone (E0211), so that share never holds
+// a handle.
+ir_box_lends_end: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, lends: [IRBoxLend]) Never! {
+    bool_row: ir_type_row(m, Type.Bool) ?? 0
+    loop at in 0..<lends.len() {
+        lend: lends[lends.len() - 1 - at]
+        last: ir_runtime(m, b, "jet_rt_block_release", [Int]{lend.boxed}, bool_row)
+        ir_open_if(b.f, last, b.line)
+        if lend.wrapper >= 0 {
+            wrapper_bytes: ir_word_const(m, b, lend.wrapper_bytes)
+            ir_free(m, b, lend.wrapper, wrapper_bytes)
+        }
+        box_bytes: ir_word_const(m, b, lend.box_bytes)
+        ir_free(m, b, lend.boxed, box_bytes)
+        ir_else(b.f, b.line)
+        ir_copy_fixup_at(m, p, b, lend.row, if lend.wrapper >= 0 -> lend.wrapper else -> lend.boxed, lend.offset)
+        ir_end(b.f, b.line)
+    }
 }
 
 // A new box of the structural enum of union `union_ty` holding `payload`

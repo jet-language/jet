@@ -1,0 +1,617 @@
+// The performance baseline store's update half. The
+// manifest `.jet/perf/baselines/names/<name>.json` chains every accepted
+// report by content hash through audited generations, and
+// `.jet/perf/baselines/objects/<report_id>.json` keeps each accepted report
+// byte-for-byte. An update is planned against the current manifest without
+// writing anything, then applied under the baselines lock only while the
+// manifest is still the one it was planned against.
+use {
+    store_text: core.text
+    jet_foundation.[CanonicalJSON, CanonicalJSONField, canonical_json_bytes, canonical_json_equal, canonical_json_parse, perf_report_object_new, perf_stable_id, perf_verify_budget_report]
+}
+
+// A measurement without a staleness policy goes stale after 30 days.
+JET_CLI_BUDGET_STALE_SECONDS: 2592000
+JET_CLI_BUDGET_MANIFEST_SCHEMA: "jet.budget-manifest"
+JET_CLI_BUDGET_AUDIT_KEYS: [String]{"accepted_at", "actor_label", "audit_id", "flags", "kind", "prior_head_report_id", "prior_state_id", "reason", "report_id"}
+// The measurement, content and subject fields a prior
+// generation must share with the candidate.
+JET_CLI_BUDGET_COMPATIBLE_MEASUREMENT: [String]{"budget_spec_sha256", "metric", "unit", "direction", "comparison", "target_class", "provider", "context_key"}
+JET_CLI_BUDGET_COMPATIBLE_CONTENT: [String]{"toolchain", "privacy"}
+JET_CLI_BUDGET_COMPATIBLE_SUBJECT: [String]{"target_triple", "target_class", "profile"}
+
+// How an update accepts its report; a bootstrap and an
+// accepted regression carry their reason.
+JetCLIBudgetUpdateKind: enum {
+    Pass
+    Bootstrap(String)
+    AcceptRegression(String)
+}
+
+// A planned update: the manifest and head it was planned
+// against, which the apply re-checks under the lock.
+JetCLIBudgetUpdatePlan: struct {
+    baseline: String
+    report_id: String
+    prior_manifest_id: String?
+    prior_head_report_id: String?
+    accepted_at: String
+    kind: JetCLIBudgetUpdateKind
+}
+
+// The update plan over the verified report `report`; nothing is written.
+jet_cli_budget_plan_update: fn(root: String, baseline: String, report: CanonicalJSON, report_id: String, kind: JetCLIBudgetUpdateKind, accepted_at: String) -> JetCLIBudgetUpdatePlan JetCLIBudgetFailure! {
+    jet_cli_budget_store_kind(kind) ?? return Err(err)
+    _: jet_cli_budget_store_seconds(accepted_at) ?? return Err(err)
+    measurements: jet_cli_budget_store_measurements(report) ?? return Err(err)
+    jet_cli_budget_store_evidence_check(measurements, kind) ?? return Err(err)
+    current: jet_cli_budget_store_read_manifest(root, baseline) ?? return Err(err)
+    absent: current == .Null
+    if absent && !jet_cli_budget_store_is_bootstrap(kind) -> return Err(jet_cli_budget_failure("baseline is absent; bootstrap with an explicit reason"))
+    jet_cli_budget_store_eligible(root, baseline, report, measurements, kind, current, accepted_at) ?? return Err(err)
+    prior_manifest := String?{None}
+    prior_head := String?{None}
+    if !absent {
+        prior_manifest = Val(jet_cli_budget_store_text(current, "manifest_id", "manifest_id") ?? return Err(err))
+        prior_head = Val(jet_cli_budget_store_head(current) ?? return Err(err))
+    }
+    // copy: the caller keeps its baseline, report id, timestamp and kind.
+    Ok(JetCLIBudgetUpdatePlan{baseline: baseline.copy(), report_id: report_id.copy(), prior_manifest_id: prior_manifest, prior_head_report_id: prior_head, accepted_at: accepted_at.copy(), kind: kind.copy()})
+}
+
+// Applies a plan: under the baselines lock the manifest must still be
+// the planned one; the report object is published immutably, then the next
+// manifest replaces the current one atomically.
+jet_cli_budget_apply_update: fn(root: String, plan: JetCLIBudgetUpdatePlan, report: CanonicalJSON, bytes: [U8]) JetCLIBudgetFailure! {
+    jet_cli_budget_store_kind(plan.kind) ?? return Err(err)
+    _: jet_cli_budget_store_seconds(plan.accepted_at) ?? return Err(err)
+    _: JetCLIRootedDirectory.open(root, [String]{".jet", "perf", "baselines"}, true) ?? return Err(jet_cli_budget_failure(err.message))
+    locks: JetCLIRootedDirectory.open(root, [String]{".jet", "perf", "baselines", "locks"}, true) ?? return Err(jet_cli_budget_failure(err.message))
+    // One lock over the whole store serializes every baseline's update.
+    _owner: locks.lock("budget baseline") ?? return Err(jet_cli_budget_failure(err.message))
+    current: jet_cli_budget_store_read_manifest(root, plan.baseline) ?? return Err(err)
+    manifest_id := String?{None}
+    head := String?{None}
+    if current != .Null {
+        manifest_id = Val(jet_cli_budget_store_text(current, "manifest_id", "manifest_id") ?? return Err(err))
+        head = Val(jet_cli_budget_store_head(current) ?? return Err(err))
+    }
+    if manifest_id != plan.prior_manifest_id || head != plan.prior_head_report_id -> return Err(jet_cli_budget_failure("baseline changed after plan; re-plan against current head"))
+    measurements: jet_cli_budget_store_measurements(report) ?? return Err(err)
+    jet_cli_budget_store_evidence_check(measurements, plan.kind) ?? return Err(err)
+    jet_cli_budget_store_eligible(root, plan.baseline, report, measurements, plan.kind, current, plan.accepted_at) ?? return Err(err)
+    objects: JetCLIRootedDirectory.open(root, [String]{".jet", "perf", "baselines", "objects"}, true) ?? return Err(jet_cli_budget_failure(err.message))
+    _: objects.publish_immutable("{plan.report_id}.json", bytes, None, JET_CLI_BUDGET_REPORT_LIMIT) ?? return Err(jet_cli_budget_failure(err.message))
+    next_manifest: jet_cli_budget_store_next_manifest(current, plan) ?? return Err(err)
+    parent: JetCLIRootedDirectory.open(root, jet_cli_budget_store_manifest_dir(plan.baseline), true) ?? return Err(jet_cli_budget_failure(err.message))
+    parent.replace(jet_cli_budget_store_manifest_name(plan.baseline), canonical_json_bytes(next_manifest), None) ?? return Err(jet_cli_budget_failure(err.message))
+}
+
+jet_cli_budget_store_is_bootstrap: fn(kind: JetCLIBudgetUpdateKind) -> Bool Never! {
+    if kind == .Bootstrap(_) -> return true
+    false
+}
+
+// An update kind's reason, when it carries one, is well formed.
+jet_cli_budget_store_kind: fn(kind: JetCLIBudgetUpdateKind) JetCLIBudgetFailure! {
+    if kind == {
+        .Pass -> {}
+        .Bootstrap(reason) -> jet_cli_budget_store_reason(reason) ?? return Err(err)
+        .AcceptRegression(reason) -> jet_cli_budget_store_reason(reason) ?? return Err(err)
+    }
+}
+
+// An acceptance reason is trimmed, control-free and 1..=512 scalars.
+jet_cli_budget_store_reason: fn(value: String) JetCLIBudgetFailure! {
+    if value.is_empty() || store_text.trim(value) != value || store_text.scalar_count(value) > 512 || store_text.has_control(value) {
+        return Err(jet_cli_budget_failure("acceptance reason must be trimmed, control-free, and 1..=512 scalars"))
+    }
+    if store_text.nfc(value) != value -> return Err(jet_cli_budget_failure("acceptance reason must be NFC"))
+}
+
+// The report's evidence admits the update kind: a regression advances the
+// baseline only when accepted with a reason.
+jet_cli_budget_store_evidence_check: fn(measurements: [CanonicalJSON], kind: JetCLIBudgetUpdateKind) JetCLIBudgetFailure! {
+    if measurements.len() == 0 -> return Err(jet_cli_budget_failure("update report has no measurements"))
+    regressed := false
+    loop measurement in measurements {
+        evidence: jet_cli_budget_store_evidence(measurement) ?? return Err(err)
+        if kind == {
+            .Pass -> {
+                if evidence != "pass" -> return Err(jet_cli_budget_failure("plain update requires every measurement to pass"))
+            }
+            .Bootstrap(_) -> {
+                if evidence != "pass" && evidence != "unavailable" -> return Err(jet_cli_budget_failure("bootstrap rejects regression and inconclusive evidence"))
+            }
+            .AcceptRegression(_) -> {
+                if evidence != "pass" && evidence != "regression" && evidence != "inconclusive" -> return Err(jet_cli_budget_failure("accept-regression rejects unavailable evidence"))
+            }
+        }
+        if evidence == "regression" || evidence == "inconclusive" -> regressed = true
+    }
+    if regressed -> return
+    if kind == .AcceptRegression(_) -> return Err(jet_cli_budget_failure("accept-regression requires regression or inconclusive evidence"))
+}
+
+// Whether the report may advance `baseline`: comparisons name this baseline, a
+// deterministic measurement advances only over compatible fresh history, and
+// a bootstrap replaces only stale history.
+jet_cli_budget_store_eligible: fn(root: String, baseline: String, report: CanonicalJSON, measurements: [CanonicalJSON], kind: JetCLIBudgetUpdateKind, current: CanonicalJSON, at: String) JetCLIBudgetFailure! {
+    content: jet_cli_budget_store_get(report, "content") ?? return Err(jet_cli_budget_failure("report content is absent"))
+    bootstrap: jet_cli_budget_store_is_bootstrap(kind)
+    seen := [String]{}
+    loop candidate in measurements {
+        budget_id: jet_cli_budget_store_text(candidate, "budget_id", "budget_id") ?? return Err(err)
+        if seen.contains(budget_id) -> return Err(jet_cli_budget_failure("duplicate budget_id `{budget_id}` in update"))
+        seen.push(budget_id)
+        comparison: jet_cli_budget_store_get(candidate, "comparison") ?? return Err(jet_cli_budget_failure("comparison is absent"))
+        comparison_kind: jet_cli_budget_store_text(comparison, "kind", "comparison.kind") ?? return Err(err)
+        if comparison_kind == "absolute_from" || comparison_kind == "relative_to" {
+            named: jet_cli_budget_store_text(comparison, "baseline", "comparison.baseline") ?? return Err(err)
+            if named != baseline -> return Err(jet_cli_budget_failure("measurement baseline does not match `{baseline}`"))
+        }
+        if comparison_kind == "absolute" && !bootstrap && current != .Null {
+            history: jet_cli_budget_store_generation(root, current, content, candidate, at, false) ?? return Err(err)
+            if history == .Absent -> return Err(jet_cli_budget_failure("deterministic measurement has no compatible prior generation"))
+        }
+        if bootstrap {
+            evidence: jet_cli_budget_store_evidence(candidate) ?? return Err(err)
+            if (comparison_kind == "absolute" || comparison_kind == "absolute_from") && evidence != "pass" -> return Err(jet_cli_budget_failure("bootstrap requires deterministic/absolute-from evidence to pass"))
+            if comparison_kind == "relative_to" && evidence != "pass" && evidence != "unavailable" -> return Err(jet_cli_budget_failure("relative bootstrap permits only pass or unavailable evidence"))
+        }
+    }
+    if !bootstrap || current == .Null -> return
+    loop candidate in measurements {
+        history: jet_cli_budget_store_generation(root, current, content, candidate, at, true) ?? return Err(err)
+        if history == {
+            .Fresh -> return Err(jet_cli_budget_failure("bootstrap is allowed only when newest compatible history is stale"))
+            .Absent -> return Err(jet_cli_budget_failure("bootstrap cannot replace incompatible or corrupt history"))
+            .Stale -> {}
+        }
+    }
+}
+
+// The newest compatible history of one measured budget.
+JetCLIBudgetHistory: enum {
+    Absent
+    Fresh
+    Stale
+}
+
+// The newest generation whose measurement of
+// the candidate's budget is compatible, and whether it is stale; Absent when
+// none is, or when the newest is stale and `include_stale` is false.
+jet_cli_budget_store_generation: fn(root: String, manifest: CanonicalJSON, content: CanonicalJSON, candidate: CanonicalJSON, at: String, include_stale: Bool) -> JetCLIBudgetHistory JetCLIBudgetFailure! {
+    objects: JetCLIRootedDirectory.open(root, [String]{".jet", "perf", "baselines", "objects"}, false) ?? return Err(jet_cli_budget_failure(err.message))
+    generations: jet_cli_budget_store_generations(manifest) ?? return Err(err)
+    budget_id: jet_cli_budget_store_text(candidate, "budget_id", "budget_id") ?? return Err(err)
+    index := generations.len()
+    loop index > 0 {
+        index -= 1
+        generation: generations[index]
+        id: jet_cli_budget_store_text(generation, "report_id", "generation.report_id") ?? return Err(err)
+        bytes: if objects.read("{id}.json", JET_CLI_BUDGET_REPORT_LIMIT) == {
+            .Val(found) -> found
+            .None -> { return Err(jet_cli_budget_failure("baseline object {id} is absent")) }
+            .Err(error) -> { return Err(jet_cli_budget_failure(error.message)) }
+        }
+        old: perf_verify_budget_report(bytes) ?? return Err(jet_cli_budget_failure("corrupt baseline object {id}: {err.message}"))
+        old_id: jet_cli_budget_store_text(old, "report_id", "report_id") ?? return Err(err)
+        if old_id != id -> return Err(jet_cli_budget_failure("baseline object {id} contains a different report_id"))
+        old_content: jet_cli_budget_store_get(old, "content") ?? return Err(jet_cli_budget_failure("report content is absent"))
+        old_measurement: jet_cli_budget_store_measurement(old_content, budget_id) ?? next
+        if jet_cli_budget_store_compatible(content, candidate, old_content, old_measurement) {
+            audit: jet_cli_budget_store_get(generation, "audit") ?? return Err(jet_cli_budget_failure("generation audit is absent"))
+            accepted_at: jet_cli_budget_store_text(audit, "accepted_at", "accepted_at") ?? return Err(err)
+            now: jet_cli_budget_store_seconds(at) ?? return Err(err)
+            then: jet_cli_budget_store_seconds(accepted_at) ?? return Err(err)
+            if now < then -> return Err(jet_cli_budget_failure("baseline generation is future-dated"))
+            limit: jet_cli_budget_store_stale_after(candidate) ?? return Err(err)
+            if now - then <= limit -> return Ok(JetCLIBudgetHistory.Fresh)
+            if include_stale -> return Ok(JetCLIBudgetHistory.Stale)
+            return Ok(JetCLIBudgetHistory.Absent)
+        }
+    }
+    Ok(JetCLIBudgetHistory.Absent)
+}
+
+// Whether two measurements, with their report contents, are comparable.
+jet_cli_budget_store_compatible: fn(left_content: CanonicalJSON, left: CanonicalJSON, right_content: CanonicalJSON, right: CanonicalJSON) -> Bool Never! {
+    loop key in JET_CLI_BUDGET_COMPATIBLE_MEASUREMENT {
+        if !jet_cli_budget_store_same(left, right, key) -> return false
+    }
+    loop key in JET_CLI_BUDGET_COMPATIBLE_CONTENT {
+        if !jet_cli_budget_store_same(left_content, right_content, key) -> return false
+    }
+    left_subject: jet_cli_budget_store_get(left_content, "subject") ?? CanonicalJSON.Null
+    right_subject: jet_cli_budget_store_get(right_content, "subject") ?? CanonicalJSON.Null
+    loop key in JET_CLI_BUDGET_COMPATIBLE_SUBJECT {
+        if !jet_cli_budget_store_same(left_subject, right_subject, key) -> return false
+    }
+    true
+}
+
+// Whether two objects hold equal values under `key`, or neither holds one.
+jet_cli_budget_store_same: fn(left: CanonicalJSON, right: CanonicalJSON, key: String) -> Bool Never! {
+    left_at: jet_cli_budget_store_index(left, key)
+    right_at: jet_cli_budget_store_index(right, key)
+    if left_at == .Val(left_index) {
+        if right_at == .Val(right_index) {
+            if left == .Object(left_fields) {
+                if right == .Object(right_fields) -> return canonical_json_equal(left_fields[left_index].value, right_fields[right_index].value)
+            }
+        }
+        return false
+    }
+    right_at == None
+}
+
+// How old history may be before it is stale, from the measurement's policy.
+jet_cli_budget_store_stale_after: fn(measurement: CanonicalJSON) -> Int JetCLIBudgetFailure! {
+    policy: jet_cli_budget_store_get(measurement, "policy") ?? return Err(jet_cli_budget_failure("measurement policy is invalid"))
+    if policy == {
+        .Null -> Ok(JET_CLI_BUDGET_STALE_SECONDS)
+        .Object(_) -> jet_cli_budget_store_integer(policy, "stale_after_seconds", "policy.stale_after_seconds")
+        else -> Err(jet_cli_budget_failure("measurement policy is invalid"))
+    }
+}
+
+// The next manifest: the current generations and one new audited
+// generation whose CAS links name the current manifest and head.
+jet_cli_budget_store_next_manifest: fn(current: CanonicalJSON, plan: JetCLIBudgetUpdatePlan) -> CanonicalJSON JetCLIBudgetFailure! {
+    kind_name := "pass"
+    reason := CanonicalJSON.Null
+    bootstrap := false
+    accept_regression := false
+    if plan.kind == {
+        .Pass -> {}
+        .Bootstrap(text) -> {
+            jet_cli_budget_store_reason(text) ?? return Err(err)
+            kind_name = "bootstrap"
+            reason = CanonicalJSON.String(text.copy()) // copy: the plan keeps its reason.
+            bootstrap = true
+        }
+        .AcceptRegression(text) -> {
+            jet_cli_budget_store_reason(text) ?? return Err(err)
+            kind_name = "exception"
+            reason = CanonicalJSON.String(text.copy()) // copy: the plan keeps its reason.
+            accept_regression = true
+        }
+    }
+    // copy: the plan keeps its links, timestamp, report id and name.
+    prior_head: if plan.prior_head_report_id == .Val(id) -> CanonicalJSON.String(id.copy()) else -> CanonicalJSON.Null
+    prior_state: if plan.prior_manifest_id == .Val(id) -> CanonicalJSON.String(id.copy()) else -> CanonicalJSON.Null
+    body: perf_report_object_new([CanonicalJSONField]{
+        CanonicalJSONField{key: "accepted_at", value: CanonicalJSON.String(plan.accepted_at.copy())},
+        CanonicalJSONField{key: "actor_label", value: CanonicalJSON.String("local")},
+        CanonicalJSONField{key: "flags", value: perf_report_object_new([CanonicalJSONField]{
+            CanonicalJSONField{key: "accept_regression", value: CanonicalJSON.Bool(accept_regression)},
+            CanonicalJSONField{key: "bootstrap", value: CanonicalJSON.Bool(bootstrap)},
+        })},
+        CanonicalJSONField{key: "kind", value: CanonicalJSON.String(kind_name)},
+        CanonicalJSONField{key: "prior_head_report_id", value: prior_head},
+        CanonicalJSONField{key: "prior_state_id", value: prior_state},
+        CanonicalJSONField{key: "reason", value: reason},
+        CanonicalJSONField{key: "report_id", value: CanonicalJSON.String(plan.report_id.copy())},
+    })
+    audit_fields := jet_cli_budget_fields(body)
+    audit_fields.push(CanonicalJSONField{key: "audit_id", value: CanonicalJSON.String(perf_stable_id(body))})
+    generations := [CanonicalJSON]{}
+    if current != .Null -> generations = jet_cli_budget_store_generations(current) ?? return Err(err)
+    generations.push(perf_report_object_new([CanonicalJSONField]{
+        CanonicalJSONField{key: "audit", value: perf_report_object_new(audit_fields)},
+        CanonicalJSONField{key: "report_id", value: CanonicalJSON.String(plan.report_id.copy())},
+    }))
+    content: perf_report_object_new([CanonicalJSONField]{
+        CanonicalJSONField{key: "generations", value: CanonicalJSON.Array(generations)},
+        CanonicalJSONField{key: "head_report_id", value: CanonicalJSON.String(plan.report_id.copy())},
+        CanonicalJSONField{key: "name", value: CanonicalJSON.String(plan.baseline.copy())},
+    })
+    manifest_id: perf_stable_id(content)
+    Ok(perf_report_object_new([CanonicalJSONField]{
+        CanonicalJSONField{key: "content", value: content},
+        CanonicalJSONField{key: "manifest_id", value: CanonicalJSON.String(manifest_id)},
+        CanonicalJSONField{key: "schema", value: CanonicalJSON.String(JET_CLI_BUDGET_MANIFEST_SCHEMA)},
+        CanonicalJSONField{key: "version", value: CanonicalJSON.Integer("1")},
+    }))
+}
+
+// The current manifest of `baseline`; Null when the baseline has none.
+jet_cli_budget_store_read_manifest: fn(root: String, baseline: String) -> CanonicalJSON JetCLIBudgetFailure! {
+    parts: jet_cli_budget_store_manifest_dir(baseline)
+    present: JetCLIRootedDirectory.present(root, parts) ?? return Err(jet_cli_budget_failure(err.message))
+    if !present -> return Ok(CanonicalJSON.Null)
+    parent: JetCLIRootedDirectory.open(root, parts, false) ?? return Err(jet_cli_budget_failure(err.message))
+    bytes: if parent.read(jet_cli_budget_store_manifest_name(baseline), JET_CLI_BUDGET_REPORT_LIMIT) == {
+        .Val(found) -> found
+        .None -> { return Ok(CanonicalJSON.Null) }
+        .Err(error) -> { return Err(jet_cli_budget_failure(error.message)) }
+    }
+    jet_cli_budget_store_verify_manifest(bytes, baseline)
+}
+
+// The directory of a baseline's manifest: `ci/linux` lives at
+// `names/ci/linux.json`.
+jet_cli_budget_store_manifest_dir: fn(baseline: String) -> [String] Never! {
+    parts := [String]{".jet", "perf", "baselines", "names"}
+    segments: baseline.split("/").to_list()
+    loop index in 0..<(segments.len() - 1) -> parts.push(segments[index].copy()) // copy: the split keeps its segments.
+    parts
+}
+
+jet_cli_budget_store_manifest_name: fn(baseline: String) -> String Never! {
+    segments: baseline.split("/").to_list()
+    "{segments[segments.len() - 1]}.json"
+}
+
+// A verified manifest: the exact wrapper, its content hash, and the audited
+// CAS chain of every generation.
+jet_cli_budget_store_verify_manifest: fn(bytes: [U8], expected_name: String) -> CanonicalJSON JetCLIBudgetFailure! {
+    value: canonical_json_parse(bytes) ?? return Err(jet_cli_budget_failure("invalid manifest: {err.message}"))
+    jet_cli_budget_store_exact(value, "manifest", [String]{"content", "manifest_id", "schema", "version"}) ?? return Err(err)
+    jet_cli_budget_store_require(value, "schema", JET_CLI_BUDGET_MANIFEST_SCHEMA) ?? return Err(err)
+    version: jet_cli_budget_store_integer(value, "version", "version") ?? return Err(err)
+    if version != 1 -> return Err(jet_cli_budget_failure("manifest version is not 1"))
+    content: jet_cli_budget_store_get(value, "content") ?? return Err(jet_cli_budget_failure("manifest content is absent"))
+    jet_cli_budget_store_exact(content, "manifest content", [String]{"generations", "head_report_id", "name"}) ?? return Err(err)
+    jet_cli_budget_store_require(content, "name", expected_name) ?? return Err(err)
+    id: jet_cli_budget_store_text(value, "manifest_id", "manifest_id") ?? return Err(err)
+    if !jet_cli_budget_store_hex64(id) || perf_stable_id(content) != id -> return Err(jet_cli_budget_failure("manifest_id mismatch"))
+    generations: jet_cli_budget_store_array(content, "generations", "generations") ?? return Err(err)
+    if generations.len() == 0 -> return Err(jet_cli_budget_failure("manifest has no generations"))
+    prior_accepted := ""
+    prefix := [CanonicalJSON]{}
+    loop (index, generation) in generations {
+        jet_cli_budget_store_exact(generation, "generation", [String]{"audit", "report_id"}) ?? return Err(err)
+        report: jet_cli_budget_store_text(generation, "report_id", "generation.report_id") ?? return Err(err)
+        if !jet_cli_budget_store_hex64(report) -> return Err(jet_cli_budget_failure("generation report_id is not lowercase Hex64"))
+        audit: jet_cli_budget_store_get(generation, "audit") ?? return Err(jet_cli_budget_failure("generation audit is absent"))
+        jet_cli_budget_store_exact(audit, "audit", JET_CLI_BUDGET_AUDIT_KEYS) ?? return Err(err)
+        jet_cli_budget_store_require(audit, "actor_label", "local") ?? return Err(err)
+        jet_cli_budget_store_require(audit, "report_id", report) ?? return Err(err)
+        accepted_at: jet_cli_budget_store_text(audit, "accepted_at", "accepted_at") ?? return Err(err)
+        _: jet_cli_budget_store_seconds(accepted_at) ?? return Err(err)
+        if index > 0 && prior_accepted > accepted_at -> return Err(jet_cli_budget_failure("manifest generations are not ordered by accepted_at"))
+        flags: jet_cli_budget_store_get(audit, "flags") ?? return Err(jet_cli_budget_failure("audit flags are absent"))
+        jet_cli_budget_store_exact(flags, "audit flags", [String]{"accept_regression", "bootstrap"}) ?? return Err(err)
+        bootstrap: jet_cli_budget_store_bool(flags, "bootstrap", "flags.bootstrap") ?? return Err(err)
+        accept: jet_cli_budget_store_bool(flags, "accept_regression", "flags.accept_regression") ?? return Err(err)
+        kind: jet_cli_budget_store_text(audit, "kind", "audit.kind") ?? return Err(err)
+        reason: jet_cli_budget_store_nullable(audit, "reason", "audit.reason") ?? return Err(err)
+        agrees := kind == "pass" && !bootstrap && !accept && reason == .Null
+        if reason == .String(text) {
+            if (kind == "bootstrap" && bootstrap && !accept) || (kind == "exception" && !bootstrap && accept) {
+                jet_cli_budget_store_reason(text) ?? return Err(err)
+                agrees = true
+            }
+        }
+        if !agrees -> return Err(jet_cli_budget_failure("audit kind, flags, and reason disagree"))
+        prior_state: jet_cli_budget_store_nullable(audit, "prior_state_id", "prior_state_id") ?? return Err(err)
+        prior_head: jet_cli_budget_store_nullable(audit, "prior_head_report_id", "prior_head_report_id") ?? return Err(err)
+        if index == 0 {
+            if prior_state != .Null || prior_head != .Null -> return Err(jet_cli_budget_failure("first generation has prior CAS links"))
+            if kind != "bootstrap" -> return Err(jet_cli_budget_failure("first generation is not a bootstrap audit"))
+        } else {
+            expected_head: jet_cli_budget_store_text(generations[index - 1], "report_id", "report_id") ?? return Err(err)
+            prefix_content: perf_report_object_new([CanonicalJSONField]{
+                CanonicalJSONField{key: "generations", value: CanonicalJSON.Array(prefix.copy())}, // copy: the next generation's prefix extends this one.
+                CanonicalJSONField{key: "head_report_id", value: CanonicalJSON.String(expected_head.copy())}, // copy: the head is compared below.
+                CanonicalJSONField{key: "name", value: CanonicalJSON.String(expected_name.copy())}, // copy: every generation names the baseline.
+            })
+            chained := false
+            if prior_state == .String(state_link) {
+                if prior_head == .String(head_link) -> chained = state_link == perf_stable_id(prefix_content) && head_link == expected_head
+            }
+            if !chained -> return Err(jet_cli_budget_failure("manifest generation CAS chain is broken"))
+        }
+        audit_id: jet_cli_budget_store_text(audit, "audit_id", "audit_id") ?? return Err(err)
+        body := [CanonicalJSONField]{}
+        audit_fields := jet_cli_budget_fields(audit)
+        loop field in audit_fields.move() {
+            if field.key != "audit_id" -> body.push(field)
+        }
+        if !jet_cli_budget_store_hex64(audit_id) || perf_stable_id(CanonicalJSON.Object(body)) != audit_id -> return Err(jet_cli_budget_failure("audit_id mismatch"))
+        prior_accepted = accepted_at
+        prefix.push(generation.copy()) // copy: the manifest keeps its generations.
+    }
+    head: jet_cli_budget_store_text(content, "head_report_id", "head_report_id") ?? return Err(err)
+    newest: jet_cli_budget_store_text(generations[generations.len() - 1], "report_id", "report_id") ?? return Err(err)
+    if head != newest -> return Err(jet_cli_budget_failure("manifest head is not newest generation"))
+    Ok(value)
+}
+
+jet_cli_budget_store_generations: fn(manifest: CanonicalJSON) -> [CanonicalJSON] JetCLIBudgetFailure! {
+    content: jet_cli_budget_store_get(manifest, "content") ?? return Err(jet_cli_budget_failure("manifest content is absent"))
+    jet_cli_budget_store_array(content, "generations", "generations")
+}
+
+jet_cli_budget_store_head: fn(manifest: CanonicalJSON) -> String JetCLIBudgetFailure! {
+    content: jet_cli_budget_store_get(manifest, "content") ?? return Err(jet_cli_budget_failure("manifest content is absent"))
+    jet_cli_budget_store_text(content, "head_report_id", "head_report_id")
+}
+
+jet_cli_budget_store_measurements: fn(report: CanonicalJSON) -> [CanonicalJSON] JetCLIBudgetFailure! {
+    content: jet_cli_budget_store_get(report, "content") ?? return Err(jet_cli_budget_failure("report content is absent"))
+    jet_cli_budget_store_array(content, "measurements", "measurements")
+}
+
+// The measurement of a budget, where a missing or repeated budget is skipped: the one
+// measurement of `budget_id` in `content`.
+jet_cli_budget_store_measurement: fn(content: CanonicalJSON, budget_id: String) -> CanonicalJSON? Never! {
+    rows: jet_cli_budget_store_array(content, "measurements", "measurements") ?? return None
+    found := CanonicalJSON?{None}
+    loop row in rows.move() {
+        id: jet_cli_budget_store_text(row, "budget_id", "budget_id") ?? return None
+        if id == budget_id {
+            if found != None -> return None
+            found = Val(row)
+        }
+    }
+    found
+}
+
+// A measurement's `decision.evidence`.
+jet_cli_budget_store_evidence: fn(measurement: CanonicalJSON) -> String JetCLIBudgetFailure! {
+    decision: jet_cli_budget_store_get(measurement, "decision") ?? return Err(jet_cli_budget_failure("measurement decision is absent"))
+    if decision == .Object(_) -> return jet_cli_budget_store_text(decision, "evidence", "decision.evidence")
+    Err(jet_cli_budget_failure("decision is not an object"))
+}
+
+// A timestamp as RFC 3339 UTC with nine
+// fractional digits, as Unix seconds.
+jet_cli_budget_store_seconds: fn(value: String) -> Int JetCLIBudgetFailure! {
+    bytes: value.bytes()
+    if bytes.len() != 30 -> return Err(jet_cli_budget_failure("accepted_at is not RFC3339UTC with nine fractional digits"))
+    loop index in 0..<30 {
+        code: Int.from_u8(bytes[index])
+        mark: if index == {
+            4 | 7 -> 45
+            10 -> 84
+            13 | 16 -> 58
+            19 -> 46
+            29 -> 90
+            else -> -1
+        }
+        if (mark >= 0 && code != mark) || (mark < 0 && (code < 48 || code > 57)) -> return Err(jet_cli_budget_failure("accepted_at is not RFC3339UTC with nine fractional digits"))
+    }
+    year: jet_cli_budget_store_digits(bytes, 0, 4)
+    month: jet_cli_budget_store_digits(bytes, 5, 7)
+    day: jet_cli_budget_store_digits(bytes, 8, 10)
+    hour: jet_cli_budget_store_digits(bytes, 11, 13)
+    minute: jet_cli_budget_store_digits(bytes, 14, 16)
+    second: jet_cli_budget_store_digits(bytes, 17, 19)
+    leap: year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)
+    month_days: [Int]{31, if leap -> 29 else -> 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31}
+    if month < 1 || month > 12 || day == 0 || day > month_days[month - 1] || hour > 23 || minute > 59 || second > 59 {
+        return Err(jet_cli_budget_failure("accepted_at contains an out-of-range UTC field"))
+    }
+    if year < 1970 -> return Err(jet_cli_budget_failure("accepted_at predates Unix epoch"))
+    shifted: if month <= 2 -> year - 1 else -> year
+    era: shifted /% 400
+    year_of_era: shifted - era * 400
+    month_index: if month > 2 -> month - 3 else -> month + 9
+    day_of_year: (153 * month_index + 2) /% 5 + day - 1
+    day_of_era: year_of_era * 365 + year_of_era /% 4 - year_of_era /% 100 + day_of_year
+    days: era * 146097 + day_of_era - 719468
+    Ok(days * 86400 + hour * 3600 + minute * 60 + second)
+}
+
+jet_cli_budget_store_digits: fn(bytes: [U8], start: Int, end: Int) -> Int Never! {
+    value := 0
+    loop index in start..<end -> value = value * 10 + Int.from_u8(bytes[index]) - 48
+    value
+}
+
+jet_cli_budget_store_hex64: fn(value: String) -> Bool Never! {
+    bytes: value.bytes()
+    if bytes.len() != 64 -> return false
+    loop byte in bytes {
+        code: Int.from_u8(byte)
+        if !((code >= 48 && code <= 57) || (code >= 97 && code <= 102)) -> return false
+    }
+    true
+}
+
+// The position of `key` in the object `value`.
+jet_cli_budget_store_index: fn(value: CanonicalJSON, key: String) -> Int? Never! {
+    if value == .Object(fields) {
+        loop (index, field) in fields {
+            if field.key == key -> return Val(index)
+        }
+    }
+    None
+}
+
+// The value `key` names in the object `value`.
+jet_cli_budget_store_get: fn(value: CanonicalJSON, key: String) -> CanonicalJSON? Never! {
+    if value == .Object(fields) {
+        loop field in fields {
+            if field.key == key -> return Val(field.value.copy()) // copy: the object stays whole.
+        }
+    }
+    None
+}
+
+// Whether `value` is an object with exactly `keys`.
+jet_cli_budget_store_exact: fn(value: CanonicalJSON, name: String, keys: [String]) JetCLIBudgetFailure! {
+    if value == .Object(fields) {
+        if fields.len() == keys.len() {
+            exact := true
+            loop field in fields {
+                if !keys.contains(field.key) -> exact = false
+            }
+            if exact -> return
+        }
+    }
+    Err(jet_cli_budget_failure("{name} has missing or unknown fields"))
+}
+
+// The text field `key` of `value` must be `expected`.
+jet_cli_budget_store_require: fn(value: CanonicalJSON, key: String, expected: String) JetCLIBudgetFailure! {
+    found: jet_cli_budget_store_text(value, key, key) ?? return Err(err)
+    if found != expected -> return Err(jet_cli_budget_failure("{key} must be `{expected}`"))
+}
+
+jet_cli_budget_store_text: fn(value: CanonicalJSON, key: String, name: String) -> String JetCLIBudgetFailure! {
+    if value == .Object(fields) {
+        loop field in fields {
+            if field.key == key {
+                if field.value == .String(text) -> return Ok(text.copy()) // copy: the object stays whole.
+                return Err(jet_cli_budget_failure("{name} is not text"))
+            }
+        }
+    }
+    Err(jet_cli_budget_failure("{name} is not text"))
+}
+
+// A text-or-null field, as its Null or String value.
+jet_cli_budget_store_nullable: fn(value: CanonicalJSON, key: String, name: String) -> CanonicalJSON JetCLIBudgetFailure! {
+    if value == .Object(fields) {
+        loop field in fields {
+            if field.key == key {
+                if field.value == {
+                    .Null -> return Ok(CanonicalJSON.Null)
+                    .String(text) -> return Ok(CanonicalJSON.String(text.copy())) // copy: the object stays whole.
+                    else -> return Err(jet_cli_budget_failure("{name} is not text or null"))
+                }
+            }
+        }
+    }
+    Err(jet_cli_budget_failure("{name} is not text or null"))
+}
+
+jet_cli_budget_store_bool: fn(value: CanonicalJSON, key: String, name: String) -> Bool JetCLIBudgetFailure! {
+    if value == .Object(fields) {
+        loop field in fields {
+            if field.key == key {
+                if field.value == .Bool(flag) -> return Ok(flag)
+                return Err(jet_cli_budget_failure("{name} is not boolean"))
+            }
+        }
+    }
+    Err(jet_cli_budget_failure("{name} is not boolean"))
+}
+
+jet_cli_budget_store_integer: fn(value: CanonicalJSON, key: String, name: String) -> Int JetCLIBudgetFailure! {
+    if value == .Object(fields) {
+        loop field in fields {
+            if field.key == key {
+                if field.value == .Integer(digits) -> return Ok(Int.parse(digits) ?? return Err(jet_cli_budget_failure("{name} is not a canonical integer")))
+                return Err(jet_cli_budget_failure("{name} is not an integer"))
+            }
+        }
+    }
+    Err(jet_cli_budget_failure("{name} is not an integer"))
+}
+
+jet_cli_budget_store_array: fn(value: CanonicalJSON, key: String, name: String) -> [CanonicalJSON] JetCLIBudgetFailure! {
+    if value == .Object(fields) {
+        loop field in fields {
+            if field.key == key {
+                if field.value == .Array(items) -> return Ok(items.copy()) // copy: the object stays whole.
+                return Err(jet_cli_budget_failure("{name} is not an array"))
+            }
+        }
+    }
+    Err(jet_cli_budget_failure("{name} is not an array"))
+}

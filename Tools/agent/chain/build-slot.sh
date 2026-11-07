@@ -77,7 +77,7 @@ while :; do
         # release suite pushed its scope 80 GB into swap and took the desktop down) keeps an overrun job from
         # thrashing the machine: it hits its own MemoryMax and dies alone instead.
         memmax=${SLOT_MEMORY_MAX:-16G}
-        nice -n 19 ionice -c3 systemd-run --user --scope --quiet --collect -p MemoryHigh="$memmax" -p MemoryMax="$((${memmax%G} + 2))G" -p MemorySwapMax=2G -p ManagedOOMMemoryPressure=kill --unit="jetslot-$s-$$" env time -q -f %M -o "$rf" "$@" {fd}>&-; rc=$?
+        nice -n 19 ionice -c3 systemd-run --user --scope --quiet --collect --expand-environment=no -p MemoryHigh="$memmax" -p MemoryMax="$((${memmax%G} + 2))G" -p MemorySwapMax=2G -p ManagedOOMMemoryPressure=kill --unit="jetslot-$s-$$" env time -q -f %M -o "$rf" "$@" {fd}>&-; rc=$?
         printf '%s\t%s\t%s\twait=%ss\trun=%ss\trc=%s\tmaxrss=%sMB\t%s\n' "$(date -d @$t0 +%F_%T)" "$s" "${lane:-?}" "$((t0 - q0))" "$(( $(date +%s) - t0 ))" "$rc" "$(( $(awk 'END{print $1+0}' "$rf") / 1024 ))" "$(printf '%s ' "$@" | cut -c1-200)" >> "$JET_RUN_ROOT/slot-ledger.tsv"
         rm -f "$rf"
         exit $rc

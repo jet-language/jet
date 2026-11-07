@@ -128,7 +128,8 @@ process_authority_check: fn(spec: I64, err: I64) -> Bool {
         at += I64{1}
     }
     process_text_list_drop(rights, false)
-    live: fd_word(spec, PROCESS_SPEC_STDOUT) != PROCESS_STREAM_CAPTURE || fd_word(spec, PROCESS_SPEC_STDERR) != PROCESS_STREAM_CAPTURE
+    stderr: fd_word(spec, PROCESS_SPEC_STDERR)
+    live: fd_word(spec, PROCESS_SPEC_STDOUT) != PROCESS_STREAM_CAPTURE || (stderr != PROCESS_STREAM_CAPTURE && stderr != PROCESS_STREAM_STDOUT)
     if (fd_word(spec, PROCESS_SPEC_TERMINAL) != I64{0} || (!process_authority_detached(spec) && live)) {
         _ := process_authority_refuse(spec, rt_static_text("authority-bound process receipts require captured stdout and stderr without a terminal; live terminal, streaming, or inherited output would bypass redaction, refusing before spawn"), err)
         return false

@@ -33,7 +33,7 @@ if (mode === 'release') {
     mkdirSync(dir, { recursive: true });
     const source = join(dir, `${cell.slug}.jet`);
     copyFileSync(cell.source, source);
-    const build = spawnSync(join(base, 'Tools/agent/jet-env'), [process.env.JET, 'build', '--release', source], {
+    const build = spawnSync(join(base, 'Tools/agent/JetEnv.jet'), [process.env.JET, 'build', '--release', source], {
       cwd: dir, env: process.env, encoding: 'utf8', timeout: 600000, maxBuffer: 64 << 20,
     });
     writeFileSync(join(dir, 'build.log'), `exit=${build.status} signal=${build.signal}\n${build.error ?? ''}\n${build.stdout ?? ''}\n${build.stderr ?? ''}`);

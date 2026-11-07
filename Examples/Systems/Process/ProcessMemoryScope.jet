@@ -1,0 +1,64 @@
+// `.memory_scope(bytes)` runs the child and everything it starts in a memory
+// scope of their own (a cgroup v2 cgroup), capped at `bytes` together, with
+// no swap. Going over the cap kills every process in the scope, never this
+// program; the reap removes the scope with whatever still runs in it. The
+// receipt's limits name the cap (`memory-scope=268435456`) and its peak is
+// the scope's. A child that asks for a scope of its own gets one inside the
+// outer scope, under the outer cap. A cap below 1 byte, or a detached spec,
+// is `IOError.InvalidInput` before anything starts.
+package: {
+    name: "process_memory_scope"
+    authority: { allow: [Env, Exec, Exec.Args, IO, Mem.Alloc, Time.Wait] }
+}
+
+use {
+    process: core.process
+    os: core.sys
+}
+
+why: fn(error: IOError) -> String {
+    if error == {
+        .InvalidInput(context) -> "InvalidInput: {context.cause ?? ""}"
+        else -> "another error"
+    }
+}
+
+limit: fn(receipt: process.ProcessReceipt) -> String {
+    loop row in receipt.limits {
+        if row.starts_with("memory-scope=") -> return row
+    }
+    "no memory-scope row"
+}
+
+refuse: fn(label: String, spec: process.ProcessSpec) {
+    if process.run_spec(spec) == {
+        .Ok(_) -> print("{label}: started")
+        .Err(error) -> print("{label}: {why(error)}")
+    }
+}
+
+run: fn() IOError! {
+    exe: os.executable()
+    mode: process.args().get(0) ?? ""
+    if mode == "child" -> process.exit(0)
+    if mode == "hog" {
+        held: "x".repeat(268435456)
+        print("held {held.len()} bytes")
+        process.exit(0)
+    }
+    if mode == "nest" {
+        inner: process.run_spec(process.cmd([exe, "child"]).memory_scope(33554432))
+        print("inner scope: {inner.success}, {limit(inner)}")
+        process.exit(0)
+    }
+    scoped: process.run_spec(process.cmd([exe, "child"]).memory_scope(268435456))
+    print("scoped child: {scoped.success}, {limit(scoped)}, peak recorded: {(scoped.peak_memory_bytes ?? -1) > 0}")
+    over: process.run_spec(process.cmd([exe, "hog"]).memory_scope(67108864).stdout(.Capture))
+    print("over the cap: {over.success}, output: {over.output.trim().len()} bytes")
+    nested: process.run_spec(process.cmd([exe, "nest"]).memory_scope(268435456).stdout(.Capture))
+    print("nested: {nested.output.trim()}")
+    plain: process.run_spec(process.cmd([exe, "child"]))
+    print("default child: {limit(plain)}")
+    refuse("zero cap", process.cmd([exe, "child"]).memory_scope(0))
+    refuse("detached", process.cmd([exe, "child"]).detached().memory_scope(67108864))
+}

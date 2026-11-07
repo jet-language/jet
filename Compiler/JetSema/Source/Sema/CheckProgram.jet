@@ -3375,8 +3375,12 @@ sema_check_registration_module_program: fn(environment: SemaScopeEnvironment, pr
                 }
                 .CodeModule(definition) -> {
                     if definition.body != None && !sema_inline_module_lowered(definition) {
-                        module_result.complete = false
-                        module_result.incomplete_reasons.push("inline module `{definition.name}` is not lowered")
+                        if sema_inline_module_import_unbuilt(definition, graph.modules[module_index].program.imports) == .Val(diagnostic) {
+                            module_result.diagnostics.push(diagnostic)
+                        } else {
+                            module_result.complete = false
+                            module_result.incomplete_reasons.push("inline module `{definition.name}` is not lowered")
+                        }
                     }
                 }
                 // A `fact` declaration has no checked body: its rows are
@@ -9152,6 +9156,9 @@ sema_finalize_graph: fn(resolved: &&SemaRegistrationGraph, trail: &SemaGraphTrai
         loop diagnostic in module_result.diagnostics -> diagnostics.push(diagnostic)
         if !module_result.complete -> complete = false
     }
+    // The C-safe export law reads the solved carriers: an `#Export(c)` that
+    // declares no carrier is refused when its body infers one.
+    if sema_guest_check_export_failures(final_graph, modules, diagnostics) -> complete = false
     // The failure-domain obligations recorded against unannotated callees
     // are discharged or emitted.
     infallible_keys := [String:Bool]{}

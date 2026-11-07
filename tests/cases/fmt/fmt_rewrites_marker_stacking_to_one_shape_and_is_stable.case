@@ -9,13 +9,9 @@ env: JET_STORE_DIR={work}/cache
 env: JETPACK_ROOT={work}/jetpack
 step: jet fmt a.jet
 exit: 0 # tests/fmt.rs:2199-2200 formats
-step: sh {work}/step-2.sh
-exit: 0 # tests/fmt.rs:2201-2204
-stdout: ~ "#Codable\nInvoice: struct" # tests/fmt.rs:2201-2204
+file: a.jet ~ "#Codable\nInvoice: struct" # tests/fmt.rs:2201-2204
 step: jet fmt b.jet
 exit: 0 # tests/fmt.rs:2208-2209 formats
-step: sh {work}/step-4.sh
-exit: 0 # tests/fmt.rs:2210-2213
-stdout: ~ "#[Job, Every(5min)]\nprune: fn" # tests/fmt.rs:2210-2213
+file: b.jet ~ "#[Job, Every(5min)]\nprune: fn" # tests/fmt.rs:2210-2213
 step: jet fmt --check a.jet b.jet
 exit: 0 # tests/fmt.rs:2205, 2214 both outputs stable

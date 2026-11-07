@@ -79,8 +79,8 @@ suite: fn(label: String, tree: String, jetdir: String, profile: String, settings
     print("runner: {runner}")
     identity: first_line("{base}/latest/IDENTITY") ?? return fail("{base}/latest/IDENTITY is unreadable")
     // Suite rows run host tools (C compilers, rustc, interpreters) that only
-    // jet-env supplies until jet does.
-    argv := [String]{"{tree}/Tools/agent/jet-env", runner, "test", "Compiler", "--profile", profile.copy(), "--compiler={snapshot}/jet"}
+    // the dev shell (Tools/agent/JetEnv.jet) supplies until jet does.
+    argv := [String]{runner, "{tree}/Tools/agent/JetEnv.jet", runner, "test", "Compiler", "--profile", profile.copy(), "--compiler={snapshot}/jet"}
     jobs: env_or("SUITE_JOBS", "")
     if jobs != "" -> argv.push("--jobs={jobs}")
     memory: env_or("SUITE_MEMORY", "")

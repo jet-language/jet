@@ -21,7 +21,7 @@ const harnessDir = path.dirname(fileURLToPath(import.meta.url));
 const repoDir = path.resolve(harnessDir, "../../..");
 
 // The compiler under measurement when --artifact is absent: $JET (what
-// `Tools/agent/jet-env jet` runs), else `jet` on PATH, else the bare name (identity
+// `Tools/agent/JetEnv.jet jet` runs), else `jet` on PATH, else the bare name (identity
 // then reports no artifact and preflight fails closed).
 function defaultJetBinary() {
   if (process.env.JET) return process.env.JET;
@@ -1076,7 +1076,7 @@ export function measurePair(options = {}) {
     schema: PERFORMANCE_SURFACE_SCHEMA,
     version: PERFORMANCE_SURFACE_VERSION,
     protocol: "paired-surface-v2",
-    generated_command: options.generatedCommand ?? `Tools/agent/jet-env node Tools/gauntlet/harness/performance-surface.mjs`,
+    generated_command: options.generatedCommand ?? `Tools/agent/JetEnv.jet node Tools/gauntlet/harness/performance-surface.mjs`,
     generated_at: generatedAt,
     target: TARGET,
     tier: PAIR_MEASUREMENT.tier,

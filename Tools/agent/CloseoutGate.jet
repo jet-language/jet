@@ -68,15 +68,23 @@ output: fn(repo: String, argv: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> 
     ran.output.trim().copy()
 }
 
+// Tower writes go through the Tower CLI.
 tower: fn(repo: String, args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> String Never! {
     argv := [String]{"node", "{repo}/Tools/tower/tower.mjs"}
     loop arg in args -> argv.push(arg.copy())
     output(repo, argv)
 }
 
+// Tower reads go through the Jet board reader.
+board: fn(repo: String, args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> String Never! {
+    argv := [String]{env_or("JET", "jet"), "{repo}/Tools/tower/Board.jet"}
+    loop arg in args -> argv.push(arg.copy())
+    output(repo, argv)
+}
+
 check: fn(repo: String, requested: String) -[Env, Exec, FS, IO, Time, Time.Wait]> () {
     head: pinned_head(repo) ?? frozen_head(repo)
-    listed: json.parse(tower(repo, [String]{"milestone", "list", "--archived", "--json"})) ?? return refuse("tower milestone list is not JSON: {err}")
+    listed: json.parse(board(repo, [String]{"milestone", "list", "--archived", "--json"})) ?? return refuse("tower milestone list is not JSON: {err}")
     milestones: if listed == .Array(items) -> items.copy() else -> [Dyn]{}
     picked: select_closeout(milestones, head, requested)
     if picked.problem != "" -> return refuse(picked.problem)

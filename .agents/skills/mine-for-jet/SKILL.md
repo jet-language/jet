@@ -44,7 +44,7 @@ From the repository root, run the checker with an explicit repository-root
 script and registry path:
 
 ```sh
-Tools/agent/jet-env python3 \
+Tools/agent/JetEnv.jet python3 \
   .agents/skills/mine-for-jet/scripts/check_sources.py \
   --registry Docs/spec/reference/prior-art.md \
   'SOURCE_URL'

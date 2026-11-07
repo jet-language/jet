@@ -67,10 +67,11 @@ golden_run() { # inside the slot: census the newest wanted commit
   n=$(wc -l < "$sel")
   s=$(date +%s)
   say "goldens ${sha:0:10}: $n examples with $d/jet"
-  # Golden examples run host tools (C compilers, interpreters) that only jet-env supplies until jet does.
+  # Golden examples run host tools (C compilers, interpreters) that only the dev shell
+  # (Tools/agent/JetEnv.jet) supplies until jet does.
   (cd "$t" && JET_COMPILER_IDENTITY=$(<"$d/IDENTITY") JET_TOOLCHAIN_ROOT=$t JET_TEST_STATE_DIR=$w/state TMPDIR=$w/tmp \
-    systemd-run --user --scope -q -p MemoryMax=24G -p MemorySwapMax=0 timeout 7200 \
-    prlimit --core=0 --stack=1073741824:1073741824 -- ${SLOT_CPUS:+taskset -c "$SLOT_CPUS"} "$t/Tools/agent/jet-env" \
+    systemd-run --user --scope -q --expand-environment=no -p MemoryMax=24G -p MemorySwapMax=0 timeout 7200 \
+    prlimit --core=0 --stack=1073741824:1073741824 -- ${SLOT_CPUS:+taskset -c "$SLOT_CPUS"} "$d/jet" "$t/Tools/agent/JetEnv.jet" \
     "$d/jet" test Compiler --profile golden --optimize=none "--cases=$sel" --jobs=6 --time-limit=120s "--results=$out" \
     > "$w/goldens.log" 2> "$w/goldens.err")
   rc=$?
@@ -119,8 +120,8 @@ jetpack_build() { # SHA TREE TMP : inside a slot; TREE is an export of SHA
   say "jetpack ${sha:0:10}: hosted build with $d/jet"
   mkdir -p "$tmp"
   (cd "$t" && JETPACK_WORKER=$worker JET=$d/jet JET_COMPILER_IDENTITY=$(<"$d/IDENTITY") JET_TOOLCHAIN_ROOT=$t TMPDIR=$tmp \
-    systemd-run --user --scope -q -p MemoryMax=16G -p MemorySwapMax=0 timeout 6000 \
-    prlimit --core=0 -- ${SLOT_CPUS:+taskset -c "$SLOT_CPUS"} bash Jetpack/Bootstrap/check.sh --hosted) > "$d/jetpack.log" 2>&1
+    systemd-run --user --scope -q --expand-environment=no -p MemoryMax=16G -p MemorySwapMax=0 timeout 6000 \
+    prlimit --core=0 -- ${SLOT_CPUS:+taskset -c "$SLOT_CPUS"} "$d/jet" Jetpack/Bootstrap/Check.jet --hosted) > "$d/jetpack.log" 2>&1
   rc=$?
   bin=$(ls -dt "$JET_STATE_ROOT"/jetpack-bootstrap/$worker-*/hosted/project/.jet/build/jetpack 2>/dev/null | awk 'NR==1')
   if [ $rc -ne 0 ] || [ ! -x "$bin" ]; then echo "rc=$rc bin=${bin:-none}; see jetpack.log" > "$d/jetpack.failed"; say "jetpack ${sha:0:10}: FAILED rc=$rc"; return 1; fi
@@ -182,7 +183,7 @@ jp=$(jetpack_reuse "$sha" && echo "jetpack ready" || echo "jetpack build follows
   echo "$sha" > "$B/.golden-want.new" && mv "$B/.golden-want.new" "$B/.golden-want"
   if flock -n "$B/.golden-worker.lock" true; then
     # A user unit starts from the user manager's environment: carry this caller's PATH and roots into it.
-    systemd-run --user --unit="base-goldens-${sha:0:9}-$(date +%s)" --collect -q -p MemoryMax=4G -p MemorySwapMax=0 -p LimitCORE=0 \
+    systemd-run --user --unit="base-goldens-${sha:0:9}-$(date +%s)" --collect -q --expand-environment=no -p MemoryMax=4G -p MemorySwapMax=0 -p LimitCORE=0 \
       -E PATH -E JET_STATE_ROOT -E JET_SCRATCH_ROOT -E JET_RUN_ROOT -E JET_BASE_ROOT -E JET_SEEDS -E JET_SEED -E JET_DEV_WORKTREE \
       ${JET_PACK_MUSL_LIB:+-E JET_PACK_MUSL_LIB} \
       bash -c "exec bash '$SELF' --golden-worker >> '$B/goldens-worker.log' 2>&1" < /dev/null > /dev/null 2>&1 && echo "golden run queued" || echo "golden worker failed to start"

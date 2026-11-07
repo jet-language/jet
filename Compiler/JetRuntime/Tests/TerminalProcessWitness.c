@@ -32,12 +32,12 @@ extern void jet_rt_world_drop(int64_t);
 extern void *fixture_terminal_process_child(int64_t);
 extern int64_t fixture_terminal_process_refs(void *);
 #else
-// Test-only mechanical construction of the documented native Child72 owner.
+// Test-only mechanical construction of the documented native Child104 owner.
 // It owns a genuine kernel PTY/pipe; every operation and release uses the pack.
 static void *fixture_terminal_process_child(int64_t master) {
-    int64_t *child=jet_rt_alloc(72,8);
-    memset(child,0,72);
-    child[4]=-1; child[5]=-1; child[6]=-1; child[7]=master; child[8]=1;
+    int64_t *child=jet_rt_alloc(104,8);
+    memset(child,0,104);
+    child[4]=-1; child[5]=-1; child[6]=-1; child[7]=master; child[8]=1; child[9]=-1; child[10]=-1; child[11]=-1;
     return child;
 }
 static int64_t fixture_terminal_process_refs(void *child) {
@@ -82,7 +82,7 @@ static unsigned frees[3];
 // included (jet_rt_alloc_check_observe), before it reclaims the block.
 static void observe_free(void *p, int64_t bytes, int64_t align) {
     for (unsigned i=0; i<3; ++i) if (watched[i] && p==watched[i]) {
-        assert(bytes==(i?8:72) && align==8 && ++frees[i]==1);
+        assert(bytes==(i?8:96) && align==8 && ++frees[i]==1);
         watched[i]=NULL; // Later genuine allocator reuse is a different owner.
     }
 }

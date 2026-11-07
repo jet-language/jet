@@ -392,8 +392,6 @@ jet_cli_codemod_secure_components: fn(project: String, raw: String) -[FS]> Strin
 
 jet_cli_codemod_secure_existing: fn(project: String, raw: String, allow_dir: Bool) -[FS, Env]> String JetCLIReadError! {
     jet_cli_codemod_reject_parent_or_absolute(raw, "root path")
-    allowed: raw == "Examples" || raw.starts_with("Examples/") || raw == "tests/ui" || raw.starts_with("tests/ui/")
-    if !allowed -> return Err(jet_cli_codemod_error("editable root `{raw}` must be beneath Examples/ or tests/ui/"))
     path: jet_cli_codemod_secure_components(project, raw)
     canonical: cli_files.realpath(path) ?? return Err(jet_cli_codemod_error("could not canonicalize `{raw}`: {jet_cli_io_error_text(err)}"))
     if !jet_cli_codemod_beneath(project, canonical) -> return Err(jet_cli_codemod_error("path `{raw}` escapes project"))
@@ -440,12 +438,11 @@ jet_cli_codemod_validate_destination: fn(project: String, path: String, any_path
     loop part in parts {
         if part == ".." || part == "." -> return Err(jet_cli_codemod_error("non-normal destination path"))
     }
-    if any_path {
-        if parts.len() == 0 -> return Err(jet_cli_codemod_error("non-normal destination path"))
-    } else {
+    if parts.len() == 0 -> return Err(jet_cli_codemod_error("non-normal destination path"))
+    // Any file of the project may be a destination; a codemod edits only
+    // Jet sources and the paired tests/ui `.stderr` snapshots.
+    if !any_path {
         under_ui: parts.len() >= 2 && parts[0] == "tests" && parts[1] == "ui"
-        allowed: (parts.len() >= 1 && parts[0] == "Examples") || under_ui
-        if !allowed || parts.len() < 2 -> return Err(jet_cli_codemod_error("destination must be beneath Examples/ or tests/ui/"))
         extension: jet_cli_codemod_extension(path)
         if extension != Val("jet") && !(under_ui && extension == Val("stderr")) -> return Err(jet_cli_codemod_error("destination must be a .jet source or paired tests/ui .stderr snapshot"))
     }
@@ -1652,10 +1649,13 @@ jet_cli_codemod_parse_v1: fn(value: JetCLIStatusValue, path: String) -> JetCLICo
     Ok(JetCLICodemodV1{name: name.copy(), entry: entry, from: from.copy(), to: to.copy()})
 }
 
-// Rust managed_project_for_entry.
+// Rust managed_project_for_entry: the directory holding the entry's
+// `Examples/` or `tests/ui/` tree; outside those, the entry's package root,
+// else the entry's own directory.
 jet_cli_codemod_managed_project: fn(entry: String) -[FS, Env]> String JetCLIReadError! {
     canonical: cli_files.realpath(entry) ?? return Err(jet_cli_codemod_error("could not canonicalize codemod entry: {jet_cli_io_error_text(err)}"))
-    ancestor := jet_cli_parent(canonical)
+    parent: jet_cli_parent(canonical) ?? return Err(jet_cli_codemod_error("codemod entry `{canonical}` has no directory"))
+    ancestor := Val(parent.copy())
     loop {
         directory: ancestor ?? break
         relative: jet_cli_codemod_components(jet_cli_codemod_project_rel(directory, canonical))
@@ -1663,7 +1663,7 @@ jet_cli_codemod_managed_project: fn(entry: String) -[FS, Env]> String JetCLIRead
         if relative.len() > 1 && relative[0] == "tests" && relative[1] == "ui" -> return Ok(directory.copy())
         ancestor = jet_cli_parent(directory)
     }
-    Err(jet_cli_codemod_error("version 1 codemod entry must be beneath Examples/ or tests/ui/"))
+    Ok(jet_cli_manifest_root(parent) ?? parent)
 }
 
 // Rust run_v1: the unit's index, every `from` definition and reference.

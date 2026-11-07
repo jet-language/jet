@@ -1,0 +1,15 @@
+# tests/comptime_core_pure_parity.rs::rustc_backed_bag_matches_aot_comptime_forced_interpreter_and_default_dev_fallback_exactly at tests/comptime_core_pure_parity.rs:1297; hand-port
+# Claim: `EXPECTED: comptime { bag_view() }` is evaluated natively at compile time and equals what the same `bag_view()` returns at run time, under `jet run` and in the built binary; both lines are the original's exact transcript.
+fixture: bag_comptime_matches_run_and_build_exactly/input
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run run.jet
+exit: 0
+stdout: = "true|true|true|true|3|2|true|true|false|1|false|1|false|2|3|true|2|false|false\ntrue|true|true|true|3|2|true|true|false|1|false|1|false|2|3|true|2|false|false\n"
+stderr: empty
+step: jet build run.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = "true|true|true|true|3|2|true|true|false|1|false|1|false|2|3|true|2|false|false\ntrue|true|true|true|3|2|true|true|false|1|false|1|false|2|3|true|2|false|false\n"
+stderr: empty

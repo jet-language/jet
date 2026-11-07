@@ -9,8 +9,8 @@ import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { nativePackHash, readNativeRuntimePack } from '../../../Tools/packaging/runtime-pack-cache.mjs';
 import { fileObject } from '../../../Tools/packaging/publish-native-runtime-pack.mjs';
-import { runNativeLibrary } from '../../../Tools/agent/compiler-native-transport.mjs';
-import { parseRuntimeExports, runtimeLifecycleList } from '../../../Tools/agent/runtime-route-abi.mjs';
+import { runNativeLibrary, runtimeLifecycleList } from '../../JetBackend/Tests/jet-front.mjs';
+import { toolJet } from '../../../Tools/agent/roots.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const [output, compiler, runtime, ...extra] = process.argv.slice(2);
 const test = extra.length === 2 && extra[0] === '--test' ? extra[1] : null;
@@ -48,10 +48,10 @@ for (const row of archives) {
 }
 if (test) {
   const unit = join(out, 'unit');
-  command('assemble-fixture', process.execPath, [join(root, 'Compiler/JetRuntime/Tests/check-runtime.mjs'), unit, '--assemble-only', '--test', test]);
+  command('assemble-fixture', toolJet(), [join(root, 'Tools/agent/CompilerPackages.jet'), '--root', root, 'runtime-unit', unit, '--test', test]);
   const file = join(unit, 'unit.jet'), text = readFileSync(file, 'utf8'), prefix = join(unit, 'fixture');
   const lifecycle = join(unit, 'lifecycle.list');
-  writeFileSync(lifecycle, runtimeLifecycleList(parseRuntimeExports(text, 'unit.jet')));
+  writeFileSync(lifecycle, runtimeLifecycleList(text));
   const lowered = runNativeLibrary({ jet, file, prefix, lifecycle, env: { ...process.env, JET_TOOLCHAIN_ROOT: root, JET_STORE_DIR: join(out, 'store') } });
   receipt('lower-fixture.json', lowered);
   if (lowered.problem) throw Error(`native ${test} fixture: ${lowered.problem.detail}`);
@@ -70,8 +70,8 @@ if (test) {
   // into each image; this platform link takes it from the shared report source.
   const faultReport = faultReportObject(out);
   const inputs = [...archiveInputs, ...crt.map(path => ({ path, handle: fileObject(path) })), { path: fixtureObject, handle: fileObject(fixtureObject) }, { path: faultReport, handle: fileObject(faultReport) }, { path: file, handle: fileObject(file) }];
-  command('compile-fixture-driver', join(root, 'Tools/agent/jet-env'), [nativeCCompiler, '-std=c11', '-O1', '-fno-stack-protector', '-fno-PIE', '-fno-builtin', '-Wall', '-Wextra', '-Werror', '-c', source, '-o', cObject]);
-  command('link-fixture-driver', join(root, 'Tools/agent/jet-env'), [nativeCCompiler, '-nostdlib', '-static', '-no-pie', crt[0], crt[1], cObject, '-Wl,--start-group', fixtureObject, faultReport, ...archiveInputs.map(row => row.path), '-Wl,--end-group', crt[2], '-o', executable]);
+  command('compile-fixture-driver', join(root, 'Tools/agent/JetEnv.jet'), [nativeCCompiler, '-std=c11', '-O1', '-fno-stack-protector', '-fno-PIE', '-fno-builtin', '-Wall', '-Wextra', '-Werror', '-c', source, '-o', cObject]);
+  command('link-fixture-driver', join(root, 'Tools/agent/JetEnv.jet'), [nativeCCompiler, '-nostdlib', '-static', '-no-pie', crt[0], crt[1], cObject, '-Wl,--start-group', fixtureObject, faultReport, ...archiveInputs.map(row => row.path), '-Wl,--end-group', crt[2], '-o', executable]);
   for (const row of inputs) if (fileObject(row.path) !== row.handle) throw Error(`fixture input changed: ${row.path}`);
   const result = command('run-fixture', executable, test === 'CompilerFileLeaves' ? [join(out, 'file-leaves.data')] : []);
   if (result.signal || result.stdout !== '' || result.stderr !== '') throw Error(`native ${test} fixture output differs`);
@@ -102,11 +102,10 @@ const source = join(root, 'Compiler/JetRuntime/Tests/NativeCodecFileLeavesWitnes
 const sourceHandle = fileObject(source), compilerHandle = fileObject(jet);
 const crt = ['crt1.o', 'crti.o', 'crtn.o'].map(name => ({ path: resolve(musl, name), handle: fileObject(resolve(musl, name)) }));
 receipt('admission.json', { runtimeDirectory, runtimeKey: admitted.key, provenance: admitted.provenance, publishedObject, linkedObject: object, object: objectHandle, compiler: { path: jet, object: compilerHandle }, witness: { path: source, object: sourceHandle }, u8Stride: stride, abiSources: [dataAbi, collections].map(({ path, handle }) => ({ path, handle })), archives: archiveInputs, crt });
-const cObject = join(out, 'codec-file-leaves.o'), link = join(out, 'link');
-command('compile', join(root, 'Tools/agent/jet-env'), [nativeCCompiler, '-std=c11', '-O1', '-fno-stack-protector', '-fno-PIE', '-fno-builtin', '-Wall', '-Wextra', '-Werror', '-pedantic', ...macros, '-c', source, '-o', cObject]);
-command('assemble-linker', process.execPath, [join(root, 'Compiler/JetBackend/Tests/run-link.mjs'), link]);
+const cObject = join(out, 'codec-file-leaves.o');
+command('compile', join(root, 'Tools/agent/JetEnv.jet'), [nativeCCompiler, '-std=c11', '-O1', '-fno-stack-protector', '-fno-PIE', '-fno-builtin', '-Wall', '-Wextra', '-Werror', '-pedantic', ...macros, '-c', source, '-o', cObject]);
 const executable = join(out, 'native-codec-file-leaves');
-command('link', jet, ['run', join(link, 'unit.jet'), '--', executable, crt[0].path, crt[1].path, cObject, object, ...archiveInputs.map(row => row.path), crt[2].path], link);
+command('link', jet, ['run', join(root, 'Compiler/JetBackend/Tests/LinkRuntime.fixture/LinkRuntime.jet'), '--', executable, crt[0].path, crt[1].path, cObject, object, ...archiveInputs.map(row => row.path), crt[2].path], out);
 for (const row of [...archiveInputs, ...crt]) if (fileObject(row.path) !== row.handle) throw Error(`C platform input changed during link: ${row.path}`);
 for (const row of [dataAbi, collections]) if (fileObject(join(root, row.path)) !== row.handle) throw Error(`canonical ABI source changed during proof: ${row.path}`);
 if (fileObject(source) !== sourceHandle || fileObject(jet) !== compilerHandle || fileObject(object) !== objectHandle) throw Error('witness, compiler, or admitted object changed during proof');

@@ -1,20 +1,35 @@
 #!/usr/bin/env jet
 // Fails CI when a checked web workload grows beyond its baseline: each row of
 // Tools/perf/web-bundle-baseline.tsv names a workload source and its frozen
-// wasm, glue, runtime and bundle sizes; the source is built with
-// `jet build --target=web` and every size may grow at most the row's percent.
+// sizes; the source is built with `jet build --target=web` and every size may
+// grow at most the row's percent. A web build ships the files its
+// web.manifest.json names: its partitions' wasm (the app's and the runtime's,
+// rt.wasm), the glue (the entry script) and the DOM runtime (the host
+// script). `wasm` is every partition together and `rt_wasm` the runtime
+// partition alone; the bundle is wasm + glue + DOM runtime. A manifest naming
+// any other file fails the gate, so no shipped byte goes unmeasured.
 // Usage (from the repository root): jet Tools/perf/WebBundleCheck.jet
 use {
     crypto: core.crypto
     files: core.files
+    json: core.encoding.json
     process: core.process
     term: core.term
 }
 
 BASELINE: "Tools/perf/web-bundle-baseline.tsv"
-JET_ENV: "Tools/agent/jet-env"
-EXPECTED_HEADER: "version\tworkload\tsource\tsource_sha256\twasm_bytes\tglue_bytes\truntime_bytes\tbundle_bytes\tregression_pct"
-ARTIFACTS: [String]{"app.wasm", "app.js", "jet_dom_runtime.js"}
+JET_ENV: "Tools/agent/JetEnv.jet"
+EXPECTED_HEADER: "version\tworkload\tsource\tsource_sha256\twasm_bytes\trt_wasm_bytes\tglue_bytes\truntime_bytes\tbundle_bytes\tregression_pct"
+BUILD_DIR: ".jet/build"
+MANIFEST: "web.manifest.json"
+// The manifest fields that name a script; each partition names its wasm `module`.
+MANIFEST_SCRIPTS: [String]{"entry", "host"}
+APP_WASM: "app.wasm"
+RT_WASM: "rt.wasm"
+GLUE: "app.js"
+DOM_RUNTIME: "jet_dom_runtime.js"
+// Every file a web build ships.
+ARTIFACTS: [String]{APP_WASM, RT_WASM, GLUE, DOM_RUNTIME}
 
 Row: struct {
     version: String
@@ -22,6 +37,7 @@ Row: struct {
     source: String
     source_hash: String
     wasm: String
+    rt_wasm: String
     glue: String
     runtime: String
     bundle: String
@@ -120,14 +136,14 @@ line_at: fn(text: String, number: Int) -> String Never! {
     ""
 }
 
-// Tab-separated fields as `IFS=$'\t' read -r` assigns nine names: runs of tabs
-// separate, edge tabs are dropped, and the ninth name takes the rest of the line.
+// Tab-separated fields as `IFS=$'\t' read -r` assigns ten names: runs of tabs
+// separate, edge tabs are dropped, and the tenth name takes the rest of the line.
 row_fields: fn(line: String) -> Row Never! {
     bytes: line.bytes()
     fields := [String]{}
     at := 0
     loop at < bytes.len() && bytes[at] == (U8{9}) -> at += 1
-    loop at < bytes.len() && fields.len() < 8 {
+    loop at < bytes.len() && fields.len() < 9 {
         start: at
         loop at < bytes.len() && bytes[at] != (U8{9}) -> at += 1
         fields.push(byte_text(bytes, start, at))
@@ -136,8 +152,40 @@ row_fields: fn(line: String) -> Row Never! {
     end := bytes.len()
     loop end > at && bytes[end - 1] == (U8{9}) -> end -= 1
     if at < end -> fields.push(byte_text(bytes, at, end))
-    loop fields.len() < 9 -> fields.push("")
-    Row{version: fields[0], workload: fields[1], source: fields[2], source_hash: fields[3], wasm: fields[4], glue: fields[5], runtime: fields[6], bundle: fields[7], regression: fields[8]}
+    loop fields.len() < 10 -> fields.push("")
+    Row{version: fields[0], workload: fields[1], source: fields[2], source_hash: fields[3], wasm: fields[4], rt_wasm: fields[5], glue: fields[6], runtime: fields[7], bundle: fields[8], regression: fields[9]}
+}
+
+field: fn(tree: Dyn, name: String) -> Dyn Never! {
+    if tree == .Object(entries) {
+        loop entry in entries {
+            if entry.key == name -> return entry.value.copy()
+        }
+    }
+    Dyn.Null
+}
+
+// The files a web.manifest.json names: its entry, its host and every
+// partition's module.
+manifest_files: fn(text: String) -> [String] Err! {
+    tree: json.parse(text) ?? return Err("not JSON: {err}")
+    named := [String]{}
+    loop key in MANIFEST_SCRIPTS {
+        if field(tree, key) == {
+            .Text(name) -> named.push(name.copy())
+            else -> return Err("no `{key}` file")
+        }
+    }
+    if field(tree, "partitions") == .Array(partitions) {
+        loop partition in partitions {
+            if field(partition, "module") == {
+                .Text(name) -> named.push(name.copy())
+                else -> return Err("a partition without a `module` file")
+            }
+        }
+        return Ok(named)
+    }
+    Err("no `partitions` array")
 }
 
 passthrough: fn(receipt: ProcessReceipt) Never! -[IO]> {
@@ -181,7 +229,7 @@ check_rows: fn(root: String, text: String, scratch: String, run_dir: String) -[E
         row: row_fields(line)
         if row.version == "" || row.version.starts_with("#") -> next
         if row.version == "version" -> next
-        if row.version != "1" {
+        if row.version != "2" {
             shown: if row.version == "" -> "missing" else -> row.version
             return fail("unsupported baseline row version: {shown}")
         }
@@ -194,16 +242,17 @@ check_rows: fn(root: String, text: String, scratch: String, run_dir: String) -[E
         if !valid_hash(row.source_hash) -> return fail("invalid source hash: {row.source}")
         source_bytes: files.read_bytes(source_path) ?? [U8]{}
         if row.source_hash != crypto.sha256(source_bytes).hex() -> return fail("source changed: {row.source}")
-        values: [String]{row.wasm, row.glue, row.runtime, row.bundle, row.regression}
+        values: [String]{row.wasm, row.rt_wasm, row.glue, row.runtime, row.bundle, row.regression}
         loop value in values {
             if !all_digits(value) -> return fail("invalid baseline value for {row.workload}")
         }
         wasm_base: number(row.wasm)
+        rt_wasm_base: number(row.rt_wasm)
         glue_base: number(row.glue)
         runtime_base: number(row.runtime)
         bundle_base: number(row.bundle)
         regression: number(row.regression)
-        if !(wasm_base > 0 && glue_base > 0 && runtime_base > 0 && bundle_base == wasm_base + glue_base + runtime_base) -> return fail("invalid bundle totals: {row.workload}")
+        if !(wasm_base > 0 && rt_wasm_base > 0 && rt_wasm_base <= wasm_base && glue_base > 0 && runtime_base > 0 && bundle_base == wasm_base + glue_base + runtime_base) -> return fail("invalid bundle totals: {row.workload}")
         if regression > 100 -> return fail("regression limit exceeds 100%: {row.workload}")
 
         case_dir: "{run_dir}/{row.workload}"
@@ -215,30 +264,45 @@ check_rows: fn(root: String, text: String, scratch: String, run_dir: String) -[E
             .Ok(_) -> {}
             .Err(error) -> return fail("cannot copy {row.source}: {error}")
         }
-        build: process.cmd([String]{"sh", "-c", "exec \"$0\" jet build --target=web main.jet >build.log 2>&1", "{root}/{JET_ENV}"})
+        // The build's output, then its errors, are kept in build.log.
+        build: process.cmd([String]{"{root}/{JET_ENV}", "jet", "build", "--target=web", "main.jet"})
             .cwd(case_dir)
             .env("JET_ROOT", root)
             .env("TMPDIR", scratch)
-        built: if build.run() == {
-            .Ok(receipt) -> receipt.code == 0
-            .Err(_) -> false
+            .output_limit(16777216)
+        built := false
+        log := [U8]{}
+        if build.run() == {
+            .Ok(receipt) -> {
+                built = receipt.code == 0 && receipt.signal == None
+                log = "{receipt.output}{receipt.errors}".bytes()
+            }
+            .Err(error) -> log = "{JET_ENV} could not start: {error}\n".bytes()
         }
+        files.write_bytes("{case_dir}/build.log", log).drop("build.log is only a record of the build")
         if !built {
-            log: files.read_bytes("{case_dir}/build.log") ?? [U8]{}
             errors := term.stderr()
             errors.write(String.from_bytes_lossy(first_lines(log, 120))).drop("web bundle stderr")
             return fail("build failed: {row.workload}")
         }
-        loop artifact in ARTIFACTS {
-            artifact_path: "{case_dir}/build/{artifact}"
-            if !files.is_file(artifact_path) -> return fail("missing regular artifact: {row.workload}/{artifact}")
+        out: "{case_dir}/{BUILD_DIR}"
+        manifest: files.read("{out}/{MANIFEST}") ?? return fail("missing {MANIFEST}: {row.workload}: {err}")
+        named: manifest_files(manifest) ?? return fail("unreadable {MANIFEST}: {row.workload}: {err.message}")
+        loop name in named {
+            if !ARTIFACTS.contains(name) -> return fail("{row.workload}: {MANIFEST} names {name}, which the gate does not count")
         }
-        wasm_current: file_bytes("{case_dir}/build/app.wasm")
-        glue_current: file_bytes("{case_dir}/build/app.js")
-        runtime_current: file_bytes("{case_dir}/build/jet_dom_runtime.js")
+        loop artifact in ARTIFACTS {
+            if !named.contains(artifact) -> return fail("{row.workload}: {MANIFEST} no longer names {artifact}")
+            if !files.is_file("{out}/{artifact}") -> return fail("missing regular artifact: {row.workload}/{artifact}")
+        }
+        rt_wasm_current: file_bytes("{out}/{RT_WASM}")
+        wasm_current: file_bytes("{out}/{APP_WASM}") + rt_wasm_current
+        glue_current: file_bytes("{out}/{GLUE}")
+        runtime_current: file_bytes("{out}/{DOM_RUNTIME}")
         bundle_current: wasm_current + glue_current + runtime_current
-        print("{row.workload}\twasm={wasm_current}\tglue={glue_current}\truntime={runtime_current}\tbundle={bundle_current}")
+        print("{row.workload}\twasm={wasm_current}\trt_wasm={rt_wasm_current}\tglue={glue_current}\truntime={runtime_current}\tbundle={bundle_current}")
         if !check_size(row.workload, "wasm", wasm_base, wasm_current, regression) -> failures += 1
+        if !check_size(row.workload, "rt_wasm", rt_wasm_base, rt_wasm_current, regression) -> failures += 1
         if !check_size(row.workload, "glue", glue_base, glue_current, regression) -> failures += 1
         if !check_size(row.workload, "runtime", runtime_base, runtime_current, regression) -> failures += 1
         if !check_size(row.workload, "bundle", bundle_base, bundle_current, regression) -> failures += 1
@@ -287,9 +351,17 @@ run: fn() {
 }
 
 #Test("baseline rows split like a tab-separated shell read") {
-    row: row_fields("\t1\tcounter\t\tsrc/main.jet\tabc\t1\t2\t3\t6\t5\t9\t")
+    row: row_fields("\t2\tcounter\t\tsrc/main.jet\tabc\t4\t1\t2\t3\t9\t5\t9\t")
     assert_eq(row.source, "src/main.jet")
-    assert_eq(row.bundle, "6")
+    assert_eq(row.rt_wasm, "1")
+    assert_eq(row.bundle, "9")
     assert_eq(row.regression, "5\t9")
     assert_eq(read_lines("a\nb\nc").join(","), "a,b")
+}
+
+#Test("the manifest names its entry, its host and every partition's module") {
+    named: manifest_files("{{\"target\": \"web\", \"entry\": \"app.js\", \"host\": \"jet_dom_runtime.js\", \"partitions\": [{{\"name\": \"runtime\", \"module\": \"rt.wasm\"}}, {{\"name\": \"app\", \"module\": \"app.wasm\"}}]}}") ?? panic(err.message)
+    assert_eq(named.join(","), "app.js,jet_dom_runtime.js,rt.wasm,app.wasm")
+    assert(manifest_files("{{\"entry\": \"app.js\", \"host\": \"h.js\"}}") == .Err(_))
+    assert(manifest_files("{{\"entry\": \"app.js\", \"host\": \"h.js\", \"partitions\": [{{\"name\": \"app\"}}]}}") == .Err(_))
 }

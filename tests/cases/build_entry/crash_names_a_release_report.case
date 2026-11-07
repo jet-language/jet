@@ -8,20 +8,30 @@ env: NO_COLOR=1
 step: jet build main.jet
 cwd: open
 exit: 0
-step: sh -c 'cd "{work}/open" && .jet/build/main > /dev/null 2> dev.txt; exit 0'
-exit: 0
+step: {work}/open/.jet/build/main
+cwd: open
+stdout: null
+stderr: file open/dev.txt
+exit: any # the dev image stops on the overflow; its report is the subject
 file: open/dev.txt ~ "Stop [E3012]: Stack overflow in `depth`" # the dev image names the function itself
 step: jet build --release main.jet
 cwd: open
 exit: 0
-step: sh -c 'cd "{work}/open" && .jet/build/main > /dev/null 2> release.txt; exec "{jet}" crash < release.txt'
+step: {work}/open/.jet/build/main
+cwd: open
+stdout: null
+stderr: file open/release.txt
+exit: any # the release image stops on the overflow; its report is the subject
+step: jet crash
+cwd: open
+stdin: {work}/open/release.txt
 exit: 0
 file: open/release.txt ~ "Stop [E3012]: Stack overflow in `??` at 0x" # the release image prints addresses
 file: open/release.txt ~ "(names and lines: jet crash)" # and its build id
 stdout: ~ "Stop [E3012]: Stack overflow in `depth`" # jet crash names the function
 stdout: ~ "--> main.jet:1 in depth" # and its declaration
-step: sh -c 'cd "{work}/open" && test "$(cat dev.txt)" = "$("{jet}" crash < release.txt)"'
-exit: 0 # the named release report is the dev build's report
+capture: named = text stdout.trim
+file.trim: open/dev.txt = "{cap:named}" # the named release report is the dev build's report
 step: jet crash
 stdin: crash_no_build.stdin
 exit: 1

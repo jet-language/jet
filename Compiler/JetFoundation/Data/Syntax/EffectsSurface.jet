@@ -205,15 +205,12 @@ ORDERING_VARIANTS: [String]{"Less", "Equal", "Greater"}
 
 INTERPOLATION_UNIT_STYLES: [String]{"name", "bare"}
 
-InterpolationSelectorKind: enum { Debug Pretty Fixed Grouped Hex Oct Bin Pad PadLeft Percent Sci Unit }
-
 /// The arguments a selector takes in its parentheses; `UnitStyle` carries the accepted styles.
 InterpolationSelectorArguments: enum { Precision Width WidthFill UnitStyle(styles: [String]) }
 
 /// `arguments` is None for a selector that takes none.
 InterpolationSelector: struct {
     name: String
-    kind: InterpolationSelectorKind
     arguments: InterpolationSelectorArguments?
 }
 
@@ -221,62 +218,50 @@ InterpolationSelector: struct {
 INTERPOLATION_SELECTORS: [InterpolationSelector]{
     {
         name: "Debug",
-        kind: InterpolationSelectorKind.Debug,
         arguments: .None,
     },
     {
         name: "Pretty",
-        kind: InterpolationSelectorKind.Pretty,
         arguments: .None,
     },
     {
         name: "Fixed",
-        kind: InterpolationSelectorKind.Fixed,
         arguments: InterpolationSelectorArguments.Precision,
     },
     {
         name: "Grouped",
-        kind: InterpolationSelectorKind.Grouped,
         arguments: InterpolationSelectorArguments.Precision,
     },
     {
         name: "Hex",
-        kind: InterpolationSelectorKind.Hex,
         arguments: InterpolationSelectorArguments.Width,
     },
     {
         name: "Pad",
-        kind: InterpolationSelectorKind.Pad,
         arguments: InterpolationSelectorArguments.WidthFill,
     },
     {
         name: "PadLeft",
-        kind: InterpolationSelectorKind.PadLeft,
         arguments: InterpolationSelectorArguments.WidthFill,
     },
     {
         name: "Sci",
-        kind: InterpolationSelectorKind.Sci,
         arguments: InterpolationSelectorArguments.Precision,
     },
     {
         name: "Percent",
-        kind: InterpolationSelectorKind.Percent,
         arguments: InterpolationSelectorArguments.Precision,
     },
     {
         name: "Bin",
-        kind: InterpolationSelectorKind.Bin,
         arguments: .None,
     },
     {
         name: "Oct",
-        kind: InterpolationSelectorKind.Oct,
         arguments: .None,
     },
     {
         name: "Unit",
-        kind: InterpolationSelectorKind.Unit,
         arguments: InterpolationSelectorArguments.UnitStyle{styles: INTERPOLATION_UNIT_STYLES},
     },
 }

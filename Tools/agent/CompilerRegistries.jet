@@ -40,11 +40,12 @@ KIT_PACKAGE: "Compiler"
 KIT_PROFILE: "registries"
 RT: "Compiler/JetRuntime/Tests/"
 BE: "Compiler/JetBackend/Tests/"
+// The runtime-pack-roots-NAME.s inputs of the Link fixtures.
+PACK_ROOTS_INPUTS: [String]{"object", "archive", "consumer", "missing"}
 TEST_SCHEMA: "jet.test.v1"
 REGISTRY_TIMEOUT_MS: 3500000
 TRANSPORT_TIMEOUT_MS: 600000
 REGISTRY_PACKAGE: "name: \"compiler_registry\"\nversion: \"0.0.1\"\nedition: \"2026\"\n"
-TRANSPORT_PACKAGE: "name: \"compiler_registry_transport\"\nversion: \"0.0.1\"\nedition: \"2026\"\nauthority: {{ allow: [Env, Exec, Exec.Args, FS, IO, Mem.Alloc, Time.Wait, FFI] }}\n"
 // The C host of a plain transport: it registers the process arguments a stop
 // reports, attaches the main thread and runs the fragment's exported entry.
 PLAIN_DRIVER: "#include <stdint.h>\nextern char **environ;\nextern void jet_rt_host_arguments(int64_t,char **,char **);\nextern void jet_rt_thread_attach(void),jet_rt_thread_detach(void);\nextern void jet_rt_plain_fixture(void);\nint main(int argc,char **argv) {{ jet_rt_host_arguments(argc,argv,environ); jet_rt_thread_attach(); jet_rt_plain_fixture(); jet_rt_thread_detach(); return 0; }}\n"
@@ -54,6 +55,10 @@ ROOT_PRIMARY_ORDER: " _-,;:!?.'\"()[]{{}}@*/\\&#%`^+<=>|~$0123456789abcdefghijkl
 CRYPTO: [String]{"AgeCodec", "AgeV1", "CryptoAead", "CryptoChaCha", "CryptoEd25519", "CryptoEd25519Signature", "CryptoEntropy", "CryptoHash", "CryptoHkdf", "CryptoOsEntropy", "CryptoWipe", "CryptoX25519", "Sha256"}
 C_FIXTURES: [String]{"EnvironmentLeaves", "FaultSchedule", "IterCharge", "ProgressState", "HostFault", "FloatBits", "TerminalColor", "TrapReport", "VaultHooks", "VaultProvider", "Thread", "HostSpawn", "CompilerEnv", "CompilerRoutes", "CompilerNeededJSON", "CompilerNeededURL", "CompilerNeededMathText", "DynNative"}
 FOUR_MODES: [String]{"assemble", "lower", "link", "run"}
+// The fragments the world/sentry C host drives, composed into one unit in
+// this order, and the C hosts that link against the same object.
+WORLD_SENTRY: [String]{"World", "Sentry", "TestScope", "AllocationPolicy"}
+WORLD_SENTRY_LINKED: [String]{"LogicalEnvironmentTests", "LinkNativeTests"}
 
 #Error
 Problem: struct {
@@ -118,6 +123,8 @@ Kit: struct {
 
 // How a native registry is driven: the runner under Compiler/*/Tests and the
 // verdict that admits it. `blocked` names a registry without a transport.
+// `fragments` names the fragments a plain transport's unit composes; `calls`
+// the runs of a committed Jet runner.
 Spec: struct {
     kind: String
     name: String
@@ -129,6 +136,18 @@ Spec: struct {
     witness: String
     expected_file: String
     blocked: String
+    fragments: [String]
+    calls: [RunnerCall]
+}
+
+// One run of a committed Jet runner and its exact stdout (stderr stays
+// empty). `witness` is the C host the transport links against the runtime
+// object and hands over; without one the runner links its own fixture against
+// the link inputs. `mode` is the operand that selects the run, if any.
+RunnerCall: struct {
+    mode: String
+    witness: String
+    expected: String
 }
 
 Runtime: struct {
@@ -653,7 +672,38 @@ strip_imports: fn(text: String) -[Exec, IO]> String Never! {
 // --- transports ---------------------------------------------------------------
 
 spec: fn(kind: String, name: String, runner: String) -> Spec Never! {
-    Spec{kind: kind, name: name, runner: runner, modes: [String]{}, crypto: false, call: None, expected: "", witness: "", expected_file: "", blocked: ""}
+    Spec{kind: kind, name: name, runner: runner, modes: [String]{}, crypto: false, call: None, expected: "", witness: "", expected_file: "", blocked: "", fragments: [String]{}, calls: [RunnerCall]{}}
+}
+
+runner_call: fn(mode: String, witness: String, expected: String) -> RunnerCall Never! {
+    RunnerCall{mode: mode, witness: if witness == "" -> "" else -> "{RT}{witness}.c", expected: "{expected}\n"}
+}
+
+// The committed Jet runners under Compiler/JetRuntime/Tests and their runs.
+runner_calls: fn(name: String) -> [RunnerCall] Never! {
+    if name == {
+        "RunDuration" -> [RunnerCall]{runner_call("", "", "Jet-only Duration C ABI fixture passed")}
+        "RunAllocParity" -> [RunnerCall]{runner_call("", "", "alloc parity: 10 checked-allocator cases passed")}
+        "RunNativeLayout" -> [RunnerCall]{runner_call("", "", "Layout6: 12 draft literals exact; native/seed 42 observations + 3 fatal modes + ownership OK")}
+        "RunNativeTextNormalize" -> [RunnerCall]{runner_call("", "", "NFC2 Unicode17 20034 rows / both routes / ownership OK")}
+        "RunIntCabi" -> [RunnerCall]{runner_call("", "", "exact Int ABI: 9962 numeric/float cases + 6 stopped reports, clone/drop and concurrent hazard fixture; Jet-only provider")}
+        "RunIntWiden" -> [RunnerCall]{runner_call("", "", "Jet-only exact Int widening C ABI fixture passed")}
+        "RunCompilerNeededMath" -> [RunnerCall]{runner_call("", "", "Jet-only compiler math C ABI fixture passed")}
+        "RunExecutionFixtures" -> [RunnerCall]{runner_call("", "execution-fixture", "native execution witness: all cases passed")}
+        "StopWitness" -> [RunnerCall]{
+            runner_call("data-sequence", "DataTreeWitness", "8 Dyn List/Entries std Vec bounds/capacity process goldens passed"),
+            runner_call("scalar-reflect", "ScalarReflectWitness", "ScalarReflect bounds: exit 101, exact unsigned-index body and stdout flushed"),
+        }
+        "UiWitness" -> [RunnerCall]{
+            runner_call("choices", "UiCarriersChoicesWitness", "UI choices: ownership and record-variant stop byte-identical"),
+            runner_call("events", "UiEventsWitness", "UI events: real-provider ownership byte-identical"),
+            runner_call("form-action-error", "UiFormActionErrorWitness", "UI ActionError: real consumed producers and transitive ownership byte-identical"),
+            runner_call("key", "UiKeyWitness", "UI Key: exhaustive real-provider oracle and record-variant stop byte-identical"),
+            runner_call("raylib-metadata", "UiRaylibMetadataWitness", "UI raylib metadata and canonical Cursor: real-provider ownership byte-identical"),
+            runner_call("view-snapshots", "UiViewSnapshotsWitness", "UI view snapshots: real-provider ownership byte-identical"),
+        }
+        else -> [RunnerCall]{}
+    }
 }
 
 specification: fn(id: String) -> Spec? Never! {
@@ -665,19 +715,29 @@ specification: fn(id: String) -> Spec? Never! {
             found.crypto = true
             return Val(found)
         }
+        // A plain transport calls its entry from the generated driver, or
+        // runs the committed C host `witness` that drives the fragment.
         plain: if name == {
-            "Alloc" -> Val((call: Val("alloc_tests"), expected: "alloc tests: ok\n"))
-            "Collections" -> Val((call: Val("collections_tests"), expected: ""))
-            "Scan" -> Val((call: Val("scan_tests"), expected: ""))
-            "Text" -> Val((call: Val("text_tests"), expected: ""))
-            "Unicode" -> Val((call: Val("unicode_tests"), expected: ""))
-            "Secret" -> Val((call: Val("secret_tests"), expected: "secret tests: ok\n"))
+            "Alloc" -> Val((call: Val("alloc_tests"), witness: "", expected: "alloc tests: ok\n"))
+            "Collections" -> Val((call: Val("collections_tests"), witness: "", expected: ""))
+            "Scan" -> Val((call: Val("scan_tests"), witness: "", expected: ""))
+            "Text" -> Val((call: Val("text_tests"), witness: "", expected: ""))
+            "Unicode" -> Val((call: Val("unicode_tests"), witness: "", expected: ""))
+            "Secret" -> Val((call: Val("secret_tests"), witness: "", expected: "secret tests: ok\n"))
+            "FilesWalk" -> Val((call: Val("files_walk_tests"), witness: "", expected: ""))
+            "HostParallelism" -> Val((call: Val("host_parallelism_tests"), witness: "", expected: ""))
+            "TestSuite" -> Val((call: None, witness: "{RT}test-suite-fixture.c", expected: "test suite: ok\n"))
+            "Parallel" -> Val((call: None, witness: "{RT}parallel-fixture.c", expected: ""))
+            "Scheduler" -> Val((call: None, witness: "{RT}scheduler-fixture.c", expected: ""))
+            "World" | "Sentry" | "TestScope" | "AllocationPolicy" -> Val((call: None, witness: "{RT}world-sentry-fixture.c", expected: ""))
             else -> None
         }
         if plain == .Val(table) {
-            found := spec("plain", name, "{RT}check-runtime.mjs")
+            found := spec("plain", name, "Tools/agent/CompilerPackages.jet")
             found.call = table.call.copy()
+            found.witness = table.witness.copy()
             found.expected = table.expected.copy()
+            found.fragments = if WORLD_SENTRY.contains(name) -> WORLD_SENTRY.copy() else -> [String]{name.copy()}
             return Val(found)
         }
         if ([String]{"CodecCSV", "CodecEnv", "DynCodec", "CompilerFileLeaves"}).contains(name) -> return Val(spec("codec-fixture", name, "{RT}run-native-codec-file-leaves.mjs"))
@@ -687,23 +747,13 @@ specification: fn(id: String) -> Spec? Never! {
             found.expected_file = "{RT}{name}Witness.stdout"
             return Val(found)
         }
-        if name == "FilesWalk" || name == "HostParallelism" {
-            found := spec("native-suite", name, if name == "FilesWalk" -> "{RT}run-files-walk-fixtures.mjs" else -> "{RT}run-host-parallelism-fixtures.mjs")
-            found.witness = "{RT}{name}Witness.c"
-            found.modes = [String]{"assemble", "lower", "audit", "link", "run"}
-            return Val(found)
-        }
         suite: if name == {
-            "AllocationPolicy" | "World" | "Sentry" | "SentryInline" | "TestScope" -> Val((runner: "run-world-sentry-fixtures.mjs", modes: FOUR_MODES.copy()))
             "Channel" -> Val((runner: "run-channel-fixtures.mjs", modes: FOUR_MODES.copy()))
             "Stm" -> Val((runner: "run-channel-fixtures.mjs", modes: [String]{"assemble-stm", "lower", "link-stm", "run-stm"}))
             "Sync" -> Val((runner: "run-channel-fixtures.mjs", modes: [String]{"assemble-sync", "lower", "link-sync", "run-sync"}))
             "Observe" -> Val((runner: "run-channel-fixtures.mjs", modes: [String]{"assemble-observe", "lower", "link-observe", "run-observe"}))
             "SharedPublication" -> Val((runner: "run-channel-fixtures.mjs", modes: [String]{"assemble-publication", "lower", "link-publication", "run-publication"}))
             "SharedThread" -> Val((runner: "run-thread-fixtures.mjs", modes: [String]{"assemble", "lower", "shared-link", "shared-run"}))
-            "Parallel" -> Val((runner: "run-parallel-fixtures.mjs", modes: FOUR_MODES.copy()))
-            "Scheduler" -> Val((runner: "run-scheduler-fixtures.mjs", modes: FOUR_MODES.copy()))
-            "TestSuite" -> Val((runner: "run-testsuite-fixtures.mjs", modes: FOUR_MODES.copy()))
             "CollectionsStop" -> Val((runner: "run-collections-stop.mjs", modes: [String]{"--assemble", "--lower", "--run"}))
             else -> None
         }
@@ -713,15 +763,43 @@ specification: fn(id: String) -> Spec? Never! {
             return Val(found)
         }
         if C_FIXTURES.contains(name) -> return Val(spec("c", name, "{BE}run-runtime.mjs"))
+        calls: runner_calls(name)
+        if calls.len() > 0 {
+            found := spec("runner", name, "{RT}{name}.jet")
+            found.calls = calls
+            return Val(found)
+        }
         found := spec("blocked", name, "")
         found.blocked = "No registered transport for {id}; the source must not be counted without an exact native verdict"
         return Val(found)
     }
+    // A CLI behavior runner: `jet run RUNNER -- <jet> <scratch>` from the
+    // repository root prints exactly its verdict.
+    if id == "JetCli/Tests/RunKeep" {
+        found := spec("cli", "RunKeep", "Compiler/JetCli/Tests/RunKeep.fixture/RunKeep.jet")
+        found.expected = "run-keep: reuse, source/Core/compiler rebuilds, stop parity and the 64-program cap: ok\n"
+        return Val(found)
+    }
+    if id == "JetCli/Tests/RunCFfi" {
+        found := spec("cli", "RunCFfi", "Compiler/JetCli/Tests/RunCFfi.jet")
+        // The expected stream of the example it runs at both tiers, beside
+        // the vendored SQLite fixture.
+        found.witness = "Examples/Interop/FFI/NativeC.out"
+        found.expected = "native_c: native O0/O2 identical\nsqlite3/Fixture: native O0/O2 identical\n"
+        return Val(found)
+    }
     if !id.starts_with("JetBackend/Tests/") -> return None
     name: id.removeprefix("JetBackend/Tests/")
-    if name == "LinkIndexes" -> return Val(spec("indices", "", "{BE}run-link.mjs"))
-    if name == "LinkPackRoots" -> return Val(spec("roots", "", "{BE}run-runtime-pack-roots.mjs"))
-    if name == "LinkRuntime" -> return Val(spec("link", "", "{BE}run-link.mjs"))
+    if name == "LinkIndexes" -> return Val(spec("indices", "", "{BE}LinkIndexes.fixture/LinkIndexes.jet"))
+    if name == "LinkPackRoots" -> return Val(spec("roots", "", "{BE}LinkPackRoots.fixture/LinkPackRoots.jet"))
+    if name == "LinkRuntime" -> return Val(spec("link", "", "{BE}LinkRuntime.fixture/LinkRuntime.jet"))
+    if name == "NativeInlineC" {
+        found := spec("cli", name, "{BE}NativeInlineC.fixture/NativeInlineC.jet")
+        // The program it builds twice, once with its shared definition removed.
+        found.witness = "tests/fixtures/native_inline_c_shared_state.jet"
+        found.expected = "native inline C shared state and whole-bridge refusal: passed\n"
+        return Val(found)
+    }
     None
 }
 
@@ -736,14 +814,17 @@ spec_dyn: fn(found: Spec, runner_sha256: String) -> Dyn Never! {
         entries["runner"] = Dyn.Text(found.runner.copy())
     } else {
         entries["name"] = Dyn.Text(found.name.copy())
+        if found.kind == "plain" || found.kind == "cli" -> entries["expected"] = Dyn.Text(found.expected.copy())
         if found.kind == "plain" {
             entries["call"] = if found.call == .Val(call) -> Dyn.Text(call.copy()) else -> Dyn.Null
-            entries["expected"] = Dyn.Text(found.expected.copy())
+            entries["fragments"] = texts(found.fragments)
         }
         entries["runner"] = Dyn.Text(found.runner.copy())
         if found.witness != "" -> entries["witness"] = Dyn.Text(found.witness.copy())
         if found.expected_file != "" -> entries["expectedFile"] = Dyn.Text(found.expected_file.copy())
-        if found.kind == "native-suite" -> entries["modes"] = texts(found.modes)
+        if found.kind == "runner" {
+            entries["calls"] = Dyn.Array(found.calls.map(call -> Dyn.Object([String: Dyn]{"mode": Dyn.Text(call.mode.copy()), "witness": Dyn.Text(call.witness.copy()), "expected": Dyn.Text(call.expected.copy())})))
+        }
     }
     entries["runnerSha256"] = Dyn.Text(runner_sha256.copy())
     Dyn.Object(entries.copy())
@@ -756,15 +837,40 @@ transport_home: fn(source: String) -[Exec, IO]> String Never! {
     fragment.replace_first(source, "/")
 }
 
-prepare_transport: fn(repo: String, row: Census, out: String, adapter: String) -[Env, Exec, FS, IO]> Dyn? Never! {
-    home: transport_home(row.source)
-    id: home.removeprefix("Compiler/").removesuffix(".jet")
-    found: specification(id) ?? return None
+// The transport a registry id names: its Tests package's file, without the
+// fixture directory it lives in or the `.run` of an entry beside its Tests.
+transport_key: fn(id: String) -[Exec, IO]> String Never! {
+    transport_home("Compiler/{id}").removeprefix("Compiler/").removesuffix(".run")
+}
+
+// The manifest entry of a registry a transport drives; it keeps the
+// registry's id, so the run accounts for exactly the censused registries.
+prepare_transport: fn(repo: String, registry: Registry, out: String, adapter: String) -[Env, Exec, FS, IO]> Dyn? Never! {
+    row: registry.row
+    id: registry.id.copy()
+    home: "Compiler/{transport_key(id)}"
+    found: specification(transport_key(id)) ?? return None
     sources := [String]{row.source.copy()}
     if found.witness != "" -> sources.push(found.witness.copy())
     if found.expected_file != "" -> sources.push(found.expected_file.copy())
-    witness: "{home.removesuffix(".jet")}.c"
+    loop name in found.fragments {
+        fragment: "{RT}Fragments.fixture/{name}Tests.jet"
+        if !sources.contains(fragment) -> sources.push(fragment)
+    }
+    if found.fragments == WORLD_SENTRY {
+        loop name in WORLD_SENTRY_LINKED -> sources.push("{RT}{name}.c")
+    }
+    loop call in found.calls {
+        if call.witness != "" && !sources.contains(call.witness) -> sources.push(call.witness.copy())
+    }
+    witness: "{home}.c"
     if found.kind == "c" && files.exists("{repo}/{witness}") -> sources.push(witness)
+    if found.kind == "indices" || found.kind == "roots" || found.kind == "link" || found.kind == "cli" {
+        sources.push("{files.dirname(found.runner)}/package.jet")
+        if found.kind == "roots" || found.kind == "link" {
+            loop name in PACK_ROOTS_INPUTS -> sources.push("{BE}LinkPackRoots.fixture/runtime-pack-roots-{name}.s")
+        }
+    }
     entry := [String: Dyn]{
         "id": Dyn.Text(id.copy()),
         "package": Dyn.Text(row.package.copy()),
@@ -829,11 +935,57 @@ c_driver: fn(name: String, repo: String) -> String? Never! {
     None
 }
 
-// The committed trap literal `name` of TrapMessages.jet, decoded from its
-// little-endian words: no runtime manufactures the expected report.
+// The bytes of the first `rt_static_text("…")` literal in `source`, undoing
+// the generators' escapes (Tools/agent/RuntimeGenerators.jet static_text).
+static_text_literal: fn(source: String, what: String) -> String Problem! {
+    literal: regex.compile("rt_static_text\\(\"((?:[^\"\\\\]|\\\\.)*)\"\\)") ?? return Err(problem("static text pattern: {err}"))
+    loop found in literal.matches(source) {
+        body: (found.group(1) ?? "").bytes()
+        bytes := [U8]{}
+        at := 0
+        loop at < body.len() {
+            code: Int.from_u8(body[at])
+            if code == 92 && at + 1 < body.len() {
+                escaped: Int.from_u8(body[at + 1])
+                plain: if escaped == {
+                    110 -> 10
+                    92 -> 92
+                    34 -> 34
+                    else -> return Err(problem("{what} has an unknown static text escape"))
+                }
+                bytes.push(U8{plain})
+                at += 2
+                next
+            }
+            if (code == 123 || code == 125) && at + 1 < body.len() && Int.from_u8(body[at + 1]) == code {
+                bytes.push(U8{code})
+                at += 2
+                next
+            }
+            bytes.push(U8{code})
+            at += 1
+        }
+        decoded: String.from_bytes(bytes) ?? return Err(problem("{what} is not UTF-8"))
+        return Ok(decoded)
+    }
+    Err(problem("{what} has no static text"))
+}
+
+// The committed trap literal `name` of TrapMessages.jet: its static text
+// (`<name>_text`), or its little-endian signed word rows. No runtime
+// manufactures the expected report.
 trap_literal: fn(repo: String, name: String) -[FS]> String Problem! {
     text: files.read("{repo}/Compiler/JetRuntime/Source/TrapMessages.jet") ?? return Err(problem("TrapMessages.jet cannot be read: {err}"))
     raw: "\n{text}".bytes()
+    static_head: "\n{name}_text: fn() -> I64 {{ "
+    line: index_of(raw, static_head, 0)
+    if line >= 0 {
+        end: index_of(raw, "\n", line + 1)
+        if end < 0 -> return Err(problem("missing frozen trap literal {name}"))
+        source: String.from_bytes(raw.slice(line, end)) ?? return Err(problem("trap literal {name} is not UTF-8"))
+        decoded: static_text_literal(source, "trap literal {name}") ?? return Err(err)
+        return Ok(decoded)
+    }
     open: index_of(raw, "\n{name}: fn() {{\n", 0)
     if open < 0 -> return Err(problem("missing frozen trap literal {name}"))
     start: open + "\n{name}: fn() {{\n".count_bytes()
@@ -852,6 +1004,27 @@ trap_literal: fn(repo: String, name: String) -[FS]> String Problem! {
     }
     literal: String.from_bytes(bytes) ?? return Err(problem("trap literal {name} is not UTF-8"))
     literal
+}
+
+// The committed owned text `name` of SchedulerMessages.jet: its static text,
+// which must be exactly as long as the text it sizes.
+scheduler_literal: fn(repo: String, name: String) -[FS]> String Problem! {
+    text: files.read("{repo}/Compiler/JetRuntime/Source/SchedulerMessages.jet") ?? return Err(problem("SchedulerMessages.jet cannot be read: {err}"))
+    raw: "\n{text}".bytes()
+    open: index_of(raw, "\n{name}: fn() -> I64 {{\n", 0)
+    if open < 0 -> return Err(problem("missing frozen scheduler literal {name}"))
+    close: index_of(raw, "\n}}", open + 1)
+    if close < 0 -> return Err(problem("missing frozen scheduler literal {name}"))
+    body: String.from_bytes(raw.slice(open, close)) ?? return Err(problem("scheduler literal {name} is not UTF-8"))
+    sized: regex.compile("scheduler_text_new\\(I64\\{{(\\d+)\\}}\\)") ?? return Err(problem("scheduler pattern: {err}"))
+    length := -1
+    loop found in sized.matches(body) {
+        length = Int.parse(found.group(1) ?? "") ?? -1
+        break
+    }
+    literal: static_text_literal(body, "scheduler literal {name}") ?? return Err(err)
+    if literal.count_bytes() != length -> return Err(problem("scheduler literal {name} is {literal.count_bytes()} bytes, not {length}"))
+    Ok(literal)
 }
 
 strips_transport: fn(name: String) -> Bool Never! {
@@ -947,6 +1120,15 @@ node: fn(lane: &Lane, runner: String, args: [String]) -[Env, Exec, FS, IO, Time,
     execute(lane, binary, argv, cwd, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
 }
 
+// A repository Jet tool, run by the jet running this script (jet_cli).
+jet_tool: fn(lane: &Lane, script: String, args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Ran Problem! {
+    argv := [String]{"{lane.repo}/{script}"}
+    loop arg in args -> argv.push(arg.copy())
+    binary: jet_cli()
+    cwd: lane.out.copy()
+    execute(lane, binary, argv, cwd, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
+}
+
 exact: fn(ran: Ran, stdout: String, stderr: String) Problem! {
     if ran.stdout == stdout && ran.stderr == stderr -> return Ok(())
     shown: json.dumps(Dyn.Object([String: Dyn]{"stdout": Dyn.Text(ran.stdout.copy()), "stderr": Dyn.Text(ran.stderr.copy()), "expectedStdout": Dyn.Text(stdout.copy()), "expectedStderr": Dyn.Text(stderr.copy())})) ?? ""
@@ -965,22 +1147,9 @@ front: fn(lane: &Lane, args: [String], prefix: String, cwd: String, extra: [Sett
     Ok(())
 }
 
-// Build `file` as a native program in `root` and return a fresh copy of it.
-compile: fn(lane: &Lane, file: String, root: String, prefix: String) -[Env, Exec, FS, IO, Time, Time.Wait]> String Problem! {
-    if !files.exists("{root}/package.jet") -> files.write("{root}/package.jet", TRANSPORT_PACKAGE) ?? return Err(problem("`{root}/package.jet` cannot be written: {err}"))
-    built: "{root}/.jet/build/{files.basename(file).removesuffix(".jet")}"
-    loop path in ([String]{built, "{prefix}.exe", "{prefix}.issues", "{prefix}.pack-issues"}) {
-        if files.exists(path) -> files.remove(path) ?? return Err(problem("`{path}` cannot be removed: {err}"))
-    }
-    front(lane, [String]{"build", file}, prefix, root, [Setting]{}) ?? return Err(err)
-    if !files.exists(built) -> return Err(problem("native build did not emit a fresh executable"))
-    files.copy(built, "{prefix}.exe") ?? return Err(problem("`{prefix}.exe` cannot be written: {err}"))
-    files.set_mode("{prefix}.exe", 0o755) ?? return Err(problem("`{prefix}.exe` cannot be made executable: {err}"))
-    "{prefix}.exe"
-}
-
-// Lower `file` as a native library: the front-end hook writes its object,
-// exports, ABI, thread and issue files beside `prefix`.
+// Lower `file` as a native library through `jet doc`, the runtime-library
+// seam (`jet check` lowers no #Export(c) body): the front-end hook writes its
+// object, exports, ABI, thread and issue files beside `prefix`.
 library: fn(lane: &Lane, file: String, prefix: String, lifecycle: String, exports: String) Problem! -[Env, Exec, FS, IO, Time, Time.Wait]> {
     if !files.exists(lifecycle) -> return Err(problem("native library lifecycle list `{lifecycle}` is missing"))
     loop suffix in ([String]{".o", ".exports", ".abi.json", ".threads", ".issues"}) {
@@ -988,7 +1157,7 @@ library: fn(lane: &Lane, file: String, prefix: String, lifecycle: String, export
     }
     hooks := [Setting]{Setting{name: "JET_FRONT_LIBRARY_OBJECT_OUTPUT", value: prefix.copy()}, Setting{name: "JET_FRONT_LIBRARY_LIFECYCLE", value: lifecycle.copy()}}
     if exports != "" -> hooks.push(Setting{name: "JET_FRONT_LIBRARY_EXPORTS", value: exports.copy()})
-    front(lane, [String]{"check", file}, prefix, files.dirname(file), hooks) ?? return Err(err)
+    front(lane, [String]{"doc", file}, prefix, files.dirname(file), hooks) ?? return Err(err)
     if files.exists("{prefix}.issues") -> return Err(problem(files.read("{prefix}.issues") ?? ""))
     loop suffix in ([String]{".o", ".exports", ".abi.json", ".threads"}) {
         if !files.exists("{prefix}{suffix}") -> return Err(problem("native library hook omitted {suffix}"))
@@ -996,25 +1165,61 @@ library: fn(lane: &Lane, file: String, prefix: String, lifecycle: String, export
     Ok(())
 }
 
-program: fn(lane: &Lane, file: String, expected: String) Problem! -[Env, Exec, FS, IO, Time, Time.Wait]> {
-    root: files.dirname(file)
-    binary: compile(lane, file, root, "{root}/registry-native") ?? return Err(err)
-    cwd: lane.out.copy()
-    ran: execute(lane, binary, [String]{}, cwd, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
-    exact(ran, expected, "") ?? return Err(err)
-}
-
 // The runtime imports jet_rt_fault_report, which Jet's linker writes into each
 // image; this platform link assembles it from the shared report source.
 link: fn(lane: &Lane, source: String, object: String, binary: String) Problem! -[Env, Exec, FS, IO, Time, Time.Wait]> {
+    report_object: fault_report(lane) ?? return Err(err)
+    args: [String]{"-std=c11", "-Wall", "-Wextra", "-Werror", source, object, report_object, "-lpthread", "-ldl", "-lm", "-o", binary}
+    execute(lane, env_or("CC", "cc"), args, lane.out.copy(), [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
+    Ok(())
+}
+
+// The object that defines jet_rt_fault_report, assembled into the lane.
+fault_report: fn(lane: &Lane) -[Env, Exec, FS, IO, Time, Time.Wait]> String Problem! {
     cwd: lane.out.copy()
     repo: lane.repo.copy()
     report: "{cwd}/fault-report.S"
     report_object: "{cwd}/fault-report.o"
     files.write(report, "    .text\n    .globl jet_rt_fault_report\n    .type jet_rt_fault_report, @function\njet_rt_fault_report:\n    .include \"{repo}/Compiler/JetRuntime/Assets/FaultReport/report.S\"\n    .size jet_rt_fault_report, . - jet_rt_fault_report\n") ?? return Err(problem("`{report}` cannot be written: {err}"))
-    execute(lane, "as", [String]{"--64", "-o", report_object, report}, cwd.copy(), [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
-    args: [String]{"-std=c11", "-Wall", "-Wextra", "-Werror", source, object, report_object, "-lpthread", "-ldl", "-lm", "-o", binary}
-    execute(lane, env_or("CC", "cc"), args, cwd, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
+    execute(lane, "as", [String]{"--64", "-o", report_object, report}, cwd, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
+    report_object
+}
+
+// The real GNU-as inputs of the runtime-pack fixtures, assembled into the
+// lane: runtime.o, archive.o, consumer.o, missing.o and runtime.a.
+pack_roots_inputs: fn(lane: &Lane) Problem! -[Env, Exec, FS, IO, Time, Time.Wait]> {
+    cwd: lane.out.copy()
+    loop name in PACK_ROOTS_INPUTS {
+        object: if name == "object" -> "runtime.o" else -> "{name}.o"
+        source: "{lane.repo}/{BE}LinkPackRoots.fixture/runtime-pack-roots-{name}.s"
+        execute(lane, "as", [String]{"--64", "-o", "{cwd}/{object}", source}, cwd, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
+    }
+    execute(lane, "ar", [String]{"rcs", "{cwd}/runtime.a", "{cwd}/archive.o"}, cwd, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
+    Ok(())
+}
+
+// A committed Jet runner, run from the repository root by the lane's jet:
+// each call's C witness is linked against the runtime object and handed over,
+// and a runner without one links its fixture against the same link inputs.
+// Every call must print exactly its line and nothing on stderr.
+runner_verdict: fn(lane: &Lane, found: Spec) Problem! -[Env, Exec, FS, IO, Time, Time.Wait]> {
+    out: lane.out.copy()
+    script: "{lane.repo}/{found.runner}"
+    loop call in found.calls {
+        label: if call.mode == "" -> "run" else -> call.mode.copy()
+        args := [String]{"-A", script.copy()}
+        if call.witness == "" {
+            report_object: fault_report(lane) ?? return Err(err)
+            args.extend([String]{"{out}/{label}", lane.object.copy(), report_object, "-lpthread", "-ldl", "-lm"})
+        } else {
+            binary: "{out}/{label}.bin"
+            link(lane, "{lane.repo}/{call.witness}", lane.object.copy(), binary) ?? return Err(err)
+            if call.mode != "" -> args.extend([String]{call.mode.copy(), "{out}/{label}"})
+            args.push(binary)
+        }
+        ran: execute(lane, lane.jet.copy(), args, lane.repo.copy(), [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
+        exact(ran, call.expected, "") ?? return Err(problem("{found.name} {label}: {err.message}"))
+    }
     Ok(())
 }
 
@@ -1073,7 +1278,7 @@ stage_toolchain: fn(jet: String, runtime: Runtime, out: String) -[FS]> String Pr
 
 run_transport: fn(entry: Dyn, repo: String, jet: String, log_dir: String, runtime: Runtime, adapter: String) -[Env, Exec, FS, IO, Time, Time.Wait]> (ran: Ran, evidence: [Dyn]) Problem! {
     id: text_field(entry, "id")
-    found: specification(id) ?? return Err(problem("unknown transport {id}"))
+    found: specification(transport_key(id)) ?? return Err(problem("unknown transport {id}"))
     if found.blocked != "" -> return Err(problem(found.blocked))
     runner_sha: text_field(field(entry, "transport"), "runnerSha256")
     if int_field(entry, "testCount") != Val(1) || text_field(entry, "sha256") != (sha256_path(adapter) ?? "") || runner_sha != (sha256_path("{repo}/{found.runner}") ?? "") {
@@ -1107,16 +1312,6 @@ drive: fn(lane: &Lane, found: Spec) Problem! -[Env, Exec, FS, IO, Time, Time.Wai
         if found.kind == "process-fixture" && !(ok && text_field(result, "witness") == "{found.name}Witness") -> return Err(problem("named native process fixture receipt differs"))
         return Ok(())
     }
-    if found.kind == "native-suite" {
-        loop mode in found.modes {
-            execute(lane, node_bin, [String]{"{repo}/{found.runner}", out, mode}, out, [Setting]{Setting{name: "JET_FRONT_JETC0", value: staged.copy()}}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
-        }
-        result: read_json("{out}/run.receipt.json") ?? return Err(err)
-        if int_field(result, "status") != Val(0) || truthy(field(result, "signal")) || truthy(field(result, "error")) || field(result, "stdout") != .Text("") || field(result, "stderr") != .Text("") {
-            return Err(problem("native files/host fixture receipt differs"))
-        }
-        return Ok(())
-    }
     if found.kind == "suite" {
         node(lane, found.runner, [String]{out, found.modes[0]}) ?? return Err(err)
         selected: suite_library(found, out)
@@ -1135,11 +1330,17 @@ drive: fn(lane: &Lane, found: Spec) Problem! -[Env, Exec, FS, IO, Time, Time.Wai
         raw: "{out}/raw"
         native: "{out}/native"
         files.create_dir_all("{native}/Source") ?? return Err(problem("`{native}/Source` cannot be created: {err}"))
-        node(lane, found.runner, [String]{raw, "--assemble-only", "--test", found.name}) ?? return Err(err)
+        unit_args := [String]{"--root", repo, "runtime-unit", raw}
+        loop name in found.fragments {
+            unit_args.push("--test")
+            unit_args.push(name.copy())
+        }
+        jet_tool(lane, found.runner, unit_args) ?? return Err(err)
         unit: files.read("{raw}/unit.jet") ?? return Err(problem("`{raw}/unit.jet` cannot be read: {err}"))
-        call: found.call ?? return Err(problem("plain transport {found.name} names no entry"))
+        entry: if found.call == .Val(call) -> "\n#Export(c) jet_rt_plain_fixture: fn() {{ {call}() }}\n" else -> ""
+        if entry == "" && found.witness == "" -> return Err(problem("plain transport {found.name} names no entry"))
         fixture: "{native}/Source/Fixture.jet"
-        files.write(fixture, "{unit}\n#Export(c) jet_rt_plain_fixture: fn() {{ {call}() }}\n") ?? return Err(problem("`{fixture}` cannot be written: {err}"))
+        files.write(fixture, "{unit}{entry}") ?? return Err(problem("`{fixture}` cannot be written: {err}"))
         package: files.read("{repo}/Compiler/JetRuntime/package.jet") ?? return Err(problem("`Compiler/JetRuntime/package.jet` cannot be read: {err}"))
         files.write("{native}/package.jet", package) ?? return Err(problem("`{native}/package.jet` cannot be written: {err}"))
         // The fragments witness the allocator a program built without
@@ -1152,33 +1353,139 @@ drive: fn(lane: &Lane, found: Spec) Problem! -[Env, Exec, FS, IO, Time, Time.Wai
         lifecycle: "{native}/lifecycle.list"
         files.write(lifecycle, kept.join("\n")) ?? return Err(problem("`{lifecycle}` cannot be written: {err}"))
         library(lane, fixture, "{native}/fixture", lifecycle, "") ?? return Err(err)
-        driver: "{native}/driver.c"
-        files.write(driver, PLAIN_DRIVER) ?? return Err(problem("`{driver}` cannot be written: {err}"))
+        driver := "{native}/driver.c"
+        if found.witness != "" {
+            driver = "{repo}/{found.witness}"
+        } else {
+            files.write(driver, PLAIN_DRIVER) ?? return Err(problem("`{driver}` cannot be written: {err}"))
+        }
         binary: "{native}/driver"
         link(lane, driver, "{native}/fixture.o", binary) ?? return Err(err)
+        if found.name == "Scheduler" -> return scheduler_verdict(lane, binary)
+        if found.fragments == WORLD_SENTRY -> return world_sentry_verdict(lane, binary, "{native}/fixture.o")
         ran: execute(lane, binary, [String]{}, out, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
         return exact(ran, found.expected, "")
     }
     if found.kind == "c" -> return c_verdict(lane, found)
-    if found.kind == "indices" {
-        node(lane, found.runner, [String]{out, "--indices"}) ?? return Err(err)
-        return program(lane, "{out}/unit.jet", "link section indexes: pass\n")
+    if found.kind == "runner" -> return runner_verdict(lane, found)
+    if found.kind == "indices" || found.kind == "roots" {
+        if found.kind == "roots" -> pack_roots_inputs(lane) ?? return Err(err)
+        expected: if found.kind == "indices" -> "link section indexes: pass\n" else -> "runtime pack object roots: pass\n"
+        ran: execute(lane, staged, [String]{"run", "{repo}/{found.runner}"}, out, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
+        exact(ran, expected, "") ?? return Err(err)
+        if found.kind == "indices" -> return Ok(())
+    }
+    if found.kind == "link" {
+        pack_roots_inputs(lane) ?? return Err(err)
+        linked: execute(lane, staged, [String]{"run", "{repo}/{found.runner}", "--", "{out}/consumer", "{out}/consumer.o", "{out}/runtime.o", "{out}/runtime.a"}, out, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
+        receipt: regex.compile("linked .+: [0-9]+ bytes; read [0-9]+ ms, link [0-9]+ ms, write [0-9]+ ms\\n") ?? return Err(problem("linker pattern: {err}"))
+        if !receipt.full_match(linked.stdout) || linked.stderr != "" -> return Err(problem("linker artifact receipt differs"))
     }
     if found.kind == "roots" || found.kind == "link" {
-        node(lane, "{BE}run-runtime-pack-roots.mjs", [String]{out, "--prepare-only"}) ?? return Err(err)
-        if found.kind == "roots" {
-            program(lane, "{out}/unit.jet", "runtime pack object roots: pass\n") ?? return Err(err)
-        } else {
-            node(lane, found.runner, [String]{out}) ?? return Err(err)
-            binary: compile(lane, "{out}/unit.jet", out, "{out}/link-native") ?? return Err(err)
-            linked: execute(lane, binary, [String]{"{out}/consumer", "{out}/consumer.o", "{out}/runtime.o", "{out}/runtime.a"}, out, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
-            receipt: regex.compile("linked .+: [0-9]+ bytes; read [0-9]+ ms, link [0-9]+ ms, write [0-9]+ ms\\n") ?? return Err(problem("linker pattern: {err}"))
-            if !receipt.full_match(linked.stdout) || linked.stderr != "" -> return Err(problem("linker artifact receipt differs"))
-        }
         consumer: execute(lane, "{out}/consumer", [String]{}, out, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
         return exact(consumer, "", "")
     }
+    if found.kind == "cli" {
+        ran: execute(lane, staged, [String]{"run", "{repo}/{found.runner}", "--", staged.copy(), "{out}/scratch"}, repo, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
+        return exact(ran, found.expected, "")
+    }
     Err(problem("unimplemented transport {found.kind}"))
+}
+
+// The scheduler host walks its tasks silently at 1, 2 and 8 workers, then
+// stops on a root panic that the process edge reports exactly as the
+// committed literals compose it: no runtime manufactures the golden.
+scheduler_verdict: fn(lane: &Lane, binary: String) Problem! -[Env, Exec, FS, IO, Time, Time.Wait]> {
+    out: lane.out.copy()
+    repo: lane.repo.copy()
+    loop threads in ([String]{"1", "2", "8"}) {
+        ran: execute(lane, binary, [String]{}, out, [Setting]{Setting{name: "JET_SCHEDULER_THREADS", value: threads.copy()}}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
+        exact(ran, "", "") ?? return Err(problem("JET_SCHEDULER_THREADS={threads}: {err.message}"))
+    }
+    header: trap_literal(repo, "trap_msg_header_panic") ?? return Err(err)
+    cancelled: scheduler_literal(repo, "scheduler_msg_cancelled") ?? return Err(err)
+    prelude: trap_literal(repo, "trap_msg_prelude_end") ?? return Err(err)
+    footer: trap_literal(repo, "trap_footer_e3001") ?? return Err(err)
+    panicked: execute(lane, binary, [String]{"root-panic"}, out, [Setting]{}, 70, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
+    exact(panicked, "", "{header}{cancelled}{prelude}{footer}")
+}
+
+// The world/sentry host runs the world, sentry, test-scope and allocation
+// policy witnesses silently under a memory ledger, and its source gate
+// silently. Its `ledger` mode records one expired-stack row through a normal
+// return, `ledger-stop` the same row through the R0802 stop with one
+// `exit: 70` line; the two ledgers are byte-equal, each a fresh owner-only
+// file (0600) in an owner-only directory (0700). The logical-environment and
+// link-native hosts link against the same object and run: each prints exactly
+// the lines its C source `puts`. Every failure is reported.
+world_sentry_verdict: fn(lane: &Lane, binary: String, object: String) Problem! -[Env, Exec, FS, IO, Time, Time.Wait]> {
+    out: lane.out.copy()
+    repo: lane.repo.copy()
+    failures := [String]{}
+    loop name in WORLD_SENTRY_LINKED {
+        source: "{repo}/{RT}{name}.c"
+        host: "{out}/native/{name}"
+        if link(lane, source, object, host) == {
+            .Err(failed) -> failures.push("{name} link: {failed.message}")
+            .Ok(_) -> {
+                expected: puts_lines(source) ?? {
+                    failures.push("{name}: {err.message}")
+                    next
+                }
+                failures.extend(step_failures(name, execute(lane, host, [String]{}, out, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS), expected, ""))
+            }
+        }
+    }
+    ledgers: "{out}/ledgers"
+    files.remove_all(ledgers) ?? ()
+    silent: Setting{name: "JET_MEMORY_LEDGER", value: "{ledgers}/checks/ledger.jsonl"}
+    failures.extend(step_failures("witnesses", execute(lane, binary, [String]{}, out, [Setting]{silent}, 0, TRANSPORT_TIMEOUT_MS), "", ""))
+    failures.extend(step_failures("source-gate", execute(lane, binary, [String]{"source-gate"}, out, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS), "", ""))
+    returned: "{ledgers}/return/ledger.jsonl"
+    stopped: "{ledgers}/stop/ledger.jsonl"
+    recorded: Setting{name: "JET_MEMORY_LEDGER", value: returned.copy()}
+    failures.extend(step_failures("ledger", execute(lane, binary, [String]{"ledger"}, out, [Setting]{recorded}, 0, TRANSPORT_TIMEOUT_MS), "*", "*"))
+    stopping: Setting{name: "JET_MEMORY_LEDGER", value: stopped.copy()}
+    failures.extend(step_failures("ledger-stop", execute(lane, binary, [String]{"ledger-stop"}, out, [Setting]{stopping}, 70, TRANSPORT_TIMEOUT_MS), "", "R0802"))
+    texts := [String]{}
+    loop path in ([String]{returned, stopped}) {
+        text: files.read(path) ?? {
+            failures.push("`{path}` cannot be read: {err}")
+            next
+        }
+        if text == "" || text.trim_end().split("\n").to_list().len() != 1 -> failures.push("`{path}` does not hold exactly one ledger row")
+        file_mode: (files.stat(path) ?? return Err(problem("`{path}` cannot be inspected: {err}"))).mode % 512
+        dir_mode: (files.stat(files.dirname(path)) ?? return Err(problem("`{files.dirname(path)}` cannot be inspected: {err}"))).mode % 512
+        if file_mode != 384 || dir_mode != 448 -> failures.push("`{path}` is not an owner-only file (0600) in an owner-only directory (0700)")
+        texts.push(text)
+    }
+    if texts.len() == 2 && texts[0] != texts[1] -> failures.push("the returned and stopped ledgers differ")
+    if failures.len() > 0 -> return Err(problem("world/sentry verdict: {failures.join("; ")}"))
+    Ok(())
+}
+
+// Why a world/sentry step failed: its run failed, or its stdout is not
+// `stdout`, or its stderr is not `stderr` ("*" admits any output). A stderr of
+// "R0802" is the sentry stop report: it names R0802 and holds exactly one
+// `exit: 70` line.
+step_failures: fn(step: String, result: Ran Problem!, stdout: String, stderr: String) -> [String] Never! {
+    ran: if result == {
+        .Ok(done) -> done
+        .Err(failed) -> return [String]{"{step}: {failed.message}"}
+    }
+    failures := [String]{}
+    if stdout != "*" && ran.stdout != stdout -> failures.push("{step}: stdout {json.dumps(Dyn.Text(ran.stdout.copy())) ?? ""} is not {json.dumps(Dyn.Text(stdout.copy())) ?? ""}")
+    if stderr == "R0802" {
+        exits := [String]{}
+        loop line in ran.stderr.split("\n") {
+            if line.starts_with("exit: ") -> exits.push(line.copy())
+        }
+        if !ran.stderr.contains("R0802") -> failures.push("{step}: the stop report does not name R0802")
+        if exits.len() != 1 || exits[0] != "exit: 70" -> failures.push("{step}: the report's exit lines [{exits.join(" | ")}] are not one `exit: 70`")
+    } else if stderr != "*" && ran.stderr != stderr {
+        failures.push("{step}: stderr {json.dumps(Dyn.Text(ran.stderr.copy())) ?? ""} is not {json.dumps(Dyn.Text(stderr.copy())) ?? ""}")
+    }
+    failures
 }
 
 crypto_verdict: fn(lane: &Lane) Problem! -[Env, Exec, FS, IO, Time, Time.Wait]> {
@@ -1212,7 +1519,12 @@ crypto_verdict: fn(lane: &Lane) Problem! -[Env, Exec, FS, IO, Time, Time.Wait]> 
 witness_stdout: fn(repo: String, name: String) -[FS]> String Problem! {
     stdout_file: "{repo}/{RT}{name}Witness.stdout"
     if files.exists(stdout_file) -> return files.read(stdout_file) ?? return Err(problem("`{stdout_file}` cannot be read: {err}"))
-    source: files.read("{repo}/{RT}{name}Witness.c") ?? return Err(problem("`{RT}{name}Witness.c` cannot be read: {err}"))
+    puts_lines("{repo}/{RT}{name}Witness.c")
+}
+
+// The lines the C source at `path` `puts`, each ending in a newline.
+puts_lines: fn(path: String) -[FS]> String Problem! {
+    source: files.read(path) ?? return Err(problem("`{path}` cannot be read: {err}"))
     puts: regex.compile("puts\\((\"(?:\\\\.|[^\"\\\\])*\")\\);") ?? return Err(problem("puts pattern: {err}"))
     out := ""
     loop found in puts.matches(source) {
@@ -1315,7 +1627,7 @@ generate: fn(repo: String, options: Options) -[Env, Exec, FS, IO, Time, Time.Wai
         mode: registry.mode
         standalone: row.package == "JetRuntime" && mode == "test"
         if !standalone {
-            if prepare_transport(repo, row, out, adapter) == .Val(transport) {
+            if prepare_transport(repo, registry, out, adapter) == .Val(transport) {
                 entries.push(transport)
                 next
             }
@@ -1374,7 +1686,10 @@ generate: fn(repo: String, options: Options) -[Env, Exec, FS, IO, Time, Time.Wai
             next
         }
         text: files.read("{repo}/{row.source}") ?? return fail("`{row.source}` cannot be read: {err}")
-        body: "\n// [compiler registry source: {row.source}]\n{strip_imports(text)}\n"
+        // The source's launch line is a comment once the source no longer
+        // starts the file.
+        launch: if text.starts_with("#!") -> "//" else -> ""
+        body: "\n// [compiler registry source: {row.source}]\n{launch}{strip_imports(text)}\n"
         names: tests_in(body) ?? return fail(err.message)
         entry["sha256"] = Dyn.Text(crypto.sha256(body.bytes()).hex())
         entry["testNames"] = texts(names)
@@ -1821,17 +2136,22 @@ shard_ids: fn(entries: [Dyn], shard: String) -> [String] Never! {
     assert_eq(lines[7], "run: fn() {{ }}")
 }
 
+// The registry of a runtime fragment, as registry_rows censuses it.
+fragment_registry: fn(name: String) -> Registry Never! {
+    source: "Compiler/JetRuntime/Tests/Fragments.fixture/{name}Tests.jet"
+    row: Census{package: "JetRuntime", source: source.copy(), sha256: "", names: [String]{}, entry: false, role: "registry"}
+    Registry{row: row, id: source.removeprefix("Compiler/").removesuffix(".jet"), mode: "run"}
+}
+
 #Test("runtime C transports run their complete witness variants") {
     repo: test_repo()
     loop name in ([String]{"CompilerEnv", "CompilerRoutes", "CompilerNeededJSON", "CompilerNeededURL", "CompilerNeededMathText", "DynNative"}) {
-        source: "Compiler/JetRuntime/Tests/Fragments.fixture/{name}Tests.jet"
-        row: Census{package: "JetRuntime", source: source, sha256: "", names: [String]{}, entry: false, role: "registry"}
-        entry: prepare_transport(repo, row, "/native/registries", "{repo}{TOOL}") ?? panic("{name}: no transport")
+        entry: prepare_transport(repo, fragment_registry(name), "/native/registries", "{repo}{TOOL}") ?? panic("{name}: no transport")
         transport: field(entry, "transport")
         assert_eq(text_field(transport, "type"), "c")
         assert_eq(text_field(transport, "name"), name)
         assert_eq(int_field(entry, "testCount"), Val(1))
-        found: specification(text_field(entry, "id")) ?? panic("{name}: no specification")
+        found: specification(transport_key(text_field(entry, "id"))) ?? panic("{name}: no specification")
         out: text_field(entry, "cwd")
         expected: if name == "CompilerEnv" -> [[String]]{[String]{}, [String]{"empty"}} else if name == "CompilerRoutes" -> [[String]]{[String]{out}} else -> [[String]]{[String]{}}
         assert_eq(driver_runs(found, out), expected)
@@ -1840,12 +2160,11 @@ shard_ids: fn(entries: [Dyn], shard: String) -> [String] Never! {
     }
 }
 
-#Test("codec, process and native-suite transports drive the selected real fixture") {
+#Test("codec and process transports drive the selected real fixture") {
     repo: test_repo()
     loop name in ([String]{"CodecCSV", "CodecEnv", "DynCodec", "CompilerFileLeaves", "ProcessExecution", "TerminalProcess"}) {
-        row: Census{package: "JetRuntime", source: "Compiler/JetRuntime/Tests/Fragments.fixture/{name}Tests.jet", sha256: "", names: [String]{}, entry: false, role: "registry"}
-        entry: prepare_transport(repo, row, "/native/registries", "{repo}{TOOL}") ?? panic("{name}: no transport")
-        found: specification(text_field(entry, "id")) ?? panic("{name}: no specification")
+        entry: prepare_transport(repo, fragment_registry(name), "/native/registries", "{repo}{TOOL}") ?? panic("{name}: no transport")
+        found: specification(transport_key(text_field(entry, "id"))) ?? panic("{name}: no specification")
         out: text_field(entry, "cwd")
         codec: name.starts_with("Codec") || name.starts_with("Dyn") || name == "CompilerFileLeaves"
         runner: if codec -> "run-native-codec-file-leaves.mjs" else -> "run-process-witnesses.mjs"
@@ -1857,12 +2176,77 @@ shard_ids: fn(entries: [Dyn], shard: String) -> [String] Never! {
             assert(sources.contains(Dyn.Text("Compiler/JetRuntime/Tests/{name}Witness.stdout")))
         }
     }
-    loop name in ([String]{"FilesWalk", "HostParallelism"}) {
-        row: Census{package: "JetRuntime", source: "Compiler/JetRuntime/Tests/Fragments.fixture/{name}Tests.jet", sha256: "", names: [String]{}, entry: false, role: "registry"}
-        entry: prepare_transport(repo, row, "/native/registries", "{repo}{TOOL}") ?? panic("{name}: no transport")
-        assert_eq(text_field(field(entry, "transport"), "type"), "native-suite")
-        assert(array_field(entry, "sources").contains(Dyn.Text("Compiler/JetRuntime/Tests/{name}Witness.c")))
-        found: specification(text_field(entry, "id")) ?? panic("{name}: no specification")
-        assert_eq(found.modes, [String]{"assemble", "lower", "audit", "link", "run"})
+}
+
+#Test("a plain transport runs its generated entry driver or its committed C host") {
+    repo: test_repo()
+    loop name in ([String]{"Alloc", "FilesWalk", "HostParallelism", "TestSuite", "Parallel", "Scheduler", "World", "Sentry", "TestScope", "AllocationPolicy"}) {
+        entry: prepare_transport(repo, fragment_registry(name), "/native/registries", "{repo}{TOOL}") ?? panic("{name}: no transport")
+        transport: field(entry, "transport")
+        assert_eq(text_field(transport, "type"), "plain")
+        assert_eq(text_field(transport, "runner"), "Tools/agent/CompilerPackages.jet")
+        call: if name == {
+            "Alloc" -> "alloc_tests"
+            "FilesWalk" -> "files_walk_tests"
+            "HostParallelism" -> "host_parallelism_tests"
+            else -> ""
+        }
+        if call != "" {
+            assert_eq(text_field(transport, "call"), call)
+            assert(field(transport, "witness") == Dyn.Null)
+            assert(field(transport, "fragments") == texts([String]{name.copy()}))
+            next
+        }
+        host: if name == {
+            "TestSuite" -> "Compiler/JetRuntime/Tests/test-suite-fixture.c"
+            "Parallel" | "Scheduler" -> "Compiler/JetRuntime/Tests/{name.lower()}-fixture.c"
+            else -> "Compiler/JetRuntime/Tests/world-sentry-fixture.c"
+        }
+        assert(field(transport, "call") == Dyn.Null)
+        assert_eq(text_field(transport, "witness"), host)
+        assert_eq(text_field(transport, "expected"), if name == "TestSuite" -> "test suite: ok\n" else -> "")
+        sources: array_field(entry, "sources")
+        assert(sources.contains(Dyn.Text(host)))
+        if WORLD_SENTRY.contains(name) {
+            // Every composed fragment and every linked host pins the row.
+            assert(field(transport, "fragments") == texts(WORLD_SENTRY))
+            loop fragment in WORLD_SENTRY -> assert(sources.contains(Dyn.Text("Compiler/JetRuntime/Tests/Fragments.fixture/{fragment}Tests.jet")))
+            loop linked in WORLD_SENTRY_LINKED -> assert(sources.contains(Dyn.Text("Compiler/JetRuntime/Tests/{linked}.c")))
+        } else {
+            assert(field(transport, "fragments") == texts([String]{name.copy()}))
+        }
+    }
+}
+
+#Test("a transport entry keeps its registry id and a runner row runs its calls") {
+    repo: test_repo()
+    fragment: prepare_transport(repo, fragment_registry("Alloc"), "/native/registries", "{repo}{TOOL}") ?? panic("Alloc: no transport")
+    assert_eq(text_field(fragment, "id"), "JetRuntime/Tests/Fragments.fixture/AllocTests")
+    assert_eq(transport_key("JetRuntime/Tests/Fragments.fixture/AllocTests"), "JetRuntime/Tests/AllocTests")
+    row: Census{package: "JetRuntime", source: "Compiler/JetRuntime/Tests/UiWitness.jet", sha256: "", names: [String]{"t"}, entry: true, role: "registry"}
+    entry: prepare_transport(repo, Registry{row: row, id: "JetRuntime/Tests/UiWitness.run", mode: "run"}, "/native/registries", "{repo}{TOOL}") ?? panic("UiWitness: no transport")
+    assert_eq(text_field(entry, "id"), "JetRuntime/Tests/UiWitness.run")
+    transport: field(entry, "transport")
+    assert_eq(text_field(transport, "type"), "runner")
+    assert_eq(text_field(transport, "runner"), "Compiler/JetRuntime/Tests/UiWitness.jet")
+    assert_eq(array_field(transport, "calls").len(), 6)
+    assert(array_field(entry, "sources").contains(Dyn.Text("Compiler/JetRuntime/Tests/UiKeyWitness.c")))
+    loop name in ([String]{"RunDuration", "RunIntWiden", "RunCompilerNeededMath", "RunExecutionFixtures", "StopWitness"}) {
+        found: specification("JetRuntime/Tests/{name}") ?? panic("{name}: no specification")
+        assert_eq(found.kind, "runner")
+        assert(found.calls.all(call -> call.expected.ends_with("\n")))
+    }
+}
+
+#Test("process-edge goldens decode the committed runtime report literals") {
+    repo: test_repo()
+    assert_eq(trap_literal(repo, "trap_msg_header_panic") ?? panic(err.message), "Stop [E3001]: `panic: ")
+    assert_eq(trap_literal(repo, "trap_msg_prelude_end") ?? panic(err.message), "`\n  --> <core.prelude>:0\n")
+    assert_eq(scheduler_literal(repo, "scheduler_msg_cancelled") ?? panic(err.message), "task cancelled at a cooperative wait point")
+    assert((trap_literal(repo, "trap_footer_e3001") ?? panic(err.message)).starts_with(" Why: The program hit a `panic`"))
+    assert_eq(static_text_literal("rt_static_text(\"a\\\\b\\\"c{{{{d}}}}\\n\")", "escapes") ?? panic(err.message), "a\\b\"c{{d}}\n")
+    if trap_literal(repo, "trap_msg_no_such_literal") == {
+        .Ok(_) -> panic("a missing trap literal decoded")
+        .Err(_) -> {}
     }
 }

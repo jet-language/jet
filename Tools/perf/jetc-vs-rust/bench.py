@@ -76,7 +76,7 @@ def measure(command, label, root, directory, cap, timeout, rust=False, extra_env
     else:
         # Match stage1/lib.sh jetc(): explicit environment, 1 GiB main stack,
         # jetwork.slice, no swap, timeout. laneB itself forbids caps above 12G.
-        scoped = ['systemd-run', '--user', '--slice=jetwork.slice', '--scope', '-q',
+        scoped = ['systemd-run', '--user', '--slice=jetwork.slice', '--scope', '-q', '--expand-environment=no',
                   f'--unit=jw-jetc-bench-{os.getpid()}-{time.time_ns()}',
                   f'-p', f'MemoryMax={cap}', '-p', 'MemorySwapMax=0',
                   'bash', '-c', 'ulimit -c 0; ulimit -s 1048576; exec "$@"',

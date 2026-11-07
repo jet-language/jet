@@ -5,15 +5,16 @@
 # jet plus 2947 MiB for the harness, sampled every 2 s. If a guard regresses
 # above the 4 GiB tree budget, this case fails. It checks memory, not the guard
 # verdicts: the run must finish and report its summary, whatever the outcomes.
-# The guards read the repository relative to the working directory, and a
-# `cwd:` may not leave the case's work directory, so the step enters the root.
+# The guards read the repository from the root JET_GUARDS_ROOT names
+# (tests/guards/repo_root.jet), so the run starts in the work directory.
 # The run builds and tests the whole guards package, about 200 s of real work, so the
 # default cases run leaves it to the `registries` profile.
 opt-in: builds and runs the whole guards package (about 200 s); run with --opt-in, the registries profile or its exact id
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
 env: JETPACK_ROOT={work}/jetpack
-step: sh -c "cd '{root}' && exec '{jet}' test tests/guards/diagnostics_coverage.jet"
+env: JET_GUARDS_ROOT={root}
+step: jet test {root}/tests/guards/diagnostics_coverage.jet
 limit: time=900 resident=4194304
 exit: in [0, 1] # the guards' own verdicts (all pass or some fail) are not this case's subject
 stdout: ~ " skipped" # the harness reports every test instead of dying

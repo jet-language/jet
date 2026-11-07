@@ -85,6 +85,16 @@ use {
     files.remove_all(root) ?? panic("remove wiring scratch")
 }
 
+#Test("a stdin file reaches the step as its exact bytes, invalid UTF-8 included") {
+    root: cases_test_root("stdin-bytes")
+    directory: files.join(root, "tests/cases/group")
+    files.create_dir_all(directory) ?? panic("create stdin bytes case directory")
+    files.write_bytes(files.join(directory, "input.bin"), [U8]{U8{102}, U8{255}, U8{10}}) ?? panic("write stdin bytes")
+    source: "step: jet -c 'od -An -tx1'\nstdin: input.bin\nstdout: = \" 66 ff 0a\\n\"\n"
+    assert_eq(cases_test_advanced(root, "bytes", source).verdict.status, "PASS")
+    files.remove_all(root) ?? panic("remove stdin bytes scratch")
+}
+
 #Test("content-length frames use UTF-8 byte counts and file payloads expand capture tokens") {
     root: cases_test_root("session-content-length")
     directory: files.join(root, "tests/cases/group")

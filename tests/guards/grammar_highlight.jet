@@ -281,6 +281,7 @@ gh_grammar_keyword_words: fn() -> [String] {
 
 // tests/grammar.rs:176.
 #Test("every_highlight_token_is_in_each_generated_section") {
+    guards_enter_root()
     sections: [GH_VSCODE, GH_TREE_SITTER].map(path -> (path: path, section: gh_generated_section(path)))
     missing := [String]{}
     loop token in gh_tokens() {
@@ -297,6 +298,7 @@ gh_grammar_keyword_words: fn() -> [String] {
 // starts and keeps the sigil `&` off the first half of `&&`; Zed marks it in a
 // parameter list and after `task`.
 #Test("take_mark_is_coloured_apart_from_logical_and") {
+    guards_enter_root()
     vscode: gh_generated_section(GH_VSCODE)
     assert(vscode.contains("keyword.other.ownership.take.jet"), "{GH_VSCODE} has no take-mark scope")
     assert(vscode.contains("(?<=\\\\btask\\\\s))(&&)"), "{GH_VSCODE} take mark is not limited to parameter and task positions")
@@ -310,6 +312,7 @@ gh_grammar_keyword_words: fn() -> [String] {
 // The `#X: value` marker line: the tree-sitter section renders the
 // registry's separator, and the grammar's `inbody_marker` rule parses it.
 #Test("tree_sitter_parses_the_inbody_marker_line_with_the_registry_separator") {
+    guards_enter_root()
     separator := ""
     loop constant in gh_constants() {
         if constant.name == "MARKER_INBODY_SEPARATOR" -> separator = constant.value
@@ -323,6 +326,7 @@ gh_grammar_keyword_words: fn() -> [String] {
 // tests/grammar.rs:204: the Zed generated block names exactly the word tokens
 // (other than marker rules) that tree-sitter parses as anonymous literals.
 #Test("zed_generated_query_covers_anonymous_highlight_words") {
+    guards_enter_root()
     anonymous: gh_anonymous_node_types()
     actual := [String]{}
     loop literal in gh_query_string_literals(gh_generated_section(GH_ZED)) {
@@ -339,6 +343,7 @@ gh_grammar_keyword_words: fn() -> [String] {
 
 // tests/grammar.rs:225.
 #Test("syntax_keyword_list_tokens_are_classified_for_highlighting") {
+    guards_enter_root()
     texts: gh_tokens().map(token -> token.text)
     missing := [String]{}
     loop keyword in gh_keyword_list() {
@@ -349,6 +354,7 @@ gh_grammar_keyword_words: fn() -> [String] {
 
 // tests/grammar.rs:465.
 #Test("grammar_covers_jet_keyword_list") {
+    guards_enter_root()
     words: gh_grammar_keyword_words()
     missing := [String]{}
     loop keyword in gh_keyword_list() {
@@ -360,6 +366,7 @@ gh_grammar_keyword_words: fn() -> [String] {
 // tests/grammar.rs:493: FOREIGN_* teaching words never appear in the VS Code
 // keyword patterns unless they are real Jet keywords.
 #Test("grammar_excludes_foreign_words") {
+    guards_enter_root()
     words: gh_grammar_keyword_words()
     keywords: gh_keyword_list()
     intruders := [String]{}
@@ -386,6 +393,7 @@ gh_listed: fn(words: [String], names: [String], wanted: Bool) -> String {
 // completion and rename read holds the real keywords and no foreign teaching
 // word or contextual literal.
 #Test("lsp_keywords_derive_from_syntax") {
+    guards_enter_root()
     keywords: gh_keyword_list()
     required: [String]{"KW_FN", "KW_PUB", "KW_USE", "KW_IF", "KW_ELSE", "KW_LOOP", "KW_RETURN", "KW_STRUCT", "KW_ENUM", "KW_IMPL", "KW_UNSAFE", "KW_TEST", "KW_TODO", "LIT_TRUE", "LIT_FALSE", "LIT_NULL", "KW_DISTINCT", "KW_MODULE"}
     assert_eq(gh_listed(keywords, required, false), "")
@@ -396,6 +404,7 @@ gh_listed: fn(words: [String], names: [String], wanted: Bool) -> String {
 // tests/lsp.rs:5782 c44_lsp_types_derive_from_syntax: the built-in type list
 // holds the types a user writes and not the retired `Result`.
 #Test("lsp_types_derive_from_syntax") {
+    guards_enter_root()
     types: gh_registry_list("JET_TYPE_LIST")
     required: [String]{"TYPE_INT", "TYPE_FLOAT", "TYPE_BOOL", "TYPE_STRING", "TYPE_CHAR", "TYPE_SHARED", "TYPE_HASH_MAP", "TYPE_BTREE_MAP", "TYPE_QUEUE", "TYPE_SET"}
     assert_eq(gh_listed(types, required, false), "")
@@ -405,6 +414,7 @@ gh_listed: fn(words: [String], names: [String], wanted: Bool) -> String {
 // tests/lsp.rs:5528 c40_value_literal_is_not_a_keyword: `Val` is a literal
 // (D-OPT-SPELL1), so rename and completion don't treat it as a keyword.
 #Test("lsp_value_literal_is_not_a_keyword") {
+    guards_enter_root()
     assert_eq(gh_resolve(gh_constants(), "LIT_VALUE"), "Val")
     assert(!gh_has(gh_keyword_list(), "Val"), "LIT_VALUE must stay out of JET_KEYWORD_LIST")
 }
@@ -412,6 +422,7 @@ gh_listed: fn(words: [String], names: [String], wanted: Bool) -> String {
 // tests/lsp.rs:5814 c44_impure_builtins_complete: the impure builtins sema and
 // comptime purity share name every stdout, stderr and stdin builtin.
 #Test("lsp_impure_builtins_complete") {
+    guards_enter_root()
     builtins: gh_registry_list("IMPURE_BUILTINS")
     missing := [String]{}
     required: [String]{"print", "input", "eprint", "read_all_input"}

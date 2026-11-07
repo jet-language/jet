@@ -36,7 +36,34 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Change the source or update `{rule}` in `package.jet`.</p>
 <h2>Worked example</h2>
-<p>No UI snapshot currently mentions this code.</p>
+<p>First UI snapshot mentioning <code>E2960</code>: <code>tests/ui/audited_gate_ladder_forbidden/stderr</code>.</p>
+<pre class="diag">Error [jet.PackagePolicyViolation]: Package policy `policy.unsafe` rejects `#Unsafe` at `run.jet`
+  --&gt; tests/ui/audited_gate_ladder_forbidden/run.jet:3:5
+    |
+  3 |     #Unsafe(&quot;the organization policy refuses this audited escape&quot;) {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ Why: The package policy gives `run.jet` an explicit ceiling, so this source use is outside the team&#39;s declared boundary.
+ Fix: Change the source or update `policy.unsafe` in `package.jet`.
+More: jet-lang.dev/e/E2960
+
+Error [jet.PackagePolicyViolation]: Package policy `policy.expert` rejects `#Impure` at `run.jet`
+  --&gt; tests/ui/audited_gate_ladder_forbidden/run.jet:9:5
+    |
+  9 |     #Impure(&quot;the organization policy refuses this audited escape&quot;) {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ Why: The package policy gives `run.jet` an explicit ceiling, so this source use is outside the team&#39;s declared boundary.
+ Fix: Change the source or update `policy.expert` in `package.jet`.
+More: jet-lang.dev/e/E2960
+
+Error [jet.PackagePolicyViolation]: Package policy `policy.expert` rejects `assume_deterministic` at `run.jet`
+  --&gt; tests/ui/audited_gate_ladder_forbidden/run.jet:15:5
+    |
+ 15 |     #Nondeterministic(&quot;the organization policy refuses this audited escape&quot;) {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ Why: The package policy gives `run.jet` an explicit ceiling, so this source use is outside the team&#39;s declared boundary.
+ Fix: Change the source or update `policy.expert` in `package.jet`.
+More: jet-lang.dev/e/E2960
+</pre>
 <p><a href="../index.html">Back to all error codes</a></p>
 </article>
 </main>

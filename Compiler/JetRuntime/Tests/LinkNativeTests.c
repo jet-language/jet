@@ -92,12 +92,13 @@ int main(int argc, char **argv, char **envp) {
     jet_rt_native_receiver_drop(rx);
     puts("select wait=0 value=42 probe=-1");
 
+    // atexit handlers run in registration order, once (core-library.md, sys).
     jet_rt_native_atexit(exit_closure(1));
     jet_rt_native_atexit(exit_closure(2));
     jet_rt_task_exit_handlers();
     jet_rt_task_exit_handlers();
-    assert(exit_log == 21 && exit_drops == 2);
-    puts("atexit=21 drops=2");
+    assert(exit_log == 12 && exit_drops == 2);
+    puts("atexit=12 drops=2");
 
     W *items = (W *)(uintptr_t)jet_rt_alloc(16, 8);
     items[0] = 4; items[1] = 5;

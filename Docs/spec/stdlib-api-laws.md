@@ -6,8 +6,8 @@ rules for a public function, method, or type. The executable surface lives in
 [`Core.jet`](../../Compiler/Prelude/Core.jet) and the Jet source
 under [`Core/`](../../Core/); accepted syntax and compiler-owned names live in
 the [syntax registry](../../Compiler/JetFoundation/Data/Syntax/). The
-[Core surface ledger test](../../tests/core_surface_ledger.rs) and its
-[checker](../../Tools/agent/check-core-surface-ledger.mjs) provide focused
+[Core surface ledger cases](../../tests/cases/core_surface_ledger/) and their
+[checker](../../Tools/agent/CoreSurfaceLedger.jet) provide focused
 machine checks; runnable examples live under
 [`Examples/`](../../Examples/). API names follow the
 [Jet vocabulary](vocabulary.md) for streams, readers, and events.
@@ -446,7 +446,7 @@ This is the Core API superiority gate. Python is the calibration arm, but the
 comparison covers every language recorded in the Core surface ledger.
 
 The workflow inventory is generated on demand by
-[`check-core-surface-ledger.mjs`](../../Tools/agent/check-core-surface-ledger.mjs).
+[`CoreSurfaceLedger.jet`](../../Tools/agent/CoreSurfaceLedger.jet).
 `--check` rebuilds `.jet/reports/core-surface-ledger.json` from compiler and
 source tables and never reads that report. Every generated row requires one
 `coreApiGate.workflowManifest` entry.
@@ -526,8 +526,8 @@ closure, construct classifications, reasoning evidence, syntax coverage, and
 fixture selection. A drift in any binding fails the gate under card `#1398`.
 
 ~~~sh
-node Tools/agent/check-core-surface-ledger.mjs --check
-node Tools/agent/check-core-surface-ledger.mjs --core-api-release-check
+jet Tools/agent/CoreSurfaceLedger.jet --check
+jet Tools/agent/CoreSurfaceLedger.jet --core-api-release-check
 ~~~
 
 `--check` proves the source-derived inventory and frozen record shape. The

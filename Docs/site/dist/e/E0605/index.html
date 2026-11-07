@@ -36,14 +36,14 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Use it from inside its enclosing module, or remove `priv` from the module or field.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0605</code>: <code>tests/ui/marker_group_private_public.stderr</code>.</p>
-<pre class="diag">Error [jet.PrivateItem]: Public marker group `Published` contains private marker `#Internal.Private`
-  --&gt; tests/ui/marker_group_private_public.jet:12:18
+<p>First UI snapshot mentioning <code>E0605</code>: <code>tests/ui/forged_file_writer_literal/stderr</code>.</p>
+<pre class="diag">Error [jet.PrivateItem]: `FileWriter` can&#39;t be built here: its field `handle` is private to its module
+  --&gt; tests/ui/forged_file_writer_literal/run.jet:6:13
     |
- 12 |         group: #[Internal.Private, Inline]
-    |                  ^^^^^^^^^^^^^^^^
- Why: A public group cannot publish a module-private marker through expansion
- Fix: Make the member public by removing `priv`, or make the group private
+  6 |     forged: FileWriter{path: &quot;/etc/passwd&quot;}
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ Why: A `priv module` is usable only by its enclosing module (`priv(package)`: by its package), and a `priv` field only by its type&#39;s module
+ Fix: Get a `FileWriter` from a function of its module, or remove `priv` from `handle`
 More: jet-lang.dev/e/E0605
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

@@ -1421,7 +1421,9 @@ sema_comptime_reflection_type_info_fields: fn(
         {name: "facts", value: TComptimeValue.List{values: facts}},
         {name: "dimensions", value: TComptimeValue.List{values: dimensions}},
     })
-    if base == .Val(value) -> values.push(SemaComptimeReflectionField{name: "base", value: TComptimeValue.String{value: value}})
+    // Every TypeInfo carries `base` so its record constant has a value in
+    // each declared member; a type that is not `distinct` has the empty text.
+    values.push(SemaComptimeReflectionField{name: "base", value: TComptimeValue.String{value: base ?? ""}})
     values.extend([SemaComptimeReflectionField]{
         {name: "implements", value: TComptimeValue.List{values: implements}},
         {name: "trait_contracts", value: TComptimeValue.List{values: trait_contracts}},

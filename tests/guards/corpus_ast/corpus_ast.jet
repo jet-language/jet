@@ -7,7 +7,7 @@ use {
     jet_lexer.[lex, Token, TOKEN_IDENT, TOKEN_LINE_COMMENT, TOKEN_BLOCK_COMMENT, TOKEN_LBRACE, TOKEN_RBRACE]
     jet_pkg_model.[PackageFacts]
     policy_ast_files: core.files
-    corpus_manifest.[PolicyError, PolicyManifest, PolicySourceRow, PolicyOccurrence, PolicyInventory, policy_manifest, policy_source_row, policy_selector_matches, policy_violation, policy_inventory_error, policy_apply_exceptions, policy_inventory, policy_discover_manifest_files, policy_join, policy_validate_manifest, policy_slice_bytes, policy_split_whitespace]
+    corpus_manifest.[PolicyError, PolicyManifest, PolicySourceRow, PolicyOccurrence, PolicyInventory, policy_manifest, policy_source_row, policy_selector_matches, policy_violation, policy_inventory_error, policy_apply_exceptions, policy_inventory, policy_discover_manifest_files, policy_join, policy_validate_manifest, policy_slice_bytes, policy_split_whitespace, guards_enter_root]
 }
 
 POLICY_TASK_INTERNAL_PREFIX: comptime { String.from_bytes([U8]{0}) ?? panic("UTF-8 task prefix") }
@@ -52,7 +52,10 @@ policy_ast_test_compiler_dependency: fn() {
     program: policy_parse_program("planted", "run: fn() {{ print(\"process.args()\") }}") ?? panic("compiler parser rejected valid source")
     assert_eq(program.items.len(), 1)
 }
-#Test("corpus policy compiler AST dependency") { policy_ast_test_compiler_dependency() }
+#Test("corpus policy compiler AST dependency") {
+    guards_enter_root()
+    policy_ast_test_compiler_dependency()
+}
 
 policy_without_parens: fn(expression: Expr) -> Expr {
     current := expression
@@ -1581,19 +1584,52 @@ policy_check_gate: fn(manifest: PolicyManifest, root: String, gate: String) Poli
 }
 
 // Gates are deduplicated across callers, not weakened to a classification check.
-#Test("corpus policy golden gate") { policy_check_gate(policy_manifest(), ".", "golden") ?? panic("{err.message}") }
-#Test("corpus policy fixture gate") { policy_check_gate(policy_manifest(), ".", "fixture") ?? panic("{err.message}") }
-#Test("corpus policy bindgen gate") { policy_check_gate(policy_manifest(), ".", "bindgen") ?? panic("{err.message}") }
-#Test("corpus policy workload gate") { policy_check_gate(policy_manifest(), ".", "workload") ?? panic("{err.message}") }
-#Test("corpus policy dev-corpus gate") { policy_check_gate(policy_manifest(), ".", "dev-corpus") ?? panic("{err.message}") }
-#Test("corpus policy conformance gate") { policy_check_gate(policy_manifest(), ".", "conformance") ?? panic("{err.message}") }
-#Test("corpus policy package gate") { policy_check_gate(policy_manifest(), ".", "package") ?? panic("{err.message}") }
-#Test("corpus policy suite gate") { policy_check_gate(policy_manifest(), ".", "suite") ?? panic("{err.message}") }
-#Test("corpus policy site gate") { policy_check_gate(policy_manifest(), ".", "site") ?? panic("{err.message}") }
-#Test("corpus policy docs gate") { policy_check_gate(policy_manifest(), ".", "docs") ?? panic("{err.message}") }
+#Test("corpus policy golden gate") {
+    guards_enter_root()
+    policy_check_gate(policy_manifest(), ".", "golden") ?? panic("{err.message}")
+}
+#Test("corpus policy fixture gate") {
+    guards_enter_root()
+    policy_check_gate(policy_manifest(), ".", "fixture") ?? panic("{err.message}")
+}
+#Test("corpus policy bindgen gate") {
+    guards_enter_root()
+    policy_check_gate(policy_manifest(), ".", "bindgen") ?? panic("{err.message}")
+}
+#Test("corpus policy workload gate") {
+    guards_enter_root()
+    policy_check_gate(policy_manifest(), ".", "workload") ?? panic("{err.message}")
+}
+#Test("corpus policy dev-corpus gate") {
+    guards_enter_root()
+    policy_check_gate(policy_manifest(), ".", "dev-corpus") ?? panic("{err.message}")
+}
+#Test("corpus policy conformance gate") {
+    guards_enter_root()
+    policy_check_gate(policy_manifest(), ".", "conformance") ?? panic("{err.message}")
+}
+#Test("corpus policy package gate") {
+    guards_enter_root()
+    policy_check_gate(policy_manifest(), ".", "package") ?? panic("{err.message}")
+}
+#Test("corpus policy suite gate") {
+    guards_enter_root()
+    policy_check_gate(policy_manifest(), ".", "suite") ?? panic("{err.message}")
+}
+#Test("corpus policy site gate") {
+    guards_enter_root()
+    policy_check_gate(policy_manifest(), ".", "site") ?? panic("{err.message}")
+}
+#Test("corpus policy docs gate") {
+    guards_enter_root()
+    policy_check_gate(policy_manifest(), ".", "docs") ?? panic("{err.message}")
+}
 // Known failing: #6220 (366 Jetpack sites break the dogfood json, path-containment
 // and directory-setup rules; Jetpack grew while the Rust gate was not running).
-#Test("corpus policy dogfood gate") { policy_check_gate(policy_manifest(), ".", "dogfood") ?? panic("{err.message}") }
+#Test("corpus policy dogfood gate") {
+    guards_enter_root()
+    policy_check_gate(policy_manifest(), ".", "dogfood") ?? panic("{err.message}")
+}
 
 policy_has_rule: fn(violations: [PolicyOccurrence], rule: String) -> Bool {
     loop violation in violations { if violation.rule == rule -> return true }
@@ -1609,7 +1645,10 @@ policy_ast_test_semantic_shapes: fn() PolicyError! {
     assert(!policy_has_rule(literal, "raw-cli-fixed-shape"))
     Ok()
 }
-#Test("semantic_rules_use_ast_shapes_not_source_text") { policy_ast_test_semantic_shapes() ?? panic("{err.message}") }
+#Test("semantic_rules_use_ast_shapes_not_source_text") {
+    guards_enter_root()
+    policy_ast_test_semantic_shapes() ?? panic("{err.message}")
+}
 policy_ast_test_cli_boundaries: fn() PolicyError! {
     manifest: policy_manifest()
     path: "Examples/Basics/FirstHour.jet"
@@ -1619,7 +1658,10 @@ policy_ast_test_cli_boundaries: fn() PolicyError! {
     assert(!policy_has_rule(single, "raw-cli-process-boundary"))
     Ok()
 }
-#Test("cli_boundary_rules_cover_repeated_process_reads") { policy_ast_test_cli_boundaries() ?? panic("{err.message}") }
+#Test("cli_boundary_rules_cover_repeated_process_reads") {
+    guards_enter_root()
+    policy_ast_test_cli_boundaries() ?? panic("{err.message}")
+}
 policy_ast_test_allow_source_reason: fn() PolicyError! {
     manifest: policy_manifest()
     error := ""
@@ -1631,7 +1673,10 @@ policy_ast_test_allow_source_reason: fn() PolicyError! {
     policy_evaluate_source(manifest, "Examples/Text/reviewed_allow.jet", "run: fn() {{ #Allow(jet.UnitScalarRewrap, \"the example intentionally shows explicit conversion\") print(\"kept\") }}")
     Ok()
 }
-#Test("maintained_guidance_allow_explains_itself_at_the_source_site") { policy_ast_test_allow_source_reason() ?? panic("{err.message}") }
+#Test("maintained_guidance_allow_explains_itself_at_the_source_site") {
+    guards_enter_root()
+    policy_ast_test_allow_source_reason() ?? panic("{err.message}")
+}
 policy_ast_test_response_decoder: fn() PolicyError! {
     manifest: policy_manifest()
     violations: policy_evaluate_generated(manifest, "producer:Jetpack/Integrations/Source/Foreign/Binders/Lua.jet#pkg_lua_render_jet", "run: fn() {{}}")
@@ -1642,7 +1687,10 @@ policy_ast_test_response_decoder: fn() PolicyError! {
     assert(no_response.is_empty())
     Ok()
 }
-#Test("generated_protocol_check_requires_one_decoder_for_response_protocols") { policy_ast_test_response_decoder() ?? panic("{err.message}") }
+#Test("generated_protocol_check_requires_one_decoder_for_response_protocols") {
+    guards_enter_root()
+    policy_ast_test_response_decoder() ?? panic("{err.message}")
+}
 policy_ast_test_binding_renderers: fn() PolicyError! {
     manifest: policy_manifest()
     count := 0
@@ -1655,14 +1703,20 @@ policy_ast_test_binding_renderers: fn() PolicyError! {
     assert_eq(count, 7)
     Ok()
 }
-#Test("every_response_binding_renderer_uses_the_shared_decoder_policy") { policy_ast_test_binding_renderers() ?? panic("{err.message}") }
+#Test("every_response_binding_renderer_uses_the_shared_decoder_policy") {
+    guards_enter_root()
+    policy_ast_test_binding_renderers() ?? panic("{err.message}")
+}
 policy_ast_test_canonical_decoder_symbol: fn() PolicyError! {
     violations: policy_evaluate_generated(policy_manifest(), "producer:Jetpack/Integrations/Source/Foreign/Binders/Lua.jet#pkg_lua_render_jet", "decode_other: fn(raw: String, code: Int) -> Dyn Err! {{ return Ok(Dyn.Null) }}")
     assert_eq(violations.len(), 1)
     assert_eq(violations[0].rule, "bindgen-one-decoder")
     Ok()
 }
-#Test("generated_decoder_policy_requires_the_canonical_decoder_symbol") { policy_ast_test_canonical_decoder_symbol() ?? panic("{err.message}") }
+#Test("generated_decoder_policy_requires_the_canonical_decoder_symbol") {
+    guards_enter_root()
+    policy_ast_test_canonical_decoder_symbol() ?? panic("{err.message}")
+}
 policy_ast_test_protocol_override: fn() PolicyError! {
     manifest: policy_manifest()
     producer: "producer:Jetpack/Integrations/Source/Foreign/Binders/Lua.jet#pkg_lua_render_jet"
@@ -1672,7 +1726,10 @@ policy_ast_test_protocol_override: fn() PolicyError! {
     assert(policy_has_rule(ordinary, "generated-protocol-override"))
     Ok()
 }
-#Test("generated_protocol_override_requires_a_distinct_envelope_shape") { policy_ast_test_protocol_override() ?? panic("{err.message}") }
+#Test("generated_protocol_override_requires_a_distinct_envelope_shape") {
+    guards_enter_root()
+    policy_ast_test_protocol_override() ?? panic("{err.message}")
+}
 
 PolicyShapeCase: struct { path: String, source: String, rule: String, present: Bool }
 policy_check_shapes: fn(cases: [PolicyShapeCase]) PolicyError! {
@@ -1716,7 +1773,10 @@ policy_ast_test_reintroduced_ceremony: fn() PolicyError! {
     }
     Ok()
 }
-#Test("card_2375_rules_reject_each_reintroduced_ceremony") { policy_ast_test_reintroduced_ceremony() ?? panic("{err.message}") }
+#Test("card_2375_rules_reject_each_reintroduced_ceremony") {
+    guards_enter_root()
+    policy_ast_test_reintroduced_ceremony() ?? panic("{err.message}")
+}
 policy_ast_test_walk_shapes: fn() PolicyError! {
     policy_check_shapes([PolicyShapeCase]{
         PolicyShapeCase{path: "Jetpack/Store/Tests/StoreIngest.jet", source: "use fs: core.files\nrun: fn() {{\n    entries: fs.walk(root)\n    loop entry in entries {{\n        if !entry.is_dir -> print(entry.path)\n    }}\n}}", rule: "walk-files-filter", present: true},
@@ -1725,7 +1785,10 @@ policy_ast_test_walk_shapes: fn() PolicyError! {
     })
     Ok()
 }
-#Test("walk_policy_distinguishes_file_only_filters_from_directory_tree_walks") { policy_ast_test_walk_shapes() ?? panic("{err.message}") }
+#Test("walk_policy_distinguishes_file_only_filters_from_directory_tree_walks") {
+    guards_enter_root()
+    policy_ast_test_walk_shapes() ?? panic("{err.message}")
+}
 policy_ast_test_crypto_module: fn() PolicyError! {
     policy_check_shapes([PolicyShapeCase]{
         PolicyShapeCase{path: "Examples/Crypto/reintroduced.jet", source: "use crypto: core.crypto\nrun: fn() {{ crypto.sha256_bytes(\"abc\".bytes()) }}", rule: "crypto-naming-fact", present: true},
@@ -1734,7 +1797,10 @@ policy_ast_test_crypto_module: fn() PolicyError! {
     })
     Ok()
 }
-#Test("crypto_digest_rule_uses_the_resolved_core_module") { policy_ast_test_crypto_module() ?? panic("{err.message}") }
+#Test("crypto_digest_rule_uses_the_resolved_core_module") {
+    guards_enter_root()
+    policy_ast_test_crypto_module() ?? panic("{err.message}")
+}
 policy_ast_test_migration_shapes: fn() PolicyError! {
     policy_check_shapes([PolicyShapeCase]{
         PolicyShapeCase{path: "Examples/Memory/reintroduced.jet", source: "run: fn() {{ delay: Duration.seconds(1.5) }}", rule: "duration-constant-safe", present: true},
@@ -1761,7 +1827,10 @@ policy_ast_test_migration_shapes: fn() PolicyError! {
     assert(policy_has_rule(violations, "dogfood-ascii"))
     Ok()
 }
-#Test("semantic_migration_rules_match_only_their_structural_shapes") { policy_ast_test_migration_shapes() ?? panic("{err.message}") }
+#Test("semantic_migration_rules_match_only_their_structural_shapes") {
+    guards_enter_root()
+    policy_ast_test_migration_shapes() ?? panic("{err.message}")
+}
 policy_ast_test_dogfood_and_workload_shapes: fn() PolicyError! {
     policy_check_shapes([PolicyShapeCase]{
         PolicyShapeCase{path: "tests/agent_workloads/adapters/incident_report.jet", source: "run: fn() {{ rows: input.split(\"\\t\") }}", rule: "delimited-reader-config", present: true},
@@ -1788,7 +1857,10 @@ policy_ast_test_dogfood_and_workload_shapes: fn() PolicyError! {
     })
     Ok()
 }
-#Test("scoped_dogfood_and_workload_recipes_have_positive_and_negative_shapes") { policy_ast_test_dogfood_and_workload_shapes() ?? panic("{err.message}") }
+#Test("scoped_dogfood_and_workload_recipes_have_positive_and_negative_shapes") {
+    guards_enter_root()
+    policy_ast_test_dogfood_and_workload_shapes() ?? panic("{err.message}")
+}
 policy_ast_test_fixture_roles: fn() PolicyError! {
     manifest: policy_manifest()
     policy_check_fixture_inventory(manifest, ".")
@@ -1798,7 +1870,10 @@ policy_ast_test_fixture_roles: fn() PolicyError! {
     loop violation in builder -> assert(violation.rule != "raw-cli-fixed-shape")
     Ok()
 }
-#Test("fixture_roles_and_approved_builder_boundary_are_explicit") { policy_ast_test_fixture_roles() ?? panic("{err.message}") }
+#Test("fixture_roles_and_approved_builder_boundary_are_explicit") {
+    guards_enter_root()
+    policy_ast_test_fixture_roles() ?? panic("{err.message}")
+}
 // corpus_policy.rs:106-134. The engine entry is the raw process protocol, not a typed CLI entry.
 policy_ast_test_engine_entry_protocol: fn() PolicyError! {
     manifest: policy_manifest()
@@ -1821,7 +1896,10 @@ policy_ast_test_engine_entry_protocol: fn() PolicyError! {
     }
     Ok()
 }
-#Test("jetpack_engine_entry_is_the_ratified_raw_process_protocol") { policy_ast_test_engine_entry_protocol() ?? panic("{err.message}") }
+#Test("jetpack_engine_entry_is_the_ratified_raw_process_protocol") {
+    guards_enter_root()
+    policy_ast_test_engine_entry_protocol() ?? panic("{err.message}")
+}
 policy_ast_test_cli_recipe_inventory: fn() PolicyError! {
     manifest: policy_manifest()
     policy_check_cli_recipe_inventory(manifest, ".")
@@ -1838,7 +1916,7 @@ policy_ast_test_cli_recipe_inventory: fn() PolicyError! {
     expert_selectors: [String]{"file:Examples/Systems/CLI/ArgsSpec.jet", "file:Examples/Systems/CLI/ArgsAudit.jet", "file:Examples/Systems/CLI/CLIArgs.jet", "file:Examples/Systems/Files/Watcher.jet", "file:Tools/gauntlet/entries/taskfile-cli/jet/run.jet"}
     loop selector in expert_selectors {
         found := false
-        expected: if selector.contains("args_spec.jet") || selector.contains("args_audit.jet") -> "builder-cli" else -> "raw-cli"
+        expected: if selector.contains("ArgsSpec.jet") || selector.contains("ArgsAudit.jet") -> "builder-cli" else -> "raw-cli"
         loop row in manifest.sources {
             if row.selector == selector { found = true
                 assert(row.profile == expected, "CLI boundary drifted: {selector}")
@@ -1854,7 +1932,10 @@ policy_ast_test_cli_recipe_inventory: fn() PolicyError! {
     }
     Ok()
 }
-#Test("cli_recipe_inventory_is_manifest_owned_and_ast_checked") { policy_ast_test_cli_recipe_inventory() ?? panic("{err.message}") }
+#Test("cli_recipe_inventory_is_manifest_owned_and_ast_checked") {
+    guards_enter_root()
+    policy_ast_test_cli_recipe_inventory() ?? panic("{err.message}")
+}
 
 // corelib_parts/system.rs:1027-1041. Use the compiler's built module registry,
 // not Core/ directory names: unregistered files are not necessarily modules.
@@ -1867,7 +1948,10 @@ policy_ast_test_core_reference: fn() {
     }
     assert(missing.is_empty(), "Docs/spec/reference/core-library.md must list every built Core module from KNOWN_CORE_MODULES: {missing}")
 }
-#Test("core_reference_lists_every_built_core_module") { policy_ast_test_core_reference() }
+#Test("core_reference_lists_every_built_core_module") {
+    guards_enter_root()
+    policy_ast_test_core_reference()
+}
 
 policy_ast_test_unicode_shell_words: fn() {
     nel: String.from_bytes([U8]{194, 133}) ?? panic("NEL UTF-8")
@@ -1878,7 +1962,10 @@ policy_ast_test_unicode_shell_words: fn() {
     assert(!policy_has_jet_run_command("```bash\n# jet run\n```"))
     assert(!policy_has_jet_run_command("```bash\njet # run\n```"))
 }
-#Test("corpus document shell words use Rust Unicode whitespace") { policy_ast_test_unicode_shell_words() }
+#Test("corpus document shell words use Rust Unicode whitespace") {
+    guards_enter_root()
+    policy_ast_test_unicode_shell_words()
+}
 
 policy_planted_ascii_ladder: fn() -> String {
     lower := "\"text\""
@@ -1940,7 +2027,10 @@ policy_ast_test_planted_rule_pairs: fn() PolicyError! {
     }
     Ok()
 }
-#Test("corpus executable AST rules planted violation and clean pairs") { policy_ast_test_planted_rule_pairs() ?? panic("{err.message}") }
+#Test("corpus executable AST rules planted violation and clean pairs") {
+    guards_enter_root()
+    policy_ast_test_planted_rule_pairs() ?? panic("{err.message}")
+}
 
 // D-ENTRY-SCRIPT1=C: every loose top-level statement in a scoped source is one
 // `entry-explicit` occurrence; explicit `run: fn` and declaration-only files pass.
@@ -1969,7 +2059,10 @@ policy_ast_test_explicit_entry: fn() PolicyError! {
     loop exception in manifest.exceptions -> assert(exception.rule != "entry-explicit", "entry-explicit has no occurrence exceptions")
     Ok()
 }
-#Test("explicit_entry_rule_matches_ordinary_file_execution") { policy_ast_test_explicit_entry() ?? panic("{err.message}") }
+#Test("explicit_entry_rule_matches_ordinary_file_execution") {
+    guards_enter_root()
+    policy_ast_test_explicit_entry() ?? panic("{err.message}")
+}
 // corpus_policy.rs `inventory_is_manifest_scoped`; it lives with the package
 // parser because inventory needs the declared-config exclusion.
 policy_ast_test_manifest_scoped_inventory: fn() PolicyError! {
@@ -1985,7 +2078,10 @@ policy_ast_test_manifest_scoped_inventory: fn() PolicyError! {
     assert(!scratch, "sources outside manifest roots are excluded")
     Ok()
 }
-#Test("inventory_is_manifest_scoped") { policy_ast_test_manifest_scoped_inventory() ?? panic("{err.message}") }
+#Test("inventory_is_manifest_scoped") {
+    guards_enter_root()
+    policy_ast_test_manifest_scoped_inventory() ?? panic("{err.message}")
+}
 // Rust `is_declared_package_config_dir`: only a `config/` its sibling
 // `package.jet` declares under `configs:` leaves the corpus.
 policy_ast_test_declared_config_exclusion: fn() PolicyError! {
@@ -1999,4 +2095,7 @@ policy_ast_test_declared_config_exclusion: fn() PolicyError! {
     loop entry in inventory.files -> assert(!entry.path.starts_with("{declared}/"), "declared package config left in the corpus: {entry.path}")
     Ok()
 }
-#Test("declared_package_config_dirs_leave_the_corpus") { policy_ast_test_declared_config_exclusion() ?? panic("{err.message}") }
+#Test("declared_package_config_dirs_leave_the_corpus") {
+    guards_enter_root()
+    policy_ast_test_declared_config_exclusion() ?? panic("{err.message}")
+}

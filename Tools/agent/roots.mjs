@@ -12,6 +12,8 @@
 //   JET_TARGET_ROOT   build target dirs              ($JET_SCRATCH_ROOT/targets)
 //   JET_SEEDS         seed store                     ($XDG_DATA_HOME/jet-seeds)
 //   JET_SEED          the admitted seed dir          ($JET_SEEDS/current)
+//   JET_BIN           the jet under test, which `jet test` passes its children; node
+//                     tools run repository Jet tools with it  ($JET_SEED/jet)
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -25,3 +27,4 @@ export const baseRoot = () => env.JET_BASE_ROOT || join(scratchRoot(), 'discover
 export const targetRoot = () => env.JET_TARGET_ROOT || join(scratchRoot(), 'targets');
 export const seedsRoot = () => env.JET_SEEDS || join(env.XDG_DATA_HOME || join(home(), '.local/share'), 'jet-seeds');
 export const seedDir = () => env.JET_SEED || join(seedsRoot(), 'current');
+export const toolJet = () => env.JET_BIN || join(seedDir(), 'jet');

@@ -301,8 +301,8 @@ kit_steps_session_action: fn(step: KitStep, context: KitStepCtx, previous: KitSt
         child := spec.spawn() ?? return kit_steps_action_error(state, "session spawn: {err}")
         input_error := ""
         if step.stdin == "null" -> child.stdin.close()
-        else if prepared.stdin != "" {
-            child.stdin.write_text(prepared.stdin) ?? {
+        else if prepared.stdin.len() > 0 {
+            child.stdin.write_all(prepared.stdin) ?? {
                 input_error = "session stdin: {err}"
                 ()
             }

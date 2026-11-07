@@ -9,9 +9,7 @@ env: JET_STORE_DIR={work}/cache
 env: JETPACK_ROOT={work}/jetpack
 step: jet fmt --simplify fence/run.jet
 exit: 0 # tests/fmt.rs:1392 simplify succeeds
-step: sh {work}/step-2.sh
-exit: 0 # tests/fmt.rs:1394-1401 range present, list gone
-stdout: ~ "0..3" # tests/fmt.rs:1394-1401 range present, list gone
-stdout: !~ "0, 1, 2, 3" # tests/fmt.rs:1394-1401 range present, list gone
+file: fence/run.jet ~ "0..3" # tests/fmt.rs:1394-1401 range present, list gone
+file: fence/run.jet !~ "0, 1, 2, 3" # tests/fmt.rs:1394-1401 range present, list gone
 step: jet fmt --simplify --check fence/run.jet
 exit: 0 # tests/fmt.rs:1414-1417 stable

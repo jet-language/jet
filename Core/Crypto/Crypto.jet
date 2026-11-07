@@ -15,6 +15,8 @@ use {
     core.crypto.vault.[KeyUnlock, WrappedVaultKey]
     core.files.[basename, dirname, join]
     fixedcrypto: __core_crypto_ct
+    byte_words.[load_be32, load_le32, push_le32, sha256_schedule, sha256_state]
+    chacha20_core.[chacha20_rounds, chacha20_state, chacha20_words]
 }
 
 // core.crypto - safe envelopes and expert primitives.
@@ -1501,16 +1503,34 @@ sha2_256: fn(data: [U8], iv: [U32]) -> [U8] Never! {
     sha256_bytes(state)
 }
 
-sha256_state: fn(iv: [U32]) -> [U32] Never! {
-    state := [U32]{}
-    loop word in iv -> state.push(word)
-    state
-}
+// Word buffers and byte-order loads behind SHA-256 and ChaCha20, not part of
+// the crypto surface.
+priv byte_words: module {
+    sha256_state: fn(iv: [U32]) -> [U32] Never! {
+        state := [U32]{}
+        loop word in iv -> state.push(word)
+        state
+    }
 
-sha256_schedule: fn() -> [U32] Never! {
-    w := [U32]{}
-    loop _ in 0..<64 -> w.push(U32{0})
-    w
+    sha256_schedule: fn() -> [U32] Never! {
+        w := [U32]{}
+        loop _ in 0..<64 -> w.push(U32{0})
+        w
+    }
+
+    /// Big-endian word at `bytes[off]`.
+    load_be32: fn(bytes: [U8], off: Int) -> U32 Never! {
+        (U32{bytes[off]} << 24).bit_or(U32{bytes[off + 1]} << 16).bit_or(U32{bytes[off + 2]} << 8).bit_or(U32{bytes[off + 3]})
+    }
+
+    load_le32: fn(bytes: [U8], off: Int) -> U32 Never! {
+        if off + 3 >= bytes.len() -> return U32{0}
+        U32{bytes[off]}.bit_or(U32{bytes[off + 1]} << 8).bit_or(U32{bytes[off + 2]} << 16).bit_or(U32{bytes[off + 3]} << 24)
+    }
+
+    push_le32: fn(out: &[U8], value: U32) Never! {
+        loop k in 0..<4 -> out.push(U8{(value >> (8 * k)).bit_and(U32{255})})
+    }
 }
 
 sha256_bytes: fn(state: [U32]) -> [U8] Never! {
@@ -1519,11 +1539,6 @@ sha256_bytes: fn(state: [U32]) -> [U8] Never! {
         loop i in 0..<4 -> out.push(U8{(word >> (24 - 8 * i)).bit_and(U32{255})})
     }
     out
-}
-
-/// Big-endian word at `bytes[off]`.
-load_be32: fn(bytes: [U8], off: Int) -> U32 Never! {
-    (U32{bytes[off]} << 24).bit_or(U32{bytes[off + 1]} << 16).bit_or(U32{bytes[off + 2]} << 8).bit_or(U32{bytes[off + 3]})
 }
 
 /// One SHA-256 compression of the 64-byte block at `msg[off]` into `state`.
@@ -2064,47 +2079,51 @@ keccak_f: fn(st: &[Int]) {
     }
 }
 
-/// RFC 8439 ChaCha20 state: constants, key, 32-bit block counter, nonce.
-chacha20_state: fn(key: [U8], nonce: [U8], counter: Int) -> [U32] Never! {
-    [U32]{
-        U32{0x61707865},
-        U32{0x3320646e},
-        U32{0x79622d32},
-        U32{0x6b206574},
-        load_le32(key, 0),
-        load_le32(key, 4),
-        load_le32(key, 8),
-        load_le32(key, 12),
-        load_le32(key, 16),
-        load_le32(key, 20),
-        load_le32(key, 24),
-        load_le32(key, 28),
-        wrapping(U32{counter}),
-        load_le32(nonce, 0),
-        load_le32(nonce, 4),
-        load_le32(nonce, 8),
+// The ChaCha20 block pieces behind chacha20_block. They are outside the
+// exported core.crypto items, so they are private.
+priv chacha20_core: module {
+    /// RFC 8439 ChaCha20 state: constants, key, 32-bit block counter, nonce.
+    chacha20_state: fn(key: [U8], nonce: [U8], counter: Int) -> [U32] Never! {
+        [U32]{
+            U32{0x61707865},
+            U32{0x3320646e},
+            U32{0x79622d32},
+            U32{0x6b206574},
+            load_le32(key, 0),
+            load_le32(key, 4),
+            load_le32(key, 8),
+            load_le32(key, 12),
+            load_le32(key, 16),
+            load_le32(key, 20),
+            load_le32(key, 24),
+            load_le32(key, 28),
+            wrapping(U32{counter}),
+            load_le32(nonce, 0),
+            load_le32(nonce, 4),
+            load_le32(nonce, 8),
+        }
     }
-}
 
-/// The sixteen-word working buffer every block of one call reuses.
-chacha20_words: fn() -> [U32] Never! {
-    w := [U32]{}
-    loop _ in 0..<16 -> w.push(U32{0})
-    w
-}
+    /// The sixteen-word working buffer every block of one call reuses.
+    chacha20_words: fn() -> [U32] Never! {
+        w := [U32]{}
+        loop _ in 0..<16 -> w.push(U32{0})
+        w
+    }
 
-/// The twenty ChaCha rounds of `state` into `w`, before the final addition.
-chacha20_rounds: fn(state: [U32], w: &[U32]) Never! {
-    loop i in 0..<16 -> w[i] = state[i]
-    loop _ in 0..<10 {
-        qr(w, 0, 4, 8, 12)
-        qr(w, 1, 5, 9, 13)
-        qr(w, 2, 6, 10, 14)
-        qr(w, 3, 7, 11, 15)
-        qr(w, 0, 5, 10, 15)
-        qr(w, 1, 6, 11, 12)
-        qr(w, 2, 7, 8, 13)
-        qr(w, 3, 4, 9, 14)
+    /// The twenty ChaCha rounds of `state` into `w`, before the final addition.
+    chacha20_rounds: fn(state: [U32], w: &[U32]) Never! {
+        loop i in 0..<16 -> w[i] = state[i]
+        loop _ in 0..<10 {
+            qr(w, 0, 4, 8, 12)
+            qr(w, 1, 5, 9, 13)
+            qr(w, 2, 6, 10, 14)
+            qr(w, 3, 7, 11, 15)
+            qr(w, 0, 5, 10, 15)
+            qr(w, 1, 6, 11, 12)
+            qr(w, 2, 7, 8, 13)
+            qr(w, 3, 4, 9, 14)
+        }
     }
 }
 
@@ -2136,15 +2155,6 @@ qr: fn(s: &[U32], ia: Int, ib: Int, ic: Int, id: Int) Never! {
     s[ib] = b
     s[ic] = c
     s[id] = d
-}
-
-load_le32: fn(bytes: [U8], off: Int) -> U32 Never! {
-    if off + 3 >= bytes.len() -> return U32{0}
-    U32{bytes[off]}.bit_or(U32{bytes[off + 1]} << 8).bit_or(U32{bytes[off + 2]} << 16).bit_or(U32{bytes[off + 3]} << 24)
-}
-
-push_le32: fn(out: &[U8], value: U32) Never! {
-    loop k in 0..<4 -> out.push(U8{(value >> (8 * k)).bit_and(U32{255})})
 }
 
 u32le: fn(bytes: [U8], off: Int) -> Int Never! {

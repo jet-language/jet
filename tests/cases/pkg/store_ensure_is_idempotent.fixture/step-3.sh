@@ -1,1 +1,0 @@
-ls store/*/ | wc -l

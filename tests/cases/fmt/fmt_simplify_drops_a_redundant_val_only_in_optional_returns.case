@@ -8,11 +8,9 @@ env: JET_STORE_DIR={work}/cache
 env: JETPACK_ROOT={work}/jetpack
 step: jet fmt --simplify val/run.jet
 exit: 0 # tests/fmt.rs:1450 simplify succeeds
-step: sh {work}/step-2.sh
-exit: 0 # tests/fmt.rs:1452-1459
-stdout: ~ "return n" # tests/fmt.rs:1452-1459
-stdout: ~ "Val(count())" # tests/fmt.rs:1452-1459
-stdout: ~ "(x) -> Val(x)" # tests/fmt.rs:1452-1459
-stdout: !~ "Val(n)" # tests/fmt.rs:1452-1459
+file: val/run.jet ~ "return n" # tests/fmt.rs:1452-1459
+file: val/run.jet ~ "Val(count())" # tests/fmt.rs:1452-1459
+file: val/run.jet ~ "(x) -> Val(x)" # tests/fmt.rs:1452-1459
+file: val/run.jet !~ "Val(n)" # tests/fmt.rs:1452-1459
 step: jet fmt --simplify --check val/run.jet
 exit: 0 # tests/fmt.rs:1460-1464 stable

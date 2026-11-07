@@ -63,13 +63,13 @@ run: fn() {
 
     // Truncation at each structural layer, reserved heads, invalid text,
     // byte strings as Dyn.Bytes, duplicate/non-text keys, date-time tag
-    // payloads, simple values, stray breaks, trailing roots, and signed-range
-    // overflow.
+    // payloads, simple values, stray breaks and trailing roots. A Dyn Int is
+    // exact, so 2^63 and -2^63-1 past the machine range decode (#4306).
     print(rejected(empty, 0, "$", "CBOR value is missing"))
     print(rejected([28], 0, "$", "indefinite/reserved CBOR length is unsupported by whole-value decoding"))
     print(rejected([26, 0], 2, "$", "CBOR length argument is truncated"))
-    print(rejected([27, 128, 0, 0, 0, 0, 0, 0, 0], 0, "$", "CBOR integer is outside Jet Int"))
-    print(rejected([59, 128, 0, 0, 0, 0, 0, 0, 0], 0, "$", "CBOR integer is outside Jet Int"))
+    print(accepted([27, 128, 0, 0, 0, 0, 0, 0, 0]))
+    print(accepted([59, 128, 0, 0, 0, 0, 0, 0, 0]))
     print(accepted([65, 0]))
     print(rejected([98, 97], 2, "$", "CBOR byte/text string is truncated"))
     print(rejected([97, 255], 0, "$", "CBOR text is not UTF-8"))

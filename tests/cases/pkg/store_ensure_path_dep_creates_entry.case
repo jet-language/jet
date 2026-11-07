@@ -9,6 +9,5 @@ env: JETPACK_ROOT={work}/jetpack
 step: jet fetch
 env: JET_PACKAGE_STORE_DIR=store
 exit: 0 # tests/pkg.rs:2837 ensure_path_dep succeeds
-step: sh {work}/step-2.sh
-exit: 0 # tests/pkg.rs:2837 entry dir exists with the source file
-stdout: = "entry-ok\n" # tests/pkg.rs:2837 entry dir exists with the source file
+capture: entry = sole-entry store recursive depth = 2 kind dir name ^= "mylib-0.1.0-"
+file: {cap:entry}/mylib.jet is-file

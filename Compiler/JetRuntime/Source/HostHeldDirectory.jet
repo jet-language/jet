@@ -57,29 +57,56 @@ fs_held_shown: fn(key: I64) -> I64 {
     path
 }
 
+// A raw entry name (Core's Directory.create_raw, open_raw and remove_raw)
+// may hold bytes that are not UTF-8. A path or error shown for one keeps its
+// ASCII bytes and shows every other byte as U+FFFD, as Core's
+// DirectoryEntry.name does. 0 when `name` is UTF-8 and shows as it is; else
+// a fresh text the caller drops.
+fs_name_display: fn(name: I64) -> I64 {
+    data: rt_text_data(name)
+    length: rt_text_len(name)
+    at := I64{0}
+    loop at < length {
+        width: rt_text_valid_width(wrapping(data + at), length - at, I64{1})
+        if (width < I64{0}) { break }
+        at += width
+    }
+    if (at == length) -> return I64{0}
+    shown: jet_rt_string_builder_new()
+    at = I64{0}
+    loop at < length {
+        byte: rt_text_byte(wrapping(data + at))
+        if (byte < I64{128}) { rt_text_push_word(shown, byte, I64{1}) } else { rt_text_push_scalar(shown, I64{65533}) }
+        at += I64{1}
+    }
+    shown
+}
+
 // jet_fs_shown: the held path joined to name, as errors report it; 0 if closed
 // (or after a propagated allocation stop).
 fs_held_shown_name: fn(key: I64, name: I64) -> I64 {
     base: fs_held_shown(key)
     if (base == I64{0}) -> return I64{0}
+    display: fs_name_display(name)
     length: rt_text_len(base)
     if (length == I64{0}) {
         jet_rt_string_drop(base)
+        if (display != I64{0}) -> return display
         return jet_rt_string_clone(name)
     }
-    name_length: rt_text_len(name)
+    label: if (display == I64{0}) -> name else -> display
+    name_length: rt_text_len(label)
     if (name_length == I64{0}) -> return base
     // base shares the table's stored path (fs_held_lookup clones it), so the
     // join is built in a fresh unique text, never appended to base in place.
     separator: if (rt_text_byte(wrapping(wrapping(rt_text_data(base) + length) - I64{1})) != I64{47}) -> I64{1} else -> I64{0}
     joined: rt_text_builder_with_capacity(length + separator + name_length)
-    if (joined == I64{0}) {
-        jet_rt_string_drop(base)
-        return I64{0}
+    if (joined != I64{0}) {
+        rt_text_append(joined, rt_text_data(base), length)
+        if (separator != I64{0}) -> rt_text_push_word(joined, I64{47}, I64{1})
+        rt_text_append(joined, rt_text_data(label), name_length)
     }
-    rt_text_append(joined, rt_text_data(base), length)
-    if (separator != I64{0}) -> rt_text_push_word(joined, I64{47}, I64{1})
-    rt_text_append(joined, rt_text_data(name), name_length)
+    if (display != I64{0}) -> jet_rt_string_drop(display)
     jet_rt_string_drop(base)
     joined
 }
@@ -598,6 +625,15 @@ fs_stat_facts_at: fn(key: I64, name: I64, follow: Bool, scratch: I64, error: I64
     }
     jet_rt_free(scratch, I64{16}, I64{8})
     jet_rt_string_drop(shown)
+    result
+}
+
+// jet_fs_remove_at_raw (Core's Directory.remove_raw): unlinkat of the entry
+// whose name is the exact bytes at `data`, shown as fs_name_display shows it.
+#Export(c) jet_fs_remove_at_raw: fn(handle: I64, data: I64, length: I64, error: I64) -> I64 {
+    name: jet_raw_bytes_into_text(data, length)
+    result: jet_fs_remove_at(handle, name, false, error)
+    jet_rt_string_drop(name)
     result
 }
 

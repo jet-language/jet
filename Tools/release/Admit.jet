@@ -16,15 +16,18 @@
 //   cc-pack   Tools/agent/cc-pack.nix builds this host's C toolchain pack from pinned sources
 //             (the only place Nix runs); its SHA-256 and size must equal CC_PACK_ASSETS in
 //             Jetpack/Provider/Source/Toolchain/CcToolchainPack.jet, the hash jet embeds.
-//   jetpack   Jetpack/Bootstrap/check.sh (keep-going) with s2 on COMMIT must show no failure
+//   jetpack   Jetpack/Bootstrap/Check.jet (keep-going) with s2 on COMMIT must show no failure
 //             row the current release showed (recorded when it was cut, else rerun on its own
-//             tree), and must finish if the release's census did; `check.sh --hosted` builds
+//             tree), and must finish if the release's census did; `Check.jet --hosted` builds
 //             the jetpack engine that ships beside jet.
 //   suites    the golden, ui and cases test profiles (`jet test Compiler --profile <suite>`,
 //             run by s2 with `--compiler` naming the current release, then s2) on COMMIT's
 //             fixtures, compared per (suite, case, tier). A row the release passes and s2
 //             fails twice is lost; a lost row needs a disposition line
-//             `suite<TAB>case<TAB>tier|*<TAB>#card<TAB>reason` in --dispositions.
+//             `suite<TAB>case<TAB>tier|*<TAB>#card<TAB>reason` in --dispositions. No failing
+//             row may be untracked: each one needs a known-failing line, a host skip or an
+//             opt-in, or (for a lost row) a disposition; a REFUSED row no ledger line owns
+//             counts as untracked.
 //   gains     rows s2 passes that the release fails, plus Jetpack rows s2 no longer shows;
 //             at least --min-gains (default 10) of them.
 // The suites start only once the cheap checks (chain, pack, jetpack) are
@@ -77,8 +80,10 @@ ADMIT_USAGE: "usage: jet run Tools/release/Main.jet -- admit COMMIT [--summary T
 // size) in CC_PACK_ASSETS.
 CC_PACK_SOURCE: "Jetpack/Provider/Source/Toolchain/CcToolchainPack.jet"
 // Testkit statuses a failing row may carry and still be tracked: a
-// known-failing line, a refusal, a host skip or an opt-in row.
-TRACKED_FAILURES: [String]{"KNOWN-FAILING", "REFUSED", "SKIP-HOST", "OPT-IN"}
+// known-failing line, a host skip or an opt-in row. The testkit turns a
+// refusal a known-failing line owns into KNOWN-FAILING, so a REFUSED row that
+// remains has no owning line and is untracked.
+TRACKED_FAILURES: [String]{"KNOWN-FAILING", "SKIP-HOST", "OPT-IN"}
 
 AdmitOptions: struct {
     commit: String
@@ -257,9 +262,16 @@ Compared: struct {
 
 passes: fn(status: String) -> Bool Never! { status == "PASS" || status == "UNEXPECTED-PASS" }
 
-// A failing row no known-failing line, refusal or release disposition
-// accounts for: nothing tracks it.
+// A failing row no known-failing line or release disposition accounts for:
+// nothing tracks it.
 is_untracked: fn(status: String) -> Bool Never! { !passes(status) && !TRACKED_FAILURES.contains(status) }
+
+// The untracked gate row of one suite: any untracked failing row fails the
+// release, however many the current release had (shown for comparison).
+untracked_row: fn(suite: String, compared: Compared) -> GateRow Never! {
+    count: compared.untracked.len()
+    GateRow{check: "untracked:{suite}", status: if count > 0 -> "FAIL" else -> "PASS", detail: "{count} failing row(s) with no known-failing line (release {compared.release_untracked}); full list in REPORT.md"}
+}
 
 row_key: fn(suite: String, id: String, tier: String) -> String Never! { "{suite}\t{id}\t{tier}" }
 
@@ -317,14 +329,27 @@ compare_suites: fn(before_rows: [SuiteRow], after_rows: [SuiteRow], retry: [Suit
         now: after_rows[after.at.get(key) ?? 0]
         if !before.at.has_key(key) && passes(now.status) -> out.added.push(now.copy())
     }
-    // A dispositioned lost row is tracked by its card, so it does not count
-    // as untracked.
+    // A dispositioned lost row is tracked by its card, and a flaky row (one
+    // the release passes and the candidate passes on its retry) is reported
+    // as flaky, so neither counts as untracked. A row the candidate timed
+    // out on is retried whatever the release did, and when its retry passes
+    // it is flaky too: it missed a wall-clock limit under the kit's load, and
+    // the report still lists it.
     tracked := [String: Bool]{}
     loop lost in out.lost {
         if lost.disposed -> tracked[row_key(lost.suite, lost.id, lost.tier)] = true
     }
+    loop row in out.flaky -> tracked[row_key(row.suite, row.id, row.tier)] = true
     loop item in after_rows {
-        if is_untracked(item.status) && !tracked.has_key(row_key(item.suite, item.id, item.tier)) -> out.untracked.push(item.copy())
+        if !is_untracked(item.status) -> next
+        key: row_key(item.suite, item.id, item.tier)
+        if tracked.has_key(key) -> next
+        if item.status == "TIMEOUT" && again.at.get(key) == .Val(at) && passes(retry[at].status) {
+            out.flaky.push(item.copy())
+            tracked[key.copy()] = true
+            next
+        }
+        out.untracked.push(item.copy())
     }
     out
 }
@@ -724,10 +749,12 @@ pack_stage: fn(ctx: &Ctx) Never! -[Env, Exec, FS, IO, Time, Time.Wait]> {
         row(ctx, "pack", "FAIL", "cannot copy s2 to {dir}: {err}")
         return
     }
-    vars: with_vars(ctx.vars, [Var]{set_var("JET_COMPILER_IDENTITY", ctx.candidate.identity), set_var("JET_TOOLCHAIN_ROOT", ctx.tree)})
-    // The pack compiles the runtime's vendored C with a host C toolchain,
-    // which only jet-env supplies until jet does.
-    argv: joined(STACK, [String]{files.join(ctx.tree, "Tools/agent/jet-env"), "bash", "-c", NORUST, "norust", "node", files.join(ctx.tree, "Tools/packaging/prebuild-runtime.mjs"), files.join(dir, "jet"), files.join(dir, "jet-runtime"), "--repo", ctx.tree.copy()})
+    vars: with_vars(ctx.vars, [Var]{set_var("JET_COMPILER_IDENTITY", ctx.candidate.identity), set_var("JET_TOOLCHAIN_ROOT", ctx.tree), set_var("JET", ctx.candidate.jet)})
+    // s2, with pack2 beside it, runs the packaging tool; the copy beside the
+    // empty pack directory lowers the runtime. The pack compiles the runtime's
+    // vendored C with a host C toolchain, which only the dev shell supplies
+    // until jet does.
+    argv: in_dev_shell(ctx.candidate.jet, ctx.tree, true, [String]{ctx.candidate.jet.copy(), files.join(ctx.tree, "Tools/packaging/PrebuildRuntime.jet"), files.join(dir, "jet"), files.join(dir, "jet-runtime"), "--repo", ctx.tree.copy()})
     result: run_logged(argv, ctx.tree, vars, log, 3600)
     if result.rc != 0 || !files.exists(files.join(dir, "jet-runtime")) {
         row(ctx, "pack", "FAIL", "the pack rebuild by s2 failed rc={result.rc}: {tail_of(log, 8)}")
@@ -807,16 +834,16 @@ jetpack_census: fn(ctx: &Ctx, side: String, jet: String, identity: String, root:
     clear_scratch(worker)
     vars: with_vars(ctx.vars, [Var]{set_var("JET_KEEP_GOING", "1"), set_var("JET_COMPILER_IDENTITY", identity), set_var("JET_TOOLCHAIN_ROOT", root), set_var("JETPACK_WORKER", worker), set_var("JET", jet)})
     log: files.join(ctx.work, "logs/jetpack-{side}.log")
-    result: run_logged(joined(STACK, [String]{"bash", "Jetpack/Bootstrap/check.sh"}), root, vars, log, 3600)
+    result: run_logged(joined(STACK, [String]{jet.copy(), "Jetpack/Bootstrap/Check.jet"}), root, vars, log, 3600)
     scratch: bootstrap_scratch(worker)
     errors: first_existing(scratch, "check-errors.txt")
     receipt: first_existing(scratch, "check.receipt")
-    // check.sh writes the receipt's `exit:` line last: without it the census
+    // Check.jet writes the receipt's `exit:` line last: without it the census
     // is partial.
     finished: !result.timed_out && receipt != "" && has_exit_line(read_text(receipt) ?? "")
     keys: if finished && errors != "" -> jetpack_keys(read_text(errors) ?? "") else -> [String]{}
     clear_scratch(worker)
-    if !finished -> return Census{finished: false, keys: [String]{}, detail: "check.sh did not finish (rc={result.rc}{if result.timed_out -> ", timed out" else -> ""}): {tail_of(log, 8)}"}
+    if !finished -> return Census{finished: false, keys: [String]{}, detail: "Check.jet did not finish (rc={result.rc}{if result.timed_out -> ", timed out" else -> ""}): {tail_of(log, 8)}"}
     Census{finished: true, keys: keys, detail: "rc={result.rc}, {keys.len()} rows, {result.wall}s"}
 }
 
@@ -902,9 +929,9 @@ jetpack_stage: fn(ctx: &Ctx) Never! -[Env, Exec, FS, IO, Time, Time.Wait]> {
 hosted_stage: fn(ctx: &Ctx) Never! -[Env, Exec, FS, IO, Time, Time.Wait]> {
     worker: "release-hosted-{sys.pid()}"
     clear_scratch(worker)
-    vars: with_vars(ctx.vars, [Var]{set_var("JET_COMPILER_IDENTITY", ctx.candidate.identity), set_var("JET_TOOLCHAIN_ROOT", ctx.tree), set_var("JETPACK_WORKER", worker), set_var("JET", ctx.candidate.jet)})
+    vars: with_vars(ctx.vars, [Var]{set_var("JET_COMPILER_IDENTITY", ctx.candidate.identity), set_var("JET_TOOLCHAIN_ROOT", ctx.tree), set_var("JETPACK_WORKER", worker), set_var("JET", ctx.candidate.jet), norust_var()})
     log: files.join(ctx.work, "logs/jetpack-hosted.log")
-    result: run_logged(joined(STACK, [String]{"bash", "-c", NORUST, "norust", "bash", "Jetpack/Bootstrap/check.sh", "--hosted"}), ctx.tree, vars, log, 3 * 3600)
+    result: run_logged(joined(STACK, [String]{ctx.candidate.jet.copy(), "Jetpack/Bootstrap/Check.jet", "--hosted"}), ctx.tree, vars, log, 3 * 3600)
     receipt: first_existing(bootstrap_scratch(worker), "hosted.receipt")
     text: if receipt != "" -> read_text(receipt) ?? "" else -> ""
     binary: line_value(text, "hosted-binary: ")
@@ -925,10 +952,10 @@ hosted_stage: fn(ctx: &Ctx) Never! -[Env, Exec, FS, IO, Time, Time.Wait]> {
     clear_scratch(worker)
     if ok {
         engine_sha: sha256_file(ctx.candidate.jetpack.copy())
-        row(ctx, "jetpack-engine", "PASS", "check.sh --hosted built jetpack with s2 without Rust ({short(engine_sha, 16)}, {result.wall}s)")
+        row(ctx, "jetpack-engine", "PASS", "Check.jet --hosted built jetpack with s2 without Rust ({short(engine_sha, 16)}, {result.wall}s)")
         return
     }
-    why: "check.sh --hosted rc={result.rc}{if result.timed_out -> " (timed out)" else -> ""}: {tail_of(log, 8)}"
+    why: "Check.jet --hosted rc={result.rc}{if result.timed_out -> " (timed out)" else -> ""}: {tail_of(log, 8)}"
     // Losing the engine the current release ships is a regression; a release
     // that never had one only notes it.
     if ctx.release.jetpack != "" {
@@ -973,8 +1000,8 @@ suite_run: fn(ctx: &Ctx, side: String, suite: String, extra: [String]) -[Env, Ex
         label: "{side}-{suite}{if retry -> "-retry" else -> ""}-{index}"
         vars: with_vars(ctx.vars, [Var]{set_var("JET_COMPILER_IDENTITY", identity), set_var("JET_TOOLCHAIN_ROOT", root), set_var("JET", jet)})
         // Suite rows run host tools (C compilers, interpreters) that only
-        // jet-env supplies until jet does.
-        argv := joined(STACK, [String]{files.join(ctx.tree, "Tools/agent/jet-env"), ctx.candidate.jet.copy(), "test", files.join(ctx.tree, "Compiler"), "--profile", suite.copy(), "--compiler={jet}", "--results={files.join(kit, "{label}.json")}"})
+        // the dev shell supplies until jet does.
+        argv := in_dev_shell(ctx.candidate.jet, ctx.tree, false, [String]{ctx.candidate.jet.copy(), "test", files.join(ctx.tree, "Compiler"), "--profile", suite.copy(), "--compiler={jet}", "--results={files.join(kit, "{label}.json")}"})
         if !retry -> argv.push("--shard={index}/{shards}")
         argv.extend(shard_pool(ctx.options, shards, sys.get("SLOT_MEMORY_MAX") ?? ""))
         if ctx.options.filter != "" && !retry -> argv.push("--filter={ctx.options.filter}")
@@ -1042,15 +1069,23 @@ suites_stage: fn(ctx: &Ctx) Never! -[Env, Exec, FS, IO, Time, Time.Wait]> {
             next
         }
         compared := compare_suites(release.rows, candidate.rows, [SuiteRow]{}, ctx.dispositions)
-        if compared.lost.len() > 0 {
+        // The retry runs every lost row and every untracked timeout again on
+        // their own: a row that missed its wall-clock limit under the kit's
+        // load has not failed if it passes by itself.
+        seen := [String: Bool]{}
+        lines := [String]{}
+        loop lost in compared.lost {
+            if seen.has_key(lost.id) -> next
+            seen[lost.id.copy()] = true
+            lines.push(lost.id.copy())
+        }
+        loop item in compared.untracked {
+            if item.status != "TIMEOUT" || seen.has_key(item.id) -> next
+            seen[item.id.copy()] = true
+            lines.push(item.id.copy())
+        }
+        if lines.len() > 0 {
             ids: files.join(ctx.work, "kit/retry-{suite}.txt")
-            seen := [String: Bool]{}
-            lines := [String]{}
-            loop lost in compared.lost {
-                if seen.has_key(lost.id) -> next
-                seen[lost.id.copy()] = true
-                lines.push(lost.id.copy())
-            }
             files.write(ids, keys_text(lines)) ?? ()
             again: suite_run(ctx, "candidate", suite, [String]{"--cases={ids}"})
             compared = compare_suites(release.rows, candidate.rows, again.rows, ctx.dispositions)
@@ -1066,10 +1101,9 @@ suites_stage: fn(ctx: &Ctx) Never! -[Env, Exec, FS, IO, Time, Time.Wait]> {
         } else {
             row(ctx, "suite:{suite}", "PASS", summary)
         }
-        // Untracked failures may only shrink: every one is listed in
-        // REPORT.md, and a release with more fails.
-        count: compared.untracked.len()
-        row(ctx, "untracked:{suite}", if count > compared.release_untracked -> "FAIL" else -> "PASS", "{count} failing row(s) with no known-failing line (release {compared.release_untracked}); full list in REPORT.md")
+        // Every untracked failure is listed in REPORT.md; any one fails.
+        untracked: untracked_row(suite, compared)
+        row(ctx, untracked.check, untracked.status, untracked.detail)
     }
     unused := [String]{}
     loop entry in ctx.dispositions {
@@ -1333,8 +1367,7 @@ publish_release: fn(ctx: Ctx, dest: String) -[Env, Exec, FS, IO, Time, Time.Wait
         shown: step.argv.join(" ")
         say("release", ctx.log, "publish: {shown}")
         files.append_all(log, "$ {shown}\n") ?? ()
-        code := 127
-        if logged_spec(step.argv, ctx.root, vars, log, 0, true).run() == .Ok(done) -> code = if done.signal != None -> 128 else -> done.code
+        code: run_logged(step.argv, ctx.root, vars, log, 0, append: true).rc
         if code != 0 {
             state.step = step.name.copy()
             state.detail = if step.name == "on origin/dev" -> "{short(ctx.sha, 10)} is not on origin/dev; push dev first" else -> "exit {code}: {tail_of(log, 3)}"

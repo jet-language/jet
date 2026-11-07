@@ -38,9 +38,9 @@ DC_SPEC_AHEAD_OF_IMPL: [(code: String, reason: String)]{
     (code: "E2210", reason: "staged #6625"), (code: "E2473", reason: "staged #3709"),
     (code: "E3002", reason: "staged #3838"), (code: "E3014", reason: "staged #6366"),
     (code: "E3306", reason: "staged #6129"), (code: "E3404", reason: "staged #5007"),
-    (code: "E3501", reason: "staged #5069"), (code: "E3510", reason: "staged #4276"),
+    (code: "E3501", reason: "staged #5069"),
     (code: "L0525", reason: "staged #6006"), (code: "L0526", reason: "staged #6006"),
-    (code: "L0527", reason: "staged #6006"),
+    (code: "L0527", reason: "staged #6006"), (code: "L2510", reason: "staged #6652"),
 }
 
 // The generated registry rows and their Prelude source list every code by
@@ -240,6 +240,7 @@ dc_report_codes: fn(text: String) -> [String] {
 // tests/diagnostics_coverage.rs:1698 (I4a): every code the compiler sources
 // emit has a typed registry row.
 #Test("every_emitted_code_has_typed_row") {
+    guards_enter_root()
     registered: dc_registered_codes()
     missing := [String]{}
     loop code in dc_emitted_codes() {
@@ -283,6 +284,7 @@ dc_baseline_failure: fn(listed: [String], unimplemented: [String], emitted: [Str
 // with a `staged #<card>` reason, and a listed code that is now emitted must
 // leave the list.
 #Test("registered_unimplemented_codes_are_expected") {
+    guards_enter_root()
     loop row in DC_SPEC_AHEAD_OF_IMPL {
         valid: row.reason.starts_with("staged #") && row.reason.count_bytes() > 8 && dc_slice(row.reason, 8, row.reason.count_bytes()).bytes().all(byte -> byte >= (U8{48}) && byte <= (U8{57}))
         assert(valid, "{row.code} reason must be `staged #<card>`, got `{row.reason}`")
@@ -306,6 +308,7 @@ dc_baseline_failure: fn(listed: [String], unimplemented: [String], emitted: [Str
 // tests/diagnostics_coverage.rs:790: the baseline comparison refuses a
 // removed entry, an added row and a substitution, and passes when they agree.
 #Test("coverage_baseline_rejects_removal_addition_and_substitution") {
+    guards_enter_root()
     baseline: [String]{"E2101", "E3001"}
     emitted := [String]{}
     assert_eq(dc_baseline_failure(baseline, ["E2101"], emitted), "DC_SPEC_AHEAD_OF_IMPL is missing baseline entries; restore the line for each:\n  E3001")
@@ -318,6 +321,7 @@ dc_baseline_failure: fn(listed: [String], unimplemented: [String], emitted: [Str
 // tests/diagnostics_coverage.rs:1525 (I2): rustc codes never become Jet
 // diagnostics, neither at a raise site nor as a rendered report opener.
 #Test("i2_rustc_codes_do_not_leak_as_jet_diagnostics") {
+    guards_enter_root()
     failures := [String]{}
     loop path in dc_source_paths() {
         text: dc_read(path)
@@ -340,6 +344,7 @@ dc_baseline_failure: fn(listed: [String], unimplemented: [String], emitted: [Str
 // runtime or backend voice. `ffi_bad_path.stderr` keeps the backend's own
 // rejection by design.
 #Test("diagnostic_snapshots_do_not_leak_runtime_or_backend_voice") {
+    guards_enter_root()
     failures := [String]{}
     loop snapshot in dc_snapshot_texts() {
         loop needle in ["thread 'main' panicked", "panicked at", "stack backtrace:", "target/debug", ".rs:", "rustc rejected generated code"] {
@@ -353,6 +358,7 @@ dc_baseline_failure: fn(listed: [String], unimplemented: [String], emitted: [Str
 // tests/diagnostics_coverage.rs:1614 (#3715, #3719): placeholder consumer text,
 // raw byte offsets, and the lexer's synthetic terminator never render.
 #Test("diagnostic_snapshots_never_render_placeholders_offsets_or_synthetic_terminators") {
+    guards_enter_root()
     failures := [String]{}
     loop snapshot in dc_snapshot_texts() {
         loop needle in ["the earlier consuming operation", "source bytes", "found `;`"] {
@@ -379,6 +385,7 @@ dc_raw_code_panic: fn(line: String) -> Bool {
 // codes through Jet-owned report helpers, never a raw panic carrying the code.
 // The Rust gate scanned the Rust Prelude; its replacement is Jet source.
 #Test("runtime_user_error_codes_use_jet_panic_voice") {
+    guards_enter_root()
     paths := [String]{}
     dc_walk("Compiler/Prelude", paths)
     dc_walk("Compiler/JetRuntime", paths)
@@ -426,6 +433,7 @@ dc_marker_names: fn() -> [String] {
 // and checker ask the registry about markers; they grow no second string
 // vocabulary of marker names.
 #Test("marker_name_literals_stay_in_the_registry") {
+    guards_enter_root()
     names: dc_marker_names()
     paths := [String]{}
     loop directory in ["Compiler/JetLexer/Source", "Compiler/JetParser/Source", "Compiler/JetSema/Source"] -> dc_walk(directory, paths)

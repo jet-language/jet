@@ -1,6 +1,7 @@
 use {
     disp_files: core.files
     disp_process: core.process
+    disp_sys: core.sys
     disp_parse: core.text.parse
     disp_encoding: core.encoding
     disp_json: core.encoding.json
@@ -13,7 +14,8 @@ use {
 // Tower card, a ratified decision, or a concrete no-action reason. The
 // program prints every report and row without one; the case compares that
 // list with its golden, so a new report without dispositions changes it.
-// Tower remains Node tooling (NODE-DEBT): the live board comes from its CLI.
+// The live cards and decisions come from Tools/tower/Board.jet, run by the
+// jet under test (JET, which the case sets).
 disp_slice: fn(text: String, start: Int, end: Int) -> String {
     if start == end -> return ""
     String.from_bytes(text.bytes()[start..(end - 1)]) ?? panic("audit report byte slice must end on UTF-8 boundaries")
@@ -88,17 +90,17 @@ disp_dashes: fn(cell: String) -> Bool {
     true
 }
 
-// The board under test is the tree's own Tools/tower/.tower, as in
-// jetpack_truth/truth_matrix_covers_every_done_epoch4_card: TOWER_DATA pins
-// the Tower CLI to it, and the parses choose their own input budget because
-// the board is past `json.parse`'s 16 MiB safe bound.
+// The board under test is the tree's own Tools/tower/.tower: TOWER_DATA pins
+// the board reader to it, and the parses choose their own input budget
+// because the board is past `json.parse`'s 16 MiB safe bound.
 disp_board_limits: fn() -> disp_encoding.EncodingLimits {
     disp_encoding.EncodingLimits{buffer_bytes: 65536, max_depth: 256, max_item_bytes: 1073741824, max_total_bytes: None, max_expansion_depth: 32, max_expansion_bytes: 8388608}
 }
 
 disp_tower_json: fn(root: String, words: [String]) -> Dyn {
     board: disp_files.join(root, "Tools/tower/.tower")
-    command := [String]{"node", "Tools/tower/tower.mjs"}
+    jet: disp_sys.get("JET") ?? panic("JET names the jet that runs Tools/tower/Board.jet")
+    command := [String]{jet, "Tools/tower/Board.jet"}
     loop word in words -> command.push(word.copy())
     live: disp_process.cmd(command).cwd(root).env("TOWER_DATA", disp_files.join(board, "tower.json")).stdout(.Capture).stderr(.Capture).run() ?? panic("run Tower projection")
     assert(live.success, "Tower projection failed: {live.errors}")

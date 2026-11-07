@@ -1,10 +1,19 @@
 #!/usr/bin/env jet
-// The runtime's generated tables, from their one source each.
+// The runtime's generated tables, and the web tier's dyn_kind table, from
+// their one source each.
 // Usage: jet Tools/agent/RuntimeGenerators.jet [--check] [--defects-only]
+//        jet Tools/agent/RuntimeGenerators.jet lifecycle FILE...
+//        jet Tools/agent/RuntimeGenerators.jet exports
 //   (default)        rewrite every stale output
 //   --check          write nothing; report every stale output
 //   --defects-only   regenerate only the private trap defect rows, refusing
 //                    when the frozen ordinary trap projection differs
+//   lifecycle        print the lifecycle.list of a library object built from
+//                    exactly the runtime sources FILE... (`-`: stdin; a
+//                    fixture's unit)
+//   exports          print `SYMBOL<TAB>FILE` for each #Export(c) function of
+//                    the runtime sources sources.list names, in its order
+// Run it from the repository root; every path is relative to it.
 use {
     crypto: core.crypto
     json: core.encoding.json
@@ -39,14 +48,18 @@ write_output: fn(path: String, text: String) GeneratorError! {
     files.write(path, text) ?? return Err(generator_fail("cannot write {path}: {err}"))
 }
 
-runtime_generators_main: fn(args: [String]) -[FS]> String GeneratorError! {
+USAGE: "usage: jet Tools/agent/RuntimeGenerators.jet [--check] [--defects-only] | lifecycle FILE... | exports"
+
+runtime_generators_main: fn(args: [String]) -[FS, IO]> String GeneratorError! {
+    if args.len() > 0 && args[0] == "lifecycle" -> return unit_lifecycle_list(args)
+    if args.len() == 1 && args[0] == "exports" -> return runtime_export_files()
     check := false
     defects_only := false
     loop arg in args {
         if {
             arg == "--check" -> check = true
             arg == "--defects-only" -> defects_only = true
-            else -> return Err(generator_fail("usage: jet Tools/agent/RuntimeGenerators.jet [--check] [--defects-only]"))
+            else -> return Err(generator_fail(USAGE))
         }
     }
     registry: files.read(REGISTRY_PATH) ?? return Err(generator_fail("cannot read {REGISTRY_PATH}: {err}"))
@@ -106,6 +119,16 @@ runtime_generators_main: fn(args: [String]) -[FS]> String GeneratorError! {
         .Ok(text) -> outputs.push(GeneratedFile{path: HOST_ERRORS_TARGET_PATH, text: text})
         .Err(error) -> problems.push(error.message)
     }
+    if read_host_carriers() == {
+        .Ok(text) -> outputs.push(GeneratedFile{path: HOST_CARRIERS_TARGET_PATH, text: text})
+        .Err(error) -> problems.push(error.message)
+    }
+    if read_dyn_kinds() == {
+        .Ok(generated) -> {
+            loop file in generated -> outputs.push(file)
+        }
+        .Err(error) -> problems.push(error.message)
+    }
     loop output in outputs {
         current: output_current(output.path, output.text) ?? return Err(err)
         if current -> next
@@ -118,6 +141,41 @@ runtime_generators_main: fn(args: [String]) -[FS]> String GeneratorError! {
     if problems.len() > 0 -> return Err(generator_fail(problems.join("\n")))
     if check -> return Ok("runtime generated tables are current")
     Ok("")
+}
+
+// `lifecycle FILE...` (`args` with its mode word): the lifecycle.list of
+// exactly those runtime sources, without its final newline. A FILE `-` is
+// the source text on stdin.
+unit_lifecycle_list: fn(args: [String]) -[FS, IO]> String GeneratorError! {
+    if args.len() < 2 -> return Err(generator_fail(USAGE))
+    problems := [String]{}
+    sources := [RuntimeSource]{}
+    loop at in 1..<args.len() {
+        path: args[at]
+        if path == "-" {
+            if term.read_all_input() == {
+                .Ok(text) -> sources.push(RuntimeSource{path: "stdin", text: text})
+                .Err(error) -> problems.push("cannot read stdin: {error}")
+            }
+            next
+        }
+        if files.read(path) == {
+            .Ok(text) -> sources.push(RuntimeSource{path: path.copy(), text: text}) // copy: `args` keeps its rows
+            .Err(error) -> problems.push("cannot read {path}: {error}")
+        }
+    }
+    if problems.len() > 0 -> return Err(generator_fail(problems.join("\n")))
+    list: lifecycle_list(sources) ?? return Err(err)
+    list.removesuffix("\n")
+}
+
+// `exports`: `SYMBOL<TAB>FILE` for each runtime #Export(c) function, in
+// sources.list order.
+runtime_export_files: fn() -[FS]> String GeneratorError! {
+    sources: read_runtime_sources() ?? return Err(err)
+    rows := [String]{}
+    loop export in placed_exports(sources) ?? return Err(err) -> rows.push("{export.name}\t{export.path}")
+    rows.join("\n")
 }
 
 run: fn() {
@@ -1191,12 +1249,19 @@ runtime_exports: fn(source: String, path: String) -> ParsedExports Never! {
     ParsedExports{exports: exports, problems: problems}
 }
 
-// lifecycle.list for the given runtime sources: one `symbol init|fini N
-// [guards]` row per hook, in symbol order.
-lifecycle_list: fn(sources: [RuntimeSource]) -> String GeneratorError! {
+// One #Export(c) function of a runtime source set and the file declaring it.
+PlacedExport: struct {
+    name: String
+    path: String
+    lifecycle: String
+}
+
+// Every #Export(c) function of `sources`, in source order; a duplicate, a bad
+// declaration and an empty set are refused, every one at once.
+placed_exports: fn(sources: [RuntimeSource]) -> [PlacedExport] GeneratorError! {
     problems := [String]{}
     names := [String]{}
-    rows := [String]{}
+    placed := [PlacedExport]{}
     loop source in sources {
         parsed: runtime_exports(source.text, source.path)
         loop problem in parsed.problems -> problems.push(problem)
@@ -1205,12 +1270,23 @@ lifecycle_list: fn(sources: [RuntimeSource]) -> String GeneratorError! {
                 problems.push("duplicate runtime #Export(c) {export.name}")
                 next
             }
-            names.push(export.name)
-            if export.lifecycle != "" -> rows.push("{export.name} {export.lifecycle}")
+            names.push(export.name.copy()) // copy: the row keeps the name too
+            placed.push(PlacedExport{name: export.name, path: source.path.copy(), lifecycle: export.lifecycle}) // copy: one row per export of the source
         }
     }
     if names.len() == 0 -> problems.push("empty runtime #Export(c) declarations")
     if problems.len() > 0 -> return Err(generator_fail(problems.join("\n")))
+    placed
+}
+
+// lifecycle.list for the given runtime sources: one `symbol init|fini N
+// [guards]` row per hook, in symbol order.
+lifecycle_list: fn(sources: [RuntimeSource]) -> String GeneratorError! {
+    placed: placed_exports(sources) ?? return Err(err)
+    rows := [String]{}
+    loop export in placed {
+        if export.lifecycle != "" -> rows.push("{export.name} {export.lifecycle}")
+    }
     rows.sort()
     lines := [String]{
         "# Runtime object lifecycle hooks: <#Export(c) symbol> init|fini <priority 0..65535> [<guard storage>,...].",
@@ -1295,8 +1371,59 @@ render_lifecycle_list: fn() -[FS]> String GeneratorError! {
     assert_eq(runtime_exports(commented, "M.jet").problems.join("|"), "M.jet: jet_net_raw_resolve_ordered parameter 1 requires the reviewed low-16-bit mask")
     narrow: "#Export(c) jet_rt_record_new_jet_resolve_error: fn(kind: I64, flag: U8) -> I64 {{ kind }}\n"
     assert_eq(runtime_exports(narrow, "M.jet").problems.len(), 0)
+    unmasked: "#Export(c) jet_rt_record_new_jet_resolve_error: fn(kind: I64, flag: I64) -> I64 {{\n    // flag.bit_and(I64{{255}})\n    flag\n}}\n"
+    assert_eq(runtime_exports(unmasked, "M.jet").problems.join("|"), "M.jet: jet_rt_record_new_jet_resolve_error parameter 1 requires the reviewed low-8-bit mask")
     open: "#Export(c) jet_net_raw_resolve_ordered: fn(host: I64, port: I64) -> I64 {{\n    port.bit_and(I64{{65535}})\n"
     assert_eq(runtime_exports(open, "M.jet").problems.join("|"), "M.jet: unterminated masked export jet_net_raw_resolve_ordered")
+}
+
+// The quoted names after each `marker` in `text`.
+quoted_after: fn(text: String, marker: String) -> [String] Never! {
+    pieces: text.split(marker).to_list()
+    names := [String]{}
+    loop at in 1..<pieces.len() -> names.push(pieces[at].partition("\"").head.copy())
+    names
+}
+
+// Record Lists cross every route as handle buffers (the IR's route calls),
+// whatever the provider's ownership. The census freezes the routes whose
+// carriers hold a List of a schema record, so a new Jet provider returning or
+// reading one is reviewed against that contract (a provider handing back
+// inline rows surfaces as a pointer-sized allocation in the first
+// `entry.field` read), and keeps the native witness that reads a field of
+// `files.list_dir`'s result.
+#Test("a route carrying a List of schema records is a reviewed handle-buffer route") {
+    path: "Compiler/JetIR/Source/RuntimeRoutes.jet"
+    routes: files.read(path) ?? panic("{path} did not read: {err}")
+    schemas: quoted_after(routes, "IRRecordSchema{{jet_name: \"")
+    found := [String]{}
+    loop line in routes.lines() {
+        symbols: quoted_after(line, "IRRoute{{symbol: \"")
+        if symbols.len() != 1 -> next
+        loop name in quoted_after(line, "List{{elem: IRRouteCarrier.Handle{{name: \"") {
+            if schemas.contains(name) && !found.contains(symbols[0]) -> found.push(symbols[0].copy()) // copy: `symbols` keeps its row
+        }
+    }
+    found.sort()
+    // Seed adapters always exchanged handle buffers; the Jet-owned rows
+    // (jet_dyn_field, jet_rt_codec_*, jet_std_fs_list_dir_raw) build or read
+    // the same shape.
+    reviewed: [String]{
+        "jet_binary_pattern_match", "jet_dyn_at", "jet_dyn_bool", "jet_dyn_field", "jet_dyn_float", "jet_dyn_int", "jet_dyn_text",
+        "jet_log_record_emit_raw",
+        "jet_net_dns_srv", "jet_net_dns_srv_at_lookup", "jet_net_dns_srv_lookup",
+        "jet_ring_log_debug_fields", "jet_ring_log_error_fields", "jet_ring_log_info_fields", "jet_ring_log_warn_fields",
+        "jet_rt_codec_decode_bool", "jet_rt_codec_decode_char", "jet_rt_codec_decode_float", "jet_rt_codec_decode_i16", "jet_rt_codec_decode_i32",
+        "jet_rt_codec_decode_i64", "jet_rt_codec_decode_i8", "jet_rt_codec_decode_int", "jet_rt_codec_decode_string", "jet_rt_codec_decode_u16",
+        "jet_rt_codec_decode_u32", "jet_rt_codec_decode_u64", "jet_rt_codec_decode_u8", "jet_rt_codec_parse_json", "jet_rt_codec_parse_toml",
+        "jet_rt_codec_parse_yaml", "jet_rt_codec_under", "jet_std_fs_list_dir_raw", "jet_text_pattern_match",
+    }
+    expected := [String]{}
+    loop symbol in reviewed {
+        if routes.contains("IRRoute{{symbol: \"{symbol}\"") -> expected.push(symbol.copy()) // copy: `reviewed` keeps its rows
+    }
+    expected.sort()
+    assert_eq(found, expected)
 }
 
 #Test("every runtime source file is in the manifest") {
@@ -2458,4 +2585,350 @@ read_host_errors: fn() -[FS]> String GeneratorError! {
     text: render_host_errors(plain) ?? panic("rows did not render: {err.message}")
     assert(text.contains("rt_static_text(\"No error information\\n\\nNo such file\\n\")"))
     assert(text.contains("errno <= I64{{2}}"))
+}
+
+// The host C carriers: their tags are the checked Core registry's
+// declaration-order ordinals, not an independent runtime enum, and the host
+// refusals and names are heap-free literals.
+
+HOST_CARRIER_ROWS_PATH: "Compiler/JetFoundation/Source/Registry/CoreEnumPayloadRows.jet"
+HOST_CARRIERS_TARGET_PATH: "Compiler/JetRuntime/Source/HostEnums.jet"
+
+// One carrier table: the constant prefix and its Core enum's variants.
+HostCarrierTable: struct {
+    prefix: String
+    values: [String]
+}
+
+// The variants of Core enum `name` in declaration order. A missing or
+// repeated variant is a broken registry.
+enum_variants: fn(rows: String, name: String) -> [String] GeneratorError! {
+    values: quoted_after(rows, "CoreEnumPayloadRow{{enum_name: \"{name}\", variant: \"")
+    if values.len() == 0 -> return Err(generator_fail("missing/duplicate {name} enum rows"))
+    loop at in 1..<values.len() {
+        loop before in 0..<at {
+            if values[before] == values[at] -> return Err(generator_fail("missing/duplicate {name} enum rows"))
+        }
+    }
+    Ok(values)
+}
+
+// `InvalidInput` as `INVALID_INPUT`: an underscore between a lowercase and
+// an uppercase letter, then every letter uppercase.
+constant_case: fn(name: String) -> String Never! {
+    bytes: name.bytes()
+    out := [U8]{}
+    loop index in 0..<bytes.len() {
+        code: Int.from_u8(bytes[index])
+        lower: code >= 97 && code <= 122
+        if code >= 65 && code <= 90 && index > 0 {
+            previous: Int.from_u8(bytes[index - 1])
+            if previous >= 97 && previous <= 122 -> out.push(U8{95})
+        }
+        out.push(U8{if lower -> code - 32 else -> code})
+    }
+    String.from_bytes(out) ?? panic("constant name {name} is not ASCII")
+}
+
+// The runtime ABI atom of `name`, as Compiler/JetIR/Source/RuntimeRoutes.jet
+// runtime_abi_atom projects it for Lower: `HTTPClient` is `http_client`.
+runtime_abi_atom: fn(name: String) -> String Never! {
+    bytes: name.bytes()
+    out := [U8]{}
+    loop index in 0..<bytes.len() {
+        code: Int.from_u8(bytes[index])
+        if code == 46 || code == 95 {
+            if out.len() > 0 && out[out.len() - 1] != (U8{95}) -> out.push(U8{95})
+            next
+        }
+        upper: code >= 65 && code <= 90
+        if upper && index > 0 && out.len() > 0 && out[out.len() - 1] != (U8{95}) {
+            previous: Int.from_u8(bytes[index - 1])
+            next_code: if index + 1 < bytes.len() -> Int.from_u8(bytes[index + 1]) else -> 0
+            previous_upper: previous >= 65 && previous <= 90
+            next_lower: next_code >= 97 && next_code <= 122
+            if !previous_upper || next_lower -> out.push(U8{95})
+        }
+        out.push(U8{if upper -> code + 32 else -> code})
+    }
+    if out.len() > 0 && out[out.len() - 1] == (U8{95}) {
+        _: out.pop() ?? panic("a nonempty runtime ABI atom failed to pop")
+    }
+    String.from_bytes(out) ?? panic("runtime ABI atom {name} is not ASCII")
+}
+
+// Registered E3001 stops: the writes are heap-free, and Root owns the
+// captured full report through the trap_header / trap_footer boundary.
+host_refusals: fn() -> [MessageLiteral] Never! {
+    [MessageLiteral]{
+        MessageLiteral{name: "host_arguments_refused", text: "host arguments unavailable; call jet_rt_host_arguments before env or argv access"},
+        MessageLiteral{name: "host_environment_index_refused", text: "startup environment index out of range"},
+        MessageLiteral{name: "host_argument_index_refused", text: "startup argument index out of range"},
+        MessageLiteral{name: "host_record_index_refused", text: "record variant index out of range"},
+        MessageLiteral{name: "host_sigpipe_refused", text: "failed to initialize SIGPIPE handling"},
+    }
+}
+
+// Host names and texts, each built as one runtime String.
+host_texts: fn() -> [MessageLiteral] Never! {
+    [MessageLiteral]{
+        MessageLiteral{name: "host_stdout_name", text: "stdout"},
+        MessageLiteral{name: "host_stderr_name", text: "stderr"},
+        MessageLiteral{name: "host_write_zero_text", text: "failed to write whole buffer"},
+        MessageLiteral{name: "host_resolver_prefix", text: "failed to lookup address information: "},
+        MessageLiteral{name: "host_resolver_nul", text: "file name contained an unexpected NUL byte"},
+        MessageLiteral{name: "host_net_wait_kind", text: "network wait"},
+    }
+}
+
+render_host_carriers: fn(rows: String) -> String GeneratorError! {
+    kinds: enum_variants(rows, "IOError") ?? return Err(err)
+    tables := [HostCarrierTable]{HostCarrierTable{prefix: "HOST_IO_KIND", values: kinds}}
+    problems := [String]{}
+    names: [String]{"IOOperation", "ProcessResourceLimit", "ProcessStreamMode", "TerminalMode"}
+    prefixes: [String]{"HOST_IO_OP", "HOST_PROCESS_LIMIT", "HOST_PROCESS_STREAM", "HOST_TERMINAL_MODE"}
+    loop at in 0..<names.len() {
+        if enum_variants(rows, names[at]) == {
+            .Ok(values) -> tables.push(HostCarrierTable{prefix: prefixes[at], values: values})
+            .Err(error) -> problems.push(error.message)
+        }
+    }
+    if problems.len() > 0 -> return Err(generator_fail(problems.join("\n")))
+    lines := [String]{
+        "// Generated by Tools/agent/RuntimeGenerators.jet from {HOST_CARRIER_ROWS_PATH}.",
+        "// C carrier tags are Core ordinals, not an independent runtime enum.",
+        "// Refusals use the shared trap boundary: Root captures the full registered report.",
+    }
+    loop table in tables {
+        loop index in 0..<table.values.len() -> lines.push("{table.prefix}_{constant_case(table.values[index])}: I64{{{index}}}")
+        lines.push("{table.prefix}_COUNT: I64{{{table.values.len()}}}")
+    }
+    loop refusal in host_refusals() {
+        lines.push("")
+        lines.push("{refusal.name}: fn() {{")
+        lines.push("    jet_rt_stdout_flush()")
+        lines.push("    trap_header(I64{{0}})")
+        if static_text_worthy(refusal.text) {
+            literal: static_text(refusal.text) ?? return Err(err)
+            lines.push("    trap_write_static({literal})")
+        } else {
+            loop word in text_words(refusal.text) -> lines.push("    trap_write_word(I64{{{word.value}}}, I64{{{word.count}}})")
+        }
+        lines.push("    trap_msg_prelude_end()")
+        lines.push("    trap_footer(I64{{0}})")
+        lines.push("}}")
+    }
+    loop text in host_texts() {
+        lines.push("")
+        lines.push("{text.name}: fn() -> I64 {{")
+        lines.push("    text: jet_rt_string_builder_new()")
+        if static_text_worthy(text.text) {
+            literal: static_text(text.text) ?? return Err(err)
+            lines.push("    jet_rt_string_builder_push(text, {literal})")
+        } else {
+            loop word in text_words(text.text) -> lines.push("    rt_text_push_word(text, I64{{{word.value}}}, I64{{{word.count}}})")
+        }
+        lines.push("    jet_rt_string_builder_finish(text)")
+        lines.push("}}")
+    }
+    loop kind in kinds {
+        if kind == "ResourceLimit" -> next
+        constant: "HOST_IO_KIND_{constant_case(kind)}"
+        atom: runtime_abi_atom(kind)
+        lines.push("")
+        lines.push("#Export(c) jet_rt_record_get_io_error_{atom}: fn(error: I64) -> I64 {{ host_error_context(error, {constant}) }}")
+        lines.push("#Export(c) jet_rt_record_new_io_error_{atom}: fn(context: I64) -> I64 {{ host_error_with_context(context, {constant}) }}")
+    }
+    Ok("{lines.join("\n")}\n")
+}
+
+read_host_carriers: fn() -[FS]> String GeneratorError! {
+    rows: files.read(HOST_CARRIER_ROWS_PATH) ?? return Err(generator_fail("cannot read {HOST_CARRIER_ROWS_PATH}: {err}"))
+    render_host_carriers(rows)
+}
+
+HOST_CARRIER_FIXTURE: "CoreEnumPayloadRow{{enum_name: \"IOError\", variant: \"InvalidInput\"\nCoreEnumPayloadRow{{enum_name: \"IOError\", variant: \"ResourceLimit\"\nCoreEnumPayloadRow{{enum_name: \"IOOperation\", variant: \"Read\"\nCoreEnumPayloadRow{{enum_name: \"ProcessResourceLimit\", variant: \"CpuTime\"\nCoreEnumPayloadRow{{enum_name: \"ProcessStreamMode\", variant: \"Inherit\"\nCoreEnumPayloadRow{{enum_name: \"TerminalMode\", variant: \"Raw\"\nCoreEnumPayloadRow{{enum_name: \"TerminalModeX\", variant: \"Cooked\"\n"
+
+#Test("host carrier tags are the registry's declaration order, one declaration per helper") {
+    text: render_host_carriers(HOST_CARRIER_FIXTURE) ?? panic("carriers did not render: {err.message}")
+    assert(text.starts_with("// Generated by Tools/agent/RuntimeGenerators.jet from {HOST_CARRIER_ROWS_PATH}.\n"))
+    assert(text.contains("\nHOST_IO_KIND_INVALID_INPUT: I64{{0}}\nHOST_IO_KIND_RESOURCE_LIMIT: I64{{1}}\nHOST_IO_KIND_COUNT: I64{{2}}\n"))
+    assert(text.contains("\nHOST_PROCESS_LIMIT_CPU_TIME: I64{{0}}\nHOST_PROCESS_LIMIT_COUNT: I64{{1}}\n"))
+    assert(text.contains("\nHOST_TERMINAL_MODE_RAW: I64{{0}}\nHOST_TERMINAL_MODE_COUNT: I64{{1}}\n"))
+    assert(text.contains("#Export(c) jet_rt_record_get_io_error_invalid_input: fn(error: I64) -> I64 {{ host_error_context(error, HOST_IO_KIND_INVALID_INPUT) }}"))
+    assert(!text.contains("io_error_resource_limit"))
+    assert(text.contains("    trap_write_static(rt_static_text(\"record variant index out of range\"))"))
+    assert(text.contains("host_stdout_name: fn() -> I64 {{\n    text: jet_rt_string_builder_new()\n    rt_text_push_word(text, I64{{128047728850035}}, I64{{6}})\n"))
+    seen := [String]{}
+    loop line in text.split("\n") {
+        if !line.contains(": fn(") || line.starts_with("#") || line.starts_with(" ") -> next
+        name: line.partition(":").head.copy()
+        loop earlier in seen -> assert(earlier != name)
+        seen.push(name)
+    }
+    assert_eq(seen.len(), 11)
+}
+
+#Test("a missing or repeated host carrier variant fails the whole table") {
+    missing: HOST_CARRIER_FIXTURE.replace("\"TerminalMode\", variant: \"Raw\"", "\"Other\", variant: \"Raw\"")
+    if render_host_carriers(missing) == {
+        .Ok(_) -> assert(false)
+        .Err(error) -> assert_eq(error.message, "missing/duplicate TerminalMode enum rows")
+    }
+    repeated: HOST_CARRIER_FIXTURE.replace("variant: \"ResourceLimit\"", "variant: \"InvalidInput\"")
+    if render_host_carriers(repeated) == {
+        .Ok(_) -> assert(false)
+        .Err(error) -> assert_eq(error.message, "missing/duplicate IOError enum rows")
+    }
+    assert_eq(constant_case("PermissionDenied"), "PERMISSION_DENIED")
+    assert_eq(runtime_abi_atom("HTTPClient"), "http_client")
+    assert_eq(runtime_abi_atom("TimedOut"), "timed_out")
+}
+
+#Test("the checked-in host carriers are the registry's projection") {
+    expected: read_host_carriers() ?? panic("carriers did not render: {err.message}")
+    found: files.read(HOST_CARRIERS_TARGET_PATH) ?? panic("{HOST_CARRIERS_TARGET_PATH} did not read: {err}")
+    assert_eq(found, expected)
+}
+
+// The decode diagnostic's name for each Dyn variant. The arms of Core's
+// core.encoding.__dyn_kind are the one source; the runtime's
+// data_tree_kind_name and the web tier's jet_dyn_kind are generated regions
+// of their host files, which only map a variant to the host's tree tag.
+
+DYN_KIND_SOURCE_PATH: "Core/Encoding/Encoding.jet"
+DYN_KIND_RUNTIME_PATH: "Compiler/JetRuntime/Source/Dyn.jet"
+DYN_KIND_WEB_PATH: "Compiler/Prelude/Web/Core/Values.js"
+DYN_KIND_BEGIN: "// Generated by Tools/agent/RuntimeGenerators.jet from core.encoding.__dyn_kind; do not edit."
+DYN_KIND_END: "// End of the generated dyn_kind rows."
+
+DynKind: struct {
+    variant: String
+    word: String
+}
+
+// The `.Variant -> "word"` arms of __dyn_kind in `source`, in order.
+dyn_kind_rows: fn(source: String) -> [DynKind] GeneratorError! {
+    marker: "\n__dyn_kind: fn(tree: Dyn) -> String Never! {{\n    if tree == {{\n"
+    open: source.find(marker)
+    if open < 0 -> return Err(generator_fail("{DYN_KIND_SOURCE_PATH} has no __dyn_kind table"))
+    body: byte_tail(source, open + byte_len(marker))
+    close: body.find("\n    }}\n}}")
+    if close < 0 -> return Err(generator_fail("{DYN_KIND_SOURCE_PATH}: the __dyn_kind table is not closed"))
+    rows := [DynKind]{}
+    loop line in byte_slice(body, 0, close).split("\n") {
+        arm: line.trim()
+        arrow: arm.find(" -> ")
+        if !arm.starts_with(".") || arrow < 0 -> return Err(generator_fail("unsupported __dyn_kind arm: {arm}"))
+        pattern: byte_slice(arm, 1, arrow)
+        variant: if pattern.ends_with("(_)") -> byte_slice(pattern, 0, byte_len(pattern) - 3) else -> pattern
+        spelling: byte_tail(arm, arrow + byte_len(" -> "))
+        literal: quoted_literal(spelling) ?? return Err(generator_fail("unsupported __dyn_kind arm: {arm}"))
+        if variant == "" || leading_name(variant) != variant || literal.spelling_len != byte_len(spelling) -> return Err(generator_fail("unsupported __dyn_kind arm: {arm}"))
+        // The word lands in a Jet and a JS string literal as written.
+        loop byte in literal.value.bytes() {
+            code: Int.from_u8(byte)
+            if code < 32 || code > 126 || code == 34 || code == 92 || code == 123 || code == 125 -> return Err(generator_fail("__dyn_kind word for {variant} is not plain printable ASCII"))
+        }
+        rows.push(DynKind{variant: variant, word: literal.value})
+    }
+    if rows.len() == 0 -> return Err(generator_fail("{DYN_KIND_SOURCE_PATH}: the __dyn_kind table has no arms"))
+    Ok(rows)
+}
+
+// The runtime tree tag constant of Dyn variant `variant`.
+dyn_kind_runtime_tag: fn(variant: String) -> String? Never! {
+    if {
+        variant == "Null" -> Val("DATA_TREE_NULL")
+        variant == "Bool" -> Val("DATA_TREE_BOOL")
+        variant == "Int" -> Val("DATA_TREE_INT")
+        variant == "Float" -> Val("DATA_TREE_FLOAT")
+        variant == "Number" -> Val("DATA_TREE_NUMBER")
+        variant == "Text" -> Val("DATA_TREE_TEXT")
+        variant == "Bytes" -> Val("DATA_TREE_BYTE_LIST")
+        variant == "DateTime" -> Val("DATA_TREE_DATETIME")
+        variant == "Array" -> Val("DATA_TREE_ARRAY")
+        variant == "Object" -> Val("DATA_TREE_OBJECT")
+        else -> None
+    }
+}
+
+// data_tree_kind_name: a tag test per arm; the last arm's word answers every
+// other tag.
+render_dyn_kind_runtime: fn(rows: [DynKind]) -> String GeneratorError! {
+    lines := [String]{DYN_KIND_BEGIN, "// dyn_kind: the diagnostic name of a runtime tree's kind.", "data_tree_kind_name: fn(kind: I64) -> I64 {{"}
+    loop at in 0..<rows.len() {
+        row: rows[at]
+        constant: dyn_kind_runtime_tag(row.variant) ?? return Err(generator_fail("Dyn variant {row.variant} has no runtime tree tag"))
+        if at + 1 < rows.len() {
+            lines.push("    if kind == {constant} -> return rt_static_text(\"{row.word}\")")
+        } else {
+            lines.push("    rt_static_text(\"{row.word}\")")
+        }
+    }
+    lines.push("}}")
+    lines.push(DYN_KIND_END)
+    Ok(lines.join("\n"))
+}
+
+// jet_dyn_kind: a case per arm on the web tree's tag, which is the variant's
+// name; a host value outside the Dyn tree is "value".
+render_dyn_kind_web: fn(rows: [DynKind]) -> String Never! {
+    lines := [String]{DYN_KIND_BEGIN, "// A value outside the Dyn tree is \"value\".", "function jet_dyn_kind(tree) {{", "  switch (tree?.tag) {{"}
+    loop row in rows -> lines.push("    case \"{row.variant}\": return \"{row.word}\";")
+    lines.push("    default: return \"value\";")
+    lines.push("  }}")
+    lines.push("}}")
+    lines.push(DYN_KIND_END)
+    lines.join("\n")
+}
+
+// `text` (the file at `path`) with its one generated dyn_kind region, the
+// DYN_KIND_BEGIN line through the DYN_KIND_END line, replaced by `region`.
+splice_dyn_kind: fn(path: String, text: String, region: String) -> String GeneratorError! {
+    begin: text.find("{DYN_KIND_BEGIN}\n")
+    if begin < 0 -> return Err(generator_fail("{path} has no generated dyn_kind region"))
+    rest: byte_tail(text, begin)
+    end: rest.find("{DYN_KIND_END}\n")
+    if end < 0 -> return Err(generator_fail("{path}: the generated dyn_kind region is not closed"))
+    after: byte_tail(rest, end + byte_len(DYN_KIND_END) + 1)
+    if after.find("{DYN_KIND_BEGIN}\n") >= 0 -> return Err(generator_fail("{path} has more than one generated dyn_kind region"))
+    Ok("{byte_slice(text, 0, begin)}{region}\n{after}")
+}
+
+read_dyn_kinds: fn() -[FS]> [GeneratedFile] GeneratorError! {
+    source: files.read(DYN_KIND_SOURCE_PATH) ?? return Err(generator_fail("cannot read {DYN_KIND_SOURCE_PATH}: {err}"))
+    rows: dyn_kind_rows(source) ?? return Err(err)
+    runtime: files.read(DYN_KIND_RUNTIME_PATH) ?? return Err(generator_fail("cannot read {DYN_KIND_RUNTIME_PATH}: {err}"))
+    web: files.read(DYN_KIND_WEB_PATH) ?? return Err(generator_fail("cannot read {DYN_KIND_WEB_PATH}: {err}"))
+    runtime_region: render_dyn_kind_runtime(rows) ?? return Err(err)
+    runtime_text: splice_dyn_kind(DYN_KIND_RUNTIME_PATH, runtime, runtime_region) ?? return Err(err)
+    web_text: splice_dyn_kind(DYN_KIND_WEB_PATH, web, render_dyn_kind_web(rows)) ?? return Err(err)
+    Ok([GeneratedFile]{GeneratedFile{path: DYN_KIND_RUNTIME_PATH, text: runtime_text}, GeneratedFile{path: DYN_KIND_WEB_PATH, text: web_text}})
+}
+
+#Test("the dyn_kind tables are __dyn_kind's arms, spliced into each host's one region") {
+    source: "x\n__dyn_kind: fn(tree: Dyn) -> String Never! {{\n    if tree == {{\n        .Null -> \"Null\"\n        .Bytes(_) -> \"Bytes\"\n        .Object(_) -> \"an object\"\n    }}\n}}\n"
+    rows: dyn_kind_rows(source) ?? panic("rows did not parse: {err.message}")
+    assert_eq(rows.len(), 3)
+    assert_eq(rows[1].variant, "Bytes")
+    assert_eq(rows[2].word, "an object")
+    runtime: render_dyn_kind_runtime(rows) ?? panic("rows did not render: {err.message}")
+    assert(runtime.contains("    if kind == DATA_TREE_BYTE_LIST -> return rt_static_text(\"Bytes\")\n    rt_static_text(\"an object\")\n}}\n{DYN_KIND_END}"))
+    assert(render_dyn_kind_web(rows).contains("    case \"Bytes\": return \"Bytes\";\n    case \"Object\": return \"an object\";\n    default: return \"value\";"))
+    host: "a\n{DYN_KIND_BEGIN}\nstale\n{DYN_KIND_END}\nb\n"
+    assert_eq(splice_dyn_kind("h", host, "R") ?? "", "a\nR\nb\n")
+    if splice_dyn_kind("h", "{host}{host}", "R") == {
+        .Ok(_) -> assert(false)
+        .Err(error) -> assert_eq(error.message, "h has more than one generated dyn_kind region")
+    }
+    unknown: dyn_kind_rows(source.replace(".Bytes(_)", ".Blob(_)")) ?? panic("rows did not parse: {err.message}")
+    if render_dyn_kind_runtime(unknown) == {
+        .Ok(_) -> assert(false)
+        .Err(error) -> assert_eq(error.message, "Dyn variant Blob has no runtime tree tag")
+    }
+    if dyn_kind_rows(source.replace("\"Bytes\"", "Bytes")) == {
+        .Ok(_) -> assert(false)
+        .Err(error) -> assert_eq(error.message, "unsupported __dyn_kind arm: .Bytes(_) -> Bytes")
+    }
 }

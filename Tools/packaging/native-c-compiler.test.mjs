@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { nativeCCompiler, nativeCEnvironment, nativeCFlags, nativeCPolicyPath } from './native-c-compiler.mjs';
-import { runtimeExportSignatures } from '../agent/runtime-route-abi.mjs';
+import { toolJet } from '../agent/roots.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const fixtureNames = ['ProcessRoutesWitness', 'ProcessExecutionWitness', 'TerminalProcessWitness', 'ProcessSpecWitness', 'TCPRoutesWitness'];
@@ -63,7 +63,7 @@ test('real native C witnesses have no glibc fortified imports and resolve agains
       if (symbol && type && /^[A-Za-z]$/u.test(type)) platformSymbols.add(symbol);
     }
   }
-  const providerSymbols = runtimeExportSignatures(root);
+  const providerSymbols = new Set(execFileSync(toolJet(), ['Tools/agent/RuntimeGenerators.jet', 'exports'], { cwd: root, encoding: 'utf8', maxBuffer: 64 << 20 }).trim().split('\n').map(row => row.split('\t')[0]));
   const collections = readFileSync(join(root, 'Compiler/JetRuntime/Source/Collections.jet'), 'utf8');
   const stride = /RT_HOST_U8_STRIDE\s*:\s*comptime\s*\{\s*I64\{(1|8)\}\s*\}/u.exec(collections)?.[1];
   assert.ok(stride, 'the TCP fixture must use the canonical U8 carrier epoch');

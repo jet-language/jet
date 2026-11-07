@@ -1,6 +1,7 @@
 use {
     core: core
     core.ui.host.[UIHostError, UIShortcut, UIShortcutBinding, UIShortcutDispatch, UIShortcutModifiers]
+    internal.[dispatched, key_claims, lookup, shortcut_failure]
 }
 
 // core.ui.host.shortcuts — the process's shortcut registry. Core owns it and
@@ -68,32 +69,35 @@ poll: fn() -[IO]> UIShortcutDispatch? UIHostError! {
     Ok(Val(dispatched(lookup(UIShortcut{key: pressed.key.copy(), modifiers: UIShortcutModifiers{bits: command}}))))
 }
 
-lookup: fn(shortcut: UIShortcut) -> UIShortcutBinding? Never! {
-    loop existing in SHORTCUTS.bindings {
-        if existing.shortcut == shortcut -> return Val(existing.copy())
+// Registry matching and provider claims: not part of the shortcuts surface.
+priv internal: module {
+    lookup: fn(shortcut: UIShortcut) -> UIShortcutBinding? Never! {
+        loop existing in SHORTCUTS.bindings {
+            if existing.shortcut == shortcut -> return Val(existing.copy())
+        }
+        None
     }
-    None
-}
 
-dispatched: fn(found: UIShortcutBinding?) -> UIShortcutDispatch Never! {
-    if found == .Val(binding) -> return UIShortcutDispatch.Dispatched(binding)
-    UIShortcutDispatch.Unhandled
-}
+    dispatched: fn(found: UIShortcutBinding?) -> UIShortcutDispatch Never! {
+        if found == .Val(binding) -> return UIShortcutDispatch.Dispatched(binding)
+        UIShortcutDispatch.Unhandled
+    }
 
-// The provider claims of a shortcut: `<mask>:<key>` for each modifier mask a
-// browser key event can carry for it. A command shortcut claims its Control
-// and its Meta form, since the page's platform is the browser's.
-key_claims: fn(shortcut: UIShortcut) -> [String] Never! {
-    bits: shortcut.modifiers.bits
-    base: bits.bit_and(15)
-    if bits.bit_and(COMMAND) == 0 -> return [String]{"{base}:{shortcut.key}"}
-    control: if base.bit_and(1) == 0 -> base + 1 else -> base
-    meta: if base.bit_and(8) == 0 -> base + 8 else -> base
-    [String]{"{control}:{shortcut.key}", "{meta}:{shortcut.key}"}
-}
+    // The provider claims of a shortcut: `<mask>:<key>` for each modifier mask a
+    // browser key event can carry for it. A command shortcut claims its Control
+    // and its Meta form, since the page's platform is the browser's.
+    key_claims: fn(shortcut: UIShortcut) -> [String] Never! {
+        bits: shortcut.modifiers.bits
+        base: bits.bit_and(15)
+        if bits.bit_and(COMMAND) == 0 -> return [String]{"{base}:{shortcut.key}"}
+        control: if base.bit_and(1) == 0 -> base + 1 else -> base
+        meta: if base.bit_and(8) == 0 -> base + 8 else -> base
+        [String]{"{control}:{shortcut.key}", "{meta}:{shortcut.key}"}
+    }
 
-shortcut_failure: fn(message: String) -> UIHostError Never! {
-    UIHostError.HostFailure{service: "Shortcuts", message: message}
+    shortcut_failure: fn(message: String) -> UIHostError Never! {
+        UIHostError.HostFailure{service: "Shortcuts", message: message}
+    }
 }
 
 #Test("UI shortcut bindings preserve action bytes and absent node identity") {

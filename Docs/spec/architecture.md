@@ -37,13 +37,12 @@ allocator `.init_array` entry. Rust-tier allocator bodies remain only as
 ledgered seed/verification paths that die at Rust cutover; native packs never
 link those bodies.
 
-Internal runtime C symbols use the acronym-aware snake projection owned by
-`Tools/agent/runtime-abi-symbols.mjs`; the route generator emits that same
-projection for Lower. For example, the `HTTPClient` symbol atom is
+Internal runtime C symbols use the acronym-aware snake projection of
+`runtime_abi_atom` (`Compiler/JetIR/Source/RuntimeRoutes.jet`), which Lower
+applies; `Tools/agent/RuntimeGenerators.jet` emits the host carrier exports
+with the same projection. For example, the `HTTPClient` symbol atom is
 `http_client`. Runtime type names, declaration keys, variant identities and
 layout metadata remain nominal: only the ABI symbol atoms are projected.
-Isolated runtime-generator fixtures copy that shared projection module alongside
-the real generator and registry inputs; they do not replace its module boundary.
 Providers, generated adapters and compiler callers use one spelling, with
 collision rejection before a symbol cutover.
 Inside the runtime's assembled source unit, calls use existing Jet provider
@@ -68,10 +67,6 @@ starting with the resolver's first family, staggers attempts by 250ms, and
 accelerates the next launch after failure. Losing descriptors are dropped on
 success, cancellation, or deadline; native C witnesses link the actual composed
 runtime rather than mock socket providers.
-`Compiler/JetRuntime/Tests/run-native-tcp-routes.mjs OUT STAGE2_JET RC_RUNTIME_DIR`
-consumes the first RC pack's admitted standalone object without rebuilding the
-runtime. It compiles the C witness fresh, binds the U8 stride to the pack's
-source identity, and records admission, compile, native link, and run receipts.
 
 The native [Duration constructor](../../Compiler/JetRuntime/Source/Duration.jet)
 borrows the exact-Int input, checks narrowing and nanosecond scaling without a
@@ -89,13 +84,14 @@ that its semantic check passed. In Codegen poll and comptime-budget emission,
 `span := builder.current_span` snapshots the source span before write-access to
 `&builder`; `span:` would retain a builder view across those mutations.
 
-Runtime process-edge fixtures decode the committed Trap/Scheduler report words
-as signed little-endian I64 values through one
-[`report-literals` reader](../../Compiler/JetRuntime/Tests/report-literals.mjs).
-The scheduler fixture writes its complete root-panic golden beside its proof
-receipts, checks exact stderr, exit 70, no signal and no stdout, and does not
-depend on a Rust-tier reference producer. Task-local panics still require
-process survival and empty stderr.
+Runtime process-edge fixtures decode the committed Trap/Scheduler report
+literals (static texts, or signed little-endian I64 word rows) through one
+reader, `trap_literal`/`scheduler_literal` in
+[`CompilerRegistries.jet`](../../Tools/agent/CompilerRegistries.jet).
+The Scheduler registry row composes its complete root-panic golden from them,
+checks exact stderr, exit 70 and no stdout, and does not depend on a
+Rust-tier reference producer. Task-local panics still require process
+survival and empty stderr.
 An aggregate fixture object already contains the full Jet runtime and links
 without a second provider. Standalone C witnesses use `jet_runtime_jet.o`
 exactly once; the startup-bearing `jet_runtime.pack.o` is a program-link input,
@@ -105,13 +101,9 @@ A C witness that counts allocations or frees installs observers with
 that links the runtime object runs on the checked heap, which calls them for
 every block it hands out or takes back, the runtime's own included. A
 link-time `--wrap=jet_rt_free` does not see those: the runtime object binds its
-internal calls section-relative. `run-alloc-observer-witness.mjs` is the
-negative control: its leak mode keeps one buffer and must fail.
-Native scan proofs run the `scan.cases` programs with the native CLI against
-their goldens and require the fresh Jet object/pack. Saved reference and
-evaluator TSVs are optional, explicitly named `--frozen-reference` and
-`--frozen-evaluator` inputs; a live retired tier is never a prerequisite for
-the raw ABI and Float-bit witnesses.
+internal calls section-relative.
+The raw scan ABI and Float-bit witness (`Compiler/JetRuntime/Tests/scan-fixture.c`)
+has no runner; the `scan.cases` programs run with their expected streams.
 Official BLAKE3 fixtures regenerate from the team vectors alone, outside the
 immutable proof source, without reading a retired runtime implementation.
 Native runtime exit corpora accept `--results` pointing to the one Jet-front
@@ -121,11 +113,12 @@ Trap proofs compare the native status, signal and exact stdout/stderr against
 the committed golden, not a retired Rust execution. The freestanding
 display witness links the sealed C-client object and its provenance-listed C
 platform archives, rather than the program pack's startup.
-Native fixture and registry feeds share
-[`compiler-native-transport`](../../Tools/agent/compiler-native-transport.mjs):
-the production CLI's `check FILE` library-object seam and `build FILE` program
-path. Library feeds require fresh object, export and ABI files; command
-completion alone is not a native pass. Checked-program observers are explicit Jet
+Native fixture feeds run through
+[`NativeTransport`](../../Tools/agent/NativeTransport.jet), which the fixture
+runners reach through `Compiler/JetBackend/Tests/jet-front.mjs`: the production
+CLI's `doc FILE` library-object seam and `build FILE` program path. Library
+feeds require fresh object, export and ABI files; command completion alone is
+not a native pass. Checked-program observers are explicit Jet
 drivers compiled from the canonical compiler aggregate, cached per pinned
 toolchain, rather than a bootstrap factory or a retired Rust observer.
 
@@ -173,10 +166,11 @@ hidden/internal definitions and implementation names do not become export
 roots; C archive members pulled to satisfy exports remain private dependencies.
 Rust-mangled symbols and Rust allocator providers are rejected. A pack requires
 a standalone runtime object, never just archives.
-`Compiler/JetBackend/Tests/run-runtime-pack-roots.mjs` exercises this boundary
+The `LinkPackRoots` row of `Tools/agent/CompilerRegistries.jet`
+(`Compiler/JetBackend/Tests/LinkPackRoots.fixture`) exercises this boundary
 with real objects, an archive and a consumer, including an unreferenced export.
 
-`Tools/packaging/prebuild-runtime.sh <hosted-jet>` assembles the canonical
+`jet Tools/packaging/PrebuildRuntime.jet <hosted-jet>` assembles the canonical
 `Compiler/JetRuntime/sources.list`, checks it through the Jet-hosted CLI's
 library entry, and lowers its checked exports plus `lifecycle.list` into one
 native object. Jet's linker resolves its permitted musl/libgcc C dependencies;
@@ -1409,16 +1403,13 @@ Inline `#FFI(c|cpp|asm)` bodies use the same bridge
 and include their checked signature, target, raw body, and schema in the cache
 identity. C/C++ wrappers and asm lower only after sema proves their boundary
 contracts.
-Inline C/C++ bodies remain separate translation units. The generated build
-script compiles every selected body before proving the complete bridge with
-the target's strict undefined-symbol linker flag, using the C++ linker when
-the closure contains C++. Shared globals may resolve from a sibling body;
-references missing from the full closure still fail. Only a successful proof
-is archived. The cache identity includes the build script itself, so changing
-this proof invalidates stale bridge artifacts without changing the ABI schema.
-`Compiler/JetIR/Tests/run-inline-foreign-link.mjs` executes all three
-production build-script templates, including shared mutex state, mixed C/C++
-state and rejection of an actually missing definition.
+Inline C bodies remain separate translation units. The native link
+(`jet_cli_native_inline_c` in `Compiler/JetCli/Source/Cli/ForeignLink.jet`)
+compiles every selected body, then proves them together as one shared object
+with undefined symbols refused before archiving them into the link. Shared
+globals may resolve from a sibling body; references missing from the full
+closure still fail. The bridge cache identity carries the inline toolchain, so
+a changed compiler, archiver or target invalidates stale bridge artifacts.
 
 The Nix shell keeps ordinary Jet compilation and hosted runtime Rust on the
 existing nixpkgs compiler. Native user-Rust helpers have a separate pinned
@@ -1505,7 +1496,7 @@ SQLite uses the sanctioned 3.45.0 amalgamation from `libsqlite3-sys` 0.28.0 in
 never a system SQLite. The upstream `sqlite3.c` SHA-256 is
 `7956a38f236a6be6c0bb30c96ba4f85f19e5a69f6beb6d2c62c9d246972a6775`.
 Core's vendored C (`Core/Vendor/Sqlite3`, `Core/Vendor/Mbedtls`) is compiled
-once when the toolchain is packaged: `prebuild-runtime.mjs` builds each library
+once when the toolchain is packaged: `PrebuildRuntime.jet` builds each library
 under the native C policy and installs `jet-runtime/<key>/foreign/<lib>/lib<lib>.a`
 (with its LICENSE and VERSION) beside the pack. The archive digests are part of
 the runtime key and the vendored sources, flags and C compiler identity part of
@@ -2213,8 +2204,8 @@ Cargo, clang++) start with the testkit's `kit_require_tool(name) ?? return`:
 with the tool absent from PATH the claim reports skip, and the `packages`
 profile records its row as skipped; with it present the claim runs. Jetpack's
 bootstrap unit lists the helper's one file, `JetTestKit/Source/RequireTool.jet`,
-for its Integrations claims. This is testkit plumbing, not a user-facing
-conditional skip.
+in its Foundation section, which every calling area's closure holds. This is
+testkit plumbing, not a user-facing conditional skip.
 The runner stages the complete `tests/ui` and `tests/ui_lint` trees once per run
 in external scratch, where each project case compiles rooted at its own
 directory. A loose case's source root is its whole directory, and the compiler

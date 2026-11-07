@@ -16,7 +16,7 @@ import { fileURLToPath } from "node:url";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "../../..");
 const DEFAULT_MANIFEST = join(HERE, "manifest.json");
-const RUNNER = join(ROOT, "Tools/agent/jet-env");
+const RUNNER = join(ROOT, "Tools/agent/JetEnv.jet");
 const HARNESS = join(ROOT, "Tools/gauntlet/harness/run.mjs");
 const TIMEOUT_MS = 120000;
 const OBSERVATION_FIELDS = Object.freeze([
@@ -272,7 +272,7 @@ function loadContext(manifestPath) {
   return context;
 }
 
-// The admitted native compiler: $JET (what `Tools/agent/jet-env jet` runs), else `jet` on PATH.
+// The admitted native compiler: $JET (what `Tools/agent/JetEnv.jet jet` runs), else `jet` on PATH.
 function defaultJetBinary() {
   if (process.env.JET && existsSync(process.env.JET)) return resolve(process.env.JET);
   for (const directory of (process.env.PATH ?? "").split(delimiter)) {

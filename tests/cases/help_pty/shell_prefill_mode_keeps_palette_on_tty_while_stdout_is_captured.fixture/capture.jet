@@ -1,0 +1,13 @@
+// Runs `args()[1..]` with stdin and stderr on this process's terminal and its
+// stdout captured into the file `args()[0]`, then prints a marker on the
+// terminal: the shell's `cmd > file; printf` that the case needs, because a
+// terminal step puts all three of the child's streams on the terminal.
+use files: core.files
+use process: core.process
+
+run: fn() {
+    argv: process.args()
+    receipt: process.cmd(argv.slice(1, argv.len())).stdin(.Inherit).stderr(.Inherit).stdout(.Capture).run() ?? panic("run: {err}")
+    files.write(argv[0], receipt.output) ?? panic("write {argv[0]}: {err}")
+    print("\nJET_HELP_CAPTURED")
+}

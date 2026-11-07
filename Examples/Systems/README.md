@@ -53,11 +53,15 @@ Run a lesson from the repository root, for example `jet run Examples/Systems/<Le
 - [EnvOverlay](Process/EnvOverlay.jet)
 - [OSFacts](Process/OSFacts.jet) — System facts live in core.sys; core.sys stays environment vars.
 - [OSProcessControl](Process/OSProcessControl.jet)
+- [ProcessAffinity](Process/ProcessAffinity.jet) — `.cpu_affinity(cpus)` runs the child only on the listed CPUs.
 - [ProcessBuilder](Process/ProcessBuilder.jet)
 - [ProcessExitCleanup](Process/ProcessExitCleanup.jet) — Explicit process termination runs the one cleanup boundary.
+- [ProcessIOPriority](Process/ProcessIOPriority.jet) — `.io_idle()` and `.io_priority(level)` run the child in the idle or a best-effort I/O class.
+- [ProcessMemoryScope](Process/ProcessMemoryScope.jet) — `.memory_scope(bytes)` caps the child and everything it starts together, and ends them at the reap.
 - [ProcessPassDirectory](Process/ProcessPassDirectory.jet)
 - [ProcessRunAll](Process/ProcessRunAll.jet) — process.run_all runs a list of specs through a bounded worker pool.
 - [ProcessStdinClose](Process/ProcessStdinClose.jet) — A spawned child owns an explicit closeable stdin pipe.
+- [ProcessUsage](Process/ProcessUsage.jet) — A finished child's receipt says what it used, read from the kernel when the child is reaped.
 - [ResourceLimits](Process/ResourceLimits.jet) — This program's resource limits and usage live in core.sys.
 - [SysExecutable](Process/SysExecutable.jet) — `os.executable()` names the running program: the script's absolute path under `jet run`, the built binary after `jet build`.
 - [SystemPrivilegedEntry](Process/SystemPrivilegedEntry.jet) — Audited identity/session controls for a disposable user namespace only.

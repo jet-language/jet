@@ -1,0 +1,49 @@
+// A cancel that arrives as a task enters its cleanup waits out the close: the
+// close finishes, and the task stops at its next wait.
+use tasks: core.tasks
+
+Resource: struct {
+    name: String
+    entered: Sender<Int>
+    resume: Receiver<Int>
+}
+
+impl Resource.Close {
+    close: fn(&&self) {
+        print("close {self.name}: entered")
+        self.entered.send(1)
+        _ := self.resume.receive() ?? panic("the resume channel closed")
+        print("close {self.name}: finished")
+    }
+}
+
+failure_label: fn(error: TaskFailure) -> String {
+    if error == {
+        .Cancelled -> { return "cancelled" }
+        .DeadlineBlown -> { return "deadline" }
+        .Panicked(_) -> { return "panicked" }
+    }
+}
+
+scoped: fn(entered: Sender<Int>, resume: Receiver<Int>) {
+    resource := Resource{name: "worker", entered, resume}
+    defer close(resource)
+    print("body")
+}
+
+run: fn() {
+    { sender: entered_sender, receiver: entered }: channel<Int>()
+    { sender: resume_sender, receiver: resume }: channel<Int>()
+    worker: task {
+        scoped(entered_sender, resume)
+        tasks.yield_now()
+        print("cancellation was not delivered")
+    }
+    _ := entered.receive() ?? panic("the worker never entered its cleanup")
+    worker.cancel()
+    resume_sender.send(1)
+    if worker.join() == {
+        .Err(error) -> print("worker: {failure_label(error)}")
+        .Ok(_) -> print("worker: finished")
+    }
+}

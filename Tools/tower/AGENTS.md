@@ -73,6 +73,11 @@ brief or claim. The barrier also applies to `--no-claim` and read-only briefs.
 Normal writes renew leases; expired leases do not block; done and frozen cards
 clear them. Decisions in the packet are copied verbatim from the live store.
 
+Gates read the board in Jet, never through node: `jet Tools/tower/Board.jet`
+answers `card show|list`, `decision show|list` and `milestone list` with the
+JSON the CLI prints for them (`--json`, `--data`, `TOWER_DATA`, the archive
+and the worktree redirect included). It only reads; writes stay on the CLI.
+
 Report completions and blockers on the card itself: a `--log` entry when you
 advance it, a `tower question answer` when the owner asked something. The
 board (and the live SSE UI) is how the owner finds out — there is no

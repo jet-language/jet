@@ -1,0 +1,299 @@
+#!/usr/bin/env jet
+// Run one command in Jet's development environment, with no shell between.
+//
+//   jet Tools/agent/JetEnv.jet [full] [--norust] <command> [args...]
+//
+// It is for the commands that need host tools Jet does not supply yet: the
+// runtime pack's C toolchain (cc, ar, nm, crt files, a static musl), suite
+// rows that require host tools, and GNU as for the fault report. A tool that
+// needs only jet runs without it. `full` selects the flake's `full` dev shell
+// (the FFI, browser and VM fleet) instead of `default`.
+//
+// The environment is the dev shell's exported variables applied the way
+// `nix develop` applies them: the variables Nix leaves to the caller
+// (NIX_IGNORED) are skipped, PATH and XDG_DATA_DIRS go in front of the
+// caller's, and the rest replace the caller's. JET_ROOT names this checkout.
+// The shell's variables come from a Nix profile cached by the content of
+// flake.nix and flake.lock under $XDG_CACHE_HOME/jet/dev-shells (else
+// ~/.cache): the dev shells never read `self`, so a missing profile is built
+// once machine-wide, under a lock, from a snapshot holding just those two
+// files, and every checkout with the same flake reuses it.
+//
+// `jet` as the command is the admitted native compiler: $JET, else the
+// compiler this checkout built (Compiler/JetCli/.jet/build/jet), else `jet`
+// on PATH, looked up before the dev shell's PATH applies; the command sees it
+// as $JET. `--norust` drops every PATH directory holding cargo, rustc or
+// rustup and refuses to start if one stays reachable: the release stages and
+// the runtime pack must not need Rust. CARGO_BUILD_JOBS defaults to 1, so a
+// foreign helper build cannot fan out across shared RAM.
+//
+// /tmp is RAM-backed tmpfs on this machine: a scratch variable (SCRATCH_VARS)
+// there is refused, because build output on it fills swap and triggers OOM
+// kills. The command's exit status is this launcher's (128 + N for signal N).
+
+use {
+    crypto: core.crypto
+    files: core.files
+    json: core.encoding.json
+    process: core.process
+    sys: core.sys
+    term: core.term
+}
+
+TOOL: "/Tools/agent/JetEnv.jet"
+USAGE: "usage: jet Tools/agent/JetEnv.jet [full] [--norust] <command> [args...]"
+SCRATCH_VARS: [String]{"JET_SCRATCH_ROOT", "JET_TEST_SCRATCH_DIR", "JET_DEV_ORACLE_CACHE_DIR", "CARGO_TARGET_DIR"}
+// The variables `nix develop` never takes from the shell (its ignoreVars).
+NIX_IGNORED: [String]{"BASHOPTS", "HOME", "NIX_BUILD_TOP", "NIX_ENFORCE_PURITY", "NIX_LOG_FD", "NIX_REMOTE", "PPID", "SHELLOPTS", "SSL_CERT_FILE", "TEMP", "TEMPDIR", "TERM", "TMP", "TMPDIR", "TZ", "UID"}
+// The variables `nix develop` puts in front of the caller's value.
+NIX_PREPENDED: [String]{"PATH", "XDG_DATA_DIRS"}
+RUST_TOOLS: [String]{"cargo", "rustc", "rustup"}
+// What the dev shells read: they never read `self`.
+FLAKE_FILES: [String]{"flake.nix", "flake.lock"}
+
+Request: struct {
+    shell: String
+    norust: Bool
+    command: [String]
+}
+
+run: fn() {
+    if parse(process.args()) == {
+        .Ok(request) -> process.exit(launch(request))
+        .Err(error) -> {
+            term.eprint(error.message)
+            process.exit(64)
+        }
+    }
+}
+
+parse: fn(args: [String]) -> Request Err! {
+    shell := "default"
+    norust := false
+    at := 0
+    if at < args.len() && args[at] == "full" {
+        shell = "full"
+        at += 1
+    }
+    if at < args.len() && args[at] == "--norust" {
+        norust = true
+        at += 1
+    }
+    if at >= args.len() -> return Err(USAGE)
+    Ok(Request{shell: shell, norust: norust, command: args[at..<args.len()]})
+}
+
+launch: fn(request: Request) -[Env, Exec, FS, IO, Time.Wait]> Int Never! {
+    if scratch_on_tmp(scratch_values([String: String]{})) == .Val(why) {
+        term.eprint(why)
+        return 64
+    }
+    repo: repo_root()
+    if repo == "" {
+        term.eprint("JetEnv: no checkout holds {TOOL}")
+        return 64
+    }
+    jet: compiler(repo)
+    shell_vars: dev_shell(repo, request.shell) ?? {
+        term.eprint("JetEnv: {err.message}")
+        return 1
+    }
+    vars := environment(shell_vars, repo, jet)
+    if scratch_on_tmp(scratch_values(vars)) == .Val(why) {
+        term.eprint(why)
+        return 64
+    }
+    if request.norust {
+        path: without_rust(vars.get("PATH") ?? "")
+        loop tool in RUST_TOOLS {
+            if on_path(path, tool) {
+                term.eprint("JetEnv: --norust: {tool} is still on PATH")
+                return 2
+            }
+        }
+        vars["PATH"] = path
+    }
+    command := request.command.copy()
+    if command[0] == "jet" && jet != "" -> command[0] = jet.copy()
+    spec := process.cmd(command).stdin(.Inherit).stdout(.Inherit).stderr(.Inherit)
+    loop (name, value) in vars -> spec = spec.env(name, value)
+    receipt: spec.run() ?? {
+        term.eprint("JetEnv: {command[0]} could not start: {err}")
+        return 127
+    }
+    if receipt.signal == .Val(number) -> return 128 + number
+    receipt.code
+}
+
+// The checkout holding this script, or else the one around the working directory.
+repo_root: fn() -[Env, FS]> String Never! {
+    script: sys.executable()
+    if script.ends_with(TOOL) -> return script.removesuffix(TOOL)
+    dir := files.cwd() ?? return ""
+    loop {
+        if files.exists("{dir}{TOOL}") -> return dir
+        if dir == "/" || dir == "" -> return ""
+        dir = files.dirname(dir)
+    }
+}
+
+// $JET, else this checkout's built compiler, else `jet` on the caller's PATH;
+// "" when there is none.
+compiler: fn(repo: String) -[Env, FS]> String Never! {
+    named: sys.get("JET") ?? ""
+    if named != "" -> return named
+    built: files.join(repo, "Compiler/JetCli/.jet/build/jet")
+    if files.is_file(built) -> return built
+    process.which("jet") ?? ""
+}
+
+// The scratch variables the command sees: `vars` over the caller's.
+scratch_values: fn(vars: [String: String]) -[Env]> [String: String] Never! {
+    out := [String: String]{}
+    loop name in SCRATCH_VARS {
+        value: vars.get(name) ?? sys.get(name) ?? ""
+        if value != "" -> out[name.copy()] = value.copy()
+    }
+    out
+}
+
+// The first scratch variable that resolves onto /tmp, as the refusal text.
+scratch_on_tmp: fn(values: [String: String]) -[FS]> String? Never! {
+    loop name in SCRATCH_VARS {
+        value: values.get(name) ?? next
+        resolved: files.realpath(value) ?? value.copy()
+        if resolved == "/tmp" || resolved.starts_with("/tmp/") {
+            return Val("JetEnv: {name}={value} is on tmpfs /tmp (RAM-backed); artifacts there cause OOM crashes, so use the configured disk-backed scratch filesystem")
+        }
+    }
+    None
+}
+
+// The exported variables of the flake's `shell` dev shell, from its cached
+// profile; a missing profile is built first, once, under a lock.
+dev_shell: fn(repo: String, shell: String) -[Env, Exec, FS, IO, Time.Wait]> [String: String] Err! {
+    nix_bytes := [U8]{}
+    loop name in FLAKE_FILES {
+        bytes: files.read_bytes(files.join(repo, name)) ?? return Err("cannot read {repo}/{name}: {err}")
+        nix_bytes.extend(crypto.sha256(bytes).hex().bytes())
+        nix_bytes.push(10)
+    }
+    key: crypto.sha256(nix_bytes).hex()
+    cache: files.join(sys.get("XDG_CACHE_HOME") ?? files.join(sys.home_dir() ?? "", ".cache"), "jet/dev-shells")
+    profile: files.join(cache, "{key}-{shell}")
+    if !files.exists(profile) && build_profile(repo, cache, key, shell, profile) == .Err(why) -> return Err(why)
+    text: files.read(profile) ?? return Err("cannot read the dev-shell profile {profile}: {err}")
+    shell_vars: exported(text) ?? return Err("the dev-shell profile {profile} is not a Nix shell environment: {err.message}")
+    Ok(shell_vars)
+}
+
+build_profile: fn(repo: String, cache: String, key: String, shell: String, profile: String) Err! -[Env, Exec, FS, IO, Time.Wait]> {
+    files.create_dir_all(cache) ?? return Err("cannot create {cache}: {err}")
+    snapshot: files.join(cache, "src-{key}")
+    // Held until this returns: one builder per key machine-wide.
+    _held: files.lock("{snapshot}.lock") ?? return Err("cannot lock {snapshot}.lock: {err}")
+    if files.exists(profile) -> return Ok(())
+    if !files.exists(snapshot) {
+        staging: "{snapshot}.{sys.pid()}"
+        files.remove_all(staging) ?? ()
+        files.create_dir_all(staging) ?? return Err("cannot create {staging}: {err}")
+        loop name in FLAKE_FILES {
+            files.copy(files.join(repo, name), files.join(staging, name)) ?? return Err("cannot copy {name} into {staging}: {err}")
+        }
+        files.rename(staging, snapshot) ?? return Err("cannot move {staging} to {snapshot}: {err}")
+    }
+    built: process.cmd([String]{"nix", "print-dev-env", "--profile", profile, "path:{snapshot}#{shell}"}).cwd(repo).stdout(.Capture).stderr(.Inherit).run() ?? return Err("nix could not start: {err}")
+    if !built.success -> return Err("`nix print-dev-env --profile {profile} path:{snapshot}#{shell}` failed (exit {built.code})")
+    Ok(())
+}
+
+// The `exported` variables of a Nix shell environment
+// (`{"variables": {NAME: {"type": T, "value": V}}}`).
+exported: fn(text: String) -> [String: String] Err! {
+    tree: json.parse(text) ?? return Err("not JSON: {err}")
+    out := [String: String]{}
+    if field(tree, "variables") == .Object(variables) {
+        loop entry in variables {
+            if field(entry.value, "type") == .Text(kind) && kind == "exported" && field(entry.value, "value") == .Text(value) {
+                out[entry.key.copy()] = value.copy()
+            }
+        }
+        return Ok(out)
+    }
+    Err("no `variables` object")
+}
+
+field: fn(tree: Dyn, name: String) -> Dyn Never! {
+    if tree == .Object(entries) {
+        loop entry in entries {
+            if entry.key == name -> return entry.value.copy()
+        }
+    }
+    Dyn.Null
+}
+
+// The variables the command gets on top of the caller's environment.
+environment: fn(shell: [String: String], repo: String, jet: String) -[Env]> [String: String] Never! {
+    out := [String: String]{}
+    loop (name, value) in shell {
+        if NIX_IGNORED.contains(name) -> next
+        if NIX_PREPENDED.contains(name) {
+            caller: sys.get(name) ?? ""
+            out[name.copy()] = if caller == "" -> value.copy() else -> "{value}:{caller}"
+            next
+        }
+        out[name.copy()] = value.copy()
+    }
+    out["JET_ROOT"] = repo.copy()
+    if jet != "" -> out["JET"] = jet.copy()
+    if (sys.get("CARGO_BUILD_JOBS") ?? "") == "" -> out["CARGO_BUILD_JOBS"] = "1"
+    out
+}
+
+// `path` without every directory that holds cargo, rustc or rustup.
+without_rust: fn(path: String) -[FS]> String Never! {
+    kept := [String]{}
+    loop dir in path.split(":") {
+        holds := false
+        loop tool in RUST_TOOLS {
+            if files.is_file(files.join(dir, tool)) -> holds = true
+        }
+        if !holds -> kept.push(dir.copy())
+    }
+    kept.join(":")
+}
+
+on_path: fn(path: String, tool: String) -[FS]> Bool Never! {
+    loop dir in path.split(":") {
+        if dir != "" && files.is_file(files.join(dir, tool)) -> return true
+    }
+    false
+}
+
+#Test("the shell's variables apply as nix develop applies them") {
+    shell: exported("{{\"variables\": {{\"PATH\": {{\"type\": \"exported\", \"value\": \"/nix/a/bin\"}}, \"TMPDIR\": {{\"type\": \"exported\", \"value\": \"/build\"}}, \"CC\": {{\"type\": \"exported\", \"value\": \"gcc\"}}, \"IFS\": {{\"type\": \"var\", \"value\": \" \"}}, \"pkgs\": {{\"type\": \"array\", \"value\": []}}}}}}") ?? panic(err.message)
+    assert_eq(shell.len(), 3)
+    vars: environment(shell, "/repo", "/seed/jet")
+    assert_eq(vars.get("TMPDIR"), None)
+    assert_eq(vars.get("CC") ?? "", "gcc")
+    assert((vars.get("PATH") ?? "").starts_with("/nix/a/bin"))
+    assert_eq(vars.get("JET_ROOT") ?? "", "/repo")
+    assert_eq(vars.get("JET") ?? "", "/seed/jet")
+    assert(exported("[1]") == .Err(_))
+}
+
+#Test("the profile and --norust are options before the command, and a command is required") {
+    plain: parse([String]{"cc", "-v"}) ?? panic(err.message)
+    assert_eq("{plain.shell} {plain.norust} {plain.command.join(" ")}", "default false cc -v")
+    full: parse([String]{"full", "--norust", "jet", "full"}) ?? panic(err.message)
+    assert_eq("{full.shell} {full.norust} {full.command.join(" ")}", "full true jet full")
+    assert(parse([String]{"full"}) == .Err(_))
+    assert(parse([String]{}) == .Err(_))
+}
+
+#Test("a scratch variable on /tmp is refused") {
+    assert(scratch_on_tmp([String: String]{"JET_SCRATCH_ROOT": "/tmp/jet-env-test-x"}) != None)
+    assert(scratch_on_tmp([String: String]{"CARGO_TARGET_DIR": "/tmp"}) != None)
+    assert(scratch_on_tmp([String: String]{"JET_SCRATCH_ROOT": "/mnt/scratch"}) == None)
+    assert(scratch_on_tmp([String: String]{}) == None)
+}

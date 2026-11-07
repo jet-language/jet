@@ -13,6 +13,7 @@ s4_agent_adapter_has_all: fn(adapter: String, needles: [String]) {
 
 // Port of tests/agent_workloads.rs:2015-2044; all original adapter/needle pairs.
 #Test("repository_and_git_jet_adapters_use_production_paths") {
+    guards_enter_root()
     s4_agent_adapter_has_all("repository_marker_scan.jet", [String]{"core.files", "fs.walk"})
     s4_agent_adapter_has_all("repository_semantic_inspection.jet", [String]{"inspect", "semindex"})
     s4_agent_adapter_has_all("repository_semantic_edit.jet", [String]{"inspect", "codemod", "--yes"})
@@ -21,6 +22,7 @@ s4_agent_adapter_has_all: fn(adapter: String, needles: [String]) {
 
 // Port of tests/agent_workloads.rs:2046-2093; no production path checks retired.
 #Test("structured_data_database_http_jet_adapters_use_production_paths") {
+    guards_enter_root()
     s4_agent_adapter_has_all("structured_data.jet", [String]{
         "json: core.encoding.json", "fs.read(input)", "json.decode<Batch>", "json.to_string",
     })
@@ -35,6 +37,7 @@ s4_agent_adapter_has_all: fn(adapter: String, needles: [String]) {
 
 // Port of tests/agent_workloads.rs:2095-2154; include hostile and cleanup paths.
 #Test("mcp_terminal_service_jet_adapters_use_production_paths") {
+    guards_enter_root()
     s4_agent_adapter_has_all("mcp_resource.jet", [String]{
         "process.cmd([jet, \"self\", \"lsp\"])", "resources/list", "resources/read",
         "child.stdin.write", "jet://environment", "-32002", "/agent-secret",
@@ -107,6 +110,7 @@ s4_agent_native_os_matrix_is_frozen_and_names_current_host: fn() {
 }
 
 #Test("native_os_matrix_is_frozen_and_names_current_host") {
+    guards_enter_root()
     s4_agent_native_os_matrix_is_frozen_and_names_current_host()
 }
 
@@ -133,5 +137,6 @@ s4_agent_jet_baseline_is_frozen_and_each_loss_has_an_owner: fn() {
 }
 
 #Test("jet_baseline_is_frozen_and_each_loss_has_an_owner") {
+    guards_enter_root()
     s4_agent_jet_baseline_is_frozen_and_each_loss_has_an_owner()
 }

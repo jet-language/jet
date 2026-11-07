@@ -9,7 +9,7 @@ or when a phase is slower than its lines/s floor.
 node Tools/perf/scaling/generate.mjs --list                 # every shape
 node Tools/perf/scaling/generate.mjs web 125000 NEW_DIR     # one corpus
 node --test Tools/perf/scaling/scaling.test.mjs
-Tools/agent/jet-env node Tools/perf/scaling/run-gate.mjs --compiler "rust=jet:$RUST_JET" \
+Tools/agent/JetEnv.jet node Tools/perf/scaling/run-gate.mjs --compiler "rust=jet:$RUST_JET" \
   --compiler "jet=bootstrap:$JETC0" --mode counters --jobs 2 \
   --memory-max 8G --timeout 25 --work-dir $JET_STATE_ROOT/scratch/ScalingGate2/landing
 node Tools/perf/scaling/report.mjs --runs-dir RUNS_DIR --output report.md
@@ -22,7 +22,7 @@ be additional explicitly labelled historical comparisons, not the current gate.
 
 Every corpus is measured in two layouts: `files` (as generated, many files)
 and `single` (one main.jet). A compiler that fails the multi-file layout fails
-the gate. Run `jet` compilers through `Tools/agent/jet-env` (rustc on PATH);
+the gate. Run `jet` compilers through `Tools/agent/JetEnv.jet` (rustc on PATH);
 the single `run-gate.mjs` command above is the landing counter proof: it covers
 every stress and domain shape, both layouts, and all rungs, with bounded
 parallel compiles. Counter mode gates deterministic work counters and compile
@@ -146,7 +146,7 @@ The focused deterministic regression runs the unchanged comptime/files corpus
 at 128, 256, 512 and 1024 using an already-built Jet compiler:
 
 ```sh
-Tools/agent/jet-env node Tools/perf/scaling/module-lookups-proof.mjs \
+Tools/agent/JetEnv.jet node Tools/perf/scaling/module-lookups-proof.mjs \
   --compiler /path/to/built/jetc0 --root FRESH_PROOF_DIR
 ```
 

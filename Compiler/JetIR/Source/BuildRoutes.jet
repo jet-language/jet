@@ -729,31 +729,28 @@ ir_list_try_empty: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, with_
 }
 
 // `xs.remove(value)` (the first equal element, None when there is none) and
-// `xs.remove(at)` (a position in 0..<len, else the List bounds stop), the
-// element moves into an Option box and every later element moves down one
-// slot.
-ir_list_remove: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, list: Int, row: Int, operand: Int, by_slot: Bool, span: Span) -> Int Never! {
+// `xs.remove(at, .Slot)` (a position in 0..<len, else the List bounds stop),
+// the element moves into an Option box and every later element moves down
+// one slot. A run-time `RemoveBy` selector (`by`, the tag word: Val 0, Slot
+// 1) picks between the two searches.
+ir_list_remove: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, list: Int, row: Int, operand: Int, mode: TListRemoveMode, selector: Int, span: Span) -> Int Never! {
     result_row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
     length: ir_load_word(m, b, list, 0)
     found: ir_word_const(m, b, -1)
-    if by_slot {
-        index: ir_native_index(m, b, operand, span)
-        if ir_failed(b) -> return -1
-        ir_list_bounds(m, b, index, length, false)
-        ir_emit(b.f, IROp.Copy, found, index, -1, -1, b.line)
-    } else {
-        needle: ir_adapt(m, p, b, operand, row, span)
-        if ir_failed(b) -> return -1
-        walk: ir_walk_open(m, b, list, row)
-        same: ir_route_equal(m, p, b, walk.item, needle, span)
-        if ir_failed(b) -> return -1
-        ir_open_if(b.f, same, b.line)
-        ir_emit(b.f, IROp.Copy, found, walk.index, -1, -1, b.line)
-        ir_emit(b.f, IROp.Br, -1, 2, -1, -1, b.line)
-        ir_end(b.f, b.line)
-        ir_walk_close(m, b, walk)
-        ir_release(m, b, needle)
+    if mode == {
+        .Slot -> ir_list_remove_slot(m, b, operand, length, found, span)
+        .Value -> ir_list_remove_value(m, p, b, list, row, operand, found, span)
+        .Dynamic -> {
+            slot_tag: ir_word_const(m, b, 1)
+            positional: ir_bool_op(m, b, IROp.Eq, selector, slot_tag)
+            ir_open_if(b.f, positional, b.line)
+            ir_list_remove_slot(m, b, operand, length, found, span)
+            ir_else(b.f, b.line)
+            ir_list_remove_value(m, p, b, list, row, operand, found, span)
+            ir_end(b.f, b.line)
+        }
     }
+    if ir_failed(b) -> return -1
     option: ir_is_option(ty)
     result: ir_fresh_temp(m, b, result_row)
     if option -> ir_option_none(m, b, result)
@@ -784,6 +781,30 @@ ir_list_remove: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, list: In
     ir_emit(b.f, IROp.Store, -1, list, 0, last, b.line)
     ir_end(b.f, b.line)
     result
+}
+
+// `found` = the checked position `operand` (the List bounds stop past the end).
+ir_list_remove_slot: fn(m: &IRModule, b: &IRBuilder, operand: Int, length: Int, found: Int, span: Span) Never! {
+    index: ir_native_index(m, b, operand, span)
+    if ir_failed(b) -> return
+    ir_list_bounds(m, b, index, length, false)
+    ir_emit(b.f, IROp.Copy, found, index, -1, -1, b.line)
+}
+
+// `found` = the first position whose element equals `operand`, unchanged when
+// none does.
+ir_list_remove_value: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, row: Int, operand: Int, found: Int, span: Span) Never! {
+    needle: ir_adapt(m, p, b, operand, row, span)
+    if ir_failed(b) -> return
+    walk: ir_walk_open(m, b, list, row)
+    same: ir_route_equal(m, p, b, walk.item, needle, span)
+    if ir_failed(b) -> return
+    ir_open_if(b.f, same, b.line)
+    ir_emit(b.f, IROp.Copy, found, walk.index, -1, -1, b.line)
+    ir_emit(b.f, IROp.Br, -1, 2, -1, -1, b.line)
+    ir_end(b.f, b.line)
+    ir_walk_close(m, b, walk)
+    ir_release(m, b, needle)
 }
 
 // `left == right` for two elements: a scalar or String in place, any other
@@ -987,9 +1008,10 @@ ir_builtin_on: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver_
             .ListMinMax -> return ir_list_min_max(m, p, b, ty, subject, element, span)
             .SortDesc -> return ir_list_sort(m, p, b, subject, element, true, span)
             .RemoveList(_, mode) -> {
-                if operands.len() != 2 || operands[1] < 0 -> return ir_fail_slot(b, span, "remove without an operand")
-                if mode == .Dynamic -> return ir_fail_slot(b, span, "remove with a dynamic mode")
-                return ir_list_remove(m, p, b, ty, subject, element, operands[1], mode == .Slot, span)
+                arity: if mode == .Dynamic -> 3 else -> 2
+                if operands.len() != arity || operands[1] < 0 || operands[arity - 1] < 0 -> return ir_fail_slot(b, span, "remove without an operand")
+                selector: if mode == .Dynamic -> operands[2] else -> -1
+                return ir_list_remove(m, p, b, ty, subject, element, operands[1], mode, selector, span)
             }
             .JoinSep | .DequeJoin -> {
                 if operands.len() != 2 -> return ir_fail_slot(b, span, "join without a separator")
@@ -1034,7 +1056,7 @@ ir_builtin_on: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver_
             .DequeDelete -> {
                 if operands.len() != 2 || operands[1] < 0 -> return ir_fail_slot(b, span, "delete without a value")
                 removed_ty: Type.Option{inner: m.types[element].ty.copy()}
-                removed: ir_list_remove(m, p, b, removed_ty, subject, element, operands[1], false, span)
+                removed: ir_list_remove(m, p, b, removed_ty, subject, element, operands[1], TListRemoveMode.Value, -1, span)
                 ir_release(m, b, removed)
                 return -1
             }
@@ -2103,6 +2125,34 @@ ir_closure_list_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, 
             keep: ir_call_callback(m, p, b, callback, callback_ty, [Int]{walk.item}, bool_row, span)
             ir_open_if(b.f, keep, b.line)
             ir_list_push(m, p, b, result, element, walk.item)
+            ir_end(b.f, b.line)
+            ir_walk_close(m, b, walk)
+            return result
+        }
+        // partition(f): the (false_, true_) pair of Lists; each element, in
+        // order, is appended as a copy to the List its predicate picked.
+        .Partition -> {
+            fields: if ir_untag(ty) == .Tuple(tuple_fields) -> tuple_fields else -> { return ir_type_fail(b, span, ty) }
+            members: ir_tuple_members(m, p, fields) ?? return ir_type_fail(b, span, ty)
+            false_offset := -1
+            true_offset := -1
+            loop member in members {
+                if member.name == "false_" -> false_offset = member.offset
+                if member.name == "true_" -> true_offset = member.offset
+            }
+            if false_offset < 0 || true_offset < 0 -> return ir_type_fail(b, span, ty)
+            result: ir_fresh_temp(m, b, result_row)
+            ir_emit(b.f, IROp.StackAddress, result, m.types[result_row].size, m.types[result_row].align, -1, b.line)
+            false_list: ir_address_at(m, b, result, false_offset)
+            true_list: ir_address_at(m, b, result, true_offset)
+            ir_para_list_clear(m, b, false_list)
+            ir_para_list_clear(m, b, true_list)
+            walk: ir_walk_open(m, b, list, element)
+            keep: ir_call_callback(m, p, b, callback, callback_ty, [Int]{walk.item}, bool_row, span)
+            ir_open_if(b.f, keep, b.line)
+            ir_list_push(m, p, b, true_list, element, walk.item)
+            ir_else(b.f, b.line)
+            ir_list_push(m, p, b, false_list, element, walk.item)
             ir_end(b.f, b.line)
             ir_walk_close(m, b, walk)
             return result

@@ -1,6 +1,6 @@
-/* Raw scan ABI and Float-bit witness host: run-scan-goldens.mjs lowers the
- * runtime sources plus ScanTests.jet and the generated float corpus to one
- * fixture object. A failed case exits 1 (scan_test_require); success is silent.
+/* Raw scan ABI and Float-bit witness host over one fixture object: the
+ * runtime sources plus ScanTests.jet and the generated float corpus. It has
+ * no runner. A failed case exits 1 (scan_test_require); success is silent.
  */
 #include <stdint.h>
 

@@ -17,7 +17,7 @@ use {
 }
 
 SPEC_PATH: "Docs/spec/syntax-decisions.md"
-TOWER_PATH: "Tools/tower/tower.mjs"
+BOARD_PATH: "Tools/tower/Board.jet"
 OPEN: "<!-- BEGIN GENERATED RATIFIED INDEX -->"
 CLOSE: "<!-- END GENERATED RATIFIED INDEX -->"
 CELL_LIMIT: 96
@@ -148,7 +148,7 @@ decision_index_main: fn(args: [String]) -[Exec, Env, FS, Time.Wait]> String Inde
     loop arg in args {
         if arg == "--check" -> check = true
     }
-    raw: process.check_output(process.cmd([String]{"node", TOWER_PATH, "decision", "list", "--json"})) ?? return Err(index_fail("tower decision list failed: {err}"))
+    raw: process.check_output(process.cmd([String]{process.env_get_or("JET", "jet"), BOARD_PATH, "decision", "list", "--json"})) ?? return Err(index_fail("tower decision list failed: {err}"))
     rows: ratified_decisions(raw) ?? return Err(err)
     spec: files.read(SPEC_PATH) ?? return Err(index_fail("cannot read {SPEC_PATH}: {err}"))
     next_spec: replace_index(spec, index_body(rows)) ?? return Err(err)

@@ -8,6 +8,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { toolJet } from '../../../Tools/agent/roots.mjs';
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const args = process.argv.slice(2);
 const output = args.shift();
@@ -27,7 +28,7 @@ const library = join(out, 'library');
 mkdirSync(library, { recursive: true });
 const entry = join(library, 'Source/Runtime.jet');
 if (from === 0) {
-  execFileSync(process.execPath, [join(repo, 'Compiler/JetRuntime/Tests/check-runtime.mjs'), library, '--assemble-only', ...(test ? ['--test', test] : [])], { stdio: 'inherit' });
+  execFileSync(toolJet(), [join(repo, 'Tools/agent/CompilerPackages.jet'), '--root', repo, 'runtime-unit', library, ...(test ? ['--test', test] : [])], { stdio: 'inherit' });
   mkdirSync(dirname(entry), { recursive: true });
   renameSync(join(library, 'unit.jet'), entry);
   writeFileSync(join(out, 'runtime.lifecycle'), readFileSync(join(repo, 'Compiler/JetRuntime/lifecycle.list')));
@@ -36,7 +37,7 @@ if (until === 1) {
   if (!process.env.JET) throw Error('JET must name the actual Jet-hosted CLI from this source tree');
   const prefix = join(out, 'jet_runtime_jet');
   for (const suffix of ['.o', '.exports', '.abi.json', '.threads', '.issues', '.pack-issues']) rmSync(prefix + suffix, { force: true });
-  // The library seam runs under `jet doc` (prebuild-runtime.mjs): `jet check`
+  // The library seam runs under `jet doc` (PrebuildRuntime.jet): `jet check`
   // stops before lowering, so it has no C export rows to build.
   const run = spawnSync(resolve(process.env.JET), ['doc', entry], {
     cwd: library,

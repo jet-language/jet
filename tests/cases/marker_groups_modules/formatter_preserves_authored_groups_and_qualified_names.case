@@ -9,10 +9,8 @@ env: JET_STORE_DIR={work}/cache
 env: JETPACK_ROOT={work}/jetpack
 step: jet fmt main.jet
 exit: 0 # tests/marker_groups_modules.rs:206-211 jet fmt formats main.jet in place
-step: sh {work}/step-2.sh
-exit: 0 # formatted file contents read back with cat (jet fmt formats in place)
-stdout: ~ "    impl Marker {\n        group: #[Inline(.Always), Scalar]\n    }" # formatted file contents read back with cat (jet fmt formats in place)
-stdout: ~ "#Fast" # formatted file contents read back with cat (jet fmt formats in place)
-stdout: ~ "#Lib.LibraryNote(\"fixed\")" # formatted file contents read back with cat (jet fmt formats in place)
+file: main.jet ~ "    impl Marker {\n        group: #[Inline(.Always), Scalar]\n    }" # formatted file contents read back with cat (jet fmt formats in place)
+file: main.jet ~ "#Fast" # formatted file contents read back with cat (jet fmt formats in place)
+file: main.jet ~ "#Lib.LibraryNote(\"fixed\")" # formatted file contents read back with cat (jet fmt formats in place)
 step: jet fmt --check main.jet
 exit: 0 # tests/marker_groups_modules.rs:206-211 formatting the output again changes nothing

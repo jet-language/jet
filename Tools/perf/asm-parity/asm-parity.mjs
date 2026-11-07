@@ -13,7 +13,7 @@
 //
 // `--jet` must run with the compiler's environment already set
 // (JET_TOOLCHAIN_ROOT, JET_COMPILER_IDENTITY); `as`, `objcopy` and `perf`
-// come from PATH (Tools/agent/jet-env provides the first two).
+// come from PATH (Tools/agent/JetEnv.jet provides the first two).
 //
 // Per cell:
 // - the reference: `as` assembles ref.S (a kernel cell .include's common.S

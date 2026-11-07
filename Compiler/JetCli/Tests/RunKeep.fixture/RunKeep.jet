@@ -1,0 +1,220 @@
+#!/usr/bin/env jet
+// `jet run` keeps its program (Compiler/JetCli/Source/Cli/ScriptCache.jet).
+// A rerun of unchanged inputs reuses it with identical output and marks it
+// used. A source edit, a Core change and a compiler change each compile again
+// and replace it. The cache holds 64 programs and drops the least recently
+// run one. Runs against copies: the compiler (beside its jet-runtime), a
+// toolchain root holding only Core, and its own XDG caches.
+// Usage: jet run Compiler/JetCli/Tests/RunKeep.fixture/RunKeep.jet -- <jet> <scratch>
+// Run from the repository root: Core is copied from the working directory.
+// It prints one line, the CompilerRegistries row's exact verdict.
+use {
+    files: core.files
+    process: core.process
+    term: core.term
+}
+
+fail: fn(message: String) -> Never {
+    term.eprint(message)
+    process.exit(1)
+}
+
+// The fixed layout of one proof: the copied compiler, the toolchain root, the
+// work directory and the default XDG cache.
+Keep: struct {
+    jet: String
+    root: String
+    work: String
+    cache: String
+}
+
+// One finished `jet run`.
+Ran: struct {
+    code: Int
+    signal: Int
+    output: String
+    errors: String
+}
+
+// The slot's record: its text and modification time, and the program kept beside it.
+Slot: struct {
+    text: String
+    secs: Int
+    nanos: Int
+    program: String
+}
+
+run_raw: fn(keep: Keep, target: String, xdg: String) -> Ran {
+    receipt: process.cmd([String]{keep.jet.copy(), "run", target.copy()}).cwd(keep.work.copy()).env("JET_TOOLCHAIN_ROOT", keep.root.copy()).env("XDG_CACHE_HOME", xdg.copy()).env("NO_COLOR", "1").run() ?? fail("jet run failed: {err}")
+    signal: receipt.signal ?? 0
+    Ran{code: receipt.code, signal: signal, output: receipt.output.copy(), errors: receipt.errors.copy()}
+}
+
+run_ok: fn(keep: Keep, target: String, xdg: String) -> String {
+    ran: run_raw(keep, target, xdg)
+    if ran.code != 0 || ran.signal != 0 -> fail("jet run failed: code={ran.code} signal={ran.signal}\n{ran.output}{ran.errors}")
+    ran.output.copy()
+}
+
+check: fn(step: String, output: String, expected: String) {
+    if output != expected -> fail("{step}: output {output.debug()}, expected {expected.debug()}")
+}
+
+// Every entry name of `directory`, sorted.
+names_in: fn(directory: String) -> [String] {
+    entries: files.list_dir(directory.copy()) ?? fail("cannot list {directory}: {err}")
+    names := [String]{}
+    loop entry in entries -> names.push(entry.name.copy())
+    names.sort()
+    names
+}
+
+slot: fn(kept: String) -> Slot {
+    names: names_in(kept)
+    records: names.filter(name -> name.ends_with(".run"))
+    if records.len() != 1 -> fail("expected one slot record, found {names.join(", ")}")
+    record: "{kept}/{records[0]}"
+    text: files.read(record.copy()) ?? fail("cannot read {record}: {err}")
+    lines: text.split("\n").to_list()
+    if lines.len() < 2 -> fail("slot record {record} names no program")
+    program: lines[1].copy()
+    programs: names.filter(name -> !name.ends_with(".run"))
+    if programs.len() != 1 || programs[0] != program -> fail("expected only the program {program}, found {names.join(", ")}")
+    modified: (files.stat(record.copy()) ?? fail("cannot stat {record}: {err}")).modified
+    Slot{text: text.copy(), secs: modified.secs, nanos: modified.nanos, program: program.copy()}
+}
+
+// Reused: the same record naming the same program, marked used since `before`.
+reused: fn(kept: String, step: String, before: Slot) -> Slot {
+    after: slot(kept)
+    if after.text != before.text -> fail("{step}: the kept program was replaced, not reused")
+    later: after.secs > before.secs || (after.secs == before.secs && after.nanos > before.nanos)
+    if !later -> fail("{step}: the reused record was not marked used")
+    after
+}
+
+rebuilt: fn(kept: String, step: String, before: Slot) -> Slot {
+    after: slot(kept)
+    if after.program == before.program -> fail("{step}: still the program {before.program}; expected a new compile")
+    after
+}
+
+write: fn(path: String, text: String) {
+    files.write(path.copy(), text.copy()) ?? fail("cannot write {path}: {err}")
+}
+
+greeting: fn(word: String) -> String {
+    "run: fn() {{\n    print(\"hello {word}\")\n}}\n"
+}
+
+// The programs a cap cache keeps; each beside its own record.
+cap_names: fn(cap_kept: String) -> [String] {
+    names: names_in(cap_kept)
+    records: names.filter(name -> name.ends_with(".run"))
+    programs: names.filter(name -> !name.ends_with(".run"))
+    if records.len() != programs.len() -> fail("cap: {records.len()} records beside {programs.len()} programs: {names.join(", ")}")
+    programs
+}
+
+cap_entry: fn(keep: Keep, index: Int) -> String {
+    "{keep.work}/cap{index}.jet"
+}
+
+cap_run: fn(keep: Keep, cap_cache: String, index: Int) {
+    check("cap entry {index}", run_ok(keep, cap_entry(keep, index), cap_cache), "entry {index}\n")
+}
+
+run: fn() {
+    args: process.args()
+    if args.len() != 2 -> fail("usage: jet run Compiler/JetCli/Tests/RunKeep.jet -- <jet> <scratch>")
+    given: files.canonicalize(args[0].copy()) ?? fail("cannot resolve {args[0]}: {err}")
+    scratch: files.absolute(args[1].copy()) ?? fail("cannot resolve {args[1]}: {err}")
+    repo: files.canonicalize(".") ?? fail("cannot resolve the repository root: {err}")
+    if files.exists(scratch.copy()) -> files.remove_all(scratch.copy()) ?? fail("cannot clear {scratch}: {err}")
+    bin: "{scratch}/bin"
+    keep: Keep{jet: "{bin}/jet", root: "{scratch}/root", work: "{scratch}/work", cache: "{scratch}/cache"}
+    directories: [String]{bin, keep.root, keep.work, keep.cache}
+    loop directory in directories {
+        files.create_dir_all(directory.copy()) ?? fail("cannot create {directory}: {err}")
+    }
+    files.copy(given.copy(), keep.jet.copy()) ?? fail("cannot copy {given}: {err}")
+    given_dir: given.removesuffix("/jet")
+    runtime: files.canonicalize("{given_dir}/jet-runtime") ?? fail("cannot resolve {given_dir}/jet-runtime: {err}")
+    files.symlink(runtime.copy(), "{bin}/jet-runtime") ?? fail("cannot link the jet-runtime: {err}")
+    files.copy_dir("{repo}/Core", "{keep.root}/Core") ?? fail("cannot copy Core: {err}")
+    kept: "{keep.cache}/jet/scripts"
+    file: "{keep.work}/greet.jet"
+
+    write(file, greeting("one"))
+    first: run_ok(keep, file, keep.cache)
+    check("first run", first, "hello one\n")
+    state := slot(kept)
+    // The kept form holds the program part and the image's patches, not a copy
+    // of the runtime image.
+    packs := [String]{}
+    loop key in names_in("{bin}/jet-runtime") {
+        image: "{bin}/jet-runtime/{key}/jet_runtime.image"
+        if files.exists(image.copy()) -> packs.push(image)
+    }
+    kept_size: (files.stat("{kept}/{state.program}") ?? fail("cannot stat the kept program: {err}")).size
+    if packs.len() == 0 -> fail("first run: no runtime image beside the compiler")
+    image_size: (files.stat(packs[0].copy()) ?? fail("cannot stat {packs[0]}: {err}")).size
+    if kept_size >= image_size -> fail("first run: the kept program has {kept_size} bytes, no fewer than the runtime image {packs[0]}")
+    check("rerun", run_ok(keep, file, keep.cache), first)
+    state = reused(kept, "rerun", state)
+
+    write(file, greeting("two"))
+    check("source edit", run_ok(keep, file, keep.cache), "hello two\n")
+    state = rebuilt(kept, "source edit", state)
+    check("rerun after the edit", run_ok(keep, file, keep.cache), "hello two\n")
+    state = reused(kept, "rerun after the edit", state)
+    // A file the program writes beside its source is no compile input.
+    write("{keep.work}/greet.out", "written beside the source\n")
+    check("non-source file beside the entry", run_ok(keep, file, keep.cache), "hello two\n")
+    state = reused(kept, "non-source file beside the entry", state)
+
+    files.append_all("{keep.root}/Core/Time/Time.jet", "\n// run-keep: a Core change\n") ?? fail("cannot change Core: {err}")
+    check("Core change", run_ok(keep, file, keep.cache), "hello two\n")
+    state = rebuilt(kept, "Core change", state)
+
+    // A new compiler binary in the same place: a new file identity.
+    files.remove(keep.jet.copy()) ?? fail("cannot remove the compiler copy: {err}")
+    files.copy(given.copy(), keep.jet.copy()) ?? fail("cannot copy {given}: {err}")
+    check("compiler change", run_ok(keep, file, keep.cache), "hello two\n")
+    state = rebuilt(kept, "compiler change", state)
+    check("rerun after the compiler change", run_ok(keep, file, keep.cache), "hello two\n")
+    state = reused(kept, "rerun after the compiler change", state)
+
+    // A program that stops: the kept run reports it as the compiling run did.
+    write(file, "run: fn() {{\n    print(\"before\")\n    panic(\"run-keep stop\")\n}}\n")
+    compiled: run_raw(keep, file, keep.cache)
+    state = rebuilt(kept, "stopping program", state)
+    rerun: run_raw(keep, file, keep.cache)
+    state = reused(kept, "stopping program rerun", state)
+    if compiled.code == 0 && compiled.signal == 0 -> fail("stopping program: exit 0\n{compiled.errors}")
+    if rerun.code != compiled.code -> fail("stopping program: kept run code {rerun.code}, compiling run {compiled.code}")
+    if rerun.signal != compiled.signal -> fail("stopping program: kept run signal {rerun.signal}, compiling run {compiled.signal}")
+    if rerun.output != compiled.output -> fail("stopping program: kept run stdout {rerun.output.debug()}, compiling run {compiled.output.debug()}")
+    if rerun.errors != compiled.errors -> fail("stopping program: kept run stderr {rerun.errors.debug()}, compiling run {compiled.errors.debug()}")
+
+    // The cap: 64 entry files fill the cache; a rerun of the first marks it used,
+    // so keeping a 65th drops the second, which compiles again when run.
+    cap_cache: "{scratch}/cap-cache"
+    cap_kept: "{cap_cache}/jet/scripts"
+    loop index in 0..<65 -> write(cap_entry(keep, index), "run: fn() {{\n    print(\"entry {index}\")\n}}\n")
+    loop index in 0..<64 -> cap_run(keep, cap_cache, index)
+    if cap_names(cap_kept).len() != 64 -> fail("cap: {cap_names(cap_kept).len()} programs kept after 64 entries")
+    before := cap_names(cap_kept)
+    cap_run(keep, cap_cache, 0)
+    if cap_names(cap_kept) != before -> fail("cap: the rerun of entry 0 compiled again")
+    cap_run(keep, cap_cache, 64)
+    if cap_names(cap_kept).len() != 64 -> fail("cap: {cap_names(cap_kept).len()} programs kept after a 65th entry")
+    before = cap_names(cap_kept)
+    cap_run(keep, cap_cache, 0)
+    if cap_names(cap_kept) != before -> fail("cap: entry 0, the most recently run, was dropped")
+    cap_run(keep, cap_cache, 1)
+    after: cap_names(cap_kept)
+    fresh: after.filter(name -> !before.contains(name))
+    if after.len() != 64 || fresh.len() == 0 -> fail("cap: entry 1, the least recently run, was not compiled again")
+    term.print("run-keep: reuse, source/Core/compiler rebuilds, stop parity and the 64-program cap: ok")
+}

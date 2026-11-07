@@ -1,5 +1,9 @@
 # tests/terminal.rs::terminal_parity_matches_non_tty_golden_and_stream_order
 # Exact original helper/source predicates; PENDING-SAME-HEAD; runtime UNRUN.
+# The `_merged` steps keep `sh -c '… > FILE 2>&1'` as a named exclusion: their subject
+# is the stdout/stderr order on one shared descriptor, and Core's process streams
+# (Stream, Inherit, Capture) cannot hand a child one descriptor for both, so the
+# kit refuses `stderr-to-stdout:` as process-merge-stderr.
 requires: os:unix
 fixture: terminal_parity_matches_non_tty_golden_and_stream_order.fixture
 env: NO_COLOR=1
@@ -24,4 +28,4 @@ file: release.merged = terminal_parity_matches_non_tty_golden_and_stream_order.m
 step interpret_merged: sh -c "exec {jet} run --quiet terminal.jet > {work}/interpret.merged 2>&1"
 stdin: piped.stdin
 exit: 0
-file: default.merged = terminal_parity_matches_non_tty_golden_and_stream_order.merged
+file: interpret.merged = terminal_parity_matches_non_tty_golden_and_stream_order.merged

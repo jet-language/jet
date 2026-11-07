@@ -12,8 +12,8 @@ A Jet executable has a `run: fn` entry point. A statement ends at a newline; use
 braces for a multi-statement body. `:` creates an immutable binding, `:=`
 creates a mutable binding, and `=` reassigns a mutable binding. `->` introduces
 a concise body or a closure. The primitive types are `Int`, `Float`, `Bool`,
-`String`, and `Char`; lists are `[T]`; optional values are `?T`; a fallible
-value is `T ! E`.
+`String`, and `Char`; lists are `[T]`; optional values are `T?`; a fallible
+result is `T E!`.
 
 ```jet
 run: fn() {

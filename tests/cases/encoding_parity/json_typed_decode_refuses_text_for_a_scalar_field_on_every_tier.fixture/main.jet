@@ -1,0 +1,45 @@
+use json: core.encoding.json
+
+Count: struct {
+    n: Int
+}
+
+Ratio: struct {
+    x: Float
+}
+
+Flag: struct {
+    b: Bool
+}
+
+show: fn(label: String, errors: [FieldError]) {
+    loop error in errors -> print("{label}: refused at `{error.path}`: {error.reason}")
+    print("{label}: {errors.len()} error(s)")
+}
+
+run: fn() {
+    if json.decode<Count>(`{"n": "42"}`) == {
+        .Ok(value) -> print("Int from text: decoded {value.n}")
+        .Err(errors) -> show("Int from text", errors)
+    }
+    if json.decode<Count>(`{"n": 42}`) == {
+        .Ok(value) -> print("Int from number: decoded {value.n}")
+        .Err(errors) -> show("Int from number", errors)
+    }
+    if json.decode<Ratio>(`{"x": "1.5"}`) == {
+        .Ok(value) -> print("Float from text: decoded {value.x}")
+        .Err(errors) -> show("Float from text", errors)
+    }
+    if json.decode<Ratio>(`{"x": 1.5}`) == {
+        .Ok(value) -> print("Float from number: decoded {value.x}")
+        .Err(errors) -> show("Float from number", errors)
+    }
+    if json.decode<Flag>(`{"b": "true"}`) == {
+        .Ok(value) -> print("Bool from text: decoded {value.b}")
+        .Err(errors) -> show("Bool from text", errors)
+    }
+    if json.decode<Flag>(`{"b": true}`) == {
+        .Ok(value) -> print("Bool from literal: decoded {value.b}")
+        .Err(errors) -> show("Bool from literal", errors)
+    }
+}

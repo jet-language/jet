@@ -2,6 +2,7 @@ use files: core.files
 
 // Static contracts from tests/cc_driver_hosts.rs; executable host matrix remains separate.
 #Test("make_driver_fixture_requires_explicit_tool_aliases_and_scopes_paths") {
+    guards_enter_root()
     root: "tests/fixtures/foreign_build_hosts/make-cc"
     makefile: files.read("{root}/Makefile") ?? panic("read Make fixture")
     declarations: [String]{
@@ -24,6 +25,7 @@ use files: core.files
 }
 
 #Test("cmake_driver_fixture_builds_both_languages_through_standard_compiler_slots") {
+    guards_enter_root()
     root: "tests/fixtures/foreign_build_hosts/cmake-cc"
     cmake: files.read("{root}/CMakeLists.txt") ?? panic("read CMake fixture")
     declarations: [String]{
@@ -47,6 +49,7 @@ use files: core.files
 // (hard links beside `jet`) and the CLI's argv[0] dispatch. The executable
 // check is tests/cases/cli/compiler_aliases_run_the_compiler_verbs.case.
 #Test("aliases_are_real_installed_bins_and_docs_cover_the_driver_matrix") {
+    guards_enter_root()
     seed: files.read("Tools/release/Seed.jet") ?? panic("read release seed helpers")
     assert(seed.contains("COMPILER_ALIASES: [String]{{\"jet-cc\", \"jet-cxx\", \"jet-c++\"}}"), "the release does not ship every compiler alias")
     assert(seed.contains("files.hard_link(files.join(dir, \"jet\"), files.join(dir, alias))"), "the release aliases are not hard links of jet")

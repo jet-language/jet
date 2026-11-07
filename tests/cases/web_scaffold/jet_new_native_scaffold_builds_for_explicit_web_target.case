@@ -42,7 +42,9 @@ exit: 0 # tests/web_scaffold.rs:366-367 the page is served
 signal dev: KILL
 wait: dev
 exit: any # the Rust KillOnDrop guard ignores the wait status
-step dom: sh -c "cp web_dom_harness.mjs demo/.jet/build/ && cd demo/.jet/build && node web_dom_harness.mjs"
+copy: web_dom_harness.mjs demo/.jet/build/web_dom_harness.mjs
+step dom: node web_dom_harness.mjs
+cwd: {work}/demo/.jet/build
 exit: 0 # tests/web_scaffold.rs:136-150 the generated Web app renders the greeting
 stdout: ~ "hello, world" # tests/web_scaffold.rs:136-150 the rendered greeting
 stdout: !~ "E-WEB-UNSUPPORTED" # tests/web_scaffold.rs:157-170 Web DOM harness has no scaffold drift diagnostic

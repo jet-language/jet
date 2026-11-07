@@ -432,12 +432,13 @@ ir_priority_queue_builtin: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Typ
             return -1
         }
         .PriorityQueueRemove(_, mode) -> {
-            if operands.len() != 2 || operands[1] < 0 -> return ir_fail_slot(b, span, "remove without an operand")
-            if mode == .Dynamic -> return ir_fail_slot(b, span, "remove with a dynamic mode")
+            arity: if mode == .Dynamic -> 3 else -> 2
+            if operands.len() != arity || operands[1] < 0 || operands[arity - 1] < 0 -> return ir_fail_slot(b, span, "remove without an operand")
+            selector: if mode == .Dynamic -> operands[2] else -> -1
             // Canonical removal slots are highest-first, not physical heap
             // slots; a descending sequence is itself a valid max-heap.
             _: ir_heap_call(m, p, b, heap_row, elem_row, "list.sort_desc", [Int]{subject}, -1)
-            return ir_list_remove(m, p, b, ty, subject, elem_row, operands[1], mode == .Slot, span)
+            return ir_list_remove(m, p, b, ty, subject, elem_row, operands[1], mode, selector, span)
         }
         .PriorityQueueToSortedList -> return ir_priority_queue_sorted(m, p, b, subject, elem_row, span)
         .PriorityQueuePeek -> {

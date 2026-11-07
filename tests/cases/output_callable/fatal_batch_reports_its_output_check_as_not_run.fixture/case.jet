@@ -1,0 +1,19 @@
+use contract_files: core.files
+use contract_process: core.process
+CHECK: Output.Check{name: "state-check", entry: verify}
+#Persist state := 0
+#Test("already reported") {
+    state = 41
+    contract_files.append_all("events.txt", "already\n") ?? panic("write completed event")
+}
+#Test("fatal child") {
+    contract_files.append_all("events.txt", "fatal\n") ?? panic("write fatal event")
+    contract_process.exit(73)
+}
+#Test("unreported body") {
+    contract_files.append_all("events.txt", "remaining\n") ?? panic("write remaining event")
+}
+verify: fn() {
+    contract_files.append_all("events.txt", "check\n") ?? panic("write check event")
+    if state != 41 -> return Err("the check saw state {state}, not 41")
+}

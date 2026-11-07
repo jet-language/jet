@@ -92,11 +92,12 @@ run: fn() {
         .Ok(_) -> print(false)
     }
 
+    // A Dyn Int is exact, so 2^63 past the machine range streams as itself (#4306).
     range_input: files.open("{work}/range.cbor") ?? panic("range open")
     range_reader := cbor.reader(range_input) ?? panic("range reader")
     if range_reader.next() == {
-        .Err(e) -> print(e.byte_offset == 0 && e.reason == "CBOR integer is outside Jet Int")
-        .Ok(_) -> print(false)
+        .Ok(event) -> print(event == Val(DataEvent.Int(9223372036854775808)))
+        .Err(_) -> print(false)
     }
 
     int_input: files.open("{work}/trunc-int.cbor") ?? panic("int open")

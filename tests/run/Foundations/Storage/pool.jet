@@ -9,6 +9,11 @@ pool_worker: fn(token: Int, returned: Sender<Int>) -> Int {
     return token
 }
 
+// Two tokens, four leases: at most two workers hold one at a time. Both
+// first leases come back before the next two are taken, so each token is
+// leased exactly twice whichever worker returns first. Taking the third
+// lease while the second was still out let a fast worker's token be leased
+// three times under load.
 pool_demo: fn() -> [Int] {
     { sender: returned, receiver: available }: channel<Int>(capacity: 2)
     returned.send(1)
@@ -19,6 +24,9 @@ pool_demo: fn() -> [Int] {
     second_token: available.receive() ?? panic("pool closed")
     second_returned: returned.copy()
     second: task pool_worker(second_token, second_returned)
+    first_lease: first.join() ?? panic("first worker failed")
+    second_lease: second.join() ?? panic("second worker failed")
+
     third_token: available.receive() ?? panic("pool closed")
     third_returned: returned.copy()
     third: task pool_worker(third_token, third_returned)
@@ -27,8 +35,8 @@ pool_demo: fn() -> [Int] {
     fourth: task pool_worker(fourth_token, fourth_returned)
 
     leases := [
-        first.join() ?? panic("first worker failed"),
-        second.join() ?? panic("second worker failed"),
+        first_lease,
+        second_lease,
         third.join() ?? panic("third worker failed"),
         fourth.join() ?? panic("fourth worker failed"),
     ]

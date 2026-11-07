@@ -7,8 +7,6 @@ env: JET_STORE_DIR={work}/cache
 env: JETPACK_ROOT={work}/jetpack
 step: jet fmt run.jet
 exit: 0 # tests/fmt.rs:3957 formats
-step: sh {work}/step-2.sh
-exit: 0 # tests/fmt.rs:3958-3962 comment appears exactly once
-stdout: = "1\n" # tests/fmt.rs:3958-3962 comment appears exactly once
+file: run.jet count "resolves to the same value" = 1 # tests/fmt.rs:3958-3962 comment appears exactly once
 step: jet fmt --check run.jet
 exit: 0 # tests/fmt.rs:3963-3964 stable

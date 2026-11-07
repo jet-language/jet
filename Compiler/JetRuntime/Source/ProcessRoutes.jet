@@ -15,7 +15,7 @@ process_route_optional_word: fn(present: Bool, value: I64) -> I64 {
     if present -> process_raw_box(value) else -> I64{0}
 }
 process_route_stream_mode: fn(mode: I64) {
-    if mode < PROCESS_STREAM_STREAM || mode > PROCESS_STREAM_CAPTURE -> trap_native_index_range_stop()
+    if mode < PROCESS_STREAM_STREAM || mode > PROCESS_STREAM_STDOUT -> trap_native_index_range_stop()
 }
 #Export(c) jet_process_spec_fields_raw: fn(cmd: I64, cmd_length: I64, has_cwd: Bool, cwd: I64, env_clear: Bool, names: I64, names_length: I64, values: I64, values_length: I64, removals: I64, removals_length: I64, has_stdin: Bool, stdin: I64, stdout: I64, stderr: I64, has_timeout: Bool, timeout: I64, has_output: Bool, output: I64, has_cpu: Bool, cpu: I64, has_memory: Bool, memory: I64, has_files: Bool, files: I64, detached: Bool, has_terminal: Bool, terminal: I64, has_policy: Bool, policy: I64) -> I64 {
     process_route_stream_mode(stdin)
@@ -78,7 +78,13 @@ process_spec_directory_slot_taken: fn(spec: I64, target: I64) -> Bool {
     }
     false
 }
+// The a0_035 seed's second name for jet_process_spec_keep_open_raw: Core
+// source still calls `__with_directory_raw` until #3594 c8 phase 2 switches
+// it to `__keep_open_raw` and deletes this export and its rows.
 #Export(c) jet_process_spec_with_directory_raw: fn(value: I64, source_fd: I64, child_fd: I64, as_cwd: Bool, spec_out: I64, supported_out: I64, assigned_out: I64, errno_out: I64) {
+    jet_process_spec_keep_open_raw(value, source_fd, child_fd, as_cwd, spec_out, supported_out, assigned_out, errno_out)
+}
+#Export(c) jet_process_spec_keep_open_raw: fn(value: I64, source_fd: I64, child_fd: I64, as_cwd: Bool, spec_out: I64, supported_out: I64, assigned_out: I64, errno_out: I64) {
     // Duplicate its lent fd, never reopen a pathname. The spec is consumed:
     // its earlier rows move into the returned one, so each passed descriptor
     // has one owner and closes once. The duplicate is the parent's carrier at

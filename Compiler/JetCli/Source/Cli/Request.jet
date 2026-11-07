@@ -132,18 +132,20 @@ jet_cli_keep_going_append: fn(rows: [String]) -> String Never! {
 }
 
 // Packaging uses the ordinary hosted source loader: the checked
-// NativeLibrary program (the compile stopped before lowering, without an
-// entry) built as IR from its `#Export(c)` rows (ir_build_library) at O1,
-// checked by IR Lint after the build and after the optimizer, and written
-// as `{prefix}.o` with its export list, ABI receipt and thread receipt
-// (ir_thread_exports: the exports that can start a second thread).
-jet_cli_runtime_library: fn(front: &&JetDriverLoweringInputsResult, prefix: String, compiler_threads: CompilerThreads) -> JetDriverCompileResult {
+// NativeLibrary program (the compile stopped before lowering) built as IR
+// from its `#Export(c)` rows (ir_build_library) at O1, checked by IR Lint
+// after the build and after the optimizer, and written as `{prefix}.o` with
+// its export list, ABI receipt and thread receipt (ir_thread_exports: the
+// exports that can start a second thread). The rows alone root the library:
+// an entry module's `run: fn` is no startup here, only an export when it is
+// `#Export(c)`. `lifecycle` is the lifecycle list's path
+// (JET_FRONT_LIBRARY_LIFECYCLE).
+jet_cli_runtime_library: fn(front: &&JetDriverLoweringInputsResult, prefix: String, lifecycle: String?, compiler_threads: CompilerThreads) -> JetDriverCompileResult {
     owned := front.move()
     result := owned.compile.move()
     if !result.complete || result.internal_problem != None -> return result
     checked := owned.inputs.move() ?? return jet_driver_compile_escaped_failure("the runtime front end returned no checked inputs")
-    if checked.entry_key != None -> return jet_driver_compile_escaped_failure("runtime feed requires a checked NativeLibrary artifact")
-    lifecycle_path: cli_sys.get("JET_FRONT_LIBRARY_LIFECYCLE") ?? return jet_driver_compile_escaped_failure("runtime packaging requires the lifecycle list")
+    lifecycle_path: lifecycle ?? return jet_driver_compile_escaped_failure("runtime packaging requires the lifecycle list")
     lifecycle_text: cli_files.read(lifecycle_path) ?? return jet_driver_compile_escaped_failure("cannot read runtime lifecycle list: {err}")
     rows: loop row in checked.c_exports -> IRLibraryExportRow{key: row.key, symbol: jet_driver_c_symbol(row.name)}
     declarations := jet_driver_checked_declarations(checked)
@@ -1370,8 +1372,9 @@ jet_cli_prepared_file_count: fn(prepared: JetCLIPrepared) -> Int Never! {
 // Compile `prepared` (`jet_cli_compile_overlays`). `input_log`, when given,
 // records every comptime input file the compile reads (`embed_file`,
 // `embed_bytes`, `find`); `settings` are the `--set` writers; a non-empty
-// `profile` is the selected `--profile`.
-jet_cli_compile_prepared: fn(prepared: &&JetCLIPrepared, input_log: Shared<JetDriverComptimeInputLog>?, trace_sink: JetCLITraceSink?, settings: [BuildSettingOverride]{[BuildSettingOverride]{}}, profile: String{""}) -> JetCLICompiled {
+// `profile` is the selected `--profile`; `prelude` checks the entry as a
+// Compiler/Prelude source (`jet check --prelude`).
+jet_cli_compile_prepared: fn(prepared: &&JetCLIPrepared, input_log: Shared<JetDriverComptimeInputLog>?, trace_sink: JetCLITraceSink?, settings: [BuildSettingOverride]{[BuildSettingOverride]{}}, profile: String{""}, prelude: Bool{false}) -> JetCLICompiled {
     if prepared.move() == {
         .Refused(output) -> JetCLICompiled.Refused{output: output}
         .Prepared(request, snapshot) -> {
@@ -1381,10 +1384,14 @@ jet_cli_compile_prepared: fn(prepared: &&JetCLIPrepared, input_log: Shared<JetDr
             selected.comptime_input_log = input_log.copy()
             selected.setting_overrides = settings
             if profile != "" -> selected.profile = profile
-            library_prefix: cli_sys.get("JET_FRONT_LIBRARY_OBJECT_OUTPUT")
+            selected.prelude_entry = prelude
+            // The runtime-library seam is `jet doc`'s (Host.jet jet_cli_doc_result):
+            // a check, test or build under a stray JET_FRONT_LIBRARY_OBJECT_OUTPUT
+            // stays that verb's compile.
+            library_prefix: if selected.mode == JetDriverCompileMode.Doc -> cli_sys.get("JET_FRONT_LIBRARY_OBJECT_OUTPUT") else -> None
             // copy: a three-field row; the request moves into the compiler below.
             compiler_threads: selected.compiler_threads.copy()
-            result := if library_prefix == .Val(prefix) -> jet_cli_runtime_library(jet_cli_lowering_inputs(selected, trace_sink), prefix, compiler_threads) else -> jet_cli_compile_request(selected, trace_sink)
+            result := if library_prefix == .Val(prefix) -> jet_cli_runtime_library(jet_cli_lowering_inputs(selected, trace_sink), prefix, cli_sys.get("JET_FRONT_LIBRARY_LIFECYCLE"), compiler_threads) else -> jet_cli_compile_request(selected, trace_sink)
             // The host's phases after the compile (Host.jet's native backend
             // route) trace through the same sink, which the result carries,
             // and compile on the request's threads.
@@ -1467,8 +1474,9 @@ jet_cli_snapshot_file_count: fn(snapshot: JetDriverAuthorizedSourceSnapshot) -> 
 // The authorized request `jet_cli_compile_overlays` compiles, without
 // compiling it: load-only queries (schema, source explain, gates) run the
 // driver's source query over exactly the sources a compile would see.
-jet_cli_prepare_overlays: fn(anchor: String, entry: String, overlays: [JetCLIOverlay], color: Bool, threads: Int?, mode: JetDriverCompileMode) -> JetCLIPrepared {
-    if jet_cli_prepare_snapshot(anchor, entry, overlays, color) == {
+// `alone` holds the entry by itself, as jet_cli_prepare_snapshot says.
+jet_cli_prepare_overlays: fn(anchor: String, entry: String, overlays: [JetCLIOverlay], color: Bool, threads: Int?, mode: JetDriverCompileMode, alone: Bool{false}) -> JetCLIPrepared {
+    if jet_cli_prepare_snapshot(anchor, entry, overlays, color, alone) == {
         .Refused(output) -> JetCLIPrepared.Refused{output: output}
         .Held(snapshot) -> jet_cli_prepare_request(snapshot, color, threads, mode, false)
     }
@@ -1503,11 +1511,13 @@ jet_cli_entry_is_script: fn(entry_path: String, overlays: [JetCLIOverlay]) -[FS,
 
 // The authorized source snapshot `jet_cli_prepare_overlays` compiles. A script
 // is a standalone program wherever it lives: its snapshot is the script alone,
-// rooted at its own directory, never the package around it.
-jet_cli_prepare_snapshot: fn(anchor: String, entry: String, overlays: [JetCLIOverlay], color: Bool) -> JetCLISnapshotted {
+// rooted at its own directory, never the package around it. So is an `alone`
+// entry (`jet check --prelude`: the compiler embeds each Prelude source by
+// itself, never with its directory's other files).
+jet_cli_prepare_snapshot: fn(anchor: String, entry: String, overlays: [JetCLIOverlay], color: Bool, alone: Bool{false}) -> JetCLISnapshotted {
     anchor_path: cli_files.realpath(anchor) ?? return jet_cli_snapshot_refused("can't securely read the file `{anchor}`", "check the spelling, or run jet from the folder that contains it", color)
     entry_path: jet_cli_overlay_path(entry)
-    script: jet_cli_entry_is_script(entry_path, overlays)
+    script: alone || jet_cli_entry_is_script(entry_path, overlays)
     root: if script -> jet_cli_parent(entry_path) ?? "/" else -> jet_cli_source_root(anchor_path)
     root_stat: cli_files.stat(root) ?? return jet_cli_snapshot_refused("can't securely read the source root `{root}`", "check that the directory exists and is readable", color)
     files := [JetDriverAuthorizedSourceFile]{}

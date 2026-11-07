@@ -21,6 +21,6 @@ owner decision, report the candidate without creating another artifact. Route
 pure layout or navigation changes to [`structure-cleanup`](../structure-cleanup/SKILL.md).
 
 Work only on named owned paths. For a code deletion, use
-`Tools/agent/jet-env` for any relevant baseline command; prose-only deletion
+`Tools/agent/JetEnv.jet` for any relevant baseline command; prose-only deletion
 needs no compiler check. Keep the deletion within the current criterion and
 scope rather than using cleanup to broaden the task.

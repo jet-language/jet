@@ -1,5 +1,5 @@
 // Native Linux process-terminal route only. TerminalSession8 owns one retained
-// HostSpawn Child72*, not a Rust Rc/File. TerminalSize16 is the existing
+// HostSpawn Child104*, not a Rust Rc/File. TerminalSize16 is the existing
 // UiCarriersBasic raw {cols,rows} record. Session aliases compare the
 // descriptor owner's identity and keep it alive independently of ProcessChild
 // handles. Explicit stream close stays shared.
@@ -9,7 +9,7 @@
     session
 }
 
-// The returned Child72 is borrowed for the lifetime of the session owner.
+// The returned Child104 is borrowed for the lifetime of the session owner.
 #Export(c) jet_terminal_session_child_raw: fn(session: I64) -> I64 {
     fd_word(session, I64{0})
 }
@@ -55,7 +55,7 @@ terminal_process_invalid_size: fn(cols: I64, rows: I64) -> I64 {
     if (master >= I64{0}) {
         // Same mechanical ioctl/lock seam as jet_process_resize_raw, without
         // an allocated ErrorOut32: this route needs only the errno result.
-        #Unsafe("TIOCSWINSZ borrows one initialized stack winsize word; the Child72 lock prevents close/recycling until ioctl returns") {
+        #Unsafe("TIOCSWINSZ borrows one initialized stack winsize word; the Child104 lock prevents close/recycling until ioctl returns") {
             result = os_ioctl_word_i64(master, I64{21524}, winsize)
         }
     }

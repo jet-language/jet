@@ -271,13 +271,13 @@ kit_ui_fixed: fn(entry: KitEntry, ctx: KitCtx, source: String, overlay: [KitEnvV
     if !files.exists(files.join(ctx.root, fixed)) -> return outcomes
     fixed_source: files.read(files.join(ctx.root, fixed)) ?? return [KitOutcome{verdict: kit_expect_verdict("ERROR", "read fixed companion: {err}"), run: kit_exec_failed("read fixed companion"), tier: "fixed-check"}]
     if kit_ui_host(fixed_source, ctx) == .Val(skip) -> return [KitOutcome{verdict: skip, run: kit_exec_failed(skip.detail), tier: "fixed-check"}]
-    checked: kit_exec_invoke_with_env(ctx.env, [ctx.env.jet, "check", fixed], source, ctx.scratch, "", overlay)
+    checked: kit_exec_invoke_with_env(ctx.env, [ctx.env.jet, "check", fixed], source, ctx.scratch, [U8]{}, overlay)
     verdict: kit_exec_process_failure(checked) ?? kit_expect_verdict(if checked.code == 0 && kit_expect_diagnostics(checked.stderr) == 0 -> "PASS" else -> "FAIL", "fixed companion must check clean")
     if verdict.status != "PASS" -> return [KitOutcome{verdict: verdict, run: checked, tier: "fixed-check"}]
     loop tier in ctx.options.tiers {
         args := [String]{ctx.env.jet, if tier == "o0" -> "run" else -> "build", fixed}
         if tier == "o2" -> args.push("--release")
-        built: kit_exec_invoke_with_env(ctx.env, args, source, ctx.scratch, "", overlay)
+        built: kit_exec_invoke_with_env(ctx.env, args, source, ctx.scratch, [U8]{}, overlay)
         failure: kit_exec_process_failure(built) ?? kit_expect_verdict(if built.code == 0 -> "PASS" else -> "FAIL", "fixed companion build/run exit {built.code}")
         if failure.status != "PASS" || tier == "o0" {
             outcomes.push(KitOutcome{verdict: failure, run: built, tier: tier})
@@ -288,7 +288,7 @@ kit_ui_fixed: fn(entry: KitEntry, ctx: KitCtx, source: String, overlay: [KitEnvV
             outcomes.push(KitOutcome{verdict: kit_expect_verdict("ERROR", "fixed companion build did not report artifact"), run: built, tier: tier})
             next
         }
-        ran: kit_exec_invoke_with_env(ctx.env, [binary], source, ctx.scratch, "", overlay)
+        ran: kit_exec_invoke_with_env(ctx.env, [binary], source, ctx.scratch, [U8]{}, overlay)
         outcomes.push(KitOutcome{verdict: kit_exec_process_failure(ran) ?? kit_expect_verdict(if ran.code == 0 -> "PASS" else -> "FAIL", "fixed companion run exit {ran.code}"), run: ran, tier: tier})
     }
     outcomes
@@ -431,7 +431,7 @@ kit_ui_outcomes: fn(entry: KitEntry, ctx: KitCtx) -> [KitOutcome] {
         digest: kit_ui_hangar_tamper(ctx, source, overlay) ?? return [KitOutcome{verdict: kit_expect_verdict("ERROR", "{err}"), run: kit_exec_failed("{err}"), tier: "-"}]
         args.push(digest)
     }
-    result: kit_exec_invoke_with_env(ctx.env, args, if call.parent -> work else -> source, ctx.scratch, call.stdin, overlay)
+    result: kit_exec_invoke_with_env(ctx.env, args, if call.parent -> work else -> source, ctx.scratch, call.stdin.bytes(), overlay)
     actual: kit_ui_normalize(entry.path, kit_ui_actual(call, result), source)
     verdict: kit_ui_snapshot(entry, call, result, actual, ctx)
     outcomes := [KitOutcome]{KitOutcome{verdict: verdict, run: result, tier: "-"}}
@@ -447,7 +447,7 @@ kit_ui_outcomes: fn(entry: KitEntry, ctx: KitCtx) -> [KitOutcome] {
 kit_ui_hangar_tamper: fn(ctx: KitCtx, source: String, overlay: [KitEnvVar]) -> String Err! {
     tree: files.join(source, "hangar-source")
     kit_exec_write(files.join(tree, "payload"), "trusted bytes\n")
-    ingest: kit_exec_invoke_with_env(ctx.env, [ctx.env.jetpack, "hangar", "ingest", tree, "--name", "ui-e1315", "--version", "1.0.0", "--no-color"], source, ctx.scratch, "", overlay)
+    ingest: kit_exec_invoke_with_env(ctx.env, [ctx.env.jetpack, "hangar", "ingest", tree, "--name", "ui-e1315", "--version", "1.0.0", "--no-color"], source, ctx.scratch, [U8]{}, overlay)
     if ingest.code != 0 -> return Err("jetpack hangar ingest exited {ingest.code}: {ingest.stderr}")
     digests: "{ingest.stdout}\n{ingest.stderr}".replace("\n", " ").split(" ").filter(word -> word.starts_with("sha256-")).to_list()
     if digests.len() == 0 -> return Err("jetpack hangar ingest printed no digest: {ingest.stderr}")

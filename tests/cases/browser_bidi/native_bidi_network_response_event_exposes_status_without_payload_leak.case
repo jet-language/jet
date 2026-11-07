@@ -9,7 +9,7 @@ write: browser_bidi_network_response.jet native_bidi_network_response_event_expo
 step: jet build browser_bidi_network_response.jet
 exit: 0
 session response raw: node {root}/tests/fixtures/browser_bidi_mock.mjs script {free-port:response} response.json
-sleep: 500ms
+await: file response.ready timeout 30s
 step run: built
 exit: 0
 stdout: ~ "network.responseCompleted\n" # original predicate: stdout.contains

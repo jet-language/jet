@@ -3,6 +3,9 @@
 # PENDING-SAME-HEAD runtimeUNRUN.
 requires: os:unix
 requires: tool:bash
+# The runner records the host rustc target identity and the host linker (`cc`) in its receipt.
+requires: tool:rustc
+requires: tool:cc
 fixture: shared_runner_publishes_only_after_a_successful_jet_export.fixture
 chmod: fake-jet 0755
 step: bash {root}/Tools/foreign-build-hosts/jet-library.sh --jet {work}/fake-jet --project {work} --entry library.jet --output core --library loadable --dest {work}/host-build --kind static --loadable --input library.jet

@@ -8,8 +8,8 @@ fixture: cache_cli_status_prune_limit_and_doctor_snapshots.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
 env: JETPACK_ROOT={work}/jetpack
-step: sh {work}/step-1.sh
-exit: 0 # fixture dirs (isolates persisted host limit from the real config)
+# Fixture dirs (isolates persisted host limit from the real config)
+mkdir: home/config
 step: jet cache status
 env: JET_STORE_DIR=store
 env: JET_STORE_CAP_BYTES=21474836480
@@ -57,6 +57,6 @@ env: JET_STORE_RESERVE_BYTES=2147483648
 env: NO_COLOR=1
 env: HOME=home
 env: XDG_CONFIG_HOME=home/config
-exit: 0 # doctor row
+exit: any # the doctor exits 1 when a host toolchain check warns (no `cc` or `pkg-config` on PATH); this row claims only the artifact-store line
 stdout: ~ "artifact store:" # doctor row
 stdout: ~ "(footprint 0 B; cap 4 GiB; reserve 2 GiB; 0 entries; 0 live leases)" # doctor row

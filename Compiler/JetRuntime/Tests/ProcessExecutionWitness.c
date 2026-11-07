@@ -33,7 +33,7 @@ typedef struct ProcessReceipt ProcessReceipt;
 typedef struct ProcessChild ProcessChild;
 typedef struct JetAuthority JetAuthority;
 
-// HOST_PROCESS_STREAM_* (HostEnums.jet): STREAM=0 INHERIT=1 CAPTURE=2.
+// HOST_PROCESS_STREAM_* (HostEnums.jet): STREAM=0 INHERIT=1 CAPTURE=2 STDOUT=3.
 #define STREAM_INHERIT 1
 #define STREAM_CAPTURE 2
 // HOST_IO_KIND_*: INVALID_INPUT=0 NOT_FOUND=1 RESOURCE_LIMIT=8 OTHER=7.

@@ -9,7 +9,7 @@ write: browser_bidi_storm.jet native_bidi_bounds_event_queue_and_hashes_large_re
 step: jet build browser_bidi_storm.jet
 exit: 0
 session storm raw: node {root}/tests/fixtures/browser_bidi_mock.mjs event-storm {free-port:storm}
-sleep: 500ms
+await: file event-storm.ready timeout 30s
 step run: built
 exit: 0
 stdout: ^= "true\ntrue:" # original predicate: line 1 == "true", line 2 starts_with("true:")

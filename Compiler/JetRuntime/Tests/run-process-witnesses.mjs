@@ -9,8 +9,8 @@ import {dirname,join,resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {readNativeRuntimePack,nativePackHash} from '../../../Tools/packaging/runtime-pack-cache.mjs';
 import {fileObject} from '../../../Tools/packaging/publish-native-runtime-pack.mjs';
-import {runNativeLibrary} from '../../../Tools/agent/compiler-native-transport.mjs';
-import {parseRuntimeExports,runtimeLifecycleList} from '../../../Tools/agent/runtime-route-abi.mjs';
+import {runNativeLibrary,runtimeLifecycleList} from '../../JetBackend/Tests/jet-front.mjs';
+import {toolJet} from '../../../Tools/agent/roots.mjs';
 const root=resolve(dirname(fileURLToPath(import.meta.url)),'../../..');
 const [output,jet,runtimeDirectory,...extra]=process.argv.slice(2);
 const test=extra.length===2&&extra[0]==='--test'?extra[1]:null;
@@ -39,9 +39,9 @@ let pack,objectHandle;
 const compilerHandle=fileObject(nativeJet);
 if(test){
  const unit=join(out,'unit'),prefix=join(unit,'fixture');
- command(process.execPath,[join(root,'Compiler/JetRuntime/Tests/check-runtime.mjs'),unit,'--assemble-only','--test',test],'assemble-fixture');
+ command(toolJet(),[join(root,'Tools/agent/CompilerPackages.jet'),'--root',root,'runtime-unit',unit,'--test',test],'assemble-fixture');
  const file=join(unit,'unit.jet'),lifecycle=join(unit,'lifecycle.list');
- writeFileSync(lifecycle,runtimeLifecycleList(parseRuntimeExports(readFileSync(file,'utf8'),'unit.jet')));
+ writeFileSync(lifecycle,runtimeLifecycleList(readFileSync(file,'utf8')));
  const lowered=runNativeLibrary({jet:nativeJet,file,prefix,lifecycle,env:{...process.env,JET_TOOLCHAIN_ROOT:root,JET_STORE_DIR:join(out,'store')}});
  writeFileSync(join(out,'lower-fixture.receipt.json'),JSON.stringify(lowered,null,2)+'\n',{flag:'wx'});
  if(lowered.problem)throw Error(`native ${test} fixture: ${lowered.problem.detail}`);
@@ -76,10 +76,10 @@ const fixtures=[['ProcessRoutesWitness','process routes: ok\n'],
 for(const [name,expected]of fixtures.filter(row=>!test||row[0]===test+'Witness')){
  const object=join(out,name+'.o'),binary=join(out,name);
  const source=join(root,'Compiler/JetRuntime/Tests',name+'.c'),sourceHandle=fileObject(source);
- command(join(root,'Tools/agent/jet-env'),[nativeCCompiler,'-std=c11','-O1','-fno-stack-protector','-fno-PIE','-fno-builtin','-Wall','-Wextra','-Werror',...(test?['-DJET_PROCESS_JET_FIXTURES=1']:[]),'-c',source,'-o',object],name+'-compile');
+ command(join(root,'Tools/agent/JetEnv.jet'),[nativeCCompiler,'-std=c11','-O1','-fno-stack-protector','-fno-PIE','-fno-builtin','-Wall','-Wextra','-Werror',...(test?['-DJET_PROCESS_JET_FIXTURES=1']:[]),'-c',source,'-o',object],name+'-compile');
  const cObjectHandle=fileObject(object);
  unchanged([...sharedInputs,{path:source,handle:sourceHandle}]);
- command(join(root,'Tools/agent/jet-env'),[nativeCCompiler,'-nostdlib','-static','-no-pie',crt[0].path,crt[1].path,object,'-Wl,--start-group',pack,faultReport,...platform,'-Wl,--end-group',crt[2].path,'-o',binary],name+'-link');
+ command(join(root,'Tools/agent/JetEnv.jet'),[nativeCCompiler,'-nostdlib','-static','-no-pie',crt[0].path,crt[1].path,object,'-Wl,--start-group',pack,faultReport,...platform,'-Wl,--end-group',crt[2].path,'-o',binary],name+'-link');
  const executableHandle=fileObject(binary);
  unchanged([...sharedInputs,{path:source,handle:sourceHandle},{path:object,handle:cObjectHandle}]);
  const r=command(binary,[],name+'-execute');

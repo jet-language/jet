@@ -226,7 +226,7 @@ jet_cli_native_c_build_map: fn(directory: String) -> String Never! {
 }
 
 // Core's vendored C closures (Core/Vendor/*): a Core module's `c.<lib>`
-// import links the archive prebuild-runtime.mjs compiled once for this
+// import links the archive Tools/packaging/PrebuildRuntime.jet compiled once for this
 // runtime, `{runtime_dir}/{key}/foreign/<lib>/lib<lib>.a`, never the
 // machine's library and never a link-time C compile.
 jet_cli_vendored_c_library: fn(lib: String) -> Bool Never! { lib == "sqlite3" || lib == "mbedtls" }
@@ -234,7 +234,7 @@ jet_cli_vendored_c_library: fn(lib: String) -> Bool Never! { lib == "sqlite3" ||
 jet_cli_vendored_c_archive: fn(lib: String, runtime_dir: String, runtime_key: String?) -[FS]> String JetCLIForeignLinkError! {
     key: runtime_key ?? return Err(jet_cli_foreign_link_error("couldn't read the Jet runtime key {runtime_dir}/{JET_CLI_RUNTIME_KEY_FILE}, which names Core's vendored C `{lib}`"))
     archive: "{runtime_dir}/{key}/foreign/{lib}/lib{lib}.a"
-    if !cli_files.is_file(archive) -> return Err(jet_cli_foreign_link_error("Core's vendored C `{lib}` is not packaged with the Jet runtime: {archive} is missing; package the runtime with `Tools/packaging/prebuild-runtime.sh <jet>`"))
+    if !cli_files.is_file(archive) -> return Err(jet_cli_foreign_link_error("Core's vendored C `{lib}` is not packaged with the Jet runtime: {archive} is missing; package the runtime with `jet Tools/packaging/PrebuildRuntime.jet <jet>`"))
     Ok(archive)
 }
 

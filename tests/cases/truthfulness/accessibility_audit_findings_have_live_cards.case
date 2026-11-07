@@ -1,9 +1,9 @@
 # Port of tests/truthfulness.rs:1771-1908 +1911-1928; runtime PENDING-SAME-HEAD.
-# The fixture checks every original table predicate and runs the real Node Tower card show command for each reference.
-requires: tool:node
+# The fixture checks every original table predicate and looks up each referenced card with Tools/tower/Board.jet, run by the jet under test.
 fixture: accessibility_audit_findings_have_live_cards.fixture
 copy: {root}/Docs/audits/cli-diagnostics-accessibility.md repo/Docs/audits/cli-diagnostics-accessibility.md
 copy: {root}/Tools/tower repo/Tools/tower
-step: jet run --allow=Exec,FS.Read {work}/main.jet
+env: JET={jet}
+step: jet run --allow=Env,Exec,FS.Read {work}/main.jet
 cwd: repo
 exit: 0

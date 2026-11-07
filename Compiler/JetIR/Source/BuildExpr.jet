@@ -842,8 +842,9 @@ ir_assign_aggregate: fn(m: &IRModule, b: &IRBuilder, slot: Int, value: Int, owns
 
 // A pinned borrowed argument or receiver (`pin = &place`, sema's
 // evaluation-order pin): an alias of the place, which never owns the value. A
-// read aliases the place's value; a write aliases an aggregate's storage or a
-// scalar's address (ir_scalar_window).
+// read aliases the place's value; a write aliases an aggregate's storage or the
+// address of a scalar, or of a handle or box that lives in other storage (a
+// List element, a struct member) (ir_scalar_window).
 ir_bind_pin: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, local: TLocal, init: Int, span: Span) Never! {
     init_ty: ir_ty(p, b, init)
     access: if ir_body_node(p, b, init).kind == .Borrow(_, borrowed) -> borrowed else -> AccessConvention.Read
@@ -854,6 +855,9 @@ ir_bind_pin: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, local: TLocal, init: 
             return
         }
         if ir_scalar_row(m, row) && !ir_option_inline(m, row) -> return ir_scalar_window(m, p, b, local, place, row, span)
+        // A copy of the handle (a String, a Decimal, an enum box) would take
+        // the writes meant for the element or member.
+        if m.types[row].kind != .Aggregate && ir_pin_place_in_storage(p, b, place) -> return ir_scalar_window(m, p, b, local, place, row, span)
     }
     value: ir_expr(m, p, b, init)
     if ir_failed(b) || value < 0 -> return
@@ -883,10 +887,11 @@ ir_bind_pin: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, local: TLocal, init: 
     b.bindings.push(IRBinding{name: local.name, slot: value, symbol: symbol, write: access != .Read})
 }
 
-// `w := &place` over a scalar place: the binding is the place's address, so
-// a read of `w` loads through it and a write stores through it, as through a
-// scalar write parameter. A variable place lives in a frame cell
-// (ir_window_cells_named), whose address is its storage.
+// `w := &place` over a scalar place, or a handle or box element or member:
+// the binding is the place's address, so a read of `w` loads through it and a
+// write drops the old value and stores through it, as through a write
+// parameter. A variable place lives in a frame cell (ir_window_cells_named),
+// whose address is its storage.
 ir_scalar_window: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, local: TLocal, place: Int, row: Int, span: Span) Never! {
     backs := [IRWriteBack]{}
     address: ir_place_address(m, p, b, place, backs, span)
@@ -894,6 +899,18 @@ ir_scalar_window: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, local: TLocal, p
     if backs.len() > 0 -> return ir_fail(b, span, "write window into a {ir_type_name(m.types[row].ty)} place outside a frame cell")
     symbol: if local.symbol_id == .Val(id) -> id.key else -> ""
     b.bindings.push(IRBinding{name: local.name, slot: address, indirect: row, symbol: symbol})
+}
+
+// Whether `place` names storage inside another value, which ir_place_address
+// reaches: a List or Map element, a struct member of such a place or of a
+// variable, a pool slot or a Shared guard's value.
+ir_pin_place_in_storage: fn(p: IRProgram, b: IRBuilder, place: Int) -> Bool Never! {
+    if ir_body_node(p, b, place).kind == {
+        .Index(_, _, kind, _, _, _) -> return kind == .List || kind == .FixedListProof || kind == .Map
+        .Field(receiver, _) -> return ir_body_node(p, b, receiver).kind == .Local(_) || ir_pin_place_in_storage(p, b, receiver)
+        .PoolSlot(_, _, _, _, _, _) | .SharedGuardValue(_) -> return true
+        else -> return false
+    }
 }
 
 // `task.group(group) { .. }`: `group` owns the runtime JetTaskGroup from
@@ -1652,8 +1669,13 @@ ir_expr: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> Int N
             loop field in fields {
                 member: ir_member_of(m, p, b, storage, field.field.name) ?? return ir_fail_slot(b, span, "field: struct {field.field.name}")
                 // A member of a field's structural union is boxed as that
-                // union.
-                value: ir_value_as(m, p, b, field.value, member.ty, span)
+                // union, by the member's checked type: a distinct member
+                // (`Usd: distinct Int`) shares its base's value row.
+                member_ty: m.types[member.ty].ty.copy()
+                field_ty: ir_ty(p, b, field.value)
+                widened := ir_untag(member_ty) == .Union(_) && !ir_never_type(field_ty)
+                if ir_untag(field_ty) == .Union(_) -> widened = false
+                value: if widened -> ir_widen_union(m, p, b, field.value, member_ty, span) else -> ir_value_as(m, p, b, field.value, member.ty, span)
                 if ir_failed(b) -> return -1
                 if value < 0 -> return ir_fail_slot(b, span, "Unit struct field")
                 ir_member_write(m, p, b, storage, member, value)
@@ -1884,7 +1906,11 @@ ir_expr: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> Int N
         .TaskGroupAll(tasks) -> return ir_task_group_value(m, p, b, expression_ty, tasks, 0, span)
         .TaskGroupAny(tasks) -> return ir_task_group_value(m, p, b, expression_ty, tasks, 1, span)
         .TaskGroupRace(tasks) -> return ir_task_group_value(m, p, b, expression_ty, tasks, 2, span)
-        .TraitBox(value, target) -> return ir_trait_box(m, p, b, value, target, span)
+        .TraitBox(value, target) -> {
+            // A trait value built outside a call argument owns its payload.
+            owned := [IRBoxLend]{}
+            return ir_trait_box(m, p, b, value, target, false, owned, span)
+        }
         // A distinct value lays out as its base, so construction and raw
         // extraction are the value itself (a Transparent convert).
         .DistinctCtor(argument) | .DistinctRaw(argument) -> return ir_expr(m, p, b, argument)
@@ -3168,6 +3194,7 @@ ir_call_row: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, type_args: 
     moves := [Bool]{}
     backs := receiver_backs
     bridges := [IRWriteBack]{}
+    lends := [IRBoxLend]{}
     if receiver >= 0 {
         if ir_receiver_access(p.functions[row].kind) == "move" -> ir_close_disarm(b, receiver)
         slots.push(if ir_receiver_access(p.functions[row].kind) == "move" -> ir_own(m, p, b, receiver) else -> receiver)
@@ -3202,10 +3229,16 @@ ir_call_row: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, type_args: 
         if ir_failed(b) -> return -1
         param_row: ir_value_type(m, p, param_ty) ?? return ir_fail_slot(b, span, "argument type {ir_type_name(param_ty)}")
         slot := -1
+        // A read argument is lent to the trait, union, Option, Result or
+        // tuple carrier it is passed in; a move parameter's carrier owns it.
+        lend: params[index].convention != .Move
         if arg.box_as_trait == .Val(target) {
-            slot = ir_trait_box(m, p, b, arg.value, target, span)
+            slot = ir_trait_box(m, p, b, arg.value, target, lend, lends, span)
         } else if arg.widen_to_union == .Val(union_ty) {
-            slot = ir_widen_union(m, p, b, arg.value, union_ty, span)
+            slot = if lend -> ir_widen_union_lent(m, p, b, arg.value, union_ty, lends, span) else -> ir_widen_union(m, p, b, arg.value, union_ty, span)
+        } else if lend && ir_lent_carrier_arg(p, b, arg.value) && (ir_value_type(m, p, ir_ty(p, b, arg.value)) ?? -1) == param_row {
+            carrier_ty: ir_ty(p, b, arg.value)
+            slot = ir_carrier_lent(m, p, b, carrier_ty, arg.value, lends, span)
         } else {
             slot = ir_value_as(m, p, b, arg.value, param_row, span)
         }
@@ -3219,7 +3252,7 @@ ir_call_row: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, type_args: 
         slots.push(if params[index].convention == .Move -> ir_own(m, p, b, slot) else -> slot)
         moves.push(params[index].convention == .Move)
     }
-    ir_call_row_emit(m, p, b, row, type_args, slots, moves, backs, bridges, span)
+    ir_call_row_emit(m, p, b, row, type_args, slots, moves, backs, bridges, lends, span)
 }
 
 // The call of non-generic function row `row` on argument values already
@@ -3241,14 +3274,15 @@ ir_call_row_typed_values: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int
         slots.push(if moving -> ir_own(m, p, b, value) else -> value)
         moves.push(moving)
     }
-    ir_call_row_emit(m, p, b, row, type_args, slots, moves, [IRWriteBack]{}, [IRWriteBack]{}, span)
+    ir_call_row_emit(m, p, b, row, type_args, slots, moves, [IRWriteBack]{}, [IRWriteBack]{}, [IRBoxLend]{}, span)
 }
 
 // The Call of function row `row` on its argument `slots` (moved where
-// `moves`), the write-backs reloaded after it and each List copy of an
-// inline `[T#N]` (`bridges`: the List as the cell, the `[T#N]` as the slot)
-// put back.
-ir_call_row_emit: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, type_args: [Type], slots: [Int], moves: [Bool], backs: [IRWriteBack], bridges: [IRWriteBack], span: Span) -> Int Never! {
+// `moves`), the write-backs reloaded after it, each List copy of an inline
+// `[T#N]` (`bridges`: the List as the cell, the `[T#N]` as the slot) put
+// back, and each trait or union box a read argument was lent to (`lends`)
+// freed.
+ir_call_row_emit: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, type_args: [Type], slots: [Int], moves: [Bool], backs: [IRWriteBack], bridges: [IRWriteBack], lends: [IRBoxLend], span: Span) -> Int Never! {
     // #5473: a derived `equal`/`compare` of a payload-free enum compares the
     // discriminant words in place; the callee is not built.
     if slots.len() == 2 && type_args.len() == 0 {
@@ -3256,6 +3290,7 @@ ir_call_row_emit: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, type_a
         if role != "" {
             value: ir_tag_method_value(m, p, b, role, slots[0], slots[1], span)
             loop slot in slots -> ir_release(m, b, slot)
+            ir_box_lends_end(m, p, b, lends)
             return value
         }
     }
@@ -3283,6 +3318,7 @@ ir_call_row_emit: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, type_a
             ir_release(m, b, slot)
         }
     }
+    ir_box_lends_end(m, p, b, lends)
     ir_stop_check(m, b)
     dst
 }
@@ -4940,14 +4976,23 @@ ir_dyn_box: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, variant: Str
 
 ir_present: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: Int, span: Span) -> Int Never! {
     row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
-    inner_row := -1
-    if ir_untag(ty) == .Option(inner) {
-        inner_row = ir_value_type(m, p, inner) ?? return ir_type_fail(b, span, inner)
-    }
-    if inner_row < 0 -> return ir_fail_slot(b, span, "Present of {ir_type_name(ty)}")
+    inner_row: ir_present_payload_row(m, p, b, ty, span)
+    if inner_row < 0 -> return -1
     slot: ir_value_as(m, p, b, value, inner_row, span)
     if ir_failed(b) -> return -1
     lent: ir_carrier_lends(p, b, value, slot)
+    ir_present_wrap(m, p, b, row, inner_row, slot, lent)
+}
+
+// The payload row of the Option type `ty`; -1 (failed) for any other type.
+ir_present_payload_row: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, span: Span) -> Int Never! {
+    if ir_untag(ty) == .Option(inner) -> return ir_value_type(m, p, inner) ?? ir_type_fail(b, span, inner)
+    ir_fail_slot(b, span, "Present of {ir_type_name(ty)}")
+}
+
+// A new present Option of row `row` holding `slot` (of row `inner_row`),
+// which it owns; `lent` records the Option as a carrier that only lends it.
+ir_present_wrap: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, inner_row: Int, slot: Int, lent: Bool) -> Int Never! {
     if ir_option_inline(m, row) {
         wrapped: ir_option_inline_wrap(m, p, b, row, slot)
         return ir_note_lent(b, wrapped, lent)
@@ -4956,6 +5001,136 @@ ir_present: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: Int, 
     boxed: ir_box_alloc(m, b, inner_size, row)
     ir_store_at(m, p, b, boxed, 0, slot)
     ir_note_lent(b, boxed, lent)
+}
+
+// Whether the read call argument `value` builds a carrier (`Val(x)`,
+// `Ok(x)`, a tuple literal) that ir_carrier_lent can lend.
+ir_lent_carrier_arg: fn(p: IRProgram, b: IRBuilder, value: Int) -> Bool Never! {
+    if ir_body_node(p, b, value).kind == {
+        .Present(_) | .Ok(_) | .Tuple(_) -> true
+        else -> false
+    }
+}
+
+// The read call argument `value` of type `ty`, a carrier built around values
+// (ir_lent_carrier_arg), lent to the callee as ir_union_lend lends a union's
+// payload: a payload another holder keeps goes into the carrier with no new
+// owner (no clone, no move, its close still armed), and a trait value it is
+// boxed into is lent too (ir_trait_box). A boxed carrier joins `lends`
+// (ir_box_lends_end); an inline Option is the payload's word and a tuple
+// lives on the stack, never released. A carrier around a fresh payload, or
+// one without a drop, is built as it is anywhere else.
+ir_carrier_lent: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: Int, lends: &[IRBoxLend], span: Span) -> Int Never! {
+    kind: ir_body_node(p, b, value).kind
+    if kind == {
+        .Present(inner) -> ir_present_lent(m, p, b, ty, inner, lends, span)
+        .Ok(inner) -> ir_ok_lent(m, p, b, ty, inner, lends, span)
+        .Tuple(values) -> ir_tuple_lent(m, p, b, ty, values, lends, span)
+        else -> ir_fail_slot(b, span, "lent carrier argument")
+    }
+}
+
+// The payload `value` of a lent carrier, as row `row`: a trait value is
+// boxed lent (ir_trait_box).
+ir_lent_payload: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, row: Int, lends: &[IRBoxLend], span: Span) -> Int Never! {
+    kind: ir_body_node(p, b, value).kind
+    if kind == .TraitBox(boxed_value, target) -> return ir_trait_box(m, p, b, boxed_value, target, true, lends, span)
+    ir_value_as(m, p, b, value, row, span)
+}
+
+// Whether `payload` is a value another holder keeps: a carrier holds it lent.
+ir_keeps_holder: fn(m: &IRModule, b: &IRBuilder, payload: Int) -> Bool Never! {
+    payload >= 0 && !b.fresh[payload] && ir_has_drop(m, b, payload)
+}
+
+// `boxed`, a new box of `box_bytes` bytes holding the lent `payload` (row
+// `row`) at `offset`, ends after the call (ir_box_lends_end).
+ir_lend_box: fn(m: &IRModule, b: &IRBuilder, boxed: Int, box_bytes: Int, payload: Int, row: Int, offset: Int, lends: &[IRBoxLend]) -> Int Never! {
+    ir_store_lent(m, b, boxed, offset, payload, row)
+    lends.push(IRBoxLend{boxed: boxed, box_bytes: box_bytes, wrapper: -1, wrapper_bytes: 0, row: row, offset: offset})
+    b.fresh[boxed] = false
+    ir_note_lent(b, boxed, true)
+}
+
+// `Val(value)`, an Option of type `ty`, lent (ir_carrier_lent).
+ir_present_lent: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: Int, lends: &[IRBoxLend], span: Span) -> Int Never! {
+    row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
+    inner_row: ir_present_payload_row(m, p, b, ty, span)
+    if inner_row < 0 -> return -1
+    payload: ir_lent_payload(m, p, b, value, inner_row, lends, span)
+    if ir_failed(b) -> return -1
+    if !ir_keeps_holder(m, b, payload) {
+        lent: ir_carrier_lends(p, b, value, payload)
+        return ir_present_wrap(m, p, b, row, inner_row, payload, lent)
+    }
+    if ir_option_inline(m, row) {
+        word: ir_temp(m, b, row)
+        ir_emit(b.f, IROp.Move, word, payload, -1, -1, b.line)
+        return ir_note_lent(b, word, true)
+    }
+    box_bytes: ir_align8(m.types[inner_row].size)
+    boxed: ir_box_alloc(m, b, box_bytes, row)
+    ir_lend_box(m, b, boxed, box_bytes, payload, inner_row, 0, lends)
+}
+
+// `Ok(value)`, a Result of type `ty`, lent (ir_carrier_lent). A view
+// Result (ir_view_result) is built as it is anywhere else.
+ir_ok_lent: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: Int, lends: &[IRBoxLend], span: Span) -> Int Never! {
+    payload_row := -1
+    if ir_untag(ty) == .Result(ok_ty, _) {
+        payload_row = ir_value_type(m, p, ok_ty) ?? -1
+    }
+    if payload_row < 0 || ir_view_result(ty) -> return ir_result_ctor(m, p, b, ty, value, true, span)
+    payload: ir_lent_payload(m, p, b, value, payload_row, lends, span)
+    if ir_failed(b) -> return -1
+    if !ir_keeps_holder(m, b, payload) {
+        lent: ir_carrier_lends(p, b, value, payload)
+        boxed: ir_result_box(m, p, b, ty, true, payload)
+        return ir_note_lent(b, boxed, lent)
+    }
+    row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
+    box_bytes: ir_result_box_bytes(m, p, ty)
+    boxed: ir_box_alloc(m, b, box_bytes, row)
+    selector: ir_word_const(m, b, 1)
+    ir_emit(b.f, IROp.Store, -1, boxed, 0, selector, b.line)
+    ir_lend_box(m, b, boxed, box_bytes, payload, payload_row, 8, lends)
+}
+
+// A tuple literal of type `ty`, lent (ir_carrier_lent). When every member
+// with a drop is a value another holder keeps, the tuple only views them: it
+// holds their bits with no new owner and is never released. A tuple that
+// owns some member is built as it is anywhere else.
+ir_tuple_lent: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, values: [Int], lends: &[IRBoxLend], span: Span) -> Int Never! {
+    row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
+    members := [IRMember]{}
+    if ir_untag(ty) == .Tuple(fields) {
+        members = ir_tuple_members(m, p, fields) ?? return ir_type_fail(b, span, ty)
+    }
+    if members.len() != values.len() -> return ir_fail_slot(b, span, "tuple literal of {ir_type_name(ty)}")
+    slots := [Int]{}
+    viewed := true
+    lent := false
+    loop (index, value) in values {
+        slot: ir_lent_payload(m, p, b, value, members[index].ty, lends, span)
+        if ir_failed(b) -> return -1
+        if slot >= 0 && b.fresh[slot] && ir_has_drop(m, b, slot) -> viewed = false
+        if ir_carrier_lends(p, b, value, slot) && ir_close_glue(m, p, b, members[index].ty, false, span) >= 0 -> lent = true
+        slots.push(slot)
+    }
+    storage: ir_temp(m, b, row)
+    ir_emit(b.f, IROp.StackAddress, storage, m.types[row].size, 8, -1, b.line)
+    loop (index, slot) in slots {
+        if viewed && slot >= 0 {
+            ir_store_lent(m, b, storage, members[index].offset, slot, members[index].ty)
+        } else {
+            ir_store_at(m, p, b, storage, members[index].offset, slot)
+        }
+    }
+    if !viewed {
+        b.fresh[storage] = true
+        return ir_note_lent(b, storage, lent)
+    }
+    ir_note_lent(b, storage, true)
 }
 
 // Whether a carrier built around `payload`, the value of expression `value`,
@@ -7212,7 +7387,7 @@ ir_require_eq_hook: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, method: TMetho
     right_moves: params[0].convention == .Move
     left_arg: if left_moves -> ir_own(m, p, b, left) else -> left
     right_arg: if right_moves -> ir_own(m, p, b, right) else -> right
-    returned: ir_call_row_emit(m, p, b, row, owner_args, [Int]{left_arg, right_arg}, [Bool]{left_moves, right_moves}, [IRWriteBack]{}, [IRWriteBack]{}, span)
+    returned: ir_call_row_emit(m, p, b, row, owner_args, [Int]{left_arg, right_arg}, [Bool]{left_moves, right_moves}, [IRWriteBack]{}, [IRWriteBack]{}, [IRBoxLend]{}, span)
     b.fresh[left] = left_fresh
     b.fresh[right] = right_fresh
     result_ty: if method.name == "compare" -> Type.Named{name: "Ordering"} else -> Type.Bool

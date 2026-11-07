@@ -11,10 +11,10 @@ env: JET_STORE_DIR={work}/cache
 env: JETPACK_ROOT={work}/jetpack
 step: jetpack hangar ingest source --name streamed --ref streamed@fixture --no-color
 exit: 0 # rs:879-887 exit 0
-# The archive is binary, and step streams are text, so the dump goes to a file
-# and the magic bytes are checked on that file's raw bytes.
-step: sh -c "'{jetpack}' hangar dump streamed@fixture --no-color > '{work}/streamed.archive'"
+# The archive is binary, so the dump's stdout goes to a file (its raw bytes)
+# and the magic bytes are checked on that file.
+step: jetpack hangar dump streamed@fixture --no-color
+stdout: file streamed.archive
 exit: 0 # rs:899-913 exit 0 and magic bytes
 file: streamed.archive ^= "jet-hangar-archive-v1" # rs:899-913 exit 0 and magic bytes
-step: sh {work}/step-3.sh
-exit: 0 # rs:915 signer created
+file: jetpack/trust/hangar.key exists # rs:915 signer created

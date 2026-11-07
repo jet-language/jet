@@ -992,7 +992,8 @@ kit_steps_prepare: fn(step: KitStep, env: KitEnv, work: String, scratch: String,
         if built == "" -> return Err("built step has no artifact")
         argv[0] = built
     }
-    stdin: if step.stdin == "" || step.stdin == "null" -> "" else -> files.read(kit_steps_snapshot_path(snapshots, fixture, step.stdin)) ?? return Err("stdin snapshot: {err}")
+    // The stdin file's exact bytes: a case may feed input that is not UTF-8.
+    stdin: if step.stdin == "" || step.stdin == "null" -> [U8]{} else -> files.read_bytes(kit_steps_snapshot_path(snapshots, fixture, step.stdin)) ?? return Err("stdin snapshot: {err}")
     cwd: if step.cwd == "" -> work else -> kit_steps_work_path(step.cwd, env, work, scratch, built) ?? return Err("cwd escapes work directory")
     if step.isolate == "no-nix" {
         bootstrap: if step.action == "spawn" -> files.join(scratch, "child-{step.label}") else -> scratch

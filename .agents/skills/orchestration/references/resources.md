@@ -37,7 +37,7 @@ failure rows; typed traps are failure evidence, not a green compiler.
 
 Keep build output outside the repository on disk-backed storage. Give each
 checkout exclusive ownership of its Cargo target; shared binaries do not imply
-shared writable build targets. Configure external targets through `jet-env`.
+shared writable build targets. Configure external targets through `Tools/agent/JetEnv.jet`.
 Bound disk and memory use before starting work, account for peak allocations,
 and reclaim idle output promptly after integration. Never remove source,
 protected evidence, or artifacts still in use to make room for another job.
@@ -45,10 +45,8 @@ Forward a collected child's complete diagnostic buffer synchronously before
 throwing on failure. An asynchronous pipe write followed by an uncaught exception
 can truncate the last diagnostics; a partial log is not a collect-all census.
 
-`jet-env` preserves caller-selected Cargo wrappers; it does not select sccache
-based on whether a debug output directory exists. Set `JET_NO_SCCACHE=1` to
-clear both Rust wrapper variables after shell imports, including for release
-builds and immutable source exports. Generator freshness checks use `--check`
+`Tools/agent/JetEnv.jet` preserves caller-selected Cargo wrappers; it does not
+select sccache. Generator freshness checks use `--check`
 without rewriting their outputs; diagnostic row generation follows this same
 contract.
 
@@ -76,7 +74,8 @@ caller-owned stack storage, not lend a pointer to a different Rust layout.
 IP24/socket56 projections copy only the fixed carrier bytes; they allocate
 nothing and transfer no owner. Source-owned record fields require their exact
 native provider; never reinterpret a host/port record as a socket56 carrier.
-Reviewed narrow-parameter widening in `runtime-route-abi.mjs` is symbol/position
+Reviewed narrow-parameter widening (`masked_word_parameters` in
+`Tools/agent/RuntimeGenerators.jet`) is symbol/position
 specific and requires that parameter's current `.bit_and` mask in the export
 body. Comments, strings and unrelated functions are not mask evidence. Return
 values, output slots and every unlisted symbol keep the strict physical ABI.
@@ -113,9 +112,10 @@ the hold into the runnable queue. A worktree check can consume uncommitted
 hash refreshes that the export omits; commit the canonical generated outputs
 and re-export rather than bypassing the build-script stale-table guard.
 Core catalog changes also require the canonical structure registry and Core
-row projections. Regenerate them with `gen-core-tables --write` (the structure
-registry is edited directly); the enum payload and record rows
-(`CoreEnumPayloadRows.jet`, `CoreRecordRows.jet`) are authored by hand.
+row projections. Regenerate them with `jet Tools/agent/CoreSourceRows.jet`,
+which `jet Tools/agent/CoreSurfaceLedger.jet --write` runs (the structure registry is edited
+directly); `CoreRecordRows.jet` and the `CORE_ENUM_PAYLOAD_ROWS` of
+`CoreEnumPayloadRows.jet` are authored by hand.
 Refreshing the surface ledger alone does not keep the assembled compiler's
 catalog or source hashes current.
 Before releasing a producer, pin every live compiler target and read-only

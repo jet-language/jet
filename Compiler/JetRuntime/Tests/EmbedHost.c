@@ -2,7 +2,7 @@
 // jet_rt_host_arguments: its first runtime entry is an allocation. A system
 // linker keeps every runtime .init_array hook, the checked heap's
 // (Alloc.jet jet_rt_alloc_check_init) among them, so checked mode holds here
-// from the first allocation (run-alloc-parity.mjs embed-* cases).
+// from the first allocation (RunAllocParity.jet embed-* cases).
 #include <stdint.h>
 #include <string.h>
 extern void *jet_rt_alloc(int64_t,int64_t);

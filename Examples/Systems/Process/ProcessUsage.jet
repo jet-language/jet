@@ -1,0 +1,41 @@
+// A finished child's receipt says what it used, read from the kernel when the
+// child is reaped. `peak_memory_bytes` is the peak resident memory of the
+// largest single process (the child, or one descendant it waited for), never
+// the sum of the tree. `user_cpu_ns` and `system_cpu_ns` are the CPU time of
+// the child and every descendant it waited for. A pipeline receipt reports
+// the largest step's peak and the steps' summed CPU time.
+package: {
+    name: "process_usage"
+    authority: { allow: [Env, Exec, Exec.Args, IO, Mem.Alloc, Time.Wait] }
+}
+
+use {
+    process: core.process
+    os: core.sys
+}
+
+// Work the child does, so it uses CPU time of its own.
+spin: fn(rounds: Int) -> Int {
+    total := 0
+    loop i in 0..<rounds -> total = (total + i * i) % 1000003
+    total
+}
+
+run: fn() IOError! {
+    exe: os.executable()
+    if (process.args().get(0) ?? "") == "spin" {
+        print("spun: {spin(300000) >= 0}")
+        process.exit(0)
+    }
+    receipt: process.run_spec(process.cmd([exe, "spin"]).stdout(.Capture))
+    print("child: {receipt.output.trim()}")
+    print("peak memory recorded: {(receipt.peak_memory_bytes ?? -1) > 0}")
+    user: receipt.user_cpu_ns ?? -1
+    system: receipt.system_cpu_ns ?? -1
+    print("CPU time recorded: {user >= 0 && system >= 0 && user + system > 0}")
+
+    piped: process.pipeline([process.cmd([exe, "spin"]), process.cmd([exe, "spin"])])
+    print("pipeline: {piped.output.trim()}")
+    print("pipeline peak memory recorded: {(piped.peak_memory_bytes ?? -1) > 0}")
+    print("pipeline CPU time recorded: {(piped.user_cpu_ns ?? -1) + (piped.system_cpu_ns ?? -1) > 0}")
+}

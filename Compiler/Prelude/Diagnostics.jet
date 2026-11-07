@@ -6095,6 +6095,19 @@ UnhandledEntryFailure: struct {
     }
 }
 
+OutputCheckNotRun: struct {
+    impl Diagnostic {
+        code: "E3016"
+        stage: [.Runtime]
+        moment: .Run
+        meaning: "A native test batch ended in a fatal trap before its output checks ran"
+        no_fix: .Behavior
+        what: fn(self) -> String { "Output check not run: the test batch ended in a fatal trap" }
+        why: fn(self) -> String { "The test batch's process state was lost; a fresh reporter cannot truthfully execute a check against the test bodies' state." }
+        fix: fn(self) -> String { "Fix the fatal trap in the reported test, then rerun the complete test batch." }
+    }
+}
+
 MemoryOperationOutsideUnsafe: struct {
     op: String
 
