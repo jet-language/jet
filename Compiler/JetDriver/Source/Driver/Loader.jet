@@ -4540,13 +4540,14 @@ jet_driver_core_module_order: fn(modules: [JetDriverLoadedModule], source_units:
 }
 
 // One loaded module row; the program moves in.
-jet_driver_loaded_module: fn(source_unit_index: Int, unit: JetDriverSourceUnit, module_identity: String, program: &&Program) -> JetDriverLoadedModule {
+jet_driver_loaded_module: fn(source_unit_index: Int, unit: JetDriverSourceUnit, module_identity: String, program: &&Program, declared_module: String) -> JetDriverLoadedModule {
     JetDriverLoadedModule{
         source_unit_index: source_unit_index,
         source_identity: jet_driver_source_identity(unit.package_identity, unit.path),
         package_identity: unit.package_identity,
         module_identity: module_identity,
         module_name: unit.module_name,
+        declared_module: declared_module,
         program: program.move(),
     }
 }
@@ -4641,6 +4642,9 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
     namespace_expanded := [Bool]{}
     loop root_index in 0..<request.authorized_sources.roots.len() -> namespace_expanded.push(false)
     resolved_imports := [SemaRegistrationImportEdge]{}
+    // Unit index -> the dotted `name: module` path that declared it
+    // (JetDriverLoadedModule.declared_module); the first declaration wins.
+    declared_modules := [Int:String]{}
     module_edges := jet_driver_module_edges()
     // Exact virtual text records; these are never added to disk authorities:
     // the embedded Core modules as they load, and every module `build: fn`
@@ -4758,7 +4762,7 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
         jet_driver_bind_dependency_imports(program, unit, catalog.packages)
         module_identity: jet_driver_unit_module_identity(unit)
         if jet_driver_has_errors(parse_result.diagnostics) {
-            modules.push(jet_driver_loaded_module(source_unit_index, unit, module_identity, program))
+            modules.push(jet_driver_loaded_module(source_unit_index, unit, module_identity, program, declared_modules.get(source_unit_index) ?? ""))
             next
         }
         // Established bare names use the same declaring-owner table as Rust.
@@ -5051,6 +5055,10 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
                     import_path: if direct.valid && direct.path == target_unit.relative_path -> definition.name else -> "{definition.name}/module"
                     synthetic: ImportDecl{kind: ImportKind.File{path: import_path, span: definition.name_span}, alias: definition.name, alias_span: definition.name_span, span: definition.span, item_spans: [Span]{}, local_spans: [Span]{}, is_pub: definition.is_pub, is_package_pub: definition.is_package_pub, inline_version: None}
                     synthetic_imports.push(synthetic.copy())
+                    if declared_modules.get(target_unit_index) == None {
+                        outer: declared_modules.get(source_unit_index) ?? ""
+                        declared_modules[target_unit_index] = if outer == "" -> definition.name.copy() else -> "{outer}.{definition.name}"
+                    }
                     if aliases.get(definition.name) == None -> _ := aliases.add(definition.name, target_unit_index)
                     edge: SemaRegistrationImportEdge{
                         source_module_identity: module_identity,
@@ -5164,7 +5172,7 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
         }
         // Pushed last, so the loop reads its own program instead of a copy of
         // the module row's.
-        modules.push(jet_driver_loaded_module(source_unit_index, unit, module_identity, program))
+        modules.push(jet_driver_loaded_module(source_unit_index, unit, module_identity, program, declared_modules.get(source_unit_index) ?? ""))
         loop import_diagnostic_index in import_diagnostic_start..<diagnostics.len() {
             diagnostics[import_diagnostic_index] = diagnostic_with_source_path(diagnostics[import_diagnostic_index], unit.path, 0)
         }

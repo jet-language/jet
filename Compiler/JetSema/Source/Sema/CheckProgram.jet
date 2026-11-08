@@ -943,7 +943,7 @@ sema_incremental_module_headers: fn(modules: [SemaRegistrationModule]) -> [SemaR
         output.push(SemaRegistrationModule{
             package_identity: source_module.package_identity, module_identity: source_module.module_identity,
             module_name: source_module.module_name, core_source_alias: source_module.core_source_alias,
-            module_path: source_module.module_path, source_file: source_module.source_file,
+            module_path: source_module.module_path, declared_module: source_module.declared_module, source_file: source_module.source_file,
             source_segments: source_module.source_segments, source_origin: source_module.source_origin,
             program: sema_incremental_program_header(source_module.program), source: "",
             declarations: sema_incremental_item_headers(source_module.declarations),
@@ -1000,7 +1000,7 @@ sema_incremental_module_input: fn(environment: SemaScopeEnvironment, program: Se
     // the same memo as an untraced one, so the handle is out of the key.
     counters := scopes.lookup_counters.copy()
     scopes.lookup_counters = None
-    input := "module={environment.module_identity:Debug};package={environment.package_identity:Debug};name={environment.module_name:Debug};file={environment.source_file:Debug};origin={environment.source_origin:Debug};segments={environment.source_segments:Debug};types={program.checked_types:Debug};type_rows={program.checked_type_rows:Debug};type_slots={program.checked_type_name_slots:Debug};type_names={program.checked_type_name_rows:Debug};boxed={program.boxed_edges:Debug};declarations={declarations:Debug};generics={environment.generic_params:Debug};comptime={comptime_input};else={environment.else_arms:Debug};fixed_writes={environment.fixed_length_write_params:Debug};debug={environment.debug_sites:Debug};scope={scopes:Debug}"
+    input := "module={environment.module_identity:Debug};package={environment.package_identity:Debug};name={environment.module_name:Debug};declared={environment.declared_module:Debug};file={environment.source_file:Debug};origin={environment.source_origin:Debug};segments={environment.source_segments:Debug};types={program.checked_types:Debug};type_rows={program.checked_type_rows:Debug};type_slots={program.checked_type_name_slots:Debug};type_names={program.checked_type_name_rows:Debug};boxed={program.boxed_edges:Debug};declarations={declarations:Debug};generics={environment.generic_params:Debug};comptime={comptime_input};else={environment.else_arms:Debug};fixed_writes={environment.fixed_length_write_params:Debug};debug={environment.debug_sites:Debug};scope={scopes:Debug}"
     scopes.location_function = location.move()
     scopes.lookup_counters = counters.move()
     input.move()

@@ -272,6 +272,16 @@ sema_inline_member_source_name: fn(name: String) -> String Never! {
     member
 }
 
+// The inline module path of a lifted member function (`__jet_db_dinner_ddeep`
+// -> `db.inner`); "" for any other name.
+sema_inline_member_module: fn(name: String) -> String Never! {
+    if sema_inline_member_source_name(name) == name -> return ""
+    decoded: sema_inline_decode_generated_suffix(String.from_bytes(name.bytes()[6..<name.bytes().len()]) ?? "") ?? return ""
+    segments := decoded.split(".").to_list()
+    _ := segments.pop()
+    segments.join(".")
+}
+
 sema_inline_trim_leading_underscores: fn(name: String) -> String Never! {
     bytes: name.bytes()
     start := 0

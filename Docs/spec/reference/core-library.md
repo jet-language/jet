@@ -3868,6 +3868,17 @@ constant evaluation; they are not alternate syntax for bindings. See
 | `clamp<T: Comparable>(x: T, lo: T, hi: T) -> T` | `T` | Clamp `x` to the bounds; reversed bounds are accepted, and a NaN argument is the result. Prelude name: no import. |
 `keep` is the approved use-site identity sink when measurement must observe a value (`D-BENCH-KEEP1=A`).
 
+`SourceLocation` is the record `$here` and a `$caller` parameter default
+(`at: SourceLocation{$caller}`) give: `file`, `line`, `column`, `function`
+and `module`, displayed as `file:line:column`. `module` is the dotted module
+of the place: the package's name, then the `name: module` declarations that
+reach the file, then the inline modules around it. In package `shop`, code in
+`run.jet` is `shop`, code in the file `cache: module` declares is
+`shop.cache`, and code inside `db: module { … }` there is `shop.cache.db`.
+A file that no `name: module` declaration reaches sits at the package root.
+The compiler fills `module` at every `$here` and `$caller` site; its `""`
+default only covers a record built by hand.
+
 ### `core.testing` — deterministic test helpers
 
 `core.testing` provides deterministic values and comparison helpers for tests;

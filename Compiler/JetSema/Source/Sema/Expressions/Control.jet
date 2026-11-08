@@ -90,13 +90,29 @@ sema_expression_panic_location: fn(environment: SemaScopeEnvironment, program: S
 // parameter out. `type_name` "" is the inferred form, typed by the parameter.
 sema_site_location_expr: fn(type_name: String, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, span: Span) -> Expr Never! {
     location: sema_expression_panic_location(environment, program, scopes, span)
+    module_path: sema_site_module(environment, location.function)
     fields: [ExprField]{
         ExprField{name: "file", name_span: span, value: Expr.Str{parts: [StrPart]{StrPart.Lit{text: location.file}}, span: span, id: AST_NODE_GENERATED}},
         ExprField{name: "line", name_span: span, value: Expr.Int{value: location.line, span: span, width: None, raw: None, id: AST_NODE_GENERATED}},
         ExprField{name: "column", name_span: span, value: Expr.Int{value: location.column, span: span, width: None, raw: None, id: AST_NODE_GENERATED}},
         ExprField{name: "function", name_span: span, value: Expr.Str{parts: [StrPart]{StrPart.Lit{text: location.function}}, span: span, id: AST_NODE_GENERATED}},
+        ExprField{name: "module", name_span: span, value: Expr.Str{parts: [StrPart]{StrPart.Lit{text: module_path}}, span: span, id: AST_NODE_GENERATED}},
     }
     Expr.StructLit{type_name: type_name, type_args: [Type]{}, import_ns: None, as_trait: None, fields: fields, inferred: type_name == "", span: span, id: AST_NODE_GENERATED}
+}
+
+// The dotted module a source location names (SourceLocation.module): the
+// package's name, then the `name: module` declarations that reach the file,
+// then the inline modules around `function` (`shop.cache.store`). A Core
+// source names its Core module, and a file outside a package its own name.
+sema_site_module: fn(environment: SemaScopeEnvironment, function: String) -> String Never! {
+    parts: environment.package_identity.split(":").to_list()
+    core: environment.source_file.starts_with("<corelib>/")
+    root: if !core && parts.len() >= 3 && parts[0] == "package" -> parts[2].copy() else -> environment.module_name.copy()
+    path := if environment.declared_module == "" -> root else -> "{root}.{environment.declared_module}"
+    inline: sema_inline_member_module(function)
+    if inline != "" -> path = "{path}.{inline}"
+    path
 }
 
 // A parameter default that names the call site.

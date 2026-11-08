@@ -44,7 +44,7 @@ Do not hand-edit these rows. Add or change a spelling in Spellings.jet, then rer
 | `$package` | package fact root: `$package.name`, `.version` |
 | `$phase` | total evaluation-site phase fact |
 | `$program` | authorized checked-program fact root |
-| `$here` | the `SourceLocation` (file, line, column, function) where it is written |
+| `$here` | the `SourceLocation` (file, line, column, function, module) where it is written |
 | `$caller` | the `SourceLocation` of the call, legal only as a parameter default `at: SourceLocation{$caller}` or inside an #Expand macro |
 | `@SOURCE` | lexical source-snapshot metadata query (no ratified `$` root yet) |
 | `@TYPES` | retained runtime type-catalog query (no ratified `$` root yet) |
