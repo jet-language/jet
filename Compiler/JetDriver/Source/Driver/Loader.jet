@@ -43,6 +43,8 @@ use {
         core_module_has_type,
         diagnostic_with_source_path,
         jet_ring_parse_manifest_layer,
+        LOG_FILTER_FIX,
+        log_filter_bad_pair,
         source_file_id,
         name_count,
         name_find,
@@ -1088,6 +1090,7 @@ jet_driver_parse_package_root: fn(snapshot: JetDriverAuthorizedSourceSnapshot, r
     edition := JET_DRIVER_EDITION
     runtime_ceiling := RuntimeLayer?{None}
     allocator_policy := AllocatorPolicy.HostedDefault
+    log_filter := ""
     authority_allow := [String]?{None}
     authority_deny := [String]?{None}
     authority_grants := [PackageGrant]{}
@@ -1108,6 +1111,7 @@ jet_driver_parse_package_root: fn(snapshot: JetDriverAuthorizedSourceSnapshot, r
     edition_seen := false
     runtime_seen := false
     allocator_seen := false
+    log_seen := false
     authority_seen := false
     deps_seen := false
     configs_seen := false
@@ -1226,6 +1230,20 @@ jet_driver_parse_package_root: fn(snapshot: JetDriverAuthorizedSourceSnapshot, r
                     parsed_allocator := jet_driver_parse_program_allocator(allocator_value.text, token.span, diagnostics)
                     if parsed_allocator != None -> allocator_policy = parsed_allocator ?? AllocatorPolicy.HostedDefault
                     index = allocator_value.next_index - 1
+                }
+                "log" -> {
+                    if log_seen -> diagnostics.push(jet_driver_diagnostic("E0003", token.span, "package log filter is declared more than once", "one package sets one core.log level filter", "keep one `log:` field"))
+                    log_seen = true
+                    if {
+                        value_index < tokens.len() && jet_driver_is_manifest_string(tokens[value_index].kind) -> {
+                            text: token_decoded(lexed.tables, tokens[value_index])
+                            if log_filter_bad_pair(text) == {
+                                .Val(pair) -> diagnostics.push(jet_driver_diagnostic("E0003", token.span, "package log filter pair `{pair}` is invalid", "a log filter is comma-separated `level` and `module=level` pairs", LOG_FILTER_FIX))
+                                None -> log_filter = text.trim()
+                            }
+                        }
+                        else -> diagnostics.push(jet_driver_diagnostic("E0003", token.span, "package log filter must be a string", "a log filter is comma-separated `level` and `module=level` pairs", "write `log: \"warn,shop.db=debug\"`"))
+                    }
                 }
                 "deps" -> {
                     if deps_seen -> diagnostics.push(jet_driver_diagnostic("E0003", token.span, "package dependencies are declared more than once", "one `deps:` block defines the package's direct dependency bindings", "keep one `deps:` block"))
@@ -1348,7 +1366,7 @@ jet_driver_parse_package_root: fn(snapshot: JetDriverAuthorizedSourceSnapshot, r
         diagnostic_index += 1
     }
     identity: jet_driver_package_identity(name, version ?? "")
-    JetDriverPackageInfo{root_index: root_index, root_path: root.canonical_path, identity: identity, name: name, version: version, edition: edition, runtime_ceiling: runtime_ceiling, allocator_policy: allocator_policy, authority_allow: authority_allow, authority_deny: authority_deny, authority_needs: authority_needs, authority_grants: authority_grants.move(), entry: entry, manifest_path: Val(manifest_path), policy_declarations: policy_declarations.move(), policy_unsafe_paths: policy_unsafe_paths.move(), policy_expert: policy_expert, policy_lints_deny: policy_lints_deny.move(), inline_package: inline_carrier != None, configs: configs.move(), dependencies: dependencies, outputs: outputs, settings: settings.move(), profile_settings: profile_settings.move(), boundaries: boundaries.move()}
+    JetDriverPackageInfo{root_index: root_index, root_path: root.canonical_path, identity: identity, name: name, version: version, edition: edition, runtime_ceiling: runtime_ceiling, allocator_policy: allocator_policy, log_filter: log_filter, authority_allow: authority_allow, authority_deny: authority_deny, authority_needs: authority_needs, authority_grants: authority_grants.move(), entry: entry, manifest_path: Val(manifest_path), policy_declarations: policy_declarations.move(), policy_unsafe_paths: policy_unsafe_paths.move(), policy_expert: policy_expert, policy_lints_deny: policy_lints_deny.move(), inline_package: inline_carrier != None, configs: configs.move(), dependencies: dependencies, outputs: outputs, settings: settings.move(), profile_settings: profile_settings.move(), boundaries: boundaries.move()}
 }
 
 // The source text of tokens `start..<end` (comments dropped), and a lone

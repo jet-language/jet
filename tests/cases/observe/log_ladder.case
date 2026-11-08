@@ -1,0 +1,53 @@
+# The core.log level ladder, lowest first: stock info, the package's `log:`
+# field, the code's `set_level`, JET_LOG, `--log`; the longest module path
+# wins. Each line is the lowest level of `shop`, `shop.db` and `shop.web`,
+# before and after the code's `set_level(.Debug, path: "shop.web")`.
+fixture: log_ladder.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step stock: jet run .
+exit: 0
+stdout: = "shop=info shop.db=info shop.web=info\nshop=info shop.db=info shop.web=debug\n"
+step env: jet run .
+env: JET_LOG=warn,shop.db=debug
+exit: 0
+stdout: = "shop=warn shop.db=debug shop.web=warn\nshop=warn shop.db=debug shop.web=debug\n"
+step env-keeps: jet run .
+env: JET_LOG=warn,shop.web=error
+exit: 0
+stdout: = "shop=warn shop.db=warn shop.web=error\nshop=warn shop.db=warn shop.web=error\n"
+stderr: ~ "\"body\":\"log.set_level(debug) at run.jet:31:9 for `shop.web` is kept below JET_LOG, which sets error\"" # the timestamp varies; the note names the call, the path and JET_LOG
+step flag: jet run --log=error .
+exit: 0
+stdout: = "shop=error shop.db=error shop.web=error\nshop=error shop.db=error shop.web=debug\n"
+step flag-over-env: jet run --log=shop.web=critical .
+env: JET_LOG=info,shop.web=debug
+exit: 0
+stdout: = "shop=info shop.db=info shop.web=critical\nshop=info shop.db=info shop.web=critical\n"
+stderr: ~ "\"body\":\"log.set_level(debug) at run.jet:31:9 for `shop.web` is kept below --log, which sets critical\"" # the timestamp varies; the note names --log
+step bad-env: jet run .
+env: JET_LOG=warn,shop=loud
+exit: 1
+stdout: = ""
+stderr: = "Error: JET_LOG: `shop=loud` is not a log filter pair; write `level` or `module=level`, where level is debug, info, warn, error, critical or fatal\n"
+step bad-flag: jet run --log=warn,9db=info .
+exit: 2
+stderr: ~ "`--log=warn,9db=info`: `9db=info` is not a log filter pair" # the usage error names the bad pair
+stderr: ~ "Write `level` or `module=level`, where level is debug, info, warn, error, critical or fatal" # the usage error teaches the pair shape
+copy: package_log.template package.jet
+step package: jet run .
+exit: 0
+stdout: = "shop=warn shop.db=debug shop.web=warn\nshop=warn shop.db=debug shop.web=debug\n"
+step package-under-env: jet run .
+env: JET_LOG=info
+exit: 0
+stdout: = "shop=info shop.db=debug shop.web=info\nshop=info shop.db=debug shop.web=debug\n"
+step explain: jet explain log .
+env: JET_LOG=error
+exit: 0
+stdout: = "core.log level filter, lowest first; the longest module path wins:\n  stock: info (core.log)\n  package: warn,shop.db=debug (./package.jet:4)\n  code: log.set_level(.Debug, path: \"shop.web\") (./run.jet:31)\n  JET_LOG: error (environment)\n  --log: given to `jet run` or `jet dev`, above every other source\nstart filter: error,shop.db=debug\na code call for a path JET_LOG or --log sets keeps their level and logs one note\n"
+copy: package_bad_log.template package.jet
+step bad-package: jet run .
+exit: 1
+stderr: ~ "Invalid value for `log`: `shop.db=loud`" # the manifest error names the bad pair

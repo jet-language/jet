@@ -491,6 +491,9 @@ JetDriverPackageInfo: struct {
     edition: String
     runtime_ceiling: RuntimeLayer?
     allocator_policy: AllocatorPolicy
+    // The `log:` field: the package's level filter, checked
+    // (jet_driver_log_field); "" when it has none.
+    log_filter: String{""}
     authority_allow: [String]?
     authority_deny: [String]?
     authority_needs: [String]
@@ -698,6 +701,8 @@ JetDriverCompileResult: struct {
     run_member_paths: [String]{[String]{}}
     // The entry package's `allocator:` policy (jet_driver_entry_allocator).
     allocator: AllocatorPolicy{AllocatorPolicy.HostedDefault}
+    // The entry package's `log:` level filter (jet_driver_entry_log).
+    log_filter: String{""}
     // A compile through assembly: the encoded JetCommandSchema record its
     // artifact carries (JetSema Registration/CliSchema.jet, spec.md:4675).
     command_record: [U8]{[U8]{}}
@@ -710,6 +715,15 @@ jet_driver_entry_allocator: fn(load: JetDriverLoadResult) -> AllocatorPolicy Nev
         if package.identity == load.package_identity -> return package.allocator_policy
     }
     AllocatorPolicy.HostedDefault
+}
+
+// The `log:` level filter of the entry package of `load`; "" when it has
+// none.
+jet_driver_entry_log: fn(load: JetDriverLoadResult) -> String Never! {
+    loop package in load.packages {
+        if package.identity == load.package_identity -> return package.log_filter.copy()
+    }
+    ""
 }
 
 // The compiler-internal all-phases diagnostic mode (`JET_KEEP_GOING=1`, read

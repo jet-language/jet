@@ -3749,17 +3749,18 @@ The library-call boundary is deliberate: ordinary human formatting remains expli
 
 ### `core.log` — structured logging
 
-`core.log` writes structured records through a configured sink. Levels are
-`debug`, `info`, `warn`, `error`, `critical`, and `fatal`; `warning` is an
-alias for `warn`. A record can carry typed fields and a redaction marker. The
+`core.log` writes structured records through a configured sink. The levels are
+`LogLevel.Debug`, `.Info`, `.Warn`, `.Error`, `.Critical` and `.Fatal`; filters
+spell them `debug`, `info`, `warn`, `error`, `critical` and `fatal`. A record
+can carry typed fields and a redaction marker, and every record carries a
+`module` field: the `SourceLocation.module` of the call that logged it. The
 package source is [`Core/Log/Log.jet`](../../../Core/Log/Log.jet).
 
 | Signature | Result | Description |
 |---|---|---|
 | `debug(message: String) -[Log]>` / `info(message: String) -[Log]>` / `warn(message: String) -[Log]>` | — | Emit a record at the named level. |
 | `error(message: String) -[Log]>` / `critical(message: String) -[Log]>` / `fatal(message: String) -[Log]>` | — | Emit a high-severity record. |
-| `warning(message: String) -[Log]>` | — | Use the Python-compatible warning spelling for `warn`. |
-| `log(level: String, message: String) -[Log]>` | — | Emit at a caller-selected level. |
+| `log(level: LogLevel, message: String) -[Log]>` | — | Emit at a caller-selected level. |
 | `debug_fields(message: String, fields: [LogField]) -[Log]>` | — | Emit debug data with structured fields. |
 | `info_fields(message: String, fields: [LogField]) -[Log]>` | — | Emit info data with structured fields. |
 | `warn_fields(message: String, fields: [LogField]) -[Log]>` | — | Emit warning data with structured fields. |
@@ -3771,21 +3772,48 @@ package source is [`Core/Log/Log.jet`](../../../Core/Log/Log.jet).
 | `redact(key: String) -> LogField` | field | Mark a key as redacted. |
 | `span(name: String) -[Log]> LogSpan` | span | Open a named span. |
 | `enter(span: LogSpan) -[Log]>` / `close(span: LogSpan) -[Log]>` | — | Enter or close a span. |
-| `set_sink(kind: String, path: String) -[Log]>` / `set_level(level: String) -[Log]>` | — | Configure output and filtering. |
+| `set_sink(kind: String, path: String) -[Log]>` | — | Select the output. |
+| `set_level(level: LogLevel, path: String{""}) -[Log]>` | — | Set the code's level for the module at `path` and every module under it; `""` is every module. |
 | `sample_every(n: Int) -[Log]>` | — | Sample every positive number of records. |
 | `counter(name: String, value: Int) -> LogField` | field | Build a counter field. |
 | `otlp_file(path: String) -[Log, FS]>` | — | Select a file sink for OTLP output. |
 | `set_trace_id(id: String) -[Log]>` | — | Attach a trace identifier to later records. |
 | `setup(spec: String) -[Log]>` | — | Apply comma-separated `key=value` settings; a bare `auto`, `json` or `text` selects the format. |
-| `enabled(level: String) -[Log]> Bool` | Boolean | Test whether a level is enabled. |
+| `enabled(level: LogLevel) -[Log]> Bool` | Boolean | Test whether a record at `level` from the calling module would be written. |
+| `record(level: LogLevel, message: String, fields: [LogField]) -> LogRecord` / `handler(level: LogLevel) -> Handler` | record, handler | Build a record, or a handler that writes records at or above `level`. |
 | `flush() -[Log]>` / `disable() -[Log]>` | — | Flush records or disable logging. |
+
+The emitting functions, `handle`, `set_level` and `enabled` also take a
+trailing `at: SourceLocation{$caller}`; callers leave it to the compiler.
+
+**Level filter.** A filter is comma-separated pairs: a bare `level` covers
+every module, and `module=level` covers that dotted module path and every
+module under it. For each record the pair with the longest matching path
+wins. Five sources set pairs, each above the earlier on the same path:
+
+1. stock: `info`;
+2. the package's top-level `log:` field in `package.jet`, such as
+   `log: "warn,shop.db=debug"`;
+3. the code's `set_level` calls;
+4. the `JET_LOG` environment variable, such as `JET_LOG=warn,shop.db=debug`;
+5. the `--log=<filter>` flag of `jet run` and `jet dev`.
+
+A `set_level` call for a path that `JET_LOG` or `--log` sets keeps the
+operator's level and logs one `warn` note naming the call's file and line. A
+pair that is not `level` or `module=level` is refused where it is written: the
+package's `log:` field fails the manifest check, `--log` is a usage error
+(E2104), and `JET_LOG` ends the program at startup with an error naming the
+pair. `jet explain log [<file|dir>]` lists each source with its file and line,
+and the filter the program starts with.
 
 Sink names are normalized to `stderr`, `json`, `jsonl`, or `text`; there is
 no `stdout` sink. `jsonl` and `text` sinks require a path. An unsupported sink
 kind, a file sink without a path, or an unknown `setup` setting leaves the
 configuration unchanged and logs an `error` record naming the rejected
 setting. Keep secrets in `redact` fields so
-the sink, rather than each caller, owns the redaction decision.
+the sink, rather than each caller, owns the redaction decision; a
+`#Credential` value passed to any `core.log` call is denied at compile time
+(E0722).
 `fatal` emits, flushes, and terminates the process with status 1; `disable`
 suppresses later emission until process end.
 
@@ -3880,7 +3908,7 @@ reach the file, then the inline modules around it. In package `shop`, code in
 `shop.cache`, and code inside `db: module { … }` there is `shop.cache.db`.
 A file that no `name: module` declaration reaches sits at the package root.
 The compiler fills `module` at every `$here` and `$caller` site; its `""`
-default only covers a record built by hand.
+default only covers a record built by hand. `core.log` filters records by it.
 
 ### `core.testing` — deterministic test helpers
 

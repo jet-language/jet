@@ -47,6 +47,8 @@ use {
         TEST_SETTINGS_PLAN_ENV,
         TestSetting,
         TestSettingKind,
+        LOG_FILTER_FIX,
+        log_filter_bad_pair,
         diagnostic_from_registry,
         diagnostic_registry_row,
         diagnostic_render_all,
@@ -1259,6 +1261,8 @@ jet_cli_with_build_options: fn(plan: &&JetCLIPlan, jet_argv: [String], quiet: Bo
                     // `jet run --observe` (jet_cli_run_entry admits it on a run only).
                     observed := options.move()
                     observed.observe = !watch && jet_cli_flag_before_separator(jet_argv, "--observe")
+                    observed.log = jet_cli_log_flag(jet_argv) ?? return jet_cli_fail("E2104", "`--log` needs a level filter", jet_cli_why("E2104"), "write `--log=warn,shop.db=debug`: {LOG_FILTER_FIX}", color, JET_DRIVER_EXIT_USAGE)
+                    if log_filter_bad_pair(observed.log) == .Val(pair) -> return jet_cli_fail("E2104", "`--log={observed.log}`: `{pair}` is not a log filter pair", jet_cli_why("E2104"), LOG_FILTER_FIX, color, JET_DRIVER_EXIT_USAGE)
                     return JetCLIPlan.Run{file: file.move(), source: source.move(), color: color, options: observed, verbose: verbose, json: json, threads: threads, program_args: program_args.move(), invocation: invocation.move(), notice: "{notice}{notes}", watch: watch, entry: entry.move()}
                 }
             }
@@ -1478,7 +1482,20 @@ jet_cli_build_args_refused: fn(file: String, color: Bool) -> JetCLIPlan Never! {
 // `jet dev`'s). Any other registered flag on a run is refused until its port
 // lands, never ignored; an unregistered one was already refused by E2102, or
 // is ignored by the `jet <file>` shorthand as the Rust host ignores it.
-JET_CLI_RUN_PORTED_FLAGS: [String]{"--release", "--profile", "--verbose", "-v", "--quiet", "--json", "--color", "--no-color", "--threads", "--trace", "--allow", "--allow-all", "-A", "--deny", "-p", "--show-default", "--no-prepare", "--set", "--gate"}
+JET_CLI_RUN_PORTED_FLAGS: [String]{"--release", "--profile", "--verbose", "-v", "--quiet", "--json", "--color", "--no-color", "--threads", "--trace", "--allow", "--allow-all", "-A", "--deny", "-p", "--show-default", "--no-prepare", "--set", "--gate", "--log"}
+
+// `--log=<filter>` of `jet run` and `jet dev`, the last one before `--`: the
+// core.log level filter the program starts with, above JET_LOG
+// (Core/Log/Log.jet); "" when none is given, None for a bare `--log`.
+jet_cli_log_flag: fn(jet_argv: [String]) -> String? Never! {
+    filter := ""
+    loop argument in jet_argv {
+        if argument == "--" -> break
+        if argument == "--log" -> return None
+        if argument.starts_with("--log=") -> filter = argument.removeprefix("--log=").trim()
+    }
+    Val(filter)
+}
 
 // `jet run [<file>]` under its build options (jet_cli_build_options); `watch`
 // makes it `jet dev`.
@@ -1797,7 +1814,8 @@ jet_cli_test_file: fn(jet_argv: [String], file: String, color: Bool, verbose: Bo
 // are load-only source queries; `--web-graph <file>` reports the application
 // graph of the checked entry (WebGraph.jet). Any other query names a package:
 // the Jetpack engine explains its Hangar record or last realization attempt.
-// The `--reload` and `--cost` views stay refused.
+// The `--reload` and `--cost` views stay refused. `log [<file|dir>]` lists
+// every source of the core.log level filter (LogExplain.jet).
 jet_cli_explain: fn(jet_argv: [String], args: [String], color: Bool, json: Bool, threads: Int?) -[FS, Env]> JetCLIPlan Never! {
     if jet_cli_has(jet_argv, "--reload") -> return jet_cli_not_ported("explain --reload", color)
     if jet_cli_has(jet_argv, "--cost") -> return jet_cli_not_ported("explain --cost", color)
@@ -1808,6 +1826,7 @@ jet_cli_explain: fn(jet_argv: [String], args: [String], color: Bool, json: Bool,
     if jet_cli_explain_diagnostic(args, color, json) == .Val(plan) -> return plan
     if args.len() == 2 && jet_cli_is_diagnostic_code(args[1]) -> return JetCLIPlan.Done{output: jet_driver_explain_code(Val(args[1]), color)}
     query: args[1]
+    if query == "log" -> return jet_cli_explain_log(args, color, json)
     if query == "marker" {
         // `run_explain_marker`: extra words stay ignored.
         if args.len() < 4 -> return jet_cli_done("", "usage: jet explain marker <file>:<line> <policy-key>\n", JET_DRIVER_EXIT_USAGE)

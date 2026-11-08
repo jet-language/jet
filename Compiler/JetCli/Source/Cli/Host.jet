@@ -1022,6 +1022,8 @@ jet_cli_native_program: fn(result: JetDriverCompileResult, inputs: &&JetDriverLo
     checks := jet_cli_ir_checks(result, checked, options)
     checks.checked_alloc = jet_cli_checked_alloc(options)
     checks.observe = options.observe
+    checks.log_package = result.log_filter.copy()
+    checks.log_flag = options.log.copy()
     declarations := jet_driver_checked_declarations(checked)
     // The program's C closure defines its foreign functions' symbols. An
     // `extern rust` function is called through the slot descriptor its helper
@@ -1583,7 +1585,7 @@ jet_cli_finish: fn(output: JetDriverVerbOutput) -> Never {
 // jet runs this on its main thread).
 // Launching its own path again runs it the way it runs now: this jet, this
 // profile and build-option flags, this invocation's authority
-// (`jet run [--profile=…] [--optimize=…] [--gate=…] [-A] [--allow=…] [--deny=…]`).
+// (`jet run [--profile=…] [--optimize=…] [--log=…] [--gate=…] [-A] [--allow=…] [--deny=…]`).
 jet_cli_launch_plan: fn(file: String, program_args: [String], options: BuildOptions, invocation: JetCLIInvocationAuthority?, vars: [JetCLIEnvVar]) -> X64Launch {
     executable: cli_files.absolute(file) ?? file
     argv := [String]{executable}
@@ -1595,6 +1597,7 @@ jet_cli_launch_plan: fn(file: String, program_args: [String], options: BuildOpti
     }
     loop setting in options.settings -> relaunch.push("--set={setting.name}={setting.value}")
     if options.observe -> relaunch.push("--observe")
+    if options.log != "" -> relaunch.push("--log={options.log}")
     loop key in options.gates -> relaunch.push("--gate={policy_key_name(key)}=allow")
     if invocation == .Val(rows) {
         if rows.all -> relaunch.push("-A")

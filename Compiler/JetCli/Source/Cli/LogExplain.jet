@@ -1,0 +1,122 @@
+// `jet explain log [<file|dir>]`: every source of the core.log level filter,
+// lowest first, each with the file:line that sets it (Core/Log/Log.jet owns
+// the ladder): the stock `info`, the package's `log:` field, the code's
+// `log.set_level` calls, JET_LOG, and the `--log` of `jet run`/`jet dev`. The
+// start filter merges the sources a program reads before its first line; a
+// code call changes it as it runs, below JET_LOG and `--log`.
+use {
+    cli_files: core.files
+    cli_sys: core.sys
+    jet_driver.[JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR]
+    jet_foundation.[LOG_FILTER_FIX, log_filter_bad_pair]
+}
+
+// One source of the filter: its rung, the text it sets, and where.
+JetCLILogSource: struct {
+    rung: String
+    filter: String
+    site: String
+}
+
+// One `path=level` pair of a merged filter; the root path is "".
+JetCLILogPair: struct {
+    path: String
+    level: String
+}
+
+jet_cli_explain_log: fn(args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPlan Never! {
+    target: if args.len() > 2 -> args[2] else -> "."
+    directory: if cli_files.is_dir(target) -> target else -> jet_cli_parent(target) ?? "."
+    root: jet_cli_manifest_root(directory)
+    ladder := [JetCLILogSource]{{rung: "stock", filter: "info", site: "core.log"}}
+    if root == .Val(home) {
+        manifest: "{home}/package.jet"
+        text: cli_files.read(manifest) ?? ""
+        if jet_cli_log_package_field(text) == .Val(found) {
+            ladder.push(JetCLILogSource{rung: "package", filter: found.filter, site: "{manifest}:{found.site}"})
+        }
+        entries := cli_files.walk(home, None) ?? [cli_files.WalkEntry]{}
+        entries.sort_by((left: cli_files.WalkEntry, right: cli_files.WalkEntry) -> left.relative <=> right.relative)
+        loop entry in entries {
+            if entry.is_dir || !entry.relative.ends_with(".jet") || entry.relative.starts_with(".jet/") -> next
+            source: cli_files.read(entry.path) ?? next
+            loop (index, line) in source.split("\n").to_list() {
+                code: line.trim()
+                if code.starts_with("//") || !code.contains("set_level(") -> next
+                ladder.push(JetCLILogSource{rung: "code", filter: code, site: "{entry.path}:{index + 1}"})
+            }
+        }
+    }
+    environment: (cli_sys.get("JET_LOG") ?? "").trim()
+    if environment != "" {
+        if log_filter_bad_pair(environment) == .Val(pair) -> return jet_cli_fail("E2104", "JET_LOG: `{pair}` is not a log filter pair", jet_cli_why("E2104"), LOG_FILTER_FIX, color, JET_DRIVER_EXIT_USER_ERROR)
+        ladder.push(JetCLILogSource{rung: "JET_LOG", filter: environment, site: "environment"})
+    }
+    // The start filter: every source a program reads before its first line.
+    pairs := [JetCLILogPair]{}
+    loop source in ladder {
+        if source.rung != "code" -> jet_cli_log_merge(pairs, source.filter)
+    }
+    start: jet_cli_log_render(pairs)
+    if json {
+        rows := [String]{}
+        loop source in ladder -> rows.push(jet_cli_log_source_json(source))
+        return jet_cli_done("{{\"sources\":[{rows.join(",")}],\"start\":{jet_cli_json_string(start)}}}\n", "", JET_DRIVER_EXIT_OK)
+    }
+    lines := [String]{"core.log level filter, lowest first; the longest module path wins:"}
+    loop source in ladder -> lines.push("  {source.rung}: {source.filter} ({source.site})")
+    lines.push("  --log: given to `jet run` or `jet dev`, above every other source")
+    lines.push("start filter: {start}")
+    if environment != "" -> lines.push("a code call for a path JET_LOG or --log sets keeps their level and logs one note")
+    jet_cli_done("{lines.join("\n")}\n", "", JET_DRIVER_EXIT_OK)
+}
+
+// The top-level `log: "…"` field of a package.jet and its 1-based line.
+JetCLILogField: struct {
+    filter: String
+    site: Int
+}
+
+jet_cli_log_package_field: fn(text: String) -> JetCLILogField? Never! {
+    loop (index, line) in text.split("\n").to_list() {
+        if !line.starts_with("log:") -> next
+        value: line.trim().removeprefix("log:").trim().removesuffix(",").trim()
+        if !value.starts_with("\"") || !value.ends_with("\"") || value.len() < 2 -> next
+        return Val(JetCLILogField{filter: value.removeprefix("\"").removesuffix("\""), site: index + 1})
+    }
+    None
+}
+
+// Layers `filter` over `pairs`: a bare level sets the root path.
+jet_cli_log_merge: fn(pairs: &[JetCLILogPair], filter: String) {
+    loop raw in filter.split(",").to_list() {
+        pair: raw.trim()
+        if pair == "" -> next
+        parts: pair.split("=").to_list()
+        path: if parts.len() == 1 -> "" else -> parts[0].trim()
+        level: if parts.len() == 1 -> pair else -> parts[1].trim()
+        replaced := false
+        loop index in 0..<pairs.len() {
+            if pairs[index].path == path {
+                pairs[index].level = level
+                replaced = true
+            }
+        }
+        if !replaced -> pairs.push(JetCLILogPair{path: path, level: level})
+    }
+}
+
+jet_cli_log_render: fn(pairs: [JetCLILogPair]) -> String Never! {
+    words := [String]{}
+    loop pair in pairs {
+        if pair.path == "" -> words.push(pair.level.copy())
+    }
+    loop pair in pairs {
+        if pair.path != "" -> words.push("{pair.path}={pair.level}")
+    }
+    words.join(",")
+}
+
+jet_cli_log_source_json: fn(source: JetCLILogSource) -> String Never! {
+    "{{\"rung\":{jet_cli_json_string(source.rung)},\"filter\":{jet_cli_json_string(source.filter)},\"site\":{jet_cli_json_string(source.site)}}}"
+}

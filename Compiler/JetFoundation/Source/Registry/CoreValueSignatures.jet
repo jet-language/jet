@@ -806,13 +806,13 @@ core_value_fixed_signature: fn(module_name: String, member: String) -> CoreTyped
             return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, None))
         }
         if member == "set_level" {
-            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, None))
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("LogLevel"), read)}, None))
         }
         if core_sig_one_of(member, [String]{"disable", "flush"}) {
             return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, None))
         }
         if member == "enabled" {
-            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, Val(Type.Bool)))
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("LogLevel"), read)}, Val(Type.Bool)))
         }
         if core_sig_one_of(member, [String]{"set_trace_id", "__trace_store"}) {
             return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, None))
@@ -832,8 +832,14 @@ core_value_fixed_signature: fn(module_name: String, member: String) -> CoreTyped
         if member == "__disabled_store" {
             return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.Bool, read)}, None))
         }
-        if member == "__sink_store" {
+        if core_sig_one_of(member, [String]{"__sink_store", "__filter_store"}) {
             return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, None))
+        }
+        if member == "__config_load" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.Int, read)}, Val(Type.String)))
+        }
+        if member == "__filter_load" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(Type.String)))
         }
     }
 

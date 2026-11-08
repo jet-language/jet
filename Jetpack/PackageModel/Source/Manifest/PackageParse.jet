@@ -2,7 +2,7 @@
 // (Package/mod.rs `parse_common` and its field readers). There is no second,
 // legacy-vocabulary parser.
 use {
-    jet_foundation.[Span, jet_ring_parse_manifest_layer]
+    jet_foundation.[Span, jet_ring_parse_manifest_layer, log_filter_bad_pair]
     jet_lexer.[
         Lexed, TOKEN_BLOCK_COMMENT, TOKEN_DOT, TOKEN_EOF, TOKEN_LBRACE, TOKEN_LINE_COMMENT, Token, lex,
     ]
@@ -174,6 +174,11 @@ impl PackageFacts {
             "target" -> return Err(PackageParseError.UnknownField(field))
             "targets" -> self.targets = pkg_parse_target_profiles(pkg_record_body(value, "targets"))
             "allocator" -> self.allocator = pkg_parse_program_allocator(value)
+            "log" -> {
+                raw: pkg_scalar(value)
+                if log_filter_bad_pair(raw) == .Val(pair) -> return Err(PackageParseError.InvalidValue{field: "log", value: pair})
+                self.log = Val(raw.trim())
+            }
             "runtime" -> {
                 raw: pkg_scalar(value)
                 self.layer = Val(jet_ring_parse_manifest_layer(raw) ?? return Err(PackageParseError.InvalidValue{field: "runtime", value: raw}))
@@ -233,7 +238,7 @@ impl PackageFacts {
 pkg_package_only_field: fn(field: String) -> Bool PackageParseError! {
     if field == MANIFEST_BLOCK_MEMBERS -> return Err(PackageParseError.ConfigMembers)
     Ok(if field == {
-        "jet" | "edition" | "description" | "license" | "repository" | "targets" | "allocator" | "runtime" | "packages" | "dev" | "grants" | "authority" | "policy" | "configs" -> true
+        "jet" | "edition" | "description" | "license" | "repository" | "targets" | "allocator" | "log" | "runtime" | "packages" | "dev" | "grants" | "authority" | "policy" | "configs" -> true
         MANIFEST_BLOCK_BOUNDARIES | MANIFEST_BLOCK_BUILD | MANIFEST_BLOCK_SETTINGS | "test" | "suites" -> true
         else -> false
     })
