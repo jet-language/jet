@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6686,
-    "rev": 96042,
+    "rev": 96049,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -29298,6 +29298,16 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-08",
+          "by": "Main",
+          "text": "Main 2026-11-08 05:30: 9513fce6f7 (G1Lead) removes the SIGILL. A failure that leaves a task body now stops the task as panic does (jet_rt_require_stop kind 2), and join returns .Panicked(\"task@N (spawn site N): <error Show text>\") instead of the process reaching Unreachable. Case task_control_tiers/a_failure_leaving_a_task_body_joins_as_panicked_on_every_tier covers jet run and the none/basic/release builds. c5 stays OPEN: it requires the body Err(e) to reach the joiner as E, not TaskFailure.Panicked. This fix is the safe interim (a typed join failure, no crash), not c5."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
+          "text": "Main 2026-11-08 04:55 defect for c5/c62, found by G1Lead while profiling w11, pre-existing: a fallible call whose error propagates out of a task body traps with SIGILL at the task lambda instead of failing the task. Repro: `use { net: core.net }  run: fn() { t: task { _ := net.tcp_connect(\"127.0.0.1:1\") }  t.join() ?? panic(\"join\")  print(\"done\") }`. Expected: join yields the NetError as the task failure and the ?? panics with \"join\". Actual: SIGILL. The same line directly in `run` propagates NetError normally. Queued for G1Lead after the #6085 w11 fixes and #6592 phase 2."
+        },
+        {
           "at": "2026-11-06",
           "by": "Main",
           "text": "Examples concept-area cutover (2c3e68a70b) moved paths this card's criteria cite. Read each cited path as its new home: c5: Examples/features/concurrency/task_domain_error.jet -> Examples/Concurrency/TaskDomainError.jet [new path does not exist yet: the criterion still has to create it]; c24: Examples/features/streams/stream_readiness.jet -> Examples/Collections/Iterators/StreamReadiness.jet [new path does not exist yet: the criterion still has to create it]."
@@ -30066,7 +30076,7 @@
       "parentId": "c0j2afiq",
       "needsAcceptance": false,
       "created": "2026-09-12T14:30:16.660Z",
-      "updated": "2026-11-07T03:07:38.789Z",
+      "updated": "2026-11-08T10:12:12.791Z",
       "updatedBy": "Main",
       "workOrder": 94,
       "goals": [
@@ -73449,6 +73459,16 @@
         {
           "at": "2026-11-08",
           "by": "Main",
+          "text": "Main 2026-11-08 04:55 w11 fix 3 landed bee6af85ed (inet_pton for literal hosts, no getaddrinfo): perf task-clock -r30 25.4 -> 21.2 ms CPU, hyperfine user+sys 20.7 -> 17.7 ms, wall unchanged at 87 ms (G1Lead). Fix 2 (persistent epoll registration, 21.2 -> 20.9 ms) is queued in lane-commit; fix 1 (wake after unlock, 20.9 -> 20.3 ms) passed VERIFY and is next. bun stays at 9.25 ms CPU; c2 still fails pending the scheduler redesign."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
+          "text": "Main 2026-11-08 04:40 w11 c2 profile (G1Lead, dev at 15e01b1474, perf stat -r30, nice 19, busy box): bun 9.25 ms CPU and 89.2 ms wall against jet-bin 25.8 ms CPU and 87.2 ms wall, so Jet wins wall unpinned and loses CPU 2.8x. Pinned to 12 cores Jet wall is 187 ms (para_map worker cap). Breakdown: 25 para workers spawn and join in 1.6 ms. 100 sequential GETs take 11.1 ms, about 110 us per request against about 40 us for bun, from 22 syscalls per request: 6 futex poller hops, 4 epoll_ctl ADD/DEL on every wait, 4 setsockopt, and a musl getaddrinfo mmap/munmap even for 127.0.0.1. Parallel overhead adds about 9 ms: 1401 of 2090 futex calls hit the HostNetPoller root mutex, which is held while waking ParkSlots and around epoll_ctl. The server delay adds about 4 ms. Approved bounded runtime fixes, to land after the next seed, in this order: Jet-side IP literal parse, register once with MOD re-arm, wake after unlock (prototype 25.8 -> 24.5 ms), then shard the root lock if still hot; estimated 19-21 ms total. The verdict: bounded fixes cannot reach bun 9 ms. The floor of the current model is one OS thread per in-flight request plus a poller hop (2 context switches) per wait. Closing c2 needs the D-PARA-LIMIT1 async-I/O path (waits multiplexed on few threads, epoll on the waiting thread): a scheduler redesign needing owner scope."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
           "text": "Main 2026-11-08 04:15: 7bf10da106 by PortsLead-2 does not meet c2. It resolves IP literals through getaddrinfo AI_NUMERICHOST on the caller thread, adds a word-sized Int division fast path for boxed operands, and reads the clock through vDSO clock_gettime with the replay env parsed once. w11 jet-bin instructions:u 104.4M -> 32.8M, task-clock 45.1 -> 24.7 ms; jet run 164.6M -> 92.4M; clones 126 -> 26, clock_gettime 2909 -> 0. On a loaded machine (15 runs, wall/CPU ms): jet-bin 85.5/19.2, jet-run 99.0/33.2, bun 87.1/8.1, deno 112.8/38.6. Still loses to bun on CPU; the rest is futex/thread-park, about 14 ms of system time, which is a scheduler redesign. A quiet-window measure is queued in proofq as Main-PortsLead-w11-measure.sh."
         },
         {
@@ -73556,7 +73576,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T22:33:20.042Z",
-      "updated": "2026-11-08T08:14:06.138Z",
+      "updated": "2026-11-08T09:42:09.100Z",
       "updatedBy": "Main",
       "goals": [
         "G4"
@@ -73581,6 +73601,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-08",
+          "by": "Main",
+          "text": "Main 2026-11-08 05:45 c1 is owner-gated (public API). Since e3e314c953 the walk is depth-first and sorts one directory at a time, so the collect-then-sort-everything cause is gone; what remains is the collected result in the public signature: walk/walk_files return [WalkEntry] !IOError (core-library.md). Today a failed directory drops its subtree, the walk continues, and the earliest failure is the Err of the whole walk. A stream cannot keep that contract, because it has yielded entries before the Err exists. Options (G1Lead census, 52 files touched by A: Examples using .len()/index, Path.walk() -> [Path], the L0522 lint, docs): (A) walk/walk_files become a lazy per-entry-fallible stream, and every caller migrates in one cutover; (B) keep the list API and add a streaming twin (new surface, against I8 one mechanism); (C) keep the list: linear time per e3e314c953, peak memory proportional to the tree, and c1 is reworded to time-linear. Needs an owner ballot (with an adversarial review before A/B is built). G1Lead builds whatever is ratified."
+        },
         {
           "at": "2026-11-07",
           "by": "Main",
@@ -73618,7 +73643,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T22:33:22.602Z",
-      "updated": "2026-11-07T20:58:59.011Z",
+      "updated": "2026-11-08T10:13:35.432Z",
       "updatedBy": "Main",
       "goals": [
         "G4"
@@ -73816,11 +73841,11 @@
         {
           "n": 2,
           "text": "The cause above is removed at its root, and the probe cited in the evidence scales linearly or shows the gap closed (receipt with the command and numbers).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-28T22:33:27.084Z"
+          "evidence": "2d77541df1 (G1Lead): `group := M.get(K) ?? F; S; M[K] = group` lowers to the canonical &M[K] write window when S cannot observe the difference (no read of the map root in S, no early exit or ?, an immutable key root, group unnamed after the store, no closure cell). L0534 is narrowed to the shapes where the copy is semantically required. Probe receipt (--release, best of 3, taskset one core), times in s: N=25k/50k/100k/200k/400k: old 0.005/0.009/0.017/0.035/0.071, header 0.005/0.010/0.018/0.036/0.072, call 0.006/0.012/0.023/0.045/0.090, hand-written in-place 0.005/0.010/0.018/0.038/0.073, so linear and equal to the in-place form (the a0_036 seed was 0.149/0.595 at 25k/50k, quadratic). Front insert is quadratic only through its own memmove and equals the hand-written in-place insert (1.905 vs 1.914 at 400k). Checks: verify-tree OK; ui_lint map_group_round_trip PASS; golden MapGroupGrowsInPlace o0/o1/o2 PASS; a new case (an update left half way shows the same map on every tier) agrees on run/none/basic/release.",
+          "at": "2026-11-08T10:39:17.107Z"
         },
         {
           "n": 3,
@@ -73843,7 +73868,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T22:33:27.084Z",
-      "updated": "2026-11-07T23:17:31.203Z",
+      "updated": "2026-11-08T10:39:17.107Z",
       "updatedBy": "Main",
       "goals": [
         "G4"
@@ -73932,6 +73957,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-08",
+          "by": "Main",
+          "text": "Main 2026-11-08 05:00: a0_037 attempt 4 at 15e01b1474 (G1Lead SIGINT fix: the kept run starts its full build as a threadless daemon, so the program keeps jet pid and signals; the interrupt cases PASS). The release failed on new losses: golden Examples/Data/JSON/JSONDuplicateKeys o0/o1/o2 (codec heap ceiling hit at 3095 instead of 3267 events), and 5 cases with SIGSEGV at 0x0 in test.invoke during `jet test --measure` and doctests (jet_measure x2, comptime_cli_parity measured_test, cli_parts_runtime measured_test_targets, testing_tiers doctests_compare_renderings). Suspects are f8b4028d06 (w10 inline text) and 3058b17fff (SHA-NI), both G1Lead. Routed back as the release blocker. Preflight, check-gate, chain, ui (2429, 0 lost) all passed. Seeds unchanged (a0_036)."
+        },
         {
           "at": "2026-11-08",
           "by": "Main",
@@ -74682,7 +74712,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-29T02:09:17.141Z",
-      "updated": "2026-11-08T08:55:34.059Z",
+      "updated": "2026-11-08T09:51:51.389Z",
       "updatedBy": "Main",
       "criteriaLastN": 74
     },
@@ -188176,6 +188206,55 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-08T10:39:17.108Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0aqwnas",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-08T10:13:35.432Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c08m4yum",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-08T10:12:12.792Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c06l1r0z",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-08T09:51:51.390Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0h06654",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-08T09:42:09.100Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c02a1ynr",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-08T09:42:08.239Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c06l1r0z",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-08T09:26:34.072Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c02a1ynr",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-08T08:56:43.129Z",
       "by": "Main",
