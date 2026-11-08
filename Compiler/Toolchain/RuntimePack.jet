@@ -68,10 +68,8 @@ RUNTIME_PACKAGE: "Compiler/JetRuntime/package.jet"
 RUNTIME_LIFECYCLE: "Compiler/JetRuntime/lifecycle.list"
 RUNTIME_FRAGMENTS: "Compiler/JetRuntime/Tests/Fragments.fixture"
 DRIVER_LOADER: "Compiler/JetDriver/Source/Driver/Loader.jet"
-// The runtime's folder, then its producer's.
-TREES: [String]{"JetRuntime", "JetIR/Source", "JetBackend/Source", "JetWeb/Source", "JetWasm/Source"}
-BACKEND_SOURCES: [String]{"Compiler/JetIR/Source", "Compiler/JetBackend/Source", "Compiler/JetWeb/Source", "Compiler/JetWasm/Source"}
-RESERVED_SOURCE_NAMES: [String]{"package.jet", "pkg.jet", "env.jet", "config.jet", "workspace.jet"}
+// The runtime's folder; every other `--tree` folder is its producer's.
+RUNTIME_TREE: "JetRuntime"
 UNIT_SOURCE_MARK: "// [unit source: "
 VENDOR_BASE_FLAGS: [String]{"-std=c11", "-O2", "-fPIC", "-fno-stack-protector", "-fno-asynchronous-unwind-tables", "-fno-unwind-tables", "-D_GNU_SOURCE"}
 // libsqlite3-sys 0.28.0 build.rs120-141,245-249 on Linux.
@@ -404,11 +402,7 @@ pack: fn(args: [String]) {
     loop entry in flags.values {
         if !known.contains(entry.key) -> fail("unknown flag --{entry.key}\n{USAGE}")
     }
-    trees := flags.trees.copy()
-    trees.sort()
-    expected := TREES.copy()
-    expected.sort()
-    if trees != expected -> fail("the --tree folders must be {TREES.join(", ")}")
+    if !flags.trees.contains(RUNTIME_TREE) -> fail("the --tree folders must include the runtime's, {RUNTIME_TREE}")
     root: absolute(".")
     identity: flag(flags, "identity")
     vendored: [Vendored]{
@@ -438,7 +432,9 @@ pack: fn(args: [String]) {
     in_package: (path: String) -> at(root, path)
     source: inventory(source_paths, in_package)
     backend_paths := [String]{}
-    loop directory in BACKEND_SOURCES {
+    loop tree in flags.trees {
+        if tree == RUNTIME_TREE -> next
+        directory: "{PACKAGE}/{tree}"
         loop path in tree_files(at(root, directory), (name: String) -> name.ends_with(".jet")) -> backend_paths.push("{directory}/{path}")
     }
     backend: inventory(backend_paths, in_package)
@@ -718,14 +714,14 @@ unit_tests: fn(args: [String]) -> [String]? {
 }
 
 // `unit OUT --check`: the runtime composed with every fragment of
-// Fragments.fixture, sorted, type-checked by $JET (default `jet`) with
-// JET_KEEP_GOING=1; the exit status.
+// Fragments.fixture (each .jet file but its package.jet), sorted,
+// type-checked by $JET (default `jet`) with JET_KEEP_GOING=1; the exit status.
 unit_check: fn(root: String, out: String) -> Int {
     dir: at(root, RUNTIME_FRAGMENTS)
     listed: files.list_dir(dir) ?? fail("`{RUNTIME_FRAGMENTS}` cannot be listed: {err}")
     fragments := [String]{}
     loop entry in listed {
-        if entry.name.ends_with(".jet") && !RESERVED_SOURCE_NAMES.contains(entry.name) -> fragments.push("{RUNTIME_FRAGMENTS}/{entry.name}")
+        if entry.name.ends_with(".jet") && entry.name != "package.jet" -> fragments.push("{RUNTIME_FRAGMENTS}/{entry.name}")
     }
     fragments.sort()
     if fragments.len() == 0 -> fail("`{RUNTIME_FRAGMENTS}` holds no fragment")
