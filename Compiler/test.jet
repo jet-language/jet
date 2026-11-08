@@ -657,7 +657,7 @@ compiler_stage: fn(rows: TestRows, setup: SuiteSetup, builder: String, stage: St
     Val(files.join(directory, "jet"))
 }
 
-// One cold `jet build Compiler` by `builder`, identified as the chain does
+// One cold `jet build --profile ship Compiler` by `builder`, identified as the chain does
 // (`name@version#<sha256 of the builder>`), with
 // the trace written to `trace` when given.
 compiler_build: fn(setup: SuiteSetup, builder: String, output: String, trace: String?) -> ProcessReceipt Err! {
@@ -667,9 +667,9 @@ compiler_build: fn(setup: SuiteSetup, builder: String, output: String, trace: St
     }
     current: sys.stack_limit() ?? return Err("couldn't read the stack limit: {err}")
     sys.set_stack_limit(Val(BUILD_STACK), current.hard) ?? return Err("couldn't raise the stack limit: {err}")
-    spec := jet_command(setup, builder, [String]{"build", "Compiler"}).env("JET_COMPILER_IDENTITY", "{setup.version}#{crypto.sha256(bytes).hex()}")
+    spec := jet_command(setup, builder, [String]{"build", "--profile", "ship", "Compiler"}).env("JET_COMPILER_IDENTITY", "{setup.version}#{crypto.sha256(bytes).hex()}")
     if trace == .Val(path) -> spec = spec.env("JET_TRACE_FILE", path)
-    receipt: spec.run() ?? return Err("couldn't run `{builder} build Compiler`: {err}")
+    receipt: spec.run() ?? return Err("couldn't run `{builder} build --profile ship Compiler`: {err}")
     Ok(receipt)
 }
 
