@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6706,
-    "rev": 96336,
+    "nextNum": 6707,
+    "rev": 96338,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -101200,6 +101200,11 @@
         {
           "at": "2026-11-08",
           "by": "Main",
+          "text": "D-MAP-WRITE1 adversarial review done (Docs/audits/2026-11-08-D-MAP-WRITE1-review.md, dev 3eed4ae28a): A holds only as a direction; its SIGBUS recovery (Fault.jet is fatal-only, one-shot), shared atomics, durability and tier meaning are unproved, so the ballot is not posted. CFreeLead redesigns to close G2-G8 for a second review. Option E (non-shrinkable backing) was added. The read-only-map defect (G1) is on its own card."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
           "text": "Owner 2026-11-08 ruled A on CFreeLead's c2 gap list: accept all as not needed. (1) locale: *_l variants (124,127,135), setlocale/newlocale/nl_langinfo (346-348), strfmon (167), multibyte locale encodings and legacy iconv charsets (145-148,157); Jet text is UTF-8 and locale-independent. (2) message catalogs gettext/catopen (349-350): a library concern. (3) obsolete or insecure: crypt/encrypt/setkey DES (319-320), ctermid (183), utmpx (318), gethostent/getnetent/getprotoent iteration (330), System V IPC msg/sem/shm/ftok (336-339), aio (223), posix_devctl (224), typed memory objects (230), setbuf/setvbuf (178)."
         },
         {
@@ -101260,7 +101265,7 @@
       "parentId": "c0lscvc9",
       "needsAcceptance": false,
       "created": "2026-11-08T15:54:55.014Z",
-      "updated": "2026-11-08T19:56:27.678Z",
+      "updated": "2026-11-08T21:18:51.593Z",
       "updatedBy": "Main",
       "criteriaLastN": 2
     },
@@ -101721,6 +101726,64 @@
       "needsAcceptance": false,
       "created": "2026-11-08T21:10:33.514Z",
       "updated": "2026-11-08T21:10:33.514Z",
+      "updatedBy": "Main"
+    },
+    {
+      "id": "c0vwlomv",
+      "num": 6706,
+      "title": "Safe read-only file maps expose bytes another process can change, and fault with SIGBUS when the file shrinks",
+      "body": "Found by the D-MAP-WRITE1 adversarial review (Docs/audits/2026-11-08-D-MAP-WRITE1-review.md). files.map gives safe code a borrowed byte view of a MAP_PRIVATE read-only mapping. Private mapping is not a snapshot: an external write changed an already borrowed byte from 3 to 9 (probe Current.jet). An external truncate makes the next access of a borrowed byte die with Fault [SIGBUS] and exit 135 (probes Shrink.jet and CFreeLead's MapShrink.jet); the shared flock is advisory and does not prevent it. Safe Jet must not observe a borrowed value changing under it, and an I/O failure in safe code must surface as a typed error or a registered, explained fault, never a raw signal death. This holds whatever D-MAP-WRITE1 decides.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": "Decide the I1 contract for read-only maps: copy-on-read, or a view the runtime keeps stable (e.g. MAP_PRIVATE plus a seal or lease where the kernel offers one), or an Unsafe-only borrowed view with a safe copying API. Then make the truncation case a typed IOError or a registered fault with what/why/fix text and a UI snapshot, with one meaning on every tier. A choice that changes public API or behavior goes to an owner ballot first.",
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A case proves that a safe borrowed view of a mapped file cannot observe a byte change made by another process after the borrow (or the safe API no longer hands out such a view), on every applicable tier.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T21:18:50.483Z"
+        },
+        {
+          "n": 2,
+          "text": "A case truncates a mapped file from another process during safe access; the program gets a typed error or a registered fault with its diagnostic code, what/why/fix text and UI snapshot, never an unexplained SIGBUS exit, on every applicable tier.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T21:18:50.483Z"
+        },
+        {
+          "n": 3,
+          "text": "The adversarial review's G1 gap is closed in a dated follow-up review, or the chosen contract is ratified on an owner ballot.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T21:18:50.483Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G10"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-08T21:18:50.483Z",
+      "updated": "2026-11-08T21:18:50.483Z",
       "updatedBy": "Main"
     }
   ],
@@ -189236,6 +189299,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-08T21:18:51.593Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0cs6xlg",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-08T21:18:50.483Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0vwlomv",
+      "note": "Safe read-only file maps expose bytes another process can change, and fault with SIGBUS when the file shrinks"
+    },
     {
       "at": "2026-11-08T21:10:40.587Z",
       "by": "Main",
