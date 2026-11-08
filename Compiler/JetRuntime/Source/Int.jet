@@ -37,6 +37,11 @@ int_inline: fn(value: I64) -> Bool Never! {
     value >= I64{-4611686018427387904} && value <= I64{4611686018427387903}
 }
 
+// Whether the value's magnitude is at most I64.MAX, so int_word reads it exactly.
+int_word_sized: fn(value: I64) -> Bool {
+    int_inline(value) || int_fits(value, U64{9223372036854775807})
+}
+
 int_node: fn(value: I64) -> I64 Never! { value.bit_and(I64{4611686018427387903}) }
 
 int_tag: fn(node: I64) -> I64 Never! { node.bit_or(I64{4611686018427387904}) }
@@ -536,18 +541,23 @@ int_division: fn(left: I64, right: I64, file: I64, file_len: I64, line: I64, kin
         int_stop(file, file_len, line, I64{0})
         if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     }
-    if int_inline(left) && int_inline(right) {
-        initial_r: left %% right
-        initial_q: (left - initial_r) /% right
-        ln: left < I64{0}
-        rn: right < I64{0}
+    // Operands that fit a machine word divide in one instruction; only wider
+    // values take the limb-by-limb long division below. Magnitudes up to
+    // I64.MAX keep every intermediate in range (|r| < |right|, q = left/right).
+    if int_word_sized(left) && int_word_sized(right) {
+        lw: if int_inline(left) -> left else -> int_word(left)
+        rw: if int_inline(right) -> right else -> int_word(right)
+        initial_r: lw %% rw
+        initial_q: (lw - initial_r) /% rw
+        ln: lw < I64{0}
+        rn: rw < I64{0}
         adjust: initial_r != I64{0} && (((kind == I64{2} || kind == I64{3}) && ln != rn) || ((kind == I64{4} || kind == I64{5}) && ln))
         if ((kind.bit_and(I64{1})) == I64{0}) {
             delta: if (!adjust) -> I64{0} else if (kind == I64{4} && rn) -> I64{1} else -> I64{-1}
             return jet_int_owned_from_i64(initial_q + delta)
         }
-        if !adjust -> return initial_r
-        return if (kind == I64{5} && rn) -> initial_r - right else -> initial_r + right
+        if !adjust -> return jet_int_owned_from_i64(initial_r)
+        return jet_int_owned_from_i64(if (kind == I64{5} && rn) -> initial_r - rw else -> initial_r + rw)
     }
     ll: int_len(left)
     rl: int_len(right)

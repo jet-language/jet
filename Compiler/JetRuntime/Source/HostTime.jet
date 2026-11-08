@@ -1,13 +1,15 @@
 // Raw host facts only. Core owns clock selection, civil arithmetic and clamps.
 // One native process-relative monotonic epoch mirrors TimeMonotonic::EPOCH;
 // scheduler deadlines/Sync still use their existing absolute clocks.
-// Root32: SyncOnce0, epoch seconds8, epoch nanoseconds16, provider TLS key24.
+// Root56: SyncOnce0, epoch seconds8, epoch nanoseconds16, provider TLS key24,
+// and the wall-clock override of jet_std_time_now (Deadline.jet): SyncOnce32,
+// present40, milliseconds48.
 time_host_root := I64{0}
 // runtime-init: 4 when time_host_root
 #Export(c) jet_rt_time_host_init: fn() {
     if (time_host_root != I64{0}) -> return
-    root: jet_rt_alloc(I64{32}, I64{8})
-    thread_zero(root, I64{32})
+    root: jet_rt_alloc(I64{56}, I64{8})
+    thread_zero(root, I64{56})
     // Registry creation is a startup fact; do not sample the host epoch until
     // the first host-monotonic call (provider setup must not move that origin).
     sync_store(wrapping(root + I64{24}), jet_rt_tls_key_new(I64{0}))
@@ -26,10 +28,7 @@ rt_time_monotonic_provider_set: fn(provider: I64) -> I64 {
 }
 time_clock_read: fn(clock: I64) -> I64 {
     scratch: wrapping(thread_base() + I64{232})
-    #Unsafe("clock_gettime synchronously writes the calling thread's two scratch words") {
-        result: os_syscall_i64(I64{228}, clock, scratch, I64{0}, I64{0}, I64{0}, I64{0})
-        if (result != I64{0}) -> jet_rt_unreachable(I64{0}, I64{0})
-    }
+    sync_clock_read(clock, scratch)
     scratch
 }
 time_seconds_magnitude: fn(seconds: I64) -> I64 {

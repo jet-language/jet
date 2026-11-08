@@ -211,9 +211,9 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1351,
+  "total": 1349,
   "counts": {
-    "Compiler": 688,
+    "Compiler": 686,
     "Core": 186,
     "Docs": 8,
     "Examples": 35,
@@ -1967,13 +1967,6 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     },
     {
       "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/Deadline.jet",
-      "line": 74,
-      "column": 5,
-      "reason": "clock_gettime writes two thread-owned TCB words, not retained after the syscall"
-    },
-    {
-      "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Display.jet",
       "line": 8,
       "column": 5,
@@ -2696,14 +2689,14 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostNetResolver.jet",
-      "line": 106,
+      "line": 138,
       "column": 5,
       "reason": "host lends length E4 bytes; outputs lend their writable pointer/count words"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostNetResolver.jet",
-      "line": 127,
+      "line": 156,
       "column": 5,
       "reason": "name owns a trailing NUL byte"
     },
@@ -3158,42 +3151,35 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostTime.jet",
-      "line": 14,
+      "line": 16,
       "column": 5,
       "reason": "runtime-init runs before any other thread exists"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostTime.jet",
-      "line": 29,
-      "column": 5,
-      "reason": "clock_gettime synchronously writes the calling thread's two scratch words"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostTime.jet",
-      "line": 58,
+      "line": 57,
       "column": 5,
       "reason": "before_out lends the tuple's one writable Bool byte"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostTime.jet",
-      "line": 151,
+      "line": 150,
       "column": 5,
       "reason": "path lends length bytes; std file open rejects embedded NUL"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostTime.jet",
-      "line": 159,
+      "line": 158,
       "column": 5,
       "reason": "name owns its trailing NUL byte"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostTime.jet",
-      "line": 195,
+      "line": 194,
       "column": 13,
       "reason": "bytes lends used initialized bytes; data owns used native U8 elements"
     },
@@ -3228,21 +3214,21 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Int.jet",
-      "line": 386,
+      "line": 391,
       "column": 9,
       "reason": "the caller holds an existing owner; atomic retain cannot race final-owner retirement"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Int.jet",
-      "line": 407,
+      "line": 412,
       "column": 9,
       "reason": "the caller consumes one owner; atomic decrement publishes refs0 before shared-domain retirement"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Int.jet",
-      "line": 412,
+      "line": 417,
       "column": 13,
       "reason": "the final owner has reached zero; the remaining shared hazard domain decides immediate free or retirement"
     },
@@ -4103,28 +4089,28 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Sync.jet",
-      "line": 54,
+      "line": 63,
       "column": 5,
       "reason": "clock_gettime writes two words of thread-owned TCB scratch; no pointer escapes"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Sync.jet",
-      "line": 108,
+      "line": 116,
       "column": 5,
       "reason": "sync_sole_inflight is this sole thread's own count until sync_sole is cleared; sync_sole_end reads it only after a membarrier"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Sync.jet",
-      "line": 125,
+      "line": 133,
       "column": 5,
       "reason": "an elided section: only this thread has written the lock word and the count since sync_sole_enter"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Sync.jet",
-      "line": 137,
+      "line": 145,
       "column": 5,
       "reason": "membarrier and sched_yield retain no memory; sync_sole only ever goes from 1 to 0"
     },
@@ -9687,14 +9673,14 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 
 | crate/package | regions |
 | --- | ---: |
-| Compiler | 688 |
+| Compiler | 686 |
 | Core | 186 |
 | Docs | 8 |
 | Examples | 35 |
 | Jetpack | 9 |
 | Tools | 7 |
 | tests | 418 |
-| **total** | **1351** |
+| **total** | **1349** |
 
 ### Regions
 
@@ -9949,7 +9935,6 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/DataEvent.jet | 8:5 | "address owns a writable word in a native DataEvent" |
 | Compiler | Compiler/JetRuntime/Source/DataLimits.jet | 5:5 | "address borrows an initialized word in a live native limits carrier" |
 | Compiler | Compiler/JetRuntime/Source/DataLimits.jet | 8:5 | "address owns a writable word in a native limits carrier or getter out slot" |
-| Compiler | Compiler/JetRuntime/Source/Deadline.jet | 74:5 | "clock_gettime writes two thread-owned TCB words, not retained after the syscall" |
 | Compiler | Compiler/JetRuntime/Source/Display.jet | 8:5 | "borrows an initialized aligned word in an E4 header, exact-Int node or owned formatter workspace" |
 | Compiler | Compiler/JetRuntime/Source/Display.jet | 14:5 | "writes an aligned word in an exclusively owned formatter workspace or fresh E4 header" |
 | Compiler | Compiler/JetRuntime/Source/Display.jet | 20:5 | "reads one initialized byte in an owned formatter digit buffer or borrowed exact-Int limb" |
@@ -10053,8 +10038,8 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/HostNetPoller.jet | 24:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/HostNetPoller.jet | 62:5 | "the root lock owns a packed 12B epoll_event; state retains the native fd through this synchronous call" |
 | Compiler | Compiler/JetRuntime/Source/HostNetPoller.jet | 88:9 | "events owns 64 packed epoll_event entries; epoll_wait retains no buffer pointer" |
-| Compiler | Compiler/JetRuntime/Source/HostNetResolver.jet | 106:5 | "host lends length E4 bytes; outputs lend their writable pointer/count words" |
-| Compiler | Compiler/JetRuntime/Source/HostNetResolver.jet | 127:5 | "name owns a trailing NUL byte" |
+| Compiler | Compiler/JetRuntime/Source/HostNetResolver.jet | 138:5 | "host lends length E4 bytes; outputs lend their writable pointer/count words" |
+| Compiler | Compiler/JetRuntime/Source/HostNetResolver.jet | 156:5 | "name owns a trailing NUL byte" |
 | Compiler | Compiler/JetRuntime/Source/HostParallelism.jet | 451:5 | "sched_getaffinity writes at most the owned 128-byte mask; pid0 names this thread" |
 | Compiler | Compiler/JetRuntime/Source/HostParallelism.jet | 526:9 | "the probe answer is fixed for the process; a racing probe stores the same word" |
 | Compiler | Compiler/JetRuntime/Source/HostParallelism.jet | 534:5 | "cpuid and xgetbv only report processor identification and the OS-enabled state" |
@@ -10119,19 +10104,18 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/HostStdio.jet | 56:5 | "text lends an E4 header and its bytes for this synchronous write; writev borrows its own stack LF" |
 | Compiler | Compiler/JetRuntime/Source/HostStdio.jet | 82:5 | "the caller lends the tuple's exact-Int word and Bool byte outputs" |
 | Compiler | Compiler/JetRuntime/Source/HostStdio.jet | 92:5 | "some lends the route's zeroed Text out slot" |
-| Compiler | Compiler/JetRuntime/Source/HostTime.jet | 14:5 | "runtime-init runs before any other thread exists" |
-| Compiler | Compiler/JetRuntime/Source/HostTime.jet | 29:5 | "clock_gettime synchronously writes the calling thread's two scratch words" |
-| Compiler | Compiler/JetRuntime/Source/HostTime.jet | 58:5 | "before_out lends the tuple's one writable Bool byte" |
-| Compiler | Compiler/JetRuntime/Source/HostTime.jet | 151:5 | "path lends length bytes; std file open rejects embedded NUL" |
-| Compiler | Compiler/JetRuntime/Source/HostTime.jet | 159:5 | "name owns its trailing NUL byte" |
-| Compiler | Compiler/JetRuntime/Source/HostTime.jet | 195:13 | "bytes lends used initialized bytes; data owns used native U8 elements" |
+| Compiler | Compiler/JetRuntime/Source/HostTime.jet | 16:5 | "runtime-init runs before any other thread exists" |
+| Compiler | Compiler/JetRuntime/Source/HostTime.jet | 57:5 | "before_out lends the tuple's one writable Bool byte" |
+| Compiler | Compiler/JetRuntime/Source/HostTime.jet | 150:5 | "path lends length bytes; std file open rejects embedded NUL" |
+| Compiler | Compiler/JetRuntime/Source/HostTime.jet | 158:5 | "name owns its trailing NUL byte" |
+| Compiler | Compiler/JetRuntime/Source/HostTime.jet | 194:13 | "bytes lends used initialized bytes; data owns used native U8 elements" |
 | Compiler | Compiler/JetRuntime/Source/Int.jet | 10:5 | "borrow an initialized word in a live exact-Int carrier" |
 | Compiler | Compiler/JetRuntime/Source/Int.jet | 16:5 | "write an initialized word in a uniquely owned exact-Int workspace" |
 | Compiler | Compiler/JetRuntime/Source/Int.jet | 22:5 | "borrow four initialized bytes in a live limb buffer; no adjacent limb is read" |
 | Compiler | Compiler/JetRuntime/Source/Int.jet | 28:5 | "write four bytes in a uniquely owned limb buffer; value is an unsigned 32-bit limb" |
-| Compiler | Compiler/JetRuntime/Source/Int.jet | 386:9 | "the caller holds an existing owner; atomic retain cannot race final-owner retirement" |
-| Compiler | Compiler/JetRuntime/Source/Int.jet | 407:9 | "the caller consumes one owner; atomic decrement publishes refs0 before shared-domain retirement" |
-| Compiler | Compiler/JetRuntime/Source/Int.jet | 412:13 | "the final owner has reached zero; the remaining shared hazard domain decides immediate free or retirement" |
+| Compiler | Compiler/JetRuntime/Source/Int.jet | 391:9 | "the caller holds an existing owner; atomic retain cannot race final-owner retirement" |
+| Compiler | Compiler/JetRuntime/Source/Int.jet | 412:9 | "the caller consumes one owner; atomic decrement publishes refs0 before shared-domain retirement" |
+| Compiler | Compiler/JetRuntime/Source/Int.jet | 417:13 | "the final owner has reached zero; the remaining shared hazard domain decides immediate free or retirement" |
 | Compiler | Compiler/JetRuntime/Source/IntHazard.jet | 13:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/IntHazard.jet | 92:5 | "the native numeric forwarder lends a pure reload callback and its live closure context for this synchronous call" |
 | Compiler | Compiler/JetRuntime/Source/JourneyTLS.jet | 22:5 | "runtime-init runs before any other thread exists" |
@@ -10254,10 +10238,10 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/Sync.jet | 28:5 | "atomic compare-exchange on an aligned live synchronization word" |
 | Compiler | Compiler/JetRuntime/Source/Sync.jet | 34:5 | "futex wake borrows a live aligned word and retains no pointer" |
 | Compiler | Compiler/JetRuntime/Source/Sync.jet | 42:5 | "futex borrows live state; timed wait uses this attached thread's reserved TCB scratch until the syscall returns" |
-| Compiler | Compiler/JetRuntime/Source/Sync.jet | 54:5 | "clock_gettime writes two words of thread-owned TCB scratch; no pointer escapes" |
-| Compiler | Compiler/JetRuntime/Source/Sync.jet | 108:5 | "sync_sole_inflight is this sole thread's own count until sync_sole is cleared; sync_sole_end reads it only after a membarrier" |
-| Compiler | Compiler/JetRuntime/Source/Sync.jet | 125:5 | "an elided section: only this thread has written the lock word and the count since sync_sole_enter" |
-| Compiler | Compiler/JetRuntime/Source/Sync.jet | 137:5 | "membarrier and sched_yield retain no memory; sync_sole only ever goes from 1 to 0" |
+| Compiler | Compiler/JetRuntime/Source/Sync.jet | 63:5 | "clock_gettime writes two words of thread-owned TCB scratch; no pointer escapes" |
+| Compiler | Compiler/JetRuntime/Source/Sync.jet | 116:5 | "sync_sole_inflight is this sole thread's own count until sync_sole is cleared; sync_sole_end reads it only after a membarrier" |
+| Compiler | Compiler/JetRuntime/Source/Sync.jet | 133:5 | "an elided section: only this thread has written the lock word and the count since sync_sole_enter" |
+| Compiler | Compiler/JetRuntime/Source/Sync.jet | 145:5 | "membarrier and sched_yield retain no memory; sync_sole only ever goes from 1 to 0" |
 | Compiler | Compiler/JetRuntime/Source/Task.jet | 532:9 | "written once, zeroed first, under the TLS registry mutex" |
 | Compiler | Compiler/JetRuntime/Source/TaskGroup.jet | 254:9 | "the canonical task selector yields without consuming any child result" |
 | Compiler | Compiler/JetRuntime/Source/TerminalColor.jet | 8:9 | "runtime-init runs before any other thread exists" |
