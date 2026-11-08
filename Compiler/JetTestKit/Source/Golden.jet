@@ -36,14 +36,11 @@ kit_golden_collect: fn(root: String, directory: String) -> [KitEntry] {
     entries
 }
 
-// The extensions of a flat entry's source: Jet's, and the C and C++ ones
-// `jet run` compiles (#6686).
-KIT_GOLDEN_ENTRY_EXTENSIONS: [String]{".jet", ".c", ".cc", ".cpp", ".cxx"}
-
-// The file `name` without its entry extension (Jet, C or C++), or None for
-// a file of any other extension.
+// The file `name` without the extension of its entry source (Jet, C or C++:
+// KIT_SOURCE_LANGUAGES), or None for a file of any other extension.
 kit_golden_entry_stem: fn(name: String) -> String? {
-    loop extension in KIT_GOLDEN_ENTRY_EXTENSIONS {
+    loop row in KIT_SOURCE_LANGUAGES {
+        extension: ".{row.extension}"
         if name.ends_with(extension) && name.count_bytes() > extension.count_bytes() -> return Val(kit_steps_byte_slice(name, 0, name.count_bytes() - extension.count_bytes()))
     }
     None

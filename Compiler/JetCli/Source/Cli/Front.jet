@@ -65,6 +65,7 @@ use {
         test_settings_put,
     ]
     jet_pkg_model.[WorkspaceDeclarationCache, pkg_discover_jobs_in]
+    jet_testkit.[KIT_SOURCE_LANGUAGES, kit_source_language]
 }
 
 JetCLIPlan: enum {
@@ -722,13 +723,6 @@ jet_cli_looks_like_source: fn(argument: String) -[FS]> Bool Never! {
     cli_files.exists("{argument}.jet")
 }
 
-// Jet tells a file's language by its extension (#6686): `.jet` (or none) is
-// Jet source, and `jet run` and `jet build` compile these C and C++
-// extensions with the C toolchain Jet programs compile their own C with
-// (ForeignLink.jet). Any other extension is refused (E2116).
-JET_CLI_C_EXTENSIONS: [String]{"c"}
-JET_CLI_CXX_EXTENSIONS: [String]{"cc", "cpp", "cxx"}
-
 // The extension of `path`'s last component, after its last `.`; "" when it
 // has none (a leading dot alone, as in `.profile`, is none).
 jet_cli_source_extension: fn(path: String) -> String Never! {
@@ -737,13 +731,16 @@ jet_cli_source_extension: fn(path: String) -> String Never! {
     parts.pop() ?? ""
 }
 
-// The language `jet run` and `jet build` compile `path` as: "c" or "c++",
-// None for any other file.
+// Jet tells a file's language by its extension (#6686, the one table
+// KIT_SOURCE_LANGUAGES): `.jet` (or none) is Jet source, and `jet run` and
+// `jet build` compile the C and C++ extensions with the C toolchain Jet
+// programs compile their own C with (ForeignLink.jet); any other extension is
+// refused (E2116). The language `path` compiles as: "c" or "c++", None for
+// any other file.
 jet_cli_native_language: fn(path: String) -> String? Never! {
-    extension: jet_cli_source_extension(path)
-    if JET_CLI_C_EXTENSIONS.contains(extension) -> return Val("c")
-    if JET_CLI_CXX_EXTENSIONS.contains(extension) -> return Val("c++")
-    None
+    language: kit_source_language(jet_cli_source_extension(path)) ?? return None
+    if language == "jet" -> return None
+    Val(language)
 }
 
 // Whether `path` is a Jet script whatever its name: its first line is a
@@ -758,10 +755,9 @@ jet_cli_jet_script: fn(path: String) -[FS]> Bool Never! {
 // `jet {command} <file>` of a file whose extension the command doesn't
 // handle (E2116), naming the extensions it does; never read as Jet source.
 jet_cli_unhandled_extension: fn(file: String, extension: String, command: String, color: Bool) -> JetCLIPlan Never! {
-    accepted := [String]{"jet"}
-    if command == "run" || command == "build" {
-        loop name in JET_CLI_C_EXTENSIONS -> accepted.push(name)
-        loop name in JET_CLI_CXX_EXTENSIONS -> accepted.push(name)
+    accepted := [String]{}
+    loop row in KIT_SOURCE_LANGUAGES {
+        if row.language == "jet" || command == "run" || command == "build" -> accepted.push(row.extension.copy())
     }
     shown := ""
     loop (index, name) in accepted {
@@ -1601,14 +1597,11 @@ jet_cli_build_args_refused: fn(file: String, color: Bool) -> JetCLIPlan Never! {
     jet_cli_fail("E2104", "`jet build {file} -- …` passes the words after `--` to `build: fn`, and this build runs none", jet_cli_why("E2104"), "remove the words after `--`, or build a package whose `build.jet` declares `build: fn(b: Build)` and reads them with `b.args()`", color, JET_DRIVER_EXIT_USAGE)
 }
 
-// The jet flags a C or C++ file's run or build takes: `--release` (O2) and
-// `--optimize=none|basic|full` (O0, O1, O2) over the command's stock level
-// (run O0, build O1, as for Jet), and the output flags. Any other is
-// refused, never ignored.
-JET_CLI_NATIVE_SOURCE_FLAGS: [String]{"--release", "--optimize", "--color", "--no-color", "--quiet", "-q"}
-
 // `jet {command} <file>` of a C or C++ file (#6686): its plan at the
 // optimize level the flags select, or the refusal of a flag it doesn't take.
+// It takes `--release` (O2) and `--optimize=none|basic|full` (O0, O1, O2)
+// over the command's stock level (run O0, build O1, as for Jet), and the
+// output flags. Any other is refused, never ignored.
 jet_cli_native_source_plan: fn(jet_argv: [String], file: String, language: String, command: String, program_args: [String], color: Bool) -> JetCLIPlan Never! {
     level := if command == "run" -> 0 else -> 1
     named: if language == "c" -> "C" else -> "C++"
@@ -1616,10 +1609,12 @@ jet_cli_native_source_plan: fn(jet_argv: [String], file: String, language: Strin
         if argument == "--" -> break
         if !argument.starts_with("-") || argument == "-" -> next
         head: argument.split("=").to_list()[0]
-        if !JET_CLI_NATIVE_SOURCE_FLAGS.contains(head) {
-            return jet_cli_fail("E2104", "`jet {command} {file}` compiles {named}, which takes no `{head}`", jet_cli_why("E2104"), "remove `{head}`; a C or C++ file takes `--release` or `--optimize=none|basic|full`", color, JET_DRIVER_EXIT_USAGE)
+        if head == {
+            "--release" -> level = 2
+            "--optimize" -> {}
+            "--color" | "--no-color" | "--quiet" | "-q" -> {}
+            else -> return jet_cli_fail("E2104", "`jet {command} {file}` compiles {named}, which takes no `{head}`", jet_cli_why("E2104"), "remove `{head}`; a C or C++ file takes `--release` or `--optimize=none|basic|full`", color, JET_DRIVER_EXIT_USAGE)
         }
-        if head == "--release" -> level = 2
         if head == "--optimize" {
             if argument == "--optimize=none" {
                 level = 0
