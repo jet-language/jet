@@ -499,6 +499,19 @@ sema_call_builtin_static_bind: fn(pattern: Type, actual: Type, row: BuiltinStati
             }
             else -> false
         }
+        .Fn(params, ret, _, _, _, _) -> if actual == {
+            .Fn(offered_params, offered_ret, _, _, _, _) -> {
+                if offered_params.len() != params.len() -> return false
+                loop index in 0..<params.len() {
+                    if !sema_call_builtin_static_bind(params[index], offered_params[index], row, bindings) -> return false
+                }
+                if ret == .Val(returned) {
+                    if offered_ret == .Val(offered) -> return sema_call_builtin_static_bind(returned, offered, row, bindings)
+                }
+                true
+            }
+            else -> false
+        }
         else -> true
     }
 }
@@ -541,6 +554,25 @@ sema_call_builtin_static_coerce: fn(value: TExpr, required: Type, span: Span, en
 }
 
 sema_call_builtin_static_argument: fn(argument: CallArg, declared: Type, row: BuiltinStaticRow, bindings: &[SemaInferenceBinding], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    // A function parameter (a key function) binds the row's open types from a
+    // probe of the argument, so the real check below carries the closed
+    // function type and its effect bound.
+    if declared == .Fn(params, _, _, _, _, _) {
+        if sema_call_builtin_static_open(declared, row, bindings) {
+            // The parameters hint an unannotated lambda once they are known.
+            closed := true
+            hinted := [Type]{}
+            loop param in params {
+                if sema_call_builtin_static_open(param, row, bindings) -> closed = false
+                hinted.push(sema_inference_substitute_type_bindings(param, bindings))
+            }
+            probe_hint := Type?{None}
+            if closed -> probe_hint = Val(Type.Fn{params: hinted, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None})
+            probe_diagnostics := [Diagnostic]{}
+            probed := sema_probe_expression(argument.expr, probe_hint, environment, program, scopes, state, tail_store, context, probe_diagnostics)
+            if probed == .Val(value) -> _ := sema_call_builtin_static_bind(declared, value.ty, row, bindings)
+        }
+    }
     if !sema_call_builtin_static_open(declared, row, bindings) {
         required := sema_call_resolved_type(sema_inference_substitute_type_bindings(declared, bindings), environment, program)
         // A Union slot hints only a decimal literal, which takes its machine

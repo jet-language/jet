@@ -1919,6 +1919,7 @@ ir_zero_drops: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, offset: 
         zero: ir_word_const(m, b, 0)
         ir_emit(b.f, IROp.Store, -1, base, offset, zero, b.line)
         ir_emit(b.f, IROp.Store, -1, base, offset + 8, zero, b.line)
+        if ir_ordered_header(m, row) -> ir_emit(b.f, IROp.Store, -1, base, offset + 24, zero, b.line)
         return
     }
     members: ir_inline_members(m, p, row) ?? return
@@ -3135,14 +3136,17 @@ ir_int_constant: fn(m: &IRModule, b: &IRBuilder, row: Int, value: Int) -> Int Ne
     slot
 }
 
-// An empty List of type row `row` in fresh frame storage.
+// An empty List of type row `row` in fresh frame storage (a PriorityQueue's
+// header with its native order word).
 ir_list_empty: fn(m: &IRModule, b: &IRBuilder, row: Int) -> Int Never! {
+    ordered: ir_ordered_header(m, row)
     storage: ir_fresh_temp(m, b, row)
-    ir_emit(b.f, IROp.StackAddress, storage, 24, 8, -1, b.line)
+    ir_emit(b.f, IROp.StackAddress, storage, if ordered -> 32 else -> 24, 8, -1, b.line)
     zero: ir_word_const(m, b, 0)
     ir_emit(b.f, IROp.Store, -1, storage, 0, zero, b.line)
     ir_emit(b.f, IROp.Store, -1, storage, 8, zero, b.line)
     ir_emit(b.f, IROp.Store, -1, storage, 16, zero, b.line)
+    if ordered -> ir_emit(b.f, IROp.Store, -1, storage, 24, zero, b.line)
     storage
 }
 

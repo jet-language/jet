@@ -13,6 +13,7 @@ Run a lesson from the repository root, for example `jet run Examples/Collections
 - [IndexedMutation](IndexedMutation.jet)
 - [IndexHook](IndexHook.jet)
 - [IndexOfByValue](IndexOfByValue.jet) — `index_of(item)` on a list or a view returns the position of the first item equal to `item`, or None.
+- [KeyedPriorityQueue](KeyedPriorityQueue.jet) — `PriorityQueue.by(key)` pops the item with the smallest key first and `by_desc(key)` the one with the largest; items with equal keys pop in the order they went in.
 - [ListBounds](ListBounds.jet)
 - [ListPredicateOps](ListPredicateOps.jet) — List predicate traversal and first-match replacement.
 - [ListRangeSlice](ListRangeSlice.jet) — List range slices copy the selected items.
