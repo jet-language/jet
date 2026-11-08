@@ -1,0 +1,282 @@
+#!/usr/bin/env jet
+// The web build's published source maps, read from the static server:
+//
+//   jet run --allow=Env,Exec,IO,Net,Time Tools/web-test/SourceMap.jet -- --port <port> [--prefix /click] [--wasm-prefix /compute]
+//
+// app.js names `app.js.map` in a trailing sourceMappingURL comment; app.js.map
+// is a version 3 map whose sources are relative and each carry their text;
+// its mappings decode, and the first one that lands on a Jet statement
+// (a `name: ` binding, a `backend: ` line or a `print(` call) names a `.jet`
+// source and a non-empty line. app.wasm.map has the version 3 header, its
+// sources' text and a mappings string; the wasm prefix's map carries
+// mappings; app.wasm's `sourceMappingURL` custom section is `app.wasm.map`.
+// It prints `PASS web source-map Jet mapping + wasm map` and the mapped
+// location, or names the failed check and exits 1.
+use {
+    client: core.http.client
+    json: core.encoding.json
+    process: core.process
+}
+
+C_BODY_LIMIT: 268435456
+C_VLQ_ALPHABET: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+
+SOURCE_MAPPING_URL: Regex{"//# sourceMappingURL=app\.js\.map\s*$"}
+JET_STATEMENT: Regex{"^\s*[A-Za-z_]\w*: "}
+DRIVE_PATH: Regex{"^[A-Za-z]:[\\/]"}
+
+#Error
+Failure: struct {
+    message: String
+
+    impl Display {
+        display: fn(self) -> String { self.message }
+    }
+}
+
+// One decoded segment with a source: generated and original positions, all 0-based.
+Mapping: struct {
+    generated_line: Int
+    generated_column: Int
+    source: Int
+    original_line: Int
+    original_column: Int
+}
+
+run: fn() {
+    args: process.args()
+    port: option(args, "--port") ?? ""
+    prefix: option(args, "--prefix") ?? "/click"
+    wasm_prefix: option(args, "--wasm-prefix") ?? ""
+    if (Int.parse(port) ?? 0) <= 0 {
+        eprint("usage: SourceMap.jet --port <port> [--prefix /click] [--wasm-prefix /compute]")
+        process.exit(2)
+    }
+    origin: "http://127.0.0.1:{port}"
+    found: check_maps(origin, prefix, wasm_prefix) ?? fail(err.message)
+    print("PASS web source-map Jet mapping + wasm map")
+    print(found)
+}
+
+// Every static check; the mapped Jet location as a JSON line.
+check_maps: fn(origin: String, prefix: String, wasm_prefix: String) -> String Failure! {
+    script: fetch_text(origin, "{prefix}/app.js")
+    named := false
+    loop line in script.split("\n").to_list() {
+        if SOURCE_MAPPING_URL.is_match(line) -> named = true
+    }
+    check(named, "app.js missing relative sourceMappingURL=app.js.map")
+
+    js_map: parse(fetch_text(origin, "{prefix}/app.js.map"), "app.js.map")
+    check(field(js_map, "version") == .Int(3), "app.js.map version")
+    sources: items(field(js_map, "sources"))
+    check(sources.len() > 0, "app.js.map sources")
+    contents: items(field(js_map, "sourcesContent"))
+    check(field(js_map, "sourcesContent") != Dyn.Null && contents.len() == sources.len(), "app.js.map sourcesContent")
+    loop name in sources {
+        path: text(name)
+        check(!path.starts_with("/") && !DRIVE_PATH.is_match(path), "host path in js map: {path}")
+    }
+
+    mappings: decode_mappings(text(field(js_map, "mappings")))
+    check(mappings.len() > 0, "app.js.map has no mappings")
+    hit := mappings[0].copy()
+    loop mapping in mappings {
+        line: source_line(contents, mapping.source, mapping.original_line)
+        if line.contains("backend: ") || JET_STATEMENT.is_match(line) || line.contains("print(") {
+            hit = mapping.copy()
+            break
+        }
+    }
+    check(hit.source >= 0 && hit.source < sources.len(), "app.js.map mapping source {hit.source} is outside its {sources.len()} sources")
+    jet_file: text(sources[hit.source])
+    check(jet_file.ends_with(".jet"), "mapped source is not a Jet file: {jet_file}")
+    jet_line: source_line(contents, hit.source, hit.original_line)
+    check(jet_line.trim() != "", "{jet_file}:{hit.original_line + 1} is empty")
+
+    wasm_map: parse(fetch_text(origin, "{prefix}/app.wasm.map"), "app.wasm.map")
+    check(field(wasm_map, "version") == .Int(3) && text(field(wasm_map, "file")) == "app.wasm", "app.wasm.map header")
+    check(items(field(wasm_map, "sourcesContent")).len() > 0, "wasm sourcesContent")
+    check(field(wasm_map, "mappings") == .Text(_), "wasm mappings field")
+
+    if wasm_prefix != "" {
+        heavy: parse(fetch_text(origin, "{wasm_prefix}/app.wasm.map"), "{wasm_prefix}/app.wasm.map")
+        check(text(field(heavy, "mappings")) != "", "{wasm_prefix} app.wasm.map must carry Jet mappings")
+    }
+
+    wasm: fetch_bytes(origin, "{prefix}/app.wasm")
+    check((wasm_source_mapping_url(wasm) ?? "") == "app.wasm.map", "wasm sourceMappingURL custom section")
+
+    file_json: json.to_string(Dyn.Text(jet_file.copy())) ?? "\"\""
+    line_json: json.to_string(Dyn.Text(jet_line.trim().copy())) ?? "\"\""
+    Ok("{{\"generatedLine\":{hit.generated_line},\"generatedColumn\":{hit.generated_column},\"jetFile\":{file_json},\"jetLine\":{hit.original_line},\"jetText\":{line_json}}}")
+}
+
+// Line `line` (0-based) of source `source`'s embedded text, or "".
+source_line: fn(contents: [Dyn], source: Int, line: Int) -> String {
+    if source < 0 || source >= contents.len() -> return ""
+    lines: text(contents[source]).split("\n").to_list()
+    if line < 0 || line >= lines.len() -> return ""
+    lines[line].copy()
+}
+
+// The segments of a version 3 `mappings` string that name a source.
+decode_mappings: fn(mappings: String) -> [Mapping] Failure! {
+    out := [Mapping]{}
+    generated_line := 0
+    source := 0
+    original_line := 0
+    original_column := 0
+    loop line in mappings.split(";").to_list() {
+        generated_column := 0
+        loop segment in line.split(",").to_list() {
+            if segment == "" -> next
+            values: decode_vlq(segment)
+            if values.len() > 0 -> generated_column += values[0]
+            if values.len() >= 4 {
+                source += values[1]
+                original_line += values[2]
+                original_column += values[3]
+                out.push(Mapping{generated_line: generated_line, generated_column: generated_column, source: source, original_line: original_line, original_column: original_column})
+            }
+        }
+        generated_line += 1
+    }
+    Ok(out)
+}
+
+// The signed base64 VLQ values of one segment.
+decode_vlq: fn(segment: String) -> [Int] Failure! {
+    values := [Int]{}
+    result := 0
+    shift := 0
+    loop (index, byte) in segment.bytes() {
+        digit: vlq_digit(Int.from_u8(byte))
+        if digit < 0 -> return Err(Failure{message: "bad VLQ at {index + 1} in `{segment}`"})
+        result += digit.bit_and(31) << shift
+        if digit >= 32 {
+            shift += 5
+            next
+        }
+        magnitude: result >> 1
+        values.push(if result.bit_and(1) == 1 -> 0 - magnitude else -> magnitude)
+        result = 0
+        shift = 0
+    }
+    if shift != 0 -> return Err(Failure{message: "truncated VLQ in `{segment}`"})
+    Ok(values)
+}
+
+vlq_digit: fn(code: Int) -> Int {
+    loop (index, byte) in C_VLQ_ALPHABET.bytes() {
+        if Int.from_u8(byte) == code -> return index
+    }
+    0 - 1
+}
+
+// The payload of the wasm module's `sourceMappingURL` custom section, if any.
+wasm_source_mapping_url: fn(bytes: [U8]) -> String? {
+    offset := 8
+    payload := (start: 0, end: 0 - 1)
+    loop offset < bytes.len() {
+        id: Int.from_u8(bytes[offset])
+        offset += 1
+        size: leb(bytes, offset)
+        offset = size.next
+        end: offset + size.value
+        if id == 0 && end <= bytes.len() {
+            name_len: leb(bytes, offset)
+            name_end: name_len.next + name_len.value
+            if name_end <= end && bytes_are(bytes, name_len.next, name_end, "sourceMappingURL") {
+                payload = (start: name_end, end: end)
+                break
+            }
+        }
+        offset = end
+    }
+    if payload.end < 0 -> return None
+    Val(String.from_bytes_lossy(bytes[payload.start..<payload.end]))
+}
+
+// Whether bytes `start..<end` are exactly `word`'s bytes.
+bytes_are: fn(bytes: [U8], start: Int, end: Int, word: String) -> Bool {
+    if end - start != word.len() -> return false
+    loop (index, byte) in word.bytes() {
+        if bytes[start + index] != byte -> return false
+    }
+    true
+}
+
+// An unsigned LEB128 at `at`: its value and the offset after it.
+leb: fn(bytes: [U8], at: Int) -> (value: Int, next: Int) {
+    value := 0
+    shift := 0
+    index := at
+    loop index < bytes.len() {
+        byte: Int.from_u8(bytes[index])
+        index += 1
+        value += byte.bit_and(127) << shift
+        if byte < 128 -> break
+        shift += 7
+    }
+    (value: value, next: index)
+}
+
+parse: fn(body: String, label: String) -> Dyn Failure! {
+    tree: json.parse(body) ?? return Err(Failure{message: "{label} is not JSON: {err}"})
+    Ok(tree)
+}
+
+fetch_response: fn(origin: String, path: String) -> HTTPResponse Failure! {
+    response: client.get("{origin}{path}") ?? return Err(Failure{message: "{path} request failed: {err}"})
+    if response.status() < 200 || response.status() > 299 -> return Err(Failure{message: "{path} returned {response.status()}"})
+    Ok(response)
+}
+
+fetch_text: fn(origin: String, path: String) -> String Failure! {
+    response: fetch_response(origin, path)
+    body: response.text(C_BODY_LIMIT) ?? return Err(Failure{message: "{path} body is not text: {err}"})
+    Ok(body)
+}
+
+fetch_bytes: fn(origin: String, path: String) -> [U8] Failure! {
+    response: fetch_response(origin, path)
+    body: response.body().bytes(C_BODY_LIMIT) ?? return Err(Failure{message: "{path} body cannot be read: {err}"})
+    Ok(body)
+}
+
+check: fn(condition: Bool, message: String) Failure! {
+    if !condition -> return Err(Failure{message: message})
+    Ok()
+}
+
+field: fn(tree: Dyn, name: String) -> Dyn {
+    if tree == .Object(entries) {
+        loop entry in entries {
+            if entry.key == name -> return entry.value.copy()
+        }
+    }
+    Dyn.Null
+}
+
+items: fn(tree: Dyn) -> [Dyn] {
+    if tree == .Array(list) -> return list.copy()
+    [Dyn]{}
+}
+
+text: fn(tree: Dyn) -> String {
+    if tree == .Text(value) -> return value.copy()
+    ""
+}
+
+option: fn(args: [String], name: String) -> String? {
+    loop index in 0..<args.len() {
+        if args[index] == name && index + 1 < args.len() -> return Val(args[index + 1].copy())
+    }
+    None
+}
+
+fail: fn(message: String) -> Never {
+    eprint(message)
+    process.exit(1)
+}
