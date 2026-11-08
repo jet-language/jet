@@ -1,0 +1,19 @@
+# #6694 S1: sha1, sha224, sha256, sha384, sha512, sha3_*, hmac_sha256,
+# hkdf_sha256 and pbkdf2_hmac pass every mbedtls 3.6.7 suite vector and every
+# Wycheproof vector they cover, on every tier (pins in vectors/UPSTREAM.md).
+fixture: digests_macs_and_kdfs_match_the_mbedtls_and_wycheproof_vectors_on_every_tier/input
+step: jet run run.jet
+env: JET_STORE_DIR={work}/cache/default/build
+exit: 0
+stdout: = "mbedtls test_suite_shax pass=589 fail=0\nmbedtls test_suite_md pass=100 fail=0\nmbedtls test_suite_hkdf pass=3 fail=0\nmbedtls test_suite_pkcs5 pass=7 fail=0\nwycheproof hmac_sha256 pass=174 fail=0\nwycheproof hkdf_sha256 pass=86 fail=0\nwycheproof pbkdf2_hmacsha256 pass=60 fail=0\n"
+stderr: empty
+step: jet run --release run.jet
+env: JET_STORE_DIR={work}/cache/release/build
+exit: 0
+stdout: = "mbedtls test_suite_shax pass=589 fail=0\nmbedtls test_suite_md pass=100 fail=0\nmbedtls test_suite_hkdf pass=3 fail=0\nmbedtls test_suite_pkcs5 pass=7 fail=0\nwycheproof hmac_sha256 pass=174 fail=0\nwycheproof hkdf_sha256 pass=86 fail=0\nwycheproof pbkdf2_hmacsha256 pass=60 fail=0\n"
+stderr: empty
+step: jet dev --watch=off run.jet
+env: JET_STORE_DIR={work}/cache/dev/build
+exit: 0
+stdout: = "mbedtls test_suite_shax pass=589 fail=0\nmbedtls test_suite_md pass=100 fail=0\nmbedtls test_suite_hkdf pass=3 fail=0\nmbedtls test_suite_pkcs5 pass=7 fail=0\nwycheproof hmac_sha256 pass=174 fail=0\nwycheproof hkdf_sha256 pass=86 fail=0\nwycheproof pbkdf2_hmacsha256 pass=60 fail=0\n"
+stderr: empty

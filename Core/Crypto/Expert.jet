@@ -314,28 +314,7 @@ ed25519_verify_strict: fn(public: [U8], message: [U8], signature: [U8]) -> Bool 
     Ok(result == 1)
 }
 
-hkdf_sha256_raw: fn(ikm: [U8], salt: [U8], info: [U8], len: Int) -> Secret CryptoError! {
-    if len < 0 || len > 8160 -> return Err(.Length)
-    prk := hmac_sha256_local(salt, ikm)
-    out := [U8]{}
-    previous := [U8]{}
-    counter := 1
-    loop out.len() < len {
-        material := [U8]{}
-        loop b in previous -> material.push(b)
-        loop b in info -> material.push(b)
-        material.push(wrapping(U8{counter}))
-        previous = hmac_sha256_local(prk, material)
-        loop b in previous {
-            if out.len() >= len -> break
-            out.push(b)
-        }
-        counter = counter + 1
-    }
-    Ok(Secret{bytes: out})
-}
-
-hmac_sha256_local: fn(key: [U8], data: [U8]) -> [U8] Never! { crypto.hmac_sha256(key, data) }
+hkdf_sha256_raw: fn(ikm: [U8], salt: [U8], info: [U8], len: Int) -> Secret CryptoError! { crypto.hkdf_sha256(ikm, salt, info, len) }
 
 x25519_raw: fn(secret_bytes: [U8], public_bytes: [U8]) -> Secret CryptoError! {
     if secret_bytes.len() != 32 || public_bytes.len() != 32 -> return Err(.KeyRejected)
