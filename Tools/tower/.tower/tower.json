@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6686,
-    "rev": 95975,
+    "rev": 95978,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -73869,6 +73869,11 @@
         {
           "at": "2026-11-08",
           "by": "Main",
+          "text": "Main 2026-11-07 22:20: the clean-clone c65 run (dev 3af734e9cb, a0_035 bytes, no cargo or rustc, $HOME NVMe) finished in 33 min (1 h 53 min on a0_034, 45 of it the cold fetch, which 591744cc94 fixed). Result: rc=1 with PASS 13369, KNOWN-FAILING 1040, SKIP-HOST 216, OPT-IN 54, UNSUPPORTED 39, FAIL 1, UNEXPECTED-PASS 1. (1) FAIL tests/guards registered_unimplemented_codes_are_expected: an order dependence. The packages suite assembles the whole Jetpack engine, tests included, under Jetpack/Bootstrap/.jet/test, and the diagnostics scan read that build output; the same class hit examples_contain_no_build_artifacts on Examples/**/.jet after golden runs. (2) UNEXPECTED-PASS comptime_diff/stream_generator_break_matches_comptime_and_runtime (#5454 line stale; it passes on dev twice). One Main commit fixes all three; all 121 guards pass in the post-run clone. A clean-clone rerun follows."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
           "text": "Main 2026-11-07 22:08: a0_035 is admitted and published (tag a0_035 on origin; jet 6508396e67adf101 = fixed point s2 == s3 from a0_034 with no Rust; jetpack 160b274762e98d1e). Release gates: golden 4430 rows, ui 2420, cases 4659; 0 lost and 12 gains. master merge 6df9913478. The c65 clean-clone run started at 21:47 on a kit assembled from the release candidate bytes, which are byte-identical to the published a0_035 jet and jetpack (sha256 checked after publish). The clone is dev 3af734e9cb, with no cargo or rustc on PATH, running `jet test Compiler --profile full`."
         },
         {
@@ -74581,7 +74586,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-29T02:09:17.141Z",
-      "updated": "2026-11-08T03:08:36.197Z",
+      "updated": "2026-11-08T03:31:20.185Z",
       "updatedBy": "Main",
       "criteriaLastN": 74
     },
@@ -89948,6 +89953,11 @@
         {
           "at": "2026-11-08",
           "by": "Main",
+          "text": "Main 2026-11-07 22:20: proof of 25a878c83e (s1 built from origin/dev 25a878c83e by a0_035; cases --filter async_event; 4 runs): not met. 3 runs 6/6 PASS and 1 run with 2 FAILs (an earlier run also FAILed scope_cancel), so the rows are scheduling-dependent. (1) cancel_and_close_winners: the handler can start before the cancel/close wins (queued -> running -> Delivered). (2) scope_cancel_and_inherited_deadline: exit 70, E3013 with a task parked on a channel receive after owner teardown. Returned to G1Lead as top priority."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
           "text": "c1 scope (TestSystemLead-2 survey at 574a9fd134): the IR already routes DispatchReport failures/trace to runtime symbols, but sema doesn't list either method on DispatchReport and the runtime has neither. The native dispatch loop (Compiler/JetRuntime/Source/AsyncEvents.jet) ignores handler results: no HandlerFailed state, no Collect/Stop/Log/Ignore policy, no panic capture, no trace entries. Work: record failures (typed error) and trace entries in the runtime; add both methods in EventHandles.jet; add runtime functions for failures (typed list) and trace (EventTrace). Reference meaning: Compiler/Prelude/Web/Core/Event.js:431-483. Rows expect e.g. collect=true handlers=2 failures=2 and the trace queued -> running -> handler:0:failed -> handler:1:failed -> terminal:HandlerFailed."
         },
         {
@@ -89980,7 +89990,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-01T21:39:53.381Z",
-      "updated": "2026-11-08T00:55:08.158Z",
+      "updated": "2026-11-08T03:13:30.639Z",
       "updatedBy": "Main"
     },
     {
@@ -99910,7 +99920,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-08",
+          "by": "Main",
+          "text": "Main 2026-11-07, from SpeedLead measurements (hosted engine unit, after #6684 fixes; host busy, load 12-40): `jet test src/jetpack.jet --serial` took 243 s (compile 55 s, claims about 188 s); without --serial 195 s, with the same 807/22/15 and the same 22 known failures. One clean parallel run is evidence that the claims share no state, not proof; dropping the flag means editing jetpack_engine_rows. Compiling the unit alone at load 7 takes 15.7 s. 715 claims take under 0.1 s each; four take 102 of 225 s: StoreIngestLate.jet:42 \"store closure readers are serialized with registration and compaction\" 57.8 s, StoreIngestLate.jet:31 18.0 s, Lifecycle.jet:302 14.9 s, NixCache.jet:784 11.5 s. strace of the 57.8 s claim shows it is CPU-bound in the store, with no child processes and temp files on tmpfs: every closure-graph load re-verifies every record (producer and metadata decode, receipt rehash, seal checks), and 70 ingest+load pairs make that quadratic. Under 1 minute needs incremental verification in the store (a trust-design change), plus parallel claims. Ruled out: per-test module-scope copies in sema (5.7 s sema.bodies at low load)."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -99948,7 +99964,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-08T01:42:17.232Z",
-      "updated": "2026-11-08T01:42:17.232Z",
+      "updated": "2026-11-08T03:19:25.836Z",
       "updatedBy": "Main"
     }
   ],
@@ -188000,6 +188016,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-08T03:31:20.185Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0h06654",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-08T03:19:25.836Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0slc5oo",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-08T03:13:30.640Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0e3wgi0",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-08T03:08:36.197Z",
       "by": "Main",
