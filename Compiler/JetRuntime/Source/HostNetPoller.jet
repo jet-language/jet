@@ -85,8 +85,12 @@ net_node_rearm: fn(root: I64, node: I64) {
     result: net_epoll_ctl(root, node, I64{3}, interest)
     if (result < I64{0}) { net_node_fail(node, result) } else { net_put(node, I64{40}, interest) }
 }
+// Ready waiters' ParkSlots are retained under the root lock and woken after
+// it is released, so no futex wake runs inside the critical section.
 #Export(c) jet_rt_net_poller_worker: fn(root: I64) -> I64 {
     events: jet_rt_alloc(I64{768}, I64{8})
+    woken: jet_rt_alloc(I64{24}, I64{8})
+    thread_zero(woken, I64{24})
     loop {
         count := I64{0}
         #Unsafe("events owns 64 packed epoll_event entries; epoll_wait retains no buffer pointer") {
@@ -106,6 +110,7 @@ net_node_rearm: fn(root: I64, node: I64) {
                 bucket = bucket + I64{1}
             }
             sync_mutex_unlock(root)
+            scheduler_words_drop(woken)
             jet_rt_free(events, I64{768}, I64{8})
             return I64{0}
         }
@@ -122,7 +127,9 @@ net_node_rearm: fn(root: I64, node: I64) {
                     ready: (bits.bit_and(net_word(waiter, I64{24}))).bit_or((if ((bits.bit_and(I64{8216})) != I64{0}) -> net_word(waiter, I64{24}) else -> I64{0}))
                     if (ready != I64{0}) {
                         net_put(waiter, I64{32}, ready)
-                        sync_park_wake(net_word(waiter, I64{16}))
+                        slot: net_word(waiter, I64{16})
+                        sync_park_retain(slot)
+                        scheduler_words_push(woken, slot)
                     }
                     waiter = net_word(waiter, I64{0})
                 }
@@ -131,6 +138,15 @@ net_node_rearm: fn(root: I64, node: I64) {
             at = at + I64{1}
         }
         sync_mutex_unlock(root)
+        at = I64{0}
+        length: sync_load(woken)
+        loop at < length {
+            slot: sync_load(wrapping(sync_load(wrapping(woken + I64{16})) + at * I64{8}))
+            sync_park_wake(slot)
+            sync_park_drop(slot)
+            at = at + I64{1}
+        }
+        sync_store(woken, I64{0})
     }
 }
 // Called UNDER FD72 mutex after closed16 is set, or by the last FD72 drop;
@@ -172,10 +188,14 @@ net_node_free: fn(root: I64, node: I64) {
 }
 // The last waiter of an open descriptor leaves its node registered (a fired
 // EPOLLONESHOT stays disarmed); a closed descriptor's node goes with it.
-net_waiter_remove: fn(root: I64, waiter: I64) {
+// Returns the waiter's outcome, read in the same critical section: the
+// failure errno (negative) or the ready mask.
+net_waiter_remove: fn(root: I64, waiter: I64) -> I64 {
     node: net_word(waiter, I64{8})
     state: net_word(node, I64{24})
     sync_mutex_lock(root)
+    failed: net_word(waiter, I64{40})
+    outcome: if (failed < I64{0}) -> failed else -> net_word(waiter, I64{32})
     net_chain_unlink(wrapping(node + I64{32}), waiter, I64{0})
     if (net_word(node, I64{32}) == I64{0} && net_word(node, I64{48}) != I64{0}) { net_node_free(root, node) } else { net_node_rearm(root, node) }
     sync_mutex_unlock(root)
@@ -183,6 +203,7 @@ net_waiter_remove: fn(root: I64, waiter: I64) {
     jet_rt_free(waiter, I64{48}, I64{8})
     // FD lock acquisition happens only AFTER the root mutex is released.
     jet_fd_drop_raw(state)
+    outcome
 }
 #Export(c) jet_socket_ready_raw: fn(state: I64, interest: I64, timeout_ns: I64, error: I64) -> I64 { host_net_ready(state, interest, timeout_ns, host_net_wait_kind(), error) }
 // Wait until `state` is ready for `interest`; `wait_kind` (owned, dropped
@@ -259,14 +280,10 @@ host_net_ready: fn(state: I64, interest: I64, timeout_ns: I64, wait_kind: I64, e
         if (scheduler_yield(wait_kind, net_word(waiter, I64{16}), remaining) != I64{0}) -> break
     }
     _ := scheduler_deadline_check(wait_kind)
-    sync_mutex_lock(root)
-    ready: net_word(waiter, I64{32})
-    failed: net_word(waiter, I64{40})
-    sync_mutex_unlock(root)
-    net_waiter_remove(root, waiter)
+    outcome: net_waiter_remove(root, waiter)
     jet_rt_string_drop(wait_kind)
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
-    if (failed < I64{0}) -> return fd_error(failed, error)
+    if (outcome < I64{0}) -> return fd_error(outcome, error)
     _ := fd_error(I64{0}, error)
-    ready
+    outcome
 }

@@ -1,0 +1,32 @@
+use {
+    net: core.net
+    time: core.time
+}
+
+// The poller wakes a ready waiter after it has released its lock, so the
+// wake can land after the waiter was cancelled and removed. Each round
+// cancels a waiter while its datagram arrives; whichever happens first, the
+// waiter must finish and the datagram must stay readable.
+#Test("a readiness wake racing the waiter's cancellation finishes both") {
+    socket: net.udp_bind("127.0.0.1:0") ?? panic("bind")
+    target: net.udp_local_addr(socket) ?? panic("address")
+    peer: net.udp_bind("127.0.0.1:0") ?? panic("peer")
+    budget: Duration.seconds(5) ?? panic("budget")
+    loop at in 0..<64 {
+        { sender: parked_tx, receiver: parked_rx }: channel<Int>()
+        waiter: task {
+            parked_tx.send(1)
+            if socket.ready(NetReadyInterest.Read, deadline: budget) == {
+                .Ok(_) -> {}
+                .Err(_) -> {}
+            }
+        }
+        _parked: parked_rx.receive() ?? panic("parked")
+        time.sleep(1ms)
+        _sent: peer.send_to("{at}".bytes(), target, deadline: budget) ?? panic("send")
+        waiter.cancel()
+        waiter.join() ?? panic("round {at} waiter")
+        packet: socket.receive(16, deadline: budget) ?? panic("receive")
+        assert(net.udp_packet_data(packet) == ("{at}"), "round {at} datagram")
+    }
+}

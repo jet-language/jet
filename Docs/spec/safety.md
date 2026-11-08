@@ -2696,7 +2696,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostNetPoller.jet",
-      "line": 92,
+      "line": 96,
       "column": 9,
       "reason": "events owns 64 packed epoll_event entries; epoll_wait retains no buffer pointer"
     },
@@ -10074,7 +10074,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/HostNetAddress.jet | 93:5 | "bytes owns width writable little-endian bytes (width&lt;=8)" |
 | Compiler | Compiler/JetRuntime/Source/HostNetPoller.jet | 28:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/HostNetPoller.jet | 66:5 | "the root lock owns a packed 12B epoll_event; state retains the native fd through this synchronous call" |
-| Compiler | Compiler/JetRuntime/Source/HostNetPoller.jet | 92:9 | "events owns 64 packed epoll_event entries; epoll_wait retains no buffer pointer" |
+| Compiler | Compiler/JetRuntime/Source/HostNetPoller.jet | 96:9 | "events owns 64 packed epoll_event entries; epoll_wait retains no buffer pointer" |
 | Compiler | Compiler/JetRuntime/Source/HostNetResolver.jet | 159:5 | "host lends length E4 bytes; outputs lend their writable pointer/count words" |
 | Compiler | Compiler/JetRuntime/Source/HostNetResolver.jet | 177:5 | "name owns a trailing NUL byte" |
 | Compiler | Compiler/JetRuntime/Source/HostParallelism.jet | 451:5 | "sched_getaffinity writes at most the owned 128-byte mask; pid0 names this thread" |
