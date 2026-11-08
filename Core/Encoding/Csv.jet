@@ -139,7 +139,7 @@ TypedCSV: struct {
     close_field: fn(&self) Never! {
         text := ""
         #Unsafe("input is a String; original complete UTF-8 scalars and ASCII quote escapes entered the field") {
-            text = encoding.__bytes_into_text(self.field.move())
+            text = encoding.__bytes_into_text(self.field)
         }
         self.field = [U8]{}
         self.fields.push(text)
@@ -869,7 +869,7 @@ CSVReader: struct {
         self.fields_heap += mem.__list_capacity<U8>(self.field)
         text := ""
         #Unsafe("each completed UTF-8 scalar was validated before its original bytes entered this field") {
-            text = encoding.__bytes_into_text(self.field.move())
+            text = encoding.__bytes_into_text(self.field)
         }
         self.field = [U8]{}
         self.fields.push(text)

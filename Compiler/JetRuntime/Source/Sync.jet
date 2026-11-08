@@ -2,6 +2,12 @@
 // futex observes their low 32 bits, while the atomic leaves publish all 64.
 // Mutex: 0 unlocked, 1 locked/uncontended, 2 locked/contended. Condvar: a
 // wrapping sequence. ParkSlot: one consumable notification, one parker.
+// A wait on a fiber (Fiber.jet) parks the fiber, not its carrier thread:
+// sync_wait goes to the fiber parking lot and sync_wake wakes the lot's
+// waiters on the word before the futex's; a plain thread waits on the futex.
+// The fiber side is reached only through the hooks the lot records
+// (Fiber.jet sync_lot), which exists once a fiber may run, so these
+// primitives link no fiber or scheduler code into a program.
 sync_load: fn(address: I64) -> I64 {
     #Unsafe("borrows an aligned live synchronization word") { return os_load_i64(address) }
 }
@@ -31,6 +37,17 @@ sync_cas: fn(address: I64, expected: I64, desired: I64) -> I64 {
 }
 
 sync_wake: fn(address: I64, count: I64) {
+    lot: sync_lot
+    remaining := count
+    // The locked read orders it after the store this wake publishes.
+    if (lot != I64{0} && sync_add(lot, I64{0}) != I64{0}) {
+        remaining = remaining - coll_call3(sync_load(wrapping(lot + I64{16})), lot, address, count)
+        if (remaining <= I64{0}) -> return
+    }
+    sync_futex_wake(address, remaining)
+}
+
+sync_futex_wake: fn(address: I64, count: I64) {
     #Unsafe("futex wake borrows a live aligned word and retains no pointer") {
         _ := os_syscall_i64(I64{202}, address, I64{129}, count, I64{0}, I64{0}, I64{0})
     }
@@ -39,6 +56,13 @@ sync_wake: fn(address: I64, count: I64) {
 // deadline_ns = -1 means unbounded. An absolute monotonic deadline survives
 // EINTR, spurious wakes and sequence changes without extending the wait.
 sync_wait: fn(address: I64, expected: I64, deadline_ns: I64) -> I64 {
+    fiber: fiber_current()
+    if (fiber != I64{0}) -> return coll_call4(sync_load(wrapping(sync_lot + I64{8})), fiber, address, expected, deadline_ns)
+    sync_futex_wait(address, expected, deadline_ns)
+}
+
+// The futex wait itself: it blocks the calling OS thread, fiber or not.
+sync_futex_wait: fn(address: I64, expected: I64, deadline_ns: I64) -> I64 {
     #Unsafe("futex borrows live state; timed wait uses this attached thread's reserved TCB scratch until the syscall returns") {
         if (deadline_ns < I64{0}) {
             return os_syscall_i64(I64{202}, address, I64{128}, expected, I64{0}, I64{0}, I64{0})
@@ -90,6 +114,32 @@ sync_mutex_try_lock: fn(address: I64) -> Bool { sync_cas(address, I64{0}, I64{1}
 
 sync_mutex_unlock: fn(address: I64) {
     if (sync_swap(address, I64{0}) == I64{2}) { sync_wake(address, I64{1}) }
+}
+
+// A lock whose waiters block their OS thread even on a fiber: the
+// scheduler's own short critical sections (its root, the fiber timers, the
+// lot buckets), which a fiber wake itself takes and which no holder parks in.
+// Every carrier takes the root, and each section is a few loads and stores,
+// so an acquirer spins briefly (test before each CAS, as alloc_lock does)
+// before it sleeps on the futex.
+sync_thread_lock: fn(address: I64) {
+    if (sync_cas(address, I64{0}, I64{1}) == I64{0}) -> return
+    spins := I64{0}
+    loop spins < (I64{128}) {
+        #Unsafe("x86 pause only hints that this thread is waiting in a spin loop") {
+            os_spin_pause()
+        }
+        if (sync_load(address) == I64{0} && sync_cas(address, I64{0}, I64{1}) == I64{0}) -> return
+        spins += I64{1}
+    }
+    loop {
+        if (sync_swap(address, I64{2}) == I64{0}) -> return
+        _ := sync_futex_wait(address, I64{2}, I64{-1})
+    }
+}
+
+sync_thread_unlock: fn(address: I64) {
+    if (sync_swap(address, I64{0}) == I64{2}) -> sync_futex_wake(address, I64{1})
 }
 
 // Sole-thread lock elision (#6444). A hot lock (stdout's, the stdin buffer's)
@@ -174,8 +224,10 @@ sync_cond_notify_all: fn(sequence: I64) {
     sync_wake(sequence, I64{2147483647})
 }
 
-// ParkSlot32: notification@0, mutex@8, sequence@16, atomic references@24.
-// There is exactly one parker; timer rows and waiter guards may retain it.
+// ParkSlot32: state@0, reserved@8/@16, atomic references@24. state: 0 empty,
+// 1 notified, 2 a thread waits on the futex, else the parked fiber (a
+// 64-aligned header, so never 1 or 2 in its low 32 bits). There is exactly
+// one parker; timer rows and waiter guards may retain it.
 sync_park_new: fn() -> I64 {
     slot: jet_rt_alloc(I64{32}, I64{8})
     sync_store(slot, I64{0})
@@ -190,30 +242,33 @@ sync_park_drop: fn(slot: I64) {
     if (sync_add(wrapping(slot + I64{24}), I64{-1}) == I64{1}) -> jet_rt_free(slot, I64{32}, I64{8})
 }
 
+// Consumes a notification, waiting for one up to timeout_ns (-1 unbounded).
 sync_park: fn(slot: I64, timeout_ns: I64) {
-    if (sync_swap(slot, I64{0}) != I64{0}) {
+    if (sync_swap(slot, I64{0}) != I64{0}) -> return
+    fiber: fiber_current()
+    if (fiber != I64{0}) {
+        _ := coll_call3(sync_load(wrapping(sync_lot + I64{24})), fiber, slot, timeout_ns)
         return
     }
-    mutex: wrapping(slot + I64{8})
-    sync_mutex_lock(mutex)
-    if (sync_swap(slot, I64{0}) != I64{0}) {
-        sync_mutex_unlock(mutex)
+    if (sync_cas(slot, I64{0}, I64{2}) != I64{0}) {
+        _ := sync_swap(slot, I64{0})
         return
     }
     deadline: sync_deadline(timeout_ns)
-    loop {
-        if (deadline >= I64{0} && sync_now_ns() >= deadline) { break }
-        woke: sync_cond_wait(wrapping(slot + I64{16}), mutex, deadline)
-        if (sync_swap(slot, I64{0}) != I64{0} || !woke) { break }
+    loop sync_load(slot) == (I64{2}) {
+        if (deadline >= I64{0} && sync_now_ns() >= deadline) {
+            if (sync_cas(slot, I64{2}, I64{0}) == I64{2}) -> return
+            break
+        }
+        _ := sync_futex_wait(slot, I64{2}, deadline)
     }
-    sync_mutex_unlock(mutex)
+    _ := sync_swap(slot, I64{0})
 }
 
 sync_park_wake: fn(slot: I64) {
-    sync_mutex_lock(wrapping(slot + I64{8}))
-    sync_store(slot, I64{1})
-    sync_cond_notify_one(wrapping(slot + I64{16}))
-    sync_mutex_unlock(wrapping(slot + I64{8}))
+    previous: sync_swap(slot, I64{1})
+    if (previous == I64{2}) -> sync_futex_wake(slot, I64{1})
+    if (previous > I64{2}) -> _ := coll_call1(sync_load(wrapping(sync_lot + I64{32})), previous)
 }
 
 // Once: 0 empty, 1 initializer running, 2 published. The initializer must not

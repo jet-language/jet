@@ -6,7 +6,10 @@
 // ceiling it is (AGENTS.md "Performance gate"): the gauntlet harness reads
 // this file and judges those cells Jet/ceiling <= 1.00 from results.json
 // (`run.mjs --ceiling-results`); a required cell no reference names is
-// uncovered and fails the gauntlet gate.
+// uncovered and fails the gauntlet gate. Its `scriptbench` field names the
+// ScriptBench workloads (Tools/perf/scriptbench/manifest.json ids) it bounds
+// the same way; an id the manifest lacks fails the run before anything is
+// built.
 //
 //   node Tools/perf/asm-parity/asm-parity.mjs --jet PATH [--out DIR] [--runs N]
 //       [--cpu C] [--modes default,release] [--cells hello,fib] [--perf PATH] [--gate]
@@ -27,7 +30,11 @@
 //   write its input (a file or a directory) into the cell's output
 //   directory, and every binary runs there (its `args` name it). The input
 //   is written once, or, with `fresh: true` (a program that changes it),
-//   again before every run. A cell with `steps` (argument lists) runs them
+//   again before every run. A cell with `server` {script, port, delay_ms}
+//   has `node script port delay_ms` serve it: started before the cell's
+//   first run, waited for until the port accepts, stopped after the cell;
+//   its port and delay must be those of the ScriptBench workloads it names.
+//   A cell with `steps` (argument lists) runs them
 //   in order in a `work` directory emptied before every run, in place of
 //   `args` (a program that keeps state between invocations); stdout is the
 //   steps' together and cycles their sum;
@@ -49,7 +56,7 @@
 //
 // Writes DIR/results.json and DIR/table.tsv (default DIR: .asm-parity under
 // the current directory) and prints the table.
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -188,8 +195,59 @@ function measure(o, variants, plan, cwd, prepare) {
   });
 }
 
+// Whether 127.0.0.1:port accepts a connection within `ms` milliseconds.
+function accepts(port, ms) {
+  const probe = `const net = require('node:net'); const end = Date.now() + ${ms};
+const once = () => { const s = net.connect(${port}, '127.0.0.1', () => { s.destroy(); process.exit(0); });
+  s.on('error', () => { s.destroy(); if (Date.now() >= end) process.exit(1); setTimeout(once, 10); }); };
+once();`;
+  return run(process.execPath, ['-e', probe]).status === 0;
+}
+
+// A cell's server, running once its port accepts; null for a cell without one.
+function startServer(cell) {
+  if (!cell.server) return null;
+  const { script, port, delay_ms } = cell.server;
+  if (accepts(port, 0)) throw new Error(`${cell.name}: port ${port} is already served; stop that server first`);
+  const child = spawn(process.execPath, [resolve(HERE, script), String(port), String(delay_ms)], { stdio: 'ignore' });
+  if (!accepts(port, 10000)) {
+    child.kill();
+    throw new Error(`${cell.name}: ${script} did not accept on port ${port}`);
+  }
+  return child;
+}
+
+// Every cell's `scriptbench` ids are manifest workloads, and a cell's server
+// is the one those workloads use.
+function scriptbenchIssues(all) {
+  const workloads = new Map(JSON.parse(readFileSync(join(HERE, '..', 'scriptbench', 'manifest.json'), 'utf8')).workloads.map((w) => [w.id, w]));
+  const issues = [];
+  for (const cell of all) {
+    if (cell.scriptbench === undefined) continue;
+    if (!Array.isArray(cell.scriptbench)) { issues.push(`${cell.name}: scriptbench is not a list of workload ids`); continue; }
+    for (const id of cell.scriptbench) {
+      const w = workloads.get(id);
+      if (!w) { issues.push(`${cell.name}: scriptbench names unknown workload ${id}`); continue; }
+      const servers = w.servers ?? [];
+      if (servers.length === 0 && cell.server) issues.push(`${cell.name}: has a server but workload ${id} uses none`);
+      for (const s of servers) {
+        if (!cell.server || cell.server.port !== s.port || cell.server.delay_ms !== s.delay_ms) {
+          issues.push(`${cell.name}: workload ${id} is served on port ${s.port} with a ${s.delay_ms} ms delay; the cell's server differs`);
+        }
+      }
+    }
+  }
+  return issues;
+}
+
 const o = options(process.argv.slice(2));
-const cells = JSON.parse(readFileSync(join(HERE, 'cells.json'), 'utf8')).filter((c) => !o.cells || o.cells.includes(c.name));
+const all = JSON.parse(readFileSync(join(HERE, 'cells.json'), 'utf8'));
+const issues = scriptbenchIssues(all);
+if (issues.length) {
+  for (const issue of issues) console.error(`cells.json: ${issue}`);
+  process.exit(1);
+}
+const cells = all.filter((c) => !o.cells || o.cells.includes(c.name));
 mkdirSync(o.out, { recursive: true });
 const rows = [];
 let wrong = 0, gated = 0;
@@ -212,8 +270,14 @@ for (const cell of cells) {
   const expect = cell.expect_file ? readFileSync(resolve(HERE, cell.expect_file), 'latin1') : cell.expect;
   const variants = [{ variant: 'asm', exe: buildRef(cell, dir) }];
   for (const mode of o.modes) variants.push({ variant: `jet-${mode}`, exe: buildJet(o, cell, mode, dir) });
-  const outs = variants.map((v) => output(v.exe, plan, cwd, prepare));
-  const speeds = measure(o, variants, plan, cwd, prepare);
+  const server = startServer(cell);
+  let outs, speeds;
+  try {
+    outs = variants.map((v) => output(v.exe, plan, cwd, prepare));
+    speeds = measure(o, variants, plan, cwd, prepare);
+  } finally {
+    server?.kill();
+  }
   let ref = null;
   variants.forEach((v, k) => {
     const out = outs[k], speed = speeds[k];

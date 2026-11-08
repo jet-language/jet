@@ -1,0 +1,32 @@
+// 100000 tasks parked at once, each in a channel receive, then released:
+// every one completes. Their stacks merge into few kernel mappings, so the
+// default vm.max_map_count (65530) is far from binding.
+package: {
+    name: "many_tasks"
+    authority: { allow: [FS, FS.Read, IO, Mem.Alloc, Time, Time.Wait] }
+}
+
+use files: core.files
+use time: core.time
+
+TASKS: 100000
+
+waiter: fn(rx: Receiver<Int>) -> Int { rx.receive() ?? 0 }
+
+mappings: fn() -[FS]> Int {
+    text: files.read("/proc/self/maps") ?? panic("read maps")
+    text.lines().len()
+}
+
+run: fn() {
+    { sender: tx, receiver: rx }: channel<Int>(capacity: 1)
+    handles := [Task<Int>]{}
+    loop i in 0..<TASKS -> handles.push(task waiter(rx))
+    time.sleep(500ms)
+    parked_maps: mappings()
+    loop i in 0..<TASKS -> tx.send(1)
+    total := 0
+    loop handle in handles -> total += handle.join() ?? 0
+    print("{total} of {TASKS} tasks completed")
+    print("mappings while parked under 10000 {parked_maps < 10000}")
+}

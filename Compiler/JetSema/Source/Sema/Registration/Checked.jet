@@ -3494,6 +3494,8 @@ sema_checked_validate_delegation_field: fn(graph: SemaRegistrationGraph, module_
 
 // Fields and methods have separate namespaces.
 // Only operator hooks may repeat a method name (pair coherence checks the RHS).
+// A generated codec's reserved `__` helper (a decode's `__read`) repeats only
+// with its codec's own method, which reports the repeat, so it is not named.
 sema_checked_member_names: fn(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, diagnostics: &[Diagnostic]) {
     names := [String:Bool]{}
     loop nominal_index in 0..<module_row.nominals.len() {
@@ -3502,7 +3504,7 @@ sema_checked_member_names: fn(graph: SemaRegistrationGraph, module_row: SemaRegi
             key: "{owner}::{method.symbol.name}"
             hook: method.symbol.owner != Val(owner)
             previous: names.get(key)
-            if previous != None && !(hook && previous == (Val(true))) {
+            if previous != None && !(hook && previous == (Val(true))) && !sema_checked_generated_helper(method) {
                 diagnostics.push(sema_method_defined_twice(method.symbol.name, module_row.nominals[nominal_index].symbol.name, method.symbol.span))
             }
             if previous == None -> names.add(key, hook).drop("new member name")
@@ -3526,12 +3528,16 @@ sema_checked_member_names: fn(graph: SemaRegistrationGraph, module_row: SemaRegi
         loop method in module_row.impls[implementation_index].methods {
             key: "{owner}::{method.symbol.name}"
             previous: names.get(key)
-            if previous != None && !(hook && previous == (Val(true))) {
+            if previous != None && !(hook && previous == (Val(true))) && !sema_checked_generated_helper(method) {
                 diagnostics.push(sema_method_defined_twice(method.symbol.name, owner_name, method.symbol.span))
             }
             if previous == None -> names.add(key, hook).drop("new member name")
         }
     }
+}
+
+sema_checked_generated_helper: fn(method: SemaRegistrationFunction) -> Bool Never! {
+    method.declaration.compiler_generated && method.symbol.name.starts_with("__")
 }
 
 sema_checked_impl_coherence: fn(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, diagnostics: &[Diagnostic]) {

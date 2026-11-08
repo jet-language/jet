@@ -153,6 +153,10 @@ fs_lock_sleep: fn(nanos: I64) {
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     fd_new(native, path, false)
 }
+// The held lock's descriptor number, a borrowed fact for ProcessSpec.keep_open;
+// a closed lock is EBADF. The Core caller keeps the lock alive until the
+// process leaf duplicates the descriptor.
+#Export(c) jet_fs_lock_fd_raw: fn(lock: I64, ok: I64, error: I64) -> I64 { jet_std_file_reader_fd_raw(lock, ok, error) }
 
 #Export(c) jet_rt_handle_drop_jet_file_lock_owner: fn(value: I64) { jet_fd_drop_raw(value) }
 #Export(c) jet_rt_handle_clone_jet_file_lock_owner: fn(value: I64) -> I64 { jet_fd_retain_raw(value) }

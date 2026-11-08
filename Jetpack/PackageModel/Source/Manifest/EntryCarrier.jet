@@ -74,53 +74,100 @@ pkg_manifest_path_checked: fn(root: String) -[FS, Env]> String? ManifestError! {
 // Only the presence verdict is needed by upward discovery. Keep successful
 // None distinct from a workspace resolution error; `??` collapses both.
 pkg_entry_has_workspace: fn(resolver: AuthorityResolver, cache: &WorkspaceDeclarationCache) -[FS, Env]> Bool ManifestError! {
-    if resolver.resolve_workspace_source(cache) == {
-        .Ok(source) -> Ok(if source == .Val(_) -> true else -> false)
+    if pkg_workspace_present(cache, resolver) == {
+        .Ok(present) -> Ok(present)
         .Err(error) -> Err(pkg_entry_workspace_error(error))
     }
 }
 
-// Loader.rs `find_manifest_root_checked`. Declaration-resolved workspaces
-// stop discovery even when their filenames are not workspace.jet.
-pkg_find_manifest_root_checked: fn(cache: &WorkspaceDeclarationCache, start: String) -[FS, Env]> String? ManifestError! {
+// The package carriers above one start: the nearest manifest root, and the
+// nearest inline Package carrier root when the walk looks for one.
+PkgPackageRoots: struct {
+    manifest: String?
+    inline: String?
+}
+
+// Loader.rs `find_manifest_root_checked` and, when `inline`,
+// `find_inline_package_root_checked`, in one climb: both walks visit the same
+// directories, so each is opened, and its workspace and manifest resolved,
+// once. Declaration-resolved workspaces stop discovery even when their
+// filenames are not workspace.jet, and a nearer manifest or a checked
+// workspace prevents a parent stock entry from becoming authority. The inline
+// walk ends at or below the manifest walk's end; its failure is reported only
+// when the manifest walk completes without one, as if it ran second.
+pkg_find_package_roots_checked: fn(cache: &WorkspaceDeclarationCache, start: String, inline: Bool) -[FS, Env]> PkgPackageRoots ManifestError! {
     dir := AuthorityResolver.authority_walk_root(start) ?? return Err(pkg_entry_authority_error(err))
+    seeking_inline := inline
+    inline_root := String?{None}
+    inline_error := ManifestError?{None}
     loop {
         authority: if AuthorityResolver.open_for_authority_walk(dir) == {
             .Ok(found) -> found
             .Err(error) -> { return Err(pkg_entry_authority_error(error)) }
         }
-        if authority == {
-            .Val(resolver) -> {
-                workspace: pkg_entry_has_workspace(resolver, cache)
-                if resolver.checked_manifest(".") == {
-                    .Ok(manifest) -> {
-                        resolver.revalidate_file(manifest.file) ?? return Err(pkg_entry_authority_error(err))
-                        return Ok(Val(dir))
-                    }
-                    .Err(error) -> {
-                        if !error.is_missing() -> return Err(pkg_entry_authority_error(error))
+        walked: authority != None
+        // Explicit shared-directory boundaries are still inspected; upward
+        // traversal itself remains pruned by the resolver. Only a walked
+        // directory's workspace stops discovery; a boundary's must still
+        // resolve wherever it carries a package.
+        resolver: if authority.move() == {
+            .Val(opened) -> opened
+            .None -> AuthorityResolver.open(dir) ?? return Err(pkg_entry_authority_error(err))
+        }
+        workspace := false
+        if walked {
+            workspace = pkg_entry_has_workspace(resolver, cache)
+        }
+        has_manifest: if resolver.checked_manifest(".") == {
+            .Ok(manifest) -> {
+                if !walked {
+                    _: pkg_entry_has_workspace(resolver, cache)
+                }
+                resolver.revalidate_file(manifest.file) ?? return Err(pkg_entry_authority_error(err))
+                true
+            }
+            .Err(error) -> {
+                if !error.is_missing() -> return Err(pkg_entry_authority_error(error))
+                false
+            }
+        }
+        if seeking_inline {
+            if pkg_checked_inline_package_entry(resolver) == {
+                .Ok(entry) -> {
+                    if entry == .Val(_) {
+                        seeking_inline = false
+                        if !walked && !has_manifest && pkg_entry_has_workspace(resolver, cache) == .Err(error) {
+                            inline_error = Val(error)
+                        } else {
+                            inline_root = Val(dir.copy())
+                        }
+                    } else if workspace || has_manifest {
+                        seeking_inline = false
                     }
                 }
-                if workspace -> return Ok(None)
-            }
-            .None -> {
-                // Explicit shared-directory boundaries are still inspected;
-                // upward traversal itself remains pruned by the resolver.
-                resolver: AuthorityResolver.open(dir) ?? return Err(pkg_entry_authority_error(err))
-                if resolver.checked_manifest(".") == {
-                    .Ok(manifest) -> {
-                        _: pkg_entry_has_workspace(resolver, cache)
-                        resolver.revalidate_file(manifest.file) ?? return Err(pkg_entry_authority_error(err))
-                        return Ok(Val(dir))
-                    }
-                    .Err(error) -> {
-                        if !error.is_missing() -> return Err(pkg_entry_authority_error(error))
-                    }
+                .Err(error) -> {
+                    seeking_inline = false
+                    inline_error = Val(error)
                 }
             }
         }
-        parent: AuthorityResolver.authority_walk_parent(dir) ?? return Ok(None)
+        if has_manifest -> return pkg_package_roots_found(Val(dir), inline_root, inline_error)
+        if workspace -> return pkg_package_roots_found(None, inline_root, inline_error)
+        parent: AuthorityResolver.authority_walk_parent(dir) ?? return pkg_package_roots_found(None, inline_root, inline_error)
         dir = parent
+    }
+}
+
+pkg_package_roots_found: fn(manifest: String?, inline: String?, inline_error: ManifestError?) -> PkgPackageRoots ManifestError! {
+    if inline_error == .Val(error) -> return Err(error)
+    Ok(PkgPackageRoots{manifest: manifest, inline: inline})
+}
+
+// Loader.rs `find_manifest_root_checked`.
+pkg_find_manifest_root_checked: fn(cache: &WorkspaceDeclarationCache, start: String) -[FS, Env]> String? ManifestError! {
+    if pkg_find_package_roots_checked(cache, start, false) == {
+        .Ok(roots) -> Ok(roots.manifest)
+        .Err(error) -> Err(error)
     }
 }
 
@@ -145,43 +192,6 @@ pkg_checked_inline_package_entry: fn(resolver: AuthorityResolver) -[FS, Env]> Ch
         if block != None -> return Ok(Val(file.move()))
     }
     Ok(None)
-}
-
-// Loader.rs `find_inline_package_root_checked`. A nearer manifest or a
-// checked workspace prevents a parent stock entry from becoming authority.
-pkg_find_inline_package_root_checked: fn(cache: &WorkspaceDeclarationCache, start: String) -[FS, Env]> String? ManifestError! {
-    dir := AuthorityResolver.authority_walk_root(start) ?? return Err(pkg_entry_authority_error(err))
-    loop {
-        authority: if AuthorityResolver.open_for_authority_walk(dir) == {
-            .Ok(found) -> found
-            .Err(error) -> { return Err(pkg_entry_authority_error(error)) }
-        }
-        walked: authority != None
-        resolver: if authority.move() == {
-            .Val(opened) -> opened
-            .None -> AuthorityResolver.open(dir) ?? return Err(pkg_entry_authority_error(err))
-        }
-        workspace := false
-        if walked {
-            workspace = pkg_entry_has_workspace(resolver, cache)
-        }
-        has_manifest: if resolver.checked_manifest(".") == {
-            .Ok(_) -> true
-            .Err(error) -> {
-                if !error.is_missing() -> return Err(pkg_entry_authority_error(error))
-                false
-            }
-        }
-        inline: pkg_checked_inline_package_entry(resolver)
-        has_inline: if inline == .Val(_) -> true else -> false
-        if !walked && (has_manifest || has_inline) {
-            _: pkg_entry_has_workspace(resolver, cache)
-        }
-        if has_inline -> return Ok(Val(dir))
-        if workspace || has_manifest -> return Ok(None)
-        parent: AuthorityResolver.authority_walk_parent(dir) ?? return Ok(None)
-        dir = parent
-    }
 }
 
 // Both carrier forms complete through PackageLoad's transactional Config
@@ -298,8 +308,9 @@ pkg_package_facts_for_entry: fn(cache: &WorkspaceDeclarationCache, entry: String
     resolver: AuthorityResolver.open(parent) ?? return Err(pkg_entry_read_error(entry, err))
     checked: resolver.checked_file(pkg_path_file_name(entry)) ?? return Err(pkg_entry_read_error(entry, err))
     checked.text() ?? return Err(pkg_unreadable_entry(entry, err))
-    manifest_root: pkg_find_manifest_root_checked(cache, resolver.root)
-    inline_root: pkg_find_inline_package_root_checked(cache, resolver.root)
+    roots: pkg_find_package_roots_checked(cache, resolver.root, true)
+    manifest_root: roots.manifest
+    inline_root: roots.inline
     loaded: if pkg_package_facts_from_checked_entry(resolver, checked, entry, manifest_root) == {
         .Ok(found) -> found
         .Err(error) -> {

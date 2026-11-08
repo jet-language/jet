@@ -286,9 +286,11 @@ scheduler_test_spawn: fn(callbacks: I64, meta: I64, log: I64, mode: I64, value: 
     // Every environment released exactly once: the 10000 joined tasks, then
     // the cancelled, panicked, detached, rejected and two group tasks.
     scheduler_test_require(sync_load(log) == I64{10006})
+    // No fiber stays parked, and the 10000 tasks ran on at most the pool's
+    // carriers: a waiting task holds no thread of its own.
     stats: jet_rt_alloc(I64{24}, I64{8})
-    jet_scheduler_blocking_wait_stats(stats)
-    scheduler_test_require(sync_load(stats) == I64{0} && sync_load(stats + I64{16}) <= I64{9})
+    scheduler_fiber_stats(stats)
+    scheduler_test_require(sync_load(stats) == I64{0} && sync_load(stats + I64{8}) <= sync_load(scheduler_root + I64{112}))
     jet_rt_free(stats, I64{24}, I64{8})
     sync_park_drop(slot)
     jet_rt_free(deadline_save, I64{32}, I64{8})

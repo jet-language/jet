@@ -1,0 +1,132 @@
+package: {
+    name: "main"
+    authority: { allow: [FS, IO] }
+}
+
+use files: core.files
+
+// The order every walk has kept: each path below `directory`, as the walk
+// joins it, sorted as strings, read with list_dir and without following a
+// link. A directory list_dir can't read adds no paths.
+listed: fn(directory: String, out: &[String]) -[FS]> {
+    entries: files.list_dir(directory) ?? return
+    loop entry in entries {
+        path: "{directory}/{entry.name}"
+        out.push(path.copy())
+        info: files.lstat(path) ?? panic("lstat {path}")
+        if info.is_dir -> listed(path, out)
+    }
+}
+
+// The process's open descriptors. A walk keeps one open only while it reads
+// a directory, inside one step.
+open_descriptors: fn() -[FS]> Int {
+    (files.list_dir("/proc/self/fd") ?? panic("list /proc/self/fd")).len()
+}
+
+first_file: fn(root: String) -[FS]> String {
+    loop item in files.walk_files(root) {
+        entry: item ?? panic("first file")
+        return entry.relative
+    }
+    ""
+}
+
+build: fn(root: String) -[FS]> {
+    loop directory in ["a/b", "a.b", "deep/1/2/3/4", "empty", "locked/inner", "wide"] {
+        files.create_dir_all(files.join(root, directory)) ?? panic("mkdir {directory}")
+    }
+    loop file in ["a/x", "a/b/y", "a.b/f", "a-b", "ab", "B", "top", "deep/1/2/3/4/leaf", "locked/inner/hidden"] {
+        files.write(files.join(root, file), file) ?? panic("write {file}")
+    }
+    // Names around each subtree key: `-` and `.` sort before `/`.
+    loop i in 0..<30 {
+        name: files.join(root, "wide/n{i}")
+        if i % 7 != 0 {
+            files.write(name, "n") ?? panic("write n{i}")
+            next
+        }
+        files.create_dir_all(name) ?? panic("mkdir n{i}")
+        files.write(files.join(name, "x"), "x") ?? panic("write n{i}/x")
+        files.write("{name}-a", "a") ?? panic("write n{i}-a")
+        files.write("{name}.txt", "t") ?? panic("write n{i}.txt")
+    }
+    files.symlink("a", files.join(root, "link")) ?? panic("symlink")
+}
+
+run: fn() {
+    scratch: files.temp_dir("walk-lazy") ?? panic("temp dir")
+    root: files.join(scratch.path, "tree")
+    build(root)
+    locked: files.join(root, "locked")
+    files.set_mode(locked, 0o000) ?? panic("lock")
+    before: open_descriptors()
+
+    // A walk reads nothing until a loop takes its first entry.
+    unread: files.walk(root)
+    print("unlooped walk opens nothing: {open_descriptors() == before}")
+
+    // A full walk: every entry in path order, the unreadable directory's
+    // error where its entries would be, and the walk goes on after it.
+    walked := [String]{}
+    shown := [String]{}
+    errors := 0
+    loop item in unread {
+        if item == {
+            .Ok(entry) -> {
+                walked.push(entry.path)
+                kind: if entry.is_dir -> "/" else -> ""
+                shown.push("{entry.depth} {entry.relative}{kind}")
+            }
+            .Err(_) -> {
+                errors += 1
+                shown.push("error: a directory can't be read")
+            }
+        }
+    }
+    loop line in shown -> print(line)
+    print("errors: {errors}")
+    print("closed after the end: {open_descriptors() == before}")
+
+    // The order is the one every walk has kept.
+    files.set_mode(locked, 0o755) ?? panic("unlock")
+    expected := [String]{}
+    listed(root, expected)
+    expected.sort()
+    readable := [String]{}
+    loop path in expected {
+        if !path.starts_with("{locked}/") -> readable.push(path)
+    }
+    print("walk order is the sorted path order: {walked == readable}")
+    files.set_mode(locked, 0o000) ?? panic("relock")
+
+    // Leaving the loop after the first entry closes the walk at once.
+    loop item in files.walk(root) {
+        entry: item ?? panic("first entry")
+        print("first: {entry.relative}")
+        break
+    }
+    print("closed after break: {open_descriptors() == before}")
+    print("first file: {first_file(root)}")
+    print("closed after return: {open_descriptors() == before}")
+
+    // `.list()` collects every entry or stops at the first error.
+    if files.walk(root).list() == {
+        .Ok(_) -> print("list: every entry")
+        .Err(_) -> print("list: the first error")
+    }
+    files.set_mode(locked, 0o755) ?? panic("unlock")
+    count: (files.walk_files(root).list() ?? panic("list")).len()
+    print("list of files once readable: {count}")
+    print("closed after list: {open_descriptors() == before}")
+
+    // The cursor a loop reads, driven by hand: it closes once it runs out.
+    cursor := files.walk(root).iter()
+    stepped := 0
+    loop {
+        step: cursor.next() ?? break
+        _: step ?? panic("step")
+        stepped += 1
+    }
+    print("stepped by hand: {stepped == walked.len() + 2}, closed: {open_descriptors() == before}")
+}

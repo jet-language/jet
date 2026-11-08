@@ -1,0 +1,120 @@
+// Liveness of parked tasks under racing wakes. 100000 rounds in three races,
+// every outcome counted: a cancel against a send to the receiving task, a
+// cancel against a sleeping task's timer, and a receive's deadline against
+// a send. A lost wakeup hangs the run; a double wake or a wake of a reused
+// task shows up as a count that does not add up. Then a program that only
+// waits must not burn CPU while its tasks are parked: 1000 tasks parked for
+// 1000 ms cost about what they cost parked for 50 ms (one carrier spinning
+// through the long wait would add about 950 ms).
+package: {
+    name: "fiber_liveness"
+    authority: { allow: [IO, Mem.Alloc, Time, Time.Wait, Env] }
+}
+
+use time: core.time
+use sys: core.sys
+use tasks: core.tasks
+
+RACERS: 50
+
+receiver: fn(rx: Receiver<Int>) -> Int { rx.receive() ?? 0 }
+
+// Cancel against send: the task either got the value or was cancelled.
+cancel_vs_send: fn(rounds: Int) -> (received: Int, cancelled: Int) {
+    received := 0
+    cancelled := 0
+    loop i in 0..<rounds {
+        { sender: tx, receiver: rx }: channel<Int>(capacity: 1)
+        waiter: task receiver(rx)
+        if i % 2 == 0 -> tasks.yield_now()
+        tx.send(1)
+        waiter.cancel()
+        if waiter.join() == {
+            .Ok(value) -> received += value
+            .Err(_) -> cancelled += 1
+        }
+    }
+    (received: received, cancelled: cancelled)
+}
+
+napper: fn() -> Int {
+    time.sleep(1ms)
+    1
+}
+
+// Cancel against a timer: the sleep either ran out or was cancelled.
+cancel_vs_timer: fn(rounds: Int) -> (woke: Int, cancelled: Int) {
+    woke := 0
+    cancelled := 0
+    loop i in 0..<rounds {
+        sleeper: task napper()
+        if i % 3 != 0 -> tasks.yield_now()
+        sleeper.cancel()
+        if sleeper.join() == {
+            .Ok(value) -> woke += value
+            .Err(_) -> cancelled += 1
+        }
+    }
+    (woke: woke, cancelled: cancelled)
+}
+
+deadline_receiver: fn(rx: Receiver<Int>) -> Int {
+    got := 0
+    #Context(deadline: time.unix_ns() /% 1_000_000 + 1) {
+        got = rx.receive() ?? 0
+    }
+    got
+}
+
+// Deadline against send: the receive either got the value or its deadline blew.
+deadline_vs_send: fn(rounds: Int) -> (received: Int, expired: Int) {
+    received := 0
+    expired := 0
+    loop i in 0..<rounds {
+        { sender: tx, receiver: rx }: channel<Int>(capacity: 1)
+        waiter: task deadline_receiver(rx)
+        time.sleep(1ms)
+        tx.send(1)
+        if waiter.join() == {
+            .Ok(value) -> received += value
+            .Err(_) -> expired += 1
+        }
+    }
+    (received: received, expired: expired)
+}
+
+racer: fn() -> Int {
+    a: cancel_vs_send(800)
+    b: cancel_vs_timer(800)
+    c: deadline_vs_send(400)
+    a.received + a.cancelled + b.woke + b.cancelled + c.received + c.expired
+}
+
+idler: fn(nap: Duration) -> Int {
+    time.sleep(nap)
+    1
+}
+
+// CPU spent while 1000 tasks sleep for `nap`, and how many woke.
+parked_cpu: fn(nap: Duration) -[Env, Time.Wait]> (spent: Duration, woke: Int) {
+    before: sys.usage() ?? panic("usage")
+    idle := [Task<Int>]{}
+    loop i in 0..<1000 -> idle.push(task idler(nap))
+    woke := 0
+    loop handle in idle -> woke += handle.join() ?? 0
+    after: sys.usage() ?? panic("usage")
+    (spent: (after.user + after.system) - (before.user + before.system), woke: woke)
+}
+
+run: fn() {
+    races := [Task<Int>]{}
+    loop r in 0..<RACERS -> races.push(task racer())
+    accounted := 0
+    loop race in races -> accounted += race.join() ?? 0
+    print("rounds accounted {accounted} of {RACERS * 2000}")
+
+    short: parked_cpu(50ms)
+    long: parked_cpu(1000ms)
+    budget: Duration.milliseconds(100) ?? panic("budget")
+    print("idle wait: {short.woke + long.woke} tasks woke, long wait within budget {long.spent < short.spent + budget}")
+}

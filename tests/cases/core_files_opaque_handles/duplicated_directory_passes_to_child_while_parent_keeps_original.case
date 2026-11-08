@@ -1,0 +1,15 @@
+# `directory.duplicate()` then `spec.keep_open(twin, at: 9)`: the child reads
+# the held directory through slot 9 after its path is replaced, and the
+# parent's original handle still lists and creates in the same directory.
+fixture: duplicated_directory_passes_to_child_while_parent_keeps_original.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run --optimize=none main.jet
+exit: 0
+stdout: = duplicated_directory_passes_to_child_while_parent_keeps_original.out
+step: jet build main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = duplicated_directory_passes_to_child_while_parent_keeps_original.out

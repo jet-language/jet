@@ -15,6 +15,7 @@ use {
     json: core.encoding.json
     random: core.crypto.random
     sys: core.sys
+    jetpack_artifact_store.[StampTable]
 }
 
 // Host reads of build files (declared inputs, work-tree outputs, published
@@ -60,10 +61,13 @@ BuildIOError: struct {
     }
 }
 
+// `executable`: a declared input whose owner may run it, which the work tree
+// receives runnable too.
 ActionInputSnapshot: struct {
     path: String
     digest: ContentDigest
     byte_len: Int
+    executable: Bool{false}
 }
 
 // One declared input as it was hashed: the snapshot the action key uses and
@@ -128,9 +132,60 @@ build_snapshot_declared_inputs: fn(store: BuildArtifactStoreHandle, base: String
         bytes: build_secure_read_file(base, path, build_read_budget(total))
         total += bytes.len()
         digest: store.put_blob(bytes)
-        inputs.push(ActionInputCapture{snapshot: ActionInputSnapshot{path: input, digest, byte_len: bytes.len()}, bytes})
+        mode: (files.stat(path) ?? return Err(BuildIOError.from(err))).mode
+        executable: (mode /% 64) % 2 == 1
+        inputs.push(ActionInputCapture{snapshot: ActionInputSnapshot{path: input, digest, byte_len: bytes.len(), executable}, bytes})
     }
     Ok(inputs)
+}
+
+// Every file of each folder `action` reads whole, as the input snapshots its
+// key hashes: `<folder>/<relative path>` and the file's digest, `stamps`
+// skipping the hash of a file whose size and change time are unchanged. A
+// link inside the folder is hashed as its target text (what it leads to is
+// hashed where it lies); one that leads out of the folder is refused. The
+// `.jet` and `.git` folders and what a `.gitignore` excludes are skipped.
+// The folder is bound into the work tree, so no byte is copied.
+build_snapshot_folders: fn(stamps: &StampTable, base: String, action: HermeticBuildAction) -[FS, Env]> [ActionInputSnapshot] BuildIOError! {
+    snapshots := [ActionInputSnapshot]{}
+    loop folder in action.folders {
+        root: build_folder_source(base, folder) ?? return Err(err)
+        if !files.is_dir(root) -> return Err(BuildIOError.new(.NotFound, "step `{action.name}` reads the folder `{folder.path}`, and `{root}` is not a folder"))
+        real: files.realpath(root) ?? return Err(BuildIOError.from(err))
+        loop walked in files.walk(real, Val(".gitignore")) {
+            entry: walked ?? return Err(BuildIOError.from(err))
+            if entry.is_dir || build_folder_skipped(entry.relative) -> next
+            path: if folder.path == "." -> entry.relative.copy() else -> "{folder.path}/{entry.relative}"
+            info: files.stat(entry.path) ?? return Err(BuildIOError.from(err))
+            if info.is_symlink {
+                resolved: files.realpath(entry.path) ?? return Err(BuildIOError.new(.NotFound, "`{path}` in the folder step `{action.name}` reads is a link that leads nowhere"))
+                if !resolved.starts_with("{real}/") -> return Err(BuildIOError.new(.PermissionDenied, "`{path}` in the folder step `{action.name}` reads is a link that leads out of it, to `{resolved}`"))
+                target: files.read_link(entry.path) ?? return Err(BuildIOError.from(err))
+                snapshots.push(ActionInputSnapshot{path, digest: ContentDigest.from_bytes("link:{target}".bytes()), byte_len: 0})
+                next
+            }
+            if !info.is_file -> return Err(BuildIOError.new(.InvalidInput, "`{path}` in the folder step `{action.name}` reads is neither a file, a folder nor a link"))
+            hex: stamps.file_digest(entry.path) ?? return Err(BuildIOError.new(.Other, "couldn't read `{path}` in the folder step `{action.name}` reads"))
+            snapshots.push(ActionInputSnapshot{path, digest: ContentDigest{value: "sha256:{hex}"}, byte_len: info.size})
+        }
+    }
+    Ok(snapshots)
+}
+
+// The host folder bound at `folder.path`: its source, else that path under
+// the project root `base`.
+build_folder_source: fn(base: String, folder: ActionFolder) -> String BuildIOError! {
+    if folder.source == .Val(source) -> return Ok(source.copy())
+    build_resolve_under(base, folder.path)
+}
+
+// Whether a folder's file at `relative` is outside what its readers see:
+// anything under a `.jet` or `.git` folder.
+build_folder_skipped: fn(relative: String) -> Bool Never! {
+    loop part in relative.split("/") {
+        if part == ".jet" || part == ".git" -> return true
+    }
+    false
 }
 
 // Rust `capture_declared_outputs`.
@@ -155,8 +210,10 @@ build_read_budget: fn(used: Int) -> Int Never! {
 }
 
 // Rust `restore_action_outputs`: the record must name exactly the declared
-// outputs, in order, before any byte is restored.
-build_restore_action_outputs: fn(store: BuildArtifactStoreHandle, base: String, action: HermeticBuildAction, record: ActionResultRecord) BuildIOError! -[FS, Env, Exec, Time, Rand]> {
+// outputs, in order, before any byte is restored. A kept output that already
+// holds the recorded bytes is left as it is; when one holds bytes no build
+// wrote (build_output_write), nothing is restored and its path is returned.
+build_restore_action_outputs: fn(store: BuildArtifactStoreHandle, base: String, action: HermeticBuildAction, record: ActionResultRecord) -[FS, Env, Exec, Time, Rand]> String? BuildIOError! {
     matches := record.outputs.len() == action.outputs.len()
     if matches {
         loop index in 0..<record.outputs.len() {
@@ -164,7 +221,16 @@ build_restore_action_outputs: fn(store: BuildArtifactStoreHandle, base: String, 
         }
     }
     if !matches -> return Err(BuildIOError.new(.InvalidData, "cached output record does not exactly match action declarations"))
+    writes := [BuildOutputWrite]{}
     loop output in record.outputs {
+        write := BuildOutputWrite.Write
+        if build_kept_output(action, output.path) == .Val(kept) -> write = build_output_write(base, kept, output.digest)
+        if write == .HandEdited -> return Ok(Val(output.path.copy()))
+        writes.push(write)
+    }
+    loop index in 0..<record.outputs.len() {
+        if writes[index] == .Unchanged -> next
+        output: record.outputs[index]
         path: build_resolve_under(base, output.path)
         found: if store.get_blob(output.digest) == {
             .Val(blob) -> blob
@@ -173,6 +239,45 @@ build_restore_action_outputs: fn(store: BuildArtifactStoreHandle, base: String, 
         }
         build_atomic_restore_file(base, path, found)
     }
+    Ok(None)
+}
+
+// What publishing a declared output does to the file under the project root.
+BuildOutputWrite: enum {
+    // Write the made bytes.
+    Write
+    // A kept output already holds them: it is left as it is.
+    Unchanged
+    // A kept output holds bytes no build wrote: it was edited by hand.
+    HandEdited
+}
+
+// The KeptOutput row of `action`'s declared output `output`, if it is kept.
+build_kept_output: fn(action: HermeticBuildAction, output: String) -> KeptOutput? Never! {
+    loop kept in action.kept {
+        if kept.path == output -> return Val(kept.copy())
+    }
+    None
+}
+
+// What publishing the bytes `made` names at kept output `kept` under `base`
+// does: a missing file is written; one already holding those bytes is left
+// as it is; one holding bytes that are neither those nor the ones the last
+// build wrote there (`kept.written`) was edited by hand. With no build
+// before (a fresh checkout), the file is written whenever its bytes differ.
+build_output_write: fn(base: String, kept: KeptOutput, made: ContentDigest) -[FS]> BuildOutputWrite BuildIOError! {
+    path: build_resolve_under(base, kept.path)
+    bytes: if build_secure_read_file(base, path, BUILD_MAX_ACTION_FILE_BYTES) == {
+        .Ok(found) -> found
+        .Err(error) -> {
+            if error.kind == BuildIOKind.NotFound -> return Ok(BuildOutputWrite.Write)
+            return Err(error)
+        }
+    }
+    held: ContentDigest.from_bytes(bytes).as_str()
+    if held == made.as_str() -> return Ok(BuildOutputWrite.Unchanged)
+    if kept.written == .Val(written) && written != held -> return Ok(BuildOutputWrite.HandEdited)
+    Ok(BuildOutputWrite.Write)
 }
 
 // `path` relative to `base` as its normal components (Rust `strip_prefix`

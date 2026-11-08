@@ -3019,6 +3019,11 @@ ir_collect_unions: fn(ty: Type, found: &[Type]) Never! {
 ir_widen_union: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, written: Type, span: Span) -> Int Never! {
     union_ty: ir_fact(p, b, written, span)
     if ir_failed(b) -> return -1
+    ir_widen_union_to(m, p, b, value, union_ty, span)
+}
+
+// ir_widen_union to the resolved union `union_ty`.
+ir_widen_union_to: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, union_ty: Type, span: Span) -> Int Never! {
     value_ty: ir_ty(p, b, value)
     member_row: ir_value_type(m, p, value_ty) ?? return ir_type_fail(b, span, value_ty)
     payload: ir_value_as(m, p, b, value, member_row, span)
@@ -3032,11 +3037,9 @@ ir_widen_union: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, writte
 // recursive union edge. After the call, ir_box_lends_end ends the box.
 IRBoxLend: struct { boxed: Int, box_bytes: Int, wrapper: Int, wrapper_bytes: Int, row: Int, offset: Int }
 
-// The read call argument `value` widened to the union `written` (sema
-// widen_to_union) and lent to the callee (ir_union_lend).
-ir_widen_union_lent: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, written: Type, lends: &[IRBoxLend], span: Span) -> Int Never! {
-    union_ty: ir_fact(p, b, written, span)
-    if ir_failed(b) -> return -1
+// The read call argument `value` widened to the resolved union `union_ty`
+// and lent to the callee (ir_union_lend).
+ir_widen_union_lent: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, union_ty: Type, lends: &[IRBoxLend], span: Span) -> Int Never! {
     value_ty: ir_ty(p, b, value)
     member_row: ir_value_type(m, p, value_ty) ?? return ir_type_fail(b, span, value_ty)
     payload: ir_value_as(m, p, b, value, member_row, span)

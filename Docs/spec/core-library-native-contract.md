@@ -539,9 +539,17 @@ base-1,000,000,000 digits, least-significant first. Zero is nonnegative;
 arithmetic normalizes leading zero limbs and returns to the inline form when
 possible. No Rust `Vec` layout is part of this ABI.
 
-Native task workers run a callback to completion on an OS thread. Cooperative
-waits park that thread; bounded compensation supplies progress for blocked
-workers. Cancellation requests deliver at wait points, while the native Check
+Native tasks run to completion on fibers: each task gets a stack and TCB of
+its own, and the pool's carrier threads multiplex them. A cooperative wait
+parks the fiber, not the carrier, and a wake makes the fiber runnable on any
+carrier; the main thread and other non-pool threads wait on futexes as
+before. A fiber stack is one mapping of the thread stack size, committed only
+where touched, under a guard page; its header and TCB share the top page, so
+a task parked in a shallow wait holds about one page beside its task record.
+Each stack is two kernel mappings, so `vm.max_map_count` (65530 by default)
+bounds live fibers near 32000; a task that finds no stack runs on its carrier
+and its waits block that thread. Cancellation requests deliver at wait
+points, while the native Check
 rail delivers explicit session interrupts. Post-call propagation observes only
 an already-delivered stop, so a new request cannot invalidate an initialized
 result. Shielded cleanup defers delivery until its outermost boundary exits.

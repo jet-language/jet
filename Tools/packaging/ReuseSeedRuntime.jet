@@ -58,7 +58,7 @@ inventory: fn(name: String, paths: [String]) -> Inventory {
 // Every `.jet` file under `directory`, as a checkout-relative path.
 jet_files: fn(directory: String) -> [String] {
     found := [String]{}
-    entries: files.walk_files(directory) ?? fail("can't list `{directory}`: {err}")
+    entries: files.walk_files(directory).list() ?? fail("can't list `{directory}`: {err}")
     loop entry in entries {
         if entry.relative.ends_with(".jet") -> found.push("{directory}/{entry.relative}")
     }

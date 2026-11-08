@@ -1,0 +1,614 @@
+// Fibers: the scheduler runs every task on a fiber, a stack of its own with
+// a TCB of its own, multiplexed onto the pool's carrier threads
+// (Scheduler.jet jet_rt_scheduler_worker). A wait that would block a task
+// (Sync.jet sync_park, sync_wait) parks its fiber instead and frees the
+// carrier for another; a wake readies the fiber, and any carrier resumes it.
+// The main thread and every non-pool thread stay plain threads whose waits
+// block on futexes.
+//
+// A fiber is one mapping: a guard page (fiber_new), the stack, and at its top
+// the header, 64-aligned (so a fiber pointer's low 32 bits are never a
+// ParkSlot state) and sized to its fields and TCB (fiber_header_bytes), so
+// the first stack frames share its page: a fiber parked in a shallow wait
+// touches one page. Fiber header state0 savedStack8 carrier16 tcb24
+// mapping32 size40 next48 task56 action64 timerArmed72 deadline80
+// timerKind88 timerTarget96 lotNext104 lotAddress112 lotResult120
+// lotLinked128 timerFiring136 lotSequence144 timerSequence152
+// heapChild160 heapSibling168 heapPrevious176, and the fiber's TCB at
+// FIBER_TCB. state: RUNNING, PARKING (the fiber is switching out to park),
+// PARKED (its carrier saw the switch complete), NOTIFIED (woken while
+// PARKING: the carrier resumes it at once) and RUNNABLE (queued). next links
+// the root's ready FIFO and its pool of idle fibers.
+//
+// The switch (Linux.jet os_fiber_switch_i64) moves the alloc thread cache
+// (TCB @320..@447) between the carrier's TCB and the fiber's, so cached
+// blocks have one owner, and points GS at the fiber's TCB: a fiber keeps its
+// TLS, park slot, context and world words across carriers.
+FIBER_TCB: I64{256}
+fiber_header_bytes: fn() -> I64 { (FIBER_TCB + context_tcb_bytes() + I64{63}).bit_and(I64{-64}) }
+FIBER_RUNNING: I64{0}
+FIBER_PARKING: I64{1}
+FIBER_PARKED: I64{2}
+FIBER_NOTIFIED: I64{3}
+FIBER_RUNNABLE: I64{4}
+// Actions a fiber leaves its carrier when it switches out.
+FIBER_PARK: I64{1}
+FIBER_DONE: I64{2}
+FIBER_DEAD: I64{3}
+FIBER_YIELD: I64{4}
+// Timer kinds: a ParkSlot's timed park, a lot wait's deadline.
+FIBER_TIMER_SLOT: I64{1}
+FIBER_TIMER_LOT: I64{2}
+// Idle fibers kept for reuse; a finished fiber past the cap tears down. The
+// carrier counts the pool under the root lock, so the cap is exact: a fiber
+// it may not pool runs once more, with the teardown job, to release its TCB.
+FIBER_POOL_CAP: I64{64}
+FIBER_JOB_TEARDOWN: I64{-1}
+// 4096 buckets keep a bucket's chain short with 100k fibers parked.
+FIBER_LOT_BUCKETS: I64{4096}
+FIBER_LOT_BYTES: I64{65576}
+FIBER_TIMERS_BYTES: I64{24}
+
+// The running fiber, 0 on a plain thread (and on an unattached one, whose
+// GS names the zero word).
+fiber_current: fn() -> I64 {
+    base: thread_base()
+    if (base == I64{0}) -> return I64{0}
+    sync_load(wrapping(base + I64{56}))
+}
+
+// RuntimeLower alone replaces this body with FunctionAddress of the checked
+// #Export(c) jet_rt_fiber_entry: a fresh fiber's seeded resume address.
+rt_fiber_entry_address: fn() -> I64 {
+    loop { jet_rt_unreachable(I64{0}, I64{0}) }
+}
+
+// A fresh fiber starts here on its own stack, with GS on its TCB. It runs
+// one job per resume; between jobs it waits in the pool.
+#Export(c) jet_rt_fiber_entry: fn(_unused: I64) -> I64 {
+    fiber: fiber_current()
+    loop {
+        job: sync_load(wrapping(fiber + I64{56}))
+        if (job == FIBER_JOB_TEARDOWN) {
+            fiber_teardown(fiber)
+            sync_store(wrapping(fiber + I64{64}), FIBER_DEAD)
+            fiber_switch_out(fiber)
+            jet_rt_unreachable(I64{0}, I64{0})
+        }
+        scheduler_run_job(job)
+        sync_store(wrapping(fiber + I64{56}), I64{0})
+        sync_store(wrapping(fiber + I64{64}), FIBER_DONE)
+        fiber_switch_out(fiber)
+    }
+}
+
+// Releases what the fiber's TCB owns, on the fiber itself: its TLS values'
+// destructors run as a task, and may park. Its alloc cache needs no flush:
+// the switch hands it back to the carrier.
+fiber_teardown: fn(fiber: I64) {
+    tcb: sync_load(wrapping(fiber + I64{24}))
+    scheduler_thread_detach()
+    thread_tls_teardown(tcb)
+    sentry_thread_detach()
+    if (thread_tls_registry != I64{0}) -> thread_unregister_tcb(tcb)
+}
+
+fiber_switch_out: fn(fiber: I64) {
+    carrier: sync_load(wrapping(fiber + I64{16}))
+    #Unsafe("the carrier saved its stack at carrier+16 when it switched to this fiber and runs nothing else until this switch resumes it") {
+        os_fiber_switch_i64(wrapping(fiber + I64{8}), sync_load(wrapping(carrier + I64{16})))
+    }
+}
+
+// Parks the running fiber, whose state is PARKING and whose waker is already
+// published; returns once a wake (or its timer) readied it.
+fiber_park: fn(fiber: I64) {
+    sync_store(wrapping(fiber + I64{64}), FIBER_PARK)
+    fiber_switch_out(fiber)
+}
+
+// Lets the other ready fibers run before this one continues.
+fiber_yield: fn(fiber: I64) {
+    sync_store(wrapping(fiber + I64{64}), FIBER_YIELD)
+    fiber_switch_out(fiber)
+}
+
+// A polling loop's pause: other fibers run before this one polls again; a
+// plain thread yields its CPU.
+fiber_spin_yield: fn() {
+    fiber: fiber_current()
+    if (fiber != I64{0}) {
+        fiber_yield(fiber)
+        return
+    }
+    #Unsafe("sched_yield retains no memory and yields this OS thread") {
+        _ := os_syscall_i64(I64{24}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+    }
+}
+
+// A waker's half: exactly one wake readies a parked fiber (a ParkSlot's
+// swap or a lot bucket's unlink hands the fiber to one waker only).
+fiber_ready: fn(fiber: I64) {
+    previous: sync_cas(fiber, FIBER_PARKING, FIBER_NOTIFIED)
+    if (previous == FIBER_PARKING) -> return
+    root: scheduler_root
+    _ := sync_add(wrapping(root + I64{48}), I64{-1})
+    sync_store(fiber, FIBER_RUNNABLE)
+    sync_thread_lock(root)
+    fiber_ready_push(root, fiber)
+    woke: scheduler_wake_idle(root)
+    sync_thread_unlock(root)
+    if woke -> scheduler_kick_idle(root)
+}
+
+// The ready FIFO at root 168/176; callers hold the root lock.
+fiber_ready_push: fn(root: I64, fiber: I64) {
+    sync_store(wrapping(fiber + I64{48}), I64{0})
+    tail: sync_load(wrapping(root + I64{176}))
+    if (tail == I64{0}) -> sync_store(wrapping(root + I64{168}), fiber) else -> sync_store(wrapping(tail + I64{48}), fiber)
+    sync_store(wrapping(root + I64{176}), fiber)
+}
+
+fiber_ready_pop: fn(root: I64) -> I64 {
+    fiber: sync_load(wrapping(root + I64{168}))
+    if (fiber == I64{0}) -> return I64{0}
+    next_fiber: sync_load(wrapping(fiber + I64{48}))
+    sync_store(wrapping(root + I64{168}), next_fiber)
+    if (next_fiber == I64{0}) -> sync_store(wrapping(root + I64{176}), I64{0})
+    fiber
+}
+
+// Moves the alloc thread cache rows from one TCB to another, emptying the
+// source: a cached block is reachable from exactly one TCB.
+fiber_cache_move: fn(from: I64, to: I64) {
+    at := I64{320}
+    loop at < (I64{448}) {
+        sync_store(wrapping(to + at), sync_load(wrapping(from + at)))
+        sync_store(wrapping(from + at), I64{0})
+        at += I64{8}
+    }
+}
+
+// GS write: wrgsbase when the kernel enabled FSGSBASE (AT_HWCAP2 bit 1),
+// else ARCH_SET_GS. The mode is settled before the first fiber exists.
+fiber_gs_write: fn(root: I64, base: I64) {
+    if (sync_load(wrapping(root + I64{192})) == I64{1}) {
+        #Unsafe("base is a live self-addressed TCB this carrier runs on until its next switch, and the kernel reported FSGSBASE") {
+            os_gs_base_write_i64(base)
+        }
+        return
+    }
+    thread_set_base(base)
+}
+
+// A carrier's half of running a fiber until it switches out, then the
+// action the fiber left. The carrier record's save word (record+16) holds
+// the carrier's stack while the fiber runs.
+fiber_run: fn(root: I64, record: I64, fiber: I64) {
+    tcb: sync_load(wrapping(record + I64{24}))
+    fiber_tcb: sync_load(wrapping(fiber + I64{24}))
+    loop {
+        sync_store(fiber, FIBER_RUNNING)
+        sync_store(wrapping(fiber + I64{16}), record)
+        fiber_cache_move(tcb, fiber_tcb)
+        fiber_gs_write(root, fiber_tcb)
+        #Unsafe("the fiber's saved stack is owned by no running thread: it is fresh, pooled or committed PARKED/RUNNABLE, and this carrier alone took it") {
+            os_fiber_switch_i64(wrapping(record + I64{16}), sync_load(wrapping(fiber + I64{8})))
+        }
+        fiber_gs_write(root, tcb)
+        fiber_cache_move(fiber_tcb, tcb)
+        action: sync_load(wrapping(fiber + I64{64}))
+        if (action == FIBER_PARK) {
+            if (sync_cas(fiber, FIBER_PARKING, FIBER_PARKED) == FIBER_PARKING) {
+                _ := sync_add(wrapping(root + I64{48}), I64{1})
+                return
+            }
+            // Woken while it switched out: run it again at once.
+            next
+        }
+        if (action == FIBER_YIELD) {
+            sync_store(fiber, FIBER_RUNNABLE)
+            sync_thread_lock(root)
+            fiber_ready_push(root, fiber)
+            sync_thread_unlock(root)
+            return
+        }
+        sync_thread_lock(root)
+        if (action == FIBER_DONE && sync_load(wrapping(root + I64{64})) >= FIBER_POOL_CAP) {
+            // The pool is full: the job stays live until the fiber's own
+            // teardown ends it DEAD.
+            sync_store(wrapping(fiber + I64{56}), FIBER_JOB_TEARDOWN)
+            sync_thread_unlock(root)
+            next
+        }
+        sync_store(wrapping(root + I64{40}), sync_load(wrapping(root + I64{40})) - I64{1})
+        if (action == FIBER_DONE) {
+            sync_store(wrapping(fiber + I64{48}), sync_load(wrapping(root + I64{72})))
+            sync_store(wrapping(root + I64{72}), fiber)
+            sync_store(wrapping(root + I64{64}), sync_load(wrapping(root + I64{64})) + I64{1})
+        } else {
+            sync_store(wrapping(root + I64{56}), sync_load(wrapping(root + I64{56})) - I64{1})
+        }
+        sync_thread_unlock(root)
+        if (action == FIBER_DEAD) -> alloc_unmap(sync_load(wrapping(fiber + I64{32})), sync_load(wrapping(fiber + I64{40})))
+        return
+    }
+}
+
+// A pooled fiber, else a fresh one; 0 when no stack can be mapped.
+fiber_take: fn(root: I64) -> I64 {
+    sync_thread_lock(root)
+    fiber: sync_load(wrapping(root + I64{72}))
+    if (fiber != I64{0}) {
+        sync_store(wrapping(root + I64{72}), sync_load(wrapping(fiber + I64{48})))
+        sync_store(wrapping(root + I64{64}), sync_load(wrapping(root + I64{64})) - I64{1})
+        sync_thread_unlock(root)
+        return fiber
+    }
+    sync_thread_unlock(root)
+    fiber_new(root)
+}
+
+// The first fiber settles the GS mode, the stack size and the shared lot
+// and timer heap before any fiber runs.
+fiber_prepare: fn(root: I64) {
+    if (sync_load(wrapping(root + I64{192})) != I64{0}) -> return
+    sync_thread_lock(root)
+    if (sync_load(wrapping(root + I64{192})) == I64{0}) {
+        sync_store(wrapping(root + I64{184}), thread_stack_bytes())
+        timers: jet_rt_alloc(FIBER_TIMERS_BYTES, I64{8})
+        thread_zero(timers, FIBER_TIMERS_BYTES)
+        sync_store(wrapping(timers + I64{16}), I64{-1})
+        sync_store(wrapping(root + I64{136}), timers)
+        if (sync_lot == I64{0}) {
+            lot: jet_rt_alloc(FIBER_LOT_BYTES, I64{8})
+            thread_zero(lot, FIBER_LOT_BYTES)
+            sync_store(wrapping(lot + I64{8}), rt_fiber_lot_wait_address())
+            sync_store(wrapping(lot + I64{16}), rt_fiber_lot_wake_address())
+            sync_store(wrapping(lot + I64{24}), rt_fiber_park_slot_address())
+            sync_store(wrapping(lot + I64{32}), rt_fiber_ready_address())
+            #Unsafe("written once, under the scheduler root lock, before any fiber can wait; a reader sees 0 (no fiber waiter exists) or the lot") {
+                sync_lot = lot
+            }
+        }
+        mode: if ((host_getauxval(I64{26}).bit_and(I64{2})) != I64{0}) -> I64{1} else -> I64{2}
+        sync_store(wrapping(root + I64{192}), mode)
+    }
+    sync_thread_unlock(root)
+}
+
+// One mapping: guard page, stack, header page. The stack is the thread
+// stack size (thread_stack_bytes), halved on a failed map down to
+// THREAD_STACK_FLOOR, reserved without commitment. The guard is a
+// page-table guard marker (MADV_GUARD_INSTALL), which leaves the mapping one
+// VMA that merges with its neighbouring fiber stacks, so vm.max_map_count
+// does not bound the live fibers; a kernel without guard markers (before
+// 6.13) gets a PROT_NONE page, two VMAs per fiber.
+fiber_new: fn(root: I64) -> I64 {
+    fiber_prepare(root)
+    bytes := sync_load(wrapping(root + I64{184}))
+    mapping := I64{-1}
+    loop {
+        #Unsafe("a fresh private anonymous stack mapping, unreserved until touched") {
+            mapping = os_syscall_i64(I64{9}, I64{0}, bytes, I64{3}, I64{147490}, I64{-1}, I64{0})
+        }
+        if (mapping >= I64{0} || bytes <= THREAD_STACK_FLOOR) -> break
+        bytes = bytes >> I64{1}
+    }
+    if (mapping < I64{0}) -> return I64{0}
+    guard := I64{0}
+    #Unsafe("the first page of the fresh, untouched mapping becomes the stack's guard: a guard marker, else PROT_NONE") {
+        guard = os_syscall_i64(I64{28}, mapping, I64{4096}, I64{102}, I64{0}, I64{0}, I64{0})
+        if (guard != I64{0}) -> guard = os_syscall_i64(I64{10}, mapping, I64{4096}, I64{0}, I64{0}, I64{0}, I64{0})
+    }
+    if (guard != I64{0}) {
+        alloc_unmap(mapping, bytes)
+        return I64{0}
+    }
+    fiber: wrapping(wrapping(mapping + bytes) - fiber_header_bytes())
+    tcb: wrapping(fiber + FIBER_TCB)
+    context_tcb_install_root(tcb)
+    sync_store(tcb, tcb)
+    // The TCB address is the fiber's identity word: no kernel tid is its.
+    sync_store(wrapping(tcb + I64{8}), tcb)
+    sync_store(wrapping(tcb + I64{56}), fiber)
+    sync_store(wrapping(fiber + I64{24}), tcb)
+    sync_store(wrapping(fiber + I64{32}), mapping)
+    sync_store(wrapping(fiber + I64{40}), bytes)
+    // The seed: the entry as the resume address, a zero return address above.
+    seed: wrapping(fiber - I64{16})
+    sync_store(seed, rt_fiber_entry_address())
+    sync_store(wrapping(seed + I64{8}), I64{0})
+    sync_store(wrapping(fiber + I64{8}), seed)
+    // Registered like a thread's, under its own address as the key, so a
+    // live-bytes census subtracts the cache rows the fiber holds while it runs.
+    if (thread_tls_registry != I64{0}) {
+        sync_mutex_lock(thread_tls_registry)
+        thread_register_tcb(tcb, tcb)
+        sync_mutex_unlock(thread_tls_registry)
+    }
+    sync_thread_lock(root)
+    sync_store(wrapping(root + I64{56}), sync_load(wrapping(root + I64{56})) + I64{1})
+    sync_thread_unlock(root)
+    fiber
+}
+
+// Timers of parked fibers: an intrusive pairing heap of fiber headers by
+// deadline (child160 sibling168 previous176, previous being the parent of a
+// first child, else the left sibling; armed72 is 1 while in the heap), so
+// arming a timer allocates nothing. FiberTimers24 lock0 root8 earliest16
+// (-1 when empty, read without the lock). Lock order: a lot bucket, then the
+// heap; the heap lock is never held while a bucket or the root is taken.
+fiber_heap_before: fn(a: I64, b: I64) -> Bool {
+    sync_load(wrapping(a + I64{80})) < sync_load(wrapping(b + I64{80}))
+}
+
+// Two detached roots as one; either may be 0.
+fiber_heap_meld: fn(a: I64, b: I64) -> I64 {
+    if (a == I64{0}) -> return b
+    if (b == I64{0}) -> return a
+    if fiber_heap_before(b, a) -> return fiber_heap_meld(b, a)
+    first: sync_load(wrapping(a + I64{160}))
+    sync_store(wrapping(b + I64{168}), first)
+    if (first != I64{0}) -> sync_store(wrapping(first + I64{176}), b)
+    sync_store(wrapping(b + I64{176}), a)
+    sync_store(wrapping(a + I64{160}), b)
+    a
+}
+
+fiber_heap_detach: fn(node: I64) {
+    sync_store(wrapping(node + I64{168}), I64{0})
+    sync_store(wrapping(node + I64{176}), I64{0})
+}
+
+// The sibling list from `first` as one detached root: pairs melded left to
+// right, then the pairs right to left.
+fiber_heap_merge_pairs: fn(first: I64) -> I64 {
+    stacked := I64{0}
+    node := first
+    loop node != (I64{0}) {
+        a: node
+        b: sync_load(wrapping(a + I64{168}))
+        node = if (b == I64{0}) -> I64{0} else -> sync_load(wrapping(b + I64{168}))
+        fiber_heap_detach(a)
+        if (b != I64{0}) -> fiber_heap_detach(b)
+        pair: fiber_heap_meld(a, b)
+        sync_store(wrapping(pair + I64{168}), stacked)
+        stacked = pair
+    }
+    result := I64{0}
+    loop stacked != (I64{0}) {
+        pair: stacked
+        stacked = sync_load(wrapping(pair + I64{168}))
+        sync_store(wrapping(pair + I64{168}), I64{0})
+        result = fiber_heap_meld(result, pair)
+    }
+    result
+}
+
+fiber_heap_set_root: fn(timers: I64, root: I64) {
+    sync_store(wrapping(timers + I64{8}), root)
+    earliest: if (root == I64{0}) -> I64{-1} else -> sync_load(wrapping(root + I64{80}))
+    sync_store(wrapping(timers + I64{16}), earliest)
+}
+
+fiber_heap_insert: fn(timers: I64, fiber: I64) {
+    sync_store(wrapping(fiber + I64{160}), I64{0})
+    fiber_heap_detach(fiber)
+    sync_store(wrapping(fiber + I64{72}), I64{1})
+    fiber_heap_set_root(timers, fiber_heap_meld(sync_load(wrapping(timers + I64{8})), fiber))
+}
+
+fiber_heap_remove: fn(timers: I64, fiber: I64) {
+    children: fiber_heap_merge_pairs(sync_load(wrapping(fiber + I64{160})))
+    root: sync_load(wrapping(timers + I64{8}))
+    if (fiber == root) {
+        fiber_heap_set_root(timers, children)
+    } else {
+        previous: sync_load(wrapping(fiber + I64{176}))
+        sibling: sync_load(wrapping(fiber + I64{168}))
+        if (sync_load(wrapping(previous + I64{160})) == fiber) -> sync_store(wrapping(previous + I64{160}), sibling) else -> sync_store(wrapping(previous + I64{168}), sibling)
+        if (sibling != I64{0}) -> sync_store(wrapping(sibling + I64{176}), previous)
+        fiber_heap_set_root(timers, fiber_heap_meld(root, children))
+    }
+    sync_store(wrapping(fiber + I64{160}), I64{0})
+    fiber_heap_detach(fiber)
+    sync_store(wrapping(fiber + I64{72}), I64{0})
+}
+
+// Arms the running fiber's timer for this park: `kind` names what the
+// firing wakes (`target`: the ParkSlot, or the lot bucket with this wait's
+// `sequence`). A new earliest deadline wakes the idle carriers so the one
+// that watches the heap sleeps to it.
+fiber_timer_arm: fn(fiber: I64, deadline_ns: I64, kind: I64, target: I64, sequence: I64) {
+    root: scheduler_root
+    timers: sync_load(wrapping(root + I64{136}))
+    sync_store(wrapping(fiber + I64{80}), deadline_ns)
+    sync_store(wrapping(fiber + I64{88}), kind)
+    sync_store(wrapping(fiber + I64{96}), target)
+    sync_store(wrapping(fiber + I64{152}), sequence)
+    sync_thread_lock(timers)
+    fiber_heap_insert(timers, fiber)
+    first: sync_load(wrapping(timers + I64{8})) == fiber
+    sync_thread_unlock(timers)
+    if first -> scheduler_watch_kick(root, deadline_ns)
+}
+
+// After the park: the timer is out of the heap, and no firing still reads
+// this fiber's park (its slot or bucket) once this returns.
+fiber_timer_disarm: fn(fiber: I64) {
+    if (sync_load(wrapping(fiber + I64{88})) == I64{0}) -> return
+    timers: sync_load(wrapping(scheduler_root + I64{136}))
+    sync_thread_lock(timers)
+    if (sync_load(wrapping(fiber + I64{72})) != I64{0}) -> fiber_heap_remove(timers, fiber)
+    sync_thread_unlock(timers)
+    loop sync_load(wrapping(fiber + (I64{136}))) != (I64{0}) {
+        #Unsafe("sched_yield retains no memory; the firing carrier clears the word right after its wake") {
+            _ := os_syscall_i64(I64{24}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+        }
+    }
+    sync_store(wrapping(fiber + I64{88}), I64{0})
+}
+
+// Fires every due timer. Each firing is marked on its fiber while it runs
+// outside the heap lock, so the woken fiber's disarm waits it out.
+fiber_timers_fire: fn(root: I64) {
+    timers: sync_load(wrapping(root + I64{136}))
+    if (timers == I64{0}) -> return
+    earliest: sync_load(wrapping(timers + I64{16}))
+    if (earliest < I64{0}) -> return
+    now: sync_now_ns()
+    if (now < earliest) -> return
+    loop {
+        sync_thread_lock(timers)
+        fiber: sync_load(wrapping(timers + I64{8}))
+        if (fiber == I64{0} || sync_load(wrapping(fiber + I64{80})) > now) {
+            sync_thread_unlock(timers)
+            return
+        }
+        fiber_heap_remove(timers, fiber)
+        sync_store(wrapping(fiber + I64{136}), I64{1})
+        sync_thread_unlock(timers)
+        target: sync_load(wrapping(fiber + I64{96}))
+        if (sync_load(wrapping(fiber + I64{88})) == FIBER_TIMER_SLOT) {
+            if (sync_cas(target, fiber, I64{0}) == fiber) {
+                sync_store(wrapping(fiber + I64{120}), I64{-110})
+                fiber_ready(fiber)
+            }
+        } else {
+            sync_thread_lock(target)
+            if (sync_load(wrapping(fiber + I64{128})) == sync_load(wrapping(fiber + I64{152}))) {
+                sync_lot_unlink(target, fiber)
+                sync_store(wrapping(fiber + I64{120}), I64{-110})
+                sync_thread_unlock(target)
+                fiber_ready(fiber)
+            } else {
+                sync_thread_unlock(target)
+            }
+        }
+        sync_store(wrapping(fiber + I64{136}), I64{0})
+    }
+}
+
+// A fiber's ParkSlot park (Sync.jet sync_park, through the lot's hook): the
+// slot holds the fiber until one waker swaps it out, or its timer takes it
+// back. A zero timeout yields instead. As on a thread, a timed-out park
+// leaves a notification that arrives after the timeout for the next park.
+#Export(c) jet_rt_fiber_park_slot: fn(fiber: I64, slot: I64, timeout_ns: I64) -> I64 {
+    if (timeout_ns == I64{0}) {
+        fiber_yield(fiber)
+        return I64{0}
+    }
+    deadline: sync_deadline(timeout_ns)
+    sync_store(wrapping(fiber + I64{120}), I64{0})
+    sync_store(fiber, FIBER_PARKING)
+    if (sync_cas(slot, I64{0}, fiber) != I64{0}) {
+        sync_store(fiber, FIBER_RUNNING)
+        _ := sync_swap(slot, I64{0})
+        return I64{0}
+    }
+    if (deadline >= I64{0}) -> fiber_timer_arm(fiber, deadline, FIBER_TIMER_SLOT, slot, I64{0})
+    fiber_park(fiber)
+    fiber_timer_disarm(fiber)
+    if (sync_load(wrapping(fiber + I64{120})) != I64{-110}) -> _ := sync_swap(slot, I64{0})
+    I64{0}
+}
+
+// Sync.jet sync_park_wake's hook: readies the fiber its swap took.
+#Export(c) jet_rt_fiber_ready: fn(fiber: I64) -> I64 {
+    fiber_ready(fiber)
+    I64{0}
+}
+
+// The parking lot of fiber futex waits (Sync.jet sync_wait/sync_wake):
+// Lot65576 waiters0, the hooks wait8 wake16 park24 ready32, then
+// FIBER_LOT_BUCKETS buckets of {lock, head} hashed by address. waiters
+// counts fibers inside a wait; a wake reads it with a locked add, after the
+// store it publishes, so either the waiter saw the new value or the waker
+// sees the waiter and takes its bucket. Sync.jet reaches the fiber side only
+// through the hooks, so a program that never runs a fiber links no fiber or
+// scheduler code (and its main thread may stay without a TCB).
+sync_lot := I64{0}
+
+// RuntimeLower alone replaces these bodies with FunctionAddress of the
+// checked #Export(c) hooks the lot records.
+rt_fiber_lot_wait_address: fn() -> I64 { loop { jet_rt_unreachable(I64{0}, I64{0}) } }
+rt_fiber_lot_wake_address: fn() -> I64 { loop { jet_rt_unreachable(I64{0}, I64{0}) } }
+rt_fiber_park_slot_address: fn() -> I64 { loop { jet_rt_unreachable(I64{0}, I64{0}) } }
+rt_fiber_ready_address: fn() -> I64 { loop { jet_rt_unreachable(I64{0}, I64{0}) } }
+
+sync_lot_bucket: fn(lot: I64, address: I64) -> I64 {
+    index: ((address >> I64{3}) + (address >> I64{9}) + (address >> I64{15})).bit_and(FIBER_LOT_BUCKETS - I64{1})
+    wrapping(wrapping(lot + I64{40}) + index * I64{16})
+}
+
+// The bucket's lock is held.
+sync_lot_unlink: fn(bucket: I64, fiber: I64) {
+    link := wrapping(bucket + I64{8})
+    loop sync_load(link) != (I64{0}) {
+        if (sync_load(link) == fiber) {
+            sync_store(link, sync_load(wrapping(fiber + I64{104})))
+            sync_store(wrapping(fiber + I64{128}), I64{0})
+            return
+        }
+        link = wrapping(sync_load(link) + I64{104})
+    }
+}
+
+// sync_wait for a fiber: 0 on a wake, -11 when the word no longer holds
+// `expected` (low 32 bits, as a futex compares), -110 at the deadline.
+#Export(c) jet_rt_fiber_lot_wait: fn(fiber: I64, address: I64, expected: I64, deadline_ns: I64) -> I64 {
+    // A deadline already past fires at the next carrier's timer pass.
+    lot: sync_lot
+    bucket: sync_lot_bucket(lot, address)
+    sync_thread_lock(bucket)
+    _ := sync_add(lot, I64{1})
+    if ((sync_load(address).bit_and(I64{4294967295})) != (expected.bit_and(I64{4294967295}))) {
+        _ := sync_add(lot, I64{-1})
+        sync_thread_unlock(bucket)
+        return I64{-11}
+    }
+    sequence := wrapping(sync_load(wrapping(fiber + I64{144})) + I64{1})
+    if (sequence == I64{0}) -> sequence = I64{1}
+    sync_store(wrapping(fiber + I64{144}), sequence)
+    sync_store(wrapping(fiber + I64{112}), address)
+    sync_store(wrapping(fiber + I64{120}), I64{0})
+    sync_store(wrapping(fiber + I64{104}), sync_load(wrapping(bucket + I64{8})))
+    sync_store(wrapping(bucket + I64{8}), fiber)
+    sync_store(wrapping(fiber + I64{128}), sequence)
+    sync_store(fiber, FIBER_PARKING)
+    if (deadline_ns >= I64{0}) -> fiber_timer_arm(fiber, deadline_ns, FIBER_TIMER_LOT, bucket, sequence)
+    sync_thread_unlock(bucket)
+    fiber_park(fiber)
+    fiber_timer_disarm(fiber)
+    _ := sync_add(lot, I64{-1})
+    sync_load(wrapping(fiber + I64{120}))
+}
+
+// Wakes up to `count` fibers waiting on `address`; returns how many.
+#Export(c) jet_rt_fiber_lot_wake: fn(lot: I64, address: I64, count: I64) -> I64 {
+    bucket: sync_lot_bucket(lot, address)
+    woken := I64{0}
+    chain := I64{0}
+    sync_thread_lock(bucket)
+    link := wrapping(bucket + I64{8})
+    loop sync_load(link) != (I64{0}) && woken < count {
+        fiber: sync_load(link)
+        if (sync_load(wrapping(fiber + I64{112})) == address) {
+            sync_store(link, sync_load(wrapping(fiber + I64{104})))
+            sync_store(wrapping(fiber + I64{128}), I64{0})
+            sync_store(wrapping(fiber + I64{104}), chain)
+            chain = fiber
+            woken += I64{1}
+        } else {
+            link = wrapping(fiber + I64{104})
+        }
+    }
+    sync_thread_unlock(bucket)
+    loop chain != (I64{0}) {
+        fiber: chain
+        chain = sync_load(wrapping(fiber + I64{104}))
+        fiber_ready(fiber)
+    }
+    woken
+}

@@ -124,7 +124,7 @@ static void codecs(void) {
     assert(jet_rt_record_tag_dyn(real) == DYN_FLOAT && bits == UINT64_C(0x8000000000000000));
     jet_rt_handle_drop_dyn(real);
     Text *s = text("\xc3\xa9");
-    void *string = jet_rt_codec_encode_string(s), *typed = jet_raw_typed_text(s);
+    void *string = jet_rt_codec_encode_string(s), *typed = jet_raw_typed_text(text("\xc3\xa9"));
     jet_rt_string_drop(s);
     assert(jet_rt_record_tag_dyn(string) == DYN_TEXT && jet_rt_record_tag_dyn(typed) == DYN_TEXT);
     text_is(jet_rt_record_get_dyn_text(string), "\xc3\xa9");

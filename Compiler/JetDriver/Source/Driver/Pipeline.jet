@@ -185,7 +185,7 @@ use {
         pkg_lint_e1293,
         pkg_lint_policy_is_denied,
     ]
-    jet_ir.[IRProgram, ir_codec_decode_helpers, ir_comptime_codec_targets, ir_core_lowered_by_name, ir_core_method_lowered_by_owner, ir_first_function_rows, ir_precise_helper_names, ir_named_function_keys, ir_reachable_core_rows]
+    jet_ir.[IRProgram, ir_codec_decode_helpers, ir_comptime_codec_targets, ir_core_decoding_read, ir_core_lowered_by_name, ir_core_method_lowered_by_owner, ir_first_function_rows, ir_precise_helper_names, ir_named_function_keys, ir_reachable_core_rows]
     jet_eval.[
         JetEvalConfig,
         JetEvalCompilerQueryHost,
@@ -2888,8 +2888,9 @@ jet_driver_prunable_core_modules: fn(load: JetDriverLoadResult, core_sources: [J
 // Core demand (SemaRegistrationGraph.core_lowering_roots), by key: the
 // top-level functions lowering keeps with no keyed call in a checked body
 // (ir_core_lowered_by_name), every top-level function of a Core module with
-// foreign rows, which jet_driver_prunable_core_modules leaves rooted, and
-// the methods lowering selects by owner type (ir_core_method_lowered_by_owner).
+// foreign rows, which jet_driver_prunable_core_modules leaves rooted, the
+// methods lowering selects by owner type (ir_core_method_lowered_by_owner)
+// and the `__Decoding` reads it selects by target (ir_core_decoding_read).
 jet_driver_core_lowering_roots: fn(graph: SemaRegistrationGraph) -> [String:Bool] Never! {
     roots := [String:Bool]{}
     loop module_row in graph.modules {
@@ -2907,7 +2908,7 @@ jet_driver_core_lowering_roots: fn(graph: SemaRegistrationGraph) -> [String:Bool
         }
         loop nominal in module_row.nominals {
             loop method in nominal.methods {
-                if ir_core_method_lowered_by_owner(method.declaration.name) -> roots[method.symbol.id.key] = true
+                if ir_core_method_lowered_by_owner(method.declaration.name) || ir_core_decoding_read(identity, nominal.symbol.name, method.declaration.name) -> roots[method.symbol.id.key] = true
             }
         }
         loop implementation in module_row.impls {

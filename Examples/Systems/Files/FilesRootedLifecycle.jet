@@ -113,8 +113,10 @@ run: fn() {
     files.write("{tree}/keep.txt", "keep") ?? panic("write keep")
     files.write("{tree}/noise.log", "noise") ?? panic("write log")
     files.write("{tree}/build/out.txt", "out") ?? panic("write build")
-    walked: files.walk_files(tree, ".gitignore") ?? panic("walk")
-    loop entry in walked -> print("walk: {files.relative(entry.path, tree)}")
+    loop item in files.walk_files(tree, ".gitignore") {
+        entry: item ?? panic("walk")
+        print("walk: {files.relative(entry.path, tree)}")
+    }
 
     // Partial positional reads stop at end of file.
     files.write("{base}/digits.txt", "0123456789") ?? panic("write digits")

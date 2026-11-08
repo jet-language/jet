@@ -1,0 +1,28 @@
+# 100000 rounds of a parked task racing two wakes (cancel against a send,
+# cancel against its sleep timer, a receive deadline against a send): every
+# round is accounted for, so no wakeup is lost or delivered twice. Then 1000
+# tasks parked for 1000 ms cost no more than 100 ms of CPU over the same
+# tasks parked for 50 ms: idle carriers sleep instead of spinning. Same
+# output on jet run and at O0, O1 and O2.
+fixture: fixtures/races
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run main.jet
+exit: 0
+stdout: = "rounds accounted 100000 of 100000\nidle wait: 2000 tasks woke, long wait within budget true\n"
+step: jet build --optimize=none main.jet
+exit: 0
+step o0: built
+exit: 0
+stdout: = "rounds accounted 100000 of 100000\nidle wait: 2000 tasks woke, long wait within budget true\n"
+step: jet build --optimize=basic main.jet
+exit: 0
+step o1: built
+exit: 0
+stdout: = "rounds accounted 100000 of 100000\nidle wait: 2000 tasks woke, long wait within budget true\n"
+step: jet build --release main.jet
+exit: 0
+step o2: built
+exit: 0
+stdout: = "rounds accounted 100000 of 100000\nidle wait: 2000 tasks woke, long wait within budget true\n"

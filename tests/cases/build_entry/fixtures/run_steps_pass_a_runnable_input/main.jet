@@ -1,0 +1,17 @@
+build: fn(b: Build) -[Exec, FS]> {
+    #Impure("run the generator a shell step is passed") {
+    // `gen` is built for this machine and passed to the shell step `table`,
+    // which runs it from its work tree: the copy there stays runnable. Its
+    // output is the source of `show`.
+    gen: b.add_executable("gen", ["gen/gen.jet"], [])
+    shell: b.probe("shell", "find_program", "sh")
+    table: b.run("table", b.found(shell), ["Exec", "FS"])
+    table.arg("-c")
+    table.arg("\"$0\" --out=\"$1\"")
+    table.file(b.host(gen))
+    table.output("show.jet")
+    show: b.add_executable("show", ["show.jet"], [])
+    b.default(show)
+    }
+}
+run: fn() {}

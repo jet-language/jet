@@ -1,0 +1,16 @@
+# #6676: every JSON string a decode reads is freed. Before the fix, the
+# String builder kept each string's byte buffer (core.encoding.__bytes_into_text
+# was declared to take the list, but the runtime only copies it) and the typed
+# decoder copied each string into its tree and kept the original
+# (__typed_text), so json.parse and json.decode<T> leaked about 32 bytes per
+# string, even one the target skips: about 38 MB over each scenario's rounds.
+fixture: json_strings_free_after_a_decode.fixture
+env: NO_COLOR=1
+step: jet run main.jet
+limit: time=120
+exit: 0
+stdout: = json_strings_free_after_a_decode.out
+step release: jet run --release main.jet
+limit: time=120
+exit: 0
+stdout: = json_strings_free_after_a_decode.out

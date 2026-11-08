@@ -7,7 +7,7 @@ WorkloadArgs: struct {
 
 run: fn(args: WorkloadArgs) {
     root: args.root
-    entries: fs.walk(root) ?? panic("cannot walk documents")
+    entries: fs.walk(root).list() ?? panic("cannot walk documents")
     rows := [String]{}
     loop entry in entries {
         if !entry.is_dir {

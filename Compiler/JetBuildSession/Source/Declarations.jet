@@ -2,9 +2,9 @@ use jet_foundation.[build_option_duration_ms]
 
 // `b.run(name, tool, caps)`: a step that runs `tool`, a BuildFile. Its
 // arguments come one call at a time (build_session_step_call); a found
-// program is looked up when the step runs, and a file another step makes
-// or a host build of a target is declared as the step's input, so this step
-// runs after its maker.
+// program, as the tool or an argument, is looked up when the step runs, and a
+// file another step makes or a host build of a target is declared as the
+// step's input, so this step runs after its maker.
 build_session_add_run: fn(state: &BuildSessionState, args: [BuildSessionValue], start: Int, end: Int) -> BuildSessionReply {
     if args.len() != 3 -> return build_session_fail(state, "`b.run` takes a name, a tool and its effects")
     name: build_session_text(args, 0) ?? return build_session_fail(state, "step name must be a string")
@@ -12,11 +12,12 @@ build_session_add_run: fn(state: &BuildSessionState, args: [BuildSessionValue], 
     caps: build_session_caps(build_session_strings(args, 2) ?? return build_session_fail(state, "a step's effects must be strings")) ?? return build_session_fail(state, "unknown build effect; use one of the ten declared effects")
     file: state.files[tool]
     if file.kind == "package" -> return build_session_fail(state, "package `{file.path}` is a folder, not a tool; run a file in it: `b.dependency(\"{file.path}\").file(path)`")
+    if file.kind == "folder" -> return build_session_fail(state, "folder `{file.path}` is not a tool; run a file in it, and pass the folder with `.file(dir)`")
     probes := [Int]{}
     inputs := [String]{}
     if file.probe == .Val(probe) -> probes.push(probe)
     if file.kind == "output" || file.kind == "host" || file.kind == "image" || file.kind == "dependency" -> inputs.push(file.path.copy())
-    action: BuildSessionAction{name: name, inputs: inputs, outputs: [String]{}, argv: [String]{file.path.copy()}, caps: caps, toolchain: 0, probes: probes, signing: None, tool: tool, start: start, end: end}
+    action: BuildSessionAction{name: name, inputs: inputs, outputs: [String]{}, kept: [String]{}, folders: [Int]{}, programs: [BuildSessionProgram]{}, argv: [String]{file.path.copy()}, caps: caps, toolchain: 0, probes: probes, signing: None, tool: tool, start: start, end: end}
     if action.name.trim() == "" -> return build_session_error_fail(state, .EmptyActionName)
     if state.actions.len() >= 100000 -> return build_session_fail(state, "action graph exceeds 100000 actions")
     loop old in state.actions { if old.name == action.name -> return build_session_error_fail(state, BuildSessionError.DuplicateActionName{value: action.name}) }
@@ -25,14 +26,23 @@ build_session_add_run: fn(state: &BuildSessionState, args: [BuildSessionValue], 
     BuildSessionReply.Value{value: BuildSessionValue.Handle{type_name: "BuildAction", session: state.id, id: id}}
 }
 
-// `b.found(probe)`: the program a find_program probe looks for, as a tool.
+// `b.found(probe)`: the program a find_program probe finds, which a step runs
+// as its tool or is passed with `.file`, or the folder a find_folder probe
+// chooses, which a step reads whole at `.jet/found/<probe>`.
 build_session_found: fn(state: &BuildSessionState, args: [BuildSessionValue]) -> BuildSessionReply {
     if args.len() != 1 -> return build_session_fail(state, "`b.found` takes one probe")
     probe: build_session_handle(state, args[0], "BuildProbe") ?? return build_session_fail(state, "the probe does not belong to this build")
     row: state.probes[probe]
-    if row.kind != "find_program" -> return build_session_fail(state, "`b.found` takes a find_program probe, and `{row.name}` is a {row.kind} probe")
+    if row.kind == "find_folder" {
+        if row.name.contains("/") || row.name == "." || row.name == ".." -> return build_session_fail(state, "probe `{row.name}` names the folder a step reads at `{BUILD_SESSION_FOUND_DIR}/{row.name}`; name it without `/`")
+        return build_session_new_file(state, BuildSessionFile{kind: "folder", path: "{BUILD_SESSION_FOUND_DIR}/{row.name}", probe: Val(probe), action: None})
+    }
+    if row.kind != "find_program" -> return build_session_fail(state, "`b.found` takes a find_program or find_folder probe, and `{row.name}` is a {row.kind} probe")
     build_session_new_file(state, BuildSessionFile{kind: "found", path: row.value.copy(), probe: Val(probe), action: None})
 }
+
+// Where a step reads the folder a find_folder probe chose.
+BUILD_SESSION_FOUND_DIR: ".jet/found"
 
 // Where `b.host(target)` puts the target's host build, never installed.
 BUILD_SESSION_HOST_DIR: ".jet/build/host"
@@ -65,7 +75,8 @@ build_session_jet: fn(state: &BuildSessionState, args: [BuildSessionValue]) -> B
 BUILD_SESSION_DEPS_DIR: ".jet/deps"
 
 // `b.dependency(name)`: the folder of the package package.jet lists as
-// `name`, whose files `.file(path)` names.
+// `name`, whose files `.file(path)` and folders `.folder(path)` name; a step
+// reads all of it with `.file(b.dependency(name))`.
 build_session_dependency: fn(state: &BuildSessionState, args: [BuildSessionValue]) -> BuildSessionReply {
     if args.len() != 1 -> return build_session_fail(state, "`b.dependency` takes one package name")
     name: build_session_text(args, 0) ?? return build_session_fail(state, "a package name must be a string")
@@ -78,17 +89,51 @@ build_session_dependency: fn(state: &BuildSessionState, args: [BuildSessionValue
     build_session_new_file(state, BuildSessionFile{kind: "package", path: name, probe: None, action: None})
 }
 
+// `b.folder(path)`: the folder at `path` in this build's package, which a
+// step reads whole with `.file(dir)`.
+build_session_folder: fn(state: &BuildSessionState, args: [BuildSessionValue]) -> BuildSessionReply {
+    if args.len() != 1 -> return build_session_fail(state, "`b.folder` takes one path")
+    path: build_session_text(args, 0) ?? return build_session_fail(state, "`b.folder` takes a path")
+    if build_session_folder_path_error(state, path) == .Val(failure) -> return failure
+    build_session_new_file(state, BuildSessionFile{kind: "folder", path: path, probe: None, action: None})
+}
+
+// Why `path` can't name a folder, if it can't: it must stay inside its
+// package, and be written plainly (`.` alone, else no empty or `.` parts),
+// so one folder has one path.
+build_session_folder_path_error: fn(state: &BuildSessionState, path: String) -> BuildSessionReply? {
+    if build_session_path_error(path) == .Val(error) -> return Val(build_session_error_fail(state, error))
+    if path == "." -> return None
+    loop part in path.split("/") {
+        if part == "" || part == "." -> return Val(build_session_fail(state, "folder `{path}` must be written plainly, as `dir/sub`: no empty or `.` parts and no trailing `/`"))
+    }
+    None
+}
+
 // `package.file(path)`: the file at `path` in a package's folder, which a
-// step reads at `.jet/deps/<name>/<path>`.
-build_session_file_file: fn(state: &BuildSessionState, args: [BuildSessionValue]) -> BuildSessionReply {
-    if args.len() != 2 -> return build_session_fail(state, "`file` takes a path")
+// step reads at `.jet/deps/<name>/<path>`. `package.folder(path)` (`folder`
+// true): the folder there, which a step reads whole at that path.
+build_session_file_file: fn(state: &BuildSessionState, args: [BuildSessionValue], folder: Bool) -> BuildSessionReply {
+    call: if folder -> "folder" else -> "file"
+    if args.len() != 2 -> return build_session_fail(state, "`{call}` takes a path")
     id: build_session_handle(state, args[0], "BuildFile") ?? return build_session_fail(state, "the file does not belong to this build")
-    folder: state.files[id]
-    if folder.kind != "package" -> return build_session_fail(state, "`{folder.path}` is a file, not a package folder; `.file(path)` names a file in `b.dependency(name)`")
-    path: build_session_text(args, 1) ?? return build_session_fail(state, "`file` takes a path")
+    dep: state.files[id]
+    if dep.kind != "package" -> return build_session_fail(state, "`{dep.path}` is not a package folder; `.{call}(path)` names a {call} in `b.dependency(name)`")
+    path: build_session_text(args, 1) ?? return build_session_fail(state, "`{call}` takes a path")
+    root: state.dependencies.get(dep.path) ?? return build_session_fail(state, "package `{dep.path}` lost its folder")
+    if folder {
+        if build_session_folder_path_error(state, path) == .Val(failure) -> return failure
+        return build_session_new_file(state, build_session_dependency_folder(dep.path, root, path))
+    }
     if build_session_path_error(path) == .Val(error) -> return build_session_error_fail(state, error)
-    root: state.dependencies.get(folder.path) ?? return build_session_fail(state, "package `{folder.path}` lost its folder")
-    build_session_new_file(state, BuildSessionFile{kind: "dependency", path: "{BUILD_SESSION_DEPS_DIR}/{folder.path}/{path}", probe: None, action: None, from: Val("{root}/{path}")})
+    build_session_new_file(state, BuildSessionFile{kind: "dependency", path: "{BUILD_SESSION_DEPS_DIR}/{dep.path}/{path}", probe: None, action: None, from: Val("{root}/{path}")})
+}
+
+// The folder `path` (`.`: all of it) of the package `name` package.jet lists,
+// at `root`: a step reads it at `.jet/deps/<name>/<path>`, bound from there.
+build_session_dependency_folder: fn(name: String, root: String, path: String) -> BuildSessionFile Never! {
+    if path == "." -> return BuildSessionFile{kind: "folder", path: "{BUILD_SESSION_DEPS_DIR}/{name}", probe: None, action: None, from: Val(root.copy())}
+    BuildSessionFile{kind: "folder", path: "{BUILD_SESSION_DEPS_DIR}/{name}/{path}", probe: None, action: None, from: Val("{root}/{path}")}
 }
 
 build_session_new_file: fn(state: &BuildSessionState, file: BuildSessionFile) -> BuildSessionReply {
@@ -97,20 +142,25 @@ build_session_new_file: fn(state: &BuildSessionState, file: BuildSessionFile) ->
     BuildSessionReply.Value{value: BuildSessionValue.Handle{type_name: "BuildFile", session: state.id, id: id}}
 }
 
-// `file.path()`: the package-relative path of a file a step makes.
+// `file.path()`: the package-relative path of a file a step makes or reads;
+// a package's is the folder a step reads it at.
 build_session_file_path: fn(state: &BuildSessionState, args: [BuildSessionValue]) -> BuildSessionReply {
     if args.len() != 1 -> return build_session_fail(state, "`path` takes no arguments")
     id: build_session_handle(state, args[0], "BuildFile") ?? return build_session_fail(state, "the file does not belong to this build")
     file: state.files[id]
-    if file.kind == "found" -> return build_session_fail(state, "found program `{file.path}` has no path until the build runs; pass it to a step as its tool")
+    if file.kind == "found" -> return build_session_fail(state, "found program `{file.path}` has no path until the build runs; pass it to a step, as its tool or with `.file(found)`")
     if file.kind == "jet" -> return build_session_fail(state, "`b.jet()` has no path until the build runs; pass it to a step as its tool")
-    if file.kind == "package" -> return build_session_fail(state, "package `{file.path}` is a folder a step can't read whole; pass a file in it: `b.dependency(\"{file.path}\").file(path)`")
-    BuildSessionReply.Value{value: BuildSessionValue.Text{value: file.path.copy()}}
+    path: if file.kind == "package" -> "{BUILD_SESSION_DEPS_DIR}/{file.path}" else -> file.path.copy()
+    BuildSessionReply.Value{value: BuildSessionValue.Text{value: path}}
 }
 
 // One call on a `b.run` step (args: the step, then the call's values). A
 // file call declares the file and appends its path, after its `flag:` text
-// when one is given, to the tool's arguments.
+// when one is given, to the tool's arguments; a folder (`b.folder(path)`, a
+// package or a folder in one) the step reads whole; a found program the path
+// its probe finds when the step runs. An output with `kept: true` stays in
+// git: the build rewrites it and refuses a hand edit of it, so it can't be
+// under `.jet/`, which is never committed.
 build_session_step_call: fn(state: &BuildSessionState, method: String, args: [BuildSessionValue]) -> BuildSessionReply {
     if args.len() == 0 -> return build_session_fail(state, "step call lost its step")
     id: build_session_handle(state, args[0], "BuildAction") ?? return build_session_fail(state, "the step does not belong to this build")
@@ -129,9 +179,12 @@ build_session_step_call: fn(state: &BuildSessionState, method: String, args: [Bu
         "output" | "writes" -> {
             path: build_session_text(args, 1) ?? return build_session_fail(state, "`.{method}` takes a path")
             if build_session_path_error(path) == .Val(error) -> return build_session_error_fail(state, error)
+            kept: build_session_kept(args)
+            if kept && (path == ".jet" || path.starts_with(".jet/")) -> return build_session_fail(state, "step `{step.name}` keeps `{path}` in git, and nothing under `.jet/` is ever committed; keep a file outside `.jet/`, or drop `kept: true`")
             if build_session_contains_string(step.outputs, path) -> return build_session_error_fail(state, BuildSessionError.DuplicateActionOutput{action: step.name, output: path})
             loop generated in state.generated { if generated.path == path -> return build_session_error_fail(state, BuildSessionError.GeneratedModuleCycle{name: generated.name, path: path}) }
             step.outputs.push(path.copy())
+            if kept -> step.kept.push(path.copy())
             if method == "writes" {
                 state.actions[id] = step
                 return unit
@@ -143,10 +196,37 @@ build_session_step_call: fn(state: &BuildSessionState, method: String, args: [Bu
         "file" -> {
             file_id: build_session_handle(state, args[1], "BuildFile") ?? return build_session_fail(state, "the file does not belong to this build")
             file: state.files[file_id]
-            if file.kind == "found" -> return build_session_fail(state, "found program `{file.path}` runs as a step's tool, not as an argument; write `b.run(name, b.found(probe), caps)`")
+            if file.kind == "found" {
+                // The argument is the program's path, set as the step starts.
+                probe: file.probe ?? return build_session_fail(state, "found program `{file.path}` lost its probe")
+                if !step.probes.contains(probe) -> step.probes.push(probe)
+                step.programs.push(BuildSessionProgram{at: step.argv.len(), flag: flag.copy(), probe: probe})
+                step.argv.push("{flag}{file.path}")
+                state.actions[id] = step
+                return unit
+            }
             if file.kind == "jet" -> return build_session_fail(state, "`b.jet()` runs as a step's tool, not as an argument; write `b.run(name, b.jet(), caps)`")
-            if file.kind == "package" -> return build_session_fail(state, "package `{file.path}` is a folder a step can't read whole; pass a file in it: `.file(b.dependency(\"{file.path}\").file(path))`")
             if (file.action ?? -1) == id -> return build_session_fail(state, "step `{step.name}` makes `{file.path}`, so it can't also read it")
+            if file.kind == "package" || file.kind == "folder" {
+                folder_id := file_id
+                if file.kind == "package" {
+                    root: state.dependencies.get(file.path) ?? return build_session_fail(state, "package `{file.path}` lost its folder")
+                    folder_id = state.files.len()
+                    state.files.push(build_session_dependency_folder(file.path, root, "."))
+                }
+                path: state.files[folder_id].path
+                known: loop old in step.folders {
+                    if state.files[old].path == path -> break true
+                } ?? false
+                if !known -> step.folders.push(folder_id)
+                // A found folder is the one its probe chooses as the step starts.
+                if file.probe == .Val(probe) {
+                    if !step.probes.contains(probe) -> step.probes.push(probe)
+                }
+                step.argv.push("{flag}{path}")
+                state.actions[id] = step
+                return unit
+            }
             build_session_append_unique(step.inputs, file.path)
             step.argv.push("{flag}{file.path}")
             state.actions[id] = step
@@ -178,6 +258,15 @@ build_session_step_call: fn(state: &BuildSessionState, method: String, args: [Bu
         }
         else -> return build_session_fail(state, "unknown step call `.{method}`")
     }
+}
+
+// The `kept:` value of an output call: the Bool after its path and its
+// optional `flag:` text; false when the call doesn't give one.
+build_session_kept: fn(args: [BuildSessionValue]) -> Bool Never! {
+    loop index in 2..<args.len() {
+        if args[index] == .Bool(value) -> return value
+    }
+    false
 }
 
 build_session_add_target: fn(state: &BuildSessionState, method: String, args: [BuildSessionValue]) -> BuildSessionReply {

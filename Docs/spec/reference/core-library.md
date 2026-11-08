@@ -920,8 +920,8 @@ Whole-file and metadata functions. `read`, `read_bytes`, `write`,
 | `symlink(original, link)` / `hard_link(original, link)` | `!IOError` | Create symbolic or hard links. |
 | `read_link(path)` | `String !IOError` | Read a symbolic-link target. |
 | `canonicalize(path)` / `absolute(path)` | `String !IOError` | Resolve an existing path with symlinks, or make an absolute lexical path without requiring existence. |
-| `walk(root, ignore)` | `[WalkEntry] !IOError` | Traverse recursively with an optional ignore-file name. |
-| `walk_files(root, ignore)` | `[WalkEntry] !IOError` | Traverse regular files only. |
+| `walk(root, ignore)` | `Walk` | Traverse recursively with an optional ignore-file name, lazily: a loop over the `Walk` yields each entry as `WalkEntry !IOError` in path order. `.list()` collects them all as `[WalkEntry] !IOError`. |
+| `walk_files(root, ignore)` | `Walk` | The same walk, keeping regular files only. |
 | `glob(pattern)` | `[String] !IOError` | Return sorted shown paths matching the native byte glob grammar. |
 | `temp_dir(prefix)` / `temp_file(prefix)` | `TempDir` / `TempFile !IOError` | Create temporary resources whose handles retain `.path`. |
 | `lock(path, timeout: Duration?{None})` / `try_lock(path)` | `FileLock !IOError` / `FileLock? !IOError` | Acquire an exclusive system lock; `try_lock` returns None only for contention. |
@@ -964,7 +964,11 @@ false. Their false-on-host-error policy is Jet-owned; the host boundary
 supplies only the following-metadata fact or the host error.
 
 `walk` and `walk_files` accept the optional `ignore` value;
-`fs.walk(root)` is the convenience form. `DirEntry` has `name`, `path`, and
+`fs.walk(root)` is the convenience form. A walk reads nothing until it is
+looped over. It keeps at most one open directory and one directory's entries
+per level in hand. A directory that cannot be read yields its error in place
+of its entries, and the walk goes on. Leaving the loop early closes the walk.
+`.list()` stops at the first error. `DirEntry` has `name`, `path`, and
 `is_dir`. `Stat` has `size`, `kind`, `mode`, `readonly`, `is_file`, `is_dir`,
 `is_symlink`, `id: FileID{device, inode}`, `links`, `owner: Int?` (None on
 Windows), `size_on_disk`, `modified` and `changed` (`DateTime`, nanosecond
@@ -1013,6 +1017,13 @@ D-CORE-FILELOCK1):
   `close(lock)` or scope exit releases it, without deleting a name. Systems
   without directory flock report `Unsupported`. This differs from locking
   the regular file named by `files.lock(path)`.
+- `directory.duplicate()` returns a fresh `Directory` with the same `path`
+  that holds the same directory through its own close-on-exec descriptor,
+  opened through the held one, never by path. Closing either handle leaves
+  the other open, and both keep naming the directory after its path is
+  renamed or replaced; a closed original is `IOError.Closed`. It is how a
+  parent passes a directory to a child and keeps using its own:
+  `spec.keep_open(directory.duplicate() ?? return, at: 9)`.
 - Publish through a held directory by exclusively creating a temporary sibling,
   writing and setting mode through its handle, calling `writer.fsync()`, then
   `directory.rename(temp, destination)` and `directory.fsync()`. Rename replaces
@@ -2358,6 +2369,21 @@ reaped ends its scope with its last handle. The receipt and plan limits carry
 a detached spec (`a detached process outlives its handle, and a memory_scope
 ends with it`); nothing starts.
 `Examples/Systems/Process/ProcessMemoryScope.jet` is the golden.
+
+`.keep_open(handle, at: Int?{None})` keeps a `FileReader`, `FileWriter`,
+`FileLock` or `Directory` open in the child at descriptor `at`, or at the
+handle's own descriptor number when `at` is `None`. The spec takes the handle:
+the parent's descriptor closes at the call, and the child's duplicate is the
+spec's, so renaming or replacing the file or directory afterwards does not
+change what the child sees through the slot. The call never fails; a refusal
+is kept on the spec, and `.spawn()`, `.run()`, `.run_checked()` and `.plan()`
+return it before any child starts. A slot outside 3 to 2147483646 is
+`IOError.InvalidInput` (`keep_open needs a descriptor slot from 3 to
+2147483646; 0 to 2 are the standard streams`), as is a slot the spec already
+keeps; a descriptor the host cannot duplicate is `IOError.Other` with the
+host's error. A `FileLock` is `IOError.Unsupported` (`keep_open does not keep
+a FileLock yet`).
+`Examples/Systems/Process/ProcessKeepOpen.jet` is the golden.
 #### Authority and output boundaries
 
 An authority is explicit at the process boundary. `Authority.from_rights` can
@@ -2394,7 +2420,8 @@ discarded and recorded in the plan and receipt.
 Authority-bound terminal sessions and authority-bound pipelines refuse before
 spawn. A terminal or pipeline cannot bypass the authority's captured, redacted
 receipt boundary; ordinary unbound terminal sessions and pipelines retain their
-separate APIs.
+separate APIs. An authority-bound specification that keeps a parent handle
+open (`.keep_open`) is refused the same way, at `.plan()` and at launch.
 
 #### Cleanup and waiting
 
@@ -3828,8 +3855,12 @@ sendability rules. The implementation is in
 
 | Signature | Result | Description |
 |---|---|---|
-| `after(delay: Duration, value: Int{0}) -[Time]> Receiver<Int>` | receiver | Deliver one value after a duration. |
+| `after<T>(delay: Duration, value: T) -[Time]> Receiver<T>` | receiver | Deliver one value after a duration, then close. |
 | `interval(period: Duration) -[Time]> Receiver<Int>` | receiver | Deliver successive tick counts starting at one. |
+| `recv<T>(rx: Receiver<T>) -[Time.Wait]> T?` | value | Receive the next value; None once the channel is closed and drained. |
+| `try_recv<T>(rx: Receiver<T>) -> T?` | value | Take a queued value without waiting; None when nothing is queued. |
+| `waitall<T>(receivers: [Receiver<T>]) -[Time.Wait]> [T?]` | values | One `recv` per receiver, in order. |
+| `waitany<T>(receivers: [Receiver<T>]) -[Time.Wait]> (index: Int, value: T?)` | answer | The receiver that answered and its `recv` result; the list must not be empty. |
 | `yield_now() -[Time]>` | — | Yield to another runnable task. |
 | `current_task() -> String` | text | Identify the running task. |
 | `timeout(delay: Duration) -[Time]>` | — | Wait for a duration before returning. |
@@ -3864,13 +3895,18 @@ worker; its source callback constructor rejects nonpositive rates before
 crossing the provider boundary.
 
 The list adapters `para_map`, `para_filter`, `para_partition` and `para_fold`
-run their callback on operating-system worker threads on every tier: `jet run`
+run their callback on the task scheduler's pool on every tier: `jet run`
 and `jet dev` (O0), `jet build` (O1) and `--release` (O2) all call the one
 runtime kernel, `jet_rt_native_para_walk` in
-[`Parallel.jet`](../../../Compiler/JetRuntime/Source/Parallel.jet). The pool
-is the host's available parallelism (cgroup quota, CPU affinity, online CPUs),
-bounded by `limit:` when a `para_map` passes one. `para_map`, `para_filter`
-and `para_partition` spread their items over the pool in chunks of at most 64
+[`Parallel.jet`](../../../Compiler/JetRuntime/Source/Parallel.jet). Each
+worker runs on a task fiber, so the pool's carrier threads (by default one
+per CPU of the host's available parallelism: cgroup quota, CPU affinity,
+online CPUs),
+bound how many items run at once; an item that waits parks and frees its
+carrier. Without `limit:` there are as many workers as carriers; a
+`para_map(f, limit: n)` has up to `n` workers, and so up to `n` items in
+flight, however many carriers there are. `para_map`, `para_filter` and
+`para_partition` spread their items over the workers in chunks of at most 64
 items, so a short list of costly items still reaches every worker.
 `para_map` and `para_filter` keep source order, and `para_fold` folds
 each 64-item chunk from a fresh seed and then merges the chunk results up a

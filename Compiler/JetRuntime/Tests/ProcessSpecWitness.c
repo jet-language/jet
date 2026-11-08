@@ -12,9 +12,9 @@ typedef struct { int64_t len, capacity; int64_t *data; } Words;
 typedef struct {
     List *cmd; Text *cwd; int64_t env_clear; List *env_set, *env_remove;
     int64_t *in; int64_t out, err; int64_t *timeout, *output, *cpu, *memory, *files;
-    int64_t detached; Policy *terminal; Text *wire; List *directories; int64_t parent_death; Words *cpu_affinity; int64_t io_class, io_level, memory_scope, memory_scope_bytes;
+    int64_t detached; Policy *terminal; Text *wire; List *directories; int64_t parent_death; Words *cpu_affinity; int64_t io_class, io_level, memory_scope, memory_scope_bytes, keep_refusal;
 } Spec;
-_Static_assert(sizeof(Spec)==184 && offsetof(Spec,terminal)==112 && offsetof(Spec,wire)==120 && offsetof(Spec,directories)==128 && offsetof(Spec,parent_death)==136 && offsetof(Spec,cpu_affinity)==144 && offsetof(Spec,io_class)==152 && offsetof(Spec,io_level)==160 && offsetof(Spec,memory_scope)==168 && offsetof(Spec,memory_scope_bytes)==176, "native Spec184");
+_Static_assert(sizeof(Spec)==192 && offsetof(Spec,terminal)==112 && offsetof(Spec,wire)==120 && offsetof(Spec,directories)==128 && offsetof(Spec,parent_death)==136 && offsetof(Spec,cpu_affinity)==144 && offsetof(Spec,io_class)==152 && offsetof(Spec,io_level)==160 && offsetof(Spec,memory_scope)==168 && offsetof(Spec,memory_scope_bytes)==176 && offsetof(Spec,keep_refusal)==184, "native Spec192");
 _Static_assert(sizeof(List)==24 && sizeof(Policy)==24, "canonical nested carriers");
 extern void jet_rt_alloc_init(void);
 extern int64_t jet_rt_alloc_check_observe(int64_t, int64_t);

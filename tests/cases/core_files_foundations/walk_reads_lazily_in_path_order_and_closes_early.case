@@ -1,0 +1,24 @@
+# fs.walk/walk_files are lazy (#6086). On a generated tree (nested, empty,
+# symlinked and unreadable directories, names around each subtree key), the
+# walk yields every entry in the order list_dir sorted by path gives. The
+# unreadable directory yields one error where its entries would be, and the
+# walk goes on. A walk opens nothing until it is looped over. A loop left by
+# its end, `break` or `return` leaves no descriptor open, and so does its
+# cursor stepped by hand to its end. `.list()` stops at the first error.
+fixture: walk_reads_lazily_in_path_order_and_closes_early.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 0
+step: jet run --optimize=none main.jet
+exit: 0
+stdout: = walk_reads_lazily_in_path_order_and_closes_early.out
+step: jet run --optimize=full main.jet
+exit: 0
+stdout: = walk_reads_lazily_in_path_order_and_closes_early.out
+step: jet build main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = walk_reads_lazily_in_path_order_and_closes_early.out

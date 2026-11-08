@@ -12,6 +12,7 @@ Run a lesson from the repository root, for example `jet run Examples/Modules/<Le
 - [ImplQualifiedHead](ImplQualifiedHead/) — In an `impl` head, a package or module alias binds to the segment after it, so `Local.labels.Named` implements `labels.Named`.
 - [Imports](Imports/)
 - [InlineModule](InlineModule.jet) — Inline code modules — group functions AND types under a named namespace.
+- [InlineModuleImports](InlineModuleImports/) — An inline module imports a sibling module under its own alias, which shadows the file's alias of the same name.
 - [Library](Library.jet)
 - [MarkerGroups](MarkerGroups/) — Fixed groups keep the original rules; imported applications name their alias.
 - [MemberImportTypes](MemberImportTypes/) — A member import names any public declaration of a file module, and qualified or contextual enum spellings follow the imported enum.

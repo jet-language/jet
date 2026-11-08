@@ -5,8 +5,8 @@ use {
     jetpack_foundation.[WORKSPACE_FILE]
     jet_pkg_model.[
         AuthorityResolver, PackageFacts, WorkspaceDeclarationCache, pkg_authority_effective_root,
-        pkg_extract_inline_package, pkg_find_inline_package_root_checked,
-        pkg_find_manifest_root_checked, pkg_manifest_path_checked, pkg_package_facts_for_entry,
+        pkg_extract_inline_package, pkg_find_manifest_root_checked,
+        pkg_find_package_roots_checked, pkg_manifest_path_checked, pkg_package_facts_for_entry,
         pkg_package_facts_for_root, pkg_package_facts_from_checked_entry, pkg_path_parent,
     ]
     jet_foundation.[Diagnostic, diagnostic_sentence_case_line]
@@ -173,7 +173,7 @@ pkg_entry_test_failure: fn(cache: &WorkspaceDeclarationCache, entry: String) -[F
     pkg_entry_test_write(root, "run.jet", "package: {{ name: \"outer\" }}\nrun: fn() {{}}\n")
     pkg_entry_test_write(root, "inner/package.jet", "name: \"inner\"\n")
     pkg_entry_test_write(root, "inner/run.jet", "run: fn() {{}}\n")
-    assert((pkg_find_inline_package_root_checked(cache, files.join(root, "inner")) ? found -> found ! error -> panic("discover")) == None)
+    assert((pkg_find_package_roots_checked(cache, files.join(root, "inner"), true) ? roots -> roots.inline ! error -> panic("discover")) == None)
     assert_eq(pkg_entry_test_facts(cache, files.join(root, "inner/run.jet")).name, "inner")
     files.remove_all(root) ?? panic("cleanup")
 }
@@ -312,7 +312,7 @@ pkg_entry_test_failure: fn(cache: &WorkspaceDeclarationCache, entry: String) -[F
     pkg_entry_test_write(root, "child/src/other.jet", "run: fn() {{}}\n")
     nested: files.join(root, "child/src")
     assert((pkg_find_manifest_root_checked(cache, nested) ? found -> found ! error -> panic("manifest walk")) == None)
-    assert((pkg_find_inline_package_root_checked(cache, nested) ? found -> found ! error -> panic("inline walk")) == None)
+    assert((pkg_find_package_roots_checked(cache, nested, true) ? roots -> roots.inline ! error -> panic("inline walk")) == None)
     assert((pkg_package_facts_for_entry(cache, files.join(nested, "other.jet")) ? found -> found ! error -> panic("boundary entry")) == None)
     files.remove_all(root) ?? panic("cleanup")
 }
@@ -338,6 +338,22 @@ pkg_entry_test_failure: fn(cache: &WorkspaceDeclarationCache, entry: String) -[F
     pkg_entry_test_write(root, "child/workspace.jet", "ordinary: fn() {{}}\n")
     pkg_entry_test_write(root, "child/other.jet", "run: fn() {{}}\n")
     assert_eq(pkg_entry_test_failure(cache, files.join(root, "child/other.jet")).code, "E0995")
+    files.remove_all(root) ?? panic("cleanup")
+}
+
+#Test("one climb reports the inline carrier and the manifest above it") {
+    cache := WorkspaceDeclarationCache.new()
+    root: pkg_entry_test_root("one-climb")
+    pkg_entry_test_write(root, "app/package.jet", "name: \"app\"\n")
+    pkg_entry_test_write(root, "app/tool/run.jet", "package: {{ name: \"tool\" }}\nrun: fn() {{}}\n")
+    tool: files.canonicalize(files.join(root, "app/tool")) ?? panic("canonical tool")
+    app: files.canonicalize(files.join(root, "app")) ?? panic("canonical app")
+    roots: pkg_find_package_roots_checked(cache, tool, true) ? found -> found ! error -> panic("both walks")
+    assert_eq(roots.inline, Val(tool))
+    assert_eq(roots.manifest, Val(app))
+    alone: pkg_find_package_roots_checked(cache, tool, false) ? found -> found ! error -> panic("manifest walk")
+    assert(alone.inline == None)
+    assert_eq(alone.manifest, Val(app))
     files.remove_all(root) ?? panic("cleanup")
 }
 

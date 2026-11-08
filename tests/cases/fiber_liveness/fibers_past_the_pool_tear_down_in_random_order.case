@@ -1,0 +1,28 @@
+# 2000 tasks parked on their own channels are released in a shuffled order,
+# with 400 more spawned between the releases: fibers past the pool of idle
+# stacks tear down in an order unrelated to their registration, and each one
+# leaves the live thread registry in O(1) (Thread.jet thread_unregister_tcb).
+# Every task returns what it was sent and no thread is left behind. Same
+# output on jet run and at O0, O1 and O2.
+fixture: fixtures/teardown
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run main.jet
+exit: 0
+stdout: = "2000 of 2000 and 400 of 400 returned what they were sent\nthreads unchanged true\n"
+step: jet build --optimize=none main.jet
+exit: 0
+step o0: built
+exit: 0
+stdout: = "2000 of 2000 and 400 of 400 returned what they were sent\nthreads unchanged true\n"
+step: jet build --optimize=basic main.jet
+exit: 0
+step o1: built
+exit: 0
+stdout: = "2000 of 2000 and 400 of 400 returned what they were sent\nthreads unchanged true\n"
+step: jet build --release main.jet
+exit: 0
+step o2: built
+exit: 0
+stdout: = "2000 of 2000 and 400 of 400 returned what they were sent\nthreads unchanged true\n"

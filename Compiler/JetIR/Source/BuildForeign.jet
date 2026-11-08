@@ -607,7 +607,7 @@ ir_asm_leaf: fn(m: &IRModule, p: IRProgram, foreign: SemaCheckedForeignFunction,
     if name_rows_value(m.function_rows, key) != None -> return ""
     source: ir_asm_source(p, foreign) ?? return "inline asm: missing triple-quoted body within the checked source span"
     names: loop param in foreign.params -> param.name
-    assembled: x64_assemble_template(source, names, result >= 0)
+    assembled: x64_assemble_template(source, names, result >= 0, p.asm_rails)
     if assembled.error == .Val(reason) -> return reason
     line: ir_source_line_of(p, foreign.source_file, foreign.span.start) ?? 0
     bytes := [U8]{}

@@ -12,8 +12,10 @@ use {
     jet_pkg_model.[pkg_json_text]
     jetpack_foundation.[
         BuildEffect, NATIVE_SANDBOX_DEFAULT_ACTION_TIMEOUT_MS, NativeSandboxCommand, NativeSandboxError, NativeSandboxMount,
-        foundation_native_sandbox_command, foundation_native_sandbox_finish, foundation_run_native_sandboxed_with_timeout_and_mounts,
+        foundation_find_folder, foundation_library_folders, foundation_native_sandbox_command, foundation_native_sandbox_finish,
+        foundation_run_native_sandboxed_with_timeout_and_mounts, foundation_sandbox_program_argument,
     ]
+    jetpack_artifact_store.[StampTable]
     files: core.files
     process: core.process
     random: core.crypto.random
@@ -44,10 +46,16 @@ BuildExecutionError: enum {
     // The action ran past its time limit, in milliseconds, and was killed.
     TimedOut(action: String, limit_ms: Int)
     ProbeFailed(probe: String, detail: String)
+    // The find_folder probe `probe` found no folder holding a `file` that
+    // fits; `searched` is each folder it looked in, with why it passed it.
+    FolderNotFound(probe: String, file: String, searched: [String])
     // The one structured action-failure route, retained whether the action
     // ran now or its failure was restored from the cache.
     Reported(report: DiagnosticBuildError)
     InvalidGraph(HermeticBuildError)
+    // The action's kept output `path` holds bytes no build wrote, so the
+    // action published none of its outputs.
+    HandEdited(action: String, path: String)
 
     report: fn(self) -> DiagnosticBuildError? Never! {
         if self == {
@@ -221,6 +229,15 @@ BuildActionStart: enum {
 // the work tree, which itself is mounted only at the child's working folder.
 BUILD_MADE_TOOL_MOUNT: "/jet/tool"
 
+// Where the Linux sandbox binds an action's work tree, its working folder
+// (foundation_linux_sandbox_argv without a separate output folder).
+BUILD_WORK_MOUNT: "/work"
+
+// Where a folder the action reads whole is bound: its path in the work tree.
+build_folder_mount: fn(path: String) -> String Never! {
+    if path == "." -> BUILD_WORK_MOUNT else -> "{BUILD_WORK_MOUNT}/{path}"
+}
+
 // Rust `execute_one_action` on the local path, for many actions at once:
 // each of `ids` (their prerequisites already done) is keyed and restored
 // from a cached record, else staged in a fresh private work tree; the staged
@@ -231,8 +248,9 @@ build_execute_actions: fn(plan: HermeticBuildPlan, ids: [Int], project_root: Str
     results := [Result<ActionOutcome, BuildExecutionError>]{}
     runs := [BuildActionRun]{}
     slots := [Int]{}
+    stamps := StampTable.load(project_root)
     loop action_id in ids {
-        if build_start_action(plan, plan.actions[action_id], project_root, artifact_store, grants, probe_facts) == {
+        if build_start_action(plan, plan.actions[action_id], project_root, artifact_store, grants, probe_facts, stamps) == {
             .Ok(start) -> if start == {
                 .Restored -> results.push(Ok(ActionOutcome.RestoredFromCache))
                 .Ready(run) -> {
@@ -244,6 +262,7 @@ build_execute_actions: fn(plan: HermeticBuildPlan, ids: [Int], project_root: Str
             .Err(error) -> results.push(Err(error))
         }
     }
+    stamps.save(project_root).drop("the stamp table only saves rehashing; a lost one costs speed, never a wrong key")
     if runs.len() == 0 -> return results
     specs: loop run in runs -> run.command.spec
     if process.run_all(specs, if jobs < 1 -> 1 else -> jobs) == {
@@ -264,17 +283,22 @@ build_execute_actions: fn(plan: HermeticBuildPlan, ids: [Int], project_root: Str
     results
 }
 
-// Snapshot the action's inputs, key it and restore a cached record, else
-// stage it in a fresh private work tree that receives exactly the input
-// bytes the key hashed.
-build_start_action: fn(plan: HermeticBuildPlan, action: HermeticBuildAction, project_root: String, artifact_store: BuildArtifactStoreHandle, grants: [BuildEffect], probe_facts: [BuildProbeFact]) -[FS, Env, Exec, Time, Time.Wait, Rand]> BuildActionStart BuildExecutionError! {
-    loop cap in action.caps {
-        if !grants.contains(cap) -> return Err(BuildExecutionError.MissingGrant{action: action.name, capability: cap})
+// Snapshot the action's inputs and the files of the folders it reads whole
+// (`stamps` their last digests; a found folder is the one its probe chose),
+// key it and restore a cached record, else stage it in a fresh private work
+// tree that receives exactly the input bytes the key hashed, runnable where
+// the input is, with each folder bound read-only at its path and each found
+// program it is passed named by the path it runs at there.
+build_start_action: fn(plan: HermeticBuildPlan, declared: HermeticBuildAction, project_root: String, artifact_store: BuildArtifactStoreHandle, grants: [BuildEffect], probe_facts: [BuildProbeFact], stamps: &StampTable) -[FS, Env, Exec, Time, Time.Wait, Rand]> BuildActionStart BuildExecutionError! {
+    loop cap in declared.caps {
+        if !grants.contains(cap) -> return Err(BuildExecutionError.MissingGrant{action: declared.name, capability: cap})
     }
+    action: build_found_folders(plan, declared, probe_facts) ?? return Err(err)
     handle: HermeticActionHandle{id: action.id, context: plan.context}
     if plan.action(handle) == None -> return Err(BuildExecutionError.InvalidGraph(HermeticBuildError.UnknownAction(handle.id)))
     inputs: build_snapshot_declared_inputs(artifact_store, project_root, action) ?? return Err(build_io_action(action, err))
-    snapshots: loop input in inputs -> input.snapshot
+    snapshots := loop input in inputs -> input.snapshot
+    snapshots.extend(build_snapshot_folders(stamps, project_root, action) ?? return Err(build_io_action(action, err)))
     // A tool another step makes is a declared input, run from the work
     // tree; any other tool is looked up through the action's toolchain.
     made_tool: action.inputs.contains(action.argv[0])
@@ -287,7 +311,13 @@ build_start_action: fn(plan: HermeticBuildPlan, action: HermeticBuildAction, pro
     loop fact in probe_facts {
         if action_probe_names.contains(fact.name) -> effective_probe_facts.push(fact.copy())
     }
-    key: build_canonical_effective_action_key(plan, action, snapshots, grants, executable_digest, effective_probe_facts)
+    programs: build_found_programs(plan, action, probe_facts) ?? return Err(err)
+    program_digests := [ContentDigest]{}
+    loop program in programs {
+        bytes: files.read_bytes(program) ?? return Err(build_io_action(action, BuildIOError.from(err)))
+        program_digests.push(ContentDigest.from_bytes(bytes))
+    }
+    key: build_canonical_effective_action_key(plan, action, snapshots, grants, executable_digest, program_digests, effective_probe_facts)
     restore_failure := CacheMissReason?{None}
     if action.cache == ActionCache.Cached {
         if build_read_action_record(artifact_store, key) == {
@@ -297,7 +327,8 @@ build_start_action: fn(plan: HermeticBuildPlan, action: HermeticBuildAction, pro
                     return Err(BuildExecutionError.Reported{report})
                 }
                 if build_restore_action_outputs(artifact_store, project_root, action, record) == {
-                    .Ok(_) -> {
+                    .Ok(edited) -> {
+                        if edited == .Val(path) -> return Err(BuildExecutionError.HandEdited{action: action.name, path})
                         build_record_cache_event(action.name, key, ActionCacheStatus.Hit(.LocalActionRecordMatched), "restore", Val(ActionOutcome.RestoredFromCache))
                         return Ok(BuildActionStart.Restored)
                     }
@@ -326,6 +357,7 @@ build_start_action: fn(plan: HermeticBuildPlan, action: HermeticBuildAction, pro
         parent: files.dirname(to)
         if parent != "" -> files.create_dir_all(parent) ?? return Err(build_io_action(action, BuildIOError.from(err)))
         files.write_bytes(to, input.bytes) ?? return Err(build_io_action(action, BuildIOError.from(err)))
+        if input.snapshot.executable -> files.set_mode(to, 493) ?? return Err(build_io_action(action, BuildIOError.from(err)))
     }
     loop output in action.outputs {
         path: build_resolve_under(sandbox, output) ?? return Err(build_io_action(action, err))
@@ -333,24 +365,77 @@ build_start_action: fn(plan: HermeticBuildPlan, action: HermeticBuildAction, pro
         if parent != "" -> files.create_dir_all(parent) ?? return Err(build_io_action(action, BuildIOError.from(err)))
     }
 
-    runtime_args: build_runtime_toolchain_arguments(plan, action.toolchain, action.argv.slice(1, action.argv.len()))
+    runtime_args := build_runtime_toolchain_arguments(plan, action.toolchain, action.argv.slice(1, action.argv.len()))
     runtime_env: build_runtime_toolchain_environment(plan, action.toolchain, build_action_environment(action))
     mounts := [NativeSandboxMount]{}
     if plan.toolchain(action.toolchain) == .Val(toolchain) {
         loop mount in toolchain.mounts -> mounts.push(NativeSandboxMount{source: mount.source, destination: mount.destination})
+    }
+    loop folder in action.folders {
+        source: build_folder_source(project_root, folder) ?? return Err(build_io_action(action, err))
+        if sys.is_linux() -> mounts.push(NativeSandboxMount{source, destination: build_folder_mount(folder.path)})
+        else {
+            // Seatbelt has no mount namespace: the work tree links the
+            // folder's host path, which the profile lets the child read.
+            link: build_resolve_under(sandbox, folder.path) ?? return Err(build_io_action(action, err))
+            parent: files.dirname(link)
+            if parent != "" -> files.create_dir_all(parent) ?? return Err(build_io_action(action, BuildIOError.from(err)))
+            real: files.realpath(source) ?? return Err(build_io_action(action, BuildIOError.from(err)))
+            files.symlink(real, link) ?? return Err(build_io_action(action, BuildIOError.from(err)))
+            mounts.push(NativeSandboxMount{source: real, destination: real.copy()})
+        }
     }
     if made_tool {
         executable = build_resolve_under(sandbox, action.argv[0]) ?? return Err(build_io_action(action, err))
         files.set_mode(executable, 493) ?? return Err(build_io_action(action, BuildIOError.from(err)))
         mounts.push(NativeSandboxMount{source: files.dirname(executable), destination: BUILD_MADE_TOOL_MOUNT})
     }
+    loop index in 0..<programs.len() {
+        passed: action.programs[index]
+        runtime_args[passed.at - 1] = "{passed.flag}{foundation_sandbox_program_argument(programs[index], mounts)}"
+    }
     share_network: build_action_shares_network(grants, action.caps)
     timeout: time.duration_ms(action.timeout_ms ?? NATIVE_SANDBOX_DEFAULT_ACTION_TIMEOUT_MS)
-    command: foundation_native_sandbox_command(executable, runtime_args, sandbox, None, runtime_env, share_network, mounts, Val(timeout)) ?? {
+    command: foundation_native_sandbox_command(executable, runtime_args, sandbox, None, runtime_env, share_network, mounts, programs, Val(timeout)) ?? {
         files.remove_all(sandbox).drop("the action sandbox is removed best-effort; the sandbox error is reported")
         return Err(build_native_sandbox_error(action, err))
     }
     Ok(BuildActionStart.Ready{run: BuildActionRun{action, key, sandbox, rebuild_status, command}})
+}
+
+// `action` with each found folder bound from the folder its find_folder
+// probe chose, which the probe's fact names.
+build_found_folders: fn(plan: HermeticBuildPlan, action: HermeticBuildAction, probe_facts: [BuildProbeFact]) -> HermeticBuildAction BuildExecutionError! {
+    resolved := action
+    folders := [ActionFolder]{}
+    loop folder in action.folders {
+        probe: folder.found ?? {
+            folders.push(folder.copy())
+            next
+        }
+        name: plan.probes[probe.id].name
+        chosen: loop fact in probe_facts {
+            if fact.name == name && fact.success -> break fact.detail.copy()
+        } ?? return Err(BuildExecutionError.IO{action: action.name, detail: "the folder `{folder.path}` is the one the probe `{name}` finds, and that probe did not run"})
+        folders.push(ActionFolder{path: folder.path.copy(), source: Val(chosen), found: folder.found})
+    }
+    resolved.folders = folders
+    Ok(resolved)
+}
+
+// The canonical host path of each found program `action` is passed, in
+// argument order: the program its find_program probe found, which the
+// probe's fact names.
+build_found_programs: fn(plan: HermeticBuildPlan, action: HermeticBuildAction, probe_facts: [BuildProbeFact]) -[FS, Env]> [String] BuildExecutionError! {
+    programs := [String]{}
+    loop program in action.programs {
+        name: plan.probes[program.probe.id].name
+        found: loop fact in probe_facts {
+            if fact.name == name && fact.success -> break fact.detail.copy()
+        } ?? return Err(BuildExecutionError.IO{action: action.name, detail: "argument {program.at} is the program the probe `{name}` finds, and that probe found none"})
+        programs.push(files.canonicalize(found) ?? return Err(build_io_action(action, BuildIOError.from(err))))
+    }
+    Ok(programs)
 }
 
 // A staged action whose child never ran to a receipt: its work tree goes.
@@ -377,7 +462,14 @@ build_finish_action: fn(run: BuildActionRun, receipt: ProcessReceipt, project_ro
         }
         return Err(BuildExecutionError.Reported{report})
     }
-    build_publish_sandbox_outputs(sandbox, project_root, action) ?? return Err(build_io_action(action, err))
+    edited: if build_publish_sandbox_outputs(sandbox, project_root, action) == {
+        .Ok(value) -> value
+        .Err(error) -> { return Err(build_io_action(action, error)) }
+    }
+    if edited == .Val(path) {
+        files.remove_all(sandbox).drop("the action sandbox is removed best-effort; the hand edit is reported")
+        return Err(BuildExecutionError.HandEdited{action: action.name, path})
+    }
     outcome: ActionOutcome.Succeeded{exit_code: code}
     if action.cache == ActionCache.Cached {
         record: build_capture_declared_outputs(artifact_store, project_root, action, key, outcome, ActionCacheStatus.Miss(.NoLocalActionRecord)) ?? return Err(build_io_action(action, err))
@@ -393,21 +485,31 @@ build_finish_action: fn(run: BuildActionRun, receipt: ProcessReceipt, project_ro
 // other special file is refused before any blocking open; the per-file and
 // per-action limits are checked against the opened file's size before a byte
 // is read). Only when all of them are read are they restored atomically
-// under the project root, so a refused output publishes nothing.
-build_publish_sandbox_outputs: fn(sandbox: String, project_root: String, action: HermeticBuildAction) BuildIOError! -[FS, Rand]> {
+// under the project root, so a refused output publishes nothing. A kept
+// output that already holds its bytes is left as it is; when one holds bytes
+// no build wrote (build_output_write), nothing is published and its path is
+// returned.
+build_publish_sandbox_outputs: fn(sandbox: String, project_root: String, action: HermeticBuildAction) -[FS, Rand]> String? BuildIOError! {
     contents := [[U8]]{}
+    writes := [BuildOutputWrite]{}
     total := 0
     loop declared in action.outputs {
         from: build_resolve_under(sandbox, declared)
         bytes: build_secure_read_file(sandbox, from, build_read_budget(total))
         total += bytes.len()
+        write := BuildOutputWrite.Write
+        if build_kept_output(action, declared) == .Val(kept) -> write = build_output_write(project_root, kept, ContentDigest.from_bytes(bytes))
+        if write == .HandEdited -> return Ok(Val(declared.copy()))
+        writes.push(write)
         contents.push(bytes)
     }
     loop index in 0..<action.outputs.len() {
+        if writes[index] == .Unchanged -> next
         to: build_resolve_under(project_root, action.outputs[index])
         build_prepare_output_destination(project_root, to)
         build_atomic_restore_file(project_root, to, contents[index])
     }
+    Ok(None)
 }
 
 // Rust `execute_probes`: each selected probe resolves through its toolchain
@@ -420,6 +522,11 @@ build_execute_probes: fn(plan: HermeticBuildPlan, selected: [Int]) -[FS, Env, Ex
             .FindProgram(program) -> if build_resolve_program_path(plan, probe.toolchain, program) == {
                 .Val(path) -> (success: true, detail: path)
                 .None -> (success: false, detail: "program `{program}` not found")
+            }
+            .FindFolder(file) -> {
+                search: foundation_find_folder(file, foundation_library_folders())
+                found: search.found ?? return Err(BuildExecutionError.FolderNotFound{probe: probe.name, file, searched: loop miss in search.misses -> "{miss.folder}: {miss.reason}"})
+                (success: true, detail: found.folder)
             }
             .PkgConfig(package, min_version) -> {
                 pkg_config: build_resolve_program_path(plan, probe.toolchain, "pkg-config") ?? return Err(BuildExecutionError.ProbeFailed{probe: probe.name, detail: "pkg-config not found"})

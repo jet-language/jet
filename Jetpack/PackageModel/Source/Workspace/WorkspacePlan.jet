@@ -114,15 +114,29 @@ WorkspaceDeclarationProbe: struct {
 
 // Root discovery shares this owned cache across its workspace-source probes.
 // Each distinct source that names `workspace` is lexed once per discovery
-// session, keyed by its text; repeated scans must use the same cache.
+// session, keyed by its text; repeated scans must use the same cache. Each
+// directory's workspace presence is resolved once per session too, keyed by
+// its canonical root, however many upward walks cross it.
 WorkspaceDeclarationCache: struct {
     priv probes: [String: WorkspaceDeclarationProbe]
+    priv presence: [String: Bool]
     // Lexes actually performed by this session, excluding memo hits.
     lexes: Int{0}
 
     new: fn() -> WorkspaceDeclarationCache Never! {
-        WorkspaceDeclarationCache{probes: [String: WorkspaceDeclarationProbe]{}}
+        WorkspaceDeclarationCache{probes: [String: WorkspaceDeclarationProbe]{}, presence: [String: Bool]{}}
     }
+}
+
+// Whether `resolver`'s root resolves a workspace source (only the verdict;
+// a caller that uses the source resolves it itself). A failure is never
+// remembered, so every walk that reaches it reports it.
+pkg_workspace_present: fn(cache: &WorkspaceDeclarationCache, resolver: AuthorityResolver) -[FS, Env]> Bool AuthorityError! {
+    if cache.presence.get(resolver.root) == .Val(present) -> return Ok(present)
+    source: resolver.resolve_workspace_source(cache)
+    present: if source == .Val(_) -> true else -> false
+    cache.presence[resolver.root.copy()] = present
+    Ok(present)
 }
 
 // A declaration's head is the identifier `workspace`, then `:`, with only

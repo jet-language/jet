@@ -344,6 +344,23 @@ channel_receive: fn(channel: I64, out: I64) -> Bool {
     if ready -> I64{1} else -> I64{0}
 }
 
+// Receiver metadata: kind104 (1 timer, 2 interval), cancelled96 and the
+// delay112 of a timer channel, read under the state lock.
+channel_word: fn(channel: I64, offset: I64) -> I64 {
+    sync_mutex_lock(channel)
+    value: sync_load(wrapping(channel + offset))
+    sync_mutex_unlock(channel)
+    value
+}
+
+#Export(c) jet_rt_native_receiver_is_timer: fn(channel: I64) -> I64 { if (channel_word(channel, I64{104}) == I64{1}) -> I64{1} else -> I64{0} }
+
+#Export(c) jet_rt_native_receiver_is_interval: fn(channel: I64) -> I64 { if (channel_word(channel, I64{104}) == I64{2}) -> I64{1} else -> I64{0} }
+
+#Export(c) jet_rt_native_receiver_is_cancelled: fn(channel: I64) -> I64 { if (channel_word(channel, I64{96}) != I64{0}) -> I64{1} else -> I64{0} }
+
+#Export(c) jet_rt_native_receiver_delay_ms: fn(channel: I64) -> I64 { jet_int_owned_from_i64(channel_word(channel, I64{112})) }
+
 #Export(c) jet_rt_native_receiver_try_receive: fn(channel: I64, meta: I64) -> I64 {
     sync_mutex_lock(channel)
     result := I64{0}

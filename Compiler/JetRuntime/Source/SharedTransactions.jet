@@ -32,9 +32,7 @@ stm_gate_enter: fn() {
     me: sync_load(wrapping(thread_base() + I64{8}))
     sync_mutex_lock(stm_root)
     loop sync_load(wrapping(stm_root + I64{8})) != (I64{0}) && sync_load(wrapping(stm_root + I64{8})) != me {
-        scheduler_blocking_wait_enter()
         _ := sync_cond_wait(wrapping(stm_root + I64{24}), stm_root, I64{-1})
-        scheduler_blocking_wait_leave()
     }
     sync_store(wrapping(stm_root + I64{8}), me)
     _ := sync_add(wrapping(stm_root + I64{16}), I64{1})

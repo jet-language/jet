@@ -79,6 +79,11 @@ Gates read the board in Jet, never through node: `jet Tools/tower/Board.jet`
 answers `card show|list`, `decision show|list` and `milestone list` with the
 JSON the CLI prints for them (`--json`, `--data`, `TOWER_DATA`, the archive
 and the worktree redirect included). It only reads; writes stay on the CLI.
+It decodes the store one record at a time with typed `json.decode`, keeping
+the fields its answers read; a record's JSON text is kept and parsed back
+only when the verb prints that record. No tree of the whole board is built:
+on a 15 MB board with 65 MB of history, `card show` peaks near 56 MB and
+the list verbs near 120 MB, where the whole tree took 785 MB.
 
 Report completions and blockers on the card itself: a `--log` entry when you
 advance it, a `tower question answer` when the owner asked something. The

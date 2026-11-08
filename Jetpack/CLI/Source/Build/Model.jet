@@ -251,9 +251,44 @@ ActionKind: enum {
     }
 }
 
+// An output kept in git (`.output(path, kept: true)`): publishing rewrites it
+// only when its bytes differ and refuses a hand edit of it. `written` is the
+// digest of the bytes the last build left there, from that build's receipt;
+// None before any build has.
+KeptOutput: struct {
+    path: String
+    written: String?
+}
+
+// A folder an action reads whole (`.file(b.folder(path))`): bound read-only
+// at `path` in its work tree, from `source`, a host folder (a dependency's),
+// else from the folder the find_folder probe `found` chose, else from `path`
+// under the project root. The action key hashes every file in it.
+ActionFolder: struct {
+    path: String
+    source: String?
+    found: ProbeHandle?
+}
+
+// A found program an action is passed (`.file(b.found(probe))`): argument
+// `at` of its argv is `flag` followed by the path the find_program `probe`
+// finds as the action starts, the path the program has inside the sandbox.
+// The action key hashes the program's bytes.
+ActionProgram: struct {
+    at: Int
+    flag: String
+    probe: ProbeHandle
+}
+
 ActionSpec: struct {
     inputs: [String]
     outputs: [String]
+    // The outputs that stay in git; no action key names them.
+    kept: [KeptOutput]
+    // The folders it reads whole.
+    folders: [ActionFolder]
+    // The found programs it is passed.
+    programs: [ActionProgram]
     argv: [String]
     env: [String: String]
     // Only allowlisted env keys enter the action identity. Empty means the
@@ -278,7 +313,7 @@ ActionSpec: struct {
 
     cached: fn(argv: [String]) -> ActionSpec Never! {
         ActionSpec{
-            inputs: [String]{}, outputs: [String]{}, argv: argv, env: [String: String]{},
+            inputs: [String]{}, outputs: [String]{}, kept: [KeptOutput]{}, folders: [ActionFolder]{}, programs: [ActionProgram]{}, argv: argv, env: [String: String]{},
             env_allowlist: [String]{}, caps: [BuildEffect]{}, cache: ActionCache.Cached,
             kind: ActionKind.Generic, toolchain: None, probes: [ProbeHandle]{}, signing_identity: None,
             labels: [String: String]{}, helper_versions: [String: String]{},
@@ -301,6 +336,39 @@ ActionSpec: struct {
     with_outputs: fn(self, paths: [String]) -> ActionSpec Never! {
         updated := self
         loop path in paths -> updated.outputs.push(path.copy())
+        updated
+    }
+
+    // `path`, one of the outputs, kept in git; `written` as KeptOutput says.
+    with_kept: fn(self, path: String, written: String?) -> ActionSpec Never! {
+        updated := self
+        updated.kept.push(KeptOutput{path: path.copy(), written: written.copy()})
+        updated
+    }
+
+    // The folder at `path` in the work tree, read whole; `source` as
+    // ActionFolder says.
+    with_folder: fn(self, path: String, source: String?) -> ActionSpec Never! {
+        updated := self
+        updated.folders.push(ActionFolder{path: path.copy(), source: source.copy(), found: None})
+        updated
+    }
+
+    // The folder the find_folder `probe` chooses when the build runs, read
+    // whole at `path` in the work tree. The action must also use the probe
+    // (with_probe), whose fact names the folder.
+    with_found_folder: fn(self, path: String, probe: ProbeHandle) -> ActionSpec Never! {
+        updated := self
+        updated.folders.push(ActionFolder{path: path.copy(), source: None, found: Val(probe)})
+        updated
+    }
+
+    // Argument `at`, `flag` followed by the path of the program the
+    // find_program `probe` finds when the build runs. The action must also
+    // use the probe (with_probe).
+    with_found_program: fn(self, at: Int, flag: String, probe: ProbeHandle) -> ActionSpec Never! {
+        updated := self
+        updated.programs.push(ActionProgram{at, flag: flag.copy(), probe})
         updated
     }
 
@@ -382,6 +450,9 @@ HermeticBuildAction: struct {
     name: String
     inputs: [String]
     outputs: [String]
+    kept: [KeptOutput]
+    folders: [ActionFolder]
+    programs: [ActionProgram]
     argv: [String]
     env: [String: String]
     env_allowlist: [String]
@@ -627,6 +698,9 @@ ReproducibilityClass: enum {
 
 ProbeKind: enum {
     FindProgram(program: String)
+    // A folder on the machine holding `file` (jetpack_foundation
+    // foundation_find_folder).
+    FindFolder(file: String)
     PkgConfig(package: String, min_version: String?)
     HeaderCheck(header: String)
     CompileCheck(name: String, includes: [String], code: String)
@@ -640,6 +714,10 @@ ProbeSpec: struct {
 
     find_program: fn(program: String) -> ProbeSpec Never! {
         ProbeSpec{kind: ProbeKind.FindProgram{program}, reproducibility: ReproducibilityClass.Ambient, provenance: BuildProvenance.ambient_record("find_program"), toolchain: None}
+    }
+
+    find_folder: fn(file: String) -> ProbeSpec Never! {
+        ProbeSpec{kind: ProbeKind.FindFolder{file}, reproducibility: ReproducibilityClass.Ambient, provenance: BuildProvenance.ambient_record("find_folder"), toolchain: None}
     }
 
     pkg_config: fn(package: String) -> ProbeSpec Never! {
@@ -737,6 +815,11 @@ HermeticBuildError: enum {
     PhonyActionWithoutCaps(String)
     PhonyActionWithOutputs(String)
     DuplicateActionOutput(action: String, output: String)
+    // A kept output the action doesn't declare as one of its outputs.
+    UndeclaredKeptOutput(action: String, output: String)
+    // An output inside a folder the action reads whole, whose read-only
+    // mount would hide it.
+    OutputInFolder(action: String, output: String, folder: String)
     DuplicateBuildOutput(output: String, first_action: String, second_action: String)
     UnknownTarget(Int)
     UnknownAction(Int)
@@ -773,6 +856,8 @@ HermeticBuildError: enum {
             .PhonyActionWithoutCaps(name) -> "PhonyActionWithoutCaps({build_debug_quote(name)})"
             .PhonyActionWithOutputs(name) -> "PhonyActionWithOutputs({build_debug_quote(name)})"
             .DuplicateActionOutput(action, output) -> "DuplicateActionOutput {{ action: {build_debug_quote(action)}, output: {build_debug_quote(output)} }}"
+            .UndeclaredKeptOutput(action, output) -> "UndeclaredKeptOutput {{ action: {build_debug_quote(action)}, output: {build_debug_quote(output)} }}"
+            .OutputInFolder(action, output, folder) -> "OutputInFolder {{ action: {build_debug_quote(action)}, output: {build_debug_quote(output)}, folder: {build_debug_quote(folder)} }}"
             .DuplicateBuildOutput(output, first_action, second_action) -> "DuplicateBuildOutput {{ output: {build_debug_quote(output)}, first_action: {build_debug_quote(first_action)}, second_action: {build_debug_quote(second_action)} }}"
             .UnknownTarget(id) -> "UnknownTarget(TargetId({id}))"
             .UnknownAction(id) -> "UnknownAction(ActionId({id}))"

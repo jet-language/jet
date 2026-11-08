@@ -52,13 +52,11 @@ rt_generator_release_address: fn() -> I64 {
     if (child == I64{0}) {
         child = task_state_new(I64{0}, sync_load(wrapping(state + I64{80})), sync_load(state), sync_load(wrapping(state + I64{8})), sync_load(wrapping(state + I64{16})), sync_load(wrapping(state + I64{24})), I64{0}, I64{0})
         sync_store(wrapping(state + I64{32}), child)
-        scheduler_submit(I64{0}, child, true)
+        scheduler_submit(child)
     } else {
         sync_park_wake(sync_load(wrapping(state + I64{64})))
     }
-    scheduler_blocking_wait_enter()
     loop sync_load(wrapping(state + I64{48})) != (I64{0}) && sync_load(wrapping(child + I64{24})) == (I64{0}) -> sync_park(sync_load(wrapping(child + I64{104})), I64{-1})
-    scheduler_blocking_wait_leave()
     if (sync_load(wrapping(state + I64{48})) == I64{0}) -> return I64{1}
     trap_store(wrapping(node + I64{144}), I64{1})
     if (sync_load(wrapping(child + I64{32})) == I64{5}) -> generator_raise(child)

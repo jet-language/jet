@@ -200,30 +200,30 @@ scheduler_process_root := I64{0}
 
 scheduler_process_root_install: fn(control: I64) {
     scheduler_control_retain(control)
-    sync_mutex_lock(scheduler_root)
+    sync_thread_lock(scheduler_root)
     previous: scheduler_process_root
     #Unsafe("written under the scheduler root mutex") {
         scheduler_process_root = control
     }
-    sync_mutex_unlock(scheduler_root)
+    sync_thread_unlock(scheduler_root)
     scheduler_control_drop(previous)
 }
 
 scheduler_process_root_release: fn(control: I64) {
-    sync_mutex_lock(scheduler_root)
+    sync_thread_lock(scheduler_root)
     owned: scheduler_process_root == control
     if owned {
         #Unsafe("written under the scheduler root mutex") {
             scheduler_process_root = I64{0}
         }
     }
-    sync_mutex_unlock(scheduler_root)
+    sync_thread_unlock(scheduler_root)
     if owned -> scheduler_control_drop(control)
 }
 
 // Returns a retained reference the caller drops.
 scheduler_root_task_control: fn() -> I64 {
-    sync_mutex_lock(scheduler_root)
+    sync_thread_lock(scheduler_root)
     previous: scheduler_process_root
     replaced := I64{0}
     if (previous == I64{0} || sync_load(wrapping(previous + I64{16})) != I64{0}) {
@@ -236,7 +236,7 @@ scheduler_root_task_control: fn() -> I64 {
     }
     control: scheduler_process_root
     scheduler_control_retain(control)
-    sync_mutex_unlock(scheduler_root)
+    sync_thread_unlock(scheduler_root)
     scheduler_control_drop(replaced)
     control
 }
@@ -706,9 +706,7 @@ scheduler_wait_while_paused: fn() -> I64 {
             }
             timeout = deadline_ms_to_ns(remaining)
         }
-        scheduler_blocking_wait_enter()
         sync_park(sync_load(wrapping(control + I64{64})), timeout)
-        scheduler_blocking_wait_leave()
     }
     jet_scheduler_native_propagate()
 }
@@ -768,9 +766,7 @@ scheduler_yield_policy: fn(wait_kind: I64, slot: I64, timeout_ns: I64, deadline:
         if (wait < I64{0} || wait > cap) -> wait = cap
     }
     sync_store(wrapping(thread_base() + I64{72}), slot)
-    scheduler_blocking_wait_enter()
     sync_park(slot, wait)
-    scheduler_blocking_wait_leave()
     sync_store(wrapping(thread_base() + I64{72}), I64{0})
     scheduler_cancel_waiter_remove(control, waiter)
     if (deadline && !virtual_wait && !shielded && jet_ctx_deadline_present() && jet_deadline_remaining_ms() <= I64{0}) {
@@ -787,29 +783,34 @@ scheduler_yield_policy: fn(wait_kind: I64, slot: I64, timeout_ns: I64, deadline:
     jet_scheduler_native_propagate()
 }
 
-// Scheduler168: mutex0 FIFOhead8/tail16 workSeq24 compensationSeq32 live40
-// waits48 compensationThreads56 peak64 reserve72 completionLo80/Hi88
-// nextTask96 timerRoot104 poolSize112 idle120 threads128 finished136
-// stop144 started152 woken160. threads/finished are word lists
-// (scheduler_words) of Worker16 records {argument0 handle8}, changed only
-// under the mutex. Every pool thread stays joinable so
-// jet_rt_scheduler_shutdown can join it; a compensation worker that retires
-// itself moves its record to finished, and the next worker start (or
-// shutdown) joins it. The pool's poolSize ordinary workers start one at a
-// time, on demand: a submit starts one only when no idle worker is left to
-// wake (idle - woken), so a process that submits a few jobs starts a few
-// threads, not the whole pool. idle counts ordinary workers waiting on
-// workSeq; woken counts the wakes a submit sent them that no worker has
-// taken yet; started counts the ordinary workers started.
+// Scheduler200: lock0 FIFOhead8/tail16 workSeq24 watch32 live40 parked48
+// fibers56 pooled64 pool72 completionLo80/Hi88 nextTask96 timerRoot104
+// poolSize112 idle120 carriers128 fiberTimers136 stop144 started152
+// woken160 readyHead168 readyTail176 stackBytes184 gsMode192. lock is a
+// thread lock (Sync.jet sync_thread_lock): a fiber's wake takes it. The FIFO
+// holds submitted task states (linked through their reserved word @88);
+// ready holds fibers to resume (Fiber.jet). live counts tasks taken and not
+// finished, parked their parked fibers, fibers the fiber stacks mapped and
+// pooled (pool, linked through Fiber next@48) the idle ones. carriers is a
+// word list (scheduler_words) of Carrier32 records {argument0 handle8
+// save16 tcb24}, changed only under the lock; every carrier stays joinable
+// so jet_rt_scheduler_shutdown can join it. The poolSize carriers start one
+// at a time, on demand: a submit starts one only when no idle carrier is left
+// to wake (idle - woken), so a process that submits a few tasks starts a few
+// threads, not the whole pool. idle counts carriers waiting on workSeq;
+// woken counts the wakes sent them that no carrier has taken yet; started
+// counts the carriers started. watch is the deadline the one idle carrier
+// watching the fiber timers sleeps to (0: none watches).
 scheduler_root := I64{0}
+SCHEDULER_ROOT_BYTES: I64{200}
 
 // runtime-init: 3 when scheduler_root
 #Export(c) jet_rt_scheduler_init: fn() {
     if (scheduler_root != I64{0}) -> return
     #Unsafe("runtime-init runs before any other thread exists") {
-        scheduler_root = jet_rt_alloc(I64{168}, I64{8})
+        scheduler_root = jet_rt_alloc(SCHEDULER_ROOT_BYTES, I64{8})
     }
-    thread_zero(scheduler_root, I64{168})
+    thread_zero(scheduler_root, SCHEDULER_ROOT_BYTES)
 }
 
 // The initialized root without starting the pool. Only scheduler_submit (via
@@ -828,16 +829,6 @@ rt_scheduler_worker_address: fn() -> I64 {
 rt_scheduler_timer_address: fn() -> I64 {
     loop { jet_rt_unreachable(I64{0}, I64{0}) }
 }
-rt_scheduler_compensate_address: fn() -> I64 {
-    loop { jet_rt_unreachable(I64{0}, I64{0}) }
-}
-
-// The compensation half of a blocking wait (jet_rt_scheduler_compensate),
-// zero until the first pool worker starts. A blocked thread can only starve
-// running jobs once a worker runs them, so a program that never starts one
-// (hello, a lock taken only by the main thread) links no pool start through
-// its waits.
-scheduler_compensate_code := I64{0}
 
 // usize::from_str accepts '+' and the full u64 range. Counts above i64::MAX
 // are returned as their bit pattern, not treated as an invalid override.
@@ -885,36 +876,20 @@ scheduler_available_parallelism: fn(fallback: I64) -> I64 {
     fallback
 }
 
-// The root's lazily created thread list at `offset` (128 live, 136 finished).
-// Callers hold the root mutex.
-scheduler_thread_list: fn(root: I64, offset: I64) -> I64 {
-    list := sync_load(wrapping(root + offset))
+// The root's lazily created carrier list (128). Callers hold the root lock.
+scheduler_carrier_list: fn(root: I64) -> I64 {
+    list := sync_load(wrapping(root + I64{128}))
     if (list == I64{0}) {
         list = jet_rt_alloc(I64{24}, I64{8})
         thread_zero(list, I64{24})
-        sync_store(wrapping(root + offset), list)
+        sync_store(wrapping(root + I64{128}), list)
     }
     list
 }
 
-// Unordered removal of one record word; callers hold the root mutex.
-scheduler_thread_list_remove: fn(list: I64, record: I64) {
-    length: sync_load(list)
-    data: sync_load(wrapping(list + I64{16}))
-    at := I64{0}
-    loop at < length {
-        if (sync_load(wrapping(data + at * I64{8})) == record) {
-            sync_store(wrapping(data + at * I64{8}), sync_load(wrapping(data + (length - I64{1}) * I64{8})))
-            sync_store(list, length - I64{1})
-            return
-        }
-        at += I64{1}
-    }
-}
-
-// Joins every thread of a list taken out from under the root mutex, then
+// Joins every carrier of a list taken out from under the root lock, then
 // frees the records and the list. Returns the number of joined threads.
-scheduler_thread_list_join: fn(list: I64) -> I64 {
+scheduler_carrier_list_join: fn(list: I64) -> I64 {
     if (list == I64{0}) -> return I64{0}
     length: sync_load(list)
     data: sync_load(wrapping(list + I64{16}))
@@ -922,44 +897,31 @@ scheduler_thread_list_join: fn(list: I64) -> I64 {
     loop at < length {
         record: sync_load(wrapping(data + at * I64{8}))
         _ := thread_join(sync_load(wrapping(record + I64{8})), I64{0})
-        jet_rt_free(record, I64{16}, I64{8})
+        jet_rt_free(record, I64{32}, I64{8})
         at += I64{1}
     }
     scheduler_words_drop(list)
     length
 }
 
-scheduler_reap_finished: fn(root: I64) {
-    sync_mutex_lock(root)
-    finished: sync_swap(wrapping(root + I64{136}), I64{0})
-    sync_mutex_unlock(root)
-    _ := scheduler_thread_list_join(finished)
-}
-
 // The spawn and the handle's publication share one critical section, so a
-// worker (which locks the root before it reads its handle) and shutdown both
-// see a complete record.
-scheduler_start_worker: fn(root: I64, flags: I64) {
-    if (scheduler_compensate_code == I64{0}) {
-        #Unsafe("an idempotent install: every writer stores the same code address") {
-            scheduler_compensate_code = rt_scheduler_compensate_address()
-        }
-    }
-    scheduler_reap_finished(root)
-    record: jet_rt_alloc(I64{16}, I64{8})
-    sync_store(record, root.bit_or(flags))
-    sync_store(wrapping(record + I64{8}), I64{0})
-    sync_mutex_lock(root)
+// carrier (which locks the root before it reads its handle) and shutdown
+// both see a complete record.
+scheduler_start_worker: fn(root: I64) {
+    record: jet_rt_alloc(I64{32}, I64{8})
+    thread_zero(record, I64{32})
+    sync_store(record, root)
+    sync_thread_lock(root)
     handle: thread_spawn(rt_scheduler_worker_address(), record)
     if (handle < I64{0}) {
-        sync_mutex_unlock(root)
-        jet_rt_free(record, I64{16}, I64{8})
+        sync_thread_unlock(root)
+        jet_rt_free(record, I64{32}, I64{8})
         scheduler_start_failed()
         return
     }
     sync_store(wrapping(record + I64{8}), handle)
-    scheduler_words_push(scheduler_thread_list(root, I64{128}), record)
-    sync_mutex_unlock(root)
+    scheduler_words_push(scheduler_carrier_list(root), record)
+    sync_thread_unlock(root)
 }
 
 // Settles the pool size on first use; workers start on demand
@@ -982,176 +944,158 @@ scheduler_get: fn() -> I64 {
     root
 }
 
-// Job32B: next0 code8 arg16 blocking24. code0 is a native Task callback.
-// The job wakes an idle worker, else starts one more while fewer than the
-// pool size run. Unsigned pool sizes above i64::MAX are attempted just as
-// Rust does, failing at pthread_create. Every idle compensation worker wakes
-// too: a reserve worker cannot take a blocking job, so waking only one could
-// leave the job to a worker that never sees it.
-scheduler_submit: fn(code: I64, argument: I64, blocking: Bool) {
+// Queues a job (scheduler_run_job) for a carrier. The job wakes an idle
+// carrier, else starts one more while fewer than the pool size run. Unsigned
+// pool sizes above i64::MAX are attempted just as Rust does, failing at
+// pthread_create.
+scheduler_submit: fn(task: I64) {
     root: scheduler_get()
-    job: jet_rt_alloc(I64{32}, I64{8})
-    sync_store(job, I64{0})
-    sync_store(wrapping(job + I64{8}), code)
-    sync_store(wrapping(job + I64{16}), argument)
-    sync_store(wrapping(job + I64{24}), if blocking -> I64{1} else -> I64{0})
-    sync_mutex_lock(root)
+    sync_store(wrapping(task + I64{88}), I64{0})
+    sync_thread_lock(root)
     tail: sync_load(wrapping(root + I64{16}))
-    if (tail == I64{0}) -> sync_store(wrapping(root + I64{8}), job) else -> sync_store(tail, job)
-    sync_store(wrapping(root + I64{16}), job)
+    if (tail == I64{0}) -> sync_store(wrapping(root + I64{8}), task) else -> sync_store(wrapping(tail + I64{88}), task)
+    sync_store(wrapping(root + I64{16}), task)
     jet_rt_observe_pool(I64{-1}, I64{1})
     start := false
-    if {
-        sync_load(wrapping(root + I64{120})) > sync_load(wrapping(root + I64{160})) -> {
-            sync_store(wrapping(root + I64{160}), sync_load(wrapping(root + I64{160})) + I64{1})
-            sync_cond_notify_one(wrapping(root + I64{24}))
-        }
-        sync_load(wrapping(root + I64{152})) != sync_load(wrapping(root + I64{112})) -> {
-            sync_store(wrapping(root + I64{152}), wrapping(sync_load(wrapping(root + I64{152})) + I64{1}))
-            start = true
-        }
-        else -> {}
+    woke: scheduler_wake_idle(root)
+    if !woke && sync_load(wrapping(root + I64{152})) != sync_load(wrapping(root + I64{112})) {
+        sync_store(wrapping(root + I64{152}), wrapping(sync_load(wrapping(root + I64{152})) + I64{1}))
+        start = true
     }
-    sync_cond_notify_all(wrapping(root + I64{32}))
-    sync_mutex_unlock(root)
-    if start -> scheduler_start_worker(root, I64{0})
+    sync_thread_unlock(root)
+    if woke -> scheduler_kick_idle(root)
+    if start -> scheduler_start_worker(root)
 }
 
-scheduler_pop: fn(root: I64, allow_blocking: Bool) -> I64 {
-    link := root + I64{8}
-    previous := I64{0}
-    loop sync_load(link) != (I64{0}) {
-        job: sync_load(link)
-        if (allow_blocking || sync_load(wrapping(job + I64{24})) == I64{0}) {
-            sync_store(link, sync_load(job))
-            if sync_load(wrapping(root + I64{16})) == job -> sync_store(wrapping(root + I64{16}), previous)
-            sync_store(wrapping(root + I64{40}), sync_load(wrapping(root + I64{40})) + I64{1})
-            return job
-        }
-        previous = job
-        link = job
-    }
-    I64{0}
+// Claims one idle carrier no earlier wake has claimed and bumps workSeq, so
+// it cannot sleep through the claim; false when none is left. The root lock
+// is held; the caller sends the futex wake (scheduler_kick_idle) after it
+// unlocks, so the woken carrier does not wake into the held lock.
+scheduler_wake_idle: fn(root: I64) -> Bool {
+    if (sync_load(wrapping(root + I64{120})) <= sync_load(wrapping(root + I64{160}))) -> return false
+    sync_store(wrapping(root + I64{160}), sync_load(wrapping(root + I64{160})) + I64{1})
+    _ := sync_add(wrapping(root + I64{24}), I64{1})
+    true
 }
 
+scheduler_kick_idle: fn(root: I64) { sync_futex_wake(wrapping(root + I64{24}), I64{1}) }
+
+// A fiber timer now first in the heap: unless the watcher already sleeps to
+// an earlier deadline, the watch is given up and one idle carrier wakes to
+// take it over at the new earliest deadline (any claimed wake does too: the
+// carrier it wakes finds no watcher). The old watcher keeps sleeping to its
+// own deadline and, back, clears the watch only while it is still its own.
+scheduler_watch_kick: fn(root: I64, deadline_ns: I64) {
+    sync_thread_lock(root)
+    watch: sync_load(wrapping(root + I64{32}))
+    woke := false
+    if (sync_load(wrapping(root + I64{120})) > I64{0} && (watch == I64{0} || watch > deadline_ns)) {
+        sync_store(wrapping(root + I64{32}), I64{0})
+        woke = scheduler_wake_idle(root)
+    }
+    sync_thread_unlock(root)
+    if woke -> scheduler_kick_idle(root)
+}
+
+// The FIFO's first task; the root lock is held.
+scheduler_pop: fn(root: I64) -> I64 {
+    task: sync_load(wrapping(root + I64{8}))
+    if (task == I64{0}) -> return I64{0}
+    next_task: sync_load(wrapping(task + I64{88}))
+    sync_store(wrapping(root + I64{8}), next_task)
+    if (next_task == I64{0}) -> sync_store(wrapping(root + I64{16}), I64{0})
+    sync_store(wrapping(root + I64{40}), sync_load(wrapping(root + I64{40})) + I64{1})
+    task
+}
+
+// An idle carrier's wait on workSeq; the root lock is held on entry and on
+// return. With no carrier watching the fiber timers, it watches them: it
+// sleeps only until the earliest deadline.
+scheduler_carrier_idle: fn(root: I64) {
+    sync_store(wrapping(root + I64{120}), sync_load(wrapping(root + I64{120})) + I64{1})
+    deadline := I64{-1}
+    timers: sync_load(wrapping(root + I64{136}))
+    if (timers != I64{0} && sync_load(wrapping(root + I64{32})) == I64{0}) {
+        earliest: sync_load(wrapping(timers + I64{16}))
+        if (earliest >= I64{0}) {
+            // A deadline is positive: watch 0 means none watches.
+            deadline = if (earliest == I64{0}) -> I64{1} else -> earliest
+            sync_store(wrapping(root + I64{32}), deadline)
+        }
+    }
+    before: sync_load(wrapping(root + I64{24}))
+    sync_thread_unlock(root)
+    _ := sync_futex_wait(wrapping(root + I64{24}), before, deadline)
+    sync_thread_lock(root)
+    sync_store(wrapping(root + I64{120}), sync_load(wrapping(root + I64{120})) - I64{1})
+    if (sync_load(wrapping(root + I64{160})) > I64{0}) -> sync_store(wrapping(root + I64{160}), sync_load(wrapping(root + I64{160})) - I64{1})
+    if (deadline >= I64{0} && sync_load(wrapping(root + I64{32})) == deadline) -> sync_store(wrapping(root + I64{32}), I64{0})
+}
+
+// A carrier: the pool thread that runs task fibers (Fiber.jet fiber_run)
+// and, idle, fires their timers. The record is its Carrier32.
 #Export(c) jet_rt_scheduler_worker: fn(record: I64) -> I64 {
-    argument: sync_load(record)
-    root: argument.bit_and(I64{-8})
-    compensation: (argument.bit_and(I64{1})) != I64{0}
-    reserve: (argument.bit_and(I64{2})) != I64{0}
+    root: sync_load(record)
+    sync_store(wrapping(record + I64{24}), thread_base())
     loop {
-        sync_mutex_lock(root)
+        fiber_timers_fire(root)
+        sync_thread_lock(root)
         if (sync_load(wrapping(root + I64{144})) != I64{0}) {
             // jet_rt_scheduler_shutdown owns this record and joins this thread.
-            sync_mutex_unlock(root)
+            sync_thread_unlock(root)
             return I64{0}
         }
-        if compensation && ((reserve && sync_load(wrapping(root + I64{48})) <= I64{8}) || (!reserve && sync_load(wrapping(root + I64{48})) == I64{0})) {
-            sync_store(wrapping(root + I64{56}), sync_load(wrapping(root + I64{56})) - I64{1})
-            if reserve -> sync_store(wrapping(root + I64{72}), I64{0})
-            scheduler_thread_list_remove(scheduler_thread_list(root, I64{128}), record)
-            scheduler_words_push(scheduler_thread_list(root, I64{136}), record)
-            sync_mutex_unlock(root)
-            return I64{0}
-        }
-        job: scheduler_pop(root, !reserve)
-        if (job == I64{0}) {
-            if compensation {
-                // A submitted job, a blocking wait that ends, and shutdown
-                // each notify this condition under the root lock.
-                _ := sync_cond_wait(wrapping(root + I64{32}), root, I64{-1})
-            } else {
-                sync_store(wrapping(root + I64{120}), sync_load(wrapping(root + I64{120})) + I64{1})
-                _ := sync_cond_wait(wrapping(root + I64{24}), root, I64{-1})
-                sync_store(wrapping(root + I64{120}), sync_load(wrapping(root + I64{120})) - I64{1})
-                if (sync_load(wrapping(root + I64{160})) > I64{0}) -> sync_store(wrapping(root + I64{160}), sync_load(wrapping(root + I64{160})) - I64{1})
-            }
-            sync_mutex_unlock(root)
+        fiber := fiber_ready_pop(root)
+        task := I64{0}
+        if (fiber == I64{0}) -> task = scheduler_pop(root)
+        if (fiber == I64{0} && task == I64{0}) {
+            scheduler_carrier_idle(root)
+            sync_thread_unlock(root)
             next
         }
-        sync_mutex_unlock(root)
-        jet_rt_observe_pool(I64{-1}, I64{-1})
-        code: sync_load(wrapping(job + I64{8}))
-        arg: sync_load(wrapping(job + I64{16}))
-        jet_rt_free(job, I64{32}, I64{8})
-        if (code == I64{0}) -> task_run(arg) else -> _ := coll_call1(code, arg)
-        sync_mutex_lock(root)
-        sync_store(wrapping(root + I64{40}), sync_load(wrapping(root + I64{40})) - I64{1})
-        sync_cond_notify_all(wrapping(root + I64{32}))
-        sync_mutex_unlock(root)
-    }
-}
-
-// A wait that blocks a scheduler-controlled thread counts as a blocking
-// wait and may start a compensation worker, once the pool has a worker
-// (scheduler_compensate_code). Every wait records whether it counted, so
-// its leave undoes exactly that.
-scheduler_blocking_wait_enter: fn() {
-    code: scheduler_compensate_code
-    active: code != I64{0} && scheduler_control_current() != I64{0}
-    stack := sync_load(wrapping(thread_base() + I64{88}))
-    if (stack == I64{0}) {
-        stack = jet_rt_alloc(I64{24}, I64{8})
-        thread_zero(stack, I64{24})
-        sync_store(wrapping(thread_base() + I64{88}), stack)
-    }
-    scheduler_words_push(stack, if active -> I64{1} else -> I64{0})
-    if active -> _ := coll_call1(code, I64{0})
-}
-
-// The counted half of scheduler_blocking_wait_enter, reached only through
-// scheduler_compensate_code.
-#Export(c) jet_rt_scheduler_compensate: fn(_unused: I64) -> I64 {
-    root: scheduler_get()
-    sync_mutex_lock(root)
-    waits: sync_load(wrapping(root + I64{48})) + I64{1}
-    sync_store(wrapping(root + I64{48}), waits)
-    ordinary: sync_load(wrapping(root + I64{56})) - sync_load(wrapping(root + I64{72}))
-    desired: if (waits < I64{8}) -> waits else -> I64{8}
-    flags := I64{0}
-    if {
-        ordinary < desired -> flags = I64{1}
-        (waits > I64{8} && sync_load(wrapping(root + I64{72})) == I64{0}) -> {
-            sync_store(wrapping(root + I64{72}), I64{1})
-            flags = I64{3}
+        // Leaving the watch to no one would sleep the timers through.
+        timers: sync_load(wrapping(root + I64{136}))
+        kick: timers != I64{0} && sync_load(wrapping(root + I64{32})) == I64{0} && sync_load(wrapping(timers + I64{16})) >= I64{0} && scheduler_wake_idle(root)
+        sync_thread_unlock(root)
+        if kick -> scheduler_kick_idle(root)
+        if (task != I64{0}) {
+            jet_rt_observe_pool(I64{-1}, I64{-1})
+            fiber = fiber_take(root)
+            if (fiber == I64{0}) {
+                // No stack could be mapped: the job runs on the carrier,
+                // whose waits then block it.
+                scheduler_run_job(task)
+                sync_thread_lock(root)
+                sync_store(wrapping(root + I64{40}), sync_load(wrapping(root + I64{40})) - I64{1})
+                sync_thread_unlock(root)
+                next
+            }
+            sync_store(wrapping(fiber + I64{56}), task)
         }
+        fiber_run(root, record, fiber)
     }
-    if (flags != I64{0}) {
-        threads: sync_load(wrapping(root + I64{56})) + I64{1}
-        sync_store(wrapping(root + I64{56}), threads)
-        if threads > sync_load(wrapping(root + I64{64})) -> sync_store(wrapping(root + I64{64}), threads)
-    }
-    sync_mutex_unlock(root)
-    if (flags != I64{0}) -> scheduler_start_worker(root, flags)
-    I64{0}
 }
 
-scheduler_blocking_wait_leave: fn() {
-    stack: sync_load(wrapping(thread_base() + I64{88}))
-    if (stack == I64{0} || sync_load(stack) == I64{0}) -> jet_rt_unreachable(I64{0}, I64{0})
-    count: sync_load(stack) - I64{1}
-    active: sync_load(wrapping(sync_load(wrapping(stack + I64{16})) + count * I64{8})) != I64{0}
-    sync_store(stack, count)
-    if !active -> return
-    root: scheduler_root
-    sync_mutex_lock(root)
-    sync_store(wrapping(root + I64{48}), sync_load(wrapping(root + I64{48})) - I64{1})
-    sync_cond_notify_all(wrapping(root + I64{32}))
-    sync_mutex_unlock(root)
+// A queued job: a task state, or a parallel walk's worker (Parallel.jet),
+// marked PARALLEL_JOB in the first word, where a task state keeps its
+// positive reference count.
+scheduler_run_job: fn(job: I64) {
+    if (sync_load(job) == PARALLEL_JOB) -> parallel_job_run(job) else -> task_run(job)
 }
 
-#Export(c) jet_scheduler_blocking_wait_stats: fn(out: I64) {
+// Fiber counts for tests: parked@0, carriers started@8, fiber stacks@16.
+scheduler_fiber_stats: fn(out: I64) {
     root: scheduler_root_required()
-    sync_mutex_lock(root)
+    sync_thread_lock(root)
     sync_store(out, sync_load(wrapping(root + I64{48})))
-    sync_store(wrapping(out + I64{8}), sync_load(wrapping(root + I64{56})))
-    sync_store(wrapping(out + I64{16}), sync_load(wrapping(root + I64{64})))
-    sync_mutex_unlock(root)
+    sync_store(wrapping(out + I64{8}), sync_load(wrapping(root + I64{152})))
+    sync_store(wrapping(out + I64{16}), sync_load(wrapping(root + I64{56})))
+    sync_thread_unlock(root)
 }
 
 scheduler_completion_order: fn(out: I64) {
     root: scheduler_root
-    sync_mutex_lock(root)
+    sync_thread_lock(root)
     low: sync_load(wrapping(root + I64{80}))
     high: sync_load(wrapping(root + I64{88}))
     sync_store(out, low)
@@ -1159,13 +1103,13 @@ scheduler_completion_order: fn(out: I64) {
     next_low: wrapping(low + I64{1})
     next_high: if (next_low == I64{0}) -> wrapping(high + I64{1}) else -> high
     if (next_low == I64{0} && next_high == I64{0}) {
-        sync_mutex_unlock(root)
+        sync_thread_unlock(root)
         scheduler_fatal(scheduler_msg_completion_exhausted())
         return
     }
     sync_store(wrapping(root + I64{80}), next_low)
     sync_store(wrapping(root + I64{88}), next_high)
-    sync_mutex_unlock(root)
+    sync_thread_unlock(root)
 }
 
 #Export(c) jet_scheduler_drain: fn() {
@@ -1174,9 +1118,9 @@ scheduler_completion_order: fn(out: I64) {
     slot: sync_park_new()
     loop at < (I64{5000}) {
         if jet_rt_observe_has_parked_tasks() -> break
-        sync_mutex_lock(root)
+        sync_thread_lock(root)
         idle: sync_load(wrapping(root + I64{8})) == I64{0} && sync_load(wrapping(root + I64{40})) == I64{0}
-        sync_mutex_unlock(root)
+        sync_thread_unlock(root)
         if idle && jet_rt_observe_io_quiescent() -> break
         sync_park(slot, I64{1000000})
         at += I64{1}
@@ -1187,18 +1131,32 @@ scheduler_completion_order: fn(out: I64) {
 // Whether no task is queued or running (the root's counts at 8 and 40).
 scheduler_idle: fn() -> Bool {
     root: scheduler_root_required()
-    sync_mutex_lock(root)
+    sync_thread_lock(root)
     idle: sync_load(wrapping(root + I64{8})) == I64{0} && sync_load(wrapping(root + I64{40})) == I64{0}
-    sync_mutex_unlock(root)
+    sync_thread_unlock(root)
     idle
 }
 
 #Export(c) jet_scheduler_drain_after_exit: fn() {
     loop {
         if scheduler_idle() && jet_rt_observe_io_quiescent() -> return
-        #Unsafe("sched_yield retains no memory and yields this OS worker") {
-            _ := os_syscall_i64(I64{24}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
-        }
+        fiber_spin_yield()
+    }
+}
+
+// The drain after a parked-task report (E3013), which ends the process: the
+// tasks it cancelled unwind, but one it could not reach (a task past the
+// registry's cap, Observe.jet OBSERVE_TASK_CAP) stays parked, so this returns
+// once nothing is queued, ready or running and every live task is parked.
+// The parked count lags a commit and leads a wake, so it only ever reads low.
+scheduler_settle_after_report: fn() {
+    root: scheduler_root_required()
+    loop {
+        sync_thread_lock(root)
+        settled: sync_load(wrapping(root + I64{8})) == I64{0} && sync_load(wrapping(root + I64{168})) == I64{0} && sync_load(wrapping(root + I64{40})) == sync_load(wrapping(root + I64{48}))
+        sync_thread_unlock(root)
+        if settled && jet_rt_observe_io_quiescent() -> return
+        fiber_spin_yield()
     }
 }
 
@@ -1314,42 +1272,40 @@ scheduler_timer_shutdown: fn(root: I64) -> I64 {
 }
 
 // Quiesce for a userland exec (JetBackend Image/Loader.jet): stop and join
-// every scheduler thread this process started (pool workers, compensation
-// workers, the timer thread), so the caller is the process's only scheduler
-// thread. 0 when none was ever started; otherwise the joined thread count.
-// -1, with nothing stopped, while a job is queued or running or a timer is
-// pending. The caller guarantees no other thread submits work concurrently.
-// The pool and the timer restart lazily on the next use.
+// every scheduler thread this process started (the carriers, the timer
+// thread), so the caller is the process's only scheduler thread. 0 when none
+// was ever started; otherwise the joined thread count. -1, with nothing
+// stopped, while a task is queued or running or a timer is pending. The
+// caller guarantees no other thread submits work concurrently. The pool and
+// the timer restart lazily on the next use; pooled fibers stay for it.
 #Export(c) jet_rt_scheduler_shutdown: fn() -> I64 {
     root: scheduler_root
     if (root == I64{0}) -> return I64{0}
     loop sync_load(wrapping(root + (I64{112}))) == (I64{-1}) -> _ := sync_wait(root + I64{112}, I64{-1}, I64{-1})
-    sync_mutex_lock(root)
+    sync_thread_lock(root)
     if (sync_load(wrapping(root + I64{8})) != I64{0} || sync_load(wrapping(root + I64{40})) != I64{0}) {
-        sync_mutex_unlock(root)
+        sync_thread_unlock(root)
         return I64{-1}
     }
     timer: scheduler_timer_shutdown(root)
     if (timer < I64{0}) {
-        sync_mutex_unlock(root)
+        sync_thread_unlock(root)
         return I64{-1}
     }
     sync_store(wrapping(root + I64{144}), I64{1})
-    live: sync_swap(wrapping(root + I64{128}), I64{0})
-    finished: sync_swap(wrapping(root + I64{136}), I64{0})
-    sync_cond_notify_all(wrapping(root + I64{24}))
-    sync_cond_notify_all(wrapping(root + I64{32}))
-    sync_mutex_unlock(root)
-    joined: timer + scheduler_thread_list_join(live) + scheduler_thread_list_join(finished)
-    sync_mutex_lock(root)
-    sync_store(wrapping(root + I64{56}), I64{0})
-    sync_store(wrapping(root + I64{72}), I64{0})
+    carriers: sync_swap(wrapping(root + I64{128}), I64{0})
+    _ := sync_add(wrapping(root + I64{24}), I64{1})
+    sync_futex_wake(wrapping(root + I64{24}), I64{2147483647})
+    sync_thread_unlock(root)
+    joined: timer + scheduler_carrier_list_join(carriers)
+    sync_thread_lock(root)
+    sync_store(wrapping(root + I64{32}), I64{0})
     sync_store(wrapping(root + I64{120}), I64{0})
     sync_store(wrapping(root + I64{144}), I64{0})
     sync_store(wrapping(root + I64{152}), I64{0})
     sync_store(wrapping(root + I64{160}), I64{0})
     _ := sync_swap(wrapping(root + I64{112}), I64{0})
-    sync_mutex_unlock(root)
+    sync_thread_unlock(root)
     jet_rt_observe_pool(I64{0}, I64{0})
     joined
 }
@@ -1565,12 +1521,6 @@ scheduler_thread_detach: fn() {
         if (sync_load(frames) != I64{0}) -> jet_rt_unreachable(I64{0}, I64{0})
         scheduler_words_drop(frames)
         sync_store(wrapping(base + I64{80}), I64{0})
-    }
-    compensation: sync_load(wrapping(base + I64{88}))
-    if (compensation != I64{0}) {
-        if (sync_load(compensation) != I64{0}) -> jet_rt_unreachable(I64{0}, I64{0})
-        scheduler_words_drop(compensation)
-        sync_store(wrapping(base + I64{88}), I64{0})
     }
     queue: sync_load(wrapping(base + I64{96}))
     if (queue != I64{0}) {

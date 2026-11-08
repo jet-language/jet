@@ -5000,7 +5000,7 @@ Build code registers typed values. Targets include
 a `BuildTarget`. `b.plan()` or `b.plan(default)` hands one
 canonical graph to scheduling, caching, execution, queries, and LSP.
 `b.toolchain(name, target_triple)` records target identity. `b.probe` supports
-`find_program`, `pkg_config`, and `header` probes.
+`find_program`, `find_folder`, `pkg_config`, and `header` probes.
 `b.args()` returns the words after `--` on the command line as a `[String]`
 (`jet build -- release-notes` gives `["release-notes"]`; no `--` gives
 `[]`), so a build entry can choose its default target or options from them.
@@ -5031,9 +5031,39 @@ build Jet code. `b.dependency(name)` is the folder of the package package.jet
 lists as `name` (an unlisted name is E3502), and `.file(path)` on it is a
 file there: before any step runs, the build copies it to
 `.jet/deps/<name>/<path>`, the path the step gets, so a step reads another
-package's file without reaching outside its own folder. The folder itself is
-neither a tool nor an argument. Example:
+package's file without reaching outside its own folder. Example:
 [`tests/cases/build_entry/run_steps_read_a_dependency_file.case`](../../tests/cases/build_entry/run_steps_read_a_dependency_file.case).
+
+A step can also read a whole folder. `b.folder(path)` is the folder at `path`
+in the build's package (`.` is the package itself), `.folder(path)` on
+`b.dependency(name)` is one in that package, at `.jet/deps/<name>/<path>`,
+and `b.dependency(name)` itself is all of it. `.file(dir)` passes the
+folder's path and binds the folder read-only at that path in the step's
+sandbox; nothing is copied. The step's cache key covers every file in it, so
+adding, removing or editing one runs the step again. A folder's `.jet/` and
+`.git/` folders and what its `.gitignore` files exclude are not part of it,
+and a link inside it that leads out of it fails the step. A folder is not a
+tool, and no step's output may lie inside a folder a step reads (E3502).
+A folder path is written plainly, as `dir/sub`: an empty part, a `.` part or
+a trailing `/` is refused (E3502), as a path that leaves the package is.
+Example:
+[`tests/cases/build_entry/run_steps_read_a_folder.case`](../../tests/cases/build_entry/run_steps_read_a_folder.case).
+
+A `find_folder` probe finds a folder on the machine:
+`b.probe("musl", "find_folder", "libc.a")` looks for the file `libc.a` in
+each absolute LIBRARY_PATH entry, then `/usr/local/lib`, `/usr/lib`, `/lib`,
+`/usr/lib/musl/lib` and `/usr/local/musl/lib`, and chooses the first folder
+where it fits. Any file fits, except that a `libc.a` fits only when it is
+musl's: an ar archive holding musl's `__libc_start_main` and `__init_tls`
+objects, with `crt1.o` beside it, so a glibc `libc.a` is passed over.
+The probe names a file alone, not a path (E3502). `b.found(probe)` is the
+folder it chose, read as `b.folder` is, at `.jet/found/<probe>`; a step that
+reads it runs the probe first. A probe that finds no folder fails the build
+before any step runs (E3505), naming each folder it looked in and why it
+passed it over. Examples:
+[`tests/cases/build_entry/run_steps_read_a_found_folder.case`](../../tests/cases/build_entry/run_steps_read_a_found_folder.case),
+[`tests/ui/build_find_folder_missing.jet`](../../tests/ui/build_find_folder_missing.jet).
+
 Calls on the step build its
 command line in order. `.input(path)` and `.output(path)` declare a file and
 pass its path as the next argument. `.reads(path)` and `.writes(path)`
@@ -5041,9 +5071,21 @@ declare a file without passing it. `.file(f)` passes another step's output
 and orders the step after that one, and `.arg(text)` passes literal text.
 `.input`, `.output` and `.file` take `flag:`, written before the path in the
 same argument: `.output("gen.c", flag: "--out=")` passes `--out=gen.c`.
-`.output` returns the new `BuildFile`, and `f.path()` is a made, host-built or
-copied package file's package-relative path; a found program and `b.jet()`
-have no path until the build runs, so their `.path()` is refused. `.toolchain(t)` and
+`.output` returns the new `BuildFile`, and `f.path()` is a made, host-built,
+copied or folder file's package-relative path (a package's is
+`.jet/deps/<name>`); a found program and `b.jet()`
+have no path until the build runs, so their `.path()` is refused. `.file` on a
+found program passes the path its probe finds when the step starts, the path
+the program runs at in the step's sandbox, which shows it as it shows a step's
+tool; on Linux that is a program in the Nix store (`/nix/store` is bound
+read-only), so a compiler there finds its own `cc1`, `as`, `ld` and libraries.
+The step's cache key covers the program's bytes and the path its probe found,
+so another compiler at that name runs the step again. Example:
+[`tests/cases/build_entry/run_steps_pass_a_found_program.case`](../../tests/cases/build_entry/run_steps_pass_a_found_program.case).
+An input a step reads reaches its sandbox runnable when its owner may run it,
+so a step can run a host build it is passed. Example:
+[`tests/cases/build_entry/run_steps_pass_a_runnable_input.case`](../../tests/cases/build_entry/run_steps_pass_a_runnable_input.case).
+`.toolchain(t)` and
 `.sign(identity)` add toolchain and signing identity; a `b.jet()` step runs on
 the toolchain its compiler was built with, so `.toolchain` on it is refused. A
 step's result is cached. A step that
@@ -5054,6 +5096,16 @@ An output that would overwrite a file no build made, such as a committed one,
 is refused before anything runs (E3502), as generated sources are: a step
 replaces only what the last build's receipt lists as a step's output. Example:
 [`tests/cases/build_entry/run_steps_refuse_to_overwrite_a_file.case`](../../tests/cases/build_entry/run_steps_refuse_to_overwrite_a_file.case).
+`.output` and `.writes` take `kept: true` for a file that stays in git, such
+as a generated table: the step may replace it though no build made it, and
+the build writes it only when the step makes other bytes than it holds. When
+it holds bytes that are neither those nor the ones the last build left there,
+it was edited by hand: the step publishes none of its outputs and the build
+fails with E3502, so the fix goes into the step's inputs instead. A fresh
+checkout, with no receipt yet, writes a kept file only when its bytes differ.
+A kept path under `.jet/`, which is never committed, is refused (E3502).
+Example:
+[`tests/cases/build_entry/run_steps_keep_a_committed_output.case`](../../tests/cases/build_entry/run_steps_keep_a_committed_output.case).
 `.timeout(10min)` bounds how long the step may run. The `action_timeout` build
 option (stock `30s`; the profile field `action_timeout: 10min`, the call
 `b.action_timeout(10min)` and the flag `--action-timeout=10min`) bounds every
@@ -5116,7 +5168,9 @@ store. `times.json` is its `BuildTimes`: one `BuildTime` row (`name`, `kind`
 `step`, `host`, `image` or `library`, `wall_ms`, `reused`) per step and target,
 in the order each finished. A step's `wall_ms` is the time of the steps that ran
 with it, and a target is `reused` when its image came from the store. Both are
-JSON objects whose fields are the value's own, in declaration order.
+JSON objects whose fields are the value's own, in declaration order; after
+them `receipt.json` has `kept`, one `path` and `digest` (`sha256:<hex>`) per
+kept output, of the bytes the build left there.
 `jet inspect build --times` shows the last build's rows (`kind`, `name`,
 `wall_ms`, and `made` or `reused`), or the record itself under `--json`;
 before any build has recorded one it fails with E2104. Example:

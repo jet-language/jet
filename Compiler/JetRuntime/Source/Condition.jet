@@ -132,9 +132,7 @@ condition_reacquire: fn(cell: I64) -> Bool {
             sync_mutex_unlock(mutex)
             return true
         }
-        scheduler_blocking_wait_enter()
         _ := sync_cond_wait(wrapping(cell + I64{16}), mutex, sync_deadline(I64{10000000}))
-        scheduler_blocking_wait_leave()
     }
 }
 

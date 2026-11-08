@@ -2756,6 +2756,10 @@ ir_static_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, owner: T
     }
     loop arg in ir_facts(p, b, type_args, span) -> all.push(arg)
     if ir_failed(b) -> return -1
+    if ir_decoding_read(p, function, all) == .Val(read) {
+        if ir_function_row(p, read.key) == None -> return ir_fail_slot(b, span, "missing Core decode read {read.key}")
+        return ir_call(m, p, b, read.key, read.args, -1, [IRWriteBack]{}, args, span)
+    }
     ir_call(m, p, b, method.symbol.key, all, -1, [IRWriteBack]{}, args, span)
 }
 
@@ -3251,7 +3255,13 @@ ir_call_row: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, type_args: 
         if arg.box_as_trait == .Val(target) {
             slot = ir_trait_box(m, p, b, arg.value, target, lend, lends, span)
         } else if arg.widen_to_union == .Val(union_ty) {
-            slot = if lend -> ir_widen_union_lent(m, p, b, arg.value, union_ty, lends, span) else -> ir_widen_union(m, p, b, arg.value, union_ty, span)
+            // The box is the parameter's own union, whose definition the
+            // callee's signature added. Sema spells the widening in the
+            // caller's scope, where a member's bare name can name another
+            // type (`Path` in core.files.path, `String | Path` in core.files).
+            target: if ir_untag(param_ty) == .Union(_) -> param_ty.copy() else -> ir_fact(p, b, union_ty, span)
+            if ir_failed(b) -> return -1
+            slot = if lend -> ir_widen_union_lent(m, p, b, arg.value, target, lends, span) else -> ir_widen_union_to(m, p, b, arg.value, target, span)
         } else if lend && ir_lent_carrier_arg(p, b, arg.value) && (ir_value_type(m, p, ir_ty(p, b, arg.value)) ?? -1) == param_row {
             carrier_ty: ir_ty(p, b, arg.value)
             slot = ir_carrier_lent(m, p, b, carrier_ty, arg.value, lends, span)

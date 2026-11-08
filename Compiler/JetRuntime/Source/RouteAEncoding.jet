@@ -3,8 +3,13 @@
 // seam, active only when JET_ENC_HOSTILE_IO is set):11 (host path metadata).
 // Codec policy is Jet.
 
-// text.into_bytes() as a fresh List<U8>.
-#Export(c) jet_raw_text_into_bytes: fn(value: I64, output: I64) -> I64 { jet_string_bytes(value, output) }
+// text.into_bytes() as a fresh List<U8>; the moved-in String is dropped once
+// its bytes are copied.
+#Export(c) jet_raw_text_into_bytes: fn(value: I64, output: I64) -> I64 {
+    result: jet_string_bytes(value, output)
+    jet_rt_string_drop(value)
+    result
+}
 
 // SystemTime ms since the epoch (0 before it).
 #Export(c) jet_raw_json_coerce_now: fn() -> I64 { jet_int_owned_from_i64(deadline_wall_now_ms()) }

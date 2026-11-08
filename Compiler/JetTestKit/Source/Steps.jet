@@ -228,7 +228,8 @@ kit_steps_parse: fn(source: String) -> KitPlan {
                 }
                 captures.push(words[1])
             }
-            plan.requires.push(value)
+            // A probe keeps its reason: its stdout assertion needs one, as a step's does.
+            plan.requires.push(if value.starts_with("probe ") -> original else -> value)
             next
         }
         if key == "fixture" {

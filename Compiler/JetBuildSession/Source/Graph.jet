@@ -106,6 +106,19 @@ build_session_validate: fn(state: BuildSessionState, default: Int) -> BuildSessi
             owners[output] = id
         }
     }
+    // A folder a step reads whole is source, bound read-only into the step,
+    // so no step can make a file inside one.
+    loop action in state.actions {
+        loop folder_id in action.folders {
+            folder: state.files[folder_id].path
+            loop output in owners.keys() {
+                if folder == "." || output == folder || output.starts_with("{folder}/") {
+                    maker: state.actions[owners[output]].name
+                    return Val(build_session_diag(state, "step `{maker}` makes `{output}` inside the folder `{folder}` that step `{action.name}` reads whole; move the output out of `{folder}`, or read only the files the step needs"))
+                }
+            }
+        }
+    }
     if build_session_cycle(target_edges, target_names) == .Val(nodes) -> return Val(build_session_error_diag(state, BuildSessionError.TargetDependencyCycle{nodes: nodes}))
     if build_session_cycle(build_session_prerequisites(state), action_names) == .Val(nodes) -> return Val(build_session_error_diag(state, BuildSessionError.ActionDependencyCycle{nodes: nodes}))
     None

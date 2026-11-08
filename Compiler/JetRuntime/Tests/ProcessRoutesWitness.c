@@ -12,8 +12,8 @@
 typedef struct { unsigned char *data; int64_t len,capacity; } Text;
 typedef struct { int64_t len,capacity; void *data; } List;
 typedef struct { void *owner; int64_t child,as_cwd; } Directory;
-typedef struct { List *cmd; Text *cwd; int64_t clear; List *set,*remove; int64_t *in,out,err,*timeout,*output,*cpu,*memory,*files,detached; void *terminal; Text *wire; List *directories; int64_t parent_death; List *cpu_affinity; int64_t io_class,io_level,memory_scope,memory_scope_bytes; } Spec;
-_Static_assert(sizeof(Spec)==184 && sizeof(Directory)==24,"native carriers");
+typedef struct { List *cmd; Text *cwd; int64_t clear; List *set,*remove; int64_t *in,out,err,*timeout,*output,*cpu,*memory,*files,detached; void *terminal; Text *wire; List *directories; int64_t parent_death; List *cpu_affinity; int64_t io_class,io_level,memory_scope,memory_scope_bytes,keep_refusal; } Spec;
+_Static_assert(sizeof(Spec)==192 && sizeof(Directory)==24,"native carriers");
 extern void jet_rt_alloc_init(void);
 extern void jet_rt_host_arguments(int64_t,char **,char **);
 extern Text *jet_rt_string_from_static(const void *,int64_t);
@@ -53,17 +53,28 @@ static void adapters(void){
  Spec *chained=NULL;int64_t second=-2;
  jet_process_spec_keep_open_raw(attached,fd,101,false,&chained,&supported.value,&second,&error);
  assert(chained==attached&&error==0&&second>=101&&chained->directories->len==2);
- // A slot the spec already passes is refused without a duplicate or a row.
+ // A slot the spec already passes is refused without a duplicate or a row,
+ // and the spec records that first refusal for launch to report.
  Spec *again=NULL;int64_t taken=-2;
  jet_process_spec_keep_open_raw(chained,fd,100,false,&again,&supported.value,&taken,&error);
- assert(again==chained&&supported.value&&taken==-1&&error==0&&chained->directories->len==2);
+ assert(again==chained&&supported.value&&taken==-1&&error==0&&chained->directories->len==2&&chained->keep_refusal==-2);
+ // A later refusal keeps the first one.
+ jet_process_spec_keep_open_raw(chained,fd,2,false,&again,&supported.value,&taken,&error);
+ assert(again==chained&&taken==-1&&error==0&&chained->directories->len==2&&chained->keep_refusal==-2);
  Spec *clone=jet_rt_handle_clone_process_spec(chained);assert(jet_rt_handle_eq_process_spec(chained,clone));
  jet_rt_handle_drop_process_spec(chained);assert(fcntl((int)assigned,F_GETFD)>=0&&fcntl((int)second,F_GETFD)>=0);
  jet_rt_handle_drop_process_spec(clone);
  errno=0;assert(fcntl((int)assigned,F_GETFD)==-1&&errno==EBADF);
  errno=0;assert(fcntl((int)second,F_GETFD)==-1&&errno==EBADF);
+ // A stdio slot and a handle the runtime cannot keep are refused without a
+ // duplicate or a row.
+ Spec *stdio=NULL;jet_process_spec_keep_open_raw(jet_rt_handle_clone_process_spec(s),fd,2,false,&stdio,&supported.value,&assigned,&error);
+ assert(assigned==-1&&error==0&&!stdio->directories&&stdio->keep_refusal==-1);jet_rt_handle_drop_process_spec(stdio);
+ Spec *unsupported=NULL;jet_process_spec_keep_open_raw(jet_rt_handle_clone_process_spec(s),-3,100,false,&unsupported,&supported.value,&assigned,&error);
+ assert(assigned==-1&&error==0&&!unsupported->directories&&unsupported->keep_refusal==-3);jet_rt_handle_drop_process_spec(unsupported);
  Spec *failed=NULL;jet_process_spec_keep_open_raw(jet_rt_handle_clone_process_spec(s),-1,100,false,&failed,&supported.value,&assigned,&error);
- assert(supported.value&&assigned==-1&&error==EBADF&&!failed->directories&&jet_rt_handle_eq_process_spec(s,failed));
+ assert(supported.value&&assigned==-1&&error==EBADF&&!failed->directories&&failed->keep_refusal==EBADF&&!jet_rt_handle_eq_process_spec(s,failed));
+ failed->keep_refusal=0;assert(jet_rt_handle_eq_process_spec(s,failed));
  jet_rt_handle_drop_process_spec(failed);jet_rt_handle_drop_process_spec(s);close(fd);
  jet_rt_string_drop(arg);jet_rt_string_drop(name);jet_rt_string_drop(ignored);jet_rt_string_drop(value);jet_rt_string_drop(wire);
 }

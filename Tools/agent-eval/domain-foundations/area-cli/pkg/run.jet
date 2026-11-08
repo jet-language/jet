@@ -56,7 +56,7 @@ Notes: struct {
             }
         }
         rx: re.compile(pattern) ?? panic("bad pattern")
-        entries: fs.walk_files(root) ?? panic("walk")
+        entries: fs.walk_files(root).list() ?? panic("walk")
         matches := 0
         loop entry in entries {
             if entry.relative == ".gitignore" || ignored(entry.relative, patterns) -> next

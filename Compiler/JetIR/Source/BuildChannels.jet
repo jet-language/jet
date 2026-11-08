@@ -64,6 +64,32 @@ ir_channel_new: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, result_ty: Type, b
     storage
 }
 
+// `after(delay, value)`: a timer Receiver<T> that delivers the value once
+// the delay passes. The delay crosses as its exact nanoseconds; the value
+// moves into the runtime by slot with its element descriptor, which the
+// runtime copies, as Sender.send's does.
+ir_timer_after: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, result_ty: Type, args: [Int], span: Span) -> Int Never! {
+    element: ir_channel_element(ir_untag(result_ty), "Receiver") ?? return ir_fail_slot(b, span, "after producing {ir_type_name(result_ty)}")
+    if args.len() != 2 -> return ir_fail_slot(b, span, "after with {args.len()} arguments")
+    row: ir_value_type(m, p, result_ty) ?? return ir_type_fail(b, span, result_ty)
+    delay: ir_expr(m, p, b, args[0])
+    if ir_failed(b) || delay < 0 -> return -1
+    nanoseconds: ir_route(m, p, b, "jet_duration_ns_value", [Int]{delay}, [Bool]{true}, Type.Int, span)
+    if ir_failed(b) -> return -1
+    ir_release(m, b, delay)
+    value: ir_expr(m, p, b, args[1])
+    if ir_failed(b) || value < 0 -> return -1
+    owned: if b.fresh[value] -> value else -> ir_copy_value(m, p, b, value, span)
+    if ir_failed(b) -> return -1
+    b.fresh[owned] = false
+    slot: ir_lazy_value_slot(m, b, owned)
+    meta: ir_lazy_meta(m, p, b, element, span)
+    if meta < 0 -> return -1
+    receiver: ir_runtime(m, b, "after_value", [Int]{nanoseconds, slot, meta}, row)
+    ir_release(m, b, nanoseconds)
+    receiver
+}
+
 // `panic: channel capacity must be at least 1, got {capacity}`: an E3001
 // stop whose zeroed descriptor carries no source location, as the
 // reference scheduler's runtime stop reports it.
@@ -87,8 +113,9 @@ ir_channel_capacity_stop: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, capacity
 }
 
 // An endpoint method: close on either endpoint, send on a Sender (an owned
-// copy of the value moves into the channel), is_ready, try_receive and
-// receive on a Receiver. None leaves any other operation to ir_handle_method.
+// copy of the value moves into the channel), is_ready, the timer metadata
+// reads, try_receive and receive on a Receiver. None leaves any other
+// operation to ir_handle_method.
 ir_channel_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, operation: BodyHandleOp, args: [Int], span: Span) -> Int? Never! {
     receiver_ty: ir_ty(p, b, receiver)
     sender: ir_channel_element(receiver_ty, "Sender")
@@ -98,7 +125,7 @@ ir_channel_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, recei
     handled: if operation == {
         .ChannelClose -> true
         .SenderSend -> is_sender
-        .ChannelIsReady | .ChannelTryReceive | .ChannelReceive -> !is_sender
+        .ChannelIsReady | .ChannelIsTimer | .ChannelIsInterval | .ChannelIsCancelled | .ChannelDelayMs | .ChannelTryReceive | .ChannelReceive -> !is_sender
         else -> false
     }
     if !handled -> return None
@@ -123,9 +150,16 @@ ir_channel_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, recei
             if meta < 0 -> return Val(-1)
             _: ir_runtime(m, b, "jet_rt_native_sender_send", [Int]{handle, slot, meta}, -1)
         }
-        .ChannelIsReady -> {
+        .ChannelIsReady | .ChannelIsTimer | .ChannelIsInterval | .ChannelIsCancelled | .ChannelDelayMs -> {
             row: ir_value_type(m, p, ty) ?? return Val(ir_type_fail(b, span, ty))
-            result = ir_runtime(m, b, "jet_rt_native_receiver_is_ready", [Int]{handle}, row)
+            read: if operation == {
+                .ChannelIsTimer -> "is_timer"
+                .ChannelIsInterval -> "is_interval"
+                .ChannelIsCancelled -> "is_cancelled"
+                .ChannelDelayMs -> "delay_ms"
+                else -> "is_ready"
+            }
+            result = ir_runtime(m, b, "jet_rt_native_receiver_{read}", [Int]{handle}, row)
         }
         .ChannelTryReceive -> {
             row: ir_value_type(m, p, ty) ?? return Val(ir_type_fail(b, span, ty))

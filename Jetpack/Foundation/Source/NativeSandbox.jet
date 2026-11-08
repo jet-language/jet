@@ -145,7 +145,7 @@ foundation_run_native_sandboxed_with_mounts: fn(executable: String, args: [Strin
 // process group survives the group kill there, exactly as in Rust, whose
 // `/proc` walk is Linux-only.
 foundation_run_native_sandboxed_with_timeout_and_mounts: fn(executable: String, args: [String], source_dir: String, output_dir: String?, env: [String: String], share_network: Bool, mounts: [NativeSandboxMount], timeout: Duration?) -[FS, Env, Exec, Time.Wait]> NativeSandboxOutput NativeSandboxError! {
-    command: foundation_native_sandbox_command(executable, args, source_dir, output_dir, env, share_network, mounts, timeout)
+    command: foundation_native_sandbox_command(executable, args, source_dir, output_dir, env, share_network, mounts, [String]{}, timeout)
     receipt: command.spec.run() ?? return Err(NativeSandboxError.IO("{err}"))
     foundation_native_sandbox_finish(command, receipt)
 }
@@ -162,15 +162,18 @@ NativeSandboxCommand: struct {
 }
 
 // The child foundation_run_native_sandboxed_with_timeout_and_mounts runs,
-// without running it.
-foundation_native_sandbox_command: fn(executable: String, args: [String], source_dir: String, output_dir: String?, env: [String: String], share_network: Bool, mounts: [NativeSandboxMount], timeout: Duration?) -[FS, Env, Exec, Time.Wait]> NativeSandboxCommand NativeSandboxError! {
+// without running it. `programs` are the host paths of the programs the
+// child is passed as arguments (foundation_sandbox_program_argument); each
+// may run there as `executable` may.
+foundation_native_sandbox_command: fn(executable: String, args: [String], source_dir: String, output_dir: String?, env: [String: String], share_network: Bool, mounts: [NativeSandboxMount], programs: [String], timeout: Duration?) -[FS, Env, Exec, Time.Wait]> NativeSandboxCommand NativeSandboxError! {
     if sys.is_windows() -> return Err(NativeSandboxError.Unsupported("the native Windows AppContainer backend has no Core process-isolation API"))
     if !sys.is_linux() && !sys.is_macos() -> return Err(NativeSandboxError.Unsupported("Jetpack's native child sandbox is implemented only on Linux, macOS, and Windows"))
     if sys.get(NATIVE_SANDBOX_FAKE_ENV) != None -> return Err(NativeSandboxError.Unsupported("test sandbox override prevents child execution"))
     status: foundation_native_sandbox_status()
     if !status.available -> return Err(NativeSandboxError.Unsupported(status.reason))
-    program: files.canonicalize(executable) ?? return Err(NativeSandboxError.Unsupported("sandbox executable is unavailable: {err}"))
-    if !files.is_file(program) -> return Err(NativeSandboxError.Unsupported("sandbox executable `{program}` is not a file"))
+    program: foundation_sandbox_executable(executable) ?? return Err(err)
+    passed := [String]{}
+    loop path in programs -> passed.push(foundation_sandbox_executable(path) ?? return Err(err))
     source: foundation_sandbox_real_directory(source_dir)
     output := String?{None}
     if output_dir == {
@@ -182,10 +185,24 @@ foundation_native_sandbox_command: fn(executable: String, args: [String], source
     // The source is always readable, and writable only as the private tree.
     source_writable: !output_is_separate
 
-    spec := if sys.is_linux() -> foundation_linux_sandbox_spec(source, output, env, share_network, source_writable, checked_mounts, program, args) else -> foundation_macos_sandbox_spec(source, output, env, share_network, source_writable, checked_mounts, program, args)
+    spec := if sys.is_linux() -> foundation_linux_sandbox_spec(source, output, env, share_network, source_writable, checked_mounts, program, args) else -> foundation_macos_sandbox_spec(source, output, env, share_network, source_writable, checked_mounts, program, passed, args)
     if timeout == .Val(limit) -> spec = spec.timeout(limit)
     mechanism: if sys.is_linux() -> "linux-bwrap" else -> "macos-seatbelt"
     Ok(NativeSandboxCommand{spec: spec.stdout(.Capture).stderr(.Capture).output_limit(NATIVE_SANDBOX_MAX_OUTPUT_BYTES), timeout, mechanism, policy: foundation_native_sandbox_policy(output_is_separate, share_network)})
+}
+
+// The canonical path of an executable a sandboxed child runs.
+foundation_sandbox_executable: fn(executable: String) -[FS, Env]> String NativeSandboxError! {
+    program: files.canonicalize(executable) ?? return Err(NativeSandboxError.Unsupported("sandbox executable is unavailable: {err}"))
+    if !files.is_file(program) -> return Err(NativeSandboxError.Unsupported("sandbox executable `{program}` is not a file"))
+    Ok(program)
+}
+
+// The argument that names the program at host path `program` (canonical) to a
+// sandboxed child with `mounts`: the path it runs at there, the one the
+// child's own executable gets.
+foundation_sandbox_program_argument: fn(program: String, mounts: [NativeSandboxMount]) -[Env]> String Never! {
+    if sys.is_linux() -> foundation_mounted_executable_path(program, mounts) else -> program.copy()
 }
 
 // The result of one sandboxed child `command` that ran to `receipt`.
@@ -206,10 +223,10 @@ foundation_linux_sandbox_spec: fn(source: String, output: String?, env: [String:
     Ok(process.cmd(argv).env_clear())
 }
 
-foundation_macos_sandbox_spec: fn(source: String, output: String?, env: [String: String], share_network: Bool, source_writable: Bool, mounts: [NativeSandboxMount], program: String, args: [String]) -[Exec]> ProcessSpec NativeSandboxError! {
+foundation_macos_sandbox_spec: fn(source: String, output: String?, env: [String: String], share_network: Bool, source_writable: Bool, mounts: [NativeSandboxMount], program: String, programs: [String], args: [String]) -[Exec]> ProcessSpec NativeSandboxError! {
     // Seatbelt restricts real host paths; it has no mount namespace, so the
     // executable keeps its host path.
-    profile: foundation_seatbelt_profile(program, source, output, share_network, true, source_writable, mounts)
+    profile: foundation_seatbelt_profile(program, programs, source, output, share_network, true, source_writable, mounts)
     // The profile is passed inline: a temporary `-f` profile could be
     // replaced between spawn and Seatbelt reading it.
     argv := [String]{NATIVE_SANDBOX_MACOS_EXEC, "-p", profile, program}
@@ -314,9 +331,12 @@ foundation_linux_sandbox_argv: fn(bwrap: String, source: String?, output: String
     argv
 }
 
-// The Seatbelt profile for one action.
-foundation_seatbelt_profile: fn(executable: String, source: String, output: String?, share_network: Bool, source_readable: Bool, source_writable: Bool, mounts: [NativeSandboxMount]) -> String NativeSandboxError! {
+// The Seatbelt profile for one action: it runs `executable`, and `programs`
+// it is passed, each of which it may run and read as it does `executable`.
+foundation_seatbelt_profile: fn(executable: String, programs: [String], source: String, output: String?, share_network: Bool, source_readable: Bool, source_writable: Bool, mounts: [NativeSandboxMount]) -> String NativeSandboxError! {
     program: foundation_sbpl_path(executable)
+    passed := [String]{}
+    loop path in programs -> passed.push("  (literal \"{foundation_sbpl_path(path)}\")")
     source_path: foundation_sbpl_path(source)
     output_path := String?{None}
     if output == {
@@ -324,6 +344,7 @@ foundation_seatbelt_profile: fn(executable: String, source: String, output: Stri
         else -> {}
     }
     lines := [String]{"(version 1)", "(deny default)", "(import \"system.sb\")", "(allow process-fork)", "(allow process-exec", "  (literal \"{program}\")"}
+    loop line in passed -> lines.push(line)
     loop mount in mounts -> lines.push("  (subpath \"{foundation_sbpl_path(mount.source)}\")")
     lines.push(")")
     lines.push("(allow file-read*")
@@ -334,6 +355,7 @@ foundation_seatbelt_profile: fn(executable: String, source: String, output: Stri
     }
     read_paths: [String]{"  (literal \"{program}\")", "  (subpath \"/System\")", "  (subpath \"/usr/lib\")", "  (subpath \"/usr/bin\")", "  (subpath \"/bin\")", "  (subpath \"/sbin\")"}
     loop line in read_paths -> lines.push(line)
+    loop line in passed -> lines.push(line)
     lines.push("  (subpath \"/nix/store\")")
     loop mount in mounts {
         lines.push("  (subpath \"{foundation_sbpl_path(mount.source)}\")")

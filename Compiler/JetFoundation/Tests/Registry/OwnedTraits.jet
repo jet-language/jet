@@ -94,8 +94,8 @@ owned_traits_quoted: fn(line: String) -> [String] Never! {
 
 #Test("no compiler source lists the owned trait names outside OWNED_TRAITS") {
     violations := [String]{}
-    entries: owned_traits_files.walk("Compiler", None) ?? panic("walk Compiler: {err}")
-    loop entry in entries {
+    loop item in owned_traits_files.walk("Compiler", None) {
+        entry: item ?? panic("walk Compiler: {err}")
         if entry.is_dir || !entry.path.ends_with(".jet") -> next
         if !entry.path.contains("/Source/") && !entry.path.contains("/Data/") -> next
         if entry.path.ends_with(OWNED_TRAITS_ROWS) -> next
@@ -115,8 +115,8 @@ owned_traits_quoted: fn(line: String) -> [String] Never! {
 // marker, not the trait).
 #Test("no syntax constant spells an owned trait or its markers") {
     violations := [String]{}
-    entries: owned_traits_files.walk(OWNED_TRAITS_SYNTAX, None) ?? panic("walk {OWNED_TRAITS_SYNTAX}: {err}")
-    loop entry in entries {
+    loop item in owned_traits_files.walk(OWNED_TRAITS_SYNTAX, None) {
+        entry: item ?? panic("walk {OWNED_TRAITS_SYNTAX}: {err}")
         if entry.is_dir || !entry.path.ends_with(".jet") -> next
         source: owned_traits_files.read(entry.path) ?? panic("read {entry.path}: {err}")
         loop (index, line) in source.split("\n").to_list() {

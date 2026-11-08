@@ -346,6 +346,246 @@ __decode_dyn: fn(tree: Dyn) -> Dyn [FieldError]! {
     Ok(tree.copy())
 }
 
+// The input of a typed decode, read in document order: the Dyn tree reader
+// (`__DecodeTree`) and core.encoding.json's text cursor. A generated Decode
+// reads a record's members through it, and `capture` hands one whole value to
+// a type that decodes from a tree. Core-private.
+__DecodeSource: trait {
+    // Enters the Object at the cursor; false (nothing read) for any other value.
+    begin_object: fn(&self) -> Bool Never!
+    // Moves to the open Object's next member, its value at the cursor; false,
+    // and the Object closed, after the last one.
+    next_key: fn(&self) -> Bool Never!
+    key_is: fn(self, name: String) -> Bool Never!
+    key_text: fn(self) -> String Never!
+    // Enters the Array at the cursor; false (nothing read) for any other value.
+    begin_array: fn(&self) -> Bool Never!
+    // Moves to the open Array's next item; false, and the Array closed,
+    // after the last one.
+    next_item: fn(&self) -> Bool Never!
+    // Reads a Null at the cursor; false (nothing read) for any other value.
+    take_null: fn(&self) -> Bool Never!
+    // Reads past the value at the cursor.
+    skip: fn(&self) Never!
+    // The value at the cursor as its typed-decode tree.
+    capture: fn(&self) -> Dyn Never!
+    read_int: fn(&self) -> Int [FieldError]!
+    read_bool: fn(&self) -> Bool [FieldError]!
+    read_float: fn(&self) -> Float [FieldError]!
+    read_string: fn(&self) -> String [FieldError]!
+}
+
+// Typed decode from a `__DecodeSource`, in
+// document order. JetIR lowers `__Decoding.read<Target, Source>` by its target
+// (BuildDyn.jet ir_decoding_read): a generated Decode's `__read`, a List,
+// Option or String-keyed Map helper below, a scalar read, else this body,
+// which decodes the value at the cursor as a tree. Each route returns what
+// this body returns for the same input. The generic parameters are not
+// spelled `T` (see json.__decode_typed).
+__Decoding: struct {}
+
+impl __Decoding {
+    read: fn<Target: Decode, Source: __DecodeSource>(reader: &Source) -> Target [FieldError]! {
+        value: reader.capture().decode<Target>() ?? return Err(err)
+        Ok(value)
+    }
+
+    // __decode_list, item by item: a failing item's errors are framed under
+    // `[index]`. Any value but an Array decodes as a tree, for its error.
+    read_list: fn<Item: Decode, Source: __DecodeSource>(reader: &Source) -> [Item] [FieldError]! {
+        if !reader.begin_array() {
+            listed: reader.capture().decode<[Item]>() ?? return Err(err)
+            return Ok(listed)
+        }
+        values := [Item]{}
+        failures := [FieldError]{}
+        index := 0
+        loop reader.next_item() {
+            if __Decoding.read<Item, Source>(reader) == {
+                .Ok(value) -> values.push(value)
+                .Err(errors) -> loop error in errors -> failures.push(decode_under("[{index}]", error))
+            }
+            index += 1
+        }
+        if failures.len() > 0 -> return Err(failures)
+        Ok(values)
+    }
+
+    // __decode_option: Null is None; any other value is Some of its read,
+    // whose errors pass through unframed.
+    read_option: fn<Item: Decode, Source: __DecodeSource>(reader: &Source) -> Item? [FieldError]! {
+        if reader.take_null() -> return Ok(None)
+        value: __Decoding.read<Item, Source>(reader)
+        Ok(Val(value))
+    }
+
+    // __decode_map, member by member: a repeated key keeps the later value and
+    // an entry's errors are framed under its key. Any value but an Object
+    // decodes as a tree, for its error.
+    read_map: fn<Item: Decode, Source: __DecodeSource>(reader: &Source) -> [String: Item] [FieldError]! {
+        if !reader.begin_object() {
+            mapped: reader.capture().decode<[String: Item]>() ?? return Err(err)
+            return Ok(mapped)
+        }
+        values := [String: Item]{}
+        failures := [FieldError]{}
+        loop reader.next_key() {
+            key: reader.key_text()
+            if __Decoding.read<Item, Source>(reader) == {
+                .Ok(value) -> values[key] = value
+                .Err(errors) -> loop error in errors -> failures.push(decode_under(key, error))
+            }
+        }
+        if failures.len() > 0 -> return Err(failures)
+        Ok(values)
+    }
+
+    read_int: fn<Source: __DecodeSource>(reader: &Source) -> Int [FieldError]! { reader.read_int() }
+    read_bool: fn<Source: __DecodeSource>(reader: &Source) -> Bool [FieldError]! { reader.read_bool() }
+    read_float: fn<Source: __DecodeSource>(reader: &Source) -> Float [FieldError]! { reader.read_float() }
+    read_string: fn<Source: __DecodeSource>(reader: &Source) -> String [FieldError]! { reader.read_string() }
+}
+
+// A Dyn tree as a `__DecodeSource`: a generated Decode's `decode(tree)` reads
+// the tree through its `__read`. A read at the cursor is `tree.decode<T>()`
+// of the value there, and a repeated Object key's first value is the
+// member's (`tree.field`). The open containers are a stack of the
+// containers themselves and the position read in each.
+__DecodeTree: struct {
+    // The value at the cursor.
+    pending: Dyn
+    key: String
+    open: [Dyn]
+    at: [Int]
+}
+
+impl __DecodeTree {
+    new: fn(tree: Dyn) -> __DecodeTree Never! {
+        __DecodeTree{pending: tree.copy(), key: "", open: [Dyn]{}, at: [Int]{}}
+    }
+
+    enter: fn(&self) Never! {
+        self.open.push(self.pending.copy())
+        self.pending = Dyn.Null
+        self.at.push(-1)
+    }
+
+    leave: fn(&self) Never! {
+        _ := self.open.pop()
+        _ := self.at.pop()
+    }
+}
+
+impl __DecodeTree.__DecodeSource {
+    begin_object: fn(&self) -> Bool Never! {
+        object: if self.pending == {
+            .Object(_) -> true
+            else -> false
+        }
+        if object -> self.enter()
+        object
+    }
+
+    next_key: fn(&self) -> Bool Never! {
+        top: self.open.len() - 1
+        if top < 0 -> return false
+        position: self.at[top] + 1
+        found := false
+        key := ""
+        value := Dyn.Null
+        if self.open[top] == {
+            .Object(entries) -> {
+                if position < entries.len() {
+                    key = entries[position].key.copy()
+                    value = entries[position].value.copy()
+                    found = true
+                }
+            }
+            else -> {}
+        }
+        if !found {
+            self.leave()
+            return false
+        }
+        self.at[top] = position
+        self.key = key
+        self.pending = value
+        true
+    }
+
+    key_is: fn(self, name: String) -> Bool Never! { self.key == name }
+
+    key_text: fn(self) -> String Never! { self.key.copy() }
+
+    begin_array: fn(&self) -> Bool Never! {
+        array: if self.pending == {
+            .Array(_) -> true
+            else -> false
+        }
+        if array -> self.enter()
+        array
+    }
+
+    next_item: fn(&self) -> Bool Never! {
+        top: self.open.len() - 1
+        if top < 0 -> return false
+        position: self.at[top] + 1
+        found := false
+        value := Dyn.Null
+        if self.open[top] == {
+            .Array(items) -> {
+                if position < items.len() {
+                    value = items[position].copy()
+                    found = true
+                }
+            }
+            else -> {}
+        }
+        if !found {
+            self.leave()
+            return false
+        }
+        self.at[top] = position
+        self.pending = value
+        true
+    }
+
+    take_null: fn(&self) -> Bool Never! {
+        if self.pending == {
+            .Null -> true
+            else -> false
+        }
+    }
+
+    skip: fn(&self) Never! { self.pending = Dyn.Null }
+
+    capture: fn(&self) -> Dyn Never! {
+        value: self.pending.copy()
+        self.pending = Dyn.Null
+        value
+    }
+
+    read_int: fn(&self) -> Int [FieldError]! {
+        value: self.pending.decode<Int>() ?? return Err(err)
+        Ok(value)
+    }
+
+    read_bool: fn(&self) -> Bool [FieldError]! {
+        value: self.pending.decode<Bool>() ?? return Err(err)
+        Ok(value)
+    }
+
+    read_float: fn(&self) -> Float [FieldError]! {
+        value: self.pending.decode<Float>() ?? return Err(err)
+        Ok(value)
+    }
+
+    read_string: fn(&self) -> String [FieldError]! {
+        value: self.pending.decode<String>() ?? return Err(err)
+        Ok(value)
+    }
+}
+
 // `error` framed under the path `segment`: an empty child path is the segment,
 // an indexed child path joins without a dot.
 decode_under: fn(segment: String, error: FieldError) -> FieldError Never! {

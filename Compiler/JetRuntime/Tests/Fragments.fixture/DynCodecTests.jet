@@ -30,7 +30,7 @@ codec_fixture_number: fn(tree: I64, expected: I64) -> Bool {
     jet_rt_handle_drop_dyn(real)
     text: jet_rt_string_clone(rt_static_text("é"))
     string_tree: jet_rt_codec_encode_string(text)
-    typed_tree: jet_raw_typed_text(text)
+    typed_tree: jet_raw_typed_text(jet_rt_string_clone(text))
     jet_rt_string_drop(text)
     if (!jet_rt_handle_eq_dyn(string_tree, typed_tree) || !jet_rt_string_eq(dyn_word(string_tree + DYN_PAYLOAD), rt_static_text("é"))) -> return I64{13}
     jet_rt_handle_drop_dyn(string_tree)

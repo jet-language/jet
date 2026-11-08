@@ -277,7 +277,7 @@ no_nix_inner: fn(args: [String]) -> Never {
     loop argument in rest.slice(2, rest.len()) -> argv.push(argument.copy())
     spec := process.cmd(argv).env("LD_LIBRARY_PATH", if previous == "" -> library_path else -> "{library_path}:{previous}")
         .stdin(.Inherit).stdout(.Inherit).stderr(.Inherit)
-    if held.len() > 0 -> spec = held[0].pass_to(spec, 9) ?? no_nix_fail("pass the loader directory: {err}")
+    if held.pop() == .Val(directory) -> spec = spec.keep_open(directory, at: 9)
     no_nix_exit(no_nix_wait(spec, subject))
 }
 

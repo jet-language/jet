@@ -1,0 +1,64 @@
+// para_map's `limit` bounds the items in flight, not the carriers: with two
+// carriers (JET_SCHEDULER_THREADS=2), items parked in a sleep under limit 16
+// overlap far beyond two, never beyond 16, and under limit 1 never overlap.
+// Items that never park hold their carrier, so no more than two of them
+// overlap, with or without a limit. Each item reports its monotonic
+// interval, and the overlaps are counted afterwards: no lock inside an item
+// can park it mid-measurement.
+package: {
+    name: "para_limit"
+    authority: { allow: [IO, Mem.Alloc, Time, Time.Wait] }
+}
+
+use time: core.time
+
+Span: struct {
+    start: Int
+    end: Int
+}
+
+parked: fn(origin: Instant) -> Span {
+    start: time.instant().difference(origin).ns
+    time.sleep(50ms)
+    Span{start: start, end: time.instant().difference(origin).ns}
+}
+
+// About 2 ms of work that never waits.
+busy: fn(origin: Instant) -> Span {
+    start: time.instant().difference(origin).ns
+    loop time.instant().difference(origin).ns - start < 2_000_000 {}
+    Span{start: start, end: time.instant().difference(origin).ns}
+}
+
+// The most spans open at one instant: at each span's start, those that
+// began no later and have not ended.
+overlap: fn(spans: [Span]) -> Int {
+    most := 0
+    loop span in spans {
+        open := 0
+        loop other in spans {
+            if other.start <= span.start && span.start < other.end -> open += 1
+        }
+        if open > most -> most = open
+    }
+    most
+}
+
+run: fn() {
+    values := [Int]{}
+    loop i in 0..<64 -> values.push(i)
+    few: [Int]{0, 1, 2, 3, 4, 5, 6, 7}
+    origin: time.instant()
+
+    wide: overlap(values.para_map((n: Int) -> parked(origin), limit: 16))
+    print("limit 16: parked items overlap past the 2 carriers {wide > 2}, within the limit {wide <= 16}")
+    one: overlap(few.para_map((n: Int) -> parked(origin), limit: 1))
+    print("limit 1: parked items overlap {one}")
+
+    worked: overlap(values.para_map((n: Int) -> busy(origin)))
+    capped: overlap(values.para_map((n: Int) -> busy(origin), limit: 16))
+    print("busy items: at most 2 at once {worked <= 2 && capped <= 2}")
+
+    mapped: values.para_map((n: Int) -> n * 3, limit: 16)
+    print("order kept {mapped == values.map((n: Int) -> n * 3)}")
+}

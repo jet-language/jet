@@ -844,6 +844,52 @@ os_tls_base_probe_i64: fn() -> I64 {
     """
 }
 
+// Points this thread's GS at `base`, a live Jet TCB: the fiber switch moves
+// a carrier thread between its own TCB and the TCB of the fiber it runs.
+// The caller has seen FSGSBASE enabled (AT_HWCAP2 bit 1); without it the
+// kernel's ARCH_SET_GS does the same. One of the runtime's closed rails
+// (X64/InlineAsm.jet): only the runtime library assembles it.
+#[Unsafe("base is a live self-addressed Jet TCB the calling thread runs on until the next switch, and the kernel enabled FSGSBASE"), FFI(asm)]
+os_gs_base_write_i64: fn(base: I64) {
+    """
+    wrgsbase {base}
+    """
+}
+
+// The fiber switch: saves the callee-saved registers and a resume address
+// on the running stack, stores that stack pointer at `save`, and returns
+// into the stack at `target`, whose top word is the resume address another
+// switch saved there (or a fresh fiber's entry, the word above it a zero
+// return address; rbp is 0 there, so the fiber's frame chain ends at its
+// entry). This call returns when some switch resumes the stack it saved;
+// every caller-saved register is clobbered, as by a call. One of the
+// runtime's closed rails (X64/InlineAsm.jet): only this exact template
+// assembles, and only in the runtime library.
+#[Unsafe("save is a writable word the resumer reads; target is a stack this switch or a fresh fiber seed left, owned by no running thread"), FFI(asm)]
+os_fiber_switch_i64: fn(save: I64, target: I64) {
+    """
+    push rbp
+    push rbx
+    push r12
+    push r13
+    push r14
+    push r15
+    lea rax, [rip + 1f]
+    push rax
+    mov qword ptr [{save}], rsp
+    mov rsp, {target}
+    xor ebp, ebp
+    ret
+    1:
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    """
+}
+
 #[Unsafe("atomically adds to one aligned live word and returns its previous value"), FFI(asm)]
 os_fetch_add_i64: fn(address: I64, delta: I64) -> I64 {
     """

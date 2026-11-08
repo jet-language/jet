@@ -1,0 +1,16 @@
+build: fn(b: Build) -[Exec, FS]> {
+    #Impure("run the step that reads a folder found on the machine") {
+    // `marks` is the first folder holding `jet-case-marker.txt`; the step
+    // prints that file's line.
+    shell: b.probe("shell", "find_program", "sh")
+    marks: b.probe("marks", "find_folder", "jet-case-marker.txt")
+    mark: b.run("mark", b.found(shell), ["Exec", "FS"])
+    mark.arg("-c")
+    mark.arg("read -r line < \"$0\"/jet-case-marker.txt; printf '%s\\n' \"$line\" > \"$1\"")
+    mark.file(b.found(marks))
+    mark.output("marker.txt")
+    app: b.add_executable("app", ["main.jet"], [mark])
+    b.default(app)
+    }
+}
+run: fn() {}

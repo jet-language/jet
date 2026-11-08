@@ -1,0 +1,37 @@
+package: {
+    name: "main"
+    authority: { allow: [FS, IO] }
+}
+
+use files: core.files
+use path: core.files.path
+
+// Every core.files.path call below hands its text to a core.files function
+// whose parameter is `String | Path`.
+run: fn() {
+    scratch: files.temp_dir("core-path-tiers") ?? panic("temp dir")
+    root: path.of(scratch.path)
+    nested: path.join(path.join(root, "a"), "b")
+    path.mkdir(nested, true) ?? panic("mkdir")
+    path.write_text(path.join(root, "top.txt"), "top") ?? panic("write top")
+    path.write_text(path.join(nested, "low.txt"), "low") ?? panic("write low")
+
+    found: path.walk(root) ?? panic("walk")
+    loop entry in found -> print("walk: {entry.raw.removeprefix(scratch.path)}")
+    print("exists top: {path.exists(path.join(root, "top.txt"))}")
+    print("exists gone: {path.exists(path.join(root, "gone.txt"))}")
+    print("is_dir a: {path.is_dir(path.join(root, "a"))}")
+    print("is_file top: {path.is_file(path.join(root, "top.txt"))}")
+    print("read_text low: {path.read_text(path.join(nested, "low.txt")) ?? panic("read low")}")
+    print("read_bytes top: {(path.read_bytes(path.join(root, "top.txt")) ?? panic("read bytes")).len()}")
+    if path.read_text(path.join(root, "gone.txt")) == {
+        .Ok(text) -> print("read_text gone: Ok {text}")
+        .Err(_) -> print("read_text gone: Err")
+    }
+    if path.walk(path.join(root, "gone")) == {
+        .Ok(rows) -> print("walk gone: Ok {rows.len()}")
+        .Err(_) -> print("walk gone: Err")
+    }
+    path.unlink(path.join(root, "top.txt")) ?? panic("unlink")
+    print("exists top after unlink: {path.exists(path.join(root, "top.txt"))}")
+}

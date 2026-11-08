@@ -75,6 +75,8 @@ use {
     ]
     jet_foundation.[
         ELF_SECTION,
+        EVIDENCE_REPORT_ENV,
+        EVIDENCE_REPORT_ID_ENV,
         BuildOptionChoice,
         BuildOptionLayer,
         BuildOptions,
@@ -325,17 +327,20 @@ JetCLITestMemberRun: struct {
 // (each optimize level, another compiler) run one at a time, as each is a
 // whole parallel test run. With `results` the runs' rows, each at its
 // `tiers` entry, are one document (TestSettingLayers.jet
-// jet_cli_test_runs_results_write). The exit status is the most severe
+// jet_cli_test_runs_results_write). A run that hands its evidence to a
+// parent (EVIDENCE_REPORT_ENV) hands it every child's records as one report
+// (jet_cli_test_runs_report_write). The exit status is the most severe
 // child's.
 jet_cli_test_workspace: fn(names: [String], member_args: [[String]], envs: [[String]], executable: String, heading: String, results: String, tiers: [String], quiet: Bool) -> JetDriverVerbOutput {
-    if results == "" -> return jet_cli_test_workspace_run(names, member_args, envs, executable, heading, results, tiers, "", quiet)
-    scratch: cli_files.temp_dir("jet-test-results") ?? return JetDriverVerbOutput{stdout: "", stderr: "jet test: couldn't create a scratch directory for the `results` document: {err}\n", exit_code: JET_DRIVER_EXIT_USER_ERROR}
-    jet_cli_test_workspace_run(names, member_args, envs, executable, heading, results, tiers, scratch.path, quiet)
+    handoff: cli_sys.get(EVIDENCE_REPORT_ENV) ?? ""
+    if results == "" && handoff == "" -> return jet_cli_test_workspace_run(names, member_args, envs, executable, heading, results, tiers, "", handoff, quiet)
+    scratch: cli_files.temp_dir("jet-test-results") ?? return JetDriverVerbOutput{stdout: "", stderr: "jet test: couldn't create a scratch directory for the children's test evidence: {err}\n", exit_code: JET_DRIVER_EXIT_USER_ERROR}
+    jet_cli_test_workspace_run(names, member_args, envs, executable, heading, results, tiers, scratch.path, handoff, quiet)
 }
 
-// jet_cli_test_workspace with `scratch` ("" without `results`) holding each
-// child's evidence report.
-jet_cli_test_workspace_run: fn(names: [String], member_args: [[String]], envs: [[String]], executable: String, heading: String, results: String, tiers: [String], scratch: String, quiet: Bool) -> JetDriverVerbOutput {
+// jet_cli_test_workspace with `scratch` ("" without `results` or a
+// `handoff` report) holding each child's evidence report.
+jet_cli_test_workspace_run: fn(names: [String], member_args: [[String]], envs: [[String]], executable: String, heading: String, results: String, tiers: [String], scratch: String, handoff: String, quiet: Bool) -> JetDriverVerbOutput {
     // copy: the plan keeps its executable; each argv owns its program word.
     program: if executable == "" -> cli_sys.executable() else -> executable.copy()
     argvs := [[String]]{}
@@ -344,14 +349,24 @@ jet_cli_test_workspace_run: fn(names: [String], member_args: [[String]], envs: [
         loop argument in args -> argv.push(argument.copy()) // copy: the plan keeps its words.
         argvs.push(argv)
     }
-    child_envs: jet_cli_test_runs_envs(envs, argvs.len(), scratch)
+    child_envs := jet_cli_test_runs_envs(envs, argvs.len(), scratch)
+    // The handed-on report holds every child's records, so they share its id.
+    if handoff != "" {
+        report_id: cli_sys.get(EVIDENCE_REPORT_ID_ENV) ?? "test:runs:{cli_process.current_pid()}:{cli_time.unix_ns()}"
+        loop index in 0..<child_envs.len() {
+            child_envs[index].push(EVIDENCE_REPORT_ID_ENV)
+            child_envs[index].push(report_id.copy())
+        }
+    }
     width: if heading == "member" -> jet_cli_native_test_width(cli_sys.cpu_count(), jet_cli_memory_available(), JET_TEST_MEMBER_MEMORY) else -> 1
     exit_code := JET_DRIVER_EXIT_OK
     loop run in jet_cli_test_members_run(heading, names, argvs, child_envs, width, quiet) {
         if run.code > exit_code -> exit_code = run.code
     }
-    if results == "" -> return JetDriverVerbOutput{stdout: "", stderr: "", exit_code: exit_code}
-    problems: jet_cli_test_runs_results_write(results, scratch, names, tiers, program)
+    if scratch == "" -> return JetDriverVerbOutput{stdout: "", stderr: "", exit_code: exit_code}
+    problems := ""
+    if results != "" -> problems = jet_cli_test_runs_results_write(results, scratch, names, tiers, program)
+    if handoff != "" -> problems = "{problems}{jet_cli_test_runs_report_write(handoff, scratch, names)}"
     if problems != "" && JET_DRIVER_EXIT_USER_ERROR > exit_code -> exit_code = JET_DRIVER_EXIT_USER_ERROR
     JetDriverVerbOutput{stdout: "", stderr: problems, exit_code: exit_code}
 }
@@ -3596,9 +3611,9 @@ jet_cli_dev_stamp: fn(root: String, watch: [String]) -[FS]> String Never! {
 
 // Every file under `directory`.
 jet_cli_dev_files: fn(directory: String) -[FS]> [String] Never! {
-    entries: cli_files.walk(directory, None) ?? return [String]{}
     files := [String]{}
-    loop entry in entries {
+    loop item in cli_files.walk(directory, None) {
+        entry: item ?? return [String]{}
         if !entry.is_dir -> files.push(entry.path)
     }
     files

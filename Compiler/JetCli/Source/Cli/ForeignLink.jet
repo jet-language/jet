@@ -244,9 +244,9 @@ jet_cli_vendored_c_archive: fn(lib: String, runtime_dir: String, runtime_key: St
 jet_cli_foreign_compile: fn(lib: String, directory: String, cache: String) -[FS, Env, Exec, Time.Wait]> String JetCLIForeignLinkError! {
     tools: jet_cli_native_c_tools() ?? return Err(err)
     flags: [String]{"-std=c11", "-O2", "-fPIC", "-fno-stack-protector", "-fno-asynchronous-unwind-tables", "-fno-unwind-tables", "-D_GNU_SOURCE"}
-    entries: cli_files.walk_files(directory, None) ?? return Err(jet_cli_foreign_link_error("couldn't read C source directory `{directory}`: {err}"))
     paths := [String]{}
-    loop entry in entries {
+    loop item in cli_files.walk_files(directory, None) {
+        entry: item ?? return Err(jet_cli_foreign_link_error("couldn't read C source directory `{directory}`: {err}"))
         if entry.path.ends_with(".c") || entry.path.ends_with(".h") -> paths.push(entry.path)
     }
     paths = jet_cli_sorted_set(paths)

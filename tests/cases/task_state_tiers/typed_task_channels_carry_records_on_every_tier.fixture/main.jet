@@ -1,0 +1,38 @@
+// Typed task channels on every tier, web included: a record crosses a
+// channel<T>, and recv answers None once the channel is closed and drained.
+package: {
+    name: "typed_task_channels"
+    authority: { allow: [IO, Time, Time.Wait] }
+}
+
+use tasks: core.tasks
+
+Order: struct {
+    id: Int
+    item: String
+    tags: [String]
+}
+
+show: fn(order: Order) -> String {
+    "{order.id} {order.item} [{order.tags.join(",")}]"
+}
+
+state: fn<T>(value: T?) -> String {
+    if value == {
+        Val(_) -> "value"
+        None -> "closed"
+    }
+}
+
+run: fn() {
+    { sender, receiver }: channel<Order>(2)
+    sender.send(Order{id: 1, item: "tea", tags: [String]{"hot", "green"}})
+    sender.send(Order{id: 2, item: "cake", tags: [String]{}})
+    sender.close()
+    loop {
+        order: tasks.recv(receiver) ?? break
+        print(show(order))
+    }
+    print(state(tasks.recv(receiver)))
+    print(state(tasks.try_recv(receiver)))
+}

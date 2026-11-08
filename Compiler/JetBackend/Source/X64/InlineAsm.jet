@@ -378,15 +378,61 @@ x64_asm_line: fn(s: &X64AsmState, line: String) -> String? Never! {
     None
 }
 
-x64_assemble_template: fn(template: String, names: [String], returns: Bool) -> X64AsmResult Never! {
+// The fiber switch rail: saves the callee-saved registers and a resume
+// address on the running stack, stores that stack pointer at `save` and
+// returns into the stack at `target`, whose top word is a resume address of
+// this same rail (any site resumes any other: each site's layout is
+// identical) or a fresh fiber's entry. rbp is cleared before the return: a
+// resumed site pops its own, and a fresh fiber's entry starts the frame
+// chain at 0, so a backtrace ends at the fiber instead of a stale carrier
+// frame. Closed: only this exact template with operands `save` (rdi) and
+// `target` (rsi) assembles, to these fixed bytes, and only for the runtime
+// library that defines the fiber entry.
+X64_FIBER_SWITCH: [String]{"push rbp", "push rbx", "push r12", "push r13", "push r14", "push r15", "lea rax, [rip + 1f]", "push rax", "mov qword ptr [{{save}}], rsp", "mov rsp, {{target}}", "xor ebp, ebp", "ret", "1:", "pop r15", "pop r14", "pop r13", "pop r12", "pop rbx", "pop rbp"}
+X64_FIBER_SWITCH_BYTES: [U8]{0x55, 0x53, 0x41, 0x54, 0x41, 0x55, 0x41, 0x56, 0x41, 0x57, 0x48, 0x8d, 0x05, 0x0a, 0, 0, 0, 0x50, 0x48, 0x89, 0x27, 0x48, 0x89, 0xf4, 0x31, 0xed, 0xc3, 0x41, 0x5f, 0x41, 0x5e, 0x41, 0x5d, 0x41, 0x5c, 0x5b, 0x5d}
+// The GS base rail: `wrgsbase {{base}}` (rdi), Jet's TCB register write that
+// switches a carrier thread to a fiber's TCB. Closed like the switch rail.
+X64_GS_BASE_WRITE: [String]{"wrgsbase {{base}}"}
+X64_GS_BASE_WRITE_BYTES: [U8]{0xf3, 0x48, 0x0f, 0xae, 0xdf}
+
+// Whether the template's non-blank lines are exactly `rail`'s and its
+// operands exactly `operands`, in order.
+x64_asm_rail: fn(lines: [String], names: [String], rail: [String], operands: [String]) -> Bool Never! {
+    if names.len() != operands.len() -> return false
+    loop (i, name) in names {
+        if name != operands[i] -> return false
+    }
+    at := 0
+    loop raw in lines {
+        line: raw.trim()
+        if line == "" -> next
+        if at >= rail.len() || line != rail[at] -> return false
+        at += 1
+    }
+    at == rail.len()
+}
+
+// `rails`: the template may be one of the runtime's closed rails (the fiber
+// switch and the GS base write); false for every program and every other
+// library, whose templates assemble only through the strict line grammar.
+x64_assemble_template: fn(template: String, names: [String], returns: Bool, rails: Bool) -> X64AsmResult Never! {
     regs := [Int]{}
     if names.len() > X64_ASM_INPUTS.len() {
         return X64AsmResult{code: [U8]{}, regs: regs, result: -1, error: Val("inline asm: more than seven operands")}
     }
     loop (i, _) in names -> regs.push(X64_ASM_INPUTS[i])
+    lines: template.split("\n").to_list()
+    if rails && !returns {
+        rail := [U8]{}
+        if x64_asm_rail(lines, names, X64_FIBER_SWITCH, [String]{"save", "target"}) {
+            loop byte in X64_FIBER_SWITCH_BYTES -> rail.push(byte)
+        } else if x64_asm_rail(lines, names, X64_GS_BASE_WRITE, [String]{"base"}) {
+            loop byte in X64_GS_BASE_WRITE_BYTES -> rail.push(byte)
+        }
+        if rail.len() > 0 -> return X64AsmResult{code: rail, regs: regs, result: -1, error: None}
+    }
     s := X64AsmState{code: [U8]{}, names: names, written: [Bool]{}, depth: 0, result: -1, rbx_saved: -1, rbx_dirty: false}
     loop _ in 0..<16 -> s.written.push(false)
-    lines: template.split("\n").to_list()
     i := 0
     loop i < lines.len() {
         raw: lines[i]

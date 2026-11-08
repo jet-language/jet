@@ -839,7 +839,8 @@ ir_codec_impl: fn(p: IRProgram, concrete: Type, codec: String, method: String) -
 
 // The type arguments of the derived codec method `function` of generic
 // declaration instance `concrete` (`[Int]` for `decode<T>` at `Wrap<Int>`):
-// each method parameter is the declaration parameter of the same name.
+// each method parameter is the declaration parameter of the same name. A
+// read method's source parameter (`__Source`) is its caller's to bind.
 ir_codec_method_args: fn(p: IRProgram, function: FnBody, concrete: Type) -> [Type]? Never! {
     name: ir_nominal_name(ir_untag(concrete)) ?? return None
     row: ir_type_def(p, name) ?? return None
@@ -848,6 +849,7 @@ ir_codec_method_args: fn(p: IRProgram, function: FnBody, concrete: Type) -> [Typ
     if declared.len() != actual.len() -> return None
     args := [Type]{}
     loop parameter in function.generic_params {
+        if parameter.name == "__Source" -> next
         found := -1
         loop (index, candidate) in declared {
             if candidate.name == parameter.name -> found = index
@@ -856,4 +858,59 @@ ir_codec_method_args: fn(p: IRProgram, function: FnBody, concrete: Type) -> [Typ
         args.push(actual[found].copy())
     }
     Val(args)
+}
+
+// The read a `__Decoding.read<Target, Source>` call (Core/Encoding/
+// Encoding.jet) lowers to: the target's own read (a derived streaming
+// `__read`), else the `__Decoding` read of a list (not bytes), option,
+// String-keyed map, Int, Bool, Float or String, each with its arguments and
+// then Source. None for another call, and for any other target, which takes
+// the reference body: the value's captured tree, decoded.
+ir_decoding_read: fn(p: IRProgram, function: FnBody, type_args: [Type]) -> (key: String, args: [Type])? Never! {
+    if function.name != "read" || type_args.len() != 2 || !function.key.ends_with("read") -> return None
+    if !function.module_identity.starts_with("<corelib>/") || !ir_core_source_path(function.source_file, "Core/Encoding/Encoding.jet") -> return None
+    owner: if function.kind == {
+        .Method(_, owner_type) -> ir_nominal_name(ir_untag(owner_type)) ?? ""
+        else -> ""
+    }
+    if ir_short_name(owner) != "__Decoding" -> return None
+    target: type_args[0]
+    source: type_args[1]
+    if ir_codec_impl(p, target, "Decode", "__read") == .Val(own) {
+        args := own.args.copy()
+        args.push(source.copy())
+        return Val((key: own.key.copy(), args: args))
+    }
+    helper := ""
+    args := [Type]{}
+    if ir_untag(target) == {
+        .List(element) -> {
+            bytes: if ir_untag(element) == {
+                .IntN(signed, bits) -> !signed && bits == 8
+                else -> false
+            }
+            if !bytes {
+                helper = "read_list"
+                args.push(element.copy())
+            }
+        }
+        .Option(inner) -> {
+            helper = "read_option"
+            args.push(inner.copy())
+        }
+        .Map(key, _, value) -> {
+            if ir_untag(key) == .String {
+                helper = "read_map"
+                args.push(value.copy())
+            }
+        }
+        .Int -> helper = "read_int"
+        .Bool -> helper = "read_bool"
+        .Float -> helper = "read_float"
+        .String -> helper = "read_string"
+        else -> {}
+    }
+    if helper == "" -> return None
+    args.push(source.copy())
+    Val((key: "{function.key.slice(0, function.key.len() - 4)}{helper}", args: args))
 }

@@ -1,0 +1,18 @@
+build: fn(b: Build) -[Exec, FS]> {
+    #Impure("compile a C file with the compiler found on the machine") {
+    // `cc` is the program `jet-case-cc` names on PATH. The shell step is
+    // passed its path, prints its version line and compiles answer.c with it.
+    shell: b.probe("shell", "find_program", "sh")
+    cc: b.probe("cc", "find_program", "jet-case-cc")
+    compile: b.run("compile", b.found(shell), ["Exec", "FS"])
+    compile.arg("-c")
+    compile.arg("\"$0\" --version | {{ read -r line; printf '%s\\n' \"$line\" > \"$3\"; }} && \"$0\" -c \"$1\" -o \"$2\"")
+    compile.file(b.found(cc))
+    compile.input("answer.c")
+    compile.output("answer.o")
+    compile.output("version.txt")
+    app: b.add_executable("app", ["main.jet"], [compile])
+    b.default(app)
+    }
+}
+run: fn() {}

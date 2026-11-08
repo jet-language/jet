@@ -10,11 +10,15 @@ use {
     cli_sys: core.sys
     jet_driver.[JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR]
     jet_foundation.[
+        DerivationRecord,
         EVIDENCE_REPORT_ENV,
         EvidenceExpectation,
         EvidenceOutcome,
         EvidenceRecord,
+        evidence_merge_error_text,
         evidence_report_read,
+        evidence_report_try_from_records,
+        evidence_report_write,
         TEST_SETTINGS_ENV,
         TEST_SETTINGS_PLAN_ENV,
         TestSetting,
@@ -252,6 +256,36 @@ jet_cli_test_runs_results_write: fn(path: String, scratch: String, names: [Strin
         loop result in jet_cli_test_record_results(report.records, TEST_SUITE_TESTS, tier) -> results.push(result)
     }
     if jet_cli_test_results_write(path, results, [String]{TEST_SUITE_TESTS}, jet) == .Val(problem) -> problems = "{problems}jet test: {problem}\n"
+    problems
+}
+
+// Hands on the evidence of the runs `names`, whose children handed their
+// reports to `scratch` (jet_cli_test_runs_envs), as one report at `path`:
+// every child's records, for the parent that named `path` (a profile's
+// `tests` run, `jet prove`). A child that wrote none adds none. The problems,
+// one line each; "" when there are none.
+jet_cli_test_runs_report_write: fn(path: String, scratch: String, names: [String]) -[FS, Env]> String Never! {
+    records := [EvidenceRecord]{}
+    derivations := [DerivationRecord]{}
+    problems := ""
+    loop (index, name) in names {
+        report_path: jet_cli_rooted_join(scratch, "{index}.bin")
+        // The child stopped before its tests ran; its own stderr says why.
+        if !cli_files.exists(report_path) {
+            problems = "{problems}jet test: run `{name}`: no test ran, so the handed-on evidence holds none of its records\n"
+            next
+        }
+        report: evidence_report_read(report_path) ?? {
+            problems = "{problems}jet test: run `{name}`: couldn't read its test evidence: {err.message}\n"
+            next
+        }
+        loop record in report.records -> records.push(record.copy()) // copy: each child's report keeps its own.
+        loop derivation in report.derivations -> derivations.push(derivation.copy())
+    }
+    if records.len() == 0 -> return problems
+    report_id: records[0].identity.report_id.copy()
+    merged: evidence_report_try_from_records(report_id, records, derivations) ?? return "{problems}jet test: couldn't merge the runs' test evidence: {evidence_merge_error_text(err)}\n"
+    evidence_report_write(merged, path) ?? return "{problems}jet test: couldn't hand on the runs' test evidence: {err.message}\n"
     problems
 }
 

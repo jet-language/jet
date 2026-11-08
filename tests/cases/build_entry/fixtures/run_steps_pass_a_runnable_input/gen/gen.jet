@@ -1,0 +1,9 @@
+use {
+    files: core.files
+    process: core.process
+}
+// `gen --out=<path>` writes a program that prints the answer to `path`.
+run: fn() {
+    out: process.args()[0].removeprefix("--out=")
+    files.write(out, "run: fn() {{ print(\"{6 * 7}\") }}\n") ?? panic("write {out}: {err}")
+}

@@ -237,8 +237,14 @@ jet_cli_c_bind_header_path: fn(root: String, header: String) -> String Never! {
 // the overlay is a bind input the `.hash` (header bytes only) does not cover.
 // An unreadable header, a failed bind, or a bind that leaves an opaque handle
 // unresolved is E3208 and leaves the old files as they were; an up-to-date
-// cache of a library with no overlay is never rewritten.
+// cache of a library with no overlay is never rewritten. Only a source that
+// names a `.h"` path can import a header, so a program none of whose sources
+// does has nothing to bind and none is parsed.
 jet_cli_c_bind_refresh: fn(root: String, entry_path: String, files: [JetDriverAuthorizedSourceFile], color: Bool) -[FS, Env, Time]> JetDriverVerbOutput? Never! {
+    names_header: loop file in files {
+        if file.source.contains(".h\"") -> break true
+    } ?? false
+    if !names_header -> return None
     inputs: jet_cli_c_bind_inputs(files, entry_path, cli_files.is_file(jet_cli_authority_path(root, "package.jet")))
     loop request in inputs.headers {
         header_path: jet_cli_c_bind_header_path(root, request.header)

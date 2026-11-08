@@ -20,6 +20,9 @@ use {
         assert_eq(cases_test_advanced(root, "pass", "{requirement}\nstep: printf ok\n").verdict.status, "PASS")
     }
     assert_eq(cases_test_advanced(root, "false-json", "requires: probe printf '%s' '{{\"ready\":false}}' json $.ready = true\nstep: printf ok\n").verdict.status, "SKIP-HOST")
+    // A probe's stdout assertion carries the requirement's reason, as a step's does.
+    assert_eq(cases_test_advanced(root, "stdout-pass", "requires: probe printf '/nix/store/x' stdout: ^= \"/nix/\" # the probe printed a store path\nstep: printf ok\n").verdict.status, "PASS")
+    assert_eq(cases_test_advanced(root, "stdout-skip", "requires: probe printf '/usr/x' stdout: ^= \"/nix/\" # the probe printed a store path\nstep: printf ok\n").verdict.status, "SKIP-HOST")
     loop requirement in ["tools-any: absent-testkit-tool", "probes-any: false | false + true"] -> assert_eq(cases_test_advanced(root, "none", "{requirement}\nstep: printf ok\n").verdict.status, "FAIL")
     files.remove_all(root) ?? panic("remove probe scratch")
 }

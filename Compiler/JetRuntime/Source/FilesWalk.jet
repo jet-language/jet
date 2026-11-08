@@ -1,4 +1,4 @@
-// The Rust original walk identities for Core/Files walk_impl: the queue, policy
+// The Rust original walk identities for the Core/Files walk cursor: the queue, policy
 // and error construction stay in Core; this owns only path, matcher and
 // open-directory slots. lifetime: one process table of monotonic keys (from 1,
 // never reused) to shared contexts. Every operation retains its context from
@@ -233,24 +233,6 @@ walk_component_compare: fn(left: I64, left_parts: I64, index: I64, right: I64, r
     walk_bytes_compare(wrapping(left + left_start), walk_component_word(left_parts, index, I64{2}) - left_start, wrapping(right + right_start), walk_component_word(right_parts, other, I64{2}) - right_start)
 }
 
-// Path's Ord (compare_components): component-wise lexicographic.
-walk_path_compare: fn(left: I64, left_length: I64, right: I64, right_length: I64) -> I64 {
-    left_parts: walk_components(left, left_length)
-    right_parts: walk_components(right, right_length)
-    left_count: walk_component_count(left_parts)
-    right_count: walk_component_count(right_parts)
-    result := I64{0}
-    at := I64{0}
-    loop result == (I64{0}) && at < left_count && at < right_count {
-        result = walk_component_compare(left, left_parts, at, right, right_parts, at)
-        at += I64{1}
-    }
-    if (result == I64{0} && left_count != right_count) -> result = if (left_count < right_count) -> I64{-1} else -> I64{1}
-    files_words_free(left_parts)
-    files_words_free(right_parts)
-    result
-}
-
 // `child.strip_prefix(root).unwrap_or(child).to_string_lossy()`: the rest
 // after the matched components (as_path trims leading and trailing "" and
 // "." parts), or the whole child when root is not a component prefix.
@@ -451,14 +433,6 @@ walk_out_error: fn(failure: I64, kind: I64, code_tag: I64, code: I64, cause_tag:
     result: rt_text_lossy(walk_slot_data(context, slot), walk_slot_length(context, slot))
     walk_leave(context)
     result
-}
-
-#Export(c) jet_walk8_before: fn(key: I64, left: I64, right: I64) -> Bool {
-    context: walk_enter(key)
-    if (context == I64{0}) -> return false
-    result: walk_path_compare(walk_slot_data(context, left), walk_slot_length(context, left), walk_slot_data(context, right), walk_slot_length(context, right))
-    walk_leave(context)
-    result < I64{0}
 }
 
 // Release the slot `slot` once the walk is done with it (walk_slot_clear),

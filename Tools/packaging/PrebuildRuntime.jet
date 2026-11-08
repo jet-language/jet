@@ -152,7 +152,7 @@ inventory: fn(repo: String, paths: [String]) -> Inventory {
 // `directory/<relative path>`, sorted.
 tree_files: fn(repo: String, directory: String, keep: fn(String) -> Bool) -> [String] {
     found := [String]{}
-    entries: files.walk_files(files.join(repo, directory)) ?? fail("cannot list `{directory}`: {err}")
+    entries: files.walk_files(files.join(repo, directory)).list() ?? fail("cannot list `{directory}`: {err}")
     loop entry in entries {
         if keep(files.basename(entry.relative)) -> found.push(entry.relative.copy())
     }

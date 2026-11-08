@@ -1,0 +1,21 @@
+# ProcessSpec.keep_open, phase 1 of #6677: a FileLock is taken but refused as
+# IOError.Unsupported when the spec runs, and an authority-bound spec that
+# keeps a handle is refused when it plans. No child starts on any tier.
+fixture: keep_open_refuses_file_lock_and_authority_before_spawn.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run --optimize=none main.jet
+exit: 0
+stdout: = keep_open_refuses_file_lock_and_authority_before_spawn.out
+file: started absent
+step: jet run --optimize=full main.jet
+exit: 0
+stdout: = keep_open_refuses_file_lock_and_authority_before_spawn.out
+file: started absent
+step: jet build main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = keep_open_refuses_file_lock_and_authority_before_spawn.out
+file: started absent

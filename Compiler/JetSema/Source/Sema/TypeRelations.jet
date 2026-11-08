@@ -1207,7 +1207,9 @@ sema_type_graph_unique_type_owner: fn(graph: SemaRegistrationGraph, caller_index
             && nominal.kind != SemaRegistrationNominalKind.TypeAlias
             // A trait in type position (`CompilerTraceSink?`) is a type too: a signature from
             // another package spells it bare where the caller holds its owner-qualified name.
-            && (nominal.kind != SemaRegistrationNominalKind.Trait || owner_row.module_identity.starts_with("<corelib>/")) -> next
+            // A Core root trait (`__DecodeSource`, the source a generated decode reads) is
+            // seen bare wherever Core is loaded, as a Core root value type is.
+            && (nominal.kind != SemaRegistrationNominalKind.Trait || (owner_row.module_identity.starts_with("<corelib>/") && !core_root_type(name))) -> next
         if !sema_registration_visible(nominal.symbol.visibility, caller.module_identity, caller.package_identity, owner_row.module_identity, owner_row.package_identity) -> next
         if found == .Val(previous) {
             if previous.module_index != owner.module_index -> return None

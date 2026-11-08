@@ -1,0 +1,206 @@
+good ok {"id":7,"name":"Ada","tags":["a","b"],"tag":"Red","inner":{"x":1,"y":2.5},"scores":{"m":1,"n":2},"level":5,"price":12,"ratio":0.5,"ok":true,"raw":{"k":[1,null]},"blob":"AQID"}
+good tree ok {"id":7,"name":"Ada","tags":["a","b"],"tag":"Red","inner":{"x":1,"y":2.5},"scores":{"m":1,"n":2},"level":5,"price":12,"ratio":0.5,"ok":true,"raw":{"k":[1,null]},"blob":"AQID"}
+spaced ok {"id":7,"name":"Ada","tags":[],"tag":{"Level":{"depth":3}},"scores":{},"level":5,"price":-4,"ratio":100.0,"ok":false,"raw":null,"blob":"AQI="}
+spaced tree ok {"id":7,"name":"Ada","tags":[],"tag":{"Level":{"depth":3}},"scores":{},"level":5,"price":-4,"ratio":100.0,"ok":false,"raw":null,"blob":"AQI="}
+order ok {"id":123456789012345678901234567890,"name":"","tags":[],"tag":"Green","inner":{"x":0},"scores":{},"level":9,"price":1,"ratio":1.0,"ok":true,"raw":1,"blob":""}
+order tree ok {"id":123456789012345678901234567890,"name":"","tags":[],"tag":"Green","inner":{"x":0},"scores":{},"level":9,"price":1,"ratio":1.0,"ok":true,"raw":1,"blob":""}
+missing err 2
+  id: E2410: missing required field `id`
+  tag: E2410: missing required field `tag`
+missing tree err 2
+  id: E2410: missing required field `id`
+  tag: E2410: missing required field `tag`
+wrong err 12
+  id: expected Int, found text "7"
+  name: expected Text, found number 7
+  tags[0]: expected Text, found number 1
+  tags[2]: expected Text, found Null
+  tag: no matching enum variant
+  inner.x: JSON number `1.5` is not an exact integer
+  scores.m: expected Int, found text "one"
+  scores.o: expected Int, found Bool
+  price: expected Int, found text "p"
+  ratio: expected Float, found text "r"
+  ok: expected Bool, found number
+  blob: invalid base64 at byte 0: byte 0x21 is not in the standard base64 alphabet
+wrong tree err 12
+  id: expected Int, found text "7"
+  name: expected Text, found number 7
+  tags[0]: expected Text, found number 1
+  tags[2]: expected Text, found Null
+  tag: no matching enum variant
+  inner.x: JSON number `1.5` is not an exact integer
+  scores.m: expected Int, found text "one"
+  scores.o: expected Int, found Bool
+  price: expected Int, found text "p"
+  ratio: expected Float, found text "r"
+  ok: expected Bool, found number
+  blob: invalid base64 at byte 0: byte 0x21 is not in the standard base64 alphabet
+shapes err 10
+  id: expected Int, found a list
+  name: expected Text, found an object
+  tags: expected a list, found an object
+  tag: no matching enum variant
+  inner: expected an object
+  scores: expected an object, found a list
+  price: expected Int, found an object
+  ratio: expected Float, found a list
+  ok: expected Bool, found Null
+  blob: expected a list, found an object
+shapes tree err 10
+  id: expected Int, found a list
+  name: expected Text, found an object
+  tags: expected a list, found an object
+  tag: no matching enum variant
+  inner: expected an object
+  scores: expected an object, found a list
+  price: expected Int, found an object
+  ratio: expected Float, found a list
+  ok: expected Bool, found Null
+  blob: expected a list, found an object
+array err 1
+  : expected an object
+array tree err 1
+  : expected an object
+null err 1
+  : expected an object
+null tree err 1
+  : expected an object
+dup err 1
+  : invalid JSON (line 1): duplicate object key `id`
+dup tree parse failed
+dup-deep err 1
+  : invalid JSON (line 1): duplicate object key `x`
+dup-deep tree parse failed
+trailing-object err 1
+  : invalid JSON (line 1): trailing commas are not allowed in JSON
+trailing-object tree parse failed
+trailing-array err 1
+  : invalid JSON (line 1): trailing commas are not allowed in JSON
+trailing-array tree parse failed
+truncated err 1
+  : invalid JSON (line 1): input ended before the value was complete
+truncated tree parse failed
+truncated-array err 1
+  : invalid JSON (line 1): input ended before the value was complete
+truncated-array tree parse failed
+unterminated err 1
+  : invalid JSON (line 1): unterminated object
+unterminated tree parse failed
+unterminated-array err 1
+  : invalid JSON (line 1): unterminated array
+unterminated-array tree parse failed
+bad-member err 1
+  : invalid JSON (line 1): expected ',' or '}' after an object member
+bad-member tree parse failed
+bad-item err 1
+  : invalid JSON (line 1): expected ',' or ']' after an array element
+bad-item tree parse failed
+bad-key err 1
+  : invalid JSON (line 1): object keys must be strings
+bad-key tree parse failed
+no-colon err 1
+  : invalid JSON (line 1): expected ':' after an object key
+no-colon tree parse failed
+extra err 1
+  : invalid JSON (line 1): extra text after JSON value
+extra tree parse failed
+empty err 1
+  : invalid JSON (line 1): input ended before the value was complete
+empty tree parse failed
+bad-literal err 1
+  : invalid JSON (line 1): expected `true`
+bad-literal tree parse failed
+bad-string err 1
+  : invalid JSON (line 1): unknown string escape; JSON allows \", \\, \/, \b, \f, \n, \r, \t, \uXXXX
+bad-string tree parse failed
+bad-number err 1
+  : invalid JSON (line 1): leading zeros are not allowed in JSON numbers
+bad-number tree parse failed
+lines err 1
+  : invalid JSON (line 5): expected a JSON value
+lines tree parse failed
+strict ok {"a":1,"bee":"x"}
+strict tree ok {"a":1,"bee":"x"}
+strict-unknown err 3
+  z: E2412: unknown field `z`
+  b: E2412: unknown field `b`
+  y: E2412: unknown field `y`
+strict-unknown tree err 3
+  z: E2412: unknown field `z`
+  b: E2412: unknown field `b`
+  y: E2412: unknown field `y`
+strict-missing err 3
+  zz: E2412: unknown field `zz`
+  a: E2410: missing required field `a`
+  bee: E2410: missing required field `bee`
+strict-missing tree err 3
+  zz: E2412: unknown field `zz`
+  a: E2410: missing required field `a`
+  bee: E2410: missing required field `bee`
+strict-list err 3
+  [1].a: expected Int, found text "no"
+  [1].bee: E2410: missing required field `bee`
+  [2]: expected an object
+strict-list tree err 3
+  [1].a: expected Int, found text "no"
+  [1].bee: E2410: missing required field `bee`
+  [2]: expected an object
+wrap ok {"value":3,"list":[1,2,-9223372036854775808]}
+wrap tree ok {"value":3,"list":[1,2,-9223372036854775808]}
+wrap-bad err 2
+  value: expected Text, found number 3
+  list[1]: expected Text, found number 4
+wrap-bad tree err 2
+  value: expected Text, found number 3
+  list[1]: expected Text, found number 4
+wrap-inner err 1
+  list[0].x: E2410: missing required field `x`
+wrap-inner tree err 1
+  list[0].x: E2410: missing required field `x`
+tags err 2
+  [2]: no matching enum variant
+  [3]: no matching enum variant
+tags tree err 2
+  [2]: no matching enum variant
+  [3]: no matching enum variant
+map err 2
+  c[0]: expected Int, found text "x"
+  d: expected a list, found Null
+map tree err 2
+  c[0]: expected Int, found text "x"
+  d: expected a list, found Null
+opt-list ok null
+opt-list tree ok null
+opt-items ok [1,null,3]
+opt-items tree ok [1,null,3]
+usd ok 42
+usd tree ok 42
+usd-bad err 1
+  [1]: expected Int, found text "two"
+usd-bad tree err 1
+  [1]: expected Int, found text "two"
+nested err 2
+  [1][1]: expected Int, found a list
+  [2]: expected a list, found number
+nested tree err 2
+  [1][1]: expected Int, found a list
+  [2]: expected a list, found number
+big ok 123456789012345678
+big tree ok 123456789012345678
+bigger ok 1234567890123456789
+bigger tree ok 1234567890123456789
+exp ok 1000
+exp tree ok 1000
+frac err 1
+  : JSON number `1.5` is not an exact integer
+frac tree err 1
+  : JSON number `1.5` is not an exact integer
+neg-zero ok 0
+neg-zero tree ok 0
+float ok -0.0025
+float tree ok -0.0025
+string ok "aé\n"
+string tree ok "aé\n"
+bool ok false
+bool tree ok false
