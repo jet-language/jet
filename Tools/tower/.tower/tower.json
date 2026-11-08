@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6686,
-    "rev": 96014,
+    "rev": 96025,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -60039,6 +60039,11 @@
         {
           "at": "2026-11-08",
           "by": "Main",
+          "text": "Main 2026-11-08 04:00: c12 is still blocked by the 2026-11-07 conflict, and G1Lead stopped it before committing. As written, a gauntlet entry.json names the original repo script, which conflicts with philosophy priority 6. A plain refuse-every-added-script gate (exempting browser JS) is a different rule whose scope the owner has not worded; it would also refuse new .mjs files under Tools/tower, the node-based Tower tooling. Owner: reword c12 to pick a rule and its exemptions."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
           "text": "Main 2026-11-08 01:30, c17 finding from PortsLead-2 (details in $JET_SCRATCH_ROOT/lanes/PortsLead/c17-gaps.md). Nine Core API gaps make Jet use more source tokens than Python across the nine named gauntlet entries: (1) tally/Counter; (2) bounded split into a tuple; (3) typed regex captures; (4) zero-pad format spec; (5) multi-aggregate group_by and .to_map(); (6) whole-unit Duration accessors; (7) find-and-update; (8) whole-tensor sum and negative indices; (9) infallible forms where the type proves success. Each is public API, so it needs an owner ballot before code; cards wait for owner direction. Two rewrites need no new API (wordfreq via top_n, regex-find-all via text.count); PortsLead-2 does them now. c12-c15 stay blocked by the 2026-11-07 conflict note."
         },
         {
@@ -60176,11 +60181,11 @@
         {
           "n": 6,
           "text": "Compiler/ and Jetpack/ run no .mjs/.js/.cjs/.ts/.py/.sh outside browser-executed assets (Compiler/Prelude/Web runtime, JetCanvas assets): every Compiler/*/Tests and Jetpack/Bootstrap script is a Jet test or Jet program that the lane-check and chain run, switched over once its Jet twin wins the c14 port bars; an original survives only as its gauntlet entry's reference (c13).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T02:55:05.039Z"
+          "evidence": "Main census of dev at 8447fc0cf4+: git ls-files Compiler Jetpack shows the only .mjs/.js/.cjs/.ts/.py/.sh/.bash files are browser-executed assets (31 under Compiler/Prelude/Web, 12 under Compiler/JetCanvas/Source/CanvasAssets). Every tracked file without an extension under Compiler/ and Jetpack/ was checked for a non-Jet shebang (bash/sh/python/node): 0 found. 47fbc5b2a5 deleted the last 44 dead node scripts, including the JetBackend and JetIR Tests runners.",
+          "at": "2026-11-08T08:13:53.405Z"
         },
         {
           "n": 7,
@@ -60266,11 +60271,12 @@
         {
           "n": 16,
           "text": "The witness runners (Compiler/JetRuntime/Tests/run-alloc-cache-witness.mjs, run-tdigest-witness.mjs, run-alloc-observer-witness.mjs and the remaining #6594 c5 runners) are each paired with a Jet test row under the port bars and switch to Jet once it wins every bar.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-06T18:49:56.217Z"
+          "evidence": "47fbc5b2a5 deleted the witness runners as dead node scripts: run-alloc-cache-witness, run-alloc-observer-witness, run-tdigest-witness, run-io-witness and the five run-ui-*-witness .mjs files under Compiler/JetRuntime/Tests. git ls-files on dev shows no witness runner left, so there is nothing to pair or switch.",
+          "at": "2026-11-08T08:14:04.307Z",
+          "closure": "obsolete"
         },
         {
           "n": 17,
@@ -60292,7 +60298,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-20T14:41:14.806Z",
-      "updated": "2026-11-08T06:24:07.695Z",
+      "updated": "2026-11-08T08:14:04.307Z",
       "updatedBy": "Main",
       "goals": [
         "G4"
@@ -64057,6 +64063,11 @@
         {
           "at": "2026-11-08",
           "by": "Main",
+          "text": "Main 2026-11-08 04:15: PortsLead-2 (exited) says c16 (warm jet run and jet run after an edit each below lua 5.4 hello) cannot be met with the current design. Best lane rows: warm 4.51-6.16 ms and after an edit 23 ms, against lua at 0.75-1.23 ms. It proposed moving c16 to #6328. Moving an owner-set criterion between cards is the owner's call, so c16 stays open here with these ratios; owner to direct."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
           "text": "Main 2026-11-08 03:10: c16 progress from PortsLead-2 (lane rows, not yet a Main proof). ea25806ed6: a warm rerun no longer rewrites the slot record (a mark less than 10 min old counts as used); the RunKeep fixture adds a backdated-record step; warm jet run hyperfine median 355.6 ms -> 4.51 ms, range 3.7-6.4 ms. aac0d83f7b: a slot record is put in place by removing the old record and then renaming the new one onto the free name, since an ext4 rename over an existing file waited 0.34 s on its auto_da_alloc flush. The rename now takes 21 us; jet run after a one-line edit takes a median 683 ms -> 23 ms, worst 16.2 s -> 60 ms. Lua 5.4 hello: 0.75-1.23 ms. c16 stays open until a quiet-window measurement meets its terms. Also landed: 2a455712d1 (c6: --verbose names the effects used), 5285fecc38 (c11: --allow=FS.Read:<path> confines reads), and 5213de8df7 (the help surface for both). They get met on release evidence."
         },
         {
@@ -64298,7 +64309,7 @@
       "parentId": "c0svnelx",
       "needsAcceptance": false,
       "created": "2026-10-28T10:49:58.414Z",
-      "updated": "2026-11-08T07:43:22.307Z",
+      "updated": "2026-11-08T08:14:05.245Z",
       "updatedBy": "Main",
       "goals": [
         "G4"
@@ -71902,6 +71913,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-08",
+          "by": "Main",
+          "text": "Main 2026-11-08 03:40 (G1Lead triage): c2 is not a spelling cleanup. Core/Service/Service.jet still has only the String forms: worker(tree, name, handler: fn(), ...), send(..., message: String) and receive. No Endpoint<T, R>, call, state: or batch: exists in Core, sema or Docs/spec. D-SERVICE-WORKER1, REPLY1, KEEP1 and BATCH1=A need the whole typed-worker build: generic worker/send/call, sema checks for state:/batch:/replies, and the runtime. service.tree still answers E2104 (#4957), so no rung can have a runnable golden until #4957 lands. Large; left out of the overnight pareto pass."
+        },
+        {
           "at": "2026-10-30",
           "text": "All decisions ratified; advanced out of deciding."
         }
@@ -71934,7 +71950,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T18:07:08.035Z",
-      "updated": "2026-11-07T04:01:15.344Z",
+      "updated": "2026-11-08T08:04:38.352Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
@@ -73430,6 +73446,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-08",
+          "by": "Main",
+          "text": "Main 2026-11-08 04:15: 7bf10da106 by PortsLead-2 does not meet c2. It resolves IP literals through getaddrinfo AI_NUMERICHOST on the caller thread, adds a word-sized Int division fast path for boxed operands, and reads the clock through vDSO clock_gettime with the replay env parsed once. w11 jet-bin instructions:u 104.4M -> 32.8M, task-clock 45.1 -> 24.7 ms; jet run 164.6M -> 92.4M; clones 126 -> 26, clock_gettime 2909 -> 0. On a loaded machine (15 runs, wall/CPU ms): jet-bin 85.5/19.2, jet-run 99.0/33.2, bun 87.1/8.1, deno 112.8/38.6. Still loses to bun on CPU; the rest is futex/thread-park, about 14 ms of system time, which is a scheduler redesign. A quiet-window measure is queued in proofq as Main-PortsLead-w11-measure.sh."
+        },
+        {
           "at": "2026-11-07",
           "by": "Main",
           "text": "Spreading receipt for 9177db37e4, same compiler (seed-built from d405d4cb6c). Probe $JET_SCRATCH_ROOT/lanes/Main/burn/para/para16.jet: 16 items of a 20M-step LCG kernel; under the old 64-item chunks all 16 ran on one worker. Built with jet build --release: ser wall 0.430 s (cpu 0.44 s); para_map wall 0.042 s (cpu 0.50 s), 10.2x. jet run (O0): ser 1.139 s, par 0.068 s. Every mode prints total 6472. c2 (ScriptBench w11) waits on the ScriptBench rebuild."
@@ -73534,7 +73555,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T22:33:20.042Z",
-      "updated": "2026-11-07T22:36:57.647Z",
+      "updated": "2026-11-08T08:14:06.138Z",
       "updatedBy": "Main",
       "goals": [
         "G4"
@@ -73905,6 +73926,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-08",
+          "by": "Main",
+          "text": "Main 2026-11-08 03:35: the a0_037 release of 8447fc0cf4 passed preflight, check-gate, chain (s2 == s3, no Rust), cc-pack, pack, jetpack, jetpack-engine, golden (4448 rows, 12 gained, 0 lost) and ui (2429 rows, 3 gained, 0 lost). During cases at 03:24, the kernel OOM-killed the whole release scope (rc 137): the 18 GB jet-scope memcg limit was hit while 14 Tools/tower/Board.jet processes ran at 670-860 MB anon each, plus two 1.6-1.9 GB jet compiles. The shard pools size their concurrency from a memory share that does not count the Board processes that gate-running cases spawn (since 3c8544784c the gates read the board through Board.jet). One `card show` peaks at 309 MB against the 14 MB tower.json. Rerunning admit at 8447fc0cf4 with --jobs 6. Board memory (22-60x the file) is logged as a defect."
+        },
         {
           "at": "2026-11-08",
           "by": "Main",
@@ -74645,7 +74671,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-29T02:09:17.141Z",
-      "updated": "2026-11-08T07:19:39.241Z",
+      "updated": "2026-11-08T08:25:56.015Z",
       "updatedBy": "Main",
       "criteriaLastN": 74
     },
@@ -89250,7 +89276,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-08",
+          "by": "Main",
+          "text": "Main 2026-11-08 03:50 (G1Lead scoping): this is not a Core-only edit. channel<T> is already generic in Core, but the runtime after_value/interval routes carry exact-Int words with a fixed Int element meta (JetRuntime RouteAInterval.jet). A generic after<T>/interval needs an IR special case that passes the value slot and element meta (as ir_channel_new does), a new runtime route, the web Channel.js path, row regeneration, and cases on O0/O1/O2/web. A generic recv/waitall/waitany cannot keep the -1 closed sentinel and must return T?, which changes behaviour for existing Int callers and needs an owner ruling before the build. Several hours plus a compiler rebuild; out of the overnight pareto pass."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -89274,7 +89306,7 @@
       "parentId": "c085f598",
       "needsAcceptance": false,
       "created": "2026-11-01T01:15:10.831Z",
-      "updated": "2026-11-07T03:30:02.243Z",
+      "updated": "2026-11-08T08:08:00.861Z",
       "updatedBy": "Main",
       "criteriaLastN": 1
     },
@@ -93518,7 +93550,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-08",
+          "by": "Main",
+          "text": "Main 2026-11-08 03:35: reader speed slice by G1Lead, landing now. On the 1.09 MB 20-field doc (CPU time), the reader drains in 51 ms against 52-72 ms for parse; it started at 1110 ms. Per kind, reader vs parse: ints 24/36 ms, strings 30/40, objects 88/94. Remaining plan, set aside for cheaper G3 criteria per the pareto order: (a) typed projection, about 2-3 h. A compiler-private intrinsic encoding.__decode_keys<T>() gives the generated Decode its demanded wire keys, wired through CoreSignatures, CoreCallRows, the Sema backing gate and JetIR lowering. __decode_typed then skips the other root fields with a validating, non-materializing skip. (b) the paired performance cell. A gauntlet entry (e.g. formats.json-kernel) with a fixture, expected.out, and peers in rust, c, zig, go, python and node, plus a hand-written Tools/perf/asm-parity ref.S ceiling, about several hours."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -93538,7 +93576,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T05:54:54.722Z",
-      "updated": "2026-11-07T03:30:48.729Z",
+      "updated": "2026-11-08T08:02:33.270Z",
       "updatedBy": "Main",
       "criteriaLastN": 1
     },
@@ -97155,7 +97193,18 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-08",
+          "by": "Main",
+          "text": "Main 2026-11-08 03:55 finding: two problems in .github/workflows/ci.yml as of dev. (1) Its one job installs Node 22 and then runs `jet Tools/agent/CoreSurfaceLedger.jet --check`, but nothing installs jet on ubuntu-latest, so the step cannot pass until a pinned seed release exists (D-SEED-DIST1). (2) AGENTS.md says hosted CI runs only the Core source-coverage ratchet, but ci.yml runs the Core surface ledger check, and its header says the coverage ratchet runs locally. The AGENTS.md sentence is stale; reported to the owner, not edited."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
+          "text": "Main 2026-11-08 03:50 (G1Lead scoping): c1 is gated. No WASI runtime is installed (no wasmtime, wasmer or iwasm), jet build --target wasm.wasi is unported (CLICommands row, #5201), and CryptoEntropyFixtures.json marks the wasi tests target-gap. c2 is built: core-coverage-ratchet.json is version 2 with name+signature entries, --check refuses unlisted functions, --write only removes, moves re-file, the 17/17 CoreCoverage #Tests pass and --check is OK. A shrink-only reset (3402 -> 3399) is landing. The remaining c2 term, hosted CI green, waits on D-SEED-DIST1, because ci.yml can run the ratchet only once a pinned seed exists."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -97184,7 +97233,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T02:40:55.176Z",
-      "updated": "2026-11-07T02:40:57.840Z",
+      "updated": "2026-11-08T08:08:16.742Z",
       "updatedBy": "Main",
       "criteriaLastN": 2
     },
@@ -188105,6 +188154,83 @@
   ],
   "events": [
     {
+      "at": "2026-11-08T08:25:56.015Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0h06654",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-08T08:14:06.138Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c02a1ynr",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-08T08:14:05.245Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0wi8ere",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-08T08:14:04.307Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0qe89cl",
+      "note": "#16"
+    },
+    {
+      "at": "2026-11-08T08:13:53.406Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0qe89cl",
+      "note": "#6"
+    },
+    {
+      "at": "2026-11-08T08:11:29.529Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0qe89cl",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-08T08:08:16.742Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0axja0l",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-08T08:08:01.681Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0axja0l",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-08T08:08:00.862Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0z2nw1h",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-08T08:04:38.352Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0mhdm27",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-08T08:02:33.270Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0tpf98i",
+      "note": "logEntry"
+    },
+    {
       "at": "2026-11-08T07:52:29.149Z",
       "by": "Main",
       "action": "card.update",
@@ -191575,713 +191701,6 @@
       "action": "card.add",
       "ref": "c0zlsxzv",
       "note": "jet lint --cost: an incomplete reachable cost projection ICEs or is accepted"
-    },
-    {
-      "at": "2026-11-07T06:30:07.274Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c005fduo",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-07T06:30:06.075Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c005fduo",
-      "note": "#2: c65 needs a passing full profile; a KF line naming an open owning card is the ledger's contract; was: Untracked failures reach 0: every row of untracked-032a.tsv passes in a release kit, or carries a known-failing line naming an open card row whose text names that case. The release REPORT.md 'untracke"
-    },
-    {
-      "at": "2026-11-07T06:30:04.776Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c005fduo",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T06:29:12.081Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c005fduo",
-      "note": "#3 The release gate fails on any untracked failing row (untrack"
-    },
-    {
-      "at": "2026-11-07T06:29:11.180Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c005fduo",
-      "note": "#2 Untracked failures reach 0: every row of untracked-032a.tsv "
-    },
-    {
-      "at": "2026-11-07T06:29:09.373Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c005fduo",
-      "note": "#1 No exit-101 row in a release kit's cases, golden or ui suite"
-    },
-    {
-      "at": "2026-11-07T06:29:02.132Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c005fduo",
-      "note": "155 failing suite rows carry no known-failing line and no owning card"
-    },
-    {
-      "at": "2026-11-07T06:28:07.755Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0max8v8",
-      "note": "#7"
-    },
-    {
-      "at": "2026-11-07T06:27:08.269Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0iv7hyj",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-07T06:27:07.308Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0810bga",
-      "note": "#10"
-    },
-    {
-      "at": "2026-11-07T06:27:06.362Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0h18kyi",
-      "note": "#84"
-    },
-    {
-      "at": "2026-11-07T06:27:05.396Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0h18kyi",
-      "note": "#83"
-    },
-    {
-      "at": "2026-11-07T06:27:04.437Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0h18kyi",
-      "note": "#80"
-    },
-    {
-      "at": "2026-11-07T06:27:03.522Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0h18kyi",
-      "note": "#74"
-    },
-    {
-      "at": "2026-11-07T06:27:02.566Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0h18kyi",
-      "note": "#73"
-    },
-    {
-      "at": "2026-11-07T06:27:01.652Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0h18kyi",
-      "note": "#59"
-    },
-    {
-      "at": "2026-11-07T06:27:00.731Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0h18kyi",
-      "note": "#58"
-    },
-    {
-      "at": "2026-11-07T06:26:59.811Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0h18kyi",
-      "note": "#57"
-    },
-    {
-      "at": "2026-11-07T06:26:58.482Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0h18kyi",
-      "note": "#55"
-    },
-    {
-      "at": "2026-11-07T06:26:57.237Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0h18kyi",
-      "note": "#54"
-    },
-    {
-      "at": "2026-11-07T06:26:56.199Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0h18kyi",
-      "note": "#33"
-    },
-    {
-      "at": "2026-11-07T06:26:55.122Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0h18kyi",
-      "note": "#32"
-    },
-    {
-      "at": "2026-11-07T06:26:54.049Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0h18kyi",
-      "note": "#15"
-    },
-    {
-      "at": "2026-11-07T06:26:53.098Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c00rqc09",
-      "note": "#13"
-    },
-    {
-      "at": "2026-11-07T06:25:54.745Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c08512l6",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-07T06:22:07.617Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0h06654",
-      "note": "#74"
-    },
-    {
-      "at": "2026-11-07T06:19:41.415Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0gcc21g",
-      "note": "#3 The other tests/ui/build_*.jet rows (8 REFUSED after 5e49306"
-    },
-    {
-      "at": "2026-11-07T06:16:15.821Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0tltpjp",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-07T06:16:14.695Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0tltpjp",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-07T06:14:31.442Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0tltpjp",
-      "note": "#7"
-    },
-    {
-      "at": "2026-11-07T06:13:22.619Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0max8v8",
-      "note": "#69: PortsLead-2's root table: every root mapped to a proving row or its own card; was: (was #5993) The 20 remaining expression/type census roots lower or carry their own card: SplitWrite, GetDisjointWrite, TryPush and EditDisjoint on List, statement Reactive, Stream<T> ! Err from source"
-    },
-    {
-      "at": "2026-11-07T06:13:09.767Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0xq1afz",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-07T06:13:08.756Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0xq1afz",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-07T06:13:02.513Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0xq1afz",
-      "note": "#2 A Pool id satisfies a generic Equatable bound without the pa"
-    },
-    {
-      "at": "2026-11-07T06:11:55.668Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c08512l6",
-      "note": "#5"
-    },
-    {
-      "at": "2026-11-07T06:07:44.730Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c08512l6",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-07T05:58:47.696Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0gcc21g",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-07T05:56:25.667Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0gcc21g",
-      "note": "#2 tests/ui/build_action_failed.jet runs in the ui suite instea"
-    },
-    {
-      "at": "2026-11-07T05:56:15.174Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0g8hybt",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-07T05:56:13.784Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0o9h3uo",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-07T05:56:12.403Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c03jg20v",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-07T05:56:10.935Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0xq1afz",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-07T05:56:09.577Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0iuwxty",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-07T05:56:07.893Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c07pwu5t",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-07T05:56:06.404Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0g8hybt",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-07T05:56:05.546Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0o9h3uo",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-07T05:56:04.605Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c03jg20v",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-07T05:56:03.701Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0xq1afz",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-07T05:56:02.802Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0iuwxty",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-07T05:56:01.972Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c07pwu5t",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-07T05:56:01.127Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0h06654",
-      "note": "#69"
-    },
-    {
-      "at": "2026-11-07T05:56:00.251Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0max8v8",
-      "note": "#113"
-    },
-    {
-      "at": "2026-11-07T05:55:59.409Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0max8v8",
-      "note": "#28"
-    },
-    {
-      "at": "2026-11-07T05:35:59.847Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c08512l6",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-07T05:35:59.010Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c08512l6",
-      "note": "#7 The quick profile can't hide a failure: today jet test Compi"
-    },
-    {
-      "at": "2026-11-07T05:35:58.154Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c08512l6",
-      "note": "#5: Corrected to the rerun in the batch environment: JetDebug/Tests passes 37/0.; was: Compiler/JetFoundation and Compiler pass 'later test setting layers replace earlier values', and Compiler/JetDebug/Tests passes a_session_pauses_steps_and_reads_the_native_image."
-    },
-    {
-      "at": "2026-11-07T05:35:57.283Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c08512l6",
-      "note": "#4: Corrected to the rerun in the batch environment; the earlier list came from a census without the compiler identity.; was: The Jetpack package tests pass: Jetpack/EnvModel/Tests (36 failing: committed examples field checks, computed module fields, pinned diagnostics E3402/E1270/E0969/E0971/E0977/E0996, fleet overrides, wo"
-    },
-    {
-      "at": "2026-11-07T05:35:56.404Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c08512l6",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-07T05:34:34.577Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0iv7hyj",
-      "note": "#3 Equality on a clone:false handle (for example a.wire == b.wi"
-    },
-    {
-      "at": "2026-11-07T05:34:33.731Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0iv7hyj",
-      "note": "#2 One rule for every clone:false handle, not a WsConn special "
-    },
-    {
-      "at": "2026-11-07T05:34:32.899Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0iv7hyj",
-      "note": "#1: Split: MechD-3's 122a4de916 covers WsConn; the general clone:false rule is c2 (a blanket rule broke pack1 on Core/Tasks Receiver copies).; was: A type holding a clone:false field is non-copyable: an implicit copy is a move or a registered diagnostic with a UI snapshot; the case that segfaulted passes on O0, O1 and O2, and core.web.browser dro"
-    },
-    {
-      "at": "2026-11-07T05:31:09.361Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0pr0hh0",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-07T05:31:07.788Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0pr0hh0",
-      "note": "#3 jet_cli_rust_foreign_snapshot does not copy the whole shared"
-    },
-    {
-      "at": "2026-11-07T05:31:06.389Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0pr0hh0",
-      "note": "#2 A killed or failed FFI build leaves no .workspaces directory"
-    },
-    {
-      "at": "2026-11-07T05:22:56.855Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c08512l6",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-07T05:21:22.708Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0afjv0e",
-      "note": "#2 A gate builds both packages (a guard or the full profile), s"
-    },
-    {
-      "at": "2026-11-07T05:21:21.799Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0afjv0e",
-      "note": "#1 jet check Compiler/JetLSP and jet check Compiler/JetDevserve"
-    },
-    {
-      "at": "2026-11-07T05:21:20.878Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c0afjv0e",
-      "note": "JetLSP and JetDevserver do not build (567 and 480 problems)"
-    },
-    {
-      "at": "2026-11-07T05:21:19.378Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c08512l6",
-      "note": "#6 These test packages compile and pass, or are deleted when de"
-    },
-    {
-      "at": "2026-11-07T05:21:18.519Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c08512l6",
-      "note": "#5 Compiler/JetFoundation and Compiler pass 'later test setting"
-    },
-    {
-      "at": "2026-11-07T05:21:17.656Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c08512l6",
-      "note": "#4 The Jetpack package tests pass: Jetpack/EnvModel/Tests (36 f"
-    },
-    {
-      "at": "2026-11-07T05:21:16.798Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c08512l6",
-      "note": "#3 Compiler/JetWasm/Tests passes (8 failing: mathkit component "
-    },
-    {
-      "at": "2026-11-07T05:21:15.933Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c08512l6",
-      "note": "#2 Compiler/JetParser/Tests (13 failing: keyword before the dec"
-    },
-    {
-      "at": "2026-11-07T05:21:15.074Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c08512l6",
-      "note": "#1 A gate runs every package test: jet test Compiler --profile "
-    },
-    {
-      "at": "2026-11-07T05:21:14.209Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c08512l6",
-      "note": "Package #Tests under Compiler/ and Jetpack/ are red or no longer compile"
-    },
-    {
-      "at": "2026-11-07T05:18:45.277Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0max8v8",
-      "note": "#113: Restated as a measurable check over a kit (tier-mixed rows = 0). vb9 (dev 6a31fd6143): 1505 tiered rows, 0 mixed.; was: (moved from #4717 c43) (was #4766) (was #4984) Native tier parity after the Rust removal: golden/ui/cases at O0/O1/O2"
-    },
-    {
-      "at": "2026-11-07T05:03:51.138Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0max8v8",
-      "note": "#108"
-    },
-    {
-      "at": "2026-11-07T05:03:50.087Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0max8v8",
-      "note": "#108: Restated for one lowering per meaning (no per-back-end cell matrix exists), with the exact refusal that proves it (PortsLead-2).; was: (was #2898 c4) A test fails the compiler build when a TIR variant or Core row is added without all applicable back-end cells; `aot_broken` and `interpreter_refused` are not accepted gate categories (n"
-    },
-    {
-      "at": "2026-11-07T05:02:04.306Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0max8v8",
-      "note": "#8"
-    },
-    {
-      "at": "2026-11-07T05:02:03.486Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0max8v8",
-      "note": "#8: Both ballots are ratified; restated as the rows that prove the outcomes (PortsLead-2).; was: (was #5091) Golden audit: owner questions from the overnight audit (2026-10-22)"
-    },
-    {
-      "at": "2026-11-07T05:00:55.883Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0pr0hh0",
-      "note": "#1 On a cold test state (empty JET_TEST_STATE_DIR and FFI cache"
-    },
-    {
-      "at": "2026-11-07T05:00:47.568Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c0pr0hh0",
-      "note": "FFI rows time out on a cold build cache (first row of each suite run)"
-    },
-    {
-      "at": "2026-11-07T05:00:31.255Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0sqrxrd",
-      "note": "#1 jet check Core (keep-going) checks every function body in Co"
-    },
-    {
-      "at": "2026-11-07T05:00:30.335Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c0sqrxrd",
-      "note": "jet check reaches only the Core bodies a program calls"
-    },
-    {
-      "at": "2026-11-07T05:00:29.049Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0s2gaqp",
-      "note": "#1 A jetpack case realizes a c@nixpkgs dependency into the cach"
-    },
-    {
-      "at": "2026-11-07T05:00:28.118Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c0s2gaqp",
-      "note": "jetpack: Nix store cache admission is unverified for provider closures"
-    },
-    {
-      "at": "2026-11-07T05:00:26.854Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0swo1p3",
-      "note": "#1 A case creates a symlink to a missing target: files.exists f"
-    },
-    {
-      "at": "2026-11-07T05:00:25.991Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c0swo1p3",
-      "note": "core.files: exists() is true for a broken symlink"
-    },
-    {
-      "at": "2026-11-07T05:00:24.762Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0txcsfz",
-      "note": "#1 A case decodes {\"n\": \"42\"} into a struct with n: Int and get"
-    },
-    {
-      "at": "2026-11-07T05:00:23.876Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c0txcsfz",
-      "note": "core.json: decode coerces a JSON string into a scalar field instead of refusing"
-    },
-    {
-      "at": "2026-11-07T05:00:22.756Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0x1npws",
-      "note": "#1 A case under tests/cases/comptime_sequence_parity evaluates "
-    },
-    {
-      "at": "2026-11-07T05:00:21.888Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c0x1npws",
-      "note": "comptime: a pure generator that only yields fails E3410 at compile time"
-    },
-    {
-      "at": "2026-11-07T04:59:44.845Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0max8v8",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-07T04:59:43.438Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0max8v8",
-      "note": "#4: Restated as the two cases that pin the defects (PortsLead-2), so the row is testable.; was: (was #4699) Verify two suspected defects in CLI fixtures"
-    },
-    {
-      "at": "2026-11-07T04:57:28.759Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0h06654",
-      "note": "#17"
-    },
-    {
-      "at": "2026-11-07T04:56:26.364Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0max8v8",
-      "note": "#66"
-    },
-    {
-      "at": "2026-11-07T04:55:50.406Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0h06654",
-      "note": "#66"
-    },
-    {
-      "at": "2026-11-07T04:54:16.069Z",
-      "by": "Main",
-      "action": "goal.log",
-      "ref": "G2",
-      "note": "2026-11-07 ~00:15: #6599 closed (C bindgen caches regenerate"
-    },
-    {
-      "at": "2026-11-07T04:53:53.582Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0yy2xbx",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-07T04:53:51.673Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0yy2xbx",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-07T04:51:22.345Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0yy2xbx",
-      "note": "#2"
     }
   ],
   "nextNum": 368,
