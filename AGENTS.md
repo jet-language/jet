@@ -303,16 +303,23 @@ may call a design better only where a passing review backs that exact claim.
 Use the most specific agent available for each role. Workers do not spawn
 workers. Every code worker returns the exact `CHECK OK` receipt from
 `Tools/agent/LaneCheck.jet`; prose-only or static-data-only work returns
-`DOCS ONLY`. Workers address the card's criteria directly: write the code to
-the spec, run only the touched files' source checks, commit, report, and move
-on. When a spec or criterion exists, the code comes first: no worker stops to
-prove rows, waits for review, or holds a commit for the orchestrator before
-landing it and taking the next criterion. Workers never run suites, A/B
-comparisons, chains, or releases; the orchestrator tests landed commits in
-batches, never gates a landing on a proof, and returns every failure to its
-owner at once. The owner fixes those failures and moves on again. The
-orchestration skill defines briefs, liveness, integration, proof cadence,
-recovery, and closure.
+`DOCS ONLY`.
+
+Workers are never idle or stalled. Each worker runs one continuous loop: write
+the code to the card's spec, run only the touched files' source checks, land
+the commit, report it to the orchestrator for testing, and start its next task
+at once. When a spec or criterion exists, the code comes first: no worker stops
+to prove rows, waits for review or a test result, or holds a commit for the
+orchestrator. Workers never run suites, A/B comparisons, chains, or releases.
+While the orchestrator's tests run, every worker keeps coding to spec.
+
+The orchestrator keeps every worker's next task queued so none waits, tests
+landed commits in batches, and never gates a landing on a proof. Every failure
+its tests find goes back at once to the worker that owns it, as that worker's
+top priority. The worker fixes it, lands the fix, reports it for final
+verification, and resumes its queue; the orchestrator verifies the fix and
+closes the criterion. The orchestration skill defines briefs, liveness,
+integration, proof cadence, recovery, and closure.
 
 This repository carries no harness-specific configuration. Agent tools use
 their own global settings; Jet contributes only this contract and the skills
