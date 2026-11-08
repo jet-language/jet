@@ -46,18 +46,6 @@ sema_build_context_method_contract: fn(method: String, arity: Int) -> SemaBuildC
             parameters = [Type]{Type.Named{name: "BuildProbe"}}
             result = Type.Named{name: "BuildFile"}
         }
-        method == "action" && (arity == 5 || (arity >= 7 && arity <= 15)) -> {
-            parameters = [Type]{Type.String, strings, strings, strings, strings}
-            trailing: [Type]{toolchain, probes, signing, Type.String, strings, strings, strings, strings, strings, Type.String}
-            loop index in 0..<arity - 5 -> parameters.push(trailing[index])
-            result = sema_build_result("BuildAction")
-        }
-        method == "legacy" && arity >= 6 && arity <= 17 -> {
-            parameters = [Type]{Type.String, Type.String, strings, strings, strings, strings}
-            trailing: [Type]{toolchain, probes, signing, Type.String, strings, strings, strings, strings, strings, Type.String, Type.String}
-            loop index in 0..<arity - 6 -> parameters.push(trailing[index])
-            result = sema_build_result("BuildAction")
-        }
         sema_build_context_target_method(method) && arity >= 3 && arity <= 7 -> {
             parameters = [Type]{Type.String, strings, Type.List{element: action}}
             trailing: [Type]{Type.List{element: target}, probes, toolchain, signing}
@@ -101,8 +89,6 @@ sema_build_context_target_method: fn(method: String) -> Bool Never! {
 }
 
 sema_build_context_arity_description: fn(method: String) -> String Never! {
-    if method == "action" -> return "5 or 7 to 15"
-    if method == "legacy" -> return "6 to 17"
     if sema_build_context_target_method(method) -> return "3 to 7"
     if method == "toolchain" -> return "2 to 6"
     if method == "probe" -> return "3 to 6"

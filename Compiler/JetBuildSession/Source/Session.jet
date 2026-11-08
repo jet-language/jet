@@ -9,7 +9,6 @@ use {
 }
 
 BuildSessionPolicy: struct {
-    legacy_denied: String?
     plugins_denied: String?
     plugin_grants: [String:[String]]
 }
@@ -90,6 +89,10 @@ BuildSessionPlugin: struct {
     grants: [String]
 }
 
+// A `b.run` step: the BuildFile `tool` it runs, its arguments, the files it
+// reads and makes, its own time limit in milliseconds (None: the
+// `action_timeout` option's), and the span of its `b.run` call, where a step
+// that declares no output is reported.
 BuildSessionAction: struct {
     name: String
     inputs: [String]
@@ -99,21 +102,7 @@ BuildSessionAction: struct {
     toolchain: Int
     probes: [Int]
     signing: Int?
-    kind: String
-    pools: [String]
-    env: [String:String]
-    env_allowlist: [String]
-    helpers: [String:String]
-    labels: [String:String]
-    cache: String
-    legacy: String?
-    plugin: Int?
-    compiler_owned: Bool{false}
-    variant_identity: String?{None}
-    // A `b.run` step: the BuildFile it runs, its own time limit in
-    // milliseconds (None: the `action_timeout` option's), and the span of its
-    // `b.run` call, where a step that declares no output is reported.
-    tool: Int?{None}
+    tool: Int
     timeout_ms: Int?{None}
     start: Int{0}
     end: Int{0}
@@ -291,22 +280,6 @@ build_session_paths: fn(paths: [String]) -> Bool {
     true
 }
 
-build_session_map: fn(entries: [String]) -> [String:String]? {
-    out := [String:String]{}
-    loop entry in entries {
-        parts: entry.split_once("=") ?? return None
-        out[parts.before] = parts.after
-    }
-    Val(out)
-}
-
-build_session_unique: fn(values: [String]) -> [String] {
-    out := [String]{}
-    loop value in values -> build_session_append_unique(out, value)
-    out.sort()
-    out
-}
-
 build_session_caps: fn(values: [String]) -> [String]? {
     // Rust BuildEffect declaration order, not lexical string order.
     out := [String]{}
@@ -338,41 +311,12 @@ build_session_cap_name: fn(flag: String) -> String Never! {
     }
 }
 
-build_session_pools: fn(values: [String]) -> [String] {
-    known: [String]{"cpu", "memory", "linker", "console", "gpu"}
-    out := [String]{}
-    custom := [String]{}
-    loop value in values {
-        lower: value.to_lower()
-        if build_session_contains_string(known, lower) -> build_session_append_unique(out, lower)
-        else -> build_session_append_unique(custom, value)
-    }
-    ordered := [String]{}
-    loop value in known { if build_session_contains_string(out, value) -> ordered.push(value) }
-    custom.sort()
-    loop value in custom -> ordered.push(value)
-    ordered
-}
-
-build_session_kind: fn(value: String) -> String? {
-    lower: value.to_lower()
-    if lower == "source_archive" -> return Val("source-archive")
-    if build_session_contains_string([String]{"compile", "docs", "debug", "source-archive", "generic"}, lower) -> return Val(lower)
-    None
-}
-
 build_session_call: fn(session: &BuildSession, method: String, args: [BuildSessionValue], generated_source: String?, in_impure_gate: Bool, start: Int, end: Int) -> BuildSessionReply Never! {
     permit := session.storage.guard_edit()
     state := &permit.value
     state.start = start
     state.end = end
     if !state.active -> return build_session_fail(state, "build context expired")
-    if method == "action" || method == "legacy" {
-        index: if method == "action" -> 4 else -> 5
-        caps: build_session_strings(args, index) ?? return build_session_fail(state, "build action effects must be a list of strings")
-        if caps.len() > 0 && !in_impure_gate -> return build_session_impure(state, method)
-        return build_session_add_action(state, method, args)
-    }
     if method == "run" {
         caps: build_session_strings(args, 2) ?? return build_session_fail(state, "a step's effects must be a list of strings")
         if caps.len() > 0 && !in_impure_gate -> return build_session_impure(state, method)
@@ -616,12 +560,7 @@ BuildSessionError: enum {
     MissingLockedProvenance(value: String)
     EmptyProbeField(value: String)
     EmptyActionArgv(value: String)
-    EmptyEnvName(value: String)
-    UndeclaredEnvName(action: String, key: String)
-    CachedActionWithoutOutputs(value: String)
     StepWithoutOutputs(value: String)
-    PhonyActionWithoutCaps(value: String)
-    PhonyActionWithOutputs(value: String)
     DuplicateActionOutput(action: String, output: String)
     DuplicateBuildOutput(output: String, first_action: String, second_action: String)
     UnknownTarget(id: Int)
@@ -629,12 +568,6 @@ BuildSessionError: enum {
     UnknownToolchain(id: Int)
     UnknownSigningIdentity(id: Int)
     UnknownProbe(id: Int)
-    LegacyWrapperWithoutInputs(kind: String)
-    LegacyWrapperWithoutOutputs(kind: String)
-    LegacyWrapperWithoutCaps(kind: String)
-    LegacyWrapperCommandMismatch(wrapper: String, actual: String)
-    LegacyProjectFileMissing(kind: String)
-    LegacyProjectFileInvalid(value: String)
     PolicyDenied(subject: String, allowed: Bool, reason: String, required_caps: [String])
     EmptyPluginField(value: String)
     InvalidPluginDigest(value: String)
@@ -691,17 +624,6 @@ build_session_error_debug: fn(variant: String, value: String) -> BuildSessionErr
 build_session_error_id: fn(variant: String, kind: String, id: Int) -> BuildSessionErrorProjection Never! {
     {variant: variant, text: "{variant}({kind}({id}))", fields: [BuildSessionErrorField]{{name: "id", value: "{id}"}}}
 }
-build_session_error_kind: fn(variant: String, kind: String) -> BuildSessionErrorProjection Never! {
-    wrapper: if kind == {
-        "cmake" -> "CMake"
-        "make" -> "Make"
-        "gradle" -> "Gradle"
-        "npm" -> "Npm"
-        "cargo" -> "Cargo"
-        else -> panic("invalid checked legacy kind")
-    }
-    {variant: variant, text: "{variant}({wrapper})", fields: [BuildSessionErrorField]{build_session_error_field("kind", kind)}}
-}
 build_session_error_cycle: fn(variant: String, kind: String, nodes: [String]) -> BuildSessionErrorProjection Never! {
     chain: loop node in nodes -> "`{node}`"
     {variant: variant, text: "{kind} dependency graph contains a cycle: {chain.join(" -> ")}; a cycle has no build order, so no {kind} in it can ever start; remove one dependency from that chain", fields: [BuildSessionErrorField]{{name: "nodes", value: build_session_error_texts(nodes)}}}
@@ -725,16 +647,7 @@ build_session_error_projection: fn(error: BuildSessionError) -> BuildSessionErro
         .MissingLockedProvenance(value) -> build_session_error_debug("MissingLockedProvenance", value)
         .EmptyProbeField(value) -> build_session_error_debug("EmptyProbeField", value)
         .EmptyActionArgv(value) -> build_session_error_debug("EmptyActionArgv", value)
-        .EmptyEnvName(value) -> build_session_error_debug("EmptyEnvName", value)
-        .CachedActionWithoutOutputs(value) -> build_session_error_one("CachedActionWithoutOutputs", value, "cached action `{value}` declares no outputs")
         .StepWithoutOutputs(value) -> build_session_error_one("StepWithoutOutputs", value, "step `{value}` declares no output, and only declared outputs leave its sealed folder; pass one with `.output(path)` or declare one with `.writes(path)`")
-        .PhonyActionWithoutCaps(value) -> build_session_error_one("PhonyActionWithoutCaps", value, "uncached action `{value}` declares no abilities")
-        .PhonyActionWithOutputs(value) -> build_session_error_debug("PhonyActionWithOutputs", value)
-        .LegacyWrapperWithoutInputs(kind) -> build_session_error_kind("LegacyWrapperWithoutInputs", kind)
-        .LegacyWrapperWithoutOutputs(kind) -> build_session_error_kind("LegacyWrapperWithoutOutputs", kind)
-        .LegacyWrapperWithoutCaps(kind) -> build_session_error_kind("LegacyWrapperWithoutCaps", kind)
-        .LegacyProjectFileMissing(kind) -> ({variant: "LegacyProjectFileMissing", text: "legacy {kind} import requires `{build_session_legacy_file(kind)}` in the project root", fields: [BuildSessionErrorField]{build_session_error_field("kind", kind)}})
-        .LegacyProjectFileInvalid(value) -> build_session_error_one("LegacyProjectFileInvalid", value, "legacy project file `{value}` must be a readable regular file")
         .EmptyPluginField(value) -> build_session_error_debug("EmptyPluginField", value)
         .InvalidPluginDigest(value) -> build_session_error_one("InvalidPluginDigest", value, "build plugin component digest is invalid: {value}")
         .PackagedPlugin(value) -> build_session_error_one("PackagedPlugin", value, "packaged build plugin rejected: {value}")
@@ -748,20 +661,8 @@ build_session_error_projection: fn(error: BuildSessionError) -> BuildSessionErro
         .UnknownSigningIdentity(id) -> build_session_error_id("UnknownSigningIdentity", "SigningIdentityId", id)
         .UnknownProbe(id) -> build_session_error_id("UnknownProbe", "ProbeId", id)
         .CompilerPackageDependencyMissing(package, dependency) -> ({variant: "CompilerPackageDependencyMissing", text: "compiler package `{package}` depends on missing package artifact `{dependency}`", fields: [BuildSessionErrorField]{build_session_error_field("package", package), build_session_error_field("dependency", dependency)}})
-        .UndeclaredEnvName(action, key) -> ({variant: "UndeclaredEnvName", text: "action `{action}` allowlists undeclared environment variable `{key}`", fields: [BuildSessionErrorField]{build_session_error_field("action", action), build_session_error_field("key", key)}})
         .DuplicateActionOutput(action, output) -> ({variant: "DuplicateActionOutput", text: "DuplicateActionOutput {{ action: {build_key_debug_text(action)}, output: {build_key_debug_text(output)} }}", fields: [BuildSessionErrorField]{build_session_error_field("action", action), build_session_error_field("output", output)}})
         .DuplicateBuildOutput(output, first, second) -> ({variant: "DuplicateBuildOutput", text: "output `{output}` is owned by both `{first}` and `{second}`", fields: [BuildSessionErrorField]{build_session_error_field("output", output), build_session_error_field("first_action", first), build_session_error_field("second_action", second)}})
-        .LegacyWrapperCommandMismatch(wrapper, actual) -> {
-            name: if wrapper == {
-                "cmake" -> "CMake"
-                "make" -> "Make"
-                "gradle" -> "Gradle"
-                "npm" -> "Npm"
-                "cargo" -> "Cargo"
-                else -> panic("invalid checked legacy kind")
-            }
-            {variant: "LegacyWrapperCommandMismatch", text: "LegacyWrapperCommandMismatch {{ wrapper: {name}, actual: {build_key_debug_text(actual)} }}", fields: [BuildSessionErrorField]{build_session_error_field("wrapper", wrapper), build_session_error_field("actual", actual)}}
-        }
         .PluginVersionMismatch(plugin, expected, actual) -> ({variant: "PluginVersionMismatch", text: "PluginVersionMismatch {{ plugin: {build_key_debug_text(plugin)}, expected: {build_key_debug_text(expected)}, actual: {build_key_debug_text(actual)} }}", fields: [BuildSessionErrorField]{build_session_error_field("plugin", plugin), build_session_error_field("expected", expected), build_session_error_field("actual", actual)}})
         .GeneratedModuleCycle(name, path) -> ({variant: "GeneratedModuleCycle", text: "E3511: generation rounds form a cycle: `{name}` and `{path}` have two producers", fields: [BuildSessionErrorField]{build_session_error_field("module", name), build_session_error_field("path", path)}})
         .TargetDependencyCycle(nodes) -> build_session_error_cycle("TargetDependencyCycle", "target", nodes)

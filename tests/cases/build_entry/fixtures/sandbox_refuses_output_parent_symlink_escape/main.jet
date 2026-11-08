@@ -1,13 +1,11 @@
 
 build: fn(b: Build) -[Exec, FS]> {
     #Impure("exercise hostile output path") {
-    action: b.action(
-        "escape",
-        [],
-        ["redirect/pwn"],
-        ["sh", "-c", "mkdir -p redirect; printf escaped > redirect/pwn"],
-        ["Exec", "FS"]
-    )
+    shell: b.probe("shell", "find_program", "sh")
+    action: b.run("escape", b.found(shell), ["Exec", "FS"])
+    action.arg("-c")
+    action.arg("mkdir -p redirect; printf escaped > redirect/pwn")
+    action.writes("redirect/pwn")
     app: b.add_executable("app", ["main.jet"], [action])
     b.default(app)
     }

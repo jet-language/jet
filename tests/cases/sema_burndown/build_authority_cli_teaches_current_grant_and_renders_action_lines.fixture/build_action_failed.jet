@@ -2,7 +2,11 @@
 // @build_grants exec
 build: fn(b: Build) -[Exec]> {
     #Impure("run failing action fixture") {
-        action: b.action("fail", [], ["never"], ["sh", "-c", "printf 'first\\nsecond\\n' >&2; exit 7"], ["Exec"])
+        shell: b.probe("shell", "find_program", "sh")
+        action: b.run("fail", b.found(shell), ["Exec"])
+        action.arg("-c")
+        action.arg("printf 'first\\nsecond\\n' >&2; exit 7")
+        action.writes("never")
         app: b.add_executable("app", ["build_action_failed.jet"], [action])
         b.default(app)
     }

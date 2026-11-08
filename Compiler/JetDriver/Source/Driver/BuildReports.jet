@@ -28,12 +28,9 @@ jet_driver_build_debug_ids: fn(values: [Int], kind: String) -> String Never! {
 jet_driver_build_file_json: fn(file: BuildGraphFile) -> String Never! {
     "{{\"path\":{foundation_json_quote(file.path)},\"owner\":{jet_driver_build_id(file.owner)},\"consumers\":{jet_driver_build_ints(file.consumers)},\"targets\":{jet_driver_build_ints(file.targets)}}}"
 }
-jet_driver_build_action_provenance: fn(state: BuildSessionState, action: BuildSessionAction) -> [String] Never! {
-    cache: if action.cache == "cached" -> { "Cached" } else -> { "UncachedPhony" }
-    facts := [String]{"argv={action.argv.join(" ")}", "inputs={action.inputs.len()}", "outputs={action.outputs.len()}", "cache={cache}"}
-    if action.legacy == .Val(wrapper) -> facts.push("legacy={wrapper}")
-    if action.plugin == .Val(plugin) -> facts.push("plugin={state.plugins[plugin].name}")
-    facts
+// Every step is cached, so its provenance says so in the executor's words.
+jet_driver_build_action_provenance: fn(action: BuildSessionAction) -> [String] Never! {
+    [String]{"argv={action.argv.join(" ")}", "inputs={action.inputs.len()}", "outputs={action.outputs.len()}", "cache=Cached"}
 }
 jet_driver_build_explanation: fn(plan: BuildSessionPlan, subject: String) -> JetDriverBuildExplanation Never! {
     permit: plan.storage.guard_read()
@@ -45,7 +42,7 @@ jet_driver_build_explanation: fn(plan: BuildSessionPlan, subject: String) -> Jet
     loop action in permit.value.actions {
         // copy: `subject` is the caller's query argument (a read parameter), and the explanation
         // owns its label.
-        if action.name == subject -> return {label: subject.copy(), provenance: jet_driver_build_action_provenance(permit.value, action)}
+        if action.name == subject -> return {label: subject.copy(), provenance: jet_driver_build_action_provenance(action)}
     }
     graph: build_session_project(permit.value)
     owner := "None"
@@ -81,10 +78,9 @@ jet_driver_build_plan_json: fn(plan: BuildSessionPlan) -> String Never! {
     loop action in graph.actions {
         real: permit.value.actions[action.id]
         probe_rows: loop probe in real.probes -> foundation_json_quote(permit.value.probes[probe].name)
-        cache: if real.cache == "cached" -> { "Cached" } else -> { "UncachedPhony" }
         hit: if action.cache_hit == .Val(value) -> { if value -> { "hit" } else -> { "miss" } } else -> { "unknown" }
-        provenance: jet_driver_build_action_provenance(permit.value, real)
-        actions.push("{{\"id\":{action.id},\"name\":{foundation_json_quote(action.name)},\"inputs\":{jet_driver_build_strings(action.inputs)},\"outputs\":{jet_driver_build_strings(action.outputs)},\"caps\":{jet_driver_build_strings(action.caps)},\"pools\":{jet_driver_build_strings(action.pools)},\"toolchain\":{foundation_json_quote(permit.value.toolchains[real.toolchain].name)},\"probes\":[{probe_rows.join(",")}],\"cache\":{foundation_json_quote(cache)},\"cache_status\":{foundation_json_quote(hit)},\"key\":{foundation_json_quote(action.key)},\"compiler_owned\":{action.compiler_owned},\"provenance\":{jet_driver_build_strings(provenance)}}}")
+        provenance: jet_driver_build_action_provenance(real)
+        actions.push("{{\"id\":{action.id},\"name\":{foundation_json_quote(action.name)},\"inputs\":{jet_driver_build_strings(action.inputs)},\"outputs\":{jet_driver_build_strings(action.outputs)},\"caps\":{jet_driver_build_strings(action.caps)},\"pools\":{jet_driver_build_strings(action.pools)},\"toolchain\":{foundation_json_quote(permit.value.toolchains[real.toolchain].name)},\"probes\":[{probe_rows.join(",")}],\"cache\":\"Cached\",\"cache_status\":{foundation_json_quote(hit)},\"key\":{foundation_json_quote(action.key)},\"compiler_owned\":{action.compiler_owned},\"provenance\":{jet_driver_build_strings(provenance)}}}")
     }
     keys: loop key in graph.action_keys -> "{{\"action\":{foundation_json_quote(key.action)},\"key\":{foundation_json_quote(key.key)}}}"
     hits: loop action in graph.cache_hits -> "{{\"action\":{foundation_json_quote(action.name)},\"key\":{foundation_json_quote(action.key)}}}"

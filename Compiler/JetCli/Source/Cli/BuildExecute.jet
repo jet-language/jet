@@ -10,7 +10,7 @@ use {
     jet_foundation.[Diagnostic, diagnostic_from_registry, diagnostic_registry_row, diagnostic_render_all]
     jet_pkg_model.[OverlayPolicy, WorkspaceDeclarationCache, pkg_build_entry_source, pkg_parse_workspace_policy, pkg_resolve_workspace_source]
     jetpack_build.[
-        ActionKind, ActionSpec, BuildArtifactStoreHandle, BuildExecutionError, BuildProvenance, BuildResourcePool,
+        ActionSpec, BuildArtifactStoreHandle, BuildExecutionError, BuildProvenance,
         HermeticActionHandle, HermeticBuildContext, HermeticBuildError, HermeticBuildPlan, LinkerIdentity, ProbeHandle,
         ProbeSpec, SDKIdentity, SigningIdentityHandle, SigningIdentitySpec, SysrootIdentity, TargetRef, TargetSpec,
         ToolchainHandle, ToolchainSpec, build_action_failure_stderr, build_execute_build_plan,
@@ -214,35 +214,12 @@ jet_cli_build_toolchain_spec: fn(declared: BuildSessionToolchain, provenance: Bu
 }
 
 jet_cli_build_action_spec: fn(action: BuildSessionAction, toolchains: [ToolchainHandle], probes: [ProbeHandle], signing: [SigningIdentityHandle], action_timeout_ms: Int) -> ActionSpec Never! {
-    spec := if action.cache == "uncached-phony" -> ActionSpec.uncached_phony(action.argv) else -> ActionSpec.cached(action.argv)
-    spec = spec.with_inputs(action.inputs).with_outputs(action.outputs).with_toolchain(toolchains[action.toolchain]).with_timeout_ms(action.timeout_ms ?? action_timeout_ms)
+    spec := ActionSpec.cached(action.argv).with_inputs(action.inputs).with_outputs(action.outputs).with_toolchain(toolchains[action.toolchain]).with_timeout_ms(action.timeout_ms ?? action_timeout_ms)
     loop cap in action.caps {
         if BuildEffect.parse(cap) == .Val(parsed) -> spec = spec.with_cap(parsed)
     }
     loop probe in action.probes -> spec = spec.with_probe(probes[probe])
     if action.signing == .Val(identity) -> spec = spec.with_signing_identity(signing[identity])
-    spec = spec.with_kind(if action.kind == {
-        "compile" -> ActionKind.Compile
-        "docs" -> ActionKind.Docs
-        "debug" -> ActionKind.Debug
-        "source-archive" -> ActionKind.SourceArchive
-        else -> ActionKind.Generic
-    })
-    loop pool in action.pools {
-        spec = spec.with_pool(if pool == {
-            "cpu" -> BuildResourcePool.CPU
-            "memory" -> BuildResourcePool.Memory
-            "linker" -> BuildResourcePool.Linker
-            "console" -> BuildResourcePool.Console
-            "gpu" -> BuildResourcePool.GPU
-            else -> BuildResourcePool.Custom(pool)
-        })
-    }
-    loop key in action.env.keys() -> spec = spec.with_env(key, action.env[key])
-    if action.env_allowlist.len() > 0 -> spec = spec.with_env_allowlist(action.env_allowlist)
-    loop helper in action.helpers.keys() -> spec = spec.with_helper_version(helper, action.helpers[helper])
-    loop label in action.labels.keys() -> spec = spec.with_label(label, action.labels[label])
-    if action.variant_identity == .Val(identity) -> spec = spec.with_variant_identity(identity)
     spec
 }
 

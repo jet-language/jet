@@ -194,32 +194,28 @@ build_session_dep_outputs: fn(state: BuildSessionState, action: Int) -> [String]
     paths.sort()
     paths
 }
+// Every field of the executor's canonical action key (Jetpack's
+// build_canonical_action_key): a step is a generic, cached, compiler-unowned
+// action with no environment, helpers, labels, variant, legacy wrapper or
+// plugin, in the cpu pool, so those fields are written as those constants.
 build_session_action_key: fn(state: BuildSessionState, id: Int) -> String Never! {
     action: state.actions[id]
     bytes := [U8]{}
+    no_entries: [String:String]{}
     build_key_text(bytes, "jet.action-key.v2")
     build_key_text(bytes, "kind")
-    build_key_text(bytes, action.kind)
-    observes: action.kind != "generic"
+    build_key_text(bytes, "generic")
     build_key_text(bytes, "observe-exact-source")
-    build_key_bool(bytes, observes)
+    build_key_bool(bytes, false)
     build_key_text(bytes, "compiler-owned")
-    build_key_bool(bytes, action.compiler_owned)
+    build_key_bool(bytes, false)
     build_key_text(bytes, "argv")
     build_key_texts(bytes, action.argv)
     build_key_text(bytes, "env-allowlist")
-    env := [String:String]{}
-    loop key in action.env.keys() { if action.env_allowlist.len() == 0 || build_session_contains_string(action.env_allowlist, key) -> env[key] = action.env[key] }
-    build_key_map(bytes, env)
+    build_key_map(bytes, no_entries)
     build_key_text(bytes, "inputs")
     build_key_texts(bytes, action.inputs)
     build_key_text(bytes, "input-snapshots")
-    if observes {
-        loop path in action.inputs {
-            build_key_text(bytes, path)
-            build_key_bool(bytes, false)
-        }
-    }
     build_key_number(bytes, 0)
     build_key_text(bytes, "outputs")
     build_key_texts(bytes, action.outputs)
@@ -228,11 +224,11 @@ build_session_action_key: fn(state: BuildSessionState, id: Int) -> String Never!
     build_key_text(bytes, "caps")
     loop cap in action.caps -> build_key_text(bytes, cap)
     build_key_text(bytes, "cache")
-    build_key_text(bytes, action.cache)
+    build_key_text(bytes, "cached")
     build_key_text(bytes, "compiler-version")
     build_key_text(bytes, state.compiler_version)
     build_key_text(bytes, "helper-versions")
-    build_key_map(bytes, action.helpers)
+    build_key_map(bytes, no_entries)
     build_key_text(bytes, "generated-modules")
     generated := state.generated
     generated = loop fresh_item in generated -> fresh_item
@@ -240,7 +236,6 @@ build_session_action_key: fn(state: BuildSessionState, id: Int) -> String Never!
     loop generated_row in generated {
         build_key_text(bytes, generated_row.path)
         build_key_text(bytes, generated_row.source_digest)
-        if observes -> build_key_text(bytes, generated_row.source)
     }
     build_key_text(bytes, "build-fact-contributions")
     contributions := state.contributions
@@ -275,27 +270,15 @@ build_session_action_key: fn(state: BuildSessionState, id: Int) -> String Never!
         build_key_declared_provenance(bytes)
     }
     build_key_text(bytes, "variant")
-    build_key_bool(bytes, action.variant_identity != None)
-    if action.variant_identity == .Val(identity) -> build_key_text(bytes, identity)
+    build_key_bool(bytes, false)
     build_key_text(bytes, "labels")
-    build_key_map(bytes, action.labels)
+    build_key_map(bytes, no_entries)
     build_key_text(bytes, "resource-pools")
-    pools: if action.pools.len() == 0 -> [String]{"cpu"} else -> action.pools
-    loop pool in pools {
-        if !build_session_contains_string([String]{"cpu", "memory", "linker", "console", "gpu"}, pool) -> build_key_text(bytes, "custom")
-        build_key_text(bytes, pool)
-    }
+    build_key_text(bytes, "cpu")
     build_key_text(bytes, "legacy")
-    build_key_bool(bytes, action.legacy != None)
-    if action.legacy == .Val(wrapper) -> build_key_text(bytes, wrapper)
+    build_key_bool(bytes, false)
     build_key_text(bytes, "plugin")
-    build_key_bool(bytes, action.plugin != None)
-    if action.plugin == .Val(index) {
-        selected: state.plugins[index]
-        values: [String]{selected.name, selected.version, selected.api_version, selected.component_digest}
-        loop value in values -> build_key_text(bytes, value)
-        loop grant in selected.grants -> build_key_text(bytes, grant)
-    }
+    build_key_bool(bytes, false)
     "act-sha256:{build_crypto.sha256(bytes).hex()}"
 }
 build_session_compiler_node: fn(kind: String, subject: String, input_digests: [BuildGraphInputDigest]) -> BuildGraphNode Never! {

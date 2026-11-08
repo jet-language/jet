@@ -3,15 +3,11 @@ build: fn(b: Build) -[Exec, FS]> {
     #Impure("probe selected toolchain") {
     tc: b.toolchain("native", "x86_64-linux")
     shell: b.probe("shell", "find_program", "sh")
-    action: b.action(
-        "stamp",
-        [],
-        ["probe.txt"],
-        ["sh", "-c", "printf probe > probe.txt"],
-        ["Exec", "FS"],
-        tc,
-        [shell]
-    )
+    action: b.run("stamp", b.found(shell), ["Exec", "FS"])
+    action.arg("-c")
+    action.arg("printf probe > probe.txt")
+    action.writes("probe.txt")
+    action.toolchain(tc)
     app: b.add_executable("app", ["main.jet"], [action])
     b.default(app)
     }

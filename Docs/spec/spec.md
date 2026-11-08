@@ -4994,9 +4994,7 @@ the build path.
 Build code registers typed values. Targets include
 `b.add_executable`, `b.add_library`, `b.add_test`, `b.add_asset_bundle`,
 `b.add_doc`, `b.add_install`, `b.add_package`, and `b.add_publish`. Each returns
-a `BuildTarget`. `b.action(name, inputs, outputs, argv, caps)` returns a
-`BuildAction`; optional typed `BuildToolchain` and `BuildProbe` arguments add
-toolchain and probe identity. `b.plan()` or `b.plan(default)` hands one
+a `BuildTarget`. `b.plan()` or `b.plan(default)` hands one
 canonical graph to scheduling, caching, execution, queries, and LSP.
 `b.toolchain(name, target_triple)` records target identity. `b.probe` supports
 `find_program`, `pkg_config`, and `header` probes.
@@ -5019,7 +5017,7 @@ same argument: `.output("gen.c", flag: "--out=")` passes `--out=gen.c`.
 `.output` returns the new `BuildFile`, and `f.path()` is a made file's
 package-relative path; a found program has no path until the build runs, so
 its `.path()` is refused. `.toolchain(t)` and `.sign(identity)` add toolchain
-and signing identity. A step's result is cached like an action's. A step that
+and signing identity. A step's result is cached. A step that
 declares no output is refused at its `b.run` call (E3502), since only declared
 outputs leave its sandbox, and `.arg` text that names a package file is
 refused with the fix `.input(path)`, so the step can't read an undeclared file.
@@ -5044,18 +5042,15 @@ it after the graph runs.
 
 ```jet
 build: fn(b: Build) -[Exec, FS]> {
-    #Impure("run declared toolchain probe and action") {
+    #Impure("run declared toolchain probe and step") {
         shell: b.probe("shell", "find_program", "sh")
         native: b.toolchain("native", "x86_64-linux")
-        stamp: b.action(
-            "stamp",
-            ["assets/version.txt"],
-            ["build/version.txt"],
-            ["sh", "-c", "cp assets/version.txt build/version.txt"],
-            ["Exec", "FS"],
-            native,
-            [shell]
-        )
+        stamp: b.run("stamp", b.found(shell), ["Exec", "FS"])
+        stamp.arg("-c")
+        stamp.arg("cp assets/version.txt build/version.txt")
+        stamp.reads("assets/version.txt")
+        stamp.writes("build/version.txt")
+        stamp.toolchain(native)
         app: b.add_executable("app", ["main.jet"], [stamp])
         b.default(app)
     }
@@ -5065,10 +5060,9 @@ run: fn() { print("hello") }
 ```
 
 Action dependencies come from target dependencies and declared producer and
-consumer edges. Ready nodes run concurrently in deterministic stages; `linker`,
-`console`, `gpu`, and named resource pools serialize. Cached actions include
-declared input content, argv, environment, authority, toolchain, probes,
-resource pools, plugins, and generated-source hashes. A cache hit restores only
+consumer edges. Ready nodes run concurrently in deterministic stages. Cached
+actions include declared input content, argv, authority, toolchain, probes,
+signing identity, and generated-source hashes. A cache hit restores only
 declared outputs from the local CAS.
 
 There is no ambient execution fallback. On Linux each action runs under
@@ -5140,21 +5134,6 @@ checks authority per plugin and rolls back rejected contributions, so a plugin
 cannot leave partial actions, targets, or generated modules. Packaged manifests
 are bounded to 64 KiB and components to 64 MiB; request and response pipes are
 bounded too. Production loaders reject symlinks and non-regular package files.
-
-### Legacy wrappers
-
-CMake, Make, Gradle, npm, and Cargo remain explicit Tier-2 wrappers. A
-`LegacyWrapperSpec` parses a canonical root file into typed command, paths,
-authority, environment, cache, kind, pools, and provenance. It records that
-file and its bounded non-symlink source closure as typed inputs, rejects links,
-oversized or non-UTF-8 files, and refuses unsupported constructs. CMake and
-Gradle imports require an exact `jet: output=...` directive. npm imports require
-an exact `main` or `module` entry; dependency-bearing imports fail because the
-hermetic sandbox does not copy `node_modules`. No undeclared install or network
-fallback is attempted. Make recipes, Gradle task bodies, unpinned Cargo
-sources, non-registry Cargo sources, and unmodeled fields fail closed.
-Production policy denies wrappers in CI unless a stronger host policy replaces
-that default.
 
 Fleet host overrides are typed values evaluated by the same pure comptime
 engine and cycle checks as computed module fields. Results retain exact source,

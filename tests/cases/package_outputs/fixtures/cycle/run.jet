@@ -1,11 +1,16 @@
-build: fn(b: Build) {
-    alpha: b.action("alpha", ["gamma.stamp"], ["alpha.stamp"], ["sh", "-c", "true"], [])
-    beta: b.action("beta", ["alpha.stamp"], ["beta.stamp"], ["sh", "-c", "true"], [])
-    gamma: b.action("gamma", ["beta.stamp"], ["gamma.stamp"], ["sh", "-c", "true"], [])
+build: fn(b: Build) -[Exec]> {
+    #Impure("find the shell the steps run") {
+    shell: b.probe("shell", "find_program", "sh")
+    alpha: b.run("alpha", b.found(shell), [])
+    alpha.reads("gamma.stamp")
+    alpha.writes("alpha.stamp")
+    beta: b.run("beta", b.found(shell), [])
+    beta.reads("alpha.stamp")
+    beta.writes("beta.stamp")
+    gamma: b.run("gamma", b.found(shell), [])
+    gamma.reads("beta.stamp")
+    gamma.writes("gamma.stamp")
     app: b.add_executable("app", ["run.jet"], [alpha, beta, gamma])
     b.default(app)
-}
-
-run: fn() {
-    print("unreachable")
+    }
 }

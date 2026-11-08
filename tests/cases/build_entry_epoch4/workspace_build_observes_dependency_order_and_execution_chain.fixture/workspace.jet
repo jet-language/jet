@@ -7,13 +7,11 @@ workspace: module {
 
 build: fn(b: Build) -[Exec]> {
     #Impure("workspace must observe member b") {
-        action: b.action(
-            "workspace-order",
-            [],
-            ["workspace-stamp"],
-            ["sh", "-c", "printf workspace > workspace-stamp"],
-            ["Exec"]
-        )
+        shell: b.probe("shell", "find_program", "sh")
+        action: b.run("workspace-order", b.found(shell), ["Exec"])
+        action.arg("-c")
+        action.arg("printf workspace > workspace-stamp")
+        action.writes("workspace-stamp")
         app: b.add_executable("workspace", ["workspace.jet"], [action])
         b.default(app)
     }

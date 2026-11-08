@@ -93,9 +93,9 @@ build_session_validate: fn(state: BuildSessionState, default: Int) -> BuildSessi
     }
     loop (id, action) in state.actions {
         action_names.push(action.name)
-        // A `b.run` step leaves only its declared outputs, so a step with
-        // none is reported at its own `b.run` call.
-        if action.tool != None && action.outputs.len() == 0 {
+        // A step leaves only its declared outputs, so a step with none is
+        // reported at its own `b.run` call.
+        if action.outputs.len() == 0 {
             diagnostic := build_session_error_diag(state, BuildSessionError.StepWithoutOutputs{value: action.name})
             diagnostic.start = action.start
             diagnostic.end = action.end
@@ -123,9 +123,8 @@ build_session_project: fn(state: BuildSessionState) -> BuildGraph Never! {
     }
     loop (id, action) in state.actions {
         target: build_session_action_target(state, id)
-        pools: if action.pools.len() == 0 -> [String]{"cpu"} else -> action.pools
         key: build_session_action_key(state, id)
-        actions.push(BuildGraphAction{id: id, name: action.name, kind: action.kind, inputs: action.inputs, outputs: action.outputs, target: target, caps: loop flag in action.caps -> build_session_cap_name(flag), pools: pools, legacy_wrapper: action.legacy, plugin: action.plugin, compiler_owned: action.compiler_owned, key: key, cache_hit: None})
+        actions.push(BuildGraphAction{id: id, name: action.name, kind: "generic", inputs: action.inputs, outputs: action.outputs, target: target, caps: loop flag in action.caps -> build_session_cap_name(flag), pools: [String]{"cpu"}, plugin: None, compiler_owned: false, key: key, cache_hit: None})
         keys.push(BuildGraphActionKey{action: action.name, key: key})
         loop output in action.outputs {
             row := file_rows.get(output) ?? BuildGraphFile{path: output, owner: None, consumers: [Int]{}, targets: [Int]{}}
