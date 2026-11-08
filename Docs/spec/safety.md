@@ -2339,84 +2339,84 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostFiles.jet",
-      "line": 374,
+      "line": 379,
       "column": 5,
       "reason": "the terminated borrowed path and 128-byte stat fact output are live for the syscall"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostFiles.jet",
-      "line": 425,
+      "line": 430,
       "column": 5,
       "reason": "the caller lends one writable Bool byte"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostFiles.jet",
-      "line": 441,
+      "line": 446,
       "column": 9,
       "reason": "the held directory and terminated source-approved single name stay live through openat"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostFiles.jet",
-      "line": 464,
+      "line": 469,
       "column": 9,
       "reason": "the held directory and terminated final name live through O_PATH|O_NOFOLLOW|O_CLOEXEC openat; no read access or link traversal"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostFiles.jet",
-      "line": 472,
+      "line": 477,
       "column": 9,
       "reason": "openat returned an exclusively owned descriptor and the caller lends StatFacts128; fstat copies initialized scalar facts"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostFiles.jet",
-      "line": 506,
+      "line": 511,
       "column": 5,
       "reason": "both duplicated descriptors and the terminated name live through the held-inode linkat syscall"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostFiles.jet",
-      "line": 528,
+      "line": 533,
       "column": 9,
       "reason": "the descriptor is held live, output begins with the borrowed empty pathname, statx writes only its private stack frame"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostFiles.jet",
-      "line": 539,
+      "line": 544,
       "column": 5,
       "reason": "the terminated source-approved path and three writable birth-time output words stay live through statx"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostFiles.jet",
-      "line": 593,
+      "line": 598,
       "column": 5,
       "reason": "both terminated borrowed names and the caller's optional compact byte output remain live only through lgetxattr"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostFiles.jet",
-      "line": 623,
+      "line": 628,
       "column": 9,
       "reason": "the held directory, terminated plain name and writable byte range are borrowed only through readlinkat"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostFiles.jet",
-      "line": 649,
+      "line": 654,
       "column": 5,
       "reason": "held directory duplicates and terminated names prevent any descriptor-close/reuse race during renameat2"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostFiles.jet",
-      "line": 669,
+      "line": 674,
       "column": 9,
       "reason": "the held fd and stack-local source-validated winsize word live only through ioctl"
     },
@@ -2682,21 +2682,21 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostNetPoller.jet",
-      "line": 24,
+      "line": 28,
       "column": 5,
       "reason": "runtime-init runs before any other thread exists"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostNetPoller.jet",
-      "line": 62,
+      "line": 66,
       "column": 5,
       "reason": "the root lock owns a packed 12B epoll_event; state retains the native fd through this synchronous call"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostNetPoller.jet",
-      "line": 88,
+      "line": 92,
       "column": 9,
       "reason": "events owns 64 packed epoll_event entries; epoll_wait retains no buffer pointer"
     },
@@ -10023,18 +10023,18 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/HostFiles.jet | 14:5 | "the caller owns the FD72 lock or exclusive runtime scratch word" |
 | Compiler | Compiler/JetRuntime/Source/HostFiles.jet | 54:5 | "the fresh path allocation includes its terminator byte" |
 | Compiler | Compiler/JetRuntime/Source/HostFiles.jet | 285:9 | "the caller lends 128 writable bytes for portable stat facts" |
-| Compiler | Compiler/JetRuntime/Source/HostFiles.jet | 374:5 | "the terminated borrowed path and 128-byte stat fact output are live for the syscall" |
-| Compiler | Compiler/JetRuntime/Source/HostFiles.jet | 425:5 | "the caller lends one writable Bool byte" |
-| Compiler | Compiler/JetRuntime/Source/HostFiles.jet | 441:9 | "the held directory and terminated source-approved single name stay live through openat" |
-| Compiler | Compiler/JetRuntime/Source/HostFiles.jet | 464:9 | "the held directory and terminated final name live through O_PATH&#124;O_NOFOLLOW&#124;O_CLOEXEC openat; no read access or link traversal" |
-| Compiler | Compiler/JetRuntime/Source/HostFiles.jet | 472:9 | "openat returned an exclusively owned descriptor and the caller lends StatFacts128; fstat copies initialized scalar facts" |
-| Compiler | Compiler/JetRuntime/Source/HostFiles.jet | 506:5 | "both duplicated descriptors and the terminated name live through the held-inode linkat syscall" |
-| Compiler | Compiler/JetRuntime/Source/HostFiles.jet | 528:9 | "the descriptor is held live, output begins with the borrowed empty pathname, statx writes only its private stack frame" |
-| Compiler | Compiler/JetRuntime/Source/HostFiles.jet | 539:5 | "the terminated source-approved path and three writable birth-time output words stay live through statx" |
-| Compiler | Compiler/JetRuntime/Source/HostFiles.jet | 593:5 | "both terminated borrowed names and the caller's optional compact byte output remain live only through lgetxattr" |
-| Compiler | Compiler/JetRuntime/Source/HostFiles.jet | 623:9 | "the held directory, terminated plain name and writable byte range are borrowed only through readlinkat" |
-| Compiler | Compiler/JetRuntime/Source/HostFiles.jet | 649:5 | "held directory duplicates and terminated names prevent any descriptor-close/reuse race during renameat2" |
-| Compiler | Compiler/JetRuntime/Source/HostFiles.jet | 669:9 | "the held fd and stack-local source-validated winsize word live only through ioctl" |
+| Compiler | Compiler/JetRuntime/Source/HostFiles.jet | 379:5 | "the terminated borrowed path and 128-byte stat fact output are live for the syscall" |
+| Compiler | Compiler/JetRuntime/Source/HostFiles.jet | 430:5 | "the caller lends one writable Bool byte" |
+| Compiler | Compiler/JetRuntime/Source/HostFiles.jet | 446:9 | "the held directory and terminated source-approved single name stay live through openat" |
+| Compiler | Compiler/JetRuntime/Source/HostFiles.jet | 469:9 | "the held directory and terminated final name live through O_PATH&#124;O_NOFOLLOW&#124;O_CLOEXEC openat; no read access or link traversal" |
+| Compiler | Compiler/JetRuntime/Source/HostFiles.jet | 477:9 | "openat returned an exclusively owned descriptor and the caller lends StatFacts128; fstat copies initialized scalar facts" |
+| Compiler | Compiler/JetRuntime/Source/HostFiles.jet | 511:5 | "both duplicated descriptors and the terminated name live through the held-inode linkat syscall" |
+| Compiler | Compiler/JetRuntime/Source/HostFiles.jet | 533:9 | "the descriptor is held live, output begins with the borrowed empty pathname, statx writes only its private stack frame" |
+| Compiler | Compiler/JetRuntime/Source/HostFiles.jet | 544:5 | "the terminated source-approved path and three writable birth-time output words stay live through statx" |
+| Compiler | Compiler/JetRuntime/Source/HostFiles.jet | 598:5 | "both terminated borrowed names and the caller's optional compact byte output remain live only through lgetxattr" |
+| Compiler | Compiler/JetRuntime/Source/HostFiles.jet | 628:9 | "the held directory, terminated plain name and writable byte range are borrowed only through readlinkat" |
+| Compiler | Compiler/JetRuntime/Source/HostFiles.jet | 654:5 | "held directory duplicates and terminated names prevent any descriptor-close/reuse race during renameat2" |
+| Compiler | Compiler/JetRuntime/Source/HostFiles.jet | 674:9 | "the held fd and stack-local source-validated winsize word live only through ioctl" |
 | Compiler | Compiler/JetRuntime/Source/HostHeldDirectory.jet | 15:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/HostHeldDirectory.jet | 206:13 | "the owned walk descriptor and terminated part live through openat" |
 | Compiler | Compiler/JetRuntime/Source/HostHeldDirectory.jet | 265:13 | "the walk directory and terminated final part live through openat" |
@@ -10072,9 +10072,9 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/HostNetAddress.jet | 50:5 | "value lends IP24; data owns length initialized native U8 elements; output receives ownership" |
 | Compiler | Compiler/JetRuntime/Source/HostNetAddress.jet | 83:5 | "bytes lends width initialized little-endian bytes (width&lt;=8)" |
 | Compiler | Compiler/JetRuntime/Source/HostNetAddress.jet | 93:5 | "bytes owns width writable little-endian bytes (width&lt;=8)" |
-| Compiler | Compiler/JetRuntime/Source/HostNetPoller.jet | 24:5 | "runtime-init runs before any other thread exists" |
-| Compiler | Compiler/JetRuntime/Source/HostNetPoller.jet | 62:5 | "the root lock owns a packed 12B epoll_event; state retains the native fd through this synchronous call" |
-| Compiler | Compiler/JetRuntime/Source/HostNetPoller.jet | 88:9 | "events owns 64 packed epoll_event entries; epoll_wait retains no buffer pointer" |
+| Compiler | Compiler/JetRuntime/Source/HostNetPoller.jet | 28:5 | "runtime-init runs before any other thread exists" |
+| Compiler | Compiler/JetRuntime/Source/HostNetPoller.jet | 66:5 | "the root lock owns a packed 12B epoll_event; state retains the native fd through this synchronous call" |
+| Compiler | Compiler/JetRuntime/Source/HostNetPoller.jet | 92:9 | "events owns 64 packed epoll_event entries; epoll_wait retains no buffer pointer" |
 | Compiler | Compiler/JetRuntime/Source/HostNetResolver.jet | 159:5 | "host lends length E4 bytes; outputs lend their writable pointer/count words" |
 | Compiler | Compiler/JetRuntime/Source/HostNetResolver.jet | 177:5 | "name owns a trailing NUL byte" |
 | Compiler | Compiler/JetRuntime/Source/HostParallelism.jet | 451:5 | "sched_getaffinity writes at most the owned 128-byte mask; pid0 names this thread" |

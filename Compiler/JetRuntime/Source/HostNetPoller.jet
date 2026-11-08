@@ -4,6 +4,10 @@
 // Node64: ID-next0, state-next8, monotonic ID16, borrowed FD72 state24,
 // waiters32, armed mask40, closed48, reserved56. Each linked waiter retains
 // FD72, so explicit close cannot recycle its descriptor before deregistration.
+// A node and its EPOLLONESHOT registration outlive their waiters: the next
+// wait on the descriptor re-arms it with one MOD instead of DEL then ADD.
+// The descriptor's close (net_fd_closed) deregisters and frees the node once
+// no waiter remains, and always before its FD72 state can be freed.
 // Waiter48: next0, node8, ParkSlot16, interest24, ready32, failure40.
 // Events carry an ID, not a node pointer: stale kernel events cannot dereference
 // freed nodes. Both ID/state bucket tables are guarded by the root mutex.
@@ -129,20 +133,25 @@ net_node_rearm: fn(root: I64, node: I64) {
         sync_mutex_unlock(root)
     }
 }
-// Called UNDER FD72 mutex after closed16 is set; never drops/relocks FD72.
+// Called UNDER FD72 mutex after closed16 is set, or by the last FD72 drop;
+// never drops/relocks FD72. A node with no waiter is freed here, before its
+// state can be; one with waiters is freed by the last waiter's removal.
 // True asks the host carrier to defer physical close until net refs drain.
 net_fd_closed: fn(state: I64) -> Bool {
     root: net_poller_root
     if (root == I64{0}) -> return false
     sync_mutex_lock(root)
     node: net_node_for_state(root, state)
+    waiting := false
     if (node != I64{0}) {
         net_put(node, I64{48}, I64{1})
         _ := net_epoll_ctl(root, node, I64{2}, I64{0})
         net_node_fail(node, I64{-9})
+        waiting = net_word(node, I64{32}) != I64{0}
+        if !waiting -> net_node_free(root, node)
     }
     sync_mutex_unlock(root)
-    node != I64{0}
+    waiting
 }
 net_chain_unlink: fn(head: I64, node: I64, next_offset: I64) {
     cursor := head
@@ -155,17 +164,20 @@ net_chain_unlink: fn(head: I64, node: I64, next_offset: I64) {
         cursor = wrapping(item + next_offset)
     }
 }
+// Caller holds the root lock; the node has no waiter.
+net_node_free: fn(root: I64, node: I64) {
+    net_chain_unlink(net_id_bucket(root, net_word(node, I64{16})), node, I64{0})
+    net_chain_unlink(net_state_bucket(root, net_word(node, I64{24})), node, I64{8})
+    jet_rt_free(node, I64{64}, I64{8})
+}
+// The last waiter of an open descriptor leaves its node registered (a fired
+// EPOLLONESHOT stays disarmed); a closed descriptor's node goes with it.
 net_waiter_remove: fn(root: I64, waiter: I64) {
     node: net_word(waiter, I64{8})
     state: net_word(node, I64{24})
     sync_mutex_lock(root)
     net_chain_unlink(wrapping(node + I64{32}), waiter, I64{0})
-    if (net_word(node, I64{32}) == I64{0}) {
-        if (net_word(node, I64{48}) == I64{0}) -> _ := net_epoll_ctl(root, node, I64{2}, I64{0})
-        net_chain_unlink(net_id_bucket(root, net_word(node, I64{16})), node, I64{0})
-        net_chain_unlink(net_state_bucket(root, state), node, I64{8})
-        jet_rt_free(node, I64{64}, I64{8})
-    } else { net_node_rearm(root, node) }
+    if (net_word(node, I64{32}) == I64{0} && net_word(node, I64{48}) != I64{0}) { net_node_free(root, node) } else { net_node_rearm(root, node) }
     sync_mutex_unlock(root)
     sync_park_drop(net_word(waiter, I64{16}))
     jet_rt_free(waiter, I64{48}, I64{8})
