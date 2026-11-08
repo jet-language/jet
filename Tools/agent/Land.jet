@@ -55,10 +55,12 @@
 // on), then `jet build Compiler` (optimize, lowering, object and link rows),
 // then the runtime pack lowered by the compiler just built (as chain s1's
 // pack step does), then that compiler's own `jet check Compiler/JetCli` (as
-// chain s2 does), each with keep-going and every row of its report listed at
-// its file:line. Each pass runs with its own memory cap (HEAVY_MEMORY).
+// chain s2 does) and its `jet check Core` (every Core body, called or not;
+// it moves to the seed's check once the seed carries `jet check Core`), each
+// with keep-going and every row of its report listed at its file:line. Each
+// pass runs with its own memory cap (HEAVY_MEMORY).
 // CENSUS_BUILD=0 stops after the check, CENSUS_SELFCHECK=0 before the
-// self-check. Output: $JET_SCRATCH_ROOT/discovery/r14/{snap,census}. A clean
+// self-checks. Output: $JET_SCRATCH_ROOT/discovery/r14/{snap,census}. A clean
 // census of every pass writes the snapshot's preflight receipt, which
 // `Tools/agent/Chain.jet TREE full` and Tools/release `admit` and `build` require.
 // Exit: 0 clean; 1 rows or a failed pass; 2 setup failure.
@@ -146,7 +148,7 @@ JOB_FILES: [String]{".patch", ".msg"}
 // The preflight receipt: its schema, the census passes it vouches for, and
 // the trees an export needs for the source identity.
 RECEIPT_SCHEMA: "jet.preflight-receipt.v1"
-RECEIPT_PASSES: [String]{"check", "build", "runtime-pack", "selfcheck"}
+RECEIPT_PASSES: [String]{"check", "build", "runtime-pack", "selfcheck", "selfcheck-core"}
 IDENTITY_TREES: [String]{"Compiler", "Core", "Jetpack"}
 // The generated CoreSourceRows views: a patch whose only conflict is in them
 // is admitted around them (the batch regenerates them from its sources).
@@ -997,7 +999,13 @@ census: fn(named: [String], passes: Passes) -[Exec, Env, FS, IO, Time, Time.Wait
     self_rows: report_rows(self_report)
     print("selfcheck rc={selfchecked} rows={self_rows}")
     show(census_rows(self_report, snap, package_dirs), 11)
-    if selfchecked != 0 || self_rows != 0 -> return 1
+    // Every Core body, called or not, whatever the self-check above found.
+    core_report: "{out}/selfcheck-core-keep-going.tsv"
+    core_checked: run_heavy(snap, 1200, [String]{self_jet, "check", "--threads", "12", "Core"}, compile_env(identity, snap, core_report), "{out}/selfcheck-core")
+    core_rows: report_rows(core_report)
+    print("selfcheck-core rc={core_checked} rows={core_rows}")
+    show(census_rows(core_report, snap, package_dirs), 11)
+    if selfchecked != 0 || self_rows != 0 || core_checked != 0 || core_rows != 0 -> return 1
 
     written: write_receipt(source_identity, read_identity(compiler_dir), head, named, receipt_dir()) ?? {
         print("census: the preflight receipt cannot be written: {err.message}")
