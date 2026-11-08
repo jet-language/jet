@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6697,
-    "rev": 96191,
+    "rev": 96192,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -100815,6 +100815,11 @@
         {
           "at": "2026-11-08",
           "by": "Main",
+          "text": "SchedLead landed 1f8f46177e (unverified by Main; queued for the batch). Direct syscalls replace fork, getgroups, getloadavg, sysconf, times, clock_gettime (vDSO), mkfifo, realpath, utime, signal (rt_sigaction with a Jet restorer), tcgetattr and tcsetattr, and inet_pton. Symbol census: jet_runtime_jet.o has 42 undefined symbols, none of the 13 card symbols; left are __errno_location, getaddrinfo, freeaddrinfo, gai_strerror, initgroups, jet_rt_fault_report, 6 pthread and 30 libm. Probe output is byte-identical with the musl build at none, basic and full. Web: canonicalize of / or . now answers without fs, getgroups and utimensat are handled, and the web host place() writes an empty auxv for the vDSO lookup. Focused cases pass at none, basic and full (118 web), apart from one timing flake that passed on rerun and known environment failures. Open: the raw fork skips the musl atfork locks, so a forked child that uses C malloc in a multithreaded C-linking program could deadlock; Main asked SchedLead whether any public path reaches it."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
           "text": "Main 2026-11-08: initgroups and setgroups stay on musl in #6690. They move to Jet with the synccall of #6689, because a per-thread port would regress the process-wide behavior of today. Found by SchedLead: the Jet setuid and setgid (HostProcess.jet) are raw per-thread syscalls that change only the calling carrier; the fix is the new synccall criterion of #6689."
         },
         {
@@ -100855,7 +100860,7 @@
       "parentId": "c0lscvc9",
       "needsAcceptance": false,
       "created": "2026-11-08T15:46:59.496Z",
-      "updated": "2026-11-08T15:56:29.867Z",
+      "updated": "2026-11-08T16:45:24.466Z",
       "updatedBy": "Main",
       "criteriaLastN": 2
     },
@@ -189349,6 +189354,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-08T16:45:24.466Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0wl6r2h",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-08T16:37:43.856Z",
       "by": "Main",
