@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6704,
-    "rev": 96330,
+    "nextNum": 6705,
+    "rev": 96332,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -102016,6 +102016,49 @@
       "updated": "2026-11-08T20:10:31.986Z",
       "updatedBy": "Main",
       "criteriaLastN": 5
+    },
+    {
+      "id": "c0nxjs80",
+      "num": 6704,
+      "title": "A range-typed Int(lo..hi) argument is rejected for a plain Int parameter (E0108); no explicit widening exists",
+      "body": "Found by WaylandLead (#6701 c5, range-typed OS-edge params). Seed a0_039:\nplain: fn(value: Int) -> Int { value * 2 }\nranged: fn(size: Int(1..1073741824)) -> Int { plain(size) }   // E0108\nInt{size} and size.raw() are rejected too; only arithmetic (size + 0) widens. A value of a refined range type is always a valid Int, so widening to the unrefined type should be implicit (or have one ratified explicit spelling). Repro: $JET_SCRATCH_ROOT/lanes/WaylandLead/probe/range_widen_repro.jet.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": "jet run of the repro prints 10 on O0, O1 and O2; a case under tests/cases covers the call, a return and an assignment of a range value to Int",
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Passing, returning or assigning an Int(lo..hi) value where Int is expected type-checks and runs with the same value on O0, O1 and O2 (case under tests/cases).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T20:32:14.367Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "sema",
+        "types",
+        "bug"
+      ],
+      "goals": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-08T20:32:10.659Z",
+      "updated": "2026-11-08T20:32:14.367Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1
     }
   ],
   "decisions": [
@@ -190235,6 +190278,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-08T20:32:14.367Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0nxjs80",
+      "note": "#1 Passing, returning or assigning an Int(lo..hi) value where I"
+    },
+    {
+      "at": "2026-11-08T20:32:10.659Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0nxjs80",
+      "note": "A range-typed Int(lo..hi) argument is rejected for a plain Int parameter (E0108); no explicit widening exists"
+    },
     {
       "at": "2026-11-08T20:13:27.685Z",
       "by": "Main",
