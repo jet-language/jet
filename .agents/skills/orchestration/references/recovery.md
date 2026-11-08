@@ -14,9 +14,10 @@ explicit in the recovery note or handoff.
 
 ## Salvage narrowly
 
-- Checkpoint only the owned paths as a commit on `dev`, using explicit paths.
-- Salvage a dead worker's coherent diff or commit and inspect it before
-  integration. Rebrief only the missing slice from the last integrated state.
+- Checkpoint a dead worker's coherent diff as an inbox submission
+  ([`intake.md`](intake.md)) from its export; the orchestrator lands it
+  through a batch. Rebrief only the missing slice from the last integrated
+  state.
 - Preserve disjoint sibling work. Never broad-restore, discard, overwrite, or
   reset another task's paths.
 - Never create branches or worktrees for recovery; the dev worktree is the only

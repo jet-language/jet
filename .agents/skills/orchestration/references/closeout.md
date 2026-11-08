@@ -58,9 +58,9 @@ Repeat this sequence for each requested card or bounded slice:
    briefing anything else.
 2. Brief and dispatch one bounded slice with one named implementer and a named
    close owner. Keep paths disjoint when independent slices are approved.
-3. Harvest the worker. Accept code only with the exact `CHECK OK` receipt, or
-   accept prose/static work with `DOCS ONLY`; otherwise return the same card
-   with the exact missing/error line. Workers never write Tower, close cards,
+3. Harvest the worker's submission ([`intake.md`](intake.md)), or accept
+   prose/static work with `DOCS ONLY`; return an incomplete submission with
+   the exact missing item. Workers never commit, write Tower, close cards,
    claim unrun proof, or spawn workers.
 4. Inspect the owned diff and integrate the complete cutover into the intended
    tree. Do not lose a coherent patch, overwrite another task's paths, or leave

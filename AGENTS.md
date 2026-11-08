@@ -238,8 +238,9 @@ paths and one named close owner. The repository's working branches are
 `master` and `dev`. At the Rust cutover, the last
 commit that still contains the Rust implementation becomes the `rust` branch: a
 frozen dead-end leaf kept as a reference and a re-bootstrap safety net. Nobody
-commits to it or merges it into `dev` or `master`. Every agent commits directly
-on `dev` in the dev worktree, in small commits that stage only its own paths.
+commits to it or merges it into `dev` or `master`. Only the orchestrator
+commits, directly on `dev` in the dev worktree, one commit per landed
+submission that stages only that submission's paths.
 Besides the master checkout, at most three worktrees may exist: the dev worktree
 and up to two more that the orchestrator creates as detached checkouts of
 `dev`. Each extra worktree has one named owner, is kept at a current `dev`
@@ -311,25 +312,24 @@ may call a design better only where a passing review backs that exact claim.
 ## Delegation
 
 Use the most specific agent available for each role. Workers do not spawn
-workers. Every code worker returns the exact `CHECK OK` receipt from
-`Tools/agent/LaneCheck.jet`; prose-only or static-data-only work returns
-`DOCS ONLY`.
+workers.
 
 Workers are never idle or stalled. Each worker runs one continuous loop: write
-the code to the card's spec, run only the touched files' source checks, land
-the commit, report it to the orchestrator for testing, and start its next task
-at once. When a spec or criterion exists, the code comes first: no worker stops
-to prove rows, waits for review or a test result, or holds a commit for the
-orchestrator. Workers never run suites, A/B comparisons, chains, or releases.
-While the orchestrator's tests run, every worker keeps coding to spec.
+the code to the card's spec, run only the touched files' source checks,
+submit the patch to the orchestrator's inbox, and start its next task at once.
+Workers never commit, build the compiler, or run suites, A/B comparisons,
+chains, censuses, or releases. When a spec or criterion exists, the code comes
+first: no worker stops to prove rows or waits for review or a test result.
+While the orchestrator's batches run, every worker keeps coding to spec.
 
-The orchestrator keeps every worker's next task queued so none waits, tests
-landed commits in batches, and never gates a landing on a proof. Every failure
-its tests find goes back at once to the worker that owns it, as that worker's
-top priority. The worker fixes it, lands the fix, reports it for final
-verification, and resumes its queue; the orchestrator verifies the fix and
-closes the criterion. The orchestration skill defines briefs, liveness,
-integration, proof cadence, recovery, and closure.
+The orchestrator does every build and test. It keeps every worker's next task
+queued, integrates submissions in batches with one collect-all pass, and lands
+each passing submission on `dev` as its own commit. A failing submission is
+set aside without holding back the rest, and every failure goes back at once
+to the worker that owns it, as one list and that worker's top priority. The
+orchestration skill's intake reference defines the submission format, batch
+integration, and landing; the skill also covers briefs, liveness, proof
+cadence, recovery, and closure.
 
 The orchestrator evaluates its own plan continuously, not only when something
 fails. Before each step and whenever a result arrives, it asks whether this is
