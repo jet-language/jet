@@ -17,6 +17,7 @@ use {
     fixedcrypto: __core_crypto_ct
     byte_words.[load_be32, load_le32, push_le32, sha256_schedule, sha256_state]
     chacha20_core.[chacha20_rounds, chacha20_state, chacha20_words]
+    sha256_run.[sha256_blocks]
 }
 
 // core.crypto - safe envelopes and expert primitives.
@@ -87,15 +88,14 @@ jetc_hash_update: fn(hash: &JetcHash, data: [U8]) Never! {
             offset += 1
         }
         if hash.pending.bytes.len() == 64 {
-            sha256_block(hash.state, hash.schedule, hash.pending.bytes, 0)
+            sha256_blocks(hash.state, hash.schedule, hash.pending.bytes, 0, 1)
             core.crypto.wipe(hash.pending.bytes)
             hash.pending.bytes = [U8]{}
         }
     }
-    loop offset + 64 <= data.len() {
-        sha256_block(hash.state, hash.schedule, data, offset)
-        offset += 64
-    }
+    blocks: (data.len() - offset) /% 64
+    sha256_blocks(hash.state, hash.schedule, data, offset, blocks)
+    offset += blocks * 64
     loop offset < data.len() {
         hash.pending.bytes.push(data[offset])
         offset += 1
@@ -106,7 +106,7 @@ jetc_hash_finish: fn(hash: &JetcHash) -> [U8] Never! {
     hash.pending.bytes.push(U8{128})
     loop hash.pending.bytes.len() %% 64 != 56 -> hash.pending.bytes.push(U8{0})
     loop b in be64(hash.length * 8) -> hash.pending.bytes.push(b)
-    loop offset in 0..<hash.pending.bytes.len(), 64 -> sha256_block(hash.state, hash.schedule, hash.pending.bytes, offset)
+    sha256_blocks(hash.state, hash.schedule, hash.pending.bytes, 0, hash.pending.bytes.len() /% 64)
     core.crypto.wipe(hash.pending.bytes)
     hash.pending.bytes = [U8]{}
     sha256_bytes(hash.state)
@@ -1499,7 +1499,7 @@ sha2_256: fn(data: [U8], iv: [U32]) -> [U8] Never! {
     loop b in be64(bit_len) -> msg.push(b)
     state := sha256_state(iv)
     w := sha256_schedule()
-    loop off in 0..<msg.len(), 64 -> sha256_block(state, w, msg, off)
+    sha256_blocks(state, w, msg, 0, msg.len() /% 64)
     sha256_bytes(state)
 }
 
@@ -1581,6 +1581,17 @@ sha256_block: fn(state: &[U32], w: &[U32], msg: [U8], off: Int) Never! {
     state[5] = state[5] + f
     state[6] = state[6] + g
     state[7] = state[7] + h
+}
+
+// The SHA-256 rounds over a run of blocks, not part of the crypto surface.
+priv sha256_run: module {
+    /// The SHA-256 compressions of the `count` 64-byte blocks from `msg[off]`
+    /// into `state`: the host's SHA extensions when it has them, else
+    /// sha256_block.
+    sha256_blocks: fn(state: &[U32], w: &[U32], msg: [U8], off: Int, count: Int) Never! {
+        if core.crypto.__sha256_blocks(state, msg, off, count) -> return
+        loop i in 0..<count -> sha256_block(state, w, msg, off + i * 64)
+    }
 }
 
 sha1_raw: fn(data: [U8]) -> [U8] {
@@ -2611,8 +2622,6 @@ g: fn(s: &[Int], a: Int, b: Int, c: Int, d: Int, mx: Int, my: Int) {
     }
 }
 
-// The host row against the scalar rounds; a host without the SHA extensions
-// answers false and keeps the state, and the scalar rounds stand in.
 #Test("SHA-256 block compression agrees with the scalar rounds at every length and offset") {
     lengths := [Int]{}
     loop length in 0..<200 -> lengths.push(length)
@@ -2627,10 +2636,7 @@ g: fn(s: &[Int], a: Int, b: Int, c: Int, d: Int, mx: Int, my: Int) {
                 fast := sha256_state(C_SHA256_IV)
                 scalar := sha256_state(C_SHA256_IV)
                 w := sha256_schedule()
-                if !core.crypto.__sha256_blocks(fast, data, off, count) {
-                    assert(fast == scalar)
-                    loop i in 0..<count -> sha256_block(fast, w, data, off + i * 64)
-                }
+                sha256_blocks(fast, w, data, off, count)
                 loop i in 0..<count -> sha256_block(scalar, w, data, off + i * 64)
                 assert(fast == scalar)
             }
