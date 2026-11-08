@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6686,
-    "rev": 96117,
+    "rev": 96118,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -100125,6 +100125,11 @@
         {
           "at": "2026-11-08",
           "by": "Main",
+          "text": "Commit 4 is held for an owner question (2026-11-08). Under c4, `jet build Compiler` builds the runtime pack, so it needs cc plus a static musl libc.a. A fresh clone with neither stops at the probes, so bootstrap.md \"From a fresh clone: no Nix\" (seed build plus ReuseSeedRuntime) stops being true. Using the toolchain own jet cc inside build steps needs new public build API: steps run sandboxed (bwrap, cleared env, no net) and see only the builder folder and probe results, not the Hangar cc pack. The pack also lacks nm (RuntimePack symbol gate) and ships compiler-rt instead of libgcc.a/libgcc_eh.a. Options for the owner: (A) the fresh clone uses the dev shell or a host cc plus musl; (B) a ballot for a jet-cc build-step surface; (C) keep ReuseSeedRuntime as an exception. SpeedLead finishes the rest of c4 as a tested patch meanwhile."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
           "text": "Main ruling, commit 4: `.file(b.found(p))` accepts a find_program result too (it already accepts find_folder), within the approved D-BUILD-GRAPH1/D-BUILD-TREES1 surface, so no ballot. The found program gets the same sandbox visibility it gets as a step tool; the action key covers its bytes and its probe fact; the old refusal and its snapshot go; a cc case proves it. The runtime pack logic moves to Compiler/Toolchain/RuntimePack.jet, run as one b.run step. Also fixed: staged inputs lost the exec bit."
         },
         {
@@ -100236,7 +100241,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-08T01:30:57.119Z",
-      "updated": "2026-11-08T13:33:15.237Z",
+      "updated": "2026-11-08T15:07:48.327Z",
       "updatedBy": "Main"
     },
     {
@@ -188481,6 +188486,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-08T15:07:48.327Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0crz3ra",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-08T14:38:05.915Z",
       "by": "Main",
