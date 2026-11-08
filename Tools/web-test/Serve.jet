@@ -6,7 +6,8 @@
 //
 // It serves the regular files under the root on 127.0.0.1 only, one
 // request per connection, and prints `serving <root> on <port>` once it
-// listens. `/` and a directory serve its index.html. A request is refused
+// listens; port 0 picks a free port and prints the one it got. `/` and a
+// directory serve its index.html. A request is refused
 // with 400 when its path leaves the root (a `..` that climbs out, a sibling
 // directory whose name starts with the root's name, a drive letter or a
 // doubled leading slash, a backslash or NUL, bad percent-encoding), when any
@@ -63,8 +64,8 @@ run: fn() {
     args: process.args()
     port_text: option(args, "--port") ?? ""
     root_arg: option(args, "--root") ?? ""
-    port: Int.parse(port_text) ?? 0
-    if port <= 0 || root_arg == "" {
+    port: Int.parse(port_text) ?? -1
+    if port < 0 || root_arg == "" {
         eprint("usage: Serve.jet --port <port> --root <dir>")
         process.exit(2)
     }
@@ -74,7 +75,9 @@ run: fn() {
     if !stat.is_dir || !has_identity(stat) -> fail("root cannot be opened: {root_arg}")
     root: ServeRoot{path: real.copy(), parts: path_parts(real), directory: directory, stat: stat}
     listener: net.tcp_listen("127.0.0.1:{port}") ?? fail("cannot listen on 127.0.0.1:{port}")
-    print("serving {root_arg} on {port}")
+    bound: listener.local_addr() ?? fail("cannot read the listening address")
+    address: "{bound}".split(":").to_list()
+    print("serving {root_arg} on {address[address.len() - 1]}")
     loop -> serve_one(root, listener)
 }
 

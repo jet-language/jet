@@ -2821,23 +2821,6 @@ distinct_count: fn(values: [String]) -> Int Never! {
 
 execute_bits: fn(mode: Int) -> Bool Never! { mode /% 64 % 2 == 1 || mode /% 8 % 2 == 1 || mode % 2 == 1 }
 
-// `file://` URL of an absolute path.
-file_url: fn(path: String) -> String Never! {
-    safe: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789/._~-"
-    hex: [String]{"0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "A", "B", "C", "D", "E", "F"}
-    out := "file://"
-    loop byte in path.bytes() {
-        value: Int.from_u8(byte)
-        text: String.from_bytes([U8]{byte}) ?? ""
-        if value < 128 && safe.contains(text) {
-            out = "{out}{text}"
-        } else {
-            out = "{out}%{hex[value /% 16]}{hex[value % 16]}"
-        }
-    }
-    out
-}
-
 resolve_executable: fn(candidate: String) -[Env, FS]> String Never! {
     if candidate.starts_with("/") -> return if files.exists(candidate) -> candidate.copy() else -> ""
     separator: if sys.family() == "windows" -> ";" else -> ":"
@@ -3754,83 +3737,51 @@ chromium_executable: fn() -[Env, Exec, FS, Time, Time.Wait]> String Problem! {
     resolved
 }
 
-json_text: fn(value: String) -> String Never! { json.to_string(Dyn.Text(value.copy())) ?? "\"\"" }
-
-// The Node harness serving `buildDir` with Tools/web-test/Serve.jet and
-// reading the page's console through the CDP driver until it matches the
-// expected output.
-web_harness: fn(driver_module: String, jet: String, serve_source: String) -> String Never! {
-    driver: json_text(driver_module)
-    lines: [String]{
-        "import fs from \"node:fs\";",
-        "import net from \"node:net\";",
-        "import {{ spawn }} from \"node:child_process\";",
-        "const driverModule = {driver};",
-        "const jetPath = {json_text(jet)};",
-        "const serveSource = {json_text(serve_source)};",
-        "const buildDir = process.argv[2];",
-        "const expectedPath = process.argv[3];",
-        "const expected = fs.readFileSync(expectedPath, \"utf8\");",
-        "const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));",
-        "const reservation = net.createServer();",
-        "await new Promise((resolve, reject) => {{ reservation.once(\"error\", reject); reservation.listen(0, \"127.0.0.1\", resolve); }});",
-        "const port = reservation.address().port;",
-        "await new Promise(resolve => reservation.close(resolve));",
-        "const server = spawn(jetPath, [\"run\", \"--allow=Env,FS,IO,Net,Time\", serveSource, \"--\", \"--port\", String(port), \"--root\", buildDir], {{ stdio: [\"ignore\", \"ignore\", \"pipe\"] }});",
-        "let serverError = \"\";",
-        "server.stderr.setEncoding(\"utf8\");",
-        "server.stderr.on(\"data\", chunk => {{ serverError += chunk; }});",
-        "let serving = false;",
-        "for (let attempt = 0; attempt < 600; attempt += 1) {{",
-        "  try {{ const response = await fetch(\"http://127.0.0.1:\" + port + \"/index.html\", {{ cache: \"no-store\" }}); if (response.ok) {{ serving = true; break; }} }} catch {{}}",
-        "  await sleep(50);",
-        "}}",
-        "if (!serving) {{ server.kill(\"SIGKILL\"); throw new Error(\"web server did not serve index.html: \" + serverError); }}",
-        "const {{ CdpDriver }} = await import({driver});",
-        "const driver = await new CdpDriver({{ chrome: process.env.CHROMIUM, chromeTempRoot: process.env.JET_WEB_CHROME_TEMP }}).launch();",
-        "try {{",
-        "  await driver.send(\"Page.addScriptToEvaluateOnNewDocument\", {{ source: \"window.__compiledWorkloadLogs = []; console.log = (...args) => window.__compiledWorkloadLogs.push(args.map(value => String(value)).join(\\\" \\\"));\" }}, driver.pageSession);",
-        "  await driver.navigate(\"http://127.0.0.1:\" + port + \"/index.html\");",
-        "  const expectedLines = expected.replace(/\\r?\\n$/, \"\").split(/\\r?\\n/);",
-        "  let logs = [];",
-        "  for (let attempt = 0; attempt < 400; attempt += 1) {{",
-        "    logs = await driver.evaluate(\"window.__compiledWorkloadLogs || []\");",
-        "    if (logs.join(\"\\n\") === expectedLines.join(\"\\n\")) break;",
-        "    await sleep(50);",
-        "  }}",
-        "  if (logs.join(\"\\n\") !== expectedLines.join(\"\\n\")) throw new Error(\"browser output differs: \" + logs.join(\"|\"));",
-        "  process.stdout.write(expected);",
-        "}} finally {{",
-        "  await driver.close();",
-        "  server.kill(\"SIGKILL\");",
-        "}}",
-    }
-    "{lines.join("\n")}\n"
+// The chromedriver that launches the configured Chromium; its major
+// version must match Chromium's.
+chromedriver_executable: fn() -[Env, FS]> String Problem! {
+    configured: env_or("JET_WEB_CHROMEDRIVER", "chromedriver")
+    resolved: resolve_executable(configured)
+    if resolved == "" -> return Err(problem("cross-platform-notes web tier requires chromedriver for Chromium: {configured}"))
+    resolved
 }
+
+json_text: fn(value: String) -> String Never! { json.to_string(Dyn.Text(value.copy())) ?? "\"\"" }
 
 BrowserRun: struct {
     result: Measured
     chromium: String
 }
 
+// Run the build in Chromium with Tools/web-test/BrowserRun.jet. The harness
+// launches Chromium through core.web.browser, so a private project directory
+// first pins the configured Chromium and chromedriver in its `.jet/lock`.
 web_browser_run: fn(state: Producer, task: [String: String], build_dir: String, expected: String, peer: Bool) -[Env, Exec, FS, IO, Time, Time.Wait]> BrowserRun Problem! {
     chromium: chromium_executable() ?? return Err(err)
-    harness: "{build_dir}/.compiled-workload-web-browser.mjs"
-    driver_local: "{build_dir}/.compiled-workload-cdp-driver.mjs"
-    files.copy("{state.root}/Tools/canvas-test/driver.mjs", driver_local) ?? return Err(problem("the CDP driver cannot be copied: {err}"))
-    files.write(harness, web_harness(file_url(driver_local), state.jet, "{state.root}/Tools/web-test/Serve.jet")) ?? return Err(problem("`{harness}` cannot be written: {err}"))
-    chrome_temp: "{build_dir}/.chrome-temp"
-    node: node_path(state) ?? return Err(err)
-    env: [EnvVar]{env_var("CHROMIUM", chromium), env_var("JET_WEB_CHROME_TEMP", chrome_temp)}
-    result: peer_measured(state, task, node, [String]{harness.copy(), build_dir.copy(), expected.copy()}, build_dir, env) ?? {
-        remove_tree(chrome_temp) ?? ()
+    driver: chromedriver_executable() ?? return Err(err)
+    jetpack: resolve_executable(env_or("JETPACK", "jetpack"))
+    if jetpack == "" -> return Err(problem("cross-platform-notes web tier requires jetpack to lock Chromium"))
+    project: "{build_dir}/.compiled-workload-browser"
+    remove_tree(project) ?? return Err(err)
+    files.create_dir_all("{project}/.jet") ?? return Err(problem("`{project}` cannot be created: {err}"))
+    locked: process.cmd([String]{jetpack, "browser", "lock", "chromium", "--binary", chromium, "--driver", driver}).cwd(project).run() ?? {
+        remove_tree(project) ?? ()
+        return Err(problem("jetpack cannot lock Chromium: {err}"))
+    }
+    if locked.code != 0 {
+        remove_tree(project) ?? ()
+        return Err(problem("jetpack cannot lock Chromium: {clean_text(locked.errors)}"))
+    }
+    harness: [String]{"run", "--allow=Env,Exec,FS,IO,Net,Time", "{state.root}/Tools/web-test/BrowserRun.jet", "--", state.jet.copy(), "{state.root}/Tools/web-test/Serve.jet", build_dir.copy(), expected.copy()}
+    result: peer_measured(state, task, state.jet, harness, project, [EnvVar]{}) ?? {
+        remove_tree(project) ?? ()
         return Err(err)
     }
     if checked(result, expected, "{at(task, "task_id")}/{if peer -> "peer" else -> "jet"}/web-browser") == .Err(failure) {
-        remove_tree(chrome_temp) ?? ()
+        remove_tree(project) ?? ()
         return Err(failure)
     }
-    remove_tree(chrome_temp) ?? return Err(err)
+    remove_tree(project) ?? return Err(err)
     BrowserRun{result: result, chromium: chromium}
 }
 
@@ -4691,7 +4642,6 @@ stat_losses: fn(stats: [Stat], selected: [String: [String: String]], tasks: [Str
 #Test("producer text helpers match the JavaScript runner") {
     assert_eq(clean_text(" a\tb\r\nc  "), "a b c")
     assert_eq(command_text([String]{"jet", "a b"}), "\"jet\" \"a b\"")
-    assert_eq(file_url("/x/a b%.mjs"), "file:///x/a%20b%25.mjs")
     assert_eq(all_digits("0123"), true)
     assert_eq(all_digits(""), false)
     assert_eq(words(" a\tb  c "), [String]{"a", "b", "c"})
