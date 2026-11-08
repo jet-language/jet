@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6686,
-    "rev": 95972,
+    "rev": 95975,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -48759,6 +48759,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-08",
+          "by": "Main",
+          "text": "Main 2026-11-07 (owner asleep; for the owner to confirm or veto). (1) The spelling of the from(xs) variants is not in the ratified text. Main ruled PriorityQueue.from_by(xs, key)/from_by_desc(xs, key) and the same on Rank, following the ballot rule \"the same by and by_desc spelling lists already use for sorting\" (sort -> sort_by). (2) Conflict to resolve: D-ORDER-BY1 option A code shows `PriorityQueue.new()   // lowest first only`, and its lesson says a priority queue gives back the smallest item first. But the native PriorityQueue is a max-heap: new()/from() pop the highest first, and Examples/Collections/Iterators/IterToolsAudit.jet prints a highest-first to_sorted_list. No spec makes it a max-heap. Tonight by(key) pops the smallest key first and by_desc the largest (as ratified), and new()/from() stay highest-first, so by(x -> x) pops opposite to new(). Owner choice: flip new()/from() to lowest-first (as the ballot premise says) with a full cutover of callers and goldens, or keep the max-heap and correct the decision text."
+        },
+        {
           "at": "2026-10-28",
           "by": "CardTrim",
           "text": "Folded #4757 \"PriorityQueue and Rank per-instance pure key ordering\" (CardTrim 2026-10-28: D-ORDER-BY1 is hosted on #4499; PriorityQueue/Rank ordering is one of its steps). Body: D-ORDER-BY1=A The container stores one pure key function and compares keys with the key type's order. by_desc reverses that comparison. The key function must have an empty effect row, the rule callbacks already follow. from(xs) gains by and by_desc variants. Equality between two containers compares items and ignores order functions. Implementation areas: Compiler/JetFoundation/Source/{Collections.jet,Registry/BuiltinStatics.jet,TIR/TIR.jet} constructor/operation rows; Compiler/JetSema callback effects and collection calls; Jet backend/runtime PriorityQueue/Rank storage and order key; Core/collections/collections.jet Spec/registry: Docs/spec/reference/core-library.md PriorityQueue/Rank; synta"
@@ -48787,7 +48792,7 @@
       "parentId": "c0iuv3zr",
       "needsAcceptance": false,
       "created": "2026-10-04T00:06:29.585Z",
-      "updated": "2026-11-07T04:01:05.553Z",
+      "updated": "2026-11-08T02:47:44.121Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
@@ -73864,6 +73869,11 @@
         {
           "at": "2026-11-08",
           "by": "Main",
+          "text": "Main 2026-11-07 22:08: a0_035 is admitted and published (tag a0_035 on origin; jet 6508396e67adf101 = fixed point s2 == s3 from a0_034 with no Rust; jetpack 160b274762e98d1e). Release gates: golden 4430 rows, ui 2420, cases 4659; 0 lost and 12 gains. master merge 6df9913478. The c65 clean-clone run started at 21:47 on a kit assembled from the release candidate bytes, which are byte-identical to the published a0_035 jet and jetpack (sha256 checked after publish). The clone is dev 3af734e9cb, with no cargo or rustc on PATH, running `jet test Compiler --profile full`."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
           "text": "c65 timing (fresh run of 4df47ce6da, a0_034, 17:06-18:59): 4 min clone and engine assembly; 45 min cold fetch-toolchain (17:10-17:55, about 1,900 hangar files at about 1.4 s each, the per-file sync of #6592, which PortsLead-2 now owns); 64 min of suites. The corpus rows total 248 CPU-minutes, but the packages suite runs  at PACKAGE_JOBS=4, each child single-core at up to 5.5 GB RSS, so the full profile's wall time follows the package suite, not the corpora. In progress: a warm-state verification of candidate a0_035 (s2 b0998cecbf79, export of 574a9fd134, env -i, no cargo or rustc on PATH) to confirm the full profile passes before the fresh-clone run."
         },
         {
@@ -74571,7 +74581,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-29T02:09:17.141Z",
-      "updated": "2026-11-08T00:51:38.524Z",
+      "updated": "2026-11-08T03:08:36.197Z",
       "updatedBy": "Main",
       "criteriaLastN": 74
     },
@@ -99847,11 +99857,11 @@
         {
           "n": 1,
           "text": "A per-phase profile of the hosted engine build (front end, sema, lowering, optimization, emission, link) names where the time goes, and it is recorded on this card with the commit.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-08T01:42:16.015Z"
+          "evidence": "Per-phase traces (jet build --trace; wall s / CPU s; 12 CPUs pinned on the busy 32-CPU host) of jet build src/jetpack.jet in the assembled hosted project (618 sources; one 12.5 MB module). dev eaa085b237: total 156.8-243.9 s wall, of which sema.finalize 98-149 s (sema.bodies 48-97 s wall / 547-928 CPU-s) and the store tail 17-127 s (fsync D-state); the front end 5-7 s, lowering 0.7-1.2 s, ir.opt 2.2-3.5 s, emission 0.7-0.9 s, link 0.15 s. Root cause 1: store fsyncs, fixed by 3412bcf62f (no fsync calls in strace). Root cause 2: the L0534 lint (10ce9aab90) copied the whole module bytes per block, fixed by ef8a3f930d. With both fixes: total 32.95 s wall / 49.7 CPU-s; sema.finalize 5.81 s; store tail 11.8 s under writeback throttling; cache hit 16.9 s. The table and the exact commands are in $JET_SCRATCH_ROOT/lanes/SpeedLead/6684-phases.md.",
+          "at": "2026-11-08T02:43:04.359Z"
         },
         {
           "n": 2,
@@ -99880,7 +99890,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-08T01:42:16.015Z",
-      "updated": "2026-11-08T02:38:44.772Z",
+      "updated": "2026-11-08T02:43:04.359Z",
       "updatedBy": "Main"
     },
     {
@@ -187990,6 +188000,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-08T03:08:36.197Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0h06654",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-08T02:47:44.121Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0eo2mnm",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-08T02:43:04.359Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c08h4xjb",
+      "note": "#1"
+    },
     {
       "at": "2026-11-08T02:39:52.356Z",
       "by": "Main",
