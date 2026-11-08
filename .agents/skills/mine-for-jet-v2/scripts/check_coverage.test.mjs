@@ -4,10 +4,9 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { scratchRoot } from '../../../../Tools/agent/roots.mjs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { check, main, merge, registryErrors, render as renderResult, sample, seconds, vague } from './check_coverage.mjs';
+import { check, main, merge, render as renderResult, sample, seconds, vague } from './check_coverage.mjs';
 
 const FIXTURE = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'coverage-pass');
-const REGISTRY = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'prior-art.md');
 const read = name => JSON.parse(readFileSync(join(FIXTURE, name), 'utf8'));
 const run = () => ({ coverage: read('coverage.json'), ledger: read('ledger.json'), claims: read('claims.json'), audit: read('recall-audit.json') });
 const talk = files => files.coverage.sources[0];
@@ -24,36 +23,9 @@ test('passing fixture is clean with and without the recall audit', () => {
   assert.deepEqual(rules(run()), []);
   assert.deepEqual(rules(run(), { requireAudit: true }), []);
   const out = sink();
-  assert.equal(main([FIXTURE, '--audit', '--registry', REGISTRY], out, sink()), 0);
+  assert.equal(main([FIXTURE, '--audit'], out, sink()), 0);
   assert.match(out.data, /example-talk\/01 00:00-05:00: ledger 6 \(1\.20\/min\), claims 4, floor 5 - ok/);
   assert.match(out.data, /PASS\n$/);
-});
-
-test('every mined source needs a prior-art row and the registry names the run', t => {
-  const scratch = scratchRoot();
-  mkdirSync(scratch, { recursive: true });
-  const root = mkdtempSync(join(scratch, 'check-coverage-registry-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
-  const partial = join(root, 'prior-art.md');
-  writeFileSync(partial, '### Another run (mined 2026-01-01)\n\n- https://www.example.org/posts/cache-keys?utm_source=feed\n');
-  const out = sink();
-  assert.equal(main([FIXTURE, '--registry', partial], out, sink()), 1);
-  assert.match(out.data, /\[registry\] source example-talk: https:\/\/example\.org\/talks\/arenas has no row in /);
-  assert.match(out.data, /\[registry\] coverage\.json: run_id fixture-coverage-pass is not named in /);
-  assert.match(out.data, /by rule: registry 2\nFAIL\n$/);
-  // The default registry is the repository's prior-art.md, which does not list the fixture.
-  const fallback = sink();
-  assert.equal(main([FIXTURE], fallback, sink()), 1);
-  assert.match(fallback.data, /\[registry\] source example-talk: .*prior-art\.md; add it under the run's section/);
-  // Own captures are marked local:, anything else must be the source URL.
-  const files = run();
-  files.coverage.sources[0].ref = 'local:captures/talk';
-  files.coverage.sources[1].ref = 'notes/cache-keys.txt';
-  assert.deepEqual(registryErrors(files.coverage, REGISTRY).map(error => `${error.where}|${error.message}`),
-    ['source example-article|ref notes/cache-keys.txt must be the source URL (http/https) or local:PATH for the run\'s own captures']);
-  delete files.coverage.run_id;
-  assert.match(registryErrors(files.coverage, REGISTRY)[0].message, /^missing run_id/);
-  assert.match(registryErrors(run().coverage, join(root, 'absent.md'))[0].message, /^cannot read the prior-art registry/);
 });
 
 test('missing run files fail with exit 1', () => {
@@ -262,12 +234,12 @@ test('--merge writes the joined run, never overwrites, and exits by the re-check
     mkdirSync(join(root, shard.dir));
     for (const name of ['coverage', 'ledger', 'claims']) writeFileSync(join(root, shard.dir, `${name}.json`), JSON.stringify(shard[name]));
   }
-  const args = ['--merge', join(root, 'shard-a'), join(root, 'shard-b'), '--out', join(root, 'merged'), '--registry', REGISTRY];
+  const args = ['--merge', join(root, 'shard-a'), join(root, 'shard-b'), '--out', join(root, 'merged')];
   const out = sink();
   assert.equal(main(args, out, sink()), 0);
   assert.match(out.data, /merged 2 shards into .*\nsource example-talk \(video, 7\.0 min, 2 segments\)[\s\S]*PASS\n$/);
   assert.ok(existsSync(join(root, 'merged', 'ledger.json')));
-  assert.equal(main([join(root, 'merged'), '--registry', REGISTRY], sink(), sink()), 0);
+  assert.equal(main([join(root, 'merged')], sink(), sink()), 0);
   const again = sink();
   assert.equal(main(args, sink(), again), 1);
   assert.match(again.data, /already exists; merge never overwrites/);

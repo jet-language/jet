@@ -24,8 +24,7 @@ shared permission and publication mechanics. Normal mining keeps this method's
 Tower logging obligation. An explicit `report-only` request overrides it:
 produce the report and read existing Tower records only; create no cards,
 decisions, ballots, or implementation edits. Repo edits are unauthorized unless
-the owner explicitly asks, with one standing exception the owner ordered: every
-run, in every mode, adds the sources it mined to the prior-art registry (below).
+the owner explicitly asks.
 
 Apply `.agents/skills/_shared/standing-lens.md` contextually. Its comparative,
 micro, live-probe, and honesty sections apply only when the declared outcome
@@ -64,12 +63,6 @@ the source ID reported by the checker, not an unchecked URL spelling. The
 checker does not authenticate owner approval; the caller supplies that fact.
 Preserve source identity and rerun approval in the report.
 
-Before close, register what the run mined. Add the run's section to the Source
-index of `Docs/spec/reference/prior-art.md` in the format of
-`.agents/skills/mine-for-jet-v2/references/output.md` (Prior-art registry), with
-one row per mined source, then pass every mined source URL to the same command
-with `--verify-tracked`. It must exit 0; the run is not complete until it does.
-
 ## Load only the needed branch
 
 1. Read [`references/capture.md`](references/capture.md).
@@ -97,6 +90,5 @@ with the allowed enums and reviewed topic keys before forming recommendations.
 Cross-check actual Jet code and relevant executable behavior, not plans alone.
 Separate inference from evidence. Stop when the declared source, subject,
 outcome, and relevant evidence lanes are covered; claims have evidence or an
-explicit unknown; every mined source has its prior-art row (`--verify-tracked`
-exit 0); and the report plus any authorized Tower obligations are complete. Do
-not start an unrelated audit or implementation workflow.
+explicit unknown; and the report plus any authorized Tower obligations are
+complete. Do not start an unrelated audit or implementation workflow.

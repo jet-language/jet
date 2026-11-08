@@ -2,33 +2,7 @@
 
 Read the shared audit-dispositions contract. Report-only creates no Tower cards,
 decisions, ballots or implementation. Chat-only stays chat-only. Repository
-publication requires authorization, except the prior-art rows below, which
-every run adds in every mode. Markdown is default, HTML only on request.
-
-## Prior-art registry
-
-Every source a run mines gets a row in the Source index of
-`Docs/spec/reference/prior-art.md` before hand-in, in a section for the run:
-
-```md
-### Subject (mined YYYY-MM-DD)
-
-Run: `RUN_ID`. Report: [report-name](../../research/report-name.md).
-
-- https://www.youtube.com/watch?v=VIDEO_ID
-- Linked page the run read in full — https://example.org/source
-```
-
-Write one row per source URL, in the spelling of the `ref` in `coverage.json`;
-a label before ` — ` says what the row is when the URL alone does not.
-`check_coverage.mjs` fails while the run ID is absent or any http(s) `ref` has no
-row (identity as in `check_sources.py`); a `ref` of `local:PATH` marks the run's
-own captures and needs none. Add the `Report:` link when the report is
-published; a run with no retained report names its Tower records instead.
-Workers add the section in the checkout they hand in, and the orchestrator lands
-it with the report or, in report-only and chat-only runs, on its own. Never name
-an unmined parent stream or linked source by URL or ID in the section: the
-registry treats any occurrence as tracked.
+publication requires authorization; Markdown is default, HTML only on request.
 
 ## Compact front, retained evidence
 

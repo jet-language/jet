@@ -14,12 +14,11 @@
 // mapping32 size40 next48 task56 action64 timerArmed72 deadline80
 // timerKind88 timerTarget96 lotNext104 lotAddress112 lotResult120
 // lotLinked128 timerFiring136 lotSequence144 timerSequence152
-// heapChild160 heapSibling168 heapPrevious176 cpuNs184 sliceStart192, and
-// the fiber's TCB at FIBER_TCB. state: RUNNING, PARKING (the fiber is
-// switching out to park), PARKED (its carrier saw the switch complete),
-// NOTIFIED (woken while PARKING: the carrier resumes it at once) and
-// RUNNABLE (queued). next links the root's ready FIFO and its pool of idle
-// fibers.
+// heapChild160 heapSibling168 heapPrevious176, and the fiber's TCB at
+// FIBER_TCB. state: RUNNING, PARKING (the fiber is switching out to park),
+// PARKED (its carrier saw the switch complete), NOTIFIED (woken while
+// PARKING: the carrier resumes it at once) and RUNNABLE (queued). next links
+// the root's ready FIFO and its pool of idle fibers.
 //
 // The switch (Linux.jet os_fiber_switch_i64) moves the alloc thread cache
 // (TCB @320..@447) between the carrier's TCB and the fiber's, so cached
@@ -191,7 +190,6 @@ fiber_run: fn(root: I64, record: I64, fiber: I64) {
     loop {
         sync_store(fiber, FIBER_RUNNING)
         sync_store(wrapping(fiber + I64{16}), record)
-        if (fiber_clock_on != I64{0}) -> sync_store(wrapping(fiber + I64{192}), sync_thread_cpu_ns())
         fiber_cache_move(tcb, fiber_tcb)
         fiber_gs_write(root, fiber_tcb)
         #Unsafe("the fiber's saved stack is owned by no running thread: it is fresh, pooled or committed PARKED/RUNNABLE, and this carrier alone took it") {
@@ -199,7 +197,6 @@ fiber_run: fn(root: I64, record: I64, fiber: I64) {
         }
         fiber_gs_write(root, tcb)
         fiber_cache_move(fiber_tcb, tcb)
-        if (fiber_clock_on != I64{0}) -> fiber_clock_settle(fiber)
         action: sync_load(wrapping(fiber + I64{64}))
         if (action == FIBER_PARK) {
             if (sync_cas(fiber, FIBER_PARKING, FIBER_PARKED) == FIBER_PARKING) {
@@ -233,58 +230,9 @@ fiber_run: fn(root: I64, record: I64, fiber: I64) {
             sync_store(wrapping(root + I64{56}), sync_load(wrapping(root + I64{56})) - I64{1})
         }
         sync_thread_unlock(root)
-        if (action == FIBER_DEAD) {
-            mapping: sync_load(wrapping(fiber + I64{32}))
-            bytes: sync_load(wrapping(fiber + I64{40}))
-            alloc_unmap(mapping, bytes)
-            fiber_space_give(root, bytes)
-        }
+        if (action == FIBER_DEAD) -> alloc_unmap(sync_load(wrapping(fiber + I64{32})), sync_load(wrapping(fiber + I64{40})))
         return
     }
-}
-
-// The task CPU clock (jet_rt_task_cpu_ns) is off, one load and a branch per
-// switch, until its first read turns it on for good. From then the carrier
-// stamps a fiber's sliceStart192 with its own thread CPU time as it switches
-// the fiber in and adds the slice to cpuNs184 as it switches it out, so a
-// fiber's clock counts only the time it ran, on whichever carriers. Both
-// words are touched only on the carrier running the fiber, by the carrier or
-// the fiber itself; a sliceStart of 0 is a slice the clock did not stamp.
-fiber_clock_on := I64{0}
-
-fiber_clock_settle: fn(fiber: I64) {
-    start: sync_load(wrapping(fiber + I64{192}))
-    if (start == I64{0}) -> return
-    sync_store(wrapping(fiber + I64{184}), wrapping(sync_load(wrapping(fiber + I64{184})) + sync_thread_cpu_ns() - start))
-    sync_store(wrapping(fiber + I64{192}), I64{0})
-}
-
-// The CPU time the running task has used, in nanoseconds: its fiber's run
-// time over every slice since the clock's first read, else (a plain thread)
-// the thread's CPU time. Only the difference of two reads by one task means
-// anything: a pooled fiber's clock runs on across the tasks it carries.
-#Export(c) jet_rt_task_cpu_ns: fn() -> I64 {
-    fiber: fiber_current()
-    now: sync_thread_cpu_ns()
-    if (fiber == I64{0}) -> return now
-    if (fiber_clock_on == I64{0}) {
-        #Unsafe("an idempotent install: every writer stores 1, and a carrier that read the old 0 left its slice unstamped, which the read below stamps") { fiber_clock_on = I64{1} }
-    }
-    start: sync_load(wrapping(fiber + I64{192}))
-    spent: sync_load(wrapping(fiber + I64{184}))
-    if (start == I64{0}) {
-        sync_store(wrapping(fiber + I64{192}), now)
-        return spent
-    }
-    wrapping(spent + now - start)
-}
-
-// The running task's identity: its fiber's TCB address (the fiber's identity
-// word, kept across carriers), else the thread's kernel id.
-#Export(c) jet_rt_task_identity: fn() -> I64 {
-    fiber: fiber_current()
-    if (fiber == I64{0}) -> return thread_tid()
-    sync_load(wrapping(fiber + I64{24}))
 }
 
 // A pooled fiber, else a fresh one; 0 when no stack can be mapped.
@@ -301,17 +249,13 @@ fiber_take: fn(root: I64) -> I64 {
     fiber_new(root)
 }
 
-// The first fiber settles the GS mode, the stack size, the address space
-// the fiber stacks may take and the shared lot and timer heap before any
-// fiber runs.
+// The first fiber settles the GS mode, the stack size and the shared lot
+// and timer heap before any fiber runs.
 fiber_prepare: fn(root: I64) {
     if (sync_load(wrapping(root + I64{192})) != I64{0}) -> return
-    stack: thread_stack_bytes()
-    space: thread_rlimit_soft(I64{9})
     sync_thread_lock(root)
     if (sync_load(wrapping(root + I64{192})) == I64{0}) {
-        sync_store(wrapping(root + I64{184}), stack)
-        sync_store(wrapping(root + I64{200}), if (space > I64{0}) -> space / FIBER_SPACE_SHARE else -> I64{-1})
+        sync_store(wrapping(root + I64{184}), thread_stack_bytes())
         timers: jet_rt_alloc(FIBER_TIMERS_BYTES, I64{8})
         thread_zero(timers, FIBER_TIMERS_BYTES)
         sync_store(wrapping(timers + I64{16}), I64{-1})
@@ -333,42 +277,16 @@ fiber_prepare: fn(root: I64) {
     sync_thread_unlock(root)
 }
 
-// Under a finite RLIMIT_AS the fiber stacks together map at most a
-// FIBER_SPACE_SHARE-th of it: the root's fiberSpace200 is what they may still
-// map (-1: no limit). Past it a task runs on its carrier, as when no stack
-// can be mapped, so the stacks never take the heap's room.
-FIBER_SPACE_SHARE: I64{4}
-
-// Takes `bytes` of the fiber stacks' space; false when too little is left.
-fiber_space_take: fn(root: I64, bytes: I64) -> Bool {
-    sync_thread_lock(root)
-    space: sync_load(wrapping(root + I64{200}))
-    taken: space < I64{0} || space >= bytes
-    if (taken && space >= I64{0}) -> sync_store(wrapping(root + I64{200}), space - bytes)
-    sync_thread_unlock(root)
-    taken
-}
-
-fiber_space_give: fn(root: I64, bytes: I64) {
-    sync_thread_lock(root)
-    space: sync_load(wrapping(root + I64{200}))
-    if (space >= I64{0}) -> sync_store(wrapping(root + I64{200}), space + bytes)
-    sync_thread_unlock(root)
-}
-
 // One mapping: guard page, stack, header page. The stack is the thread
-// stack size (thread_stack_bytes), charged to the fiber stacks' space
-// (fiber_space_take), halved on a failed map down to THREAD_STACK_FLOOR and
-// reserved without commitment. The guard is a
+// stack size (thread_stack_bytes), halved on a failed map down to
+// THREAD_STACK_FLOOR, reserved without commitment. The guard is a
 // page-table guard marker (MADV_GUARD_INSTALL), which leaves the mapping one
 // VMA that merges with its neighbouring fiber stacks, so vm.max_map_count
 // does not bound the live fibers; a kernel without guard markers (before
 // 6.13) gets a PROT_NONE page, two VMAs per fiber.
 fiber_new: fn(root: I64) -> I64 {
     fiber_prepare(root)
-    want: sync_load(wrapping(root + I64{184}))
-    if !fiber_space_take(root, want) -> return I64{0}
-    bytes := want
+    bytes := sync_load(wrapping(root + I64{184}))
     mapping := I64{-1}
     loop {
         #Unsafe("a fresh private anonymous stack mapping, unreserved until touched") {
@@ -377,11 +295,7 @@ fiber_new: fn(root: I64) -> I64 {
         if (mapping >= I64{0} || bytes <= THREAD_STACK_FLOOR) -> break
         bytes = bytes >> I64{1}
     }
-    if (mapping < I64{0}) {
-        fiber_space_give(root, want)
-        return I64{0}
-    }
-    if (bytes != want) -> fiber_space_give(root, want - bytes)
+    if (mapping < I64{0}) -> return I64{0}
     guard := I64{0}
     #Unsafe("the first page of the fresh, untouched mapping becomes the stack's guard: a guard marker, else PROT_NONE") {
         guard = os_syscall_i64(I64{28}, mapping, I64{4096}, I64{102}, I64{0}, I64{0}, I64{0})
@@ -389,7 +303,6 @@ fiber_new: fn(root: I64) -> I64 {
     }
     if (guard != I64{0}) {
         alloc_unmap(mapping, bytes)
-        fiber_space_give(root, bytes)
         return I64{0}
     }
     fiber: wrapping(wrapping(mapping + bytes) - fiber_header_bytes())

@@ -1,17 +1,11 @@
 #!/usr/bin/env node
 // Depth gate for a mine-for-jet-v2 run directory: bounded segments, a mapped concept
-// ledger per segment, a full segment x lane matrix, densities, the recall audit, and a
-// prior-art registry row for every mined source.
+// ledger per segment, a full segment x lane matrix, densities, and the recall audit.
 // Exit 0 only when nothing is missing; 1 on any gap; 2 on usage errors.
-import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-
-const SCRIPTS = dirname(fileURLToPath(import.meta.url));
-// Every mined source needs a row here before hand-in (Docs/spec/reference/prior-art.md, Source index).
-export const REGISTRY = join(SCRIPTS, '..', '..', '..', '..', 'Docs', 'spec', 'reference', 'prior-art.md');
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 export const SCHEMAS = {
   coverage: 'mine-for-jet-v2/coverage@1',
@@ -429,41 +423,6 @@ export function render({ errors, report }, { perRule = Infinity } = {}) {
   return `${lines.join('\n')}\n`;
 }
 
-// Hand-in also needs the prior-art registry to name the run ID and list every source the run mined.
-// An http(s) ref is an external source and must be tracked; `local:PATH` marks the run's own captures.
-// Source identity is check_sources.py's (same canonical IDs and line matching as the pre-capture check).
-export function registryErrors(coverage, registryPath = REGISTRY) {
-  const errors = [];
-  const err = (where, message) => errors.push({ rule: 'registry', where, message });
-  if (!isObj(coverage)) return errors;
-  let registry;
-  try { registry = readFileSync(registryPath, 'utf8'); } catch (error) { err(registryPath, `cannot read the prior-art registry: ${error.message}`); return errors; }
-  const runId = coverage.run_id;
-  if (!text(runId)) err('coverage.json', 'missing run_id; the run\'s prior-art section names it');
-  else if (!new RegExp(`(?<![\\w.-])${runId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w.-])`).test(registry)) {
-    err('coverage.json', `run_id ${runId} is not named in ${registryPath}; add the run's section before hand-in`);
-  }
-  const refs = new Map();
-  for (const source of Array.isArray(coverage.sources) ? coverage.sources : []) {
-    if (!isObj(source) || !text(source.ref) || source.ref.startsWith('local:')) continue;
-    if (!/^https?:\/\//.test(source.ref)) { err(`source ${source.source_id}`, `ref ${source.ref} must be the source URL (http/https) or local:PATH for the run's own captures`); continue; }
-    refs.set(source.ref, [...(refs.get(source.ref) ?? []), source.source_id]);
-  }
-  if (!refs.size) return errors;
-  const guard = spawnSync('python3', [join(SCRIPTS, 'check_sources.py'), '--registry', registryPath, '--verify-tracked', ...refs.keys()], { encoding: 'utf8' });
-  let rows = null;
-  if ([0, 3, 4].includes(guard.status)) try { rows = JSON.parse(guard.stdout); } catch { rows = null; }
-  if (!Array.isArray(rows) || rows.length !== refs.size) {
-    const detail = guard.error?.message ?? (guard.stderr.trim().split('\n').at(-1) || `exit ${guard.status}`);
-    err('check_sources.py', `cannot check ${[...refs.keys()].join(' ')} against the registry: ${detail}`);
-    return errors;
-  }
-  for (const [index, [ref, ids]] of [...refs].entries()) {
-    if (rows[index].status === 'new') err(`source ${ids.join(', ')}`, `${ref} has no row in ${registryPath}; add it under the run's section before hand-in`);
-  }
-  return errors;
-}
-
 // Joins shard run directories: same-source shards become one source (segments sorted, range dropped
 // when the shards tile the whole duration); ledgers and claims are concatenated. Conflicts are errors.
 export function merge(shards) {
@@ -514,15 +473,15 @@ export function merge(shards) {
   } };
 }
 
-const USAGE = 'usage: check_coverage.mjs RUN_DIR [--audit] [--summary] [--registry PRIOR_ART_MD] | check_coverage.mjs RUN_DIR --sample SEED\n'
-  + '       check_coverage.mjs --merge SHARD_DIR SHARD_DIR... --out RUN_DIR [--summary] [--registry PRIOR_ART_MD]';
+const USAGE = 'usage: check_coverage.mjs RUN_DIR [--audit] [--summary] | check_coverage.mjs RUN_DIR --sample SEED\n'
+  + '       check_coverage.mjs --merge SHARD_DIR SHARD_DIR... --out RUN_DIR [--summary]';
 const readRun = (dir, loadErrors) => name => {
   let raw;
   try { raw = readFileSync(join(dir, name), 'utf8'); } catch (error) { if (error.code !== 'ENOENT') loadErrors.push(`${join(dir, name)}: ${error.message}`); return undefined; }
   try { return JSON.parse(raw); } catch (error) { loadErrors.push(`${join(dir, name)}: invalid JSON: ${error.message}`); return null; }
 };
 export function main(argv = process.argv.slice(2), out = process.stdout, errOut = process.stderr) {
-  let dir = null; let requireAudit = false; let seed = null; let perRule = Infinity; let shardDirs = null; let outDir = null; let registry = REGISTRY;
+  let dir = null; let requireAudit = false; let seed = null; let perRule = Infinity; let shardDirs = null; let outDir = null;
   const usage = () => { errOut.write(`${USAGE}\n`); return 2; };
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--audit') requireAudit = true;
@@ -530,7 +489,6 @@ export function main(argv = process.argv.slice(2), out = process.stdout, errOut 
     else if (argv[i] === '--sample') { seed = argv[++i]; if (!text(seed)) return usage(); }
     else if (argv[i] === '--merge') shardDirs = [];
     else if (argv[i] === '--out') { outDir = argv[++i]; if (!text(outDir) || outDir.startsWith('--')) return usage(); }
-    else if (argv[i] === '--registry') { registry = argv[++i]; if (!text(registry) || registry.startsWith('--')) return usage(); }
     else if (argv[i].startsWith('--')) return usage();
     else if (shardDirs) shardDirs.push(argv[i]);
     else if (dir) return usage();
@@ -552,7 +510,6 @@ export function main(argv = process.argv.slice(2), out = process.stdout, errOut 
     for (const [key, name] of Object.entries(names)) writeFileSync(join(outDir, name), `${JSON.stringify(files[key], null, 2)}\n`, { flag: 'wx' });
     out.write(`merged ${shardDirs.length} shards into ${outDir}\n`);
     const result = check(files);
-    result.errors.push(...registryErrors(files.coverage, registry));
     out.write(render(result, { perRule }));
     return result.errors.length ? 1 : 0;
   }
@@ -567,7 +524,6 @@ export function main(argv = process.argv.slice(2), out = process.stdout, errOut 
   const result = check({ coverage, ledger: load('ledger.json'), claims: load('claims.json'),
     audit: requireAudit ? load('recall-audit.json') : undefined }, { requireAudit });
   for (const message of loadErrors) result.errors.unshift({ rule: 'schema', where: 'load', message });
-  result.errors.push(...registryErrors(coverage, registry));
   out.write(render(result, { perRule }));
   return result.errors.length ? 1 : 0;
 }

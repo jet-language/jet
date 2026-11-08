@@ -36,10 +36,6 @@ use {
 
 NO_NIX_FAILED: "JET_TESTKIT_NO_NIX_SETUP_FAILED"
 
-// The runtime's process exit, status unchanged: `process.exit` gives any
-// program's 101 the user-error status 1 (S36).
-#Import(c) no_nix_exit_raw: fn(code: I64) = "jet_rt_process_exit"
-
 run: fn() {
     args: process.args()
     if args.len() > 1 && args[0] == "--outer" -> no_nix_outer(args[1], args.slice(2, args.len()))
@@ -53,14 +49,12 @@ no_nix_say: fn(text: String) {
     errors.write(text).drop("no-nix stderr")
 }
 
-// The subject's status as the kit would have seen it from sh.
+// The subject's status as the kit would have seen it from sh: a subject's
+// 101 (a Jet defect) passes through unchanged.
 no_nix_exit: fn(code: Int) -> Never {
-    if code == 101 {
-        #Unsafe("the no-nix launcher passes its subject's status 101 through unchanged; process.exit would report it as 1 (S36)") {
-            no_nix_exit_raw(I64{101})
-        }
+    #Unsafe("the no-nix launcher passes its subject's status 101 through unchanged; process.exit would report it as 1 (S36)") {
+        process.exit_unmapped(code)
     }
-    process.exit(code)
 }
 
 // A setup failure: the reason, then the marker the kit reports as ERROR.
