@@ -1,0 +1,14 @@
+use {
+    _mem: core.mem
+    json: core.encoding.json
+}
+
+#Codable
+Bag: struct { items: [String] }
+
+run: fn() {
+    bag: json.decode<Bag>(`{"items": ["a"]}`) ?? return
+    names := [String]{}
+    loop item in bag.items -> names.push(item)
+    print(names.len())
+}

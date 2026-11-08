@@ -1728,7 +1728,9 @@ sema_derive_expand_scoped: fn(body: [DeriveBodyItem], scope: [NamedCtValue], rep
 // author and no user-typeable span; its spans are offsets into
 // `Prelude/Derives.jet`. Its advice is dropped; its errors are kept and land on
 // `anchor`, the derived type's name (the only authored location the derive
-// has), once per distinct problem.
+// has), once per distinct problem. A generated codec impl's methods drop
+// their advice too, keeping their errors where they are
+// (sema_check_generated_codec_method).
 sema_author_facing_diagnostics: fn(anchor: Span, generated: [Diagnostic], diagnostics: &[Diagnostic]) {
     kept := [Diagnostic]{}
     loop diagnostic in generated {

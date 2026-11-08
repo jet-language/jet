@@ -4760,6 +4760,15 @@ sema_check_generated_method_author_span: fn(job: SemaBodyJob, module_index: Int,
     panic("a registered Jet method lost its owning graph")
 }
 
+// Is `job` a method of a compiler-generated codec impl? Its body has no
+// author to act on advice, so it reports its errors alone, as a derived
+// body does (sema_author_facing_diagnostics); they keep their own spans.
+sema_check_generated_codec_method: fn(job: SemaBodyJob, module_index: Int, program: SemaProgramTables) -> Bool {
+    graph: program.registration_graph ?? panic("a registered Jet method lost its owning graph")
+    if job == .ImplMethod(_, owner, _) -> return graph.modules[module_index].impls[owner].compiler_generated
+    false
+}
+
 sema_check_apply_method_job: fn(module_index: Int, memory_plan: SemaFunctionMemoryPlan, job: SemaBodyJob, ready: &[SemaPreparedBody], queries: &[Int:SemaBodyMemoQuery], memo: SemaModuleMemo?, scopes: &SemaScopeTable, environment: &SemaScopeEnvironment, program: SemaProgramTables, host_hooks: SemaHostHookAccess?, comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], diagnostics: &[Diagnostic], functions: &[FnBody], prelude_demands: &[Int:[SemaPreludeConversionDemand]], call_facts: &[SemaCallSiteFact], hardware_use: &TargetHardwareUse, comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact], comptime_body_sources: &[SemaComptimeBodySource], compute_facts: &[SemaComputeFunctionFacts], failure_facts: &[SemaFunctionFailureFacts], exact_int_reachable: &Bool, copy_events: &[SemaCopyEvent], reasons: &[String], keep_going: Bool, pending_obligations: Bool) -> Bool {
     ordinal: if job == {
         .NominalMethod(position, _, _) -> position
@@ -4771,6 +4780,14 @@ sema_check_apply_method_job: fn(module_index: Int, memory_plan: SemaFunctionMemo
         generated_diagnostics := [Diagnostic]{}
         complete := sema_check_registration_method(job, module_index, memory_plan, ready, queries, memo, ordinal, scopes, environment, program, host_hooks, comptime_functions, comptime_rows, generated_diagnostics, functions, prelude_demands, call_facts, hardware_use, comptime_requests, name_references, comptime_body_sources, compute_facts, failure_facts, exact_int_reachable, copy_events, reasons, keep_going, pending_obligations)
         sema_author_facing_diagnostics(span, generated_diagnostics, diagnostics)
+        return complete
+    }
+    if sema_check_generated_codec_method(job, module_index, program) {
+        generated_diagnostics := [Diagnostic]{}
+        complete := sema_check_registration_method(job, module_index, memory_plan, ready, queries, memo, ordinal, scopes, environment, program, host_hooks, comptime_functions, comptime_rows, generated_diagnostics, functions, prelude_demands, call_facts, hardware_use, comptime_requests, name_references, comptime_body_sources, compute_facts, failure_facts, exact_int_reachable, copy_events, reasons, keep_going, pending_obligations)
+        loop diagnostic in generated_diagnostics {
+            if diagnostic.severity == DIAGNOSTIC_ERROR -> diagnostics.push(diagnostic)
+        }
         return complete
     }
     sema_check_registration_method(job, module_index, memory_plan, ready, queries, memo, ordinal, scopes, environment, program, host_hooks, comptime_functions, comptime_rows, diagnostics, functions, prelude_demands, call_facts, hardware_use, comptime_requests, name_references, comptime_body_sources, compute_facts, failure_facts, exact_int_reachable, copy_events, reasons, keep_going, pending_obligations)
