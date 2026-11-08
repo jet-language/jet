@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6686,
-    "rev": 95951,
+    "rev": 95957,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -47520,7 +47520,7 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P1",
       "plan": null,
       "checkSteps": null,
@@ -47529,6 +47529,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-08",
+          "by": "Main",
+          "text": "Main 2026-11-07: every criterion is met; at faa532e09f no DataTree, data_tree_ or DATA_TREE_ name remains in Compiler, Core or Docs/spec (only diagnostics.md:390 records the retirement). Closing."
+        },
         {
           "at": "2026-11-07",
           "by": "Main",
@@ -47685,12 +47690,13 @@
       "parentId": "c0iuv3zr",
       "needsAcceptance": false,
       "created": "2026-10-02T18:52:06.045Z",
-      "updated": "2026-11-08T00:32:52.815Z",
+      "updated": "2026-11-08T01:59:16.911Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
       ],
-      "criteriaLastN": 8
+      "criteriaLastN": 8,
+      "completedAt": "2026-11-08T01:59:16.911Z"
     },
     {
       "id": "c011piog",
@@ -70002,6 +70008,11 @@
         {
           "at": "2026-11-08",
           "by": "Main",
+          "text": "Main 2026-11-07 c3 canvas route: the canvas scenarios cannot run (the canvas is unbuilt, #6418; every caller is known-failing: canvas_cli_lifecycle and JetLSP/Tests #6650), so a blind port of 88 scenarios would prove nothing. G1Lead ports the runnable layer (CanvasDriver.jet over WebDriver BiDi, Harness.jet, Run.jet and the native/driver/gecko lifecycles), moves every caller to Jet and deletes every Tools/canvas-test/*.mjs; porting the scenarios became a criterion on #6418. sourcemap.mjs is gone (70532ccd85): SourceMap.jet does the static checks and the case is known-failing because the web build emits no source map; the CDP breakpoint proof needs a page-scoped protocol API that core.web.browser lacks."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
           "text": "c3: first full self-host chain through the Jet Tools/agent/Chain.jet (no chain.sh): release admit of 574a9fd134 from a0_034 reaches the fixed point s2 == s3 (jet b0998cecbf79b5c5), no Rust, pack1 == pack2 bytes. The one defect found on the way (inroot re-launched the script path, so every canonical stage died with 'unknown argument inroot') is fixed by 6ddd076fc0."
         },
         {
@@ -71291,7 +71302,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T17:15:48.068Z",
-      "updated": "2026-11-08T00:35:37.788Z",
+      "updated": "2026-11-08T01:59:59.132Z",
       "updatedBy": "Main",
       "goals": [
         "G1"
@@ -84929,6 +84940,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-07T11:25:02.684Z"
+        },
+        {
+          "n": 145,
+          "text": "The 88 canvas scenarios of Tools/canvas-test/scenario.mjs (deleted in the #6035 c3 cutover; its last commit is logged on this card) are ported to Jet against Tools/canvas-test/Harness.jet, each keeping its assertions and messages, and `jet run Tools/canvas-test/Run.jet -- scenario --scenario N` passes for every N on the running canvas.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T01:59:57.985Z"
         }
       ],
       "refs": [],
@@ -84939,9 +84959,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T01:11:55.199Z",
-      "updated": "2026-11-07T11:25:03.561Z",
+      "updated": "2026-11-08T01:59:57.985Z",
       "updatedBy": "Main",
-      "criteriaLastN": 144
+      "criteriaLastN": 145
     },
     {
       "id": "c081c9o8",
@@ -93339,6 +93359,11 @@
         {
           "at": "2026-11-08",
           "by": "Main",
+          "text": "PortsLead-2 AFTER numbers, g13 batch (link CAS, parallel fsync pool, hashing on worker tasks, one tree pass with a memo), not yet landed. Cold `jetpack env fetch-toolchain --json` from an empty HOME and state: 20.6 s wall on the home NVMe; 43.4 s on the contended scratch NVMe, and 96.6 s on a rerun at load 10, where the fsync writeback of 442 MB dominates. BEFORE was 1131.1 s. Tree hash unchanged: sha256-700385c9c906 (5931 files, 442377517 B); CAS 4019 entries, linked. Scratch split: verify 2.2 s, untar 7.1 s, seal 1.2 s, parallel hash 16.6 s, publish fsync 24.1 s, hangar 0.6 s. core.crypto SHA-256 runs at 45-50 MB/s at O1/O2, about 10x slower than a scalar native implementation (~500 MB/s) and 40x slower than SHA-NI; that work is on #6681."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
           "text": "PortsLead-2 measured a cold fetch-toolchain before the fix at 135.6 s on its own s1. The c65 fresh run spent about 45 minutes in the same phase (17:10-17:55) under heavy machine load. The gap is unexplained: the per-file sync alone may not account for the 45 minutes."
         },
         {
@@ -93375,7 +93400,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T05:33:07.839Z",
-      "updated": "2026-11-08T01:38:22.033Z",
+      "updated": "2026-11-08T01:43:35.197Z",
       "updatedBy": "Main",
       "criteriaLastN": 2
     },
@@ -99560,7 +99585,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-08",
+          "by": "Main",
+          "text": "Measured on #6592 (PortsLead-2, 2026-11-07): pure-Jet core.crypto SHA-256 at 45-50 MB/s at O1 and O2; a hand-unrolled Jet version is no faster. Parallel hashing of the 442 MB toolchain tree still takes 16.6 s, the largest remaining fetch phase after fsync."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -99598,7 +99629,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-08T01:26:36.572Z",
-      "updated": "2026-11-08T01:26:36.572Z",
+      "updated": "2026-11-08T01:43:36.115Z",
       "updatedBy": "Main"
     },
     {
@@ -187728,6 +187759,48 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-08T01:59:59.133Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0pgowhn",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-08T01:59:57.986Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0hn7w1n",
+      "note": "#145 The 88 canvas scenarios of Tools/canvas-test/scenario.mjs (d"
+    },
+    {
+      "at": "2026-11-08T01:59:16.911Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c07rizte",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-08T01:59:14.253Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c07rizte",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-08T01:43:36.115Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0nsxbj2",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-08T01:43:35.197Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0g93joj",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-08T01:42:18.522Z",
       "by": "Main",
