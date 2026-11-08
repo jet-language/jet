@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6708,
-    "rev": 96345,
+    "nextNum": 6710,
+    "rev": 96349,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -101067,6 +101067,11 @@
         {
           "at": "2026-11-08",
           "by": "Main",
+          "text": "SqliteLead-6 (wal.c port, pager WAL paths and unix shm methods) is submitted and waits for a seed that carries SqliteLead-3. Owed when the connection layer (main.c) lands: wire the checkpoint interrupt check and the \"PRAGMA table_list\" exec that sqlite3PagerCheckpoint issues."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
           "text": "SqliteLead plan accepted 2026-11-08. Target is SQLite 3.45.0 with the PrebuildRuntime SQLITE_FLAGS: full SQL, VDBE, planner with STAT4, B-tree, pager, rollback journal, WAL with shm, the unix VFS with fcntl locks, memdb, FK on by default, and the FTS3/4, FTS5, JSON1, RTree, DBSTAT, SOUNDEX and column-metadata extensions. load_extension stays refused as today. The engine lives as private core.db parts under Core/Db/Engine/; the public core.db API is unchanged. Slices: S0 scratch-only C oracle, S1 file-format read, S2 B-tree and pager write, S3 minimal SQL end to end, S4 full SQL against sqllogictest slices, S5 WAL, locking and crash recovery, S6 extensions, S7 perf against C (speedtest1 and the db cells), S8 the one-commit cutover deleting Core/Vendor/Sqlite3. Main rulings: SqliteLead owns the new Compiler/JetRuntime/HostDbVfs.jet; shared registry rows go in Core.jet and CoreSourceParts.tsv; existing file leaves are reused and only missing ones added; sqllogictest goes in as a pinned manifest plus runner, with no corpus committed."
         },
         {
@@ -101129,7 +101134,7 @@
       "parentId": "c0lscvc9",
       "needsAcceptance": false,
       "created": "2026-11-08T15:47:22.108Z",
-      "updated": "2026-11-08T16:00:21.571Z",
+      "updated": "2026-11-08T22:32:27.056Z",
       "updatedBy": "Main",
       "criteriaLastN": 4
     },
@@ -101772,7 +101777,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-08",
+          "by": "Main",
+          "text": "Root cause (AllocLead, gdb watchpoints): this is #6702. Reassigning a Close local drops the old value first and closes it afterwards (ir_stmt_body .Assign in Compiler/JetIR/Source/BuildExpr.jet). The close increments the freed list buffer count word (incq -0x18(%rbx)), so a free-list link of 0 becomes 1, the buffer is wiped in place and freed twice, and the free list points the block at itself; the third allocation of that size then reads 0x1. --checked-alloc hides it because its 0xDF fill makes the count negative, which the runtime reads as a static buffer. SpeedLead-7/7b (batch b4) hold the fix; AllocLead-1 adds the regression case resource_close/reassigned_close_local_frees_its_old_buffer_once, which faults on all three tiers with seed a0_040."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -101799,9 +101810,65 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-08T22:17:15.953Z",
-      "updated": "2026-11-08T22:17:23.237Z",
+      "updated": "2026-11-08T22:39:33.628Z",
       "updatedBy": "Main",
       "criteriaLastN": 2
+    },
+    {
+      "id": "c0ku1nvb",
+      "num": 6708,
+      "title": "Element and module-storage reassignment drops the old Close value without closing it (xs[i] = v, m[k] = v, module storage)",
+      "body": "Found by AllocLead while tracing #6707. With seed a0_040, `xs[i] = v` and `m[k] = v` drop the replaced element without running its close. Assigning to module storage does the same, from reading the code; that path has not been run. Field writes and Shared guard writes correctly close before they drop. Fix: one replace-then-close-then-drop path for every assignment target, with a case for each target on every tier.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "goals": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-08T22:39:35.331Z",
+      "updated": "2026-11-08T22:39:35.331Z",
+      "updatedBy": "Main"
+    },
+    {
+      "id": "c0e4cn5v",
+      "num": 6709,
+      "title": "ICE: `o := Box?(Val(make(\"o0\")))` crashes sema.body totality (\"has no checked type\")",
+      "body": "Found by AllocLead with seed a0_040. An Option of a boxed value built inline in a local binding crashes the compiler in sema.body totality with \"has no checked type\" instead of checking. Under I2 and I3 this must be either a checked program or a registered diagnostic. Add a case under tests/cases.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "goals": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-08T22:39:37.102Z",
+      "updated": "2026-11-08T22:39:37.102Z",
+      "updatedBy": "Main"
     }
   ],
   "decisions": [
@@ -189316,6 +189383,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-08T22:39:37.102Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0e4cn5v",
+      "note": "ICE: `o := Box?(Val(make(\"o0\")))` crashes sema.body totality (\"has no checked type\")"
+    },
+    {
+      "at": "2026-11-08T22:39:35.331Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0ku1nvb",
+      "note": "Element and module-storage reassignment drops the old Close value without closing it (xs[i] = v, m[k] = v, module storage)"
+    },
+    {
+      "at": "2026-11-08T22:39:33.628Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c09yzxgv",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-08T22:32:27.056Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ajhpeh",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-08T22:17:23.237Z",
       "by": "Main",
