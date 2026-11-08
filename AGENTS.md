@@ -171,6 +171,16 @@ the reference includes the smallest hand-written implementation of that
 feature. Jet minimizes each feature's cost and never removes a feature to meet
 the ceiling.
 
+Close every performance gap at its root, in the general mechanism: the
+codegen, runtime, or Core path that every program using the feature goes
+through. Never tailor a fix to one cell: no pattern that recognizes a
+benchmark program, no per-cell flag or constant, and no special case that only
+that workload reaches. When the ceiling shows that a feature costs almost
+nothing (for example, CPU time while waiting on I/O), Jet's general code for
+that feature must cost almost nothing too. Every performance fix names the
+feature it improves and proves the gain on a second program that uses the
+feature differently from the cell.
+
 Required cells cover the foundations (numerics, text, files, concurrency,
 networking, build time, and run time) plus one real workload in each critical
 area: web, games, CLI and scripts, data analysis, backend services, GUI
