@@ -607,7 +607,7 @@ store_register_entries_unlocked_with_mode: fn(verification: &StoreVerification, 
     hangar: roots.hangar_dir()
     loop entry in entries {
         if mode == {
-            .Native -> store_share_tree_files(roots, entry.out, entry.platform_artifact_kind != "")
+            .Native -> store_share_tree_files(verification, roots, entry.out, entry.platform_artifact_kind != "")
             // Nix admission keeps objects root-local. Optional shared-CAS
             // pooling is skipped, including for regular-file roots.
             .AdmittedNix -> store_verify_admitted_nix_output(roots, entry)
@@ -701,7 +701,7 @@ store_register_entry_unlocked_with_hook: fn(verification: &StoreVerification, ro
 
 store_register_entry_unlocked_mode: fn(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry, after_append: (fn())?, fresh_action_key: String?) -> Bool StoreError! {
     hangar: roots.hangar_dir()
-    store_share_tree_files(roots, entry.out, entry.platform_artifact_kind != "")
+    store_share_tree_files(verification, roots, entry.out, entry.platform_artifact_kind != "")
     output_hash: entry.envelope.output_hash
     if store_object_digest_for_path(entry.out, hangar) == Val((output_hash)) {
         store_write_seal(verification, entry.out, hangar, entry.envelope.output_hash)

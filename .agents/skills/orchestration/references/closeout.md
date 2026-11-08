@@ -83,10 +83,12 @@ artifact proof green. If a proof was not run, record it as unknown or pending.
 ## Linked-card milestone
 
 After **every linked card** for a milestone is `done`, freeze the integrated
-source in a commit and open the commit-bound token:
+source in a commit. The orchestrator records the commit-bound token with
+Tower, then the gate checks it:
 
 ```sh
-jet Tools/agent/CloseoutGate.jet open MILESTONE --by AGENT
+tower milestone closeout MILESTONE --commit "$(git rev-parse HEAD)" --by AGENT
+jet Tools/agent/CloseoutGate.jet check MILESTONE
 ```
 
 The gate must select the frozen source commit, a qualified candidate at that

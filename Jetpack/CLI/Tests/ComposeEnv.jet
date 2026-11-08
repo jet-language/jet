@@ -85,12 +85,10 @@ cli_test_provider_paths: fn(file: String, value: String) -> String? {
     vars: projection.env_vars()
     assert_eq(vars.get("JET_ROOT"), Val("/workspace/jet"))
     assert_eq(vars.get("JET_ENV_DISABLE"), Val("1"))
-    assert_eq(vars.get("JET_NIX_TMP_CLEANED"), Val("1"))
     leased: projection.lease_vars()
     assert_eq(cli_test_plain(leased.get("TZDIR")), Val("/hangar/tzdata-1/share/zoneinfo"))
     if sys.name() == "linux" -> assert_eq(cli_test_plain(leased.get("LD_LIBRARY_PATH")), Val("/hangar/vulkan-1/lib:/hangar/raylib-1/lib:/host/lib"))
     assert_eq(projection.activation, NativeActivation.Disabled)
-    assert_eq(projection.nix_shell_scratch, NixShellScratch.NotCreated)
 }
 
 #Test("cli native output manifest keeps output selection and target condition typed") {

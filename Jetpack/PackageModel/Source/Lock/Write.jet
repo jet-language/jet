@@ -60,6 +60,10 @@ pkg_lock_write: fn(input: LockFile) -> String Never! {
         out.push(pkg_lock_string_field("binary", browser.binary))
         out.push(pkg_lock_string_field("protocol", browser.protocol))
         out.push("size = {browser.size}\n")
+        if browser.driver != "" {
+            out.push(pkg_lock_string_field("driver", browser.driver))
+            out.push("driver-size = {browser.driver_size}\n")
+        }
         pkg_lock_write_envelope(out, browser.envelope)
     }
 

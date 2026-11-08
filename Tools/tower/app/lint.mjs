@@ -1,12 +1,9 @@
 // Card #457 — `tower lint`: rule-based durability sweeper over the live
-// board (+ optional docs scan). Each rule is its own function returning
-// findings [{rule, ref, msg}]; `lint()` aggregates them. Read-only — never
-// mutates the store.
-import { readdirSync, existsSync, readFileSync } from 'node:fs';
-import { join, relative } from 'node:path';
+// board. Each rule is its own function returning findings [{rule, ref, msg}];
+// `lint()` aggregates them. Read-only — never mutates the store. The
+// Docs/spec reference scan lives in Tools/tower/Board.jet (`lint --docs`).
 import { ballotGaps, findCard } from './store.mjs';
 import { isOpenCard, referenceLabel, referenceTokens } from './card-matching.mjs';
-import { DOCS_DIR } from './paths.mjs';
 
 // `updated`/`ratifiedAt` are 'YYYY-MM-DD' (today()); `created` on decisions
 // and `at` on events are full ISO timestamps (now()) — handle both.
@@ -220,83 +217,6 @@ export function ruleDuplicateSuspects(s) {
 
 const CORE_RULES = [ruleDoneWithoutEvidence, ruleClaimedIdle, ruleMissingAttribution, ruleBallotGaps, ruleStaleDraft, ruleBlockerUnpopulated, ruleUnhomedCard, ruleCriteriaEvidenceConflicts, ruleDuplicateSuspects, ruleUnknownGoal];
 
-const DECISION_ID_RE = /\bD-[A-Z0-9]+(?:-[A-Z0-9]+)*\b/g;
-const CARD_REF_RE = /#(\d+)\b/g;
-const DECISION_CONTEXT_RE = /\bD-[A-Z0-9]+(?:-[A-Z0-9]+)*\b/;
-
-function specFiles(root) {
-  if (!existsSync(root)) return [];
-  const files = [];
-  const walk = dir => {
-    for (const entry of readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
-      if (entry.name.startsWith('.')) continue;
-      const abs = join(dir, entry.name);
-      if (entry.isDirectory()) walk(abs);
-      else if (/\.(?:md|json|txt)$/i.test(entry.name)) files.push(abs);
-    }
-  };
-  walk(root);
-  return files;
-}
-
-function addLocation(map, id, path, line) {
-  const locations = map.get(id) || [];
-  locations.push(`${path}:${line}`);
-  map.set(id, locations);
-}
-
-function cardRefsInLine(line) {
-  // Only treat references as cards when prose names cards/issues, or when a
-  // decision citation carries its owning card list. This avoids `[U8#4096]`
-  // and similar language examples.
-  const hasCardContext = /\b(?:card|cards|issue|issues)\b/i.test(line) || DECISION_CONTEXT_RE.test(line);
-  if (!hasCardContext) return [];
-  return [...line.matchAll(CARD_REF_RE)]
-    .filter(m => (line.slice(0, m.index).match(/`/g) || []).length % 2 === 0)
-    .map(m => `#${m[1]}`);
-}
-
-function isPlaceholderDecision(id) {
-  return /^D-(?:X+|Y+|EXAMPLE|TODO)$/i.test(id);
-}
-
-export function ruleSpecReferenceGaps(s, history, { docsRoot = join(process.cwd(), DOCS_DIR) } = {}) {
-  const specRoot = join(docsRoot, 'spec');
-  const knownCards = new Set([
-    ...(s?.cards || []).map(c => c.num),
-    ...(history?.cards || []).map(c => c.num),
-  ]);
-  const knownDecisions = new Set([
-    ...(s?.decisions || []).map(d => d.id),
-    ...(history?.decisions || []).map(d => d.id),
-  ]);
-  const missingCards = new Map();
-  const missingDecisions = new Map();
-
-  for (const file of specFiles(specRoot)) {
-    const path = `${DOCS_DIR}/${relative(docsRoot, file).replaceAll('\\', '/')}`;
-    const lines = readFileSync(file, 'utf8').split('\n');
-    lines.forEach((line, index) => {
-      for (const ref of cardRefsInLine(line)) {
-        if (!knownCards.has(Number(ref.slice(1)))) addLocation(missingCards, ref, path, index + 1);
-      }
-      for (const match of line.matchAll(DECISION_ID_RE)) {
-        if (!isPlaceholderDecision(match[0]) && !knownDecisions.has(match[0]))
-          addLocation(missingDecisions, match[0], path, index + 1);
-      }
-    });
-  }
-
-  const findings = [];
-  for (const [ref, locations] of [...missingCards].sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true })))
-    findings.push({ rule: 'spec-card-ref-missing', ref,
-      msg: `${locations.join(', ')} cites ${ref}, but Tower has no card record` });
-  for (const [ref, locations] of [...missingDecisions].sort(([a], [b]) => a.localeCompare(b)))
-    findings.push({ rule: 'spec-decision-ref-missing', ref,
-      msg: `${locations.join(', ')} cites ${ref}, but Tower has no decision record` });
-  return findings;
-}
-
 // ---- aggregate ---------------------------------------------------------------
 // Owner rulings 2026-08-05 / 2026-10-04: every card lives in an epoch or is a
 // sidequest — frozen cards included. The store rejects new violations; this
@@ -310,9 +230,6 @@ export function ruleUnhomedCard(s) {
   return findings;
 }
 
-export function lint(s, history, { docs = false, docsRoot } = {}) {
-  let findings = CORE_RULES.flatMap(fn => fn(s));
-  findings = findings.concat(ruleOrphanBlockers(s, history));
-  if (docs) findings = findings.concat(ruleSpecReferenceGaps(s, history, { docsRoot }));
-  return findings;
+export function lint(s, history) {
+  return CORE_RULES.flatMap(fn => fn(s)).concat(ruleOrphanBlockers(s, history));
 }

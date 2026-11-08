@@ -1,0 +1,16 @@
+// w13: put the 2,000,000 lines of w13.txt into a set and count the distinct ones.
+package: {
+    name: "run"
+    authority: { allow: [IO, Mem.Alloc, FS.Read] }
+}
+
+use {
+    fs: core.files
+}
+
+run: fn() {
+    raw: fs.read("w13.txt") ?? panic("read failed")
+    seen := Set.from([String]{})
+    loop line in raw.lines() -> seen.add(line)
+    print("unique={seen.len()}")
+}

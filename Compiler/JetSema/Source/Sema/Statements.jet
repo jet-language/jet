@@ -615,22 +615,34 @@ sema_stmt_is_value_return: fn(statement: Stmt) -> Bool Never! {
     }
 }
 
-// Rust `check_value_tail` for the end of a value block: an empty block, or one
-// whose last line is a statement that can still reach the end, reports E0114. A
-// value line and a table report their own errors. False when E0114 was
-// reported.
-sema_stmt_check_value_block_end: fn(statements: [Stmt], checked: [TStmt], expected: Type?, block_span: Span, function_name: String, diagnostics: &[Diagnostic]) -> Bool {
+// Rust `check_value_tail` for the end of a value block: an empty block, one
+// whose last line is a valueless builtin call (`print`, `assert`, …: Rust
+// `check_call` hands back no type for these), or one whose last line is a
+// statement that can still reach the end, reports E0114. A value line and a
+// table report their own errors. False when E0114 was reported.
+sema_stmt_check_value_block_end: fn(statements: [Stmt], checked: [TStmt], expected: Type?, block_span: Span, function_name: String, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
     if statements.len() == 0 {
         diagnostics.push(sema_stmt_missing_value(expected, None, function_name, block_span))
         return false
     }
     seen := 0
+    // An earlier line that always leaves makes a valueless last line dead
+    // code, not the block's value.
+    left := false
     loop last in statements {
         seen += 1
-        if seen < statements.len() -> next
+        if seen < statements.len() {
+            if sema_stmt_definitely_returns(last) -> left = true
+            next
+        }
         if last == {
-            .Expr(_) | .Return(_, _) | .Switch(_, _, _, _) -> return true
-            .Unsafe(_, _, body, span) -> return sema_stmt_check_value_block_end(body, checked, expected, span, function_name, diagnostics)
+            .Expr(value) -> {
+                if left || sema_fallback_unit_call_name(value, scopes) == None -> return true
+                diagnostics.push(sema_stmt_missing_value(expected, None, function_name, expr_span(value)))
+                return false
+            }
+            .Return(_, _) | .Switch(_, _, _, _) -> return true
+            .Unsafe(_, _, body, span) -> return sema_stmt_check_value_block_end(body, checked, expected, span, function_name, scopes, diagnostics)
             else -> {}
         }
         if !sema_stmt_tree_block_can_fall_through(checked) || sema_stmt_definitely_returns(last) -> return true
@@ -1019,8 +1031,13 @@ sema_stmt_check_unit_if: fn(expr: Expr, return_type: Type?, environment: SemaSco
             // A dispatch table binds a call subject once before the chain
             // that tests it, exactly like the value form.
             if sema_expression_if_dispatch_subject(condition, else_value) == .Val(subject) {
-                binding: sema_expression_if_bind_subject(subject, condition, else_value, environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaStatementResult{value: [TStmt]{}, complete: false}
-                table := sema_stmt_check_unit_if_parts(sema_expression_if_rebound_condition(subject, condition), then_body, then_value, else_body, sema_expression_if_rebound_chain(subject, else_value), span, return_type, environment, program, scopes, state, tail_store, context, diagnostics, loop_depth)
+                // A value table's `it` lives in the table's own scope.
+                table_it: sema_expression_if_subject_is_table_it(subject)
+                if table_it -> sema_scope_enter(scopes, state, "if.it@{span.start}")
+                bound: sema_expression_if_bind_subject(subject, condition, else_value, environment, program, scopes, state, tail_store, context, diagnostics)
+                table := if bound != None -> sema_stmt_check_unit_if_parts(sema_expression_if_rebound_condition(subject, condition), then_body, then_value, else_body, sema_expression_if_rebound_chain(subject, else_value), span, return_type, environment, program, scopes, state, tail_store, context, diagnostics, loop_depth) else -> SemaStatementResult{value: [TStmt]{}, complete: false}
+                if table_it -> sema_single_use_leave_scope(scopes, state, diagnostics)
+                binding: bound ?? return SemaStatementResult{value: [TStmt]{}, complete: false}
                 if !table.complete -> return table
                 statements := [TStmt]{binding}
                 loop statement in table.value -> statements.push(statement)
@@ -1142,7 +1159,7 @@ sema_stmt_check_switch: fn(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?,
         if !branch.complete -> complete = false
         if value_tail {
             context.value_tail_span = Val(span)
-            ends: if arm_return != None -> sema_stmt_check_value_block_end(arms[arm_index].body, branch.value, arm_return, arms[arm_index].span, context.function_name, diagnostics) else -> sema_stmt_check_value_block_end(arms[arm_index].body, branch.value, return_type, arms[arm_index].span, context.function_name, diagnostics)
+            ends: if arm_return != None -> sema_stmt_check_value_block_end(arms[arm_index].body, branch.value, arm_return, arms[arm_index].span, context.function_name, scopes, diagnostics) else -> sema_stmt_check_value_block_end(arms[arm_index].body, branch.value, return_type, arms[arm_index].span, context.function_name, scopes, diagnostics)
             if !ends -> complete = false
         }
         sema_single_use_leave_scope(scopes, state, diagnostics)
@@ -1179,7 +1196,7 @@ sema_stmt_check_switch: fn(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?,
         if !checked_else.complete -> complete = false
         if value_tail {
             context.value_tail_span = Val(span)
-            if !sema_stmt_check_value_block_end(body, checked_else.value, return_type, span, context.function_name, diagnostics) -> complete = false
+            if !sema_stmt_check_value_block_end(body, checked_else.value, return_type, span, context.function_name, scopes, diagnostics) -> complete = false
         }
         checked_value := checked_else.value.move()
         checked_else.value = [TStmt]{}
@@ -3433,6 +3450,179 @@ sema_stmt_lint_same_subject_dispatch: fn(statements: [Stmt], environment: SemaSc
         }
         index = run_end
     }
+}
+
+// One group a block takes out of a Map by key and grows (L0534): the local's
+// name, the source of the Map, the key and the fallback group, and the span of
+// the take.
+SemaStmtMapGroupTake: struct { name: String, map: String, key: String, fallback: String, span: Span }
+
+// L0534: `group := groups.get(key) ?? [T]{}`, a write such as
+// `group.push(item)`, then `groups[key] = group` copies the whole group on
+// every pass. The local still shares the entry's buffer when it is written,
+// so the write first makes it unique by copying it, strings and all, and the
+// store then drops the Map's old copy: a loop of these is quadratic. Growing
+// the entry in place (`groups[key].push(item)`, the key seeded first when it
+// is missing) copies nothing. The fix is that rewrite when the block is
+// exactly take, one write, store, and the local is not read after the store.
+sema_stmt_lint_map_group_round_trip: fn(statements: [Stmt], environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) {
+    graph: program.registration_graph ?? return
+    caller: sema_scope_caller_index(environment, graph) ?? return
+    raw: graph.modules[caller].source.bytes()
+    loop index in 0..<statements.len() {
+        taken: sema_stmt_map_group_take(statements[index], raw) ?? next
+        stored := -1
+        written := false
+        loop later in (index + 1)..<statements.len() {
+            if sema_stmt_map_group_store(statements[later], raw, taken) {
+                stored = later
+                break
+            }
+            if sema_stmt_map_group_write(statements[later], taken.name) != None -> written = true
+        }
+        if stored < 0 || !written -> next
+        diagnostic := sema_lint("L0534", taken.span, "`{taken.name}` copies the whole group out of `{taken.map}` and stores it back", "`{taken.name}` still shares the entry's buffer when it is written, so the write first copies the whole group, and storing it back drops the Map's old copy; in a loop that is quadratic", "Grow the entry in place: `if !{taken.map}.has_key({taken.key}) -> {taken.map}[{taken.key}] = {taken.fallback}`, then `{taken.map}[{taken.key}].push(…)`")
+        if stored == index + 2 && sema_stmt_map_group_edit(statements, index, taken, raw) == .Val(edit) -> diagnostic = diagnostic_with_edit_grade(diagnostic, edit, DiagnosticFixApplicability.Suggested, DiagnosticFixSafety.NeedsReview)
+        diagnostics.push(diagnostic)
+    }
+}
+
+// The source text of `span`, None outside `raw`.
+sema_stmt_source_text: fn(raw: [U8], span: Span) -> String? {
+    if span.start < 0 || span.end > raw.len() || span.start >= span.end -> return None
+    text: String.from_bytes(raw[span.start..<span.end]) ?? return None
+    Val(text)
+}
+
+// `name := map.get(key) ?? fallback` with a mutable local `name`.
+sema_stmt_map_group_take: fn(statement: Stmt, raw: [U8]) -> SemaStmtMapGroupTake? {
+    if statement == .Val(binding) {
+        if !binding.mutable || binding.pattern != None -> return None
+        if binding.init == .OrFallback(value, fallback, _, span, _) {
+            if value == .MethodCall(receiver, method, _, _, _, args, _) {
+                if method != "get" || args.len() != 1 -> return None
+                if fallback == .Value(group) {
+                    map: sema_stmt_source_text(raw, expr_source_span(receiver)) ?? return None
+                    key: sema_stmt_source_text(raw, expr_source_span(args[0].expr)) ?? return None
+                    seed: sema_stmt_source_text(raw, expr_source_span(group)) ?? return None
+                    return Val(SemaStmtMapGroupTake{name: binding.name.copy(), map: map, key: key, fallback: seed, span: Span{start: binding.name_span.start, end: span.end}})
+                }
+            }
+        }
+    }
+    None
+}
+
+// `map[key] = name` or `map[key] = name.move()`, the take's Map and key
+// written as they were taken.
+sema_stmt_map_group_store: fn(statement: Stmt, raw: [U8], taken: SemaStmtMapGroupTake) -> Bool {
+    if statement == .Assign(target, op, _, value) {
+        if op != None || !sema_stmt_names_local(value, taken.name) -> return false
+        if target == .Index(base, index, _, _) {
+            return (sema_stmt_source_text(raw, expr_source_span(base)) == Val(taken.map.copy())) && (sema_stmt_source_text(raw, expr_source_span(index)) == Val(taken.key.copy()))
+        }
+    }
+    false
+}
+
+// Whether `value` is the local `name`, or `name.move()`.
+sema_stmt_names_local: fn(value: Expr, name: String) -> Bool {
+    if value == .Ident(local, _, _) -> return local == name
+    if value == .MethodCall(receiver, method, _, _, _, args, _) {
+        if method != "move" || args.len() != 0 -> return false
+        if receiver == .Ident(local, _, _) -> return local == name
+    }
+    false
+}
+
+// The method of a statement `name.method(…)` that grows or reorders the
+// group in place; None for any other statement.
+sema_stmt_map_group_write: fn(statement: Stmt, name: String) -> String? {
+    if statement == .Expr(call) {
+        if call == .MethodCall(receiver, method, _, _, _, _, _) {
+            writes: [String]{"push", "extend", "insert", "append", "sort", "reverse"}
+            if receiver == .Ident(local, _, _) {
+                if local == name && writes.contains(method) -> return Val(method.copy())
+            }
+        }
+    }
+    None
+}
+
+// The L0534 rewrite of take, write, store: the key seeded when missing, then
+// the write through the entry. None when the rest of the block still names
+// the local.
+sema_stmt_map_group_edit: fn(statements: [Stmt], index: Int, taken: SemaStmtMapGroupTake, raw: [U8]) -> TextEdit? {
+    method: sema_stmt_map_group_write(statements[index + 1], taken.name) ?? return None
+    // A method call is spanned at its name; its arguments run from the `(`
+    // right after it to the matching `)`.
+    open: sema_compiler_index_stmt_span(statements[index + 1]).end
+    if open >= raw.len() || raw[open] != (U8{40}) -> return None
+    close: sema_stmt_scan_close(raw, open + 1) ?? return None
+    arguments: sema_stmt_source_text(raw, Span{start: open, end: close + 1}) ?? return None
+    // The take starts at its local's name (its statement span starts at `:=`).
+    start: taken.span.start
+    last: sema_compiler_index_stmt_span(statements[index + 2])
+    // A `name.move()` store is spanned at `move`; only a plain store is
+    // rewritten.
+    if statements[index + 2] == .Assign(_, _, _, value) {
+        if !(value == .Ident(_, _, _)) -> return None
+    }
+    block_end: sema_stmt_scan_close(raw, last.end) ?? return None
+    rest: sema_stmt_source_text(raw, Span{start: last.end, end: block_end}) ?? ""
+    if sema_stmt_names_word(rest, taken.name) -> return None
+    line_start := start
+    loop line_start > 0 && raw[line_start - 1] != (U8{10}) -> line_start -= 1
+    indent := ""
+    loop _ in line_start..<start -> indent = "{indent} "
+    entry: "{taken.map}[{taken.key}]"
+    Val(TextEdit{span: Span{start: start, end: last.end}, new_text: "if !{taken.map}.has_key({taken.key}) -> {entry} = {taken.fallback}\n{indent}{entry}.{method}{arguments}"})
+}
+
+// The offset of the bracket that closes the nesting `from` sits in: the
+// first `)`, `]` or `}` outside strings with no opener of its own after
+// `from`. None when the source ends first.
+sema_stmt_scan_close: fn(raw: [U8], from: Int) -> Int? {
+    at := from
+    depth := 0
+    in_string := false
+    loop at < raw.len() {
+        byte: raw[at]
+        if in_string {
+            if byte == (U8{92}) {
+                at += 2
+                next
+            }
+            if byte == (U8{34}) -> in_string = false
+        } else if byte == (U8{34}) {
+            in_string = true
+        } else if byte == (U8{40}) || byte == (U8{91}) || byte == (U8{123}) {
+            depth += 1
+        } else if byte == (U8{41}) || byte == (U8{93}) || byte == (U8{125}) {
+            if depth == 0 -> return Val(at)
+            depth -= 1
+        }
+        at += 1
+    }
+    None
+}
+
+// Whether `text` names `word` as a whole identifier.
+sema_stmt_names_word: fn(text: String, word: String) -> Bool {
+    bytes: text.bytes()
+    wanted: word.bytes()
+    loop at in 0..<bytes.len() {
+        end: at + wanted.len()
+        if end > bytes.len() || bytes[at..<end] != wanted -> next
+        before: at == 0 || !sema_stmt_identifier_byte(bytes[at - 1])
+        after: end >= bytes.len() || !sema_stmt_identifier_byte(bytes[end])
+        if before && after -> return true
+    }
+    false
+}
+
+sema_stmt_identifier_byte: fn(byte: U8) -> Bool {
+    (byte >= U8{48} && byte <= U8{57}) || (byte >= U8{65} && byte <= U8{90}) || (byte >= U8{97} && byte <= U8{122}) || byte == U8{95}
 }
 
 // The L0514 rewrite: one `if subject == { … }` table whose arms keep the
@@ -7523,6 +7713,7 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
     scopes.return_type = return_type
     scopes.loop_depth = loop_depth
     sema_stmt_lint_same_subject_dispatch(statements, environment, program, diagnostics)
+    sema_stmt_lint_map_group_round_trip(statements, environment, program, diagnostics)
     output := [TStmt]{}
     complete := true
     reachable := true
@@ -8266,6 +8457,11 @@ sema_stmt_check_unreachable_statement: fn(statement: Stmt, index: Int, statement
         if !dead_result.complete -> complete = false
     }
     dead_edges := [String]{}
+    // A dead `break value` still types its loop (`loop { break(outer, 1)
+    // break 2 }` is an Int loop): the frames open at the mark keep the result
+    // type the dead line gave them.
+    dead_frame_types := [Type?]{}
+    loop frame_index in 0..<dead_mark.saved.loop_value_frames.len() -> dead_frame_types.push(context.loop_value_frames[frame_index].ty)
     loop edge_index in dead_mark.failure_edges..<context.failure_edges.len() -> dead_edges.push(context.failure_edges[edge_index])
     dead_direct_source: context.failure_direct_source
     dead_members := [Type]{}
@@ -8285,6 +8481,9 @@ sema_stmt_check_unreachable_statement: fn(statement: Stmt, index: Int, statement
     loop failure_case in dead_cases -> context.failure_union_cases.push(failure_case)
     loop union_edge in dead_union_edges -> context.failure_union_edges.push(union_edge)
     context.failure_union_general = dead_general
+    loop frame_index in 0..<dead_frame_types.len() {
+        if context.loop_value_frames[frame_index].ty == None && dead_frame_types[frame_index] != None -> context.loop_value_frames[frame_index].ty = dead_frame_types[frame_index]
+    }
     complete
 }
 

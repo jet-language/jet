@@ -1,0 +1,459 @@
+#!/usr/bin/env jet
+// One DX reference-app metric over `jet dev --target=web --canvas` in a real
+// browser, run from the reference app's project directory:
+//
+//   jet run --allow=Env,Exec,FS,IO,Net,Time Tools/web-dev-test/ReferenceApp.jet -- \
+//     --metric first_run|edit_to_see|error_to_fix|test_loop --manifest <manifest.json> \
+//     --app <id> [--jet-env Tools/agent/JetEnv.jet] [--exercise] [--browser chromium|firefox]
+//
+// `--jet-env` runs each `jet` command through Jet's development environment
+// (`jet Tools/agent/JetEnv.jet jet …`); without it `jet` is the one on PATH.
+//
+// The manifest's `reference_apps` entry names the app's entry and its edit
+// loop (edit, failure and repair recipes). core.web.browser launches the
+// engine pinned in the working directory's `.jet/lock` and drives the preview
+// over WebDriver BiDi. first_run times dev start to the rendered reference
+// page; edit_to_see times an edit to its visible marker; error_to_fix times a
+// broken save to the diagnostic overlay plus the repair to a clean page;
+// test_loop times `jet test`. `--exercise` also walks the rendered routes,
+// action links and the progressive form. It prints `REFERENCE_METRIC:<metric>
+// value_ms=<ms>` (error_to_fix adds `diagnosis_ms` and `repair_ms`), restores
+// the edited source, and exits 0, or names the failed check and exits 1.
+use {
+    browser: core.web.browser
+    core.web.browser.[Browser, BrowserProtocol]
+    client: core.http.client
+    files: core.files
+    json: core.encoding.json
+    net: core.net
+    process: core.process
+    time: core.time
+}
+
+C_WAIT_MS: 30000
+C_POLL_MS: 80
+C_BODY_LIMIT: 268435456
+
+C_REFERENCE_STATE: "JSON.stringify((() => {{ const root = document.querySelector('[data-jet-edit-loop]'); return {{ marker: root?.getAttribute('data-jet-edit-loop') || '', interactions: Boolean(document.querySelector('[data-panel=\"interactions\"]')), form: Boolean(document.querySelector('form[action=\"/actions/ship-order-progressive\"]')), text: document.body?.innerText || '' }}; }})())"
+
+C_INITIAL_PANELS: "JSON.stringify({{ routes: document.querySelector('[data-panel=\"routes\"]')?.getAttribute('data-jet-routes') || '', query: Boolean(document.querySelector('[data-panel=\"query\"]')), forms: Boolean(document.querySelector('[data-panel=\"forms\"]')), table: Boolean(document.querySelector('[data-panel=\"table\"]')), virtual: Boolean(document.querySelector('[data-panel=\"virtual\"]')), store: Boolean(document.querySelector('[data-panel=\"store\"]')), refresh: document.querySelector('[data-action=\"refresh-orders\"]')?.getAttribute('href') || '', next: document.querySelector('[data-action=\"next-page\"]')?.getAttribute('href') || '', cart: document.querySelector('[data-action=\"add-to-cart\"]')?.getAttribute('href') || '' }})"
+
+C_FORM_BEFORE_SUBMIT: "JSON.stringify((() => {{ const form = document.querySelector('form[action=\"/actions/ship-order-progressive\"]'); if (!form) return null; return {{ action: form.action, method: form.method, fields: Array.from(form.querySelectorAll('input')).map((input) => ({{ name: input.name, value: input.value, required: input.required }})), submit: Boolean(form.querySelector('button[type=\"submit\"]')) }}; }})())"
+
+C_FORM_SUBMIT: "(() => {{ const form = document.querySelector('form[action=\"/actions/ship-order-progressive\"]'); if (!form) return false; form.querySelector('[name=\"carrier\"]').value = 'Parcel'; form.requestSubmit(); return true; }})()"
+
+// Set before an action that loads a new document; its absence afterwards
+// proves the load happened.
+C_MARK_DOCUMENT: "window.__jetReferenceDocument = true"
+C_NEW_DOCUMENT: "typeof window.__jetReferenceDocument === 'undefined' && document.readyState === 'complete'"
+
+#Error
+Failure: struct {
+    message: String
+
+    impl Display {
+        display: fn(self) -> String { self.message }
+    }
+}
+
+// The launched session and the BiDi context id of the tab it drives.
+Driver: struct {
+    session: Browser
+    bidi: BrowserProtocol
+    context: String
+}
+
+// One manifest source recipe: replace `needle` with `replacement`.
+Recipe: struct {
+    needle: String
+    replacement: String
+}
+
+Run: struct {
+    metric: String
+    exercise: Bool
+    engine: String
+    jet_env: String
+    project: String
+    entry: String
+    source: String
+    edit: Recipe
+    edit_marker: String
+    failure: Recipe
+    repair: Recipe
+    port: Int
+}
+
+// What a run started, so cleanup can stop it.
+Live: struct {
+    server: ProcessChild?
+    driver: Driver?
+}
+
+Timing: struct {
+    value_ms: Int
+    diagnosis_ms: Int?
+    repair_ms: Int?
+}
+
+run: fn() {
+    r: setup(process.args()) ?? fail(err.message)
+    original: files.read(r.source) ?? fail("cannot read {r.source}: {err}")
+    live := Live{server: None, driver: None}
+    timing := Timing{value_ms: 0, diagnosis_ms: None, repair_ms: None}
+    failure := ""
+    if measure(r, live) == {
+        .Ok(found) -> timing = found
+        .Err(error) -> failure = error.message
+    }
+    if live.driver == .Val(d) -> d.session.close().drop("the engine also stops with the session's last owner")
+    if live.server == .Val(child) {
+        child.kill().drop("an exited dev server needs no signal")
+        child.wait().drop("the dev server's receipt is not reported")
+    }
+    files.write(r.source, original) ?? fail("cannot restore {r.source}: {err}")
+    if failure != "" -> fail(failure)
+    detail: if timing.diagnosis_ms == .Val(diagnosis) && timing.repair_ms == .Val(repair) -> " diagnosis_ms={diagnosis} repair_ms={repair}" else -> ""
+    print("REFERENCE_METRIC:{r.metric} value_ms={timing.value_ms}{detail}")
+}
+
+setup: fn(args: [String]) -> Run Failure! {
+    metric: required(args, "--metric")
+    manifest_path: required(args, "--manifest")
+    app_id: required(args, "--app")
+    jet_env: option(args, "--jet-env") ?? ""
+    raw: files.read(manifest_path) ?? return Err(Failure{message: "cannot read {manifest_path}: {err}"})
+    manifest: json.parse(raw) ?? return Err(Failure{message: "{manifest_path} is not JSON: {err}"})
+    app := Dyn.Null
+    loop candidate in items(field(manifest, "reference_apps")) {
+        if text(field(candidate, "id")) == app_id -> app = candidate.copy()
+    }
+    check(app != Dyn.Null, "reference app is missing from {manifest_path}")
+    root: text(field(app, "root"))
+    loop_spec: field(app, "edit_loop")
+    edit: field(loop_spec, "edit")
+    project: files.cwd() ?? return Err(Failure{message: "the working directory is unreadable: {err}"})
+    Ok(Run{
+        metric: metric,
+        exercise: args.contains("--exercise"),
+        engine: option(args, "--browser") ?? "chromium",
+        jet_env: jet_env,
+        project: project.copy(),
+        entry: text(field(app, "entry")).removeprefix("{root}/"),
+        source: files.join(project, text(field(loop_spec, "file")).removeprefix("{root}/")),
+        edit: recipe(edit),
+        edit_marker: text(field(edit, "visible_marker")),
+        failure: recipe(field(loop_spec, "failure")),
+        repair: recipe(field(loop_spec, "repair")),
+        port: free_port(),
+    })
+}
+
+measure: fn(r: Run, live: &Live) -> Timing Failure! {
+    if r.metric == {
+        "first_run" -> {
+            started: time.instant()
+            start_dev(r, live)
+            start_browser(r, live)
+            wait_reference_page(live_driver(live), "state-preserved")
+            Ok(Timing{value_ms: started.elapsed_millis(), diagnosis_ms: None, repair_ms: None})
+        }
+        "edit_to_see" -> {
+            start_dev(r, live)
+            start_browser(r, live)
+            started: time.instant()
+            edit_and_reload(r, live_driver(live), r.edit, r.edit_marker, "edit")
+            Ok(Timing{value_ms: started.elapsed_millis(), diagnosis_ms: None, repair_ms: None})
+        }
+        "error_to_fix" -> measure_error(r, live)
+        "test_loop" -> {
+            started: time.instant()
+            receipt: process.cmd(jet_argv(r, [String]{"test"})).cwd(r.project).env("NO_COLOR", "1").env("CI", "1").stdout(.Capture).stderr(.Capture).run() ?? return Err(Failure{message: "jet test could not start: {err}"})
+            if receipt.code != 0 || receipt.signal != None {
+                shown: if receipt.errors != "" -> receipt.errors.copy() else -> receipt.output.copy()
+                return Err(Failure{message: "reference test loop failed: {shown}"})
+            }
+            Ok(Timing{value_ms: started.elapsed_millis(), diagnosis_ms: None, repair_ms: None})
+        }
+        else -> Err(Failure{message: "unsupported reference metric: {r.metric}"})
+    }
+}
+
+measure_error: fn(r: Run, live: &Live) -> Timing Failure! {
+    start_dev(r, live)
+    start_browser(r, live)
+    d: live_driver(live)
+    baseline: dev_version(r.port).trim()
+    diagnosis_started: time.instant()
+    apply(r.source, r.failure, "failure")
+    wait_for(d, "document.querySelector('#jet-dev-overlay')?.style.display === 'flex'", "reference compile diagnostic overlay")
+    diagnosis_ms: diagnosis_started.elapsed_millis()
+    repair_started: time.instant()
+    apply(r.source, r.repair, "repair")
+    wait_version(r.port, baseline)
+    navigate(d, "http://127.0.0.1:{r.port}/")
+    wait_for(d, "(() => {{ const overlay = document.querySelector('#jet-dev-overlay'); return !overlay || overlay.style.display === 'none'; }})()", "reference overlay recovery")
+    wait_reference_page(d, "state-preserved")
+    repair_ms: repair_started.elapsed_millis()
+    Ok(Timing{value_ms: diagnosis_ms + repair_ms, diagnosis_ms: Val(diagnosis_ms), repair_ms: Val(repair_ms)})
+}
+
+start_dev: fn(r: Run, live: &Live) Failure! {
+    argv: jet_argv(r, [String]{"dev", r.entry.copy(), "--target=web", "--canvas", "--port={r.port}"})
+    child: process.cmd(argv).cwd(r.project).env("NO_COLOR", "1").env("CI", "1").stdout(.Inherit).stderr(.Inherit).spawn() ?? return Err(Failure{message: "jet dev could not start: {err}"})
+    live.server = Val(child)
+    wait_page_contains(r.port, "data-jet-edit-loop")
+    wait_version(r.port, "")
+    Ok()
+}
+
+// A `jet` command line, through the development environment when one is named.
+jet_argv: fn(r: Run, rest: [String]) -> [String] {
+    argv := if r.jet_env == "" -> [String]{"jet"} else -> [String]{"jet", r.jet_env.copy(), "jet"}
+    loop part in rest -> argv.push(part.copy())
+    argv
+}
+
+start_browser: fn(r: Run, live: &Live) Failure! {
+    d: open(r.engine)
+    live.driver = Val(d)
+    navigate(d, "http://127.0.0.1:{r.port}/")
+    wait_reference_page(d, "state-preserved")
+    if r.exercise -> exercise(d)
+    Ok()
+}
+
+live_driver: fn(live: Live) -> Driver Failure! {
+    if live.driver == .Val(d) -> return Ok(d)
+    Err(Failure{message: "the browser is not running"})
+}
+
+edit_and_reload: fn(r: Run, d: Driver, change: Recipe, marker: String, label: String) Failure! {
+    baseline: dev_version(r.port).trim()
+    apply(r.source, change, label)
+    wait_version(r.port, baseline)
+    navigate(d, "http://127.0.0.1:{r.port}/")
+    wait_reference_page(d, marker)
+    Ok()
+}
+
+apply: fn(path: String, change: Recipe, label: String) Failure! {
+    current: files.read(path) ?? return Err(Failure{message: "cannot read {path}: {err}"})
+    check(current.contains(change.needle), "{label} source recipe is not applicable")
+    parts: current.partition(change.needle)
+    files.write(path, "{parts.head}{change.replacement}{parts.tail}") ?? return Err(Failure{message: "cannot write {path}: {err}"})
+    Ok()
+}
+
+exercise: fn(d: Driver) Failure! {
+    initial: json.parse(value(d, C_INITIAL_PANELS)) ?? return Err(Failure{message: "reference panels are not JSON: {err}"})
+    routes: text(field(initial, "routes"))
+    check(routes.contains("/orders") && routes.contains("/settings"), "reference routes were not rendered")
+    panels: [String]{"query", "forms", "table", "virtual", "store"}
+    loop panel in panels {
+        check(field(initial, panel) == Dyn.Bool(true), "reference {panel} panel was not rendered")
+    }
+    links: [String]{"refresh", "next", "cart"}
+    loop link in links {
+        check(text(field(initial, link)) != "", "reference {link} link was not rendered")
+    }
+
+    check(navigate_by_action(d, "next-page") == "1", "next-page did not update the table page")
+    navigate_by_action(d, "refresh-orders")
+    refresh: value(d, "document.querySelector('[data-panel=\"query\"]')?.getAttribute('data-query-refresh') || ''")
+    check((Int.parse(refresh) ?? 0) > 0, "refresh link did not update query state")
+    navigate_by_action(d, "add-to-cart")
+    cart: value(d, "document.querySelector('[data-panel=\"store\"]')?.getAttribute('data-cart-count') || ''")
+    check(cart == "1", "cart link did not update store state: {cart}")
+
+    shown: value(d, C_FORM_BEFORE_SUBMIT)
+    form: json.parse(shown) ?? return Err(Failure{message: "progressive form facts are not JSON: {err}"})
+    check(text(field(form, "action")).ends_with("/actions/ship-order-progressive"), "progressive form action was not rendered")
+    check(text(field(form, "method")).to_upper() == "POST", "progressive form method was not POST")
+    fields: items(field(form, "fields"))
+    check(has_field(fields, "id", "41") && has_field(fields, "carrier", "Parcel") && has_field(fields, "tracking", "PX-41"), "progressive form fields were not rendered: {shown}")
+    check(field(form, "submit") == Dyn.Bool(true), "progressive form submit control was not rendered")
+
+    value(d, C_MARK_DOCUMENT)
+    check(value(d, C_FORM_SUBMIT) == "true", "progressive form was not submitted through the DOM")
+    wait_for(d, C_NEW_DOCUMENT, "progressive form result page")
+    result: value(d, "JSON.stringify({{ url: location.href, text: document.body?.innerText || '' }})")
+    check(result.contains("ship-order submitted for 41 via Parcel"), "progressive DOM form submit failed: {result}")
+    Ok()
+}
+
+// Click an action link, wait for the page it loads, and return the table page.
+navigate_by_action: fn(d: Driver, action: String) -> String Failure! {
+    value(d, C_MARK_DOCUMENT)
+    value(d, "document.querySelector('[data-action=\"{action}\"]').click()")
+    wait_for(d, C_NEW_DOCUMENT, "{action} page load")
+    wait_reference_page(d, "state-preserved")
+    value(d, "document.querySelector('[data-panel=\"table\"]')?.getAttribute('data-table-page') || ''")
+}
+
+has_field: fn(fields: [Dyn], name: String, expected: String) -> Bool {
+    loop entry in fields {
+        if text(field(entry, "name")) == name && text(field(entry, "value")) == expected && field(entry, "required") == Dyn.Bool(true) -> return true
+    }
+    false
+}
+
+wait_reference_page: fn(d: Driver, marker: String) Failure! {
+    started: time.instant()
+    loop started.elapsed_millis() < C_WAIT_MS {
+        if evaluate(d, C_REFERENCE_STATE) == .Val(raw) {
+            if json.parse(raw) == .Ok(state) {
+                seen: text(field(state, "marker")) == marker || text(field(state, "text")).contains(marker)
+                if seen && field(state, "interactions") == Dyn.Bool(true) && field(state, "form") == Dyn.Bool(true) -> return Ok()
+            }
+        }
+        time.sleep(time.duration_ms(C_POLL_MS))
+    }
+    Err(Failure{message: "timed out waiting for reference page {marker}"})
+}
+
+// The dev server's build version; empty while it has none.
+dev_version: fn(port: Int) -> String {
+    dev_get(port, "/__jet_dev_version") ?? ""
+}
+
+// Wait for a dev version other than `baseline` (any version when empty).
+wait_version: fn(port: Int, baseline: String) Failure! {
+    started: time.instant()
+    loop started.elapsed_millis() < C_WAIT_MS {
+        current: dev_version(port).trim()
+        if current != "" && current != baseline -> return Ok()
+        time.sleep(time.duration_ms(C_POLL_MS))
+    }
+    Err(Failure{message: if baseline == "" -> "timed out waiting for initial dev version" else -> "timed out waiting for dev rebuild"})
+}
+
+// Wait for the preview's root page to hold `needle`.
+wait_page_contains: fn(port: Int, needle: String) Failure! {
+    started: time.instant()
+    loop started.elapsed_millis() < C_WAIT_MS {
+        if (dev_get(port, "/") ?? "").contains(needle) -> return Ok()
+        time.sleep(time.duration_ms(C_POLL_MS))
+    }
+    Err(Failure{message: "timed out waiting for reference app preview"})
+}
+
+// The body of a 200 answer from the dev server.
+dev_get: fn(port: Int, path: String) -> String Failure! {
+    response: client.get("http://127.0.0.1:{port}{path}") ?? return Err(Failure{message: "{path} request failed: {err}"})
+    if response.status() != 200 -> return Err(Failure{message: "{path} returned {response.status()}"})
+    body: response.text(C_BODY_LIMIT) ?? return Err(Failure{message: "{path} body is not text: {err}"})
+    Ok(body)
+}
+
+// A loopback port nothing listens on now.
+free_port: fn() -> Int Failure! {
+    listener: net.tcp_listen("127.0.0.1:0") ?? return Err(Failure{message: "cannot reserve a port: {err}"})
+    address: net.listener_local_socket_addr(listener) ?? return Err(Failure{message: "cannot read the reserved port: {err}"})
+    Ok(address.port)
+}
+
+// Poll until `expression` is `true`; a thrown page error counts as not yet.
+wait_for: fn(d: Driver, expression: String, label: String) Failure! {
+    started: time.instant()
+    loop started.elapsed_millis() < C_WAIT_MS {
+        if evaluate(d, expression) == .Val(found) && found == "true" -> return Ok()
+        time.sleep(time.duration_ms(C_POLL_MS))
+    }
+    Err(Failure{message: "timed out waiting for {label}"})
+}
+
+// The page value of `expression`; a thrown page error fails the run.
+value: fn(d: Driver, expression: String) -> String Failure! {
+    if evaluate(d, expression) == {
+        .Val(found) -> Ok(found)
+        None -> Err(Failure{message: "page expression threw: {expression}"})
+        .Err(error) -> Err(error)
+    }
+}
+
+// The page value of `expression` as `String(value)` after awaiting it, or
+// None when the page threw.
+evaluate: fn(d: Driver, expression: String) -> String? Failure! {
+    params: Dyn.Object([(key: String, value: Dyn)]{
+        (key: "expression", value: Dyn.Text("(async () => String(await ({expression})))()")),
+        (key: "target", value: Dyn.Object([(key: String, value: Dyn)]{(key: "context", value: Dyn.Text(d.context.copy()))})),
+        (key: "awaitPromise", value: Dyn.Bool(true)),
+        (key: "resultOwnership", value: Dyn.Text("none")),
+    })
+    reply: command(d.bidi, "script.evaluate", params)
+    if text(field(reply, "type")) != "success" -> return Ok(None)
+    Ok(Val(text(field(field(reply, "result"), "value"))))
+}
+
+navigate: fn(d: Driver, address: String) Failure! {
+    command(d.bidi, "browsingContext.navigate", Dyn.Object([(key: String, value: Dyn)]{
+        (key: "context", value: Dyn.Text(d.context.copy())),
+        (key: "url", value: Dyn.Text(address.copy())),
+        (key: "wait", value: Dyn.Text("complete")),
+    }))
+    Ok()
+}
+
+// Launch the locked engine and open one tab.
+open: fn(engine: String) -> Driver Failure! {
+    session: browser.launch(engine) ?? return Err(Failure{message: "{engine} launch failed: {err}"})
+    bidi: session.protocol("bidi") ?? return Err(Failure{message: "BiDi protocol unavailable: {err}"})
+    created: command(bidi, "browsingContext.create", Dyn.Object([(key: String, value: Dyn)]{(key: "type", value: Dyn.Text("tab"))}))
+    context: text(field(created, "context"))
+    if context == "" -> return Err(Failure{message: "browsingContext.create returned no context"})
+    Ok(Driver{session: session, bidi: bidi, context: context})
+}
+
+command: fn(bidi: BrowserProtocol, method: String, params: Dyn) -> Dyn Failure! {
+    wire: json.to_string(params) ?? return Err(Failure{message: "{method} parameters cannot be encoded: {err}"})
+    reply: bidi.send(method, wire) ?? return Err(Failure{message: "{method} failed: {err}"})
+    tree: json.parse(reply) ?? return Err(Failure{message: "{method} reply is not JSON: {err}"})
+    Ok(tree)
+}
+
+recipe: fn(tree: Dyn) -> Recipe {
+    Recipe{needle: text(field(tree, "needle")), replacement: text(field(tree, "replacement"))}
+}
+
+check: fn(condition: Bool, message: String) Failure! {
+    if !condition -> return Err(Failure{message: message})
+    Ok()
+}
+
+field: fn(tree: Dyn, name: String) -> Dyn {
+    if tree == .Object(entries) {
+        loop entry in entries {
+            if entry.key == name -> return entry.value.copy()
+        }
+    }
+    Dyn.Null
+}
+
+items: fn(tree: Dyn) -> [Dyn] {
+    if tree == .Array(list) -> return list.copy()
+    [Dyn]{}
+}
+
+text: fn(tree: Dyn) -> String {
+    if tree == .Text(found) -> return found.copy()
+    ""
+}
+
+required: fn(args: [String], name: String) -> String Failure! {
+    found: option(args, name) ?? ""
+    if found == "" -> return Err(Failure{message: "missing {name}"})
+    Ok(found)
+}
+
+option: fn(args: [String], name: String) -> String? {
+    loop index in 0..<args.len() {
+        if args[index] == name && index + 1 < args.len() -> return Val(args[index + 1].copy())
+    }
+    None
+}
+
+fail: fn(message: String) -> Never {
+    eprint(message)
+    process.exit(1)
+}

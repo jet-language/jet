@@ -33,8 +33,8 @@ compiler_json_fixture_value: fn(text: I64, kind: I64, payload: I64, rendered: I6
     if (status == I64{1}) {
         tree: rt_text_word(slots)
         show: jet_rt_handle_debug_dyn(tree)
-        result = rt_text_word(slots + I64{8}) == I64{724} && data_tree_word(tree + DATA_TREE_TAG) == kind &&
-            (kind > DATA_TREE_FLOAT || data_tree_word(tree + DATA_TREE_PAYLOAD) == payload) && jet_rt_string_eq(show, rendered)
+        result = rt_text_word(slots + I64{8}) == I64{724} && dyn_word(tree + DYN_TAG) == kind &&
+            (kind > DYN_FLOAT || dyn_word(tree + DYN_PAYLOAD) == payload) && jet_rt_string_eq(show, rendered)
         jet_rt_string_drop(show)
         jet_rt_handle_drop_dyn(tree)
     } else { jet_rt_handle_drop_encoding_error(rt_text_word(slots + I64{8})) }
@@ -46,21 +46,21 @@ compiler_json_fixture_value: fn(text: I64, kind: I64, payload: I64, rendered: I6
     jet_rt_string_builder_push(structural, rt_static_text(" \t"))
     rt_text_push_scalar(structural, I64{13})
     jet_rt_string_builder_push(structural, rt_static_text("\nnull\n"))
-    whitespace_ok: compiler_json_fixture_value(structural, DATA_TREE_NULL, I64{0}, rt_static_text("null"))
+    whitespace_ok: compiler_json_fixture_value(structural, DYN_NULL, I64{0}, rt_static_text("null"))
     jet_rt_string_drop(structural)
     if !whitespace_ok -> return I64{1}
-    if !compiler_json_fixture_value(rt_static_text("true"), DATA_TREE_BOOL, I64{1}, rt_static_text("true")) -> return I64{2}
-    if !compiler_json_fixture_value(rt_static_text("false"), DATA_TREE_BOOL, I64{0}, rt_static_text("false")) -> return I64{3}
-    if !compiler_json_fixture_value(rt_static_text("-9223372036854775808"), DATA_TREE_NUMBER, I64{0}, rt_static_text("-9223372036854775808")) -> return I64{4}
-    if !compiler_json_fixture_value(rt_static_text("9223372036854775807"), DATA_TREE_NUMBER, I64{0}, rt_static_text("9223372036854775807")) -> return I64{5}
-    if !compiler_json_fixture_value(rt_static_text("9223372036854775808"), DATA_TREE_NUMBER, I64{0}, rt_static_text("9223372036854775808")) -> return I64{6}
-    if !compiler_json_fixture_value(rt_static_text("-9223372036854775809"), DATA_TREE_NUMBER, I64{0}, rt_static_text("-9223372036854775809")) -> return I64{7}
-    if !compiler_json_fixture_value(rt_static_text("-0"), DATA_TREE_NUMBER, I64{0}, rt_static_text("-0")) -> return I64{8}
-    if !compiler_json_fixture_value(rt_static_text("1.50"), DATA_TREE_NUMBER, I64{0}, rt_static_text("1.50")) -> return I64{9}
-    if !compiler_json_fixture_value(rt_static_text("-0.0"), DATA_TREE_NUMBER, I64{0}, rt_static_text("-0.0")) -> return I64{10}
-    if !compiler_json_fixture_value(rt_static_text("1e-400"), DATA_TREE_NUMBER, I64{0}, rt_static_text("1e-400")) -> return I64{11}
-    if !compiler_json_fixture_value(rt_static_text("{{\"z\":1,\"a\":[false,\"123\"]}}"), DATA_TREE_OBJECT, I64{0}, rt_static_text("{{\"z\":1,\"a\":[false,\"123\"]}}")) -> return I64{12}
-    if !compiler_json_fixture_value(rt_static_text("\"\\uD83D\\uDE00é\\/\\t\\b\\f\\r\\n\\\"\\\\\""), DATA_TREE_TEXT, I64{0}, rt_static_text("\"😀é/\\t\\b\\f\\r\\n\\\"\\\\\"")) -> return I64{13}
+    if !compiler_json_fixture_value(rt_static_text("true"), DYN_BOOL, I64{1}, rt_static_text("true")) -> return I64{2}
+    if !compiler_json_fixture_value(rt_static_text("false"), DYN_BOOL, I64{0}, rt_static_text("false")) -> return I64{3}
+    if !compiler_json_fixture_value(rt_static_text("-9223372036854775808"), DYN_NUMBER, I64{0}, rt_static_text("-9223372036854775808")) -> return I64{4}
+    if !compiler_json_fixture_value(rt_static_text("9223372036854775807"), DYN_NUMBER, I64{0}, rt_static_text("9223372036854775807")) -> return I64{5}
+    if !compiler_json_fixture_value(rt_static_text("9223372036854775808"), DYN_NUMBER, I64{0}, rt_static_text("9223372036854775808")) -> return I64{6}
+    if !compiler_json_fixture_value(rt_static_text("-9223372036854775809"), DYN_NUMBER, I64{0}, rt_static_text("-9223372036854775809")) -> return I64{7}
+    if !compiler_json_fixture_value(rt_static_text("-0"), DYN_NUMBER, I64{0}, rt_static_text("-0")) -> return I64{8}
+    if !compiler_json_fixture_value(rt_static_text("1.50"), DYN_NUMBER, I64{0}, rt_static_text("1.50")) -> return I64{9}
+    if !compiler_json_fixture_value(rt_static_text("-0.0"), DYN_NUMBER, I64{0}, rt_static_text("-0.0")) -> return I64{10}
+    if !compiler_json_fixture_value(rt_static_text("1e-400"), DYN_NUMBER, I64{0}, rt_static_text("1e-400")) -> return I64{11}
+    if !compiler_json_fixture_value(rt_static_text("{{\"z\":1,\"a\":[false,\"123\"]}}"), DYN_OBJECT, I64{0}, rt_static_text("{{\"z\":1,\"a\":[false,\"123\"]}}")) -> return I64{12}
+    if !compiler_json_fixture_value(rt_static_text("\"\\uD83D\\uDE00é\\/\\t\\b\\f\\r\\n\\\"\\\\\""), DYN_TEXT, I64{0}, rt_static_text("\"😀é/\\t\\b\\f\\r\\n\\\"\\\\\"")) -> return I64{13}
     if !compiler_json_fixture_error(rt_static_text(""), rt_static_text("expected a JSON value"), I64{1}) -> return I64{14}
     if !compiler_json_fixture_error(rt_static_text("\nNaN"), rt_static_text("expected a JSON value"), I64{2}) -> return I64{15}
     if !compiler_json_fixture_error(rt_static_text("tru\n"), rt_static_text("expected a JSON word"), I64{1}) -> return I64{16}
@@ -78,8 +78,8 @@ compiler_json_fixture_value: fn(text: I64, kind: I64, payload: I64, rendered: I6
     if !compiler_json_fixture_error(rt_static_text("-"), rt_static_text("bad number"), I64{1}) -> return I64{28}
     if !compiler_json_fixture_error(rt_static_text("1."), rt_static_text("bad number"), I64{1}) -> return I64{29}
     if !compiler_json_fixture_error(rt_static_text("1e+"), rt_static_text("bad number"), I64{1}) -> return I64{30}
-    if !compiler_json_fixture_value(rt_static_text("1e400"), DATA_TREE_NUMBER, I64{0}, rt_static_text("1e400")) -> return I64{31}
-    if !compiler_json_fixture_value(rt_static_text("-1e400"), DATA_TREE_NUMBER, I64{0}, rt_static_text("-1e400")) -> return I64{32}
+    if !compiler_json_fixture_value(rt_static_text("1e400"), DYN_NUMBER, I64{0}, rt_static_text("1e400")) -> return I64{31}
+    if !compiler_json_fixture_value(rt_static_text("-1e400"), DYN_NUMBER, I64{0}, rt_static_text("-1e400")) -> return I64{32}
     if !compiler_json_fixture_error(rt_static_text("01"), rt_static_text("extra text after JSON value"), I64{1}) -> return I64{33}
     if !compiler_json_fixture_error(rt_static_text("null\nfalse"), rt_static_text("extra text after JSON value"), I64{2}) -> return I64{34}
     if !compiler_json_fixture_error(rt_static_text("[1,]"), rt_static_text("expected `,` or `]`"), I64{1}) -> return I64{35}
@@ -103,7 +103,7 @@ compiler_json_fixture_value: fn(text: I64, kind: I64, payload: I64, rendered: I6
         rt_text_push_scalar(nested, I64{93})
         at += I64{1}
     }
-    accepted: compiler_json_fixture_value(nested, DATA_TREE_ARRAY, I64{0}, nested)
+    accepted: compiler_json_fixture_value(nested, DYN_ARRAY, I64{0}, nested)
     jet_rt_string_drop(nested)
     if !accepted -> return I64{43}
     too_deep: jet_rt_string_builder_new()
@@ -123,14 +123,14 @@ compiler_json_fixture_value: fn(text: I64, kind: I64, payload: I64, rendered: I6
         rt_text_push_scalar(large, I64{57})
         at += I64{1}
     }
-    boundary: compiler_json_fixture_value(large, DATA_TREE_NUMBER, I64{0}, large)
+    boundary: compiler_json_fixture_value(large, DYN_NUMBER, I64{0}, large)
     rt_text_push_scalar(large, I64{57})
     limited: compiler_json_fixture_error(large, rt_static_text("JSON number exceeds the 1000000-digit limit"), I64{1})
     jet_rt_string_drop(large)
     if !boundary -> return I64{45}
     if !limited -> return I64{46}
-    if !compiler_json_fixture_value(rt_static_text("1e+1000000"), DATA_TREE_NUMBER, I64{0}, rt_static_text("1e+1000000")) -> return I64{47}
-    if !compiler_json_fixture_value(rt_static_text("1e-1000000"), DATA_TREE_NUMBER, I64{0}, rt_static_text("1e-1000000")) -> return I64{48}
+    if !compiler_json_fixture_value(rt_static_text("1e+1000000"), DYN_NUMBER, I64{0}, rt_static_text("1e+1000000")) -> return I64{47}
+    if !compiler_json_fixture_value(rt_static_text("1e-1000000"), DYN_NUMBER, I64{0}, rt_static_text("1e-1000000")) -> return I64{48}
     if !compiler_json_fixture_error(rt_static_text("1e1000001"), rt_static_text("JSON number exponent exceeds the ±1000000 limit"), I64{1}) -> return I64{49}
     if !compiler_json_fixture_error(rt_static_text("1e-1000001"), rt_static_text("JSON number exponent exceeds the ±1000000 limit"), I64{1}) -> return I64{50}
     if !compiler_json_fixture_error(rt_static_text("1e9223372036854775808"), rt_static_text("JSON number exponent is out of range"), I64{1}) -> return I64{51}
@@ -158,9 +158,9 @@ compiler_json_fixture_value: fn(text: I64, kind: I64, payload: I64, rendered: I6
     jet_rt_int_drop(projected)
     if !int_ok || !projection_ok -> return I64{1}
     bytes: data_sequence_new(I64{2}, RT_HOST_U8_STRIDE)
-    host_u8_put(data_tree_word(bytes + DATA_SEQUENCE_DATA), I64{0}, I64{0})
-    host_u8_put(data_tree_word(bytes + DATA_SEQUENCE_DATA), I64{1}, I64{255})
-    data_tree_store(bytes + DATA_SEQUENCE_LENGTH, I64{2})
+    host_u8_put(dyn_word(bytes + DATA_SEQUENCE_DATA), I64{0}, I64{0})
+    host_u8_put(dyn_word(bytes + DATA_SEQUENCE_DATA), I64{1}, I64{255})
+    dyn_store(bytes + DATA_SEQUENCE_LENGTH, I64{2})
     binary: jet_rt_record_new_dyn_bytes(bytes)
     binary_copy: jet_rt_handle_clone_dyn(binary)
     binary_text: jet_rt_handle_show_dyn(binary_copy)
@@ -170,18 +170,18 @@ compiler_json_fixture_value: fn(text: I64, kind: I64, payload: I64, rendered: I6
     jet_rt_handle_drop_dyn(binary_copy)
     if !binary_ok -> return I64{2}
     stamp: jet_rt_alloc(DYN_DATETIME_BYTES, I64{8})
-    data_tree_store(stamp + DYN_DATETIME_SECS, I64{-1})
-    data_tree_store(stamp + DYN_DATETIME_NANOS, I64{120000000})
-    data_tree_store(stamp + DYN_DATETIME_LEAP, I64{0})
-    data_tree_store(stamp + DYN_DATETIME_OFFSET, I64{19800})
+    dyn_store(stamp + DYN_DATETIME_SECS, I64{-1})
+    dyn_store(stamp + DYN_DATETIME_NANOS, I64{120000000})
+    dyn_store(stamp + DYN_DATETIME_LEAP, I64{0})
+    dyn_store(stamp + DYN_DATETIME_OFFSET, I64{19800})
     date: jet_rt_record_new_dyn_date_time(stamp)
     date_copy: jet_rt_handle_clone_dyn(date)
     date_text: jet_rt_handle_show_dyn(date_copy)
     date_ok: jet_rt_handle_eq_dyn(date, date_copy) && jet_rt_string_eq(date_text, rt_static_text("1970-01-01T05:29:59.12+05:30"))
-    data_tree_store(stamp + DYN_DATETIME_OFFSET, I64{0})
+    dyn_store(stamp + DYN_DATETIME_OFFSET, I64{0})
     utc: jet_rt_record_new_dyn_date_time(stamp)
     offsets_differ: !jet_rt_handle_eq_dyn(date, utc)
-    data_tree_store(stamp + DYN_DATETIME_LEAP, I64{1})
+    dyn_store(stamp + DYN_DATETIME_LEAP, I64{1})
     leap: jet_rt_record_new_dyn_date_time(stamp)
     leap_text: jet_rt_handle_show_dyn(leap)
     leap_ok: jet_rt_string_eq(leap_text, rt_static_text("1969-12-31T23:59:60.12Z"))

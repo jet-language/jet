@@ -1,0 +1,8 @@
+Warning [jet.MapGroupRoundTrip]: `group` copies the whole group out of `groups` and stores it back
+  --> tests/ui_lint/map_group_round_trip.jet:10:9
+    |
+ 10 |         group := groups.get(p.dept) ?? [Person]{}
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ Why: `group` still shares the entry's buffer when it is written, so the write first copies the whole group, and storing it back drops the Map's old copy; in a loop that is quadratic
+ Fix: Grow the entry in place: `if !groups.has_key(p.dept) -> groups[p.dept] = [Person]{}`, then `groups[p.dept].push(…)`
+More: jet-lang.dev/e/L0534

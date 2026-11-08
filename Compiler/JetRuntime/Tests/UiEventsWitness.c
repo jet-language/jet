@@ -7,8 +7,8 @@
 #include <stdio.h>
 #include <string.h>
 #include <limits.h>
-#define DATA_TREE_U8_STRIDE 1
-_Static_assert(DATA_TREE_U8_STRIDE==1,"packed native U8 storage");
+#define DYN_U8_STRIDE 1
+_Static_assert(DYN_U8_STRIDE==1,"packed native U8 storage");
 typedef int64_t H;
 typedef struct { unsigned char *data; uint64_t len,cap; } Text;
 typedef struct { uint64_t len,cap; unsigned char *data; } Bytes;
@@ -51,9 +51,9 @@ static H flipped(Text *t) {
 }
 static Bytes *bytes(size_t n) {
     Bytes *b=(Bytes *)(uintptr_t)jet_rt_alloc(24,8);b->len=n;b->cap=n+3;
-    b->data=(unsigned char *)(uintptr_t)jet_rt_alloc((H)(b->cap*DATA_TREE_U8_STRIDE),8);
-    memset(b->data,0xa5,b->cap*DATA_TREE_U8_STRIDE);
-    for(size_t i=0;i<n;++i)b->data[i*DATA_TREE_U8_STRIDE]=(unsigned char)(i*73);
+    b->data=(unsigned char *)(uintptr_t)jet_rt_alloc((H)(b->cap*DYN_U8_STRIDE),8);
+    memset(b->data,0xa5,b->cap*DYN_U8_STRIDE);
+    for(size_t i=0;i<n;++i)b->data[i*DYN_U8_STRIDE]=(unsigned char)(i*73);
     return b;
 }
 static Event *event(bool tui,H kind,size_t n) {
@@ -86,7 +86,7 @@ static void cases(bool tui,H kind,size_t n) {
     if(tui&&kind==2){assert(b->second==INT64_MIN);a->second=INT64_MAX;assert(!eq(ah,bh));a->second=INT64_MIN;}
     if(tui&&kind==3) {
         Bytes *x=(Bytes *)(uintptr_t)a->second,*y=(Bytes *)(uintptr_t)b->second;assert(x!=y&&x->len==y->len&&y->cap==n);
-        if(n){assert(x->data!=y->data);for(size_t i=0;i<n;++i)assert(x->data[i*DATA_TREE_U8_STRIDE]==y->data[i*DATA_TREE_U8_STRIDE]);x->data[(n-1)*DATA_TREE_U8_STRIDE]^=1;assert(!eq(ah,bh));x->data[(n-1)*DATA_TREE_U8_STRIDE]^=1;--x->len;assert(!eq(ah,bh));++x->len;}
+        if(n){assert(x->data!=y->data);for(size_t i=0;i<n;++i)assert(x->data[i*DYN_U8_STRIDE]==y->data[i*DYN_U8_STRIDE]);x->data[(n-1)*DYN_U8_STRIDE]^=1;assert(!eq(ah,bh));x->data[(n-1)*DYN_U8_STRIDE]^=1;--x->len;assert(!eq(ah,bh));++x->len;}
     }
     if(tui&&kind==4){assert(b->first==1);a->first^=1;assert(!eq(ah,bh));a->first^=1;}
     if(tui&&kind>=5){a->first^=1;a->second^=1;assert(eq(ah,bh));}

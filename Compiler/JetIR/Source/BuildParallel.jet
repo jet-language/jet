@@ -1,7 +1,8 @@
 // The IR builder's parallel List methods: para_map, para_filter,
 // para_partition and para_fold. The runtime's joined range scheduler
-// (jet_rt_native_para_walk) calls a helper over 64-item ranges (a para_map
-// with `limit: n` over shorter ones, so n workers share the items); the
+// (jet_rt_native_para_walk) calls a helper over ranges of at most 64 items,
+// spread over the available workers (or a para_map's `limit: n`), except
+// para_fold, whose ranges are exactly its 64-item chunks; the
 // helper reads its inputs through a frame env the caller lends until every
 // worker has joined, and writes disjoint output slots.
 
@@ -49,6 +50,10 @@ ir_para_helper: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, role: String, ty: 
     }
     id
 }
+
+// The limit an unlimited para_map, para_filter or para_partition passes: more
+// workers than any host has, so the runtime caps it at the available ones.
+PARA_EVERY_WORKER: 1073741824
 
 // Opens a loop over the native words begin..<end; ir_walk_close advances
 // and closes it.
@@ -254,9 +259,10 @@ ir_closure_parallel: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, lis
     ir_emit(b.f, IROp.Store, -1, env, 0, callback, b.line)
     ir_emit(b.f, IROp.Store, -1, env, 8, data, b.line)
     ir_emit(b.f, IROp.Store, -1, env, 16, output, b.line)
-    // A negative limit takes every available worker.
+    // Without `limit:` the call spreads its items over every available
+    // worker; only para_fold passes a negative limit (its 64-item chunks).
     limited: operation == .ParaMap && operands.len() == 2
-    limit: if limited -> operands[1] else -> ir_int_constant(m, b, int_row, -1)
+    limit: if limited -> operands[1] else -> ir_int_constant(m, b, int_row, PARA_EVERY_WORKER)
     _: ir_runtime(m, b, "jet_rt_native_para_walk", [Int]{length, limit, env, invoke}, -1)
     if limited -> ir_release(m, b, limit)
     if operation == .ParaMap {

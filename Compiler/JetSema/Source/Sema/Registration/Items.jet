@@ -4429,6 +4429,34 @@ sema_registration_prepare_graph: fn(inputs: &&[SemaRegistrationModuleInput], edg
             }
         }
     }
+    // A lowered inline module's own module or file import reads a generated
+    // file-level alias that shares the scoped declaration's span
+    // (InlineModules.jet sema_inline_alias_imports); the alias binds the
+    // module that declaration's own edge names.
+    loop aliased_module in 0..<graph.modules.len() {
+        aliased := [ImportDecl]{}
+        loop declaration in graph.modules[aliased_module].program.imports {
+            if sema_inline_module_alias_import(declaration) -> aliased.push(declaration)
+        }
+        source_identity: graph.modules[aliased_module].module_identity.copy()
+        loop declaration in aliased {
+            bound := false
+            loop edge in edges {
+                if bound || edge.source_module_identity != source_identity -> next
+                if edge.declaration.span.start != declaration.span.start || edge.declaration.span.end != declaration.span.end -> next
+                target_index: sema_registration_module_index(graph, edge.target_module_identity) ?? next
+                target_package := edge.target_package_identity
+                if target_package == "" -> target_package = graph.modules[target_index].package_identity
+                lifted := sema_registration_foreign_import_declaration(edge)
+                lifted.alias = declaration.alias.copy()
+                lifted.is_pub = false
+                lifted.is_package_pub = false
+                sema_registration_add_import(graph, registered, aliased_module, "", lifted, edge.target_module_identity, target_package)
+                bound = true
+            }
+            if !bound -> sema_registration_push_graph_diagnostic(graph, aliased_module, sema_error("E0003", declaration.span, "an inline module's own import has no resolved graph edge", "a lowered inline module reads its own import through the module that import's edge names", "keep the loader's scoped edge for the inline module's import"))
+        }
+    }
     module_index := 0
     loop module_index < graph.modules.len() {
         // Every source import must have one exact edge. A missing edge is not

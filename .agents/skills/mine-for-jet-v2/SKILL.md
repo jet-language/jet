@@ -47,7 +47,7 @@ ledger written while reading, within one working context; split by segment
 range rather than skim.
 
 **Ballot quality is non-negotiable:** before drafting, reconcile current, planned
-(including ratified-unbuilt), in-flight, and proposed Jet state via the digest.
+(including ratified-unbuilt), in-flight, and proposed Jet state (read as below).
 Design downsides away; redesign until the recommendation has at most **two real
 residual losses, each concretely mitigated**. Aim for a researched, best-of-all-worlds,
 no-compromise design under rule 9: combine demonstrated strengths without
@@ -74,24 +74,18 @@ supported CLI publication and readback. A recommendation does not authorize codi
 
 ## Establish Jet state before extraction
 
-Run in the exact checkout, through `Tools/agent/JetEnv.jet`:
-
-```sh
-Tools/agent/JetEnv.jet node Tools/agent/jet-state.mjs --subject 'SUBJECT' --format markdown
-```
-
-Use JSON for complete candidate rows; the compact text view is a bounded preview.
-Read the latest owner direction separately, then relevant winning decisions and
-acceptance terms, cards and phases, dev-versus-master and named-worktree changes,
-research/proposals, and registry spellings. Missing providers are **unknown**, not
-absence. The digest is candidate retrieval, not semantic alignment or runtime
-proof. Inspect focused code/examples and related branch hunks; do not resurrect
-a retired implementation because it is easier to probe. Record digest identity
-and direct refs in claims. Reinvoke the relevant subject immediately before any
-authorized publication if board or tree identity changed; inconsistent digests
-must be refreshed.
-See [digest inputs, receipt contract, and freshness](references/jet-state.md)
-when a provider or identity needs explanation.
+Read it in the exact checkout, read-only: Tower's read commands
+(`node Tools/tower/tower.mjs`) for decisions, ballots, cards and phases;
+`git log` and `git diff` of dev against master and of named worktrees;
+`Docs/research/` and `Docs/proposals/`; and the registry spellings in
+`Compiler/JetFoundation/Data/Syntax/Spellings.jet`. Read the latest owner
+direction separately, then relevant winning decisions and acceptance terms.
+A source you did not read is **unknown**, not absence. Retrieval is not
+semantic alignment or runtime proof. Inspect focused code/examples and related
+branch hunks; do not resurrect a retired implementation because it is easier
+to probe. Record the dev and master heads, the Tower revision and direct refs
+in claims. Reread the relevant records immediately before any authorized
+publication if board or tree identity changed.
 
 Keep **three independent axes** per claim: observed implementation; intended
 owner decision; work/proposal state. Ratified-unbuilt is explicit. Ready is not
@@ -112,7 +106,7 @@ The existing checker conventions remain: `new`, `tracked`, `duplicate-input`;
 exit 3 for duplicate/unapproved tracked input; exit 4 for untracked
 `--verify-tracked`. Explicit approved reruns use `--allow-rerun CONTENT_ID`
 (the source ID when there is no content selector).
-An optional `--evidence-index DIGEST_JSON` joins retained report/source leads.
+Report links in `Docs/research/` are leads, not proof of body review.
 Tracked does not mean fully mined; new does not prove never mined. Preserve
 historical source IDs separately from content selectors, revision and subresource.
 Never silently remap historical identities. Playlist expansion needs explicit scope.

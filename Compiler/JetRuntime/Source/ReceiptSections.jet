@@ -104,7 +104,7 @@ receipt_section_valid: fn(tree: I64, section: I64, type_name: I64, schema: I64, 
         receipt_section_stop(rt_static_text("receipt section schema digest is malformed"))
         return false
     }
-    if (rt_text_word(wrapping(tree + DATA_TREE_TAG)) != DATA_TREE_OBJECT) {
+    if (rt_text_word(wrapping(tree + DYN_TAG)) != DYN_OBJECT) {
         receipt_section_stop_with(rt_static_text("receipt section `"), section, rt_static_text("` must encode as an object"))
         return false
     }
@@ -112,22 +112,22 @@ receipt_section_valid: fn(tree: I64, section: I64, type_name: I64, schema: I64, 
 }
 
 // Compact JSON with every object's keys in byte order (stable for equal
-// keys), recursively; scalars render as data_tree_render does.
+// keys), recursively; scalars render as dyn_render does.
 receipt_section_render: fn(target: I64, tree: I64) {
-    kind: rt_text_word(wrapping(tree + DATA_TREE_TAG))
-    if (kind != DATA_TREE_ARRAY && kind != DATA_TREE_OBJECT) {
-        data_tree_render(target, tree)
+    kind: rt_text_word(wrapping(tree + DYN_TAG))
+    if (kind != DYN_ARRAY && kind != DYN_OBJECT) {
+        dyn_render(target, tree)
         return
     }
-    value: rt_text_word(wrapping(tree + DATA_TREE_PAYLOAD))
+    value: rt_text_word(wrapping(tree + DYN_PAYLOAD))
     length: rt_text_word(wrapping(value + DATA_SEQUENCE_LENGTH))
     data: rt_text_word(wrapping(value + DATA_SEQUENCE_DATA))
-    if (kind == DATA_TREE_ARRAY) {
+    if (kind == DYN_ARRAY) {
         rt_text_push_word(target, I64{91}, I64{1})
         at := I64{0}
         loop at < length {
             if (at != I64{0}) -> rt_text_push_word(target, I64{44}, I64{1})
-            receipt_section_render(target, rt_text_word(wrapping(data + at * DATA_TREE_ELEMENT_BYTES)))
+            receipt_section_render(target, rt_text_word(wrapping(data + at * DYN_ELEMENT_BYTES)))
             at += I64{1}
         }
         rt_text_push_word(target, I64{93}, I64{1})
@@ -136,11 +136,11 @@ receipt_section_render: fn(target: I64, tree: I64) {
     order: jet_rt_alloc(if (length == I64{0}) -> I64{8} else -> length * I64{8}, I64{8})
     at := I64{0}
     loop at < length {
-        entry: wrapping(data + at * DATA_TREE_ENTRY_BYTES)
+        entry: wrapping(data + at * DYN_ENTRY_BYTES)
         slot := at
         loop slot > (I64{0}) {
             previous: rt_text_word(wrapping(order + (slot - I64{1}) * I64{8}))
-            if (jet_rt_string_compare(rt_text_word(wrapping(previous + DATA_TREE_ENTRY_KEY)), rt_text_word(wrapping(entry + DATA_TREE_ENTRY_KEY))) <= I64{0}) -> break
+            if (jet_rt_string_compare(rt_text_word(wrapping(previous + DYN_ENTRY_KEY)), rt_text_word(wrapping(entry + DYN_ENTRY_KEY))) <= I64{0}) -> break
             fd_put(order, slot * I64{8}, previous)
             slot -= I64{1}
         }
@@ -152,9 +152,9 @@ receipt_section_render: fn(target: I64, tree: I64) {
     loop at < length {
         if (at != I64{0}) -> rt_text_push_word(target, I64{44}, I64{1})
         entry: rt_text_word(wrapping(order + at * I64{8}))
-        data_tree_quote(target, rt_text_word(wrapping(entry + DATA_TREE_ENTRY_KEY)))
+        dyn_quote(target, rt_text_word(wrapping(entry + DYN_ENTRY_KEY)))
         rt_text_push_word(target, I64{58}, I64{1})
-        receipt_section_render(target, rt_text_word(wrapping(entry + DATA_TREE_ENTRY_VALUE)))
+        receipt_section_render(target, rt_text_word(wrapping(entry + DYN_ENTRY_VALUE)))
         at += I64{1}
     }
     rt_text_push_word(target, I64{125}, I64{1})

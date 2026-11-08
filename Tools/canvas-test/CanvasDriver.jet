@@ -1,0 +1,397 @@
+// The Canvas harness's browser driver: core.web.browser launches the engine
+// the working directory's `.jet/lock` pins (Chromium through its locked
+// chromedriver, Firefox over BiDi directly), and every page action is one
+// WebDriver BiDi command on one tab: navigate, evaluate, pointer, wheel and
+// key input, preload scripts and screenshots. Chromium also takes a window
+// size through its CDP browser target.
+use {
+    browser: core.web.browser
+    core.web.browser.[Browser, BrowserProtocol]
+    base64: core.encoding.base64
+    files: core.files
+    json: core.encoding.json
+    math: core.math
+    time: core.time
+    core.encoding.[Dyn]
+}
+
+C_WAIT_MS: 8000
+C_POLL_MS: 80
+
+#Error
+Failure: struct {
+    message: String
+
+    impl Display {
+        display: fn(self) -> String { self.message }
+    }
+}
+
+// The launched session, its BiDi channel and the tab every action drives.
+Driver: struct {
+    session: Browser
+    bidi: BrowserProtocol
+    context: String
+    engine: String
+    version: String
+}
+
+// A viewport point in CSS pixels.
+Point: struct {
+    x: Float
+    y: Float
+}
+
+fail_with: fn(message: String) -> Failure { Failure{message: message} }
+
+check: fn(condition: Bool, message: String) Failure! {
+    if !condition -> return Err(Failure{message: message})
+    Ok()
+}
+
+// Launch the locked `engine` and open one tab.
+driver_launch: fn(engine: String) -> Driver Failure! {
+    pin: browser.locked(engine) ?? return Err(fail_with("{engine} is not locked in .jet/lock: {err}"))
+    session: browser.launch(engine) ?? return Err(fail_with("{engine} launch failed: {err}"))
+    bidi: session.protocol("bidi") ?? return Err(fail_with("BiDi protocol unavailable: {err}"))
+    created: command(bidi, "browsingContext.create", obj([(key: "type", value: Dyn.Text("tab"))]))
+    context: text(at(created, "context"))
+    if context == "" -> return Err(fail_with("browsingContext.create returned no context"))
+    Ok(Driver{session: session, bidi: bidi, context: context, engine: engine.copy(), version: pin.version.copy()})
+}
+
+driver_close: fn(d: Driver) Failure! {
+    d.session.close() ?? return Err(fail_with("{d.engine} close failed: {err}"))
+    Ok()
+}
+
+// One BiDi command with a JSON object of parameters; its result object.
+command: fn(bidi: BrowserProtocol, method: String, params: Dyn) -> Dyn Failure! {
+    wire: json.to_string(params) ?? return Err(fail_with("{method} parameters cannot be encoded: {err}"))
+    reply: bidi.send(method, wire) ?? return Err(fail_with("{method} failed: {err}"))
+    tree: json.parse(reply) ?? return Err(fail_with("{method} reply is not JSON: {err}"))
+    Ok(tree)
+}
+
+driver_command: fn(d: Driver, method: String, params: Dyn) -> Dyn Failure! { command(d.bidi, method, params) }
+
+context_param: fn(d: Driver) -> (key: String, value: Dyn) { (key: "context", value: Dyn.Text(d.context.copy())) }
+
+// Navigate the tab and wait for its load event.
+driver_navigate: fn(d: Driver, url: String) Failure! {
+    driver_command(d, "browsingContext.navigate", obj([context_param(d), (key: "url", value: Dyn.Text(url.copy())), (key: "wait", value: Dyn.Text("complete"))]))
+    Ok()
+}
+
+// The awaited page value of `expression` as JSON: undefined is null, and a
+// thrown page error fails with its text.
+driver_eval: fn(d: Driver, expression: String) -> Dyn Failure! {
+    wrapped: "(async () => {{ const __jetValue = await ({expression}\n); return __jetValue === undefined ? 'null' : JSON.stringify(__jetValue); }})()"
+    reply: driver_command(d, "script.evaluate", obj([
+        (key: "expression", value: Dyn.Text(wrapped)),
+        (key: "target", value: obj([context_param(d)])),
+        (key: "awaitPromise", value: Dyn.Bool(true)),
+        (key: "resultOwnership", value: Dyn.Text("none")),
+        (key: "userActivation", value: Dyn.Bool(true)),
+    ]))
+    if text(at(reply, "type")) != "success" {
+        detail: text(at(reply, "exceptionDetails.text"))
+        shown: if detail != "" -> detail else -> js(reply)
+        code: short_text(expression, 400)
+        return Err(fail_with("page evaluation threw: {shown}\n  in: {code}"))
+    }
+    raw: text(at(reply, "result.value"))
+    if raw == "" -> return Ok(Dyn.Null)
+    value: json.parse(raw) ?? return Err(fail_with("page value is not JSON: {err}"))
+    Ok(value)
+}
+
+// One `input.performActions` with the given input sources.
+driver_actions: fn(d: Driver, sources: [Dyn]) Failure! {
+    driver_command(d, "input.performActions", obj([context_param(d), (key: "actions", value: Dyn.Array(sources.copy()))]))
+    Ok()
+}
+
+// Release every held key and button.
+driver_release: fn(d: Driver) Failure! {
+    driver_command(d, "input.releaseActions", obj([context_param(d)]))
+    Ok()
+}
+
+pointer_source: fn(actions: [Dyn]) -> Dyn {
+    obj([(key: "type", value: Dyn.Text("pointer")), (key: "id", value: Dyn.Text("mouse")), (key: "parameters", value: obj([(key: "pointerType", value: Dyn.Text("mouse"))])), (key: "actions", value: Dyn.Array(actions.copy()))])
+}
+
+key_source: fn(actions: [Dyn]) -> Dyn {
+    obj([(key: "type", value: Dyn.Text("key")), (key: "id", value: Dyn.Text("keyboard")), (key: "actions", value: Dyn.Array(actions.copy()))])
+}
+
+move_action: fn(x: Float, y: Float, duration: Int) -> Dyn {
+    obj([(key: "type", value: Dyn.Text("pointerMove")), (key: "x", value: Dyn.Int(round(x))), (key: "y", value: Dyn.Int(round(y))), (key: "origin", value: Dyn.Text("viewport")), (key: "duration", value: Dyn.Int(duration))])
+}
+
+button_action: fn(kind: String, button: Int) -> Dyn {
+    obj([(key: "type", value: Dyn.Text(kind.copy())), (key: "button", value: Dyn.Int(button))])
+}
+
+key_action: fn(kind: String, key: String) -> Dyn {
+    obj([(key: "type", value: Dyn.Text(kind.copy())), (key: "value", value: Dyn.Text(webdriver_key(key)))])
+}
+
+pause_action: fn() -> Dyn { obj([(key: "type", value: Dyn.Text("pause")), (key: "duration", value: Dyn.Int(0))]) }
+
+// Pointer `actions` with `modifiers` held: the key source presses them
+// first, pauses through the pointer actions, then releases them.
+driver_pointer: fn(d: Driver, actions: [Dyn], modifiers: [String]) Failure! {
+    if modifiers.len() == 0 -> return driver_actions(d, [Dyn]{pointer_source(actions)})
+    keys := [Dyn]{}
+    pointer := [Dyn]{}
+    loop key in modifiers {
+        keys.push(key_action("keyDown", key))
+        pointer.push(pause_action())
+    }
+    loop action in actions {
+        keys.push(pause_action())
+        pointer.push(action.copy())
+    }
+    loop index in 0..<modifiers.len() {
+        keys.push(key_action("keyUp", modifiers[modifiers.len() - 1 - index]))
+        pointer.push(pause_action())
+    }
+    driver_actions(d, [Dyn]{key_source(keys), pointer_source(pointer)})
+}
+
+driver_click: fn(d: Driver, x: Float, y: Float, button: Int, count: Int, modifiers: [String]) Failure! {
+    actions := [Dyn]{move_action(x, y, 0)}
+    loop _ in 0..<count {
+        actions.push(button_action("pointerDown", button))
+        actions.push(button_action("pointerUp", button))
+    }
+    driver_pointer(d, actions, modifiers)
+}
+
+// Press at `from`, move to `to` in `steps` even steps, release.
+driver_drag: fn(d: Driver, from: Point, to: Point, steps: Int, modifiers: [String]) Failure! {
+    actions := [Dyn]{move_action(from.x, from.y, 0), button_action("pointerDown", 0)}
+    count: if steps < 1 -> 1 else -> steps
+    loop index in 1..<count + 1 {
+        t: Float.from_int(index) / Float.from_int(count)
+        actions.push(move_action(from.x + (to.x - from.x) * t, from.y + (to.y - from.y) * t, 16))
+    }
+    actions.push(button_action("pointerUp", 0))
+    driver_pointer(d, actions, modifiers)
+}
+
+driver_wheel: fn(d: Driver, x: Float, y: Float, delta_x: Float, delta_y: Float) Failure! {
+    scroll: obj([
+        (key: "type", value: Dyn.Text("scroll")), (key: "x", value: Dyn.Int(round(x))), (key: "y", value: Dyn.Int(round(y))),
+        (key: "deltaX", value: Dyn.Int(round(delta_x))), (key: "deltaY", value: Dyn.Int(round(delta_y))),
+        (key: "origin", value: Dyn.Text("viewport")), (key: "duration", value: Dyn.Int(0)),
+    ])
+    driver_actions(d, [Dyn]{obj([(key: "type", value: Dyn.Text("wheel")), (key: "id", value: Dyn.Text("wheel")), (key: "actions", value: Dyn.Array([Dyn]{scroll}))])})
+}
+
+// Type each character of `value` as a key press.
+driver_type: fn(d: Driver, value: String) Failure! {
+    actions := [Dyn]{}
+    loop ch in value.chars() {
+        actions.push(obj([(key: "type", value: Dyn.Text("keyDown")), (key: "value", value: Dyn.Text("{ch}"))]))
+        actions.push(obj([(key: "type", value: Dyn.Text("keyUp")), (key: "value", value: Dyn.Text("{ch}"))]))
+    }
+    driver_actions(d, [Dyn]{key_source(actions)})
+}
+
+// Press `keys` in order and release them in reverse: one key or a chord.
+driver_keys: fn(d: Driver, keys: [String]) Failure! {
+    actions := [Dyn]{}
+    loop key in keys -> actions.push(key_action("keyDown", key))
+    loop index in 0..<keys.len() -> actions.push(key_action("keyUp", keys[keys.len() - 1 - index]))
+    driver_actions(d, [Dyn]{key_source(actions)})
+}
+
+// The WebDriver key value of a DOM key name; any other name is itself.
+webdriver_key: fn(key: String) -> String {
+    code: if key == {
+        "Alt" -> 0x0A
+        "Control" -> 0x09
+        "Meta" -> 0x3D
+        "Shift" -> 0x08
+        "Enter" -> 0x07
+        "Escape" -> 0x0C
+        "Tab" -> 0x04
+        "Backspace" -> 0x03
+        "Delete" -> 0x17
+        "ArrowLeft" -> 0x12
+        "ArrowUp" -> 0x13
+        "ArrowRight" -> 0x14
+        "ArrowDown" -> 0x15
+        "Home" -> 0x11
+        "End" -> 0x10
+        "PageUp" -> 0x0E
+        "PageDown" -> 0x0F
+        "F2" -> 0x32
+        else -> -1
+    }
+    if key == "Space" -> return " "
+    if code < 0 -> return key.copy()
+    // U+E000 + code, as UTF-8.
+    String.from_bytes([U8]{U8{238}, U8{128}, U8.from_int(128 + code) ?? U8{128}}) ?? key.copy()
+}
+
+// Install `function_declaration` before every document's own scripts; its id.
+driver_add_preload: fn(d: Driver, function_declaration: String) -> String Failure! {
+    reply: driver_command(d, "script.addPreloadScript", obj([
+        (key: "functionDeclaration", value: Dyn.Text(function_declaration.copy())),
+        (key: "contexts", value: Dyn.Array([Dyn]{Dyn.Text(d.context.copy())})),
+    ]))
+    Ok(text(at(reply, "script")))
+}
+
+driver_remove_preload: fn(d: Driver, id: String) Failure! {
+    driver_command(d, "script.removePreloadScript", obj([(key: "script", value: Dyn.Text(id.copy()))]))
+    Ok()
+}
+
+// Write a viewport PNG to `path`.
+driver_screenshot: fn(d: Driver, path: String) -> String Failure! {
+    reply: driver_command(d, "browsingContext.captureScreenshot", obj([context_param(d)]))
+    bytes: base64.decode(text(at(reply, "data"))) ?? return Err(fail_with("screenshot is not base64: {err}"))
+    files.write_bytes(path, bytes) ?? return Err(fail_with("cannot write {path}: {err}"))
+    Ok(path)
+}
+
+// Size the tab's window (Chromium's CDP browser target; the BiDi context id is its target id).
+driver_set_viewport: fn(d: Driver, width: Int, height: Int) Failure! {
+    cdp: d.session.protocol("cdp") ?? return Err(fail_with("{d.engine} has no CDP browser target to size the window: {err}"))
+    target_wire: json.to_string(obj([(key: "targetId", value: Dyn.Text(d.context.copy()))])) ?? "{{}}"
+    window: cdp.send("Browser.getWindowForTarget", target_wire) ?? return Err(fail_with("Browser.getWindowForTarget failed: {err}"))
+    window_tree: json.parse(window) ?? return Err(fail_with("Browser.getWindowForTarget reply is not JSON: {err}"))
+    bounds: obj([(key: "width", value: Dyn.Int(width)), (key: "height", value: Dyn.Int(height)), (key: "windowState", value: Dyn.Text("normal"))])
+    wire: json.to_string(obj([(key: "windowId", value: at(window_tree, "windowId")), (key: "bounds", value: bounds)])) ?? "{{}}"
+    cdp.send("Browser.setWindowBounds", wire) ?? return Err(fail_with("Browser.setWindowBounds failed: {err}"))
+    Ok()
+}
+
+sleep_ms: fn(ms: Int) { time.sleep(time.duration_ms(ms)) }
+
+pause: fn() { sleep_ms(C_POLL_MS) }
+
+// A poll deadline: `w: deadline(ms)` then `loop alive(w) { ...; pause() }`.
+Deadline: struct {
+    started: Instant
+    ms: Int
+}
+
+deadline: fn(ms: Int) -> Deadline { Deadline{started: time.instant(), ms: ms} }
+
+alive: fn(w: Deadline) -> Bool { w.started.elapsed_millis() < w.ms }
+
+round: fn(value: Float) -> Int { math.round(value) }
+
+// --- Dyn ----------------------------------------------------------------------
+
+obj: fn(entries: [(key: String, value: Dyn)]) -> Dyn {
+    fields := [String:Dyn]{}
+    loop entry in entries -> fields[entry.key.copy()] = entry.value.copy()
+    Dyn.Object(fields)
+}
+
+// The value at a dotted path of object keys and array indices; Null when absent.
+at: fn(tree: Dyn, path: String) -> Dyn {
+    current := tree.copy()
+    loop part in path.split(".").to_list() {
+        if part == "" -> next
+        current = child(current, part)
+    }
+    current
+}
+
+child: fn(tree: Dyn, key: String) -> Dyn {
+    if tree == .Object(entries) {
+        loop entry in entries {
+            if entry.key == key -> return entry.value.copy()
+        }
+        return Dyn.Null
+    }
+    if tree == .Array(list) {
+        index: Int.parse(key) ?? return Dyn.Null
+        if index >= 0 && index < list.len() -> return list[index].copy()
+    }
+    Dyn.Null
+}
+
+// A text value as itself, a number or Bool as JavaScript's String(), others empty.
+text: fn(tree: Dyn) -> String {
+    if tree == {
+        .Text(value) -> value.copy()
+        .Int(value) -> "{value}"
+        .Number(lexeme) -> lexeme.copy()
+        .Bool(value) -> if value -> "true" else -> "false"
+        .Float(_) -> js(tree)
+        else -> ""
+    }
+}
+
+num: fn(tree: Dyn) -> Float {
+    if tree == {
+        .Int(value) -> Float.from_int(value)
+        .Float(value) -> value
+        .Number(lexeme) -> Float.parse(lexeme) ?? 0.0
+        .Text(value) -> Float.parse(value.trim()) ?? 0.0
+        .Bool(value) -> if value -> 1.0 else -> 0.0
+        else -> 0.0
+    }
+}
+
+int: fn(tree: Dyn) -> Int {
+    if tree == .Int(value) -> return value
+    round(num(tree))
+}
+
+// JavaScript truthiness of a JSON value.
+truthy: fn(tree: Dyn) -> Bool {
+    if tree == {
+        .Null -> false
+        .Bool(value) -> value
+        .Int(value) -> value != 0
+        .Float(value) -> value != 0.0 && value == value
+        .Number(lexeme) -> (Float.parse(lexeme) ?? 0.0) != 0.0
+        .Text(value) -> value != ""
+        else -> true
+    }
+}
+
+is_null: fn(tree: Dyn) -> Bool { tree == .Null }
+
+items: fn(tree: Dyn) -> [Dyn] {
+    if tree == .Array(list) -> return list.copy()
+    [Dyn]{}
+}
+
+// An object's values in order (Object.values).
+values: fn(tree: Dyn) -> [Dyn] {
+    out := [Dyn]{}
+    if tree == .Object(entries) {
+        loop entry in entries -> out.push(entry.value.copy())
+    }
+    out
+}
+
+keys: fn(tree: Dyn) -> [String] {
+    out := [String]{}
+    if tree == .Object(entries) {
+        loop entry in entries -> out.push(entry.key.copy())
+    }
+    out
+}
+
+// JSON.stringify of a value.
+js: fn(tree: Dyn) -> String { json.to_string(tree) ?? "null" }
+
+// A JavaScript string literal of `value`, for embedding in page code.
+q: fn(value: String) -> String { json.to_string(Dyn.Text(value.copy())) ?? "\"\"" }
+
+short_text: fn(value: String, limit: Int) -> String {
+    if value.len() <= limit -> return value.copy()
+    "{value.slice(0..<limit)}…"
+}

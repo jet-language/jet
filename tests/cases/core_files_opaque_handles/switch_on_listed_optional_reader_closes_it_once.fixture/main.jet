@@ -17,6 +17,20 @@ member_size: fn(members: &[Member], index: Int) -> Int IOError! {
     }
 }
 
+// The window's payload passes on to a borrowing parameter, as Jetpack's
+// CacheLease.copy_profile_executable does: the value table's subject is
+// its generated `it`, which still windows the element.
+reader_size: fn(input: &FileReader) -> Int {
+    input.stat().size
+}
+
+member_size_through: fn(members: &[Member], index: Int) -> Int {
+    if &members[index].file == {
+        .Val(input) -> reader_size(input)
+        .None -> -1
+    }
+}
+
 // The handle still reads after every match above.
 member_bytes: fn(members: &[Member], index: Int) -> Int IOError! {
     total := 0
@@ -48,6 +62,7 @@ run: fn() {
         print("round {round}: main has bytes {size > 0}, none {absent}")
     }
     bytes: member_bytes(members, 0) ?? panic("bytes")
+    print("through a borrow: {member_size_through(members, 0) == (member_size(members, 0) ?? -2)} {member_size_through(members, 1)}")
     print("read every byte {bytes == (member_size(members, 0) ?? -2)}")
     package: files.open("package.jet") ?? panic("open package.jet")
     readers: [FileReader?]{Val(package), None}

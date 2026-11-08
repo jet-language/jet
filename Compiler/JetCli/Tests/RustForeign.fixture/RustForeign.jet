@@ -1,6 +1,7 @@
 // Pure host contracts. Real parser declarations feed the production planner;
 // these tests do not prepare a helper, probe tools, spawn Cargo, or fake a cache.
 use {
+    jet_cli.[JET_CLI_RUST_ARTIFACT_SCHEMA, JET_CLI_RUST_SANDBOX_POLICY, jet_cli_rust_foreign_bwrap, jet_cli_rust_foreign_cargo_detail, jet_cli_rust_foreign_cargo_error, jet_cli_rust_foreign_digest, jet_cli_rust_foreign_hex, jet_cli_rust_foreign_metadata, jet_cli_rust_foreign_provenance]
     jet_parser.[parse_source]
     jet_driver.[JetDriverRustForeignEntry, JetDriverRustForeignFacts, JetDriverRustForeignPlan, jet_driver_rust_foreign_plan, jet_driver_rust_foreign_function, JET_DRIVER_RUST_FOREIGN_TARGET, JET_DRIVER_RUST_FOREIGN_ARTIFACT_MODE, JET_DRIVER_RUST_FOREIGN_DESCRIPTOR]
     rust_foreign_test_sys: core.sys
@@ -8,8 +9,8 @@ use {
 }
 
 cli_rust_foreign_test_plan: fn(name: String) -> JetDriverRustForeignPlan {
-    parsed: parse_source("extern rust \"base64@0.22\" {{ {name}: fn(s: String) -> String = \"base64::encode\" }}".bytes())
-    assert(parsed.diagnostics.len() == 0)
+    parsed: parse_source("extern rust \"base64@0.22\" {{\n    {name}: fn(s: String) -> String = \"base64::encode\"\n}}\n".bytes())
+    assert(parsed.diagnostics.len() == 0, "the extern rust block parses: {parsed.diagnostics:Debug}")
     entries := [JetDriverRustForeignEntry]{}
     loop item in parsed.program.items {
         if item == .ExternRust(block) {
@@ -75,14 +76,24 @@ cli_rust_foreign_test_provenance: fn(plan: JetDriverRustForeignPlan) {
     assert(changed.contains("wrapper-digest={cli_rust_foreign_test_digest(other.source)}\n"))
     assert(!changed.contains("wrapper-digest={cli_rust_foreign_test_digest(plan.source)}\n"))
     assert(changed.contains("descriptor={JET_DRIVER_RUST_FOREIGN_DESCRIPTOR}\n"))
-    injected: jet_cli_rust_foreign_provenance(plan, "cache\nidentity=forged", toolchain, closure, digest, false)
-    if injected == .Err(error) {
-        assert_eq(error.code, "E0704")
-        assert(error.what.contains("unrepresentable scalar field"))
-    } else { panic("provenance accepted a source-path row injection") }
+    if jet_cli_rust_foreign_provenance(plan, "cache\nidentity=forged", toolchain, closure, digest, false) == {
+        .Ok(_) -> panic("provenance accepted a source-path row injection")
+        .Err(error) -> {
+            assert_eq(error.code, "E0704")
+            assert(error.what.contains("unrepresentable scalar field"))
+        }
+    }
     assert(jet_cli_rust_foreign_hex(digest))
     assert(!jet_cli_rust_foreign_hex(digest.to_upper()))
     assert(!jet_cli_rust_foreign_hex("../artifact"))
+    assert_eq(jet_cli_rust_foreign_digest("abc".bytes()), digest)
+}
+cli_rust_foreign_test_metadata: fn(plan: JetDriverRustForeignPlan) {
+    plain: jet_cli_rust_foreign_metadata("{{\"packages\":[{{\"name\":\"base64\",\"targets\":[{{\"kind\":[\"lib\"]}}]}}]}}", plan.crate_name) ?? panic("plain metadata: {err}")
+    assert(!plain)
+    build_script: jet_cli_rust_foreign_metadata("{{\"packages\":[{{\"name\":\"dep\",\"targets\":[{{\"kind\":[\"custom-build\"]}}]}}]}}", plan.crate_name) ?? panic("build-script metadata: {err}")
+    assert(build_script)
+    assert(jet_cli_rust_foreign_metadata("{{\"packages\":1}}", plan.crate_name) == .Err(_))
 }
 cli_rust_foreign_test_environment: fn() {
     loop metadata in ([Bool]{true, false}) {
@@ -109,5 +120,6 @@ run: fn() {
     assert(plan.source.contains("fn jet_ffi_encode_cabi("))
     cli_rust_foreign_test_detail(plan)
     cli_rust_foreign_test_provenance(plan)
+    cli_rust_foreign_test_metadata(plan)
     cli_rust_foreign_test_environment()
 }

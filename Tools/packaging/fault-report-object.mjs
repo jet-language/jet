@@ -4,7 +4,7 @@
 // program image (Image/StaticLink.jet link_fault_report). A link outside Jet's
 // linker writes it from the same source: the full report,
 // Compiler/JetRuntime/Assets/FaultReport/report.S, assembled with GNU as
-// as Tools/agent/gen-runtime-fault-report.mjs assembles it.
+// as Tools/agent/RuntimeGenerators.jet assembles it.
 import { spawnSync } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';

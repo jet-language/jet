@@ -113,9 +113,8 @@ Trap proofs compare the native status, signal and exact stdout/stderr against
 the committed golden, not a retired Rust execution. The freestanding
 display witness links the sealed C-client object and its provenance-listed C
 platform archives, rather than the program pack's startup.
-Native fixture feeds run through
-[`NativeTransport`](../../Tools/agent/NativeTransport.jet), which the fixture
-runners reach through `Compiler/JetBackend/Tests/jet-front.mjs`: the production
+Native fixture feeds run through the transports of
+[`CompilerRegistries`](../../Tools/agent/CompilerRegistries.jet): the production
 CLI's `doc FILE` library-object seam and `build FILE` program path. Library
 feeds require fresh object, export and ABI files; command completion alone is
 not a native pass. Checked-program observers are explicit Jet
@@ -130,8 +129,8 @@ its seven generic inputs then need only the return register and two syscall
 clobbers, rather than sixteen simultaneous general-purpose register slots.
 Before scheduling a cutover job, syntax-check its shell script and check every
 referenced input script/path exists. Outputs created by earlier steps are
-identified separately; the runtime assembly driver is
-`Compiler/JetBackend/Tests/run-runtime.mjs`, not a JetRuntime test script.
+identified separately; the runtime unit assembler is
+`Tools/agent/CompilerPackages.jet runtime-unit`, not a JetRuntime test script.
 
 The bootstrap completion owner may initiate Source resource retirement after
 its caller consumes the factory result and grants retirement permission; a
@@ -241,9 +240,8 @@ Native `[U8]` payloads are packed one-byte elements, matching checked
 `RT_HOST_U8_STRIDE` is 1; byte-list allocation, indexing, copying and freeing
 share that fact across Dyn, files, networking, text, crypto and codecs.
 HTTP Body chunk buffers use the same layout, including borrowed input windows.
-`run-native-codec-file-leaves.mjs` gates the admitted RC object with a C client
-that checks all 256 byte values through List pack/unpack and multi-chunk HTTP
-Body transfer; it rejects an object whose pinned source declares another stride.
+The codec and file-leaf rows of `Tools/agent/CompilerRegistries.jet` run
+their runtime fragments on that layout through the runtime's C ABI.
 
 A nested `[[U8]]` crosses a route only to a Jet runtime provider: the
 outer data pointer and length address native 24-byte `[len, cap, data]` headers
@@ -1303,13 +1301,30 @@ generated runtime uses the existing std-only WebSocket and strict JSON codecs
 to speak WebDriver BiDi. It does not require Node, Playwright, or a Canvas
 facade. Browser installation is Jetpack work: `jetpack browser lock|provision`
 writes `[[browser]]` entries into `.jet/lock`, and `browser.locked(engine)`
-reads that pin (FS) so launch resolves a deterministic binary.
+reads that pin (FS) so launch resolves a deterministic binary. An engine that
+serves BiDi only through a WebDriver driver also pins that driver in its entry
+(`driver`, `driver-size`): `jetpack browser lock chromium --driver <path>`, or
+`jetpack browser provision chromium@<source>`, which realizes
+`chromedriver@<source>` beside it so the two versions match.
+`browser.launch(engine)` starts the locked engine headless on a throwaway
+profile and connects with the lock's protocol profile. Firefox serves BiDi
+itself: launch passes `--remote-debugging-port=0`, reads the BiDi port Firefox
+records in that profile, and disables the session bus for the child because a
+desktop D-Bus can stall Firefox before its BiDi server answers. Chromium goes
+through the pinned chromedriver: launch starts it on a free port, creates a
+WebDriver classic session with `webSocketUrl`, and connects to that session's
+BiDi socket. Without a pinned driver, launch refuses Chromium with a
+`missing driver` error. The session owns the engine: `close()` or the last
+owner's drop stops it (for Chromium, by deleting the driver session, since
+Chromium outlives a killed driver) and removes the profile.
 
 `BrowserProfile` pins a client command contract; it is not a claim about a
 server version. The runtime gates raw commands against that contract. A
 connection checks `session.status`, then creates the session with
 `session.new`; only that command's matched feature map enables optional
-protocols such as CDP. `Browser.context()` creates an isolated BiDi user
+protocols such as CDP. A Chromium launch is the one exception: chromedriver
+already created the session, so the connection skips both commands, and CDP is
+enabled because chromedriver's BiDi mapper serves `goog:cdp.*`. `Browser.context()` creates an isolated BiDi user
 context. `context.page()` and `context.tab()` both create a BiDi tab under
 that context; the context owns its pages. `page.main_frame()` and
 `page.frames()` expose the browsing-context tree (main plus child frames)

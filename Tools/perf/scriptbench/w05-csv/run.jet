@@ -1,0 +1,26 @@
+// w05: read w05.csv (1,000,000 rows), total qty and qty * price_cents.
+package: {
+    name: "run"
+    authority: { allow: [IO, Mem.Alloc, FS.Read] }
+}
+
+use {
+    csv: core.encoding.csv
+    fs: core.files
+}
+
+run: fn() {
+    raw: fs.read("w05.csv") ?? panic("read failed")
+    rows: csv.rows(raw, header: true) ?? panic("csv parse failed")
+    count := 0
+    qty := 0
+    value := 0
+    loop row in rows {
+        q: Int.parse(row.fields[3]) ?? panic("bad qty")
+        price: Int.parse(row.fields[4]) ?? panic("bad price")
+        count += 1
+        qty += q
+        value += q * price
+    }
+    print("rows={count} qty={qty} value={value}")
+}

@@ -402,7 +402,9 @@ pkg_envelope_encode_node: fn(root: String, path: String, rel: String, envelope_a
         }
         envelope_archive.record_header(U8{70}, rel_bytes, pkg_envelope_mode(info))
         pkg_encode_semantic_xattrs(path, envelope_archive, allow_semantic_xattrs)
-        content_digest: pkg_envelope_read_file_stable(path, info, allow_nix_store_symlinks, envelope_archive, hook)
+        // Only a multiply-linked file needs its content digest: it names the
+        // CAS pool peer a Hangar-local hardlink may share.
+        content_digest: pkg_envelope_read_file_stable(path, info, allow_nix_store_symlinks, key != None, envelope_archive, hook)
         if key == {
             .Val(identity) -> {
                 hardlinks.push(EnvelopeHardlink{key: identity, first: rel, seen: 1, total: info.links, cas_key: pkg_envelope_cas_key(info, content_digest)})
@@ -478,9 +480,9 @@ pkg_validate_relative_nix_store_symlink_target: fn(target: String, parent_depth:
 }
 
 // Hash one regular file's bytes from a no-follow handle, refusing a file
-// whose identity drifts before or while it is read. Returns the hex digest
-// of the file content.
-pkg_envelope_read_file_stable: fn(path: String, expected: Stat, allow_hardlink_metadata_changes: Bool, envelope_archive: &EnvelopeArchive, hook: &EnvelopeWalkHook) -[FS]> String EnvelopeError! {
+// whose identity drifts before or while it is read. With `want_content`,
+// returns the hex digest of the file content; otherwise "".
+pkg_envelope_read_file_stable: fn(path: String, expected: Stat, allow_hardlink_metadata_changes: Bool, want_content: Bool, envelope_archive: &EnvelopeArchive, hook: &EnvelopeWalkHook) -[FS]> String EnvelopeError! {
     reader: files.open(path, links: .Refuse) ?? return Err(EnvelopeError.OpenNoFollow{path: path, detail: "{err}"})
     before: reader.stat() ?? return Err(EnvelopeError.InspectOpen{path: path, detail: "{err}"})
     if !EnvelopeStableIdentity.of(before).unchanged(EnvelopeStableIdentity.of(expected), allow_hardlink_metadata_changes) {
@@ -494,12 +496,13 @@ pkg_envelope_read_file_stable: fn(path: String, expected: Stat, allow_hardlink_m
         chunk: reader.read(ENVELOPE_READ_CHUNK) ?? return Err(EnvelopeError.ReadEntries{path: path, detail: "{err}"})
         if chunk.len() == 0 -> break
         envelope_archive.update(chunk)
-        content.update(chunk)
+        if want_content -> content.update(chunk)
     }
     after: reader.stat() ?? return Err(EnvelopeError.Reinspect{path: path, detail: "{err}"})
     if !EnvelopeStableIdentity.of(before).unchanged(EnvelopeStableIdentity.of(after), allow_hardlink_metadata_changes) {
         return Err(EnvelopeError.FileChanged(path))
     }
+    if !want_content -> return Ok("")
     Ok(content.digest())
 }
 

@@ -1,4 +1,10 @@
 // #4790 / #4870: a join retains the checked Task element on both compiler halves.
+use {
+    jet_foundation.[Type]
+    jet_ir.[ir_failure_carrier_for_type, ir_handle_task_route]
+    jet_sema.[sema_taskgroup_failure_result, sema_taskgroup_task_element]
+}
+
 task_carrier_expect: fn(element: Type, symbol: String) Never! {
     task_type := Type.Apply{name: "Task", args: [Type]{element}}
     join_type := sema_taskgroup_failure_result(element)

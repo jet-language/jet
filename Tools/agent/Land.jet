@@ -1,6 +1,7 @@
 #!/usr/bin/env jet
-// Land patches on a checkout, queue them for the landing service, and run the
-// collect-all census that admits compiler commits and expensive launches.
+// Land patches on a checkout, queue them for the landing service, run that
+// service, publish what it landed, and run the collect-all census that admits
+// compiler commits and expensive launches.
 //
 //   jet Tools/agent/Land.jet land [--scratch-copy DIR] PATCH MSG [PATCH MSG]...
 //   jet Tools/agent/Land.jet queue LANE BASE...
@@ -10,6 +11,10 @@
 //   jet Tools/agent/Land.jet receipt identity TREE
 //   jet Tools/agent/Land.jet receipt check LAUNCHER TREE SEED_DIR
 //   jet Tools/agent/Land.jet receipt commit LAUNCHER REPO COMMIT SEED_DIR
+//   jet Tools/agent/Land.jet serve
+//   jet Tools/agent/Land.jet batch LIST
+//   jet Tools/agent/Land.jet publish latest | base COMMIT | jetpack COMMIT
+//   jet Tools/agent/Land.jet release-train SHA
 //
 // `land` commits a stack of patches on the checkout it runs in, one commit
 // per patch, with the message in the MSG file after it. The checkout must
@@ -21,7 +26,7 @@
 // it was. The lane check covers the whole compiler and Jetpack's assembly
 // when a patch touches Compiler, Core, Jetpack or a sources.list, and
 // otherwise every .jet file the patches leave behind. The landing service
-// (Tools/agent/land/lander.sh) runs the full census before it commits; `land`
+// (`serve`) runs the full census before it commits; `land`
 // is the direct path for a checkout with no service, such as a fresh clone.
 //
 // `--scratch-copy DIR` clones the checkout into DIR first (DIR must not
@@ -55,7 +60,7 @@
 // CENSUS_BUILD=0 stops after the check, CENSUS_SELFCHECK=0 before the
 // self-check. Output: $JET_SCRATCH_ROOT/discovery/r14/{snap,census}. A clean
 // census of every pass writes the snapshot's preflight receipt, which
-// `chain.sh full` and Tools/release `admit` and `build` require.
+// `Tools/agent/Chain.jet TREE full` and Tools/release `admit` and `build` require.
 // Exit: 0 clean; 1 rows or a failed pass; 2 setup failure.
 //
 // `precommit` runs the census for a commit touching FILE... when one of them
@@ -65,8 +70,8 @@
 // (RATCHETS: the unsafe-region baseline in Docs/spec/safety.md, the Core
 // coverage list, and every generator with committed output: the compiler's
 // copies of the Prelude sources, the diagnostic, Core source, owned-trait,
-// vocabulary and lexer-keyword rows, the collation table, the runtime
-// tables and the Unicode tables). Every pass runs and reports its rows; it
+// vocabulary and lexer-keyword rows, the lexical ledger, the collation table,
+// the runtime tables and the Unicode tables). Every pass runs and reports its rows; it
 // prints PRECOMMIT OK or PRECOMMIT FAILED.
 //
 // `ratchets` prints RATCHETS, one tool per line, for a lander that runs them
@@ -84,6 +89,46 @@
 // `commit` one of COMMIT of the checkout REPO (from an export of it). Each
 // prints `LAUNCHER: admitted by ...` (exit 0) or the refusal, which names the
 // census to run (exit 1); exit 2 is a setup failure.
+//
+// `serve` is the landing service, run from the tools checkout. Every minute
+// it takes the jobs `queue` wrote, admits each one (`prescreen`: all at once
+// when HEAD with every queued patch checks clean, else one by one after the
+// ones admitted before it), lands the admitted jobs as one `batch` and, when
+// the batch fails, bisects it: every clean half lands, and a failing job, or
+// the rest of its lane's stack, goes back to its lane. Each job's verdict is
+// $JET_RUN_ROOT/land-results/<job>.result (LANDED <sha>, STALE or REJECTED
+// with the rows); the service log is $JET_RUN_ROOT/lander.log. It waits while
+// the dev worktree has tracked changes and exits when
+// $JET_RUN_ROOT/lander.stop exists.
+//
+// `batch` lands the jobs of LIST (`LANE<TAB>MSG<TAB>PATCH[<TAB>NAME]` lines,
+// absolute paths) on $JET_DEV_WORKTREE under $JET_RUN_ROOT/commit.lock with
+// one verification: every patch that applies (a patch already on dev is
+// skipped; a lane's later patches are left once one does not apply), the
+// regenerated views and runtime generator outputs, then one seed `precommit`
+// of every path. Patches that share a file land as one commit. The commits
+// are built in a private index and published with one compare-and-swap of
+// HEAD; a failed precommit or commit leaves HEAD and the worktree as they
+// were. A landed batch is then published (`publish latest`, then `publish
+// base` of HEAD) and handed to the release train. The report is
+// $JET_RUN_ROOT/batch-land.log. Exit: 0 landed or nothing applied; 2 setup
+// failure; 3 the worktree has tracked changes; 5 precommit failed; 6 the
+// commits could not be made.
+//
+// `publish latest` makes the batch-verified census compiler (with a runtime
+// pack) $JET_SCRATCH_ROOT/discovery/b2/install-latest. `publish base COMMIT`
+// keeps install-latest, which must say COMMIT, as $JET_BASE_ROOT/<sha> for
+// lanes (base/latest is the newest), seeds it into the chain stage store,
+// gives it the jetpack of an input-identical published commit, and wants its
+// golden census: a golden worker (a user unit) runs the newest wanted one in
+// a build slot, then builds the commit's jetpack when none could be reused.
+// `publish jetpack COMMIT` (inside a build slot) gives a published base its
+// jetpack.
+//
+// `release-train SHA` records SHA as the newest pending dev HEAD and, unless
+// $JET_RELEASE_WORK/paused exists, starts the release train (a user unit):
+// one train at a time gates the newest pending HEAD with
+// `Tools/release/Main.jet -- admit` and writes its verdict to the batch log.
 use {
     crypto: core.crypto
     files: core.files
@@ -123,6 +168,7 @@ RATCHETS: [String]{
     "Tools/agent/OwnedTraitRows.jet",
     "Tools/agent/VocabularyRows.jet",
     "Tools/agent/LexerKeywordRows.jet",
+    "Tools/agent/LexicalLedger.jet",
     "Tools/agent/CollationTable.jet",
     "Tools/agent/RuntimeGenerators.jet",
     "Tools/agent/UnicodeTables.jet",
@@ -144,6 +190,10 @@ run: fn() {
         "ratchets" -> ratchets_main(rest)
         "prescreen" -> prescreen_main(rest)
         "receipt" -> receipt_main(rest)
+        "serve" -> serve_main(rest)
+        "batch" -> batch_main(rest)
+        "publish" -> publish_main(rest)
+        "release-train" -> release_train_main(rest)
         else -> usage()
     }
     process.exit(code)
@@ -159,6 +209,10 @@ usage: fn() -[Exec, IO]> Never {
     term.eprint("       jet Tools/agent/Land.jet receipt identity TREE")
     term.eprint("       jet Tools/agent/Land.jet receipt check LAUNCHER TREE SEED_DIR")
     term.eprint("       jet Tools/agent/Land.jet receipt commit LAUNCHER REPO COMMIT SEED_DIR")
+    term.eprint("       jet Tools/agent/Land.jet serve")
+    term.eprint("       jet Tools/agent/Land.jet batch LIST")
+    term.eprint("       jet Tools/agent/Land.jet publish latest | base COMMIT | golden-worker | golden-run | jetpack COMMIT")
+    term.eprint("       jet Tools/agent/Land.jet release-train SHA | --run")
     process.exit(64)
 }
 
@@ -801,8 +855,7 @@ dev_worktree: fn() -[Exec, Env, FS, Time.Wait]> String Never! { root("JET_DEV_WO
 
 // The seed compiler's directory: $JET_SEED, else the current seed.
 seed_dir: fn() -[Env, FS]> String Never! {
-    seeds: root("JET_SEEDS", "{env_or("XDG_DATA_HOME", "{env_or("HOME", "")}/.local/share")}/jet-seeds")
-    named: root("JET_SEED", "{seeds}/current")
+    named: root("JET_SEED", "{seeds_root()}/current")
     files.canonicalize(named) ?? named.copy()
 }
 
@@ -858,8 +911,8 @@ census: fn(named: [String], passes: Passes) -[Exec, Env, FS, IO, Time, Time.Wait
         print("census: `{r14}` cannot be created: {err}")
         return 2
     }
-    // One census at a time owns the snapshot; publish-latest.sh and
-    // `chain.sh seed-published` read the census output beside it.
+    // One census at a time owns the snapshot; `publish latest` and
+    // `Tools/agent/Chain.jet seed-published` read the census output beside it.
     _held: files.lock("{r14}/census-snap.lock") ?? {
         print("census: the snapshot lock cannot be taken: {err}")
         return 2
@@ -1267,11 +1320,8 @@ prescreen: fn(worktree: String, tree: String, patch: String, earlier: [String]) 
 // Apply `patch` in `tree`; when it does not apply whole, apply it around the
 // generated views.
 apply_around_views: fn(tree: String, patch: String) -[Exec, Time.Wait]> Bool Never! {
-    if run_in(tree, [String]{"git", "apply", patch}, "").code == 0 -> return true
-    argv := [String]{"git", "apply"}
-    loop view in GENERATED_VIEWS -> argv.push("--exclude={view}")
-    argv.push(patch.copy())
-    run_in(tree, argv, "").code == 0
+    if git(tree, [String]{"apply", patch}).code == 0 -> return true
+    git(tree, around_views([String]{}, patch)).code == 0
 }
 
 // Each `Error...` line of a check's output with the location on the line after it.
@@ -1306,6 +1356,1265 @@ counted: fn(rows: [String]) -> [String] Never! {
         at += count
     }
     out
+}
+
+// --- the landing service ----------------------------------------------------
+
+// A land job: a lane's patch and its commit message, and its queue name (""
+// outside the service).
+Job: struct {
+    lane: String
+    message: String
+    patch: String
+    name: String
+}
+
+// A job that applied, with the paths its patch touches.
+Applied: struct {
+    job: Job
+    paths: [String]
+}
+
+// A path and its modification time, for newest-first listings.
+Dated: struct {
+    path: String
+    time: Int
+}
+
+// What a publish step did: its summary line, and whether it succeeded.
+Step: struct {
+    ok: Bool
+    line: String
+}
+
+// The jobs of a list, one `LANE<TAB>MSG<TAB>PATCH[<TAB>NAME]` per line
+// (absolute paths); blank lines and `#` comments are skipped.
+read_jobs: fn(text: String) -> [Job] Never! {
+    jobs := [Job]{}
+    loop line in text.lines() {
+        if line.trim() == "" || line.starts_with("#") -> next
+        fields: line.split("\t").to_list()
+        if fields.len() < 3 -> next
+        name: if fields.len() > 3 -> fields[3].copy() else -> ""
+        jobs.push(Job{lane: fields[0].copy(), message: fields[1].copy(), patch: fields[2].copy(), name: name})
+    }
+    jobs
+}
+
+job_line: fn(job: Job) -> String Never! { "{job.lane}\t{job.message}\t{job.patch}\t{job.name}" }
+
+// `line` on stdout and appended to `log`.
+say: fn(log: String, line: String) -[FS, IO]> {
+    print(line)
+    files.append_all(log, "{line}\n") ?? ()
+}
+
+// The UTC wall clock, `YYYY-MM-DD HH:MM:SS`.
+stamp: fn() -[Time]> String Never! {
+    dt: time.gmtime(time.unix_ns() /% 1000000000)
+    "{time.isoformat_date(dt.date())} {time.isoformat_time(dt.time())}"
+}
+
+epoch: fn() -[Time]> Int Never! { time.unix_ns() /% 1000000000 }
+
+// The last `count` of `lines`.
+last_of: fn(lines: [String], count: Int) -> [String] Never! {
+    start: if lines.len() > count -> lines.len() - count else -> 0
+    out := [String]{}
+    loop at in start..<lines.len() -> out.push(lines[at].copy())
+    out
+}
+
+// The last `count` lines of `text`.
+last_lines: fn(text: String, count: Int) -> [String] Never! {
+    lines := [String]{}
+    loop line in text.trim_end().lines() -> lines.push(line.copy())
+    last_of(lines, count)
+}
+
+// The first `count` lines of `text`.
+first_lines: fn(text: String, count: Int) -> [String] Never! {
+    lines := [String]{}
+    loop line in text.trim_end().lines() {
+        if lines.len() >= count -> break
+        lines.push(line.copy())
+    }
+    lines
+}
+
+// A command's output, then its error output.
+both: fn(ran: Ran) -> String Never! { "{ran.output}{ran.errors}" }
+
+// The paths of a `-z` git listing.
+nul_paths: fn(ran: Ran) -> [String] Never! {
+    paths := [String]{}
+    if ran.code != 0 -> return paths
+    loop field in nul_fields(ran.output) {
+        if field != "" -> paths.push(field.copy())
+    }
+    paths
+}
+
+// The paths with tracked changes in the worktree `dir`.
+dirty_paths: fn(dir: String) -[Exec, Time.Wait]> [String] Never! {
+    paths := [String]{}
+    loop field in nul_paths(git(dir, [String]{"status", "--porcelain", "-z", "--untracked-files=no"})) {
+        raw: field.bytes()
+        // `XY PATH`: two status letters and a space.
+        if raw.len() > 3 -> paths.push(String.from_bytes_lossy(raw.slice(3, raw.len())))
+    }
+    paths
+}
+
+// Is `path` in the worktree `dir` (a dangling symlink counts)?
+on_disk: fn(dir: String, path: String) -[FS]> Bool Never! {
+    full: files.join(dir, path)
+    files.exists(full) || files.is_symlink(full)
+}
+
+// `git --literal-pathspecs ARGS... -- PATHS...` in `dir` with the index `index` ("" for the checkout's).
+git_paths: fn(dir: String, index: String, args: [String], paths: [String]) -[Exec, Time.Wait]> Ran Never! {
+    argv := [String]{"--literal-pathspecs"}
+    argv.extend(args.copy())
+    argv.push("--")
+    argv.extend(paths.copy())
+    git_index(dir, index, argv)
+}
+
+// `jet ARGS...` by the seed in `dir`, with `dir` as its toolchain root, killed
+// after `seconds` (0: no limit); 124 on a timeout.
+seed_run: fn(dir: String, args: [String], seconds: Int) -[Exec, Env, FS, Time.Wait]> Ran Never! {
+    seed: seed_dir()
+    argv := [String]{"{seed}/jet"}
+    argv.extend(args.copy())
+    spec := process.cmd(argv).cwd(dir).env("JET_COMPILER_IDENTITY", read_identity(seed)).env("JET_TOOLCHAIN_ROOT", dir).output_limit(268435456)
+    if seconds > 0 -> spec = spec.timeout(time.duration_seconds(seconds))
+    receipt: spec.run() ?? return Ran{code: 127, output: "", errors: "{argv[0]}: {err}"}
+    code: if {
+        receipt.timed_out -> 124
+        receipt.signal == .Val(_) -> 128
+        else -> receipt.code
+    }
+    Ran{code: code, output: receipt.output.copy(), errors: receipt.errors.copy()}
+}
+
+// The checkout this tool runs from: its later runs (the golden worker, the
+// release train, the build slot) start from there.
+tools_checkout: fn() -[Exec, Env, FS, Time.Wait]> String Never! {
+    top: checkout_top()
+    if top != "" -> return top
+    dev_worktree()
+}
+
+seeds_root: fn() -[Env, FS]> String Never! { root("JET_SEEDS", "{env_or("XDG_DATA_HOME", "{env_or("HOME", "")}/.local/share")}/jet-seeds") }
+
+base_root: fn() -[Env, FS]> String Never! { root("JET_BASE_ROOT", "{scratch_root()}/discovery/base") }
+
+// The environment a detached run of this tool starts with: PATH, the roots,
+// and the seed's identity with `tools` as its toolchain root.
+unit_env: fn(tools: String) -[Exec, Env, FS, Time.Wait]> [Setting] Never! {
+    seed: seed_dir()
+    env := [Setting]{
+        Setting{name: "PATH", value: env_or("PATH", "")},
+        Setting{name: "JET_STATE_ROOT", value: state_root()},
+        Setting{name: "JET_SCRATCH_ROOT", value: scratch_root()},
+        Setting{name: "JET_RUN_ROOT", value: run_root()},
+        Setting{name: "JET_BASE_ROOT", value: base_root()},
+        Setting{name: "JET_SEEDS", value: seeds_root()},
+        Setting{name: "JET_SEED", value: root("JET_SEED", "{seeds_root()}/current")},
+        Setting{name: "JET_DEV_WORKTREE", value: dev_worktree()},
+        Setting{name: "JET_COMPILER_IDENTITY", value: read_identity(seed)},
+        Setting{name: "JET_TOOLCHAIN_ROOT", value: tools.copy()},
+    }
+    musl: root("JET_PACK_MUSL_LIB", "")
+    if musl != "" -> env.push(Setting{name: "JET_PACK_MUSL_LIB", value: musl})
+    env
+}
+
+// Start `jet Tools/agent/Land.jet ARGS...` by the seed as the user unit
+// `unit` (systemd-run), detached from the caller, in `tools`, with the
+// unit `properties` and its output appended to `log`.
+start_unit: fn(tools: String, unit: String, properties: [String], args: [String], log: String) -[Exec, Env, FS, Time.Wait]> Ran Never! {
+    argv := [String]{"systemd-run", "--user", "--unit={unit}", "--collect", "-q", "--expand-environment=no", "--working-directory={tools}"}
+    props := properties.copy()
+    props.push("StandardOutput=append:{log}")
+    props.push("StandardError=append:{log}")
+    loop property in props {
+        argv.push("-p")
+        argv.push(property.copy())
+    }
+    loop setting in unit_env(tools) -> argv.push("--setenv={setting.name}={setting.value}")
+    argv.push("{seed_dir()}/jet")
+    argv.push("Tools/agent/Land.jet")
+    argv.extend(args.copy())
+    run_in(tools, argv, "")
+}
+
+// Can `path` be locked now? The probe's lock is released on return.
+lock_free: fn(path: String) -[FS, Env]> Bool Never! {
+    _held: files.try_lock(path) ?? return false
+    true
+}
+
+// `items` newest first.
+newest_first: fn(items: [Dated]) -> [Dated] Never! {
+    sorted := items.copy()
+    sorted.sort_by((left: Dated, right: Dated) -> {
+        if left.time > right.time -> return Ordering.Less
+        if left.time < right.time -> return Ordering.Greater
+        Ordering.Equal
+    })
+    sorted
+}
+
+mtime: fn(path: String) -[FS]> Int Never! { files.getmtime(path) ?? 0 }
+
+// The entries of the directory `dir`, none when it cannot be listed.
+entries: fn(dir: String) -[FS]> [files.DirEntry] Never! { files.list_dir(dir) ?? [files.DirEntry]{} }
+
+// The first line of the file at `path`, "" when it cannot be read.
+first_line_of: fn(path: String) -[FS]> String Never! { (files.read(path) ?? "").partition("\n").head.trim() }
+
+// `text` with `git stripspace`'s cleanup: trailing whitespace removed, runs
+// of blank lines collapsed, no blank lines at either end, one final newline.
+stripspace: fn(text: String) -> String Never! {
+    out := [String]{}
+    blank := false
+    loop raw in text.lines() {
+        line: raw.trim_end()
+        if line == "" {
+            blank = out.len() > 0
+            next
+        }
+        if blank -> out.push("")
+        blank = false
+        out.push(line.copy())
+    }
+    if out.len() == 0 -> return ""
+    "{out.join("\n")}\n"
+}
+
+// The root of `at`'s group.
+group_root: fn(group: [Int], at: Int) -> Int Never! {
+    current := at
+    loop group[current] != current -> current = group[current]
+    current
+}
+
+// The groups of patches that share a file (transitively), as the root index
+// of each patch's group: a group lands as one commit, since staging a whole
+// file would take another patch's hunks too.
+share_groups: fn(paths: [[String]]) -> [Int] Never! {
+    group := [Int]{}
+    loop at in 0..<paths.len() -> group.push(at)
+    owner := [String:Int]{}
+    loop at in 0..<paths.len() {
+        loop path in paths[at] {
+            if owner.get(path) == .Val(first) {
+                a: group_root(group, first)
+                b: group_root(group, at)
+                if a != b -> group[b] = a
+                next
+            }
+            owner[path] = at
+        }
+    }
+    roots := [Int]{}
+    loop at in 0..<paths.len() -> roots.push(group_root(group, at))
+    roots
+}
+
+// `batch LIST`.
+batch_main: fn(args: [String]) -[Exec, Env, FS, IO, Time, Time.Wait]> Int Never! {
+    if args.len() != 1 -> usage()
+    text: files.read(args[0]) ?? {
+        term.eprint("batch: {args[0]} cannot be read: {err}")
+        return 2
+    }
+    worktree: dev_worktree()
+    if worktree == "" {
+        term.eprint("batch: no dev worktree (set JET_DEV_WORKTREE or run in the checkout)")
+        return 2
+    }
+    batch(tools_checkout(), worktree, read_jobs(text))
+}
+
+// Land `jobs` on the worktree `dir` with one verification; the report is
+// $JET_RUN_ROOT/batch-land.log. Exit: 0 landed (or nothing applied); 2 setup
+// failure; 3 the worktree has tracked changes; 5 the precommit failed; 6 the
+// commits could not be made. 5 and 6 leave HEAD and the worktree as they were.
+batch: fn(tools: String, dir: String, jobs: [Job]) -[Exec, Env, FS, IO, Time, Time.Wait]> Int Never! {
+    run: run_root()
+    files.create_dir_all(run) ?? ()
+    log: "{run}/batch-land.log"
+    files.write(log, "") ?? ()
+    _held: files.lock("{run}/commit.lock") ?? {
+        say(log, "the commit lock cannot be taken: {err}")
+        return 2
+    }
+    dirty: git(dir, [String]{"status", "--porcelain", "--untracked-files=no"})
+    if dirty.code != 0 || dirty.output.trim() != "" {
+        say(log, "worktree has tracked changes; refusing")
+        loop line in first_lines(dirty.output, 10) -> say(log, line)
+        return 3
+    }
+    parsed: git(dir, [String]{"rev-parse", "--verify", "HEAD"})
+    if parsed.code != 0 {
+        say(log, "HEAD of {dir} cannot be read: {first_line(parsed)}")
+        return 2
+    }
+    pre: parsed.output.trim()
+    applied := [Applied]{}
+    all := [String]{}
+    broken := [String:String]{}
+    regenerate := false
+    loop job in jobs {
+        name: files.basename(job.patch)
+        if broken.get(job.lane) == .Val(base) {
+            say(log, "DOES NOT APPLY {job.lane} {name} - an earlier patch of its stack did not apply ({base}); left for its lane")
+            next
+        }
+        if git(dir, [String]{"apply", "-R", "--check", job.patch}).code == 0 {
+            say(log, "SKIP (already on dev) {job.lane} {name}")
+            next
+        }
+        whole: git(dir, [String]{"apply", "--check", job.patch}).code == 0 && git(dir, [String]{"apply", job.patch}).code == 0
+        // A patch whose only conflict is in the generated CoreSourceRows views
+        // applies around them; the views are regenerated from the batch's sources.
+        around := false
+        if !whole {
+            around = git(dir, around_views([String]{"--check"}, job.patch)).code == 0 && git(dir, around_views([String]{}, job.patch)).code == 0
+            if around {
+                regenerate = true
+                say(log, "applied around the CoreSourceRows views: {name}")
+            }
+        }
+        if !whole && !around {
+            say(log, "DOES NOT APPLY {job.lane} {name} - left for its lane")
+            broken[job.lane] = name
+            next
+        }
+        paths: touched_paths(dir, job.patch)
+        loop path in paths {
+            if !all.contains(path) -> all.push(path.copy())
+        }
+        say(log, "APPLIED {job.lane} {name} ({paths.len()} files)")
+        applied.push(Applied{job: job.copy(), paths: paths})
+    }
+    if applied.len() == 0 {
+        say(log, "nothing applied")
+        return 0
+    }
+    if regenerate {
+        rows: seed_run(dir, [String]{"Tools/agent/CoreSourceRows.jet"}, 900)
+        say(log, "CoreSourceRows regeneration rc={rows.code} {last_lines(both(rows), 1).join(" ")}")
+        if rows.code != 0 {
+            say(log, "CoreSourceRows regeneration FAILED; reverting")
+            revert_batch(dir, applied, all, log)
+            return 5
+        }
+    }
+    // The runtime generators' outputs (stop exports, lifecycle) for the batch's runtime sources.
+    generated: seed_run(dir, [String]{"Tools/agent/RuntimeGenerators.jet"}, 900)
+    say(log, "RuntimeGenerators rc={generated.code} {last_lines(both(generated), 2).join(" ")}")
+    regenerated := [String]{}
+    loop path in dirty_paths(dir) {
+        if !all.contains(path) -> regenerated.push(path)
+    }
+    shown_regenerated: if regenerated.len() > 0 -> regenerated.join(" ") else -> "none"
+    say(log, "regenerated: {shown_regenerated}")
+    precommit_args := [String]{"Tools/agent/Land.jet", "precommit"}
+    precommit_args.extend(all.copy())
+    precommit_args.extend(regenerated.copy())
+    checked: seed_run(dir, precommit_args, 0)
+    rows := [String]{}
+    loop line in both(checked).lines() {
+        if line.starts_with("nm: ") || line.starts_with("skip ") -> next
+        rows.push(line.copy())
+    }
+    loop line in last_of(rows, 25) -> say(log, line)
+    if checked.code != 0 {
+        say(log, "PRECOMMIT FAILED for the batch; reverting")
+        revert_batch(dir, applied, all, log)
+        return 5
+    }
+
+    // Every commit is built in a private index, chained on the pre-batch HEAD;
+    // nothing visible changes until the one compare-and-swap of HEAD.
+    groups_of := [[String]]{}
+    loop item in applied -> groups_of.push(item.paths.copy())
+    roots: share_groups(groups_of)
+    index: "{run}/batch-land.index.{sys.pid()}"
+    files.remove(index) ?? ()
+    tip := pre.copy()
+    failure := ""
+    landed := [String]{}
+    if git_index(dir, index, [String]{"read-tree", pre}).code != 0 -> failure = "read-tree of the pre-batch HEAD failed"
+    loop group in 0..<applied.len() {
+        if failure != "" -> break
+        if roots[group] != group -> next
+        members := [Int]{}
+        loop at in 0..<applied.len() {
+            if roots[at] == group -> members.push(at)
+        }
+        message := ""
+        names := [String]{}
+        paths := [String]{}
+        loop at in members {
+            job: applied[at].job
+            name: files.basename(job.patch)
+            text: files.read(job.message) ?? {
+                failure = "the message {job.message} cannot be read: {err}"
+                break
+            }
+            if members.len() > 1 && message == "" -> message = "{text.partition("\n").head} (with {members.len() - 1} more landed together: shared files)\n\n"
+            message = if members.len() == 1 -> text.copy() else -> "{message}== {job.lane} ({name})\n{text}\n"
+            names.push("{job.lane} {name}")
+            paths.extend(applied[at].paths.copy())
+        }
+        if failure != "" -> break
+        made: chain_commit(dir, index, tip, "group [{names.join(" ")}]", paths, message) ?? {
+            failure = err.message.copy()
+            break
+        }
+        tip = made.copy()
+        loop name in names -> landed.push("{made} {name}")
+    }
+    if failure == "" && regenerated.len() > 0 {
+        made: chain_commit(dir, index, tip, "regenerated files", regenerated, "runtime: regenerated stop exports and lifecycle for the landed runtime routes (runtime generators)\n") ?? {
+            failure = err.message.copy()
+            ""
+        }
+        if made != "" {
+            tip = made.copy()
+            landed.push("{made} regenerated")
+        }
+    }
+    // The chain must carry exactly the verified worktree: every path the batch
+    // changed, nothing else. The verified tree starts from the pre-batch HEAD,
+    // so a path the batch deleted counts when HEAD tracked it.
+    if failure == "" {
+        candidates := all.copy()
+        extra := regenerated.copy()
+        extra.extend(nul_paths(git(dir, [String]{"diff", "--name-only", "-z", pre})))
+        loop path in extra {
+            if !candidates.contains(path) -> candidates.push(path.copy())
+        }
+        tracked: nul_paths(git_paths(dir, "", [String]{"ls-tree", "-r", "-z", "--name-only", pre}, candidates))
+        verified := [String]{}
+        loop path in candidates {
+            if on_disk(dir, path) || tracked.contains(path) -> verified.push(path.copy())
+        }
+        full: "{index}.full"
+        files.remove(full) ?? ()
+        want := ""
+        if git_index(dir, full, [String]{"read-tree", pre}).code == 0 && git_paths(dir, full, [String]{"add", "-A"}, verified).code == 0 {
+            written: git_index(dir, full, [String]{"write-tree"})
+            if written.code == 0 -> want = written.output.trim()
+        }
+        files.remove(full) ?? ()
+        chained: git(dir, [String]{"rev-parse", "{tip}^{{tree}}"}).output.trim()
+        if want == "" || want != chained {
+            shown_want: if want == "" -> "none" else -> want.copy()
+            failure = "the commit chain's tree {short_sha(tip)} is not the verified worktree ({shown_want}): some changed path is in no commit"
+            if want != "" -> say(log, "tree diff (chain vs verified): {first_lines(git(dir, [String]{"diff-tree", "-r", "--name-status", chained, want}).output, 20).join(" ")}")
+        }
+    }
+    // Publish every commit at once: HEAD moves only if it is still the pre-batch HEAD.
+    if failure == "" {
+        moved: git(dir, [String]{"update-ref", "-m", "batch-land: {landed.len()} commit(s) on {short_sha(pre)}", "HEAD", tip, pre})
+        if moved.code != 0 -> failure = "update-ref of HEAD {short_sha(pre)} -> {short_sha(tip)} failed (HEAD moved?): {first_line(moved)}"
+    }
+    files.remove(index) ?? ()
+    if failure != "" {
+        say(log, "!!!!!!!! BATCH COMMIT FAILED: {failure}")
+        say(log, "!!!!!!!! nothing landed: this batch moved no ref (HEAD {git(dir, [String]{"rev-parse", "--short", "HEAD"}).output.trim()}, pre-batch {short_sha(pre)}); reverting the batch's worktree changes")
+        loop item in applied -> say(log, "COMMIT FAILED {item.job.lane} {item.job.patch}")
+        revert_batch(dir, applied, all, log)
+        return 6
+    }
+    // The worktree already is the new HEAD; bring the index along.
+    synced: git(dir, [String]{"read-tree", "--reset", "HEAD"}).code == 0 && git(dir, [String]{"update-index", "-q", "--refresh"}).code == 0
+    if !synced -> say(log, "!!!!!!!! index sync after landing failed: run git read-tree --reset HEAD in {dir}")
+    git(dir, [String]{"hook", "run", "--ignore-missing", "post-commit"})
+    loop line in landed {
+        parts: line.partition(" ")
+        say(log, "COMMITTED {git(dir, [String]{"rev-parse", "--short", parts.head}).output.trim()} {parts.tail}")
+    }
+    say(log, "cleanup: {unstick(dir)}")
+    head: git(dir, [String]{"rev-parse", "HEAD"}).output.trim()
+    latest: publish_latest(dir)
+    say(log, latest.line)
+    // The published compiler is kept as base/<sha> for lanes (with its golden
+    // census and jetpack, and seeded into the chain store).
+    if latest.ok -> say(log, publish_base(tools, dir, head).line)
+    say(log, "DONE HEAD {git(dir, [String]{"rev-parse", "--short", "HEAD"}).output.trim()}")
+    say(log, release_train(tools, head))
+    0
+}
+
+// `git apply` arguments that apply `patch` around the generated views, after
+// `options` (`--check`, or none).
+around_views: fn(options: [String], patch: String) -> [String] Never! {
+    argv := [String]{"apply"}
+    argv.extend(options.copy())
+    loop view in GENERATED_VIEWS -> argv.push("--exclude={view}")
+    argv.push(patch.copy())
+    argv
+}
+
+// Stage `paths` in the private index and commit it on `tip` with `message`:
+// the new commit. `what` names the commit in a failure.
+chain_commit: fn(dir: String, index: String, tip: String, what: String, paths: [String], message: String) -[Exec, FS, Time.Wait]> String LandError! {
+    // A path one member creates and a later one removes (a move within the
+    // group) is neither on disk nor tracked; staging it would fail the group.
+    tracked: nul_paths(git_paths(dir, index, [String]{"ls-files", "-z"}, paths))
+    live := [String]{}
+    loop path in paths {
+        if path == "" || live.contains(path) -> next
+        if on_disk(dir, path) || tracked.contains(path) -> live.push(path.copy())
+    }
+    if live.len() == 0 -> return Err(LandError{message: "{what}: none of its paths is on disk or tracked"})
+    added: git_paths(dir, index, [String]{"add", "-A"}, live)
+    if added.code != 0 -> return Err(LandError{message: "{what}: git add failed: {first_line(added)}"})
+    tree: git_index(dir, index, [String]{"write-tree"})
+    if tree.code != 0 -> return Err(LandError{message: "{what}: write-tree failed: {first_line(tree)}"})
+    if tree.output.trim() == git(dir, [String]{"rev-parse", "{tip}^{{tree}}"}).output.trim() -> return Err(LandError{message: "{what}: would be an empty commit (its net change is nothing, or an earlier commit of this batch took it: a grouping bug)"})
+    file: "{index}.msg"
+    files.write(file, stripspace(message)) ?? return Err(LandError{message: "{what}: the message cannot be written to {file}: {err}"})
+    made: git(dir, [String]{"commit-tree", tree.output.trim(), "-p", tip, "-F", file})
+    files.remove(file) ?? ()
+    if made.code != 0 -> return Err(LandError{message: "{what}: commit-tree failed: {first_line(made)}"})
+    made.output.trim()
+}
+
+// Undo a batch: reverse-apply its patches (newest first), restore every path
+// still dirty to HEAD and remove the untracked paths the batch created. A
+// worktree still dirty after that stops the landing service.
+revert_batch: fn(dir: String, applied: [Applied], all: [String], log: String) -[Exec, Env, FS, IO, Time.Wait]> {
+    loop step in 0..<applied.len() {
+        patch: applied[applied.len() - 1 - step].job.patch
+        if git(dir, [String]{"apply", "-R", patch}).code != 0 -> say(log, "reverse-apply failed (restoring paths instead): {files.basename(patch)}")
+    }
+    loop path in dirty_paths(dir) {
+        if git_paths(dir, "", [String]{"checkout", "HEAD"}, [String]{path}).code != 0 -> git_paths(dir, "", [String]{"rm", "-q", "--cached"}, [String]{path})
+    }
+    tracked: nul_paths(git_paths(dir, "", [String]{"ls-files", "-z"}, all))
+    loop path in all {
+        if !on_disk(dir, path) || tracked.contains(path) -> next
+        full: files.join(dir, path)
+        if files.is_dir(full) -> files.remove_all(full) ?? () else -> files.remove(full) ?? ()
+    }
+    left: git(dir, [String]{"status", "--porcelain", "--untracked-files=no"}).output
+    if left.trim() == "" -> return
+    say(log, "REVERT LEFT THE WORKTREE DIRTY")
+    loop line in first_lines(left, 20) -> say(log, line)
+    files.write("{run_root()}/lander.stop", "") ?? ()
+}
+
+// Revert what failed landings left uncommitted in the worktree `dir`: every
+// path that differs from HEAD goes back to HEAD, and the files they added are
+// removed. Returns a summary.
+unstick: fn(dir: String) -[Exec, FS, Time.Wait]> String Never! {
+    paths: nul_paths(git(dir, [String]{"diff", "--name-only", "-z", "HEAD"}))
+    added: nul_paths(git(dir, [String]{"diff", "--name-only", "-z", "--diff-filter=A", "HEAD"}))
+    summary: "changed {paths.len()} added {added.len()}"
+    if paths.len() == 0 -> return summary
+    git_paths(dir, "", [String]{"reset", "-q"}, paths)
+    loop path in added -> files.remove(files.join(dir, path)) ?? ()
+    tracked: nul_paths(git(dir, [String]{"diff", "--name-only", "-z", "--diff-filter=MD", "HEAD"}))
+    if tracked.len() > 0 -> git_paths(dir, "", [String]{"checkout", "-q"}, tracked)
+    left: first_lines(git(dir, [String]{"status", "--porcelain", "--untracked-files=no"}).output, 1000000).len()
+    "{summary} left: {left}"
+}
+
+// `serve`: the landing service. Every cycle it admits each queued job
+// (`prescreen`), lands the admitted ones as one batch and, when the batch
+// fails, bisects it, lands every clean half and returns each failing job to
+// its lane with the rows.
+serve_main: fn(args: [String]) -[Exec, Env, FS, IO, Time, Time.Wait]> Int Never! {
+    if args.len() != 0 -> usage()
+    tools: tools_checkout()
+    worktree: dev_worktree()
+    if tools == "" || worktree == "" {
+        term.eprint("serve: no dev worktree (set JET_DEV_WORKTREE or run in the checkout)")
+        return 2
+    }
+    run: run_root()
+    queue: "{run}/land-queue"
+    results: "{run}/land-results"
+    log: "{run}/lander.log"
+    made: [String]{"{queue}/taken", results}
+    loop dir in made {
+        files.create_dir_all(dir) ?? {
+            term.eprint("serve: {dir} cannot be created: {err}")
+            return 2
+        }
+    }
+    note(log, "lander up")
+    loop {
+        if files.exists("{run}/lander.stop") {
+            note(log, "lander stopping")
+            return 0
+        }
+        // A dirty shared worktree (someone mid-commit) is never the patches' fault: wait.
+        if git(worktree, [String]{"status", "--porcelain", "--untracked-files=no"}).output.trim() != "" {
+            time.sleep(30s)
+            next
+        }
+        queued := [Job]{}
+        names := [String]{}
+        loop entry in entries(queue) {
+            if !entry.is_dir && entry.name.ends_with(".job") -> names.push(entry.name.copy())
+        }
+        names.sort()
+        loop name in names {
+            text: files.read("{queue}/{name}") ?? next
+            found: read_jobs(text.partition("\n").head)
+            if found.len() == 0 {
+                files.rename("{queue}/{name}", "{queue}/taken/{name}") ?? ()
+                files.write("{results}/{name.removesuffix(".job")}.result", "REJECTED the job file is not LANE<TAB>MSG<TAB>PATCH\n") ?? ()
+                next
+            }
+            job := found[0].copy()
+            job.name = name.removesuffix(".job")
+            queued.push(job)
+        }
+        if queued.len() > 0 {
+            admitted: admit(tools, queue, results, log, queued)
+            if admitted.len() == 0 {
+                time.sleep(30s)
+                next
+            }
+            list: "{queue}/taken/batch-{epoch()}.list"
+            lines := [String]{}
+            loop job in admitted -> lines.push(job_line(job))
+            files.write(list, "{lines.join("\n")}\n") ?? ()
+            note(log, "batch: {admitted.len()} job(s)")
+            land_bisecting(tools, worktree, results, log, list, admitted)
+            note(log, "batch done; HEAD {git(worktree, [String]{"rev-parse", "--short", "HEAD"}).output.trim()}")
+        }
+        time.sleep(60s)
+    }
+}
+
+// `line` appended to the service log, after the time.
+note: fn(log: String, line: String) -[FS, Time]> {
+    files.append_all(log, "{stamp()} {line}\n") ?? ()
+}
+
+// The queued jobs admitted to a batch. All at once when HEAD with every
+// queued patch checks clean (one seed check); else one by one, each after the
+// jobs admitted before it. A refused job gets its result; every job leaves the
+// queue.
+admit: fn(tools: String, queue: String, results: String, log: String, queued: [Job]) -[Exec, Env, FS, IO, Time, Time.Wait]> [Job] Never! {
+    if queued.len() > 1 {
+        stacked := [String]{"Tools/agent/Land.jet", "prescreen", queued[queued.len() - 1].patch.copy()}
+        loop at in 0..<(queued.len() - 1) -> stacked.push(queued[at].patch.copy())
+        if seed_run(tools, stacked, 0).code == 0 {
+            loop job in queued -> files.rename("{queue}/{job.name}.job", "{queue}/taken/{job.name}.job") ?? ()
+            note(log, "prescreen clean (stacked) {queued.len()} job(s)")
+            return queued.copy()
+        }
+        note(log, "stacked prescreen failed; admitting one by one")
+    }
+    admitted := [Job]{}
+    loop job in queued {
+        args := [String]{"Tools/agent/Land.jet", "prescreen", job.patch.copy()}
+        loop earlier in admitted -> args.push(earlier.patch.copy())
+        screened: seed_run(tools, args, 0)
+        files.rename("{queue}/{job.name}.job", "{queue}/taken/{job.name}.job") ?? ()
+        if screened.code != 0 {
+            verdict: if screened.code == 3 -> "STALE does not apply to HEAD; rebase" else -> "REJECTED at prescreen (seed check of HEAD + this patch alone)"
+            files.write("{results}/{job.name}.result", "{verdict}\n{both(screened).trim_end()}\n") ?? ()
+            note(log, "prescreen rejected {job.name}")
+            next
+        }
+        note(log, "prescreen clean {job.name}")
+        admitted.push(job.copy())
+    }
+    admitted
+}
+
+// Land `jobs` as one batch; when it fails, land each half the same way. A
+// lane's jobs are a stack: once one did not land, its later ones in the
+// second half are left for the lane.
+land_bisecting: fn(tools: String, worktree: String, results: String, log: String, list: String, jobs: [Job]) -[Exec, Env, FS, IO, Time, Time.Wait]> {
+    code: batch(tools, worktree, jobs)
+    report: files.read("{run_root()}/batch-land.log") ?? ""
+    files.write("{list}.out", report) ?? ()
+    files.append_all(log, report) ?? ()
+    if code == 0 {
+        write_results(results, jobs, report, "ok")
+        return
+    }
+    if jobs.len() <= 1 {
+        why: if code == 6 -> "the batch could not be committed (nothing landed; see BATCH COMMIT FAILED)" else -> "precommit failed for this patch"
+        write_results(results, jobs, report, why)
+        return
+    }
+    half: (jobs.len() + 1) /% 2
+    first := [Job]{}
+    second := [Job]{}
+    loop at in 0..<jobs.len() {
+        if at < half -> first.push(jobs[at].copy()) else -> second.push(jobs[at].copy())
+    }
+    note(log, "batch of {jobs.len()} failed (rc {code}); bisecting {half} + {jobs.len() - half}")
+    land_bisecting(tools, worktree, results, log, "{list}.a", first)
+    // A lane whose job in the first half did not land keeps its later jobs.
+    failed := [String:String]{}
+    loop job in first {
+        result: files.read("{results}/{job.name}.result") ?? ""
+        if !result.starts_with("LANDED") -> failed[job.lane] = job.name.copy()
+    }
+    rest := [Job]{}
+    loop job in second {
+        if failed.get(job.lane) == .Val(base) {
+            files.write("{results}/{job.name}.result", "STALE an earlier patch of its stack did not land ({base}); rebase the stack onto HEAD\n") ?? ()
+            note(log, "stack: {job.name} left for its lane ({base} did not land)")
+            next
+        }
+        rest.push(job.copy())
+    }
+    if rest.len() > 0 -> land_bisecting(tools, worktree, results, log, "{list}.b", rest)
+}
+
+// Each job's result file from a batch report: LANDED <sha>, STALE (does not
+// apply), LANDED already-on-dev, or REJECTED `why` with the report's tail.
+write_results: fn(results: String, jobs: [Job], report: String, why: String) -[FS]> {
+    loop job in jobs -> files.write("{results}/{job.name}.result", job_result(job, report, why)) ?? ()
+}
+
+job_result: fn(job: Job, report: String, why: String) -> String Never! {
+    name: files.basename(job.patch)
+    landed := ""
+    stale_stack := false
+    stale := false
+    skipped := false
+    loop line in report.lines() {
+        if line.starts_with("COMMITTED ") && line.ends_with(" {job.lane} {name}") {
+            landed = line.remove_prefix("COMMITTED ").partition(" ").head.copy()
+            next
+        }
+        if line.starts_with("DOES NOT APPLY {job.lane} {name} - an earlier patch of its stack did not apply") -> stale_stack = true
+        if line.starts_with("DOES NOT APPLY {job.lane} {name} ") -> stale = true
+        if line == "SKIP (already on dev) {job.lane} {name}" -> skipped = true
+    }
+    if landed != "" -> return "LANDED {landed}\n"
+    if stale_stack -> return "STALE an earlier patch of its stack did not apply; rebase the stack onto HEAD\n"
+    if stale -> return "STALE does not apply to HEAD; rebase\n"
+    if skipped -> return "LANDED already-on-dev\n"
+    tail := [String]{}
+    loop line in report.lines() {
+        if !line.starts_with("nm: ") -> tail.push(line.copy())
+    }
+    "REJECTED {why}\n{last_of(tail, 25).join("\n")}\n"
+}
+
+// --- publishing -------------------------------------------------------------
+
+// The published compilers kept, newest first by publish time (plus the newest
+// one with a finished golden census).
+BASE_KEEP: 6
+// The paths a hosted jetpack is built from (with the compiler they make): a
+// published jetpack is reused for a commit that changes none of them.
+JETPACK_INPUTS: [String]{"Jetpack", "Core", "Compiler"}
+GOLD_EXCLUDE: "Systems/Process/OSProcessControl"
+
+publish_main: fn(args: [String]) -[Exec, Env, FS, IO, Time, Time.Wait]> Int Never! {
+    if args.len() == 0 -> usage()
+    tools: tools_checkout()
+    step: if {
+        args.len() == 1 && args[0] == "latest" -> publish_latest(dev_worktree())
+        args.len() == 2 && args[0] == "base" -> publish_base(tools, dev_worktree(), args[1])
+        args.len() == 1 && args[0] == "golden-worker" -> return golden_worker_main(tools)
+        args.len() == 1 && args[0] == "golden-run" -> return golden_run(dev_worktree())
+        args.len() == 2 && args[0] == "jetpack" -> return jetpack_run(dev_worktree(), args[1])
+        else -> usage()
+    }
+    print(step.line)
+    if step.ok -> 0 else -> 1
+}
+
+// `publish latest`: the batch-verified compiler (the census s1, built from
+// HEAD and the batch) with a runtime pack becomes
+// $JET_SCRATCH_ROOT/discovery/b2/install-latest (an atomic swap), with COMMIT
+// (HEAD of the worktree `dir`) and IDENTITY (the seed's).
+publish_latest: fn(dir: String) -[Exec, Env, FS, Time.Wait]> Step Never! {
+    scratch: scratch_root()
+    out: "{scratch}/discovery/r14/census"
+    b2: "{scratch}/discovery/b2"
+    s1: "{scratch}/discovery/r14/snap/Compiler/JetCli/.jet/build/jet"
+    if !files.is_file(s1) -> return Step{ok: false, line: "publish-latest: no census compiler"}
+    pack := "{out}/runtime/out"
+    if !files.exists("{pack}/native.key") -> pack = "{b2}/install-latest/jet-runtime"
+    if !files.exists("{pack}/native.key") {
+        older := [Dated]{}
+        loop entry in entries(b2) {
+            if entry.name.starts_with("install-m") && files.is_dir("{b2}/{entry.name}/jet-runtime") -> older.push(Dated{path: "{b2}/{entry.name}/jet-runtime", time: mtime("{b2}/{entry.name}/jet-runtime")})
+        }
+        sorted: newest_first(older)
+        if sorted.len() > 0 -> pack = sorted[0].path.copy()
+    }
+    staged: "{b2}/install-latest.new.{sys.pid()}"
+    files.remove_all(staged) ?? ()
+    files.create_dir_all(staged) ?? return Step{ok: false, line: "publish-latest: {staged} cannot be created: {err}"}
+    files.copy(s1, "{staged}/jet") ?? return Step{ok: false, line: "publish-latest: {s1} cannot be copied: {err}"}
+    files.set_mode("{staged}/jet", 0o755) ?? return Step{ok: false, line: "publish-latest: {staged}/jet cannot be made executable: {err}"}
+    files.copy_dir(pack, "{staged}/jet-runtime") ?? return Step{ok: false, line: "publish-latest: the runtime pack {pack} cannot be copied: {err}"}
+    commit: git(dir, [String]{"rev-parse", "HEAD"}).output.trim()
+    files.write("{staged}/COMMIT", "{commit}\n") ?? return Step{ok: false, line: "publish-latest: COMMIT cannot be written: {err}"}
+    files.copy("{seed_dir()}/IDENTITY", "{staged}/IDENTITY") ?? return Step{ok: false, line: "publish-latest: the seed's IDENTITY cannot be copied: {err}"}
+    current: "{b2}/install-latest"
+    files.remove_all("{current}.old") ?? ()
+    if files.is_dir(current) -> files.rename(current, "{current}.old") ?? ()
+    files.rename(staged, current) ?? return Step{ok: false, line: "publish-latest: {staged} cannot become {current}: {err}"}
+    files.remove_all("{current}.old") ?? ()
+    Step{ok: true, line: "published install-latest at {first_line_of("{current}/COMMIT")}"}
+}
+
+// `publish base COMMIT`: keep install-latest, which must say COMMIT, as
+// $JET_BASE_ROOT/<sha>/{jet,jet-runtime/,IDENTITY,COMMIT,GENERATION} for
+// lanes (base/latest names the newest; the BASE_KEEP newest stay), seed it
+// into the chain stage store (`Tools/agent/Chain.jet seed-published`), copy a jetpack an
+// input-identical published commit has, and want its golden census.
+publish_base: fn(tools: String, repo: String, commit: String) -[Exec, Env, FS, IO, Time, Time.Wait]> Step Never! {
+    latest: "{scratch_root()}/discovery/b2/install-latest"
+    base: base_root()
+    files.create_dir_all(base) ?? return Step{ok: false, line: "publish-base: {base} cannot be created: {err}"}
+    parsed: git(repo, [String]{"rev-parse", "--verify", "{commit}^{{commit}}"})
+    if parsed.code != 0 -> return Step{ok: false, line: "publish-base: unknown commit {commit}"}
+    sha: parsed.output.trim()
+    published: first_line_of("{latest}/COMMIT")
+    if published != sha -> return Step{ok: false, line: "publish-base: install-latest is {short_sha(published)}, not {short_sha(sha)}; nothing published"}
+    dir: "{base}/{sha}"
+    state := "already published"
+    if !files.is_dir(dir) {
+        staged: "{base}/.new.{sys.pid()}"
+        files.remove_all(staged) ?? ()
+        copied: copy_install(latest, staged)
+        if copied != "" {
+            files.remove_all(staged) ?? ()
+            return Step{ok: false, line: "publish-base: copy failed: {copied}"}
+        }
+        same: first_line_of("{staged}/COMMIT") == sha && (files.read_bytes("{staged}/jet") ?? [U8]{}) == (files.read_bytes("{latest}/jet") ?? [U8]{0})
+        if !same {
+            files.remove_all(staged) ?? ()
+            return Step{ok: false, line: "publish-base: install-latest changed while copying; nothing published"}
+        }
+        files.write("{staged}/.published", "{stamp()}\n") ?? ()
+        // The published compiler is stage s1 (built by the seed); a lane A/B must compare s2 with s2.
+        seed_name: files.read_link(root("JET_SEED", "{seeds_root()}/current")) ?? seed_dir()
+        files.write("{staged}/GENERATION", "generation=s1\nbuilt_by_seed={seed_name}\nnote=an A/B of a lane s2 against this compiler compares two code generations; build a base s2 for same-generation A/Bs\n") ?? ()
+        files.rename(staged, dir) ?? files.remove_all(staged) ?? ()
+        state = "published"
+    }
+    link: "{base}/.latest.{sys.pid()}"
+    files.remove(link) ?? ()
+    files.symlink(sha, link) ?? ()
+    files.rename(link, "{base}/latest") ?? ()
+    prune_bases(base)
+    seeding := process.cmd([String]{"{seed_dir()}/jet", "Tools/agent/Chain.jet", "seed-published", dir}).cwd(tools).output_limit(268435456)
+    loop setting in unit_env(tools) -> seeding = seeding.env(setting.name, setting.value)
+    seeded: if seeding.run() == .Ok(receipt) -> last_lines("{receipt.output}{receipt.errors}", 1).join("") else -> "seed-published: Tools/agent/Chain.jet could not start"
+    // A jetpack whose inputs did not change is copied now; otherwise the golden run builds one after its census.
+    jetpack: if jetpack_reuse(repo, base, sha) -> "jetpack ready" else -> "jetpack build follows the golden census"
+    Step{ok: true, line: "publish-base: {state} {dir}; {seeded}; {jetpack}; {want_goldens(tools, base, sha)}"}
+}
+
+// Copy the compiler of the install `from` into the new directory `to`; "" or
+// what failed.
+copy_install: fn(from: String, to: String) -[FS]> String Never! {
+    files.create_dir_all(to) ?? return "{to}: {err}"
+    names: [String]{"jet", "IDENTITY", "COMMIT"}
+    loop name in names {
+        files.copy("{from}/{name}", "{to}/{name}") ?? return "{from}/{name}: {err}"
+    }
+    files.set_mode("{to}/jet", 0o755) ?? return "{to}/jet: {err}"
+    files.copy_dir("{from}/jet-runtime", "{to}/jet-runtime") ?? return "{from}/jet-runtime: {err}"
+    ""
+}
+
+// Keep the BASE_KEEP newest published bases, plus the newest one with a
+// finished goldens.json, so lanes always have a golden baseline.
+prune_bases: fn(base: String) -[FS]> {
+    published := [Dated]{}
+    golden := ""
+    golden_time := -1
+    loop entry in entries(base) {
+        if entry.name.starts_with(".") || entry.name == "latest" -> next
+        dir: "{base}/{entry.name}"
+        if files.exists("{dir}/.published") -> published.push(Dated{path: dir, time: mtime("{dir}/.published")})
+        if files.exists("{dir}/goldens.json") && mtime("{dir}/goldens.json") > golden_time {
+            golden = dir
+            golden_time = mtime("{dir}/goldens.json")
+        }
+    }
+    sorted: newest_first(published)
+    loop at in 0..<sorted.len() {
+        if at < BASE_KEEP || sorted[at].path == golden -> next
+        files.remove_all(sorted[at].path) ?? ()
+    }
+}
+
+// Want one golden census of `sha`, and start the golden worker unless one is
+// alive (a live worker re-reads the want, under the same lock, before it exits).
+want_goldens: fn(tools: String, base: String, sha: String) -[Exec, Env, FS, Time, Time.Wait]> String Never! {
+    _want: files.lock("{base}/.golden-want.lock") ?? return "golden run not wanted: the want lock cannot be taken: {err}"
+    files.write("{base}/.golden-want.new", "{sha}\n") ?? return "golden run not wanted: {err}"
+    files.rename("{base}/.golden-want.new", "{base}/.golden-want") ?? return "golden run not wanted: {err}"
+    if !lock_free("{base}/.golden-worker.lock") -> return "golden run wanted (worker busy; it takes the newest)"
+    started: start_unit(tools, "base-goldens-{sha.slice(0..<9)}-{epoch()}", [String]{"MemoryMax=4G", "MemorySwapMax=0", "LimitCORE=0"}, [String]{"publish", "golden-worker"}, "{base}/goldens-worker.log")
+    if started.code == 0 -> "golden run queued" else -> "golden worker failed to start: {first_line(started)}"
+}
+
+// The wanted commit whose golden census has not run, "" when there is none.
+golden_wanted: fn(base: String) -[FS]> String Never! {
+    sha: first_line_of("{base}/.golden-want")
+    dir: "{base}/{sha}"
+    if sha == "" || !files.is_dir(dir) || files.exists("{dir}/goldens.json") || files.exists("{dir}/goldens.failed") -> return ""
+    sha
+}
+
+// `publish golden-worker` (a user unit): run golden censuses in build slots
+// while one is wanted. A run takes the newest wanted commit when its slot
+// starts, so older wanted ones are skipped.
+golden_worker_main: fn(tools: String) -[Exec, Env, FS, IO, Time, Time.Wait]> Int Never! {
+    base: base_root()
+    worker: files.try_lock("{base}/.golden-worker.lock") ?? return 0
+    loop {
+        want: files.lock("{base}/.golden-want.lock") ?? {
+            print("{stamp()} worker: the want lock cannot be taken: {err}")
+            return 1
+        }
+        if golden_wanted(base) == "" {
+            // The worker lock goes first, under the want lock: a publish that
+            // then finds no worker starts a new one.
+            close(worker)
+            close(want)
+            return 0
+        }
+        close(want)
+        print("{stamp()} worker: queueing a golden run (want {short_sha(first_line_of("{base}/.golden-want"))})")
+        argv := [String]{"{seed_dir()}/jet", "Tools/agent/Chain.jet", "slot", "--", "{seed_dir()}/jet", "Tools/agent/Land.jet", "publish", "golden-run"}
+        spec := process.cmd(argv).cwd(tools).env("SLOT_SMALL", "0").output_limit(268435456)
+        loop setting in unit_env(tools) -> spec = spec.env(setting.name, setting.value)
+        receipt: spec.run() ?? {
+            print("{stamp()} worker: the build slot cannot start: {err}")
+            return 1
+        }
+        if receipt.output.trim() != "" -> print(receipt.output.trim_end())
+        if receipt.errors.trim() != "" -> print(receipt.errors.trim_end())
+    }
+}
+
+// `publish golden-run` (inside a build slot): the golden census of the newest
+// wanted commit with its published compiler and pack, from an export of it:
+// the Examples rows of `jet test Compiler --profile golden` at the none level
+// minus the GOLD_EXCLUDE example stems (each must drop a row). Writes
+// goldens.json (the --results document) and goldens.meta, or goldens.failed
+// when the census produced no counts; then the commit's jetpack.
+golden_run: fn(repo: String) -[Exec, Env, FS, IO, Time, Time.Wait]> Int Never! {
+    base: base_root()
+    sha: golden_wanted(base)
+    if sha == "" -> return 0
+    dir: "{base}/{sha}"
+    work: "{base}/.work/{sha.slice(0..<9)}"
+    files.remove_all(work) ?? ()
+    code: golden_census(repo, base, sha, dir, work)
+    files.remove_all(work) ?? ()
+    code
+}
+
+golden_census: fn(repo: String, base: String, sha: String, dir: String, work: String) -[Exec, Env, FS, IO, Time, Time.Wait]> Int Never! {
+    tree: "{work}/tree"
+    dirs: [String]{tree, "{work}/state", "{work}/tmp"}
+    loop path in dirs -> files.create_dir_all(path) ?? ()
+    print("{stamp()} goldens {short_sha(sha)}: export")
+    export_tree(repo, sha, tree, [String]{}) ?? {
+        files.write("{dir}/goldens.failed", "export failed: {err.message}\n") ?? ()
+        return 1
+    }
+    identity: read_identity(dir)
+    exclude := [String]{}
+    loop stem in (process.env_get("GOLD_EXCLUDE") ?? GOLD_EXCLUDE).split(" ") {
+        if stem != "" -> exclude.push(stem.copy())
+    }
+    listed: run_in_env(tree, [String]{"{dir}/jet", "test", "Compiler", "--profile", "golden", "--optimize=none", "--list"}, compile_env(identity, tree, ""))
+    rows: golden_rows(listed.output, exclude) ?? {
+        files.write("{dir}/goldens.failed", "golden selection failed\n{err.message}\n{last_lines(listed.errors, 20).join("\n")}\n") ?? ()
+        return 1
+    }
+    if rows.len() == 0 {
+        files.write("{dir}/goldens.failed", "golden selection failed: no rows\n{last_lines(listed.errors, 20).join("\n")}\n") ?? ()
+        return 1
+    }
+    selection: "{work}/select.txt"
+    files.write(selection, "{rows.join("\n")}\n") ?? ()
+    results: "{work}/goldens.json"
+    start: epoch()
+    print("{stamp()} goldens {short_sha(sha)}: {rows.len()} examples with {dir}/jet")
+    // Golden examples run host tools (C compilers, interpreters) that only the
+    // dev shell (Tools/agent/JetEnv.jet) supplies until jet does.
+    cpus: env_or("SLOT_CPUS", "")
+    argv := [String]{"systemd-run", "--user", "--scope", "-q", "--expand-environment=no", "-p", "MemoryMax=24G", "-p", "MemorySwapMax=0", "timeout", "7200", "prlimit", "--core=0", HEAVY_STACK, "--"}
+    if cpus != "" -> argv.extend([String]{"taskset", "-c", cpus})
+    argv.extend([String]{"{dir}/jet", "{tree}/Tools/agent/JetEnv.jet", "{dir}/jet", "test", "Compiler", "--profile", "golden", "--optimize=none", "--cases={selection}", "--jobs=6", "--time-limit=120s", "--results={results}"})
+    env := compile_env(identity, tree, "")
+    env.push(Setting{name: "JET_TEST_STATE_DIR", value: "{work}/state"})
+    env.push(Setting{name: "TMPDIR", value: "{work}/tmp"})
+    code: run_logged(tree, argv, env, "{work}/goldens")
+    if !files.is_dir(dir) -> return 0
+    secs: epoch() - start
+    counts: results_counts(files.read(results) ?? "")
+    if {
+        counts != "" -> {
+            files.rename(results, "{dir}/goldens.json.tmp") ?? ()
+            files.rename("{dir}/goldens.json.tmp", "{dir}/goldens.json") ?? ()
+            meta: [String]{"commit={sha}", "compiler={dir}/jet", "identity={identity}", "examples={rows.len()}", "exclude={exclude.join(" ")}", "args=--profile golden --optimize=none --cases --jobs=6 --time-limit=120s", "rc={code}", "secs={secs}", "cpus={cpus}", "counts={counts}", "finished={stamp()}"}
+            files.write("{dir}/goldens.meta", "{meta.join("\n")}\n") ?? ()
+            print("{stamp()} goldens {short_sha(sha)}: {counts} in {secs}s")
+        }
+        else -> {
+            errors: files.read("{work}/goldens.err") ?? ""
+            output: files.read("{work}/goldens.out") ?? ""
+            clipped := [String]{}
+            loop line in last_lines(output, 20) -> clipped.push(clip(line, 400))
+            size: (files.read_bytes(results) ?? [U8]{}).len()
+            files.write("{dir}/goldens.failed", "rc={code}: no counts after {secs}s; results bytes {size}\n-- stderr tail\n{last_lines(errors, 60).join("\n")}\n-- stdout tail\n{clipped.join("\n")}\n") ?? ()
+            files.write("{dir}/goldens.err", errors) ?? ()
+            files.write("{dir}/goldens.stdout", output) ?? ()
+            print("{stamp()} goldens {short_sha(sha)}: FAILED rc={code}")
+        }
+    }
+    jetpack_build(repo, base, sha, tree, "{work}/tmp")
+    0
+}
+
+// `argv` in `dir` with `env` added.
+run_in_env: fn(dir: String, argv: [String], env: [Setting]) -[Exec, Time.Wait]> Ran Never! {
+    spec := process.cmd(argv).cwd(dir).output_limit(268435456)
+    loop setting in env -> spec = spec.env(setting.name, setting.value)
+    receipt: spec.run() ?? return Ran{code: 127, output: "", errors: "{argv[0]}: {err}"}
+    code: if receipt.signal == .Val(_) -> 128 else -> receipt.code
+    Ran{code: code, output: receipt.output.copy(), errors: receipt.errors.copy()}
+}
+
+// The golden census rows of a `jet test --list` (`suite<TAB>path`): the
+// golden Examples rows minus the `exclude` example stems. Each stem must drop
+// a row, or the exclusion could not hold.
+golden_rows: fn(listed: String, exclude: [String]) -> [String] LandError! {
+    hit := [Bool]{}
+    loop _ in exclude -> hit.push(false)
+    rows := [String]{}
+    loop line in listed.lines() {
+        fields: line.partition("\t")
+        path: fields.tail.partition("\t").head
+        if fields.head != "golden" || !path.starts_with("Examples/") -> next
+        dropped := false
+        loop at in 0..<exclude.len() {
+            file: "Examples/{exclude[at]}.jet"
+            stem: "Examples/{exclude[at]}"
+            under: "{stem}/"
+            if path == file || path == stem || path.starts_with(under) {
+                hit[at] = true
+                dropped = true
+            }
+        }
+        if !dropped -> rows.push(path.copy())
+    }
+    loop at in 0..<exclude.len() {
+        if !hit[at] -> return Err(LandError{message: "exclusion {exclude[at]} matched no example"})
+    }
+    rows
+}
+
+// The `"counts":{...}` object a results document opens with, "" when it has none.
+results_counts: fn(text: String) -> String Never! {
+    parts: text.partition("\"counts\":{{")
+    if parts.sep == "" -> return ""
+    body: parts.tail.partition("}}")
+    if body.sep == "" -> return ""
+    "{{{body.head}}}"
+}
+
+// Is base/SHA's jetpack there, or copied now from a published commit with
+// the same JETPACK_INPUTS?
+jetpack_reuse: fn(repo: String, base: String, sha: String) -[Exec, FS, Time.Wait]> Bool Never! {
+    dir: "{base}/{sha}"
+    if files.is_file("{dir}/jetpack") -> return true
+    if !files.is_dir(dir) -> return false
+    built := [Dated]{}
+    loop entry in entries(base) {
+        if entry.name.starts_with(".") || entry.name == "latest" || entry.name == sha -> next
+        jetpack: "{base}/{entry.name}/jetpack"
+        if files.is_file(jetpack) && files.is_file("{base}/{entry.name}/jetpack.receipt") -> built.push(Dated{path: entry.name.copy(), time: mtime(jetpack)})
+    }
+    loop prev in newest_first(built) {
+        args := [String]{"diff", "--quiet", prev.path, sha, "--"}
+        args.extend(JETPACK_INPUTS.copy())
+        if git(repo, args).code != 0 -> next
+        // The receipt first: Tools/agent/Suite.jet keys on the jetpack file, so it never sees a jetpack without its receipt.
+        receipt: (files.read("{base}/{prev.path}/jetpack.receipt") ?? "").trim_end()
+        files.write("{dir}/.jetpack.receipt.tmp", "{receipt}\nreused-for: {sha}\nreused-from: {prev.path} (no change under {JETPACK_INPUTS.join(" ")} between them)\n") ?? return false
+        files.rename("{dir}/.jetpack.receipt.tmp", "{dir}/jetpack.receipt") ?? return false
+        files.copy("{base}/{prev.path}/jetpack", "{dir}/.jetpack.tmp") ?? return false
+        files.set_mode("{dir}/.jetpack.tmp", 0o755) ?? return false
+        files.rename("{dir}/.jetpack.tmp", "{dir}/jetpack") ?? return false
+        return true
+    }
+    false
+}
+
+// The hosted jetpack engine of base/SHA (inside a build slot; `tree` is an
+// export of SHA): reused when it can be, else built by its published compiler.
+jetpack_build: fn(repo: String, base: String, sha: String, tree: String, tmp: String) -[Exec, Env, FS, IO, Time, Time.Wait]> Bool Never! {
+    dir: "{base}/{sha}"
+    if !files.is_dir(dir) -> return true
+    if jetpack_reuse(repo, base, sha) {
+        from: (files.read("{dir}/jetpack.receipt") ?? "").partition("reused-from: ").tail.partition(" ").head
+        shown: if from == "" -> "present" else -> "reused from {short_sha(from)}"
+        print("{stamp()} jetpack {short_sha(sha)}: {shown}")
+        return true
+    }
+    worker: "base-{sha.slice(0..<9)}"
+    start: epoch()
+    print("{stamp()} jetpack {short_sha(sha)}: hosted build with {dir}/jet")
+    files.create_dir_all(tmp) ?? ()
+    argv := [String]{"systemd-run", "--user", "--scope", "-q", "--expand-environment=no", "-p", "MemoryMax=16G", "-p", "MemorySwapMax=0", "timeout", "6000", "prlimit", "--core=0", "--"}
+    cpus: env_or("SLOT_CPUS", "")
+    if cpus != "" -> argv.extend([String]{"taskset", "-c", cpus})
+    argv.extend([String]{"{dir}/jet", "Jetpack/Bootstrap/Check.jet", "--hosted"})
+    env := compile_env(read_identity(dir), tree, "")
+    env.push(Setting{name: "JETPACK_WORKER", value: worker.copy()})
+    env.push(Setting{name: "JET", value: "{dir}/jet"})
+    env.push(Setting{name: "TMPDIR", value: tmp.copy()})
+    built: run_in_env(tree, argv, env)
+    files.write("{dir}/jetpack.log", both(built)) ?? ()
+    bootstrap: "{state_root()}/jetpack-bootstrap"
+    runs := [Dated]{}
+    loop entry in entries(bootstrap) {
+        if !entry.name.starts_with("{worker}-") -> next
+        bin: "{bootstrap}/{entry.name}/hosted/project/.jet/build/jetpack"
+        if files.is_file(bin) -> runs.push(Dated{path: "{bootstrap}/{entry.name}", time: mtime(bin)})
+    }
+    newest: newest_first(runs)
+    if built.code != 0 || newest.len() == 0 {
+        shown: if newest.len() == 0 -> "none" else -> "{newest[0].path}/hosted/project/.jet/build/jetpack"
+        files.write("{dir}/jetpack.failed", "rc={built.code} bin={shown}; see jetpack.log\n") ?? ()
+        print("{stamp()} jetpack {short_sha(sha)}: FAILED rc={built.code}")
+        return false
+    }
+    run: newest[0].path
+    files.copy("{run}/hosted/project/.jet/build/jetpack", "{dir}/.jetpack.tmp") ?? return false
+    files.set_mode("{dir}/.jetpack.tmp", 0o755) ?? return false
+    files.rename("{dir}/.jetpack.tmp", "{dir}/jetpack") ?? return false
+    receipt: (files.read("{run}/hosted.receipt") ?? "").trim_end()
+    lead: if receipt == "" -> "" else -> "{receipt}\n"
+    files.write("{dir}/.jetpack.receipt.tmp", "{lead}commit: {sha}\nsecs: {epoch() - start}\n") ?? ()
+    files.rename("{dir}/.jetpack.receipt.tmp", "{dir}/jetpack.receipt") ?? ()
+    files.remove("{dir}/jetpack.failed") ?? ()
+    loop entry in entries(bootstrap) {
+        if entry.name.starts_with("{worker}-") -> files.remove_all("{bootstrap}/{entry.name}") ?? ()
+    }
+    digest: crypto.sha256(files.read_bytes("{dir}/jetpack") ?? [U8]{}).hex().slice(0..<12)
+    print("{stamp()} jetpack {short_sha(sha)}: built in {epoch() - start}s sha256={digest}")
+    true
+}
+
+// `publish jetpack COMMIT` (inside a build slot): give an already-published
+// base its jetpack (reused, else built from an export of COMMIT).
+jetpack_run: fn(repo: String, commit: String) -[Exec, Env, FS, IO, Time, Time.Wait]> Int Never! {
+    parsed: git(repo, [String]{"rev-parse", "--verify", "{commit}^{{commit}}"})
+    if parsed.code != 0 {
+        print("unknown commit {commit}")
+        return 1
+    }
+    sha: parsed.output.trim()
+    base: base_root()
+    if !files.is_dir("{base}/{sha}") {
+        print("not published: {base}/{sha}")
+        return 1
+    }
+    if jetpack_reuse(repo, base, sha) {
+        print("{stamp()} jetpack {short_sha(sha)}: present or reused")
+        return 0
+    }
+    work: "{base}/.work/jp-{sha.slice(0..<9)}"
+    files.remove_all(work) ?? ()
+    built: export_tree(repo, sha, "{work}/tree", [String]{}) == .Ok(_) && jetpack_build(repo, base, sha, "{work}/tree", "{work}/tmp")
+    files.remove_all(work) ?? ()
+    if built -> 0 else -> 1
+}
+
+// --- the release train ------------------------------------------------------
+
+release_root: fn() -[Env, FS]> String Never! { env_or("JET_RELEASE_WORK", "{state_root()}/release") }
+
+release_train_main: fn(args: [String]) -[Exec, Env, FS, IO, Time, Time.Wait]> Int Never! {
+    if args.len() != 1 -> usage()
+    if args[0] == "--run" -> return release_train_run()
+    line: release_train(tools_checkout(), args[0])
+    if line != "" -> print(line)
+    0
+}
+
+// `release-train SHA`: record SHA as the newest pending dev HEAD and start the
+// train unless Main paused it; returns at once.
+release_train: fn(tools: String, sha: String) -[Exec, Env, FS, Time, Time.Wait]> String Never! {
+    work: release_root()
+    files.create_dir_all(work) ?? return "release train: {work} cannot be created: {err}"
+    files.write("{work}/pending.new", "{sha}\n") ?? return "release train: {err}"
+    files.rename("{work}/pending.new", "{work}/pending") ?? return "release train: {err}"
+    // Main pauses the train while a known blocker fails every gate; the pending HEAD stays recorded.
+    if files.exists("{work}/paused") -> return "release train paused; pending {short_sha(sha)}"
+    started: start_unit(tools, "release-train-{epoch()}", [String]{"LimitCORE=0"}, [String]{"release-train", "--run"}, "{work}/train.log")
+    if started.code != 0 -> return "release train failed to start: {first_line(started)}"
+    ""
+}
+
+// `release-train --run`: one train at a time gates the newest pending HEAD
+// with `Tools/release/Main.jet -- admit` (run by the seed), then the newest
+// that arrived meanwhile; intermediate HEADs are skipped. The gate releases
+// only with at least RELEASE_MIN_GAINS gained rows; a "gains FAIL" just means
+// wait for more landings. A pass writes the next a0_NNN and the commands, and
+// says RELEASE READY on the batch log for Main; nothing is merged, tagged,
+// pushed or made current here.
+release_train_run: fn() -[Exec, Env, FS, IO, Time, Time.Wait]> Int Never! {
+    work: release_root()
+    dev: env_or("RELEASE_DEV", dev_worktree())
+    log: env_or("RELEASE_LOG", "{run_root()}/batch-land.log")
+    // Another train holds the lock: it takes the newest pending HEAD.
+    _train: files.try_lock("{work}/train.flock") ?? return 0
+    loop {
+        head: first_line_of("{work}/pending")
+        if head == "" -> break
+        files.remove("{work}/pending") ?? ()
+        out: "{work}/train-{head.slice(0..<12)}.log"
+        gated: seed_run(dev, [String]{"run", "Tools/release/Main.jet", "--", "admit", head, "--min-gains", env_or("RELEASE_MIN_GAINS", "10")}, 43200)
+        files.write(out, both(gated)) ?? ()
+        files.append_all(log, "{train_verdict(gated.code, both(gated), head, out)}\n") ?? ()
+    }
+    0
+}
+
+// The batch-log line of a release gate run of `head`.
+train_verdict: fn(code: Int, output: String, head: String, out: String) -> String Never! {
+    if code == 0 {
+        version := ""
+        loop line in output.lines() {
+            if line.starts_with("PASS:") -> version = line.remove_prefix("PASS:").trim().partition(" ").head.copy()
+        }
+        return "RELEASE READY {version} from {short_sha(head)}; run the commands in {out}"
+    }
+    if code == 1 {
+        reasons := [String]{}
+        loop line in output.lines() {
+            if line.starts_with("FAIL: ") -> reasons.push(clip(line.remove_prefix("FAIL: "), 200))
+        }
+        return "release gate {short_sha(head)}: not released ({reasons.join("; ")})"
+    }
+    "release gate {short_sha(head)}: could not start rc={code} ({clip(last_lines(output, 1).join(""), 200)})"
 }
 
 // --- preflight receipts -----------------------------------------------------
@@ -1511,7 +2820,7 @@ array_field: fn(tree: Dyn, name: String) -> [Dyn] Never! {
 }
 
 #Test("a refusal names the census that would admit the launch") {
-    assert_eq(refusal("chain.sh", "no preflight receipt for source identity x", "/seeds/a0_032", "0123456789abcdef"), "chain.sh: refused: no preflight receipt for source identity x.\nRun the collect-all preflight in the dev worktree at 0123456789 (name each uncommitted file the launch tree carries after it), then launch again:\n  CENSUS_JET_DIR=/seeds/a0_032 jet Tools/agent/Land.jet census")
+    assert_eq(refusal("Chain.jet", "no preflight receipt for source identity x", "/seeds/a0_032", "0123456789abcdef"), "Chain.jet: refused: no preflight receipt for source identity x.\nRun the collect-all preflight in the dev worktree at 0123456789 (name each uncommitted file the launch tree carries after it), then launch again:\n  CENSUS_JET_DIR=/seeds/a0_032 jet Tools/agent/Land.jet census")
     assert(refusal("release", "r", "/s", "").contains("in the dev worktree (name each"))
 }
 
@@ -1533,4 +2842,49 @@ array_field: fn(tree: Dyn, name: String) -> [Dyn] Never! {
 #Test("check errors are counted with the place on the line after them") {
     rows: error_rows("Error[E0109]: mismatch\n  --> a.jet:3:1\nnote\nError[E0109]: mismatch\n  --> a.jet:3:1\nError[E0505]: moved\n")
     assert_eq(counted(rows), [String]{"2 Error[E0109]: mismatch a.jet:3:1", "1 Error[E0505]: moved "})
+}
+
+#Test("a commit message is cleaned as git stripspace cleans it") {
+    assert_eq(stripspace("\n\nsubject  \n\n\n\nbody\t\nmore\n\n"), "subject\n\nbody\nmore\n")
+    assert_eq(stripspace(" \n\n"), "")
+}
+
+#Test("patches that share a file, even through another, form one group") {
+    roots: share_groups([[String]]{[String]{"a", "b"}, [String]{"c"}, [String]{"d", "b"}, [String]{"e", "c"}, [String]{"f"}})
+    assert_eq(roots, [Int]{0, 1, 0, 1, 4})
+}
+
+#Test("list lines are jobs; comments, blanks and short lines are not") {
+    jobs: read_jobs("# x\n\nL\t/m\t/p\nM\t/m2\t/p2\tname\nbad\tline\n")
+    assert_eq(jobs.len(), 2)
+    assert_eq(job_line(jobs[0]), "L\t/m\t/p\t")
+    assert_eq(jobs[1].name, "name")
+}
+
+#Test("a job's result is read from its lines in the batch report") {
+    job: Job{lane: "L", message: "/q/a.msg", patch: "/q/a.patch", name: "1-L"}
+    assert_eq(job_result(job, "APPLIED L a.patch (2 files)\nCOMMITTED 0123abcd L a.patch\n", "ok"), "LANDED 0123abcd\n")
+    assert_eq(job_result(job, "SKIP (already on dev) L a.patch\n", "ok"), "LANDED already-on-dev\n")
+    assert_eq(job_result(job, "DOES NOT APPLY L a.patch - left for its lane\n", "ok"), "STALE does not apply to HEAD; rebase\n")
+    assert_eq(job_result(job, "DOES NOT APPLY L a.patch - an earlier patch of its stack did not apply (z.patch); left for its lane\n", "ok"), "STALE an earlier patch of its stack did not apply; rebase the stack onto HEAD\n")
+    assert_eq(job_result(job, "nm: x\nPRECOMMIT FAILED\n", "precommit failed for this patch"), "REJECTED precommit failed for this patch\nPRECOMMIT FAILED\n")
+    assert_eq(job_result(job, "COMMITTED 0123abcd L xa.patch\n", "ok"), "REJECTED ok\nCOMMITTED 0123abcd L xa.patch\n")
+}
+
+#Test("the golden rows are the Examples rows minus the excluded stems") {
+    listed: "golden\tExamples/A/One.jet\ngolden\tExamples/Systems/Process/OSProcessControl.jet\ngolden\tCompiler/X.jet\nrun\tExamples/A/Two.jet\ngolden\tExamples/B/Dir/main.jet\n"
+    assert_eq(golden_rows(listed, [String]{"Systems/Process/OSProcessControl"}) ?? panic("selection"), [String]{"Examples/A/One.jet", "Examples/B/Dir/main.jet"})
+    assert_eq(golden_rows(listed, [String]{"B/Dir"}) ?? panic("selection"), [String]{"Examples/A/One.jet", "Examples/Systems/Process/OSProcessControl.jet"})
+    assert(golden_rows(listed, [String]{"Gone"}) == .Err(_))
+}
+
+#Test("the counts object is cut from a results document") {
+    assert_eq(results_counts("{{\"schema\":1,\"counts\":{{\"pass\":3,\"fail\":1}},\"rows\":[]}}"), "{{\"pass\":3,\"fail\":1}}")
+    assert_eq(results_counts("{{\"rows\":[]}}"), "")
+}
+
+#Test("a release gate run becomes one batch-log line") {
+    assert_eq(train_verdict(0, "x\nPASS: a0_034 ready\n", "0123456789abcdef", "/w/t.log"), "RELEASE READY a0_034 from 0123456789; run the commands in /w/t.log")
+    assert_eq(train_verdict(1, "FAIL: gains 3 < 10\nFAIL: rows\n", "0123456789abcdef", "/w/t.log"), "release gate 0123456789: not released (gains 3 < 10; rows)")
+    assert_eq(train_verdict(2, "boom\n", "0123456789abcdef", "/w/t.log"), "release gate 0123456789: could not start rc=2 (boom)")
 }

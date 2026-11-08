@@ -1,0 +1,11 @@
+// Chromium serves BiDi only through a WebDriver driver, which the lock does not
+// pin, so launch refuses it before starting anything.
+use browser: core.web.browser
+
+run: fn() {
+    session: browser.launch("chromium") ?? {
+        print("chromium refused: {err}")
+        return
+    }
+    print("chromium launched: {session.abilities().bidi()}")
+}

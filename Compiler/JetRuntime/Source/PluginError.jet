@@ -1,58 +1,58 @@
 // Derived Clone/PartialEq/Debug, Display. show/display message only; debug is
 // full Rust derive.
 #Export(c) jet_rt_handle_clone_plugin_error: fn(value: I64) -> I64 {
-    kind: data_tree_word(wrapping(value + PLUGIN_ERROR_TAG))
+    kind: dyn_word(wrapping(value + PLUGIN_ERROR_TAG))
     result: jet_rt_alloc(PLUGIN_ERROR_BYTES, I64{8})
-    data_tree_store(wrapping(result + PLUGIN_ERROR_TAG), kind)
-    data_tree_store(wrapping(result + PLUGIN_ERROR_FAULT), jet_rt_handle_clone_plugin_fault(data_tree_word(wrapping(value + PLUGIN_ERROR_FAULT))))
-    data_tree_store(wrapping(result + PLUGIN_ERROR_LIMIT), if kind == PLUGIN_ERROR_BUDGET -> data_tree_word(wrapping(value + PLUGIN_ERROR_LIMIT)) else -> I64{0})
+    dyn_store(wrapping(result + PLUGIN_ERROR_TAG), kind)
+    dyn_store(wrapping(result + PLUGIN_ERROR_FAULT), jet_rt_handle_clone_plugin_fault(dyn_word(wrapping(value + PLUGIN_ERROR_FAULT))))
+    dyn_store(wrapping(result + PLUGIN_ERROR_LIMIT), if kind == PLUGIN_ERROR_BUDGET -> dyn_word(wrapping(value + PLUGIN_ERROR_LIMIT)) else -> I64{0})
     result
 }
 #Export(c) jet_rt_handle_drop_plugin_error: fn(value: I64) {
     if (value == I64{0}) -> return
-    jet_rt_handle_drop_plugin_fault(data_tree_word(wrapping(value + PLUGIN_ERROR_FAULT)))
+    jet_rt_handle_drop_plugin_fault(dyn_word(wrapping(value + PLUGIN_ERROR_FAULT)))
     jet_rt_free(value, PLUGIN_ERROR_BYTES, I64{8})
 }
 #Export(c) jet_rt_handle_eq_plugin_error: fn(left: I64, right: I64) -> Bool {
-    kind: data_tree_word(wrapping(left + PLUGIN_ERROR_TAG))
-    if kind != data_tree_word(wrapping(right + PLUGIN_ERROR_TAG)) -> return false
+    kind: dyn_word(wrapping(left + PLUGIN_ERROR_TAG))
+    if kind != dyn_word(wrapping(right + PLUGIN_ERROR_TAG)) -> return false
     // Budget { limit, fault } has this order.
-    if kind == PLUGIN_ERROR_BUDGET && data_tree_word(wrapping(left + PLUGIN_ERROR_LIMIT)) != data_tree_word(wrapping(right + PLUGIN_ERROR_LIMIT)) -> return false
-    jet_rt_handle_eq_plugin_fault(data_tree_word(wrapping(left + PLUGIN_ERROR_FAULT)), data_tree_word(wrapping(right + PLUGIN_ERROR_FAULT)))
+    if kind == PLUGIN_ERROR_BUDGET && dyn_word(wrapping(left + PLUGIN_ERROR_LIMIT)) != dyn_word(wrapping(right + PLUGIN_ERROR_LIMIT)) -> return false
+    jet_rt_handle_eq_plugin_fault(dyn_word(wrapping(left + PLUGIN_ERROR_FAULT)), dyn_word(wrapping(right + PLUGIN_ERROR_FAULT)))
 }
 #Export(c) jet_rt_handle_display_plugin_error: fn(value: I64) -> I64 {
-    fault: data_tree_word(wrapping(value + PLUGIN_ERROR_FAULT))
-    jet_rt_string_clone(data_tree_word(wrapping(fault + PLUGIN_FAULT_MESSAGE)))
+    fault: dyn_word(wrapping(value + PLUGIN_ERROR_FAULT))
+    jet_rt_string_clone(dyn_word(wrapping(fault + PLUGIN_FAULT_MESSAGE)))
 }
 #Export(c) jet_rt_handle_show_plugin_error: fn(value: I64) -> I64 { jet_rt_handle_display_plugin_error(value) }
 plugin_frame_debug: fn(target: I64, frame: I64) {
     // "PluginFrame { function: "
     jet_rt_string_builder_push(target, rt_static_text("PluginFrame {{ function: "))
-    rt_text_push_rust_debug_str(target, data_tree_word(wrapping(frame + PLUGIN_FRAME_FUNCTION)))
+    rt_text_push_rust_debug_str(target, dyn_word(wrapping(frame + PLUGIN_FRAME_FUNCTION)))
     // ", component: "
     rt_text_push_word(target, I64{7957702681909469228}, I64{8})
     rt_text_push_word(target, I64{138419662437}, I64{5})
-    rt_text_push_rust_debug_str(target, data_tree_word(wrapping(frame + PLUGIN_FRAME_COMPONENT)))
+    rt_text_push_rust_debug_str(target, dyn_word(wrapping(frame + PLUGIN_FRAME_COMPONENT)))
     // ", offset: "
     rt_text_push_word(target, I64{8387236764689834028}, I64{8})
     rt_text_push_word(target, I64{8250}, I64{2})
-    rt_text_push_number(target, data_tree_word(wrapping(frame + PLUGIN_FRAME_OFFSET)))
+    rt_text_push_number(target, dyn_word(wrapping(frame + PLUGIN_FRAME_OFFSET)))
     rt_text_push_word(target, I64{32032}, I64{2}) // " }"
 }
 plugin_fault_debug: fn(target: I64, fault: I64) {
     // "PluginFault { export: "
     jet_rt_string_builder_push(target, rt_static_text("PluginFault {{ export: "))
-    rt_text_push_rust_debug_str(target, data_tree_word(wrapping(fault + PLUGIN_FAULT_EXPORT)))
+    rt_text_push_rust_debug_str(target, dyn_word(wrapping(fault + PLUGIN_FAULT_EXPORT)))
     // ", message: "
     rt_text_push_word(target, I64{7449362198107594796}, I64{8})
     rt_text_push_word(target, I64{2112101}, I64{3})
-    rt_text_push_rust_debug_str(target, data_tree_word(wrapping(fault + PLUGIN_FAULT_MESSAGE)))
+    rt_text_push_rust_debug_str(target, dyn_word(wrapping(fault + PLUGIN_FAULT_MESSAGE)))
     // ", frames: ["
     rt_text_push_word(target, I64{8315172552308039724}, I64{8})
     rt_text_push_word(target, I64{5972026}, I64{3})
-    frames: data_tree_word(wrapping(fault + PLUGIN_FAULT_FRAMES))
-    length: data_tree_word(wrapping(frames + DATA_SEQUENCE_LENGTH))
-    data: data_tree_word(wrapping(frames + DATA_SEQUENCE_DATA))
+    frames: dyn_word(wrapping(fault + PLUGIN_FAULT_FRAMES))
+    length: dyn_word(wrapping(frames + DATA_SEQUENCE_LENGTH))
+    data: dyn_word(wrapping(frames + DATA_SEQUENCE_DATA))
     at := I64{0}
     loop at < length {
         if (at != I64{0}) -> rt_text_push_word(target, I64{8236}, I64{2})
@@ -71,13 +71,13 @@ plugin_limit_debug: fn(target: I64, limit: I64) {
     }
 }
 #Export(c) jet_rt_handle_debug_plugin_error: fn(value: I64) -> I64 {
-    kind: data_tree_word(wrapping(value + PLUGIN_ERROR_TAG))
+    kind: dyn_word(wrapping(value + PLUGIN_ERROR_TAG))
     target: jet_rt_string_builder_new()
     if kind == PLUGIN_ERROR_BUDGET {
         // "Budget { limit: "
         rt_text_push_word(target, I64{8872219244795032898}, I64{8})
         rt_text_push_word(target, I64{2322296554018925600}, I64{8})
-        plugin_limit_debug(target, data_tree_word(wrapping(value + PLUGIN_ERROR_LIMIT)))
+        plugin_limit_debug(target, dyn_word(wrapping(value + PLUGIN_ERROR_LIMIT)))
         rt_text_push_word(target, I64{4212110802899312684}, I64{8}) // ", fault: "
         rt_text_push_word(target, I64{32}, I64{1})
     } else if kind == PLUGIN_ERROR_GUEST {
@@ -85,26 +85,26 @@ plugin_limit_debug: fn(target: I64, limit: I64) {
     } else if kind == PLUGIN_ERROR_DENIED {
         rt_text_push_word(target, I64{11369385791743300}, I64{7})
     } else { rt_text_push_word(target, I64{11386969320219972}, I64{7}) }
-    plugin_fault_debug(target, data_tree_word(wrapping(value + PLUGIN_ERROR_FAULT)))
+    plugin_fault_debug(target, dyn_word(wrapping(value + PLUGIN_ERROR_FAULT)))
     if kind == PLUGIN_ERROR_BUDGET { rt_text_push_word(target, I64{32032}, I64{2}) } else { rt_text_push_word(target, I64{41}, I64{1}) }
     target
 }
 // Match getters (IR_RECORD_SCHEMAS PluginError): the tag, each variant's
 // owned fault, and Budget's limit as its PluginLimit variant index.
-#Export(c) jet_rt_record_tag_plugin_error: fn(value: I64) -> I64 { data_tree_word(wrapping(value + PLUGIN_ERROR_TAG)) }
-#Export(c) jet_rt_record_get_plugin_error_guest: fn(value: I64) -> I64 { jet_rt_handle_clone_plugin_fault(data_tree_word(wrapping(value + PLUGIN_ERROR_FAULT))) }
-#Export(c) jet_rt_record_get_plugin_error_denied: fn(value: I64) -> I64 { jet_rt_handle_clone_plugin_fault(data_tree_word(wrapping(value + PLUGIN_ERROR_FAULT))) }
-#Export(c) jet_rt_record_get_plugin_error_defect: fn(value: I64) -> I64 { jet_rt_handle_clone_plugin_fault(data_tree_word(wrapping(value + PLUGIN_ERROR_FAULT))) }
-#Export(c) jet_rt_record_get_plugin_error_budget_limit: fn(value: I64) -> I64 { data_tree_word(wrapping(value + PLUGIN_ERROR_LIMIT)) }
-#Export(c) jet_rt_record_get_plugin_error_budget_fault: fn(value: I64) -> I64 { jet_rt_handle_clone_plugin_fault(data_tree_word(wrapping(value + PLUGIN_ERROR_FAULT))) }
+#Export(c) jet_rt_record_tag_plugin_error: fn(value: I64) -> I64 { dyn_word(wrapping(value + PLUGIN_ERROR_TAG)) }
+#Export(c) jet_rt_record_get_plugin_error_guest: fn(value: I64) -> I64 { jet_rt_handle_clone_plugin_fault(dyn_word(wrapping(value + PLUGIN_ERROR_FAULT))) }
+#Export(c) jet_rt_record_get_plugin_error_denied: fn(value: I64) -> I64 { jet_rt_handle_clone_plugin_fault(dyn_word(wrapping(value + PLUGIN_ERROR_FAULT))) }
+#Export(c) jet_rt_record_get_plugin_error_defect: fn(value: I64) -> I64 { jet_rt_handle_clone_plugin_fault(dyn_word(wrapping(value + PLUGIN_ERROR_FAULT))) }
+#Export(c) jet_rt_record_get_plugin_error_budget_limit: fn(value: I64) -> I64 { dyn_word(wrapping(value + PLUGIN_ERROR_LIMIT)) }
+#Export(c) jet_rt_record_get_plugin_error_budget_fault: fn(value: I64) -> I64 { jet_rt_handle_clone_plugin_fault(dyn_word(wrapping(value + PLUGIN_ERROR_FAULT))) }
 // Variant constructors (record.out, the Jet value crossing back for its
 // rendering): each adopts its fault; Budget takes its PluginLimit variant
 // index first, in declaration order.
 plugin_error_new: fn(kind: I64, limit: I64, fault: I64) -> I64 {
     value: jet_rt_alloc(PLUGIN_ERROR_BYTES, I64{8})
-    data_tree_store(wrapping(value + PLUGIN_ERROR_TAG), kind)
-    data_tree_store(wrapping(value + PLUGIN_ERROR_FAULT), fault)
-    data_tree_store(wrapping(value + PLUGIN_ERROR_LIMIT), limit)
+    dyn_store(wrapping(value + PLUGIN_ERROR_TAG), kind)
+    dyn_store(wrapping(value + PLUGIN_ERROR_FAULT), fault)
+    dyn_store(wrapping(value + PLUGIN_ERROR_LIMIT), limit)
     value
 }
 #Export(c) jet_rt_record_new_plugin_error_guest: fn(fault: I64) -> I64 { plugin_error_new(PLUGIN_ERROR_GUEST, I64{0}, fault) }

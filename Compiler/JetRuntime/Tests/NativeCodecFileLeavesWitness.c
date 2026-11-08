@@ -13,7 +13,7 @@
 #ifndef RT_HOST_U8_STRIDE
 #error "runner must provide the RC-pinned native U8 element stride"
 #endif
-#ifndef DATA_TREE_INT
+#ifndef DYN_INT
 #error "runner must provide the RC-pinned DataABI tags"
 #endif
 typedef int64_t W;
@@ -91,7 +91,7 @@ static void text_is(Text *value, const char *expected) {
     jet_rt_string_drop(value);
 }
 static void number(void *tree, const char *expected) {
-    assert(jet_rt_record_tag_dyn(tree) == DATA_TREE_INT);
+    assert(jet_rt_record_tag_dyn(tree) == DYN_INT);
     text_is(jet_rt_handle_show_dyn(tree), expected);
     jet_rt_handle_drop_dyn(tree);
 }
@@ -116,17 +116,17 @@ static void codecs(void) {
     jet_rt_int_drop(exact);
     number(integer, "9223372036854775807");
     void *boolean = jet_rt_codec_encode_bool(2);
-    assert(jet_rt_record_tag_dyn(boolean) == DATA_TREE_BOOL && jet_rt_record_get_dyn_bool(boolean));
+    assert(jet_rt_record_tag_dyn(boolean) == DYN_BOOL && jet_rt_record_get_dyn_bool(boolean));
     jet_rt_handle_drop_dyn(boolean);
     void *real = jet_rt_codec_encode_float(-0.0);
     double decoded = jet_rt_record_get_dyn_float(real); uint64_t bits;
     memcpy(&bits, &decoded, sizeof bits);
-    assert(jet_rt_record_tag_dyn(real) == DATA_TREE_FLOAT && bits == UINT64_C(0x8000000000000000));
+    assert(jet_rt_record_tag_dyn(real) == DYN_FLOAT && bits == UINT64_C(0x8000000000000000));
     jet_rt_handle_drop_dyn(real);
     Text *s = text("\xc3\xa9");
     void *string = jet_rt_codec_encode_string(s), *typed = jet_raw_typed_text(s);
     jet_rt_string_drop(s);
-    assert(jet_rt_record_tag_dyn(string) == DATA_TREE_TEXT && jet_rt_record_tag_dyn(typed) == DATA_TREE_TEXT);
+    assert(jet_rt_record_tag_dyn(string) == DYN_TEXT && jet_rt_record_tag_dyn(typed) == DYN_TEXT);
     text_is(jet_rt_record_get_dyn_text(string), "\xc3\xa9");
     text_is(jet_rt_record_get_dyn_text(typed), "\xc3\xa9");
     jet_rt_handle_drop_dyn(string); jet_rt_handle_drop_dyn(typed);
@@ -155,7 +155,7 @@ static void codecs(void) {
     s = text("1e400"); void *ok = NULL; uintptr_t *errors = (uintptr_t *)(uintptr_t)724; W count = 725;
     assert(jet_rt_codec_parse_json(s, &ok, &errors, &count) == 1);
     jet_rt_string_drop(s);
-    assert(errors == (uintptr_t *)(uintptr_t)724 && count == 725 && jet_rt_record_tag_dyn(ok) == DATA_TREE_NUMBER);
+    assert(errors == (uintptr_t *)(uintptr_t)724 && count == 725 && jet_rt_record_tag_dyn(ok) == DYN_NUMBER);
     text_is(jet_rt_record_get_dyn_number(ok), "1e400"); jet_rt_handle_drop_dyn(ok);
     s = text("\n?"); ok = (void *)(uintptr_t)723;
     assert(jet_rt_codec_parse_json(s, &ok, &errors, &count) == 0 && count == 1 && ok == (void *)(uintptr_t)723);

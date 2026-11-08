@@ -26,7 +26,7 @@ env_fixture_row: fn(values: I64, index: I64, name: I64, value: I64) -> Bool {
     csv_record_free(allow)
     segments: env_segments(rt_text_data(rt_static_text("DB____Host__")), I64{12})
     if (trap_word(segments) != I64{2} || !jet_rt_string_eq(csv_words_get(segments, I64{0}), rt_static_text("db")) || !jet_rt_string_eq(csv_words_get(segments, I64{1}), rt_static_text("host"))) -> return I64{7}
-    tree: data_tree_new(DATA_TREE_OBJECT, data_sequence_new(I64{0}, DATA_TREE_ENTRY_BYTES))
+    tree: dyn_new(DYN_OBJECT, data_sequence_new(I64{0}, DYN_ENTRY_BYTES))
     env_tree_insert(tree, segments, I64{0}, jet_rt_string_clone(rt_static_text("a")))
     upper: csv_words_new()
     csv_words_push(upper, jet_rt_string_clone(rt_static_text("DB")))

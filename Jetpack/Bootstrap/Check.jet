@@ -25,10 +25,10 @@
 // package.jet as that package, the engine areas without one as a unit
 // Assemble.jet assembles (Compiler/test.jet, jetpack_engine_rows).
 //
-// Every jet command runs in its own cgroup scope (systemd-run) with a hard
-// memory cap and no swap, under a wall-clock timeout; this script runs again
-// inside the scope (`--scoped`) to time the command and read the scope's peak
-// memory. Full type checks take one of a few shared slots. Assembled units,
+// Every jet command runs in a memory scope of its own (`.memory_scope`: a
+// cgroup with a hard cap and no swap) under a wall-clock timeout; the receipt
+// records the scope's peak memory. Full type checks take one of a few shared
+// slots. Assembled units,
 // logs and receipts stay under $JET_STATE_ROOT/jetpack-bootstrap
 // (Tools/agent/roots.sh), never /tmp. The receipt is
 // <scratch>/check.receipt (hosted.receipt for --hosted); its last line is
@@ -67,7 +67,6 @@ OUTPUT_LIMIT: 1073741824
 
 run: fn() {
     args: process.args()
-    if args.len() > 0 && args[0] == "--scoped" -> process.exit(scoped(args))
     repo: repo_root()
     options: parse_options(args)
     if options.hosted && (options.areas != "" || options.own != "" || options.each || options.syntax) -> fail(64, "--hosted builds the whole engine; it takes no area selection, --each or --syntax")
@@ -348,13 +347,13 @@ prove_hosted: fn(proof: Proof) -> Int {
 // Grammar only: the admitted compiler's own parser (`jet inspect compiler
 // parse`). Any non-zero status (crash, cap kill) leaves no verdict and fails.
 prove_syntax: fn(proof: Proof) -> Int {
-    argv: [String]{"systemd-run", "--user", "--scope", "--quiet", "--expand-environment=no", "-p", "MemoryMax=3G", "-p", "MemorySwapMax=0", proof.jet, "inspect", "compiler", "parse", "src/jetpack.jet"}
+    argv: [String]{proof.jet, "inspect", "compiler", "parse", "src/jetpack.jet"}
     parse_json: "{proof.scratch}/syntax.parse.json"
     parse_err: "{proof.scratch}/syntax.parse.err"
     log: "{proof.scratch}/syntax.log"
     probe := ""
     probe_status := 0
-    results: process.run_all([ProcessSpec]{child_spec(proof.child, argv, "{proof.scratch}/check/project")}, 1) ?? fail(1, "the parser could not run: {err}")
+    results: process.run_all([ProcessSpec]{child_spec(proof.child, argv, "{proof.scratch}/check/project").memory_scope(3 * GIB)}, 1) ?? fail(1, "the parser could not run: {err}")
     if results[0] == {
         .Ok(ran) -> {
             probe_status = status_of(ran)
@@ -437,77 +436,58 @@ wait_for_memory: fn() {
     }
 }
 
-// One capped cgroup scope for `argv` in `workdir`: the command output goes to
+// One capped memory scope for `argv` in `workdir`: the command output goes to
 // <scratch>/<label>.log and is printed; the receipt records the command, its
-// exit status, the scope's peak memory and the log. RuntimeMaxSec makes
-// systemd end the scope even if this process dies, so a killed caller never
-// orphans an unbounded compiler; the log is written from inside the scope.
+// exit status, the scope's peak memory and the log. Going over the cap kills
+// every process in the scope and never this one; a child of a killed caller
+// dies with it (run_all's parent-death signal).
 bounded: fn(proof: Proof, label: String, memory: String, secs: Int, workdir: String, argv: [String]) -> Int {
     log: "{proof.scratch}/{label}.log"
+    cap: memory_bytes(memory)
+    if cap <= 0 -> fail(64, "{label}: memory cap {memory} is not a size like 6G, 512M or a byte count")
     wait_for_memory()
     quoted := [String]{}
     loop word in argv -> quoted.push(shell_quote(word))
     note(proof, "{label}-command: {quoted.join(" ")}\n")
-    files.write(log, "") ?? fail(1, "cannot write {log}: {err}")
-    scope := [String]{"systemd-run", "--user", "--scope", "--quiet", "--expand-environment=no", "-p", "MemoryMax={memory}", "-p", "MemorySwapMax=0", "-p", "RuntimeMaxSec={secs + 30}"}
-    scope.extend([String]{proof.jet, "{proof.repo}/{SELF}", "--scoped", log, "{secs}", workdir, "--"})
-    scope.extend(argv.copy()) // copy: the receipt line keeps the words
-    status: inherit(child_spec(proof.child, scope, proof.repo))
-    text: files.read(log) ?? ""
+    spec: child_spec(proof.child, argv, workdir).timeout(time.duration_seconds(secs)).memory_scope(cap)
+    results: process.run_all([ProcessSpec]{spec}, 1) ?? fail(1, "{label} could not run: {err}")
+    status := 127
     peak := ""
-    kept := [String]{}
-    loop line in text.split("\n") {
-        if line.starts_with("peak_bytes=") -> peak = line.removeprefix("peak_bytes=") else -> kept.push(line.copy()) // copy: the log text is dropped
-    }
-    if kept.len() > 0 && kept[kept.len() - 1] == "" -> _ := kept.pop()
-    note(proof, "{label}-exit: {status}\n{label}-peak-bytes: {if peak == "" -> "unknown" else -> peak}\n{label}-log: {log}\n")
-    loop line in kept -> print(line)
-    // The kernel ends the whole scope on a cgroup OOM, so no peak line is written.
-    if (status == 143 || status == 137) && peak == "" {
-        note(proof, "{label}-killed: memory cap MemoryMax={memory} reached (cgroup OOM; the machine is unaffected)\n")
-        term.eprint("jetpack-bootstrap: {label} was killed at its MemoryMax={memory} cap (cgroup OOM, contained); the unit is too large to type-check under this cap (#3661)")
-    }
-    status
-}
-
-// Inside the scope: `--scoped LOG SECS WORKDIR -- ARGV...` runs ARGV in
-// WORKDIR under a SECS timeout, writes its output and then
-// `peak_bytes=<the scope's memory.peak>` to LOG, and exits with its status
-// (124 on the timeout, 128 + the signal on a signal).
-scoped: fn(args: [String]) -> Int {
-    if args.len() < 6 || args[4] != "--" {
-        term.eprint("usage: jet {SELF} --scoped LOG SECS WORKDIR -- ARGV...")
-        return 64
-    }
-    log: args[1]
-    secs: int_or(args[2], 0)
-    argv: args[5..<args.len()]
-    spec: process.cmd(argv).cwd(args[3]).timeout(time.duration_seconds(secs)).output_limit(OUTPUT_LIMIT)
-    results: process.run_all([ProcessSpec]{spec}, 1) ?? return start_failed(log, argv[0], "{err}")
-    status := 0
+    text := ""
     if results[0] == {
         .Ok(ran) -> {
             status = status_of(ran)
-            files.write(log, "{ran.output}{ran.errors}") ?? term.eprint("jetpack-bootstrap: cannot write {log}: {err}")
+            text = "{ran.output}{ran.errors}"
+            if ran.peak_memory_bytes == .Val(bytes) -> peak = "{bytes}"
         }
-        .Err(error) -> return start_failed(log, argv[0], "{error}")
+        .Err(error) -> text = "jetpack-bootstrap: {argv[0]} could not start: {error}\n"
     }
-    files.append_all(log, "peak_bytes={scope_peak()}\n") ?? term.eprint("jetpack-bootstrap: cannot write {log}: {err}")
+    files.write(log, text) ?? fail(1, "cannot write {log}: {err}")
+    note(proof, "{label}-exit: {status}\n{label}-peak-bytes: {if peak == "" -> "unknown" else -> peak}\n{label}-log: {log}\n")
+    if text != "" {
+        loop line in text.removesuffix("\n").split("\n") -> print(line)
+    }
+    // Going over the cap kills the whole scope with SIGKILL (a timeout is 124).
+    if status == 137 {
+        note(proof, "{label}-killed: memory cap {memory} reached (scope OOM; the machine is unaffected)\n")
+        term.eprint("jetpack-bootstrap: {label} was killed at its {memory} memory cap (scope OOM, contained); the unit is too large to type-check under this cap (#3661)")
+    }
     status
 }
 
-start_failed: fn(log: String, program: String, error: String) -> Int {
-    files.write(log, "jetpack-bootstrap: {program} could not start: {error}\npeak_bytes={scope_peak()}\n") ?? term.eprint("jetpack-bootstrap: cannot write {log}: {err}")
-    127
-}
+GIB: 1073741824
 
-// This process's cgroup's memory.peak, or `unknown`.
-scope_peak: fn() -> String {
-    cgroup: files.read("/proc/self/cgroup") ?? return "unknown"
-    fields: cgroup.partition("\n").head.split(":").to_list()
-    if fields.len() < 3 -> return "unknown"
-    peak: files.read("/sys/fs/cgroup{fields[2]}/memory.peak") ?? return "unknown"
-    peak.trim()
+// `6G`, `512M`, `64K` or a byte count, in bytes; 0 when it is none of them.
+memory_bytes: fn(text: String) -> Int {
+    if text == "" -> return 0
+    scale: if {
+        text.ends_with("G") -> GIB
+        text.ends_with("M") -> 1048576
+        text.ends_with("K") -> 1024
+        else -> 1
+    }
+    digits: if scale == 1 -> text.copy() else -> text.slice(0..<text.len() - 1).copy()
+    int_or(digits, 0) * scale
 }
 
 // --- every area ------------------------------------------------------------------

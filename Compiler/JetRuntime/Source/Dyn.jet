@@ -3,112 +3,112 @@
 // ordered JSON render semantics. Exact Int words retain shared owners. Text
 // constructors clone, sequence constructors adopt, sequence getters lend; Dyn
 // is the sole public carrier.
-data_tree_word: fn(address: I64) -> I64 {
+dyn_word: fn(address: I64) -> I64 {
     #Unsafe("address borrows an initialized word in a live native Dyn or List") { return os_load_i64(address) }
 }
-data_tree_store: fn(address: I64, value: I64) {
+dyn_store: fn(address: I64, value: I64) {
     #Unsafe("address owns a writable word in a native Dyn or List") { os_store_i64(address, value) }
 }
-data_tree_new: fn(kind: I64, payload: I64) -> I64 {
-    tree: jet_rt_alloc(DATA_TREE_BYTES, I64{8})
-    data_tree_store(wrapping(tree + DATA_TREE_TAG), kind)
-    data_tree_store(wrapping(tree + DATA_TREE_PAYLOAD), payload)
+dyn_new: fn(kind: I64, payload: I64) -> I64 {
+    tree: jet_rt_alloc(DYN_BYTES, I64{8})
+    dyn_store(wrapping(tree + DYN_TAG), kind)
+    dyn_store(wrapping(tree + DYN_PAYLOAD), payload)
     tree
 }
-data_tree_payload: fn(tree: I64, kind: I64) -> I64 {
-    if data_tree_word(wrapping(tree + DATA_TREE_TAG)) != kind {
+dyn_payload: fn(tree: I64, kind: I64) -> I64 {
+    if dyn_word(wrapping(tree + DYN_TAG)) != kind {
         rt_record_variant_panic()
         if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     }
-    data_tree_word(wrapping(tree + DATA_TREE_PAYLOAD))
+    dyn_word(wrapping(tree + DYN_PAYLOAD))
 }
 data_sequence_push: fn(sequence: I64, key: I64, child: I64, entries: Bool) {
-    stride: if entries -> DATA_TREE_ENTRY_BYTES else -> DATA_TREE_ELEMENT_BYTES
+    stride: if entries -> DYN_ENTRY_BYTES else -> DYN_ELEMENT_BYTES
     slot: data_sequence_reserve(sequence, stride)
     if entries {
-        data_tree_store(wrapping(slot + DATA_TREE_ENTRY_KEY), jet_rt_string_clone(key))
-        data_tree_store(wrapping(slot + DATA_TREE_ENTRY_VALUE), child)
-    } else { data_tree_store(slot, child) }
-    data_tree_store(wrapping(sequence + DATA_SEQUENCE_LENGTH), data_tree_word(wrapping(sequence + DATA_SEQUENCE_LENGTH)) + I64{1})
+        dyn_store(wrapping(slot + DYN_ENTRY_KEY), jet_rt_string_clone(key))
+        dyn_store(wrapping(slot + DYN_ENTRY_VALUE), child)
+    } else { dyn_store(slot, child) }
+    dyn_store(wrapping(sequence + DATA_SEQUENCE_LENGTH), dyn_word(wrapping(sequence + DATA_SEQUENCE_LENGTH)) + I64{1})
 }
 data_sequence_clone: fn(sequence: I64, kind: I64) -> I64 {
-    stride: if kind == DATA_TREE_OBJECT -> DATA_TREE_ENTRY_BYTES else if kind == DATA_TREE_BYTE_LIST -> RT_HOST_U8_STRIDE else -> DATA_TREE_ELEMENT_BYTES
-    length: data_tree_word(wrapping(sequence + DATA_SEQUENCE_LENGTH))
+    stride: if kind == DYN_OBJECT -> DYN_ENTRY_BYTES else if kind == DYN_BYTE_LIST -> RT_HOST_U8_STRIDE else -> DYN_ELEMENT_BYTES
+    length: dyn_word(wrapping(sequence + DATA_SEQUENCE_LENGTH))
     result: data_sequence_new(length, stride)
-    source: data_tree_word(wrapping(sequence + DATA_SEQUENCE_DATA))
-    target: data_tree_word(wrapping(result + DATA_SEQUENCE_DATA))
+    source: dyn_word(wrapping(sequence + DATA_SEQUENCE_DATA))
+    target: dyn_word(wrapping(result + DATA_SEQUENCE_DATA))
     at := I64{0}
     loop at < length {
-        if kind == DATA_TREE_BYTE_LIST { host_u8_put(target, at, host_u8_get(source, at)) } else if kind == DATA_TREE_OBJECT {
-            data_tree_store(wrapping(wrapping(target + at * stride) + DATA_TREE_ENTRY_KEY), jet_rt_string_clone(data_tree_word(wrapping(wrapping(source + at * stride) + DATA_TREE_ENTRY_KEY))))
-            data_tree_store(wrapping(wrapping(target + at * stride) + DATA_TREE_ENTRY_VALUE), jet_rt_handle_clone_dyn(data_tree_word(wrapping(wrapping(source + at * stride) + DATA_TREE_ENTRY_VALUE))))
-        } else { data_tree_store(wrapping(target + at * stride), jet_rt_handle_clone_dyn(data_tree_word(wrapping(source + at * stride)))) }
+        if kind == DYN_BYTE_LIST { host_u8_put(target, at, host_u8_get(source, at)) } else if kind == DYN_OBJECT {
+            dyn_store(wrapping(wrapping(target + at * stride) + DYN_ENTRY_KEY), jet_rt_string_clone(dyn_word(wrapping(wrapping(source + at * stride) + DYN_ENTRY_KEY))))
+            dyn_store(wrapping(wrapping(target + at * stride) + DYN_ENTRY_VALUE), jet_rt_handle_clone_dyn(dyn_word(wrapping(wrapping(source + at * stride) + DYN_ENTRY_VALUE))))
+        } else { dyn_store(wrapping(target + at * stride), jet_rt_handle_clone_dyn(dyn_word(wrapping(source + at * stride)))) }
         at += I64{1}
     }
-    data_tree_store(wrapping(result + DATA_SEQUENCE_LENGTH), length)
+    dyn_store(wrapping(result + DATA_SEQUENCE_LENGTH), length)
     result
 }
 data_sequence_drop: fn(sequence: I64, kind: I64) {
-    stride: if kind == DATA_TREE_OBJECT -> DATA_TREE_ENTRY_BYTES else if kind == DATA_TREE_BYTE_LIST -> RT_HOST_U8_STRIDE else -> DATA_TREE_ELEMENT_BYTES
-    length: data_tree_word(wrapping(sequence + DATA_SEQUENCE_LENGTH))
-    capacity: data_tree_word(wrapping(sequence + DATA_SEQUENCE_CAPACITY))
-    data: data_tree_word(wrapping(sequence + DATA_SEQUENCE_DATA))
+    stride: if kind == DYN_OBJECT -> DYN_ENTRY_BYTES else if kind == DYN_BYTE_LIST -> RT_HOST_U8_STRIDE else -> DYN_ELEMENT_BYTES
+    length: dyn_word(wrapping(sequence + DATA_SEQUENCE_LENGTH))
+    capacity: dyn_word(wrapping(sequence + DATA_SEQUENCE_CAPACITY))
+    data: dyn_word(wrapping(sequence + DATA_SEQUENCE_DATA))
     at := I64{0}
-    loop kind != DATA_TREE_BYTE_LIST && at < length {
-        if kind == DATA_TREE_OBJECT {
-            jet_rt_string_drop(data_tree_word(wrapping(wrapping(data + at * stride) + DATA_TREE_ENTRY_KEY)))
-            jet_rt_handle_drop_dyn(data_tree_word(wrapping(wrapping(data + at * stride) + DATA_TREE_ENTRY_VALUE)))
-        } else { jet_rt_handle_drop_dyn(data_tree_word(wrapping(data + at * stride))) }
+    loop kind != DYN_BYTE_LIST && at < length {
+        if kind == DYN_OBJECT {
+            jet_rt_string_drop(dyn_word(wrapping(wrapping(data + at * stride) + DYN_ENTRY_KEY)))
+            jet_rt_handle_drop_dyn(dyn_word(wrapping(wrapping(data + at * stride) + DYN_ENTRY_VALUE)))
+        } else { jet_rt_handle_drop_dyn(dyn_word(wrapping(data + at * stride))) }
         at += I64{1}
     }
     if (capacity != I64{0}) -> jet_rt_free(data, capacity * stride, I64{8})
     jet_rt_free(sequence, DATA_SEQUENCE_BYTES, I64{8})
 }
 #Export(c) jet_rt_handle_clone_dyn: fn(tree: I64) -> I64 {
-    kind: data_tree_word(wrapping(tree + DATA_TREE_TAG))
-    payload := data_tree_word(wrapping(tree + DATA_TREE_PAYLOAD))
-    if kind == DATA_TREE_INT { payload = jet_rt_int_clone(payload) } else if kind == DATA_TREE_NUMBER || kind == DATA_TREE_TEXT { payload = jet_rt_string_clone(payload) } else if kind == DATA_TREE_DATETIME { payload = data_dyn_datetime_clone(payload) } else if kind == DATA_TREE_BYTE_LIST || kind >= DATA_TREE_ARRAY { payload = data_sequence_clone(payload, kind) }
-    data_tree_new(kind, payload)
+    kind: dyn_word(wrapping(tree + DYN_TAG))
+    payload := dyn_word(wrapping(tree + DYN_PAYLOAD))
+    if kind == DYN_INT { payload = jet_rt_int_clone(payload) } else if kind == DYN_NUMBER || kind == DYN_TEXT { payload = jet_rt_string_clone(payload) } else if kind == DYN_DATETIME { payload = data_dyn_datetime_clone(payload) } else if kind == DYN_BYTE_LIST || kind >= DYN_ARRAY { payload = data_sequence_clone(payload, kind) }
+    dyn_new(kind, payload)
 }
 #Export(c) jet_rt_handle_drop_dyn: fn(tree: I64) {
     if (tree == I64{0}) -> return
-    kind: data_tree_word(wrapping(tree + DATA_TREE_TAG))
-    payload: data_tree_word(wrapping(tree + DATA_TREE_PAYLOAD))
-    if kind == DATA_TREE_INT { jet_rt_int_drop(payload) } else if kind == DATA_TREE_NUMBER || kind == DATA_TREE_TEXT { jet_rt_string_drop(payload) } else if kind == DATA_TREE_DATETIME { jet_rt_free(payload, DYN_DATETIME_BYTES, I64{8}) } else if kind == DATA_TREE_BYTE_LIST || kind >= DATA_TREE_ARRAY { data_sequence_drop(payload, kind) }
-    jet_rt_free(tree, DATA_TREE_BYTES, I64{8})
+    kind: dyn_word(wrapping(tree + DYN_TAG))
+    payload: dyn_word(wrapping(tree + DYN_PAYLOAD))
+    if kind == DYN_INT { jet_rt_int_drop(payload) } else if kind == DYN_NUMBER || kind == DYN_TEXT { jet_rt_string_drop(payload) } else if kind == DYN_DATETIME { jet_rt_free(payload, DYN_DATETIME_BYTES, I64{8}) } else if kind == DYN_BYTE_LIST || kind >= DYN_ARRAY { data_sequence_drop(payload, kind) }
+    jet_rt_free(tree, DYN_BYTES, I64{8})
 }
 #Export(c) jet_rt_handle_eq_dyn: fn(left: I64, right: I64) -> Bool {
-    kind: data_tree_word(wrapping(left + DATA_TREE_TAG))
-    if kind != data_tree_word(wrapping(right + DATA_TREE_TAG)) -> return false
-    a: data_tree_word(wrapping(left + DATA_TREE_PAYLOAD))
-    b: data_tree_word(wrapping(right + DATA_TREE_PAYLOAD))
-    if kind == DATA_TREE_NULL -> return true
-    if kind == DATA_TREE_INT -> return jet_int_compare(a, b) == I64{0}
+    kind: dyn_word(wrapping(left + DYN_TAG))
+    if kind != dyn_word(wrapping(right + DYN_TAG)) -> return false
+    a: dyn_word(wrapping(left + DYN_PAYLOAD))
+    b: dyn_word(wrapping(right + DYN_PAYLOAD))
+    if kind == DYN_NULL -> return true
+    if kind == DYN_INT -> return jet_int_compare(a, b) == I64{0}
     // Do not shortcut pointer identity: derived f64 equality rejects NaN even
     // in a tree compared with itself, and treats -0 and +0 as equal.
-    if kind == DATA_TREE_FLOAT -> return rt_f64_from_bits(a) == rt_f64_from_bits(b)
-    if kind == DATA_TREE_BOOL -> return a == b
-    if kind <= DATA_TREE_TEXT -> return jet_rt_string_eq(a, b)
-    if kind == DATA_TREE_DATETIME -> return time_glue_equal(a, b, DYN_DATETIME_BYTES)
-    length: data_tree_word(wrapping(a + DATA_SEQUENCE_LENGTH))
-    if length != data_tree_word(wrapping(b + DATA_SEQUENCE_LENGTH)) -> return false
-    ap: data_tree_word(wrapping(a + DATA_SEQUENCE_DATA))
-    bp: data_tree_word(wrapping(b + DATA_SEQUENCE_DATA))
-    stride: if kind == DATA_TREE_OBJECT -> DATA_TREE_ENTRY_BYTES else -> DATA_TREE_ELEMENT_BYTES
+    if kind == DYN_FLOAT -> return rt_f64_from_bits(a) == rt_f64_from_bits(b)
+    if kind == DYN_BOOL -> return a == b
+    if kind <= DYN_TEXT -> return jet_rt_string_eq(a, b)
+    if kind == DYN_DATETIME -> return time_glue_equal(a, b, DYN_DATETIME_BYTES)
+    length: dyn_word(wrapping(a + DATA_SEQUENCE_LENGTH))
+    if length != dyn_word(wrapping(b + DATA_SEQUENCE_LENGTH)) -> return false
+    ap: dyn_word(wrapping(a + DATA_SEQUENCE_DATA))
+    bp: dyn_word(wrapping(b + DATA_SEQUENCE_DATA))
+    stride: if kind == DYN_OBJECT -> DYN_ENTRY_BYTES else -> DYN_ELEMENT_BYTES
     at := I64{0}
     loop at < length {
-        if kind == DATA_TREE_BYTE_LIST {
+        if kind == DYN_BYTE_LIST {
             if host_u8_get(ap, at) != host_u8_get(bp, at) -> return false
-        } else if kind == DATA_TREE_OBJECT {
-            if !jet_rt_string_eq(data_tree_word(wrapping(wrapping(ap + at * stride) + DATA_TREE_ENTRY_KEY)), data_tree_word(wrapping(wrapping(bp + at * stride) + DATA_TREE_ENTRY_KEY))) -> return false
-            if !jet_rt_handle_eq_dyn(data_tree_word(wrapping(wrapping(ap + at * stride) + DATA_TREE_ENTRY_VALUE)), data_tree_word(wrapping(wrapping(bp + at * stride) + DATA_TREE_ENTRY_VALUE))) -> return false
-        } else if !jet_rt_handle_eq_dyn(data_tree_word(wrapping(ap + at * stride)), data_tree_word(wrapping(bp + at * stride))) -> return false
+        } else if kind == DYN_OBJECT {
+            if !jet_rt_string_eq(dyn_word(wrapping(wrapping(ap + at * stride) + DYN_ENTRY_KEY)), dyn_word(wrapping(wrapping(bp + at * stride) + DYN_ENTRY_KEY))) -> return false
+            if !jet_rt_handle_eq_dyn(dyn_word(wrapping(wrapping(ap + at * stride) + DYN_ENTRY_VALUE)), dyn_word(wrapping(wrapping(bp + at * stride) + DYN_ENTRY_VALUE))) -> return false
+        } else if !jet_rt_handle_eq_dyn(dyn_word(wrapping(ap + at * stride)), dyn_word(wrapping(bp + at * stride))) -> return false
         at += I64{1}
     }
     true
 }
 // Stream into one builder; avoid allocating one String for every delimiter.
-data_tree_quote: fn(target: I64, text: I64) {
+dyn_quote: fn(target: I64, text: I64) {
     rt_text_push_word(target, I64{34}, I64{1})
     data: rt_text_data(text)
     length: rt_text_len(text)
@@ -129,75 +129,75 @@ data_tree_quote: fn(target: I64, text: I64) {
     }
     rt_text_push_word(target, I64{34}, I64{1})
 }
-data_tree_render: fn(target: I64, tree: I64) {
-    kind: data_tree_word(wrapping(tree + DATA_TREE_TAG))
-    value: data_tree_word(wrapping(tree + DATA_TREE_PAYLOAD))
-    if kind == DATA_TREE_NULL {
+dyn_render: fn(target: I64, tree: I64) {
+    kind: dyn_word(wrapping(tree + DYN_TAG))
+    value: dyn_word(wrapping(tree + DYN_PAYLOAD))
+    if kind == DYN_NULL {
         rt_text_push_word(target, I64{1819047278}, I64{4})
         return
     }
-    if kind == DATA_TREE_BOOL {
+    if kind == DYN_BOOL {
         if (value == I64{0}) { rt_text_push_word(target, I64{435728179558}, I64{5}) } else { rt_text_push_word(target, I64{1702195828}, I64{4}) }
         return
     }
-    if kind == DATA_TREE_INT || kind == DATA_TREE_FLOAT {
-        if (kind == DATA_TREE_FLOAT && ((value.bit_and(I64{9223372036854775807})) >> I64{52}) == I64{2047}) -> panic("JSON cannot encode a non-finite Float")
-        text: if kind == DATA_TREE_INT -> jet_rt_int_to_string(value) else -> jet_rt_float_debug(rt_f64_from_bits(value))
+    if kind == DYN_INT || kind == DYN_FLOAT {
+        if (kind == DYN_FLOAT && ((value.bit_and(I64{9223372036854775807})) >> I64{52}) == I64{2047}) -> panic("JSON cannot encode a non-finite Float")
+        text: if kind == DYN_INT -> jet_rt_int_to_string(value) else -> jet_rt_float_debug(rt_f64_from_bits(value))
         jet_rt_string_builder_push(target, text)
         jet_rt_string_drop(text)
         return
     }
-    if kind == DATA_TREE_NUMBER {
+    if kind == DYN_NUMBER {
         jet_rt_string_builder_push(target, value)
         return
     }
-    if kind == DATA_TREE_TEXT {
-        data_tree_quote(target, value)
+    if kind == DYN_TEXT {
+        dyn_quote(target, value)
         return
     }
-    if kind == DATA_TREE_BYTE_LIST {
+    if kind == DYN_BYTE_LIST {
         text: data_dyn_bytes_text(value)
-        data_tree_quote(target, text)
+        dyn_quote(target, text)
         jet_rt_string_drop(text)
         return
     }
-    if kind == DATA_TREE_DATETIME {
+    if kind == DYN_DATETIME {
         text: data_dyn_datetime_text(value)
-        data_tree_quote(target, text)
+        dyn_quote(target, text)
         jet_rt_string_drop(text)
         return
     }
-    object: kind == DATA_TREE_OBJECT
+    object: kind == DYN_OBJECT
     rt_text_push_word(target, if object -> I64{123} else -> I64{91}, I64{1})
-    length: data_tree_word(wrapping(value + DATA_SEQUENCE_LENGTH))
-    data: data_tree_word(wrapping(value + DATA_SEQUENCE_DATA))
+    length: dyn_word(wrapping(value + DATA_SEQUENCE_LENGTH))
+    data: dyn_word(wrapping(value + DATA_SEQUENCE_DATA))
     at := I64{0}
     loop at < length {
         if (at != I64{0}) -> rt_text_push_word(target, I64{44}, I64{1})
         if object {
-            data_tree_quote(target, data_tree_word(wrapping(wrapping(data + at * DATA_TREE_ENTRY_BYTES) + DATA_TREE_ENTRY_KEY)))
+            dyn_quote(target, dyn_word(wrapping(wrapping(data + at * DYN_ENTRY_BYTES) + DYN_ENTRY_KEY)))
             rt_text_push_word(target, I64{58}, I64{1})
-            data_tree_render(target, data_tree_word(wrapping(wrapping(data + at * DATA_TREE_ENTRY_BYTES) + DATA_TREE_ENTRY_VALUE)))
-        } else { data_tree_render(target, data_tree_word(wrapping(data + at * DATA_TREE_ELEMENT_BYTES))) }
+            dyn_render(target, dyn_word(wrapping(wrapping(data + at * DYN_ENTRY_BYTES) + DYN_ENTRY_VALUE)))
+        } else { dyn_render(target, dyn_word(wrapping(data + at * DYN_ELEMENT_BYTES))) }
         at += I64{1}
     }
     rt_text_push_word(target, if object -> I64{125} else -> I64{93}, I64{1})
 }
 #Export(c) jet_rt_handle_show_dyn: fn(tree: I64) -> I64 {
-    kind: data_tree_word(wrapping(tree + DATA_TREE_TAG))
-    value: data_tree_word(wrapping(tree + DATA_TREE_PAYLOAD))
-    if kind == DATA_TREE_TEXT || kind == DATA_TREE_NUMBER -> return jet_rt_string_clone(value)
-    if kind == DATA_TREE_INT -> return jet_rt_int_to_string(value)
-    if kind == DATA_TREE_FLOAT -> return jet_rt_float_debug(rt_f64_from_bits(value))
-    if kind == DATA_TREE_BOOL -> return jet_rt_string_clone(if (value == I64{0}) -> rt_static_text("false") else -> rt_static_text("true"))
-    if kind == DATA_TREE_BYTE_LIST -> return data_dyn_bytes_text(value)
-    if kind == DATA_TREE_DATETIME -> return data_dyn_datetime_text(value)
+    kind: dyn_word(wrapping(tree + DYN_TAG))
+    value: dyn_word(wrapping(tree + DYN_PAYLOAD))
+    if kind == DYN_TEXT || kind == DYN_NUMBER -> return jet_rt_string_clone(value)
+    if kind == DYN_INT -> return jet_rt_int_to_string(value)
+    if kind == DYN_FLOAT -> return jet_rt_float_debug(rt_f64_from_bits(value))
+    if kind == DYN_BOOL -> return jet_rt_string_clone(if (value == I64{0}) -> rt_static_text("false") else -> rt_static_text("true"))
+    if kind == DYN_BYTE_LIST -> return data_dyn_bytes_text(value)
+    if kind == DYN_DATETIME -> return data_dyn_datetime_text(value)
     jet_rt_handle_debug_dyn(tree)
 }
 #Export(c) jet_rt_handle_display_dyn: fn(tree: I64) -> I64 { jet_rt_handle_show_dyn(tree) }
 #Export(c) jet_rt_handle_debug_dyn: fn(tree: I64) -> I64 {
     target: jet_rt_string_builder_new()
-    data_tree_render(target, tree)
+    dyn_render(target, tree)
     jet_rt_string_builder_finish(target)
 }
 // JetDynAccess::field: the first entry with this key is cloned out; a missing
@@ -205,16 +205,16 @@ data_tree_render: fn(target: I64, tree: I64) {
 // tree and name; err receives an owned List payload of one owned FieldError
 // (CAbiRoutes list_out, length via err_len).
 #Export(c) jet_dyn_field: fn(tree: I64, name: I64, ok: I64, err: I64, err_len: I64) -> I64 {
-    object: data_tree_word(wrapping(tree + DATA_TREE_TAG)) == DATA_TREE_OBJECT
+    object: dyn_word(wrapping(tree + DYN_TAG)) == DYN_OBJECT
     if object {
-        sequence: data_tree_word(wrapping(tree + DATA_TREE_PAYLOAD))
-        length: data_tree_word(wrapping(sequence + DATA_SEQUENCE_LENGTH))
-        data: data_tree_word(wrapping(sequence + DATA_SEQUENCE_DATA))
+        sequence: dyn_word(wrapping(tree + DYN_PAYLOAD))
+        length: dyn_word(wrapping(sequence + DATA_SEQUENCE_LENGTH))
+        data: dyn_word(wrapping(sequence + DATA_SEQUENCE_DATA))
         at := I64{0}
         loop at < length {
-            entry: wrapping(data + at * DATA_TREE_ENTRY_BYTES)
-            if jet_rt_string_eq(data_tree_word(wrapping(entry + DATA_TREE_ENTRY_KEY)), name) {
-                data_tree_store(ok, jet_rt_handle_clone_dyn(data_tree_word(wrapping(entry + DATA_TREE_ENTRY_VALUE))))
+            entry: wrapping(data + at * DYN_ENTRY_BYTES)
+            if jet_rt_string_eq(dyn_word(wrapping(entry + DYN_ENTRY_KEY)), name) {
+                dyn_store(ok, jet_rt_handle_clone_dyn(dyn_word(wrapping(entry + DYN_ENTRY_VALUE))))
                 return I64{1}
             }
             at += I64{1}
@@ -227,42 +227,42 @@ data_tree_render: fn(target: I64, tree: I64) {
         jet_rt_string_builder_push(target, rt_static_text("` not found"))
     } else {
         jet_rt_string_builder_push(target, rt_static_text("expected object, got "))
-        data_tree_render(target, tree)
+        dyn_render(target, tree)
     }
     error: jet_rt_alloc(TEXT_FIELD_BYTES, I64{8})
     text_glue_store(wrapping(error + TEXT_FIELD_PATH), jet_rt_string_clone(name))
     text_glue_store(wrapping(error + TEXT_FIELD_REASON), jet_rt_string_builder_finish(target))
     slot: jet_rt_alloc(I64{8}, I64{8})
-    data_tree_store(slot, error)
-    data_tree_store(err, slot)
-    data_tree_store(err_len, I64{1})
+    dyn_store(slot, error)
+    dyn_store(err, slot)
+    dyn_store(err_len, I64{1})
     I64{0}
 }
 // JetDynAccess::to_text: scalar leaves project exactly as Show does
 // (jet_rt_handle_show_dyn); Null, Array and Object are None.
 #Export(c) jet_dyn_to_text: fn(tree: I64, some: I64) -> I64 {
-    kind: data_tree_word(wrapping(tree + DATA_TREE_TAG))
-    if kind == DATA_TREE_NULL || kind >= DATA_TREE_ARRAY -> return I64{0}
-    data_tree_store(some, jet_rt_handle_show_dyn(tree))
+    kind: dyn_word(wrapping(tree + DYN_TAG))
+    if kind == DYN_NULL || kind >= DYN_ARRAY -> return I64{0}
+    dyn_store(some, jet_rt_handle_show_dyn(tree))
     I64{1}
 }
 // render_dyn_json(tree, false, 0) after `prefix`; owned.
-data_tree_got: fn(prefix: I64, tree: I64) -> I64 {
+dyn_got: fn(prefix: I64, tree: I64) -> I64 {
     target: jet_rt_string_builder_new()
     jet_rt_string_builder_push(target, prefix)
-    data_tree_render(target, tree)
+    dyn_render(target, tree)
     jet_rt_string_builder_finish(target)
 }
 // One FieldError at `path` (consumed) with `reason` (consumed) in the
 // CAbiRoutes list_out shape jet_dyn_field writes.
-data_tree_field_error: fn(path: I64, reason: I64, err: I64, err_len: I64) -> I64 {
+dyn_field_error: fn(path: I64, reason: I64, err: I64, err_len: I64) -> I64 {
     error: jet_rt_alloc(TEXT_FIELD_BYTES, I64{8})
     text_glue_store(wrapping(error + TEXT_FIELD_PATH), path)
     text_glue_store(wrapping(error + TEXT_FIELD_REASON), reason)
     slot: jet_rt_alloc(I64{8}, I64{8})
-    data_tree_store(slot, error)
-    data_tree_store(err, slot)
-    data_tree_store(err_len, I64{1})
+    dyn_store(slot, error)
+    dyn_store(err, slot)
+    dyn_store(err_len, I64{1})
     I64{0}
 }
 // JetDynAccess::at: Array item `index`, counted from the end when negative;
@@ -272,102 +272,102 @@ data_tree_field_error: fn(path: I64, reason: I64, err: I64, err_len: I64) -> I64
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     path_text: jet_rt_string_builder_new()
     rt_text_push_word(path_text, I64{91}, I64{1})
-    data_tree_push_count(path_text, position)
+    dyn_push_count(path_text, position)
     rt_text_push_word(path_text, I64{93}, I64{1})
     path: jet_rt_string_builder_finish(path_text)
-    if data_tree_word(wrapping(tree + DATA_TREE_TAG)) != DATA_TREE_ARRAY -> return data_tree_field_error(path, data_tree_got(rt_static_text("expected array, got "), tree), err, err_len)
-    length: data_tree_word(wrapping(data_tree_word(wrapping(tree + DATA_TREE_PAYLOAD)) + DATA_SEQUENCE_LENGTH))
-    found: data_tree_array_item(tree, if (position < I64{0}) -> length + position else -> position)
+    if dyn_word(wrapping(tree + DYN_TAG)) != DYN_ARRAY -> return dyn_field_error(path, dyn_got(rt_static_text("expected array, got "), tree), err, err_len)
+    length: dyn_word(wrapping(dyn_word(wrapping(tree + DYN_PAYLOAD)) + DATA_SEQUENCE_LENGTH))
+    found: dyn_array_item(tree, if (position < I64{0}) -> length + position else -> position)
     if (found == I64{0}) {
         reason: jet_rt_string_builder_new()
         jet_rt_string_builder_push(reason, rt_static_text("index "))
-        data_tree_push_count(reason, position)
+        dyn_push_count(reason, position)
         jet_rt_string_builder_push(reason, rt_static_text(" out of bounds (len "))
-        data_tree_push_count(reason, length)
+        dyn_push_count(reason, length)
         rt_text_push_word(reason, I64{41}, I64{1})
-        return data_tree_field_error(path, jet_rt_string_builder_finish(reason), err, err_len)
+        return dyn_field_error(path, jet_rt_string_builder_finish(reason), err, err_len)
     }
     jet_rt_string_drop(path)
-    data_tree_store(ok, jet_rt_handle_clone_dyn(found))
+    dyn_store(ok, jet_rt_handle_clone_dyn(found))
     I64{1}
 }
-data_tree_scalar_error: fn(prefix: I64, tree: I64, err: I64, err_len: I64) -> I64 {
-    data_tree_field_error(jet_rt_string_clone(rt_static_text("")), data_tree_got(prefix, tree), err, err_len)
+dyn_scalar_error: fn(prefix: I64, tree: I64, err: I64, err_len: I64) -> I64 {
+    dyn_field_error(jet_rt_string_clone(rt_static_text("")), dyn_got(prefix, tree), err, err_len)
 }
 // JetDynAccess::int: an Int, or a Number lexeme that is an exact integer
 // (json_exact_integer_text then the exact parse).
 #Export(c) jet_dyn_int: fn(tree: I64, ok: I64, err: I64, err_len: I64) -> I64 {
-    kind: data_tree_word(wrapping(tree + DATA_TREE_TAG))
-    payload: data_tree_word(wrapping(tree + DATA_TREE_PAYLOAD))
-    if kind == DATA_TREE_INT {
-        data_tree_store(ok, jet_rt_int_clone(payload))
+    kind: dyn_word(wrapping(tree + DYN_TAG))
+    payload: dyn_word(wrapping(tree + DYN_PAYLOAD))
+    if kind == DYN_INT {
+        dyn_store(ok, jet_rt_int_clone(payload))
         return I64{1}
     }
-    if kind == DATA_TREE_NUMBER {
+    if kind == DYN_NUMBER {
         if (codec_integer_text(payload, ok) == I64{0}) {
-            jet_rt_string_drop(data_tree_word(ok))
-            return data_tree_scalar_error(rt_static_text("expected int, got "), tree, err, err_len)
+            jet_rt_string_drop(dyn_word(ok))
+            return dyn_scalar_error(rt_static_text("expected int, got "), tree, err, err_len)
         }
-        text: data_tree_word(ok)
+        text: dyn_word(ok)
         parsed: jet_int_parse(text, ok, err)
         jet_rt_string_drop(text)
         if (parsed != I64{0}) -> return I64{1}
-        jet_rt_string_drop(data_tree_word(err))
+        jet_rt_string_drop(dyn_word(err))
     }
-    data_tree_scalar_error(rt_static_text("expected int, got "), tree, err, err_len)
+    dyn_scalar_error(rt_static_text("expected int, got "), tree, err, err_len)
 }
 // JetDynAccess::text: only a Text leaf.
 #Export(c) jet_dyn_text: fn(tree: I64, ok: I64, err: I64, err_len: I64) -> I64 {
-    if data_tree_word(wrapping(tree + DATA_TREE_TAG)) != DATA_TREE_TEXT -> return data_tree_scalar_error(rt_static_text("expected text, got "), tree, err, err_len)
-    data_tree_store(ok, jet_rt_string_clone(data_tree_word(wrapping(tree + DATA_TREE_PAYLOAD))))
+    if dyn_word(wrapping(tree + DYN_TAG)) != DYN_TEXT -> return dyn_scalar_error(rt_static_text("expected text, got "), tree, err, err_len)
+    dyn_store(ok, jet_rt_string_clone(dyn_word(wrapping(tree + DYN_PAYLOAD))))
     I64{1}
 }
 // JetDynAccess::bool: only a Bool leaf.
 #Export(c) jet_dyn_bool: fn(tree: I64, ok: I64, err: I64, err_len: I64) -> I64 {
-    if data_tree_word(wrapping(tree + DATA_TREE_TAG)) != DATA_TREE_BOOL -> return data_tree_scalar_error(rt_static_text("expected bool, got "), tree, err, err_len)
-    rt_text_put(ok, if (data_tree_word(wrapping(tree + DATA_TREE_PAYLOAD)) != I64{0}) -> I64{1} else -> I64{0})
+    if dyn_word(wrapping(tree + DYN_TAG)) != DYN_BOOL -> return dyn_scalar_error(rt_static_text("expected bool, got "), tree, err, err_len)
+    rt_text_put(ok, if (dyn_word(wrapping(tree + DYN_PAYLOAD)) != I64{0}) -> I64{1} else -> I64{0})
     I64{1}
 }
 // JetDynAccess::float: a Float, a finite Int, or a finite trimmed Number
 // lexeme.
 #Export(c) jet_dyn_float: fn(tree: I64, ok: I64, err: I64, err_len: I64) -> I64 {
-    kind: data_tree_word(wrapping(tree + DATA_TREE_TAG))
-    payload: data_tree_word(wrapping(tree + DATA_TREE_PAYLOAD))
-    if kind == DATA_TREE_FLOAT {
-        data_tree_store(ok, payload)
+    kind: dyn_word(wrapping(tree + DYN_TAG))
+    payload: dyn_word(wrapping(tree + DYN_PAYLOAD))
+    if kind == DYN_FLOAT {
+        dyn_store(ok, payload)
         return I64{1}
     }
-    if kind == DATA_TREE_INT {
+    if kind == DYN_INT {
         bits: rt_f64_bits(jet_int_owned_to_f64(payload))
-        if !codec_finite(bits) -> return data_tree_field_error(jet_rt_string_clone(rt_static_text("")), jet_rt_string_clone(rt_static_text("expected float, got out-of-range Int")), err, err_len)
-        data_tree_store(ok, bits)
+        if !codec_finite(bits) -> return dyn_field_error(jet_rt_string_clone(rt_static_text("")), jet_rt_string_clone(rt_static_text("expected float, got out-of-range Int")), err, err_len)
+        dyn_store(ok, bits)
         return I64{1}
     }
-    if kind == DATA_TREE_NUMBER {
+    if kind == DYN_NUMBER {
         if (jet_float_parse(payload, ok, err) != I64{0}) {
-            if codec_finite(data_tree_word(ok)) -> return I64{1}
+            if codec_finite(dyn_word(ok)) -> return I64{1}
         } else {
-            jet_rt_string_drop(data_tree_word(err))
+            jet_rt_string_drop(dyn_word(err))
         }
     }
-    data_tree_scalar_error(rt_static_text("expected float, got "), tree, err, err_len)
+    dyn_scalar_error(rt_static_text("expected float, got "), tree, err, err_len)
 }
 // JetDynAccess::equal_unordered: structural equality where an Object's entries
 // match in any order (each right entry used once) and NaN equals nothing.
 #Export(c) jet_dyn_equal_unordered: fn(left: I64, right: I64) -> Bool {
-    kind: data_tree_word(wrapping(left + DATA_TREE_TAG))
-    if kind != data_tree_word(wrapping(right + DATA_TREE_TAG)) -> return false
-    if kind != DATA_TREE_ARRAY && kind != DATA_TREE_OBJECT -> return jet_rt_handle_eq_dyn(left, right)
-    a: data_tree_word(wrapping(left + DATA_TREE_PAYLOAD))
-    b: data_tree_word(wrapping(right + DATA_TREE_PAYLOAD))
-    length: data_tree_word(wrapping(a + DATA_SEQUENCE_LENGTH))
-    if length != data_tree_word(wrapping(b + DATA_SEQUENCE_LENGTH)) -> return false
-    ap: data_tree_word(wrapping(a + DATA_SEQUENCE_DATA))
-    bp: data_tree_word(wrapping(b + DATA_SEQUENCE_DATA))
-    if kind == DATA_TREE_ARRAY {
+    kind: dyn_word(wrapping(left + DYN_TAG))
+    if kind != dyn_word(wrapping(right + DYN_TAG)) -> return false
+    if kind != DYN_ARRAY && kind != DYN_OBJECT -> return jet_rt_handle_eq_dyn(left, right)
+    a: dyn_word(wrapping(left + DYN_PAYLOAD))
+    b: dyn_word(wrapping(right + DYN_PAYLOAD))
+    length: dyn_word(wrapping(a + DATA_SEQUENCE_LENGTH))
+    if length != dyn_word(wrapping(b + DATA_SEQUENCE_LENGTH)) -> return false
+    ap: dyn_word(wrapping(a + DATA_SEQUENCE_DATA))
+    bp: dyn_word(wrapping(b + DATA_SEQUENCE_DATA))
+    if kind == DYN_ARRAY {
         at := I64{0}
         loop at < length {
-            if !jet_dyn_equal_unordered(data_tree_word(wrapping(ap + at * DATA_TREE_ELEMENT_BYTES)), data_tree_word(wrapping(bp + at * DATA_TREE_ELEMENT_BYTES))) -> return false
+            if !jet_dyn_equal_unordered(dyn_word(wrapping(ap + at * DYN_ELEMENT_BYTES)), dyn_word(wrapping(bp + at * DYN_ELEMENT_BYTES))) -> return false
             at += I64{1}
         }
         return true
@@ -377,13 +377,13 @@ data_tree_scalar_error: fn(prefix: I64, tree: I64, err: I64, err_len: I64) -> I6
     same := true
     at := I64{0}
     loop same && at < length {
-        entry: wrapping(ap + at * DATA_TREE_ENTRY_BYTES)
+        entry: wrapping(ap + at * DYN_ENTRY_BYTES)
         matched := false
         other := I64{0}
         loop !matched && other < length {
-            candidate: wrapping(bp + other * DATA_TREE_ENTRY_BYTES)
-            if (data_tree_word(wrapping(used + other * I64{8})) == I64{0} && jet_rt_string_eq(data_tree_word(wrapping(entry + DATA_TREE_ENTRY_KEY)), data_tree_word(wrapping(candidate + DATA_TREE_ENTRY_KEY))) && jet_dyn_equal_unordered(data_tree_word(wrapping(entry + DATA_TREE_ENTRY_VALUE)), data_tree_word(wrapping(candidate + DATA_TREE_ENTRY_VALUE)))) {
-                data_tree_store(wrapping(used + other * I64{8}), I64{1})
+            candidate: wrapping(bp + other * DYN_ENTRY_BYTES)
+            if (dyn_word(wrapping(used + other * I64{8})) == I64{0} && jet_rt_string_eq(dyn_word(wrapping(entry + DYN_ENTRY_KEY)), dyn_word(wrapping(candidate + DYN_ENTRY_KEY))) && jet_dyn_equal_unordered(dyn_word(wrapping(entry + DYN_ENTRY_VALUE)), dyn_word(wrapping(candidate + DYN_ENTRY_VALUE)))) {
+                dyn_store(wrapping(used + other * I64{8}), I64{1})
                 matched = true
             }
             other += I64{1}
@@ -396,50 +396,50 @@ data_tree_scalar_error: fn(prefix: I64, tree: I64, err: I64, err_len: I64) -> I6
 }
 // Generated by Tools/agent/RuntimeGenerators.jet from core.encoding.__dyn_kind; do not edit.
 // dyn_kind: the diagnostic name of a runtime tree's kind.
-data_tree_kind_name: fn(kind: I64) -> I64 {
-    if kind == DATA_TREE_NULL -> return rt_static_text("Null")
-    if kind == DATA_TREE_BOOL -> return rt_static_text("Bool")
-    if kind == DATA_TREE_INT -> return rt_static_text("Int")
-    if kind == DATA_TREE_FLOAT -> return rt_static_text("Float")
-    if kind == DATA_TREE_NUMBER -> return rt_static_text("number")
-    if kind == DATA_TREE_TEXT -> return rt_static_text("Text")
-    if kind == DATA_TREE_BYTE_LIST -> return rt_static_text("Bytes")
-    if kind == DATA_TREE_DATETIME -> return rt_static_text("DateTime")
-    if kind == DATA_TREE_ARRAY -> return rt_static_text("a list")
+dyn_kind_name: fn(kind: I64) -> I64 {
+    if kind == DYN_NULL -> return rt_static_text("Null")
+    if kind == DYN_BOOL -> return rt_static_text("Bool")
+    if kind == DYN_INT -> return rt_static_text("Int")
+    if kind == DYN_FLOAT -> return rt_static_text("Float")
+    if kind == DYN_NUMBER -> return rt_static_text("number")
+    if kind == DYN_TEXT -> return rt_static_text("Text")
+    if kind == DYN_BYTE_LIST -> return rt_static_text("Bytes")
+    if kind == DYN_DATETIME -> return rt_static_text("DateTime")
+    if kind == DYN_ARRAY -> return rt_static_text("a list")
     rt_static_text("an object")
 }
 // End of the generated dyn_kind rows.
 // get_opt: the borrowed value of the first Object entry named `key`; 0 for a
 // miss or a tree that is not an Object.
-data_tree_object_find: fn(tree: I64, key: I64) -> I64 {
-    if data_tree_word(wrapping(tree + DATA_TREE_TAG)) != DATA_TREE_OBJECT -> return I64{0}
-    sequence: data_tree_word(wrapping(tree + DATA_TREE_PAYLOAD))
-    length: data_tree_word(wrapping(sequence + DATA_SEQUENCE_LENGTH))
-    data: data_tree_word(wrapping(sequence + DATA_SEQUENCE_DATA))
+dyn_object_find: fn(tree: I64, key: I64) -> I64 {
+    if dyn_word(wrapping(tree + DYN_TAG)) != DYN_OBJECT -> return I64{0}
+    sequence: dyn_word(wrapping(tree + DYN_PAYLOAD))
+    length: dyn_word(wrapping(sequence + DATA_SEQUENCE_LENGTH))
+    data: dyn_word(wrapping(sequence + DATA_SEQUENCE_DATA))
     at := I64{0}
     loop at < length {
-        entry: wrapping(data + at * DATA_TREE_ENTRY_BYTES)
-        if jet_rt_string_eq(data_tree_word(wrapping(entry + DATA_TREE_ENTRY_KEY)), key) -> return data_tree_word(wrapping(entry + DATA_TREE_ENTRY_VALUE))
+        entry: wrapping(data + at * DYN_ENTRY_BYTES)
+        if jet_rt_string_eq(dyn_word(wrapping(entry + DYN_ENTRY_KEY)), key) -> return dyn_word(wrapping(entry + DYN_ENTRY_VALUE))
         at += I64{1}
     }
     I64{0}
 }
 // The borrowed Array item at `position`; 0 when out of range or not an Array.
-data_tree_array_item: fn(tree: I64, position: I64) -> I64 {
-    if data_tree_word(wrapping(tree + DATA_TREE_TAG)) != DATA_TREE_ARRAY -> return I64{0}
-    sequence: data_tree_word(wrapping(tree + DATA_TREE_PAYLOAD))
-    if (position < I64{0} || position >= data_tree_word(wrapping(sequence + DATA_SEQUENCE_LENGTH))) -> return I64{0}
-    data_tree_word(wrapping(data_tree_word(wrapping(sequence + DATA_SEQUENCE_DATA)) + position * DATA_TREE_ELEMENT_BYTES))
+dyn_array_item: fn(tree: I64, position: I64) -> I64 {
+    if dyn_word(wrapping(tree + DYN_TAG)) != DYN_ARRAY -> return I64{0}
+    sequence: dyn_word(wrapping(tree + DYN_PAYLOAD))
+    if (position < I64{0} || position >= dyn_word(wrapping(sequence + DATA_SEQUENCE_LENGTH))) -> return I64{0}
+    dyn_word(wrapping(dyn_word(wrapping(sequence + DATA_SEQUENCE_DATA)) + position * DYN_ELEMENT_BYTES))
 }
 // jet_dyn_stop_message: a builder holding "{site}: ".
-data_tree_stop_begin: fn(site: I64) -> I64 {
+dyn_stop_begin: fn(site: I64) -> I64 {
     target: jet_rt_string_builder_new()
     jet_rt_string_builder_push(target, site)
     jet_rt_string_builder_push(target, rt_static_text(": "))
     target
 }
 // Pushes the decimal text of a native i64.
-data_tree_push_count: fn(target: I64, count: I64) {
+dyn_push_count: fn(target: I64, count: I64) {
     exact: jet_int_owned_from_i64(count)
     text: jet_rt_int_to_string(exact)
     jet_rt_string_builder_push(target, text)
@@ -448,59 +448,59 @@ data_tree_push_count: fn(target: I64, count: I64) {
 }
 // jet_dyn_get_key: Some(clone) of the first entry named `key`.
 #Export(c) jet_dyn_get_key: fn(tree: I64, key: I64, some: I64) -> I64 {
-    found: data_tree_object_find(tree, key)
+    found: dyn_object_find(tree, key)
     if (found == I64{0}) -> return I64{0}
-    data_tree_store(some, jet_rt_handle_clone_dyn(found))
+    dyn_store(some, jet_rt_handle_clone_dyn(found))
     I64{1}
 }
 // jet_dyn_get_at: Some(clone) of the Array item at `index`.
 #Export(c) jet_dyn_get_at: fn(tree: I64, index: I64, some: I64) -> I64 {
     position: jet_int_owned_to_i64(index)
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
-    found: data_tree_array_item(tree, position)
+    found: dyn_array_item(tree, position)
     if (found == I64{0}) -> return I64{0}
-    data_tree_store(some, jet_rt_handle_clone_dyn(found))
+    dyn_store(some, jet_rt_handle_clone_dyn(found))
     I64{1}
 }
 // jet_dyn_has: an Object has an entry named `key`.
-#Export(c) jet_dyn_has: fn(tree: I64, key: I64) -> Bool { data_tree_object_find(tree, key) != I64{0} }
+#Export(c) jet_dyn_has: fn(tree: I64, key: I64) -> Bool { dyn_object_find(tree, key) != I64{0} }
 // jet_dyn_keys: an Object's keys in entry order; empty for every other kind.
 // Returns the count and an owned word column of texts.
 #Export(c) jet_dyn_keys: fn(tree: I64, output: I64) -> I64 {
-    if data_tree_word(wrapping(tree + DATA_TREE_TAG)) != DATA_TREE_OBJECT {
-        data_tree_store(output, I64{0})
+    if dyn_word(wrapping(tree + DYN_TAG)) != DYN_OBJECT {
+        dyn_store(output, I64{0})
         return I64{0}
     }
-    sequence: data_tree_word(wrapping(tree + DATA_TREE_PAYLOAD))
-    length: data_tree_word(wrapping(sequence + DATA_SEQUENCE_LENGTH))
-    data: data_tree_word(wrapping(sequence + DATA_SEQUENCE_DATA))
+    sequence: dyn_word(wrapping(tree + DYN_PAYLOAD))
+    length: dyn_word(wrapping(sequence + DATA_SEQUENCE_LENGTH))
+    data: dyn_word(wrapping(sequence + DATA_SEQUENCE_DATA))
     words: if (length == I64{0}) -> I64{0} else -> jet_rt_alloc(length * I64{8}, I64{8})
     at := I64{0}
     loop at < length {
-        data_tree_store(wrapping(words + at * I64{8}), jet_rt_string_clone(data_tree_word(wrapping(wrapping(data + at * DATA_TREE_ENTRY_BYTES) + DATA_TREE_ENTRY_KEY))))
+        dyn_store(wrapping(words + at * I64{8}), jet_rt_string_clone(dyn_word(wrapping(wrapping(data + at * DYN_ENTRY_BYTES) + DYN_ENTRY_KEY))))
         at += I64{1}
     }
-    data_tree_store(output, words)
+    dyn_store(output, words)
     length
 }
 // jet_dyn_index_key: Ok(clone) of the first entry named `key`, else the
 // "{site}..." stop text. ok and err share the caller's slot.
 #Export(c) jet_dyn_index_key: fn(tree: I64, key: I64, site: I64, ok: I64, err: I64) -> I64 {
-    found: data_tree_object_find(tree, key)
+    found: dyn_object_find(tree, key)
     if (found != I64{0}) {
-        data_tree_store(ok, jet_rt_handle_clone_dyn(found))
+        dyn_store(ok, jet_rt_handle_clone_dyn(found))
         return I64{1}
     }
-    kind: data_tree_word(wrapping(tree + DATA_TREE_TAG))
-    target: data_tree_stop_begin(site)
-    if kind == DATA_TREE_OBJECT {
+    kind: dyn_word(wrapping(tree + DYN_TAG))
+    target: dyn_stop_begin(site)
+    if kind == DYN_OBJECT {
         jet_rt_string_builder_push(target, rt_static_text("no key "))
         rt_text_push_rust_debug_str(target, key)
     } else {
         jet_rt_string_builder_push(target, rt_static_text("expected an object, found "))
-        jet_rt_string_builder_push(target, data_tree_kind_name(kind))
+        jet_rt_string_builder_push(target, dyn_kind_name(kind))
     }
-    data_tree_store(err, jet_rt_string_builder_finish(target))
+    dyn_store(err, jet_rt_string_builder_finish(target))
     I64{0}
 }
 // jet_dyn_index_at: Ok(clone) of the Array item at `index`, else the
@@ -508,54 +508,54 @@ data_tree_push_count: fn(target: I64, count: I64) {
 #Export(c) jet_dyn_index_at: fn(tree: I64, index: I64, site: I64, ok: I64, err: I64) -> I64 {
     position: jet_int_owned_to_i64(index)
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
-    found: data_tree_array_item(tree, position)
+    found: dyn_array_item(tree, position)
     if (found != I64{0}) {
-        data_tree_store(ok, jet_rt_handle_clone_dyn(found))
+        dyn_store(ok, jet_rt_handle_clone_dyn(found))
         return I64{1}
     }
-    kind: data_tree_word(wrapping(tree + DATA_TREE_TAG))
-    target: data_tree_stop_begin(site)
-    if kind == DATA_TREE_ARRAY {
+    kind: dyn_word(wrapping(tree + DYN_TAG))
+    target: dyn_stop_begin(site)
+    if kind == DYN_ARRAY {
         jet_rt_string_builder_push(target, rt_static_text("index "))
-        data_tree_push_count(target, position)
+        dyn_push_count(target, position)
         jet_rt_string_builder_push(target, rt_static_text(" is out of range (length "))
-        data_tree_push_count(target, data_tree_word(wrapping(data_tree_word(wrapping(tree + DATA_TREE_PAYLOAD)) + DATA_SEQUENCE_LENGTH)))
+        dyn_push_count(target, dyn_word(wrapping(dyn_word(wrapping(tree + DYN_PAYLOAD)) + DATA_SEQUENCE_LENGTH)))
         jet_rt_string_builder_push(target, rt_static_text(")"))
     } else {
         jet_rt_string_builder_push(target, rt_static_text("expected an array, found "))
-        jet_rt_string_builder_push(target, data_tree_kind_name(kind))
+        jet_rt_string_builder_push(target, dyn_kind_name(kind))
     }
-    data_tree_store(err, jet_rt_string_builder_finish(target))
+    dyn_store(err, jet_rt_string_builder_finish(target))
     I64{0}
 }
 // Stores the "{site}: {detail}" stop text into err.
-data_tree_operator_stop: fn(site: I64, detail: I64, err: I64) -> I64 {
-    target: data_tree_stop_begin(site)
+dyn_operator_stop: fn(site: I64, detail: I64, err: I64) -> I64 {
+    target: dyn_stop_begin(site)
     jet_rt_string_builder_push(target, detail)
-    data_tree_store(err, jet_rt_string_builder_finish(target))
+    dyn_store(err, jet_rt_string_builder_finish(target))
     I64{0}
 }
 // Stores the "{site}: {verb} {left kind}{joint}{right kind}" stop text into err.
-data_tree_kinds_stop: fn(site: I64, verb: I64, left: I64, joint: I64, right: I64, err: I64) -> I64 {
-    target: data_tree_stop_begin(site)
+dyn_kinds_stop: fn(site: I64, verb: I64, left: I64, joint: I64, right: I64, err: I64) -> I64 {
+    target: dyn_stop_begin(site)
     jet_rt_string_builder_push(target, verb)
-    jet_rt_string_builder_push(target, data_tree_kind_name(data_tree_word(wrapping(left + DATA_TREE_TAG))))
+    jet_rt_string_builder_push(target, dyn_kind_name(dyn_word(wrapping(left + DYN_TAG))))
     jet_rt_string_builder_push(target, joint)
-    jet_rt_string_builder_push(target, data_tree_kind_name(data_tree_word(wrapping(right + DATA_TREE_TAG))))
-    data_tree_store(err, jet_rt_string_builder_finish(target))
+    jet_rt_string_builder_push(target, dyn_kind_name(dyn_word(wrapping(right + DYN_TAG))))
+    dyn_store(err, jet_rt_string_builder_finish(target))
     I64{0}
 }
 // Stores the "{site}: {detail}{op}" stop text into err.
-data_tree_unknown_operator: fn(site: I64, detail: I64, op: I64, err: I64) -> I64 {
-    target: data_tree_stop_begin(site)
+dyn_unknown_operator: fn(site: I64, detail: I64, op: I64, err: I64) -> I64 {
+    target: dyn_stop_begin(site)
     jet_rt_string_builder_push(target, detail)
     jet_rt_string_builder_push(target, op)
-    data_tree_store(err, jet_rt_string_builder_finish(target))
+    dyn_store(err, jet_rt_string_builder_finish(target))
     I64{0}
 }
-data_tree_numeric: fn(kind: I64) -> Bool { kind == DATA_TREE_INT || kind == DATA_TREE_FLOAT }
-data_tree_f64: fn(kind: I64, payload: I64) -> Float {
-    if kind == DATA_TREE_INT -> return jet_int_owned_to_f64(payload)
+dyn_numeric: fn(kind: I64) -> Bool { kind == DYN_INT || kind == DYN_FLOAT }
+dyn_f64: fn(kind: I64, payload: I64) -> Float {
+    if kind == DYN_INT -> return jet_int_owned_to_f64(payload)
     rt_f64_from_bits(payload)
 }
 // jet_dyn_binary: `+ - *` of two Int leaves is their exact Int and `/` the
@@ -563,41 +563,41 @@ data_tree_f64: fn(kind: I64, payload: I64) -> Float {
 // give the Float result. Any other pair stops with "{site}: cannot {verb} {left
 // kind} by {right kind}". ok and err share the caller's slot.
 #Export(c) jet_dyn_binary: fn(left: I64, right: I64, op: I64, site: I64, ok: I64, err: I64) -> I64 {
-    left_kind: data_tree_word(wrapping(left + DATA_TREE_TAG))
-    right_kind: data_tree_word(wrapping(right + DATA_TREE_TAG))
-    a: data_tree_word(wrapping(left + DATA_TREE_PAYLOAD))
-    b: data_tree_word(wrapping(right + DATA_TREE_PAYLOAD))
+    left_kind: dyn_word(wrapping(left + DYN_TAG))
+    right_kind: dyn_word(wrapping(right + DYN_TAG))
+    a: dyn_word(wrapping(left + DYN_PAYLOAD))
+    b: dyn_word(wrapping(right + DYN_PAYLOAD))
     sum: jet_rt_string_eq(op, rt_static_text("+"))
     difference: jet_rt_string_eq(op, rt_static_text("-"))
     product: jet_rt_string_eq(op, rt_static_text("*"))
     quotient: jet_rt_string_eq(op, rt_static_text("/"))
-    if left_kind == DATA_TREE_INT && right_kind == DATA_TREE_INT {
+    if left_kind == DYN_INT && right_kind == DYN_INT {
         if quotient {
-            if (b == I64{0}) -> return data_tree_operator_stop(site, rt_static_text("division by zero"), err)
-            data_tree_store(ok, data_tree_new(DATA_TREE_FLOAT, rt_f64_bits(int_ratio_to_f64(a, b))))
+            if (b == I64{0}) -> return dyn_operator_stop(site, rt_static_text("division by zero"), err)
+            dyn_store(ok, dyn_new(DYN_FLOAT, rt_f64_bits(int_ratio_to_f64(a, b))))
             return I64{1}
         }
-        if !sum && !difference && !product -> return data_tree_unknown_operator(site, rt_static_text("unknown Dyn operator "), op, err)
+        if !sum && !difference && !product -> return dyn_unknown_operator(site, rt_static_text("unknown Dyn operator "), op, err)
         value: if {
             sum -> jet_int_add(a, b)
             difference -> jet_int_sub(a, b)
             else -> jet_int_mul(a, b)
         }
-        data_tree_store(ok, data_tree_new(DATA_TREE_INT, value))
+        dyn_store(ok, dyn_new(DYN_INT, value))
         return I64{1}
     }
-    if data_tree_numeric(left_kind) && data_tree_numeric(right_kind) {
-        x: data_tree_f64(left_kind, a)
-        y: data_tree_f64(right_kind, b)
-        if !sum && !difference && !product && !quotient -> return data_tree_unknown_operator(site, rt_static_text("unknown Dyn operator "), op, err)
-        if (quotient && y == Float{0.0}) -> return data_tree_operator_stop(site, rt_static_text("division by zero"), err)
+    if dyn_numeric(left_kind) && dyn_numeric(right_kind) {
+        x: dyn_f64(left_kind, a)
+        y: dyn_f64(right_kind, b)
+        if !sum && !difference && !product && !quotient -> return dyn_unknown_operator(site, rt_static_text("unknown Dyn operator "), op, err)
+        if (quotient && y == Float{0.0}) -> return dyn_operator_stop(site, rt_static_text("division by zero"), err)
         value: if {
             sum -> x + y
             difference -> x - y
             product -> x * y
             else -> x / y
         }
-        data_tree_store(ok, data_tree_new(DATA_TREE_FLOAT, rt_f64_bits(value)))
+        dyn_store(ok, dyn_new(DYN_FLOAT, rt_f64_bits(value)))
         return I64{1}
     }
     verb: if {
@@ -607,13 +607,13 @@ data_tree_f64: fn(kind: I64, payload: I64) -> Float {
         quotient -> rt_static_text("cannot divide ")
         else -> rt_static_text("cannot combine ")
     }
-    data_tree_kinds_stop(site, verb, left, rt_static_text(" by "), right, err)
+    dyn_kinds_stop(site, verb, left, rt_static_text(" by "), right, err)
 }
 // The exact order of an Int and a finite or infinite Float (Rust
 // dyn_integer_float_compare): -1, 0 or 1, or 2 when the Float is NaN. The
 // Int's nearest Float decides unless it equals the Float; an equal Float is
 // either exact or a whole number, compared as an Int.
-data_tree_int_float_order: fn(integer: I64, float: Float) -> I64 {
+dyn_int_float_order: fn(integer: I64, float: Float) -> I64 {
     if float != float -> return I64{2}
     infinity: Float{1.0} / Float{0.0}
     if float == infinity -> return I64{-1}
@@ -632,7 +632,7 @@ data_tree_int_float_order: fn(integer: I64, float: Float) -> I64 {
     jet_rt_int_drop(whole)
     order
 }
-data_tree_word_order: fn(left: I64, right: I64) -> I64 {
+dyn_word_order: fn(left: I64, right: I64) -> I64 {
     if {
         left < right -> I64{-1}
         left > right -> I64{1}
@@ -640,44 +640,44 @@ data_tree_word_order: fn(left: I64, right: I64) -> I64 {
     }
 }
 // Two Bytes leaves bytewise, a prefix first.
-data_tree_bytes_order: fn(left: I64, right: I64) -> I64 {
-    left_length: data_tree_word(wrapping(left + DATA_SEQUENCE_LENGTH))
-    right_length: data_tree_word(wrapping(right + DATA_SEQUENCE_LENGTH))
-    left_data: data_tree_word(wrapping(left + DATA_SEQUENCE_DATA))
-    right_data: data_tree_word(wrapping(right + DATA_SEQUENCE_DATA))
+dyn_bytes_order: fn(left: I64, right: I64) -> I64 {
+    left_length: dyn_word(wrapping(left + DATA_SEQUENCE_LENGTH))
+    right_length: dyn_word(wrapping(right + DATA_SEQUENCE_LENGTH))
+    left_data: dyn_word(wrapping(left + DATA_SEQUENCE_DATA))
+    right_data: dyn_word(wrapping(right + DATA_SEQUENCE_DATA))
     at := I64{0}
     loop at < left_length && at < right_length {
-        order: data_tree_word_order(host_u8_get(left_data, at), host_u8_get(right_data, at))
+        order: dyn_word_order(host_u8_get(left_data, at), host_u8_get(right_data, at))
         if (order != I64{0}) -> return order
         at += I64{1}
     }
-    data_tree_word_order(left_length, right_length)
+    dyn_word_order(left_length, right_length)
 }
 // Two DateTime leaves by instant: POSIX seconds, then the leap label, then
 // nanoseconds (DynDateTime::instant_key); the frozen offset does not count.
-data_tree_datetime_order: fn(left: I64, right: I64) -> I64 {
-    seconds: data_tree_word_order(data_tree_word(wrapping(left + DYN_DATETIME_SECS)), data_tree_word(wrapping(right + DYN_DATETIME_SECS)))
+dyn_datetime_order: fn(left: I64, right: I64) -> I64 {
+    seconds: dyn_word_order(dyn_word(wrapping(left + DYN_DATETIME_SECS)), dyn_word(wrapping(right + DYN_DATETIME_SECS)))
     if (seconds != I64{0}) -> return seconds
-    leap: data_tree_word_order(data_tree_word(wrapping(left + DYN_DATETIME_LEAP)), data_tree_word(wrapping(right + DYN_DATETIME_LEAP)))
+    leap: dyn_word_order(dyn_word(wrapping(left + DYN_DATETIME_LEAP)), dyn_word(wrapping(right + DYN_DATETIME_LEAP)))
     if (leap != I64{0}) -> return leap
-    data_tree_word_order(data_tree_word(wrapping(left + DYN_DATETIME_NANOS)), data_tree_word(wrapping(right + DYN_DATETIME_NANOS)))
+    dyn_word_order(dyn_word(wrapping(left + DYN_DATETIME_NANOS)), dyn_word(wrapping(right + DYN_DATETIME_NANOS)))
 }
 // -1, 0 or 1; 2 for an unordered pair (a NaN); 3 when the kinds don't order.
-data_tree_order: fn(left: I64, right: I64) -> I64 {
-    left_kind: data_tree_word(wrapping(left + DATA_TREE_TAG))
-    right_kind: data_tree_word(wrapping(right + DATA_TREE_TAG))
-    a: data_tree_word(wrapping(left + DATA_TREE_PAYLOAD))
-    b: data_tree_word(wrapping(right + DATA_TREE_PAYLOAD))
-    if left_kind == DATA_TREE_TEXT && right_kind == DATA_TREE_TEXT -> return jet_rt_string_compare(a, b)
-    if left_kind == DATA_TREE_BYTE_LIST && right_kind == DATA_TREE_BYTE_LIST -> return data_tree_bytes_order(a, b)
-    if left_kind == DATA_TREE_DATETIME && right_kind == DATA_TREE_DATETIME -> return data_tree_datetime_order(a, b)
-    if left_kind == DATA_TREE_INT && right_kind == DATA_TREE_INT -> return jet_int_compare(a, b)
-    if left_kind == DATA_TREE_INT && right_kind == DATA_TREE_FLOAT -> return data_tree_int_float_order(a, rt_f64_from_bits(b))
-    if left_kind == DATA_TREE_FLOAT && right_kind == DATA_TREE_INT {
-        order: data_tree_int_float_order(b, rt_f64_from_bits(a))
+dyn_order: fn(left: I64, right: I64) -> I64 {
+    left_kind: dyn_word(wrapping(left + DYN_TAG))
+    right_kind: dyn_word(wrapping(right + DYN_TAG))
+    a: dyn_word(wrapping(left + DYN_PAYLOAD))
+    b: dyn_word(wrapping(right + DYN_PAYLOAD))
+    if left_kind == DYN_TEXT && right_kind == DYN_TEXT -> return jet_rt_string_compare(a, b)
+    if left_kind == DYN_BYTE_LIST && right_kind == DYN_BYTE_LIST -> return dyn_bytes_order(a, b)
+    if left_kind == DYN_DATETIME && right_kind == DYN_DATETIME -> return dyn_datetime_order(a, b)
+    if left_kind == DYN_INT && right_kind == DYN_INT -> return jet_int_compare(a, b)
+    if left_kind == DYN_INT && right_kind == DYN_FLOAT -> return dyn_int_float_order(a, rt_f64_from_bits(b))
+    if left_kind == DYN_FLOAT && right_kind == DYN_INT {
+        order: dyn_int_float_order(b, rt_f64_from_bits(a))
         return if (order == I64{2}) -> order else -> -order
     }
-    if left_kind == DATA_TREE_FLOAT && right_kind == DATA_TREE_FLOAT {
+    if left_kind == DYN_FLOAT && right_kind == DYN_FLOAT {
         x: rt_f64_from_bits(a)
         y: rt_f64_from_bits(b)
         return if {
@@ -700,14 +700,14 @@ data_tree_order: fn(left: I64, right: I64) -> I64 {
         rt_text_put(ok, if equal -> I64{1} else -> I64{0})
         return I64{1}
     }
-    order: data_tree_order(left, right)
-    if (order == I64{3}) -> return data_tree_kinds_stop(site, rt_static_text("cannot compare "), left, rt_static_text(" with "), right, err)
+    order: dyn_order(left, right)
+    if (order == I64{3}) -> return dyn_kinds_stop(site, rt_static_text("cannot compare "), left, rt_static_text(" with "), right, err)
     holds: if {
         jet_rt_string_eq(op, rt_static_text("<")) -> order == I64{-1}
         jet_rt_string_eq(op, rt_static_text("<=")) -> order == I64{-1} || order == I64{0}
         jet_rt_string_eq(op, rt_static_text(">")) -> order == I64{1}
         jet_rt_string_eq(op, rt_static_text(">=")) -> order == I64{1} || order == I64{0}
-        else -> { return data_tree_unknown_operator(site, rt_static_text("unknown Dyn comparison "), op, err) }
+        else -> { return dyn_unknown_operator(site, rt_static_text("unknown Dyn comparison "), op, err) }
     }
     rt_text_put(ok, if holds -> I64{1} else -> I64{0})
     I64{1}
@@ -715,24 +715,24 @@ data_tree_order: fn(left: I64, right: I64) -> I64 {
 // jet_dyn_remove: an Object's first entry named `key` leaves the tree in place;
 // Some(that value), else None for a miss or a non-Object.
 #Export(c) jet_dyn_remove: fn(tree: I64, key: I64, some: I64) -> I64 {
-    if (data_tree_word(wrapping(tree + DATA_TREE_TAG)) != DATA_TREE_OBJECT) -> return I64{0}
-    sequence: data_tree_word(wrapping(tree + DATA_TREE_PAYLOAD))
-    length: data_tree_word(wrapping(sequence + DATA_SEQUENCE_LENGTH))
-    data: data_tree_word(wrapping(sequence + DATA_SEQUENCE_DATA))
+    if (dyn_word(wrapping(tree + DYN_TAG)) != DYN_OBJECT) -> return I64{0}
+    sequence: dyn_word(wrapping(tree + DYN_PAYLOAD))
+    length: dyn_word(wrapping(sequence + DATA_SEQUENCE_LENGTH))
+    data: dyn_word(wrapping(sequence + DATA_SEQUENCE_DATA))
     at := I64{0}
     loop at < length {
-        entry: wrapping(data + at * DATA_TREE_ENTRY_BYTES)
-        if (jet_rt_string_eq(data_tree_word(wrapping(entry + DATA_TREE_ENTRY_KEY)), key)) {
-            data_tree_store(some, data_tree_word(wrapping(entry + DATA_TREE_ENTRY_VALUE)))
-            jet_rt_string_drop(data_tree_word(wrapping(entry + DATA_TREE_ENTRY_KEY)))
+        entry: wrapping(data + at * DYN_ENTRY_BYTES)
+        if (jet_rt_string_eq(dyn_word(wrapping(entry + DYN_ENTRY_KEY)), key)) {
+            dyn_store(some, dyn_word(wrapping(entry + DYN_ENTRY_VALUE)))
+            jet_rt_string_drop(dyn_word(wrapping(entry + DYN_ENTRY_KEY)))
             later := at + I64{1}
             loop later < length {
-                from: wrapping(data + later * DATA_TREE_ENTRY_BYTES)
-                data_tree_store(wrapping(wrapping(from - DATA_TREE_ENTRY_BYTES) + DATA_TREE_ENTRY_KEY), data_tree_word(wrapping(from + DATA_TREE_ENTRY_KEY)))
-                data_tree_store(wrapping(wrapping(from - DATA_TREE_ENTRY_BYTES) + DATA_TREE_ENTRY_VALUE), data_tree_word(wrapping(from + DATA_TREE_ENTRY_VALUE)))
+                from: wrapping(data + later * DYN_ENTRY_BYTES)
+                dyn_store(wrapping(wrapping(from - DYN_ENTRY_BYTES) + DYN_ENTRY_KEY), dyn_word(wrapping(from + DYN_ENTRY_KEY)))
+                dyn_store(wrapping(wrapping(from - DYN_ENTRY_BYTES) + DYN_ENTRY_VALUE), dyn_word(wrapping(from + DYN_ENTRY_VALUE)))
                 later += I64{1}
             }
-            data_tree_store(wrapping(sequence + DATA_SEQUENCE_LENGTH), length - I64{1})
+            dyn_store(wrapping(sequence + DATA_SEQUENCE_LENGTH), length - I64{1})
             return I64{1}
         }
         at += I64{1}
@@ -741,9 +741,9 @@ data_tree_order: fn(left: I64, right: I64) -> I64 {
 }
 // A refused set_path step: the owned `value` is dropped and err takes the
 // "{site}: ..." stop text; the builder already holds the step detail.
-data_tree_set_refused: fn(target: I64, value: I64, err: I64) -> I64 {
+dyn_set_refused: fn(target: I64, value: I64, err: I64) -> I64 {
     jet_rt_handle_drop_dyn(value)
-    data_tree_store(err, jet_rt_string_builder_finish(target))
+    dyn_store(err, jet_rt_string_builder_finish(target))
     I64{0}
 }
 // jet_dyn_set_path over `steps`, a runtime Array of Text (key) and Int (index)
@@ -751,66 +751,66 @@ data_tree_set_refused: fn(target: I64, value: I64, err: I64) -> I64 {
 // owned `value` (their contents swap, and the value's shell drops the replaced
 // contents). Every refusal names its step as Rust does.
 #Export(c) jet_dyn_set_path: fn(tree: I64, steps: I64, value: I64, site: I64, err: I64) -> I64 {
-    sequence: data_tree_word(wrapping(steps + DATA_TREE_PAYLOAD))
-    count: data_tree_word(wrapping(sequence + DATA_SEQUENCE_LENGTH))
-    data: data_tree_word(wrapping(sequence + DATA_SEQUENCE_DATA))
+    sequence: dyn_word(wrapping(steps + DYN_PAYLOAD))
+    count: dyn_word(wrapping(sequence + DATA_SEQUENCE_LENGTH))
+    data: dyn_word(wrapping(sequence + DATA_SEQUENCE_DATA))
     node := tree
     at := I64{0}
     loop at < count {
-        step: data_tree_word(wrapping(data + at * DATA_TREE_ELEMENT_BYTES))
-        kind: data_tree_word(wrapping(node + DATA_TREE_TAG))
-        if (data_tree_word(wrapping(step + DATA_TREE_TAG)) == DATA_TREE_TEXT) {
-            key: data_tree_word(wrapping(step + DATA_TREE_PAYLOAD))
-            if (kind != DATA_TREE_OBJECT) {
-                target: data_tree_stop_begin(site)
+        step: dyn_word(wrapping(data + at * DYN_ELEMENT_BYTES))
+        kind: dyn_word(wrapping(node + DYN_TAG))
+        if (dyn_word(wrapping(step + DYN_TAG)) == DYN_TEXT) {
+            key: dyn_word(wrapping(step + DYN_PAYLOAD))
+            if (kind != DYN_OBJECT) {
+                target: dyn_stop_begin(site)
                 jet_rt_string_builder_push(target, rt_static_text("expected an object, found "))
-                jet_rt_string_builder_push(target, data_tree_kind_name(kind))
-                return data_tree_set_refused(target, value, err)
+                jet_rt_string_builder_push(target, dyn_kind_name(kind))
+                return dyn_set_refused(target, value, err)
             }
-            found: data_tree_object_find(node, key)
+            found: dyn_object_find(node, key)
             if (found == I64{0}) {
                 if (at + I64{1} == count) {
-                    data_sequence_push(data_tree_word(wrapping(node + DATA_TREE_PAYLOAD)), key, value, true)
+                    data_sequence_push(dyn_word(wrapping(node + DYN_PAYLOAD)), key, value, true)
                     return I64{1}
                 }
-                target: data_tree_stop_begin(site)
+                target: dyn_stop_begin(site)
                 jet_rt_string_builder_push(target, rt_static_text("no key "))
                 rt_text_push_rust_debug_str(target, key)
-                return data_tree_set_refused(target, value, err)
+                return dyn_set_refused(target, value, err)
             }
             node = found
         } else {
-            position: jet_int_owned_to_i64(data_tree_word(wrapping(step + DATA_TREE_PAYLOAD)))
+            position: jet_int_owned_to_i64(dyn_word(wrapping(step + DYN_PAYLOAD)))
             if (jet_scheduler_native_propagate() != I64{0}) {
                 jet_rt_handle_drop_dyn(value)
                 return I64{0}
             }
-            if (kind != DATA_TREE_ARRAY) {
-                target: data_tree_stop_begin(site)
+            if (kind != DYN_ARRAY) {
+                target: dyn_stop_begin(site)
                 jet_rt_string_builder_push(target, rt_static_text("expected an array, found "))
-                jet_rt_string_builder_push(target, data_tree_kind_name(kind))
-                return data_tree_set_refused(target, value, err)
+                jet_rt_string_builder_push(target, dyn_kind_name(kind))
+                return dyn_set_refused(target, value, err)
             }
-            found: data_tree_array_item(node, position)
+            found: dyn_array_item(node, position)
             if (found == I64{0}) {
-                target: data_tree_stop_begin(site)
+                target: dyn_stop_begin(site)
                 jet_rt_string_builder_push(target, rt_static_text("index "))
-                data_tree_push_count(target, position)
+                dyn_push_count(target, position)
                 jet_rt_string_builder_push(target, rt_static_text(" is out of range (length "))
-                data_tree_push_count(target, data_tree_word(wrapping(data_tree_word(wrapping(node + DATA_TREE_PAYLOAD)) + DATA_SEQUENCE_LENGTH)))
+                dyn_push_count(target, dyn_word(wrapping(dyn_word(wrapping(node + DYN_PAYLOAD)) + DATA_SEQUENCE_LENGTH)))
                 jet_rt_string_builder_push(target, rt_static_text(")"))
-                return data_tree_set_refused(target, value, err)
+                return dyn_set_refused(target, value, err)
             }
             node = found
         }
         at += I64{1}
     }
-    replaced_kind: data_tree_word(wrapping(node + DATA_TREE_TAG))
-    replaced_payload: data_tree_word(wrapping(node + DATA_TREE_PAYLOAD))
-    data_tree_store(wrapping(node + DATA_TREE_TAG), data_tree_word(wrapping(value + DATA_TREE_TAG)))
-    data_tree_store(wrapping(node + DATA_TREE_PAYLOAD), data_tree_word(wrapping(value + DATA_TREE_PAYLOAD)))
-    data_tree_store(wrapping(value + DATA_TREE_TAG), replaced_kind)
-    data_tree_store(wrapping(value + DATA_TREE_PAYLOAD), replaced_payload)
+    replaced_kind: dyn_word(wrapping(node + DYN_TAG))
+    replaced_payload: dyn_word(wrapping(node + DYN_PAYLOAD))
+    dyn_store(wrapping(node + DYN_TAG), dyn_word(wrapping(value + DYN_TAG)))
+    dyn_store(wrapping(node + DYN_PAYLOAD), dyn_word(wrapping(value + DYN_PAYLOAD)))
+    dyn_store(wrapping(value + DYN_TAG), replaced_kind)
+    dyn_store(wrapping(value + DYN_PAYLOAD), replaced_payload)
     jet_rt_handle_drop_dyn(value)
     I64{1}
 }
@@ -823,63 +823,63 @@ data_tree_set_refused: fn(target: I64, value: I64, err: I64) -> I64 {
     rt_text_append(target, detail, length)
     jet_rt_string_builder_finish(target)
 }
-#Export(c) jet_rt_record_tag_dyn: fn(tree: I64) -> I64 { data_tree_word(wrapping(tree + DATA_TREE_TAG)) }
-#Export(c) jet_rt_record_new_dyn_null: fn() -> I64 { data_tree_new(DATA_TREE_NULL, I64{0}) }
-#Export(c) jet_rt_record_new_dyn_bool: fn(value: Bool) -> I64 { data_tree_new(DATA_TREE_BOOL, if value -> I64{1} else -> I64{0}) }
-#Export(c) jet_rt_record_new_dyn_int: fn(value: I64) -> I64 { data_tree_new(DATA_TREE_INT, jet_rt_int_clone(value)) }
-#Export(c) jet_rt_record_new_dyn_float: fn(value: Float) -> I64 { data_tree_new(DATA_TREE_FLOAT, rt_f64_bits(value)) }
-#Export(c) jet_rt_record_new_dyn_number: fn(value: I64) -> I64 { data_tree_new(DATA_TREE_NUMBER, jet_rt_string_clone(value)) }
-#Export(c) jet_rt_record_new_dyn_text: fn(value: I64) -> I64 { data_tree_new(DATA_TREE_TEXT, jet_rt_string_clone(value)) }
-#Export(c) jet_rt_record_new_dyn_bytes: fn(value: I64) -> I64 { data_tree_new(DATA_TREE_BYTE_LIST, value) }
-#Export(c) jet_rt_record_new_dyn_date_time: fn(value: I64) -> I64 { data_tree_new(DATA_TREE_DATETIME, data_dyn_datetime_clone(value)) }
-#Export(c) jet_rt_record_new_dyn_array: fn(value: I64) -> I64 { data_tree_new(DATA_TREE_ARRAY, value) }
-#Export(c) jet_rt_record_new_dyn_object: fn(value: I64) -> I64 { data_tree_new(DATA_TREE_OBJECT, value) }
-#Export(c) jet_rt_record_get_dyn_bool: fn(tree: I64) -> Bool { data_tree_payload(tree, DATA_TREE_BOOL) != I64{0} }
+#Export(c) jet_rt_record_tag_dyn: fn(tree: I64) -> I64 { dyn_word(wrapping(tree + DYN_TAG)) }
+#Export(c) jet_rt_record_new_dyn_null: fn() -> I64 { dyn_new(DYN_NULL, I64{0}) }
+#Export(c) jet_rt_record_new_dyn_bool: fn(value: Bool) -> I64 { dyn_new(DYN_BOOL, if value -> I64{1} else -> I64{0}) }
+#Export(c) jet_rt_record_new_dyn_int: fn(value: I64) -> I64 { dyn_new(DYN_INT, jet_rt_int_clone(value)) }
+#Export(c) jet_rt_record_new_dyn_float: fn(value: Float) -> I64 { dyn_new(DYN_FLOAT, rt_f64_bits(value)) }
+#Export(c) jet_rt_record_new_dyn_number: fn(value: I64) -> I64 { dyn_new(DYN_NUMBER, jet_rt_string_clone(value)) }
+#Export(c) jet_rt_record_new_dyn_text: fn(value: I64) -> I64 { dyn_new(DYN_TEXT, jet_rt_string_clone(value)) }
+#Export(c) jet_rt_record_new_dyn_bytes: fn(value: I64) -> I64 { dyn_new(DYN_BYTE_LIST, value) }
+#Export(c) jet_rt_record_new_dyn_date_time: fn(value: I64) -> I64 { dyn_new(DYN_DATETIME, data_dyn_datetime_clone(value)) }
+#Export(c) jet_rt_record_new_dyn_array: fn(value: I64) -> I64 { dyn_new(DYN_ARRAY, value) }
+#Export(c) jet_rt_record_new_dyn_object: fn(value: I64) -> I64 { dyn_new(DYN_OBJECT, value) }
+#Export(c) jet_rt_record_get_dyn_bool: fn(tree: I64) -> Bool { dyn_payload(tree, DYN_BOOL) != I64{0} }
 #Export(c) jet_rt_record_get_dyn_int: fn(tree: I64) -> I64 {
-    payload: data_tree_payload(tree, DATA_TREE_INT)
+    payload: dyn_payload(tree, DYN_INT)
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     jet_rt_int_clone(payload)
 }
 #Export(c) jet_rt_record_get_dyn_float: fn(tree: I64) -> Float {
-    payload: data_tree_payload(tree, DATA_TREE_FLOAT)
+    payload: dyn_payload(tree, DYN_FLOAT)
     if (jet_scheduler_native_propagate() != I64{0}) -> return Float{0.0}
     rt_f64_from_bits(payload)
 }
 #Export(c) jet_rt_record_get_dyn_number: fn(tree: I64) -> I64 {
-    payload: data_tree_payload(tree, DATA_TREE_NUMBER)
+    payload: dyn_payload(tree, DYN_NUMBER)
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     jet_rt_string_clone(payload)
 }
 #Export(c) jet_rt_record_get_dyn_text: fn(tree: I64) -> I64 {
-    payload: data_tree_payload(tree, DATA_TREE_TEXT)
+    payload: dyn_payload(tree, DYN_TEXT)
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     jet_rt_string_clone(payload)
 }
-#Export(c) jet_rt_record_get_dyn_bytes: fn(tree: I64) -> I64 { data_tree_payload(tree, DATA_TREE_BYTE_LIST) }
+#Export(c) jet_rt_record_get_dyn_bytes: fn(tree: I64) -> I64 { dyn_payload(tree, DYN_BYTE_LIST) }
 #Export(c) jet_rt_record_get_dyn_date_time: fn(tree: I64) -> I64 {
-    payload: data_tree_payload(tree, DATA_TREE_DATETIME)
+    payload: dyn_payload(tree, DYN_DATETIME)
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     data_dyn_datetime_clone(payload)
 }
-#Export(c) jet_rt_record_get_dyn_array: fn(tree: I64) -> I64 { data_tree_payload(tree, DATA_TREE_ARRAY) }
-#Export(c) jet_rt_record_get_dyn_object: fn(tree: I64) -> I64 { data_tree_payload(tree, DATA_TREE_OBJECT) }
-#Export(c) jet_rt_record_seq_list_rec_dyn_new: fn(capacity: I64) -> I64 { data_sequence_new(capacity, DATA_TREE_ELEMENT_BYTES) }
-#Export(c) jet_rt_record_seq_list_rec_dyn_len: fn(sequence: I64) -> I64 { data_tree_word(wrapping(sequence + DATA_SEQUENCE_LENGTH)) }
-#Export(c) jet_rt_record_seq_list_rec_dyn_get: fn(sequence: I64, index: I64) -> I64 { data_tree_word(data_sequence_slot(sequence, index, DATA_TREE_ELEMENT_BYTES)) }
+#Export(c) jet_rt_record_get_dyn_array: fn(tree: I64) -> I64 { dyn_payload(tree, DYN_ARRAY) }
+#Export(c) jet_rt_record_get_dyn_object: fn(tree: I64) -> I64 { dyn_payload(tree, DYN_OBJECT) }
+#Export(c) jet_rt_record_seq_list_rec_dyn_new: fn(capacity: I64) -> I64 { data_sequence_new(capacity, DYN_ELEMENT_BYTES) }
+#Export(c) jet_rt_record_seq_list_rec_dyn_len: fn(sequence: I64) -> I64 { dyn_word(wrapping(sequence + DATA_SEQUENCE_LENGTH)) }
+#Export(c) jet_rt_record_seq_list_rec_dyn_get: fn(sequence: I64, index: I64) -> I64 { dyn_word(data_sequence_slot(sequence, index, DYN_ELEMENT_BYTES)) }
 #Export(c) jet_rt_record_seq_list_rec_dyn_push: fn(sequence: I64, tree: I64) { data_sequence_push(sequence, I64{0}, tree, false) }
-#Export(c) jet_rt_record_seq_entries_rec_dyn_new: fn(capacity: I64) -> I64 { data_sequence_new(capacity, DATA_TREE_ENTRY_BYTES) }
-#Export(c) jet_rt_record_seq_entries_rec_dyn_len: fn(sequence: I64) -> I64 { data_tree_word(wrapping(sequence + DATA_SEQUENCE_LENGTH)) }
+#Export(c) jet_rt_record_seq_entries_rec_dyn_new: fn(capacity: I64) -> I64 { data_sequence_new(capacity, DYN_ENTRY_BYTES) }
+#Export(c) jet_rt_record_seq_entries_rec_dyn_len: fn(sequence: I64) -> I64 { dyn_word(wrapping(sequence + DATA_SEQUENCE_LENGTH)) }
 #Export(c) jet_rt_record_seq_entries_rec_dyn_get: fn(sequence: I64, index: I64, key: I64) -> I64 {
-    slot: data_sequence_slot(sequence, index, DATA_TREE_ENTRY_BYTES)
-    data_tree_store(key, jet_rt_string_clone(data_tree_word(wrapping(slot + DATA_TREE_ENTRY_KEY))))
-    data_tree_word(wrapping(slot + DATA_TREE_ENTRY_VALUE))
+    slot: data_sequence_slot(sequence, index, DYN_ENTRY_BYTES)
+    dyn_store(key, jet_rt_string_clone(dyn_word(wrapping(slot + DYN_ENTRY_KEY))))
+    dyn_word(wrapping(slot + DYN_ENTRY_VALUE))
 }
 #Export(c) jet_rt_record_seq_entries_rec_dyn_push: fn(sequence: I64, key: I64, tree: I64) { data_sequence_push(sequence, key, tree, true) }
 
 // RFC4648 standard alphabet with padding.
 data_dyn_bytes_text: fn(sequence: I64) -> I64 {
-    length: data_tree_word(wrapping(sequence + DATA_SEQUENCE_LENGTH))
-    data: data_tree_word(wrapping(sequence + DATA_SEQUENCE_DATA))
+    length: dyn_word(wrapping(sequence + DATA_SEQUENCE_LENGTH))
+    data: dyn_word(wrapping(sequence + DATA_SEQUENCE_DATA))
     alphabet: rt_static_text("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/")
     target: jet_rt_string_builder_new()
     at := I64{0}
@@ -901,8 +901,8 @@ data_dyn_datetime_clone: fn(value: I64) -> I64 {
 // Split seconds into days/remainder before adding the frozen i32 offset,
 // retaining Rust's i128 sum at both i64 extremes.
 data_dyn_datetime_text: fn(value: I64) -> I64 {
-    seconds: data_tree_word(wrapping(value + DYN_DATETIME_SECS))
-    offset: data_tree_word(wrapping(value + DYN_DATETIME_OFFSET))
+    seconds: dyn_word(wrapping(value + DYN_DATETIME_SECS))
+    offset: dyn_word(wrapping(value + DYN_DATETIME_OFFSET))
     remainder: seconds %% I64{86400}
     local_remainder: (if (remainder < I64{0}) -> remainder + I64{86400} else -> remainder) + offset
     days: seconds /% I64{86400} + local_remainder /% I64{86400}
@@ -928,8 +928,8 @@ data_dyn_datetime_text: fn(value: I64) -> I64 {
     rt_text_push_scalar(target, I64{58})
     time_glue_pad(target, clock /% I64{60} %% I64{60}, I64{2})
     rt_text_push_scalar(target, I64{58})
-    time_glue_pad(target, if (data_tree_word(wrapping(value + DYN_DATETIME_LEAP)) != I64{0}) -> I64{60} else -> clock %% I64{60}, I64{2})
-    nanos: data_tree_word(wrapping(value + DYN_DATETIME_NANOS))
+    time_glue_pad(target, if (dyn_word(wrapping(value + DYN_DATETIME_LEAP)) != I64{0}) -> I64{60} else -> clock %% I64{60}, I64{2})
+    nanos: dyn_word(wrapping(value + DYN_DATETIME_NANOS))
     if (nanos != I64{0}) {
         rt_text_push_scalar(target, I64{46})
         digits := I64{9}

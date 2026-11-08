@@ -2212,7 +2212,7 @@ sema_function_check_pass: fn(func: Func, owner_id: SymbolID, function_kind: TFun
     sema_function_header_external_target(func, diagnostics, diagnostics_start)
     // Rust `check_value_block` over the body: a value body reports E0114 when
     // it can reach its end without a value.
-    if returns_value && !sema_stmt_check_value_block_end(func.body, statements.value, Val(effective_return), func.span, context.function_name, diagnostics) -> complete = false
+    if returns_value && !sema_stmt_check_value_block_end(func.body, statements.value, Val(effective_return), func.span, context.function_name, scopes, diagnostics) -> complete = false
     // Validation borrows the original checked rows. Once that loan ends the
     // same vector moves into the function; no owning TStmt-vector copy.
     body := statements.value.move()
@@ -3375,7 +3375,7 @@ sema_check_registration_module_program: fn(environment: SemaScopeEnvironment, pr
                 }
                 .CodeModule(definition) -> {
                     if definition.body != None && !sema_inline_module_lowered(definition) {
-                        if sema_inline_module_import_unbuilt(definition, graph.modules[module_index].program.imports) == .Val(diagnostic) {
+                        if sema_inline_module_import_unbuilt(definition) == .Val(diagnostic) {
                             module_result.diagnostics.push(diagnostic)
                         } else {
                             module_result.complete = false

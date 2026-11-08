@@ -1,0 +1,56 @@
+// The forms_table browser check: open the served FormsTable page in the
+// Chromium locked in the working directory's `.jet/lock`, check the typed
+// form's generated markup, fill and submit it, and wait for the action's
+// observable result.
+//   jet run --allow=Env,Exec,FS,IO,Net,Time forms_browser.jet -- <url>
+use {
+    browser: core.web.browser
+    process: core.process
+    time: core.time
+}
+
+C_MARKUP: [String]{
+    "method=\"post\" action=\"/actions/save\"",
+    "<input name=\"name\" id=\"Person-name\" type=\"text\" aria-label=\"name\" aria-invalid=\"false\" required",
+    "value=\"Ada\">",
+    "<button type=\"submit\">Submit</button>",
+}
+
+fail: fn(message: String) -> Never {
+    eprint(message)
+    process.exit(1)
+}
+
+run: fn() {
+    args: process.args()
+    if args.len() != 1 -> fail("usage: forms_browser.jet <url>")
+    session: browser.launch("chromium") ?? fail("Chromium did not launch: {err}")
+    outcome: check(session, args[0])
+    session.close() ?? fail("Chromium did not close: {err}")
+    if outcome != "" -> fail(outcome)
+    print("PASS forms table typed action browser fixture")
+}
+
+// "" when the form round-trips, else the failure.
+check: fn(session: Browser, url: String) -[Env, Net, Time, Time.Wait]> String Never! {
+    context: session.context() ?? return "no browsing context: {err}"
+    page: context.page() ?? return "no page: {err}"
+    page.goto(url) ?? return "navigation failed: {err}"
+    markup: page.dom() ?? return "the page markup is unreadable: {err}"
+    loop fragment in C_MARKUP {
+        if !markup.contains(fragment) -> return "typed form lost generated {fragment}: {markup}"
+    }
+    page.get_by_css("form [name=id]").fill("7") ?? return "id fill failed: {err}"
+    page.get_by_css("form [name=name]").fill("Ada") ?? return "name fill failed: {err}"
+    page.get_by_css("form [name=active]").click() ?? return "active click failed: {err}"
+    page.get_by_css("form button[type=submit]").click() ?? return "submit failed: {err}"
+    body := ""
+    attempt := 0
+    loop attempt < 100 {
+        body = page.text() ?? ""
+        if body.contains("saved Ada") -> return ""
+        time.sleep(50ms)
+        attempt += 1
+    }
+    "typed form action did not return the observable result: {body}"
+}

@@ -1,0 +1,287 @@
+#!/usr/bin/env jet
+// The loopback static server for the web cases and the compiled web
+// workloads:
+//
+//   jet run --allow=Env,FS,IO,Net,Time Tools/web-test/Serve.jet -- --port <port> --root <dir>
+//
+// It serves the regular files under the root on 127.0.0.1 only, one
+// request per connection, and prints `serving <root> on <port>` once it
+// listens; port 0 picks a free port and prints the one it got. `/` and a
+// directory serve its index.html. A request is refused
+// with 400 when its path leaves the root (a `..` that climbs out, a sibling
+// directory whose name starts with the root's name, a drive letter or a
+// doubled leading slash, a backslash or NUL, bad percent-encoding), when any
+// part of the path is a symbolic link, when the target is not a regular file
+// with exactly one link (a hard link could carry bytes from outside), and
+// when the root, an ancestor or the target is replaced while it is opened.
+// Each part is opened from its held parent directory without following a
+// link, and the opened directory or file must be the same file (device and
+// inode) that the path names before and after the open and again before the
+// bytes are sent. Anything else that cannot be opened is 404.
+
+use {
+    files: core.files
+    net: core.net
+    process: core.process
+    url: core.net.url
+}
+
+C_MAX_HEAD_BYTES: 32768
+C_READ_BYTES: 65536
+C_READ_TIMEOUT_MS: 5000
+
+ServeRoot: struct {
+    path: String
+    parts: [String]
+    directory: Directory
+    stat: Stat
+}
+
+HeldDir: struct {
+    directory: Directory
+    stat: Stat
+}
+
+HeldFile: struct {
+    reader: FileReader
+    stat: Stat
+}
+
+// One opened path part, or the status that refuses the request.
+Opened: enum {
+    Dir(HeldDir)
+    File(HeldFile)
+    Refused(Int)
+}
+
+Reply: struct {
+    status: Int
+    content_type: String
+    body: [U8]
+}
+
+run: fn() {
+    args: process.args()
+    port_text: option(args, "--port") ?? ""
+    root_arg: option(args, "--root") ?? ""
+    port: Int.parse(port_text) ?? -1
+    if port < 0 || root_arg == "" {
+        eprint("usage: Serve.jet --port <port> --root <dir>")
+        process.exit(2)
+    }
+    real: files.realpath(root_arg) ?? fail("root does not exist: {root_arg}")
+    directory: files.open_directory(real) ?? fail("root cannot be opened: {root_arg}")
+    stat: directory.stat() ?? fail("root cannot be opened: {root_arg}")
+    if !stat.is_dir || !has_identity(stat) -> fail("root cannot be opened: {root_arg}")
+    root: ServeRoot{path: real.copy(), parts: path_parts(real), directory: directory, stat: stat}
+    listener: net.tcp_listen("127.0.0.1:{port}") ?? fail("cannot listen on 127.0.0.1:{port}")
+    bound: listener.local_addr() ?? fail("cannot read the listening address")
+    address: "{bound}".split(":").to_list()
+    print("serving {root_arg} on {address[address.len() - 1]}")
+    loop -> serve_one(root, listener)
+}
+
+fail: fn(message: String) -> Never {
+    eprint(message)
+    process.exit(2)
+}
+
+option: fn(args: [String], name: String) -> String? {
+    loop index in 0..<args.len() {
+        if args[index] == name && index + 1 < args.len() -> return Val(args[index + 1].copy())
+    }
+    None
+}
+
+path_parts: fn(path: String) -> [String] {
+    parts := [String]{}
+    loop part in path.split("/").to_list() {
+        if part != "" -> parts.push(part.copy())
+    }
+    parts
+}
+
+serve_one: fn(root: ServeRoot, listener: TCPListener) {
+    stream := net.tcp_accept(listener) ?? return
+    net.set_read_timeout(stream, C_READ_TIMEOUT_MS).drop("an unset timeout only lets a silent client wait longer")
+    reply: if request_target(stream) == {
+        .Val(target) -> answer(root, target)
+        None -> refused(400)
+    }
+    send(stream, reply)
+    net.tcp_close(stream).drop("a client that already left needs no close")
+}
+
+// The request target of the first request line, once the whole head arrived.
+request_target: fn(stream: &TCPStream) -> String? {
+    head := [U8]{}
+    loop head.len() < C_MAX_HEAD_BYTES {
+        chunk: net.tcp_read_bytes(stream, 4096) ?? return None
+        if chunk.len() == 0 -> return None
+        loop byte in chunk -> head.push(byte)
+        if head_end(head) {
+            text: String.from_bytes_lossy(head)
+            line: text.split("\r\n").to_list()[0]
+            words: line.split(" ").to_list()
+            if words.len() != 3 -> return None
+            return Val(words[1].copy())
+        }
+    }
+    None
+}
+
+head_end: fn(head: [U8]) -> Bool {
+    if head.len() < 4 -> return false
+    loop index in 0..<head.len() - 3 {
+        if head[index] == (U8{13}) && head[index + 1] == (U8{10}) && head[index + 2] == (U8{13}) && head[index + 3] == (U8{10}) -> return true
+    }
+    false
+}
+
+send: fn(stream: &TCPStream, reply: Reply) {
+    reason: if reply.status == 200 -> "OK" else if reply.status == 400 -> "Bad Request" else -> "Not Found"
+    content_type: if reply.content_type == "" -> "" else -> "content-type: {reply.content_type}\r\n"
+    // Cross-origin isolation: the web runtime shares its memory through a
+    // SharedArrayBuffer, which a browser offers only to an isolated page.
+    isolation: "cross-origin-opener-policy: same-origin\r\ncross-origin-embedder-policy: require-corp\r\n"
+    head: "HTTP/1.1 {reply.status} {reason}\r\n{content_type}{isolation}content-length: {reply.body.len()}\r\nconnection: close\r\n\r\n"
+    net.tcp_write_all_bytes(stream, head.bytes()).drop("a client that left gets no reply")
+    net.tcp_write_all_bytes(stream, reply.body).drop("a client that left gets no body")
+}
+
+refused: fn(status: Int) -> Reply {
+    Reply{status: status, content_type: "", body: (if status == 400 -> "bad path" else -> "not found").bytes()}
+}
+
+answer: fn(root: ServeRoot, target: String) -> Reply {
+    parts: safe_parts(root.parts, target) ?? return refused(400)
+    current: files.lstat(root.path) ?? return refused(400)
+    if !current.is_dir || !same_file(root.stat, current) -> return refused(400)
+    walk(root, root.directory, root.path, parts, 0)
+}
+
+// The path parts under the root that `target` names, or None when the
+// decoded path is malformed or resolves outside the root.
+safe_parts: fn(root_parts: [String], target: String) -> [String]? {
+    raw: target.split("?").to_list()[0]
+    decoded: url.percent_decode(raw) ?? return None
+    bytes: decoded.bytes()
+    loop byte in bytes {
+        if byte == (U8{92}) || byte == (U8{0}) -> return None
+    }
+    start: if bytes.len() > 0 && bytes[0] == (U8{47}) -> 1 else -> 0
+    if bytes.len() > start {
+        first: bytes[start]
+        if first == (U8{47}) -> return None
+        letter: (first >= (U8{65}) && first <= (U8{90})) || (first >= (U8{97}) && first <= (U8{122}))
+        if letter && bytes.len() > start + 1 && bytes[start + 1] == (U8{58}) -> return None
+    }
+    relative: if decoded == "/" -> "/index.html" else -> decoded.copy()
+    resolved := root_parts.copy()
+    loop part in ".{relative}".split("/").to_list() {
+        if part == "" || part == "." -> next
+        if part == ".." {
+            if resolved.len() > 0 -> _: resolved.pop()
+            next
+        }
+        resolved.push(part.copy())
+    }
+    if resolved.len() <= root_parts.len() -> return None
+    loop index in 0..<root_parts.len() {
+        if resolved[index] != root_parts[index] -> return None
+    }
+    inside := [String]{}
+    loop index in root_parts.len()..<resolved.len() -> inside.push(resolved[index].copy())
+    Val(inside)
+}
+
+// Open parts[index..] below `parent`, holding each directory until the reply is read.
+walk: fn(root: ServeRoot, parent: Directory, at: String, parts: [String], index: Int) -> Reply {
+    name: parts[index]
+    candidate: "{at}/{name}"
+    last: index == parts.len() - 1
+    if open_entry(root, parent, candidate, name, !last) == {
+        .Refused(status) -> refused(status)
+        .Dir(held) -> {
+            if !last -> return walk(root, held.directory, candidate, parts, index + 1)
+            index_path: "{candidate}/index.html"
+            if open_entry(root, held.directory, index_path, "index.html", false) == {
+                .File(file) -> file_reply(file, index_path)
+                .Dir(_) -> refused(400)
+                .Refused(status) -> refused(status)
+            }
+        }
+        .File(file) -> file_reply(file, candidate)
+    }
+}
+
+open_entry: fn(root: ServeRoot, parent: Directory, candidate: String, name: String, need_dir: Bool) -> Opened {
+    before: files.lstat(candidate) ?? return Opened.Refused(404)
+    if before.is_symlink -> return Opened.Refused(400)
+    if need_dir && !before.is_dir -> return Opened.Refused(404)
+    if before.is_dir {
+        directory: parent.open_directory(name) ?? return open_failed(candidate)
+        opened: directory.stat() ?? return Opened.Refused(404)
+        if !unchanged(before, opened, candidate) || !contained(root.path, candidate) -> return Opened.Refused(400)
+        if !opened.is_dir -> return Opened.Refused(404)
+        return Opened.Dir(HeldDir{directory: directory, stat: opened})
+    }
+    if !before.is_file -> return Opened.Refused(400)
+    reader: parent.open(name) ?? return open_failed(candidate)
+    opened: reader.stat() ?? return Opened.Refused(404)
+    if !unchanged(before, opened, candidate) || !contained(root.path, candidate) -> return Opened.Refused(400)
+    Opened.File(HeldFile{reader: reader, stat: opened})
+}
+
+// An open that the no-follow walk refused: a part that became a link is 400.
+open_failed: fn(candidate: String) -> Opened {
+    after: files.lstat(candidate) ?? return Opened.Refused(404)
+    if after.is_symlink -> return Opened.Refused(400)
+    Opened.Refused(404)
+}
+
+file_reply: fn(file: &&HeldFile, served: String) -> Reply {
+    if !file.stat.is_file || file.stat.links != 1 -> return refused(400)
+    held := file
+    body := [U8]{}
+    loop {
+        chunk: held.reader.read(C_READ_BYTES) ?? return refused(404)
+        if chunk.len() == 0 -> break
+        loop byte in chunk -> body.push(byte)
+    }
+    current: held.reader.stat() ?? return refused(404)
+    if !current.is_file || current.links != 1 || !same_file(held.stat, current) -> return refused(400)
+    Reply{status: 200, content_type: mime(served), body: body}
+}
+
+unchanged: fn(before: Stat, opened: Stat, candidate: String) -> Bool {
+    after: files.lstat(candidate) ?? return false
+    !after.is_symlink && same_file(before, opened) && same_file(after, opened)
+}
+
+contained: fn(root: String, candidate: String) -> Bool {
+    actual: files.realpath(candidate) ?? return false
+    prefix: if root.ends_with("/") -> root.copy() else -> "{root}/"
+    actual.starts_with(prefix) && actual != prefix
+}
+
+has_identity: fn(stat: Stat) -> Bool {
+    stat.id.device != 0 && stat.id.inode != 0
+}
+
+same_file: fn(left: Stat, right: Stat) -> Bool {
+    has_identity(left) && has_identity(right) && left.id.device == right.id.device && left.id.inode == right.id.inode
+}
+
+mime: fn(path: String) -> String {
+    name: path.split("/").to_list()
+    base: name[name.len() - 1]
+    pieces: base.split(".").to_list()
+    if pieces.len() < 2 -> return "application/octet-stream"
+    extension: pieces[pieces.len() - 1]
+    if extension == "html" -> return "text/html; charset=utf-8"
+    if extension == "js" || extension == "mjs" -> return "text/javascript; charset=utf-8"
+    if extension == "wasm" -> return "application/wasm"
+    if extension == "json" || extension == "map" -> return "application/json; charset=utf-8"
+    "application/octet-stream"
+}

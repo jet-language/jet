@@ -62,6 +62,31 @@ suspended near a deadline, after a crash, or for a release:
 - Never call an unrun runtime, tier, diagnostic, snapshot, or golden criterion
   green.
 
+## Standing work order: close a goal in one sweep
+
+This is the owner's required process for closing a goal or milestone. Follow
+it every time; never drift into one-blocker-at-a-time work:
+
+1. **Collect every closure blocker at once.** List every open criterion on
+   every open card of the goal, and run each one's census in collect-all mode
+   in the same pass: `JET_KEEP_GOING=1` checks of every package it names (and
+   of every sibling the same rule covers), an inventory of every file it
+   names, and the suite or fresh-clone run it names. The complete list exists
+   before the first fix.
+2. **Fix the whole list in one sweep.** Group the rows by root. The
+   orchestrator writes the code to spec for the roots it owns. Each root in a
+   subagent's area goes to that subagent as one focused prompt naming the
+   exact rows, files and criterion text.
+3. **Submit for batch testing and move on.** Every landed commit goes on the
+   batch queue with the proof its criterion names. The orchestrator moves to
+   the next goal's work without waiting.
+4. **Close from the batch.** When the batch reports, record each proven
+   criterion as evidence and close its card. Every failure goes back to its
+   owner as one focused prompt, and the orchestrator moves on again.
+
+Only code work and closure count toward the sweep. Merging, carving or
+reshuffling cards is not progress.
+
 Successful completion requires every requested path integrated and evidenced,
 with Tower reflecting the real state. If no agent-actionable work remains,
 return an honest blocked result only when every unfinished path has a concrete

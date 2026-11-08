@@ -1,6 +1,8 @@
 # tests/web_browser.rs::forms_table_browser_submit_reaches_typed_action
 # NEST-P001 predicates run BEFORE browser availability guard, exactly as original.
-# Browser JS is the original inline CDP algorithm, unchanged apart from root/port transport.
+# The browser half drives the Chromium locked in {work}/.jet/lock (with its
+# chromedriver) through core.web.browser: fixtures/forms_browser.jet checks the
+# generated markup, fills and submits the form, and waits for the action result.
 # PENDING-SAME-HEAD/PENDING-GRAMMAR(batch-four probes), runtime UNRUN.
 env: NO_COLOR=1
 copy: {root}/tests/cases/web_browser/fixtures/nest {work}/nest
@@ -25,15 +27,21 @@ stdout: ~ "<button type=\"submit\">Submit</button>" # original NEST-P001 asserti
 stdout+stderr: !~ "source bytes 0..0" # original excludes old lowering ICE
 stdout+stderr: !~ "selected entry is not a top-level function" # original excludes old lowering ICE
 when probe chromium --version
-when probe node --version
+when probe chromedriver --version
 spawn app: jet run {root}/Examples/Apps/Web/FormsTable.jet
 env: JET_APP_PORT={free-port:forms}
 stdout: null
 poll ready: jet run {root}/tests/cases/web_browser/fixtures/http-ready.jet 127.0.0.1:{free-port:forms} / - write until stdout: ^= "HTTP/1.1 200" timeout 30s every 50ms # the app serves its root page
-write: browser.mjs forms_table_browser_submit_reaches_typed_action.template
-step: {env:JET_WEB_NODE|env:NODE|node} {work}/browser.mjs
-env: CHROMIUM={env:JET_WEB_CHROMIUM|env:CHROMIUM|chromium}
+copy: {root}/tests/cases/web_browser/fixtures/forms_browser.jet {work}/browser.jet
+step: jetpack browser lock chromium --binary {tool:chromium} --driver {tool:chromedriver}
+cwd: {work}
+env: JET_PROJECT_ROOT={work}
 exit: 0
+step: jet run --allow=Env,Exec,FS,IO,Net,Time {work}/browser.jet -- http://127.0.0.1:{free-port:forms}/
+cwd: {work}
+env: JET_PROJECT_ROOT={work}
+exit: 0
+stdout: ~ "PASS forms table typed action browser fixture" # the Jet browser check's completion line
 signal app: KILL
 wait: app
 exit: any # original server cleanup ignores kill status

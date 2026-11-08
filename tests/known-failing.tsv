@@ -208,7 +208,6 @@ tests/cases/dev_parts_routine/resident_jit_fidelity_matches_runtime_contract.cas
 tests/cases/dev_parts_routine/struct_field_change_emits_e2210.case	#5454	REFUSED read_bytes: the testkit session `recv` is not implemented yet, and the original reads the live session output
 tests/cases/dev_parts_routine/unused_expanding_generic_body_does_not_expand_the_instantiation_worklist.case	#5454	`jet run unused_expanding_generic_body.jet` exits 1 with UnknownFunction "`Grow` has no method `unused`" at line 8; the original runs the unreachable expanding method's caller and prints 7
 tests/cases/dev_parts_routine/wrapped_returned_view_fields_match_aot_and_default_dev.case	#5454	FAIL: `jet build wrapped_returned_view_fields.jet` exits 1 (expected 0): Error [E2417]: Explicit failure domain `String (text)` is not an Error type
-tests/cases/dev_parts_routine/yielding_and_result_loops_run_in_native_jit_without_fallback.case	#5454	`jet check loop_values.jet` reports E0073 "This loop has no final break value" for the value loops at lines 25 and 47 (each holds `break(result, n)` and then `break 1`)
 tests/cases/dev_parts_tier_parity/ui_and_web_match_interpreter_default_run_and_aot_web_web_app.case	#5454	`jet run web_app.jet` serves until stopped and hits the case's 30 s limit; Examples/Apps/Web/WebApp.case marks the example `run: none`, and the pinned Examples/Apps/Web/WebApp.out no longer exists
 tests/cases/core_files_opaque_handles/file_handles_have_no_fd_fields_and_cannot_be_written_or_forged.case	#6462	no E0339/E0605: `.path` of TempFile/TempDir/FileLock is readable by spec (core-library.md:635,701) and `priv` is read-private too; refusing the write and the forged literal waits on an owner ballot for a read-only field form
 tests/cases/measurement_tiers/measurement_observations_are_methods_not_public_fields.case	#5454	no ICE now: `jet check field_value.jet` accepts the field read `m.value` on a `measurement(..)` value (exit 0), where the original requires Measurement observations to be methods and the field read to be refused
@@ -269,7 +268,6 @@ tests/cases/marker_groups_modules/a_qualified_marker_with_a_builtin_prefix_does_
 tests/cases/unit_family/same_unit_arithmetic_compiles.case	#6004	Error [E0360]: No `+` operator is defined for `Usd`
 tests/cases/marker_groups_modules/groups_require_two_members_no_parameters_and_no_hidden_forbidden_kinds.case	#6004	expected output stream predicate not matched on HEAD (no replayable first error)
 tests/cases/unit_family/omitted_base_defaults_to_first_member.case	#6004	Error [E0405]: `??` only works on a fallible value, not Millimeter
-tests/cases/marker_groups_modules/nested_import_aliases_bind_groups_locally_and_do_not_fall_through_when_shadowed.case	#6674	`jet check main.jet` in q1 is E2104 "an inline module's own import of `second` is not built yet" at `use rules: second` inside `inner: module`: an inline module whose body imports a non-Core module is not lowered yet
 tests/cases/cli_parts_surface/group_help_and_man_inventory_every_nested_description.case	#6004	expected output stream predicate not matched on HEAD (no replayable first error)
 tests/cases/fmt/layout_compiler_fact_rejects_unknown_and_user_owned_at_members.case	#6005	ok: `a.jet` has no problems
 tests/cases/fmt/fmt_layout_block_round_trips_byte_for_byte.case	#6005	expected output stream predicate not matched on HEAD (no replayable first error)
@@ -336,7 +334,7 @@ tests/cases/cli_parts_bindings/go_bind_compiles_and_runs_c_archive_scalar.case	#
 tests/cases/cli_parts_bindings/go_bind_compiles_and_runs_move_only_cgo_handle.case	#6366	`jet run`: `use <name>: go.<lib>` is E1002 (`go` is reserved); the compiler resolves no generated `.jet/bindings/go/` module
 tests/cases/cli_parts_bindings/java_bind_embeds_jvm_handles_methods_and_exceptions.case	#6418	unproven past the bind: `jet run` of a `use <name>: <language>.<lib>` binding is E1002 for go, py, perl and js (the compiler resolves no generated `.jet/bindings/<language>/` module)
 tests/cases/cli_parts_bindings/pascal_bind_runs_scalar_and_owned_class_lifecycle.case	#6418	unproven past the bind: `jet run` of a `use <name>: <language>.<lib>` binding is E1002 for go, py, perl and js (the compiler resolves no generated `.jet/bindings/<language>/` module)
-tests/cases/cli_parts_bindings/perl_bind_round_trips_datatree_state_timeout_and_cancellation.case	#6366	`jet run`: `use <name>: perl.<lib>` is E1002 (`perl` is reserved); the compiler resolves no generated `.jet/bindings/perl/` module
+tests/cases/cli_parts_bindings/perl_bind_round_trips_dyn_state_timeout_and_cancellation.case	#6366	`jet run`: `use <name>: perl.<lib>` is E1002 (`perl` is reserved); the compiler resolves no generated `.jet/bindings/perl/` module
 tests/cases/cli_parts_bindings/tcl_bind_runs_one_shot_and_persistent_typed_sessions.case	#6418	unproven past the bind: `jet run` of a `use <name>: <language>.<lib>` binding is E1002 for go, py, perl and js (the compiler resolves no generated `.jet/bindings/<language>/` module)
 tests/cases/cli_parts_commands/php_bind_runs_a_persistent_bounded_worker_pool.case	#6366	`jet run`: `use ops: php.ops` is E0603; the compiler resolves no generated `.jet/bindings/php/` module
 
@@ -396,7 +394,7 @@ tests/cases/repl/repl_complex_bindings_keep_exact_typed_ast_across_turns.case	#6
 tests/cases/repl/repl_cooked_rerun_edits_and_applies_downstream_state.case	#6418	`jet repl` is not built yet (E2104)
 tests/cases/repl/repl_cooked_rerun_prompts_each_effect_and_skip_stales_downstream.case	#6418	`jet repl` is not built yet (E2104)
 tests/cases/repl/repl_core_data_dispatch.case	#6418	`jet repl` is not built yet (E2104)
-tests/cases/repl/repl_core_data_json_ingest_and_select.case	#6418	`jet repl` is not built yet (E2104)
+tests/cases/repl/repl_core_data_json_ingest_and_select.case	#6418	`jet repl --project` denies Env (E1803) in a non-interactive session before the model loads
 tests/cases/repl/repl_core_data_list_query_echo_hides_comptime_metadata.case	#6418	`jet repl` is not built yet (E2104)
 tests/cases/repl/repl_core_data_query_plans_and_typed_joins.case	#6418	`jet repl` is not built yet (E2104)
 tests/cases/repl/repl_core_data_schema_empty_lists_and_row_law.case	#6418	`jet repl` is not built yet (E2104)
@@ -650,6 +648,7 @@ tests/cases/script_to_system/script_to_system_continuity_preserves_one_source.ca
 tests/cases/source_import/enterprise_import_reports_ambiguity_malformed_input_and_no_cpp_importer.case	#6418	unbuilt: E2101/E2102 command or flag not built (E2102)
 tests/cases/web_browser/forms_table_browser_submit_reaches_typed_action.case	#6665	`jet run` of the NEST-P001 fixture renders `<form action="save" method="POST">` with no `name=Ada` line, not the original `<form method="post" action="/actions/save" aria-busy="false">` markup
 tests/cases/web_browser/jet_web_browser_reference_loop_uses_rendered_routes_and_actions.case	#6665	`jet run` of the NEST-P001 fixture renders `<form action="save" method="POST">` with no `name=Ada` line, not the original `<form method="post" action="/actions/save" aria-busy="false">` markup
+tests/cases/web_browser/web_browser_source_map_cdp_jet_breakpoint.case	#6035	the web build emits no source map: app.js has no `sourceMappingURL=app.js.map` comment, so SourceMap.jet fails its first check; the live CDP breakpoint half also waits on a page-scoped CDP surface in core.web.browser
 tests/cases/web_dev/jet_dev_app_zero_arg_watches_launched_file.case	#6419	unbuilt: core API surface missing (E1001/E1004/E0102/E0107/E0302/E0311/E0313/E0304) (E0102)
 tests/cases/web_dev/jet_dev_runs_user_defined_dev_fn_and_rebuilds_on_save.case	#6419	unbuilt: core API surface missing (E1001/E1004/E0102/E0107/E0302/E0311/E0313/E0304) (E0102)
 tests/cases/web_dev/jet_dev_web_real_pty_pins_header_toggles_verbose_and_restores_scroll_region.case	#6419	unbuilt: core API surface missing (E1001/E1004/E0102/E0107/E0302/E0311/E0313/E0304) (E0107)
@@ -973,23 +972,18 @@ tests/cases/cffi/c_member_lists_resolve_each_library_and_alias_through_cffi.case
 tests/cases/constant_identity/aliased_dotted_module_import_retains_module_precedence_and_ambiguity.case	#4723	`jet run public/main.jet` E0624: `answer` is declared in both alpha.value.jet and alpha.tools.value.jet, and the files of one package share one namespace
 tests/cases/constant_identity/aliased_single_member_import_uses_the_grouped_member_resolution.case	#4723	the aliased single-member import ambiguity is not reported (`jet check` exit 0, expected nonzero)
 tests/cases/constant_identity/checked_private_constant_identity_survives_cross_module_calls_imports_and_shadows.case	#4723	`jet check private/main.jet --json` accepts the private constant reach (exit 0, expected 1)
-tests/cases/control_and_data/discarded_if_does_not_unify_mixed_tail_values.case	#6661	`jet run main.jet` E0003 at the bare `7` arm statement: a number is no longer a statement, so the discarded-if fixture does not parse
-tests/cases/control_and_data/value_block_tails_report_unit_and_lint_old_arm_table_shape.case	#6661	`jet check invalid.jet --json` reports a different number of E0114 unit-tail rows than the case counts
-tests/cases/control_and_data/yielding_and_result_loops_compile_and_run.case	#6661	`jet build` E0073 "no final break value" at `(loop { break(result, 11) break 1 }) + 2`: a value loop whose labeled outer break precedes its own `break 1`
+tests/cases/control_and_data/value_block_tails_report_unit_and_lint_old_arm_table_shape.case	#6661	`jet check lintable.jet --json` rejects the old arm-table shape with E0003 ("This `if` needs an `else` arm") instead of linting it as L0513 with a fix (exit 1, expected 0)
 tests/cases/corelib/core_auth_strict_jwt_and_paseto_hostile_matrix.case	#6448	core.auth JWT/PASETO hostile-matrix output differs from the blessed .out snapshot
-tests/cases/corelib/core_http_client_bounds_and_strictly_decodes_response_bodies.case	#6661	`jet test fixture.jet` E0073 "no final break value" at the `loop i in 0..<10 {…}` that ends the `peer: task {…}` body
+tests/cases/corelib/core_http_client_bounds_and_strictly_decodes_response_bodies.case	#3665	the preserved guest matches `http` results with `.Ok(response)`/`.Err(error)`, but the call returns an `HTTPResponse` (E0305 at guest.jet:7), so the guest never connects and the peer task stays parked (E3013)
 tests/cases/corelib/core_http_client_exposes_binary_body_once.case	#3665	`jet test fixture.jet` stops with E3013 "Parked tasks remain at process exit"
 tests/cases/corelib/core_http_client_multipart_boundary_does_not_collide_with_fields.case	#3665	`jet test fixture.jet` E-OperatorTypeMismatch: the fixture joins text with `+`
 tests/cases/corelib/core_http_client_owns_pre_response_errors.case	#3665	`jet test fixture.jet` E0205 at `requests.push(http_read(stream))`: `stream` has read access only
 tests/cases/corelib/core_http_client_rejects_invalid_redirect_limits_before_transport.case	#3665	`jet test fixture.jet` UnknownMethod: `to_list` isn't a method on the value at fixture.jet:49
 tests/cases/corelib/core_http_nominal_message_and_body_surface_is_executable.case	#3665	FallbackTypeMismatch: `http.Body.reader(input, 6) ?? panic(…)`, but `http.Body.reader` is not fallible
-tests/cases/corelib/core_net_dns_rejects_reserved_header_forward_pointer_and_impossible_counts.case	#6661	`jet test fixture.jet` E0073 "no final break value" at the loop that ends the peer `task {…}` body (fixture.jet:92)
-tests/cases/corelib/core_net_dns_txt_and_srv_are_real_udp_queries.case	#6661	`jet test fixture.jet` E0073 "no final break value" at the loop that ends the peer `task {…}` body (fixture.jet:85)
 tests/cases/corelib/game_run_needs_mutable_scene_lvalue.case	#6661	`jet check` reports nothing for the `game.run` scene the case expects rejected (exit 0, expected nonzero)
 tests/cases/corelib/generated_internal_tagged_enum_round_trips_every_variant_shape.case	#6661	generated internal-tag decode of the unit variant `{"type":"Idle"}` fails, so the fixture panics `unit` (exit 70)
 tests/cases/corelib/io_prompt_helpers_validate_choices_and_refuse_non_tty_secrets.pty.case	#6661	the pty transcript matches the stream predicate the case forbids (`!~`)
 tests/cases/corelib/parenthesized_view_place_return_keeps_parameter_provenance.case	#6066	`jet test` ViewOutlivesOwner at fixture.jet:8: a parenthesized returned view place loses its parameter provenance
-tests/cases/corelib/solve_solver_type_name_is_reserved.case	#6661	`jet check` reports nothing for the solver type name the case expects reserved (exit 0, expected nonzero)
 tests/cases/custom/generic_struct_fns.case	#6661	`jet build fixture.jet` E0904 "Can't figure out what `T` should be here" at `Stack<Int>{ empty_stack() }`
 tests/cases/db_policy/sqlite_blob_round_trip_preserves_bytes_across_tiers.case	#6448	`jet run` ValueTypeMismatch: `DBValue` can't be used in a typed literal hole (main.jet:15)
 tests/cases/effects/cross_module_foreign_undo_bindings_keep_distinct_identities.case	#6366	foreign crate bridge fails to build: cargo E0428 `jet_ffi_mutate` is defined multiple times for two modules' undo bindings

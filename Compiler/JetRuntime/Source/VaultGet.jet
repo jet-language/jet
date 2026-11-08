@@ -66,7 +66,7 @@ vault_get_plan_text: fn() -> I64 {
     bytes: rt_text_word(scratch)
     jet_rt_free(scratch, I64{16}, I64{8})
     if !vault_utf8_valid(rt_text_word(wrapping(bytes + DATA_SEQUENCE_DATA)), rt_text_word(wrapping(bytes + DATA_SEQUENCE_LENGTH))) {
-        data_sequence_drop(bytes, DATA_TREE_BYTE_LIST)
+        data_sequence_drop(bytes, DYN_BYTE_LIST)
         return I64{0}
     }
     bytes
@@ -377,7 +377,7 @@ vault_get_audit: fn(context: I64, name: I64, plan: I64) {
     jet_rt_free(scratch, I64{80}, I64{8})
     vault_get_audit(context, name, plan)
     vault_get_context_drop(context)
-    if (text != I64{0}) -> data_sequence_drop(text, DATA_TREE_BYTE_LIST)
+    if (text != I64{0}) -> data_sequence_drop(text, DYN_BYTE_LIST)
     if (value == I64{0}) -> return I64{0}
     rt_text_store(some, value)
     I64{1}

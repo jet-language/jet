@@ -1,62 +1,166 @@
 use {
+    canvas_html_test_json: core.encoding.json
     canvas_html_test_process: core.process
     jet_canvas.[canvas_html, canvas_html_for, canvas_html_query]
     jet_testkit.[kit_require_tool]
 }
 
-// Real JavaScript execution of the public Jet-produced HTML, not source-string
-// assertions and not copied bootstrap JS. Without Node on PATH the claim
-// reports skip; a harness failure is a test failure, never a success fallback.
-canvas_html_test_bootstrap: fn(scenario: String, html: String) -[Exec, IO, Time.Wait, FS, Env]> {
-    node: kit_require_tool("node") ?? return
-    child: canvas_html_test_process.cmd([String]{node, "Compiler/JetCanvas/Tests/CanvasAssets/bootstrap-dom.mjs", scenario})
+// One raw <script> element of the emitted HTML: `src` is the attribute's
+// payload bytes exactly as emitted (never HTML-normalized, so the historical
+// JSON-escaped src stays its own transport contract), `body` its raw text.
+CanvasHTMLTestScript: struct {
+    src: String?
+    body: String
+}
+
+// The `<script>` and `<script src="...">` elements of `html`, in order.
+canvas_html_test_scripts: fn(html: String) -> [CanvasHTMLTestScript] {
+    scripts := [CanvasHTMLTestScript]{}
+    rest := html.copy()
+    loop {
+        opening: rest.partition("<script")
+        if opening.sep == "" -> break
+        after: opening.tail
+        src := String?{None}
+        attributes := ""
+        if after.starts_with(">") {
+            attributes = after.removeprefix(">")
+        } else {
+            spaced: after.trim_start()
+            if spaced.len() == after.len() || !spaced.starts_with("src=\"") {
+                rest = after.copy()
+                next
+            }
+            quoted: spaced.removeprefix("src=\"").partition("\">")
+            if quoted.sep == "" {
+                rest = after.copy()
+                next
+            }
+            src = .Val(quoted.head.copy())
+            attributes = quoted.tail.copy()
+        }
+        closing: attributes.partition("</script>")
+        if closing.sep == "" -> break
+        scripts.push(CanvasHTMLTestScript{src, body: closing.head.copy()})
+        rest = closing.tail.copy()
+    }
+    scripts
+}
+
+// Node runs the inline bootstrap script in a fresh context whose only global
+// is a `window` that records every assignment in order, and prints the
+// assignments as JSON [name, value] pairs. It compiles and executes the
+// emitted source, so syntax errors and injected statements fail.
+CANVAS_HTML_TEST_ENGINE: "const vm = require('node:vm'); const writes = []; const window = new Proxy(Object.create(null), {{ set(target, key, value) {{ writes.push([key, value]); target[key] = value; return true; }} }}); new vm.Script(require('node:fs').readFileSync(0, 'utf8'), {{ filename: process.argv[1] }}).runInContext(vm.createContext({{ window }}), {{ timeout: 1000 }}); process.stdout.write(JSON.stringify(writes));"
+
+// The global assignments the inline script made, in order.
+canvas_html_test_evaluate: fn(node: String, scenario: String, index: Int, script: String) -[Exec, IO, Time.Wait]> [(name: String, value: String)] {
+    child: canvas_html_test_process.cmd([String]{node, "-e", CANVAS_HTML_TEST_ENGINE, "canvas-{scenario}-{index}.js"})
         .stdin(.Stream).stdout(.Capture).stderr(.Capture)
-        .spawn() ?? panic("Canvas bootstrap requires its scenario harness")
-    child.stdin.write_text(html) ?? panic("Canvas bootstrap HTML input failed")
+        .spawn() ?? panic("Canvas bootstrap {scenario}: node could not start")
+    child.stdin.write_text(script) ?? panic("Canvas bootstrap HTML input failed")
     child.stdin.close()
     receipt: child.wait() ?? panic("Canvas bootstrap JS evaluation failed to finish")
     if !receipt.success -> panic("Canvas bootstrap {scenario}: {receipt.errors}")
+    pairs: canvas_html_test_json.parse(receipt.output) ?? panic("Canvas bootstrap {scenario}: the engine printed no JSON: {receipt.output}")
+    writes := [(name: String, value: String)]{}
+    if pairs == {
+        .Array(items) -> {
+            loop item in items {
+                if item == {
+                    .Array(pair) -> {
+                        if pair.len() != 2 -> panic("Canvas bootstrap {scenario}: a write is not a [name, value] pair")
+                        name: pair[0].text() ?? panic("Canvas bootstrap {scenario}: a global name is not text")
+                        value: pair[1].text() ?? panic("Canvas bootstrap {scenario}: global {name} was set to a non-string")
+                        writes.push((name: name, value: value))
+                    }
+                    else -> panic("Canvas bootstrap {scenario}: a write is not a [name, value] pair")
+                }
+            }
+        }
+        else -> panic("Canvas bootstrap {scenario}: the engine output is not a list of writes")
+    }
+    writes
+}
+
+// Real JavaScript execution of the public Jet-produced HTML, not source-string
+// assertions and not copied bootstrap JS: exactly one inline bootstrap and one
+// app entry; the bootstrap installs exactly `base` and `routes`, in that
+// order, before the app entry loads; the app entry is the exact versioned
+// route `src`. Without Node on PATH the claim reports skip; a harness failure
+// is a test failure, never a success fallback.
+canvas_html_test_bootstrap: fn(scenario: String, html: String, base: String, src: String, routes: [(name: String, value: String)]) -[Exec, IO, Time.Wait, FS, Env]> {
+    node: kit_require_tool("node") ?? return
+    scripts: canvas_html_test_scripts(html)
+    assert(scripts.len() == 2, "Canvas bootstrap {scenario}: one bootstrap and one app entry must be emitted, not {scripts.len()}")
+    expected := [(name: String, value: String)]{(name: "__JET_CANVAS_BASE__", value: base)}
+    loop route in routes -> expected.push((name: route.name, value: route.value))
+    installed := [(name: String, value: String)]{}
+    loaded := [String]{}
+    loop index in 0..<scripts.len() {
+        script: scripts[index]
+        if script.src == {
+            .Val(path) -> {
+                assert_eq(script.body, "")
+                assert(installed.len() > 0 && installed[0].name == "__JET_CANVAS_BASE__" && installed[0].value == base, "base must be installed before app loading")
+                loaded.push(path.copy())
+            }
+            None -> installed.extend(canvas_html_test_evaluate(node, scenario, index, script.body))
+        }
+    }
+    assert(installed == expected, "Canvas bootstrap {scenario}: only the intended route globals may be installed, in order")
+    assert(loaded == [String]{src}, "Canvas bootstrap {scenario}: exact versioned app route payload")
 }
 
 #Test("canvas_html_default_bootstrap_evaluates_before_versioned_app") {
     assert_eq(canvas_html(), canvas_html_for("/canvas"))
-    canvas_html_test_bootstrap("default", canvas_html())
+    canvas_html_test_bootstrap("default", canvas_html(), "/canvas", "/canvas/app.js?canvas_ui=blueprint23", [(name: String, value: String)]{})
 }
 
 #Test("canvas_html_dynamic_base_retains_trailing_slash") {
-    canvas_html_test_bootstrap("nested", canvas_html_for("/project/canvas/"))
+    canvas_html_test_bootstrap("nested", canvas_html_for("/project/canvas/"), "/project/canvas/", "/project/canvas//app.js?canvas_ui=blueprint23", [(name: String, value: String)]{})
 }
 
 #Test("canvas_html_empty_path_mode_does_not_enable_query_routes") {
-    canvas_html_test_bootstrap("empty", canvas_html_for(""))
+    canvas_html_test_bootstrap("empty", canvas_html_for(""), "", "/app.js?canvas_ui=blueprint23", [(name: String, value: String)]{})
 }
 
 #Test("canvas_html_base_is_opaque_not_url_normalized") {
-    canvas_html_test_bootstrap("opaque", canvas_html_for("/雪?q=1&path=../#leaf"))
+    canvas_html_test_bootstrap("opaque", canvas_html_for("/雪?q=1&path=../#leaf"), "/雪?q=1&path=../#leaf", "/雪?q=1&path=../#leaf/app.js?canvas_ui=blueprint23", [(name: String, value: String)]{})
 }
 
 #Test("canvas_html_hostile_base_uses_json_escaping_in_both_positions") {
     controls: String.from_bytes([U8]{127, 194, 133, 0}) ?? panic("control fixture UTF-8")
     carriage: String.from_bytes([U8]{13}) ?? panic("CR fixture UTF-8")
+    // The src payload keeps the JSON escapes as raw bytes.
+    src: "/a\\\"\\\\\\n\\r\\t<>&'雪\\u007f\\u0085\\u0000/app.js?canvas_ui=blueprint23"
     // #4303: pass the interpolation directly, not a local String-view binding.
-    canvas_html_test_bootstrap("hostile", canvas_html_for("/a\"\\\n{carriage}\t<>&'雪{controls}"))
+    canvas_html_test_bootstrap("hostile", canvas_html_for("/a\"\\\n{carriage}\t<>&'雪{controls}"), "/a\"\\\n{carriage}\t<>&'雪{controls}", src, [(name: String, value: String)]{})
 }
 
 #Test("canvas_html_marker_in_base_is_not_recursively_replaced") {
-    canvas_html_test_bootstrap("marker", canvas_html_for("/__JET_CANVAS_BOOTSTRAP__"))
+    canvas_html_test_bootstrap("marker", canvas_html_for("/__JET_CANVAS_BOOTSTRAP__"), "/__JET_CANVAS_BOOTSTRAP__", "/__JET_CANVAS_BOOTSTRAP__/app.js?canvas_ui=blueprint23", [(name: String, value: String)]{})
 }
 
 #Test("canvas_html_query_bootstrap_evaluates_all_route_overrides") {
-    canvas_html_test_bootstrap("query", canvas_html_query())
+    canvas_html_test_bootstrap("query", canvas_html_query(), "", "/?jet_panel_app=1&canvas_ui=blueprint23", [(name: String, value: String)]{
+        (name: "__JET_CANVAS_GRAPH__", value: "/?jet_panel_graph=1"),
+        (name: "__JET_CANVAS_TX__", value: "/canvas/transaction"),
+        (name: "__JET_CANVAS_QUERY__", value: "/canvas/query"),
+        (name: "__JET_CANVAS_SCM__", value: "/canvas/source-control"),
+        (name: "__JET_CANVAS_PROOF__", value: "/canvas/proof"),
+        (name: "__JET_CANVAS_COMMAND__", value: "/canvas/command")
+    })
 }
 
-// Integration prerequisite, not registered fake claims: independently syntax-checks all
-// twelve JS assets (DEV-A2); canvas_scenarios
+// Integration prerequisite, not registered fake claims: Javascript.jet
+// independently syntax-checks all twelve JS assets (DEV-A2); canvas_scenarios
 // canvas-workbench-e2e/session-surface-matrix/devserver-real-client-survival and
 // canvas_cli_lifecycle require the actual browser, checked producer, runtime,
-// session-secret serving host, source transaction and asset composition. The vm scenarios
-// above prove ONLY emitted inline bootstrap JS and raw routes; they do not assert DOM
-// controls, draft/selection/reconnect or host journeys. #3598: the frozen runtime lacks
-// the unrelated Foundation protocol parser's parse_with_limits export. Focused bootstrap
-// proof composes the actual shared foundation_json_escape/helper bodies only; full
-// Foundation package integration is gated.
+// session-secret serving host, source transaction and asset composition. The
+// engine runs above prove ONLY emitted inline bootstrap JS and raw routes; they
+// are not a DOM implementation and do not assert DOM controls,
+// draft/selection/reconnect or host journeys. #3598: the frozen runtime lacks
+// the unrelated Foundation protocol parser's parse_with_limits export. Focused
+// bootstrap proof composes the actual shared foundation_json_escape/helper
+// bodies only; full Foundation package integration is gated.

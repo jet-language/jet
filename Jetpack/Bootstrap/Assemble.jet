@@ -60,8 +60,6 @@ use {
 // The trees of an area folder whose files the inventory holds to the manifests.
 TREE_KINDS: [String]{"Source", "Tests"}
 
-MODES: [String]{"check", "aot", "hosted"}
-
 // Shared dependencies reference canonical Compiler/ sources in this checkout.
 ALLOWED_PREFIXES: [String]{"Jetpack/", "Compiler/"}
 COMPILER_PACKAGES: "Tools/agent/CompilerPackages.jet"
@@ -142,7 +140,7 @@ Assembled: struct {
 }
 
 env_config: fn(mode: String, root: String, cwd: String) -> Config Err! {
-    if !has(MODES, mode) -> return Err("unknown mode {mode}; expected check, aot or hosted")
+    if mode != "check" && mode != "aot" && mode != "hosted" -> return Err("unknown mode {mode}; expected check, aot or hosted")
     listed: comma_list(process.env_get("JETPACK_BOOTSTRAP_AREAS") ?? "")
     areas: if listed.len() > 0 -> Val(listed) else -> [String]?{None}
     if mode == "hosted" && areas != None -> return Err("hosted builds require every Jetpack area")
@@ -1130,8 +1128,6 @@ find_text: fn(raw: [U8], from: Int, needle: String) -> Int {
     -1
 }
 
-DECLARATION_KINDS: [String]{"fn", "struct", "enum", "trait", "type"}
-
 // The top-level declarations of `source` (code only): `name: fn|struct|enum|
 // trait|type` (optionally `pub`) at a line start, or an upper-case constant
 // `NAME:` (not `:=`).
@@ -1200,7 +1196,8 @@ kind_declaration: fn(raw: [U8], at: Int) -> DeclarationAt {
     if colon >= raw.len() || raw[colon] != (U8{58}) -> return none
     kind_at := colon + 1
     loop kind_at < raw.len() && is_space(raw[kind_at]) -> kind_at += 1
-    loop kind in DECLARATION_KINDS {
+    kinds: [String]{"fn", "struct", "enum", "trait", "type"}
+    loop kind in kinds {
         if !starts_at(raw, kind_at, kind) -> next
         kind_end: kind_at + kind.count_bytes()
         if kind_end < raw.len() && is_ident_byte(raw[kind_end]) -> next
@@ -1618,8 +1615,6 @@ unblock_uses: fn(text: String) -> String {
 
 // --- tests ---------------------------------------------------------------------------
 
-FIXTURE_PATHS: [String]{"Jetpack/Foundation/Source/Fixture.jet", "Jetpack/Store/Source/Fixture.jet", "Jetpack/CLI/Source/Fixture.jet"}
-
 FIXTURE_MODES: [String]{"check", "aot"}
 
 FIXTURE_MANIFEST: "# == Foundation ==\nJetpack/Foundation/Source/Fixture.jet\n# == Engine (folders: Store) ==\nJetpack/Store/Source/Fixture.jet\n# == CLI ==\nJetpack/CLI/Source/Fixture.jet\n"
@@ -1637,9 +1632,9 @@ area_fixture: fn() -> String {
     put(root, "Jetpack/Bootstrap/areas.list", "Foundation:\nEngine: Foundation\nCLI: Foundation\n")
     put(root, "Jetpack/Bootstrap/sources.list", FIXTURE_MANIFEST)
     put(root, "Jetpack/Bootstrap/tests.list", "# == Engine (folders: Store) ==\nJetpack/Store/Tests/Fixture.jet\n")
-    put(root, FIXTURE_PATHS[0], "foundation_fixture: fn() {{}}\n")
-    put(root, FIXTURE_PATHS[1], "store_fixture: fn() {{}}\n")
-    put(root, FIXTURE_PATHS[2], "cli_fixture: fn() {{}}\n")
+    put(root, "Jetpack/Foundation/Source/Fixture.jet", "foundation_fixture: fn() {{}}\n")
+    put(root, "Jetpack/Store/Source/Fixture.jet", "store_fixture: fn() {{}}\n")
+    put(root, "Jetpack/CLI/Source/Fixture.jet", "cli_fixture: fn() {{}}\n")
     put(root, "Jetpack/Store/Tests/Fixture.jet", "#Test(\"store fixture\") {{\n    assert(true)\n}}\n")
     root
 }
@@ -1681,7 +1676,7 @@ read_map: fn(root: String, mode: String) -> Dyn {
         assert_eq(done.claims, 1)
         map: read_map(root, mode)
         if map_field(map, "mode") == .Text(found) -> assert_eq(found, mode) else -> panic("the map names no mode")
-        assert_eq(map_texts(map, "files").join(","), "{FIXTURE_PATHS.join(",")},Jetpack/Store/Tests/Fixture.jet")
+        assert_eq(map_texts(map, "files").join(","), "Jetpack/Foundation/Source/Fixture.jet,Jetpack/Store/Source/Fixture.jet,Jetpack/CLI/Source/Fixture.jet,Jetpack/Store/Tests/Fixture.jet")
         assert_eq(map_texts(map, "tests").join(","), "store fixture")
         assert_eq(map_texts(map, "test_areas").join(","), "Engine")
         source: files.read("{root}/scratch/{mode}/project/src/jetpack.jet") ?? panic("{err}")
@@ -1701,16 +1696,18 @@ read_map: fn(root: String, mode: String) -> Dyn {
 #Test("a source outside Jetpack/ and Compiler/ or in another area's section is refused") {
     root: area_fixture()
     put(root, "Tools/packaging/other.jet", "other: fn() {{}}\n")
+    store: "Jetpack/Store/Source/Fixture.jet"
+    cli: "Jetpack/CLI/Source/Fixture.jet"
     manifests: [String]{
-        FIXTURE_MANIFEST.replace("{FIXTURE_PATHS[1]}\n", "{FIXTURE_PATHS[1]}\nTools/packaging/other.jet\n"),
-        FIXTURE_MANIFEST.replace("{FIXTURE_PATHS[1]}\n# == CLI ==\n", "{FIXTURE_PATHS[1]}\n{FIXTURE_PATHS[2]}\n# == CLI ==\n"),
+        FIXTURE_MANIFEST.replace("{store}\n", "{store}\nTools/packaging/other.jet\n"),
+        FIXTURE_MANIFEST.replace("{store}\n# == CLI ==\n", "{store}\n{cli}\n# == CLI ==\n"),
     }
     refusals := [String]{}
     loop manifest in manifests {
         put(root, "Jetpack/Bootstrap/sources.list", manifest)
         if assemble(fixture_config(root, "check", None, None), [String]{}) == .Err(error) -> refusals.push(error.message.copy()) // copy: the error is dropped
     }
-    assert_eq(refusals.join("\n"), "Jetpack/Bootstrap/sources.list:5: sources must live under Jetpack/ or Compiler/\nJetpack/Bootstrap/sources.list:5: {FIXTURE_PATHS[2]} belongs under the `# == CLI ==` section")
+    assert_eq(refusals.join("\n"), "Jetpack/Bootstrap/sources.list:5: sources must live under Jetpack/ or Compiler/\nJetpack/Bootstrap/sources.list:5: {cli} belongs under the `# == CLI ==` section")
     files.remove_all(root) ?? ()
 }
 
@@ -1731,7 +1728,7 @@ read_map: fn(root: String, mode: String) -> Dyn {
     graph: area_graph(root) ?? panic(err.message)
     assert_eq((graph.closure("CLI") ?? panic(err.message)).join(","), "Foundation,CLI")
     assert_eq(areas_command(root, [String]{"populated"}) ?? panic(err.message), "Foundation\nEngine\nCLI")
-    assert_eq(areas_command(root, [String]{"sources", "Engine"}) ?? panic(err.message), "{FIXTURE_PATHS[0]}\n{FIXTURE_PATHS[1]}")
+    assert_eq(areas_command(root, [String]{"sources", "Engine"}) ?? panic(err.message), "Jetpack/Foundation/Source/Fixture.jet\nJetpack/Store/Source/Fixture.jet")
     assert(graph.closure("Nope") == .Err(_))
     files.remove_all(root) ?? ()
 }
@@ -1756,34 +1753,33 @@ read_map: fn(root: String, mode: String) -> Dyn {
     assert(rebase_embeds(root, "embed_file(\"../../../../x\")", "Jetpack/Env/Source/A.jet", "sources.list:1", embeds) == .Err(_))
 }
 
-COMPILER_FIXTURE: [String]{
-    "Compiler/JetCli/package.jet", "name: \"jet-cli\"\n",
-    // Prelude source held in a raw string: its `Err: struct` declares nothing.
-    "Compiler/JetSema/Source/Derives.jet", "PRELUDE_SOURCE: comptime {{ ```// The default error.\nErr: struct {{\n    message: String\n}}\n``` }}\n",
-    "Compiler/JetWasm/Source/Module.jet", "Export: struct {{\n    name: String\n}}\nwasm_size: fn() -> Int {{\n    0\n}}\n",
-    "Jetpack/Bootstrap/sources.list", "# == Compiler front end ==\nCompiler/JetFront/Source/Items.jet\n",
-    "Jetpack/Bootstrap/tests.list", "",
-}
-
-// The fixture's members as Tools/agent/CompilerPackages.jet sources lists them.
-COMPILER_MEMBERS: [String]{"Compiler/JetFront/Source/Items.jet", "Compiler/JetSema/Source/Derives.jet", "Compiler/JetWasm/Source/Module.jet"}
-
 compiler_fixture: fn(items: String) -> String {
     root: normalize_join("/", files.mkdtemp("jetpack-compiler-slice") ?? panic("a temporary directory cannot be made: {err}"))
-    loop at in 0..<(COMPILER_FIXTURE.len() /% 2) -> put(root, COMPILER_FIXTURE[2 * at], COMPILER_FIXTURE[2 * at + 1])
+    fixture: [String]{
+        "Compiler/JetCli/package.jet", "name: \"jet-cli\"\n",
+        // Prelude source held in a raw string: its `Err: struct` declares nothing.
+        "Compiler/JetSema/Source/Derives.jet", "PRELUDE_SOURCE: comptime {{ ```// The default error.\nErr: struct {{\n    message: String\n}}\n``` }}\n",
+        "Compiler/JetWasm/Source/Module.jet", "Export: struct {{\n    name: String\n}}\nwasm_size: fn() -> Int {{\n    0\n}}\n",
+        "Jetpack/Bootstrap/sources.list", "# == Compiler front end ==\nCompiler/JetFront/Source/Items.jet\n",
+        "Jetpack/Bootstrap/tests.list", "",
+    }
+    loop at in 0..<(fixture.len() /% 2) -> put(root, fixture[2 * at], fixture[2 * at + 1])
     put(root, "Compiler/JetFront/Source/Items.jet", items)
     root
 }
 
 #Test("a raw string's text and an enum's own variants name no dependency") {
     root: compiler_fixture("Marker: enum {{\n    Plain\n    Export, Named(String)\n}}\nfront_marker: fn() -> Marker {{ Marker.Export }}\nfront_error: fn(message: String) -> Err {{ Err{{message: message}} }}\nNOTE: `calls wasm_size() with \"quotes\" and // slashes`\n")
-    assert_eq(slice_drift(root, COMPILER_MEMBERS).join("\n"), "")
+    // The fixture's members as Tools/agent/CompilerPackages.jet sources lists them.
+    members: [String]{"Compiler/JetFront/Source/Items.jet", "Compiler/JetSema/Source/Derives.jet", "Compiler/JetWasm/Source/Module.jet"}
+    assert_eq(slice_drift(root, members).join("\n"), "")
     files.remove_all(root) ?? ()
 }
 
 #Test("a call past the slice is still drift") {
     root: compiler_fixture("front_size: fn() -> Int {{\n    wasm_size()\n}}\n")
-    assert_eq(slice_drift(root, COMPILER_MEMBERS).join("\n"), "Compiler/JetFront/Source/Items.jet uses wasm_size, which only Compiler/JetWasm/Source/Module.jet declares, outside the compiler slice")
+    members: [String]{"Compiler/JetFront/Source/Items.jet", "Compiler/JetSema/Source/Derives.jet", "Compiler/JetWasm/Source/Module.jet"}
+    assert_eq(slice_drift(root, members).join("\n"), "Compiler/JetFront/Source/Items.jet uses wasm_size, which only Compiler/JetWasm/Source/Module.jet declares, outside the compiler slice")
     files.remove_all(root) ?? ()
 }
 

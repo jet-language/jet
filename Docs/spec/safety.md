@@ -211,9 +211,9 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1339,
+  "total": 1343,
   "counts": {
-    "Compiler": 676,
+    "Compiler": 680,
     "Core": 186,
     "Docs": 8,
     "Examples": 35,
@@ -3501,7 +3501,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/ProcessRoutes.jet",
-      "line": 118,
+      "line": 112,
       "column": 5,
       "reason": "supported_out lends exactly one writable C bool byte; Linux implements F_DUPFD_CLOEXEC"
     },
@@ -4690,6 +4690,20 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     },
     {
       "package": "Compiler",
+      "file": "Compiler/JetRuntime/Tests/Fragments.fixture/CollectionsStopTests.jet",
+      "line": 22,
+      "column": 5,
+      "reason": "the single-threaded fixture host owns the snapshot from a case to its check"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Tests/Fragments.fixture/CollectionsStopTests.jet",
+      "line": 37,
+      "column": 5,
+      "reason": "the single-threaded fixture host owns the snapshot from a case to its check"
+    },
+    {
+      "package": "Compiler",
       "file": "Compiler/JetRuntime/Tests/Fragments.fixture/EnvOverlayKernel.jet",
       "line": 6,
       "column": 5,
@@ -4928,6 +4942,13 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     },
     {
       "package": "Compiler",
+      "file": "Compiler/JetTestKit/Assets/no_nix.jet",
+      "line": 59,
+      "column": 9,
+      "reason": "the no-nix launcher passes its subject's status 101 through unchanged; process.exit would report it as 1 (S36)"
+    },
+    {
+      "package": "Compiler",
       "file": "Compiler/JetTestKit/Source/Exec.jet",
       "line": 422,
       "column": 5,
@@ -4953,6 +4974,13 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
       "line": 363,
       "column": 5,
       "reason": "the case explicitly authorizes signalling its own spawned child"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetTestKit/Tests/Fixtures/golden/compiler.jet",
+      "line": 33,
+      "column": 9,
+      "reason": "the CLI double stands in for jet, whose internal compiler error alone ends with status 101 (I2)"
     },
     {
       "package": "Core",
@@ -9603,14 +9631,14 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 
 | crate/package | regions |
 | --- | ---: |
-| Compiler | 676 |
+| Compiler | 680 |
 | Core | 186 |
 | Docs | 8 |
 | Examples | 35 |
 | Jetpack | 9 |
 | Tools | 7 |
 | tests | 418 |
-| **total** | **1339** |
+| **total** | **1343** |
 
 ### Regions
 
@@ -10084,7 +10112,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/ProcessExecutionCollect.jet | 335:9 | "ok is the canonical writable Bool output slot" |
 | Compiler | Compiler/JetRuntime/Source/ProcessExecutionCollect.jet | 343:5 | "ok lends exactly the C ABI Bool byte" |
 | Compiler | Compiler/JetRuntime/Source/ProcessExecutionCollect.jet | 449:13 | "the child mutex holds the capture builder's initialized bytes" |
-| Compiler | Compiler/JetRuntime/Source/ProcessRoutes.jet | 118:5 | "supported_out lends exactly one writable C bool byte; Linux implements F_DUPFD_CLOEXEC" |
+| Compiler | Compiler/JetRuntime/Source/ProcessRoutes.jet | 112:5 | "supported_out lends exactly one writable C bool byte; Linux implements F_DUPFD_CLOEXEC" |
 | Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 33:9 | "written under the scheduler root mutex" |
 | Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 245:5 | "an idempotent install: every writer stores the same code address" |
 | Compiler | Compiler/JetRuntime/Source/ProveJournal.jet | 97:5 | "the harness main arms the journal before any test, so before any other thread reads it" |
@@ -10254,6 +10282,8 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 380:5 | "the test owns this fresh align-8 block and its header words" |
 | Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 462:5 | "the exact success line is two bounded stack words written to stdout" |
 | Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocationPolicyTests.jet | 5:5 | "the single-threaded fixture reads the process-lifetime tracked-node count after all its payloads were freed" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/CollectionsStopTests.jet | 22:5 | "the single-threaded fixture host owns the snapshot from a case to its check" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/CollectionsStopTests.jet | 37:5 | "the single-threaded fixture host owns the snapshot from a case to its check" |
 | Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/EnvOverlayKernel.jet | 6:5 | "failed witness terminates its isolated real-runtime process" |
 | Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SchedulerTests.jet | 5:5 | "an isolated failed scheduler witness exits with no further runtime cleanup" |
 | Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SchedulerTests.jet | 209:5 | "fixture byte writes stay within owned 19/20-byte text buffers" |
@@ -10288,10 +10318,12 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetSema/Tests/ScalarGlobalFixtures.jet | 21:5 | "single-threaded test: plain module writes of each scalar type" |
 | Compiler | Compiler/JetSema/Tests/XmlCheckerRootsFixtures.jet | 10:5 | "no raw operations in this regression" |
 | Compiler | Compiler/JetSema/Tests/XmlCheckerRootsFixtures.jet | 11:9 | "nested tail retains its value grammar" |
+| Compiler | Compiler/JetTestKit/Assets/no_nix.jet | 59:9 | "the no-nix launcher passes its subject's status 101 through unchanged; process.exit would report it as 1 (S36)" |
 | Compiler | Compiler/JetTestKit/Source/Exec.jet | 422:5 | "the testkit stops its own step child at the resident-memory guard" |
 | Compiler | Compiler/JetTestKit/Source/Exec.jet | 608:9 | "the testkit stops a process its own case left running in the case scratch" |
 | Compiler | Compiler/JetTestKit/Source/StepsControl.jet | 133:5 | "kill(pid, 0) observes the case-owned child without sending a signal" |
 | Compiler | Compiler/JetTestKit/Source/StepsSessions.jet | 363:5 | "the case explicitly authorizes signalling its own spawned child" |
+| Compiler | Compiler/JetTestKit/Tests/Fixtures/golden/compiler.jet | 33:9 | "the CLI double stands in for jet, whose internal compiler error alone ends with status 101 (I2)" |
 | Core | Core/Auth/Auth.jet | 113:5 | "auth PASETO v4.public verification uses the fixed Ed25519 primitive" |
 | Core | Core/Crypto/Crypto.jet | 322:5 | "vault key import: validate a serialized wrapped carrier at the typed crypto boundary" |
 | Core | Core/Crypto/Crypto.jet | 328:5 | "vault key import: expose the authenticated wrapped carrier, not plaintext key material" |

@@ -1439,6 +1439,7 @@ thread that opened them (**E1102**).
 | `config()` / `config_from_env()` | `BrowserTestConfig !BrowserError` | Load checked browser-test configuration. |
 | `make_profile(name)` / `profile(name)` / `timeout(ms)` | `BrowserProfile` / `BrowserProfile !BrowserError` / `BrowserTimeout !BrowserError` | Construct an isolated profile, check a pinned BiDi profile (`bidi-2024.11` or `bidi-2025.5`), or check a timeout in `1..=600000` milliseconds. |
 | `locked(engine)` | `BrowserLocked !BrowserError` | Read and verify the provider's locked browser record. |
+| `launch(engine)` | `Browser !BrowserError` | Start the locked engine headless on a throwaway profile and connect over BiDi; closing the session stops the engine. Firefox serves BiDi itself; Chromium launches through the chromedriver its lock entry pins, with `protocol("cdp")` available. |
 | `connect(endpoint)` / `connect_profile(endpoint, profile, timeout)` / `connect_browser_profile(profile, timeout)` | `Browser !BrowserError` | Connect to an endpoint with the default or a named profile. |
 | `browser.context()` | `BrowserContext !BrowserError` | Open an isolated browsing context. |
 | `context.page()` / `context.tab()` | `BrowserPage` | Open a page or tab in a context. |
@@ -3831,21 +3832,21 @@ The realtime stream extension likewise observes and cancels the same provider
 worker; its source callback constructor rejects nonpositive rates before
 crossing the provider boundary.
 
-The source scheduler-channel constructors preserve that pair rather than
-returning `TaskState`. Bounded scheduler channels clamp capacities below one
-to one. Interval periods truncate to whole milliseconds and clamp to at least
-one millisecond; their first delivered tick is one.
-
-The source `Condition` extension delegates notification to the existing shared
-condition protocol, preserving parked waiters rather than fabricating state.
-The realtime stream extension likewise observes and cancels the same provider
-worker; its source callback constructor rejects nonpositive rates before
-crossing the provider boundary.
-
-The source scheduler-channel constructors preserve that pair rather than
-returning `TaskState`. Bounded scheduler channels clamp capacities below one
-to one. Interval periods truncate to whole milliseconds and clamp to at least
-one millisecond; their first delivered tick is one.
+The list adapters `para_map`, `para_filter`, `para_partition` and `para_fold`
+run their callback on operating-system worker threads on every tier: `jet run`
+and `jet dev` (O0), `jet build` (O1) and `--release` (O2) all call the one
+runtime kernel, `jet_rt_native_para_walk` in
+[`Parallel.jet`](../../../Compiler/JetRuntime/Source/Parallel.jet). The pool
+is the host's available parallelism (cgroup quota, CPU affinity, online CPUs),
+bounded by `limit:` when a `para_map` passes one. `para_map`, `para_filter`
+and `para_partition` spread their items over the pool in chunks of at most 64
+items, so a short list of costly items still reaches every worker.
+`para_map` and `para_filter` keep source order, and `para_fold` folds
+each 64-item chunk from a fresh seed and then merges the chunk results up a
+fixed tree, so every tier and every worker count gives the same result.
+Compile-time code also runs natively at O0, but there the kernel uses one
+worker: a `para_*` call in a `comptime` block, a `comptime fn` or a value
+computed while building runs its chunks in order and returns the same value.
 
 ### `core.prelude` — small compiler-owned helpers
 

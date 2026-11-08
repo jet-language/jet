@@ -57,6 +57,7 @@ CLIFlags: struct {
     browser_binary: String?
     version: String?
     browser_protocol: String?
+    browser_driver: String?
     // Hangar archive destination, signer, and source.
     archive_to: String?
     archive_key: String?
@@ -108,6 +109,7 @@ CLIFlags: struct {
             browser_binary: None,
             version: None,
             browser_protocol: None,
+            browser_driver: None,
             archive_to: None,
             archive_key: None,
             archive_from: None,
@@ -259,6 +261,10 @@ cli_parse_args_for: fn(verb: String, args: [String]) -> CLIParsed Never! {
                 index += 1
                 if cli_flag_argument(args, index) == .Val(protocol) -> flags.browser_protocol = Val(protocol)
             }
+            arg == BROWSER_FLAG_DRIVER -> {
+                index += 1
+                if cli_flag_argument(args, index) == .Val(driver) -> flags.browser_driver = Val(driver)
+            }
             arg == "--to" -> {
                 index += 1
                 if cli_flag_argument(args, index) == .Val(path) -> flags.archive_to = Val(path)
@@ -328,7 +334,7 @@ cli_verb_flags: fn(verb: String) -> [String] Never! {
         IMAGE_SUBCOMMAND -> [String]{"{IMAGE_FLAG_PUSH} <ref>"}
         SECRETS_SUBCOMMAND -> [String]{SECRETS_FLAG_FORCE}
         TOOL_SUBCOMMAND -> [String]{"{TOOL_FLAG_AS} <name>"}
-        BROWSER_SUBCOMMAND -> [String]{"{BROWSER_FLAG_BINARY} <path>", "{BROWSER_FLAG_VERSION} <version>", "{BROWSER_FLAG_PROTOCOL} <protocol>"}
+        BROWSER_SUBCOMMAND -> [String]{"{BROWSER_FLAG_BINARY} <path>", "{BROWSER_FLAG_VERSION} <version>", "{BROWSER_FLAG_PROTOCOL} <protocol>", "{BROWSER_FLAG_DRIVER} <path>"}
         TRANSITION_SPLIT_VERB | TRANSITION_FOLD_VERB -> [String]{TRANSITION_FLAG_CHECK}
         else -> [String]{}
     }

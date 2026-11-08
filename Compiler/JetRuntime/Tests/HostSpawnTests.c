@@ -118,8 +118,8 @@ int main(int argc,char **argv) {
     spec[21]=1;
     // The limits child also runs on exactly the one CPU its affinity mask (word 28) names: this process's first,
     // in the idle I/O class its ioprio (word 29, IOPRIO_CLASS_IDLE << 13) names.
-    cpu_set_t mine,only; assert(!sched_getaffinity(0,sizeof mine,&mine)); int first=0; while(!CPU_ISSET(first,&mine)) ++first; CPU_ZERO(&only); CPU_SET(first,&only); char first_text[16]; snprintf(first_text,sizeof first_text,"%d",first); _Static_assert(sizeof(cpu_set_t)==128,"PROCESS_CPU_SET_BYTES");
-    spec[15]=1;spec[16]=1001;spec[17]=1;spec[18]=268435456;spec[19]=1;spec[20]=64;spec[28]=(W)(intptr_t)&only;spec[29]=3<<13; char *limits[]={executable,"limits",first_text,NULL}; c=spawn(spec, executable, limits, env);read_exact(c,1,bytes,6);assert(!memcmp(bytes,"limits",6));wait_code(c,0);jet_process_drop_raw(c);spec[15]=spec[17]=spec[19]=spec[28]=spec[29]=0;
+    cpu_set_t mine,only; assert(!sched_getaffinity(0,sizeof mine,&mine)); int cpu=0; while(!CPU_ISSET(cpu,&mine)) ++cpu; CPU_ZERO(&only); CPU_SET(cpu,&only); char cpu_text[16]; snprintf(cpu_text,sizeof cpu_text,"%d",cpu); _Static_assert(sizeof(cpu_set_t)==128,"PROCESS_CPU_SET_BYTES");
+    spec[15]=1;spec[16]=1001;spec[17]=1;spec[18]=268435456;spec[19]=1;spec[20]=64;spec[28]=(W)(intptr_t)&only;spec[29]=3<<13; char *limits[]={executable,"limits",cpu_text,NULL}; c=spawn(spec, executable, limits, env);read_exact(c,1,bytes,6);assert(!memcmp(bytes,"limits",6));wait_code(c,0);jet_process_drop_raw(c);spec[15]=spec[17]=spec[19]=spec[28]=spec[29]=0;
     spec[21]=0;
     // memory_scope (words 30/31): the child joins the scope's `main` leaf
     // through its cgroup.procs descriptor; the reap takes the scope's

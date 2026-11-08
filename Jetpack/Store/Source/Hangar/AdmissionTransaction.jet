@@ -322,6 +322,9 @@ AdmissionTransaction: struct {
             else -> store_copy_nofollow_tree(object.source, partial) ?? return Err(StoreError.Other(err.what()))
         }
         store_seal_node(partial)
+        // A tree this process hashed and then renamed keeps its digest; only
+        // a copied or unhashed source is hashed again here.
+        if internal -> store_carry_verified_digest(verification, object.source, partial, self.roots.hangar_dir(), object.allow_semantic_xattrs)
         actual: store_verified_output_hash(verification, partial, Val(self.roots.hangar_dir()), object.allow_semantic_xattrs)
         if actual != object.digest -> return Err(StoreError.Other("Hangar object `{object.digest}` re-hashed as `{actual}`"))
         store_fsync_tree(partial)

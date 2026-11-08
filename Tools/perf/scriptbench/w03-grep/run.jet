@@ -1,0 +1,25 @@
+// w03: scan a 100 MB log for `status=5xx ms=N`, count the matches and total N.
+package: {
+    name: "run"
+    authority: { allow: [IO, Mem.Alloc, FS.Read] }
+}
+
+use {
+    fs: core.files
+    re: core.regex
+}
+
+run: fn() {
+    rx: re.compile("status=5\\d\\d ms=(\\d+)") ?? panic("bad pattern")
+    text: fs.read("data/log100m.txt") ?? panic("read failed")
+    count := 0
+    total := 0
+    loop line in text.lines() {
+        if re.match(rx, line) == .Val(m) {
+            count += 1
+            total += Int.parse(m.groups[0]) ?? panic("bad ms")
+        }
+    }
+    print("matches {count}")
+    print("ms_sum {total}")
+}

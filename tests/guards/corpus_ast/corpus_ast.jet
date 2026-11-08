@@ -612,33 +612,92 @@ policy_is_build_command_literal: fn(expression: Expr) -> Bool {
     }
     false
 }
+// A hand-built JSON wire value: an interpolated string literal holding a
+// quoted object key followed by `:` (`"{{\"key\": {value}}}"`). Brace text
+// alone is not wire JSON: generated Jet source (`module {{`), Debug-style
+// struct text (`Name {{ field: .. }}`), shell scripts and error prose all
+// carry braces and colons without a quoted key.
 policy_is_hand_json_wire: fn(expression: Expr) -> Bool {
     interpolated := false
-    object_shape := false
+    quoted_key := false
     if policy_without_parens(expression) == .Str(parts, _, _) {
         loop part in parts {
             if part == {
                 .Interp(_, _) -> interpolated = true
-                .Lit(text) -> { if text.contains("{{") && text.contains(":") -> object_shape = true }
+                .Lit(text) -> { if policy_text_has_quoted_key(text) -> quoted_key = true }
                 else -> {}
             }
         }
     }
-    interpolated && object_shape
+    interpolated && quoted_key
 }
-policy_is_string_prefix_containment: fn(expression: Expr) -> Bool {
-    if policy_without_parens(expression) == .MethodCall(_, method, _, _, _, args, _) {
+// `"key":` (optionally `\"key\":`, optionally with spaces before the colon):
+// a double quote, a key of letters, digits, `_`, `-`, `.` or `@`, a closing
+// quote, then `:`.
+policy_text_has_quoted_key: fn(text: String) -> Bool {
+    bytes: text.bytes()
+    quote: U8{34}
+    backslash: U8{92}
+    space: U8{32}
+    colon: U8{58}
+    loop i in 0..<bytes.len() {
+        if bytes[i] != quote -> next
+        j := i + 1
+        key_len := 0
+        loop j < bytes.len() && policy_json_key_byte(bytes[j]) {
+            j = j + 1
+            key_len = key_len + 1
+        }
+        if key_len == 0 -> next
+        if j < bytes.len() && bytes[j] == backslash -> j = j + 1
+        if j >= bytes.len() || bytes[j] != quote -> next
+        j = j + 1
+        loop j < bytes.len() && bytes[j] == space -> j = j + 1
+        if j < bytes.len() && bytes[j] == colon -> return true
+    }
+    false
+}
+policy_json_key_byte: fn(byte: U8) -> Bool {
+    (byte >= (U8{48}) && byte <= (U8{57})) || (byte >= (U8{65}) && byte <= (U8{90})) || (byte >= (U8{97}) && byte <= (U8{122})) || byte == (U8{95}) || byte == (U8{45}) || byte == (U8{46}) || byte == (U8{64})
+}
+// A string prefix used as directory containment: `p.starts_with("{dir}/")`
+// (an interpolated directory then `/`), or an absolute directory literal
+// such as `"/nix/store/"`. URL schemes (`"https://"`), relative-spec syntax
+// (`"./"`, `"../"`), markup (`"</"`) and dotted or dashed name prefixes
+// (`"{name}-"`, `"{prefix}."`) are not path containment, and neither is a
+// prefix test on a receiver the source also tests for a URL scheme: that
+// receiver is a URL, and `"{origin}/"` checks its authority.
+policy_is_string_prefix_containment: fn(expression: Expr, url_receivers: [String]) -> Bool {
+    if policy_without_parens(expression) == .MethodCall(receiver, method, _, _, _, args, _) {
         if method == "starts_with" && args.len() > 0 && policy_without_parens(args[0].expr) == .Str(parts, _, _) {
-            loop part in parts {
-                if part == {
-                    .Interp(_, _) -> return true
-                    .Lit(text) -> { if text.len() > 1 && text.ends_with("/") -> return true }
-                    else -> {}
-                }
+            if parts.len() == 0 -> return false
+            if policy_without_parens(receiver) == .Ident(name, _, _) && url_receivers.contains(name) -> return false
+            interpolated := false
+            loop part in parts { if part == .Interp(_, _) -> interpolated = true }
+            last: parts[parts.len() - 1]
+            if last == .Lit(text) {
+                if interpolated -> return text.ends_with("/") && !text.contains(":")
+                return parts.len() == 1 && text.len() > 1 && text.starts_with("/") && text.ends_with("/") && !text.contains("//")
             }
         }
     }
     false
+}
+// The identifiers a source tests with `starts_with("<scheme>://")`.
+policy_url_receivers: fn(expressions: [Expr]) -> [String] {
+    names := [String]{}
+    loop expression in expressions {
+        if policy_without_parens(expression) == .MethodCall(receiver, method, _, _, _, args, _) {
+            if method != "starts_with" || args.len() == 0 -> next
+            if policy_without_parens(args[0].expr) == .Str(parts, _, _) {
+                if parts.len() != 1 -> next
+                if parts[0] == .Lit(text) && text.contains("://") && policy_without_parens(receiver) == .Ident(name, _, _) {
+                    if !names.contains(name) -> names.push(name.copy())
+                }
+            }
+        }
+    }
+    names
 }
 policy_is_url_query_reparse: fn(expression: Expr) -> Bool {
     if policy_without_parens(expression) == .MethodCall(_, method, _, _, _, args, _) {
@@ -766,7 +825,7 @@ policy_is_task_statement: fn(statement: Stmt, only_all: Bool) -> Bool {
         else -> return false
     }
 }
-policy_data_tree_type: fn(ty: Type) -> Bool {
+policy_dyn_type: fn(ty: Type) -> Bool {
     if policy_named_type(ty, "Dyn") -> return true
     if ty == .List(inner) -> return policy_named_type(inner, "Dyn")
     false
@@ -806,14 +865,14 @@ policy_named_tower_truthiness: fn(path: String, name: String) -> Bool {
     name == "javascript_truthy_int" || name == "javascript_truthy_float" || name == "javascript_truthy_text" ||
     name == "javascript_truthy_array" || name == "javascript_truthy_object"
 }
-policy_data_tree_violations: fn(path: String, program: Program) -> [PolicyOccurrence] {
+policy_dyn_violations: fn(path: String, program: Program) -> [PolicyOccurrence] {
     violations := [PolicyOccurrence]{}
     loop item in program.items {
         if item == .Func(function) {
             if policy_named_tower_truthiness(path, function.name) -> next
             result: function.return_type ?? next
             if !policy_named_type(result, "Bool") -> next
-            pair: function.params.len() == 2 && policy_data_tree_type(function.params[0].ty) && policy_data_tree_type(function.params[1].ty)
+            pair: function.params.len() == 2 && policy_dyn_type(function.params[0].ty) && policy_dyn_type(function.params[1].ty)
             constant: policy_constant_bool_body(function.body)
             if (pair && (constant || policy_compares_parameter_pair(function))) ||
                 (function.params.len() == 1 && policy_named_type(function.params[0].ty, "Dyn") && constant) {
@@ -1291,7 +1350,9 @@ policy_evaluate_program: fn(manifest: PolicyManifest, path: String, row: PolicyS
     }
     enabled := [Bool]{}
     loop rule in rules -> enabled.push(policy_applies(manifest, path, row, rule))
-    loop expression in policy_program_expressions(program) {
+    expressions: policy_program_expressions(program)
+    url_receivers: policy_url_receivers(expressions)
+    loop expression in expressions {
         span: expr_span(expression)
         if policy_is_process_input(expression, aliases) -> argv_sites.push(span.copy())
         loop index in 0..<rules.len() {
@@ -1307,7 +1368,7 @@ policy_evaluate_program: fn(manifest: PolicyManifest, path: String, row: PolicyS
                 "http-message-text" -> policy_is_http_message_text(expression)
                 "delimited-reader-config" -> policy_is_raw_delimited_split(expression)
                 "plain-format-fact" -> policy_is_redundant_fixed_cleanup(expression)
-                "dogfood-path-containment" -> policy_is_string_prefix_containment(expression)
+                "dogfood-path-containment" -> policy_is_string_prefix_containment(expression, url_receivers)
                 "dogfood-json" -> policy_is_hand_json_wire(expression)
                 "dogfood-url-query" -> policy_is_url_query_reparse(expression)
                 "dogfood-list-equality" -> policy_is_named_list_equality(expression)
@@ -1347,7 +1408,7 @@ policy_evaluate_program: fn(manifest: PolicyManifest, path: String, row: PolicyS
         }
     }
     if policy_applies(manifest, path, row, "dyn-domain-policy") {
-        loop violation in policy_data_tree_violations(path, program) -> violations.push(violation)
+        loop violation in policy_dyn_violations(path, program) -> violations.push(violation)
     }
     if policy_applies(manifest, path, row, "walk-files-filter") && facts.file_walks.len() > 0 -> violations.push(policy_occurrence(path, "walk-files-filter", "call:fs.walk", facts.file_walks[0]))
     if policy_applies(manifest, path, row, "regex-capture-recipe") && !policy_has_anchored_regex_capture(program, aliases) {
@@ -1843,13 +1904,27 @@ policy_ast_test_dogfood_and_workload_shapes: fn() PolicyError! {
         PolicyShapeCase{path: "tests/agent_workloads/adapters/http_api.jet", source: "run: fn(req: HTTPRequest) {{ payload: req.json(Json) }}", rule: "http-typed-json", present: false},
         PolicyShapeCase{path: "tests/agent_workloads/adapters/http_api.jet", source: "handle: fn(req: HTTPRequest) -> HTTPResponse {{ return response }}", rule: "http-unused-request", present: true},
         PolicyShapeCase{path: "tests/agent_workloads/adapters/http_api.jet", source: "handle: fn(req: HTTPRequest) -> HTTPResponse {{ return req.response() }}", rule: "http-unused-request", present: false},
-        PolicyShapeCase{path: "Jetpack/Store/Source/Ingest/TreeIngest.jet", source: "run: fn() {{ allowed: candidate.starts_with(\"root/\") }}", rule: "dogfood-path-containment", present: true},
+        PolicyShapeCase{path: "Jetpack/Store/Source/Ingest/TreeIngest.jet", source: "run: fn() {{ allowed: candidate.starts_with(\"{{root}}/\") }}", rule: "dogfood-path-containment", present: true},
+        PolicyShapeCase{path: "Jetpack/Store/Source/Ingest/TreeIngest.jet", source: "run: fn() {{ inside: path == root || path.starts_with(\"{{root.removesuffix(\"/\")}}/\") }}", rule: "dogfood-path-containment", present: true},
+        PolicyShapeCase{path: "Jetpack/Store/Source/Ingest/TreeIngest.jet", source: "run: fn() {{ stored: path.starts_with(\"/nix/store/\") }}", rule: "dogfood-path-containment", present: true},
         PolicyShapeCase{path: "Jetpack/Store/Source/Ingest/TreeIngest.jet", source: "run: fn() {{ allowed: candidate == root }}", rule: "dogfood-path-containment", present: false},
+        PolicyShapeCase{path: "Jetpack/Store/Source/Ingest/TreeIngest.jet", source: "use paths: core.files.path\nrun: fn() {{ allowed: paths.is_relative_to(paths.of(candidate), paths.of(root)) }}", rule: "dogfood-path-containment", present: false},
+        PolicyShapeCase{path: "Jetpack/Store/Source/Ingest/TreeIngest.jet", source: "run: fn() {{ secure: url.starts_with(\"https://\") || url.starts_with(\"file://\") }}", rule: "dogfood-path-containment", present: false},
+        PolicyShapeCase{path: "Jetpack/Store/Source/Ingest/TreeIngest.jet", source: "run: fn() {{ local: raw.starts_with(\"./\") || raw.starts_with(\"../\") }}", rule: "dogfood-path-containment", present: false},
+        PolicyShapeCase{path: "Jetpack/Store/Source/Ingest/TreeIngest.jet", source: "run: fn() {{ closing: opening.starts_with(\"</\") }}", rule: "dogfood-path-containment", present: false},
+        PolicyShapeCase{path: "Jetpack/Store/Source/Ingest/TreeIngest.jet", source: "run: fn() {{ named: rest.starts_with(\"{{name}}-\") || value.starts_with(\"{{prefix}}.\") || line.starts_with(\"{{key}} = \") }}", rule: "dogfood-path-containment", present: false},
+        PolicyShapeCase{path: "Jetpack/Store/Source/Ingest/TreeIngest.jet", source: "run: fn() {{ same: location.starts_with(\"https://\") && location.starts_with(\"{{origin}}/\") }}", rule: "dogfood-path-containment", present: false},
         // The Rust final still evaluated these at Jetpack/CLI/Source/Entry/Main.jet,
         // which D-JPK-DISPATCH1=B (ee56d70d95) made a raw-protocol source that no
         // semantic rule reaches; any root:Jetpack dogfood source carries the scope.
         PolicyShapeCase{path: "Jetpack/Store/Source/Ingest/TreeIngest.jet", source: "run: fn() {{ wire: \"{{{{\\\"key\\\": {{value}}}}}}\" }}", rule: "dogfood-json", present: true},
         PolicyShapeCase{path: "Jetpack/Store/Source/Ingest/TreeIngest.jet", source: "run: fn() {{ wire: json.to_string(value) }}", rule: "dogfood-json", present: false},
+        PolicyShapeCase{path: "Jetpack/Store/Source/Ingest/TreeIngest.jet", source: "run: fn() {{ row: \"{{{{\\\"name\\\":{{quote(name)}},\\\"size\\\":{{size}}}}}}\" }}", rule: "dogfood-json", present: true},
+        PolicyShapeCase{path: "Jetpack/Store/Source/Ingest/TreeIngest.jet", source: "run: fn() {{ field: \"  \\\"sha256\\\": {{quote(sha)}},\\n\" }}", rule: "dogfood-json", present: true},
+        PolicyShapeCase{path: "Jetpack/Store/Source/Ingest/TreeIngest.jet", source: "run: fn() {{ text: \"Provenance {{{{ source: {{source}}, lock: {{lock}} }}}}\" }}", rule: "dogfood-json", present: false},
+        PolicyShapeCase{path: "Jetpack/Store/Source/Ingest/TreeIngest.jet", source: "run: fn() {{ out: \"#Import c.{{abi}}: module {{{{\\n    open: fn() -> Int = \\\"{{abi}}_open\\\"\\n}}}}\\n\" }}", rule: "dogfood-json", present: false},
+        PolicyShapeCase{path: "Jetpack/Store/Source/Ingest/TreeIngest.jet", source: "run: fn() {{ message: \"write `{{name}}: module {{{{ members: find(\\\"./packages\\\") }}}}` in `{{file}}`\" }}", rule: "dogfood-json", present: false},
+        PolicyShapeCase{path: "Jetpack/Store/Source/Ingest/TreeIngest.jet", source: "run: fn() {{ script: \"[ \\\"$code\\\" = 0 ] || {{{{ echo \\\"{{kind}}\\\"; }}}}\" }}", rule: "dogfood-json", present: false},
         PolicyShapeCase{path: "Tools/tower/run.jet", source: "run: fn() {{ fields: query.split(\"&\") }}", rule: "dogfood-url-query", present: true},
         PolicyShapeCase{path: "Tools/tower/run.jet", source: "run: fn() {{ fields: url.query() }}", rule: "dogfood-url-query", present: false},
         PolicyShapeCase{path: "Jetpack/CLI/Source/Realize/ProjectPlan.jet", source: "run: fn() {{ same_strings(left, right) }}", rule: "dogfood-list-equality", present: true},
@@ -1991,7 +2066,7 @@ policy_ast_test_planted_rule_pairs: fn() PolicyError! {
         PolicyPlantedPair{rule: "http-typed-json", kind: "call:request.body", rejected: "run: fn(req: HTTPRequest) {{ req.body(Json) }}", clean: "run: fn(req: HTTPRequest) {{ req.json(Json) }}"},
         PolicyPlantedPair{rule: "delimited-reader-config", kind: "call:delimited-split", rejected: "run: fn() {{ input.split(\"\\t\") }}", clean: "run: fn() {{ input.split(\"|\") }}"},
         PolicyPlantedPair{rule: "plain-format-fact", kind: "call:Fixed.replace", rejected: "run: fn() {{ \"{{value:Fixed(2)}}\".replace(\",\", \"\") }}", clean: "run: fn() {{ \"{{value:Fixed(2)}}\" }}"},
-        PolicyPlantedPair{rule: "dogfood-path-containment", kind: "call:path.starts_with", rejected: "run: fn() {{ candidate.starts_with(\"root/\") }}", clean: "run: fn() {{ candidate.is_within(root) }}"},
+        PolicyPlantedPair{rule: "dogfood-path-containment", kind: "call:path.starts_with", rejected: "run: fn() {{ candidate.starts_with(\"{{root}}/\") }}", clean: "use paths: core.files.path\nrun: fn() {{ paths.is_relative_to(paths.of(candidate), paths.of(root)) }}"},
         PolicyPlantedPair{rule: "dogfood-json", kind: "literal:json-wire", rejected: "run: fn() {{ \"{{{{\\\"key\\\": {{value}}}}}}\" }}", clean: "run: fn() {{ json.to_string(value) }}"},
         PolicyPlantedPair{rule: "dogfood-url-query", kind: "call:url.query.split", rejected: "run: fn() {{ query.split(\"&\") }}", clean: "run: fn() {{ url.query() }}"},
         PolicyPlantedPair{rule: "dogfood-list-equality", kind: "fn:same_strings", rejected: "run: fn() {{ same_strings(left, right) }}", clean: "run: fn() {{ left == right }}"},

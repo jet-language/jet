@@ -25,6 +25,7 @@ copy: tower/history.json history-before
 copy: tower/read-only-marker.txt marker-before
 step success: jet {work}/repo/Tools/ci/TowerHygiene.jet
 env: TOWER_DATA={work}/tower
+env: JET={jet}
 env: JET_TOWER_LINT_SCOPE={work}/Docs
 env: JET_TOWER_HYGIENE_REPORT={work}/success.txt
 unset: JET_TEST_SHARD
@@ -37,7 +38,7 @@ file: success.txt ~ "lint_json=pass" # Original success report.contains.
 file: success.txt ~ "lint_repeat_json=pass" # Original success report.contains.
 file: success.txt ~ "candidate_commit=" # Original success report.contains.
 file: success.txt ~ "runner_os=" # Original success report.contains.
-file: success.txt ~ "node=v" # Original success report.contains.
+file: success.txt ~ "board=Tools/tower/Board.jet" # The Jet board reader runs the lint, not node.
 file: success.txt ~ "scope_input=" # Original success report.contains.
 file: tower/tower.json == tower-before
 file: tower/history.json == history-before
@@ -45,6 +46,7 @@ file: tower/read-only-marker.txt == marker-before
 write: Docs/spec/bad.md = "D-MISSING1\n"
 step failure: jet {work}/repo/Tools/ci/TowerHygiene.jet
 env: TOWER_DATA={work}/tower
+env: JET={jet}
 env: JET_TOWER_LINT_SCOPE={work}/Docs
 env: JET_TOWER_HYGIENE_REPORT={work}/failure.txt
 unset: JET_TEST_SHARD
@@ -60,6 +62,7 @@ file: tower/read-only-marker.txt == marker-before
 mkdir: outside
 step traversal: jet {work}/repo/Tools/ci/TowerHygiene.jet
 env: TOWER_DATA={work}/tower
+env: JET={jet}
 env: JET_TOWER_LINT_SCOPE={work}/Docs
 env: JET_TOWER_HYGIENE_REPORT={work}/outside/../tower/traversal.txt
 unset: JET_TEST_SHARD
@@ -69,6 +72,7 @@ mkdir: tower/tower.json.lock
 write: tower/tower.json.lock/info.json = "{\"pid\": 1, \"at\": 0}\n"
 step locked: jet {work}/repo/Tools/ci/TowerHygiene.jet
 env: TOWER_DATA={work}/tower
+env: JET={jet}
 env: JET_TOWER_LINT_SCOPE={work}/Docs
 env: JET_TOWER_HYGIENE_REPORT={work}/locked.txt
 unset: JET_TEST_SHARD

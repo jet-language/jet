@@ -238,14 +238,14 @@ csv_parse: fn(text: I64, out: I64) -> I64 {
 // each the record's cell or empty text.
 csv_row_tree: fn(header: I64, record: I64) -> I64 {
     columns: trap_word(header)
-    entries: data_sequence_new(columns, DATA_TREE_ENTRY_BYTES)
+    entries: data_sequence_new(columns, DYN_ENTRY_BYTES)
     at := I64{0}
     loop at < columns {
         cell: if (at < trap_word(record)) -> csv_words_get(record, at) else -> rt_static_text("")
         data_sequence_push(entries, csv_words_get(header, at), jet_rt_record_new_dyn_text(cell), true)
         at += I64{1}
     }
-    data_tree_new(DATA_TREE_OBJECT, entries)
+    dyn_new(DYN_OBJECT, entries)
 }
 
 // Releases owned FieldError handles in a word list and the list.

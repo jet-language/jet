@@ -303,16 +303,33 @@ may call a design better only where a passing review backs that exact claim.
 Use the most specific agent available for each role. Workers do not spawn
 workers. Every code worker returns the exact `CHECK OK` receipt from
 `Tools/agent/LaneCheck.jet`; prose-only or static-data-only work returns
-`DOCS ONLY`. Workers address the card's criteria directly: write the code to
-the spec, run only the touched files' source checks, commit, report, and move
-on. When a spec or criterion exists, the code comes first: no worker stops to
-prove rows, waits for review, or holds a commit for the orchestrator before
-landing it and taking the next criterion. Workers never run suites, A/B
-comparisons, chains, or releases; the orchestrator tests landed commits in
-batches, never gates a landing on a proof, and returns every failure to its
-owner at once. The owner fixes those failures and moves on again. The
-orchestration skill defines briefs, liveness, integration, proof cadence,
-recovery, and closure.
+`DOCS ONLY`.
+
+Workers are never idle or stalled. Each worker runs one continuous loop: write
+the code to the card's spec, run only the touched files' source checks, land
+the commit, report it to the orchestrator for testing, and start its next task
+at once. When a spec or criterion exists, the code comes first: no worker stops
+to prove rows, waits for review or a test result, or holds a commit for the
+orchestrator. Workers never run suites, A/B comparisons, chains, or releases.
+While the orchestrator's tests run, every worker keeps coding to spec.
+
+The orchestrator keeps every worker's next task queued so none waits, tests
+landed commits in batches, and never gates a landing on a proof. Every failure
+its tests find goes back at once to the worker that owns it, as that worker's
+top priority. The worker fixes it, lands the fix, reports it for final
+verification, and resumes its queue; the orchestrator verifies the fix and
+closes the criterion. The orchestration skill defines briefs, liveness,
+integration, proof cadence, recovery, and closure.
+
+The orchestrator evaluates its own plan continuously, not only when something
+fails. Before each step and whenever a result arrives, it asks whether this is
+the fastest effective route to the owner's targets, whether a better approach
+exists, and whether work, order, or agents should be rearranged to meet every
+deadline. Then it acts on the answer: it re-routes work to whoever can finish
+it soonest, puts the highest-value and quickest wins first so progress shows
+early, and overlaps every independent stage. The orchestrator orchestrates; it
+takes on implementation only when that is the fastest route and never at the
+cost of monitoring, unblocking, and verifying.
 
 This repository carries no harness-specific configuration. Agent tools use
 their own global settings; Jet contributes only this contract and the skills
@@ -333,15 +350,15 @@ in one pass:
   `jet Tools/agent/Land.jet census` (the seed's keep-going `jet check` and
   `jet build` of the compiler, the runtime pack and the self-check, every row
   of every phase in one report; the lander runs it through `Land.jet
-  precommit` before every compiler commit) and `Tools/agent/chain/chain.sh
+  precommit` before every compiler commit) and `jet Tools/agent/Chain.jet
   TREE LEVEL --dry-run`, which names every stage the launch would build. Every
   row is clean or carries a written disposition naming the commit in this
   launch that fixes it. Launching to "see what fails next" is forbidden. The
   launchers enforce it: a clean census writes the snapshot's receipt
   (`Land.jet receipt`, keyed on the compiler source identity and the seed),
-  and `chain.sh` full and `Tools/release/Main.jet` `admit` and `build` refuse
-  to start without the receipt for their tree and seed; `--check-gate`
-  gives the answer without launching.
+  and `Tools/agent/Chain.jet TREE full` and `Tools/release/Main.jet` `admit`
+  and `build` refuse to start without the receipt for their tree and seed;
+  `--check-gate` gives the answer without launching.
 - **Every compiler phase has a collect-all mode, or that is the first defect.**
   Parse, imports, sema, comptime, codegen lowering, backend lowering, machine
   emission, object, link and run must each record a failing item as a census
@@ -408,11 +425,12 @@ proof the criteria name. Broad suites, unfiltered censuses, and
 required token. A worker's type-check is not proof of runtime behavior, tier
 parity, goldens, snapshots, or generated artifacts.
 
-Agent tooling lives in the repository: `Tools/agent/chain/` (the self-host
-chain and the machine build slots), `Tools/agent/land/` (the lander, batch
-landing, the census preflight and publishing), `Tools/agent/Land.jet` (`queue`
-adds a land job for the lander; `land` lands a patch stack directly, with
-`--scratch-copy` on a fresh clone), `Tools/agent/Suite.jet` (one `jet test
+Agent tooling lives in the repository: `Tools/agent/Chain.jet` (the self-host
+chain and the machine build slots), `Tools/agent/Land.jet` (`serve` is the
+lander, `batch` its batch landing, `census` the preflight, `publish` keeps
+landed compilers for lanes; `queue` adds a land job for the lander; `land`
+lands a patch stack directly, with `--scratch-copy` on a fresh clone),
+`Tools/agent/Suite.jet` (one `jet test
 Compiler --profile` run on a compiler snapshot) and `Tools/agent/ballots/Validate.jet` (the ballot validator).
 Tools find state, scratch, queues, published compilers and seeds only through
 the root variables of `Tools/agent/roots.sh` (shell) and `Tools/agent/roots.mjs`

@@ -1,6 +1,5 @@
 use {
     std.[fs, env, process, thread]
-    std.process.[Command]
 }
 // Helpers and fixtures are owned solely by CanvasScenarios.jet.
 // GATE #4494: real browser/CLI processes, threads and filesystem providers.
@@ -9,7 +8,7 @@ use {
 #Test("cdp_driver_owns_parallel_browsers_under_long_tmpdir") {
     tools: canvas_tools()
     if tools == none {
-        eprintln("ignored: CDP lifecycle regression needs dev-shell Chromium and Node")
+        eprintln("ignored: browser driver lifecycle regression needs dev-shell Chromium")
         return
     }
     _permits: (0..MAX_CANVAS_BROWSERS).map(_ -> CanvasBrowserPermit.acquire()).collect()
@@ -17,10 +16,10 @@ use {
     repeated: "x".repeat(120)
     long_tmp: env.temp_dir().join("canvas-driver-lifecycle-{repeated}-{process.id()}")
     fs.create_dir_all(long_tmp).expect("create long Canvas driver temp root")
-    output: Command.new(tools.unwrap().node).current_dir(repo).env("CHROMIUM", tools.unwrap().chromium).env("TMPDIR", long_tmp)
-        .arg("Tools/canvas-test/driver-lifecycle.mjs").arg(MAX_CANVAS_BROWSERS.to_string()).output().expect("run Canvas CDP lifecycle regression")
+    output: canvas_harness(repo, "driver-lifecycle").env("CHROMIUM", tools.unwrap().chromium).env("TMPDIR", long_tmp)
+        .arg(MAX_CANVAS_BROWSERS.to_string()).output().expect("run Canvas browser driver lifecycle regression")
     fs.remove_dir_all(long_tmp).expect("remove long Canvas driver temp root")
-    assert(output.status.success(), "parallel CDP lifecycle failed\n--- stdout ---\n{String.from_utf8_lossy(output.stdout)}\n--- stderr ---\n{String.from_utf8_lossy(output.stderr)}")
+    assert(output.status.success(), "parallel browser driver lifecycle failed\n--- stdout ---\n{String.from_utf8_lossy(output.stdout)}\n--- stderr ---\n{String.from_utf8_lossy(output.stderr)}")
     assert(String.from_utf8_lossy(output.stdout).contains("PASS 4 isolated Chromium lifecycles"))
 }
 
@@ -30,7 +29,7 @@ use {
 #Test("canvas_real_client_loads_projection_and_keeps_devserver_alive") { run_canvas_scenario(DEVSERVER_REAL_CLIENT_SCENARIO) }
 #Test("resident_session_ide_state_matrix") { run_canvas_scenario("resident-session-ide-state-matrix") }
 #Test("canvas_workbench_e2e") {
-    assert(canvas_tools() != none, "Canvas workbench E2E needs dev-shell Chromium and Node; run Tools/agent/JetEnv.jet full")
+    assert(canvas_tools() != none, "Canvas workbench E2E needs dev-shell Chromium; run Tools/agent/JetEnv.jet full")
     run_canvas_scenario(WORKBENCH_E2E_SCENARIO)
 }
 #Test("session_surface_matrix") {
@@ -42,7 +41,7 @@ use {
 #Test("click_select_details") { run_canvas_scenario("click-select-details") }
 #Test("node_drag_persists_without_source_change") { run_canvas_scenario("node-drag-persists-without-source-change") }
 #Test("selection_marquee_modifiers_local_move") {
-    assert(canvas_tools() != none, "selection/marquee/local-move proof requires Chromium and Node; run Tools/agent/JetEnv.jet full")
+    assert(canvas_tools() != none, "selection/marquee/local-move proof requires Chromium; run Tools/agent/JetEnv.jet full")
     run_canvas_scenario("selection-marquee-modifiers-local-move")
 }
 #Test("clipboard_copy_paste") { run_canvas_scenario("clipboard-copy-paste") }
@@ -99,7 +98,7 @@ use {
 #Test("harness_checked_doc_empty_noop_selftest") { run_canvas_scenario("harness-checked-doc-empty-noop-selftest") }
 #Test("rename_variable_sidebar") { run_canvas_scenario("rename-variable-sidebar") }
 #Test("project_rename_preview_commit") {
-    assert(canvas_tools() != none, "checked cross-file edit proof requires Chromium and Node; run Tools/agent/JetEnv.jet full")
+    assert(canvas_tools() != none, "checked cross-file edit proof requires Chromium; run Tools/agent/JetEnv.jet full")
     run_canvas_scenario("project-rename-preview-commit")
 }
 #Test("details_scalar_enum_reference_editors") { run_canvas_scenario("details-scalar-enum-reference-editors") }
@@ -117,26 +116,26 @@ use {
 #Test("undo_depth_20_mixed_run") { run_canvas_scenario("undo-depth-20-mixed-run") }
 #Test("run_button_output_visible") { run_canvas_scenario("run-button-output-visible") }
 #Test("debug_live_session") {
-    assert(canvas_tools() != none, "debug live-session proof requires Chromium and Node; run Tools/agent/JetEnv.jet full")
+    assert(canvas_tools() != none, "debug live-session proof requires Chromium; run Tools/agent/JetEnv.jet full")
     run_canvas_scenario("debug-live-session")
 }
 #Test("debug_runtime_values_staleness_liveness") {
-    assert(canvas_tools() != none, "debug staleness/liveness proof requires Chromium and Node; run Tools/agent/JetEnv.jet full")
+    assert(canvas_tools() != none, "debug staleness/liveness proof requires Chromium; run Tools/agent/JetEnv.jet full")
     run_canvas_scenario("debug-runtime-values-staleness-liveness")
 }
 #Test("debug_breakpoints_run_control_gestures") { run_canvas_scenario("debug-breakpoints-run-control-gestures") }
 #Test("graph_source_toggle_preserves_selection") { run_canvas_scenario("graph-source-toggle-preserves-selection") }
 #Test("canvas_rad_two_way_round_trip") {
-    assert(canvas_tools() != none, "Canvas RAD round-trip proof requires Chromium and Node; run Tools/agent/JetEnv.jet full")
+    assert(canvas_tools() != none, "Canvas RAD round-trip proof requires Chromium; run Tools/agent/JetEnv.jet full")
     run_canvas_scenario("canvas-rad-two-way-round-trip")
 }
 #Test("random_ops_source_sync") { run_canvas_scenario("random-ops-source-sync") }
 #Test("harness_click_noop_selftest") { run_canvas_scenario("harness-click-noop-selftest") }
 #Test("big_project_perf_budget") {
-    tools: canvas_tools().unwrap_or_else(() -> panic("big-project-perf needs dev-shell Chromium and Node; no skipped sample path"))
+    tools: canvas_tools().unwrap_or_else(() -> panic("big-project-perf needs dev-shell Chromium; no skipped sample path"))
     loop clean_run in 1..2 {
         eprintln("BIG_PROJECT_PERF clean_run={clean_run}/2")
-        run_browser_scenario(BIG_PROJECT_SCENARIO, "chromium", tools.node, [("CHROMIUM", tools.chromium)])
+        run_browser_scenario(BIG_PROJECT_SCENARIO, "chromium", [("CHROMIUM", tools.chromium)])
     }
 }
 #Test("gecko_smoke") {
@@ -147,7 +146,7 @@ use {
     tools: gecko_tools().unwrap_or_else(error -> panic("{error}"))
     run_gecko_cleanup_probe(tools)
     loop name in ["open-and-render", "pan-zoom-fit", "click-select-details", "palette-insert-core-fn", "wire-data-and-exec", "undo-restores-source", "check-button-populates-panel", "random-ops-source-sync"] {
-        run_browser_scenario(name, "firefox", tools.node, [(_0: "FIREFOX", _1: tools.firefox), (_0: "GECKODRIVER", _1: tools.geckodriver)])
+        run_browser_scenario(name, "firefox", [(_0: "FIREFOX", _1: tools.firefox), (_0: "GECKODRIVER", _1: tools.geckodriver)])
     }
 }
 #Test("canvas_cases_same_name_get_distinct_directories") {

@@ -170,15 +170,15 @@ log_sink_open: fn(path: I64) -> I64 {
         rt_text_store(wrapping(state + LOG_STATE_SPANS_CAP), grown)
     }
     slot: wrapping(rt_text_word(wrapping(state + LOG_STATE_SPANS)) + length * I64{16})
-    rt_text_store(slot, data_tree_word(wrapping(span + LOG_SPAN_ID)))
-    rt_text_store(wrapping(slot + I64{8}), jet_rt_string_clone(data_tree_word(wrapping(span + LOG_SPAN_NAME))))
+    rt_text_store(slot, dyn_word(wrapping(span + LOG_SPAN_ID)))
+    rt_text_store(wrapping(slot + I64{8}), jet_rt_string_clone(dyn_word(wrapping(span + LOG_SPAN_NAME))))
     rt_text_store(wrapping(state + LOG_STATE_SPANS_LEN), length + I64{1})
 }
 
 // Remove the last active span with this id (rposition), if any.
 #Export(c) jet_ring_log_close: fn(span: I64) {
     state: log_state()
-    id: data_tree_word(wrapping(span + LOG_SPAN_ID))
+    id: dyn_word(wrapping(span + LOG_SPAN_ID))
     spans: rt_text_word(wrapping(state + LOG_STATE_SPANS))
     length: rt_text_word(wrapping(state + LOG_STATE_SPANS_LEN))
     at := length

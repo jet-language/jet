@@ -25,7 +25,7 @@ vault_fixture_check: fn(condition: Bool) {
     data: rt_text_word(forbidden + DATA_SEQUENCE_DATA)
     at := I64{0}
     loop at < count {
-        needle: rt_text_word(data + at * DATA_TREE_ELEMENT_BYTES)
+        needle: rt_text_word(data + at * DYN_ELEMENT_BYTES)
         vault_fixture_check(rt_text_find(shown, needle, I64{0}, false) < I64{0})
         vault_fixture_check(rt_text_find(debug, needle, I64{0}, false) < I64{0})
         at += I64{1}
@@ -137,12 +137,12 @@ vault_fixture_check: fn(condition: Bool) {
     vault_fixture_check(rt_text_equal_bytes(rt_text_word(bytes + DATA_SEQUENCE_DATA), rt_text_data(payload), count))
     if (count == I64{8192}) -> vault_fixture_check(rt_text_word(bytes + DATA_SEQUENCE_CAPACITY) == I64{8192})
     vault_fixture_check(trap_syscall(I64{8}, file, I64{0}, I64{1}, I64{0}, I64{0}, I64{0}) == count)
-    data_sequence_drop(bytes, DATA_TREE_BYTE_LIST)
+    data_sequence_drop(bytes, DYN_BYTE_LIST)
     vault_fixture_check(vault_linux_read_at_root(root, name, out) == I64{0})
     reopened: rt_text_word(out)
     vault_fixture_check(rt_text_word(reopened + DATA_SEQUENCE_LENGTH) == count)
     vault_fixture_check(rt_text_equal_bytes(rt_text_word(reopened + DATA_SEQUENCE_DATA), rt_text_data(payload), count))
-    data_sequence_drop(reopened, DATA_TREE_BYTE_LIST)
+    data_sequence_drop(reopened, DYN_BYTE_LIST)
     vault_fixture_check(vault_linux_remove_exact(dirfd, rt_text_data(name), file, rt_text_data(quarantine), out, scratch) == I64{0})
     vault_fixture_check(rt_text_word(out) == I64{1})
     vault_linux_close(file)
@@ -166,7 +166,7 @@ vault_fixture_check: fn(condition: Bool) {
     vault_fixture_check(rt_text_word(decoded + DATA_SEQUENCE_LENGTH) == count)
     vault_fixture_check(rt_text_equal_bytes(rt_text_word(decoded + DATA_SEQUENCE_DATA), rt_text_word(plaintext + DATA_SEQUENCE_DATA), count))
     thread_zero(rt_text_word(decoded + DATA_SEQUENCE_DATA), rt_text_word(decoded + DATA_SEQUENCE_CAPACITY))
-    data_sequence_drop(decoded, DATA_TREE_BYTE_LIST)
+    data_sequence_drop(decoded, DYN_BYTE_LIST)
     vault_fixture_check(vault_crypto_keygen(slots + I64{32}, slots + I64{40}) == I64{0})
     wrong_identity: rt_text_word(slots + I64{32})
     wrong_recipient: rt_text_word(slots + I64{40})
@@ -182,7 +182,7 @@ vault_fixture_check: fn(condition: Bool) {
     vault_fixture_check(corrupt != I64{0} && vault_error_tag(corrupt) == I64{4})
     vault_fixture_check(rt_text_word(slots + I64{24}) == I64{-471})
     vault_error_drop(corrupt)
-    data_sequence_drop(ciphertext, DATA_TREE_BYTE_LIST)
+    data_sequence_drop(ciphertext, DYN_BYTE_LIST)
     vault_text_zero(identity)
     vault_text_zero(wrong_identity)
     jet_rt_string_drop(identity)
@@ -361,7 +361,7 @@ vault_fixture_origin: fn(name: I64) -> I64 {
 }
 vault_fixture_push_record: fn(store: I64, record: I64) {
     records: rt_text_word(store + VAULT_STORE_RECORDS)
-    slot: data_sequence_reserve(records, DATA_TREE_ELEMENT_BYTES)
+    slot: data_sequence_reserve(records, DYN_ELEMENT_BYTES)
     rt_text_store(slot, record)
     rt_text_store(records + DATA_SEQUENCE_LENGTH, rt_text_word(records + DATA_SEQUENCE_LENGTH) + I64{1})
 }
@@ -492,8 +492,8 @@ vault_fixture_opaque: fn(record: I64, byte: I64, scratch: I64) {
     index = I64{0}
     loop {
         if (index == I64{3}) -> break
-        left: data + index * DATA_TREE_ELEMENT_BYTES
-        right: data + (I64{5} - index) * DATA_TREE_ELEMENT_BYTES
+        left: data + index * DYN_ELEMENT_BYTES
+        right: data + (I64{5} - index) * DYN_ELEMENT_BYTES
         save: rt_text_word(left)
         rt_text_store(left, rt_text_word(right))
         rt_text_store(right, save)
@@ -511,8 +511,8 @@ vault_fixture_opaque: fn(record: I64, byte: I64, scratch: I64) {
     index = I64{0}
     loop {
         if (index == I64{6}) -> break
-        record: rt_text_word(canonical + index * DATA_TREE_ELEMENT_BYTES)
-        original: rt_text_word(data + (I64{5} - index) * DATA_TREE_ELEMENT_BYTES)
+        record: rt_text_word(canonical + index * DYN_ELEMENT_BYTES)
+        original: rt_text_word(data + (I64{5} - index) * DYN_ELEMENT_BYTES)
         vault_fixture_check(vault_record_equal(record, original))
         index += I64{1}
     }
@@ -547,8 +547,8 @@ vault_fixture_opaque: fn(record: I64, byte: I64, scratch: I64) {
     duplicate := I64{1}
     loop {
         if (duplicate >= I64{6}) -> break
-        row: rt_text_word(canonical + duplicate * DATA_TREE_ELEMENT_BYTES)
-        previous: rt_text_word(canonical + (duplicate - I64{1}) * DATA_TREE_ELEMENT_BYTES)
+        row: rt_text_word(canonical + duplicate * DYN_ELEMENT_BYTES)
+        previous: rt_text_word(canonical + (duplicate - I64{1}) * DYN_ELEMENT_BYTES)
         vault_fixture_opaque(row, duplicate, scratch)
         rt_text_store(slots, encoded)
         vault_fixture_check(vault_encode_v2(decoded, slots) == I64{8})
@@ -569,7 +569,7 @@ vault_fixture_opaque: fn(record: I64, byte: I64, scratch: I64) {
         duplicate += I64{2}
     }
     first: rt_text_word(canonical)
-    last: rt_text_word(canonical + I64{5} * DATA_TREE_ELEMENT_BYTES)
+    last: rt_text_word(canonical + I64{5} * DYN_ELEMENT_BYTES)
     origin: vault_fixture_origin(invalid_origin)
     rt_text_store(first + VAULT_RECORD_ORIGIN, origin)
     vault_record_hash(first, first + VAULT_RECORD_HASH, scratch)
@@ -610,7 +610,7 @@ jet_rt_vault_recipients_fixture: fn(input: I64, count: I64, expected_error: I64,
         first: vault_crypto_key_text(rt_text_word(keys + DATA_SEQUENCE_DATA), false)
         vault_fixture_check(jet_rt_string_eq(first, expected_first))
         jet_rt_string_drop(first)
-        data_sequence_drop(keys, DATA_TREE_BYTE_LIST)
+        data_sequence_drop(keys, DYN_BYTE_LIST)
     } else {
         vault_fixture_check(error != I64{0} && rt_text_word(error) == expected_error)
         vault_error_drop(error)
@@ -684,7 +684,7 @@ jet_rt_vault_linux_stream_fixture: fn(file: I64, expected: I64) {
         vault_fixture_check(rt_text_word(bytes + DATA_SEQUENCE_LENGTH) == rt_text_len(expected))
         vault_fixture_check(rt_text_equal_bytes(rt_text_word(bytes + DATA_SEQUENCE_DATA), rt_text_data(expected), rt_text_len(expected)))
         thread_zero(rt_text_word(bytes + DATA_SEQUENCE_DATA), rt_text_word(bytes + DATA_SEQUENCE_CAPACITY))
-        data_sequence_drop(bytes, DATA_TREE_BYTE_LIST)
+        data_sequence_drop(bytes, DYN_BYTE_LIST)
     }
     jet_rt_free(scratch, I64{16}, I64{8})
 }
@@ -697,7 +697,7 @@ jet_rt_vault_identity_stream_fixture: fn(root: I64, expected: I64) {
     vault_fixture_check(rt_text_word(bytes + DATA_SEQUENCE_LENGTH) == rt_text_len(expected))
     vault_fixture_check(rt_text_equal_bytes(rt_text_word(bytes + DATA_SEQUENCE_DATA), rt_text_data(expected), rt_text_len(expected)))
     thread_zero(rt_text_word(bytes + DATA_SEQUENCE_DATA), rt_text_word(bytes + DATA_SEQUENCE_CAPACITY))
-    data_sequence_drop(bytes, DATA_TREE_BYTE_LIST)
+    data_sequence_drop(bytes, DYN_BYTE_LIST)
     jet_rt_free(scratch, I64{8}, I64{8})
 }
 
@@ -826,7 +826,7 @@ jet_rt_vault_lock_acquire_fixture: fn(root: I64) {
     vault_hex_put(scratch, guard + VAULT_LOCK_NONCE, I64{16})
     vault_fixture_check(rt_text_equal_bytes(scratch, rt_text_word(scratch + I64{432}), I64{32}))
     thread_zero(rt_text_word(bytes + DATA_SEQUENCE_DATA), rt_text_word(bytes + DATA_SEQUENCE_CAPACITY))
-    data_sequence_drop(bytes, DATA_TREE_BYTE_LIST)
+    data_sequence_drop(bytes, DYN_BYTE_LIST)
     vault_lock_drop(guard)
     thread_zero(scratch, I64{464})
     jet_rt_free(scratch, I64{464}, I64{8})
@@ -848,7 +848,7 @@ jet_rt_vault_lifecycle_strings_fixture: fn(name: I64, rollback: I64, missing_roo
         record: vault_record_allocate(name, I64{1}, at + I64{1}, I64{2}, I64{1}, secret)
         rt_text_store(record + VAULT_RECORD_CREATED, if (at == I64{0}) -> I64{19} else -> I64{-1})
         rt_text_store(record + VAULT_RECORD_STATUS_MS, I64{7})
-        slot: data_sequence_reserve(records, DATA_TREE_ELEMENT_BYTES)
+        slot: data_sequence_reserve(records, DYN_ELEMENT_BYTES)
         rt_text_store(slot, record)
         rt_text_store(records + DATA_SEQUENCE_LENGTH, at + I64{1})
         at += I64{1}

@@ -311,7 +311,7 @@ vault_linux_read_to_end: fn(file: I64, out: I64, scratch: I64) -> I64 {
         } else if (count != I64{-4}) {
             thread_zero(rt_text_word(wrapping(bytes + DATA_SEQUENCE_DATA)), rt_text_word(wrapping(bytes + DATA_SEQUENCE_CAPACITY)))
             rt_text_put(scratch, I64{0})
-            data_sequence_drop(bytes, DATA_TREE_BYTE_LIST)
+            data_sequence_drop(bytes, DYN_BYTE_LIST)
             return vault_error_new(I64{4}, I64{0}, I64{0})
         }
     }
@@ -560,7 +560,7 @@ vault_process_start: fn(pid: I64, out: I64) -> Bool {
     }
     bytes: rt_text_word(wrapping(scratch + I64{32}))
     parsed: vault_process_start_parse(rt_text_word(wrapping(bytes + DATA_SEQUENCE_DATA)), rt_text_word(wrapping(bytes + DATA_SEQUENCE_LENGTH)), out)
-    data_sequence_drop(bytes, DATA_TREE_BYTE_LIST)
+    data_sequence_drop(bytes, DYN_BYTE_LIST)
     jet_rt_free(scratch, I64{48}, I64{8})
     parsed
 }
@@ -822,7 +822,7 @@ vault_decode_held_at_root: fn(root: I64, file: I64, store: I64, hash: I64, kind:
     bytes: rt_text_word(scratch)
     decoded: vault_decode_ciphertext_at_root(root, bytes, store, hash, kind)
     thread_zero(rt_text_word(wrapping(bytes + DATA_SEQUENCE_DATA)), rt_text_word(wrapping(bytes + DATA_SEQUENCE_CAPACITY)))
-    data_sequence_drop(bytes, DATA_TREE_BYTE_LIST)
+    data_sequence_drop(bytes, DYN_BYTE_LIST)
     decoded
 }
 // The wrapper owns file/text/store lifetimes, while the inner function keeps
@@ -914,12 +914,12 @@ vault_recover_stale_lock: fn(root: I64, dir: I64, hash: I64, revision: I64, repo
     text: rt_text_word(wrapping(scratch + I64{432}))
     if (text != I64{0}) {
         thread_zero(rt_text_word(wrapping(text + DATA_SEQUENCE_DATA)), rt_text_word(wrapping(text + DATA_SEQUENCE_CAPACITY)))
-        data_sequence_drop(text, DATA_TREE_BYTE_LIST)
+        data_sequence_drop(text, DYN_BYTE_LIST)
     }
     ciphertext: rt_text_word(wrapping(scratch + I64{456}))
     if (ciphertext != I64{0}) {
         thread_zero(rt_text_word(wrapping(ciphertext + DATA_SEQUENCE_DATA)), rt_text_word(wrapping(ciphertext + DATA_SEQUENCE_CAPACITY)))
-        data_sequence_drop(ciphertext, DATA_TREE_BYTE_LIST)
+        data_sequence_drop(ciphertext, DYN_BYTE_LIST)
     }
     thread_zero(scratch, I64{560})
     jet_rt_free(scratch, I64{560}, I64{8})
@@ -967,7 +967,7 @@ vault_recover_backup_inner: fn(root: I64, scratch: I64) -> I64 {
     ciphertext: rt_text_word(wrapping(scratch + I64{640}))
     decoded: vault_decode_ciphertext_at_root(root, ciphertext, wrapping(scratch + I64{536}), wrapping(scratch + I64{560}), wrapping(scratch + I64{592}))
     thread_zero(rt_text_word(wrapping(ciphertext + DATA_SEQUENCE_DATA)), rt_text_word(wrapping(ciphertext + DATA_SEQUENCE_CAPACITY)))
-    data_sequence_drop(ciphertext, DATA_TREE_BYTE_LIST)
+    data_sequence_drop(ciphertext, DYN_BYTE_LIST)
     rt_text_store(wrapping(scratch + I64{640}), I64{0})
     if (decoded != I64{0}) {
         vault_error_drop(decoded)
@@ -1219,7 +1219,7 @@ vault_write_inner: fn(root: I64, store: I64, hash: I64, provider: I64, kind: I64
     installed_bytes: rt_text_word(wrapping(scratch + I64{688}))
     installed_decode: vault_decode_ciphertext_at_root(root, installed_bytes, wrapping(scratch + I64{864}), wrapping(scratch + I64{656}), wrapping(scratch + I64{648}))
     thread_zero(rt_text_word(wrapping(installed_bytes + DATA_SEQUENCE_DATA)), rt_text_word(wrapping(installed_bytes + DATA_SEQUENCE_CAPACITY)))
-    data_sequence_drop(installed_bytes, DATA_TREE_BYTE_LIST)
+    data_sequence_drop(installed_bytes, DYN_BYTE_LIST)
     if (installed_decode != I64{0}) {
         vault_error_drop(installed_decode)
         return vault_error_new(I64{9}, I64{0}, I64{0})
@@ -1285,10 +1285,10 @@ vault_write_at_root: fn(root: I64, store: I64, hash: I64, provider: I64, kind: I
     ciphertext: rt_text_word(wrapping(scratch + I64{880}))
     if (ciphertext != I64{0}) {
         thread_zero(rt_text_word(wrapping(ciphertext + DATA_SEQUENCE_DATA)), rt_text_word(wrapping(ciphertext + DATA_SEQUENCE_CAPACITY)))
-        data_sequence_drop(ciphertext, DATA_TREE_BYTE_LIST)
+        data_sequence_drop(ciphertext, DYN_BYTE_LIST)
     }
     recipients: rt_text_word(wrapping(scratch + I64{888}))
-    if (recipients != I64{0}) -> data_sequence_drop(recipients, DATA_TREE_BYTE_LIST)
+    if (recipients != I64{0}) -> data_sequence_drop(recipients, DYN_BYTE_LIST)
     vault_lock_drop(lock)
     thread_zero(scratch, I64{928})
     jet_rt_free(scratch, I64{928}, I64{8})
@@ -1377,7 +1377,7 @@ vault_headless_granted: fn(repo: I64) -> Bool {
     bytes: rt_text_word(wrapping(scratch + I64{104}))
     granted: vault_trust_lines(rt_text_word(wrapping(bytes + DATA_SEQUENCE_DATA)), rt_text_word(wrapping(bytes + DATA_SEQUENCE_LENGTH)), repo, scratch)
     thread_zero(rt_text_word(wrapping(bytes + DATA_SEQUENCE_DATA)), rt_text_word(wrapping(bytes + DATA_SEQUENCE_CAPACITY)))
-    data_sequence_drop(bytes, DATA_TREE_BYTE_LIST)
+    data_sequence_drop(bytes, DYN_BYTE_LIST)
     thread_zero(scratch, I64{128})
     jet_rt_free(scratch, I64{128}, I64{8})
     granted
@@ -1423,7 +1423,7 @@ vault_tty_answer: fn(file: I64) -> Bool {
         }
     }
     thread_zero(data, rt_text_word(wrapping(bytes + DATA_SEQUENCE_CAPACITY)))
-    data_sequence_drop(bytes, DATA_TREE_BYTE_LIST)
+    data_sequence_drop(bytes, DYN_BYTE_LIST)
     accepted
 }
 // Seed2085-2125: test hook FIRST; tty open failure alone allows headless trust.

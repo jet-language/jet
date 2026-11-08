@@ -181,7 +181,7 @@ scalar_reflect: fn(out: String, binary: String) -[Exec, FS, IO, Time.Wait]> Int 
 stop_witness: fn(args: [String]) -[Exec, Env, FS, IO, Time.Wait]> Int Never! {
     if args.len() == 0 -> return fail("{USAGE}\nWITNESS is one of: data-sequence, scalar-reflect")
     key: args[0]
-    operand: if key == "data-sequence" -> "DATA_TREE_WITNESS" else if key == "scalar-reflect" -> "SCALAR_REFLECT_WITNESS" else -> ""
+    operand: if key == "data-sequence" -> "DYN_WITNESS" else if key == "scalar-reflect" -> "SCALAR_REFLECT_WITNESS" else -> ""
     if operand == "" -> return fail("unknown witness: {key}\nWITNESS is one of: data-sequence, scalar-reflect")
     if args.len() != 3 || args.contains("") -> return fail("usage: jet Compiler/JetRuntime/Tests/StopWitness.jet {key} OUT {operand}")
     cwd: files.cwd() ?? return fail("cannot read the working directory: {err}")

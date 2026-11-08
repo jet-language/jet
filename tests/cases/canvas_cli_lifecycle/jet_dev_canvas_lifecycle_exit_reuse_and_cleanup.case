@@ -1,12 +1,16 @@
 # Port of tests/canvas_cli_lifecycle.rs:8-34.
-# Existing probe preserves all lifecycle assertions; only the Jet source is staged.
-# PENDING-GRAMMAR: effective-env argv default token.
-# PENDING-SAME-HEAD: historical probe exits 1 because E2105 says Can't rather than the original regex can't.
-requires: tool:node
+# Tools/canvas-test/Run.jet native-lifecycle keeps every lifecycle assertion; only the Jet source is staged.
+# PENDING-SAME-HEAD: the source-not-found step expects `can't find the file`; E2105 says Can't.
+requires: os-name:linux
+requires: tool:chromium
+requires: tool:chromedriver
 fixture: fixtures
+env: JET_PROJECT_ROOT={work}
 env: JET_BIN={jet}
 env: JET_SOURCE=Examples/features/tooling/canvas_blueprint_demo.jet
 env: TMPDIR={scratch}
-step: {env:JET_CANVAS_NODE|node} {root}/Tools/canvas-test/native-lifecycle.mjs
+step: jetpack browser lock chromium --binary {tool:chromium} --version 152.0.7977.64 --protocol bidi-2025.5 --driver {tool:chromedriver}
 exit: 0
-stdout: = lifecycle.out
+step: jet run --allow=Env,Exec,FS,IO,Net,Time {root}/Tools/canvas-test/Run.jet -- native-lifecycle
+exit: 0
+stdout: ~ "PASS native jet dev --canvas lifecycle" # the probe's one pass line; its browser and port details vary per host

@@ -489,7 +489,8 @@ existing publication header; consuming their owned slot clears it before the
 one release. The publication header is 16 bytes (node head at 0, alias counter
 at 8), with no new global or sidecar cell registry.
 
-The existing publication fixture assembly also supports `link-weak`/`run-weak`.
+The Shared publication registry row also links `shared-weak-fixture.c`
+against the same fixture object and runs it.
 Its C client checks failed upgrade leaves the out slot unchanged, exactly-once
 payload destruction, the counting allocator's remaining 96-byte cell until the
 last weak drops, and a two-thread upgrade/final-strong-drop race.
@@ -515,10 +516,10 @@ including two threads each racing 100,000 clone/drop pairs and a null-glue
 case that must not fall back to the descriptor callback.
 
 The Shared site publication witness uses the actual native providers, not a
-Rust seed implementation. `run-channel-fixtures.mjs OUT assemble-publication`
-enrolls the registry observer after the production runtime; the existing
-`lower` mode emits the fixture object, and `link-publication`/`run-publication`
-link and exercise it with the freshly composed native library. Two initializers
+Rust seed implementation. The `SharedPublicationTests` registry row composes
+the fragment after the production runtime, which enrolls the registry
+observer, lowers the unit to the fixture object, and links and runs
+`shared-publication-fixture.c` against the freshly composed native library. Two initializers
 race to publish one winner; the losing payload drop runs once. World reset
 clears the cell and releases only its owner while a retained clone survives;
 republishing the same site must retain exactly one registry node. Process

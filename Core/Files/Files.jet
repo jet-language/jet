@@ -517,7 +517,7 @@ process_directory: fn(spec: ProcessSpec, directory: Directory, child_fd: Int, as
     held: core.files.__directory_fd(directory.handle)
     if !held.available -> return Err(IOError.Unsupported(context))
     if !held.held -> return Err(IOError.Closed(context))
-    row: core.process.__with_directory_raw(spec, held.fd, child_fd, as_cwd)
+    row: core.process.__keep_open_raw(spec, held.fd, child_fd, as_cwd)
     if !row.available -> return Err(IOError.Unsupported(context))
     if row.errno != 0 {
         return Err(IOError.Other(IOContext{operation: .Resolve, resource: Val(directory.path),

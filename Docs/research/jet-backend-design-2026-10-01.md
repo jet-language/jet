@@ -3414,8 +3414,8 @@ before releasing permits. The commit clone is observable and matches
 publication. The process-wide outer gate covers begin through commit or
 rollback; generated scope/drop glue must close that authority on every exit.
 The actual-kernel clients are `JetRuntime/Tests/StmTests.jet` and
-`sync-fixture.c`, assembled separately by `run-channel-fixtures.mjs`
-(`assemble-stm`, `link-stm`, `run-stm`).
+`sync-fixture.c`, composed after the channel fragment by the registry's plain
+transport (`JetRuntime/Tests/Fragments.fixture/StmTests`).
 The dropped-root witness holds an uncommitted staged edit while a second
 attached pthread attempts begin; rollback must let that thread enter and see
 the old published value. Its subsequent commit advances exactly one revision.
@@ -3431,8 +3431,9 @@ The owned guard's mutable token records whether reacquisition succeeded:
 access delivers the named invalid-guard stop; dropping it releases only its
 retained owner, never another writer's permit or revision. The wait callback
 writes a single Bool byte; its error output transfers one E4 String owner only
-on a non-stopping error return. `assemble-sync`, `link-sync`, and `run-sync`
-include the Condition queue and cancellation-cleanup witnesses.
+on a non-stopping error return. The `SyncTests` and `ObserveTests` registry
+rows compile the same host with the Condition queue and cancellation-cleanup
+witnesses selected.
 
 ### Remaining native String routes
 

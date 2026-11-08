@@ -295,23 +295,23 @@ env_renamed: fn(names: I64, name: I64, rest: I64, rest_length: I64) -> I64 {
 // jet_env_insert_tree over the borrowed runtime Dyn object `tree`; consumes
 // `value`.
 env_tree_insert: fn(tree: I64, segments: I64, from: I64, value: I64) {
-    entries: data_tree_word(wrapping(tree + DATA_TREE_PAYLOAD))
+    entries: dyn_word(wrapping(tree + DYN_PAYLOAD))
     segment: csv_words_get(segments, from)
     last: from + I64{1} == trap_word(segments)
-    length: data_tree_word(wrapping(entries + DATA_SEQUENCE_LENGTH))
-    data: data_tree_word(wrapping(entries + DATA_SEQUENCE_DATA))
+    length: dyn_word(wrapping(entries + DATA_SEQUENCE_LENGTH))
+    data: dyn_word(wrapping(entries + DATA_SEQUENCE_DATA))
     at := I64{0}
     loop at < length {
-        slot: wrapping(data + at * DATA_TREE_ENTRY_BYTES)
-        if env_fold_text(data_tree_word(wrapping(slot + DATA_TREE_ENTRY_KEY)), segment) {
-            child: data_tree_word(wrapping(slot + DATA_TREE_ENTRY_VALUE))
+        slot: wrapping(data + at * DYN_ENTRY_BYTES)
+        if env_fold_text(dyn_word(wrapping(slot + DYN_ENTRY_KEY)), segment) {
+            child: dyn_word(wrapping(slot + DYN_ENTRY_VALUE))
             if last {
                 jet_rt_handle_drop_dyn(child)
-                data_tree_store(wrapping(slot + DATA_TREE_ENTRY_VALUE), jet_rt_record_new_dyn_text(value))
+                dyn_store(wrapping(slot + DYN_ENTRY_VALUE), jet_rt_record_new_dyn_text(value))
                 jet_rt_string_drop(value)
                 return
             }
-            if (data_tree_word(wrapping(child + DATA_TREE_TAG)) == DATA_TREE_OBJECT) {
+            if (dyn_word(wrapping(child + DYN_TAG)) == DYN_OBJECT) {
                 env_tree_insert(child, segments, from + I64{1}, value)
                 return
             }
@@ -323,7 +323,7 @@ env_tree_insert: fn(tree: I64, segments: I64, from: I64, value: I64) {
         jet_rt_string_drop(value)
         return
     }
-    child: data_tree_new(DATA_TREE_OBJECT, data_sequence_new(I64{0}, DATA_TREE_ENTRY_BYTES))
+    child: dyn_new(DYN_OBJECT, data_sequence_new(I64{0}, DYN_ENTRY_BYTES))
     env_tree_insert(child, segments, from + I64{1}, value)
     data_sequence_push(entries, segment, child, true)
 }
@@ -474,7 +474,7 @@ env_fail: fn(prefix: I64, middle: I64, suffix: I64, errors: I64, errors_len: I64
     }
     env_process_load(allow, values)
     env_values_sort(values)
-    tree: data_tree_new(DATA_TREE_OBJECT, data_sequence_new(I64{0}, DATA_TREE_ENTRY_BYTES))
+    tree: dyn_new(DYN_OBJECT, data_sequence_new(I64{0}, DYN_ENTRY_BYTES))
     origins: csv_words_new()
     plen: rt_text_len(prefix)
     at := I64{0}

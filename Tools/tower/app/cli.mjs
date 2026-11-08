@@ -10,7 +10,7 @@ import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as db from './store.mjs';
 import { openStore, TowerError, PHASE_IDS } from './store.mjs';
-import { DOCS_DIR, findDataDir, projectRoot, readJSON, readLatestJSON, writeJSON } from './paths.mjs';
+import { findDataDir, projectRoot, readJSON, readLatestJSON, writeJSON } from './paths.mjs';
 import { SHARD_BYTES, historyFiles, planShards } from './history-shards.mjs';
 import { ConfigError } from './config.mjs';
 import { migrate } from './migrate.mjs';
@@ -142,7 +142,7 @@ const COMMAND_FLAGS = {
   }},
   next: { flags: ['agent', 'epoch', 'track', 'limit', 'burndown', 'parallel', 'readyAcrossEpochs'] },
   brief: { flags: ['agent', 'noClaim', 'color'] },
-  lint: { flags: ['docs', 'docsRoot'] },
+  lint: { flags: [] },
   docs: { verbs: {
     list: [],
     show: ['path', 'scratch'],
@@ -203,7 +203,7 @@ const FLAG_VALUE = {
   status: 'S', open: null, all: null, untagged: null, force: null, archive: null,
   unarchive: null, archived: null, draft: null, drafts: null, ready: null, comment: '"…"', quote: '"…"',
   outcome: 'K', agent: 'A', noClaim: null, limit: 'N', burndown: null, parallel: null,
-  readyAcrossEpochs: null, docs: null, docsRoot: 'DIR', scratch: null, note: '"…"',
+  readyAcrossEpochs: null, scratch: null, note: '"…"',
   manifest: 'FILE', dryRun: null, apply: null, commit: 'OID', hardeningDedupKey: 'KEY', hardeningSeam: 'SEAM',
   hardeningRelation: 'RELATION', hardeningWrongTierMask: 'TIERS', hardeningInputPartition: 'PARTITION',
   hardeningFindingId: 'ID', hardeningFixture: 'PATH', out: 'FILE',
@@ -1055,8 +1055,7 @@ function cmdNext(store, { flags }) {
 function cmdLint(store, { flags }) {
   const s = store.load();
   const history = store.loadHistory();
-  const docsRoot = flags.docsRoot || join(projectRoot(store.dataDir), DOCS_DIR);
-  const findings = lint(s, history, { docs: !!flags.docs, docsRoot });
+  const findings = lint(s, history);
   if (flags.json) {
     console.log(JSON.stringify(findings, null, 2));
     process.exitCode = findings.length ? 1 : 0;

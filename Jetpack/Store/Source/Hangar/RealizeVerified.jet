@@ -222,7 +222,7 @@ store_record_realized_mode_unlocked: fn(verification: &StoreVerification, roots:
     named_outputs := [String: String]{}
     loop name in store_sorted_keys(realized.named_outputs) {
         path: realized.named_outputs[name]
-        digest: store_canonical_graph_digest(roots, graph, path) ?? pkg_try_output_hash_of(path) ?? return Err(StoreError.Other(err.message()))
+        digest: store_canonical_graph_digest(roots, graph, path) ?? store_verified_output_hash(verification, path, None, false) ?? return Err(err)
         if name == "out" && digest != realized.envelope.output_hash {
             return Err(StoreError.Other("Nix primary output changed during Store registration: expected {realized.envelope.output_hash}, got {digest}"))
         }

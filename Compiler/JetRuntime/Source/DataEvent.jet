@@ -26,14 +26,14 @@ data_event_text: fn(kind: I64) -> Bool {
 #Export(c) jet_rt_handle_clone_data_event: fn(event: I64) -> I64 {
     kind: data_event_word(wrapping(event + DATA_EVENT_TAG))
     payload := data_event_word(wrapping(event + DATA_EVENT_PAYLOAD))
-    if data_event_text(kind) { payload = jet_rt_string_clone(payload) } else if kind == DATA_EVENT_BYTE_LIST { payload = data_sequence_clone(payload, DATA_TREE_BYTE_LIST) }
+    if data_event_text(kind) { payload = jet_rt_string_clone(payload) } else if kind == DATA_EVENT_BYTE_LIST { payload = data_sequence_clone(payload, DYN_BYTE_LIST) }
     data_event_new(kind, payload)
 }
 #Export(c) jet_rt_handle_drop_data_event: fn(event: I64) {
     if (event == I64{0}) -> return
     kind: data_event_word(wrapping(event + DATA_EVENT_TAG))
     payload: data_event_word(wrapping(event + DATA_EVENT_PAYLOAD))
-    if data_event_text(kind) { jet_rt_string_drop(payload) } else if kind == DATA_EVENT_BYTE_LIST { data_sequence_drop(payload, DATA_TREE_BYTE_LIST) }
+    if data_event_text(kind) { jet_rt_string_drop(payload) } else if kind == DATA_EVENT_BYTE_LIST { data_sequence_drop(payload, DYN_BYTE_LIST) }
     jet_rt_free(event, DATA_EVENT_BYTES, I64{8})
 }
 #Export(c) jet_rt_handle_eq_data_event: fn(left: I64, right: I64) -> Bool {

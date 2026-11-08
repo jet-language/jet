@@ -32,7 +32,7 @@ publication requires authorization; Markdown is default, HTML only on request.
 7. Strongest remaining unverified assumption, if any.
 
 Do not duplicate Tower phases/plans as a living catalog or commit a generated
-Jet-state digest. Digest identity/direct refs belong in dated claims. Code
+Jet-state snapshot. Checkout identity/direct refs belong in dated claims. Code
 presence is not exercised behavior; backend implementation code is not Jet idiom.
 Keep audience participants anonymous unless identity materially affects evidence.
 

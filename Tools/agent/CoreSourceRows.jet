@@ -711,7 +711,7 @@ FILES_WRITES: [String]{
     "set_mode", "mkdtemp", "mktemp", "temp_dir", "temp_file", "lock", "__open_writer", "__create_directory",
     "__fsync_directory", "__rename_at", "__remove_at", "__xattr_set", "__writer_set_mode", "__flock",
     "__open_writer_raw", "__remove_at_raw",
-    "__remove_raw", "__remove_dir_raw", "__remove_all_raw", "__hard_link_raw", "__fsync_raw", "__chown_raw",
+    "__remove_raw", "__remove_dir_raw", "__remove_all_raw", "__hard_link_raw", "__fsync_raw", "__syncfs_raw", "__chown_raw",
     "__set_mode_raw", "__symlink_directory_raw", "__symlink_raw", "__mkdtemp_raw", "__temp_dir_raw", "__temp_file_raw",
     "try_lock", "__lock_open", "__lock_try", "__lock_wait", "__lock_close", "__lock_fd_identity", "__lock_path_identity", "__lock_owner",
     "__entries_mkdir", "__entries_copy",
@@ -767,7 +767,7 @@ call_effect: fn(module_name: String, member: String) -> String? Never! {
         "core.web" -> unless_listed(member, WEB_PURE, "Browser")
         "core.mod" -> if member == "__read_context" || member == "__stage_context" -> Val("FS") else -> unless_listed(member, MOD_PURE, "Exec")
         "core.process" -> if member == {
-            "__with_directory_raw" | "__keep_open_raw" -> Val("FS")
+            "__keep_open_raw" -> Val("FS")
             "status_ok" -> None
             else -> Val("Exec")
         }
@@ -832,7 +832,7 @@ call_effect_leaf: fn(module_name: String, member: String) -> String? Never! {
             else -> None
         }
         "core.process" -> if member == {
-            "__with_directory_raw" | "__keep_open_raw" -> Val("FS.Read")
+            "__keep_open_raw" -> Val("FS.Read")
             "run" | "pipeline" -> Val("Time.Wait")
             else -> None
         }

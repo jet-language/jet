@@ -1,8 +1,9 @@
 # tests/web_browser.rs::web_browser_source_map_cdp_jet_breakpoint
-# Exact five-source preparation/build/publish sequence and original browser oracle.
-# PENDING-SAME-HEAD/PENDING-GRAMMAR(batch-four probes), runtime UNRUN.
-requires: probe chromium --version
-requires: probe node --version
+# Exact five-source preparation/build/publish sequence; the published source
+# maps are checked statically: app.js names app.js.map, the map's mappings
+# land on a Jet line, and app.wasm carries its map. The live CDP breakpoint
+# half of the original oracle needs a page-scoped CDP surface in
+# core.web.browser, which does not exist.
 fixture: fixtures/acceptance
 step: jet build --target=web app.jet
 cwd: {work}/click_src
@@ -39,13 +40,12 @@ mkdir: {work}/lifecycle
 for file {work}/lifecycle_src/.jet/build as f
 copy: {f.path} {work}/lifecycle/{f.name}
 end for
-spawn server: {env:JET_WEB_NODE|env:NODE|node} {root}/Tools/web-test/serve.mjs --port {free-port:static} --root {work}
+spawn server: jet run --allow=Env,FS,IO,Net,Time {root}/Tools/web-test/Serve.jet -- --port {free-port:static} --root {work}
 stdout: null
 poll ready: jet run {root}/tests/cases/web_browser/fixtures/http-ready.jet 127.0.0.1:{free-port:static} /click/web.manifest.json - - until stdout: ~ "200 OK" timeout 10s every 50ms # the static server serves the manifest
-step: {env:JET_WEB_NODE|env:NODE|node} {root}/Tools/web-test/sourcemap.mjs --port {free-port:static} --prefix /click --wasm-prefix /compute
-env: CHROMIUM={env:JET_WEB_CHROMIUM|env:CHROMIUM|chromium}
+step: jet run --allow=Env,Exec,IO,Net,Time {root}/Tools/web-test/SourceMap.jet -- --port {free-port:static} --prefix /click --wasm-prefix /compute
 exit: 0
-stdout: ~ "PASS web source-map CDP" # original completion predicate
+stdout: ~ "PASS web source-map Jet mapping + wasm map" # the second line is the mapped location, which varies with the build
 signal server: KILL
 wait: server
 exit: any # original server cleanup ignores status

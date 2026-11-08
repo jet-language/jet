@@ -106,8 +106,9 @@ Migrating from a v3-era board: `node <tower-dir>/tower.mjs import old-tower.json
   matter its stage. After upgrading Tower, restart `tower serve` and reload the
   browser to apply the owner-visibility rule; no board-data migration is needed.
 - **Milestone review** — milestone criteria use the same `open` → `met` →
-  `verified` flow. After all cards close, freeze the source commit with
-  `jet Tools/agent/CloseoutGate.jet open <id> --by X`; broad proof is refused
+  `verified` flow. After all cards close, freeze the source commit and record
+  its token with `tower milestone closeout <id> --commit SHA --by X`, then
+  `jet Tools/agent/CloseoutGate.jet check <id>`; broad proof is refused
   before that. `tower milestone verify <id> --evidence "…" --by X` works only
   when every linked card is done, every milestone criterion is verified, and
   the token exists. Reopening a linked card or milestone criterion clears the

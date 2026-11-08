@@ -364,8 +364,8 @@ vault_record_compare: fn(left: I64, right: I64) -> I64 {
 vault_sorted_indices: fn(data: I64, count: I64, records: Bool, first: I64, second: I64) -> I64 {
     at := I64{0}
     loop at < count {
-        item: if records -> rt_text_word(wrapping(data + at * DATA_TREE_ELEMENT_BYTES)) else -> data + at * VAULT_PAIR_BYTES
-        rt_text_store(wrapping(first + at * DATA_TREE_ELEMENT_BYTES), item)
+        item: if records -> rt_text_word(wrapping(data + at * DYN_ELEMENT_BYTES)) else -> data + at * VAULT_PAIR_BYTES
+        rt_text_store(wrapping(first + at * DYN_ELEMENT_BYTES), item)
         at += I64{1}
     }
     source := first
@@ -382,13 +382,13 @@ vault_sorted_indices: fn(data: I64, count: I64, records: Bool, first: I64, secon
             loop out < end {
                 use_left := right == end
                 if left < middle && right < end {
-                    a: rt_text_word(wrapping(source + left * DATA_TREE_ELEMENT_BYTES))
-                    b: rt_text_word(wrapping(source + right * DATA_TREE_ELEMENT_BYTES))
+                    a: rt_text_word(wrapping(source + left * DYN_ELEMENT_BYTES))
+                    b: rt_text_word(wrapping(source + right * DYN_ELEMENT_BYTES))
                     compare: if records -> vault_record_compare(a, b) else -> jet_rt_string_compare(rt_text_word(a), rt_text_word(b))
                     use_left = compare <= I64{0}
                 }
                 index: if use_left -> left else -> right
-                rt_text_store(wrapping(target + out * DATA_TREE_ELEMENT_BYTES), rt_text_word(wrapping(source + index * DATA_TREE_ELEMENT_BYTES)))
+                rt_text_store(wrapping(target + out * DYN_ELEMENT_BYTES), rt_text_word(wrapping(source + index * DYN_ELEMENT_BYTES)))
                 if use_left { left += I64{1} } else { right += I64{1} }
                 out += I64{1}
             }
@@ -482,12 +482,12 @@ vault_id_insert: fn(root: I64, node: I64) -> I64 {
 }
 
 vault_group_end: fn(records: I64, count: I64, start: I64) -> I64 {
-    first: rt_text_word(wrapping(records + start * DATA_TREE_ELEMENT_BYTES))
+    first: rt_text_word(wrapping(records + start * DYN_ELEMENT_BYTES))
     key_type: rt_text_word(wrapping(first + VAULT_RECORD_TYPE))
     name: rt_text_word(wrapping(first + VAULT_RECORD_NAME))
     end := start + I64{1}
     loop end < count {
-        row: rt_text_word(wrapping(records + end * DATA_TREE_ELEMENT_BYTES))
+        row: rt_text_word(wrapping(records + end * DYN_ELEMENT_BYTES))
         if rt_text_word(wrapping(row + VAULT_RECORD_TYPE)) != key_type -> break
         if !jet_rt_string_eq(rt_text_word(wrapping(row + VAULT_RECORD_NAME)), name) -> break
         end += I64{1}
@@ -565,7 +565,7 @@ vault_encode_v2_inner: fn(store: I64, strings: I64, string_count: I64, records: 
         current := I64{0}
         index := at
         loop index < end {
-            record: rt_text_word(wrapping(records + index * DATA_TREE_ELEMENT_BYTES))
+            record: rt_text_word(wrapping(records + index * DYN_ELEMENT_BYTES))
             generation: rt_text_word(wrapping(record + VAULT_RECORD_GENERATION))
             if (generation != index - at + I64{1}) -> return I64{8}
             if (rt_text_word(wrapping(record + VAULT_RECORD_STATUS)) == I64{1}) {
@@ -583,7 +583,7 @@ vault_encode_v2_inner: fn(store: I64, strings: I64, string_count: I64, records: 
     previous := I64{0}
     at = I64{0}
     loop at < string_count {
-        pair: rt_text_word(wrapping(strings + at * DATA_TREE_ELEMENT_BYTES))
+        pair: rt_text_word(wrapping(strings + at * DYN_ELEMENT_BYTES))
         name: rt_text_word(pair)
         value: rt_text_word(wrapping(pair + I64{8}))
         if !vault_validate_text(name, false) -> return I64{0}
@@ -596,7 +596,7 @@ vault_encode_v2_inner: fn(store: I64, strings: I64, string_count: I64, records: 
     }
     at = I64{0}
     loop at < record_count {
-        record: rt_text_word(wrapping(records + at * DATA_TREE_ELEMENT_BYTES))
+        record: rt_text_word(wrapping(records + at * DYN_ELEMENT_BYTES))
         key_type: rt_text_word(wrapping(record + VAULT_RECORD_TYPE))
         if (key_type != I64{1} && key_type != I64{2}) -> return I64{8}
         name: rt_text_word(wrapping(record + VAULT_RECORD_NAME))
@@ -607,7 +607,7 @@ vault_encode_v2_inner: fn(store: I64, strings: I64, string_count: I64, records: 
     id_root := I64{0}
     at = I64{0}
     loop at < record_count {
-        record: rt_text_word(wrapping(records + at * DATA_TREE_ELEMENT_BYTES))
+        record: rt_text_word(wrapping(records + at * DYN_ELEMENT_BYTES))
         bytes: jet_rt_secret_bytes(rt_text_word(wrapping(record + VAULT_RECORD_SECRET)))
         if (rt_text_word(wrapping(record + VAULT_RECORD_GENERATION)) == I64{0} ||
             rt_text_word(wrapping(bytes + DATA_SEQUENCE_LENGTH)) != I64{32} ||
@@ -638,7 +638,7 @@ vault_encode_v2_inner: fn(store: I64, strings: I64, string_count: I64, records: 
     cursor := I64{44}
     at = I64{0}
     loop at < string_count {
-        pair: rt_text_word(wrapping(strings + at * DATA_TREE_ELEMENT_BYTES))
+        pair: rt_text_word(wrapping(strings + at * DYN_ELEMENT_BYTES))
         name: rt_text_word(pair)
         value: rt_text_word(wrapping(pair + I64{8}))
         name_length: rt_text_len(name)
@@ -656,13 +656,13 @@ vault_encode_v2_inner: fn(store: I64, strings: I64, string_count: I64, records: 
     at = I64{0}
     loop at < record_count {
         end: vault_group_end(records, record_count, at)
-        first: rt_text_word(wrapping(records + at * DATA_TREE_ELEMENT_BYTES))
+        first: rt_text_word(wrapping(records + at * DYN_ELEMENT_BYTES))
         name: rt_text_word(wrapping(first + VAULT_RECORD_NAME))
         name_length: rt_text_len(name)
         current := I64{0}
         index := at
         loop index < end {
-            row: rt_text_word(wrapping(records + index * DATA_TREE_ELEMENT_BYTES))
+            row: rt_text_word(wrapping(records + index * DYN_ELEMENT_BYTES))
             if (rt_text_word(wrapping(row + VAULT_RECORD_STATUS)) == I64{1}) -> current = rt_text_word(wrapping(row + VAULT_RECORD_GENERATION))
             index += I64{1}
         }
@@ -680,7 +680,7 @@ vault_encode_v2_inner: fn(store: I64, strings: I64, string_count: I64, records: 
     }
     at = I64{0}
     loop at < record_count {
-        cursor = vault_write_record(buffer, cursor, rt_text_word(wrapping(records + at * DATA_TREE_ELEMENT_BYTES)))
+        cursor = vault_write_record(buffer, cursor, rt_text_word(wrapping(records + at * DYN_ELEMENT_BYTES)))
         at += I64{1}
     }
     vault_payload_hash(buffer, length, wrapping(buffer + length), scratch)
@@ -696,8 +696,8 @@ vault_encode_v2: fn(store: I64, output: I64) -> I64 {
     if (rt_text_word(wrapping(store + VAULT_STORE_REVISION)) == I64{0} ||
         vault_bytes_zero(wrapping(store + VAULT_STORE_UUID), I64{16}) ||
         string_count > VAULT_MAX_STRINGS || record_count > VAULT_MAX_VERSIONS) -> return I64{8}
-    strings_bytes: string_count * DATA_TREE_ELEMENT_BYTES * I64{2}
-    records_bytes: record_count * DATA_TREE_ELEMENT_BYTES * I64{2}
+    strings_bytes: string_count * DYN_ELEMENT_BYTES * I64{2}
+    records_bytes: record_count * DYN_ELEMENT_BYTES * I64{2}
     strings_mem: if (strings_bytes == I64{0}) -> I64{8} else -> jet_rt_alloc(strings_bytes, I64{8})
     records_mem: if (records_bytes == I64{0}) -> I64{8} else -> jet_rt_alloc(records_bytes, I64{8})
     strings: vault_sorted_indices(rt_text_word(wrapping(pairs + DATA_SEQUENCE_DATA)), string_count, false, strings_mem, strings_mem + strings_bytes / I64{2})
@@ -956,7 +956,7 @@ vault_decode_record: fn(cursor: I64, previous: I64) -> I64 {
     record
 }
 vault_decode_records: fn(cursor: I64, count: I64, nodes: I64, scratch: I64) -> I64 {
-    records: data_sequence_new(count, DATA_TREE_ELEMENT_BYTES)
+    records: data_sequence_new(count, DYN_ELEMENT_BYTES)
     data: rt_text_word(wrapping(records + DATA_SEQUENCE_DATA))
     previous := I64{0}
     root := I64{0}
@@ -976,7 +976,7 @@ vault_decode_records: fn(cursor: I64, count: I64, nodes: I64, scratch: I64) -> I
             rt_text_store(wrapping(cursor + I64{24}), error)
             break
         }
-        rt_text_store(wrapping(data + at * DATA_TREE_ELEMENT_BYTES), record)
+        rt_text_store(wrapping(data + at * DYN_ELEMENT_BYTES), record)
         previous = record
         at += I64{1}
         rt_text_store(wrapping(records + DATA_SEQUENCE_LENGTH), at)
@@ -999,7 +999,7 @@ vault_groups_cover_records: fn(groups: I64, records: I64) -> Bool {
     loop group_index < group_count {
         if at == count -> return false
         group: wrapping(group_data + group_index * VAULT_GROUP_BYTES)
-        row: rt_text_word(wrapping(data + at * DATA_TREE_ELEMENT_BYTES))
+        row: rt_text_word(wrapping(data + at * DYN_ELEMENT_BYTES))
         if rt_text_word(group) != rt_text_word(wrapping(row + VAULT_RECORD_TYPE)) -> return false
         if !jet_rt_string_eq(rt_text_word(wrapping(group + I64{8})), rt_text_word(wrapping(row + VAULT_RECORD_NAME))) -> return false
         end: vault_group_end(data, count, at)
@@ -1010,7 +1010,7 @@ vault_groups_cover_records: fn(groups: I64, records: I64) -> Bool {
         active_generation := I64{0}
         index := at
         loop index < end {
-            record: rt_text_word(wrapping(data + index * DATA_TREE_ELEMENT_BYTES))
+            record: rt_text_word(wrapping(data + index * DYN_ELEMENT_BYTES))
             generation: rt_text_word(wrapping(record + VAULT_RECORD_GENERATION))
             if (generation != index - at + I64{1}) -> return false
             if (rt_text_word(wrapping(record + VAULT_RECORD_STATUS)) == I64{1}) {

@@ -6,6 +6,7 @@
 // expression dispatcher to remain small.
 use {
     jet_foundation.[
+        AST_NODE_GENERATED,
         BinOp,
         ElseArmSpan,
         Expr,
@@ -506,6 +507,13 @@ parser_expression_form_parse_guard_table: fn(state: &JetParserState, start: Span
 }
 
 parser_expression_form_parse_dispatch_table: fn(state: &JetParserState, subject: Expr, op: BinOp, start: Span, depth: Int) -> ParsedExpr {
+    // A subject that is not a plain name is the arms' `it`, as in the statement
+    // form: the heads test it through a generated grouping, which sema binds
+    // to `it` once (sema_expression_if_subject_is_table_it).
+    head_subject: if subject == {
+        .Ident(_, _, _) -> subject
+        else -> Expr.Paren{value: subject, span: expr_span(subject), id: AST_NODE_GENERATED}
+    }
     arms := [ParserExpressionFormArm]{}
     else_body := [Stmt]{}
     else_value := Expr.NoElse{span: start, id: parser_node_id(state)}
@@ -547,7 +555,7 @@ parser_expression_form_parse_dispatch_table: fn(state: &JetParserState, subject:
             break
         }
         arm_position: state.position
-        condition: parser_parse_if_arm_head(state, subject, subject, op)
+        condition: parser_parse_if_arm_head(state, head_subject, head_subject, op)
         parser_expect_unified_arrow(state, "after a value dispatch arm head")
         branch: parser_expression_form_selected_value(state, depth + 1)
         arms.push(ParserExpressionFormArm{cond: condition.move(), body: branch.body, value: branch.value})

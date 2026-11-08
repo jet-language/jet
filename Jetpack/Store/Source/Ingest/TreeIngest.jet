@@ -187,6 +187,157 @@ store_verified_digest_put: fn(verification: &StoreVerification, key: String, mem
     permit.value.verified_digests[key] = memo
 }
 
+// Remember the canonical digest a producer just took of the tree at `path`.
+store_remember_output_digest: fn(verification: &StoreVerification, path: String, hangar_root: String?, allow_semantic_xattrs: Bool, digest: String) StoreError! -[FS, Env]> {
+    stamp: store_object_stamp(files.stat(path))
+    key: store_output_digest_key(path, store_normalize_memo_root(hangar_root), allow_semantic_xattrs)
+    store_verified_digest_put(verification, key, VerifiedDigestMemo{path, stamp, digest})
+}
+
+// Carry a tree digest across a rename this process made: the renamed root
+// keeps its stamp, so a memo for `source` holds for `destination` under the
+// Hangar root. A digest taken without a Hangar root admits no CAS peers, so
+// it implies the Hangar-rooted one.
+store_carry_verified_digest: fn(verification: &StoreVerification, source: String, destination: String, hangar_root: String, allow_semantic_xattrs: Bool) StoreError! -[FS, Env]> {
+    stamp: store_object_stamp(files.stat(destination))
+    root: store_normalize_memo_root(Val(hangar_root))
+    keys: [String]{store_output_digest_key(source, None, allow_semantic_xattrs), store_output_digest_key(source, root, allow_semantic_xattrs)}
+    loop key in keys {
+        memo: store_verified_digest_get(verification, key)
+        if memo == .Val(cached) && cached.stamp == stamp {
+            store_verified_digest_put(verification, store_output_digest_key(destination, root, allow_semantic_xattrs), VerifiedDigestMemo{path: destination, stamp, digest: cached.digest})
+            return
+        }
+    }
+}
+
+// A regular file's content memo key: its (device, inode, size, mtime)
+// stamp, so the digest survives the renames that publish its tree.
+store_content_digest_key: fn(stamp: DigestStamp) -> String Never! {
+    "content\n{stamp.device}\n{stamp.inode}\n{stamp.size}\n{stamp.modified_ns}"
+}
+
+// Remember the content SHA-256 hex a producer took from a file's bytes.
+store_remember_content_digest: fn(verification: &StoreVerification, path: String, digest_hex: String) StoreError! -[FS]> {
+    stamp: store_object_stamp(files.stat(path))
+    store_verified_digest_put(verification, store_content_digest_key(stamp), VerifiedDigestMemo{path, stamp, digest: digest_hex})
+}
+
+// The content SHA-256 hex of each file. Remembered digests are reused; the
+// rest are hashed on worker tasks at once.
+store_content_digests: fn(verification: &StoreVerification, paths: [String], infos: [files.Stat]) -[FS, Env]> [String] StoreError! {
+    digests := [String]{}
+    missing := [String]{}
+    sizes := [Int]{}
+    loop index in 0..<paths.len() {
+        stamp: store_object_stamp(infos[index])
+        memo: store_verified_digest_get(verification, store_content_digest_key(stamp))
+        if memo == .Val(cached) && cached.stamp == stamp {
+            digests.push(cached.digest)
+            next
+        }
+        digests.push("")
+        missing.push(paths[index].copy())
+        sizes.push(infos[index].size)
+    }
+    if missing.len() == 0 -> return Ok(digests)
+    hashed: store_hash_tree_and_files("", missing, sizes)
+    cursor := 0
+    loop index in 0..<digests.len() {
+        if digests[index] == "" {
+            digests[index] = hashed.files[cursor].copy()
+            cursor += 1
+        }
+    }
+    Ok(digests)
+}
+
+// Worker tasks one hashing pass may run at once.
+STORE_HASH_WORKERS: 16
+
+// The canonical digest of the tree at `root` ("" for none) and the content
+// SHA-256 hex of each file in `paths`, in order.
+StoreTreeHashes: struct {
+    tree: String
+    files: [String]
+}
+
+// One worker's share of a hashing pass.
+StoreHashLane: struct {
+    root: String
+    paths: [String]
+    slots: [Int]
+}
+
+StoreHashLaneResult: struct {
+    tree: String
+    digests: [String]
+    failure: String
+}
+
+// Hash a tree and a set of files on worker tasks at once. The canonical
+// tree digest is one ordered stream, so it gets a worker of its own; files
+// are dealt largest first to the least-loaded worker, so the pass ends when
+// the longest single stream does.
+store_hash_tree_and_files: fn(root: String, paths: [String], sizes: [Int]) -[FS, Env]> StoreTreeHashes StoreError! {
+    order := [Int]{}
+    loop index in 0..<paths.len() -> order.push(index)
+    order.sort_by((index: Int) -> 0 - sizes[index])
+    total := 0
+    loop size in sizes -> total += size
+    lanes := [StoreHashLane]{}
+    loads := [Int]{}
+    if root != "" {
+        lanes.push(StoreHashLane{root: root, paths: [String]{}, slots: [Int]{}})
+        loads.push(total)
+    }
+    file_lanes: if paths.len() < STORE_HASH_WORKERS -> paths.len() else -> STORE_HASH_WORKERS
+    loop _ in 0..<file_lanes {
+        lanes.push(StoreHashLane{root: "", paths: [String]{}, slots: [Int]{}})
+        loads.push(0)
+    }
+    loop index in order {
+        lightest := 0
+        loop lane in 0..<lanes.len() {
+            if loads[lane] < loads[lightest] -> lightest = lane
+        }
+        lanes[lightest].paths.push(paths[index].copy())
+        lanes[lightest].slots.push(index)
+        loads[lightest] = loads[lightest] + sizes[index] + 1
+    }
+    handles := [Task<StoreHashLaneResult>]{}
+    loop lane in lanes {
+        owned: lane.copy()
+        handles.push(task { store_hash_lane(owned) })
+    }
+    tree := ""
+    digests := [String]{}
+    loop _ in 0..<paths.len() -> digests.push("")
+    failure := ""
+    lane_index := 0
+    loop handle in handles {
+        result: handle.join() ?? StoreHashLaneResult{tree: "", digests: [String]{}, failure: "a hashing worker stopped"}
+        if result.failure != "" && failure == "" -> failure = result.failure.copy()
+        if lanes[lane_index].root != "" -> tree = result.tree.copy()
+        loop slot in 0..<result.digests.len() -> digests[lanes[lane_index].slots[slot]] = result.digests[slot].copy()
+        lane_index += 1
+    }
+    if failure != "" -> return Err(StoreError.Other(failure))
+    Ok(StoreTreeHashes{tree: tree, files: digests})
+}
+
+store_hash_lane: fn(lane: StoreHashLane) -[FS, Env]> StoreHashLaneResult Never! {
+    tree := ""
+    if lane.root != "" {
+        tree = pkg_try_output_hash_of(lane.root) ?? return StoreHashLaneResult{tree: "", digests: [String]{}, failure: "hash `{lane.root}`: {err.message()}"}
+    }
+    digests := [String]{}
+    loop path in lane.paths {
+        digests.push(store_sha256_file_hex(path) ?? return StoreHashLaneResult{tree: "", digests: [String]{}, failure: "hash `{path}`: {err.message()}"})
+    }
+    StoreHashLaneResult{tree: tree, digests: digests, failure: ""}
+}
+
 store_normalize_memo_root: fn(root: String?) -[FS, Env]> String? Never! {
     path: root ?? return None
     Val(files.canonicalize(path) ?? path)

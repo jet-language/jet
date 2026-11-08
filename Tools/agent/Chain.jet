@@ -1,7 +1,12 @@
 #!/usr/bin/env jet
-// The hashing, change classification, store and binary checks of
-// Tools/agent/chain/chain.sh, run by the seed.
+// The compiler chain: export a tree, build its stages through the content
+// addressed stage store, take a machine build slot, and the hashing, change
+// classification, store and binary checks the chain reads.
 //
+//   jet Tools/agent/Chain.jet TREE LEVEL|--auto [--out DIR] [--base COMMIT] [--dry-run|--check-gate]
+//   jet Tools/agent/Chain.jet export DIR [COMMIT] [PATCH...]
+//   jet Tools/agent/Chain.jet seed-published INSTALL_DIR
+//   jet Tools/agent/Chain.jet slot [--small] -- CMD...
 //   jet Tools/agent/Chain.jet diff TREE BASE REPO
 //   jet Tools/agent/Chain.jet plan TREE DIFF.json
 //   jet Tools/agent/Chain.jet inputs TREE
@@ -9,6 +14,49 @@
 //   jet Tools/agent/Chain.jet packhash DIR
 //   jet Tools/agent/Chain.jet evict STORE CAP_GB
 //   jet Tools/agent/Chain.jet trapscan ELF
+//
+// TREE LEVEL runs the chain of a source export (never a git worktree):
+//   check         the seed's `jet check` of the packages the tree changes
+//                 against its base (`plan` names them)
+//   s1            seed builds s1, s1's runtime pack (pack1)
+//   full          s1, pack1, s2 (by s1), pack2, s3 (by s2): FIXED_POINT when
+//                 s2 == s3 (jet and jet.o)
+//   full+threads  full, then t1 (s2 with --threads 1) == s3
+// --auto picks the level from `plan` (the reasons go to REPORT.md). Results:
+// DIR (default TREE/.chain) holds RESULT (TSV: stage status rc wall_s
+// peak_rss_mb sha256 key note, then a verdict row), REPORT.md, s1/ s2/ s3/ t1/
+// (jet, jet.o, jet-runtime/), keys/ and logs/. The base is --base, else the
+// commit `export` wrote to TREE/.chain-base, else dev HEAD. full and
+// full+threads need the tree's preflight receipt for the seed (`Land.jet
+// receipt check`); --check-gate only checks it. --dry-run builds nothing,
+// takes no slot and prints each stage's key and whether the store holds it.
+//
+// Every stage has a key: SHA-256 over its material (kind, builder or
+// compiler sha, its pack hash, the `inputs` hash of the tree files the stage
+// reads, identity, args) and the canonical root. A stage whose key is in the
+// store is REUSED: copied out and verified, never rebuilt. The rest build at
+// the canonical root $JET_SCRATCH_ROOT/discovery/r14/snap: each build and
+// pack stage runs in a private user and mount namespace with the tree bound
+// there, so equal sources give equal binaries whatever the tree's path. Only
+// clean results are stored (rc 0, no keep-going rows, no `todo` traps). The
+// chain first probes the store; a complete hit takes no slot, else the
+// stages the store lacks run in one build slot. Each stage process runs in a
+// memory scope of CHAIN_MEMMAX (default 24G) with no swap, on the slot's
+// CPUs. Settings: CHAIN_SEED (default $JET_SEEDS/current), CHAIN_STORE
+// (default $JET_SCRATCH_ROOT/stagestore, cap 20 GB; $JET_RUN_ROOT/stagestore,
+// cap 4 GB, when scratch has under 40 GB free), CHAIN_STORE_CAP_GB,
+// JET_PACK_MUSL_LIB (required).
+//
+// `export` writes COMMIT (default HEAD) of the dev checkout to DIR with
+// `git archive`, applies each PATCH and records the commit in DIR/.chain-base.
+// `seed-published` stores the lander's census build of INSTALL_DIR (and its
+// pack) as the s1 and pack1 of the tree at the canonical root.
+//
+// `slot` runs CMD in a machine build slot (A B C D, see take_slot) on its
+// CPUs, at nice 19 in the idle I/O class, in a memory scope of
+// SLOT_MEMORY_MAX (default 16G) plus 2G, with SLOT_CPUS, CHAIN_CPUS and
+// CAP_CPUS set; --small (or SLOT_SMALL=1) queues it in the small class. Every
+// job appends a row to $JET_RUN_ROOT/slot-ledger.tsv.
 //
 // `diff` prints JSON {base, changed: [{path, status, sha}], digest}: TREE
 // against git commit BASE of the checkout REPO. `plan` prints JSON {level,
@@ -36,7 +84,9 @@ use {
     files: core.files
     json: core.encoding.json
     process: core.process
+    sys: core.sys
     term: core.term
+    time: core.time
 }
 
 run: fn() {
@@ -67,11 +117,21 @@ run: fn() {
         process.exit(0)
     }
     if verb == "evict" && args.len() == 3 -> process.exit(evict(args[1], args[2]))
+    if verb == "export" && args.len() >= 2 -> process.exit(export_tree(roots(), args.slice(1, args.len())))
+    if verb == "seed-published" && args.len() == 2 -> process.exit(chain_main([String]{}, args[1]))
+    if verb == "slot" -> process.exit(slot_main(args.slice(1, args.len())))
+    if verb == "inroot" -> process.exit(inroot(args.slice(1, args.len())))
+    if args.len() >= 2 -> process.exit(chain_main(args, ""))
     usage()
 }
 
 usage: fn() -[Exec, IO]> Never {
-    term.eprint("usage: jet Tools/agent/Chain.jet diff TREE BASE REPO")
+    term.eprint("usage: jet Tools/agent/Chain.jet TREE LEVEL|--auto [--out DIR] [--base COMMIT] [--dry-run|--check-gate]")
+    term.eprint("       (LEVEL: check, s1, full, full+threads)")
+    term.eprint("       jet Tools/agent/Chain.jet export DIR [COMMIT] [PATCH...]")
+    term.eprint("       jet Tools/agent/Chain.jet seed-published INSTALL_DIR")
+    term.eprint("       jet Tools/agent/Chain.jet slot [--small] -- CMD...")
+    term.eprint("       jet Tools/agent/Chain.jet diff TREE BASE REPO")
     term.eprint("       jet Tools/agent/Chain.jet plan TREE DIFF.json")
     term.eprint("       jet Tools/agent/Chain.jet inputs TREE")
     term.eprint("       jet Tools/agent/Chain.jet dirhash DIR")
@@ -244,10 +304,13 @@ pack_digest: fn(pack: [PackFile]) -> String? Never! {
 }
 
 // The pack-comparison digest of the runtime pack DIR.
-packhash: fn(dir: String) -[Exec, FS, IO]> String Never! {
+packhash: fn(dir: String) -[Exec, FS, IO]> String Never! { pack_compare(dir) ?? fail("a provenance.json of `{dir}` is not a JSON object") }
+
+// `packhash` of DIR, None when a provenance.json of it is not a JSON object.
+pack_compare: fn(dir: String) -[Exec, FS, IO]> String? Never! {
     pack := [PackFile]{}
     loop path in all_files(dir) -> pack.push(PackFile{path: path.copy(), bytes: entry_bytes(files.join(dir, path), "symlink:")})
-    pack_digest(pack) ?? fail("a provenance.json of `{dir}` is not a JSON object")
+    pack_digest(pack)
 }
 
 // --- stage inputs -----------------------------------------------------------
@@ -644,6 +707,12 @@ evict: fn(store: String, cap_text: String) -[Exec, FS, IO]> Int Never! {
         term.eprint("Chain.jet evict: CAP_GB `{cap_text}` is negative")
         return 64
     }
+    print(evict_store(store, cap_text, cap_gb))
+    0
+}
+
+// `evict` of STORE to `cap_gb` (shown as `cap_text`); the line it reports.
+evict_store: fn(store: String, cap_text: String, cap_gb: Float) -[Exec, FS, IO]> String Never! {
     cap: cap_gb * Float.from_int(GIB)
     entries := [StoreEntry]{}
     loop item in list(store) {
@@ -668,8 +737,7 @@ evict: fn(store: String, cap_text: String) -[Exec, FS, IO]> Int Never! {
         gone.push(entry.name.slice(0..<16))
     }
     named: if gone.len() > 0 -> ": {gone.join(" ")}" else -> ""
-    print("store {hundredths(total)} GB of {cap_text} GB; evicted {gone.len()}{named}")
-    0
+    "store {hundredths(total)} GB of {cap_text} GB; evicted {gone.len()}{named}"
 }
 
 // `bytes` in GiB with two decimals, rounded half up.
@@ -677,6 +745,1290 @@ hundredths: fn(bytes: Int) -> String Never! {
     scaled: (bytes * 200 + GIB) /% (2 * GIB)
     cents: scaled % 100
     "{scaled /% 100}.{if cents < 10 -> "0" else -> ""}{cents}"
+}
+
+// --- roots ------------------------------------------------------------------
+
+// `name` from the environment, else `fallback`; an empty value is unset.
+env_or: fn(name: String, fallback: String) -[Env]> String Never! {
+    value: process.env_get(name) ?? ""
+    if value != "" -> value.copy() else -> fallback.copy()
+}
+
+// The value `${XDG_CONFIG_HOME:-~/.config}/jet/env` assigns to `name`.
+env_file_value: fn(name: String) -[Env, FS]> String? Never! {
+    home: env_or("HOME", "")
+    text: files.read("{env_or("XDG_CONFIG_HOME", "{home}/.config")}/jet/env") ?? return None
+    found := ""
+    seen := false
+    loop raw in text.lines() {
+        line: raw.trim().removeprefix("export ").trim()
+        parts: line.partition("=")
+        if parts.sep == "" || parts.head != name -> next
+        value := parts.tail
+        quoted: (value.starts_with("\"") && value.ends_with("\"")) || (value.starts_with("'") && value.ends_with("'"))
+        if value.len() >= 2 && quoted -> value = value.removeprefix("\"").removesuffix("\"").removeprefix("'").removesuffix("'")
+        found = value.replace("$HOME", home)
+        seen = true
+    }
+    if seen -> Val(found) else -> None
+}
+
+root_of: fn(name: String, fallback: String) -[Env, FS]> String Never! { env_or(name, env_file_value(name) ?? fallback) }
+
+// The dev tool roots (the table of Tools/agent/roots.sh), the checkout whose
+// tools run (JET_TOOLCHAIN_ROOT, else the current directory) and the
+// canonical build root.
+Roots: struct {
+    state: String
+    scratch: String
+    run: String
+    seeds: String
+    tools: String
+    repo: String
+    r14: String
+    root: String
+}
+
+roots: fn() -[Env, Exec, FS, IO]> Roots Never! {
+    home: env_or("HOME", "")
+    state: root_of("JET_STATE_ROOT", "{env_or("XDG_CACHE_HOME", "{home}/.cache")}/jet-dev")
+    scratch: root_of("JET_SCRATCH_ROOT", state)
+    run: root_of("JET_RUN_ROOT", "{scratch}/run")
+    seeds: root_of("JET_SEEDS", "{env_or("XDG_DATA_HOME", "{home}/.local/share")}/jet-seeds")
+    named: env_or("JET_TOOLCHAIN_ROOT", "")
+    tools: if named != "" -> absolute(named) else -> files.cwd() ?? fail("no current directory: {err}")
+    r14: "{scratch}/discovery/r14"
+    Roots{state: state, scratch: scratch, run: run, seeds: seeds, tools: tools.copy(), repo: root_of("JET_DEV_WORKTREE", tools), r14: r14.copy(), root: "{r14}/snap"}
+}
+
+// --- small helpers ----------------------------------------------------------
+
+under: fn(path: String, dir: String) -> Bool Never! { path == dir || path.starts_with("{dir}/") }
+
+prefix: fn(text: String, count: Int) -> String Never! { if text.count_bytes() <= count -> text.copy() else -> text.slice(0..<count).copy() }
+
+pad: fn(text: String, width: Int) -> String Never! {
+    out := text.copy()
+    loop out.count_bytes() < width -> out = "{out} "
+    out
+}
+
+basename: fn(path: String) -> String Never! {
+    parts: path.split("/").to_list()
+    parts[parts.len() - 1].copy()
+}
+
+first_line: fn(path: String) -[FS]> String Never! { (files.read(path) ?? "").partition("\n").head.trim().copy() }
+
+// Nanoseconds as seconds with one decimal.
+tenths: fn(ns: Int) -> String Never! {
+    scaled: (ns + 50000000) /% 100000000
+    "{scaled /% 10}.{scaled % 10}"
+}
+
+// The UTC wall clock as HH:MM:SS, after the date and `date_sep` when one is given.
+now_text: fn(date_sep: String?) -[Time]> String Never! {
+    now: time.now()
+    clock: "{two(now.hour())}:{two(now.minute())}:{two(now.second())}"
+    if date_sep == .Val(sep) -> "{time.strftime("%Y-%m-%d", now)}{sep}{clock}" else -> clock
+}
+
+two: fn(n: Int) -> String Never! { if n < 10 -> "0{n}" else -> "{n}" }
+
+stamp: fn() -[Time]> String Never! { now_text(.Val(" ")) }
+
+say: fn(text: String) -[IO, Time]> { print("{now_text(None)} {text}") }
+
+sha_file: fn(path: String) -[Exec, FS, IO]> String Never! {
+    hasher := crypto.new()
+    hasher.update(files.read_bytes(path) ?? fail("cannot read `{path}`: {err}"))
+    hasher.digest()
+}
+
+// `24G`, `512M`, `64K` or a byte count, in bytes.
+memory_bytes: fn(text: String) -> Int Never! {
+    units: [String]{"K", "M", "G"}
+    loop at in 0..<units.len() {
+        if !text.ends_with(units[at]) -> next
+        scale := 1024
+        loop _ in 0..<at -> scale *= 1024
+        return (Int.parse(text.removesuffix(units[at])) ?? 0) * scale
+    }
+    Int.parse(text) ?? 0
+}
+
+// `4-9,20-25` as the CPUs it names.
+parse_cpus: fn(text: String) -> [Int] Never! {
+    cpus := [Int]{}
+    loop part in text.split(",") {
+        span: part.trim().partition("-")
+        first: Int.parse(span.head) ?? next
+        last: if span.sep == "" -> first else -> Int.parse(span.tail) ?? first
+        loop cpu in first..<(last + 1) -> cpus.push(cpu)
+    }
+    cpus
+}
+
+// The lane a path names (`.../lanes/<Lane>/...` or `.../tdev/<Lane>/...`).
+lane_of: fn(text: String) -> String Never! {
+    markers: [String]{"tdev/", "lanes/"}
+    loop marker in markers {
+        rest: text.partition(marker)
+        if rest.sep == "" -> next
+        count := 0
+        loop letter in rest.tail.bytes() {
+            code: Int.from_u8(letter)
+            if !((code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122)) -> break
+            count += 1
+        }
+        if count > 0 -> return rest.tail.slice(0..<count).copy()
+    }
+    ""
+}
+
+// PATH without the directories that hold cargo, rustc or rustup: the
+// compiler chain must not need them.
+RUST_TOOLS: ["cargo", "rustc", "rustup"]
+
+norust_path: fn() -[Env, FS]> String Never! {
+    kept := [String]{}
+    loop dir in env_or("PATH", "").split(":") {
+        holds := false
+        loop name in RUST_TOOLS {
+            if files.is_file(files.join(dir, name)) -> holds = true
+        }
+        if !holds -> kept.push(dir.copy())
+    }
+    kept.join(":")
+}
+
+git_line: fn(repo: String, args: [String]) -[Env, Exec, FS, IO, Time.Wait]> String? Never! {
+    argv := [String]{"git", "-C", repo.copy()}
+    argv.extend(args.copy())
+    receipt: process.cmd(argv).output_limit(268435456).run() ?? return None
+    if !receipt.success -> return None
+    Val(receipt.output.trim().copy())
+}
+
+// The rows of a keep-going report after its header.
+keep_going_rows: fn(path: String) -[FS]> Int Never! {
+    text: files.read(path) ?? return 0
+    lines: text.split("\n").to_list()
+    count := 0
+    loop at in 1..<lines.len() {
+        if lines[at] != "" -> count += 1
+    }
+    count
+}
+
+// The first two lines of a stage's error log, on one line.
+err_head: fn(path: String) -[FS]> String Never! {
+    text: files.read(path) ?? return ""
+    kept := [String]{}
+    loop line in text.split("\n") {
+        if line.starts_with("norust: ") -> next
+        kept.push(line.replace("\t", " "))
+        if kept.len() == 2 -> break
+    }
+    prefix(kept.join(" "), 160)
+}
+
+// --- copies -----------------------------------------------------------------
+
+// Plain copies, never hard links: the compiler refuses source and pack inputs
+// with more than one link (E2105). A copy is writable by its owner.
+copy_plain: fn(from: String, to: String) -[Exec, FS, IO]> {
+    files.copy(from, to) ?? fail("cannot copy `{from}` to `{to}`: {err}")
+    mode: lstat(to).mode % 4096
+    if (mode /% 128) % 2 == 0 -> files.set_mode(to, mode + 128) ?? ()
+}
+
+copy_tree: fn(from: String, to: String) -[Exec, FS, IO]> {
+    files.create_dir_all(to) ?? fail("cannot create `{to}`: {err}")
+    loop entry in list(from) {
+        source: files.join(from, entry.name)
+        target: files.join(to, entry.name)
+        found: lstat(source)
+        if found.is_symlink {
+            files.symlink(files.read_link(source) ?? fail("cannot read link `{source}`: {err}"), target) ?? fail("cannot link `{target}`: {err}")
+        } else if found.is_dir {
+            copy_tree(source, target)
+        } else {
+            copy_plain(source, target)
+        }
+    }
+}
+
+same_file: fn(left: String, right: String) -[FS]> Bool Never! {
+    one: files.read_bytes(left) ?? return false
+    two: files.read_bytes(right) ?? return false
+    one == two
+}
+
+// `mode` without its write bits.
+without_write: fn(mode: Int) -> Int Never! {
+    out := mode % 4096
+    bits: [Int]{128, 16, 2}
+    loop bit in bits {
+        if (out /% bit) % 2 == 1 -> out -= bit
+    }
+    out
+}
+
+// --- export -----------------------------------------------------------------
+
+// `export DIR [COMMIT] [PATCH...]`.
+export_tree: fn(r: Roots, args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
+    dir: absolute(args[0])
+    commit: if args.len() > 1 -> args[1].copy() else -> "HEAD"
+    sha: git_line(r.repo, [String]{"rev-parse", "--verify", "{commit}^{{commit}}"}) ?? {
+        print("Chain.jet export: unknown commit {commit}")
+        return 2
+    }
+    if under(dir, r.r14) {
+        print("refuse: {dir} is under {r.r14}")
+        return 2
+    }
+    files.remove_all(dir) ?? ()
+    files.create_dir_all(dir) ?? fail("cannot create `{dir}`: {err}")
+    archive: "{dir}.export-{sys.pid()}.tar"
+    archived: process.cmd([String]{"git", "-C", r.repo.copy(), "archive", "--format=tar", "-o", archive, sha.copy()}).run() ?? fail("git archive: {err}")
+    ok := archived.success
+    if ok {
+        unpacked: process.cmd([String]{"tar", "-x", "-f", archive, "-C", dir.copy()}).run() ?? fail("tar: {err}")
+        ok = unpacked.success
+    }
+    files.remove(archive) ?? ()
+    if !ok {
+        print("EXPORT FAILED")
+        return 1
+    }
+    patches := 0
+    loop at in 2..<args.len() {
+        applied: process.cmd([String]{"git", "apply", absolute(args[at])}).cwd(dir).run() ?? fail("git apply: {err}")
+        if !applied.success {
+            print("APPLY FAILED {args[at]}")
+            return 1
+        }
+        patches += 1
+    }
+    files.write(files.join(dir, ".chain-base"), "{sha}\n") ?? fail("cannot write `{dir}/.chain-base`: {err}")
+    print("exported {prefix(sha, 10)} + {patches} patch(es) to {dir}")
+    0
+}
+
+// --- the chain --------------------------------------------------------------
+
+LEVELS: ["check", "s1", "full", "full+threads"]
+
+ChainOptions: struct {
+    tree: String
+    level: String
+    auto: Bool
+    out: String
+    base: String
+    dry: Bool
+    gate: Bool
+}
+
+parse_chain: fn(args: [String]) -[Env, Exec, FS, IO]> ChainOptions Never! {
+    options := ChainOptions{tree: absolute(args[0]), level: "", auto: false, out: "", base: "", dry: false, gate: false}
+    at := 1
+    loop at < args.len() {
+        arg: args[at].copy()
+        at += 1
+        if arg == "--auto" {
+            options.auto = true
+            next
+        }
+        if arg == "--dry-run" {
+            options.dry = true
+            next
+        }
+        if arg == "--check-gate" {
+            options.gate = true
+            next
+        }
+        if arg == "--out" && at < args.len() {
+            options.out = absolute(args[at])
+            at += 1
+            next
+        }
+        if arg == "--base" && at < args.len() {
+            options.base = args[at].copy()
+            at += 1
+            next
+        }
+        if LEVELS.contains(arg) {
+            options.level = arg.copy()
+            next
+        }
+        term.eprint("Chain.jet: unknown argument {arg}")
+        usage()
+    }
+    if options.level == "" && !options.auto -> usage()
+    options
+}
+
+// One chain run: its roots, tree, store and the stage results so far.
+Chain: struct {
+    r: Roots
+    tree: String
+    level: String
+    auto: Bool
+    out: String
+    logs: String
+    base: String
+    base_src: String
+    seed: String
+    cid: String
+    ver: String
+    musl: String
+    mem: Int
+    store: String
+    cap: String
+    work: String
+    nsdir: String
+    mode: String
+    rows: [String]
+    sha: [String: String]
+    pk: [String: String]
+    miss: String
+    cpus: [Int]
+    seed_sha: String
+    seed_pk: String
+    bin: String
+    pin: String
+    digest: String
+    members: [String]
+    reasons: [String]
+    nchanged: String
+    started: Int
+}
+
+// Free GB of the file system holding `path`, 0 when unknown.
+free_gb: fn(path: String) -[Env, Exec, FS, IO, Time.Wait]> Int Never! {
+    receipt: process.cmd([String]{"df", "--output=avail", "-BG", path.copy()}).run() ?? return 0
+    lines: receipt.output.trim().split("\n").to_list()
+    if lines.len() < 2 -> return 0
+    Int.parse(lines[1].trim().removesuffix("G")) ?? 0
+}
+
+// `TREE LEVEL|--auto ...`, or `seed-published INSTALL_DIR` when `seedpub`
+// names the install.
+chain_main: fn(args: [String], seedpub: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
+    r: roots()
+    musl: root_of("JET_PACK_MUSL_LIB", "")
+    if musl == "" {
+        print("Chain.jet: set JET_PACK_MUSL_LIB to the static musl lib dir (in the environment or the jet env file)")
+        return 2
+    }
+    options: if seedpub != "" -> ChainOptions{tree: r.root.copy(), level: "s1", auto: false, out: "{r.run}/chain-work/seedpub-{sys.pid()}", base: "", dry: false, gate: false} else -> parse_chain(args)
+    tree: options.tree.copy()
+    if !files.is_dir(files.join(tree, "Compiler")) || !files.is_dir(files.join(tree, "Tools/agent")) {
+        print("Chain.jet: {tree} is not a source export")
+        return 2
+    }
+    if seedpub == "" && under(tree, r.r14) {
+        print("Chain.jet: refuse a tree under {r.r14} (the canonical root)")
+        return 2
+    }
+    base := options.base.copy()
+    base_src := "--base"
+    if base == "" {
+        recorded: first_line(files.join(tree, ".chain-base"))
+        if recorded != "" {
+            base = recorded.copy()
+            base_src = ".chain-base"
+        } else {
+            base = "HEAD"
+            base_src = "dev HEAD (no .chain-base; pass --base)"
+        }
+    }
+    base_sha: git_line(r.repo, [String]{"rev-parse", "--verify", "{base}^{{commit}}"}) ?? {
+        print("Chain.jet: unknown base {base}")
+        return 2
+    }
+    out: if options.out == "" -> files.join(tree, ".chain") else -> options.out.copy()
+    dirs: [String]{out.copy(), "{out}/logs", "{out}/keys"}
+    loop dir in dirs -> files.create_dir_all(dir) ?? fail("cannot create `{dir}`: {err}")
+    named_seed: env_or("CHAIN_SEED", "{r.seeds}/current")
+    seed: files.canonicalize(named_seed) ?? fail("no seed at `{named_seed}`: {err}")
+    cid: first_line(files.join(seed, "IDENTITY"))
+    if cid == "" -> fail("`{seed}/IDENTITY` names no identity")
+    store := env_or("CHAIN_STORE", "")
+    cap := "20"
+    if store == "" {
+        if free_gb(r.scratch) >= 40 {
+            store = "{r.scratch}/stagestore"
+        } else {
+            store = "{r.run}/stagestore"
+            cap = "4"
+        }
+    }
+    cap = env_or("CHAIN_STORE_CAP_GB", cap)
+    files.create_dir_all(store) ?? fail("cannot create `{store}`: {err}")
+    work: "{r.run}/chain-work/{sys.pid()}"
+    files.create_dir_all("{work}/tmp") ?? fail("cannot create `{work}/tmp`: {err}")
+    // Every stage inherits these.
+    sys.set("JET_PACK_MUSL_LIB", musl)
+    sys.set("CARGO_INCREMENTAL", "0")
+    sys.set("JET_TARGET_CAP_GB", "120")
+    cargo_vars: [String]{"CARGO_TARGET_DIR", "CARGO_HOME", "RUSTUP_HOME", "RUSTC"}
+    loop name in cargo_vars -> sys.unset(name) ?? false
+    sys.set_core_file_limit(Val(0), Val(0)) ?? ()
+    sys.set_stack_limit(Val(1073741824), Val(1073741824)) ?? ()
+    nsdir: "{r.run}/chain-ns/{sys.pid()}"
+    c := Chain{r: r, tree: tree, level: options.level.copy(), auto: options.auto, out: out.copy(), logs: "{out}/logs", base: base_sha, base_src: base_src, seed: seed.copy(), cid: cid.copy(), ver: cid.partition("#").head.copy(), musl: musl, mem: memory_bytes(env_or("CHAIN_MEMMAX", "24G")), store: store, cap: cap, work: work.copy(), nsdir: nsdir.copy(), mode: "", rows: [String]{}, sha: [String: String]{}, pk: [String: String]{}, miss: "", cpus: [Int]{}, seed_sha: "", seed_pk: "", bin: "-", pin: "-", digest: "-", members: [String]{}, reasons: [String]{}, nchanged: "not computed (explicit level)", started: time.unix_ns()}
+    code: chain_run(c, options, seedpub)
+    files.remove_all(work) ?? ()
+    files.remove_all(nsdir) ?? ()
+    code
+}
+
+chain_run: fn(c: &Chain, options: ChainOptions, seedpub: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
+    if options.auto || c.level == "check" {
+        found: diff(c.tree, c.base, c.r.repo)
+        diff_path: files.join(c.out, "diff.json")
+        files.write(diff_path, render_diff(found)) ?? fail("cannot write `{diff_path}`: {err}")
+        planned: plan(c.tree, diff_path)
+        c.digest = found.digest.copy()
+        c.nchanged = changed_summary(found.changed)
+        c.members = planned.members.copy()
+        c.reasons = planned.reasons.copy()
+        if options.auto {
+            if c.level == "" -> c.level = planned.level.copy()
+            print("--auto: level {planned.level} (base {prefix(c.base, 10)} from {c.base_src}; changes: {c.nchanged})")
+            loop reason in planned.reasons -> print("  why: {reason}")
+            if planned.members.len() > 0 -> print("  check members: {planned.members.join(" ")}")
+        }
+    }
+    // Self-hosting needs the tree's preflight receipt for this seed; check,
+    // s1 and --dry-run are ungated.
+    if options.gate || !options.dry {
+        if c.level == "full" || c.level == "full+threads" {
+            gate: process.cmd([String]{files.join(c.seed, "jet"), files.join(c.r.tools, "Tools/agent/Land.jet"), "receipt", "check", "Chain.jet", c.tree.copy(), c.seed.copy()}).cwd(c.r.tools).env("JET_COMPILER_IDENTITY", c.cid).env("JET_TOOLCHAIN_ROOT", c.r.tools).stdout(.Inherit).stderr(.Inherit).run() ?? fail("Tools/agent/Land.jet receipt: {err}")
+            if !gate.success -> return 2
+        } else if options.gate {
+            print("Chain.jet: level {c.level} is ungated (full and full+threads need a preflight receipt)")
+        }
+        if options.gate -> return 0
+    }
+    c.seed_sha = sha_file(files.join(c.seed, "jet"))
+    c.seed_pk = dirhash(files.join(c.seed, "jet-runtime"))
+    if c.level != "check" {
+        inputs: stage_inputs(c.tree)
+        c.bin = content_hash(c.tree, inputs.build, "chain-build-inputs-v1")
+        c.pin = content_hash(c.tree, inputs.pack, "chain-pack-inputs-v1")
+    }
+    if seedpub != "" -> return seed_published(c, seedpub)
+    if options.dry {
+        c.mode = "dry"
+        got: chain(c)
+        print("dry run: level {c.level}, store {c.store}")
+        loop row in c.rows {
+            cells: row.split("\t").to_list()
+            print("  {pad(cells[0], 6)} {cells[1]} key {prefix(cells[6], 16)} {cells[7]}")
+        }
+        if got == 3 -> print("  {c.miss} and every later stage would build (later keys depend on {c.miss}'s output)")
+        if got == 0 -> print("  every stage is in the store: the run would take no slot")
+        return 0
+    }
+    // Inside a slot (SLOT_CPUS set) the chain runs inline.
+    held: env_or("SLOT_CPUS", "")
+    if held != "" {
+        c.cpus = parse_cpus(held)
+        c.mode = "run"
+        chain(c)
+        return finish(c, "CPUs {held}")
+    }
+    lock_path: files.join(c.tree, ".chain-lock")
+    _tree_lock: files.lock(lock_path) ?? fail("cannot lock `{lock_path}`: {err}")
+    // Reuse what the store holds; a complete hit finishes without a slot.
+    c.mode = "probe"
+    probed: chain(c)
+    if probed == 0 -> return finish(c, "none (every stage REUSED)")
+    if probed != 3 -> return finish(c, "none (a stage failed while reusing)")
+    small := true
+    seen := false
+    loop stage in stage_order(c.level) {
+        if stage == c.miss -> seen = true
+        if seen && (stage.starts_with("s") || stage == "t1") -> small = false
+    }
+    say("queueing in a build slot (SLOT_SMALL={if small -> "1" else -> "0"}) from stage {c.miss}")
+    slot: take_slot(c.r, small, c.level == "s1")
+    export_slot(slot.cpus)
+    c.cpus = parse_cpus(slot.cpus)
+    started: time.unix_ns()
+    c.mode = "run"
+    chain(c)
+    code: finish(c, "CPUs {slot.cpus} (one slot for every stage the store lacked)")
+    ledger(c.r, slot.name, slot.queued, lane_of(c.tree), started, code, peak_mb(c), "Chain.jet {c.tree} {c.level}")
+    code
+}
+
+stage_order: fn(level: String) -> [String] Never! {
+    if level == "check" -> return [String]{"check"}
+    if level == "s1" -> return [String]{"s1", "pack1"}
+    if level == "full" -> return [String]{"s1", "pack1", "s2", "pack2", "s3"}
+    [String]{"s1", "pack1", "s2", "pack2", "s3", "t1"}
+}
+
+changed_summary: fn(changed: [Change]) -> String Never! {
+    if changed.len() == 0 -> return "0 file(s)"
+    shown := [String]{}
+    loop at in 0..<changed.len() {
+        if at == 6 -> break
+        shown.push("{changed[at].status} {changed[at].path}")
+    }
+    "{changed.len()} file(s): {shown.join(", ")}{if changed.len() > 6 -> ", ..." else -> ""}"
+}
+
+// The chain for its level in its mode (dry: resolve keys from the store only;
+// probe: reuse what the store holds and stop at the first stage it lacks;
+// run: build every stage it lacks). 3 at a miss in dry and probe.
+chain: fn(c: &Chain) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
+    c.rows = [String]{}
+    c.miss = ""
+    if c.level == "check" -> return check_stage(c)
+    got := build_stage(c, "s1", c.seed.copy(), c.seed_sha.copy(), c.seed_pk.copy(), c.cid.copy(), 12)
+    if got != 0 -> return got
+    s1: c.sha.get("s1") ?? ""
+    s1_dir: files.join(c.out, "s1")
+    s2_dir: files.join(c.out, "s2")
+    got = pack_stage(c, "pack1", s1_dir, s1, c.cid.copy())
+    if got != 0 || c.level == "s1" -> return got
+    pack1: c.pk.get("pack1") ?? ""
+    got = build_stage(c, "s2", s1_dir, s1, pack1, c.cid.copy(), 12)
+    if got != 0 -> return got
+    s2: c.sha.get("s2") ?? ""
+    next_identity: "{c.ver}#{s2}"
+    got = pack_stage(c, "pack2", s2_dir, s2, next_identity)
+    if got != 0 -> return got
+    pack2: c.pk.get("pack2") ?? ""
+    got = build_stage(c, "s3", s2_dir, s2, pack2, next_identity, 12)
+    if got != 0 || c.level != "full+threads" -> return got
+    build_stage(c, "t1", s2_dir, s2, pack2, next_identity, 1)
+}
+
+// One RESULT row: stage status rc wall_s peak_rss_mb sha256 key note.
+rec: fn(c: &Chain, cells: [String]) { c.rows.push(cells.join("\t")) }
+
+since: fn(t0: Int) -[Time]> String Never! { tenths(time.unix_ns() - t0) }
+
+// A stage's key: SHA-256 over its material lines and the canonical root.
+key_of: fn(c: &Chain, mat: [String]) -> String Never! {
+    text := "chain-stage-v1\n"
+    loop line in mat -> text = "{text}{line}\n"
+    hasher := crypto.new()
+    hasher.update("{text}root={c.r.root}\n".bytes())
+    hasher.digest()
+}
+
+write_keys: fn(c: &Chain, name: String, mat: [String]) -[FS]> { files.write(files.join(c.out, "keys/{name}.txt"), "{mat.join("\n")}\n") ?? () }
+
+find_entry: fn(c: &Chain, k: String) -[FS]> String Never! {
+    stores: [String]{c.store.copy(), "{c.r.scratch}/stagestore", "{c.r.run}/stagestore"}
+    loop store in stores {
+        if files.is_file("{store}/{k}/meta") -> return "{store}/{k}"
+    }
+    ""
+}
+
+meta_of: fn(entry: String, name: String) -[FS]> String Never! {
+    text: files.read(files.join(entry, "meta")) ?? return ""
+    head: "{name}="
+    loop line in text.split("\n") {
+        if line.starts_with(head) -> return line.removeprefix(head).copy()
+    }
+    ""
+}
+
+touch_used: fn(entry: String) -[FS]> { files.write(files.join(entry, ".used"), "") ?? () }
+
+// Store `src` (a build's jet and jet.o, a pack's jet-runtime/, or a check's
+// logs) under `k` with meta `lines`, built in a temp dir and renamed in; then
+// evict the store to its cap.
+store_put: fn(c: &Chain, k: String, kind: String, src: String, lines: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> {
+    dest: files.join(c.store, k)
+    if files.is_dir(dest) -> return
+    tmp: files.join(c.store, ".tmp.{k}.{sys.pid()}")
+    files.remove_all(tmp) ?? ()
+    files.create_dir_all(tmp) ?? fail("cannot create `{tmp}`: {err}")
+    if kind == "build" {
+        names: [String]{"jet", "jet.o"}
+        loop name in names {
+            if files.exists(files.join(src, name)) -> copy_plain(files.join(src, name), files.join(tmp, name))
+        }
+    } else if kind == "pack" {
+        copy_tree(files.join(src, "jet-runtime"), files.join(tmp, "jet-runtime"))
+    } else {
+        loop entry in list(src) -> copy_plain(files.join(src, entry.name), files.join(tmp, entry.name))
+    }
+    bytes := 0
+    loop rel in all_files(tmp) -> bytes += lstat(files.join(tmp, rel)).size
+    meta := lines.copy()
+    meta.push("created={stamp()}")
+    meta.push("bytes={bytes}")
+    files.write(files.join(tmp, "meta"), "{meta.join("\n")}\n") ?? fail("cannot write `{tmp}/meta`: {err}")
+    loop rel in all_files(tmp) {
+        path: files.join(tmp, rel)
+        found: lstat(path)
+        if found.is_file -> files.set_mode(path, without_write(found.mode)) ?? ()
+    }
+    touch_used(tmp)
+    files.rename(tmp, dest) ?? files.remove_all(tmp) ?? ()
+    _evicting: files.lock(files.join(c.store, ".evict.lock")) ?? return
+    files.write(files.join(c.logs, "evict.log"), "{evict_store(c.store, c.cap, Float.parse(c.cap) ?? 20.0)}\n") ?? ()
+}
+
+build_mat: fn(c: &Chain, builder: String, builder_pack: String, identity: String, threads: Int) -> [String] Never! {
+    [String]{"kind=build", "builder={builder}", "builderpack={builder_pack}", "inputs={c.bin}", "identity={identity}", "args=build --threads {threads} Compiler", "env=JET_KEEP_GOING=1"}
+}
+
+pack_mat: fn(c: &Chain, compiler: String, identity: String) -> [String] Never! {
+    [String]{"kind=pack", "compiler={compiler}", "inputs={c.pin}", "identity={identity}", "musl={c.musl}", "args=PrebuildRuntime.jet"}
+}
+
+StageRun: struct {
+    rc: Int
+    ns: Int
+    rss: Int
+}
+
+// Run one stage process, its output to logs/NAME.out and logs/NAME.err,
+// under the chain's memory cap (no swap) and the slot's CPUs. `vars` are
+// its NAME=VALUE settings. A `canonical` stage runs with the tree mounted at
+// the canonical root in a private mount namespace (`inroot`), from there.
+stage_run: fn(c: &Chain, name: String, argv: [String], vars: [String], seconds: Int, canonical: Bool) -[Env, Exec, FS, IO, Time, Time.Wait]> StageRun Never! {
+    spec := process.cmd(argv).cwd(c.tree)
+    if canonical {
+        files.create_dir_all(files.join(c.nsdir, "snap")) ?? fail("cannot create `{c.nsdir}/snap`: {err}")
+        inner := [String]{"unshare", "-r", "-m", "--propagation", "private", files.join(c.seed, "jet"), files.join(c.r.tools, "Tools/agent/Chain.jet"), "inroot", c.nsdir.copy(), c.tree.copy(), c.r.r14.copy(), c.r.root.copy(), "{sys.getuid()}", "{sys.getgid()}"}
+        inner.extend(vars.copy())
+        inner.push("--")
+        inner.extend(argv.copy())
+        spec = process.cmd(inner).cwd(c.r.tools)
+    } else {
+        loop setting in vars {
+            parts: setting.partition("=")
+            spec = spec.env(parts.head, parts.tail)
+        }
+    }
+    spec = spec.memory_scope(c.mem).timeout(time.duration_seconds(seconds)).output_limit(1073741824)
+    if c.cpus.len() > 0 -> spec = spec.cpu_affinity(c.cpus.copy())
+    t0: time.unix_ns()
+    receipt: spec.run() ?? {
+        files.write(files.join(c.logs, "{name}.err"), "{argv[0]}: {err}\n") ?? ()
+        return StageRun{rc: 127, ns: time.unix_ns() - t0, rss: 0}
+    }
+    files.write(files.join(c.logs, "{name}.out"), receipt.output) ?? ()
+    files.write(files.join(c.logs, "{name}.err"), receipt.errors) ?? ()
+    rc := receipt.code
+    if receipt.signal == .Val(number) -> rc = 128 + number
+    if receipt.timed_out -> rc = 124
+    StageRun{rc: rc, ns: time.unix_ns() - t0, rss: (receipt.peak_memory_bytes ?? 0) /% 1048576}
+}
+
+// `inroot NSDIR TREE R14 ROOT UID GID [NAME=VALUE]... -- CMD...`, as root of
+// a new user and mount namespace: our own empty NSDIR over R14 (so nothing
+// the lander deletes is a mount point of ours) and TREE at ROOT, then CMD from
+// ROOT as UID:GID with the settings.
+inroot: fn(args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
+    if args.len() < 8 -> usage()
+    at := 6
+    vars := [String]{}
+    loop at < args.len() && args[at] != "--" {
+        vars.push(args[at].copy())
+        at += 1
+    }
+    if at + 1 >= args.len() -> usage()
+    if !bind(args[0], args[2]) || !bind(args[1], args[3]) {
+        term.eprint("chain: canonical root bind failed")
+        return 97
+    }
+    argv := [String]{"unshare", "--user", "--map-user={args[4]}", "--map-group={args[5]}"}
+    loop rest in (at + 1)..<args.len() -> argv.push(args[rest].copy())
+    spec := process.cmd(argv).cwd(args[3]).stdin(.Inherit).stdout(.Inherit).stderr(.Inherit)
+    loop setting in vars {
+        parts: setting.partition("=")
+        spec = spec.env(parts.head, parts.tail)
+    }
+    receipt: spec.run() ?? {
+        term.eprint("chain: {argv[4]}: {err}")
+        return 127
+    }
+    if receipt.signal == .Val(number) -> return 128 + number
+    receipt.code
+}
+
+bind: fn(from: String, to: String) -[Exec, IO, Time.Wait]> Bool Never! {
+    receipt: process.cmd([String]{"mount", "--bind", from.copy(), to.copy()}).run() ?? return false
+    receipt.success
+}
+
+// build_stage: NAME built by BUILDER_DIR/jet (sha BUILDER, its pack hash
+// BUILDER_PACK) under IDENTITY: `jet build --threads THREADS Compiler` at the
+// canonical root. 0 built or reused, 1 failed, 3 a miss outside a run.
+build_stage: fn(c: &Chain, n: String, builder_dir: String, builder: String, builder_pack: String, identity: String, threads: Int) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
+    mat: build_mat(c, builder, builder_pack, identity, threads)
+    k: key_of(c, mat)
+    write_keys(c, n, mat)
+    t0: time.unix_ns()
+    dir: files.join(c.out, n)
+    jet: files.join(dir, "jet")
+    found := find_entry(c, k)
+    if found != "" {
+        c.sha[n.copy()] = meta_of(found, "sha256")
+        if c.mode != "dry" {
+            files.create_dir_all(dir) ?? fail("cannot create `{dir}`: {err}")
+            files.remove(jet) ?? ()
+            files.remove("{jet}.o") ?? ()
+            copy_plain(files.join(found, "jet"), jet)
+            if files.exists(files.join(found, "jet.o")) -> copy_plain(files.join(found, "jet.o"), "{jet}.o")
+            if sha_file(jet) != (c.sha.get(n) ?? "") {
+                files.remove(jet) ?? ()
+                found = ""
+            }
+        }
+    }
+    if found != "" {
+        touch_used(found)
+        sha: c.sha.get(n) ?? ""
+        rec(c, [String]{n.copy(), "REUSED", "0", since(t0), meta_of(found, "rss_mb"), sha.copy(), k.copy(), "built {meta_of(found, "created")} in {meta_of(found, "wall_s")}s by {meta_of(found, "lane")}"})
+        say("{n} REUSED {prefix(k, 16)} (jet {prefix(sha, 16)})")
+        return 0
+    }
+    if c.mode != "run" {
+        c.miss = n.copy()
+        say("{n} needs a build (key {prefix(k, 16)})")
+        return 3
+    }
+    say("{n}: {basename(builder_dir)} builds Compiler (--threads {threads})")
+    build_out: files.join(c.tree, "Compiler/JetCli/.jet/build")
+    files.remove_all(build_out) ?? ()
+    files.remove_all(dir) ?? ()
+    files.create_dir_all(dir) ?? fail("cannot create `{dir}`: {err}")
+    report: files.join(c.logs, "{n}-keep-going.tsv")
+    vars: [String]{"JET_COMPILER_IDENTITY={identity}", "JET_TOOLCHAIN_ROOT={c.r.root}", "JET_KEEP_GOING=1", "JET_KEEP_GOING_REPORT={report}", "TMPDIR={c.work}/tmp", "PATH={norust_path()}"}
+    ran: stage_run(c, n, [String]{files.join(builder_dir, "jet"), "build", "--threads", "{threads}", "Compiler"}, vars, 3600, true)
+    rows: keep_going_rows(report)
+    built: files.join(build_out, "jet")
+    if files.is_file(built) {
+        files.copy(built, jet) ?? ()
+        if files.is_file("{built}.o") -> files.copy("{built}.o", "{jet}.o") ?? ()
+    }
+    files.remove_all(build_out) ?? ()
+    if !files.is_file(jet) {
+        failure: err_head(files.join(c.logs, "{n}.err"))
+        rec(c, [String]{n.copy(), "FAILED", "{ran.rc}", tenths(ran.ns), "{ran.rss}", "-", k.copy(), "no binary; keep-going rows={rows}; {failure}"})
+        say("{n} FAILED rc={ran.rc} rows={rows} (logs {c.logs}/{n}.err)")
+        return 1
+    }
+    sha: sha_file(jet)
+    c.sha[n.copy()] = sha.copy()
+    // #5662: a seed without the census fix installs keep-going `todo` traps
+    // with no row; the binary tells.
+    traps := "scan-failed"
+    scanned: trap_owners(files.read_bytes(jet) ?? [U8]{})
+    if scanned == .Val(owners) {
+        files.write(files.join(c.logs, "{n}-traps.txt"), owners.join("\n")) ?? ()
+        traps = "{owners.len()}"
+    }
+    wall: tenths(ran.ns)
+    if ran.rc == 0 && rows == 0 && traps == "0" {
+        lines := [String]{"stage={n}", "kind=build", "sha256={sha}", "wall_s={wall}", "rss_mb={ran.rss}", "lane={lane_of(c.tree)}", "tree={c.tree}"}
+        lines.extend(mat)
+        store_put(c, k, "build", dir, lines)
+        rec(c, [String]{n.copy(), "BUILT", "0", wall, "{ran.rss}", sha.copy(), k.copy(), "stored"})
+    } else {
+        rec(c, [String]{n.copy(), "DIRTY", "{ran.rc}", wall, "{ran.rss}", sha.copy(), k.copy(), "binary with rc={ran.rc} keep-going rows={rows} traps={traps} (not stored; {c.logs}/{n}-traps.txt)"})
+    }
+    say("{n} built rc={ran.rc} rows={rows} traps={traps} wall {wall}s rss {ran.rss}MB (jet {prefix(sha, 16)})")
+    0
+}
+
+// pack_stage: the runtime pack COMPILER_DIR/jet-runtime, lowered by
+// COMPILER_DIR/jet (sha COMPILER) under IDENTITY; the seed runs
+// Tools/packaging/PrebuildRuntime.jet in the dev shell, which supplies the
+// host C toolchain the runtime's vendored C needs.
+pack_stage: fn(c: &Chain, n: String, compiler_dir: String, compiler: String, identity: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
+    mat: pack_mat(c, compiler, identity)
+    k: key_of(c, mat)
+    write_keys(c, n, mat)
+    t0: time.unix_ns()
+    pack: files.join(compiler_dir, "jet-runtime")
+    found := find_entry(c, k)
+    if found != "" {
+        c.pk[n.copy()] = meta_of(found, "packhash")
+        if c.mode != "dry" {
+            files.remove_all(pack) ?? ()
+            copy_tree(files.join(found, "jet-runtime"), pack)
+            if dirhash(pack) != (c.pk.get(n) ?? "") {
+                files.remove_all(pack) ?? ()
+                found = ""
+            }
+        }
+    }
+    if found != "" {
+        touch_used(found)
+        hash: c.pk.get(n) ?? ""
+        rec(c, [String]{n.copy(), "REUSED", "0", since(t0), meta_of(found, "rss_mb"), hash.copy(), k.copy(), "native.key {prefix(meta_of(found, "native_key"), 16)}; built {meta_of(found, "created")} in {meta_of(found, "wall_s")}s by {meta_of(found, "lane")}"})
+        say("{n} REUSED {prefix(k, 16)} (pack {prefix(hash, 16)})")
+        return 0
+    }
+    if c.mode != "run" {
+        c.miss = n.copy()
+        say("{n} needs a build (key {prefix(k, 16)})")
+        return 3
+    }
+    say("{n}: PrebuildRuntime.jet with {basename(compiler_dir)}")
+    files.remove_all(pack) ?? ()
+    files.create_dir_all("{c.work}/tmp") ?? ()
+    seed_jet: files.join(c.seed, "jet")
+    vars: [String]{"JET_COMPILER_IDENTITY={c.cid}", "JET={seed_jet}", "JET_TOOLCHAIN_ROOT={c.r.root}", "TMPDIR={c.work}/tmp"}
+    argv: [String]{seed_jet.copy(), "{c.r.root}/Tools/agent/JetEnv.jet", "--norust", seed_jet.copy(), "{c.r.root}/Tools/packaging/PrebuildRuntime.jet", files.join(compiler_dir, "jet"), pack.copy(), "--repo", c.r.root.copy(), "--identity", identity.copy()}
+    ran: stage_run(c, n, argv, vars, 1800, true)
+    wall: tenths(ran.ns)
+    if ran.rc != 0 || !files.is_file(files.join(pack, "native.key")) {
+        failure: err_head(files.join(c.logs, "{n}.err"))
+        rec(c, [String]{n.copy(), "FAILED", "{ran.rc}", wall, "{ran.rss}", "-", k.copy(), "no pack; {failure}"})
+        say("{n} FAILED rc={ran.rc} (logs {c.logs}/{n}.err)")
+        return 1
+    }
+    hash: dirhash(pack)
+    c.pk[n.copy()] = hash.copy()
+    native_key: first_line(files.join(pack, "native.key"))
+    lines := [String]{"stage={n}", "kind=pack", "packhash={hash}", "native_key={native_key}", "wall_s={wall}", "rss_mb={ran.rss}", "lane={lane_of(c.tree)}", "tree={c.tree}"}
+    lines.extend(mat)
+    store_put(c, k, "pack", compiler_dir, lines)
+    rec(c, [String]{n.copy(), "BUILT", "0", wall, "{ran.rss}", hash.copy(), k.copy(), "native.key {prefix(native_key, 16)}; stored"})
+    say("{n} built wall {wall}s rss {ran.rss}MB (pack {prefix(hash, 16)}, native.key {prefix(native_key, 16)})")
+    0
+}
+
+// check_stage: the seed's `jet check` of each member, from the tree (no
+// canonical root: check writes no artifact).
+check_stage: fn(c: &Chain) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
+    mat: [String]{"kind=check", "seed={c.seed_sha}", "seedpack={c.seed_pk}", "base={c.base}", "diff={c.digest}", "members={c.members.join(" ")}", "identity={c.cid}", "args=check --threads 12", "env=JET_KEEP_GOING=1"}
+    k: key_of(c, mat)
+    write_keys(c, "check", mat)
+    t0: time.unix_ns()
+    if c.members.len() == 0 {
+        rec(c, [String]{"check", "OK", "0", "0", "0", "-", k.copy(), "no package touched: nothing to check"})
+        say("check: no package touched")
+        return 0
+    }
+    found: find_entry(c, k)
+    if found != "" {
+        if c.mode != "dry" {
+            loop entry in list(found) {
+                if entry.name.starts_with("check-") -> copy_plain(files.join(found, entry.name), files.join(c.logs, entry.name))
+            }
+        }
+        touch_used(found)
+        rc: meta_of(found, "rc")
+        summary: meta_of(found, "summary")
+        rec(c, [String]{"check", "REUSED", rc.copy(), since(t0), meta_of(found, "rss_mb"), "-", k.copy(), summary.copy()})
+        say("check REUSED {prefix(k, 16)}: {summary}")
+        return if rc == "0" -> 0 else -> 1
+    }
+    if c.mode != "run" {
+        c.miss = "check"
+        say("check needs a run (key {prefix(k, 16)})")
+        return 3
+    }
+    worst := 0
+    peak := 0
+    wall := 0
+    transient := false
+    sums := [String]{}
+    loop member in c.members {
+        n: "check-{member.replace("/", "_")}"
+        say("check {member} with {basename(c.seed)}")
+        report: files.join(c.logs, "{n}-keep-going.tsv")
+        vars: [String]{"JET_COMPILER_IDENTITY={c.cid}", "JET_TOOLCHAIN_ROOT={c.tree}", "JET_KEEP_GOING=1", "JET_KEEP_GOING_REPORT={report}", "TMPDIR={c.work}/tmp", "PATH={norust_path()}"}
+        argv: [String]{files.join(c.seed, "jet"), "check", "--threads", "12", member.copy()}
+        ran: stage_run(c, n, argv, vars, 1200, false)
+        rows: keep_going_rows(report)
+        if ran.rc >= 124 -> transient = true
+        if ran.rc != 0 || rows != 0 -> worst = 1
+        if ran.rss > peak -> peak = ran.rss
+        wall += ran.ns
+        sums.push("{member} rc={ran.rc} rows={rows}")
+        say("check {member} rc={ran.rc} rows={rows} {tenths(ran.ns)}s")
+    }
+    summary: sums.join(";")
+    if !transient {
+        kept: files.join(c.work, "chk")
+        files.create_dir_all(kept) ?? fail("cannot create `{kept}`: {err}")
+        loop entry in list(c.logs) {
+            if entry.name.starts_with("check-") -> copy_plain(files.join(c.logs, entry.name), files.join(kept, entry.name))
+        }
+        lines := [String]{"stage=check", "kind=check", "rc={worst}", "summary={summary}", "wall_s={tenths(wall)}", "rss_mb={peak}", "lane={lane_of(c.tree)}", "tree={c.tree}"}
+        lines.extend(mat)
+        store_put(c, k, "check", kept, lines)
+    }
+    rec(c, [String]{"check", if worst == 0 -> "OK" else -> "FAILED", "{worst}", tenths(wall), "{peak}", "-", k.copy(), summary.copy()})
+    worst
+}
+
+same_build: fn(c: &Chain, left: String, right: String) -[FS]> Bool Never! {
+    one: files.join(c.out, left)
+    two: files.join(c.out, right)
+    if !same_file("{one}/jet", "{two}/jet") -> return false
+    if !files.exists("{one}/jet.o") && !files.exists("{two}/jet.o") -> return true
+    same_file("{one}/jet.o", "{two}/jet.o")
+}
+
+// The largest peak of the stages this run built, in MB.
+peak_mb: fn(c: &Chain) -> Int Never! {
+    peak := 0
+    loop row in c.rows {
+        cells: row.split("\t").to_list()
+        if cells[1] == "REUSED" -> next
+        value: Int.parse(cells[4]) ?? 0
+        if value > peak -> peak = value
+    }
+    peak
+}
+
+// The verdict of the run, RESULT and REPORT.md; the exit code.
+finish: fn(c: &Chain, slot_note: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
+    verdict := "OK"
+    code := 0
+    note := ""
+    failed := [String]{}
+    check_rc := ""
+    loop row in c.rows {
+        cells: row.split("\t").to_list()
+        if cells[1] == "FAILED" -> failed.push(cells[0].copy())
+        if cells[0] == "check" -> check_rc = cells[2].copy()
+    }
+    if c.level == "check" {
+        if check_rc != "0" {
+            verdict = "FAILED"
+            code = 1
+        }
+    } else if failed.len() > 0 {
+        verdict = "FAILED"
+        code = 1
+        note = "stage(s) failed: {failed.join(" ")}"
+    } else if c.level == "s1" {
+        note = "s1 jet {prefix(c.sha.get("s1") ?? "", 16)}, pack1 {prefix(c.pk.get("pack1") ?? "", 16)}"
+    } else {
+        s2: c.sha.get("s2") ?? ""
+        s3: c.sha.get("s3") ?? ""
+        if same_build(c, "s2", "s3") {
+            verdict = "FIXED_POINT"
+            jet_o: files.join(c.out, "s2/jet.o")
+            note = "s2 == s3 (jet {prefix(s2, 16)}{if files.exists(jet_o) -> ", jet.o {prefix(sha_file(jet_o), 16)}" else -> ""})"
+        } else {
+            verdict = "NOT_FIXED"
+            code = 1
+            note = "s2 {prefix(s2, 16)} != s3 {prefix(s3, 16)}"
+        }
+        rec(c, [String]{"fixed_point", if verdict == "FIXED_POINT" -> "SAME" else -> "DIFFERENT", "{code}", "0", "0", s3.copy(), "-", "cmp s2 s3 (jet and jet.o)"})
+        if c.level == "full+threads" {
+            t1: c.sha.get("t1") ?? ""
+            if same_build(c, "t1", "s3") {
+                rec(c, [String]{"threads1", "SAME", "0", "0", "0", t1.copy(), "-", "cmp t1 (--threads 1) s3"})
+                note = "{note}; t1 (--threads 1) == s3"
+            } else {
+                rec(c, [String]{"threads1", "DIFFERENT", "1", "0", "0", t1.copy(), "-", "cmp t1 (--threads 1) s3"})
+                verdict = "THREADS_DIFFER"
+                code = 1
+                note = "{note}; t1 {prefix(t1, 16)} != s3"
+            }
+        }
+        // Compared without the provenance fields that name the building
+        // compiler (s1 for pack1, s2 for pack2).
+        one: pack_compare(files.join(c.out, "s1/jet-runtime")) ?? ""
+        two: pack_compare(files.join(c.out, "s2/jet-runtime")) ?? ""
+        if one == "" || two == "" {
+            note = "{note}; pack1 and pack2 not compared (packhash failed)"
+        } else {
+            note = "{note}; pack1 {if one == two -> "==" else -> "!="} pack2 bytes (provenance without compilerSha256, recipeSha256)"
+        }
+    }
+    write_report(c, verdict, code, note, slot_note)
+    code
+}
+
+write_report: fn(c: &Chain, verdict: String, code: Int, note: String, slot_note: String) -[Env, Exec, FS, IO, Time]> {
+    total: since(c.started)
+    rows := [String]{"stage\tstatus\trc\twall_s\tpeak_rss_mb\tsha256\tkey\tnote"}
+    rows.extend(c.rows.copy())
+    rows.push("verdict\t{verdict}\t{code}\t{total}\t{peak_mb(c)}\t{c.sha.get("s3") ?? c.sha.get("s1") ?? "-"}\t-\tlevel={c.level} {note}")
+    staged: files.join(c.out, "RESULT.new")
+    files.write(staged, "{rows.join("\n")}\n") ?? fail("cannot write `{staged}`: {err}")
+    files.rename(staged, files.join(c.out, "RESULT")) ?? fail("cannot rename `{staged}`: {err}")
+    md := [String]{"# Chain.jet {c.level}: {c.tree}", "", "- base: {prefix(c.base, 10)} ({c.base_src}); changes: {c.nchanged}"}
+    if c.reasons.len() > 0 {
+        md.push("- why this level:{if c.auto -> " (--auto)" else -> ""}")
+        loop reason in c.reasons -> md.push("  - {reason}")
+    }
+    if c.level == "check" -> md.push("- check members: {if c.members.len() == 0 -> "none" else -> c.members.join(" ")}")
+    md.push("- seed: {basename(c.seed)} ({c.cid}); build inputs {prefix(c.bin, 16)}, pack inputs {prefix(c.pin, 16)}")
+    md.push("- store: {c.store} (cap {c.cap} GB, LRU); canonical build root {c.r.root} (private mount namespace)")
+    md.push("- slot: {slot_note}")
+    md.push("")
+    md.push("| stage | status | rc | wall s | peak RSS MB | sha256 | key | note |")
+    md.push("|---|---|---:|---:|---:|---|---|---|")
+    loop row in c.rows {
+        cells: row.split("\t").to_list()
+        md.push("| {cells[0]} | {if cells[1] == "REUSED" -> "**REUSED**" else -> cells[1].copy()} | {cells[2]} | {cells[3]} | {cells[4]} | {prefix(cells[5], 16)} | {prefix(cells[6], 16)} | {cells[7]} |")
+    }
+    md.push("")
+    md.push("**{verdict}** {note} (wall {total} s)")
+    text: md.join("\n")
+    files.write(files.join(c.out, "REPORT.md"), "{text}\n") ?? fail("cannot write `{c.out}/REPORT.md`: {err}")
+    print("== {c.out}/REPORT.md")
+    print(text)
+}
+
+// `seed-published INSTALL_DIR` (`Land.jet publish base`): INSTALL_DIR holds
+// the compiler the lander's census built at the canonical root; it is that
+// tree's s1 (and its pack, pack1), so store both under the keys a chain
+// computes, only when nothing about that claim is assumed: the snap's build
+// output is still these bytes, it is newer than the seed, the census build
+// was clean, the identity is the seed's, and the pack is the one the census
+// made with this compiler.
+seed_published: fn(c: &Chain, install: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
+    seedpub: files.canonicalize(install) ?? {
+        print("seed-published: no install at {install}")
+        return 2
+    }
+    built: files.join(c.r.root, "Compiler/JetCli/.jet/build/jet")
+    census_report: files.join(c.r.r14, "census/build-keep-going.tsv")
+    published: sha_file(files.join(seedpub, "jet"))
+    if !files.is_file(built) || sha_file(built) != published {
+        print("seed-published: {c.r.root} no longer holds this build of {seedpub}/jet; nothing stored")
+        return 1
+    }
+    seed_time: files.getmtime(files.join(c.seed, "jet")) ?? 0
+    if seed_time >= (files.getmtime(built) ?? 0) {
+        print("seed-published: seed {basename(c.seed)} is newer than the census build; nothing stored")
+        return 1
+    }
+    if !files.is_file(census_report) || keep_going_rows(census_report) != 0 || (files.getmtime(census_report) ?? 0) <= seed_time {
+        print("seed-published: census build was not clean; nothing stored")
+        return 1
+    }
+    if first_line(files.join(seedpub, "IDENTITY")) != c.cid {
+        print("seed-published: identity is not the seed's; nothing stored")
+        return 1
+    }
+    said := [String]{}
+    mat: build_mat(c, c.seed_sha.copy(), c.seed_pk.copy(), c.cid.copy(), 12)
+    k: key_of(c, mat)
+    s1: files.join(c.out, "s1")
+    files.create_dir_all(s1) ?? fail("cannot create `{s1}`: {err}")
+    copy_plain(files.join(seedpub, "jet"), files.join(s1, "jet"))
+    if files.is_dir(files.join(c.store, k)) {
+        said.push("s1 {prefix(k, 16)} already stored")
+    } else {
+        lines := [String]{"stage=s1", "kind=build", "sha256={published}", "wall_s=-", "rss_mb=-", "lane=lander census", "tree={c.r.root} ({first_line(files.join(seedpub, "COMMIT"))})"}
+        lines.extend(mat)
+        store_put(c, k, "build", s1, lines)
+        said.push("s1 {prefix(k, 16)} stored")
+    }
+    pack: files.join(seedpub, "jet-runtime")
+    census: files.join(c.r.r14, "census/runtime/out")
+    provenance: json.parse(files.read(files.join(pack, "provenance.json")) ?? "") ?? Dyn.Null
+    if text_field(provenance, "compilerSha256") == published && files.is_dir(census) && dirhash(pack) == dirhash(census) {
+        pmat: pack_mat(c, published, c.cid.copy())
+        pk: key_of(c, pmat)
+        if files.is_dir(files.join(c.store, pk)) {
+            said.push("pack1 {prefix(pk, 16)} already stored")
+        } else {
+            copy_tree(pack, files.join(s1, "jet-runtime"))
+            lines := [String]{"stage=pack1", "kind=pack", "packhash={dirhash(files.join(s1, "jet-runtime"))}", "native_key={first_line(files.join(s1, "jet-runtime/native.key"))}", "wall_s=-", "rss_mb=-", "lane=lander census", "tree={c.r.root}"}
+            lines.extend(pmat)
+            store_put(c, pk, "pack", s1, lines)
+            said.push("pack1 {prefix(pk, 16)} stored")
+        }
+    } else {
+        said.push("pack1 not stored (pack is not the census pack of this compiler)")
+    }
+    files.remove_all(c.out) ?? ()
+    print("seed-published: {said.join(" ")}")
+    0
+}
+
+// --- build slots ------------------------------------------------------------
+
+// Three machine-wide build slots split by physical core (CPU N and N+16 are
+// SMT siblings): A = cores 4-9, B = cores 10-15, C = both (only while
+// MemAvailable > 26 GB), and D = both for short builds only (MemAvailable >
+// 30 GB). A and B never share a physical core, so a measurement in one is not
+// skewed by its neighbour's SMT sibling; cores 0-3 stay free for the desktop.
+SLOT_NAMES: ["A", "B", "C", "D"]
+
+slot_cpus: fn(name: String) -> String Never! {
+    if name == "A" -> return "4-9,20-25"
+    if name == "B" -> return "10-15,26-31"
+    "4-15,20-31"
+}
+
+SlotTaken: struct {
+    name: String
+    cpus: String
+    queued: Int
+    locks: [files.FileLock]
+}
+
+mem_available_gb: fn() -[FS]> Int Never! {
+    text: files.read("/proc/meminfo") ?? return 0
+    loop line in text.split("\n") {
+        if !line.starts_with("MemAvailable:") -> next
+        return (Int.parse(line.removeprefix("MemAvailable:").trim().partition(" ").head) ?? 0) /% 1048576
+    }
+    0
+}
+
+// The I/O pressure (`some` avg10, whole percent).
+io_pressure: fn() -[FS]> Int Never! {
+    text: files.read("/proc/pressure/io") ?? return 0
+    loop line in text.split("\n") {
+        if !line.starts_with("some ") -> next
+        return Int.parse(line.partition("avg10=").tail.partition(".").head) ?? 0
+    }
+    0
+}
+
+// Milliseconds the NVMe disks spent doing I/O, summed.
+disk_ms: fn() -[FS]> Int Never! {
+    text: files.read("/proc/diskstats") ?? return 0
+    total := 0
+    loop line in text.split("\n") {
+        cells := [String]{}
+        loop cell in line.split(" ") {
+            if cell != "" -> cells.push(cell.copy())
+        }
+        if cells.len() < 13 || !cells[2].starts_with("nvme") || cells[2].contains("p") -> next
+        total += Int.parse(cells[12]) ?? 0
+    }
+    total
+}
+
+// The first ticket of a live waiter; a dead waiter's ticket is removed.
+head_ticket: fn(queue: String) -[FS]> String Never! {
+    names := [String]{}
+    listed: files.list_dir(queue) ?? [files.DirEntry]{}
+    loop entry in listed -> names.push(entry.name.copy())
+    names.sort()
+    loop name in names {
+        parts: name.split("-").to_list()
+        if files.exists("/proc/{parts[parts.len() - 1]}") -> return files.join(queue, name)
+        files.remove(files.join(queue, name)) ?? ()
+    }
+    ""
+}
+
+// Wait for a build slot. Waiters are served in ticket order: each holds a
+// ticket in $JET_RUN_ROOT/slot-queue and only the first live ticket may take
+// a free slot. Classes: SLOT_PRIORITY=1 with Main's key first, then small
+// jobs (under ~2 min and ~3 GB) and short builds, then the rest, each first
+// come, first served. A slot opens only while MemAvailable > 20 GB and the
+// I/O pressure is below 85% or the NVMe disks were under 50% busy over the
+// last wait (a task parked in iowait holds PSI near 90% while the disks sit
+// idle). A reserved slot ($JET_RUN_ROOT/slot-S-reserved) is taken only with
+// SLOT_RESERVED=1.
+take_slot: fn(r: Roots, small: Bool, short: Bool) -[Env, Exec, FS, IO, Time, Time.Wait]> SlotTaken Never! {
+    queue: files.join(r.run, "slot-queue")
+    files.create_dir_all(queue) ?? fail("cannot create `{queue}`: {err}")
+    class := if small -> 1 else -> 2
+    if env_or("SLOT_PRIORITY", "0") == "1" {
+        key: first_line(files.join(r.state, "scratch/Main/.slot-key"))
+        offered: env_or("SLOT_PRIORITY_KEY", "")
+        if offered != "" && offered == key {
+            class = 0
+        } else {
+            term.eprint("slot: SLOT_PRIORITY=1 ignored (Main's class only); queueing in class {class}")
+        }
+    }
+    if short && class == 2 -> class = 1
+    queued: time.unix_ns()
+    ticket: files.join(queue, "{class}-{queued}-{sys.pid()}")
+    files.write(ticket, "") ?? fail("cannot write `{ticket}`: {err}")
+    busy_then := disk_ms()
+    then := time.unix_ns()
+    time.sleep(time.duration_seconds(2))
+    loop {
+        mem: mem_available_gb()
+        io := io_pressure()
+        busy_now: disk_ms()
+        now: time.unix_ns()
+        // Percent of the elapsed wall time the disks (summed) were busy.
+        busy: (busy_now - busy_then) * 100000000 /% (now - then + 1)
+        busy_then = busy_now
+        then = now
+        if io >= 85 && busy < 50 -> io = 0
+        head: head_ticket(queue) == ticket
+        if mem > 20 && io < 85 && (head || short) {
+            loop name in SLOT_NAMES {
+                if name == "D" && !(short && mem > 30) -> next
+                if name != "D" && !head -> next
+                if name == "C" && mem <= 26 -> next
+                if files.exists(files.join(r.run, "slot-{name}-reserved")) && env_or("SLOT_RESERVED", "0") != "1" -> next
+                lock: files.try_lock(files.join(r.run, "build-slot-{name}.lock")) ?? next
+                files.remove(ticket) ?? ()
+                locks := [files.FileLock]{}
+                locks.push(lock)
+                return SlotTaken{name: name.copy(), cpus: slot_cpus(name), queued: queued, locks: locks}
+            }
+        }
+        time.sleep(time.duration_seconds(10))
+    }
+}
+
+export_slot: fn(cpus: String) -[Env]> {
+    names: [String]{"SLOT_CPUS", "CHAIN_CPUS", "CAP_CPUS"}
+    loop name in names -> sys.set(name, cpus)
+}
+
+// One row per job in $JET_RUN_ROOT/slot-ledger.tsv: when, slot, lane, how
+// long it waited and ran, its exit code, its peak memory and its command.
+ledger: fn(r: Roots, slot: String, queued: Int, lane: String, started: Int, code: Int, peak: Int, command: String) -[FS, Time]> {
+    now: time.unix_ns()
+    row: "{now_text(.Val("_"))}\t{slot}\t{if lane == "" -> "?" else -> lane.copy()}\twait={(started - queued) /% 1000000000}s\trun={(now - started) /% 1000000000}s\trc={code}\tmaxrss={peak}MB\t{prefix(command, 200)}\n"
+    files.append_all(files.join(r.run, "slot-ledger.tsv"), row) ?? ()
+}
+
+// `slot [--small] -- CMD...`: CMD in a build slot, on its CPUs, in the idle
+// I/O class at nice 19, in a memory scope of SLOT_MEMORY_MAX (default 16G)
+// plus 2G with no swap, so an overrun job dies alone. Exports SLOT_CPUS,
+// CHAIN_CPUS and CAP_CPUS to it; SLOT_SMALL=1 is --small.
+slot_main: fn(args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
+    small := env_or("SLOT_SMALL", "0") == "1"
+    at := 0
+    if args.len() > 0 && args[0] == "--small" {
+        small = true
+        at = 1
+    }
+    if args.len() <= at + 1 || args[at] != "--" -> usage()
+    command := [String]{}
+    loop rest in (at + 1)..<args.len() -> command.push(args[rest].copy())
+    r: roots()
+    slot: take_slot(r, small, false)
+    export_slot(slot.cpus)
+    sys.set_core_file_limit(Val(0), Val(0)) ?? ()
+    argv := [String]{"nice", "-n", "19"}
+    argv.extend(command.copy())
+    shown: command.join(" ")
+    lane: lane_of("{files.cwd() ?? ""} {shown}")
+    started: time.unix_ns()
+    receipt: process.cmd(argv).cpu_affinity(parse_cpus(slot.cpus)).io_idle().memory_scope(memory_bytes(env_or("SLOT_MEMORY_MAX", "16G")) + 2 * GIB).stdin(.Inherit).stdout(.Inherit).stderr(.Inherit).run() ?? {
+        term.eprint("slot: {command[0]}: {err}")
+        ledger(r, slot.name, slot.queued, lane, started, 127, 0, shown)
+        return 127
+    }
+    code := receipt.code
+    if receipt.signal == .Val(number) -> code = 128 + number
+    ledger(r, slot.name, slot.queued, lane, started, code, (receipt.peak_memory_bytes ?? 0) /% 1048576, shown)
+    code
 }
 
 // --- trapscan ---------------------------------------------------------------

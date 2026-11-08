@@ -1,0 +1,101 @@
+#!/usr/bin/env jet
+// Run a built web project in the Chromium the working directory's `.jet/lock`
+// pins, and print its console output once it matches the expected output:
+//
+//   jet run --allow=Env,Exec,FS,IO,Net,Time Tools/web-test/BrowserRun.jet -- <jet> <Serve.jet> <build-dir> <expected>
+//
+// It serves the build directory with Tools/web-test/Serve.jet on a free
+// loopback port, launches Chromium through core.web.browser, installs a BiDi
+// preload script that records console.log lines before the page's own
+// scripts run, opens index.html, and polls the recorded lines (400 times,
+// 50 ms apart) until they equal the expected lines. It prints the expected
+// text and exits 0 on a match; otherwise it names the difference and exits 1.
+
+use {
+    browser: core.web.browser
+    files: core.files
+    json: core.encoding.json
+    process: core.process
+    term: core.term
+    time: core.time
+    core.encoding.[Dyn]
+}
+
+C_HOOK: "() => {{ window.__compiledWorkloadLogs = []; console.log = (...args) => window.__compiledWorkloadLogs.push(args.map(value => String(value)).join(\" \")); }}"
+C_LOGS: "(window.__compiledWorkloadLogs || []).join(\"\\n\")"
+
+fail: fn(message: String) -> Never {
+    eprint(message)
+    process.exit(1)
+}
+
+// The object field `key` of a JSON value, if it has one.
+field: fn(value: Dyn, key: String) -> Dyn? Never! {
+    if value == .Object(fields) {
+        loop entry in fields {
+            if entry.key == key -> return Val(entry.value.copy())
+        }
+    }
+    None
+}
+
+text_of: fn(value: Dyn?) -> String Never! {
+    if value == .Val(.Text(found)) -> return found.copy()
+    ""
+}
+
+json_text: fn(value: String) -> String Never! { json.to_string(Dyn.Text(value.copy())) ?? "\"\"" }
+
+run: fn() {
+    args: process.args()
+    if args.len() != 4 -> fail("usage: BrowserRun.jet <jet> <Serve.jet> <build-dir> <expected>")
+    expected: files.read(args[3]) ?? fail("cannot read the expected output `{args[3]}`: {err}")
+    server := process.cmd([String]{args[0], "run", "--allow=Env,FS,IO,Net,Time", args[1], "--", "--port", "0", "--root", args[2]})
+        .stdout(.Capture).stderr(.Capture).spawn() ?? fail("cannot start the web server: {err}")
+    port := ""
+    loop line in server.stdout.lines() {
+        words: line.trim().split(" ").to_list()
+        if words.len() >= 4 && words[0] == "serving" {
+            port = words[words.len() - 1].copy()
+            break
+        }
+    }
+    if port == "" {
+        server.kill().drop("the server already exited")
+        fail("the web server did not report its port")
+    }
+    outcome: drive("http://127.0.0.1:{port}/index.html", expected)
+    server.kill().drop("the server already exited")
+    server.wait().drop("the server receipt is not reported")
+    if outcome != "" -> fail(outcome)
+    out := term.stdout()
+    out.write(expected) ?? fail("cannot write the output: {err}")
+}
+
+// Drive the page and compare; "" on a match, else the failure.
+drive: fn(url: String, expected: String) -[Exec, FS, IO, Net, Time, Time.Wait]> String Never! {
+    session: browser.launch("chromium") ?? return "Chromium did not launch: {err}"
+    bidi: session.protocol("bidi") ?? return "BiDi is unavailable: {err}"
+    tree: bidi.send("browsingContext.getTree", "{{\"maxDepth\":0}}") ?? return "browsingContext.getTree failed: {err}"
+    parsed: json.parse(tree) ?? return "browsingContext.getTree replied with bad JSON"
+    contexts: field(parsed, "contexts") ?? return "browsingContext.getTree has no contexts"
+    context := ""
+    if contexts == .Array(items) && items.len() > 0 -> context = text_of(field(items[0], "context"))
+    if context == "" -> return "Chromium has no top-level browsing context"
+    bidi.send("script.addPreloadScript", "{{\"functionDeclaration\":{json_text(C_HOOK)}}}") ?? return "the console hook was refused: {err}"
+    bidi.send("browsingContext.navigate", "{{\"context\":{json_text(context)},\"url\":{json_text(url)},\"wait\":\"complete\"}}") ?? return "navigation failed: {err}"
+    want: expected.trim_end().replace("\r\n", "\n")
+    logs := ""
+    attempt := 0
+    loop attempt < 400 {
+        reply: bidi.send("script.evaluate", "{{\"expression\":{json_text(C_LOGS)},\"target\":{{\"context\":{json_text(context)}}},\"awaitPromise\":false}}") ?? return "reading the console failed: {err}"
+        value: json.parse(reply) ?? return "script.evaluate replied with bad JSON"
+        logs = text_of(field(field(value, "result") ?? Dyn.Null, "value"))
+        if logs == want -> break
+        time.sleep(50ms)
+        attempt += 1
+    }
+    session.close().drop("the engine stops at its last owner's drop as well")
+    if logs != want -> return "browser output differs: {logs.replace("\n", "|")}"
+    ""
+}

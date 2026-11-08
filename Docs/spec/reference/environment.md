@@ -92,7 +92,6 @@ processes:
 | `JET_CANVAS_CHROMIUM` | executable path | Selects the Chromium executable. |
 | `JET_CANVAS_FIREFOX` | executable path | Selects the Firefox executable. |
 | `JET_CANVAS_GECKODRIVER` | executable path | Selects the geckodriver executable used with Firefox. |
-| `JET_CANVAS_NODE` | executable path | Selects the Node executable used by the Canvas harness. |
 
 `JET_CANVAS_PREREQUISITES=strict` is the policy control. Resolved paths and
 proof variables with longer `JET_CANVAS_*` names are harness transport rather

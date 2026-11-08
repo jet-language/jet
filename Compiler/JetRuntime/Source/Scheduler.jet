@@ -859,7 +859,7 @@ scheduler_worker_count: fn() -> I64 {
     parsed: scheduler_parse_threads(value, out)
     jet_rt_string_drop(value)
     if parsed -> return sync_load(out)
-    scheduler_available_parallelism(I64{4})
+    if comptime_serving() -> I64{4} else -> scheduler_available_parallelism(I64{4})
 }
 
 // The pool's environment override stays in worker_count. Pool (fallback 4),

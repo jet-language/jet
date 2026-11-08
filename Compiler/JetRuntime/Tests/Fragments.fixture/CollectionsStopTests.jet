@@ -3,7 +3,14 @@
 // uses fewer blocks per class than one slab can hold, so no full slab can be
 // unlinked during the live-total snapshot. No direct allocations are used.
 // C callbacks deliver the real budget stop rail, leaving result slots unwritten.
-#Export(c) collections_stop_test: fn(family: I64, unary: I64, binary: I64, show: I64, release: I64, list_drop: I64) {
+// The live totals of all eight allocator classes, taken before each case.
+// The budget stop's own records and texts belong to the session, not to the
+// iterator, so the host checks the totals only once comptime end and the
+// next begin have released them.
+coll_stop_snapshot := I64{0}
+
+coll_stop_take_snapshot: fn() {
+    coll_test_require(coll_stop_snapshot == I64{0})
     snapshot: jet_rt_alloc(I64{64}, I64{8})
     width := I64{32}
     at := I64{0}
@@ -12,6 +19,37 @@
         width *= I64{2}
         at += I64{1}
     }
+    #Unsafe("the single-threaded fixture host owns the snapshot from a case to its check") {
+        coll_stop_snapshot = snapshot
+    }
+}
+
+#Export(c) collections_stop_restored: fn() {
+    snapshot: coll_stop_snapshot
+    coll_test_require(snapshot != I64{0})
+    width := I64{32}
+    at := I64{0}
+    loop at < (I64{8}) {
+        coll_test_require(coll_test_live(width) == trap_word(snapshot + at * I64{8}))
+        width *= I64{2}
+        at += I64{1}
+    }
+    #Unsafe("the single-threaded fixture host owns the snapshot from a case to its check") {
+        coll_stop_snapshot = I64{0}
+    }
+    jet_rt_free(snapshot, I64{64}, I64{8})
+}
+
+// Each progress step asks the terminal color mode, and that first
+// environment read loads the process-wide environment table once. The host
+// loads it before any case snapshots, so the totals count only the case's
+// own blocks.
+#Export(c) collections_stop_warm: fn() {
+    _ := terminal_color_enabled()
+}
+
+#Export(c) collections_stop_test: fn(family: I64, unary: I64, binary: I64, show: I64, release: I64, list_drop: I64) {
+    coll_stop_take_snapshot()
     meta: coll_test_meta()
     list_meta: coll_test_meta()
     trap_store(list_meta, I64{24})
@@ -58,20 +96,15 @@
     coll_test_require(jet_rt_session_propagate() != I64{0} && result == I64{0})
     coll_meta_drop(list_meta)
     coll_meta_drop(meta)
-    width = I64{32}
-    at = I64{0}
-    loop at < (I64{8}) {
-        coll_test_require(coll_test_live(width) == trap_word(snapshot + at * I64{8}))
-        width *= I64{2}
-        at += I64{1}
-    }
-    jet_rt_free(snapshot, I64{64}, I64{8})
 }
 
 // Focused review witnesses use owning pointer elements, not inert integers.
 // Every case checks all eight allocator classes after its complete cleanup.
 #Import(c) coll_stop_after_free: fn(address: I64) = "coll_stop_after_free"
 #Import(c) coll_stop_arm: fn(address: I64) = "coll_stop_arm"
+// The instrumented iterator advances progress through the C host's wrapper,
+// which delegates the real advance once and then stops via the budget rail.
+#Import(c) coll_stop_progress_advance: fn(state: I64) = "coll_stop_progress_advance"
 
 coll_stop_free: fn(address: I64, size: I64, align: I64) {
     jet_rt_free(address, size, align)
@@ -96,14 +129,8 @@ coll_stop_owned_source: fn(meta: I64, length: I64) -> I64 {
 }
 
 #Export(c) collections_review_test: fn(family: I64, unary: I64, binary: I64, clone: I64, drop: I64, box_drop: I64) {
-    snapshot: jet_rt_alloc(I64{64}, I64{8})
-    width := I64{32}
+    coll_stop_take_snapshot()
     at := I64{0}
-    loop at < (I64{8}) {
-        trap_store(snapshot + at * I64{8}, coll_test_live(width))
-        width *= I64{2}
-        at += I64{1}
-    }
     meta: coll_test_meta()
     trap_store(meta + I64{8}, clone)
     trap_store(meta + I64{16}, drop)
@@ -195,12 +222,4 @@ coll_stop_owned_source: fn(meta: I64, length: I64) -> I64 {
     coll_test_require(jet_rt_session_propagate() != I64{0} && result == I64{0})
     coll_meta_drop(list_meta)
     coll_meta_drop(meta)
-    width = I64{32}
-    at = I64{0}
-    loop at < (I64{8}) {
-        coll_test_require(coll_test_live(width) == trap_word(snapshot + at * I64{8}))
-        width *= I64{2}
-        at += I64{1}
-    }
-    jet_rt_free(snapshot, I64{64}, I64{8})
 }

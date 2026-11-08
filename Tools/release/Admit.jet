@@ -9,7 +9,7 @@
 // receipt`, written by `Land.jet census`); --check-gate says whether it would
 // start and stops. The gate runs every check and reports all of them; it does
 // not stop at the first failure:
-//   chain     chain.sh builds s1, s2 and s3 of COMMIT from the current release, every stage
+//   chain     Tools/agent/Chain.jet builds s1, s2 and s3 of COMMIT from the current release, every stage
 //             without Rust on PATH, and must reach the fixed point (s2 == s3).
 //   pack      the runtime pack, rebuilt by s2 without Rust, must equal the chain's pack2 byte
 //             for byte.
@@ -49,7 +49,7 @@
 // SEEDS/a0_NNN stays without current.env and the gate prints the steps left. The evidence
 // stays in the work directory. The gate never repoints `current`, merges or pushes master.
 // One release run at a time (a lock in the work root); the run takes one
-// build-slot.sh slot, and every suite process runs inside that slot's memory cap. Each
+// Tools/agent/Chain.jet build slot, and every suite process runs inside that slot's memory cap. Each
 // shard's `jet test` gets `--memory` (the slot's SLOT_MEMORY_MAX, 16G when unset, split
 // across the shards), because a pool left to size itself reads the host's MemAvailable
 // and every shard would claim all of it; --jobs N caps each pool at N entries at once.
@@ -58,8 +58,7 @@
 // published.
 //
 // Environment: the roots of Tools/agent/roots.sh, JET_RELEASE_WORK (default
-// $JET_STATE_ROOT/release), JET_RELEASE_CHAIN (default Tools/agent/chain/chain.sh),
-// JET_RELEASE_SLOT (default Tools/agent/chain/build-slot.sh; empty runs without a slot),
+// $JET_STATE_ROOT/release), JET_RELEASE_SLOT (empty runs without a build slot),
 // JET_PACK_MUSL_LIB, JET_KEYS_DIR (where the jet-release signing key lives).
 // Exit: 0 released and published, 1 a check or a publication step failed (not admitted),
 // 2 the run could not start.
@@ -332,9 +331,10 @@ compare_suites: fn(before_rows: [SuiteRow], after_rows: [SuiteRow], retry: [Suit
     // A dispositioned lost row is tracked by its card, and a flaky row (one
     // the release passes and the candidate passes on its retry) is reported
     // as flaky, so neither counts as untracked. A row the candidate timed
-    // out on is retried whatever the release did, and when its retry passes
-    // it is flaky too: it missed a wall-clock limit under the kit's load, and
-    // the report still lists it.
+    // out on is retried whatever the release did: it missed a wall-clock
+    // limit under the kit's load. When its retry passes it is flaky; when
+    // its retry ends in a tracked status (a known-failing line, a host skip)
+    // that line owns it. The report still lists it either way.
     tracked := [String: Bool]{}
     loop lost in out.lost {
         if lost.disposed -> tracked[row_key(lost.suite, lost.id, lost.tier)] = true
@@ -344,7 +344,7 @@ compare_suites: fn(before_rows: [SuiteRow], after_rows: [SuiteRow], retry: [Suit
         if !is_untracked(item.status) -> next
         key: row_key(item.suite, item.id, item.tier)
         if tracked.has_key(key) -> next
-        if item.status == "TIMEOUT" && again.at.get(key) == .Val(at) && passes(retry[at].status) {
+        if item.status == "TIMEOUT" && again.at.get(key) == .Val(at) && !is_untracked(retry[at].status) {
             out.flaky.push(item.copy())
             tracked[key.copy()] = true
             next
@@ -380,7 +380,7 @@ ChainRow: struct {
     note: String
 }
 
-// chain.sh RESULT (TSV with a header) as rows by stage.
+// Tools/agent/Chain.jet RESULT (TSV with a header) as rows by stage.
 parse_chain_result: fn(text: String) -> [ChainRow] Never! {
     lines := [String]{}
     loop line in text.split("\n").to_list() {
@@ -534,7 +534,6 @@ Pre: struct {
     root: String
     seeds: String
     work_root: String
-    chain: String
     musl: String
     sha: String
     release: SeedRelease
@@ -550,7 +549,6 @@ preconditions: fn(options: AdmitOptions, root: String) -[Env, Exec, FS, Time.Wai
     errors := options.errors.copy()
     seeds: absolute_or(if options.seeds != "" -> options.seeds else -> seeds_root())
     work_root: absolute_or(if options.work != "" -> options.work else -> env_or("JET_RELEASE_WORK", files.join(state_root(), "release")))
-    chain: env_or("JET_RELEASE_CHAIN", files.join(root, "Tools/agent/chain/chain.sh"))
     musl: env_or("JET_PACK_MUSL_LIB", MUSL_DEFAULT)
     sha := ""
     if options.commit != "" {
@@ -564,7 +562,6 @@ preconditions: fn(options: AdmitOptions, root: String) -[Env, Exec, FS, Time.Wai
     }
     release: release_info(seeds)
     if release.error != "" -> errors.push(release.error.copy())
-    if !files.exists(chain) -> errors.push("chain.sh not found at {chain} (JET_RELEASE_CHAIN)")
     if !files.exists(files.join(musl, "libc.a")) -> errors.push("no musl libc.a in {musl} (JET_PACK_MUSL_LIB)")
     key: publication_key_paths(RELEASE_KEY).seed_path
     if options.filter == "" && !files.exists(key) -> errors.push("no release signing key at {key}: create it with `jet registry keygen --registry {RELEASE_KEY}`")
@@ -583,7 +580,7 @@ preconditions: fn(options: AdmitOptions, root: String) -[Env, Exec, FS, Time.Wai
     // The preflight gate, once the run could otherwise start: COMMIT's
     // receipt from a census by the current release.
     admission: if errors.len() > 0 -> Admission{admitted: false, text: ""} else -> preflight_gate("release-compiler", root, release.dir, sha)
-    Pre{errors: errors, root: root.copy(), seeds: seeds, work_root: work_root, chain: chain, musl: musl, sha: sha, release: release, dispositions: dispositions, admission: admission}
+    Pre{errors: errors, root: root.copy(), seeds: seeds, work_root: work_root, musl: musl, sha: sha, release: release, dispositions: dispositions, admission: admission}
 }
 
 GateRow: struct {
@@ -616,7 +613,6 @@ Ctx: struct {
     work: String
     sha: String
     release: SeedRelease
-    chain: String
     vars: [Var]
     dispositions: [Disposition]
     next: String
@@ -683,9 +679,9 @@ line_value: fn(text: String, prefix: String) -> String Never! {
 chain_stage: fn(ctx: &Ctx) Never! -[Env, Exec, FS, IO, Time, Time.Wait]> {
     out: files.join(ctx.work, "chain")
     log: files.join(ctx.work, "logs/chain.log")
-    result: run_logged([String]{"bash", ctx.chain.copy(), ctx.tree.copy(), "full", "--out", out}, ctx.work, [Var]{set_var("CHAIN_SEED", ctx.release.dir)}, log, 4 * 3600)
+    result: run_logged([String]{ctx.release.jet.copy(), files.join(ctx.root, "Tools/agent/Chain.jet"), ctx.tree.copy(), "full", "--out", out}, ctx.work, [Var]{set_var("CHAIN_SEED", ctx.release.dir), set_var("JET_COMPILER_IDENTITY", ctx.release.identity), set_var("JET_TOOLCHAIN_ROOT", ctx.root)}, log, 4 * 3600)
     text: read_text(files.join(out, "RESULT")) ?? {
-        row(ctx, "chain", "FAIL", "chain.sh rc={result.rc} wrote no RESULT: {tail_of(log, 8)}")
+        row(ctx, "chain", "FAIL", "Tools/agent/Chain.jet rc={result.rc} wrote no RESULT: {tail_of(log, 8)}")
         return
     }
     rows: parse_chain_result(text)
@@ -1416,7 +1412,7 @@ run_gate: fn(options: AdmitOptions, pre: Pre) -[Env, Exec, FS, IO, Time, Time.Wa
     loop dir in work_dirs -> files.create_dir_all(files.join(work, dir)) ?? ()
     ctx := Ctx{
         options: options.copy(), root: pre.root.copy(), seeds: pre.seeds.copy(), work_root: pre.work_root.copy(), work: work.copy(),
-        sha: pre.sha.copy(), release: pre.release.copy(), chain: pre.chain.copy(),
+        sha: pre.sha.copy(), release: pre.release.copy(),
         vars: [Var]{set_var("JET_PACK_MUSL_LIB", pre.musl), set_var("TMPDIR", files.join(work, "tmp")), drop_var("JET")},
         dispositions: pre.dispositions.copy(), next: next_release_name(release_names(pre.seeds)),
         tree: files.join(work, "tree"), release_tree: files.join(work, "release-tree"), log: files.join(work, "release.log"),
@@ -1530,15 +1526,15 @@ admit_main: fn(args: [String], root: String) -[Env, Exec, FS, IO, Time, Time.Wai
     admit_in_slot(args, root, options, pre)
 }
 
-// Runs the gate inside one build slot: when there is a slot helper and no
-// slot is held yet, the current release runs this command again under it.
+// Runs the gate inside one build slot: unless JET_RELEASE_SLOT is set empty
+// or a slot is held already, the current release runs this command again
+// under `Tools/agent/Chain.jet slot`.
 admit_in_slot: fn(args: [String], root: String, options: AdmitOptions, pre: Pre) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
-    slot: sys.get("JET_RELEASE_SLOT") ?? files.join(root, "Tools/agent/chain/build-slot.sh")
-    if slot != "" && files.exists(slot) && sys.get("SLOT_CPUS") == None {
-        argv := [String]{"bash", slot, pre.release.jet.copy(), "run", files.join(root, "Tools/release/Main.jet"), "--", "admit"}
+    if sys.get("JET_RELEASE_SLOT") != .Val("") && sys.get("SLOT_CPUS") == None {
+        argv := [String]{pre.release.jet.copy(), files.join(root, "Tools/agent/Chain.jet"), "slot", "--", pre.release.jet.copy(), "run", files.join(root, "Tools/release/Main.jet"), "--", "admit"}
         argv.extend(args.copy())
         inner: process.cmd(argv).cwd(root).env("JET_RELEASE_LOCK_HELD", "1").env("JET_COMPILER_IDENTITY", pre.release.identity).env("JET_TOOLCHAIN_ROOT", root).env_remove("JET").stdin(.Inherit).stdout(.Inherit).stderr(.Inherit).run() ?? {
-            term.eprint("admit: {slot} could not start: {err}")
+            term.eprint("admit: {pre.release.jet} Tools/agent/Chain.jet slot could not start: {err}")
             return 2
         }
         return if inner.signal != None -> 1 else -> inner.code

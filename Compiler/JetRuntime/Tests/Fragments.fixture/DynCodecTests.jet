@@ -1,9 +1,9 @@
 // Direct provider fixture: all scalar C input rails, owned output lifetime,
 // FieldError path framing and the strict parser's exact number/error contract.
 codec_fixture_number: fn(tree: I64, expected: I64) -> Bool {
-    kind: data_tree_word(tree + DATA_TREE_TAG)
+    kind: dyn_word(tree + DYN_TAG)
     text: jet_rt_handle_show_dyn(tree)
-    same: kind == DATA_TREE_INT && jet_rt_string_eq(text, expected)
+    same: kind == DYN_INT && jet_rt_string_eq(text, expected)
     jet_rt_string_drop(text)
     jet_rt_handle_drop_dyn(tree)
     same
@@ -23,21 +23,21 @@ codec_fixture_number: fn(tree: I64, expected: I64) -> Bool {
     jet_rt_int_drop(exact)
     if !codec_fixture_number(owned, rt_static_text("9223372036854775807")) -> return I64{10}
     boolean: jet_rt_codec_encode_bool(U8{2})
-    if (data_tree_word(boolean + DATA_TREE_TAG) != DATA_TREE_BOOL || data_tree_word(boolean + DATA_TREE_PAYLOAD) != I64{1}) -> return I64{11}
+    if (dyn_word(boolean + DYN_TAG) != DYN_BOOL || dyn_word(boolean + DYN_PAYLOAD) != I64{1}) -> return I64{11}
     jet_rt_handle_drop_dyn(boolean)
     real: jet_rt_codec_encode_float(Float{-0.0})
-    if (data_tree_word(real + DATA_TREE_TAG) != DATA_TREE_FLOAT || data_tree_word(real + DATA_TREE_PAYLOAD) != I64{-9223372036854775808}) -> return I64{12}
+    if (dyn_word(real + DYN_TAG) != DYN_FLOAT || dyn_word(real + DYN_PAYLOAD) != I64{-9223372036854775808}) -> return I64{12}
     jet_rt_handle_drop_dyn(real)
     text: jet_rt_string_clone(rt_static_text("é"))
     string_tree: jet_rt_codec_encode_string(text)
     typed_tree: jet_raw_typed_text(text)
     jet_rt_string_drop(text)
-    if (!jet_rt_handle_eq_dyn(string_tree, typed_tree) || !jet_rt_string_eq(data_tree_word(string_tree + DATA_TREE_PAYLOAD), rt_static_text("é"))) -> return I64{13}
+    if (!jet_rt_handle_eq_dyn(string_tree, typed_tree) || !jet_rt_string_eq(dyn_word(string_tree + DYN_PAYLOAD), rt_static_text("é"))) -> return I64{13}
     jet_rt_handle_drop_dyn(string_tree)
     jet_rt_handle_drop_dyn(typed_tree)
     scalar: jet_rt_codec_encode_char(I64{119070})
     replacement: jet_rt_codec_encode_char(I64{55296})
-    if (!jet_rt_string_eq(data_tree_word(scalar + DATA_TREE_PAYLOAD), rt_static_text("𝄞")) || !jet_rt_string_eq(data_tree_word(replacement + DATA_TREE_PAYLOAD), rt_static_text("�"))) -> return I64{14}
+    if (!jet_rt_string_eq(dyn_word(scalar + DYN_PAYLOAD), rt_static_text("𝄞")) || !jet_rt_string_eq(dyn_word(replacement + DYN_PAYLOAD), rt_static_text("�"))) -> return I64{14}
     jet_rt_handle_drop_dyn(scalar)
     jet_rt_handle_drop_dyn(replacement)
     slots: jet_rt_alloc(I64{32}, I64{8})
@@ -63,7 +63,7 @@ codec_fixture_number: fn(tree: I64, expected: I64) -> Bool {
     if (jet_rt_codec_parse_json(rt_static_text("1e400"), slots, slots + I64{8}, slots + I64{16}) != I64{1}) -> return I64{19}
     if (text_glue_word(slots + I64{8}) != I64{724} || text_glue_word(slots + I64{16}) != I64{725}) -> return I64{23}
     parsed: text_glue_word(slots)
-    if (data_tree_word(parsed + DATA_TREE_TAG) != DATA_TREE_NUMBER || !jet_rt_string_eq(data_tree_word(parsed + DATA_TREE_PAYLOAD), rt_static_text("1e400"))) -> return I64{20}
+    if (dyn_word(parsed + DYN_TAG) != DYN_NUMBER || !jet_rt_string_eq(dyn_word(parsed + DYN_PAYLOAD), rt_static_text("1e400"))) -> return I64{20}
     jet_rt_handle_drop_dyn(parsed)
     text_glue_store(slots, I64{723})
     if (jet_rt_codec_parse_json(rt_static_text("\n?"), slots, slots + I64{8}, slots + I64{16}) != I64{0} || text_glue_word(slots + I64{16}) != I64{1}) -> return I64{21}
