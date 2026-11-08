@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6686,
-    "rev": 96083,
+    "rev": 96084,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -73496,6 +73496,11 @@
         {
           "at": "2026-11-08",
           "by": "Main",
+          "text": "SchedLead commit 1/7 landed as afe2acc8c8: tasks run on fibers that park instead of blocking their worker thread; closed InlineAsm rails X64_FIBER_SWITCH and X64_GS_BASE_WRITE, gated by IRProgram.asm_rails. Its receipt: precommit rc=0, VERIFY OK, LaneCheck CHECK OK; focused task/cancel/generator/para/deadline/sleep cases and the concurrency goldens equal to baseline. #6403 r08: the quick task finishes in 98.7 us (base 2.9 s). 100000 cancel/timer/wake race rounds all accounted on every tier (base hangs). No leak over 3 x 10000 cancelled parked tasks. About 5.7 KB per parked task. w11 still loses to bun on wall (105.95 vs 94.66 ms); the root is the para_map limit cap at the core count, which is commit 2. Open: the ~32k live-fiber cap (vm.max_map_count) must degrade or diagnose, never crash; a 100k-task case is requested. #6403 c4 names a function that was removed; it gets reworded to the offload stats at c6."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
           "text": "Owner decision 2026-11-08 (to Main): build the async-I/O scheduler redesign now, no ballot. Tasks are multiplexed on few threads, with the epoll wait run on the waiting thread (the D-PARA-LIMIT1 path) instead of an OS thread per in-flight wait plus a poller-thread hop. Scope covers the same root in #6403 (a blocked task holds its worker) and #6440 (generator yield is a park/wake, about 20 us). Engineer away the downsides (task/channel/cancellation semantics unchanged on every tier, blocking foreign calls and OS waits offloaded, fairness and deadlines, I9 parity, debuggability), then build. Target: w11 beats every peer on wall, CPU and RSS (bun 9.25 ms CPU; jet 19.5 ms after fixes 1-4)."
         },
         {
@@ -73618,7 +73623,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T22:33:20.042Z",
-      "updated": "2026-11-08T11:04:51.808Z",
+      "updated": "2026-11-08T13:02:53.421Z",
       "updatedBy": "Main",
       "goals": [
         "G4"
@@ -188354,6 +188359,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-08T13:02:53.421Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c02a1ynr",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-08T12:58:19.491Z",
       "by": "Main",
