@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6686,
-    "rev": 96050,
+    "rev": 96052,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -64207,11 +64207,11 @@
         {
           "n": 11,
           "text": "Path-scoped grants work: `jet run --allow=FS.Read:./data s.jet` reads ./data/a.txt and is refused for ./other.txt with E1803 naming the refused path, and `--allow=FS.Read:./hello.jet` grants exactly that file. Today both forms are refused with E1803 (probe on 8fbf094: `jet run --allow=FS.Read:. readf3.jet`). Tests for directory, exact file, `..` and symlink escape.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-28T21:05:52.891Z"
+          "evidence": "5285fecc38. a0_037 release kit of 3a8dd83e79 (released 2026-11-08 05:39, all suites passed): cases authority/run_allow_read_path_confines_reads_to_the_granted_paths PASS. The --allow=FS.Read:./data directory grant reads data/a.txt and data/b.txt and refuses other.txt, data/../other.txt (..), data/link.txt (a symlink to a file outside) and data/up/other.txt (a symlinked dir escape), each with E1803 naming the refused path and the grant. The exact-file grant ./data/a.txt reads a.txt and refuses b.txt. The --release tier refuses the same way, and an unscoped FS.Read lifts the confinement.",
+          "at": "2026-11-08T10:40:19.393Z"
         },
         {
           "n": 12,
@@ -64319,7 +64319,7 @@
       "parentId": "c0svnelx",
       "needsAcceptance": false,
       "created": "2026-10-28T10:49:58.414Z",
-      "updated": "2026-11-08T10:40:18.164Z",
+      "updated": "2026-11-08T10:40:19.393Z",
       "updatedBy": "Main",
       "goals": [
         "G4"
@@ -72564,6 +72564,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-08",
+          "by": "Main",
+          "text": "Main 2026-11-08 05:50: c3 half proven. In the a0_037 kit, cases run_entry/run_dash_runs_the_program_piped_on_stdin PASS: `jet run -` with hello.jet on stdin prints hi with exit 0, words after - are the arguments, and a rerun reuses the stdin entry. Not covered: the clause \"Piped source follows the D-AUTH-DEFAULT1 notice rule (#6614 c3)\". The piped fixture uses only free basics, so no notice path is exercised. c3 stays open until a step pipes a program needing a non-default effect and asserts the notice/refusal exactly as for a file. c2 (jet -e) is proven by the JetCli RunEval.fixture registry row, which is outside the release kit; to be met from the c65 full-profile run."
+        },
+        {
           "at": "2026-11-04",
           "by": "Main",
           "text": "#6563 c1 precut audit re-added 1 criteria from archived #2161: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
@@ -72670,7 +72675,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T21:05:38.566Z",
-      "updated": "2026-11-08T04:18:46.224Z",
+      "updated": "2026-11-08T10:40:20.254Z",
       "updatedBy": "Main",
       "goals": [
         "G4"
@@ -188206,6 +188211,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-08T10:40:20.254Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0z3glhp",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-08T10:40:19.393Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0wi8ere",
+      "note": "#11"
+    },
     {
       "at": "2026-11-08T10:40:18.164Z",
       "by": "Main",
