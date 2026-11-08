@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6686,
-    "rev": 96078,
+    "rev": 96079,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -99589,6 +99589,11 @@
         {
           "at": "2026-11-08",
           "by": "Main",
+          "text": "Board memory took down the a0_038 retry, 2026-11-08 07:11 (release of c902740d37). The release scope cap is 18 GB (memory.max 18874368 kB). The kernel OOM killer fired with 24 concurrent Board processes at 0.6-0.9 GB RSS each, the largest 223k pages, spawned by the cases suite at --jobs 6 across 4 shards; oom.group killed the whole release. The release was rerun with --jobs 3 as a stopgap. Root: Tools/tower/Board.jet parses all of tower.json and the history shards into Dyn trees (json.parse_with_limits, lines 374 and 427). Fix direction: Board decodes only the fields a projection needs, through typed json.decode<T> on the #6082 D streaming reader, so no document tree is built. It is routed to G1Lead as D's first real consumer, after D's first step lands."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
           "text": "Main 2026-11-08 03:35 defect: Tools/tower/Board.jet uses 22-60x the board file in memory. `card show #6096 --json` peaks at 309 MB RSS (0.95 s) on the 14 MB tower.json, and the projections the gates run reached 670-860 MB anon each. In the a0_037 release cases suite, 14 concurrent Boards (spawned by gate-running cases) plus compiles filled the 18 GB release memcg, and the OOM killed the whole release (rc 137 at 03:24). Root fix: read the board without materializing the whole Dyn tree, or project only what each command needs (the JSON event reader from 5ed4a14dcd fits), so each Board stays near the file size. Meanwhile the release runs admit with --jobs."
         },
         {
@@ -99619,7 +99624,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T16:32:42.207Z",
-      "updated": "2026-11-08T08:26:01.640Z",
+      "updated": "2026-11-08T12:13:07.587Z",
       "updatedBy": "Main",
       "criteriaLastN": 1
     },
@@ -188334,6 +188339,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-08T12:13:07.587Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c09z2sp5",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-08T11:59:55.726Z",
       "by": "Main",
