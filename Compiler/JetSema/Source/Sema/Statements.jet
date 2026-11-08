@@ -615,22 +615,34 @@ sema_stmt_is_value_return: fn(statement: Stmt) -> Bool Never! {
     }
 }
 
-// Rust `check_value_tail` for the end of a value block: an empty block, or one
-// whose last line is a statement that can still reach the end, reports E0114. A
-// value line and a table report their own errors. False when E0114 was
-// reported.
-sema_stmt_check_value_block_end: fn(statements: [Stmt], checked: [TStmt], expected: Type?, block_span: Span, function_name: String, diagnostics: &[Diagnostic]) -> Bool {
+// Rust `check_value_tail` for the end of a value block: an empty block, one
+// whose last line is a valueless builtin call (`print`, `assert`, …: Rust
+// `check_call` hands back no type for these), or one whose last line is a
+// statement that can still reach the end, reports E0114. A value line and a
+// table report their own errors. False when E0114 was reported.
+sema_stmt_check_value_block_end: fn(statements: [Stmt], checked: [TStmt], expected: Type?, block_span: Span, function_name: String, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
     if statements.len() == 0 {
         diagnostics.push(sema_stmt_missing_value(expected, None, function_name, block_span))
         return false
     }
     seen := 0
+    // An earlier line that always leaves makes a valueless last line dead
+    // code, not the block's value.
+    left := false
     loop last in statements {
         seen += 1
-        if seen < statements.len() -> next
+        if seen < statements.len() {
+            if sema_stmt_definitely_returns(last) -> left = true
+            next
+        }
         if last == {
-            .Expr(_) | .Return(_, _) | .Switch(_, _, _, _) -> return true
-            .Unsafe(_, _, body, span) -> return sema_stmt_check_value_block_end(body, checked, expected, span, function_name, diagnostics)
+            .Expr(value) -> {
+                if left || sema_fallback_unit_call_name(value, scopes) == None -> return true
+                diagnostics.push(sema_stmt_missing_value(expected, None, function_name, expr_span(value)))
+                return false
+            }
+            .Return(_, _) | .Switch(_, _, _, _) -> return true
+            .Unsafe(_, _, body, span) -> return sema_stmt_check_value_block_end(body, checked, expected, span, function_name, scopes, diagnostics)
             else -> {}
         }
         if !sema_stmt_tree_block_can_fall_through(checked) || sema_stmt_definitely_returns(last) -> return true
@@ -1147,7 +1159,7 @@ sema_stmt_check_switch: fn(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?,
         if !branch.complete -> complete = false
         if value_tail {
             context.value_tail_span = Val(span)
-            ends: if arm_return != None -> sema_stmt_check_value_block_end(arms[arm_index].body, branch.value, arm_return, arms[arm_index].span, context.function_name, diagnostics) else -> sema_stmt_check_value_block_end(arms[arm_index].body, branch.value, return_type, arms[arm_index].span, context.function_name, diagnostics)
+            ends: if arm_return != None -> sema_stmt_check_value_block_end(arms[arm_index].body, branch.value, arm_return, arms[arm_index].span, context.function_name, scopes, diagnostics) else -> sema_stmt_check_value_block_end(arms[arm_index].body, branch.value, return_type, arms[arm_index].span, context.function_name, scopes, diagnostics)
             if !ends -> complete = false
         }
         sema_single_use_leave_scope(scopes, state, diagnostics)
@@ -1184,7 +1196,7 @@ sema_stmt_check_switch: fn(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?,
         if !checked_else.complete -> complete = false
         if value_tail {
             context.value_tail_span = Val(span)
-            if !sema_stmt_check_value_block_end(body, checked_else.value, return_type, span, context.function_name, diagnostics) -> complete = false
+            if !sema_stmt_check_value_block_end(body, checked_else.value, return_type, span, context.function_name, scopes, diagnostics) -> complete = false
         }
         checked_value := checked_else.value.move()
         checked_else.value = [TStmt]{}
