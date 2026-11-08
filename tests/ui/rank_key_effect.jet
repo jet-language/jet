@@ -1,0 +1,12 @@
+// A Rank key function must be pure: `loud_len` prints, so its `IO` effect
+// breaks the key's empty effect bound.
+loud_len: fn(word: String) -> Int {
+    print(word)
+    word.len()
+}
+
+run: fn() {
+    words := Rank.by(loud_len)
+    words.add("pear")
+    print(words.len())
+}

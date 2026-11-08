@@ -8,6 +8,13 @@
 // is the key order; both see the ascending keys. Lookups, insertion,
 // removal and equality are helper functions built once per Set type
 // (set.find, set.insert, set.take, set.remove, set.equal).
+//
+// A Rank's header adds an order word at 24: 0 for the element's native
+// order, else a key constructor's `before` function value (ir_key_order).
+// Under a key order the entries are always all in that order, equal keys in
+// insertion order: a new key moves in at its key position (a hashed Rank's
+// index is then rebuilt and its sorted count is its length, so nothing ever
+// merges), and an unhashed Rank finds a key by a linear scan.
 
 use jet_foundation.[Span, Type, name_rows_set, name_rows_value, type_carrier_identity]
 
@@ -20,6 +27,149 @@ ir_set_shape: fn(m: &IRModule, p: IRProgram, set_row: Int) -> IRMapShape? Never!
     if kind == "" -> return None
     member: IRMember{name: "key", offset: 0, ty: key_row}
     Val(IRMapShape{entry: key_row, entry_ty: elem.copy(), key: member.copy(), value: member, value_ty: Type.Named{name: "Unit"}, stride: ir_list_stride(m, key_row), kind: kind})
+}
+
+// Whether `ty` is a Rank, whose header carries an order word at 24.
+ir_rank_type: fn(ty: Type) -> Bool Never! {
+    if ir_untag(ty) == .Apply(name, args) {
+        if name == "Rank" && args.len() == 1 -> return true
+    }
+    false
+}
+
+// set.find of an unhashed Rank under a key order (its order word set),
+// returning from the helper: the index of the entry equal to `key`, else
+// -1 - its key position (ir_set_key_point). A native order falls through to
+// the binary search.
+ir_set_keyed_find: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapShape, set: Int, key: Int) Never! {
+    word_row: ir_word_row(m)
+    a.f.result = word_row
+    rank_order: ir_heap_order(m, a, set)
+    ir_open_if(a.f, rank_order.keyed, a.line)
+    length: ir_load_word(m, a, set, 0)
+    data: ir_load_word(m, a, set, 16)
+    one: ir_word_const(m, a, 1)
+    at: ir_word_const(m, a, 0)
+    done: ir_open(a.f, IROp.Block, a.line)
+    _: ir_open(a.f, IROp.Loop, a.line)
+    more: ir_bool_op(m, a, IROp.Lt, at, length)
+    ir_exit_unless(m, a, more, done)
+    entry: ir_element_address(m, a, data, at, shape.stride)
+    item: ir_load_at(m, a, entry, shape.key.offset, shape.key.ty)
+    same: ir_map_order(m, p, a, shape.kind, item, key).same
+    ir_open_if(a.f, same, a.line)
+    ir_emit(a.f, IROp.Return, -1, at, -1, -1, a.line)
+    ir_end(a.f, a.line)
+    ir_emit(a.f, IROp.Add, at, at, one, IR_OVERFLOW_WRAP, a.line)
+    ir_emit(a.f, IROp.Br, -1, 0, -1, -1, a.line)
+    ir_end(a.f, a.line)
+    ir_end(a.f, a.line)
+    point: ir_set_key_point(m, a, shape, set, key, rank_order.order)
+    minus_one: ir_word_const(m, a, -1)
+    insertion: ir_word_op(m, a, IROp.Sub, minus_one, point)
+    ir_emit(a.f, IROp.Return, -1, insertion, -1, -1, a.line)
+    ir_end(a.f, a.line)
+}
+
+// The key position of `key` in the Rank `set` under the key order `order`:
+// after every entry whose key `key`'s does not order before, so equal keys
+// keep insertion order.
+ir_set_key_point: fn(m: &IRModule, a: &IRBuilder, shape: IRMapShape, set: Int, key: Int, order: Int) -> Int Never! {
+    bool_row: ir_type_row(m, Type.Bool) ?? 0
+    length: ir_load_word(m, a, set, 0)
+    data: ir_load_word(m, a, set, 16)
+    one: ir_word_const(m, a, 1)
+    at: ir_word_const(m, a, 0)
+    found: ir_open(a.f, IROp.Block, a.line)
+    _: ir_open(a.f, IROp.Loop, a.line)
+    more: ir_bool_op(m, a, IROp.Lt, at, length)
+    ir_exit_unless(m, a, more, found)
+    entry: ir_element_address(m, a, data, at, shape.stride)
+    item: ir_load_at(m, a, entry, shape.key.offset, shape.key.ty)
+    earlier: ir_call_closure(m, a, order, [Int]{key, item}, bool_row)
+    later: ir_temp(m, a, bool_row)
+    ir_emit(a.f, IROp.Not, later, earlier, -1, -1, a.line)
+    ir_exit_unless(m, a, later, found)
+    ir_emit(a.f, IROp.Add, at, at, one, IR_OVERFLOW_WRAP, a.line)
+    ir_emit(a.f, IROp.Br, -1, 0, -1, -1, a.line)
+    ir_end(a.f, a.line)
+    ir_end(a.f, a.line)
+    at
+}
+
+// The new `key` into the hashed Rank `set` under the key order `order`,
+// returning true from set.insert: room made as for an append (map.rebuild
+// keeps entries that are all in order in place), the key moved in at its key
+// position, then the index rebuilt over the shifted positions with every
+// entry counted sorted.
+ir_set_keyed_place: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapShape, set_row: Int, set: Int, key: Int, order: Int) Never! {
+    bool_row: ir_type_row(m, Type.Bool) ?? 0
+    length: ir_load_word(m, a, set, 0)
+    ir_set_hashed_room(m, p, a, set_row, set, length)
+    point: ir_set_key_point(m, a, shape, set, key, order)
+    room: ir_load_word(m, a, set, 16)
+    room_capacity: ir_load_word(m, a, set, 8)
+    target: ir_element_address(m, a, room, point, shape.stride)
+    one: ir_word_const(m, a, 1)
+    after: ir_word_op(m, a, IROp.Add, point, one)
+    shifted: ir_element_address(m, a, room, after, shape.stride)
+    moved: ir_word_op(m, a, IROp.Sub, length, point)
+    width: ir_word_const(m, a, shape.stride)
+    bytes: ir_word_op(m, a, IROp.Mul, moved, width)
+    _: ir_runtime(m, a, "jet_rt_mem_move", [Int]{shifted, target, bytes}, -1)
+    a.fresh[key] = true
+    ir_store_at(m, p, a, target, 0, key)
+    grown: ir_word_op(m, a, IROp.Add, length, one)
+    ir_emit(a.f, IROp.Store, -1, set, 0, grown, a.line)
+    ir_map_clear_index(m, a, shape, set)
+    trailer: ir_map_trailer(m, a, shape, room, room_capacity)
+    indexed: ir_word_const(m, a, 0)
+    hashed: ir_open(a.f, IROp.Block, a.line)
+    _: ir_open(a.f, IROp.Loop, a.line)
+    unhashed: ir_bool_op(m, a, IROp.Lt, indexed, grown)
+    ir_exit_unless(m, a, unhashed, hashed)
+    entry: ir_element_address(m, a, room, indexed, shape.stride)
+    stored: ir_load_at(m, a, entry, shape.key.offset, shape.key.ty)
+    hash: ir_map_tag(m, a, shape, stored)
+    ir_map_slot_insert(m, a, trailer, hash, indexed)
+    ir_emit(a.f, IROp.Add, indexed, indexed, one, IR_OVERFLOW_WRAP, a.line)
+    ir_emit(a.f, IROp.Br, -1, 0, -1, -1, a.line)
+    ir_end(a.f, a.line)
+    ir_end(a.f, a.line)
+    ir_emit(a.f, IROp.Store, -1, trailer, 0, grown, a.line)
+    added: ir_int_constant(m, a, bool_row, 1)
+    ir_emit(a.f, IROp.Return, -1, added, -1, -1, a.line)
+}
+
+// Grows the hashed Set `set` of `length` entries when it is full: map.rebuild
+// at twice its length, at least 4.
+ir_set_hashed_room: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, set_row: Int, set: Int, length: Int) Never! {
+    capacity: ir_load_word(m, a, set, 8)
+    full: ir_bool_op(m, a, IROp.Ge, length, capacity)
+    ir_open_if(a.f, full, a.line)
+    grown: ir_word_op(m, a, IROp.Add, length, length)
+    four: ir_word_const(m, a, 4)
+    small: ir_bool_op(m, a, IROp.Lt, grown, four)
+    ir_open_if(a.f, small, a.line)
+    ir_emit(a.f, IROp.Copy, grown, four, -1, -1, a.line)
+    ir_end(a.f, a.line)
+    _: ir_map_call(m, p, a, set_row, "map.rebuild", [Int]{set, grown}, -1)
+    ir_end(a.f, a.line)
+}
+
+// An empty header of the Set type row `set_row`; a Rank's takes `like`'s
+// order, whose function value gains it as an owner.
+ir_set_empty_like: fn(m: &IRModule, b: &IRBuilder, set_row: Int, like: Int) -> Int Never! {
+    target: ir_list_empty(m, b, set_row)
+    if !ir_rank_type(m.types[set_row].ty) -> return target
+    order: ir_load_word(m, b, like, 24)
+    zero: ir_word_const(m, b, 0)
+    keyed: ir_bool_op(m, b, IROp.Ne, order, zero)
+    ir_open_if(b.f, keyed, b.line)
+    _: ir_runtime(m, b, "jet_rt_native_closure_retain", [Int]{order}, -1)
+    ir_emit(b.f, IROp.Store, -1, target, 24, order, b.line)
+    ir_end(b.f, b.line)
+    target
 }
 
 // The id of Set helper `name` of the Set type row `set_row`, built on first use.
@@ -42,6 +192,7 @@ ir_set_helper: fn(m: &IRModule, p: IRProgram, set_row: Int, name: String) -> Int
             if ir_map_hashed(shape) {
                 ir_map_probe_body(m, p, a, shape, set, probe_key)
             } else {
+                if ir_rank_type(m.types[set_row].ty) -> ir_set_keyed_find(m, p, a, shape, set, probe_key)
                 ir_map_find_body(m, p, a, shape, set, probe_key)
             }
         } else if name == "set.insert" {
@@ -68,8 +219,9 @@ ir_set_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, set_row: Int, name: S
 
 // Moves the key in and returns true; a key already present keeps its entry,
 // drops the offered one and returns false (map.set with a Unit value). A
-// hashed Set appends the key, out of order until a rebuild merges it in;
-// any other inserts it at its insertion point.
+// hashed Set appends the key, out of order until a rebuild merges it in,
+// and a hashed Rank under a key order places it (ir_set_keyed_place); any
+// other inserts it at its insertion point.
 ir_set_insert_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapShape, set_row: Int, set: Int, key: Int) Never! {
     bool_row: ir_type_row(m, Type.Bool) ?? 0
     a.f.result = bool_row
@@ -83,18 +235,14 @@ ir_set_insert_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapSh
     ir_emit(a.f, IROp.Return, -1, kept, -1, -1, a.line)
     ir_end(a.f, a.line)
     if ir_map_hashed(shape) {
+        if ir_rank_type(m.types[set_row].ty) {
+            rank_order: ir_heap_order(m, a, set)
+            ir_open_if(a.f, rank_order.keyed, a.line)
+            ir_set_keyed_place(m, p, a, shape, set_row, set, key, rank_order.order)
+            ir_end(a.f, a.line)
+        }
         length: ir_load_word(m, a, set, 0)
-        capacity: ir_load_word(m, a, set, 8)
-        full: ir_bool_op(m, a, IROp.Ge, length, capacity)
-        ir_open_if(a.f, full, a.line)
-        grown: ir_word_op(m, a, IROp.Add, length, length)
-        four: ir_word_const(m, a, 4)
-        small: ir_bool_op(m, a, IROp.Lt, grown, four)
-        ir_open_if(a.f, small, a.line)
-        ir_emit(a.f, IROp.Copy, grown, four, -1, -1, a.line)
-        ir_end(a.f, a.line)
-        _: ir_map_call(m, p, a, set_row, "map.rebuild", [Int]{set, grown}, -1)
-        ir_end(a.f, a.line)
+        ir_set_hashed_room(m, p, a, set_row, set, length)
         hash: ir_map_tag(m, a, shape, key)
         room: ir_load_word(m, a, set, 16)
         room_capacity: ir_load_word(m, a, set, 8)
@@ -194,8 +342,9 @@ ir_set_take_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapShap
 }
 
 // Equal lengths and the same key at every position of the ascending entries;
-// for a hashed Set, whose entries are not in key order, each left key held
-// by the right Set.
+// for a hashed Set, whose entries are not in key order, or when either Rank
+// has a key order (equality ignores the orders), each left key held by the
+// right Set.
 ir_set_equal_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapShape, set_row: Int, left: Int, right: Int) Never! {
     bool_row: ir_type_row(m, Type.Bool) ?? 0
     a.f.result = bool_row
@@ -220,6 +369,26 @@ ir_set_equal_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapSha
         held: ir_int_constant(m, a, bool_row, 1)
         ir_emit(a.f, IROp.Return, -1, held, -1, -1, a.line)
         return
+    }
+    if ir_rank_type(m.types[set_row].ty) {
+        left_order: ir_load_word(m, a, left, 24)
+        right_order: ir_load_word(m, a, right, 24)
+        orders: ir_word_op(m, a, IROp.BitOr, left_order, right_order)
+        zero: ir_word_const(m, a, 0)
+        keyed: ir_bool_op(m, a, IROp.Ne, orders, zero)
+        ir_open_if(a.f, keyed, a.line)
+        word_row: ir_word_row(m)
+        member: ir_walk_open(m, a, left, shape.entry)
+        found: ir_set_call(m, p, a, set_row, "set.find", [Int]{right, member.item}, word_row)
+        absent: ir_bool_op(m, a, IROp.Lt, found, zero)
+        ir_open_if(a.f, absent, a.line)
+        missing: ir_int_constant(m, a, bool_row, 0)
+        ir_emit(a.f, IROp.Return, -1, missing, -1, -1, a.line)
+        ir_end(a.f, a.line)
+        ir_walk_close(m, a, member)
+        held: ir_int_constant(m, a, bool_row, 1)
+        ir_emit(a.f, IROp.Return, -1, held, -1, -1, a.line)
+        ir_end(a.f, a.line)
     }
     right_data: ir_load_word(m, a, right, 16)
     walk: ir_walk_open(m, a, left, shape.entry)
@@ -306,7 +475,9 @@ ir_set_new: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, inputs: [Int], result:
 // later duplicates dropped. A fresh List gives its elements up, from a
 // buffer of its own, which is then retired (ir_list_retire); any other's
 // are copied. An Iter is drained into a List first, as Iter.to_list is.
-ir_set_from: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, source: Int, span: Span) -> Int Never! {
+// `order` (-1: the native order) is a Rank's fresh key order, which the new
+// header owns (Rank.from_by).
+ir_set_from: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, source: Int, order: Int, span: Span) -> Int Never! {
     set_row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
     shape: ir_set_shape(m, p, set_row) ?? return ir_fail_slot(b, span, "Set construction of {ir_type_name(ty)}")
     elem: shape.entry_ty
@@ -323,6 +494,7 @@ ir_set_from: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, source: Int
     }
     if moved -> ir_make_unique(m, p, b, list)
     set: ir_list_empty(m, b, set_row)
+    if order >= 0 -> ir_emit(b.f, IROp.Store, -1, set, 24, order, b.line)
     bool_row: ir_type_row(m, Type.Bool) ?? 0
     walk: ir_walk_open(m, b, list, shape.key.ty)
     key: if moved -> walk.item else -> ir_copy_value(m, p, b, walk.item, span)
@@ -374,7 +546,7 @@ ir_set_builtin: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, route: S
     symbol: ir_set_symbol(route)
     if symbol == "jet_set_from" || symbol == "jet_iter_to_set" {
         if operands.len() != 1 -> return None
-        return Val(ir_set_from(m, p, b, ty, subject, span))
+        return Val(ir_set_from(m, p, b, ty, subject, -1, span))
     }
     set_row: b.f.slot_type[subject]
     shape: ir_set_shape(m, p, set_row) ?? return None
@@ -430,6 +602,7 @@ ir_set_builtin: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, route: S
     // `other` inserted; `intersection(other)` (`difference(other)`) a new Set
     // of copies of the receiver's keys `other` holds (lacks), in the
     // receiver's order; `symmetric_difference(other)` the difference both ways.
+    // A Rank result keeps the receiver's order.
     if symbol == "jet_set_union" || symbol == "jet_set_intersection" || symbol == "jet_set_difference" || symbol == "jet_set_symmetric_difference" {
         if operands.len() != 2 || operands[1] < 0 -> return Val(ir_fail_slot(b, span, "Set {route} without an operand"))
         other: ir_adapt(m, p, b, operands[1], set_row, span)
@@ -446,7 +619,7 @@ ir_set_builtin: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, route: S
             b.fresh[key] = false
             ir_walk_close(m, b, walk)
         } else {
-            target = ir_list_empty(m, b, set_row)
+            target = ir_set_empty_like(m, b, set_row, subject)
             ir_set_keep_keys(m, p, b, set_row, shape, subject, other, target, symbol == "jet_set_intersection", span)
             if symbol == "jet_set_symmetric_difference" -> ir_set_keep_keys(m, p, b, set_row, shape, other, subject, target, false, span)
         }

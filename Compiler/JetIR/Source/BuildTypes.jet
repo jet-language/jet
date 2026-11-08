@@ -338,10 +338,12 @@ ir_value_type_laid: fn(m: &IRModule, p: IRProgram, ty: Type, laying: [String]) -
     }
     if ir_set_element(ty) == .Val(element) {
         // The ordered Map<T, Unit> header: len at 0, cap at 8, entry data at
-        // 16; its element is a map key.
+        // 16; its element is a map key. A Rank's adds its order word at 24
+        // (BuildSets.jet).
         key: ir_value_type_in(m, p, element, laying) ?? return None
         if ir_map_key_kind(m, key) == "" -> return None
-        interned: ir_intern_type(m, type_carrier_identity(ty), ir_layout(IRTypeKind.Aggregate, ty, 24, 8, IRClass.Pointer, false, 64, ""))
+        size: if ir_rank_type(ty) -> 32 else -> 24
+        interned: ir_intern_type(m, type_carrier_identity(ty), ir_layout(IRTypeKind.Aggregate, ty, size, 8, IRClass.Pointer, false, 64, ""))
         return Val(ir_mark_counted(m, interned))
     }
     if ir_priority_queue_element(ty) == .Val(element) {

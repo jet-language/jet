@@ -25,9 +25,11 @@ ir_priority_queue_element: fn(ty: Type) -> Type? Never! {
     None
 }
 
-// Whether the counted header row `row` carries an order word at 24.
+// Whether the counted header row `row` carries an order word at 24: a
+// PriorityQueue's or a Rank's.
 ir_ordered_header: fn(m: IRModule, row: Int) -> Bool Never! {
-    ir_priority_queue_element(m.types[row].ty) != None
+    ty: m.types[row].ty
+    ir_priority_queue_element(ty) != None || ir_rank_type(ty)
 }
 
 // The element row of the PriorityQueue type row `heap_row`.
@@ -467,13 +469,23 @@ ir_heap_native_open: fn(m: &IRModule, b: &IRBuilder, heap: Int, elem_row: Int) -
 // `PriorityQueue.by(key)` / `by_desc(key)` and `Rank`'s (`from`: the
 // `from_by(xs, key)` forms, `subject` the source List and `operands[1]` the
 // key): an empty header, or the source's elements, under the key order of
-// `key` (ir_key_order). A source sorts into pop order stably, so equal keys
-// keep their input order.
+// `key` (ir_key_order). A queue's source sorts into pop order stably, so
+// equal keys keep their input order; a Rank's source elements are inserted
+// in order, later duplicates dropped.
 ir_key_ordered: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, descending: Bool, from: Bool, subject: Int, operands: [Int], span: Span) -> Int Never! {
     header_row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
-    elem_row: ir_priority_queue_row(m, p, header_row) ?? return ir_fail_slot(b, span, "key-ordered construction of {ir_type_name(ty)}")
     if from && (operands.len() != 2 || operands[1] < 0) -> return ir_fail_slot(b, span, "from_by without a key")
     key: if from -> operands[1] else -> subject
+    if ir_rank_type(ty) {
+        shape: ir_set_shape(m, p, header_row) ?? return ir_fail_slot(b, span, "key-ordered construction of {ir_type_name(ty)}")
+        rank_order: ir_key_order(m, p, b, key, shape.key.ty, descending, span)
+        if ir_failed(b) -> return -1
+        if from -> return ir_set_from(m, p, b, ty, subject, rank_order, span)
+        rank: ir_list_empty(m, b, header_row)
+        ir_emit(b.f, IROp.Store, -1, rank, 24, rank_order, b.line)
+        return rank
+    }
+    elem_row: ir_priority_queue_row(m, p, header_row) ?? return ir_fail_slot(b, span, "key-ordered construction of {ir_type_name(ty)}")
     order: ir_key_order(m, p, b, key, elem_row, descending, span)
     if ir_failed(b) -> return -1
     header := -1
