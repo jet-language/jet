@@ -783,17 +783,18 @@ scheduler_yield_policy: fn(wait_kind: I64, slot: I64, timeout_ns: I64, deadline:
     jet_scheduler_native_propagate()
 }
 
-// Scheduler200: lock0 FIFOhead8/tail16 workSeq24 watch32 live40 parked48
+// Scheduler208: lock0 FIFOhead8/tail16 workSeq24 watch32 live40 parked48
 // fibers56 pooled64 pool72 completionLo80/Hi88 nextTask96 timerRoot104
 // poolSize112 idle120 carriers128 fiberTimers136 stop144 started152
-// woken160 readyHead168 readyTail176 stackBytes184 gsMode192. lock is a
-// thread lock (Sync.jet sync_thread_lock): a fiber's wake takes it. The FIFO
-// holds submitted task states (linked through their reserved word @88);
-// ready holds fibers to resume (Fiber.jet). live counts tasks taken and not
-// finished, parked their parked fibers, fibers the fiber stacks mapped and
-// pooled (pool, linked through Fiber next@48) the idle ones. carriers is a
-// word list (scheduler_words) of Carrier32 records {argument0 handle8
-// save16 tcb24}, changed only under the lock; every carrier stays joinable
+// woken160 readyHead168 readyTail176 stackBytes184 gsMode192 fiberSpace200.
+// lock is a thread lock (Sync.jet sync_thread_lock): a fiber's wake takes it.
+// The FIFO holds submitted task states (linked through their reserved word
+// @88); ready holds fibers to resume (Fiber.jet). live counts tasks taken and
+// not finished, parked their parked fibers, fibers the fiber stacks mapped,
+// pooled (pool, linked through Fiber next@48) the idle ones and fiberSpace
+// the bytes the fiber stacks may still map (Fiber.jet fiber_space_take).
+// carriers is a word list (scheduler_words) of Carrier32 records {argument0
+// handle8 save16 tcb24}, changed only under the lock; every carrier stays joinable
 // so jet_rt_scheduler_shutdown can join it. The poolSize carriers start one
 // at a time, on demand: a submit starts one only when no idle carrier is left
 // to wake (idle - woken), so a process that submits a few tasks starts a few
@@ -802,7 +803,7 @@ scheduler_yield_policy: fn(wait_kind: I64, slot: I64, timeout_ns: I64, deadline:
 // counts the carriers started. watch is the deadline the one idle carrier
 // watching the fiber timers sleeps to (0: none watches).
 scheduler_root := I64{0}
-SCHEDULER_ROOT_BYTES: I64{200}
+SCHEDULER_ROOT_BYTES: I64{208}
 
 // runtime-init: 3 when scheduler_root
 #Export(c) jet_rt_scheduler_init: fn() {
@@ -1062,8 +1063,8 @@ scheduler_carrier_idle: fn(root: I64) {
             jet_rt_observe_pool(I64{-1}, I64{-1})
             fiber = fiber_take(root)
             if (fiber == I64{0}) {
-                // No stack could be mapped: the job runs on the carrier,
-                // whose waits then block it.
+                // No stack could be mapped, or the fiber stacks' space is
+                // spent: the job runs on the carrier, whose waits then block it.
                 scheduler_run_job(task)
                 sync_thread_lock(root)
                 sync_store(wrapping(root + I64{40}), sync_load(wrapping(root + I64{40})) - I64{1})

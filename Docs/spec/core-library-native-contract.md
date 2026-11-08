@@ -548,7 +548,11 @@ where touched, under a guard page; its header and TCB share the top page, so
 a task parked in a shallow wait holds about one page beside its task record.
 Each stack is two kernel mappings, so `vm.max_map_count` (65530 by default)
 bounds live fibers near 32000; a task that finds no stack runs on its carrier
-and its waits block that thread. A task's CPU clock (`jet_rt_task_cpu_ns`)
+and its waits block that thread. Under a finite address-space limit
+(`RLIMIT_AS`) no thread or fiber stack reserves more than a hundredth of it
+and the fiber stacks together at most a quarter, so the stacks leave the
+heap its room; a task past that quarter runs on its carrier as well. A
+task's CPU clock (`jet_rt_task_cpu_ns`)
 is its fiber's run time summed over the carriers that ran it, and its
 identity (`jet_rt_task_identity`) is its fiber's, so a trace keyed by task
 stays whole across parks; on a plain thread both are the thread's.

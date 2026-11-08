@@ -390,27 +390,46 @@ rt_thread_entry_address: fn() -> I64 {
     result
 }
 
+// The soft limit of rlimit `resource`; -1 when it has none (RLIM_INFINITY
+// reads as -1), the call fails, or a comptime child asks (no host probe).
+thread_rlimit_soft: fn(resource: I64) -> I64 {
+    scratch: jet_rt_alloc(I64{16}, I64{8})
+    thread_zero(scratch, I64{16})
+    status := I64{-1}
+    #Unsafe("getrlimit writes its two-word record into the owned 16-byte scratch and retains no pointer") {
+        status = if comptime_serving() -> I64{-1} else -> os_syscall_i64(I64{97}, resource, scratch, I64{0}, I64{0}, I64{0}, I64{0})
+    }
+    soft: sync_load(scratch)
+    jet_rt_free(scratch, I64{16}, I64{8})
+    if (status != I64{0}) -> return I64{-1}
+    soft
+}
+
 // Rust scheduler worker stack: CompilerStack::COMPILER_STACK_SIZE = 192 MiB.
 // A larger soft RLIMIT_STACK (the native compiler stages run under prlimit,
 // since O0 frames are larger than Rust's) also sizes every runtime thread, so
 // work moved onto a scheduler worker gets the main thread's recursion budget.
 // RLIM_INFINITY, failures and a comptime child (no host probe) keep 192 MiB; capped at 8 GiB.
+// Under a finite RLIMIT_AS (a memory_limit, a capped check) no stack takes
+// more than a THREAD_STACK_SPACE_SHARE-th of the address space (at least
+// THREAD_STACK_FLOOR), so the carriers' and fibers' stacks leave the heap its
+// room, which one RLIMIT_STACK-sized stack per thread and fiber would not.
 thread_stack_bytes: fn() -> I64 {
-    scratch: jet_rt_alloc(I64{16}, I64{8})
-    thread_zero(scratch, I64{16})
-    status := I64{-1}
-    #Unsafe("getrlimit(RLIMIT_STACK) writes its two-word record into the owned 16-byte scratch and retains no pointer") {
-        status = if comptime_serving() -> I64{-1} else -> os_syscall_i64(I64{97}, I64{3}, scratch, I64{0}, I64{0}, I64{0}, I64{0})
+    soft: thread_rlimit_soft(I64{3})
+    bytes := if (soft <= I64{201326592}) -> I64{201326592} else if (soft > I64{8589934592}) -> I64{8589934592} else -> soft
+    space: thread_rlimit_soft(I64{9})
+    if (space > I64{0}) {
+        share: (space / THREAD_STACK_SPACE_SHARE).bit_and(I64{-4096})
+        if share < bytes -> bytes = if share > THREAD_STACK_FLOOR -> share else -> THREAD_STACK_FLOOR
     }
-    soft: sync_load(scratch)
-    jet_rt_free(scratch, I64{16}, I64{8})
-    if (status != I64{0} || soft <= I64{201326592}) { return I64{201326592} }
-    if (soft > I64{8589934592}) { return I64{8589934592} }
-    soft
+    bytes
 }
 
 // The smallest stack thread_spawn falls back to.
 THREAD_STACK_FLOOR: I64{1048576}
+// Under a finite RLIMIT_AS a stack takes at most a hundredth of it: 204 MiB
+// of a 20 GiB cap, as much as an uncapped thread's 192 MiB.
+THREAD_STACK_SPACE_SHARE: I64{100}
 
 // musl pthread_attr_t is 56 bytes on x86-64; 64-byte storage is conservative.
 // Returns pthread_t on success, negative pthread errno on failure. A stack
