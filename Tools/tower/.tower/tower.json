@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6686,
-    "rev": 96060,
+    "rev": 96063,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -64253,11 +64253,12 @@
         {
           "n": 16,
           "text": "Script startup beats Lua: on one host, the same-run median of a warm jet run hello.jet (cache hit) and of jet run after an edit are each below lua 5.4 hello.lua. Baseline on dev c865bb06 (Main, 2026-11-04): lua 1.5-2.2 ms; jet warm 6.9-8.6 ms; jet after an edit 21-29 ms. Owner rule (2026-11-04): if Jet gets close but beating Lua proves extremely hard, record the measured ratios and the remaining root, and move this criterion to Speed and size (#6328, beside c18 against LuaJIT) instead of holding the scripting goal open.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T20:30:36.989Z"
+          "evidence": "Moved to #6328 c21 by owner order 2026-11-08 (Main). The startup race against Lua belongs to Speed and size, beside #6328 c18 (LuaJIT); #5949 keeps its permission criteria.",
+          "at": "2026-11-08T11:12:54.601Z",
+          "closure": "duplicate"
         },
         {
           "n": 17,
@@ -64319,7 +64320,7 @@
       "parentId": "c0svnelx",
       "needsAcceptance": false,
       "created": "2026-10-28T10:49:58.414Z",
-      "updated": "2026-11-08T10:40:19.393Z",
+      "updated": "2026-11-08T11:12:54.601Z",
       "updatedBy": "Main",
       "goals": [
         "G4"
@@ -80764,6 +80765,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-08",
+          "by": "Main",
+          "text": "Main 2026-11-08 06:45 startup census (a0_037, x86-64 Linux, hyperfine -N; the machine was loaded by a running release, so these are min/median of 60 runs, cold 15): hand-written static ELF hello (write+exit, 182 B) 0.140/0.155 ms; Jet AOT hello binary (jet build, 37,504 B) 0.155/0.175 ms, within ~13% of the ceiling; luajit 0.547/0.582; lua 5.4 0.707/0.751; `jet --version` (exec of the 95.9 MB jet binary) 0.463/0.492; `jet run hello.jet` warm (kept-program cache hit) 8.87/9.57 ms (user 3.9, sys 5.6); cold (no cache or store at all) 17.5/17.8 ms (user 9.9, sys 8.7). strace -c: warm makes 2,255 syscalls (519 statx, 125 getdents64, 268 openat, 440 close: the toolchain and Core source scan to compute the keep key) plus thread-pool futex waits; cold makes 2,999 (501 futex across the parallel compile threads). So the program and runtime startup are at the ceiling, and the whole gap is the jet run front end: the toolchain and Core scan, the thread pool for a tiny program, re-processing Core and Prelude every run (most of the cold 9.9 ms user), and the compiler throughput gap (#6527 phases 3.9x over budget in total). Physical floor for running from source with no cache: one exec (about 0.15 ms) plus a compile of the user code only, against a Core/Prelude shipped precompiled inside the jet binary (an immutable toolchain artifact, not a cache) at about tens of us for hello, plus the in-process run (about 0.02 ms): about 0.2-0.3 ms, below luajit 0.58 and lua 0.75."
+        },
+        {
           "at": "2026-11-04",
           "by": "Main",
           "text": "Held-work citation moved into the repo (#6563 c2, landed 446b49726a; see Tools/tower/held/README.md). The scratch patches wave/34/in/DeclTypes-32*.patch are already on dev (both reverse-apply) and are not held."
@@ -81104,6 +81110,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-10-31T01:27:05.078Z"
+        },
+        {
+          "n": 21,
+          "text": "(was #5949 c16) Script startup beats Lua: on one host, the same-run median of `jet run hello.jet` and of `jet run` after an edit are each below lua 5.4 hello.lua, by design rather than by reusing a kept program or incremental state (owner 2026-11-08: do not rely on incremental compilation or caching to win; the final target is the hand-written machine-code ceiling). Baselines in the #6328 log, 2026-11-08.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T11:12:43.152Z"
         }
       ],
       "refs": [],
@@ -81114,8 +81129,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T16:05:34.496Z",
-      "updated": "2026-11-07T03:23:00.178Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-08T11:12:55.780Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 21
     },
     {
       "id": "c0l7lwif",
@@ -188246,6 +188262,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-08T11:12:55.780Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c08r6ogl",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-08T11:12:54.601Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0wi8ere",
+      "note": "#16"
+    },
+    {
+      "at": "2026-11-08T11:12:43.152Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c08r6ogl",
+      "note": "#21 (was #5949 c16) Script startup beats Lua: on one host, the s"
+    },
     {
       "at": "2026-11-08T11:04:51.808Z",
       "by": "Main",
