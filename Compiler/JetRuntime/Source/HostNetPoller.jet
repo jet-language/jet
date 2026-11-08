@@ -172,10 +172,15 @@ net_waiter_remove: fn(root: I64, waiter: I64) {
     // FD lock acquisition happens only AFTER the root mutex is released.
     jet_fd_drop_raw(state)
 }
-#Export(c) jet_socket_ready_raw: fn(state: I64, interest: I64, timeout_ns: I64, error: I64) -> I64 {
+#Export(c) jet_socket_ready_raw: fn(state: I64, interest: I64, timeout_ns: I64, error: I64) -> I64 { host_net_ready(state, interest, timeout_ns, host_net_wait_kind(), error) }
+// Wait until `state` is ready for `interest`; `wait_kind` (owned, dropped
+// here) names the wait to the scheduler, the observation and an E3003.
+host_net_ready: fn(state: I64, interest: I64, timeout_ns: I64, wait_kind: I64, error: I64) -> I64 {
     jet_rt_world_reject_uncontrolled(I64{1})
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
-    wait_kind: host_net_wait_kind()
+    if (jet_scheduler_native_propagate() != I64{0}) {
+        jet_rt_string_drop(wait_kind)
+        return I64{0}
+    }
     if (scheduler_wait_point_cancel_check() != I64{0} || scheduler_deadline_check(wait_kind) != I64{0}) {
         jet_rt_string_drop(wait_kind)
         return I64{0}

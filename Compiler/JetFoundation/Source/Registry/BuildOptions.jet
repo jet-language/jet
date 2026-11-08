@@ -183,7 +183,9 @@ BuildSettingOverride: struct {
 // non-stock value in layer order, so a `build: fn` layer can still go under the
 // flags; `values` is the resolved value of each row, in table order.
 // `settings` are the `--set` writers in argv order; `gates` the audited gates
-// `--gate name=allow` opens for the compile, in argv order.
+// `--gate name=allow` opens for the compile, in argv order. `observe` is
+// `jet run --observe`: the program links the runtime's observation start and
+// runs with JET_OBSERVE=1.
 BuildOptions: struct {
     command: String
     profile: String
@@ -191,6 +193,7 @@ BuildOptions: struct {
     values: [BuildOptionChoice]
     settings: [BuildSettingOverride]{[BuildSettingOverride]{}}
     gates: [PolicyKey]{[PolicyKey]{}}
+    observe: Bool{false}
 }
 
 BuildOptionsResolved: enum {
@@ -360,13 +363,14 @@ JET_BUILD_OPTIONS_UNKEYED: [String]{"output_dir", "action_timeout"}
 JET_BUILD_DEFAULT_PROFILE: "dev"
 
 // The options' identity in a cache key: the profile, then each resolved row
-// that shapes the image, then each `--set` setting value.
+// that shapes the image, then each `--set` setting value, then `observe`.
 build_options_key: fn(options: BuildOptions) -> String Never! {
     out := if options.profile == "" -> JET_BUILD_DEFAULT_PROFILE else -> options.profile
     loop choice in options.values {
         if !JET_BUILD_OPTIONS_UNKEYED.contains(choice.name) -> out = "{out};{choice.name}={choice.value}"
     }
     loop setting in options.settings -> out = "{out};set.{setting.name}={setting.value}"
+    if options.observe -> out = "{out};observe"
     out
 }
 

@@ -506,7 +506,8 @@ observe_env_key: fn(index: I64) -> I64 {
 // The observation start jet_rt_main runs before the entry.
 // Its hook is kept only in a program that links something to observe: a
 // task (Observe.jet observe_task_linked), a channel, a live value or an
-// event (the snapshot's section code words). Any other program links no
+// event (the snapshot's section code words), or one built by
+// `jet run --observe` (jet_rt_observe_link). Any other program links no
 // writer, no thread spawn and no environment read for it.
 observe_start_code := I64{0}
 
@@ -515,6 +516,13 @@ observe_start_code := I64{0}
     #Unsafe("runtime-init runs before any other thread exists") {
         observe_start_code = rt_observe_start_address()
     }
+}
+
+// A `jet run --observe` build's entry calls this first (JetIR
+// ir_observe_link): the call is the link's reason to keep the observation
+// start, so a program with nothing else to observe still publishes its run.
+#Export(c) jet_rt_observe_link: fn() -> I64 {
+    observe_task_linked
 }
 
 // jet_rt_observe_runtime_start_from_env as a code word's target. Returns

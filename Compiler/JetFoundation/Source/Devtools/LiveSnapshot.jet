@@ -171,7 +171,7 @@ jet_live_decode: fn(bytes: [U8]) -> JetLiveSnapshot JetLiveSnapshotError! {
                     effects["waiting"] = (effects.get("waiting") ?? 0) + 1
                     if jet_live_starts(wait_raw, "channel ") -> effects["channel"] = (effects.get("channel") ?? 0) + 1
                     if jet_live_starts(wait_raw, "time ") -> effects["time"] = (effects.get("time") ?? 0) + 1
-                    if jet_live_contains(wait_raw, "tcp") || jet_live_contains(wait_raw, "network") || jet_live_starts(wait_raw, "io ") -> effects["io"] = (effects.get("io") ?? 0) + 1
+                    if jet_live_contains(wait_raw, "tcp") || jet_live_contains(wait_raw, "network") || jet_live_starts(wait_raw, "udp ") || jet_live_starts(wait_raw, "unix ") || jet_live_starts(wait_raw, "io ") -> effects["io"] = (effects.get("io") ?? 0) + 1
                 }
                 if task_cancelled -> cancelled += 1
                 if state_word == (U64{1}) -> running += 1

@@ -3671,7 +3671,8 @@ a source-call match alone is not a runtime observation. The observation writer
 bounds event history and does not include channel values, task locals,
 environment, or credentials. Observation is pay-for-use (D-SIZE-PAYUSE1): a
 program built without tasks, channels, live values or events links no writer,
-so `JET_OBSERVE=1` publishes nothing for it. The executable
+so `JET_OBSERVE=1` publishes nothing for it; `jet run --observe` links the
+writer into any program and runs it with `JET_OBSERVE=1`. The executable
 event example is covered by
 [`Compiler/JetLSP/Tests/Integration`](../../Compiler/JetLSP/Tests/Integration/) (`Canvas*.jet`) and the public API by
 [`Core/Event/Event.jet`](../../Core/Event/Event.jet). (D-OBSERVE-LIVE1, D-OBSERVE-TASK1)

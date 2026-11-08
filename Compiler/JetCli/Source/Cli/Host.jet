@@ -1021,6 +1021,7 @@ jet_cli_native_program: fn(result: JetDriverCompileResult, inputs: &&JetDriverLo
     checked := inputs.move()
     checks := jet_cli_ir_checks(result, checked, options)
     checks.checked_alloc = jet_cli_checked_alloc(options)
+    checks.observe = options.observe
     declarations := jet_driver_checked_declarations(checked)
     // The program's C closure defines its foreign functions' symbols. An
     // `extern rust` function is called through the slot descriptor its helper
@@ -1592,6 +1593,7 @@ jet_cli_launch_plan: fn(file: String, program_args: [String], options: BuildOpti
         if choice.layer == BuildOptionLayer.Flag -> relaunch.push(choice.written)
     }
     loop setting in options.settings -> relaunch.push("--set={setting.name}={setting.value}")
+    if options.observe -> relaunch.push("--observe")
     loop key in options.gates -> relaunch.push("--gate={policy_key_name(key)}=allow")
     if invocation == .Val(rows) {
         if rows.all -> relaunch.push("-A")
@@ -1599,6 +1601,26 @@ jet_cli_launch_plan: fn(file: String, program_args: [String], options: BuildOpti
         if rows.deny.len() > 0 -> relaunch.push("--deny={rows.deny.join(",")}")
     }
     X64Launch{argv: argv, env: jet_cli_launch_env(vars), executable: executable, name: jet_cli_stem(file), relaunch: relaunch, parent_death: true}
+}
+
+// The environment of an observed run (`jet run --observe`, `jet perf test`):
+// JET_OBSERVE=1 and each of the five identity fields its runtime publishes
+// under (ObserveLive.jet jet_rt_observe_runtime_start_from_env) that jet's
+// own environment leaves unset: this run's session, `source`, and the
+// `runtime` build and revision of the `game` world.
+jet_cli_observe_env: fn(source: String) -> [JetCLIEnvVar] {
+    vars := [JetCLIEnvVar]{JetCLIEnvVar{name: "JET_OBSERVE", value: "1"}}
+    identity: [JetCLIEnvVar]{
+        JetCLIEnvVar{name: "JET_DEVTOOLS_RELAY_SESSION_ID", value: "jet-observe-{cli_process.current_pid()}-{cli_time.unix_ns()}"},
+        JetCLIEnvVar{name: "JET_DEVTOOLS_RELAY_SOURCE_ID", value: source},
+        JetCLIEnvVar{name: "JET_DEVTOOLS_RELAY_BUILD_ID", value: "runtime"},
+        JetCLIEnvVar{name: "JET_DEVTOOLS_RELAY_REVISION", value: "runtime"},
+        JetCLIEnvVar{name: "JET_DEVTOOLS_RELAY_WORLD_ID", value: "game"},
+    }
+    loop field in identity {
+        if (cli_sys.get(field.name) ?? "") == "" -> vars.push(field.copy())
+    }
+    vars
 }
 
 #Import(c) jet_cli_scheduler_shutdown: fn() -> I64 = "jet_rt_scheduler_shutdown"
@@ -1635,13 +1657,17 @@ JetCLIRunStep: enum {
 }
 
 // Finish `step` on this thread: run its program (jet_cli_launch) with the
-// environment that lets it write a production-failure receipt, else return
-// its output.
+// environment that lets it write a production-failure receipt, and under
+// `--observe` publish its run (jet_cli_observe_env), else return its output.
 jet_cli_run_step: fn(step: &&JetCLIRunStep) -> JetDriverVerbOutput {
     if step.move() == {
         .Output(output) -> output
         .Launch(executable, file, binary, program_args, options, invocation, verbose, color) -> {
-            vars: jet_cli_production_receipt_env(file, program_args)
+            vars := jet_cli_production_receipt_env(file, program_args)
+            if options.observe {
+                // copy: the observed run's fields join the receipt's.
+                loop field in jet_cli_observe_env(file) -> vars.push(field.copy())
+            }
             jet_cli_launch(executable, file, binary, program_args, options, invocation, vars, verbose, color)
         }
     }

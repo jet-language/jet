@@ -331,7 +331,7 @@ net_route_connect_one: fn(address: I64, output: I64, error: I64) -> I64 {
     thread_zero(scratch, I64{40})
     state: net_route_connect_start(address, scratch)
     if (state != I64{0} && net_word(scratch, I64{8}) == I64{115}) {
-        _ := jet_socket_ready_raw(state, I64{4}, I64{-1}, scratch)
+        _ := host_net_ready(state, I64{4}, I64{-1}, jet_rt_string_clone(operation), scratch)
         if net_route_wait_stop(operation, error) {
             jet_fd_drop_raw(state)
             jet_rt_free(scratch, I64{40}, I64{8})

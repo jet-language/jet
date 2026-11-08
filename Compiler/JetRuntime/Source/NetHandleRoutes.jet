@@ -31,7 +31,8 @@ net_tcp_wait: fn(state: I64, interest: I64, operation: I64, scratch: I64, error:
     remaining: if jet_ctx_deadline_present() -> jet_deadline_remaining_ms() else -> I64{-1}
     if (jet_ctx_deadline_present() && remaining <= I64{0}) -> return net_route_timeout(operation, error)
     timeout: if (remaining < I64{0}) -> I64{-1} else if (remaining > I64{9223372036854}) -> I64{9223372036854775807} else -> remaining * I64{1000000}
-    ready: jet_socket_ready_raw(state, interest, timeout, scratch)
+    // The wait is named by its operation (`tcp accept`, `udp receive`, …).
+    ready: host_net_ready(state, interest, timeout, jet_rt_string_clone(operation), scratch)
     if net_route_wait_stop(operation, error) -> return I64{0}
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     if (ready < I64{0}) -> return net_route_errno(operation, I64{0}, net_word(scratch, I64{8}), error)
