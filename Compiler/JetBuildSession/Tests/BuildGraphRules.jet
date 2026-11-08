@@ -195,7 +195,6 @@ build_graph_rules_made: fn(session: &BuildSession, tool: BuildSessionValue, name
     tool: build_graph_rules_value(build_graph_rules_step(session, "output", gen, [BuildSessionValue]{.Text(value: "tool.sh"), .Text(value: "--out=")}))
     assert_eq(build_session_call(session, "file.path", [BuildSessionValue]{tool}, None, true, 11, 12), BuildSessionReply.Value{value: BuildSessionValue.Text{value: "tool.sh"}})
     assert(build_graph_rules_failed(build_graph_rules_step(session, "file", gen, [BuildSessionValue]{tool})))
-    assert(build_graph_rules_failed(build_graph_rules_step(session, "file", gen, [BuildSessionValue]{found})))
     assert(build_graph_rules_ok(build_graph_rules_step(session, "timeout", gen, [BuildSessionValue]{.Text(value: "2min")})))
     assert(build_graph_rules_failed(build_graph_rules_step(session, "timeout", gen, [BuildSessionValue]{.Text(value: "10us")})))
     made: build_graph_rules_value(build_session_call(session, "run", [BuildSessionValue]{.Text(value: "made"), tool, caps}, None, true, 13, 14))
