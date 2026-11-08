@@ -890,9 +890,169 @@ spawn_stream_io: fn(child: I64, stream: I64, bytes: I64, length: I64, number: I6
     _ := fd_error(result, error)
 }
 
-// Mechanical libc OS floor, ledgered like the resolver. realpath writes into
-// caller-owned Jet memory, never libc malloc, so allocator domains cannot mix.
-#Import(c) process_realpath: fn(path: I64, buffer: I64) -> I64 = "realpath"
+// musl's realpath(path, resolved): each component is moved from a stack of
+// remaining path text to the output, and a symlink's contents are pushed
+// back onto that stack (at most 40 links), all without libc. `output` is
+// PATH_MAX (4096) bytes; the result is NUL-terminated there. 0 on success,
+// else the errno. Plain readlink and getcwd system calls: like the libc call
+// they replace, they bypass `jet test`'s read recorder.
+process_realpath: fn(path: I64, output: I64) -> I64 {
+    length := I64{0}
+    loop length < (I64{4097}) && rt_text_byte(wrapping(path + length)) != (I64{0}) -> length += I64{1}
+    if (length == I64{0}) -> return I64{2}
+    if (length >= I64{4096}) -> return I64{36}
+    // stack: 4097 bytes, then one dummy byte for a zero-capacity readlink.
+    stack: jet_rt_alloc(I64{4098}, I64{1})
+    result: process_realpath_resolve(path, length, stack, output)
+    jet_rt_free(stack, I64{4098}, I64{1})
+    result
+}
+
+process_realpath_resolve: fn(path: I64, length: I64, stack: I64, output: I64) -> I64 {
+    p := I64{4096} - length
+    q := I64{0}
+    links := I64{0}
+    up_count := I64{0}
+    check_dir := I64{0}
+    rt_text_bytes_copy(wrapping(stack + p), path, length + I64{1})
+    loop {
+        if (process_byte(stack, p) == I64{47}) {
+            // The whole component is / or //: the output restarts there.
+            check_dir = I64{0}
+            up_count = I64{0}
+            q = I64{0}
+            process_byte_put(output, q, I64{47})
+            q += I64{1}
+            p += I64{1}
+            // An initial // (but not ///) is kept.
+            if (process_byte(stack, p) == I64{47} && process_byte(stack, p + I64{1}) != I64{47}) {
+                process_byte_put(output, q, I64{47})
+                q += I64{1}
+            }
+            p = process_realpath_slashes(stack, p)
+        } else {
+            l := I64{0}
+            loop process_byte(stack, p + l) != (I64{0}) && process_byte(stack, p + l) != (I64{47}) -> l += I64{1}
+            l0: l
+            if (l == I64{0} && check_dir == I64{0}) -> break
+            if (l == I64{1} && process_byte(stack, p) == I64{46}) {
+                // A `.` component is skipped, keeping check_dir.
+                p = process_realpath_slashes(stack, p + l)
+            } else {
+                // The component goes onto the output, at least for readlink;
+                // the output advances once it is known not to be a link.
+                if (q != I64{0} && process_byte(output, q - I64{1}) != I64{47}) {
+                    if (p == I64{0}) -> return I64{36}
+                    p -= I64{1}
+                    process_byte_put(stack, p, I64{47})
+                    l += I64{1}
+                }
+                if (q + l >= I64{4096}) -> return I64{36}
+                rt_text_bytes_copy(wrapping(output + q), wrapping(stack + p), l)
+                process_byte_put(output, q + l, I64{0})
+                p += l
+                up: l0 == I64{2} && process_byte(stack, p - I64{2}) == I64{46} && process_byte(stack, p - I64{1}) == I64{46}
+                linked := I64{-22}
+                if (up && q <= I64{3} * up_count) {
+                    // A `..` with nothing to cancel waits for the cwd.
+                    up_count += I64{1}
+                    q += l
+                    linked = I64{-1}
+                } else if (!up || check_dir != I64{0}) {
+                    // musl's readlink: a zero capacity reads into one dummy byte and counts nothing.
+                    target: if (p == I64{0}) -> wrapping(stack + I64{4097}) else -> stack
+                    #Unsafe("readlink borrows the NUL-terminated output path and writes at most p (or the one dummy) bytes of the owned stack") {
+                        linked = os_syscall_i64(I64{89}, output, target, if (p == I64{0}) -> I64{1} else -> p, I64{0}, I64{0}, I64{0})
+                    }
+                    if (p == I64{0} && linked > I64{0}) -> linked = I64{0}
+                    if (linked == p) -> return I64{36}
+                    if (linked == I64{0}) -> return I64{2}
+                    if (linked < I64{0} && linked != I64{-22}) -> return -linked
+                }
+                if (linked == I64{-22}) {
+                    // Not a link (or a `..` after known directories).
+                    check_dir = I64{0}
+                    if up {
+                        loop q != (I64{0}) && process_byte(output, q - I64{1}) != (I64{47}) -> q -= I64{1}
+                        if (q > I64{1} && (q > I64{2} || process_byte(output, I64{0}) != I64{47})) -> q -= I64{1}
+                    } else {
+                        if (l0 != I64{0}) -> q += l
+                        check_dir = process_byte(stack, p)
+                    }
+                    p = process_realpath_slashes(stack, p)
+                } else if (linked > I64{0}) {
+                    links += I64{1}
+                    if (links == I64{40}) -> return I64{40}
+                    // Contents ending in / drop the stack's slashes, so no
+                    // // or spurious overflow appears.
+                    if (process_byte(stack, linked - I64{1}) == I64{47}) {
+                        loop process_byte(stack, p) == (I64{47}) -> p += I64{1}
+                    }
+                    p -= linked
+                    process_move_up(wrapping(stack + p), stack, linked)
+                } else {
+                    p = process_realpath_slashes(stack, p)
+                }
+            }
+        }
+    }
+    process_byte_put(output, q, I64{0})
+    if (process_byte(output, I64{0}) == I64{47}) -> return I64{0}
+    // A relative result joins the working directory, less its leading `..`s.
+    cwd := I64{0}
+    #Unsafe("getcwd writes at most 4097 bytes of the owned stack") {
+        cwd = os_syscall_i64(I64{79}, stack, I64{4097}, I64{0}, I64{0}, I64{0}, I64{0})
+    }
+    if (cwd < I64{0}) -> return -cwd
+    if (cwd == I64{0} || process_byte(stack, I64{0}) != I64{47}) -> return I64{2}
+    l := I64{0}
+    loop process_byte(stack, l) != (I64{0}) -> l += I64{1}
+    p = I64{0}
+    loop up_count > (I64{0}) {
+        up_count -= I64{1}
+        loop l > (I64{1}) && process_byte(stack, l - I64{1}) != (I64{47}) -> l -= I64{1}
+        if (l > I64{1}) -> l -= I64{1}
+        p += I64{2}
+        if (p < q) -> p += I64{1}
+    }
+    if (q - p != I64{0} && process_byte(stack, l - I64{1}) != I64{47}) {
+        process_byte_put(stack, l, I64{47})
+        l += I64{1}
+    }
+    if (l + (q - p) + I64{1} >= I64{4096}) -> return I64{36}
+    process_move_up(wrapping(output + l), wrapping(output + p), q - p + I64{1})
+    rt_text_bytes_copy(output, stack, l)
+    I64{0}
+}
+
+// The offset after the slashes at `p`.
+process_realpath_slashes: fn(stack: I64, p: I64) -> I64 {
+    at := p
+    loop process_byte(stack, at) == (I64{47}) -> at += I64{1}
+    at
+}
+
+process_byte: fn(base: I64, at: I64) -> I64 { rt_text_byte(wrapping(base + at)) }
+
+process_byte_put: fn(base: I64, at: I64, value: I64) { net_store_uint(wrapping(base + at), I64{1}, value) }
+
+// memmove of `count` bytes: from the last byte down when the target is above
+// the source, else from the first up.
+process_move_up: fn(target: I64, source: I64, count: I64) {
+    if (target > source) {
+        at := count
+        loop at > (I64{0}) {
+            at -= I64{1}
+            process_byte_put(target, at, process_byte(source, at))
+        }
+        return
+    }
+    at := I64{0}
+    loop at < count {
+        process_byte_put(target, at, process_byte(source, at))
+        at += I64{1}
+    }
+}
 
 #Export(c) jet_process_path_stat_raw: fn(path: I64, facts: I64, error: I64) {
     result := I64{0}
@@ -907,16 +1067,8 @@ spawn_stream_io: fn(child: I64, stream: I64, bytes: I64, length: I64, number: I6
 // capacity is exactly 4096. Unpack once and free(buffer, capacity, 1), NOT len.
 #Export(c) jet_process_path_canonicalize_raw: fn(path: I64, length: I64, capacity: I64, error: I64) -> I64 {
     buffer: jet_rt_alloc(I64{4096}, I64{1})
-    result := I64{0}
-    #Unsafe("the source-approved native NUL path and Jet-owned PATH_MAX buffer are live across the mechanical realpath call") {
-        result = process_realpath(path, buffer)
-    }
-    if (result == I64{0}) {
-        errno := I64{0}
-        #Unsafe("libc __errno_location returns this calling thread's live errno int; read only its initialized four bytes") {
-            at: net_errno_location()
-            errno = os_load_u8(at).bit_or((os_load_u8(wrapping(at + I64{1})) << I64{8})).bit_or((os_load_u8(wrapping(at + I64{2})) << I64{16})).bit_or((os_load_u8(wrapping(at + I64{3})) << I64{24}))
-        }
+    errno: process_realpath(path, buffer)
+    if (errno != I64{0}) {
         jet_rt_free(buffer, I64{4096}, I64{1})
         fd_put(length, I64{0}, I64{0})
         fd_put(capacity, I64{0}, I64{0})

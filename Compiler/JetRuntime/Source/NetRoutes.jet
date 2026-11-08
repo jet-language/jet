@@ -3,7 +3,115 @@
 // carrier. The Rust original is the semantic source; no Rust Box/std socket
 // layout is read here. Nonblocking syscalls use HostSockets and the shared
 // native poller.
-#Import(c) net_route_inet_pton: fn(family: I64, text: I64, output: I64) -> I64 = "inet_pton"
+
+// musl's inet_pton over the NUL-terminated `text`: 1 when it is the family's
+// strict form (AF_INET 2: the dotted quad, no leading zeros; AF_INET6 10: the
+// RFC 4291 text, scope-free) with its 4 or 16 address bytes at `output`, 0
+// when it is not (`output` may then hold some bytes), -1 for another family.
+net_route_inet_pton: fn(family: I64, text: I64, output: I64) -> I64 {
+    if (family == I64{2}) -> return net_route_inet4(text, output)
+    if (family != I64{10}) -> return I64{-1}
+    s := text
+    if (rt_text_byte(s) == I64{58}) {
+        s = wrapping(s + I64{1})
+        if (rt_text_byte(s) != I64{58}) -> return I64{0}
+    }
+    // The groups are kept in place as big-endian u16 words of `output`.
+    gap := I64{-1}
+    v4 := false
+    i := I64{0}
+    loop {
+        if (rt_text_byte(s) == I64{58} && gap < I64{0}) {
+            gap = i
+            net_route_group_put(output, i, I64{0})
+            s = wrapping(s + I64{1})
+            if (rt_text_byte(s) == I64{0}) -> break
+            if (i == I64{7}) -> return I64{0}
+        } else {
+            value := I64{0}
+            j := I64{0}
+            loop j < (I64{4}) {
+                digit: net_route_hex(rt_text_byte(wrapping(s + j)))
+                if (digit < I64{0}) -> break
+                value = value * I64{16} + digit
+                j += I64{1}
+            }
+            if (j == I64{0}) -> return I64{0}
+            net_route_group_put(output, i, value)
+            end: rt_text_byte(wrapping(s + j))
+            if (end == I64{0} && (gap >= I64{0} || i == I64{7})) -> break
+            if (i == I64{7}) -> return I64{0}
+            if (end != I64{58}) {
+                if (end != I64{46} || (i < I64{6} && gap < I64{0})) -> return I64{0}
+                v4 = true
+                i += I64{1}
+                net_route_group_put(output, i, I64{0})
+                break
+            }
+            s = wrapping(wrapping(s + j) + I64{1})
+        }
+        i += I64{1}
+    }
+    if (gap >= I64{0}) {
+        // Move groups gap..=i up to end at group 7, then zero the gap.
+        shift: I64{7} - i
+        at := i
+        loop at >= gap {
+            net_route_group_put(output, at + shift, net_route_group(output, at))
+            at -= I64{1}
+        }
+        at = I64{0}
+        loop at < shift {
+            net_route_group_put(output, gap + at, I64{0})
+            at += I64{1}
+        }
+    }
+    if (v4 && net_route_inet4(s, wrapping(output + I64{12})) <= I64{0}) -> return I64{0}
+    I64{1}
+}
+
+// musl's AF_INET inet_pton: four decimal parts of one to three digits, no
+// leading zero, each at most 255, joined by dots.
+net_route_inet4: fn(text: I64, output: I64) -> I64 {
+    s := text
+    i := I64{0}
+    loop i < (I64{4}) {
+        value := I64{0}
+        j := I64{0}
+        loop j < (I64{3}) {
+            byte: rt_text_byte(wrapping(s + j))
+            if (byte < I64{48} || byte > I64{57}) -> break
+            value = value * I64{10} + byte - I64{48}
+            j += I64{1}
+        }
+        if (j == I64{0} || (j > I64{1} && rt_text_byte(s) == I64{48}) || value > I64{255}) -> return I64{0}
+        net_store_uint(wrapping(output + i), I64{1}, value)
+        end: rt_text_byte(wrapping(s + j))
+        if (end == I64{0} && i == I64{3}) -> return I64{1}
+        if (end != I64{46}) -> return I64{0}
+        s = wrapping(wrapping(s + j) + I64{1})
+        i += I64{1}
+    }
+    I64{0}
+}
+
+net_route_hex: fn(byte: I64) -> I64 {
+    if (byte >= I64{48} && byte <= I64{57}) -> return byte - I64{48}
+    lower: byte.bit_or(I64{32})
+    if (lower >= I64{97} && lower <= I64{102}) -> return lower - I64{87}
+    I64{-1}
+}
+
+net_route_group: fn(output: I64, index: I64) -> I64 {
+    at: wrapping(output + index * I64{2})
+    (rt_text_byte(at) << I64{8}).bit_or(rt_text_byte(wrapping(at + I64{1})))
+}
+
+net_route_group_put: fn(output: I64, index: I64, value: I64) {
+    at: wrapping(output + index * I64{2})
+    net_store_uint(at, I64{1}, (value >> I64{8}).bit_and(I64{255}))
+    net_store_uint(wrapping(at + I64{1}), I64{1}, value.bit_and(I64{255}))
+}
 
 net_route_detail_take: fn(operation: I64, address: I64, message: I64, code: I64) -> I64 {
     value: jet_rt_alloc(NET_DETAIL_BYTES, I64{8})

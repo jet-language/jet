@@ -11,12 +11,11 @@ use {
 
 // The C functions the host provides, each as the runtime's IR calls it.
 WEB_HOST_C: [String]{
-    "__errno_location", "acos", "acosh", "asin", "asinh", "atan", "atan2", "atanh", "cbrt", "ceil", "clock_gettime",
-    "cos", "cosh", "exp", "exp2", "expm1", "floor", "fma", "fmod", "fork", "freeaddrinfo", "gai_strerror", "getaddrinfo",
-    "getauxval", "getgroups", "getloadavg", "hypot", "inet_pton", "initgroups", "log", "log10", "log1p", "log2", "mkfifo",
-    "pow", "pthread_attr_destroy", "pthread_attr_init", "pthread_attr_setstacksize", "pthread_create", "pthread_detach",
-    "pthread_join", "realpath", "round", "signal", "sin", "sinh", "sqrt", "sysconf", "tan", "tanh", "tcgetattr",
-    "tcsetattr", "times", "trunc", "utime",
+    "__errno_location", "acos", "acosh", "asin", "asinh", "atan", "atan2", "atanh", "cbrt", "ceil", "cos", "cosh", "exp",
+    "exp2", "expm1", "floor", "fma", "fmod", "freeaddrinfo", "gai_strerror", "getaddrinfo", "getauxval", "hypot",
+    "initgroups", "log", "log10", "log1p", "log2", "pow", "pthread_attr_destroy", "pthread_attr_init",
+    "pthread_attr_setstacksize", "pthread_create", "pthread_detach", "pthread_join", "round", "sin", "sinh", "sqrt",
+    "tan", "tanh", "trunc",
 }
 
 // Each host C function: true when it replaces the runtime's own definition,
@@ -306,53 +305,6 @@ function power(x, y) {
   return Math.pow(x, y);
 }
 
-function parseIPv4(text) {
-  const parts = text.split(".");
-  if (parts.length !== 4) return null;
-  const bytes = [];
-  for (const part of parts) {
-    if (!/^[0-9]{1,3}$/.test(part) || (part.length > 1 && part[0] === "0")) return null;
-    const value = Number(part);
-    if (value > 255) return null;
-    bytes.push(value);
-  }
-  return bytes;
-}
-
-function parseIPv6(text) {
-  const halves = text.split("::");
-  if (halves.length > 2) return null;
-  const groups = (half) => (half === "" ? [] : half.split(":"));
-  const head = groups(halves[0]);
-  const tail = halves.length === 2 ? groups(halves[1]) : [];
-  const words = [];
-  const take = (list) => {
-    for (let index = 0; index < list.length; index += 1) {
-      const group = list[index];
-      if (index === list.length - 1 && group.includes(".")) {
-        const v4 = parseIPv4(group);
-        if (!v4) return false;
-        words.push((v4[0] << 8) | v4[1], (v4[2] << 8) | v4[3]);
-      } else {
-        if (!/^[0-9a-fA-F]{1,4}$/.test(group)) return false;
-        words.push(parseInt(group, 16));
-      }
-    }
-    return true;
-  };
-  if (!take(head)) return null;
-  const front = words.length;
-  if (!take(tail)) return null;
-  const back = words.splice(front);
-  if (halves.length === 2) {
-    if (front + back.length > 7) return null;
-    while (words.length + back.length < 8) words.push(0);
-  }
-  words.push(...back);
-  if (words.length !== 8) return null;
-  return words.flatMap((word) => [word >> 8, word & 255]);
-}
-
 class Host {
   constructor(manifest) {
     this.runtime = manifest.partitions?.find((partition) => partition.name === "runtime");
@@ -530,11 +482,13 @@ class Host {
   }
 
   // The argument and environment strings and their pointer arrays at the top
-  // of the stack, the stack pointer below them.
+  // of the stack, the stack pointer below them, then an empty auxiliary
+  // vector (one AT_NULL pair): the runtime reads that vector after envp's
+  // terminating null, as on Linux, and finds no entry.
   place(args, environment) {
     const strings = [...args, ...environment].map((item) => encoder.encode(item + "\0"));
     const size = alignUp(strings.reduce((total, bytes) => total + bytes.length, 0), 16);
-    const words = alignUp((args.length + environment.length + 2) * 8, 16);
+    const words = alignUp((args.length + environment.length + 4) * 8, 16);
     const view = this.view();
     let at = this.stackTop - size;
     const addresses = [];
@@ -553,6 +507,8 @@ class Host {
     put(0);
     const envp = slot;
     for (let index = 0; index < environment.length; index += 1) put(addresses[args.length + index]);
+    put(0);
+    put(0);
     put(0);
     this.sp.value = BigInt(argv);
     return [args.length, argv, envp];
@@ -797,13 +753,6 @@ class Host {
       host.setErrno(errno);
       return value;
     };
-    const guarded = (body, value) => {
-      try {
-        return body();
-      } catch (error) {
-        return fail(typeof error?.errno === "number" ? Math.abs(error.errno) : E.IO, value);
-      }
-    };
     // The host runs one thread: the first refused thread start says why
     // before the runtime stops with E3001.
     let threadsRefused = false;
@@ -835,11 +784,6 @@ class Host {
         if (staged !== null) host.u8().set(staged, Number(buffer));
         staged = null;
       },
-      clock_gettime: (clock, at) => {
-        host.timespec(Number(at), nowNanoseconds(Number(clock)));
-        return 0n;
-      },
-      fork: () => fail(E.NOSYS, -1n),
       getaddrinfo: () => fail(E.NOSYS, -11n),
       freeaddrinfo: () => {},
       gai_strerror: () => BigInt(GAI_TEXT),
@@ -849,18 +793,7 @@ class Host {
         if (type === 23n || type === 16n || type === 26n) return 0n;
         return fail(E.NOENT, 0n);
       },
-      getgroups: () => 0n,
-      getloadavg: () => -1n,
       initgroups: () => fail(E.PERM, -1n),
-      inet_pton: (family, source, destination) => {
-        const text = host.text(Number(source));
-        const bytes = family === 2n ? parseIPv4(text) : family === 10n ? parseIPv6(text) : undefined;
-        if (bytes === undefined) return fail(97, -1n);
-        if (bytes === null) return 0n;
-        host.u8().set(bytes, Number(destination));
-        return 1n;
-      },
-      mkfifo: () => fail(E.NOSYS, -1n),
       pthread_attr_init: () => 0n,
       pthread_attr_destroy: () => 0n,
       pthread_attr_setstacksize: () => 0n,
@@ -871,42 +804,6 @@ class Host {
       },
       pthread_detach: () => BigInt(E.SRCH),
       pthread_join: () => BigInt(E.SRCH),
-      realpath: (path, resolved) => {
-        if (!fs) return fail(E.NOSYS, 0n);
-        if (resolved === 0n) return fail(E.NOMEM, 0n);
-        return guarded(() => {
-          const bytes = encoder.encode(fs.realpathSync(host.text(Number(path))) + "\0");
-          if (bytes.length > 4096) return fail(E.RANGE, 0n);
-          host.u8().set(bytes, Number(resolved));
-          return resolved;
-        }, 0n);
-      },
-      signal: () => 0n,
-      sysconf: (name) => {
-        if (name === 30n) return 4096n;
-        if (name === 83n || name === 84n) return 1n;
-        if (name === 2n) return 100n;
-        if (name === 4n) return 1024n;
-        return fail(E.INVAL, -1n);
-      },
-      tcgetattr: () => fail(E.NOTTY, -1n),
-      tcsetattr: () => fail(E.NOTTY, -1n),
-      times: (buffer) => {
-        host.zero(Number(buffer), 32);
-        return BigInt(Math.floor(performance.now() / 10));
-      },
-      utime: (path, times) => {
-        if (!fs) return fail(E.NOSYS, -1n);
-        return guarded(() => {
-          const view = host.view();
-          const now = Date.now() / 1000;
-          const at = Number(times);
-          const access = at === 0 ? now : Number(view.getBigInt64(at, true));
-          const modify = at === 0 ? now : Number(view.getBigInt64(at + 8, true));
-          fs.utimesSync(host.text(Number(path)), access, modify);
-          return 0n;
-        }, -1n);
-      },
     };
   }
 }
@@ -1031,6 +928,7 @@ const SYSCALLS = {
   107: () => nodeProcess?.geteuid?.() ?? 0,
   108: () => nodeProcess?.getegid?.() ?? 0,
   110: () => nodeProcess?.ppid ?? 0,
+  115: () => 0,
   124: () => nodeProcess?.pid ?? 1,
   131: (h, stack, old) => {
     if (old !== 0) {
@@ -1116,6 +1014,14 @@ const SYSCALLS = {
   269: (h, dirfd, path, mode) => (fs ? (fs.accessSync(h.path(dirfd, path), mode), 0) : -E.NOSYS),
   271: (h, fds, count) => SYSCALLS[7](h, fds, count),
   273: () => 0,
+  280: (h, dirfd, path, times, flags) => {
+    if (!fs) return -E.NOSYS;
+    const view = h.view();
+    const stamp = (at) => Number(view.getBigInt64(at, true)) + Number(view.getBigInt64(at + 8, true)) / 1e9;
+    const now = Date.now() / 1000;
+    fs.utimesSync(h.path(dirfd, path), times === 0 ? now : stamp(times), times === 0 ? now : stamp(times + 16));
+    return 0;
+  },
   302: (h, pid, resource, limit, old) => {
     if (old !== 0) {
       const value = resource === 3 ? BigInt(STACK) : resource === 7 ? 1024n : 0xffffffffffffffffn;

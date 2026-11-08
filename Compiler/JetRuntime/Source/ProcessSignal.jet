@@ -5,12 +5,30 @@
 // every 10 ms, cancels the process root task control once per delivered
 // signal (Scheduler.jet scheduler_root_task_control) and runs the interrupt
 // handlers once per counted SIGINT.
-#Import(c) process_signal_install: fn(signal: I64, handler: I64) -> I64 = "signal"
 
 // Checked FunctionAddress intrinsics in the canonical RuntimeLibrary table.
 rt_process_signal_mark_address: fn() -> I64 { loop { jet_rt_unreachable(I64{0}, I64{0}) } }
+rt_process_signal_restore_address: fn() -> I64 { loop { jet_rt_unreachable(I64{0}, I64{0}) } }
 rt_process_signal_dispatcher_address: fn() -> I64 { loop { jet_rt_unreachable(I64{0}, I64{0}) } }
 rt_process_signal_interrupts_address: fn() -> I64 { loop { jet_rt_unreachable(I64{0}, I64{0}) } }
+
+// The mark handler's restorer: the handler returns here, on its signal
+// frame, and rt_sigreturn resumes the interrupted code. The rail needs this
+// exact body, so the frame is the plain `push rbp; mov rbp, rsp`.
+#Export(c) jet_rt_process_signal_restore: fn() -> I64 {
+    #Unsafe("the kernel enters this restorer only from a returning handler, on its signal frame") { os_signal_return() }
+    I64{0}
+}
+
+// musl's signal(signal, handler): rt_sigaction with SA_RESTART | SA_RESTORER,
+// an empty mask and the mark restorer. -1 when the kernel refuses.
+process_signal_install: fn(signal: I64, handler: I64) -> I64 {
+    status := I64{0}
+    #Unsafe("rt_sigaction borrows the four-word action on the stack; handler is this runtime's one-word C-ABI export and the restorer its rt_sigreturn rail") {
+        status = os_syscall_stack4_i64(I64{13}, signal, handler, I64{335544320}, rt_process_signal_restore_address(), I64{0}, I64{8})
+    }
+    if (status < I64{0}) -> I64{-1} else -> I64{0}
+}
 
 // State88: pendingInterrupts0 pendingSignals8 installed16 installMutex24
 // dispatchMutex32 handlersMutex40 handlers48/56/64 (INT, HUP, TERM: 1 when a
