@@ -211,9 +211,9 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1343,
+  "total": 1344,
   "counts": {
-    "Compiler": 680,
+    "Compiler": 681,
     "Core": 186,
     "Docs": 8,
     "Examples": 35,
@@ -1054,6 +1054,13 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
       "line": 1562,
       "column": 9,
       "reason": "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the runtime's unmapped process exit"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetCli/Source/Cli/Host.jet",
+      "line": 1889,
+      "column": 9,
+      "reason": "posix setpriority: the build lowers only its own threads, never raising one"
     },
     {
       "package": "Compiler",
@@ -9631,14 +9638,14 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 
 | crate/package | regions |
 | --- | ---: |
-| Compiler | 680 |
+| Compiler | 681 |
 | Core | 186 |
 | Docs | 8 |
 | Examples | 35 |
 | Jetpack | 9 |
 | Tools | 7 |
 | tests | 418 |
-| **total** | **1343** |
+| **total** | **1344** |
 
 ### Regions
 
@@ -9763,6 +9770,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1217:5 | "the admitted runtime signature or pinned clone/drop role was checked before invoking its fixed word ABI" |
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1225:1 | "calls machine code; the caller vouches for its three-word System V signature" |
 | Compiler | Compiler/JetCli/Source/Cli/Host.jet | 1562:9 | "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the runtime's unmapped process exit" |
+| Compiler | Compiler/JetCli/Source/Cli/Host.jet | 1889:9 | "posix setpriority: the build lowers only its own threads, never raising one" |
 | Compiler | Compiler/JetDevserver/Source/WebHost02.jet | 383:5 | "unlinkat borrows a held parent and CString" |
 | Compiler | Compiler/JetDevserver/Source/WebHost02.jet | 387:5 | "adopt only a successful openat descriptor" |
 | Compiler | Compiler/JetDevserver/Source/WebHost02.jet | 394:5 | "adopt only a successful openat descriptor" |

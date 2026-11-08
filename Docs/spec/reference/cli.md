@@ -671,6 +671,18 @@ most 64 programs; keeping another removes the least recently run one. A
 compile that read a comptime input file keeps nothing, and a `--verbose` or
 traced run always compiles.
 
+A plain `jet run` compiles at the stock `optimize: none`, so the first run
+starts quickly. When a rerun reuses that program and neither a profile nor a
+flag chose the level, it also starts one background build of the same
+sources at `full`: the same `jet run` command, detached, at the lowest CPU
+priority and in the idle I/O class, printing nothing. That build keeps its
+program in the same slot, and later reruns run it. Every level means the same,
+so only speed changes. Only one build runs per slot: it holds the lock file
+`<slot>.full` beside the record while it runs. A build that
+fails leaves `<slot>.failed` naming the sources it failed on, and none is tried
+again for them. A build that is killed leaves the `none` program in use, and
+the next rerun starts it again.
+
 `jet build`, `run`, `check`, `test`, and `emit` take `--trace` to watch the
 compiler work: one line per event on stderr as it happens, with the elapsed
 time, each phase's start and end (with its duration, item count, and resident
