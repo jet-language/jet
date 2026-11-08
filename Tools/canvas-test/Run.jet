@@ -1,0 +1,265 @@
+// The Canvas browser harness entry:
+//
+//   jet run --allow=Env,Exec,FS,IO,Net,Time Tools/canvas-test/Run.jet -- <mode> ...
+//
+// Modes:
+//   scenario --scenario N --port P [--browser chromium|firefox] [--session S]
+//            [--out-dir D] [--seed 373] [--program-target T]
+//       One Canvas scenario against a running `jet dev --canvas` server. No
+//       scenario is ported to Jet yet (#6418), so a named scenario fails.
+//   native-lifecycle
+//       `jet dev --canvas` ($JET_BIN, $JET_SOURCE) refuses a missing source,
+//       stays ready when its browser launch fails, serves two browser
+//       sessions with one resident Canvas session, and frees its port on
+//       Ctrl-C.
+//   driver-lifecycle [COUNT]
+//       COUNT (4) Chromium sessions launch with isolated profiles, each answers
+//       on BiDi and CDP, and each closes for good.
+//   gecko-lifecycle
+//       A Firefox session answers on BiDi and closes for good.
+//
+// Browsers come from the working directory's `.jet/lock`
+// (`jetpack browser lock`). Each mode prints one PASS line and exits 0, or
+// prints FAIL and exits 1; a usage error exits 2.
+use {
+    client: core.http.client
+    json: core.encoding.json
+    process: core.process
+    core.encoding.[Dyn]
+}
+
+C_DEFAULT_SEED: 373
+
+run: fn() {
+    args: process.args()
+    mode: if args.len() == 0 || args[0].starts_with("--") -> "scenario" else -> args[0].copy()
+    rest: if args.len() > 0 && !args[0].starts_with("--") -> args[1..<args.len()] else -> args.copy()
+    if mode == {
+        "scenario" -> scenario_mode(rest)
+        "native-lifecycle" -> native_lifecycle()
+        "driver-lifecycle" -> driver_lifecycle(rest)
+        "gecko-lifecycle" -> gecko_lifecycle()
+        else -> usage("unknown mode: {mode}")
+    }
+}
+
+usage: fn(message: String) -> Never {
+    eprint("{message}\nusage: Run.jet scenario --scenario N --port P [--browser B] [--session S] [--out-dir D] [--seed N] [--program-target T]\n       Run.jet native-lifecycle | driver-lifecycle [COUNT] | gecko-lifecycle")
+    process.exit(2)
+}
+
+fail: fn(message: String) -> Never {
+    eprint("FAIL {message}")
+    process.exit(1)
+}
+
+// The value after `--name`, else the environment variable `env`, else `fallback`.
+option: fn(args: [String], name: String, env: String, fallback: String) -> String {
+    loop index in 0..<args.len() {
+        if args[index] == name && index + 1 < args.len() -> return args[index + 1].copy()
+    }
+    if env != "" -> return process.env_get(env) ?? fallback.copy()
+    fallback.copy()
+}
+
+// --- scenario ----------------------------------------------------------------
+
+scenario_mode: fn(args: [String]) {
+    name: option(args, "--scenario", "", "")
+    port: Int.parse(option(args, "--port", "JET_CANVAS_PORT", "0")) ?? 0
+    browser: option(args, "--browser", "JET_CANVAS_BROWSER", "chromium")
+    if name == "" -> usage("unknown scenario: (missing)")
+    if port <= 0 -> usage("missing --port")
+    fail("{browser} {name}: scenario {name} is not ported to Jet yet (#6418)")
+}
+
+// --- driver and gecko lifecycles ---------------------------------------------------
+
+driver_lifecycle: fn(args: [String]) {
+    count: if args.len() > 0 -> Int.parse(args[0]) ?? 0 else -> 4
+    if count < 1 -> usage("driver-lifecycle COUNT must be a positive number")
+    drivers := [Driver]{}
+    loop _ in 0..<count {
+        d: driver_launch("chromium") ?? fail(err.message)
+        drivers.push(d)
+    }
+    loop d in drivers {
+        answer_bidi(d) ?? fail(err.message)
+        cdp: d.session.protocol("cdp") ?? fail("Chromium has no CDP channel: {err}")
+        reply: cdp.send("Browser.getVersion", "{{}}") ?? fail("Browser.getVersion failed: {err}")
+        product: text(at(json.parse(reply) ?? Dyn.Null, "product"))
+        if product == "" -> fail("Browser.getVersion named no product: {reply}")
+        if !d.session.privacy().isolated_profiles() -> fail("Chromium sessions do not have isolated profiles")
+    }
+    loop d in drivers -> closed_for_good(d) ?? fail(err.message)
+    print("PASS {count} isolated Chromium lifecycles")
+}
+
+gecko_lifecycle: fn() {
+    d: driver_launch("firefox") ?? fail(err.message)
+    answer_bidi(d) ?? fail(err.message)
+    closed_for_good(d) ?? fail(err.message)
+    print("PASS Gecko session close ends the session and its browser")
+}
+
+answer_bidi: fn(d: Driver) Failure! {
+    value: driver_eval(d, "1 + 1")
+    if int(value) != 2 -> return Err(fail_with("{d.engine} evaluated 1 + 1 as {js(value)}"))
+    Ok()
+}
+
+// Close the session; it must refuse further commands, report itself cleaned,
+// and close again without error.
+closed_for_good: fn(d: Driver) Failure! {
+    driver_close(d)
+    if d.session.protocol("bidi") == .Ok(_) -> return Err(fail_with("a closed {d.engine} session still offers BiDi"))
+    if !d.session.receipt().cleaned() -> return Err(fail_with("a closed {d.engine} session does not report its cleanup"))
+    driver_close(d)
+    Ok()
+}
+
+// --- native jet dev --canvas lifecycle --------------------------------------------
+
+native_lifecycle: fn() {
+    jet: process.env_get("JET_BIN") ?? usage("JET_BIN is required")
+    source: process.env_get("JET_SOURCE") ?? "Examples/Tooling/CanvasBlueprintDemo.jet"
+    tmpdir: process.env_get("TMPDIR") ?? "/tmp"
+    missing_browser: "/definitely/missing/canvas-browser"
+
+    missing: process.cmd([String]{jet, "dev", "missing-canvas-lifecycle.jet", "--canvas"})
+        .env("JET_CANVAS_BROWSER", missing_browser).env("TMPDIR", tmpdir)
+        .timeout(15000ms).run() ?? fail("cannot run jet dev: {err}")
+    if missing.timed_out -> fail("jet dev did not exit for a missing source\n{missing.output}\n{missing.errors}")
+    if missing.success -> fail("source-not-found must exit with an error")
+    if !"{missing.output}\n{missing.errors}".contains("can't find the file `missing-canvas-lifecycle.jet`") -> fail("source-not-found did not name the file\n{missing.output}\n{missing.errors}")
+    if missing.output.contains("Canvas: http") -> fail("source-not-found must not start Canvas")
+
+    server := process.cmd([String]{jet, "dev", source, "--canvas"})
+        .env("JET_CANVAS_BROWSER", missing_browser).env("TMPDIR", tmpdir)
+        .stdout(.Capture).stderr(.Capture).spawn() ?? fail("cannot start jet dev: {err}")
+    canvas_url := ""
+    loop line in server.stdout.lines() {
+        if line.starts_with("Canvas: http") {
+            canvas_url = line.slice(8..<line.len()).trim()
+            break
+        }
+    }
+    if canvas_url == "" {
+        server.kill().drop("jet dev already exited")
+        server.wait().drop("the receipt is not needed")
+        fail("jet dev exited before printing its Canvas URL")
+    }
+    launch_reported := false
+    loop line in server.stderr.lines() {
+        if line.contains("Canvas browser launch failed") {
+            launch_reported = true
+            break
+        }
+    }
+    if !launch_reported {
+        server.kill().drop("jet dev already exited")
+        server.wait().drop("the receipt is not needed")
+        fail("jet dev did not report its Canvas browser launch failure")
+    }
+    status: dev_url(canvas_url, "/__jet_dev_status")
+    if reuse_sessions(canvas_url, status) == .Err(problem) {
+        server.kill().drop("jet dev already exited")
+        server.wait().drop("the receipt is not needed")
+        fail(problem.message)
+    }
+    server.interrupt() ?? fail("cannot send Ctrl-C to jet dev: {err}")
+    server.wait() ?? fail("jet dev did not exit on Ctrl-C: {err}")
+    wait_closed(status) ?? fail(err.message)
+    print("PASS native jet dev --canvas lifecycle: source-not-found, launch failure, browser close, second request, Ctrl-C cleanup")
+}
+
+// The resident host stays ready across two browser sessions, which share
+// one Canvas session.
+reuse_sessions: fn(canvas_url: String, status: String) Failure! {
+    initial: wait_status(status)
+    if text(at(initial, "state")) != "ready" -> return Err(fail_with("browser-launch failure must leave resident dev ready: {js(initial)}"))
+    first: visit_canvas(canvas_url)
+    wait_status(status)
+    second: visit_canvas(canvas_url)
+    if first != second -> return Err(fail_with("second Canvas request must reuse resident session: {first} then {second}"))
+    Ok()
+}
+
+// Open the Canvas in a fresh Chromium, read the resident session id, close.
+visit_canvas: fn(canvas_url: String) -> String Failure! {
+    d: driver_launch("chromium")
+    driver_navigate(d, canvas_url)
+    w: deadline(15000)
+    loaded := false
+    loop alive(w) && !loaded {
+        page: driver_eval(d, "({{ readyState: document.readyState, title: document.title }})")
+        loaded = text(at(page, "readyState")) == "complete" && text(at(page, "title")) == "Jet Canvas"
+        if !loaded -> sleep_ms(50)
+    }
+    if !loaded {
+        driver_close(d)
+        return Err(fail_with("Canvas page did not finish loading"))
+    }
+    body: authorized_get(dev_url(canvas_url, "/__jet_canvas/session"))
+    driver_close(d)
+    session := at(body, "session")
+    if is_null(session) -> session = at(body, "canvas.session")
+    id: text(at(session, "id"))
+    if id == "" -> return Err(fail_with("Canvas session response must identify the resident session: {js(body)}"))
+    Ok(id)
+}
+
+// `path` on the Canvas URL's origin, carrying its session token.
+dev_url: fn(canvas_url: String, path: String) -> String {
+    "{url_origin(canvas_url)}{path}?session={url_param(canvas_url, "session")}"
+}
+
+url_origin: fn(url: String) -> String {
+    scheme_end: url.find("://")
+    if scheme_end < 0 -> return url.copy()
+    slash: url.slice(scheme_end + 3..<url.len()).find("/")
+    if slash < 0 -> return url.copy()
+    url.slice(0..<scheme_end + 3 + slash)
+}
+
+url_param: fn(url: String, name: String) -> String {
+    query: url.find("?")
+    if query < 0 -> return ""
+    loop pair in url.slice(query + 1..<url.len()).split("&").to_list() {
+        if pair.starts_with("{name}=") -> return pair.slice(name.len() + 1..<pair.len())
+    }
+    ""
+}
+
+// GET with the dev server's bearer token and origin; the JSON body.
+authorized_get: fn(url: String) -> Dyn Failure! {
+    s: client.session_header(client.session_header(client.session(), "Authorization", "Bearer {url_param(url, "session")}"), "Origin", url_origin(url))
+    response: client.session_get(s, url) ?? return Err(fail_with("{url} request failed: {err}"))
+    if response.status() < 200 || response.status() > 299 -> return Err(fail_with("{url} returned HTTP {response.status()}"))
+    body: response.text(1048576) ?? return Err(fail_with("{url} body is not text: {err}"))
+    tree: json.parse(body) ?? return Err(fail_with("{url} body is not JSON: {err}"))
+    Ok(tree)
+}
+
+wait_status: fn(url: String) -> Dyn Failure! {
+    w: deadline(10000)
+    last := ""
+    loop alive(w) {
+        if authorized_get(url) == {
+            .Ok(tree) -> return Ok(tree)
+            .Err(problem) -> last = problem.message
+        }
+        sleep_ms(50)
+    }
+    Err(fail_with("Canvas status never became ready: {last}"))
+}
+
+// After Ctrl-C the port refuses connections.
+wait_closed: fn(url: String) Failure! {
+    w: deadline(10000)
+    loop alive(w) {
+        if client.get(url) == .Err(_) -> return Ok()
+        sleep_ms(50)
+    }
+    Err(fail_with("Canvas port remained reachable after Ctrl-C"))
+}

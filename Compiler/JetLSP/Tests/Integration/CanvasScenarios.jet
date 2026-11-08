@@ -26,8 +26,8 @@ BIG_FUNCTIONS_PER_MODULE: BIG_FUNCTION_COUNT / BIG_MODULE_COUNT
 BIG_FILE_COUNT: BIG_MODULE_COUNT + 1
 CANVAS_BROWSER_POOL: OnceLock<(Mutex<USize>, Condvar)>.new()
 CANVAS_SESSIONS: OnceLock<Mutex<[U16:String]>>.new()
-CanvasTools: struct { chromium: OSPath, node: OSPath }
-GeckoTools: struct { firefox: OSPath, geckodriver: OSPath, node: OSPath }
+CanvasTools: struct { chromium: OSPath }
+GeckoTools: struct { firefox: OSPath, geckodriver: OSPath }
 CANVAS_TOOLS: OnceLock<CanvasTools?>.new()
 GECKO_TOOLS: OnceLock<GeckoTools Err!>.new()
 
@@ -107,33 +107,39 @@ assert_big_fixture_preflight: fn(repo: &OSPath, case: &CanvasCase, port: U16) {
     eprintln("BIG_PROJECT_PREFLIGHT files={actual.file_count} functions={actual.function_count} source_bytes={actual.source_bytes} source_sha256={actual.source_sha256} graphs={graph_count} jet_check=passed")
 }
 
+// `jet run Tools/canvas-test/Run.jet -- <mode> <args>` from the repository root.
+canvas_harness: fn(repo: &OSPath, mode: &String) -> Command {
+    command := Command.new(admitted_tool("JET", "jet"))
+    command.current_dir(repo).args(["run", "--allow=Env,Exec,FS,IO,Net,Time", "Tools/canvas-test/Run.jet", "--", mode])
+    command
+}
 run_gecko_cleanup_probe: fn(tools: &GeckoTools) {
     repo: OSPath.from(env.manifest_dir())
-    output: Command.new(tools.node).current_dir(repo).env("FIREFOX", tools.firefox).env("GECKODRIVER", tools.geckodriver)
-        .arg("Tools/canvas-test/gecko-lifecycle.mjs").output().expect("run Gecko cleanup lifecycle probe")
+    output: canvas_harness(repo, "gecko-lifecycle").env("FIREFOX", tools.firefox).env("GECKODRIVER", tools.geckodriver)
+        .output().expect("run Gecko cleanup lifecycle probe")
     assert(output.status.success(), "Gecko cleanup lifecycle probe failed\n--- stdout ---\n{String.from_utf8_lossy(output.stdout)}\n--- stderr ---\n{String.from_utf8_lossy(output.stderr)}")
     eprintln("{String.from_utf8_lossy(output.stdout)}")
 }
 run_canvas_scenario: fn(name: &String) {
     tools: canvas_tools()
     if tools == none {
-        eprintln("ignored: Canvas scenario `{name}` needs dev-shell Chromium and Node")
+        eprintln("ignored: Canvas scenario `{name}` needs dev-shell Chromium")
         return
     }
-    run_browser_scenario(name, "chromium", tools.unwrap().node, [(_0: "CHROMIUM", _1: tools.unwrap().chromium)])
+    run_browser_scenario(name, "chromium", [(_0: "CHROMIUM", _1: tools.unwrap().chromium)])
 }
 run_target_independent_scenario: fn(name: &String) {
-    tools: canvas_tools().unwrap_or_else(() -> panic("Canvas scenario `{name}` needs dev-shell Chromium and Node"))
-    run_browser_scenario_with_server(name, "chromium", tools.node, [(_0: "CHROMIUM", _1: tools.chromium)], true, none)
+    tools: canvas_tools().unwrap_or_else(() -> panic("Canvas scenario `{name}` needs dev-shell Chromium"))
+    run_browser_scenario_with_server(name, "chromium", [(_0: "CHROMIUM", _1: tools.chromium)], true, none)
 }
 run_target_independent_scenario_for_target: fn(name: &String, target: &String) {
-    tools: canvas_tools().unwrap_or_else(() -> panic("Canvas scenario `{name}` needs dev-shell Chromium and Node"))
-    run_browser_scenario_with_server(name, "chromium", tools.node, [(_0: "CHROMIUM", _1: tools.chromium)], true, target)
+    tools: canvas_tools().unwrap_or_else(() -> panic("Canvas scenario `{name}` needs dev-shell Chromium"))
+    run_browser_scenario_with_server(name, "chromium", [(_0: "CHROMIUM", _1: tools.chromium)], true, target)
 }
-run_browser_scenario: fn(name: &String, browser: &String, node: &OSPath, environment: &[(String, OSPath)]) {
-    run_browser_scenario_with_server(name, browser, node, environment, false, none)
+run_browser_scenario: fn(name: &String, browser: &String, environment: &[(String, OSPath)]) {
+    run_browser_scenario_with_server(name, browser, environment, false, none)
 }
-run_browser_scenario_with_server: fn(name: &String, browser: &String, node: &OSPath, environment: &[(String, OSPath)], target_independent: Bool, program_target: String?) {
+run_browser_scenario_with_server: fn(name: &String, browser: &String, environment: &[(String, OSPath)], target_independent: Bool, program_target: String?) {
     browser_count: if name == SESSION_SURFACE_MATRIX_SCENARIO -> 2 else -> 1
     _browser_permits: (0..browser_count).map(_ -> CanvasBrowserPermit.acquire()).collect()
     repo: OSPath.from(env.manifest_dir())
@@ -143,10 +149,10 @@ run_browser_scenario_with_server: fn(name: &String, browser: &String, node: &OSP
     if case.big_fixture != none -> assert_big_fixture_preflight(repo, case, port)
     session: CANVAS_SESSIONS.get_or_init(() -> Mutex.new({})).lock().unwrap().get(port).cloned().expect("Canvas server session secret")
     home: env.var("HOME").unwrap()
-    command := Command.new(node)
-    command.current_dir(repo).envs(environment.iter().copied()).env("TMPDIR", "{home}/.cache/jet-test-scratch")
+    command := canvas_harness(repo, "scenario")
+    command.envs(environment.iter().copied()).env("TMPDIR", "{home}/.cache/jet-test-scratch")
         .env("JET_BIN", admitted_tool("JET", "jet")).env("JETPACK_BIN", admitted_tool("JETPACK", "jetpack"))
-        .arg("Tools/canvas-test/run.mjs").arg("--scenario").arg(name).arg("--browser").arg(browser).arg("--port").arg(port.to_string())
+        .arg("--scenario").arg(name).arg("--browser").arg(browser).arg("--port").arg(port.to_string())
         .arg("--session").arg(session).arg("--out-dir").arg(case.screenshots).arg("--seed").arg("373")
     if program_target != none -> command.arg("--program-target").arg(program_target.unwrap())
     output: command.output().expect("run Canvas scenario driver")
@@ -167,8 +173,7 @@ canvas_tools: fn() -> CanvasTools? {
     CANVAS_TOOLS.get_or_init(() -> {
         strict: env.var_os("JET_CANVAS_PREREQUISITES").as_deref() == "strict"
         chromium: resolve_canvas_tool("chromium", strict)
-        node: resolve_canvas_tool("node", strict)
-        CanvasTools{chromium: chromium.move(), node: node.move()}
+        CanvasTools{chromium: chromium.move()}
     }).as_ref()
 }
 gecko_tools: fn() -> GeckoTools Err! {
@@ -176,8 +181,7 @@ gecko_tools: fn() -> GeckoTools Err! {
         strict: env.var_os("JET_CANVAS_PREREQUISITES").as_deref() == "strict"
         firefox: resolve_canvas_tool("firefox", strict).ok_or_else(() -> "Gecko smoke needs a valid Firefox executable")
         geckodriver: resolve_canvas_tool("geckodriver", strict).ok_or_else(() -> "Gecko smoke needs a valid geckodriver executable")
-        node: resolve_canvas_tool("node", strict).ok_or_else(() -> "Gecko smoke needs a valid Node executable")
-        GeckoTools{firefox: firefox.move(), geckodriver: geckodriver, node: node.move()}
+        GeckoTools{firefox: firefox.move(), geckodriver: geckodriver}
     }).as_ref().map_err(error -> error.as_str())
 }
 resolve_canvas_tool: fn(name: String, strict: Bool) -> OSPath? {
@@ -191,7 +195,6 @@ resolve_canvas_tool: fn(name: String, strict: Bool) -> OSPath? {
         "chromium" -> version.contains("Chromium") || version.contains("Chrome")
         "firefox" -> version.contains("Firefox")
         "geckodriver" -> version.starts_with("geckodriver")
-        "node" -> version.starts_with('v') && version.as_bytes().get(1).is_some_and(byte -> byte.is_ascii_digit())
         else -> false
     }
     if valid -> path.move() else -> none
