@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6697,
-    "rev": 96192,
+    "rev": 96194,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -100815,6 +100815,11 @@
         {
           "at": "2026-11-08",
           "by": "Main",
+          "text": "Correction to the 1f8f46177e receipt (SchedLead): the objdump line on the restorer resetting rsp was not verified and is withdrawn; the strace facts stand. help_pty is 0 PASS and 13 known-failing. Fork regression, confirmed reachable: core.sys.fork() (Core/Sys/Sys.jet:657) lets the child run any Jet code, which can reach musl calloc (getaddrinfo), getgrouplist (initgroups), pthread_create or vendored C, and the raw syscall-57 fork skips the atfork locks and the tid fix-up that musl fork did. Spawn is unaffected (clone CLONE_VM|CLONE_VFORK, raw syscalls only before execve, HostSpawn.jet:288-461). An older hazard: the Jet allocator lock (Alloc.jet:305) was never held across fork. Main ruling: option B, a runtime fork gate (a shared rwlock around runtime musl calls, taken exclusively by fork with alloc_lock and the stdout lock, then reinitialized in the child), lands right after #6691 with a fork-under-load case. The residual for C threads created by user or vendored C folds into the owner thread question for #6689."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
           "text": "SchedLead landed 1f8f46177e (unverified by Main; queued for the batch). Direct syscalls replace fork, getgroups, getloadavg, sysconf, times, clock_gettime (vDSO), mkfifo, realpath, utime, signal (rt_sigaction with a Jet restorer), tcgetattr and tcsetattr, and inet_pton. Symbol census: jet_runtime_jet.o has 42 undefined symbols, none of the 13 card symbols; left are __errno_location, getaddrinfo, freeaddrinfo, gai_strerror, initgroups, jet_rt_fault_report, 6 pthread and 30 libm. Probe output is byte-identical with the musl build at none, basic and full. Web: canonicalize of / or . now answers without fs, getgroups and utimensat are handled, and the web host place() writes an empty auxv for the vDSO lookup. Focused cases pass at none, basic and full (118 web), apart from one timing flake that passed on rerun and known environment failures. Open: the raw fork skips the musl atfork locks, so a forked child that uses C malloc in a multithreaded C-linking program could deadlock; Main asked SchedLead whether any public path reaches it."
         },
         {
@@ -100846,6 +100851,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-08T15:47:01.468Z"
+        },
+        {
+          "n": 3,
+          "text": "core.sys.fork() is as safe as it was under musl fork: a runtime fork gate holds the runtime C-call lock, alloc_lock and the stdout lock across the fork syscall and reinitializes them in the child; a case forks while other carriers allocate and resolve, and the child completes.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T16:49:26.619Z"
         }
       ],
       "refs": [],
@@ -100860,9 +100874,9 @@
       "parentId": "c0lscvc9",
       "needsAcceptance": false,
       "created": "2026-11-08T15:46:59.496Z",
-      "updated": "2026-11-08T16:45:24.466Z",
+      "updated": "2026-11-08T16:49:26.619Z",
       "updatedBy": "Main",
-      "criteriaLastN": 2
+      "criteriaLastN": 3
     },
     {
       "id": "c0esaekb",
@@ -189354,6 +189368,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-08T16:49:26.619Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0wl6r2h",
+      "note": "#3 core.sys.fork() is as safe as it was under musl fork: a runt"
+    },
+    {
+      "at": "2026-11-08T16:49:25.671Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0wl6r2h",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-08T16:45:24.466Z",
       "by": "Main",
