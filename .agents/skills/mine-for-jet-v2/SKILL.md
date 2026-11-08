@@ -36,9 +36,11 @@ claim, or to already-covered (with the Jet ref) or out-of-scope (with a specific
 reason). Fill a segment × lane matrix with claim IDs or concrete
 segment-specific reasons. `scripts/check_coverage.mjs` validates all of it,
 reports ledger/claim densities, flags thin segments for written justification,
-and must exit 0 before hand-in. Exhaustiveness covers the declared corpus, not
-an unbounded linked-source crawl. Never silently narrow a broad request, hide
-findings behind a cap, or stop at attractive language spellings.
+fails until `Docs/spec/reference/prior-art.md` lists every mined source and
+names the run, and must exit 0 before hand-in. Exhaustiveness covers the
+declared corpus, not an unbounded linked-source crawl. Never silently narrow a
+broad request, hide findings behind a cap, or stop at attractive language
+spellings.
 
 **Orchestration:** legwork agents produce captures and segment indexes only;
 the thinking model reads every body and writes ledgers, claims, lane rows and
@@ -68,7 +70,9 @@ study for a focused question. No unrequested implementation or extra sources.
 
 Normal mining retains its method-owned Tower obligations **only after alignment
 and independent review**. Explicit report-only is read-only with respect to
-Tower; chat-only remains chat-only. Repository publication requires permission.
+Tower; chat-only remains chat-only. Repository publication requires permission,
+with one standing exception the owner ordered: every mining run, in every mode,
+adds its sources to `Docs/spec/reference/prior-art.md` (see hand-in below).
 Workers never write Tower: return reviewed payloads to the orchestrator for
 supported CLI publication and readback. A recommendation does not authorize coding.
 
@@ -125,8 +129,12 @@ reuse captures, and use repository scripts rather than per-run ad-hoc Python.
 1. Follow [review](references/review.md) and [depth](references/depth.md):
    segment ledgers and lane matrix, owner-question matrix, normalized claims,
    seven hard gates, dedupe and value ranking. Relevant audience, live-probe and
-   multi-source lanes remain conditional; no mandatory real-user study. Hand in
-   only when the gate passes:
+   multi-source lanes remain conditional; no mandatory real-user study. Before
+   hand-in, add the run's section to the Source index of
+   `Docs/spec/reference/prior-art.md` in the checkout you hand in
+   ([output](references/output.md#prior-art-registry)): every source with an
+   http(s) `ref` gets a row, and the section names the `run_id`. Hand in only
+   when the gate passes; it fails on a missing row or run ID:
 
    ```sh
    Tools/agent/JetEnv.jet node .agents/skills/mine-for-jet-v2/scripts/check_coverage.mjs "$CAPTURE_ROOT"
@@ -149,7 +157,8 @@ reuse captures, and use repository scripts rather than per-run ad-hoc Python.
    after that evidence is retained.
 
 Completion requires all declared sources, segments, lanes and owner questions
-accounted for (gate and recall audit at exit 0), claims evidenced or explicitly
-unknown, quality gates and reviewer findings resolved, and authorized
-artifacts/payloads handed off. Review is not
-ratification or runtime verification. Do not begin unrelated implementation.
+accounted for (gate and recall audit at exit 0), every mined source listed in
+the prior-art registry, claims evidenced or explicitly unknown, quality gates
+and reviewer findings resolved, and authorized artifacts/payloads handed off.
+Review is not ratification or runtime verification. Do not begin unrelated
+implementation.

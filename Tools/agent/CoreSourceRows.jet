@@ -810,9 +810,6 @@ call_effect: fn(module_name: String, member: String) -> String? Never! {
             "__fork" | "__setsid" -> Val("Exec")
             else -> Val("Env")
         }
-        // Joining the scheduler's threads readies the process for a raw exec
-        // or fork, so it needs the same root as a child launch.
-        "core.tasks" -> if member == "__quiesce" -> Val("Exec") else -> None
         "core.db" | "core.jobs" -> Val("DB")
         "core.auth" -> when_listed(member, AUTH_DB, "DB")
         "core.plugin" -> Val("Exec")

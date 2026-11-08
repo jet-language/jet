@@ -57,7 +57,6 @@ Run a lesson from the repository root, for example `jet run Examples/Systems/<Le
 - [ProcessAffinity](Process/ProcessAffinity.jet) — `.cpu_affinity(cpus)` runs the child only on the listed CPUs.
 - [ProcessBuilder](Process/ProcessBuilder.jet)
 - [ProcessExitCleanup](Process/ProcessExitCleanup.jet) — Explicit process termination runs the one cleanup boundary.
-- [ProcessExitUnmapped](Process/ProcessExitUnmapped.jet) — `process.exit(101)` ends a program with the user-error status 1, since 101 is the status of a Jet defect (S36).
 - [ProcessIOPriority](Process/ProcessIOPriority.jet) — `.io_idle()` and `.io_priority(level)` run the child in the idle or a best-effort I/O class.
 - [ProcessMemoryScope](Process/ProcessMemoryScope.jet) — `.memory_scope(bytes)` caps the child and everything it starts together, and ends them at the reap.
 - [ProcessKeepOpen](Process/ProcessKeepOpen.jet) — `spec.keep_open(handle, at:)` keeps a file, writer or directory open in the child at a chosen descriptor; `directory.duplicate()` passes one while the parent keeps its own.

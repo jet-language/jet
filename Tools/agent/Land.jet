@@ -155,10 +155,11 @@ IDENTITY_TREES: [String]{"Compiler", "Core", "Jetpack"}
 // The generated CoreSourceRows views: a patch whose only conflict is in them
 // is admitted around them (the batch regenerates them from its sources).
 GENERATED_VIEWS: [String]{"Compiler/JetCli/Source/Cli/CoreSources.jet", "Compiler/JetCli/Source/Cli/CoreStructureRows.jet", "Compiler/JetFoundation/Source/Registry/CoreCallRows.jet", "Compiler/JetFoundation/Source/Registry/CoreEnumRows.jet", "Compiler/JetFoundation/Source/Registry/CoreSourceOwned.jet", "Compiler/JetFoundation/Source/Registry/EffectVocabulary.jet"}
-// Every heavy pass: its address space capped at HEAVY_MEMORY (each process of
-// the build's tree, the runtime pack's steps among them, gets its own cap),
-// low priority, pinned CPUs and the compiler's 1 GiB stack.
-HEAVY_MEMORY: 34359738368
+// Every heavy pass: its memory capped at HEAVY_MEMORY in its own systemd scope
+// (the whole process tree, the runtime pack's steps among them, shares the
+// cap; an address-space limit would count the fibers' reserved stacks, not
+// memory), low priority, pinned CPUs and the compiler's 1 GiB stack.
+HEAVY_MEMORY: "32G"
 HEAVY_CPUS: "16-27"
 HEAVY_STACK: "--stack=1073741824:1073741824"
 // The ratchets every commit keeps, each run as `jet TOOL --check`, and how
@@ -782,9 +783,9 @@ Setting: struct {
 // `argv` as a heavy pass, killed after `seconds` (0: no limit), run as
 // run_logged runs it.
 run_heavy: fn(dir: String, seconds: Int, argv: [String], env: [Setting], log: String) -[Exec, FS, Time.Wait]> Int Never! {
-    out := [String]{"nice", "-n", "19", "ionice", "-c3", "taskset", "-c", HEAVY_CPUS, "prlimit", HEAVY_STACK, "--"}
+    out := [String]{"systemd-run", "--user", "--scope", "-q", "--expand-environment=no", "-p", "MemoryMax={HEAVY_MEMORY}", "-p", "MemorySwapMax=0", "nice", "-n", "19", "ionice", "-c3", "taskset", "-c", HEAVY_CPUS, "prlimit", HEAVY_STACK, "--"}
     out.extend(argv.copy())
-    spec := process.cmd(out).memory_limit(HEAVY_MEMORY)
+    spec := process.cmd(out)
     if seconds > 0 -> spec = spec.timeout(time.duration_seconds(seconds))
     run_spec(spec, out[0], dir, env, log)
 }

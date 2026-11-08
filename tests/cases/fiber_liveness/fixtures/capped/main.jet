@@ -1,0 +1,43 @@
+// 200 tasks asleep at once under a 4 GiB address-space cap set before the
+// first task: every one completes, and the process's peak address space
+// stays under 3 GiB. No stack reserves more than a hundredth of the cap and
+// the fiber stacks together a quarter, the tasks past it running on their
+// carriers; one stack of the thread stack size (192 MiB) per task would
+// reserve 37 GiB.
+package: {
+    name: "capped_tasks"
+    authority: { allow: [Env, FS, FS.Read, IO, Mem.Alloc, Time, Time.Wait] }
+}
+
+use files: core.files
+use sys: core.sys
+use time: core.time
+
+TASKS: 200
+CAP: 4294967296
+PEAK_BOUND_KB: 3145728
+
+nap: fn() -> Int {
+    time.sleep(20ms)
+    1
+}
+
+// A /proc status field's number ("VmPeak:\t 123 kB").
+census: fn(prefix: String) -[FS]> Int {
+    text: files.read("/proc/self/status") ?? panic("read status")
+    loop line in text.lines() {
+        if line.starts_with(prefix) -> return Int.parse(line.remove_prefix(prefix).remove_suffix("kB").trim()) ?? -1
+    }
+    -1
+}
+
+run: fn() {
+    sys.set_memory_limit(CAP, CAP) ?? panic("set_memory_limit")
+    handles := [Task<Int>]{}
+    loop i in 0..<TASKS -> handles.push(task nap())
+    total := 0
+    loop handle in handles -> total += handle.join() ?? 0
+    peak: census("VmPeak:")
+    print("{total} of {TASKS} tasks completed")
+    print("peak address space under 3 GiB {peak > 0 && peak < PEAK_BOUND_KB}")
+}
