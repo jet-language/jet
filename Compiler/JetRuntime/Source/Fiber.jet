@@ -6,7 +6,7 @@
 // The main thread and every non-pool thread stay plain threads whose waits
 // block on futexes.
 //
-// A fiber is one mapping: a PROT_NONE guard page, the stack, and at its top
+// A fiber is one mapping: a guard page (fiber_new), the stack, and at its top
 // the header, 64-aligned (so a fiber pointer's low 32 bits are never a
 // ParkSlot state) and sized to its fields and TCB (fiber_header_bytes), so
 // the first stack frames share its page: a fiber parked in a shallow wait
@@ -39,10 +39,14 @@ FIBER_YIELD: I64{4}
 // Timer kinds: a ParkSlot's timed park, a lot wait's deadline.
 FIBER_TIMER_SLOT: I64{1}
 FIBER_TIMER_LOT: I64{2}
-// Idle fibers kept for reuse; a finished fiber past the cap tears down.
+// Idle fibers kept for reuse; a finished fiber past the cap tears down. The
+// carrier counts the pool under the root lock, so the cap is exact: a fiber
+// it may not pool runs once more, with the teardown job, to release its TCB.
 FIBER_POOL_CAP: I64{64}
-FIBER_LOT_BUCKETS: I64{64}
-FIBER_LOT_BYTES: I64{1032}
+FIBER_JOB_TEARDOWN: I64{-1}
+// 4096 buckets keep a bucket's chain short with 100k fibers parked.
+FIBER_LOT_BUCKETS: I64{4096}
+FIBER_LOT_BYTES: I64{65544}
 FIBER_TIMERS_BYTES: I64{24}
 
 // The running fiber, 0 on a plain thread (and on an unattached one, whose
@@ -60,18 +64,19 @@ rt_fiber_entry_address: fn() -> I64 {
 }
 
 // A fresh fiber starts here on its own stack, with GS on its TCB. It runs
-// one task per resume; between tasks it waits in the pool.
+// one job per resume; between jobs it waits in the pool.
 #Export(c) jet_rt_fiber_entry: fn(_unused: I64) -> I64 {
     fiber: fiber_current()
     loop {
-        task_run(sync_load(wrapping(fiber + I64{56})))
-        sync_store(wrapping(fiber + I64{56}), I64{0})
-        if (sync_load(wrapping(scheduler_root + I64{64})) >= FIBER_POOL_CAP) {
+        job: sync_load(wrapping(fiber + I64{56}))
+        if (job == FIBER_JOB_TEARDOWN) {
             fiber_teardown(fiber)
             sync_store(wrapping(fiber + I64{64}), FIBER_DEAD)
             fiber_switch_out(fiber)
             jet_rt_unreachable(I64{0}, I64{0})
         }
+        scheduler_run_job(job)
+        sync_store(wrapping(fiber + I64{56}), I64{0})
         sync_store(wrapping(fiber + I64{64}), FIBER_DONE)
         fiber_switch_out(fiber)
     }
@@ -209,6 +214,13 @@ fiber_run: fn(root: I64, record: I64, fiber: I64) {
             return
         }
         sync_thread_lock(root)
+        if (action == FIBER_DONE && sync_load(wrapping(root + I64{64})) >= FIBER_POOL_CAP) {
+            // The pool is full: the job stays live until the fiber's own
+            // teardown ends it DEAD.
+            sync_store(wrapping(fiber + I64{56}), FIBER_JOB_TEARDOWN)
+            sync_thread_unlock(root)
+            next
+        }
         sync_store(wrapping(root + I64{40}), sync_load(wrapping(root + I64{40})) - I64{1})
         if (action == FIBER_DONE) {
             sync_store(wrapping(fiber + I64{48}), sync_load(wrapping(root + I64{72})))
@@ -263,7 +275,11 @@ fiber_prepare: fn(root: I64) {
 
 // One mapping: guard page, stack, header page. The stack is the thread
 // stack size (thread_stack_bytes), halved on a failed map down to
-// THREAD_STACK_FLOOR, reserved without commitment.
+// THREAD_STACK_FLOOR, reserved without commitment. The guard is a
+// page-table guard marker (MADV_GUARD_INSTALL), which leaves the mapping one
+// VMA that merges with its neighbouring fiber stacks, so vm.max_map_count
+// does not bound the live fibers; a kernel without guard markers (before
+// 6.13) gets a PROT_NONE page, two VMAs per fiber.
 fiber_new: fn(root: I64) -> I64 {
     fiber_prepare(root)
     bytes := sync_load(wrapping(root + I64{184}))
@@ -276,11 +292,12 @@ fiber_new: fn(root: I64) -> I64 {
         bytes = bytes >> I64{1}
     }
     if (mapping < I64{0}) -> return I64{0}
-    protect := I64{0}
-    #Unsafe("the first page of the fresh mapping becomes the stack's PROT_NONE guard") {
-        protect = os_syscall_i64(I64{10}, mapping, I64{4096}, I64{0}, I64{0}, I64{0}, I64{0})
+    guard := I64{0}
+    #Unsafe("the first page of the fresh, untouched mapping becomes the stack's guard: a guard marker, else PROT_NONE") {
+        guard = os_syscall_i64(I64{28}, mapping, I64{4096}, I64{102}, I64{0}, I64{0}, I64{0})
+        if (guard != I64{0}) -> guard = os_syscall_i64(I64{10}, mapping, I64{4096}, I64{0}, I64{0}, I64{0}, I64{0})
     }
-    if (protect != I64{0}) {
+    if (guard != I64{0}) {
         alloc_unmap(mapping, bytes)
         return I64{0}
     }
@@ -494,14 +511,14 @@ fiber_park_slot: fn(fiber: I64, slot: I64, timeout_ns: I64) {
 }
 
 // The parking lot of fiber futex waits (Sync.jet sync_wait/sync_wake):
-// Lot1032 waiters0, then FIBER_LOT_BUCKETS buckets of {lock, head} hashed
+// Lot65544 waiters0, then FIBER_LOT_BUCKETS buckets of {lock, head} hashed
 // by address. waiters counts fibers inside a wait; a wake reads it with a
 // locked add, after the store it publishes, so either the waiter saw the
 // new value or the waker sees the waiter and takes its bucket.
 sync_lot := I64{0}
 
 sync_lot_bucket: fn(lot: I64, address: I64) -> I64 {
-    index: ((address >> I64{3}) + (address >> I64{9})).bit_and(FIBER_LOT_BUCKETS - I64{1})
+    index: ((address >> I64{3}) + (address >> I64{9}) + (address >> I64{15})).bit_and(FIBER_LOT_BUCKETS - I64{1})
     wrapping(wrapping(lot + I64{8}) + index * I64{16})
 }
 

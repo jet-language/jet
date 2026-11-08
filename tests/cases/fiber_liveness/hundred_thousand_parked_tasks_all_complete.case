@@ -1,0 +1,27 @@
+# 100000 tasks parked at once in a channel receive, then released: all of
+# them complete, with no crash, refusal or hang. Fiber stacks guard with page
+# table markers and merge into few mappings, so the default vm.max_map_count
+# (65530, about 32000 stacks at two mappings each) does not bound live
+# tasks. Same output on jet run and at O0, O1 and O2.
+fixture: fixtures/many
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run main.jet
+exit: 0
+stdout: = "100000 of 100000 tasks completed\nmappings while parked under 10000 true\n"
+step: jet build --optimize=none main.jet
+exit: 0
+step o0: built
+exit: 0
+stdout: = "100000 of 100000 tasks completed\nmappings while parked under 10000 true\n"
+step: jet build --optimize=basic main.jet
+exit: 0
+step o1: built
+exit: 0
+stdout: = "100000 of 100000 tasks completed\nmappings while parked under 10000 true\n"
+step: jet build --release main.jet
+exit: 0
+step o2: built
+exit: 0
+stdout: = "100000 of 100000 tasks completed\nmappings while parked under 10000 true\n"

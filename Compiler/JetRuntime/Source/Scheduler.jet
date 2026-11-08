@@ -944,9 +944,10 @@ scheduler_get: fn() -> I64 {
     root
 }
 
-// Queues a task state for a carrier. The task wakes an idle carrier, else
-// starts one more while fewer than the pool size run. Unsigned pool sizes
-// above i64::MAX are attempted just as Rust does, failing at pthread_create.
+// Queues a job (scheduler_run_job) for a carrier. The job wakes an idle
+// carrier, else starts one more while fewer than the pool size run. Unsigned
+// pool sizes above i64::MAX are attempted just as Rust does, failing at
+// pthread_create.
 scheduler_submit: fn(task: I64) {
     root: scheduler_get()
     sync_store(wrapping(task + I64{88}), I64{0})
@@ -1061,9 +1062,9 @@ scheduler_carrier_idle: fn(root: I64) {
             jet_rt_observe_pool(I64{-1}, I64{-1})
             fiber = fiber_take(root)
             if (fiber == I64{0}) {
-                // No stack could be mapped: the task runs on the carrier,
+                // No stack could be mapped: the job runs on the carrier,
                 // whose waits then block it.
-                task_run(task)
+                scheduler_run_job(task)
                 sync_thread_lock(root)
                 sync_store(wrapping(root + I64{40}), sync_load(wrapping(root + I64{40})) - I64{1})
                 sync_thread_unlock(root)
@@ -1073,6 +1074,13 @@ scheduler_carrier_idle: fn(root: I64) {
         }
         fiber_run(root, record, fiber)
     }
+}
+
+// A queued job: a task state, or a parallel walk's worker (Parallel.jet),
+// marked PARALLEL_JOB in the first word, where a task state keeps its
+// positive reference count.
+scheduler_run_job: fn(job: I64) {
+    if (sync_load(job) == PARALLEL_JOB) -> parallel_job_run(job) else -> task_run(job)
 }
 
 // Fiber counts for tests: parked@0, carriers started@8, fiber stacks@16.
@@ -1132,6 +1140,22 @@ scheduler_idle: fn() -> Bool {
 #Export(c) jet_scheduler_drain_after_exit: fn() {
     loop {
         if scheduler_idle() && jet_rt_observe_io_quiescent() -> return
+        fiber_spin_yield()
+    }
+}
+
+// The drain after a parked-task report (E3013), which ends the process: the
+// tasks it cancelled unwind, but one it could not reach (a task past the
+// registry's cap, Observe.jet OBSERVE_TASK_CAP) stays parked, so this returns
+// once nothing is queued, ready or running and every live task is parked.
+// The parked count lags a commit and leads a wake, so it only ever reads low.
+scheduler_settle_after_report: fn() {
+    root: scheduler_root_required()
+    loop {
+        sync_thread_lock(root)
+        settled: sync_load(wrapping(root + I64{8})) == I64{0} && sync_load(wrapping(root + I64{168})) == I64{0} && sync_load(wrapping(root + I64{40})) == sync_load(wrapping(root + I64{48}))
+        sync_thread_unlock(root)
+        if settled && jet_rt_observe_io_quiescent() -> return
         fiber_spin_yield()
     }
 }

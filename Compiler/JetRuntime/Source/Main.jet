@@ -267,8 +267,9 @@ rt_main_stopped_address: fn() -> I64 {
     main_exit_claim(I64{0})
     parked_code: main_exit_cleanup()
     // ONLY normal main-thread return drains. Fatal/explicit exit never joins
-    // the worker executing the process boundary and cannot self-wait.
-    jet_scheduler_drain_after_exit()
+    // the worker executing the process boundary and cannot self-wait. A
+    // parked-task report ends the process, so it settles rather than joins.
+    if (parked_code != I64{0}) -> scheduler_settle_after_report() else -> jet_scheduler_drain_after_exit()
     // Checked mode (Alloc.jet, `--checked-alloc`): a write after one of the
     // last frees traps here rather than going unseen.
     alloc_check_sweep()

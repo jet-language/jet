@@ -7,7 +7,7 @@
 // @48 Context current record pointer; @56 Fiber running on this TCB (0 on a
 // plain thread); @64 Scheduler native body active;
 // @72 Sync park slot; @80 Task completion frames List*;
-// @88 reserved; @96 Deadline owner deadlines;
+// @88 Thread live-registry row (thread_register_tcb); @96 Deadline owner deadlines;
 // @104 World current lease; @112 World flags; @120 World park slot;
 // @128 Sentry enabled; @136 Sentry file; @144 Sentry file length;
 // @152 Sentry line; @160 Sentry reason; @168 Sentry reason length;
@@ -43,6 +43,9 @@
 // All headers use [len@0,cap@8,data@16]. Root is 88 bytes; closures transfer
 // to the registry for key lifetime. No inherited GS pointer is dereferenced.
 thread_tls_registry := I64{0}
+
+// The TCB word holding its live-registry row (layout above).
+THREAD_TCB_ROW: I64{88}
 
 // Zero `bytes` bytes at a word-aligned address. A byte list's capacity need
 // not be a word multiple, so whole words go first and the tail goes bytewise:
@@ -91,7 +94,8 @@ thread_new_tcb: fn(tid: I64) -> I64 {
     tcb
 }
 
-// Registry mutex is held. These are native List<I64> words, two per thread.
+// Registry mutex is held. These are native List<I64> words, two per thread;
+// the TCB's @88 holds its row's first word index, so unregistering is O(1).
 thread_register_tcb: fn(tid: I64, tcb: I64) {
     live: wrapping(thread_tls_registry + I64{64})
     count: sync_load(live)
@@ -99,6 +103,7 @@ thread_register_tcb: fn(tid: I64, tcb: I64) {
     data: sync_load(wrapping(live + I64{16}))
     sync_store(wrapping(data + count * I64{8}), tid)
     sync_store(wrapping(data + (count + I64{1}) * I64{8}), tcb)
+    sync_store(wrapping(tcb + THREAD_TCB_ROW), count)
     sync_store(live, count + I64{2})
 }
 
@@ -156,24 +161,20 @@ thread_sole_check: fn(tid: I64) {
     thread_set_base(tcb)
 }
 
+// Moves the last row into the TCB's row.
 thread_unregister_tcb: fn(tcb: I64) {
     sync_mutex_lock(thread_tls_registry)
     live: wrapping(thread_tls_registry + I64{64})
-    count: sync_load(live)
     data: sync_load(wrapping(live + I64{16}))
-    at := I64{0}
-    loop at < count {
-        if (sync_load(wrapping(data + (at + I64{1}) * I64{8})) == tcb) {
-            last: count - I64{2}
-            if at < last {
-                sync_store(wrapping(data + at * I64{8}), sync_load(wrapping(data + last * I64{8})))
-                sync_store(wrapping(data + (at + I64{1}) * I64{8}), sync_load(wrapping(data + (last + I64{1}) * I64{8})))
-            }
-            sync_store(live, last)
-            break
-        }
-        at += I64{2}
+    at: sync_load(wrapping(tcb + THREAD_TCB_ROW))
+    last: sync_load(live) - I64{2}
+    if at < last {
+        moved: sync_load(wrapping(data + (last + I64{1}) * I64{8}))
+        sync_store(wrapping(data + at * I64{8}), sync_load(wrapping(data + last * I64{8})))
+        sync_store(wrapping(data + (at + I64{1}) * I64{8}), moved)
+        sync_store(wrapping(moved + THREAD_TCB_ROW), at)
     }
+    sync_store(live, last)
     sync_mutex_unlock(thread_tls_registry)
 }
 

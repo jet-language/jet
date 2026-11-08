@@ -3868,13 +3868,18 @@ worker; its source callback constructor rejects nonpositive rates before
 crossing the provider boundary.
 
 The list adapters `para_map`, `para_filter`, `para_partition` and `para_fold`
-run their callback on operating-system worker threads on every tier: `jet run`
+run their callback on the task scheduler's pool on every tier: `jet run`
 and `jet dev` (O0), `jet build` (O1) and `--release` (O2) all call the one
 runtime kernel, `jet_rt_native_para_walk` in
-[`Parallel.jet`](../../../Compiler/JetRuntime/Source/Parallel.jet). The pool
-is the host's available parallelism (cgroup quota, CPU affinity, online CPUs),
-bounded by `limit:` when a `para_map` passes one. `para_map`, `para_filter`
-and `para_partition` spread their items over the pool in chunks of at most 64
+[`Parallel.jet`](../../../Compiler/JetRuntime/Source/Parallel.jet). Each
+worker runs on a task fiber, so the pool's carrier threads (by default one
+per CPU of the host's available parallelism: cgroup quota, CPU affinity,
+online CPUs),
+bound how many items run at once; an item that waits parks and frees its
+carrier. Without `limit:` there are as many workers as carriers; a
+`para_map(f, limit: n)` has up to `n` workers, and so up to `n` items in
+flight, however many carriers there are. `para_map`, `para_filter` and
+`para_partition` spread their items over the workers in chunks of at most 64
 items, so a short list of costly items still reaches every worker.
 `para_map` and `para_filter` keep source order, and `para_fold` folds
 each 64-item chunk from a fresh seed and then merges the chunk results up a

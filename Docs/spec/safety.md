@@ -2136,56 +2136,56 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fiber.jet",
-      "line": 93,
+      "line": 98,
       "column": 5,
       "reason": "the carrier saved its stack at carrier+16 when it switched to this fiber and runs nothing else until this switch resumes it"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fiber.jet",
-      "line": 119,
+      "line": 124,
       "column": 5,
       "reason": "sched_yield retains no memory and yields this OS thread"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fiber.jet",
-      "line": 171,
+      "line": 176,
       "column": 9,
       "reason": "base is a live self-addressed TCB this carrier runs on until its next switch, and the kernel reported FSGSBASE"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fiber.jet",
-      "line": 190,
+      "line": 195,
       "column": 9,
       "reason": "the fiber's saved stack is owned by no running thread: it is fresh, pooled or committed PARKED/RUNNABLE, and this carrier alone took it"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fiber.jet",
-      "line": 254,
+      "line": 266,
       "column": 13,
       "reason": "written once, under the scheduler root lock, before any fiber can wait; a reader sees 0 (no fiber waiter exists) or the lot"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fiber.jet",
-      "line": 272,
+      "line": 288,
       "column": 9,
       "reason": "a fresh private anonymous stack mapping, unreserved until touched"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fiber.jet",
-      "line": 280,
+      "line": 296,
       "column": 5,
-      "reason": "the first page of the fresh mapping becomes the stack's PROT_NONE guard"
+      "reason": "the first page of the fresh, untouched mapping becomes the stack's guard: a guard marker, else PROT_NONE"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fiber.jet",
-      "line": 425,
+      "line": 442,
       "column": 9,
       "reason": "sched_yield retains no memory; the firing carrier clears the word right after its wake"
     },
@@ -3424,7 +3424,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Main.jet",
-      "line": 285,
+      "line": 286,
       "column": 5,
       "reason": "the entry has returned and drained its workers; only the main thread runs here"
     },
@@ -3536,14 +3536,14 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Observe.jet",
-      "line": 147,
+      "line": 217,
       "column": 5,
       "reason": "an idempotent flag: every writer stores the same 1"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Observe.jet",
-      "line": 466,
+      "line": 533,
       "column": 9,
       "reason": "an idempotent install: every writer stores the same code address"
     },
@@ -3571,14 +3571,14 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/ObserveLive.jet",
-      "line": 516,
+      "line": 514,
       "column": 5,
       "reason": "runtime-init runs before any other thread exists"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Parallel.jet",
-      "line": 43,
+      "line": 50,
       "column": 9,
       "reason": "checked System V (env,start,end)->Unit callback; env remains borrowed and each range has exclusive output slots"
     },
@@ -4019,7 +4019,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Scheduler.jet",
-      "line": 1240,
+      "line": 1264,
       "column": 9,
       "reason": "sched_yield retains no memory and yields this OS thread"
     },
@@ -4383,77 +4383,77 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 63,
+      "line": 66,
       "column": 5,
       "reason": "every caller has attached before running Jet TLS code; an unattached thread's GS names the readable zero word, which the allocator alone treats as no TCB"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 73,
+      "line": 76,
       "column": 5,
       "reason": "GS is reserved for Jet and base is a live self-addressed TCB or the detached zero word"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 80,
+      "line": 83,
       "column": 5,
       "reason": "gettid identifies this thread without reading its inherited GS"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 124,
+      "line": 129,
       "column": 5,
       "reason": "getpid retains no memory"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 194,
+      "line": 195,
       "column": 9,
       "reason": "runtime-init runs before any other thread exists"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 288,
+      "line": 289,
       "column": 9,
       "reason": "the registry owns this live closure header whose code accepts header and one I64 value"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 384,
+      "line": 385,
       "column": 5,
       "reason": "the caller transferred a System V I64->I64 code address and one argument to this thread"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 401,
+      "line": 402,
       "column": 5,
       "reason": "getrlimit(RLIMIT_STACK) writes its two-word record into the owned 16-byte scratch and retains no pointer"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 468,
+      "line": 469,
       "column": 5,
       "reason": "fresh raw clone stack mapping with a PROT_NONE first-page guard; child may call only Jet/syscall code, never musl/Rust with inherited FS"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 485,
+      "line": 486,
       "column": 5,
       "reason": "guarded stack is seeded with Jet-only entry/arg; TID word is live until join; flags share VM, FS, FILES, SIGHAND, THREAD, SYSVSEM and enable parent-set/child-clear TID"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 500,
+      "line": 501,
       "column": 9,
       "reason": "kernel CHILD_CLEARTID clears this live word and wakes a non-private futex; recheck handles exit-before-wait and EINTR"
     },
@@ -5041,7 +5041,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Tests/Fragments.fixture/ThreadTests.jet",
-      "line": 284,
+      "line": 369,
       "column": 5,
       "reason": "heap-free fixture success line is one eight-byte write"
     },
@@ -10078,14 +10078,14 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/Fault.jet | 139:5 | "rt_sigaction borrows the four-word SIG_DFL action on the stack; tgkill signals this thread" |
 | Compiler | Compiler/JetRuntime/Source/FaultAllocation.jet | 21:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/FaultSchedule.jet | 32:9 | "an idempotent install: every writer stores the same code address" |
-| Compiler | Compiler/JetRuntime/Source/Fiber.jet | 93:5 | "the carrier saved its stack at carrier+16 when it switched to this fiber and runs nothing else until this switch resumes it" |
-| Compiler | Compiler/JetRuntime/Source/Fiber.jet | 119:5 | "sched_yield retains no memory and yields this OS thread" |
-| Compiler | Compiler/JetRuntime/Source/Fiber.jet | 171:9 | "base is a live self-addressed TCB this carrier runs on until its next switch, and the kernel reported FSGSBASE" |
-| Compiler | Compiler/JetRuntime/Source/Fiber.jet | 190:9 | "the fiber's saved stack is owned by no running thread: it is fresh, pooled or committed PARKED/RUNNABLE, and this carrier alone took it" |
-| Compiler | Compiler/JetRuntime/Source/Fiber.jet | 254:13 | "written once, under the scheduler root lock, before any fiber can wait; a reader sees 0 (no fiber waiter exists) or the lot" |
-| Compiler | Compiler/JetRuntime/Source/Fiber.jet | 272:9 | "a fresh private anonymous stack mapping, unreserved until touched" |
-| Compiler | Compiler/JetRuntime/Source/Fiber.jet | 280:5 | "the first page of the fresh mapping becomes the stack's PROT_NONE guard" |
-| Compiler | Compiler/JetRuntime/Source/Fiber.jet | 425:9 | "sched_yield retains no memory; the firing carrier clears the word right after its wake" |
+| Compiler | Compiler/JetRuntime/Source/Fiber.jet | 98:5 | "the carrier saved its stack at carrier+16 when it switched to this fiber and runs nothing else until this switch resumes it" |
+| Compiler | Compiler/JetRuntime/Source/Fiber.jet | 124:5 | "sched_yield retains no memory and yields this OS thread" |
+| Compiler | Compiler/JetRuntime/Source/Fiber.jet | 176:9 | "base is a live self-addressed TCB this carrier runs on until its next switch, and the kernel reported FSGSBASE" |
+| Compiler | Compiler/JetRuntime/Source/Fiber.jet | 195:9 | "the fiber's saved stack is owned by no running thread: it is fresh, pooled or committed PARKED/RUNNABLE, and this carrier alone took it" |
+| Compiler | Compiler/JetRuntime/Source/Fiber.jet | 266:13 | "written once, under the scheduler root lock, before any fiber can wait; a reader sees 0 (no fiber waiter exists) or the lot" |
+| Compiler | Compiler/JetRuntime/Source/Fiber.jet | 288:9 | "a fresh private anonymous stack mapping, unreserved until touched" |
+| Compiler | Compiler/JetRuntime/Source/Fiber.jet | 296:5 | "the first page of the fresh, untouched mapping becomes the stack's guard: a guard marker, else PROT_NONE" |
+| Compiler | Compiler/JetRuntime/Source/Fiber.jet | 442:9 | "sched_yield retains no memory; the firing carrier clears the word right after its wake" |
 | Compiler | Compiler/JetRuntime/Source/FilesPathOps.jet | 35:5 | "the terminated raw path and the 128-byte stat fact row are live for the syscall" |
 | Compiler | Compiler/JetRuntime/Source/FilesStreams.jet | 34:9 | "the freshly opened owned descriptor and the 128-byte stat fact row are live for fstat" |
 | Compiler | Compiler/JetRuntime/Source/FilesWalk.jet | 36:5 | "runtime-init runs before any other thread exists" |
@@ -10262,7 +10262,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/Main.jet | 254:5 | "an idempotent install: every writer stores the same code address" |
 | Compiler | Compiler/JetRuntime/Source/Main.jet | 257:5 | "entry is the loader/object's checked executable System V void(void) address, not a closure header" |
 | Compiler | Compiler/JetRuntime/Source/Main.jet | 263:5 | "only the main thread running jet_rt_main writes its root control" |
-| Compiler | Compiler/JetRuntime/Source/Main.jet | 285:5 | "the entry has returned and drained its workers; only the main thread runs here" |
+| Compiler | Compiler/JetRuntime/Source/Main.jet | 286:5 | "the entry has returned and drained its workers; only the main thread runs here" |
 | Compiler | Compiler/JetRuntime/Source/MemRegistry.jet | 20:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/MemStorage.jet | 23:5 | "address borrows an initialized word in a native allocator header, descriptor, drop record, or Fixed metadata span" |
 | Compiler | Compiler/JetRuntime/Source/MemStorage.jet | 26:5 | "address exclusively owns one aligned writable allocator or Fixed metadata word" |
@@ -10278,13 +10278,13 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/NetUnix.jet | 189:5 | "private scratch lends one native int and its 4B socklen; getsockopt retains neither pointer" |
 | Compiler | Compiler/JetRuntime/Source/Observe.jet | 18:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/Observe.jet | 25:5 | "runtime-init runs before any other thread exists" |
-| Compiler | Compiler/JetRuntime/Source/Observe.jet | 147:5 | "an idempotent flag: every writer stores the same 1" |
-| Compiler | Compiler/JetRuntime/Source/Observe.jet | 466:9 | "an idempotent install: every writer stores the same code address" |
+| Compiler | Compiler/JetRuntime/Source/Observe.jet | 217:5 | "an idempotent flag: every writer stores the same 1" |
+| Compiler | Compiler/JetRuntime/Source/Observe.jet | 533:9 | "an idempotent install: every writer stores the same code address" |
 | Compiler | Compiler/JetRuntime/Source/ObserveLive.jet | 70:9 | "an idempotent install: every writer stores the same code address" |
 | Compiler | Compiler/JetRuntime/Source/ObserveLive.jet | 118:9 | "an idempotent install: every writer stores the same code address" |
 | Compiler | Compiler/JetRuntime/Source/ObserveLive.jet | 247:5 | "vetted Observe Linux file/clock syscalls borrow native buffers only for their duration" |
-| Compiler | Compiler/JetRuntime/Source/ObserveLive.jet | 516:5 | "runtime-init runs before any other thread exists" |
-| Compiler | Compiler/JetRuntime/Source/Parallel.jet | 43:9 | "checked System V (env,start,end)-&gt;Unit callback; env remains borrowed and each range has exclusive output slots" |
+| Compiler | Compiler/JetRuntime/Source/ObserveLive.jet | 514:5 | "runtime-init runs before any other thread exists" |
+| Compiler | Compiler/JetRuntime/Source/Parallel.jet | 50:9 | "checked System V (env,start,end)-&gt;Unit callback; env remains borrowed and each range has exclusive output slots" |
 | Compiler | Compiler/JetRuntime/Source/PluginHost.jet | 105:5 | "the linked guest entry reads the live instance and argument area only for this synchronous call" |
 | Compiler | Compiler/JetRuntime/Source/ProcessExecutionCollect.jet | 335:9 | "ok is the canonical writable Bool output slot" |
 | Compiler | Compiler/JetRuntime/Source/ProcessExecutionCollect.jet | 343:5 | "ok lends exactly the C ABI Bool byte" |
@@ -10347,7 +10347,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 232:9 | "written under the scheduler root mutex" |
 | Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 535:9 | "an idempotent install: every writer stores the same code address" |
 | Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 810:5 | "runtime-init runs before any other thread exists" |
-| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 1240:9 | "sched_yield retains no memory and yields this OS thread" |
+| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 1264:9 | "sched_yield retains no memory and yields this OS thread" |
 | Compiler | Compiler/JetRuntime/Source/Secret.jet | 13:5 | "address names bytes bytes of live storage the caller owns or is freeing; effectful asm stores wipe every byte before release or reuse" |
 | Compiler | Compiler/JetRuntime/Source/Secret.jet | 38:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/Secret.jet | 110:17 | "secret is a registered live Secret header (Close unregisters before it clears); its buffer holds capacity bytes" |
@@ -10399,17 +10399,17 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/TextGlue.jet | 7:5 | "owns a writable aligned word in a fresh native text diagnostic" |
 | Compiler | Compiler/JetRuntime/Source/TextMethods.jet | 146:9 | "item0 lends the C-ABI tuple's one writable Bool byte" |
 | Compiler | Compiler/JetRuntime/Source/TextMethods.jet | 151:5 | "item0 lends the C-ABI tuple's one writable Bool byte" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 63:5 | "every caller has attached before running Jet TLS code; an unattached thread's GS names the readable zero word, which the allocator alone treats as no TCB" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 73:5 | "GS is reserved for Jet and base is a live self-addressed TCB or the detached zero word" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 80:5 | "gettid identifies this thread without reading its inherited GS" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 124:5 | "getpid retains no memory" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 194:9 | "runtime-init runs before any other thread exists" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 288:9 | "the registry owns this live closure header whose code accepts header and one I64 value" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 384:5 | "the caller transferred a System V I64-&gt;I64 code address and one argument to this thread" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 401:5 | "getrlimit(RLIMIT_STACK) writes its two-word record into the owned 16-byte scratch and retains no pointer" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 468:5 | "fresh raw clone stack mapping with a PROT_NONE first-page guard; child may call only Jet/syscall code, never musl/Rust with inherited FS" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 485:5 | "guarded stack is seeded with Jet-only entry/arg; TID word is live until join; flags share VM, FS, FILES, SIGHAND, THREAD, SYSVSEM and enable parent-set/child-clear TID" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 500:9 | "kernel CHILD_CLEARTID clears this live word and wakes a non-private futex; recheck handles exit-before-wait and EINTR" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 66:5 | "every caller has attached before running Jet TLS code; an unattached thread's GS names the readable zero word, which the allocator alone treats as no TCB" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 76:5 | "GS is reserved for Jet and base is a live self-addressed TCB or the detached zero word" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 83:5 | "gettid identifies this thread without reading its inherited GS" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 129:5 | "getpid retains no memory" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 195:9 | "runtime-init runs before any other thread exists" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 289:9 | "the registry owns this live closure header whose code accepts header and one I64 value" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 385:5 | "the caller transferred a System V I64-&gt;I64 code address and one argument to this thread" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 402:5 | "getrlimit(RLIMIT_STACK) writes its two-word record into the owned 16-byte scratch and retains no pointer" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 469:5 | "fresh raw clone stack mapping with a PROT_NONE first-page guard; child may call only Jet/syscall code, never musl/Rust with inherited FS" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 486:5 | "guarded stack is seeded with Jet-only entry/arg; TID word is live until join; flags share VM, FS, FILES, SIGHAND, THREAD, SYSVSEM and enable parent-set/child-clear TID" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 501:9 | "kernel CHILD_CLEARTID clears this live word and wakes a non-private futex; recheck handles exit-before-wait and EINTR" |
 | Compiler | Compiler/JetRuntime/Source/TimeGlue.jet | 3:5 | "borrows an initialized aligned word inside a native time carrier" |
 | Compiler | Compiler/JetRuntime/Source/TimeGlue.jet | 6:5 | "owns a writable aligned word inside a fresh native time carrier" |
 | Compiler | Compiler/JetRuntime/Source/Trap.jet | 8:5 | "the caller borrows an initialized word of a live JetText or static require descriptor" |
@@ -10493,7 +10493,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/ThreadTests.jet | 36:5 | "gettid verifies identity without trusting the TCB under test" |
 | Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/ThreadTests.jet | 45:5 | "ARCH_GET_GS writes a caller-owned word; the inherited pointer is compared, never dereferenced" |
 | Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/ThreadTests.jet | 204:13 | "sched_yield widens both sides of the check-to-wait race without timing assumptions" |
-| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/ThreadTests.jet | 284:5 | "heap-free fixture success line is one eight-byte write" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/ThreadTests.jet | 369:5 | "heap-free fixture success line is one eight-byte write" |
 | Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/UnicodeTests.jet | 8:5 | "a failed Unicode runtime witness ends only its isolated test process" |
 | Compiler | Compiler/JetSema/Tests/ScalarGlobalFixtures.jet | 21:5 | "single-threaded test: plain module writes of each scalar type" |
 | Compiler | Compiler/JetSema/Tests/XmlCheckerRootsFixtures.jet | 10:5 | "no raw operations in this regression" |

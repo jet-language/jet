@@ -1,11 +1,18 @@
-// A range callback borrows env until every worker has joined. Chunk failures
-// are isolated, all chunks run, and the lowest failing chunk start wins.
-// Worker120: len0 chunks8 workers16 index24 env32 invoke40 stop48 start56
-// pthread64 save72 (save points into the caller-owned 32-byte control scope at
-// 80) size112 (items per chunk).
-rt_parallel_worker_address: fn() -> I64 {
-    loop { jet_rt_unreachable(I64{0}, I64{0}) }
-}
+// A range callback borrows env until every worker has finished. Chunk
+// failures are isolated, all chunks run, and the lowest failing chunk start
+// wins. Each worker is a scheduler job (scheduler_run_job) that runs on a
+// pool fiber, so a worker whose item waits parks and frees its carrier: the
+// carriers bound how many items run at once, and a para_map's `limit` bounds
+// how many are in flight.
+// Worker136: job0 (PARALLEL_JOB) len8 chunks16 workers24 index32 env40
+// invoke48 stop56 start64 join72 (the walk's count of unfinished workers)
+// size80 (items per chunk) queue88 (the scheduler FIFO link) save96 (points
+// into the 32-byte control scope at 104).
+PARALLEL_JOB: I64{-1}
+PARALLEL_WORKER_BYTES: I64{136}
+// BuildParallel's PARA_EVERY_WORKER: a para_map without `limit`, more
+// workers than any host has, so it gets the available ones.
+PARALLEL_EVERY_WORKER: U64{1073741824}
 
 parallel_limit: fn(limit: I64, cap: I64) -> I64 {
     // Rust's Option<i64> -> usize accepts zero, rejects negative/too-wide.
@@ -25,13 +32,13 @@ parallel_chunk_size: fn(length: I64, limit: I64, limited: I64) -> I64 {
     if size < (I64{64}) -> size else -> I64{64}
 }
 
-#Export(c) jet_rt_native_para_worker: fn(worker: I64) -> I64 {
-    chunk := sync_load(wrapping(worker + I64{24}))
-    chunks: sync_load(wrapping(worker + I64{8}))
-    stride: sync_load(wrapping(worker + I64{16}))
-    length: sync_load(worker)
-    save: sync_load(wrapping(worker + I64{72}))
-    size: sync_load(wrapping(worker + I64{112}))
+parallel_worker_run: fn(worker: I64) {
+    chunk := sync_load(wrapping(worker + I64{32}))
+    chunks: sync_load(wrapping(worker + I64{16}))
+    stride: sync_load(wrapping(worker + I64{24}))
+    length: sync_load(wrapping(worker + I64{8}))
+    save: sync_load(wrapping(worker + I64{96}))
+    size: sync_load(wrapping(worker + I64{80}))
     loop chunk < chunks {
         start: chunk * size
         remaining: length - start
@@ -41,7 +48,7 @@ parallel_chunk_size: fn(length: I64, limit: I64, limited: I64) -> I64 {
         scheduler_control_enter(control, save)
         body: scheduler_body_enter()
         #Unsafe("checked System V (env,start,end)->Unit callback; env remains borrowed and each range has exclusive output slots") {
-            os_call3_unit_i64(sync_load(wrapping(worker + I64{40})), sync_load(wrapping(worker + I64{32})), start, end)
+            os_call3_unit_i64(sync_load(wrapping(worker + I64{48})), sync_load(wrapping(worker + I64{40})), start, end)
         }
         scheduler_body_leave(body)
         record: scheduler_control_take_stop(control)
@@ -49,15 +56,22 @@ parallel_chunk_size: fn(length: I64, limit: I64, limited: I64) -> I64 {
         scheduler_control_drop(control)
         if (record != I64{0}) {
             // This worker's cyclic chunk indices only increase.
-            if (sync_load(wrapping(worker + I64{48})) == I64{0}) {
-                sync_store(wrapping(worker + I64{48}), record)
-                sync_store(wrapping(worker + I64{56}), start)
+            if (sync_load(wrapping(worker + I64{56})) == I64{0}) {
+                sync_store(wrapping(worker + I64{56}), record)
+                sync_store(wrapping(worker + I64{64}), start)
             } else { scheduler_stop_drop(record) }
         }
         if stride >= chunks - chunk -> break
         chunk += stride
     }
-    I64{0}
+}
+
+// A worker job on its pool fiber. The walk may free the worker once the
+// join count reaches zero, so the wake names only the join word's address.
+parallel_job_run: fn(worker: I64) {
+    parallel_worker_run(worker)
+    join: sync_load(wrapping(worker + I64{72}))
+    if (sync_add(join, I64{-1}) == I64{1}) -> sync_wake(join, I64{1})
 }
 
 parallel_raise: fn(record: I64) {
@@ -99,54 +113,60 @@ parallel_raise: fn(record: I64) {
     if (length == I64{0}) {
         return
     }
-    cap: if comptime_serving() -> I64{1} else -> scheduler_available_parallelism(I64{1})
+    serving: comptime_serving()
+    cap: if serving -> I64{1} else -> scheduler_available_parallelism(I64{1})
     if (jet_rt_session_propagate() != I64{0}) -> return
-    limited: parallel_limit(limit, cap)
+    // Parked items hold no carrier, so an explicit `limit` is not cut to the
+    // available parallelism: it alone bounds the items in flight.
+    every: int_negative(limit) || !int_fits(limit, PARALLEL_EVERY_WORKER - U64{1})
+    limited: if (serving || every) -> parallel_limit(limit, cap) else -> parallel_limit(limit, length)
     size: parallel_chunk_size(length, limit, limited)
     chunks: length / size + (if (length % size == I64{0}) -> I64{0} else -> I64{1})
     count: if limited < chunks -> limited else -> chunks
-    // Each worker owns its descriptor and its control save slot through join.
-    bytes: count * I64{120}
-    workers: jet_rt_alloc(bytes, I64{8})
-    if (workers == I64{0} && jet_rt_session_propagate() != I64{0}) -> return
-    thread_zero(workers, bytes)
+    // Each worker owns its descriptor and its control save slot until it
+    // counts itself out of the join word at the block's head.
+    bytes: I64{8} + count * PARALLEL_WORKER_BYTES
+    block: jet_rt_alloc(bytes, I64{8})
+    if (block == I64{0} && jet_rt_session_propagate() != I64{0}) -> return
+    thread_zero(block, bytes)
+    workers: wrapping(block + I64{8})
+    sync_store(block, count)
     at := I64{0}
-    started := I64{0}
-    spawn_failed := false
     loop at < count {
-        worker: workers + at * I64{120}
-        sync_store(worker, length)
-        sync_store(wrapping(worker + I64{8}), chunks)
-        sync_store(wrapping(worker + I64{16}), count)
-        sync_store(wrapping(worker + I64{24}), at)
-        sync_store(wrapping(worker + I64{32}), env)
-        sync_store(wrapping(worker + I64{40}), invoke)
-        sync_store(wrapping(worker + I64{72}), worker + I64{80})
-        sync_store(wrapping(worker + I64{112}), size)
-        if (count == I64{1}) { _ := jet_rt_native_para_worker(worker) } else {
-            handle: thread_spawn(rt_parallel_worker_address(), worker)
-            if (handle < I64{0}) {
-                spawn_failed = true
-                break
-            }
-            sync_store(wrapping(worker + I64{64}), handle)
-            started += I64{1}
-        }
+        worker: workers + at * PARALLEL_WORKER_BYTES
+        sync_store(worker, PARALLEL_JOB)
+        sync_store(wrapping(worker + I64{8}), length)
+        sync_store(wrapping(worker + I64{16}), chunks)
+        sync_store(wrapping(worker + I64{24}), count)
+        sync_store(wrapping(worker + I64{32}), at)
+        sync_store(wrapping(worker + I64{40}), env)
+        sync_store(wrapping(worker + I64{48}), invoke)
+        sync_store(wrapping(worker + I64{72}), block)
+        sync_store(wrapping(worker + I64{80}), size)
+        sync_store(wrapping(worker + I64{96}), worker + I64{104})
         at += I64{1}
     }
-    // Rust joins in reverse creation order; no borrowed input escapes here.
-    loop started > (I64{0}) {
-        started -= I64{1}
-        handle: sync_load(wrapping(wrapping(workers + started * I64{120}) + I64{64}))
-        if (thread_join(handle, I64{0}) != I64{0}) { jet_rt_unreachable(I64{0}, I64{0}) }
+    if (count == I64{1}) { parallel_worker_run(workers) } else {
+        at = I64{0}
+        loop at < count {
+            scheduler_submit(workers + at * PARALLEL_WORKER_BYTES)
+            at += I64{1}
+        }
+        // The workers borrow env and the block: the walk waits for every
+        // one, whatever stop it is asked to deliver meanwhile.
+        loop {
+            left: sync_load(block)
+            if (left == I64{0}) -> break
+            _ := sync_wait(block, left, I64{-1})
+        }
     }
     first := I64{0}
     index := length
     at = I64{0}
     loop at < count {
-        worker: workers + at * I64{120}
-        record: sync_load(wrapping(worker + I64{48}))
-        start: sync_load(wrapping(worker + I64{56}))
+        worker: workers + at * PARALLEL_WORKER_BYTES
+        record: sync_load(wrapping(worker + I64{56}))
+        start: sync_load(wrapping(worker + I64{64}))
         if (record != I64{0}) {
             if start < index {
                 scheduler_stop_drop(first)
@@ -156,14 +176,9 @@ parallel_raise: fn(record: I64) {
         }
         at += I64{1}
     }
-    jet_rt_free(workers, bytes, I64{8})
+    jet_rt_free(block, bytes, I64{8})
     if (jet_rt_session_propagate() != I64{0}) {
         scheduler_stop_drop(first)
-        return
-    }
-    if spawn_failed {
-        scheduler_stop_drop(first)
-        scheduler_start_failed()
         return
     }
     parallel_raise(first)

@@ -270,6 +270,90 @@ thread_test_inherited: fn(entry: I64) {
     jet_rt_free(result, I64{8}, I64{8})
 }
 
+// Every live row names a TCB whose @88 is that row, and each live fake TCB
+// of `slots` is on exactly one row.
+thread_test_registry_check: fn(slots: I64, count: I64) {
+    sync_mutex_lock(thread_tls_registry)
+    live: wrapping(thread_tls_registry + I64{64})
+    length: sync_load(live)
+    data: sync_load(wrapping(live + I64{16}))
+    fakes := I64{0}
+    at := I64{0}
+    loop at < length {
+        tcb: sync_load(wrapping(data + (at + I64{1}) * I64{8}))
+        thread_test_require(sync_load(wrapping(tcb + THREAD_TCB_ROW)) == at)
+        slot := I64{0}
+        loop slot < count {
+            if (sync_load(wrapping(slots + slot * I64{8})) == tcb) -> fakes += I64{1}
+            slot += I64{1}
+        }
+        at += I64{2}
+    }
+    sync_mutex_unlock(thread_tls_registry)
+    expected := I64{0}
+    at = I64{0}
+    loop at < count {
+        if (sync_load(wrapping(slots + at * I64{8})) != I64{0}) -> expected += I64{1}
+        at += I64{1}
+    }
+    thread_test_require(fakes == expected)
+}
+
+// Rows leave the live registry in random order, as fibers past the pool tear
+// down, with registrations between: each step keeps every row's TCB @88 on
+// its row (thread_unregister_tcb moves the last row into the hole).
+thread_test_registry_rows: fn() {
+    count: I64{256}
+    slots: jet_rt_alloc(count * I64{8}, I64{8})
+    thread_zero(slots, count * I64{8})
+    at := I64{0}
+    loop at < count {
+        tcb: jet_rt_alloc(I64{128}, I64{64})
+        thread_zero(tcb, I64{128})
+        sync_store(tcb, tcb)
+        sync_mutex_lock(thread_tls_registry)
+        thread_register_tcb(tcb, tcb)
+        sync_mutex_unlock(thread_tls_registry)
+        sync_store(wrapping(slots + at * I64{8}), tcb)
+        at += I64{1}
+    }
+    thread_test_registry_check(slots, count)
+    seed := I64{12345}
+    steps := I64{0}
+    loop steps < (I64{4096}) {
+        seed = (seed * I64{1103515245} + I64{12345}).bit_and(I64{2147483647})
+        pick: (seed >> I64{8}) % count
+        tcb: sync_load(wrapping(slots + pick * I64{8}))
+        if (tcb != I64{0}) {
+            thread_unregister_tcb(tcb)
+            jet_rt_free(tcb, I64{128}, I64{64})
+            sync_store(wrapping(slots + pick * I64{8}), I64{0})
+        } else if ((seed >> I64{20}).bit_and(I64{1}) == I64{0}) {
+            fresh: jet_rt_alloc(I64{128}, I64{64})
+            thread_zero(fresh, I64{128})
+            sync_store(fresh, fresh)
+            sync_mutex_lock(thread_tls_registry)
+            thread_register_tcb(fresh, fresh)
+            sync_mutex_unlock(thread_tls_registry)
+            sync_store(wrapping(slots + pick * I64{8}), fresh)
+        }
+        if (steps.bit_and(I64{63}) == I64{0}) -> thread_test_registry_check(slots, count)
+        steps += I64{1}
+    }
+    at = I64{0}
+    loop at < count {
+        tcb: sync_load(wrapping(slots + at * I64{8}))
+        if (tcb != I64{0}) {
+            thread_unregister_tcb(tcb)
+            jet_rt_free(tcb, I64{128}, I64{64})
+            sync_store(wrapping(slots + at * I64{8}), I64{0})
+        }
+        at += I64{1}
+    }
+    thread_test_registry_check(slots, count)
+    jet_rt_free(slots, count * I64{8}, I64{8})
+}
+
 #Export(c) jet_rt_thread_fixture_run: fn(callbacks: I64) -> I64 {
     // .init_array already initialized alloc/thread; repeated init is harmless.
     parent: thread_base()
@@ -281,6 +365,7 @@ thread_test_inherited: fn(entry: I64) {
     thread_test_clone(sync_load(callbacks + I64{16}))
     thread_test_rearm(sync_load(callbacks + I64{40}), sync_load(callbacks + I64{32}))
     thread_test_inherited(sync_load(callbacks + I64{48}))
+    thread_test_registry_rows()
     #Unsafe("heap-free fixture success line is one eight-byte write") {
         _ := os_write_word_i64(I64{1}, I64{2932874797083764}, I64{7})
     }

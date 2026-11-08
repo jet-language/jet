@@ -1,0 +1,85 @@
+// Fibers past the pool of idle stacks tear down in random order. 2000 tasks
+// each park on their own channel and are released in a shuffled order; every
+// fifth release also spawns a task that parks the same way, released after
+// the first wave. Each finished fiber past the pool leaves the live thread
+// registry, so its rows are removed in an order unrelated to how they were
+// added. Every task returns the value it was sent, and the thread count is
+// back where it was.
+package: {
+    name: "fiber_teardown"
+    authority: { allow: [FS, FS.Read, IO, Mem.Alloc, Time, Time.Wait] }
+}
+
+use files: core.files
+use time: core.time
+
+TASKS: 2000
+
+waiter: fn(rx: Receiver<Int>) -> Int { rx.receive() ?? -1 }
+
+threads: fn() -[FS]> Int {
+    text: files.read("/proc/self/status") ?? panic("read status")
+    loop line in text.lines() {
+        if line.starts_with("Threads:") -> return Int.parse(line.remove_prefix("Threads:").trim()) ?? -1
+    }
+    -1
+}
+
+// A Fisher-Yates shuffle of 0..<count by a fixed LCG: the same order on
+// every run.
+shuffled: fn(count: Int) -> [Int] {
+    order := [Int]{}
+    loop i in 0..<count -> order.push(i)
+    seed := 12345
+    loop k in 0..<count {
+        seed = (seed * 1103515245 + 12345) % 2147483648
+        j: k + seed % (count - k)
+        held: order[j]
+        order[j] = order[k]
+        order[k] = held
+    }
+    order
+}
+
+run: fn() {
+    senders := [Sender<Int>]{}
+    parked := [Task<Int>]{}
+    loop i in 0..<TASKS {
+        { sender: tx, receiver: rx }: channel<Int>(capacity: 1)
+        senders.push(tx)
+        parked.push(task waiter(rx))
+    }
+    time.sleep(50ms)
+    before: threads()
+    late_senders := [Sender<Int>]{}
+    late := [Task<Int>]{}
+    order: shuffled(TASKS)
+    loop k in 0..<TASKS {
+        senders[order[k]].send(order[k])
+        if k % 5 == 0 {
+            { sender: tx, receiver: rx }: channel<Int>(capacity: 1)
+            late_senders.push(tx)
+            late.push(task waiter(rx))
+        }
+    }
+    right := 0
+    at := 0
+    loop handle in parked {
+        got: handle.join() ?? -1
+        if got == at -> right += 1
+        at += 1
+    }
+    late_count: late.len()
+    late_order: shuffled(late_count)
+    loop k in 0..<late_count -> late_senders[late_order[k]].send(TASKS + late_order[k])
+    late_right := 0
+    at = 0
+    loop handle in late {
+        got: handle.join() ?? -1
+        if got == TASKS + at -> late_right += 1
+        at += 1
+    }
+    time.sleep(100ms)
+    print("{right} of {TASKS} and {late_right} of {late_count} returned what they were sent")
+    print("threads unchanged {threads() == before}")
+}

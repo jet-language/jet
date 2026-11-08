@@ -1,11 +1,11 @@
 // Native task/channel registry. It records only identities and wait/resource
-// facts, never a task payload, channel element or environment. Root128:
+// facts, never a task payload, channel element or environment. Root136:
 // mutex0/next-task8/next-channel16/tasks24/task-count32/channels40/
 // workers48/queued56/exit-reported64/writer72/event-sequence80/events88/
-// event-tail96/event-count104/values112/value-count120. Task88:
-// next0/id8/parent16/site24/label32/state40/wait48/deadline-present56/
-// deadline64/cancelled72/control80. Channel64: next0/id8/depth16/bounded24/
-// capacity32/send40/recv48/closed56.
+// event-tail96/event-count104/values112/value-count120/task-table128.
+// Task96: next0/id8/parent16/site24/label32/state40/wait48/deadline-present56/
+// deadline64/cancelled72/control80/previous88. Channel64: next0/id8/depth16/
+// bounded24/capacity32/send40/recv48/closed56.
 observe_root := I64{0}
 observe_task_key := I64{0}
 // The live snapshot's channel section (ObserveLive.jet), installed by the
@@ -16,9 +16,9 @@ observe_channels_code := I64{0}
 #Export(c) jet_rt_observe_init: fn() {
     if (observe_root != I64{0}) -> return
     #Unsafe("runtime-init runs before any other thread exists") {
-        observe_root = jet_rt_alloc(I64{128}, I64{8})
+        observe_root = jet_rt_alloc(I64{136}, I64{8})
     }
-    thread_zero(observe_root, I64{128})
+    thread_zero(observe_root, I64{136})
     sync_store(wrapping(observe_root + I64{8}), I64{2})
     sync_store(wrapping(observe_root + I64{16}), I64{1})
     sync_store(wrapping(observe_root + I64{80}), I64{1})
@@ -32,13 +32,83 @@ observe_current_task: fn() -> I64 {
     if (current == I64{0}) -> I64{1} else -> current
 }
 
+// The most tasks the registry holds; a task registered past it is not
+// observed (its id is 0).
+OBSERVE_TASK_CAP: I64{4096}
+
+OBSERVE_TASK_BYTES: I64{96}
+
+// The task table maps an id to its node in O(1) under the registry mutex:
+// open addressing with linear probing over twice the cap's slots, so it is
+// never more than half full. Allocated by the first registration and kept
+// for the process.
+OBSERVE_TASK_SLOTS: I64{8192}
+
+observe_task_slot: fn(table: I64, at: I64) -> I64 { wrapping(table + at * I64{8}) }
+
+observe_task_next_slot: fn(at: I64) -> I64 { (at + I64{1}).bit_and(OBSERVE_TASK_SLOTS - I64{1}) }
+
+observe_task_home: fn(id: I64) -> I64 { id.bit_and(OBSERVE_TASK_SLOTS - I64{1}) }
+
 observe_task_find: fn(id: I64) -> I64 {
-    node := sync_load(wrapping(observe_root + I64{24}))
+    table: sync_load(wrapping(observe_root + I64{128}))
+    if (table == I64{0}) -> return I64{0}
+    at := observe_task_home(id)
+    node := sync_load(observe_task_slot(table, at))
     loop node != (I64{0}) {
         if (sync_load(wrapping(node + I64{8})) == id) -> return node
-        node = sync_load(node)
+        at = observe_task_next_slot(at)
+        node = sync_load(observe_task_slot(table, at))
     }
     I64{0}
+}
+
+observe_task_insert: fn(table: I64, node: I64) {
+    at := observe_task_home(sync_load(wrapping(node + I64{8})))
+    loop sync_load(observe_task_slot(table, at)) != (I64{0}) {
+        at = observe_task_next_slot(at)
+    }
+    sync_store(observe_task_slot(table, at), node)
+}
+
+// Removes a present node and shifts later entries of its probe run back
+// into the hole, so every remaining id stays reachable from its home slot.
+observe_task_erase: fn(table: I64, node: I64) {
+    hole := observe_task_home(sync_load(wrapping(node + I64{8})))
+    loop sync_load(observe_task_slot(table, hole)) != node {
+        hole = observe_task_next_slot(hole)
+    }
+    next := observe_task_next_slot(hole)
+    entry := sync_load(observe_task_slot(table, next))
+    loop entry != (I64{0}) {
+        home: observe_task_home(sync_load(wrapping(entry + I64{8})))
+        // An entry whose home lies cyclically in (hole, next] must stay.
+        stays: if (hole <= next) -> (home > hole && home <= next) else -> (home > hole || home <= next)
+        if !stays {
+            sync_store(observe_task_slot(table, hole), entry)
+            hole = next
+        }
+        next = observe_task_next_slot(next)
+        entry = sync_load(observe_task_slot(table, next))
+    }
+    sync_store(observe_task_slot(table, hole), I64{0})
+}
+
+// Links a filled node at the head of the task list and into the table,
+// with the registry mutex held.
+observe_task_link: fn(node: I64) {
+    table := sync_load(wrapping(observe_root + I64{128}))
+    if (table == I64{0}) {
+        table = jet_rt_alloc(OBSERVE_TASK_SLOTS * I64{8}, I64{8})
+        thread_zero(table, OBSERVE_TASK_SLOTS * I64{8})
+        sync_store(wrapping(observe_root + I64{128}), table)
+    }
+    head: sync_load(wrapping(observe_root + I64{24}))
+    sync_store(node, head)
+    if (head != I64{0}) -> sync_store(wrapping(head + I64{88}), node)
+    sync_store(wrapping(observe_root + I64{24}), node)
+    observe_task_insert(table, node)
+    _ := sync_add(wrapping(observe_root + I64{32}), I64{1})
 }
 
 observe_channel_find: fn(id: I64) -> I64 {
@@ -124,7 +194,7 @@ observe_task_node_drop: fn(node: I64) {
     if (label != I64{0}) -> jet_rt_string_drop(label)
     if (wait != I64{0}) -> jet_rt_string_drop(wait)
     scheduler_control_drop(sync_load(wrapping(node + I64{80})))
-    jet_rt_free(node, I64{88}, I64{8})
+    jet_rt_free(node, OBSERVE_TASK_BYTES, I64{8})
 }
 
 // The parked-task report as the process exit's last step (Main.jet
@@ -151,7 +221,7 @@ observe_task_linked := I64{0}
     parent: observe_current_task()
     id: sync_add(wrapping(observe_root + I64{8}), I64{1})
     sync_mutex_lock(observe_root)
-    if (sync_load(wrapping(observe_root + I64{32})) >= I64{4096}) {
+    if (sync_load(wrapping(observe_root + I64{32})) >= OBSERVE_TASK_CAP) {
         sync_mutex_unlock(observe_root)
         return I64{0}
     }
@@ -163,17 +233,15 @@ observe_task_linked := I64{0}
         observe_msg_task_label(text)
         observe_decimal_unsigned(text, site)
     }
-    node: jet_rt_alloc(I64{88}, I64{8})
-    thread_zero(node, I64{88})
+    node: jet_rt_alloc(OBSERVE_TASK_BYTES, I64{8})
+    thread_zero(node, OBSERVE_TASK_BYTES)
     scheduler_control_retain(control)
-    sync_store(node, sync_load(wrapping(observe_root + I64{24})))
     sync_store(wrapping(node + I64{8}), id)
     sync_store(wrapping(node + I64{16}), parent)
     sync_store(wrapping(node + I64{24}), site)
     sync_store(wrapping(node + I64{32}), text)
     sync_store(wrapping(node + I64{80}), control)
-    sync_store(wrapping(observe_root + I64{24}), node)
-    _ := sync_add(wrapping(observe_root + I64{32}), I64{1})
+    observe_task_link(node)
     sync_mutex_unlock(observe_root)
     id
 }
@@ -190,22 +258,21 @@ observe_task_linked := I64{0}
 #Export(c) jet_rt_observe_task_finish: fn(id: I64) {
     if (id == I64{0}) -> return
     sync_mutex_lock(observe_root)
-    link := observe_root + I64{24}
-    node := sync_load(link)
-    loop node != (I64{0}) {
-        if (sync_load(wrapping(node + I64{8})) == id) {
-            sync_store(link, sync_load(node))
-            _ := sync_add(wrapping(observe_root + I64{32}), I64{-1})
-            sync_mutex_unlock(observe_root)
-            // Final control cleanup can reenter the registry; never drop it
-            // while the registry mutex is held.
-            observe_task_node_drop(node)
-            return
-        }
-        link = node
-        node = sync_load(node)
+    node: observe_task_find(id)
+    if (node == I64{0}) {
+        sync_mutex_unlock(observe_root)
+        return
     }
+    next: sync_load(node)
+    previous: sync_load(wrapping(node + I64{88}))
+    if (previous == I64{0}) -> sync_store(wrapping(observe_root + I64{24}), next) else -> sync_store(previous, next)
+    if (next != I64{0}) -> sync_store(wrapping(next + I64{88}), previous)
+    observe_task_erase(sync_load(wrapping(observe_root + I64{128})), node)
+    _ := sync_add(wrapping(observe_root + I64{32}), I64{-1})
     sync_mutex_unlock(observe_root)
+    // Final control cleanup can reenter the registry; never drop it while
+    // the registry mutex is held.
+    observe_task_node_drop(node)
 }
 
 #Export(c) jet_rt_observe_task_control: fn(id: I64, state: I64, cancelled: I64) {

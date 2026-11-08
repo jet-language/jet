@@ -1,0 +1,25 @@
+// 5000 detached tasks park in a receive that never comes (each holds a
+// sender, so the channel never closes) and the program returns. The task
+// registry holds at most 4096 tasks, so the exit report (E3013) counts
+// exactly 4096 parked tasks: those it lists within its byte limit plus the
+// omitted rest. The tasks past the cap run unobserved.
+package: {
+    name: "observe_cap"
+    authority: { allow: [IO, Mem.Alloc, Time, Time.Wait] }
+}
+
+use time: core.time
+
+TASKS: 5000
+
+waiter: fn(tx: Sender<Int>, rx: Receiver<Int>) -> Int { rx.receive() ?? 0 }
+
+run: fn() {
+    { sender: tx, receiver: rx }: channel<Int>(capacity: 1)
+    loop i in 0..<TASKS {
+        parked: task waiter(tx, rx)
+        parked.detach()
+    }
+    time.sleep(500ms)
+    print("leaving with {TASKS} parked")
+}

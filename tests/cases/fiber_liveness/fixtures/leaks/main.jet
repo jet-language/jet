@@ -1,10 +1,13 @@
 // Tasks cancelled while parked give back their stacks. Rounds of 10000
 // tasks each park in a receive and are cancelled. After the first round has
-// filled the pool of idle stacks, two more rounds leave the mapping count
-// within a few rows of the first census (allocator blocks come and go; one
-// leaked fiber would add two rows, a leaked round 20000) and the thread
-// count unchanged. A finished fiber's stack is unmapped by its carrier just
-// after the join wakes, so each census waits for the carriers to settle.
+// filled the pool of idle stacks, two more rounds leave the address space
+// within 160 MiB of the first census (allocator arenas of up to 64 MiB
+// each come and go; one leaked fiber would add its whole stack reservation,
+// at least 192 MiB) and the thread count unchanged. A finished fiber's
+// stack returns to the pool from its carrier just after the join wakes, so
+// every round starts once the carriers settle (a round started before a
+// late return maps one more pooled stack, which is no leak), and the last
+// census waits, up to 5 s, for them too.
 package: {
     name: "fiber_leaks"
     authority: { allow: [FS, FS.Read, IO, Mem.Alloc, Time, Time.Wait] }
@@ -34,28 +37,41 @@ round: fn() -> Int {
     cancelled
 }
 
+// A /proc status field's number ("Threads:\t33", "VmSize:\t 123 kB").
 census: fn(path: String, prefix: String) -[FS]> Int {
     text: files.read(path) ?? panic("read {path}")
-    if prefix == "" -> return text.lines().len()
     loop line in text.lines() {
-        if line.starts_with(prefix) -> return Int.parse(line.remove_prefix(prefix).trim()) ?? -1
+        if line.starts_with(prefix) -> return Int.parse(line.remove_prefix(prefix).remove_suffix("kB").trim()) ?? -1
     }
     -1
 }
 
-settled_maps: fn() -[FS, Time.Wait]> Int {
+BOUND_KB: 160 * 1024
+
+// The address space once the carriers settle: two equal readings 100 ms
+// apart, or the first reading within BOUND_KB of `base` (-1: no base).
+settled_kb: fn(base: Int) -[FS, Time.Wait]> Int {
     time.sleep(100ms)
-    census("/proc/self/maps", "")
+    size := census("/proc/self/status", "VmSize:")
+    loop tries in 0..<50 {
+        if base >= 0 && size - base <= BOUND_KB -> return size
+        time.sleep(100ms)
+        next: census("/proc/self/status", "VmSize:")
+        if base < 0 && next == size -> return size
+        size = next
+    }
+    size
 }
 
 run: fn() {
     first: round()
-    maps_first: settled_maps()
+    size_first: settled_kb(-1)
     threads_first: census("/proc/self/status", "Threads:")
     second: round()
+    _ := settled_kb(-1)
     third: round()
-    maps_last: settled_maps()
+    size_last: settled_kb(size_first)
     threads_last: census("/proc/self/status", "Threads:")
     print("cancelled {first}, {second}, {third} of {TASKS}")
-    print("mappings within 16 rows {maps_last - maps_first <= 16}, threads unchanged {threads_last == threads_first}")
+    print("address space within 160 MiB {size_last - size_first <= BOUND_KB}, threads unchanged {threads_last == threads_first}")
 }
