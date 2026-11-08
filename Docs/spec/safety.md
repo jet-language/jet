@@ -3431,7 +3431,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Observe.jet",
-      "line": 453,
+      "line": 466,
       "column": 9,
       "reason": "an idempotent install: every writer stores the same code address"
     },
@@ -10102,7 +10102,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/Observe.jet | 18:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/Observe.jet | 25:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/Observe.jet | 147:5 | "an idempotent flag: every writer stores the same 1" |
-| Compiler | Compiler/JetRuntime/Source/Observe.jet | 453:9 | "an idempotent install: every writer stores the same code address" |
+| Compiler | Compiler/JetRuntime/Source/Observe.jet | 466:9 | "an idempotent install: every writer stores the same code address" |
 | Compiler | Compiler/JetRuntime/Source/ObserveLive.jet | 70:9 | "an idempotent install: every writer stores the same code address" |
 | Compiler | Compiler/JetRuntime/Source/ObserveLive.jet | 118:9 | "an idempotent install: every writer stores the same code address" |
 | Compiler | Compiler/JetRuntime/Source/ObserveLive.jet | 247:5 | "vetted Observe Linux file/clock syscalls borrow native buffers only for their duration" |

@@ -363,6 +363,20 @@ observe_parked_details: fn(details: I64) -> I64 {
     count
 }
 
+// Parked tasks with no cancellation requested. A parked task whose cancel is
+// already requested has been woken to unwind, so it is not yet a leaked wait.
+observe_parked_unsettled: fn() -> I64 {
+    sync_mutex_lock(observe_root)
+    count := I64{0}
+    node := sync_load(wrapping(observe_root + I64{24}))
+    loop node != (I64{0}) {
+        if sync_load(wrapping(node + I64{40})) == (I64{2}) && sync_load(wrapping(node + I64{72})) == (I64{0}) -> count += I64{1}
+        node = sync_load(node)
+    }
+    sync_mutex_unlock(observe_root)
+    count
+}
+
 observe_has_live_child: fn() -> Bool {
     sync_mutex_lock(observe_root)
     node := sync_load(wrapping(observe_root + I64{24}))
@@ -414,20 +428,19 @@ observe_cancel_live_tasks: fn() {
     if observe_root == (I64{0}) -> return I64{0}
     if sync_swap(wrapping(observe_root + I64{64}), I64{1}) != (I64{0}) -> return I64{0}
     observe_publish_exit()
-    details: jet_rt_string_builder_new()
-    count := observe_parked_details(details)
+    // The window lets a just-submitted child publish its first wait and a
+    // cancelled one finish unwinding; any task still parked after it is
+    // reported, cancelled or not.
     attempt := I64{0}
-    loop count == (I64{0}) && attempt < (I64{25}) {
-        if !observe_has_live_child() {
-            jet_rt_string_drop(details)
-            return I64{0}
-        }
+    loop observe_parked_unsettled() == (I64{0}) && attempt < (I64{25}) {
+        if !observe_has_live_child() -> return I64{0}
         // OS observation delay, not a scheduler wait: it must not alter the
         // exiting task's wait state or deliver its pending cancellation.
         _ := sync_wait(observe_root + I64{64}, I64{1}, sync_deadline(I64{1000000}))
-        count = observe_parked_details(details)
         attempt += I64{1}
     }
+    details: jet_rt_string_builder_new()
+    count: observe_parked_details(details)
     observe_cancel_live_tasks()
     if count == (I64{0}) {
         jet_rt_string_drop(details)

@@ -672,6 +672,11 @@ async_dispatch: fn(core: I64, entry: I64) -> I64 {
                 }
                 break
             }
+            // Past its wait points a handler's outcome is decided: recording
+            // it (and dropping its result) runs under the runtime's own
+            // shield, so a cancel arriving meanwhile waits for the next
+            // handler instead of failing a finished payload.
+            jet_scheduler_shield_enter()
             boxed: event_word(scratch)
             if (event_word(boxed) == I64{1}) {
                 async_handler_line(lines, at, rt_static_text("delivered -> "))
@@ -688,10 +693,15 @@ async_dispatch: fn(core: I64, entry: I64) -> I64 {
             }
             coll_slot_drop(scratch, r_meta)
             coll_zero(scratch, coll_size(r_meta))
+            scheduler_shield_leave_finished()
             if (state == DISPATCH_HANDLER_FAILED && policy == FAILURE_STOP_FIRST) -> break
         }
         at += I64{1}
     }
+    // Every handler has run: the terminal is decided, and the bookkeeping
+    // below (listener releases can run closure drops) cannot deliver a late
+    // cancel that would fail the task instead of publishing its report.
+    jet_scheduler_shield_enter()
     jet_rt_free(scratch, coll_size(r_meta), I64{8})
     async_payload_free(payload, sync_load(wrapping(entry + I64{32})))
     text: jet_rt_string_builder_finish(lines)
@@ -720,5 +730,6 @@ async_dispatch: fn(core: I64, entry: I64) -> I64 {
     _ := sync_add(entry, I64{-1})
     async_notify(core)
     async_unlock(core)
+    scheduler_shield_leave_finished()
     report
 }

@@ -1232,7 +1232,10 @@ arbitrary task and channel wait cycles. The M:N scheduler parks tasks at
 mechanisms do not detect arbitrary wait cycles.
 
 At the process-exit boundary, the observe registry emits the registered E3013
-runtime diagnostic when tasks remain parked. The report is bounded by both task
+runtime diagnostic when tasks remain parked. A parked task whose cancellation
+is already requested is unwinding, so it gets the same short exit window as a
+child that has yet to publish its first wait; it is reported only if it is
+still parked after that window. The report is bounded by both task
 cardinality and rendered bytes; each row carries the task identity, state, wait
 target, and compiler spawn site, while channel payloads and task locals stay
 outside the report. A direct named task call uses that function name plus the
