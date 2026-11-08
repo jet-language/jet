@@ -790,7 +790,6 @@ runner_calls: fn(name: String) -> [RunnerCall] Never! {
         "RunNativeTextNormalize" -> [RunnerCall]{runner_call("", "", "NFC2 Unicode17 20034 rows / both routes / ownership OK")}
         "RunIntCabi" -> [RunnerCall]{runner_call("", "", "exact Int ABI: 9962 numeric/float cases + 6 stopped reports, clone/drop and concurrent hazard fixture; Jet-only provider")}
         "RunIntWiden" -> [RunnerCall]{runner_call("", "", "Jet-only exact Int widening C ABI fixture passed")}
-        "RunCompilerNeededMath" -> [RunnerCall]{runner_call("", "", "Jet-only compiler math C ABI fixture passed")}
         "RunExecutionFixtures" -> [RunnerCall]{runner_call("", "execution-fixture", "native execution witness: all cases passed")}
         "StopWitness" -> [RunnerCall]{
             runner_call("data-sequence", "DynWitness", "8 Dyn List/Entries std Vec bounds/capacity process goldens passed"),
@@ -2481,7 +2480,7 @@ fragment_registry: fn(name: String) -> Registry Never! {
     assert_eq(text_field(transport, "runner"), "Compiler/JetRuntime/Tests/UiWitness.jet")
     assert_eq(array_field(transport, "calls").len(), 6)
     assert(array_field(entry, "sources").contains(Dyn.Text("Compiler/JetRuntime/Tests/UiKeyWitness.c")))
-    loop name in ([String]{"RunDuration", "RunIntWiden", "RunCompilerNeededMath", "RunExecutionFixtures", "StopWitness"}) {
+    loop name in ([String]{"RunDuration", "RunIntWiden", "RunExecutionFixtures", "StopWitness"}) {
         found: specification("JetRuntime/Tests/{name}") ?? panic("{name}: no specification")
         assert_eq(found.kind, "runner")
         assert(found.calls.all(call -> call.expected.ends_with("\n")))

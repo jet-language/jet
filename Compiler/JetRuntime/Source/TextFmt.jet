@@ -3,8 +3,6 @@
 // past the i64 range, round the exact binary expansion half away at the same
 // place. Never print a negative zero. The Word precision is the raw carrier
 // word the Rust adapter receives.
-#Import(c) text_fmt_round: fn(x: Float) -> Float = "round"
-
 TEXT_FMT_BIG_BYTES: I64{328}
 
 // Exact Big32x40 (FloatShortest.jet) division by a small divisor, in place;
@@ -150,7 +148,7 @@ text_fmt_exact: fn(bits: I64, precision: I64) -> I64 {
         if ((rt_f64_bits(scale).bit_and(I64{9223372036854775807})) == I64{9218868437227405312}) -> break
         at += I64{1}
     }
-    rounded: rt_f64_bits(text_fmt_round(value * scale)).bit_and(I64{9223372036854775807})
+    rounded: rt_f64_bits(libm_round(value * scale)).bit_and(I64{9223372036854775807})
     body := I64{0}
     // rounded < 2^63 (a NaN product also takes the exact expansion).
     if (rounded < I64{4890909195324358656}) {
