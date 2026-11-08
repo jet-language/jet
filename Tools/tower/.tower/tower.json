@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6679,
-    "rev": 95904,
+    "rev": 95910,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -69985,6 +69985,16 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-08",
+          "by": "Main",
+          "text": "Gate defect found by TestSystemLead-2 at 7b15e3ba2e: Tools/agent/LaneCheck.jet checks a Jetpack source as a standalone file, outside the assembled Jetpack unit (the Foundation CoreImports aliases plus the area closure), so every package symbol is unknown. 'LaneCheck Jetpack' checks run.jet without the assembled sources and fails at run.jet:13 (no cli_jetpack_main). Until LaneCheck checks Jetpack paths through Jetpack/Bootstrap/Check.jet --area <Area>, a Jetpack patch's receipt is that check plus the area's claims."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
+          "text": "c3 scope at 7b15e3ba2e: the first clause (Tools/testkit gone; no Node or shell test or gate script under Tools/agent or Tools/ci) holds except Tools/agent/roots.{sh,mjs}, and Tools/ci/CompiledWorkloads.jet still copies canvas-test/driver.mjs. The second clause (no receipt or gate needs a non-Jet tool) covers about 55k lines of node and shell under Tools (tower and editors excluded), and each piece already has an owner criterion: #5072 c3 (Browser.launch plus the canvas, web and sourcemap drivers, G4), #5072 c7 (Tools/perf is Jet, G4) and #2858 c75 (the same, G11), #5072 c8 (Tools/gauntlet is Jet, G4), #5201 c27 (web test drivers, G9), #6386 c108 (developer-tool test drivers, G5), and #6666 c2 (integrated-gate.mjs, G11). Peer programs under Tools/gauntlet/entries are workloads under test, not tooling. c3 closes when those criteria are met. Order: the drivers the case corpus calls first (driver, acceptance, sourcemap, native-lifecycle, notebook acceptance, hybrid, reference_app; about 2k lines), then perf and gauntlet. canvas-test/scenario.mjs (7.5k lines) is called only by the JetLSP integration tests, which can't compile until #6650."
+        },
+        {
           "at": "2026-11-07",
           "by": "Main",
           "text": "c3 remaining scope (inventory at 7debbff095): Tools/agent, Tools/ci and Tools/testkit hold no non-Jet gate script; roots.sh and roots.mjs are root-variable libraries that Jet gates only cite in comments. Gates still need non-Jet tools on three paths. (1) Compiler/JetTestKit/Assets/no-nix.sh, the cases isolate:no-nix launcher: TestSystemLead-2 is porting it to a Jet helper. (2) The node browser runners, about 9.9k lines in Tools/{canvas-test,web-test,notebook-test,web-dev-test} plus Tools/agent-eval/dx/manifest.js. Callers: Tools/ci/CompiledWorkloads.jet web_browser_run (driver.mjs, serve.mjs and a node harness), 14 tests/cases rows (web_dev static server x5, web_browser x3, notebook chromium and firefox, canvas_cli_lifecycle, hybrid overlay, reference loops x2), JetLSP Integration CanvasScenarios(.Tests) and CanvasCliLifecycleTests. They depend on #5072 c3 (D-BROWSER-AUTO1=A Browser.launch, with Chromium BiDi through chromedriver provisioned by jetpack browser provision); core.web.browser speaks only BiDi, and Chromium 152 exposes CDP only. A Firefox 157 native-BiDi connect also times out, which is a Core defect. PortsLead-2 owns the order: Firefox connect fix, launch, then the runner ports. serve.mjs goes to Tools/web-test/Serve.jet first, and that is in the lander. (3) node runs the web tier's generated JavaScript in 161 case files; that is the code under test, not tooling, as in 76500069b1."
@@ -71251,7 +71261,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T17:15:48.068Z",
-      "updated": "2026-11-07T23:30:02.134Z",
+      "updated": "2026-11-08T00:02:22.645Z",
       "updatedBy": "Main",
       "goals": [
         "G1"
@@ -73804,6 +73814,16 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-08",
+          "by": "Main",
+          "text": "c65 FAIL 4 settled: in isolation at dev ef5223d6a4, the Jetpack/CLI 'sandbox outputs: regular outputs publish, a FIFO output is refused at once and nothing is published' claim passes 3 of 3 (the engine unit assembled with Assemble.jet aot, then jet test src/jetpack.jet --serial --filter, with seed a0_034). The fresh-run FAIL was its 3000 ms elapsed assert (BuildExecutor.jet:265) under the machine load of 17:56. So every real c65 FAIL at 4df47ce6da is fixed on dev or is seed staleness. Next: Land.jet census, then Tools/release admit at the commit after the lander lands, then fresh-c65 with the new release on a quiet machine."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
+          "text": "Correction to the two earlier c65 logs: the full profile counts ledgered KNOWN-FAILING rows as passing. full.json of the fresh-clone run at 4df47ce6da (seed a0_034, 2h wall) has PASS 13357, FAIL 4, KNOWN-FAILING 1047, UNSUPPORTED 38, SKIP-HOST 214, OPT-IN 54. JetDevserver and JetLSP (#6650), the dogfood gate (#3590), retired spelling (#6582), the perf budgets (#6527) and the other Jetpack rows are ledgered, so they don't block c65. The 4 FAILs: (1) tests/guards closed lists: fixed by df0a4c1961 and 15b9773dee, now 121/121. (2) and (3) cases comptime_sequence_parity/pure_yield_only_generator_folds_at_compile_time (seed: ComptimeEffectWithoutImpure) and marker_groups_modules/nested_import_aliases_bind_groups_locally_and_do_not_fall_through_when_shadowed (seed: 'An inline module's own import is not built yet'): both FAIL with seed a0_034 and PASS with the compiler built from dev at 15b9773dee, so the seed is stale. (4) Jetpack/CLI 'sandbox outputs: ... a FIFO output is refused at once' (BuildExecutor.jet:246, 3 s timing assert): being reproduced in isolation. Plan: once (4) is settled, cut a release from dev HEAD, then rerun fresh-c65 with it."
+        },
+        {
           "at": "2026-11-07",
           "by": "Main",
           "text": "c65 rows rerun at dev dbe15056d6 (fresh-clone env, seed a0_034). tests/guards: 121/121 (the closed-lists guard is fixed). tests/guards/corpus_ast: 34 passed, 2 failed. (1) The corpus policy dogfood gate has 377 findings under root Jetpack: dogfood-json 246, dogfood-path-containment 130 (path.starts_with must be Path.is_within), dogfood-url-query 1. Owned by #3590 c196 (G7). (2) The retired failure surface row comes from the unported Compiler/JetDevserver and JetLSP sources (BrowserWebAdapter.jet:150 and others), owned by #6650 c1. So c65 depends on #6650 c1 and c2 (G5) and #3590 c196 (G7), plus the 24 Jetpack CLI and Engine rows (their messages come from the full.json of the 4df47ce6da run) and a quiet perf rerun."
@@ -74493,7 +74513,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-29T02:09:17.141Z",
-      "updated": "2026-11-07T23:47:13.931Z",
+      "updated": "2026-11-08T00:03:34.833Z",
       "updatedBy": "Main",
       "criteriaLastN": 74
     },
@@ -94640,7 +94660,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "Defect found by TestSystemLead-2 at 56e30acfcf: an #Import(c) call to the runtime symbol jet_rt_process_exit lowers into jet_rt_unreachable. The program prints 'internal error: entered unreachable code:' and exits 101 whatever code it passed. Repro: a 10-line program that imports raw_exit: fn(code: I64) = \"jet_rt_process_exit\" and calls it. Sites hit: Compiler Host.jet:1563 jet_cli_defect_exit, the JetTestKit fixture compiler.jet, and Compiler/JetTestKit/Assets/no_nix.jet. It belongs to c6 (reaching a runtime C symbol through #Import(c)): the imported call must exit with its argument and print nothing."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -94720,7 +94746,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T21:43:21.231Z",
-      "updated": "2026-11-06T21:56:26.549Z",
+      "updated": "2026-11-07T23:49:56.025Z",
       "updatedBy": "Main"
     },
     {
@@ -98270,6 +98296,11 @@
         {
           "at": "2026-11-07",
           "by": "Main",
+          "text": "c1 progress, 56e30acfcf (TestSystemLead-2, on dev): a dead break value still types its loop, and a task body's lone finite loop stays a statement. With the lane's s1 compiler, 3 of c1's 4 rows PASS: control_and_data/yielding_and_result_loops_compile_and_run and corelib/core_net_dns_rejects_reserved_header_forward_pointer_and_impossible_counts / core_net_dns_txt_and_srv_are_real_udp_queries. Bonus #5454 row: dev_parts_routine/yielding_and_result_loops_run_in_native_jit_without_fallback. Regression filters: loop 52 PASS (base 51 PASS, 10 KF), task 81 PASS, break 7 PASS. corelib/core_http_client_bounds_and_strictly_decodes_response_bodies is past E0073 and now fails at E0305 on its guest's .Ok/.Err match of an HTTPResponse, a Core HTTP client defect; its KF line now points to #3665. c1 stays open until that row passes."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
           "text": "Its 19 rows name this card in tests/known-failing.tsv since 26d99ef2fe."
         }
       ],
@@ -98319,7 +98350,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T08:09:39.678Z",
-      "updated": "2026-11-07T08:17:55.404Z",
+      "updated": "2026-11-07T23:49:29.956Z",
       "updatedBy": "Main",
       "criteriaLastN": 4
     },
@@ -187019,6 +187050,48 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-08T00:03:34.833Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0h06654",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-08T00:02:24.586Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0h06654",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-08T00:02:22.646Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0pgowhn",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-08T00:02:04.520Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0pgowhn",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-07T23:49:56.025Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0bbj6h3",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-07T23:49:29.956Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0m4deiq",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-07T23:47:13.931Z",
       "by": "Main",
