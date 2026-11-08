@@ -1,0 +1,121 @@
+// Typed JSON decode reads the document in place. Every input decodes
+// through `json.decode<T>(text)` and through its parsed tree
+// (`tree.decode<T>()`); both print the value, or each FieldError, in order.
+use json: core.encoding.json
+
+#Codable
+Tag: enum {
+    Red
+    Green
+    Level(depth: Int)
+}
+
+#Codable
+Inner: struct {
+    x: Int
+    y: Float?
+}
+
+#[Codable, DenyUnknownFields]
+Strict: struct {
+    a: Int
+    #Rename("bee") b: String
+}
+
+#CodableAsBase
+Usd: distinct Int
+
+#Codable
+Wrap: struct<T> {
+    value: T
+    list: [T]
+}
+
+#Codable
+Row: struct {
+    id: Int
+    name: String
+    tags: [String]
+    tag: Tag
+    inner: Inner?
+    scores: [String: Int]
+    level: Int{5}
+    price: Usd
+    ratio: Float
+    ok: Bool
+    raw: Dyn
+    blob: [U8]
+    #Skip note: String?
+}
+
+show_errors: fn(label: String, errors: [FieldError]) {
+    print("{label} err {errors.len()}")
+    loop error in errors -> print("  {error.path}: {error.reason}")
+}
+
+check: fn<T: [Decode, Encode]>(label: String, text: String) {
+    if json.decode<T>(text) == {
+        .Ok(value) -> print("{label} ok {json.to_string(value) ?? "?"}")
+        .Err(errors) -> show_errors(label, errors)
+    }
+    tree: json.parse(text) ?? {
+        print("{label} tree parse failed")
+        return
+    }
+    if tree.decode<T>() == {
+        .Ok(value) -> print("{label} tree ok {json.to_string(value) ?? "?"}")
+        .Err(errors) -> show_errors("{label} tree", errors)
+    }
+}
+
+run: fn() {
+    good: "{{\"id\":7,\"name\":\"Ada\",\"tags\":[\"a\",\"b\"],\"tag\":\"Red\",\"inner\":{{\"x\":1,\"y\":2.5}},\"scores\":{{\"m\":1,\"n\":2}},\"price\":12,\"ratio\":0.5,\"ok\":true,\"raw\":{{\"k\":[1,null]}},\"blob\":\"AQID\",\"note\":\"skipped\"}}"
+    check<Row>("good", good)
+    check<Row>("spaced", " {{ \"id\" : 7 , \"name\" : \"Ada\" , \"tags\" : [ ] , \"tag\" : {{\"Level\":{{\"depth\":3}}}} , \"inner\" : null , \"scores\" : {{ }} , \"price\" : -4 , \"ratio\" : 1e2 , \"ok\" : false , \"raw\" : null , \"blob\" : [1,2] }} \n")
+    check<Row>("order", "{{\"blob\":[],\"raw\":1,\"ok\":true,\"ratio\":1,\"price\":1,\"scores\":{{}},\"level\":9,\"inner\":{{\"x\":-0}},\"tag\":\"Green\",\"tags\":[],\"name\":\"\",\"id\":123456789012345678901234567890}}")
+    check<Row>("missing", "{{\"name\":\"Ada\",\"tags\":[],\"scores\":{{}},\"price\":1,\"ratio\":1,\"ok\":true,\"raw\":1,\"blob\":[]}}")
+    check<Row>("wrong", "{{\"id\":\"7\",\"name\":7,\"tags\":[1,\"x\",null],\"tag\":\"Blue\",\"inner\":{{\"x\":1.5}},\"scores\":{{\"m\":\"one\",\"n\":2,\"o\":true}},\"price\":\"p\",\"ratio\":\"r\",\"ok\":1,\"raw\":1,\"blob\":\"!!\"}}")
+    check<Row>("shapes", "{{\"id\":[1],\"name\":{{}},\"tags\":{{\"a\":1}},\"tag\":[],\"inner\":[],\"scores\":[1],\"price\":{{}},\"ratio\":[],\"ok\":null,\"raw\":1,\"blob\":{{}}}}")
+    check<Row>("array", "[1,2]")
+    check<Row>("null", "null")
+    check<Row>("dup", "{{\"id\":1,\"id\":2}}")
+    check<Row>("dup-deep", "{{\"id\":1,\"inner\":{{\"x\":1,\"x\":2}}}}")
+    check<Row>("trailing-object", "{{\"id\":1,}}")
+    check<Row>("trailing-array", "{{\"tags\":[\"a\",]}}")
+    check<Row>("truncated", "{{\"id\":1,\"name\":")
+    check<Row>("truncated-array", "{{\"tags\":[")
+    check<Row>("unterminated", "{{\"id\":1")
+    check<Row>("unterminated-array", "{{\"tags\":[1")
+    check<Row>("bad-member", "{{\"id\":1 \"name\":2}}")
+    check<Row>("bad-item", "{{\"tags\":[1 2]}}")
+    check<Row>("bad-key", "{{id:1}}")
+    check<Row>("no-colon", "{{\"id\" 1}}")
+    check<Row>("extra", "{{}} {{}}")
+    check<Row>("empty", "")
+    check<Row>("bad-literal", "{{\"ok\":tru}}")
+    check<Row>("bad-string", "{{\"name\":\"a\\q\"}}")
+    check<Row>("bad-number", "{{\"id\":01}}")
+    check<Row>("lines", "{{\n\"id\":1,\n\"tags\":[\n1,\n}}")
+    check<Strict>("strict", "{{\"a\":1,\"bee\":\"x\"}}")
+    check<Strict>("strict-unknown", "{{\"z\":1,\"a\":1,\"b\":\"x\",\"bee\":\"y\",\"y\":[{{\"q\":1}}]}}")
+    check<Strict>("strict-missing", "{{\"zz\":null}}")
+    check<[Strict]>("strict-list", "[{{\"a\":1,\"bee\":\"x\"}},{{\"a\":\"no\"}},7]")
+    check<Wrap<Int>>("wrap", "{{\"value\":3,\"list\":[1,2,-9223372036854775808]}}")
+    check<Wrap<String>>("wrap-bad", "{{\"value\":3,\"list\":[\"a\",4]}}")
+    check<Wrap<Inner>>("wrap-inner", "{{\"value\":{{\"x\":1}},\"list\":[{{\"y\":1}},{{\"x\":2,\"extra\":[1,{{}}]}}]}}")
+    check<[Tag]>("tags", "[\"Red\",{{\"Level\":{{\"depth\":2}}}},\"Nope\",{{\"Level\":{{\"depth\":\"x\"}}}}]")
+    check<[String: [Int]]>("map", "{{\"a\":[1,2],\"b\":[],\"c\":[\"x\"],\"d\":null}}")
+    check<[Int]?>("opt-list", "null")
+    check<[Int?]>("opt-items", "[1,null,3]")
+    check<Usd>("usd", "42")
+    check<[Usd]>("usd-bad", "[1,\"two\"]")
+    check<[[Int]]>("nested", "[[1],[2,[3]],4]")
+    check<Int>("big", "123456789012345678")
+    check<Int>("bigger", "1234567890123456789")
+    check<Int>("exp", "1E3")
+    check<Int>("frac", "1.5")
+    check<Int>("neg-zero", "-0")
+    check<Float>("float", "-2.5e-3")
+    check<String>("string", "\"a\\u00e9\\n\"")
+    check<Bool>("bool", "false")
+}

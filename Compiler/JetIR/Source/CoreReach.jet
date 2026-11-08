@@ -38,12 +38,13 @@ ir_core_reach_is_top_level: fn(kind: TFuncKind) -> Bool Never! {
 }
 
 // Whether a function is a derived Encode/Decode method: a compiler-generated
-// `encode`/`decode` method. Sema checks one only when a codec requirement
-// demands it, and its callers reach it through an owner-type lookup during
-// instance lowering (`value.encode()` inside `json.to_string<T>`), never by a
-// key in a body, so a checked one is rooted.
+// `encode`/`decode`/`__read` method. Sema checks one only when a codec
+// requirement demands it, and its callers reach it through an owner-type
+// lookup during instance lowering (`value.encode()` inside
+// `json.to_string<T>`, `__Decoding.read<T, …>`), never by a key in a body,
+// so a checked one is rooted.
 ir_core_reach_generated_codec: fn(function: FnBody) -> Bool Never! {
-    function.synthetic && !ir_core_reach_is_top_level(function.kind) && (function.name == "encode" || function.name == "decode")
+    function.synthetic && !ir_core_reach_is_top_level(function.kind) && (function.name == "encode" || function.name == "decode" || function.name == "__read")
 }
 
 // Source-owned selector policy. Both reachability and expression lowering
@@ -197,6 +198,24 @@ ir_process_line_reader: fn(owner: String) -> String Never! {
 // the derived struct form instead.
 ir_core_method_lowered_by_owner: fn(name: String) -> Bool Never! {
     name == "display" || name == "show" || name == "debug" || name == "compare" || name == "close" || name == "read_line" || name == "next"
+}
+
+// The `__Decoding` reads of Core/Encoding/Encoding.jet that lowering selects
+// by a `__Decoding.read` call's target (BuildDyn.jet ir_decoding_read), with
+// no keyed call in a checked body. A compile that lowers checks each up front
+// under Core demand (driver jet_driver_core_lowering_roots).
+ir_decoding_reads: fn() -> [String] Never! {
+    [String]{"read_list", "read_option", "read_map", "read_int", "read_bool", "read_float", "read_string"}
+}
+
+// Whether method `name` of Core nominal `owner` in module `module_identity`
+// is one of those reads.
+ir_core_decoding_read: fn(module_identity: String, owner: String, name: String) -> Bool Never! {
+    if owner != "__Decoding" || !core_identity_in_module(module_identity, "core.encoding") -> return false
+    loop read in ir_decoding_reads() {
+        if read == name -> return true
+    }
+    false
 }
 
 ir_core_reach_add: fn(keys: &[String], key: String) Never! {

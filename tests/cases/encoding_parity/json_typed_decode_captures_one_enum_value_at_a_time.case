@@ -1,0 +1,27 @@
+# #6082: a typed JSON decode captures an enum value (any shape without a
+# streaming read) one value at a time at the cursor. main.jet decodes
+# 100,000, 200,000 and 400,000 records whose enum field takes that route; a
+# capture of the rest of the document would be quadratic (about 10^11 bytes
+# copied at 4x), so finishing inside each step timeout proves the captures
+# are per value. The binary, O0 and the web build all run it.
+requires: tool:node
+fixture: json_typed_decode_captures_one_enum_value_at_a_time.fixture
+env: NO_COLOR=1
+step: jet run --optimize=none main.jet
+timeout: 120s
+exit: 0
+stdout: = json_typed_decode_captures_one_enum_value_at_a_time.out
+step: jet build --optimize=full main.jet
+timeout: 120s
+exit: 0
+step: .jet/build/main
+timeout: 60s
+exit: 0
+stdout: = json_typed_decode_captures_one_enum_value_at_a_time.out
+step: jet build --target web main.jet
+timeout: 120s
+exit: 0
+step: node .jet/build/app.js
+timeout: 120s
+exit: 0
+stdout: = json_typed_decode_captures_one_enum_value_at_a_time.out

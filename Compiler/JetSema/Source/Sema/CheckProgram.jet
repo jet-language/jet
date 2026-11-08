@@ -2499,7 +2499,7 @@ sema_comptime_indexed_function_source: fn(graph: SemaRegistrationGraph, module_i
             if module_index >= 0 && declaring != module_index -> return None
             // copy: the source is the caller's own; the row stays in the graph.
             declaration := graph.modules[declaring].impls[owner].methods[index].declaration.copy()
-            if sema_codec_pending_body(graph, declaring, owner) == .Val(body) -> declaration.body = body
+            if sema_codec_pending_body(graph, declaring, owner, declaration.name) == .Val(body) -> declaration.body = body
             return Val(SemaComptimeFunctionSource{declaration: declaration, symbol: graph.modules[declaring].impls[owner].methods[index].symbol.copy(), kind: sema_comptime_method_kind(graph.modules[declaring].impls[owner].methods[index].declaration, graph.modules[declaring].impls[owner].target_type, graph.modules[declaring].impls[owner].trait_symbol), raw_protocol_return: graph.modules[declaring].impls[owner].methods[index].raw_protocol_return})
         }
         .Foreign(_, _) -> return None
@@ -7165,7 +7165,7 @@ sema_comptime_codec_methods_add: fn(graph: SemaRegistrationGraph, ty: Type, modu
                     else -> ""
                 }
                 if method_name == "" -> next
-                if sema_codec_impl_pending(implementation) && sema_codec_pending_body(graph, reference.module_index, reference.row) == None -> next
+                if sema_codec_impl_pending(implementation) && sema_codec_pending_body(graph, reference.module_index, reference.row, method_name) == None -> next
                 if sema_type_graph_impl_target_nominal_key(graph, implementation) != Val(nominal_key) -> next
                 loop method in implementation.methods {
                     if method.symbol.name == method_name -> found.push((module_identity: graph.modules[reference.module_index].module_identity.copy(), key: method.symbol.id.key.copy()))

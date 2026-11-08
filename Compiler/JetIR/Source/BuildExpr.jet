@@ -2756,6 +2756,10 @@ ir_static_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, owner: T
     }
     loop arg in ir_facts(p, b, type_args, span) -> all.push(arg)
     if ir_failed(b) -> return -1
+    if ir_decoding_read(p, function, all) == .Val(read) {
+        if ir_function_row(p, read.key) == None -> return ir_fail_slot(b, span, "missing Core decode read {read.key}")
+        return ir_call(m, p, b, read.key, read.args, -1, [IRWriteBack]{}, args, span)
+    }
     ir_call(m, p, b, method.symbol.key, all, -1, [IRWriteBack]{}, args, span)
 }
 
