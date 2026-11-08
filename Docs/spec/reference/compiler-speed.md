@@ -124,7 +124,7 @@ and none runs twice. If a milestone lands short of its lines-per-second target,
 the measured number is what ships (`D-SPEED-CHECKS1`).
 
 `Tools/perf/budget/budget.json` marks the rows that carry these checks
-`always_on`. `Tools/perf/budget/check.mjs` prints their subtotal. It fails a
+`always_on`. `Tools/perf/budget/Check.jet` prints their subtotal. It fails a
 full-unit trace (the compile reached `lower`) that lacks any always-on span.
 
 ## Performance gate and dated evidence
