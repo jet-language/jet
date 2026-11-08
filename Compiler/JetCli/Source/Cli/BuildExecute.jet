@@ -529,7 +529,9 @@ JET_CLI_BUILD_JET_TOOLCHAIN: "(jet)"
 // handle id is the executor handle id; the session's toolchain 0 is the
 // executor's inferred host. A step whose tool is `b.jet()` runs on one more
 // toolchain: the running compiler's folder (with its runtime pack and
-// IDENTITY) mounted read-only, its one tool `jet`.
+// IDENTITY) mounted read-only, its one tool `jet`. That jet is this compiler,
+// so the step gets this compiler's identity in `JET_COMPILER_IDENTITY`: an
+// unpublished compiler has no IDENTITY file beside it.
 jet_cli_build_hermetic_plan: fn(graph: BuildPlanExecution, action_timeout_ms: Int) -> HermeticBuildPlan HermeticBuildError! {
     build := HermeticBuildContext.new()
     provenance: BuildProvenance.user_declared("fn build", None)
@@ -541,12 +543,13 @@ jet_cli_build_hermetic_plan: fn(graph: BuildPlanExecution, action_timeout_ms: In
     runs_jet: loop action in graph.actions {
         if graph.files[action.tool].kind == "jet" -> break true
     } ?? false
+    jet_identity := ""
     if runs_jet {
         compiler: cli_sys.executable()
         // A compiler without a named identity is known by its bytes; one it
         // can't read can't run the step either.
-        identity: jet_cli_compiler_identity() ?? build_crypto.sha256(cli_files.read_bytes(compiler) ?? [U8]{}).hex()
-        spec: ToolchainSpec.host("host", provenance).with_read_only_mount_identity(jet_cli_executable_dir(), JET_CLI_BUILD_JET_MOUNT, identity).with_tool("jet", "{JET_CLI_BUILD_JET_MOUNT}/{cli_files.basename(compiler)}").declared_only()
+        jet_identity = jet_cli_compiler_identity() ?? build_crypto.sha256(cli_files.read_bytes(compiler) ?? [U8]{}).hex()
+        spec: ToolchainSpec.host("host", provenance).with_read_only_mount_identity(jet_cli_executable_dir(), JET_CLI_BUILD_JET_MOUNT, jet_identity).with_tool("jet", "{JET_CLI_BUILD_JET_MOUNT}/{cli_files.basename(compiler)}").declared_only()
         toolchains.push(build.toolchain(JET_CLI_BUILD_JET_TOOLCHAIN, spec))
     }
     signing := [SigningIdentityHandle]{}
@@ -563,8 +566,11 @@ jet_cli_build_hermetic_plan: fn(graph: BuildPlanExecution, action_timeout_ms: In
     }
     actions := [HermeticActionHandle]{}
     loop action in graph.actions {
-        toolchain: if graph.files[action.tool].kind == "jet" -> toolchains[toolchains.len() - 1] else -> toolchains[action.toolchain]
-        actions.push(build.action(action.name, jet_cli_build_action_spec(action, toolchain, probes, signing, action_timeout_ms)))
+        runs_this_jet: graph.files[action.tool].kind == "jet"
+        toolchain: if runs_this_jet -> toolchains[toolchains.len() - 1] else -> toolchains[action.toolchain]
+        spec := jet_cli_build_action_spec(action, toolchain, probes, signing, action_timeout_ms)
+        if runs_this_jet -> spec = spec.with_env(JET_CLI_COMPILER_IDENTITY_ENV, jet_identity)
+        actions.push(build.action(action.name, spec))
     }
     targets := [TargetRef]{}
     loop target in graph.targets {
