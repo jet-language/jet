@@ -1204,6 +1204,207 @@ ir_map_found_option: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, shape: IRMapS
     result
 }
 
+// The parts of a group update (ir_map_take_fuses): the map variable and the
+// group variable (ir_map_take_name), and the key node of the `get`.
+IRMapTake: struct { map: String, group: String, key: Int }
+
+// Whether statement `at` of `body` starts a group update: `group := map.get(key)
+// ?? <empty List>`, then only pushes onto `group` of values that read
+// neither `map` nor `group` (ir_map_take_reads), then `map[key] = group`.
+// Its `get` takes the entry's value out of the map (ir_map_take), leaving
+// the empty List in its place, so the pushes grow the group the map held
+// instead of a copy of it, and the store puts it back. Nothing between the
+// `get` and the store reads the map, so taking the value is the same
+// program and the update is linear in the group, not quadratic.
+ir_map_take_fuses: fn(p: IRProgram, b: IRBuilder, body: [Int], at: Int) -> Bool Never! {
+    if at + 2 >= body.len() -> return false
+    update: ir_map_take_let(p, b, body[at]) ?? return false
+    index := at + 1
+    loop index < body.len() {
+        statement: ir_body_stmt(p, b, body[index])
+        if statement == .Assign(place, op, value, _, _) {
+            return index > at + 1 && op == None && ir_map_take_store(p, b, update, place, value)
+        }
+        if statement == .ExprStmt(value, _) {
+            if !ir_map_take_push(p, b, update, value) -> return false
+        } else {
+            return false
+        }
+        index += 1
+    }
+    false
+}
+
+// The group update `statement` starts, when it is `group := map.get(key) ??
+// <empty List>` binding a plain variable, with `map` a variable and `key` a
+// variable or a field of one.
+ir_map_take_let: fn(p: IRProgram, b: IRBuilder, statement: Int) -> IRMapTake? Never! {
+    if ir_body_stmt(p, b, statement) == .Let(local, _, init, _, _, _) {
+        if local.generated || local.deref || local.place_borrow || local.address_lifetime != None || local.persist_key != None -> return None
+        if ir_body_node(p, b, init).kind == .OrFallback(value, fallback, _) {
+            if fallback == .Value(seed) {
+                if !ir_map_take_empty(p, b, seed) -> return None
+                if ir_body_node(p, b, value).kind == .BuiltinMethod(receiver, operation, args) {
+                    if operation != .GetMap || args.len() != 1 || !ir_map_take_key(p, b, args[0]) -> return None
+                    map: ir_map_take_local(p, b, receiver) ?? return None
+                    return Val(IRMapTake{map: map, group: ir_map_take_name(local), key: args[0]})
+                }
+            }
+        }
+    }
+    None
+}
+
+// Whether node `id` is an empty List literal.
+ir_map_take_empty: fn(p: IRProgram, b: IRBuilder, id: Int) -> Bool Never! {
+    if ir_body_node(p, b, id).kind == {
+        .ListLit(values) | .List(values, _) -> return values.len() == 0
+        else -> return false
+    }
+}
+
+// Whether key node `id` is a variable or a field of one.
+ir_map_take_key: fn(p: IRProgram, b: IRBuilder, id: Int) -> Bool Never! {
+    if ir_body_node(p, b, id).kind == {
+        .Local(_) -> return true
+        .Field(receiver, _) -> return ir_map_take_key(p, b, receiver)
+        else -> return false
+    }
+}
+
+// Whether key nodes `left` and `right` read the same variable and fields.
+ir_map_take_same: fn(p: IRProgram, b: IRBuilder, left: Int, right: Int) -> Bool Never! {
+    other: ir_body_node(p, b, right)
+    if ir_body_node(p, b, left).kind == {
+        .Local(local) -> {
+            if other.kind == .Local(again) -> return ir_map_take_name(local) == ir_map_take_name(again)
+            return false
+        }
+        .Field(receiver, field) -> {
+            if other.kind == .Field(again, same) -> return field.name == same.name && ir_map_take_same(p, b, receiver, again)
+            return false
+        }
+        else -> return false
+    }
+}
+
+// The variable node `id` reads (through a borrow, move or copy of it).
+ir_map_take_local: fn(p: IRProgram, b: IRBuilder, id: Int) -> String? Never! {
+    if ir_body_node(p, b, id).kind == {
+        .Local(local) -> return Val(ir_map_take_name(local))
+        .Borrow(place, _) | .Move(place) | .Clone(place, _) -> return ir_map_take_local(p, b, place)
+        else -> return None
+    }
+}
+
+ir_map_take_name: fn(local: TLocal) -> String Never! {
+    if local.symbol_id == .Val(id) -> return "{local.name}/{id.key}"
+    local.name
+}
+
+// Whether node `id` is `group.push(value)` with `value` only reading
+// (ir_map_take_reads).
+ir_map_take_push: fn(p: IRProgram, b: IRBuilder, update: IRMapTake, id: Int) -> Bool Never! {
+    if ir_body_node(p, b, id).kind == .BuiltinMethod(receiver, operation, args) {
+        if operation != .Push -> return false
+        group: ir_map_take_local(p, b, receiver) ?? return false
+        if group != update.group -> return false
+        loop arg in args {
+            if !ir_map_take_reads(p, b, update, arg) -> return false
+        }
+        return true
+    }
+    false
+}
+
+// Whether evaluating node `id` only reads literals and variables other than
+// the update's map and group, fields of them and primitive operators.
+ir_map_take_reads: fn(p: IRProgram, b: IRBuilder, update: IRMapTake, id: Int) -> Bool Never! {
+    if ir_body_node(p, b, id).kind == {
+        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) -> return true
+        .Local(local) -> {
+            name: ir_map_take_name(local)
+            return name != update.map && name != update.group
+        }
+        .Field(receiver, _) -> return ir_map_take_reads(p, b, update, receiver)
+        .Borrow(place, _) | .Move(place) | .Clone(place, _) | .ExplicitCopy(place) -> return ir_map_take_reads(p, b, update, place)
+        .Binary(_, _, _, lhs, rhs) -> return ir_map_update_primitive(ir_ty(p, b, lhs)) && ir_map_update_primitive(ir_ty(p, b, rhs)) && ir_map_take_reads(p, b, update, lhs) && ir_map_take_reads(p, b, update, rhs)
+        else -> return false
+    }
+}
+
+// Whether `place = value` is `map[key] = group` for the update's map, key
+// and group.
+ir_map_take_store: fn(p: IRProgram, b: IRBuilder, update: IRMapTake, place: BodyPlace, value: Int) -> Bool Never! {
+    if place == .Expr(target) {
+        if ir_body_node(p, b, target).kind == .Index(base, index, _, _, _, _) {
+            map: ir_map_take_local(p, b, base) ?? return false
+            group: ir_map_take_local(p, b, value) ?? return false
+            return map == update.map && group == update.group && ir_map_take_same(p, b, index, update.key)
+        }
+    }
+    false
+}
+
+// `local := map.get(key) ?? <empty List>` of a group update
+// (ir_map_take_fuses): a found entry's value moves into `local` and the
+// empty List takes its place in the map; a missing key binds the empty List.
+ir_map_take: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, local: TLocal, init: Int, span: Span) Never! {
+    ir_stmt_line(p, b, span)
+    get := -1
+    seed := -1
+    if ir_body_node(p, b, init).kind == .OrFallback(value, fallback, _) {
+        get = value
+        if fallback == .Value(empty) -> seed = empty
+    }
+    receiver := -1
+    index := -1
+    if ir_body_node(p, b, get).kind == .BuiltinMethod(base, _, args) {
+        receiver = base
+        index = args[0]
+    }
+    if seed < 0 || receiver < 0 -> return ir_fail(b, span, "map group take")
+    base_ty: ir_ty(p, b, receiver)
+    map: ir_write_base(m, p, b, receiver, span)
+    if ir_failed(b) || map < 0 -> return
+    ir_make_unique(m, p, b, map)
+    row: b.f.slot_type[map]
+    shape: ir_map_shape(m, p, row) ?? return ir_fail(b, span, "map group take of {ir_type_name(base_ty)}")
+    key: ir_value_as(m, p, b, index, shape.key.ty, span)
+    if ir_failed(b) || key < 0 -> return
+    word_row: ir_word_row(m)
+    found: ir_map_call(m, p, b, row, "map.find", [Int]{map, key}, word_row)
+    ir_release(m, b, key)
+    empty: ir_value_as(m, p, b, seed, shape.value.ty, span)
+    if ir_failed(b) || empty < 0 -> return
+    if !b.fresh[empty] -> return ir_fail(b, span, "map group take of a held fallback")
+    value_row: shape.value.ty
+    aggregate: m.types[value_row].kind == .Aggregate
+    size: m.types[value_row].size
+    taken: ir_fresh_temp(m, b, value_row)
+    if aggregate -> ir_emit(b.f, IROp.StackAddress, taken, size, 8, -1, b.line)
+    none: ir_word_const(m, b, 0)
+    present: ir_bool_op(m, b, IROp.Ge, found, none)
+    ir_open_if(b.f, present, b.line)
+    entries: ir_load_word(m, b, map, 16)
+    entry: ir_element_address(m, b, entries, found, shape.stride)
+    held: ir_load_at(m, b, entry, shape.value.offset, value_row)
+    if aggregate {
+        ir_emit(b.f, IROp.CopyBytes, -1, taken, held, size, b.line)
+        ir_emit(b.f, IROp.CopyBytes, -1, held, empty, size, b.line)
+    } else {
+        ir_emit(b.f, IROp.Move, taken, held, -1, -1, b.line)
+        ir_emit(b.f, IROp.Store, -1, entry, shape.value.offset, empty, b.line)
+    }
+    ir_else(b.f, b.line)
+    if aggregate -> ir_emit(b.f, IROp.CopyBytes, -1, taken, empty, size, b.line) else -> ir_emit(b.f, IROp.Move, taken, empty, -1, -1, b.line)
+    ir_end(b.f, b.line)
+    b.fresh[empty] = false
+    ir_bind_local(m, p, b, local, taken, span)
+    bound: b.bindings[b.bindings.len() - 1].slot
+    ir_close_arm(m, p, b, bound, false, span)
+}
+
 // `[k: v, ...]` in display: `[:]` when empty; keys and values render as
 // themselves.
 ir_render_map: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, builder: Int, slot: Int, mode: IRRender, span: Span) Never! {
