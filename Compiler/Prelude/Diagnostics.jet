@@ -4803,7 +4803,7 @@ MapGroupRoundTrip: struct {
         no_fix: None
         fix_safety: .NeedsReview
         what: fn(self) -> String { "`{self.group}` copies the whole group out of `{self.map}` and stores it back" }
-        why: fn(self) -> String { "`{self.group}` still shares the entry's buffer when it is written, so the write first copies the whole group, and storing it back drops the Map's old copy; in a loop that is quadratic. Only a block that pushes plain values onto a group taken with an empty List fallback moves the group out of the Map without a copy" }
+        why: fn(self) -> String { "`{self.group}` still shares the entry's buffer when it is written, so the write first copies the whole group, and storing it back drops the Map's old copy; in a loop that is quadratic. The build grows the entry in place only when the Map is a variable the function declares, the statements before the store neither name it nor `break` or `next`, and nothing after the store names the group" }
         fix: fn(self) -> String { "Grow the entry in place: `if !{self.map}.has_key({self.key}) -> {self.map}[{self.key}] = {self.fallback}`, then `{self.map}[{self.key}].{self.write}(…)`" }
     }
 }

@@ -19,7 +19,7 @@
 // frozen buffer (capacity 0: static, empty) has no trailer: its entries are
 // all in order, found by binary search, as every Map of other keys is.
 
-use jet_foundation.[Span, Type, TBinaryOp, BodyMapEntry, TypeTupleField, TPanicLoc, TPanicLocal, name_rows_set, name_rows_value, type_carrier_identity]
+use jet_foundation.[Span, Type, TBinaryOp, BodyMapEntry, BodyOrFallback, StmtKind, TypeTupleField, TPanicLoc, TPanicLocal, body_each_expr_child, body_each_stmt_child, name_rows_set, name_rows_value, type_carrier_identity]
 
 // The entry tuple `(key: K, value: V)` of a Map type, None for any other.
 ir_map_entry_type: fn(ty: Type) -> Type? Never! {
@@ -1204,73 +1204,264 @@ ir_map_found_option: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, shape: IRMapS
     result
 }
 
-// The parts of a group update (ir_map_take_fuses): the map variable and the
-// group variable (ir_map_take_name), and the key node of the `get`.
-IRMapTake: struct { map: String, group: String, key: Int }
+// The parts of a group update (ir_map_take_fuses): the map's variable, the
+// group's variable and the variable the key reads (ir_map_take_name), and
+// the key node of the `get`.
+IRMapTake: struct { map: String, group: String, key_root: String, key: Int }
 
-// Whether statement `at` of `body` starts a group update: `group := map.get(key)
-// ?? <empty List>`, then only pushes onto `group` of values that read
-// neither `map` nor `group` (ir_map_take_reads), then `map[key] = group`.
-// Its `get` takes the entry's value out of the map (ir_map_take), leaving
-// the empty List in its place, so the pushes grow the group the map held
-// instead of a copy of it, and the store puts it back. Nothing between the
-// `get` and the store reads the map, so taking the value is the same
-// program and the update is linear in the group, not quadratic. JetSema's
-// L0534 (Statements.jet sema_stmt_map_group_moved) matches the same shape in
-// the source and stays silent on it.
-ir_map_take_fuses: fn(p: IRProgram, b: IRBuilder, body: [Int], at: Int) -> Bool Never! {
-    if at + 2 >= body.len() -> return false
-    update: ir_map_take_let(p, b, body[at]) ?? return false
+// The index in `body` of the store of the group update statement `at`
+// starts (-1: none). A group update is `group := map.get(key) ?? fallback`,
+// statements, then `map[key] = group`. It builds as the write window
+// `group := &map[key]`, a missing key first seeded with the fallback
+// (ir_map_take), and its store builds nothing: each write of `group` lands
+// in the map's entry, so growing a group row by row is linear in the group,
+// not a copy of it per row. That is the same program when only `group` can
+// see the entry until the store. The map is a variable this frame owns (no
+// parameter, capture or frame cell), no closure of the body names it and no
+// transaction holds the update (ir_map_take_let): a return, a failure or a
+// stop that leaves the frame between the take and the store ends the map
+// unread, as it ends the group it would have stored. The statements between
+// never name the map, never `break` or `next` past the store, never write
+// the key's variable and never move the group out (ir_map_take_stmt_ok);
+// nothing after the store names the group.
+// JetSema's L0534 (Statements.jet sema_stmt_map_group_moved) matches the
+// same shape in the source and stays silent on it.
+ir_map_take_fuses: fn(p: IRProgram, b: IRBuilder, body: [Int], at: Int) -> Int Never! {
+    if at + 1 >= body.len() -> return -1
+    update: ir_map_take_let(p, b, body[at]) ?? return -1
     index := at + 1
     loop index < body.len() {
         statement: ir_body_stmt(p, b, body[index])
         if statement == .Assign(place, op, value, _, _) {
-            return index > at + 1 && op == None && ir_map_take_store(p, b, update, place, value)
-        }
-        if statement == .ExprStmt(value, _) {
-            if !ir_map_take_push(p, b, update, value) -> return false
-        } else {
-            return false
+            if op == None && ir_map_take_store(p, b, update, place, value) {
+                if !ir_map_take_stmts_ok(p, b, update, body, at + 1, index, true) -> return -1
+                if !ir_map_take_stmts_ok(p, b, update, body, index + 1, body.len(), false) -> return -1
+                return index
+            }
         }
         index += 1
     }
-    false
+    -1
 }
 
 // The group update `statement` starts, when it is `group := map.get(key) ??
-// <empty List>` binding a plain variable, with `map` a variable and `key` a
-// variable or a field of one.
+// fallback` binding a plain variable, with `map` a variable this frame owns
+// that no closure of the body names and `key` a variable or a field of one.
 ir_map_take_let: fn(p: IRProgram, b: IRBuilder, statement: Int) -> IRMapTake? Never! {
     if ir_body_stmt(p, b, statement) == .Let(local, _, init, _, _, _) {
         if local.generated || local.deref || local.place_borrow || local.address_lifetime != None || local.persist_key != None -> return None
-        if ir_body_node(p, b, init).kind == .OrFallback(value, fallback, _) {
-            if fallback == .Value(seed) {
-                if !ir_map_take_empty(p, b, seed) -> return None
-                if ir_body_node(p, b, value).kind == .BuiltinMethod(receiver, operation, args) {
-                    if operation != .GetMap || args.len() != 1 || !ir_map_take_key(p, b, args[0]) -> return None
-                    map: ir_map_take_local(p, b, receiver) ?? return None
-                    return Val(IRMapTake{map: map, group: ir_map_take_name(local), key: args[0]})
-                }
+        if b.cells.contains(local.name) || b.transactions.len() > 0 -> return None
+        if ir_body_node(p, b, init).kind == .OrFallback(value, _, _) {
+            if ir_body_node(p, b, value).kind == .BuiltinMethod(receiver, operation, args) {
+                if operation != .GetMap || args.len() != 1 -> return None
+                key_root: ir_map_take_key_root(p, b, args[0]) ?? return None
+                if b.cells.contains(key_root.name) -> return None
+                map: ir_map_take_owned(p, b, receiver) ?? return None
+                return Val(IRMapTake{map: map, group: ir_map_take_name(local), key_root: ir_map_take_name(key_root), key: args[0]})
             }
         }
     }
     None
 }
 
-// Whether node `id` is an empty List literal.
-ir_map_take_empty: fn(p: IRProgram, b: IRBuilder, id: Int) -> Bool Never! {
-    if ir_body_node(p, b, id).kind == {
-        .ListLit(values) | .List(values, _) -> return values.len() == 0
-        else -> return false
+// The variable a group update's map reads (ir_map_take_name), when it is a
+// variable of this frame that still owns its Map, lends it to nothing, lives
+// in no frame cell and no closure of the body names.
+ir_map_take_owned: fn(p: IRProgram, b: IRBuilder, receiver: Int) -> String? Never! {
+    local: ir_map_take_variable(p, b, receiver) ?? return None
+    if b.cells.contains(local.name) -> return None
+    binding: ir_lookup_local(b, local) ?? return None
+    slot: binding.slot
+    if binding.indirect >= 0 || binding.write || !binding.owned -> return None
+    if b.f.slot_kind[slot] != .Local || !ir_owned_binding(b, slot) || ir_lent(b, slot) -> return None
+    name: ir_map_take_name(local)
+    if ir_map_take_captured(p, b, name) -> return None
+    Val(name)
+}
+
+// Whether a closure of the body names the variable `name`.
+ir_map_take_captured: fn(p: IRProgram, b: IRBuilder, name: String) -> Bool Never! {
+    found := false
+    if b.row >= 0 {
+        loop node in p.functions[b.row].tree.nodes {
+            if node.kind == .Lambda(_) -> body_each_expr_child(p.functions[b.row].tree, node, (child: Int) -> ir_map_take_note(p, b, child, name, found))
+        }
+        loop node in b.made.nodes {
+            if node.kind == .Lambda(_) -> body_each_expr_child(p.functions[b.row].tree, node, (child: Int) -> ir_map_take_note(p, b, child, name, found))
+        }
+    } else {
+        loop node in b.made.nodes {
+            if node.kind == .Lambda(_) -> body_each_expr_child(b.made, node, (child: Int) -> ir_map_take_note(p, b, child, name, found))
+        }
+    }
+    found
+}
+
+// Sets `found` when node `id` or a node inside it reads the variable `name`.
+ir_map_take_note: fn(p: IRProgram, b: IRBuilder, id: Int, name: String, found: &Bool) Never! {
+    if found -> return
+    node: ir_body_node(p, b, id)
+    if node.kind == .Local(local) {
+        if ir_map_take_name(local) == name {
+            found = true
+            return
+        }
+    }
+    if b.row >= 0 {
+        body_each_expr_child(p.functions[b.row].tree, node, (child: Int) -> ir_map_take_note(p, b, child, name, found))
+    } else {
+        body_each_expr_child(b.made, node, (child: Int) -> ir_map_take_note(p, b, child, name, found))
     }
 }
 
-// Whether key node `id` is a variable or a field of one.
-ir_map_take_key: fn(p: IRProgram, b: IRBuilder, id: Int) -> Bool Never! {
+// Whether statements `from..<to` of `body` keep a group update's window
+// sound: `between` its take and its store they never name the map, never
+// leave the block early, never write the key's variable and never move the
+// group out; after the store they never name the group.
+ir_map_take_stmts_ok: fn(p: IRProgram, b: IRBuilder, update: IRMapTake, body: [Int], from: Int, to: Int, between: Bool) -> Bool Never! {
+    loop index in from..<to {
+        statement: body[index]
+        if !ir_map_take_stmt_ok(p, b, update, statement, between) -> return false
+        bad := false
+        kind: ir_body_stmt(p, b, statement)
+        if b.row >= 0 {
+            body_each_stmt_child(p.functions[b.row].tree, kind, (expression: Int) -> ir_map_take_node_ok(p, b, update, expression, between, bad))
+        } else {
+            body_each_stmt_child(b.made, kind, (expression: Int) -> ir_map_take_node_ok(p, b, update, expression, between, bad))
+        }
+        if bad -> return false
+    }
+    true
+}
+
+// The statement rules of ir_map_take_stmts_ok, through the statements
+// nested in `statement` (its expressions are ir_map_take_node_ok's).
+ir_map_take_stmt_ok: fn(p: IRProgram, b: IRBuilder, update: IRMapTake, statement: Int, between: Bool) -> Bool Never! {
+    kind: ir_body_stmt(p, b, statement)
+    if kind == {
+        .Return(_, _) -> return true
+        // After the store, leaving the block ends the group too.
+        .Break(_, _) | .BreakValue(_, _, _) | .Continue(_, _) -> return !between
+        else -> {}
+    }
+    nested: ir_map_take_nested(kind) ?? return false
+    if kind == .Assign(place, _, _, _, _) {
+        root := ""
+        if place == .Local(local) -> root = ir_map_take_name(local)
+        if place == .Expr(target) -> root = ir_map_take_root(p, b, target) ?? ""
+        if between && (root == update.map || root == update.key_root) -> return false
+        if !between && root == update.group -> return false
+    }
+    loop inner in nested {
+        if !ir_map_take_stmt_ok(p, b, update, inner, between) -> return false
+    }
+    true
+}
+
+// The statements nested in `kind`: an `if`'s, a `match`'s or a loop's
+// bodies; None for a statement a group update does not look into (one that
+// leaves the block early among them).
+ir_map_take_nested: fn(kind: StmtKind) -> [Int]? Never! {
+    nested := [Int]{}
+    if kind == {
+        .Let(_, _, _, _, _, _) | .Assign(_, _, _, _, _) | .ExprStmt(_, _) -> {}
+        .If(_, then_body, else_body, _, _) -> {
+            loop inner in then_body -> nested.push(inner)
+            if else_body == .Val(other) {
+                loop inner in other -> nested.push(inner)
+            }
+        }
+        .Loop(_, body, _) | .While(_, _, body, _) | .Inline(body, _) | .DebugOnly(body, _) -> {
+            loop inner in body -> nested.push(inner)
+        }
+        .ForIn(_, _, _, _, _, _, _, _, _, _, body, _) -> {
+            loop inner in body -> nested.push(inner)
+        }
+        .ForRange(_, _, _, _, _, _, body, _, _) -> {
+            loop inner in body -> nested.push(inner)
+        }
+        .Range(_, _, _, _, _, _, _, _, body, _) -> {
+            loop inner in body -> nested.push(inner)
+        }
+        .CountedLoop(_, _, _, _, _, body, _) -> {
+            loop inner in body -> nested.push(inner)
+        }
+        .Match(_, arms, _, _) -> {
+            loop arm in arms {
+                loop inner in arm.body -> nested.push(inner)
+            }
+        }
+        .EnumMatch(_, arms, else_body, _, _) -> {
+            loop arm in arms {
+                loop inner in arm.body -> nested.push(inner)
+            }
+            if else_body == .Val(other) {
+                loop inner in other -> nested.push(inner)
+            }
+        }
+        else -> return None
+    }
+    Val(nested)
+}
+
+// Sets `bad` when node `id` or a node inside it breaks a group update's
+// window (ir_map_take_stmts_ok): `between` the take and the store, a read
+// of the map, a fallback that jumps past the store, a block of statements
+// inside an expression (which may), a raw address, a write or move of the
+// key's variable or a move of the group; after the store, a read of the
+// group.
+ir_map_take_node_ok: fn(p: IRProgram, b: IRBuilder, update: IRMapTake, id: Int, between: Bool, bad: &Bool) Never! {
+    if bad -> return
+    node: ir_body_node(p, b, id)
+    if !between {
+        if node.kind == .Local(local) {
+            if ir_map_take_name(local) == update.group -> bad = true
+        }
+    } else {
+        if node.kind == {
+            .Local(local) -> bad = ir_map_take_name(local) == update.map
+            .InlineBlock(_) | .RawOf(_) | .RawAddressOf(_) -> bad = true
+            .OrFallback(_, fallback, _) -> {
+                if fallback == {
+                    .Break | .Continue | .BreakLabel(_) | .ContinueLabel(_) -> bad = true
+                    else -> {}
+                }
+            }
+            .IfExpr(_, then_body, _, else_body, _) -> bad = then_body.len() > 0 || else_body.len() > 0
+            .Move(value) -> {
+                root: ir_map_take_root(p, b, value) ?? ""
+                bad = root == update.group || root == update.key_root
+            }
+            .Borrow(place, access) -> bad = access != .Read && (ir_map_take_root(p, b, place) ?? "") == update.key_root
+            else -> {}
+        }
+    }
+    if bad -> return
+    if b.row >= 0 {
+        body_each_expr_child(p.functions[b.row].tree, node, (child: Int) -> ir_map_take_node_ok(p, b, update, child, between, bad))
+    } else {
+        body_each_expr_child(b.made, node, (child: Int) -> ir_map_take_node_ok(p, b, update, child, between, bad))
+    }
+}
+
+// The variable a place or key node `id` reads (ir_map_take_name), through
+// fields, elements, borrows, moves and copies.
+ir_map_take_root: fn(p: IRProgram, b: IRBuilder, id: Int) -> String? Never! {
     if ir_body_node(p, b, id).kind == {
-        .Local(_) -> return true
-        .Field(receiver, _) -> return ir_map_take_key(p, b, receiver)
-        else -> return false
+        .Local(local) -> return Val(ir_map_take_name(local))
+        .Field(receiver, _) | .Borrow(receiver, _) | .Move(receiver) | .Clone(receiver, _) | .ExplicitCopy(receiver) -> return ir_map_take_root(p, b, receiver)
+        .Index(base, _, _, _, _, _) -> return ir_map_take_root(p, b, base)
+        else -> return None
+    }
+}
+
+// The variable key node `id` reads, when it is that variable or a field of
+// one.
+ir_map_take_key_root: fn(p: IRProgram, b: IRBuilder, id: Int) -> TLocal? Never! {
+    if ir_body_node(p, b, id).kind == {
+        .Local(local) -> return Val(local)
+        .Field(receiver, _) -> return ir_map_take_key_root(p, b, receiver)
+        else -> return None
     }
 }
 
@@ -1290,11 +1481,11 @@ ir_map_take_same: fn(p: IRProgram, b: IRBuilder, left: Int, right: Int) -> Bool 
     }
 }
 
-// The variable node `id` reads (through a borrow, move or copy of it).
-ir_map_take_local: fn(p: IRProgram, b: IRBuilder, id: Int) -> String? Never! {
+// The variable node `id` is, through a borrow, move or copy of it.
+ir_map_take_variable: fn(p: IRProgram, b: IRBuilder, id: Int) -> TLocal? Never! {
     if ir_body_node(p, b, id).kind == {
-        .Local(local) -> return Val(ir_map_take_name(local))
-        .Borrow(place, _) | .Move(place) | .Clone(place, _) -> return ir_map_take_local(p, b, place)
+        .Local(local) -> return Val(local)
+        .Borrow(place, _) | .Move(place) | .Clone(place, _) -> return ir_map_take_variable(p, b, place)
         else -> return None
     }
 }
@@ -1304,108 +1495,78 @@ ir_map_take_name: fn(local: TLocal) -> String Never! {
     local.name
 }
 
-// Whether node `id` is `group.push(value)` with `value` only reading
-// (ir_map_take_reads).
-ir_map_take_push: fn(p: IRProgram, b: IRBuilder, update: IRMapTake, id: Int) -> Bool Never! {
-    if ir_body_node(p, b, id).kind == .BuiltinMethod(receiver, operation, args) {
-        if operation != .Push -> return false
-        group: ir_map_take_local(p, b, receiver) ?? return false
-        if group != update.group -> return false
-        loop arg in args {
-            if !ir_map_take_reads(p, b, update, arg) -> return false
-        }
-        return true
-    }
-    false
-}
-
-// Whether evaluating node `id` only reads literals (text without holes
-// among them) and variables other than the update's map and group, fields of
-// them and copies of them.
-ir_map_take_reads: fn(p: IRProgram, b: IRBuilder, update: IRMapTake, id: Int) -> Bool Never! {
-    if ir_body_node(p, b, id).kind == {
-        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) -> return true
-        .StrLit(parts) -> return !parts.any(part -> part == .Interpolation(_, _))
-        .Local(local) -> {
-            name: ir_map_take_name(local)
-            return name != update.map && name != update.group
-        }
-        .Field(receiver, _) -> return ir_map_take_reads(p, b, update, receiver)
-        .Borrow(place, _) | .Move(place) | .Clone(place, _) | .ExplicitCopy(place) -> return ir_map_take_reads(p, b, update, place)
-        else -> return false
-    }
-}
-
 // Whether `place = value` is `map[key] = group` for the update's map, key
 // and group.
 ir_map_take_store: fn(p: IRProgram, b: IRBuilder, update: IRMapTake, place: BodyPlace, value: Int) -> Bool Never! {
     if place == .Expr(target) {
         if ir_body_node(p, b, target).kind == .Index(base, index, _, _, _, _) {
-            map: ir_map_take_local(p, b, base) ?? return false
-            group: ir_map_take_local(p, b, value) ?? return false
-            return map == update.map && group == update.group && ir_map_take_same(p, b, index, update.key)
+            map: ir_map_take_variable(p, b, base) ?? return false
+            group: ir_map_take_variable(p, b, value) ?? return false
+            return ir_map_take_name(map) == update.map && ir_map_take_name(group) == update.group && ir_map_take_same(p, b, index, update.key)
         }
     }
     false
 }
 
-// `local := map.get(key) ?? <empty List>` of a group update
-// (ir_map_take_fuses): a found entry's value moves into `local` and the
-// empty List takes its place in the map; a missing key binds the empty List.
+// `local := map.get(key) ?? fallback` of a group update (ir_map_take_fuses):
+// `local` binds the write window of the key's entry, which a missing key
+// first gets with the fallback's value (a fallback that stops leaves).
 ir_map_take: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, local: TLocal, init: Int, span: Span) Never! {
     ir_stmt_line(p, b, span)
-    get := -1
-    seed := -1
-    if ir_body_node(p, b, init).kind == .OrFallback(value, fallback, _) {
-        get = value
-        if fallback == .Value(empty) -> seed = empty
-    }
     receiver := -1
     index := -1
-    if ir_body_node(p, b, get).kind == .BuiltinMethod(base, _, args) {
-        receiver = base
-        index = args[0]
+    fallback := BodyOrFallback.Value{value: -1}
+    if ir_body_node(p, b, init).kind == .OrFallback(value, alternative, _) {
+        fallback = alternative
+        if ir_body_node(p, b, value).kind == .BuiltinMethod(base, _, args) {
+            receiver = base
+            index = args[0]
+        }
     }
-    if seed < 0 || receiver < 0 -> return ir_fail(b, span, "map group take")
+    if receiver < 0 -> return ir_fail(b, span, "map group update")
     base_ty: ir_ty(p, b, receiver)
     map: ir_write_base(m, p, b, receiver, span)
     if ir_failed(b) || map < 0 -> return
     ir_make_unique(m, p, b, map)
     row: b.f.slot_type[map]
-    shape: ir_map_shape(m, p, row) ?? return ir_fail(b, span, "map group take of {ir_type_name(base_ty)}")
+    shape: ir_map_shape(m, p, row) ?? return ir_fail(b, span, "map group update of {ir_type_name(base_ty)}")
     key: ir_value_as(m, p, b, index, shape.key.ty, span)
     if ir_failed(b) || key < 0 -> return
+    value_row: shape.value.ty
     word_row: ir_word_row(m)
     found: ir_map_call(m, p, b, row, "map.find", [Int]{map, key}, word_row)
-    ir_release(m, b, key)
-    empty: ir_value_as(m, p, b, seed, shape.value.ty, span)
-    if ir_failed(b) || empty < 0 -> return
-    if !b.fresh[empty] -> return ir_fail(b, span, "map group take of a held fallback")
-    value_row: shape.value.ty
-    aggregate: m.types[value_row].kind == .Aggregate
-    size: m.types[value_row].size
-    taken: ir_fresh_temp(m, b, value_row)
-    if aggregate -> ir_emit(b.f, IROp.StackAddress, taken, size, 8, -1, b.line)
+    at: ir_temp(m, b, word_row)
+    ir_emit(b.f, IROp.Copy, at, found, -1, -1, b.line)
     none: ir_word_const(m, b, 0)
     present: ir_bool_op(m, b, IROp.Ge, found, none)
     ir_open_if(b.f, present, b.line)
-    entries: ir_load_word(m, b, map, 16)
-    entry: ir_element_address(m, b, entries, found, shape.stride)
-    held: ir_load_at(m, b, entry, shape.value.offset, value_row)
-    if aggregate {
-        ir_emit(b.f, IROp.CopyBytes, -1, taken, held, size, b.line)
-        ir_emit(b.f, IROp.CopyBytes, -1, held, empty, size, b.line)
-    } else {
-        ir_emit(b.f, IROp.Move, taken, held, -1, -1, b.line)
-        ir_emit(b.f, IROp.Store, -1, entry, shape.value.offset, empty, b.line)
-    }
+    if b.fresh[key] && ir_has_drop(m, b, key) -> ir_emit(b.f, IROp.Drop, -1, key, -1, -1, b.line)
     ir_else(b.f, b.line)
-    if aggregate -> ir_emit(b.f, IROp.CopyBytes, -1, taken, empty, size, b.line) else -> ir_emit(b.f, IROp.Move, taken, empty, -1, -1, b.line)
+    if fallback == .Value(_) {
+        seed: ir_temp(m, b, value_row)
+        ir_fallback_route(m, p, b, fallback, seed, span)
+        if ir_failed(b) -> return
+        b.fresh[seed] = ir_has_drop(m, b, seed)
+        ir_map_set(m, p, b, row, map, key, seed)
+        point: ir_map_added_index(m, b, shape, map, found)
+        ir_emit(b.f, IROp.Copy, at, point, -1, -1, b.line)
+    } else {
+        ir_fallback_route(m, p, b, fallback, -1, span)
+        if ir_failed(b) -> return
+    }
     ir_end(b.f, b.line)
-    b.fresh[empty] = false
-    ir_bind_local(m, p, b, local, taken, span)
-    bound: b.bindings[b.bindings.len() - 1].slot
-    ir_close_arm(m, p, b, bound, false, span)
+    b.fresh[key] = false
+    entries: ir_load_word(m, b, map, 16)
+    entry: ir_element_address(m, b, entries, at, shape.stride)
+    value: ir_address_at(m, b, entry, shape.value.offset)
+    symbol: if local.symbol_id == .Val(id) -> id.key else -> ""
+    if m.types[value_row].kind != .Aggregate {
+        b.bindings.push(IRBinding{name: local.name, slot: value, indirect: value_row, symbol: symbol})
+        return
+    }
+    address: ir_temp(m, b, value_row)
+    ir_emit(b.f, IROp.Offset, address, value, 0, -1, b.line)
+    b.bindings.push(IRBinding{name: local.name, slot: address, symbol: symbol, write: true})
 }
 
 // `[k: v, ...]` in display: `[:]` when empty; keys and values render as

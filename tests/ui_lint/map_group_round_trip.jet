@@ -3,15 +3,14 @@ Person: struct {
     dept: String
 }
 
-// Copies each department's group out of the Map and back, newest first.
-by_dept_copied: fn(people: [Person]) -> [String: [Person]] {
-    groups := [String: [Person]]{}
+// Copies each department's group out of a Map the caller lends and back,
+// newest first: the lint fires.
+by_dept_copied: fn(people: [Person], groups: &[String: [Person]]) {
     loop p in people {
         group := groups.get(p.dept) ?? [Person]{}
         group.insert(0, p.copy())
         groups[p.dept] = group
     }
-    groups
 }
 
 // Grows each department's group in place, newest first: no lint.
@@ -24,8 +23,8 @@ by_dept_in_place: fn(people: [Person]) -> [String: [Person]] {
     groups
 }
 
-// Pushes onto each department's group: the build moves the group out of the
-// Map instead of copying it, so no lint.
+// Pushes onto each department's group of a Map the function declares: the
+// build grows the entry in place, so no lint.
 by_dept_moved: fn(people: [Person]) -> [String: [Person]] {
     groups := [String: [Person]]{}
     loop p in people {
@@ -36,7 +35,7 @@ by_dept_moved: fn(people: [Person]) -> [String: [Person]] {
     groups
 }
 
-// Pushes plain values onto a group taken with `[]`: no lint either.
+// Pushes onto a group taken with `[]`: no lint either.
 names_by_dept: fn(people: [Person]) -> [String: [String]] {
     names := [String: [String]]{}
     loop p in people {
@@ -48,8 +47,8 @@ names_by_dept: fn(people: [Person]) -> [String: [String]] {
     names
 }
 
-// Seeds each group with a header: the fallback is not empty, so the group is
-// copied and the lint fires.
+// Seeds each group with a header: the build seeds the entry with it and
+// grows it in place, so no lint.
 titled_by_dept: fn(people: [Person]) -> [String: [String]] {
     titled := [String: [String]]{}
     loop p in people {
@@ -60,11 +59,28 @@ titled_by_dept: fn(people: [Person]) -> [String: [String]] {
     titled
 }
 
+// Can `break` between the take and the store, past the store: the Map must
+// not hold a half-grown group then, so the group is copied and the lint
+// fires.
+named_by_dept: fn(people: [Person]) -> [String: [String]] {
+    names := [String: [String]]{}
+    loop p in people {
+        group := names.get(p.dept) ?? []
+        if p.name == "" -> break
+        group.push(p.name.copy())
+        names[p.dept] = group
+    }
+    names
+}
+
 run: fn() {
     people: [Person]{{name: "Ada", dept: "eng"}, {name: "Bo", dept: "ops"}, {name: "Cy", dept: "eng"}}
-    print(by_dept_copied(people).len())
+    copied := [String: [Person]]{}
+    by_dept_copied(people, copied)
+    print(copied.len())
     print(by_dept_in_place(people).len())
     print(by_dept_moved(people).len())
     print(names_by_dept(people)["eng"])
     print(titled_by_dept(people)["eng"])
+    print(named_by_dept(people)["eng"])
 }

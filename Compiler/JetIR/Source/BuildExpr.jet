@@ -282,7 +282,12 @@ ir_stmts: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, body: [Int]) Never! {
     outermost: b.scopes.len() == 1
     loop (at, statement) in body {
         if ir_failed(b) -> break
-        b.map_take = if ir_map_take_fuses(p, b, body, at) -> statement else -> -1
+        b.map_take = -1
+        stored: ir_map_take_fuses(p, b, body, at)
+        if stored >= 0 {
+            b.map_take = statement
+            b.map_stores.push(body[stored])
+        }
         if outermost -> ir_stmt_collecting(m, p, b, statement) else -> ir_stmt(m, p, b, statement)
     }
     // The entry's outermost block ends: its variables drop before the
@@ -448,6 +453,12 @@ ir_stmt_body: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Neve
         }
         .Assign(place, op, value, line, span) -> {
             if line > 0 -> b.line = line
+            // A group update's store (ir_map_take): the window wrote the
+            // entry. Updates nest, so the latest one's store comes first.
+            if b.map_stores.len() > 0 && b.map_stores[b.map_stores.len() - 1] == statement {
+                _: b.map_stores.pop()
+                return
+            }
             if place == .Expr(target_place) {
                 return ir_assign_place(m, p, b, target_place, op, value, span)
             }

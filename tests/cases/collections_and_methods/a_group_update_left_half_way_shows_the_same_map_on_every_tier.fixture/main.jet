@@ -1,0 +1,108 @@
+// A group update (`group := groups.get(key) ?? fallback`, writes of
+// `group`, then `groups[key] = group`) that a stop leaves half-way. Where
+// the build grows the entry in place, nothing can read the Map after the
+// stop; where something can (a scope guard's closure names it), the build
+// copies the group. Either way the program shows what the hand-written copy
+// shows.
+
+use scope: core.mem.scope
+
+Row: struct {
+    dept: String
+    name: String
+}
+
+checked: fn(name: String) -> String Err! {
+    if name == "bad" -> return Err("bad name {name}")
+    return Ok(name)
+}
+
+failure_text: fn(error: TaskFailure) -> String {
+    if error == {
+        .Panicked(reason) -> return "panicked: {reason}"
+        .DeadlineBlown -> return "deadline"
+        .Cancelled -> return "cancelled"
+    }
+}
+
+failed: fn(reason: String) -> [String: [String]] {
+    print("failed: {reason}")
+    return [String: [String]]{}
+}
+
+// A guard reads the Map as the panic unwinds the frame.
+guarded: fn(rows: [Row]) {
+    groups := [String: [String]]{}
+    _guard: scope.guard(() -> print("guarded sees {groups}"))
+    loop r in rows {
+        group := groups.get(r.dept) ?? ["head"]
+        group.push(r.name.copy())
+        if r.name == "boom" -> panic("boom in {r.dept}")
+        groups[r.dept] = group
+    }
+}
+
+// The same with the copy written out.
+guarded_copied: fn(rows: [Row]) {
+    groups := [String: [String]]{}
+    _guard: scope.guard(() -> print("guarded_copied sees {groups}"))
+    loop r in rows {
+        held: groups.get(r.dept) ?? ["head"]
+        group := held.copy()
+        group.push(r.name.copy())
+        if r.name == "boom" -> panic("boom in {r.dept}")
+        groups[r.dept] = group
+    }
+}
+
+// Grown in place: a failure leaves the function between the take and the
+// store.
+grown: fn(rows: [Row]) -> [String: [String]] Err! {
+    groups := [String: [String]]{}
+    loop r in rows {
+        group := groups.get(r.dept) ?? ["head"]
+        group.push(checked(r.name))
+        groups[r.dept] = group
+    }
+    return Ok(groups)
+}
+
+// The same with the copy written out.
+grown_copied: fn(rows: [Row]) -> [String: [String]] Err! {
+    groups := [String: [String]]{}
+    loop r in rows {
+        held: groups.get(r.dept) ?? ["head"]
+        group := held.copy()
+        group.push(checked(r.name))
+        groups[r.dept] = group
+    }
+    return Ok(groups)
+}
+
+// Grown in place: a panic ends the task between the take and the store.
+ended: fn(rows: [Row]) {
+    groups := [String: [String]]{}
+    loop r in rows {
+        group := groups.get(r.dept) ?? ["head"]
+        if r.name == "boom" -> panic("boom in {r.dept}")
+        group.push(r.name.copy())
+        groups[r.dept] = group
+    }
+    print("ended with {groups}")
+}
+
+run: fn() {
+    rows: [Row]{{dept: "eng", name: "Ada"}, {dept: "ops", name: "Bo"}, {dept: "eng", name: "boom"}, {dept: "eng", name: "Cy"}}
+    first: task { guarded(rows) }
+    first.join() ?? print(failure_text(err))
+    second: task { guarded_copied(rows) }
+    second.join() ?? print(failure_text(err))
+    third: task { ended(rows) }
+    third.join() ?? print(failure_text(err))
+    fine: [Row]{{dept: "eng", name: "Ada"}, {dept: "ops", name: "Bo"}, {dept: "eng", name: "Cy"}}
+    print(grown(fine) ?? failed("{err}"))
+    print(grown_copied(fine) ?? failed("{err}"))
+    bad: [Row]{{dept: "eng", name: "Ada"}, {dept: "eng", name: "bad"}}
+    print(grown(bad) ?? failed("{err}"))
+    print(grown_copied(bad) ?? failed("{err}"))
+}
