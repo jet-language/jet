@@ -13,53 +13,6 @@ LIBM_POW_SIGN_BIAS: I64{262144}
 // -1ULL << 27
 LIBM_POW_SPLIT: I64{-134217728}
 
-// log(x) as hi + lo, lo carrying about 15 more bits.
-LibmPowLog: struct { hi: Float, lo: Float }
-
-// pow.c log_inline(): ix is x's bits, normalized in the subnormal range
-// using the sign bit for the exponent.
-libm_pow_log: fn(ix: I64) -> LibmPowLog {
-    // x = 2^k z; where z is in range [OFF,2*OFF) and exact.
-    tmp: wrapping(ix - LIBM_POW_OFF)
-    i: Int.from_i64(libm_shr(tmp, I64{45}).bit_and(I64{127}) * I64{3})
-    // arithmetic shift
-    k: tmp >> I64{52}
-    iz: wrapping(ix - tmp.bit_and(LIBM_TOP12_MASK))
-    z: rt_f64_from_bits(iz)
-    kd: Float{k}
-    // log(x) = k*Ln2 + log(c) + log1p(z/c-1).
-    table: LIBM_POW_LOG_TABLE
-    invc: rt_f64_from_bits(table[i])
-    logc: rt_f64_from_bits(table[i + 1])
-    logctail: rt_f64_from_bits(table[i + 2])
-    // Split z such that rhi, rlo and rhi*rhi are exact and |rlo| <= |r|.
-    zhi: rt_f64_from_bits((iz + (I64{1} << I64{31})).bit_and(LIBM_HIGH_WORD))
-    zlo: z - zhi
-    rhi: zhi * invc - Float{1.0}
-    rlo: zlo * invc
-    r: rhi + rlo
-    // k*Ln2 + log(c) + r.
-    t1: kd * Float{0.6931471805598903} + logc
-    t2: t1 + r
-    lo1: kd * Float{5.497923018708371e-14} + logctail
-    lo2: t1 - t2 + r
-    // A[0] = -0.5.
-    ar: Float{-0.5} * r
-    ar2: r * ar
-    ar3: r * ar2
-    // k*Ln2 + log(c) + r + A[0]*r*r.
-    arhi: Float{-0.5} * rhi
-    arhi2: rhi * arhi
-    hi: t2 + arhi2
-    lo3: rlo * (ar + arhi)
-    lo4: t2 - hi + arhi2
-    // p = log1p(r) - r - A[0]*r*r.
-    p: ar3 * (Float{-0.6666666666666679} + r * Float{0.5000000000000007} + ar2 * (Float{0.7999999995323976} + r * Float{-0.6666666663487739} + ar2 * (Float{-1.142909628459501} + r * Float{1.0000415263675542})))
-    lo: lo1 + lo2 + lo3 + lo4 + p
-    y: hi + lo
-    LibmPowLog{hi: y, lo: hi - y + lo}
-}
-
 // pow.c specialcase(): as exp.c's, but the scale may be negative.
 libm_pow_special: fn(tmp: Float, sbits: I64, ki: I64) -> Float {
     if (ki.bit_and(I64{2147483648}) == I64{0}) {
@@ -115,10 +68,11 @@ libm_pow_exp: fn(x: Float, xtail: Float, sign_bias: I64) -> Float {
     r := x + kd * LIBM_EXP_NEGLN2HIN + kd * LIBM_EXP_NEGLN2LON
     // The code assumes 2^-200 < |xtail| < 2^-8/N.
     r = r + xtail
-    // 2^(k/N) ~= scale * (1 + tail). sign_bias has no low bits, so
-    // ki + sign_bias indexes the same row.
-    tail: libm_exp_tail(ki)
-    sbits: libm_exp_scale_bits(wrapping(ki + sign_bias))
+    // 2^(k/N) ~= scale * (1 + tail), from table row k mod N. sign_bias has
+    // no low bits, so ki + sign_bias indexes the same row.
+    row: Int.from_i64(ki.bit_and(I64{127}) * I64{2})
+    tail: rt_f64_from_bits(LIBM_EXP_TABLE[row])
+    sbits: wrapping(LIBM_EXP_TABLE[row + 1] + libm_shl(wrapping(ki + sign_bias), I64{45}))
     r2: r * r
     tmp: tail + r + r2 * (Float{0.49999999999996786} + r * Float{0.16666666666665886}) + r2 * r2 * (Float{0.0416666808410674} + r * Float{0.008333335853059549})
     if (abstop == I64{0}) -> return libm_pow_special(tmp, sbits, ki)
@@ -182,11 +136,51 @@ libm_pow: fn(x: Float, y: Float) -> Float {
             ix = wrapping(rt_f64_bits(x * LIBM_TOINT).bit_and(LIBM_ABS) - (I64{52} << I64{52}))
         }
     }
-    l: libm_pow_log(ix)
+    // pow.c log_inline(): log(x) as log_hi + log_lo, log_lo carrying about
+    // 15 more bits; ix is x's bits, normalized in the subnormal range using
+    // the sign bit for the exponent.
+    // x = 2^k z; where z is in range [OFF,2*OFF) and exact.
+    tmp: wrapping(ix - LIBM_POW_OFF)
+    i: Int.from_i64(libm_shr(tmp, I64{45}).bit_and(I64{127}) * I64{3})
+    // arithmetic shift
+    k: tmp >> I64{52}
+    iz: wrapping(ix - tmp.bit_and(LIBM_TOP12_MASK))
+    z: rt_f64_from_bits(iz)
+    kd: libm_small_float(k)
+    // log(x) = k*Ln2 + log(c) + log1p(z/c-1).
+    invc: rt_f64_from_bits(LIBM_POW_LOG_TABLE[i])
+    logc: rt_f64_from_bits(LIBM_POW_LOG_TABLE[i + 1])
+    logctail: rt_f64_from_bits(LIBM_POW_LOG_TABLE[i + 2])
+    // Split z such that rhi, rlo and rhi*rhi are exact and |rlo| <= |r|.
+    zhi: rt_f64_from_bits((iz + (I64{1} << I64{31})).bit_and(LIBM_HIGH_WORD))
+    zlo: z - zhi
+    rhi: zhi * invc - Float{1.0}
+    rlo: zlo * invc
+    r: rhi + rlo
+    // k*Ln2 + log(c) + r.
+    t1: kd * Float{0.6931471805598903} + logc
+    t2: t1 + r
+    lo1: kd * Float{5.497923018708371e-14} + logctail
+    lo2: t1 - t2 + r
+    // A[0] = -0.5.
+    ar: Float{-0.5} * r
+    ar2: r * ar
+    ar3: r * ar2
+    // k*Ln2 + log(c) + r + A[0]*r*r.
+    arhi: Float{-0.5} * rhi
+    arhi2: rhi * arhi
+    hi: t2 + arhi2
+    lo3: rlo * (ar + arhi)
+    lo4: t2 - hi + arhi2
+    // p = log1p(r) - r - A[0]*r*r.
+    p: ar3 * (Float{-0.6666666666666679} + r * Float{0.5000000000000007} + ar2 * (Float{0.7999999995323976} + r * Float{-0.6666666663487739} + ar2 * (Float{-1.142909628459501} + r * Float{1.0000415263675542})))
+    lo: lo1 + lo2 + lo3 + lo4 + p
+    log_hi: hi + lo
+    log_lo: hi - log_hi + lo
     yhi: rt_f64_from_bits(iy.bit_and(LIBM_POW_SPLIT))
     ylo: y - yhi
-    lhi: rt_f64_from_bits(rt_f64_bits(l.hi).bit_and(LIBM_POW_SPLIT))
-    llo: l.hi - lhi + l.lo
+    lhi: rt_f64_from_bits(rt_f64_bits(log_hi).bit_and(LIBM_POW_SPLIT))
+    llo: log_hi - lhi + log_lo
     ehi: yhi * lhi
     // |elo| < |ehi| * 2^-25.
     elo: ylo * lhi + y * llo

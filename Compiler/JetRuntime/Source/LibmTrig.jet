@@ -22,7 +22,7 @@ LIBM_PM24: Float{5.960464477539063e-8}
 // __rem_pio2.c for |x| ~<= 9pi/4 away from a multiple of pi/2: k*pi/2 is
 // removed in two parts.
 libm_rem_pio2_near: fn(x: Float, negative: Bool, k: I64) -> LibmReduced {
-    multiple: Float{k}
+    multiple: libm_small_float(k)
     if negative {
         z: x + multiple * LIBM_PIO2_1
         y0: z + multiple * LIBM_PIO2_1T
@@ -213,13 +213,12 @@ libm_whole: fn(x: Float) -> I64 { runtime_duration_float_word(x) }
 // (0.0 below index 0). The setup and the recomputation both fill f by that
 // rule, so each q[i] is computed where it is read.
 libm_pio2_product: fn(t0: Float, t1: Float, t2: Float, jx: I64, jv: I64, i: I64) -> Float {
-    table: LIBM_IPIO2
     sum := Float{0.0}
     j := I64{0}
     loop j <= jx {
         term: if (j == I64{0}) -> t0 else -> if (j == I64{1}) -> t1 else -> t2
         index: jv + i - j
-        f: if (index < I64{0}) -> Float{0.0} else -> Float{table[Int.from_i64(index)]}
+        f: if (index < I64{0}) -> Float{0.0} else -> libm_small_float(LIBM_IPIO2[Int.from_i64(index)])
         sum = sum + term * f
         j += I64{1}
     }
@@ -273,7 +272,7 @@ libm_rem_pio2_large: fn(t0: Float, t1: Float, t2: Float, e0: I64, nx: I64) -> Li
         // trim off integer >= 8
         z = z - Float{8.0} * libm_floor(z * Float{0.125})
         n = libm_whole(libm_trunc(z))
-        z = z - Float{n}
+        z = z - libm_small_float(n)
         ih = I64{0}
         if (q0 > I64{0}) {
             // need iq[jz-1] to determine n

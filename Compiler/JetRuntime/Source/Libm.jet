@@ -26,6 +26,8 @@ LIBM_P1023: Float{8.98846567431158e+307}
 LIBM_PM969: Float{2.004168360008973e-292}
 // DBL_MIN, 0x1p-1022
 LIBM_DBL_MIN: Float{2.2250738585072014e-308}
+// asuint64(0x1.8p52)
+LIBM_TOINT_HALF_BITS: I64{4843621399236968448}
 
 // uint64 a < b.
 libm_ult: fn(a: I64, b: I64) -> Bool { a.bit_xor(LIBM_SIGN) < b.bit_xor(LIBM_SIGN) }
@@ -49,6 +51,10 @@ libm_nonzero: fn(word: I64) -> I64 { if (word == I64{0}) -> I64{0} else -> I64{1
 
 // The biased exponent field of a double's bits.
 libm_exponent: fn(bits: I64) -> I64 { (bits >> I64{52}).bit_and(I64{2047}) }
+
+// C's (double)k for |k| < 2^51. Float{k} also proves k exact, at a division
+// per call; 0x1.8p52 + k is exact, so its bits are 0x1.8p52's plus k.
+libm_small_float: fn(k: I64) -> Float { rt_f64_from_bits(wrapping(LIBM_TOINT_HALF_BITS + k)) - LIBM_TOINT_HALF }
 
 // x86_64 musl computes sqrt with sqrtsd (src/math/x86_64/sqrt.c); Core's
 // sqrt is that IEEE operation on every tier.
