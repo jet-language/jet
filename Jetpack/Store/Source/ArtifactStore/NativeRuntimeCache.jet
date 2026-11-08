@@ -376,7 +376,7 @@ store_runtime_compile_artifact: fn(store: ArtifactStore, key: String, exported: 
         files.remove_all(staging).drop("a rejected runtime falls back to the inline program")
         return Ok(None)
     }
-    if store.publish_file(key, staged_rlib) == {
+    if store.publish_file(key, staged_rlib, durable: true) == {
         .Err(error) -> {
             if error == {
                 .Conflict(_) -> {}

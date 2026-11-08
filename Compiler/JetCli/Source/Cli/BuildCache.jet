@@ -115,12 +115,14 @@ jet_cli_build_restore: fn(store: ArtifactStore, key: String, binary: String, roo
 
 // Store the built executable at `path` under `key`, its side entries first,
 // so a stored executable always has them; the `--verbose` line it reports.
+// The entries are published without disk syncs: a restore verifies their
+// digests, so an entry a crash lost or tore is a miss that builds again.
 jet_cli_build_store: fn(store: ArtifactStore?, key: String, path: String, executable: X64Executable, verbose: Bool) -[FS, Env, Exec, Time, Rand]> String Never! {
     opened: store ?? return ""
     id: if executable.build_id.len() > 0 -> sha256_hex_bytes(executable.build_id) else -> ""
-    if opened.publish_bytes(jet_cli_build_side_key(key, "build-id"), id.bytes(), false) == .Err(error) -> return jet_cli_build_store_off(verbose, error.message())
-    if opened.publish_bytes(jet_cli_build_side_key(key, "debug"), executable.debug_file, false) == .Err(error) -> return jet_cli_build_store_off(verbose, error.message())
-    if opened.publish_file(key, path) == .Err(error) -> return jet_cli_build_store_off(verbose, error.message())
+    if opened.publish_bytes(jet_cli_build_side_key(key, "build-id"), id.bytes(), executable: false, durable: false) == .Err(error) -> return jet_cli_build_store_off(verbose, error.message())
+    if opened.publish_bytes(jet_cli_build_side_key(key, "debug"), executable.debug_file, executable: false, durable: false) == .Err(error) -> return jet_cli_build_store_off(verbose, error.message())
+    if opened.publish_file(key, path, durable: false) == .Err(error) -> return jet_cli_build_store_off(verbose, error.message())
     if verbose -> "[build] cache store -> saved binary\n" else -> ""
 }
 

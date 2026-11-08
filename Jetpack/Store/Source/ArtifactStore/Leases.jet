@@ -113,8 +113,7 @@ impl ArtifactLease.Close {
         expected: self.owner_value.owner_line("lease").bytes()
         bytes: files.read_bytes(self.path_value) ?? return
         if !pkg_bytes_starts_with(bytes, 0, expected) -> return
-        files.remove(self.path_value) ?? return
-        store_artifact_sync_dir(files.dirname(self.path_value)).drop("lease release is best-effort once the file is gone")
+        files.remove(self.path_value).drop("lease release is best-effort; a lease of a dead owner is reclaimed")
     }
 }
 
@@ -129,8 +128,7 @@ impl ArtifactStoreLock.Close {
     close: fn(&&self) -[FS]> {
         bytes: files.read_bytes(self.path) ?? return
         if bytes != self.owner_line -> return
-        files.remove(self.path) ?? return
-        store_artifact_sync_dir(files.dirname(self.path)).drop("lock release is best-effort once the file is gone")
+        files.remove(self.path).drop("lock release is best-effort; a lock of a dead owner is reclaimed")
     }
 }
 
