@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6702,
-    "rev": 96309,
+    "nextNum": 6703,
+    "rev": 96310,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -101847,6 +101847,38 @@
       "updated": "2026-11-08T19:54:18.077Z",
       "updatedBy": "Main",
       "criteriaLastN": 3
+    },
+    {
+      "id": "c0gdndep",
+      "num": 6702,
+      "title": "I1: reassigning a Close local in the entry `run` closes the old value twice (SIGSEGV, heap corruption)",
+      "body": "TlsLead found, Main reproduced with seed a0_039 (`jet run $JET_SCRATCH_ROOT/lanes/TlsLead/dev/bn/oob/close-reassign-repro.jet`, rc 139): `x = sub(x, y) ?? panic(..)` on a struct with a Close impl. In helper fn `same` the closes are correct (4). In `run` the identical block closes 4 times at scope end, one extra, and the extra close faults at 0x1/0x2 in Box.close. The same mis-close hits a non-entry fn in Bignum div_mpi (`x = sub_mpi(x, y) ?? return Err(err)` inside a loop) and corrupts the heap. It happens at -O none and full; --checked-alloc=true hides it; every RHS form tried reproduces it, including `nx := …; x = nx`. Safe Jet, so this is an I1 memory-safety violation.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": "a case (O0, O1, O2, web) reassigning Close locals in run, a helper, a loop with ?? return Err, and the nx := …; x = nx form prints the exact close count and order and exits 0; the TlsLead repro passes; the root cause is fixed in the drop/close lowering, not worked around per call shape",
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [
+        "I1",
+        "safety",
+        "ownership"
+      ],
+      "goals": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-08T19:59:57.219Z",
+      "updated": "2026-11-08T19:59:57.219Z",
+      "updatedBy": "Main"
     }
   ],
   "decisions": [
@@ -190066,6 +190098,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-08T19:59:57.220Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0gdndep",
+      "note": "I1: reassigning a Close local in the entry `run` closes the old value twice (SIGSEGV, heap corruption)"
+    },
     {
       "at": "2026-11-08T19:56:43.737Z",
       "by": "Main",
