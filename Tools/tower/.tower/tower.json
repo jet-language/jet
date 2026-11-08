@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6707,
-    "rev": 96342,
+    "nextNum": 6708,
+    "rev": 96345,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -92344,57 +92344,6 @@
       "completedAt": "2026-11-07T07:08:24.162Z"
     },
     {
-      "id": "c0d0i1i1",
-      "num": 6571,
-      "title": "Remove interpreter residue: jet run and comptime are native O0 in memory (D-EXEC2=A, I9)",
-      "body": "Owner reminder 2026-11-05: jet run, jet dev and compile-time code run natively at O0 from memory, like a JIT, never through an interpreter. That is built: JetBackend Image/Loader.jet maps the linked image through a memfd; JetCli Host.jet:1431 runs it in place of jet (single-threaded) or in a child; JetEval IR/Native.jet runs comptime batches in a compiler child; Pipeline.jet:1600/1619 calls jet_eval_native_load/run. Residue to remove in one cutover: (1) Pipeline.jet:951,1646-1662 diagnostics say 'comptime interpreter'; (2) ComptimeIR.jet:104 TTargetApplicability field 'interpreter'; (3) InspectGates.jet:64 still classifies a '--interpret' session flag; (4) Host.jet:353 and EffectsSurface.jet:630 comments; (5) Host.jet:1433-1434 writes the image to a file when it can't run from memory, which D-EXEC2=A forbids: make it an ICE (exit 101) or a report, never a written executable.",
-      "kind": "bug",
-      "track": "sidequest",
-      "epoch": null,
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "No compiler source, diagnostic text, registry field or CLI flag names an interpreter for jet run, jet dev or compile-time code (Pipeline.jet comptime messages, ComptimeIR TTargetApplicability.interpreter, InspectGates --interpret); UI snapshots updated in the same commit.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev 3b17b1be65 + c788d573db: the debug tier wire value is jet-dev-replay, E2202 (jet dev step budget) retired, comptime/ComptimeIR/InspectGates interpreter names removed, CoreCallRecord.interpreter_route deleted, DiagnosticStage.Interp gone from the generated CoreEnumRows; the core enum generator --check now verifies each exported enum against its source enum declaration (fails naming DiagnosticStage with Interp restored); full chain FIXED_POINT, LaneCheck CHECK OK (SemaParity)",
-          "at": "2026-11-05T22:13:43.743Z"
-        },
-        {
-          "n": 2,
-          "text": "jet run never writes an executable: when the image can't run from memory (Host.jet:1433), the run reports a registered diagnostic or an exit-101 internal error instead of writing the file; a case proves it.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Owner ruling D-EXEC-NOEXEC1 (c): when the system forbids runnable memory, jet run writes the same code to a file and runs it, same output and real signal. The Host.jet:1433 file fallback is the ruled behavior, not residue.",
-          "at": "2026-11-05T21:39:38.338Z",
-          "closure": "obsolete"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "goals": [
-        "G2"
-      ],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-05T21:28:21.478Z",
-      "updated": "2026-11-05T22:13:54.741Z",
-      "updatedBy": "Main",
-      "completedAt": "2026-11-05T22:13:54.741Z"
-    },
-    {
       "id": "c0qowqlz",
       "num": 6572,
       "title": "codegen: a consuming method fn m(&&self) does not drop self (a struct's [TCPListener] stays open)",
@@ -101805,6 +101754,54 @@
       "created": "2026-11-08T21:18:50.483Z",
       "updated": "2026-11-08T21:18:50.483Z",
       "updatedBy": "Main"
+    },
+    {
+      "id": "c09yzxgv",
+      "num": 6707,
+      "title": "I1: the seed runtime fast allocator path corrupts the heap in safe Jet ([U64] push loop SIGSEGV at address 0x1, layout-dependent)",
+      "body": "Found by TlsLead while running the Wycheproof ECDSA vectors. Two programs differ only in one string constant (a path), and both are safe Jet with no raw memory operations. With seed a0_040 one faults deterministically with SIGSEGV (invalid memory access at 0x1) inside a plain [U64] push loop (`words`, main.jet:83) at every optimization level; the other runs clean. With --checked-alloc=true both run clean and no bad free or write after free is reported, so the corruption comes from the fast allocator path or from codegen around it, depending on layout. Safe Jet must never fault on memory (I1). The repro is in TlsLead scratch at dev/ecdsa/repro_alloc (crash/main.jet vs nocrash.jet). Run it with the seed: jet run main.jet, with JET_TOOLCHAIN_ROOT set to the TlsLead split toolchain.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "building",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The root cause is named: allocator path, codegen or runtime, with the exact faulting write. The fix is at the root, and the TlsLead repro runs clean on every tier without --checked-alloc.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T22:17:22.266Z"
+        },
+        {
+          "n": 2,
+          "text": "A reduced regression case lands in tests/ and faults before the fix on every tier; JetTestKit or the cases suite runs it.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T22:17:23.237Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-08T22:17:15.953Z",
+      "updated": "2026-11-08T22:17:23.237Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 2
     }
   ],
   "decisions": [
@@ -189319,6 +189316,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-08T22:17:23.237Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c09yzxgv",
+      "note": "#2 A reduced regression case lands in tests/ and faults before "
+    },
+    {
+      "at": "2026-11-08T22:17:22.266Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c09yzxgv",
+      "note": "#1 The root cause is named: allocator path, codegen or runtime,"
+    },
+    {
+      "at": "2026-11-08T22:17:15.953Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c09yzxgv",
+      "note": "I1: the seed runtime fast allocator path corrupts the heap in safe Jet ([U64] push loop SIGSEGV at address 0x1, layout-dependent)"
+    },
     {
       "at": "2026-11-08T22:09:09.215Z",
       "by": "Main",

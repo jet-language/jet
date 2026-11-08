@@ -84710,6 +84710,59 @@
       "completedAt": "2026-11-05T20:47:06.927Z",
       "questions": [],
       "retiredAt": "2026-11-08T21:10:33.655Z"
+    },
+    {
+      "id": "c0d0i1i1",
+      "num": 6571,
+      "title": "Remove interpreter residue: jet run and comptime are native O0 in memory (D-EXEC2=A, I9)",
+      "body": "Owner reminder 2026-11-05: jet run, jet dev and compile-time code run natively at O0 from memory, like a JIT, never through an interpreter. That is built: JetBackend Image/Loader.jet maps the linked image through a memfd; JetCli Host.jet:1431 runs it in place of jet (single-threaded) or in a child; JetEval IR/Native.jet runs comptime batches in a compiler child; Pipeline.jet:1600/1619 calls jet_eval_native_load/run. Residue to remove in one cutover: (1) Pipeline.jet:951,1646-1662 diagnostics say 'comptime interpreter'; (2) ComptimeIR.jet:104 TTargetApplicability field 'interpreter'; (3) InspectGates.jet:64 still classifies a '--interpret' session flag; (4) Host.jet:353 and EffectsSurface.jet:630 comments; (5) Host.jet:1433-1434 writes the image to a file when it can't run from memory, which D-EXEC2=A forbids: make it an ICE (exit 101) or a report, never a written executable.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "No compiler source, diagnostic text, registry field or CLI flag names an interpreter for jet run, jet dev or compile-time code (Pipeline.jet comptime messages, ComptimeIR TTargetApplicability.interpreter, InspectGates --interpret); UI snapshots updated in the same commit.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 3b17b1be65 + c788d573db: the debug tier wire value is jet-dev-replay, E2202 (jet dev step budget) retired, comptime/ComptimeIR/InspectGates interpreter names removed, CoreCallRecord.interpreter_route deleted, DiagnosticStage.Interp gone from the generated CoreEnumRows; the core enum generator --check now verifies each exported enum against its source enum declaration (fails naming DiagnosticStage with Interp restored); full chain FIXED_POINT, LaneCheck CHECK OK (SemaParity)",
+          "at": "2026-11-05T22:13:43.743Z"
+        },
+        {
+          "n": 2,
+          "text": "jet run never writes an executable: when the image can't run from memory (Host.jet:1433), the run reports a registered diagnostic or an exit-101 internal error instead of writing the file; a case proves it.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Owner ruling D-EXEC-NOEXEC1 (c): when the system forbids runnable memory, jet run writes the same code to a file and runs it, same output and real signal. The Host.jet:1433 file fallback is the ruled behavior, not residue.",
+          "at": "2026-11-05T21:39:38.338Z",
+          "closure": "obsolete"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G2"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-05T21:28:21.478Z",
+      "updated": "2026-11-05T22:13:54.741Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-11-05T22:13:54.741Z",
+      "questions": [],
+      "retiredAt": "2026-11-08T22:17:16.091Z"
     }
   ]
 }
