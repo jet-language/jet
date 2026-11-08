@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6679,
-    "rev": 95925,
+    "nextNum": 6684,
+    "rev": 95943,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -75758,8 +75758,8 @@
       "parentId": "c0xiig3k",
       "needsAcceptance": false,
       "created": "2026-10-29T12:53:42.058Z",
-      "updated": "2026-11-08T01:25:02.053Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-08T01:27:15.945Z",
+      "updatedBy": "owner",
       "criteriaLastN": 50
     },
     {
@@ -94378,6 +94378,42 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-07T12:03:34.226Z"
+        },
+        {
+          "n": 7,
+          "text": "The packages suite on a fresh clone finishes in under 5 minutes wall: the hosted Jetpack engine build overlaps the package runs (2a5ad087af), and the engine unit's claims, which run serially because they share process state, run in under 1 minute.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T01:26:50.077Z"
+        },
+        {
+          "n": 8,
+          "text": "Every corpus suite (golden, cases, ui, packages) runs as wide as the machine's cores and memory allow, with no fixed job cap below that.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T01:26:51.360Z"
+        },
+        {
+          "n": 9,
+          "text": "Excluding the toolchain fetch, jet test Compiler --profile full on a fresh clone finishes in under 10 minutes on the batch machine. A per-phase timeline is recorded with the commit.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T01:26:52.700Z"
+        },
+        {
+          "n": 10,
+          "text": "The cold toolchain fetch inside that run (#6592) takes 30 s or less, so the whole fresh-clone run finishes in under 11 minutes.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T01:26:54.121Z"
         }
       ],
       "refs": [],
@@ -94387,14 +94423,14 @@
         "owner-direction"
       ],
       "goals": [
-        "G5"
+        "G11"
       ],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T19:02:30.892Z",
-      "updated": "2026-11-07T12:03:34.226Z",
+      "updated": "2026-11-08T01:26:54.121Z",
       "updatedBy": "Main",
-      "criteriaLastN": 6
+      "criteriaLastN": 10
     },
     {
       "id": "c0pcddhe",
@@ -99065,8 +99101,8 @@
     {
       "id": "c0b4rnem",
       "num": 6675,
-      "title": "Transpile Jet to other languages through target libraries (C, Wasm, Rust), so the compiler always has a recent portable seed",
-      "body": "Owner request (2026-11-07), long horizon.\n\nGoal: Jet source can be exported (transpiled) to another language, such as C, WebAssembly or Rust. Each target is defined by an ordinary Jet library (one file or package per target) that any package can write, so targets are pluggable rather than built into the compiler. A command takes Jet source and a target library and writes that language's version of the program.\n\nWhy:\n1. Bootstrap durability. Exporting the compiler's own source to C or Wasm gives a recent, buildable seed for any machine at any time, so a seed never goes stale and a Jet compiler can always be rebuilt from what most machines already have (a C compiler or a Wasm runtime).\n2. Onboarding and installation. A new user or platform builds Jet from the exported C or Wasm with the toolchain they already have, with no prebuilt binary download.\n3. Interop. A Jet library can be handed to a C, Rust or Wasm codebase as source.\n\nShape (direction, not yet ratified):\n- A target library consumes the checked program from the compiler-as-a-library (philosophy priority 5: the language is a library), at the IR level that already carries sema's facts (I3), and emits text in the target language.\n- The exported program keeps Jet's meaning: memory and type safety, fault reports and error behavior are the same as the native tiers (I1, I9), and the Prelude and runtime are exported with it rather than re-implemented.\n- Targets are libraries, not compiler hooks: no private seam only first-party targets can use.\n\nRelated: #6186 (portable Wasm seed bootstrapped with a C compiler: the bootstrap outcome this would serve), #5201 (JetIR to JS/Wasm backend), #6345 (portable target better than Wasm), #6508 (exporting Jet to C, Python and JavaScript through FFI).\n\nOwner gates before building: the command's name and flags, the target-library API, and which targets are first-party. These go on a Tower ballot with same-program alternatives. An adversarial design review (Docs/audits) must test every claim first, including whether exported C or Wasm can keep I1 and I9 meaning, and how it compares with existing source-to-source compilers and bootstrap chains (for example Nim and Vala emitting C, Zig's Wasm-plus-C bootstrap, and mrustc and GNU Mes for Rust and Guix).",
+      "title": "Transpile Jet to other languages through target libraries that implement one trait (C and Rust first-party, any language by a package)",
+      "body": "Owner request 2026-11-07, re-scoped the same day: Jet transpiles a program to another language, and any language can be added as an ordinary Jet library implementing a target trait. Seeding and bootstrapping the compiler are a separate, frozen question on #6683; this card comes first.\n\nWhy: interop (Jet code inside C, Rust, Lua or JavaScript projects), reach (platforms with no Jet native writer), and the language-is-a-library priority.\n\nDesign: ballot D-EXPORT-TARGET1. The recommended shape: one shared pass makes every meaning explicit, and core.compiler exposes a versioned program view. A Target trait has required operation methods, host leaves and optional idiom hooks. Capabilities are checked first, and `jet test --to <target>` checks every executable example against `jet run`.",
       "kind": "feature",
       "track": "sidequest",
       "epoch": "e4",
@@ -99094,12 +99130,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "An adversarial design review in Docs/audits tests every claimed strength (bootstrap durability, onboarding, interop, kept meaning) against existing source-to-source compilers and bootstrap chains, and every gap it finds is on a card or ballot.",
+          "text": "An adversarial design review in Docs/audits tests every claimed strength of the ratified D-EXPORT-TARGET1 design (library-defined targets for any language, one meaning across targets, readable output through idiom hooks, interop) against Haxe with Reflaxe, Fable, Kotlin's shared IR, Nim, Gleam and LLVM targets. Every gap it finds is on a card or ballot.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T16:22:07.881Z"
+          "at": "2026-11-08T01:31:37.569Z"
         },
         {
           "n": 2,
@@ -99127,24 +99163,6 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-07T16:22:11.035Z"
-        },
-        {
-          "n": 5,
-          "text": "Exporting the compiler's own source to C (and to Wasm) gives a compiler that, built with only a C compiler (or a Wasm runtime), compiles the same tree to a byte-identical stage-2 compiler: a portable seed for every release, linked with #6186.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T16:22:11.991Z"
-        },
-        {
-          "n": 6,
-          "text": "Install docs describe building Jet from the exported seed with a stock C compiler, and a fresh machine with no Jet binary follows them to a working jet.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T16:22:13.251Z"
         }
       ],
       "refs": [
@@ -99158,8 +99176,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T16:22:00.126Z",
-      "updated": "2026-11-07T23:07:28.638Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-08T01:31:38.826Z",
+      "updatedBy": "Main",
       "criteriaLastN": 6
     },
     {
@@ -99375,6 +99393,339 @@
       "updated": "2026-11-07T20:02:41.046Z",
       "updatedBy": "Main",
       "criteriaLastN": 3
+    },
+    {
+      "id": "c0yxlw5x",
+      "num": 6679,
+      "title": "Test results are reused across runs: the full profile and the admit skip rows whose compiler and inputs are unchanged",
+      "body": "Owner direction 2026-11-07: card this; no cached or incremental work now.\n\nMeasured: a fresh-clone `jet test Compiler --profile full` took about 2 hours (engine 4 min, cold toolchain fetch 45 min, suites 64 min). The release admit then reruns every suite for the same commit, about 40 more minutes. Corpus rows total 248 CPU minutes (golden 160, cases 79, ui 9).",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The admit of a commit reuses the full-profile results recorded for that exact commit and compiler identity, and reruns only rows whose inputs changed.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T01:26:32.891Z"
+        },
+        {
+          "n": 2,
+          "text": "A row's reuse key covers its source files, fixtures, the compiler identity, the Prelude and Core it builds against, and the environment it reads. A change to any of them reruns that row and the rows that depend on it, and a targeted test proves each part of the key.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T01:26:32.891Z"
+        },
+        {
+          "n": 3,
+          "text": "With an unchanged tree, a second `jet test Compiler --profile full` finishes in under 1 minute and reports the same rows and verdicts as the first.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T01:26:32.891Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G11"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-08T01:26:32.892Z",
+      "updated": "2026-11-08T01:26:32.892Z",
+      "updatedBy": "Main"
+    },
+    {
+      "id": "c0sxi78p",
+      "num": 6680,
+      "title": "The compiler's default thread count is fixed at start from the instantaneous load, so a build started on a busy host runs on one core",
+      "body": "Owner direction 2026-11-07: card this; do not build now.\n\n`jet_cli_default_threads` (Compiler/JetCli/Source/Cli/Request.jet) reads procs_running from /proc/stat once at start and drops to one thread when the host is busy. The thread count then never grows. In the full profile, the hosted Jetpack engine build started beside four package runs took about 13 minutes on one core; it took 184 s when it started on a quiet host.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A build's parallel width follows free cores while it runs, instead of being fixed by the load at start.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T01:26:34.705Z"
+        },
+        {
+          "n": 2,
+          "text": "The hosted Jetpack engine build started beside 8 concurrent package runs finishes within 1.5x of its quiet-host wall time, measured on the batch machine and recorded with the commit.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T01:26:34.705Z"
+        },
+        {
+          "n": 3,
+          "text": "The quiet-host self-build wall time does not regress (compared on the same machine and commit range as #6527).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T01:26:34.705Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G11"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-08T01:26:34.705Z",
+      "updated": "2026-11-08T01:26:34.705Z",
+      "updatedBy": "Main"
+    },
+    {
+      "id": "c0nsxbj2",
+      "num": 6681,
+      "title": "core.crypto SHA-256 runs at 45-50 MB/s; a scalar native implementation does about 500 MB/s and SHA-NI about 2 GB/s",
+      "body": "Owner direction 2026-11-07: card this; do not build now.\n\nMeasured on #6592: pure-Jet core.crypto SHA-256 runs at about 45-50 MB/s at O1 and O2, and a hand-unrolled Jet version gives the same speed. The backend has no SHA-NI path. Toolchain install hashes about 450 MB, so hashing alone costs about 9 s per pass on one thread.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "An asm-parity cell under Tools/perf/asm-parity is the SHA-256 ceiling reference: SHA-NI where the CPU reports it, and the best scalar code otherwise.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T01:26:36.572Z"
+        },
+        {
+          "n": 2,
+          "text": "core.crypto SHA-256 at O1 and O2 meets that ceiling (Jet/ceiling at most 1.00 in cycles and bytes) on both paths, and beats every gauntlet peer.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T01:26:36.572Z"
+        },
+        {
+          "n": 3,
+          "text": "The digest is identical on every tier (O0, O1, O2 and web), held by the existing SHA-256 conformance vectors.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T01:26:36.572Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G11"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-08T01:26:36.572Z",
+      "updated": "2026-11-08T01:26:36.572Z",
+      "updatedBy": "Main"
+    },
+    {
+      "id": "c0crz3ra",
+      "num": 6682,
+      "title": "Compiler/build.jet declares the whole project: every artifact, generated table, toolchain, chain stage and profile is one build graph",
+      "body": "Owner direction 2026-11-07: make full use of Jet's customizable build function for this project; card it, do not build it now.\n\nToday Compiler/build.jet declares one target, the jet executable. Everything else is assembled outside the build graph, each piece in its own serial step: the self-host chain (Tools/agent/chain/chain.sh), the runtime pack (cc-pack and pack, with musl found through JET_PACK_MUSL_LIB), the Jetpack engine (Jetpack/Bootstrap/Assemble.jet, then a separate jet build inside the packages suite: 3 min quiet, 13 min under load), the generated registry tables (regenerated by hand and checked at precommit; a stale CoreEnumRows failed a landing on 2026-11-07), and the test and release tools.\n\nThe Build API already offers add_executable, add_library, add_test, add_package, add_publish, add_install, add_doc, action, generate, toolchain, probe, signing and embed, the registered build options, and core.build graph receipts with receipt_diff.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "One build function declares jet, the runtime pack, jetpack, the docs site and the release package as targets, so `jet build` builds them concurrently from one graph and the packages suite reuses that jetpack instead of building its own.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T01:30:57.119Z"
+        },
+        {
+          "n": 2,
+          "text": "Every generated registry table (CoreEnumRows, CoreStructureRows and the rest) comes from `b.generate` over its source registry, so it cannot be stale, and the precommit generator checks for those tables are deleted.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T01:30:57.119Z"
+        },
+        {
+          "n": 3,
+          "text": "The C compiler and musl are declared with `b.toolchain` and `b.probe`. JET_PACK_MUSL_LIB and the other toolchain environment variables are deleted, and a missing tool fails at once with a registered error.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T01:30:57.119Z"
+        },
+        {
+          "n": 4,
+          "text": "The self-host stages and the s2 == s3 byte-identical check are build actions; a stage whose inputs are unchanged is reused. The shell steps they replace in Tools/agent/chain are deleted.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T01:30:57.119Z"
+        },
+        {
+          "n": 5,
+          "text": "Each compiler package (JetFoundation, JetLexer, JetParser, JetSema, JetIR, JetBackend, JetCli and the rest) is its own library target that compiles in parallel, so an edit rebuilds only the packages that depend on it. Depends on #6623.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T01:30:57.119Z"
+        },
+        {
+          "n": 6,
+          "text": "Build profiles give a fast `dev` profile for targeted testing and a `ship` profile for release stages.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T01:30:57.119Z"
+        },
+        {
+          "n": 7,
+          "text": "Every build records a core.build graph receipt with per-target wall time. receipt_diff between two commits shows what rebuilt and why, and the per-phase timeline for #6610 is read from it.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T01:30:57.119Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G11"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-08T01:30:57.119Z",
+      "updated": "2026-11-08T01:30:57.119Z",
+      "updatedBy": "Main"
+    },
+    {
+      "id": "c0zizxhx",
+      "num": 6683,
+      "title": "Portable seed: build a working Jet on a machine that has only a C compiler or a WebAssembly runtime",
+      "body": "Owner direction 2026-11-07: seeding and bootstrapping the compiler is a separate question from transpilation (#6675, D-EXPORT-TARGET1) and is frozen for the future. Transpilation comes first.\n\nGoal: a machine with no Jet binary builds a current Jet from what it already has, so a seed never goes stale and a new platform is never stuck.\n\nCandidate plan from the earlier D-EXPORT-TARGET1 draft, which is not ratified: compile the compiler with the existing WebAssembly writer, then turn that .wasm into C with a committed WebAssembly-to-C translator. A small C host answers the runtime's system calls on POSIX, and compile-time code runs on the IR evaluator instead of an x86-64 child. Every release checks that the seed rebuilds the release's own stage-2 bytes. Once the #6675 C target exists, exporting the compiler to C is the alternative route. Trust limit: a seed built from generated output still trusts the compiler that wrote it; only an independent Jet implementation removes that.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e11",
+      "milestoneId": null,
+      "phase": "frozen",
+      "priority": "P3",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "An adversarial design review in Docs/audits tests the seed's claims (durability, onboarding, trust) against existing bootstrap chains: Zig's WebAssembly seed, Nim's generated C, mrustc, and bootstrappable builds. Every gap it finds is on a card or ballot.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T01:31:11.555Z"
+        },
+        {
+          "n": 2,
+          "text": "A ratified Tower ballot picks the seed route (WebAssembly translated to C, the #6675 C target, or prebuilt binaries only), with same-program alternatives and the trust limits stated.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T01:31:11.555Z"
+        },
+        {
+          "n": 3,
+          "text": "Exporting the compiler's own source to C (and to Wasm) gives a compiler that, built with only a C compiler (or a Wasm runtime), compiles the same tree to a byte-identical stage-2 compiler: a portable seed for every release, linked with #6186.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T01:31:11.555Z"
+        },
+        {
+          "n": 4,
+          "text": "Install docs describe building Jet from the exported seed with a stock C compiler, and a fresh machine with no Jet binary follows them to a working jet.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T01:31:11.555Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-08T01:31:11.556Z",
+      "updated": "2026-11-08T01:31:11.556Z",
+      "updatedBy": "Main"
     }
   ],
   "decisions": [
@@ -183786,278 +184137,230 @@
         }
       },
       "draft": false,
-      "status": "open",
-      "created": "2026-11-07T01:24:45.114Z"
+      "status": "ratified",
+      "created": "2026-11-07T01:24:45.114Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-08"
     },
     {
       "id": "D-EXPORT-TARGET1",
       "cardId": "c0b4rnem",
       "group": "architecture",
-      "title": "Export Jet programs, and the Jet compiler itself, to C, WebAssembly or other languages",
-      "situation": "Exporting means turning a Jet program into the same program written in another language, such as C or WebAssembly, so a C compiler or a Wasm runtime can build and run it. Today Jet produces only a finished x86-64 Linux program or a browser bundle, and building Jet itself needs an earlier Jet program, called a seed. When a machine has no seed, or the seed is too old to build today's compiler, a new user or a new platform is stuck. It also matters for teams that want Jet code inside a C or Rust project. You are asked who defines a target language, where it plugs into the compiler, and in what order the pieces ship. We recommend a staged plan. First comes a seed built from the WebAssembly writer Jet already has. Next comes C export, once one shared pass makes every check explicit, and target libraries for other languages come last.",
-      "gist": "How should Jet export a program, the compiler included, to C, WebAssembly or another language, so any machine can build it with tools it already has?",
-      "lesson": "A target can only keep Jet's meaning if every check is already an explicit step when the target starts. Today the x86-64 and web code writers still decide some meaning themselves, such as when a whole number grows into a big integer. That work has to move into one shared step first. A seed is only useful where no Jet runs yet, so it must also run compile-time code without an x86-64 machine.",
+      "title": "Transpile Jet to any language through a target trait that a library implements",
+      "situation": "Transpiling means writing a Jet program as the same program in another language, such as C, Rust, JavaScript or Lua. You asked for targets that anyone can add: each target is an ordinary Jet library that implements one trait. The hard part is keeping Jet's meaning. Overflow checks, bounds checks, cleanup and error stops must behave the same in every language. You are asked what a target library receives from the compiler, what it must implement, and how much of the output it may shape. Seeding and bootstrapping the compiler are a separate, later question on their own card.",
+      "gist": "What does a transpilation target implement, and what does it receive from the compiler, so that a library can add any language while the program keeps one meaning?",
+      "lesson": "A target can only keep Jet's meaning if every check is already an explicit step when it receives the program. A target that receives the source tree must re-implement every check itself, and that is where languages drift apart. Haxe is the known example: its Int behaves differently on different targets.",
       "explainer": "",
-      "story": "Ana has a new board with gcc on it and no Jet binary. She builds the release's seed with one cc command and gets a slow jet that runs on her board. It cannot write machine code for her board, because Jet's only native code writer is x86-64, but it can export to C. She exports today's compiler to C, builds that with gcc, and has a full-speed jet for her board.\n\nLater her team's C service needs Jet's CSV reader. She runs `jet build --emit c` on it, gets C files plus a header, and their C build compiles them like any other library. The exported reader prints the same results and the same error messages as the Jet one, because both are spelled from the same checked program.",
-      "inWild": "Nim compiles to C and ships its compiler as generated C, so it builds anywhere with a C compiler (https://nim-lang.org/docs/backends.html). Vala also compiles to C, and its users build the generated C without Vala installed (https://vala.dev). Zig bootstraps from a WebAssembly build of its compiler plus a small C program that turns it into C (https://ziglang.org/news/goodbye-cpp/). mrustc is a separate Rust compiler written in C++ that exists only to bootstrap rustc (https://github.com/thepowersgang/mrustc). The bootstrappable-builds project argues that generated C is not real source, so a seed built from it still trusts the compiler that wrote it (https://bootstrappable.org/). Diverse double-compiling builds a compiler's source with a second, independent compiler and compares the bytes to detect a tampered compiler (https://dwheeler.com/trusting-trust/).",
-      "detail": "WHAT VOTING A INCLUDES\n\n1. Seed first. The web target already writes WebAssembly from Jet IR for the whole runtime, and its JavaScript host answers the runtime's Linux system calls. A small C host answers the same calls on POSIX systems, and a committed WebAssembly-to-C translator turns the compiler's .wasm into C. The native compiler runs compile-time code by loading x86-64 code into a child process, so the seed runs it on the IR evaluator instead. Every release checks that the seed rebuilds the release's own stage 2 bytes on x86-64 Linux.\n\n2. One explicit form. Whole-number fast paths and big-integer spills, fixed-width traps and their messages, and the stop protocol move out of the x86-64 and web code writers into one shared pass over IR. After it, a code writer only spells a closed list of operations, each with a conformance test, so a printer of that form adds no meaning.\n\n3. C export. `jet build --emit c greet.jet` prints that form as C, with a header for exported functions and the runtime printed the same way. The runtime's 75 machine-code leaves (system call, atomics, thread start, thread base, CPU queries) get C versions held to the native ones by tests. The output language is separate from the platform: the `os:` and architecture choices still pick the runtime's system-call layer, and only Linux x86-64 has one today.\n\n4. Capabilities are checked first. Each emit form declares what it can spell, such as threads, SIMD or inline assembly. A program that needs something the form lacks gets a registered error naming the form before anything is written. Today the web target reports such failures late, as unregistered selection errors.\n\n5. Target libraries last. Other languages plug in as Jet packages only after the owner declares the explicit form stable. Until then the form changes in the same commit as its first-party writers.\n\n6. Meaning across targets. Each emit form is held to the same output as jet run for every executable example, like the native and web targets.\n\nWHAT VOTING A DOES NOT INCLUDE\n\nA native code writer for a second architecture, which is a separate card. Readable, hand-maintainable output, which option C gives. Speed claims for exported code. A guarantee against a compromised compiler lineage, which only an independent Jet implementation could give.\n\nEDGE CASES\n\nC leaves some operations undefined, such as signed overflow, type punning and evaluation order. The C export emits only operations C defines exactly: unsigned 64-bit arithmetic, explicit overflow comparisons, memcpy for reinterpretation, and one step per statement. C has no guaranteed tail call, so IR tail jumps become a loop or a trampoline.\n\nThe native fault report is an x86-64 code blob that reads Linux x86-64 signal-context offsets; the C export writes its own report from a location table, with line directives for debuggers. Compile-time code runs during export, and only its results are written.",
+      "story": "Ana's team has a Lua game engine and wants her Jet pathfinding code inside it. She adds the community `lua` target package to her project and runs `jet build --to lua path.jet`. She gets `path.lua` plus `jet_runtime.lua`, and the engine loads them like any other module.\n\nAn overflow in her code stops with the same message in Lua as in `jet run`, because the target spelled checks the compiler had already made explicit. Ben writes that `lua` target in about 2,000 lines of Jet. He implements the required trait methods, then overrides the hooks for records and loops so the output reads like ordinary Lua. `jet test --to lua` runs every executable example through his target and compares the output with `jet run`.",
+      "inWild": "Haxe compiles one language to JavaScript, C++, C#, Java, Python, Lua and PHP. Reflaxe lets a library add a target from Haxe's typed syntax tree (https://github.com/SomeRanDev/reflaxe). Integer width and overflow differ between Haxe targets (https://haxe.org/manual/types-basic-types.html).\n\nFable compiles F# to JavaScript, TypeScript, Python, Rust and Dart from the typed tree. Its documentation lists behavior that differs per target, such as numeric types and reflection (https://fable.io/docs/).\n\nKotlin lowers every platform from one shared IR, and its JVM, JavaScript, Wasm and Native back ends consume that IR (https://kotlinlang.org/docs/multiplatform.html).\n\nNim, Gleam and Scala.js each ship a fixed set of first-party back ends, and third parties cannot add a language (https://nim-lang.org/docs/backends.html, https://gleam.run/documentation/).\n\nLLVM lets anyone add a machine target by implementing its target classes. Emscripten and wasm2c turn low-level code into JavaScript or C that is correct but hard to read.",
+      "detail": "WHAT VOTING A INCLUDES\n\n1. One trait. `core.compiler.target.Target` is a public, versioned trait. A target is any Jet package with a type that implements it. First-party targets are ordinary implementations with no special access.\n\n2. What a target receives. It receives the checked program after one shared pass that makes every meaning explicit. That covers overflow checks, big-integer spills, bounds checks, cleanup, error stops and the stop protocol. Jet's own runtime (Prelude and Core) arrives the same way and is transpiled by the same target.\n\n3. What a target must implement. Required methods spell a closed list of explicit operations (arithmetic, memory, calls, branches, loops and returns). A small set of host leaves gives the target language's system calls, clock, memory and threads. Each operation has a conformance test.\n\n4. Idiom hooks. Optional hooks let a target spell records, enums, functions, loops, strings and errors in the target language's own style. Each hook receives the already explicit form and has a default built from the required methods. A target can therefore start plain and grow idiomatic, and a hook can never drop a check.\n\n5. Capabilities first. A target declares what it can spell, such as threads, 64-bit integers, tail calls or SIMD. A program that needs something missing gets a registered error naming the target before anything is written.\n\n6. One meaning. `jet test --to <target>` runs every executable example through the target and compares stdout, stderr and the exit code with `jet run`. A target is listed as conforming only when that passes.\n\n7. Command. `jet build --to <target> file.jet` writes the program's files. `c` and `rust` are the first-party targets; any other name is a target package listed in the project's dependencies.\n\n8. Order. The shared explicit pass and the public program view land first, because today the x86-64 and web code writers still decide some meaning themselves. Then the trait and the C target, then Rust, then third-party targets.\n\nWHAT VOTING A DOES NOT INCLUDE\n\nSeeding and bootstrapping the compiler, which are on their own frozen card. Native code writers for new machine architectures. Speed claims for transpiled code.\n\nEDGE CASES\n\nLanguages without fixed 64-bit integers, such as JavaScript or Lua, spell `Int` through host leaves, so overflow still stops at the same values. Garbage-collected languages still run Jet's cleanup at the same points, because cleanup is an explicit step. C's undefined behavior is avoided because the C target spells only operations C defines exactly. A target without threads rejects programs that spawn them, with the capability error. Compile-time code runs in the compiler before transpiling, and only its results are written.",
       "options": [
         {
           "key": "A",
-          "name": "Staged: a WebAssembly seed now, then C export after one shared pass makes every check explicit, then target libraries (recommended)",
-          "detail": "First the seed, from the WebAssembly writer Jet already has. Then one shared pass that moves the meaning the x86-64 and web writers still decide into IR, so a C export only spells finished steps. Target libraries for other languages open once that form is declared stable.",
-          "technical": "Stage 1: a C system-call host and a committed WebAssembly-to-C translator over the web target's output. Compile-time code runs on the IR evaluator, and the release checks that the seed rebuilds its own stage 2 bytes.\n\nStage 2: a shared IR pass makes exact-Int spills, fixed-width traps and the stop protocol explicit. `jet build --emit c` prints the result, with C versions of the 75 runtime asm leaves. Emit capabilities are registered diagnostics checked before selection.\n\nStage 3: a public emit interface for third-party packages after the owner declares the form stable.",
-          "code": "// greet.jet: the same program under every option\nrun: fn() { print(\"hello\") }\n\n// Stage 1, a new machine:\n// $ cc seed/wasm2c.c -o wasm2c && ./wasm2c seed/jet.wasm > jet.c\n// $ cc jet.c seed/host.c -o jet\n// Stage 2, a user's program:\n// $ jet build --emit c greet.jet\n// $ cc greet.c jet_runtime.c -o greet && ./greet\n// hello"
+          "name": "A trait over the explicit program, with optional idiom hooks (recommended)",
+          "detail": "A target implements required methods for a closed list of explicit operations and host leaves, and may override idiom hooks that shape readable output. The runtime is transpiled through the same target. Conformance runs every executable example.",
+          "technical": "Prerequisite: one shared IR pass moves exact-Int spills, fixed-width traps and the stop protocol out of the x86-64 and web selectors. Then core.compiler exposes a versioned, read-only program view. Target: trait has required op methods, a host-leaf table and hooks with defaults. Capabilities are registered diagnostics checked before any output. `jet test --to` drives the example corpus.",
+          "code": "// greet.jet: the same program under every option\nadd: fn(a: Int, b: Int) -> Int { a + b }\nrun: fn() { print(\"hello {add(2, 3)}\") }\n\n// $ jet build --to c greet.jet\n// $ cc greet.c jet_runtime.c -o greet && ./greet\n// hello 5\n\n// A target library (ordinary Jet):\nLua: struct {}\nimpl Lua.Target {\n    name: fn(self) -> String { \"lua\" }\n    op: fn(self, step: target.Op, out: &target.Text) { ... }\n    record: fn(self, r: target.Record, out: &target.Text) { ... }  // optional hook\n}\n// $ jet build --to lua greet.jet"
         },
         {
           "key": "B",
-          "name": "Target libraries print today's final IR; C and WebAssembly first; a C seed at every release",
-          "detail": "A target is a Jet package that spells the program the compiler hands it. The compiler exported to C becomes the portable seed. The plan assumes the final form already fixes every meaning and that the exported compiler can rebuild itself on the new machine.",
-          "technical": "A public target interface over Jet IR, the input JetIR X64Select.jet and JetWeb Web/Select.jet consume today. Both writers still decide exact-Int inline and spill paths, fixed-width traps and the stop protocol, so each new target re-implements them. `jet build --target NAME|PATH` selects a target package, beside `--target web`, which today means the build option `os: web`. The runtime's Linux x86-64 system-call layer and 75 asm leaves go along. The C-built compiler still writes only x86-64 code and runs compile-time code in an x86-64 child process.",
-          "code": "// greet.jet: the same program under every option\nrun: fn() { print(\"hello\") }\n\n// $ jet build --target c greet.jet\n//   writes greet.c and jet_runtime.c (the runtime, exported too)\n// $ cc greet.c jet_runtime.c -o greet && ./greet\n// hello\n// A third-party target is a package:\n// $ jet build --target ./my_target greet.jet"
+          "name": "A trait over the checked source tree (Haxe with Reflaxe, Fable)",
+          "detail": "A target receives the typed, checked syntax tree and writes idiomatic code directly. Each target re-implements Jet's checks, cleanup and error behavior. The conformance suite catches what it gets wrong.",
+          "technical": "core.compiler exposes the checked tree and its types. Target: trait has one method per syntax node. Prelude and Core are transpiled from source by the same target, so every target re-spells overflow, bounds and stop semantics.",
+          "code": "// greet.jet: the same program under every option\nadd: fn(a: Int, b: Int) -> Int { a + b }\nrun: fn() { print(\"hello {add(2, 3)}\") }\n\n// $ jet build --to lua greet.jet\n// greet.lua:\n//   local function add(a, b) return a + b end   -- no overflow check\n// Each target writes Jet's checks itself, or drops them."
         },
         {
           "key": "C",
-          "name": "Source-level transpilers: each target rewrites the typed source into readable code",
-          "detail": "A target receives the checked source tree and writes idiomatic code a person could keep editing, with real types in the C header and the target's own async and errors. Each target must reproduce Jet's checks, cleanup and error behavior on its own.",
-          "technical": "A target interface over the typed syntax tree. Each target re-implements overflow, bounds and cleanup rules, effects and error propagation in its language, held to jet run by the golden suite. Rust output maps Jet ownership onto borrows where it can and falls back to reference counting where it cannot. Best for handing Jet libraries to other projects; poor as a seed, because every compiler feature must be re-spelled by hand.",
-          "code": "// greet.jet: the same program under every option\nrun: fn() { print(\"hello\") }\n\n// $ jet build --target c greet.jet\n// greet.c (readable):\n//   int main(void) { printf(\"hello\\n\"); return 0; }\n// Each target writes its own overflow,\n// cleanup and error code by hand."
+          "name": "A trait over the explicit program, with no idiom hooks",
+          "detail": "Like A, but a target spells only the explicit operations. Output is correct and portable but reads like machine code, as Emscripten and wasm2c output does.",
+          "technical": "Same prerequisite and program view as A, with no hook layer. Target: trait has the op methods and host leaves only.",
+          "code": "// greet.jet: the same program under every option\nadd: fn(a: Int, b: Int) -> Int { a + b }\nrun: fn() { print(\"hello {add(2, 3)}\") }\n\n// $ jet build --to c greet.jet\n// greet.c:\n//   uint64_t r3 = r1 + r2; if (r3 < r1) jet_stop(7);\n// Correct, but not code a person would maintain."
         },
         {
           "key": "D",
-          "name": "A WebAssembly seed only, with no export command (Zig's approach)",
-          "detail": "Jet builds the compiler as one WebAssembly file at each release and ships a small C program that turns it into C. Most of the writer exists already. Users get no way to export their own programs.",
-          "technical": "The web target already writes the whole runtime as WebAssembly from Jet IR, and its JavaScript host answers the runtime's Linux system calls, with the host's file system under node. A C host answers the same calls on POSIX, a committed translator turns the .wasm into C, and compile-time code runs on the IR evaluator. WebAssembly here is single-threaded (Web/Leaf.jet makes every atomic a plain read-modify-write), so the seed compiler runs serially. No target interface, no C export.",
-          "code": "// greet.jet: the same program under every option\nrun: fn() { print(\"hello\") }\n\n// Users: jet build greet.jet (native only).\n// Bootstrapping a new machine:\n// $ cc seed/wasm2c.c -o wasm2c\n// $ ./wasm2c seed/jet.wasm > jet.c && cc jet.c host.c -o jet"
-        },
-        {
-          "key": "E",
-          "name": "Keep binary seeds only: publish prebuilt compilers for each platform",
-          "detail": "Each release ships prebuilt jet binaries for the platforms the project builds, which today is x86-64 Linux. A new platform waits for a native code writer for it.",
-          "technical": "Today's release flow: a native seed per platform, published with each release. No new trusted artifact and no slow path. A second platform needs a second native code writer under every option, so E defers that cost rather than adding one.",
-          "code": "// greet.jet: the same program under every option\nrun: fn() { print(\"hello\") }\n\n// $ jet build greet.jet       (native only)\n// New machine: download the release binary\n// for your platform, if one exists."
+          "name": "First-party targets only, with no public trait (Nim, Gleam)",
+          "detail": "The compiler ships C and Rust writers. Nobody outside the compiler can add a language.",
+          "technical": "The C and Rust writers live in Compiler/ beside the x86-64 and web writers and read the internal IR directly.",
+          "code": "// greet.jet: the same program under every option\nadd: fn(a: Int, b: Int) -> Int { a + b }\nrun: fn() { print(\"hello {add(2, 3)}\") }\n\n// $ jet build --to c greet.jet       works\n// $ jet build --to lua greet.jet     error: no such target"
         }
       ],
       "comparisons": [],
       "rec": "A",
       "recommendation": {
         "rec": "A",
-        "why": "A ships the seed from code Jet already has, instead of waiting for a new C target to cover the whole compiler. It keeps one meaning in fact rather than by ruling, because the shared pass removes the decisions the code writers make today before any new writer is added. It opens target libraries only when their input can stop changing.",
+        "why": "It is the only option where any language can be added by a library and the program still keeps one meaning. Every check is explicit before a target sees it, and idiom hooks cannot remove a check.",
         "gains": [
-          "A machine with a C compiler can build a working Jet from the release seed, compile-time code included.",
-          "Jet programs and libraries can be handed to C projects as buildable source.",
-          "The x86-64 and web writers lose their duplicated meaning, which helps even without export."
+          "Any language can be added by an ordinary Jet package.",
+          "Overflow, bounds, cleanup and error stops behave the same in every target, proven by the example corpus.",
+          "Targets can start plain and become idiomatic one hook at a time."
         ],
         "losses": [
           {
-            "loss": "The seed runs slowly: it is translated WebAssembly, single-threaded, with compile-time code on the IR evaluator.",
-            "mitigation": "Its only job is one rebuild; the user then exports the compiler to C and builds a full-speed one."
+            "loss": "Targets wait for the shared explicit pass and the public program view.",
+            "mitigation": "Both also remove duplicated meaning from the x86-64 and web writers, so the work pays off even before the first target."
           },
           {
-            "loss": "A seed built from generated output still trusts the compiler that wrote it.",
-            "mitigation": "The release check catches a changed or miscompiled seed file. Only an independent Jet implementation could catch a compromised compiler, and that is stated, not claimed."
+            "loss": "The trait is a public contract that changes as the compiler grows.",
+            "mitigation": "It is versioned with the compiler library, and first-party targets change in the same commit, so breakage shows up at once."
           },
           {
-            "loss": "Third-party targets wait for stage 3.",
-            "mitigation": "The form they would depend on is still changing; opening it earlier would break them on every commit."
+            "loss": "Output without hooks reads like low-level code.",
+            "mitigation": "The C and Rust targets ship with hooks for records, enums, functions and loops."
           }
         ],
         "whyNot": [
           {
             "key": "B",
-            "reason": "Today's IR is not final: both existing writers still decide exact-Int, trap and stop meaning, so B's targets would each carry a second meaning. Its C seed also cannot rebuild itself off x86-64, because compile-time code runs in an x86-64 child and the only native writer is x86-64. `--target c` mixes an output language into a flag that today means the platform."
+            "reason": "Every target re-implements Jet's checks by hand, so meaning drifts between languages, as it does in Haxe and Fable."
           },
           {
             "key": "C",
-            "reason": "Best for readable library hand-off, but each target re-creates Jet's rules by hand and none of it yields a seed."
+            "reason": "It keeps the meaning but gives up readable output, which is much of why teams want transpiled code."
           },
           {
             "key": "D",
-            "reason": "It is stage 1 of A and solves bootstrapping, but gives users no export."
-          },
-          {
-            "key": "E",
-            "reason": "It keeps new platforms waiting for a native writer, with no way to run Jet there in the meantime."
+            "reason": "It rules out the library-defined targets you asked for."
           }
         ],
-        "tradeoff": "A delivers export later than B promises. In exchange it gives a seed sooner, one meaning that is true of the code, and a stable emit interface for third parties."
+        "tradeoff": "A delays third-party targets until the explicit pass and the public program view exist, in exchange for one meaning in every language."
       },
       "hybrid": null,
       "ballotMode": "full",
       "shortAuthorizedBy": null,
       "ballotProcessVersion": 5,
       "reviewPasses": {
-        "adversarial": "Author model family: Claude. Adversarial model family: Claude. Fresh agent: PortsLead-2. The review found that today's IR still leaves exact-Int, trap and stop meaning to each writer, and that comptime and the only native writer are x86-64. It replaced the recommendation with the staged option A, `--emit c` and corrected seed-trust claims."
+        "adversarial": "Author model family: Claude. Adversarial model family: Claude. Fresh agent: PortsLead-2. It reviewed the earlier seed draft and found that each writer still decides exact-Int, trap and stop meaning; fixing that is option A's first step. A fresh review of this re-scoped revision is pending and is the build card's first criterion."
       },
-      "checkInstructions": "Claims checked against dev 964e737fcc.\n\nCompiler/JetIR/Source/X64Select.jet header: x86-64 selection decides exact-Int inline and spill paths (jet_int_add) and the slow paths.\n\nCompiler/JetWeb/Source/Web/Select.jet header: WebAssembly selection re-gives each IR instruction the x86-64 selector's meaning (exact-Int fast paths, big-integer routes, fixed-width traps and stop texts, stop protocol). It also imports jet_ir X64 tables, so IR is not yet a fully decided form.\n\nCompiler/JetWeb/Source/Web/Leaf.jet: the web target re-spells the Linux layer's #FFI(asm) leaves and makes every atomic a plain read-modify-write.\n\nCompiler/JetWeb/Source/Web/Host.jet: the JavaScript host answers the runtime's Linux system calls and the C library calls the runtime makes.\n\nCompiler/JetBackend/Source/OS/Linux.jet: 75 runtime leaves, os_syscall_i64 a raw Linux x86-64 syscall; 383 raw syscall sites across 58 runtime files use x86-64 numbers.\n\nCompiler/JetBackend/Source/Image/SessionHost.jet: compile-time code runs in a child process that loads x86-64 code under seccomp.\n\nCompiler/JetBackend/Source/X64/FaultReport.jet: the fault report is an x86-64 code blob; Compiler/JetRuntime/Source/Fault.jet reads Linux x86-64 ucontext offsets.\n\nCompiler/JetCli/Source/Cli/Front.jet jet_cli_build_options: `--target web` sets the build option `os: web`.\n\nJetWeb builds WebAssembly with jet_wasm's writer helpers (wasm_put_unsigned, wasm_sig_type).\n\nThe a0_033 native jet is 95 MB.",
+      "checkInstructions": "Claims checked against dev 964e737fcc.\n\nCompiler/JetIR/Source/X64Select.jet header: x86-64 selection decides exact-Int inline and spill paths (jet_int_add) and the slow paths.\n\nCompiler/JetWeb/Source/Web/Select.jet header: WebAssembly selection re-gives each IR instruction the x86-64 selector's meaning (exact-Int fast paths, big-integer routes, fixed-width traps and stop texts, stop protocol). It also imports jet_ir X64 tables, so IR is not yet a fully decided form.\n\nCompiler/JetWeb/Source/Web/Leaf.jet: the web target re-spells the Linux layer's #FFI(asm) leaves and makes every atomic a plain read-modify-write.\n\nCompiler/JetWeb/Source/Web/Host.jet: the JavaScript host answers the runtime's Linux system calls and the C library calls the runtime makes.\n\nCompiler/JetBackend/Source/OS/Linux.jet: 75 runtime leaves, os_syscall_i64 a raw Linux x86-64 syscall; 383 raw syscall sites across 58 runtime files use x86-64 numbers.\n\nCompiler/JetBackend/Source/Image/SessionHost.jet: compile-time code runs in a child process that loads x86-64 code under seccomp.\n\nCompiler/JetBackend/Source/X64/FaultReport.jet: the fault report is an x86-64 code blob; Compiler/JetRuntime/Source/Fault.jet reads Linux x86-64 ucontext offsets.\n\nCompiler/JetCli/Source/Cli/Front.jet jet_cli_build_options: `--target web` sets the build option `os: web`.\n\nJetWeb builds WebAssembly with jet_wasm's writer helpers (wasm_put_unsigned, wasm_sig_type).\n\nThe a0_033 native jet is 95 MB.\n\nRe-scope 2026-11-07: core.compiler exports only check, lex, lock, manifest, package, parse, profiles and source_map (Compiler/Prelude/Core.jet), so no public program view exists yet. `jet build --target` names platforms such as web (Compiler/JetCli/Source/Cli/Front.jet), so transpilation uses a separate `--to` flag.",
       "surface": {
-        "gist": "How should Jet turn a program, the compiler included, into C or WebAssembly that any machine can build?",
-        "lesson": "A target keeps Jet's meaning only if every check is already explicit when it starts, and today's code writers still decide some of it. A seed is only useful where no Jet runs yet, so it must run compile-time code without x86-64.",
+        "gist": "What does a transpilation target implement, so any language can be added by a library and keep Jet's meaning?",
+        "lesson": "A target keeps Jet's meaning only if every check is explicit when it receives the program. Targets that re-implement checks drift, as Haxe's do.",
         "trio": {
           "current": {
-            "note": "Jet builds only x86-64 Linux programs or browser bundles, and building Jet needs an earlier Jet binary.",
-            "code": "// greet.jet: the same program under every option\nrun: fn() { print(\"hello\") }\n\n// $ jet build greet.jet          native program\n// $ jet build --target web ...   browser bundle\n// No C output; a new machine needs a Jet binary first."
+            "note": "Jet writes only x86-64 Linux programs and browser bundles. There is no way to emit another language.",
+            "code": "// greet.jet: the same program under every option\nadd: fn(a: Int, b: Int) -> Int { a + b }\nrun: fn() { print(\"hello {add(2, 3)}\") }\n\n// $ jet build greet.jet             native program\n// $ jet build --target web greet.jet browser bundle"
           },
           "wild": {
-            "lang": "Zig",
-            "note": "Zig ships its compiler as WebAssembly plus a small C program that turns it into C.",
-            "code": "// Bootstrapping Zig from a C compiler alone\n$ cc -o zig-wasm2c stage1/wasm2c.c\n$ ./zig-wasm2c stage1/zig1.wasm zig1.c\n$ cc -o zig1 zig1.c stage1/wasi.c"
+            "lang": "Haxe",
+            "note": "Reflaxe lets a library add a Haxe target from the typed tree, but Int behaves differently per target.",
+            "code": "// one Haxe program -> JS, C++, Python, Lua...\n// Int overflow wraps on some targets, not others"
           }
         },
         "options": [
           {
             "key": "A",
-            "name": "Staged: seed, explicit form, C export, then libraries",
-            "gist": "A WebAssembly seed now; C export once every check is explicit; target libraries when the form is stable.",
+            "name": "Trait over the explicit program, with idiom hooks",
+            "gist": "Libraries add any language; every check is explicit; hooks make output readable.",
             "gains": [
-              "A seed soonest, from existing code",
-              "One meaning that is true of the code",
-              "C export for users"
+              "Any language by a library",
+              "One meaning, proven by examples",
+              "Readable output where a target wants it"
             ],
             "losses": [
-              "Slow seed",
-              "Third-party targets come last"
+              "Waits for the explicit pass"
             ],
             "proposed": {
-              "code": "// greet.jet: the same program under every option\nrun: fn() { print(\"hello\") }\n// $ jet build --emit c greet.jet\n// $ cc greet.c jet_runtime.c -o greet\n// $ ./greet\n// hello"
+              "code": "// $ jet build --to lua greet.jet\nimpl Lua.Target { op: fn(...) {...} }"
             }
           },
           {
             "key": "B",
-            "name": "Target libraries print today's IR",
-            "gist": "C and WebAssembly export for users, and a C seed every release.",
+            "name": "Trait over the source tree",
+            "gist": "Targets write idiomatic code and re-implement Jet's checks.",
             "gains": [
-              "Export to C or WebAssembly",
-              "Third-party targets at once"
+              "Most readable output"
             ],
             "losses": [
-              "Each target re-decides some meaning",
-              "The C seed cannot rebuild itself off x86-64",
-              "`--target` gains a second meaning"
+              "Meaning drifts per target"
             ],
             "proposed": {
-              "code": "// greet.jet: the same program under every option\nrun: fn() { print(\"hello\") }\n// $ jet build --target c greet.jet\n// $ cc greet.c jet_runtime.c -o greet\n// $ ./greet\n// hello"
+              "code": "// add(a, b) = a + b, no overflow check"
             }
           },
           {
             "key": "C",
-            "name": "Readable transpilers per language",
-            "gist": "Each target rewrites the source into code a person can edit.",
+            "name": "Trait over the explicit program, no hooks",
+            "gist": "Correct and portable, but machine-like output.",
             "gains": [
-              "Readable, editable output",
-              "Natural types and errors in the target language"
+              "Simplest trait"
             ],
             "losses": [
-              "Each target re-creates Jet's checks and can drift",
-              "No seed"
+              "Unreadable output"
             ],
             "proposed": {
-              "code": "// greet.jet: the same program under every option\nrun: fn() { print(\"hello\") }\n// greet.c, readable:\n// int main(void) { printf(\"hello\\n\"); }"
+              "code": "// uint64_t r3 = r1 + r2; ..."
             }
           },
           {
             "key": "D",
-            "name": "WebAssembly seed only",
-            "gist": "Zig's bootstrap from Jet's existing web writer, with no export for users.",
+            "name": "First-party targets only",
+            "gist": "The compiler ships C and Rust; nobody can add a language.",
             "gains": [
-              "Smallest change that fixes bootstrapping",
-              "Most of the writer exists"
+              "No public contract"
             ],
             "losses": [
-              "Users cannot export their programs",
-              "The seed runs serially and slowly"
+              "Not what you asked for"
             ],
             "proposed": {
-              "code": "// greet.jet: the same program under every option\nrun: fn() { print(\"hello\") }\n// jet build greet.jet   (native only)\n// $ ./wasm2c seed/jet.wasm > jet.c"
-            }
-          },
-          {
-            "key": "E",
-            "name": "Prebuilt binaries only",
-            "gist": "Keep today's release binaries per platform.",
-            "gains": [
-              "No new work or trusted artifact"
-            ],
-            "losses": [
-              "New platforms stay stuck"
-            ],
-            "proposed": {
-              "code": "// greet.jet: the same program under every option\nrun: fn() { print(\"hello\") }\n// $ jet build greet.jet   (native only)"
+              "code": "// jet build --to lua: no such target"
             }
           }
         ],
         "recommendation": {
           "rec": "A",
-          "why": "A ships the seed from code Jet already has and makes one meaning true before adding writers.",
+          "why": "Any language can be added by a library, and checks are explicit before a target sees them.",
           "gains": [
-            "A working seed soonest",
-            "C export without a second meaning"
+            "Library-defined targets",
+            "One meaning",
+            "Readable output"
           ],
           "losses": [
             {
-              "loss": "A seed built from generated output still trusts the compiler that wrote it.",
-              "mitigation": "The release check catches a changed seed file, not a compromised compiler; that limit is stated."
+              "loss": "Targets wait for the explicit pass and program view.",
+              "mitigation": "That work also removes duplicated meaning from today's writers."
             }
           ],
           "whyNot": [
             {
               "key": "B",
-              "reason": "Its targets would each re-decide meaning, and its seed cannot rebuild itself off x86-64."
+              "reason": "Meaning drifts between targets."
             },
             {
               "key": "C",
-              "reason": "Every target re-creates Jet's rules; no seed."
+              "reason": "Unreadable output."
             },
             {
               "key": "D",
-              "reason": "Stage 1 of A, with no export for users."
-            },
-            {
-              "key": "E",
-              "reason": "Leaves new platforms stuck."
+              "reason": "No library-defined targets."
             }
           ],
-          "tradeoff": "Export arrives after the seed and the shared pass, but with one real meaning and a stable interface."
+          "tradeoff": "Third-party targets come after the explicit pass, in exchange for one meaning everywhere."
         }
       },
       "designAway": [
         {
-          "loss": "Exported C could behave differently from Jet, through C's undefined behavior such as signed overflow, type punning and evaluation order.",
+          "loss": "A transpiled program could behave differently from `jet run`.",
           "attempts": [
-            "The C export prints the form after the shared pass, where every overflow check, bounds check and cleanup is an explicit step.",
-            "It emits only operations C defines exactly: unsigned 64-bit arithmetic, explicit overflow comparisons, memcpy for reinterpretation, and one step per statement; tail jumps become loops or trampolines."
+            "Targets receive the program after the shared pass, where every check is an explicit step.",
+            "Idiom hooks receive that explicit form and default to the required methods, so a hook cannot remove a check.",
+            "`jet test --to` compares every executable example's output with `jet run`."
           ],
-          "result": "Removed by design; every executable example's golden output is checked on the C export."
+          "result": "Removed by design; conformance is proven per target."
         },
         {
-          "loss": "A new code writer could drift from Jet's one meaning.",
+          "loss": "C's undefined behavior could change meaning in the C target.",
           "attempts": [
-            "The shared pass moves exact-Int spills, fixed-width traps and the stop protocol out of every writer, so a writer only spells a closed list of operations.",
-            "Each listed operation has a conformance test, and each first-party writer runs the full golden suite."
+            "The C target spells only operations C defines exactly: unsigned arithmetic with explicit overflow comparisons, memcpy for reinterpretation, and one step per statement."
           ],
-          "result": "Reduced to the closed operation list, which the conformance tests pin."
+          "result": "Removed by design for the first-party C target; third-party targets carry the same conformance check."
         },
         {
-          "loss": "Features a target cannot express, such as inline assembly, SIMD or threads, could fail at export time.",
+          "loss": "A third-party target could break on every compiler change.",
           "attempts": [
-            "Each emit form declares its capabilities, and the checker reports a registered error naming the form before selection.",
-            "The C runtime provides C versions of the 75 asm leaves, held to the native ones by tests."
+            "The program view and the trait are versioned with the compiler library.",
+            "First-party targets use the same public trait, so a breaking change fails in-repository first."
           ],
-          "result": "Minimized; a missing capability is a clear compile error, never wrong output."
-        },
-        {
-          "loss": "The seed could not run compile-time code away from x86-64, because the native compiler runs it in an x86-64 child process.",
-          "attempts": [
-            "The seed routes compile-time code to the IR evaluator, which `fn build` and `fn dev` already run on."
-          ],
-          "result": "Removed, at the evaluator's speed."
-        },
-        {
-          "loss": "A seed built from generated output still trusts the compiler that wrote it.",
-          "attempts": [
-            "Each release rebuilds stage 2 from the seed and requires the native stage 2 bytes."
-          ],
-          "result": "Cannot be removed. The check catches a changed or miscompiled seed file; a compromised compiler would write the same flaw into the seed and pass. Only an independent Jet implementation would catch that."
+          "result": "Reduced, not removed: the trait is a public contract, stated as a loss."
         }
       ],
       "draft": false,
@@ -186400,9 +186703,11 @@
       "by": "owner",
       "kind": "question",
       "text": "what is considered best practice overall across all domains? we need the correct default with the ability to control exact behavior for experts where needed",
-      "status": "open",
-      "answer": "",
-      "created": "2026-11-07T23:05:21.581Z"
+      "status": "answered",
+      "answer": "Best practice across fields has three parts. (1) The default never loses information silently. IEEE 754 defines float-to-int per rounding direction and signals invalid on NaN, infinity or out of range; Julia's Int(2.5) throws; Jet's own Float{n} already stops when inexact. (2) The rounding is always named, because fields disagree: games want floor for negative coordinates, statistics and money want ties-to-even (the IEEE, Python, NumPy, R, C# and Julia default), everyday arithmetic wants ties-away, and audio and pixels want saturation. (3) Out of range either stops, returns a checkable value, or saturates only when asked. The ballot now recommends A, which follows Julia. Int{f} is exact; trunc, floor, ceil, round (ties away) and a new round_even (ties to even) name the rounding; Int.from_float returns None; a new Int.saturating_from clamps, on every integer head. math.round stops on NaN and out of range instead of today's silent 0 and clamping. The rejected camps are B, truncate and stop (Swift, Python), and C, truncate and saturate (Rust as, Java, Kotlin). There is no unchecked unsafe form, because the range check is one compare that the optimizer removes when it proves the range.",
+      "created": "2026-11-07T23:05:21.581Z",
+      "answeredAt": "2026-11-08",
+      "answeredBy": "Main"
     },
     {
       "id": "q1o8lb8m",
@@ -186411,9 +186716,11 @@
       "by": "owner",
       "kind": "question",
       "text": "this misses my original ask or twists my intent. the bootstrapped/seeded compiler for jet is secondary. my main question was about supporting transpilation from jet to a target language, where the implementation of a transpilation target can be implemented for any language using an implementable trait/library. please update accordingly. the seeding/compiler bootstrap is a separate question and that should be a card frozen for the future. the transpilation card should be separate and will occur earlier",
-      "status": "open",
-      "answer": "",
-      "created": "2026-11-07T23:07:28.638Z"
+      "status": "answered",
+      "answer": "Updated. D-EXPORT-TARGET1 now asks only about transpilation: what a target library implements and what it receives. Recommended A: one public Target trait in core.compiler.target, implemented by any Jet package. The target receives the checked program after one shared pass that makes every check explicit (overflow, bounds, cleanup, error stops). It implements required operation methods plus host leaves, and may override idiom hooks (records, enums, functions, loops, strings, errors) for readable output; a hook cannot drop a check. Capabilities are checked before output, and jet test --to <target> compares every executable example with jet run. The command is jet build --to <target> file.jet, with C and Rust first-party. The alternatives are B, a trait over the source tree (Haxe with Reflaxe, Fable: readable, but meaning drifts), C, explicit form with no hooks, and D, first-party targets only. Seeding and bootstrap moved to the frozen card #6683 (epoch e11, Bootstrapping), with the two seed criteria removed from #6675. #6675 is now transpilation only and comes first.",
+      "created": "2026-11-07T23:07:28.638Z",
+      "answeredAt": "2026-11-08",
+      "answeredBy": "Main"
     }
   ],
   "ideas": [
@@ -187270,6 +187577,132 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-08T01:31:38.826Z",
+      "by": "Main",
+      "action": "question.answer",
+      "ref": "q1o8lb8m",
+      "note": ""
+    },
+    {
+      "at": "2026-11-08T01:31:37.569Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0b4rnem",
+      "note": "#1: Owner re-scoped the card to transpile targets 2026-11-07; was: An adversarial design review in Docs/audits tests every claimed strength (bootstrap durability, onboarding, interop, kept meaning) against existing source-to-source compilers and bootstrap chains, and"
+    },
+    {
+      "at": "2026-11-08T01:31:28.386Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-EXPORT-TARGET1",
+      "note": ""
+    },
+    {
+      "at": "2026-11-08T01:31:27.553Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0b4rnem",
+      "note": "title,body"
+    },
+    {
+      "at": "2026-11-08T01:31:24.566Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0b4rnem",
+      "note": "#5: Seed criterion moved to #6683 (owner 2026-11-07: seeding is a separate frozen card); was [open]: Exporting the compiler's own source to C (and to Wasm) gives a compiler that, built with only a C compiler (or a Wasm runtime), compiles the same tree to a byte-identical stage-2 compiler: a portable "
+    },
+    {
+      "at": "2026-11-08T01:31:23.680Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0b4rnem",
+      "note": "#6: Seed criterion moved to #6683 (owner 2026-11-07: seeding is a separate frozen card); was [open]: Install docs describe building Jet from the exported seed with a stock C compiler, and a fresh machine with no Jet binary follows them to a working jet."
+    },
+    {
+      "at": "2026-11-08T01:31:11.556Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0zizxhx",
+      "note": "Portable seed: build a working Jet on a machine that has only a C compiler or a WebAssembly runtime"
+    },
+    {
+      "at": "2026-11-08T01:30:57.119Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0crz3ra",
+      "note": "Compiler/build.jet declares the whole project: every artifact, generated table, toolchain, chain stage and profile is one build graph"
+    },
+    {
+      "at": "2026-11-08T01:27:15.945Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-FLOAT-INT1",
+      "note": "A"
+    },
+    {
+      "at": "2026-11-08T01:26:54.121Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c00ctwqw",
+      "note": "#10 The cold toolchain fetch inside that run (#6592) takes 30 s "
+    },
+    {
+      "at": "2026-11-08T01:26:52.700Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c00ctwqw",
+      "note": "#9 Excluding the toolchain fetch, jet test Compiler --profile f"
+    },
+    {
+      "at": "2026-11-08T01:26:51.360Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c00ctwqw",
+      "note": "#8 Every corpus suite (golden, cases, ui, packages) runs as wid"
+    },
+    {
+      "at": "2026-11-08T01:26:50.077Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c00ctwqw",
+      "note": "#7 The packages suite on a fresh clone finishes in under 5 minu"
+    },
+    {
+      "at": "2026-11-08T01:26:48.761Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c00ctwqw",
+      "note": "goals"
+    },
+    {
+      "at": "2026-11-08T01:26:36.572Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0nsxbj2",
+      "note": "core.crypto SHA-256 runs at 45-50 MB/s; a scalar native implementation does about 500 MB/s and SHA-NI about 2 GB/s"
+    },
+    {
+      "at": "2026-11-08T01:26:34.706Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0sxi78p",
+      "note": "The compiler's default thread count is fixed at start from the instantaneous load, so a build started on a busy host runs on one core"
+    },
+    {
+      "at": "2026-11-08T01:26:32.892Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0yxlw5x",
+      "note": "Test results are reused across runs: the full profile and the admit skip rows whose compiler and inputs are unchanged"
+    },
+    {
+      "at": "2026-11-08T01:25:15.414Z",
+      "by": "Main",
+      "action": "question.answer",
+      "ref": "q0ay96ip",
+      "note": ""
+    },
     {
       "at": "2026-11-08T01:25:02.053Z",
       "by": "Main",
