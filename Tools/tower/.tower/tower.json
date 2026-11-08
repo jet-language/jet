@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6696,
-    "rev": 96177,
+    "nextNum": 6697,
+    "rev": 96183,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -100555,6 +100555,11 @@
         {
           "at": "2026-11-08",
           "by": "Main",
+          "text": "Owner 2026-11-08: track full libc coverage too (\"We should already have a lot of what libc covers just need to fill the gaps\"), filed as #6696. Owner approved spawning leads for mbedtls (#6694) and SQLite (#6695)."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
           "text": "Which artifacts need which C (SpeedLead, nm on the c4-built jet and on seed a0_038): jet links mbedtls (T mbedtls_ssl_setup, T jet_tls_new) through JetCli core.http.client (BuildHTTPTransport.jet, the HTTPS build fetch) and core.http.server tls (BuildWeb.jet), both reaching Core/Net/Tls.jet #Import c.mbedtls. jet links no sqlite (no sqlite3_* symbol, no core.db reached). jetpack links mbedtls and no sqlite. The runtime pack ships both foreign archives, which a user program links only when it reaches c.mbedtls or c.sqlite3 (ForeignLink.jet jet_cli_vendored_c_archive). So after #6693, mbedtls (#6694) is the only C that jet itself needs; SQLite (#6695) is needed only so the pack can serve user programs that use core.db. The fresh-clone criterion therefore needs #6693 and #6694 for jet, and #6695 for the pack."
         }
       ],
@@ -100608,7 +100613,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-08T15:46:43.606Z",
-      "updated": "2026-11-08T15:49:13.633Z",
+      "updated": "2026-11-08T15:55:07.845Z",
       "updatedBy": "Main",
       "criteriaLastN": 4
     },
@@ -101043,6 +101048,11 @@
         {
           "at": "2026-11-08",
           "by": "Main",
+          "text": "Assigned 2026-11-08 by Main to TlsLead (spawned with owner approval). The brief is in the Main lane scratch, briefs/TlsLead.md."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
           "text": "Assigned 2026-11-08 by Main: unstaffed: needs the owner's permission for another lead."
         }
       ],
@@ -101105,7 +101115,7 @@
       "parentId": "c0lscvc9",
       "needsAcceptance": false,
       "created": "2026-11-08T15:47:15.645Z",
-      "updated": "2026-11-08T15:47:55.240Z",
+      "updated": "2026-11-08T15:56:08.096Z",
       "updatedBy": "Main",
       "criteriaLastN": 5
     },
@@ -101127,6 +101137,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-08",
+          "by": "Main",
+          "text": "Assigned 2026-11-08 by Main to SqliteLead (spawned with owner approval). The brief is in the Main lane scratch, briefs/SqliteLead.md."
+        },
         {
           "at": "2026-11-08",
           "by": "Main",
@@ -101182,9 +101197,63 @@
       "parentId": "c0lscvc9",
       "needsAcceptance": false,
       "created": "2026-11-08T15:47:22.108Z",
-      "updated": "2026-11-08T15:47:56.350Z",
+      "updated": "2026-11-08T15:56:09.223Z",
       "updatedBy": "Main",
       "criteriaLastN": 4
+    },
+    {
+      "id": "c0cs6xlg",
+      "num": 6696,
+      "title": "No C: full libc coverage in Jet (census libc against Core and the runtime, then fill every gap)",
+      "body": "Owner, 2026-11-08: \"We should already have a lot of what libc covers just need to fill the gaps.\" Track full coverage of what a C libc provides (POSIX and C23: memory, strings, stdio and files, time and locale, process, signals, threads and sync, networking and name resolution, math, environment, users and groups, terminal, dynamic memory), as Jet-native Core or runtime surface. Step one is a census: every libc function family, with the Core or runtime API that already covers it, and the gaps. Then each gap is filled through normal Core review (new public API needs a ballot). Math is #6688; threads, syscalls and DNS are #6689 to #6691.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A committed census lists every libc function family (C23 and POSIX.1-2024) with the Jet Core or runtime API that covers it, or names it as a gap; produced by a script, not by hand.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T15:55:05.521Z"
+        },
+        {
+          "n": 2,
+          "text": "Every gap is either filled with Jet surface (each new public API through a ballot) or carries an owner ruling that Jet does not need it.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T15:55:06.766Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "no-c",
+        "owner-direction"
+      ],
+      "goals": [
+        "G3",
+        "G7"
+      ],
+      "parentId": "c0lscvc9",
+      "needsAcceptance": false,
+      "created": "2026-11-08T15:54:55.014Z",
+      "updated": "2026-11-08T15:55:06.766Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 2
     }
   ],
   "decisions": [
@@ -189235,6 +189304,48 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-08T15:56:09.223Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ajhpeh",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-08T15:56:08.096Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0bnp1zw",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-08T15:55:07.845Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0lscvc9",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-08T15:55:06.766Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0cs6xlg",
+      "note": "#2 Every gap is either filled with Jet surface (each new public"
+    },
+    {
+      "at": "2026-11-08T15:55:05.521Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0cs6xlg",
+      "note": "#1 A committed census lists every libc function family (C23 and"
+    },
+    {
+      "at": "2026-11-08T15:54:55.014Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0cs6xlg",
+      "note": "No C: full libc coverage in Jet (census libc against Core and the runtime, then fill every gap)"
+    },
     {
       "at": "2026-11-08T15:51:04.510Z",
       "by": "Main",
