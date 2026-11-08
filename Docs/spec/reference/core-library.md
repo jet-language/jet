@@ -172,10 +172,13 @@ host kernels without source pass-through facades. Path permission and ownership
 policy uses the compile-target OS family, not a duplicate platform detector.
 `walk` and `walk_files` own traversal in Jet: depth starts at zero for root
 entries, results sort by shown path, ancestor symlinks are refused, and each
-directory inherits the existing ignore matcher. The private context preserves
+directory inherits the existing ignore matcher. The walk is depth first and
+sorts one directory at a time: each child directory is walked where its path
+and `/` fall among its siblings, which is exactly where its entries sort, so
+the whole result is never sorted. The private context preserves
 native path identities (including non-Unicode names) until its scope guard
-releases it. Failed directory batches are discarded while already queued work
-continues; the earliest error is selected by native directory-path ordering.
+releases it. A directory that fails is left out while the walk continues;
+the earliest error is selected by native directory-path ordering.
 Directory removal/listing, hard links, socket mode checks, canonicalization,
 and temporary directory/lock creation also perform their fault policy in Jet.
 Temporary directory and file names share the same Jet prefix, process-ID,
