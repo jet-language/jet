@@ -1,9 +1,9 @@
-// core.tasks timer channels. after: one value after max(0, ns / 1e6) ms on a
-// channel of kind timer; interval: ticks 1, 2... every max(1) ms until a send
-// is refused, on a channel of kind interval. Both are unbounded and fed by a
-// producer on a detached host thread; one created inside a deterministic world
-// is a world task of that world. The receiver handle is the native channel
-// state (Channel.jet State160).
+// core.tasks timer channels. after: one value of any element type after
+// max(0, ns / 1e6) ms on a channel of kind timer; interval: Int ticks 1, 2...
+// every max(1) ms until a send is refused, on a channel of kind interval.
+// Both are unbounded and fed by a producer on a detached host thread; one
+// created inside a deterministic world is a world task of that world. The
+// receiver handle is the native channel state (Channel.jet State160).
 
 // Checked FunctionAddress intrinsics in the canonical RuntimeLibrary table.
 rt_interval_worker_address: fn() -> I64 { loop { jet_rt_unreachable(I64{0}, I64{0}) } }
@@ -17,9 +17,9 @@ rt_timer_int_drop_address: fn() -> I64 { loop { jet_rt_unreachable(I64{0}, I64{0
     I64{0}
 }
 
-// The element descriptor of an exact-Int channel (Collections.jet meta72:
-// stride 8, drop 16, kind 1). Queued values are moved out on receive and
-// never cloned.
+// The element descriptor of an interval's exact-Int ticks (Collections.jet
+// meta72: stride 8, drop 16, kind 1). Queued values are moved out on receive
+// and never cloned.
 timer_meta: fn() -> I64 {
     meta: jet_rt_alloc(I64{72}, I64{8})
     thread_zero(meta, I64{72})
@@ -29,21 +29,21 @@ timer_meta: fn() -> I64 {
     meta
 }
 
-// reserve_send + commit of an owned Int on the unbounded channel: refused,
-// leaving the value with the caller, once the channel is closed or has no
-// receiver left.
-timer_send: fn(channel: I64, value: I64) -> Bool {
+// reserve_send + commit of the owned value in `slot`, whose element `meta`
+// describes, on the unbounded channel: refused, leaving the value with the
+// caller, once the channel is closed or has no receiver left.
+timer_send: fn(channel: I64, slot: I64, meta: I64) -> Bool {
     sync_mutex_lock(channel)
     if (sync_load(wrapping(channel + I64{88})) != I64{0} || sync_load(wrapping(channel + I64{128})) == I64{0}) {
         channel_update(channel)
         sync_mutex_unlock(channel)
         return false
     }
-    if (sync_load(wrapping(channel + I64{56})) == I64{0}) -> sync_store(wrapping(channel + I64{56}), timer_meta())
+    if (sync_load(wrapping(channel + I64{56})) == I64{0}) -> sync_store(wrapping(channel + I64{56}), coll_meta_copy(meta))
     length: sync_load(wrapping(channel + I64{16}))
     channel_grow(channel, length + sync_load(wrapping(channel + I64{80})) + I64{1})
-    target: wrapping(sync_load(wrapping(channel + I64{32})) + ((sync_load(wrapping(channel + I64{40})) + length) % sync_load(wrapping(channel + I64{24}))) * I64{8})
-    sync_store(target, value)
+    target: wrapping(sync_load(wrapping(channel + I64{32})) + ((sync_load(wrapping(channel + I64{40})) + length) % sync_load(wrapping(channel + I64{24}))) * coll_size(meta))
+    coll_copy(slot, target, coll_payload(meta))
     sync_store(wrapping(channel + I64{16}), length + I64{1})
     channel_wake_one(channel, false)
     channel_update(channel)
@@ -51,19 +51,21 @@ timer_send: fn(channel: I64, value: I64) -> Bool {
     true
 }
 
-// A new unbounded timer channel of `kind` whose producer job (Job32:
+// A new unbounded timer channel of `kind` whose producer job (Job40:
 // channel (the producer's sender endpoint) 0, delay ms 8, owned World lease
-// or 0 at 16, owned value at 24) runs `worker` on a detached host thread.
-timer_start: fn(kind: I64, delay: I64, value: I64, worker: I64) -> I64 {
+// or 0 at 16, owned value slot or 0 at 24, owned element descriptor or 0 at
+// 32) runs `worker` on a detached host thread.
+timer_start: fn(kind: I64, delay: I64, value: I64, meta: I64, worker: I64) -> I64 {
     channel: channel_new(I64{-1}, kind, delay)
     sync_store(wrapping(channel + I64{120}), I64{1})
     channel_retain(channel)
-    job: jet_rt_alloc(I64{32}, I64{8})
+    job: jet_rt_alloc(I64{40}, I64{8})
     sync_store(job, channel)
     sync_store(wrapping(job + I64{8}), delay)
     world: world_current()
     sync_store(wrapping(job + I64{16}), if (world == I64{0}) -> I64{0} else -> jet_rt_world_clone(world))
     sync_store(wrapping(job + I64{24}), value)
+    sync_store(wrapping(job + I64{32}), meta)
     if (world != I64{0}) -> world_task_spawned(world)
     handle: thread_spawn(worker, job)
     if (handle < I64{0}) {
@@ -82,7 +84,7 @@ timer_worker_enter: fn(job: I64, save: I64) {
 timer_worker_leave: fn(job: I64, save: I64) {
     channel: sync_load(job)
     world: sync_load(wrapping(job + I64{16}))
-    jet_rt_free(job, I64{32}, I64{8})
+    jet_rt_free(job, I64{40}, I64{8})
     if (world != I64{0}) {
         world_task_finished(world)
         world_scope_leave(save)
@@ -97,12 +99,20 @@ timer_worker_leave: fn(job: I64, save: I64) {
     timer_worker_enter(job, save)
     channel: sync_load(job)
     delay: sync_load(wrapping(job + I64{8}))
+    meta: timer_meta()
+    slot: jet_rt_alloc(I64{8}, I64{8})
     tick := I64{1}
     loop {
         jet_scheduler_sleep_ms(delay)
-        if !timer_send(channel, jet_int_owned_from_i64(tick)) -> break
+        sync_store(slot, jet_int_owned_from_i64(tick))
+        if !timer_send(channel, slot, meta) {
+            jet_rt_int_drop(sync_load(slot))
+            break
+        }
         tick += I64{1}
     }
+    jet_rt_free(slot, I64{8}, I64{8})
+    coll_meta_drop(meta)
     timer_worker_leave(job, save)
     I64{0}
 }
@@ -112,7 +122,13 @@ timer_worker_leave: fn(job: I64, save: I64) {
     timer_worker_enter(job, save)
     jet_scheduler_sleep_ms(sync_load(wrapping(job + I64{8})))
     value: sync_load(wrapping(job + I64{24}))
-    if !timer_send(sync_load(job), value) -> jet_rt_int_drop(value)
+    meta: sync_load(wrapping(job + I64{32}))
+    if timer_send(sync_load(job), value, meta) {
+        jet_rt_free_8(value, coll_size(meta))
+    } else {
+        coll_slot_free(value, meta)
+    }
+    coll_meta_drop(meta)
     timer_worker_leave(job, save)
     I64{0}
 }
@@ -121,18 +137,25 @@ timer_worker_leave: fn(job: I64, save: I64) {
     native: jet_int_owned_to_i64(ms)
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     delay: if (native < I64{1}) -> I64{1} else -> native
-    timer_start(I64{2}, delay, I64{0}, rt_interval_worker_address())
+    timer_start(I64{2}, delay, I64{0}, I64{0}, rt_interval_worker_address())
 }
 
-// The Duration carrier's ns word, truncated to whole milliseconds.
-#Export(c) after_value: fn(delay: I64, value: I64) -> I64 {
+// after(delay, value): `delay` is the Duration's exact nanoseconds, truncated
+// to whole milliseconds; the owned value in `slot` moves into the producer
+// job with a copy of its frame-held element descriptor `meta`.
+#Export(c) after_value: fn(delay: I64, slot: I64, meta: I64) -> I64 {
     native: jet_int_owned_to_i64(delay)
     if (jet_scheduler_native_propagate() != I64{0}) {
-        jet_rt_int_drop(value)
+        jet_rt_session_shield_enter()
+        coll_slot_drop(slot, meta)
+        jet_rt_session_shield_leave()
         return I64{0}
     }
+    owned_meta: coll_meta_copy(meta)
+    value: coll_slot_new(owned_meta)
+    coll_copy(slot, value, coll_payload(owned_meta))
     ms: native / I64{1000000}
-    timer_start(I64{1}, if (ms < I64{0}) -> I64{0} else -> ms, value, rt_after_worker_address())
+    timer_start(I64{1}, if (ms < I64{0}) -> I64{0} else -> ms, value, owned_meta, rt_after_worker_address())
 }
 
 #Export(c) jet_rt_handle_drop_jet_receiver_63726174653a3a6a65745f666f756e646174696f6e3a3a4e756d657269633a3a4a6574496e74: fn(channel: I64) {

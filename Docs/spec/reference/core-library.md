@@ -3832,8 +3832,12 @@ sendability rules. The implementation is in
 
 | Signature | Result | Description |
 |---|---|---|
-| `after(delay: Duration, value: Int{0}) -[Time]> Receiver<Int>` | receiver | Deliver one value after a duration. |
+| `after<T>(delay: Duration, value: T) -[Time]> Receiver<T>` | receiver | Deliver one value after a duration, then close. |
 | `interval(period: Duration) -[Time]> Receiver<Int>` | receiver | Deliver successive tick counts starting at one. |
+| `recv<T>(rx: Receiver<T>) -[Time.Wait]> T?` | value | Receive the next value; None once the channel is closed and drained. |
+| `try_recv<T>(rx: Receiver<T>) -> T?` | value | Take a queued value without waiting; None when nothing is queued. |
+| `waitall<T>(receivers: [Receiver<T>]) -[Time.Wait]> [T?]` | values | One `recv` per receiver, in order. |
+| `waitany<T>(receivers: [Receiver<T>]) -[Time.Wait]> (index: Int, value: T?)` | answer | The receiver that answered and its `recv` result; the list must not be empty. |
 | `yield_now() -[Time]>` | — | Yield to another runnable task. |
 | `current_task() -> String` | text | Identify the running task. |
 | `timeout(delay: Duration) -[Time]>` | — | Wait for a duration before returning. |

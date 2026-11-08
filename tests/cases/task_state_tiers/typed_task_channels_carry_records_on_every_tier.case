@@ -1,0 +1,35 @@
+# A record crosses a typed task channel on O0, O1, O2 and web; recv
+# answers None once the channel is closed and drained. timers.jet runs on
+# the native tiers: a producer task's record, after<T> delivering a record,
+# waitall keeping one T? per receiver, waitany naming the receiver that
+# answered, and interval's Int ticks. The web target has no task or timer
+# workers yet, so timers.jet has no web step.
+fixture: typed_task_channels_carry_records_on_every_tier.fixture
+env: NO_COLOR=1
+step O0: jet run --optimize=none main.jet
+exit: 0
+stdout: = typed_task_channels_carry_records_on_every_tier.out
+step O1: jet run --optimize=basic main.jet
+exit: 0
+stdout: = typed_task_channels_carry_records_on_every_tier.out
+step O2: jet run --optimize=full main.jet
+exit: 0
+stdout: = typed_task_channels_carry_records_on_every_tier.out
+step timers_O0: jet run --optimize=none timers.jet
+exit: 0
+stdout: = typed_task_channels_carry_records_on_every_tier.timers.out
+step timers_O1: jet run --optimize=basic timers.jet
+exit: 0
+stdout: = typed_task_channels_carry_records_on_every_tier.timers.out
+step timers_O2: jet run --optimize=full timers.jet
+exit: 0
+stdout: = typed_task_channels_carry_records_on_every_tier.timers.out
+when tool node
+step: jet build --target web main.jet
+exit: 0
+file: .jet/build/app.wasm is-file
+step: node app.js
+cwd: .jet/build
+exit: 0
+stdout: = typed_task_channels_carry_records_on_every_tier.out
+end when

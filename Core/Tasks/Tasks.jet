@@ -16,7 +16,7 @@ use {
 // Timer creation and scheduler identity are host cells. Scheduler channels
 // and task groups use language primitives; TaskState transitions are pure Jet.
 // Sleeping uses core.time.sleep.
-after: fn(delay: time.Duration, value: Int{0}) -[Time]> Receiver<Int> Never! {
+after: fn<T>(delay: time.Duration, value: T) -[Time]> Receiver<T> Never! {
     core.tasks.after(delay, value)
 }
 
@@ -69,32 +69,35 @@ yield_now: fn() Never! -[Time.Wait]> { host_yield() }
 
 current_task: fn() -> String Never! { host_task_id() }
 
-/// Receive from the host scheduler channel. A closed channel maps to the
-/// existing integer sentinel because this convenience rail is non-fallible.
-recv: fn(rx: Receiver<Int>) -[Time.Wait]> Int Never! {
-    value: rx.receive() ?? return -1
-    value
+/// Receive from a scheduler channel: the next value, or None once the
+/// channel is closed and drained.
+recv: fn<T>(rx: Receiver<T>) -[Time.Wait]> T? Never! {
+    value: rx.receive() ?? return None
+    Val(value)
 }
 
 /// Blocking receive spellings used by queue/future adapters.
-get: fn(rx: Receiver<Int>) -[Time.Wait]> Int Never! { recv(rx) }
+get: fn<T>(rx: Receiver<T>) -[Time.Wait]> T? Never! { recv(rx) }
 
-result: fn(rx: Receiver<Int>) -[Time.Wait]> Int Never! { recv(rx) }
+result: fn<T>(rx: Receiver<T>) -[Time.Wait]> T? Never! { recv(rx) }
 
-wait: fn(rx: Receiver<Int>) -[Time.Wait]> Int Never! { recv(rx) }
+wait: fn<T>(rx: Receiver<T>) -[Time.Wait]> T? Never! { recv(rx) }
 
-waitall: fn(receivers: [Receiver<Int>]) -[Time.Wait]> [Int] Never! {
-    out := [Int]{}
-    loop rx in receivers -> out.push(wait(rx))
+/// One receive per receiver, in order; None where a channel closed drained.
+waitall: fn<T>(receivers: [Receiver<T>]) -[Time.Wait]> [T?] Never! {
+    out := [T?]{}
+    loop rx in receivers -> out.push(recv(rx))
     out
 }
 
-waitany: fn(receivers: [Receiver<Int>]) -[Time.Wait]> Int Never! {
-    if receivers.len() == 0 -> return -1
+/// The index of the receiver that answered and its value (None when that
+/// channel closed drained). The list must not be empty.
+waitany: fn<T>(receivers: [Receiver<T>]) -[Time.Wait]> (index: Int, value: T?) Never! {
+    if receivers.len() == 0 -> panic("waitany needs at least one receiver")
     // Receiver readiness is owned by the scheduler's opaque handle. This
     // convenience rail keeps the deterministic first-arm selection; callers
     // needing a true race should use the host select surface.
-    wait(receivers[0])
+    (index: 0, value: recv(receivers[0]))
 }
 
 
@@ -116,15 +119,15 @@ task_trace: fn(paused: Bool, cancel: Bool) -> String Never! {
 }
 
 /// Receiver metadata is owned by the scheduler's typed handle.
-is_timer: fn(rx: Receiver<Int>) -> Bool Never! { rx.is_timer() }
+is_timer: fn<T>(rx: Receiver<T>) -> Bool Never! { rx.is_timer() }
 
-is_interval: fn(rx: Receiver<Int>) -> Bool Never! { rx.is_interval() }
+is_interval: fn<T>(rx: Receiver<T>) -> Bool Never! { rx.is_interval() }
 
-is_cancelled: fn(rx: Receiver<Int>) -> Bool Never! { rx.is_cancelled() }
+is_cancelled: fn<T>(rx: Receiver<T>) -> Bool Never! { rx.is_cancelled() }
 
-is_ready: fn(rx: Receiver<Int>) -> Bool Never! { rx.is_ready() }
+is_ready: fn<T>(rx: Receiver<T>) -> Bool Never! { rx.is_ready() }
 
-delay_ms: fn(rx: Receiver<Int>) -> Int Never! { rx.delay_ms() }
+delay_ms: fn<T>(rx: Receiver<T>) -> Int Never! { rx.delay_ms() }
 
 timeout: fn(delay: time.Duration) Never! -[Time]> {
     _: recv(core.tasks.after(delay, 0))
@@ -136,11 +139,11 @@ sleep: fn(ms: Int) Never! -[Time]> {
     host_sleep_ms(delay)
 }
 
-try_recv: fn(rx: Receiver<Int>) -> Int? Never! { rx.try_receive() }
+try_recv: fn<T>(rx: Receiver<T>) -> T? Never! { rx.try_receive() }
 
 /// Closing the receiver wakes blocked consumers and is the host cancellation
 /// operation. The returned handle remains usable for identity/ownership.
-cancel: fn(rx: Receiver<Int>) -[Time]> Receiver<Int> Never! {
+cancel: fn<T>(rx: Receiver<T>) -[Time]> Receiver<T> Never! {
     rx.close()
     rx.copy()
 }
@@ -206,7 +209,7 @@ notify: fn(state: TaskState) -> TaskState Never! {
     TaskState{values: state.values.copy(), capacity: state.capacity, closed: state.closed, locked: state.locked, generation: state.generation + 1}
 }
 
-start: fn(rx: Receiver<Int>) -> Receiver<Int> Never! { rx.copy() }
+start: fn<T>(rx: Receiver<T>) -> Receiver<T> Never! { rx.copy() }
 
 run: fn() Never! -[Time.Wait]> { yield_now() }
 
