@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6697,
-    "rev": 96201,
+    "rev": 96202,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -74070,6 +74070,11 @@
         {
           "at": "2026-11-08",
           "by": "Main",
+          "text": "c65 run 6 roots (Main repro in the same clean home at b7ff715849 and on a dev export at d17bb32500). (1) BuildGraphRules.jet:198 still asserts that .file(found) fails, which 4a44ce3b8e made legal; Main lands the one-line removal (fixed tree: JetBuildSession/Tests 17/17). (2) The tests/guards closed-list guard fails on dev with 18 new hand-written lists and 3 duplicates from 8f09d320cf, 74bbf2a07c, afe2acc8c8, 1f8f46177e, 775f3b07ae, 42d3bedfe8 and d17bb32500. They went to SpeedLead (RuntimePack, build.jet, Cache, FindFolder, the duplicates), SchedLead (InlineAsm rails) and QuickLead (extension lists). Precommit runs no tests/guards, which is why they landed. (3) JetCli/Tests exited -1: being re-run alone under the full profile. (4) perf P15 residual 1157 s: taken under heavy host load, to re-measure on a quiet host before routing."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
           "text": "c65 run 6 (Main): fresh clone at b7ff715849, PATH without cargo or rustc, seed a0_039, jet test Compiler --profile full gives full rc=1. Counts: PASS 13672, FAIL 4, KNOWN-FAILING 1033, UNEXPECTED-PASS 0, ERROR 0, TIMEOUT 0. Suites tests 337/337, selfhost 3/3, and cases, golden and ui have no unexpected row. The four FAIL rows, all new since run 5 (c902740d37): (1) packages Compiler/JetBuildSession/Tests run_steps_build_their_command_line_from_declared_files; (2) packages Compiler/JetCli/Tests exited -1 (a signal; packages rows went from 3167 to 3086 because its rows are missing); (3) packages tests/guards, every closed list is generated or kept closed; (4) perf P15 driver residual 1156.95 s against a 225K budget of 800 (total 1391 s, under host load from the lead builds). Main is re-running 1 to 3 alone in the same clean home to get each root before routing."
         },
         {
@@ -74862,7 +74867,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-29T02:09:17.141Z",
-      "updated": "2026-11-08T17:21:15.338Z",
+      "updated": "2026-11-08T17:25:41.355Z",
       "updatedBy": "Main",
       "criteriaLastN": 74
     },
@@ -189409,6 +189414,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-08T17:25:41.355Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0h06654",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-08T17:23:07.644Z",
       "by": "Main",
