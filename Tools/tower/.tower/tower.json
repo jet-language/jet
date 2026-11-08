@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6697,
-    "rev": 96209,
+    "rev": 96210,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -74070,6 +74070,11 @@
         {
           "at": "2026-11-08",
           "by": "Main",
+          "text": "Correction to the P15 note above (SchedLead measurement; buildsample with rusage). CPU did not regress: cold jet build Compiler is user 106.7 s plus sys 10.0 s on a0_038 at c902740d37, and user 107.7 s plus sys 9.7 s on a0_039 at b7ff715849. The trace accounting broke: Request.jet keeps span stacks and item cpu_ns by OS thread, and since afe2acc8c8 tasks resume on other carriers. The a0_039 trace has B=10147 against E=10086 (61 spans never closed), nested phases count as top-level, so whole-process CPU is summed per carrier, and item cpu_ns differences two threads clocks. The jet check wall difference is fsync stalls on the cache store (9.9 s and 12.7 s per strace), the known store journal cost SpeedLead fixes after c6. A task-heavy program (4000 tasks) shows no spin. Fix: SchedLead does opt-in per-fiber CPU accounting in the runtime and keys the Request.jet stacks by task; the surface for the task clock and id is owner Q19."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
           "text": "P15 root measured (Main, cold traced jet build Compiler checked by Tools/perf/budget/Check.jet at 225K). a0_038 on c902740d37: wall 59.3 s, work sum 108.8 s, P15 0.08 s, P4 comptime 2.42 s (508 us per item), P8 8.67 s. a0_039 on b7ff715849: wall 53.1 s, work sum 498.6 s, P15 305.2 s, P4 25.8 s (5.4 ms per item), P8 18.5 s. Cold jet check of Compiler/JetFoundation: a0_038 real 43.8 s, user 293 s; a0_039 real 91.0 s, user 56 s, so parallel check lost its parallelism. The suspect range includes the fibers commit afe2acc8c8 (#6085 c2). Routed to SchedLead as top priority, with p15.sh as the proof harness. Guard rows: dace302873 (SchedLead) and 2e4142d89c (SpeedLead) landed; only QuickLead three extension lists remain."
         },
         {
@@ -74877,7 +74882,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-29T02:09:17.141Z",
-      "updated": "2026-11-08T17:42:51.186Z",
+      "updated": "2026-11-08T17:53:36.228Z",
       "updatedBy": "Main",
       "criteriaLastN": 74
     },
@@ -189444,6 +189449,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-08T17:53:36.228Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0h06654",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-08T17:52:13.830Z",
       "by": "Main",
