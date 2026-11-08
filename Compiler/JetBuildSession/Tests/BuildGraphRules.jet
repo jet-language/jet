@@ -3,7 +3,7 @@
 // nothing is executed.
 use jet_build_session.[
     BuildSession, BuildSessionError, BuildSessionPolicy, BuildSessionReply, BuildSessionValue,
-    build_session_call, build_session_compiler_node, build_session_graph, build_session_new,
+    build_session_call, build_session_compiler_node, build_session_graph, build_session_new, build_session_set_dependencies,
 ]
 
 build_graph_rules_session: fn(id: Int) -> BuildSession Never! {
@@ -238,6 +238,28 @@ build_graph_rules_made: fn(session: &BuildSession, tool: BuildSessionValue, name
     assert_eq(permit.value.actions[0].inputs, [String]{".jet/build/host/gen"})
     assert_eq(permit.value.actions[1].argv, [String]{"jet", "check", ".jet/build/host/gen"})
     assert_eq(permit.value.actions[1].inputs, [String]{".jet/build/host/gen"})
+}
+
+#Test("dependency_files_are_step_files_under_jet_deps") {
+    session := build_graph_rules_session(96)
+    build_session_set_dependencies(session, [String: String]{"words": "/src/words"})
+    caps: build_graph_rules_list([String]{"Exec", "FS"})
+    assert(build_graph_rules_failed(build_session_call(session, "dependency", [BuildSessionValue]{.Text(value: "other")}, None, false, 1, 2)))
+    words: build_graph_rules_value(build_session_call(session, "dependency", [BuildSessionValue]{.Text(value: "words")}, None, false, 3, 4))
+    assert(build_graph_rules_failed(build_session_call(session, "file.path", [BuildSessionValue]{words}, None, false, 5, 6)))
+    assert(build_graph_rules_failed(build_session_call(session, "file.file", [BuildSessionValue]{words, .Text(value: "../escape.txt")}, None, false, 7, 8)))
+    data: build_graph_rules_value(build_session_call(session, "file.file", [BuildSessionValue]{words, .Text(value: "data/answer.txt")}, None, false, 9, 10))
+    assert_eq(build_session_call(session, "file.path", [BuildSessionValue]{data}, None, false, 11, 12), BuildSessionReply.Value{value: BuildSessionValue.Text{value: ".jet/deps/words/data/answer.txt"}})
+    assert(build_graph_rules_failed(build_session_call(session, "file.file", [BuildSessionValue]{data, .Text(value: "more.txt")}, None, false, 13, 14)))
+    assert(build_graph_rules_failed(build_session_call(session, "run", [BuildSessionValue]{.Text(value: "folder"), words, caps}, None, true, 15, 16)))
+    gen: build_graph_rules_value(build_session_call(session, "file.file", [BuildSessionValue]{words, .Text(value: "gen.sh")}, None, false, 17, 18))
+    step: build_graph_rules_value(build_session_call(session, "run", [BuildSessionValue]{.Text(value: "answer"), gen, caps}, None, true, 19, 20))
+    assert(build_graph_rules_failed(build_graph_rules_step(session, "file", step, [BuildSessionValue]{words})))
+    assert(build_graph_rules_ok(build_graph_rules_step(session, "file", step, [BuildSessionValue]{data, .Text(value: "--in=")})))
+    permit: session.storage.guard_read()
+    assert_eq(permit.value.actions[0].argv, [String]{".jet/deps/words/gen.sh", "--in=.jet/deps/words/data/answer.txt"})
+    assert_eq(permit.value.actions[0].inputs, [String]{".jet/deps/words/gen.sh", ".jet/deps/words/data/answer.txt"})
+    assert_eq(permit.value.files[1].from, Val("/src/words/data/answer.txt"))
 }
 
 #Test("run_step_without_an_output_refuses_the_plan") {

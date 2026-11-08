@@ -5016,16 +5016,23 @@ executable target with a source can be built so (E3502), and on a machine the
 native backend doesn't write images for, a step that runs one is refused
 before anything runs. `b.jet()` is the compiler running the build; its step
 runs it from its own folder, mounted read-only, so a step can check, run or
-build Jet code. Calls on the step build its
+build Jet code. `b.dependency(name)` is the folder of the package package.jet
+lists as `name` (an unlisted name is E3502), and `.file(path)` on it is a
+file there: before any step runs, the build copies it to
+`.jet/deps/<name>/<path>`, the path the step gets, so a step reads another
+package's file without reaching outside its own folder. The folder itself is
+neither a tool nor an argument. Example:
+[`tests/cases/build_entry/run_steps_read_a_dependency_file.case`](../../tests/cases/build_entry/run_steps_read_a_dependency_file.case).
+Calls on the step build its
 command line in order. `.input(path)` and `.output(path)` declare a file and
 pass its path as the next argument. `.reads(path)` and `.writes(path)`
 declare a file without passing it. `.file(f)` passes another step's output
 and orders the step after that one, and `.arg(text)` passes literal text.
 `.input`, `.output` and `.file` take `flag:`, written before the path in the
 same argument: `.output("gen.c", flag: "--out=")` passes `--out=gen.c`.
-`.output` returns the new `BuildFile`, and `f.path()` is a made or host-built
-file's package-relative path; a found program and `b.jet()` have no path until
-the build runs, so their `.path()` is refused. `.toolchain(t)` and
+`.output` returns the new `BuildFile`, and `f.path()` is a made, host-built or
+copied package file's package-relative path; a found program and `b.jet()`
+have no path until the build runs, so their `.path()` is refused. `.toolchain(t)` and
 `.sign(identity)` add toolchain and signing identity; a `b.jet()` step runs on
 the toolchain its compiler was built with, so `.toolchain` on it is refused. A
 step's result is cached. A step that

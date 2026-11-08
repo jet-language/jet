@@ -146,6 +146,15 @@ jet_cli_build_run_graph: fn(graph: BuildPlanExecution, receipt: BuildGraph, sele
         return jet_cli_build_execution_error(BuildExecutionError.MissingGrant{action: "probe {plan.probes[probe_ids[0]].name}", capability: BuildEffect.Exec}, member, color)
     }
     probes: build_execute_probes(plan, probe_ids) ?? return jet_cli_build_execution_error(err, member, color)
+    // A file of a listed package (`b.dependency(name).file(path)`) is copied
+    // to its `.jet/deps/<name>/` path, where a step's sandbox reads it.
+    loop file in graph.files {
+        from: file.from ?? next
+        to: jet_cli_entry_join(root, file.path)
+        folder: jet_cli_parent(to) ?? root
+        cli_files.create_dir_all(folder) ?? return jet_cli_build_failed("couldn't create `{folder}` for the package files steps read: {err}", jet_cli_why("E2105"), "make `{folder}` writable", color)
+        cli_files.copy2(from, to) ?? return jet_cli_build_failed("couldn't copy the package file `{from}` a step reads: {err}", jet_cli_why("E2105"), "correct the path given to `.file(path)` on `b.dependency(name)`", color)
+    }
     store := BuildArtifactStoreHandle?{None}
     if needs.steps.len() > 0 {
         store = Val(BuildArtifactStoreHandle.open() ?? return jet_cli_build_execution_failed("E3505", "couldn't open the build store: {err.message()}", None, "point `JET_STORE_DIR` at a writable store directory", color))

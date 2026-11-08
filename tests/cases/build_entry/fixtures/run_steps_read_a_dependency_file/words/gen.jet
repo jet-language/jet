@@ -1,0 +1,11 @@
+use {
+    files: core.files
+    process: core.process
+}
+// `gen --in=<path> --out=<path>` writes the answer it reads, as a sentence.
+run: fn() {
+    input: process.args()[0].removeprefix("--in=")
+    out: process.args()[1].removeprefix("--out=")
+    answer: files.read(input) ?? panic("read {input}: {err}")
+    files.write(out, "the answer is {answer.trim()}\n") ?? panic("write {out}: {err}")
+}

@@ -11,6 +11,7 @@ exit: 1
 stderr: ~ "E2104" # nothing to show before the first build
 stderr: ~ "`jet build` has recorded its times" # names what is missing
 step: jet build main.jet --allow=Exec,FS
+env: JET_STORE_DIR={work}/store
 exit: 0
 file: .jet/build/receipt.json ~ "\"name\":\"table\"" # the step is in the graph the build ran
 file: .jet/build/receipt.json ~ "\"cache_hit\":false" # the first run of the step ran it
@@ -27,6 +28,7 @@ stdout: ~ "\nimage\tshow\t" # the target's row
 stdout: ~ "\tmade\n" # each was made, not reused
 stdout: !~ "\treused\n" # nothing was reused
 step: jet build main.jet --allow=Exec,FS
+env: JET_STORE_DIR={work}/store
 exit: 0
 file: .jet/build/receipt.json ~ "\"cache_hit\":true" # the second run of the step came from the store
 step: jet inspect build main.jet --times --json

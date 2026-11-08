@@ -9,7 +9,7 @@ use {
     jet_build_session.[
         BuildSessionGeneratedModule, BuildSessionPlan, BuildSessionPolicy, build_plan_graph, build_plan_selection,
         build_plan_selected_generated, build_session_abort, build_session_append_unique,
-        build_session_compiler_node, build_session_finish, build_session_new, build_session_set_args,
+        build_session_compiler_node, build_session_finish, build_session_new, build_session_set_args, build_session_set_dependencies,
     ]
 }
 
@@ -235,6 +235,7 @@ jet_driver_query_build_plan: fn(owned_request: &&JetDriverCompileRequest, scope:
     session_id: jet_driver_build_next_session_id(scope) ?? return jet_driver_build_query_empty(request, errors, false, Val("build invocation identity space exhausted"))
     session := build_session_new(session_id, jet_driver_build_session_package(package, path), request.host_facts.compiler_identity ?? "", scope.policy)
     build_session_set_args(session, request.build_args)
+    build_session_set_dependencies(session, sources.dependency_roots)
     config := jet_eval_runtime_config(request.eval_config)
     // A refused effect inside `#Impure` is reported for this gate (E3411).
     config.impure_gate = policy_gate_allows(request.gate_set, PolicyKey.Impure)

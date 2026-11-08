@@ -112,13 +112,17 @@ BuildSessionAction: struct {
 // probe looks for (`path` is its name, resolved when the step runs);
 // `output` is a path a step declared, which that step makes; `host` is the
 // executable `target` built for the machine running the build, at its
-// `.jet/build/host/` path; `jet` is the compiler running the build.
+// `.jet/build/host/` path; `jet` is the compiler running the build;
+// `package` is the folder of a package package.jet lists (`path` its name),
+// and `dependency` a file in it, copied from `from` to its
+// `.jet/deps/<name>/` path before any step runs.
 BuildSessionFile: struct {
     kind: String
     path: String
     probe: Int?
     action: Int?
     target: Int?{None}
+    from: String?{None}
 }
 
 BuildSessionTarget: struct {
@@ -170,6 +174,9 @@ BuildSessionState: struct {
     default_target: Int
     // The words after `--` on `jet build`, which `b.args()` returns.
     args: [String]
+    // The folder of each package package.jet lists, by its name
+    // (`b.dependency(name)`).
+    dependencies: [String: String]{[String: String]{}}
     start: Int
     end: Int
 }
@@ -196,6 +203,12 @@ build_session_abort: fn(session: &BuildSession) Never! {
 build_session_set_args: fn(session: &BuildSession, args: [String]) Never! {
     permit := session.storage.guard_edit()
     permit.value.args = args.copy()
+}
+
+// The folders of the packages the build's package.jet lists, by name.
+build_session_set_dependencies: fn(session: &BuildSession, dependencies: [String: String]) Never! {
+    permit := session.storage.guard_edit()
+    permit.value.dependencies = dependencies.copy()
 }
 
 // `build_diag`: a generated-source cycle is E3511, every other invalid graph
@@ -328,8 +341,10 @@ build_session_call: fn(session: &BuildSession, method: String, args: [BuildSessi
     if method == "found" -> return build_session_found(state, args)
     if method == "host" -> return build_session_host(state, args)
     if method == "jet" -> return build_session_jet(state, args)
+    if method == "dependency" -> return build_session_dependency(state, args)
     if method.starts_with("action.") -> return build_session_step_call(state, method.removeprefix("action."), args)
     if method == "file.path" -> return build_session_file_path(state, args)
+    if method == "file.file" -> return build_session_file_file(state, args)
     if method.starts_with("add_") -> return build_session_add_target(state, method, args)
     if method == "toolchain" -> return build_session_add_toolchain(state, args)
     if method == "signing" -> return build_session_add_signing(state, args)
