@@ -406,9 +406,8 @@ iterdir: fn(path: Path) -[FS]> [Path] IOError! {
 
 
 walk: fn(path: Path) -[FS]> [Path] IOError! {
-    entries: files.walk(path.raw, None)
     out := [Path]{}
-    loop e in entries -> out.push(Path{raw: e.path})
+    loop entry in files.walk(path.raw, None) -> out.push(Path{raw: entry?.path})
     Ok(out)
 }
 

@@ -920,8 +920,8 @@ Whole-file and metadata functions. `read`, `read_bytes`, `write`,
 | `symlink(original, link)` / `hard_link(original, link)` | `!IOError` | Create symbolic or hard links. |
 | `read_link(path)` | `String !IOError` | Read a symbolic-link target. |
 | `canonicalize(path)` / `absolute(path)` | `String !IOError` | Resolve an existing path with symlinks, or make an absolute lexical path without requiring existence. |
-| `walk(root, ignore)` | `[WalkEntry] !IOError` | Traverse recursively with an optional ignore-file name. |
-| `walk_files(root, ignore)` | `[WalkEntry] !IOError` | Traverse regular files only. |
+| `walk(root, ignore)` | `Walk` | Traverse recursively with an optional ignore-file name, lazily: a loop over the `Walk` yields each entry as `WalkEntry !IOError` in path order. `.list()` collects them all as `[WalkEntry] !IOError`. |
+| `walk_files(root, ignore)` | `Walk` | The same walk, keeping regular files only. |
 | `glob(pattern)` | `[String] !IOError` | Return sorted shown paths matching the native byte glob grammar. |
 | `temp_dir(prefix)` / `temp_file(prefix)` | `TempDir` / `TempFile !IOError` | Create temporary resources whose handles retain `.path`. |
 | `lock(path, timeout: Duration?{None})` / `try_lock(path)` | `FileLock !IOError` / `FileLock? !IOError` | Acquire an exclusive system lock; `try_lock` returns None only for contention. |
@@ -964,7 +964,11 @@ false. Their false-on-host-error policy is Jet-owned; the host boundary
 supplies only the following-metadata fact or the host error.
 
 `walk` and `walk_files` accept the optional `ignore` value;
-`fs.walk(root)` is the convenience form. `DirEntry` has `name`, `path`, and
+`fs.walk(root)` is the convenience form. A walk reads nothing until it is
+looped over. It keeps at most one open directory and one directory's entries
+per level in hand. A directory that cannot be read yields its error in place
+of its entries, and the walk goes on. Leaving the loop early closes the walk.
+`.list()` stops at the first error. `DirEntry` has `name`, `path`, and
 `is_dir`. `Stat` has `size`, `kind`, `mode`, `readonly`, `is_file`, `is_dir`,
 `is_symlink`, `id: FileID{device, inode}`, `links`, `owner: Int?` (None on
 Windows), `size_on_disk`, `modified` and `changed` (`DateTime`, nanosecond

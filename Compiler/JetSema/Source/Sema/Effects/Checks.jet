@@ -1718,6 +1718,24 @@ sema_effect_record_close: fn(nodes: &[SemaEffectNode], facts: SemaEffectCallInde
     loop key in keys -> sema_effect_node_add_edge(nodes, node_index, key)
 }
 
+// A loop over a registered Iterable calls its `iter`, its iterator's `next`
+// on every step and that iterator's own `close` when the loop ends (JetIR
+// ir_iterable_walk), so their effects are the loop's: edges to all three, the
+// close methods found by owner name as for `close(value)`. A lambda's rows
+// come from its call facts, which hold no loop, so its loops charge the
+// enclosing function (SemaEffectWalk.IterableLoops).
+sema_effect_record_iterable_loop: fn(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, iter_type: String, iter_symbol: String, next_symbol: String, span: Span) Never! {
+    node_index: if walk == {
+        .Collect(index) | .IterableLoops(index) -> index
+        .Region(index, region) -> if sema_effect_span_contains(region, span) -> index else -> return
+        else -> return
+    }
+    sema_effect_node_add_edge(nodes, node_index, iter_symbol)
+    sema_effect_node_add_edge(nodes, node_index, next_symbol)
+    keys: facts.close_methods.get(sema_effect_symbol_leaf(iter_type)) ?? [String]{}
+    loop key in keys -> sema_effect_node_add_edge(nodes, node_index, key)
+}
+
 // The declaring module of a `kind:{module}::{name}` type symbol key
 // (`symbol_id` with an empty owner).
 sema_effect_symbol_module: fn(key: String) -> String? Never! {
@@ -1791,6 +1809,7 @@ sema_effect_walk_expr_enter: fn(nodes: &[SemaEffectNode], node_index: Int, tree:
         .Close(value) -> sema_effect_record_close(nodes, facts, node_index, body_type(tree, value))
         .Lambda(value) -> {
             sema_effect_merge_lambda(nodes, node_index, value)
+            sema_effect_walk_lambda_children(SemaEffectWalk.IterableLoops{node_index: node_index}, nodes, facts, diagnostics, caller, tree, value)
             return false
         }
         .StrLit(parts) -> {
@@ -3332,6 +3351,8 @@ SemaEffectWalk: enum {
     Unsafe(audited: Bool)
     Region(node_index: Int, region: Span)
     PreludeDemands(state: Shared<SemaPreludeDemandWalk>)
+    // A lambda body's Iterable loops, charged to the enclosing node.
+    IterableLoops(node_index: Int)
 }
 
 sema_effect_walk_visit: fn(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller: SemaEffectCaller, tree: BodyTree, expression: Int) {
@@ -3351,6 +3372,7 @@ sema_effect_walk_enter: fn(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts
             sema_prelude_conversion_demands_enter(state, node)
             Val(walk)
         }
+        .IterableLoops(_) -> Val(walk)
     }
 }
 
@@ -3662,9 +3684,12 @@ sema_effect_walk_stmt_children: fn(walk: SemaEffectWalk, nodes: &[SemaEffectNode
             loop arm in arms -> sema_effect_walk_stmt_list_children(walk, nodes, facts, diagnostics, caller, tree, arm.body)
             sema_effect_walk_stmt_list_children(walk, nodes, facts, diagnostics, caller, tree, else_body)
         }
-        .ForIn(_, _, _, source, collection, step, _, _, _, _, body, _) -> {
+        .ForIn(_, _, _, source, collection, step, method_kind, _, _, _, body, span) -> {
             sema_effect_walk_visit(walk, nodes, facts, diagnostics, caller, tree, source)
             sema_effect_walk_visit(walk, nodes, facts, diagnostics, caller, tree, collection)
+            if method_kind == .Val(kind) {
+                if kind == .Iterable(_, iter_type, iter_symbol, next_symbol, _) -> sema_effect_record_iterable_loop(walk, nodes, facts, iter_type, iter_symbol, next_symbol, span)
+            }
             if step == .Val(step_value) -> sema_effect_walk_visit(walk, nodes, facts, diagnostics, caller, tree, step_value)
             sema_effect_walk_stmt_list_children(walk, nodes, facts, diagnostics, caller, tree, body)
         }

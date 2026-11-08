@@ -1505,22 +1505,34 @@ walk_error: fn(operation: IOOperation, kind: Int, code: Int?, cause: String?, re
     }
 }
 
+// The directory and every ancestor must be a real directory, not a symlink.
+// The ancestor slots this pushes are released before it returns.
 walk_validate: fn(context: Int, directory: Int, root: String) IOError! -[FS]> {
     source: core.files.__walk_validation_path(context, directory)
+    failure := IOError?{None}
     loop ancestor in core.files.__walk_ancestors(context, source) {
-        metadata: core.files.__walk_metadata(context, ancestor)
-        if metadata.cause != None -> return Err(walk_error(.Read, metadata.kind, metadata.code, metadata.cause, root))
-        if metadata.symlink {
-            path: core.files.__walk_shown(context, ancestor)
-            return Err(walk_error(.Read, 3, None, Val("filesystem walk path contains symlink: {path}"), root))
+        if failure == None {
+            metadata: core.files.__walk_metadata(context, ancestor)
+            if metadata.cause != None {
+                failure = Val(walk_error(.Read, metadata.kind, metadata.code, metadata.cause, root))
+            } else if metadata.symlink {
+                path: core.files.__walk_shown(context, ancestor)
+                failure = Val(walk_error(.Read, 3, None, Val("filesystem walk path contains symlink: {path}"), root))
+            }
+        }
+        core.files.__walk_release(context, ancestor)
+    }
+    if failure == None {
+        metadata: core.files.__walk_metadata(context, source)
+        if metadata.cause != None {
+            failure = Val(walk_error(.Read, metadata.kind, metadata.code, metadata.cause, root))
+        } else if !metadata.directory {
+            path: core.files.__walk_shown(context, source)
+            failure = Val(walk_error(.Read, 0, None, Val("filesystem walk root is not a directory: {path}"), root))
         }
     }
-    metadata: core.files.__walk_metadata(context, source)
-    if metadata.cause != None -> return Err(walk_error(.Read, metadata.kind, metadata.code, metadata.cause, root))
-    if !metadata.directory {
-        path: core.files.__walk_shown(context, source)
-        return Err(walk_error(.Read, 0, None, Val("filesystem walk root is not a directory: {path}"), root))
-    }
+    if source != directory -> core.files.__walk_release(context, source)
+    if failure == .Val(error) -> return Err(error)
     Ok(())
 }
 
@@ -1528,8 +1540,10 @@ walk_validate: fn(context: Int, directory: Int, root: String) IOError! -[FS]> {
 // directories sorted by subtree key, the child's path and a separator. Every
 // path below a child starts with its key, and no sibling's path does, so a
 // walk that descends into each child where its key falls among the entries
-// yields every path in order without sorting the whole tree.
-__walk_batch: fn(context: Int, directory: Int, depth: Int, root: String, ignore: String?, files_only: Bool) -[FS]> (entries: [WalkEntry], children: [(key: String, directory: Int)]) IOError! {
+// yields every path in order without sorting the whole tree. Both lists are
+// in reverse, so the next one is the last. Every slot the batch is done with
+// is released; a child directory keeps its slot until it is read.
+__walk_batch: fn(context: Int, directory: Int, depth: Int, root: String, ignore: String?, files_only: Bool) -[FS]> __WalkFrame IOError! {
     walk_validate(context, directory, root)
     if ignore != None {
         rules: core.files.__walk_rules(context, directory, ignore)
@@ -1547,70 +1561,140 @@ __walk_batch: fn(context: Int, directory: Int, depth: Int, root: String, ignore:
         if ignore != None {
             skipped = entry.ignore_file || core.files.__walk_ignored(context, directory, entry.relative, entry.directory)
         }
-        if skipped -> next
-        if !files_only || (!entry.directory && entry.file) {
+        if !skipped && (!files_only || (!entry.directory && entry.file)) {
             entries.push(WalkEntry{path: entry.path, relative: entry.relative, is_dir: entry.directory, depth: depth})
         }
-        if entry.directory {
-            if ignore != None -> core.files.__walk_inherit(context, entry.child, directory)
-            // The walk joins a child's name to its directory with `/`.
-            children.push((key: "{entry.path}/", directory: entry.child))
+        if skipped || !entry.directory {
+            core.files.__walk_release(context, entry.child)
+            next
         }
+        if ignore != None -> core.files.__walk_inherit(context, entry.child, directory)
+        // The walk joins a child's name to its directory with `/`.
+        children.push((key: "{entry.path}/", directory: entry.child))
     }
-    entries.sort_by((left: WalkEntry, right: WalkEntry) -> left.path <=> right.path)
-    children.sort_by((left: (key: String, directory: Int), right: (key: String, directory: Int)) -> left.key <=> right.key)
-    Ok((entries: entries, children: children))
+    entries.sort_by((left: WalkEntry, right: WalkEntry) -> right.path <=> left.path)
+    children.sort_by((left: (key: String, directory: Int), right: (key: String, directory: Int)) -> right.key <=> left.key)
+    Ok(__WalkFrame{entries: entries, children: children, depth: depth})
 }
 
-// Walk `directory` and everything below it into `out` in path order, depth
-// first. A directory that can't be read adds its error to `failed` and leaves
-// its subtree out; the walk goes on, so the error reported is the first in
-// walk order wherever it was met.
-__walk_tree: fn(context: Int, directory: Int, depth: Int, root: String, ignore: String?, files_only: Bool, out: &[WalkEntry], failed: &[(directory: Int, error: IOError)]) -[FS]> {
-    if __walk_batch(context, directory, depth, root, ignore, files_only) == {
-        .Ok(batch) -> {
-            child := 0
-            loop entry in batch.entries {
-                loop child < batch.children.len() && batch.children[child].key < entry.path {
-                    __walk_tree(context, batch.children[child].directory, depth + 1, root, ignore, files_only, out, failed)
-                    child += 1
+// One directory of a walk being read: the entries and child directories it
+// has still to yield, each in reverse walk order.
+__WalkFrame: struct {
+    entries: [WalkEntry]
+    children: [(key: String, directory: Int)]
+    depth: Int
+}
+
+/// The entries below a directory, read as the walk goes: a loop over it
+/// yields each one in path order as `WalkEntry IOError!`, with at most one
+/// open directory and one directory's entries in hand at a time. A directory
+/// that can't be read yields its error where its entries would be, and the
+/// walk goes on. Leaving the loop early closes the walk.
+Walk: struct {
+    priv root: String
+    priv ignore: String?
+    priv files_only: Bool
+
+    /// Every entry in walk order, or the first error the walk meets.
+    list: fn(&&self) -[FS]> [WalkEntry] IOError! {
+        out := [WalkEntry]{}
+        loop entry in self -> out.push(entry?)
+        Ok(out)
+    }
+}
+
+impl Walk.Iterable {
+    Iter: __WalkCursor
+
+    iter: fn(&&self) -> __WalkCursor {
+        __WalkCursor{root: self.root, ignore: self.ignore, files_only: self.files_only, context: 0, frames: [__WalkFrame]{}, done: false}
+    }
+}
+
+// A walk being read: its context, 0 until the first step opens it, and the
+// directories still to finish, the deepest last.
+__WalkCursor: struct {
+    root: String
+    ignore: String?
+    files_only: Bool
+    context: Int
+    frames: [__WalkFrame]
+    done: Bool
+}
+
+impl __WalkCursor.Iterator {
+    Item: WalkEntry IOError!
+
+    // Yield the next entry, descending first into each child directory whose
+    // subtree key sorts before it.
+    next: fn(&self) -[FS]> (WalkEntry IOError!)? {
+        if self.done -> return None
+        if self.context == 0 {
+            if __walk_open(self) == .Err(error) {
+                __walk_finish(self)
+                return Val(Err(error))
+            }
+        }
+        loop self.frames.len() > 0 {
+            top: self.frames.len() - 1
+            entries: self.frames[top].entries.len()
+            children: self.frames[top].children.len()
+            if children > 0 && (entries == 0 || self.frames[top].children[children - 1].key < self.frames[top].entries[entries - 1].path) {
+                child: self.frames[top].children.pop() ?? panic("walk child")
+                depth: self.frames[top].depth + 1
+                if __walk_batch(self.context, child.directory, depth, self.root, self.ignore, self.files_only) == {
+                    .Ok(frame) -> {
+                        core.files.__walk_release(self.context, child.directory)
+                        self.frames.push(frame)
+                    }
+                    .Err(error) -> {
+                        core.files.__walk_release(self.context, child.directory)
+                        return Val(Err(error))
+                    }
                 }
-                out.push(entry)
+                next
             }
-            loop child < batch.children.len() {
-                __walk_tree(context, batch.children[child].directory, depth + 1, root, ignore, files_only, out, failed)
-                child += 1
-            }
+            if self.frames[top].entries.pop() == .Val(entry) -> return Val(Ok(entry))
+            _ := self.frames.pop()
         }
-        .Err(error) -> failed.push((directory: directory, error: error))
+        __walk_finish(self)
+        None
     }
 }
 
-walk_impl: fn(root: String, ignore: String?, files_only: Bool) -[FS]> [WalkEntry] IOError! {
-    files8_preflight("FS.Read", .Read, root)
-    context: core.files.__walk_context(root, ignore ?? "", ignore != None)
-    _guard: core.mem.scope.guard(() -> core.files.__walk_close(context))
-    walk_validate(context, 0, root)
-    if ignore != None -> core.files.__walk_matcher_new(context)
-    out := [WalkEntry]{}
-    failed := [(directory: Int, error: IOError)]{}
-    __walk_tree(context, 0, 0, root, ignore, files_only, out, failed)
-    if failed.len() == 0 -> return Ok(out)
-    first := 0
-    loop index in 1..<failed.len() {
-        if core.files.__walk_before(context, failed[index].directory, failed[first].directory) -> first = index
+impl __WalkCursor.Close {
+    close: fn(&&self) {
+        if self.context != 0 -> core.files.__walk_close(self.context)
     }
-    Err(failed[first].error)
+}
+
+__walk_open: fn(cursor: &__WalkCursor) IOError! -[FS]> {
+    files8_preflight("FS.Read", .Read, cursor.root)
+    cursor.context = core.files.__walk_context(cursor.root, cursor.ignore ?? "", cursor.ignore != None)
+    walk_validate(cursor.context, 0, cursor.root)
+    if cursor.ignore != None -> core.files.__walk_matcher_new(cursor.context)
+    cursor.frames.push(__walk_batch(cursor.context, 0, 0, cursor.root, cursor.ignore, cursor.files_only))
+    Ok(())
+}
+
+// The walk is over: close its context so no descriptor or slot outlives it.
+__walk_finish: fn(cursor: &__WalkCursor) -[FS]> {
+    cursor.done = true
+    cursor.frames = [__WalkFrame]{}
+    if cursor.context != 0 -> core.files.__walk_close(cursor.context)
+    cursor.context = 0
 }
 
 
-walk: fn(root: String | Path, ignore: String?{None}) -[FS]> [WalkEntry] IOError! {
-    walk_impl(path_text(root), ignore, false)
+/// The entries below `root`, every directory and file, read lazily in path
+/// order (see `Walk`); the call keeps the FS authority every walk needs.
+walk: fn(root: String | Path, ignore: String?{None}) -[FS]> Walk {
+    Walk{root: path_text(root), ignore: ignore, files_only: false}
 }
 
 
-walk_files: fn(root: String | Path, ignore: String?{None}) -[FS]> [WalkEntry] IOError! {
-    walk_impl(path_text(root), ignore, true)
+walk_files: fn(root: String | Path, ignore: String?{None}) -[FS]> Walk {
+    Walk{root: path_text(root), ignore: ignore, files_only: true}
 }
 
 
@@ -2251,7 +2335,7 @@ slice_bytes: fn(raw: [U8], start: Int, end: Int) -> [U8] Never! {
 readdir: fn(path: String) -[FS]> [DirEntry] IOError! { core.files.list_dir(path) }
 
 
-walkdir: fn(root: String, ignore: String?) -[FS]> [WalkEntry] IOError! { walk_impl(root, ignore, false) }
+walkdir: fn(root: String, ignore: String?) -[FS]> Walk { Walk{root: root, ignore: ignore, files_only: false} }
 
 
 truncate: fn(path: String, size: Int) IOError! -[FS]> {
@@ -2484,7 +2568,7 @@ trim_file_line: fn(bytes: &[U8]) Never! {
     write(join(directory.path, ".gitignore"), "hidden\n").expect("root rules")
     write(join(child, "visible"), "nested").expect("nested file")
     write(join(child, "hidden"), "hidden").expect("inherited ignored file")
-    rows: walk(directory.path, Val(".gitignore")).expect("walk")
+    rows: walk(directory.path, Val(".gitignore")).list().expect("walk")
     assert_eq(rows.len(), 3)
     assert_eq(rows[0].relative, "nested")
     assert_eq(rows[0].depth, 0)
@@ -2493,13 +2577,13 @@ trim_file_line: fn(bytes: &[U8]) Never! {
     assert_eq(rows[1].depth, 1)
     assert_eq(rows[2].relative, "visible")
     assert_eq(rows[2].depth, 0)
-    files: walk_files(directory.path, Val(".gitignore")).expect("walk files")
+    files: walk_files(directory.path, Val(".gitignore")).list().expect("walk files")
     assert_eq(files.len(), 2)
     loop entry in files -> assert(!entry.is_dir)
 }
 
 #Test("walk validates an empty spelling but reads the actual empty root") {
-    if walk("", None) == {
+    if walk("", None).list() == {
         .Ok(_) -> assert(false)
         .Err(_) -> {}
     }
@@ -2507,7 +2591,7 @@ trim_file_line: fn(bytes: &[U8]) Never! {
 
 #Test("walk rejects regular-file roots with the native cause") {
     file: temp_file("walk_root").expect("temporary walk root")
-    if walk(file.path, None) == {
+    if walk(file.path, None).list() == {
         .Ok(_) -> assert(false)
         .Err(error) -> {
             if error == {

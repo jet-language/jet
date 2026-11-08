@@ -3596,9 +3596,9 @@ jet_cli_dev_stamp: fn(root: String, watch: [String]) -[FS]> String Never! {
 
 // Every file under `directory`.
 jet_cli_dev_files: fn(directory: String) -[FS]> [String] Never! {
-    entries: cli_files.walk(directory, None) ?? return [String]{}
     files := [String]{}
-    loop entry in entries {
+    loop item in cli_files.walk(directory, None) {
+        entry: item ?? return [String]{}
         if !entry.is_dir -> files.push(entry.path)
     }
     files

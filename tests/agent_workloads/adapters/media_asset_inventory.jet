@@ -10,7 +10,7 @@ WorkloadArgs: struct {
 
 run: fn(args: WorkloadArgs) {
     root: args.root
-    entries: fs.walk(root) ?? panic("cannot walk media")
+    entries: fs.walk(root).list() ?? panic("cannot walk media")
     rows := [String]{}
     loop entry in entries {
         if !entry.is_dir {

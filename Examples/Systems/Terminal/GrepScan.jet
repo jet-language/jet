@@ -24,7 +24,7 @@ run: fn() {
     fs.write(Path.from(root).join(".gitignore"), "ignored/\n")
 
     // The walk opts into the ignore file; omission means no ignore rules.
-    entries: fs.walk(root, ignore: ".gitignore")
+    entries: fs.walk(root, ignore: ".gitignore").list()
     listing := [String]{}
     loop entry in entries -> listing.push("{entry.relative}:{entry.is_dir}:{entry.depth}")
     listing.sort()

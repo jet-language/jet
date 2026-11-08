@@ -9,10 +9,10 @@ use {
 }
 
 run: fn() {
-    entries: fs.walk("w02") ?? panic("walk failed")
     files := 0
     bytes := 0
-    loop entry in entries {
+    loop item in fs.walk("w02") {
+        entry: item ?? panic("walk failed")
         if entry.is_dir -> next
         info: fs.stat(entry.path) ?? panic("stat failed")
         files += 1

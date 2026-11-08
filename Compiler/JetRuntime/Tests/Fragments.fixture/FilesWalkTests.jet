@@ -58,7 +58,6 @@ files_walk_fixture_ignored: fn(rules: I64, relative: I64, is_dir: Bool) -> Bool 
     if (walk_parent_length(rt_text_data(rt_static_text("/a")), I64{2}) != I64{1}) -> return I64{20}
     if (walk_parent_length(rt_text_data(rt_static_text(".")), I64{1}) != I64{0}) -> return I64{21}
     if (walk_parent_length(rt_text_data(rt_static_text("/")), I64{1}) != I64{-1}) -> return I64{22}
-    if (walk_path_compare(rt_text_data(rt_static_text("a/b")), I64{3}, rt_text_data(rt_static_text("a.b")), I64{3}) >= I64{0}) -> return I64{23}
     I64{0}
 }
 
@@ -135,16 +134,15 @@ files_walk_fixture_live: fn(key: I64) -> Bool {
     if (seen != I64{7} || !jet_walk8_ignored(key, I64{0}, rt_static_text("b.txt"), false)) -> return I64{17}
     jet_walk8_inherit(key, child, I64{0})
     if !jet_walk8_ignored(key, child, rt_static_text("a/b.txt"), false) -> return I64{18}
-    if !jet_walk8_before(key, I64{0}, child) || jet_walk8_before(key, child, I64{0}) -> return I64{19}
     shown: jet_walk8_shown(key, child)
-    if !jet_rt_string_eq(shown, directory) -> return I64{20}
+    if !jet_rt_string_eq(shown, directory) -> return I64{19}
     jet_rt_string_drop(shown)
     // A released slot is the next one a push takes.
     jet_walk8_release(key, child)
     held: walk_enter(key)
     reused: walk_slot_push(held, walk_bytes_new(rt_text_data(directory), rt_text_len(directory)), rt_text_len(directory))
     walk_leave(held)
-    if (reused != child) -> return I64{26}
+    if (reused != child) -> return I64{20}
 
     // An in-flight operation holds the context across a concurrent close.
     context: walk_enter(key)

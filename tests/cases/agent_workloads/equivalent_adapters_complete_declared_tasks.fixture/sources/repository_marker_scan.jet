@@ -7,7 +7,7 @@ WorkloadArgs: struct {
 
 run: fn(args: WorkloadArgs) {
     root: args.root
-    paths: fs.walk(root) ?? panic("cannot walk input root")
+    paths: fs.walk(root).list() ?? panic("cannot walk input root")
     rows := [String]{}
     loop file in paths {
         if !file.is_dir {

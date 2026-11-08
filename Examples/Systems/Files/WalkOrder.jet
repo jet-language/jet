@@ -21,7 +21,7 @@ run: fn() {
     loop file in files {
         fs.write(Path.from(root).join(file), file) ?? panic("write {file}")
     }
-    entries: fs.walk(root, None) ?? panic("walk")
+    entries: fs.walk(root, None).list() ?? panic("walk")
     paths := [String]{}
     loop entry in entries {
         kind: if entry.is_dir -> " dir" else -> ""

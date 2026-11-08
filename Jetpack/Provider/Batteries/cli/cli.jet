@@ -68,7 +68,7 @@ cli: module {}
     // relative path and one-based line number for aligned presentation.
     search: fn(root: String, pattern: String) -> [SearchHit] {
         regex: re.compile(pattern) ?? panic("cli search regex")
-        entries: fs.walk_files(root, ignore: ".gitignore") ?? panic("cli search walk")
+        entries: fs.walk_files(root, ignore: ".gitignore").list() ?? panic("cli search walk")
         hits := [SearchHit]{}
         loop entry in entries {
             text: fs.read(entry.path) ?? panic("cli search read")

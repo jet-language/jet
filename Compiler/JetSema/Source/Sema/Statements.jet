@@ -452,10 +452,10 @@ sema_stmt_single_byte_literal: fn(arg: CallArg) -> Int? Never! {
     None
 }
 
-// L0522 (check_stdlib_walk_filter): a loop over `fs.walk(root)` whose first
-// line only skips directories (`if entry.is_dir { next }`) and whose other
-// lines read the entry only as `entry.path`, with no exit or fallback route,
-// restates `fs.walk_files(root)`.
+// L0522 (check_stdlib_walk_filter): a loop over `fs.walk(root).list()` whose
+// first line only skips directories (`if entry.is_dir { next }`) and whose
+// other lines read the entry only as `entry.path`, with no exit or fallback
+// route, restates `fs.walk_files(root)`.
 sema_stmt_lint_walk_filter: fn(var: String, collection: Expr, body: [Stmt], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) {
     walk: sema_stmt_direct_fs_walk(collection, environment, program, scopes) ?? return
     if body.len() == 0 || !sema_stmt_is_directory_filter(body[0], var) -> return
@@ -511,12 +511,19 @@ sema_stmt_int_listed: fn(values: [Int], wanted: Int) -> Bool Never! {
     false
 }
 
-// `fs.walk(root)` (optionally `ignore:`), behind `??` or `?`, on the
-// `core.files` import spelled `fs`: the span from `fs` through the call's `)`.
+// `fs.walk(root).list()` (optionally `ignore:`), behind `??` or `?`, on the
+// `core.files` import spelled `fs`: the span from `fs` through the walk
+// call's `)`.
 sema_stmt_direct_fs_walk: fn(collection: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> Span? {
     expression := sema_registration_cli_without_parens(collection)
     if expression == .OrFallback(value, _, _, _, _) -> expression = sema_registration_cli_without_parens(value)
     if expression == .Try(value, _, _, _, _) -> expression = sema_registration_cli_without_parens(value)
+    if expression == .MethodCall(walked, collect, _, _, _, collected, _) {
+        if collect != "list" || collected.len() != 0 -> return None
+        expression = sema_registration_cli_without_parens(walked)
+    } else {
+        return None
+    }
     if expression == .MethodCall(receiver, method, _, _, _, args, _) {
         if method != "walk" || args.len() < 1 || args.len() > 2 -> return None
         loop (index, arg) in args {
