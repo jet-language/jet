@@ -1405,7 +1405,7 @@ stage_run: fn(c: &Chain, name: String, argv: [String], vars: [String], seconds: 
     spec := process.cmd(argv).cwd(c.tree)
     if canonical {
         files.create_dir_all(files.join(c.nsdir, "snap")) ?? fail("cannot create `{c.nsdir}/snap`: {err}")
-        inner := [String]{"unshare", "-r", "-m", "--propagation", "private", sys.executable(), files.join(c.r.tools, "Tools/agent/Chain.jet"), "inroot", c.nsdir.copy(), c.tree.copy(), c.r.r14.copy(), c.r.root.copy(), "{sys.getuid()}", "{sys.getgid()}"}
+        inner := [String]{"unshare", "-r", "-m", "--propagation", "private", files.join(c.seed, "jet"), files.join(c.r.tools, "Tools/agent/Chain.jet"), "inroot", c.nsdir.copy(), c.tree.copy(), c.r.r14.copy(), c.r.root.copy(), "{sys.getuid()}", "{sys.getgid()}"}
         inner.extend(vars.copy())
         inner.push("--")
         inner.extend(argv.copy())
