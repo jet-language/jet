@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6701,
-    "rev": 96285,
+    "nextNum": 6702,
+    "rev": 96286,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -101735,6 +101735,38 @@
       "created": "2026-11-08T19:41:56.680Z",
       "updated": "2026-11-08T19:41:56.680Z",
       "updatedBy": "Main"
+    },
+    {
+      "id": "c0l39twq",
+      "num": 6701,
+      "title": "Native windows in pure Jet: a Wayland client that opens a window and presents frames, no external libraries",
+      "body": "Owner 2026-11-08: \"i want jet to be able to draw to screen immediately with native windows using a full jet native framework/system asap no external dependencies. start with wayland support.\" Today the static native runtime never opens a window (RouteAGame.jet: the old bridge dlopened libraylib) and core.ui native is headless. Plan: a Wayland client written in Jet (wire protocol over the AF_UNIX socket at $XDG_RUNTIME_DIR/$WAYLAND_DISPLAY, wl_registry, wl_compositor, wl_shm with a memfd buffer passed by SCM_RIGHTS, xdg_wm_base/xdg_surface/xdg_toplevel, frame callbacks, wl_seat pointer and keyboard, the compositor keymap parsed in Jet), presenting the existing Jet software rasterizer canvas; then core.game.raylib windows and the core.ui host on top. X11 follows as a separate card.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": "jet run of an example opens a native Wayland window on a stock compositor (GNOME/KDE/sway), draws animated content from the Jet rasterizer, takes keyboard and pointer input, resizes and closes cleanly; the executable links no external library (symbol census); a headless-compositor case proves it on O0, O1 and O2",
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [
+        "gui",
+        "wayland",
+        "native"
+      ],
+      "goals": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-08T19:44:17.134Z",
+      "updated": "2026-11-08T19:44:17.134Z",
+      "updatedBy": "Main"
     }
   ],
   "decisions": [
@@ -189954,6 +189986,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-08T19:44:17.135Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0l39twq",
+      "note": "Native windows in pure Jet: a Wayland client that opens a window and presents frames, no external libraries"
+    },
     {
       "at": "2026-11-08T19:41:56.681Z",
       "by": "Main",
