@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6686,
-    "rev": 96072,
+    "rev": 96074,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -89410,6 +89410,11 @@
         {
           "at": "2026-11-08",
           "by": "Main",
+          "text": "Owner ruling 2026-11-08 (asked by Main): a generic `recv` returns `T?`; none means the channel is closed and drained. `waitall` returns `[T?]`; `waitany` returns the index plus `T?`. The -1 closed sentinel is removed, and every existing Int caller, case, example and doc migrates in one cutover on O0/O1/O2 and web. Build scope as scoped by G1Lead 03:50 (runtime after/interval value route, web Channel.js, row regeneration); no ballot needed for the return shape."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
           "text": "Main 2026-11-08 03:50 (G1Lead scoping): this is not a Core-only edit. channel<T> is already generic in Core, but the runtime after_value/interval routes carry exact-Int words with a fixed Int element meta (JetRuntime RouteAInterval.jet). A generic after<T>/interval needs an IR special case that passes the value slot and element meta (as ir_channel_new does), a new runtime route, the web Channel.js path, row regeneration, and cases on O0/O1/O2/web. A generic recv/waitall/waitany cannot keep the -1 closed sentinel and must return T?, which changes behaviour for existing Int callers and needs an owner ruling before the build. Several hours plus a compiler rebuild; out of the overnight pareto pass."
         }
       ],
@@ -89422,6 +89427,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-07T03:30:02.243Z"
+        },
+        {
+          "n": 2,
+          "text": "Generic `recv` returns `T?` (none = closed and drained), `waitall` returns `[T?]`, `waitany` returns the index plus `T?`; the -1 sentinel and every Int-only channel signature are gone, with all callers migrated in the same cutover (owner 2026-11-08).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T11:28:30.565Z"
         }
       ],
       "refs": [],
@@ -89436,9 +89450,9 @@
       "parentId": "c085f598",
       "needsAcceptance": false,
       "created": "2026-11-01T01:15:10.831Z",
-      "updated": "2026-11-08T08:08:00.861Z",
+      "updated": "2026-11-08T11:28:30.565Z",
       "updatedBy": "Main",
-      "criteriaLastN": 1
+      "criteriaLastN": 2
     },
     {
       "id": "c0pjwkhn",
@@ -188300,6 +188314,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-08T11:28:30.566Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0z2nw1h",
+      "note": "#2 Generic `recv` returns `T?` (none = closed and drained), `wa"
+    },
+    {
+      "at": "2026-11-08T11:28:29.670Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0z2nw1h",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-08T11:26:35.088Z",
       "by": "Main",
