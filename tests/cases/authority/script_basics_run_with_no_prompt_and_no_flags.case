@@ -1,0 +1,28 @@
+# Claim (#5949 c5): a script that only prints, reads args and stdin, reads the
+# clock and uses randomness runs with no prompt and no flags, from a terminal
+# and from a pipe.
+fixture: script_basics_run_with_no_prompt_and_no_flags.fixture
+requires: os:unix
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step piped: jet run basics.jet one two
+stdin: line.stdin
+exit: 0
+stdout: = "args: one two\nstdin: hello\nclock read: true\ndie in 1..6: true\n"
+stderr: = ""
+step piped_release: jet run --release basics.jet one two
+stdin: line.stdin
+exit: 0
+stdout: = "args: one two\nstdin: hello\nclock read: true\ndie in 1..6: true\n"
+stderr: = ""
+step terminal: jet run basics.jet one two
+pty: true
+stdin: line.stdin
+exit: 0
+stdout: ~ "args: one two" # the terminal also echoes the typed line, so each output line is matched alone
+stdout: ~ "stdin: hello" # the typed line reached the script
+stdout: ~ "clock read: true" # time needs no grant
+stdout: ~ "die in 1..6: true" # randomness needs no grant
+stdout: !~ "will:" # no authority prompt
+stdout: !~ "Run it?" # no authority prompt

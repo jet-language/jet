@@ -1,0 +1,19 @@
+#!/usr/bin/env jet
+// A script that only prints, reads its arguments and standard input, reads the
+// clock and draws a random number. It carries no authority block and is run
+// with no flags.
+use {
+    process: core.process
+    random: core.math.random
+    term: core.term
+    time: core.time
+}
+
+run: fn() {
+    print("args: {process.args().join(" ")}")
+    line: term.input() ?? "none"
+    print("stdin: {line}")
+    print("clock read: {time.now().year() >= 2024}")
+    roll: random.int(1, 6)
+    print("die in 1..6: {roll >= 1 && roll <= 6}")
+}
