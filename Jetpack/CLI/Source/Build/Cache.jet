@@ -15,6 +15,7 @@ use {
     json: core.encoding.json
     random: core.crypto.random
     sys: core.sys
+    jetpack_artifact_store.[StampTable]
 }
 
 // Host reads of build files (declared inputs, work-tree outputs, published
@@ -131,6 +132,55 @@ build_snapshot_declared_inputs: fn(store: BuildArtifactStoreHandle, base: String
         inputs.push(ActionInputCapture{snapshot: ActionInputSnapshot{path: input, digest, byte_len: bytes.len()}, bytes})
     }
     Ok(inputs)
+}
+
+// Every file of each folder `action` reads whole, as the input snapshots its
+// key hashes: `<folder>/<relative path>` and the file's digest, `stamps`
+// skipping the hash of a file whose size and change time are unchanged. A
+// link inside the folder is hashed as its target text (what it leads to is
+// hashed where it lies); one that leads out of the folder is refused. The
+// `.jet` and `.git` folders and what a `.gitignore` excludes are skipped.
+// The folder is bound into the work tree, so no byte is copied.
+build_snapshot_folders: fn(stamps: &StampTable, base: String, action: HermeticBuildAction) -[FS, Env]> [ActionInputSnapshot] BuildIOError! {
+    snapshots := [ActionInputSnapshot]{}
+    loop folder in action.folders {
+        root: build_folder_source(base, folder) ?? return Err(err)
+        if !files.is_dir(root) -> return Err(BuildIOError.new(.NotFound, "step `{action.name}` reads the folder `{folder.path}`, and `{root}` is not a folder"))
+        real: files.realpath(root) ?? return Err(BuildIOError.from(err))
+        loop walked in files.walk(real, Val(".gitignore")) {
+            entry: walked ?? return Err(BuildIOError.from(err))
+            if entry.is_dir || build_folder_skipped(entry.relative) -> next
+            path: if folder.path == "." -> entry.relative.copy() else -> "{folder.path}/{entry.relative}"
+            info: files.stat(entry.path) ?? return Err(BuildIOError.from(err))
+            if info.is_symlink {
+                resolved: files.realpath(entry.path) ?? return Err(BuildIOError.new(.NotFound, "`{path}` in the folder step `{action.name}` reads is a link that leads nowhere"))
+                if !resolved.starts_with("{real}/") -> return Err(BuildIOError.new(.PermissionDenied, "`{path}` in the folder step `{action.name}` reads is a link that leads out of it, to `{resolved}`"))
+                target: files.read_link(entry.path) ?? return Err(BuildIOError.from(err))
+                snapshots.push(ActionInputSnapshot{path, digest: ContentDigest.from_bytes("link:{target}".bytes()), byte_len: 0})
+                next
+            }
+            if !info.is_file -> return Err(BuildIOError.new(.InvalidInput, "`{path}` in the folder step `{action.name}` reads is neither a file, a folder nor a link"))
+            hex: stamps.file_digest(entry.path) ?? return Err(BuildIOError.new(.Other, "couldn't read `{path}` in the folder step `{action.name}` reads"))
+            snapshots.push(ActionInputSnapshot{path, digest: ContentDigest{value: "sha256:{hex}"}, byte_len: info.size})
+        }
+    }
+    Ok(snapshots)
+}
+
+// The host folder bound at `folder.path`: its source, else that path under
+// the project root `base`.
+build_folder_source: fn(base: String, folder: ActionFolder) -> String BuildIOError! {
+    if folder.source == .Val(source) -> return Ok(source.copy())
+    build_resolve_under(base, folder.path)
+}
+
+// Whether a folder's file at `relative` is outside what its readers see:
+// anything under a `.jet` or `.git` folder.
+build_folder_skipped: fn(relative: String) -> Bool Never! {
+    loop part in relative.split("/") {
+        if part == ".jet" || part == ".git" -> return true
+    }
+    false
 }
 
 // Rust `capture_declared_outputs`.

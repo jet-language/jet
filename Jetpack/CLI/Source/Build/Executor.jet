@@ -14,6 +14,7 @@ use {
         BuildEffect, NATIVE_SANDBOX_DEFAULT_ACTION_TIMEOUT_MS, NativeSandboxCommand, NativeSandboxError, NativeSandboxMount,
         foundation_native_sandbox_command, foundation_native_sandbox_finish, foundation_run_native_sandboxed_with_timeout_and_mounts,
     ]
+    jetpack_artifact_store.[StampTable]
     files: core.files
     process: core.process
     random: core.crypto.random
@@ -224,6 +225,15 @@ BuildActionStart: enum {
 // the work tree, which itself is mounted only at the child's working folder.
 BUILD_MADE_TOOL_MOUNT: "/jet/tool"
 
+// Where the Linux sandbox binds an action's work tree, its working folder
+// (foundation_linux_sandbox_argv without a separate output folder).
+BUILD_WORK_MOUNT: "/work"
+
+// Where a folder the action reads whole is bound: its path in the work tree.
+build_folder_mount: fn(path: String) -> String Never! {
+    if path == "." -> BUILD_WORK_MOUNT else -> "{BUILD_WORK_MOUNT}/{path}"
+}
+
 // Rust `execute_one_action` on the local path, for many actions at once:
 // each of `ids` (their prerequisites already done) is keyed and restored
 // from a cached record, else staged in a fresh private work tree; the staged
@@ -234,8 +244,9 @@ build_execute_actions: fn(plan: HermeticBuildPlan, ids: [Int], project_root: Str
     results := [Result<ActionOutcome, BuildExecutionError>]{}
     runs := [BuildActionRun]{}
     slots := [Int]{}
+    stamps := StampTable.load(project_root)
     loop action_id in ids {
-        if build_start_action(plan, plan.actions[action_id], project_root, artifact_store, grants, probe_facts) == {
+        if build_start_action(plan, plan.actions[action_id], project_root, artifact_store, grants, probe_facts, stamps) == {
             .Ok(start) -> if start == {
                 .Restored -> results.push(Ok(ActionOutcome.RestoredFromCache))
                 .Ready(run) -> {
@@ -247,6 +258,7 @@ build_execute_actions: fn(plan: HermeticBuildPlan, ids: [Int], project_root: Str
             .Err(error) -> results.push(Err(error))
         }
     }
+    stamps.save(project_root).drop("the stamp table only saves rehashing; a lost one costs speed, never a wrong key")
     if runs.len() == 0 -> return results
     specs: loop run in runs -> run.command.spec
     if process.run_all(specs, if jobs < 1 -> 1 else -> jobs) == {
@@ -267,17 +279,19 @@ build_execute_actions: fn(plan: HermeticBuildPlan, ids: [Int], project_root: Str
     results
 }
 
-// Snapshot the action's inputs, key it and restore a cached record, else
+// Snapshot the action's inputs and the files of the folders it reads whole
+// (`stamps` their last digests), key it and restore a cached record, else
 // stage it in a fresh private work tree that receives exactly the input
-// bytes the key hashed.
-build_start_action: fn(plan: HermeticBuildPlan, action: HermeticBuildAction, project_root: String, artifact_store: BuildArtifactStoreHandle, grants: [BuildEffect], probe_facts: [BuildProbeFact]) -[FS, Env, Exec, Time, Time.Wait, Rand]> BuildActionStart BuildExecutionError! {
+// bytes the key hashed, with each folder bound read-only at its path.
+build_start_action: fn(plan: HermeticBuildPlan, action: HermeticBuildAction, project_root: String, artifact_store: BuildArtifactStoreHandle, grants: [BuildEffect], probe_facts: [BuildProbeFact], stamps: &StampTable) -[FS, Env, Exec, Time, Time.Wait, Rand]> BuildActionStart BuildExecutionError! {
     loop cap in action.caps {
         if !grants.contains(cap) -> return Err(BuildExecutionError.MissingGrant{action: action.name, capability: cap})
     }
     handle: HermeticActionHandle{id: action.id, context: plan.context}
     if plan.action(handle) == None -> return Err(BuildExecutionError.InvalidGraph(HermeticBuildError.UnknownAction(handle.id)))
     inputs: build_snapshot_declared_inputs(artifact_store, project_root, action) ?? return Err(build_io_action(action, err))
-    snapshots: loop input in inputs -> input.snapshot
+    snapshots := loop input in inputs -> input.snapshot
+    snapshots.extend(build_snapshot_folders(stamps, project_root, action) ?? return Err(build_io_action(action, err)))
     // A tool another step makes is a declared input, run from the work
     // tree; any other tool is looked up through the action's toolchain.
     made_tool: action.inputs.contains(action.argv[0])
@@ -342,6 +356,20 @@ build_start_action: fn(plan: HermeticBuildPlan, action: HermeticBuildAction, pro
     mounts := [NativeSandboxMount]{}
     if plan.toolchain(action.toolchain) == .Val(toolchain) {
         loop mount in toolchain.mounts -> mounts.push(NativeSandboxMount{source: mount.source, destination: mount.destination})
+    }
+    loop folder in action.folders {
+        source: build_folder_source(project_root, folder) ?? return Err(build_io_action(action, err))
+        if sys.is_linux() -> mounts.push(NativeSandboxMount{source, destination: build_folder_mount(folder.path)})
+        else {
+            // Seatbelt has no mount namespace: the work tree links the
+            // folder's host path, which the profile lets the child read.
+            link: build_resolve_under(sandbox, folder.path) ?? return Err(build_io_action(action, err))
+            parent: files.dirname(link)
+            if parent != "" -> files.create_dir_all(parent) ?? return Err(build_io_action(action, BuildIOError.from(err)))
+            real: files.realpath(source) ?? return Err(build_io_action(action, BuildIOError.from(err)))
+            files.symlink(real, link) ?? return Err(build_io_action(action, BuildIOError.from(err)))
+            mounts.push(NativeSandboxMount{source: real, destination: real.copy()})
+        }
     }
     if made_tool {
         executable = build_resolve_under(sandbox, action.argv[0]) ?? return Err(build_io_action(action, err))

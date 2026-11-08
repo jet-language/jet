@@ -90,14 +90,16 @@ BuildSessionPlugin: struct {
 }
 
 // A `b.run` step: the BuildFile `tool` it runs, its arguments, the files it
-// reads and makes (`kept` the outputs that stay in git), its own time limit
-// in milliseconds (None: the `action_timeout` option's), and the span of its
+// reads and makes (`kept` the outputs that stay in git), the folders it reads
+// whole (`folders`, "folder" BuildFile ids), its own time limit in
+// milliseconds (None: the `action_timeout` option's), and the span of its
 // `b.run` call, where a step that declares no output is reported.
 BuildSessionAction: struct {
     name: String
     inputs: [String]
     outputs: [String]
     kept: [String]
+    folders: [Int]
     argv: [String]
     caps: [String]
     toolchain: Int
@@ -117,7 +119,9 @@ BuildSessionAction: struct {
 // platform, copied to `.jet/build/image/`; `jet` is the compiler running the build;
 // `package` is the folder of a package package.jet lists (`path` its name),
 // and `dependency` a file in it, copied from `from` to its
-// `.jet/deps/<name>/` path before any step runs.
+// `.jet/deps/<name>/` path before any step runs; `folder` is a folder a step
+// reads whole at `path`, bound read-only from `from` (a package's folder) or
+// from `path` in this package.
 BuildSessionFile: struct {
     kind: String
     path: String
@@ -345,9 +349,11 @@ build_session_call: fn(session: &BuildSession, method: String, args: [BuildSessi
     if method == "image" -> return build_session_host(state, args, true)
     if method == "jet" -> return build_session_jet(state, args)
     if method == "dependency" -> return build_session_dependency(state, args)
+    if method == "folder" -> return build_session_folder(state, args)
     if method.starts_with("action.") -> return build_session_step_call(state, method.removeprefix("action."), args)
     if method == "file.path" -> return build_session_file_path(state, args)
-    if method == "file.file" -> return build_session_file_file(state, args)
+    if method == "file.file" -> return build_session_file_file(state, args, false)
+    if method == "file.folder" -> return build_session_file_file(state, args, true)
     if method.starts_with("add_") -> return build_session_add_target(state, method, args)
     if method == "toolchain" -> return build_session_add_toolchain(state, args)
     if method == "signing" -> return build_session_add_signing(state, args)

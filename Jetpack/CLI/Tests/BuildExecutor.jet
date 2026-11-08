@@ -482,6 +482,86 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
     }
 }
 
+#Test("folder inputs: an output outside every read folder plans, one inside a read folder and a folder outside the project are refused") {
+    build := HermeticBuildContext.new()
+    build.action("read", ActionSpec.cached([String]{"sh"}).with_outputs([String]{"out.txt"}).with_folder("data", None)) ?? panic("read")
+    build.action("near", ActionSpec.cached([String]{"sh"}).with_outputs([String]{"database.txt"})) ?? panic("near")
+    assert(build.plan() == .Ok(_))
+    if build.action("escape", ActionSpec.cached([String]{"sh"}).with_outputs([String]{"e.txt"}).with_folder("../up", None)) == {
+        .Err(error) -> assert(error == HermeticBuildError.InvalidPath("../up"))
+        .Ok(_) -> panic("a folder outside the project must be refused")
+    }
+    build.action("inside", ActionSpec.cached([String]{"sh"}).with_outputs([String]{"data/gen.txt"})) ?? panic("inside")
+    if build.plan() == {
+        .Err(error) -> assert(error == HermeticBuildError.OutputInFolder{action: "read", output: "data/gen.txt", folder: "data"})
+        .Ok(_) -> panic("an output inside a read folder must be refused")
+    }
+}
+
+#Test("folder snapshots: each file is hashed under the folder path, `.jet` and ignored files are skipped, a link out of the folder is refused") {
+    root: build_test_root("folder-snapshot")
+    outside: build_test_root("folder-snapshot-outside")
+    files.create_dir_all(files.join(root, "data/sub")) ?? panic("data")
+    files.create_dir_all(files.join(root, "data/.jet")) ?? panic("data .jet")
+    files.write(files.join(root, "data/a.txt"), "a") ?? panic("a")
+    files.write(files.join(root, "data/sub/b.txt"), "bb") ?? panic("b")
+    files.write(files.join(root, "data/.jet/state"), "x") ?? panic("state")
+    files.write(files.join(root, "data/.gitignore"), "skip.txt\n") ?? panic("ignore")
+    files.write(files.join(root, "data/skip.txt"), "skip") ?? panic("skip")
+    build := HermeticBuildContext.new()
+    build.action("read", ActionSpec.cached([String]{"sh"}).with_outputs([String]{"out.txt"}).with_folder("data", None)) ?? panic("action")
+    plan: build.plan() ?? panic("plan")
+    stamps := StampTable.load(root)
+    first: build_snapshot_folders(stamps, root, plan.actions[0]) ?? panic("snapshot")
+    paths: loop snapshot in first -> snapshot.path
+    assert(paths.contains("data/a.txt"))
+    assert(paths.contains("data/sub/b.txt"))
+    assert(!paths.contains("data/.jet/state"))
+    assert(!paths.contains("data/skip.txt"))
+    loop snapshot in first {
+        if snapshot.path == "data/a.txt" {
+            assert_eq(snapshot.digest, ContentDigest.from_bytes("a".bytes()))
+            assert_eq(snapshot.byte_len, 1)
+        }
+    }
+    files.write(files.join(root, "data/a.txt"), "AA") ?? panic("edit a")
+    files.write(files.join(root, "data/c.txt"), "c") ?? panic("add c")
+    second: build_snapshot_folders(stamps, root, plan.actions[0]) ?? panic("second snapshot")
+    assert((loop snapshot in second -> snapshot.path).contains("data/c.txt"))
+    loop snapshot in second {
+        if snapshot.path == "data/a.txt" -> assert_eq(snapshot.digest, ContentDigest.from_bytes("AA".bytes()))
+    }
+    files.write(files.join(outside, "secret"), "secret") ?? panic("secret")
+    files.symlink(files.join(outside, "secret"), files.join(root, "data/link")) ?? panic("link")
+    if build_snapshot_folders(stamps, root, plan.actions[0]) == {
+        .Err(error) -> assert(error.kind == BuildIOKind.PermissionDenied)
+        .Ok(_) -> panic("a link out of the folder must be refused")
+    }
+    files.remove_all(root).drop("test cleanup")
+    files.remove_all(outside).drop("test cleanup")
+}
+
+#Test("folder inputs: the folder is bound read-only at its path, and a changed file in it runs the action again") {
+    if !build_test_require_sandbox() -> return
+    root: build_test_root("folder-run")
+    files.create_dir_all(files.join(root, "data")) ?? panic("data")
+    files.write(files.join(root, "data/a.txt"), "one") ?? panic("a")
+    store: BuildArtifactStoreHandle.at(files.join(root, ".jet-store")) ?? panic("store")
+    build := HermeticBuildContext.new()
+    script: "read -r line < data/a.txt; printf %s \"$line\" > out.txt; if (printf x > data/w) 2>/dev/null; then printf ' writable' >> out.txt; fi"
+    spec: ActionSpec.cached([String]{"sh", "-c", script}).with_outputs([String]{"out.txt"}).with_folder("data", None).with_cap(BuildEffect.Exec)
+    action: build.action("read", spec) ?? panic("action")
+    target: build.add_executable("out", TargetSpec.new().with_action(action)) ?? panic("target")
+    plan: build.plan_with_default(target) ?? panic("plan")
+    build_execute_build_plan(plan, root, store, [BuildEffect]{BuildEffect.Exec}) ?? panic("first run")
+    assert_eq(files.read(files.join(root, "out.txt")) ?? panic("out"), "one")
+    assert(!files.exists(files.join(root, "data/w")))
+    files.write(files.join(root, "data/a.txt"), "three") ?? panic("edit a")
+    build_execute_build_plan(plan, root, store, [BuildEffect]{BuildEffect.Exec}) ?? panic("second run")
+    assert_eq(files.read(files.join(root, "out.txt")) ?? panic("out again"), "three")
+    files.remove_all(root).drop("test cleanup")
+}
+
 #Test("cache records: a matching record restores, a record for another key or with mismatched outputs is refused") {
     root: build_test_root("records")
     store: BuildArtifactStoreHandle.at(files.join(root, ".jet-store")) ?? panic("store")

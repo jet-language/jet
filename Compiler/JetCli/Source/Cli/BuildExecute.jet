@@ -11,7 +11,7 @@ use {
     cli_sys: core.sys
     cli_time: core.time
     core.build.[BuildGraph, BuildGraphAction]
-    jet_build_session.[BUILD_SESSION_HOST_DIR, BUILD_SESSION_IMAGE_DIR, BuildPlanExecution, BuildPlanSelection, BuildSessionAction, BuildSessionTarget, BuildSessionToolchain]
+    jet_build_session.[BUILD_SESSION_HOST_DIR, BUILD_SESSION_IMAGE_DIR, BuildPlanExecution, BuildPlanSelection, BuildSessionAction, BuildSessionFile, BuildSessionTarget, BuildSessionToolchain]
     jet_driver.[JetDriverAuthorityPolicy, JetDriverAuthorizedSourceFile, JetDriverBuildKept, JetDriverBuildTime, JetDriverFailure, JetDriverGeneratedModule, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR, jet_driver_build_graph_json, jet_driver_build_times_json]
     jet_foundation.[BuildOptions, Diagnostic, build_option_duration_ms, build_options_value, diagnostic_from_registry, diagnostic_registry_row, diagnostic_render_all]
     jet_pkg_model.[OverlayPolicy, WorkspaceDeclarationCache, pkg_build_entry_source, pkg_parse_workspace_policy, pkg_resolve_workspace_source]
@@ -169,8 +169,10 @@ jet_cli_build_run_graph: fn(graph: BuildPlanExecution, receipt: BuildGraph, sele
     }
     probes: build_execute_probes(plan, probe_ids) ?? return jet_cli_build_execution_error(err, member, color)
     // A file of a listed package (`b.dependency(name).file(path)`) is copied
-    // to its `.jet/deps/<name>/` path, where a step's sandbox reads it.
+    // to its `.jet/deps/<name>/` path, where a step's sandbox reads it; a
+    // folder of one is bound there in the sandbox instead.
     loop file in graph.files {
+        if file.kind == "folder" -> next
         from: file.from ?? next
         to: jet_cli_entry_join(root, file.path)
         folder: jet_cli_parent(to) ?? root
@@ -750,7 +752,7 @@ jet_cli_build_hermetic_plan: fn(graph: BuildPlanExecution, action_timeout_ms: In
     loop action in graph.actions {
         runs_this_jet: graph.files[action.tool].kind == "jet"
         toolchain: if runs_this_jet -> toolchains[toolchains.len() - 1] else -> toolchains[action.toolchain]
-        spec := jet_cli_build_action_spec(action, toolchain, probes, signing, action_timeout_ms, last_kept)
+        spec := jet_cli_build_action_spec(action, graph.files, toolchain, probes, signing, action_timeout_ms, last_kept)
         if runs_this_jet -> spec = spec.with_env(JET_CLI_COMPILER_IDENTITY_ENV, jet_identity)
         actions.push(build.action(action.name, spec))
     }
@@ -780,9 +782,10 @@ jet_cli_build_toolchain_spec: fn(declared: BuildSessionToolchain, provenance: Bu
     spec
 }
 
-jet_cli_build_action_spec: fn(action: BuildSessionAction, toolchain: ToolchainHandle, probes: [ProbeHandle], signing: [SigningIdentityHandle], action_timeout_ms: Int, last_kept: [String: String]) -> ActionSpec Never! {
+jet_cli_build_action_spec: fn(action: BuildSessionAction, files: [BuildSessionFile], toolchain: ToolchainHandle, probes: [ProbeHandle], signing: [SigningIdentityHandle], action_timeout_ms: Int, last_kept: [String: String]) -> ActionSpec Never! {
     spec := ActionSpec.cached(action.argv).with_inputs(action.inputs).with_outputs(action.outputs).with_toolchain(toolchain).with_timeout_ms(action.timeout_ms ?? action_timeout_ms)
     loop path in action.kept -> spec = spec.with_kept(path, last_kept.get(path))
+    loop id in action.folders -> spec = spec.with_folder(files[id].path, files[id].from)
     loop cap in action.caps {
         if BuildEffect.parse(cap) == .Val(parsed) -> spec = spec.with_cap(parsed)
     }

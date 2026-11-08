@@ -51,7 +51,7 @@ sema_build_context_method_contract: fn(method: String, arity: Int) -> SemaBuildC
             result = Type.Named{name: "BuildFile"}
         }
         method == "jet" && arity == 0 -> result = Type.Named{name: "BuildFile"}
-        method == "dependency" && arity == 1 -> {
+        (method == "dependency" || method == "folder") && arity == 1 -> {
             parameters = [Type]{Type.String}
             result = Type.Named{name: "BuildFile"}
         }
@@ -102,7 +102,7 @@ sema_build_context_arity_description: fn(method: String) -> String Never! {
     if method == "toolchain" -> return "2 to 6"
     if method == "probe" -> return "3 to 6"
     if method == "plan" -> return "0 or 1"
-    if method == "default" || method == "found" || method == "host" || method == "image" || method == "dependency" -> return "1"
+    if method == "default" || method == "found" || method == "host" || method == "image" || method == "dependency" || method == "folder" -> return "1"
     if method == "run" -> return "3"
     if method == "args" || method == "jet" -> return "0"
     if method == "find" || method == "embed" -> return "1"
@@ -194,7 +194,7 @@ sema_build_step_contract: fn(owner: String, method: String) -> SemaBuildStepCont
     file: Type.Named{name: "BuildFile"}
     if owner == "BuildFile" {
         if method == "path" -> return Val(SemaBuildStepContract{parameters: [Type]{}, result: Type.String, flag: false, kept: false})
-        if method == "file" -> return Val(SemaBuildStepContract{parameters: [Type]{Type.String}, result: file, flag: false, kept: false})
+        if method == "file" || method == "folder" -> return Val(SemaBuildStepContract{parameters: [Type]{Type.String}, result: file, flag: false, kept: false})
         return None
     }
     if method == {
@@ -217,7 +217,7 @@ sema_call_try_build_step_method: fn(receiver: Expr, receiver_value: TExpr, metho
         else -> { return SemaMethodSpecialCheck{handled: false, value: None} }
     }
     failed: SemaMethodSpecialCheck{handled: true, value: None}
-    surface: if owner == "BuildFile" -> "path or file" else -> SEMA_BUILD_STEP_METHODS
+    surface: if owner == "BuildFile" -> "path, file or folder" else -> SEMA_BUILD_STEP_METHODS
     contract: sema_build_step_contract(owner, method) ?? {
         diagnostics.push(sema_error("E0102", span, "`{owner}` has no method `{method}`", "`{owner}` is a protected Core type with a closed method surface", "use {surface}"))
         return failed

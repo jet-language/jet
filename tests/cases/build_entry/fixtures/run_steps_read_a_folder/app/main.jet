@@ -1,0 +1,16 @@
+build: fn(b: Build) -[Exec, FS]> {
+    #Impure("run the step that reads two folders") {
+    // The step prints the first line of each file in `data/` and in the
+    // `lines/` folder of the package `words`, which package.jet lists.
+    shell: b.probe("shell", "find_program", "sh")
+    lines: b.run("lines", b.found(shell), ["Exec", "FS"])
+    lines.arg("-c")
+    lines.arg("for f in \"$0\"/* \"$1\"/*; do read -r line < \"$f\"; printf '%s\\n' \"$line\"; done > \"$2\"")
+    lines.file(b.folder("data"))
+    lines.file(b.dependency("words").folder("lines"))
+    lines.output("lines.txt")
+    app: b.add_executable("app", ["main.jet"], [lines])
+    b.default(app)
+    }
+}
+run: fn() {}

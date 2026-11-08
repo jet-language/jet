@@ -266,7 +266,7 @@ build_graph_rules_made: fn(session: &BuildSession, tool: BuildSessionValue, name
     caps: build_graph_rules_list([String]{"Exec", "FS"})
     assert(build_graph_rules_failed(build_session_call(session, "dependency", [BuildSessionValue]{.Text(value: "other")}, None, false, 1, 2)))
     words: build_graph_rules_value(build_session_call(session, "dependency", [BuildSessionValue]{.Text(value: "words")}, None, false, 3, 4))
-    assert(build_graph_rules_failed(build_session_call(session, "file.path", [BuildSessionValue]{words}, None, false, 5, 6)))
+    assert_eq(build_session_call(session, "file.path", [BuildSessionValue]{words}, None, false, 5, 6), BuildSessionReply.Value{value: BuildSessionValue.Text{value: ".jet/deps/words"}})
     assert(build_graph_rules_failed(build_session_call(session, "file.file", [BuildSessionValue]{words, .Text(value: "../escape.txt")}, None, false, 7, 8)))
     data: build_graph_rules_value(build_session_call(session, "file.file", [BuildSessionValue]{words, .Text(value: "data/answer.txt")}, None, false, 9, 10))
     assert_eq(build_session_call(session, "file.path", [BuildSessionValue]{data}, None, false, 11, 12), BuildSessionReply.Value{value: BuildSessionValue.Text{value: ".jet/deps/words/data/answer.txt"}})
@@ -274,12 +274,58 @@ build_graph_rules_made: fn(session: &BuildSession, tool: BuildSessionValue, name
     assert(build_graph_rules_failed(build_session_call(session, "run", [BuildSessionValue]{.Text(value: "folder"), words, caps}, None, true, 15, 16)))
     gen: build_graph_rules_value(build_session_call(session, "file.file", [BuildSessionValue]{words, .Text(value: "gen.sh")}, None, false, 17, 18))
     step: build_graph_rules_value(build_session_call(session, "run", [BuildSessionValue]{.Text(value: "answer"), gen, caps}, None, true, 19, 20))
-    assert(build_graph_rules_failed(build_graph_rules_step(session, "file", step, [BuildSessionValue]{words})))
+    assert(build_graph_rules_ok(build_graph_rules_step(session, "file", step, [BuildSessionValue]{words})))
     assert(build_graph_rules_ok(build_graph_rules_step(session, "file", step, [BuildSessionValue]{data, .Text(value: "--in=")})))
     permit: session.storage.guard_read()
-    assert_eq(permit.value.actions[0].argv, [String]{".jet/deps/words/gen.sh", "--in=.jet/deps/words/data/answer.txt"})
+    assert_eq(permit.value.actions[0].argv, [String]{".jet/deps/words/gen.sh", ".jet/deps/words", "--in=.jet/deps/words/data/answer.txt"})
     assert_eq(permit.value.actions[0].inputs, [String]{".jet/deps/words/gen.sh", ".jet/deps/words/data/answer.txt"})
     assert_eq(permit.value.files[1].from, Val("/src/words/data/answer.txt"))
+    folder: permit.value.files[permit.value.actions[0].folders[0]]
+    assert_eq(folder.kind, "folder")
+    assert_eq(folder.from, Val("/src/words"))
+}
+
+#Test("folders_are_read_whole_and_written_plainly") {
+    session := build_graph_rules_session(99)
+    build_session_set_dependencies(session, [String: String]{"words": "/src/words"})
+    tool: build_graph_rules_tool(session)
+    unplain: [String]{"", "../up", "/abs", "data/", "a//b", "./data", "data/."}
+    loop bad in unplain {
+        assert(build_graph_rules_failed(build_session_call(session, "folder", [BuildSessionValue]{.Text(value: bad)}, None, false, 1, 2)))
+    }
+    assert(build_graph_rules_ok(build_session_call(session, "folder", [BuildSessionValue]{.Text(value: ".")}, None, false, 1, 2)))
+    data: build_graph_rules_value(build_session_call(session, "folder", [BuildSessionValue]{.Text(value: "data")}, None, false, 3, 4))
+    assert_eq(build_session_call(session, "file.path", [BuildSessionValue]{data}, None, false, 5, 6), BuildSessionReply.Value{value: BuildSessionValue.Text{value: "data"}})
+    assert(build_graph_rules_failed(build_session_call(session, "run", [BuildSessionValue]{.Text(value: "folder"), data, build_graph_rules_list([String]{})}, None, true, 7, 8)))
+    words: build_graph_rules_value(build_session_call(session, "dependency", [BuildSessionValue]{.Text(value: "words")}, None, false, 9, 10))
+    assert(build_graph_rules_failed(build_session_call(session, "file.folder", [BuildSessionValue]{words, .Text(value: "lib/")}, None, false, 11, 12)))
+    lib: build_graph_rules_value(build_session_call(session, "file.folder", [BuildSessionValue]{words, .Text(value: "lib")}, None, false, 11, 12))
+    assert(build_graph_rules_failed(build_session_call(session, "file.folder", [BuildSessionValue]{data, .Text(value: "sub")}, None, false, 13, 14)))
+    step: build_graph_rules_value(build_graph_rules_made(session, tool, "pack", [String]{"out/pack.txt"}))
+    assert(build_graph_rules_ok(build_graph_rules_step(session, "file", step, [BuildSessionValue]{data, .Text(value: "--dir=")})))
+    assert(build_graph_rules_ok(build_graph_rules_step(session, "file", step, [BuildSessionValue]{data})))
+    assert(build_graph_rules_ok(build_graph_rules_step(session, "file", step, [BuildSessionValue]{lib})))
+    plan: build_graph_rules_value(build_session_call(session, "plan", [BuildSessionValue]{}, None, false, 15, 16))
+    assert(build_session_graph(session, plan).diagnostic == None)
+    permit: session.storage.guard_read()
+    assert_eq(permit.value.actions[0].argv, [String]{"tool", "out/pack.txt", "--dir=data", "data", ".jet/deps/words/lib"})
+    assert_eq(permit.value.actions[0].inputs, [String]{})
+    assert_eq(permit.value.actions[0].folders.len(), 2)
+    shared: permit.value.files[permit.value.actions[0].folders[1]]
+    assert_eq(shared.path, ".jet/deps/words/lib")
+    assert_eq(shared.from, Val("/src/words/lib"))
+}
+
+#Test("no_step_output_lies_inside_a_folder_a_step_reads") {
+    session := build_graph_rules_session(100)
+    tool: build_graph_rules_tool(session)
+    data: build_graph_rules_value(build_session_call(session, "folder", [BuildSessionValue]{.Text(value: "data")}, None, false, 1, 2))
+    _: build_graph_rules_value(build_graph_rules_made(session, tool, "gen", [String]{"data/gen.txt"}))
+    read: build_graph_rules_value(build_graph_rules_made(session, tool, "read", [String]{"read.txt"}))
+    assert(build_graph_rules_ok(build_graph_rules_step(session, "file", read, [BuildSessionValue]{data})))
+    plan: build_graph_rules_value(build_session_call(session, "plan", [BuildSessionValue]{}, None, false, 3, 4))
+    diagnostic: build_session_graph(session, plan).diagnostic ?? panic("an output inside a folder a step reads must refuse the plan")
+    assert(diagnostic.what.contains("step `gen` makes `data/gen.txt` inside the folder `data` that step `read` reads whole"))
 }
 
 #Test("run_step_without_an_output_refuses_the_plan") {

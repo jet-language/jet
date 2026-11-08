@@ -130,6 +130,7 @@ build_validate_action: fn(name: String, spec: ActionSpec) HermeticBuildError! {
     }
     build_validate_paths(spec.inputs)
     build_validate_paths(spec.outputs)
+    loop folder in spec.folders -> build_validate_paths([String]{folder.path})
     loop key in spec.env.keys() {
         if key.trim() == "" -> return Err(HermeticBuildError.EmptyEnvName(name))
     }
@@ -154,7 +155,9 @@ build_validate_action: fn(name: String, spec: ActionSpec) HermeticBuildError! {
     }
 }
 
-// Rust `validate_action_output_owners`: one owner per declared output.
+// Rust `validate_action_output_owners`: one owner per declared output, and
+// none inside a folder an action reads whole (the folder's read-only mount
+// would hide it, and its reader has no order after its maker).
 build_validate_action_output_owners: fn(actions: [HermeticBuildAction]) HermeticBuildError! {
     owners := [String: String]{}
     loop action in actions {
@@ -165,6 +168,18 @@ build_validate_action_output_owners: fn(actions: [HermeticBuildAction]) Hermetic
             owners[output] = action.name
         }
     }
+    loop action in actions {
+        loop folder in action.folders {
+            loop output in owners.keys() {
+                if build_path_within(output, folder.path) -> return Err(HermeticBuildError.OutputInFolder{action: action.name, output, folder: folder.path})
+            }
+        }
+    }
+}
+
+// Whether `path` is `folder` or under it; `.` holds every path.
+build_path_within: fn(path: String, folder: String) -> Bool Never! {
+    folder == "." || path == folder || path.starts_with("{folder}/")
 }
 
 build_validate_paths: fn(paths: [String]) HermeticBuildError! {

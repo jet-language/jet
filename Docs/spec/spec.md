@@ -5031,9 +5031,24 @@ build Jet code. `b.dependency(name)` is the folder of the package package.jet
 lists as `name` (an unlisted name is E3502), and `.file(path)` on it is a
 file there: before any step runs, the build copies it to
 `.jet/deps/<name>/<path>`, the path the step gets, so a step reads another
-package's file without reaching outside its own folder. The folder itself is
-neither a tool nor an argument. Example:
+package's file without reaching outside its own folder. Example:
 [`tests/cases/build_entry/run_steps_read_a_dependency_file.case`](../../tests/cases/build_entry/run_steps_read_a_dependency_file.case).
+
+A step can also read a whole folder. `b.folder(path)` is the folder at `path`
+in the build's package (`.` is the package itself), `.folder(path)` on
+`b.dependency(name)` is one in that package, at `.jet/deps/<name>/<path>`,
+and `b.dependency(name)` itself is all of it. `.file(dir)` passes the
+folder's path and binds the folder read-only at that path in the step's
+sandbox; nothing is copied. The step's cache key covers every file in it, so
+adding, removing or editing one runs the step again. A folder's `.jet/` and
+`.git/` folders and what its `.gitignore` files exclude are not part of it,
+and a link inside it that leads out of it fails the step. A folder is not a
+tool, and no step's output may lie inside a folder a step reads (E3502).
+A folder path is written plainly, as `dir/sub`: an empty part, a `.` part or
+a trailing `/` is refused (E3502), as a path that leaves the package is.
+Example:
+[`tests/cases/build_entry/run_steps_read_a_folder.case`](../../tests/cases/build_entry/run_steps_read_a_folder.case).
+
 Calls on the step build its
 command line in order. `.input(path)` and `.output(path)` declare a file and
 pass its path as the next argument. `.reads(path)` and `.writes(path)`
@@ -5041,8 +5056,9 @@ declare a file without passing it. `.file(f)` passes another step's output
 and orders the step after that one, and `.arg(text)` passes literal text.
 `.input`, `.output` and `.file` take `flag:`, written before the path in the
 same argument: `.output("gen.c", flag: "--out=")` passes `--out=gen.c`.
-`.output` returns the new `BuildFile`, and `f.path()` is a made, host-built or
-copied package file's package-relative path; a found program and `b.jet()`
+`.output` returns the new `BuildFile`, and `f.path()` is a made, host-built,
+copied or folder file's package-relative path (a package's is
+`.jet/deps/<name>`); a found program and `b.jet()`
 have no path until the build runs, so their `.path()` is refused. `.toolchain(t)` and
 `.sign(identity)` add toolchain and signing identity; a `b.jet()` step runs on
 the toolchain its compiler was built with, so `.toolchain` on it is refused. A
