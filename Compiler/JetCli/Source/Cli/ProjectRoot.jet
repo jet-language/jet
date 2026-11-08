@@ -8,10 +8,7 @@
 // declaration cache of the command's discovery session.
 use {
     cli_files: core.files
-    jet_pkg_model.[
-        AuthorityResolver, ManifestError, WorkspaceDeclarationCache,
-        pkg_find_inline_package_root_checked, pkg_find_manifest_root_checked,
-    ]
+    jet_pkg_model.[AuthorityResolver, ManifestError, WorkspaceDeclarationCache, pkg_find_package_roots_checked, pkg_workspace_present]
 }
 
 jet_cli_selected_project_root: fn(cache: &WorkspaceDeclarationCache, start: String) -[FS, Env]> String ManifestError! {
@@ -53,9 +50,9 @@ jet_cli_find_workspace_root_checked: fn(cache: &WorkspaceDeclarationCache, start
         if AuthorityResolver.open_for_authority_walk(dir) == {
             .Ok(found) -> {
                 if found == .Val(resolver) {
-                    if resolver.resolve_workspace_source(cache) == {
-                        .Ok(source) -> {
-                            if source != None -> return Ok(Val(dir))
+                    if pkg_workspace_present(cache, resolver) == {
+                        .Ok(present) -> {
+                            if present -> return Ok(Val(dir))
                         }
                         .Err(error) -> return Err(ManifestError{diagnostic: error.workspace_diagnostic()})
                     }
@@ -81,18 +78,13 @@ jet_cli_find_repository_root: fn(start: String) -[FS, Env]> String? Never! {
 }
 
 // `find_package_root_checked`: the extracted manifest root or the inline
-// Package carrier's root; the inline root wins so a later facts read reports
-// the explicit conflict instead of silently choosing one.
+// Package carrier's root, found in one climb; the inline root wins so a later
+// facts read reports the explicit conflict instead of silently choosing one.
 jet_cli_find_package_root_checked: fn(cache: &WorkspaceDeclarationCache, start: String) -[FS, Env]> String? ManifestError! {
-    manifest: if pkg_find_manifest_root_checked(cache, start) == {
+    roots: if pkg_find_package_roots_checked(cache, start, true) == {
         .Ok(found) -> found
         .Err(error) -> { return Err(error) }
     }
-    if pkg_find_inline_package_root_checked(cache, start) == {
-        .Ok(found) -> {
-            if found != None -> return Ok(found)
-        }
-        .Err(error) -> return Err(error)
-    }
-    Ok(manifest)
+    if roots.inline != None -> return Ok(roots.inline)
+    Ok(roots.manifest)
 }

@@ -42,8 +42,9 @@ jet_cli_production_receipt_env: fn(file: String, program_args: [String]) -> [Jet
     closure.push(U8{0})
     jet_cli_receipt_frame(closure, entry.bytes())
     jet_cli_receipt_frame(closure, source_digest.bytes())
-    jet_cli_production_project_input(closure, source_file, root, "manifest")
-    jet_cli_production_project_input(closure, source_file, root, "lock")
+    package: jet_cli_manifest_root(jet_cli_parent(source_file) ?? ".")
+    jet_cli_production_project_input(closure, package, root, "manifest")
+    jet_cli_production_project_input(closure, package, root, "lock")
     closure_digest: jet_cli_source_hash(closure)
 
     inputs := "jet-production-inputs-v1".bytes()
@@ -97,11 +98,12 @@ jet_cli_production_relative: fn(path: String, root: String) -> String? {
 }
 
 // The closure's frames for the `kind` file ("manifest" or "lock") of the
-// package that holds `source_file`: its kind, its path relative to `root`,
-// and its digest. A package without that file adds nothing.
-jet_cli_production_project_input: fn(closure: &[U8], source_file: String, root: String, kind: String) {
-    package: jet_cli_manifest_root(jet_cli_parent(source_file) ?? ".") ?? return
-    path: if kind == "manifest" -> "{package}/{PACKAGE_FILE}" else -> "{package}/{UNIFIED_LOCK_FILE}"
+// package that holds the source (`package`, its manifest root): its kind, its
+// path relative to `root`, and its digest. A package without that file, or a
+// source outside any package, adds nothing.
+jet_cli_production_project_input: fn(closure: &[U8], package: String?, root: String, kind: String) {
+    found: package ?? return
+    path: if kind == "manifest" -> "{found}/{PACKAGE_FILE}" else -> "{found}/{UNIFIED_LOCK_FILE}"
     bytes: cli_files.read_bytes(path) ?? return
     jet_cli_receipt_frame(closure, kind.bytes())
     relative: jet_cli_production_relative(path, root) ?? kind.copy()
@@ -112,17 +114,15 @@ jet_cli_production_project_input: fn(closure: &[U8], source_file: String, root: 
 // jet's environment rows with `vars` set over them.
 jet_cli_launch_env: fn(vars: [JetCLIEnvVar]) -> [String]? {
     if vars.len() == 0 -> return None
+    prefixes := [String]{}
+    loop variable in vars -> prefixes.push("{variable.name}=")
     rows := [String]{}
     loop row in x64_process_env() {
-        if !jet_cli_env_overridden(row, vars) -> rows.push(row.copy())
+        overridden: loop prefix in prefixes {
+            if row.starts_with(prefix) -> break true
+        } ?? false
+        if !overridden -> rows.push(row.copy())
     }
     loop variable in vars -> rows.push("{variable.name}={variable.value}")
     Val(rows)
-}
-
-jet_cli_env_overridden: fn(row: String, vars: [JetCLIEnvVar]) -> Bool {
-    loop variable in vars {
-        if row.starts_with("{variable.name}=") -> return true
-    }
-    false
 }
