@@ -5,6 +5,9 @@
 // A wait on a fiber (Fiber.jet) parks the fiber, not its carrier thread:
 // sync_wait goes to the fiber parking lot and sync_wake wakes the lot's
 // waiters on the word before the futex's; a plain thread waits on the futex.
+// The fiber side is reached only through the hooks the lot records
+// (Fiber.jet sync_lot), which exists once a fiber may run, so these
+// primitives link no fiber or scheduler code into a program.
 sync_load: fn(address: I64) -> I64 {
     #Unsafe("borrows an aligned live synchronization word") { return os_load_i64(address) }
 }
@@ -38,7 +41,7 @@ sync_wake: fn(address: I64, count: I64) {
     remaining := count
     // The locked read orders it after the store this wake publishes.
     if (lot != I64{0} && sync_add(lot, I64{0}) != I64{0}) {
-        remaining = remaining - sync_lot_wake(lot, address, count)
+        remaining = remaining - coll_call3(sync_load(wrapping(lot + I64{16})), lot, address, count)
         if (remaining <= I64{0}) -> return
     }
     sync_futex_wake(address, remaining)
@@ -54,7 +57,7 @@ sync_futex_wake: fn(address: I64, count: I64) {
 // EINTR, spurious wakes and sequence changes without extending the wait.
 sync_wait: fn(address: I64, expected: I64, deadline_ns: I64) -> I64 {
     fiber: fiber_current()
-    if (fiber != I64{0}) -> return sync_lot_wait(fiber, address, expected, deadline_ns)
+    if (fiber != I64{0}) -> return coll_call4(sync_load(wrapping(sync_lot + I64{8})), fiber, address, expected, deadline_ns)
     sync_futex_wait(address, expected, deadline_ns)
 }
 
@@ -244,7 +247,7 @@ sync_park: fn(slot: I64, timeout_ns: I64) {
     if (sync_swap(slot, I64{0}) != I64{0}) -> return
     fiber: fiber_current()
     if (fiber != I64{0}) {
-        fiber_park_slot(fiber, slot, timeout_ns)
+        _ := coll_call3(sync_load(wrapping(sync_lot + I64{24})), fiber, slot, timeout_ns)
         return
     }
     if (sync_cas(slot, I64{0}, I64{2}) != I64{0}) {
@@ -265,7 +268,7 @@ sync_park: fn(slot: I64, timeout_ns: I64) {
 sync_park_wake: fn(slot: I64) {
     previous: sync_swap(slot, I64{1})
     if (previous == I64{2}) -> sync_futex_wake(slot, I64{1})
-    if (previous > I64{2}) -> fiber_ready(previous)
+    if (previous > I64{2}) -> _ := coll_call1(sync_load(wrapping(sync_lot + I64{32})), previous)
 }
 
 // Once: 0 empty, 1 initializer running, 2 published. The initializer must not

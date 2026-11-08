@@ -46,7 +46,7 @@ FIBER_POOL_CAP: I64{64}
 FIBER_JOB_TEARDOWN: I64{-1}
 // 4096 buckets keep a bucket's chain short with 100k fibers parked.
 FIBER_LOT_BUCKETS: I64{4096}
-FIBER_LOT_BYTES: I64{65544}
+FIBER_LOT_BYTES: I64{65576}
 FIBER_TIMERS_BYTES: I64{24}
 
 // The running fiber, 0 on a plain thread (and on an unattached one, whose
@@ -263,6 +263,10 @@ fiber_prepare: fn(root: I64) {
         if (sync_lot == I64{0}) {
             lot: jet_rt_alloc(FIBER_LOT_BYTES, I64{8})
             thread_zero(lot, FIBER_LOT_BYTES)
+            sync_store(wrapping(lot + I64{8}), rt_fiber_lot_wait_address())
+            sync_store(wrapping(lot + I64{16}), rt_fiber_lot_wake_address())
+            sync_store(wrapping(lot + I64{24}), rt_fiber_park_slot_address())
+            sync_store(wrapping(lot + I64{32}), rt_fiber_ready_address())
             #Unsafe("written once, under the scheduler root lock, before any fiber can wait; a reader sees 0 (no fiber waiter exists) or the lot") {
                 sync_lot = lot
             }
@@ -486,14 +490,14 @@ fiber_timers_fire: fn(root: I64) {
     }
 }
 
-// A fiber's ParkSlot park (Sync.jet sync_park): the slot holds the fiber
-// until one waker swaps it out, or its timer takes it back. A zero timeout
-// yields instead. As on a thread, a timed-out park leaves a notification
-// that arrives after the timeout for the next park.
-fiber_park_slot: fn(fiber: I64, slot: I64, timeout_ns: I64) {
+// A fiber's ParkSlot park (Sync.jet sync_park, through the lot's hook): the
+// slot holds the fiber until one waker swaps it out, or its timer takes it
+// back. A zero timeout yields instead. As on a thread, a timed-out park
+// leaves a notification that arrives after the timeout for the next park.
+#Export(c) jet_rt_fiber_park_slot: fn(fiber: I64, slot: I64, timeout_ns: I64) -> I64 {
     if (timeout_ns == I64{0}) {
         fiber_yield(fiber)
-        return
+        return I64{0}
     }
     deadline: sync_deadline(timeout_ns)
     sync_store(wrapping(fiber + I64{120}), I64{0})
@@ -501,25 +505,41 @@ fiber_park_slot: fn(fiber: I64, slot: I64, timeout_ns: I64) {
     if (sync_cas(slot, I64{0}, fiber) != I64{0}) {
         sync_store(fiber, FIBER_RUNNING)
         _ := sync_swap(slot, I64{0})
-        return
+        return I64{0}
     }
     if (deadline >= I64{0}) -> fiber_timer_arm(fiber, deadline, FIBER_TIMER_SLOT, slot, I64{0})
     fiber_park(fiber)
     fiber_timer_disarm(fiber)
-    if (sync_load(wrapping(fiber + I64{120})) == I64{-110}) -> return
-    _ := sync_swap(slot, I64{0})
+    if (sync_load(wrapping(fiber + I64{120})) != I64{-110}) -> _ := sync_swap(slot, I64{0})
+    I64{0}
+}
+
+// Sync.jet sync_park_wake's hook: readies the fiber its swap took.
+#Export(c) jet_rt_fiber_ready: fn(fiber: I64) -> I64 {
+    fiber_ready(fiber)
+    I64{0}
 }
 
 // The parking lot of fiber futex waits (Sync.jet sync_wait/sync_wake):
-// Lot65544 waiters0, then FIBER_LOT_BUCKETS buckets of {lock, head} hashed
-// by address. waiters counts fibers inside a wait; a wake reads it with a
-// locked add, after the store it publishes, so either the waiter saw the
-// new value or the waker sees the waiter and takes its bucket.
+// Lot65576 waiters0, the hooks wait8 wake16 park24 ready32, then
+// FIBER_LOT_BUCKETS buckets of {lock, head} hashed by address. waiters
+// counts fibers inside a wait; a wake reads it with a locked add, after the
+// store it publishes, so either the waiter saw the new value or the waker
+// sees the waiter and takes its bucket. Sync.jet reaches the fiber side only
+// through the hooks, so a program that never runs a fiber links no fiber or
+// scheduler code (and its main thread may stay without a TCB).
 sync_lot := I64{0}
+
+// RuntimeLower alone replaces these bodies with FunctionAddress of the
+// checked #Export(c) hooks the lot records.
+rt_fiber_lot_wait_address: fn() -> I64 { loop { jet_rt_unreachable(I64{0}, I64{0}) } }
+rt_fiber_lot_wake_address: fn() -> I64 { loop { jet_rt_unreachable(I64{0}, I64{0}) } }
+rt_fiber_park_slot_address: fn() -> I64 { loop { jet_rt_unreachable(I64{0}, I64{0}) } }
+rt_fiber_ready_address: fn() -> I64 { loop { jet_rt_unreachable(I64{0}, I64{0}) } }
 
 sync_lot_bucket: fn(lot: I64, address: I64) -> I64 {
     index: ((address >> I64{3}) + (address >> I64{9}) + (address >> I64{15})).bit_and(FIBER_LOT_BUCKETS - I64{1})
-    wrapping(wrapping(lot + I64{8}) + index * I64{16})
+    wrapping(wrapping(lot + I64{40}) + index * I64{16})
 }
 
 // The bucket's lock is held.
@@ -537,7 +557,7 @@ sync_lot_unlink: fn(bucket: I64, fiber: I64) {
 
 // sync_wait for a fiber: 0 on a wake, -11 when the word no longer holds
 // `expected` (low 32 bits, as a futex compares), -110 at the deadline.
-sync_lot_wait: fn(fiber: I64, address: I64, expected: I64, deadline_ns: I64) -> I64 {
+#Export(c) jet_rt_fiber_lot_wait: fn(fiber: I64, address: I64, expected: I64, deadline_ns: I64) -> I64 {
     // A deadline already past fires at the next carrier's timer pass.
     lot: sync_lot
     bucket: sync_lot_bucket(lot, address)
@@ -566,7 +586,7 @@ sync_lot_wait: fn(fiber: I64, address: I64, expected: I64, deadline_ns: I64) -> 
 }
 
 // Wakes up to `count` fibers waiting on `address`; returns how many.
-sync_lot_wake: fn(lot: I64, address: I64, count: I64) -> I64 {
+#Export(c) jet_rt_fiber_lot_wake: fn(lot: I64, address: I64, count: I64) -> I64 {
     bucket: sync_lot_bucket(lot, address)
     woken := I64{0}
     chain := I64{0}
