@@ -3,16 +3,12 @@ build: fn(b: Build) -[Exec, FS]> {
         native: b.toolchain("native", "x86_64-unknown-linux-gnu", "x86_64-unknown-linux-gnu", "sdk-14.2", "lld", "sysroot/x86_64")
         signer: b.signing("release", "developer-id:ACME")
         shell: b.probe("shell", "find_program", "sh", native)
-        stamp: b.action(
-            "stamp",
-            [],
-            ["stamp.txt"],
-            ["sh", "-c", "printf stamped > stamp.txt"],
-            ["Exec", "FS"],
-            native,
-            [shell],
-            signer
-        )
+        stamp: b.run("stamp", b.found(shell), ["Exec", "FS"])
+        stamp.arg("-c")
+        stamp.arg("printf stamped > stamp.txt")
+        stamp.writes("stamp.txt")
+        stamp.toolchain(native)
+        stamp.sign(signer)
         app: b.add_executable("app", ["main.jet"], [stamp])
         b.default(app)
     }

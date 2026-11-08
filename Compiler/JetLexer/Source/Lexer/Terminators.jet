@@ -165,6 +165,8 @@ K_SHL_EQ: 104
 K_SHR_EQ: 105
 K_HASH: 106
 K_DOLLAR: 107
+K_PIPE_GT: 108
+K_LT_GT: 109
 
 // Facts hold four ints per token, so `index * 4 < facts.len()` is the bound
 // check without a division on every call.
@@ -195,6 +197,7 @@ ends_statement: fn(kind: Int) -> Bool Never! {
         K_BANG -> true
         K_GT -> true
         K_SHR -> true
+        K_LT_GT -> true
         K_FENCE_CLOSE -> true
         // A bodiless declaration ends its line on its kind word:
         // `pricing: module`, `Log.Audit: effect`, and `tag` / `effect` read
@@ -233,6 +236,7 @@ suppresses_terminator: fn(kind: Int) -> Bool Never! {
         K_TILDE_PIPE -> true
         K_SHL -> true
         K_SHR -> true
+        K_PIPE_GT -> true
         K_QUESTION_QUESTION -> true
         else -> false
     }

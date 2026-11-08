@@ -40,6 +40,7 @@ use {
         TypeParam,
         UnOp,
         access_sigil,
+        pipe_value_is_name,
         type_name,
     ]
     jet_parser.[jfmt_bin_op_spell, jfmt_compound_spell]
@@ -489,7 +490,7 @@ jet_cli_emit_ast_expr: fn(expression: Expr) -> JetCLIEmitNode Never! {
             jet_cli_emit_node("Slice", "slice", children)
         }
         .Range(start, end, exclusive, _, _) -> jet_cli_emit_node("Range", if exclusive -> "range ..<" else -> "range ..", [JetCLIEmitNode]{jet_cli_emit_ast_expr(start), jet_cli_emit_ast_expr(end)})
-        .Ident(name, _, _) -> jet_cli_emit_leaf("Ident", "ident {name}")
+        .Ident(name, _, _) -> if pipe_value_is_name(name) -> jet_cli_emit_leaf("PipeValue", "pipe value <>") else -> jet_cli_emit_leaf("Ident", "ident {name}")
         .Call(call, _) -> {
             children := [JetCLIEmitNode]{}
             jet_cli_emit_ast_args(call.args, children)
@@ -583,6 +584,11 @@ jet_cli_emit_ast_expr: fn(expression: Expr) -> JetCLIEmitNode Never! {
         .PtrFromAddr(alias, _, elem, address, _, _) -> jet_cli_emit_ast_unary("PtrFromAddr", "pointer {alias}: {type_name(elem)}", address)
         .ComptimeName(name, _, _, _) -> jet_cli_emit_leaf("ComptimeName", "comptime name {name}")
         .Paren(value, _, _) -> jet_cli_emit_ast_unary("Paren", "paren", value)
+        .Pipe(head, steps, _, _) -> {
+            children := [JetCLIEmitNode]{jet_cli_emit_ast_expr(head)}
+            loop step in steps -> children.push(jet_cli_emit_node("step", "step", [JetCLIEmitNode]{jet_cli_emit_ast_expr(step.value)}))
+            jet_cli_emit_node("Pipe", "pipe", children)
+        }
     }
 }
 

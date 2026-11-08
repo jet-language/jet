@@ -1,8 +1,11 @@
-// Byte envelopes and durable filesystem primitives of the artifact store
-// (Rust `jet_store` encode/decode, `read_file`, `atomic_write` and the sync
-// helpers). Every store write goes through a temporary file, an fsync, a
-// rename, and a directory sync; every read verifies that the file it opened is
-// still the file at the path.
+// Byte envelopes and filesystem primitives of the artifact store (Rust
+// `jet_store` encode/decode, `read_file`, `atomic_write` and the sync
+// helpers). A durable store write goes through a temporary file, an fsync, a
+// rename, and a directory sync. Lock and lease files, recency touches and
+// cache entries skip the syncs: a crash loses only what a later run recreates
+// or recomputes, and on a busy disk one sync can wait for every dirty page of
+// the filesystem. Every read verifies that the file it opened is still the
+// file at the path.
 use {
     jet_pkg_model.[pkg_bytes_starts_with, pkg_bytes_text]
     files: core.files
@@ -243,16 +246,17 @@ store_artifact_set_executable: fn(path: String, executable: Bool) ArtifactStoreE
     files.set_mode(path, updated_mode)
 }
 
-// Create `path`, refusing an existing one, and sync its bytes.
-store_artifact_create_new_synced: fn(path: String, bytes: [U8]) ArtifactStoreError! -[FS]> {
+// Create `path`, refusing an existing one. Lock and lease files mean
+// something only while their owner runs, so their bytes are not synced.
+store_artifact_create_new: fn(path: String, bytes: [U8]) ArtifactStoreError! -[FS]> {
     writer: files.create(path, if_exists: .Refuse)
     writer.write_all(bytes)
-    writer.fsync()
     close(writer)
 }
 
-// Append one synced record to a regular file (the journal).
-store_artifact_append_synced: fn(path: String, bytes: [U8]) ArtifactStoreError! -[FS]> {
+// Append records to a regular file (the journal), synced with its directory
+// when `durable`.
+store_artifact_append: fn(path: String, bytes: [U8], durable: Bool) ArtifactStoreError! -[FS]> {
     if files.stat(path) == {
         .Ok(info) -> {
             if info.is_symlink || !info.is_file {
@@ -263,9 +267,9 @@ store_artifact_append_synced: fn(path: String, bytes: [U8]) ArtifactStoreError! 
     }
     writer: files.append(path)
     writer.write_all(bytes)
-    writer.fsync()
+    if durable -> writer.fsync()
     close(writer)
-    store_artifact_sync_dir(files.dirname(path))
+    if durable -> store_artifact_sync_dir(files.dirname(path))
 }
 
 // Create one store directory (its parent must exist), refusing a link or a

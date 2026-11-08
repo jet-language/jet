@@ -15,12 +15,16 @@
 // value is a string (`output_dir: "dist"`, `--output-dir=dist`,
 // `b.output_dir("dist")`). A List value is strings (`libs: ["z"]`,
 // `b.libs(["z"])`), one flag per item (`--libs=z --libs=bz2`); it is kept as
-// one value, its items joined by newlines (build_options_list).
+// one value, its items joined by newlines (build_options_list). A Duration
+// value is a positive Time literal written the same way everywhere
+// (`action_timeout: 10min`, `--action-timeout=10min`,
+// `b.action_timeout(10min)`), whole milliseconds or more.
 BuildOptionKind: enum {
     Choice
     Bool
     Text
     List
+    Duration
 }
 
 BuildOptionRow: struct {
@@ -105,6 +109,9 @@ JET_BUILD_OPTIONS: comptime { [BuildOptionRow]{
     // version). A Linux ELF image has no versioned ABI floor, so a non-empty
     // value is refused (E2104).
     {name: "min_os", kind: BuildOptionKind.Text, values: [String]{}, stock_build: "", stock_run: "", removes_check: [String]{}, help: "The oldest OS version the image runs on (\"\" is none)"},
+    // How long one build step (`b.run`) may run before it is stopped and the
+    // build fails; a step's own `.timeout(...)` replaces it for that step.
+    {name: "action_timeout", kind: BuildOptionKind.Duration, values: [String]{}, stock_build: "30s", stock_run: "30s", removes_check: [String]{}, help: "How long one build step may run, such as 10min"},
 } }
 
 // The runtime exports of the checked heap (JetRuntime Alloc.jet): its link
@@ -217,7 +224,7 @@ build_option_flag_row: fn(argument: String) -> BuildOptionRow? {
 // `["z", "bz2"]` for a List row.
 build_option_argument: fn(row: BuildOptionRow, value: String) -> String {
     if row.kind == {
-        .Bool -> value.copy()
+        .Bool | .Duration -> value.copy()
         .Text -> "\"{value}\""
         .List -> {
             items := [String]{}
@@ -246,7 +253,30 @@ build_option_accepts: fn(row: BuildOptionRow, value: String) -> Bool Never! {
         .Choice | .Bool -> row.values.contains(value)
         .Text -> !value.contains("\n")
         .List -> !build_option_items(value).contains("")
+        .Duration -> build_option_duration_ms(value) != None
     }
+}
+
+// The milliseconds a Duration value (`10min`, `30s`, `1_500ms`) spells: a
+// whole number and one Time unit, ns through h. A value that is not
+// written so, or that comes to less than one millisecond, has none.
+build_option_duration_ms: fn(value: String) -> Int? Never! {
+    // Longer suffixes first, so `ms` is not read as `s`.
+    units: [(suffix: String, ns: Int)]{(suffix: "ns", ns: 1), (suffix: "us", ns: 1000), (suffix: "ms", ns: 1000000), (suffix: "min", ns: 60000000000), (suffix: "s", ns: 1000000000), (suffix: "h", ns: 3600000000000)}
+    loop unit in units {
+        if !value.ends_with(unit.suffix) -> next
+        digits: value.removesuffix(unit.suffix).replace("_", "")
+        if digits == "" || digits.len() > 12 -> return None
+        loop character in digits.chars() {
+            if character < '0' || character > '9' -> return None
+        }
+        count: Int.parse(digits) ?? return None
+        // At most 12 digits, so no unit's product overflows.
+        ms: if unit.ns >= 1000000 -> count * unit.ns.div_euclid(1000000) else -> count.div_euclid(1000000.div_euclid(unit.ns))
+        if ms <= 0 -> return None
+        return Val(ms)
+    }
+    None
 }
 
 // The items of a List value (build_option_accepts): "" is no item.
@@ -272,6 +302,7 @@ build_option_value_hint: fn(row: BuildOptionRow) -> String Never! {
         .Choice | .Bool -> "one of {build_option_values_text(row)}"
         .Text -> "a path or other text"
         .List -> "one item per flag"
+        .Duration -> "a positive duration such as 10min, 90s or 500ms"
     }
 }
 
@@ -281,6 +312,7 @@ build_option_profile_hint: fn(row: BuildOptionRow) -> String Never! {
         .Choice | .Bool -> "one of {build_option_values_text(row)}"
         .Text -> "a string"
         .List -> "a list of strings, none empty"
+        .Duration -> "a positive Time literal such as 10min"
     }
 }
 
@@ -289,6 +321,7 @@ build_option_profile_hint: fn(row: BuildOptionRow) -> String Never! {
 build_option_variants_text: fn(row: BuildOptionRow) -> String Never! {
     if row.kind == BuildOptionKind.Text -> return "a string literal"
     if row.kind == BuildOptionKind.List -> return "a list literal of strings"
+    if row.kind == BuildOptionKind.Duration -> return "a positive Time literal such as `10min`"
     words := [String]{}
     loop value in build_option_method_values(row) -> words.push(build_option_argument(row, value))
     "one of {build_option_join(words)}"
@@ -319,7 +352,7 @@ build_option_join: fn(words: [String]) -> String Never! {
 
 // The rows that only place a product, not shape its bytes, so no cache key
 // names them.
-JET_BUILD_OPTIONS_UNKEYED: [String]{"output_dir"}
+JET_BUILD_OPTIONS_UNKEYED: [String]{"output_dir", "action_timeout"}
 
 // The profile a compile selects when no `--profile` names one: every compile
 // request starts at it (JetDriverCompileRequest), and every record that names

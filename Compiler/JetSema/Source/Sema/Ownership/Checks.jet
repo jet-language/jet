@@ -4770,6 +4770,15 @@ sema_ownership_collect_evaluated_expr_accesses: fn(state: &SemaOwnershipState, e
             sema_ownership_collect_evaluated_expr_accesses(state, else_value, mode, else_bound, nested, scopes, events, checks)
         }
         .PtrFromAddr(_, _, _, addr, _, _) -> sema_ownership_collect_evaluated_expr_accesses(state, addr, mode, bound, nested, scopes, events, checks)
+        // Each step's hidden name is bound before the step runs.
+        .Pipe(head, steps, _, _) -> {
+            sema_ownership_collect_evaluated_expr_accesses(state, head, mode, bound, nested, scopes, events, checks)
+            step_bound := bound.copy()
+            loop step in steps {
+                step_bound.push(step.name)
+                sema_ownership_collect_evaluated_expr_accesses(state, step.value, mode, step_bound, nested, scopes, events, checks)
+            }
+        }
         else -> {}
     }
 }

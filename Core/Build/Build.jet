@@ -38,7 +38,6 @@ BuildGraphAction: struct {
     target: Int?
     caps: [String]
     pools: [String]
-    legacy_wrapper: String?
     plugin: Int?
     compiler_owned: Bool
     key: String
@@ -344,10 +343,6 @@ valid_graph: fn(graph: BuildGraph) -> Bool {
         }
         loop pool in action.pools {
             if !valid_graph_text(pool, 128) -> return false
-        }
-        if action.legacy_wrapper != .None {
-            wrapper: action.legacy_wrapper ?? ""
-            if !valid_graph_text(wrapper, 1024) -> return false
         }
         if action.target != .None {
             target_id: action.target ?? -1

@@ -1,14 +1,12 @@
 
 build: fn(b: Build) -[Exec, FS]> {
     #Impure("generate declared source") {
-    action: b.action(
-        "bad-gen",
-        [],
-        [".jet/generated/main/bad.jet"],
-        ["sh", "-c", "printf 'nope: fn(' > .jet/generated/main/bad.jet"],
-        ["Exec", "FS"]
-        )
-        app: b.add_executable("app", ["main.jet", ".jet/generated/main/bad.jet"], [action])
+    shell: b.probe("shell", "find_program", "sh")
+    action: b.run("bad-gen", b.found(shell), ["Exec", "FS"])
+    action.arg("-c")
+    action.arg("printf 'nope: fn(' > .jet/generated/main/bad.jet")
+    action.writes(".jet/generated/main/bad.jet")
+    app: b.add_executable("app", ["main.jet", ".jet/generated/main/bad.jet"], [action])
     b.default(app)
     }
 }

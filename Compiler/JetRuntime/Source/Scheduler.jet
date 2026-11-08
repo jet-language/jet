@@ -666,6 +666,12 @@ scheduler_control_cancel: fn(control: I64) {
     }
 }
 
+// A cancel the task has consumed into its own result (an AsyncEvent entry's
+// Cancelled report): no later wait point or shield exit delivers it again.
+scheduler_control_cancel_consume: fn(control: I64) {
+    sync_store(wrapping(control + I64{16}), I64{0})
+}
+
 #Export(c) jet_rt_scheduler_control_cancel: fn(control: I64) { scheduler_control_cancel(control) }
 #Export(c) jet_rt_scheduler_control_retain: fn(control: I64) { scheduler_control_retain(control) }
 #Export(c) jet_rt_scheduler_control_drop: fn(control: I64) { scheduler_control_drop(control) }
@@ -719,6 +725,13 @@ scheduler_observe_update: fn(state: I64, wait: I64) {
 
 // Including its per-site interrupt order.
 scheduler_yield: fn(wait_kind: I64, slot: I64, timeout_ns: I64) -> I64 {
+    scheduler_yield_policy(wait_kind, slot, timeout_ns, true)
+}
+
+// scheduler_yield whose park observes the ambient deadline only when
+// `deadline` holds: a join of a typed task its own deadline already bounds
+// waits for that task's result instead.
+scheduler_yield_policy: fn(wait_kind: I64, slot: I64, timeout_ns: I64, deadline: Bool) -> I64 {
     // A cancelled root wait point returns its fallback without parking.
     if scheduler_root_cancel_observed() -> return I64{0}
     world: world_current()
@@ -744,7 +757,7 @@ scheduler_yield: fn(wait_kind: I64, slot: I64, timeout_ns: I64) -> I64 {
     if virtual_wait {
         if (wait != I64{0}) -> wait = I64{-1}
     }
-    if !virtual_wait && !shielded && jet_ctx_deadline_present() {
+    if deadline && !virtual_wait && !shielded && jet_ctx_deadline_present() {
         remaining: jet_deadline_remaining_ms()
         if (remaining <= I64{0}) {
             scheduler_cancel_waiter_remove(control, waiter)
@@ -760,7 +773,7 @@ scheduler_yield: fn(wait_kind: I64, slot: I64, timeout_ns: I64) -> I64 {
     scheduler_blocking_wait_leave()
     sync_store(wrapping(thread_base() + I64{72}), I64{0})
     scheduler_cancel_waiter_remove(control, waiter)
-    if (!virtual_wait && !shielded && jet_ctx_deadline_present() && jet_deadline_remaining_ms() <= I64{0}) {
+    if (deadline && !virtual_wait && !shielded && jet_ctx_deadline_present() && jet_deadline_remaining_ms() <= I64{0}) {
         scheduler_deliver_deadline(wait_kind)
         return jet_scheduler_native_status()
     }

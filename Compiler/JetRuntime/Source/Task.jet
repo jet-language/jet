@@ -143,6 +143,16 @@ task_spawn_state: fn(site: I64, label: I64, env: I64, invoke: I64, release: I64,
     child
 }
 
+// A typed operation's task (an AsyncEvent dispatch) turns the deadline it
+// inherits into its own result value, so its join never replaces that value
+// with the caller's deadline stop (typedDeadline@184).
+task_spawn_typed_deadline: fn(label: I64, env: I64, invoke: I64, release: I64, meta: I64) -> I64 {
+    child: task_state_new(I64{0}, label, env, invoke, release, meta, I64{0}, I64{0})
+    sync_store(wrapping(child + I64{184}), I64{1})
+    scheduler_submit(I64{0}, child, true)
+    child
+}
+
 // A task's state, registered but not yet submitted: a generator
 // (Generator.jet) records its producer before the producer can run.
 task_state_new: fn(site: I64, label: I64, env: I64, invoke: I64, release: I64, meta: I64, group: I64, permit: I64) -> I64 {
@@ -285,18 +295,29 @@ task_drain: fn(child: I64) {
     scheduler_blocking_wait_leave()
 }
 
+// A typed child whose own deadline is no later than the joiner's ends by
+// itself with its typed result, so that join parks without observing the
+// joiner's deadline: the two expire together, and the result wins.
+task_join_bounded: fn(child: I64) -> Bool {
+    if (sync_load(wrapping(child + I64{184})) == I64{0}) || !jet_ctx_deadline_present() -> return false
+    context: wrapping(child + TASK_CONTEXT)
+    sync_load(wrapping(context + CONTEXT_DEADLINE_PRESENT)) != I64{0} && sync_load(wrapping(context + CONTEXT_DEADLINE_MS)) <= jet_ctx_deadline_ms()
+}
+
 // Core Task is move-only (Sema/Ownership/Copy.jet:132-143); Rust's has no Clone
 // and join(self):717 consumes the sole handle. Lexical group cleanup is a
 // separate retained drain, using done@24 wake-all.
 task_join_wait: fn(child: I64) -> I64 {
     kind: scheduler_msg_join()
-    if (sync_load(wrapping(child + I64{184})) == I64{0}) -> _ := scheduler_deadline_check(kind)
+    typed: sync_load(wrapping(child + I64{184})) != I64{0}
+    bounded: task_join_bounded(child)
+    if !typed -> _ := scheduler_deadline_check(kind)
     loop jet_scheduler_native_propagate() == (I64{0}) {
         if (scheduler_wait_point_cancel_check() != I64{0}) -> break
         if (sync_load(wrapping(child + I64{24})) != I64{0}) -> break
-        _ := scheduler_yield(kind, sync_load(wrapping(child + I64{104})), I64{-1})
+        _ := scheduler_yield_policy(kind, sync_load(wrapping(child + I64{104})), I64{-1}, !bounded)
     }
-    if (sync_load(wrapping(child + I64{184})) == I64{0}) -> _ := scheduler_deadline_check(kind)
+    if !typed -> _ := scheduler_deadline_check(kind)
     jet_rt_string_drop(kind)
     jet_scheduler_native_propagate()
 }

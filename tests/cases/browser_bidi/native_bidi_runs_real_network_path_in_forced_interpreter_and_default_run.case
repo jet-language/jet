@@ -1,23 +1,22 @@
-# tests/browser_bidi.rs::native_bidi_runs_real_network_path_in_forced_interpreter_and_default_run at tests/browser_bidi.rs:1189; hand-port (mock BiDi endpoint: tests/fixtures/browser_bidi_mock.mjs on a {free-port}; the forced-interpreter and default runs are both `jet run`, the Jet CLI has no interpreter flag)
+# tests/browser_bidi.rs::native_bidi_runs_real_network_path_in_forced_interpreter_and_default_run at tests/browser_bidi.rs:1189; hand-port (mock BiDi endpoint: tests/fixtures/BrowserBidiMock.jet on a {free-port}; the forced-interpreter and default runs are both `jet run`, the Jet CLI has no interpreter flag)
 fixture: native_bidi_runs_real_network_path_in_forced_interpreter_and_default_run.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
 env: JETPACK_ROOT={work}/jetpack
 env: JETPACK_ENV=1
-requires: tool:node
 write: forced/browser_bidi_dev.jet native_bidi_runs_real_network_path_in_forced_interpreter_and_default_run.fixture/forced/browser_bidi_dev.template
 write: default/browser_bidi_dev.jet native_bidi_runs_real_network_path_in_forced_interpreter_and_default_run.fixture/default/browser_bidi_dev.template
 write: profile/browser_bidi_dev.jet native_bidi_runs_real_network_path_in_forced_interpreter_and_default_run.fixture/profile/browser_bidi_dev.template
 write: guard_0/browser_bidi_dev.jet native_bidi_runs_real_network_path_in_forced_interpreter_and_default_run.fixture/guard_0/browser_bidi_dev.template
 write: guard_1/browser_bidi_dev.jet native_bidi_runs_real_network_path_in_forced_interpreter_and_default_run.fixture/guard_1/browser_bidi_dev.template
 write: codec/browser_bidi_dev.jet native_bidi_runs_real_network_path_in_forced_interpreter_and_default_run.fixture/codec/browser_bidi_dev.template
-session forced raw: node {root}/tests/fixtures/browser_bidi_mock.mjs script {free-port:forced} forced.json
-session default raw: node {root}/tests/fixtures/browser_bidi_mock.mjs script {free-port:default} default.json
-session profile raw: node {root}/tests/fixtures/browser_bidi_mock.mjs script {free-port:profile} profile.json
-session guard_0 raw: node {root}/tests/fixtures/browser_bidi_mock.mjs script {free-port:guard_0} guard_0.json
-session guard_1 raw: node {root}/tests/fixtures/browser_bidi_mock.mjs script {free-port:guard_1} guard_1.json
-session invalid raw: node {root}/tests/fixtures/browser_bidi_mock.mjs handshake {free-port:invalid} invalid.json
-session codec_surrogate raw: node {root}/tests/fixtures/browser_bidi_mock.mjs handshake {free-port:codec_surrogate} codec_surrogate.json
+session forced raw: {jet} run --allow=Exec,FS.Read,FS.Write,Net,Time {root}/tests/fixtures/BrowserBidiMock.jet -- script {free-port:forced} forced.json
+session default raw: {jet} run --allow=Exec,FS.Read,FS.Write,Net,Time {root}/tests/fixtures/BrowserBidiMock.jet -- script {free-port:default} default.json
+session profile raw: {jet} run --allow=Exec,FS.Read,FS.Write,Net,Time {root}/tests/fixtures/BrowserBidiMock.jet -- script {free-port:profile} profile.json
+session guard_0 raw: {jet} run --allow=Exec,FS.Read,FS.Write,Net,Time {root}/tests/fixtures/BrowserBidiMock.jet -- script {free-port:guard_0} guard_0.json
+session guard_1 raw: {jet} run --allow=Exec,FS.Read,FS.Write,Net,Time {root}/tests/fixtures/BrowserBidiMock.jet -- script {free-port:guard_1} guard_1.json
+session invalid raw: {jet} run --allow=Exec,FS.Read,FS.Write,Net,Time {root}/tests/fixtures/BrowserBidiMock.jet -- handshake {free-port:invalid} invalid.json
+session codec_surrogate raw: {jet} run --allow=Exec,FS.Read,FS.Write,Net,Time {root}/tests/fixtures/BrowserBidiMock.jet -- handshake {free-port:codec_surrogate} codec_surrogate.json
 await: file forced.ready timeout 30s
 await: file default.ready timeout 30s
 await: file profile.ready timeout 30s

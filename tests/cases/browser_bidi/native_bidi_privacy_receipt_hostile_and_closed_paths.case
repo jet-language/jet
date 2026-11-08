@@ -1,15 +1,14 @@
-# tests/browser_bidi.rs::native_bidi_privacy_receipt_hostile_and_closed_paths at tests/browser_bidi.rs:2713; hand-port (mock BiDi endpoint: tests/fixtures/browser_bidi_mock.mjs on a {free-port})
+# tests/browser_bidi.rs::native_bidi_privacy_receipt_hostile_and_closed_paths at tests/browser_bidi.rs:2713; hand-port (mock BiDi endpoint: tests/fixtures/BrowserBidiMock.jet on a {free-port})
 fixture: native_bidi_privacy_receipt_hostile_and_closed_paths.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
 env: JETPACK_ROOT={work}/jetpack
 env: JETPACK_ENV=1
-requires: tool:node
 write: browser_bidi_privacy_hostile.jet native_bidi_privacy_receipt_hostile_and_closed_paths.fixture/run.template
 step: jet build browser_bidi_privacy_hostile.jet
 exit: 0
-session privacy_hostile raw: node {root}/tests/fixtures/browser_bidi_mock.mjs script {free-port:privacy_hostile} privacy_hostile.json
-session privacy_closed raw: node {root}/tests/fixtures/browser_bidi_mock.mjs script {free-port:privacy_closed} privacy_closed.json
+session privacy_hostile raw: {jet} run --allow=Exec,FS.Read,FS.Write,Net,Time {root}/tests/fixtures/BrowserBidiMock.jet -- script {free-port:privacy_hostile} privacy_hostile.json
+session privacy_closed raw: {jet} run --allow=Exec,FS.Read,FS.Write,Net,Time {root}/tests/fixtures/BrowserBidiMock.jet -- script {free-port:privacy_closed} privacy_closed.json
 await: file privacy_hostile.ready timeout 30s
 await: file privacy_closed.ready timeout 30s
 step run: built

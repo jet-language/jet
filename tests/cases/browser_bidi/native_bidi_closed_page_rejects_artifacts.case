@@ -1,14 +1,13 @@
-# tests/browser_bidi.rs::native_bidi_closed_page_rejects_artifacts at tests/browser_bidi.rs:2189; hand-port (mock BiDi endpoint: tests/fixtures/browser_bidi_mock.mjs on a {free-port})
+# tests/browser_bidi.rs::native_bidi_closed_page_rejects_artifacts at tests/browser_bidi.rs:2189; hand-port (mock BiDi endpoint: tests/fixtures/BrowserBidiMock.jet on a {free-port})
 fixture: native_bidi_closed_page_rejects_artifacts.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
 env: JETPACK_ROOT={work}/jetpack
 env: JETPACK_ENV=1
-requires: tool:node
 write: browser_bidi_artifacts_closed.jet native_bidi_closed_page_rejects_artifacts.fixture/run.template
 step: jet build browser_bidi_artifacts_closed.jet
 exit: 0
-session artifacts_closed raw: node {root}/tests/fixtures/browser_bidi_mock.mjs script {free-port:artifacts_closed} artifacts_closed.json
+session artifacts_closed raw: {jet} run --allow=Exec,FS.Read,FS.Write,Net,Time {root}/tests/fixtures/BrowserBidiMock.jet -- script {free-port:artifacts_closed} artifacts_closed.json
 await: file artifacts_closed.ready timeout 30s
 step run: built
 exit: 0

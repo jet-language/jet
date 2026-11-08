@@ -74,6 +74,14 @@ ir_copy_fixup_body: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, at: 
         data: ir_load_word(m, b, at, 16)
         _: ir_runtime(m, b, "jet_rt_block_retain", [Int]{data}, -1)
         ir_end(b.f, b.line)
+        // A key order's function value gains the copy as an owner.
+        if ir_ordered_header(m, row) {
+            order: ir_load_word(m, b, at, 24)
+            keyed: ir_bool_op(m, b, IROp.Ne, order, zero)
+            ir_open_if(b.f, keyed, b.line)
+            _: ir_runtime(m, b, "jet_rt_native_closure_retain", [Int]{order}, -1)
+            ir_end(b.f, b.line)
+        }
         return
     }
     members: ir_inline_members(m, p, row) ?? return
@@ -612,6 +620,14 @@ ir_drop_glue: fn(m: &IRModule, p: IRProgram, row: Int) Never! {
         data: ir_load_word(m, a, at, 16)
         ir_release_buffer(m, p, a, row, entry, data, length, capacity)
         ir_end(a.f, a.line)
+        // The order word's function value loses this owner.
+        if ir_ordered_header(m, row) {
+            order: ir_load_word(m, a, at, 24)
+            keyed: ir_bool_op(m, a, IROp.Ne, order, zero)
+            ir_open_if(a.f, keyed, a.line)
+            ir_closure_unref(m, a, order)
+            ir_end(a.f, a.line)
+        }
     } else if ir_inline_members(m, p, row) == .Val(members) {
         loop member in members {
             if member.boxed {

@@ -91,6 +91,10 @@ ast_visit_expr: fn(expression: Expr, visitor: fn(Expr) -[Mem.Alloc, Mem.Rc, Time
             .Block(body) -> ast_visit_body(body, visitor, true)
         }
         .PtrFromAddr(_, _, _, address, _, _) -> ast_visit_expr(address, visitor)
+        .Pipe(head, steps, _, _) -> {
+            ast_visit_expr(head, visitor)
+            loop step in steps -> ast_visit_expr(step.value, visitor)
+        }
         else -> {}
     }
 }

@@ -2528,6 +2528,10 @@ jet_cli_replay_expr: fn(value: Expr, aliases: [String:String], locals: [String],
         }
         .ComptimeName(_, _, _, _) -> {}
         .Paren(inner, _, _) -> jet_cli_replay_expr(inner, aliases, locals, sites)
+        .Pipe(head, steps, _, _) -> {
+            jet_cli_replay_expr(head, aliases, locals, sites)
+            loop step in steps -> jet_cli_replay_expr(step.value, aliases, locals, sites)
+        }
     }
 }
 

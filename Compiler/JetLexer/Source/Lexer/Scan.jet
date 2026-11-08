@@ -1018,6 +1018,11 @@ raw_token_facts_range: fn(source: [U8], config_surface: Bool, from: Int, to: Int
                     last_code = push_code(facts, K_OR_OR, start, start + 2, false)
                     i += 2
                 }
+                // `|>` starts a pipe step.
+                next1 == 62 -> {
+                    last_code = push_code(facts, K_PIPE_GT, start, start + 2, false)
+                    i += 2
+                }
                 next1 == 61 -> {
                     last_code = push_code(facts, K_PIPE_EQ, start, start + 2, false)
                     i += 2
@@ -1079,6 +1084,12 @@ raw_token_facts_range: fn(source: [U8], config_surface: Bool, from: Int, to: Int
                 }
                 next1 == 61 -> {
                     last_code = push_code(facts, K_LE, start, start + 2, false)
+                    i += 2
+                }
+                // `<>` is the value a pipe step receives, one
+                // longest-match token as the fence tokens are.
+                next1 == 62 -> {
+                    last_code = push_code(facts, K_LT_GT, start, start + 2, false)
                     i += 2
                 }
                 // `<:` opens a statement-expansion fence.

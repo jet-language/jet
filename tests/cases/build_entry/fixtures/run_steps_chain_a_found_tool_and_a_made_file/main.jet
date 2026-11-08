@@ -1,0 +1,18 @@
+build: fn(b: Build) -[Exec, FS]> {
+    #Impure("run the declared steps") {
+    shell: b.probe("shell", "find_program", "sh")
+    // `sh -c <script> tool.sh`: the script writes the tool to `$0`.
+    gen: b.run("gen", b.found(shell), ["Exec", "FS"])
+    gen.arg("-c")
+    gen.arg("printf '%s' 'printf made > \"${{1#--out=}}\"' > \"$0\"")
+    script: gen.output("tool.sh")
+    // `sh tool.sh --out=made.txt`: runs after `gen`, which makes tool.sh.
+    made: b.run("made", b.found(shell), ["Exec", "FS"])
+    made.file(script)
+    made.output("made.txt", flag: "--out=")
+    made.timeout(10s)
+    app: b.add_executable("app", ["main.jet"], [gen, made])
+    b.default(app)
+    }
+}
+run: fn() {}

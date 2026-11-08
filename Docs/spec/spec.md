@@ -4994,9 +4994,7 @@ the build path.
 Build code registers typed values. Targets include
 `b.add_executable`, `b.add_library`, `b.add_test`, `b.add_asset_bundle`,
 `b.add_doc`, `b.add_install`, `b.add_package`, and `b.add_publish`. Each returns
-a `BuildTarget`. `b.action(name, inputs, outputs, argv, caps)` returns a
-`BuildAction`; optional typed `BuildToolchain` and `BuildProbe` arguments add
-toolchain and probe identity. `b.plan()` or `b.plan(default)` hands one
+a `BuildTarget`. `b.plan()` or `b.plan(default)` hands one
 canonical graph to scheduling, caching, execution, queries, and LSP.
 `b.toolchain(name, target_triple)` records target identity. `b.probe` supports
 `find_program`, `pkg_config`, and `header` probes.
@@ -5005,6 +5003,44 @@ canonical graph to scheduling, caching, execution, queries, and LSP.
 `[]`), so a build entry can choose its default target or options from them.
 A `jet build` that runs no `build: fn`, such as `jet build main.jet -- a`,
 refuses the words with E2104 instead of dropping them.
+
+`b.run(name, tool, caps)` declares one step and returns its `BuildAction`.
+The tool is a `BuildFile`. `b.found(probe)` is the program a `find_program`
+probe finds, and a step's `.output(path)` is a file that step makes, so one
+step can build the tool the next one runs. `b.host(target)` is the executable
+`target` built for the machine running the build, at
+`.jet/build/host/<name>` and never installed; a step that runs it waits for it
+to compile, and the one graph builds it whether or not it is selected. Only an
+executable target with a source can be built so (E3502), and on a machine the
+native backend doesn't write images for, a step that runs one is refused
+before anything runs. `b.jet()` is the compiler running the build; its step
+runs it from its own folder, mounted read-only, so a step can check, run or
+build Jet code. Calls on the step build its
+command line in order. `.input(path)` and `.output(path)` declare a file and
+pass its path as the next argument. `.reads(path)` and `.writes(path)`
+declare a file without passing it. `.file(f)` passes another step's output
+and orders the step after that one, and `.arg(text)` passes literal text.
+`.input`, `.output` and `.file` take `flag:`, written before the path in the
+same argument: `.output("gen.c", flag: "--out=")` passes `--out=gen.c`.
+`.output` returns the new `BuildFile`, and `f.path()` is a made or host-built
+file's package-relative path; a found program and `b.jet()` have no path until
+the build runs, so their `.path()` is refused. `.toolchain(t)` and
+`.sign(identity)` add toolchain and signing identity; a `b.jet()` step runs on
+the toolchain its compiler was built with, so `.toolchain` on it is refused. A
+step's result is cached. A step that
+declares no output is refused at its `b.run` call (E3502), since only declared
+outputs leave its sandbox, and `.arg` text that names a package file is
+refused with the fix `.input(path)`, so the step can't read an undeclared file.
+`.timeout(10min)` bounds how long the step may run. The `action_timeout` build
+option (stock `30s`; the profile field `action_timeout: 10min`, the call
+`b.action_timeout(10min)` and the flag `--action-timeout=10min`) bounds every
+step that sets no limit of its own. Both take a whole number and one unit
+(`ns`, `us`, `ms`, `s`, `min` or `h`) that comes to at least 1ms, and no cache
+key names the limit. A step that runs past
+its limit is stopped and reported with E3505. Example:
+[`tests/cases/build_entry/run_steps_chain_a_found_tool_and_a_made_file.case`](../../tests/cases/build_entry/run_steps_chain_a_found_tool_and_a_made_file.case);
+a generator built and run in one build, whose output another target compiles:
+[`tests/cases/build_entry/run_steps_run_a_host_tool.case`](../../tests/cases/build_entry/run_steps_run_a_host_tool.case).
 
 A target's sources are package-relative paths, and the first is its entry.
 Every source a target lists is part of it: the others share the entry's
@@ -5018,18 +5054,15 @@ it after the graph runs.
 
 ```jet
 build: fn(b: Build) -[Exec, FS]> {
-    #Impure("run declared toolchain probe and action") {
+    #Impure("run declared toolchain probe and step") {
         shell: b.probe("shell", "find_program", "sh")
         native: b.toolchain("native", "x86_64-linux")
-        stamp: b.action(
-            "stamp",
-            ["assets/version.txt"],
-            ["build/version.txt"],
-            ["sh", "-c", "cp assets/version.txt build/version.txt"],
-            ["Exec", "FS"],
-            native,
-            [shell]
-        )
+        stamp: b.run("stamp", b.found(shell), ["Exec", "FS"])
+        stamp.arg("-c")
+        stamp.arg("cp assets/version.txt build/version.txt")
+        stamp.reads("assets/version.txt")
+        stamp.writes("build/version.txt")
+        stamp.toolchain(native)
         app: b.add_executable("app", ["main.jet"], [stamp])
         b.default(app)
     }
@@ -5038,12 +5071,18 @@ build: fn(b: Build) -[Exec, FS]> {
 run: fn() { print("hello") }
 ```
 
-Action dependencies come from target dependencies and declared producer and
-consumer edges. Ready nodes run concurrently in deterministic stages; `linker`,
-`console`, `gpu`, and named resource pools serialize. Cached actions include
-declared input content, argv, environment, authority, toolchain, probes,
-resource pools, plugins, and generated-source hashes. A cache hit restores only
-declared outputs from the local CAS.
+`jet build` runs steps and targets as one graph. A step waits for the steps
+that make its inputs, the targets it runs as `b.host` tools, and its target's
+dependencies' steps; a target waits for its own and its dependencies' steps
+and the steps that make its sources. Every step's grant is checked and every
+probe runs before anything else does. Then whatever is ready runs: the ready
+steps together, up to `--threads` at once, then a ready target compiles. A
+failure stops only what waits on it, the rest of the graph still runs, and
+every failure is reported. Steps and targets that wait on each other are
+refused (E3502) before anything runs. Cached actions include declared input
+content, argv, authority, toolchain, probes, signing identity, and
+generated-source hashes. A cache hit restores only declared outputs from the
+local CAS.
 
 There is no ambient execution fallback. On Linux each action runs under
 bubblewrap with private mount, PID, IPC, UTS, and network namespaces. Only
@@ -5114,21 +5153,6 @@ checks authority per plugin and rolls back rejected contributions, so a plugin
 cannot leave partial actions, targets, or generated modules. Packaged manifests
 are bounded to 64 KiB and components to 64 MiB; request and response pipes are
 bounded too. Production loaders reject symlinks and non-regular package files.
-
-### Legacy wrappers
-
-CMake, Make, Gradle, npm, and Cargo remain explicit Tier-2 wrappers. A
-`LegacyWrapperSpec` parses a canonical root file into typed command, paths,
-authority, environment, cache, kind, pools, and provenance. It records that
-file and its bounded non-symlink source closure as typed inputs, rejects links,
-oversized or non-UTF-8 files, and refuses unsupported constructs. CMake and
-Gradle imports require an exact `jet: output=...` directive. npm imports require
-an exact `main` or `module` entry; dependency-bearing imports fail because the
-hermetic sandbox does not copy `node_modules`. No undeclared install or network
-fallback is attempted. Make recipes, Gradle task bodies, unpinned Cargo
-sources, non-registry Cargo sources, and unmodeled fields fail closed.
-Production policy denies wrappers in CI unless a stronger host policy replaces
-that default.
 
 Fleet host overrides are typed values evaluated by the same pure comptime
 engine and cycle checks as computed module fields. Results retain exact source,

@@ -3,18 +3,19 @@
 // remote binding, no compiler runner: the entry `jet cc` / `jet c++` use).
 // Every action and probe runs through the one native child boundary
 // (Foundation NativeSandbox: Linux Bubblewrap, macOS Seatbelt); there is no
-// unsandboxed fallback. Actions of one batch run one after another here
-// rather than on scoped threads; every member still runs and the batch
-// reports its first error in action order, as the Rust join does.
+// unsandboxed fallback. The actions of one batch run at once, each in its
+// own child; every member still runs and the batch reports its first error
+// in action order, as the Rust join does.
 
 use {
     jet_foundation.[DiagnosticBuildError, DiagnosticErrorDetails, DiagnosticErrorField, foundation_json_quote]
     jet_pkg_model.[pkg_json_text]
     jetpack_foundation.[
-        BuildEffect, NATIVE_SANDBOX_DEFAULT_ACTION_TIMEOUT_MS, NativeSandboxError, NativeSandboxMount,
-        foundation_run_native_sandboxed_with_timeout_and_mounts,
+        BuildEffect, NATIVE_SANDBOX_DEFAULT_ACTION_TIMEOUT_MS, NativeSandboxCommand, NativeSandboxError, NativeSandboxMount,
+        foundation_native_sandbox_command, foundation_native_sandbox_finish, foundation_run_native_sandboxed_with_timeout_and_mounts,
     ]
     files: core.files
+    process: core.process
     random: core.crypto.random
     json: core.encoding.json
     sys: core.sys
@@ -40,6 +41,8 @@ BuildExecutionError: enum {
     MissingGrant(action: String, capability: BuildEffect)
     SandboxUnavailable
     IO(action: String, detail: String)
+    // The action ran past its time limit, in milliseconds, and was killed.
+    TimedOut(action: String, limit_ms: Int)
     ProbeFailed(probe: String, detail: String)
     // The one structured action-failure route, retained whether the action
     // ran now or its failure was restored from the cache.
@@ -109,27 +112,13 @@ build_execute_build_plan: fn(plan: HermeticBuildPlan, project_root: String, arti
     outcomes := [BuildActionOutcomeRow]{}
     loop stage in model.stages {
         loop batch in build_execution_batches(plan, stage.actions) {
-            loop action_id in batch {
-                action: plan.actions[action_id]
-                loop cap in action.caps {
-                    if !grants.contains(cap) -> return Err(BuildExecutionError.MissingGrant{action: action.name, capability: cap})
-                }
-            }
-            results := [BuildExecutionError?]{}
+            results: build_execute_actions(plan, batch, project_root, artifact_store, grants, probes, batch.len())
             completed := [BuildActionOutcomeRow]{}
-            loop action_id in batch {
-                action: plan.actions[action_id]
-                handle: HermeticActionHandle{id: action.id, context: plan.context}
-                if build_execute_one_action(plan, action, handle, project_root, artifact_store, grants, probes) == {
-                    .Ok(outcome) -> {
-                        completed.push(BuildActionOutcomeRow{action: handle, outcome})
-                        results.push(None)
-                    }
-                    .Err(error) -> results.push(Val(error))
+            loop index in 0..<batch.len() {
+                if results[index] == {
+                    .Ok(outcome) -> completed.push(BuildActionOutcomeRow{action: HermeticActionHandle{id: batch[index], context: plan.context}, outcome})
+                    .Err(error) -> return Err(error)
                 }
-            }
-            loop result in results {
-                if result == .Val(error) -> return Err(error)
             }
             completed.sort_by((left: BuildActionOutcomeRow, right: BuildActionOutcomeRow) -> left.action.id <=> right.action.id)
             loop row in completed -> outcomes.push(row)
@@ -186,6 +175,7 @@ build_native_sandbox_error: fn(action: HermeticBuildAction, error: NativeSandbox
     if error == {
         .Unsupported(_) -> BuildExecutionError.SandboxUnavailable
         .IO(detail) -> BuildExecutionError.IO{action: action.name, detail}
+        .TimedOut(limit_ms) -> BuildExecutionError.TimedOut{action: action.name, limit_ms}
     }
 }
 
@@ -211,14 +201,84 @@ build_action_shares_network: fn(grants: [BuildEffect], caps: [BuildEffect]) -> B
     grants.contains(BuildEffect.Net) && caps.contains(BuildEffect.Net)
 }
 
-// Rust `execute_one_action` on the local path: snapshot inputs, key the
-// action, restore a cached record, else run it in a fresh private work tree
-// under the native sandbox and publish only its declared outputs. The work
-// tree receives exactly the input bytes the key hashed.
-build_execute_one_action: fn(plan: HermeticBuildPlan, action: HermeticBuildAction, handle: HermeticActionHandle, project_root: String, artifact_store: BuildArtifactStoreHandle, grants: [BuildEffect], probe_facts: [BuildProbeFact]) -[FS, Env, Exec, Time, Time.Wait, Rand]> ActionOutcome BuildExecutionError! {
+// One action keyed, looked up and staged in its fresh private work tree,
+// ready to run under the native sandbox.
+BuildActionRun: struct {
+    action: HermeticBuildAction
+    key: String
+    sandbox: String
+    rebuild_status: ActionCacheStatus
+    command: NativeSandboxCommand
+}
+
+BuildActionStart: enum {
+    // A cached record restored the action's outputs.
+    Restored
+    Ready(run: BuildActionRun)
+}
+
+// Where a step's made tool runs from: the read-only mount of its folder in
+// the work tree, which itself is mounted only at the child's working folder.
+BUILD_MADE_TOOL_MOUNT: "/jet/tool"
+
+// Rust `execute_one_action` on the local path, for many actions at once:
+// each of `ids` (their prerequisites already done) is keyed and restored
+// from a cached record, else staged in a fresh private work tree; the staged
+// ones run together under the native sandbox, at most `jobs` at a time, and
+// each publishes only its declared outputs. One slot per action, in `ids`
+// order: one action's failure never stops the others.
+build_execute_actions: fn(plan: HermeticBuildPlan, ids: [Int], project_root: String, artifact_store: BuildArtifactStoreHandle, grants: [BuildEffect], probe_facts: [BuildProbeFact], jobs: Int) -[FS, Env, Exec, Time, Time.Wait, Rand]> [Result<ActionOutcome, BuildExecutionError>] Never! {
+    results := [Result<ActionOutcome, BuildExecutionError>]{}
+    runs := [BuildActionRun]{}
+    slots := [Int]{}
+    loop action_id in ids {
+        if build_start_action(plan, plan.actions[action_id], project_root, artifact_store, grants, probe_facts) == {
+            .Ok(start) -> if start == {
+                .Restored -> results.push(Ok(ActionOutcome.RestoredFromCache))
+                .Ready(run) -> {
+                    slots.push(results.len())
+                    results.push(Ok(ActionOutcome.RestoredFromCache))
+                    runs.push(run)
+                }
+            }
+            .Err(error) -> results.push(Err(error))
+        }
+    }
+    if runs.len() == 0 -> return results
+    specs: loop run in runs -> run.command.spec
+    if process.run_all(specs, if jobs < 1 -> 1 else -> jobs) == {
+        .Ok(receipts) -> loop index in 0..<runs.len() {
+            slot: slots[index]
+            if receipts[index] == {
+                .Ok(receipt) -> if build_finish_action(runs[index], receipt, project_root, artifact_store) == {
+                    .Ok(outcome) -> results[slot] = Ok(outcome)
+                    .Err(error) -> results[slot] = Err(error)
+                }
+                .Err(error) -> results[slot] = Err(build_abandon_action(runs[index], NativeSandboxError.IO("{error}")))
+            }
+        }
+        .Err(error) -> loop index in 0..<runs.len() {
+            results[slots[index]] = Err(build_abandon_action(runs[index], NativeSandboxError.IO("{error}")))
+        }
+    }
+    results
+}
+
+// Snapshot the action's inputs, key it and restore a cached record, else
+// stage it in a fresh private work tree that receives exactly the input
+// bytes the key hashed.
+build_start_action: fn(plan: HermeticBuildPlan, action: HermeticBuildAction, project_root: String, artifact_store: BuildArtifactStoreHandle, grants: [BuildEffect], probe_facts: [BuildProbeFact]) -[FS, Env, Exec, Time, Time.Wait, Rand]> BuildActionStart BuildExecutionError! {
+    loop cap in action.caps {
+        if !grants.contains(cap) -> return Err(BuildExecutionError.MissingGrant{action: action.name, capability: cap})
+    }
+    handle: HermeticActionHandle{id: action.id, context: plan.context}
+    if plan.action(handle) == None -> return Err(BuildExecutionError.InvalidGraph(HermeticBuildError.UnknownAction(handle.id)))
     inputs: build_snapshot_declared_inputs(artifact_store, project_root, action) ?? return Err(build_io_action(action, err))
     snapshots: loop input in inputs -> input.snapshot
-    executable: build_resolve_program_path(plan, action.toolchain, action.argv[0]) ?? return Err(BuildExecutionError.IO{action: action.name, detail: "tool {action.argv[0]} was not found"})
+    // A tool another step makes is a declared input, run from the work
+    // tree; any other tool is looked up through the action's toolchain.
+    made_tool: action.inputs.contains(action.argv[0])
+    executable := if made_tool -> files.join(project_root, action.argv[0]) else -> build_resolve_program_path(plan, action.toolchain, action.argv[0]) ?? return Err(BuildExecutionError.IO{action: action.name, detail: "tool {action.argv[0]} was not found"})
     executable_bytes: if files.is_file(executable) -> (files.read_bytes(executable) ?? return Err(build_io_action(action, BuildIOError.from(err)))) else -> action.argv[0].bytes()
     executable_digest: ContentDigest.from_bytes(executable_bytes)
     action_probe_names := [String]{}
@@ -227,7 +287,6 @@ build_execute_one_action: fn(plan: HermeticBuildPlan, action: HermeticBuildActio
     loop fact in probe_facts {
         if action_probe_names.contains(fact.name) -> effective_probe_facts.push(fact.copy())
     }
-    if plan.action(handle) == None -> return Err(BuildExecutionError.InvalidGraph(HermeticBuildError.UnknownAction(handle.id)))
     key: build_canonical_effective_action_key(plan, action, snapshots, grants, executable_digest, effective_probe_facts)
     restore_failure := CacheMissReason?{None}
     if action.cache == ActionCache.Cached {
@@ -240,7 +299,7 @@ build_execute_one_action: fn(plan: HermeticBuildPlan, action: HermeticBuildActio
                 if build_restore_action_outputs(artifact_store, project_root, action, record) == {
                     .Ok(_) -> {
                         build_record_cache_event(action.name, key, ActionCacheStatus.Hit(.LocalActionRecordMatched), "restore", Val(ActionOutcome.RestoredFromCache))
-                        return Ok(ActionOutcome.RestoredFromCache)
+                        return Ok(BuildActionStart.Restored)
                     }
                     .Err(error) -> restore_failure = Val(build_cache_restore_miss_reason(error))
                 }
@@ -280,21 +339,41 @@ build_execute_one_action: fn(plan: HermeticBuildPlan, action: HermeticBuildActio
     if plan.toolchain(action.toolchain) == .Val(toolchain) {
         loop mount in toolchain.mounts -> mounts.push(NativeSandboxMount{source: mount.source, destination: mount.destination})
     }
+    if made_tool {
+        executable = build_resolve_under(sandbox, action.argv[0]) ?? return Err(build_io_action(action, err))
+        files.set_mode(executable, 493) ?? return Err(build_io_action(action, BuildIOError.from(err)))
+        mounts.push(NativeSandboxMount{source: files.dirname(executable), destination: BUILD_MADE_TOOL_MOUNT})
+    }
     share_network: build_action_shares_network(grants, action.caps)
-    timeout: time.duration_ms(NATIVE_SANDBOX_DEFAULT_ACTION_TIMEOUT_MS)
-    ran: foundation_run_native_sandboxed_with_timeout_and_mounts(executable, runtime_args, sandbox, None, runtime_env, share_network, mounts, Val(timeout)) ?? {
+    timeout: time.duration_ms(action.timeout_ms ?? NATIVE_SANDBOX_DEFAULT_ACTION_TIMEOUT_MS)
+    command: foundation_native_sandbox_command(executable, runtime_args, sandbox, None, runtime_env, share_network, mounts, Val(timeout)) ?? {
         files.remove_all(sandbox).drop("the action sandbox is removed best-effort; the sandbox error is reported")
         return Err(build_native_sandbox_error(action, err))
     }
-    receipt: ran.receipt
-    code: if receipt.signal != None -> 1 else -> receipt.code
-    if !receipt.success {
+    Ok(BuildActionStart.Ready{run: BuildActionRun{action, key, sandbox, rebuild_status, command}})
+}
+
+// A staged action whose child never ran to a receipt: its work tree goes.
+build_abandon_action: fn(run: BuildActionRun, error: NativeSandboxError) -[FS]> BuildExecutionError Never! {
+    files.remove_all(run.sandbox).drop("the action sandbox is removed best-effort; the sandbox error is reported")
+    build_native_sandbox_error(run.action, error)
+}
+
+// Read the receipt of a staged action's child: record a failure as the
+// action's cached terminal report, else publish its declared outputs.
+build_finish_action: fn(run: BuildActionRun, receipt: ProcessReceipt, project_root: String, artifact_store: BuildArtifactStoreHandle) -[FS, Env, Exec, Time, Rand]> ActionOutcome BuildExecutionError! {
+    action: run.action
+    key: run.key
+    sandbox: run.sandbox
+    ran: foundation_native_sandbox_finish(run.command, receipt) ?? return Err(build_abandon_action(run, err))
+    code: if ran.receipt.signal != None -> 1 else -> ran.receipt.code
+    if !ran.receipt.success {
         files.remove_all(sandbox).drop("the action sandbox is removed best-effort; the action failure is reported")
-        report: build_action_failure_report(action.name, code, receipt.errors.trim())
+        report: build_action_failure_report(action.name, code, ran.receipt.errors.trim())
         if action.cache == ActionCache.Cached {
-            record: ActionResultRecord{key, outcome: ActionOutcome.Failed{exit_code: code}, outputs: [ActionOutputRecord]{}, failure_report: Val(report), status: ActionCacheStatus.Miss(build_rebuild_status_reason(rebuild_status))}
+            record: ActionResultRecord{key, outcome: ActionOutcome.Failed{exit_code: code}, outputs: [ActionOutputRecord]{}, failure_report: Val(report), status: ActionCacheStatus.Miss(build_rebuild_status_reason(run.rebuild_status))}
             build_write_action_record(artifact_store, key, record) ?? return Err(build_io_action(action, err))
-            build_record_cache_event(action.name, key, rebuild_status, "terminal", Val(ActionOutcome.Failed{exit_code: code}))
+            build_record_cache_event(action.name, key, run.rebuild_status, "terminal", Val(ActionOutcome.Failed{exit_code: code}))
         }
         return Err(BuildExecutionError.Reported{report})
     }
@@ -397,6 +476,7 @@ build_run_probe_sandboxed: fn(executable: String, args: [String], source: (path:
             Err(if error == {
                 .Unsupported(_) -> BuildExecutionError.SandboxUnavailable
                 .IO(detail) -> BuildExecutionError.IO{action: "build probe sandbox", detail}
+                .TimedOut(_) -> BuildExecutionError.IO{action: "build probe sandbox", detail: error.message()}
             })
         }
     }

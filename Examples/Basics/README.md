@@ -28,6 +28,7 @@ Run a lesson from the repository root, for example `jet run Examples/Basics/<Les
 - [Numbers](Numbers.jet)
 - [Onboarding](Onboarding/) — First-hour lesson 3: the `run.jet` that `jet new` creates, edited to read a typed `#CLI` argument.
 - [PatternMatching](PatternMatching.jet)
+- [Pipes](Pipes.jet) — A pipe runs one step per line; inside a `|>` step, `<>` is the value of the line above.
 - [PrintLines](PrintLines.jet) — Builtin `print` is variadic; each argument writes its own line.
 - [ScriptRun](ScriptRun.jet) — Ordinary files run only their explicit `run: fn` body.
 - [SplitJoin](SplitJoin.jet) — Splitting a text and joining the pieces again replaces every separator with the joiner, keeping empty pieces at the start, between two separators and at the…

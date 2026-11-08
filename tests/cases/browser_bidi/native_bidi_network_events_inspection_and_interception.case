@@ -1,14 +1,13 @@
-# tests/browser_bidi.rs::native_bidi_network_events_inspection_and_interception at tests/browser_bidi.rs:1633; hand-port (mock BiDi endpoint: tests/fixtures/browser_bidi_mock.mjs on a {free-port})
+# tests/browser_bidi.rs::native_bidi_network_events_inspection_and_interception at tests/browser_bidi.rs:1633; hand-port (mock BiDi endpoint: tests/fixtures/BrowserBidiMock.jet on a {free-port})
 fixture: native_bidi_network_events_inspection_and_interception.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
 env: JETPACK_ROOT={work}/jetpack
 env: JETPACK_ENV=1
-requires: tool:node
 write: browser_bidi_network.jet native_bidi_network_events_inspection_and_interception.fixture/run.template
 step: jet build browser_bidi_network.jet
 exit: 0
-session network raw: node {root}/tests/fixtures/browser_bidi_mock.mjs script {free-port:network} network.json
+session network raw: {jet} run --allow=Exec,FS.Read,FS.Write,Net,Time {root}/tests/fixtures/BrowserBidiMock.jet -- script {free-port:network} network.json
 await: file network.ready timeout 30s
 step run: built
 exit: 0

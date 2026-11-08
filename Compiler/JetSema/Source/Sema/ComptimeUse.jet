@@ -569,6 +569,13 @@ sema_comptime_use_expr: fn(expression: Expr, scan: &SemaComptimeUseScan) {
             sema_comptime_use_type(element, alias_span, scan)
             sema_comptime_use_expr(address, scan)
         }
+        .Pipe(head, steps, _, _) -> {
+            sema_comptime_use_expr(head, scan)
+            loop step in steps {
+                scan.bound[step.name] = true
+                sema_comptime_use_expr(step.value, scan)
+            }
+        }
         else -> {}
     }
 }

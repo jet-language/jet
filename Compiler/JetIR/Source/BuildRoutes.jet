@@ -889,6 +889,7 @@ ir_builtin_on: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver_
     if mutates -> ir_make_unique(m, p, b, subject)
     bool_row: ir_type_row(m, Type.Bool) ?? 0
     int_row: ir_type_row(m, Type.Int) ?? 0
+    if operation == .KeyOrdered(descending, from) -> return ir_key_ordered(m, p, b, ty, descending, from, subject, operands, span)
     if operation == .SetFrom || operation == .SortedSetFrom || ir_set_element(receiver_ty) != None {
         set_route: ir_builtin_route_plan(operation, receiver_ty, ty, ir_failure_carrier_for_type(ty))
         result: ir_set_builtin(m, p, b, ty, set_route.symbol, subject, operands, span) ?? return ir_fail_slot(b, span, "set builtin {set_route.symbol}")

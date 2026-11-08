@@ -52,6 +52,7 @@ use {
         ParamZone,
         PatSlot,
         Pattern,
+        PipeStep,
         Span,
         Stmt,
         StrFormat,
@@ -932,6 +933,12 @@ sema_derive_expand_expr_node: fn(expansion: &SemaDeriveExpansion, expression: Ex
             return sema_derive_literal_expr(bound, span) ?? expression.copy()
         }
         .Paren(value, span, node) -> return Expr.Paren{value: sema_derive_expand_expr(expansion, value), span: span, id: node}
+        .Pipe(head, steps, span, node) -> {
+            expanded_head: sema_derive_expand_expr(expansion, head)
+            expanded := [PipeStep]{}
+            loop step in steps -> expanded.push(PipeStep{name: step.name, value: sema_derive_expand_expr(expansion, step.value), reads: step.reads, span: step.span})
+            return Expr.Pipe{head: expanded_head, steps: expanded, span: span, id: node}
+        }
         else -> {}
     }
     // copy: every other expression kind is unchanged by expansion, but the derive template keeps it

@@ -1,0 +1,10 @@
+port: fn(raw: [U8], fallback: Int) -> Int {
+    raw
+        |> String.from_bytes(<>) ?? return fallback
+        |> Int.parse(<>.trim()) ?? return fallback
+        |> if <> < 1 || <> > 65535 -> fallback else -> <>
+}
+
+run: fn() {
+    print(port([U8]{" 8080 "}, 80))
+}

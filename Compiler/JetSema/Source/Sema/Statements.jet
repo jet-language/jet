@@ -3465,11 +3465,15 @@ SemaStmtMapGroupTake: struct { name: String, map: String, key: String, fallback:
 // the entry in place (`groups[key].push(item)`, the key seeded first when it
 // is missing) copies nothing. The fix is that rewrite when the block is
 // exactly take, one write, store, and the local is not read after the store.
+// Only a block that takes a group copies the module's bytes
+// (`String.bytes`): a copy for every block makes a large module's check
+// quadratic.
 sema_stmt_lint_map_group_round_trip: fn(statements: [Stmt], environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) {
     graph: program.registration_graph ?? return
     caller: sema_scope_caller_index(environment, graph) ?? return
-    raw: graph.modules[caller].source.bytes()
     loop index in 0..<statements.len() {
+        if !sema_stmt_map_group_takes(statements[index]) -> next
+        raw: graph.modules[caller].source.bytes()
         taken: sema_stmt_map_group_take(statements[index], raw) ?? next
         stored := -1
         written := false
@@ -3494,7 +3498,23 @@ sema_stmt_source_text: fn(raw: [U8], span: Span) -> String? {
     Val(text)
 }
 
-// `name := map.get(key) ?? fallback` with a mutable local `name`.
+// Whether `statement` is `name := map.get(key) ?? fallback` with a mutable
+// local `name`.
+sema_stmt_map_group_takes: fn(statement: Stmt) -> Bool {
+    if statement == .Val(binding) {
+        if !binding.mutable || binding.pattern != None -> return false
+        if binding.init == .OrFallback(value, fallback, _, _, _) {
+            if value == .MethodCall(_, method, _, _, _, args, _) {
+                if method != "get" || args.len() != 1 -> return false
+                return fallback == .Value(_)
+            }
+        }
+    }
+    false
+}
+
+// The take of a statement sema_stmt_map_group_takes accepts, None when its
+// parts' source text is not in `raw`.
 sema_stmt_map_group_take: fn(statement: Stmt, raw: [U8]) -> SemaStmtMapGroupTake? {
     if statement == .Val(binding) {
         if !binding.mutable || binding.pattern != None -> return None

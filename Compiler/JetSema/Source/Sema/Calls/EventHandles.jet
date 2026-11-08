@@ -84,6 +84,8 @@ sema_event_method_shape: fn(owner: String, method: String, args: [Type]) -> (ari
         if method == "state" -> return Val((arity: 0, result: Type.Named{name: "DispatchState"}))
         if method == "accepted" -> return Val((arity: 0, result: Type.Bool))
         if method == "delivered_handlers" -> return Val((arity: 0, result: Type.Int))
+        if method == "failures" -> return Val((arity: 0, result: Type.List{element: Type.Apply{name: "DispatchFailure", args: args.copy()}}))
+        if method == "trace" -> return Val((arity: 0, result: Type.Named{name: "EventTrace"}))
         return None
     }
     if owner == "EventScope" {
@@ -119,12 +121,16 @@ sema_event_value_parameters: fn(owner: String, method: String, args: [Type]) -> 
     params
 }
 
-// Rust `F: Fn(T) + 'static` (Event, AsyncEvent), `Fn(T) -> R` (Hook),
-// `Fn(T) -> HookDecision<T, E>` (DecisionHook): one payload parameter.
+// Rust `F: Fn(T) + 'static` (Event), `Fn(T) -> R` (Hook),
+// `Fn(T) -> HookDecision<T, E>` (DecisionHook), `Fn(T) -> R` with
+// `R: JetIntoDispatchResult<E>` (AsyncEvent: a handler returns through a
+// `Result<Unit, E>` carrier, so a unit body is its Ok): one payload
+// parameter.
 sema_event_handler_type: fn(owner: String, args: [Type]) -> Type Never! {
     ret: if owner == {
         "Hook" -> args[1].copy()
         "DecisionHook" -> Type.Apply{name: "HookDecision", args: args.copy()}
+        "AsyncEvent" -> Type.Result{ok: sema_event_unit(), err: args[1].copy()}
         else -> sema_event_unit()
     }
     Type.Fn{params: [Type]{args[0].copy()}, ret: Val(ret), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}

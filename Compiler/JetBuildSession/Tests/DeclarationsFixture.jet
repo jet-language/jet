@@ -10,16 +10,18 @@ use {
 }
 
 build_session_declarations_fixture: fn() -> Bool Never! {
-    policy: BuildSessionPolicy{legacy_denied: None, plugins_denied: None, plugin_grants: [String:[String]]{}}
+    policy: BuildSessionPolicy{plugins_denied: None, plugin_grants: [String:[String]]{}}
     session := build_session_new(71, "fixture", "fixture-compiler", policy)
     other := build_session_new(72, "other", "fixture-compiler", policy)
     empty: BuildSessionValue.List{values: [BuildSessionValue]{}}
-    inputs: BuildSessionValue.List{values: [BuildSessionValue]{.Text(value: "schema.txt")}}
-    outputs: BuildSessionValue.List{values: [BuildSessionValue]{.Text(value: "generated/schema.bin")}}
-    argv: BuildSessionValue.List{values: [BuildSessionValue]{.Text(value: "schema-compiler"), .Text(value: "schema.txt")}}
-    action_args: [BuildSessionValue]{.Text(value: "schema"), inputs, outputs, argv, empty}
-    action_reply: build_session_call(session, "action", action_args, None, false, 10, 20)
+    probe_reply: build_session_call(session, "probe", [BuildSessionValue]{.Text(value: "schema-compiler"), .Text(value: "find_program"), .Text(value: "schema-compiler")}, None, true, 1, 9)
+    probe: if probe_reply == {.Value(value) -> value else -> { return false }}
+    found_reply: build_session_call(session, "found", [BuildSessionValue]{probe}, None, false, 1, 9)
+    found: if found_reply == {.Value(value) -> value else -> { return false }}
+    action_reply: build_session_call(session, "run", [BuildSessionValue]{.Text(value: "schema"), found, empty}, None, false, 10, 20)
     action: if action_reply == {.Value(value) -> value else -> { return false }}
+    if build_session_call(session, "action.input", [BuildSessionValue]{action, .Text(value: "schema.txt")}, None, false, 10, 20) != .Value(value: .Unit) -> return false
+    if build_session_call(session, "action.output", [BuildSessionValue]{action, .Text(value: "generated/schema.bin")}, None, false, 10, 20) == {.Failure(_) -> { return false } else -> {}}
     foreign: build_session_call(other, "add_library", [BuildSessionValue]{.Text(value: "foreign"), empty, .List(values: [BuildSessionValue]{action})}, None, false, 21, 30)
     if foreign == {.Failure(_) -> {} else -> return false}
     target_reply: build_session_call(session, "add_library", [BuildSessionValue]{.Text(value: "schema"), .List(values: [BuildSessionValue]{.Text(value: ".jet/generated/fixture/schema.jet")}), .List(values: [BuildSessionValue]{action})}, None, false, 31, 40)
@@ -29,9 +31,7 @@ build_session_declarations_fixture: fn() -> Bool Never! {
     if generated != .Value(value: .Unit) -> return false
     wrong_generate: build_session_call(session, "generate", [BuildSessionValue]{.Text(value: "retired"), .Text(value: source)}, None, false, 51, 60)
     if wrong_generate == {.Failure(_) -> {} else -> return false}
-    six_args := action_args
-    six_args.push(.Handle(type_name: "BuildToolchain", session: 71, id: 0))
-    if build_session_call(session, "action", six_args, None, false, 61, 70) == {.Failure(_) -> {} else -> return false}
+    if build_session_call(session, "run", [BuildSessionValue]{.Text(value: "short"), found}, None, false, 61, 70) == {.Failure(_) -> {} else -> return false}
     contribution: build_session_call(session, "contribute", [BuildSessionValue]{.Text(value: "cache_slots"), .Int(value: 8)}, None, false, 71, 80)
     if contribution != .Value(value: .Unit) -> return false
     plan: build_session_call(session, "plan", [BuildSessionValue]{target}, None, false, 81, 90)

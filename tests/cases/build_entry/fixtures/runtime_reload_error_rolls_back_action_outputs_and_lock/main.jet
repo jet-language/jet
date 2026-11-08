@@ -1,7 +1,11 @@
 
 build: fn(b: Build) -[Exec, FS]> {
     #Impure("rollback after runtime reload") {
-    stamp: b.action("stamp", [], ["stamp"], ["sh", "-c", "printf changed > stamp"], ["Exec", "FS"])
+    shell: b.probe("shell", "find_program", "sh")
+    stamp: b.run("stamp", b.found(shell), ["Exec", "FS"])
+    stamp.arg("-c")
+    stamp.arg("printf changed > stamp")
+    stamp.writes("stamp")
     app: b.add_executable("app", ["main.jet", "missing.jet"], [stamp])
     b.default(app)
     }

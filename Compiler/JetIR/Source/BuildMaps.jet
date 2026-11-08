@@ -110,18 +110,26 @@ ir_map_hashed: fn(shape: IRMapShape) -> Bool Never! {
     hashing && shape.stride %% 8 == 0
 }
 
-// Whether the type row `row` is a Map row with a hash index (ir_map_hashed).
+// Whether the type row `row` is a Map, Set or Rank row with a hash index
+// (ir_map_hashed).
 ir_map_row_hashed: fn(m: &IRModule, p: IRProgram, row: Int) -> Bool Never! {
-    if ir_map_entry_type(m.types[row].ty) == None -> return false
-    shape: ir_map_shape(m, p, row) ?? return false
+    shape: ir_keyed_shape(m, p, row) ?? return false
     ir_map_hashed(shape)
 }
 
-// The id of Map helper `name` of the Map type row `map_row`, built on first use.
+// The entry layout of the Map row `row`, or of the Set or Rank row `row`
+// (ir_set_shape: the key alone); None for any other row.
+ir_keyed_shape: fn(m: &IRModule, p: IRProgram, row: Int) -> IRMapShape? Never! {
+    if ir_map_entry_type(m.types[row].ty) != None -> return ir_map_shape(m, p, row)
+    ir_set_shape(m, p, row)
+}
+
+// The id of Map helper `name` of the Map, Set or Rank type row `map_row`,
+// built on first use.
 ir_map_helper: fn(m: &IRModule, p: IRProgram, map_row: Int, name: String) -> Int Never! {
     key: "{name}<{type_carrier_identity(m.types[map_row].ty)}>"
     if name_rows_value(m.function_rows, key) == .Val(known) -> return known
-    shape: ir_map_shape(m, p, map_row) ?? panic("Map helper {name} of a type without a Map shape")
+    shape: ir_keyed_shape(m, p, map_row) ?? panic("Map helper {name} of a type without a Map shape")
     id: m.functions.len()
     symbol: ir_map_helper_symbol(name)
     m.functions.push(ir_hashed_function(name, key, "jet_ir_map_{symbol}_", "", 0))
@@ -290,7 +298,7 @@ ir_map_block_bytes: fn(m: &IRModule, a: &IRBuilder, shape: IRMapShape, capacity:
 // row's buffer of entries of `stride` bytes.
 ir_buffer_bytes: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, data: Int, capacity: Int, stride: Int) -> Int Never! {
     if ir_map_row_hashed(m, p, row) {
-        shape: ir_map_shape(m, p, row) ?? panic("hashed Map row without a Map shape")
+        shape: ir_keyed_shape(m, p, row) ?? panic("hashed Map row without a Map shape")
         trailer: ir_map_trailer(m, b, shape, data, capacity)
         mask: ir_load_word(m, b, trailer, 8)
         return ir_map_block_bytes(m, b, shape, capacity, mask)
@@ -661,7 +669,7 @@ ir_map_order_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapSha
 // merges its tail in place first, so that read and the ones after it walk
 // its buffer: made unique, then rebuilt at its capacity.
 ir_map_settle_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, map_row: Int, map: Int) Never! {
-    shape: ir_map_shape(m, p, map_row) ?? panic("map.settle of a type without a Map shape")
+    shape: ir_keyed_shape(m, p, map_row) ?? panic("map.settle of a type without a Map shape")
     length: ir_load_word(m, a, map, 0)
     sorted: ir_map_sorted(m, a, shape, map)
     dirty: ir_bool_op(m, a, IROp.Ne, sorted, length)
@@ -1233,7 +1241,7 @@ ir_render_map: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, builder: Int, slot:
 // the way out; any other Map is its own.
 ir_map_ordered: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, map: Int) -> Int Never! {
     row: b.f.slot_type[map]
-    shape: ir_map_shape(m, p, row) ?? return map
+    shape: ir_keyed_shape(m, p, row) ?? return map
     if !ir_map_hashed(shape) -> return map
     word_row: ir_word_row(m)
     bytes_ty: Type.List{element: Type.IntN{signed: false, bits: 8}}
@@ -1268,7 +1276,7 @@ ir_map_ordered_end: fn(m: &IRModule, b: &IRBuilder, map: Int, header: Int) Never
 // its own buffer, so the walk reads that buffer instead of a sorted copy.
 ir_map_settle_for: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, collection: Int, map: Int) Never! {
     row: b.f.slot_type[map]
-    shape: ir_map_shape(m, p, row) ?? return
+    shape: ir_keyed_shape(m, p, row) ?? return
     if !ir_map_hashed(shape) -> return
     if ir_body_node(p, b, collection).kind == .Local(local) {
         binding: ir_lookup_local(b, local) ?? return

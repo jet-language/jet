@@ -1,0 +1,28 @@
+# A Set or Rank of hashing keys (Int, String) inserts by appending and
+# finds by its hash index, so building one is linear. The program builds Sets
+# of 2,000,000 distinct Int and String keys and a Rank of 200,000, then
+# probes, removes, pops, copies, clears and walks them; a sorted array would
+# move half its keys per insert (about 2 * 10^12 moved words), so finishing
+# under each step's timeout proves the inserts do not. A Rank still walks
+# and answers first/last in key order.
+fixture: set_inserts_by_hash_in_linear_time.fixture
+env: NO_COLOR=1
+step: jet run --optimize=none main.jet
+timeout: 60s
+exit: 0
+stdout: = set_inserts_by_hash_in_linear_time.out
+step: jet run --optimize=basic main.jet
+timeout: 60s
+exit: 0
+stdout: = set_inserts_by_hash_in_linear_time.out
+step: jet run --optimize=full main.jet
+timeout: 60s
+exit: 0
+stdout: = set_inserts_by_hash_in_linear_time.out
+step: jet build main.jet
+timeout: 120s
+exit: 0
+step: .jet/build/main
+timeout: 60s
+exit: 0
+stdout: = set_inserts_by_hash_in_linear_time.out

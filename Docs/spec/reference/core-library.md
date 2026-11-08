@@ -467,9 +467,9 @@ records the shipped surface without adding aliases:
 | `[T]` | `[a, b]` | Eager closure methods, sequence adapters, reducers, `lazy`, `to_set`, `join`, `compare`, `split`, `starts_with`, `ends_with`, `slice`, `copy`, and `equal`. |
 | `[K:V]` | `["a": 1]`, `Map.new()`, `Map.from_keys(keys, default)` | Ordered `keys`, `values`, `get`, `has_key`, `add`, `add_new`, `remove`, `pop`, `merge`, `copy`, `equal`, `map`, `filter`, `flat_map`, `fold`, `intersection`, `slice`, `top_n`, and reducers. |
 | `Set<T>` | `Set.new()`, `Set.from(xs)` | Hash-set `add`, `remove`, `pop`, `has`, set algebra, subset/disjoint checks, `copy`, `first`, `values`, closure methods, `to_list`, and size/clear operations. |
-| `Rank<T>` | `Rank.new()`, `Rank.from(xs)` | Ordered set insertion, removal, membership, first/last, set algebra, and list conversion. |
+| `Rank<T>` | `Rank.new()`, `Rank.from(xs)`, `Rank.by(key)`, `Rank.by_desc(key)`, `Rank.from_by(xs, key)`, `Rank.from_by_desc(xs, key)` | Ordered set insertion, removal, membership, first/last, set algebra, and list conversion. `new` and `from` keep items in their own ascending order. The `by` forms order by a pure key function (`(w: String) -> w.len()`, an `Int`, `Float`, `String` or other natively ordered key): `by` keeps the smallest key first and `by_desc` the largest, and items with equal keys stay in the order they went in. Membership is still the item's own equality, so two items with equal keys are both kept. Set algebra results keep the receiver's order. A key function with effects is rejected (E0747). |
 | `Queue<T>` | `Queue.new()`, `Queue.init(xs)` | Double-ended push/pop and peek, capacity, lookup/delete, list conversion, join, reverse, split, and size/clear operations. |
-| `PriorityQueue<T>` | `PriorityQueue.new()`, `PriorityQueue.from(xs)` | `push`, `pop`, `peek`, `to_sorted_list`, `remove`, and size/clear operations. |
+| `PriorityQueue<T>` | `PriorityQueue.new()`, `PriorityQueue.from(xs)`, `PriorityQueue.by(key)`, `PriorityQueue.by_desc(key)`, `PriorityQueue.from_by(xs, key)`, `PriorityQueue.from_by_desc(xs, key)` | `push`, `pop`, `peek`, `to_sorted_list`, `remove`, and size/clear operations. `new` and `from` pop the largest item first by its own order. The `by` forms order by a pure key function (`(s: Score) -> s.points`, an `Int`, `Float`, `String` or other natively ordered key): `by` pops the smallest key first and `by_desc` the largest; items with equal keys pop in the order they went in, and `to_sorted_list` lists them in pop order. A key function with effects is rejected (E0747). |
 | `Cache<K,V>` | `Cache<K,V>.new(capacity)` | Bounded least-recently-used `add`, `add_new`, `get`, `remove`, `has_key`, `keys`, `capacity`, and size/clear operations. The constructor names its key and value types (`Cache<String, Int>.new(2)`): no argument carries them, and a later line never settles them (D-INFER-LEVEL1). `add` and `get` make a key the most recent; `add` returns a held key's old value, and a new key into a full cache evicts the least recent entry. `add_new` on a held key and `has_key` leave the order alone. `keys` lists the most recent first. A negative capacity is 0, which keeps nothing. |
 | `Tally<T>` | `Tally.new()`, `Tally.from(xs)` | Counting `add`, `remove`, `has`, `count`, list conversion, and size/clear operations. |
 | `Bits` | `Bits.new()` | Integer-set `add`, `remove`, `has`, `count`, list conversion, copying, and size/clear operations. |
@@ -3867,6 +3867,17 @@ constant evaluation; they are not alternate syntax for bindings. See
 | `min<T: Comparable>(a: T, b: T, rest: ...T) -> T` / `max<T: Comparable>(a: T, b: T, rest: ...T) -> T` | `T` | The first least or greatest of two or more ordered values; a NaN argument is the result. Prelude names: no import. |
 | `clamp<T: Comparable>(x: T, lo: T, hi: T) -> T` | `T` | Clamp `x` to the bounds; reversed bounds are accepted, and a NaN argument is the result. Prelude name: no import. |
 `keep` is the approved use-site identity sink when measurement must observe a value (`D-BENCH-KEEP1=A`).
+
+`SourceLocation` is the record `$here` and a `$caller` parameter default
+(`at: SourceLocation{$caller}`) give: `file`, `line`, `column`, `function`
+and `module`, displayed as `file:line:column`. `module` is the dotted module
+of the place: the package's name, then the `name: module` declarations that
+reach the file, then the inline modules around it. In package `shop`, code in
+`run.jet` is `shop`, code in the file `cache: module` declares is
+`shop.cache`, and code inside `db: module { … }` there is `shop.cache.db`.
+A file that no `name: module` declaration reaches sits at the package root.
+The compiler fills `module` at every `$here` and `$caller` site; its `""`
+default only covers a record built by hand.
 
 ### `core.testing` — deterministic test helpers
 

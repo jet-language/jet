@@ -98,7 +98,8 @@ files_c_len: fn(name: I64) -> I64 {
 
 // open (O_RDONLY|O_CLOEXEC, EINTR retried; a directory opens too) then
 // syncfs (EINTR retried): every dirty file and directory on the filesystem
-// holding `path` reaches stable storage. Both fail as Flush.
+// holding `path` reaches stable storage. A kernel without syncfs (ENOSYS)
+// flushes every filesystem with sync instead. Both fail as Flush.
 #Export(c) jet_std_fs_syncfs_raw: fn(path: I64, error: I64) -> I64 {
     if !compiler_fs_path(path, HOST_IO_OP_FLUSH, error) -> return I64{0}
     name: fd_c_path(path)
@@ -113,6 +114,10 @@ files_c_len: fn(name: I64) -> I64 {
     loop {
         result = host_call(I64{306}, fd, I64{0}, I64{0})
         if (result != I64{-4}) -> break
+    }
+    if (result == I64{-38}) {
+        _ := host_call(I64{162}, I64{0}, I64{0}, I64{0})
+        result = I64{0}
     }
     _ := host_call(I64{3}, fd, I64{0}, I64{0})
     if (result < I64{0}) -> return compiler_fs_errno(HOST_IO_OP_FLUSH, path, -result, error)

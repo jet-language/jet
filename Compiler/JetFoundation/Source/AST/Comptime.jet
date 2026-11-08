@@ -388,6 +388,10 @@ ast_comptime_walk_expr: fn(expr: Expr, calls: Bool, sites: &[ComptimeNameSite]) 
             loop arg in args -> ast_comptime_walk_expr(arg.expr, calls, sites)
         }
         .PtrFromAddr(_, _, _, addr, _, _) -> ast_comptime_walk_expr(addr, calls, sites)
+        .Pipe(head, steps, _, _) -> {
+            ast_comptime_walk_expr(head, calls, sites)
+            loop step in steps -> ast_comptime_walk_expr(step.value, calls, sites)
+        }
         // Lambda bodies are suppressed under PLAIN; literals, `OptMethodCall`
         // (absent from the Rust walk) and compile-time names have no children.
         else -> {}

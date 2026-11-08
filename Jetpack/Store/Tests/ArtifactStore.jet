@@ -366,7 +366,7 @@ store_artifact_test_tallied: fn(store: ArtifactStore) -[FS, Env, Time, Rand]> In
     files.write(source, "artifact") ?? panic("source")
     files.set_mode(source, 0o755) ?? panic("source mode")
     key: ArtifactDigest.hash("artifact-key".bytes()).to_hex()
-    artifact: store.publish_file(key, source) ?? panic("publish file")
+    artifact: store.publish_file(key, source, durable: true) ?? panic("publish file")
     assert(artifact.path.starts_with(files.join(root, "cas")))
     restored: store.restore_file(key, destination) ?? panic("restore")
     if restored == {
@@ -382,7 +382,7 @@ store_artifact_test_tallied: fn(store: ArtifactStore) -[FS, Env, Time, Rand]> In
         .Corrupt -> {}
         else -> panic("a corrupt object must restore as Corrupt")
     }
-    store.publish_file(key, source) ?? panic("republish")
+    store.publish_file(key, source, durable: true) ?? panic("republish")
     repaired: store.restore_file(key, destination) ?? panic("restore repaired")
     if repaired == {
         .Hit(_, _) -> {}
@@ -585,7 +585,7 @@ STORE_ARTIFACT_TEST_BUILD_RECORD_V0: comptime { `{"schema":"jet.build-record/v0"
     assert_eq(store_artifact_test_entries(files.join(root, "lto")), 0)
     assert(!files.exists(files.join(parent, "outside")), "a refused namespace created a directory outside the store")
     loop key in refused {
-        if store.publish_bytes(key, "payload".bytes(), false) == {
+        if store.publish_bytes(key, "payload".bytes(), executable: false, durable: true) == {
             .Ok(_) -> panic("artifact key `{key}` must be refused")
             .Err(error) -> assert_eq(store_artifact_test_kind(error), "invalid-digest")
         }

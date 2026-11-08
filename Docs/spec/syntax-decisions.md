@@ -44,7 +44,7 @@ Do not hand-edit these rows. Add or change a spelling in Spellings.jet, then rer
 | `$package` | package fact root: `$package.name`, `.version` |
 | `$phase` | total evaluation-site phase fact |
 | `$program` | authorized checked-program fact root |
-| `$here` | the `SourceLocation` (file, line, column, function) where it is written |
+| `$here` | the `SourceLocation` (file, line, column, function, module) where it is written |
 | `$caller` | the `SourceLocation` of the call, legal only as a parameter default `at: SourceLocation{$caller}` or inside an #Expand macro |
 | `@SOURCE` | lexical source-snapshot metadata query (no ratified `$` root yet) |
 | `@TYPES` | retained runtime type-catalog query (no ratified `$` root yet) |
@@ -57,6 +57,8 @@ Do not hand-edit these rows. Add or change a spelling in Spellings.jet, then rer
 | `!` | error-contract mark after its error type (`E!`, `(A \| B)!`); deny-only root in an effect row |
 | `?` | optional type mark after its type (`T?`) |
 | `??` | fallback |
+| `\|>` | pipe step: the expression after it runs on the value from the line above, which it reads as `<>`; each step is a hidden one-step binding |
+| `<>` | the value of the nearest enclosing `\|>` step; legal only inside a step, which must read it at least once |
 | `x.move()` | an early take: a compiler-owned method that moves a named place out before its last use; a call that takes is written plain because its signature declares `&&T` or `&&self` |
 | `&&T / &&self` | take mark in a signature, and `task &&name` for a task capture; `&T` / `&self` is the write mark; calls stay unmarked |
 | `&self.field / &self.[a, b]` | stated receiver field footprint: the record fields a method may read or change, checked against its body (E0231) and published in the API snapshot; reuses member spread `.[` |
@@ -621,11 +623,34 @@ D-ONELINE-BODY1=B's typed `f: fn() T -> expr`; the earlier general-pipe
 proposal (D-SUGAR2), superseded by D-SHAPE-PIPE1=C.
 
 **D-SHAPE-PIPE1=C — Bars mean alternatives, not general flow** *(ratified
-2026-07-15, card #552; amended by D-SIGIL-ALGEBRA1=B)*: single `|` belongs
+2026-07-15, card #552; amended by D-SIGIL-ALGEBRA1=B and D-PIPE1=A)*: single `|` belongs
 to alternative-list grammar, including structural or-patterns and choice arms.
-Jet assigns no general flow meaning to a bar. Reusable flows use ordinary calls,
+Jet assigns no general flow meaning to a bar; the one flow form is the D-PIPE1
+pipe below. Reusable flows otherwise use ordinary calls,
 named intermediate values, and ordinary named composition helpers. `||` keeps
-its Boolean meaning; integer OR is `value.bit_or(other)`.
+its Boolean meaning; integer OR is `value.bit_or(other)`. Its warning against
+tap, error, async and mutation pipe variants stands.
+
+**D-PIPE1=A — `|>` steps and the `<>` value** *(ratified 2026-11-05, card
+#6565)*: `head |> step |> step` runs each step on the value of the line above,
+which the step writes as `<>`:
+`raw |> String.from_bytes(<>) ?? return fallback |> Int.parse(<>.trim()) ?? return fallback`.
+`|>` is one token, left-associative and the loosest form; a step runs to the
+next `|>`, so a step's own `?? return` leaves the function. `<>` is one
+longest-match lexer token beside `<:` and `:>` (`<`, `<=`, `<=>`, `<<` and `>>`
+never form it) and a primary expression legal only inside a step (E0437). Every
+step reads `<>` at least once (E0438) and may read it more often; the value is
+computed once. `<>` means the nearest enclosing step, through lambdas and string
+holes, and a pipe inside a lambda or brackets has its own steps. Each step
+lowers before type checking to a hidden immutable binding in a frame of its own,
+so the pipe checks, owns and compiles exactly as the hand-named form; a head
+that is a name has no binding, and the first step reads that name in place, as
+`String.from_bytes(raw)` does (a first step that also writes the name keeps
+the hidden binding). `<>`
+touching another `<` or `>` is E0439 with an add-space fix; `Box<>` is the
+empty type-argument list E0440 with a fix that removes `<>`. Outside a pipe,
+`a <> b` is the generic E0003, which lists the legal operators, `!=` among
+them. Named steps, a hidden first argument and function-only steps are declined.
 
 ### Control flow
 

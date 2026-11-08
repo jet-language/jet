@@ -214,9 +214,6 @@ jet_eval_build_graph_texts: fn(values: [String]) -> TComptimeValue Never! { TCom
 jet_eval_build_graph_optional_int: fn(value: Int?) -> TComptimeValue Never! {
     if value == {.Val(number) -> TComptimeValue.Present{value: jet_eval_build_graph_int(number)} else -> TComptimeValue.Failed{report: .Clean{ty: Type.Int}}}
 }
-jet_eval_build_graph_optional_text: fn(value: String?) -> TComptimeValue Never! {
-    if value == {.Val(text) -> TComptimeValue.Present{value: jet_eval_build_graph_text(text)} else -> TComptimeValue.Failed{report: .Clean{ty: Type.String}}}
-}
 jet_eval_build_graph_optional_bool: fn(value: Bool?) -> TComptimeValue Never! {
     if value == {.Val(flag) -> TComptimeValue.Present{value: TComptimeValue.Bool{value: flag}} else -> TComptimeValue.Failed{report: .Clean{ty: Type.Bool}}}
 }
@@ -231,7 +228,6 @@ jet_eval_build_graph_action: fn(value: BuildGraphAction) -> TComptimeValue Never
         {name: "target", value: jet_eval_build_graph_optional_int(value.target)},
         {name: "caps", value: jet_eval_build_graph_texts(value.caps)},
         {name: "pools", value: jet_eval_build_graph_texts(value.pools)},
-        {name: "legacy_wrapper", value: jet_eval_build_graph_optional_text(value.legacy_wrapper)},
         {name: "plugin", value: jet_eval_build_graph_optional_int(value.plugin)},
         {name: "compiler_owned", value: TComptimeValue.Bool{value: value.compiler_owned}},
         {name: "key", value: jet_eval_build_graph_text(value.key)},

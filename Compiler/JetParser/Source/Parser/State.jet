@@ -137,6 +137,13 @@ JetParserState: struct {
     // `#X: value` markers (-1 = none), and the markers read there so far.
     inbody_marker_depth: Int{-1}
     inbody_markers: [Marker]{[Marker]{}}
+    // Pipes (`head |> step`): each token's bracket depth (built on first use),
+    // the depths whose expression already owns its `|>` steps, and the open
+    // steps, innermost last, with how many times each has read its `<>`.
+    token_depths: [Int]{[Int]{}}
+    pipe_owner_depths: [Int]{[Int]{}}
+    pipe_step_names: [String]{[String]{}}
+    pipe_step_reads: [Int]{[Int]{}}
 }
 
 // One authored piece of a classic branch chain: an arm's condition and body,

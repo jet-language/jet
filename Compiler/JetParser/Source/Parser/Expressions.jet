@@ -40,9 +40,14 @@ use {
         ast_empty_call_arg_flags,
         ast_empty_lambda_meta,
         diagnostic_from_registry,
+        diagnostic_with_edit,
         diagnostic_with_edit_grade,
         expr_span,
         marker_registered,
+        foundation_named_type,
+        pipe_value_is_name,
+        pipe_value_name,
+        PipeStep,
     ]
     jet_lexer.[
         STRING_PART_BYTE,
@@ -104,6 +109,8 @@ use {
         TOKEN_STAR,
         TOKEN_STRING,
         TOKEN_TRUE,
+        TOKEN_LT_GT,
+        TOKEN_PIPE_GT,
         TOKEN_UNIT_NUMBER,
         StringPart,
         Token,
@@ -218,7 +225,124 @@ parser_parse_expression_dispatch_atom: fn(state: &JetParserState, depth: Int) ->
     parser_parse_expression_restricted(state, 7, depth, false, true)
 }
 
+// A pipe belongs to the loosest expression at its bracket depth: that one
+// reads the `|> step` lines, while the expressions inside its head and steps
+// (a `?? return fallback`, an `if` arm) stop at the next `|>`. Brackets,
+// blocks and string holes start a depth of their own.
 parser_parse_expression_restricted: fn(state: &JetParserState, minimum: Int, depth: Int, allow_struct_lit: Bool, stop_before_comparison: Bool) -> ParsedExpr {
+    if minimum > 1 || stop_before_comparison -> return parser_parse_operators(state, minimum, depth, allow_struct_lit, stop_before_comparison)
+    level: parser_token_depth(state, state.position)
+    owners: state.pipe_owner_depths.len()
+    if owners > 0 && state.pipe_owner_depths[owners - 1] == level -> return parser_parse_operators(state, minimum, depth, allow_struct_lit, stop_before_comparison)
+    state.pipe_owner_depths.push(level)
+    left := parser_parse_operators(state, minimum, depth, allow_struct_lit, stop_before_comparison)
+    if parser_current_kind(state) == TOKEN_PIPE_GT -> left = parser_parse_pipe(state, left, depth + 1, allow_struct_lit)
+    _ := state.pipe_owner_depths.pop()
+    left
+}
+
+// The bracket depth of token `index`; an opener and its closer sit at the
+// depth outside them.
+parser_token_depth: fn(state: &JetParserState, index: Int) -> Int {
+    if state.token_depths.len() != state.tokens.len() {
+        state.token_depths = [Int]{}
+        level := 0
+        loop cursor in 0..<state.tokens.len() {
+            kind: state.tokens[cursor].kind
+            if kind == TOKEN_RPAREN || kind == TOKEN_RBRACKET || kind == TOKEN_RBRACE -> level -= 1
+            state.token_depths.push(level)
+            if kind == TOKEN_LPAREN || kind == TOKEN_LBRACKET || kind == TOKEN_LBRACE -> level += 1
+        }
+    }
+    if index < 0 || index >= state.token_depths.len() -> return 0
+    state.token_depths[index]
+}
+
+// `head |> step |> step`: each step is parsed with its hidden name open, so
+// every `<>` inside it (lambdas and string holes too) reads that name. A pipe
+// that starts from a name reads that name in place, as the hand-named form
+// writes it: its first step's `<>` is the name itself, so the head is neither
+// moved nor copied. A first step that also writes the name (where an inner
+// binding may hide it) keeps the hidden name.
+parser_parse_pipe: fn(state: &JetParserState, head: ParsedExpr, depth: Int, allow_struct_lit: Bool) -> ParsedExpr {
+    steps := [PipeStep]{}
+    end := head.span
+    loop parser_current_kind(state) == TOKEN_PIPE_GT {
+        bar: parser_bump(state)
+        name := pipe_value_name(bar.span.start)
+        if steps.len() == 0 {
+            // copy: the head keeps its name; the first step reads it as `<>`.
+            if head.expr == .Ident(head_name, _, _) -> name = head_name.copy()
+        }
+        start: state.position
+        saved_diagnostics: state.diagnostics.len()
+        saved_blocks: state.block_spans.len()
+        saved_else_arms: state.else_arms.len()
+        step := parser_parse_pipe_step(state, name, depth, allow_struct_lit)
+        if !pipe_value_is_name(name) && parser_pipe_step_writes(state, start, name) {
+            parser_rewind(state, start, saved_diagnostics, saved_blocks, saved_else_arms)
+            name = pipe_value_name(bar.span.start)
+            step = parser_parse_pipe_step(state, name, depth, allow_struct_lit)
+        }
+        step_span: parser_cover(bar.span, step.value.span)
+        if step.reads == 0 -> parser_add_error_code(state, "E0438", step_span, "this pipe step doesn't use `<>`", "each `|>` step receives the value of the line above as `<>`; a step that never reads it drops that value", "write `<>` where the value goes, such as `|> f(<>)`, or end the pipe before this step")
+        end = step.value.span
+        steps.push(PipeStep{name: name, value: step.value.expr, reads: step.reads, span: step_span})
+    }
+    span: parser_cover(head.span, end)
+    ParsedExpr{expr: Expr.Pipe{head: head.expr, steps: steps, span: span, id: parser_node_id(state)}, span: span}
+}
+
+// One step's expression, parsed with `name` open as its `<>`, and how often
+// it reads `<>`.
+parser_parse_pipe_step: fn(state: &JetParserState, name: String, depth: Int, allow_struct_lit: Bool) -> (value: ParsedExpr, reads: Int) {
+    // copy: the open-step stack keeps the name; the caller's step keeps it too.
+    state.pipe_step_names.push(name.copy())
+    state.pipe_step_reads.push(0)
+    value: parser_parse_expression_restricted(state, 1, depth + 1, allow_struct_lit, false)
+    reads: state.pipe_step_reads.pop() ?? 0
+    _ := state.pipe_step_names.pop()
+    (value: value, reads: reads)
+}
+
+// Whether the tokens from `start` to the cursor write `name` themselves, in
+// code or in a string's hole.
+parser_pipe_step_writes: fn(state: JetParserState, start: Int, name: String) -> Bool Never! {
+    loop index in start..<state.position {
+        if index >= state.tokens.len() -> break
+        token: state.tokens[index]
+        if token.kind == TOKEN_IDENT || token.kind == TOKEN_SELF || token.kind == TOKEN_KW_IT {
+            if parser_value(state, token) == name -> return true
+        } else if token.kind == TOKEN_STRING && parser_text(state, token).contains(name) {
+            return true
+        }
+    }
+    false
+}
+
+// `<>`: the value the innermost open pipe step receives.
+parser_parse_pipe_value: fn(state: &JetParserState, token: Token) -> ParsedExpr {
+    parser_bump(state)
+    next: parser_current(state)
+    if next.span.start == token.span.end && parser_pipe_value_touches(next.kind) {
+        touching: Span{start: token.span.start, end: next.span.end}
+        diagnostic: diagnostic_from_registry("E0439", Val(touching), "`<>` touches `{parser_text(state, next)}`", "`<>` written against another `<` or `>` reads as a different operator", "Add a space after `<>`")
+        state.diagnostics.push(diagnostic_with_edit_grade(diagnostic, TextEdit{span: Span{start: token.span.end, end: token.span.end}, new_text: " "}, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving))
+    }
+    count: state.pipe_step_names.len()
+    if count == 0 {
+        parser_add_error_code(state, "E0437", token.span, "`<>` is outside a pipe step", "`<>` is the value a `|> step` receives from the line above; outside a step there is no such value", "move it into a step such as `value |> f(<>)`, or write the value itself")
+        return ParsedExpr{expr: Expr.Unit{span: token.span, id: parser_node_id(state)}, span: token.span}
+    }
+    state.pipe_step_reads[count - 1] = state.pipe_step_reads[count - 1] + 1
+    ParsedExpr{expr: Expr.Ident{name: state.pipe_step_names[count - 1], span: token.span, id: parser_node_id(state)}, span: token.span}
+}
+
+parser_pipe_value_touches: fn(kind: Int) -> Bool Never! {
+    kind == TOKEN_LT || kind == TOKEN_GT || kind == TOKEN_LE || kind == TOKEN_GE || kind == TOKEN_SHL || kind == TOKEN_SHR || kind == TOKEN_COMPARE || kind == TOKEN_LT_GT
+}
+
+parser_parse_operators: fn(state: &JetParserState, minimum: Int, depth: Int, allow_struct_lit: Bool, stop_before_comparison: Bool) -> ParsedExpr {
     if depth > MAX_EXPRESSION_DEPTH {
         span: parser_current(state).span
         parser_add_fatal_code(state, "E1403", span, "this expression is nested too deeply", "recursive expression parsing is bounded against adversarial nesting", "reduce the nesting depth")
@@ -237,6 +361,14 @@ parser_parse_expression_restricted: fn(state: &JetParserState, minimum: Int, dep
     if marked_subject && !(left.expr == .Place(_, _, _, _)) -> marked_subject = false
     loop {
         operator := parser_current_kind(state)
+        // `<>` only ever stands for a value, so after a value it joins
+        // nothing (`a <> b`): name the operators that do, then read on.
+        if operator == TOKEN_LT_GT {
+            stray: parser_bump(state)
+            parser_add_error(state, stray.span, "something unexpected appeared after this value, found `<>`", "after a value, an expression continues only with an operator: `==`, `!=`, `<`, `<=`, `>`, `>=`, `+`, `-`, `*`, `/`, `&&`, `||`, `??` or `|>`", "write the operator you mean, such as `!=` for not equal")
+            _ := parser_parse_operators(state, minimum, depth + 1, allow_struct_lit, stop_before_comparison)
+            break
+        }
         precedence := parser_expression_precedence(operator)
         if precedence == 0 || precedence < minimum -> break
         if stop_before_comparison && parser_expression_comparison_boundary(operator) -> break
@@ -617,6 +749,7 @@ parser_parse_prefix: fn(state: &JetParserState, depth: Int, allow_struct_lit: Bo
         typed: parser_try_parse_typed_literal(state, depth + 1)
         if typed == .Val(parsed) -> return parsed
     }
+    if kind == TOKEN_LT_GT -> return parser_parse_pipe_value(state, token)
     // Rust has no unary `+`: `+1` falls through to "expected a value".
     if kind == TOKEN_MINUS || kind == TOKEN_BANG {
         parser_bump(state)
@@ -839,6 +972,9 @@ parser_parse_interpolation: fn(state: &JetParserState, part: StringPart, depth: 
         statement_start: -1,
         allow_environment_reads: state.allow_environment_reads,
         derive_template_depth: state.derive_template_depth,
+        // A hole inside a pipe step reads that step's `<>`.
+        pipe_step_names: state.pipe_step_names.copy(),
+        pipe_step_reads: state.pipe_step_reads.copy(),
     }
     // The nested state parses with the outer tables and source; every exit
     // hands them back.
@@ -849,6 +985,7 @@ parser_parse_interpolation: fn(state: &JetParserState, part: StringPart, depth: 
         return
     }
     value: parser_parse_expression(nested, 1, depth + 1)
+    loop index in 0..<state.pipe_step_reads.len() -> state.pipe_step_reads[index] = nested.pipe_step_reads[index]
     loop block in nested.block_spans -> state.block_spans.push(block)
     if nested.diagnostics.len() > 0 {
         parser_return_hole(state, nested)
@@ -1195,7 +1332,10 @@ parser_parse_lambda_arrow_body: fn(state: &JetParserState, depth: Int, fallback_
     if typed_body && (parser_kind_at(state, 1) == TOKEN_BANG || error_suffix) -> parser_lambda_interface_error(state, body_start.span)
     saved_diagnostics: state.diagnostics.len()
     body_start_position: state.position
+    // An arrow body owns its own pipe: `line -> line |> f(<>)`.
+    state.pipe_owner_depths.push(-1)
     value: parser_parse_expression(state, 1, depth + 1)
+    _ := state.pipe_owner_depths.pop()
     if struct_body && parser_aborting(state) && state.abort_mark > saved_diagnostics {
         loop state.diagnostics.len() > saved_diagnostics -> _ := state.diagnostics.pop()
         state.abort_mark = 0
@@ -1506,6 +1646,27 @@ parser_parse_postfix: fn(state: &JetParserState, initial: &&ParsedExpr, depth: I
             if tail_done -> break
             if kind == TOKEN_LBRACKET || kind == TOKEN_QUESTION || kind == TOKEN_QUESTION_DOT -> break
             if tail_member && kind != TOKEN_LPAREN && kind != TOKEN_LT && kind != TOKEN_LBRACE -> break
+        }
+        // `Box<>{…}` / `id<>(…)`: an empty type-argument list, refused as
+        // in a type and read on without it.
+        if kind == TOKEN_LT_GT && parser_current(state).span.start == expression.span.end {
+            written: if expression.expr == {
+                .Ident(name, _, _) -> name
+                .Field(_, member, _, _) -> member
+                else -> ""
+            }
+            if written != "" {
+                empty: parser_bump(state)
+                diagnostic: diagnostic_from_registry("E0440", Val(empty.span), "`{written}<>` has an empty type-argument list", "a type's arguments go between `<` and `>`; `<>` lists none, so it only adds noise", "Write the type arguments, such as `{written}<Int>`, or drop the `<>`")
+                state.diagnostics.push(diagnostic_with_edit(diagnostic, TextEdit{span: empty.span, new_text: ""}))
+                // A typed literal's head refuses with a diagnostic, so the
+                // literal is read here, as `Box{…}` would be.
+                if expression.expr == .Ident(_, _, _) && allow_struct_lit && parser_current_kind(state) == TOKEN_LBRACE {
+                    expression = parser_parse_typed_literal_body(state, Val(foundation_named_type(written)), expression.span, depth + 1)
+                    tail_done = true
+                }
+                next
+            }
         }
         if kind == TOKEN_LT {
             // Rust `ptr_from_addr`: `alias.Ptr<T>.from_addr(addr)` reads its

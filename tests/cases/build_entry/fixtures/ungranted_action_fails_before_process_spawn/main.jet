@@ -1,7 +1,11 @@
 
 build: fn(b: Build) -[Exec, FS]> {
     #Impure("exercise denied authority") {
-    action: b.action("escape", [], ["out"], ["sh", "-c", "printf bad > out"], ["Exec"])
+    shell: b.probe("shell", "find_program", "sh")
+    action: b.run("escape", b.found(shell), ["Exec"])
+    action.arg("-c")
+    action.arg("printf bad > out")
+    action.writes("out")
     app: b.add_executable("app", ["main.jet"], [action])
     b.default(app)
     }

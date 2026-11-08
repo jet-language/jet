@@ -491,6 +491,9 @@ SemaScopeEnvironment: struct {
     module_row: Int{-1}
     package_identity: String
     module_name: String
+    // The dotted `name: module` path that declared the module's file ("" at
+    // the package root; SemaRegistrationModule.declared_module).
+    declared_module: String{""}
     source_file: String
     source_origin: SemaSourceOrigin
     source_segments: [SemaSourceSegment]
@@ -995,6 +998,7 @@ sema_scope_environment_enter_module: fn(environment: &SemaScopeEnvironment, prog
         environment.module_row = module_index
         environment.package_identity = graph.modules[module_index].package_identity
         environment.module_name = graph.modules[module_index].module_name
+        environment.declared_module = graph.modules[module_index].declared_module
         environment.source_file = graph.modules[module_index].source_file
         environment.source_origin = graph.modules[module_index].source_origin
         environment.source_segments = graph.modules[module_index].source_segments
@@ -1019,6 +1023,7 @@ sema_scope_environment_enter_probe_module: fn(environment: &SemaScopeEnvironment
         environment.module_row = module_index
         environment.package_identity = graph.modules[module_index].package_identity
         environment.module_name = graph.modules[module_index].module_name
+        environment.declared_module = graph.modules[module_index].declared_module
         environment.source_file = graph.modules[module_index].source_file
         environment.source_origin = graph.modules[module_index].source_origin
         environment.source_segments = graph.modules[module_index].source_segments

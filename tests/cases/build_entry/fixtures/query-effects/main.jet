@@ -1,7 +1,11 @@
 
 build: fn(b: Build) -[Exec, FS]> {
     #Impure("declare an inspectable action") {
-        action: b.action("never-run", [], ["out"], ["sh", "-c", "exit 91"], ["Exec", "FS"])
+        shell: b.probe("shell", "find_program", "sh")
+        action: b.run("never-run", b.found(shell), ["Exec", "FS"])
+        action.arg("-c")
+        action.arg("exit 91")
+        action.writes("out")
         app: b.add_executable("app", ["main.jet"], [action])
         b.default(app)
     }

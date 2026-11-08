@@ -1,7 +1,10 @@
-
 build: fn(b: Build) -[Exec, FS]> {
     #Impure("write declared cached output") {
-        emit: b.action("emit", [], ["artifact"], ["sh", "-c", "printf fresh > artifact"], ["Exec", "FS"])
+        shell: b.probe("shell", "find_program", "sh")
+        emit: b.run("emit", b.found(shell), ["Exec", "FS"])
+        emit.arg("-c")
+        emit.arg("printf fresh > artifact")
+        emit.writes("artifact")
         app: b.add_executable("app", ["main.jet"], [emit])
         b.default(app)
     }

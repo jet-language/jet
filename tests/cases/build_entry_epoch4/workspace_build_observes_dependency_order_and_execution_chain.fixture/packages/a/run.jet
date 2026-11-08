@@ -1,13 +1,11 @@
 
 build: fn(b: Build) -[Exec]> {
     #Impure("member a records execution") {
-        action: b.action(
-            "a-order",
-            [],
-            ["a/a.jet"],
-            ["sh", "-c", "printf 'a_ready: fn() -> Int { 1 }' > a/a.jet"],
-            ["Exec"]
-        )
+        shell: b.probe("shell", "find_program", "sh")
+        action: b.run("a-order", b.found(shell), ["Exec"])
+        action.arg("-c")
+        action.arg("printf 'a_ready: fn() -> Int {{ 1 }}' > a/a.jet")
+        action.writes("a/a.jet")
         target: b.add_library("a", ["run.jet"], [action])
         b.default(target)
     }

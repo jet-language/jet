@@ -291,7 +291,7 @@ ArtifactStore: struct {
         if actual != object {
             return Err(ArtifactStoreError.Corrupt{path: self.object_path(object), reason: "published bytes are {actual.text()}, expected {object.text()}"})
         }
-        self.publish_data(ArtifactEntryKey.Blob(object.key()), self.object_path(object), bytes)
+        self.publish_data(ArtifactEntryKey.Blob(object.key()), self.object_path(object), bytes, durable: true)
     }
 
     get_blob: fn(self, object: ObjectHandle) -[FS, Env, Exec, Time, Rand]> [U8]? ArtifactStoreError! {
@@ -413,6 +413,11 @@ ArtifactStore: struct {
     }
 
     publish_action: fn(self, action: ActionHandle, record: [U8]) ArtifactStoreError! -[FS, Env, Exec, Time, Rand]> {
+        self.publish_action_entry(action, record, durable: true)
+    }
+
+    // `publish_action`, written with its disk syncs when `durable`.
+    publish_action_entry: fn(self, action: ActionHandle, record: [U8], durable: Bool) ArtifactStoreError! -[FS, Env, Exec, Time, Rand]> {
         path: self.action_path(action)
         key: ArtifactEntryKey.Action(action.key())
         encoded: store_artifact_encode_action(action, record)
@@ -426,15 +431,15 @@ ArtifactStore: struct {
                 if store_artifact_decode_action(action, existing) == {
                     .Ok(value) -> {
                         if value != record -> return Err(ArtifactStoreError.Conflict{path: path})
-                        return self.append_journal_locked("touch", key, existing.len())
+                        return self.append_journal_locked("touch", key, existing.len(), durable: false)
                     }
                     .Err(error) -> self.quarantine_locked(key, path, error.reason)
                 }
             }
         }
         self.ensure_capacity_locked(encoded.len(), path)
-        store_artifact_atomic_write(path, encoded)
-        self.append_journal_locked("put", key, encoded.len())
+        store_artifact_replace_file(path, encoded, durable)
+        self.append_journal_locked("put", key, encoded.len(), durable)
     }
 
     get_action: fn(self, action: ActionHandle) -[FS, Env, Exec, Time, Rand]> [U8]? ArtifactStoreError! {
@@ -479,7 +484,7 @@ ArtifactStore: struct {
             info: files.stat(self.action_path(action)) ?? next
             entries.push(ArtifactJournalAppend{operation: "touch", key: ArtifactEntryKey.Action(action.key()), length: info.size})
         }
-        self.append_journal_entries_locked(entries).drop("recency is advisory; a failed touch only costs eviction order")
+        self.append_journal_entries_locked(entries, durable: false).drop("recency is advisory; a failed touch only costs eviction order")
     }
 
     // Publish many action records under one lock, one capacity check and one
@@ -532,7 +537,7 @@ ArtifactStore: struct {
             if durable -> store_artifact_atomic_write(write.path, write.encoded) else -> store_artifact_replace_unsynced(write.path, write.encoded)
             journal.push(ArtifactJournalAppend{operation: "put", key: write.key, length: write.encoded.len()})
         }
-        self.append_journal_entries_locked(journal)
+        self.append_journal_entries_locked(journal, durable)
     }
 
     action: fn(self, key: String) -> ActionHandle Never! { ActionHandle.from_key(key) }
@@ -541,7 +546,7 @@ ArtifactStore: struct {
         valid: LTONamespace.new(namespace)
         object: ObjectHandle.from_bytes(bytes)
         key: ArtifactEntryKey.LTO{namespace: valid.name(), key: object.key()}
-        self.publish_data(key, self.lto_path(valid.name(), object), bytes)
+        self.publish_data(key, self.lto_path(valid.name(), object), bytes, durable: true)
         Ok(object)
     }
 
@@ -591,8 +596,7 @@ ArtifactStore: struct {
         loop target in targets -> keys.push(target.entry_key())
         text := self.owner_value.owner_line("lease")
         loop key in store_artifact_unique_keys(keys) -> text = "{text}{key.kind_name()}|{key.wire_value()}\n"
-        store_artifact_create_new_synced(path, text.bytes())
-        store_artifact_sync_dir(directory)
+        store_artifact_create_new(path, text.bytes())
         Ok(ArtifactLease{path_value: path, owner_value: self.owner_value})
     }
 
@@ -655,27 +659,31 @@ ArtifactStore: struct {
     }
 
     // Publish a file as one CAS blob and an immutable action record keyed by
-    // the caller's already-computed lower-case SHA-256 build key.
+    // the caller's already-computed lower-case SHA-256 build key, with their
+    // disk syncs when `durable`. An artifact a build recomputes is published
+    // without them: a read verifies its digest, so one a crash lost or tore
+    // reads as missing and is built again.
     // Rust order: the source is checked and read before the key is decoded.
-    publish_file: fn(self, key: String, source: String) -[FS, Env, Exec, Time, Rand]> StoredArtifact ArtifactStoreError! {
+    publish_file: fn(self, key: String, source: String, durable: Bool) -[FS, Env, Exec, Time, Rand]> StoredArtifact ArtifactStoreError! {
         metadata: files.stat(source)
         if metadata.is_symlink || !metadata.is_file {
             return Err(ArtifactStoreError.Corrupt{path: source, reason: "published artifact is not a regular file"})
         }
         bytes: files.read_bytes(source)
-        self.publish_bytes(key, bytes, store_artifact_is_executable(metadata))
+        self.publish_bytes(key, bytes, store_artifact_is_executable(metadata), durable)
     }
 
     // Publish in-memory bytes as one CAS blob and an immutable action record
-    // keyed by the caller's already-computed lower-case SHA-256 build key.
-    // The bytes are hashed once; the blob is written atomically under that
-    // digest, so the returned handle names exactly these bytes.
-    publish_bytes: fn(self, key: String, bytes: [U8], executable: Bool) -[FS, Env, Exec, Time, Rand]> StoredArtifact ArtifactStoreError! {
+    // keyed by the caller's already-computed lower-case SHA-256 build key,
+    // durable as `publish_file`. The bytes are hashed once; the blob is
+    // written atomically under that digest, so the returned handle names
+    // exactly these bytes.
+    publish_bytes: fn(self, key: String, bytes: [U8], executable: Bool, durable: Bool) -[FS, Env, Exec, Time, Rand]> StoredArtifact ArtifactStoreError! {
         action: store_artifact_action_for_key(key)
         object: ObjectHandle.from_bytes(bytes)
         path: self.object_path(object)
-        self.publish_data(ArtifactEntryKey.Blob(object.key()), path, bytes)
-        self.publish_action(action, store_artifact_encode_record(object, executable))
+        self.publish_data(ArtifactEntryKey.Blob(object.key()), path, bytes, durable)
+        self.publish_action_entry(action, store_artifact_encode_record(object, executable), durable)
         Ok(StoredArtifact{action, object, path, executable})
     }
 
@@ -737,7 +745,9 @@ ArtifactStore: struct {
     }
 
     // Verify and copy a named artifact to `destination`, preserving its
-    // executable bit. Corrupt entries are removed from the active namespace.
+    // executable bit. The copy is a build output its caller can restore
+    // again, so it is written without disk syncs. Corrupt entries are removed
+    // from the active namespace.
     restore_file: fn(self, key: String, destination: String) -[FS, Env, Exec, Time, Rand]> ArtifactRestore ArtifactStoreError! {
         if self.lookup_artifact(key) == {
             .Missing -> Ok(ArtifactRestore.Missing)
@@ -746,14 +756,16 @@ ArtifactStore: struct {
                 lease: self.acquire_artifact_lease([LeaseTarget]{LeaseTarget.Action(artifact.action), LeaseTarget.Blob(artifact.object)}) ?? return Err(err)
                 defer close(lease)
                 bytes: files.read_bytes(artifact.path)
-                store_artifact_atomic_write(destination, bytes)
+                store_artifact_replace_unsynced(destination, bytes)
                 store_artifact_set_executable(destination, artifact.executable)
                 Ok(ArtifactRestore.Hit{object: artifact.object, executable: artifact.executable})
             }
         }
     }
 
-    publish_data: fn(self, key: ArtifactEntryKey, path: String, bytes: [U8]) ArtifactStoreError! -[FS, Env, Exec, Time, Rand]> {
+    // Publish one entry's bytes at `path`, with their disk syncs when
+    // `durable`.
+    publish_data: fn(self, key: ArtifactEntryKey, path: String, bytes: [U8], durable: Bool) ArtifactStoreError! -[FS, Env, Exec, Time, Rand]> {
         self.ensure_layout()
         lock: self.acquire_lock() ?? return Err(err)
         defer close(lock)
@@ -761,13 +773,13 @@ ArtifactStore: struct {
             .Missing -> {}
             .Corrupt(reason) -> self.quarantine_locked(key, path, reason)
             .Bytes(existing) -> {
-                if existing == bytes -> return self.append_journal_locked("touch", key, existing.len())
+                if existing == bytes -> return self.append_journal_locked("touch", key, existing.len(), durable: false)
                 self.quarantine_locked(key, path, "existing bytes do not match their key")
             }
         }
         self.ensure_capacity_locked(bytes.len(), path)
-        store_artifact_atomic_write(path, bytes)
-        self.append_journal_locked("put", key, bytes.len())
+        store_artifact_replace_file(path, bytes, durable)
+        self.append_journal_locked("put", key, bytes.len(), durable)
     }
 
     // Scanned entries with their last use and whether a live lease pins them.
@@ -848,7 +860,7 @@ ArtifactStore: struct {
                 .Ok(_) -> {
                     store_artifact_sync_dir(files.dirname(entry.path))
                     after = store_artifact_saturating_sub(after, entry.size_bytes)
-                    self.append_journal_locked("remove", entry.key, entry.size_bytes)
+                    self.append_journal_locked("remove", entry.key, entry.size_bytes, durable: true)
                     removed.push(entry.status())
                 }
                 .Err(error) -> {
@@ -970,7 +982,7 @@ ArtifactStore: struct {
     touch_after_read: fn(self, key: ArtifactEntryKey, length: Int) Never! -[FS, Env, Time, Rand]> {
         lock: self.acquire_lock() ?? return
         defer close(lock)
-        self.append_journal_locked("touch", key, length).drop("recency is advisory; the verified bytes are returned regardless")
+        self.append_journal_locked("touch", key, length, durable: false).drop("recency is advisory; the verified bytes are returned regardless")
     }
 
     quarantine_locked: fn(self, key: ArtifactEntryKey, path: String, reason: String) ArtifactStoreError! -[FS, Env, Rand]> {
@@ -986,7 +998,7 @@ ArtifactStore: struct {
                     .Ok(info) -> info.size
                     else -> 0
                 }
-                self.append_journal_locked("remove", key, length)
+                self.append_journal_locked("remove", key, length, durable: true)
             }
             .Err(error) -> {
                 if store_artifact_io_missing(error) -> return
@@ -995,14 +1007,15 @@ ArtifactStore: struct {
         }
     }
 
-    append_journal_locked: fn(self, operation: String, key: ArtifactEntryKey, length: Int) ArtifactStoreError! -[FS, Env, Rand]> {
-        self.append_journal_entries_locked([ArtifactJournalAppend]{ArtifactJournalAppend{operation: operation, key: key, length: length}})
+    append_journal_locked: fn(self, operation: String, key: ArtifactEntryKey, length: Int, durable: Bool) ArtifactStoreError! -[FS, Env, Rand]> {
+        self.append_journal_entries_locked([ArtifactJournalAppend]{ArtifactJournalAppend{operation: operation, key: key, length: length}}, durable)
     }
 
     // One journal line per entry after one read of the journal's final line
-    // and one synced write (Rust lib.rs:1464). Only a torn or corrupt tail
-    // compacts; full readers (status, prune, compaction) verify every line.
-    append_journal_entries_locked: fn(self, entries: [ArtifactJournalAppend]) ArtifactStoreError! -[FS, Env, Rand]> {
+    // and one write, synced when `durable` (Rust lib.rs:1464): touches and
+    // cache entries are not. Only a torn or corrupt tail compacts; full
+    // readers (status, prune, compaction) verify every line.
+    append_journal_entries_locked: fn(self, entries: [ArtifactJournalAppend], durable: Bool) ArtifactStoreError! -[FS, Env, Rand]> {
         if entries.len() == 0 -> return
         journal_path: files.join(self.root(), "journal")
         last_sequence := store_artifact_journal_tail_sequence(journal_path)
@@ -1016,7 +1029,7 @@ ArtifactStore: struct {
         loop (index, entry) in entries {
             lines.push(store_artifact_journal_line(entry.operation, entry.key, entry.length, store_artifact_saturating_add(base, index + 1)))
         }
-        store_artifact_append_synced(journal_path, lines.join("").bytes())
+        store_artifact_append(journal_path, lines.join("").bytes(), durable)
     }
 
     // Rewrite the journal as one `put` per present entry, oldest use first
@@ -1052,7 +1065,7 @@ ArtifactStore: struct {
             if store_artifact_owner_liveness(record.owner, self.owner_value) == {
                 .Val(alive) -> {
                     if alive -> live.push(record)
-                    if !alive && clean_stale && store_artifact_try_remove(path) -> store_artifact_sync_dir(directory)
+                    if !alive && clean_stale -> store_artifact_try_remove(path)
                 }
                 else -> live.push(record)
             }
@@ -1095,9 +1108,7 @@ ArtifactStore: struct {
             if files.create(path, if_exists: .Refuse) == {
                 .Ok(writer) -> {
                     writer.write_all(owner_line.bytes())
-                    writer.fsync()
                     close(writer)
-                    store_artifact_sync_dir(locks)
                     return Ok(ArtifactStoreLock{path, owner_line: owner_line.bytes()})
                 }
                 .Err(error) -> {
@@ -1121,7 +1132,6 @@ ArtifactStore: struct {
                 else -> true
             }
             if !is_live && store_artifact_try_remove(path) {
-                store_artifact_sync_dir(locks)
                 retry_ms = STORE_ARTIFACT_LOCK_RETRY_MS
                 next
             }

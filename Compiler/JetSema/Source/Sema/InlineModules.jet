@@ -65,6 +65,7 @@ use {
         NamedType,
         OrFallback,
         Param,
+        PipeStep,
         Program,
         Span,
         Stmt,
@@ -269,6 +270,16 @@ sema_inline_member_source_name: fn(name: String) -> String Never! {
         if !sema_inline_is_alphanumeric(code) && code != 95 -> return name.copy()
     }
     member
+}
+
+// The inline module path of a lifted member function (`__jet_db_dinner_ddeep`
+// -> `db.inner`); "" for any other name.
+sema_inline_member_module: fn(name: String) -> String Never! {
+    if sema_inline_member_source_name(name) == name -> return ""
+    decoded: sema_inline_decode_generated_suffix(String.from_bytes(name.bytes()[6..<name.bytes().len()]) ?? "") ?? return ""
+    segments := decoded.split(".").to_list()
+    _ := segments.pop()
+    segments.join(".")
 }
 
 sema_inline_trim_leading_underscores: fn(name: String) -> String Never! {
@@ -989,6 +1000,12 @@ sema_inline_rewrite_expr: fn(rewrite: &SemaInlineRewrite, expression: Expr) -> E
         .CallValue(callee, args, span, node) -> return Expr.CallValue{callee: sema_inline_rewrite_expr(rewrite, callee), args: sema_inline_rewrite_call_args(rewrite, args), span: span, id: node}
         .PtrFromAddr(alias, alias_span, elem, addr, span, node) -> return Expr.PtrFromAddr{alias: alias, alias_span: alias_span, elem: sema_inline_rewrite_type(rewrite, elem), addr: sema_inline_rewrite_expr(rewrite, addr), span: span, id: node}
         .Paren(value, span, node) -> return Expr.Paren{value: sema_inline_rewrite_expr(rewrite, value), span: span, id: node}
+        .Pipe(head, steps, span, node) -> {
+            mapped_head: sema_inline_rewrite_expr(rewrite, head)
+            mapped := [PipeStep]{}
+            loop step in steps -> mapped.push(PipeStep{name: step.name, value: sema_inline_rewrite_expr(rewrite, step.value), reads: step.reads, span: step.span})
+            return Expr.Pipe{head: mapped_head, steps: mapped, span: span, id: node}
+        }
         else -> {}
     }
     // copy: the rewrite walks the module program by borrowed payload views (Jet has no consuming

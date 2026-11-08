@@ -7,7 +7,7 @@ use jet_build_session.[
 ]
 
 build_graph_rules_session: fn(id: Int) -> BuildSession Never! {
-    policy: BuildSessionPolicy{legacy_denied: None, plugins_denied: None, plugin_grants: [String:[String]]{}}
+    policy: BuildSessionPolicy{plugins_denied: None, plugin_grants: [String:[String]]{}}
     build_session_new(id, "graph", "graph-compiler", policy)
 }
 
@@ -23,12 +23,6 @@ build_graph_rules_ok: fn(reply: BuildSessionReply) -> Bool Never! {
     if reply == {.Value(_) -> true else -> false}
 }
 
-// ActionSpec::cached(argv).with_outputs(outputs): the five-argument `b.action` form.
-build_graph_rules_cached: fn(session: &BuildSession, name: String, argv: [String], outputs: [String]) -> BuildSessionReply Never! {
-    empty: build_graph_rules_list([String]{})
-    build_session_call(session, "action", [BuildSessionValue]{.Text(value: name), empty, build_graph_rules_list(outputs), build_graph_rules_list(argv), empty}, None, false, 1, 2)
-}
-
 build_graph_rules_value: fn(reply: BuildSessionReply) -> BuildSessionValue Never! {
     if reply == {.Value(value) -> value else -> panic("build declaration failed")}
 }
@@ -37,67 +31,47 @@ build_graph_rules_failed: fn(reply: BuildSessionReply) -> Bool Never! {
     if reply == {.Failure(_) -> true else -> false}
 }
 
-// Positional controls six through eight of `b.action`: the session's host
-// toolchain, no probes, and a declared signing identity.
-build_graph_rules_controls: fn(session: &BuildSession, id: Int) -> [BuildSessionValue] Never! {
-    signing: build_graph_rules_value(build_session_call(session, "signing", [BuildSessionValue]{.Text(value: "dev"), .Text(value: "Developer")}, None, false, 3, 4))
-    [BuildSessionValue]{.Handle(type_name: "BuildToolchain", session: id, id: 0), build_graph_rules_list([String]{}), signing}
+// `b.found(b.probe("tool", "find_program", "tool"))`: the program the
+// session's steps run.
+build_graph_rules_tool: fn(session: &BuildSession) -> BuildSessionValue Never! {
+    probe: build_graph_rules_value(build_session_call(session, "probe", [BuildSessionValue]{.Text(value: "tool"), .Text(value: "find_program"), .Text(value: "tool")}, None, true, 1, 2))
+    build_graph_rules_value(build_session_call(session, "found", [BuildSessionValue]{probe}, None, true, 3, 4))
 }
 
-// ActionSpec::uncached_phony(argv).with_cap(caps): the trailing cache control is the
-// fifteenth argument, after the controls and empty kind/pool/env/helper/label slots.
-build_graph_rules_phony: fn(session: &BuildSession, id: Int, name: String, argv: [String], caps: [String]) -> BuildSessionReply Never! {
-    empty: build_graph_rules_list([String]{})
-    args := [BuildSessionValue]{.Text(value: name), empty, empty, build_graph_rules_list(argv), build_graph_rules_list(caps)}
-    loop value in build_graph_rules_controls(session, id) -> args.push(value)
-    tail: [BuildSessionValue]{.Text(value: "generic"), empty, empty, empty, empty, empty, .Text(value: "phony")}
-    loop value in tail -> args.push(value)
-    build_session_call(session, "action", args, None, caps.len() > 0, 5, 6)
+build_graph_rules_step: fn(session: &BuildSession, method: String, step: BuildSessionValue, values: [BuildSessionValue]) -> BuildSessionReply Never! {
+    args := [BuildSessionValue]{step.copy()}
+    loop value in values -> args.push(value.copy())
+    build_session_call(session, "action.{method}", args, None, true, 9, 10)
+}
+
+// `step := b.run(name, tool, caps)`, then `step.output(path)` for each output.
+build_graph_rules_made: fn(session: &BuildSession, tool: BuildSessionValue, name: String, outputs: [String]) -> BuildSessionReply Never! {
+    step: build_session_call(session, "run", [BuildSessionValue]{.Text(value: name), tool, build_graph_rules_list([String]{})}, None, true, 5, 6)
+    handle: if step == {.Value(value) -> value else -> return step}
+    loop output in outputs {
+        made: build_graph_rules_step(session, "output", handle, [BuildSessionValue]{.Text(value: output)})
+        if made == .Failure(_) -> return made
+    }
+    step
 }
 
 #Test("duplicate_target_or_action_names_are_rejected") {
     session := build_graph_rules_session(81)
+    tool: build_graph_rules_tool(session)
     empty: build_graph_rules_list([String]{})
     assert(build_graph_rules_ok(build_session_call(session, "add_executable", [BuildSessionValue]{.Text(value: "app"), empty, empty}, None, false, 1, 2)))
     duplicate_target: build_session_call(session, "add_library", [BuildSessionValue]{.Text(value: "app"), empty, empty}, None, false, 3, 4)
     assert_eq(build_graph_rules_error(duplicate_target), Val(BuildSessionError.DuplicateTargetName{value: "app"}))
-    assert(build_graph_rules_ok(build_graph_rules_cached(session, "codegen", [String]{"tool"}, [String]{"out.jet"})))
-    duplicate_action: build_graph_rules_cached(session, "codegen", [String]{"tool"}, [String]{"other.jet"})
+    assert(build_graph_rules_ok(build_graph_rules_made(session, tool, "codegen", [String]{"out.jet"})))
+    duplicate_action: build_graph_rules_made(session, tool, "codegen", [String]{"other.jet"})
     assert_eq(build_graph_rules_error(duplicate_action), Val(BuildSessionError.DuplicateActionName{value: "codegen"}))
-}
-
-#Test("cached_actions_need_outputs") {
-    session := build_graph_rules_session(82)
-    refused: build_graph_rules_cached(session, "probe", [String]{"cc", "--version"}, [String]{})
-    assert_eq(build_graph_rules_error(refused), Val(BuildSessionError.CachedActionWithoutOutputs{value: "probe"}))
-}
-
-#Test("outputless_commands_are_explicit_uncached_phony_actions") {
-    session := build_graph_rules_session(83)
-    clean: build_graph_rules_phony(session, 83, "clean-generated", [String]{"rm", "-rf", ".jet/generated"}, [String]{"FS"})
-    assert_eq(clean, BuildSessionReply.Value{value: BuildSessionValue.Handle{type_name: "BuildAction", session: 83, id: 0}})
-    plan: build_session_call(session, "plan", [BuildSessionValue]{}, None, false, 7, 8)
-    queried: build_session_graph(session, if plan == {.Value(value) -> value else -> panic("plan failed")})
-    assert(queried.diagnostic == None)
-    graph: queried.graph ?? panic("plan graph")
-    assert_eq(graph.actions.len(), 1)
-    assert(graph.actions[0].outputs.len() == 0)
-    // plan.phony_actions() == [action]: the session's one phony action is this one.
-    permit: session.storage.guard_read()
-    phony: loop action in permit.value.actions -> if action.cache == "uncached-phony" -> action.name else -> ""
-    assert_eq(phony, [String]{"clean-generated"})
-}
-
-#Test("phony_actions_need_a_declared_capability") {
-    session := build_graph_rules_session(84)
-    refused: build_graph_rules_phony(session, 84, "clean-generated", [String]{"rm", "-rf", ".jet/generated"}, [String]{})
-    assert_eq(build_graph_rules_error(refused), Val(BuildSessionError.PhonyActionWithoutCaps{value: "clean-generated"}))
 }
 
 #Test("action_outputs_have_one_owner_in_the_plan") {
     session := build_graph_rules_session(85)
-    assert(build_graph_rules_ok(build_graph_rules_cached(session, "generate-a", [String]{"tool-a"}, [String]{".jet/generated/out.jet"})))
-    assert(build_graph_rules_ok(build_graph_rules_cached(session, "generate-b", [String]{"tool-b"}, [String]{".jet/generated/out.jet"})))
+    tool: build_graph_rules_tool(session)
+    assert(build_graph_rules_ok(build_graph_rules_made(session, tool, "generate-a", [String]{".jet/generated/out.jet"})))
+    assert(build_graph_rules_ok(build_graph_rules_made(session, tool, "generate-b", [String]{".jet/generated/out.jet"})))
     plan: build_session_call(session, "plan", [BuildSessionValue]{}, None, false, 7, 8)
     queried: build_session_graph(session, if plan == {.Value(value) -> value else -> panic("plan failed")})
     assert(queried.graph == None)
@@ -119,8 +93,10 @@ build_graph_rules_phony: fn(session: &BuildSession, id: Int, name: String, argv:
 
 #Test("registers_typed_targets_and_default_plan") {
     session := build_graph_rules_session(86)
+    tool: build_graph_rules_tool(session)
     empty: build_graph_rules_list([String]{})
-    gen: build_graph_rules_value(build_session_call(session, "action", [BuildSessionValue]{.Text(value: "generate-assets"), build_graph_rules_list([String]{"assets/sprite.png"}), build_graph_rules_list([String]{".jet/generated/assets.jet"}), build_graph_rules_list([String]{"jet-tool", "pack"}), build_graph_rules_list([String]{"FS"})}, None, true, 1, 2))
+    gen: build_graph_rules_value(build_graph_rules_made(session, tool, "generate-assets", [String]{".jet/generated/assets.jet"}))
+    assert(build_graph_rules_ok(build_graph_rules_step(session, "input", gen, [BuildSessionValue]{.Text(value: "assets/sprite.png")})))
     lib: build_graph_rules_value(build_session_call(session, "add_library", [BuildSessionValue]{.Text(value: "engine"), build_graph_rules_list([String]{"src/engine.jet"}), .List(values: [BuildSessionValue]{gen})}, None, false, 3, 4))
     app: build_graph_rules_value(build_session_call(session, "add_executable", [BuildSessionValue]{.Text(value: "game"), build_graph_rules_list([String]{"src/main.jet"}), empty, .List(values: [BuildSessionValue]{lib})}, None, false, 5, 6))
     on_app: BuildSessionValue.List{values: [BuildSessionValue]{app}}
@@ -145,6 +121,7 @@ build_graph_rules_phony: fn(session: &BuildSession, id: Int, name: String, argv:
     assert_eq(bundles, 1)
     assert_eq(graph.actions.len(), 1)
     assert_eq(graph.actions[0].outputs[0], ".jet/generated/assets.jet")
+    assert_eq(graph.actions[0].inputs, [String]{"assets/sprite.png"})
     // The executable uses the session's default host toolchain (role Host).
     permit: session.storage.guard_read()
     assert_eq(permit.value.targets[1].toolchain, 0)
@@ -162,6 +139,7 @@ build_graph_rules_phony: fn(session: &BuildSession, id: Int, name: String, argv:
     assert(build_graph_rules_failed(build_session_call(a, "add_executable", [BuildSessionValue]{.Text(value: "bad-toolchain"), empty, empty, empty, empty, toolchain}, None, false, 7, 8)))
     assert(build_graph_rules_failed(build_session_call(a, "add_executable", [BuildSessionValue]{.Text(value: "bad-signer"), empty, empty, empty, empty, host, signer}, None, false, 9, 10)))
     assert(build_graph_rules_failed(build_session_call(a, "add_library", [BuildSessionValue]{.Text(value: "bad-probe"), empty, empty, empty, .List(values: [BuildSessionValue]{probe})}, None, false, 11, 12)))
+    assert(build_graph_rules_failed(build_session_call(a, "found", [BuildSessionValue]{probe}, None, true, 13, 14)))
     permit: a.storage.guard_read()
     assert_eq(permit.value.targets.len(), 0)
 }
@@ -179,66 +157,95 @@ build_graph_rules_phony: fn(session: &BuildSession, id: Int, name: String, argv:
     assert(build_graph_rules_ok(build_session_call(session, "probe", [BuildSessionValue]{.Text(value: "sqlite"), .Text(value: "pkg_config"), .Text(value: "sqlite3"), toolchain}, None, true, 11, 12)))
 }
 
-#Test("legacy_wrappers_are_typed_declared_and_policy_denied_without_ambient_authority") {
-    session := build_graph_rules_session(90)
-    wrappers: [String]{"cmake", "make", "gradle", "npm", "cargo"}
-    commands: [[String]]{[String]{"cmake", "--build", "build"}, [String]{"make"}, [String]{"gradle", "assemble"}, [String]{"npm", "run", "build"}, [String]{"cargo", "build"}}
-    loop (index, wrapper) in wrappers {
-        args: [BuildSessionValue]{.Text(value: wrapper), .Text(value: "legacy-{wrapper}"), build_graph_rules_list([String]{"legacy/project"}), build_graph_rules_list([String]{"build/{wrapper}"}), build_graph_rules_list(commands[index]), build_graph_rules_list([String]{"Exec", "FS"})}
-        assert(build_graph_rules_ok(build_session_call(session, "legacy", args, None, true, 1, 2)))
+#Test("a_step_toolchain_and_signer_change_its_action_key") {
+    keys := [String]{}
+    controls: [String]{"plain", "toolchain", "sign"}
+    loop index in 0..<controls.len() {
+        control: controls[index]
+        session := build_graph_rules_session(90 + index)
+        tool: build_graph_rules_tool(session)
+        step: build_graph_rules_value(build_graph_rules_made(session, tool, "same", [String]{"build/out"}))
+        if control == "toolchain" {
+            cross: build_graph_rules_value(build_session_call(session, "toolchain", [BuildSessionValue]{.Text(value: "cross"), .Text(value: "wasm32-wasi")}, None, false, 7, 8))
+            assert(build_graph_rules_ok(build_graph_rules_step(session, "toolchain", step, [BuildSessionValue]{cross})))
+        }
+        if control == "sign" {
+            signer: build_graph_rules_value(build_session_call(session, "signing", [BuildSessionValue]{.Text(value: "dev"), .Text(value: "Developer")}, None, false, 7, 8))
+            assert(build_graph_rules_ok(build_graph_rules_step(session, "sign", step, [BuildSessionValue]{signer})))
+        }
+        plan: build_graph_rules_value(build_session_call(session, "plan", [BuildSessionValue]{}, None, false, 11, 12))
+        graph: build_session_graph(session, plan).graph ?? panic("plan graph")
+        keys.push(graph.action_keys[0].key)
     }
-    capless: build_session_call(session, "legacy", [BuildSessionValue]{.Text(value: "make"), .Text(value: "legacy-capless"), build_graph_rules_list([String]{"Makefile"}), build_graph_rules_list([String]{"build/app"}), build_graph_rules_list([String]{"make"}), build_graph_rules_list([String]{})}, None, false, 7, 8)
-    assert_eq(build_graph_rules_error(capless), Val(BuildSessionError.LegacyWrapperWithoutCaps{kind: "make"}))
-    plan: build_graph_rules_value(build_session_call(session, "plan", [BuildSessionValue]{}, None, false, 3, 4))
-    graph: build_session_graph(session, plan).graph ?? panic("plan graph")
+    assert(keys[0] != keys[1])
+    assert(keys[0] != keys[2])
+    assert(keys[1] != keys[2])
+}
+
+#Test("run_steps_build_their_command_line_from_declared_files") {
+    session := build_graph_rules_session(97)
+    caps: build_graph_rules_list([String]{"Exec", "FS"})
+    shell: build_graph_rules_value(build_session_call(session, "probe", [BuildSessionValue]{.Text(value: "shell"), .Text(value: "find_program"), .Text(value: "sh")}, None, true, 1, 2))
+    found: build_graph_rules_value(build_session_call(session, "found", [BuildSessionValue]{shell}, None, true, 3, 4))
+    assert(build_graph_rules_failed(build_session_call(session, "file.path", [BuildSessionValue]{found}, None, true, 5, 6)))
+    gen: build_graph_rules_value(build_session_call(session, "run", [BuildSessionValue]{.Text(value: "gen"), found, caps}, None, true, 7, 8))
+    assert(build_graph_rules_ok(build_graph_rules_step(session, "arg", gen, [BuildSessionValue]{.Text(value: "-c")})))
+    assert_eq(build_graph_rules_error(build_graph_rules_step(session, "arg", gen, [BuildSessionValue]{.Text(value: " ")})), Val(BuildSessionError.EmptyActionArgv{value: "gen"}))
+    assert(build_graph_rules_ok(build_graph_rules_step(session, "input", gen, [BuildSessionValue]{.Text(value: "gen.sh")})))
+    tool: build_graph_rules_value(build_graph_rules_step(session, "output", gen, [BuildSessionValue]{.Text(value: "tool.sh"), .Text(value: "--out=")}))
+    assert_eq(build_session_call(session, "file.path", [BuildSessionValue]{tool}, None, true, 11, 12), BuildSessionReply.Value{value: BuildSessionValue.Text{value: "tool.sh"}})
+    assert(build_graph_rules_failed(build_graph_rules_step(session, "file", gen, [BuildSessionValue]{tool})))
+    assert(build_graph_rules_failed(build_graph_rules_step(session, "file", gen, [BuildSessionValue]{found})))
+    assert(build_graph_rules_ok(build_graph_rules_step(session, "timeout", gen, [BuildSessionValue]{.Text(value: "2min")})))
+    assert(build_graph_rules_failed(build_graph_rules_step(session, "timeout", gen, [BuildSessionValue]{.Text(value: "10us")})))
+    made: build_graph_rules_value(build_session_call(session, "run", [BuildSessionValue]{.Text(value: "made"), tool, caps}, None, true, 13, 14))
+    assert(build_graph_rules_ok(build_graph_rules_step(session, "reads", made, [BuildSessionValue]{.Text(value: "data.txt")})))
+    assert(build_graph_rules_ok(build_graph_rules_step(session, "writes", made, [BuildSessionValue]{.Text(value: "made.txt")})))
     permit: session.storage.guard_read()
-    loop (index, wrapper) in wrappers {
-        action: graph.actions[index]
-        assert_eq(action.legacy_wrapper, Val(wrapper))
-        exec := false
-        loop cap in action.caps { if cap == "Exec" -> exec = true }
-        assert(exec)
-        assert_eq(action.inputs[0], "legacy/project")
-        assert_eq(permit.value.actions[index].labels.get("legacy.wrapper"), Val(wrapper))
-    }
-    denied_policy: BuildSessionPolicy{legacy_denied: Val("CI forbids legacy build tools"), plugins_denied: None, plugin_grants: [String:[String]]{}}
-    ci := build_session_new(91, "graph", "graph-compiler", denied_policy)
-    denial: build_session_call(ci, "legacy", [BuildSessionValue]{.Text(value: "cargo"), .Text(value: "legacy-cargo"), build_graph_rules_list([String]{"Cargo.toml"}), build_graph_rules_list([String]{"target/debug/app"}), build_graph_rules_list([String]{"cargo", "build"}), build_graph_rules_list([String]{"Exec"})}, None, true, 5, 6)
-    reason: if denial == {.Failure(diagnostic) -> diagnostic.what else -> panic("legacy wrapper must be denied")}
-    assert(reason.contains("CI forbids legacy build tools"))
+    first: permit.value.actions[0]
+    assert_eq(first.argv, [String]{"sh", "-c", "gen.sh", "--out=tool.sh"})
+    assert_eq(first.inputs, [String]{"gen.sh"})
+    assert_eq(first.outputs, [String]{"tool.sh"})
+    assert_eq(first.probes, [Int]{0})
+    assert_eq(first.timeout_ms, Val(120000))
+    second: permit.value.actions[1]
+    assert_eq(second.argv, [String]{"tool.sh"})
+    assert_eq(second.inputs, [String]{"tool.sh", "data.txt"})
+    assert_eq(second.outputs, [String]{"made.txt"})
 }
 
-#Test("action_environment_allowlist_cannot_name_undeclared_values") {
-    session := build_graph_rules_session(92)
+#Test("host_and_jet_tools_are_step_tools") {
+    session := build_graph_rules_session(99)
+    caps: build_graph_rules_list([String]{"Exec", "FS"})
     empty: build_graph_rules_list([String]{})
-    args := [BuildSessionValue]{.Text(value: "env-check"), empty, build_graph_rules_list([String]{"build/out"}), build_graph_rules_list([String]{"tool"}), empty}
-    loop value in build_graph_rules_controls(session, 92) -> args.push(value)
-    tail: [BuildSessionValue]{.Text(value: "generic"), empty, empty, build_graph_rules_list([String]{"MISSING"})}
-    loop value in tail -> args.push(value)
-    refused: build_session_call(session, "action", args, None, false, 5, 6)
-    assert_eq(build_graph_rules_error(refused), Val(BuildSessionError.UndeclaredEnvName{action: "env-check", key: "MISSING"}))
+    gen: build_graph_rules_value(build_session_call(session, "add_executable", [BuildSessionValue]{.Text(value: "gen"), build_graph_rules_list([String]{"gen/main.jet"}), empty}, None, false, 1, 2))
+    lib: build_graph_rules_value(build_session_call(session, "add_library", [BuildSessionValue]{.Text(value: "lib"), build_graph_rules_list([String]{"lib.jet"}), empty}, None, false, 3, 4))
+    assert(build_graph_rules_failed(build_session_call(session, "host", [BuildSessionValue]{lib}, None, false, 5, 6)))
+    host: build_graph_rules_value(build_session_call(session, "host", [BuildSessionValue]{gen}, None, false, 7, 8))
+    assert_eq(build_session_call(session, "file.path", [BuildSessionValue]{host}, None, false, 9, 10), BuildSessionReply.Value{value: BuildSessionValue.Text{value: ".jet/build/host/gen"}})
+    jet: build_graph_rules_value(build_session_call(session, "jet", [BuildSessionValue]{}, None, false, 11, 12))
+    assert(build_graph_rules_failed(build_session_call(session, "file.path", [BuildSessionValue]{jet}, None, false, 13, 14)))
+    table: build_graph_rules_value(build_session_call(session, "run", [BuildSessionValue]{.Text(value: "table"), host, caps}, None, true, 15, 16))
+    assert(build_graph_rules_ok(build_graph_rules_step(session, "output", table, [BuildSessionValue]{.Text(value: "table.jet")})))
+    check: build_graph_rules_value(build_session_call(session, "run", [BuildSessionValue]{.Text(value: "check"), jet, caps}, None, true, 17, 18))
+    assert(build_graph_rules_ok(build_graph_rules_step(session, "arg", check, [BuildSessionValue]{.Text(value: "check")})))
+    assert(build_graph_rules_ok(build_graph_rules_step(session, "file", check, [BuildSessionValue]{host})))
+    assert(build_graph_rules_failed(build_graph_rules_step(session, "file", check, [BuildSessionValue]{jet})))
+    toolchain: build_graph_rules_value(build_session_call(session, "toolchain", [BuildSessionValue]{.Text(value: "cross"), .Text(value: "wasm32-wasi")}, None, false, 19, 20))
+    assert(build_graph_rules_failed(build_graph_rules_step(session, "toolchain", check, [BuildSessionValue]{toolchain})))
+    permit: session.storage.guard_read()
+    assert_eq(permit.value.actions[0].argv, [String]{".jet/build/host/gen", "table.jet"})
+    assert_eq(permit.value.actions[0].inputs, [String]{".jet/build/host/gen"})
+    assert_eq(permit.value.actions[1].argv, [String]{"jet", "check", ".jet/build/host/gen"})
+    assert_eq(permit.value.actions[1].inputs, [String]{".jet/build/host/gen"})
 }
 
-build_graph_rules_kind_key: fn(id: Int, kind: String) -> String Never! {
-    session := build_graph_rules_session(id)
-    args := [BuildSessionValue]{.Text(value: "same"), build_graph_rules_list([String]{"src/main.jet"}), build_graph_rules_list([String]{"build/out"}), build_graph_rules_list([String]{"jetc", "src/main.jet"}), build_graph_rules_list([String]{})}
-    loop value in build_graph_rules_controls(session, id) -> args.push(value)
-    args.push(.Text(value: kind))
-    _: build_graph_rules_value(build_session_call(session, "action", args, None, false, 5, 6))
+#Test("run_step_without_an_output_refuses_the_plan") {
+    session := build_graph_rules_session(98)
+    shell: build_graph_rules_value(build_session_call(session, "probe", [BuildSessionValue]{.Text(value: "shell"), .Text(value: "find_program"), .Text(value: "sh")}, None, true, 1, 2))
+    found: build_graph_rules_value(build_session_call(session, "found", [BuildSessionValue]{shell}, None, true, 3, 4))
+    _: build_graph_rules_value(build_session_call(session, "run", [BuildSessionValue]{.Text(value: "quiet"), found, build_graph_rules_list([String]{"Exec"})}, None, true, 5, 6))
     plan: build_graph_rules_value(build_session_call(session, "plan", [BuildSessionValue]{}, None, false, 7, 8))
-    graph: build_session_graph(session, plan).graph ?? panic("plan graph")
-    graph.action_keys[0].key
-}
-
-#Test("action_kinds_have_distinct_identities") {
-    compile: build_graph_rules_kind_key(93, "compile")
-    docs: build_graph_rules_kind_key(94, "docs")
-    debug: build_graph_rules_kind_key(95, "debug")
-    archive: build_graph_rules_kind_key(96, "source_archive")
-    assert(compile != docs)
-    assert(compile != debug)
-    assert(compile != archive)
-    assert(docs != debug)
-    assert(docs != archive)
-    assert(debug != archive)
+    diagnostic: build_session_graph(session, plan).diagnostic ?? panic("a step with no output must refuse the plan")
+    assert_eq(diagnostic.error, Val(BuildSessionError.StepWithoutOutputs{value: "quiet"}))
 }

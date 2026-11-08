@@ -1,7 +1,11 @@
 
 build: fn(b: Build) -[Exec, FS]> {
     #Impure("declare selected closure") {
-    bad: b.action("unselected", [], ["missing-generated.jet"], ["sh", "-c", "exit 77"], ["Exec", "FS"])
+    shell: b.probe("shell", "find_program", "sh")
+    bad: b.run("unselected", b.found(shell), ["Exec", "FS"])
+    bad.arg("-c")
+    bad.arg("exit 77")
+    bad.writes("missing-generated.jet")
     ignored: b.add_executable("ignored", ["missing-generated.jet"], [bad])
     app: b.add_executable("app", ["main.jet"], [])
     b.default(app)

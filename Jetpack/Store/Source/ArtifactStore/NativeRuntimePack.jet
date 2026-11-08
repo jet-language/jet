@@ -418,7 +418,7 @@ native_runtime_pack_publish: fn(store: ArtifactStore, subject: NativeRuntimePack
     }
     // Existing publish_bytes returns Conflict for a different record at this
     // compiler-bound action key. Never overwrite or select by native.key.
-    Ok(store.publish_bytes(NativeCandidateComposition.action_key(compiler), composition.to_bytes(), false) ?? return Err(NativeRuntimePackError.Store(err)))
+    Ok(store.publish_bytes(NativeCandidateComposition.action_key(compiler), composition.to_bytes(), executable: false, durable: true) ?? return Err(NativeRuntimePackError.Store(err)))
 }
 
 VerifiedNativeRuntimePack: struct {

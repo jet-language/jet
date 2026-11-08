@@ -12,6 +12,11 @@
 // guard packages, and the claims of the Jetpack engine areas that have no package), selfhost
 // (the fixed point s2 == s3) and perf (the self-compile against its budget) are test.jet's.
 // `full` runs every suite, so each package's #Tests run in it.
+// The build profiles: `jet build --profile dev Compiler` is the fast build for targeted
+// testing (no optimizer passes). `ship` pins the values the self-host stages build with, so
+// its jet is byte-identical to a plain `jet build Compiler`; the selfhost and perf suites of
+// test.jet build with it. Chain, census and release stages pass no profile: they build trees
+// whose package.jet may predate these profiles.
 name: "compiler"
 version: "0.0.1"
 edition: "2026"
@@ -38,6 +43,10 @@ suites: {
     ui: TestSuite{ ui_corpus: "../tests/ui" },
     ui_lint: TestSuite{ ui_corpus: "../tests/ui_lint" },
     cases: TestSuite{ cases_corpus: "../tests/cases" },
+}
+build: {
+    dev: Build{ optimize: none },
+    ship: Build{ optimize: basic, debug_info: true },
 }
 test: {
     quick: TestProfile{ suites: [tests] },

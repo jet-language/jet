@@ -576,6 +576,9 @@ SemaRegistrationModuleInput: struct {
     namespace_names: [String]{[String]{}}
     namespace_private: [String]{[String]{}}
     namespace_refs: [String]{[String]{}}
+    // The dotted `name: module` path that declared the file ("" at the
+    // package root): the start of SourceLocation's `module`.
+    declared_module: String{""}
     // The module's source text (Rust `Module::source`). A declared text block
     // hands the text inside its braces to its rule.
     source: String{""}
@@ -602,6 +605,9 @@ SemaRegistrationModule: struct {
     module_name: String
     core_source_alias: String
     module_path: String
+    // The dotted `name: module` path that declared the file ("" at the
+    // package root): the start of SourceLocation's `module`.
+    declared_module: String{""}
     source_file: String
     source_segments: [SemaSourceSegment]
     source_origin: SemaSourceOrigin
@@ -2662,6 +2668,7 @@ sema_registration_prepare_module_row: fn(input: &&SemaRegistrationModuleInput, t
         module_name: owned.module_name,
         core_source_alias: owned.core_source_alias,
         module_path: owned.module_path,
+        declared_module: owned.declared_module,
         source_file: owned.source_file,
         source_segments: owned.source_segments,
         source_origin: owned.source_origin,

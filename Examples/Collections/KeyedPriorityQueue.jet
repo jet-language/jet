@@ -1,0 +1,58 @@
+// `PriorityQueue.by(key)` pops the item with the smallest key first and
+// `by_desc(key)` the one with the largest; items with equal keys pop in the
+// order they went in. `from_by(xs, key)` and `from_by_desc(xs, key)` start
+// from the items of a List. `new()` and `from(xs)` keep the item's own order.
+Score: struct {
+    name: String
+    points: Int
+}
+
+drain: fn(queue: &PriorityQueue<Score>) -> String {
+    names := [String]{}
+    loop {
+        if queue.pop() == .Val(score) {
+            names.push(score.name)
+        } else {
+            break
+        }
+    }
+    names.join(",")
+}
+
+run: fn() {
+    scores := PriorityQueue.by_desc((s: Score) -> s.points)
+    scores.push(Score{name: "Ana", points: 90})
+    scores.push(Score{name: "Bo", points: 75})
+    scores.push(Score{name: "Cy", points: 90})
+    scores.push(Score{name: "Di", points: 98})
+    print(scores.len())
+    best: scores.pop()
+    if best == .Val(top) -> print(top.name)
+    print(drain(scores))
+
+    team: [Score]{{name: "Ana", points: 90}, {name: "Bo", points: 75}, {name: "Cy", points: 75}}
+    lows := PriorityQueue.from_by(team, (s: Score) -> s.points)
+    print(drain(lows))
+    highs := PriorityQueue.from_by_desc(team, (s: Score) -> s.points)
+    print(drain(highs))
+    print(team.len())
+
+    words := PriorityQueue.by((w: String) -> w.len())
+    words.push("pear")
+    words.push("fig")
+    words.push("kiwi")
+    words.push("apple")
+    print(words.peek() ?? "")
+    print(words.to_sorted_list())
+    print(words.pop() ?? "")
+    print(words.pop() ?? "")
+
+    temps := PriorityQueue.by((t: Float) -> -t)
+    temps.push(1.5)
+    temps.push(-2.0)
+    temps.push(3.25)
+    print(temps.pop() ?? 0.0)
+
+    plain := PriorityQueue.from([2, 9, 4])
+    print(plain.pop() ?? -1)
+}

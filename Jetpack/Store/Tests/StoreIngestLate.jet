@@ -3,17 +3,17 @@
 //
 // Omitted: `windows_directory_sync_contract_requests_flushable_handle`
 // asserts Rust's hand-built Win32 open flags; the port has no such struct
-// (Core `files.fsync` owns the directory handle).
+// (Core `files.sync_filesystem` owns the flush).
 // Rust's two threaded claims run their writers and readers in turn: Jet
 // tasks are cooperative, so the serialized ordering is what they observe.
 
-#Test("store windows store tree sync flushes directory handle") {
-    if sys.family() != "windows" -> return
+#Test("store tree sync flushes a written tree in one filesystem sync") {
     roots: store_test_temp_roots()
-    tree: files.join(roots.root, "windows-sync-tree")
+    tree: files.join(roots.root, "sync-tree")
     files.create_dir_all(files.join(tree, "nested")) ?? panic("dir")
     files.write(files.join(tree, "nested/payload"), "durable") ?? panic("payload")
-    store_fsync_tree(tree) ?? panic("fsync tree")
+    store_fsync_tree(tree) ?? panic("sync tree")
+    assert_eq(files.read(files.join(tree, "nested/payload")) ?? panic("read back"), "durable")
     store_test_drop_roots(roots)
 }
 

@@ -112,11 +112,16 @@ option_or_err: fn<T>(value: &&T?, why: &&String) -> T Err! {
 // Where source sits: `$here` is the place it is written, and a parameter
 // default `at: SourceLocation{$caller}` is the place of each call that leaves
 // `at` out. The compiler fills the fields; displays as `file:line:column`.
+// `module` is the dotted module of the place: the package's name, then the
+// `name: module` declarations that reach the file, then any inline modules
+// around it (`shop.cache`); a file no declaration reaches is the package
+// root (`shop`). "" only in a value built by hand.
 SourceLocation: struct {
     file: String
     line: Int
     column: Int
     function: String
+    module: String{""}
 }
 impl SourceLocation.Display { display: fn(self) -> String { "{self.file}:{self.line}:{self.column}" } }
 

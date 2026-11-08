@@ -1,0 +1,15 @@
+build: fn(b: Build) -[Exec, FS]> {
+    #Impure("run the generator with jet") {
+    // `jet run --allow=FS.Write gen/gen.jet -- --out=show.jet`, with the
+    // compiler running this build as the step's tool.
+    table: b.run("table", b.jet(), ["Exec", "FS"])
+    table.arg("run")
+    table.arg("--allow=FS.Write")
+    table.input("gen/gen.jet")
+    table.arg("--")
+    table.output("show.jet", flag: "--out=")
+    show: b.add_executable("show", ["show.jet"], [])
+    b.default(show)
+    }
+}
+run: fn() {}

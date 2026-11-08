@@ -702,6 +702,10 @@ sema_state_expr: fn(walk: &SemaStateWalk, tree: BodyTree, value: Expr) Never! {
         }
         .PatternTest(subject, _, _, _) -> sema_state_expr(walk, tree, subject)
         .PtrFromAddr(_, _, _, addr, _, _) -> sema_state_expr(walk, tree, addr)
+        .Pipe(head, steps, _, _) -> {
+            sema_state_expr(walk, tree, head)
+            loop step in steps -> sema_state_expr(walk, tree, step.value)
+        }
         .OrFallback(inner, fallback, _, _, _) -> {
             sema_state_expr(walk, tree, inner)
             if fallback == {

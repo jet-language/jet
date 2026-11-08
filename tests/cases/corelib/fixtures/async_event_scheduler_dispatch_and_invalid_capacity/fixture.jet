@@ -9,8 +9,7 @@ LocalState: enum { Closed }
 run: fn() {
     local: LocalState.Closed
     print("local={local == .Closed}")
-    bad: event.async_result<Int, String>(AsyncPolicy{ capacity: 0, overflow: .Block }, .Collect)
-    if bad == {
+    if event.async_result<Int, String>(AsyncPolicy{ capacity: 0, overflow: .Block }, .Collect) == {
         .Ok(_) -> print("bad accepted")
         .Err(_) -> print("invalid capacity")
     }

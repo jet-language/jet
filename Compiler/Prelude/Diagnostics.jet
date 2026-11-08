@@ -12795,6 +12795,68 @@ MethodNamedCopyOrMove: struct {
     }
 }
 
+PipeValueOutsideStep: struct {
+    impl Diagnostic {
+        code: "E0437"
+        stage: [.Parse]
+        meaning: "`<>` is written outside a pipe step"
+        detail: true
+        no_fix: .Behavior
+        fix_next: "Move `<>` into a `|>` step, or write the value itself."
+        what: fn(self) -> String { "`<>` is outside a pipe step" }
+        why: fn(self) -> String { "`<>` is the value a `|> step` receives from the line above; outside a step there is no such value" }
+        fix: fn(self) -> String { "move it into a step such as `value |> f(<>)`, or write the value itself" }
+    }
+}
+
+PipeStepWithoutValue: struct {
+    impl Diagnostic {
+        code: "E0438"
+        stage: [.Parse]
+        meaning: "A pipe step never reads `<>`, the value it receives"
+        detail: true
+        no_fix: .Behavior
+        fix_next: "Write `<>` where the value goes, or end the pipe before this step."
+        what: fn(self) -> String { "this pipe step doesn't use `<>`" }
+        why: fn(self) -> String { "each `|>` step receives the value of the line above as `<>`; a step that never reads it drops that value" }
+        fix: fn(self) -> String { "write `<>` where the value goes, such as `|> f(<>)`, or end the pipe before this step" }
+    }
+}
+
+PipeValueTouchesAngle: struct {
+    neighbor: String
+
+    impl Diagnostic {
+        code: "E0439"
+        stage: [.Parse]
+        meaning: "`<>` is written against another `<` or `>`"
+        detail: true
+        edit: .SourceEdit
+        no_fix: None
+        fix_safety: .BehaviorPreserving
+        what: fn(self) -> String { "`<>` touches `{self.neighbor}`" }
+        why: fn(self) -> String { "`<>` written against another `<` or `>` reads as a different operator" }
+        fix: fn(self) -> String { "Add a space after `<>`" }
+    }
+}
+
+EmptyTypeArgumentList: struct {
+    name: String
+
+    impl Diagnostic {
+        code: "E0440"
+        stage: [.Parse]
+        meaning: "A type is written with an empty type-argument list `<>`"
+        detail: true
+        edit: .SuggestedSourceEdit
+        no_fix: None
+        fix_safety: .BehaviorPreserving
+        what: fn(self) -> String { "`{self.name}<>` has an empty type-argument list" }
+        why: fn(self) -> String { "a type's arguments go between `<` and `>`; `<>` lists none, so it only adds noise" }
+        fix: fn(self) -> String { "Write the type arguments, such as `{self.name}<Int>`, or drop the `<>`" }
+    }
+}
+
 InvalidChannelCapacity: struct {
     capacity: String
 

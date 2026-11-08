@@ -93,6 +93,14 @@ build_session_validate: fn(state: BuildSessionState, default: Int) -> BuildSessi
     }
     loop (id, action) in state.actions {
         action_names.push(action.name)
+        // A step leaves only its declared outputs, so a step with none is
+        // reported at its own `b.run` call.
+        if action.outputs.len() == 0 {
+            diagnostic := build_session_error_diag(state, BuildSessionError.StepWithoutOutputs{value: action.name})
+            diagnostic.start = action.start
+            diagnostic.end = action.end
+            return Val(diagnostic)
+        }
         loop output in action.outputs {
             if owners.get(output) == .Val(first) -> return Val(build_session_error_diag(state, BuildSessionError.DuplicateBuildOutput{output: output, first_action: state.actions[first].name, second_action: action.name}))
             owners[output] = id
@@ -115,9 +123,8 @@ build_session_project: fn(state: BuildSessionState) -> BuildGraph Never! {
     }
     loop (id, action) in state.actions {
         target: build_session_action_target(state, id)
-        pools: if action.pools.len() == 0 -> [String]{"cpu"} else -> action.pools
         key: build_session_action_key(state, id)
-        actions.push(BuildGraphAction{id: id, name: action.name, kind: action.kind, inputs: action.inputs, outputs: action.outputs, target: target, caps: loop flag in action.caps -> build_session_cap_name(flag), pools: pools, legacy_wrapper: action.legacy, plugin: action.plugin, compiler_owned: action.compiler_owned, key: key, cache_hit: None})
+        actions.push(BuildGraphAction{id: id, name: action.name, kind: "generic", inputs: action.inputs, outputs: action.outputs, target: target, caps: loop flag in action.caps -> build_session_cap_name(flag), pools: [String]{"cpu"}, plugin: None, compiler_owned: false, key: key, cache_hit: None})
         keys.push(BuildGraphActionKey{action: action.name, key: key})
         loop output in action.outputs {
             row := file_rows.get(output) ?? BuildGraphFile{path: output, owner: None, consumers: [Int]{}, targets: [Int]{}}
@@ -182,8 +189,9 @@ build_session_finish: fn(session: &BuildSession, returned: BuildSessionValue) ->
 // the selected targets the build neither compiles, checks nor produces with actions.
 // `options` are the build options fn build set, its layer of the build-option order.
 // `source` is the target's first source, the one it compiles or checks; `sources` are every
-// source it declares, which `jet build` requires to exist before any action runs.
-BuildPlanExecutable: struct { name: String source: String sources: [String] }
+// source it declares, which `jet build` requires to exist before any action runs. `target`
+// is its handle id.
+BuildPlanExecutable: struct { name: String source: String sources: [String] target: Int }
 BuildPlanSelection: struct { executables: [BuildPlanExecutable] libraries: [BuildPlanExecutable] unsupported: [String] options: [BuildSessionOption] }
 build_plan_selection: fn(plan: BuildSessionPlan) -> BuildPlanSelection Never! {
     permit: plan.storage.guard_read()
@@ -221,9 +229,9 @@ build_plan_selection: fn(plan: BuildSessionPlan) -> BuildPlanSelection Never! {
     loop index in order {
         target: permit.value.targets[index]
         if target.kind == "executable" && target.sources.len() > 0 {
-            executables.push(BuildPlanExecutable{name: target.name.copy(), source: target.sources[0].copy(), sources: target.sources.copy()})
+            executables.push(BuildPlanExecutable{name: target.name.copy(), source: target.sources[0].copy(), sources: target.sources.copy(), target: index})
         } else if target.kind == "library" && target.sources.len() > 0 {
-            libraries.push(BuildPlanExecutable{name: target.name.copy(), source: target.sources[0].copy(), sources: target.sources.copy()})
+            libraries.push(BuildPlanExecutable{name: target.name.copy(), source: target.sources[0].copy(), sources: target.sources.copy(), target: index})
         } else if target.actions.len() == 0 {
             unsupported.push("{target.name} ({target.kind})")
         }
@@ -244,11 +252,12 @@ BuildPlanExecution: struct {
     plugins: [BuildSessionPlugin]
     actions: [BuildSessionAction]
     targets: [BuildSessionTarget]
+    files: [BuildSessionFile]
     default: Int
 }
 build_plan_execution: fn(plan: BuildSessionPlan) -> BuildPlanExecution Never! {
     permit: plan.storage.guard_read()
-    BuildPlanExecution{toolchains: permit.value.toolchains.copy(), signing: permit.value.signing.copy(), probes: permit.value.probes.copy(), plugins: permit.value.plugins.copy(), actions: permit.value.actions.copy(), targets: permit.value.targets.copy(), default: plan.default}
+    BuildPlanExecution{toolchains: permit.value.toolchains.copy(), signing: permit.value.signing.copy(), probes: permit.value.probes.copy(), plugins: permit.value.plugins.copy(), actions: permit.value.actions.copy(), targets: permit.value.targets.copy(), files: permit.value.files.copy(), default: plan.default}
 }
 // Every module `build: fn` generated, selected or not (`write_generated: on`
 // writes them all for inspection), in path order.

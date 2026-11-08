@@ -10,6 +10,7 @@ use {
         access_sigil,
         ArithmeticOperation,
         ArithmeticPolicyFact,
+        Binding,
         BinOp,
         BodyNode,
         NodeKind,
@@ -31,12 +32,15 @@ use {
         Item,
         IntegerWidth,
         CopyFact,
+        Marker,
         OperatorMarker,
         ParamZone,
+        PipeStep,
         QuantityKind,
         Span,
         StrFormat,
         StrPart,
+        Stmt,
         Symbol,
         SymbolID,
         SymbolKind,
@@ -5631,6 +5635,7 @@ sema_check_expression_cold: fn(expr: Expr, expected: Type?, environment: SemaSco
             sema_expr_expected_owned(sema_tree_node(pointer, TExprKind.RawOf{value: checked}, span), expected, environment, program, diagnostics)
         }
         .PtrFromAddr(alias, alias_span, element, address, span, _) -> sema_expr_check_pointer_from_address(alias, alias_span, element, address, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+        .Pipe(head, steps, span, _) -> sema_expr_check_pipe(head, steps, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         .Tainted(value, tag_value, span, _) -> {
             if tag_value != None && !sema_taint_validate_tag(tag_value, environment, program, span, diagnostics) -> return None
             sema_check_expression(value, expected, environment, program, scopes, state, tail_store, context, diagnostics)
@@ -5648,6 +5653,44 @@ sema_check_expression_cold: fn(expr: Expr, expected: Type?, environment: SemaSco
 sema_expr_check_paren: fn(value: Expr, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     checked: sema_check_expression(value, expected, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
     Val(TExpr{ty: checked.ty, kind: checked.kind, span: span})
+}
+
+// A pipe `head |> s1 |> … |> sN` is the hand-named form `p0: head`,
+// `p1: s1`, …, `sN` run in a frame of its own, where each step reads the
+// value before it through its hidden name (`<>`). A head that is a name has
+// no binding: the parser gave the first step that name, so it reads the head
+// in place, as `f(raw)` does. The bindings go through the ordinary statement
+// checker, so the pipe and the named form check, own and lower the same way.
+sema_expr_check_pipe: fn(head: Expr, steps: [PipeStep], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    // Step k reads its hidden name, bound to the head (k = 0) or to step k - 1.
+    bindings := [Stmt]{}
+    in_place: if head == .Ident(name, _, _) -> name == steps[0].name else -> false
+    if !in_place -> bindings.push(sema_expr_pipe_binding(steps[0].name, head, steps[0].span))
+    loop index in 1..<steps.len() -> bindings.push(sema_expr_pipe_binding(steps[index].name, steps[index - 1].value, steps[index].span))
+    last: steps[steps.len() - 1]
+    // copy: the scope's return type is read across the frame the pipe enters.
+    return_type: scopes.return_type.copy()
+    mark: sema_scope_mark(scopes)
+    sema_scope_enter(scopes, state, "pipe@{span.start}")
+    checked_bindings: sema_check_statements(bindings, return_type, environment, program, scopes, state, tail_store, context, diagnostics, scopes.loop_depth)
+    if !checked_bindings.complete {
+        sema_scope_leave(scopes, state)
+        return None
+    }
+    value: sema_check_expression(last.value, expected, environment, program, scopes, state, tail_store, context, diagnostics) ?? {
+        sema_scope_leave(scopes, state)
+        return None
+    }
+    sema_single_use_leave_scope(scopes, state, diagnostics)
+    sema_scope_rollback(scopes, mark)
+    body := checked_bindings.value
+    body.push(TStmt.ExprStmt{value: value, span: expr_span(last.value)})
+    Val(sema_tree_node(value.ty, TExprKind.InlineBlock{body: body}, span))
+}
+
+sema_expr_pipe_binding: fn(name: String, init: Expr, span: Span) -> Stmt Never! {
+    // copy: the binding owns its initializer; the pipe's AST keeps its own.
+    Stmt.Val{binding: Binding{mutable: false, markers: [Marker]{}, reactive_upgrade: false, meta: None, name: name, name_span: span, sigil_span: None, pattern: None, ty: None, ty_span: None, init: init.copy(), is_comptime: false, ct: None, uninit: false, arena_view: false, string_view: false, gc_promotion: None, gc_transferred: false}}
 }
 
 sema_expr_check_call_expr: fn(call: Call, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {

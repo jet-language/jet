@@ -1017,6 +1017,10 @@ sema_core_collect_expr: fn(expr: Expr, imports: [SemaCoreImport], registered: [S
             sema_core_collect_type(elem, registered, used, spans, Val(span))
             sema_core_collect_expr(addr, imports, registered, used, spans, callbacks)
         }
+        .Pipe(head, steps, _, _) -> {
+            sema_core_collect_expr(head, imports, registered, used, spans, callbacks)
+            loop step in steps -> sema_core_collect_expr(step.value, imports, registered, used, spans, callbacks)
+        }
         .Field(base, member, span, _) -> {
             if base == {
                 .Ident(alias, _, _) -> {

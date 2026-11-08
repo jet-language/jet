@@ -2,7 +2,12 @@ use files: core.files
 
 build: fn(b: Build) -[Exec, FS]> {
     #Impure("declare a stamp action") {
-        action: b.action("stamp", ["impure.jet"], ["stamp.txt"], ["sh", "-c", "printf ok > stamp.txt"], ["Exec", "FS"])
+        shell: b.probe("shell", "find_program", "sh")
+        action: b.run("stamp", b.found(shell), ["Exec", "FS"])
+        action.arg("-c")
+        action.arg("printf ok > stamp.txt")
+        action.reads("impure.jet")
+        action.writes("stamp.txt")
         app: b.add_executable("probe_app", ["impure.jet"], [action])
         b.default(app)
     }

@@ -1,14 +1,13 @@
-# tests/browser_bidi.rs::native_bidi_profile_drives_isolated_session_and_redacts_trace at tests/browser_bidi.rs:936; hand-port (mock BiDi endpoint: tests/fixtures/browser_bidi_mock.mjs on a {free-port}; the program is tests/fixtures/browser_bidi.jet (include_str!))
+# tests/browser_bidi.rs::native_bidi_profile_drives_isolated_session_and_redacts_trace at tests/browser_bidi.rs:936; hand-port (mock BiDi endpoint: tests/fixtures/BrowserBidiMock.jet on a {free-port}; the program is tests/fixtures/browser_bidi.jet (include_str!))
 fixture: native_bidi_profile_drives_isolated_session_and_redacts_trace.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
 env: JETPACK_ROOT={work}/jetpack
 env: JETPACK_ENV=1
-requires: tool:node
 write: browser_bidi.jet native_bidi_profile_drives_isolated_session_and_redacts_trace.fixture/run.template
 step: jet build browser_bidi.jet
 exit: 0
-session mock raw: node {root}/tests/fixtures/browser_bidi_mock.mjs script {free-port:mock} mock.json
+session mock raw: {jet} run --allow=Exec,FS.Read,FS.Write,Net,Time {root}/tests/fixtures/BrowserBidiMock.jet -- script {free-port:mock} mock.json
 await: file mock.ready timeout 30s
 step run: built
 exit: 0

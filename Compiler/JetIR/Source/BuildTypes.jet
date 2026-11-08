@@ -338,18 +338,21 @@ ir_value_type_laid: fn(m: &IRModule, p: IRProgram, ty: Type, laying: [String]) -
     }
     if ir_set_element(ty) == .Val(element) {
         // The ordered Map<T, Unit> header: len at 0, cap at 8, entry data at
-        // 16; its element is a map key.
+        // 16; its element is a map key. A Rank's adds its order word at 24
+        // (BuildSets.jet).
         key: ir_value_type_in(m, p, element, laying) ?? return None
         if ir_map_key_kind(m, key) == "" -> return None
-        interned: ir_intern_type(m, type_carrier_identity(ty), ir_layout(IRTypeKind.Aggregate, ty, 24, 8, IRClass.Pointer, false, 64, ""))
+        size: if ir_rank_type(ty) -> 32 else -> 24
+        interned: ir_intern_type(m, type_carrier_identity(ty), ir_layout(IRTypeKind.Aggregate, ty, size, 8, IRClass.Pointer, false, 64, ""))
         return Val(ir_mark_counted(m, interned))
     }
     if ir_priority_queue_element(ty) == .Val(element) {
-        // The List header over the heap: len at 0, cap at 8, element data at
-        // 16; its element needs a native order.
-        heap_element: ir_value_type_in(m, p, element, laying) ?? return None
-        if ir_map_key_kind(m, heap_element) == "" -> return None
-        interned: ir_intern_type(m, type_carrier_identity(ty), ir_layout(IRTypeKind.Aggregate, ty, 24, 8, IRClass.Pointer, false, 64, ""))
+        // The List header over the queue (len at 0, cap at 8, element data
+        // at 16) and its order word at 24: 0 for the element's native order
+        // (a binary max-heap), else the key constructor's `before` function
+        // value (pop order, BuildPriorityQueues.jet).
+        _: ir_value_type_in(m, p, element, laying) ?? return None
+        interned: ir_intern_type(m, type_carrier_identity(ty), ir_layout(IRTypeKind.Aggregate, ty, 32, 8, IRClass.Pointer, false, 64, ""))
         return Val(ir_mark_counted(m, interned))
     }
     if ir_task_element(ty) != None -> return Val(ir_task_row(m, ty))
@@ -595,7 +598,7 @@ ir_handle_row_laid: fn(m: &IRModule, p: IRProgram, ty: Type, name: String) -> In
 // methods and fields the evaluator answers (ir_host_method).
 ir_host_value_name: fn(name: String) -> Bool Never! {
     if name == {
-        "Build" | "BuildPlan" | "BuildTarget" | "BuildAction" | "BuildToolchain" | "BuildProbe" | "BuildSigningIdentity" | "BuildError" | "Dev" | "SourceSpan" -> true
+        "Build" | "BuildPlan" | "BuildTarget" | "BuildAction" | "BuildToolchain" | "BuildProbe" | "BuildSigningIdentity" | "BuildFile" | "BuildError" | "Dev" | "SourceSpan" -> true
         "ProgramInfo" | "TypeInfo" | "FunctionInfo" | "PackageInfo" | "CompilerDefinition" | "CompilerReference" | "CompilerCall" | "CompilerStructuralNode" -> true
         "LayoutInfo" | "FieldInfo" | "MethodInfo" | "TypeParamInfo" | "MarkerInfo" | "StateInfo" | "TransitionInfo" | "FactInfo" | "DimensionInfo" | "DimensionAxis" | "EffectInfo" | "ArithmeticOperationInfo" -> true
         "CompilerError" | "CompilerDiagnostic" | "CompilerLexed" | "CompilerToken" | "CompilerSyntaxTree" | "CompilerNode" | "CompilerChecked" | "CompilerSemanticIndex" | "CompilerSourceMap" | "CompilerGeneratedLine" -> true
