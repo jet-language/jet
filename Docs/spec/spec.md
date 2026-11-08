@@ -4016,10 +4016,8 @@ and the test command contract is covered by
 [`tests/measurement_tiers.rs`](../../tests/measurement_tiers.rs). The separate
 compiler-speed dashboard at [`Tools/perf/dashboard.sh`](../../Tools/perf/dashboard.sh)
 uses its own one-warmup, twenty-sample policy and six clean/no-change/edit
-production rows; [`Tools/perf/ci-perf-check.sh`](../../Tools/perf/ci-perf-check.sh)
-rejects missing or mismatched corpus, identity, parity, variance, and budget
-evidence. Do not use dashboard numbers as a substitute for the `.measure`
-claim's execution record.
+production rows. Do not use dashboard numbers as a substitute for the
+`.measure` claim's execution record.
 
 ## Size-oriented builds and language tooling
 

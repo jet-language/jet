@@ -4,11 +4,10 @@ Jet has one compiler meaning and one native build path. `jet run` and `jet dev`
 compile at O0 through it and run the linked image from memory, without writing
 an executable (D-EXEC2=A); the release profile produces an optimized artifact. This page is
 for compiler contributors and users reasoning
-about build/run trade-offs. The executable perf schema and gate are in
-[`Tools/perf/ci-perf-check.sh`](../../../Tools/perf/ci-perf-check.sh), with
-scenario planning in
-[`Tools/perf/test-ci-perf-check.sh`](../../../Tools/perf/test-ci-perf-check.sh);
-[R12 and I9](../philosophy.md) are the semantic constraints.
+about build/run trade-offs. The phase budget gate is
+[`Tools/perf/budget/Check.jet`](../../../Tools/perf/budget/Check.jet), which
+`Compiler/test.jet` runs; [R12 and I9](../philosophy.md) are the semantic
+constraints.
 
 ## One core, one build path
 
