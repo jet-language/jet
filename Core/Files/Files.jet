@@ -863,6 +863,16 @@ fsync: fn(path: String | Path) IOError! -[FS.Write]> {
 }
 
 
+/// Flush every dirty file and directory on the filesystem holding `path` in
+/// one `syncfs`. Write a whole tree, sync once, then publish it with a rename
+/// instead of syncing file by file.
+sync_filesystem: fn(path: String | Path) IOError! -[FS.Write]> {
+    text: path_text(path)
+    files8_preflight("FS.Write", .Flush, text)
+    core.files.__syncfs_raw(text)
+}
+
+
 // A final link is followed, so a broken link does not exist; `lexists` sees the link itself.
 exists_impl: fn(path: String) -> Bool Never! {
     row: core.files.__stat_at(-1, path, true) ?? return false

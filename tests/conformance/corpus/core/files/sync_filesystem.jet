@@ -1,0 +1,15 @@
+// core-conformance: core.files.sync_filesystem
+use {
+    files: core.files
+    testing: core.testing
+}
+
+run: fn() {
+    root: testing.temp_dir("files-sync-filesystem")
+    tree: Path.from(root).join("tree")
+    files.create_dir_all(tree.join("nested")) ?? panic("seed tree")
+    files.write(tree.join("nested").join("fixture.txt"), "fixture") ?? panic("seed")
+    files.sync_filesystem(tree) ?? panic("sync_filesystem")
+    print(files.read(tree.join("nested").join("fixture.txt")) ?? panic("read back"))
+    files.remove_all(root) ?? panic("cleanup")
+}
