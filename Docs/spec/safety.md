@@ -5643,98 +5643,98 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Core",
       "file": "Core/Encoding/Stream.jet",
-      "line": 324,
+      "line": 360,
       "column": 9,
       "reason": "the shared UTF-8 validator just accepted this owned byte allocation"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Stream.jet",
-      "line": 395,
+      "line": 500,
       "column": 9,
       "reason": "the shared UTF-8 validator just accepted this owned ASCII token"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Stream.jet",
-      "line": 400,
+      "line": 505,
       "column": 13,
       "reason": "retain a validated number lexeme in the private event carrier until typed decoding"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Stream.jet",
-      "line": 602,
+      "line": 697,
       "column": 9,
       "reason": "transfer already validated UTF-8 storage to inspect its actual owned capacity"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Stream.jet",
-      "line": 613,
+      "line": 708,
       "column": 9,
       "reason": "the private numeric event is projected only into the matching typed tree carrier"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Stream.jet",
-      "line": 989,
+      "line": 1084,
       "column": 5,
       "reason": "the shared UTF-8 validator just accepted this owned allocation"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Stream.jet",
-      "line": 1001,
+      "line": 1096,
       "column": 5,
       "reason": "the byte position was checked against this String's storage length"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Stream.jet",
-      "line": 1565,
+      "line": 1660,
       "column": 5,
       "reason": "the shared UTF-8 validator accepted this exact owned formatter buffer"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Stream.jet",
-      "line": 1576,
+      "line": 1671,
       "column": 5,
       "reason": "transfer the owned UTF-8 String buffer before re-spelling its shortest digits"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Stream.jet",
-      "line": 1722,
+      "line": 1817,
       "column": 13,
       "reason": "retain a validated number lexeme in the private event carrier"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Stream.jet",
-      "line": 1727,
+      "line": 1822,
       "column": 13,
       "reason": "project the native compiler-private Bytes carrier into its event"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Stream.jet",
-      "line": 1793,
+      "line": 1888,
       "column": 13,
       "reason": "classify the private Bytes carrier without borrowing or exposing its payload"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Stream.jet",
-      "line": 1936,
+      "line": 2031,
       "column": 5,
       "reason": "owned validated UTF-8 allocation transfers in the encoding source seam"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Stream.jet",
-      "line": 1973,
+      "line": 2068,
       "column": 5,
       "reason": "exercise the typed Encode byte carrier at the JSON preflight boundary"
     },
@@ -10474,20 +10474,20 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Core | Core/Encoding/Stream.jet | 30:5 | "check the private Bytes variant immediately before borrowing its backing" |
 | Core | Core/Encoding/Stream.jet | 37:5 | "the shared parser validated this exact numeric lexeme" |
 | Core | Core/Encoding/Stream.jet | 43:5 | "retain decoded JSON text until the target Decode contract is known" |
-| Core | Core/Encoding/Stream.jet | 324:9 | "the shared UTF-8 validator just accepted this owned byte allocation" |
-| Core | Core/Encoding/Stream.jet | 395:9 | "the shared UTF-8 validator just accepted this owned ASCII token" |
-| Core | Core/Encoding/Stream.jet | 400:13 | "retain a validated number lexeme in the private event carrier until typed decoding" |
-| Core | Core/Encoding/Stream.jet | 602:9 | "transfer already validated UTF-8 storage to inspect its actual owned capacity" |
-| Core | Core/Encoding/Stream.jet | 613:9 | "the private numeric event is projected only into the matching typed tree carrier" |
-| Core | Core/Encoding/Stream.jet | 989:5 | "the shared UTF-8 validator just accepted this owned allocation" |
-| Core | Core/Encoding/Stream.jet | 1001:5 | "the byte position was checked against this String's storage length" |
-| Core | Core/Encoding/Stream.jet | 1565:5 | "the shared UTF-8 validator accepted this exact owned formatter buffer" |
-| Core | Core/Encoding/Stream.jet | 1576:5 | "transfer the owned UTF-8 String buffer before re-spelling its shortest digits" |
-| Core | Core/Encoding/Stream.jet | 1722:13 | "retain a validated number lexeme in the private event carrier" |
-| Core | Core/Encoding/Stream.jet | 1727:13 | "project the native compiler-private Bytes carrier into its event" |
-| Core | Core/Encoding/Stream.jet | 1793:13 | "classify the private Bytes carrier without borrowing or exposing its payload" |
-| Core | Core/Encoding/Stream.jet | 1936:5 | "owned validated UTF-8 allocation transfers in the encoding source seam" |
-| Core | Core/Encoding/Stream.jet | 1973:5 | "exercise the typed Encode byte carrier at the JSON preflight boundary" |
+| Core | Core/Encoding/Stream.jet | 360:9 | "the shared UTF-8 validator just accepted this owned byte allocation" |
+| Core | Core/Encoding/Stream.jet | 500:9 | "the shared UTF-8 validator just accepted this owned ASCII token" |
+| Core | Core/Encoding/Stream.jet | 505:13 | "retain a validated number lexeme in the private event carrier until typed decoding" |
+| Core | Core/Encoding/Stream.jet | 697:9 | "transfer already validated UTF-8 storage to inspect its actual owned capacity" |
+| Core | Core/Encoding/Stream.jet | 708:9 | "the private numeric event is projected only into the matching typed tree carrier" |
+| Core | Core/Encoding/Stream.jet | 1084:5 | "the shared UTF-8 validator just accepted this owned allocation" |
+| Core | Core/Encoding/Stream.jet | 1096:5 | "the byte position was checked against this String's storage length" |
+| Core | Core/Encoding/Stream.jet | 1660:5 | "the shared UTF-8 validator accepted this exact owned formatter buffer" |
+| Core | Core/Encoding/Stream.jet | 1671:5 | "transfer the owned UTF-8 String buffer before re-spelling its shortest digits" |
+| Core | Core/Encoding/Stream.jet | 1817:13 | "retain a validated number lexeme in the private event carrier" |
+| Core | Core/Encoding/Stream.jet | 1822:13 | "project the native compiler-private Bytes carrier into its event" |
+| Core | Core/Encoding/Stream.jet | 1888:13 | "classify the private Bytes carrier without borrowing or exposing its payload" |
+| Core | Core/Encoding/Stream.jet | 2031:5 | "owned validated UTF-8 allocation transfers in the encoding source seam" |
+| Core | Core/Encoding/Stream.jet | 2068:5 | "exercise the typed Encode byte carrier at the JSON preflight boundary" |
 | Core | Core/Encoding/XmlEngine.jet | 132:5 | "all callers iterate or check the UTF-8 byte bounds before borrowing this byte" |
 | Core | Core/Encoding/XmlEngine.jet | 170:5 | "the caller selected a scalar-aligned window of validated UTF-8 bytes" |
 | Core | Core/Encoding/XmlEngine.jet | 2180:5 | "attribute whitespace compaction preserves the already validated UTF-8 byte sequence" |
