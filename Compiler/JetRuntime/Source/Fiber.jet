@@ -14,11 +14,12 @@
 // mapping32 size40 next48 task56 action64 timerArmed72 deadline80
 // timerKind88 timerTarget96 lotNext104 lotAddress112 lotResult120
 // lotLinked128 timerFiring136 lotSequence144 timerSequence152
-// heapChild160 heapSibling168 heapPrevious176, and the fiber's TCB at
-// FIBER_TCB. state: RUNNING, PARKING (the fiber is switching out to park),
-// PARKED (its carrier saw the switch complete), NOTIFIED (woken while
-// PARKING: the carrier resumes it at once) and RUNNABLE (queued). next links
-// the root's ready FIFO and its pool of idle fibers.
+// heapChild160 heapSibling168 heapPrevious176 cpuNs184 sliceStart192, and
+// the fiber's TCB at FIBER_TCB. state: RUNNING, PARKING (the fiber is
+// switching out to park), PARKED (its carrier saw the switch complete),
+// NOTIFIED (woken while PARKING: the carrier resumes it at once) and
+// RUNNABLE (queued). next links the root's ready FIFO and its pool of idle
+// fibers.
 //
 // The switch (Linux.jet os_fiber_switch_i64) moves the alloc thread cache
 // (TCB @320..@447) between the carrier's TCB and the fiber's, so cached
@@ -190,6 +191,7 @@ fiber_run: fn(root: I64, record: I64, fiber: I64) {
     loop {
         sync_store(fiber, FIBER_RUNNING)
         sync_store(wrapping(fiber + I64{16}), record)
+        if (fiber_clock_on != I64{0}) -> sync_store(wrapping(fiber + I64{192}), sync_thread_cpu_ns())
         fiber_cache_move(tcb, fiber_tcb)
         fiber_gs_write(root, fiber_tcb)
         #Unsafe("the fiber's saved stack is owned by no running thread: it is fresh, pooled or committed PARKED/RUNNABLE, and this carrier alone took it") {
@@ -197,6 +199,7 @@ fiber_run: fn(root: I64, record: I64, fiber: I64) {
         }
         fiber_gs_write(root, tcb)
         fiber_cache_move(fiber_tcb, tcb)
+        if (fiber_clock_on != I64{0}) -> fiber_clock_settle(fiber)
         action: sync_load(wrapping(fiber + I64{64}))
         if (action == FIBER_PARK) {
             if (sync_cas(fiber, FIBER_PARKING, FIBER_PARKED) == FIBER_PARKING) {
@@ -233,6 +236,50 @@ fiber_run: fn(root: I64, record: I64, fiber: I64) {
         if (action == FIBER_DEAD) -> alloc_unmap(sync_load(wrapping(fiber + I64{32})), sync_load(wrapping(fiber + I64{40})))
         return
     }
+}
+
+// The task CPU clock (jet_rt_task_cpu_ns) is off, one load and a branch per
+// switch, until its first read turns it on for good. From then the carrier
+// stamps a fiber's sliceStart192 with its own thread CPU time as it switches
+// the fiber in and adds the slice to cpuNs184 as it switches it out, so a
+// fiber's clock counts only the time it ran, on whichever carriers. Both
+// words are touched only on the carrier running the fiber, by the carrier or
+// the fiber itself; a sliceStart of 0 is a slice the clock did not stamp.
+fiber_clock_on := I64{0}
+
+fiber_clock_settle: fn(fiber: I64) {
+    start: sync_load(wrapping(fiber + I64{192}))
+    if (start == I64{0}) -> return
+    sync_store(wrapping(fiber + I64{184}), wrapping(sync_load(wrapping(fiber + I64{184})) + sync_thread_cpu_ns() - start))
+    sync_store(wrapping(fiber + I64{192}), I64{0})
+}
+
+// The CPU time the running task has used, in nanoseconds: its fiber's run
+// time over every slice since the clock's first read, else (a plain thread)
+// the thread's CPU time. Only the difference of two reads by one task means
+// anything: a pooled fiber's clock runs on across the tasks it carries.
+#Export(c) jet_rt_task_cpu_ns: fn() -> I64 {
+    fiber: fiber_current()
+    now: sync_thread_cpu_ns()
+    if (fiber == I64{0}) -> return now
+    if (fiber_clock_on == I64{0}) {
+        #Unsafe("an idempotent install: every writer stores 1, and a carrier that read the old 0 left its slice unstamped, which the read below stamps") { fiber_clock_on = I64{1} }
+    }
+    start: sync_load(wrapping(fiber + I64{192}))
+    spent: sync_load(wrapping(fiber + I64{184}))
+    if (start == I64{0}) {
+        sync_store(wrapping(fiber + I64{192}), now)
+        return spent
+    }
+    wrapping(spent + now - start)
+}
+
+// The running task's identity: its fiber's TCB address (the fiber's identity
+// word, kept across carriers), else the thread's kernel id.
+#Export(c) jet_rt_task_identity: fn() -> I64 {
+    fiber: fiber_current()
+    if (fiber == I64{0}) -> return thread_tid()
+    sync_load(wrapping(fiber + I64{24}))
 }
 
 // A pooled fiber, else a fresh one; 0 when no stack can be mapped.

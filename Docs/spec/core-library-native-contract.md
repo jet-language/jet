@@ -548,8 +548,11 @@ where touched, under a guard page; its header and TCB share the top page, so
 a task parked in a shallow wait holds about one page beside its task record.
 Each stack is two kernel mappings, so `vm.max_map_count` (65530 by default)
 bounds live fibers near 32000; a task that finds no stack runs on its carrier
-and its waits block that thread. Cancellation requests deliver at wait
-points, while the native Check
+and its waits block that thread. A task's CPU clock (`jet_rt_task_cpu_ns`)
+is its fiber's run time summed over the carriers that ran it, and its
+identity (`jet_rt_task_identity`) is its fiber's, so a trace keyed by task
+stays whole across parks; on a plain thread both are the thread's.
+Cancellation requests deliver at wait points, while the native Check
 rail delivers explicit session interrupts. Post-call propagation observes only
 an already-delivered stop, so a new request cannot invalidate an initialized
 result. Shielded cleanup defers delivery until its outermost boundary exits.
