@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6679,
-    "rev": 95910,
+    "rev": 95913,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -47662,11 +47662,11 @@
         {
           "n": 8,
           "text": "The DataTree spelling is gone: every data_tree_*/DATA_TREE_*/DataTree name in the runtime, RuntimeGenerators, Backend, IR, LSP, Devserver, rows, known-failing lines and Docs/spec becomes its Dyn name in one cutover (Rename.jet), with no alias. Docs/audits, research, proposals and Tools/tower stay untouched. jet check of the compiler and the touched rows pass.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T20:27:13.291Z"
+          "evidence": "f14ce0e216 (DataTree to Dyn, one cutover, 91 files, no alias). git grep DataTree|data_tree_|DATA_TREE_ at 0a8122edeb, excluding Docs/audits, research, proposals and Tools/tower: 2 hits, both prose about the retired name (Docs/spec/diagnostics.md:390 'not restored as an alias', and one case comment). Land.jet census of 574a9fd134 by seed a0_034: compiler check rc=0 rows=0, build rc=0, runtime rc=0, selfcheck rc=0 (receipt b32e7a12...). Touched rows (TestSystemLead-2): dyn_ cases 7 PASS, 3 KF, 3 SKIP-HOST; goldens DynArrayAccepts 3/3, Data/Dyn 42/42; rtgen current.",
+          "at": "2026-11-08T00:32:52.815Z"
         }
       ],
       "refs": [],
@@ -47680,7 +47680,7 @@
       "parentId": "c0iuv3zr",
       "needsAcceptance": false,
       "created": "2026-10-02T18:52:06.045Z",
-      "updated": "2026-11-07T22:38:33.884Z",
+      "updated": "2026-11-08T00:32:52.815Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
@@ -69987,6 +69987,11 @@
         {
           "at": "2026-11-08",
           "by": "Main",
+          "text": "c3 browser drivers, dev 574a9fd134. Landed: Browser.launch for locked Firefox over BiDi (50af4c1f70) and locked Chromium through locked chromedriver with CDP (40b6a16571; 6 browser_lock rows PASS). The CompiledWorkloads web tier runs through Tools/web-test/BrowserRun.jet, not node (73c14677c6; CompiledWorkloads 11/0). notebook-test/acceptance, web-test/acceptance, web-dev-test/hybrid and reference_app are Jet and the .mjs are deleted (a188650c5f; same verdicts before and after on this host, end-to-end runs pending with browsers on PATH). The acceptance fixtures compile and http-ready has Net (574a9fd134). Still on node: canvas-test/driver.mjs (forms_table template), web-test/sourcemap.mjs (blocked: the web build emits no sourceMappingURL, so the sourcemap row fails before the driver; needs a web-build owner), canvas-test/native-lifecycle.mjs (blocked: jet dev --canvas is unbuilt, E2104, #6386), and web-test/live-reload.mjs (gauntlet only). Then Tools/perf and Tools/gauntlet (#5072 c7/c8)."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
           "text": "Gate defect found by TestSystemLead-2 at 7b15e3ba2e: Tools/agent/LaneCheck.jet checks a Jetpack source as a standalone file, outside the assembled Jetpack unit (the Foundation CoreImports aliases plus the area closure), so every package symbol is unknown. 'LaneCheck Jetpack' checks run.jet without the assembled sources and fails at run.jet:13 (no cli_jetpack_main). Until LaneCheck checks Jetpack paths through Jetpack/Bootstrap/Check.jet --area <Area>, a Jetpack patch's receipt is that check plus the area's claims."
         },
         {
@@ -71261,7 +71266,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T17:15:48.068Z",
-      "updated": "2026-11-08T00:02:22.645Z",
+      "updated": "2026-11-08T00:30:51.083Z",
       "updatedBy": "Main",
       "goals": [
         "G1"
@@ -73816,6 +73821,11 @@
         {
           "at": "2026-11-08",
           "by": "Main",
+          "text": "c65: release a0_035 is underway. Land.jet census of 50af4c1f70 by seed a0_034: check, build, runtime and selfcheck rc=0 with 0 rows (preflight receipt 6ae49176...). Tools/release admit 50af4c1f70 --check-gate admitted it, and the admit run started (chain slot, work dir under the release cache). When a0_035 publishes, fresh-c65.sh runs with a0_035 at 50af4c1f70 on a quiet machine."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
           "text": "c65 FAIL 4 settled: in isolation at dev ef5223d6a4, the Jetpack/CLI 'sandbox outputs: regular outputs publish, a FIFO output is refused at once and nothing is published' claim passes 3 of 3 (the engine unit assembled with Assemble.jet aot, then jet test src/jetpack.jet --serial --filter, with seed a0_034). The fresh-run FAIL was its 3000 ms elapsed assert (BuildExecutor.jet:265) under the machine load of 17:56. So every real c65 FAIL at 4df47ce6da is fixed on dev or is seed staleness. Next: Land.jet census, then Tools/release admit at the commit after the lander lands, then fresh-c65 with the new release on a quiet machine."
         },
         {
@@ -74513,7 +74523,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-29T02:09:17.141Z",
-      "updated": "2026-11-08T00:03:34.833Z",
+      "updated": "2026-11-08T00:11:56.526Z",
       "updatedBy": "Main",
       "criteriaLastN": 74
     },
@@ -187050,6 +187060,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-08T00:32:52.815Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c07rizte",
+      "note": "#8"
+    },
+    {
+      "at": "2026-11-08T00:30:51.083Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0pgowhn",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-08T00:11:56.526Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0h06654",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-08T00:03:34.833Z",
       "by": "Main",
