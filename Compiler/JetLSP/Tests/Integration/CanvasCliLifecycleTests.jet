@@ -345,8 +345,8 @@ use {
         server: RunningNotebook{child: child.move()}
         defer -> drop(server)
         wait_for_notebook_server(port, token)
-        output: Command.new(command_path("node", "NODE")).current_dir(env.var("CARGO_MANIFEST_DIR").unwrap())
-            .args(["Tools/notebook-test/acceptance.mjs", "--browser", browser, "--port", port_text, "--token", token, "--save-path", document.to_str().unwrap(), "--merge-path", merge_document.to_str().unwrap()])
+        output: Command.new(env.var("CARGO_BIN_EXE_jet").unwrap()).current_dir(env.var("CARGO_MANIFEST_DIR").unwrap())
+            .args(["run", "--allow=Env,Exec,FS,IO,Net,Time", "Tools/notebook-test/Acceptance.jet", "--", "--browser", browser, "--port", port_text, "--token", token, "--save-path", document.to_str().unwrap(), "--merge-path", merge_document.to_str().unwrap()])
             .output().unwrap()
         assert(output.status.success(), "{browser} notebook browser journey failed:\n{String.from_utf8_lossy(output.stdout)}\n{String.from_utf8_lossy(output.stderr)}")
         ran += 1

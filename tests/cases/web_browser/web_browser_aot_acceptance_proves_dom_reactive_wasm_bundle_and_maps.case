@@ -1,8 +1,10 @@
 # tests/web_browser.rs::web_browser_aot_acceptance_proves_dom_reactive_wasm_bundle_and_maps
 # Exact five-source preparation/build/publish sequence and original browser oracle.
 # PENDING-SAME-HEAD/PENDING-GRAMMAR(batch-four probes), runtime UNRUN.
-requires: probe chromium --version
-requires: probe node --version
+requires: os-name:linux
+requires: tool:chromium
+requires: tool:chromedriver
+env: JET_PROJECT_ROOT={work}
 fixture: fixtures/acceptance
 step: jet build --target=web app.jet
 cwd: {work}/click_src
@@ -42,8 +44,9 @@ end for
 spawn server: jet run --allow=Env,FS,IO,Net,Time {root}/Tools/web-test/Serve.jet -- --port {free-port:static} --root {work}
 stdout: null
 poll ready: jet run {root}/tests/cases/web_browser/fixtures/http-ready.jet 127.0.0.1:{free-port:static} /click/web.manifest.json - - until stdout: ~ "200 OK" timeout 10s every 50ms # the static server serves the manifest
-step: {env:JET_WEB_NODE|env:NODE|node} {root}/Tools/web-test/acceptance.mjs --port {free-port:static}
-env: CHROMIUM={env:JET_WEB_CHROMIUM|env:CHROMIUM|chromium}
+step: jetpack browser lock chromium --binary {tool:chromium} --driver {tool:chromedriver} --version 152.0 --protocol bidi-2025.5
+exit: 0
+step: jet run --allow=Env,Exec,FS,IO,Net,Time {root}/Tools/web-test/Acceptance.jet -- --port {free-port:static}
 exit: 0
 stdout: ~ "PASS web backend browser acceptance matrix" # original completion predicate
 signal server: KILL
