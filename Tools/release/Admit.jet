@@ -165,6 +165,8 @@ parse_admit_args: fn(args: [String]) -> AdmitOptions Never! {
     if options.commit == "" -> options.errors.push("COMMIT is required")
     if options.shards < 1 -> options.errors.push("--shards must be at least 1")
     if options.reuse != "" && options.filter != "" -> options.errors.push("--reuse and --filter do not combine: a reused run is a release")
+    // The summary goes into the tag and the master merge, which carry no machine paths.
+    if options.summary.starts_with("/") || options.summary.starts_with("~") -> options.errors.push("--summary is the text of the release, not a path: {options.summary}")
     options
 }
 
@@ -1469,7 +1471,7 @@ assemble: fn(ctx: Ctx, plan: MergePlan) -[Env, Exec, FS, Time, Time.Wait]> Assem
     // The C toolchain pack sits beside jet, where jet looks first; it stays
     // out of SHA256SUMS because jet checks it against the hash it embeds.
     copy_file(ctx.cc_pack_path, files.join(temp, ctx.cc_pack_file), false) ?? return Err(assembly("cannot copy {ctx.cc_pack_path} into {temp}: {err}"))
-    body: "Verified {short(ctx.sha, 10)}: {verified}.\n\nIdentity {ctx.candidate.identity}.\n\nEvidence: {dest}/RELEASE.md"
+    body: "Verified {short(ctx.sha, 10)}: {verified}.\n\nIdentity {ctx.candidate.identity}.\n\nEvidence: RELEASE.md and RELEASE.json in the {ctx.next} seed directory."
     // jet-use installs a release from its current.env, so it waits in the
     // work directory and reaches dest only once the release is published.
     env_text: "# Newest verified self-hosted compiler (written by Tools/release admit; jet-use installs it).\nLABEL=\"{ctx.next} (dev {short(ctx.sha, 9)}, {date}, verified: s2 == s3 {short(ctx.candidate.sha, 16)}, no Rust; {gains.total} gains, {lost.len()} lost over {ctx.release.name})\"\nJET={dest}/jet\nJET_IDENTITY={ctx.candidate.identity}\n"
