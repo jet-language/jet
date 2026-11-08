@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6697,
-    "rev": 96204,
+    "rev": 96205,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -74070,6 +74070,11 @@
         {
           "at": "2026-11-08",
           "by": "Main",
+          "text": "c65 run 6 follow-up (Main). (1) The BuildGraphRules fix landed as 9cd852f2bf. (3) JetCli/Tests passes when re-run under the full profile in the same home (all its rows pass), so the exit -1 in run 6 was not reproduced; a load or OOM-kill flake, watched in run 7. The re-run reused the run-6 home and state, and 14 Jetpack Engine, Environment, Publication and Services rows that passed in run 6 failed there, so that re-run is not clean evidence for them. (4) P15 is a real regression, not only load: self-compile total work went from 95.6 s (run 5, c902740d37) to 297.8 s on the quieter re-run, with the residual at 223.7 s against a budget of 800 units. Main is timing a cold traced jet build Compiler at b7ff715849 to find which interval grew."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
           "text": "c65 run 6 roots (Main repro in the same clean home at b7ff715849 and on a dev export at d17bb32500). (1) BuildGraphRules.jet:198 still asserts that .file(found) fails, which 4a44ce3b8e made legal; Main lands the one-line removal (fixed tree: JetBuildSession/Tests 17/17). (2) The tests/guards closed-list guard fails on dev with 18 new hand-written lists and 3 duplicates from 8f09d320cf, 74bbf2a07c, afe2acc8c8, 1f8f46177e, 775f3b07ae, 42d3bedfe8 and d17bb32500. They went to SpeedLead (RuntimePack, build.jet, Cache, FindFolder, the duplicates), SchedLead (InlineAsm rails) and QuickLead (extension lists). Precommit runs no tests/guards, which is why they landed. (3) JetCli/Tests exited -1: being re-run alone under the full profile. (4) perf P15 residual 1157 s: taken under heavy host load, to re-measure on a quiet host before routing."
         },
         {
@@ -74867,7 +74872,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-29T02:09:17.141Z",
-      "updated": "2026-11-08T17:25:41.355Z",
+      "updated": "2026-11-08T17:37:46.832Z",
       "updatedBy": "Main",
       "criteriaLastN": 74
     },
@@ -189424,6 +189429,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-08T17:37:46.832Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0h06654",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-08T17:34:46.227Z",
       "by": "Main",
