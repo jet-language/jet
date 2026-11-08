@@ -41,12 +41,13 @@ run: fn() {
     taken := [Int:[Int]]{}
     loop i in 0..<1000 {
         key: i % 7
+        doubled: i * 2
         if !in_place.has_key(key) -> in_place[key] = [Int]{}
         in_place[key].push(i)
-        in_place[key].push(i * 2)
+        in_place[key].push(doubled)
         bucket := taken.get(key) ?? [Int]{}
         bucket.push(i)
-        bucket.push(i * 2)
+        bucket.push(doubled)
         taken[key] = bucket
     }
     same := true

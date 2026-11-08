@@ -3457,17 +3457,18 @@ sema_stmt_lint_same_subject_dispatch: fn(statements: [Stmt], environment: SemaSc
 // the take.
 SemaStmtMapGroupTake: struct { name: String, map: String, key: String, fallback: String, span: Span }
 
-// L0534: `group := groups.get(key) ?? [T]{}`, a write such as
-// `group.push(item)`, then `groups[key] = group` copies the whole group on
-// every pass. The local still shares the entry's buffer when it is written,
-// so the write first makes it unique by copying it, strings and all, and the
-// store then drops the Map's old copy: a loop of these is quadratic. Growing
-// the entry in place (`groups[key].push(item)`, the key seeded first when it
-// is missing) copies nothing. The fix is that rewrite when the block is
-// exactly take, one write, store, and the local is not read after the store.
-// Only a block that takes a group copies the module's bytes
-// (`String.bytes`): a copy for every block makes a large module's check
-// quadratic.
+// L0534: `group := groups.get(key) ?? fallback`, a write such as
+// `group.insert(0, item)`, then `groups[key] = group` copies the whole group
+// on every pass. The local still shares the entry's buffer when it is
+// written, so the write first makes it unique by copying it, strings and
+// all, and the store then drops the Map's old copy: a loop of these is
+// quadratic. Growing the entry in place (`groups[key].insert(0, item)`, the
+// key seeded first when it is missing) copies nothing. The fix is that
+// rewrite when the block is exactly take, one write, store, and the local is
+// not read after the store. A block the compiler already builds without the
+// copy (sema_stmt_map_group_moved) is not reported. Only a block that takes
+// a group copies the module's bytes (`String.bytes`): a copy for every block
+// makes a large module's check quadratic.
 sema_stmt_lint_map_group_round_trip: fn(statements: [Stmt], environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) {
     graph: program.registration_graph ?? return
     caller: sema_scope_caller_index(environment, graph) ?? return
@@ -3476,18 +3477,112 @@ sema_stmt_lint_map_group_round_trip: fn(statements: [Stmt], environment: SemaSco
         raw: graph.modules[caller].source.bytes()
         taken: sema_stmt_map_group_take(statements[index], raw) ?? next
         stored := -1
-        written := false
+        written := ""
         loop later in (index + 1)..<statements.len() {
             if sema_stmt_map_group_store(statements[later], raw, taken) {
                 stored = later
                 break
             }
-            if sema_stmt_map_group_write(statements[later], taken.name) != None -> written = true
+            if written == "" {
+                if sema_stmt_map_group_write(statements[later], taken.name) == .Val(method) -> written = method
+            }
         }
-        if stored < 0 || !written -> next
-        diagnostic := sema_lint("L0534", taken.span, "`{taken.name}` copies the whole group out of `{taken.map}` and stores it back", "`{taken.name}` still shares the entry's buffer when it is written, so the write first copies the whole group, and storing it back drops the Map's old copy; in a loop that is quadratic", "Grow the entry in place: `if !{taken.map}.has_key({taken.key}) -> {taken.map}[{taken.key}] = {taken.fallback}`, then `{taken.map}[{taken.key}].push(…)`")
+        if stored < 0 || written == "" || sema_stmt_map_group_moved(statements, index, stored, taken.name) -> next
+        diagnostic := sema_lint("L0534", taken.span, "`{taken.name}` copies the whole group out of `{taken.map}` and stores it back", "`{taken.name}` still shares the entry's buffer when it is written, so the write first copies the whole group, and storing it back drops the Map's old copy; in a loop that is quadratic. Only a block that pushes plain values onto a group taken with an empty List fallback moves the group out of the Map without a copy", "Grow the entry in place: `if !{taken.map}.has_key({taken.key}) -> {taken.map}[{taken.key}] = {taken.fallback}`, then `{taken.map}[{taken.key}].{written}(…)`")
         if stored == index + 2 && sema_stmt_map_group_edit(statements, index, taken, raw) == .Val(edit) -> diagnostic = diagnostic_with_edit_grade(diagnostic, edit, DiagnosticFixApplicability.Suggested, DiagnosticFixSafety.NeedsReview)
         diagnostics.push(diagnostic)
+    }
+}
+
+// Whether the build moves the group out of the Map instead of copying it
+// (JetIR BuildMaps.jet ir_map_take_fuses): the Map is a variable, the key a
+// variable or a field of one, the fallback an empty List, and every
+// statement between the take and the store pushes onto the group a value
+// that only reads literals and variables other than the Map and the group,
+// fields of them and copies of them.
+sema_stmt_map_group_moved: fn(statements: [Stmt], index: Int, stored: Int, name: String) -> Bool {
+    if statements[index] == .Val(binding) {
+        if binding.init == .OrFallback(value, fallback, _, _, _) {
+            if fallback == .Value(group) {
+                if !sema_stmt_map_group_empty_list(group) -> return false
+            } else {
+                return false
+            }
+            if value == .MethodCall(receiver, _, _, _, _, args, _) {
+                map := ""
+                if receiver == .Ident(local, _, _) {
+                    map = local.copy()
+                } else {
+                    return false
+                }
+                if !sema_stmt_map_group_key(args[0].expr) -> return false
+                loop later in (index + 1)..<stored {
+                    if !sema_stmt_map_group_plain_push(statements[later], name, map) -> return false
+                }
+                return true
+            }
+        }
+    }
+    false
+}
+
+// Whether `value` is an empty List literal (`[]` or `[T]{}`).
+sema_stmt_map_group_empty_list: fn(value: Expr) -> Bool {
+    if value == .ListLit(elements, _, _) -> return elements.len() == 0
+    if value == .TypedLit(head, body, _, _) {
+        if head == .Val(ty) {
+            if !(ty == .List(_)) -> return false
+        } else {
+            return false
+        }
+        if body == {
+            .Empty -> return true
+            .Elements(elements) -> return elements.len() == 0
+            .Fields(fields) -> return fields.len() == 0
+            else -> return false
+        }
+    }
+    false
+}
+
+// Whether `key` is a variable or a field of one.
+sema_stmt_map_group_key: fn(key: Expr) -> Bool {
+    if key == .Ident(_, _, _) -> return true
+    if key == .Field(base, _, _, _) -> return sema_stmt_map_group_key(base)
+    false
+}
+
+// Whether `statement` is `name.push(value)` with `value` only reading
+// (sema_stmt_map_group_plain).
+sema_stmt_map_group_plain_push: fn(statement: Stmt, name: String, map: String) -> Bool {
+    if statement == .Expr(call) {
+        if call == .MethodCall(receiver, method, _, _, _, args, _) {
+            if method != "push" -> return false
+            if receiver == .Ident(local, _, _) {
+                if local != name -> return false
+            } else {
+                return false
+            }
+            loop arg in args {
+                if !sema_stmt_map_group_plain(arg.expr, name, map) -> return false
+            }
+            return true
+        }
+    }
+    false
+}
+
+// Whether evaluating `value` only reads literals (text without holes among
+// them) and variables other than `name` and `map`, fields of them and copies
+// of them.
+sema_stmt_map_group_plain: fn(value: Expr, name: String, map: String) -> Bool {
+    if value == {
+        .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Char(_, _, _) -> return true
+        .Str(parts, _, _) -> return !parts.any(part -> part == .Interp(_, _))
+        .Ident(local, _, _) -> return local != name && local != map
+        .Field(base, _, _, _) | .Paren(base, _, _) | .Copy(base, _, _) -> return sema_stmt_map_group_plain(base, name, map)
+        .MethodCall(receiver, method, _, _, _, args, _) -> return method == "copy" && args.len() == 0 && sema_stmt_map_group_plain(receiver, name, map)
+        else -> return false
     }
 }
 

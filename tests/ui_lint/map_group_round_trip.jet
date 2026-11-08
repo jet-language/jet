@@ -3,8 +3,30 @@ Person: struct {
     dept: String
 }
 
-// Copies each department's group out of the Map and back: quadratic.
+// Copies each department's group out of the Map and back, newest first.
 by_dept_copied: fn(people: [Person]) -> [String: [Person]] {
+    groups := [String: [Person]]{}
+    loop p in people {
+        group := groups.get(p.dept) ?? [Person]{}
+        group.insert(0, p.copy())
+        groups[p.dept] = group
+    }
+    groups
+}
+
+// Grows each department's group in place, newest first: no lint.
+by_dept_in_place: fn(people: [Person]) -> [String: [Person]] {
+    groups := [String: [Person]]{}
+    loop p in people {
+        if !groups.has_key(p.dept) -> groups[p.dept] = [Person]{}
+        groups[p.dept].insert(0, p.copy())
+    }
+    groups
+}
+
+// Pushes onto each department's group: the build moves the group out of the
+// Map instead of copying it, so no lint.
+by_dept_moved: fn(people: [Person]) -> [String: [Person]] {
     groups := [String: [Person]]{}
     loop p in people {
         group := groups.get(p.dept) ?? [Person]{}
@@ -14,18 +36,35 @@ by_dept_copied: fn(people: [Person]) -> [String: [Person]] {
     groups
 }
 
-// Grows each department's group in place: no lint.
-by_dept_in_place: fn(people: [Person]) -> [String: [Person]] {
-    groups := [String: [Person]]{}
+// Pushes plain values onto a group taken with `[]`: no lint either.
+names_by_dept: fn(people: [Person]) -> [String: [String]] {
+    names := [String: [String]]{}
     loop p in people {
-        if !groups.has_key(p.dept) -> groups[p.dept] = [Person]{}
-        groups[p.dept].push(p.copy())
+        group := names.get(p.dept) ?? []
+        group.push(p.name.copy())
+        group.push("-")
+        names[p.dept] = group
     }
-    groups
+    names
+}
+
+// Seeds each group with a header: the fallback is not empty, so the group is
+// copied and the lint fires.
+titled_by_dept: fn(people: [Person]) -> [String: [String]] {
+    titled := [String: [String]]{}
+    loop p in people {
+        group := titled.get(p.dept) ?? ["header"]
+        group.push(p.name.copy())
+        titled[p.dept] = group
+    }
+    titled
 }
 
 run: fn() {
     people: [Person]{{name: "Ada", dept: "eng"}, {name: "Bo", dept: "ops"}, {name: "Cy", dept: "eng"}}
     print(by_dept_copied(people).len())
     print(by_dept_in_place(people).len())
+    print(by_dept_moved(people).len())
+    print(names_by_dept(people)["eng"])
+    print(titled_by_dept(people)["eng"])
 }

@@ -1215,7 +1215,9 @@ IRMapTake: struct { map: String, group: String, key: Int }
 // the empty List in its place, so the pushes grow the group the map held
 // instead of a copy of it, and the store puts it back. Nothing between the
 // `get` and the store reads the map, so taking the value is the same
-// program and the update is linear in the group, not quadratic.
+// program and the update is linear in the group, not quadratic. JetSema's
+// L0534 (Statements.jet sema_stmt_map_group_moved) matches the same shape in
+// the source and stays silent on it.
 ir_map_take_fuses: fn(p: IRProgram, b: IRBuilder, body: [Int], at: Int) -> Bool Never! {
     if at + 2 >= body.len() -> return false
     update: ir_map_take_let(p, b, body[at]) ?? return false
@@ -1317,18 +1319,19 @@ ir_map_take_push: fn(p: IRProgram, b: IRBuilder, update: IRMapTake, id: Int) -> 
     false
 }
 
-// Whether evaluating node `id` only reads literals and variables other than
-// the update's map and group, fields of them and primitive operators.
+// Whether evaluating node `id` only reads literals (text without holes
+// among them) and variables other than the update's map and group, fields of
+// them and copies of them.
 ir_map_take_reads: fn(p: IRProgram, b: IRBuilder, update: IRMapTake, id: Int) -> Bool Never! {
     if ir_body_node(p, b, id).kind == {
         .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) -> return true
+        .StrLit(parts) -> return !parts.any(part -> part == .Interpolation(_, _))
         .Local(local) -> {
             name: ir_map_take_name(local)
             return name != update.map && name != update.group
         }
         .Field(receiver, _) -> return ir_map_take_reads(p, b, update, receiver)
         .Borrow(place, _) | .Move(place) | .Clone(place, _) | .ExplicitCopy(place) -> return ir_map_take_reads(p, b, update, place)
-        .Binary(_, _, _, lhs, rhs) -> return ir_map_update_primitive(ir_ty(p, b, lhs)) && ir_map_update_primitive(ir_ty(p, b, rhs)) && ir_map_take_reads(p, b, update, lhs) && ir_map_take_reads(p, b, update, rhs)
         else -> return false
     }
 }
