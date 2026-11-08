@@ -1035,8 +1035,8 @@ jet_cli_native_session: fn() -> Shared<JetEvalNativeSession>? Never! {
 // The native session over the runtime pack directory `runtime_dir`; None when
 // it records no runtime key.
 jet_cli_native_session_at: fn(runtime_dir: String) -> Shared<JetEvalNativeSession>? Never! {
-    key: jet_cli_runtime_key(runtime_dir) ?? return None
-    Val(jet_eval_native_session("{runtime_dir}/{key}/{JET_CLI_RUNTIME_IMAGE_FILE}", JetCLINativeImageReader{}))
+    if jet_cli_runtime_key(runtime_dir) == None -> return None
+    Val(jet_eval_native_session("{runtime_dir}/{JET_CLI_RUNTIME_IMAGE_FILE}", JetCLINativeImageReader{}))
 }
 
 // The CLI's read of the runtime image for jet_eval_native_session.

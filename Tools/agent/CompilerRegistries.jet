@@ -17,7 +17,7 @@
 // A package registry runs in place inside its Tests package; a JetRuntime Test
 // registry runs as an assembled standalone file; the native runtime and
 // backend registries run through their transports, which assemble each
-// fixture with Tools/agent/CompilerPackages.jet, lower it through the
+// fixture with Compiler/Toolchain/RuntimePack.jet, lower it through the
 // candidate jet, link its C host and check the real native verdict.
 use {
     base64: core.encoding.base64
@@ -42,6 +42,9 @@ KIT_PACKAGE: "Compiler"
 KIT_PROFILE: "registries"
 RT: "Compiler/JetRuntime/Tests/"
 BE: "Compiler/JetBackend/Tests/"
+// The tool a plain or C transport assembles its runtime unit with, run on
+// the Compiler package.
+RUNTIME_UNIT_TOOL: "Compiler/Toolchain/RuntimePack.jet"
 // The runtime-pack-roots-NAME.s inputs of the Link fixtures.
 PACK_ROOTS_INPUTS: [String]{"object", "archive", "consumer", "missing"}
 TEST_SCHEMA: "jet.test.v1"
@@ -834,7 +837,7 @@ specification: fn(id: String) -> Spec? Never! {
             else -> if CRYPTO.contains(name) -> Val((call: None, witness: "{RT}{name}Witness.c", expected: "")) else -> None
         }
         if plain == .Val(table) {
-            found := spec("plain", name, "Tools/agent/CompilerPackages.jet")
+            found := spec("plain", name, RUNTIME_UNIT_TOOL)
             found.call = table.call.copy()
             found.witness = table.witness.copy()
             found.expected = table.expected.copy()
@@ -843,7 +846,7 @@ specification: fn(id: String) -> Spec? Never! {
             if PROCESS_WITNESSES.contains(name) || CRYPTO_FROZEN.contains(name) -> found.expected_file = "{RT}{name}Witness.stdout"
             return Val(found)
         }
-        if C_FIXTURES.contains(name) -> return Val(spec("c", name, "Tools/agent/CompilerPackages.jet"))
+        if C_FIXTURES.contains(name) -> return Val(spec("c", name, RUNTIME_UNIT_TOOL))
         calls: runner_calls(name)
         if calls.len() > 0 {
             found := spec("runner", name, "{RT}{name}.jet")
@@ -1354,7 +1357,7 @@ sha256_path: fn(path: String) -[FS]> String Problem! {
 // supplied jet and runtime exactly, never a previously installed runtime.
 stage_toolchain: fn(jet: String, runtime: Runtime, out: String) -[FS]> String Problem! {
     staged: "{out}/jet"
-    staged_pack: "{out}/jet-runtime/{files.basename(files.dirname(runtime.pack))}/jet_runtime.pack.o"
+    staged_pack: "{out}/jet-runtime/jet_runtime.pack.o"
     if !files.exists(out) {
         files.create_dir_all(out) ?? return Err(problem("`{out}` cannot be created: {err}"))
         files.copy(jet, staged) ?? return Err(problem("`{jet}` cannot be staged: {err}"))
@@ -1400,7 +1403,7 @@ drive: fn(lane: &Lane, found: Spec) Problem! -[Env, Exec, FS, IO, Time, Time.Wai
         raw: "{out}/raw"
         native: "{out}/native"
         files.create_dir_all("{native}/Source") ?? return Err(problem("`{native}/Source` cannot be created: {err}"))
-        unit_args := [String]{"--root", repo, "runtime-unit", raw}
+        unit_args := [String]{"--root", "{repo}/Compiler", "unit", raw}
         loop name in found.fragments {
             unit_args.push("--test")
             unit_args.push(name.copy())
@@ -1722,7 +1725,7 @@ c_verdict: fn(lane: &Lane, found: Spec) Problem! -[Env, Exec, FS, IO, Time, Time
     repo: lane.repo.copy()
     // The runtime unit with this fixture's test fragment, as the package's
     // Source/Runtime.jet beside its manifest.
-    jet_tool(lane, found.runner, [String]{"--root", repo, "runtime-unit", "{out}/library", "--test", found.name}) ?? return Err(err)
+    jet_tool(lane, found.runner, [String]{"--root", "{repo}/Compiler", "unit", "{out}/library", "--test", found.name}) ?? return Err(err)
     files.create_dir_all("{out}/library/Source") ?? return Err(problem("`{out}/library/Source` cannot be created: {err}"))
     files.rename("{out}/library/unit.jet", "{out}/library/Source/Runtime.jet") ?? return Err(problem("`{out}/library/unit.jet` cannot be moved: {err}"))
     library(lane, "{out}/library/Source/Runtime.jet", "{out}/jet_runtime_jet", "{repo}/Compiler/JetRuntime/lifecycle.list", "") ?? return Err(err)
@@ -1950,11 +1953,8 @@ partition: fn(entries: [Dyn], shard: String) -> [Dyn] Problem! {
 native_runtime: fn(jet: String, runtime: String) -[FS]> Runtime Problem! {
     requested: if runtime != "" -> runtime.copy() else -> "{files.dirname(jet)}/jet-runtime"
     dir: files.canonicalize(requested) ?? return Err(problem("`{requested}` cannot be resolved: {err}"))
-    key_text: files.read("{dir}/native.key") ?? return Err(problem("`{dir}/native.key` cannot be read: {err}"))
-    key: key_text.trim()
-    if key == "" || key == "." || key == ".." || key.bytes().any(b -> b == (U8{47}) || b == (U8{92}) || is_space(b)) -> return Err(problem("native.key must name one runtime directory"))
-    pack: "{dir}/{key}/jet_runtime.pack.o"
-    object: "{dir}/{key}/jet_runtime_jet.o"
+    pack: "{dir}/jet_runtime.pack.o"
+    object: "{dir}/jet_runtime_jet.o"
     provenance: read_json("{dir}/provenance.json") ?? return Err(err)
     pack_sha: sha256_path(pack) ?? return Err(err)
     object_sha: sha256_path(object) ?? return Err(err)
@@ -2386,7 +2386,7 @@ fragment_registry: fn(name: String) -> Registry Never! {
         entry: prepare_transport(repo, fragment_registry(name), "/native/registries", "{repo}{TOOL}") ?? panic("{name}: no transport")
         transport: field(entry, "transport")
         assert_eq(text_field(transport, "type"), "plain")
-        assert_eq(text_field(transport, "runner"), "Tools/agent/CompilerPackages.jet")
+        assert_eq(text_field(transport, "runner"), RUNTIME_UNIT_TOOL)
         call: if name == {
             "Alloc" -> "alloc_tests"
             "FilesWalk" -> "files_walk_tests"

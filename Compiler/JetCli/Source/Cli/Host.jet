@@ -570,8 +570,8 @@ jet_cli_stem: fn(file: String) -> String Never! {
 jet_cli_build_failed: fn(what: String, why: String, fix: String, color: Bool) -> JetDriverVerbOutput Never! {
     jet_cli_report_output("", "E2105", what, why, fix, color, JET_DRIVER_EXIT_USER_ERROR)
 }
-// The native runtime is checked and linked once when the toolchain is packaged,
-// then shipped beside `jet` as jet-runtime/<runtime key>/jet_runtime.pack.o.
+// The native runtime is checked and linked once when the toolchain is built
+// (Compiler/build.jet), then shipped beside `jet` as jet-runtime/jet_runtime.pack.o.
 // Both dev and release builds use the same pack and native linker.
 JET_CLI_RUNTIME_PACK_FILE: "jet_runtime.pack.o"
 // The Jet-only runtime object the pack was linked from, beside it. A program
@@ -582,12 +582,12 @@ JET_CLI_RUNTIME_OBJECT_FILE: "jet_runtime_jet.o"
 // closure to it instead of linking the pack, and compile-time code runs
 // bound to it in the comptime child (JetEval Native.jet).
 JET_CLI_RUNTIME_IMAGE_FILE: "jet_runtime.image"
-// Written by packaging: the toolchain's native runtime key for every profile.
+// Written by the toolchain build: the native runtime's key for every profile.
 JET_CLI_RUNTIME_KEY_FILE: "native.key"
-// Written by packaging beside the pack: every symbol the runtime exports, one
+// Written by the toolchain build beside the pack: every symbol the runtime exports, one
 // per line, sorted (Request.jet).
 JET_CLI_RUNTIME_EXPORTS_FILE: "runtime.exports"
-// Written by packaging beside the pack: the exports whose call can start a
+// Written by the toolchain build beside the pack: the exports whose call can start a
 // second thread, one per line, or `*` when every program can
 // (Request.jet, JetIR BuildLibrary.jet ir_thread_exports).
 JET_CLI_RUNTIME_THREADS_FILE: "runtime.threads"
@@ -609,9 +609,9 @@ jet_cli_runtime_dir: fn() -[Env]> String Never! {
     "{parts.join("/")}/jet-runtime"
 }
 
-// The runtime key packaging recorded beside this compiler. Consumer source
-// and build profile do not enter it; no toolchain probes are needed here.
-// None when the file is missing, unreadable, or names more than one directory.
+// The runtime key the toolchain build recorded beside this compiler. Consumer
+// source and build profile do not enter it; no toolchain probes are needed
+// here. None when the file is missing, unreadable, or not one word.
 jet_cli_runtime_key: fn(runtime_dir: String) -[FS]> String? Never! {
     text: cli_files.read("{runtime_dir}/{JET_CLI_RUNTIME_KEY_FILE}") ?? return None
     key: text.trim()
@@ -774,7 +774,7 @@ jet_cli_native_executable: fn(result: JetDriverCompileResult, inputs: &&JetDrive
             return JetCLINativeLinked.Image{executable: jet_cli_native_with_command(bound.executable, result.command_record)}
         }
         // The image moved into the bind; the full link reads the pack.
-        runtime_path = "{runtime_dir}/{runtime_key ?? ""}/{JET_CLI_RUNTIME_PACK_FILE}"
+        runtime_path = "{runtime_dir}/{JET_CLI_RUNTIME_PACK_FILE}"
         runtime = cli_files.read_bytes(runtime_path) ?? return JetCLINativeLinked.Failed{failure: JetCLINativeFailure.Runtime{what: "couldn't read the Jet runtime {runtime_path}: {err}"}}
     }
     // Input names appear only in link diagnostics; the image is a function of
@@ -877,8 +877,9 @@ JetCLIForeignRealized: struct {
     bound: Bool
 }
 
-// `runtime_key` is None when the object's route already fails on it; the
-// runtime is read only for a realized closure, as the link would read it.
+// `runtime_key` is None when the object's route already fails on it: the
+// runtime is then not read. The runtime is read only for a realized closure,
+// as the link would read it.
 // `bind`: a program with no closure at all binds to the pack's prelinked
 // runtime image (Image/MemoryLink.jet), so only the image is read; a pack
 // without one is read whole, as before.
@@ -886,7 +887,7 @@ jet_cli_native_foreign_realize: fn(facts: JetDriverForeignLinkFacts, rust_helper
     realized := JetCLIForeignRealized{inputs: None, error: "", runtime: None, runtime_path: "", runtime_stamp: [Int]{}, runtime_gap_at: 0, runtime_gap: 0, runtime_error: "", bound: false}
     platform := false
     no_closure := false
-    if jet_cli_native_c_inputs(facts, rust_helper, sources, runtime_dir, runtime_key) == {
+    if jet_cli_native_c_inputs(facts, rust_helper, sources, runtime_dir) == {
         .Ok(found) -> {
             platform = found.platform
             no_closure = found.names.len() == 0
@@ -897,9 +898,9 @@ jet_cli_native_foreign_realize: fn(facts: JetDriverForeignLinkFacts, rust_helper
             return realized
         }
     }
-    key: runtime_key ?? return realized
+    if runtime_key == None -> return realized
     if bind && no_closure && !platform {
-        image_path: "{runtime_dir}/{key}/{JET_CLI_RUNTIME_IMAGE_FILE}"
+        image_path: "{runtime_dir}/{JET_CLI_RUNTIME_IMAGE_FILE}"
         // The loader maps the image part from this file when it is still
         // the one read here (Image/Loader.jet x64_executable_load).
         image := x64_image_file_read(image_path)
@@ -914,7 +915,7 @@ jet_cli_native_foreign_realize: fn(facts: JetDriverForeignLinkFacts, rust_helper
         }
     }
     runtime_file: if platform -> JET_CLI_RUNTIME_OBJECT_FILE else -> JET_CLI_RUNTIME_PACK_FILE
-    realized.runtime_path = "{runtime_dir}/{key}/{runtime_file}"
+    realized.runtime_path = "{runtime_dir}/{runtime_file}"
     if cli_files.read_bytes(realized.runtime_path) == {
         .Ok(bytes) -> realized.runtime = Val(bytes)
         .Err(err) -> realized.runtime_error = "couldn't read the Jet runtime {realized.runtime_path}: {err}"
@@ -935,9 +936,9 @@ JetCLIRuntimeExports: struct {
 
 jet_cli_runtime_exports: fn(runtime_dir: String) -[FS]> JetCLIRuntimeExports Never! {
     key: jet_cli_runtime_key(runtime_dir) ?? return JetCLIRuntimeExports{key: "", exports: [U8]{}, threads: None, failure: Val(JetCLINativeFailure.RuntimeKey{what: "couldn't read the Jet runtime key {runtime_dir}/{JET_CLI_RUNTIME_KEY_FILE}"})}
-    exports_path: "{runtime_dir}/{key}/{JET_CLI_RUNTIME_EXPORTS_FILE}"
+    exports_path: "{runtime_dir}/{JET_CLI_RUNTIME_EXPORTS_FILE}"
     exports: cli_files.read_bytes(exports_path) ?? return JetCLIRuntimeExports{key: key, exports: [U8]{}, threads: None, failure: Val(JetCLINativeFailure.Runtime{what: "couldn't read the Jet runtime exports {exports_path}: {err}"})}
-    threads: cli_files.read_bytes("{runtime_dir}/{key}/{JET_CLI_RUNTIME_THREADS_FILE}") ?? return JetCLIRuntimeExports{key: key, exports: exports, threads: None, failure: None}
+    threads: cli_files.read_bytes("{runtime_dir}/{JET_CLI_RUNTIME_THREADS_FILE}") ?? return JetCLIRuntimeExports{key: key, exports: exports, threads: None, failure: None}
     JetCLIRuntimeExports{key: key, exports: exports, threads: Val(threads), failure: None}
 }
 
@@ -1285,8 +1286,8 @@ jet_cli_native_report: fn(file: String, command: String, failure: JetCLINativeFa
         // Every fault is a census row the caller reports first (jet_cli_ice_census).
         .Faulted -> jet_cli_ice("the native route of `jet {command} {file}` stopped on a fault it did not record")
         .Write(what) -> jet_cli_build_failed(what, jet_cli_why("E2105"), "check that the build directory is writable", color)
-        .RuntimeKey(what) -> jet_cli_build_failed(what, jet_cli_why("E2105"), "package the runtime beside jet with `jet Tools/packaging/PrebuildRuntime.jet <jet>`, which writes the key and the runtime pack", color)
-        .Runtime(what) -> jet_cli_build_failed(what, jet_cli_why("E2105"), "package the runtime beside jet with `jet Tools/packaging/PrebuildRuntime.jet <jet>`, which writes the runtime pack and object", color)
+        .RuntimeKey(what) -> jet_cli_build_failed(what, jet_cli_why("E2105"), "build the toolchain with `jet build Compiler`, which puts the runtime key and pack beside jet", color)
+        .Runtime(what) -> jet_cli_build_failed(what, jet_cli_why("E2105"), "build the toolchain with `jet build Compiler`, which puts the runtime pack and object beside jet", color)
         .Foreign(message) -> jet_cli_build_failed("couldn't realize C dependencies for `{file}`: {message}", jet_cli_why("E2105"), "check the declared C source/library paths and the installed C toolchain", color)
     }
 }

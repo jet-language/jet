@@ -17,7 +17,7 @@ function receipt(t) {
   const archive = Buffer.from('vendored archive bytes');
   const recipe = nativePackRecipe(source, backend, lifecycle, platform, compiler, vendoredRecipe);
   const key = hash(JSON.stringify({ format: 'jet-native-runtime/v2', source, abi: hash(abi), threads: hash(threads), backend, lifecycle, platform, vendored: [hash(archive)] }));
-  const directory = join(root, key);
+  const directory = root;
   mkdirSync(join(directory, 'foreign', 'sqlite3'), { recursive: true });
   const provenance = { backend: 'jet-native', runtimeKey: key, rustObjects: 0, llvmObjects: 0,
     source: { sha256: source }, backendInputs: { sha256: backend }, lifecycle: { sha256: lifecycle },

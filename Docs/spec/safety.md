@@ -1114,14 +1114,14 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetCli/Source/Cli/Host.jet",
-      "line": 1611,
+      "line": 1612,
       "column": 9,
       "reason": "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the runtime's unmapped process exit"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetCli/Source/Cli/Host.jet",
-      "line": 2015,
+      "line": 2016,
       "column": 9,
       "reason": "posix setpriority: the build lowers only its own threads, never raising one"
     },
@@ -6896,7 +6896,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Tools",
       "file": "Tools/packaging/NativeCCompiler.jet",
-      "line": 120,
+      "line": 121,
       "column": 9,
       "reason": "re-raise the compiler's terminating signal on this process, as the parent shell expects"
     },
@@ -10002,8 +10002,8 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1477:5 | "the allocation receipt pairs this owner with its original free address and exact size/alignment" |
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1485:5 | "the admitted runtime signature or pinned clone/drop role was checked before invoking its fixed word ABI" |
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1493:1 | "calls machine code; the caller vouches for its three-word System V signature" |
-| Compiler | Compiler/JetCli/Source/Cli/Host.jet | 1611:9 | "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the runtime's unmapped process exit" |
-| Compiler | Compiler/JetCli/Source/Cli/Host.jet | 2015:9 | "posix setpriority: the build lowers only its own threads, never raising one" |
+| Compiler | Compiler/JetCli/Source/Cli/Host.jet | 1612:9 | "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the runtime's unmapped process exit" |
+| Compiler | Compiler/JetCli/Source/Cli/Host.jet | 2016:9 | "posix setpriority: the build lowers only its own threads, never raising one" |
 | Compiler | Compiler/JetCli/Tests/RunKeep.fixture/RunKeep.jet | 155:5 | "the test owns the slot record it ages" |
 | Compiler | Compiler/JetDevserver/Source/WebHost02.jet | 383:5 | "unlinkat borrows a held parent and CString" |
 | Compiler | Compiler/JetDevserver/Source/WebHost02.jet | 387:5 | "adopt only a successful openat descriptor" |
@@ -10828,7 +10828,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Tools | Tools/ci/CompiledWorkloadPeerLauncher.jet | 591:9 | "posix kill: every process in the sandbox's private PID namespace except its init and this supervisor belongs to the supervised command" |
 | Tools | Tools/ci/CompiledWorkloadPeerLauncher.jet | 603:5 | "libc signal + posix kill: restore SIG_DFL for one signal number, then re-raise it on this process so the caller observes the supervised command's signal" |
 | Tools | Tools/ci/CompiledWorkloadPeerProbe.jet | 98:5 | "posix kill: the probe ends itself with SIGTERM so the check observes the launcher propagating a signal death" |
-| Tools | Tools/packaging/NativeCCompiler.jet | 120:9 | "re-raise the compiler's terminating signal on this process, as the parent shell expects" |
+| Tools | Tools/packaging/NativeCCompiler.jet | 121:9 | "re-raise the compiler's terminating signal on this process, as the parent shell expects" |
 | tests | tests/cases/backend_ice/fixtures/asm_rail/rail.jet | 10:1 | "the program claims the runtime's stack switch" |
 | tests | tests/cases/backend_ice/fixtures/asm_rail/rail.jet | 36:1 | "the program claims the runtime's TLS base" |
 | tests | tests/cases/backend_ice/fixtures/asm_rail/rail.jet | 44:5 | "call the leaf the build refuses" |

@@ -26,10 +26,9 @@ function heldFile(path) {
     return bytes;
   } finally { closeSync(fd); }
 }
-export function readNativeRuntimePack(directory, recipe = null) {
-  const key = heldFile(join(directory, 'native.key')).toString('utf8').trim();
-  if (!/^[a-f0-9]{64}$/.test(key)) throw Error('native.key must name one content-addressed runtime directory');
-  const root = join(directory, key);
+export function readNativeRuntimePack(root, recipe = null) {
+  const key = heldFile(join(root, 'native.key')).toString('utf8').trim();
+  if (!/^[a-f0-9]{64}$/.test(key)) throw Error('native.key must hold the content-addressed runtime key');
   const provenanceBytes = heldFile(join(root, 'provenance.json'));
   const provenance = JSON.parse(provenanceBytes);
   if (provenance.backend !== 'jet-native' || provenance.rustObjects !== 0 || provenance.llvmObjects !== 0 || provenance.runtimeKey !== key) {
@@ -49,7 +48,7 @@ export function readNativeRuntimePack(directory, recipe = null) {
   if (!Array.isArray(abi) || !abi.length || JSON.stringify(abi.map(row => row.symbol).sort()) !== JSON.stringify(names)) {
     throw Error('runtime ABI and checked exports disagree');
   }
-  // Core's vendored C archives (PrebuildRuntime.jet) ship beside the pack.
+  // Core's vendored C archives (Compiler/Toolchain/RuntimePack.jet) ship in the pack.
   const vendored = provenance.vendoredC?.archives;
   if (!Array.isArray(vendored) || !vendored.length) throw Error('runtime pack provenance lacks the vendored C archives');
   for (const row of vendored) {

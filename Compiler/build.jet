@@ -1,6 +1,50 @@
-// `jet build Compiler/`: the `jet` executable is JetCli's run entry, compiled with every
-// package it depends on (JetCli/package.jet lists them).
-build: fn(b: Build) {
+// `jet build Compiler/`: the toolchain. The `jet` executable is JetCli's run
+// entry, compiled with every package it depends on (JetCli/package.jet lists
+// them). The `runtime` step puts its runtime pack and IDENTITY beside it
+// (Toolchain/RuntimePack.jet): the jet this build made lowers the runtime,
+// the machine's C compiler builds Core's vendored C, and the pack carries the
+// static musl libc.a a find_folder probe chooses on LIBRARY_PATH.
+RUNTIME_DIR: "JetCli/.jet/build/jet-runtime"
+RUNTIME_FILES: [String]{
+    "jet_runtime_jet.o", "runtime.abi.json", "runtime.exports", "runtime.threads",
+    "jet_runtime.pack.o", "jet_runtime.image", "jet_runtime.wasm", "jet_runtime.wasm.tsv",
+    "foreign/sqlite3/libsqlite3.a", "foreign/sqlite3/LICENSE",
+    "foreign/mbedtls/libmbedtls.a", "foreign/mbedtls/LICENSE", "foreign/mbedtls/VERSION",
+    "foreign/platform/libc.a", "foreign/platform/libgcc_eh.a", "foreign/platform/libgcc.a",
+    "provenance.json", "native.key",
+}
+// The runtime's folder, then the IR builder, optimizer and selector, the
+// x86-64 encoder, object writer and linker, and the WebAssembly selector and
+// encoder that make it.
+RUNTIME_TREES: [String]{"JetRuntime", "JetIR/Source", "JetBackend/Source", "JetWeb/Source", "JetWasm/Source"}
+
+build: fn(b: Build) -[Exec, FS]> {
     jet: b.add_executable("jet", ["JetCli/run.jet"], [])
-    b.default(jet)
+    #Impure("compile Core's vendored C and find static musl with the machine's C toolchain") {
+        cc: b.probe("cc", "find_program", "cc")
+        ar: b.probe("ar", "find_program", "ar")
+        nm: b.probe("nm", "find_program", "nm")
+        musl: b.probe("musl", "find_folder", "libc.a")
+        runtime: b.run("runtime", b.jet(), ["Exec", "FS"])
+        runtime.arg("run")
+        runtime.arg("--allow=Env,Exec,FS")
+        runtime.input("Toolchain/RuntimePack.jet")
+        runtime.arg("--")
+        runtime.arg("pack")
+        runtime.file(b.host(jet), flag: "--jet=")
+        runtime.file(b.found(musl), flag: "--musl=")
+        runtime.file(b.found(cc), flag: "--cc=")
+        runtime.file(b.found(ar), flag: "--ar=")
+        runtime.file(b.found(nm), flag: "--nm=")
+        runtime.file(b.dependency("sqlite3"), flag: "--sqlite3=")
+        runtime.file(b.dependency("mbedtls"), flag: "--mbedtls=")
+        loop tree in RUNTIME_TREES -> runtime.file(b.folder(tree), flag: "--tree=")
+        runtime.input("JetCli/Source/Cli/native-c-policy.tsv", flag: "--policy=")
+        runtime.arg("--out={RUNTIME_DIR}")
+        loop file in RUNTIME_FILES -> runtime.writes("{RUNTIME_DIR}/{file}")
+        runtime.output("JetCli/.jet/build/IDENTITY", flag: "--identity=")
+        runtime.timeout(10min)
+        toolchain: b.add_install("toolchain", [], [runtime], [jet])
+        b.default(toolchain)
+    }
 }

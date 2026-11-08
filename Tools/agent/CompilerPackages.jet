@@ -11,7 +11,6 @@
 //   jet Tools/agent/CompilerPackages.jet [--root DIR] select FILE...
 //   jet Tools/agent/CompilerPackages.jet [--root DIR] identity
 //   jet Tools/agent/CompilerPackages.jet [--root DIR] unblock FILE...|-
-//   jet Tools/agent/CompilerPackages.jet [--root DIR] runtime-unit OUT [--test NAME]...|--check
 //   jet Tools/agent/CompilerPackages.jet [--root DIR] unit [ENTRY]...
 //   jet Tools/agent/CompilerPackages.jet [--root DIR] unit-inputs [ENTRY]...
 //
@@ -47,21 +46,6 @@
 // one `use` line per row, keeping every line and byte offset, each text
 // followed by a NUL byte. With `-` it reads the texts from stdin instead,
 // each followed by a NUL byte, and writes them back the same way.
-//
-// `runtime-unit` writes the runtime's one-namespace unit, OUT/unit.jet, and
-// its OUT/package.jet, then prints OUT/unit.jet (OUT is used as given): each
-// Compiler/JetRuntime/sources.list source, unblocked, after a
-// `// [unit source: PATH]` line, its Core `use` lines dropped and gathered
-// once each, in first-seen order, at the head of the unit, and its other
-// `use` lines dropped. Each `--test NAME` appends the fragment
-// Compiler/JetRuntime/Tests/Fragments.fixture/NAMETests.jet, in order, and
-// any `--test` writes a test package of the driver's one edition instead of
-// the runtime's package.jet. `runtime-unit OUT --check` composes every
-// fragment of Fragments.fixture, sorted, into one test unit and type-checks
-// it with $JET (default `jet`) under JET_KEEP_GOING=1: the compiler's output
-// with each error location followed by the source it falls in, then one
-// `SOURCE<TAB>ERRORS` row per unit source; exit 0 only with no error. It is
-// the check of Fragments.fixture, whose files compile only in that unit.
 //
 // `unit` writes one namespace of the member files of the packages at the
 // ENTRYs and of every package they depend on, for focused fixtures that
@@ -136,7 +120,6 @@ usage: fn() -[Exec, IO]> Never {
     term.eprint("       jet Tools/agent/CompilerPackages.jet [--root DIR] select FILE...")
     term.eprint("       jet Tools/agent/CompilerPackages.jet [--root DIR] identity")
     term.eprint("       jet Tools/agent/CompilerPackages.jet [--root DIR] unblock FILE...|-")
-    term.eprint("       jet Tools/agent/CompilerPackages.jet [--root DIR] runtime-unit OUT [--test NAME]...|--check")
     term.eprint("       jet Tools/agent/CompilerPackages.jet [--root DIR] unit|unit-inputs [ENTRY]...")
     process.exit(2)
 }
@@ -184,10 +167,6 @@ command: fn(root: String, name: String, args: [String]) PackagesError! -[Env, Ex
                 out.write_bytes(bytes) ?? return Err(PackagesError{message: "stdout: {err}"})
             }
         }
-        "runtime-unit" -> {
-            if args.len() == 2 && args[1] == "--check" -> process.exit(runtime_unit_check(root, args[0]) ?? return Err(err))
-            print(runtime_unit(root, args) ?? return Err(err))
-        }
         "unit" -> out.write(compiler_fixture_unit(root, entries(args))) ?? return Err(PackagesError{message: "stdout: {err}"})
         "unit-inputs" -> {
             loop input in compiler_fixture_inputs(root, entries(args)) -> print("{input.path}\t{input.text}")
@@ -204,163 +183,6 @@ framed_texts: fn(input: String) -> [String] PackagesError! {
     texts := input.split(nul).to_list()
     _ := texts.pop()
     texts
-}
-
-RUNTIME_SOURCES: "Compiler/JetRuntime/sources.list"
-RUNTIME_PACKAGE: "Compiler/JetRuntime/package.jet"
-RUNTIME_FRAGMENTS: "Compiler/JetRuntime/Tests/Fragments.fixture"
-DRIVER_LOADER: "Compiler/JetDriver/Source/Driver/Loader.jet"
-
-// The fragment names of `runtime-unit OUT [--test NAME]...`, in order; None
-// when the arguments are not that shape or name a fragment twice.
-runtime_unit_tests: fn(args: [String]) -> [String]? Never! {
-    if args.len() % 2 != 1 -> return None
-    tests := [String]{}
-    at := 1
-    loop at < args.len() {
-        if args[at] != "--test" || !is_type_name(args[at + 1]) || tests.contains(args[at + 1]) -> return None
-        tests.push(args[at + 1].copy())
-        at += 2
-    }
-    Val(tests)
-}
-
-// `runtime-unit OUT [--test NAME]...`: writes OUT/unit.jet and OUT/package.jet
-// and returns OUT/unit.jet. Each `--test NAME` composes the fragment
-// NAMETests.jet, in order.
-runtime_unit: fn(root: String, args: [String]) -[Exec, FS, IO]> String PackagesError! {
-    tests: runtime_unit_tests(args) ?? usage()
-    fragments := [String]{}
-    loop name in tests -> fragments.push("{RUNTIME_FRAGMENTS}/{name}Tests.jet")
-    compose_runtime_unit(root, args[0], fragments)
-}
-
-// `runtime-unit OUT --check`: the runtime composed with every fragment of
-// Fragments.fixture, sorted, type-checked by $JET (default `jet`) with
-// JET_KEEP_GOING=1. Prints the compiler's output with each error location
-// followed by the source it falls in, then `SOURCE<TAB>N` (its error count)
-// for every source of the unit; the exit status is 0 only with no error.
-runtime_unit_check: fn(root: String, out: String) -[Env, Exec, FS, IO, Time.Wait]> Int PackagesError! {
-    dir: files.join(root, RUNTIME_FRAGMENTS)
-    listed: files.list_dir(dir) ?? return Err(PackagesError{message: "`{RUNTIME_FRAGMENTS}` cannot be listed: {err}"})
-    fragments := [String]{}
-    loop entry in listed {
-        if entry.name.ends_with(".jet") && !RESERVED_SOURCE_NAMES.contains(entry.name) -> fragments.push("{RUNTIME_FRAGMENTS}/{entry.name}")
-    }
-    fragments.sort_by((left: String, right: String) -> left <=> right)
-    if fragments.len() == 0 -> return Err(PackagesError{message: "`{RUNTIME_FRAGMENTS}` holds no fragment"})
-    unit_path: compose_runtime_unit(root, out, fragments) ?? return Err(err)
-    unit: files.read(unit_path) ?? return Err(PackagesError{message: "`{unit_path}` cannot be read: {err}"})
-    jet: process.env_get("JET") ?? "jet"
-    receipt: process.cmd([String]{jet.copy(), "check", unit_path.copy()}).cwd(out).env("JET_KEEP_GOING", "1").output_limit(1073741824).run() ?? return Err(PackagesError{message: "{jet} check cannot run: {err}"})
-    sources := [String]{}
-    owners := [String]{}
-    current := ""
-    loop line in unit.split("\n") {
-        if line.starts_with(UNIT_SOURCE_MARK) {
-            current = line.removeprefix(UNIT_SOURCE_MARK).removesuffix("]").copy()
-            sources.push(current.copy())
-        }
-        owners.push(current.copy())
-    }
-    counts := [String: Int]{}
-    total := 0
-    error := false
-    loop line in "{receipt.output}{receipt.errors}".split("\n") {
-        trimmed: line.trim_start()
-        if trimmed.len() == line.len() && line != "" -> error = line.starts_with("Error")
-        if !error || !trimmed.starts_with("-->") {
-            print(line)
-            next
-        }
-        parts: trimmed.removeprefix("-->").trim().partition(" ").head.split(":").to_list()
-        number: if parts.len() >= 3 -> Int.parse(parts[parts.len() - 2]) ?? 0 else -> 0
-        in_unit: parts.len() >= 3 && parts.slice(0, parts.len() - 2).join(":").ends_with("unit.jet")
-        owner: if in_unit && number >= 1 && number <= owners.len() -> owners[number - 1].copy() else -> ""
-        print(if owner == "" -> line.copy() else -> "{line} ({owner})")
-        counts[owner] = (counts.get(owner) ?? 0) + 1
-        total += 1
-        error = false
-    }
-    loop source in sources -> print("{source}\t{counts.get(source) ?? 0}")
-    if (counts.get("") ?? 0) > 0 -> print("(outside the unit)\t{counts.get("") ?? 0}")
-    print("runtime unit check: {total} error(s) over {fragments.len()} fragments; jet check exit {receipt.code}")
-    Ok(if total == 0 && receipt.success -> 0 else -> 1)
-}
-
-UNIT_SOURCE_MARK: "// [unit source: "
-
-// The runtime's one-namespace unit with the files `fragments` appended, in
-// order, written to OUT/unit.jet beside its package.jet; returns OUT/unit.jet.
-compose_runtime_unit: fn(root: String, out: String, fragments: [String]) -[Exec, FS, IO]> String PackagesError! {
-    listed: files.read(files.join(root, RUNTIME_SOURCES)) ?? return Err(PackagesError{message: "`{RUNTIME_SOURCES}` cannot be read: {err}"})
-    paths := [String]{}
-    loop row in listed.split("\n") {
-        line: row.trim()
-        if line == "" || line.starts_with("#") -> next
-        if paths.contains(line) -> return Err(PackagesError{message: "`{RUNTIME_SOURCES}` lists `{line}` twice"})
-        paths.push(line.copy())
-    }
-    if paths.len() == 0 -> return Err(PackagesError{message: "`{RUNTIME_SOURCES}` lists no source"})
-    paths.extend(fragments.copy())
-    uses := [String]{}
-    bodies := [String]{}
-    loop path in paths {
-        text: files.read(files.join(root, path)) ?? return Err(PackagesError{message: "`{path}` cannot be read: {err}"})
-        importing := false
-        kept := [String]{}
-        loop line in unblock_uses(text).split("\n") {
-            if line.starts_with("use ") {
-                if is_core_use(line) && !uses.contains(line) -> uses.push(line.copy())
-                importing = line.contains("[") && !line.contains("]")
-                next
-            }
-            if importing {
-                if line.contains("]") -> importing = false
-                next
-            }
-            kept.push(line.copy())
-        }
-        bodies.push("{UNIT_SOURCE_MARK}{path}]\n{kept.join("\n")}")
-    }
-    package := ""
-    if fragments.len() > 0 {
-        // A test unit takes the one language edition the driver accepts.
-        loader: files.read(files.join(root, DRIVER_LOADER)) ?? return Err(PackagesError{message: "`{DRIVER_LOADER}` cannot be read: {err}"})
-        edition := ""
-        loop line in loader.split("\n") {
-            value: line.removeprefix("JET_DRIVER_EDITION: \"")
-            if value.len() < line.len() && value.len() > 1 && value.ends_with("\"") && !value.removesuffix("\"").contains("\"") {
-                edition = value.removesuffix("\"")
-                break
-            }
-        }
-        if edition == "" -> return Err(PackagesError{message: "JET_DRIVER_EDITION is not found in `{DRIVER_LOADER}`"})
-        package = "name: \"jet_runtime_tests\"\nversion: \"0.0.1\"\nedition: \"{edition}\"\n"
-    } else {
-        package = files.read(files.join(root, RUNTIME_PACKAGE)) ?? return Err(PackagesError{message: "`{RUNTIME_PACKAGE}` cannot be read: {err}"})
-    }
-    files.create_dir_all(out) ?? return Err(PackagesError{message: "`{out}` cannot be created: {err}"})
-    unit := uses.copy()
-    unit.push("")
-    unit.extend(bodies)
-    unit_path: files.join(out, "unit.jet")
-    files.write(unit_path, unit.join("\n")) ?? return Err(PackagesError{message: "`{unit_path}` cannot be written: {err}"})
-    files.write(files.join(out, "package.jet"), package) ?? return Err(PackagesError{message: "`{out}/package.jet` cannot be written: {err}"})
-    Ok(unit_path)
-}
-
-// `^[A-Z][A-Za-z0-9]*$`.
-is_type_name: fn(text: String) -> Bool Never! {
-    raw: text.bytes()
-    if raw.len() == 0 -> return false
-    first: Int.from_u8(raw[0])
-    if first < 65 || first > 90 -> return false
-    loop byte in raw {
-        code: Int.from_u8(byte)
-        if !((code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122)) -> return false
-    }
-    true
 }
 
 one_entry: fn(args: [String]) -[Exec, IO]> String Never! {
@@ -1058,18 +880,7 @@ unblock_uses: fn(text: String) -> String Never! {
     lines.join("\n")
 }
 
-#Test("runtime-unit accepts only type-shaped test names and Core uses") {
-    assert(is_type_name("Alloc"))
-    assert(is_type_name("Fmt2"))
-    assert(!is_type_name("lower"))
-    assert(!is_type_name(""))
-    assert(!is_type_name("Bad-Name"))
-    assert(runtime_unit_tests([String]{"out"}) == Val([String]{}))
-    assert(runtime_unit_tests([String]{"out", "--test", "World", "--test", "Sentry"}) == Val([String]{"World", "Sentry"}))
-    assert(runtime_unit_tests([String]{"out", "--test", "World", "--test", "World"}) == None)
-    assert(runtime_unit_tests([String]{"out", "--test"}) == None)
-    assert(runtime_unit_tests([String]{"out", "--test", "lower"}) == None)
-    assert(runtime_unit_tests([String]{"out", "--tests", "World"}) == None)
+#Test("Core uses are told from package uses") {
     assert(is_core_use("use core.files"))
     assert(is_core_use("use fs: core.files"))
     assert(is_core_use("use core.text.[Text, Rune]"))

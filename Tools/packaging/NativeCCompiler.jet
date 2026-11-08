@@ -8,7 +8,8 @@
 // features, and every stream inherited; exits as the compiler exits.
 // Usage (from the repository root): Tools/packaging/NativeCCompiler.jet CC_ARGS...
 // Tests: jet test Tools/packaging/NativeCCompiler.jet (the platform census
-// needs JET_PACK_MUSL_LIB, nm and a script-mode `jet` on PATH).
+// needs the static musl `libc.a` on LIBRARY_PATH, nm and a script-mode `jet`
+// on PATH).
 use {
     files: core.files
     process: core.process
@@ -184,11 +185,13 @@ forbidden: fn(name: String) -> Bool { re.is_match(Regex{"_chk(?:_|$)"}, name) ||
 
 #Test("real native C witnesses have no glibc fortified imports and resolve against the admitted platform archives") {
     root: test_root()
-    musl: process.env_get("JET_PACK_MUSL_LIB") ?? panic("JET_PACK_MUSL_LIB must name the native pack static musl directory")
+    folders: process.env_get_or("LIBRARY_PATH", "").split(":").to_list()
+    musl: loop folder in folders if folder != "" && files.is_file("{folder}/libc.a") && files.is_file("{folder}/crt1.o") -> folder.copy()
+    if musl.len() == 0 -> panic("LIBRARY_PATH must name the static musl `libc.a` folder the runtime pack links")
+    archives := [String]{"{musl[0]}/libc.a"}
     scratch: process.env_get_or("JET_TEST_SCRATCH_DIR", sys.temp_dir())
     files.create_dir_all(scratch) ?? panic("cannot create {scratch}")
     out: test_command(["mktemp", "-d", "{scratch}/native-c-platform-census-XXXXXX"]).trim()
-    archives := [String]{"{musl}/libc.a"}
     loop name in ["libgcc.a", "libgcc_eh.a"] -> archives.push(test_command(["{root}/{SELF}", "-print-file-name={name}"]).trim())
     platform := [String]{}
     loop path in archives {

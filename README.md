@@ -198,7 +198,9 @@ how it breaks ties.
 
 Jet compiles itself: each release is built by the one before it, and a new
 compiler must rebuild its own source byte for byte before it becomes a release.
-To build from a fresh clone, use the latest release as the seed:
+To build from a fresh clone, use the latest release as the seed. The build
+also makes the runtime pack, so it needs a C compiler (`cc`, `ar`, `nm`) and
+static musl's `libc.a`; `nix develop` supplies both:
 
 ```sh
 TAG=$(gh release view --repo jet-language/jet --json tagName --jq .tagName)
@@ -206,8 +208,7 @@ git clone --branch "$TAG" https://github.com/jet-language/jet && cd jet
 gh release download "$TAG" --repo jet-language/jet --pattern "jet-$TAG-linux-x64.tar.gz*" --dir ../release
 (cd ../release && sha256sum -c "jet-$TAG-linux-x64.tar.gz.sha256")
 mkdir ../seed && tar -xzf "../release/jet-$TAG-linux-x64.tar.gz" -C ../seed
-../seed/jet build Compiler
-../seed/jet run Tools/packaging/ReuseSeedRuntime.jet -- ../seed Compiler/JetCli/.jet/build/jet
+../seed/jet build Compiler        # jet, its runtime pack and IDENTITY
 export PATH="$PWD/Compiler/JetCli/.jet/build:$PATH"
 ```
 

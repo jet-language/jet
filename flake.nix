@@ -99,6 +99,10 @@
           )
           // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
             "CARGO_TARGET_${pkgs.stdenv.hostPlatform.rust.cargoEnvVarTarget}_LINKER" = "${jetCargoLinker}";
+            # The static musl whose libc.a the runtime pack links: Compiler/build.jet's
+            # find_folder probe looks for it on LIBRARY_PATH. The C compiler's own -L
+            # flags come first, so host links keep glibc.
+            LIBRARY_PATH = "${pkgs.pkgsStatic.musl}/lib";
           }
           // pkgs.lib.optionalAttrs jetHasMuslHelpers {
             JET_RUST_MUSL_TOOLCHAIN = "${jetRustToolchain}";

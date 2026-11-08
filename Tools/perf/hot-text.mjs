@@ -12,7 +12,7 @@
 // <jet> is a built compiler beside its jet-runtime/ directory. Only the
 // compiler's own functions are listed: its object is the link's first input,
 // so they are the functions below the first one the runtime pack
-// (jet-runtime/<native.key>/jet_runtime.pack.o) defines; libc and libgcc
+// (jet-runtime/jet_runtime.pack.o) defines; libc and libgcc
 // come after the pack. The environment names the toolchain as for any run
 // (JET_TOOLCHAIN_ROOT, JET_COMPILER_IDENTITY). Needs `cc` and ptrace of a
 // child: each command runs under Tools/perf/fntrace.c, which puts a
@@ -67,8 +67,7 @@ function main() {
   const args = parseArgs(process.argv);
   const jetBytes = readFileSync(args.jet);
   const runtime = join(dirname(args.jet), "jet-runtime");
-  const key = readFileSync(join(runtime, "native.key"), "utf8").trim();
-  const pack = new Set(functionSymbols(readFileSync(join(runtime, key, "jet_runtime.pack.o"))).map((symbol) => symbol.name));
+  const pack = new Set(functionSymbols(readFileSync(join(runtime, "jet_runtime.pack.o"))).map((symbol) => symbol.name));
   const byAddress = new Map();
   const symbols = functionSymbols(jetBytes);
   let boundary = -1n;
