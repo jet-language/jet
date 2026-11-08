@@ -3375,12 +3375,8 @@ sema_check_registration_module_program: fn(environment: SemaScopeEnvironment, pr
                 }
                 .CodeModule(definition) -> {
                     if definition.body != None && !sema_inline_module_lowered(definition) {
-                        if sema_inline_module_import_unbuilt(definition) == .Val(diagnostic) {
-                            module_result.diagnostics.push(diagnostic)
-                        } else {
-                            module_result.complete = false
-                            module_result.incomplete_reasons.push("inline module `{definition.name}` is not lowered")
-                        }
+                        module_result.complete = false
+                        module_result.incomplete_reasons.push("inline module `{definition.name}` is not lowered")
                     }
                 }
                 // A `fact` declaration has no checked body: its rows are

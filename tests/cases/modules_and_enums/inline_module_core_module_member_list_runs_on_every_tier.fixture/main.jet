@@ -1,0 +1,18 @@
+// An inline module binds a Core module through a member list, as a file
+// does: its members, and the members of a module nested in it, call through
+// the bound name.
+geometry: module {
+    use core.[math]
+    magnitude: fn(n: Int) -> Int { return math.abs(n) }
+    root: fn(x: Float) -> Float { return math.sqrt(x) }
+    labels: module {
+        use core.text.[fmt]
+        rank: fn(n: Int) -> String { return fmt.ordinal(math.abs(n)) }
+    }
+}
+
+run: fn() {
+    print(geometry.magnitude(-7))
+    print(geometry.root(16.0))
+    print(geometry.labels.rank(-3))
+}

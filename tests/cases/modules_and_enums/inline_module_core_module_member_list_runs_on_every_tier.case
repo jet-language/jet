@@ -1,0 +1,16 @@
+# An inline module's own `use core.[math]` (and a nested module's `use core.text.[fmt]`)
+# binds the Core module inside the module: it lowers and runs the same on every tier.
+fixture: inline_module_core_module_member_list_runs_on_every_tier.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run main.jet
+exit: 0
+stdout: = "7\n4.0\n3rd\n"
+step: jet run --release main.jet
+exit: 0
+stdout: = "7\n4.0\n3rd\n"
+step: jet build main.jet
+exit: 0
+step: built
+exit: 0
+stdout: = "7\n4.0\n3rd\n"
