@@ -40,11 +40,14 @@ NativeSandboxStatus: struct {
 NativeSandboxError: enum {
     Unsupported(String)
     IO(String)
+    // The child ran past its time limit (in milliseconds) and was killed.
+    TimedOut(limit_ms: Int)
 
     message: fn(self) -> String Never! {
         if self == {
             .Unsupported(detail) -> detail
             .IO(detail) -> detail
+            .TimedOut(limit_ms) -> "sandbox process timed out after {limit_ms}ms"
         }
     }
 }
@@ -165,7 +168,7 @@ foundation_run_native_sandboxed_with_timeout_and_mounts: fn(executable: String, 
     receipt: spec.stdout(.Capture).stderr(.Capture).output_limit(NATIVE_SANDBOX_MAX_OUTPUT_BYTES).run() ?? return Err(NativeSandboxError.IO("{err}"))
     if receipt.timed_out {
         limit: timeout ?? panic("a timed-out sandbox run had a timeout")
-        return Err(NativeSandboxError.IO("sandbox process timed out after {limit.ns / 1000000}ms"))
+        return Err(NativeSandboxError.TimedOut{limit_ms: limit.ns.div_euclid(1000000)})
     }
     if receipt.limit_hit == .Val(_) -> return Err(NativeSandboxError.IO("sandbox process output exceeded {NATIVE_SANDBOX_MAX_OUTPUT_BYTES} bytes"))
     mechanism: if sys.is_linux() -> "linux-bwrap" else -> "macos-seatbelt"

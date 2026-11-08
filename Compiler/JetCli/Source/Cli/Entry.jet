@@ -55,9 +55,11 @@ use {
     TOKEN_RPAREN,
     TOKEN_STRING,
     TOKEN_TRUE,
+    TOKEN_UNIT_NUMBER,
     Token,
     TokenTables,
     token_decoded,
+    token_suffix,
     lex,
     lex_config,
     ]
@@ -362,11 +364,13 @@ jet_cli_build_profiles: fn(tokens: [Token], tables: TokenTables, open: Int, clos
                 field = skipped + 1
                 next
             }
-            if tokens[field].kind == TOKEN_IDENT && field + 2 < body_close && tokens[field + 1].kind == TOKEN_COLON && (tokens[field + 2].kind == TOKEN_IDENT || tokens[field + 2].kind == TOKEN_TRUE || tokens[field + 2].kind == TOKEN_FALSE || jet_cli_is_manifest_string(tokens[field + 2].kind)) {
+            if tokens[field].kind == TOKEN_IDENT && field + 2 < body_close && tokens[field + 1].kind == TOKEN_COLON && (tokens[field + 2].kind == TOKEN_IDENT || tokens[field + 2].kind == TOKEN_TRUE || tokens[field + 2].kind == TOKEN_FALSE || tokens[field + 2].kind == TOKEN_UNIT_NUMBER || jet_cli_is_manifest_string(tokens[field + 2].kind)) {
                 kind: tokens[field + 2].kind
                 value: if {
                     kind == TOKEN_TRUE -> "true"
                     kind == TOKEN_FALSE -> "false"
+                    // A Duration field: `action_timeout: 10min`.
+                    kind == TOKEN_UNIT_NUMBER -> "{token_decoded(tables, tokens[field + 2])}{token_suffix(tables, tokens[field + 2])}"
                     else -> token_decoded(tables, tokens[field + 2])
                 }
                 fields.push(JetCLIProfileField{name: token_decoded(tables, tokens[field]), value: value, list: false})

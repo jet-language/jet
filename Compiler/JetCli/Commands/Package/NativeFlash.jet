@@ -57,10 +57,7 @@ jet_cli_flash_execute: fn(plan: JetCLIFlashPlan) -[FS, Env, Exec, Time.Wait]> Je
         .Ok(value) -> value
         .Err(error) -> {
             cli_files.remove_all(output) ?? ()
-            detail: if error == {
-                .Unsupported(text) -> text
-                .IO(text) -> text
-            }
+            detail: error.message()
             return jet_cli_flash_execution_failed("authority_spawn", detail, status.mechanism, status.policy)
         }
     }

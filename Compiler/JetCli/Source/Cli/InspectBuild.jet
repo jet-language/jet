@@ -10,7 +10,7 @@ use {
     ]
     jet_foundation.[
         BuildOptionChoice, BuildOptionLayer, BuildOptions, Diagnostic, DIAGNOSTIC_LINT, SourceFile, Span,
-        build_option_argument, build_option_check_removal_note, build_option_row, build_options_check_removals, build_options_value, build_options_with_code,
+        build_option_argument, build_option_check_removal_note, build_option_duration_ms, build_option_row, build_options_check_removals, build_options_value, build_options_with_code,
         diagnostic_render_all,
     ]
     core.build.[BuildGraphNode]
@@ -195,8 +195,10 @@ jet_cli_build_package_as: fn(file: String, color: Bool, options: BuildOptions, b
             build_files.write(path, source_file.source) ?? return jet_cli_build_failed("couldn't write the generated source `{path}`: {err}", jet_cli_why("E2105"), "make `{directory}` writable, or build with `--write-generated=off`", color)
         }
     }
+    // Every step without its own `.timeout` gets the `action_timeout` option's.
+    action_timeout_ms: build_option_duration_ms(build_options_value(selected_options, "action_timeout")) ?? panic("the resolved `action_timeout` is a checked duration")
     // copy: `failed` is a payload view of the execution's result.
-    if jet_cli_build_execute(graph, root, policy, invocation, member, color) == .Val(failed) -> return failed.copy()
+    if jet_cli_build_execute(graph, root, policy, invocation, member, action_timeout_ms, color) == .Val(failed) -> return failed.copy()
     loop executable in selected.executables {
         source_path: jet_cli_entry_join(root, executable.source)
         source: build_files.read(source_path) ?? return jet_cli_build_failed("couldn't read the target source `{source_path}`: {err}", jet_cli_why("E2105"), "correct the source path given to `b.add_executable`", color)

@@ -5006,6 +5006,32 @@ canonical graph to scheduling, caching, execution, queries, and LSP.
 A `jet build` that runs no `build: fn`, such as `jet build main.jet -- a`,
 refuses the words with E2104 instead of dropping them.
 
+`b.run(name, tool, caps)` declares one step and returns its `BuildAction`.
+The tool is a `BuildFile`. `b.found(probe)` is the program a `find_program`
+probe finds, and a step's `.output(path)` is a file that step makes, so one
+step can build the tool the next one runs. Calls on the step build its
+command line in order. `.input(path)` and `.output(path)` declare a file and
+pass its path as the next argument. `.reads(path)` and `.writes(path)`
+declare a file without passing it. `.file(f)` passes another step's output
+and orders the step after that one, and `.arg(text)` passes literal text.
+`.input`, `.output` and `.file` take `flag:`, written before the path in the
+same argument: `.output("gen.c", flag: "--out=")` passes `--out=gen.c`.
+`.output` returns the new `BuildFile`, and `f.path()` is a made file's
+package-relative path; a found program has no path until the build runs, so
+its `.path()` is refused. `.toolchain(t)` and `.sign(identity)` add toolchain
+and signing identity. A step's result is cached like an action's. A step that
+declares no output is refused at its `b.run` call (E3502), since only declared
+outputs leave its sandbox, and `.arg` text that names a package file is
+refused with the fix `.input(path)`, so the step can't read an undeclared file.
+`.timeout(10min)` bounds how long the step may run. The `action_timeout` build
+option (stock `30s`; the profile field `action_timeout: 10min`, the call
+`b.action_timeout(10min)` and the flag `--action-timeout=10min`) bounds every
+step that sets no limit of its own. Both take a whole number and one unit
+(`ns`, `us`, `ms`, `s`, `min` or `h`) that comes to at least 1ms, and no cache
+key names the limit. A step that runs past
+its limit is stopped and reported with E3505. Example:
+[`tests/cases/build_entry/run_steps_chain_a_found_tool_and_a_made_file.case`](../../tests/cases/build_entry/run_steps_chain_a_found_tool_and_a_made_file.case).
+
 A target's sources are package-relative paths, and the first is its entry.
 Every source a target lists is part of it: the others share the entry's
 namespace, as the modules `b.generate` produces do, so

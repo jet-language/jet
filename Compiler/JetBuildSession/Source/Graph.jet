@@ -93,6 +93,14 @@ build_session_validate: fn(state: BuildSessionState, default: Int) -> BuildSessi
     }
     loop (id, action) in state.actions {
         action_names.push(action.name)
+        // A `b.run` step leaves only its declared outputs, so a step with
+        // none is reported at its own `b.run` call.
+        if action.tool != None && action.outputs.len() == 0 {
+            diagnostic := build_session_error_diag(state, BuildSessionError.StepWithoutOutputs{value: action.name})
+            diagnostic.start = action.start
+            diagnostic.end = action.end
+            return Val(diagnostic)
+        }
         loop output in action.outputs {
             if owners.get(output) == .Val(first) -> return Val(build_session_error_diag(state, BuildSessionError.DuplicateBuildOutput{output: output, first_action: state.actions[first].name, second_action: action.name}))
             owners[output] = id

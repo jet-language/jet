@@ -1,0 +1,5 @@
+# A `b.run` step with no declared output is refused before anything runs.
+fixture: fixtures/run_step_without_output_is_refused_at_its_call
+step: jet build main.jet --allow=Exec --json
+exit: nonzero
+json: machine doc $.reports[?code="E3502"][?what~="step `quiet` declares no output"] #>= 1

@@ -242,3 +242,51 @@ build_graph_rules_kind_key: fn(id: Int, kind: String) -> String Never! {
     assert(docs != archive)
     assert(debug != archive)
 }
+
+build_graph_rules_step: fn(session: &BuildSession, method: String, step: BuildSessionValue, values: [BuildSessionValue]) -> BuildSessionReply Never! {
+    args := [BuildSessionValue]{step.copy()}
+    loop value in values -> args.push(value.copy())
+    build_session_call(session, "action.{method}", args, None, true, 9, 10)
+}
+
+#Test("run_steps_build_their_command_line_from_declared_files") {
+    session := build_graph_rules_session(97)
+    caps: build_graph_rules_list([String]{"Exec", "FS"})
+    shell: build_graph_rules_value(build_session_call(session, "probe", [BuildSessionValue]{.Text(value: "shell"), .Text(value: "find_program"), .Text(value: "sh")}, None, true, 1, 2))
+    found: build_graph_rules_value(build_session_call(session, "found", [BuildSessionValue]{shell}, None, true, 3, 4))
+    assert(build_graph_rules_failed(build_session_call(session, "file.path", [BuildSessionValue]{found}, None, true, 5, 6)))
+    gen: build_graph_rules_value(build_session_call(session, "run", [BuildSessionValue]{.Text(value: "gen"), found, caps}, None, true, 7, 8))
+    assert(build_graph_rules_ok(build_graph_rules_step(session, "arg", gen, [BuildSessionValue]{.Text(value: "-c")})))
+    assert_eq(build_graph_rules_error(build_graph_rules_step(session, "arg", gen, [BuildSessionValue]{.Text(value: " ")})), Val(BuildSessionError.EmptyActionArgv{value: "gen"}))
+    assert(build_graph_rules_ok(build_graph_rules_step(session, "input", gen, [BuildSessionValue]{.Text(value: "gen.sh")})))
+    tool: build_graph_rules_value(build_graph_rules_step(session, "output", gen, [BuildSessionValue]{.Text(value: "tool.sh"), .Text(value: "--out=")}))
+    assert_eq(build_session_call(session, "file.path", [BuildSessionValue]{tool}, None, true, 11, 12), BuildSessionReply.Value{value: BuildSessionValue.Text{value: "tool.sh"}})
+    assert(build_graph_rules_failed(build_graph_rules_step(session, "file", gen, [BuildSessionValue]{tool})))
+    assert(build_graph_rules_failed(build_graph_rules_step(session, "file", gen, [BuildSessionValue]{found})))
+    assert(build_graph_rules_ok(build_graph_rules_step(session, "timeout", gen, [BuildSessionValue]{.Text(value: "2min")})))
+    assert(build_graph_rules_failed(build_graph_rules_step(session, "timeout", gen, [BuildSessionValue]{.Text(value: "10us")})))
+    made: build_graph_rules_value(build_session_call(session, "run", [BuildSessionValue]{.Text(value: "made"), tool, caps}, None, true, 13, 14))
+    assert(build_graph_rules_ok(build_graph_rules_step(session, "reads", made, [BuildSessionValue]{.Text(value: "data.txt")})))
+    assert(build_graph_rules_ok(build_graph_rules_step(session, "writes", made, [BuildSessionValue]{.Text(value: "made.txt")})))
+    permit: session.storage.guard_read()
+    first: permit.value.actions[0]
+    assert_eq(first.argv, [String]{"sh", "-c", "gen.sh", "--out=tool.sh"})
+    assert_eq(first.inputs, [String]{"gen.sh"})
+    assert_eq(first.outputs, [String]{"tool.sh"})
+    assert_eq(first.probes, [Int]{0})
+    assert_eq(first.timeout_ms, Val(120000))
+    second: permit.value.actions[1]
+    assert_eq(second.argv, [String]{"tool.sh"})
+    assert_eq(second.inputs, [String]{"tool.sh", "data.txt"})
+    assert_eq(second.outputs, [String]{"made.txt"})
+}
+
+#Test("run_step_without_an_output_refuses_the_plan") {
+    session := build_graph_rules_session(98)
+    shell: build_graph_rules_value(build_session_call(session, "probe", [BuildSessionValue]{.Text(value: "shell"), .Text(value: "find_program"), .Text(value: "sh")}, None, true, 1, 2))
+    found: build_graph_rules_value(build_session_call(session, "found", [BuildSessionValue]{shell}, None, true, 3, 4))
+    _: build_graph_rules_value(build_session_call(session, "run", [BuildSessionValue]{.Text(value: "quiet"), found, build_graph_rules_list([String]{"Exec"})}, None, true, 5, 6))
+    plan: build_graph_rules_value(build_session_call(session, "plan", [BuildSessionValue]{}, None, false, 7, 8))
+    diagnostic: build_session_graph(session, plan).diagnostic ?? panic("a step with no output must refuse the plan")
+    assert_eq(diagnostic.error, Val(BuildSessionError.StepWithoutOutputs{value: "quiet"}))
+}

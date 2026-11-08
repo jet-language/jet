@@ -22,7 +22,7 @@ build_services_require: fn(ok: Bool, message: String) Never! {
         .DuplicateToolchainName{value: "tool"}, .DuplicateSigningIdentityName{value: "sign"}, .DuplicateProbeName{value: "probe"},
         .EmptyPath, .InvalidPath{value: "../bad"}, .EmptyToolchainTriple{value: "tool"}, .EmptyIdentityField{value: "identity"},
         .MissingLockedProvenance{value: "probe"}, .EmptyProbeField{value: "probe"}, .EmptyActionArgv{value: "action"}, .EmptyEnvName{value: "action"},
-        .UndeclaredEnvName{action: "action", key: "KEY"}, .CachedActionWithoutOutputs{value: "action"}, .PhonyActionWithoutCaps{value: "action"}, .PhonyActionWithOutputs{value: "action"},
+        .UndeclaredEnvName{action: "action", key: "KEY"}, .CachedActionWithoutOutputs{value: "action"}, .StepWithoutOutputs{value: "step"}, .PhonyActionWithoutCaps{value: "action"}, .PhonyActionWithOutputs{value: "action"},
         .DuplicateActionOutput{action: "action", output: "output"}, .DuplicateBuildOutput{output: "output", first_action: "first", second_action: "second"},
         .UnknownTarget{id: 3}, .UnknownAction{id: 4}, .UnknownToolchain{id: 5}, .UnknownSigningIdentity{id: 6}, .UnknownProbe{id: 7},
         .LegacyWrapperWithoutInputs{kind: "make"}, .LegacyWrapperWithoutOutputs{kind: "make"}, .LegacyWrapperWithoutCaps{kind: "make"},
@@ -36,13 +36,13 @@ build_services_require: fn(ok: Bool, message: String) Never! {
         "EmptyTargetName", "EmptyActionName", "EmptyToolchainName", "EmptySigningIdentityName", "EmptyProbeName",
         "DuplicateTargetName", "DuplicateActionName", "CompilerPackageDependencyMissing", "DuplicateToolchainName", "DuplicateSigningIdentityName", "DuplicateProbeName",
         "EmptyPath", "InvalidPath", "EmptyToolchainTriple", "EmptyIdentityField", "MissingLockedProvenance", "EmptyProbeField", "EmptyActionArgv", "EmptyEnvName",
-        "UndeclaredEnvName", "CachedActionWithoutOutputs", "PhonyActionWithoutCaps", "PhonyActionWithOutputs", "DuplicateActionOutput", "DuplicateBuildOutput",
+        "UndeclaredEnvName", "CachedActionWithoutOutputs", "StepWithoutOutputs", "PhonyActionWithoutCaps", "PhonyActionWithOutputs", "DuplicateActionOutput", "DuplicateBuildOutput",
         "UnknownTarget", "UnknownAction", "UnknownToolchain", "UnknownSigningIdentity", "UnknownProbe",
         "LegacyWrapperWithoutInputs", "LegacyWrapperWithoutOutputs", "LegacyWrapperWithoutCaps", "LegacyWrapperCommandMismatch", "LegacyProjectFileMissing", "LegacyProjectFileInvalid",
         "PolicyDenied", "EmptyPluginField", "InvalidPluginDigest", "PackagedPlugin", "PluginVersionMismatch", "EmptyGeneratedModuleField", "InvalidGeneratedModulePath",
         "DuplicateGeneratedModuleName", "DuplicateGeneratedModulePath", "GeneratedModuleCycle", "TargetDependencyCycle", "ActionDependencyCycle",
     }
-    build_services_require(errors.len() == 48 && errors.len() == variants.len(), "closed BuildError census")
+    build_services_require(errors.len() == 49 && errors.len() == variants.len(), "closed BuildError census")
     loop (index, error) in errors {
         projection: build_session_error_projection(error)
         build_services_require(projection.variant == variants[index], "variant identity")

@@ -524,7 +524,7 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
     build_test_assert_descendant_reaped(files.join(root, "exit-marker"))
     timeout_started: time.instant()
     if foundation_run_native_sandboxed_with_timeout_and_mounts(bash, [String]{"-c", build_test_delayed_descendant("timeout-marker", "while :; do :; done")}, root, None, [String: String]{}, false, [NativeSandboxMount]{}, Val(time.duration_ms(500))) == {
-        .Err(error) -> assert(error == NativeSandboxError.IO("sandbox process timed out after 500ms"))
+        .Err(error) -> assert(error == NativeSandboxError.TimedOut{limit_ms: 500})
         .Ok(_) -> panic("a child past its budget must be killed")
     }
     assert(timeout_started.elapsed_millis() < 3000)

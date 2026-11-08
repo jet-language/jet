@@ -272,6 +272,9 @@ ActionSpec: struct {
     // Sorted by rank, then custom name, and unique (Rust `BTreeSet`).
     resource_pools: [BuildResourcePool]
     variant_identity: String?
+    // How long the action may run, in milliseconds; None takes the
+    // sandbox's default.
+    timeout_ms: Int?
 
     cached: fn(argv: [String]) -> ActionSpec Never! {
         ActionSpec{
@@ -279,7 +282,7 @@ ActionSpec: struct {
             env_allowlist: [String]{}, caps: [BuildEffect]{}, cache: ActionCache.Cached,
             kind: ActionKind.Generic, toolchain: None, probes: [ProbeHandle]{}, signing_identity: None,
             labels: [String: String]{}, helper_versions: [String: String]{},
-            resource_pools: [BuildResourcePool]{}, variant_identity: None,
+            resource_pools: [BuildResourcePool]{}, variant_identity: None, timeout_ms: None,
         }
     }
 
@@ -366,6 +369,12 @@ ActionSpec: struct {
         updated.variant_identity = Val(identity)
         updated
     }
+
+    with_timeout_ms: fn(self, limit: Int) -> ActionSpec Never! {
+        updated := self
+        updated.timeout_ms = Val(limit)
+        updated
+    }
 }
 
 HermeticBuildAction: struct {
@@ -386,6 +395,7 @@ HermeticBuildAction: struct {
     helper_versions: [String: String]
     resource_pools: [BuildResourcePool]
     variant_identity: String?
+    timeout_ms: Int?
 }
 
 // Rust `BTreeSet<String>::insert`.

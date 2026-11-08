@@ -110,6 +110,23 @@ BuildSessionAction: struct {
     plugin: Int?
     compiler_owned: Bool{false}
     variant_identity: String?{None}
+    // A `b.run` step: the BuildFile it runs, its own time limit in
+    // milliseconds (None: the `action_timeout` option's), and the span of its
+    // `b.run` call, where a step that declares no output is reported.
+    tool: Int?{None}
+    timeout_ms: Int?{None}
+    start: Int{0}
+    end: Int{0}
+}
+
+// A file the build knows (BuildFile): `found` is the program a find_program
+// probe looks for (`path` is its name, resolved when the step runs);
+// `output` is a path a step declared, which that step makes.
+BuildSessionFile: struct {
+    kind: String
+    path: String
+    probe: Int?
+    action: Int?
 }
 
 BuildSessionTarget: struct {
@@ -145,6 +162,7 @@ BuildSessionState: struct {
     compiler_version: String
     policy: BuildSessionPolicy
     actions: [BuildSessionAction]
+    files: [BuildSessionFile]
     targets: [BuildSessionTarget]
     toolchains: [BuildSessionToolchain]
     signing: [BuildSessionSigning]
@@ -169,7 +187,7 @@ BuildSession: struct { storage: Shared<BuildSessionState> }
 build_session_new: fn(session_id: Int, package: String, compiler_version: String, policy: BuildSessionPolicy) -> BuildSession Never! {
     {storage: shared BuildSessionState{
         id: session_id, active: true, package: package, compiler_version: compiler_version, policy: policy,
-        actions: [BuildSessionAction]{}, targets: [BuildSessionTarget]{},
+        actions: [BuildSessionAction]{}, files: [BuildSessionFile]{}, targets: [BuildSessionTarget]{},
         toolchains: [BuildSessionToolchain]{{name: "host", role: "host", host_triple: "host", target_triple: "host", sdk: None, linker: None, sysroot: None}},
         signing: [BuildSessionSigning]{}, probes: [BuildSessionProbe]{}, plugins: [BuildSessionPlugin]{},
         generated: [BuildSessionGeneratedModule]{}, contributions: [BuildSessionContribution]{},
@@ -238,6 +256,7 @@ build_session_handle: fn(state: BuildSessionState, value: BuildSessionValue, kin
             "BuildTarget" -> state.targets.len()
             "BuildToolchain" -> state.toolchains.len()
             "BuildProbe" -> state.probes.len()
+            "BuildFile" -> state.files.len()
             "BuildSigningIdentity" -> state.signing.len()
             else -> 0
         }
@@ -354,6 +373,14 @@ build_session_call: fn(session: &BuildSession, method: String, args: [BuildSessi
         if caps.len() > 0 && !in_impure_gate -> return build_session_impure(state, method)
         return build_session_add_action(state, method, args)
     }
+    if method == "run" {
+        caps: build_session_strings(args, 2) ?? return build_session_fail(state, "a step's effects must be a list of strings")
+        if caps.len() > 0 && !in_impure_gate -> return build_session_impure(state, method)
+        return build_session_add_run(state, args, start, end)
+    }
+    if method == "found" -> return build_session_found(state, args)
+    if method.starts_with("action.") -> return build_session_step_call(state, method.removeprefix("action."), args)
+    if method == "file.path" -> return build_session_file_path(state, args)
     if method.starts_with("add_") -> return build_session_add_target(state, method, args)
     if method == "toolchain" -> return build_session_add_toolchain(state, args)
     if method == "signing" -> return build_session_add_signing(state, args)
@@ -592,6 +619,7 @@ BuildSessionError: enum {
     EmptyEnvName(value: String)
     UndeclaredEnvName(action: String, key: String)
     CachedActionWithoutOutputs(value: String)
+    StepWithoutOutputs(value: String)
     PhonyActionWithoutCaps(value: String)
     PhonyActionWithOutputs(value: String)
     DuplicateActionOutput(action: String, output: String)
@@ -699,6 +727,7 @@ build_session_error_projection: fn(error: BuildSessionError) -> BuildSessionErro
         .EmptyActionArgv(value) -> build_session_error_debug("EmptyActionArgv", value)
         .EmptyEnvName(value) -> build_session_error_debug("EmptyEnvName", value)
         .CachedActionWithoutOutputs(value) -> build_session_error_one("CachedActionWithoutOutputs", value, "cached action `{value}` declares no outputs")
+        .StepWithoutOutputs(value) -> build_session_error_one("StepWithoutOutputs", value, "step `{value}` declares no output, and only declared outputs leave its sealed folder; pass one with `.output(path)` or declare one with `.writes(path)`")
         .PhonyActionWithoutCaps(value) -> build_session_error_one("PhonyActionWithoutCaps", value, "uncached action `{value}` declares no abilities")
         .PhonyActionWithOutputs(value) -> build_session_error_debug("PhonyActionWithOutputs", value)
         .LegacyWrapperWithoutInputs(kind) -> build_session_error_kind("LegacyWrapperWithoutInputs", kind)

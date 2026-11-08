@@ -40,6 +40,8 @@ BuildExecutionError: enum {
     MissingGrant(action: String, capability: BuildEffect)
     SandboxUnavailable
     IO(action: String, detail: String)
+    // The action ran past its time limit, in milliseconds, and was killed.
+    TimedOut(action: String, limit_ms: Int)
     ProbeFailed(probe: String, detail: String)
     // The one structured action-failure route, retained whether the action
     // ran now or its failure was restored from the cache.
@@ -186,6 +188,7 @@ build_native_sandbox_error: fn(action: HermeticBuildAction, error: NativeSandbox
     if error == {
         .Unsupported(_) -> BuildExecutionError.SandboxUnavailable
         .IO(detail) -> BuildExecutionError.IO{action: action.name, detail}
+        .TimedOut(limit_ms) -> BuildExecutionError.TimedOut{action: action.name, limit_ms}
     }
 }
 
@@ -218,7 +221,9 @@ build_action_shares_network: fn(grants: [BuildEffect], caps: [BuildEffect]) -> B
 build_execute_one_action: fn(plan: HermeticBuildPlan, action: HermeticBuildAction, handle: HermeticActionHandle, project_root: String, artifact_store: BuildArtifactStoreHandle, grants: [BuildEffect], probe_facts: [BuildProbeFact]) -[FS, Env, Exec, Time, Time.Wait, Rand]> ActionOutcome BuildExecutionError! {
     inputs: build_snapshot_declared_inputs(artifact_store, project_root, action) ?? return Err(build_io_action(action, err))
     snapshots: loop input in inputs -> input.snapshot
-    executable: build_resolve_program_path(plan, action.toolchain, action.argv[0]) ?? return Err(BuildExecutionError.IO{action: action.name, detail: "tool {action.argv[0]} was not found"})
+    // A tool another step makes is a declared input, run from the project;
+    // any other tool is looked up through the action's toolchain.
+    executable: if action.inputs.contains(action.argv[0]) -> files.join(project_root, action.argv[0]) else -> build_resolve_program_path(plan, action.toolchain, action.argv[0]) ?? return Err(BuildExecutionError.IO{action: action.name, detail: "tool {action.argv[0]} was not found"})
     executable_bytes: if files.is_file(executable) -> (files.read_bytes(executable) ?? return Err(build_io_action(action, BuildIOError.from(err)))) else -> action.argv[0].bytes()
     executable_digest: ContentDigest.from_bytes(executable_bytes)
     action_probe_names := [String]{}
@@ -281,7 +286,7 @@ build_execute_one_action: fn(plan: HermeticBuildPlan, action: HermeticBuildActio
         loop mount in toolchain.mounts -> mounts.push(NativeSandboxMount{source: mount.source, destination: mount.destination})
     }
     share_network: build_action_shares_network(grants, action.caps)
-    timeout: time.duration_ms(NATIVE_SANDBOX_DEFAULT_ACTION_TIMEOUT_MS)
+    timeout: time.duration_ms(action.timeout_ms ?? NATIVE_SANDBOX_DEFAULT_ACTION_TIMEOUT_MS)
     ran: foundation_run_native_sandboxed_with_timeout_and_mounts(executable, runtime_args, sandbox, None, runtime_env, share_network, mounts, Val(timeout)) ?? {
         files.remove_all(sandbox).drop("the action sandbox is removed best-effort; the sandbox error is reported")
         return Err(build_native_sandbox_error(action, err))
@@ -397,6 +402,7 @@ build_run_probe_sandboxed: fn(executable: String, args: [String], source: (path:
             Err(if error == {
                 .Unsupported(_) -> BuildExecutionError.SandboxUnavailable
                 .IO(detail) -> BuildExecutionError.IO{action: "build probe sandbox", detail}
+                .TimedOut(_) -> BuildExecutionError.IO{action: "build probe sandbox", detail: error.message()}
             })
         }
     }

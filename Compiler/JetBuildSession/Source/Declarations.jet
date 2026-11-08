@@ -1,3 +1,5 @@
+use jet_foundation.[build_option_duration_ms]
+
 // Rust runtime_bridge positional contract. Optional trailing controls are
 // decoded once here, before mutating the session. No command is executed.
 build_session_add_action: fn(state: &BuildSessionState, method: String, args: [BuildSessionValue]) -> BuildSessionReply {
@@ -129,6 +131,123 @@ build_session_insert_action: fn(state: &BuildSessionState, action: BuildSessionA
     id: state.actions.len()
     state.actions.push(action.copy())
     BuildSessionReply.Value{value: BuildSessionValue.Handle{type_name: "BuildAction", session: state.id, id: id}}
+}
+
+// `b.run(name, tool, caps)`: a step that runs `tool`, a BuildFile. Its
+// arguments come one call at a time (build_session_step_call); a found
+// program is looked up when the step runs, and a file another step makes
+// is that step's output, so this step runs after it.
+build_session_add_run: fn(state: &BuildSessionState, args: [BuildSessionValue], start: Int, end: Int) -> BuildSessionReply {
+    if args.len() != 3 -> return build_session_fail(state, "`b.run` takes a name, a tool and its effects")
+    name: build_session_text(args, 0) ?? return build_session_fail(state, "step name must be a string")
+    tool: build_session_handle(state, args[1], "BuildFile") ?? return build_session_fail(state, "the step's tool does not belong to this build")
+    caps: build_session_caps(build_session_strings(args, 2) ?? return build_session_fail(state, "a step's effects must be strings")) ?? return build_session_fail(state, "unknown build effect; use one of the ten declared effects")
+    file: state.files[tool]
+    probes := [Int]{}
+    inputs := [String]{}
+    if file.probe == .Val(probe) -> probes.push(probe)
+    if file.kind == "output" -> inputs.push(file.path.copy())
+    action: BuildSessionAction{name: name, inputs: inputs, outputs: [String]{}, argv: [String]{file.path.copy()}, caps: caps, toolchain: 0, probes: probes, signing: None, kind: "generic", pools: [String]{}, env: [String:String]{}, env_allowlist: [String]{}, helpers: [String:String]{}, labels: [String:String]{}, cache: "cached", legacy: None, plugin: None, tool: Val(tool), start: start, end: end}
+    if action.name.trim() == "" -> return build_session_error_fail(state, .EmptyActionName)
+    if state.actions.len() >= 100000 -> return build_session_fail(state, "action graph exceeds 100000 actions")
+    loop old in state.actions { if old.name == action.name -> return build_session_error_fail(state, BuildSessionError.DuplicateActionName{value: action.name}) }
+    id: state.actions.len()
+    state.actions.push(action)
+    BuildSessionReply.Value{value: BuildSessionValue.Handle{type_name: "BuildAction", session: state.id, id: id}}
+}
+
+// `b.found(probe)`: the program a find_program probe looks for, as a tool.
+build_session_found: fn(state: &BuildSessionState, args: [BuildSessionValue]) -> BuildSessionReply {
+    if args.len() != 1 -> return build_session_fail(state, "`b.found` takes one probe")
+    probe: build_session_handle(state, args[0], "BuildProbe") ?? return build_session_fail(state, "the probe does not belong to this build")
+    row: state.probes[probe]
+    if row.kind != "find_program" -> return build_session_fail(state, "`b.found` takes a find_program probe, and `{row.name}` is a {row.kind} probe")
+    build_session_new_file(state, BuildSessionFile{kind: "found", path: row.value.copy(), probe: Val(probe), action: None})
+}
+
+build_session_new_file: fn(state: &BuildSessionState, file: BuildSessionFile) -> BuildSessionReply {
+    id: state.files.len()
+    state.files.push(file.copy())
+    BuildSessionReply.Value{value: BuildSessionValue.Handle{type_name: "BuildFile", session: state.id, id: id}}
+}
+
+// `file.path()`: the package-relative path of a file a step makes.
+build_session_file_path: fn(state: &BuildSessionState, args: [BuildSessionValue]) -> BuildSessionReply {
+    if args.len() != 1 -> return build_session_fail(state, "`path` takes no arguments")
+    id: build_session_handle(state, args[0], "BuildFile") ?? return build_session_fail(state, "the file does not belong to this build")
+    file: state.files[id]
+    if file.kind == "found" -> return build_session_fail(state, "found program `{file.path}` has no path until the build runs; pass it to a step as its tool")
+    BuildSessionReply.Value{value: BuildSessionValue.Text{value: file.path.copy()}}
+}
+
+// One call on a `b.run` step (args: the step, then the call's values). A
+// file call declares the file and appends its path, after its `flag:` text
+// when one is given, to the tool's arguments.
+build_session_step_call: fn(state: &BuildSessionState, method: String, args: [BuildSessionValue]) -> BuildSessionReply {
+    if args.len() == 0 -> return build_session_fail(state, "step call lost its step")
+    id: build_session_handle(state, args[0], "BuildAction") ?? return build_session_fail(state, "the step does not belong to this build")
+    step := state.actions[id]
+    if step.tool == None -> return build_session_fail(state, "`{step.name}` is a `b.action`; `.{method}` is a call on a `b.run` step")
+    flag: build_session_text(args, 2) ?? ""
+    unit: BuildSessionReply.Value{value: BuildSessionValue.Unit}
+    if method == {
+        "input" | "reads" -> {
+            path: build_session_text(args, 1) ?? return build_session_fail(state, "`.{method}` takes a path")
+            if build_session_path_error(path) == .Val(error) -> return build_session_error_fail(state, error)
+            build_session_append_unique(step.inputs, path)
+            if method == "input" -> step.argv.push("{flag}{path}")
+            state.actions[id] = step
+            return unit
+        }
+        "output" | "writes" -> {
+            path: build_session_text(args, 1) ?? return build_session_fail(state, "`.{method}` takes a path")
+            if build_session_path_error(path) == .Val(error) -> return build_session_error_fail(state, error)
+            if build_session_contains_string(step.outputs, path) -> return build_session_error_fail(state, BuildSessionError.DuplicateActionOutput{action: step.name, output: path})
+            loop generated in state.generated { if generated.path == path -> return build_session_error_fail(state, BuildSessionError.GeneratedModuleCycle{name: generated.name, path: path}) }
+            step.outputs.push(path.copy())
+            if method == "writes" {
+                state.actions[id] = step
+                return unit
+            }
+            step.argv.push("{flag}{path}")
+            state.actions[id] = step
+            return build_session_new_file(state, BuildSessionFile{kind: "output", path: path, probe: None, action: Val(id)})
+        }
+        "file" -> {
+            file_id: build_session_handle(state, args[1], "BuildFile") ?? return build_session_fail(state, "the file does not belong to this build")
+            file: state.files[file_id]
+            if file.kind == "found" -> return build_session_fail(state, "found program `{file.path}` runs as a step's tool, not as an argument; write `b.run(name, b.found(probe), caps)`")
+            if (file.action ?? -1) == id -> return build_session_fail(state, "step `{step.name}` makes `{file.path}`, so it can't also read it")
+            build_session_append_unique(step.inputs, file.path)
+            step.argv.push("{flag}{file.path}")
+            state.actions[id] = step
+            return unit
+        }
+        "arg" -> {
+            text: build_session_text(args, 1) ?? return build_session_fail(state, "`.arg` takes text")
+            if text.trim() == "" -> return build_session_error_fail(state, BuildSessionError.EmptyActionArgv{value: step.name})
+            step.argv.push(text.copy())
+            state.actions[id] = step
+            return unit
+        }
+        "timeout" -> {
+            text: build_session_text(args, 1) ?? return build_session_fail(state, "`.timeout` takes a Time literal")
+            step.timeout_ms = Val(build_option_duration_ms(text) ?? return build_session_fail(state, "step `{step.name}`'s time limit `{text}` must be a positive Time literal, whole milliseconds or more"))
+            state.actions[id] = step
+            return unit
+        }
+        "toolchain" -> {
+            step.toolchain = build_session_handle(state, args[1], "BuildToolchain") ?? return build_session_fail(state, "the step's toolchain does not belong to this build")
+            state.actions[id] = step
+            return unit
+        }
+        "sign" -> {
+            step.signing = Val(build_session_handle(state, args[1], "BuildSigningIdentity") ?? return build_session_fail(state, "the step's signing identity does not belong to this build"))
+            state.actions[id] = step
+            return unit
+        }
+        else -> return build_session_fail(state, "unknown step call `.{method}`")
+    }
 }
 
 build_session_add_target: fn(state: &BuildSessionState, method: String, args: [BuildSessionValue]) -> BuildSessionReply {
