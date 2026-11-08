@@ -1,0 +1,9 @@
+# `b.dependency("words").file(path)` is a file of the package app's package.jet
+# lists: the step runs the dependency's generator on the dependency's data,
+# both copied to `.jet/deps/words/` where the step's sandbox reads them.
+fixture: fixtures/run_steps_read_a_dependency_file
+requires: tool:bwrap
+step: jet build app/main.jet --allow=Exec,FS
+exit: 0
+file: app/answer.out = "the answer is 42\n"
+file: app/.jet/deps/words/answer.txt exists # the copy the step read

@@ -3671,7 +3671,8 @@ a source-call match alone is not a runtime observation. The observation writer
 bounds event history and does not include channel values, task locals,
 environment, or credentials. Observation is pay-for-use (D-SIZE-PAYUSE1): a
 program built without tasks, channels, live values or events links no writer,
-so `JET_OBSERVE=1` publishes nothing for it. The executable
+so `JET_OBSERVE=1` publishes nothing for it; `jet run --observe` links the
+writer into any program and runs it with `JET_OBSERVE=1`. The executable
 event example is covered by
 [`Compiler/JetLSP/Tests/Integration`](../../Compiler/JetLSP/Tests/Integration/) (`Canvas*.jet`) and the public API by
 [`Core/Event/Event.jet`](../../Core/Event/Event.jet). (D-OBSERVE-LIVE1, D-OBSERVE-TASK1)
@@ -5013,24 +5014,44 @@ step can build the tool the next one runs. `b.host(target)` is the executable
 to compile, and the one graph builds it whether or not it is selected. Only an
 executable target with a source can be built so (E3502), and on a machine the
 native backend doesn't write images for, a step that runs one is refused
-before anything runs. `b.jet()` is the compiler running the build; its step
+before anything runs. `b.image(target)` is the same target built for the
+build's selected platform, the image a step packs or ships, copied to
+`.jet/build/image/<name>` once it compiles; a step that reads or runs it
+waits for it, the one graph builds it whether or not it is selected, and only
+an executable target with a source has one (E3502). When the build selects
+the machine's own platform, a target's image and host build are one file,
+built once. A step runs an image only where a sandbox can (Linux x86-64);
+elsewhere it is refused before anything runs. Example:
+[`tests/cases/build_entry/run_steps_read_an_image.case`](../../tests/cases/build_entry/run_steps_read_an_image.case).
+`b.jet()` is the compiler running the build; its step
 runs it from its own folder, mounted read-only, so a step can check, run or
-build Jet code. Calls on the step build its
+build Jet code. `b.dependency(name)` is the folder of the package package.jet
+lists as `name` (an unlisted name is E3502), and `.file(path)` on it is a
+file there: before any step runs, the build copies it to
+`.jet/deps/<name>/<path>`, the path the step gets, so a step reads another
+package's file without reaching outside its own folder. The folder itself is
+neither a tool nor an argument. Example:
+[`tests/cases/build_entry/run_steps_read_a_dependency_file.case`](../../tests/cases/build_entry/run_steps_read_a_dependency_file.case).
+Calls on the step build its
 command line in order. `.input(path)` and `.output(path)` declare a file and
 pass its path as the next argument. `.reads(path)` and `.writes(path)`
 declare a file without passing it. `.file(f)` passes another step's output
 and orders the step after that one, and `.arg(text)` passes literal text.
 `.input`, `.output` and `.file` take `flag:`, written before the path in the
 same argument: `.output("gen.c", flag: "--out=")` passes `--out=gen.c`.
-`.output` returns the new `BuildFile`, and `f.path()` is a made or host-built
-file's package-relative path; a found program and `b.jet()` have no path until
-the build runs, so their `.path()` is refused. `.toolchain(t)` and
+`.output` returns the new `BuildFile`, and `f.path()` is a made, host-built or
+copied package file's package-relative path; a found program and `b.jet()`
+have no path until the build runs, so their `.path()` is refused. `.toolchain(t)` and
 `.sign(identity)` add toolchain and signing identity; a `b.jet()` step runs on
 the toolchain its compiler was built with, so `.toolchain` on it is refused. A
 step's result is cached. A step that
 declares no output is refused at its `b.run` call (E3502), since only declared
 outputs leave its sandbox, and `.arg` text that names a package file is
 refused with the fix `.input(path)`, so the step can't read an undeclared file.
+An output that would overwrite a file no build made, such as a committed one,
+is refused before anything runs (E3502), as generated sources are: a step
+replaces only what the last build's receipt lists as a step's output. Example:
+[`tests/cases/build_entry/run_steps_refuse_to_overwrite_a_file.case`](../../tests/cases/build_entry/run_steps_refuse_to_overwrite_a_file.case).
 `.timeout(10min)` bounds how long the step may run. The `action_timeout` build
 option (stock `30s`; the profile field `action_timeout: 10min`, the call
 `b.action_timeout(10min)` and the flag `--action-timeout=10min`) bounds every
@@ -5083,6 +5104,21 @@ refused (E3502) before anything runs. Cached actions include declared input
 content, argv, authority, toolchain, probes, signing identity, and
 generated-source hashes. A cache hit restores only declared outputs from the
 local CAS.
+
+When `jet build` runs the graph of a `build: fn`, it leaves two records under
+`.jet/build/` beside the build entry, whether or not the build succeeded. `receipt.json` is
+the `core.build` `BuildGraph` it ran: its targets, steps with their keys, files
+and the compiler's own nodes, with each step that ran marked a cache hit or
+miss in `cache_hit` and listed in `cache_hits` when its outputs came from the
+store. `times.json` is its `BuildTimes`: one `BuildTime` row (`name`, `kind`
+`step`, `host`, `image` or `library`, `wall_ms`, `reused`) per step and target,
+in the order each finished. A step's `wall_ms` is the time of the steps that ran
+with it, and a target is `reused` when its image came from the store. Both are
+JSON objects whose fields are the value's own, in declaration order.
+`jet inspect build --times` shows the last build's rows (`kind`, `name`,
+`wall_ms`, and `made` or `reused`), or the record itself under `--json`;
+before any build has recorded one it fails with E2104. Example:
+[`tests/cases/build_entry/run_steps_record_the_graph_and_times.case`](../../tests/cases/build_entry/run_steps_record_the_graph_and_times.case).
 
 There is no ambient execution fallback. On Linux each action runs under
 bubblewrap with private mount, PID, IPC, UTS, and network namespaces. Only

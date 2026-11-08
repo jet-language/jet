@@ -71,10 +71,7 @@ deadline_parse_i64: fn(text: I64, out: I64) -> Bool {
 
 deadline_wall_now_ms: fn() -> I64 {
     scratch: wrapping(thread_base() + I64{232})
-    #Unsafe("clock_gettime writes two thread-owned TCB words, not retained after the syscall") {
-        result: os_syscall_i64(I64{228}, I64{0}, scratch, I64{0}, I64{0}, I64{0}, I64{0})
-        if (result != I64{0}) -> jet_rt_unreachable(I64{0}, I64{0})
-    }
+    sync_clock_read(I64{0}, scratch)
     seconds: sync_load(scratch)
     if (seconds < I64{0}) -> return I64{0}
     wrapping(seconds * I64{1000} + sync_load(wrapping(scratch + I64{8})) /% I64{1000000})
@@ -82,22 +79,31 @@ deadline_wall_now_ms: fn() -> I64 {
 
 // CoreReview2 #49 Rust's std::env reads the immutable host
 // startup capture, never the Jet env overlay. RtL7 owns the one rt_env_get view.
+// That capture never changes, so the replay or epoch override it names is
+// parsed once (time_host_root @32..55) instead of on every clock read.
 jet_std_time_now: fn() -> I64 {
     world: world_current()
     if (world != I64{0}) -> return jet_world_now(world)
-    key: scheduler_msg_replay()
-    replay: rt_env_get(key)
-    jet_rt_string_drop(key)
-    scratch: wrapping(thread_base() + I64{248})
-    accepted: deadline_parse_i64(replay, scratch)
-    jet_rt_string_drop(replay)
-    if accepted -> return sync_load(scratch)
-    epoch_key: scheduler_msg_epoch()
-    epoch: rt_env_get(epoch_key)
-    jet_rt_string_drop(epoch_key)
-    epoch_accepted: deadline_parse_i64(epoch, scratch)
-    jet_rt_string_drop(epoch)
-    if epoch_accepted -> return sync_load(scratch)
+    root: time_host_root
+    once: wrapping(root + I64{32})
+    if sync_once_enter(once) {
+        value: wrapping(root + I64{48})
+        key: scheduler_msg_replay()
+        replay: rt_env_get(key)
+        jet_rt_string_drop(key)
+        accepted := deadline_parse_i64(replay, value)
+        jet_rt_string_drop(replay)
+        if !accepted {
+            epoch_key: scheduler_msg_epoch()
+            epoch: rt_env_get(epoch_key)
+            jet_rt_string_drop(epoch_key)
+            accepted = deadline_parse_i64(epoch, value)
+            jet_rt_string_drop(epoch)
+        }
+        sync_store(wrapping(root + I64{40}), if accepted -> I64{1} else -> I64{0})
+        sync_once_complete(once)
+    }
+    if (sync_load(wrapping(root + I64{40})) != I64{0}) -> return sync_load(wrapping(root + I64{48}))
     deadline_wall_now_ms()
 }
 

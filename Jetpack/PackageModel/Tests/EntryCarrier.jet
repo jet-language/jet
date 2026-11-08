@@ -475,7 +475,8 @@ pkg_entry_test_failure: fn(cache: &WorkspaceDeclarationCache, entry: String) -[F
     cache := WorkspaceDeclarationCache.new()
     root: pkg_entry_test_root("cache-session")
     pkg_entry_test_write(root, "run.jet", "package: {{ name: \"cached\" }}\nrun: fn() {{}}\n")
-    pkg_entry_test_write(root, "other.jet", "other: fn() {{}}\n")
+    // A `workspace` before `:` makes the probe lex this source rather than skip it.
+    pkg_entry_test_write(root, "other.jet", "// not a `workspace: module` declaration\nother: fn() {{}}\n")
     assert_eq(pkg_entry_test_facts(cache, files.join(root, "other.jet")).name, "cached")
     first: cache.lexes
     assert(first > 0)

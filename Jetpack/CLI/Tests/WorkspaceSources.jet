@@ -59,10 +59,11 @@ cli_ws_test_load_workspace: fn(cache: &WorkspaceDeclarationCache, dir: String) -
     package: files.join(root, "packages/app")
     nested: files.join(package, "src")
     files.create_dir_all(nested) ?? panic("create nested dir")
-    // The scratch path keeps each source distinct from every other claim's.
+    // The scratch path keeps each source distinct from every other claim's;
+    // each source has a `workspace` before `:`, so discovery lexes every one.
     files.write(files.join(root, "authority.jet"), "// {root}\nworkspace: module {{ policy: {{ deny: #(Exec) }} }}\n") ?? panic("write authority.jet")
-    files.write(files.join(root, "tools.jet"), "// {root}\nhelper: fn() {{}}\n") ?? panic("write tools.jet")
-    files.write(files.join(package, PACKAGE_FILE), "// {root}\nname: \"app\"\n") ?? panic("write package.jet")
+    files.write(files.join(root, "tools.jet"), "// {root}\n// workspace: tools\nhelper: fn() {{}}\n") ?? panic("write tools.jet")
+    files.write(files.join(package, PACKAGE_FILE), "// {root}\n// workspace: member\nname: \"app\"\n") ?? panic("write package.jet")
     before: cache.lexes
     assert_eq(cli_workspace_root(cache, nested), root)
     assert_eq(cli_workspace_root(cache, nested), root)

@@ -1,0 +1,23 @@
+# Claim (#6067 c3): `jet run -` runs the program piped on standard input, with
+# the words after `-` as its arguments, and a rerun of the same source reuses
+# its entry file.
+fixture: run_dash_runs_the_program_piped_on_stdin.fixture
+env: NO_COLOR=1
+env: XDG_CACHE_HOME={work}/cache
+env: JET_STORE_DIR={work}/store
+step: jet run -
+stdin: hello.jet
+exit: 0
+stdout: = "hi\n"
+stderr: = ""
+step args: jet run - one two
+stdin: args.jet
+exit: 0
+stdout: = "one two\n"
+stderr: = ""
+step rerun: jet run -
+stdin: hello.jet
+exit: 0
+stdout: = "hi\n"
+stderr: = ""
+entries: cache/jet/scripts/stdin = 2

@@ -36,15 +36,20 @@ OS_SYS_FORK: 57
 OS_SYS_WAIT4: 61
 OS_SYS_KILL: 62
 OS_SYS_FCNTL: 72
+OS_SYS_SETSID: 112
 OS_SYS_SIGALTSTACK: 131
 OS_SYS_PRCTL: 157
 OS_SYS_ARCH_PRCTL: 158
 OS_SYS_EXIT_GROUP: 231
+OS_SYS_IOPRIO_SET: 251
 OS_SYS_OPENAT: 257
 OS_SYS_PRLIMIT64: 302
 OS_SYS_GETRANDOM: 318
 OS_SYS_MEMFD_CREATE: 319
 OS_SYS_CLOSE_RANGE: 436
+OS_SYS_LANDLOCK_CREATE_RULESET: 444
+OS_SYS_LANDLOCK_ADD_RULE: 445
+OS_SYS_LANDLOCK_RESTRICT_SELF: 446
 
 OS_PROT_READ: 1
 OS_PROT_WRITE: 2
@@ -62,9 +67,15 @@ OS_MAP_FIXED_NOREPLACE: 0x100000
 
 OS_AT_FDCWD: -100
 OS_O_RDONLY_CLOEXEC: 0x80000
+OS_O_RDWR: 2
+OS_O_PATH_CLOEXEC: 0x280000
+OS_O_DIRECTORY: 0x10000
+
+OS_PR_SET_NO_NEW_PRIVS: 38
 
 OS_EEXIST: 17
 OS_EINTR: 4
+OS_ENOTDIR: 20
 
 // One raw system call with up to six arguments. The operands arrive in rdi,
 // rsi, rdx, rcx, r8, r9 and r10 (InlineAsm.jet X64_ASM_INPUTS), and each is
@@ -402,6 +413,201 @@ os_xgetbv_i64: fn(register: I64) -> I64 {
     xgetbv
     mov rax, rax ; -> return
     ; clobbers rcx, rdx
+    """
+}
+
+// One SHA-256 compression (FIPS 180-4) with the SHA extensions: the eight
+// state words a..h at `state` take the 64-byte block at `data`. `table` holds
+// the byte-swap shuffle mask (16 bytes) and the 64 round constants. The
+// caller has seen CPUID.7.0:EBX.SHA, SSSE3 and SSE4.1. The rounds follow
+// Intel's SHA-NI reference: state as ABEF/CDGH, four rounds per group.
+#[Unsafe("reads 32 state bytes at state, 64 block bytes at data and 272 table bytes at table, and writes the 32 state bytes; the caller has seen the SHA extensions"), FFI(asm)]
+os_sha256_block_i64: fn(state: I64, data: I64, table: I64) {
+    """
+    movups xmm1, xmmword ptr [{state}]
+    movups xmm2, xmmword ptr [{state} + 16]
+    pshufd xmm1, xmm1, 177
+    pshufd xmm2, xmm2, 27
+    movaps xmm7, xmm1
+    palignr xmm1, xmm2, 8
+    pblendw xmm2, xmm7, 240
+    movups xmm8, xmmword ptr [{table}]
+    movaps xmm9, xmm1
+    movaps xmm10, xmm2
+    movups xmm0, xmmword ptr [{data}]
+    pshufb xmm0, xmm8
+    movaps xmm3, xmm0
+    movups xmm11, xmmword ptr [{table} + 16]
+    paddd xmm0, xmm11
+    sha256rnds2 xmm2, xmm1
+    pshufd xmm0, xmm0, 14
+    sha256rnds2 xmm1, xmm2
+    movups xmm0, xmmword ptr [{data} + 16]
+    pshufb xmm0, xmm8
+    movaps xmm4, xmm0
+    movups xmm11, xmmword ptr [{table} + 32]
+    paddd xmm0, xmm11
+    sha256rnds2 xmm2, xmm1
+    pshufd xmm0, xmm0, 14
+    sha256rnds2 xmm1, xmm2
+    sha256msg1 xmm3, xmm4
+    movups xmm0, xmmword ptr [{data} + 32]
+    pshufb xmm0, xmm8
+    movaps xmm5, xmm0
+    movups xmm11, xmmword ptr [{table} + 48]
+    paddd xmm0, xmm11
+    sha256rnds2 xmm2, xmm1
+    pshufd xmm0, xmm0, 14
+    sha256rnds2 xmm1, xmm2
+    sha256msg1 xmm4, xmm5
+    movups xmm0, xmmword ptr [{data} + 48]
+    pshufb xmm0, xmm8
+    movaps xmm6, xmm0
+    movups xmm11, xmmword ptr [{table} + 64]
+    paddd xmm0, xmm11
+    sha256rnds2 xmm2, xmm1
+    movaps xmm7, xmm6
+    palignr xmm7, xmm5, 4
+    paddd xmm3, xmm7
+    sha256msg2 xmm3, xmm6
+    pshufd xmm0, xmm0, 14
+    sha256rnds2 xmm1, xmm2
+    sha256msg1 xmm5, xmm6
+    movaps xmm0, xmm3
+    movups xmm11, xmmword ptr [{table} + 80]
+    paddd xmm0, xmm11
+    sha256rnds2 xmm2, xmm1
+    movaps xmm7, xmm3
+    palignr xmm7, xmm6, 4
+    paddd xmm4, xmm7
+    sha256msg2 xmm4, xmm3
+    pshufd xmm0, xmm0, 14
+    sha256rnds2 xmm1, xmm2
+    sha256msg1 xmm6, xmm3
+    movaps xmm0, xmm4
+    movups xmm11, xmmword ptr [{table} + 96]
+    paddd xmm0, xmm11
+    sha256rnds2 xmm2, xmm1
+    movaps xmm7, xmm4
+    palignr xmm7, xmm3, 4
+    paddd xmm5, xmm7
+    sha256msg2 xmm5, xmm4
+    pshufd xmm0, xmm0, 14
+    sha256rnds2 xmm1, xmm2
+    sha256msg1 xmm3, xmm4
+    movaps xmm0, xmm5
+    movups xmm11, xmmword ptr [{table} + 112]
+    paddd xmm0, xmm11
+    sha256rnds2 xmm2, xmm1
+    movaps xmm7, xmm5
+    palignr xmm7, xmm4, 4
+    paddd xmm6, xmm7
+    sha256msg2 xmm6, xmm5
+    pshufd xmm0, xmm0, 14
+    sha256rnds2 xmm1, xmm2
+    sha256msg1 xmm4, xmm5
+    movaps xmm0, xmm6
+    movups xmm11, xmmword ptr [{table} + 128]
+    paddd xmm0, xmm11
+    sha256rnds2 xmm2, xmm1
+    movaps xmm7, xmm6
+    palignr xmm7, xmm5, 4
+    paddd xmm3, xmm7
+    sha256msg2 xmm3, xmm6
+    pshufd xmm0, xmm0, 14
+    sha256rnds2 xmm1, xmm2
+    sha256msg1 xmm5, xmm6
+    movaps xmm0, xmm3
+    movups xmm11, xmmword ptr [{table} + 144]
+    paddd xmm0, xmm11
+    sha256rnds2 xmm2, xmm1
+    movaps xmm7, xmm3
+    palignr xmm7, xmm6, 4
+    paddd xmm4, xmm7
+    sha256msg2 xmm4, xmm3
+    pshufd xmm0, xmm0, 14
+    sha256rnds2 xmm1, xmm2
+    sha256msg1 xmm6, xmm3
+    movaps xmm0, xmm4
+    movups xmm11, xmmword ptr [{table} + 160]
+    paddd xmm0, xmm11
+    sha256rnds2 xmm2, xmm1
+    movaps xmm7, xmm4
+    palignr xmm7, xmm3, 4
+    paddd xmm5, xmm7
+    sha256msg2 xmm5, xmm4
+    pshufd xmm0, xmm0, 14
+    sha256rnds2 xmm1, xmm2
+    sha256msg1 xmm3, xmm4
+    movaps xmm0, xmm5
+    movups xmm11, xmmword ptr [{table} + 176]
+    paddd xmm0, xmm11
+    sha256rnds2 xmm2, xmm1
+    movaps xmm7, xmm5
+    palignr xmm7, xmm4, 4
+    paddd xmm6, xmm7
+    sha256msg2 xmm6, xmm5
+    pshufd xmm0, xmm0, 14
+    sha256rnds2 xmm1, xmm2
+    sha256msg1 xmm4, xmm5
+    movaps xmm0, xmm6
+    movups xmm11, xmmword ptr [{table} + 192]
+    paddd xmm0, xmm11
+    sha256rnds2 xmm2, xmm1
+    movaps xmm7, xmm6
+    palignr xmm7, xmm5, 4
+    paddd xmm3, xmm7
+    sha256msg2 xmm3, xmm6
+    pshufd xmm0, xmm0, 14
+    sha256rnds2 xmm1, xmm2
+    sha256msg1 xmm5, xmm6
+    movaps xmm0, xmm3
+    movups xmm11, xmmword ptr [{table} + 208]
+    paddd xmm0, xmm11
+    sha256rnds2 xmm2, xmm1
+    movaps xmm7, xmm3
+    palignr xmm7, xmm6, 4
+    paddd xmm4, xmm7
+    sha256msg2 xmm4, xmm3
+    pshufd xmm0, xmm0, 14
+    sha256rnds2 xmm1, xmm2
+    sha256msg1 xmm6, xmm3
+    movaps xmm0, xmm4
+    movups xmm11, xmmword ptr [{table} + 224]
+    paddd xmm0, xmm11
+    sha256rnds2 xmm2, xmm1
+    movaps xmm7, xmm4
+    palignr xmm7, xmm3, 4
+    paddd xmm5, xmm7
+    sha256msg2 xmm5, xmm4
+    pshufd xmm0, xmm0, 14
+    sha256rnds2 xmm1, xmm2
+    movaps xmm0, xmm5
+    movups xmm11, xmmword ptr [{table} + 240]
+    paddd xmm0, xmm11
+    sha256rnds2 xmm2, xmm1
+    movaps xmm7, xmm5
+    palignr xmm7, xmm4, 4
+    paddd xmm6, xmm7
+    sha256msg2 xmm6, xmm5
+    pshufd xmm0, xmm0, 14
+    sha256rnds2 xmm1, xmm2
+    movaps xmm0, xmm6
+    movups xmm11, xmmword ptr [{table} + 256]
+    paddd xmm0, xmm11
+    sha256rnds2 xmm2, xmm1
+    pshufd xmm0, xmm0, 14
+    sha256rnds2 xmm1, xmm2
+    paddd xmm1, xmm9
+    paddd xmm2, xmm10
+    pshufd xmm1, xmm1, 27
+    pshufd xmm2, xmm2, 177
+    movaps xmm7, xmm1
+    pblendw xmm1, xmm2, 240
+    palignr xmm2, xmm7, 8
+    movups xmmword ptr [{state}], xmm1
+    movups xmmword ptr [{state} + 16], xmm2
+    ; clobbers xmm0, xmm1, xmm2, xmm3, xmm4, xmm5, xmm6, xmm7, xmm8, xmm9, xmm10, xmm11
     """
 }
 

@@ -90,35 +90,54 @@ jet_cli_perf_session: fn(action: String, args: [String], quiet: Bool, color: Boo
     parsed := jet_cli_perf_session_args(args) ?? return jet_cli_perf_error(err.message, "run `jet perf {action} <file.jet> [--out <path{extension}>]`", color)
     exe: perf_sys.executable()
     if exe == "" -> return jet_cli_perf_error("cannot resolve the jet executable", JET_CLI_PERF_FIX, color)
+    // `jet run --observe` links the program's observation start and starts
+    // the program's observation, and only the program's: jet itself runs
+    // unobserved, so the program runs in jet's place, under the session's
+    // pid. `jet test` has no `--observe`, so the session's own environment
+    // observes a test run (jet_cli_observe_env).
     argv := [String]{exe, action}
+    observed_run: action == "run"
+    if observed_run -> argv.push("--observe")
     loop arg in parsed.child_args {
         // copy: the parsed argv keeps its words; the spawn owns its own.
         argv.push(arg.copy())
     }
-    // The runtime starts its live observation only under the five relay
-    // identity fields (ObserveLive.jet `observe_live_start`); the session id
-    // is unique to this perf process and moment.
-    session_id: "jet-perf-{perf_process.current_pid()}-{perf_time.unix_ns()}"
-    spec: perf_process.cmd(argv).env("JET_OBSERVE", "1").env("JET_DEVTOOLS_RELAY_SESSION_ID", session_id).env("JET_DEVTOOLS_RELAY_SOURCE_ID", parsed.source ?? "").env("JET_DEVTOOLS_RELAY_BUILD_ID", "runtime").env("JET_DEVTOOLS_RELAY_REVISION", "runtime").env("JET_DEVTOOLS_RELAY_WORLD_ID", "game").stdin(.Inherit).stdout(.Inherit).stderr(.Inherit)
+    spec := perf_process.cmd(argv).stdin(.Inherit).stdout(.Inherit).stderr(.Inherit)
+    if observed_run {
+        spec = spec.env_remove("JET_OBSERVE")
+    } else {
+        loop field in jet_cli_observe_env(parsed.source ?? "") -> spec = spec.env(field.name, field.value)
+    }
     child := spec.spawn() ?? return jet_cli_perf_error("cannot start `jet {action}`: {err}", JET_CLI_PERF_FIX, color)
     pid: child.id()
     started: perf_time.instant()
-    observed := JetCLIPerfSessionObserved{root: [JetCLIPerfObservation]{}, program: [JetCLIPerfObservation]{}, program_pid: None, restarted: false}
+    observed := JetCLIPerfSessionObserved{root: [JetCLIPerfObservation]{}, program: [JetCLIPerfObservation]{}, program_pid: None}
+    alive := String?{None}
     loop {
-        exited: jet_cli_perf_session_zombie(pid) ?? (child.exited() ?? return jet_cli_perf_error("cannot wait for `jet {action}`: {err}", JET_CLI_PERF_FIX, color))
+        // The root's last stat while it lives binds its final publication,
+        // which is read after the reap.
+        if jet_cli_perf_process_stat(pid) == .Ok(stat) -> alive = Val(stat)
+        exited: child.exited() ?? return jet_cli_perf_error("cannot wait for `jet {action}`: {err}", JET_CLI_PERF_FIX, color)
         if exited -> break
         if parsed.source != None -> jet_cli_perf_session_observe(observed, pid, U64.from_int(started.elapsed().ns) ?? U64{0})
         perf_time.sleep(25ms)
     }
-    // The exited child is not reaped yet, so its runtime's exit publication
-    // is still readable under its pid: every completed run gets its final
-    // observation, however short it was.
-    if parsed.source != None -> jet_cli_perf_session_observe(observed, pid, U64.from_int(started.elapsed().ns) ?? U64{0})
     receipt: child.wait() ?? return jet_cli_perf_error("cannot wait for `jet {action}`: {err}", JET_CLI_PERF_FIX, color)
     // The session's wall, spawn to exit, on the observations' clock: every
     // observed span ends inside it.
     wall: U64.from_int(started.elapsed().ns) ?? U64{0}
-    observations: if observed.program.len() > 0 -> observed.program.move() else if observed.restarted -> observed.root.move() else -> [JetCLIPerfObservation]{}
+    // The child is reaped as it exits, so its runtime's exit publication is
+    // read without /proc unless a poll already kept it: every completed run
+    // gets its final observation, however short it was.
+    published: observed.root.len() > 0 && observed.root[observed.root.len() - 1].live.runtime.exit
+    if parsed.source != None && !published && alive == .Val(stat) {
+        cpu: if receipt.user_cpu_ns == .Val(user) && receipt.system_cpu_ns == .Val(system) -> Val(user + system) else -> Int?{None}
+        if jet_cli_perf_live_read_reaped(pid, stat, cpu) == .Ok(live) -> jet_cli_perf_session_keep(observed.root, JetCLIPerfObservation{at_ns: wall, live: live})
+    }
+    // Under `jet run --observe` only the program publishes, so what the
+    // root's pid publishes is the program, run in jet's place. A `jet test`
+    // root publishes its own compile, never the tests.
+    observations: if observed.program.len() > 0 -> observed.program.move() else if observed_run -> observed.root.move() else -> [JetCLIPerfObservation]{}
     reason: if parsed.source == None -> "source sampling requires a source capture" else -> "source sampling requires a readable `.jet` source"
     capture := jet_cli_perf_capture_new(trace_profile_unsupported(reason), [SourceIdentity]{})
     if parsed.source == .Val(source) {
@@ -265,24 +284,16 @@ jet_cli_perf_attach_browser: fn(pid: Int, activate: Bool) -[FS, Env, Time]> JetC
 }
 
 // The observations of the session's root process, and of the first
-// descendant that publishes its own. The root is the `jet` host, whose own
-// runtime publishes too: its observations describe the compile, not the
-// program. They describe the program only once a runtime restarted under the
-// root's pid (`restarted`: the program ran in jet's place, and its runtime's
-// window began again); a program that ran in a child process publishes under
-// the child's pid.
-JetCLIPerfSessionObserved: struct { root: [JetCLIPerfObservation], program: [JetCLIPerfObservation], program_pid: Int?, restarted: Bool }
+// descendant that publishes its own. The root is the `jet` host: under
+// `jet run --observe` it publishes nothing itself, so what its pid publishes
+// is the program, run in jet's place; a program that ran in a child process
+// publishes under the child's pid.
+JetCLIPerfSessionObserved: struct { root: [JetCLIPerfObservation], program: [JetCLIPerfObservation], program_pid: Int? }
 
 // One poll of the process tree under `root` at `at` ns into the session
 // (`poll_observe_snapshot`).
 jet_cli_perf_session_observe: fn(observed: &JetCLIPerfSessionObserved, root: Int, at: U64) Never! -[FS.Read, Env, Time]> {
-    if jet_cli_perf_live_read(root) == .Ok(live) {
-        if observed.root.len() > 0 && live.runtime.elapsed_ns < observed.root[observed.root.len() - 1].live.runtime.elapsed_ns {
-            observed.root.clear()
-            observed.restarted = true
-        }
-        jet_cli_perf_session_keep(observed.root, JetCLIPerfObservation{at_ns: at, live: live})
-    }
+    if jet_cli_perf_live_read(root) == .Ok(live) -> jet_cli_perf_session_keep(observed.root, JetCLIPerfObservation{at_ns: at, live: live})
     if observed.program_pid == .Val(pid) {
         if jet_cli_perf_live_read(pid) == .Ok(live) -> jet_cli_perf_session_keep(observed.program, JetCLIPerfObservation{at_ns: at, live: live})
         return
@@ -325,16 +336,6 @@ jet_cli_perf_session_children: fn(pid: Int) -[FS.Read]> [Int] Never! {
         }
     }
     kids
-}
-
-// `child_exited` on Linux: whether `pid` is a zombie, None where `/proc`
-// cannot tell. This does not reap it, so the runtime's exit snapshot stays
-// readable until `wait`.
-jet_cli_perf_session_zombie: fn(pid: Int) -[FS.Read, Time.Wait]> Bool? Never! {
-    stat: jet_cli_perf_process_stat(pid) ?? return None
-    parts: stat.split(") ").to_list()
-    tail: parts[parts.len() - 1]
-    Val(tail.starts_with("Z") || tail.starts_with("X"))
 }
 
 // The host target triple (`JET_BUILD_TARGET`).

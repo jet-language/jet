@@ -285,7 +285,7 @@ parser_parse_pipe: fn(state: &JetParserState, head: ParsedExpr, depth: Int, allo
             step = parser_parse_pipe_step(state, name, depth, allow_struct_lit)
         }
         step_span: parser_cover(bar.span, step.value.span)
-        if step.reads == 0 -> parser_add_error_code(state, "E0438", step_span, "this pipe step doesn't use `<>`", "each `|>` step receives the value of the line above as `<>`; a step that never reads it drops that value", "write `<>` where the value goes, such as `|> f(<>)`, or end the pipe before this step")
+        if step.reads == 0 -> parser_add_error_code(state, "E0438", step_span, "This pipe step doesn't use `<>`", "Each `|>` step receives the value of the line above as `<>`; a step that never reads it drops that value", "Write `<>` where the value goes, such as `|> f(<>)`, or end the pipe before this step")
         end = step.value.span
         steps.push(PipeStep{name: name, value: step.value.expr, reads: step.reads, span: step_span})
     }
@@ -331,7 +331,7 @@ parser_parse_pipe_value: fn(state: &JetParserState, token: Token) -> ParsedExpr 
     }
     count: state.pipe_step_names.len()
     if count == 0 {
-        parser_add_error_code(state, "E0437", token.span, "`<>` is outside a pipe step", "`<>` is the value a `|> step` receives from the line above; outside a step there is no such value", "move it into a step such as `value |> f(<>)`, or write the value itself")
+        parser_add_error_code(state, "E0437", token.span, "`<>` is outside a pipe step", "`<>` is the value a `|> step` receives from the line above; outside a step there is no such value", "Move it into a step such as `value |> f(<>)`, or write the value itself")
         return ParsedExpr{expr: Expr.Unit{span: token.span, id: parser_node_id(state)}, span: token.span}
     }
     state.pipe_step_reads[count - 1] = state.pipe_step_reads[count - 1] + 1
@@ -1657,7 +1657,7 @@ parser_parse_postfix: fn(state: &JetParserState, initial: &&ParsedExpr, depth: I
             }
             if written != "" {
                 empty: parser_bump(state)
-                diagnostic: diagnostic_from_registry("E0440", Val(empty.span), "`{written}<>` has an empty type-argument list", "a type's arguments go between `<` and `>`; `<>` lists none, so it only adds noise", "Write the type arguments, such as `{written}<Int>`, or drop the `<>`")
+                diagnostic: diagnostic_from_registry("E0440", Val(empty.span), "`{written}<>` has an empty type-argument list", "A type's arguments go between `<` and `>`; `<>` lists none, so it only adds noise", "Write the type arguments, such as `{written}<Int>`, or drop the `<>`")
                 state.diagnostics.push(diagnostic_with_edit(diagnostic, TextEdit{span: empty.span, new_text: ""}))
                 // A typed literal's head refuses with a diagnostic, so the
                 // literal is read here, as `Box{…}` would be.

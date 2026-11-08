@@ -4791,6 +4791,7 @@ MapGroupRoundTrip: struct {
     map: String
     key: String
     fallback: String
+    write: String
 
     impl Diagnostic {
         code: "L0534"
@@ -4802,8 +4803,8 @@ MapGroupRoundTrip: struct {
         no_fix: None
         fix_safety: .NeedsReview
         what: fn(self) -> String { "`{self.group}` copies the whole group out of `{self.map}` and stores it back" }
-        why: fn(self) -> String { "`{self.group}` still shares the entry's buffer when it is written, so the write first copies the whole group, and storing it back drops the Map's old copy; in a loop that is quadratic" }
-        fix: fn(self) -> String { "Grow the entry in place: `if !{self.map}.has_key({self.key}) -> {self.map}[{self.key}] = {self.fallback}`, then `{self.map}[{self.key}].push(…)`" }
+        why: fn(self) -> String { "`{self.group}` still shares the entry's buffer when it is written, so the write first copies the whole group, and storing it back drops the Map's old copy; in a loop that is quadratic. Only a block that pushes plain values onto a group taken with an empty List fallback moves the group out of the Map without a copy" }
+        fix: fn(self) -> String { "Grow the entry in place: `if !{self.map}.has_key({self.key}) -> {self.map}[{self.key}] = {self.fallback}`, then `{self.map}[{self.key}].{self.write}(…)`" }
     }
 }
 
@@ -12805,7 +12806,7 @@ PipeValueOutsideStep: struct {
         fix_next: "Move `<>` into a `|>` step, or write the value itself."
         what: fn(self) -> String { "`<>` is outside a pipe step" }
         why: fn(self) -> String { "`<>` is the value a `|> step` receives from the line above; outside a step there is no such value" }
-        fix: fn(self) -> String { "move it into a step such as `value |> f(<>)`, or write the value itself" }
+        fix: fn(self) -> String { "Move it into a step such as `value |> f(<>)`, or write the value itself" }
     }
 }
 
@@ -12817,9 +12818,9 @@ PipeStepWithoutValue: struct {
         detail: true
         no_fix: .Behavior
         fix_next: "Write `<>` where the value goes, or end the pipe before this step."
-        what: fn(self) -> String { "this pipe step doesn't use `<>`" }
-        why: fn(self) -> String { "each `|>` step receives the value of the line above as `<>`; a step that never reads it drops that value" }
-        fix: fn(self) -> String { "write `<>` where the value goes, such as `|> f(<>)`, or end the pipe before this step" }
+        what: fn(self) -> String { "This pipe step doesn't use `<>`" }
+        why: fn(self) -> String { "Each `|>` step receives the value of the line above as `<>`; a step that never reads it drops that value" }
+        fix: fn(self) -> String { "Write `<>` where the value goes, such as `|> f(<>)`, or end the pipe before this step" }
     }
 }
 
@@ -12852,7 +12853,7 @@ EmptyTypeArgumentList: struct {
         no_fix: None
         fix_safety: .BehaviorPreserving
         what: fn(self) -> String { "`{self.name}<>` has an empty type-argument list" }
-        why: fn(self) -> String { "a type's arguments go between `<` and `>`; `<>` lists none, so it only adds noise" }
+        why: fn(self) -> String { "A type's arguments go between `<` and `>`; `<>` lists none, so it only adds noise" }
         fix: fn(self) -> String { "Write the type arguments, such as `{self.name}<Int>`, or drop the `<>`" }
     }
 }

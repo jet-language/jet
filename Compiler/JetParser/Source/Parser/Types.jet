@@ -355,7 +355,7 @@ parser_parse_type_base: fn(state: &JetParserState, depth: Int) -> ParsedType {
             // an empty type-argument list is read and refused here.
             if parser_current_kind(state) == TOKEN_LT_GT {
                 empty: parser_bump(state)
-                diagnostic: diagnostic_from_registry("E0440", Val(empty.span), "`{name}<>` has an empty type-argument list", "a type's arguments go between `<` and `>`; `<>` lists none, so it only adds noise", "Write the type arguments, such as `{name}<Int>`, or drop the `<>`")
+                diagnostic: diagnostic_from_registry("E0440", Val(empty.span), "`{name}<>` has an empty type-argument list", "A type's arguments go between `<` and `>`; `<>` lists none, so it only adds noise", "Write the type arguments, such as `{name}<Int>`, or drop the `<>`")
                 state.diagnostics.push(diagnostic_with_edit(diagnostic, TextEdit{span: empty.span, new_text: ""}))
                 return ParsedType{ty: foundation_named_type(name), span: parser_cover(start.span, empty.span)}
             }

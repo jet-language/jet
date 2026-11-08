@@ -280,8 +280,9 @@ ir_stmts: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, body: [Int]) Never! {
     states: ir_own_states(b, if ir_stmts_leave(p, b, body) -> b.bindings.len() else -> 0)
     ir_scope_open(b)
     outermost: b.scopes.len() == 1
-    loop statement in body {
+    loop (at, statement) in body {
         if ir_failed(b) -> break
+        b.map_take = if ir_map_take_fuses(p, b, body, at) -> statement else -> -1
         if outermost -> ir_stmt_collecting(m, p, b, statement) else -> ir_stmt(m, p, b, statement)
     }
     // The entry's outermost block ends: its variables drop before the
@@ -391,6 +392,10 @@ ir_stmt_body: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Neve
     b.moving = -1
     if ir_body_stmt(p, b, statement) == {
         .Let(local, let_ty, init, _, _, span) -> {
+            if b.map_take == statement {
+                b.map_take = -1
+                return ir_map_take(m, p, b, local, init, span)
+            }
             ir_stmt_line(p, b, span)
             // `name := &place` binds an alias of the place, never a copy: a
             // write borrow's edits reach the owner. A range borrow keeps its

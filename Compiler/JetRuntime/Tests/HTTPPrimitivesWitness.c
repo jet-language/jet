@@ -47,7 +47,7 @@ static void watch(void *p,int64_t n,int64_t a) {
     watched[count].p=p; watched[count].n=n; watched[count].a=a;
     watched[count++].freed=0;
 }
-static void watch_text(Text *t) { watch((char *)(t)-8,40,8); if(t->capacity) watch(t->data,t->capacity,1); }
+static void watch_text(Text *t) { watch((char *)(t)-8,104,8); if((const char *)t->data!=(const char *)t+32) watch(t->data,t->capacity,1); }
 static void all_freed(void) { for(size_t i=0;i<count;i++) assert(watched[i].freed==1); count=0; }
 static void none_freed(void) { for(size_t i=0;i<count;i++) assert(watched[i].freed==0); }
 static int64_t owners(Text *t) { return *(int64_t *)((char *)t-8) & 0x3fffffffffffffff; }

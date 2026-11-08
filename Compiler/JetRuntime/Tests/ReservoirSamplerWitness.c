@@ -33,7 +33,7 @@ static void observe_free(void *p,int64_t bytes,int64_t align){
 static void watch(void *p,int64_t bytes,int64_t align){assert(nwatched<34);pointers[nwatched]=p;sizes[nwatched]=bytes;aligns[nwatched]=align;freed[nwatched++]=0;}
 static void watch_owner(Reservoir *r){
     watched=r;nwatched=0;watch(r,64,8);watch(r->items.data,r->items.capacity*8,8);
-    for(int64_t i=0;i<r->items.len;++i){Text *t=r->items.data[i];watch((char *)(t)-8,40,8);if(t->capacity)watch(t->data,t->capacity,1);}
+    for(int64_t i=0;i<r->items.len;++i){Text *t=r->items.data[i];watch((char *)(t)-8,104,8);if((const char *)t->data!=(const char *)t+32)watch(t->data,t->capacity,1);}
 }
 // Heap text is [count][data,len,cap,cache]; the owner count is the word before.
 static int64_t owners(const Text *t){return *(const int64_t *)((const char *)t-8)&INT64_C(0x3fffffffffffffff);}

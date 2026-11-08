@@ -546,6 +546,17 @@ x64_sse: fn(code: &[U8], prefix: Int, wide: Bool, opcode: Int, reg: Int, rm: Int
     x64_modrm_reg(code, reg, rm)
 }
 
+// The same in the 0F 38 or 0F 3A opcode map (`escape` 0x38 or 0x3a): the
+// SSSE3 and SSE4.1 shuffles and the SHA extensions.
+x64_sse_escaped: fn(code: &[U8], prefix: Int, escape: Int, opcode: Int, reg: Int, rm: Int) Never! {
+    if prefix != 0 -> x64_byte(code, prefix)
+    if reg >= 8 || rm >= 8 -> x64_rex(code, false, reg, rm)
+    x64_byte(code, 0x0f)
+    x64_byte(code, escape)
+    x64_byte(code, opcode)
+    x64_modrm_reg(code, reg, rm)
+}
+
 // movsd/movss xmm, [base + disp], or the reverse store (0F 10/11).
 x64_float_load: fn(code: &[U8], single: Bool, dst: Int, base: Int, disp: Int) Never! {
     x64_byte(code, if single -> 0xf3 else -> 0xf2)

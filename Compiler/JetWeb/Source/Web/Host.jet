@@ -11,10 +11,10 @@ use {
 
 // The C functions the host provides, each as the runtime's IR calls it.
 WEB_HOST_C: [String]{
-    "__errno_location", "acos", "acosh", "asin", "asinh", "atan", "atan2", "atanh", "cbrt", "ceil", "cos", "cosh",
-    "exp", "exp2", "expm1", "floor", "fma", "fmod", "fork", "freeaddrinfo", "gai_strerror", "getaddrinfo", "getauxval",
-    "getgroups", "getloadavg", "hypot", "inet_pton", "initgroups", "log", "log10", "log1p", "log2", "mkfifo", "pow",
-    "pthread_attr_destroy", "pthread_attr_init", "pthread_attr_setstacksize", "pthread_create", "pthread_detach",
+    "__errno_location", "acos", "acosh", "asin", "asinh", "atan", "atan2", "atanh", "cbrt", "ceil", "clock_gettime",
+    "cos", "cosh", "exp", "exp2", "expm1", "floor", "fma", "fmod", "fork", "freeaddrinfo", "gai_strerror", "getaddrinfo",
+    "getauxval", "getgroups", "getloadavg", "hypot", "inet_pton", "initgroups", "log", "log10", "log1p", "log2", "mkfifo",
+    "pow", "pthread_attr_destroy", "pthread_attr_init", "pthread_attr_setstacksize", "pthread_create", "pthread_detach",
     "pthread_join", "realpath", "round", "signal", "sin", "sinh", "sqrt", "sysconf", "tan", "tanh", "tcgetattr",
     "tcsetattr", "times", "trunc", "utime",
 }
@@ -834,6 +834,10 @@ class Host {
       jet_ui_provider_take: (buffer) => {
         if (staged !== null) host.u8().set(staged, Number(buffer));
         staged = null;
+      },
+      clock_gettime: (clock, at) => {
+        host.timespec(Number(at), nowNanoseconds(Number(clock)));
+        return 0n;
       },
       fork: () => fail(E.NOSYS, -1n),
       getaddrinfo: () => fail(E.NOSYS, -11n),

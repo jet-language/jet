@@ -76,20 +76,46 @@ rt_text_bytes_copy: fn(target: I64, source: I64, len: I64) {
     }
 }
 
-// P2 (#5041): a heap text block is [count][data, len, cap][cache]; owners
-// hold the address of `data`, so every reader keeps offsets 0/8/16. Clone
-// retains the block and drop releases it. Text is immutable once published;
-// only fresh builders (count 1) are written in place. Only these two helpers
-// know the prefix. The cache word (rt_text_cache) costs no memory: the
-// allocator serves 32 and 40 bytes from the same class.
-rt_text_header_alloc: fn() -> I64 {
-    block: jet_rt_alloc_8(I64{40})
+// A heap text block is [count][data, len, cap][cache][inline];
+// owners hold the address of `data`, so every reader keeps offsets 0/8/16.
+// Clone retains the block and drop releases it. Text is immutable once
+// published; only fresh builders (count 1) are written in place. Only these
+// helpers know the block. Its last RT_TEXT_INLINE bytes are the buffer of a
+// text that fits them (data = header + 32), so a short text is one
+// allocation; a longer text, or a builder that outgrows them, owns a separate
+// buffer of `cap` bytes and leaves them unused. Every heap block is
+// RT_TEXT_BLOCK bytes (the allocator's 128-byte class), so freeing it needs
+// no record of where its bytes went.
+RT_TEXT_BLOCK: I64{104}
+RT_TEXT_INLINE: I64{64}
+
+// A fresh empty owner whose buffer holds `cap` bytes: its inline bytes, or a
+// separate buffer for a longer text. 0 only after a propagated allocation
+// failure.
+rt_text_builder_with_capacity: fn(cap: I64) -> I64 {
+    block: jet_rt_alloc_8(RT_TEXT_BLOCK)
     rc_init(block)
-    rt_text_store(wrapping(block + I64{32}), I64{0})
-    wrapping(block + I64{8})
+    header: wrapping(block + I64{8})
+    rt_text_store(header, wrapping(header + I64{32}))
+    rt_text_store(wrapping(header + I64{8}), I64{0})
+    rt_text_store(wrapping(header + I64{16}), RT_TEXT_INLINE)
+    rt_text_store(wrapping(header + I64{24}), I64{0})
+    if (cap <= RT_TEXT_INLINE) -> return header
+    data: alloc_bytes(cap)
+    if (data == I64{0} && jet_rt_session_propagate() != I64{0}) {
+        rt_text_header_free(header)
+        return I64{0}
+    }
+    rt_text_store(header, data)
+    rt_text_store(wrapping(header + I64{16}), cap)
+    header
 }
 
-rt_text_header_free: fn(header: I64) { jet_rt_free_8(wrapping(header - I64{8}), I64{40}) }
+rt_text_header_free: fn(header: I64) { jet_rt_free_8(wrapping(header - I64{8}), RT_TEXT_BLOCK) }
+
+// Whether `data` is heap text `value`'s inline buffer, which goes with the
+// block rather than by free_bytes.
+rt_text_inline: fn(value: I64, data: I64) -> Bool { data == wrapping(value + I64{32}) }
 
 // The cache word at +24 of a heap text of `len` bytes (0 < len < 2^31) holds
 // facts about its bytes, which never change once published: the low 32 bits
@@ -112,23 +138,15 @@ rt_text_cache_store: fn(value: I64, prefix: I64, counted: I64) {
 }
 
 // rt_static_text headers (Lower/StaticText.jet) are process-lifetime rodata
-// objects without a count word: cap 0 over a real buffer. Heap headers with
-// cap 0 always use the empty sentinel data 1, so the test is exact.
-rt_text_immortal: fn(value: I64) -> Bool {
-    rt_text_word(wrapping(value + I64{16})) == I64{0} && rt_text_data(value) != I64{1}
-}
+// objects without a count word: cap 0 over a real buffer. A heap header's cap
+// is at least RT_TEXT_INLINE, so the test is exact.
+rt_text_immortal: fn(value: I64) -> Bool { rt_text_word(wrapping(value + I64{16})) == I64{0} }
 
 rt_text_copy: fn(ptr: I64, len: I64) -> I64 {
-    header: rt_text_header_alloc()
-    data: if (len == I64{0}) -> I64{1} else -> alloc_bytes(len)
-    if (data == I64{0} && jet_rt_session_propagate() != I64{0}) {
-        rt_text_header_free(header)
-        return I64{0}
-    }
-    rt_text_bytes_copy(data, ptr, len)
-    rt_text_store(header, data)
+    header: rt_text_builder_with_capacity(len)
+    if (header == I64{0}) -> return I64{0}
+    rt_text_bytes_copy(rt_text_data(header), ptr, len)
     rt_text_store(wrapping(header + I64{8}), len)
-    rt_text_store(wrapping(header + I64{16}), len)
     header
 }
 
@@ -230,13 +248,11 @@ rt_text_reserve_extra: fn(target: I64, old: I64, used: I64, extra: I64) -> I64 {
     cap: rt_text_word(wrapping(target + I64{16}))
     if (needed <= cap) -> return old
     grown: if (cap <= I64{4611686018427387903}) -> cap * I64{2} else -> needed
-    capacity: if {
-        needed > grown -> needed
-        (grown < I64{16}) -> I64{16}
-        else -> grown
-    }
+    capacity: if (needed > grown) -> needed else -> grown
+    // The inline bytes stay with the block; a separate buffer is released.
+    separate: !rt_text_inline(target, old)
     // A direct-mapped buffer grows by mremap: no second buffer, no copy.
-    if (cap != I64{0}) {
+    if separate {
         moved: alloc_grow_large(old, cap, capacity)
         if (moved != I64{0}) {
             rt_text_store(target, moved)
@@ -248,7 +264,7 @@ rt_text_reserve_extra: fn(target: I64, old: I64, used: I64, extra: I64) -> I64 {
     if (data == I64{0} && jet_rt_session_propagate() != I64{0}) -> return I64{0}
     rt_text_bytes_copy(data, old, used)
     before: jet_rt_session_status()
-    if (cap != I64{0}) -> free_bytes(old, cap)
+    if separate -> free_bytes(old, cap)
     if (jet_rt_session_status() != before && jet_rt_session_propagate() != I64{0}) {
         jet_rt_free(data, capacity, I64{1})
         return I64{0}
@@ -289,7 +305,6 @@ rt_text_append_raw_word: fn(target: I64, word: I64, count: I64) {
 }
 
 rt_text_push_scalar: fn(target: I64, scalar: I64) {
-    if !rt_text_writable(target) -> return
     value: if (scalar < I64{0} || scalar > I64{1114111} || (scalar >= I64{55296} && scalar <= I64{57343})) -> I64{65533} else -> scalar
     width: if {
         (value < I64{128}) -> I64{1}
@@ -299,30 +314,10 @@ rt_text_push_scalar: fn(target: I64, scalar: I64) {
     }
     // Reserve once, then initialize the complete scalar before publishing len.
     // No transient scalar buffer allocation is necessary.
-    loop rt_text_word(wrapping(target + I64{16})) - rt_text_len(target) < width {
-        cap: rt_text_word(wrapping(target + I64{16}))
-        used: rt_text_len(target)
-        if (used > I64{9223372036854775807} - width) {
-            rt_text_capacity_stop()
-            return
-        }
-        grown: if (cap <= I64{4611686018427387903}) -> cap * I64{2} else -> used + width
-        capacity: if (grown < I64{16}) -> I64{16} else -> grown
-        old: rt_text_data(target)
-        data: alloc_bytes(capacity)
-        if (data == I64{0} && jet_rt_session_propagate() != I64{0}) -> return
-        rt_text_bytes_copy(data, old, used)
-        before: jet_rt_session_status()
-        if (cap != I64{0}) { free_bytes(old, cap) }
-        if (jet_rt_session_status() != before && jet_rt_session_propagate() != I64{0}) {
-            jet_rt_free(data, capacity, I64{1})
-            return
-        }
-        rt_text_store(target, data)
-        rt_text_store(wrapping(target + I64{16}), capacity)
-    }
     used: rt_text_len(target)
-    data: wrapping(rt_text_data(target) + used)
+    buffer: rt_text_reserve_extra(target, rt_text_data(target), used, width)
+    if (buffer == I64{0}) -> return
+    data: wrapping(buffer + used)
     if {
         (width == I64{1}) -> rt_text_put(data, value)
         else -> {
@@ -398,7 +393,7 @@ rt_text_lossy: fn(ptr: I64, len: I64) -> I64 {
     value
 }
 
-// Borrow both carriers; publish one fresh owner with exact buffer capacity.
+// Borrow both carriers; publish one fresh owner (inline when it fits).
 #Export(c) jet_rt_string_concat: fn(left: I64, right: I64) -> I64 {
     left_len: rt_text_len(left)
     right_len: rt_text_len(right)
@@ -407,17 +402,12 @@ rt_text_lossy: fn(ptr: I64, len: I64) -> I64 {
         return I64{0}
     }
     len: left_len + right_len
-    header: rt_text_header_alloc()
-    data: if (len == I64{0}) -> I64{1} else -> alloc_bytes(len)
-    if (data == I64{0} && jet_rt_session_propagate() != I64{0}) {
-        rt_text_header_free(header)
-        return I64{0}
-    }
+    header: rt_text_builder_with_capacity(len)
+    if (header == I64{0}) -> return I64{0}
+    data: rt_text_data(header)
     rt_text_bytes_copy(data, rt_text_data(left), left_len)
     rt_text_bytes_copy(wrapping(data + left_len), rt_text_data(right), right_len)
-    rt_text_store(header, data)
     rt_text_store(wrapping(header + I64{8}), len)
-    rt_text_store(wrapping(header + I64{16}), len)
     header
 }
 
@@ -470,18 +460,20 @@ rt_text_lossy: fn(ptr: I64, len: I64) -> I64 {
     rt_static_text("")
 }
 
-// Release one owner; the last owner frees the buffer and the block. Static
-// rt_static_text headers are immortal and never freed.
+// Release one owner; the last owner frees a separate buffer and the block.
+// Static rt_static_text headers are immortal and never freed.
 #Export(c) jet_rt_string_drop: fn(value: I64) {
     if (value == I64{0}) {
         return
     }
     if rt_text_immortal(value) -> return
     if !jet_rt_rc_release(wrapping(value - I64{8})) -> return
-    cap: rt_text_word(wrapping(value + I64{16}))
-    before: jet_rt_session_status()
-    if (cap != I64{0}) { free_bytes(rt_text_data(value), cap) }
-    if (jet_rt_session_status() != before && jet_rt_session_propagate() != I64{0}) -> return
+    data: rt_text_data(value)
+    if !rt_text_inline(value, data) {
+        before: jet_rt_session_status()
+        free_bytes(data, rt_text_word(wrapping(value + I64{16})))
+        if (jet_rt_session_status() != before && jet_rt_session_propagate() != I64{0}) -> return
+    }
     rt_text_header_free(value)
 }
 
@@ -891,19 +883,6 @@ rt_text_find_bytes: fn(data: I64, len: I64, pattern: I64, n: I64, start: I64, la
     n <= len && rt_text_equal_bytes(wrapping(wrapping(rt_text_data(value) + len) - n), rt_text_data(needle), n)
 }
 
-rt_text_builder_with_capacity: fn(cap: I64) -> I64 {
-    header: rt_text_header_alloc()
-    data: if (cap == I64{0}) -> I64{1} else -> alloc_bytes(cap)
-    if (data == I64{0} && jet_rt_session_propagate() != I64{0}) {
-        rt_text_header_free(header)
-        return I64{0}
-    }
-    rt_text_store(header, data)
-    rt_text_store(wrapping(header + I64{8}), I64{0})
-    rt_text_store(wrapping(header + I64{16}), cap)
-    header
-}
-
 // A fresh owned text of `length` bytes in a `capacity`-byte buffer; the
 // caller initializes those bytes before publishing it. Runtime files that
 // render text directly build it here, never as a hand-made header. 0 only
@@ -915,7 +894,7 @@ rt_text_with_length: fn(length: I64, capacity: I64) -> I64 {
     header
 }
 
-#Export(c) jet_rt_string_builder_new: fn() -> I64 { rt_text_copy(I64{1}, I64{0}) }
+#Export(c) jet_rt_string_builder_new: fn() -> I64 { rt_text_builder_with_capacity(I64{0}) }
 
 #Export(c) jet_rt_string_builder_push: fn(target: I64, value: I64) {
     rt_text_append(target, rt_text_data(value), rt_text_len(value))

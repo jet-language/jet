@@ -2,7 +2,7 @@
 // No cache observation or action execution is invented by these projections.
 use {
     jet_foundation.[foundation_json_quote]
-    core.build.[BuildGraphFile]
+    core.build.[BuildGraph, BuildGraphAction, BuildGraphFile]
     jet_build_session.[
         BuildSessionAction, BuildSessionPlan, BuildSessionState, build_key_debug_text,
         build_key_target_kind, build_session_project,
@@ -103,4 +103,40 @@ jet_driver_build_plan_json: fn(plan: BuildSessionPlan) -> String Never! {
     // Rust BuildGraph.affected_files() is the static file universe here,
     // not receipt_diff's rebuild-impact closure. Reuse the canonical rows.
     "{{\"schema_version\":1,\"default\":{default},\"targets\":[{targets.join(",")}],\"actions\":[{actions.join(",")}],\"action_keys\":[{keys.join(",")}],\"cache_hits\":[{hits.join(",")}],\"files\":[{files.join(",")}],\"affected_files\":[{files.join(",")}],\"toolchains\":[{tools.join(",")}],\"probes\":[{probes.join(",")}],\"generated\":[{generated.join(",")}]}}"
+}
+
+// The core.build values `jet build` records, as JSON objects whose fields
+// are the values' own, in declaration order: `.jet/build/receipt.json` (the
+// BuildGraph it built) and `.jet/build/times.json` (its BuildTimes).
+jet_driver_build_graph_json: fn(graph: BuildGraph) -> String Never! {
+    targets: loop target in graph.targets -> "{{\"id\":{target.id},\"name\":{foundation_json_quote(target.name)},\"kind\":{foundation_json_quote(target.kind)},\"deps\":{jet_driver_build_ints(target.deps)},\"actions\":{jet_driver_build_ints(target.actions)},\"files\":{jet_driver_build_strings(target.files)},\"plugin\":{jet_driver_build_id(target.plugin)}}}"
+    actions: loop action in graph.actions -> jet_driver_build_action_json(action)
+    keys: loop key in graph.action_keys -> "{{\"action\":{foundation_json_quote(key.action)},\"key\":{foundation_json_quote(key.key)}}}"
+    hits: loop action in graph.cache_hits -> jet_driver_build_action_json(action)
+    files: loop file in graph.files -> jet_driver_build_file_json(file)
+    affected: loop file in graph.affected_files -> jet_driver_build_file_json(file)
+    nodes := [String]{}
+    loop node in graph.nodes {
+        digests: loop digest in node.input_digests -> "{{\"name\":{foundation_json_quote(digest.name)},\"digest\":{foundation_json_quote(digest.digest)}}}"
+        nodes.push("{{\"kind\":{foundation_json_quote(node.kind)},\"key\":{foundation_json_quote(node.key)},\"subject\":{foundation_json_quote(node.subject)},\"inputs\":{jet_driver_build_strings(node.inputs)},\"input_digests\":[{digests.join(",")}]}}")
+    }
+    "{{\"targets\":[{targets.join(",")}],\"actions\":[{actions.join(",")}],\"action_keys\":[{keys.join(",")}],\"cache_hits\":[{hits.join(",")}],\"files\":[{files.join(",")}],\"affected_files\":[{affected.join(",")}],\"nodes\":[{nodes.join(",")}]}}\n"
+}
+jet_driver_build_action_json: fn(action: BuildGraphAction) -> String Never! {
+    hit: if action.cache_hit == .Val(value) -> "{value}" else -> "null"
+    "{{\"id\":{action.id},\"name\":{foundation_json_quote(action.name)},\"kind\":{foundation_json_quote(action.kind)},\"inputs\":{jet_driver_build_strings(action.inputs)},\"outputs\":{jet_driver_build_strings(action.outputs)},\"target\":{jet_driver_build_id(action.target)},\"caps\":{jet_driver_build_strings(action.caps)},\"pools\":{jet_driver_build_strings(action.pools)},\"plugin\":{jet_driver_build_id(action.plugin)},\"compiler_owned\":{action.compiler_owned},\"key\":{foundation_json_quote(action.key)},\"cache_hit\":{hit}}}"
+}
+
+// One core.build BuildTime row as the compiler writes it. The compiler is
+// built by a seed whose core.build may predate BuildTime, so it writes the
+// row's fields from this mirror.
+JetDriverBuildTime: struct {
+    name: String
+    kind: String
+    wall_ms: Int
+    reused: Bool
+}
+jet_driver_build_times_json: fn(rows: [JetDriverBuildTime]) -> String Never! {
+    written: loop row in rows -> "{{\"name\":{foundation_json_quote(row.name)},\"kind\":{foundation_json_quote(row.kind)},\"wall_ms\":{row.wall_ms},\"reused\":{row.reused}}}"
+    "{{\"rows\":[{written.join(",")}]}}\n"
 }

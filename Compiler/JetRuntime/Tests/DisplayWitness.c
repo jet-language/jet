@@ -37,7 +37,7 @@ static void write_all(long fd, const void *bytes, uint64_t count) {
     }
 }
 static void release(JetCText *text) {
-    if (text->len > text->cap || (!text->cap && text->ptr != (void *)1)) failed = 1;
+    if (text->len > text->cap || !text->cap) failed = 1;
     jet_rt_string_drop(text);
 }
 static void expect(JetCText *text, const unsigned char *expected, uint64_t length) {

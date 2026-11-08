@@ -46,6 +46,7 @@ Run a lesson from the repository root, for example `jet run Examples/Systems/<Le
 - [PathWithin](Files/PathWithin.jet) — Lexical containment compares normalized components.
 - [ReadBytesPaths](Files/ReadBytesPaths.jet)
 - [WalkFiles](Files/WalkFiles.jet) — File-only traversal keeps the walk policy and drops directories.
+- [WalkOrder](Files/WalkOrder.jet) — `walk` yields the entries in path order, depth first, without sorting the whole tree.
 - [Watcher](Files/Watcher.jet) — core.watcher owns file/process/port watch handles.
 
 ## Process

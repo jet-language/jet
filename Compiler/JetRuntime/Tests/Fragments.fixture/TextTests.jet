@@ -119,11 +119,11 @@ text_test_concat: fn() {
         len: left_len + right_len
         joined: jet_rt_string_concat(left, right)
         text_test_require(joined != left && joined != right)
-        text_test_require(rt_text_len(joined) == len && rt_text_word(joined + I64{16}) == len)
+        text_test_require(rt_text_len(joined) == len && rt_text_word(joined + I64{16}) == (if (len <= RT_TEXT_INLINE) -> RT_TEXT_INLINE else -> len))
         data: rt_text_data(joined)
-        if (len == I64{0}) { text_test_require(data == I64{1}) } else {
-            text_test_require(data != rt_text_data(left) && data != rt_text_data(right))
-        }
+        // A result that fits the block keeps its bytes inline: one allocation.
+        text_test_require(rt_text_inline(joined, data) == (len <= RT_TEXT_INLINE))
+        text_test_require(data != rt_text_data(left) && data != rt_text_data(right))
         at = I64{0}
         loop at < len {
             expected: if (at < left_len) -> rt_text_byte(rt_text_data(left) + at) else -> rt_text_byte(rt_text_data(right) + at - left_len)
@@ -238,7 +238,7 @@ text_tests: fn() {
     text_test_search()
     text_test_routes()
     empty: jet_rt_string_builder_new()
-    text_test_require(rt_text_data(empty) == I64{1} && rt_text_word(empty + I64{16}) == I64{0})
+    text_test_require(rt_text_inline(empty, rt_text_data(empty)) && rt_text_word(empty + I64{16}) == RT_TEXT_INLINE)
     text_test_require(jet_string_is_empty(empty) && jet_char_len(empty) == I64{0})
     word: text_test_word(I64{6513249}, I64{3})  // abc
     // A clone shares the counted text; an equal word built apart owns its own.
@@ -289,7 +289,7 @@ text_tests: fn() {
     text_test_require(packed_empty != I64{0} && rt_text_byte(packed_empty) == I64{0})
     unpacked_empty: jet_rt_c_string_unpack(packed_empty)
     jet_rt_c_string_free(packed_empty, I64{1})
-    text_test_require(rt_text_len(unpacked_empty) == I64{0} && rt_text_data(unpacked_empty) == I64{1})
+    text_test_require(rt_text_len(unpacked_empty) == I64{0} && rt_text_inline(unpacked_empty, rt_text_data(unpacked_empty)))
     jet_rt_string_drop(unpacked_empty)
     sliced: jet_rt_string_slice_range(unicode, I64{1}, I64{3}, U8{1}, I64{1}, I64{0}, I64{0})
     text_test_require(jet_char_len(sliced) == I64{2} && rt_text_len(sliced) == I64{5})

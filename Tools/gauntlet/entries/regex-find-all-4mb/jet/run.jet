@@ -1,11 +1,7 @@
-use {
-    files: core.files
-    re: core.regex
-}
+use files: core.files
 
 #CLI Args: struct { path: String }
 run: fn(args: Args) IOError! {
     text: files.read(args.path)
-    matches: re.find_all(Regex{"struct"}, text)
-    print("matches {matches.len()}")
+    print("matches {text.count("struct")}")
 }

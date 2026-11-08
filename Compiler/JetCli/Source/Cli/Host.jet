@@ -264,6 +264,36 @@ jet_cli_compile_prelude_check: fn(file: String, source: String, color: Bool, qui
     output
 }
 
+// `jet check Core`: one Check compile of an entry that imports every public
+// module of the Core library `core` (jet_cli_core_check_source), written to a
+// scratch directory, with every declaration of each module loaded and every
+// body checked whether a program calls it or not; reported as `jet check`
+// reports `core`.
+jet_cli_compile_core_check: fn(core: String, color: Bool, quiet: Bool, threads: Int?, json: Bool, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
+    watch: cli_time.start()
+    scratch: cli_files.temp_dir("jet-check-core") ?? return JetDriverVerbOutput{stdout: "", stderr: "jet check: couldn't create a scratch directory for the Core entry: {err}\n", exit_code: JET_DRIVER_EXIT_USER_ERROR}
+    entry: "{scratch.path}/core.jet"
+    source: jet_cli_core_check_source()
+    cli_files.write(entry, source) ?? return JetDriverVerbOutput{stdout: "", stderr: "jet check: couldn't write the Core entry `{entry}`: {err}\n", exit_code: JET_DRIVER_EXIT_USER_ERROR}
+    prepared := if jet_cli_prepare_snapshot(entry, entry, [JetCLIOverlay]{}, color, true) == {
+        .Refused(refusal) -> JetCLIPrepared.Refused{output: refusal}
+        .Held(snapshot) -> jet_cli_prepare_request(snapshot, color, threads, JetDriverCompileMode.Check, false, Val(core))
+    }
+    compiled: jet_cli_compile_prepared(prepared, None, trace_sink, [BuildSettingOverride]{}, "", false, true)
+    output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    if compiled == {
+        .Refused(refusal) -> output = refusal.move()
+        .Compiled(result, snapshot) -> {
+            diagnostics: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
+            output = if json -> jet_cli_check_json_outcome(core, source, diagnostics, watch.elapsed_millis(), JET_BUILD_DEFAULT_PROFILE) else -> jet_driver_check_outcome(core, source, diagnostics, color, quiet)
+            if jet_cli_errors(diagnostics).len() == 0 {
+                if result.internal_problem == .Val(problem) -> output = jet_cli_ice(problem)
+            }
+        }
+    }
+    output
+}
+
 // `jet check` of a workspace root: each member no other member depends on
 // checks in project scope; its compile loads every other member, and a
 // failing member's errors are reported inline before its E0626. Each outcome
@@ -1021,6 +1051,9 @@ jet_cli_native_program: fn(result: JetDriverCompileResult, inputs: &&JetDriverLo
     checked := inputs.move()
     checks := jet_cli_ir_checks(result, checked, options)
     checks.checked_alloc = jet_cli_checked_alloc(options)
+    checks.observe = options.observe
+    checks.log_package = result.log_filter.copy()
+    checks.log_flag = options.log.copy()
     declarations := jet_driver_checked_declarations(checked)
     // The program's C closure defines its foreign functions' symbols. An
     // `extern rust` function is called through the slot descriptor its helper
@@ -1460,9 +1493,10 @@ jet_cli_build_result: fn(file: String, name: String, source: String, color: Bool
     } else {
         if jet_cli_build_stored(file, name, color, options, result, inputs, snapshot, verbose) == {
             .Failed(failure) -> return failure
-            .Written(path, lines) -> {
+            .Written(path, lines, reused) -> {
                 log = lines
                 if sbom -> built = jet_cli_build_sbom(file, name, source, path, color, quiet)
+                built.reused = reused
             }
         }
     }
@@ -1581,7 +1615,10 @@ jet_cli_finish: fn(output: JetDriverVerbOutput) -> Never {
 // jet runs this on its main thread).
 // Launching its own path again runs it the way it runs now: this jet, this
 // profile and build-option flags, this invocation's authority
-// (`jet run [--profile=…] [--optimize=…] [--gate=…] [-A] [--allow=…] [--deny=…]`).
+// (`jet run [--profile=…] [--optimize=…] [--log=…] [--gate=…] [-A] [--allow=…] [--deny=…]`).
+// A run confined by `--allow=FS.Read:<path>` (jet_cli_read_scope) reads
+// only those paths, and JET_READ_SCOPE names them, so the runtime's refusal
+// of any other read names the grant.
 jet_cli_launch_plan: fn(file: String, program_args: [String], options: BuildOptions, invocation: JetCLIInvocationAuthority?, vars: [JetCLIEnvVar]) -> X64Launch {
     executable: cli_files.absolute(file) ?? file
     argv := [String]{executable}
@@ -1592,13 +1629,39 @@ jet_cli_launch_plan: fn(file: String, program_args: [String], options: BuildOpti
         if choice.layer == BuildOptionLayer.Flag -> relaunch.push(choice.written)
     }
     loop setting in options.settings -> relaunch.push("--set={setting.name}={setting.value}")
+    if options.observe -> relaunch.push("--observe")
+    if options.log != "" -> relaunch.push("--log={options.log}")
     loop key in options.gates -> relaunch.push("--gate={policy_key_name(key)}=allow")
     if invocation == .Val(rows) {
         if rows.all -> relaunch.push("-A")
         if rows.allow.len() > 0 -> relaunch.push("--allow={rows.allow.join(",")}")
         if rows.deny.len() > 0 -> relaunch.push("--deny={rows.deny.join(",")}")
     }
-    X64Launch{argv: argv, env: jet_cli_launch_env(vars), executable: executable, name: jet_cli_stem(file), relaunch: relaunch, parent_death: true}
+    scope: jet_cli_read_scope(invocation)
+    // copy: `vars` is the caller's; the launch's rows own their own.
+    env_vars := vars.copy()
+    if scope.len() > 0 -> env_vars.push(JetCLIEnvVar{name: "JET_READ_SCOPE", value: scope.join(", ")})
+    X64Launch{argv: argv, env: jet_cli_launch_env(env_vars), executable: executable, name: jet_cli_stem(file), relaunch: relaunch, parent_death: true, read_scope: scope}
+}
+
+// The environment of an observed run (`jet run --observe`, `jet perf test`):
+// JET_OBSERVE=1 and each of the five identity fields its runtime publishes
+// under (ObserveLive.jet jet_rt_observe_runtime_start_from_env) that jet's
+// own environment leaves unset: this run's session, `source`, and the
+// `runtime` build and revision of the `game` world.
+jet_cli_observe_env: fn(source: String) -> [JetCLIEnvVar] {
+    vars := [JetCLIEnvVar]{JetCLIEnvVar{name: "JET_OBSERVE", value: "1"}}
+    identity: [JetCLIEnvVar]{
+        JetCLIEnvVar{name: "JET_DEVTOOLS_RELAY_SESSION_ID", value: "jet-observe-{cli_process.current_pid()}-{cli_time.unix_ns()}"},
+        JetCLIEnvVar{name: "JET_DEVTOOLS_RELAY_SOURCE_ID", value: source},
+        JetCLIEnvVar{name: "JET_DEVTOOLS_RELAY_BUILD_ID", value: "runtime"},
+        JetCLIEnvVar{name: "JET_DEVTOOLS_RELAY_REVISION", value: "runtime"},
+        JetCLIEnvVar{name: "JET_DEVTOOLS_RELAY_WORLD_ID", value: "game"},
+    }
+    loop field in identity {
+        if (cli_sys.get(field.name) ?? "") == "" -> vars.push(field.copy())
+    }
+    vars
 }
 
 #Import(c) jet_cli_scheduler_shutdown: fn() -> I64 = "jet_rt_scheduler_shutdown"
@@ -1635,13 +1698,17 @@ JetCLIRunStep: enum {
 }
 
 // Finish `step` on this thread: run its program (jet_cli_launch) with the
-// environment that lets it write a production-failure receipt, else return
-// its output.
+// environment that lets it write a production-failure receipt, and under
+// `--observe` publish its run (jet_cli_observe_env), else return its output.
 jet_cli_run_step: fn(step: &&JetCLIRunStep) -> JetDriverVerbOutput {
     if step.move() == {
         .Output(output) -> output
         .Launch(executable, file, binary, program_args, options, invocation, verbose, color) -> {
-            vars: jet_cli_production_receipt_env(file, program_args)
+            vars := jet_cli_production_receipt_env(file, program_args)
+            if options.observe {
+                // copy: the observed run's fields join the receipt's.
+                loop field in jet_cli_observe_env(file) -> vars.push(field.copy())
+            }
             jet_cli_launch(executable, file, binary, program_args, options, invocation, vars, verbose, color)
         }
     }
@@ -1747,7 +1814,9 @@ jet_cli_full_path_origins: fn(diagnostics: &[Diagnostic]) Never! {
 // `jet run <file>`'s build, as `jet build` does: problems with an error stop
 // it, and so does the application authority check; `run` hides advisory
 // lints unless `--verbose`, and `json` reports what it shows as JSON
-// (jet_cli_run_problems). The image is linked to run from memory.
+// (jet_cli_run_problems). A `--verbose` run says on one stderr line which
+// effects the program uses (the checked entry's, `entry_effects`). The image
+// is linked to run from memory.
 jet_cli_run_build: fn(file: String, source: String, color: Bool, options: BuildOptions, verbose: Bool, json: Bool, invocation: JetCLIInvocationAuthority?, result: JetDriverCompileResult, inputs: &&JetDriverLoweringInputs?, snapshot: JetDriverAuthorizedSourceSnapshot) -> JetCLIBuilt {
     if result.trace_sink == .Val(sink) -> sink.begin("cli.diagnostics", "", -1, -1)
     errors: jet_cli_errors(result.diagnostics)
@@ -1759,6 +1828,11 @@ jet_cli_run_build: fn(file: String, source: String, color: Bool, options: BuildO
     }
     if jet_cli_authority_check(file, source, color, json, "run", invocation, result) == .Val(refusal) -> return JetCLIBuilt.Failed{output: refusal}
     if verbose -> jet_cli_write_verbose_lints(file, source, color, json, jet_cli_present_shown(result, snapshot, true))
+    if verbose && !json {
+        used: jet_cli_sorted_set(result.entry_effects)
+        listed: if used.len() == 0 -> "none" else -> used.join(", ")
+        cli_term.eprint("jet run: effects used: {listed}")
+    }
     jet_cli_build_binary(file, jet_cli_stem(file), "run", color, options, result, inputs, snapshot)
 }
 
@@ -1798,6 +1872,7 @@ jet_cli_run_settled: fn(step: &&JetCLIRunStep) -> JetCLIRunStep {
 // A plain `jet run`: run the program kept for exactly these inputs, or
 // compile it, keep it, and run it (ScriptCache.jet).
 jet_cli_compile_kept: fn(file: String, source: String, color: Bool, json: Bool, options: BuildOptions, threads: Int?, program_args: [String], invocation: JetCLIInvocationAuthority?) -> JetCLIRunStep {
+    if cli_sys.get(JET_CLI_SCRIPT_PROMOTE_ENV) != None -> return jet_cli_compile_promoted(file, source, json, options, threads, invocation)
     step := JetCLIRunStep.Output{output: JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}}
     held: jet_cli_prepare_snapshot(file, file, [JetCLIOverlay]{}, color)
     keep: if held == .Held(snapshot) -> jet_cli_script_keeper(file, options, snapshot) else -> None
@@ -1832,9 +1907,66 @@ jet_cli_script_build_and_run: fn(file: String, source: String, color: Bool, json
 }
 
 jet_cli_script_launch: fn(keep: JetCLIScriptKeep?, authority: JetCLIAuthority, executable: &&X64Executable, file: String, binary: String, program_args: [String], options: BuildOptions, invocation: JetCLIInvocationAuthority?, color: Bool) -> JetCLIRunStep {
-    if keep == .Val(kept) -> jet_cli_script_keep(kept, executable, authority)
+    if keep == .Val(kept) {
+        _: jet_cli_script_keep(kept, executable, authority, build_options_value(options, "optimize"))
+    }
     JetCLIRunStep.Launch{executable: executable.move(), file: file, binary: binary, program_args: program_args, options: options, invocation: invocation, verbose: false, color: color}
 }
+
+// The background `full` build a reused `none` program started
+// (ScriptCache.jet jet_cli_script_promote): compile `file` as its plain run
+// did, with every option of that run (`--observe` and `--log` among them)
+// but the optimize level `full`, keep the program in that run's slot, and
+// end without running it or printing anything. Its threads run at the
+// lowest CPU priority.
+jet_cli_compile_promoted: fn(file: String, source: String, json: Bool, options: BuildOptions, threads: Int?, invocation: JetCLIInvocationAuthority?) -> JetCLIRunStep {
+    jet_cli_script_lower_priority()
+    held: jet_cli_prepare_snapshot(file, file, [JetCLIOverlay]{}, false)
+    keep: if held == .Held(snapshot) -> jet_cli_script_keeper(file, options, snapshot) else -> None
+    if keep == .Val(kept) {
+        lock: jet_cli_script_promotion(kept) ?? return jet_cli_promoted_end()
+        full: jet_cli_build_options_set(options, "optimize", JET_CLI_SCRIPT_LEVEL_FULL)
+        prepared: if held.move() == {
+            .Held(snapshot) -> jet_cli_prepare_request(snapshot, false, threads, JetDriverCompileMode.Program, kept.core_files)
+            .Refused(refusal) -> JetCLIPrepared.Refused{output: refusal}
+        }
+        compiled := jet_cli_compile_executable(prepared, None, full, jet_cli_script_input_log(keep), None, false)
+        stored := false
+        if compiled.move() == {
+            .Refused(_) -> {}
+            .Checked(result, inputs, snapshot) -> {
+                authority: jet_cli_application_authority(result, None)
+                built := jet_cli_run_build(file, source, false, full, false, json, invocation, result, inputs, snapshot)
+                if built.move() == {
+                    .Failed(_) -> {}
+                    .Image(executable, _) -> stored = jet_cli_script_keep(kept, executable, authority, JET_CLI_SCRIPT_LEVEL_FULL)
+                }
+            }
+        }
+        jet_cli_script_promoted(lock, kept, stored)
+    }
+    jet_cli_promoted_end()
+}
+
+// A background build ends with success and no output, whatever it kept.
+jet_cli_promoted_end: fn() -> JetCLIRunStep Never! {
+    JetCLIRunStep.Output{output: JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}}
+}
+
+// Put every thread of this process at the lowest CPU priority, so a
+// background build takes only time no other program wants. Linux keeps the
+// priority per thread, and a thread starts with its creator's, so the
+// threads the compile starts later inherit it.
+jet_cli_script_lower_priority: fn() {
+    tasks: cli_files.list_dir("/proc/self/task") ?? return
+    loop task in tasks {
+        thread: Int.parse(task.name) ?? next
+        #Unsafe("posix setpriority: the build lowers only its own threads, never raising one") {
+            cli_sys.setpriority(thread, 19).drop("a thread left at its priority only finishes sooner")
+        }
+    }
+}
+
 jet_cli_native_test_unrun_check_report: fn() -> String Never! {
     row: diagnostic_registry_row("E3016") ?? panic("native output-check failure is registered")
     diagnostic: diagnostic_from_registry(row.code, None, row.what, row.why, row.fix)
@@ -3174,7 +3306,7 @@ jet_cli_write_output: fn(output: JetDriverVerbOutput) {
 // The plans whose compile `--trace` and JET_TRACE_FILE trace.
 jet_cli_plan_compiles: fn(plan: JetCLIPlan) -> Bool Never! {
     if plan == {
-        .Check(_, _, _, _, _, _, _, _, _, _, _) | .CheckWorkspace(_, _, _, _, _, _, _, _, _) | .CheckPrelude(_, _, _, _, _, _) | .Build(_, _, _, _, _, _, _, _, _, _, _) | .BuildPackage(_, _, _, _, _, _, _, _) | .Run(_, _, _, _, _, _, _, _, _, _, _, _) | .DevWeb(_, _, _, _, _, _, _, _) | .Test(_, _, _, _, _, _) | .Emit(_, _, _, _, _, _) -> true
+        .Check(_, _, _, _, _, _, _, _, _, _, _) | .CheckWorkspace(_, _, _, _, _, _, _, _, _) | .CheckPrelude(_, _, _, _, _, _) | .CheckCore(_, _, _, _, _) | .Build(_, _, _, _, _, _, _, _, _, _, _) | .BuildPackage(_, _, _, _, _, _, _, _) | .Run(_, _, _, _, _, _, _, _, _, _, _, _) | .DevWeb(_, _, _, _, _, _, _, _) | .Test(_, _, _, _, _, _) | .Emit(_, _, _, _, _, _) -> true
         else -> false
     }
 }
@@ -3206,6 +3338,7 @@ jet_cli_execute: fn(plan: &&JetCLIPlan, trace_sink: JetCLITraceSink?{None}, reco
             output = jet_cli_check_workspace(files, sources, color, quiet, threads, json, settings, profile, trace_sink)
         }
         .CheckPrelude(file, source, color, quiet, threads, json) -> output = jet_cli_compile_prelude_check(file, source, color, quiet, threads, json, trace_sink)
+        .CheckCore(core, color, quiet, threads, json) -> output = jet_cli_compile_core_check(core, color, quiet, threads, json, trace_sink)
         .Build(file, source, color, options, threads, invocation, notice, json, sbom, quiet, verbose) -> {
             jet_cli_write_notice(notice)
             output = jet_cli_compile_build(file, source, color, options, threads, invocation, json, sbom, quiet, verbose, trace_sink)

@@ -1,0 +1,22 @@
+# Docs/spec/reference/cli.md: a program check loads only the Core declarations the program
+# reaches, so a type error in a Core function nothing calls stays hidden from it. `jet check Core`
+# and a JET_KEEP_GOING check load and check every Core declaration, so both report it.
+env: NO_COLOR=1
+requires: os:unix
+fixture: check-core-uncalled.fixture
+copy: {root}/Core tree/Core
+copy: {root}/Compiler/Prelude tree/Compiler/Prelude
+concat: tree/Core/Log/Log.jet tree/Core/Log/Log.jet uncalled.txt
+step: jet check tree/app/probe.jet
+unset: JET_TOOLCHAIN_ROOT
+exit: 0
+stdout+stderr: ~ "has no problems" # the check's verdict line; the path varies with the work directory
+step: jet check tree/app/probe.jet
+unset: JET_TOOLCHAIN_ROOT
+env: JET_KEEP_GOING=1
+exit: 1
+stdout+stderr: ~ "not an Int" # the error's source line; the rest of the report names the work directory
+step: jet check tree/Core
+unset: JET_TOOLCHAIN_ROOT
+exit: 1
+stdout+stderr: ~ "not an Int" # the error's source line; the rest of the report names the work directory

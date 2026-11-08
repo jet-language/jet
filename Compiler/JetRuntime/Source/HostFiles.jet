@@ -337,7 +337,12 @@ fd_operation: fn(state: I64, syscall: I64, a2: I64, a3: I64, errno: I64) {
         fd_unlock(state)
         return
     }
-    if (fd_word(state, I64{16}) == I64{0}) { _ := fd_flush_locked(state) }
+    // A descriptor dropped without an explicit close still frees its poller
+    // node here, before this state's address can be reused.
+    if (fd_word(state, I64{16}) == I64{0}) {
+        _ := fd_flush_locked(state)
+        _ := net_fd_closed(state)
+    }
     // A logically closed socket may still own its number while pollers retain
     // the carrier. Their final release closes it before number reuse is possible.
     if (fd_word(state, I64{8}) >= I64{0}) {

@@ -1524,7 +1524,12 @@ walk_validate: fn(context: Int, directory: Int, root: String) IOError! -[FS]> {
     Ok(())
 }
 
-walk_batch: fn(context: Int, directory: Int, depth: Int, root: String, ignore: String?, files_only: Bool) -[FS]> (entries: [WalkEntry], children: [Int]) IOError! {
+// One directory of a walk: its kept entries sorted by path, and its child
+// directories sorted by subtree key, the child's path and a separator. Every
+// path below a child starts with its key, and no sibling's path does, so a
+// walk that descends into each child where its key falls among the entries
+// yields every path in order without sorting the whole tree.
+__walk_batch: fn(context: Int, directory: Int, depth: Int, root: String, ignore: String?, files_only: Bool) -[FS]> (entries: [WalkEntry], children: [(key: String, directory: Int)]) IOError! {
     walk_validate(context, directory, root)
     if ignore != None {
         rules: core.files.__walk_rules(context, directory, ignore)
@@ -1533,7 +1538,7 @@ walk_batch: fn(context: Int, directory: Int, depth: Int, root: String, ignore: S
     opened: core.files.__walk_read_dir(context, directory)
     if opened.cause != None -> return Err(walk_error(.Read, opened.kind, opened.code, opened.cause, root))
     entries := [WalkEntry]{}
-    children := [Int]{}
+    children := [(key: String, directory: Int)]{}
     loop {
         entry: core.files.__walk_next(context, directory)
         if entry.cause != None -> return Err(walk_error(.Read, entry.kind, entry.code, entry.cause, root))
@@ -1548,10 +1553,37 @@ walk_batch: fn(context: Int, directory: Int, depth: Int, root: String, ignore: S
         }
         if entry.directory {
             if ignore != None -> core.files.__walk_inherit(context, entry.child, directory)
-            children.push(entry.child)
+            // The walk joins a child's name to its directory with `/`.
+            children.push((key: "{entry.path}/", directory: entry.child))
         }
     }
+    entries.sort_by((left: WalkEntry, right: WalkEntry) -> left.path <=> right.path)
+    children.sort_by((left: (key: String, directory: Int), right: (key: String, directory: Int)) -> left.key <=> right.key)
     Ok((entries: entries, children: children))
+}
+
+// Walk `directory` and everything below it into `out` in path order, depth
+// first. A directory that can't be read adds its error to `failed` and leaves
+// its subtree out; the walk goes on, so the error reported is the first in
+// walk order wherever it was met.
+__walk_tree: fn(context: Int, directory: Int, depth: Int, root: String, ignore: String?, files_only: Bool, out: &[WalkEntry], failed: &[(directory: Int, error: IOError)]) -[FS]> {
+    if __walk_batch(context, directory, depth, root, ignore, files_only) == {
+        .Ok(batch) -> {
+            child := 0
+            loop entry in batch.entries {
+                loop child < batch.children.len() && batch.children[child].key < entry.path {
+                    __walk_tree(context, batch.children[child].directory, depth + 1, root, ignore, files_only, out, failed)
+                    child += 1
+                }
+                out.push(entry)
+            }
+            loop child < batch.children.len() {
+                __walk_tree(context, batch.children[child].directory, depth + 1, root, ignore, files_only, out, failed)
+                child += 1
+            }
+        }
+        .Err(error) -> failed.push((directory: directory, error: error))
+    }
 }
 
 walk_impl: fn(root: String, ignore: String?, files_only: Bool) -[FS]> [WalkEntry] IOError! {
@@ -1560,30 +1592,15 @@ walk_impl: fn(root: String, ignore: String?, files_only: Bool) -[FS]> [WalkEntry
     _guard: core.mem.scope.guard(() -> core.files.__walk_close(context))
     walk_validate(context, 0, root)
     if ignore != None -> core.files.__walk_matcher_new(context)
-    queue := [(directory: Int, depth: Int)]{(directory: 0, depth: 0)}
-    cursor := 0
     out := [WalkEntry]{}
-    first_error := IOError?{None}
-    error_directory := -1
-    loop cursor < queue.len() {
-        pending: queue[cursor]
-        cursor += 1
-        if walk_batch(context, pending.directory, pending.depth, root, ignore, files_only) == {
-            .Ok(batch) -> {
-                loop entry in batch.entries -> out.push(entry)
-                loop child in batch.children -> queue.push((directory: child, depth: pending.depth + 1))
-            }
-            .Err(error) -> {
-                if error_directory == -1 || core.files.__walk_before(context, pending.directory, error_directory) {
-                    error_directory = pending.directory
-                    first_error = Val(error)
-                }
-            }
-        }
+    failed := [(directory: Int, error: IOError)]{}
+    __walk_tree(context, 0, 0, root, ignore, files_only, out, failed)
+    if failed.len() == 0 -> return Ok(out)
+    first := 0
+    loop index in 1..<failed.len() {
+        if core.files.__walk_before(context, failed[index].directory, failed[first].directory) -> first = index
     }
-    if first_error.move() == .Val(error) -> return Err(error)
-    out.sort_by((left: WalkEntry, right: WalkEntry) -> left.path <=> right.path)
-    Ok(out)
+    Err(failed[first].error)
 }
 
 

@@ -8,7 +8,7 @@ use {
     perf_json: core.encoding.json
     perf_text: core.text
     core.encoding.[Dyn]
-    jet_foundation.[JetLiveSnapshot, foundation_json_integer, jet_live_bind, jet_live_decode]
+    jet_foundation.[JetLiveSnapshot, foundation_json_integer, jet_live_bind, jet_live_decode, jet_live_stat_ticks, jet_live_ticks_ns]
 }
 
 JetCLIPerfRuntimeWindow: struct { elapsed_ns: U64, cpu_ns: U64?, exit: Bool }
@@ -125,4 +125,35 @@ jet_cli_perf_live_read: fn(pid: Int) -[FS.Read, Env, Time]> JetCLIPerfLive JetCL
     now: perf_time.unix_ns() /% 1000000
     if now > live.captured_ms && now - live.captured_ms > 2000 -> return Err(jet_cli_read_error("process {pid} is not publishing a live runtime snapshot"))
     Ok(jet_cli_perf_live_from(live))
+}
+// A run's final publication, read after its process was reaped: the spawning
+// side's collector reaps a child as it exits, so /proc no longer shows it.
+// `stat` is the process's last /proc/<pid>/stat from while it lived; it binds
+// the snapshot, so an earlier process's file under a reused pid is refused.
+// `cpu_ns` is the reap's CPU (wait4's rusage: the process and the children it
+// waited for); less those children's CPU in `stat` and the run's starting
+// ticks, it is the run's CPU.
+jet_cli_perf_live_read_reaped: fn(pid: Int, stat: String, cpu_ns: Int?) -[FS.Read, Env, Time.Wait]> JetCLIPerfLive JetCLIReadError! {
+    path: perf_files.join(perf_sys.temp_dir(), "jet-observe-{pid}.json")
+    bytes: jet_cli_perf_read_private(path, 1048576)
+    live := jet_live_decode(bytes) ?? return Err(jet_cli_read_error(err.message))
+    if live.pid != pid -> return Err(jet_cli_read_error("live snapshot does not belong to process {pid}"))
+    if !live.runtime.exit -> return Err(jet_cli_read_error("process {pid} exited before its final runtime snapshot"))
+    jet_live_bind(live, stat) ?? return Err(jet_cli_read_error(err.message))
+    parts: stat.split(") ").to_list()
+    live.runtime.cpu_ns = if cpu_ns == .Val(spent) -> jet_cli_perf_reaped_cpu(jet_cli_find_words(parts[parts.len() - 1]), live, spent) else -> None
+    Ok(jet_cli_perf_live_from(live))
+}
+// The run's CPU from the reap's `spent` ns: less the waited-for children's
+// ticks (cutime and cstime, fields 16 and 17) and the run's starting ticks.
+jet_cli_perf_reaped_cpu: fn(fields: [String], live: JetLiveSnapshot, spent: Int) -> Int? Never! {
+    if spent < 0 || fields.len() <= 14 -> return None
+    child_user: jet_live_stat_ticks(fields[13]) ?? return None
+    child_system: jet_live_stat_ticks(fields[14]) ?? return None
+    if (child_user > U64{18446744073709551615} - child_system) -> return None
+    children: jet_live_ticks_ns(child_user + child_system, live.clock_hz) ?? return None
+    started: jet_live_ticks_ns(live.start_ticks, live.clock_hz) ?? return None
+    total: U64.from_int(spent) ?? return None
+    rest: if total < children -> U64{0} else -> total - children
+    Val(Int.from_u64(if rest < started -> U64{0} else -> rest - started))
 }

@@ -58,7 +58,7 @@ x64_comptime_spawn: fn(image: [U8], stdout: Bool, budget: Int) -> X64ComptimeChi
     spawned := X64Spawned{pid: -1, failure: loaded.failure}
     if loaded.failure == "" {
         // No parent_death: the compile's child may outlive the worker thread that spawned it; it ends when its command pipe closes.
-        launch: X64Launch{argv: [String]{"jet-comptime"}, env: Val([String]{}), executable: "", name: "jet-comptime", relaunch: [String]{}, parent_death: false}
+        launch: X64Launch{argv: [String]{"jet-comptime"}, env: Val([String]{}), executable: "", name: "jet-comptime", relaunch: [String]{}, parent_death: false, read_scope: [String]{}}
         // The child's standard input stays the compiler's; its filter refuses reading it.
         spawned = x64_image_spawn(loaded, launch, [Int]{-1, pipes[5], pipes[7], pipes[0], pipes[3]})
         x64_image_unload(loaded)

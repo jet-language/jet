@@ -48,8 +48,8 @@ static void expect(IP *ip, const char *expected) {
     assert(text->length == (int64_t)strlen(expected));
     assert(memcmp(text->data, expected, (size_t)text->length) == 0);
     assert(memcmp(ip, &saved, sizeof saved) == 0);
-    watch((char *)(text)-8, 40, 8);
-    if (text->capacity) watch(text->data, text->capacity, 1);
+    watch((char *)(text)-8, 104, 8);
+    if((const char *)text->data!=(const char *)text+32) watch(text->data, text->capacity, 1);
     unsigned before = intercepted;
     jet_rt_string_drop(text);
     done(before);

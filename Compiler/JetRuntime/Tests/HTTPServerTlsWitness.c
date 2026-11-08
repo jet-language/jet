@@ -26,7 +26,7 @@ static void observe_free(void *p,int64_t n,int64_t a) {
 static void watch(void *p,int64_t n,int64_t a) {
     assert(p && count<28); watched[count].p=p; watched[count].n=n; watched[count].a=a; watched[count++].freed=0;
 }
-static void watch_text(Text *t) { watch((char *)(t)-8,40,8); if(t->capacity) watch(t->data,t->capacity,1); }
+static void watch_text(Text *t) { watch((char *)(t)-8,104,8); if((const char *)t->data!=(const char *)t+32) watch(t->data,t->capacity,1); }
 // Heap text is [count][data,len,cap,cache]; the owner count is the word before.
 static int64_t owners(Text *t) { return *(int64_t *)((char *)t-8)&INT64_C(0x3fffffffffffffff); }
 static void watch_tls(Tls *t) { watch(t,16,8); watch_text(t->cert); watch_text(t->key); }

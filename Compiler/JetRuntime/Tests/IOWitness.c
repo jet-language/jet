@@ -80,8 +80,8 @@ static void observe_free(void *ptr,int64_t size,int64_t align) {
 }
 static void text_watch(Text *text) {
     if(!text) return;
-    watch((char *)(text)-8,40,8);
-    if(text->capacity) watch(text->data,text->capacity,1);
+    watch((char *)(text)-8,104,8);
+    if((const char *)text->data!=(const char *)text+32) watch(text->data,text->capacity,1);
 }
 static void context_watch(Context *c) { watch(c,40,8); text_watch(c->resource); text_watch(c->cause); }
 static void error_watch(Error *e,bool children) { watch(e,56,8); if(children) { text_watch(e->resource); text_watch(e->cause); } }

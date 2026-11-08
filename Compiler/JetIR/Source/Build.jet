@@ -199,6 +199,10 @@ IRBuilder: struct {
     // (BuildMaps.jet ir_map_update): a `get` of that map and key in the value
     // answers from the entry it found.
     probe: IRMapProbe?{None}
+    // The `Let` of a Map group update being built (BuildMaps.jet
+    // ir_map_take_fuses; -1: none): its `get` takes the entry's value out of
+    // the map (ir_map_take).
+    map_take: Int{-1}
 }
 
 // One failure of a body: its message and the span it names.
@@ -258,6 +262,13 @@ IRChecks: struct {
     // jet_rt_alloc_check_link, so the link keeps the runtime's checked heap
     // (ir_checked_alloc_link).
     checked_alloc: Bool{false}
+    // `jet run --observe`: the entry calls jet_rt_observe_link, so the link
+    // keeps the runtime's observation start (ir_observe_link).
+    observe: Bool{false}
+    // The entry package's `log:` field and `jet run --log`: the level
+    // filters the entry passes to the runtime (ir_log_configure).
+    log_package: String{""}
+    log_flag: String{""}
 }
 
 // An argv-selectable job: the checked function `key` that the program word
@@ -1218,10 +1229,12 @@ IR_STARTUP_FUNCTION_PREFIX: "__startup_"
 // The function the executable starts: `entry` itself when it takes nothing,
 // returns nothing, the program computes no constant at startup, the
 // `backtrace` build option is the stock `full`, the program allocator the
-// system heap, no job is selectable and the build is not checked, otherwise
-// a generated `entry` function. It first links a checked build's checked
-// heap (ir_checked_alloc_link), passes a `brief` or `off` backtrace to the
-// runtime (jet_rt_fault_backtrace, the IRBacktrace word) and a counting
+// system heap, no job is selectable, the build is neither checked nor
+// observed and sets no log filter, otherwise a generated `entry` function.
+// It first links a checked build's checked heap (ir_checked_alloc_link) and
+// an observed build's observation start (ir_observe_link), passes the log
+// filters (ir_log_configure), a `brief` or `off` backtrace to
+// the runtime (jet_rt_fault_backtrace, the IRBacktrace word) and a counting
 // program allocator's cap (jet_rt_program_allocator_configure,
 // IRChecks.counting), computes every constant computed at startup
 // (p.startup, through ir_startup_guard), then runs the job the program's
@@ -1230,7 +1243,7 @@ IR_STARTUP_FUNCTION_PREFIX: "__startup_"
 // ir_entry_unknown_job) or else runs `entry`, through ir_entry_call.
 ir_entry_function: fn(m: &IRModule, p: IRProgram, entry: Int, failures: &[IRBuildFailure]) -> Int Never! {
     row: m.functions[entry].result
-    if m.functions[entry].param_count > 0 || (row < 0 && p.startup.len() == 0 && p.checks.backtrace == .Full && p.checks.counting == None && p.checks.jobs.len() == 0 && !p.checks.checked_alloc) -> return entry
+    if m.functions[entry].param_count > 0 || (row < 0 && p.startup.len() == 0 && p.checks.backtrace == .Full && p.checks.counting == None && p.checks.jobs.len() == 0 && !p.checks.checked_alloc && !p.checks.observe && p.checks.log_package == "" && p.checks.log_flag == "") -> return entry
     ty: if row >= 0 -> m.types[row].ty.copy() else -> Type.Named{name: "Unit"}
     key: "{m.functions[entry].key}#entry"
     id: m.functions.len()
@@ -1240,6 +1253,8 @@ ir_entry_function: fn(m: &IRModule, p: IRProgram, entry: Int, failures: &[IRBuil
     b.line = m.functions[entry].line
     span: Span{start: 0, end: 0}
     ir_checked_alloc_link(m, p, b)
+    ir_observe_link(m, p, b)
+    ir_log_configure(m, p, b)
     if p.checks.backtrace != .Full {
         mode: if p.checks.backtrace == .Brief -> 1 else -> 2
         word: ir_word_const(m, b, mode)
@@ -1287,6 +1302,29 @@ ir_checked_alloc_link: fn(m: &IRModule, p: IRProgram, b: &IRBuilder) Never! {
     if !p.checks.checked_alloc -> return
     word: ir_word_row(m)
     _: ir_runtime(m, b, "jet_rt_alloc_check_link", [Int]{}, word)
+}
+
+// A `jet run --observe` build's entry first calls jet_rt_observe_link: the
+// call keeps the runtime's observation start in the link, so a program with
+// no task, channel, live value or event still publishes its run (JetRuntime
+// ObserveLive.jet jet_rt_observe_start_init).
+ir_observe_link: fn(m: &IRModule, p: IRProgram, b: &IRBuilder) Never! {
+    if !p.checks.observe -> return
+    word: ir_word_row(m)
+    _: ir_runtime(m, b, "jet_rt_observe_link", [Int]{}, word)
+}
+
+// An entry package with a `log:` field, or a `jet run --log` build, passes
+// both level filters to the runtime first (JetRuntime RouteALog.jet
+// jet_rt_log_configure), which takes the two texts.
+ir_log_configure: fn(m: &IRModule, p: IRProgram, b: &IRBuilder) Never! {
+    if p.checks.log_package == "" && p.checks.log_flag == "" -> return
+    string_row: ir_string_row(m)
+    package_args: ir_static_text(m, b, p.checks.log_package)
+    package: ir_runtime(m, b, "jet_rt_string_from_static", package_args, string_row)
+    flag_args: ir_static_text(m, b, p.checks.log_flag)
+    flag: ir_runtime(m, b, "jet_rt_string_from_static", flag_args, string_row)
+    _: ir_runtime(m, b, "jet_rt_log_configure", [Int]{package, flag}, -1)
 }
 
 // The branch of the entry function that runs `job` when the program's first

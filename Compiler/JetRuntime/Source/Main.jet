@@ -230,11 +230,16 @@ rt_main_stopped_address: fn() -> I64 {
     // Exactly once, after TLS/registry initialization and before
     // the checked no-argument entry. Object main must not start Observe itself.
     // The start is a code word: only a program that links something to observe
-    // (a task, a channel, a live value or an event) has it installed
-    // (ObserveLive.jet jet_rt_observe_start_init); any other program links no
-    // observation writer, and JET_OBSERVE=1 has nothing to publish there.
+    // (a task, a channel, a live value or an event) or is built by
+    // `jet run --observe` has it installed (ObserveLive.jet
+    // jet_rt_observe_start_init); any other program links no observation
+    // writer, and JET_OBSERVE=1 has nothing to publish there.
     observe: observe_start_code
     if (observe != I64{0}) -> _ := coll_call1(observe, I64{0})
+    // The log start (RouteALog.jet jet_rt_log_state_init) is installed only
+    // in a program that links the log cells: it checks JET_LOG.
+    log_start: log_start_code
+    if (log_start != I64{0}) -> _ := coll_call1(log_start, I64{0})
     // The entry runs under the process root control: a stop (a panic, a
     // numeric stop, process.exit, os.stop) is published there and every
     // generated frame leaves by its stop edge, running its closes, drops

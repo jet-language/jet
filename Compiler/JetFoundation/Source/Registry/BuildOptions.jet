@@ -183,7 +183,10 @@ BuildSettingOverride: struct {
 // non-stock value in layer order, so a `build: fn` layer can still go under the
 // flags; `values` is the resolved value of each row, in table order.
 // `settings` are the `--set` writers in argv order; `gates` the audited gates
-// `--gate name=allow` opens for the compile, in argv order.
+// `--gate name=allow` opens for the compile, in argv order. `observe` is
+// `jet run --observe`: the program links the runtime's observation start and
+// runs with JET_OBSERVE=1. `log` is the `--log` level filter of `jet run` and
+// `jet dev`, checked (log_filter_bad_pair); "" when none is given.
 BuildOptions: struct {
     command: String
     profile: String
@@ -191,6 +194,46 @@ BuildOptions: struct {
     values: [BuildOptionChoice]
     settings: [BuildSettingOverride]{[BuildSettingOverride]{}}
     gates: [PolicyKey]{[PolicyKey]{}}
+    observe: Bool{false}
+    log: String{""}
+}
+
+// The first pair of a core.log level filter (the package's `log:` field,
+// `--log`, JET_LOG) that is not `level` or `module=level`, trimmed; None
+// when every pair is. A level is debug, info, warn, error, critical or
+// fatal; a module is identifier segments joined by `.`; empty pairs are
+// skipped.
+log_filter_bad_pair: fn(text: String) -> String? {
+    loop raw in text.split(",") {
+        pair: raw.trim()
+        if pair == "" -> next
+        parts: pair.split("=").to_list()
+        valid: if parts.len() == 1 -> log_filter_level(pair) else -> parts.len() == 2 && log_filter_module(parts[0].trim()) && log_filter_level(parts[1].trim())
+        if !valid -> return Val(pair)
+    }
+    None
+}
+
+// The fix line of every report of a bad level filter pair.
+LOG_FILTER_FIX: "write `level` or `module=level`, where level is debug, info, warn, error, critical or fatal"
+
+log_filter_level: fn(name: String) -> Bool Never! {
+    name == "debug" || name == "info" || name == "warn" || name == "error" || name == "critical" || name == "fatal"
+}
+
+log_filter_module: fn(path: String) -> Bool Never! {
+    if path == "" -> return false
+    loop segment in path.split(".") {
+        bytes: segment.bytes()
+        if bytes.len() == 0 -> return false
+        loop (index, byte) in bytes {
+            n: Int.from_u8(byte)
+            letter: (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || n == 95
+            digit: n >= 48 && n <= 57
+            if !letter && !(digit && index > 0) -> return false
+        }
+    }
+    true
 }
 
 BuildOptionsResolved: enum {
@@ -360,13 +403,16 @@ JET_BUILD_OPTIONS_UNKEYED: [String]{"output_dir", "action_timeout"}
 JET_BUILD_DEFAULT_PROFILE: "dev"
 
 // The options' identity in a cache key: the profile, then each resolved row
-// that shapes the image, then each `--set` setting value.
+// that shapes the image, then each `--set` setting value, then `observe`
+// and `log`.
 build_options_key: fn(options: BuildOptions) -> String Never! {
     out := if options.profile == "" -> JET_BUILD_DEFAULT_PROFILE else -> options.profile
     loop choice in options.values {
         if !JET_BUILD_OPTIONS_UNKEYED.contains(choice.name) -> out = "{out};{choice.name}={choice.value}"
     }
     loop setting in options.settings -> out = "{out};set.{setting.name}={setting.value}"
+    if options.observe -> out = "{out};observe"
+    if options.log != "" -> out = "{out};log={options.log}"
     out
 }
 

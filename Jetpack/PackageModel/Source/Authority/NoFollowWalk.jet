@@ -74,6 +74,20 @@ pkg_authority_read_sorted_entries: fn(directory: Directory, path: String, budget
     Ok(entries)
 }
 
+// The Jet source names directly in the held `directory` (displayed as `path`),
+// sorted. Each entry counts against `budget`; none is stat'ed here, because
+// the caller opens every returned name with its own checked no-follow read.
+pkg_authority_sorted_source_names: fn(directory: Directory, path: String, budget: &AuthorityWalkBudget) -[FS]> [String] AuthorityError! {
+    listed: directory.list() ?? return Err(AuthorityError.IO{path: path, operation: "read", detail: "{err}"})
+    names := [String]{}
+    loop entry in listed {
+        budget.note_entry(path)
+        if pkg_authority_extension(entry.name) == Val(FILE_EXT) -> names.push(entry.name)
+    }
+    names.sort()
+    Ok(names)
+}
+
 // Whether `root` directly holds Jet source, the only directories that may
 // become authority roots during upward discovery.
 pkg_authority_has_candidate: fn(root: String) -[FS, Env]> Bool AuthorityError! {

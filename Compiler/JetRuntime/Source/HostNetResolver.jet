@@ -52,6 +52,37 @@ net_resolver_job_drop: fn(job: I64) {
     sync_park_drop(net_word(job, I64{72}))
     jet_rt_free(job, I64{136}, I64{8})
 }
+// addrinfo48: flags0/family4/socktype8/protocol12/addrlen16, ai_addr24,
+// canonname32, next40. Only AF_INET/AF_INET6 survive Rust's sockaddr
+// conversion; never sort or dedupe valid answers.
+net_resolve_usable: fn(cursor: I64) -> Bool {
+    family: net_load_uint(wrapping(cursor + I64{4}), I64{4})
+    length: net_load_uint(wrapping(cursor + I64{16}), I64{4})
+    (family == I64{2} && length >= I64{16}) || (family == I64{10} && length >= I64{28})
+}
+net_resolve_count: fn(answers: I64) -> I64 {
+    count := I64{0}
+    cursor := answers
+    loop cursor != (I64{0}) {
+        if net_resolve_usable(cursor) -> count = count + I64{1}
+        cursor = net_word(cursor, I64{40})
+    }
+    count
+}
+// Copies the usable answers in order into `rows` (count*56) with `port`.
+net_resolve_fill: fn(answers: I64, port: I64, rows: I64) {
+    cursor := answers
+    at := I64{0}
+    loop cursor != (I64{0}) {
+        if net_resolve_usable(cursor) {
+            row: wrapping(rows + at * I64{56})
+            if !net_socket_decode(net_word(cursor, I64{24}), net_load_uint(wrapping(cursor + I64{16}), I64{4}), row) -> host_record_index_refused()
+            net_put(row, I64{24}, port)
+            at = at + I64{1}
+        }
+        cursor = net_word(cursor, I64{40})
+    }
+}
 #Export(c) jet_rt_net_resolver_worker: fn(job: I64) -> I64 {
     status: net_i32(net_getaddrinfo(net_word(job, I64{24}), I64{0}, wrapping(job + I64{80}), wrapping(job + I64{128})))
     error := I64{0}
@@ -59,30 +90,9 @@ net_resolver_job_drop: fn(job: I64) {
     count := I64{0}
     answers: net_word(job, I64{128})
     if (status != I64{0}) { error = net_gai_error(status) } else {
-        cursor := answers
-        // addrinfo48: flags0/family4/socktype8/protocol12/addrlen16,
-        // ai_addr24, canonname32, next40. Only AF_INET/AF_INET6 survive
-        // Rust's sockaddr conversion; never sort or dedupe valid answers.
-        loop cursor != (I64{0}) {
-            family: net_load_uint(wrapping(cursor + I64{4}), I64{4})
-            length: net_load_uint(wrapping(cursor + I64{16}), I64{4})
-            if ((family == I64{2} && length >= I64{16}) || (family == I64{10} && length >= I64{28})) -> count = count + I64{1}
-            cursor = net_word(cursor, I64{40})
-        }
+        count = net_resolve_count(answers)
         if (count != I64{0}) -> rows = jet_rt_alloc(count * I64{56}, I64{8})
-        cursor = answers
-        at := I64{0}
-        loop cursor != (I64{0}) {
-            family: net_load_uint(wrapping(cursor + I64{4}), I64{4})
-            length: net_load_uint(wrapping(cursor + I64{16}), I64{4})
-            if ((family == I64{2} && length >= I64{16}) || (family == I64{10} && length >= I64{28})) {
-                row: wrapping(rows + at * I64{56})
-                if !net_socket_decode(net_word(cursor, I64{24}), length, row) -> host_record_index_refused()
-                net_put(row, I64{24}, net_word(job, I64{40}))
-                at = at + I64{1}
-            }
-            cursor = net_word(cursor, I64{40})
-        }
+        net_resolve_fill(answers, net_word(job, I64{40}), rows)
     }
     // libc owns the answer chain even if copying produced no usable answers.
     if (answers != I64{0}) -> net_freeaddrinfo(answers)
@@ -95,6 +105,49 @@ net_resolver_job_drop: fn(job: I64) {
     sync_mutex_unlock(wrapping(job + I64{8}))
     net_resolver_job_drop(job)
     I64{0}
+}
+// An IP literal needs no lookup. inet_pton accepts exactly the strict IPv4
+// dotted quad and the scope-free IPv6 text, and getaddrinfo would answer each
+// with that one address, so these forms build their row directly instead of
+// paying libc's per-call allocation. Other numeric forms (inet_aton
+// shorthand, a scoped IPv6 address) still take getaddrinfo with
+// AI_NUMERICHOST (4) and SOCK_STREAM, which answers them on the caller's
+// thread without blocking. Neither path spawns a resolver worker. False for
+// any other host, which the worker resolves (and reports) as before.
+// Scratch: hints0..47, addrinfo* 48.
+net_resolve_numeric: fn(name: I64, port: I64, rows_out: I64, length_out: I64) -> Bool {
+    row: jet_rt_alloc(I64{56}, I64{8})
+    thread_zero(row, I64{56})
+    family := I64{0}
+    if (net_i32(net_route_inet_pton(I64{2}, name, wrapping(row + I64{8}))) == I64{1}) {
+        family = I64{4}
+    } else if (net_i32(net_route_inet_pton(I64{10}, name, wrapping(row + I64{8}))) == I64{1}) {
+        family = I64{6}
+    }
+    if (family != I64{0}) {
+        net_put(row, I64{0}, family)
+        net_put(row, I64{24}, port)
+        net_put(rows_out, I64{0}, row)
+        net_put(length_out, I64{0}, I64{1})
+        return true
+    }
+    jet_rt_free(row, I64{56}, I64{8})
+    scratch: jet_rt_alloc(I64{56}, I64{8})
+    thread_zero(scratch, I64{56})
+    net_store_uint(scratch, I64{4}, I64{4})
+    net_store_uint(wrapping(scratch + I64{8}), I64{4}, I64{1})
+    status: net_i32(net_getaddrinfo(name, I64{0}, scratch, wrapping(scratch + I64{48})))
+    answers: net_word(scratch, I64{48})
+    jet_rt_free(scratch, I64{56}, I64{8})
+    if (status != I64{0}) -> return false
+    count: net_resolve_count(answers)
+    rows := I64{0}
+    if (count != I64{0}) -> rows = jet_rt_alloc(count * I64{56}, I64{8})
+    net_resolve_fill(answers, port, rows)
+    if (answers != I64{0}) -> net_freeaddrinfo(answers)
+    net_put(rows_out, I64{0}, rows)
+    net_put(length_out, I64{0}, count)
+    true
 }
 // The ordered answers as one owned buffer of inline Socket56 rows (count*56),
 // the shape the worker publishes; `jet_http_build_resolve` reads it directly.
@@ -119,12 +172,17 @@ net_resolve_rows: fn(host: I64, port: I64, rows_out: I64, length_out: I64, error
         jet_rt_string_drop(wait_kind)
         return I64{0}
     }
-    job: jet_rt_alloc(I64{136}, I64{8})
-    thread_zero(job, I64{136})
-    net_put(job, I64{0}, I64{2})
     name: jet_rt_alloc(length + I64{1}, I64{1})
     rt_text_bytes_copy(name, rt_text_data(host), length)
     #Unsafe("name owns a trailing NUL byte") { os_store_u8(wrapping(name + length), I64{0}) }
+    if net_resolve_numeric(name, port.bit_and(I64{65535}), rows_out, length_out) {
+        jet_rt_free(name, length + I64{1}, I64{1})
+        jet_rt_string_drop(wait_kind)
+        return I64{1}
+    }
+    job: jet_rt_alloc(I64{136}, I64{8})
+    thread_zero(job, I64{136})
+    net_put(job, I64{0}, I64{2})
     net_put(job, I64{24}, name)
     net_put(job, I64{32}, length)
     net_put(job, I64{40}, port.bit_and(I64{65535}))

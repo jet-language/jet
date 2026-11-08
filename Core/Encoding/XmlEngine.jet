@@ -189,7 +189,7 @@ scalar_count: fn(bytes: View<U8>, end: Int) -> Int Never! {
     Entity(name: String, resolved: String?, raw: String)
 }
  Attribute: struct {  name: Name,  parts: [Part],  normalized: String?,  quote: String,  raw: String }
- Event: enum {
+ ScanEvent: enum {
     DocumentStart
     Declaration(version: String, encoding: String?, standalone: Bool?, raw: String)
     DocumentWhitespace(value: String, raw: String)
@@ -2003,7 +2003,7 @@ unit_prefix: fn(units: View<DecodedUnit>, start: Int, needle: String) -> Bool Ne
     }
     true
 }
-StreamEvent: struct { event: Event, raw_bytes: [U8], encoding: WireEncoding, bom: [U8] }
+StreamEvent: struct { event: ScanEvent, raw_bytes: [U8], encoding: WireEncoding, bom: [U8] }
 StreamScanner: struct {
     lexer: ByteLexer
     options: ParseOptions
@@ -2058,7 +2058,7 @@ impl StreamScanner {
             self.started = true
             self.nodes = 1
             self.wire_consumed = self.lexer.bom().len()
-            return Val(StreamEvent{event: Event.DocumentStart, raw_bytes: [], encoding: encoding, bom: self.lexer.bom.copy()})
+            return Val(StreamEvent{event: ScanEvent.DocumentStart, raw_bytes: [], encoding: encoding, bom: self.lexer.bom.copy()})
         }
         token: if self.lexer.next_token() == {
             .Val(value) -> value.move()
@@ -2067,7 +2067,7 @@ impl StreamScanner {
                 if !self.stack.is_empty() { return Err(self.fail(XMLFault.at_kind(self.wire_consumed, Reason.Malformed, "XML document ended before closing element"))) }
                 if !self.root_seen { return Err(self.fail(XMLFault.at_kind(self.wire_consumed, Reason.Malformed, "empty XML document"))) }
                 self.ended = true
-                return Val(StreamEvent{event: Event.DocumentEnd, raw_bytes: [], encoding: encoding, bom: self.lexer.bom.copy()})
+                return Val(StreamEvent{event: ScanEvent.DocumentEnd, raw_bytes: [], encoding: encoding, bom: self.lexer.bom.copy()})
             }
             .Err(error) -> {
                 self.terminal = Val(error.copy())
@@ -2678,7 +2678,7 @@ impl Scanner {
         }
         ParsedParts{parts: parts.move(), normalized: if all -> Val(normalized) else -> None}
     }
-    open: fn(self: &Scanner) -> Event XMLFault! {
+    open: fn(self: &Scanner) -> ScanEvent XMLFault! {
         start: self.offset
         end := start + 1
         quote := U8?{None}
@@ -2773,7 +2773,7 @@ impl Scanner {
         if !empty {
             self.stack.push(Frame{name: name.copy(), namespaces: local.move()})
         } else if self.stack.is_empty() { self.root_closed = true }
-        Event.ElementStart{name: name.move(), namespaces: namespaces, attributes: attributes, empty: empty, raw: raw.move()}
+        ScanEvent.ElementStart{name: name.move(), namespaces: namespaces, attributes: attributes, empty: empty, raw: raw.move()}
     }
     charge_nodes: fn(self: &Scanner, amount: Int) XMLFault! {
         if self.nodes + amount > self.options.limits.max_nodes {
@@ -2781,7 +2781,7 @@ impl Scanner {
         }
         self.nodes += amount
     }
-    charge_event: fn(self: &Scanner, event: Event) XMLFault! {
+    charge_event: fn(self: &Scanner, event: ScanEvent) XMLFault! {
         if event == {
             .DocumentStart -> self.charge_nodes(1) ?? return Err(err)
             .DocumentEnd | .ElementEnd(_, _) -> {}
@@ -2836,29 +2836,29 @@ impl Scanner {
             }
         }
     }
-    next_inner: fn(self: &Scanner) -> Event? XMLFault! {
+    next_inner: fn(self: &Scanner) -> ScanEvent? XMLFault! {
         if self.ended { return None }
         if !self.started {
             self.started = true
-            return Val(Event.DocumentStart)
+            return Val(ScanEvent.DocumentStart)
         }
         if self.offset == self.source.len() {
             if !self.stack.is_empty() { return Err(self.fail("XML document ended before closing element")) }
             if !self.root_seen { return Err(self.fail("empty XML document")) }
             self.ended = true
-            return Val(Event.DocumentEnd)
+            return Val(ScanEvent.DocumentEnd)
         }
         if self.starts("<!--") {
             taken: self.take_until("-->", "unterminated XML comment") ?? return Err(err)
             raw: taken.raw.move()
             value: taken.body.slice(4, taken.body.len())
             if value.contains("--") { return Err(self.fail("XML comment contains --")) }
-            return Val(Event.Comment{value: value.move(), raw: raw.move()})
+            return Val(ScanEvent.Comment{value: value.move(), raw: raw.move()})
         }
         if self.starts("<![CDATA[") {
             if self.stack.is_empty() { return Err(self.fail("CDATA outside root element")) }
             taken: self.take_until("]]>", "unterminated CDATA") ?? return Err(err)
-            return Val(Event.Cdata{value: taken.body.slice(9, taken.body.len()), raw: taken.raw.move()})
+            return Val(ScanEvent.Cdata{value: taken.body.slice(9, taken.body.len()), raw: taken.raw.move()})
         }
         if self.starts("<?xml") {
             if self.declaration_seen || self.root_seen || self.offset != 0 { return Err(self.fail("XML declaration is out of order")) }
@@ -2875,7 +2875,7 @@ impl Scanner {
                 }
             }
             self.declaration_seen = true
-            return Val(Event.Declaration{version: version.move(), encoding: encoding, standalone: standalone, raw: raw.move()})
+            return Val(ScanEvent.Declaration{version: version.move(), encoding: encoding, standalone: standalone, raw: raw.move()})
         }
         if self.starts("<?") {
             taken: self.take_until("?>", "unterminated processing instruction") ?? return Err(err)
@@ -2886,7 +2886,7 @@ impl Scanner {
             target: byte_text(bytes[0..<bytes.len()], 0, split)
             if !valid_name(target) || ascii_equal(target, "xml") -> return Err(self.fail("invalid processing instruction target"))
             value: byte_text(bytes[0..<bytes.len()], split, bytes.len()).trim_start()
-            return Val(Event.ProcessingInstruction{target: target.move(), value: value, raw: raw.move()})
+            return Val(ScanEvent.ProcessingInstruction{target: target.move(), value: value, raw: raw.move()})
         }
         if self.starts("<!DOCTYPE") {
             if self.doctype_seen || self.root_seen { return Err(self.fail("DOCTYPE is out of order")) }
@@ -2934,7 +2934,7 @@ impl Scanner {
             loop entity_name in ordered -> self.check_name(entity_name, "entity name") ?? return Err(err)
             self.declared_entities = declared_entities.move()
             self.doctype_seen = true
-            return Val(Event.Doctype{name: name.move(), public_id: public_id, system_id: system_id, internal_subset: internal_subset, raw: raw.move()})
+            return Val(ScanEvent.Doctype{name: name.move(), public_id: public_id, system_id: system_id, internal_subset: internal_subset, raw: raw.move()})
         }
         if self.starts("</") {
             start: self.offset
@@ -2950,7 +2950,7 @@ impl Scanner {
             self.offset = start + rel + 1
             _: self.stack.pop()
             if self.stack.is_empty() { self.root_closed = true }
-            return Val(Event.ElementEnd{name: name.move(), raw: byte_text(self.source[0..<self.source.len()], start, self.offset)})
+            return Val(ScanEvent.ElementEnd{name: name.move(), raw: byte_text(self.source[0..<self.source.len()], start, self.offset)})
         }
         if self.starts("<") {
             if self.root_closed { return Err(self.fail("multiple XML root elements")) }
@@ -2960,7 +2960,7 @@ impl Scanner {
         if self.starts("&") {
             if self.stack.is_empty() { return Err(self.fail("entity reference outside root element")) }
             reference: self.reference() ?? return Err(err)
-            return Val(Event.EntityRef{name: reference.name.move(), resolved: reference.resolved.move(), raw: reference.raw.move()})
+            return Val(ScanEvent.EntityRef{name: reference.name.move(), resolved: reference.resolved.move(), raw: reference.raw.move()})
         }
         start: self.offset
         rel := 0
@@ -2972,13 +2972,13 @@ impl Scanner {
             if !raw.bytes().all(character -> character == (U8{32}) || character == (U8{9}) || character == (U8{13}) || character == (U8{10})) {
                 return Err(self.fail("character data outside root element"))
             }
-            Val(Event.DocumentWhitespace{value: raw.copy(), raw: raw.move()})
+            Val(ScanEvent.DocumentWhitespace{value: raw.copy(), raw: raw.move()})
         } else -> {
             if raw.contains("]]>") { return Err(self.fail("character data contains forbidden ]]>")) }
-            Val(Event.Text{value: raw.copy(), raw: raw.move()})
+            Val(ScanEvent.Text{value: raw.copy(), raw: raw.move()})
         }
     }
-     next: fn(self: &Scanner) -> Event? XMLFault! {
+     next: fn(self: &Scanner) -> ScanEvent? XMLFault! {
         value: if self.next_inner() == {
             .Val(event) -> event.move()
             .None -> { return None }

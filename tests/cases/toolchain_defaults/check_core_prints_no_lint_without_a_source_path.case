@@ -1,0 +1,9 @@
+# Docs/spec/reference/cli.md: `jet check Core` reports no lint in Core source, nor one in a codec body
+# the compiler generates for a Core type. The every-body check demands core.db's DBError codec, whose
+# body grows a list in a loop of a core.mem module; its lint is Core's own, so a clean Core prints
+# only the verdict. Unlocated, that lint printed here against the check's scratch entry.
+env: NO_COLOR=1
+step: jet check {root}/Core
+exit: 0
+stdout+stderr: ~ "has no problems" # the verdict line; the path varies with the checkout
+stdout+stderr: !~ "Warning" # no lint without a real source path

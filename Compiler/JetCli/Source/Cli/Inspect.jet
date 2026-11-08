@@ -225,7 +225,10 @@ jet_cli_inspect_run: fn(request: JetCLIInspectRequest, color: Bool, json: Bool, 
             return JetCLIPlan.Inspect{job: JetCLIInspectJob{action: "structure", file: file, subject: None, json: json, color: color, threads: threads, notice: notice, project: project}}
         }
         "claims" -> return jet_cli_with_notices([String]{notice}, jet_cli_inspect_claims_manifest(file, json, color))
-        "build" -> return JetCLIPlan.Inspect{job: JetCLIInspectJob{action: "graph", file: file, subject: None, json: json, color: color, threads: threads, notice: notice, project: project}}
+        "build" -> {
+            if request.options.contains("--times") -> return jet_cli_with_notices([String]{notice}, jet_cli_inspect_build_times(file, json, color))
+            return JetCLIPlan.Inspect{job: JetCLIInspectJob{action: "graph", file: file, subject: None, json: json, color: color, threads: threads, notice: notice, project: project}}
+        }
         // Gates arm: `run` over the resolved entry followed by the plane flags
         // (filters and invocation writers).
         "gates" -> {

@@ -1,0 +1,19 @@
+build: fn(b: Build) -[Exec, FS]> {
+    #Impure("run the dependency's generator") {
+    // `jet run gen.jet -- --in=answer.txt --out=answer.out`, where gen.jet
+    // and answer.txt are files of the package `words` package.jet lists;
+    // `app` builds after the step.
+    words: b.dependency("words")
+    answer: b.run("answer", b.jet(), ["Exec", "FS"])
+    answer.arg("run")
+    answer.arg("--allow=FS")
+    answer.file(words.file("gen.jet"))
+    answer.arg("--")
+    answer.file(words.file("answer.txt"), flag: "--in=")
+    answer.output("answer.out", flag: "--out=")
+    answer.timeout(10min)
+    app: b.add_executable("app", ["main.jet"], [answer])
+    b.default(app)
+    }
+}
+run: fn() {}

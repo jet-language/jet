@@ -113,7 +113,7 @@ AuthorityResolver: struct {
         loop {
             chunk: handle.read(AUTHORITY_READ_CHUNK) ?? return Err(AuthorityError.IO{path: full, operation: "read", detail: "{err}"})
             if chunk.len() == 0 -> break
-            loop byte in chunk -> bytes.push(byte)
+            bytes.extend(chunk)
             if bytes.len() > PKG_MAX_TREE_FILE_BYTES {
                 return Err(pkg_authority_limit_error(full, "authority file exceeds the {PKG_MAX_TREE_FILE_BYTES}-byte read bound"))
             }
@@ -331,22 +331,21 @@ AuthorityResolver: struct {
             }
         }
         budget := AuthorityWalkBudget.new()
-        entries: pkg_authority_read_sorted_entries(self.root_handle, self.root, budget)
+        names: pkg_authority_sorted_source_names(self.root_handle, self.root, budget)
         indexes := [WorkspaceSource]{}
         authorities := [WorkspaceSource]{}
         malformed_canonical := false
-        loop entry in entries {
-            if pkg_authority_extension(entry.name) != Val(FILE_EXT) -> next
-            file: self.checked_file(entry.name)
+        loop name in names {
+            file: self.checked_file(name)
             budget.record_file(file.path, file.bytes.len())
             source: file.text()
             if pkg_declares_workspace_module(cache, source) {
-                role: if entry.name == WORKSPACE_FILE || pkg_declares_workspace_members(cache, source) -> WorkspaceSourceRole.Index else -> WorkspaceSourceRole.Authority
+                role: if name == WORKSPACE_FILE || pkg_declares_workspace_members(cache, source) -> WorkspaceSourceRole.Index else -> WorkspaceSourceRole.Authority
                 // `file.move()` moves the checked file in; a plain read would copy its FileReader.
                 candidate: WorkspaceSource{path: file.path, source: source, role: role, checked: file.move()}
                 self.revalidate_source(candidate)
                 if role == WorkspaceSourceRole.Index -> indexes.push(candidate) else -> authorities.push(candidate)
-            } else if entry.name == WORKSPACE_FILE {
+            } else if name == WORKSPACE_FILE {
                 malformed_canonical = true
             }
         }

@@ -145,35 +145,15 @@ test_stop_assertion_take: fn() -> Bool {
 
 // Borrow text. Return false when this thread has no active test capture; the
 // host print path then writes normally. Raw stdout.write never calls this hook.
+// The capture is an owned text builder: Text.jet appends the line (a borrowed
+// view of the builder survives its growth) and its newline.
 #Export(c) jet_rt_test_capture_print: fn(text: I64) -> Bool {
     state: test_capture_state()
     if (state == I64{0}) { return false }
-    if (trap_word(state) == I64{0}) { return false }
     builder: trap_word(state)
-    old_data: trap_word(builder)
-    old_len: trap_word(wrapping(builder + I64{8}))
-    old_cap: trap_word(wrapping(builder + I64{16}))
-    source := trap_word(text)
-    length: trap_word(wrapping(text + I64{8}))
-    needed: old_len + length + I64{1}
-    destination := old_data
-    if (needed > old_cap) {
-        capacity := if (old_cap == I64{0}) -> I64{8} else -> old_cap * I64{2}
-        if (capacity < needed) { capacity = needed }
-        destination = jet_rt_alloc(capacity, I64{1})
-        test_copy_bytes(destination, old_data, old_len)
-        // A borrowed view may alias the builder. Rebase it before freeing the
-        // old buffer; the append itself starts after all existing bytes.
-        if (source >= old_data && source - old_data <= old_len && length <= old_len - (source - old_data)) {
-            source = destination + (source - old_data)
-        }
-        trap_store(builder, destination)
-        trap_store(wrapping(builder + I64{16}), capacity)
-        if (old_cap != I64{0}) { jet_rt_free(old_data, old_cap, I64{1}) }
-    }
-    test_copy_bytes(wrapping(destination + old_len), source, length)
-    trap_put(wrapping(wrapping(destination + old_len) + length), I64{10})
-    trap_store(wrapping(builder + I64{8}), needed)
+    if (builder == I64{0}) { return false }
+    rt_text_append(builder, trap_word(text), trap_word(wrapping(text + I64{8})))
+    rt_text_append_raw_word(builder, I64{10}, I64{1})
     true
 }
 

@@ -74,7 +74,7 @@ static void watch(void *pointer,int64_t bytes,int64_t align) {
     watched[watched_count].bytes=bytes;
     watched[watched_count++].align=align;
 }
-static void watch_text(Text *t) { watch((char *)(t)-8,40,8); if(t->capacity) watch(t->data,t->capacity,1); }
+static void watch_text(Text *t) { watch((char *)(t)-8,104,8); if((const char *)t->data!=(const char *)t+32) watch(t->data,t->capacity,1); }
 // Heap text is [count][data,len,cap,cache]; the owner count is the word before.
 static int64_t owners(Text *t) { return *(int64_t *)((char *)t-8)&INT64_C(0x3fffffffffffffff); }
 static void watch_cause(Cause *c) { watch(c,32,8); watch_text(c->kind); watch_text(c->message); }

@@ -768,7 +768,9 @@ JET_CLI_FORMS: comptime { [JetCLIFormSpec]{
     {form: "run --fixtures", ported: false, card: 6418, argv: [String]{"run", "--fixtures=x", "<file>"}},
     {form: "run --gc-trace", ported: false, card: 6418, argv: [String]{"run", "--gc-trace", "<file>"}},
     {form: "run --locked", ported: false, card: 6418, argv: [String]{"run", "--locked", "<file>"}},
-    {form: "run --observe", ported: false, card: 6418, argv: [String]{"run", "--observe", "<file>"}},
+    {form: "run --observe", ported: true, card: 0, argv: [String]{"run", "--observe", "<file>"}},
+    {form: "run --log", ported: true, card: 0, argv: [String]{"run", "--log=warn", "<file>"}},
+    {form: "dev --log", ported: true, card: 0, argv: [String]{"dev", "--log=warn", "<file>"}},
     {form: "run --offline", ported: false, card: 6418, argv: [String]{"run", "--offline", "<file>"}},
     {form: "run --output", ported: false, card: 6418, argv: [String]{"run", "--output=x", "<file>"}},
     {form: "run --preset", ported: false, card: 6418, argv: [String]{"run", "--preset=x", "<file>"}},
@@ -906,6 +908,7 @@ jet_cli_test_setting_text: fn(setting: TestSettingRow) -> String Never! {
 JET_CLI_FIXED_FLAGS: comptime { [JetCLIFlagSpec]{
     {long: "--live", help: "With inspect: Process id for a live plane scope"},
     {long: "--observe", help: "With run: Expose bounded live runtime facts for attachment"},
+    {long: "--log", help: "With run/dev: Set the log level filter, such as warn,shop.db=debug; above JET_LOG"},
     {long: "--raw-frames", help: "With debug: Show generated Rust frames and scopes (expert)"},
     {long: "--dap", help: "With debug: Speak the Debug Adapter Protocol over stdio"},
     {long: "--gc-trace", help: "With run/dev: Record bounded automatic GC-promotion evidence"},
@@ -976,7 +979,7 @@ JET_CLI_FIXED_FLAGS: comptime { [JetCLIFlagSpec]{
     {long: "--advisory-db", help: "With audit: Path to advisory database file"},
     {long: "--vendor-dir", help: "With vendor: Directory to copy dependencies into (default vendor/)"},
     {long: "--sbom", help: "With build: Also write an SPDX SBOM next to the binary"},
-    {long: "--verbose", help: "With build/jobs: Print the bridge steps; with check: print the status line, proof rows, and receipt notices; with run/dev/test: show advisory lints; with explain: show a syntax token's registry name and decision"},
+    {long: "--verbose", help: "With build/jobs: Print the bridge steps; with check: print the status line, proof rows, and receipt notices; with run: name the effects the program uses and show advisory lints; with dev/test: show advisory lints; with explain: show a syntax token's registry name and decision"},
     {long: "--template", help: "With new: Start from a named template: cli, ui, web, or overrides"},
     {long: "--sort", help: "With help: Order commands by use (frequency, the default), A to Z (az), or Z to A (za)"},
     {long: "--online", help: "With doctor/inspect gates: Allow network checks"},
@@ -1017,6 +1020,7 @@ JET_CLI_FIXED_FLAGS: comptime { [JetCLIFlagSpec]{
     // `jet run` delegates project environment realization
     // to Jetpack unless the caller explicitly opts out.
     {long: "--no-prepare", help: "With run: Refuse Jetpack project environment preparation"},
+    {long: "-e", help: "With run: Run CODE as the body of the program's run function, as jet -e CODE [<args>]; jet run - reads the program from standard input"},
     {long: "--pure", help: "With eval: Reject code with side effects"},
     {long: "--allow", help: "With run/build/jobs/repl/db/inspect gates: Allow comma-separated effect roots or leaves as --allow=RIGHTS"},
     {long: "--allow-all", help: "With run/build/inspect gates: Allow every effect, as --allow with every right; --deny still wins. A file starting with a #!/ line runs this way"},
@@ -1108,6 +1112,7 @@ JET_CLI_FIXED_FLAGS: comptime { [JetCLIFlagSpec]{
     {long: "--no-capture", help: "With dev: Disable automatic replay capture for this session"},
     {long: "--update", help: "With import: Merge generated Jet into an existing target"},
     {long: "--coverage", help: "With test/inspect build: Show function or diagnostic coverage"},
+    {long: "--times", help: "With inspect build: Show how long each step and target of the last build took"},
     {long: "--verify", help: "With build: Rebuild and compare one indexed receipt artifact"},
     // The emit tiers (owner-directed 2026-10-15).
     {long: "--ast", help: "With emit: Print the parsed syntax tree"},

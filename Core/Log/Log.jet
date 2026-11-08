@@ -8,17 +8,32 @@ package: {
         log: .Library{ entry: log }
     }
 }
-use core: core
+use {
+    core: core
+    internal.[code_level, covering_rank, emit, enabled_for, level_name, level_rank, module_path_valid, parse_filter, render_filter]
+}
 
 // core.log — one structured logger for the process.
 //
-// Levels are `debug`, `info`, `warn`, `error`, `critical`, `fatal`. Fields
-// are typed (`field` / `int` / `float` / `bool`); `redact` marks a key so
-// sinks must not print its value. Spans are `span` + `enter` / `close`.
-// This is not a tracing SDK; OTLP file export is the one optional bridge.
+// Levels are the typed `LogLevel`, `.Debug` through `.Fatal`. Fields are
+// typed (`field` / `int` / `float` / `bool`); `redact` marks a key so sinks
+// must not print its value. Spans are `span` + `enter` / `close`. Every
+// record's first field is `module`: the dotted module of the call
+// (SourceLocation.module). This is not a tracing SDK; OTLP file export is
+// the one optional bridge.
+//
+// The level a record must reach comes from five sources, each later one
+// above the earlier: the stock `info`, the package's `log:` field, the
+// `set_level` calls of the code, the JET_LOG environment variable and the
+// `--log` flag of `jet run` and `jet dev`. Each source is a filter of
+// comma-separated `level` and `module=level` pairs. A pair covers its module
+// and every module under it, a bare level covers every module, and for a
+// record the longest module path any source names decides; a later source
+// replaces an earlier source's pair for the same path. The compiler checks
+// the package field and the flag, and the runtime checks JET_LOG at startup.
 //
 // Filtering, sampling, JSON line layout, and redaction are Jet. The sink
-// write and the process-global level/trace cells are host.
+// write and the process-global level, filter and trace cells are host.
 LogField: struct {
     key: String
     value: String
@@ -35,31 +50,38 @@ LogSpan: struct {
     name: fn(self) -> String Never! { self.name }
 }
 
-debug: fn(message: String) Never! -[Log]> { emit("debug", message, [LogField]{}) }
+/// A record's severity, least to most severe.
+LogLevel: enum {
+    Debug
+    Info
+    Warn
+    Error
+    Critical
+    Fatal
+}
 
-info: fn(message: String) Never! -[Log]> { emit("info", message, [LogField]{}) }
+debug: fn(message: String, at: SourceLocation{$caller}) Never! -[Log]> { emit(.Debug, message, [LogField]{}, at.module) }
 
-warn: fn(message: String) Never! -[Log]> { emit("warn", message, [LogField]{}) }
+info: fn(message: String, at: SourceLocation{$caller}) Never! -[Log]> { emit(.Info, message, [LogField]{}, at.module) }
 
-error: fn(message: String) Never! -[Log]> { emit("error", message, [LogField]{}) }
+warn: fn(message: String, at: SourceLocation{$caller}) Never! -[Log]> { emit(.Warn, message, [LogField]{}, at.module) }
+
+error: fn(message: String, at: SourceLocation{$caller}) Never! -[Log]> { emit(.Error, message, [LogField]{}, at.module) }
+
 /// Emit a message at a caller-selected level.
-log: fn(level: String, message: String) Never! -[Log]> { emit(level, message, [LogField]{}) }
+log: fn(level: LogLevel, message: String, at: SourceLocation{$caller}) Never! -[Log]> { emit(level, message, [LogField]{}, at.module) }
 
-/// Python-compatible warning spelling.
-warning: fn(message: String) Never! -[Log]> { warn(message) }
+critical: fn(message: String, at: SourceLocation{$caller}) Never! -[Log]> { emit(.Critical, message, [LogField]{}, at.module) }
 
+fatal: fn(message: String, at: SourceLocation{$caller}) Never! -[Log]> { emit(.Fatal, message, [LogField]{}, at.module) }
 
-critical: fn(message: String) Never! -[Log]> { emit("critical", message, [LogField]{}) }
+debug_fields: fn(message: String, fields: [LogField], at: SourceLocation{$caller}) Never! -[Log]> { emit(.Debug, message, fields, at.module) }
 
-fatal: fn(message: String) Never! -[Log]> { emit("fatal", message, [LogField]{}) }
+info_fields: fn(message: String, fields: [LogField], at: SourceLocation{$caller}) Never! -[Log]> { emit(.Info, message, fields, at.module) }
 
-debug_fields: fn(message: String, fields: [LogField]) Never! -[Log]> { emit("debug", message, fields) }
+warn_fields: fn(message: String, fields: [LogField], at: SourceLocation{$caller}) Never! -[Log]> { emit(.Warn, message, fields, at.module) }
 
-info_fields: fn(message: String, fields: [LogField]) Never! -[Log]> { emit("info", message, fields) }
-
-warn_fields: fn(message: String, fields: [LogField]) Never! -[Log]> { emit("warn", message, fields) }
-
-error_fields: fn(message: String, fields: [LogField]) Never! -[Log]> { emit("error", message, fields) }
+error_fields: fn(message: String, fields: [LogField], at: SourceLocation{$caller}) Never! -[Log]> { emit(.Error, message, fields, at.module) }
 
 field: fn(key: String, value: String) -> LogField Never! {
     LogField{key: key, value: value, kind: "string", redacted: false}
@@ -126,9 +148,12 @@ otlp_file: fn(path: String) Never! -[Log, FS]> {
     if trim(path).len() > 0 -> set_sink("jsonl", path)
 }
 
-set_level: fn(level: String) Never! -[Log]> {
-    normalized: canon_level(level)
-    if normalized.len() > 0 -> core.log.__level_store(rank_canonical(normalized) /% 10)
+/// Set the level of the module at `path` (`shop.db`) and every module under
+/// it; "" is every module. The code's levels rank above the package's `log:`
+/// field and below JET_LOG and `--log`: when either names the same path, its
+/// level stays, and this call logs one `warn` note that says so.
+set_level: fn(level: LogLevel, path: String{""}, at: SourceLocation{$caller}) Never! -[Log]> {
+    code_level(level_rank(level), path, at)
 }
 
 set_trace_id: fn(id: String) Never! -[Log]> {
@@ -136,11 +161,12 @@ set_trace_id: fn(id: String) Never! -[Log]> {
 }
 
 /// Apply comma-separated settings without handing the whole grammar to the
-/// host. Each setting is `key=value` (`level`, `format`, `sink`, `file` or
-/// `path`, `sample` or `sample_every`, `trace_id`); a bare `auto`, `json` or
-/// `text` selects the record format. An unknown setting or value
-/// is reported as an error record and otherwise ignored. The host owns the
-/// sink and process-global cells; Jet owns normalization and dispatch.
+/// host. Each setting is `key=value` (`format`, `sink`, `file` or `path`,
+/// `sample` or `sample_every`, `trace_id`); a bare `auto`, `json` or `text`
+/// selects the record format. Levels are set by `set_level` alone. An unknown
+/// setting or value is reported as an error record and otherwise ignored. The
+/// host owns the sink and process-global cells; Jet owns normalization and
+/// dispatch.
 setup: fn(spec: String) Never! -[Log]> {
     loop raw in split_csv(spec) {
         if trim(raw).len() == 0 -> next
@@ -149,7 +175,6 @@ setup: fn(spec: String) Never! -[Log]> {
         value: trim(pair.right)
         if {
             value.len() == 0 && is_format(key) -> core.log.__format_store(format_code(key))
-            key == "level" && canon_level(value).len() > 0 -> set_level(value)
             key == "format" && is_format(ascii_lower(value)) -> core.log.__format_store(format_code(ascii_lower(value)))
             key == "sink" -> {
                 sink: ascii_lower(value)
@@ -174,49 +199,18 @@ format_code: fn(name: String) -> Int Never! {
 }
 
 reject_setting: fn(message: String) -[Log]> {
-    emit("error", message, [LogField]{})
+    core.log.__record_emit("error", message, [LogField]{})
 }
 
 disable: fn() Never! -[Log]> { core.log.__disabled_store(true) }
 
 flush: fn() Never! -[Log]> { core.log.__flush() }
 
-enabled: fn(level: String) -[Log]> Bool Never! {
-    normalized: canon_level(level)
-    if normalized.len() == 0 -> return false
-    enabled_canonical(normalized)
+/// Whether a record at `level` from the calling module would be written.
+enabled: fn(level: LogLevel, at: SourceLocation{$caller}) -[Log]> Bool Never! {
+    enabled_for(level_rank(level), at.module)
 }
 
-enabled_canonical: fn(normalized: String) -[Log]> Bool Never! {
-    if core.log.__disabled_load() -> return false
-    stored: core.log.__level_load()
-    minimum: if stored == 0 -> 1 else -> stored - 1
-    minimum <= rank_canonical(normalized) /% 10 - 1
-}
-
-emit: fn(level: String, message: String, fields: [LogField]) -[Log]> {
-    normalized: canon_level(level)
-    if normalized.len() == 0 -> return
-    // `fatal` always ends the process with exit 1 (ledger #1474); the host
-    // applies the level filter to the record and still exits, so a disabled
-    // or filtered logger must not skip the call.
-    if normalized != "fatal" && !enabled_canonical(normalized) -> return
-    normalized_fields := fields
-    if normalized_fields.len() > 0 -> normalized_fields = normalize_fields(normalized_fields)
-    // This leaf retains sink selection, sampling, timestamps and telemetry
-    // fan-out until Jet runtime L6 replaces it. It is not a public-row call.
-    if normalized == "critical" || normalized == "fatal" {
-        line := message
-        if normalized_fields.len() > 0 -> line = render_json(record(normalized, message, normalized_fields))
-        core.log.__record_emit(normalized, line, [LogField]{})
-    } else {
-        core.log.__record_emit(normalized, message, normalized_fields)
-    }
-    if normalized == "fatal" {
-        flush()
-        core.log.__process_exit(1)
-    }
-}
 normalize_fields: fn(fields: [LogField]) -> [LogField] {
     needs_normalization := false
     loop i in 0..<fields.len() {
@@ -239,35 +233,219 @@ normalize_fields: fn(fields: [LogField]) -> [LogField] {
     out
 }
 
-rank: fn(level: String) -> Int { rank_canonical(canon_level(level)) }
-
-rank_canonical: fn(level: String) -> Int {
-    if level == {
-        "debug" -> 10
-        "info" -> 20
-        "warn" -> 30
-        "error" -> 40
-        "critical" -> 50
-        "fatal" -> 60
-        else -> -1
-    }
+// One pair of a level filter: `path` "" is every module.
+FilterPair: struct {
+    path: String
+    rank: Int
 }
 
-canon_level: fn(level: String) -> String {
-    n: ascii_lower(trim(level))
-    if n == {
-        "warning" -> return "warn"
-        "err" -> return "error"
-        "crit" -> return "critical"
-        "debug" | "info" | "warn" | "error" | "critical" | "fatal" -> return n
-        else -> ""
-    }
-}
+// The level cell caches the resolution: 0 is unresolved, 1-6 is the one
+// level every module has, and FILTER_PER_MODULE means a source names a module.
+FILTER_PER_MODULE: 7
 
-default_level: fn(level: String) -> String {
-    normalized: canon_level(level)
-    if normalized.len() == 0 -> return "info"
-    normalized
+// The sources below the code's levels and above them (`__config_load`).
+CONFIG_PACKAGE: 0
+CONFIG_ENV: 1
+CONFIG_FLAG: 2
+
+// Level resolution, the filter text and the record leaf: not part of the
+// log surface.
+priv internal: module {
+    enabled_for: fn(rank: Int, path: String) -[Log]> Bool Never! {
+        if core.log.__disabled_load() -> return false
+        rank >= threshold(path)
+    }
+
+    emit: fn(level: LogLevel, message: String, fields: [LogField], path: String) -[Log]> {
+        // `fatal` always ends the process with exit 1 (ledger #1474); the host
+        // applies the level filter to the record and still exits, so a disabled
+        // or filtered logger must not skip the call.
+        if level != .Fatal && !enabled_for(level_rank(level), path) -> return
+        tagged := [LogField]{LogField{key: "module", value: path, kind: "string", redacted: false}}
+        loop item in normalize_fields(fields) -> tagged.push(item)
+        // This leaf retains sink selection, sampling, timestamps and telemetry
+        // fan-out until Jet runtime L6 replaces it. It is not a public-row call.
+        core.log.__record_emit(level_name(level), message, tagged)
+        if level == .Fatal {
+            flush()
+            core.log.__process_exit(1)
+        }
+    }
+
+    level_rank: fn(level: LogLevel) -> Int Never! {
+        if level == {
+            .Debug -> 1
+            .Info -> 2
+            .Warn -> 3
+            .Error -> 4
+            .Critical -> 5
+            .Fatal -> 6
+        }
+    }
+
+    level_name: fn(level: LogLevel) -> String Never! { rank_name(level_rank(level)) }
+
+    // The filter spelling of a rank (1 is `debug` … 6 is `fatal`).
+    rank_name: fn(rank: Int) -> String Never! {
+        if rank == {
+            1 -> "debug"
+            2 -> "info"
+            3 -> "warn"
+            4 -> "error"
+            5 -> "critical"
+            else -> "fatal"
+        }
+    }
+
+    // The rank of a level's filter spelling, or 0 for any other text.
+    name_rank: fn(name: String) -> Int Never! {
+        if name == {
+            "debug" -> 1
+            "info" -> 2
+            "warn" -> 3
+            "error" -> 4
+            "critical" -> 5
+            "fatal" -> 6
+            else -> 0
+        }
+    }
+
+    // The rank a record of module `path` must reach.
+    threshold: fn(path: String) -[Log]> Int Never! {
+        cached: core.log.__level_load()
+        if cached > 0 && cached < FILTER_PER_MODULE -> return cached
+        pairs: merged_filter()
+        if cached == 0 {
+            if pairs.len() == 1 {
+                core.log.__level_store(pairs[0].rank)
+                return pairs[0].rank
+            }
+            core.log.__level_store(FILTER_PER_MODULE)
+        }
+        covering_rank(pairs, path)
+    }
+
+    // Every source's pairs, the stock `info` first; a later source's pair
+    // replaces an earlier pair for the same path.
+    merged_filter: fn() -[Log]> [FilterPair] Never! {
+        pairs := [FilterPair]{FilterPair{path: "", rank: 2}}
+        texts: [String]{core.log.__config_load(CONFIG_PACKAGE), core.log.__filter_load(), core.log.__config_load(CONFIG_ENV), core.log.__config_load(CONFIG_FLAG)}
+        loop text in texts {
+            loop pair in parse_filter(text) -> put_pair(pairs, pair.path, pair.rank)
+        }
+        pairs
+    }
+
+    // The rank of the longest pair path that covers `path`: the path itself or
+    // a dotted prefix of it, and "" covers every path.
+    covering_rank: fn(pairs: [FilterPair], path: String) -> Int Never! {
+        best := -1
+        rank := 2
+        loop pair in pairs {
+            if pair.path.len() > best && path_covers(pair.path, path) {
+                best = pair.path.len()
+                rank = pair.rank
+            }
+        }
+        rank
+    }
+
+    path_covers: fn(prefix: String, path: String) -> Bool Never! {
+        if prefix == "" || prefix == path -> return true
+        path.starts_with("{prefix}.")
+    }
+
+    // The rank `pairs` give exactly `path`, or 0.
+    pair_rank: fn(pairs: [FilterPair], path: String) -> Int Never! {
+        loop pair in pairs {
+            if pair.path == path -> return pair.rank
+        }
+        0
+    }
+
+    put_pair: fn(pairs: &[FilterPair], path: String, rank: Int) {
+        loop i in 0..<pairs.len() {
+            if pairs[i].path == path {
+                pairs[i] = FilterPair{path: path, rank: rank}
+                return
+            }
+        }
+        pairs.push(FilterPair{path: path, rank: rank})
+    }
+
+    // The pairs of a filter text. The compiler and the runtime have already
+    // checked each source; a pair that is not `level` or `module=level` is
+    // skipped.
+    parse_filter: fn(text: String) -> [FilterPair] Never! {
+        pairs := [FilterPair]{}
+        if text == "" -> return pairs
+        loop raw in split_csv(text) {
+            item: trim(raw)
+            if item.len() == 0 -> next
+            pair: split_once(item, "=")
+            if trim(pair.right) == "" {
+                rank: name_rank(item)
+                if rank > 0 -> put_pair(pairs, "", rank)
+            } else {
+                path: trim(pair.left)
+                rank: name_rank(trim(pair.right))
+                if rank > 0 && module_path_valid(path) -> put_pair(pairs, path, rank)
+            }
+        }
+        pairs
+    }
+
+    render_filter: fn(pairs: [FilterPair]) -> String Never! {
+        text := ""
+        loop pair in pairs {
+            item: if pair.path == "" -> rank_name(pair.rank) else -> "{pair.path}={rank_name(pair.rank)}"
+            text = if text == "" -> item else -> "{text},{item}"
+        }
+        text
+    }
+
+    // A dotted module path: identifier segments joined by `.`.
+    module_path_valid: fn(path: String) -> Bool Never! {
+        if path.len() == 0 -> return false
+        start := true
+        loop b in path.bytes() {
+            n: Int.from_u8(b)
+            if n == 46 {
+                if start -> return false
+                start = true
+                next
+            }
+            letter: (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || n == 95
+            digit: n >= 48 && n <= 57
+            if !letter && !(digit && !start) -> return false
+            start = false
+        }
+        !start
+    }
+
+    // Record the code's level for `path` ("" is every module). When JET_LOG or
+    // `--log` names the same path, the operator's level stays and one `warn`
+    // note says so.
+    code_level: fn(rank: Int, path: String, at: SourceLocation) -[Log]> {
+        if path != "" && !module_path_valid(path) {
+            return reject_setting("log.set_level: `{path}` is not a dotted module path; the level is unchanged")
+        }
+        pairs := parse_filter(core.log.__filter_load())
+        put_pair(pairs, path, rank)
+        core.log.__filter_store(render_filter(pairs))
+        core.log.__level_store(0)
+        operators: [Int]{CONFIG_FLAG, CONFIG_ENV}
+        loop source in operators {
+            kept: pair_rank(parse_filter(core.log.__config_load(source)), path)
+            if kept > 0 {
+                operator: if source == CONFIG_FLAG -> "--log" else -> "JET_LOG"
+                target: if path == "" -> "every module" else -> "`{path}`"
+                note: "log.set_level({rank_name(rank)}) at {at} for {target} is kept below {operator}, which sets {rank_name(kept)}"
+                if !core.log.__disabled_load() -> core.log.__record_emit("warn", note, [LogField]{LogField{key: "module", value: at.module, kind: "string", redacted: false}})
+                return
+            }
+        }
+    }
 }
 
 canon_mode: fn(mode: String) -> String {
@@ -367,7 +545,7 @@ split_csv: fn(text: String) -> [String] {
 
 /// A structured log event shared by formatters and handlers.
 LogRecord: struct {
-    level: String
+    level: LogLevel
     message: String
     fields: [LogField]
 }
@@ -380,24 +558,24 @@ Formatter: struct {
 
 /// A level-filtered sink. `handle` applies the threshold before formatting.
 Handler: struct {
-    minimum: String
+    minimum: LogLevel
     mode: String
 }
 
-record: fn(level: String, message: String, fields: [LogField]) -> LogRecord Never! {
-    LogRecord{level: default_level(level), message: message, fields: fields}
+record: fn(level: LogLevel, message: String, fields: [LogField]) -> LogRecord Never! {
+    LogRecord{level: level, message: message, fields: fields}
 }
 
 formatter: fn(mode: String) -> Formatter Never! {
     Formatter{mode: canon_mode(mode)}
 }
 
-handler: fn(level: String) -> Handler Never! {
-    Handler{minimum: default_level(level), mode: "json"}
+handler: fn(level: LogLevel) -> Handler Never! {
+    Handler{minimum: level, mode: "json"}
 }
 
 handler_format: fn(target: Handler, mode: String) -> Handler Never! {
-    Handler{minimum: default_level(target.minimum), mode: canon_mode(mode)}
+    Handler{minimum: target.minimum, mode: canon_mode(mode)}
 }
 
 format: fn(target: Formatter, event: LogRecord) -> String Never! {
@@ -406,20 +584,19 @@ format: fn(target: Formatter, event: LogRecord) -> String Never! {
     render_json(event)
 }
 
-handle: fn(target: Handler, event: LogRecord) Never! -[Log]> {
-    minimum: default_level(target.minimum)
-    if rank(event.level) < rank(minimum) -> return
+handle: fn(target: Handler, event: LogRecord, at: SourceLocation{$caller}) Never! -[Log]> {
+    if level_rank(event.level) < level_rank(target.minimum) -> return
     formatter: Formatter{mode: canon_mode(target.mode)}
     if formatter.mode == "text" {
-        emit(event.level, format(formatter, event), [LogField]{})
+        emit(event.level, format(formatter, event), [LogField]{}, at.module)
     } else {
-        emit(event.level, event.message, event.fields)
+        emit(event.level, event.message, event.fields, at.module)
     }
 }
 
 
 render_text: fn(event: LogRecord) -> String {
-    line := "{event.level}: {event.message}"
+    line := "{level_name(event.level)}: {event.message}"
     loop field in event.fields {
         value := field.value
         if field.redacted -> value = "[redacted]"
@@ -429,7 +606,7 @@ render_text: fn(event: LogRecord) -> String {
 }
 
 render_json: fn(event: LogRecord) -> String {
-    line := "{{\"level\":\"{escape(event.level)}\",\"msg\":\"{escape(event.message)}\""
+    line := "{{\"level\":\"{level_name(event.level)}\",\"msg\":\"{escape(event.message)}\""
     loop field in event.fields {
         if field.redacted {
             line = "{line},\"{escape(field.key)}\":\"[redacted]\""
@@ -501,7 +678,7 @@ parse_int: fn(text: String) -> Int? {
 }
 add: fn(event: LogRecord, field: LogField) -> LogRecord Never! {
     fields := event.fields
-    fields.push(field)
+    fields.push(field.copy())
     LogRecord{level: event.level, message: event.message, fields: fields}
 }
 
@@ -517,23 +694,41 @@ clear: fn(event: LogRecord) -> LogRecord Never! { record(event.level, event.mess
 
 #Test("log level policy uses raw state") {
     saved_level: core.log.__level_load()
+    saved_filter: core.log.__filter_load()
     saved_disabled: core.log.__disabled_load()
+    core.log.__filter_store("")
     core.log.__level_store(0)
     core.log.__disabled_store(false)
-    assert(!enabled("debug"))
-    assert(enabled("info"))
-    assert(!enabled("not-a-level"))
-    set_level(" DEBUG ")
-    assert(enabled("debug"))
-    set_level("warn")
-    assert(!enabled("info"))
-    assert(enabled(" WARNING "))
-    set_level("invalid")
-    assert(!enabled("info"))
+    assert(!enabled_for(1, "shop"))
+    assert(enabled_for(2, "shop"))
+    set_level(.Debug)
+    assert(enabled_for(1, "shop"))
+    set_level(.Warn)
+    assert(!enabled_for(2, "shop"))
+    assert(enabled_for(3, "shop"))
+    set_level(.Debug, path: "shop.db")
+    assert(enabled_for(1, "shop.db"))
+    assert(enabled_for(1, "shop.db.pool"))
+    assert(!enabled_for(1, "shop.dbx"))
+    assert(!enabled_for(2, "shop"))
     disable()
-    assert(!enabled("fatal"))
+    assert(!enabled_for(6, "shop"))
+    core.log.__filter_store(saved_filter)
     core.log.__level_store(saved_level)
     core.log.__disabled_store(saved_disabled)
+}
+
+#Test("log filters take the longest covering module path") {
+    pairs: parse_filter("warn, shop.db=debug,shop.db.pool=error,bad pair,shop=nope")
+    assert_eq(render_filter(pairs), "warn,shop.db=debug,shop.db.pool=error")
+    assert_eq(covering_rank(pairs, "shop"), 3)
+    assert_eq(covering_rank(pairs, "shop.db"), 1)
+    assert_eq(covering_rank(pairs, "shop.db.pool.conn"), 4)
+    assert_eq(covering_rank(pairs, "shop.dbx"), 3)
+    assert(module_path_valid("shop.db_2"))
+    assert(!module_path_valid("shop..db"))
+    assert(!module_path_valid("2shop"))
+    assert(!module_path_valid("shop."))
 }
 
 #Test("log format codes are source policy") {

@@ -50,11 +50,19 @@ sync_wait: fn(address: I64, expected: I64, deadline_ns: I64) -> I64 {
     }
 }
 
+// The platform clock_gettime reads the kernel's vDSO page in user space; a
+// raw syscall 228 enters the kernel on every clock read.
+#Import(c) sync_clock_gettime: fn(clock: I64, timespec: I64) -> I64 = "clock_gettime"
+
+// Reads `clock` into the two words at `timespec` (seconds, nanoseconds).
+sync_clock_read: fn(clock: I64, timespec: I64) {
+    if (sync_clock_gettime(clock, timespec) != I64{0}) { jet_rt_unreachable(I64{0}, I64{0}) }
+}
+
 sync_now_ns: fn() -> I64 {
     #Unsafe("clock_gettime writes two words of thread-owned TCB scratch; no pointer escapes") {
         scratch: wrapping(os_tls_base_i64() + I64{232})
-        result: os_syscall_i64(I64{228}, I64{1}, scratch, I64{0}, I64{0}, I64{0}, I64{0})
-        if (result != I64{0}) { jet_rt_unreachable(I64{0}, I64{0}) }
+        sync_clock_read(I64{1}, scratch)
         return wrapping(os_load_i64(scratch) * I64{1000000000} + os_load_i64(wrapping(scratch + I64{8})))
     }
 }

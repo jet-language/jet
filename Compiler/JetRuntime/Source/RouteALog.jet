@@ -1,13 +1,14 @@
 // core.log host cells and sinks. Rust providers: (state cells, flush, spans,
 // JSON/text records), (trace id), (record emit, span allocate) and the AOT
 // jet_log_write_line/jet_log_process_exit leaves. Every cell is thread_local!
-// in Rust, so each OS thread owns one LogState88 block (allocated on first use,
+// in Rust, so each OS thread owns one LogState96 block (allocated on first use,
 // freed by the TLS destructor): level0 disabled8 format16 sink24 (owned E4 or 0
 // for "") sample_every32 sample_count40 next_span48 trace56 (owned E4 or 0)
-// spans: data64 len72 cap80, each span a 16-byte {id, owned name E4}. The
+// spans: data64 len72 cap80, each span a 16-byte {id, owned name E4}, and the
+// code's level filter88 (owned E4 or 0). The
 // devtools publication (:316-590) reaches only installed event sinks; the
 // native runtime installs none, so it has no native counterpart.
-LOG_STATE_BYTES: I64{88}
+LOG_STATE_BYTES: I64{96}
 LOG_STATE_LEVEL: I64{0}
 LOG_STATE_DISABLED: I64{8}
 LOG_STATE_FORMAT: I64{16}
@@ -19,11 +20,27 @@ LOG_STATE_TRACE: I64{56}
 LOG_STATE_SPANS: I64{64}
 LOG_STATE_SPANS_LEN: I64{72}
 LOG_STATE_SPANS_CAP: I64{80}
+LOG_STATE_FILTER: I64{88}
 // LogField32: key0 value8 kind16 owned E4s, redacted24.
 LOG_FIELD_BYTES: I64{32}
 log_state_key := I64{0}
+// The process's level filters below and above the code's
+// (Core/Log/Log.jet __config_load): the package's `log:` field and the
+// `--log` flag, which the entry function passes (jet_rt_log_configure), and
+// JET_LOG, which the start reads (jet_rt_log_start). Each is an owned text,
+// or 0 for "", written before any other thread exists.
+log_config_package := I64{0}
+log_config_env := I64{0}
+log_config_flag := I64{0}
+// The start jet_rt_main runs before the entry: only a program that links the
+// log cells has it installed.
+log_start_code := I64{0}
 
 rt_log_state_drop_address: fn() -> I64 {
+    loop { jet_rt_unreachable(I64{0}, I64{0}) }
+}
+// RuntimeLower resolves this checked function-address entry, never the body.
+rt_log_start_address: fn() -> I64 {
     loop { jet_rt_unreachable(I64{0}, I64{0}) }
 }
 // runtime-init: 3 when log_state_key
@@ -35,11 +52,136 @@ rt_log_state_drop_address: fn() -> I64 {
     rt_text_store(wrapping(closure + I64{16}), I64{0})
     #Unsafe("runtime-init runs before any other thread exists") {
         log_state_key = jet_rt_tls_key_new(closure)
+        log_start_code = rt_log_start_address()
     }
 }
+
+// JET_LOG, checked, becomes the process's environment filter; a pair that is
+// not `level` or `module=level` ends the process with an error naming it.
+#Export(c) jet_rt_log_start: fn(_argument: I64) -> I64 {
+    value: rt_env_get(rt_static_text("JET_LOG"))
+    if (value == I64{0}) -> return I64{0}
+    bad: log_filter_bad_pair(value)
+    if (bad != I64{0}) {
+        message: jet_rt_string_builder_new()
+        jet_rt_string_builder_push(message, rt_static_text("JET_LOG: `"))
+        jet_rt_string_builder_push(message, bad)
+        jet_rt_string_builder_push(message, rt_static_text("` is not a log filter pair; write `level` or `module=level`, where level is debug, info, warn, error, critical or fatal"))
+        jet_rt_string_drop(bad)
+        jet_rt_string_drop(value)
+        jet_rt_entry_error_exit(jet_rt_string_builder_finish(message))
+        return I64{0}
+    }
+    if (rt_text_len(value) == I64{0}) {
+        jet_rt_string_drop(value)
+        return I64{0}
+    }
+    #Unsafe("the log start runs before any other thread exists") {
+        log_config_env = value
+    }
+    I64{0}
+}
+
+// The entry function's filters, both owned: the package's `log:` field and
+// `--log`.
+#Export(c) jet_rt_log_configure: fn(package: I64, flag: I64) {
+    #Unsafe("the entry function configures before any other thread exists") {
+        log_text_drop(log_config_package)
+        log_config_package = log_owned_or_zero(package)
+        log_text_drop(log_config_flag)
+        log_config_flag = log_owned_or_zero(flag)
+    }
+}
+
+log_owned_or_zero: fn(text: I64) -> I64 {
+    if (rt_text_len(text) != I64{0}) -> return text
+    jet_rt_string_drop(text)
+    I64{0}
+}
+
+// A copy of the first pair of `text` that is not `level` or `module=level`
+// (surrounding blanks trimmed), or 0. Empty pairs are skipped.
+log_filter_bad_pair: fn(text: I64) -> I64 {
+    data: rt_text_data(text)
+    length: rt_text_len(text)
+    start := I64{0}
+    loop start <= length {
+        end := start
+        loop end < length && rt_text_byte(wrapping(data + end)) != (I64{44}) { end += I64{1} }
+        first := start
+        loop first < end && log_filter_blank(rt_text_byte(wrapping(data + first))) { first += I64{1} }
+        last := end
+        loop last > first && log_filter_blank(rt_text_byte(wrapping(wrapping(data + last) - I64{1}))) { last -= I64{1} }
+        if (last > first && !log_filter_pair_valid(data, first, last)) -> return rt_text_copy(wrapping(data + first), last - first)
+        start = end + I64{1}
+    }
+    I64{0}
+}
+
+log_filter_blank: fn(byte: I64) -> Bool { (byte == I64{32}) || (byte == I64{9}) }
+
+log_filter_pair_valid: fn(data: I64, first: I64, last: I64) -> Bool {
+    equals := first
+    loop equals < last && rt_text_byte(wrapping(data + equals)) != (I64{61}) { equals += I64{1} }
+    if (equals == last) -> return log_filter_level_valid(data, first, last)
+    path_last := equals
+    loop path_last > first && log_filter_blank(rt_text_byte(wrapping(wrapping(data + path_last) - I64{1}))) { path_last -= I64{1} }
+    level_first := equals + I64{1}
+    loop level_first < last && log_filter_blank(rt_text_byte(wrapping(data + level_first))) { level_first += I64{1} }
+    log_filter_path_valid(data, first, path_last) && log_filter_level_valid(data, level_first, last)
+}
+
+// Identifier segments joined by `.`.
+log_filter_path_valid: fn(data: I64, first: I64, last: I64) -> Bool {
+    if (last <= first) -> return false
+    segment_start := true
+    at := first
+    loop at < last {
+        byte: rt_text_byte(wrapping(data + at))
+        at += I64{1}
+        if (byte == I64{46}) {
+            if segment_start -> return false
+            segment_start = true
+            next
+        }
+        letter: (byte >= I64{65} && byte <= I64{90}) || (byte >= I64{97} && byte <= I64{122}) || (byte == I64{95})
+        digit: (byte >= I64{48} && byte <= I64{57})
+        if (!letter && !(digit && !segment_start)) -> return false
+        segment_start = false
+    }
+    !segment_start
+}
+
+log_filter_level_valid: fn(data: I64, first: I64, last: I64) -> Bool {
+    if (last <= first) -> return false
+    name: rt_text_copy(wrapping(data + first), last - first)
+    valid: log_text_is(name, rt_static_text("debug")) || log_text_is(name, rt_static_text("info")) || log_text_is(name, rt_static_text("warn")) || log_text_is(name, rt_static_text("error")) || log_text_is(name, rt_static_text("critical")) || log_text_is(name, rt_static_text("fatal"))
+    jet_rt_string_drop(name)
+    valid
+}
+
+// Core's `__config_load(which)`: 0 the package's filter, 1 JET_LOG's, 2 the
+// flag's; an owned text.
+#Export(c) jet_log_config_load: fn(which: I64) -> I64 {
+    native: jet_int_owned_to_i64(which)
+    value: if {
+        (native == I64{0}) -> log_config_package
+        (native == I64{1}) -> log_config_env
+        else -> log_config_flag
+    }
+    if (value == I64{0}) -> return jet_rt_string_builder_finish(jet_rt_string_builder_new())
+    jet_rt_string_clone(value)
+}
+#Export(c) jet_log_filter_load: fn() -> I64 {
+    value: rt_text_word(wrapping(log_state() + LOG_STATE_FILTER))
+    if (value == I64{0}) -> return jet_rt_string_builder_finish(jet_rt_string_builder_new())
+    jet_rt_string_clone(value)
+}
+#Export(c) jet_log_filter_store: fn(value: I64) { log_text_cell_store(wrapping(log_state() + LOG_STATE_FILTER), value) }
 #Export(c) jet_rt_log_state_drop: fn(_closure: I64, state: I64) -> I64 {
     log_text_drop(rt_text_word(wrapping(state + LOG_STATE_SINK)))
     log_text_drop(rt_text_word(wrapping(state + LOG_STATE_TRACE)))
+    log_text_drop(rt_text_word(wrapping(state + LOG_STATE_FILTER)))
     spans: rt_text_word(wrapping(state + LOG_STATE_SPANS))
     count: rt_text_word(wrapping(state + LOG_STATE_SPANS_LEN))
     at := I64{0}

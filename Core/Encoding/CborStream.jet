@@ -28,7 +28,7 @@ allocation_error: fn(failure: stream.__ReserveFailure, offset: Int, path: String
     else -> error(.Limit, offset, path, reason)
 }
 
-reserve: fn<T>(allocation: stream.AllocationBudget, values: &[T], additional: Int, offset: Int, path: String, reason: String) -> Int EncodingError! {
+reserve: fn<T>(allocation: &stream.AllocationBudget, values: &[T], additional: Int, offset: Int, path: String, reason: String) -> Int EncodingError! {
     old: mem.__list_capacity<T>(values) * mem.__type_size<T>()
     stream.__reserve_checked<T>(allocation, values, additional) ?? return Err(allocation_error(err, offset, path, reason))
     Ok(mem.__list_capacity<T>(values) * mem.__type_size<T>() - old)
@@ -36,7 +36,7 @@ reserve: fn<T>(allocation: stream.AllocationBudget, values: &[T], additional: In
 
 // Reset through an edit borrow so terminal cleanup works for both local buffers
 // and reader/writer frame storage without moving an owner out of borrowed self.
-release: fn<T>(allocation: stream.AllocationBudget, values: &[T]) Never! {
+release: fn<T>(allocation: &stream.AllocationBudget, values: &[T]) Never! {
     size: mem.__list_capacity<T>(values) * mem.__type_size<T>()
     values = [T]{}
     allocation.release(size)
@@ -492,13 +492,13 @@ CBORPush: struct {
         if self.retained - old + size > self.limits.max_item_bytes -> return Err(error(.Limit, self.total, "$", "max_item_bytes {self.limits.max_item_bytes} exceeded"))
     }
 
-    allocate: fn(self, size: Int) -> [U8] EncodingError! {
+    allocate: fn(&self, size: Int) -> [U8] EncodingError! {
         out := [U8]{}
         _: reserve<U8>(self.allocation, out, size, self.total, "$", "CBOR item allocation failed") ?? return Err(err)
         Ok(out)
     }
 
-    scalar: fn(self, event: DataEvent) -> [U8] EncodingError! {
+    scalar: fn(&self, event: DataEvent) -> [U8] EncodingError! {
         payload := 0
         header := 1
         if event == {
@@ -714,15 +714,14 @@ writer: fn(output: &&FileWriter, limits: EncodingLimits) -[FS]> CBORPush Encodin
 }
 
 #Test("CBOR buffer release resets borrowed storage and returns its heap charge") {
-    allocation: stream.budget(EncodingLimits.safe())
+    allocation := stream.budget(EncodingLimits.safe())
     values := [U8]{}
     _: reserve<U8>(allocation, values, 8, 0, "$", "test allocation failed") ?? panic("reserve")
     values.push(U8{7})
     release<U8>(allocation, values)
     assert_eq(values.len(), 0)
     assert_eq(mem.__list_capacity<U8>(values), 0)
-    guard: allocation.state.guard_read()
-    assert_eq(guard.value.used, 0)
+    assert_eq(allocation.used, 0)
 }
 
 #Test("CBOR preferred float and definite length wire known answers") {

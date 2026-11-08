@@ -348,8 +348,9 @@ in one pass:
   chain, release build or any other run costing more than about 15 minutes
   starts only after a clean collect-all preflight of that exact commit:
   `jet Tools/agent/Land.jet census` (the seed's keep-going `jet check` and
-  `jet build` of the compiler, the runtime pack and the self-check, every row
-  of every phase in one report; the lander runs it through `Land.jet
+  `jet build` of the compiler, the runtime pack and the self-checks of the
+  CLI and of every Core body, every row of every phase in one report; the
+  lander runs it through `Land.jet
   precommit` before every compiler commit) and `jet Tools/agent/Chain.jet
   TREE LEVEL --dry-run`, which names every stage the launch would build. Every
   row is clean or carries a written disposition naming the commit in this

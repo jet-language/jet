@@ -24,6 +24,9 @@ JetDriverSourceQueryResult: struct {
     entry_package_version: String?{None}
     entry_module_index: Int{-1}
     names: NameLedger?{None}
+    // The folder of each package the entry package's manifest lists, by
+    // its name there.
+    dependency_roots: [String: String]{[String: String]{}}
 }
 
 jet_driver_source_query: fn(request: JetDriverCompileRequest) -> JetDriverSourceQueryResult {
@@ -41,9 +44,18 @@ jet_driver_load_with_names: fn(request: JetDriverCompileRequest) -> JetDriverLoa
 
 jet_driver_source_query_loaded: fn(load: JetDriverLoadResult, request: JetDriverCompileRequest) -> JetDriverSourceQueryResult {
     entry_package_version := String?{None}
+    dependency_roots := [String: String]{}
     loop package in load.packages {
         if package.identity == load.package_identity {
             entry_package_version = package.version
+            loop dependency in package.dependencies {
+                loop target in load.packages {
+                    if target.root_index == dependency.target_root_index && target.identity != package.identity {
+                        dependency_roots[dependency.name] = target.root_path.copy()
+                        break
+                    }
+                }
+            }
             break
         }
     }
@@ -72,7 +84,7 @@ jet_driver_source_query_loaded: fn(load: JetDriverLoadResult, request: JetDriver
     loop (index, module_row) in load.modules {
         if module_row.module_identity == load.entry_module_identity -> entry_index = index
     }
-    JetDriverSourceQueryResult{modules: modules, diagnostics: load.diagnostics, complete: load.complete, entry_package_version: entry_package_version, entry_module_index: entry_index, names: load.names}
+    JetDriverSourceQueryResult{modules: modules, diagnostics: load.diagnostics, complete: load.complete, entry_package_version: entry_package_version, entry_module_index: entry_index, names: load.names, dependency_roots: dependency_roots}
 }
 
 // The name facts read each module's items once: the items move out of the

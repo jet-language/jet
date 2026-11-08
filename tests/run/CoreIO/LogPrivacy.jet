@@ -25,9 +25,9 @@ emit_all: fn() -[Log]> {
 }
 
 route: fn(mode: String) -[Log]> {
-    gate: log.handler_format(log.handler("warn"), mode)
-    log.handle(gate, log.record("info", "handler below threshold", fields()))
-    log.handle(gate, log.record("error", "handler at threshold", fields()))
+    gate: log.handler_format(log.handler(.Warn), mode)
+    log.handle(gate, log.record(.Info, "handler below threshold", fields()))
+    log.handle(gate, log.record(.Error, "handler at threshold", fields()))
 }
 
 report: fn(label: String, sink: String) {
@@ -41,7 +41,7 @@ run: fn() {
     scratch: files.temp_dir("jet-log-privacy") ?? panic("temp dir")
     text_path: "{scratch.path}/app.log"
     json_path: "{scratch.path}/app.jsonl"
-    log.set_level("warn")
+    log.set_level(.Warn)
 
     log.set_sink("text", text_path)
     emit_all()
@@ -59,7 +59,7 @@ run: fn() {
     report("text sink", files.read(text_path) ?? "")
     report("jsonl sink", files.read(json_path) ?? "")
 
-    event: log.record("error", "login refused", fields())
+    event: log.record(.Error, "login refused", fields())
     print("text view: {log.format(log.formatter("text"), event)}")
     print("json view: {log.format(log.formatter("json"), event)}")
 }

@@ -503,6 +503,10 @@ in the `inspect.build` status envelope), not an invented empty BuildPlan.
 Target and action explanations use the checked declaration; file explanations
 use its retained ownership, consumers, targets, and generated-source digest.
 Unobserved action-cache status remains `unknown`.
+`inspect build --times` instead reads the `.jet/build/times.json` record the
+last `jet build` of the package wrote and shows how long each step and target
+took and whether it was made or reused (`--json`: the `BuildTimes` record under
+`times`); with no record it fails with E2104.
 The default-pipeline path still checks the package semantically. Failed queries
 use the standard `diagnostics` JSON status envelope or human problem-count
 report, with advisory lints shown only under `--verbose`/`-v`; internal query
@@ -613,6 +617,14 @@ by `jet Tools/agent/CoreSourceRows.jet`, which
 `jet Tools/agent/CoreSurfaceLedger.jet --write` runs and `--check`
 holds current.
 
+`jet check Core`, aimed at that toolchain's `Core/` directory, checks the
+whole Core library: one compile imports every public Core module and checks
+every function body, whether a program calls it or not. A lint in Core
+source is not reported, nor one in a codec body the compiler generates for a
+Core type. Any other `jet check` loads and checks only the Core declarations
+its program can name; `JET_KEEP_GOING=1` loads and checks every declaration
+of each Core module the program imports.
+
 Source snapshots enumerate held no-follow directories and read each source or
 foreign cache through one bounded opened file. File identities include the
 opened object's device, inode, length, and exact modification timestamp;
@@ -645,11 +657,27 @@ positional words after the file; under the shorthand every word after the
 file is the program's (a `--` right after it only separates), so a
 `#!/usr/bin/env jet` file runs as `./file.jet args`. Advisory lints stay hidden unless `--verbose`
 or `-v` comes before `--`; a verbose run reports them before the program
-starts. `--json` reports the same problems as the standard `diagnostics` JSON
+starts, then one line naming the effects the program uses
+(`jet run: effects used: Exec, IO, Time.Wait`), so `jet run --verbose -A`
+shows what the blanket grant let through. `--json` reports the same problems as the standard `diagnostics` JSON
 status envelope on stderr, leaving stdout to the program; it never changes the
 exit status. Run flags other than `--release`, `--profile`, `--verbose`, `--quiet`,
 `--json`, `--color`, `--threads`, `--trace`, `--allow`, `-A`, and `--deny` are
 refused with E2104, naming the card the command model gives them, until they are ported.
+
+`jet -e CODE [args...]` runs CODE as the body of `run: fn`: `jet -e 'print(1 + 2)'`
+prints 3. A `;` between statements stands for the line break a file would
+have (`jet -e 'name := 1; print(name)'`). CODE is checked as a file is, so a
+misspelled name is refused before anything runs. The file that holds it is
+kept under the kept programs' directory (`eval/`, named by the content hash),
+and the rest runs as `jet <that file> [args...]`, so the same code reruns its
+kept program. Flags that come before `-e` are the run's. `jet run -e CODE`
+runs the same way. A `-e` after the program (`jet run hello.jet -e …`) is
+refused with E2104, and `jet dev -e` with E2102.
+
+`jet run - [args...]` runs the program read from standard input
+(`jet run - < hello.jet`, or a pipe). Its source is kept the same way, under
+`stdin/` named by its content hash, and runs as `jet run <that file> [args...]`.
 
 A script is a standalone program wherever it lives: its source snapshot is the
 script alone, and the source walk of a package leaves every script out.
@@ -667,9 +695,26 @@ writes its fault report into, are not compile inputs and don't change the
 hash. A rerun with the same toolchain and sources
 runs the kept program without compiling. Any change, including a different
 compiler, compiles again and replaces the kept program. The cache holds at
-most 64 programs; keeping another removes the least recently run one. A
-compile that read a comptime input file keeps nothing, and a `--verbose` or
-traced run always compiles.
+most 64 programs; keeping another removes the least recently run one. A rerun
+marks its program as just run unless it was marked in the last ten minutes,
+so recency counts to within ten minutes. A compile that read a comptime input
+file keeps nothing, and a `--verbose` or traced run always compiles.
+
+A plain `jet run` compiles at the stock `optimize: none`, so the first run
+starts quickly. When a rerun reuses that program and neither a profile nor a
+flag chose the level, it also starts one background build of the same
+sources at `full`: the same `jet run` command, detached (in a session of its
+own, not the program's child, with no terminal and its output discarded), at
+the lowest CPU priority and in the idle I/O class, printing nothing. The
+reused program still runs as a freshly compiled one does, in place of
+`jet run` with its process id, so a signal sent to that process reaches the
+program. That build keeps its
+program in the same slot, and later reruns run it. Every level means the same,
+so only speed changes. Only one build runs per slot: it holds the lock file
+`<slot>.full` beside the record while it runs. A build that
+fails leaves `<slot>.failed` naming the sources it failed on, and none is tried
+again for them. A build that is killed leaves the `none` program in use, and
+the next rerun starts it again.
 
 `jet build`, `run`, `check`, `test`, and `emit` take `--trace` to watch the
 compiler work: one line per event on stderr as it happens, with the elapsed
@@ -712,6 +757,18 @@ E1803, exit 1; a file with no package manifest leads the Fix with the exact
 `--allow` command and its `-A` form. The interactive confirmation (D-SCRIPT-CONFIRM1), authority
 receipts, and lint-policy enforcement are not ported yet: the Jet host always
 answers as a non-interactive run.
+
+`jet run --allow=FS.Read:<path>` grants `FS.Read` confined to that path: the
+program may read the named file, or the named directory and everything
+beneath it, and nothing else (several such rows grant each path; `-A`,
+`--allow=FS` and `--allow=FS.Read` lift the confinement). The path is
+relative to the working directory. The kernel enforces it (Linux Landlock,
+[`Loader.jet`](../../../Compiler/JetBackend/Source/Image/Loader.jet)
+`x64_confine_reads`) on the file an open reaches, so neither `..` nor a
+symbolic link leads out, and processes the program starts are confined too.
+Any other read fails with a `PermissionDenied` error whose cause names E1803
+and the granted paths (`JET_READ_SCOPE`). A kernel that can't confine the
+run refuses it instead of running it unconfined.
 
 `jet doc --check [<file.jet|dir>]` exits 1 when a public API item has no `///`
 summary (L2201). Command entries are not library API: a module-level `run: fn`,
