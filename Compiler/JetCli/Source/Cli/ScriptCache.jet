@@ -31,7 +31,7 @@ use {
     cli_process: core.process
     cli_sys: core.sys
     cli_time: core.time
-    jet_backend.[X64Executable, x64_executable_keep, x64_executable_kept]
+    jet_backend.[X64Executable, x64_executable_keep, x64_executable_kept, x64_file_spawn_detached]
     jet_driver.[
         JetDriverAuthorizedSourceSnapshot,
         JetDriverComptimeInputLog,
@@ -334,12 +334,16 @@ jet_cli_script_promote_failed: fn(directory: String, slot: String) -> String Nev
 }
 
 // Start the background `full` build of `keep`'s sources: this `jet` again with
-// the same arguments and environment, detached, in the idle I/O class, with
-// JET_CLI_SCRIPT_PROMOTE_ENV naming the slot. `jet run -` is given its entry
-// `file` in place of the `-`, as the build has no standard input to read. None
-// starts while a build holds the slot's lock, or after one failed on these
-// sources. A build that was killed leaves the `none` program in use, and a
-// later rerun starts it again.
+// the same arguments and environment, with JET_CLI_SCRIPT_PROMOTE_ENV naming
+// the slot, as a daemon in the idle I/O class (x64_file_spawn_detached). The
+// start leaves this `jet` no thread and no child, so the reused program then
+// runs in its place as a compiled one does (Host.jet jet_cli_launch), with
+// its pid and its signals, and the build is never the program's child nor in
+// its terminal's process group. `jet run -` is given its entry `file` in
+// place of the `-`, as the build has no standard input to read. None starts
+// while a build holds the slot's lock, or after one failed on these sources.
+// A build that was killed leaves the `none` program in use, and a later rerun
+// starts it again.
 jet_cli_script_promote: fn(directory: String, keep: JetCLIScriptKeep, file: String) {
     if cli_files.read(jet_cli_script_promote_failed(directory, keep.slot)) == .Ok(text) {
         if text == keep.sources -> return
@@ -351,12 +355,11 @@ jet_cli_script_promote: fn(directory: String, keep: JetCLIScriptKeep, file: Stri
     close(lock)
     arguments := cli_process.args()
     if jet_cli_stdin_source_at(arguments) == .Val(at) -> arguments[at] = file.copy()
-    argv := [String]{cli_sys.executable()}
+    jet: cli_sys.executable()
+    argv := [String]{jet}
     loop argument in arguments -> argv.push(argument)
-    if cli_process.cmd(argv).env(JET_CLI_SCRIPT_PROMOTE_ENV, keep.slot).detached().io_idle().spawn() == {
-        .Ok(_) -> {}
-        .Err(_) -> {}
-    }
+    // A build that can't start leaves the `none` program in use.
+    _ := x64_file_spawn_detached(jet, argv, jet_cli_launch_env([JetCLIEnvVar]{JetCLIEnvVar{name: JET_CLI_SCRIPT_PROMOTE_ENV, value: keep.slot}}))
 }
 
 // The lock of `keep`'s background build when this process is that build and

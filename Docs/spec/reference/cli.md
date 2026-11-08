@@ -703,8 +703,12 @@ file keeps nothing, and a `--verbose` or traced run always compiles.
 A plain `jet run` compiles at the stock `optimize: none`, so the first run
 starts quickly. When a rerun reuses that program and neither a profile nor a
 flag chose the level, it also starts one background build of the same
-sources at `full`: the same `jet run` command, detached, at the lowest CPU
-priority and in the idle I/O class, printing nothing. That build keeps its
+sources at `full`: the same `jet run` command, detached (in a session of its
+own, not the program's child, with no terminal and its output discarded), at
+the lowest CPU priority and in the idle I/O class, printing nothing. The
+reused program still runs as a freshly compiled one does, in place of
+`jet run` with its process id, so a signal sent to that process reaches the
+program. That build keeps its
 program in the same slot, and later reruns run it. Every level means the same,
 so only speed changes. Only one build runs per slot: it holds the lock file
 `<slot>.full` beside the record while it runs. A build that
