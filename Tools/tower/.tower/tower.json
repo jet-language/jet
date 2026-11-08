@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6697,
-    "rev": 96227,
+    "nextNum": 6698,
+    "rev": 96241,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -64092,6 +64092,11 @@
         {
           "at": "2026-11-08",
           "by": "Main",
+          "text": "Owner ruling 2026-11-08 (Q13): c1, c3 and c8 (prompt once, refuse without a terminal, prompt lists every authority) removed; #6614 builds the allow-by-default model and removes the prompt path."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
           "text": "Main 2026-11-08: c7 is dropped. Ratified D-AUTH-DEFAULT1=A (#6614: every effect allowed unless denied, a note listing effects, ceilings) supersedes the prompt-and-refuse model in c1, c3, c7 and c8. G1Lead built c7 with c2 and found it breaks c5 (tests/cases/authority/script_basics_run_with_no_prompt_and_no_flags.case: bare #! basics.jet stops with E1803 undecided for Rand, Time), because c5 passes only through the implicit allow-all that c7 removes. Not landed, and the patch is discarded. It held the Authority.jet launch-word merge, Front.jet E2104 for jet run, 76 in-repo #! lines rewritten to -S jet -A, and the E1803 text, spec and cli.md updates. The part #6614 keeps, launch-line flags applying as if typed (so -S jet --deny=... works), is unlanded and belongs to #6614. Criteria c1, c3, c7 and c8 need rewording to D-AUTH-DEFAULT1=A or removal; owner to confirm."
         },
         {
@@ -64132,16 +64137,6 @@
       ],
       "criteria": [
         {
-          "n": 1,
-          "text": "A `#!/usr/bin/env jet` script that reads a file, run from a terminal, prompts once listing FS.Read and its path; \"always\" stores the answer and the next run does not prompt; editing the file prompts again (scripted pty proof).",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Superseded by D-AUTH-DEFAULT1=A (ratified on #6614, which supersedes D-SCRIPT-CONFIRM1): every effect is allowed by default with an effect notice, so the Run it? prompt, its always store, per-script prompt counts and launch-line grants no longer exist. The replacement behaviour is #6614 c3 (notice), c8 (URL or registry code asks), c9 (no terminal) and c10 (prompt path removed).",
-          "at": "2026-11-08T04:18:29.758Z",
-          "closure": "obsolete"
-        },
-        {
           "n": 2,
           "text": "The same script with `#!/usr/bin/env -S jet -A` (and with `jet run -A`) runs with no prompt, under both `./script` and `jet run script.jet`.",
           "status": "met",
@@ -64149,16 +64144,6 @@
           "verifiedBy": null,
           "evidence": "CardClose-1 2026-10-31 (wave 9b tree): w12 jet (on PATH as sc/sb5949/bin/jet). sc/sb5949/sa.jet (`#!/usr/bin/env -S jet -A`, reads tmp/data5949/a.txt): `./sa.jet` prints \"data-a\" exit 0 and `jet run sa.jet` prints \"data-a\" exit 0. plain.jet (no #! line) under `jet run -A plain.jet` prints \"data-a\" exit 0. None of them prompts. Control: `jet run plain.jet` gives \"E1803 Application authority is undecided for `FS.Read`\" exit 1",
           "at": "2026-10-31T18:01:35.774Z"
-        },
-        {
-          "n": 3,
-          "text": "Without a terminal, the same script without -A exits non-zero with an error that names `--allow=FS.Read:<path>` and says `-A` allows every effect; UI snapshot registered.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Superseded by D-AUTH-DEFAULT1=A (ratified on #6614, which supersedes D-SCRIPT-CONFIRM1): every effect is allowed by default with an effect notice, so the Run it? prompt, its always store, per-script prompt counts and launch-line grants no longer exist. The replacement behaviour is #6614 c3 (notice), c8 (URL or registry code asks), c9 (no terminal) and c10 (prompt path removed).",
-          "at": "2026-11-08T04:18:30.643Z",
-          "closure": "obsolete"
         },
         {
           "n": 4,
@@ -64196,16 +64181,6 @@
           "verifiedBy": null,
           "evidence": "Superseded by D-AUTH-DEFAULT1=A (ratified on #6614, which supersedes D-SCRIPT-CONFIRM1): every effect is allowed by default with an effect notice, so the Run it? prompt, its always store, per-script prompt counts and launch-line grants no longer exist. The replacement behaviour is #6614 c3 (notice), c8 (URL or registry code asks), c9 (no terminal) and c10 (prompt path removed).",
           "at": "2026-11-08T04:18:32.479Z",
-          "closure": "obsolete"
-        },
-        {
-          "n": 8,
-          "text": "Before any line runs, the prompt lists every authority the script can reach, from the checked effect set: each with its exact target when the path or host is a literal, and the source line that needs it. A pty test with a script that reads notes.txt and fetches https://example.com shows one prompt with both rows and no prompt mid-run.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Superseded by D-AUTH-DEFAULT1=A (ratified on #6614, which supersedes D-SCRIPT-CONFIRM1): every effect is allowed by default with an effect notice, so the Run it? prompt, its always store, per-script prompt counts and launch-line grants no longer exist. The replacement behaviour is #6614 c3 (notice), c8 (URL or registry code asks), c9 (no terminal) and c10 (prompt path removed).",
-          "at": "2026-11-08T04:18:33.341Z",
           "closure": "obsolete"
         },
         {
@@ -64345,11 +64320,12 @@
       "parentId": "c0svnelx",
       "needsAcceptance": false,
       "created": "2026-10-28T10:49:58.414Z",
-      "updated": "2026-11-08T16:01:01.865Z",
+      "updated": "2026-11-08T18:43:21.838Z",
       "updatedBy": "Main",
       "goals": [
         "G4"
-      ]
+      ],
+      "criteriaLastN": 21
     },
     {
       "id": "c050uwwc",
@@ -73525,6 +73501,11 @@
         {
           "at": "2026-11-08",
           "by": "Main",
+          "text": "Owner ruling 2026-11-08 (Q19): A. Public Core gets core.tasks.cpu_ns() -> Int (CPU time used by the current task) and core.tasks.current_task() returns a real task id; the compiler trace uses that public surface rather than a private route."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
           "text": "SchedLead commit 1/7 landed as afe2acc8c8: tasks run on fibers that park instead of blocking their worker thread; closed InlineAsm rails X64_FIBER_SWITCH and X64_GS_BASE_WRITE, gated by IRProgram.asm_rails. Its receipt: precommit rc=0, VERIFY OK, LaneCheck CHECK OK; focused task/cancel/generator/para/deadline/sleep cases and the concurrency goldens equal to baseline. #6403 r08: the quick task finishes in 98.7 us (base 2.9 s). 100000 cancel/timer/wake race rounds all accounted on every tier (base hangs). No leak over 3 x 10000 cancelled parked tasks. About 5.7 KB per parked task. w11 still loses to bun on wall (105.95 vs 94.66 ms); the root is the para_map limit cap at the core count, which is commit 2. Open: the ~32k live-fiber cap (vm.max_map_count) must degrade or diagnose, never crash; a 100k-task case is requested. #6403 c4 names a function that was removed; it gets reworded to the offload stats at c6."
         },
         {
@@ -73670,7 +73651,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T22:33:20.042Z",
-      "updated": "2026-11-08T17:57:16.718Z",
+      "updated": "2026-11-08T18:43:25.105Z",
       "updatedBy": "Main",
       "goals": [
         "G4"
@@ -100603,6 +100584,11 @@
         {
           "at": "2026-11-08",
           "by": "Main",
+          "text": "Owner rulings 2026-11-08. Q7: H1, core.crypto.Hasher really streams (new, update and digest stay; the public data field becomes private native SHA state). Q8: ship bwrap in the C toolchain pack for now, until the sandbox is built properly in Jet; the Jet sandbox is a longer-term card, not now (filed separately so bwrap removal is not lost). Q15: all five behaviors confirmed; no C++ standard library now (maybe a stretch goal)."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
           "text": "QuickLead landed 775f3b07ae (28 files; unverified by Main, queued for the batch). c1: jet run, jet build and jet x.c, with .cc, .cpp and .cxx as C++, go through ForeignLink jet_cli_native_c_tools; case run_entry/c_and_cpp_files_run_by_extension (cases run_entry PASS 18, FAIL 0). c2: E2116 UnhandledSourceExtension with a UI snapshot; #! scripts stay Jet. c4: golden Examples/Interop/FFI/PlainC.c PASS on O0, O1 and O2. c3 partial: E1275 now names its reason (Bubblewrap not on PATH) and pkg_sha256_hex is native. fetch-toolchain went from 23.2 s to 15.2 s (hyperfine, 3 runs, host load about 33). But jet run hello.c is still 25 to 28 s with no JET_CC_PACK_ROOT, and jet cc with bwrap takes 80.5 s real (13.0 s user); the rest waits on owner choices H and B. jet build hello.c with the pack takes 29.8 ms. Behavior choices built and pending owner confirmation: O0, O1 and O2 mapping; build output to .jet/build/<stem>; check, doc and dev refuse with E2116; no mixing .jet and .c; no C++ stdlib in the pack."
         }
       ],
@@ -100656,7 +100642,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-08T15:40:30.554Z",
-      "updated": "2026-11-08T16:51:22.275Z",
+      "updated": "2026-11-08T18:43:24.039Z",
       "updatedBy": "Main",
       "criteriaLastN": 4
     },
@@ -100678,6 +100664,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-08",
+          "by": "Main",
+          "text": "Owner Q8 ruling 2026-11-08: bwrap ships in the C toolchain pack as a stopgap; its removal (a Jet sandbox) is tracked on #6697, longer term."
+        },
         {
           "at": "2026-11-08",
           "by": "Main",
@@ -100739,7 +100730,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-08T15:46:43.606Z",
-      "updated": "2026-11-08T15:55:07.845Z",
+      "updated": "2026-11-08T18:44:05.884Z",
       "updatedBy": "Main",
       "criteriaLastN": 4
     },
@@ -100862,6 +100853,11 @@
         {
           "at": "2026-11-08",
           "by": "Main",
+          "text": "Owner ruling 2026-11-08 (Q9): \"lean towards A but need downsides engineered away\". Direction: a process-wide C gate. Before building, the design must remove or mitigate each downside of A (serialized parallel TLS handshakes and blocking C calls until mbedtls is ported, user C serialized forever, reentrancy when C calls back into Jet, a blocking C call stalling every other C caller, fork) and pass an adversarial review; the redesign goes back to the owner with each remaining cost named."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
           "text": "SchedLead started 2026-11-08. Scheduler c3 is paused and unlanded; notes are in the lane scratch c3-paused.md. Measured c3 state: w11 task-clock 23.8 to 19.6 ms, clones 20 to 12, RSS 4.3 MB. The Thread.jet THP stack fix folds into this card: Jet-mapped MAP_STACK stacks replace the madvise workaround (w11 RSS 13.7 to 5.5 MB, fib smoke 16.3 to 5.3 MB, measured on the unlanded patch)."
         },
         {
@@ -100920,7 +100916,7 @@
       "parentId": "c0lscvc9",
       "needsAcceptance": false,
       "created": "2026-11-08T15:46:55.183Z",
-      "updated": "2026-11-08T15:56:28.862Z",
+      "updated": "2026-11-08T18:43:22.905Z",
       "updatedBy": "Main",
       "criteriaLastN": 4
     },
@@ -101029,6 +101025,11 @@
         {
           "at": "2026-11-08",
           "by": "Main",
+          "text": "Owner ruling 2026-11-08 (Q14): Go resolver semantics, not exact musl getaddrinfo. Owner words: \"yes, go with go. We want pareto behavior, what is correct and the best method for the majority of situations. more advanced behavior and apis can be built for experts beyond that.\" c2 reworded."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
           "text": "Main 2026-11-08 correction: musl never reads /etc/nsswitch.conf, so the keep-behavior criterion means the Jet resolver does not read it either. The body text \"nsswitch.conf hosts line\" was wrong. The resolver matches musl 1.2.6 getaddrinfo exactly: search-list failure aborts with EAI_AGAIN or EAI_NODATA, both A and AAAA must answer, the default nameserver is 127.0.0.1, results are RFC 6724 sorted. A switch to Go-style semantics (continue the search on a candidate failure, keep A answers when AAAA times out) is an owner question."
         },
         {
@@ -101049,12 +101050,12 @@
         },
         {
           "n": 2,
-          "text": "For localhost, names in /etc/hosts, numeric hosts, a local test DNS server (A, AAAA, CNAME, NXDOMAIN, SERVFAIL, truncation then TCP, timeout) and search domains, the Jet resolver returns the same addresses in the same order and the same error kinds as getaddrinfo did; case-tested.",
+          "text": "For localhost, names in /etc/hosts, numeric hosts, a local test DNS server (A, AAAA, CNAME, NXDOMAIN, SERVFAIL, truncation then TCP, timeout) and search domains, the Jet resolver follows Go pure-resolver semantics (owner ruling 2026-11-08): a failed search candidate (timeout, SERVFAIL, NODATA) moves on to the next candidate, and when A answers but AAAA fails or times out the A answers are returned. Addresses come back in RFC 6724 order with the error kinds core.net already defines; every difference from musl getaddrinfo is listed in the case file and case-tested.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-08T15:47:04.748Z"
+          "at": "2026-11-08T18:43:16.616Z"
         },
         {
           "n": 3,
@@ -101078,7 +101079,7 @@
       "parentId": "c0lscvc9",
       "needsAcceptance": false,
       "created": "2026-11-08T15:47:02.773Z",
-      "updated": "2026-11-08T16:37:43.856Z",
+      "updated": "2026-11-08T18:43:17.613Z",
       "updatedBy": "Main",
       "criteriaLastN": 3
     },
@@ -101484,6 +101485,63 @@
       "updated": "2026-11-08T18:36:24.682Z",
       "updatedBy": "Main",
       "criteriaLastN": 2
+    },
+    {
+      "id": "c0dlrfkp",
+      "num": 6697,
+      "title": "No C: a Jet Linux sandbox replaces the bwrap binary shipped in the C toolchain pack",
+      "body": "Owner order 2026-11-08 (Q8): \"B4 BUT that is a longer term card I dont want done now. for the time being, ship bwrap until the sandbox is built PROPERLY in jet, make sure this task is not lost so we dont forget to remove bwrap in the future.\" Context: #6686 found no bwrap on a NixOS host, so jet cc refused with E1275. The stopgap ships bwrap (a C binary) in the C toolchain pack. This card builds the sandbox in Jet (namespaces plus landlock or seccomp, ratified D-PORTABLE1=A: Jet own sandbox) and removes bwrap. Longer term: not to start before the owner says so. Related: #6687 (Jet depends on no other language), #4268 (authority and sandbox boundaries).",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Process isolation for jet cc and every other sandboxed launch is done by Jet code (user, mount, pid and network namespaces, landlock rules or a seccomp filter) with the same confinement bwrap gave; a case proves each refused access.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T18:44:02.638Z"
+        },
+        {
+          "n": 2,
+          "text": "The bwrap binary is gone from the C toolchain pack and from every launch path, with no fallback; the pack is re-pinned without it.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T18:44:03.737Z"
+        },
+        {
+          "n": 3,
+          "text": "On a host without unprivileged user namespaces, the launch refuses with a registered diagnostic (what/why/fix and a UI snapshot) naming the missing kernel feature.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T18:44:04.877Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-08T18:43:54.516Z",
+      "updated": "2026-11-08T18:44:04.877Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 3
     }
   ],
   "decisions": [
@@ -189534,6 +189592,104 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-08T18:44:05.885Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0lscvc9",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-08T18:44:04.877Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0dlrfkp",
+      "note": "#3 On a host without unprivileged user namespaces, the launch r"
+    },
+    {
+      "at": "2026-11-08T18:44:03.737Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0dlrfkp",
+      "note": "#2 The bwrap binary is gone from the C toolchain pack and from "
+    },
+    {
+      "at": "2026-11-08T18:44:02.638Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0dlrfkp",
+      "note": "#1 Process isolation for jet cc and every other sandboxed launc"
+    },
+    {
+      "at": "2026-11-08T18:43:54.516Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0dlrfkp",
+      "note": "No C: a Jet Linux sandbox replaces the bwrap binary shipped in the C toolchain pack"
+    },
+    {
+      "at": "2026-11-08T18:43:25.105Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c02a1ynr",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-08T18:43:24.039Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c086wraw",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-08T18:43:22.905Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0x92nsv",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-08T18:43:21.838Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0wi8ere",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-08T18:43:20.800Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0wi8ere",
+      "note": "#1: Owner ruling 2026-11-08 (Q13): remove. The prompt model is superseded by ratified D-AUTH-DEFAULT1=A (#6614).; was [met]: A `#!/usr/bin/env jet` script that reads a file, run from a terminal, prompts once listing FS.Read and its path; \"always\" stores the answer and the next run does not prompt; editing the file prompts a"
+    },
+    {
+      "at": "2026-11-08T18:43:19.726Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0wi8ere",
+      "note": "#3: Owner ruling 2026-11-08 (Q13): remove. The prompt model is superseded by ratified D-AUTH-DEFAULT1=A (#6614).; was [met]: Without a terminal, the same script without -A exits non-zero with an error that names `--allow=FS.Read:<path>` and says `-A` allows every effect; UI snapshot registered."
+    },
+    {
+      "at": "2026-11-08T18:43:18.706Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0wi8ere",
+      "note": "#8: Owner ruling 2026-11-08 (Q13): remove. The prompt model is superseded by ratified D-AUTH-DEFAULT1=A (#6614).; was [met]: Before any line runs, the prompt lists every authority the script can reach, from the checked effect set: each with its exact target when the path or host is a literal, and the source line that needs "
+    },
+    {
+      "at": "2026-11-08T18:43:17.613Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0esaekb",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-08T18:43:16.616Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0esaekb",
+      "note": "#2: Owner ruling 2026-11-08 on Q14: yes, go with Go. We want pareto behavior, what is correct and the best method for the majority of situations; more advanced behavior and APIs can be built for experts beyond that.; was: For localhost, names in /etc/hosts, numeric hosts, a local test DNS server (A, AAAA, CNAME, NXDOMAIN, SERVFAIL, truncation then TCP, timeout) and search domains, the Jet resolver returns the same addr"
+    },
     {
       "at": "2026-11-08T18:36:29.240Z",
       "by": "Main",
