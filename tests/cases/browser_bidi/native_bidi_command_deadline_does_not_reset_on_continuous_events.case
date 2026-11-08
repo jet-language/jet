@@ -1,14 +1,13 @@
-# tests/browser_bidi.rs::native_bidi_command_deadline_does_not_reset_on_continuous_events at tests/browser_bidi.rs:1152; hand-port (mock BiDi endpoint: tests/fixtures/browser_bidi_mock.mjs on a {free-port})
+# tests/browser_bidi.rs::native_bidi_command_deadline_does_not_reset_on_continuous_events at tests/browser_bidi.rs:1152; hand-port (mock BiDi endpoint: tests/fixtures/BrowserBidiMock.jet on a {free-port})
 fixture: native_bidi_command_deadline_does_not_reset_on_continuous_events.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
 env: JETPACK_ROOT={work}/jetpack
 env: JETPACK_ENV=1
-requires: tool:node
 write: browser_bidi_deadline.jet native_bidi_command_deadline_does_not_reset_on_continuous_events.fixture/run.template
 step: jet build browser_bidi_deadline.jet
 exit: 0
-session deadline raw: node {root}/tests/fixtures/browser_bidi_mock.mjs continuous-events {free-port:deadline}
+session deadline raw: {jet} run --allow=Exec,FS.Read,FS.Write,Net,Time {root}/tests/fixtures/BrowserBidiMock.jet -- continuous-events {free-port:deadline}
 await: file continuous-events.ready timeout 30s
 step run: built
 exit: 0

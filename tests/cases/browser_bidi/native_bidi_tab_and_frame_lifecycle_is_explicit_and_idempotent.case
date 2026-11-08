@@ -1,14 +1,13 @@
-# tests/browser_bidi.rs::native_bidi_tab_and_frame_lifecycle_is_explicit_and_idempotent at tests/browser_bidi.rs:824; hand-port (mock BiDi endpoint: tests/fixtures/browser_bidi_mock.mjs on a {free-port})
+# tests/browser_bidi.rs::native_bidi_tab_and_frame_lifecycle_is_explicit_and_idempotent at tests/browser_bidi.rs:824; hand-port (mock BiDi endpoint: tests/fixtures/BrowserBidiMock.jet on a {free-port})
 fixture: native_bidi_tab_and_frame_lifecycle_is_explicit_and_idempotent.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
 env: JETPACK_ROOT={work}/jetpack
 env: JETPACK_ENV=1
-requires: tool:node
 write: browser_bidi_tab_frame.jet native_bidi_tab_and_frame_lifecycle_is_explicit_and_idempotent.fixture/run.template
 step: jet build browser_bidi_tab_frame.jet
 exit: 0
-session tab_frame raw: node {root}/tests/fixtures/browser_bidi_mock.mjs script {free-port:tab_frame} tab_frame.json
+session tab_frame raw: {jet} run --allow=Exec,FS.Read,FS.Write,Net,Time {root}/tests/fixtures/BrowserBidiMock.jet -- script {free-port:tab_frame} tab_frame.json
 await: file tab_frame.ready timeout 30s
 step run: built
 exit: 0

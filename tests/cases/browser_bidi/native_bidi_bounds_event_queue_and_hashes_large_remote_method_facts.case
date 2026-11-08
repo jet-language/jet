@@ -1,14 +1,13 @@
-# tests/browser_bidi.rs::native_bidi_bounds_event_queue_and_hashes_large_remote_method_facts at tests/browser_bidi.rs:1106; hand-port (mock BiDi endpoint: tests/fixtures/browser_bidi_mock.mjs on a {free-port})
+# tests/browser_bidi.rs::native_bidi_bounds_event_queue_and_hashes_large_remote_method_facts at tests/browser_bidi.rs:1106; hand-port (mock BiDi endpoint: tests/fixtures/BrowserBidiMock.jet on a {free-port})
 fixture: native_bidi_bounds_event_queue_and_hashes_large_remote_method_facts.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
 env: JETPACK_ROOT={work}/jetpack
 env: JETPACK_ENV=1
-requires: tool:node
 write: browser_bidi_storm.jet native_bidi_bounds_event_queue_and_hashes_large_remote_method_facts.fixture/run.template
 step: jet build browser_bidi_storm.jet
 exit: 0
-session storm raw: node {root}/tests/fixtures/browser_bidi_mock.mjs event-storm {free-port:storm}
+session storm raw: {jet} run --allow=Exec,FS.Read,FS.Write,Net,Time {root}/tests/fixtures/BrowserBidiMock.jet -- event-storm {free-port:storm}
 await: file event-storm.ready timeout 30s
 step run: built
 exit: 0

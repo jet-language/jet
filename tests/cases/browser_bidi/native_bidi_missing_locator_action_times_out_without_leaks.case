@@ -1,14 +1,13 @@
-# tests/browser_bidi.rs::native_bidi_missing_locator_action_times_out_without_leaks at tests/browser_bidi.rs:1494; hand-port (mock BiDi endpoint: tests/fixtures/browser_bidi_mock.mjs on a {free-port})
+# tests/browser_bidi.rs::native_bidi_missing_locator_action_times_out_without_leaks at tests/browser_bidi.rs:1494; hand-port (mock BiDi endpoint: tests/fixtures/BrowserBidiMock.jet on a {free-port})
 fixture: native_bidi_missing_locator_action_times_out_without_leaks.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
 env: JETPACK_ROOT={work}/jetpack
 env: JETPACK_ENV=1
-requires: tool:node
 write: browser_bidi_missing_locator.jet native_bidi_missing_locator_action_times_out_without_leaks.fixture/run.template
 step: jet build browser_bidi_missing_locator.jet
 exit: 0
-session missing_locator raw: node {root}/tests/fixtures/browser_bidi_mock.mjs script {free-port:missing_locator} missing_locator.json
+session missing_locator raw: {jet} run --allow=Exec,FS.Read,FS.Write,Net,Time {root}/tests/fixtures/BrowserBidiMock.jet -- script {free-port:missing_locator} missing_locator.json
 await: file missing_locator.ready timeout 30s
 step run: built
 exit: 0

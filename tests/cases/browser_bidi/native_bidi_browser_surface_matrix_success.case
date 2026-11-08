@@ -1,14 +1,13 @@
-# tests/browser_bidi.rs::native_bidi_browser_surface_matrix_success at tests/browser_bidi.rs:2937; hand-port (mock BiDi endpoint: tests/fixtures/browser_bidi_mock.mjs on a {free-port})
+# tests/browser_bidi.rs::native_bidi_browser_surface_matrix_success at tests/browser_bidi.rs:2937; hand-port (mock BiDi endpoint: tests/fixtures/BrowserBidiMock.jet on a {free-port})
 fixture: native_bidi_browser_surface_matrix_success.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
 env: JETPACK_ROOT={work}/jetpack
 env: JETPACK_ENV=1
-requires: tool:node
 write: browser_bidi_matrix.jet native_bidi_browser_surface_matrix_success.fixture/run.template
 step: jet build browser_bidi_matrix.jet
 exit: 0
-session matrix raw: node {root}/tests/fixtures/browser_bidi_mock.mjs script {free-port:matrix} matrix.json
+session matrix raw: {jet} run --allow=Exec,FS.Read,FS.Write,Net,Time {root}/tests/fixtures/BrowserBidiMock.jet -- script {free-port:matrix} matrix.json
 await: file matrix.ready timeout 30s
 step run: built
 exit: 0

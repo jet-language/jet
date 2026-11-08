@@ -1,14 +1,13 @@
-# tests/browser_bidi.rs::native_bidi_checked_expert_cdp_integrates_with_page_lifecycle at tests/browser_bidi.rs:2488; hand-port (mock BiDi endpoint: tests/fixtures/browser_bidi_mock.mjs on a {free-port})
+# tests/browser_bidi.rs::native_bidi_checked_expert_cdp_integrates_with_page_lifecycle at tests/browser_bidi.rs:2488; hand-port (mock BiDi endpoint: tests/fixtures/BrowserBidiMock.jet on a {free-port})
 fixture: native_bidi_checked_expert_cdp_integrates_with_page_lifecycle.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
 env: JETPACK_ROOT={work}/jetpack
 env: JETPACK_ENV=1
-requires: tool:node
 write: browser_bidi_cdp_lifecycle.jet native_bidi_checked_expert_cdp_integrates_with_page_lifecycle.fixture/run.template
 step: jet build browser_bidi_cdp_lifecycle.jet
 exit: 0
-session cdp_lifecycle raw: node {root}/tests/fixtures/browser_bidi_mock.mjs script {free-port:cdp_lifecycle} cdp_lifecycle.json
+session cdp_lifecycle raw: {jet} run --allow=Exec,FS.Read,FS.Write,Net,Time {root}/tests/fixtures/BrowserBidiMock.jet -- script {free-port:cdp_lifecycle} cdp_lifecycle.json
 await: file cdp_lifecycle.ready timeout 30s
 step run: built
 exit: 0
