@@ -13,10 +13,11 @@ use {
     jetpack_artifact_store.[ArtifactRestore, ArtifactStore]
 }
 
-// A built `jet build` executable: its path and the lines its build reports
-// on stderr before the effect summary.
+// A built `jet build` executable: its path, the lines its build reports
+// on stderr before the effect summary, and whether the store gave it back
+// instead of the backend writing it.
 JetCLIStoredBuild: enum {
-    Written(path: String, log: String)
+    Written(path: String, log: String, reused: Bool)
     Failed(output: JetDriverVerbOutput)
 }
 
@@ -53,7 +54,7 @@ jet_cli_build_stored: fn(file: String, name: String, color: Bool, options: Build
                 if restored == {
                     .Hit(_, _) -> {
                         if verbose -> log = "{log}[build] cache hit -> reused cached binary\n"
-                        return JetCLIStoredBuild.Written{path: binary, log: log}
+                        return JetCLIStoredBuild.Written{path: binary, log: log, reused: true}
                     }
                     .Corrupt -> log = "{log}note: removed a corrupt cached binary of `{name}` from the store; rebuilding it\n"
                     .Missing -> {}
@@ -68,7 +69,7 @@ jet_cli_build_stored: fn(file: String, name: String, color: Bool, options: Build
     built := jet_cli_build_binary(file, name, "build", color, options, result, inputs, snapshot)
     if built.move() == {
         .Failed(failure) -> JetCLIStoredBuild.Failed{output: failure}
-        .Image(executable, path) -> JetCLIStoredBuild.Written{path: path, log: "{log}{jet_cli_build_store(store, key, path, executable, verbose)}"}
+        .Image(executable, path) -> JetCLIStoredBuild.Written{path: path, log: "{log}{jet_cli_build_store(store, key, path, executable, verbose)}", reused: false}
     }
 }
 

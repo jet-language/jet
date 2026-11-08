@@ -5085,6 +5085,21 @@ content, argv, authority, toolchain, probes, signing identity, and
 generated-source hashes. A cache hit restores only declared outputs from the
 local CAS.
 
+When `jet build` runs the graph of a `build: fn`, it leaves two records under
+`.jet/build/` beside the build entry, whether or not the build succeeded. `receipt.json` is
+the `core.build` `BuildGraph` it ran: its targets, steps with their keys, files
+and the compiler's own nodes, with each step that ran marked a cache hit or
+miss in `cache_hit` and listed in `cache_hits` when its outputs came from the
+store. `times.json` is its `BuildTimes`: one `BuildTime` row (`name`, `kind`
+`step`, `host`, `image` or `library`, `wall_ms`, `reused`) per step and target,
+in the order each finished. A step's `wall_ms` is the time of the steps that ran
+with it, and a target is `reused` when its image came from the store. Both are
+JSON objects whose fields are the value's own, in declaration order.
+`jet inspect build --times` shows the last build's rows (`kind`, `name`,
+`wall_ms`, and `made` or `reused`), or the record itself under `--json`;
+before any build has recorded one it fails with E2104. Example:
+[`tests/cases/build_entry/run_steps_record_the_graph_and_times.case`](../../tests/cases/build_entry/run_steps_record_the_graph_and_times.case).
+
 There is no ambient execution fallback. On Linux each action runs under
 bubblewrap with private mount, PID, IPC, UTS, and network namespaces. Only
 declared inputs enter its writable tree and only declared outputs leave it.

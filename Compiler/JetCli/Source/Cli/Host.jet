@@ -1461,9 +1461,10 @@ jet_cli_build_result: fn(file: String, name: String, source: String, color: Bool
     } else {
         if jet_cli_build_stored(file, name, color, options, result, inputs, snapshot, verbose) == {
             .Failed(failure) -> return failure
-            .Written(path, lines) -> {
+            .Written(path, lines, reused) -> {
                 log = lines
                 if sbom -> built = jet_cli_build_sbom(file, name, source, path, color, quiet)
+                built.reused = reused
             }
         }
     }

@@ -104,6 +104,25 @@ BuildGraph: struct {
     nodes: [BuildGraphNode]
 }
 
+/// One target or step a `jet build` ran: its name, its kind (`step`, `image`
+/// for an executable it built, `library` for one it checked, or `host` for an
+/// executable it built for the machine running the build), its wall time in
+/// milliseconds and whether its result was reused from the store instead of
+/// made again. Steps that ran together each carry the time of their round.
+BuildTime: struct {
+    name: String
+    kind: String
+    wall_ms: Int
+    reused: Bool
+}
+
+/// The times of one `jet build`, in the order its targets and steps finished,
+/// as `.jet/build/times.json` records them. They stay out of BuildGraph, so
+/// receipt_diff finds two equal graphs equal however long each build took.
+BuildTimes: struct {
+    rows: [BuildTime]
+}
+
 /// `graph` is a compiler-owned query.  Runtime code cannot manufacture a
 /// BuildPlan, so failing closed here is preferable to returning an empty
 /// graph that looks like a successful build.  The comptime dispatcher replaces

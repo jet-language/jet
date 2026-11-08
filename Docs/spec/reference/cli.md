@@ -503,6 +503,10 @@ in the `inspect.build` status envelope), not an invented empty BuildPlan.
 Target and action explanations use the checked declaration; file explanations
 use its retained ownership, consumers, targets, and generated-source digest.
 Unobserved action-cache status remains `unknown`.
+`inspect build --times` instead reads the `.jet/build/times.json` record the
+last `jet build` of the package wrote and shows how long each step and target
+took and whether it was made or reused (`--json`: the `BuildTimes` record under
+`times`); with no record it fails with E2104.
 The default-pipeline path still checks the package semantically. Failed queries
 use the standard `diagnostics` JSON status envelope or human problem-count
 report, with advisory lints shown only under `--verbose`/`-v`; internal query
