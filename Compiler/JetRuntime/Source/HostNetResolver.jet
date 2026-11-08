@@ -106,11 +106,32 @@ net_resolve_fill: fn(answers: I64, port: I64, rows: I64) {
     net_resolver_job_drop(job)
     I64{0}
 }
-// An IP literal needs no lookup: getaddrinfo with AI_NUMERICHOST (4) and
-// SOCK_STREAM answers it on the caller's thread without blocking, so it
-// spawns no resolver worker. False for any other host, which the worker
-// resolves (and reports) as before. Scratch: hints0..47, addrinfo* 48.
+// An IP literal needs no lookup. inet_pton accepts exactly the strict IPv4
+// dotted quad and the scope-free IPv6 text, and getaddrinfo would answer each
+// with that one address, so these forms build their row directly instead of
+// paying libc's per-call allocation. Other numeric forms (inet_aton
+// shorthand, a scoped IPv6 address) still take getaddrinfo with
+// AI_NUMERICHOST (4) and SOCK_STREAM, which answers them on the caller's
+// thread without blocking. Neither path spawns a resolver worker. False for
+// any other host, which the worker resolves (and reports) as before.
+// Scratch: hints0..47, addrinfo* 48.
 net_resolve_numeric: fn(name: I64, port: I64, rows_out: I64, length_out: I64) -> Bool {
+    row: jet_rt_alloc(I64{56}, I64{8})
+    thread_zero(row, I64{56})
+    family := I64{0}
+    if (net_i32(net_route_inet_pton(I64{2}, name, wrapping(row + I64{8}))) == I64{1}) {
+        family = I64{4}
+    } else if (net_i32(net_route_inet_pton(I64{10}, name, wrapping(row + I64{8}))) == I64{1}) {
+        family = I64{6}
+    }
+    if (family != I64{0}) {
+        net_put(row, I64{0}, family)
+        net_put(row, I64{24}, port)
+        net_put(rows_out, I64{0}, row)
+        net_put(length_out, I64{0}, I64{1})
+        return true
+    }
+    jet_rt_free(row, I64{56}, I64{8})
     scratch: jet_rt_alloc(I64{56}, I64{8})
     thread_zero(scratch, I64{56})
     net_store_uint(scratch, I64{4}, I64{4})

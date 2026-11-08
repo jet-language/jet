@@ -1,0 +1,46 @@
+use {
+    net: core.net
+    client: core.http.client
+}
+
+http_crlf: fn() -> String { String.from_bytes([U8]{13, 10}) ?? panic("CRLF") }
+
+// Answers `count` requests, one connection each, with the request's Host line
+// as the body, so the client sees which listener its host text reached.
+serve: fn(listener: net.TCPListener, count: Int) {
+    crlf: http_crlf()
+    loop _ in 0..<count {
+        stream := net.tcp_accept(listener) ?? panic("accept")
+        net.set_read_timeout(stream, 5000) ?? panic("read timeout")
+        request: String.from_bytes(net.tcp_read_bytes(stream, 4096) ?? panic("read request")) ?? panic("request UTF-8")
+        host := ""
+        loop line in request.lines() {
+            if line.starts_with("host:") || line.starts_with("Host:") -> host = line.slice(5, line.len()).trim()
+        }
+        reply: "HTTP/1.1 200 OK{crlf}Content-Length: {host.len()}{crlf}Connection: close{crlf}{crlf}{host}"
+        net.tcp_write_all_bytes(stream, reply.bytes()) ?? panic("write response")
+        net.tcp_close(stream) ?? panic("close peer")
+    }
+}
+
+// Every host form must reach the listener bound on `bind`: the peer echoes
+// the Host line it received, so the body names the request it answered.
+check_hosts: fn(bind: String, hosts: [String]) {
+    listener: net.tcp_listen(bind) ?? panic("listen {bind}")
+    port: net.socket_port(net.listener_local_socket_addr(listener) ?? panic("address {bind}"))
+    peer: task { serve(listener, hosts.len()) }
+    loop host in hosts {
+        response: client.request("GET", "http://{host}:{port}/").send() ?? panic("request to {host}")
+        body: response.text() ?? panic("body from {host}")
+        assert(body == ("{host}:{port}"), "{host} reached the peer on {bind}")
+    }
+    peer.join() ?? panic("peer on {bind}")
+}
+
+// A strict IPv4 dotted quad and scope-free IPv6 text are decoded without a
+// lookup; the inet_aton shorthand forms still take the platform resolver.
+// Both must name the same address the platform resolver gives.
+#Test("core_http_client_numeric_hosts_connect_to_the_literal_address") {
+    check_hosts("127.0.0.1:0", ["127.0.0.1", "127.1", "127.000.000.001", "0x7f.0.0.1", "[::ffff:127.0.0.1]"])
+    check_hosts("[::1]:0", ["[::1]", "[0:0:0:0:0:0:0:1]", "[0000:0000:0000:0000:0000:0000:0000:0001]"])
+}
