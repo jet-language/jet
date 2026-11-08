@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6698,
-    "rev": 96246,
+    "rev": 96250,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -78146,12 +78146,12 @@
         },
         {
           "n": 9,
-          "text": "(from #6257 Is Float Comparable? The generic bound `T: Comparable` admit) Bound, derive and diagnostic agree on whether Float is Comparable, pinned by UI tests",
+          "text": "Float is Comparable everywhere (owner ruling 2026-11-08, Q21 A): T: Comparable admits Float; derive, compare, sort, min and max order Floats by IEEE 754 totalOrder (-NaN < -inf < ... < -0.0 < +0.0 < ... < +inf < NaN); plain < on Float stays the IEEE operator. Bound, derive and diagnostics agree, pinned by cases on O0, O1 and O2 (a sort of a list holding NaN and -0.0) and UI tests.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-30T07:51:16.996Z"
+          "at": "2026-11-08T18:49:35.954Z"
         },
         {
           "n": 11,
@@ -78927,7 +78927,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T00:04:45.539Z",
-      "updated": "2026-11-07T03:47:57.233Z",
+      "updated": "2026-11-08T18:49:35.954Z",
       "updatedBy": "Main",
       "criteriaLastN": 122
     },
@@ -89607,6 +89607,11 @@
         {
           "at": "2026-11-08",
           "by": "Main",
+          "text": "Owner ruling 2026-11-08 (Q3): recommended option. interval stays Receiver<Int> tick counts (no interval<T>); waitany on an empty list is a precondition panic."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
           "text": "G1Lead landed 9b21994eb3: typed task channels. recv, get, result and wait return T? (None means closed and drained), and the -1 sentinel is gone. waitall returns [T?]; waitany returns (index, T?); after<T> carries any value. interval stays Receiver<Int> pending the owner (c1 question). Case task_state_tiers/typed_task_channels_carry_records_on_every_tier: PASS on O0, O1, O2 and web for a plain channel. The task parts have no web step, because tasks are not available on the web target yet. Finding, not changed: on native, closing a receiver never sets the cancelled flag, so is_cancelled is always false; the web Channel.js sets it. Also, Core in-file #Test blocks cannot run: jet test Core refuses with E1355."
         },
         {
@@ -89623,12 +89628,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "`Receiver<T>` carries any sendable type; `after`, `interval`, `recv`, `waitall` and `waitany` are generic; a case sends a record through a channel on O0, O1 and O2 and web.",
+          "text": "Receiver<T> carries any sendable type; after, recv, waitall and waitany are generic, and interval(period) -> Receiver<Int> delivers tick counts 1, 2, 3 (owner ruling 2026-11-08, Q3 A: a caller wanting a payload maps the tick); a case sends a record through a channel on O0, O1, O2 and web.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T03:30:02.243Z"
+          "at": "2026-11-08T18:49:32.838Z"
         },
         {
           "n": 2,
@@ -89638,6 +89643,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-08T11:28:30.565Z"
+        },
+        {
+          "n": 3,
+          "text": "waitany on an empty list stops with a precondition panic whose message says waitany needs at least one receiver (owner ruling 2026-11-08, Q3); a case proves it on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T18:49:33.937Z"
         }
       ],
       "refs": [],
@@ -89652,9 +89666,9 @@
       "parentId": "c085f598",
       "needsAcceptance": false,
       "created": "2026-11-01T01:15:10.831Z",
-      "updated": "2026-11-08T15:38:31.074Z",
+      "updated": "2026-11-08T18:49:34.948Z",
       "updatedBy": "Main",
-      "criteriaLastN": 2
+      "criteriaLastN": 3
     },
     {
       "id": "c0pjwkhn",
@@ -189597,6 +189611,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-08T18:49:35.954Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0oev2ib",
+      "note": "#9: Owner ruling 2026-11-08 on Q21: A.; was: (from #6257 Is Float Comparable? The generic bound `T: Comparable` admit) Bound, derive and diagnostic agree on whether Float is Comparable, pinned by UI tests"
+    },
+    {
+      "at": "2026-11-08T18:49:34.948Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0z2nw1h",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-08T18:49:33.937Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0z2nw1h",
+      "note": "#3 waitany on an empty list stops with a precondition panic who"
+    },
+    {
+      "at": "2026-11-08T18:49:32.838Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0z2nw1h",
+      "note": "#1: Owner ruling 2026-11-08 on Q3: the recommendation (A plus the panic).; was: `Receiver<T>` carries any sendable type; `after`, `interval`, `recv`, `waitall` and `waitany` are generic; a case sends a record through a channel on O0, O1 and O2 and web."
+    },
     {
       "at": "2026-11-08T18:48:14.106Z",
       "by": "Main",
