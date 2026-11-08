@@ -1915,8 +1915,9 @@ jet_cli_script_launch: fn(keep: JetCLIScriptKeep?, authority: JetCLIAuthority, e
 
 // The background `full` build a reused `none` program started
 // (ScriptCache.jet jet_cli_script_promote): compile `file` as its plain run
-// did but at the optimize level `full`, keep the program in that run's slot,
-// and end without running it or printing anything. Its threads run at the
+// did, with every option of that run (`--observe` and `--log` among them)
+// but the optimize level `full`, keep the program in that run's slot, and
+// end without running it or printing anything. Its threads run at the
 // lowest CPU priority.
 jet_cli_compile_promoted: fn(file: String, source: String, json: Bool, options: BuildOptions, threads: Int?, invocation: JetCLIInvocationAuthority?) -> JetCLIRunStep {
     jet_cli_script_lower_priority()
@@ -1924,7 +1925,7 @@ jet_cli_compile_promoted: fn(file: String, source: String, json: Bool, options: 
     keep: if held == .Held(snapshot) -> jet_cli_script_keeper(file, options, snapshot) else -> None
     if keep == .Val(kept) {
         lock: jet_cli_script_promotion(kept) ?? return jet_cli_promoted_end()
-        full: jet_cli_script_full_options(options)
+        full: jet_cli_build_options_set(options, "optimize", JET_CLI_SCRIPT_LEVEL_FULL)
         prepared: if held.move() == {
             .Held(snapshot) -> jet_cli_prepare_request(snapshot, false, threads, JetDriverCompileMode.Program, kept.core_files)
             .Refused(refusal) -> JetCLIPrepared.Refused{output: refusal}

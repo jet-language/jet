@@ -39,7 +39,7 @@ use {
         JetDriverVerbOutput,
         schema_cache_dir,
     ]
-    jet_foundation.[BuildOptionChoice, BuildOptionLayer, BuildOptions, CORE_SOURCE_OWNED_ROWS, build_options_key]
+    jet_foundation.[BuildOptionLayer, BuildOptions, CORE_SOURCE_OWNED_ROWS, build_options_key]
     jet_lexer.[TOKEN_SEMI, lex]
 }
 
@@ -319,20 +319,6 @@ jet_cli_script_level_stock: fn(options: BuildOptions) -> Bool Never! {
         if choice.name == "optimize" -> return choice.layer == BuildOptionLayer.Stock
     }
     false
-}
-
-// `options` with the optimize level `full`, from the same layer: the options
-// of a reused program's background build.
-jet_cli_script_full_options: fn(options: BuildOptions) -> BuildOptions Never! {
-    values := [BuildOptionChoice]{}
-    loop choice in options.values {
-        if choice.name != "optimize" {
-            values.push(choice.copy())
-            next
-        }
-        values.push(BuildOptionChoice{name: choice.name.copy(), value: JET_CLI_SCRIPT_LEVEL_FULL, layer: choice.layer, written: choice.written.copy(), site: choice.site.copy(), pinned: choice.pinned})
-    }
-    BuildOptions{command: options.command.copy(), profile: options.profile.copy(), written: options.written.copy(), values: values, settings: options.settings.copy(), gates: options.gates.copy()}
 }
 
 // The lock file of `slot`'s background `full` build in `directory`: a build
