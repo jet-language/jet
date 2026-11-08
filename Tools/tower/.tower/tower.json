@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6705,
-    "rev": 96334,
+    "nextNum": 6706,
+    "rev": 96336,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -40721,65 +40721,6 @@
       "goals": []
     },
     {
-      "id": "c06tdlnf",
-      "num": 3677,
-      "title": "Named optional tuple returned from split_once is rejected: E0108 needs ?(after, before) but the value is ?(before, after)",
-      "body": "Found by the Jetpack port (#3590, PkgModelFinish, Opus 5.5); reproduced by the lead with target/debug/jet built 2026-09-26 03:05. Command: systemd-run --user --scope --quiet --expand-environment=no -p MemoryMax=4G -p MemorySwapMax=0 timeout 300 target/debug/jet run src/<file>.jet (from the repro directory; package.jet beside src/). Repro ~/.cache/jet-luna/PkgModelFinish/defects/E-split-once-tuple/src/split.jet:\n\nfn split_assign(text: String) -> ?(before: String, after: String) {\n    text.split_once(\"=\")\n}\n\njet run: E0108 \"This needs ?(after: String, before: String), but the value is ?(before: String, after: String)\". Named-tuple identity seems to depend on field order in one place and on sorted order in another; the declared type and split_once's type are the same set of named fields.",
-      "kind": "bug",
-      "track": "epoch",
-      "epoch": "e3",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-10-01",
-          "by": "owner",
-          "text": "TowerCloser under owner exception (#4013, 2026-10-01): tagged obe:bootstrap-done. Frozen until the bootstrap finishes and the Rust front end retires (D-EXEC1, #4013). Frozen 2026-09-28 as RUST_ONLY_ARCHIVE: defect is in the Rust compiler path and the Jet compiler already handles it; the Rust front end retires at bootstrap. The sweep closes this card when that step lands."
-        },
-        {
-          "at": "2026-09-28",
-          "by": "Pip",
-          "text": "Triage 2026-09-28 (Luna 5.6 high legwork, Pip reviewed): RUST_ONLY_ARCHIVE. The archived Rust report is not evidence against Jet: Jet declares split_once's named tuple explicitly and uses order-sensitive tuple identity (CoreValueSignatures.jet:733-740; Types.jet:710-716), with a dedicated lowering route (BuiltinMethods.jet:521-524). Evidence: The card reports the named-tuple order mismatch at ~/.cache/jet-luna/triage/bugs-4.json:289-318. ; Compiler/JetFoundation/Source/Registry/CoreValueSignatures.jet:733-740 defines the Jet split_once result as an ordered named tuple (found, head, tail). ; Compiler/JetFoundation/Source/Types/Types.jet:710-716 compares tuple identity field-by-field in order, rather than sorting names. Frozen under the owner's Rust-archive direction (see #218 log). Reopen if the Jet compiler reproduces it; add a regression to the Jet port's test list."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "The repro in the body runs to the expected output on AOT and default jet run, with a regression test.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "CardClose-1 verdict 2026-10-31: Wave-14 s2 jet (wave/14/tree/.chain/s2/jet): testkit golden --filter split_once gives Examples/features/text/split_once_named_return.jet PASS on o0, o1 and o2 (PASS 3, FAIL 0). On the w12 jet this same golden was E0113 at o0. The golden is the regression test.",
-          "at": "2026-10-31T21:20:13.392Z"
-        }
-      ],
-      "refs": [
-        "3590",
-        "3601",
-        "3602"
-      ],
-      "tags": [
-        "jetpack-port",
-        "sema",
-        "rust-archived",
-        "obe:bootstrap-done"
-      ],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-09-28T11:50:15.338Z",
-      "updated": "2026-11-05T20:48:41.497Z",
-      "updatedBy": "owner",
-      "goals": [],
-      "completedAt": "2026-11-05T20:48:41.497Z"
-    },
-    {
       "id": "c077ihdp",
       "num": 3693,
       "title": "Project jobs: core.process, job graph, and job parameters broken on the default tier",
@@ -48099,61 +48040,6 @@
       "goals": []
     },
     {
-      "id": "c058eq5n",
-      "num": 4346,
-      "title": "`os.executable()` under `jet run` names the jet binary, so a program that relaunches itself runs `jet <arg>` instead (I9)",
-      "body": "Title: `os.executable()` under `jet run` names the jet binary, so a program that relaunches itself runs `jet <arg>` instead (I9)\nKind: bug · Track: sidequest · Priority: P2 · Tags: I9, process\nBody: Found 2026-10-02 (CW2-GOLD-A). Examples/features/io/cleanup_matrix.jet:85-93 relaunches itself per case with `process.cmd([os.executable(), path])`. Under `jet run` (night12), `os.executable()` returns the jet binary (scratch probe printed ~/.cache/jet-test-scratch/jet-release-night12/jet), so each child runs `jet return`, `jet error`, … and all six exit 2 with no cleanup trace; the example exits 0 with wrong output. After AOT the same call names the program itself. One source, two meanings. Decide the contract (core-library.md:1499 says only \"Return process … facts\"): either `jet run` gives the program a relaunchable executable identity (os.executable() names something that reruns this program with the same tier), or self-relaunch gets its own explicit API and os.executable() is documented as the host process binary on every tier, with cleanup_matrix migrated.\nCriteria:\n1. The chosen contract is written in Docs/spec/reference/core-library.md beside `executable()`.\n2. cleanup_matrix prints the six case traces on the default tier and after AOT, identical; a golden is added.",
-      "kind": "task",
-      "track": "sidequest",
-      "epoch": "e14",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P1",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-10-28",
-          "by": "CardTrim",
-          "text": "Folded into #5973 as a criterion (CardTrim 2026-10-28)."
-        },
-        {
-          "at": "2026-10-23",
-          "by": "agent",
-          "text": "Board burndown 2026-10-22: probe 4346.jet in $JET_SCRATCH_ROOT/lanes/TowerBurndown/probes on seed a0_010, 2026-10-22 (cleanup_matrix): the native backend refuses with E2104 (generic Core call core.tasks channel.new; atexit route). Still blocked on native channel support."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "Examples/features/io/cleanup_matrix.jet match their goldens on o0 (jet run) and o1 (jet build), or the error becomes the intended diagnostic and the golden is updated with a reason.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "CardClose-1 2026-10-31: Examples/features/io/cleanup_matrix.jet matches Examples/features/expected/io/cleanup_matrix.out under jet run --optimize=none|basic|full and a jet build --optimize=basic binary (exit 0), on the wave-9 and wave-9b compilers ($JET_SCRATCH_ROOT/lanes/CardClose/verdicts.tsv).",
-          "at": "2026-10-31T14:11:24.591Z"
-        }
-      ],
-      "refs": [],
-      "tags": [
-        "bug",
-        "burn-down",
-        "wayfinder:task",
-        "trimmed"
-      ],
-      "parentId": "c0fqk5ka",
-      "needsAcceptance": false,
-      "created": "2026-10-02T23:07:10.848Z",
-      "updated": "2026-11-05T20:48:42.583Z",
-      "updatedBy": "owner",
-      "goals": [],
-      "completedAt": "2026-11-05T20:48:42.583Z"
-    },
-    {
       "id": "c0zgefsg",
       "num": 4378,
       "title": "Core Path: lossless native OS paths (D-OSPATH-NATIVE1)",
@@ -48459,85 +48345,6 @@
       "updated": "2026-10-28T20:00:07.180Z",
       "updatedBy": "CardTrim",
       "goals": []
-    },
-    {
-      "id": "c0cl9fm1",
-      "num": 4441,
-      "title": "One meaning for date and time format patterns (D-TIME-FORMAT-CANONICAL1)",
-      "body": "Implement one meaning for Core time format patterns, as ratified in D-TIME-FORMAT-CANONICAL1. Remove the second meaning. Acceptance: format goldens use one pattern grammar, and each pattern has one documented result.\n\nEarlier text, kept for reference (Rust-era homes such as Rust crates, TIR/MIR/LIR, the JIT and generated Rust are retired):\n\nRaised 2026-10-03 by the runtime port (RuntimeLead-3). Two time formatters disagree: frozen Rust Time.rs:1760-1868 jet_time_format_pattern (ordered replace with legacy tokens; %%Y renders the year; %f = 9-digit nanoseconds; %Y zero-padded to 4 digits including negative years), used by native Date/LocalTime/DateTime.format; and Core/time/time.jet:116-166 strftime (one-pass byte parser; %%Y renders a literal %Y; %f = 6-digit microseconds; %Y unpadded; also supports %c/%U/%W/%w), a separate public entry. Same program: format(date(-5, 1, 2), \"%Y %%Y %f\") differs. Options: (A) keep two distinct documented formats (Date.format pattern vs strftime) over ONE private configurable engine; (B) ratify one uniform semantics and migrate all callers (native Date.format + Core strftime + docs + tests). Recommendation: B with strftime semantics (one meaning, POSIX-familiar), unless legacy pattern compatibility is wanted. Independent defect regardless of outcome: card filed for strftime's non-ASCII literal loss.",
-      "kind": "task",
-      "track": "sidequest",
-      "epoch": "e3",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-10-28",
-          "by": "CardTrim",
-          "text": "Folded into #5979 as a criterion (CardTrim 2026-10-28)."
-        },
-        {
-          "at": "2026-10-23",
-          "by": "agent",
-          "text": "Rewritten for the Jet architecture (self-hosted compiler, AST + fact tables, JetIR slot IR, no Rust) in the 2026-10-22 board burndown: Tagged ballot-needed, but D-TIME-FORMAT-CANONICAL1 (ratified A: one meaning for date and time format patterns) answers the choice. Drop the ballot. The earlier text is kept at the end of the body."
-        },
-        {
-          "at": "2026-10-04",
-          "by": "Pip",
-          "text": "Burn-down consolidation 2026-10-04: absorbed #4312, #4438, #4256; their criteria are carried here as [#n] rows."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "[#4312] unix_ms(now()) equals epoch milliseconds: the shared now/Instant identity is canonical (CoreCallRows.jet:436/441).",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "CardClose-1 2026-10-31 (wave 9b tree): p/now4441.jet `print(time.unix_ms(time.now()) / 1000)` -> 1793460462.399 / 1793460463.431 / 1793460464.87 on o0/o1/o2, bracketed by `date +%s` 1793460460 before and 1793460464 after (queue1.out). unix_ms(now()) is epoch milliseconds.",
-          "at": "2026-10-31T15:46:56.787Z"
-        },
-        {
-          "n": 2,
-          "text": "[#4438] The checked return carrier of time.now matches its native leaf (DateTime, not i64), with a registry-level signature proof.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "CardClose-1 2026-10-31 (wave 9b tree): code-shape: checked carrier and native leaf agree on DateTime: Compiler/JetFoundation/Source/Registry/CoreHostSignatures.jet:355 `core.time now|now_utc - DateTime`; Compiler/JetIR/Source/RuntimeRoutes.jet:1349 `IRRoute{symbol: \"jet_time_now_utc\" ... result: IRRouteResult.Plain{carrier: IRRouteCarrier.Handle{name: \"JetDateTime\"}}}`; Core/Time/Time.jet:1462 `fn now() -[Time]> DateTime`. Run: p/now4441.jet `time.unix_ms(time.now())` correct on o0/o1/o2 (row C1)",
-          "at": "2026-10-31T16:09:33.745Z"
-        },
-        {
-          "n": 3,
-          "text": "[#4256] The redundant calendar floor correction is removed (calendar.jet:20-24), and operator printers label xor and power with their current spellings (Emit/Operations.jet:104,107).",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "CardClose-1 verdict 2026-10-31: w14 tree. The calendar floor correction is gone: Core/Time/Calendar.jet:19-20 is `// `/%` already rounds toward negative infinity.` and `fn floor_div(a: Int, b: Int) -> Int { a /% b }`. The operator printers use the current spellings. The formatter's jfmt_bin_op_spell (Compiler/JetParser/Source/Formatter/Formatter.jet:176,179) prints `.Pow -> \"pow\"` and `.BitXor -> \"bit_xor\"`, and jfmt_bin_op_method (:195-200) prints them as methods; jfmt_compound_spell has no ^= or ~|= arm. Sema Expressions.jet:852,855 print \"pow\"/\"bit_xor\", and SemIndex prints \"pow\". No `.Pow -> \"^\"` or `.BitXor -> \"~|\"` arm remains in Compiler (rg). Run on the w14 s2 jet, p4441/run.jet at O0/O1/O2: \"pow 1024 bit_xor 4\", \"floor_div(-7, 2) = -4, floor_div(7, -2) = -4\", \"leapdays(1900, 2025) = 31\" (31 matches Python). `jet fmt --check` exits 0.",
-          "at": "2026-10-31T21:51:34.687Z"
-        }
-      ],
-      "refs": [],
-      "tags": [
-        "core",
-        "time",
-        "ballot-needed",
-        "wayfinder:decision",
-        "trimmed"
-      ],
-      "parentId": "c0tlmh3q",
-      "needsAcceptance": false,
-      "created": "2026-10-03T06:27:02.602Z",
-      "updated": "2026-11-05T20:48:43.852Z",
-      "updatedBy": "owner",
-      "goals": [],
-      "completedAt": "2026-11-05T20:48:43.852Z"
     },
     {
       "id": "c0jd9jl3",
@@ -55685,100 +55492,6 @@
       "updated": "2026-10-28T20:11:16.749Z",
       "updatedBy": "CardTrim",
       "goals": []
-    },
-    {
-      "id": "c0ohzy6k",
-      "num": 4809,
-      "title": "Checker allows moving a field out of a type with its own Close (D-CLOSE-PARTIAL-MOVE1)",
-      "body": "D-CLOSE-PARTIAL-MOVE1=A (ratified 2026-10-17): moving a field out of a value whose type has its own Close is E0222, except inside that type's Close. Callers move the whole value, copy a copyable field, or call a method the type author provides. The error names the user's type and suggests those three fixes. This holds on every tier (sema only, I3).\n\nState at 161cf85cc:\n- The JetSema refusal is Compiler/JetSema/Source/Sema/Ownership/Checks.jet:2491-2500, and the registry row is DiagnosticRows.jet:3142-3157.\n- UI snapshots exist: tests/ui/E0222_close_root, E0222_close_nested and E0222_close_receiver_nested (.jet + .stderr, 7e9ede2f6).\n- The Rust checker refuses too (crates/jet-sema/src/Sema/CheckerOwnership.rs:5331). The old note that 'the Rust checker has no refusal' is stale.\n\nRemaining:\n- On the native compiler the Why text leaks the internal id `module:14:source-root:0::main.jet::Holder` (burn-down p4809-build on a0_001 stage3; #5047).\n- The Fix text lacks the third fix (call a method the type provides).\n\nIdentity set: lands after a0_004.",
-      "kind": "bug",
-      "track": "epoch",
-      "epoch": "e3",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P1",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-10-28",
-          "by": "CardTrim",
-          "text": "Folded into #5988 as a criterion (CardTrim 2026-10-28)."
-        },
-        {
-          "at": "2026-10-28",
-          "by": "Main",
-          "text": "2026-10-28 Main (SmallGoals5): C1 holds on 9b5e1290da. The three E0222 UI snapshots pass and the Why line names ClosePair. C2's regenerated Docs/site E0222 page is still open, because the generated site is stale throughout and needs one full regeneration, not a single page. C3's burn-down repro path no longer exists; restate C3 against a current fixture."
-        },
-        {
-          "at": "2026-10-24",
-          "by": "agent",
-          "text": "Recheck at fc382a23cd (CardVerify, discovery jet; repros in $JET_RUN_ROOT/CardVerify/<card>/): E0222 fires, but the Fix lists two of the three ratified fixes (no 'call a method'), and the caret is at 7:20 where the snapshot expects 7:14."
-        },
-        {
-          "at": "2026-10-23",
-          "by": "agent",
-          "text": "2026-10-23 TowerSweep3 recheck on dev base/latest (source lines not all re-verified):\nSTILL-FAILS: jet check 4809/E0222_close_root.jet, _nested, _receiver_nested => each emits E0222 \"A part of ... cannot be moved independently\" with Why and Fix. Fix lists two options only (move the Close owner, or copy the field); no \"call a method the type provides\" option. Source Checks.jet:2496; registry text DiagnosticRows.jet:2089-2092."
-        },
-        {
-          "at": "2026-10-17",
-          "by": "Main",
-          "text": "D-CLOSE-PARTIAL-MOVE1=A ratified 2026-10-17. Correction to the 2026-10-17 burn-down: UI snapshots exist (tests/ui/E0222_close_{root,nested,receiver_nested}, 7e9ede2f6) and expect the user type name; the native run differs only by the #5047 id leak. Plan: FOLLOWTHROUGH.md section 15."
-        },
-        {
-          "at": "2026-10-17",
-          "by": "Main",
-          "text": "Burn-down 2026-10-17 (DoneEvidence, runs on a0_001 r29g; files $JET_SCRATCH_ROOT/discovery/burndown/DoneEvidence/runs/): triage said DONE but NOT closeable. proposed criterion: R29G refuses ^h.inner with registered E0222 'A part of `h.inner` cannot be moved independently' ($JET_SCRATCH_ROOT/discovery/burndown/DoneEvidence/runs/file/p4809-build). NOT MET: ballot D-CLOSE-PARTIAL-MOVE1 does not exist (tower decision show finds nothing); no UI snapshot was identified; the Why text leaks the internal id 'module:14:source-root:0::main.jet::Holder'."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "Native `jet check` of tests/ui/E0222_close_root.jet, E0222_close_nested.jet and E0222_close_receiver_nested.jet prints stderr byte-identical to the snapshots, and the Why line names the user type (`ClosePair`).",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Main 2026-10-31: landed on dev 8439d4bdb3 (wave 11). tests/ui/E0222_close_{root,nested,receiver_nested}.jet PASS in q/sg/ui-w11-wave.txt with the wave-11 jet; each .stderr Why line names `ClosePair` (CardClose-1 verdict).",
-          "at": "2026-10-31T16:28:17.968Z"
-        },
-        {
-          "n": 2,
-          "text": "The E0222 Close Fix text (Checks.jet:2496 and the DiagnosticRows.jet E0222 row) names all three ratified fixes: move the owner as a whole, copy the field if its type supports copying, or call a method the type provides. The snapshots and the generated Docs/site E0222 page are regenerated in the same commit.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "CardClose-1 2026-10-31 (wave 9b tree): all three fixes are named everywhere: Compiler/JetSema/Source/Sema/Ownership/Checks.jet:2934 Fix \"Move the Close owner as a whole, copy the field if its type supports copying, or call a method `{type}` provides\"; the DiagnosticRows.jet:2099 E0222 row and Prelude/Diagnostics.jet fix \"Move the complete owner, copy a copyable field, call a method the owner's type provides, or update persistent state atomically.\"; tests/ui/E0222_close_root.stderr:7 and Docs/site/dist/e/E0222/index.html:46 carry the same Fix line (UI E0222_close_* PASS in ui-w9b-wave.txt)",
-          "at": "2026-10-31T14:51:37.206Z"
-        },
-        {
-          "n": 3,
-          "text": "The burn-down repro ($JET_SCRATCH_ROOT/discovery/burndown/DoneEvidence/runs/file/p4809-build) prints `Holder` has its own Close; Examples/features/memory/resource_close_containers.jet (Close takes its own fields) and destructure_drop_order.jet still pass.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "CardClose-1 2026-10-31 (wave 9b tree): the named burndown repro path no longer exists (ls -> No such file); the equivalent repro p/holder4809.jet `moved :: ^h.inner` -> \"Error [E0222]: ... Why: `Holder` has its own Close implementation\" [exit 1] (queue1.out); gold4.sh on w9b (gb5.out): memory/resource_close_containers and memory/destructure_drop_order stdout == expected on jet run o0/o1/o2 and the AOT build, exit 0 x4",
-          "at": "2026-10-31T16:17:59.500Z"
-        }
-      ],
-      "refs": [],
-      "tags": [
-        "sema",
-        "ownership",
-        "ballot",
-        "wayfinder:decision",
-        "trimmed"
-      ],
-      "parentId": "c0vpsecx",
-      "needsAcceptance": false,
-      "created": "2026-10-08T04:09:46.174Z",
-      "updated": "2026-11-05T20:48:45.197Z",
-      "updatedBy": "owner",
-      "goals": [],
-      "completedAt": "2026-11-05T20:48:45.197Z"
     },
     {
       "id": "c0xv38ku",
@@ -74088,6 +73801,11 @@
         {
           "at": "2026-11-08",
           "by": "Main",
+          "text": "a0_040 (a8a76e6bd5) admitted and published at 16:10 by Admit --reuse of its first run: every suite row reused, the one untracked failure (fiber_liveness/task_clock_follows_the_task_across_parks, load-flaky) verified again on both sides and passed; chain s1-s3 REUSED, identity 84684c68a235074b. The case's flake fix is b83811def8 on dev; --reuse rerun of untracked failures is 018ac8b7a5."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
           "text": "Main 2026-11-08 15:43: release a0_040 (a8a76e6bd5) FAIL on one untracked cases row: fiber_liveness/task_clock_follows_the_task_across_parks (\"a plain thread's clock is its CPU time false\"). Every other gate passed: chain fixed point, cc-pack, pack, jetpack, golden 4454 rows (+21), ui 2433, cases 4714 (+4). The row passes 3/3 alone, so it's load-flaky: the burn spins on wall time. SchedLead fixes the case to be load-independent (SchedLead-8), then a0_040 is re-admitted. c65 run 7 waits for it."
         },
         {
@@ -74910,7 +74628,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-29T02:09:17.141Z",
-      "updated": "2026-11-08T20:44:36.716Z",
+      "updated": "2026-11-08T21:10:40.587Z",
       "updatedBy": "Main",
       "criteriaLastN": 74
     },
@@ -91552,138 +91270,6 @@
       "criteriaLastN": 8
     },
     {
-      "id": "c0n8pmxe",
-      "num": 6563,
-      "title": "Every closed card is durable: no work lives only on the scratch disk",
-      "body": "On 2026-11-04 Main's $JET_SCRATCH_ROOT cleanup deleted lane work that open cards still cited (for example #6442's held patches). A closed card or met criterion is a promise that its change is on dev or master. Evidence that names only a scratch path, ~/.cache, /tmp or a commit outside dev/master/rust breaks that promise, and card merges carry such evidence forward unchecked. Owner order: durable work lives in the repo, and only throwaway output stays on disk.",
-      "kind": "task",
-      "track": "epoch",
-      "epoch": "e14",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P0",
-      "plan": "1) Audit every done card and met criterion, live and archived (audit-closures.mjs): DURABLE, SHA-NOT-IN-BRANCHES, SCRATCH-ONLY, NO-COMMIT. 2) Re-verify each non-durable code closure against dev content, and reopen any whose change is absent, with the reason. 3) Move durable out-of-repo work into the repo: unlanded patches under Tools/tower/held/<card>/ (base commit, state, next step), research and proposals into Docs/research and Docs/proposals, ballot drafts into Tower. 4) Tower refuses card close and criterion meet unless the evidence names a commit reachable from dev or master; scratch-only evidence is rejected. 5) Commit the board to master regularly.",
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-05",
-          "by": "Main",
-          "text": "Owner ruling 2026-11-05 (replaces the no-delete and held/ rule): agents work directly in the dev worktree, and no agent keeps its own copy of the repository. Once work is on dev, delete everything that fed it: exports, build trees, staged patches, test scratch, logs and superseded compilers. Work not yet on dev is committed, or recorded on its card, before its scratch is removed. Keep only the compilers in use: the admitted seed, the candidate under test, and the compilers a running job names. Nothing is retired by moving it elsewhere on disk. Codified in AGENTS.md and the orchestration closeout reference, dev 9e25f0a0d5."
-        },
-        {
-          "at": "2026-11-04",
-          "by": "Main",
-          "text": "c1: the precut board writes are applied (1,615 commands, 0 failed: 1,495 criteria added on 119 live cards, plus logs), from Docs/audits/precut-2026-11 at ff5dd7fd7b. With the 59 newer rows (a32d379133) and the 384 orphaned merges done, the only rows left are the 8 on frozen cards, which need the owner. c1 is met when those 8 are dispositioned."
-        },
-        {
-          "at": "2026-11-04",
-          "by": "Main",
-          "text": "c1 precut audit (ruling D-AUDIT-PRECUT1=D): all 3670 pre-cutover rows on 1344 cards re-judged on today's compiler (pinned base compiler built from 9c7ddf1359 on a git-archive export of 9c7ddf1359; goldens, ui, cases and probes on o0/o1/o2). Rows: VERIFIED 827, REOPEN 2403, OBSOLETE 440. 1495 criteria re-added on 119 live cards (489 twin rows share a criterion). Docs/audits/precut-2026-11/ (ff5dd7fd7b)."
-        },
-        {
-          "at": "2026-11-04",
-          "by": "Main",
-          "text": "#6563 c1 precut audit re-added 1 criteria from archived #1705: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
-        },
-        {
-          "at": "2026-11-04",
-          "by": "Main",
-          "text": "D-AUDIT-PRECUT1 = D (owner, 2026-11-04): all 3,670 pre-cutover rows are re-proved on today's compiler, VERIFIED with a commit, or reopened as live criteria. The 384 orphaned merges already have verdicts (12 re-added as live criteria, 359 already live)."
-        },
-        {
-          "at": "2026-11-04",
-          "by": "Main",
-          "text": "c5 progress: held/5910 integrated and retired (code d248040524, held entry retired by SelfMem-held5910; content kept at the scratch held store with a LOG.tsv row). Remaining held: #6442, #5971 and #6497 (all Builder3)."
-        },
-        {
-          "at": "2026-11-04",
-          "by": "Main",
-          "text": "c5 progress: Tools/tower/held/README.md now lists every remaining held entry with owner and status (a7fb4e0b70): #5910 SelfMem, #6442 and #5971 and #6497 Builder3. c5 stays open until each lands."
-        },
-        {
-          "at": "2026-11-04",
-          "by": "Main",
-          "text": "c1 progress: all 384 orphaned merged criteria have a verdict ($JET_SCRATCH_ROOT/lanes/Main/briefs/6563-orphans-rehome.tsv, Prep-2, against dev 0d1ea12f79): 359 already exist on a live card, 5 hold on dev by probe, 1 probably holds but could not be probed (R288: the Jetpack Publication bootstrap check fails on dev), and 19 were real dropped requirements, now re-added as 12 criteria on #3239, #5976, #4275, #6281, #5201 and #4717. The 13th (output ownership hand-back, was #3207) belongs on frozen #5964 and waits for the owner."
-        },
-        {
-          "at": "2026-11-04",
-          "by": "Main",
-          "text": "c1 progress: the closure audit is committed at a32d379133 (Docs/audits/closure-audit-2026-11/: 15,249 rows regenerated on dev 0e281eefd0, scripts, dispositions, probes and their results; home paths quoted from old evidence redacted to ~). The 59 live and post-cutover dispositions are applied, except 8 rows on frozen cards (owner only). c1 stays open until the owner votes D-AUDIT-PRECUT1 (3,670 pre-cutover rows) and the 384 orphaned merged criteria are re-homed (in progress)."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "The closure audit covers every done card and met criterion (live and archived). Each row is DURABLE, re-verified against dev content with the commit recorded, or reopened with its reason. The audit TSV is committed under Docs/audits.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Every done card and met criterion has a recorded verdict. a32d379133 commits Docs/audits/closure-audit-2026-11 (15,249 rows on dev 0e281eefd0; the 59 live and post-cutover dispositions applied; the 8 on frozen cards applied with the owner's approval, 2026-11-04: 3 reopened, 4 verified, 1 obsolete). ff5dd7fd7b commits Docs/audits/precut-2026-11 under D-AUDIT-PRECUT1 = D: all 3,670 pre-cutover rows re-judged on the base compiler built from 9c7ddf1359 (VERIFIED 827, REOPEN 2,403, OBSOLETE 440); the reopened rows were added as 1,495 criteria on 119 live cards (board rev 92162, 1,615 writes, 0 failed). The 384 orphaned merges have verdicts (briefs/6563-orphans-rehome.tsv).",
-          "at": "2026-11-05T00:01:06.455Z"
-        },
-        {
-          "n": 2,
-          "text": "Every unlanded patch that an open card depends on (including the #6442 held rows and all recovered lane patches) is either landed on dev or committed under Tools/tower/held/<card>/ with its base commit, state and next step, and the card cites the repo path. No open card cites a $JET_SCRATCH_ROOT, ~/.cache or /tmp path as the only home of work.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed 446b49726a on dev (batch 4; receipt $JET_SCRATCH_ROOT/lanes/Main/land/Batch4.receipt.md): 17 files, all under Tools/tower/held/. Every unlanded patch an open card cites is held there (#6442 BS15n/19/20/21/23 applying and composing on dev 1b79163228; #5971 Main-13; #6497 FFIDesign-1), superseded with its commit on dev (#4599, #4717, #6328, part of #6442), or recorded as lost in held/README.md (#3595, #5910, #6312, #6414; lost in the 2026-11-04 cleanup). 0 personal or scratch paths in the new files. Each card's citation was logged on Tower to its new home.",
-          "at": "2026-11-04T18:26:26.286Z"
-        },
-        {
-          "n": 3,
-          "text": "tower card criteria --meet and a card move to done fail with a registered error when the evidence names no commit reachable from dev or master (decision-only and duplicate closures declare their kind). A test proves both the refusal and the pass.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed d7579e3d72 (on dev and master 0aa0e392b8). Tools/tower/test/durable-evidence.test.mjs passes 8/8 (meet, verify and done refuse evidence with no commit on dev/master; non-code kinds declared; CLI E_EVIDENCE). The full Tower suite passes (423 tests, 422 pass, 0 fail). Main ran both in the master checkout.",
-          "at": "2026-11-04T16:55:42.387Z"
-        },
-        {
-          "n": 4,
-          "text": "Tools/tower/.tower/tower.json and history.json are committed whenever an agent finishes a card operation batch: a check shows the committed board within one batch of the working copy.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed 0aa0e392b8 (dev = master). 'tower board commit/check' plus an auto-commit of tower.json and history.json to master every 25 writes; owner-scratch.md is never committed. test/board-commit.test.mjs passes 4/4. Live check: 'OK committed board rev 90143 at master 0aa0e392b8; working copy rev 90166: 23 writes behind (batch 25)'.",
-          "at": "2026-11-04T16:55:42.781Z"
-        },
-        {
-          "n": 5,
-          "text": "Every patch under Tools/tower/held/ is integrated, not parked: each lands on dev with its card's focused proof (rebased as needed), and its held/ entry is then retired with the landing commit recorded in held/README.md. Owner 2026-11-04: held work is integrated, and recovered in-flight work (#5910 SP05c, #6414 OptAccumulate, #6312 cache-control, #3595 bridges) takes priority.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "355b41d4c0: the only held item on dev, Tools/tower/held/6497 (FFIDesign-1), had already landed in e82d9a1c09; the held patch equals that commit's diff of its 8 files (1662 lines, 0 differ). The held copy is retired with a README Landed row; Tools/tower/held/ has no unintegrated patches.",
-          "at": "2026-11-05T10:29:16.573Z"
-        },
-        {
-          "n": 6,
-          "text": "(was #1705 c2) A check lists audit reports in docs/audits whose findings carry no disposition [precut audit: failing on 9c7ddf1359: C:truthfulness/accessibility_audit_findings_have_live_cards FAIL exit 70; expected 0]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "49936a929c: new case truthfulness/audit_reports_list_findings_without_a_disposition ports the removed scripts/agent/check-audit-dispositions.mjs (2efc938b3d) to Jet and lists every Docs/audits report with no audit-dispositions:v1 table and every row with no live card, ratified decision or concrete no-action reason (today 89 reports, 33 missing-card rows, 2 D-ENVFN1 rows; golden .out, and a new undispositioned report fails it); precut accessibility_audit_findings_have_live_cards FAIL exit 70 -> PASS (the fixture's jet.report/v2 literal from 38b2b7df7b goes back to the v1 the dated report names)",
-          "at": "2026-11-05T05:14:34.680Z"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "goals": [
-        "G1"
-      ],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-04T16:33:47.956Z",
-      "updated": "2026-11-05T20:47:06.928Z",
-      "updatedBy": "Main",
-      "completedAt": "2026-11-05T20:47:06.927Z"
-    },
-    {
       "id": "c0rdxo6y",
       "num": 6564,
       "title": "Hand-off anywhere: a fresh clone is enough for any agent to continue work",
@@ -102069,6 +101655,73 @@
       "updated": "2026-11-08T20:32:14.367Z",
       "updatedBy": "Main",
       "criteriaLastN": 1
+    },
+    {
+      "id": "c0ky4017",
+      "num": 6705,
+      "title": "Wayland window and ui stack: measured best against every alternative",
+      "body": "Owner order (2026-11-08): the native Wayland window is good enough for now (the compositor-paced frame loop ran \"buttery smooth\" at 240 Hz). Land the deterministic functionality first, then hill-climb this card until it is near perfect. The window and ui stack must beat every strong alternative on the same compositor and display, idle and under a full-machine load. The alternatives are GTK4 (frame clock), Qt 6 (QQuickWindow), SDL3, winit with softbuffer, a Chromium/Electron requestAnimationFrame page, and a hand-written C wl_surface.frame + wp_presentation loop as the machine ceiling. The xkb keymap is measured against libxkbcommon. Peer programs stay outside the tree. Each loss is fixed at its root in the runtime leaves or the loop, never by dropping a feature (AGENTS.md performance gate).",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": "Start after the Wayland functionality (frame loop, CSD, HiDPI and fractional scale, cursors, clipboard, multi-window, keyboard) and X11 have landed. Build the same bouncing-square program and a resize/HiDPI/text scene in each alternative, measure every metric in the criteria, rank the losses in Pareto order and fix them.",
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A same-program comparison table, recorded with its commit and commands, covers Jet and each alternative on: presented-interval p50/p99 and missed frames at the display's refresh (idle and under a full-machine load), input-to-photon latency, CPU time per frame and wakeups per second, time to first presented frame, RSS and binary size.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T21:10:33.514Z"
+        },
+        {
+          "n": 2,
+          "text": "Jet is at or better than every alternative on every metric of that table, and within the hand-written C ceiling, or each remaining loss has its own card naming its root.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T21:10:33.514Z"
+        },
+        {
+          "n": 3,
+          "text": "Live resize, fractional scale (125% and 150%), cursor shape, clipboard and multi-window are compared the same way: no stretched or blank frames during resize and crisp output at fractional scale, with the same metrics as criterion 1 where they apply.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T21:10:33.514Z"
+        },
+        {
+          "n": 4,
+          "text": "The Jet xkb keymap matches libxkbcommon on the oracle and beats it on keymap compile time (compositor keymap fd to ready Keymap), per-key cost and memory, or each loss has its own card.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T21:10:33.514Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G11"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-08T21:10:33.514Z",
+      "updated": "2026-11-08T21:10:33.514Z",
+      "updatedBy": "Main"
     }
   ],
   "decisions": [
@@ -122734,158 +122387,6 @@
       "ratifiedAt": "2026-10-04"
     },
     {
-      "id": "D-TIME-FORMAT-CANONICAL1",
-      "cardId": "c0cl9fm1",
-      "group": "core",
-      "title": "One meaning for date and time format patterns",
-      "gist": "Should every time formatter read one percent-code pattern language, or should two named dialects remain?",
-      "lesson": "A format pattern like \"%Y-%m-%d\" turns a date into text. Jet's two formatters read patterns differently, so the same pattern prints different text. One even rewrites ordinary letters such as \"ss\" inside words. Both options keep every field Jet can print today; they differ in whether one language or two remain.",
-      "explainer": "A directive is a percent sign followed by a letter, such as %Y for the year. Everything else in the pattern is copied as written. One pass means the formatter reads the pattern once, left to right, so text it already produced is never read again as a new directive.\n\nToday time.strftime, written in Jet, reads patterns in one pass but knows only some codes. It has no %S, %p, %z, %e, %F, %T, %R or %D. The .format method, written in Rust, knows those but works by find-and-replace. It replaces %% first, so \"%%Y\" turns into a year instead of the text \"%Y\". It also replaces bare tokens such as yyyy, MM, dd, HH, mm and ss anywhere, even inside words.\n\nSome codes also disagree. %f prints 6 digits (microseconds) in strftime but 9 digits (nanoseconds) in .format. Year 5 prints as \"5\" in strftime and \"0005\" in .format. A Date has no clock time, yet .format quietly uses midnight. A LocalTime has no date, yet .format uses 1 January 1970.\n\nA literal pattern is one written directly in the code, like \"%H:%M\". The compiler can read it before the program runs. A runtime pattern comes from a variable, such as a user setting.",
-      "story": "Sam prints log timestamps with \"%H:%M:%S\". In one file he calls time.strftime and gets \"03:04:%S\". In another he calls dt.format and gets \"03:04:05\". He expects one pattern to mean one thing.",
-      "inWild": "# https://docs.python.org/3/library/datetime.html#strftime-and-strptime-format-codes\nfrom datetime import datetime\ndatetime(2026, 1, 2, 3, 4, 5, 123456).strftime(\"%H:%M:%S %%Y %f\")\n# '03:04:05 %Y 123456'  (one pass: %%Y is the text %Y)",
-      "detail": "Code facts, checked 2026-10-04. Core/time/time.jet:117-175 strftime is one-pass. It supports %% %A %a %b %B %c %d %f %H %I %j %m %M %U %W %w %y %Y and %Z, which always prints UTC. It lacks %S, %p, %z, %e, %F, %T, %R and %D and copies an unknown code as text. %f is six microsecond digits and %Y is unpadded.\n\ncrates/jet-codegen/src/Prelude/Core/Time.rs:1768-1868 builds .format output by chained replacement. %% is replaced first (line 1823), so %%Y then becomes a year. %f is nine nanosecond digits (1845), years pad to four digits (1760-1766), and %z prints +HH:MM (1722-1725). Lines 1849-1866 also replace EEEE, MMMM, MMM, yyyy, DDD, EEE, MM, dd, HH, mm, ss, SSSSSSSSS, SSSSSS, SSS, VV and XXX anywhere in the pattern.\n\nDate.format fills in midnight (Time.rs:274-279) and LocalTime.format fills in 1970-01-01 (466-471). format_checked exists on Date, LocalTime, DateTime and ZonedDateTime (Compiler/JetFoundation/Source/Registry/CoreCallRows.jet:1606-1714). It returns String TextError! and validates the token grammar with quoted literals (Time.rs:1873-2004). Core/time/time.jet:104 isoformat_date already pads the year to four digits. No proposed output was run.",
-      "options": [
-        {
-          "key": "A",
-          "name": "One percent-code language, checked early, migrated automatically",
-          "detail": "Every formatter reads one percent-code language in one pass: time.strftime, and .format and .format_checked on Date, LocalTime, DateTime and ZonedDateTime. The codes are the familiar C and Python ones, plus %N for nanoseconds and %L for milliseconds. The year pads to four digits, like isoformat.\n\nWhen the pattern is written in the code, the compiler reads it. An unknown code, a stray % at the end, or a field the value lacks, such as %H on a Date, is a compile error with a suggested fix. A bare yyyy or HH:mm gets a warning offering the percent spelling, which helps people coming from Java.\n\n`jet fix` rewrites every existing literal pattern so it prints what it printed before. For example \"yyyy-MM-dd HH:mm:ss.SSS\" becomes \"%Y-%m-%d %H:%M:%S.%L\". If old output came from a token inside a word, like \"class\", the fix keeps that output and adds a note so the author can restore the word.\n\nA pattern that comes from a variable or a settings file cannot be rewritten in the source. jet fix wraps it instead: `dt.format(p)` becomes `dt.format(time.from_legacy(p, .DateTime))`, which translates the old pattern while the program runs. So a stored \"yyyy %f\" still prints what it printed before.\n\nOne old output is not kept. The old formatter re-read zone names, so Europe/Brussels printed as Europe/Bru05els. The new %Z prints the real name, and jet fix lists every pattern this can affect.",
-          "technical": "Date codes. %a and %A are the short and full English weekday. %b and %B are the short and full month. %Y is the year with at least four digits, with a minus when negative (-0005). %y is the year mod 100. %m, %d and %y are two digits. %e is the day padded with a space. %j is the day of year, three digits. %w is the weekday with Sunday 0. %U and %W are Sunday-first and Monday-first week numbers; days before the first such day are week 00.\n\nClock codes. %H, %I, %M and %S are two digits. %p is AM or PM. %f is microseconds, six digits, truncated. %L is milliseconds, three digits. %N is nanoseconds, nine digits. Zone codes: %z is the offset +HHMM, %:z is +HH:MM, and %Z is the zone name. Composites: %F = %Y-%m-%d, %D = %m/%d/%y, %T = %H:%M:%S, %R = %H:%M, and %c is the asctime form. %% is one percent. Composites render fields directly; produced text is never re-read.\n\nThe GNU no-padding flag works on every numeric code: %-d prints 2, not 02, and %-Y prints -5, not -0005.\n\nReceivers: Date takes date codes only and LocalTime clock codes only. DateTime takes both, with %z +0000, %:z +00:00 and %Z UTC. ZonedDateTime takes both plus its real zone and historical offset. No synthetic midnight or 1970 fields exist. In a literal pattern, an unknown code, a code the receiver lacks or a trailing % is a compile error. At run time .format copies it as text and .format_checked returns TextError.\n\nLiteral migration by jet fix keeps output byte for byte, except the zone case below. Date tokens: EEEE to %A, EEE to %a, MMMM to %B, MMM to %b, yyyy to %Y, MM to %m, dd to %d, DDD to %j. Clock tokens: HH to %H, mm to %M, ss to %S, SSSSSSSSS to %N, SSSSSS to %f, SSS to %L. Zone tokens: VV to %Z and XXX to %:z. Old .format %f becomes %N and %z becomes %:z. Old time.strftime %Y becomes %-Y, its unpadded form.\n\nA %% followed by a letter becomes the code the old formatter actually applied. Codes whose old output was fixed text, such as Date midnight digits or an empty DateTime zone, become that text. Quoted literals in format_checked patterns become plain text with % doubled. Literal text that already holds a % is escaped first.\n\nRuntime migration: time.from_legacy(pattern: String, kind: time.LegacyKind) -> String Never!, with LegacyKind = Strftime | Date | LocalTime | DateTime | Zoned. It applies the same translation while the program runs, using the receiver facts named by kind. jet fix wraps every old call whose pattern is not a literal, choosing kind from the static receiver type. Converting a stored pattern once with from_legacy lets the author delete the wrapper.\n\nOne case is not preserved. Old .format replaced %Z with the zone name and then re-read it, so ss in Europe/Brussels became seconds (Time.rs:1840, 1859). The new %Z prints the real name. jet fix lists every literal %Z pattern on a ZonedDateTime for review, and from_legacy documents the same difference. One engine serves every tier.",
-          "code": "use core.time as time\ndt :: time.datetime(-5, 1, 2, 3, 4, 5) + 123456789ns   // year -5, Jan 2, 03:04:05\nprint(time.strftime(\"%H:%M:%S\", dt))   // 03:04:05\nprint(dt.format(\"%H:%M:%S\"))           // 03:04:05, same engine\nprint(dt.format(\"%Y %%Y %f %N\"))       // -0005 %Y 123456 123456789\nprint(dt.format(\"%H:%M class\"))        // 03:04 class\n// dt.format(\"%Q\")                     // compile error: unknown code %Q\n// jet fix: dt.format(\"yyyy-MM-dd\") becomes dt.format(\"%Y-%m-%d\"), same output\n// jet fix: dt.format(setting) becomes dt.format(time.from_legacy(setting, .DateTime))"
-        },
-        {
-          "key": "B",
-          "name": "Two named dialects",
-          "detail": "Every formatter takes a dialect: `.Strftime`, the one-pass percent language of A, or `.Legacy`, today's find-and-replace rules frozen as they are. Existing .format calls are rewritten to pass .Legacy, so their output does not change.\n\nThe disagreement stays. \"%Y %%Y\" still means two different things depending on the dialect, and Legacy still rewrites \"ss\" inside words. Every reader must check which dialect a call uses. Every new formatting feature must be built twice or refused in one dialect.",
-          "technical": "format(pattern: String, dialect: TimeFormat) -> String Never! on each receiver, with TimeFormat = Strftime | Legacy; time.strftime always uses Strftime. Legacy freezes the Time.rs:1823-1866 order, padded year, nine-digit %f, synthetic midnight and 1970 fields. One private engine with two policies.",
-          "code": "use core.time as time\ndt :: time.datetime(-5, 1, 2, 3, 4, 5) + 123456789ns\nprint(time.strftime(\"%H:%M:%S\", dt))            // 03:04:05\nprint(dt.format(\"%H:%M:%S\", .Legacy))           // 03:04:05\nprint(dt.format(\"%Y %%Y %f\", .Legacy))          // -0005 -0005 123456789\nprint(dt.format(\"%Y %%Y %f\", .Strftime))        // -0005 %Y 123456\nprint(dt.format(\"%H:%M class\", .Legacy))        // 03:04 cla05"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "Python",
-          "note": "Python strftime reads the pattern once, so %%Y is the text %Y and %f is six digits.",
-          "code": "# https://docs.python.org/3/library/datetime.html#strftime-and-strptime-format-codes\ndatetime(2026, 1, 2, 3, 4, 5, 123456).strftime(\"%H:%M:%S %%Y %f\")\n# '03:04:05 %Y 123456'"
-        },
-        {
-          "lang": "GNU date",
-          "note": "GNU date adds %N for nanoseconds and %:z for an offset with a colon.",
-          "code": "# https://www.gnu.org/software/coreutils/manual/html_node/Time-conversion-specifiers.html\ndate -u -d @0 '+%H:%M:%S.%N %:z'\n# 00:00:00.000000000 +00:00"
-        }
-      ],
-      "rec": "A",
-      "recommendation": {
-        "why": "One pattern should print the same text everywhere. A gets there while keeping existing output: jet fix rewrites written patterns and wraps runtime patterns in a converter. Only text the old formatter corrupted changes.",
-        "gains": [
-          "One pattern prints the same text in every formatter.",
-          "Pattern typos are caught while compiling, not in production logs.",
-          "jet fix keeps existing output, for written patterns and for patterns read from settings."
-        ],
-        "losses": [
-          {
-            "loss": "Old calls whose pattern comes from a variable or setting keep a time.from_legacy wrapper until their stored patterns are converted.",
-            "mitigation": "jet fix adds the wrapper with the right kind, so output stays the same. Running a stored pattern through time.from_legacy once converts it, and the wrapper can then be deleted."
-          },
-          {
-            "loss": "Old output that re-read a printed zone name, such as Europe/Bru05els for Europe/Brussels, is not reproduced.",
-            "mitigation": "that text was corrupt. The new %Z prints the real name, and jet fix lists every literal %Z pattern on a zoned value for review."
-          }
-        ],
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "Two dialects keep one pattern meaning two things, so every reader must check which rules apply."
-          }
-        ],
-        "tradeoff": "One language plus an output-preserving fix removes the disagreement; only text the old formatter corrupted changes."
-      },
-      "hybrid": null,
-      "ballotMode": "short",
-      "shortAuthorizedBy": null,
-      "ballotProcessVersion": 4,
-      "reviewPasses": null,
-      "checkInstructions": "Test every code on Date, LocalTime, DateTime and ZonedDateTime with years -5, 0, 5 and 10000. Cover %U, %W and %w at year boundaries, Unicode literals, %%Y, trailing % and fractions 0, 999 and 999999999.\n\nProve compile errors for unknown and missing-field codes in literal patterns. Run jet fix over a corpus of old patterns, literal and runtime, and assert byte-identical output before and after. Cover runtime patterns holding %f, %z and yyyy through time.from_legacy for every kind. Zone regression: old \"%Z\" on Europe/Brussels printed Europe/Bru05els; new prints Europe/Brussels, and jet fix lists the call. Prove one engine serves every tier.",
-      "surface": {
-        "gist": "Should every time formatter read one percent-code pattern language, or should two named dialects remain?",
-        "lesson": "A format pattern like \"%Y-%m-%d\" turns a date into text. Jet's two formatters read patterns differently, so the same pattern prints different text. One even rewrites ordinary letters such as \"ss\" inside words. Both options keep every field Jet can print today; they differ in whether one language or two remain.",
-        "trio": {
-          "current": {
-            "note": "strftime lacks %S; .format uses find-and-replace, even inside words.",
-            "code": "// Core/time/time.jet:140-169: no case for %S\ntime.strftime(\"%H:%M:%S\", dt)   // \"03:04:%S\"\n// crates/jet-codegen/src/Prelude/Core/Time.rs:1823-1866\ndt.format(\"%H:%M:%S\")           // \"03:04:05\"\ndt.format(\"%H:%M class\")        // \"03:04 cla05\"\ndt.format(\"%%Y\")                // \"-0005\", not \"%Y\""
-          },
-          "wild": {
-            "lang": "Python",
-            "note": "Python reads the pattern once; %%Y stays the text %Y.",
-            "code": "# https://docs.python.org/3/library/datetime.html#strftime-and-strptime-format-codes\ndatetime(2026, 1, 2, 3, 4, 5, 123456).strftime(\"%H:%M:%S %%Y %f\")\n# '03:04:05 %Y 123456'"
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "One percent-code language, checked and migrated",
-            "gist": "All formatters share C and Python codes; jet fix keeps old output, even from settings.",
-            "gains": [
-              "Same pattern, same text, in every formatter.",
-              "Typos in written patterns fail at compile time."
-            ],
-            "losses": [
-              "Runtime patterns keep a from_legacy wrapper until stored patterns convert.",
-              "Zone names the old formatter corrupted now print correctly instead."
-            ],
-            "proposed": {
-              "code": "dt :: time.datetime(-5, 1, 2, 3, 4, 5) + 123456789ns\nprint(time.strftime(\"%H:%M:%S\", dt))   // 03:04:05\nprint(dt.format(\"%H:%M:%S\"))           // 03:04:05\nprint(dt.format(\"%Y %%Y %f %N\"))       // -0005 %Y 123456 123456789\nprint(dt.format(\"%H:%M class\"))        // 03:04 class\n// dt.format(\"%Q\")                     // compile error\n// jet fix: \"yyyy-MM-dd\" becomes \"%Y-%m-%d\"\n// jet fix: dt.format(setting) becomes\n//   dt.format(time.from_legacy(setting, .DateTime))"
-            }
-          },
-          {
-            "key": "B",
-            "name": "Two named dialects",
-            "gist": "Each call picks Strftime or Legacy; old calls get Legacy.",
-            "gains": [
-              "Old calls keep their exact output with no review."
-            ],
-            "losses": [
-              "One pattern still means two things.",
-              "Legacy still rewrites letters inside words."
-            ],
-            "proposed": {
-              "code": "print(dt.format(\"%Y %%Y %f\", .Legacy))     // -0005 -0005 123456789\nprint(dt.format(\"%Y %%Y %f\", .Strftime))   // -0005 %Y 123456\nprint(dt.format(\"%H:%M class\", .Legacy))   // 03:04 cla05"
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "One pattern should print the same text everywhere, and jet fix gets there while keeping existing output, even from settings.",
-          "gains": [
-            "One meaning for every pattern.",
-            "Typos caught while compiling.",
-            "Existing patterns, written or stored, print as before."
-          ],
-          "losses": [
-            {
-              "loss": "Runtime patterns keep a from_legacy wrapper until stored patterns convert.",
-              "mitigation": "jet fix adds it, so output stays the same; convert a stored pattern once, then delete the wrapper."
-            },
-            {
-              "loss": "Zone names the old formatter corrupted, like Europe/Bru05els, are not reproduced.",
-              "mitigation": "the new %Z prints the real name; jet fix lists each affected pattern."
-            }
-          ],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "Two dialects keep the disagreement; readers must check each call's rules."
-            }
-          ],
-          "tradeoff": "One language plus an output-preserving fix removes the disagreement; only corrupted zone text changes."
-        }
-      },
-      "draft": false,
-      "status": "ratified",
-      "created": "2026-10-04T01:12:49.428Z",
-      "situation": "A time format pattern is the small template, such as \"%H:%M:%S\", that turns a date and time into text. Jet has two formatters that read the same pattern differently: time.strftime prints \"03:04:%S\" because it has no seconds code, while dt.format prints \"03:04:05\". The method form also replaces bare letter pairs, so the word \"class\" in a pattern comes out as \"cla05\". This bites anyone printing timestamps in logs, file names or screens, and the errors are silent. You are deciding whether every formatter shares one pattern language or whether two named dialects remain. We recommend one percent-code language, checked while compiling, with a jet fix migration that keeps old output, even for patterns read from settings. The only output that changes is text the old formatter corrupted, such as the zone name Europe/Brussels printed as Europe/Bru05els.",
-      "outcome": "A",
-      "ratifiedAt": "2026-10-04"
-    },
-    {
       "id": "D-BINARY-CANONICAL1",
       "cardId": "c0jd9jl3",
       "group": "core",
@@ -123720,203 +123221,6 @@
       "draft": false,
       "status": "ratified",
       "created": "2026-10-04T14:33:37.032Z",
-      "outcome": "A",
-      "ratifiedAt": "2026-10-04"
-    },
-    {
-      "id": "D-SELF-RELAUNCH1",
-      "cardId": "c058eq5n",
-      "group": "stdlib",
-      "title": "How a program starts another copy of itself",
-      "situation": "Some programs start a fresh copy of themselves, for example to test crash cleanup in a separate process. Jet's example does this by running os.executable() with one extra argument. After jet build, os.executable() names the program file, so that works. Under jet run, the program runs inside the jet tool, so os.executable() names jet itself. Each child then runs a command like `jet return`, which fails, and the example quietly prints the wrong output. You are deciding how a program reliably relaunches itself in both modes. We recommend a new process.self_cmd(args) call that always reruns this same program, while os.executable() keeps naming the real file of the running process.",
-      "gist": "How should a Jet program start another copy of itself so it works the same under jet run and jet build?",
-      "lesson": "A process is one running program. os.executable() returns the file the operating system started. After jet build that is your program. Under jet run it is the jet tool, which runs your program inside itself. A adds process.self_cmd(args), which always reruns this program. B makes jet run hand out a small launcher file instead. C only documents the difference and leaves relaunching to each author.",
-      "explainer": "Plain words first. A process is one running program, with its own memory and its own exit code. A child process is a process another program starts.\n\nJet has two ways to run code. jet build makes a native program file you can start directly. jet run compiles your program and runs it inside the jet tool's own process. Jet's law says both must behave the same.\n\nos.executable() asks the operating system which file started the current process. After jet build that file is your program. Under jet run it is the jet tool.\n\nprocess.cmd(argv) builds a description of a child process from a list: the program file first, then its arguments. process.run_spec runs that description and returns a receipt with the exit code and output.\n\nThe example cleanup_matrix starts itself six times, each with a case name, to watch cleanup happen in a separate process. Under jet run each child becomes `jet return` or `jet error`. jet does not know those commands, so every child exits with an error.\n\nRelaunch means starting a new copy of the same program. The question is which call names that copy correctly in both modes.",
-      "story": "Omar writes a test harness that starts his program again in a child process for each crash scenario. It works after jet build. Under jet run every child prints a jet usage error, and his harness reports success with empty traces.",
-      "inWild": "// Rust: std::env::current_exe() names the running file; under `cargo run` that is the built binary.\n// Go: os.Executable() names the running file; under `go run` that is a temporary built binary.\n// Python: sys.executable names the interpreter, so a script relaunches itself with\n//   subprocess.run([sys.executable, sys.argv[0], 'child'])\n// Node: process.execPath names node; relaunch uses child_process.fork(__filename).",
-      "detail": "Code facts, checked 2026-10-04. Core/sys/sys.jet:53 declares executable() -[Env]> String. The native leaf in crates/jet-codegen/src/Prelude/CoreLib/Top/OsExtra.rs:18-22 returns std::env::current_exe(). Under jet run the program runs inside the jet process, so that path is the jet binary. Docs/spec/reference/core-library.md:1499 only says executable() returns process and operating-system facts. Examples/features/io/sys_executable.jet:1-2 already states that meaning: the jet host under jet run, the built binary after jet build.\n\nprocess.argv() is already made the same in both modes. jet run hands the program its own argument list through one shared carrier (crates/jet-comptime/src/Comptime/Interpreter.rs:663-690, crates/jet-jit/src/Collections.rs:2286-2289). os.executable() has no such carrier.\n\nExamples/features/io/cleanup_matrix.jet:86-95 relaunches itself with process.cmd([os.executable(), path]). Card #4346 records that under jet run every child ran `jet return` and similar, exited 2, and the example still exited 0. process.cmd takes the full argument list, program first (core-library.md:1574). jet run takes program arguments after `--` (Docs/spec/reference/cli.md:27), and --allow, --deny, --profile and similar flags shape the run (cli.md:127-130).\n\nOther examples relaunch the same way. They are Examples/features/foundations/distributed/run.jet:65-72, foundations/storage/run.jet:20 and io/watcher.jet:91. Jetpack does too, in Jetpack/Store/Tests/Broker.jet:386 and Jetpack/Services/Source/Supervisor/Lifecycle.jet:60. The test helper tests/dev_parts/support.rs:3463-3470 works around the watcher case by pointing argv at the AOT binary.\n\nOther Jetpack code reads os.executable() to find files beside the running binary. Examples are Jetpack/Foundation/Source/SourceRoot.jet:13 and Jetpack/Store/Source/ArtifactStore/NativeRuntimeCache.jet:244.\n\nRatified law. D-VERDICT-1254-1 requires that nothing works under jet build and fails under default jet run. D-VERDICT-687-1 makes jet run and jet build two views over one compiler. D-EFF-BUILD-REUSE1=B reuses checked work across fresh compiler processes, so a relaunched jet run child does not recheck from nothing.\n\nNo Core call today returns the entry file or the jet run flags, so a program cannot build a correct relaunch list by itself under jet run.",
-      "options": [
-        {
-          "key": "A",
-          "name": "process.self_cmd(args) reruns this program",
-          "detail": "A new call, process.self_cmd(args: [String]) -> ProcessSpec, builds a child that runs this same program with these arguments. After jet build the list is the program file followed by args. Under jet run it is jet, run, the same absolute entry and every flag that shaped the parent run, then `--` and args. The child therefore runs the same way as its parent.\n\nos.executable() keeps its plain meaning, the file of the running process, which is jet under jet run. The checker warns when os.executable() is the program element of process.cmd, and names self_cmd as the fix. All in-repo self-relaunches move to self_cmd([...]) in the same change, and the support.rs workaround is deleted. The returned value is an ordinary ProcessSpec, so streams, limits and authority work as usual, and .plan() shows the real list.",
-          "technical": "The run driver records the entry path, project root and the program-shaping flags it applied in the process-start facts. Those flags are rights, profile, preset, fixtures, locked and offline, and they travel through the carrier that already feeds process.argv(). self_cmd reads those facts; an AOT program records its own path instead. Under jet test the child reruns jet test on the same file, and the caller selects a test through its own arguments or environment, as Broker.jet:386-387 does.\n\nThe call carries the same -[Exec] effect as process.cmd. One registry row, one Core declaration, one leaf per back end, one registered warning, a spec row beside executable() and goldens for every migrated example on both modes land together.",
-          "code": "fn run() CaseFail! {\n    args :: process.argv()\n    if args.len() > 1 -> return child(args.get(1) ?? \"\")\n    loop path in [\"return\", \"error\", \"panic\"] {\n        spec :: process.self_cmd([path]).stdout(.Capture)\n        receipt :: process.run_spec(spec) ?? panic(\"child {path} did not start\")\n        print(\"== {path}: exit {receipt.code}\")\n    }\n    Ok()\n}\n// jet run:   jet run cleanup.jet -- return\n// jet build: ./cleanup return"
-        },
-        {
-          "key": "B",
-          "name": "jet run hands out a launcher file",
-          "detail": "Under jet run, os.executable() returns the path of a small launcher file that jet writes before the program starts. Starting that file runs jet run on the same entry with the same flags. Existing code like cleanup_matrix works unchanged.\n\nThe cost is that os.executable() no longer names the running file under jet run. Code that hashes its own file, reads files beside it, or reports its path gets the launcher instead; Jetpack's SourceRoot.jet:13 and NativeRuntimeCache.jet:244 do that today. jet must write and mark executable a launcher per entry and flag set, with a .cmd or .exe form on Windows.",
-          "technical": "jet run writes the launcher under the project's .jet directory keyed by entry and flags, reused across runs. The leaf returns that path on the run path and current_exe after jet build. Launcher creation failure must be reported, not silently fall back to the jet path.",
-          "code": "spec :: process.cmd([os.executable(), path])\n// jet run:   os.executable() == \".jet/run/cleanup-launcher\"\n// jet build: os.executable() == \"./cleanup\""
-        },
-        {
-          "key": "C",
-          "name": "Document the difference only",
-          "detail": "os.executable() is documented as the running file: jet under jet run, the program after jet build. No new call is added. A program that wants to relaunch must detect the mode and build the jet run command itself.\n\nToday no Core call gives the entry file or the run flags, so this needs at least a mode check and an entry-path fact. The same source still has two meanings, which the parity law forbids.",
-          "technical": "Adds documentation and, to be usable, two facts: whether the program runs under jet run, and its entry path. cleanup_matrix branches on the mode.",
-          "code": "argv := [os.executable()]\nif sys.running_under_jet_run() {\n    argv = [os.executable(), \"run\", sys.entry_path(), \"--\"]\n}\nspec :: process.cmd(argv + [path])"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "Node",
-          "note": "Node keeps process.execPath as the real node binary and offers child_process.fork(file) to rerun a script in a new process.",
-          "code": "// https://nodejs.org/api/child_process.html#child_processforkmodulepath-args-options\nconst child = fork(__filename, ['child']);"
-        },
-        {
-          "lang": "Python",
-          "note": "Python keeps sys.executable as the interpreter, so a script relaunches with the interpreter plus its own path.",
-          "code": "# https://docs.python.org/3/library/sys.html#sys.executable\nsubprocess.run([sys.executable, sys.argv[0], 'child'])"
-        }
-      ],
-      "rec": "A",
-      "recommendation": {
-        "why": "A gives relaunching one call that means the same thing in both modes, which the parity law requires. os.executable() keeps telling the truth about the running file, so code that inspects its own file keeps working.",
-        "gains": [
-          "Self-relaunch works the same under jet run and after jet build.",
-          "os.executable() keeps one honest meaning: the file the system started.",
-          "The child is an ordinary ProcessSpec, so plans, limits and authority still apply."
-        ],
-        "losses": [
-          {
-            "loss": "Code that relaunches with os.executable() must move to the new call, and code outside the repository that keeps the old pattern still fails under jet run.",
-            "mitigation": "The in-repo examples and Jetpack callers migrate with the call. The registered warning on os.executable() as process.cmd's program points every other caller at self_cmd."
-          },
-          {
-            "loss": "A relaunched child under jet run starts the jet tool again, which is slower than starting a built program.",
-            "mitigation": "D-EFF-BUILD-REUSE1=B reuses checked work across fresh compiler processes, and jet build removes the cost entirely."
-          }
-        ],
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "Under jet run, B makes os.executable() name a file that is not the running process. That breaks code that finds files beside its binary, and it adds a launcher file per entry and flag set."
-          },
-          {
-            "key": "C",
-            "reason": "C leaves one source with two meanings and makes every author rebuild the jet run command by hand."
-          }
-        ],
-        "tradeoff": "A adds one process call. In return relaunching works in both modes and os.executable() stays truthful."
-      },
-      "hybrid": null,
-      "ballotMode": "full",
-      "shortAuthorizedBy": null,
-      "ballotProcessVersion": 4,
-      "reviewPasses": {
-        "beginner": "Fresh agent: BallotDraft2. Skill: rli5. Author-run pass, because this worker cannot start agents. It found process, child process, jet run versus jet build and ProcessSpec undefined, so the explainer now teaches each before the options.",
-        "adversarial": "Author model family: claude. Adversarial model family: claude. Fresh agent: BallotRev0. The review checked every cited line and decision and found five more self-relaunch callers and a test workaround, against the claim that only cleanup_matrix relaunches. It added their migration, a warning against the old pattern, every run-shaping flag and jet test, and B's real cost for Jetpack code that reads files beside its binary."
-      },
-      "checkInstructions": "Run cleanup_matrix, foundations/distributed, foundations/storage and io/watcher under jet run and after jet build. Each must print the same output in both modes, and goldens record them.\n\nCheck that process.self_cmd([\"x\"]).plan() shows the jet run entry, the same run-shaping flags and `-- x` under jet run, and the program path plus x after jet build. Check that process.cmd([os.executable(), \"x\"]) gets the registered warning. Check that os.executable() still returns the jet path under jet run and the program path after jet build.\n\nCheck that a child started with self_cmd inherits stream and authority policy like any ProcessSpec, and that tests/dev_parts/support.rs:3463-3470 is gone.",
-      "surface": {
-        "gist": "How should a Jet program start another copy of itself so it works the same under jet run and jet build?",
-        "lesson": "os.executable() returns the file the system started. After jet build that is your program. Under jet run it is the jet tool, so relaunching with it fails. A adds process.self_cmd(args), which always reruns this program. B makes jet run hand out a launcher file. C only documents the difference.",
-        "trio": {
-          "current": {
-            "note": "Today the relaunch works after jet build and silently fails under jet run.",
-            "code": "// Examples/features/io/cleanup_matrix.jet:90\nspec :: process.cmd([os.executable(), path])\n// jet build: ./cleanup return      (works)\n// jet run:   jet return            (exit 2, no trace)"
-          },
-          "wild": {
-            "lang": "Node",
-            "note": "Node keeps the real binary path and adds a call to rerun a script.",
-            "code": "// https://nodejs.org/api/child_process.html\nconst child = fork(__filename, ['child']);"
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "process.self_cmd(args)",
-            "gist": "One call that always reruns this program, in either mode.",
-            "gains": [
-              "Same result under jet run and jet build.",
-              "os.executable() keeps one honest meaning."
-            ],
-            "losses": [
-              "Existing relaunch code moves to the new call."
-            ],
-            "proposed": {
-              "code": "spec :: process.self_cmd([path]).stdout(.Capture)\nreceipt :: process.run_spec(spec) ?? panic(\"no start\")\n// jet run:   jet run cleanup.jet -- return\n// jet build: ./cleanup return"
-            }
-          },
-          {
-            "key": "B",
-            "name": "A launcher file under jet run",
-            "gist": "os.executable() returns a small launcher that reruns the program.",
-            "gains": [
-              "Existing code works unchanged."
-            ],
-            "losses": [
-              "os.executable() stops naming the running file.",
-              "jet writes a launcher file for each program."
-            ],
-            "proposed": {
-              "code": "spec :: process.cmd([os.executable(), path])\n// jet run: os.executable() is .jet/run/cleanup-launcher"
-            }
-          },
-          {
-            "key": "C",
-            "name": "Document only",
-            "gist": "Each author detects the mode and builds the command.",
-            "gains": [
-              "No new process call."
-            ],
-            "losses": [
-              "One source keeps two meanings.",
-              "Needs new mode and entry-path facts anyway."
-            ],
-            "proposed": {
-              "code": "argv := [os.executable()]\nif sys.running_under_jet_run() {\n    argv = [os.executable(), \"run\", sys.entry_path(), \"--\"]\n}"
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "A gives relaunching one call with one meaning in both modes. os.executable() keeps telling the truth about the running file.",
-          "gains": [
-            "Relaunch works the same in both modes.",
-            "The child is an ordinary process description."
-          ],
-          "losses": [
-            {
-              "loss": "Relaunch code must move to the new call.",
-              "mitigation": "Every in-repo caller migrates in the same change, and a warning flags the old pattern."
-            }
-          ],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "B makes os.executable() name a file that is not running."
-            },
-            {
-              "key": "C",
-              "reason": "C keeps two meanings and makes each author rebuild the command."
-            }
-          ],
-          "tradeoff": "One new call buys a relaunch that works everywhere and a truthful os.executable()."
-        }
-      },
-      "designAway": [
-        {
-          "loss": "Existing relaunch code must migrate.",
-          "attempts": [
-            "Make os.executable() return a launcher (option B); rejected because it breaks the meaning for code that inspects its own file.",
-            "Migrate every in-repo caller in the same change, warn on os.executable() as process.cmd's program, and document self_cmd beside executable(); kept."
-          ],
-          "result": "Mitigated: in-repo callers migrate together, and the warning finds the rest."
-        },
-        {
-          "loss": "Relaunch under jet run starts jet again.",
-          "attempts": [
-            "Run the child in-process; rejected because a separate process is the point of relaunching.",
-            "Rely on ratified cross-process reuse of checked work; kept."
-          ],
-          "result": "Mitigated by D-EFF-BUILD-REUSE1=B."
-        }
-      ],
-      "draft": false,
-      "status": "ratified",
-      "created": "2026-10-04T16:49:10.212Z",
       "outcome": "A",
       "ratifiedAt": "2026-10-04"
     },
@@ -144571,167 +143875,6 @@
       "draft": false,
       "status": "ratified",
       "created": "2026-10-16T13:35:53.560Z",
-      "outcome": "A",
-      "ratifiedAt": "2026-10-17"
-    },
-    {
-      "id": "D-CLOSE-PARTIAL-MOVE1",
-      "cardId": "c0ohzy6k",
-      "group": "semantics",
-      "title": "Moving a field out of a value that has its own Close",
-      "situation": "Some Jet types define Close, cleanup code that runs once when a value is done, such as flushing a file. If code moves one field out of such a value, Close would later run on a value with a missing field. Today's Jet checker refuses that move with error E0222, except inside the type's own Close. That rule was added to fix a crash and was never put to a vote. We recommend keeping the refusal, with clearer error text, because Close always sees a complete value.",
-      "gist": "May code move one field out of a value whose type defines its own Close, and if so, what happens to that Close?",
-      "lesson": "Close is a type's own cleanup, run exactly once when its value ends. It reads the value's fields. Moving one field out leaves a hole that Close would read. Jet can refuse such moves, skip Close when a value is taken apart, or allow it only inside the type's own methods. Fields that can be copied are unaffected under every option.",
-      "explainer": "",
-      "story": "Sam wraps a file in an Upload type whose Close flushes and logs. Later he writes a helper that takes just the file out of an Upload. Today the checker stops him with E0222. He wants to know whether that is a permanent rule, and if so, how to get the file out properly.",
-      "inWild": "// Rust refuses the same move (error E0509):\nstruct Upload { file: File, name: String }\nimpl Drop for Upload { fn drop(&mut self) { /* flush */ } }\nfn take(u: Upload) -> File { u.file }   // error[E0509]: cannot move out of type `Upload`, which implements the `Drop` trait",
-      "detail": "Source: card #4809; checker rule in Compiler/JetSema/Source/Sema/Ownership/Checks.jet:2393-2402 (sema_ownership_reject_partial_close_move). Today: moving part of a value whose type has its own Close is E0222. The one exemption is the consuming Close body itself, so Close may take its own fields apart, as in Examples/features/memory/resource_close_containers.jet.\n\nBurn-down 2026-10-17 (DoneEvidence) confirmed the refusal on r29g, and also found two gaps. No UI snapshot exists, and the Why text leaks an internal id ('module:14:source-root:0::main.jet::Holder'). Under A, both are fixed: the message names the user's type, and a UI snapshot is added.\n\nRelated: D-FIELD-DROP-ORDER1=A explicitly did not permit new partial moves. Copying a copyable field (for example a String under default copy) is allowed under every option. Destructuring with `..` copies the named fields and leaves the owner whole (Examples/features/memory/destructure_drop_order.jet).\n\nThe rule applies on every tier (check, run, build, interpreter), so I9 holds under each option.",
-      "options": [
-        {
-          "key": "A",
-          "name": "Refuse the move, as today",
-          "detail": "Moving a field out of a value whose type has its own Close is error E0222, except inside that type's Close. Callers move the whole value, copy a copyable field, or call a method the type author provides. The error text names the user's type and suggests those fixes.",
-          "code": "struct Upload { file: Buffer, name: String }\nimpl Upload.Close {\n    fn close(^self) { flush(self.file); print(\"closed {self.name}\") }\n}\n\nfn take_file(up: ^Upload) -> Buffer {\n    ^up.file\n}\n// error[E0222]: A part of `up.file` cannot be moved independently\n// why: `Upload` has its own Close, which needs the complete value\n// fix: move `up` as a whole, or copy the field if its type supports copying"
-        },
-        {
-          "key": "B",
-          "name": "Allow it; Close is skipped and the rest is cleaned field by field",
-          "detail": "Any code may move a field out. The value's own Close then never runs; each remaining field is cleaned up on its own. A file wrapper's flush or a lock wrapper's release could be skipped silently by an ordinary-looking line.",
-          "code": "fn take_file(up: ^Upload) -> Buffer {\n    ^up.file      // allowed; Upload's Close will not run\n}                 // up.name is dropped on its own; nothing is flushed or logged"
-        },
-        {
-          "key": "C",
-          "name": "Allow it only inside the type's own methods",
-          "detail": "Inside the type's own impl, a consuming method may move fields out of self, and Close does not run for that value. Everywhere else the move is E0222. Authors get an into-parts pattern, but a method can skip cleanup with no visible marker, unlike Swift, which requires `discard self`.",
-          "code": "impl Upload {\n    fn into_file(^self) -> Buffer { ^self.file }   // allowed here; Close skipped\n}\nfn take_file(up: ^Upload) -> Buffer { ^up.file } // error[E0222] outside the impl"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "Rust",
-          "note": "Rust refuses moving a field out of a type that implements Drop (E0509); authors use Option fields or mem::take instead.",
-          "code": "error[E0509]: cannot move out of type `Upload`, which implements the `Drop` trait"
-        },
-        {
-          "lang": "Swift",
-          "note": "Swift lets a noncopyable type's own consuming method take itself apart only after writing `discard self`, which skips deinit.",
-          "code": "consuming func intoFile() -> File { let f = file; discard self; return f }"
-        }
-      ],
-      "rec": "A",
-      "recommendation": {
-        "why": "Close always sees a complete value, so cleanup can never silently skip a step. This is today's behavior, matches Rust, and keeps copyable fields and the Close body itself unrestricted.",
-        "tradeoff": "Type authors who want an into-parts method must design for it, for example with an optional field, until a separate vote adds an explicit take-apart step.",
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "One ordinary-looking line can silently skip a flush or a lock release."
-          },
-          {
-            "key": "C",
-            "reason": "Cleanup can still be skipped with no visible marker in the method."
-          }
-        ],
-        "losses": [
-          {
-            "loss": "No built-in into-parts pattern for Close types.",
-            "mitigation": "Authors use an optional field and take it; an explicit take-apart step can be voted separately."
-          }
-        ]
-      },
-      "hybrid": null,
-      "ballotMode": "short",
-      "shortAuthorizedBy": null,
-      "ballotProcessVersion": 4,
-      "reviewPasses": null,
-      "checkInstructions": null,
-      "surface": {
-        "gist": "May code move one field out of a value whose type has its own Close cleanup?",
-        "lesson": "Close is a type's own cleanup, run once when its value ends, and it reads the value's fields. Moving one field out leaves a hole Close would read. Jet can refuse the move, skip Close, or allow it only inside the type's own methods.",
-        "trio": {
-          "current": {
-            "note": "Today's checker refuses the move with E0222; this was never voted.",
-            "code": "fn take_file(up: ^Upload) -> Buffer {\n    ^up.file\n}\n// error[E0222]: A part of `up.file` cannot be\n//   moved independently"
-          },
-          "wild": {
-            "lang": "Rust",
-            "note": "Rust refuses the same move with E0509.",
-            "code": "fn take(u: Upload) -> File { u.file }\n// error[E0509]: cannot move out of type `Upload`,\n//   which implements the `Drop` trait"
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "Refuse it",
-            "gist": "Keep E0222; Close always sees a whole value.",
-            "gains": [
-              "Cleanup can never be skipped by accident.",
-              "Matches today and Rust."
-            ],
-            "losses": [
-              "No easy into-parts pattern."
-            ],
-            "proposed": {
-              "code": "^up.file\n// error[E0222]: ... cannot be moved independently\n// fix: move `up` as a whole, or copy the field"
-            }
-          },
-          {
-            "key": "B",
-            "name": "Allow; skip Close",
-            "gist": "Any code may move a field; Close never runs.",
-            "gains": [
-              "Most flexible."
-            ],
-            "losses": [
-              "A flush or unlock can vanish silently."
-            ],
-            "proposed": {
-              "code": "^up.file   // allowed; Upload's Close skipped"
-            }
-          },
-          {
-            "key": "C",
-            "name": "Only inside the type",
-            "gist": "The type's own methods may take it apart.",
-            "gains": [
-              "Authors get an into-parts method."
-            ],
-            "losses": [
-              "Skipped cleanup has no visible marker."
-            ],
-            "proposed": {
-              "code": "impl Upload {\n    fn into_file(^self) -> Buffer { ^self.file }\n}"
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "Close always sees a complete value, so cleanup never silently skips a step. It is today's rule and matches Rust.",
-          "gains": [
-            "Predictable cleanup."
-          ],
-          "losses": [
-            {
-              "loss": "No built-in into-parts pattern.",
-              "mitigation": "Use an optional field; an explicit take-apart step can be voted later."
-            }
-          ],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "Silently skips cleanup."
-            },
-            {
-              "key": "C",
-              "reason": "Skips cleanup without a visible marker."
-            }
-          ],
-          "tradeoff": "Less flexibility for cleanup that always runs."
-        }
-      },
-      "draft": false,
-      "status": "ratified",
-      "created": "2026-10-17T19:30:28.856Z",
       "outcome": "A",
       "ratifiedAt": "2026-10-17"
     },
@@ -178519,201 +177662,6 @@
       "ratifiedAt": "2026-11-05"
     },
     {
-      "id": "D-AUDIT-PRECUT1",
-      "cardId": "c0n8pmxe",
-      "group": "other",
-      "title": "Closure audit: what to do with the 3,670 closures from the Rust era that have no durable evidence",
-      "situation": "#6563 c1 says every done card and every met criterion, live or archived, must be DURABLE, re-verified against dev with a commit, or reopened. The audit finds 3,729 rows with no durable evidence. 59 of them are live or were closed after the Rust cutover (6a18f4d8e3, 2026-10-23), and Prep has a disposition for each. The other 3,670 rows are on 1,344 archived cards, all closed between 2026-06 and 2026-10-23 against the Rust compiler. Their evidence is mostly prose with no commit (1,952), a merge into a card later deleted (468), or a Rust file path (390). The rest cite a decision (253), are empty (227), name a path not on dev (223), use Rust words (94) or cite a sha not in the repo (63). Only the owner can restore an archived card.",
-      "gist": "Should the audit record the Rust-era closures as unproven since the cutover, or reopen them and prove each one again?",
-      "lesson": "A durable closure names a commit, file, test or decision still on dev. Rust-era closures named Rust files and cargo runs that the cutover deleted. The cutover removed that evidence, not the need for the behaviour. The 4,414 tracked tests/cases files and the Examples goldens now guard most of it, but #6096 still lists areas whose Rust tests are unported. One group differs: 468 criteria were merged into 60 cards later deleted. Only 84 of them appear, met, on another card; 384 are on no card.",
-      "explainer": "",
-      "story": "Prep re-proved all 59 live and post-cutover rows on compiler 76b385b498. 27 still hold and 17 must be reopened. Of the rest, 10 no longer apply, 2 are covered by a decision, 2 are duplicates and 1 needs a fresh perf run. Proving the 3,670 older rows the same way means one probe each, and most of their wording describes Rust-era internals.",
-      "inWild": "When a project rewrites its implementation, the usual practice is to close legacy-era tracker items in bulk as 'obsolete after the rewrite'. An item is reopened only when the new test suite or a user shows the behaviour is still missing. [INFERENCE: a general practice; Prep cites no specific project.]",
-      "detail": "Today's tooling: $JET_STATE_ROOT/scratch/Main/prep/audit/audit2.mjs writes CLOSURE-AUDIT-v2.tsv (15,259 rows), and era.mjs splits its REOPEN rows by the cutover. The live and post-cutover dispositions are in $JET_SCRATCH_ROOT/lanes/Main/briefs/6563-c1-dispositions.tsv. The merged-into-deleted figures come from matching each source criterion's normalized text against every criterion on the live and archived board.",
-      "options": [
-        {
-          "key": "A",
-          "name": "Record the Rust-era rows as unproven, but check the 384 orphaned merges",
-          "detail": "Each pre-cutover row with no durable evidence is recorded UNPROVEN-PRECUT, citing 6a18f4d8e3. UNPROVEN-PRECUT never counts as done; it means the evidence predates the cutover. The exceptions are the 384 orphaned merges, rows merged into a deleted card and on no card, which Prep checks against dev. A row that holds is recorded VERIFIED with a commit; the rest become criteria on live cards. A row in an area #6096 lists as unported also becomes a #6096 criterion. The 59 newer rows follow the dispositions TSV; c1 is amended to match.",
-          "technical": "audit2.mjs gains the class UNPROVEN-PRECUT (closed before 2026-10-23T07:18:29Z, not live, not merged-orphan). Archived UNPROVEN-PRECUT rows need no Tower write; the audit TSV is their record.\n\nThe new c1 text reads: 'Each live or post-cutover row is DURABLE, re-verified against dev with its commit, or reopened with its reason. Each pre-cutover row with no durable evidence is recorded UNPROVEN-PRECUT, which never counts as done. Merged-into-deleted rows are re-verified or carried to a live card. Rows in areas #6096 lists as unported become criteria on #6096. The audit TSV and the orphan list are committed under Docs/audits.'",
-          "code": "# audit row (A)\n2026-08-14\tCRIT\t#2731 c3\tarchived\tdone\tUNPROVEN-PRECUT\t6a18f4d8e3\tcites Source/Lower.rs; Rust retired\n2026-10-04\tCRIT\t#3716 c1\tarchived\tdone\tVERIFIED\t<sha>\tmerged into deleted #3919; L0303 UI snapshot passes"
-        },
-        {
-          "key": "B",
-          "name": "Record every Rust-era row as unproven",
-          "detail": "As A, but the 468 merged-into-deleted rows are also recorded UNPROVEN-PRECUT, with no check.",
-          "technical": "Same class and c1 amendment as A, with no merged-orphan exception.",
-          "code": "2026-10-04\tCRIT\t#3716 c1\tarchived\tdone\tUNPROVEN-PRECUT\t6a18f4d8e3\tmerged into deleted #3919"
-        },
-        {
-          "key": "C",
-          "name": "Restore and reopen every card",
-          "detail": "The owner restores all 1,344 archived cards, and each of the 3,670 rows is reopened with its reason, then re-proved or closed again.",
-          "technical": "1,344 calls to `tower archive restore <id> --by owner`, then `tower card criteria --reopen` per row. c1 stays as written.",
-          "code": "node Tools/tower/tower.mjs archive restore <id> --by owner\nnode Tools/tower/tower.mjs card criteria '#2731' --reopen 3 --reason 'Rust-era evidence' --by Main"
-        },
-        {
-          "key": "D",
-          "name": "Re-prove every row on today's compiler",
-          "detail": "Leave the cards archived, but prove each of the 3,670 rows on today's compiler, the way the 59 newer rows were proved, and record VERIFIED with a commit or REOPEN.",
-          "technical": "One probe, golden or case per row; reopen any row that fails (owner restore needed). c1 stays as written.",
-          "code": "$JET_SCRATCH_ROOT/lanes/Main/prep/c6563/probe.sh <base> run p<card>.jet"
-        }
-      ],
-      "comparisons": [],
-      "rec": "A",
-      "recommendation": {
-        "rec": "A",
-        "why": "The cutover deleted the evidence those closures cited, not the need for their behaviour. The ported cases, the goldens and #6096 now carry that need. The one group no surviving test or card covers is the 384 orphaned merges, and A checks exactly those.",
-        "gains": [
-          "c1 can close this cycle with an honest record of every row.",
-          "No surviving work is lost: the orphaned merges are checked, and the 17 live or post-cutover rows that fail are reopened.",
-          "There is no owner restore of 1,344 cards."
-        ],
-        "losses": [
-          {
-            "loss": "A Rust-era behaviour that no ported case covers could stay recorded UNPROVEN-PRECUT while still missing.",
-            "mitigation": "#6096 holds every area whose Rust tests are still unported, and the ported-case ledger (#5454) and the goldens are the standing net. Anyone who finds a gap files a live card, which is the normal path."
-          },
-          {
-            "loss": "Checking 384 orphaned rows takes Prep time.",
-            "mitigation": "They group under 60 deleted targets, so most checks are one probe per group."
-          }
-        ],
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "384 criteria that were moved onto cards later deleted would vanish with no check at all."
-          },
-          {
-            "key": "C",
-            "reason": "1,344 owner restores, and most rows would be closed again on the same ported tests and goldens that A relies on."
-          },
-          {
-            "key": "D",
-            "reason": "3,670 probes, many against wording about Rust internals that has no Jet equivalent."
-          }
-        ],
-        "tradeoff": "Trust the ported test net for Rust-era closures, in exchange for closing the audit now, while still checking the one group that net does not cover."
-      },
-      "hybrid": null,
-      "ballotMode": "full",
-      "shortAuthorizedBy": null,
-      "ballotProcessVersion": 5,
-      "reviewPasses": {
-        "adversarial": "Author model family: Claude. Adversarial model family: Claude. Fresh agent: Main, reviewing Prep's draft, because the owner caps agents at three. Findings were that obsolete overstated what is known while #6096 still lists unported areas, so the label became UNPROVEN-PRECUT and A routes those areas to #6096."
-      },
-      "checkInstructions": null,
-      "surface": {
-        "gist": "Record the Rust-era closures that have no durable evidence as unproven, or reopen and re-prove all of them?",
-        "lesson": "3,670 old closures cite Rust code the cutover deleted. That removed their evidence, not the need for the behaviour. Ported tests guard most of it, and #6096 tracks the unported areas. 384 criteria merged into cards later deleted are on no card.",
-        "trio": {
-          "current": {
-            "note": "c1 demands that every row be durable, re-verified or reopened, with no era rule.",
-            "code": "REOPEN rows: 3,729 (59 live or post-cutover, 3,670 Rust-era)"
-          },
-          "wild": {
-            "lang": "Implementation rewrites (general practice)",
-            "note": "Legacy issues are closed in bulk as obsolete after a rewrite and reopened only when a gap is shown.",
-            "code": "Closing: obsolete after the rewrite; reopen if this still reproduces."
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "Record as unproven, check the orphaned merges",
-            "gist": "Unproven since the cutover, except 384 orphaned merges, which are checked.",
-            "gains": [
-              "Closes now and loses no surviving work."
-            ],
-            "losses": [
-              "An uncovered Rust-era gap could hide."
-            ],
-            "proposed": {
-              "code": "#2731 c3  UNPROVEN-PRECUT 6a18f4d8e3\n#3716 c1  VERIFIED <sha>"
-            }
-          },
-          {
-            "key": "B",
-            "name": "Record every row as unproven",
-            "gist": "Every Rust-era row is recorded unproven, the merges included.",
-            "gains": [
-              "Least work."
-            ],
-            "losses": [
-              "384 orphaned criteria are dropped unchecked."
-            ],
-            "proposed": {
-              "code": "#3716 c1  UNPROVEN-PRECUT 6a18f4d8e3"
-            }
-          },
-          {
-            "key": "C",
-            "name": "Restore and reopen everything",
-            "gist": "The owner restores 1,344 cards and every row is reopened.",
-            "gains": [
-              "Nothing is assumed."
-            ],
-            "losses": [
-              "1,344 owner restores; most rows are closed again."
-            ],
-            "proposed": {
-              "code": "tower archive restore <id> --by owner   (x1,344)"
-            }
-          },
-          {
-            "key": "D",
-            "name": "Re-prove everything",
-            "gist": "One probe per row on today's compiler.",
-            "gains": [
-              "Every row gets a fresh proof."
-            ],
-            "losses": [
-              "3,670 probes, many with no Jet meaning."
-            ],
-            "proposed": {
-              "code": "probe.sh <base> run p<card>.jet   (x3,670)"
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "The cutover removed the evidence for those closures, not the need. Ported tests and #6096 cover the behaviour, and A checks the orphaned merges that nothing else covers.",
-          "gains": [
-            "c1 closes with every row recorded.",
-            "No surviving work is lost."
-          ],
-          "losses": [
-            {
-              "loss": "An uncovered Rust-era gap could hide.",
-              "mitigation": "#6096 tracks unported areas, the #5454 ledger and goldens catch regressions, and a found gap gets a live card."
-            }
-          ],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "Drops 384 orphaned criteria unchecked."
-            },
-            {
-              "key": "C",
-              "reason": "1,344 owner restores."
-            },
-            {
-              "key": "D",
-              "reason": "3,670 probes."
-            }
-          ],
-          "tradeoff": "Trust the ported tests for Rust-era closures, so the audit closes now."
-        }
-      },
-      "draft": false,
-      "status": "ratified",
-      "created": "2026-11-04T18:40:37.512Z",
-      "outcome": "D",
-      "comment": "Owner, in chat with Main, 2026-11-04: each pre-cutover row is re-proved on today's compiler and recorded VERIFIED with a commit, or reopened as a criterion on a live card.",
-      "ratifiedAt": "2026-11-04"
-    },
-    {
       "id": "D-PIPE1",
       "cardId": "c09umw0r",
       "group": "syntax",
@@ -190288,6 +189236,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-08T21:10:40.587Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0h06654",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-08T21:10:33.514Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0ky4017",
+      "note": "Wayland window and ui stack: measured best against every alternative"
+    },
     {
       "at": "2026-11-08T20:44:36.716Z",
       "by": "Main",
