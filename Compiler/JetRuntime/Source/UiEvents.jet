@@ -44,7 +44,7 @@ ui_event_size_eq: fn(a: I64, b: I64) -> Bool {
             if (kind == I64{4}) -> first = ui_carrier_bool(wrapping(value + UI_EVENT_FIRST))
             if (kind == I64{0}) -> second = ui_carrier_word(wrapping(value + UI_EVENT_SECOND)).bit_and(I64{255})
             if (kind == I64{2}) -> second = ui_carrier_word(wrapping(value + UI_EVENT_SECOND))
-            if (kind == I64{3}) -> second = data_sequence_clone(ui_carrier_word(wrapping(value + UI_EVENT_SECOND)), DATA_TREE_BYTE_LIST)
+            if (kind == I64{3}) -> second = data_sequence_clone(ui_carrier_word(wrapping(value + UI_EVENT_SECOND)), DYN_BYTE_LIST)
             ui_carrier_store(wrapping(result + UI_EVENT_FIRST), first)
             ui_carrier_store(wrapping(result + UI_EVENT_SECOND), second)
         }
@@ -55,7 +55,7 @@ ui_event_size_eq: fn(a: I64, b: I64) -> Bool {
     if (value == I64{0}) -> return
     kind: ui_carrier_word(wrapping(value + UI_EVENT_KIND))
     if (kind == I64{0} || kind == I64{2} || kind == I64{3}) -> jet_rt_string_drop(ui_carrier_word(wrapping(value + UI_EVENT_FIRST)))
-    if (kind == I64{3}) -> data_sequence_drop(ui_carrier_word(wrapping(value + UI_EVENT_SECOND)), DATA_TREE_BYTE_LIST)
+    if (kind == I64{3}) -> data_sequence_drop(ui_carrier_word(wrapping(value + UI_EVENT_SECOND)), DYN_BYTE_LIST)
     jet_rt_free(value, UI_EVENT_BYTES, I64{8})
 }
 ui_event_bytes_eq: fn(a: I64, b: I64) -> Bool {

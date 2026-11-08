@@ -13,9 +13,9 @@ WS_MAX_HANDSHAKE: I64{16384}
 
 ws_error_new: fn(kind: I64, limit: I64, operation: I64) -> I64 {
     value: jet_rt_alloc(WS_ERROR_BYTES, I64{8})
-    data_tree_store(wrapping(value + WS_ERROR_TAG), kind)
-    data_tree_store(wrapping(value + WS_ERROR_LIMIT), limit)
-    data_tree_store(wrapping(value + WS_ERROR_OPERATION), operation)
+    dyn_store(wrapping(value + WS_ERROR_TAG), kind)
+    dyn_store(wrapping(value + WS_ERROR_LIMIT), limit)
+    dyn_store(wrapping(value + WS_ERROR_OPERATION), operation)
     value
 }
 ws_fail: fn(kind: I64, error: I64) -> I64 {
@@ -40,7 +40,7 @@ ws_net_failure: fn(failure: I64, reading: Bool, operation: I64, error: I64) -> I
 }
 ws_deadline_passed: fn() -> Bool { jet_ctx_deadline_present() && jet_deadline_remaining_ms() <= I64{0} }
 
-#Export(c) jet_rt_record_tag_jet_ws_error: fn(value: I64) -> I64 { data_tree_word(wrapping(value + WS_ERROR_TAG)) }
+#Export(c) jet_rt_record_tag_jet_ws_error: fn(value: I64) -> I64 { dyn_word(wrapping(value + WS_ERROR_TAG)) }
 #Export(c) jet_rt_record_new_jet_ws_error_invalid_url: fn() -> I64 { ws_error_new(WS_ERROR_INVALID_URL, I64{0}, I64{0}) }
 #Export(c) jet_rt_record_new_jet_ws_error_invalid_handshake: fn() -> I64 { ws_error_new(WS_ERROR_INVALID_HANDSHAKE, I64{0}, I64{0}) }
 #Export(c) jet_rt_record_new_jet_ws_error_protocol: fn() -> I64 { ws_error_new(WS_ERROR_PROTOCOL, I64{0}, I64{0}) }
@@ -51,18 +51,18 @@ ws_deadline_passed: fn() -> Bool { jet_ctx_deadline_present() && jet_deadline_re
 #Export(c) jet_rt_record_new_jet_ws_error_cancelled: fn() -> I64 { ws_error_new(WS_ERROR_CANCELLED, I64{0}, I64{0}) }
 #Export(c) jet_rt_record_new_jet_ws_error_unsupported_target: fn() -> I64 { ws_error_new(WS_ERROR_UNSUPPORTED_TARGET, I64{0}, I64{0}) }
 #Export(c) jet_rt_record_get_jet_ws_error_message_too_large_limit: fn(value: I64) -> I64 {
-    if (data_tree_word(wrapping(value + WS_ERROR_TAG)) != WS_ERROR_MESSAGE_TOO_LARGE) {
+    if (dyn_word(wrapping(value + WS_ERROR_TAG)) != WS_ERROR_MESSAGE_TOO_LARGE) {
         rt_record_variant_panic()
         if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     }
-    jet_int_owned_from_i64(data_tree_word(wrapping(value + WS_ERROR_LIMIT)))
+    jet_int_owned_from_i64(dyn_word(wrapping(value + WS_ERROR_LIMIT)))
 }
 #Export(c) jet_rt_record_get_jet_ws_error_io_operation: fn(value: I64) -> I64 {
-    if (data_tree_word(wrapping(value + WS_ERROR_TAG)) != WS_ERROR_IO) {
+    if (dyn_word(wrapping(value + WS_ERROR_TAG)) != WS_ERROR_IO) {
         rt_record_variant_panic()
         if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     }
-    jet_rt_string_clone(data_tree_word(wrapping(value + WS_ERROR_OPERATION)))
+    jet_rt_string_clone(dyn_word(wrapping(value + WS_ERROR_OPERATION)))
 }
 
 ws_conn_new: fn(stream: I64, client: Bool) -> I64 {
@@ -244,9 +244,9 @@ ws_utf8_valid: fn(data: I64, length: I64) -> Bool {
 }
 ws_message_new: fn(kind: I64, payload: I64, reason: I64) -> I64 {
     message: jet_rt_alloc(WS_MESSAGE_BYTES, I64{8})
-    data_tree_store(wrapping(message + WS_MESSAGE_TAG), kind)
-    data_tree_store(wrapping(message + WS_MESSAGE_PAYLOAD), payload)
-    data_tree_store(wrapping(message + WS_MESSAGE_REASON), reason)
+    dyn_store(wrapping(message + WS_MESSAGE_TAG), kind)
+    dyn_store(wrapping(message + WS_MESSAGE_PAYLOAD), payload)
+    dyn_store(wrapping(message + WS_MESSAGE_REASON), reason)
     message
 }
 // A complete text (1) or binary (2) message, or 0 after a Protocol error.
@@ -258,10 +258,10 @@ ws_finish_data: fn(opcode: I64, data: I64, length: I64, error: I64) -> I64 {
     bytes: data_sequence_new(length, RT_HOST_U8_STRIDE)
     at := I64{0}
     loop at < length {
-        host_u8_put(data_tree_word(wrapping(bytes + DATA_SEQUENCE_DATA)), at, rt_text_byte(wrapping(data + at)))
+        host_u8_put(dyn_word(wrapping(bytes + DATA_SEQUENCE_DATA)), at, rt_text_byte(wrapping(data + at)))
         at += I64{1}
     }
-    data_tree_store(wrapping(bytes + DATA_SEQUENCE_LENGTH), length)
+    dyn_store(wrapping(bytes + DATA_SEQUENCE_LENGTH), length)
     ws_message_new(I64{1}, bytes, I64{0})
 }
 // The fragments of one data message: buffer0, length8, capacity16.
@@ -392,12 +392,12 @@ ws_receive: fn(conn: I64, assembly: I64, output: I64, error: I64) -> I64 {
     ws_assembly_drop(assembly)
     result
 }
-#Export(c) jet_ws_message_is_text: fn(message: I64) -> Bool { data_tree_word(wrapping(message + WS_MESSAGE_TAG)) == I64{0} }
-#Export(c) jet_ws_message_is_binary: fn(message: I64) -> Bool { data_tree_word(wrapping(message + WS_MESSAGE_TAG)) == I64{1} }
-#Export(c) jet_ws_message_is_close: fn(message: I64) -> Bool { data_tree_word(wrapping(message + WS_MESSAGE_TAG)) == I64{2} }
+#Export(c) jet_ws_message_is_text: fn(message: I64) -> Bool { dyn_word(wrapping(message + WS_MESSAGE_TAG)) == I64{0} }
+#Export(c) jet_ws_message_is_binary: fn(message: I64) -> Bool { dyn_word(wrapping(message + WS_MESSAGE_TAG)) == I64{1} }
+#Export(c) jet_ws_message_is_close: fn(message: I64) -> Bool { dyn_word(wrapping(message + WS_MESSAGE_TAG)) == I64{2} }
 #Export(c) jet_ws_message_text: fn(message: I64, output: I64, error: I64) -> I64 {
-    if (data_tree_word(wrapping(message + WS_MESSAGE_TAG)) != I64{0}) -> return ws_fail(WS_ERROR_PROTOCOL, error)
-    net_put(output, I64{0}, jet_rt_string_clone(data_tree_word(wrapping(message + WS_MESSAGE_PAYLOAD))))
+    if (dyn_word(wrapping(message + WS_MESSAGE_TAG)) != I64{0}) -> return ws_fail(WS_ERROR_PROTOCOL, error)
+    net_put(output, I64{0}, jet_rt_string_clone(dyn_word(wrapping(message + WS_MESSAGE_PAYLOAD))))
     I64{1}
 }
 

@@ -27,14 +27,14 @@ process_text_list_clone: fn(value: I64, pairs: Bool) -> I64 {
         return result
     }
     length: encoding_word(wrapping(value + DATA_SEQUENCE_LENGTH))
-    stride: DATA_TREE_ENTRY_BYTES
+    stride: DYN_ENTRY_BYTES
     result: data_sequence_new(length, stride)
     source: encoding_word(wrapping(value + DATA_SEQUENCE_DATA))
     target: encoding_word(wrapping(result + DATA_SEQUENCE_DATA))
     at := I64{0}
     loop at < length * stride {
         encoding_store(wrapping(target + at), jet_rt_string_clone(encoding_word(wrapping(source + at))))
-        at += DATA_TREE_ELEMENT_BYTES
+        at += DYN_ELEMENT_BYTES
     }
     encoding_store(wrapping(result + DATA_SEQUENCE_LENGTH), length)
     result
@@ -46,30 +46,30 @@ process_text_list_drop: fn(value: I64, pairs: Bool) {
         length: encoding_word(wrapping(value + DATA_SEQUENCE_LENGTH))
         data: encoding_word(wrapping(value + DATA_SEQUENCE_DATA))
         at := I64{0}
-        loop at < length * DATA_TREE_ENTRY_BYTES {
+        loop at < length * DYN_ENTRY_BYTES {
             jet_rt_string_drop(encoding_word(wrapping(data + at)))
-            at += DATA_TREE_ELEMENT_BYTES
+            at += DYN_ELEMENT_BYTES
         }
         capacity: encoding_word(wrapping(value + DATA_SEQUENCE_CAPACITY))
-        if (capacity != I64{0}) -> jet_rt_free(data, capacity * DATA_TREE_ENTRY_BYTES, I64{8})
+        if (capacity != I64{0}) -> jet_rt_free(data, capacity * DYN_ENTRY_BYTES, I64{8})
     }
     jet_rt_free(value, DATA_SEQUENCE_BYTES, I64{8})
 }
 process_text_list_eq: fn(a: I64, b: I64, pairs: Bool) -> Bool {
     length: encoding_word(wrapping(a + DATA_SEQUENCE_LENGTH))
     if length != encoding_word(wrapping(b + DATA_SEQUENCE_LENGTH)) -> return false
-    stride: if pairs -> DATA_TREE_ENTRY_BYTES else -> DATA_TREE_ELEMENT_BYTES
+    stride: if pairs -> DYN_ENTRY_BYTES else -> DYN_ELEMENT_BYTES
     left: encoding_word(wrapping(a + DATA_SEQUENCE_DATA))
     right: encoding_word(wrapping(b + DATA_SEQUENCE_DATA))
     at := I64{0}
     loop at < length * stride {
         if !jet_rt_string_eq(encoding_word(wrapping(left + at)), encoding_word(wrapping(right + at))) -> return false
-        at += DATA_TREE_ELEMENT_BYTES
+        at += DYN_ELEMENT_BYTES
     }
     true
 }
 process_text_list_push: fn(list: I64, text: I64) {
-    slot: data_sequence_reserve(list, DATA_TREE_ELEMENT_BYTES)
+    slot: data_sequence_reserve(list, DYN_ELEMENT_BYTES)
     encoding_store(slot, jet_rt_string_clone(text))
     encoding_store(wrapping(list + DATA_SEQUENCE_LENGTH), encoding_word(wrapping(list + DATA_SEQUENCE_LENGTH)) + I64{1})
 }
@@ -77,15 +77,15 @@ process_text_list_push: fn(list: I64, text: I64) {
 process_word_list_clone: fn(value: I64) -> I64 {
     if (value == I64{0}) -> return I64{0}
     length: encoding_word(wrapping(value + DATA_SEQUENCE_LENGTH))
-    result: data_sequence_new(length, DATA_TREE_ELEMENT_BYTES)
-    coll_copy(encoding_word(wrapping(value + DATA_SEQUENCE_DATA)), encoding_word(wrapping(result + DATA_SEQUENCE_DATA)), length * DATA_TREE_ELEMENT_BYTES)
+    result: data_sequence_new(length, DYN_ELEMENT_BYTES)
+    coll_copy(encoding_word(wrapping(value + DATA_SEQUENCE_DATA)), encoding_word(wrapping(result + DATA_SEQUENCE_DATA)), length * DYN_ELEMENT_BYTES)
     encoding_store(wrapping(result + DATA_SEQUENCE_LENGTH), length)
     result
 }
 process_word_list_drop: fn(value: I64) {
     if (value == I64{0}) -> return
     capacity: encoding_word(wrapping(value + DATA_SEQUENCE_CAPACITY))
-    if (capacity != I64{0}) -> jet_rt_free(encoding_word(wrapping(value + DATA_SEQUENCE_DATA)), capacity * DATA_TREE_ELEMENT_BYTES, I64{8})
+    if (capacity != I64{0}) -> jet_rt_free(encoding_word(wrapping(value + DATA_SEQUENCE_DATA)), capacity * DYN_ELEMENT_BYTES, I64{8})
     jet_rt_free(value, DATA_SEQUENCE_BYTES, I64{8})
 }
 process_word_list_eq: fn(a: I64, b: I64) -> Bool {
@@ -95,9 +95,9 @@ process_word_list_eq: fn(a: I64, b: I64) -> Bool {
     left: encoding_word(wrapping(a + DATA_SEQUENCE_DATA))
     right: encoding_word(wrapping(b + DATA_SEQUENCE_DATA))
     at := I64{0}
-    loop at < length * DATA_TREE_ELEMENT_BYTES {
+    loop at < length * DYN_ELEMENT_BYTES {
         if encoding_word(wrapping(left + at)) != encoding_word(wrapping(right + at)) -> return false
-        at += DATA_TREE_ELEMENT_BYTES
+        at += DYN_ELEMENT_BYTES
     }
     true
 }
@@ -121,7 +121,7 @@ process_spec_clone: fn(value: I64, directories: Bool) -> I64 {
     field := PROCESS_SPEC_TIMEOUT
     loop field <= PROCESS_SPEC_OPEN_FILE_LIMIT {
         encoding_store(wrapping(result + field), process_optional_raw_clone(encoding_word(wrapping(value + field))))
-        field += DATA_TREE_ELEMENT_BYTES
+        field += DYN_ELEMENT_BYTES
     }
     terminal: encoding_word(wrapping(value + PROCESS_SPEC_TERMINAL))
     encoding_store(wrapping(result + PROCESS_SPEC_TERMINAL), if (terminal == I64{0}) -> I64{0} else -> jet_rt_handle_clone_terminal_policy(terminal))
@@ -140,7 +140,7 @@ process_spec_clone: fn(value: I64, directories: Bool) -> I64 {
     field := PROCESS_SPEC_TIMEOUT
     loop field <= PROCESS_SPEC_OPEN_FILE_LIMIT {
         encoding_enum_drop(encoding_word(wrapping(value + field)))
-        field += DATA_TREE_ELEMENT_BYTES
+        field += DYN_ELEMENT_BYTES
     }
     jet_rt_handle_drop_terminal_policy(encoding_word(wrapping(value + PROCESS_SPEC_TERMINAL)))
     jet_rt_string_drop(encoding_word(wrapping(value + PROCESS_SPEC_POLICY_WIRE)))
@@ -168,7 +168,7 @@ process_spec_clone: fn(value: I64, directories: Bool) -> I64 {
     field := PROCESS_SPEC_TIMEOUT
     loop field <= PROCESS_SPEC_OPEN_FILE_LIMIT {
         if !process_optional_raw_eq(encoding_word(wrapping(a + field)), encoding_word(wrapping(b + field))) -> return false
-        field += DATA_TREE_ELEMENT_BYTES
+        field += DYN_ELEMENT_BYTES
     }
     if (encoding_word(wrapping(a + PROCESS_SPEC_DETACHED)).bit_and(I64{255})) != (encoding_word(wrapping(b + PROCESS_SPEC_DETACHED)).bit_and(I64{255})) -> return false
     if encoding_word(wrapping(a + PROCESS_SPEC_PARENT_DEATH)) != encoding_word(wrapping(b + PROCESS_SPEC_PARENT_DEATH)) -> return false
@@ -210,7 +210,7 @@ process_spec_clone: fn(value: I64, directories: Bool) -> I64 {
     at := I64{0}
     loop at < length {
         if (at != I64{0}) -> rt_text_push_word(result, I64{8236}, I64{2})
-        rt_text_push_rust_debug_str(result, encoding_word(wrapping(data + at * DATA_TREE_ELEMENT_BYTES)))
+        rt_text_push_rust_debug_str(result, encoding_word(wrapping(data + at * DYN_ELEMENT_BYTES)))
         at += I64{1}
     }
     rt_text_push_word(result, I64{10589}, I64{2}) // ])
@@ -221,8 +221,8 @@ jet_std_process_cmd_owned: fn(cmd: I64) -> I64 {
     result: jet_rt_alloc(PROCESS_SPEC_BYTES, I64{8})
     coll_zero(result, PROCESS_SPEC_BYTES)
     encoding_store(wrapping(result + PROCESS_SPEC_CMD), cmd)
-    encoding_store(wrapping(result + PROCESS_SPEC_ENV_SET), data_sequence_new(I64{0}, DATA_TREE_ENTRY_BYTES))
-    encoding_store(wrapping(result + PROCESS_SPEC_ENV_REMOVE), data_sequence_new(I64{0}, DATA_TREE_ELEMENT_BYTES))
+    encoding_store(wrapping(result + PROCESS_SPEC_ENV_SET), data_sequence_new(I64{0}, DYN_ENTRY_BYTES))
+    encoding_store(wrapping(result + PROCESS_SPEC_ENV_REMOVE), data_sequence_new(I64{0}, DYN_ELEMENT_BYTES))
     encoding_store(wrapping(result + PROCESS_SPEC_STDOUT), PROCESS_STREAM_CAPTURE)
     encoding_store(wrapping(result + PROCESS_SPEC_STDERR), PROCESS_STREAM_CAPTURE)
     encoding_store(wrapping(result + PROCESS_SPEC_OUTPUT_LIMIT), process_raw_box(PROCESS_SPEC_DEFAULT_OUTPUT_LIMIT))
@@ -231,10 +231,10 @@ jet_std_process_cmd_owned: fn(cmd: I64) -> I64 {
 #Export(c) jet_std_process_cmd: fn(data: I64, length: I64) -> I64 {
     // list_in treats null data or nonpositive length as empty.
     count: if (length <= I64{0} || data == I64{0}) -> I64{0} else -> length
-    cmd: data_sequence_new(count, DATA_TREE_ELEMENT_BYTES)
+    cmd: data_sequence_new(count, DYN_ELEMENT_BYTES)
     at := I64{0}
     loop at < count {
-        process_text_list_push(cmd, encoding_word(wrapping(data + at * DATA_TREE_ELEMENT_BYTES)))
+        process_text_list_push(cmd, encoding_word(wrapping(data + at * DYN_ELEMENT_BYTES)))
         at += I64{1}
     }
     jet_std_process_cmd_owned(cmd)
@@ -253,7 +253,7 @@ jet_std_process_cmd_owned: fn(cmd: I64) -> I64 {
     cmd: encoding_word(wrapping(result + PROCESS_SPEC_CMD))
     at := I64{0}
     loop at < length {
-        process_text_list_push(cmd, encoding_word(wrapping(data + at * DATA_TREE_ELEMENT_BYTES)))
+        process_text_list_push(cmd, encoding_word(wrapping(data + at * DYN_ELEMENT_BYTES)))
         at += I64{1}
     }
     result
@@ -289,19 +289,19 @@ process_spec_env_forget: fn(list: I64, stride: I64, name: I64) {
 }
 #Export(c) jet_process_spec_env: fn(value: I64, name: I64, text: I64) -> I64 {
     result: value
-    process_spec_env_forget(encoding_word(wrapping(result + PROCESS_SPEC_ENV_REMOVE)), DATA_TREE_ELEMENT_BYTES, name)
-    process_spec_env_forget(encoding_word(wrapping(result + PROCESS_SPEC_ENV_SET)), DATA_TREE_ENTRY_BYTES, name)
+    process_spec_env_forget(encoding_word(wrapping(result + PROCESS_SPEC_ENV_REMOVE)), DYN_ELEMENT_BYTES, name)
+    process_spec_env_forget(encoding_word(wrapping(result + PROCESS_SPEC_ENV_SET)), DYN_ENTRY_BYTES, name)
     list: encoding_word(wrapping(result + PROCESS_SPEC_ENV_SET))
-    slot: data_sequence_reserve(list, DATA_TREE_ENTRY_BYTES)
-    encoding_store(wrapping(slot + DATA_TREE_ENTRY_KEY), jet_rt_string_clone(name))
-    encoding_store(wrapping(slot + DATA_TREE_ENTRY_VALUE), jet_rt_string_clone(text))
+    slot: data_sequence_reserve(list, DYN_ENTRY_BYTES)
+    encoding_store(wrapping(slot + DYN_ENTRY_KEY), jet_rt_string_clone(name))
+    encoding_store(wrapping(slot + DYN_ENTRY_VALUE), jet_rt_string_clone(text))
     encoding_store(wrapping(list + DATA_SEQUENCE_LENGTH), encoding_word(wrapping(list + DATA_SEQUENCE_LENGTH)) + I64{1})
     result
 }
 #Export(c) jet_process_spec_env_remove: fn(value: I64, name: I64) -> I64 {
     result: value
-    process_spec_env_forget(encoding_word(wrapping(result + PROCESS_SPEC_ENV_SET)), DATA_TREE_ENTRY_BYTES, name)
-    process_spec_env_forget(encoding_word(wrapping(result + PROCESS_SPEC_ENV_REMOVE)), DATA_TREE_ELEMENT_BYTES, name)
+    process_spec_env_forget(encoding_word(wrapping(result + PROCESS_SPEC_ENV_SET)), DYN_ENTRY_BYTES, name)
+    process_spec_env_forget(encoding_word(wrapping(result + PROCESS_SPEC_ENV_REMOVE)), DYN_ELEMENT_BYTES, name)
     process_text_list_push(encoding_word(wrapping(result + PROCESS_SPEC_ENV_REMOVE)), name)
     result
 }
@@ -350,11 +350,11 @@ process_int_saturated: fn(value: I64) -> I64 {
     result: value
     process_word_list_drop(encoding_word(wrapping(result + PROCESS_SPEC_CPU_AFFINITY)))
     count: if (length <= I64{0} || data == I64{0}) -> I64{0} else -> length
-    cpus: data_sequence_new(count, DATA_TREE_ELEMENT_BYTES)
+    cpus: data_sequence_new(count, DYN_ELEMENT_BYTES)
     target: encoding_word(wrapping(cpus + DATA_SEQUENCE_DATA))
     at := I64{0}
     loop at < count {
-        encoding_store(wrapping(target + at * DATA_TREE_ELEMENT_BYTES), process_int_saturated(encoding_word(wrapping(data + at * DATA_TREE_ELEMENT_BYTES))))
+        encoding_store(wrapping(target + at * DYN_ELEMENT_BYTES), process_int_saturated(encoding_word(wrapping(data + at * DYN_ELEMENT_BYTES))))
         at += I64{1}
     }
     encoding_store(wrapping(cpus + DATA_SEQUENCE_LENGTH), count)

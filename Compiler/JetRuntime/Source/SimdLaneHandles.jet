@@ -11,8 +11,8 @@
     at := I64{0}
     loop at < F64X4_LANES {
         // No pointer-identity shortcut: NaN != itself, -0 == +0.
-        a: rt_f64_from_bits(data_tree_word(wrapping(left + at * F64X4_LANE_STRIDE)))
-        b: rt_f64_from_bits(data_tree_word(wrapping(right + at * F64X4_LANE_STRIDE)))
+        a: rt_f64_from_bits(dyn_word(wrapping(left + at * F64X4_LANE_STRIDE)))
+        b: rt_f64_from_bits(dyn_word(wrapping(right + at * F64X4_LANE_STRIDE)))
         if a != b -> return false
         at += I64{1}
     }
@@ -24,7 +24,7 @@
     at := I64{0}
     loop at < F64X4_LANES {
         if (at != I64{0}) -> rt_text_push_word(result, I64{8236}, I64{2})
-        text: jet_rt_float_debug(rt_f64_from_bits(data_tree_word(wrapping(value + at * F64X4_LANE_STRIDE))))
+        text: jet_rt_float_debug(rt_f64_from_bits(dyn_word(wrapping(value + at * F64X4_LANE_STRIDE))))
         jet_rt_string_builder_push(result, text)
         jet_rt_string_drop(text)
         at += I64{1}

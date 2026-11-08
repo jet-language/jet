@@ -1,5 +1,5 @@
 // Link the real Jet runtime object.
-// This client is not a runtime provider. Define DATA_TREE_U8_STRIDE to match
+// This client is not a runtime provider. Define DYN_U8_STRIDE to match
 // Collections.jet's single RT_HOST_U8_STRIDE epoch (canonical packed = 1).
 #include <assert.h>
 #include <stdbool.h>
@@ -7,10 +7,10 @@
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
-#ifndef DATA_TREE_U8_STRIDE
-#define DATA_TREE_U8_STRIDE 1
+#ifndef DYN_U8_STRIDE
+#define DYN_U8_STRIDE 1
 #endif
-_Static_assert(DATA_TREE_U8_STRIDE == 1 || DATA_TREE_U8_STRIDE == 8, "native U8 epoch");
+_Static_assert(DYN_U8_STRIDE == 1 || DYN_U8_STRIDE == 8, "native U8 epoch");
 typedef struct { unsigned char *data; int64_t length, capacity; } Text;
 typedef struct { int64_t tag; uintptr_t payload; } Tree;
 typedef struct { int64_t length, capacity; void *data; } Sequence;
@@ -98,7 +98,7 @@ static void watch_tree(Tree *tree) {
     if (tree->tag == 7) watch((void *)tree->payload, 32, 8);
     if (tree->tag == 6 || tree->tag >= 8) {
         Sequence *sequence = (Sequence *)tree->payload;
-        int64_t stride = tree->tag == 9 ? 16 : tree->tag == 6 ? DATA_TREE_U8_STRIDE : 8;
+        int64_t stride = tree->tag == 9 ? 16 : tree->tag == 6 ? DYN_U8_STRIDE : 8;
         watch(sequence, 24, 8);
         if (sequence->capacity) watch(sequence->data, sequence->capacity * stride, 8);
         for (int64_t i = 0; tree->tag != 6 && i < sequence->length; ++i) {
@@ -212,9 +212,9 @@ static void sequence_cases(void) {
     expect(jet_rt_handle_show_dyn(a), "[]"); assert(jet_rt_handle_eq_dyn(a,b)); drop_pair(a,b);
     a = jet_rt_record_new_dyn_object(jet_rt_record_seq_entries_rec_dyn_new(0)); b = jet_rt_handle_clone_dyn(a);
     expect(jet_rt_handle_show_dyn(a), "{}"); drop_pair(a,b);
-    seq = jet_rt_alloc(24,8); seq->length = seq->capacity = 3; seq->data = jet_rt_alloc(3 * DATA_TREE_U8_STRIDE,8);
-    memset(seq->data,0,3 * DATA_TREE_U8_STRIDE);
-    unsigned char *bytes = seq->data; bytes[0] = 0; bytes[DATA_TREE_U8_STRIDE] = 127; bytes[2 * DATA_TREE_U8_STRIDE] = 255;
+    seq = jet_rt_alloc(24,8); seq->length = seq->capacity = 3; seq->data = jet_rt_alloc(3 * DYN_U8_STRIDE,8);
+    memset(seq->data,0,3 * DYN_U8_STRIDE);
+    unsigned char *bytes = seq->data; bytes[0] = 0; bytes[DYN_U8_STRIDE] = 127; bytes[2 * DYN_U8_STRIDE] = 255;
     a = jet_rt_record_new_dyn_bytes(seq); b = jet_rt_handle_clone_dyn(a);
     assert(jet_rt_record_get_dyn_bytes(a) == seq && jet_rt_handle_eq_dyn(a,b));
     expect(jet_rt_handle_show_dyn(a), "AH//");

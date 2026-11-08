@@ -3,10 +3,10 @@
 // changed (ProcessSpec.jet); every returned carrier owns its children.
 process_route_text_list: fn(data: I64, length: I64) -> I64 {
     count: if data == (I64{0}) || length <= (I64{0}) -> I64{0} else -> length
-    result: data_sequence_new(count, DATA_TREE_ELEMENT_BYTES)
+    result: data_sequence_new(count, DYN_ELEMENT_BYTES)
     index := I64{0}
     loop index < count {
-        process_text_list_push(result, encoding_word(wrapping(data + index * DATA_TREE_ELEMENT_BYTES)))
+        process_text_list_push(result, encoding_word(wrapping(data + index * DYN_ELEMENT_BYTES)))
         index += I64{1}
     }
     result
@@ -31,12 +31,12 @@ process_route_stream_mode: fn(mode: I64) {
     name_count: if names == (I64{0}) || names_length <= (I64{0}) -> I64{0} else -> names_length
     value_count: if values == (I64{0}) || values_length <= (I64{0}) -> I64{0} else -> values_length
     count: if name_count < value_count -> name_count else -> value_count
-    pairs: data_sequence_new(count, DATA_TREE_ENTRY_BYTES)
+    pairs: data_sequence_new(count, DYN_ENTRY_BYTES)
     index := I64{0}
     loop index < count {
-        slot: data_sequence_reserve(pairs, DATA_TREE_ENTRY_BYTES)
-        encoding_store(wrapping(slot + DATA_TREE_ENTRY_KEY), jet_rt_string_clone(encoding_word(wrapping(names + index * DATA_TREE_ELEMENT_BYTES))))
-        encoding_store(wrapping(slot + DATA_TREE_ENTRY_VALUE), jet_rt_string_clone(encoding_word(wrapping(values + index * DATA_TREE_ELEMENT_BYTES))))
+        slot: data_sequence_reserve(pairs, DYN_ENTRY_BYTES)
+        encoding_store(wrapping(slot + DYN_ENTRY_KEY), jet_rt_string_clone(encoding_word(wrapping(names + index * DYN_ELEMENT_BYTES))))
+        encoding_store(wrapping(slot + DYN_ENTRY_VALUE), jet_rt_string_clone(encoding_word(wrapping(values + index * DYN_ELEMENT_BYTES))))
         encoding_store(wrapping(pairs + DATA_SEQUENCE_LENGTH), index + I64{1})
         index += I64{1}
     }

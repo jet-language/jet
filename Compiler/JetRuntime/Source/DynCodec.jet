@@ -8,9 +8,9 @@
 #Export(c) jet_raw_typed_text: fn(value: I64) -> I64 { jet_rt_record_new_dyn_text(value) }
 #Export(c) jet_rt_codec_encode_char: fn(value: I64) -> I64 {
     // The existing scalar adapter replaces an invalid Unicode scalar with U+FFFD.
-    data_tree_new(DATA_TREE_TEXT, jet_rt_char_to_string(value))
+    dyn_new(DYN_TEXT, jet_rt_char_to_string(value))
 }
-codec_encode_word: fn(value: I64) -> I64 { data_tree_new(DATA_TREE_INT, jet_int_owned_from_i64(value)) }
+codec_encode_word: fn(value: I64) -> I64 { dyn_new(DYN_INT, jet_int_owned_from_i64(value)) }
 #Export(c) jet_rt_codec_encode_u8: fn(value: I64) -> I64 { codec_encode_word(value.bit_and(I64{255})) }
 #Export(c) jet_rt_codec_encode_u16: fn(value: I64) -> I64 { codec_encode_word(value.bit_and(I64{65535})) }
 #Export(c) jet_rt_codec_encode_u32: fn(value: I64) -> I64 { codec_encode_word(value.bit_and(I64{4294967295})) }
@@ -28,7 +28,7 @@ codec_encode_word: fn(value: I64) -> I64 { data_tree_new(DATA_TREE_INT, jet_int_
     }
     int_store(wrapping(node + I64{32}), at)
     int_scale(node, I64{2}, value.bit_and(I64{1}))
-    data_tree_new(DATA_TREE_INT, int_tag(node))
+    dyn_new(DYN_INT, int_tag(node))
 }
 codec_signed_word: fn(value: I64, mask: I64, sign: I64) -> I64 {
     low: value.bit_and(mask)
@@ -149,12 +149,12 @@ codec_etf_strings_key := I64{0}
 // The ETF scope's String from a Bytes leaf (mode 1) or a list of byte Ints
 // (mode 2): -1 when `tree` is not that leaf, else the codec status.
 codec_etf_string: fn(tree: I64, mode: I64, ok: I64, err: I64, err_len: I64) -> I64 {
-    kind: data_tree_word(wrapping(tree + DATA_TREE_TAG))
-    bytes: mode == I64{1} && kind == DATA_TREE_BYTE_LIST
-    if !bytes && !(mode == I64{2} && kind == DATA_TREE_ARRAY) -> return I64{-1}
-    sequence: data_tree_word(wrapping(tree + DATA_TREE_PAYLOAD))
-    length: data_tree_word(wrapping(sequence + DATA_SEQUENCE_LENGTH))
-    data: data_tree_word(wrapping(sequence + DATA_SEQUENCE_DATA))
+    kind: dyn_word(wrapping(tree + DYN_TAG))
+    bytes: mode == I64{1} && kind == DYN_BYTE_LIST
+    if !bytes && !(mode == I64{2} && kind == DYN_ARRAY) -> return I64{-1}
+    sequence: dyn_word(wrapping(tree + DYN_PAYLOAD))
+    length: dyn_word(wrapping(sequence + DATA_SEQUENCE_LENGTH))
+    data: dyn_word(wrapping(sequence + DATA_SEQUENCE_DATA))
     text := I64{0}
     if bytes {
         text = rt_text_copy(data, length)
@@ -162,12 +162,12 @@ codec_etf_string: fn(tree: I64, mode: I64, ok: I64, err: I64, err_len: I64) -> I
         target: jet_rt_string_builder_new()
         at := I64{0}
         loop at < length {
-            item: data_tree_word(wrapping(data + at * DATA_TREE_ELEMENT_BYTES))
-            if (data_tree_word(wrapping(item + DATA_TREE_TAG)) != DATA_TREE_INT || !codec_fixed_fits(data_tree_word(wrapping(item + DATA_TREE_PAYLOAD)), I64{4})) {
+            item: dyn_word(wrapping(data + at * DYN_ELEMENT_BYTES))
+            if (dyn_word(wrapping(item + DYN_TAG)) != DYN_INT || !codec_fixed_fits(dyn_word(wrapping(item + DYN_PAYLOAD)), I64{4})) {
                 jet_rt_string_drop(jet_rt_string_builder_finish(target))
                 return codec_fail(jet_rt_string_clone(rt_static_text("expected Text, found a list that is not bytes")), err, err_len)
             }
-            rt_text_push_word(target, int_word(data_tree_word(wrapping(item + DATA_TREE_PAYLOAD))), I64{1})
+            rt_text_push_word(target, int_word(dyn_word(wrapping(item + DYN_PAYLOAD))), I64{1})
             at += I64{1}
         }
         text = jet_rt_string_builder_finish(target)
@@ -178,7 +178,7 @@ codec_etf_string: fn(tree: I64, mode: I64, ok: I64, err: I64, err_len: I64) -> I
         jet_rt_string_drop(text)
         return codec_fail(jet_rt_string_clone(rt_static_text("expected Text, found bytes that are not UTF-8")), err, err_len)
     }
-    data_tree_store(ok, text)
+    dyn_store(ok, text)
     I64{1}
 }
 
@@ -200,20 +200,20 @@ codec_trimmed_is: fn(text: I64, literal: I64) -> Bool {
 
 // `{prefix}{found}`: a Text leaf is `text {:?}` (Rust str Debug), a Number
 // leaf `number {lexeme}` when `lexeme`, anything else its dyn_kind
-// (data_tree_kind_name). Owned.
+// (dyn_kind_name). Owned.
 codec_found: fn(prefix: I64, tree: I64, lexeme: Bool) -> I64 {
-    kind: data_tree_word(wrapping(tree + DATA_TREE_TAG))
-    payload: data_tree_word(wrapping(tree + DATA_TREE_PAYLOAD))
+    kind: dyn_word(wrapping(tree + DYN_TAG))
+    payload: dyn_word(wrapping(tree + DYN_PAYLOAD))
     target: jet_rt_string_builder_new()
     jet_rt_string_builder_push(target, prefix)
-    if (kind == DATA_TREE_TEXT) {
+    if (kind == DYN_TEXT) {
         jet_rt_string_builder_push(target, rt_static_text("text "))
         rt_text_push_rust_debug_str(target, payload)
-    } else if (lexeme && kind == DATA_TREE_NUMBER) {
+    } else if (lexeme && kind == DYN_NUMBER) {
         jet_rt_string_builder_push(target, rt_static_text("number "))
         jet_rt_string_builder_push(target, payload)
     } else {
-        jet_rt_string_builder_push(target, data_tree_kind_name(kind))
+        jet_rt_string_builder_push(target, dyn_kind_name(kind))
     }
     jet_rt_string_builder_finish(target)
 }
@@ -228,7 +228,7 @@ codec_framed: fn(prefix: I64, text: I64, suffix: I64) -> I64 {
 }
 
 codec_reason: fn(out: I64, reason: I64) -> I64 {
-    data_tree_store(out, reason)
+    dyn_store(out, reason)
     I64{0}
 }
 
@@ -329,7 +329,7 @@ codec_integer_text: fn(lexeme: I64, out: I64) -> I64 {
 }
 
 codec_integral: fn(out: I64, text: I64) -> I64 {
-    data_tree_store(out, text)
+    dyn_store(out, text)
     I64{1}
 }
 
@@ -385,38 +385,38 @@ codec_float_whole: fn(bits: I64) -> CodecWhole {
 // jet_dyn_decode_fixed_integer's range check with its `range` reason; kind -1
 // is the exact Int.
 codec_decode_integer: fn(tree: I64, kind: I64, range: I64, ok: I64, err: I64, err_len: I64) -> I64 {
-    kind_tag: data_tree_word(wrapping(tree + DATA_TREE_TAG))
-    payload: data_tree_word(wrapping(tree + DATA_TREE_PAYLOAD))
+    kind_tag: dyn_word(wrapping(tree + DYN_TAG))
+    payload: dyn_word(wrapping(tree + DYN_PAYLOAD))
     value := I64{0}
-    if (kind_tag == DATA_TREE_INT) {
+    if (kind_tag == DYN_INT) {
         if (kind >= I64{0} && !codec_i128(payload)) -> return codec_fail(jet_rt_string_clone(rt_static_text("exact Int is outside i128")), err, err_len)
         value = jet_rt_int_clone(payload)
-    } else if (kind_tag == DATA_TREE_FLOAT) {
+    } else if (kind_tag == DYN_FLOAT) {
         whole: codec_float_whole(payload)
         if !whole.integral -> return codec_fail(codec_found(rt_static_text("expected Int, found "), tree, false), err, err_len)
         value = jet_int_owned_from_i64(whole.value)
-    } else if (kind_tag == DATA_TREE_NUMBER) {
-        if (codec_integer_text(payload, ok) == I64{0}) -> return codec_fail(data_tree_word(ok), err, err_len)
-        text: data_tree_word(ok)
+    } else if (kind_tag == DYN_NUMBER) {
+        if (codec_integer_text(payload, ok) == I64{0}) -> return codec_fail(dyn_word(ok), err, err_len)
+        text: dyn_word(ok)
         parsed: jet_int_parse(text, ok, err)
         jet_rt_string_drop(text)
         if (parsed == I64{0}) {
-            jet_rt_string_drop(data_tree_word(err))
+            jet_rt_string_drop(dyn_word(err))
             return codec_fail(codec_framed(rt_static_text("expected Int, found number "), payload, rt_static_text("")), err, err_len)
         }
-        value = data_tree_word(ok)
+        value = dyn_word(ok)
         if (kind >= I64{0} && !codec_i128(value)) {
             jet_rt_int_drop(value)
             return codec_fail(codec_framed(rt_static_text("expected Int, found number "), payload, rt_static_text("")), err, err_len)
         }
-    } else if (kind_tag == DATA_TREE_TEXT && codec_text_cells()) {
+    } else if (kind_tag == DYN_TEXT && codec_text_cells()) {
         // A text cell is the exact Int (CtBigInt::from_str) or i128 FromStr
         // of the trimmed text; any failure names the original text.
         if (jet_int_parse(payload, ok, err) == I64{0}) {
-            jet_rt_string_drop(data_tree_word(err))
+            jet_rt_string_drop(dyn_word(err))
             return codec_fail(codec_found(rt_static_text("expected Int, found "), tree, false), err, err_len)
         }
-        value = data_tree_word(ok)
+        value = dyn_word(ok)
         if (kind >= I64{0} && !codec_i128(value)) {
             jet_rt_int_drop(value)
             return codec_fail(codec_found(rt_static_text("expected Int, found "), tree, false), err, err_len)
@@ -425,14 +425,14 @@ codec_decode_integer: fn(tree: I64, kind: I64, range: I64, ok: I64, err: I64, er
         return codec_fail(codec_found(rt_static_text("expected Int, found "), tree, false), err, err_len)
     }
     if (kind < I64{0}) {
-        data_tree_store(ok, value)
+        dyn_store(ok, value)
         return I64{1}
     }
     fits: codec_fixed_fits(value, kind)
     word: int_word(value)
     jet_rt_int_drop(value)
     if !fits -> return codec_fail(jet_rt_string_clone(range), err, err_len)
-    data_tree_store(ok, word)
+    dyn_store(ok, word)
     I64{1}
 }
 #Export(c) jet_rt_codec_decode_int: fn(tree: I64, ok: I64, err: I64, err_len: I64) -> I64 {
@@ -469,33 +469,33 @@ codec_finite: fn(bits: I64) -> Bool { ((bits >> I64{52}).bit_and(I64{2047})) != 
 // whitespace, so jet_float_parse's trim is Rust's untrimmed str::parse::<f64>
 // here.
 #Export(c) jet_rt_codec_decode_float: fn(tree: I64, ok: I64, err: I64, err_len: I64) -> I64 {
-    kind_tag: data_tree_word(wrapping(tree + DATA_TREE_TAG))
-    payload: data_tree_word(wrapping(tree + DATA_TREE_PAYLOAD))
-    if (kind_tag == DATA_TREE_FLOAT) {
-        data_tree_store(ok, payload)
+    kind_tag: dyn_word(wrapping(tree + DYN_TAG))
+    payload: dyn_word(wrapping(tree + DYN_PAYLOAD))
+    if (kind_tag == DYN_FLOAT) {
+        dyn_store(ok, payload)
         return I64{1}
     }
-    if (kind_tag == DATA_TREE_INT) {
+    if (kind_tag == DYN_INT) {
         bits: rt_f64_bits(jet_int_owned_to_f64(payload))
         if !codec_finite(bits) -> return codec_fail(jet_rt_string_clone(rt_static_text("expected float, got out-of-range Int")), err, err_len)
-        data_tree_store(ok, bits)
+        dyn_store(ok, bits)
         return I64{1}
     }
-    if (kind_tag == DATA_TREE_NUMBER) {
+    if (kind_tag == DYN_NUMBER) {
         if (jet_float_parse(payload, ok, err) == I64{0}) {
-            jet_rt_string_drop(data_tree_word(err))
+            jet_rt_string_drop(dyn_word(err))
             return codec_fail(codec_framed(rt_static_text("expected Float, found number "), payload, rt_static_text("")), err, err_len)
         }
-        if !codec_finite(data_tree_word(ok)) -> return codec_fail(codec_framed(rt_static_text("expected Float, found out-of-range number "), payload, rt_static_text("")), err, err_len)
+        if !codec_finite(dyn_word(ok)) -> return codec_fail(codec_framed(rt_static_text("expected Float, found out-of-range number "), payload, rt_static_text("")), err, err_len)
         return I64{1}
     }
-    if (kind_tag == DATA_TREE_TEXT && codec_text_cells()) {
+    if (kind_tag == DYN_TEXT && codec_text_cells()) {
         // The trimmed text's f64, kept only when finite.
         if (jet_float_parse(payload, ok, err) == I64{0}) {
-            jet_rt_string_drop(data_tree_word(err))
+            jet_rt_string_drop(dyn_word(err))
             return codec_fail(codec_found(rt_static_text("expected Float, found "), tree, false), err, err_len)
         }
-        if !codec_finite(data_tree_word(ok)) -> return codec_fail(codec_found(rt_static_text("expected Float, found "), tree, false), err, err_len)
+        if !codec_finite(dyn_word(ok)) -> return codec_fail(codec_found(rt_static_text("expected Float, found "), tree, false), err, err_len)
         return I64{1}
     }
     codec_fail(codec_found(rt_static_text("expected Float, found "), tree, false), err, err_len)
@@ -503,13 +503,13 @@ codec_finite: fn(bits: I64) -> Bool { ((bits >> I64{52}).bit_and(I64{2047})) != 
 
 // A text cell is exactly `true` or `false` once trimmed.
 #Export(c) jet_rt_codec_decode_bool: fn(tree: I64, ok: I64, err: I64, err_len: I64) -> I64 {
-    kind_tag: data_tree_word(wrapping(tree + DATA_TREE_TAG))
-    payload: data_tree_word(wrapping(tree + DATA_TREE_PAYLOAD))
-    if (kind_tag == DATA_TREE_BOOL) {
+    kind_tag: dyn_word(wrapping(tree + DYN_TAG))
+    payload: dyn_word(wrapping(tree + DYN_PAYLOAD))
+    if (kind_tag == DYN_BOOL) {
         rt_text_put(ok, if (payload != I64{0}) -> I64{1} else -> I64{0})
         return I64{1}
     }
-    if (kind_tag == DATA_TREE_TEXT && codec_text_cells()) {
+    if (kind_tag == DYN_TEXT && codec_text_cells()) {
         if codec_trimmed_is(payload, rt_static_text("true")) {
             rt_text_put(ok, I64{1})
             return I64{1}
@@ -523,7 +523,7 @@ codec_finite: fn(bits: I64) -> Bool { ((bits >> I64{52}).bit_and(I64{2047})) != 
 }
 
 #Export(c) jet_rt_codec_decode_string: fn(tree: I64, ok: I64, err: I64, err_len: I64) -> I64 {
-    if (data_tree_word(wrapping(tree + DATA_TREE_TAG)) != DATA_TREE_TEXT) {
+    if (dyn_word(wrapping(tree + DYN_TAG)) != DYN_TEXT) {
         mode: jet_rt_tls_get(codec_etf_strings_key)
         if (mode != I64{0}) {
             status: codec_etf_string(tree, mode, ok, err, err_len)
@@ -531,18 +531,18 @@ codec_finite: fn(bits: I64) -> Bool { ((bits >> I64{52}).bit_and(I64{2047})) != 
         }
         return codec_fail(codec_found(rt_static_text("expected Text, found "), tree, true), err, err_len)
     }
-    data_tree_store(ok, jet_rt_string_clone(data_tree_word(wrapping(tree + DATA_TREE_PAYLOAD))))
+    dyn_store(ok, jet_rt_string_clone(dyn_word(wrapping(tree + DYN_PAYLOAD))))
     I64{1}
 }
 
 // decode_string, then exactly one scalar.
 #Export(c) jet_rt_codec_decode_char: fn(tree: I64, ok: I64, err: I64, err_len: I64) -> I64 {
-    if (data_tree_word(wrapping(tree + DATA_TREE_TAG)) != DATA_TREE_TEXT) -> return codec_fail(codec_found(rt_static_text("expected Text, found "), tree, true), err, err_len)
-    text: data_tree_word(wrapping(tree + DATA_TREE_PAYLOAD))
+    if (dyn_word(wrapping(tree + DYN_TAG)) != DYN_TEXT) -> return codec_fail(codec_found(rt_static_text("expected Text, found "), tree, true), err, err_len)
+    text: dyn_word(wrapping(tree + DYN_PAYLOAD))
     data: rt_text_data(text)
     length: rt_text_len(text)
     if (length > I64{0} && rt_text_width(data) == length) {
-        data_tree_store(ok, rt_text_decode(data))
+        dyn_store(ok, rt_text_decode(data))
         return I64{1}
     }
     target: jet_rt_string_builder_new()

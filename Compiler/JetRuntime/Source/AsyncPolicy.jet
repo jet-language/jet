@@ -8,12 +8,12 @@
         if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     }
     value: jet_rt_alloc(ASYNC_POLICY_BYTES, I64{8})
-    data_tree_store(wrapping(value + ASYNC_POLICY_CAPACITY), raw)
-    data_tree_store(wrapping(value + ASYNC_POLICY_OVERFLOW), overflow)
+    dyn_store(wrapping(value + ASYNC_POLICY_CAPACITY), raw)
+    dyn_store(wrapping(value + ASYNC_POLICY_OVERFLOW), overflow)
     value
 }
-#Export(c) jet_rt_record_get_jet_async_policy_capacity: fn(value: I64) -> I64 { jet_int_owned_from_i64(data_tree_word(wrapping(value + ASYNC_POLICY_CAPACITY))) }
-#Export(c) jet_rt_record_get_jet_async_policy_overflow: fn(value: I64) -> I64 { data_tree_word(wrapping(value + ASYNC_POLICY_OVERFLOW)) }
+#Export(c) jet_rt_record_get_jet_async_policy_capacity: fn(value: I64) -> I64 { jet_int_owned_from_i64(dyn_word(wrapping(value + ASYNC_POLICY_CAPACITY))) }
+#Export(c) jet_rt_record_get_jet_async_policy_overflow: fn(value: I64) -> I64 { dyn_word(wrapping(value + ASYNC_POLICY_OVERFLOW)) }
 #Export(c) jet_rt_handle_clone_jet_async_policy: fn(value: I64) -> I64 {
     result: jet_rt_alloc(ASYNC_POLICY_BYTES, I64{8})
     coll_copy(value, result, ASYNC_POLICY_BYTES)

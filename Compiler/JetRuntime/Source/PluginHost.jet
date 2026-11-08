@@ -73,9 +73,9 @@ PG_LIMIT_FUEL: I64{0}
 PG_LIMIT_MEMORY: I64{1}
 PG_LIMIT_TABLE: I64{2}
 
-pg_word: fn(address: I64) -> I64 { data_tree_word(address) }
-pg_store: fn(address: I64, value: I64) { data_tree_store(address, value) }
-pg_desc: fn(desc: I64, index: I64) -> I64 { data_tree_word(wrapping(desc + index * I64{8})) }
+pg_word: fn(address: I64) -> I64 { dyn_word(address) }
+pg_store: fn(address: I64, value: I64) { dyn_store(address, value) }
+pg_desc: fn(desc: I64, index: I64) -> I64 { dyn_word(wrapping(desc + index * I64{8})) }
 
 pg_u32: fn(address: I64) -> I64 {
     rt_text_byte(address).bit_or(rt_text_byte(wrapping(address + I64{1})) << I64{8}).bit_or(rt_text_byte(wrapping(address + I64{2})) << I64{16}).bit_or(rt_text_byte(wrapping(address + I64{3})) << I64{24})

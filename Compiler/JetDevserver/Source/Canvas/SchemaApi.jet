@@ -36,7 +36,7 @@ CANVAS_PAYLOAD_LIMIT: Usize{16 * 1024 * 1024}
 
 canvas_machine_output: fn(action: String, ok: Bool, payload: String) -> String {
     payload := payload.trim() // #4303
-    value: parse_json_with_limit(payload, CANVAS_PAYLOAD_LIMIT).ok().and_then((tree) -> StatusValue.from_data_tree(tree).ok()).unwrap_or_else(() -> StatusValue.String(payload.to_string()))
+    value: parse_json_with_limit(payload, CANVAS_PAYLOAD_LIMIT).ok().and_then((tree) -> StatusValue.from_dyn(tree).ok()).unwrap_or_else(() -> StatusValue.String(payload.to_string()))
     StatusEnvelope.new(action, ok).with_field("canvas", value).json()
 }
 canvas_machine_success: fn(action: String, payload: String) -> String { canvas_machine_output(action, true, payload) }

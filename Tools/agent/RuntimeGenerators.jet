@@ -2799,7 +2799,7 @@ HOST_CARRIER_FIXTURE: "CoreEnumPayloadRow{{enum_name: \"IOError\", variant: \"In
 
 // The decode diagnostic's name for each Dyn variant. The arms of Core's
 // core.encoding.__dyn_kind are the one source; the runtime's
-// data_tree_kind_name and the web tier's jet_dyn_kind are generated regions
+// dyn_kind_name and the web tier's jet_dyn_kind are generated regions
 // of their host files, which only map a variant to the host's tree tag.
 
 DYN_KIND_SOURCE_PATH: "Core/Encoding/Encoding.jet"
@@ -2845,24 +2845,24 @@ dyn_kind_rows: fn(source: String) -> [DynKind] GeneratorError! {
 // The runtime tree tag constant of Dyn variant `variant`.
 dyn_kind_runtime_tag: fn(variant: String) -> String? Never! {
     if {
-        variant == "Null" -> Val("DATA_TREE_NULL")
-        variant == "Bool" -> Val("DATA_TREE_BOOL")
-        variant == "Int" -> Val("DATA_TREE_INT")
-        variant == "Float" -> Val("DATA_TREE_FLOAT")
-        variant == "Number" -> Val("DATA_TREE_NUMBER")
-        variant == "Text" -> Val("DATA_TREE_TEXT")
-        variant == "Bytes" -> Val("DATA_TREE_BYTE_LIST")
-        variant == "DateTime" -> Val("DATA_TREE_DATETIME")
-        variant == "Array" -> Val("DATA_TREE_ARRAY")
-        variant == "Object" -> Val("DATA_TREE_OBJECT")
+        variant == "Null" -> Val("DYN_NULL")
+        variant == "Bool" -> Val("DYN_BOOL")
+        variant == "Int" -> Val("DYN_INT")
+        variant == "Float" -> Val("DYN_FLOAT")
+        variant == "Number" -> Val("DYN_NUMBER")
+        variant == "Text" -> Val("DYN_TEXT")
+        variant == "Bytes" -> Val("DYN_BYTE_LIST")
+        variant == "DateTime" -> Val("DYN_DATETIME")
+        variant == "Array" -> Val("DYN_ARRAY")
+        variant == "Object" -> Val("DYN_OBJECT")
         else -> None
     }
 }
 
-// data_tree_kind_name: a tag test per arm; the last arm's word answers every
+// dyn_kind_name: a tag test per arm; the last arm's word answers every
 // other tag.
 render_dyn_kind_runtime: fn(rows: [DynKind]) -> String GeneratorError! {
-    lines := [String]{DYN_KIND_BEGIN, "// dyn_kind: the diagnostic name of a runtime tree's kind.", "data_tree_kind_name: fn(kind: I64) -> I64 {{"}
+    lines := [String]{DYN_KIND_BEGIN, "// dyn_kind: the diagnostic name of a runtime tree's kind.", "dyn_kind_name: fn(kind: I64) -> I64 {{"}
     loop at in 0..<rows.len() {
         row: rows[at]
         constant: dyn_kind_runtime_tag(row.variant) ?? return Err(generator_fail("Dyn variant {row.variant} has no runtime tree tag"))
@@ -2920,7 +2920,7 @@ read_dyn_kinds: fn() -[FS]> [GeneratedFile] GeneratorError! {
     assert_eq(rows[1].variant, "Bytes")
     assert_eq(rows[2].word, "an object")
     runtime: render_dyn_kind_runtime(rows) ?? panic("rows did not render: {err.message}")
-    assert(runtime.contains("    if kind == DATA_TREE_BYTE_LIST -> return rt_static_text(\"Bytes\")\n    rt_static_text(\"an object\")\n}}\n{DYN_KIND_END}"))
+    assert(runtime.contains("    if kind == DYN_BYTE_LIST -> return rt_static_text(\"Bytes\")\n    rt_static_text(\"an object\")\n}}\n{DYN_KIND_END}"))
     assert(render_dyn_kind_web(rows).contains("    case \"Bytes\": return \"Bytes\";\n    case \"Object\": return \"an object\";\n    default: return \"value\";"))
     host: "a\n{DYN_KIND_BEGIN}\nstale\n{DYN_KIND_END}\nb\n"
     assert_eq(splice_dyn_kind("h", host, "R") ?? "", "a\nR\nb\n")

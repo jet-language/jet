@@ -14,7 +14,7 @@ use {
     jet.REPL.Notebook.[decide_render, export_ipynb, export_jet, import_ipynb, merge_by_id, quarantine_outputs, run_headless_script, save_jetnb, load_jetnb, grant_active, CellKind, ClientKind, JetNotebook, Kernel, MimeBundle, RenderDecision, RerunDecision, TrustStore, POLICY_VERSION, NotebookCell, ActiveRequest, CellExecResult]
     jet.REPL.RerunPlan.[StepKind]
     jet_semindex.[semantic_blame, semantic_rename_ops, SemanticOp, SemanticOpTarget]
-    Compiler.JetLSP.Tests.Integration.DevCorpusGate.[TOWER_DATATREE_POLICY_SITE]
+    Compiler.JetLSP.Tests.Integration.DevCorpusGate.[TOWER_DYN_POLICY_SITE]
     Compiler.JetLSP.Tests.Integration.Notebook.[RunningNotebook, command_path, command_available, free_loopback_port, wait_for_notebook_server]
     Compiler.JetLSP.Tests.Integration.SemanticOps.[fixture]
 }
@@ -37,19 +37,19 @@ use {
     CorpusPolicy.load().expect("corpus manifest").check_gate("dev-corpus").expect("dev corpus semantic policy")
 }
 
-#Test("tower_datatree_policy_keeps_mechanical_ops_and_named_exceptions") {
+#Test("tower_dyn_policy_keeps_mechanical_ops_and_named_exceptions") {
     policy: CorpusPolicy.load().expect("corpus manifest")
     root: OSPath(env.var("CARGO_MANIFEST_DIR").unwrap())
-    source: fs.read_to_string(root.join(TOWER_DATATREE_POLICY_SITE)).expect("Tower recipe source is readable")
-    violations: policy.evaluate_source(TOWER_DATATREE_POLICY_SITE, source).expect("Tower recipe parses")
-    assert(violations.is_empty(), "Tower DataTree corpus policy failed:\n{violations.map((v) -> v.to_string()).collect().join("\n")}")
+    source: fs.read_to_string(root.join(TOWER_DYN_POLICY_SITE)).expect("Tower recipe source is readable")
+    violations: policy.evaluate_source(TOWER_DYN_POLICY_SITE, source).expect("Tower recipe parses")
+    assert(violations.is_empty(), "Tower Dyn corpus policy failed:\n{violations.map((v) -> v.to_string()).collect().join("\n")}")
 }
 
-#Test("tower_datatree_policy_rejects_duplicate_generic_ladders") {
+#Test("tower_dyn_policy_rejects_duplicate_generic_ladders") {
     policy: CorpusPolicy.load().expect("corpus manifest")
-    violations: policy.evaluate_source(TOWER_DATATREE_POLICY_SITE, "\nduplicate_equal: fn(left: DataTree, right: DataTree) -> Bool {{ return true }}\narrays_semantically_equal: fn(left: [DataTree], right: [DataTree]) -> Bool {{ return true }}\ntruthy: fn(value: DataTree) -> Bool {{ return true }}\njavascript_truthy_duplicate: fn(value: DataTree) -> Bool {{ return true }}\n").expect("synthetic Tower source parses")
+    violations: policy.evaluate_source(TOWER_DYN_POLICY_SITE, "\nduplicate_equal: fn(left: Dyn, right: Dyn) -> Bool {{ return true }}\narrays_semantically_equal: fn(left: [Dyn], right: [Dyn]) -> Bool {{ return true }}\ntruthy: fn(value: Dyn) -> Bool {{ return true }}\njavascript_truthy_duplicate: fn(value: Dyn) -> Bool {{ return true }}\n").expect("synthetic Tower source parses")
     assert_eq(violations.len(), 4, "all duplicate generic helpers must be rejected once: {violations}")
-    assert(violations.all((violation) -> violation.rule == "datatree-domain-policy"), "one occurrence-scoped DataTree rule must own every rejection: {violations}")
+    assert(violations.all((violation) -> violation.rule == "dyn-domain-policy"), "one occurrence-scoped Dyn rule must own every rejection: {violations}")
 }
 
 #Test("semantic_corpus_policy_runs_after_dev_domain_checks") {

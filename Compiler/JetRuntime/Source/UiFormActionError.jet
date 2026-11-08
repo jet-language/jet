@@ -16,13 +16,13 @@ ui_form_sequence_buffer_drop: fn(value: I64, stride: I64) {
     if (capacity != I64{0}) -> jet_rt_free(ui_carrier_word(wrapping(value + DATA_SEQUENCE_DATA)), capacity * stride, I64{8})
 }
 ui_form_messages_copy: fn(value: I64, result: I64) {
-    ui_form_sequence_copy(value, result, DATA_TREE_ELEMENT_BYTES)
+    ui_form_sequence_copy(value, result, DYN_ELEMENT_BYTES)
     length: ui_carrier_word(wrapping(value + DATA_SEQUENCE_LENGTH))
     source: ui_carrier_word(wrapping(value + DATA_SEQUENCE_DATA))
     target: ui_carrier_word(wrapping(result + DATA_SEQUENCE_DATA))
     at := I64{0}
     loop at < length {
-        ui_carrier_store(wrapping(target + at * DATA_TREE_ELEMENT_BYTES), jet_rt_string_clone(ui_carrier_word(wrapping(source + at * DATA_TREE_ELEMENT_BYTES))))
+        ui_carrier_store(wrapping(target + at * DYN_ELEMENT_BYTES), jet_rt_string_clone(ui_carrier_word(wrapping(source + at * DYN_ELEMENT_BYTES))))
         at += I64{1}
     }
 }
@@ -31,10 +31,10 @@ ui_form_messages_drop: fn(value: I64) {
     data: ui_carrier_word(wrapping(value + DATA_SEQUENCE_DATA))
     at := I64{0}
     loop at < length {
-        jet_rt_string_drop(ui_carrier_word(wrapping(data + at * DATA_TREE_ELEMENT_BYTES)))
+        jet_rt_string_drop(ui_carrier_word(wrapping(data + at * DYN_ELEMENT_BYTES)))
         at += I64{1}
     }
-    ui_form_sequence_buffer_drop(value, DATA_TREE_ELEMENT_BYTES)
+    ui_form_sequence_buffer_drop(value, DYN_ELEMENT_BYTES)
 }
 ui_form_messages_eq: fn(a: I64, b: I64) -> Bool {
     length: ui_carrier_word(wrapping(a + DATA_SEQUENCE_LENGTH))
@@ -43,13 +43,13 @@ ui_form_messages_eq: fn(a: I64, b: I64) -> Bool {
     second: ui_carrier_word(wrapping(b + DATA_SEQUENCE_DATA))
     at := I64{0}
     loop at < length {
-        if (!jet_rt_string_eq(ui_carrier_word(wrapping(first + at * DATA_TREE_ELEMENT_BYTES)), ui_carrier_word(wrapping(second + at * DATA_TREE_ELEMENT_BYTES)))) -> return false
+        if (!jet_rt_string_eq(ui_carrier_word(wrapping(first + at * DYN_ELEMENT_BYTES)), ui_carrier_word(wrapping(second + at * DYN_ELEMENT_BYTES)))) -> return false
         at += I64{1}
     }
     true
 }
 ui_form_messages_push: fn(value: I64, message: I64) {
-    slot: data_sequence_reserve(value, DATA_TREE_ELEMENT_BYTES)
+    slot: data_sequence_reserve(value, DYN_ELEMENT_BYTES)
     ui_carrier_store(slot, message)
     ui_carrier_store(wrapping(value + DATA_SEQUENCE_LENGTH), ui_carrier_word(wrapping(value + DATA_SEQUENCE_LENGTH)) + I64{1})
 }

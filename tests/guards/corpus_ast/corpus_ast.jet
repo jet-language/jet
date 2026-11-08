@@ -825,7 +825,7 @@ policy_is_task_statement: fn(statement: Stmt, only_all: Bool) -> Bool {
         else -> return false
     }
 }
-policy_data_tree_type: fn(ty: Type) -> Bool {
+policy_dyn_type: fn(ty: Type) -> Bool {
     if policy_named_type(ty, "Dyn") -> return true
     if ty == .List(inner) -> return policy_named_type(inner, "Dyn")
     false
@@ -865,14 +865,14 @@ policy_named_tower_truthiness: fn(path: String, name: String) -> Bool {
     name == "javascript_truthy_int" || name == "javascript_truthy_float" || name == "javascript_truthy_text" ||
     name == "javascript_truthy_array" || name == "javascript_truthy_object"
 }
-policy_data_tree_violations: fn(path: String, program: Program) -> [PolicyOccurrence] {
+policy_dyn_violations: fn(path: String, program: Program) -> [PolicyOccurrence] {
     violations := [PolicyOccurrence]{}
     loop item in program.items {
         if item == .Func(function) {
             if policy_named_tower_truthiness(path, function.name) -> next
             result: function.return_type ?? next
             if !policy_named_type(result, "Bool") -> next
-            pair: function.params.len() == 2 && policy_data_tree_type(function.params[0].ty) && policy_data_tree_type(function.params[1].ty)
+            pair: function.params.len() == 2 && policy_dyn_type(function.params[0].ty) && policy_dyn_type(function.params[1].ty)
             constant: policy_constant_bool_body(function.body)
             if (pair && (constant || policy_compares_parameter_pair(function))) ||
                 (function.params.len() == 1 && policy_named_type(function.params[0].ty, "Dyn") && constant) {
@@ -1408,7 +1408,7 @@ policy_evaluate_program: fn(manifest: PolicyManifest, path: String, row: PolicyS
         }
     }
     if policy_applies(manifest, path, row, "dyn-domain-policy") {
-        loop violation in policy_data_tree_violations(path, program) -> violations.push(violation)
+        loop violation in policy_dyn_violations(path, program) -> violations.push(violation)
     }
     if policy_applies(manifest, path, row, "walk-files-filter") && facts.file_walks.len() > 0 -> violations.push(policy_occurrence(path, "walk-files-filter", "call:fs.walk", facts.file_walks[0]))
     if policy_applies(manifest, path, row, "regex-capture-recipe") && !policy_has_anchored_regex_capture(program, aliases) {

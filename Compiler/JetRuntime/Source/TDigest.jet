@@ -1,7 +1,7 @@
 // Shared Native40 owner (#4828), embedded canonical sequence of mean/weight pairs.
 // Do not replace the seed cumulative quirk with textbook t-digest.
-td_float: fn(address: I64) -> Float { rt_f64_from_bits(data_tree_word(address)) }
-td_put: fn(address: I64, value: Float) { data_tree_store(address, rt_f64_bits(value)) }
+td_float: fn(address: I64) -> Float { rt_f64_from_bits(dyn_word(address)) }
+td_put: fn(address: I64, value: Float) { dyn_store(address, rt_f64_bits(value)) }
 td_partition: fn(data: I64, length: I64, value: Float) -> I64 {
     if (length == I64{0}) -> return I64{0}
     // rustc1.97.1 slice::partition_point delegates to this binary_search_by shape.
@@ -21,7 +21,7 @@ td_partition: fn(data: I64, length: I64, value: Float) -> I64 {
     value: jet_rt_alloc(TD_BYTES, I64{8})
     thread_zero(value, TD_BYTES)
     sync_store(wrapping(value + TD_REFS), I64{1})
-    data_tree_store(wrapping(wrapping(value + TD_SEQUENCE) + DATA_SEQUENCE_DATA), I64{8})
+    dyn_store(wrapping(wrapping(value + TD_SEQUENCE) + DATA_SEQUENCE_DATA), I64{8})
     value
 }
 #Export(c) jet_rt_handle_clone_jet_t_digest: fn(value: I64) -> I64 {
@@ -32,8 +32,8 @@ td_partition: fn(data: I64, length: I64, value: Float) -> I64 {
     if (value == I64{0}) -> return
     if (sync_add(wrapping(value + TD_REFS), I64{-1}) != I64{1}) -> return
     sequence: wrapping(value + TD_SEQUENCE)
-    capacity: data_tree_word(wrapping(sequence + DATA_SEQUENCE_CAPACITY))
-    if (capacity != I64{0}) -> jet_rt_free(data_tree_word(wrapping(sequence + DATA_SEQUENCE_DATA)), capacity * TD_CENTROID_BYTES, I64{8})
+    capacity: dyn_word(wrapping(sequence + DATA_SEQUENCE_CAPACITY))
+    if (capacity != I64{0}) -> jet_rt_free(dyn_word(wrapping(sequence + DATA_SEQUENCE_DATA)), capacity * TD_CENTROID_BYTES, I64{8})
     jet_rt_free(value, TD_BYTES, I64{8})
 }
 #Export(c) jet_rt_handle_show_jet_t_digest: fn(_value: I64) -> I64 {
@@ -44,16 +44,16 @@ td_partition: fn(data: I64, length: I64, value: Float) -> I64 {
 #Export(c) jet_rt_native_tdigest_add: fn(value: I64, sample: Float) {
     sync_mutex_lock(wrapping(value + TD_MUTEX))
     sequence: wrapping(value + TD_SEQUENCE)
-    length: data_tree_word(wrapping(sequence + DATA_SEQUENCE_LENGTH))
-    index: td_partition(data_tree_word(wrapping(sequence + DATA_SEQUENCE_DATA)), length, sample)
+    length: dyn_word(wrapping(sequence + DATA_SEQUENCE_LENGTH))
+    index: td_partition(dyn_word(wrapping(sequence + DATA_SEQUENCE_DATA)), length, sample)
     _ := data_sequence_reserve(sequence, TD_CENTROID_BYTES)
-    data: data_tree_word(wrapping(sequence + DATA_SEQUENCE_DATA))
+    data: dyn_word(wrapping(sequence + DATA_SEQUENCE_DATA))
     at := length
     loop at > index {
         target: data + at * TD_CENTROID_BYTES
         source: target - TD_CENTROID_BYTES
-        data_tree_store(wrapping(target + TD_MEAN), data_tree_word(wrapping(source + TD_MEAN)))
-        data_tree_store(wrapping(target + TD_WEIGHT), data_tree_word(wrapping(source + TD_WEIGHT)))
+        dyn_store(wrapping(target + TD_MEAN), dyn_word(wrapping(source + TD_MEAN)))
+        dyn_store(wrapping(target + TD_WEIGHT), dyn_word(wrapping(source + TD_WEIGHT)))
         at -= I64{1}
     }
     td_put(wrapping(wrapping(data + index * TD_CENTROID_BYTES) + TD_MEAN), sample)
@@ -98,18 +98,18 @@ td_partition: fn(data: I64, length: I64, value: Float) -> I64 {
         }
         at += I64{1}
     }
-    data_tree_store(wrapping(sequence + DATA_SEQUENCE_LENGTH), write)
+    dyn_store(wrapping(sequence + DATA_SEQUENCE_LENGTH), write)
     sync_mutex_unlock(wrapping(value + TD_MUTEX))
 }
 #Export(c) jet_rt_native_tdigest_quantile: fn(value: I64, quantile: Float) -> Float {
     sync_mutex_lock(wrapping(value + TD_MUTEX))
     sequence: wrapping(value + TD_SEQUENCE)
-    length: data_tree_word(wrapping(sequence + DATA_SEQUENCE_LENGTH))
+    length: dyn_word(wrapping(sequence + DATA_SEQUENCE_LENGTH))
     if (length == I64{0}) {
         sync_mutex_unlock(wrapping(value + TD_MUTEX))
         return Float{0.0}
     }
-    data: data_tree_word(wrapping(sequence + DATA_SEQUENCE_DATA))
+    data: dyn_word(wrapping(sequence + DATA_SEQUENCE_DATA))
     total := Float{-0.0}
     at := I64{0}
     loop at < length {

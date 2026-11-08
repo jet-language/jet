@@ -182,7 +182,7 @@ compiler_json_number: fn(state: I64) -> I64 {
         }
         if (exponent < I64{-1000000}) -> return compiler_json_error(state, rt_static_text("JSON number exponent exceeds the ±1000000 limit"))
     }
-    data_tree_new(DATA_TREE_NUMBER, rt_text_copy(wrapping(data + start), end - start))
+    dyn_new(DYN_NUMBER, rt_text_copy(wrapping(data + start), end - start))
 }
 compiler_json_word: fn(state: I64, word: I64, kind: I64, payload: I64) -> I64 {
     at := I64{0}
@@ -191,13 +191,13 @@ compiler_json_word: fn(state: I64, word: I64, kind: I64, payload: I64) -> I64 {
         compiler_json_bump(state)
         at += I64{1}
     }
-    data_tree_new(kind, payload)
+    dyn_new(kind, payload)
 }
 compiler_json_container: fn(state: I64, depth: I64, object: Bool) -> I64 {
     if (depth >= I64{64}) -> return compiler_json_error(state, rt_static_text("JSON value is nested too deeply"))
     compiler_json_bump(state)
-    kind: if object -> DATA_TREE_OBJECT else -> DATA_TREE_ARRAY
-    stride: if object -> DATA_TREE_ENTRY_BYTES else -> DATA_TREE_ELEMENT_BYTES
+    kind: if object -> DYN_OBJECT else -> DYN_ARRAY
+    stride: if object -> DYN_ENTRY_BYTES else -> DYN_ELEMENT_BYTES
     close: if object -> I64{125} else -> I64{93}
     separator: if object -> rt_static_text("expected `,` or `}}`") else -> rt_static_text("expected `,` or `]`")
     sequence: data_sequence_new(I64{0}, stride)
@@ -205,7 +205,7 @@ compiler_json_container: fn(state: I64, depth: I64, object: Bool) -> I64 {
         compiler_json_ws(state)
         if compiler_json_peek(state) == close {
             compiler_json_bump(state)
-            return data_tree_new(kind, sequence)
+            return dyn_new(kind, sequence)
         }
         key := I64{0}
         if object {
@@ -218,12 +218,12 @@ compiler_json_container: fn(state: I64, depth: I64, object: Bool) -> I64 {
                 break
             }
             compiler_json_bump(state)
-            length: data_tree_word(wrapping(sequence + DATA_SEQUENCE_LENGTH))
-            data: data_tree_word(wrapping(sequence + DATA_SEQUENCE_DATA))
+            length: dyn_word(wrapping(sequence + DATA_SEQUENCE_LENGTH))
+            data: dyn_word(wrapping(sequence + DATA_SEQUENCE_DATA))
             duplicate := false
             at := I64{0}
             loop at < length {
-                if jet_rt_string_eq(key, data_tree_word(wrapping(wrapping(data + at * stride) + DATA_TREE_ENTRY_KEY))) {
+                if jet_rt_string_eq(key, dyn_word(wrapping(wrapping(data + at * stride) + DYN_ENTRY_KEY))) {
                     duplicate = true
                     break
                 }
@@ -246,10 +246,10 @@ compiler_json_container: fn(state: I64, depth: I64, object: Bool) -> I64 {
         }
         slot: data_sequence_reserve(sequence, stride)
         if object {
-            data_tree_store(wrapping(slot + DATA_TREE_ENTRY_KEY), key)
-            data_tree_store(wrapping(slot + DATA_TREE_ENTRY_VALUE), child)
-        } else { data_tree_store(slot, child) }
-        data_tree_store(wrapping(sequence + DATA_SEQUENCE_LENGTH), data_tree_word(wrapping(sequence + DATA_SEQUENCE_LENGTH)) + I64{1})
+            dyn_store(wrapping(slot + DYN_ENTRY_KEY), key)
+            dyn_store(wrapping(slot + DYN_ENTRY_VALUE), child)
+        } else { dyn_store(slot, child) }
+        dyn_store(wrapping(sequence + DATA_SEQUENCE_LENGTH), dyn_word(wrapping(sequence + DATA_SEQUENCE_LENGTH)) + I64{1})
         compiler_json_ws(state)
         ch: compiler_json_peek(state)
         if (ch == I64{44}) {
@@ -270,13 +270,13 @@ compiler_json_container: fn(state: I64, depth: I64, object: Bool) -> I64 {
 compiler_json_value: fn(state: I64, depth: I64) -> I64 {
     compiler_json_ws(state)
     ch: compiler_json_peek(state)
-    if (ch == I64{110}) -> return compiler_json_word(state, rt_static_text("null"), DATA_TREE_NULL, I64{0})
-    if (ch == I64{116}) -> return compiler_json_word(state, rt_static_text("true"), DATA_TREE_BOOL, I64{1})
-    if (ch == I64{102}) -> return compiler_json_word(state, rt_static_text("false"), DATA_TREE_BOOL, I64{0})
+    if (ch == I64{110}) -> return compiler_json_word(state, rt_static_text("null"), DYN_NULL, I64{0})
+    if (ch == I64{116}) -> return compiler_json_word(state, rt_static_text("true"), DYN_BOOL, I64{1})
+    if (ch == I64{102}) -> return compiler_json_word(state, rt_static_text("false"), DYN_BOOL, I64{0})
     if (ch == I64{34}) {
         text: compiler_json_string(state)
         if (text == I64{0}) -> return I64{0}
-        return data_tree_new(DATA_TREE_TEXT, text)
+        return dyn_new(DYN_TEXT, text)
     }
     if (ch == I64{91}) -> return compiler_json_container(state, depth, false)
     if (ch == I64{123}) -> return compiler_json_container(state, depth, true)
