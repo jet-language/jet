@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6696,
-    "rev": 96174,
+    "rev": 96175,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -100135,6 +100135,11 @@
         {
           "at": "2026-11-08",
           "by": "Main",
+          "text": "Owner ruling 2026-11-08 on commit 4: \"A as stopgap but removed when we have 100% jet.\" So c4 lands in the (A) shape: a fresh clone builds with the dev shell or a host cc plus static musl, and ReuseSeedRuntime.jet is deleted. The host C requirement goes when #6687 (no C dependency) closes; the fresh-clone criterion there proves it. Landing waits for a0_039 to be the current seed, because a0_038 rejects the new build.jet (Build.folder arity). SpeedLead holds the tested patch (LaneCheck CHECK OK on dev c884e9421c)."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
           "text": "Commit 4 is held for an owner question (2026-11-08). Under c4, `jet build Compiler` builds the runtime pack, so it needs cc plus a static musl libc.a. A fresh clone with neither stops at the probes, so bootstrap.md \"From a fresh clone: no Nix\" (seed build plus ReuseSeedRuntime) stops being true. Using the toolchain own jet cc inside build steps needs new public build API: steps run sandboxed (bwrap, cleared env, no net) and see only the builder folder and probe results, not the Hangar cc pack. The pack also lacks nm (RuntimePack symbol gate) and ships compiler-rt instead of libgcc.a/libgcc_eh.a. Options for the owner: (A) the fresh clone uses the dev shell or a host cc plus musl; (B) a ballot for a jet-cc build-step surface; (C) keep ReuseSeedRuntime as an exception. SpeedLead finishes the rest of c4 as a tested patch meanwhile."
         },
         {
@@ -100251,7 +100256,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-08T01:30:57.119Z",
-      "updated": "2026-11-08T15:07:48.327Z",
+      "updated": "2026-11-08T15:49:44.501Z",
       "updatedBy": "Main"
     },
     {
@@ -189220,6 +189225,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-08T15:49:44.501Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0crz3ra",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-08T15:49:13.633Z",
       "by": "Main",
