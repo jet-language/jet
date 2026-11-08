@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6697,
-    "rev": 96212,
+    "rev": 96214,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -74079,6 +74079,11 @@
         {
           "at": "2026-11-08",
           "by": "Main",
+          "text": "c65 root 2 (closed-list guard) fixed on dev: dace302873 (SchedLead), 2e4142d89c (SpeedLead) and 72e3e2cd78 (QuickLead). The precommit tests/guards run on 72e3e2cd78 gives 122 passed, 0 failed. The Main precommit now runs tests/guards with an empty baseline, so any new closed-list problem fails a commit. Also landed: 8b040ecdba (#6696: the libc census prints on demand; generated table removed from Docs)."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
           "text": "Correction to the P15 note above (SchedLead measurement; buildsample with rusage). CPU did not regress: cold jet build Compiler is user 106.7 s plus sys 10.0 s on a0_038 at c902740d37, and user 107.7 s plus sys 9.7 s on a0_039 at b7ff715849. The trace accounting broke: Request.jet keeps span stacks and item cpu_ns by OS thread, and since afe2acc8c8 tasks resume on other carriers. The a0_039 trace has B=10147 against E=10086 (61 spans never closed), nested phases count as top-level, so whole-process CPU is summed per carrier, and item cpu_ns differences two threads clocks. The jet check wall difference is fsync stalls on the cache store (9.9 s and 12.7 s per strace), the known store journal cost SpeedLead fixes after c6. A task-heavy program (4000 tasks) shows no spin. Fix: SchedLead does opt-in per-fiber CPU accounting in the runtime and keys the Request.jet stacks by task; the surface for the task clock and id is owner Q19."
         },
         {
@@ -74891,7 +74896,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-29T02:09:17.141Z",
-      "updated": "2026-11-08T17:53:36.228Z",
+      "updated": "2026-11-08T18:07:00.952Z",
       "updatedBy": "Main",
       "criteriaLastN": 74
     },
@@ -101370,6 +101375,11 @@
         {
           "at": "2026-11-08",
           "by": "Main",
+          "text": "8b040ecdba (G1Lead): the census prints on demand; Docs/audits/libc-census.md is removed, matching the reworded c1. Queued for Main batch verification."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
           "text": "G1Lead landed 6dedd63f5a (Tools/agent/LibcCensus.jet plus Docs/audits/libc-census.md): 261 families, 1,482 functions, every POSIX.1-2024 function once plus the C23 additions; 119 covered, 40 partial, 23 language, 79 GAP. The committed generated doc breaks AGENTS.md, and the fault is in the Main criterion. c1 is reworded, and G1Lead is removing the doc and keeping the script on demand. GAP areas: math (rint family, issignaling, Bessel, C23 pi-trig, exp10 and log2p1 family, pown and rootn family, fromfp, fmaximum family, narrowing ops, canonicalize, totalorder, payload); all of fenv; complex elementary functions plus carg and cproj; isblank, isgraph, ispunct, isxdigit, the isw forms, wctype, wctrans and the _l variants; memset_explicit, swab; a64l, l64a; fdopen, fileno, ungetc, setbuf, setvbuf, ctermid; posix_fadvise, fallocate, readv, writev, mknod, statvfs, pathconf; dup family, isatty, ttyname, aio, posix_devctl; mlock and typed memory; posix_spawnattr and sched policy; signal sets and masks, sigwait, sigqueue, sigaltstack, pthread_kill; pthread attributes, mutex and cond attributes, rwlock, spin, once, TLS keys, atfork, semaphores; atomic fences; clock_settime and CPU-time clocks; set-uid and set-gid family, the group database, utmpx, crypt; sendmsg, recvmsg, socketpair, sockatmark, netdb iteration, if_nameindex; mq, shm_open, SysV IPC; tcgetpgrp, tcsetpgrp, pty functions; setlocale, locale_t, nl_langinfo, gettext, catgets, fmtmsg. Which gaps get Jet surface is an owner question (Q18); each new public API needs a ballot."
         },
         {
@@ -101410,7 +101420,7 @@
       "parentId": "c0lscvc9",
       "needsAcceptance": false,
       "created": "2026-11-08T15:54:55.014Z",
-      "updated": "2026-11-08T17:52:12.855Z",
+      "updated": "2026-11-08T18:07:01.919Z",
       "updatedBy": "Main",
       "criteriaLastN": 2
     }
@@ -189463,6 +189473,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-08T18:07:01.919Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0cs6xlg",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-08T18:07:00.952Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0h06654",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-08T18:02:13.672Z",
       "by": "Main",
