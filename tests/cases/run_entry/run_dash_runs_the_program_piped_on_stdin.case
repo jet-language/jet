@@ -1,6 +1,9 @@
 # Claim (#6067 c3): `jet run -` runs the program piped on standard input, with
 # the words after `-` as its arguments, and a rerun of the same source reuses
-# its entry file.
+# its entry file. Piped source gets the authority decision the same program
+# gets as a file: a program that writes files is refused before it runs, with
+# a Fix that names the program as the command did (`-`, not the cache entry),
+# and `--allow`/`-A` run it.
 fixture: run_dash_runs_the_program_piped_on_stdin.fixture
 env: NO_COLOR=1
 env: XDG_CACHE_HOME={work}/cache
@@ -21,3 +24,27 @@ exit: 0
 stdout: = "hi\n"
 stderr: = ""
 entries: cache/jet/scripts/stdin = 2
+step file_refused: jet run write.jet
+exit: 1
+stdout: = ""
+stderr: = run_dash_runs_the_program_piped_on_stdin.file.stderr
+file: written.txt absent
+step piped_refused: jet run -
+stdin: write.jet
+exit: 1
+stdout: = ""
+stderr: = run_dash_runs_the_program_piped_on_stdin.piped.stderr
+file: written.txt absent
+step piped_allowed: jet run --allow=FS.Write -
+stdin: write.jet
+exit: 0
+stdout: = "wrote\n"
+stderr: = ""
+file: written.txt = "piped"
+remove: written.txt
+step piped_allow_all: jet run -A -
+stdin: write.jet
+exit: 0
+stdout: = "wrote\n"
+stderr: = ""
+file: written.txt = "piped"

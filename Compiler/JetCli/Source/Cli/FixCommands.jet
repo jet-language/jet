@@ -78,11 +78,12 @@ jet_cli_fix_collect: fn(file: String, source: String, all: Bool) -> JetCLIFixQue
 
 // The E1803 refusal of a script with no package block whose authority is
 // undecided, carrying the leading `package` block that grants the rights as
-// a needs-review edit; None for any other refusal. `jet run` reports the
+// a needs-review edit; None for any other refusal, and for source piped to
+// `jet run -`, which has no file to edit. `jet run` reports the
 // grant and `jet fix` applies it only under `--all`: granting a right is a
 // decision, not a repair.
 jet_cli_inline_grant_refusal: fn(authority: JetCLIAuthority, file: String, source: String, command: String) -> Diagnostic? Never! {
-    if !jet_cli_is_application_default(authority) || jet_driver_inline_package(source).found || jet_cli_undecided(authority).len() == 0 -> return None
+    if !jet_cli_is_application_default(authority) || jet_driver_inline_package(source).found || jet_cli_undecided(authority).len() == 0 || jet_cli_stdin_entry(file) -> return None
     report: jet_cli_authority_refusal(authority, file, command) ?? return None
     at: jet_cli_fix_inline_insertion(source)
     edit: TextEdit{span: Span{start: at, end: at}, new_text: authority_inline_package_block(file, jet_cli_inline_allow_row(authority))}

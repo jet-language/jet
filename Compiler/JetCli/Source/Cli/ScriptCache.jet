@@ -248,6 +248,23 @@ jet_cli_entry_file: fn(kind: String, source: String) -> String? {
     Val(path)
 }
 
+// Whether `file` is the entry file `jet run -` wrote for its piped source
+// (jet_cli_entry_file's `stdin` kind): a 64-digit content hash under
+// `jet/scripts/stdin`. The command named that program `-`.
+jet_cli_stdin_entry: fn(file: String) -> Bool Never! {
+    if !file.ends_with(".jet") -> return false
+    raw: file.bytes()
+    stem: raw.len() - 4 - 64
+    if stem < 0 -> return false
+    head: String.from_bytes(raw[0..<stem]) ?? return false
+    if !head.ends_with("/jet/scripts/stdin/") -> return false
+    loop byte in raw[stem..<(stem + 64)] {
+        code: Int.from_u8(byte)
+        if !((code >= 48 && code <= 57) || (code >= 97 && code <= 102)) -> return false
+    }
+    true
+}
+
 // `jet -e` code with each `;` that separates statements made a line break,
 // the boundary a file writes; a `;` inside a string or comment stays.
 jet_cli_eval_lines: fn(code: String) -> String Never! {
