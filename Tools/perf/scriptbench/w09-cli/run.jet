@@ -1,0 +1,22 @@
+// w09: a typed #CLI entry with two commands, run as
+// `greet --name World --times 3 --shout` and `add --a 2 --b 40`.
+package: {
+    name: "run"
+    authority: { allow: [IO, Mem.Alloc, Exec.Args, Env] }
+}
+
+#CLI(Standard)
+Main: struct {
+    #Doc("Greet someone") greet: fn(self, name: String, times: Int{1}, shout: Bool) {
+        text: "Hello, {name}!"
+        loop _ in 0..<times -> print(if shout -> text.to_upper() else -> text)
+    }
+
+    #Doc("Add two numbers") add: fn(self, a: Int, b: Int) {
+        print(a + b)
+    }
+}
+
+run: fn(_args: Main) {
+
+}

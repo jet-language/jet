@@ -1,0 +1,19 @@
+// w08: 200 sequential GETs against the local fixture server (port 18080).
+package: {
+    name: "run"
+    authority: { allow: [IO, Mem.Alloc, Net, Time.Wait] }
+}
+
+use {
+    http: core.http
+}
+
+run: fn() {
+    total := 0
+    loop i in 0..<200 {
+        resp: http.get("http://127.0.0.1:18080/item/{i}") ?? panic("request failed")
+        total += (resp.text() ?? panic("body failed")).count_bytes()
+    }
+    print("requests 200")
+    print("bytes {total}")
+}

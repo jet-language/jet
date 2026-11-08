@@ -1,0 +1,70 @@
+{
+  "version": 2,
+  "comparator": "AGENTS.md: Jet beats every peer on every metric. A cell is one workload, one Jet tier (jet-bin: the `jet build --release` binary; jet-run: `jet run run.jet`, warm) and one peer, for one metric (wall, cpu, rss); its ratio is Jet over the peer. A ratio of 1.00 or more is a LOSS. Peers are never averaged; every peer counts. A peer that prints the wrong output or overruns the timeout is an error, not a win.",
+  "method": {
+    "rounds": 3,
+    "warmup": 2,
+    "runs": 5,
+    "slow_ms": 10000,
+    "slow_warmup": 0,
+    "slow_runs": 1,
+    "timeout_s": 120,
+    "note": "hyperfine -N with every command of a workload in one invocation per round; the command order rotates by one each round, so the commands interleave. Wall is the median of all timed runs, CPU the mean of user + system, RSS the largest peak across runs. A command whose correctness run takes over slow_ms gets slow_warmup and slow_runs per round (the correctness run itself warms the caches)."
+  },
+  "hyperfine": "/nix/store/m2h6y8mbq2388413sfa4k4sb48cwpl9s-hyperfine-1.20.0/bin/hyperfine",
+  "server": ["/nix/store/hi7j7adiizy4cfprlj7xnx9ag3mrzmam-nodejs-slim-24.21.0/bin/node", "server.js"],
+  "path": [
+    "/nix/store/kpw5lyh32ysqswlxhdhh9hgfqdkcm7rh-coreutils-full-9.11/bin",
+    "/nix/store/cqhgy07rpxdwk9kd2qlc3cw4s9ajzm9f-gnugrep-3.12/bin",
+    "/nix/store/xbqis14s3fvckwlayc6vxvglws1v2mcw-gawk-5.4.1/bin",
+    "/nix/store/nl0wq6d4bpjrxmlax141liq0qr9z87gn-findutils-4.10.0/bin",
+    "/nix/store/x5ad8l4zpkg2dldjyqsknlcyypjmp0wp-curl-8.22.0-bin/bin"
+  ],
+  "report_only": [
+    {"workload": "w15", "tier": "jet-run", "why": "D-PERF-RUNCELL1=B: the jet-run cell of a sleep-bound workload is reported, not gated"}
+  ],
+  "peers": [
+    {"name": "python", "file": "peer.py", "argv": ["/nix/store/jy00n3jp5xj8s40n1fbldmkcr5n7avxc-python3-3.13.15/bin/python3"]},
+    {"name": "node", "file": "peer.mjs", "argv": ["/nix/store/hi7j7adiizy4cfprlj7xnx9ag3mrzmam-nodejs-slim-24.21.0/bin/node"]},
+    {"name": "bun", "file": "peer.mjs", "argv": ["/nix/store/m8q63cc8f40l5c1gkmfr6l73z826hrc7-bun-1.4.4/bin/bun"]},
+    {"name": "deno", "file": "peer.mjs", "argv": ["/nix/store/r6fzpqv2ydk2105wz1pprcvvc548wi0c-deno-2.8.3/bin/deno", "run", "--allow-all", "--quiet"]},
+    {"name": "perl", "file": "peer.pl", "argv": ["/nix/store/llas6flzd2875r7zzhhvwnynwqi349jb-perl-5.42.3/bin/perl"]},
+    {"name": "ruby", "file": "peer.rb", "argv": ["/nix/store/3rcm37q1arwggzjxzcnbiz5s8a7c1ppx-ruby-3.4.9/bin/ruby"]},
+    {"name": "lua", "file": "peer.lua", "argv": ["/nix/store/31ll1161qkccxk5c0hjqk0mmh1y7d5sb-lua-5.4.7/bin/lua"]},
+    {"name": "luajit", "file": "peer.lua", "argv": ["/nix/store/qdsipnycfv5phy9q20z6awhl2cbdrj2k-luajit-2.1.1774638290/bin/luajit"]},
+    {"name": "php", "file": "peer.php", "argv": ["/nix/store/3b7qb75lxc171x84k8axh2x2xvl68s35-php-8.4.25/bin/php", "-d", "memory_limit=-1"]},
+    {"name": "bash", "file": "peer.sh", "argv": ["/nix/store/7ik8057hajl6vq9j40h3jracxjn0bb5x-bash-5.3p15/bin/bash"]}
+  ],
+  "workloads": [
+    {"id": "w01", "dir": "w01-hello", "what": "print one line (start-up and exit)", "cards": ["#5072"], "args": [], "servers": [],
+     "peers": ["python", "node", "bun", "deno", "perl", "ruby", "lua", "luajit", "php", "bash"]},
+    {"id": "w02", "dir": "w02-walk", "what": "walk a 20,000-file tree, stat each file, total the sizes", "cards": ["#6086"], "args": [], "servers": [],
+     "peers": ["python", "node", "bun", "deno", "perl", "ruby", "lua", "luajit", "php", "bash"]},
+    {"id": "w03", "dir": "w03-grep", "what": "regex-scan a 100 MB log, count the 5xx lines and total their ms", "cards": ["#5072"], "args": [], "servers": [],
+     "peers": ["python", "node", "bun", "deno", "perl", "ruby", "lua", "luajit", "php", "bash"]},
+    {"id": "w04", "dir": "w04-wordfreq", "what": "count the words of 25 MB of prose, print the top 10", "cards": ["#5072"], "args": [], "servers": [],
+     "peers": ["python", "node", "bun", "deno", "perl", "ruby", "lua", "luajit", "php", "bash"]},
+    {"id": "w05", "dir": "w05-csv", "what": "parse a 1,000,000-row CSV and total two integer columns", "cards": ["#6083", "#6087"], "args": [], "servers": [],
+     "peers": ["python", "node", "bun", "deno", "perl", "ruby", "lua", "luajit", "php"]},
+    {"id": "w06", "dir": "w06-json", "what": "decode a 44 MB JSON array into 400,000 typed records and total one field", "cards": ["#6082", "#6087"], "args": [], "servers": [],
+     "peers": ["python", "node", "bun", "deno", "perl", "ruby", "php"]},
+    {"id": "w07", "dir": "w07-spawn", "what": "run 100 short child processes one after another", "cards": ["#6084"], "args": [], "servers": [],
+     "peers": ["python", "node", "bun", "deno", "perl", "ruby", "lua", "luajit", "php", "bash"]},
+    {"id": "w08", "dir": "w08-http", "what": "200 sequential GETs against a local server", "cards": ["#5072"], "args": [], "servers": [{"port": 18080, "delay_ms": 0}],
+     "peers": ["python", "node", "bun", "deno", "perl", "ruby", "php", "bash"]},
+    {"id": "w09", "dir": "w09-cli", "what": "a typed #CLI entry: greet --name World --times 3 --shout", "cards": ["#6061"], "args": ["greet", "--name", "World", "--times", "3", "--shout"], "servers": [],
+     "peers": ["python", "node", "bun", "deno", "perl", "ruby", "lua", "luajit", "php", "bash"]},
+    {"id": "w10", "dir": "w10-split", "what": "split a 20,000-line text into lines and words", "cards": ["#6088", "#6089"], "args": [], "servers": [],
+     "peers": ["python", "node", "bun", "deno", "perl", "ruby", "lua", "luajit", "php"]},
+    {"id": "w11", "dir": "w11-fetch", "what": "fetch 100 URLs, at most 32 at a time, from a local server that answers after 20 ms", "cards": ["#6085"], "args": [], "servers": [{"port": 18411, "delay_ms": 20}],
+     "peers": ["python", "node", "bun", "deno", "ruby"]},
+    {"id": "w12", "dir": "w12-strcat", "what": "build one string from 2,000,000 appends", "cards": ["#6080"], "args": [], "servers": [],
+     "peers": ["python", "node", "bun", "deno", "perl", "ruby", "lua", "luajit", "php"]},
+    {"id": "w13", "dir": "w13-set", "what": "put 2,000,000 lines into a set and count the distinct ones", "cards": ["#6081"], "args": [], "servers": [],
+     "peers": ["python", "node", "bun", "deno", "perl", "ruby", "lua", "luajit", "php"]},
+    {"id": "w14", "dir": "w14-numeric", "what": "sum i * i % 7919 for i in 1..=30,000,000", "cards": ["#6087"], "args": [], "servers": [],
+     "peers": ["python", "node", "bun", "deno", "perl", "ruby", "lua", "luajit", "php", "bash"]},
+    {"id": "w15", "dir": "w15-sleep", "what": "sleep 100 ms thirty times", "cards": ["#6090"], "args": [], "servers": [],
+     "peers": ["python", "node", "bun", "deno", "perl", "ruby", "luajit", "php", "bash"]}
+  ]
+}

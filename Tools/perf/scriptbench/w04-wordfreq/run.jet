@@ -1,0 +1,36 @@
+// w04: count the lower-cased words of 25 MB of prose; print the total, the
+// distinct count and the ten most frequent words (ties by word).
+package: {
+    name: "run"
+    authority: { allow: [IO, Mem.Alloc, FS.Read] }
+}
+
+use {
+    fs: core.files
+    re: core.regex
+}
+
+Count: struct {
+    word: String
+    n: Int
+}
+
+run: fn() {
+    rx: re.compile("[a-z]+") ?? panic("bad pattern")
+    text: fs.read("data/words.txt") ?? panic("read failed")
+    counts := [String: Int]{}
+    total := 0
+    loop line in text.lines() {
+        loop word in re.find_all(rx, line.to_lower()) {
+            counts[word] = (counts.get(word) ?? 0) + 1
+            total += 1
+        }
+    }
+    rows := [Count]{}
+    loop (word, n) in counts -> rows.push(Count{word: word, n: n})
+    rows.sort_by((r: Count) -> r.word)
+    rows.sort_by_desc((r: Count) -> r.n)
+    print("total {total}")
+    print("distinct {counts.len()}")
+    loop r in rows.take(10) -> print("{r.n} {r.word}")
+}

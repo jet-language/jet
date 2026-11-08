@@ -1,0 +1,18 @@
+// w07: run 100 short child processes (`true`) one after another.
+package: {
+    name: "run"
+    authority: { allow: [IO, Mem.Alloc, Exec, Env, FS, Time.Wait] }
+}
+
+use {
+    process: core.process
+}
+
+run: fn() {
+    ok := 0
+    loop _ in 0..<100 {
+        receipt: process.cmd(["true"]).run() ?? panic("spawn failed")
+        if receipt.success -> ok += 1
+    }
+    print("children ok={ok}")
+}
