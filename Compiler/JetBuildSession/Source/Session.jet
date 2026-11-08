@@ -91,15 +91,17 @@ BuildSessionPlugin: struct {
 
 // A `b.run` step: the BuildFile `tool` it runs, its arguments, the files it
 // reads and makes (`kept` the outputs that stay in git), the folders it reads
-// whole (`folders`, "folder" BuildFile ids), its own time limit in
-// milliseconds (None: the `action_timeout` option's), and the span of its
-// `b.run` call, where a step that declares no output is reported.
+// whole (`folders`, "folder" BuildFile ids), the found programs it is passed
+// (`programs`), its own time limit in milliseconds (None: the
+// `action_timeout` option's), and the span of its `b.run` call, where a step
+// that declares no output is reported.
 BuildSessionAction: struct {
     name: String
     inputs: [String]
     outputs: [String]
     kept: [String]
     folders: [Int]
+    programs: [BuildSessionProgram]
     argv: [String]
     caps: [String]
     toolchain: Int
@@ -109,6 +111,15 @@ BuildSessionAction: struct {
     timeout_ms: Int?{None}
     start: Int{0}
     end: Int{0}
+}
+
+// A found program passed to a step (`.file(b.found(probe))`): argument `at`
+// of the step is `flag` followed by the path the find_program `probe` finds
+// when the step runs.
+BuildSessionProgram: struct {
+    at: Int
+    flag: String
+    probe: Int
 }
 
 // A file the build knows (BuildFile): `found` is the program a find_program

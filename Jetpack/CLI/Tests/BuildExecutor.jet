@@ -518,6 +518,26 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
     assert(build.plan() == .Ok(_))
 }
 
+#Test("found programs: an action is passed a found program only through a find_program probe it uses, as one of its arguments") {
+    build := HermeticBuildContext.new()
+    cc: build.probe("cc", ProbeSpec.find_program("cc")) ?? panic("cc")
+    musl: build.probe("musl", ProbeSpec.find_folder("libc.a")) ?? panic("musl")
+    if build.action("unused", ActionSpec.cached([String]{"sh", "cc"}).with_outputs([String]{"a.txt"}).with_found_program(1, "", cc)) == {
+        .Err(error) -> assert(error == HermeticBuildError.UnknownProbe(cc.id))
+        .Ok(_) -> panic("the action must use the probe that finds its program")
+    }
+    if build.action("folder", ActionSpec.cached([String]{"sh", "libc.a"}).with_outputs([String]{"b.txt"}).with_found_program(1, "", musl).with_probe(musl)) == {
+        .Err(error) -> assert(error == HermeticBuildError.UnknownProbe(musl.id))
+        .Ok(_) -> panic("only a find_program probe finds a program")
+    }
+    if build.action("tool", ActionSpec.cached([String]{"cc"}).with_outputs([String]{"c.txt"}).with_found_program(0, "", cc).with_probe(cc)) == {
+        .Err(error) -> assert(error == HermeticBuildError.EmptyActionArgv("tool"))
+        .Ok(_) -> panic("a found program passed to an action is one of its arguments")
+    }
+    build.action("compile", ActionSpec.cached([String]{"sh", "--cc=cc"}).with_outputs([String]{"d.txt"}).with_found_program(1, "--cc=", cc).with_probe(cc)) ?? panic("compile")
+    assert(build.plan() == .Ok(_))
+}
+
 #Test("folder snapshots: each file is hashed under the folder path, `.jet` and ignored files are skipped, a link out of the folder is refused") {
     root: build_test_root("folder-snapshot")
     outside: build_test_root("folder-snapshot-outside")
@@ -685,7 +705,7 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
     assert(inputs[0].snapshot.digest == ContentDigest.from_bytes("input".bytes()))
     snapshots: loop input in inputs -> input.snapshot
     executable: build_resolve_program_path(plan, action.toolchain, "sh") ?? panic("sh")
-    key: build_canonical_effective_action_key(plan, action, snapshots, [BuildEffect]{BuildEffect.Exec}, ContentDigest.from_bytes(files.read_bytes(executable) ?? panic("sh bytes")), [BuildProbeFact]{})
+    key: build_canonical_effective_action_key(plan, action, snapshots, [BuildEffect]{BuildEffect.Exec}, ContentDigest.from_bytes(files.read_bytes(executable) ?? panic("sh bytes")), [ContentDigest]{}, [BuildProbeFact]{})
     report: build_action_failure_report("write", 3, "")
     build_write_action_record(store, key, ActionResultRecord{key, outcome: ActionOutcome.Failed{exit_code: 3}, outputs: [ActionOutputRecord]{}, failure_report: Val(report), status: ActionCacheStatus.Miss(.NoLocalActionRecord)}) ?? panic("record")
     previous: sys.get("JETPACK_FAKE_SANDBOX")
@@ -756,17 +776,22 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
     files.remove_all(root).drop("test cleanup")
 }
 
-#Test("action keys: identical declarations share a key, a changed grant or input digest splits it") {
+#Test("action keys: identical declarations share a key, a changed grant, input digest, input mode or found program splits it") {
     plan: build_test_plan([BuildEffect]{BuildEffect.Exec}, "true")
     action: plan.actions[0]
     input: ActionInputSnapshot{path: "input.txt", digest: ContentDigest.from_bytes("a".bytes()), byte_len: 1}
     changed: ActionInputSnapshot{path: "input.txt", digest: ContentDigest.from_bytes("b".bytes()), byte_len: 1}
+    runnable: ActionInputSnapshot{path: "input.txt", digest: ContentDigest.from_bytes("a".bytes()), byte_len: 1, executable: true}
     tool: ContentDigest.from_bytes("sh".bytes())
-    base: build_canonical_effective_action_key(plan, action, [ActionInputSnapshot]{input}, [BuildEffect]{BuildEffect.Exec}, tool, [BuildProbeFact]{})
+    programs: [ContentDigest]{ContentDigest.from_bytes("cc".bytes())}
+    base: build_canonical_effective_action_key(plan, action, [ActionInputSnapshot]{input}, [BuildEffect]{BuildEffect.Exec}, tool, programs, [BuildProbeFact]{})
     assert(base.starts_with("act-sha256:") && base.len() == 75)
-    assert_eq(build_canonical_effective_action_key(plan, action, [ActionInputSnapshot]{input}, [BuildEffect]{BuildEffect.Exec}, tool, [BuildProbeFact]{}), base)
-    assert(build_canonical_effective_action_key(plan, action, [ActionInputSnapshot]{input}, [BuildEffect]{BuildEffect.Exec, BuildEffect.Net}, tool, [BuildProbeFact]{}) != base)
-    assert(build_canonical_effective_action_key(plan, action, [ActionInputSnapshot]{changed}, [BuildEffect]{BuildEffect.Exec}, tool, [BuildProbeFact]{}) != base)
+    assert_eq(build_canonical_effective_action_key(plan, action, [ActionInputSnapshot]{input}, [BuildEffect]{BuildEffect.Exec}, tool, programs, [BuildProbeFact]{}), base)
+    assert(build_canonical_effective_action_key(plan, action, [ActionInputSnapshot]{input}, [BuildEffect]{BuildEffect.Exec, BuildEffect.Net}, tool, programs, [BuildProbeFact]{}) != base)
+    assert(build_canonical_effective_action_key(plan, action, [ActionInputSnapshot]{changed}, [BuildEffect]{BuildEffect.Exec}, tool, programs, [BuildProbeFact]{}) != base)
+    assert(build_canonical_effective_action_key(plan, action, [ActionInputSnapshot]{runnable}, [BuildEffect]{BuildEffect.Exec}, tool, programs, [BuildProbeFact]{}) != base)
+    upgraded: [ContentDigest]{ContentDigest.from_bytes("cc 2".bytes())}
+    assert(build_canonical_effective_action_key(plan, action, [ActionInputSnapshot]{input}, [BuildEffect]{BuildEffect.Exec}, tool, upgraded, [BuildProbeFact]{}) != base)
 }
 
 #Test("toolchain mounts: an absolute mount is accepted, relative and parent destinations are refused") {

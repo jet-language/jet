@@ -150,7 +150,7 @@ HermeticBuildContext: struct {
         toolchain: spec.toolchain ?? self.default_toolchain
         id: self.actions.len()
         self.actions.push(HermeticBuildAction{
-            id: id, name: checked, inputs: spec.inputs, outputs: spec.outputs, kept: spec.kept, folders: spec.folders, argv: spec.argv, env: spec.env,
+            id: id, name: checked, inputs: spec.inputs, outputs: spec.outputs, kept: spec.kept, folders: spec.folders, programs: spec.programs, argv: spec.argv, env: spec.env,
             env_allowlist: spec.env_allowlist, caps: spec.caps, cache: spec.cache, kind: spec.kind,
             toolchain: toolchain, probes: spec.probes, signing_identity: spec.signing_identity, labels: spec.labels,
             helper_versions: spec.helper_versions, resource_pools: spec.resource_pools, variant_identity: spec.variant_identity, timeout_ms: spec.timeout_ms,
@@ -218,6 +218,21 @@ HermeticBuildContext: struct {
                 else -> false
             }
             if !used || !finds_folder -> return Err(HermeticBuildError.UnknownProbe(probe.id))
+        }
+        // A found program's probe is a find_program probe the action uses,
+        // and the program is one of its arguments.
+        loop program in spec.programs {
+            self.check_probe_ref(program.probe)
+            used: loop old in spec.probes {
+                if old.id == program.probe.id -> break true
+            } ?? false
+            finds_program: if self.probes[program.probe.id].kind == {
+                .FindProgram(_) -> true
+                else -> false
+            }
+            if !used || !finds_program -> return Err(HermeticBuildError.UnknownProbe(program.probe.id))
+            // The argv has no argument `at` past the program it runs.
+            if program.at < 1 || program.at >= spec.argv.len() -> return Err(HermeticBuildError.EmptyActionArgv(name))
         }
         if spec.signing_identity == .Val(identity) -> self.check_signing_identity_ref(identity)
     }

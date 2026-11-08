@@ -798,6 +798,7 @@ jet_cli_build_action_spec: fn(action: BuildSessionAction, files: [BuildSessionFi
         file: files[id]
         if file.probe == .Val(probe) -> spec = spec.with_found_folder(file.path, probes[probe]) else -> spec = spec.with_folder(file.path, file.from)
     }
+    loop program in action.programs -> spec = spec.with_found_program(program.at, program.flag, probes[program.probe])
     loop cap in action.caps {
         if BuildEffect.parse(cap) == .Val(parsed) -> spec = spec.with_cap(parsed)
     }

@@ -61,10 +61,13 @@ BuildIOError: struct {
     }
 }
 
+// `executable`: a declared input whose owner may run it, which the work tree
+// receives runnable too.
 ActionInputSnapshot: struct {
     path: String
     digest: ContentDigest
     byte_len: Int
+    executable: Bool{false}
 }
 
 // One declared input as it was hashed: the snapshot the action key uses and
@@ -129,7 +132,9 @@ build_snapshot_declared_inputs: fn(store: BuildArtifactStoreHandle, base: String
         bytes: build_secure_read_file(base, path, build_read_budget(total))
         total += bytes.len()
         digest: store.put_blob(bytes)
-        inputs.push(ActionInputCapture{snapshot: ActionInputSnapshot{path: input, digest, byte_len: bytes.len()}, bytes})
+        mode: (files.stat(path) ?? return Err(BuildIOError.from(err))).mode
+        executable: (mode /% 64) % 2 == 1
+        inputs.push(ActionInputCapture{snapshot: ActionInputSnapshot{path: input, digest, byte_len: bytes.len(), executable}, bytes})
     }
     Ok(inputs)
 }

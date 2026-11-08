@@ -355,6 +355,31 @@ build_graph_rules_made: fn(session: &BuildSession, tool: BuildSessionValue, name
     assert(action.probes.contains(probe), "the step that reads a found folder runs its probe first")
 }
 
+#Test("a_found_program_is_passed_to_a_step_by_the_path_its_probe_finds") {
+    session := build_graph_rules_session(102)
+    tool: build_graph_rules_tool(session)
+    cc_probe: build_graph_rules_value(build_session_call(session, "probe", [BuildSessionValue]{.Text(value: "cc"), .Text(value: "find_program"), .Text(value: "cc")}, None, true, 1, 2))
+    cc: build_graph_rules_value(build_session_call(session, "found", [BuildSessionValue]{cc_probe}, None, true, 3, 4))
+    assert(build_graph_rules_failed(build_session_call(session, "file.path", [BuildSessionValue]{cc}, None, false, 5, 6)))
+    step: build_graph_rules_value(build_graph_rules_made(session, tool, "compile", [String]{"a.o"}))
+    assert(build_graph_rules_ok(build_graph_rules_step(session, "file", step, [BuildSessionValue]{cc, .Text(value: "--cc=")})))
+    assert(build_graph_rules_ok(build_graph_rules_step(session, "file", step, [BuildSessionValue]{cc})))
+    plan: build_graph_rules_value(build_session_call(session, "plan", [BuildSessionValue]{}, None, false, 7, 8))
+    assert(build_session_graph(session, plan).diagnostic == None)
+    permit: session.storage.guard_read()
+    action: permit.value.actions[0]
+    assert_eq(action.argv, [String]{"tool", "a.o", "--cc=cc", "cc"})
+    assert_eq(action.inputs, [String]{})
+    assert_eq(action.programs.len(), 2)
+    assert_eq(action.programs[0].at, 2)
+    assert_eq(action.programs[0].flag, "--cc=")
+    assert_eq(action.programs[1].at, 3)
+    assert_eq(action.programs[1].flag, "")
+    probe: action.programs[0].probe
+    assert_eq(permit.value.probes[probe].name, "cc")
+    assert(action.probes.contains(probe), "the step passed a found program runs its probe first")
+}
+
 #Test("run_step_without_an_output_refuses_the_plan") {
     session := build_graph_rules_session(98)
     shell: build_graph_rules_value(build_session_call(session, "probe", [BuildSessionValue]{.Text(value: "shell"), .Text(value: "find_program"), .Text(value: "sh")}, None, true, 1, 2))

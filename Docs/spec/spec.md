@@ -5074,7 +5074,18 @@ same argument: `.output("gen.c", flag: "--out=")` passes `--out=gen.c`.
 `.output` returns the new `BuildFile`, and `f.path()` is a made, host-built,
 copied or folder file's package-relative path (a package's is
 `.jet/deps/<name>`); a found program and `b.jet()`
-have no path until the build runs, so their `.path()` is refused. `.toolchain(t)` and
+have no path until the build runs, so their `.path()` is refused. `.file` on a
+found program passes the path its probe finds when the step starts, the path
+the program runs at in the step's sandbox, which shows it as it shows a step's
+tool; on Linux that is a program in the Nix store (`/nix/store` is bound
+read-only), so a compiler there finds its own `cc1`, `as`, `ld` and libraries.
+The step's cache key covers the program's bytes and the path its probe found,
+so another compiler at that name runs the step again. Example:
+[`tests/cases/build_entry/run_steps_pass_a_found_program.case`](../../tests/cases/build_entry/run_steps_pass_a_found_program.case).
+An input a step reads reaches its sandbox runnable when its owner may run it,
+so a step can run a host build it is passed. Example:
+[`tests/cases/build_entry/run_steps_pass_a_runnable_input.case`](../../tests/cases/build_entry/run_steps_pass_a_runnable_input.case).
+`.toolchain(t)` and
 `.sign(identity)` add toolchain and signing identity; a `b.jet()` step runs on
 the toolchain its compiler was built with, so `.toolchain` on it is refused. A
 step's result is cached. A step that

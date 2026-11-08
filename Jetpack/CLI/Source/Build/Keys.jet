@@ -96,6 +96,7 @@ build_canonical_action_key: fn(plan: HermeticBuildPlan, action: HermeticBuildAct
         w.text(snapshot.path)
         w.text(snapshot.digest.as_str())
         w.number(snapshot.byte_len)
+        w.flag(snapshot.executable)
     }
     w.text("outputs")
     w.texts(action.outputs)
@@ -198,8 +199,10 @@ build_declared_dep_outputs: fn(plan: HermeticBuildPlan, action: HermeticBuildAct
 }
 
 // Rust `canonical_effective_action_key`: the canonical key plus the
-// effective grants, resolved executable digest and actual probe facts.
-build_canonical_effective_action_key: fn(plan: HermeticBuildPlan, action: HermeticBuildAction, inputs: [ActionInputSnapshot], grants: [BuildEffect], executable_digest: ContentDigest, probe_facts: [BuildProbeFact]) -> String Never! {
+// effective grants, resolved executable digest, the digests of the found
+// programs it is passed (`programs`, in argument order) and actual probe
+// facts, which name each found program's path.
+build_canonical_effective_action_key: fn(plan: HermeticBuildPlan, action: HermeticBuildAction, inputs: [ActionInputSnapshot], grants: [BuildEffect], executable_digest: ContentDigest, programs: [ContentDigest], probe_facts: [BuildProbeFact]) -> String Never! {
     base: build_canonical_action_key(plan, action, inputs)
     w := BuildKeyWriter.new()
     w.text("jet.effective-action-key.v1")
@@ -210,6 +213,9 @@ build_canonical_effective_action_key: fn(plan: HermeticBuildPlan, action: Hermet
     // stay in the key through their digest.
     w.text("resolved-executable-digest")
     w.text(executable_digest.as_str())
+    w.text("found-program-digests")
+    w.number(programs.len())
+    loop digest in programs -> w.text(digest.as_str())
     w.text("actual-probe-facts")
     loop fact in probe_facts {
         w.text(fact.name)

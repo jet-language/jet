@@ -270,6 +270,16 @@ ActionFolder: struct {
     found: ProbeHandle?
 }
 
+// A found program an action is passed (`.file(b.found(probe))`): argument
+// `at` of its argv is `flag` followed by the path the find_program `probe`
+// finds as the action starts, the path the program has inside the sandbox.
+// The action key hashes the program's bytes.
+ActionProgram: struct {
+    at: Int
+    flag: String
+    probe: ProbeHandle
+}
+
 ActionSpec: struct {
     inputs: [String]
     outputs: [String]
@@ -277,6 +287,8 @@ ActionSpec: struct {
     kept: [KeptOutput]
     // The folders it reads whole.
     folders: [ActionFolder]
+    // The found programs it is passed.
+    programs: [ActionProgram]
     argv: [String]
     env: [String: String]
     // Only allowlisted env keys enter the action identity. Empty means the
@@ -301,7 +313,7 @@ ActionSpec: struct {
 
     cached: fn(argv: [String]) -> ActionSpec Never! {
         ActionSpec{
-            inputs: [String]{}, outputs: [String]{}, kept: [KeptOutput]{}, folders: [ActionFolder]{}, argv: argv, env: [String: String]{},
+            inputs: [String]{}, outputs: [String]{}, kept: [KeptOutput]{}, folders: [ActionFolder]{}, programs: [ActionProgram]{}, argv: argv, env: [String: String]{},
             env_allowlist: [String]{}, caps: [BuildEffect]{}, cache: ActionCache.Cached,
             kind: ActionKind.Generic, toolchain: None, probes: [ProbeHandle]{}, signing_identity: None,
             labels: [String: String]{}, helper_versions: [String: String]{},
@@ -348,6 +360,15 @@ ActionSpec: struct {
     with_found_folder: fn(self, path: String, probe: ProbeHandle) -> ActionSpec Never! {
         updated := self
         updated.folders.push(ActionFolder{path: path.copy(), source: None, found: Val(probe)})
+        updated
+    }
+
+    // Argument `at`, `flag` followed by the path of the program the
+    // find_program `probe` finds when the build runs. The action must also
+    // use the probe (with_probe).
+    with_found_program: fn(self, at: Int, flag: String, probe: ProbeHandle) -> ActionSpec Never! {
+        updated := self
+        updated.programs.push(ActionProgram{at, flag: flag.copy(), probe})
         updated
     }
 
@@ -431,6 +452,7 @@ HermeticBuildAction: struct {
     outputs: [String]
     kept: [KeptOutput]
     folders: [ActionFolder]
+    programs: [ActionProgram]
     argv: [String]
     env: [String: String]
     env_allowlist: [String]

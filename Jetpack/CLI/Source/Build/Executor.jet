@@ -13,7 +13,7 @@ use {
     jetpack_foundation.[
         BuildEffect, NATIVE_SANDBOX_DEFAULT_ACTION_TIMEOUT_MS, NativeSandboxCommand, NativeSandboxError, NativeSandboxMount,
         foundation_find_folder, foundation_library_folders, foundation_native_sandbox_command, foundation_native_sandbox_finish,
-        foundation_run_native_sandboxed_with_timeout_and_mounts,
+        foundation_run_native_sandboxed_with_timeout_and_mounts, foundation_sandbox_program_argument,
     ]
     jetpack_artifact_store.[StampTable]
     files: core.files
@@ -286,8 +286,9 @@ build_execute_actions: fn(plan: HermeticBuildPlan, ids: [Int], project_root: Str
 // Snapshot the action's inputs and the files of the folders it reads whole
 // (`stamps` their last digests; a found folder is the one its probe chose),
 // key it and restore a cached record, else stage it in a fresh private work
-// tree that receives exactly the input bytes the key hashed, with each
-// folder bound read-only at its path.
+// tree that receives exactly the input bytes the key hashed, runnable where
+// the input is, with each folder bound read-only at its path and each found
+// program it is passed named by the path it runs at there.
 build_start_action: fn(plan: HermeticBuildPlan, declared: HermeticBuildAction, project_root: String, artifact_store: BuildArtifactStoreHandle, grants: [BuildEffect], probe_facts: [BuildProbeFact], stamps: &StampTable) -[FS, Env, Exec, Time, Time.Wait, Rand]> BuildActionStart BuildExecutionError! {
     loop cap in declared.caps {
         if !grants.contains(cap) -> return Err(BuildExecutionError.MissingGrant{action: declared.name, capability: cap})
@@ -310,7 +311,13 @@ build_start_action: fn(plan: HermeticBuildPlan, declared: HermeticBuildAction, p
     loop fact in probe_facts {
         if action_probe_names.contains(fact.name) -> effective_probe_facts.push(fact.copy())
     }
-    key: build_canonical_effective_action_key(plan, action, snapshots, grants, executable_digest, effective_probe_facts)
+    programs: build_found_programs(plan, action, probe_facts) ?? return Err(err)
+    program_digests := [ContentDigest]{}
+    loop program in programs {
+        bytes: files.read_bytes(program) ?? return Err(build_io_action(action, BuildIOError.from(err)))
+        program_digests.push(ContentDigest.from_bytes(bytes))
+    }
+    key: build_canonical_effective_action_key(plan, action, snapshots, grants, executable_digest, program_digests, effective_probe_facts)
     restore_failure := CacheMissReason?{None}
     if action.cache == ActionCache.Cached {
         if build_read_action_record(artifact_store, key) == {
@@ -350,6 +357,7 @@ build_start_action: fn(plan: HermeticBuildPlan, declared: HermeticBuildAction, p
         parent: files.dirname(to)
         if parent != "" -> files.create_dir_all(parent) ?? return Err(build_io_action(action, BuildIOError.from(err)))
         files.write_bytes(to, input.bytes) ?? return Err(build_io_action(action, BuildIOError.from(err)))
+        if input.snapshot.executable -> files.set_mode(to, 493) ?? return Err(build_io_action(action, BuildIOError.from(err)))
     }
     loop output in action.outputs {
         path: build_resolve_under(sandbox, output) ?? return Err(build_io_action(action, err))
@@ -357,7 +365,7 @@ build_start_action: fn(plan: HermeticBuildPlan, declared: HermeticBuildAction, p
         if parent != "" -> files.create_dir_all(parent) ?? return Err(build_io_action(action, BuildIOError.from(err)))
     }
 
-    runtime_args: build_runtime_toolchain_arguments(plan, action.toolchain, action.argv.slice(1, action.argv.len()))
+    runtime_args := build_runtime_toolchain_arguments(plan, action.toolchain, action.argv.slice(1, action.argv.len()))
     runtime_env: build_runtime_toolchain_environment(plan, action.toolchain, build_action_environment(action))
     mounts := [NativeSandboxMount]{}
     if plan.toolchain(action.toolchain) == .Val(toolchain) {
@@ -382,9 +390,13 @@ build_start_action: fn(plan: HermeticBuildPlan, declared: HermeticBuildAction, p
         files.set_mode(executable, 493) ?? return Err(build_io_action(action, BuildIOError.from(err)))
         mounts.push(NativeSandboxMount{source: files.dirname(executable), destination: BUILD_MADE_TOOL_MOUNT})
     }
+    loop index in 0..<programs.len() {
+        passed: action.programs[index]
+        runtime_args[passed.at - 1] = "{passed.flag}{foundation_sandbox_program_argument(programs[index], mounts)}"
+    }
     share_network: build_action_shares_network(grants, action.caps)
     timeout: time.duration_ms(action.timeout_ms ?? NATIVE_SANDBOX_DEFAULT_ACTION_TIMEOUT_MS)
-    command: foundation_native_sandbox_command(executable, runtime_args, sandbox, None, runtime_env, share_network, mounts, Val(timeout)) ?? {
+    command: foundation_native_sandbox_command(executable, runtime_args, sandbox, None, runtime_env, share_network, mounts, programs, Val(timeout)) ?? {
         files.remove_all(sandbox).drop("the action sandbox is removed best-effort; the sandbox error is reported")
         return Err(build_native_sandbox_error(action, err))
     }
@@ -409,6 +421,21 @@ build_found_folders: fn(plan: HermeticBuildPlan, action: HermeticBuildAction, pr
     }
     resolved.folders = folders
     Ok(resolved)
+}
+
+// The canonical host path of each found program `action` is passed, in
+// argument order: the program its find_program probe found, which the
+// probe's fact names.
+build_found_programs: fn(plan: HermeticBuildPlan, action: HermeticBuildAction, probe_facts: [BuildProbeFact]) -[FS, Env]> [String] BuildExecutionError! {
+    programs := [String]{}
+    loop program in action.programs {
+        name: plan.probes[program.probe.id].name
+        found: loop fact in probe_facts {
+            if fact.name == name && fact.success -> break fact.detail.copy()
+        } ?? return Err(BuildExecutionError.IO{action: action.name, detail: "argument {program.at} is the program the probe `{name}` finds, and that probe found none"})
+        programs.push(files.canonicalize(found) ?? return Err(build_io_action(action, BuildIOError.from(err))))
+    }
+    Ok(programs)
 }
 
 // A staged action whose child never ran to a receipt: its work tree goes.
