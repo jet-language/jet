@@ -1,14 +1,11 @@
 // w06: decode w06.json (400,000 records, about 44 MB) into typed records and
-// total the salaries of the active ones. Typed decoding refuses input over
-// 16 MiB under EncodingLimits.safe(), so the file goes through
-// `json.parse_with_limits` and each array item is decoded to a Person.
+// total the salaries of the active ones.
 package: {
     name: "run"
     authority: { allow: [IO, Mem.Alloc, FS.Read] }
 }
 
 use {
-    encoding: core.encoding
     json: core.encoding.json
     fs: core.files
 }
@@ -25,18 +22,11 @@ Person: struct {
 
 run: fn() {
     raw: fs.read("w06.json") ?? panic("read failed")
-    limits := encoding.EncodingLimits.safe()
-    limits.max_item_bytes = 268435456
-    tree: json.parse_with_limits(raw, limits) ?? panic("parse failed")
-    items: if tree == {
-        .Array(items) -> items
-        else -> panic("not an array")
-    }
+    people: json.decode<[Person]>(raw) ?? panic("decode failed")
     count := 0
     active := 0
     salary := 0
-    loop item in items {
-        person: Person.decode(item) ?? panic("decode failed")
+    loop person in people {
         count += 1
         if !person.active -> next
         active += 1
