@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6686,
-    "rev": 96114,
+    "rev": 96116,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -74060,6 +74060,11 @@
         {
           "at": "2026-11-08",
           "by": "Main",
+          "text": "Release a0_039 attempt 2 (759775d626, --jobs 2): chain, pack, jetpack, golden (+18) and ui (+3) PASS; cases FAIL with 15 gained and 1 lost. Lost: build_entry/program_owned_main_stops_as_the_process_root_does (plain now links jet_rt_thread_attach; suspect afe2acc8c8; sent to SchedLead). 4 untracked: core_surface_ledger x2 plus compiled_workload gate x2, \"Core API fixture review is not accepted: repository-marker-scan\" (863e3d6b4e edited the adapter without refreshing its review digest; sent to G1Lead). Attempt 1 was OOM-killed in cases (rc=137). c65 run #6 waits for the recut."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
           "text": "c65 run #5, 2026-11-08 07:36-07:58: a0_038 at c902740d37, clean home, no cargo or rustc, jet test Compiler --profile full: full rc=1, not a pass. full.json counts read PASS 13429 / FAIL 0 / ERROR 0 / UNEXPECTED-PASS 0, but the tests suite member jet_testkit ran 226 passed, 14 failed (GoldenStreams, NoNix, StepsParsing, UiSnapshots). Run #4 failed the same way, and Main missed it there. Root: Compiler/JetTestKit/Source/Exec.jet:110 falls back to JET_TOOLCHAIN_ROOT = env.root, the unit test scratch root, which holds no Core, whenever the variable is unset; only a clean home has it unset. Second defect: full.json drops the tests-suite member failures, so the counts read FAIL 0 on a failing run. Both routed to G1Lead as top priority; c65 run #6 follows on the seed that carries the fix."
         },
         {
@@ -74827,7 +74832,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-29T02:09:17.141Z",
-      "updated": "2026-11-08T12:58:19.491Z",
+      "updated": "2026-11-08T14:37:41.331Z",
       "updatedBy": "Main",
       "criteriaLastN": 74
     },
@@ -99764,6 +99769,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-08",
+          "by": "Main",
+          "text": "Owner ruling 2026-11-08 (Main asked; owner chose): add dir.duplicate(), a new Core call on Directory that returns a fresh, independent handle to the same directory. keep_open keeps its ratified take (D-CORE-PROCINHERIT1=A). Census (QuickLead): the only caller that reuses one handle is Jetpack CacheLease.pass_into (CacheLease.jet:174, reached from ShellEnv.jet:172 and StoreCache.jet:337); it migrates to keep_open(lease.directory.duplicate()), and Directory.pass_to is removed in the same cutover. FileLock arm: phase 1 refuses it with IOError.Unsupported until a seed carries core.files.__lock_fd; c3 is met only after phase 2."
+        },
+        {
           "at": "2026-11-07",
           "by": "Main",
           "text": "c3 state at dev 8405a508b0. Done: the per-type core.files.__keep_open_{reader,writer,directory} bodies and every JetSema routing by handle type are gone; grep finds keep_open in no JetSema or JetIR lowering source. 94775580e5 and a5476b82af (#3594 c8 phases 1-2) leave one raw bridge, core.process.__keep_open_raw, plus core.files.__reader_fd and __writer_fd. Missing: the public PROCINHERIT1 method ProcessSpec.keep_open(^handle: KeepOpen, at: Int?{None}) over the union. Today only Directory.pass_to(spec, at) and compiler_with_process_directory reach the bridge, so a FileReader or FileWriter cannot be passed. c3 closes with #3594 c8 phase 3: one Core keep_open body over the union, which takes the handle's descriptor (__reader_fd, __writer_fd or __directory_fd) and calls __keep_open_raw. Directory.pass_to then becomes a caller or goes. Batch proofs at the same compiler (seed-built d405d4cb6c + table-it): golden --filter Systems/Process PASS 54/54; cases --filter held_directory is still KNOWN-FAILING under #6386 (jet debug DAP), unchanged."
@@ -99842,7 +99852,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T18:36:38.446Z",
-      "updated": "2026-11-07T22:40:30.341Z",
+      "updated": "2026-11-08T14:37:40.469Z",
       "updatedBy": "Main",
       "criteriaLastN": 5
     },
@@ -188466,6 +188476,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-08T14:37:41.331Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0h06654",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-08T14:37:40.469Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0fs42sy",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-08T14:06:09.907Z",
       "by": "Main",
