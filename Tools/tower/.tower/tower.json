@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6686,
-    "rev": 96111,
+    "rev": 96113,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -73227,6 +73227,11 @@
         {
           "at": "2026-11-08",
           "by": "Main",
+          "text": "G1Lead landed option D as dev c1dd8c7b26: typed json.decode<T> reads the document in place through one generated reader per type; decode(tree) is the same body over the tree source. Worker verify: check/build/selfcheck rows 0; filters encoding_parity 27, json 91, codable 13, serde 4, decode 29, corelib_parts_encoding_streams 4, all PASS. General-mechanism proof on a second program (package index, 50k+100k packages, identical output): 1648-1719 ms / 444 MiB vs 2922-3268 ms / 1.20 GiB. w06: 1633-1822 ms / 505 MB vs 3593-4058 ms / 1.46 GB. Main runs the c1/c2 peer measurements with the next seed."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
           "text": "Owner correction 2026-11-08 (to Main), superseding the process in the previous entry: NO ballot. The owner ratifies D directly: engineer away the downsides (hand-written impl migration, Flatten/untagged without a second semantics, error-order parity with the tree path, public Decode change size, code size and compile time), then build D. A design pass that removes each downside comes first inside the build; no owner gate before building."
         },
         {
@@ -73291,7 +73296,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T22:33:12.272Z",
-      "updated": "2026-11-08T11:00:12.871Z",
+      "updated": "2026-11-08T14:03:19.969Z",
       "updatedBy": "Main",
       "goals": [
         "G4"
@@ -188457,6 +188462,20 @@
   ],
   "events": [
     {
+      "at": "2026-11-08T14:03:20.939Z",
+      "by": "Main",
+      "action": "goal.log",
+      "ref": "G11",
+      "note": "Owner, 2026-11-08, restating the 2026-11-05 ruling on #5910:"
+    },
+    {
+      "at": "2026-11-08T14:03:19.969Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0hsgoa6",
+      "note": "logEntry"
+    },
+    {
       "at": "2026-11-08T13:53:42.905Z",
       "by": "Main",
       "action": "goal.log",
@@ -194556,6 +194575,11 @@
         {
           "at": "2026-11-08",
           "by": "Main",
+          "text": "Owner, 2026-11-08, restating the 2026-11-05 ruling on #5910: NO incremental compilation, in any form. Never propose it. Dev speed comes from the no-cache model: compile from the entry points and only reached code, precompiled checked Core and Prelude shipped with jet (#6328), phase arenas and streaming to flat memory (#5910), and phase throughput (#6527, #5479)."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
           "text": "Owner durable guidance, 2026-11-08: fix performance structurally, in the codegen, runtime or Core path every program using a feature goes through, never tailored to one benchmark program, so that every program touching the feature is as fast as possible. If the ceiling shows a feature costs about zero (for example, w11 CPU while waiting on I/O, 0.00 s in ref.S), Jet's general code for that feature must cost about zero too. AGENTS.md Performance gate carries it (Main patch in flight). Main's earlier idea of compiling the \"fetch N, K at a time\" shape into one event loop is reframed accordingly: any task that only waits on I/O lowers to near-zero-cost parking (no per-task stack or allocation beyond its live state), for every program, not one recognized shape."
         },
         {
@@ -194575,7 +194599,7 @@
         }
       ],
       "created": "2026-11-04T18:09:54.108Z",
-      "updated": "2026-11-08T13:53:39.899Z",
+      "updated": "2026-11-08T14:03:20.939Z",
       "updatedBy": "Main"
     },
     {
