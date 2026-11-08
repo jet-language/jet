@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6686,
-    "rev": 96096,
+    "rev": 96097,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -73674,6 +73674,11 @@
         {
           "at": "2026-11-08",
           "by": "Main",
+          "text": "cd58a15b81 (G1Lead): Core/Files/Path.jet walk unwraps each entry with `entry ?? return Err(err)`. The old `entry?.path` spelling checks under no compiler (E0047 on a0_038 and on dev sema), and it landed because precommit does not gate selfcheck-core; that lander gap is Main's. A Core census under a0_038 and B2 is clean after the fix (0 rows), and the walk cases pass 11/11. Found while fixing it: no case calls core.files.path walk, and every core.files.path function passing path.raw to a `String | Path` parameter ICEs in ir.build (\"union String | core.files.path::Path without a definition\") on a0_038 and on dev, an I2 violation. Routed to G1Lead ahead of #6082 D: fix the root in lowering, add an O0/O1/O2 case, and census the other Core parameter unions."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
           "text": "Phase 2 landed as 863e3d6b4e (62 files, lane-commit precommit passed). G1Lead reports peak RSS, old vs new, of 13.4/40.2/160.6 MB vs 15.0/15.0/14.4 MB on 20k/80k/323k entries, identical path order, and the Iterable-loop authority fix (E1803/E0740). Main could not re-check this with the a0_038 seed: a probe built inside the dev checkout came out byte-identical to one built outside any checkout and still reported no FS requirement, so the seed does not pick up the checkout Core. c1 is to be measured with a compiler built from 863e3d6b4e or later, in the next batch verification. Scripts: $JET_SCRATCH_ROOT/lanes/Main/walk6086/ab2.sh."
         },
         {
@@ -73723,7 +73728,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T22:33:22.602Z",
-      "updated": "2026-11-08T12:43:43.016Z",
+      "updated": "2026-11-08T13:35:47.386Z",
       "updatedBy": "Main",
       "goals": [
         "G4"
@@ -188441,6 +188446,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-08T13:35:47.386Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c08m4yum",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-08T13:33:15.237Z",
       "by": "Main",
