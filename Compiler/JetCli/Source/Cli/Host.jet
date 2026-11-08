@@ -1807,7 +1807,9 @@ jet_cli_full_path_origins: fn(diagnostics: &[Diagnostic]) Never! {
 // `jet run <file>`'s build, as `jet build` does: problems with an error stop
 // it, and so does the application authority check; `run` hides advisory
 // lints unless `--verbose`, and `json` reports what it shows as JSON
-// (jet_cli_run_problems). The image is linked to run from memory.
+// (jet_cli_run_problems). A `--verbose` run says on one stderr line which
+// effects the program uses (the checked entry's, `entry_effects`). The image
+// is linked to run from memory.
 jet_cli_run_build: fn(file: String, source: String, color: Bool, options: BuildOptions, verbose: Bool, json: Bool, invocation: JetCLIInvocationAuthority?, result: JetDriverCompileResult, inputs: &&JetDriverLoweringInputs?, snapshot: JetDriverAuthorizedSourceSnapshot) -> JetCLIBuilt {
     if result.trace_sink == .Val(sink) -> sink.begin("cli.diagnostics", "", -1, -1)
     errors: jet_cli_errors(result.diagnostics)
@@ -1819,6 +1821,11 @@ jet_cli_run_build: fn(file: String, source: String, color: Bool, options: BuildO
     }
     if jet_cli_authority_check(file, source, color, json, "run", invocation, result) == .Val(refusal) -> return JetCLIBuilt.Failed{output: refusal}
     if verbose -> jet_cli_write_verbose_lints(file, source, color, json, jet_cli_present_shown(result, snapshot, true))
+    if verbose && !json {
+        used: jet_cli_sorted_set(result.entry_effects)
+        listed: if used.len() == 0 -> "none" else -> used.join(", ")
+        cli_term.eprint("jet run: effects used: {listed}")
+    }
     jet_cli_build_binary(file, jet_cli_stem(file), "run", color, options, result, inputs, snapshot)
 }
 
