@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6703,
-    "rev": 96312,
+    "nextNum": 6704,
+    "rev": 96322,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -101802,6 +101802,11 @@
         {
           "at": "2026-11-08",
           "by": "Main",
+          "text": "Owner approved (chat): items 1, 2 and 4 of the OS-edge safety plan go into WaylandLead-1 as #6701 c4-c6; items 3, 5, 6 and 8 are #6703; the default seccomp allowlist goes to a ballot."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
           "text": "Owner 2026-11-08: \"i do not want a module or subsystem called ray, if we need a separate module layer, it should just be called ui not ray\". Windows, frames, drawing surfaces and each window's input live in `ui` (Core/Ui, core.ui) with the D-GAME-PLATFORM1 shape (ui.open, win.frames(fps), frame.events(), frame.present, ui.headless); the Wayland client is ui's private Linux backend. No module, package or import alias is named `ray`; this supersedes the `ray` name in D-GAME-PLATFORM1, D-RAY-API1 and the 2026-11-01 package answer."
         },
         {
@@ -101837,6 +101842,33 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-08T19:54:18.077Z"
+        },
+        {
+          "n": 4,
+          "text": "Minimal trusted base: the OS edge is about 12 generic runtime leaves (open/close, read-at, size, shared create/resize/drop, copy in/out, unix send/receive with fds, readiness); no raw pointer or raw fd number reaches Core; the Wayland client, wire parser and XKB parser are safe Jet, so a hostile compositor can cause only typed errors.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T20:10:08.627Z"
+        },
+        {
+          "n": 5,
+          "text": "Ownership makes misuse unwritable: Fd and SharedMemory are owned resources closed on drop (no double close, no use after close, no fd-reuse race across threads); offsets and lengths are range-typed (Int(lo..hi)) so sema proves bounds before a leaf runs.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T20:10:09.820Z"
+        },
+        {
+          "n": 6,
+          "text": "Linux hazards removed by design, each with a case: shared memory is sealed (F_SEAL_SHRINK|F_SEAL_GROW) so a peer cannot SIGBUS us; received fds (keymap) are read with pread, never mapped; MSG_CTRUNC closes every received fd and reports a typed error; every leaf retries EINTR and handles partial sends; every fd is O_CLOEXEC.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T20:10:10.837Z"
         }
       ],
       "refs": [],
@@ -101849,9 +101881,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-08T19:44:17.134Z",
-      "updated": "2026-11-08T19:54:18.077Z",
+      "updated": "2026-11-08T20:10:33.419Z",
       "updatedBy": "Main",
-      "criteriaLastN": 3
+      "criteriaLastN": 6
     },
     {
       "id": "c0gdndep",
@@ -101895,6 +101927,85 @@
       "updated": "2026-11-08T20:09:56.595Z",
       "updatedBy": "Main",
       "criteriaLastN": 1
+    },
+    {
+      "id": "c0wz8yaf",
+      "num": 6703,
+      "title": "Prove the runtime OS edge safe: leaf contracts, model checking, fault injection, checked mode",
+      "body": "Owner direction: find a way to prove the safety of the unsafe runtime layer, holistically. #6701 c4-c6 shrink the trusted base, make misuse unwritable through ownership and range types, and remove Linux hazards by design. This card proves what remains: every runtime syscall leaf against a written contract. Kernel-enforced confinement (a default seccomp allowlist) is a separate owner ballot. A public claim that the edge is proven needs a passing adversarial review per AGENTS.md. Limit: this proves Jet against the kernel documented behaviour, not kernel bugs.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": "each item has a case or gate that fails when broken",
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Every runtime syscall leaf carries a machine-checkable contract (precondition, postcondition, frame: which bytes and fds it may touch, with no arithmetic overflow), and a symbolic checker written in Jet with no external solver proves each leaf IR against it; a leaf without a passing proof record fails the build.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T20:10:27.900Z"
+        },
+        {
+          "n": 2,
+          "text": "Machine-code translation check: the syscall number and argument registers emitted for every leaf at O0/O1/O2 match a committed table derived from the kernel syscall_64.tbl, and a mismatch fails the gate.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T20:10:28.871Z"
+        },
+        {
+          "n": 3,
+          "text": "Model-based differential testing: a pure-Jet model of the fd table and mappings runs at least one million random operation sequences against the real kernel with no divergence; a fault-injection test mode makes every leaf return each documented errno (EINTR, EAGAIN, ENOMEM, EMSGSIZE, truncated control data), and every error path is exercised; the Wayland wire and XKB parsers are fuzzed with no hang or panic.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T20:10:29.874Z"
+        },
+        {
+          "n": 4,
+          "text": "Checked runtime mode: extend --checked-alloc with a shadow ledger of open fds and mappings that checks every leaf call against it (owned and open, in range, not after close); the cases and golden suites pass in this mode.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T20:10:30.922Z"
+        },
+        {
+          "n": 5,
+          "text": "Drift gates: the unsafe-site ratchet can only fall, every leaf has a contract and a proof record, and jet audit foreign stays clean; a dated adversarial review in Docs/audits tries to break the claim and passes before any public text calls the edge proven.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T20:10:31.986Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "I1",
+        "safety",
+        "runtime"
+      ],
+      "goals": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-08T20:10:18.606Z",
+      "updated": "2026-11-08T20:10:31.986Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 5
     }
   ],
   "decisions": [
@@ -190115,6 +190226,76 @@
   ],
   "events": [
     {
+      "at": "2026-11-08T20:10:33.419Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0l39twq",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-08T20:10:31.986Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0wz8yaf",
+      "note": "#5 Drift gates: the unsafe-site ratchet can only fall, every le"
+    },
+    {
+      "at": "2026-11-08T20:10:30.922Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0wz8yaf",
+      "note": "#4 Checked runtime mode: extend --checked-alloc with a shadow l"
+    },
+    {
+      "at": "2026-11-08T20:10:29.875Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0wz8yaf",
+      "note": "#3 Model-based differential testing: a pure-Jet model of the fd"
+    },
+    {
+      "at": "2026-11-08T20:10:28.871Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0wz8yaf",
+      "note": "#2 Machine-code translation check: the syscall number and argum"
+    },
+    {
+      "at": "2026-11-08T20:10:27.900Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0wz8yaf",
+      "note": "#1 Every runtime syscall leaf carries a machine-checkable contr"
+    },
+    {
+      "at": "2026-11-08T20:10:18.606Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0wz8yaf",
+      "note": "Prove the runtime OS edge safe: leaf contracts, model checking, fault injection, checked mode"
+    },
+    {
+      "at": "2026-11-08T20:10:10.837Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0l39twq",
+      "note": "#6 Linux hazards removed by design, each with a case: shared me"
+    },
+    {
+      "at": "2026-11-08T20:10:09.820Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0l39twq",
+      "note": "#5 Ownership makes misuse unwritable: Fd and SharedMemory are o"
+    },
+    {
+      "at": "2026-11-08T20:10:08.627Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0l39twq",
+      "note": "#4 Minimal trusted base: the OS edge is about 12 generic runtim"
+    },
+    {
       "at": "2026-11-08T20:09:56.595Z",
       "by": "Main",
       "action": "card.criteria-add",
@@ -193550,713 +193731,6 @@
       "action": "card.criteria-add",
       "ref": "c0fs42sy",
       "note": "#1 Root fix in sema/lowering: a borrowed argument that widens i"
-    },
-    {
-      "at": "2026-11-07T18:36:38.447Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c0fs42sy",
-      "note": "A borrowed argument widened into a union parameter is moved and dropped by the callee (I1)"
-    },
-    {
-      "at": "2026-11-07T18:23:09.433Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0pgowhn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-07T17:38:45.051Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c09z2sp5",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-07T17:23:30.422Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0pgowhn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-07T17:09:29.927Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0692z4s",
-      "note": "#14"
-    },
-    {
-      "at": "2026-11-07T17:01:23.663Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0pgowhn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-07T16:59:33.798Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c07rizte",
-      "note": "#7"
-    },
-    {
-      "at": "2026-11-07T16:59:32.891Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c07rizte",
-      "note": "#6"
-    },
-    {
-      "at": "2026-11-07T16:59:31.946Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c07rizte",
-      "note": "#5"
-    },
-    {
-      "at": "2026-11-07T16:59:31.019Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0h18kyi",
-      "note": "#98"
-    },
-    {
-      "at": "2026-11-07T16:59:30.077Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c005fduo",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-07T16:36:46.150Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c09z2sp5",
-      "note": "#1 Tower's write path is Jet: Tools/agent/CloseoutGate.jet's 'o"
-    },
-    {
-      "at": "2026-11-07T16:36:03.014Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0692z4s",
-      "note": "#15 A one-shot HTTP response's second body().text returns Err(.B"
-    },
-    {
-      "at": "2026-11-07T16:36:01.922Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0692z4s",
-      "note": "#14 Memory safety (I1): socket_addr(\"[zz]\", 80) in safe Jet retu"
-    },
-    {
-      "at": "2026-11-07T16:34:10.624Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0pgowhn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-07T16:33:40.642Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0b4rnem",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-07T16:33:39.427Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-EXPORT-TARGET1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-11-07T16:33:25.320Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-EXPORT-TARGET1",
-      "note": "Export Jet programs, and the Jet compiler itself, to C, WebAssembly or other languages"
-    },
-    {
-      "at": "2026-11-07T16:32:42.207Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c09z2sp5",
-      "note": "The remaining Tools/ scripts and Tower itself run on Jet"
-    },
-    {
-      "at": "2026-11-07T16:32:10.606Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0uwol3w",
-      "note": "#199 The Jetpack infrastructure scripts are Jet. Owner ruling 11-"
-    },
-    {
-      "at": "2026-11-07T16:32:09.049Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0m58g8t",
-      "note": "#29 The web test drivers are Jet. Owner ruling 11-07 (Docs/spec/"
-    },
-    {
-      "at": "2026-11-07T16:32:07.236Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0ozzmvc",
-      "note": "#120 The developer-tool test drivers are Jet. Owner ruling 11-07 "
-    },
-    {
-      "at": "2026-11-07T16:32:05.858Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0hs3czc",
-      "note": "#99 Tools/perf is Jet. Owner ruling 11-07 (Docs/spec/philosophy."
-    },
-    {
-      "at": "2026-11-07T16:28:41.232Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0uwol3w",
-      "note": "#198: Count corrected from the landed corpus_ast run (d919fa4f22): 368 = 246 + 122.; was: Dogfood policy: Jetpack's sources pass the corpus_ast dogfood gate with no exception rows. Today 366 sites fail: 249 dogfood-json (hand-built JSON wire text where the typed JSON helper belongs) and 11"
-    },
-    {
-      "at": "2026-11-07T16:26:41.680Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0b4rnem",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-07T16:22:13.251Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0b4rnem",
-      "note": "#6 Install docs describe building Jet from the exported seed wi"
-    },
-    {
-      "at": "2026-11-07T16:22:11.991Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0b4rnem",
-      "note": "#5 Exporting the compiler's own source to C (and to Wasm) gives"
-    },
-    {
-      "at": "2026-11-07T16:22:11.035Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0b4rnem",
-      "note": "#4 Exporting a program to C and building it with a stock C comp"
-    },
-    {
-      "at": "2026-11-07T16:22:10.147Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0b4rnem",
-      "note": "#3 A target is an ordinary Jet library that any package can wri"
-    },
-    {
-      "at": "2026-11-07T16:22:09.119Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0b4rnem",
-      "note": "#2 A ratified Tower ballot fixes the command's name and flags, "
-    },
-    {
-      "at": "2026-11-07T16:22:07.881Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0b4rnem",
-      "note": "#1 An adversarial design review in Docs/audits tests every clai"
-    },
-    {
-      "at": "2026-11-07T16:22:00.126Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c0b4rnem",
-      "note": "Transpile Jet to other languages through target libraries (C, Wasm, Rust), so the compiler always has a recent portable seed"
-    },
-    {
-      "at": "2026-11-07T16:17:46.853Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0iiv9ft",
-      "note": "#13 Free space: Core reports a filesystem's available bytes and "
-    },
-    {
-      "at": "2026-11-07T16:17:45.841Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0ufrhm0",
-      "note": "#13 Isolation mappings: isolate() can map the caller's uid and g"
-    },
-    {
-      "at": "2026-11-07T16:17:44.872Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0ufrhm0",
-      "note": "#12 I/O priority and cgroup placement: a ProcessSpec can set the"
-    },
-    {
-      "at": "2026-11-07T16:17:43.942Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0ufrhm0",
-      "note": "#11 Per-child usage: a ProcessReceipt reports that one child's p"
-    },
-    {
-      "at": "2026-11-07T16:17:42.981Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0ufrhm0",
-      "note": "#10 CPU affinity: a ProcessSpec can pin the child to a CPU set, "
-    },
-    {
-      "at": "2026-11-07T16:14:34.426Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0pgowhn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-07T16:13:22.625Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0uwol3w",
-      "note": "#198 Dogfood policy: Jetpack's sources pass the corpus_ast dogfoo"
-    },
-    {
-      "at": "2026-11-07T16:03:40.158Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0pgowhn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-07T16:03:39.274Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0iiv9ft",
-      "note": "#12 Byte paths: Core can create, list, open and remove a file wh"
-    },
-    {
-      "at": "2026-11-07T16:03:38.366Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0ufrhm0",
-      "note": "#9 Isolation: Core can run a child in new Linux namespaces (use"
-    },
-    {
-      "at": "2026-11-07T16:03:37.500Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0ufrhm0",
-      "note": "#8 Descriptor passing: keep_open hands any open descriptor to t"
-    },
-    {
-      "at": "2026-11-07T16:03:36.651Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0ufrhm0",
-      "note": "#7 Merged output: a ProcessSpec can send the child's stdout and"
-    },
-    {
-      "at": "2026-11-07T15:15:07.033Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0h06654",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-07T15:10:56.185Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0r85c0z",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-07T15:10:53.497Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0r85c0z",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-07T15:10:51.877Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0x5m1jn",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-07T15:10:49.216Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0x5m1jn",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-07T15:02:58.241Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0h114mv",
-      "note": "#3 A gate type-checks every Core function body, reached or not."
-    },
-    {
-      "at": "2026-11-07T14:55:39.968Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c08512l6",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-07T14:42:50.140Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0h114mv",
-      "note": "#2 A gated row runs the Core #Tests, among them the Dyn kinds #"
-    },
-    {
-      "at": "2026-11-07T14:38:12.407Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0pgowhn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-07T14:33:52.142Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c00e9u2p",
-      "note": "#18 A cancel that arrives while a Close runs is held until the c"
-    },
-    {
-      "at": "2026-11-07T14:28:29.469Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0pgowhn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-07T14:28:28.411Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0pgowhn",
-      "note": "#68"
-    },
-    {
-      "at": "2026-11-07T14:27:33.354Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c08512l6",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-07T14:23:06.665Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c00e9u2p",
-      "note": "#17 A panic inside a Close while a panic is already unwinding is"
-    },
-    {
-      "at": "2026-11-07T14:19:29.040Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c07rizte",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-07T14:18:33.558Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c03yyxl3",
-      "note": "#2 The eight Examples/Interop/FFI/Projections/*/guest.jet expor"
-    },
-    {
-      "at": "2026-11-07T14:13:54.196Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0h18kyi",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-07T14:13:52.898Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0h18kyi",
-      "note": "#98 Sema refuses every #Export(c) or library export that can fai"
-    },
-    {
-      "at": "2026-11-07T14:00:54.987Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c06l2xid",
-      "note": "#2 A generated module whose template names a top-level comptime"
-    },
-    {
-      "at": "2026-11-07T13:09:22.751Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0pgowhn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-07T13:08:15.856Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0h18kyi",
-      "note": "#97 Interpolating a struct value whose fields include Set<String"
-    },
-    {
-      "at": "2026-11-07T12:44:47.138Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c005fduo",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-07T12:38:49.030Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0ycgz3f",
-      "note": "#2 A jet check of a small program returns within 1 s of its res"
-    },
-    {
-      "at": "2026-11-07T12:38:40.642Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c02188uw",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-07T12:38:38.896Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c02188uw",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-07T12:30:36.500Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0lb1p4p",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-07T12:30:17.393Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0lb1p4p",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-07T12:30:02.055Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0ngdap0",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-07T12:30:00.348Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0txcsfz",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-07T12:29:58.729Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c023hw48",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-07T12:29:57.013Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0ngdap0",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-07T12:29:56.104Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0txcsfz",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-07T12:29:55.197Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c023hw48",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-07T12:29:54.265Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c02188uw",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-07T12:13:47.124Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0lb1p4p",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-07T12:13:46.304Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0lb1p4p",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-07T12:03:35.301Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c005fduo",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-07T12:03:34.226Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c00ctwqw",
-      "note": "#6 The two step timeouts set for #6651 c2 are removed and both "
-    },
-    {
-      "at": "2026-11-07T11:59:04.773Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c00ctwqw",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-07T11:59:03.595Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c00ctwqw",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T11:50:09.581Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0h06654",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-07T11:25:03.561Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0hn7w1n",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-07T11:25:02.684Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0hn7w1n",
-      "note": "#144 Header binding has one canonical spelling, jet inspect bind "
-    },
-    {
-      "at": "2026-11-07T11:25:01.848Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0hn7w1n",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-07T11:16:15.510Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0hn7w1n",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-07T11:16:14.586Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0hn7w1n",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T11:14:30.828Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0lb1p4p",
-      "note": "#4 Every generator whose output is committed has its --check ru"
-    },
-    {
-      "at": "2026-11-07T11:14:29.848Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0lb1p4p",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-07T11:14:13.722Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c005fduo",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-07T11:10:36.871Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-11-07T11:10:36.871Z"
-    },
-    {
-      "at": "2026-11-07T11:08:44.669Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c005fduo",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-07T11:08:32.987Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0hn7w1n",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-07T11:07:24.229Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0o2a99m",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-07T11:07:23.296Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0heplig",
-      "note": "#8"
-    },
-    {
-      "at": "2026-11-07T11:07:22.373Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0h18kyi",
-      "note": "#76"
-    },
-    {
-      "at": "2026-11-07T11:07:21.506Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0h18kyi",
-      "note": "#75"
-    },
-    {
-      "at": "2026-11-07T11:06:21.553Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c005fduo",
-      "note": "logEntry"
     }
   ],
   "nextNum": 368,
