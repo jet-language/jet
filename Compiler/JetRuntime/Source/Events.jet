@@ -298,11 +298,19 @@ event_scope_release_hard: fn(scope: I64, cancel: Bool) {
     policy
 }
 
+// EventTrace32: delivered0 queued8 dropped16 summary24. The summary is an
+// owned String an AsyncEvent DispatchReport's trace carries (its entry's
+// steps joined by " -> "); 0 is an Event dispatch's computed summary.
 event_trace_new: fn(delivered: I64, queued: I64, dropped: I64) -> I64 {
-    trace: jet_rt_alloc(I64{24}, I64{8})
+    event_trace_with_summary(delivered, queued, dropped, I64{0})
+}
+
+event_trace_with_summary: fn(delivered: I64, queued: I64, dropped: I64, summary: I64) -> I64 {
+    trace: jet_rt_alloc(I64{32}, I64{8})
     event_store(trace, delivered)
     event_store(wrapping(trace + I64{8}), queued)
     event_store(wrapping(trace + I64{16}), dropped)
+    event_store(wrapping(trace + I64{24}), summary)
     trace
 }
 
@@ -310,8 +318,11 @@ event_trace_new: fn(delivered: I64, queued: I64, dropped: I64) -> I64 {
 #Export(c) jet_event_trace_queued: fn(trace: I64) -> I64 { jet_int_owned_from_i64(event_word(wrapping(trace + I64{8}))) }
 #Export(c) jet_event_trace_dropped: fn(trace: I64) -> I64 { jet_int_owned_from_i64(event_word(wrapping(trace + I64{16}))) }
 
-// `event delivered={d} queued={q} dropped={r}` (dispatch :800-805).
+// A carried summary, else `event delivered={d} queued={q} dropped={r}`
+// (dispatch :800-805).
 #Export(c) jet_event_trace_summary: fn(trace: I64) -> I64 {
+    summary: event_word(wrapping(trace + I64{24}))
+    if (summary != I64{0}) -> return jet_rt_string_clone(summary)
     text: jet_rt_string_builder_new()
     jet_rt_string_builder_push(text, rt_static_text("event delivered="))
     rt_text_push_number(text, event_word(trace))
@@ -323,11 +334,14 @@ event_trace_new: fn(delivered: I64, queued: I64, dropped: I64) -> I64 {
 }
 
 #Export(c) jet_rt_handle_clone_jet_event_trace: fn(trace: I64) -> I64 {
-    event_trace_new(event_word(trace), event_word(wrapping(trace + I64{8})), event_word(wrapping(trace + I64{16})))
+    summary: event_word(wrapping(trace + I64{24}))
+    event_trace_with_summary(event_word(trace), event_word(wrapping(trace + I64{8})), event_word(wrapping(trace + I64{16})), if (summary != I64{0}) -> jet_rt_string_clone(summary) else -> I64{0})
 }
 
 #Export(c) jet_rt_handle_drop_jet_event_trace: fn(trace: I64) {
-    if (trace != I64{0}) -> jet_rt_free(trace, I64{24}, I64{8})
+    if (trace == I64{0}) -> return
+    jet_rt_string_drop(event_word(wrapping(trace + I64{24})))
+    jet_rt_free(trace, I64{32}, I64{8})
 }
 
 // ---- Event -----------------------------------------------------------------

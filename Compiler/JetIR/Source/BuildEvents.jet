@@ -51,6 +51,7 @@ ir_event_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receive
     if symbol == "jet_std::JetHook::run" -> return Val(ir_hook_run(m, p, b, ty, receiver, args, span))
     if symbol == "jet_std::JetDecisionHook::run" -> return Val(ir_decision_hook_run(m, p, b, ty, receiver, args, span))
     if symbol == "jet_std::JetAsyncEvent::emit_async" -> return Val(ir_async_emit(m, p, b, ty, receiver, args, span))
+    if symbol == "jet_std::JetDispatchReport::failures" -> return Val(ir_dispatch_report_failures(m, p, b, ty, receiver, args, span))
     export: if symbol == {
         "jet_std::JetEvent::listener_count" -> "jet_event_listener_count"
         "jet_std::JetEvent::trace" -> "jet_event_trace"
@@ -64,6 +65,7 @@ ir_event_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receive
         "jet_std::JetDispatchReport::state" -> "jet_dispatch_report_state"
         "jet_std::JetDispatchReport::accepted" -> "jet_dispatch_report_accepted"
         "jet_std::JetDispatchReport::delivered_handlers" -> "jet_dispatch_report_delivered_handlers"
+        "jet_std::JetDispatchReport::trace" -> "jet_dispatch_report_trace"
         "jet_std::JetEventScope::cancel" -> "jet_event_scope_cancel"
         "jet_std::JetEventScope::active_count" -> "jet_event_scope_active_count"
         "jet_std::JetSubscription::unsubscribe" -> "jet_subscription_unsubscribe"
@@ -231,20 +233,56 @@ ir_event_ok_type: fn(ty: Type) -> Type? Never! {
 
 // `core.event.__async_new<T, E>(policy, failures)`: the source validated the
 // capacity, so the provider's event is always the Ok payload; the policy
-// record is borrowed and released here when consumed.
+// record is borrowed and released here when consumed. The provider keeps E's
+// descriptor and the handler result's (`Result<Unit, E>`): it reads each
+// handler's Ok or Err and keeps an Err's E for its DispatchReport.
 ir_async_event_new: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, result_ty: Type, args: [Int], span: Span) -> Int Never! {
     event_ty: ir_event_ok_type(result_ty) ?? return ir_fail_slot(b, span, "AsyncEvent.new producing {ir_type_name(result_ty)}")
     row: ir_event_family_row(m, p, event_ty) ?? return ir_fail_slot(b, span, "AsyncEvent.new producing {ir_type_name(event_ty)}")
     if args.len() != 2 -> return ir_fail_slot(b, span, "AsyncEvent.new with {args.len()} arguments")
+    failure_ty: ir_type_args(ir_untag(event_ty))[1].copy()
+    e_meta: ir_lazy_meta(m, p, b, failure_ty, span)
+    if e_meta < 0 -> return -1
+    handled_ty: Type.Result{ok: Type.Named{name: "Unit"}, err: failure_ty.copy()}
+    r_meta: ir_lazy_meta(m, p, b, handled_ty, span)
+    if r_meta < 0 -> return -1
     policy: ir_expr(m, p, b, args[0])
     if ir_failed(b) || policy < 0 -> return -1
     failures: ir_expr(m, p, b, args[1])
     if ir_failed(b) || failures < 0 -> return -1
-    event: ir_runtime(m, b, "jet_async_event_new", [Int]{policy, failures}, row)
+    event: ir_runtime(m, b, "jet_async_event_new", [Int]{policy, failures, e_meta, r_meta}, row)
     b.fresh[event] = true
     ir_release(m, b, failures)
     ir_release(m, b, policy)
     ir_result_box(m, p, b, result_ty, true, event)
+}
+
+// DispatchReport.failures(): the provider builds the List of
+// DispatchFailure<E> boxes in the lowering's enum layout from the words
+// passed here (the runtime's FAILURE_* offsets in AsyncEvents.jet), each
+// Handler payload a clone of the report's E.
+ir_dispatch_report_failures: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, args: [Int], span: Span) -> Int Never! {
+    if args.len() != 0 -> return ir_fail_slot(b, span, "DispatchReport.failures with {args.len()} arguments")
+    failure_ty: if ir_untag(ty) == .List(element) -> element.copy() else -> { return ir_fail_slot(b, span, "DispatchReport.failures producing {ir_type_name(ty)}") }
+    failure_row: ir_value_type(m, p, failure_ty) ?? return ir_type_fail(b, span, failure_ty)
+    if m.types[failure_row].kind != .Pointer -> return ir_fail_slot(b, span, "DispatchReport failures of {ir_type_name(failure_ty)}")
+    failure_def: ir_enum_def(m, p, failure_row) ?? return ir_fail_slot(b, span, "DispatchFailure without a declaration")
+    failure_args: ir_row_args(m, failure_row)
+    handler: ir_event_variant(m, p, failure_def, failure_args, "Handler") ?? return ir_fail_slot(b, span, "layout of DispatchFailure.Handler")
+    panicked: ir_event_variant(m, p, failure_def, failure_args, "Panic") ?? return ir_fail_slot(b, span, "layout of DispatchFailure.Panic")
+    bytes: ir_enum_box_size(m, p, failure_def, failure_args) ?? return ir_fail_slot(b, span, "layout of DispatchFailure")
+    report: ir_expr(m, p, b, receiver)
+    if ir_failed(b) || report < 0 -> return -1
+    words: [Int]{
+        ir_word_const(m, b, ir_align8(bytes)),
+        ir_word_const(m, b, handler.index), ir_word_const(m, b, handler.offset),
+        ir_word_const(m, b, panicked.index), ir_word_const(m, b, panicked.offset),
+    }
+    layout: ir_out_slot(m, b, words.len())
+    loop (position, word) in words -> ir_emit(b.f, IROp.Store, -1, layout, position * 8, word, b.line)
+    result: ir_event_out_value(m, p, b, ty, "jet_dispatch_report_failures", [Int]{report, layout}, span)
+    ir_release(m, b, report)
+    result
 }
 
 // A value the runtime writes to frame storage through `export(args, out)`.

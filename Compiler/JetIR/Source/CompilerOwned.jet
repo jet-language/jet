@@ -301,6 +301,7 @@ ir_compiler_owned_generic_params: fn(name: String) -> [String] Never! {
     if name == "Ray2" || name == "Transform2" -> return [String]{"T", "From", "To"}
     if name == "Transform" -> return [String]{"From", "To"}
     if name == "DataSnapshot" || name == "KeyRef" || name == "MutationPlan" || name == "VaultWrite" || name == "Rotation" || name == "VJPRun" -> return [String]{"T"}
+    if name == "DispatchFailure" -> return [String]{"E"}
     [String]{}
 }
 
@@ -322,6 +323,7 @@ IR_COMPILER_OWNED_ENUMS: comptime { [IRCompilerOwnedEnum]{
     {name: "HookOutcome", variants: [String]{"Continue", "Cancel", "Fail"}},
     {name: "HookDecision", variants: [String]{"Continue", "Transform", "Cancel", "Fail"}},
     {name: "DispatchState", variants: [String]{"Delivered", "HandlerFailed", "DroppedNewest", "DroppedOldest", "Closed", "Cancelled", "DeadlineExceeded"}},
+    {name: "DispatchFailure", variants: [String]{"Handler", "Panic"}},
     {name: "Ordering", variants: [String]{"Less", "Equal", "Greater"}},
     {name: "RemoveBy", variants: [String]{"Val", "Slot"}},
     {name: "TaskFailure", variants: [String]{"Cancelled", "DeadlineBlown", "Panicked"}},
@@ -398,6 +400,10 @@ ir_compiler_owned_enum_payload: fn(name: String, variant: String) -> IRCompilerO
         if variant == carries_value -> return ir_compiler_owned_single(Type.Named{name: "T"})
         if variant == "Fail" -> return ir_compiler_owned_single(Type.Named{name: "E"})
         return IRCompilerOwnedPayload.Unit
+    }
+    if name == "DispatchFailure" {
+        if variant == "Handler" -> return ir_compiler_owned_single(Type.Named{name: "E"})
+        return ir_compiler_owned_single(Type.String)
     }
     if name == "DataEvent" {
         if variant == "Bool" -> return ir_compiler_owned_single(Type.Bool)

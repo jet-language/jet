@@ -248,6 +248,16 @@ sema_pattern_payload: fn(subject_ty: Type, variant: String, env: SemaScopeEnviro
                 diagnostics.push(sema_error("E0305", span, "pattern `{variant}` doesn't belong to `{name}`", "hook decision patterns name one of the declared hook outcomes", "check the hook variant spelling"))
                 return result
             }
+            if name == "DispatchFailure" {
+                if variant == "Handler" && args.len() > 0 -> result.types.push(args[0])
+                if variant == "Panic" -> result.types.push(Type.String)
+                if result.types.len() > 0 {
+                    result.known = true
+                    return result
+                }
+                diagnostics.push(sema_error("E0305", span, "pattern `{variant}` doesn't belong to `{name}`", "a dispatch failure is a handler's typed failure or its panic", "match `.Handler(error)` or `.Panic(message)`"))
+                return result
+            }
         }
         else -> {}
     }

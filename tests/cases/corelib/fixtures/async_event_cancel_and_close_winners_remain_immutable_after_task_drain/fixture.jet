@@ -27,6 +27,7 @@ run: fn() {
         print("cancel queued={queued_report.state() == .Cancelled} trace={queued_report.trace().summary()}")
         print("cancel pending={pending_report.state() == .Cancelled} trace={pending_report.trace().summary()}")
     }
+    _: cancel_gate.join() ?? panic("cancel gate join")
     print("cancel counts={cancel_event.queued_count()},{cancel_event.running_count()},{cancel_event.blocked_count()}")
 
     { sender: close_gate_started_tx, receiver: close_gate_started_rx }: channel<Int>()
@@ -51,5 +52,6 @@ run: fn() {
         print("close queued={queued_report.state() == .Cancelled} trace={queued_report.trace().summary()}")
         print("close pending={pending_report.state() == .Closed} trace={pending_report.trace().summary()}")
     }
+    _: close_gate.join() ?? panic("close gate join")
     print("close counts={close_event.queued_count()},{close_event.running_count()},{close_event.blocked_count()}")
 }
