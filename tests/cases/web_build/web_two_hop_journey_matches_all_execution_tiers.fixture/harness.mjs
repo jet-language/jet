@@ -1,16 +1,9 @@
-
-process.on("unhandledRejection", (error) => {
-  if (error?.name !== "JetError") throw error;
-});
+// Runs the web build's program. The runtime writes its report to stderr;
+// the host passes the bytes through and only reports the exit status.
 const { jet_main } = await import("./app.js");
 try {
   await jet_main();
-  throw new Error("unexpected success");
+  console.log("unexpected success");
 } catch (error) {
-  console.log("JOURNEY_BEGIN");
-  console.log(error.journey);
-  console.log("JOURNEY_END");
-  console.log("FRAME_BEGIN");
-  console.log(error.frame);
-  console.log("FRAME_END");
+  console.log(`${error.name} status=${error.status}`);
 }
