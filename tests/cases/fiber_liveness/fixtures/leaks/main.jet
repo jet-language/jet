@@ -1,0 +1,61 @@
+// Tasks cancelled while parked give back their stacks. Rounds of 10000
+// tasks each park in a receive and are cancelled. After the first round has
+// filled the pool of idle stacks, two more rounds leave the mapping count
+// within a few rows of the first census (allocator blocks come and go; one
+// leaked fiber would add two rows, a leaked round 20000) and the thread
+// count unchanged. A finished fiber's stack is unmapped by its carrier just
+// after the join wakes, so each census waits for the carriers to settle.
+package: {
+    name: "fiber_leaks"
+    authority: { allow: [FS, FS.Read, IO, Mem.Alloc, Time, Time.Wait] }
+}
+
+use files: core.files
+use time: core.time
+
+TASKS: 10000
+
+waiter: fn(rx: Receiver<Int>) -> Int { rx.receive() ?? 0 }
+
+round: fn() -> Int {
+    { sender: tx, receiver: rx }: channel<Int>(capacity: 1)
+    parked := [Task<Int>]{}
+    loop i in 0..<TASKS -> parked.push(task waiter(rx))
+    time.sleep(50ms)
+    loop i in 0..<parked.len() -> parked[i].cancel()
+    cancelled := 0
+    loop handle in parked {
+        if handle.join() == {
+            .Ok(_) -> {}
+            .Err(_) -> cancelled += 1
+        }
+    }
+    tx.close()
+    cancelled
+}
+
+census: fn(path: String, prefix: String) -[FS]> Int {
+    text: files.read(path) ?? panic("read {path}")
+    if prefix == "" -> return text.lines().len()
+    loop line in text.lines() {
+        if line.starts_with(prefix) -> return Int.parse(line.remove_prefix(prefix).trim()) ?? -1
+    }
+    -1
+}
+
+settled_maps: fn() -[FS, Time.Wait]> Int {
+    time.sleep(100ms)
+    census("/proc/self/maps", "")
+}
+
+run: fn() {
+    first: round()
+    maps_first: settled_maps()
+    threads_first: census("/proc/self/status", "Threads:")
+    second: round()
+    third: round()
+    maps_last: settled_maps()
+    threads_last: census("/proc/self/status", "Threads:")
+    print("cancelled {first}, {second}, {third} of {TASKS}")
+    print("mappings within 16 rows {maps_last - maps_first <= 16}, threads unchanged {threads_last == threads_first}")
+}

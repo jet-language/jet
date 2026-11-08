@@ -1,6 +1,6 @@
 // Native Task state, one ref per handle/group plus a worker ref:
 // refs0 control8 mutex16 done24 stopKind32 ownedMeta40 resultSlot48 initialized56
-// env64 invoke72 release80 reserved88/96 completionPark104
+// env64 invoke72 release80 queueNext88 reserved96 completionPark104
 // completionLo112/Hi120 identity128 group136 permit144 taken152 inlineSlot160..183
 // typedDeadline184 ownedWorld192, then the task's Context record (Context.jet)
 // at TASK_CONTEXT. Result initializes only after Propagate == 0.
@@ -139,7 +139,7 @@ task_drop: fn(child: I64) {
 
 task_spawn_state: fn(site: I64, label: I64, env: I64, invoke: I64, release: I64, meta: I64, group: I64, permit: I64) -> I64 {
     child: task_state_new(site, label, env, invoke, release, meta, group, permit)
-    scheduler_submit(I64{0}, child, true)
+    scheduler_submit(child)
     child
 }
 
@@ -149,7 +149,7 @@ task_spawn_state: fn(site: I64, label: I64, env: I64, invoke: I64, release: I64,
 task_spawn_typed_deadline: fn(label: I64, env: I64, invoke: I64, release: I64, meta: I64) -> I64 {
     child: task_state_new(I64{0}, label, env, invoke, release, meta, I64{0}, I64{0})
     sync_store(wrapping(child + I64{184}), I64{1})
-    scheduler_submit(I64{0}, child, true)
+    scheduler_submit(child)
     child
 }
 
@@ -290,9 +290,7 @@ task_run: fn(child: I64) {
 }
 
 task_drain: fn(child: I64) {
-    scheduler_blocking_wait_enter()
     loop sync_load(wrapping(child + I64{24})) == (I64{0}) -> _ := sync_wait(child + I64{24}, I64{0}, I64{-1})
-    scheduler_blocking_wait_leave()
 }
 
 // A typed child whose own deadline is no later than the joiner's ends by

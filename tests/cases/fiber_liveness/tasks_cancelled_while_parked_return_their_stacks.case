@@ -1,0 +1,26 @@
+# Three rounds of 10000 tasks parked in a receive and then cancelled: every
+# join reports the cancel, and after the first round fills the pool of idle
+# stacks the later rounds leave no mapping or thread behind. Same output on
+# jet run and at O0, O1 and O2.
+fixture: fixtures/leaks
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run main.jet
+exit: 0
+stdout: = "cancelled 10000, 10000, 10000 of 10000\nmappings within 16 rows true, threads unchanged true\n"
+step: jet build --optimize=none main.jet
+exit: 0
+step o0: built
+exit: 0
+stdout: = "cancelled 10000, 10000, 10000 of 10000\nmappings within 16 rows true, threads unchanged true\n"
+step: jet build --optimize=basic main.jet
+exit: 0
+step o1: built
+exit: 0
+stdout: = "cancelled 10000, 10000, 10000 of 10000\nmappings within 16 rows true, threads unchanged true\n"
+step: jet build --release main.jet
+exit: 0
+step o2: built
+exit: 0
+stdout: = "cancelled 10000, 10000, 10000 of 10000\nmappings within 16 rows true, threads unchanged true\n"

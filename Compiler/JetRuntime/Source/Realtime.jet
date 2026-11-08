@@ -109,10 +109,8 @@ realtime_join: fn(stream: I64) {
     handle: sync_load(wrapping(scratch + RT_THREAD))
     if (handle != I64{0}) {
         // Shielded, serialized join cannot abandon the worker or its buffer.
-        scheduler_blocking_wait_enter()
         loop sync_load(wrapping(stream + RT_DONE)) == (I64{0}) -> sync_park(sync_load(wrapping(stream + RT_COMPLETION_PARK)), I64{-1})
         joined: thread_join(handle, scratch + RT_JOIN_OUT)
-        scheduler_blocking_wait_leave()
         sync_store(wrapping(scratch + RT_THREAD), I64{0})
         if (joined != I64{0}) {
             sync_mutex_unlock(wrapping(stream + RT_JOIN_MUTEX))
@@ -251,18 +249,13 @@ rt_realtime_worker_address: fn() -> I64 { loop { jet_rt_unreachable(I64{0}, I64{
     sync_mutex_lock(wrapping(scratch + RT_MATH_MUTEX))
     deadline := realtime_add(start, jet_rt_native_realtime_deadline_offset(rate, frames, I64{1}, I64{0}, scratch))
     sync_mutex_unlock(wrapping(scratch + RT_MATH_MUTEX))
-    // Warm the scheduler wait stack before the allocation-free callback loop.
-    scheduler_blocking_wait_enter()
-    scheduler_blocking_wait_leave()
     loop !realtime_cancelled(stream) {
         identity: sync_load(wrapping(stream + RT_DEADLINE_IDENTITY))
         remaining: realtime_remaining(deadline, realtime_now_ns())
         // Persistent park is NOT on the control's cancel-wake list. Rust cancel
         // waits for sleep's deadline before the callback-boundary check.
         if (remaining > I64{0}) {
-            scheduler_blocking_wait_enter()
             sync_park(wrapping(scratch + RT_SLEEP_PARK), remaining)
-            scheduler_blocking_wait_leave()
         }
         if realtime_cancelled(stream) -> break
         lateness: realtime_remaining(realtime_now_ns(), identity)

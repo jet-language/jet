@@ -42,16 +42,12 @@ shared_borrow_unpin: fn(cell: I64) {
 }
 
 // A contended acquire spins briefly before it blocks. Most holds (a queue
-// claim, a counter, a row move) end within a microsecond, while a blocking
-// wait makes the scheduler start a compensation worker
-// (scheduler_blocking_wait_enter: a 1 GiB-stack pthread_create) that retires
-// as soon as the waits drop; a traced 16-thread compiler pass created
-// hundreds of thousands of such threads. Each round releases the mutex,
-// pauses SHARED_SPIN_PAUSES times and takes it again; after SHARED_SPIN_ROUNDS
-// rounds the caller blocks as before, so a wait that really lasts is still
-// compensated and nothing about ordering or deadlock-freedom changes (the
-// mutex is never held while pausing). Returns false when the caller should
-// block.
+// claim, a counter, a row move) end within a microsecond, well under the
+// cost of parking the waiter and readying it again. Each round releases the
+// mutex, pauses SHARED_SPIN_PAUSES times and takes it again; after
+// SHARED_SPIN_ROUNDS rounds the caller blocks as before, so nothing about
+// ordering or deadlock-freedom changes (the mutex is never held while
+// pausing). Returns false when the caller should block.
 SHARED_SPIN_ROUNDS: I64{64}
 SHARED_SPIN_PAUSES: I64{32}
 
@@ -92,10 +88,7 @@ shared_acquire: fn(shared: I64, editable: Bool) {
             next
         }
         // These callback doors never observe cancellation.
-        // Compensation is required, but cancellation must not change meaning.
-        scheduler_blocking_wait_enter()
         _ := sync_cond_wait(wrapping(shared + I64{16}), mutex, sync_deadline(I64{10000000}))
-        scheduler_blocking_wait_leave()
     }
 }
 
@@ -660,9 +653,7 @@ shared_physical_guard_release: fn(guard: I64, commit: Bool) {
             round += I64{1}
             next
         }
-        scheduler_blocking_wait_enter()
         _ := sync_cond_wait(wrapping(cell + I64{16}), mutex, sync_deadline(I64{10000000}))
-        scheduler_blocking_wait_leave()
     }
 }
 #Export(c) jet_rt_shared_guard_drop: fn(guard: I64) {

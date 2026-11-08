@@ -201,11 +201,9 @@ task_selection: fn(handles: I64, count: I64, kind: I64, flatten: Bool) -> I64 {
     if (count == I64{0}) -> jet_rt_unreachable(I64{0}, I64{0})
     wait_kind: scheduler_msg_selection()
     first_error := I64{-1}
-    scheduler_blocking_wait_enter()
     loop {
         if (task_selection_wait_check(wait_kind) != I64{0}) {
             task_selection_drain(handles, count, true)
-            scheduler_blocking_wait_leave()
             jet_rt_string_drop(wait_kind)
             return I64{-1}
         }
@@ -247,13 +245,11 @@ task_selection: fn(handles: I64, count: I64, kind: I64, flatten: Bool) -> I64 {
             (!pending) -> winner = first_error
         }
         if (winner >= I64{0}) {
-            scheduler_blocking_wait_leave()
             jet_rt_string_drop(wait_kind)
             return winner
         }
-        #Unsafe("the canonical task selector yields without consuming any child result") {
-            _ := os_syscall_i64(I64{24}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
-        }
+        // The canonical task selector yields without consuming any child result.
+        fiber_spin_yield()
     }
 }
 

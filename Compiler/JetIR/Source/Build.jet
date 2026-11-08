@@ -382,6 +382,11 @@ IRProgram: struct {
     // call that can deliver one (IRModule.stop_points); false only for the
     // runtime library (ir_build_library).
     stop_points: Bool{true}
+    // Whether `#FFI(asm)` leaves may be the runtime's closed rails (the fiber
+    // switch and GS base write, X64/InlineAsm.jet): true only for a library
+    // that defines the fiber entry the switch starts fresh stacks in
+    // (ir_build_library), never for a program.
+    asm_rails: Bool{false}
     // Whether `#Unsafe` scopes enter the runtime sentry and raw accesses are
     // checked by it (BuildSentry.jet): true for a program or test image
     // (ir_build_program, ir_build_tests); false for the runtime library the

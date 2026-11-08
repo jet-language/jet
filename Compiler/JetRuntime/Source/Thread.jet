@@ -4,9 +4,10 @@
 // TCB (context_tcb_bytes(), align64), append-only runtime layout; owner per slot:
 // @0 Thread self; @8 Thread tid; @16 Scheduler current control;
 // @24 Scheduler shield; @32 Scheduler wait boundary; @40 Deadline boundary;
-// @48 Context current record pointer; @56 reserved; @64 Scheduler native body active;
+// @48 Context current record pointer; @56 Fiber running on this TCB (0 on a
+// plain thread); @64 Scheduler native body active;
 // @72 Sync park slot; @80 Task completion frames List*;
-// @88 Task compensation stack List*; @96 Deadline owner deadlines;
+// @88 reserved; @96 Deadline owner deadlines;
 // @104 World current lease; @112 World flags; @120 World park slot;
 // @128 Sentry enabled; @136 Sentry file; @144 Sentry file length;
 // @152 Sentry line; @160 Sentry reason; @168 Sentry reason length;
@@ -330,26 +331,7 @@ thread_tls_destroy: fn(table: I64, key: I64, attempt_only: Bool) -> Bool {
 #Export(c) jet_rt_thread_detach: fn() {
     tcb: thread_base()
     scheduler_thread_detach()
-    table: sync_load(wrapping(tcb + I64{208}))
-    if (table != I64{0}) {
-        // Match musl pthread_key destructors: PTHREAD_DESTRUCTOR_ITERATIONS
-        // is 4 (musl src/thread/pthread_key_create.c). Each pass sees
-        // keys installed by the previous pass; values rearmed after the fourth
-        // pass are left undestroyed, exactly as pthread termination permits.
-        pass := I64{0}
-        loop pass < (I64{4}) {
-            invoked := false
-            key := sync_load(table)
-            loop key > (I64{0}) {
-                if thread_tls_destroy(table, key, false) -> invoked = true
-                key -= I64{1}
-            }
-            if !invoked -> break
-            pass += I64{1}
-        }
-        jet_rt_free(sync_load(wrapping(table + I64{16})), sync_load(wrapping(table + I64{8})) * I64{8}, I64{8})
-        jet_rt_free(table, I64{24}, I64{8})
-    }
+    thread_tls_teardown(tcb)
     sentry_thread_detach()
     // Every destructor above has run its last free: return the cache before
     // the TCB that holds it goes away, then release the TCB on the locked path.
@@ -357,6 +339,31 @@ thread_tls_destroy: fn(table: I64, key: I64, attempt_only: Bool) -> Bool {
     thread_unregister_tcb(tcb)
     thread_set_base(thread_detached_base())
     jet_rt_free(tcb, context_tcb_bytes(), I64{64})
+}
+
+// Runs the destructors of the TCB's TLS values and frees its table: a
+// thread's detach and a fiber's teardown (Fiber.jet) on the TCB itself.
+thread_tls_teardown: fn(tcb: I64) {
+    table: sync_load(wrapping(tcb + I64{208}))
+    if (table == I64{0}) -> return
+    // Match musl pthread_key destructors: PTHREAD_DESTRUCTOR_ITERATIONS
+    // is 4 (musl src/thread/pthread_key_create.c). Each pass sees
+    // keys installed by the previous pass; values rearmed after the fourth
+    // pass are left undestroyed, exactly as pthread termination permits.
+    pass := I64{0}
+    loop pass < (I64{4}) {
+        invoked := false
+        key := sync_load(table)
+        loop key > (I64{0}) {
+            if thread_tls_destroy(table, key, false) -> invoked = true
+            key -= I64{1}
+        }
+        if !invoked -> break
+        pass += I64{1}
+    }
+    jet_rt_free(sync_load(wrapping(table + I64{16})), sync_load(wrapping(table + I64{8})) * I64{8}, I64{8})
+    jet_rt_free(table, I64{24}, I64{8})
+    sync_store(wrapping(tcb + I64{208}), I64{0})
 }
 
 // RuntimeLower alone replaces this body with FunctionAddress of the checked

@@ -85,9 +85,7 @@ async_wait: fn(core: I64) {
         if (remaining < I64{9000000000000}) -> deadline = sync_deadline(remaining * I64{1000000})
     }
     async_unlock(core)
-    scheduler_blocking_wait_enter()
     _ := sync_wait(core + I64{144}, before, deadline)
-    scheduler_blocking_wait_leave()
     async_lock(core)
 }
 

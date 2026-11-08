@@ -75,10 +75,10 @@ ir_runtime_intrinsic_specs: fn() -> [IRIntrinsicSpec] Never! {
         {name: "rt_tls_shared_destructor_address", shape: .FunctionAddress{symbol: "jet_rt_tls_shared_destructor", arity: 2}},
         {name: "rt_layout_registry_drop_address", shape: .FunctionAddress{symbol: "jet_rt_layout_registry_drop", arity: 1}},
         {name: "rt_scheduler_worker_address", shape: .FunctionAddress{symbol: "jet_rt_scheduler_worker", arity: 1}},
+        {name: "rt_fiber_entry_address", shape: .FunctionAddress{symbol: "jet_rt_fiber_entry", arity: 1}},
         {name: "rt_async_entry_invoke_address", shape: .FunctionAddress{symbol: "jet_async_entry_invoke", arity: 2}},
         {name: "rt_async_entry_release_address", shape: .FunctionAddress{symbol: "jet_async_entry_release", arity: 1}},
         {name: "rt_scheduler_timer_address", shape: .FunctionAddress{symbol: "jet_rt_scheduler_timer", arity: 1}},
-        {name: "rt_scheduler_compensate_address", shape: .FunctionAddress{symbol: "jet_rt_scheduler_compensate", arity: 1}},
         {name: "rt_comptime_serve_stop_address", shape: .FunctionAddress{symbol: "jet_rt_comptime_serve_stop", arity: 5}},
         {name: "rt_task_exit_run_address", shape: .FunctionAddress{symbol: "jet_rt_task_exit_run", arity: 1}},
         {name: "rt_observe_parked_tasks_report_address", shape: .FunctionAddress{symbol: "jet_rt_observe_parked_tasks_report", arity: 2}},
@@ -183,6 +183,7 @@ ir_build_library: fn(functions: &&[FnBody], decls: DeclTable, type_defs: &&[TTyp
     intrinsics := [String:IRRuntimeIntrinsic]{}
     bits := false
     from_bits := false
+    rails := false
     loop spec in ir_runtime_intrinsic_specs() {
         selected := false
         loop function in p.functions {
@@ -220,6 +221,7 @@ ir_build_library: fn(functions: &&[FnBody], decls: DeclTable, type_defs: &&[TTyp
                     }
                     key: target ?? return ir_library_failed([String]{"runtime intrinsic {spec.name} requires #Export(c) {symbol}"})
                     intrinsics[function.key] = IRRuntimeIntrinsic.FunctionAddress{key: key}
+                    if symbol == "jet_rt_fiber_entry" -> rails = true
                 }
                 .FaultReport -> {
                     if !ir_address_target_signature(function, IR_X64_ARGUMENT_REGISTERS.len()) {
@@ -232,6 +234,7 @@ ir_build_library: fn(functions: &&[FnBody], decls: DeclTable, type_defs: &&[TTyp
     }
     if bits != from_bits -> return ir_library_failed([String]{"runtime bitcast definitions must be present as one validated pair"})
     p.intrinsics = intrinsics.move()
+    p.asm_rails = rails
     failures := [IRBuildFailure]{}
     roots := [Int]{}
     loop row in exports {
