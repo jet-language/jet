@@ -12,6 +12,7 @@
 use {
     cli_files: core.files
     cli_sys: core.sys
+    cli_term: core.term
     jet_driver.[
         JetDriverFailure,
         JetDriverVerbOutput,
@@ -735,6 +736,47 @@ jet_cli_shorthand_file: fn(argv: [String]) -[FS]> Int? Never! {
         if argument.starts_with("-") && argument != "-" -> next
         if jet_cli_is_builtin(argument) || !jet_cli_looks_like_source(argument) || cli_files.is_dir(argument) -> return None
         return Val(index)
+    }
+    None
+}
+
+// The argv index of `jet -e CODE`'s `-e`: a flag before the first command
+// word, as the `jet <file>` shorthand's file is the first.
+jet_cli_eval_flag_at: fn(argv: [String]) -> Int? Never! {
+    skip_next := false
+    loop (index, argument) in argv {
+        if skip_next {
+            skip_next = false
+            next
+        }
+        if argument == "-e" -> return Val(index)
+        if argument == "--" || !argument.starts_with("-") || argument == "-" -> return None
+        if JET_CLI_SEPARATE_VALUE_FLAGS.contains(argument) -> skip_next = true
+    }
+    None
+}
+
+// The argv index of `jet run -`'s `-`: the target word after `run`, which
+// reads the program's source from standard input.
+jet_cli_stdin_source_at: fn(argv: [String]) -> Int? Never! {
+    skip_next := false
+    command := false
+    loop (index, argument) in argv {
+        if skip_next {
+            skip_next = false
+            next
+        }
+        if argument == "--" -> return None
+        if argument == "-" {
+            if command -> return Val(index)
+            return None
+        }
+        if argument.starts_with("-") {
+            if JET_CLI_SEPARATE_VALUE_FLAGS.contains(argument) -> skip_next = true
+            next
+        }
+        if command || argument != "run" -> return None
+        command = true
     }
     None
 }
@@ -2136,6 +2178,23 @@ jet_cli_plan: fn(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]>
     // Moved and grouped spellings. copy: `raw` stays with the caller (`raw` is a read parameter:
     // no move out of it, E0201) and the binding `argv` owns its own.
     argv := raw.copy()
+    // `jet -e CODE [args...]` is `jet <file> [args...]` of the file that
+    // holds CODE as the body of `run: fn` (ScriptCache.jet jet_cli_eval_file).
+    if jet_cli_eval_flag_at(argv) == .Val(at) {
+        if at + 1 >= argv.len() -> return jet_cli_fail("E2104", "`-e` needs the code to run", jet_cli_why("E2104"), "write the statements after it: `jet -e 'print(1 + 2)'`", color, JET_DRIVER_EXIT_USAGE)
+        file: jet_cli_eval_file(argv[at + 1]) ?? return jet_cli_fail("E2105", "couldn't write the file `-e` runs", jet_cli_why("E2105"), "set `XDG_CACHE_HOME` or `HOME` to a writable directory", color, JET_DRIVER_EXIT_USER_ERROR)
+        rewritten := jet_cli_prefix(argv, at)
+        rewritten.push(file)
+        loop word in jet_cli_tail(argv, at + 2) -> rewritten.push(word)
+        argv = rewritten
+    }
+    // `jet run - [args...]` runs the program read from standard input, kept
+    // as the `stdin` entry file of its source (ScriptCache.jet jet_cli_entry_file).
+    if jet_cli_stdin_source_at(argv) == .Val(at) {
+        source: cli_term.read_all_input() ?? return jet_cli_fail("E2105", "couldn't read the program `jet run -` runs from standard input", jet_cli_why("E2105"), "pipe the source in: `jet run - < hello.jet`", color, JET_DRIVER_EXIT_USER_ERROR)
+        file: jet_cli_entry_file("stdin", source) ?? return jet_cli_fail("E2105", "couldn't write the file `jet run -` runs", jet_cli_why("E2105"), "set `XDG_CACHE_HOME` or `HOME` to a writable directory", color, JET_DRIVER_EXIT_USER_ERROR)
+        argv[at] = file
+    }
     if jet_cli_moved_command(argv[0]) == .Val(moved) {
         group: JET_CLI_COMMANDS[moved.group].name
         return jet_cli_fail(

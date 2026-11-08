@@ -1,0 +1,77 @@
+// `jet -e CODE` runs CODE as the body of `run: fn` (Compiler/JetCli/Source/Cli/Front.jet,
+// ScriptCache.jet jet_cli_eval_file). The code prints and exits 0; a rerun of
+// the same code runs the same entry file in the same slot; a `;` separates
+// statements; code that names an undefined binding is refused with E0107
+// before anything runs. Runs with its own XDG cache.
+// Usage: jet run Compiler/JetCli/Tests/RunEval.fixture/RunEval.jet -- <jet> <scratch>
+// Run from the repository root: it is the toolchain root the runs use.
+// It prints one line, the CompilerRegistries row's exact verdict.
+use {
+    files: core.files
+    process: core.process
+    term: core.term
+}
+
+fail: fn(message: String) -> Never {
+    term.eprint(message)
+    process.exit(1)
+}
+
+// One finished `jet -e`.
+Ran: struct {
+    code: Int
+    signal: Int
+    output: String
+    errors: String
+}
+
+eval: fn(jet: String, repo: String, work: String, cache: String, code: String) -> Ran {
+    receipt: process.cmd([String]{jet.copy(), "-e", code.copy()}).cwd(work.copy()).env("JET_TOOLCHAIN_ROOT", repo.copy()).env("XDG_CACHE_HOME", cache.copy()).env("NO_COLOR", "1").run() ?? fail("jet -e failed to start: {err}")
+    Ran{code: receipt.code, signal: receipt.signal ?? 0, output: receipt.output.copy(), errors: receipt.errors.copy()}
+}
+
+// Every entry name of `directory`, sorted.
+names_in: fn(directory: String) -> [String] {
+    entries: files.list_dir(directory.copy()) ?? fail("cannot list {directory}: {err}")
+    names := [String]{}
+    loop entry in entries -> names.push(entry.name.copy())
+    names.sort()
+    names
+}
+
+// The kept slot records and the entry files `-e` wrote.
+cached: fn(cache: String) -> String {
+    records: names_in("{cache}/jet/scripts").filter(name -> name.ends_with(".run"))
+    sources: names_in("{cache}/jet/scripts/eval")
+    "{records.len()} record(s), {sources.len()} entry file(s)"
+}
+
+run: fn() {
+    args: process.args()
+    if args.len() != 2 -> fail("usage: jet run Compiler/JetCli/Tests/RunEval.fixture/RunEval.jet -- <jet> <scratch>")
+    jet: files.canonicalize(args[0].copy()) ?? fail("cannot resolve {args[0]}: {err}")
+    scratch: files.absolute(args[1].copy()) ?? fail("cannot resolve {args[1]}: {err}")
+    repo: files.canonicalize(".") ?? fail("cannot resolve the repository root: {err}")
+    if files.exists(scratch.copy()) -> files.remove_all(scratch.copy()) ?? fail("cannot clear {scratch}: {err}")
+    work: "{scratch}/work"
+    cache: "{scratch}/cache"
+    files.create_dir_all(work.copy()) ?? fail("cannot create {work}: {err}")
+
+    first: eval(jet, repo, work, cache, "print(1 + 2)")
+    if first.code != 0 || first.signal != 0 || first.output != "3\n" -> fail("print(1 + 2): code={first.code} signal={first.signal} stdout {first.output.debug()}\n{first.errors}")
+    after_first: cached(cache)
+    if after_first != "1 record(s), 1 entry file(s)" -> fail("print(1 + 2): {after_first}, expected one kept program and one entry file")
+
+    rerun: eval(jet, repo, work, cache, "print(1 + 2)")
+    if rerun.code != 0 || rerun.output != "3\n" -> fail("rerun: code={rerun.code} stdout {rerun.output.debug()}\n{rerun.errors}")
+    if cached(cache) != after_first -> fail("rerun: {cached(cache)}, expected the first run's entry file and slot")
+
+    lines: eval(jet, repo, work, cache, "name := 1; print(name)")
+    if lines.code != 0 || lines.output != "1\n" -> fail("name := 1; print(name): code={lines.code} stdout {lines.output.debug()}\n{lines.errors}")
+
+    typo: eval(jet, repo, work, cache, "name := 1; print(nmae)")
+    if typo.code == 0 || typo.signal != 0 -> fail("typo: code={typo.code} signal={typo.signal}, expected a refusal\n{typo.errors}")
+    if typo.output != "" -> fail("typo: ran and printed {typo.output.debug()}")
+    if !typo.errors.contains("E0107") -> fail("typo: stderr names no E0107:\n{typo.errors}")
+    term.print("run-eval: `jet -e` prints, separates statements with `;`, reruns its entry file and refuses an undefined name before running: ok")
+}

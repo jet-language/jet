@@ -664,6 +664,18 @@ exit status. Run flags other than `--release`, `--profile`, `--verbose`, `--quie
 `--json`, `--color`, `--threads`, `--trace`, `--allow`, `-A`, and `--deny` are
 refused with E2104, naming the card the command model gives them, until they are ported.
 
+`jet -e CODE [args...]` runs CODE as the body of `run: fn`: `jet -e 'print(1 + 2)'`
+prints 3. A `;` between statements stands for the line break a file would
+have (`jet -e 'name := 1; print(name)'`). CODE is checked as a file is, so a
+misspelled name is refused before anything runs. The file that holds it is
+kept under the kept programs' directory (`eval/`, named by the content hash),
+and the rest runs as `jet <that file> [args...]`, so the same code reruns its
+kept program. Flags that come before `-e` are the run's.
+
+`jet run - [args...]` runs the program read from standard input
+(`jet run - < hello.jet`, or a pipe). Its source is kept the same way, under
+`stdin/` named by its content hash, and runs as `jet run <that file> [args...]`.
+
 A script is a standalone program wherever it lives: its source snapshot is the
 script alone, and the source walk of a package leaves every script out.
 

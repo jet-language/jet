@@ -861,6 +861,11 @@ specification: fn(id: String) -> Spec? Never! {
         found.expected = "run-keep: reuse, the background full build, source/Core/compiler rebuilds, stop parity and the 64-program cap: ok\n"
         return Val(found)
     }
+    if id == "JetCli/Tests/RunEval" {
+        found := spec("cli", "RunEval", "Compiler/JetCli/Tests/RunEval.fixture/RunEval.jet")
+        found.expected = "run-eval: `jet -e` prints, separates statements with `;`, reruns its entry file and refuses an undefined name before running: ok\n"
+        return Val(found)
+    }
     if id == "JetCli/Tests/RunCFfi" {
         found := spec("cli", "RunCFfi", "Compiler/JetCli/Tests/RunCFfi.jet")
         // The expected stream of the example it runs at both tiers, beside
