@@ -130,7 +130,7 @@ clobbers, rather than sixteen simultaneous general-purpose register slots.
 Before scheduling a cutover job, syntax-check its shell script and check every
 referenced input script/path exists. Outputs created by earlier steps are
 identified separately; the runtime unit assembler is
-`Tools/agent/CompilerPackages.jet runtime-unit`, not a JetRuntime test script.
+`Compiler/Toolchain/RuntimePack.jet unit`, not a JetRuntime test script.
 
 The bootstrap completion owner may initiate Source resource retirement after
 its caller consumes the factory result and grants retirement permission; a
@@ -169,13 +169,13 @@ The `LinkPackRoots` row of `Tools/agent/CompilerRegistries.jet`
 (`Compiler/JetBackend/Tests/LinkPackRoots.fixture`) exercises this boundary
 with real objects, an archive and a consumer, including an unreferenced export.
 
-`jet Tools/packaging/PrebuildRuntime.jet <hosted-jet>` assembles the canonical
-`Compiler/JetRuntime/sources.list`, checks it through the Jet-hosted CLI's
-library entry, and lowers its checked exports plus `lifecycle.list` into one
-native object. Jet's linker resolves its permitted musl/libgcc C dependencies;
-no Rust runtime, standard-library rlibs, rustc or system linker participates.
-Packaging writes `jet-runtime/native.key` beside the compiler and installs
-`jet-runtime/<key>/jet_runtime.pack.o` and `jet_runtime.image`: the pack linked
+The `runtime` step of `jet build Compiler` (`Compiler/Toolchain/RuntimePack.jet
+pack`) assembles the canonical `Compiler/JetRuntime/sources.list`, checks it
+through the newly built compiler's library entry, and lowers its checked
+exports plus `lifecycle.list` into one native object. Jet's linker resolves its
+permitted musl/libgcc C dependencies; no Rust runtime, standard-library rlibs,
+rustc or system linker participates. The step installs `jet-runtime/` beside
+the compiler: `native.key`, `jet_runtime.pack.o` and `jet_runtime.image`, the pack linked
 once at the run base (`LINK_RUN_BASE`), with its symbol table, a
 `.jet.bind` section naming where it calls `main`, and a `.jet.exports` hash
 index of its defined global symbols. Binding a program object to that image
@@ -1514,8 +1514,9 @@ SQLite uses the sanctioned 3.45.0 amalgamation from `libsqlite3-sys` 0.28.0 in
 never a system SQLite. The upstream `sqlite3.c` SHA-256 is
 `7956a38f236a6be6c0bb30c96ba4f85f19e5a69f6beb6d2c62c9d246972a6775`.
 Core's vendored C (`Core/Vendor/Sqlite3`, `Core/Vendor/Mbedtls`) is compiled
-once when the toolchain is packaged: `PrebuildRuntime.jet` builds each library
-under the native C policy and installs `jet-runtime/<key>/foreign/<lib>/lib<lib>.a`
+once when the toolchain is built: the `runtime` step of `jet build Compiler`
+builds each library under the native C policy and installs
+`jet-runtime/foreign/<lib>/lib<lib>.a`
 (with its LICENSE and VERSION) beside the pack. The archive digests are part of
 the runtime key and the vendored sources, flags and C compiler identity part of
 the pack recipe. A Core `c.<lib>` import links that archive, so neither jet's
@@ -1528,7 +1529,7 @@ User C closures and prepared user-Rust helper archives also link the existing
 toolchain's musl `libc.a` (including math and pthread), the `libgcc_eh.a`
 unwinder and the C compiler builtins as program-only platform inputs. Packaging
 places them in `jet-runtime/foreign/platform`. Such a program links the Jet-only
-runtime object (`<key>/jet_runtime_jet.o`) with them, not the runtime pack: the
+runtime object (`jet-runtime/jet_runtime_jet.o`) with them, not the runtime pack: the
 pack holds its own private, initialized libc, and a second copy beside it would
 run uninitialized. A program with no foreign closure receives no additional link
 inputs and keeps the pack. Platform archives are never runtime-pack exports.
@@ -1966,7 +1967,7 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   and binary-build edges.
 - **R8 — Small, self-contained binaries.** The native back end links each
   program's objects against the content-addressed native runtime pack
-  (`jet-runtime/<key>/jet_runtime.pack.o`, see the Pipeline section); no Rust
+  (`jet-runtime/jet_runtime.pack.o`, see the Pipeline section); no Rust
   runtime, Rust std or rustc participates. The linker keeps only what the
   program uses ("only link what's needed"). The output is one self-contained
   native binary. A size-minimal profile is decision S15, selected with

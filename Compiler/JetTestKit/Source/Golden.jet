@@ -10,9 +10,11 @@ kit_golden_tiers: fn() -> [KitTier] {
 kit_golden_exists: fn(path: String) -> Bool { files.exists(path) }
 
 // Every entry under `directory`, its streams beside its source: a flat
-// `<Name>.jet` is the entry `<Name>`, and a project folder (one holding
-// `run.jet`) is the entry named by the folder. A folder with `package.jet` or
-// `workspace.jet` but no `run.jet` is a library or workspace, not an entry.
+// `<Name>.jet` is the entry `<Name>`, as is a flat C or C++ file
+// (`<Name>.c`, `.cc`, `.cpp`, `.cxx`) that `jet run` compiles by its
+// extension, and a project folder (one holding `run.jet`) is the entry named
+// by the folder. A folder with `package.jet` or `workspace.jet` but no
+// `run.jet` is a library or workspace, not an entry.
 kit_golden_collect: fn(root: String, directory: String) -> [KitEntry] {
     entries := [KitEntry]{}
     if !kit_golden_exists(files.join(root, directory)) -> return entries
@@ -27,11 +29,24 @@ kit_golden_collect: fn(root: String, directory: String) -> [KitEntry] {
             }
             nested: kit_golden_collect(root, shown)
             loop entry in nested -> entries.push(entry)
-        } else if child.name.ends_with(".jet") && child.name != "package.jet" && child.name != "workspace.jet" {
-            entries.push(KitEntry{path: shown, expected: kit_steps_byte_slice(shown, 0, shown.count_bytes() - 4), project: directory, suite: "golden", mode: ""})
+        } else if child.name != "package.jet" && child.name != "workspace.jet" && kit_golden_entry_stem(child.name) == .Val(stem) {
+            entries.push(KitEntry{path: shown, expected: kit_steps_byte_slice(shown, 0, shown.count_bytes() - child.name.count_bytes() + stem.count_bytes()), project: directory, suite: "golden", mode: ""})
         }
     }
     entries
+}
+
+// The extensions of a flat entry's source: Jet's, and the C and C++ ones
+// `jet run` compiles (#6686).
+KIT_GOLDEN_ENTRY_EXTENSIONS: [String]{".jet", ".c", ".cc", ".cpp", ".cxx"}
+
+// The file `name` without its entry extension (Jet, C or C++), or None for
+// a file of any other extension.
+kit_golden_entry_stem: fn(name: String) -> String? {
+    loop extension in KIT_GOLDEN_ENTRY_EXTENSIONS {
+        if name.ends_with(extension) && name.count_bytes() > extension.count_bytes() -> return Val(kit_steps_byte_slice(name, 0, name.count_bytes() - extension.count_bytes()))
+    }
+    None
 }
 
 // Every entry of the golden corpora (checkout-relative directories).
@@ -105,7 +120,7 @@ kit_golden_stream_verdict: fn(id: String, stem: String, tier: String, result: Ki
 
 kit_golden_source_name: fn(entry: KitEntry) -> String {
     file: files.basename(entry.path)
-    file.slice(0, file.len() - 4)
+    kit_golden_entry_stem(file) ?? file
 }
 
 kit_golden_tier_independent: fn(plan: KitPlan) -> Bool {
@@ -191,10 +206,11 @@ kit_golden_test_outcome: fn(context: KitStepCtx, entry: KitEntry, tier: KitTier,
 
 // Stages `entry`'s project from `project` into `work`. A flat entry shares its
 // directory with the flat entries beside it (kit_golden_collect files every
-// flat `.jet` there as one), and its row reads none of theirs unless its
-// source names one: those siblings' files (`<stem>.*`) stay out, unless the
-// entry, or a sibling it names, names the stem. Every other file and every
-// support directory is staged, so the row writes only what it may read.
+// flat `.jet`, C or C++ file there as one), and its row reads none of theirs
+// unless its source names one: those siblings' files (`<stem>.*`) stay out,
+// unless the entry, or a sibling it names, names the stem. Every other file
+// and every support directory is staged, so the row writes only what it may
+// read.
 kit_golden_stage: fn(project: String, entry: KitEntry, work: String) {
     own: files.basename(entry.path)
     if own == "run.jet" {
@@ -203,16 +219,24 @@ kit_golden_stage: fn(project: String, entry: KitEntry, work: String) {
     }
     files.create_dir_all(work) ?? panic("mkdir {work}: {err}")
     listed: files.list_dir(project) ?? panic("list {project}: {err}")
+    // Each sibling entry's stem, and at the same index its source file.
     siblings := [String]{}
+    sources := [String]{}
     loop child in listed {
-        if child.is_dir || !child.name.ends_with(".jet") || child.name == own || child.name == "package.jet" || child.name == "workspace.jet" -> next
-        siblings.push(kit_steps_byte_slice(child.name, 0, child.name.count_bytes() - 4))
+        if child.is_dir || child.name == own || child.name == "package.jet" || child.name == "workspace.jet" -> next
+        stem: kit_golden_entry_stem(child.name) ?? next
+        siblings.push(stem)
+        sources.push(child.name.copy())
     }
-    own_stem: kit_steps_byte_slice(own, 0, own.count_bytes() - 4)
+    own_stem: kit_golden_entry_stem(own) ?? own.copy()
     named := [String]{own_stem.copy()}
     at := 0
     loop at < named.len() {
-        text: files.read(files.join(project, "{named[at]}.jet")) ?? ""
+        source := own.copy()
+        loop index in 0..<siblings.len() {
+            if siblings[index] == named[at] -> source = sources[index].copy()
+        }
+        text: files.read(files.join(project, source)) ?? ""
         at += 1
         loop stem in siblings {
             if !named.contains(stem) && text.contains(stem) -> named.push(stem.copy())

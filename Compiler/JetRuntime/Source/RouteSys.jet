@@ -1,15 +1,9 @@
-// (core.sys identity, facts and POSIX control) and its libc doors. Every call
-// goes through the same musl function Rust's libc binding names; the C int/long
-// results are read at their declared width. Samples set errno to 0 first, call,
-// then read errno, as jet_sys_call_sample does.
-#Import(c) sys_fork: fn() -> I64 = "fork"
-#Import(c) sys_getgroups: fn(size: I64, list: I64) -> I64 = "getgroups"
+// (core.sys identity, facts and POSIX control). Each call is the Linux system
+// call musl's function of the same name makes, with musl's result: -1 and the
+// errno for a failure, else the call's value. initgroups alone still calls
+// musl, which applies setgroups to every thread; its sample sets errno to 0
+// first, calls, then reads errno, as jet_sys_call_sample does.
 #Import(c) sys_initgroups: fn(user: I64, group: I64) -> I64 = "initgroups"
-#Import(c) sys_mkfifo: fn(path: I64, mode: I64) -> I64 = "mkfifo"
-#Import(c) sys_getloadavg: fn(loadavg: I64, count: I64) -> I64 = "getloadavg"
-#Import(c) sys_utime: fn(path: I64, times: I64) -> I64 = "utime"
-#Import(c) sys_times: fn(buffer: I64) -> I64 = "times"
-#Import(c) sys_sysconf: fn(name: I64) -> I64 = "sysconf"
 
 sys_errno_clear: fn() { net_store_uint(net_errno_location(), I64{4}, I64{0}) }
 
@@ -37,8 +31,14 @@ sys_some: fn(some: I64, value: I64) -> I64 {
 #Export(c) jet_sys_getegid_raw: fn(some: I64) -> I64 { sys_some(some, host_call(I64{108}, I64{0}, I64{0}, I64{0})) }
 #Export(c) jet_sys_getpgrp_raw: fn(some: I64) -> I64 { sys_some(some, host_call(I64{111}, I64{0}, I64{0}, I64{0})) }
 
-// The Rust original getgroups(0, NULL): the raw libc count (or -1).
-#Export(c) jet_sys_groups_count_raw: fn(some: I64) -> I64 { sys_some(some, net_i32(sys_getgroups(I64{0}, I64{0}))) }
+// The Rust original getgroups(0, NULL): the count (or -1).
+#Export(c) jet_sys_groups_count_raw: fn(some: I64) -> I64 { sys_some(some, sys_groups(I64{0}, I64{0})) }
+
+// getgroups(size, list): the kernel's count, or -1.
+sys_groups: fn(size: I64, list: I64) -> I64 {
+    count: host_call(I64{115}, size, list, I64{0})
+    if (count < I64{0}) -> I64{-1} else -> count
+}
 
 // Capacity is already checked against the nonnegative i32 range by Core. The
 // List is [count, gid0..., gid(capacity-1)], every slot an owned exact Int;
@@ -49,7 +49,7 @@ sys_some: fn(some: I64, value: I64) -> I64 {
     // Eight bytes of slack keep the last u32 read inside the allocation.
     gids: jet_rt_alloc(native * I64{4} + I64{8}, I64{8})
     thread_zero(gids, native * I64{4} + I64{8})
-    count: net_i32(sys_getgroups(native, gids))
+    count: sys_groups(native, gids)
     length: native + I64{1}
     data: jet_rt_alloc(length * I64{8}, I64{8})
     trap_store(data, jet_int_owned_from_i64(count))
@@ -67,8 +67,7 @@ sys_some: fn(some: I64, value: I64) -> I64 {
 // already printed (Rust's line writer holds none).
 #Export(c) jet_sys_fork_raw: fn(available: I64, value: I64, errno: I64) {
     jet_rt_stdout_flush()
-    sys_errno_clear()
-    sys_sample(net_i32(sys_fork()), available, value, errno)
+    host_sample_out(host_call(I64{57}, I64{0}, I64{0}, I64{0}), available, value, errno)
 }
 
 // The Rust original initgroups(user, group as u32); Core checked NUL absence.
@@ -82,57 +81,71 @@ sys_some: fn(some: I64, value: I64) -> I64 {
     sys_sample(result, available, value, errno)
 }
 
-// mkfifo(path, mode as u32).
+// mkfifo(path, mode as u32): mknod(path, mode | S_IFIFO, 0).
 #Export(c) jet_sys_mkfifo_raw: fn(path: I64, mode: I64, available: I64, value: I64, errno: I64) {
     native: jet_int_owned_to_i64(mode)
     if (jet_scheduler_native_propagate() != I64{0}) -> return
     name: fd_c_path(path)
-    sys_errno_clear()
-    result: net_i32(sys_mkfifo(name, native.bit_and(I64{4294967295})))
+    result: host_call(I64{133}, name, native.bit_and(I64{4294967295}).bit_or(I64{4096}), I64{0})
     fd_c_path_drop(name, path)
-    sys_sample(result, available, value, errno)
+    host_sample_out(result, available, value, errno)
 }
 
-// getloadavg(avg, 3): (true, count, avg0, avg1, avg2). The three doubles cross
-// as their raw f64 bits in the Float out slots.
+// getloadavg(avg, 3): (true, count, avg0, avg1, avg2). musl reads sysinfo's
+// three loads, each a 16-bit binary fraction; the doubles cross as their raw
+// f64 bits in the Float out slots. A host without sysinfo (the web) has no
+// averages: count -1.
 #Export(c) jet_sys_loadavg_raw: fn(available: I64, count: I64, first: I64, second: I64, third: I64) {
-    averages: jet_rt_alloc(I64{24}, I64{8})
-    thread_zero(averages, I64{24})
-    result: net_i32(sys_getloadavg(averages, I64{3}))
-    #Unsafe("averages owns three initialized f64 words; the caller lends the tuple's Bool byte, Int word and three Float words") {
+    info: jet_rt_alloc(I64{112}, I64{8})
+    thread_zero(info, I64{112})
+    result: host_call(I64{99}, info, I64{0}, I64{0})
+    #Unsafe("info owns the initialized struct sysinfo; the caller lends the tuple's Bool byte, Int word and three Float words") {
         os_store_u8(available, I64{1})
-        os_store_i64(count, jet_int_owned_from_i64(result))
-        os_store_i64(first, os_load_i64(averages))
-        os_store_i64(second, os_load_i64(wrapping(averages + I64{8})))
-        os_store_i64(third, os_load_i64(wrapping(averages + I64{16})))
+        os_store_i64(count, jet_int_owned_from_i64(if (result < I64{0}) -> I64{-1} else -> I64{3}))
+        os_store_i64(first, sys_load_bits(info, result, I64{8}))
+        os_store_i64(second, sys_load_bits(info, result, I64{16}))
+        os_store_i64(third, sys_load_bits(info, result, I64{24}))
     }
-    jet_rt_free(averages, I64{24}, I64{8})
+    jet_rt_free(info, I64{112}, I64{8})
 }
 
-// utime(path, {actime, modtime}).
+// One sysinfo load (an unsigned long at `offset`) over 65536 as f64 bits; 0
+// when sysinfo failed.
+sys_load_bits: fn(info: I64, result: I64, offset: I64) -> I64 {
+    if (result < I64{0}) -> return I64{0}
+    load: trap_word(wrapping(info + offset))
+    rt_f64_bits(Float{load} / Float{65536.0})
+}
+
+// utime(path, {actime, modtime}): utimensat(AT_FDCWD, path, {{actime, 0},
+// {modtime, 0}}, 0).
 #Export(c) jet_sys_utime_raw: fn(path: I64, atime: I64, mtime: I64, available: I64, value: I64, errno: I64) {
     access: jet_int_owned_to_i64(atime)
     if (jet_scheduler_native_propagate() != I64{0}) -> return
     modified: jet_int_owned_to_i64(mtime)
     if (jet_scheduler_native_propagate() != I64{0}) -> return
-    times: jet_rt_alloc(I64{16}, I64{8})
+    times: jet_rt_alloc(I64{32}, I64{8})
     trap_store(times, access)
-    trap_store(wrapping(times + I64{8}), modified)
+    trap_store(wrapping(times + I64{8}), I64{0})
+    trap_store(wrapping(times + I64{16}), modified)
+    trap_store(wrapping(times + I64{24}), I64{0})
     name: fd_c_path(path)
-    sys_errno_clear()
-    result: net_i32(sys_utime(name, times))
+    result := I64{0}
+    #Unsafe("utimensat borrows the NUL-terminated path and the two owned timespecs for the synchronous call") {
+        result = os_syscall_i64(I64{280}, I64{-100}, name, times, I64{0}, I64{0}, I64{0})
+    }
     fd_c_path_drop(name, path)
-    jet_rt_free(times, I64{16}, I64{8})
-    sys_sample(result, available, value, errno)
+    jet_rt_free(times, I64{32}, I64{8})
+    host_sample_out(result, available, value, errno)
 }
 
 // The Rust original times(&tms) and sysconf(_SC_CLK_TCK): (true, utime, stime,
-// cutime, cstime, elapsed, ticks).
+// cutime, cstime, elapsed, ticks). musl's times is the raw system call and its
+// _SC_CLK_TCK the constant 100.
 #Export(c) jet_sys_times_raw: fn(available: I64, user: I64, system: I64, child_user: I64, child_system: I64, elapsed: I64, ticks: I64) {
     buffer: jet_rt_alloc(I64{32}, I64{8})
     thread_zero(buffer, I64{32})
-    now: sys_times(buffer)
-    rate: sys_sysconf(I64{2})
+    now: host_call(I64{100}, buffer, I64{0}, I64{0})
     #Unsafe("buffer owns an initialized struct tms; the caller lends the tuple's Bool byte and six Int words") {
         os_store_u8(available, I64{1})
         os_store_i64(user, jet_int_owned_from_i64(os_load_i64(buffer)))
@@ -140,7 +153,7 @@ sys_some: fn(some: I64, value: I64) -> I64 {
         os_store_i64(child_user, jet_int_owned_from_i64(os_load_i64(wrapping(buffer + I64{16}))))
         os_store_i64(child_system, jet_int_owned_from_i64(os_load_i64(wrapping(buffer + I64{24}))))
         os_store_i64(elapsed, jet_int_owned_from_i64(now))
-        os_store_i64(ticks, jet_int_owned_from_i64(rate))
+        os_store_i64(ticks, jet_int_owned_from_i64(I64{100}))
     }
     jet_rt_free(buffer, I64{32}, I64{8})
 }

@@ -9,8 +9,9 @@
 // --check-gate says whether it would start and stops. It exports COMMIT (it
 // must be on dev) and runs the bootstrap chain of
 // Docs/spec/contributing/bootstrap.md from the seed DIR, with no Rust on
-// PATH: the seed builds s1, s1 packs its runtime and builds s2, s2 packs its
-// runtime and builds s3, and s2 and s3 must be byte-identical. Every stage
+// PATH: the seed builds s1 (`jet build Compiler` makes jet and the runtime
+// pack it lowers), s1 builds s2, s2 builds s3, and s2 and s3 must be
+// byte-identical. Every stage
 // runs in the export as its working directory, so the images record source
 // directories relative to it. OUT (new or empty, outside the checkout and
 // /tmp) receives s2 as the release: jet, its aliases, jet-runtime/, IDENTITY
@@ -25,8 +26,8 @@
 //   jet run Tools/release/Main.jet -- candidate OUT --evidence EVDIR...
 //   jet run Tools/release/Main.jet -- publish OUT
 //
-// Environment: JET_PACK_MUSL_LIB (the static musl lib directory
-// Tools/packaging/PrebuildRuntime.jet links).
+// The stages run in the dev shell (Tools/agent/JetEnv.jet), which supplies
+// the C toolchain and the static musl the runtime pack links.
 // Exit: 0 done, 1 a check failed, 2 the run could not start.
 
 use {
@@ -110,25 +111,23 @@ BuildRun: struct {
     vars: [Var]
 }
 
-// `builder` (a directory with jet and jet-runtime/) builds the stage `name`,
-// which then packs its runtime when `pack`.
-build_stage: fn(run: BuildRun, name: String, builder: String, identity: String, pack: Bool) -[Env, Exec, FS, IO, Time, Time.Wait]> Stage Never! {
+// `builder` (a directory with jet and jet-runtime/) builds the stage `name`:
+// jet and the runtime pack it lowers.
+build_stage: fn(run: BuildRun, name: String, builder: String, identity: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Stage Never! {
     built: files.join(run.tree, "Compiler/JetCli/.jet/build/jet")
+    built_pack: files.join(run.tree, "Compiler/JetCli/.jet/build/jet-runtime")
     remove_tree(files.dirname(built))
     log: files.join(run.logs, "{name}.log")
     vars: with_vars(run.vars, [Var]{set_var("JET_COMPILER_IDENTITY", identity)})
     builder_jet: files.join(builder, "jet")
     result: run_logged(in_dev_shell(builder_jet, run.tree, true, [String]{builder_jet.copy(), "build", "--threads", "{run.threads}", "Compiler"}), run.tree, vars, log, 3600)
-    if result.rc != 0 || !files.exists(built) -> return Stage{dir: "", identity: "", error: "{name}: jet build Compiler rc={result.rc}: {tail_of(log, 6)}"}
+    if result.rc != 0 || !files.exists(built) || !files.exists(files.join(built_pack, "native.key")) -> return Stage{dir: "", identity: "", error: "{name}: jet build Compiler rc={result.rc}: {tail_of(log, 6)}"}
     dir: files.join(run.work, name)
     files.create_dir_all(dir) ?? return Stage{dir: "", identity: "", error: "{name}: cannot create {dir}: {err}"}
     copy_file(built, files.join(dir, "jet"), true) ?? return Stage{dir: "", identity: "", error: "{name}: cannot copy {built}: {err}"}
+    if !copy_tree(built_pack, files.join(dir, "jet-runtime")) -> return Stage{dir: "", identity: "", error: "{name}: cannot copy {built_pack}"}
     own: "{run.version}#{sha256_file(files.join(dir, "jet"))}"
     say("build", "", "{name}: {own} ({result.wall}s)")
-    if !pack -> return Stage{dir: dir, identity: own, error: ""}
-    pack_log: files.join(run.logs, "{name}-pack.log")
-    packed: run_logged(in_dev_shell(builder_jet, run.tree, true, [String]{builder_jet.copy(), files.join(run.tree, "Tools/packaging/PrebuildRuntime.jet"), files.join(dir, "jet"), files.join(dir, "jet-runtime"), "--repo", run.tree.copy(), "--identity", own.copy()}), run.tree, with_vars(run.vars, [Var]{set_var("JET_COMPILER_IDENTITY", identity), set_var("JET", builder_jet)}), pack_log, 3600)
-    if packed.rc != 0 || !files.exists(files.join(dir, "jet-runtime/native.key")) -> return Stage{dir: "", identity: "", error: "{name}: PrebuildRuntime.jet rc={packed.rc}: {tail_of(pack_log, 6)}"}
     Stage{dir: dir, identity: own, error: ""}
 }
 
@@ -158,8 +157,6 @@ build_main: fn(args: [String], root: String) -[Env, Exec, FS, IO, Time, Time.Wai
         print(admission.text)
         return 0
     }
-    musl: env_or("JET_PACK_MUSL_LIB", MUSL_DEFAULT)
-    if !files.exists(files.join(musl, "libc.a")) -> return build_fail(2, "no musl libc.a in {musl} (JET_PACK_MUSL_LIB)")
     out: absolute_or(options.out)
     if files.exists(out) && files.list_dir(out) == .Ok(entries) && entries.len() > 0 -> return build_fail(2, "{out} is not empty")
     if inside(root, out) -> return build_fail(2, "{out} is inside the checkout")
@@ -178,14 +175,14 @@ build_main: fn(args: [String], root: String) -[Env, Exec, FS, IO, Time, Time.Wai
     // on PATH (`in_dev_shell`).
     run: BuildRun{
         root: root.copy(), tree: tree.copy(), work: work.copy(), logs: logs.copy(), version: version.copy(), threads: options.threads,
-        vars: [Var]{set_var("JET_PACK_MUSL_LIB", musl), set_var("TMPDIR", tmp), set_var("JET_TOOLCHAIN_ROOT", tree), drop_var("JET")},
+        vars: [Var]{set_var("TMPDIR", tmp), set_var("JET_TOOLCHAIN_ROOT", tree), drop_var("JET")},
     }
     say("build", "", "chain of {short(sha, 10)} from seed {seed_identity} in {work}")
-    s1: build_stage(run, "s1", seed, seed_identity, true)
+    s1: build_stage(run, "s1", seed, seed_identity)
     if s1.error != "" -> return build_fail(1, s1.error)
-    s2: build_stage(run, "s2", s1.dir, s1.identity, true)
+    s2: build_stage(run, "s2", s1.dir, s1.identity)
     if s2.error != "" -> return build_fail(1, s2.error)
-    s3: build_stage(run, "s3", s2.dir, s2.identity, false)
+    s3: build_stage(run, "s3", s2.dir, s2.identity)
     if s3.error != "" -> return build_fail(1, s3.error)
     if s2.identity != s3.identity -> return build_fail(1, "no fixed point: s2 {s2.identity} != s3 {s3.identity}")
 

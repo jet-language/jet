@@ -11,12 +11,7 @@ pthread_join
 getaddrinfo
 freeaddrinfo
 gai_strerror
-inet_pton
 __errno_location
-# L7 host canonicalization, parent-only (never after fork).
-realpath
-# vDSO clocks (Sync.jet sync_clock_read): no kernel entry per clock read.
-clock_gettime
 # Scalar libm functions supplied by the permitted C platform archive.
 acos
 acosh
@@ -48,20 +43,8 @@ tan
 tanh
 trunc
 round
-# core.sys process, identity and host leaves (RouteSys.jet), each read with errno.
-fork
-getgroups
+# core.sys initgroups (RouteSys.jet), read with errno; musl applies it to every thread.
 initgroups
-mkfifo
-getloadavg
-utime
-times
-sysconf
-# core.term raw mode (RouteTerm.jet).
-tcgetattr
-tcsetattr
-# Counted SIGINT handler install (ProcessSignal.jet).
-signal
 # The fault report every image link writes (Image/StaticLink.jet link_fault_report);
 # a platform link of this object adds Tools/packaging/fault-report-object.mjs.
 jet_rt_fault_report

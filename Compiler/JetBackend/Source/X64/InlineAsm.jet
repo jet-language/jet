@@ -394,6 +394,13 @@ X64_FIBER_SWITCH_BYTES: [U8]{0x55, 0x53, 0x41, 0x54, 0x41, 0x55, 0x41, 0x56, 0x4
 // switches a carrier thread to a fiber's TCB. Closed like the switch rail.
 X64_GS_BASE_WRITE: [String]{"wrgsbase {{base}}"}
 X64_GS_BASE_WRITE_BYTES: [U8]{0xf3, 0x48, 0x0f, 0xae, 0xdf}
+// The signal return rail: rt_sigreturn on the stack a signal handler returned
+// to. It is the whole body of a signal restorer, an exported function whose
+// frame is `push rbp; mov rbp, rsp`, so rbp + 8 is the stack pointer the
+// handler's `ret` left: the kernel's signal frame lies just below it. Never
+// returns. Closed like the switch rail.
+X64_SIGNAL_RETURN: [String]{"lea rsp, [rbp + 8]", "mov eax, 15", "syscall"}
+X64_SIGNAL_RETURN_BYTES: [U8]{0x48, 0x8d, 0x65, 0x08, 0xb8, 0x0f, 0, 0, 0, 0x0f, 0x05}
 
 // Whether the template's non-blank lines are exactly `rail`'s and its
 // operands exactly `operands`, in order.
@@ -413,8 +420,9 @@ x64_asm_rail: fn(lines: [String], names: [String], rail: [String], operands: [St
 }
 
 // `rails`: the template may be one of the runtime's closed rails (the fiber
-// switch and the GS base write); false for every program and every other
-// library, whose templates assemble only through the strict line grammar.
+// switch, the GS base write and the signal return); false for every program
+// and every other library, whose templates assemble only through the strict
+// line grammar.
 x64_assemble_template: fn(template: String, names: [String], returns: Bool, rails: Bool) -> X64AsmResult Never! {
     regs := [Int]{}
     if names.len() > X64_ASM_INPUTS.len() {
@@ -428,6 +436,8 @@ x64_assemble_template: fn(template: String, names: [String], returns: Bool, rail
             loop byte in X64_FIBER_SWITCH_BYTES -> rail.push(byte)
         } else if x64_asm_rail(lines, names, X64_GS_BASE_WRITE, [String]{"base"}) {
             loop byte in X64_GS_BASE_WRITE_BYTES -> rail.push(byte)
+        } else if x64_asm_rail(lines, names, X64_SIGNAL_RETURN, [String]{}) {
+            loop byte in X64_SIGNAL_RETURN_BYTES -> rail.push(byte)
         }
         if rail.len() > 0 -> return X64AsmResult{code: rail, regs: regs, result: -1, error: None}
     }

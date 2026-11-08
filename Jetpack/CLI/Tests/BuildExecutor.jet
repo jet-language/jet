@@ -108,7 +108,7 @@ build_test_plan: fn(caps: [BuildEffect], script: String) -[Rand]> HermeticBuildP
     if build_execute_build_plan(plan, root, store, [BuildEffect]{BuildEffect.Exec, BuildEffect.Net}) == {
         .Err(error) -> {
             build_test_restore_env("JETPACK_FAKE_SANDBOX", previous)
-            assert(error == BuildExecutionError.SandboxUnavailable)
+            assert(error == BuildExecutionError.SandboxUnavailable{reason: "test sandbox override prevents child execution"})
         }
         .Ok(_) -> {
             build_test_restore_env("JETPACK_FAKE_SANDBOX", previous)
@@ -154,7 +154,7 @@ build_test_plan: fn(caps: [BuildEffect], script: String) -[Rand]> HermeticBuildP
     if build_execute_build_plan(plan, root, store, [BuildEffect]{BuildEffect.Exec}) == {
         .Err(error) -> {
             build_test_restore_env("JETPACK_FAKE_SANDBOX", previous)
-            assert(error == BuildExecutionError.SandboxUnavailable)
+            assert(error == BuildExecutionError.SandboxUnavailable{reason: "test sandbox override prevents child execution"})
         }
         .Ok(_) -> {
             build_test_restore_env("JETPACK_FAKE_SANDBOX", previous)
@@ -162,7 +162,7 @@ build_test_plan: fn(caps: [BuildEffect], script: String) -[Rand]> HermeticBuildP
         }
     }
     assert(!files.exists(files.join(root, "out.txt")))
-    assert(build_native_sandbox_error(plan.actions[0], NativeSandboxError.Unsupported("x")) == BuildExecutionError.SandboxUnavailable)
+    assert(build_native_sandbox_error(plan.actions[0], NativeSandboxError.Unsupported("x")) == BuildExecutionError.SandboxUnavailable{reason: "x"})
     assert(build_native_sandbox_error(plan.actions[0], NativeSandboxError.IO("disk")) == BuildExecutionError.IO{action: "write", detail: "disk"})
     files.remove_all(root).drop("test cleanup")
 }

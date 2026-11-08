@@ -155,6 +155,8 @@ web_leaf: fn(e: &WebEmitter, st: &WebState, name: String, args: [Int], result: B
         // Only a carrier thread switches fibers or moves GS, and the web
         // target starts no thread (clone below refuses).
         "os_fiber_switch_i64" | "os_gs_base_write_i64" -> web_op(e, 0x00)
+        // The web host delivers no signal to a handler, so no restorer runs.
+        "os_signal_return" -> web_op(e, 0x00)
         "os_stack_address_i64" -> web_global_get(e, WEB_GLOBAL_SP)
         "os_copy_ascending_i64" -> {
             web_at(e, args[0])

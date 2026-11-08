@@ -100,8 +100,8 @@ jet_cli_script_toolchain: fn(identity: String, options: BuildOptions, entry: Str
         .Missing(_, _) -> { return None }
     }
     runtime_dir: jet_cli_runtime_dir()
-    runtime_key: jet_cli_runtime_key(runtime_dir) ?? return None
-    pack: "{runtime_dir}/{runtime_key}/{JET_CLI_RUNTIME_PACK_FILE}"
+    if jet_cli_runtime_key(runtime_dir) == None -> return None
+    pack: "{runtime_dir}/{JET_CLI_RUNTIME_PACK_FILE}"
     pack_stat: cli_files.stat(pack) ?? return None
     executable: cli_sys.executable()
     executable_stat: cli_files.stat(executable) ?? return None

@@ -253,15 +253,11 @@ run: fn() {
     state := slot(kept)
     // The kept form holds the program part and the image's patches, not a copy
     // of the runtime image.
-    packs := [String]{}
-    loop key in names_in("{bin}/jet-runtime") {
-        image: "{bin}/jet-runtime/{key}/jet_runtime.image"
-        if files.exists(image.copy()) -> packs.push(image)
-    }
+    image: "{bin}/jet-runtime/jet_runtime.image"
+    if !files.exists(image.copy()) -> fail("first run: no runtime image beside the compiler")
     kept_size: (files.stat("{kept}/{state.program}") ?? fail("cannot stat the kept program: {err}")).size
-    if packs.len() == 0 -> fail("first run: no runtime image beside the compiler")
-    image_size: (files.stat(packs[0].copy()) ?? fail("cannot stat {packs[0]}: {err}")).size
-    if kept_size >= image_size -> fail("first run: the kept program has {kept_size} bytes, no fewer than the runtime image {packs[0]}")
+    image_size: (files.stat(image.copy()) ?? fail("cannot stat {image}: {err}")).size
+    if kept_size >= image_size -> fail("first run: the kept program has {kept_size} bytes, no fewer than the runtime image {image}")
     check("rerun", run_ok(keep, file, keep.cache), first)
     state = promoted(kept, "rerun", state)
     check("rerun of the full program", run_ok(keep, file, keep.cache), first)

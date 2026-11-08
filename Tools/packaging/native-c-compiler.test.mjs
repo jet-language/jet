@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -48,8 +48,9 @@ test('native fixture and packaging drivers have no independent C compiler policy
 });
 
 test('real native C witnesses have no glibc fortified imports and resolve against the admitted platform archives', t => {
-  const musl = process.env.JET_PACK_MUSL_LIB;
-  assert.ok(musl, 'JET_PACK_MUSL_LIB must name the native pack static musl directory');
+  const musl = (process.env.LIBRARY_PATH ?? '').split(':').find(folder =>
+    folder !== '' && existsSync(join(folder, 'libc.a')) && existsSync(join(folder, 'crt1.o')));
+  assert.ok(musl, 'LIBRARY_PATH must name the static musl libc.a folder the runtime pack links');
   const scratch = process.env.JET_TEST_SCRATCH_DIR ?? tmpdir();
   mkdirSync(scratch, { recursive: true });
   const out = mkdtempSync(join(scratch, 'native-c-platform-census-'));

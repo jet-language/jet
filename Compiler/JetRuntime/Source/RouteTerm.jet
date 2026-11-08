@@ -1,6 +1,4 @@
 // core.term leaves over the runtime's one stdio layer.
-#Import(c) term_tcgetattr: fn(fd: I64, termios: I64) -> I64 = "tcgetattr"
-#Import(c) term_tcsetattr: fn(fd: I64, actions: I64, termios: I64) -> I64 = "tcsetattr"
 
 // Stdout write_all, then flush when asked, when the frame is nonempty, or when
 // stdout is a terminal; io::Error's Display on failure.
@@ -340,13 +338,29 @@ term_mode_saved_key: fn() -> I64 {
     term_mode_key
 }
 
+// musl's tcgetattr: ioctl(fd, TCGETS, termios), 0 or -1.
+term_tcgetattr: fn(fd: I64, termios: I64) -> I64 {
+    #Unsafe("TCGETS writes the kernel termios into the caller's writable 64-byte struct") {
+        if (os_syscall_i64(I64{16}, fd, I64{21505}, termios, I64{0}, I64{0}, I64{0}) < I64{0}) -> return I64{-1}
+    }
+    I64{0}
+}
+
+// musl's tcsetattr(fd, TCSANOW, termios): ioctl(fd, TCSETS, termios), 0 or -1.
+term_tcsetattr: fn(fd: I64, termios: I64) -> I64 {
+    #Unsafe("TCSETS reads the kernel termios from the caller's initialized struct") {
+        if (os_syscall_i64(I64{16}, fd, I64{21506}, termios, I64{0}, I64{0}, I64{0}) < I64{0}) -> return I64{-1}
+    }
+    I64{0}
+}
+
 // Clear ECHO; raw also clears ICANON and sets VMIN=1, VTIME=0. Any
 // tcgetattr/tcsetattr failure is false and saves nothing.
 #Export(c) jet_term_mode_enter: fn(raw: Bool) -> Bool {
     node: jet_rt_alloc(I64{72}, I64{8})
     thread_zero(node, I64{72})
     mode: wrapping(node + I64{8})
-    if (net_i32(term_tcgetattr(I64{0}, mode)) != I64{0}) {
+    if (term_tcgetattr(I64{0}, mode) != I64{0}) {
         jet_rt_free(node, I64{72}, I64{8})
         return false
     }
@@ -359,7 +373,7 @@ term_mode_saved_key: fn() -> I64 {
         net_store_uint(wrapping(wrapping(next + I64{17}) + I64{6}), I64{1}, I64{1})
         net_store_uint(wrapping(wrapping(next + I64{17}) + I64{5}), I64{1}, I64{0})
     }
-    status: net_i32(term_tcsetattr(I64{0}, I64{0}, next))
+    status: term_tcsetattr(I64{0}, next)
     jet_rt_free(next, I64{64}, I64{8})
     if (status != I64{0}) {
         jet_rt_free(node, I64{72}, I64{8})
@@ -377,6 +391,6 @@ term_mode_saved_key: fn() -> I64 {
     node: jet_rt_tls_get(key)
     if (node == I64{0}) -> return
     jet_rt_tls_set(key, trap_word(node))
-    _ := term_tcsetattr(I64{0}, I64{0}, node + I64{8})
+    _ := term_tcsetattr(I64{0}, node + I64{8})
     jet_rt_free(node, I64{72}, I64{8})
 }

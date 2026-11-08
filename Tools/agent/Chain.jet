@@ -18,8 +18,9 @@
 // TREE LEVEL runs the chain of a source export (never a git worktree):
 //   check         the seed's `jet check` of the packages the tree changes
 //                 against its base (`plan` names them)
-//   s1            seed builds s1, s1's runtime pack (pack1)
-//   full          s1, pack1, s2 (by s1), pack2, s3 (by s2): FIXED_POINT when
+//   s1            seed builds s1 and its runtime pack, pack1 (`jet build
+//                 Compiler` makes both)
+//   full          s1, s2 (by s1, with pack2), s3 (by s2): FIXED_POINT when
 //                 s2 == s3 (jet and jet.o)
 //   full+threads  full, then t1 (s2 with --threads 1) == s3
 // --auto picks the level from `plan` (the reasons go to REPORT.md). Results:
@@ -31,26 +32,27 @@
 // receipt check`); --check-gate only checks it. --dry-run builds nothing,
 // takes no slot and prints each stage's key and whether the store holds it.
 //
-// Every stage has a key: SHA-256 over its material (kind, builder or
-// compiler sha, its pack hash, the `inputs` hash of the tree files the stage
-// reads, identity, args) and the canonical root. A stage whose key is in the
-// store is REUSED: copied out and verified, never rebuilt. The rest build at
-// the canonical root $JET_SCRATCH_ROOT/discovery/r14/snap: each build and
-// pack stage runs in a private user and mount namespace with the tree bound
-// there, so equal sources give equal binaries whatever the tree's path. Only
+// Every stage has a key: SHA-256 over its material (kind, builder sha, its
+// pack hash, the `inputs` hash of the tree files the stage reads, identity,
+// args) and the canonical root. A stage whose key is in the store is REUSED:
+// copied out and verified, never rebuilt. The rest build at the canonical
+// root $JET_SCRATCH_ROOT/discovery/r14/snap: each build stage runs in the dev
+// shell (Tools/agent/JetEnv.jet --norust, which supplies the C toolchain and
+// static musl the runtime pack needs) in a private user and mount namespace
+// with the tree bound there, so equal sources give equal binaries whatever
+// the tree's path. Only
 // clean results are stored (rc 0, no keep-going rows, no `todo` traps). The
 // chain first probes the store; a complete hit takes no slot, else the
 // stages the store lacks run in one build slot. Each stage process runs in a
 // memory scope of CHAIN_MEMMAX (default 24G) with no swap, on the slot's
 // CPUs. Settings: CHAIN_SEED (default $JET_SEEDS/current), CHAIN_STORE
 // (default $JET_SCRATCH_ROOT/stagestore, cap 20 GB; $JET_RUN_ROOT/stagestore,
-// cap 4 GB, when scratch has under 40 GB free), CHAIN_STORE_CAP_GB,
-// JET_PACK_MUSL_LIB (required).
+// cap 4 GB, when scratch has under 40 GB free), CHAIN_STORE_CAP_GB.
 //
 // `export` writes COMMIT (default HEAD) of the dev checkout to DIR with
 // `git archive`, applies each PATCH and records the commit in DIR/.chain-base.
-// `seed-published` stores the lander's census build of INSTALL_DIR (and its
-// pack) as the s1 and pack1 of the tree at the canonical root.
+// `seed-published` stores the lander's census build of INSTALL_DIR (with its
+// pack) as the s1 of the tree at the canonical root.
 //
 // `slot` runs CMD in a machine build slot (A B C D, see take_slot) on its
 // CPUs, at nice 19 in the idle I/O class, in a memory scope of
@@ -61,13 +63,13 @@
 // `diff` prints JSON {base, changed: [{path, status, sha}], digest}: TREE
 // against git commit BASE of the checkout REPO. `plan` prints JSON {level,
 // reasons, members}: the --auto level and the check members of a `diff`.
-// `inputs` prints "BUILD PACK NBUILD NPACK": the content hashes and counts of
-// the tree files a build stage and a pack stage read. `dirhash` prints the
+// `inputs` prints "HASH N": the content hash and count of the tree files a
+// build stage reads. `dirhash` prints the
 // content hash of a directory (a runtime pack): every file's relative path and
 // bytes. `packhash` prints the digest two runtime packs compare by: every
-// file, as `dirhash` reads it, except that each provenance.json (at the pack
-// root and in its content-key directory) counts as its canonical JSON without
-// compilerSha256 and recipeSha256, which name the compiler that built the pack.
+// file, as `dirhash` reads it, except that the pack's provenance.json counts
+// as its canonical JSON without compilerSha256 and recipeSha256, which name
+// the compiler that built the pack.
 // `evict` removes the least recently used entries of a stage store until it
 // is under CAP_GB. Every content hash is SHA-256 over a domain string and a
 // NUL, then per file in byte order: u64 big-endian path length, path, u64
@@ -105,7 +107,7 @@ run: fn() {
     if verb == "inputs" && args.len() == 2 {
         tree: absolute(args[1])
         inputs: stage_inputs(tree)
-        print("{content_hash(tree, inputs.build, "chain-build-inputs-v1")} {content_hash(tree, inputs.pack, "chain-pack-inputs-v1")} {inputs.build.len()} {inputs.pack.len()}")
+        print("{content_hash(tree, inputs, "chain-build-inputs-v2")} {inputs.len()}")
         process.exit(0)
     }
     if verb == "dirhash" && args.len() == 2 {
@@ -259,10 +261,8 @@ PackFile: struct {
     bytes: [U8]
 }
 
-// A pack's provenance.json: at its root or in its content-key directory.
-provenance_path: fn(path: String) -> Bool Never! {
-    path == "provenance.json" || path.partition("/").tail == "provenance.json"
-}
+// A pack's provenance.json.
+provenance_path: fn(path: String) -> Bool Never! { path == "provenance.json" }
 
 // A provenance.json as packs compare it: canonical JSON of the object
 // without BUILDER_FIELDS; None when it is not a JSON object.
@@ -342,35 +342,26 @@ compiler_packages: fn(tree: String, args: [String]) -[Env, Exec, FS, IO, Time.Wa
     rows
 }
 
-Inputs: struct {
-    build: [String]
-    pack: [String]
-}
-
-// The build stage reads the compiler's source identity inputs (workspace
-// files, every package `jet build Compiler` compiles, Core) plus the Prelude
-// and runtime trees the toolchain root serves and the dev-shell definition;
-// the pack stage reads those plus the packaging recipe
-// (Tools/packaging/PrebuildRuntime.jet and the Tools/agent/CompilerPackages.jet
-// it assembles the runtime unit with) and every runtime source sources.list
-// names. Both sorted and unique.
-stage_inputs: fn(tree: String) -[Env, Exec, FS, IO, Time.Wait]> Inputs Never! {
-    build := compiler_packages(tree, [String]{"inputs"})
-    loop extra in ([String]{"Compiler/Prelude", "Compiler/JetRuntime", "env.jet", "flake.nix", "flake.lock"}) -> walk_into(tree, extra, build)
-    pack := build.copy()
-    loop recipe in ([String]{"Tools/packaging/PrebuildRuntime.jet", "Tools/agent/CompilerPackages.jet"}) {
-        if files.exists(files.join(tree, recipe)) -> pack.push(recipe.copy())
-    }
+// A build stage (`jet build Compiler`, which makes jet and its runtime pack)
+// reads the compiler's source identity inputs (workspace files, every package
+// the compiler compiles, Core), the Prelude and runtime trees the toolchain
+// root serves, the pack recipe (Compiler/Toolchain), Core's vendored C (its
+// own packages, which the Core walk skips), every runtime source
+// sources.list names, and the dev-shell definition, which fixes the C
+// toolchain and musl. Sorted and unique.
+stage_inputs: fn(tree: String) -[Env, Exec, FS, IO, Time.Wait]> [String] Never! {
+    read := compiler_packages(tree, [String]{"inputs"})
+    loop extra in ([String]{"Compiler/Prelude", "Compiler/JetRuntime", "Compiler/Toolchain", "Core/Vendor/Sqlite3", "Core/Vendor/Mbedtls", "env.jet", "flake.nix", "flake.lock"}) -> walk_into(tree, extra, read)
     sources: files.join(tree, "Compiler/JetRuntime/sources.list")
     if files.exists(sources) {
         text: files.read(sources) ?? fail("cannot read `{sources}`: {err}")
         loop line in text.split("\n") {
             row: line.trim()
             if row == "" || row.starts_with("#") -> next
-            if files.exists(files.join(tree, row)) -> pack.push(row.copy())
+            if files.exists(files.join(tree, row)) -> read.push(row.copy())
         }
     }
-    Inputs{build: unique(build), pack: unique(pack)}
+    unique(read)
 }
 
 // --- diff -------------------------------------------------------------------
@@ -513,7 +504,7 @@ HEX: "0123456789abcdef"
 //   full : the code generator and what it links or evaluates: JetIR,
 //          JetBackend, JetEval (compile-time evaluation), JetRuntime, Prelude,
 //          Bootstrap, the Compiler workspace files, the runtime pack recipe
-//          (Tools/packaging), the dev shell (flake.nix/flake.lock), and any
+//          (Compiler/Toolchain), the dev shell (flake.nix/flake.lock), and any
 //          compiler source whose file name names comptime, lowering, linking,
 //          native objects, emission, the scheduler or threads.
 //   s1   : the rest of the compiler front end `jet build Compiler` compiles
@@ -523,7 +514,7 @@ HEX: "0123456789abcdef"
 //   check: Tests/tests, Examples, Tools, Docs, Core library sources, packages
 //          the compiler does not build (JetLSP, JetRepl, ...), and anything no
 //          chain stage reads.
-FULL_DIRS: ["Compiler/JetIR/", "Compiler/JetBackend/", "Compiler/JetEval/", "Compiler/JetRuntime/", "Compiler/Prelude/", "Compiler/Bootstrap/", "Tools/packaging/"]
+FULL_DIRS: ["Compiler/JetIR/", "Compiler/JetBackend/", "Compiler/JetEval/", "Compiler/JetRuntime/", "Compiler/Prelude/", "Compiler/Bootstrap/", "Compiler/Toolchain/"]
 FULL_FILES: ["Compiler/package.jet", "Compiler/build.jet", "flake.nix", "flake.lock"]
 FULL_NAMES: ["comptime", "lower", "link", "native", "emit", "codegen", "object", "sched", "thread", "parallel"]
 
@@ -543,7 +534,6 @@ rank: fn(level: String) -> Int Never! { if level == "full" -> 2 else if level ==
 // The class of the changed `path`; `read` holds the paths a build stage reads.
 classify: fn(path: String, read: [String: Bool]) -> Class Never! {
     parts: path.split("/").to_list()
-    if path == "Tools/packaging/PrebuildRuntime.jet" -> return Class{level: "full", reason: "runtime pack producer"}
     if parts.contains("Tests") || parts.contains("tests") -> return Class{level: "check", reason: "tests"}
     if FULL_FILES.contains(path) -> return Class{level: "full", reason: if path.starts_with("flake") -> "dev shell definition" else -> "Compiler workspace file"}
     loop dir in FULL_DIRS {
@@ -581,9 +571,8 @@ plan: fn(tree: String, diff_path: String) -[Env, Exec, FS, IO, Time.Wait]> Plan 
     parsed: json.parse(text) ?? fail("`{diff_path}` is not JSON: {err}")
     paths := [String]{}
     loop change in array_field(parsed, "changed") -> paths.push(text_field(change, "path"))
-    inputs: stage_inputs(tree)
     read := [String: Bool]{}
-    loop path in inputs.build -> read[path.copy()] = true
+    loop path in stage_inputs(tree) -> read[path.copy()] = true
     selector := [String]{"select"}
     selector.extend(paths.copy())
     loop path in compiler_packages(tree, selector) -> read[path.copy()] = true
@@ -1084,7 +1073,6 @@ Chain: struct {
     seed: String
     cid: String
     ver: String
-    musl: String
     mem: Int
     store: String
     cap: String
@@ -1099,7 +1087,6 @@ Chain: struct {
     seed_sha: String
     seed_pk: String
     bin: String
-    pin: String
     digest: String
     members: [String]
     reasons: [String]
@@ -1119,11 +1106,6 @@ free_gb: fn(path: String) -[Env, Exec, FS, IO, Time.Wait]> Int Never! {
 // names the install.
 chain_main: fn(args: [String], seedpub: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
     r: roots()
-    musl: root_of("JET_PACK_MUSL_LIB", "")
-    if musl == "" {
-        print("Chain.jet: set JET_PACK_MUSL_LIB to the static musl lib dir (in the environment or the jet env file)")
-        return 2
-    }
     options: if seedpub != "" -> ChainOptions{tree: r.root.copy(), level: "s1", auto: false, out: "{r.run}/chain-work/seedpub-{sys.pid()}", base: "", dry: false, gate: false} else -> parse_chain(args)
     tree: options.tree.copy()
     if !files.is_dir(files.join(tree, "Compiler")) || !files.is_dir(files.join(tree, "Tools/agent")) {
@@ -1172,7 +1154,6 @@ chain_main: fn(args: [String], seedpub: String) -[Env, Exec, FS, IO, Time, Time.
     work: "{r.run}/chain-work/{sys.pid()}"
     files.create_dir_all("{work}/tmp") ?? fail("cannot create `{work}/tmp`: {err}")
     // Every stage inherits these.
-    sys.set("JET_PACK_MUSL_LIB", musl)
     sys.set("CARGO_INCREMENTAL", "0")
     sys.set("JET_TARGET_CAP_GB", "120")
     cargo_vars: [String]{"CARGO_TARGET_DIR", "CARGO_HOME", "RUSTUP_HOME", "RUSTC"}
@@ -1180,7 +1161,7 @@ chain_main: fn(args: [String], seedpub: String) -[Env, Exec, FS, IO, Time, Time.
     sys.set_core_file_limit(Val(0), Val(0)) ?? ()
     sys.set_stack_limit(Val(1073741824), Val(1073741824)) ?? ()
     nsdir: "{r.run}/chain-ns/{sys.pid()}"
-    c := Chain{r: r, tree: tree, level: options.level.copy(), auto: options.auto, out: out.copy(), logs: "{out}/logs", base: base_sha, base_src: base_src, seed: seed.copy(), cid: cid.copy(), ver: cid.partition("#").head.copy(), musl: musl, mem: memory_bytes(env_or("CHAIN_MEMMAX", "24G")), store: store, cap: cap, work: work.copy(), nsdir: nsdir.copy(), mode: "", rows: [String]{}, sha: [String: String]{}, pk: [String: String]{}, miss: "", cpus: [Int]{}, seed_sha: "", seed_pk: "", bin: "-", pin: "-", digest: "-", members: [String]{}, reasons: [String]{}, nchanged: "not computed (explicit level)", started: time.unix_ns()}
+    c := Chain{r: r, tree: tree, level: options.level.copy(), auto: options.auto, out: out.copy(), logs: "{out}/logs", base: base_sha, base_src: base_src, seed: seed.copy(), cid: cid.copy(), ver: cid.partition("#").head.copy(), mem: memory_bytes(env_or("CHAIN_MEMMAX", "24G")), store: store, cap: cap, work: work.copy(), nsdir: nsdir.copy(), mode: "", rows: [String]{}, sha: [String: String]{}, pk: [String: String]{}, miss: "", cpus: [Int]{}, seed_sha: "", seed_pk: "", bin: "-", digest: "-", members: [String]{}, reasons: [String]{}, nchanged: "not computed (explicit level)", started: time.unix_ns()}
     code: chain_run(c, options, seedpub)
     files.remove_all(work) ?? ()
     files.remove_all(nsdir) ?? ()
@@ -1217,11 +1198,7 @@ chain_run: fn(c: &Chain, options: ChainOptions, seedpub: String) -[Env, Exec, FS
     }
     c.seed_sha = sha_file(files.join(c.seed, "jet"))
     c.seed_pk = dirhash(files.join(c.seed, "jet-runtime"))
-    if c.level != "check" {
-        inputs: stage_inputs(c.tree)
-        c.bin = content_hash(c.tree, inputs.build, "chain-build-inputs-v1")
-        c.pin = content_hash(c.tree, inputs.pack, "chain-pack-inputs-v1")
-    }
+    if c.level != "check" -> c.bin = content_hash(c.tree, stage_inputs(c.tree), "chain-build-inputs-v2")
     if seedpub != "" -> return seed_published(c, seedpub)
     if options.dry {
         c.mode = "dry"
@@ -1270,9 +1247,9 @@ chain_run: fn(c: &Chain, options: ChainOptions, seedpub: String) -[Env, Exec, FS
 
 stage_order: fn(level: String) -> [String] Never! {
     if level == "check" -> return [String]{"check"}
-    if level == "s1" -> return [String]{"s1", "pack1"}
-    if level == "full" -> return [String]{"s1", "pack1", "s2", "pack2", "s3"}
-    [String]{"s1", "pack1", "s2", "pack2", "s3", "t1"}
+    if level == "s1" -> return [String]{"s1"}
+    if level == "full" -> return [String]{"s1", "s2", "s3"}
+    [String]{"s1", "s2", "s3", "t1"}
 }
 
 changed_summary: fn(changed: [Change]) -> String Never! {
@@ -1293,20 +1270,14 @@ chain: fn(c: &Chain) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
     c.miss = ""
     if c.level == "check" -> return check_stage(c)
     got := build_stage(c, "s1", c.seed.copy(), c.seed_sha.copy(), c.seed_pk.copy(), c.cid.copy(), 12)
-    if got != 0 -> return got
-    s1: c.sha.get("s1") ?? ""
+    if got != 0 || c.level == "s1" -> return got
     s1_dir: files.join(c.out, "s1")
     s2_dir: files.join(c.out, "s2")
-    got = pack_stage(c, "pack1", s1_dir, s1, c.cid.copy())
-    if got != 0 || c.level == "s1" -> return got
-    pack1: c.pk.get("pack1") ?? ""
-    got = build_stage(c, "s2", s1_dir, s1, pack1, c.cid.copy(), 12)
+    got = build_stage(c, "s2", s1_dir, c.sha.get("s1") ?? "", c.pk.get("s1") ?? "", c.cid.copy(), 12)
     if got != 0 -> return got
     s2: c.sha.get("s2") ?? ""
+    pack2: c.pk.get("s2") ?? ""
     next_identity: "{c.ver}#{s2}"
-    got = pack_stage(c, "pack2", s2_dir, s2, next_identity)
-    if got != 0 -> return got
-    pack2: c.pk.get("pack2") ?? ""
     got = build_stage(c, "s3", s2_dir, s2, pack2, next_identity, 12)
     if got != 0 || c.level != "full+threads" -> return got
     build_stage(c, "t1", s2_dir, s2, pack2, next_identity, 1)
@@ -1361,7 +1332,6 @@ store_put: fn(c: &Chain, k: String, kind: String, src: String, lines: [String]) 
         loop name in names {
             if files.exists(files.join(src, name)) -> copy_plain(files.join(src, name), files.join(tmp, name))
         }
-    } else if kind == "pack" {
         copy_tree(files.join(src, "jet-runtime"), files.join(tmp, "jet-runtime"))
     } else {
         loop entry in list(src) -> copy_plain(files.join(src, entry.name), files.join(tmp, entry.name))
@@ -1384,11 +1354,7 @@ store_put: fn(c: &Chain, k: String, kind: String, src: String, lines: [String]) 
 }
 
 build_mat: fn(c: &Chain, builder: String, builder_pack: String, identity: String, threads: Int) -> [String] Never! {
-    [String]{"kind=build", "builder={builder}", "builderpack={builder_pack}", "inputs={c.bin}", "identity={identity}", "args=build --threads {threads} Compiler", "env=JET_KEEP_GOING=1"}
-}
-
-pack_mat: fn(c: &Chain, compiler: String, identity: String) -> [String] Never! {
-    [String]{"kind=pack", "compiler={compiler}", "inputs={c.pin}", "identity={identity}", "musl={c.musl}", "args=PrebuildRuntime.jet"}
+    [String]{"kind=build", "builder={builder}", "builderpack={builder_pack}", "inputs={c.bin}", "identity={identity}", "args=JetEnv.jet --norust jet build --threads {threads} Compiler", "env=JET_KEEP_GOING=1"}
 }
 
 StageRun: struct {
@@ -1468,9 +1434,11 @@ bind: fn(from: String, to: String) -[Exec, IO, Time.Wait]> Bool Never! {
     receipt.success
 }
 
-// build_stage: NAME built by BUILDER_DIR/jet (sha BUILDER, its pack hash
-// BUILDER_PACK) under IDENTITY: `jet build --threads THREADS Compiler` at the
-// canonical root. 0 built or reused, 1 failed, 3 a miss outside a run.
+// build_stage: NAME (jet, jet.o and its runtime pack jet-runtime/) built by
+// BUILDER_DIR/jet (sha BUILDER, its pack hash BUILDER_PACK) under IDENTITY:
+// `jet build --threads THREADS Compiler` at the canonical root, in the dev
+// shell, which supplies the C toolchain and static musl the pack links.
+// 0 built or reused, 1 failed, 3 a miss outside a run.
 build_stage: fn(c: &Chain, n: String, builder_dir: String, builder: String, builder_pack: String, identity: String, threads: Int) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
     mat: build_mat(c, builder, builder_pack, identity, threads)
     k: key_of(c, mat)
@@ -1481,14 +1449,18 @@ build_stage: fn(c: &Chain, n: String, builder_dir: String, builder: String, buil
     found := find_entry(c, k)
     if found != "" {
         c.sha[n.copy()] = meta_of(found, "sha256")
+        c.pk[n.copy()] = meta_of(found, "packhash")
         if c.mode != "dry" {
             files.create_dir_all(dir) ?? fail("cannot create `{dir}`: {err}")
             files.remove(jet) ?? ()
             files.remove("{jet}.o") ?? ()
+            files.remove_all(files.join(dir, "jet-runtime")) ?? ()
             copy_plain(files.join(found, "jet"), jet)
             if files.exists(files.join(found, "jet.o")) -> copy_plain(files.join(found, "jet.o"), "{jet}.o")
-            if sha_file(jet) != (c.sha.get(n) ?? "") {
+            copy_tree(files.join(found, "jet-runtime"), files.join(dir, "jet-runtime"))
+            if sha_file(jet) != (c.sha.get(n) ?? "") || dirhash(files.join(dir, "jet-runtime")) != (c.pk.get(n) ?? "") {
                 files.remove(jet) ?? ()
+                files.remove_all(files.join(dir, "jet-runtime")) ?? ()
                 found = ""
             }
         }
@@ -1496,8 +1468,8 @@ build_stage: fn(c: &Chain, n: String, builder_dir: String, builder: String, buil
     if found != "" {
         touch_used(found)
         sha: c.sha.get(n) ?? ""
-        rec(c, [String]{n.copy(), "REUSED", "0", since(t0), meta_of(found, "rss_mb"), sha.copy(), k.copy(), "built {meta_of(found, "created")} in {meta_of(found, "wall_s")}s by {meta_of(found, "lane")}"})
-        say("{n} REUSED {prefix(k, 16)} (jet {prefix(sha, 16)})")
+        rec(c, [String]{n.copy(), "REUSED", "0", since(t0), meta_of(found, "rss_mb"), sha.copy(), k.copy(), "pack {prefix(c.pk.get(n) ?? "", 16)}, native.key {prefix(meta_of(found, "native_key"), 16)}; built {meta_of(found, "created")} in {meta_of(found, "wall_s")}s by {meta_of(found, "lane")}"})
+        say("{n} REUSED {prefix(k, 16)} (jet {prefix(sha, 16)}, pack {prefix(c.pk.get(n) ?? "", 16)})")
         return 0
     }
     if c.mode != "run" {
@@ -1511,23 +1483,31 @@ build_stage: fn(c: &Chain, n: String, builder_dir: String, builder: String, buil
     files.remove_all(dir) ?? ()
     files.create_dir_all(dir) ?? fail("cannot create `{dir}`: {err}")
     report: files.join(c.logs, "{n}-keep-going.tsv")
+    files.create_dir_all("{c.work}/tmp") ?? ()
+    builder_jet: files.join(builder_dir, "jet")
     vars: [String]{"JET_COMPILER_IDENTITY={identity}", "JET_TOOLCHAIN_ROOT={c.r.root}", "JET_KEEP_GOING=1", "JET_KEEP_GOING_REPORT={report}", "TMPDIR={c.work}/tmp", "PATH={norust_path()}"}
-    ran: stage_run(c, n, [String]{files.join(builder_dir, "jet"), "build", "--threads", "{threads}", "Compiler"}, vars, 3600, true)
+    argv: [String]{builder_jet.copy(), "{c.r.root}/Tools/agent/JetEnv.jet", "--norust", builder_jet.copy(), "build", "--threads", "{threads}", "Compiler"}
+    ran: stage_run(c, n, argv, vars, 3600, true)
     rows: keep_going_rows(report)
     built: files.join(build_out, "jet")
+    pack: files.join(dir, "jet-runtime")
     if files.is_file(built) {
         files.copy(built, jet) ?? ()
         if files.is_file("{built}.o") -> files.copy("{built}.o", "{jet}.o") ?? ()
     }
+    if files.is_file(files.join(build_out, "jet-runtime/native.key")) -> copy_tree(files.join(build_out, "jet-runtime"), pack)
     files.remove_all(build_out) ?? ()
-    if !files.is_file(jet) {
+    if !files.is_file(jet) || !files.is_file(files.join(pack, "native.key")) {
         failure: err_head(files.join(c.logs, "{n}.err"))
-        rec(c, [String]{n.copy(), "FAILED", "{ran.rc}", tenths(ran.ns), "{ran.rss}", "-", k.copy(), "no binary; keep-going rows={rows}; {failure}"})
+        rec(c, [String]{n.copy(), "FAILED", "{ran.rc}", tenths(ran.ns), "{ran.rss}", "-", k.copy(), "{if files.is_file(jet) -> "no runtime pack" else -> "no binary"}; keep-going rows={rows}; {failure}"})
         say("{n} FAILED rc={ran.rc} rows={rows} (logs {c.logs}/{n}.err)")
         return 1
     }
     sha: sha_file(jet)
     c.sha[n.copy()] = sha.copy()
+    hash: dirhash(pack)
+    c.pk[n.copy()] = hash.copy()
+    native_key: first_line(files.join(pack, "native.key"))
     // #5662: a seed without the census fix installs keep-going `todo` traps
     // with no row; the binary tells.
     traps := "scan-failed"
@@ -1538,73 +1518,14 @@ build_stage: fn(c: &Chain, n: String, builder_dir: String, builder: String, buil
     }
     wall: tenths(ran.ns)
     if ran.rc == 0 && rows == 0 && traps == "0" {
-        lines := [String]{"stage={n}", "kind=build", "sha256={sha}", "wall_s={wall}", "rss_mb={ran.rss}", "lane={lane_of(c.tree)}", "tree={c.tree}"}
+        lines := [String]{"stage={n}", "kind=build", "sha256={sha}", "packhash={hash}", "native_key={native_key}", "wall_s={wall}", "rss_mb={ran.rss}", "lane={lane_of(c.tree)}", "tree={c.tree}"}
         lines.extend(mat)
         store_put(c, k, "build", dir, lines)
-        rec(c, [String]{n.copy(), "BUILT", "0", wall, "{ran.rss}", sha.copy(), k.copy(), "stored"})
+        rec(c, [String]{n.copy(), "BUILT", "0", wall, "{ran.rss}", sha.copy(), k.copy(), "pack {prefix(hash, 16)}, native.key {prefix(native_key, 16)}; stored"})
     } else {
         rec(c, [String]{n.copy(), "DIRTY", "{ran.rc}", wall, "{ran.rss}", sha.copy(), k.copy(), "binary with rc={ran.rc} keep-going rows={rows} traps={traps} (not stored; {c.logs}/{n}-traps.txt)"})
     }
-    say("{n} built rc={ran.rc} rows={rows} traps={traps} wall {wall}s rss {ran.rss}MB (jet {prefix(sha, 16)})")
-    0
-}
-
-// pack_stage: the runtime pack COMPILER_DIR/jet-runtime, lowered by
-// COMPILER_DIR/jet (sha COMPILER) under IDENTITY; the seed runs
-// Tools/packaging/PrebuildRuntime.jet in the dev shell, which supplies the
-// host C toolchain the runtime's vendored C needs.
-pack_stage: fn(c: &Chain, n: String, compiler_dir: String, compiler: String, identity: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
-    mat: pack_mat(c, compiler, identity)
-    k: key_of(c, mat)
-    write_keys(c, n, mat)
-    t0: time.unix_ns()
-    pack: files.join(compiler_dir, "jet-runtime")
-    found := find_entry(c, k)
-    if found != "" {
-        c.pk[n.copy()] = meta_of(found, "packhash")
-        if c.mode != "dry" {
-            files.remove_all(pack) ?? ()
-            copy_tree(files.join(found, "jet-runtime"), pack)
-            if dirhash(pack) != (c.pk.get(n) ?? "") {
-                files.remove_all(pack) ?? ()
-                found = ""
-            }
-        }
-    }
-    if found != "" {
-        touch_used(found)
-        hash: c.pk.get(n) ?? ""
-        rec(c, [String]{n.copy(), "REUSED", "0", since(t0), meta_of(found, "rss_mb"), hash.copy(), k.copy(), "native.key {prefix(meta_of(found, "native_key"), 16)}; built {meta_of(found, "created")} in {meta_of(found, "wall_s")}s by {meta_of(found, "lane")}"})
-        say("{n} REUSED {prefix(k, 16)} (pack {prefix(hash, 16)})")
-        return 0
-    }
-    if c.mode != "run" {
-        c.miss = n.copy()
-        say("{n} needs a build (key {prefix(k, 16)})")
-        return 3
-    }
-    say("{n}: PrebuildRuntime.jet with {basename(compiler_dir)}")
-    files.remove_all(pack) ?? ()
-    files.create_dir_all("{c.work}/tmp") ?? ()
-    seed_jet: files.join(c.seed, "jet")
-    vars: [String]{"JET_COMPILER_IDENTITY={c.cid}", "JET={seed_jet}", "JET_TOOLCHAIN_ROOT={c.r.root}", "TMPDIR={c.work}/tmp"}
-    argv: [String]{seed_jet.copy(), "{c.r.root}/Tools/agent/JetEnv.jet", "--norust", seed_jet.copy(), "{c.r.root}/Tools/packaging/PrebuildRuntime.jet", files.join(compiler_dir, "jet"), pack.copy(), "--repo", c.r.root.copy(), "--identity", identity.copy()}
-    ran: stage_run(c, n, argv, vars, 1800, true)
-    wall: tenths(ran.ns)
-    if ran.rc != 0 || !files.is_file(files.join(pack, "native.key")) {
-        failure: err_head(files.join(c.logs, "{n}.err"))
-        rec(c, [String]{n.copy(), "FAILED", "{ran.rc}", wall, "{ran.rss}", "-", k.copy(), "no pack; {failure}"})
-        say("{n} FAILED rc={ran.rc} (logs {c.logs}/{n}.err)")
-        return 1
-    }
-    hash: dirhash(pack)
-    c.pk[n.copy()] = hash.copy()
-    native_key: first_line(files.join(pack, "native.key"))
-    lines := [String]{"stage={n}", "kind=pack", "packhash={hash}", "native_key={native_key}", "wall_s={wall}", "rss_mb={ran.rss}", "lane={lane_of(c.tree)}", "tree={c.tree}"}
-    lines.extend(mat)
-    store_put(c, k, "pack", compiler_dir, lines)
-    rec(c, [String]{n.copy(), "BUILT", "0", wall, "{ran.rss}", hash.copy(), k.copy(), "native.key {prefix(native_key, 16)}; stored"})
-    say("{n} built wall {wall}s rss {ran.rss}MB (pack {prefix(hash, 16)}, native.key {prefix(native_key, 16)})")
+    say("{n} built rc={ran.rc} rows={rows} traps={traps} wall {wall}s rss {ran.rss}MB (jet {prefix(sha, 16)}, pack {prefix(hash, 16)}, native.key {prefix(native_key, 16)})")
     0
 }
 
@@ -1716,7 +1637,7 @@ finish: fn(c: &Chain, slot_note: String) -[Env, Exec, FS, IO, Time, Time.Wait]> 
         code = 1
         note = "stage(s) failed: {failed.join(" ")}"
     } else if c.level == "s1" {
-        note = "s1 jet {prefix(c.sha.get("s1") ?? "", 16)}, pack1 {prefix(c.pk.get("pack1") ?? "", 16)}"
+        note = "s1 jet {prefix(c.sha.get("s1") ?? "", 16)}, pack1 {prefix(c.pk.get("s1") ?? "", 16)}"
     } else {
         s2: c.sha.get("s2") ?? ""
         s3: c.sha.get("s3") ?? ""
@@ -1770,7 +1691,7 @@ write_report: fn(c: &Chain, verdict: String, code: Int, note: String, slot_note:
         loop reason in c.reasons -> md.push("  - {reason}")
     }
     if c.level == "check" -> md.push("- check members: {if c.members.len() == 0 -> "none" else -> c.members.join(" ")}")
-    md.push("- seed: {basename(c.seed)} ({c.cid}); build inputs {prefix(c.bin, 16)}, pack inputs {prefix(c.pin, 16)}")
+    md.push("- seed: {basename(c.seed)} ({c.cid}); build inputs {prefix(c.bin, 16)}")
     md.push("- store: {c.store} (cap {c.cap} GB, LRU); canonical build root {c.r.root} (private mount namespace)")
     md.push("- slot: {slot_note}")
     md.push("")
@@ -1789,12 +1710,12 @@ write_report: fn(c: &Chain, verdict: String, code: Int, note: String, slot_note:
 }
 
 // `seed-published INSTALL_DIR` (`Land.jet publish base`): INSTALL_DIR holds
-// the compiler the lander's census built at the canonical root; it is that
-// tree's s1 (and its pack, pack1), so store both under the keys a chain
+// the compiler and runtime pack the lander's census built at the canonical
+// root; they are that tree's s1, so store them under the key a chain
 // computes, only when nothing about that claim is assumed: the snap's build
-// output is still these bytes, it is newer than the seed, the census build
-// was clean, the identity is the seed's, and the pack is the one the census
-// made with this compiler.
+// output is still these bytes (jet and pack), it is newer than the seed, the
+// census build was clean, the identity is the seed's, and the pack was
+// lowered by this compiler.
 seed_published: fn(c: &Chain, install: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
     seedpub: files.canonicalize(install) ?? {
         print("seed-published: no install at {install}")
@@ -1803,8 +1724,10 @@ seed_published: fn(c: &Chain, install: String) -[Env, Exec, FS, IO, Time, Time.W
     built: files.join(c.r.root, "Compiler/JetCli/.jet/build/jet")
     census_report: files.join(c.r.r14, "census/build-keep-going.tsv")
     published: sha_file(files.join(seedpub, "jet"))
-    if !files.is_file(built) || sha_file(built) != published {
-        print("seed-published: {c.r.root} no longer holds this build of {seedpub}/jet; nothing stored")
+    pack: files.join(seedpub, "jet-runtime")
+    built_pack: files.join(c.r.root, "Compiler/JetCli/.jet/build/jet-runtime")
+    if !files.is_file(built) || sha_file(built) != published || !files.is_file(files.join(pack, "native.key")) || !files.is_dir(built_pack) || dirhash(pack) != dirhash(built_pack) {
+        print("seed-published: {c.r.root} no longer holds this build of {seedpub}/jet and its jet-runtime; nothing stored")
         return 1
     }
     seed_time: files.getmtime(files.join(c.seed, "jet")) ?? 0
@@ -1820,40 +1743,27 @@ seed_published: fn(c: &Chain, install: String) -[Env, Exec, FS, IO, Time, Time.W
         print("seed-published: identity is not the seed's; nothing stored")
         return 1
     }
-    said := [String]{}
+    provenance: json.parse(files.read(files.join(pack, "provenance.json")) ?? "") ?? Dyn.Null
+    if text_field(provenance, "compilerSha256") != published {
+        print("seed-published: the pack was not lowered by this compiler; nothing stored")
+        return 1
+    }
     mat: build_mat(c, c.seed_sha.copy(), c.seed_pk.copy(), c.cid.copy(), 12)
     k: key_of(c, mat)
+    if files.is_dir(files.join(c.store, k)) {
+        print("seed-published: s1 {prefix(k, 16)} already stored")
+        return 0
+    }
     s1: files.join(c.out, "s1")
     files.create_dir_all(s1) ?? fail("cannot create `{s1}`: {err}")
     copy_plain(files.join(seedpub, "jet"), files.join(s1, "jet"))
-    if files.is_dir(files.join(c.store, k)) {
-        said.push("s1 {prefix(k, 16)} already stored")
-    } else {
-        lines := [String]{"stage=s1", "kind=build", "sha256={published}", "wall_s=-", "rss_mb=-", "lane=lander census", "tree={c.r.root} ({first_line(files.join(seedpub, "COMMIT"))})"}
-        lines.extend(mat)
-        store_put(c, k, "build", s1, lines)
-        said.push("s1 {prefix(k, 16)} stored")
-    }
-    pack: files.join(seedpub, "jet-runtime")
-    census: files.join(c.r.r14, "census/runtime/out")
-    provenance: json.parse(files.read(files.join(pack, "provenance.json")) ?? "") ?? Dyn.Null
-    if text_field(provenance, "compilerSha256") == published && files.is_dir(census) && dirhash(pack) == dirhash(census) {
-        pmat: pack_mat(c, published, c.cid.copy())
-        pk: key_of(c, pmat)
-        if files.is_dir(files.join(c.store, pk)) {
-            said.push("pack1 {prefix(pk, 16)} already stored")
-        } else {
-            copy_tree(pack, files.join(s1, "jet-runtime"))
-            lines := [String]{"stage=pack1", "kind=pack", "packhash={dirhash(files.join(s1, "jet-runtime"))}", "native_key={first_line(files.join(s1, "jet-runtime/native.key"))}", "wall_s=-", "rss_mb=-", "lane=lander census", "tree={c.r.root}"}
-            lines.extend(pmat)
-            store_put(c, pk, "pack", s1, lines)
-            said.push("pack1 {prefix(pk, 16)} stored")
-        }
-    } else {
-        said.push("pack1 not stored (pack is not the census pack of this compiler)")
-    }
+    copy_tree(pack, files.join(s1, "jet-runtime"))
+    hash: dirhash(files.join(s1, "jet-runtime"))
+    lines := [String]{"stage=s1", "kind=build", "sha256={published}", "packhash={hash}", "native_key={first_line(files.join(s1, "jet-runtime/native.key"))}", "wall_s=-", "rss_mb=-", "lane=lander census", "tree={c.r.root} ({first_line(files.join(seedpub, "COMMIT"))})"}
+    lines.extend(mat)
+    store_put(c, k, "build", s1, lines)
     files.remove_all(c.out) ?? ()
-    print("seed-published: {said.join(" ")}")
+    print("seed-published: s1 {prefix(k, 16)} stored (jet {prefix(published, 16)}, pack {prefix(hash, 16)})")
     0
 }
 
@@ -2270,16 +2180,14 @@ put_text: fn(b: &[U8], at: Int, text: String) {
     assert_eq(hundredths(GIB * 20 + GIB /% 20), "20.05")
 }
 
-// A two-level runtime pack whose provenance names `compiler` and `recipe`,
-// whose other provenance field is `object`, and whose object holds `byte`.
+// A runtime pack whose provenance names `compiler` and `recipe`, whose other
+// provenance field is `object`, and whose object holds `byte`.
 sample_pack: fn(compiler: String, recipe: String, object: String, byte: Int) -> [PackFile] Never! {
     provenance: "{{\"backend\":\"jet-native\",\"compilerSha256\":\"{compiler}\",\"objectSha256\":\"{object}\",\"recipeSha256\":\"{recipe}\"}}"
-    key: "f2a10ea90b64b2a5df415c5912d5a42da5d3cda2c0cd122c0e42117dea596b33"
     [PackFile]{
         PackFile{path: "provenance.json", bytes: provenance.bytes()},
-        PackFile{path: "native.key", bytes: "{key}\n".bytes()},
-        PackFile{path: "{key}/provenance.json", bytes: provenance.bytes()},
-        PackFile{path: "{key}/jet_runtime.pack.o", bytes: [U8]{U8{127}, U8{69}, U8.from_int(byte) ?? U8{0}}},
+        PackFile{path: "native.key", bytes: "f2a10ea90b64b2a5df415c5912d5a42da5d3cda2c0cd122c0e42117dea596b33\n".bytes()},
+        PackFile{path: "jet_runtime.pack.o", bytes: [U8]{U8{127}, U8{69}, U8.from_int(byte) ?? U8{0}}},
     }
 }
 

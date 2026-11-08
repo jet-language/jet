@@ -476,7 +476,7 @@ cli_cc_report_provider_error: fn(error: ProviderError) -[IO, Env, Time.Wait]> {
 cli_cc_report_execution_error: fn(error: BuildExecutionError) -[IO, Env, Time.Wait]> {
     theme: Theme.resolve_choice(ColorChoice.Auto)
     if error == {
-        .SandboxUnavailable -> theme.error_coded("E1275", "C/C++ build sandbox is unavailable", "the native action boundary could not be enforced", "install the native sandbox backend and retry; Jet will not run the compiler unsandboxed")
+        .SandboxUnavailable(reason) -> theme.error_coded("E1275", "C/C++ build sandbox is unavailable", reason, "install the native sandbox backend and retry; Jet will not run the compiler unsandboxed")
         .Reported(report) -> theme.error_coded(report.code ?? "E3505", "C/C++ compiler action failed", build_report_render(report), "fix the reported compiler or linker error; no artifact was accepted")
         .MissingGrant(action, capability) -> theme.error_coded("E1340", "C/C++ action lacked its required build grant", "action `{action}` requested `{capability.name()}`", "retry through the canonical `jet cc` or `jet c++` entry point")
         .IO(action, detail) -> theme.error_coded("E1340", "C/C++ build action could not complete", "action `{action}`: {detail}", "check the project paths and declared toolchain object, then retry")

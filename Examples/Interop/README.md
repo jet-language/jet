@@ -16,6 +16,7 @@ Run a lesson from the repository root, for example `jet run Examples/Interop/<Le
 - [InlineC](FFI/InlineC.jet)
 - [NativeC](FFI/NativeC/) — A C library binds through `#Import c.<lib>`: each symbol gets a Jet signature, so signed, unsigned, float, Bool, String and write-back `&` arguments cross…
 - [OpaqueHandles](FFI/OpaqueHandles/) — Generated opaque C handles stay checked at the Jet boundary.
+- [PlainC](FFI/PlainC.c) — A C file runs with plain `jet run PlainC.c`: Jet tells its language by the extension, compiles and links it with the C toolchain Jet programs use, and runs it.
 
 ## Languages
 

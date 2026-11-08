@@ -23,11 +23,14 @@ Its stage-2 compiler becomes the seed of the next release.
 
 ## From a fresh clone
 
-A clone and the latest published release are enough: no Nix, no
-`Tools/agent/JetEnv.jet`, nothing in `HOME` and no Jet environment variables, only
-`git`, `curl`, `jq` and OpenSSL 3. This fetches the latest release, checks its signed
-record, clones the release's tag, builds that compiler with the release's seed,
-gives it the seed's runtime pack, runs one row
+A clone, the latest published release and a C toolchain are enough: no
+`Tools/agent/JetEnv.jet`, nothing in `HOME` and no Jet environment variables,
+only `git`, `curl`, `jq`, OpenSSL 3, a C compiler (`cc`, `ar` and `nm` on
+`PATH`) and static musl (its `libc.a` and `crt1.o` in a `LIBRARY_PATH`
+folder or a usual library folder such as `/usr/lib/musl/lib`); `nix develop`
+supplies all of them. This fetches the latest release, checks its signed
+record, clones the release's tag, builds that compiler and its runtime pack
+with the release's seed, runs one row
 of the UI suite with it, runs an example, lands a patch on a scratch copy of
 the checkout and validates a ballot. `PATCH` is a `git diff` of
 your change, `MSG` a file with its commit message, `BALLOT` a ballot
@@ -44,8 +47,7 @@ openssl pkeyutl -verify -pubin -inkey ../jet/Tools/release/jet-release.pub.pem -
 jq -r '.artifacts.release[] | "\(.sha256)  \(.path)"' CANDIDATE.json | sha256sum -c --ignore-missing
 mkdir ../seed && tar -xzf "jet-$TAG-linux-x64.tar.gz" -C ../seed && (cd ../seed && sha256sum -c --quiet SHA256SUMS)
 cd ../jet && SEED=$(realpath ../seed)
-"$SEED/jet" build Compiler                     # writes Compiler/JetCli/.jet/build/jet
-"$SEED/jet" run Tools/packaging/ReuseSeedRuntime.jet -- "$SEED" Compiler/JetCli/.jet/build/jet
+"$SEED/jet" build Compiler                     # writes Compiler/JetCli/.jet/build/{jet,jet-runtime,IDENTITY}
 export PATH=$PWD/Compiler/JetCli/.jet/build:$PATH
 jet test Compiler --profile ui tests/ui/list_expected_type_mismatch.jet
 jet run Examples/Basics/Hello.jet
@@ -70,18 +72,15 @@ it; check those with the key file of a later checkout.
 a checkout, from the Core sources built into it), and its identity from the
 `IDENTITY` file beside it; `JET_TOOLCHAIN_ROOT` and
 `JET_COMPILER_IDENTITY` override both ([Environment
-variables](../reference/environment.md)). `ReuseSeedRuntime.jet` recomputes the
-source, backend and lifecycle inventories that the seed pack's
-`provenance.json` records, the way `Tools/packaging/PrebuildRuntime.jet` hashes
-them, and installs `jet-runtime/` and `IDENTITY` beside the new compiler only
-when every file matches. Otherwise it writes nothing, names how many files
-differ and the first, and points to the two ways on: the published release of
-the commit you checked out, or a runtime pack rebuilt for this checkout with
-`jet Tools/packaging/PrebuildRuntime.jet`. The testkit keeps its scratch in
-`$JET_SCRATCH_ROOT/testkit`, else `~/.cache/jet/testkit`.
+variables](../reference/environment.md)). `jet build Compiler` builds the
+compiler and then, with it, the runtime pack it lowers (`jet-runtime/`) and
+its `IDENTITY`; the pack step compiles the runtime's vendored C with the
+host C compiler and links static musl's `libc.a`. A missing compiler or musl
+stops the build before any step runs and names what it searched. The testkit
+keeps its scratch in `$JET_SCRATCH_ROOT/testkit`, else `~/.cache/jet/testkit`.
 
-A seed released before these defaults finds neither; run its two steps
-with `JET_TOOLCHAIN_ROOT=$PWD JET_COMPILER_IDENTITY=$(cat "$SEED/IDENTITY")`.
+A seed released before these defaults finds neither; run its build with
+`JET_TOOLCHAIN_ROOT=$PWD JET_COMPILER_IDENTITY=$(cat "$SEED/IDENTITY")`.
 
 `Land.jet land --scratch-copy DIR` clones the checkout into `DIR`, which must
 not exist yet, with the checkout's git identity. It applies the patch, runs
@@ -95,29 +94,28 @@ payload, with the rules Tower applies when a ballot is posted
 
 ## The chain
 
-Run it from a checkout of the commit you want to build. The compiler builds
-need nothing but `jet`; the runtime pack step compiles the runtime's vendored
-C, so run `PrebuildRuntime.jet` in the Nix development environment
-(`Tools/agent/JetEnv.jet` or `nix develop`), which supplies the host C toolchain.
-`SEED` is the seed directory, `WORK` a scratch directory outside the
-checkout, and `JET_PACK_MUSL_LIB` the `lib` directory of a static musl
-(`$(nix build --no-link --print-out-paths nixpkgs#pkgsStatic.musl)/lib`).
+Run it from a checkout of the commit you want to build, in the Nix
+development environment (`Tools/agent/JetEnv.jet` or `nix develop`): each
+`jet build Compiler` also makes the runtime pack the new compiler lowers, and
+that step compiles the runtime's vendored C with the host C toolchain and
+links the static musl `libc.a` it finds on `LIBRARY_PATH`, both of which the
+development environment supplies. `SEED` is the seed directory and `WORK` a
+scratch directory outside the checkout.
 
 ```sh
-export JET_TOOLCHAIN_ROOT=$PWD JET_COMPILER_IDENTITY=$(cat "$SEED/IDENTITY")
-"$SEED/jet" build Compiler                 # s1, written to Compiler/JetCli/.jet/build/jet
-mkdir -p "$WORK/s1" && cp Compiler/JetCli/.jet/build/jet "$WORK/s1/"
-JET="$SEED/jet" "$SEED/jet" Tools/packaging/PrebuildRuntime.jet "$WORK/s1/jet" "$WORK/s1/jet-runtime" --repo "$PWD"
-"$WORK/s1/jet" build Compiler              # s2, built by s1 with s1's own runtime pack
+"$SEED/jet" build Compiler        # s1: Compiler/JetCli/.jet/build/{jet,jet-runtime,IDENTITY}
+mkdir -p "$WORK" && cp -r Compiler/JetCli/.jet/build "$WORK/s1"
+"$WORK/s1/jet" build Compiler     # s2, built by s1 with s1's own runtime pack
 ```
 
-Copy `s2` out and give it a runtime pack the same way, adding
-`--identity jet@<version>#<sha256 of s2>`, then build `s3` with
-it, setting `JET_COMPILER_IDENTITY` to that identity. The
-build is trusted when `s2` and `s3` are byte-identical. Every release proves
-that fixed point. The trusting-trust check compares the `s2` of two chains
-that start from different seeds, for example a published seed and one rebuilt
-from the `rust` branch.
+The build writes `IDENTITY` (`jet@<version>#<sha256 of jet>`) beside the
+compiler it makes, so each stage runs under its own identity. Copy `s2` out
+the same way and build `s3` with it. The build is trusted when `s2` and `s3`
+are byte-identical, and the runtime pack `s2` builds is byte-identical to the
+one `s1` built for it. Every release proves that fixed point. The
+trusting-trust check compares the `s2` of two chains that start from
+different seeds, for example a published seed and one rebuilt from the
+`rust` branch.
 
 The jump from a seed to the commit you want must stay small, because a seed
 only builds sources its own language level accepts. To cross many releases,

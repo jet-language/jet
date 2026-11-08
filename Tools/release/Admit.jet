@@ -11,8 +11,8 @@
 // not stop at the first failure:
 //   chain     Tools/agent/Chain.jet builds s1, s2 and s3 of COMMIT from the current release, every stage
 //             without Rust on PATH, and must reach the fixed point (s2 == s3).
-//   pack      the runtime pack, rebuilt by s2 without Rust, must equal the chain's pack2 byte
-//             for byte.
+//   pack      the runtime pack, rebuilt by s2 without Rust (`jet build Compiler`), must
+//             equal the chain's pack2 byte for byte.
 //   cc-pack   Tools/agent/cc-pack.nix builds this host's C toolchain pack from pinned sources
 //             (the only place Nix runs); its SHA-256 and size must equal CC_PACK_ASSETS in
 //             Jetpack/Provider/Source/Toolchain/CcToolchainPack.jet, the hash jet embeds.
@@ -59,7 +59,7 @@
 //
 // Environment: the roots of Tools/agent/roots.sh, JET_RELEASE_WORK (default
 // $JET_STATE_ROOT/release), JET_RELEASE_SLOT (empty runs without a build slot),
-// JET_PACK_MUSL_LIB, JET_KEYS_DIR (where the jet-release signing key lives).
+// JET_KEYS_DIR (where the jet-release signing key lives).
 // Exit: 0 released and published, 1 a check or a publication step failed (not admitted),
 // 2 the run could not start.
 
@@ -534,7 +534,6 @@ Pre: struct {
     root: String
     seeds: String
     work_root: String
-    musl: String
     sha: String
     release: SeedRelease
     dispositions: [Disposition]
@@ -549,7 +548,6 @@ preconditions: fn(options: AdmitOptions, root: String) -[Env, Exec, FS, Time.Wai
     errors := options.errors.copy()
     seeds: absolute_or(if options.seeds != "" -> options.seeds else -> seeds_root())
     work_root: absolute_or(if options.work != "" -> options.work else -> env_or("JET_RELEASE_WORK", files.join(state_root(), "release")))
-    musl: env_or("JET_PACK_MUSL_LIB", MUSL_DEFAULT)
     sha := ""
     if options.commit != "" {
         parsed: git_in(root, [String]{"rev-parse", "--verify", "{options.commit}^{{commit}}"})
@@ -562,7 +560,6 @@ preconditions: fn(options: AdmitOptions, root: String) -[Env, Exec, FS, Time.Wai
     }
     release: release_info(seeds)
     if release.error != "" -> errors.push(release.error.copy())
-    if !files.exists(files.join(musl, "libc.a")) -> errors.push("no musl libc.a in {musl} (JET_PACK_MUSL_LIB)")
     key: publication_key_paths(RELEASE_KEY).seed_path
     if options.filter == "" && !files.exists(key) -> errors.push("no release signing key at {key}: create it with `jet registry keygen --registry {RELEASE_KEY}`")
     dispositions := [Disposition]{}
@@ -580,7 +577,7 @@ preconditions: fn(options: AdmitOptions, root: String) -[Env, Exec, FS, Time.Wai
     // The preflight gate, once the run could otherwise start: COMMIT's
     // receipt from a census by the current release.
     admission: if errors.len() > 0 -> Admission{admitted: false, text: ""} else -> preflight_gate("release-compiler", root, release.dir, sha)
-    Pre{errors: errors, root: root.copy(), seeds: seeds, work_root: work_root, musl: musl, sha: sha, release: release, dispositions: dispositions, admission: admission}
+    Pre{errors: errors, root: root.copy(), seeds: seeds, work_root: work_root, sha: sha, release: release, dispositions: dispositions, admission: admission}
 }
 
 GateRow: struct {
@@ -738,25 +735,22 @@ tree_differences: fn(root: String, other: String) -[FS]> (differ: [String], file
 }
 
 pack_stage: fn(ctx: &Ctx) Never! -[Env, Exec, FS, IO, Time, Time.Wait]> {
-    dir: files.join(ctx.work, "pack")
-    files.create_dir_all(dir) ?? ()
     log: files.join(ctx.work, "logs/pack.log")
-    copy_file(ctx.candidate.jet, files.join(dir, "jet"), true) ?? {
-        row(ctx, "pack", "FAIL", "cannot copy s2 to {dir}: {err}")
-        return
-    }
-    vars: with_vars(ctx.vars, [Var]{set_var("JET_COMPILER_IDENTITY", ctx.candidate.identity), set_var("JET_TOOLCHAIN_ROOT", ctx.tree), set_var("JET", ctx.candidate.jet)})
-    // s2, with pack2 beside it, runs the packaging tool; the copy beside the
-    // empty pack directory lowers the runtime. The pack compiles the runtime's
-    // vendored C with a host C toolchain, which only the dev shell supplies
-    // until jet does.
-    argv: in_dev_shell(ctx.candidate.jet, ctx.tree, true, [String]{ctx.candidate.jet.copy(), files.join(ctx.tree, "Tools/packaging/PrebuildRuntime.jet"), files.join(dir, "jet"), files.join(dir, "jet-runtime"), "--repo", ctx.tree.copy()})
+    built: files.join(ctx.tree, "Compiler/JetCli/.jet/build")
+    remove_tree(built)
+    vars: with_vars(ctx.vars, [Var]{set_var("JET_COMPILER_IDENTITY", ctx.candidate.identity), set_var("JET_TOOLCHAIN_ROOT", ctx.tree)})
+    // s2 builds the toolchain: the jet it builds is s2's bytes at the fixed
+    // point, and the runtime pack beside it is that jet's lowering. The pack
+    // compiles the runtime's vendored C with a host C toolchain and links
+    // static musl, which only the dev shell supplies until jet does.
+    argv: in_dev_shell(ctx.candidate.jet, ctx.tree, true, [String]{ctx.candidate.jet.copy(), "build", "Compiler"})
     result: run_logged(argv, ctx.tree, vars, log, 3600)
-    if result.rc != 0 || !files.exists(files.join(dir, "jet-runtime")) {
+    pack: files.join(built, "jet-runtime")
+    if result.rc != 0 || !files.exists(files.join(pack, "native.key")) {
         row(ctx, "pack", "FAIL", "the pack rebuild by s2 failed rc={result.rc}: {tail_of(log, 8)}")
         return
     }
-    compared: tree_differences(files.join(dir, "jet-runtime"), ctx.candidate.runtime)
+    compared: tree_differences(pack, ctx.candidate.runtime)
     if compared.differ.len() > 0 {
         shown: compared.differ[0..<if compared.differ.len() > 8 -> 8 else -> compared.differ.len()].join(", ")
         row(ctx, "pack", "FAIL", "the rebuilt pack differs from pack2 in {compared.differ.len()} file(s): {shown}")
@@ -1413,7 +1407,7 @@ run_gate: fn(options: AdmitOptions, pre: Pre) -[Env, Exec, FS, IO, Time, Time.Wa
     ctx := Ctx{
         options: options.copy(), root: pre.root.copy(), seeds: pre.seeds.copy(), work_root: pre.work_root.copy(), work: work.copy(),
         sha: pre.sha.copy(), release: pre.release.copy(),
-        vars: [Var]{set_var("JET_PACK_MUSL_LIB", pre.musl), set_var("TMPDIR", files.join(work, "tmp")), drop_var("JET")},
+        vars: [Var]{set_var("TMPDIR", files.join(work, "tmp")), drop_var("JET")},
         dispositions: pre.dispositions.copy(), next: next_release_name(release_names(pre.seeds)),
         tree: files.join(work, "tree"), release_tree: files.join(work, "release-tree"), log: files.join(work, "release.log"),
         built: false, candidate: Built{jet: "", runtime: "", sha: "", identity: "", jetpack: "", s2: "", s3: ""},

@@ -665,6 +665,25 @@ exit status. Run flags other than `--release`, `--profile`, `--verbose`, `--quie
 `--json`, `--color`, `--threads`, `--trace`, `--allow`, `-A`, and `--deny` are
 refused with E2104, naming the card the command model gives them, until they are ported.
 
+Jet tells a file's language by its extension. A `.jet` file, or one with no
+extension, is Jet source. `jet run`, `jet build` and the `jet <file>`
+shorthand also take a C file (`.c`) or a C++ file (`.cc`, `.cpp`, `.cxx`):
+they compile and link it in one command of the C toolchain Jet programs
+compile their own C with (`CC`/`AR` when set, else the C toolchain pack
+`jetpack` provides), into `.jet/build/<stem>` in the nearest directory at or
+above the file that holds `package.jet`, or the file's own directory. The
+compile is O0 for `jet run` and O1 for `jet build`; `--release` (or
+`--optimize=full`) is O2, and `--optimize=none|basic` picks O0 or O1. A
+run then runs the program on the caller's stdin, stdout and stderr with the
+same arguments a Jet program gets, and exits as it exits. The C toolchain
+links no C++ standard library. The compiler's report of a file it rejects
+goes to stderr, and the command exits 1. Other Jet flags are refused with
+E2104. A file with any other extension is refused with E2116, which names
+the extensions the command takes: `jet check`, `jet doc` and `jet dev` take
+`.jet` alone. The exception is a script whose first line is a `#!` line naming
+jet (`#!/usr/bin/env jet`). It is Jet source whatever its name, since the
+kernel runs it with jet.
+
 `jet -e CODE [args...]` runs CODE as the body of `run: fn`: `jet -e 'print(1 + 2)'`
 prints 3. A `;` between statements stands for the line break a file would
 have (`jet -e 'name := 1; print(name)'`). CODE is checked as a file is, so a

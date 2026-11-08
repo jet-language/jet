@@ -10845,6 +10845,24 @@ CrashSymbolsMissing: struct {
     }
 }
 
+UnhandledSourceExtension: struct {
+    file: String
+    extension: String
+    command: String
+    accepted: String
+
+    impl Diagnostic {
+        code: "E2116"
+        stage: [.Jet]
+        meaning: "A command was given a file whose extension it doesn't handle (#6686)"
+        detail: true
+        no_fix: .Ambiguous
+        what: fn(self) -> String { "`jet {self.command}` doesn't handle `.{self.extension}` files like `{self.file}`." }
+        why: fn(self) -> String { "Jet tells a file's language by its extension, and `jet {self.command}` takes {self.accepted}." }
+        fix: fn(self) -> String { "Give `jet {self.command}` a `.jet` file; `jet run` and `jet build` also compile C (`.c`) and C++ (`.cc`, `.cpp`, `.cxx`)." }
+    }
+}
+
 RetiredDevPrescan: struct {
     impl Diagnostic {
         code: "E2201"

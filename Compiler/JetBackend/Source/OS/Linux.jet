@@ -856,6 +856,22 @@ os_gs_base_write_i64: fn(base: I64) {
     """
 }
 
+// rt_sigreturn from a signal handler's return: the whole body of the signal
+// restorer (ProcessSignal.jet jet_rt_process_signal_restore). The handler's
+// `ret` popped the restorer's address off the kernel's signal frame, so the
+// restorer's entry stack pointer, rbp + 8 under its `push rbp; mov rbp, rsp`
+// frame, is where rt_sigreturn finds that frame. Never returns. One of the
+// runtime's closed rails (X64/InlineAsm.jet): only the runtime library
+// assembles it.
+#[Unsafe("only a signal restorer's own frame calls this, on the stack its handler returned to"), FFI(asm)]
+os_signal_return: fn() {
+    """
+    lea rsp, [rbp + 8]
+    mov eax, 15
+    syscall
+    """
+}
+
 // The fiber switch: saves the callee-saved registers and a resume address
 // on the running stack, stores that stack pointer at `save`, and returns
 // into the stack at `target`, whose top word is the resume address another

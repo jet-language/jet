@@ -74,13 +74,109 @@ sync_futex_wait: fn(address: I64, expected: I64, deadline_ns: I64) -> I64 {
     }
 }
 
-// The platform clock_gettime reads the kernel's vDSO page in user space; a
-// raw syscall 228 enters the kernel on every clock read.
-#Import(c) sync_clock_gettime: fn(clock: I64, timespec: I64) -> I64 = "clock_gettime"
+// The kernel's vDSO clock_gettime reads its time page in user space; a raw
+// syscall 228 enters the kernel on every clock read. 0 until resolved, then
+// the code address, or 1 for none (no vDSO image or symbol).
+sync_vdso_clock := I64{0}
 
-// Reads `clock` into the two words at `timespec` (seconds, nanoseconds).
+// musl's __vdsosym("__vdso_clock_gettime") over the vDSO image the kernel
+// maps at AT_SYSINFO_EHDR: the first PT_LOAD gives the load bias, PT_DYNAMIC
+// the DT_HASH, DT_SYMTAB and DT_STRTAB tables, and the symbol is a defined
+// global or weak one of an untyped, object, function or common type. 1 when
+// there is none.
+sync_vdso_lookup: fn() -> I64 {
+    image: host_getauxval(I64{33})
+    if (image == I64{0}) -> return I64{1}
+    headers: wrapping(image + sync_word(image, I64{32}))
+    entry: net_load_uint(wrapping(image + I64{54}), I64{2})
+    count: net_load_uint(wrapping(image + I64{56}), I64{2})
+    bias := I64{0}
+    loaded := false
+    dynamic := I64{0}
+    at := I64{0}
+    loop at < count {
+        header: wrapping(headers + at * entry)
+        kind: net_load_uint(header, I64{4})
+        if (kind == I64{1} && !loaded) {
+            bias = wrapping(wrapping(image + sync_word(header, I64{8})) - sync_word(header, I64{16}))
+            loaded = true
+        } else if (kind == I64{2}) {
+            dynamic = wrapping(image + sync_word(header, I64{8}))
+        }
+        at += I64{1}
+    }
+    if (!loaded || dynamic == I64{0}) -> return I64{1}
+    hash := I64{0}
+    strings := I64{0}
+    symbols := I64{0}
+    field := sync_word(dynamic, I64{0})
+    loop field != (I64{0}) {
+        value: wrapping(bias + sync_word(dynamic, I64{8}))
+        if (field == I64{4}) -> hash = value
+        if (field == I64{5}) -> strings = value
+        if (field == I64{6}) -> symbols = value
+        dynamic = wrapping(dynamic + I64{16})
+        field = sync_word(dynamic, I64{0})
+    }
+    if (hash == I64{0} || strings == I64{0} || symbols == I64{0}) -> return I64{1}
+    name: rt_static_text("__vdso_clock_gettime")
+    total: net_load_uint(wrapping(hash + I64{4}), I64{4})
+    at = I64{0}
+    loop at < total {
+        symbol: wrapping(symbols + at * I64{24})
+        info: net_load_uint(wrapping(symbol + I64{4}), I64{1})
+        typed: (I64{1} << info.bit_and(I64{15})).bit_and(I64{39}) != I64{0}
+        bound: (I64{1} << (info >> I64{4})).bit_and(I64{1030}) != I64{0}
+        defined: net_load_uint(wrapping(symbol + I64{6}), I64{2}) != I64{0}
+        if (typed && bound && defined && sync_vdso_name(wrapping(strings + net_load_uint(symbol, I64{4})), name)) {
+            return wrapping(bias + sync_word(symbol, I64{8}))
+        }
+        at += I64{1}
+    }
+    I64{1}
+}
+
+// One word of the vDSO image, which the kernel maps readable for the
+// process lifetime.
+sync_word: fn(base: I64, offset: I64) -> I64 {
+    #Unsafe("base points into the kernel's vDSO image, mapped readable for the process lifetime") {
+        return os_load_i64(wrapping(base + offset))
+    }
+}
+
+// Whether the NUL-terminated symbol name at `text` is the static text `name`.
+sync_vdso_name: fn(text: I64, name: I64) -> Bool {
+    data: rt_text_word(name)
+    length: rt_text_word(wrapping(name + I64{8}))
+    at := I64{0}
+    loop at < length {
+        if (rt_text_byte(wrapping(text + at)) != rt_text_byte(wrapping(data + at))) -> return false
+        at += I64{1}
+    }
+    rt_text_byte(wrapping(text + length)) == I64{0}
+}
+
+// Reads `clock` into the two words at `timespec` (seconds, nanoseconds), as
+// musl's clock_gettime: the vDSO's call, then the system call unless the vDSO
+// refused the clock (EINVAL).
 sync_clock_read: fn(clock: I64, timespec: I64) {
-    if (sync_clock_gettime(clock, timespec) != I64{0}) { jet_rt_unreachable(I64{0}, I64{0}) }
+    code := sync_vdso_clock
+    if (code == I64{0}) {
+        code = sync_vdso_lookup()
+        #Unsafe("an idempotent install: every writer stores the same resolved address") { sync_vdso_clock = code }
+    }
+    status := I64{-38}
+    if (code != I64{1}) {
+        #Unsafe("the vDSO's clock_gettime(clockid_t, struct timespec *) writes the caller's two timespec words") {
+            status = net_i32(os_call_address_two_i64(code, clock, timespec))
+        }
+    }
+    if (status != I64{0} && status != I64{-22}) {
+        #Unsafe("clock_gettime writes the caller's two timespec words") {
+            status = os_syscall_i64(I64{228}, clock, timespec, I64{0}, I64{0}, I64{0}, I64{0})
+        }
+    }
+    if (status != I64{0}) { jet_rt_unreachable(I64{0}, I64{0}) }
 }
 
 sync_now_ns: fn() -> I64 {

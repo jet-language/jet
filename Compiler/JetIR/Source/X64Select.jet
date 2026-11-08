@@ -4177,10 +4177,11 @@ ir_x64_test_sha_line: fn(line: String) -> [U8] Never! {
     assert(x64_assemble_template("pshufd xmm1, xmm1, 177 ; -> return", names, true, false).error != None)
 }
 
-// The fiber switch and GS base write rails assemble, to their fixed bytes,
-// only for the runtime library and only as their exact templates: a program's
-// leaf with the same text gets the strict grammar's refusal.
-#Test("The fiber switch and GS base rails assemble only for the runtime library") {
+// The fiber switch, GS base write and signal return rails assemble, to their
+// fixed bytes, only for the runtime library and only as their exact
+// templates: a program's leaf with the same text gets the strict grammar's
+// refusal.
+#Test("The fiber switch, GS base and signal return rails assemble only for the runtime library") {
     switch: "push rbp\npush rbx\npush r12\npush r13\npush r14\npush r15\nlea rax, [rip + 1f]\npush rax\nmov qword ptr [{{save}}], rsp\nmov rsp, {{target}}\nxor ebp, ebp\nret\n1:\npop r15\npop r14\npop r13\npop r12\npop rbx\npop rbp"
     pair: [String]{"save", "target"}
     railed: x64_assemble_template(switch, pair, false, true)
@@ -4193,6 +4194,11 @@ ir_x64_test_sha_line: fn(line: String) -> [U8] Never! {
     assert(gs.error == None)
     assert(gs.code == [U8]{0xf3, 0x48, 0x0f, 0xae, 0xdf})
     assert(x64_assemble_template("wrgsbase {{base}}", [String]{"base"}, false, false).error != None)
+    restore: "lea rsp, [rbp + 8]\nmov eax, 15\nsyscall"
+    returned: x64_assemble_template(restore, [String]{}, false, true)
+    assert(returned.error == None)
+    assert(returned.code == [U8]{0x48, 0x8d, 0x65, 0x08, 0xb8, 0x0f, 0, 0, 0, 0x0f, 0x05})
+    assert(x64_assemble_template(restore, [String]{}, false, false).error != None)
 }
 
 // count(n) counts i up to n; the Loop is line 3 and its first instruction

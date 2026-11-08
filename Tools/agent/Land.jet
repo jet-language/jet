@@ -52,9 +52,9 @@
 // file the worktree no longer has is deleted from the snapshot. In package
 // form in the snapshot, with the seed ($JET_SEED, else CENSUS_JET_DIR):
 // `jet check Compiler/JetCli` (sema of the CLI and every package it depends
-// on), then `jet build Compiler` (optimize, lowering, object and link rows),
-// then the runtime pack lowered by the compiler just built (as chain s1's
-// pack step does), then that compiler's own `jet check Compiler/JetCli` (as
+// on), then `jet build Compiler` in the dev shell (optimize, lowering,
+// object and link rows; it also makes the runtime pack the new compiler
+// lowers, as chain s1 does), then that compiler's own `jet check Compiler/JetCli` (as
 // chain s2 does) and its `jet check Core` (every Core body, called or not;
 // it moves to the seed's check once the seed carries `jet check Core`), each
 // with keep-going and every row of its report listed at its file:line. Each
@@ -154,8 +154,8 @@ IDENTITY_TREES: [String]{"Compiler", "Core", "Jetpack"}
 // is admitted around them (the batch regenerates them from its sources).
 GENERATED_VIEWS: [String]{"Compiler/JetCli/Source/Cli/CoreSources.jet", "Compiler/JetCli/Source/Cli/CoreStructureRows.jet", "Compiler/JetFoundation/Source/Registry/CoreCallRows.jet", "Compiler/JetFoundation/Source/Registry/CoreEnumRows.jet", "Compiler/JetFoundation/Source/Registry/CoreSourceOwned.jet", "Compiler/JetFoundation/Source/Registry/EffectVocabulary.jet"}
 // Every heavy pass: its address space capped at HEAVY_MEMORY (each process of
-// the runtime pack's tree gets its own cap; the other passes are one jet
-// process), low priority, pinned CPUs and the compiler's 1 GiB stack.
+// the build's tree, the runtime pack's steps among them, gets its own cap),
+// low priority, pinned CPUs and the compiler's 1 GiB stack.
 HEAVY_MEMORY: 34359738368
 HEAVY_CPUS: "16-27"
 HEAVY_STACK: "--stack=1073741824:1073741824"
@@ -876,13 +876,6 @@ clip: fn(text: String, limit: Int) -> String Never! {
     out
 }
 
-// The last `limit` bytes of `text`.
-tail_text: fn(text: String, limit: Int) -> String Never! {
-    raw: text.bytes()
-    if raw.len() <= limit -> return text.copy()
-    String.from_bytes_lossy(raw.slice(raw.len() - limit, raw.len()))
-}
-
 show: fn(lines: [String], limit: Int) -[IO]> {
     loop at in 0..<lines.len() {
         if at >= limit -> break
@@ -971,9 +964,12 @@ census: fn(named: [String], passes: Passes) -[Exec, Env, FS, IO, Time, Time.Wait
     if checked != 0 || check_rows != 0 -> return 1
     if !passes.build -> return 0
 
+    // `jet build Compiler` makes jet and, beside it, the runtime pack that jet
+    // lowers; the pack compiles the runtime's vendored C and links static musl
+    // with the host C toolchain the dev shell supplies (Tools/agent/JetEnv.jet).
     files.remove_all("{snap}/Compiler/JetCli/.jet/build") ?? ()
     build_report: "{out}/build-keep-going.tsv"
-    built: run_heavy(snap, 1800, [String]{seed_jet, "build", "--threads", "12", "Compiler"}, compile_env(identity, snap, build_report), "{out}/build")
+    built: run_heavy(snap, 1800, [String]{seed_jet, "{snap}/Tools/agent/JetEnv.jet", seed_jet, "build", "--threads", "12", "Compiler"}, compile_env(identity, snap, build_report), "{out}/build")
     build_rows: report_rows(build_report)
     print("build rc={built} rows={build_rows}")
     show(census_rows(build_report, snap, package_dirs), 21)
@@ -981,17 +977,13 @@ census: fn(named: [String], passes: Passes) -[Exec, Env, FS, IO, Time, Time.Wait
         print(clip(files.read("{out}/build.err") ?? "", 600))
         return 1
     }
-
-    // The runtime pack, lowered by the compiler just built, beside it (as
-    // chain s1's pack step places it).
     self_jet: "{snap}/Compiler/JetCli/.jet/build/jet"
-    if !runtime_pack(seed_jet, self_jet, snap, "{out}/runtime", identity) -> return 1
-    home: files.dirname(files.canonicalize(self_jet) ?? self_jet.copy())
-    files.remove("{home}/jet-runtime") ?? ()
-    files.symlink("{out}/runtime/out", "{home}/jet-runtime") ?? {
-        print("census: the runtime pack cannot be linked beside {self_jet}: {err}")
+    native_key: (files.read("{snap}/Compiler/JetCli/.jet/build/jet-runtime/native.key") ?? "").trim()
+    if native_key == "" {
+        print("runtime rc=1 (the build made no runtime pack beside {self_jet})")
         return 1
     }
+    print("runtime rc=0 native.key {native_key}")
     if !passes.selfcheck -> return 0
 
     self_report: "{out}/selfcheck-keep-going.tsv"
@@ -1013,53 +1005,6 @@ census: fn(named: [String], passes: Passes) -[Exec, Env, FS, IO, Time, Time.Wait
     }
     print("preflight receipt {written}")
     0
-}
-
-// The runtime pack of `tree`, lowered by `compiler`, in WORK/out; prints
-// `runtime rc=N issues=K`. `runner` runs Tools/packaging/PrebuildRuntime.jet.
-// The pack builds the runtime's vendored C with a host C toolchain, which
-// the dev shell supplies (Tools/agent/JetEnv.jet).
-runtime_pack: fn(runner: String, compiler: String, tree: String, work: String, identity: String) -[Exec, Env, FS, IO, Time.Wait]> Bool Never! {
-    musl: root("JET_PACK_MUSL_LIB", "")
-    if musl == "" {
-        print("runtime rc=2 issues=0 (set JET_PACK_MUSL_LIB to the static musl lib dir)")
-        return false
-    }
-    files.remove_all(work) ?? ()
-    files.create_dir_all("{work}/tmp") ?? ()
-    pack: "{work}/out"
-    env := compile_env(identity, tree, "")
-    env.push(Setting{name: "TMPDIR", value: "{work}/tmp"})
-    env.push(Setting{name: "JET_PACK_MUSL_LIB", value: musl.copy()})
-    env.push(Setting{name: "JET", value: runner.copy()})
-    code: run_heavy(tree, 1800, [String]{runner, "{tree}/Tools/agent/JetEnv.jet", runner, "{tree}/Tools/packaging/PrebuildRuntime.jet", compiler, pack, "--repo", tree}, env, "{work}/pack")
-    issues: issue_rows(pack)
-    if files.exists("{pack}/native.key") {
-        print("runtime rc=0 issues={issues.len()}")
-        return true
-    }
-    print("runtime rc=1 issues={issues.len()} (exit {code})")
-    show(issues, 10)
-    print(tail_text(files.read("{work}/pack.err") ?? "", 600))
-    false
-}
-
-// The lines of the pack's runtime*.issues files.
-issue_rows: fn(pack: String) -[FS]> [String] Never! {
-    rows := [String]{}
-    listed: files.list_dir(pack) ?? return rows
-    names := [String]{}
-    loop entry in listed {
-        if entry.name.starts_with("runtime") && entry.name.ends_with(".issues") -> names.push(entry.name.copy())
-    }
-    names.sort()
-    loop name in names {
-        text: files.read(files.join(pack, name)) ?? ""
-        loop line in text.lines() {
-            if line.trim() != "" -> rows.push(line.copy())
-        }
-    }
-    rows
 }
 
 // The rows of a keep-going report: its nonblank lines after the header.
@@ -1534,8 +1479,6 @@ unit_env: fn(tools: String) -[Exec, Env, FS, Time.Wait]> [Setting] Never! {
         Setting{name: "JET_COMPILER_IDENTITY", value: read_identity(seed)},
         Setting{name: "JET_TOOLCHAIN_ROOT", value: tools.copy()},
     }
-    musl: root("JET_PACK_MUSL_LIB", "")
-    if musl != "" -> env.push(Setting{name: "JET_PACK_MUSL_LIB", value: musl})
     env
 }
 
@@ -2145,25 +2088,16 @@ publish_main: fn(args: [String]) -[Exec, Env, FS, IO, Time, Time.Wait]> Int Neve
 }
 
 // `publish latest`: the batch-verified compiler (the census s1, built from
-// HEAD and the batch) with a runtime pack becomes
+// HEAD and the batch) with the runtime pack its build made becomes
 // $JET_SCRATCH_ROOT/discovery/b2/install-latest (an atomic swap), with COMMIT
 // (HEAD of the worktree `dir`) and IDENTITY (the seed's).
 publish_latest: fn(dir: String) -[Exec, Env, FS, Time.Wait]> Step Never! {
     scratch: scratch_root()
-    out: "{scratch}/discovery/r14/census"
     b2: "{scratch}/discovery/b2"
     s1: "{scratch}/discovery/r14/snap/Compiler/JetCli/.jet/build/jet"
+    pack: "{scratch}/discovery/r14/snap/Compiler/JetCli/.jet/build/jet-runtime"
     if !files.is_file(s1) -> return Step{ok: false, line: "publish-latest: no census compiler"}
-    pack := "{out}/runtime/out"
-    if !files.exists("{pack}/native.key") -> pack = "{b2}/install-latest/jet-runtime"
-    if !files.exists("{pack}/native.key") {
-        older := [Dated]{}
-        loop entry in entries(b2) {
-            if entry.name.starts_with("install-m") && files.is_dir("{b2}/{entry.name}/jet-runtime") -> older.push(Dated{path: "{b2}/{entry.name}/jet-runtime", time: mtime("{b2}/{entry.name}/jet-runtime")})
-        }
-        sorted: newest_first(older)
-        if sorted.len() > 0 -> pack = sorted[0].path.copy()
-    }
+    if !files.exists("{pack}/native.key") -> return Step{ok: false, line: "publish-latest: the census build made no runtime pack"}
     staged: "{b2}/install-latest.new.{sys.pid()}"
     files.remove_all(staged) ?? ()
     files.create_dir_all(staged) ?? return Step{ok: false, line: "publish-latest: {staged} cannot be created: {err}"}

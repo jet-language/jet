@@ -10,6 +10,7 @@ use {
     jet_driver.[JetDriverAuthorizedSourceSnapshot, JetDriverCDependency, JetDriverForeignLinkFacts, JetDriverInlineC, jet_driver_c_dependencies]
     jet_foundation.[BuildOptions, Type, build_options_list, sha256_bytes, sha256_hex_bytes]
     jet_pkg_model.[COMPILER_VERSION]
+    jetpack_foundation.[foundation_find_folder, foundation_library_folders]
 }
 
 #Error
@@ -100,12 +101,15 @@ jet_cli_native_c_run_all: fn(commands: [[String]]) -[Env, Exec, Time.Wait]> [Jet
 
 // The C compiler and archiver for the native x86-64 linker. `flags` select
 // the compiler's target, sysroot and headers and follow the compiler in
-// every command; `link_flags` follow them in the inline C proof link.
+// every command; `link_flags` follow them in a link: the inline C proof link
+// and a C or C++ program's (Host.jet jet_cli_native_source).
 JetCLINativeCTools: struct { compiler: String, archiver: String, target: String, flags: [String], link_flags: [String] }
 
 // The pack's glibc target: the ABI a host `cc` compiles for, whose sysroot
 // carries the link stubs the inline C proof link resolves against.
 JET_CLI_NATIVE_C_PACK_TARGET: "x86_64-unknown-linux-gnu"
+// The glibc target's program loader.
+JET_CLI_NATIVE_C_PACK_LOADER: "/lib64/ld-linux-x86-64.so.2"
 
 // One meaning on every tier: `CC`/`AR`, when set, name the host tools;
 // otherwise the C toolchain pack this jet ships (clang, lld and llvm-ar):
@@ -143,7 +147,9 @@ jet_cli_native_c_pack_root: fn(engine: String) -[FS, Env, Exec, Time.Wait]> Stri
     Ok(root)
 }
 
-// The tools of the unpacked pack at `root`, for its glibc target.
+// The tools of the unpacked pack at `root`, for its glibc target. A program
+// it links loads through the target's loader, which the pack's clang leaves
+// out, as `jet cc` names it (Jetpack CcDriver cli_cc_toolchain_argv).
 jet_cli_native_c_pack_at: fn(root: String) -> JetCLINativeCTools Never! {
     sysroot: "{root}/glibc/{JET_CLI_NATIVE_C_PACK_TARGET}"
     JetCLINativeCTools{
@@ -151,7 +157,7 @@ jet_cli_native_c_pack_at: fn(root: String) -> JetCLINativeCTools Never! {
         archiver: "{root}/bin/llvm-ar",
         target: JET_CLI_NATIVE_C_PACK_TARGET,
         flags: [String]{"--target={JET_CLI_NATIVE_C_PACK_TARGET}", "--sysroot={sysroot}", "-resource-dir={root}/lib/clang/21"},
-        link_flags: [String]{"-fuse-ld=lld", "--rtlib=compiler-rt", "--unwindlib=none"}
+        link_flags: [String]{"-fuse-ld=lld", "--rtlib=compiler-rt", "--unwindlib=none", "-Wl,--dynamic-linker={JET_CLI_NATIVE_C_PACK_LOADER}"}
     }
 }
 
@@ -226,15 +232,14 @@ jet_cli_native_c_build_map: fn(directory: String) -> String Never! {
 }
 
 // Core's vendored C closures (Core/Vendor/*): a Core module's `c.<lib>`
-// import links the archive Tools/packaging/PrebuildRuntime.jet compiled once for this
-// runtime, `{runtime_dir}/{key}/foreign/<lib>/lib<lib>.a`, never the
+// import links the archive the toolchain build (Compiler/build.jet) compiled
+// once for this runtime, `{runtime_dir}/foreign/<lib>/lib<lib>.a`, never the
 // machine's library and never a link-time C compile.
 jet_cli_vendored_c_library: fn(lib: String) -> Bool Never! { lib == "sqlite3" || lib == "mbedtls" }
 
-jet_cli_vendored_c_archive: fn(lib: String, runtime_dir: String, runtime_key: String?) -[FS]> String JetCLIForeignLinkError! {
-    key: runtime_key ?? return Err(jet_cli_foreign_link_error("couldn't read the Jet runtime key {runtime_dir}/{JET_CLI_RUNTIME_KEY_FILE}, which names Core's vendored C `{lib}`"))
-    archive: "{runtime_dir}/{key}/foreign/{lib}/lib{lib}.a"
-    if !cli_files.is_file(archive) -> return Err(jet_cli_foreign_link_error("Core's vendored C `{lib}` is not packaged with the Jet runtime: {archive} is missing; package the runtime with `jet Tools/packaging/PrebuildRuntime.jet <jet>`"))
+jet_cli_vendored_c_archive: fn(lib: String, runtime_dir: String) -[FS]> String JetCLIForeignLinkError! {
+    archive: "{runtime_dir}/foreign/{lib}/lib{lib}.a"
+    if !cli_files.is_file(archive) -> return Err(jet_cli_foreign_link_error("Core's vendored C `{lib}` is not packaged with the Jet runtime: {archive} is missing; build the toolchain with `jet build Compiler`"))
     Ok(archive)
 }
 
@@ -486,9 +491,9 @@ jet_cli_foreign_option_path: fn(root: String, written: String) -> String Never! 
 // provider archives (with the libraries the `libs` and `link_args` build
 // options add), the `link_args` archives, the realized Rust helper archive
 // `rust_helper` (its exact StaticLibrary) and the inline C archive, in that
-// order. `runtime_key` names the runtime whose vendored C archives Core's
-// `c.<lib>` imports link (None when the key could not be read).
-jet_cli_native_c_closure: fn(facts: JetDriverForeignLinkFacts, rust_helper: String?, sources: JetCLIForeignSources, runtime_dir: String, runtime_key: String?) -[FS, Env, Exec, Time.Wait]> JetCLIForeignInputs JetCLIForeignLinkError! {
+// order. Core's `c.<lib>` imports link the vendored C archives of the runtime
+// in `runtime_dir`.
+jet_cli_native_c_closure: fn(facts: JetDriverForeignLinkFacts, rust_helper: String?, sources: JetCLIForeignSources, runtime_dir: String) -[FS, Env, Exec, Time.Wait]> JetCLIForeignInputs JetCLIForeignLinkError! {
     inputs := JetCLIForeignInputs{names: [String]{}, bytes: [[U8]]{}, paths: [String]{}}
     root: sources.root
     // Every archive key hashes the tools, flags, source and preprocessed
@@ -538,7 +543,7 @@ jet_cli_native_c_closure: fn(facts: JetDriverForeignLinkFacts, rust_helper: Stri
         }
         if directories.len() > 1 -> return Err(jet_cli_foreign_link_error("C dependency `{lib}` has conflicting declarations"))
         if jet_cli_vendored_c_library(lib) && directories.len() == 0 {
-            path: jet_cli_vendored_c_archive(lib, runtime_dir, runtime_key) ?? return Err(err)
+            path: jet_cli_vendored_c_archive(lib, runtime_dir) ?? return Err(err)
             jet_cli_foreign_add(inputs, path) ?? return Err(err)
             next
         }
@@ -606,15 +611,15 @@ jet_cli_native_c_closure: fn(facts: JetDriverForeignLinkFacts, rust_helper: Stri
     Ok(inputs)
 }
 
-// The program-only platform archive `name`: the copy packaging placed beside
-// the runtime, else the development toolchain's (musl's libc.a, or the C
-// compiler's archive, exactly as runtime packaging selects it).
+// The program-only platform archive `name`: the copy the toolchain build placed
+// beside the runtime, else the development toolchain's (the musl `libc.a` a
+// find_folder search chooses on LIBRARY_PATH, or the C compiler's archive).
 jet_cli_foreign_platform_archive: fn(runtime_dir: String, name: String) -[FS, Env, Exec, Time.Wait]> String JetCLIForeignLinkError! {
     packaged: "{runtime_dir}/foreign/platform/{name}"
     if cli_files.is_file(packaged) -> return Ok(packaged)
     if name == "libc.a" {
-        musl: cli_sys.get("JET_PACK_MUSL_LIB") ?? return Err(jet_cli_foreign_link_error("the toolchain's musl libc.a was not packaged for foreign programs"))
-        return Ok("{musl}/libc.a")
+        musl: foundation_find_folder(name, foundation_library_folders()).found ?? return Err(jet_cli_foreign_link_error("the toolchain's musl libc.a was not packaged for foreign programs, and no folder on LIBRARY_PATH holds musl's static `libc.a`"))
+        return Ok("{musl.folder}/libc.a")
     }
     tools: jet_cli_native_c_tools() ?? return Err(err)
     probe := jet_cli_native_c_argv(tools)
@@ -632,8 +637,8 @@ jet_cli_foreign_platform_archive: fn(runtime_dir: String, name: String) -[FS, En
 // with the Jet-only runtime object. The runtime pack already holds a private,
 // initialized libc; a second libc beside it would be uninitialized.
 // Programs without a foreign closure preserve the original link line exactly.
-jet_cli_native_c_inputs: fn(facts: JetDriverForeignLinkFacts, rust_helper: String?, sources: JetCLIForeignSources, runtime_dir: String, runtime_key: String?) -[FS, Env, Exec, Time.Wait]> JetCLIForeignInputs JetCLIForeignLinkError! {
-    inputs := jet_cli_native_c_closure(facts, rust_helper, sources, runtime_dir, runtime_key) ?? return Err(err)
+jet_cli_native_c_inputs: fn(facts: JetDriverForeignLinkFacts, rust_helper: String?, sources: JetCLIForeignSources, runtime_dir: String) -[FS, Env, Exec, Time.Wait]> JetCLIForeignInputs JetCLIForeignLinkError! {
+    inputs := jet_cli_native_c_closure(facts, rust_helper, sources, runtime_dir) ?? return Err(err)
     has_c: inputs.names.len() > 0 || facts.libraries.len() > 0 || facts.direct_links.len() > 0 || facts.transitive_links.len() > 0 || facts.c_or_rust_rows
     if !has_c -> return Ok(inputs)
     loop name in ([String]{"libc.a", "libgcc_eh.a", "libgcc.a"}) {
