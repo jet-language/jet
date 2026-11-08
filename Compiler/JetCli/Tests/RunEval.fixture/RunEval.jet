@@ -2,7 +2,9 @@
 // ScriptCache.jet jet_cli_eval_file). The code prints and exits 0; a rerun of
 // the same code runs the same entry file in the same slot; a `;` separates
 // statements; code that names an undefined binding is refused with E0107
-// before anything runs. Runs with its own XDG cache.
+// before anything runs. `jet run -e CODE` runs it the same way; a `-e` after
+// a run's program is refused with E2104, and `jet dev -e` with E2102. Runs
+// with its own XDG cache.
 // Usage: jet run Compiler/JetCli/Tests/RunEval.fixture/RunEval.jet -- <jet> <scratch>
 // Run from the repository root: it is the toolchain root the runs use.
 // It prints one line, the CompilerRegistries row's exact verdict.
@@ -17,7 +19,7 @@ fail: fn(message: String) -> Never {
     process.exit(1)
 }
 
-// One finished `jet -e`.
+// One finished `jet` run.
 Ran: struct {
     code: Int
     signal: Int
@@ -25,9 +27,17 @@ Ran: struct {
     errors: String
 }
 
-eval: fn(jet: String, repo: String, work: String, cache: String, code: String) -> Ran {
-    receipt: process.cmd([String]{jet.copy(), "-e", code.copy()}).cwd(work.copy()).env("JET_TOOLCHAIN_ROOT", repo.copy()).env("XDG_CACHE_HOME", cache.copy()).env("NO_COLOR", "1").run() ?? fail("jet -e failed to start: {err}")
+// `jet <args>` run in `work` with the cache `cache`.
+jet_run: fn(jet: String, repo: String, work: String, cache: String, args: [String]) -> Ran {
+    argv := [String]{jet.copy()}
+    loop arg in args -> argv.push(arg.copy())
+    receipt: process.cmd(argv).cwd(work.copy()).env("JET_TOOLCHAIN_ROOT", repo.copy()).env("XDG_CACHE_HOME", cache.copy()).env("NO_COLOR", "1").run() ?? fail("jet {args.join(" ")} failed to start: {err}")
     Ran{code: receipt.code, signal: receipt.signal ?? 0, output: receipt.output.copy(), errors: receipt.errors.copy()}
+}
+
+// One finished `jet -e CODE`.
+eval: fn(jet: String, repo: String, work: String, cache: String, code: String) -> Ran {
+    jet_run(jet, repo, work, cache, [String]{"-e", code.copy()})
 }
 
 // Every entry name of `directory`, sorted.
@@ -73,5 +83,16 @@ run: fn() {
     if typo.code == 0 || typo.signal != 0 -> fail("typo: code={typo.code} signal={typo.signal}, expected a refusal\n{typo.errors}")
     if typo.output != "" -> fail("typo: ran and printed {typo.output.debug()}")
     if !typo.errors.contains("E0107") -> fail("typo: stderr names no E0107:\n{typo.errors}")
-    term.print("run-eval: `jet -e` prints, separates statements with `;`, reruns its entry file and refuses an undefined name before running: ok")
+
+    via_run: jet_run(jet, repo, work, cache, [String]{"run", "-e", "print(1 + 2)"})
+    if via_run.code != 0 || via_run.signal != 0 || via_run.output != "3\n" -> fail("jet run -e: code={via_run.code} signal={via_run.signal} stdout {via_run.output.debug()}\n{via_run.errors}")
+
+    files.write("{work}/hello.jet", "run: fn() {{\n    print(1)\n}}\n") ?? fail("cannot write hello.jet: {err}")
+    late: jet_run(jet, repo, work, cache, [String]{"run", "hello.jet", "-e", "print(2)"})
+    if late.code == 0 || late.output != "" -> fail("jet run hello.jet -e: code={late.code} stdout {late.output.debug()}, expected a refusal")
+    if !late.errors.contains("E2104") -> fail("jet run hello.jet -e: stderr names no E2104:\n{late.errors}")
+    dev: jet_run(jet, repo, work, cache, [String]{"dev", "-e", "print(2)"})
+    if dev.code == 0 || dev.output != "" -> fail("jet dev -e: code={dev.code} stdout {dev.output.debug()}, expected a refusal")
+    if !dev.errors.contains("E2102") -> fail("jet dev -e: stderr names no E2102:\n{dev.errors}")
+    term.print("run-eval: `jet -e` and `jet run -e` print, separate statements with `;`, rerun their entry file, refuse an undefined name before running and refuse a `-e` after the program or with `jet dev`: ok")
 }

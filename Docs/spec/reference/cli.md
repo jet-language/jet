@@ -671,7 +671,9 @@ have (`jet -e 'name := 1; print(name)'`). CODE is checked as a file is, so a
 misspelled name is refused before anything runs. The file that holds it is
 kept under the kept programs' directory (`eval/`, named by the content hash),
 and the rest runs as `jet <that file> [args...]`, so the same code reruns its
-kept program. Flags that come before `-e` are the run's.
+kept program. Flags that come before `-e` are the run's. `jet run -e CODE`
+runs the same way. A `-e` after the program (`jet run hello.jet -e …`) is
+refused with E2104, and `jet dev -e` with E2102.
 
 `jet run - [args...]` runs the program read from standard input
 (`jet run - < hello.jet`, or a pipe). Its source is kept the same way, under

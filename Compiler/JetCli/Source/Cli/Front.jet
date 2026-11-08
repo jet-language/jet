@@ -741,15 +741,21 @@ jet_cli_shorthand_file: fn(argv: [String]) -[FS]> Int? Never! {
 }
 
 // The argv index of `jet -e CODE`'s `-e`: a flag before the first command
-// word, as the `jet <file>` shorthand's file is the first.
+// word, as the `jet <file>` shorthand's file is the first, or right after a
+// leading `run` (`jet run -e CODE`).
 jet_cli_eval_flag_at: fn(argv: [String]) -> Int? Never! {
     skip_next := false
+    command := false
     loop (index, argument) in argv {
         if skip_next {
             skip_next = false
             next
         }
         if argument == "-e" -> return Val(index)
+        if argument == "run" && !command {
+            command = true
+            next
+        }
         if argument == "--" || !argument.starts_with("-") || argument == "-" -> return None
         if JET_CLI_SEPARATE_VALUE_FLAGS.contains(argument) -> skip_next = true
     }
@@ -1525,12 +1531,13 @@ jet_cli_build_args_refused: fn(file: String, color: Bool) -> JetCLIPlan Never! {
     jet_cli_fail("E2104", "`jet build {file} -- …` passes the words after `--` to `build: fn`, and this build runs none", jet_cli_why("E2104"), "remove the words after `--`, or build a package whose `build.jet` declares `build: fn(b: Build)` and reads them with `b.args()`", color, JET_DRIVER_EXIT_USAGE)
 }
 
-// The jet flags `jet run` honors (`--observe` is a run's alone: `jet dev`,
-// which checks its own flags, refuses it as scoped to `run`). Any other
-// registered flag on a run is refused until its port lands, never ignored;
-// an unregistered one was already refused by E2102, or is ignored by the
-// `jet <file>` shorthand as the Rust host ignores it.
-JET_CLI_RUN_PORTED_FLAGS: [String]{"--release", "--profile", "--verbose", "-v", "--quiet", "--json", "--color", "--no-color", "--threads", "--trace", "--allow", "--allow-all", "-A", "--deny", "-p", "--show-default", "--no-prepare", "--set", "--gate", "--log", "--observe"}
+// The jet flags `jet run` honors (`--observe` and `-e` are a run's alone:
+// `jet dev`, which checks its own flags, refuses them as scoped to `run`).
+// `-e` is honored before a run's target (jet_cli_eval_flag_at) and refused
+// after it. Any other registered flag on a run is refused until its port
+// lands, never ignored; an unregistered one was already refused by E2102, or
+// is ignored by the `jet <file>` shorthand as the Rust host ignores it.
+JET_CLI_RUN_PORTED_FLAGS: [String]{"--release", "--profile", "--verbose", "-v", "--quiet", "--json", "--color", "--no-color", "--threads", "--trace", "--allow", "--allow-all", "-A", "--deny", "-p", "--show-default", "--no-prepare", "--set", "--gate", "--log", "--observe", "-e"}
 
 // `--log=<filter>` of `jet run` and `jet dev`, the last one before `--`: the
 // core.log level filter the program starts with, above JET_LOG
@@ -1564,12 +1571,13 @@ jet_cli_run_entry: fn(jet_argv: [String], args: [String], passthrough: [String]?
     loop argument in jet_argv {
         if !argument.starts_with("-") || argument == "-" -> next
         if watch && (argument == "--watch" || argument == "--watch=on") -> next
-        if watch && argument == "--observe" -> return jet_cli_misplaced_flag(argument, "dev", [String]{"run"}, color)
+        if watch && (argument == "--observe" || argument == "-e") -> return jet_cli_misplaced_flag(argument, "dev", [String]{"run"}, color)
         if watch && argument == "--watch=off" {
             keep_watching = false
             next
         }
         head: argument.split("=").to_list()[0]
+        if head == "-e" -> return jet_cli_fail("E2104", "`-e` runs code in place of a program, so it comes before any", jet_cli_why("E2104"), "run the code alone: `jet -e 'print(1 + 2)'` or `jet run -e 'print(1 + 2)'`", color, JET_DRIVER_EXIT_USAGE)
         if JET_CLI_RUN_PORTED_FLAGS.contains(head) || build_option_flag_row(head) != None || !jet_cli_is_known_flag(head) -> next
         command: if watch -> "dev" else -> "run"
         return jet_cli_not_ported("{command} {head}", color)

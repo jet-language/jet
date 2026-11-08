@@ -61,6 +61,8 @@ commands=(
     )
 flags=(
         '--live[With inspect\: Process id for a live plane scope]'
+        '--observe[With run\: Expose bounded live runtime facts for attachment]'
+        '--log[With run/dev\: Set the log level filter, such as warn,shop.db=debug; above JET_LOG]'
         '--structural[With diff/merge\: Compare checked definitions by semantic identity]'
         '--base-receipt[With review\: Proof receipt for the base change-set side]'
         '--receipt[With review\: Proof receipt for the reviewed change-set side]'
@@ -104,7 +106,7 @@ flags=(
         '--advisory-db[With audit\: Path to advisory database file]'
         '--vendor-dir[With vendor\: Directory to copy dependencies into (default vendor/)]'
         '--sbom[With build\: Also write an SPDX SBOM next to the binary]'
-        '--verbose[With build/jobs\: Print the bridge steps; with check\: print the status line, proof rows, and receipt notices; with run/dev/test\: show advisory lints; with explain\: show a syntax token'\''s registry name and decision]'
+        '--verbose[With build/jobs\: Print the bridge steps; with check\: print the status line, proof rows, and receipt notices; with run\: name the effects the program uses and show advisory lints; with dev/test\: show advisory lints; with explain\: show a syntax token'\''s registry name and decision]'
         '--template[With new\: Start from a named template\: cli, ui, web, or overrides]'
         '--sort[With help\: Order commands by use (frequency, the default), A to Z (az), or Z to A (za)]'
         '--online[With doctor/inspect gates\: Allow network checks]'
@@ -118,6 +120,7 @@ flags=(
         '--watch[With dev\: Re-run on dependency changes (--watch=off runs once)]'
         '--project[With repl\: Load package settings and imports from this directory]'
         '--no-prepare[With run\: Refuse Jetpack project environment preparation]'
+        '-e[With run\: Run CODE as the body of the program'\''s run function, as jet -e CODE \[<args>\]; jet run - reads the program from standard input]'
         '--pure[With eval\: Reject code with side effects]'
         '--allow[With run/build/jobs/repl/inspect gates\: Allow comma-separated effect roots or leaves as --allow=RIGHTS]'
         '--allow-all[With run/build/inspect gates\: Allow every effect, as --allow with every right; --deny still wins. A file starting with a #!/ line runs this way]'
@@ -187,6 +190,7 @@ flags=(
         '--browser-trace[--browser-trace, `browser_trace\: true`, `t.browser_trace()`]'
         '--update[With import\: Merge generated Jet into an existing target]'
         '--coverage[With test/inspect build\: Show function or diagnostic coverage]'
+        '--times[With inspect build\: Show how long each step and target of the last build took]'
         '--ast[With emit\: Print the parsed syntax tree]'
         '--ir[With emit\: Print the slot IR the native backend builds]'
         '--fn[With emit --ast/--ir\: Print only the named function]'
@@ -214,7 +218,6 @@ flags=(
         '--builder[With jobs\: Select a previously bound remote builder]'
         '--a11y[With lint\: Check roles, labels, and other accessibility basics]'
         '--complexity[With lint\: Report per-function cognitive complexity]'
-        '--cost[With lint\: Show typed hidden-copy and fallback costs]'
         '--max[With lint --complexity\: Fail when a function exceeds this score]'
         '--scope[With inspect\: Choose a ledger or trust scope]'
         '--core[With inspect structure\: Show the canonical core module export facts]'
@@ -229,6 +232,7 @@ flags=(
         '--reason[With exceptional budget update\: Checked-in reason]'
         '--yes[With budget update\: Apply a valid non-interactive plan]'
         '-y[Short form of --yes]'
+        '--prelude[With check\: Check a Compiler/Prelude file as the compiler embeds it]'
     )
 if (( CURRENT == 2 )); then
 _describe -t commands 'command' commands
@@ -246,6 +250,7 @@ case $words[2] in
             cache) _values 'action' 'status:Show machine-wide artifact store usage' 'prune:Prune the artifact store to a target size' 'limit:Set the host-wide artifact store limit' ;;
             os) _values 'action' 'bridge:Convert an existing system configuration to Jet' 'services:Manage development services' 'config:Manage Jet settings and trust' ;;
             gc) _values 'action' 'report:Show values moved into automatic memory management' ;;
+            perf) _values 'action' 'run:Run a program and write a .jettrace' 'test:Run tests and write a .jettrace' 'attach:Attach to a running process and write a .jettrace' 'view:Show a .jettrace summary' 'compare:Compare two .jettrace artifacts' 'export:Export a loss-declared projection of a .jettrace' ;;
             esac
 else
 _values 'flag' $flags
