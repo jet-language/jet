@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6698,
-    "rev": 96261,
+    "rev": 96264,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -60263,12 +60263,12 @@
         },
         {
           "n": 12,
-          "text": "Pairing guard: Tools/agent/LaneCheck.jet refuses a commit that adds a .mjs, .js, .cjs, .ts, .sh, .bash or .py file (or an extensionless file with a non-Jet shebang) unless a gauntlet entry under Tools/gauntlet/entries/ names that script as its original and holds its Jet twin, the shared fixtures, the expected output and a parity check, all in the same commit. Browser-executed JS and Nix/flake files are exempt (owner 2026-11-06). A planted unpaired script is refused with a message naming the file; a planted paired script and a planted browser asset pass.",
+          "text": "Pairing guard: Tools/agent/LaneCheck.jet refuses a commit that adds a .mjs, .js, .cjs, .ts, .sh, .bash or .py file (or an extensionless file with a non-Jet shebang) unless a gauntlet entry under Tools/gauntlet/entries/ names that script as its original and holds its Jet twin, the shared fixtures, the expected output and a parity check, all in the same commit. Exempt: browser-executed JS and Nix/flake files (owner 2026-11-06), and test or example subjects that a Jet case or example consumes (tests/cases, tests/fixtures, tests/run, tests/*/inputs, Examples) (owner 2026-11-08, Q26 A). A ScriptBench workload folder holding run.jet and expected.out counts as a pairing like a gauntlet entry. The exemptions live in one place in the guard. A planted unpaired script is refused with a message naming the file; a planted paired script, a planted browser asset and a planted test subject pass.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-06T18:45:11.053Z"
+          "at": "2026-11-08T18:54:54.418Z"
         },
         {
           "n": 13,
@@ -60327,7 +60327,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-20T14:41:14.806Z",
-      "updated": "2026-11-08T11:26:35.088Z",
+      "updated": "2026-11-08T18:54:54.418Z",
       "updatedBy": "Main",
       "goals": [
         "G4"
@@ -95234,6 +95234,11 @@
         {
           "at": "2026-11-08",
           "by": "Main",
+          "text": "Owner rulings 2026-11-08 (Q25). a: B, ballot a command that runs URL or registry code (jet run <url> or pkg@ver) now; c8 applies to it. b: A, --allow=R acknowledges R (left out of the notice) and resource-qualified rows still confine through Landlock. c: A, the ambient floor (IO, Mem.Alloc, Exec.Args) stays inside every written ceiling and leaves only through an explicit deny. FYI items (jet new writes no authority row; scripts lose the #! -A rule; the notice omits floor effects) stand, no objection."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
           "text": "Assigned 2026-11-08 by Main: EffectsLead (G8), starting with the c1 adversarial review. Also on EffectsLead: #6206, #6551 (ballot draft for c1) and #6129 for direction."
         }
       ],
@@ -95330,12 +95335,12 @@
         },
         {
           "n": 11,
-          "text": "Soundness (found by the c1 review, EffectsLead 2026-11-08): a written #Import(c) or other foreign import records FFI.C (or its language leaf) and is treated as reaching every effect, so deny rows, written ceilings and the #Unsafe gate apply to it (I1). Probe: deny:[FFI, Exec, FS] plus a C system() call that writes a file is refused at check time. Proof: a case per path.",
+          "text": "Soundness (found by the c1 review, EffectsLead 2026-11-08): a written #Import(c) or other foreign import records FFI.C (or its language leaf) and, with no declared effect row, is treated as reaching every effect, so deny rows and written ceilings apply to it. Probe: deny:[FFI, Exec, FS] plus a C system() call that writes a file is refused at check time. Proof: a case per path.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-08T18:51:17.965Z"
+          "at": "2026-11-08T18:54:52.282Z"
         },
         {
           "n": 12,
@@ -95358,7 +95363,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T21:37:13.788Z",
-      "updated": "2026-11-08T18:51:19.035Z",
+      "updated": "2026-11-08T18:54:53.359Z",
       "updatedBy": "Main",
       "criteriaLastN": 12
     },
@@ -189682,6 +189687,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-08T18:54:54.418Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0qe89cl",
+      "note": "#12: Owner ruling 2026-11-08 on Q26: A.; was: Pairing guard: Tools/agent/LaneCheck.jet refuses a commit that adds a .mjs, .js, .cjs, .ts, .sh, .bash or .py file (or an extensionless file with a non-Jet shebang) unless a gauntlet entry under Tools"
+    },
+    {
+      "at": "2026-11-08T18:54:53.359Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ihjl6a",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-08T18:54:52.282Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0ihjl6a",
+      "note": "#11: EffectsLead correction: safety.md gates #Import(c) by #Unsafe only when marked; no new #Unsafe requirement (that would be a new rule).; was: Soundness (found by the c1 review, EffectsLead 2026-11-08): a written #Import(c) or other foreign import records FFI.C (or its language leaf) and is treated as reaching every effect, so deny rows, wri"
+    },
     {
       "at": "2026-11-08T18:51:47.483Z",
       "by": "Main",
