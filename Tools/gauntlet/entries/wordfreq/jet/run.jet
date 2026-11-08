@@ -1,8 +1,7 @@
 use files: core.files
 
-// Word counts, ranked as main.rs ranks them: every entry collected, then a
-// full sort by count (descending) and word, the first 20 printed. The
-// collection reads the Map through to_list (its ordered copy).
+// Word counts over ASCII-whitespace tokens. top_n ranks by count
+// (descending) and word, the order the contract asks for.
 #CLI
 Args: struct {
     path: String
@@ -34,13 +33,6 @@ run: fn(args: Args) IOError! {
         counts[word] = (counts.get(word) ?? 0) + 1
         total += 1
     }
-    ranked := counts.to_list()
-    ranked.sort_by((left, right) -> (right.value <=> left.value).then(left.key <=> right.key))
-    shown := 0
-    loop item in ranked {
-        if shown == 20 -> break
-        print("{item.value} {item.key}")
-        shown += 1
-    }
-    print("distinct {ranked.len()} total {total}")
+    loop item in counts.top_n(20) -> print("{item.value} {item.key}")
+    print("distinct {counts.len()} total {total}")
 }

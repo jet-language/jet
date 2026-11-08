@@ -30,7 +30,7 @@
     }
   },
   "authoring": {
-    "jet": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Uses the shared core.regex find_all operation for the literal pattern."},
+    "jet": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Uses String.count for the non-overlapping literal matches, as the Python and Go peers do."},
     "rust": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Uses the Rust standard-library non-overlapping literal match iterator; no external regex dependency."},
     "c": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Uses the C standard-library strstr loop with non-overlapping advancement."},
     "zig": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Uses Zig standard-library literal search with non-overlapping advancement."},
@@ -39,9 +39,9 @@
     "node": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Uses the Node standard-library String.indexOf loop with non-overlapping advancement."}
   },
   "rewrite_provenance": {
-    "worker": "CorpusRegexFindAll4mb",
+    "worker": "PortsLead",
     "variant": "jet",
-    "changed": "Rewrote matching through the ratified core.regex.find_all operation with a named regex alias; the 4 MiB read, literal pattern, count, and output remain unchanged.",
+    "changed": "Counted the literal pattern with String.count instead of core.regex.find_all and a list length; the 4 MiB read, literal pattern, count, and output remain unchanged.",
     "matched": "Same generated 4 MiB corpus, literal `struct` pattern, complete-corpus non-overlapping matches, expected count 31,476, and output formatting as every peer; no input or matching work was removed.",
     "expected_output_sha256": "ebfaba9687e13131f7f918bba9d0b0f31181a6e796a0fc3d03c97905b338f97b",
     "measurement": "unrun: owner-deferred source-only rewrite; runtime and performance proof remain pending"
