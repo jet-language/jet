@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6702,
-    "rev": 96308,
+    "rev": 96309,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -88451,7 +88451,7 @@
     {
       "id": "c0l5a4vu",
       "num": 6503,
-      "title": "FFI v3 gallery: whole apps (sqlite notes, a raylib window, a raylib game with sqlite high scores)",
+      "title": "FFI v3 gallery: whole apps (sqlite notes)",
       "body": "Three complete small applications built on C libraries with no `#Unsafe`, no pointers and no binding files. Today\nJet ships a hand-written raylib module as `core.game.raylib`; under FFI v3 `use c.raylib` produces the same shape\nfrom the header plus the reviewed raylib pack. Outputs are design targets.\n\n## Simple: a notes CLI on sqlite\n\n```jet\npackage: {\n    name: \"notes\"\n    deps: { sqlite: c@system }\n}\n\nuse sql: c.sqlite3\n\nrun: fn(args: [String]) !sql.SqliteError {\n    db: sql.open(\"notes.db\")                                   // sqlite3_open_v2 / sqlite3_close as Close\n    db.exec(\"create table if not exists notes(id integer primary key, body text)\")\n    if args.len() > 0 {\n        db.prepare(\"insert into notes(body) values (?)\").bind(1, args.join(\" \")).step()\n    }\n    loop row in db.query(\"select id, body from notes order by id\") {\n        print(\"{row.int(0)}. {row.text(1)}\")\n    }\n}\n```\n\n```text\n$ jet run notes.jet buy milk\n1. buy milk\n$ jet run notes.jet call Ann\n1. buy milk\n2. call Ann\n```\n\n## Medium: a raylib window\n\n```jet\npackage: {\n    name: \"bounce\"\n    deps: { rl: c@nixpkgs:raylib }\n}\n\nuse rl: c.raylib\n\nBall: struct {\n    x: F32\n    y: F32\n    dx: F32\n    dy: F32\n}\n\nupdate: fn(ball: &Ball, w: F32, h: F32) {\n    ball.x += ball.dx\n    ball.y += ball.dy\n    if ball.x < 20.0 || ball.x > w - 20.0 -> ball.dx = -ball.dx\n    if ball.y < 20.0 || ball.y > h - 20.0 -> ball.dy = -ball.dy\n}\n\nrun: fn() {\n    rl.init_window(800, 450, \"bounce\")                          // close_window at scope end\n    rl.set_target_fps(60)\n    ball := Ball{x: 400.0, y: 225.0, dx: 4.0, dy: 3.0}\n    loop {\n        if rl.window_should_close() -> break\n        update(ball, 800.0, 450.0)\n        rl.begin_drawing()\n        rl.clear_background(rl.RAYWHITE)\n        rl.draw_circle_v(rl.Vector2{x: ball.x, y: ball.y}, 20.0, rl.MAROON)   // struct by value: layout from the header\n        rl.draw_text(\"FPS {rl.get_fps()}\", 10, 10, 20, rl.DARKGRAY)\n        rl.end_drawing()\n    }\n}\n```\n\nA window with a red ball bouncing off its edges at 60 frames per second.\n\n## Complex: a game with sqlite high scores, a worker task and audio\n\n```jet\npackage: {\n    name: \"catcher\"\n    deps: {\n        rl: c@nixpkgs:raylib\n        sqlite: c@system\n    }\n}\n\nuse rl: c.raylib\nuse sql: c.sqlite3\n\nDrop: struct {\n    x: F32\n    y: F32\n    speed: F32\n}\n\nGame: struct {\n    paddle_x: F32\n    drops: [Drop]\n    score: Int\n    lives: Int\n}\n\nsave_score: fn(name: String, score: Int) !sql.SqliteError {\n    db: sql.open(\"scores.db\")\n    db.exec(\"create table if not exists scores(name text, score integer)\")\n    db.prepare(\"insert into scores values (?, ?)\").bind(1, name).bind(2, score).step()\n}\n\ntop_scores: fn() -> [String] !sql.SqliteError {\n    db: sql.open(\"scores.db\")\n    loop row in db.query(\"select name, score from scores order by score desc limit 5\") -> \"{row.text(0)}  {row.int(1)}\"\n}\n\nstep: fn(game: &Game, dt: F32) {\n    if rl.is_key_down(.Left) -> game.paddle_x -= 400.0 * dt\n    if rl.is_key_down(.Right) -> game.paddle_x += 400.0 * dt\n    if rl.get_random_value(0, 30) == 0 {\n        game.drops.push(Drop{x: F32.from_float(Float.from_int(rl.get_random_value(10, 790))), y: 0.0, speed: 150.0})\n    }\n    kept := [Drop]{}\n    loop d in game.drops {\n        y: d.y + d.speed * dt\n        if y > 420.0 && (d.x - game.paddle_x).abs() < 50.0 {\n            game.score += 1\n            next\n        }\n        if y > 450.0 {\n            game.lives -= 1\n            next\n        }\n        kept.push(Drop{x: d.x, y: y, speed: d.speed})\n    }\n    game.drops = kept\n}\n\ndraw: fn(game: Game, best: [String]) {\n    rl.begin_drawing()\n    rl.clear_background(rl.SKYBLUE)\n    rl.draw_rectangle(Int.from_float(game.paddle_x) - 50, 430, 100, 12, rl.DARKBLUE)\n    loop d in game.drops -> rl.draw_circle(Int.from_float(d.x), Int.from_float(d.y), 8.0, rl.BLUE)\n    rl.draw_text(\"score {game.score}  lives {game.lives}\", 10, 10, 20, rl.BLACK)\n    loop i in 0..<best.len() -> rl.draw_text(best[i], 620, 10 + 22 * i, 18, rl.DARKGRAY)\n    rl.end_drawing()\n}\n\nrun: fn() !(sql.SqliteError | TaskFailure) {\n    best_task: task top_scores()                              // sqlite on a worker: the pack marks it thread-safe\n    rl.init_window(800, 450, \"catcher\")\n    rl.init_audio_device()                                      // close_audio_device at scope end\n    ding: rl.Sound.load(\"ding.wav\")                           // unload_sound as Close\n    rl.set_target_fps(60)\n\n    best: best_task.join()                                    // loaded while the window and sound opened\n    game := Game{paddle_x: 400.0, drops: [], score: 0, lives: 3}\n    loop {\n        if rl.window_should_close() || game.lives == 0 -> break\n        before: game.score\n        step(game, rl.get_frame_time())\n        if game.score > before -> rl.play_sound(ding)\n        draw(game, best)\n    }\n    save_score(\"player\", game.score)\n    print(\"final score {game.score}\")\n}\n```\n\n```text\nfinal score 23\n```\n\n`jet audit foreign catcher.jet` lists raylib and sqlite3 rows with their evidence: header facts from pinned clang,\npack facts from `c-raylib-pack@5.5.0` and `c-sqlite-pack@3.46.0` with their reviewers, and `thread .Main` guards on\nevery raylib window row. The release binary's calls into both libraries are direct calls with no wrapper frames.\n\n### Best competitor equivalent\n\n```odin\n// Odin: vendor:raylib is hand-maintained bindings shipped with the compiler; sqlite needs its own binding.\nimport rl \"vendor:raylib\"\nmain :: proc() {\n    rl.InitWindow(800, 450, \"catcher\")\n    defer rl.CloseWindow()\n    for !rl.WindowShouldClose() { rl.BeginDrawing(); rl.ClearBackground(rl.SKYBLUE); rl.EndDrawing() }\n}\n```\n",
       "kind": "task",
       "track": "epoch",
@@ -88500,7 +88500,7 @@
       "parentId": "c0rkebo4",
       "needsAcceptance": false,
       "created": "2026-11-01T00:50:21.070Z",
-      "updated": "2026-11-08T19:56:26.425Z",
+      "updated": "2026-11-08T19:56:43.736Z",
       "updatedBy": "Main",
       "criteriaLastN": 1
     },
@@ -190066,6 +190066,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-08T19:56:43.737Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0l5a4vu",
+      "note": "title"
+    },
     {
       "at": "2026-11-08T19:56:27.678Z",
       "by": "Main",
