@@ -1,0 +1,28 @@
+# On one carrier thread, a task parked in a 200 ms sleep while another task
+# burns 200 ms on that carrier gains under 50 ms on its task CPU clock
+# (jet_rt_task_cpu_ns), the burner's clock counts its own run, the parked
+# task keeps its identity (jet_rt_task_identity), and the main thread's
+# clock is its own CPU time. Same output on jet run and at O0, O1 and O2.
+fixture: fixtures/clock
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JET_SCHEDULER_THREADS=1
+step: jet run main.jet
+exit: 0
+stdout: = "identity kept across the park true\nparked task's clock skips the other task's run true\nbusy task's clock counts its own run true\na plain thread's clock is its CPU time true\n"
+step: jet build --optimize=none main.jet
+exit: 0
+step o0: built
+exit: 0
+stdout: = "identity kept across the park true\nparked task's clock skips the other task's run true\nbusy task's clock counts its own run true\na plain thread's clock is its CPU time true\n"
+step: jet build --optimize=basic main.jet
+exit: 0
+step o1: built
+exit: 0
+stdout: = "identity kept across the park true\nparked task's clock skips the other task's run true\nbusy task's clock counts its own run true\na plain thread's clock is its CPU time true\n"
+step: jet build --release main.jet
+exit: 0
+step o2: built
+exit: 0
+stdout: = "identity kept across the park true\nparked task's clock skips the other task's run true\nbusy task's clock counts its own run true\na plain thread's clock is its CPU time true\n"

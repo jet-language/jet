@@ -187,6 +187,15 @@ sync_now_ns: fn() -> I64 {
     }
 }
 
+// The calling thread's CPU time (CLOCK_THREAD_CPUTIME_ID) in nanoseconds.
+sync_thread_cpu_ns: fn() -> I64 {
+    #Unsafe("clock_gettime writes two words of thread-owned TCB scratch; no pointer escapes") {
+        scratch: wrapping(os_tls_base_i64() + I64{232})
+        sync_clock_read(I64{3}, scratch)
+        return wrapping(os_load_i64(scratch) * I64{1000000000} + os_load_i64(wrapping(scratch + I64{8})))
+    }
+}
+
 sync_deadline: fn(timeout_ns: I64) -> I64 {
     if (timeout_ns < I64{0}) { return I64{-1} }
     now: sync_now_ns()

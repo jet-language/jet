@@ -17,7 +17,11 @@ records read-only, and create no cards, decisions, ballots, or implementation
 edits. A chat-only/no-file request stays in chat without a retained report or
 disposition-table scaffold.
 
-Repo edits remain unauthorized unless the owner explicitly requests them.
+Repo edits remain unauthorized unless the owner explicitly requests them. The
+one exception, in every mode including report-only and chat-only, is the
+prior-art registry: the run's section in `Docs/spec/reference/prior-art.md`
+lists every mined source, and `check_sources.py --verify-tracked` over those
+sources exits 0 before close (see `SKILL.md`, Check the source registry).
 Report completion does not ratify or implement a recommendation.
 
 ## Tower-enabled mode

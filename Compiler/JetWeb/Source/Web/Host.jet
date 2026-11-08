@@ -11,11 +11,8 @@ use {
 
 // The C functions the host provides, each as the runtime's IR calls it.
 WEB_HOST_C: [String]{
-    "__errno_location", "acos", "acosh", "asin", "asinh", "atan", "atan2", "atanh", "cbrt", "ceil", "cos", "cosh", "exp",
-    "exp2", "expm1", "floor", "fma", "fmod", "freeaddrinfo", "gai_strerror", "getaddrinfo", "getauxval", "hypot",
-    "initgroups", "log", "log10", "log1p", "log2", "pow", "pthread_attr_destroy", "pthread_attr_init",
-    "pthread_attr_setstacksize", "pthread_create", "pthread_detach", "pthread_join", "round", "sin", "sinh", "sqrt",
-    "tan", "tanh", "trunc",
+    "__errno_location", "freeaddrinfo", "gai_strerror", "getaddrinfo", "getauxval", "initgroups", "pthread_attr_destroy",
+    "pthread_attr_init", "pthread_attr_setstacksize", "pthread_create", "pthread_detach", "pthread_join",
 }
 
 // Each host C function: true when it replaces the runtime's own definition,
@@ -253,56 +250,6 @@ async function load(url) {
   const response = await fetch(url);
   if (!response.ok) throw new JetHostAbiError("cannot load " + url.href + ": HTTP " + response.status);
   return new Uint8Array(await response.arrayBuffer());
-}
-
-// The exact a * b + c of finite doubles, rounded once to nearest-even.
-function fusedMultiplyAdd(a, b, c) {
-  if (!Number.isFinite(a) || !Number.isFinite(b) || !Number.isFinite(c) || a === 0 || b === 0) return a * b + c;
-  const scaled = (x) => {
-    const view = new DataView(new ArrayBuffer(8));
-    view.setFloat64(0, x);
-    const bits = view.getBigUint64(0);
-    const exponent = Number((bits >> 52n) & 0x7ffn);
-    const fraction = bits & 0xfffffffffffffn;
-    const magnitude = exponent === 0 ? fraction : (fraction | 0x10000000000000n) << BigInt(exponent - 1);
-    return bits >> 63n ? -magnitude : magnitude;
-  };
-  // Every finite double is an integer times 2^-1074; the sum is exact at 2^-2148.
-  const sum = scaled(a) * scaled(b) + (scaled(c) << 1074n);
-  if (sum === 0n) return a * b + c;
-  const negative = sum < 0n;
-  let magnitude = negative ? -sum : sum;
-  let exponent = -2148;
-  const width = magnitude.toString(2).length;
-  // Keep 53 significant bits, fewer below the least normal exponent.
-  let keep = 53;
-  const lowest = width + exponent - 1;
-  if (lowest < -1022) keep = Math.max(0, 53 - (-1022 - lowest));
-  const drop = width - keep;
-  if (drop > 0) {
-    const shift = BigInt(drop);
-    const half = 1n << (shift - 1n);
-    const rest = magnitude & ((1n << shift) - 1n);
-    magnitude >>= shift;
-    if (rest > half || (rest === half && (magnitude & 1n) === 1n)) magnitude += 1n;
-    exponent += drop;
-  }
-  let value = Number(magnitude) * 2 ** Math.max(exponent, -1074);
-  if (exponent < -1074) value = Number(magnitude) / 2 ** (-1074 - exponent) * 2 ** -1074;
-  return negative ? -value : value;
-}
-
-// C round: halves away from zero.
-function roundHalfAway(x) {
-  const whole = Math.trunc(x);
-  return Math.abs(x - whole) >= 0.5 ? whole + Math.sign(x) : whole;
-}
-
-// C pow where it differs from Math.pow: 1^y and (-1)^(+-Inf) are 1.
-function power(x, y) {
-  if (x === 1 || y === 0) return 1;
-  if (x === -1 && (y === Infinity || y === -Infinity)) return 1;
-  return Math.pow(x, y);
 }
 
 class Host {
@@ -768,11 +715,6 @@ class Host {
     const textAt = (bytes, length) => decoder.decode(host.u8().slice(Number(bytes), Number(bytes) + Number(length)));
     return {
       __errno_location: () => BigInt(ERRNO_WORD),
-      acos: Math.acos, acosh: Math.acosh, asin: Math.asin, asinh: Math.asinh, atan: Math.atan, atan2: Math.atan2,
-      atanh: Math.atanh, cbrt: Math.cbrt, ceil: Math.ceil, cos: Math.cos, cosh: Math.cosh, exp: Math.exp,
-      exp2: (x) => power(2, x), expm1: Math.expm1, floor: Math.floor, fma: fusedMultiplyAdd, fmod: (x, y) => x % y,
-      hypot: Math.hypot, log: Math.log, log10: Math.log10, log1p: Math.log1p, log2: Math.log2, pow: power,
-      round: roundHalfAway, sin: Math.sin, sinh: Math.sinh, sqrt: Math.sqrt, tan: Math.tan, tanh: Math.tanh, trunc: Math.trunc,
       jet_ui_provider_capability: (code) => (provider()?.capability(Number(code)) ? 1n : 0n),
       jet_ui_provider_clipboard_get: () => stage(provider()?.clipboardGet()),
       jet_ui_provider_clipboard_set: (bytes, length) => (provider()?.clipboardSet(textAt(bytes, length)) ? 0n : -1n),

@@ -1,0 +1,359 @@
+// The C library math the runtime computes itself, ported statement for
+// statement from musl 1.2.5 src/math (MIT; FreeBSD msun and ARM
+// optimized-routines lineage), so every tier returns musl's bits. Each port
+// names its musl file. This file holds the shared helpers and the exactly
+// rounded functions; LibmTrig.jet, LibmExpLog.jet and LibmPow.jet hold the rest.
+//
+// musl's floating-point exception side effects (FORCE_EVAL, fp_barrier) and
+// errno are not ported: Jet exposes neither, and they never change a result.
+// C unsigned words live in I64: uint64 order is libm_ult, shifts that can
+// carry a bit into or out of bit 63 are libm_shl and libm_shr (a fixed-width
+// `<<` traps on overflow), and C wraparound is written as wrapping(...).
+// Hexadecimal C constants are written as the decimal literal of the same
+// double.
+use libm_core: core.math
+
+LIBM_SIGN: I64{-9223372036854775807 - 1}
+LIBM_ABS: I64{9223372036854775807}
+LIBM_EXP_INF: I64{9218868437227405312}
+LIBM_MANTISSA: I64{4503599627370495}
+LIBM_IMPLICIT: I64{4503599627370496}
+// 1/DBL_EPSILON, 0x1p52: adding then subtracting it rounds to an integer.
+LIBM_TOINT: Float{4503599627370496.0}
+LIBM_P63: Float{9223372036854775808.0}
+LIBM_P1023: Float{8.98846567431158e+307}
+// 0x1p-1022 * 0x1p53
+LIBM_PM969: Float{2.004168360008973e-292}
+// DBL_MIN, 0x1p-1022
+LIBM_DBL_MIN: Float{2.2250738585072014e-308}
+// asuint64(0x1.8p52)
+LIBM_TOINT_HALF_BITS: I64{4843621399236968448}
+
+// uint64 a < b.
+libm_ult: fn(a: I64, b: I64) -> Bool { a.bit_xor(LIBM_SIGN) < b.bit_xor(LIBM_SIGN) }
+
+// uint64 x >> n, 0 <= n < 64.
+libm_shr: fn(x: I64, n: I64) -> I64 {
+    if (n == I64{0}) -> return x
+    (x >> n).bit_and(LIBM_ABS >> (n - I64{1}))
+}
+
+// uint64 x << n, 0 <= n < 64: bits shifted past bit 63 are dropped.
+libm_shl: fn(x: I64, n: I64) -> I64 {
+    if (n == I64{0}) -> return x
+    low: x.bit_and(LIBM_ABS >> n) << n
+    if (libm_shr(x, I64{63} - n).bit_and(I64{1}) == I64{0}) -> return low
+    low.bit_or(LIBM_SIGN)
+}
+
+// C's `!!word`.
+libm_nonzero: fn(word: I64) -> I64 { if (word == I64{0}) -> I64{0} else -> I64{1} }
+
+// The biased exponent field of a double's bits.
+libm_exponent: fn(bits: I64) -> I64 { (bits >> I64{52}).bit_and(I64{2047}) }
+
+// C's (double)k for |k| < 2^51. Float{k} also proves k exact, at a division
+// per call; 0x1.8p52 + k is exact, so its bits are 0x1.8p52's plus k.
+libm_small_float: fn(k: I64) -> Float { rt_f64_from_bits(wrapping(LIBM_TOINT_HALF_BITS + k)) - LIBM_TOINT_HALF }
+
+// x86_64 musl computes sqrt with sqrtsd (src/math/x86_64/sqrt.c); Core's
+// sqrt is that IEEE operation on every tier.
+libm_sqrt: fn(x: Float) -> Float { libm_core.sqrt(x) }
+
+// floor.c
+libm_floor: fn(x: Float) -> Float {
+    ix: rt_f64_bits(x)
+    e: libm_exponent(ix)
+    if (e >= I64{1075} || x == Float{0.0}) -> return x
+    // y = int(x) - x, where int(x) is an integer neighbor of x
+    y: if (ix < I64{0}) -> x - LIBM_TOINT + LIBM_TOINT - x else -> x + LIBM_TOINT - LIBM_TOINT - x
+    if (e <= I64{1022}) -> return if (ix < I64{0}) -> Float{-1.0} else -> Float{0.0}
+    if (y > Float{0.0}) -> return x + y - Float{1.0}
+    x + y
+}
+
+// ceil.c
+libm_ceil: fn(x: Float) -> Float {
+    ix: rt_f64_bits(x)
+    e: libm_exponent(ix)
+    if (e >= I64{1075} || x == Float{0.0}) -> return x
+    y: if (ix < I64{0}) -> x - LIBM_TOINT + LIBM_TOINT - x else -> x + LIBM_TOINT - LIBM_TOINT - x
+    if (e <= I64{1022}) -> return if (ix < I64{0}) -> Float{-0.0} else -> Float{1.0}
+    if (y < Float{0.0}) -> return x + y + Float{1.0}
+    x + y
+}
+
+// trunc.c
+libm_trunc: fn(x: Float) -> Float {
+    ix: rt_f64_bits(x)
+    e := libm_exponent(ix) - I64{1023} + I64{12}
+    if (e >= I64{64}) -> return x
+    if (e < I64{12}) -> e = I64{1}
+    m: libm_shr(I64{-1}, e)
+    if (ix.bit_and(m) == I64{0}) -> return x
+    rt_f64_from_bits(ix.bit_and(m.bit_xor(I64{-1})))
+}
+
+// round.c: halfway cases away from zero.
+libm_round: fn(x: Float) -> Float {
+    ix: rt_f64_bits(x)
+    e: libm_exponent(ix)
+    if (e >= I64{1075}) -> return x
+    a: if (ix < I64{0}) -> -x else -> x
+    if (e < I64{1022}) -> return Float{0.0} * x
+    y := a + LIBM_TOINT - LIBM_TOINT - a
+    if (y > Float{0.5}) {
+        y = y + a - Float{1.0}
+    } else if (y <= Float{-0.5}) {
+        y = y + a + Float{1.0}
+    } else {
+        y = y + a
+    }
+    if (ix < I64{0}) -> return -y
+    y
+}
+
+// fmod.c
+libm_fmod: fn(x: Float, y: Float) -> Float {
+    uxi := rt_f64_bits(x)
+    uyi := rt_f64_bits(y)
+    ex := libm_exponent(uxi)
+    ey := libm_exponent(uyi)
+    negative: uxi < I64{0}
+    if (libm_shl(uyi, I64{1}) == I64{0} || uyi.bit_and(LIBM_ABS) > LIBM_EXP_INF || ex == I64{2047}) -> return (x * y) / (x * y)
+    if (!libm_ult(libm_shl(uyi, I64{1}), libm_shl(uxi, I64{1}))) {
+        if (libm_shl(uxi, I64{1}) == libm_shl(uyi, I64{1})) -> return Float{0.0} * x
+        return x
+    }
+    // normalize x and y
+    if (ex == I64{0}) {
+        i := libm_shl(uxi, I64{12})
+        loop i >= (I64{0}) {
+            ex -= I64{1}
+            i = libm_shl(i, I64{1})
+        }
+        uxi = libm_shl(uxi, I64{1} - ex)
+    } else {
+        uxi = uxi.bit_and(LIBM_MANTISSA).bit_or(LIBM_IMPLICIT)
+    }
+    if (ey == I64{0}) {
+        i := libm_shl(uyi, I64{12})
+        loop i >= (I64{0}) {
+            ey -= I64{1}
+            i = libm_shl(i, I64{1})
+        }
+        uyi = libm_shl(uyi, I64{1} - ey)
+    } else {
+        uyi = uyi.bit_and(LIBM_MANTISSA).bit_or(LIBM_IMPLICIT)
+    }
+    // x mod y
+    loop ex > ey {
+        i: uxi - uyi
+        if (i >= I64{0}) {
+            if (i == I64{0}) -> return Float{0.0} * x
+            uxi = i
+        }
+        uxi = uxi << I64{1}
+        ex -= I64{1}
+    }
+    i: uxi - uyi
+    if (i >= I64{0}) {
+        if (i == I64{0}) -> return Float{0.0} * x
+        uxi = i
+    }
+    loop uxi < LIBM_IMPLICIT {
+        uxi = uxi << I64{1}
+        ex -= I64{1}
+    }
+    // scale result
+    if (ex > I64{0}) {
+        uxi = (uxi - LIBM_IMPLICIT).bit_or(ex << I64{52})
+    } else {
+        uxi = uxi >> (I64{1} - ex)
+    }
+    if negative -> uxi = uxi.bit_or(LIBM_SIGN)
+    rt_f64_from_bits(uxi)
+}
+
+// scalbn.c
+libm_scalbn: fn(x: Float, exponent: I64) -> Float {
+    y := x
+    n := exponent
+    if (n > I64{1023}) {
+        y = y * LIBM_P1023
+        n -= I64{1023}
+        if (n > I64{1023}) {
+            y = y * LIBM_P1023
+            n -= I64{1023}
+            if (n > I64{1023}) -> n = I64{1023}
+        }
+    } else if (n < I64{-1022}) {
+        // make sure final n < -53 to avoid double
+        // rounding in the subnormal range
+        y = y * LIBM_PM969
+        n += I64{969}
+        if (n < I64{-1022}) {
+            y = y * LIBM_PM969
+            n += I64{969}
+            if (n < I64{-1022}) -> n = I64{-1022}
+        }
+    }
+    y * rt_f64_from_bits((I64{1023} + n) << I64{52})
+}
+
+// fma.c normalize(): the exponent, with ZEROINFNAN (971) for an infinity
+// or NaN and 972 for a zero. The significand is libm_fma_significand.
+libm_fma_exponent: fn(x: Float) -> I64 {
+    e := libm_exponent(rt_f64_bits(x))
+    if (e == I64{0}) {
+        scaled: libm_exponent(rt_f64_bits(x * LIBM_P63))
+        e = if (scaled == I64{0}) -> I64{2048} else -> scaled - I64{63}
+    }
+    e - I64{1076}
+}
+
+// fma.c normalize(): the significand with its top 10 bits and last bit 0.
+libm_fma_significand: fn(x: Float) -> I64 {
+    ix := rt_f64_bits(x)
+    if (libm_exponent(ix) == I64{0}) -> ix = rt_f64_bits(x * LIBM_P63)
+    ix.bit_and(LIBM_MANTISSA).bit_or(LIBM_IMPLICIT) << I64{1}
+}
+
+// fma.c: the generic C fma, which x86_64 musl uses without __FMA__. The
+// 128-bit product is fma.c mul(); both significands are below 2^54.
+libm_fma: fn(x: Float, y: Float, z: Float) -> Float {
+    // ZEROINFNAN = 0x7ff-0x3ff-52-1
+    zero_inf_nan: I64{971}
+    xe: libm_fma_exponent(x)
+    ye: libm_fma_exponent(y)
+    ze: libm_fma_exponent(z)
+    if (xe >= zero_inf_nan || ye >= zero_inf_nan) -> return x * y + z
+    if (ze >= zero_inf_nan) {
+        if (ze > zero_inf_nan) -> return x * y + z
+        return z
+    }
+    xm: libm_fma_significand(x)
+    ym: libm_fma_significand(y)
+    zm: libm_fma_significand(z)
+    // mul: r = x*y
+    xlo: xm.bit_and(I64{4294967295})
+    xhi: xm >> I64{32}
+    ylo: ym.bit_and(I64{4294967295})
+    yhi: ym >> I64{32}
+    t1: wrapping(xlo * ylo)
+    t2: xlo * yhi + xhi * ylo
+    t3: xhi * yhi
+    rlo := wrapping(t1 + libm_shl(t2, I64{32}))
+    rhi := t3 + (t2 >> I64{32}) + (if libm_ult(rlo, t1) -> I64{1} else -> I64{0})
+    // either top 20 or 21 bits of rhi and last 2 bits of rlo are 0
+
+    // align exponents
+    e := xe + ye
+    d := ze - e
+    zlo := I64{0}
+    zhi := I64{0}
+    // shift bits z<<=kz, r>>=kr, so kz+kr == d, set e = e+kr (== ez-kz)
+    if (d > I64{0}) {
+        if (d < I64{64}) {
+            zlo = libm_shl(zm, d)
+            zhi = libm_shr(zm, I64{64} - d)
+        } else {
+            zhi = zm
+            e = ze - I64{64}
+            d -= I64{64}
+            if (d > I64{0} && d < I64{64}) {
+                rlo = libm_shl(rhi, I64{64} - d).bit_or(libm_shr(rlo, d)).bit_or(libm_nonzero(libm_shl(rlo, I64{64} - d)))
+                rhi = libm_shr(rhi, d)
+            } else if (d >= I64{64}) {
+                rlo = I64{1}
+                rhi = I64{0}
+            }
+        }
+    } else {
+        d = I64{0} - d
+        if (d == I64{0}) {
+            zlo = zm
+        } else if (d < I64{64}) {
+            zlo = libm_shr(zm, d).bit_or(libm_nonzero(libm_shl(zm, I64{64} - d)))
+        } else {
+            zlo = I64{1}
+        }
+    }
+
+    // add
+    sign := (rt_f64_bits(x) < I64{0}) != (rt_f64_bits(y) < I64{0})
+    samesign: sign == (rt_f64_bits(z) < I64{0})
+    nonzero := true
+    if samesign {
+        // r += z
+        rlo = wrapping(rlo + zlo)
+        rhi = wrapping(rhi + wrapping(zhi + (if libm_ult(rlo, zlo) -> I64{1} else -> I64{0})))
+    } else {
+        // r -= z
+        t: rlo
+        rlo = wrapping(rlo - zlo)
+        rhi = wrapping(wrapping(rhi - zhi) - (if libm_ult(t, rlo) -> I64{1} else -> I64{0}))
+        if (rhi < I64{0}) {
+            rlo = wrapping(I64{0} - rlo)
+            rhi = wrapping(wrapping(I64{0} - rhi) - libm_nonzero(rlo))
+            sign = !sign
+        }
+        nonzero = rhi != I64{0}
+    }
+
+    // set rhi to top 63bit of the result (last bit is sticky)
+    if nonzero {
+        e += I64{64}
+        d = I64.from_int(rhi.leading_zeros()) ?? I64{0}
+        d -= I64{1}
+        // note: d > 0
+        rhi = libm_shl(rhi, d).bit_or(libm_shr(rlo, I64{64} - d)).bit_or(libm_nonzero(libm_shl(rlo, d)))
+    } else if (rlo != I64{0}) {
+        d = I64.from_int(rlo.leading_zeros()) ?? I64{0}
+        d -= I64{1}
+        if (d < I64{0}) {
+            rhi = libm_shr(rlo, I64{1}).bit_or(rlo.bit_and(I64{1}))
+        } else {
+            rhi = rlo << d
+        }
+    } else {
+        // exact +-0
+        return x * y + z
+    }
+    e -= d
+
+    // convert to double
+    i := rhi
+    // i is in [1<<62,(1<<63)-1]
+    if sign -> i = I64{0} - i
+    // |r| is in [0x1p62,0x1p63]; (double)i rounds to nearest, as approx does
+    r := approx(i)
+    if (e < I64{-1084}) {
+        // result is subnormal before rounding
+        if (e == I64{-1085}) {
+            c: if sign -> Float{0.0} - LIBM_P63 else -> LIBM_P63
+            if (r == c) {
+                // min normal after rounding. musl returns
+                // DBL_MIN/FLT_MIN * (float)(0x0.ffffff8p-63*FLT_MIN * r):
+                // that float product, 2^-126 - 2^-151, rounds to FLT_MIN,
+                // so the result is DBL_MIN with r's sign.
+                return if sign -> Float{0.0} - LIBM_DBL_MIN else -> LIBM_DBL_MIN
+            }
+            // one bit is lost when scaled, add another top bit to
+            // only round once at conversion if it is inexact
+            if (libm_shl(rhi, I64{53}) != I64{0}) {
+                i = libm_shr(rhi, I64{1}).bit_or(rhi.bit_and(I64{1})).bit_or(I64{4611686018427387904})
+                if sign -> i = I64{0} - i
+                r = approx(i)
+                // remove top bit
+                r = Float{2.0} * r - c
+            }
+        } else {
+            // only round once when scaled
+            i = (libm_shr(rhi, I64{10}).bit_or(libm_nonzero(libm_shl(rhi, I64{54})))) << I64{10}
+            if sign -> i = I64{0} - i
+            r = approx(i)
+        }
+    }
+    libm_scalbn(r, e)
+}

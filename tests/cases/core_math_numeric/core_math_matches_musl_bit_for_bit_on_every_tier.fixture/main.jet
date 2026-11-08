@@ -1,0 +1,188 @@
+// Every corpus row is a call of one core.math function: its argument words,
+// then musl 1.2.5's result word, as hex binary64 bits. The program prints one
+// line per function with the rows it checked and how many results differ from
+// musl's bits, plus the first differing rows.
+use {
+    math: core.math
+}
+
+ACOS: comptime { embed_file("corpus/acos.txt") }
+ACOSH: comptime { embed_file("corpus/acosh.txt") }
+ASIN: comptime { embed_file("corpus/asin.txt") }
+ASINH: comptime { embed_file("corpus/asinh.txt") }
+ATAN: comptime { embed_file("corpus/atan.txt") }
+ATAN2: comptime { embed_file("corpus/atan2.txt") }
+ATANH: comptime { embed_file("corpus/atanh.txt") }
+CBRT: comptime { embed_file("corpus/cbrt.txt") }
+CEIL: comptime { embed_file("corpus/ceil.txt") }
+COS: comptime { embed_file("corpus/cos.txt") }
+COSH: comptime { embed_file("corpus/cosh.txt") }
+ERF: comptime { embed_file("corpus/erf.txt") }
+ERFC: comptime { embed_file("corpus/erfc.txt") }
+EXP: comptime { embed_file("corpus/exp.txt") }
+EXP2: comptime { embed_file("corpus/exp2.txt") }
+EXPM1: comptime { embed_file("corpus/expm1.txt") }
+FLOOR: comptime { embed_file("corpus/floor.txt") }
+FMA: comptime { embed_file("corpus/fma.txt") }
+FMOD: comptime { embed_file("corpus/fmod.txt") }
+HYPOT: comptime { embed_file("corpus/hypot.txt") }
+LGAMMA: comptime { embed_file("corpus/lgamma.txt") }
+LOG: comptime { embed_file("corpus/log.txt") }
+LOG10: comptime { embed_file("corpus/log10.txt") }
+LOG1P: comptime { embed_file("corpus/log1p.txt") }
+LOG2: comptime { embed_file("corpus/log2.txt") }
+POW: comptime { embed_file("corpus/pow.txt") }
+SIN: comptime { embed_file("corpus/sin.txt") }
+SINH: comptime { embed_file("corpus/sinh.txt") }
+SQRT: comptime { embed_file("corpus/sqrt.txt") }
+TAN: comptime { embed_file("corpus/tan.txt") }
+TANH: comptime { embed_file("corpus/tanh.txt") }
+TGAMMA: comptime { embed_file("corpus/tgamma.txt") }
+TRUNC: comptime { embed_file("corpus/trunc.txt") }
+
+hex_value: fn(b: U8) -> Int {
+    n: Int.from_u8(b)
+    if n >= 48 && n <= 57 -> return n - 48
+    n - 87
+}
+
+// The 16-digit hex word at `at`, as the signed Int math.from_bits takes.
+word_at: fn(raw: [U8], at: Int) -> Int {
+    n := 0
+    loop i in 0..<16 -> n = n * 16 + hex_value(raw[at + i])
+    if n > 9223372036854775807 -> n = n - 18446744073709551616
+    n
+}
+
+hex_word: fn(word: Int) -> String {
+    digits: "0123456789abcdef".bytes()
+    n := if word < 0 -> word + 18446744073709551616 else -> word
+    out := [U8]{}
+    loop _ in 0..<16 {
+        out.push(digits[n %% 16])
+        n = n /% 16
+    }
+    out.reverse()
+    String.from_bytes(out) ?? ""
+}
+
+is_nan_word: fn(word: Int) -> Bool {
+    magnitude: if word < 0 -> word + 9223372036854775808 else -> word
+    magnitude > 9218868437227405312
+}
+
+evaluate: fn(name: String, a: [Float]) -> Float {
+    if name == "acos" -> return math.acos(a[0])
+    if name == "acosh" -> return math.acosh(a[0])
+    if name == "asin" -> return math.asin(a[0])
+    if name == "asinh" -> return math.asinh(a[0])
+    if name == "atan" -> return math.atan(a[0])
+    if name == "atan2" -> return math.atan2(a[0], a[1])
+    if name == "atanh" -> return math.atanh(a[0])
+    if name == "cbrt" -> return math.cbrt(a[0])
+    if name == "ceil" -> return math.ceil(a[0])
+    if name == "cos" -> return math.cos(a[0])
+    if name == "cosh" -> return math.cosh(a[0])
+    if name == "erf" -> return math.erf(a[0])
+    if name == "erfc" -> return math.erfc(a[0])
+    if name == "exp" -> return math.exp(a[0])
+    if name == "exp2" -> return math.exp2(a[0])
+    if name == "expm1" -> return math.exp_m1(a[0])
+    if name == "floor" -> return math.floor(a[0])
+    if name == "fma" -> return math.fma(a[0], a[1], a[2])
+    if name == "fmod" -> return math.fmod(a[0], a[1])
+    if name == "hypot" -> return math.hypot(a[0], a[1])
+    if name == "lgamma" -> return math.lgamma(a[0])
+    if name == "log" -> return math.ln(a[0])
+    if name == "log10" -> return math.log10(a[0])
+    if name == "log1p" -> return math.ln_1p(a[0])
+    if name == "log2" -> return math.log2(a[0])
+    if name == "pow" -> return a[0].pow(a[1])
+    if name == "sin" -> return math.sin(a[0])
+    if name == "sinh" -> return math.sinh(a[0])
+    if name == "sqrt" -> return math.sqrt(a[0])
+    if name == "tan" -> return math.tan(a[0])
+    if name == "tanh" -> return math.tanh(a[0])
+    if name == "tgamma" -> return math.gamma(a[0])
+    math.trunc(a[0])
+}
+
+// WebAssembly leaves the sign and payload of an arithmetic NaN to the engine,
+// so where invalid arithmetic does not give x86's default NaN (sign set, quiet
+// payload 0), a NaN result matches any NaN.
+nan_bits_are_exact: fn() -> Bool {
+    infinity: math.from_bits(word_at("7ff0000000000000".bytes(), 0))
+    math.to_bits(infinity - infinity) == -2251799813685248
+}
+
+check: fn(name: String, corpus: String, exact_nan: Bool) {
+    raw: corpus.bytes()
+    at := 0
+    rows := 0
+    wrong := 0
+    loop at < raw.len() {
+        if raw[at] == (U8{35}) {
+            loop raw[at] != (U8{10}) -> at = at + 1
+            at = at + 1
+            next
+        }
+        words := [Int]{}
+        loop raw[at + 16] == (U8{32}) {
+            words.push(word_at(raw, at))
+            at = at + 17
+        }
+        want: word_at(raw, at)
+        at = at + 17
+        arguments := [Float]{}
+        loop word in words -> arguments.push(math.from_bits(word))
+        got: math.to_bits(evaluate(name, arguments))
+        rows = rows + 1
+        same: got == want || (!exact_nan && is_nan_word(got) && is_nan_word(want))
+        if !same {
+            wrong = wrong + 1
+            if wrong <= 3 {
+                shown := [String]{}
+                loop word in words -> shown.push(hex_word(word))
+                print("{name}({shown.join(", ")}) = {hex_word(got)}, musl {hex_word(want)}")
+            }
+        }
+    }
+    print("{name}: {rows} rows, {wrong} differ from musl")
+}
+
+run: fn() {
+    exact_nan: nan_bits_are_exact()
+    check("acos", ACOS, exact_nan)
+    check("acosh", ACOSH, exact_nan)
+    check("asin", ASIN, exact_nan)
+    check("asinh", ASINH, exact_nan)
+    check("atan", ATAN, exact_nan)
+    check("atan2", ATAN2, exact_nan)
+    check("atanh", ATANH, exact_nan)
+    check("cbrt", CBRT, exact_nan)
+    check("ceil", CEIL, exact_nan)
+    check("cos", COS, exact_nan)
+    check("cosh", COSH, exact_nan)
+    check("erf", ERF, exact_nan)
+    check("erfc", ERFC, exact_nan)
+    check("exp", EXP, exact_nan)
+    check("exp2", EXP2, exact_nan)
+    check("expm1", EXPM1, exact_nan)
+    check("floor", FLOOR, exact_nan)
+    check("fma", FMA, exact_nan)
+    check("fmod", FMOD, exact_nan)
+    check("hypot", HYPOT, exact_nan)
+    check("lgamma", LGAMMA, exact_nan)
+    check("log", LOG, exact_nan)
+    check("log10", LOG10, exact_nan)
+    check("log1p", LOG1P, exact_nan)
+    check("log2", LOG2, exact_nan)
+    check("pow", POW, exact_nan)
+    check("sin", SIN, exact_nan)
+    check("sinh", SINH, exact_nan)
+    check("sqrt", SQRT, exact_nan)
+    check("tan", TAN, exact_nan)
+    check("tanh", TANH, exact_nan)
+    check("tgamma", TGAMMA, exact_nan)
+    check("trunc", TRUNC, exact_nan)
+}

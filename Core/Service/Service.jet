@@ -924,7 +924,7 @@ authority_lock_stale: fn(path: String, now: Int) -> Bool Never! {
 }
 
 authority_operation_lock: fn(runtime: ServiceRuntime, operation: String) -> __ServiceFileLock ServiceError! {
-    digest: service_crypto.sha256_raw(delivery_signature_payload([String]{authority_store_identity(runtime.store), operation}))
+    digest: service_crypto.sha256(delivery_signature_payload([String]{authority_store_identity(runtime.store), operation})).bytes
     authority_file_lock(runtime.store, "op-{service_encoding.bytes_to_hex(digest)}")
 }
 
@@ -1964,7 +1964,7 @@ rollout_encode: fn(tree_name: String, state: __RolloutState) -> [U8] ServiceErro
         rollout_scalar(lines, "directory_generation", "{entry.generation}")
     }
     body: lines.join("")
-    checksum: service_encoding.bytes_to_hex(service_crypto.sha256_raw(body.bytes()))
+    checksum: service_encoding.bytes_to_hex(service_crypto.sha256(body.bytes()).bytes)
     bytes: "{body}checksum:{checksum}\n".bytes()
     if bytes.len() > 4194304 -> return Err(state_error("rollout journal exceeds its byte limit"))
     Ok(bytes)
@@ -2051,7 +2051,7 @@ rollout_decode: fn(tree_name: String, bytes: [U8]) -> __RolloutState ServiceErro
         if authority_hex_digit(Int.from_u8(byte)) == None -> return Err(state_error("rollout journal checksum is invalid"))
     }
     content: bytes.slice(0, marker + 1)
-    if checksum != service_encoding.bytes_to_hex(service_crypto.sha256_raw(content)) -> return Err(state_error("rollout journal checksum does not match its contents"))
+    if checksum != service_encoding.bytes_to_hex(service_crypto.sha256(content).bytes) -> return Err(state_error("rollout journal checksum does not match its contents"))
     text: String.from_bytes(content) ?? return Err(state_error("rollout journal is not valid UTF-8"))
     pieces: text.split("\n").to_list()
     collected := [String]{}
@@ -3437,7 +3437,7 @@ authority_append: fn(runtime: ServiceRuntime, op: String, fields: [String]) Serv
 // Receipt ids name the logical operation: store, tree, worker, message and
 // key, never the generation-scoped authority token.
 authority_delivery_id: fn(store: String, tree: String, worker: String, message: String, key: String) -> String Never! {
-    digest: service_crypto.sha256_raw(delivery_signature_payload([String]{authority_store_identity(store), tree, worker, message, key}))
+    digest: service_crypto.sha256(delivery_signature_payload([String]{authority_store_identity(store), tree, worker, message, key})).bytes
     "svc-{service_encoding.bytes_to_hex(digest)}"
 }
 
