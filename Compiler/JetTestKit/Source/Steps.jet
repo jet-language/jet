@@ -1138,7 +1138,8 @@ kit_steps_exit_status: fn(expected: String, code: Int) -> KitVerdict {
 // The public build contract places executable artifacts beside the staged
 // project root; progress output is not a machine-readable artifact receipt.
 // A package whose build entry registers an executable writes it under that
-// target's name; any other entry builds under its file stem.
+// target's name; any other entry, a C or C++ file's too, builds under its
+// file stem.
 kit_steps_artifact: fn(entry: String, source: String, artifact: String) -> String {
     directory: files.dirname(files.join(source, entry))
     root := directory
@@ -1168,7 +1169,7 @@ kit_steps_artifact: fn(entry: String, source: String, artifact: String) -> Strin
         if kit_steps_build_entry_executable(text) == .Val(target) -> return files.join(files.join(root, ".jet/build"), target)
     }
     name: files.basename(entry)
-    stem: if name.ends_with(".jet") -> kit_steps_byte_slice(name, 0, name.count_bytes() - 4) else -> name
+    stem: kit_golden_entry_stem(name) ?? name
     files.join(files.join(root, ".jet/build"), stem)
 }
 

@@ -41,7 +41,8 @@ BuildExecutionResult: struct {
 #Error
 BuildExecutionError: enum {
     MissingGrant(action: String, capability: BuildEffect)
-    SandboxUnavailable
+    // No native sandbox can run the action here; `reason` says why.
+    SandboxUnavailable(reason: String)
     IO(action: String, detail: String)
     // The action ran past its time limit, in milliseconds, and was killed.
     TimedOut(action: String, limit_ms: Int)
@@ -181,7 +182,7 @@ build_io_action: fn(action: HermeticBuildAction, error: BuildIOError) -> BuildEx
 
 build_native_sandbox_error: fn(action: HermeticBuildAction, error: NativeSandboxError) -> BuildExecutionError Never! {
     if error == {
-        .Unsupported(_) -> BuildExecutionError.SandboxUnavailable
+        .Unsupported(reason) -> BuildExecutionError.SandboxUnavailable{reason}
         .IO(detail) -> BuildExecutionError.IO{action: action.name, detail}
         .TimedOut(limit_ms) -> BuildExecutionError.TimedOut{action: action.name, limit_ms}
     }
@@ -581,7 +582,7 @@ build_run_probe_sandboxed: fn(executable: String, args: [String], source: (path:
         .Err(error) -> {
             files.remove_all(root).drop("the probe root is removed best-effort after the run")
             Err(if error == {
-                .Unsupported(_) -> BuildExecutionError.SandboxUnavailable
+                .Unsupported(reason) -> BuildExecutionError.SandboxUnavailable{reason}
                 .IO(detail) -> BuildExecutionError.IO{action: "build probe sandbox", detail}
                 .TimedOut(_) -> BuildExecutionError.IO{action: "build probe sandbox", detail: error.message()}
             })

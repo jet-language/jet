@@ -84,7 +84,9 @@ diagnostic report (`Error [jet.…]`) expects exit 1 there too.
 A PASS/FAIL disagreement is reported as `tier-split`, not blessed separately.
 An E2104 build refusal is `UNSUPPORTED` only on a native tier.
 
-Discovery covers `Examples` and `tests/run`. A package or workspace
+Discovery covers `Examples` and `tests/run`. A flat `<stem>.jet` is an entry,
+and so is a flat C or C++ file (`<stem>.c`, `.cc`, `.cpp`, `.cxx`), which every
+tier runs and builds as `jet run` and `jet build` do. A package or workspace
 root stops descent; its `run.jet` is the entry, not its support modules.
 `.out` expects successful stdout, `.err.out` expects stderr and exit 1 or 70,
 and `.stderr.out` pins successful stderr. `.stdin` contains exact piped input.

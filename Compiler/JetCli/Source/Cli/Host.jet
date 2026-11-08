@@ -1793,6 +1793,42 @@ jet_cli_launch_failed: fn(why: String, color: Bool) -> JetDriverVerbOutput Never
     jet_cli_report_output("", "E2105", "couldn't run the built program: {why}", jet_cli_why("E2105"), "correct the named problem, then run the command again", color, JET_DRIVER_EXIT_USER_ERROR)
 }
 
+// `jet run|build` of a C or C++ file (JetCLIPlan.NativeSource, #6686). The
+// file compiles and links in one command of the C toolchain Jet programs
+// compile their own C with (ForeignLink.jet jet_cli_native_c_tools, under the
+// one native C policy), into `.jet/build/<stem>` under the nearest package
+// root, else beside the file. The C driver compiles `.cc`, `.cpp` and `.cxx`
+// as C++ and links no C++ standard library, as `jet c++` leaves it to a
+// package dependency. The compiler's diagnostics reach stderr as it writes
+// them, and a file it rejects exits 1. A run then runs the binary in place
+// of jet with `program_args`, so jet ends as the program ends.
+jet_cli_native_source: fn(file: String, level: Int, run: Bool, program_args: [String], color: Bool) -> JetDriverVerbOutput {
+    path: cli_files.absolute(file) ?? file
+    directory: jet_cli_parent(path) ?? "."
+    build_dir: "{jet_cli_manifest_root(directory) ?? directory}/.jet/build"
+    if jet_cli_build_dir(build_dir, color) == .Val(refused) -> return refused
+    stem: jet_cli_native_source_stem(path)
+    binary: "{build_dir}/{stem}"
+    tools: jet_cli_native_c_tools() ?? return jet_cli_build_failed("couldn't find a C compiler for `{file}`: {err.message}", jet_cli_why("E2105"), "keep the `jetpack` this jet ships beside it, which provides jet's C toolchain pack, or name a C compiler with `CC`", color)
+    argv := jet_cli_native_c_argv(tools)
+    loop flag in tools.link_flags -> argv.push(flag.copy())
+    loop word in ([String]{"-O{level}", file, "-o", binary}) -> argv.push(word)
+    compiled: jet_cli_native_c_command(argv).stdout(.Inherit).stderr(.Inherit).run() ?? return jet_cli_build_failed("couldn't run the C compiler `{tools.compiler}`: {jet_cli_io_error_text(err)}", jet_cli_why("E2105"), "check the installed C toolchain", color)
+    if !compiled.success -> return JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR}
+    if !run -> return JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    argv_run := [String]{binary}
+    loop argument in program_args -> argv_run.push(argument.copy())
+    launch: X64Launch{argv: argv_run, env: None, executable: binary, name: stem, relaunch: [String]{}, parent_death: false, read_scope: [String]{}}
+    jet_cli_launch_failed(x64_file_exec(binary, launch), color)
+}
+
+// The file name of `path` without its C or C++ extension: the binary's name.
+jet_cli_native_source_stem: fn(path: String) -> String Never! {
+    name: jet_cli_file_name(path)
+    extension: jet_cli_source_extension(name)
+    name.slice(0..<(name.len() - extension.len() - 1))
+}
+
 // Under `--verbose`, the advisory lints (not a11y) of a compile with no
 // errors, written to stderr before the built program runs, so they precede
 // its output on the shared streams.
@@ -3369,6 +3405,7 @@ jet_cli_execute: fn(plan: &&JetCLIPlan, trace_sink: JetCLITraceSink?{None}, reco
             jet_cli_write_notice(notice)
             output = if watch -> jet_cli_dev_loop(file, entry, color, options, verbose, json, threads, program_args, invocation, trace_sink) else -> jet_cli_run_step(jet_cli_compile_run(file, entry, source, color, options, verbose, json, threads, program_args, invocation, trace_sink))
         }
+        .NativeSource(file, level, run, program_args, color) -> output = jet_cli_native_source(file, level, run, program_args, color)
         .DevWeb(file, _, color, options, threads, invocation, notice, port) -> {
             jet_cli_write_notice(notice)
             output = jet_cli_dev_web_loop(file, color, options, threads, invocation, port, trace_sink)

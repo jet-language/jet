@@ -191,19 +191,32 @@ kit_test_golden_env: fn(root: String) -> KitEnv {
 #Test("feature discovery stops at projects and package workspace boundaries") {
     root: kit_test_golden_scratch("discovery")
     kit_exec_write(files.join(root, "Examples/topic/flat.jet"), "run: fn() {{}}\n")
+    kit_exec_write(files.join(root, "Examples/topic/Native.c"), "int main(void) {{ return 0; }}\n")
+    kit_exec_write(files.join(root, "Examples/topic/Native.out"), "")
+    kit_exec_write(files.join(root, "Examples/topic/Templates.cpp"), "int main() {{ return 0; }}\n")
+    kit_exec_write(files.join(root, "Examples/topic/notes.txt"), "not an entry\n")
     kit_exec_write(files.join(root, "Examples/topic/project/run.jet"), "run: fn() {{}}\n")
     kit_exec_write(files.join(root, "Examples/topic/project/helper.jet"), "helper: fn() {{}}\n")
+    kit_exec_write(files.join(root, "Examples/topic/project/native/helper.c"), "int helper(void) {{ return 0; }}\n")
     kit_exec_write(files.join(root, "Examples/topic/package/package.jet"), "name: \"library\"\n")
     kit_exec_write(files.join(root, "Examples/topic/package/nested/run.jet"), "run: fn() {{}}\n")
     kit_exec_write(files.join(root, "Examples/topic/workspace/workspace.jet"), "workspace {{}}\n")
     kit_exec_write(files.join(root, "Examples/topic/workspace/member/run.jet"), "run: fn() {{}}\n")
     kit_exec_write(files.join(root, "tests/run/Ownership/case.jet"), "run: fn() {{}}\n")
     entries: kit_golden_discover(root, ["Examples", "tests/run"])
-    assert_eq(entries.len(), 3)
+    assert_eq(entries.len(), 5)
     ids: entries.map(entry -> entry.path)
     assert(kit_expect_named(ids, "Examples/topic/flat.jet"))
     assert(kit_expect_named(ids, "Examples/topic/project/run.jet"))
     assert(kit_expect_named(ids, "tests/run/Ownership/case.jet"))
+    // A flat C or C++ file is an entry, its streams under its stem.
+    loop entry in entries {
+        if entry.path == "Examples/topic/Native.c" -> assert_eq(entry.expected, "Examples/topic/Native")
+        if entry.path == "Examples/topic/Templates.cpp" -> assert_eq(entry.expected, "Examples/topic/Templates")
+    }
+    assert(kit_expect_named(ids, "Examples/topic/Native.c"))
+    assert(kit_expect_named(ids, "Examples/topic/Templates.cpp"))
+    assert_eq(kit_steps_artifact("Examples/topic/Native.c", root, ""), files.join(root, "Examples/topic/.jet/build/Native"))
     files.remove_all(root) ?? panic("remove discovery scratch")
 }
 

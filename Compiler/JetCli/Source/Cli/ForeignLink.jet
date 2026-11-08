@@ -100,12 +100,15 @@ jet_cli_native_c_run_all: fn(commands: [[String]]) -[Env, Exec, Time.Wait]> [Jet
 
 // The C compiler and archiver for the native x86-64 linker. `flags` select
 // the compiler's target, sysroot and headers and follow the compiler in
-// every command; `link_flags` follow them in the inline C proof link.
+// every command; `link_flags` follow them in a link: the inline C proof link
+// and a C or C++ program's (Host.jet jet_cli_native_source).
 JetCLINativeCTools: struct { compiler: String, archiver: String, target: String, flags: [String], link_flags: [String] }
 
 // The pack's glibc target: the ABI a host `cc` compiles for, whose sysroot
 // carries the link stubs the inline C proof link resolves against.
 JET_CLI_NATIVE_C_PACK_TARGET: "x86_64-unknown-linux-gnu"
+// The glibc target's program loader.
+JET_CLI_NATIVE_C_PACK_LOADER: "/lib64/ld-linux-x86-64.so.2"
 
 // One meaning on every tier: `CC`/`AR`, when set, name the host tools;
 // otherwise the C toolchain pack this jet ships (clang, lld and llvm-ar):
@@ -143,7 +146,9 @@ jet_cli_native_c_pack_root: fn(engine: String) -[FS, Env, Exec, Time.Wait]> Stri
     Ok(root)
 }
 
-// The tools of the unpacked pack at `root`, for its glibc target.
+// The tools of the unpacked pack at `root`, for its glibc target. A program
+// it links loads through the target's loader, which the pack's clang leaves
+// out, as `jet cc` names it (Jetpack CcDriver cli_cc_toolchain_argv).
 jet_cli_native_c_pack_at: fn(root: String) -> JetCLINativeCTools Never! {
     sysroot: "{root}/glibc/{JET_CLI_NATIVE_C_PACK_TARGET}"
     JetCLINativeCTools{
@@ -151,7 +156,7 @@ jet_cli_native_c_pack_at: fn(root: String) -> JetCLINativeCTools Never! {
         archiver: "{root}/bin/llvm-ar",
         target: JET_CLI_NATIVE_C_PACK_TARGET,
         flags: [String]{"--target={JET_CLI_NATIVE_C_PACK_TARGET}", "--sysroot={sysroot}", "-resource-dir={root}/lib/clang/21"},
-        link_flags: [String]{"-fuse-ld=lld", "--rtlib=compiler-rt", "--unwindlib=none"}
+        link_flags: [String]{"-fuse-ld=lld", "--rtlib=compiler-rt", "--unwindlib=none", "-Wl,--dynamic-linker={JET_CLI_NATIVE_C_PACK_LOADER}"}
     }
 }
 
