@@ -211,9 +211,9 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1378,
+  "total": 1367,
   "counts": {
-    "Compiler": 711,
+    "Compiler": 700,
     "Core": 186,
     "Docs": 8,
     "Examples": 35,
@@ -1131,83 +1131,6 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
       "line": 155,
       "column": 5,
       "reason": "the test owns the slot record it ages"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetDevserver/Source/WebHost02.jet",
-      "line": 383,
-      "column": 5,
-      "reason": "unlinkat borrows a held parent and CString"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetDevserver/Source/WebHost02.jet",
-      "line": 387,
-      "column": 5,
-      "reason": "adopt only a successful openat descriptor"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetDevserver/Source/WebHost02.jet",
-      "line": 394,
-      "column": 5,
-      "reason": "adopt only a successful openat descriptor"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetDevserver/Source/WebHost02.jet",
-      "line": 436,
-      "column": 5,
-      "reason": "mkdirat borrows the retained directory and CString"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetDevserver/Source/WebHost02.jet",
-      "line": 451,
-      "column": 5,
-      "reason": "exclusive openat descriptor transfers ownership exactly once"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetDevserver/Source/WebHost02.jet",
-      "line": 470,
-      "column": 5,
-      "reason": "exclusive temporary and renameat borrow retained parent and names"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetDevserver/Source/WebHost02.jet",
-      "line": 489,
-      "column": 5,
-      "reason": "renameat borrows both retained directory authorities"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetDevserver/Source/WebHost02.jet",
-      "line": 542,
-      "column": 5,
-      "reason": "Win32 fills borrowed UTF16 buffer; handle remains owned"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetDevserver/Source/WebHost02.jet",
-      "line": 552,
-      "column": 5,
-      "reason": "Win32 writes exactly the C-layout attribute tag record"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetDevserver/Source/WebHost02.jet",
-      "line": 601,
-      "column": 5,
-      "reason": "aligned variable-sized FILE_RENAME_INFO uses selected C layout and live UTF16 loans"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetDevserver/Source/WebHost02.jet",
-      "line": 614,
-      "column": 5,
-      "reason": "Win32 consumes borrowed C-layout disposition record"
     },
     {
       "package": "Compiler",
@@ -9876,14 +9799,14 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 
 | crate/package | regions |
 | --- | ---: |
-| Compiler | 711 |
+| Compiler | 700 |
 | Core | 186 |
 | Docs | 8 |
 | Examples | 35 |
 | Jetpack | 9 |
 | Tools | 7 |
 | tests | 422 |
-| **total** | **1378** |
+| **total** | **1367** |
 
 ### Regions
 
@@ -10019,17 +9942,6 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetCli/Source/Cli/Host.jet | 1612:9 | "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the runtime's unmapped process exit" |
 | Compiler | Compiler/JetCli/Source/Cli/Host.jet | 2016:9 | "posix setpriority: the build lowers only its own threads, never raising one" |
 | Compiler | Compiler/JetCli/Tests/RunKeep.fixture/RunKeep.jet | 155:5 | "the test owns the slot record it ages" |
-| Compiler | Compiler/JetDevserver/Source/WebHost02.jet | 383:5 | "unlinkat borrows a held parent and CString" |
-| Compiler | Compiler/JetDevserver/Source/WebHost02.jet | 387:5 | "adopt only a successful openat descriptor" |
-| Compiler | Compiler/JetDevserver/Source/WebHost02.jet | 394:5 | "adopt only a successful openat descriptor" |
-| Compiler | Compiler/JetDevserver/Source/WebHost02.jet | 436:5 | "mkdirat borrows the retained directory and CString" |
-| Compiler | Compiler/JetDevserver/Source/WebHost02.jet | 451:5 | "exclusive openat descriptor transfers ownership exactly once" |
-| Compiler | Compiler/JetDevserver/Source/WebHost02.jet | 470:5 | "exclusive temporary and renameat borrow retained parent and names" |
-| Compiler | Compiler/JetDevserver/Source/WebHost02.jet | 489:5 | "renameat borrows both retained directory authorities" |
-| Compiler | Compiler/JetDevserver/Source/WebHost02.jet | 542:5 | "Win32 fills borrowed UTF16 buffer; handle remains owned" |
-| Compiler | Compiler/JetDevserver/Source/WebHost02.jet | 552:5 | "Win32 writes exactly the C-layout attribute tag record" |
-| Compiler | Compiler/JetDevserver/Source/WebHost02.jet | 601:5 | "aligned variable-sized FILE_RENAME_INFO uses selected C layout and live UTF16 loans" |
-| Compiler | Compiler/JetDevserver/Source/WebHost02.jet | 614:5 | "Win32 consumes borrowed C-layout disposition record" |
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 145:5 | "pointer is a fresh payload whose align &gt;= 8 block reserved the word 24 bytes before it" |
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 153:5 | "pointer is an align &gt;= 8 payload being freed with its allocated size; its block reserved the count word 24 bytes before it" |
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 176:5 | "anonymous private mmap owns fresh writable bytes and cannot alias a live heap block; a failed syscall produces no allocation" |

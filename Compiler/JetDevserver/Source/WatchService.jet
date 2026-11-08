@@ -3,20 +3,18 @@ use {
     fs: std.fs
     env: std.env
     std.collections.[VecDeque]
-    // GATE #4494: channels, mutexes, atomics, native threads and blocking event waits.
-    std.sync.[mpsc, Mutex, MutexGuard, Arc]
-    std.sync.atomic.[AtomicBool, Ordering]
+    // GATE #4494: channels, mutexes and blocking event waits.
+    std.sync.[mpsc, Mutex, MutexGuard]
     thread: std.thread
-    std.thread.[JoinHandle]
-    std.ffi.[CString]
     std.time.[Duration, Instant, SystemTime]
+    watcher: core.watcher
+    core.watcher.[WatchSet]
     jet_driver.Diagnostics.[Diagnostic]
     Loader: jet_driver.Loader
     jet_driver.Syntax.[PACKAGE_FILE]
     jet_foundation.JSON.[foundation_json_escape]
     jet_foundation.Game.[JetGameChangeKind]
     SHA256: jet_foundation.SHA256
-    core.sys.target.[selected_os]
 }
 
 RootKind: enum {
@@ -57,93 +55,36 @@ WatchWake: struct {
     sender: mpsc.Sender<()>
     wake: fn(self) -> () { _: self.sender.send(_) }
 }
+// Waits for a change under the watched paths or a wake. Every host watches
+// through core.watcher; one poll per WATCH_POLL_INTERVAL_MS reports whether
+// any watched directory changed since the last poll.
 EventWaiter: struct {
-    receiver: mpsc.Receiver<()>; wake: WatchWake; native: Watcher?
+    receiver: mpsc.Receiver<()>; wake: WatchWake; watches: WatchSet
     new: fn(paths: [OSPath]) -> EventWaiter {
         (sender, receiver): mpsc.channel()
-        native: if selected_os() == "linux" -> Watcher.new(paths, sender.clone()) else -> None
-        EventWaiter{receiver, wake: WatchWake{sender}, native}
+        EventWaiter{receiver, wake: WatchWake{sender}, watches: watch_set(paths)}
     }
-    refresh: fn(self, paths: [OSPath]) -> () {
-        if selected_os() == "linux" { if self.native == .Val(native) -> native.refresh(paths) }
-    }
+    refresh: fn(self, paths: [OSPath]) -> () { self.watches = watch_set(paths) }
     wait: fn(self, timeout: Duration?) -> Bool {
-        if selected_os() == "linux" && self.native.is_some() {
-            return if timeout == {
-                .Val(timeout) -> self.receiver.recv_timeout(timeout).is_ok()
-                .None -> self.receiver.recv().is_ok()
+        deadline: timeout.map((limit) -> Instant.now() + limit)
+        loop {
+            if self.watches.poll().len() > 0 -> return true
+            interval := Duration.from_millis(WATCH_POLL_INTERVAL_MS)
+            if deadline == .Val(end) {
+                remaining: end.saturating_duration_since(Instant.now())
+                if remaining.is_zero() -> return false
+                interval = interval.min(remaining)
             }
+            if self.receiver.recv_timeout(interval).is_ok() -> return true
         }
-        timeout: timeout.unwrap_or(Duration.from_millis(WATCH_POLL_INTERVAL_MS))
-        _: self.receiver.recv_timeout(timeout)
-        true
     }
     coalesce: fn(self, timeout: Duration) -> () {
-        if selected_os() == "linux" && self.native.is_some() {
-            deadline: Instant.now() + timeout
-            loop {
-                remaining: deadline.saturating_duration_since(Instant.now())
-                if remaining.is_zero() || self.receiver.recv_timeout(remaining).is_err() -> break
-            }
-            loop { if self.receiver.try_recv().is_err() -> break }
-            return
-        }
         thread.sleep(timeout)
+        _: self.watches.poll()
+        loop { if self.receiver.try_recv().is_err() -> break }
     }
     wake_handle: fn(self) -> WatchWake { self.wake.clone() }
 }
-IN_NONBLOCK: I32{0x800}
-IN_CLOEXEC: I32{0x80000}
-IN_MASK: U32{(0x00000002).bit_or(0x00000004).bit_or(0x00000008).bit_or(0x00000040).bit_or(0x00000080).bit_or(0x00000100).bit_or(0x00000200).bit_or(0x00000400).bit_or(0x00000800).bit_or(0x00004000)}
-POLLIN: I16{0x001}
-POLLERR: I16{0x008}
-POLLHUP: I16{0x010}
-POLLNVAL: I16{0x020}
-#Repr("C")
-PollFd: struct { fd: I32; events: I16; revents: I16 }
-// GATE #4494: Linux libc event descriptor ABI, only called under selected_os Linux dispatch.
-#FFI(c)
-close: fn(fd: I32) -> I32
-#FFI(c)
-inotify_add_watch: fn(fd: I32, pathname: Ptr<I8>, mask: U32) -> I32
-#FFI(c)
-inotify_init1: fn(flags: I32) -> I32
-#FFI(c)
-pipe: fn(fds: Ptr<I32>) -> I32
-#FFI(c)
-poll: fn(fds: Ptr<PollFd>, nfds: USize, timeout: I32) -> I32
-#FFI(c)
-read: fn(fd: I32, buffer: Ptr<U8>, count: USize) -> ISize
-#FFI(c)
-write: fn(fd: I32, buffer: Ptr<U8>, count: USize) -> ISize
-Watcher: struct {
-    paths: Arc<Mutex<[OSPath]>>; control_write: I32; stop: Arc<AtomicBool>; join: JoinHandle<()>?
-    new: fn(paths: [OSPath], sender: mpsc.Sender<()>) -> Watcher? {
-        pipes := [I32{0}, I32{0}]
-        if pipe(pipes.as_mut_ptr()) != 0 -> return None
-        paths: normalize_paths(paths); probe: build_notify_fd(paths)
-        if probe < 0 { _: close(pipes[0]); _: close(pipes[1]); return None }
-        _: close(probe)
-        paths: Arc.new(Mutex.new(paths)); stop: Arc.new(AtomicBool.new(false))
-        thread_paths: paths.clone(); thread_stop: stop.clone()
-        join: thread.Builder.new().name("jet-watch-events").spawn(() -> run(pipes[0], thread_paths, thread_stop, sender)).ok()
-        if join == .Val(join) -> .Val(Watcher{paths, control_write: pipes[1], stop, join: .Val(join)}) else -> None
-    }
-    refresh: fn(self, paths: [OSPath]) -> () {
-        paths: normalize_paths(paths); current := self.paths.lock().unwrap_or_else((e) -> e.into_inner())
-        if current == paths -> return
-        current = paths.move(); drop(current); self.signal()
-    }
-    signal: fn(self) -> () { byte: [U8{1}]; _: write(self.control_write, byte.as_ptr(), byte.len()) }
-}
-impl Watcher.Drop {
-    drop: fn(self: Watcher) -> () {
-        self.stop.store(true, Ordering.Release); self.signal()
-        if self.join.take() == .Val(join) -> _: join.join()
-        _: close(self.control_write)
-    }
-}
-normalize_paths: fn(paths: [OSPath]) -> [OSPath] { paths := paths.move(); paths.sort(); paths.dedup(); paths.move() }
 existing_directory: fn(path: OSPath) -> OSPath? {
     candidate := if path.is_dir() -> path.to_path_buf() else -> path.parent().unwrap_or(OSPath(".")).to_path_buf()
     loop {
@@ -154,46 +95,16 @@ existing_directory: fn(path: OSPath) -> OSPath? {
         } else { return None }
     }
 }
-build_notify_fd: fn(paths: [OSPath]) -> I32 {
-    fd: inotify_init1(IN_NONBLOCK.bit_or(IN_CLOEXEC))
-    if fd < 0 -> return -1
+// One file watch per existing directory that holds a watched path; a
+// directory that cannot be watched is left out, as a failed watch add was.
+watch_set: fn(paths: [OSPath]) -> WatchSet {
     directories := paths.iter().filter_map((path) -> existing_directory(path)).collect()
-    directories.sort(); directories.dedup(); watched := 0
+    directories.sort(); directories.dedup()
+    set: watcher.set()
     loop directory in directories {
-        if CString.new(directory.as_os_str().as_bytes()).ok() == .Val(path) {
-            if inotify_add_watch(fd, path.as_ptr(), IN_MASK) >= 0 -> watched += 1
-        }
+        if watcher.files(directory.to_string()) == .Ok(handle) -> set.add(handle)
     }
-    if watched == 0 { _: close(fd); -1 } else { fd }
-}
-run: fn(control_read: I32, paths: Arc<Mutex<[OSPath]>>, stop: Arc<AtomicBool>, sender: mpsc.Sender<()>) -> () {
-    notify_fd := { paths: paths.lock().unwrap_or_else((e) -> e.into_inner()); build_notify_fd(paths) }
-    loop {
-        if stop.load(Ordering.Acquire) -> break
-        fds := [PollFd{fd: control_read, events: POLLIN, revents: 0}, PollFd{fd: notify_fd, events: POLLIN, revents: 0}]
-        count: if notify_fd >= 0 -> 2 else -> 1; result: poll(fds.as_mut_ptr(), count, -1)
-        if result < 0 {
-            if std.io.Error.last_os_error().raw_os_error() == 4 -> next
-            break
-        }
-        if fds[0].revents != 0 {
-            bytes := [U8; 64]{0}; _: read(control_read, bytes.as_mut_ptr(), bytes.len())
-            if stop.load(Ordering.Acquire) -> break
-            if notify_fd >= 0 -> _: close(notify_fd)
-            paths: paths.lock().unwrap_or_else((e) -> e.into_inner()); notify_fd = build_notify_fd(paths)
-        }
-        if notify_fd >= 0 && (fds[1].revents.bit_and((POLLIN.bit_or(POLLERR).bit_or(POLLHUP).bit_or(POLLNVAL)))) != 0 {
-            buffer := [U8; 8192]{0}; changed := false
-            loop {
-                count: read(notify_fd, buffer.as_mut_ptr(), buffer.len())
-                if count <= 0 -> break
-                changed = true
-            }
-            if changed -> _: sender.send(_)
-        }
-    }
-    if notify_fd >= 0 -> _: close(notify_fd)
-    _: close(control_read)
+    set
 }
 ChangeKind: enum { Created; Modified; Deleted; Renamed; Stale }
 InvalidationReceipt: struct {

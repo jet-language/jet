@@ -39,8 +39,6 @@ CLIENT_TTL_MS: Session.CLIENT_TTL_MS
 MAX_CLIENTS: Session.MAX_CLIENTS
 REQUEST_DEADLINE: Duration.from_secs(10)
 MAX_STATIC_RESPONSE_BYTES: 64 * 1024 * 1024
-// GATE #4494: native atomics, locks, terminal IO, clock and listener ownership.
-PUBLICATION_COUNTER: AtomicU64.new(0)
 decode_devtools_envelope: fn(payload: String) -> JetDevtoolsDecodedEnvelope Err! {
     root: parse_json_with_limit(payload, JET_DEVTOOLS_MAX_ENVELOPE_BYTES) ?? return .Err("devtools envelope is not valid bounded JSON")
     object: object_map(root) ?? return .Err("devtools envelope must be an object")
