@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6707,
-    "rev": 96338,
+    "rev": 96339,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -100583,6 +100583,11 @@
         {
           "at": "2026-11-08",
           "by": "Main",
+          "text": "D-FFI-CARRIER1 and D-FFI-SERIAL1 adversarial review done (Docs/audits/2026-11-08-D-FFI-CARRIER1-review.md, dev 4c315cc06c). Neither A holds unconditionally. Carrier A is a second carrier kind (I8; this card's log says no second carrier mechanism is built), and its migration cost, C TLS, fork/exit/signal and callback claims are unproved. Channel round trips measured 5.4-6.2 us, which is not an FFI cost. Compile-time C stops with E3010 (an I9 gap). A per-library gate does not make unsafe C safe: recursive entry still corrupted scratch state in a deterministic witness. Facts confirmed: C calls run on the task fiber stack (O0/O1/O2), and a C-linking image starts through __libc_start_main. The review added carrier G (one C-compatible worker kind for native programs) and serialization D (audited wrappers over Shared.guard_edit). Both ballots validate but are not postable until a redesign closes the 14 gap lines and passes a second review."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
           "text": "Main 2026-11-08: C-gate redesign shelved. Decision (implementation, within card scope): c1 (raw clone carriers) lands only after #6694 and #6695 remove C from Core, because musl believes the process has one thread on raw carriers (need_locks=0), so concurrent C malloc corrupts the heap and errno/TLS alias (SchedLead probe A). No second carrier mechanism is built. SchedLead prepares the raw-clone spawn/join/detach cutover, gated off until then."
         },
         {
@@ -100656,7 +100661,7 @@
       "parentId": "c0lscvc9",
       "needsAcceptance": false,
       "created": "2026-11-08T15:46:55.183Z",
-      "updated": "2026-11-08T20:33:38.061Z",
+      "updated": "2026-11-08T21:38:15.772Z",
       "updatedBy": "Main",
       "criteriaLastN": 4
     },
@@ -189299,6 +189304,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-08T21:38:15.772Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0x92nsv",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-08T21:18:51.593Z",
       "by": "Main",
