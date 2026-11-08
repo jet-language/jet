@@ -428,14 +428,56 @@ store_seal_node: fn(path: String) StoreError! {
     files.set_mode(path, sealed_mode)
 }
 
-// Make a tree durable: every file and directory, children first.
+// Workers that flush one tree at once: enough to keep a device queue full.
+STORE_SYNC_WORKERS: 48
+
+// Make a tree durable before the caller publishes it. Every file is flushed
+// on a worker pool, then every directory, so each name a directory flush
+// commits already has durable bytes behind it.
 store_fsync_tree: fn(path: String) StoreError! {
+    file_nodes := [String]{}
+    directory_nodes := [String]{}
+    store_collect_sync_nodes(path, file_nodes, directory_nodes)
+    store_sync_nodes_parallel(file_nodes)
+    store_sync_nodes_parallel(directory_nodes)
+}
+
+store_collect_sync_nodes: fn(path: String, file_nodes: &[String], directory_nodes: &[String]) StoreError! {
     metadata: files.stat(path)
     if metadata.is_symlink -> return
     if metadata.is_dir {
-        loop child in files.list_dir(path) -> store_fsync_tree(child.path)
+        loop child in files.list_dir(path) -> store_collect_sync_nodes(child.path, file_nodes, directory_nodes)
+        directory_nodes.push(path.copy())
+        return
     }
-    store_sync_store_node(path, metadata.is_dir)
+    file_nodes.push(path.copy())
+}
+
+// Flush every node on worker tasks, at most STORE_SYNC_WORKERS at a time,
+// and return once all of them are durable.
+store_sync_nodes_parallel: fn(nodes: [String]) StoreError! -[FS]> {
+    workers: if nodes.len() < STORE_SYNC_WORKERS -> nodes.len() else -> STORE_SYNC_WORKERS
+    lanes := [[String]]{}
+    loop _ in 0..<workers -> lanes.push([String]{})
+    loop index in 0..<nodes.len() -> lanes[index % workers].push(nodes[index].copy())
+    handles := [Task<String>]{}
+    loop lane in lanes {
+        owned: lane.copy()
+        handles.push(task { store_sync_lane(owned) })
+    }
+    failure := ""
+    loop handle in handles {
+        message: handle.join() ?? "a flush worker stopped"
+        if message != "" && failure == "" -> failure = message
+    }
+    if failure != "" -> return Err(StoreError.Other(failure))
+}
+
+store_sync_lane: fn(nodes: [String]) -[FS]> String Never! {
+    loop node in nodes {
+        store_sync_store_node(node, false) ?? return "flush `{node}`: {err.message()}"
+    }
+    ""
 }
 
 // `jet.status/v1` for `cache bind`.

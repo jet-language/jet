@@ -202,15 +202,16 @@ provider_cc_pack_ensure: fn(verification: &StoreVerification, roots: HangarRoots
     staging: files.join(hangar, "{stem}.partial")
     provider_cc_remove_tree(archive)
     provider_cc_remove_tree(staging)
+    unpack := CcPackArchive{path: "", origin: ""}
     if provider_cc_pack_obtain(asset, sources, offline, archive) == {
-        .Ok(_) -> {}
+        .Ok(obtained) -> unpack = obtained
         .Err(error) -> {
             provider_cc_remove_tree(archive)
             return Err(error)
         }
     }
     term.eprint("first use: unpacking the C toolchain into the Hangar (first time only)")
-    if provider_cc_pack_install(verification, roots, asset, archive, staging) == {
+    if provider_cc_pack_install(verification, roots, asset, unpack, staging) == {
         .Ok(tools) -> {
             provider_cc_remove_tree(archive)
             Ok(tools)
@@ -229,18 +230,20 @@ provider_cc_pack_short: fn(digest: String) -> String Never! {
     pkg_bytes_text(raw, 0, if raw.len() < 12 -> raw.len() else -> 12)
 }
 
-// Put the verified pack archive at `destination`: the copy beside jetpack,
-// else the `JET_CC_PACK_URL` pack, else the release download. Returns where
-// it came from.
-provider_cc_pack_obtain: fn(asset: CcPackAsset, sources: CcPackSources, offline: Bool, destination: String) -[IO, FS, Env, Net, Time.Wait]> String ProviderError! {
+// One pack archive to unpack, and where it came from.
+CcPackArchive: struct {
+    path: String
+    origin: String
+}
+
+// The pack archive to unpack: the copy beside jetpack, else the
+// `JET_CC_PACK_URL` pack, else the release download. A local pack is read
+// where it lies; a download lands at `destination`. Install verifies it.
+provider_cc_pack_obtain: fn(asset: CcPackAsset, sources: CcPackSources, offline: Bool, destination: String) -[IO, FS, Env, Net, Time.Wait]> CcPackArchive ProviderError! {
     release: provider_cc_pack_release_name(sources)
     if sources.beside == .Val(dir) {
         local: files.join(dir, asset.file)
-        if provider_cc_is_regular_file(local) {
-            provider_cc_pack_copy_file(local, destination, asset) ?? return Err(ProviderError.BadOutput(err.message()))
-            provider_cc_pack_verify_archive(destination, asset, "`{local}`") ?? return Err(ProviderError.BadOutput(err.message()))
-            return Ok(local)
-        }
+        if provider_cc_is_regular_file(local) -> return Ok(CcPackArchive{path: local, origin: "`{local}`"})
     }
     if sources.url == .Val(url) -> return provider_cc_pack_fetch(url, asset, release, offline, destination)
     name: release ?? {
@@ -249,9 +252,9 @@ provider_cc_pack_obtain: fn(asset: CcPackAsset, sources: CcPackSources, offline:
     provider_cc_pack_fetch("{sources.release_base}/{name}/{asset.file}", asset, release, offline, destination)
 }
 
-// Fetch the pack at `url` into `destination` and verify it. A `file://`
-// URL is a local copy, so it works offline; any other URL is a download.
-provider_cc_pack_fetch: fn(url: String, asset: CcPackAsset, release: String?, offline: Bool, destination: String) -[IO, FS, Env, Net, Time.Wait]> String ProviderError! {
+// The pack at `url`. A `file://` URL is a local file, so it works offline;
+// any other URL is downloaded into `destination`.
+provider_cc_pack_fetch: fn(url: String, asset: CcPackAsset, release: String?, offline: Bool, destination: String) -[IO, FS, Env, Net, Time.Wait]> CcPackArchive ProviderError! {
     label: if release == {
         .Val(name) -> "jet {name}"
         .None -> "this jet"
@@ -261,32 +264,13 @@ provider_cc_pack_fetch: fn(url: String, asset: CcPackAsset, release: String?, of
         return Err(ProviderError.Offline("the C toolchain pack for {label} is not in the Hangar and cannot be downloaded offline; {provider_cc_pack_fixes(asset, release)}"))
     }
     term.eprint("first use: fetching the C toolchain for {label} ({terminal_human_size(asset.size)})")
-    if local {
-        provider_cc_pack_copy_file(url.removeprefix("file://"), destination, asset) ?? return Err(ProviderError.BadOutput(err.message()))
-    } else {
-        provider_cc_pack_download(url, destination, asset) ?? return Err(ProviderError.BadOutput(err.message()))
-    }
-    provider_cc_pack_verify_archive(destination, asset, url) ?? return Err(ProviderError.BadOutput(err.message()))
-    Ok(url)
+    if local -> return Ok(CcPackArchive{path: url.removeprefix("file://"), origin: url})
+    provider_cc_pack_download(url, destination, asset) ?? return Err(ProviderError.BadOutput(err.message()))
+    Ok(CcPackArchive{path: destination, origin: url})
 }
 
-// Copy a local pack into a staging file that must not exist yet, refusing
-// more bytes than the pack jet expects.
-provider_cc_pack_copy_file: fn(source: String, destination: String, asset: CcPackAsset) CcToolchainError! -[FS]> {
-    input := files.open(source) ?? return Err(CcToolchainError.Invalid("open C toolchain pack `{source}`: {err}"))
-    output := files.create(destination, if_exists: .Refuse) ?? return Err(CcToolchainError.Invalid("create C toolchain pack staging file: {err}"))
-    total := 0
-    loop {
-        chunk: input.read(CC_PACK_READ_CHUNK) ?? return Err(CcToolchainError.Invalid("read C toolchain pack `{source}`: {err}"))
-        if chunk.len() == 0 -> break
-        total += chunk.len()
-        if total > asset.size -> return Err(CcToolchainError.Invalid("C toolchain pack `{source}` is larger than the {asset.size} bytes this jet expects"))
-        output.write_all(chunk) ?? return Err(CcToolchainError.Invalid("write C toolchain pack staging file: {err}"))
-    }
-    output.fsync() ?? return Err(CcToolchainError.Invalid("sync C toolchain pack staging file: {err}"))
-}
-
-// Download the pack through the native release client.
+// Download the pack through the native release client. The file is scratch
+// that install verifies and deletes, so it is never flushed.
 provider_cc_pack_download: fn(url: String, destination: String, asset: CcPackAsset) CcToolchainError! -[FS, Env, Net, Time.Wait]> {
     response: provider_native_get_within(url, "C toolchain pack", CC_PACK_FETCH_TIMEOUT_MS) ?? return Err(CcToolchainError.Invalid(err.message()))
     output := files.create(destination, if_exists: .Refuse) ?? return Err(CcToolchainError.Invalid("create C toolchain pack staging file: {err}"))
@@ -297,32 +281,51 @@ provider_cc_pack_download: fn(url: String, destination: String, asset: CcPackAss
         if total > asset.size -> return Err(CcToolchainError.Invalid("C toolchain pack at {url} is larger than the {asset.size} bytes this jet expects"))
         output.write_all(chunk) ?? return Err(CcToolchainError.Invalid("write C toolchain pack staging file: {err}"))
     }
-    output.fsync() ?? return Err(CcToolchainError.Invalid("sync C toolchain pack staging file: {err}"))
 }
 
-// The staged archive must hash to the embedded SHA-256; otherwise it is
-// deleted and the error names both hashes.
-provider_cc_pack_verify_archive: fn(path: String, asset: CcPackAsset, origin: String) CcToolchainError! -[FS]> {
-    actual: foundation_sha256_file_hex(path) ?? {
-        provider_cc_remove_tree(path)
-        return Err(CcToolchainError.Invalid("hash C toolchain pack from {origin}: {err}"))
+// The open archive must hash to the embedded SHA-256 within the expected
+// size; it is then rewound so the same handle is unpacked.
+provider_cc_pack_verify_archive: fn(file: &files.FileReader, asset: CcPackAsset, origin: String) CcToolchainError! -[FS]> {
+    hasher := StreamingSHA256.new()
+    total := 0
+    loop {
+        chunk: file.read(CC_PACK_READ_CHUNK) ?? return Err(CcToolchainError.Invalid("read C toolchain pack from {origin}: {err}"))
+        if chunk.len() == 0 -> break
+        total += chunk.len()
+        if total > asset.size -> return Err(CcToolchainError.Invalid("C toolchain pack from {origin} is larger than the {asset.size} bytes this jet expects"))
+        hasher.update(chunk)
     }
+    actual: hasher.finalize_hex()
     if actual != asset.sha256 {
-        provider_cc_remove_tree(path)
         return Err(CcToolchainError.PackHashMismatch{origin: origin, expected: asset.sha256, actual: actual})
     }
+    file.seek(0) ?? return Err(CcToolchainError.Invalid("rewind C toolchain pack from {origin}: {err}"))
 }
 
-// Unpack, check, seal and record a verified archive as the pack entry.
-provider_cc_pack_install: fn(verification: &StoreVerification, roots: HangarRoots, asset: CcPackAsset, archive: String, staging: String) -[FS, Env, Time]> CcPackTools CcToolchainError! {
+// Verify, unpack, seal and record a pack archive as the pack entry. One
+// open handle is hashed and then unpacked, so the bytes unpacked are the
+// bytes verified.
+provider_cc_pack_install: fn(verification: &StoreVerification, roots: HangarRoots, asset: CcPackAsset, archive: CcPackArchive, staging: String) -[FS, Env, Time]> CcPackTools CcToolchainError! {
+    file := files.open(archive.path, links: .Refuse) ?? return Err(CcToolchainError.Invalid("open C toolchain pack from {archive.origin}: {err}"))
+    provider_cc_pack_verify_archive(file, asset, archive.origin)
     files.create_dir_all(staging) ?? return Err(CcToolchainError.Invalid("create C toolchain pack staging directory: {err}"))
-    provider_cc_pack_untar(archive, staging)
+    provider_cc_pack_untar(file, staging)
     manifest: provider_cc_pack_read_manifest(staging, asset)
-    clang_sha256: provider_cc_pack_tool_sha256(staging, CC_PACK_CLANG)
-    lld_sha256: provider_cc_pack_tool_sha256(staging, CC_PACK_LLD)
-    ar_sha256: provider_cc_pack_tool_sha256(staging, CC_PACK_AR)
-    store_seal_local_output(staging) ?? return Err(CcToolchainError.Invalid("seal C toolchain pack: {err.message()}"))
-    digest: pkg_try_output_hash_of(staging) ?? return Err(CcToolchainError.Invalid("hash C toolchain pack tree: {err.message()}"))
+    // Untar creates only fresh regular files and directories in private
+    // staging, so no hardlink lets the seal reach outside it, and the tree
+    // is sealed before its one canonical hash.
+    store_seal_node(staging) ?? return Err(CcToolchainError.Invalid("seal C toolchain pack: {err.message()}"))
+    digests: provider_cc_pack_digests(staging)
+    digest: digests.tree
+    clang_sha256: provider_cc_pack_tool_sha256(staging, CC_PACK_CLANG, digests.files)
+    lld_sha256: provider_cc_pack_tool_sha256(staging, CC_PACK_LLD, digests.files)
+    ar_sha256: provider_cc_pack_tool_sha256(staging, CC_PACK_AR, digests.files)
+    // Store registration and publication reuse these digests instead of
+    // reading the tree again.
+    store_remember_output_digest(verification, staging, None, false, digest) ?? return Err(CcToolchainError.Invalid("remember C toolchain pack digest: {err.message()}"))
+    loop path in digests.files.keys() {
+        store_remember_content_digest(verification, path, digests.files[path]) ?? return Err(CcToolchainError.Invalid("remember C toolchain pack file digest: {err.message()}"))
+    }
     facts: [String: String]{
         "cc.schema": CC_TOOLCHAIN_SCHEMA,
         "cc.producer": CC_TOOLCHAIN_PRODUCER,
@@ -352,7 +355,7 @@ provider_cc_pack_install: fn(verification: &StoreVerification, roots: HangarRoot
         out: staging,
         bin: files.join(staging, "bin"),
         rlib: "",
-        envelope: Envelope.for_output(staging, reference, CC_PACK_RECIPE_ID),
+        envelope: Envelope{output_hash: digest, platform: pkg_host_platform(), signature: "", provenance: "{reference} via {CC_PACK_RECIPE_ID}"},
         cache_identity: CacheIdentity{
             source_fingerprint: source,
             recipe_fingerprint: pkg_sha256_hex(CC_PACK_RECIPE_ID.bytes()),
@@ -370,14 +373,46 @@ provider_cc_pack_install: fn(verification: &StoreVerification, roots: HangarRoot
     Ok(CcPackTools{digest: digest, root: root, asset: asset, manifest: manifest, clang_sha256: clang_sha256, lld_sha256: lld_sha256, ar_sha256: ar_sha256})
 }
 
-// The SHA-256 of one non-empty pack tool.
-provider_cc_pack_tool_sha256: fn(root: String, relative: String) -[FS]> String CcToolchainError! {
+// The pack tree's canonical digest and every file's content SHA-256.
+CcPackDigests: struct {
+    tree: String
+    files: [String: String]
+}
+
+// Hash the pack tree and each of its files on worker tasks at once.
+provider_cc_pack_digests: fn(staging: String) -[FS, Env]> CcPackDigests CcToolchainError! {
+    paths := [String]{}
+    sizes := [Int]{}
+    provider_cc_pack_collect_files(staging, paths, sizes)
+    hashed: store_hash_tree_and_files(staging, paths, sizes) ?? return Err(CcToolchainError.Invalid("hash C toolchain pack: {err.message()}"))
+    file_digests := [String: String]{}
+    loop index in 0..<paths.len() -> file_digests[paths[index]] = hashed.files[index]
+    Ok(CcPackDigests{tree: hashed.tree, files: file_digests})
+}
+
+// Every regular file below `path`, with its size.
+provider_cc_pack_collect_files: fn(path: String, paths: &[String], sizes: &[Int]) CcToolchainError! -[FS]> {
+    entries: files.list_dir(path) ?? return Err(CcToolchainError.Invalid("list C toolchain pack directory `{path}`: {err}"))
+    loop entry in entries {
+        info: files.stat(entry.path) ?? return Err(CcToolchainError.Invalid("inspect C toolchain pack entry `{entry.path}`: {err}"))
+        if info.is_symlink -> next
+        if info.is_dir {
+            provider_cc_pack_collect_files(entry.path, paths, sizes)
+        } else if info.is_file {
+            paths.push(entry.path)
+            sizes.push(info.size)
+        }
+    }
+}
+
+// The SHA-256 of one non-empty pack tool, taken from the pack's file digests.
+provider_cc_pack_tool_sha256: fn(root: String, relative: String, digests: [String: String]) -[FS]> String CcToolchainError! {
     path: provider_cc_checked_relative_path(root, relative, "pack tool `{relative}`")
     metadata: files.stat(path) ?? return Err(CcToolchainError.Invalid("C toolchain pack tool `{relative}` is unavailable: {err}"))
     if metadata.is_symlink || !metadata.is_file || metadata.size == 0 {
         return Err(CcToolchainError.Invalid("C toolchain pack tool `{relative}` is not a non-empty regular file"))
     }
-    foundation_sha256_file_hex(path) ?? return Err(CcToolchainError.Invalid("hash C toolchain pack tool `{relative}`: {err}"))
+    digests.get(path) ?? return Err(CcToolchainError.Invalid("C toolchain pack tool `{relative}` was not hashed"))
 }
 
 // The recorded pack for `asset`, re-proved, or None when the Hangar has none.
@@ -511,8 +546,7 @@ CcPackTarStream: struct {
 
 // Unpack the regular files and directories of a pack archive below
 // `destination`, within the entry and byte limits.
-provider_cc_pack_untar: fn(archive: String, destination: String) CcToolchainError! -[FS]> {
-    file: files.open(archive, links: .Refuse) ?? return Err(CcToolchainError.Invalid("open C toolchain pack: {err}"))
+provider_cc_pack_untar: fn(&&file: files.FileReader, destination: String) CcToolchainError! -[FS]> {
     stream := CcPackTarStream{reader: zstd.reader(file), buffer: [U8]{}, at: 0}
     entries := 0
     unpacked := 0

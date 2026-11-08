@@ -145,7 +145,7 @@ store_optimize_objects_cas_pool: fn(verification: &StoreVerification, roots: Han
     report := CleanReport.empty()
     loop path in object_dirs {
         sealed: store_check_seal(verification, path, hangar)
-        shared: store_share_tree_files_unlocked_with_report(roots, path, false)
+        shared: store_share_tree_files_unlocked_with_report(verification, roots, path, false)
         report.optimized_files += shared.optimized_files
         report.optimized_bytes += shared.optimized_bytes
         if shared.optimized_files > 0 && sealed == .Val(digest) -> store_write_seal(verification, path, hangar, digest)

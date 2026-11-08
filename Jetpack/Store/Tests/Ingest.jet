@@ -16,18 +16,27 @@
     // Production hashes objects only after sealing (admission seals the staged
     // tree before its first digest), so the baseline is a sealed tree too.
     store_seal_node(output) ?? panic("seal")
+    first_path: files.join(output, "first")
+    first_before: files.stat(first_path) ?? panic("first before")
+    verification := StoreVerification.new()
 
     before: pkg_try_output_hash_of_in_hangar(output, roots.hangar_dir(), false) ?? panic("before")
-    store_share_tree_files(roots, output, false) ?? panic("first share")
+    store_share_tree_files(verification, roots, output, false) ?? panic("first share")
     after_first: pkg_try_output_hash_of_in_hangar(output, roots.hangar_dir(), false) ?? panic("after first")
-    store_share_tree_files(roots, output, false) ?? panic("second share")
+    store_share_tree_files(verification, roots, output, false) ?? panic("second share")
     after_second: pkg_try_output_hash_of_in_hangar(output, roots.hangar_dir(), false) ?? panic("after second")
 
     assert_eq(before, after_first)
     assert_eq(before, after_second)
-    first: files.stat(files.join(output, "first")) ?? panic("first stat")
+    first: files.stat(first_path) ?? panic("first stat")
     second: files.stat(files.join(output, "second")) ?? panic("second stat")
     assert(first.id != second.id)
+    // Sharing links the file itself into the pool: its inode is kept and
+    // becomes the pool entry, so no bytes are copied.
+    assert(first.id == first_before.id)
+    pool_key: store_shared_cas_key(store_sha256_file_hex(first_path) ?? panic("first digest"), store_permission_identity(first))
+    pooled: files.stat(files.join(roots.shared_cas_dir(), pool_key)) ?? panic("pool entry")
+    assert(pooled.id == first.id)
     store_make_tree_writable_for_removal(root).drop("claim cleanup")
     files.remove_all(root).drop("claim cleanup")
 }
