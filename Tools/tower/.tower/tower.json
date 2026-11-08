@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6698,
-    "rev": 96241,
+    "rev": 96246,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -72560,7 +72560,7 @@
     {
       "id": "c0z3glhp",
       "num": 6067,
-      "title": "Jet one-liners: `jet -e`, `jet run -` and typed line loops (`-n`, `-p`, `-a`, `--csv T`) that beat Perl and awk",
+      "title": "Jet one-liners: jet -e, jet run - and input through plain Core names that beat Perl and awk",
       "body": "Scripting audit 2026-10-28 (Docs/audits/scripting-peers-2026-10-28.md, row D03). Jet has no one-liner mode. Probes on commit 8fbf094: `echo 'fn run() { print(\"x\") }' | jet run -` gives E2105 \"Can't securely read the file `-`\"; `jet run -e 'print(1)'` gives E2105; `jet eval 1+2` gives E2104. Perl (`perl -lane`), Ruby (`ruby -ne`), awk and nushell own this use. No card covers it: #4720's `jet eval` is pure and evaluator-only.\n\nDesign that beats them. `-e CODE` is the body of `fn run`, checked by sema exactly like a file, so a typo fails before any input is read. `-n` wraps the body in `loop line in stdin.lines()`; `-p` also prints `line` after the body; `-a` binds `words: [String]` split on whitespace (`-F,` sets the separator); `--begin`/`--end` run code before and after the loop; `-i` edits named files in place. The step Perl and awk cannot take: `--csv Row` or `--json T` decodes each record into `row: Row`, a struct declared inline or in a file, so a misspelled field is a compile error, while awk and Perl print an empty string. Compiled one-liners are cached by content hash like any script, so the second run uses native code. Piped source follows #5949: never remembered, always asks.\n\nSpelling is decided by ballot D-SCRIPT-ONELINER1 (cards/DECISIONS.md). Map: #5981.",
       "kind": "task",
       "track": "epoch",
@@ -72575,6 +72575,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-08",
+          "by": "Main",
+          "text": "Main 2026-11-08: c4, c6 and c8 re-cut to D-SCRIPT-ONELINER1=A; title updated. Note: the ballot text says input.edit(f) asks once to write; that half follows D-AUTH-DEFAULT1=A (#6614: allowed by default with the effect-change notice), as c3 already does for piped source. c9 (from #2161) is not about one-liners; it stays here until re-homed."
+        },
         {
           "at": "2026-11-08",
           "by": "Main",
@@ -72620,12 +72625,12 @@
         },
         {
           "n": 4,
-          "text": "A checked-in table of 10 classic one-liners (print field 2, sum column 3, count matching lines, unique lines in order, in-place replace with -i, number lines, longest line, swap two fields, keep lines longer than 80, sum a named CSV column) passes with byte-identical output to the `perl` version on the same input.",
+          "text": "A checked-in table of 10 classic one-liners (print field 2, sum column 3, count matching lines, unique lines in order, in-place replace through input.edit(f), number lines, longest line, swap two fields, keep lines longer than 80, sum a named CSV column through input.csv(T)) written with jet -e, input, words() and split(sep), passes with byte-identical output to the perl version on the same input.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T21:05:38.566Z"
+          "at": "2026-11-08T18:48:08.413Z"
         },
         {
           "n": 5,
@@ -72638,12 +72643,12 @@
         },
         {
           "n": 6,
-          "text": "With `--csv Row`, a misspelled field (`r.nmae`) is a compile error before any input is read; the test also records that the awk and Perl versions of the same typo exit 0 with empty output.",
+          "text": "With input.csv(Row), a misspelled field (r.nmae) is a compile error before any input is read; the test also records that the awk and Perl versions of the same typo exit 0 with empty output.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T21:05:38.566Z"
+          "at": "2026-11-08T18:48:09.602Z"
         },
         {
           "n": 7,
@@ -72656,12 +72661,12 @@
         },
         {
           "n": 8,
-          "text": "Docs/spec/reference/cli.md and `jet help run` document -e, -n, -p, -a, -F, -i, --begin, --end, --csv and --json; UI snapshot of the help.",
+          "text": "Docs/spec/reference/cli.md and jet help run document -e and jet run -, and jet help input lists input, words(), split(sep), input.csv(T), input.json(T) and input.edit(f) together; UI snapshots of both helps.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T21:05:38.566Z"
+          "at": "2026-11-08T18:48:10.895Z"
         },
         {
           "n": 9,
@@ -72687,7 +72692,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T21:05:38.566Z",
-      "updated": "2026-11-08T10:40:20.254Z",
+      "updated": "2026-11-08T18:48:14.105Z",
       "updatedBy": "Main",
       "goals": [
         "G4"
@@ -189592,6 +189597,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-08T18:48:14.106Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0z3glhp",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-08T18:48:12.912Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0z3glhp",
+      "note": "title"
+    },
+    {
+      "at": "2026-11-08T18:48:10.896Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0z3glhp",
+      "note": "#8: Re-cut to ratified D-SCRIPT-ONELINER1=A (c1): one -e flag and plain Core names; the letter flags were the rejected option (ScriptLead triage 2026-11-08).; was: Docs/spec/reference/cli.md and `jet help run` document -e, -n, -p, -a, -F, -i, --begin, --end, --csv and --json; UI snapshot of the help."
+    },
+    {
+      "at": "2026-11-08T18:48:09.602Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0z3glhp",
+      "note": "#6: Re-cut to ratified D-SCRIPT-ONELINER1=A (c1): one -e flag and plain Core names; the letter flags were the rejected option (ScriptLead triage 2026-11-08).; was: With `--csv Row`, a misspelled field (`r.nmae`) is a compile error before any input is read; the test also records that the awk and Perl versions of the same typo exit 0 with empty output."
+    },
+    {
+      "at": "2026-11-08T18:48:08.413Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0z3glhp",
+      "note": "#4: Re-cut to ratified D-SCRIPT-ONELINER1=A (c1): one -e flag and plain Core names; the letter flags were the rejected option (ScriptLead triage 2026-11-08).; was: A checked-in table of 10 classic one-liners (print field 2, sum column 3, count matching lines, unique lines in order, in-place replace with -i, number lines, longest line, swap two fields, keep lines"
+    },
     {
       "at": "2026-11-08T18:44:05.885Z",
       "by": "Main",
