@@ -1,8 +1,9 @@
 // `jet run` keeps its program (Compiler/JetCli/Source/Cli/ScriptCache.jet).
 // A rerun of a `none` program reuses it with identical output and starts the
 // background `full` build that replaces it in the same slot; a rerun of the
-// `full` program reuses it and marks it used. A source edit, a Core change and
-// a compiler change each compile again and replace it. The cache holds 64
+// `full` program reuses it, and marks it used only when its last mark is past
+// the ten-minute use grain. A source edit, a Core change and a compiler
+// change each compile again and replace it. The cache holds 64
 // programs and drops the least recently run one. Runs against copies: the
 // compiler (beside its jet-runtime), a toolchain root holding only Core, and
 // its own XDG caches.
@@ -13,6 +14,7 @@ use {
     files: core.files
     process: core.process
     term: core.term
+    sys: core.sys
     time: core.time
 }
 
@@ -38,9 +40,10 @@ Ran: struct {
     errors: String
 }
 
-// The slot's record: its text and modification time, the program kept beside
-// it, its sources hash and the optimize level the program was built at.
+// The slot's record: its path, text and modification time, the program kept
+// beside it, its sources hash and the optimize level the program was built at.
 Slot: struct {
+    record: String
     text: String
     secs: Int
     nanos: Int
@@ -92,7 +95,7 @@ slot: fn(kept: String) -> Slot {
     programs: names.filter(name -> program_file(name))
     if programs.len() != 1 || programs[0] != program -> fail("expected only the program {program}, found {names.join(", ")}")
     modified: (files.stat(record.copy()) ?? fail("cannot stat {record}: {err}")).modified
-    Slot{text: text.copy(), secs: modified.secs, nanos: modified.nanos, program: program.copy(), sources: lines[2].copy(), level: lines[3].copy()}
+    Slot{record: record.copy(), text: text.copy(), secs: modified.secs, nanos: modified.nanos, program: program.copy(), sources: lines[2].copy(), level: lines[3].copy()}
 }
 
 // How many slot records in `kept` name a `full` program.
@@ -136,12 +139,32 @@ settle: fn(kept: String, step: String, full: Int) {
     }
 }
 
-// Reused: the same record naming the same program, marked used since `before`.
+// Reused: the same record naming the same program, left as it was: a record
+// written within the use grain (ScriptCache.jet JET_CLI_SCRIPT_USED_GRAIN_NS)
+// is already marked, so the rerun writes nothing.
 reused: fn(kept: String, step: String, before: Slot) -> Slot {
     after: slot(kept)
     if after.text != before.text -> fail("{step}: the kept program was replaced, not reused")
+    if after.secs != before.secs || after.nanos != before.nanos -> fail("{step}: the record, marked moments ago, was written again")
+    after
+}
+
+// `before`'s record with its mark set back eleven minutes, past the use grain.
+aged: fn(kept: String, before: Slot) -> Slot {
+    back: before.secs - 660
+    #Unsafe("the test owns the slot record it ages") {
+        sys.utime(before.record.copy(), back, back) ?? fail("cannot age {before.record}: {err}")
+    }
+    slot(kept)
+}
+
+// Marked: the same record naming the same program, its old mark `before`
+// renewed by the rerun `step`.
+marked: fn(kept: String, step: String, before: Slot) -> Slot {
+    after: slot(kept)
+    if after.text != before.text -> fail("{step}: the kept program was replaced, not reused")
     later: after.secs > before.secs || (after.secs == before.secs && after.nanos > before.nanos)
-    if !later -> fail("{step}: the reused record was not marked used")
+    if !later -> fail("{step}: the reused record, last marked eleven minutes ago, was not marked used")
     after
 }
 
@@ -243,6 +266,9 @@ run: fn() {
     state = promoted(kept, "rerun", state)
     check("rerun of the full program", run_ok(keep, file, keep.cache), first)
     state = reused(kept, "rerun of the full program", state)
+    state = aged(kept, state)
+    check("rerun of an old mark", run_ok(keep, file, keep.cache), first)
+    state = marked(kept, "rerun of an old mark", state)
 
     write(file, greeting("two"))
     check("source edit", run_ok(keep, file, keep.cache), "hello two\n")

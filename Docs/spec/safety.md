@@ -211,9 +211,9 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1350,
+  "total": 1351,
   "counts": {
-    "Compiler": 687,
+    "Compiler": 688,
     "Core": 186,
     "Docs": 8,
     "Examples": 35,
@@ -1089,6 +1089,13 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
       "line": 1963,
       "column": 9,
       "reason": "posix setpriority: the build lowers only its own threads, never raising one"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetCli/Tests/RunKeep.fixture/RunKeep.jet",
+      "line": 155,
+      "column": 5,
+      "reason": "the test owns the slot record it ages"
     },
     {
       "package": "Compiler",
@@ -9680,14 +9687,14 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 
 | crate/package | regions |
 | --- | ---: |
-| Compiler | 687 |
+| Compiler | 688 |
 | Core | 186 |
 | Docs | 8 |
 | Examples | 35 |
 | Jetpack | 9 |
 | Tools | 7 |
 | tests | 418 |
-| **total** | **1350** |
+| **total** | **1351** |
 
 ### Regions
 
@@ -9817,6 +9824,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1233:1 | "calls machine code; the caller vouches for its three-word System V signature" |
 | Compiler | Compiler/JetCli/Source/Cli/Host.jet | 1596:9 | "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the runtime's unmapped process exit" |
 | Compiler | Compiler/JetCli/Source/Cli/Host.jet | 1963:9 | "posix setpriority: the build lowers only its own threads, never raising one" |
+| Compiler | Compiler/JetCli/Tests/RunKeep.fixture/RunKeep.jet | 155:5 | "the test owns the slot record it ages" |
 | Compiler | Compiler/JetDevserver/Source/WebHost02.jet | 383:5 | "unlinkat borrows a held parent and CString" |
 | Compiler | Compiler/JetDevserver/Source/WebHost02.jet | 387:5 | "adopt only a successful openat descriptor" |
 | Compiler | Compiler/JetDevserver/Source/WebHost02.jet | 394:5 | "adopt only a successful openat descriptor" |

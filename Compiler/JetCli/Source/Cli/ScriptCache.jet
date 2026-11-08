@@ -30,6 +30,7 @@ use {
     cli_files: core.files
     cli_process: core.process
     cli_sys: core.sys
+    cli_time: core.time
     jet_backend.[X64Executable, x64_executable_keep, x64_executable_kept]
     jet_driver.[
         JetDriverAuthorizedSourceSnapshot,
@@ -62,6 +63,11 @@ JET_CLI_SCRIPT_LEVEL_NONE: "none"
 // The most slots the cache holds; a keep past it removes the least recently
 // used ones.
 JET_CLI_SCRIPT_KEEP_MAX: 64
+
+// How long a slot's use mark stands: a rerun within this many nanoseconds of
+// the record's last write leaves the record as it is, so back-to-back reruns
+// write nothing, and the trim orders slots by use to within ten minutes.
+JET_CLI_SCRIPT_USED_GRAIN_NS: 600000000000
 
 // A `jet run` compile whose program is kept when it finishes: its slot, the
 // toolchain and sources it started from, and the log of the comptime inputs
@@ -406,10 +412,17 @@ jet_cli_script_promoted: fn(lock: &&cli_files.FileLock, keep: JetCLIScriptKeep, 
 
 // Mark the slot record `record`, whose text is `text`, as just used: a copy
 // written beside it and renamed over it, so a concurrent run reads either
-// record whole and the oldest-used slots are the ones trimmed. A keep that
-// replaced the record meanwhile is undone, leaving the next run to compile
-// again (its program may be gone).
+// record whole and the oldest-used slots are the ones trimmed. A record
+// written less than JET_CLI_SCRIPT_USED_GRAIN_NS ago is already marked, so
+// the rerun leaves it alone; a rename over a file can wait on the file
+// system's journal, far longer than the run. A keep that replaced the record
+// meanwhile is undone, leaving the next run to compile again (its program may
+// be gone).
 jet_cli_script_used: fn(record: String, text: String) {
+    status: cli_files.stat(record) ?? return
+    written: status.modified.to_unix_ns() ?? return
+    since: cli_time.unix_ns() - written
+    if since >= 0 && since < JET_CLI_SCRIPT_USED_GRAIN_NS -> return
     staged: "{record}.{cli_sys.pid()}"
     cli_files.write(staged, text) ?? return
     if cli_files.rename(staged, record) == .Err(_) -> cli_files.remove(staged).drop("a staged record is never read")

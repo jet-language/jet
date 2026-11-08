@@ -693,9 +693,10 @@ writes its fault report into, are not compile inputs and don't change the
 hash. A rerun with the same toolchain and sources
 runs the kept program without compiling. Any change, including a different
 compiler, compiles again and replaces the kept program. The cache holds at
-most 64 programs; keeping another removes the least recently run one. A
-compile that read a comptime input file keeps nothing, and a `--verbose` or
-traced run always compiles.
+most 64 programs; keeping another removes the least recently run one. A rerun
+marks its program as just run unless it was marked in the last ten minutes,
+so recency counts to within ten minutes. A compile that read a comptime input
+file keeps nothing, and a `--verbose` or traced run always compiles.
 
 A plain `jet run` compiles at the stock `optimize: none`, so the first run
 starts quickly. When a rerun reuses that program and neither a profile nor a
