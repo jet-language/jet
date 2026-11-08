@@ -2611,6 +2611,33 @@ g: fn(s: &[Int], a: Int, b: Int, c: Int, d: Int, mx: Int, my: Int) {
     }
 }
 
+// The host row against the scalar rounds; a host without the SHA extensions
+// answers false and keeps the state, and the scalar rounds stand in.
+#Test("SHA-256 block compression agrees with the scalar rounds at every length and offset") {
+    lengths := [Int]{}
+    loop length in 0..<200 -> lengths.push(length)
+    lengths.push(4109)
+    offsets: [Int]{0, 1, 3, 8}
+    loop length in lengths {
+        data := [U8]{}
+        loop index in 0..<length -> data.push(U8{(index * 167 + length * 31) %% 256})
+        loop off in offsets {
+            if off <= length {
+                count: (length - off) /% 64
+                fast := sha256_state(C_SHA256_IV)
+                scalar := sha256_state(C_SHA256_IV)
+                w := sha256_schedule()
+                if !core.crypto.__sha256_blocks(fast, data, off, count) {
+                    assert(fast == scalar)
+                    loop i in 0..<count -> sha256_block(fast, w, data, off + i * 64)
+                }
+                loop i in 0..<count -> sha256_block(scalar, w, data, off + i * 64)
+                assert(fast == scalar)
+            }
+        }
+    }
+}
+
 #Test("JETC2 never overwrites destinations and removes unauthenticated outputs") {
     if core.files.__os_family() == "unix" && !core.files.__path_windows() {
         root: core.files.mktemp("jetc-source-contract")

@@ -218,3 +218,58 @@ rt_sha256_parts: fn(left: I64, left_len: I64, right: I64, right_len: I64, digest
 #Export(c) jet_rt_native_sha256: fn(bytes: I64, length: I64, digest: I64, scratch: I64) {
     rt_sha256_parts(bytes, length, I64{1}, I64{0}, digest, scratch)
 }
+
+// The SHA extensions' constants for os_sha256_block_i64, else 0: the byte-swap
+// shuffle mask (16 bytes), then the 64 round constants as U32s (256 bytes).
+// Set up only on a host whose cpuid reports SHA, SSSE3 and SSE4.1; the table
+// lives for the process.
+sha256_ni_table := I64{0}
+// runtime-init: 4 when sha256_ni_table
+#Export(c) jet_rt_sha256_ni_init: fn() {
+    if (sha256_ni_table != I64{0} || !sha256_ni_present()) -> return
+    table: jet_rt_alloc(I64{272}, I64{8})
+    rt_text_store(table, I64{0x0405060700010203})
+    rt_text_store(wrapping(table + I64{8}), I64{0x0c0d0e0f08090a0b})
+    rounds: I64{64}
+    round := I64{0}
+    loop round < rounds {
+        rt_text_store(wrapping(table + (I64{16} + round * I64{4})), rt_crypto_word64(rt_sha256_k(round + I64{1}), rt_sha256_k(round)))
+        round += I64{2}
+    }
+    #Unsafe("runtime-init runs before any other thread exists") {
+        sha256_ni_table = table
+    }
+}
+
+// CPUID.7.0:EBX bit 29 (SHA) with CPUID.1:ECX bits 9 (SSSE3) and 19 (SSE4.1).
+sha256_ni_present: fn() -> Bool {
+    #Unsafe("cpuid only reports processor identification") {
+        if (os_cpuid_eax_i64(I64{0}, I64{0}) < I64{7}) -> return false
+        if (os_cpuid_ecx_i64(I64{1}, I64{0}).bit_and(I64{524800}) != I64{524800}) -> return false
+        if (os_cpuid_ebx_i64(I64{7}, I64{0}).bit_and(I64{536870912}) != I64{0}) -> return true
+    }
+    false
+}
+
+// core.crypto.__sha256_blocks: the `count` 64-byte blocks of the borrowed
+// bytes (data, length) from `offset` compressed into the eight-word List<U32>
+// at `header` (len, capacity, data) with the SHA extensions. False, touching
+// nothing, on a host without them or for a state or range outside those
+// bounds; Core then runs its own rounds.
+#Export(c) jet_crypto_sha256_blocks: fn(header: I64, data: I64, length: I64, offset: I64, count: I64) -> Bool {
+    table: sha256_ni_table
+    if (table == I64{0} || RT_HOST_U8_STRIDE != I64{1}) -> return false
+    start: jet_int_owned_to_i64(offset)
+    blocks: jet_int_owned_to_i64(count)
+    if (rt_text_word(header) != I64{8} || start < I64{0} || blocks < I64{0} || start > length || blocks > (length - start) / I64{64}) -> return false
+    state: rt_text_word(wrapping(header + I64{16}))
+    at := start
+    end: start + blocks * I64{64}
+    loop at < end {
+        #Unsafe("the state list holds eight U32 words, and the range check keeps each block inside the length borrowed bytes") {
+            os_sha256_block_i64(state, wrapping(data + at), table)
+        }
+        at += I64{64}
+    }
+    true
+}
