@@ -8797,8 +8797,9 @@ sema_check_module_in_shared: fn(shared_state: Shared<SemaCheckShared>, host_hook
 // One codec wave's part of module `module_index`: the generated codec
 // methods the wave filled (graph.codec_wave_rows), checked against the
 // module scope the body pass uses (sema_check_module_summary_scopes) and
-// appended to the module's result from that pass. Returns how many checked
-// functions it appended.
+// appended to the module's result from that pass, their diagnostics located
+// in the module's source as the body pass locates its own. Returns how many
+// checked functions it appended.
 sema_check_codec_module_in_shared: fn(shared_state: Shared<SemaCheckShared>, host_hooks: SemaHostHookAccess?, module_index: Int, comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], pending_obligations: Bool, counter_phase: String, trace_sink: CompilerTraceSink?, result: &SemaGraphModuleResult) -> Int {
     environment := sema_check_shared_take_environment(shared_state)
     program := sema_check_shared_take_program(shared_state)
@@ -8813,9 +8814,11 @@ sema_check_codec_module_in_shared: fn(shared_state: Shared<SemaCheckShared>, hos
     // codec wave injects no prelude conversion: no demand is kept.
     prelude_demands := [Int:[SemaPreludeConversionDemand]]{}
     before: result.functions.len()
+    diagnostics_before: result.diagnostics.len()
     loop job in jobs {
         if !sema_check_apply_method_job(module_index, memory_plan, job, ready, queries, None, scopes, environment, program, host_hooks, comptime_functions, comptime_rows, result.diagnostics, result.functions, prelude_demands, result.call_facts, result.hardware_use, result.comptime_requests, result.name_references, result.comptime_body_sources, result.compute_facts, result.failure_facts, result.exact_int_reachable, result.copy_events, result.incomplete_reasons, keep_going, pending_obligations) -> result.complete = false
     }
+    sema_check_registered_locate_diagnostics(environment, program, module_index, diagnostics_before, result.diagnostics)
     sema_check_shared_fill(shared_state, environment, program, memory_plan)
     result.functions.len() - before
 }
