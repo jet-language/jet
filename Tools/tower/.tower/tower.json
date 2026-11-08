@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6686,
-    "rev": 96052,
+    "rev": 96056,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -34,7 +34,7 @@
         "radar:e17"
       ]
     },
-    "completionCursor": "2026-11-08T02:37:24.333Z"
+    "completionCursor": "2026-11-08T10:52:31.050Z"
   },
   "epochs": [
     {
@@ -73196,6 +73196,16 @@
         {
           "at": "2026-11-08",
           "by": "Main",
+          "text": "Owner direction 2026-11-08 (to Main): option D. The generated Decode body reads an abstract format-neutral reader interface; Dyn is one reader and a JSON byte cursor another, so there is one copy of the decode rules (SerdeItems) and every format streams with no intermediate tree. The downsides must be engineered away before presentation: the migration of hand-written Decode impls (adapter or one cutover), Flatten and untagged enums (buffering or lookahead without a second semantics), the size of the public Decode change, the beginner surface, and error-order parity with the tree path. Process: a ballot draft with exact surface and same-program alternatives, then an adversarial design review in Docs/audits (serde Deserializer/visitor and Swift Decoder as the strongest existing designs, with measured probes), then a redesign until it holds, then owner ratification, then build. Options A/B/C are superseded."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
+          "text": "Main 2026-11-08 06:10 c1 is owner-gated. Every #Codable decode is a Sema-generated body over `tree: Dyn` (Registration/SerdeItems.jet: field lookup, defaults, presence/E2410, DenyUnknownFields, validate, Flatten, migration, tagged/untagged enums). JetIR ir_dyn_decode only dispatches to it, so a one-pass decode needs a second, generated, per-type decoder over a byte cursor. Options (G1Lead scoping): (A) a hidden codec slot on the Prelude Decode trait, `__decode_json(cursor)`, whose default materializes the subtree and calls decode. SerdeItems emits the streaming body beside decode with shared helpers, and Flatten, untagged, migration and hand-written impls use the fallback, unchanged. This changes a public trait shape (Prelude Traits.jet, the OwnedTraitRows ratchet), so it needs a ballot and an adversarial review. Recommended. (B) a compiler-generated free function per type over a Core-private cursor. It needs a privacy exemption for generated items in Sema/Calls/Core.jet, which is frozen, so the freeze must be lifted. (C) JetIR synthesizes the readers from type rows plus TSerdeAttribute, duplicating the SerdeItems semantics in IR. That is a second mechanism (I8), the largest and riskiest; not advised. Any option must keep per-field errors in declaration order, and a syntax or duplicate-key error anywhere must replace the field errors, as the tree path does. Separately in scope now: dropping the 16 MiB typed-decode refusal (typed decode over 16 MiB then works through the tree path). That is not the root fix."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
           "text": "Main 2026-11-08 00:00: PortsLead-2 found c1 needs a streaming Decode path. The Prelude trait is decode(tree: Dyn) and SerdeItems derives it, so every typed decode builds the Dyn tree first. Meeting c1 needs a language-level change to the Decode trait and its derive, not a library fix. It needs a design (and a ballot if it changes the public trait) before code. Deferred out of the overnight G4 push."
         },
         {
@@ -73245,7 +73255,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T22:33:12.272Z",
-      "updated": "2026-11-08T05:16:16.011Z",
+      "updated": "2026-11-08T10:59:25.573Z",
       "updatedBy": "Main",
       "goals": [
         "G4"
@@ -93530,6 +93540,11 @@
         {
           "at": "2026-11-08",
           "by": "Main",
+          "text": "Main 2026-11-08 06:00: phase 2 landed as a08ffb93e2 (G1Lead). Core sha256 runs blocks through the runtime __sha256_blocks (SHA-NI where the CPU has it) in a private module. Receipt: release build, on a host with sha_ni, best of 3, 64 x sha256 over 1 MiB takes 0.38 s against 1.43 s on dev (3.8x). A differential of 302 inputs (lengths 0..299, 4109, 1048583) against node crypto shows 0 mismatches on none and release. Golden Crypto/ 39 PASS, Jetc 3 PASS, cases crypto 43 PASS (1 known-failing E2702, 1 SKIP-HOST), argon2id 2 PASS; 12 ratchets --check pass on a0_037. With phase 1 (591744cc94 hash-once, 3058b17fff SHA-NI) that completes the build. c1 still needs the timing: a first `jet cc` pack install under 60 s on the reference machine, measured on a quiet machine with the next seed (it must contain a08ffb93e2; a0_037 does not)."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
           "text": "Main 2026-11-08 03:45: c1 progress by G1Lead. The hash-once half landed in 591744cc94. SHA-NI phase 1 landed in 3058b17fff: x64 SSE/SHA template forms (12 SDM encodings plus 3 rejections, tested), the leaf os_sha256_block_i64 behind cpuid with the scalar fallback kept, jet_crypto_sha256_blocks, and the core.crypto.__sha256_blocks row. Phase 2 (the Core sha2_256 and JETC2 stream through sha256_blocks) waits for a seed built from 3058b17fff or later, since the seed resolves Core dunders from its compiled-in rows. Lane rows with phase 2: SHA-256 of 16 MiB 435 ms -> 43-52 ms (about 9.4x); 302/302 differential rows against node sha256/sha224 at O0/O1/O2; crypto cases 43 PASS, 0 FAIL; jetc 5/5."
         },
         {
@@ -93581,7 +93596,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T05:33:07.839Z",
-      "updated": "2026-11-08T08:41:24.458Z",
+      "updated": "2026-11-08T10:48:54.818Z",
       "updatedBy": "Main",
       "criteriaLastN": 2
     },
@@ -188211,6 +188226,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-08T10:59:25.573Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0hsgoa6",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-08T10:52:31.050Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-11-08T10:52:31.050Z"
+    },
+    {
+      "at": "2026-11-08T10:51:53.399Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0hsgoa6",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-08T10:48:54.818Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0g93joj",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-08T10:40:20.254Z",
       "by": "Main",
