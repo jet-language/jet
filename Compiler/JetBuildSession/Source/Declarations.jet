@@ -26,14 +26,23 @@ build_session_add_run: fn(state: &BuildSessionState, args: [BuildSessionValue], 
     BuildSessionReply.Value{value: BuildSessionValue.Handle{type_name: "BuildAction", session: state.id, id: id}}
 }
 
-// `b.found(probe)`: the program a find_program probe looks for, as a tool.
+// `b.found(probe)`: the program a find_program probe looks for, as a tool,
+// or the folder a find_folder probe chooses, which a step reads whole at
+// `.jet/found/<probe>`.
 build_session_found: fn(state: &BuildSessionState, args: [BuildSessionValue]) -> BuildSessionReply {
     if args.len() != 1 -> return build_session_fail(state, "`b.found` takes one probe")
     probe: build_session_handle(state, args[0], "BuildProbe") ?? return build_session_fail(state, "the probe does not belong to this build")
     row: state.probes[probe]
-    if row.kind != "find_program" -> return build_session_fail(state, "`b.found` takes a find_program probe, and `{row.name}` is a {row.kind} probe")
+    if row.kind == "find_folder" {
+        if row.name.contains("/") || row.name == "." || row.name == ".." -> return build_session_fail(state, "probe `{row.name}` names the folder a step reads at `{BUILD_SESSION_FOUND_DIR}/{row.name}`; name it without `/`")
+        return build_session_new_file(state, BuildSessionFile{kind: "folder", path: "{BUILD_SESSION_FOUND_DIR}/{row.name}", probe: Val(probe), action: None})
+    }
+    if row.kind != "find_program" -> return build_session_fail(state, "`b.found` takes a find_program or find_folder probe, and `{row.name}` is a {row.kind} probe")
     build_session_new_file(state, BuildSessionFile{kind: "found", path: row.value.copy(), probe: Val(probe), action: None})
 }
+
+// Where a step reads the folder a find_folder probe chose.
+BUILD_SESSION_FOUND_DIR: ".jet/found"
 
 // Where `b.host(target)` puts the target's host build, never installed.
 BUILD_SESSION_HOST_DIR: ".jet/build/host"
@@ -201,6 +210,10 @@ build_session_step_call: fn(state: &BuildSessionState, method: String, args: [Bu
                     if state.files[old].path == path -> break true
                 } ?? false
                 if !known -> step.folders.push(folder_id)
+                // A found folder is the one its probe chooses as the step starts.
+                if file.probe == .Val(probe) {
+                    if !step.probes.contains(probe) -> step.probes.push(probe)
+                }
                 step.argv.push("{flag}{path}")
                 state.actions[id] = step
                 return unit

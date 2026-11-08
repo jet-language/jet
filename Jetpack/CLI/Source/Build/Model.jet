@@ -262,11 +262,12 @@ KeptOutput: struct {
 
 // A folder an action reads whole (`.file(b.folder(path))`): bound read-only
 // at `path` in its work tree, from `source`, a host folder (a dependency's),
-// else from `path` under the project root. The action key hashes every file
-// in it.
+// else from the folder the find_folder probe `found` chose, else from `path`
+// under the project root. The action key hashes every file in it.
 ActionFolder: struct {
     path: String
     source: String?
+    found: ProbeHandle?
 }
 
 ActionSpec: struct {
@@ -337,7 +338,16 @@ ActionSpec: struct {
     // ActionFolder says.
     with_folder: fn(self, path: String, source: String?) -> ActionSpec Never! {
         updated := self
-        updated.folders.push(ActionFolder{path: path.copy(), source: source.copy()})
+        updated.folders.push(ActionFolder{path: path.copy(), source: source.copy(), found: None})
+        updated
+    }
+
+    // The folder the find_folder `probe` chooses when the build runs, read
+    // whole at `path` in the work tree. The action must also use the probe
+    // (with_probe), whose fact names the folder.
+    with_found_folder: fn(self, path: String, probe: ProbeHandle) -> ActionSpec Never! {
+        updated := self
+        updated.folders.push(ActionFolder{path: path.copy(), source: None, found: Val(probe)})
         updated
     }
 
@@ -666,6 +676,9 @@ ReproducibilityClass: enum {
 
 ProbeKind: enum {
     FindProgram(program: String)
+    // A folder on the machine holding `file` (jetpack_foundation
+    // foundation_find_folder).
+    FindFolder(file: String)
     PkgConfig(package: String, min_version: String?)
     HeaderCheck(header: String)
     CompileCheck(name: String, includes: [String], code: String)
@@ -679,6 +692,10 @@ ProbeSpec: struct {
 
     find_program: fn(program: String) -> ProbeSpec Never! {
         ProbeSpec{kind: ProbeKind.FindProgram{program}, reproducibility: ReproducibilityClass.Ambient, provenance: BuildProvenance.ambient_record("find_program"), toolchain: None}
+    }
+
+    find_folder: fn(file: String) -> ProbeSpec Never! {
+        ProbeSpec{kind: ProbeKind.FindFolder{file}, reproducibility: ReproducibilityClass.Ambient, provenance: BuildProvenance.ambient_record("find_folder"), toolchain: None}
     }
 
     pkg_config: fn(package: String) -> ProbeSpec Never! {

@@ -1,0 +1,105 @@
+use {
+    jetpack_foundation.[FolderMiss, foundation_ar_members, foundation_find_folder, foundation_library_folders_of]
+    files: core.files
+    sys: core.sys
+    crypto: core.crypto
+}
+
+find_folder_test_root: fn(label: String) -[FS, Env]> String Never! {
+    home: sys.get("HOME") ?? panic("find_folder fixtures require HOME")
+    scratch: sys.get("JET_SCRATCH_ROOT") ?? (sys.get("JET_STATE_ROOT") ?? files.join(sys.get("XDG_CACHE_HOME") ?? files.join(home, ".cache"), "jet-dev"))
+    root: files.join(scratch, "jet-foundation-find-folder-{label}-{sys.pid()}")
+    files.remove_all(root).drop("a stale find_folder fixture may be absent")
+    files.create_dir_all(root) ?? panic("create find_folder fixture")
+    root
+}
+
+// `text` padded with spaces to `width`.
+find_folder_test_pad: fn(text: String, width: Int) -> String Never! {
+    padded := text.copy()
+    loop padded.len() < width {
+        padded = "{padded} "
+    }
+    padded
+}
+
+find_folder_test_header: fn(name: String, size: Int) -> String Never! {
+    "{find_folder_test_pad(name, 16)}{find_folder_test_pad("0", 12)}{find_folder_test_pad("0", 6)}{find_folder_test_pad("0", 6)}{find_folder_test_pad("644", 8)}{find_folder_test_pad("{size}", 10)}`\n"
+}
+
+// A GNU ar archive of one-byte members named `names`, a name longer than
+// 15 bytes kept in the `//` table as `ar` does.
+find_folder_test_ar: fn(names: [String]) -> [U8] Never! {
+    long := ""
+    members := ""
+    loop name in names {
+        header: if name.len() > 15 -> {
+            offset: long.len()
+            long = "{long}{name}/\n"
+            "/{offset}"
+        } else -> "{name}/"
+        members = "{members}{find_folder_test_header(header, 1)}x\n"
+    }
+    table: if long == "" -> "" else -> {
+        padding: if long.len() % 2 == 1 -> "\n" else -> ""
+        "{find_folder_test_header("/", 4)}0000{find_folder_test_header("//", long.len())}{long}{padding}"
+    }
+    "!<arch>\n{table}{members}".bytes()
+}
+
+find_folder_test_write: fn(folder: String, name: String, bytes: [U8]) Never! -[FS]> {
+    files.create_dir_all(folder) ?? panic("create {folder}")
+    files.write_bytes(files.join(folder, name), bytes) ?? panic("write {name} in {folder}")
+}
+
+find_folder_test_reasons: fn(misses: [FolderMiss]) -> [String] Never! {
+    loop miss in misses -> "{files.basename(miss.folder)}: {miss.reason}"
+}
+
+#Test("foundation_ar_members names each member, long names from the `//` table") {
+    bytes: find_folder_test_ar([String]{"__libc_start_main.lo", "__init_tls.o", "a_very_long_member_name.o", "x.o"})
+    assert_eq(foundation_ar_members(bytes), [String]{"__libc_start_main.lo", "__init_tls.o", "a_very_long_member_name.o", "x.o"})
+    assert_eq(foundation_ar_members("not an archive".bytes()), [String]{})
+}
+
+#Test("library folders are the absolute LIBRARY_PATH entries, then the usual ones, each once") {
+    assert_eq(foundation_library_folders_of("/opt/musl/lib::relative:/usr/lib:/opt/musl/lib"), [String]{"/opt/musl/lib", "/usr/lib", "/usr/local/lib", "/lib", "/usr/lib/musl/lib", "/usr/local/musl/lib"})
+    assert_eq(foundation_library_folders_of(""), [String]{"/usr/local/lib", "/usr/lib", "/lib", "/usr/lib/musl/lib", "/usr/local/musl/lib"})
+}
+
+#Test("find_folder takes the first folder holding the file and names each folder it passed") {
+    root: find_folder_test_root("first")
+    find_folder_test_write(files.join(root, "empty"), "other.txt", "o".bytes())
+    find_folder_test_write(files.join(root, "first"), "wanted.txt", "one".bytes())
+    find_folder_test_write(files.join(root, "second"), "wanted.txt", "two".bytes())
+    search: foundation_find_folder("wanted.txt", [String]{files.join(root, "absent"), files.join(root, "empty"), files.join(root, "first"), files.join(root, "second")})
+    found: search.found ?? panic("no folder found")
+    assert_eq(found.folder, files.canonicalize(files.join(root, "first")) ?? panic("canonicalize"))
+    assert_eq(found.sha256, crypto.sha256("one".bytes()).hex())
+    assert_eq(find_folder_test_reasons(search.misses), [String]{"absent: no `wanted.txt`", "empty: no `wanted.txt`"})
+    missing: foundation_find_folder("nowhere.txt", [String]{files.join(root, "first")})
+    assert(missing.found == None, "a file no folder holds is not found")
+    assert_eq(find_folder_test_reasons(missing.misses), [String]{"first: no `nowhere.txt`"})
+    files.remove_all(root).drop("the fixture is removed best-effort")
+}
+
+#Test("find_folder takes only musl's libc.a, with crt1.o beside it") {
+    root: find_folder_test_root("musl")
+    musl: find_folder_test_ar([String]{"__libc_start_main.lo", "__init_tls.lo", "printf.lo"})
+    find_folder_test_write(files.join(root, "text"), "libc.a", "INPUT ( libc.so )".bytes())
+    find_folder_test_write(files.join(root, "glibc"), "libc.a", find_folder_test_ar([String]{"libc-start.o", "libc-tls.o", "printf.o"}))
+    find_folder_test_write(files.join(root, "glibc"), "crt1.o", "x".bytes())
+    find_folder_test_write(files.join(root, "bare"), "libc.a", musl)
+    find_folder_test_write(files.join(root, "musl"), "libc.a", musl)
+    find_folder_test_write(files.join(root, "musl"), "crt1.o", "x".bytes())
+    search: foundation_find_folder("libc.a", [String]{files.join(root, "text"), files.join(root, "glibc"), files.join(root, "bare"), files.join(root, "musl")})
+    found: search.found ?? panic("musl's libc.a was not found")
+    assert_eq(files.basename(found.folder), "musl")
+    assert_eq(found.sha256, crypto.sha256(musl).hex())
+    assert_eq(find_folder_test_reasons(search.misses), [String]{
+        "text: `libc.a` is not an ar archive",
+        "glibc: `libc.a` is not musl: it has no `__libc_start_main` and `__init_tls` objects",
+        "bare: musl's `libc.a` has no `crt1.o` beside it",
+    })
+    files.remove_all(root).drop("the fixture is removed best-effort")
+}

@@ -5000,7 +5000,7 @@ Build code registers typed values. Targets include
 a `BuildTarget`. `b.plan()` or `b.plan(default)` hands one
 canonical graph to scheduling, caching, execution, queries, and LSP.
 `b.toolchain(name, target_triple)` records target identity. `b.probe` supports
-`find_program`, `pkg_config`, and `header` probes.
+`find_program`, `find_folder`, `pkg_config`, and `header` probes.
 `b.args()` returns the words after `--` on the command line as a `[String]`
 (`jet build -- release-notes` gives `["release-notes"]`; no `--` gives
 `[]`), so a build entry can choose its default target or options from them.
@@ -5048,6 +5048,21 @@ A folder path is written plainly, as `dir/sub`: an empty part, a `.` part or
 a trailing `/` is refused (E3502), as a path that leaves the package is.
 Example:
 [`tests/cases/build_entry/run_steps_read_a_folder.case`](../../tests/cases/build_entry/run_steps_read_a_folder.case).
+
+A `find_folder` probe finds a folder on the machine:
+`b.probe("musl", "find_folder", "libc.a")` looks for the file `libc.a` in
+each absolute LIBRARY_PATH entry, then `/usr/local/lib`, `/usr/lib`, `/lib`,
+`/usr/lib/musl/lib` and `/usr/local/musl/lib`, and chooses the first folder
+where it fits. Any file fits, except that a `libc.a` fits only when it is
+musl's: an ar archive holding musl's `__libc_start_main` and `__init_tls`
+objects, with `crt1.o` beside it, so a glibc `libc.a` is passed over.
+The probe names a file alone, not a path (E3502). `b.found(probe)` is the
+folder it chose, read as `b.folder` is, at `.jet/found/<probe>`; a step that
+reads it runs the probe first. A probe that finds no folder fails the build
+before any step runs (E3505), naming each folder it looked in and why it
+passed it over. Examples:
+[`tests/cases/build_entry/run_steps_read_a_found_folder.case`](../../tests/cases/build_entry/run_steps_read_a_found_folder.case),
+[`tests/ui/build_find_folder_missing.jet`](../../tests/ui/build_find_folder_missing.jet).
 
 Calls on the step build its
 command line in order. `.input(path)` and `.output(path)` declare a file and

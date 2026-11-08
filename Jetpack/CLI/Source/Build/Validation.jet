@@ -73,6 +73,8 @@ build_validate_identity: fn(name: String, field: String, provenance: BuildProven
 build_validate_probe: fn(name: String, spec: ProbeSpec) HermeticBuildError! {
     invalid: if spec.kind == {
         .FindProgram(program) -> program.trim() == ""
+        // A file name, which the probe looks for in each folder.
+        .FindFolder(file) -> file.trim() == "" || file.contains("/") || file == "." || file == ".."
         .PkgConfig(package, _) -> package.trim() == ""
         .HeaderCheck(header) -> header.trim() == "" || !build_valid_header_name(header)
         .CompileCheck(check, includes, code) -> {

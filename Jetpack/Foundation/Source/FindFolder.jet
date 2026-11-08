@@ -1,0 +1,123 @@
+// Finding a folder on the machine that holds a named file: the find_folder
+// build probe's search. It looks in each LIBRARY_PATH entry, then the usual
+// library folders, and takes the first folder whose file fits. A `libc.a`
+// fits only when it is musl's, the static C library Jet links, so a glibc
+// `libc.a` met first is passed over and named.
+use {
+    files: core.files
+    sys: core.sys
+    crypto: core.crypto
+}
+
+// The library folders searched after LIBRARY_PATH's entries, in order.
+FOUNDATION_LIBRARY_FOLDERS: [String]{"/usr/local/lib", "/usr/lib", "/lib", "/usr/lib/musl/lib", "/usr/local/musl/lib"}
+
+// The folder a search chose, as its real path, and the sha256 of the file
+// it holds.
+FoundFolder: struct {
+    folder: String
+    sha256: String
+}
+
+// A folder a search passed over, and why.
+FolderMiss: struct {
+    folder: String
+    reason: String
+}
+
+// What a search found, and every folder it passed over before.
+FolderSearch: struct {
+    found: FoundFolder?
+    misses: [FolderMiss]
+}
+
+// The folders a search looks in: each absolute LIBRARY_PATH entry (an empty
+// or relative one is skipped, so the working folder never supplies a
+// library), then FOUNDATION_LIBRARY_FOLDERS, each once.
+foundation_library_folders: fn() -[Env]> [String] Never! {
+    foundation_library_folders_of(sys.get("LIBRARY_PATH") ?? "")
+}
+
+// foundation_library_folders for the LIBRARY_PATH value `library_path`.
+foundation_library_folders_of: fn(library_path: String) -> [String] Never! {
+    folders := [String]{}
+    loop entry in library_path.split(":") {
+        if entry.starts_with("/") && !folders.contains(entry) -> folders.push(entry.copy())
+    }
+    loop entry in FOUNDATION_LIBRARY_FOLDERS {
+        if !folders.contains(entry) -> folders.push(entry.copy())
+    }
+    folders
+}
+
+// The first of `folders` holding a `file` that fits (foundation_file_fit).
+foundation_find_folder: fn(file: String, folders: [String]) -[FS]> FolderSearch Never! {
+    misses := [FolderMiss]{}
+    loop folder in folders {
+        path: files.join(folder, file)
+        reason := if files.is_file(path) -> "" else -> "no `{file}`"
+        bytes := [U8]{}
+        if reason == "" {
+            if files.read_bytes(path) == {
+                .Ok(read) -> bytes = read
+                .Err(error) -> reason = "can't read `{file}`: {error}"
+            }
+        }
+        if reason == "" -> reason = foundation_file_fit(folder, file, bytes)
+        if reason == "" {
+            real: files.canonicalize(folder) ?? folder.copy()
+            return FolderSearch{found: Val(FoundFolder{folder: real, sha256: crypto.sha256(bytes).hex()}), misses}
+        }
+        misses.push(FolderMiss{folder: folder.copy(), reason})
+    }
+    FolderSearch{found: None, misses}
+}
+
+// Why the `file` in `folder`, holding `bytes`, doesn't fit, or "" when it
+// does. Any file fits but `libc.a`, which must be musl's: an ar archive
+// with musl's `__libc_start_main` and `__init_tls` objects (`.o`, or `.lo`
+// as musl's own build names them), with `crt1.o` beside it.
+foundation_file_fit: fn(folder: String, file: String, bytes: [U8]) -[FS]> String Never! {
+    if file != "libc.a" -> return ""
+    members: foundation_ar_members(bytes)
+    if members.len() == 0 -> return "`libc.a` is not an ar archive"
+    if !foundation_ar_has_object(members, "__libc_start_main") || !foundation_ar_has_object(members, "__init_tls") -> return "`libc.a` is not musl: it has no `__libc_start_main` and `__init_tls` objects"
+    if !files.is_file(files.join(folder, "crt1.o")) -> return "musl's `libc.a` has no `crt1.o` beside it"
+    ""
+}
+
+// Whether `members` holds the object compiled from `stem`.
+foundation_ar_has_object: fn(members: [String], stem: String) -> Bool Never! {
+    members.contains("{stem}.o") || members.contains("{stem}.lo")
+}
+
+// The member names of the ar archive `bytes`, long names (GNU `//` table)
+// resolved; [] when it is not an ar archive.
+foundation_ar_members: fn(bytes: [U8]) -> [String] Never! {
+    names := [String]{}
+    if bytes.len() < 8 || (String.from_bytes(bytes[0..<8]) ?? "") != "!<arch>\n" -> return names
+    long := [U8]{}
+    at := 8
+    loop at + 60 <= bytes.len() {
+        name: (String.from_bytes(bytes[at..<at + 16]) ?? "").trim()
+        size: Int.parse((String.from_bytes(bytes[at + 48..<at + 58]) ?? "").trim()) ?? return names
+        start: at + 60
+        if size < 0 || start + size > bytes.len() -> return names
+        if name == "//" {
+            long = bytes[start..<start + size]
+        } else if name.starts_with("/") {
+            offset: Int.parse(name.slice(1, name.len())) ?? -1
+            if offset >= 0 && offset < long.len() {
+                end := offset
+                loop end < long.len() && long[end] != (U8{47}) && long[end] != (U8{10}) {
+                    end += 1
+                }
+                names.push(String.from_bytes(long[offset..<end]) ?? "")
+            }
+        } else {
+            names.push(name.removesuffix("/"))
+        }
+        at = start + size + size % 2
+    }
+    names
+}

@@ -328,6 +328,33 @@ build_graph_rules_made: fn(session: &BuildSession, tool: BuildSessionValue, name
     assert(diagnostic.what.contains("step `gen` makes `data/gen.txt` inside the folder `data` that step `read` reads whole"))
 }
 
+#Test("a_found_folder_is_read_whole_at_its_probe_name") {
+    session := build_graph_rules_session(101)
+    tool: build_graph_rules_tool(session)
+    assert(build_graph_rules_failed(build_session_call(session, "probe", [BuildSessionValue]{.Text(value: "deep"), .Text(value: "find_folder"), .Text(value: "lib/libc.a")}, None, true, 1, 2)))
+    nested: build_graph_rules_value(build_session_call(session, "probe", [BuildSessionValue]{.Text(value: "a/b"), .Text(value: "find_folder"), .Text(value: "libc.a")}, None, true, 1, 2))
+    assert(build_graph_rules_failed(build_session_call(session, "found", [BuildSessionValue]{nested}, None, true, 3, 4)))
+    musl: build_graph_rules_value(build_session_call(session, "probe", [BuildSessionValue]{.Text(value: "musl"), .Text(value: "find_folder"), .Text(value: "libc.a")}, None, true, 5, 6))
+    lib: build_graph_rules_value(build_session_call(session, "found", [BuildSessionValue]{musl}, None, true, 7, 8))
+    assert_eq(build_session_call(session, "file.path", [BuildSessionValue]{lib}, None, false, 9, 10), BuildSessionReply.Value{value: BuildSessionValue.Text{value: ".jet/found/musl"}})
+    assert(build_graph_rules_failed(build_session_call(session, "run", [BuildSessionValue]{.Text(value: "folder"), lib, build_graph_rules_list([String]{})}, None, true, 11, 12)))
+    step: build_graph_rules_value(build_graph_rules_made(session, tool, "link", [String]{"app"}))
+    assert(build_graph_rules_ok(build_graph_rules_step(session, "file", step, [BuildSessionValue]{lib, .Text(value: "-L")})))
+    assert(build_graph_rules_ok(build_graph_rules_step(session, "file", step, [BuildSessionValue]{lib})))
+    plan: build_graph_rules_value(build_session_call(session, "plan", [BuildSessionValue]{}, None, false, 13, 14))
+    assert(build_session_graph(session, plan).diagnostic == None)
+    permit: session.storage.guard_read()
+    action: permit.value.actions[0]
+    assert_eq(action.argv, [String]{"tool", "app", "-L.jet/found/musl", ".jet/found/musl"})
+    assert_eq(action.folders.len(), 1)
+    folder: permit.value.files[action.folders[0]]
+    assert_eq(folder.kind, "folder")
+    assert_eq(folder.from, None)
+    probe: folder.probe ?? panic("a found folder keeps its probe")
+    assert_eq(permit.value.probes[probe].name, "musl")
+    assert(action.probes.contains(probe), "the step that reads a found folder runs its probe first")
+}
+
 #Test("run_step_without_an_output_refuses_the_plan") {
     session := build_graph_rules_session(98)
     shell: build_graph_rules_value(build_session_call(session, "probe", [BuildSessionValue]{.Text(value: "shell"), .Text(value: "find_program"), .Text(value: "sh")}, None, true, 1, 2))

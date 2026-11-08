@@ -90,6 +90,7 @@ jet_driver_build_plan_json: fn(plan: BuildSessionPlan) -> String Never! {
     loop probe in permit.value.probes {
         kind: if probe.kind == {
             "find_program" -> { "FindProgram {{ program: {build_key_debug_text(probe.value)} }}" }
+            "find_folder" -> { "FindFolder {{ file: {build_key_debug_text(probe.value)} }}" }
             "pkg_config" -> { "PkgConfig {{ package: {build_key_debug_text(probe.value)}, min_version: None }}" }
             "header" -> { "HeaderCheck {{ header: {build_key_debug_text(probe.value)} }}" }
             "compile_check" -> { "CompileCheck {{ name: {build_key_debug_text(probe.value)}, includes: [], code: {build_key_debug_text(probe.code)} }}" }

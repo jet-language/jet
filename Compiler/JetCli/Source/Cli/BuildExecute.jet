@@ -676,6 +676,14 @@ jet_cli_build_execution_error: fn(error: BuildExecutionError, member: String?, c
         .IO(action, detail) -> jet_cli_build_execution_failed("E3505", "build action `{action}` failed: {detail}", None, "fix the action's command, toolchain, or input and output declarations", color)
         .TimedOut(action, limit_ms) -> jet_cli_build_execution_failed("E3505", "build action `{action}` ran past its time limit of {limit_ms}ms and was stopped", None, "raise the limit with `.timeout(10min)` on the step, or the `action_timeout` build option for every step", color)
         .ProbeFailed(probe, detail) -> jet_cli_build_execution_failed("E3505", "build probe `{probe}` failed: {detail}", None, "install what the probe looks for, or declare it on the probe's toolchain", color)
+        .FolderNotFound(probe, file, searched) -> {
+            // Jet links static musl, so find_folder takes only musl's `libc.a`.
+            musl: file == "libc.a"
+            wanted: if musl -> "musl's static `libc.a`, with `crt1.o` beside it" else -> "`{file}`"
+            fix: if musl -> "put the `lib` folder of a static musl on LIBRARY_PATH" else -> "put the folder holding `{file}` on LIBRARY_PATH"
+            looked: loop folder in searched -> "  {folder}"
+            jet_cli_build_execution_failed("E3505", "build probe `{probe}` found no folder holding {wanted}", Val("It looked in:\n{looked.join("\n")}"), fix, color)
+        }
         .Reported(report) -> jet_cli_build_execution_failed("E3505", report.message, build_action_failure_stderr(report), "fix the command the action runs; its stderr follows", color)
         .InvalidGraph(graph) -> jet_cli_ice("the checked build plan is not a valid executor graph: {graph.debug_text()}")
         .HandEdited(action, path) -> jet_cli_build_execution_failed("E3502", "step `{action}` would overwrite `{path}`, which it keeps in git and which holds bytes no build wrote", None, "undo the edit (`git checkout -- {path}`) and change the step's inputs instead; the build rewrites `{path}` from them", color)
@@ -742,6 +750,7 @@ jet_cli_build_hermetic_plan: fn(graph: BuildPlanExecution, action_timeout_ms: In
     loop probe in graph.probes {
         spec: if probe.kind == {
             "find_program" -> ProbeSpec.find_program(probe.value)
+            "find_folder" -> ProbeSpec.find_folder(probe.value)
             "pkg_config" -> ProbeSpec.pkg_config(probe.value)
             "header" -> ProbeSpec.header_check(probe.value)
             else -> ProbeSpec.compile_check(probe.value, [String]{}, probe.code)
@@ -785,7 +794,10 @@ jet_cli_build_toolchain_spec: fn(declared: BuildSessionToolchain, provenance: Bu
 jet_cli_build_action_spec: fn(action: BuildSessionAction, files: [BuildSessionFile], toolchain: ToolchainHandle, probes: [ProbeHandle], signing: [SigningIdentityHandle], action_timeout_ms: Int, last_kept: [String: String]) -> ActionSpec Never! {
     spec := ActionSpec.cached(action.argv).with_inputs(action.inputs).with_outputs(action.outputs).with_toolchain(toolchain).with_timeout_ms(action.timeout_ms ?? action_timeout_ms)
     loop path in action.kept -> spec = spec.with_kept(path, last_kept.get(path))
-    loop id in action.folders -> spec = spec.with_folder(files[id].path, files[id].from)
+    loop id in action.folders {
+        file: files[id]
+        if file.probe == .Val(probe) -> spec = spec.with_found_folder(file.path, probes[probe]) else -> spec = spec.with_folder(file.path, file.from)
+    }
     loop cap in action.caps {
         if BuildEffect.parse(cap) == .Val(parsed) -> spec = spec.with_cap(parsed)
     }

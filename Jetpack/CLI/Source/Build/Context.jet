@@ -206,6 +206,19 @@ HermeticBuildContext: struct {
         build_validate_action(name, spec)
         if spec.toolchain == .Val(toolchain) -> self.check_toolchain_ref(toolchain)
         loop probe in spec.probes -> self.check_probe_ref(probe)
+        // A found folder's probe is a find_folder probe the action uses.
+        loop folder in spec.folders {
+            probe: folder.found ?? next
+            self.check_probe_ref(probe)
+            used: loop old in spec.probes {
+                if old.id == probe.id -> break true
+            } ?? false
+            finds_folder: if self.probes[probe.id].kind == {
+                .FindFolder(_) -> true
+                else -> false
+            }
+            if !used || !finds_folder -> return Err(HermeticBuildError.UnknownProbe(probe.id))
+        }
         if spec.signing_identity == .Val(identity) -> self.check_signing_identity_ref(identity)
     }
 

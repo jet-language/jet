@@ -12,7 +12,8 @@ use {
     jet_pkg_model.[pkg_json_text]
     jetpack_foundation.[
         BuildEffect, NATIVE_SANDBOX_DEFAULT_ACTION_TIMEOUT_MS, NativeSandboxCommand, NativeSandboxError, NativeSandboxMount,
-        foundation_native_sandbox_command, foundation_native_sandbox_finish, foundation_run_native_sandboxed_with_timeout_and_mounts,
+        foundation_find_folder, foundation_library_folders, foundation_native_sandbox_command, foundation_native_sandbox_finish,
+        foundation_run_native_sandboxed_with_timeout_and_mounts,
     ]
     jetpack_artifact_store.[StampTable]
     files: core.files
@@ -45,6 +46,9 @@ BuildExecutionError: enum {
     // The action ran past its time limit, in milliseconds, and was killed.
     TimedOut(action: String, limit_ms: Int)
     ProbeFailed(probe: String, detail: String)
+    // The find_folder probe `probe` found no folder holding a `file` that
+    // fits; `searched` is each folder it looked in, with why it passed it.
+    FolderNotFound(probe: String, file: String, searched: [String])
     // The one structured action-failure route, retained whether the action
     // ran now or its failure was restored from the cache.
     Reported(report: DiagnosticBuildError)
@@ -280,13 +284,15 @@ build_execute_actions: fn(plan: HermeticBuildPlan, ids: [Int], project_root: Str
 }
 
 // Snapshot the action's inputs and the files of the folders it reads whole
-// (`stamps` their last digests), key it and restore a cached record, else
-// stage it in a fresh private work tree that receives exactly the input
-// bytes the key hashed, with each folder bound read-only at its path.
-build_start_action: fn(plan: HermeticBuildPlan, action: HermeticBuildAction, project_root: String, artifact_store: BuildArtifactStoreHandle, grants: [BuildEffect], probe_facts: [BuildProbeFact], stamps: &StampTable) -[FS, Env, Exec, Time, Time.Wait, Rand]> BuildActionStart BuildExecutionError! {
-    loop cap in action.caps {
-        if !grants.contains(cap) -> return Err(BuildExecutionError.MissingGrant{action: action.name, capability: cap})
+// (`stamps` their last digests; a found folder is the one its probe chose),
+// key it and restore a cached record, else stage it in a fresh private work
+// tree that receives exactly the input bytes the key hashed, with each
+// folder bound read-only at its path.
+build_start_action: fn(plan: HermeticBuildPlan, declared: HermeticBuildAction, project_root: String, artifact_store: BuildArtifactStoreHandle, grants: [BuildEffect], probe_facts: [BuildProbeFact], stamps: &StampTable) -[FS, Env, Exec, Time, Time.Wait, Rand]> BuildActionStart BuildExecutionError! {
+    loop cap in declared.caps {
+        if !grants.contains(cap) -> return Err(BuildExecutionError.MissingGrant{action: declared.name, capability: cap})
     }
+    action: build_found_folders(plan, declared, probe_facts) ?? return Err(err)
     handle: HermeticActionHandle{id: action.id, context: plan.context}
     if plan.action(handle) == None -> return Err(BuildExecutionError.InvalidGraph(HermeticBuildError.UnknownAction(handle.id)))
     inputs: build_snapshot_declared_inputs(artifact_store, project_root, action) ?? return Err(build_io_action(action, err))
@@ -385,6 +391,26 @@ build_start_action: fn(plan: HermeticBuildPlan, action: HermeticBuildAction, pro
     Ok(BuildActionStart.Ready{run: BuildActionRun{action, key, sandbox, rebuild_status, command}})
 }
 
+// `action` with each found folder bound from the folder its find_folder
+// probe chose, which the probe's fact names.
+build_found_folders: fn(plan: HermeticBuildPlan, action: HermeticBuildAction, probe_facts: [BuildProbeFact]) -> HermeticBuildAction BuildExecutionError! {
+    resolved := action
+    folders := [ActionFolder]{}
+    loop folder in action.folders {
+        probe: folder.found ?? {
+            folders.push(folder.copy())
+            next
+        }
+        name: plan.probes[probe.id].name
+        chosen: loop fact in probe_facts {
+            if fact.name == name && fact.success -> break fact.detail.copy()
+        } ?? return Err(BuildExecutionError.IO{action: action.name, detail: "the folder `{folder.path}` is the one the probe `{name}` finds, and that probe did not run"})
+        folders.push(ActionFolder{path: folder.path.copy(), source: Val(chosen), found: folder.found})
+    }
+    resolved.folders = folders
+    Ok(resolved)
+}
+
 // A staged action whose child never ran to a receipt: its work tree goes.
 build_abandon_action: fn(run: BuildActionRun, error: NativeSandboxError) -[FS]> BuildExecutionError Never! {
     files.remove_all(run.sandbox).drop("the action sandbox is removed best-effort; the sandbox error is reported")
@@ -469,6 +495,11 @@ build_execute_probes: fn(plan: HermeticBuildPlan, selected: [Int]) -[FS, Env, Ex
             .FindProgram(program) -> if build_resolve_program_path(plan, probe.toolchain, program) == {
                 .Val(path) -> (success: true, detail: path)
                 .None -> (success: false, detail: "program `{program}` not found")
+            }
+            .FindFolder(file) -> {
+                search: foundation_find_folder(file, foundation_library_folders())
+                found: search.found ?? return Err(BuildExecutionError.FolderNotFound{probe: probe.name, file, searched: loop miss in search.misses -> "{miss.folder}: {miss.reason}"})
+                (success: true, detail: found.folder)
             }
             .PkgConfig(package, min_version) -> {
                 pkg_config: build_resolve_program_path(plan, probe.toolchain, "pkg-config") ?? return Err(BuildExecutionError.ProbeFailed{probe: probe.name, detail: "pkg-config not found"})

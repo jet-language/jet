@@ -498,6 +498,26 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
     }
 }
 
+#Test("found folders: an action reads a found folder only through a find_folder probe it uses") {
+    build := HermeticBuildContext.new()
+    if build.probe("nested", ProbeSpec.find_folder("lib/libc.a")) == {
+        .Err(_) -> {}
+        .Ok(_) -> panic("a find_folder probe names a file alone")
+    }
+    musl: build.probe("musl", ProbeSpec.find_folder("libc.a")) ?? panic("musl")
+    shell: build.probe("shell", ProbeSpec.find_program("sh")) ?? panic("shell")
+    if build.action("unused", ActionSpec.cached([String]{"sh"}).with_outputs([String]{"a.txt"}).with_found_folder(".jet/found/musl", musl)) == {
+        .Err(error) -> assert(error == HermeticBuildError.UnknownProbe(musl.id))
+        .Ok(_) -> panic("the action must use the probe that finds its folder")
+    }
+    if build.action("program", ActionSpec.cached([String]{"sh"}).with_outputs([String]{"b.txt"}).with_found_folder(".jet/found/shell", shell).with_probe(shell)) == {
+        .Err(error) -> assert(error == HermeticBuildError.UnknownProbe(shell.id))
+        .Ok(_) -> panic("only a find_folder probe finds a folder")
+    }
+    build.action("link", ActionSpec.cached([String]{"sh"}).with_outputs([String]{"c.txt"}).with_found_folder(".jet/found/musl", musl).with_probe(musl)) ?? panic("link")
+    assert(build.plan() == .Ok(_))
+}
+
 #Test("folder snapshots: each file is hashed under the folder path, `.jet` and ignored files are skipped, a link out of the folder is refused") {
     root: build_test_root("folder-snapshot")
     outside: build_test_root("folder-snapshot-outside")
@@ -560,6 +580,46 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
     build_execute_build_plan(plan, root, store, [BuildEffect]{BuildEffect.Exec}) ?? panic("second run")
     assert_eq(files.read(files.join(root, "out.txt")) ?? panic("out again"), "three")
     files.remove_all(root).drop("test cleanup")
+}
+
+#Test("found folders: the folder a find_folder probe chose is bound at its path, and a probe that finds none fails naming each folder") {
+    if !build_test_require_sandbox() -> return
+    root: build_test_root("found-folder")
+    lib: build_test_root("found-folder-lib")
+    files.write(files.join(lib, "marker.txt"), "found") ?? panic("marker")
+    previous: sys.get("LIBRARY_PATH")
+    sys.set("LIBRARY_PATH", "{files.join(root, "none")}:{lib}")
+    store: BuildArtifactStoreHandle.at(files.join(root, ".jet-store")) ?? panic("store")
+    build := HermeticBuildContext.new()
+    probe: build.probe("marks", ProbeSpec.find_folder("marker.txt")) ?? panic("probe")
+    script: "read -r line < .jet/found/marks/marker.txt; printf %s \"$line\" > out.txt"
+    spec: ActionSpec.cached([String]{"sh", "-c", script}).with_outputs([String]{"out.txt"}).with_found_folder(".jet/found/marks", probe).with_probe(probe).with_cap(BuildEffect.Exec)
+    action: build.action("read", spec) ?? panic("action")
+    target: build.add_executable("out", TargetSpec.new().with_action(action)) ?? panic("target")
+    plan: build.plan_with_default(target) ?? panic("plan")
+    build_execute_build_plan(plan, root, store, [BuildEffect]{BuildEffect.Exec}) ?? panic("run")
+    assert_eq(files.read(files.join(root, "out.txt")) ?? panic("out"), "found")
+    missing := HermeticBuildContext.new()
+    absent: missing.probe("absent", ProbeSpec.find_folder("jet-test-no-such-file.a")) ?? panic("absent probe")
+    needs: missing.action("needs", ActionSpec.cached([String]{"sh"}).with_outputs([String]{"o.txt"}).with_found_folder(".jet/found/absent", absent).with_probe(absent).with_cap(BuildEffect.Exec)) ?? panic("needs")
+    missing_target: missing.add_executable("o", TargetSpec.new().with_action(needs)) ?? panic("missing target")
+    missing_plan: missing.plan_with_default(missing_target) ?? panic("missing plan")
+    if build_execute_build_plan(missing_plan, root, store, [BuildEffect]{BuildEffect.Exec}) == {
+        .Err(error) -> if error == {
+            .FolderNotFound(name, file, searched) -> {
+                assert_eq(name, "absent")
+                assert_eq(file, "jet-test-no-such-file.a")
+                assert_eq(searched[0], "{files.join(root, "none")}: no `jet-test-no-such-file.a`")
+                assert_eq(searched[1], "{lib}: no `jet-test-no-such-file.a`")
+                assert_eq(searched[searched.len() - 1], "/usr/local/musl/lib: no `jet-test-no-such-file.a`")
+            }
+            else -> panic("a probe that finds no folder fails as FolderNotFound")
+        }
+        .Ok(_) -> panic("a probe that finds no folder must fail the build")
+    }
+    build_test_restore_env("LIBRARY_PATH", previous)
+    files.remove_all(root).drop("test cleanup")
+    files.remove_all(lib).drop("test cleanup")
 }
 
 #Test("cache records: a matching record restores, a record for another key or with mismatched outputs is refused") {
