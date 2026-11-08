@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6679,
-    "rev": 95917,
+    "rev": 95921,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -89885,6 +89885,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-08",
+          "by": "Main",
+          "text": "c1 scope (TestSystemLead-2 survey at 574a9fd134): the IR already routes DispatchReport failures/trace to runtime symbols, but sema doesn't list either method on DispatchReport and the runtime has neither. The native dispatch loop (Compiler/JetRuntime/Source/AsyncEvents.jet) ignores handler results: no HandlerFailed state, no Collect/Stop/Log/Ignore policy, no panic capture, no trace entries. Work: record failures (typed error) and trace entries in the runtime; add both methods in EventHandles.jet; add runtime functions for failures (typed list) and trace (EventTrace). Reference meaning: Compiler/Prelude/Web/Core/Event.js:431-483. Rows expect e.g. collect=true handlers=2 failures=2 and the trace queued -> running -> handler:0:failed -> handler:1:failed -> terminal:HandlerFailed."
+        },
+        {
           "at": "2026-11-03",
           "by": "Main",
           "text": "2026-11-02 Main: landed 9cca72d39f (Main-9): `dead_code: keep` keeps the unreached functions' code in the image; before, the keep was recorded but the function bodies were still dropped. Wave 36: goldens 1207/0 regressions, ui lost 0, cases lost 0."
@@ -89914,7 +89919,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-01T21:39:53.381Z",
-      "updated": "2026-11-07T04:01:42.555Z",
+      "updated": "2026-11-08T00:55:08.158Z",
       "updatedBy": "Main"
     },
     {
@@ -93311,7 +93316,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-08",
+          "by": "Main",
+          "text": "Root cause of the 45-minute cold fetch-toolchain (c65 run 4df47ce6da, 17:10-17:55; PortsLead-2): AdmissionTransaction.publish_object → store_fsync_tree fsyncs every file and directory of the pack, about 1,900 journal commits at about 1.4 s each. Fix: write everything, one filesystem flush, then the publish rename. That needs a public Core function, because a Core  seam is reserved outside Core (Spellings.jet:13, Sema/Calls/Core.jet:514); ballot D-FS-SYNC1 (A: files.sync_filesystem, B: parallel fsync_tree, C: no API). Internal commit A (runtime syncfs export plus seam rows, no public surface) lands meanwhile; commit B (public function, store change, conformance case) waits on the ballot and the next seed."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -93331,7 +93342,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T05:33:07.839Z",
-      "updated": "2026-11-07T03:30:40.998Z",
+      "updated": "2026-11-08T00:56:59.450Z",
       "updatedBy": "Main",
       "criteriaLastN": 1
     },
@@ -98324,6 +98335,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-08",
+          "by": "Main",
+          "text": "c4 progress (TestSystemLead-2): ebb25ee28f makes a valueless builtin call (print/assert/assert_eq/consume/close) as a value-block tail report E0114 unless an earlier line always leaves. value_block_tails_report_unit_and_lint_old_arm_table_shape passes step 1 and stays KF at step 2 (lintable.jet gets E0003, not L0513). 0e5a5249b8 reserves Solver again: solve_solver_type_name_is_reserved KF→PASS, 8 Solver rows still pass. Remaining rows: game_run_needs_mutable_scene_lvalue needs core.game.run to take the scene mutably (a Core signature change); b3_map_get_through_object_pattern:  now binds key/value entries, not a map, so the fixture's .get is a type error (fixture intent); generated_internal_tagged_enum_round_trips_every_variant_shape (unit variant decode panics) and io_prompt_helpers_validate_choices_and_refuse_non_tty_secrets.pty (transcript matches a forbidden pattern) are not yet examined."
+        },
+        {
           "at": "2026-11-07",
           "by": "Main",
           "text": "c1 progress, 56e30acfcf (TestSystemLead-2, on dev): a dead break value still types its loop, and a task body's lone finite loop stays a statement. With the lane's s1 compiler, 3 of c1's 4 rows PASS: control_and_data/yielding_and_result_loops_compile_and_run and corelib/core_net_dns_rejects_reserved_header_forward_pointer_and_impossible_counts / core_net_dns_txt_and_srv_are_real_udp_queries. Bonus #5454 row: dev_parts_routine/yielding_and_result_loops_run_in_native_jit_without_fallback. Regression filters: loop 52 PASS (base 51 PASS, 10 KF), task 81 PASS, break 7 PASS. corelib/core_http_client_bounds_and_strictly_decodes_response_bodies is past E0073 and now fails at E0305 on its guest's .Ok/.Err match of an HTTPResponse, a Core HTTP client defect; its KF line now points to #3665. c1 stays open until that row passes."
@@ -98380,7 +98396,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T08:09:39.678Z",
-      "updated": "2026-11-07T23:49:29.956Z",
+      "updated": "2026-11-08T00:55:06.853Z",
       "updatedBy": "Main",
       "criteriaLastN": 4
     },
@@ -184025,6 +184041,156 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-07T16:33:25.320Z"
+    },
+    {
+      "id": "D-FS-SYNC1",
+      "cardId": "c0g93joj",
+      "group": "core-files",
+      "title": "Core gets files.sync_filesystem: one durable flush for a whole tree of writes",
+      "situation": "",
+      "gist": "How does Jet code make a tree of many new files durable without one disk flush per file?",
+      "lesson": "core.files.fsync makes one file durable. Writing a tree of thousands of files and calling fsync on each one costs a journal commit per file. sync_filesystem flushes the whole filesystem that holds a path in one call, so a writer can create every file, flush once, and only then publish the tree with a rename.",
+      "explainer": "",
+      "story": "Jetpack installs a toolchain of about 1,900 files. Today it calls fsync on every file and directory before it publishes the tree, and a cold install takes 45 minutes on a normal ext4 disk. With sync_filesystem it writes every file, flushes once, and renames the finished tree into place. A crash before the flush still leaves no published tree, and the install takes a few minutes.",
+      "inWild": "Linux has syncfs(2), which flushes one filesystem. Go exposes it as unix.Syncfs in golang.org/x/sys, and Rust as nix::unistd::syncfs or rustix::fs::syncfs; neither standard library has it. Python has os.sync(), which flushes every filesystem. Package managers either fsync per file, like dpkg, which sorts its writes so the commits batch, or skip durability, like pip and npm.",
+      "detail": "Option A adds one public function beside fsync in Core/Files/Files.jet: sync_filesystem(path) IOError! -[FS.Write]>. On Linux it calls syncfs(2) on the filesystem that holds path. Elsewhere it calls sync(2), which flushes every filesystem in one call. Where the host has neither, it returns IOError and the caller keeps per-file fsync. Jetpack writes every object, flushes once, and renames the tree into place. A failed flush fails the publish, so a crash never publishes a partial tree.\n\nOption B adds a higher-level fsync_tree(dir) that fsyncs every file under dir from several threads at once, so the journal batches the commits. It adds no new kind of flush, but it still does one fsync per file, and its speed depends on the filesystem's batching.\n\nOption C adds no API and keeps per-file fsync. A cold toolchain install stays at about 45 minutes, and the clean-clone proof (#6096 c65) stays near 2 hours.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Add sync_filesystem(path)",
+          "detail": "One public Core function: a single flush of the filesystem that holds path (syncfs(2) on Linux, sync(2) elsewhere, IOError where neither exists). The store flushes once before its publish rename.",
+          "code": "use { files: core.files }\n\nloop object in objects -> files.write(object.path, object.bytes) ?? return Err(err)\nfiles.sync_filesystem(staging) ?? return Err(err)\nfiles.rename(staging, published) ?? return Err(err)"
+        },
+        {
+          "key": "B",
+          "name": "Add fsync_tree(dir)",
+          "detail": "One public Core function that fsyncs every file and directory under dir in parallel, so the journal can batch the commits. Still one fsync per file.",
+          "code": "use { files: core.files }\n\nloop object in objects -> files.write(object.path, object.bytes) ?? return Err(err)\nfiles.fsync_tree(staging) ?? return Err(err)\nfiles.rename(staging, published) ?? return Err(err)"
+        },
+        {
+          "key": "C",
+          "name": "No new API",
+          "detail": "Keep fsync per file. Installs stay slow.",
+          "code": "use { files: core.files }\n\nloop object in objects {\n    files.write(object.path, object.bytes) ?? return Err(err)\n    files.fsync(object.path) ?? return Err(err)\n}\nfiles.rename(staging, published) ?? return Err(err)"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "why": "One call replaces thousands of journal commits, and the write-flush-rename order keeps the same crash guarantee. It maps directly to the operating system's own primitive.",
+        "tradeoff": "The flush also covers unrelated dirty data on the same filesystem, so one call can take longer than a single fsync on a busy disk.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It still does one flush per file; batching helps only on some filesystems and adds a thread pool to a file API."
+          },
+          {
+            "key": "C",
+            "reason": "A cold toolchain install stays at 45 minutes and dominates every clean-clone proof."
+          }
+        ],
+        "losses": [
+          {
+            "loss": "On hosts without syncfs(2), sync(2) flushes every filesystem, not just one.",
+            "mitigation": "It is still one call per publish, and the docs say which flush each host uses."
+          }
+        ]
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "How does Jet code make a tree of many new files durable without one disk flush per file?",
+        "lesson": "fsync flushes one file. sync_filesystem flushes the whole filesystem holding a path in one call. Write every file, flush once, then publish with a rename.",
+        "trio": {
+          "current": {
+            "note": "Today each file needs its own fsync.",
+            "code": "loop object in objects {\n    files.write(object.path, object.bytes) ?? return Err(err)\n    files.fsync(object.path) ?? return Err(err)\n}"
+          },
+          "wild": {
+            "lang": "Go",
+            "note": "Go exposes Linux syncfs in golang.org/x/sys.",
+            "code": "fd, _ := unix.Open(dir, unix.O_RDONLY, 0)\nunix.Syncfs(fd)"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "sync_filesystem(path)",
+            "gist": "One flush for the whole filesystem.",
+            "gains": [
+              "One call per tree",
+              "Maps to syncfs(2)"
+            ],
+            "losses": [
+              "Also flushes unrelated dirty data"
+            ],
+            "proposed": {
+              "code": "files.sync_filesystem(staging) ?? return Err(err)\nfiles.rename(staging, published) ?? return Err(err)"
+            }
+          },
+          {
+            "key": "B",
+            "name": "fsync_tree(dir)",
+            "gist": "Parallel fsync of every file.",
+            "gains": [
+              "No new kind of flush"
+            ],
+            "losses": [
+              "Still a flush per file",
+              "Speed depends on the filesystem"
+            ],
+            "proposed": {
+              "code": "files.fsync_tree(staging) ?? return Err(err)"
+            }
+          },
+          {
+            "key": "C",
+            "name": "No new API",
+            "gist": "Keep per-file fsync.",
+            "gains": [
+              "Nothing to add"
+            ],
+            "losses": [
+              "45-minute cold installs"
+            ],
+            "proposed": {
+              "code": "files.fsync(object.path) ?? return Err(err)"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "One call replaces thousands of journal commits with the same crash guarantee.",
+          "gains": [
+            "Cold installs drop from about 45 minutes to a few",
+            "Same write-flush-rename crash safety"
+          ],
+          "losses": [
+            {
+              "loss": "Flushes unrelated dirty data on the same filesystem.",
+              "mitigation": "Still one call per publish."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Still one flush per file."
+            },
+            {
+              "key": "C",
+              "reason": "Installs stay at 45 minutes."
+            }
+          ],
+          "tradeoff": "A wider flush in exchange for one call."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-08T00:56:50.121Z"
     }
   ],
   "questions": [
@@ -187080,6 +187246,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-08T00:56:59.450Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0g93joj",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-08T00:56:50.121Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-FS-SYNC1",
+      "note": "Core gets files.sync_filesystem: one durable flush for a whole tree of writes"
+    },
+    {
+      "at": "2026-11-08T00:55:08.159Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0e3wgi0",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-08T00:55:06.853Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0m4deiq",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-08T00:51:38.524Z",
       "by": "Main",
