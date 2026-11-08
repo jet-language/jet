@@ -1,8 +1,10 @@
 # On one carrier thread, a task parked in a 200 ms sleep while another task
-# burns 200 ms on that carrier gains under 50 ms on its task CPU clock
-# (jet_rt_task_cpu_ns), the burner's clock counts its own run, the parked
+# spends 200 ms of CPU on that carrier gains under 50 ms on its task CPU clock
+# (jet_rt_task_cpu_ns), the burner's clock reaches its own 200 ms, the parked
 # task keeps its identity (jet_rt_task_identity), and the main thread's
-# clock is its own CPU time. Same output on jet run and at O0, O1 and O2.
+# clock reaches 50 ms of its own CPU time. Each burn spins until the CPU
+# clock advances (30 s wall-time cap), so the checks hold under load. Same
+# output on jet run and at O0, O1 and O2.
 fixture: fixtures/clock
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
