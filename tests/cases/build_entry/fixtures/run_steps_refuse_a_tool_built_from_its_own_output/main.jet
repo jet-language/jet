@@ -1,0 +1,10 @@
+build: fn(b: Build) -[Exec, FS]> {
+    #Impure("run the generator") {
+    // `gen` compiles from `gen.jet`, which the step running `gen` makes.
+    gen: b.add_executable("gen", ["gen.jet"], [])
+    again: b.run("again", b.host(gen), ["Exec", "FS"])
+    again.output("gen.jet", flag: "--out=")
+    b.default(gen)
+    }
+}
+run: fn() {}

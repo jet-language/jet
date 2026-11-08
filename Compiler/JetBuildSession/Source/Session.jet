@@ -110,12 +110,15 @@ BuildSessionAction: struct {
 
 // A file the build knows (BuildFile): `found` is the program a find_program
 // probe looks for (`path` is its name, resolved when the step runs);
-// `output` is a path a step declared, which that step makes.
+// `output` is a path a step declared, which that step makes; `host` is the
+// executable `target` built for the machine running the build, at its
+// `.jet/build/host/` path; `jet` is the compiler running the build.
 BuildSessionFile: struct {
     kind: String
     path: String
     probe: Int?
     action: Int?
+    target: Int?{None}
 }
 
 BuildSessionTarget: struct {
@@ -323,6 +326,8 @@ build_session_call: fn(session: &BuildSession, method: String, args: [BuildSessi
         return build_session_add_run(state, args, start, end)
     }
     if method == "found" -> return build_session_found(state, args)
+    if method == "host" -> return build_session_host(state, args)
+    if method == "jet" -> return build_session_jet(state, args)
     if method.starts_with("action.") -> return build_session_step_call(state, method.removeprefix("action."), args)
     if method == "file.path" -> return build_session_file_path(state, args)
     if method.starts_with("add_") -> return build_session_add_target(state, method, args)

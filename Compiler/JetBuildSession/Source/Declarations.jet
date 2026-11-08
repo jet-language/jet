@@ -3,7 +3,8 @@ use jet_foundation.[build_option_duration_ms]
 // `b.run(name, tool, caps)`: a step that runs `tool`, a BuildFile. Its
 // arguments come one call at a time (build_session_step_call); a found
 // program is looked up when the step runs, and a file another step makes
-// is that step's output, so this step runs after it.
+// or a host build of a target is declared as the step's input, so this step
+// runs after its maker.
 build_session_add_run: fn(state: &BuildSessionState, args: [BuildSessionValue], start: Int, end: Int) -> BuildSessionReply {
     if args.len() != 3 -> return build_session_fail(state, "`b.run` takes a name, a tool and its effects")
     name: build_session_text(args, 0) ?? return build_session_fail(state, "step name must be a string")
@@ -13,7 +14,7 @@ build_session_add_run: fn(state: &BuildSessionState, args: [BuildSessionValue], 
     probes := [Int]{}
     inputs := [String]{}
     if file.probe == .Val(probe) -> probes.push(probe)
-    if file.kind == "output" -> inputs.push(file.path.copy())
+    if file.kind == "output" || file.kind == "host" -> inputs.push(file.path.copy())
     action: BuildSessionAction{name: name, inputs: inputs, outputs: [String]{}, argv: [String]{file.path.copy()}, caps: caps, toolchain: 0, probes: probes, signing: None, tool: tool, start: start, end: end}
     if action.name.trim() == "" -> return build_session_error_fail(state, .EmptyActionName)
     if state.actions.len() >= 100000 -> return build_session_fail(state, "action graph exceeds 100000 actions")
@@ -32,6 +33,25 @@ build_session_found: fn(state: &BuildSessionState, args: [BuildSessionValue]) ->
     build_session_new_file(state, BuildSessionFile{kind: "found", path: row.value.copy(), probe: Val(probe), action: None})
 }
 
+// Where `b.host(target)` puts the target's host build, never installed.
+BUILD_SESSION_HOST_DIR: ".jet/build/host"
+
+// `b.host(target)`: the executable `target` built for the machine running
+// the build, the tool a step runs on it.
+build_session_host: fn(state: &BuildSessionState, args: [BuildSessionValue]) -> BuildSessionReply {
+    if args.len() != 1 -> return build_session_fail(state, "`b.host` takes one target")
+    target: build_session_handle(state, args[0], "BuildTarget") ?? return build_session_fail(state, "the target does not belong to this build")
+    row: state.targets[target]
+    if row.kind != "executable" || row.sources.len() == 0 -> return build_session_fail(state, "`b.host` builds an executable target from its source, and `{row.name}` is a {row.kind} target{if row.sources.len() == 0 -> " with no source" else -> ""}")
+    build_session_new_file(state, BuildSessionFile{kind: "host", path: "{BUILD_SESSION_HOST_DIR}/{row.name}", probe: None, action: None, target: Val(target)})
+}
+
+// `b.jet()`: the compiler running the build, as a tool.
+build_session_jet: fn(state: &BuildSessionState, args: [BuildSessionValue]) -> BuildSessionReply {
+    if args.len() != 0 -> return build_session_fail(state, "`b.jet` takes no arguments")
+    build_session_new_file(state, BuildSessionFile{kind: "jet", path: "jet", probe: None, action: None})
+}
+
 build_session_new_file: fn(state: &BuildSessionState, file: BuildSessionFile) -> BuildSessionReply {
     id: state.files.len()
     state.files.push(file.copy())
@@ -44,6 +64,7 @@ build_session_file_path: fn(state: &BuildSessionState, args: [BuildSessionValue]
     id: build_session_handle(state, args[0], "BuildFile") ?? return build_session_fail(state, "the file does not belong to this build")
     file: state.files[id]
     if file.kind == "found" -> return build_session_fail(state, "found program `{file.path}` has no path until the build runs; pass it to a step as its tool")
+    if file.kind == "jet" -> return build_session_fail(state, "`b.jet()` has no path until the build runs; pass it to a step as its tool")
     BuildSessionReply.Value{value: BuildSessionValue.Text{value: file.path.copy()}}
 }
 
@@ -83,6 +104,7 @@ build_session_step_call: fn(state: &BuildSessionState, method: String, args: [Bu
             file_id: build_session_handle(state, args[1], "BuildFile") ?? return build_session_fail(state, "the file does not belong to this build")
             file: state.files[file_id]
             if file.kind == "found" -> return build_session_fail(state, "found program `{file.path}` runs as a step's tool, not as an argument; write `b.run(name, b.found(probe), caps)`")
+            if file.kind == "jet" -> return build_session_fail(state, "`b.jet()` runs as a step's tool, not as an argument; write `b.run(name, b.jet(), caps)`")
             if (file.action ?? -1) == id -> return build_session_fail(state, "step `{step.name}` makes `{file.path}`, so it can't also read it")
             build_session_append_unique(step.inputs, file.path)
             step.argv.push("{flag}{file.path}")
@@ -103,6 +125,7 @@ build_session_step_call: fn(state: &BuildSessionState, method: String, args: [Bu
             return unit
         }
         "toolchain" -> {
+            if state.files[step.tool].kind == "jet" -> return build_session_fail(state, "step `{step.name}` runs `b.jet()`, which runs on the toolchain it was built with")
             step.toolchain = build_session_handle(state, args[1], "BuildToolchain") ?? return build_session_fail(state, "the step's toolchain does not belong to this build")
             state.actions[id] = step
             return unit

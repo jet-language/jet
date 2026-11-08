@@ -145,6 +145,25 @@ foundation_run_native_sandboxed_with_mounts: fn(executable: String, args: [Strin
 // process group survives the group kill there, exactly as in Rust, whose
 // `/proc` walk is Linux-only.
 foundation_run_native_sandboxed_with_timeout_and_mounts: fn(executable: String, args: [String], source_dir: String, output_dir: String?, env: [String: String], share_network: Bool, mounts: [NativeSandboxMount], timeout: Duration?) -[FS, Env, Exec, Time.Wait]> NativeSandboxOutput NativeSandboxError! {
+    command: foundation_native_sandbox_command(executable, args, source_dir, output_dir, env, share_network, mounts, timeout)
+    receipt: command.spec.run() ?? return Err(NativeSandboxError.IO("{err}"))
+    foundation_native_sandbox_finish(command, receipt)
+}
+
+// One sandboxed child, checked and ready to run: its process (output
+// captured and bounded, the time limit set) and what its receipt is read
+// against. A caller runs many at once with `process.run_all` and reads each
+// receipt with foundation_native_sandbox_finish.
+NativeSandboxCommand: struct {
+    spec: ProcessSpec
+    timeout: Duration?
+    mechanism: String
+    policy: String
+}
+
+// The child foundation_run_native_sandboxed_with_timeout_and_mounts runs,
+// without running it.
+foundation_native_sandbox_command: fn(executable: String, args: [String], source_dir: String, output_dir: String?, env: [String: String], share_network: Bool, mounts: [NativeSandboxMount], timeout: Duration?) -[FS, Env, Exec, Time.Wait]> NativeSandboxCommand NativeSandboxError! {
     if sys.is_windows() -> return Err(NativeSandboxError.Unsupported("the native Windows AppContainer backend has no Core process-isolation API"))
     if !sys.is_linux() && !sys.is_macos() -> return Err(NativeSandboxError.Unsupported("Jetpack's native child sandbox is implemented only on Linux, macOS, and Windows"))
     if sys.get(NATIVE_SANDBOX_FAKE_ENV) != None -> return Err(NativeSandboxError.Unsupported("test sandbox override prevents child execution"))
@@ -165,14 +184,18 @@ foundation_run_native_sandboxed_with_timeout_and_mounts: fn(executable: String, 
 
     spec := if sys.is_linux() -> foundation_linux_sandbox_spec(source, output, env, share_network, source_writable, checked_mounts, program, args) else -> foundation_macos_sandbox_spec(source, output, env, share_network, source_writable, checked_mounts, program, args)
     if timeout == .Val(limit) -> spec = spec.timeout(limit)
-    receipt: spec.stdout(.Capture).stderr(.Capture).output_limit(NATIVE_SANDBOX_MAX_OUTPUT_BYTES).run() ?? return Err(NativeSandboxError.IO("{err}"))
+    mechanism: if sys.is_linux() -> "linux-bwrap" else -> "macos-seatbelt"
+    Ok(NativeSandboxCommand{spec: spec.stdout(.Capture).stderr(.Capture).output_limit(NATIVE_SANDBOX_MAX_OUTPUT_BYTES), timeout, mechanism, policy: foundation_native_sandbox_policy(output_is_separate, share_network)})
+}
+
+// The result of one sandboxed child `command` that ran to `receipt`.
+foundation_native_sandbox_finish: fn(command: NativeSandboxCommand, receipt: ProcessReceipt) -> NativeSandboxOutput NativeSandboxError! {
     if receipt.timed_out {
-        limit: timeout ?? panic("a timed-out sandbox run had a timeout")
+        limit: command.timeout ?? panic("a timed-out sandbox run had a timeout")
         return Err(NativeSandboxError.TimedOut{limit_ms: limit.ns.div_euclid(1000000)})
     }
     if receipt.limit_hit == .Val(_) -> return Err(NativeSandboxError.IO("sandbox process output exceeded {NATIVE_SANDBOX_MAX_OUTPUT_BYTES} bytes"))
-    mechanism: if sys.is_linux() -> "linux-bwrap" else -> "macos-seatbelt"
-    Ok(NativeSandboxOutput{receipt, mechanism, policy: foundation_native_sandbox_policy(output_is_separate, share_network)})
+    Ok(NativeSandboxOutput{receipt, mechanism: command.mechanism, policy: command.policy})
 }
 
 foundation_linux_sandbox_spec: fn(source: String, output: String?, env: [String: String], share_network: Bool, source_writable: Bool, mounts: [NativeSandboxMount], program: String, args: [String]) -[FS, Env, Exec]> ProcessSpec NativeSandboxError! {

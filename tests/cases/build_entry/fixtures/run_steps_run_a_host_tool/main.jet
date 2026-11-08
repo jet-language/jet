@@ -1,0 +1,13 @@
+build: fn(b: Build) -[Exec, FS]> {
+    #Impure("run the generator") {
+    // `gen` is built for this machine and runs as the step `table`, whose
+    // output is the source of `show`; so `gen` compiles, `table` runs, then
+    // `show` compiles.
+    gen: b.add_executable("gen", ["gen/gen.jet"], [])
+    table: b.run("table", b.host(gen), ["Exec", "FS"])
+    table.output("show.jet", flag: "--out=")
+    show: b.add_executable("show", ["show.jet"], [])
+    b.default(show)
+    }
+}
+run: fn() {}

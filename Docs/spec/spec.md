@@ -5007,17 +5007,27 @@ refuses the words with E2104 instead of dropping them.
 `b.run(name, tool, caps)` declares one step and returns its `BuildAction`.
 The tool is a `BuildFile`. `b.found(probe)` is the program a `find_program`
 probe finds, and a step's `.output(path)` is a file that step makes, so one
-step can build the tool the next one runs. Calls on the step build its
+step can build the tool the next one runs. `b.host(target)` is the executable
+`target` built for the machine running the build, at
+`.jet/build/host/<name>` and never installed; a step that runs it waits for it
+to compile, and the one graph builds it whether or not it is selected. Only an
+executable target with a source can be built so (E3502), and on a machine the
+native backend doesn't write images for, a step that runs one is refused
+before anything runs. `b.jet()` is the compiler running the build; its step
+runs it from its own folder, mounted read-only, so a step can check, run or
+build Jet code. Calls on the step build its
 command line in order. `.input(path)` and `.output(path)` declare a file and
 pass its path as the next argument. `.reads(path)` and `.writes(path)`
 declare a file without passing it. `.file(f)` passes another step's output
 and orders the step after that one, and `.arg(text)` passes literal text.
 `.input`, `.output` and `.file` take `flag:`, written before the path in the
 same argument: `.output("gen.c", flag: "--out=")` passes `--out=gen.c`.
-`.output` returns the new `BuildFile`, and `f.path()` is a made file's
-package-relative path; a found program has no path until the build runs, so
-its `.path()` is refused. `.toolchain(t)` and `.sign(identity)` add toolchain
-and signing identity. A step's result is cached. A step that
+`.output` returns the new `BuildFile`, and `f.path()` is a made or host-built
+file's package-relative path; a found program and `b.jet()` have no path until
+the build runs, so their `.path()` is refused. `.toolchain(t)` and
+`.sign(identity)` add toolchain and signing identity; a `b.jet()` step runs on
+the toolchain its compiler was built with, so `.toolchain` on it is refused. A
+step's result is cached. A step that
 declares no output is refused at its `b.run` call (E3502), since only declared
 outputs leave its sandbox, and `.arg` text that names a package file is
 refused with the fix `.input(path)`, so the step can't read an undeclared file.
@@ -5028,7 +5038,9 @@ step that sets no limit of its own. Both take a whole number and one unit
 (`ns`, `us`, `ms`, `s`, `min` or `h`) that comes to at least 1ms, and no cache
 key names the limit. A step that runs past
 its limit is stopped and reported with E3505. Example:
-[`tests/cases/build_entry/run_steps_chain_a_found_tool_and_a_made_file.case`](../../tests/cases/build_entry/run_steps_chain_a_found_tool_and_a_made_file.case).
+[`tests/cases/build_entry/run_steps_chain_a_found_tool_and_a_made_file.case`](../../tests/cases/build_entry/run_steps_chain_a_found_tool_and_a_made_file.case);
+a generator built and run in one build, whose output another target compiles:
+[`tests/cases/build_entry/run_steps_run_a_host_tool.case`](../../tests/cases/build_entry/run_steps_run_a_host_tool.case).
 
 A target's sources are package-relative paths, and the first is its entry.
 Every source a target lists is part of it: the others share the entry's
@@ -5059,11 +5071,18 @@ build: fn(b: Build) -[Exec, FS]> {
 run: fn() { print("hello") }
 ```
 
-Action dependencies come from target dependencies and declared producer and
-consumer edges. Ready nodes run concurrently in deterministic stages. Cached
-actions include declared input content, argv, authority, toolchain, probes,
-signing identity, and generated-source hashes. A cache hit restores only
-declared outputs from the local CAS.
+`jet build` runs steps and targets as one graph. A step waits for the steps
+that make its inputs, the targets it runs as `b.host` tools, and its target's
+dependencies' steps; a target waits for its own and its dependencies' steps
+and the steps that make its sources. Every step's grant is checked and every
+probe runs before anything else does. Then whatever is ready runs: the ready
+steps together, up to `--threads` at once, then a ready target compiles. A
+failure stops only what waits on it, the rest of the graph still runs, and
+every failure is reported. Steps and targets that wait on each other are
+refused (E3502) before anything runs. Cached actions include declared input
+content, argv, authority, toolchain, probes, signing identity, and
+generated-source hashes. A cache hit restores only declared outputs from the
+local CAS.
 
 There is no ambient execution fallback. On Linux each action runs under
 bubblewrap with private mount, PID, IPC, UTS, and network namespaces. Only

@@ -10,7 +10,7 @@ use {
     ]
     jet_foundation.[
         BuildOptionChoice, BuildOptionLayer, BuildOptions, Diagnostic, DIAGNOSTIC_LINT, SourceFile, Span,
-        build_option_argument, build_option_check_removal_note, build_option_duration_ms, build_option_row, build_options_check_removals, build_options_value, build_options_with_code,
+        build_option_argument, build_option_check_removal_note, build_option_row, build_options_check_removals, build_options_value, build_options_with_code,
         diagnostic_render_all,
     ]
     core.build.[BuildGraphNode]
@@ -70,9 +70,9 @@ jet_cli_build_query_failure: fn(request: JetDriverCompileRequest, query: JetDriv
 }
 // `jet build` of a package whose `build: fn(b: Build)` configures the build: evaluate it,
 // record the values it contributes to the package's declared settings
-// (jet_cli_record_build_contributions), run the selected actions
-// (jet_cli_build_execute), then compile each selected executable target from
-// its source, named after the target.
+// (jet_cli_record_build_contributions), then run its steps and selected
+// targets as one graph (jet_cli_build_run_graph), each executable compiled
+// from its source, named after the target.
 // The options fn build set go between `options`' profile values and its flags;
 // `build_args` (the words after `--`) are what its `b.args()` returns. Under
 // `write_generated: on` each generated source is first written to its
@@ -111,7 +111,7 @@ jet_cli_workspace_package_entry: fn(file: String, color: Bool) -[FS, Env]> Strin
 }
 
 // `jet_cli_build_package` of one package; `member` names the workspace member
-// a workspace build runs it for (jet_cli_build_execute).
+// a workspace build runs it for (jet_cli_build_run_graph).
 jet_cli_build_package_as: fn(file: String, color: Bool, options: BuildOptions, build_args: [String], threads: Int?, invocation: JetCLIInvocationAuthority?, member: String?, locked: Bool, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
     selection := BuildPlanSelection?{None}
     execution := BuildPlanExecution?{None}
@@ -195,22 +195,8 @@ jet_cli_build_package_as: fn(file: String, color: Bool, options: BuildOptions, b
             build_files.write(path, source_file.source) ?? return jet_cli_build_failed("couldn't write the generated source `{path}`: {err}", jet_cli_why("E2105"), "make `{directory}` writable, or build with `--write-generated=off`", color)
         }
     }
-    // Every step without its own `.timeout` gets the `action_timeout` option's.
-    action_timeout_ms: build_option_duration_ms(build_options_value(selected_options, "action_timeout")) ?? panic("the resolved `action_timeout` is a checked duration")
-    // copy: `failed` is a payload view of the execution's result.
-    if jet_cli_build_execute(graph, root, policy, invocation, member, action_timeout_ms, color) == .Val(failed) -> return failed.copy()
-    loop executable in selected.executables {
-        source_path: jet_cli_entry_join(root, executable.source)
-        source: build_files.read(source_path) ?? return jet_cli_build_failed("couldn't read the target source `{source_path}`: {err}", jet_cli_why("E2105"), "correct the source path given to `b.add_executable`", color)
-        built: jet_cli_compile_target(source_path, executable.name, source, executable.sources, target_generated, color, selected_options.copy(), threads, invocation, trace_sink)
-        if built.exit_code != JET_DRIVER_EXIT_OK -> return built
-    }
-    loop library in selected.libraries {
-        source_path: jet_cli_entry_join(root, library.source)
-        source: build_files.read(source_path) ?? return jet_cli_build_failed("couldn't read the target source `{source_path}`: {err}", jet_cli_why("E2105"), "correct the source path given to `b.add_library`", color)
-        checked: jet_cli_check_library(source_path, source, library.sources, target_generated, color, threads, trace_sink)
-        if checked.exit_code != JET_DRIVER_EXIT_OK -> return checked
-    }
+    built: jet_cli_build_run_graph(graph, selected, root, policy, invocation, member, selected_options, threads, target_generated, trace_sink, color)
+    if built.exit_code != JET_DRIVER_EXIT_OK -> return built
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     // A `build: fn` that selects no executable keeps the stock build of the
     // program beside it, named after its file.

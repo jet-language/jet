@@ -46,6 +46,11 @@ sema_build_context_method_contract: fn(method: String, arity: Int) -> SemaBuildC
             parameters = [Type]{Type.Named{name: "BuildProbe"}}
             result = Type.Named{name: "BuildFile"}
         }
+        method == "host" && arity == 1 -> {
+            parameters = [Type]{target}
+            result = Type.Named{name: "BuildFile"}
+        }
+        method == "jet" && arity == 0 -> result = Type.Named{name: "BuildFile"}
         sema_build_context_target_method(method) && arity >= 3 && arity <= 7 -> {
             parameters = [Type]{Type.String, strings, Type.List{element: action}}
             trailing: [Type]{Type.List{element: target}, probes, toolchain, signing}
@@ -93,9 +98,9 @@ sema_build_context_arity_description: fn(method: String) -> String Never! {
     if method == "toolchain" -> return "2 to 6"
     if method == "probe" -> return "3 to 6"
     if method == "plan" -> return "0 or 1"
-    if method == "default" || method == "found" -> return "1"
+    if method == "default" || method == "found" || method == "host" -> return "1"
     if method == "run" -> return "3"
-    if method == "args" -> return "0"
+    if method == "args" || method == "jet" -> return "0"
     if method == "find" || method == "embed" -> return "1"
     if method == "error" -> return "5"
     "2"
