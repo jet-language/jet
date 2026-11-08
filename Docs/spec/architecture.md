@@ -1302,6 +1302,14 @@ to speak WebDriver BiDi. It does not require Node, Playwright, or a Canvas
 facade. Browser installation is Jetpack work: `jetpack browser lock|provision`
 writes `[[browser]]` entries into `.jet/lock`, and `browser.locked(engine)`
 reads that pin (FS) so launch resolves a deterministic binary.
+`browser.launch(engine)` starts the locked Firefox headless on a throwaway
+profile with `--remote-debugging-port=0`, reads the BiDi port Firefox records
+in that profile, and connects with the lock's protocol profile. The session
+bus is disabled for the child because a desktop D-Bus can stall Firefox
+before its BiDi server answers. The session owns the engine: `close()` or the
+last owner's drop stops it and removes the profile. Chromium serves BiDi only
+through a WebDriver driver, which the lock does not pin, so `launch` refuses
+it with a `missing driver` error.
 
 `BrowserProfile` pins a client command contract; it is not a claim about a
 server version. The runtime gates raw commands against that contract. A

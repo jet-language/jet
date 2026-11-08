@@ -48,6 +48,7 @@ BrowserError: struct {
                 "missing lock" -> "no locked browser for this engine in .jet/lock"
                 "unknown engine" -> "browser engine is not supported"
                 "missing binary" -> "locked browser binary was not found"
+                "missing driver" -> "this engine needs a locked WebDriver driver to launch"
                 "size mismatch" -> "locked browser binary size drifted"
                 "invalid lock" -> "browser lock entry is incomplete"
                 else -> "browser protocol failed"
@@ -141,6 +142,25 @@ __BrowserState: struct {
     trace: [String]
     trace_bytes: Int
     events: [BrowserEvent]
+    engine: __BrowserEngine?
+}
+
+// The engine process and throwaway profile that `launch` started. The
+// session state is its one owner, so the last Browser copy (or close) stops
+// the engine and removes the profile.
+__BrowserEngine: struct {
+    child: ProcessChild
+    profile: String
+}
+
+impl __BrowserEngine.Close {
+    close: fn(&&self) {
+        // Close cannot fail: an engine that already exited cannot be
+        // signalled, and wait still reaps it.
+        self.child.kill().drop("an exited engine needs no signal")
+        self.child.wait().drop("the engine receipt is not reported")
+        files.remove_all(self.profile).drop("profile removal at close is best-effort")
+    }
 }
 
 // The id and closed fact of one BiDi resource (user context, browsing
@@ -733,6 +753,52 @@ locked: fn(engine: String) -[FS, IO]> BrowserLocked BrowserError! {
     Ok(entry)
 }
 
+// Start the engine pinned by `locked(engine)` headless on a throwaway profile
+// and connect over the engine's own WebDriver BiDi endpoint. Firefox serves
+// BiDi itself. Chromium speaks BiDi only through a WebDriver driver, which the
+// lock does not pin, so it refuses with "missing driver". The session's last
+// owner, or close, stops the engine and removes the profile.
+launch: fn(engine: String) -[Exec, FS, IO, Net, Time, Time.Wait]> Browser BrowserError! {
+    pin: locked(engine)
+    if pin.engine != "firefox" -> return Err(BrowserError{kind: "missing driver"})
+    p: profile(pin.protocol)
+    dir: files.temp_dir("jet-browser-") ?? return Err(BrowserError{kind: "transport"})
+    // Port 0 picks a free port, which Firefox records in the profile. The
+    // session bus stays off: a desktop D-Bus can stall Firefox's startup
+    // after its BiDi server listens and before it answers.
+    spec: process.cmd([String]{pin.binary, "--headless", "--no-remote", "--profile", dir.path, "--remote-debugging-port=0", "about:blank"})
+        .env("DBUS_SESSION_BUS_ADDRESS", "disabled:").stdout(.Capture).stderr(.Capture)
+    child: spec.spawn() ?? {
+        files.remove_all(dir.path).drop("a failed launch leaves no profile")
+        return Err(BrowserError{kind: "transport"})
+    }
+    held := __BrowserEngine{child: child, profile: dir.path.copy()}
+    port: __launched_bidi_port(held, "{dir.path}/WebDriverBiDiServer.json", 60000)
+    browser: connect_profile("ws://127.0.0.1:{port}/session", p, BrowserTimeout{milliseconds: 30000})
+    __browser_own_engine(browser, held)
+    Ok(browser)
+}
+
+// The BiDi port the engine records in its profile. A read can race the
+// engine's write, so an incomplete file retries; an engine that exits first
+// fails the launch.
+__launched_bidi_port: fn(engine: __BrowserEngine, path: String, timeout_ms: Int) -[Exec, FS, Time, Time.Wait]> Int BrowserError! {
+    started: time.instant()
+    loop {
+        if files.read(path) == .Ok(raw) {
+            if json.parse(raw) == .Ok(value) {
+                if browser_get(value, "ws_port") == .Val(field) {
+                    port: dyn_int(field) ?? 0
+                    if port > 0 && port < 65536 -> return Ok(port)
+                }
+            }
+        }
+        if engine.child.exited() ?? false -> return Err(BrowserError{kind: "transport"})
+        if started.elapsed_millis() >= timeout_ms -> return Err(BrowserError{kind: "timeout"})
+        time.sleep(20ms)
+    }
+}
+
 connect: fn(endpoint: String) -[Net, Time]> Browser BrowserError! {
     connect_profile(endpoint, profile("bidi-2025.5"), BrowserTimeout{milliseconds: 30000})
 }
@@ -741,7 +807,7 @@ connect_profile: fn(endpoint: String, p: BrowserProfile, t: BrowserTimeout) -[Ne
     conn: core.net.ws.__connect(endpoint) ? value -> value ! error -> return Err(browser_ws_error(error))
     browser: Browser{__state: shared __BrowserState{
         conn: conn.move(), next_id: 1, closed: false, session_started: false, timeout_ms: t.milliseconds,
-        profile: p.name, cdp: false, trace: [String]{"connect"}, trace_bytes: 7, events: [BrowserEvent]{}
+        profile: p.name, cdp: false, trace: [String]{"connect"}, trace_bytes: 7, events: [BrowserEvent]{}, engine: None
     }}
     status: browser_command(browser, "session.status", empty_object())
     if !browser_true_field(status, "ready") || !browser_text_field(status, "message") ->
@@ -825,9 +891,16 @@ browser_mark_started: fn(browser: Browser) Never! {
     guard.value.session_started = true
 }
 
+// Closing ends the session; a launched engine stops with it.
 browser_mark_closed: fn(browser: Browser) Never! {
     guard := browser.__state.guard_edit()
     guard.value.closed = true
+    guard.value.engine = None
+}
+
+__browser_own_engine: fn(browser: Browser, engine: &&__BrowserEngine) Never! {
+    guard := browser.__state.guard_edit()
+    guard.value.engine = Val(engine)
 }
 
 browser_set_cdp: fn(browser: Browser, cdp: Bool) Never! {
