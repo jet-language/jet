@@ -9,6 +9,10 @@ s3_artifact_check_directory: fn(path: String) -[FS, Env]> {
     loop entry in entries {
         kind: artifact_files.stat(entry.path) ?? panic("cannot inspect example {entry.path}")
         if kind.is_dir && !kind.is_symlink {
+            // `.jet/` is the package state directory where jet itself keeps build
+            // output (git-ignored); running an example fills it, so it is not a
+            // stray artifact and the check must not depend on what ran first.
+            if entry.name == ".jet" -> next
             assert(entry.name != "build", "generated build directory under examples: {entry.path}")
             s3_artifact_check_directory(entry.path)
             next

@@ -66,13 +66,16 @@ dc_slice: fn(text: String, start: Int, end: Int) -> String {
     String.from_bytes(raw[start..(end - 1)]) ?? panic("diagnostic scan slice must end on UTF-8 boundaries")
 }
 
-// Every `.jet` file under `directory`, skipping test packages and fixtures:
-// the deleted gate scanned compiler sources, not their tests.
+// Every `.jet` file under `directory`, skipping test packages, fixtures and
+// dot directories: the deleted gate scanned compiler sources, not their tests,
+// and a dot directory such as `.jet/` holds build output (the packages suite
+// assembles the whole Jetpack engine, tests included, under
+// Jetpack/Bootstrap/.jet/test), so the scan must not depend on what ran first.
 dc_walk: fn(directory: String, out: &[String]) {
     if !dc_files.exists(directory) -> return
     loop child in (dc_files.list_dir(directory) ?? panic("list {directory}: {err}")) {
         if child.is_dir {
-            if child.name != "Tests" && child.name != "Fixtures" && child.name != "fixtures" -> dc_walk(child.path, out)
+            if child.name != "Tests" && child.name != "Fixtures" && child.name != "fixtures" && !child.name.starts_with(".") -> dc_walk(child.path, out)
         } else if child.name.ends_with(".jet") && !dc_has(DC_REGISTRY_FILES, child.path) -> out.push(child.path)
     }
 }
