@@ -320,12 +320,17 @@ jet_cli_policy_why: fn(authority: JetCLIAuthority) -> String Never! {
 // A program with no package.jet edits its leading `package: { … }` block. The
 // floor stays granted beside a written row, so the row
 // names only the undecided rights. `jet fix --all` inserts a missing block
-// only, named after `file`.
+// only, named after `file`. Source piped to `jet run -` has no file to fix:
+// the block goes at the top of the piped source.
 jet_cli_policy_fix: fn(authority: JetCLIAuthority, file: String) -> String Never! {
     undecided: jet_cli_undecided(authority)
-    if undecided.len() > 0 && jet_cli_is_application_default(authority) -> return authority_inline_package_fix(file, undecided)
+    if undecided.len() > 0 && jet_cli_is_application_default(authority) {
+        if jet_cli_stdin_entry(file) -> return "declare a leading `package: {{ name: \"stdin\", authority: {{ allow: [{undecided.join(", ")}] }} }}` block in the piped source; otherwise approve the exact operation once in an interactive terminal"
+        return authority_inline_package_fix(file, undecided)
+    }
     if undecided.len() > 0 && jet_cli_is_manifest_less(authority) {
-        return "add `allow: [{undecided.join(", ")}]` under `authority` in this file's leading `package: {{ … }}` block; otherwise approve the exact operation once in an interactive terminal"
+        holder: if jet_cli_stdin_entry(file) -> "the piped source's" else -> "this file's"
+        return "add `allow: [{undecided.join(", ")}]` under `authority` in {holder} leading `package: {{ … }}` block; otherwise approve the exact operation once in an interactive terminal"
     }
     denied: jet_cli_denied_required(authority)
     if undecided.len() == 0 && jet_cli_denied_by_invocation(authority, denied) {
@@ -346,7 +351,8 @@ jet_cli_policy_facts: fn(authority: JetCLIAuthority) -> String Never! {
 
 // E1803 when the policy denies or leaves undecided a required right
 // (`policy_refusal`; A program with no package.jet leads its Fix with the exact
-// `--allow` invocation of `command` and its `-A` form.
+// `--allow` invocation of `command` and its `-A` form, naming the program as
+// the command did: `-` for source piped to `jet run -`.
 jet_cli_authority_refusal: fn(authority: JetCLIAuthority, file: String, command: String) -> Diagnostic? Never! {
     denied: jet_cli_denied_required(authority)
     undecided: jet_cli_undecided(authority)
@@ -356,7 +362,8 @@ jet_cli_authority_refusal: fn(authority: JetCLIAuthority, file: String, command:
     if denied.len() == 0 && jet_cli_is_manifest_less(authority) {
         fix: diagnostic.fix
         rest: if fix.len() == 0 -> "" else -> "{jet_cli_ascii_lower(fix.slice(0..<1))}{fix.slice(1..<fix.len())}"
-        diagnostic.fix = "run `jet {command} --allow={undecided.join(",")} {file}` (or `-A`/`--allow-all` for every effect) to allow it for this run, or {rest}"
+        program: if jet_cli_stdin_entry(file) -> "-" else -> file
+        diagnostic.fix = "run `jet {command} --allow={undecided.join(",")} {program}` (or `-A`/`--allow-all` for every effect) to allow it for this run, or {rest}"
     }
     diagnostic.detail = Val(jet_cli_policy_facts(authority))
     diagnostic.denial_kind = Val("authority")

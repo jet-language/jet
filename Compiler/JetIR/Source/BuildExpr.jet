@@ -282,7 +282,12 @@ ir_stmts: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, body: [Int]) Never! {
     outermost: b.scopes.len() == 1
     loop (at, statement) in body {
         if ir_failed(b) -> break
-        b.map_take = if ir_map_take_fuses(p, b, body, at) -> statement else -> -1
+        b.map_take = -1
+        stored: ir_map_take_fuses(p, b, body, at)
+        if stored >= 0 {
+            b.map_take = statement
+            b.map_stores.push(body[stored])
+        }
         if outermost -> ir_stmt_collecting(m, p, b, statement) else -> ir_stmt(m, p, b, statement)
     }
     // The entry's outermost block ends: its variables drop before the
@@ -448,6 +453,12 @@ ir_stmt_body: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Neve
         }
         .Assign(place, op, value, line, span) -> {
             if line > 0 -> b.line = line
+            // A group update's store (ir_map_take): the window wrote the
+            // entry. Updates nest, so the latest one's store comes first.
+            if b.map_stores.len() > 0 && b.map_stores[b.map_stores.len() - 1] == statement {
+                _: b.map_stores.pop()
+                return
+            }
             if place == .Expr(target_place) {
                 return ir_assign_place(m, p, b, target_place, op, value, span)
             }
@@ -5497,9 +5508,15 @@ ir_try_failure: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int, is_r
     }
     // A comptime item (ir_comptime_item_shell) checks under the build's
     // implicit `!Err` rail: a failure that reaches it fails the build with
-    // the error's text, as a panic does.
+    // the error's text, as a panic does. A failure that leaves a task body
+    // stops the task as a panic does, which its join reports as
+    // TaskFailure.Panicked.
     if b.failure == .Infallible && b.f.name == "__comptime_item" {
-        ir_comptime_item_failure(m, p, b, subject, is_result, span)
+        ir_failure_stop(m, p, b, subject, is_result, "the compile-time value is absent", span)
+        return
+    }
+    if b.failure == .Infallible && b.task_body {
+        ir_failure_stop(m, p, b, subject, is_result, "the task's value is absent", span)
         return
     }
     // An infallible or diverging function's failure edge is dead.
@@ -5510,11 +5527,12 @@ ir_try_failure: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int, is_r
     ir_fail(b, span, "`?` without a matching failure carrier")
 }
 
-// The failure edge of a comptime item: a require stop (Trap.jet
+// A failure edge that stops as `panic` does: a require stop (Trap.jet
 // jet_rt_require_stop, the stop `panic` raises) whose message is the
-// error's Show text, or that the value is absent; the descriptor is zeroed,
-// as ir_channel_capacity_stop's is, since the item's span locates the report.
-ir_comptime_item_failure: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int, is_result: Bool, span: Span) Never! {
+// error's Show text, or `absent` for a None; the descriptor is zeroed, as
+// ir_channel_capacity_stop's is, since the item's span or the task's join
+// locates the report.
+ir_failure_stop: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int, is_result: Bool, absent: String, span: Span) Never! {
     string_row: ir_string_row(m)
     message := -1
     held: m.types[b.f.slot_type[subject]].ty
@@ -5527,7 +5545,7 @@ ir_comptime_item_failure: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, subject:
         message = ir_render(m, p, b, err_ty, error, IRRender.Show, span)
         if ir_failed(b) -> return
     } else {
-        text: ir_static_text(m, b, "the compile-time value is absent")
+        text: ir_static_text(m, b, absent)
         message = ir_runtime(m, b, "jet_rt_string_from_static", text, string_row)
     }
     pointer_row: ir_pointer_row(m)
@@ -6029,7 +6047,9 @@ ir_slice_walk_window: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, ba
 
 // `loop x in value` over a type with an `Iterable` impl: `iter` takes the
 // value into its iterator, which the loop owns; each step calls
-// `next(iterator)`, and the walk ends at its first None. The item a step
+// `next(iterator)`, and the walk ends at its first None. An iterator that
+// closes closes when the loop ends, by its end, `break`, `return` or a
+// failure, as a variable holding it would. The item a step
 // takes out of the Option belongs to that step: `break`, `next` and the end
 // of the body drop it unless the body moved it. A step runs the body on
 // every n-th item from the first; the others are taken and dropped.
@@ -6050,6 +6070,7 @@ ir_iterable_walk: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, 
     if ir_failed(b) || iterator < 0 -> return
     b.fresh[iterator] = false
     b.bindings.push(IRBinding{name: "", slot: iterator, owned: true})
+    ir_close_arm(m, p, b, iterator, false, span)
     iterator_ty: m.types[b.f.slot_type[iterator]].ty
     next_args: ir_owner_args(p, p.functions[next_row], iterator_ty) ?? return ir_fail(b, span, "iterator {ir_type_name(iterator_ty)}, which does not spell its owner's type arguments")
     countdown: ir_walk_countdown(m, b, stride)
@@ -6614,6 +6635,7 @@ ir_cell_binding: fn(m: &IRModule, b: &IRBuilder, name: String) -> Int Never! {
 ir_build_lambda: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, job: IRLambdaJob) Never! {
     lambda: job.lambda
     b.line = job.line
+    b.task_body = job.task_body
     span: lambda.source_span
     env: ir_new_slot(b, ir_pointer_row(m), IRSlotKind.Param, ir_intern_name(m, "closure"))
     conventions: lambda.host_param_conventions ?? [AccessConvention]{}

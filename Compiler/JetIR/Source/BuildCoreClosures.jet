@@ -235,6 +235,8 @@ ir_task_spawn: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, task_ty: Type, grou
     closure_ty: ir_lambda_function_type(checked)
     env: ir_lambda(m, p, b, closure_ty, checked, span)
     if ir_failed(b) || env < 0 -> return -1
+    // ir_lambda queued the body's job last.
+    m.lambdas[m.lambdas.len() - 1].task_body = true
     invoke_id: ir_lazy_helper(m, p, b, "callback", closure_ty, span)
     if invoke_id < 0 -> return -1
     invoke: ir_lazy_address(m, b, invoke_id)

@@ -444,9 +444,9 @@ committed file spells one machine's home, user, mounts or tool roots:
 check runs first, refuses them, and
 `tower redact` cleans the board.
 
-Hosted CI runs only the Core surface ledger check
-(`.github/workflows/ci.yml`); until a pinned native seed release exists
-(D-SEED-DIST1), `Tools/agent/LaneCheck.jet` and the full gate
+There is no hosted CI until a pinned native seed release exists
+(D-SEED-DIST1). `Tools/agent/LaneCheck.jet`, the Core surface ledger check
+(`jet Tools/agent/CoreSurfaceLedger.jet --check`) and the full gate
 (`JET=<jet> jet Tools/agent/VerifyFull.jet`, which includes the Core
 source-coverage ratchet `Tools/agent/CoreCoverage.jet`) run locally with the
 admitted `JET`.

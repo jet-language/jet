@@ -1,0 +1,23 @@
+# A failure that leaves a task body, from a Unit body or a valued one, stops the task as a panic does: its join reports TaskFailure.Panicked with the error's text, and the process goes on. `jet run` and the none, basic and release builds agree.
+fixture: a_failure_leaving_a_task_body_joins_as_panicked_on_every_tier.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run main.jet
+exit: 0
+stdout: = "panicked: task@0 (spawn site 0): not a count: seven\npanicked: task@1 (spawn site 1): not a count: nine\ntotal -1\nfine 9\n"
+step: jet build main.jet --optimize=none
+exit: 0
+step: built
+exit: 0
+stdout: = "panicked: task@0 (spawn site 0): not a count: seven\npanicked: task@1 (spawn site 1): not a count: nine\ntotal -1\nfine 9\n"
+step: jet build main.jet --optimize=basic
+exit: 0
+step: built
+exit: 0
+stdout: = "panicked: task@0 (spawn site 0): not a count: seven\npanicked: task@1 (spawn site 1): not a count: nine\ntotal -1\nfine 9\n"
+step: jet build main.jet --release
+exit: 0
+step: built
+exit: 0
+stdout: = "panicked: task@0 (spawn site 0): not a count: seven\npanicked: task@1 (spawn site 1): not a count: nine\ntotal -1\nfine 9\n"

@@ -139,6 +139,12 @@ files_walk_fixture_live: fn(key: I64) -> Bool {
     shown: jet_walk8_shown(key, child)
     if !jet_rt_string_eq(shown, directory) -> return I64{20}
     jet_rt_string_drop(shown)
+    // A released slot is the next one a push takes.
+    jet_walk8_release(key, child)
+    held: walk_enter(key)
+    reused: walk_slot_push(held, walk_bytes_new(rt_text_data(directory), rt_text_len(directory)), rt_text_len(directory))
+    walk_leave(held)
+    if (reused != child) -> return I64{26}
 
     // An in-flight operation holds the context across a concurrent close.
     context: walk_enter(key)

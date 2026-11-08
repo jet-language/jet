@@ -686,10 +686,11 @@ parse_json: fn(text: String, allow_duplicates: Bool, limits: EncodingLimits) -> 
     if !p.eof() -> return Err(p.err("unexpected trailing data after the JSON value"))
     Ok(value)
 }
-// Compiler-private typed decoder entry; number lexemes retain their target-free carriers.
+// Compiler-private typed decoder entry; number lexemes retain their target-free
+// carriers. The input is already a whole String in memory, so its size is not
+// bounded here; nesting stays bounded by the safe max_depth.
 __parse_typed: fn(text: String) -> Dyn EncodingError! {
     raw: text.bytes()
-    if raw.len() > safe_limits().max_item_bytes -> return Err(limit_error(EncodingFormat.JSON, 0, "JSON input exceeds max_item_bytes ({safe_limits().max_item_bytes})"))
     parser := Parser.new(raw, false)
     parser.typed_numbers = true
     value: parser.parse_value()

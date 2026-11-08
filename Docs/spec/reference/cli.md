@@ -678,6 +678,10 @@ refused with E2104, and `jet dev -e` with E2102.
 `jet run - [args...]` runs the program read from standard input
 (`jet run - < hello.jet`, or a pipe). Its source is kept the same way, under
 `stdin/` named by its content hash, and runs as `jet run <that file> [args...]`.
+It gets the authority decision the same program gets as a file. An E1803
+refusal names it as the command did: its Fix runs `jet run --allow=… -` and
+puts the `package` block at the top of the piped source, as there is no file
+for `jet fix` to edit.
 
 A script is a standalone program wherever it lives: its source snapshot is the
 script alone, and the source walk of a package leaves every script out.

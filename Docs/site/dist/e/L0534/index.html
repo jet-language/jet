@@ -32,7 +32,7 @@
 <h2>What</h2>
 <p class="diag-copy what" data-registry-field="what">`{group}` copies the whole group out of `{map}` and stores it back</p>
 <h2>Why</h2>
-<p class="diag-copy why" data-registry-field="why">`{group}` still shares the entry&#39;s buffer when it is written, so the write first copies the whole group, and storing it back drops the Map&#39;s old copy; in a loop that is quadratic. Only a block that pushes plain values onto a group taken with an empty List fallback moves the group out of the Map without a copy</p>
+<p class="diag-copy why" data-registry-field="why">`{group}` still shares the entry&#39;s buffer when it is written, so the write first copies the whole group, and storing it back drops the Map&#39;s old copy; in a loop that is quadratic. The build grows the entry in place only when the Map is a variable the function declares, the statements before the store neither name it nor `break` or `next`, and nothing after the store names the group</p>
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Grow the entry in place: `if !{map}.has_key({key}) -&gt; {map}[{key}] = {fallback}`, then `{map}[{key}].{write}(…)`</p>
 <h2>Worked example</h2>
@@ -42,17 +42,17 @@
     |
  10 |         group := groups.get(p.dept) ?? [Person]{}
     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
- Why: `group` still shares the entry&#39;s buffer when it is written, so the write first copies the whole group, and storing it back drops the Map&#39;s old copy; in a loop that is quadratic. Only a block that pushes plain values onto a group taken with an empty List fallback moves the group out of the Map without a copy
+ Why: `group` still shares the entry&#39;s buffer when it is written, so the write first copies the whole group, and storing it back drops the Map&#39;s old copy; in a loop that is quadratic. The build grows the entry in place only when the Map is a variable the function declares, the statements before the store neither name it nor `break` or `next`, and nothing after the store names the group
  Fix: Grow the entry in place: `if !groups.has_key(p.dept) -&gt; groups[p.dept] = [Person]{}`, then `groups[p.dept].insert(…)`
 More: jet-lang.dev/e/L0534
 
-Warning [jet.MapGroupRoundTrip]: `group` copies the whole group out of `titled` and stores it back
-  --&gt; tests/ui_lint/map_group_round_trip.jet:56:9
+Warning [jet.MapGroupRoundTrip]: `group` copies the whole group out of `names` and stores it back
+  --&gt; tests/ui_lint/map_group_round_trip.jet:68:9
     |
- 56 |         group := titled.get(p.dept) ?? [&quot;header&quot;]
-    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
- Why: `group` still shares the entry&#39;s buffer when it is written, so the write first copies the whole group, and storing it back drops the Map&#39;s old copy; in a loop that is quadratic. Only a block that pushes plain values onto a group taken with an empty List fallback moves the group out of the Map without a copy
- Fix: Grow the entry in place: `if !titled.has_key(p.dept) -&gt; titled[p.dept] = [&quot;header&quot;]`, then `titled[p.dept].push(…)`
+ 68 |         group := names.get(p.dept) ?? []
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ Why: `group` still shares the entry&#39;s buffer when it is written, so the write first copies the whole group, and storing it back drops the Map&#39;s old copy; in a loop that is quadratic. The build grows the entry in place only when the Map is a variable the function declares, the statements before the store neither name it nor `break` or `next`, and nothing after the store names the group
+ Fix: Grow the entry in place: `if !names.has_key(p.dept) -&gt; names[p.dept] = []`, then `names[p.dept].push(…)`
 More: jet-lang.dev/e/L0534
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

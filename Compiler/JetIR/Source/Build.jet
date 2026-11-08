@@ -200,9 +200,15 @@ IRBuilder: struct {
     // answers from the entry it found.
     probe: IRMapProbe?{None}
     // The `Let` of a Map group update being built (BuildMaps.jet
-    // ir_map_take_fuses; -1: none): its `get` takes the entry's value out of
-    // the map (ir_map_take).
+    // ir_map_take_fuses; -1: none): its `group` binds the write window of
+    // the map's entry (ir_map_take).
     map_take: Int{-1}
+    // The stores of the group updates being built (`map[key] = group`):
+    // the window already wrote the entry, so each builds nothing.
+    map_stores: [Int]{[Int]{}}
+    // A task body (ir_task_spawn): a failure that leaves it stops the task,
+    // which its join reports as TaskFailure.Panicked (ir_try_failure).
+    task_body: Bool{false}
 }
 
 // One failure of a body: its message and the span it names.
@@ -488,7 +494,8 @@ IRQueued: struct { row: Int, id: Int, args: [Type], lambda: Int{-1} }
 // A lambda body to build as its own function: the box holds its captures
 // at their offsets; the instance it was created under; the checked
 // function whose tree holds its nodes and the nodes the creating builder
-// made (IRBuilder `row`, `made`, `next_node`).
+// made (IRBuilder `row`, `made`, `next_node`); whether it is a task body
+// (IRBuilder `task_body`).
 IRLambdaJob: struct {
     lambda: BodyLambda
     captures: [IRCaptureSlot]
@@ -498,6 +505,7 @@ IRLambdaJob: struct {
     row: Int
     made: BodyTree
     next_node: Int
+    task_body: Bool{false}
 }
 
 // One closure capture: the name the body reads, its byte offset in the box,
