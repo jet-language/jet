@@ -141,7 +141,10 @@ head_end: fn(head: [U8]) -> Bool {
 send: fn(stream: &TCPStream, reply: Reply) {
     reason: if reply.status == 200 -> "OK" else if reply.status == 400 -> "Bad Request" else -> "Not Found"
     content_type: if reply.content_type == "" -> "" else -> "content-type: {reply.content_type}\r\n"
-    head: "HTTP/1.1 {reply.status} {reason}\r\n{content_type}content-length: {reply.body.len()}\r\nconnection: close\r\n\r\n"
+    // Cross-origin isolation: the web runtime shares its memory through a
+    // SharedArrayBuffer, which a browser offers only to an isolated page.
+    isolation: "cross-origin-opener-policy: same-origin\r\ncross-origin-embedder-policy: require-corp\r\n"
+    head: "HTTP/1.1 {reply.status} {reason}\r\n{content_type}{isolation}content-length: {reply.body.len()}\r\nconnection: close\r\n\r\n"
     net.tcp_write_all_bytes(stream, head.bytes()).drop("a client that left gets no reply")
     net.tcp_write_all_bytes(stream, reply.body).drop("a client that left gets no body")
 }

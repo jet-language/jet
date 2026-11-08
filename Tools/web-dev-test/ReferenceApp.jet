@@ -4,7 +4,10 @@
 //
 //   jet run --allow=Env,Exec,FS,IO,Net,Time Tools/web-dev-test/ReferenceApp.jet -- \
 //     --metric first_run|edit_to_see|error_to_fix|test_loop --manifest <manifest.json> \
-//     --app <id> --jet-env <Tools/agent/jet-env> [--exercise] [--browser chromium|firefox]
+//     --app <id> [--jet-env Tools/agent/JetEnv.jet] [--exercise] [--browser chromium|firefox]
+//
+// `--jet-env` runs each `jet` command through Jet's development environment
+// (`jet Tools/agent/JetEnv.jet jet …`); without it `jet` is the one on PATH.
 //
 // The manifest's `reference_apps` entry names the app's entry and its edit
 // loop (edit, failure and repair recipes). core.web.browser launches the
@@ -118,7 +121,7 @@ setup: fn(args: [String]) -> Run Failure! {
     metric: required(args, "--metric")
     manifest_path: required(args, "--manifest")
     app_id: required(args, "--app")
-    jet_env: required(args, "--jet-env")
+    jet_env: option(args, "--jet-env") ?? ""
     raw: files.read(manifest_path) ?? return Err(Failure{message: "cannot read {manifest_path}: {err}"})
     manifest: json.parse(raw) ?? return Err(Failure{message: "{manifest_path} is not JSON: {err}"})
     app := Dyn.Null
@@ -165,7 +168,7 @@ measure: fn(r: Run, live: &Live) -> Timing Failure! {
         "error_to_fix" -> measure_error(r, live)
         "test_loop" -> {
             started: time.instant()
-            receipt: process.cmd([String]{r.jet_env.copy(), "jet", "test"}).cwd(r.project).env("NO_COLOR", "1").env("CI", "1").stdout(.Capture).stderr(.Capture).run() ?? return Err(Failure{message: "jet test could not start: {err}"})
+            receipt: process.cmd(jet_argv(r, [String]{"test"})).cwd(r.project).env("NO_COLOR", "1").env("CI", "1").stdout(.Capture).stderr(.Capture).run() ?? return Err(Failure{message: "jet test could not start: {err}"})
             if receipt.code != 0 || receipt.signal != None {
                 shown: if receipt.errors != "" -> receipt.errors.copy() else -> receipt.output.copy()
                 return Err(Failure{message: "reference test loop failed: {shown}"})
@@ -196,12 +199,19 @@ measure_error: fn(r: Run, live: &Live) -> Timing Failure! {
 }
 
 start_dev: fn(r: Run, live: &Live) Failure! {
-    argv: [String]{r.jet_env.copy(), "jet", "dev", r.entry.copy(), "--target=web", "--canvas", "--port={r.port}"}
+    argv: jet_argv(r, [String]{"dev", r.entry.copy(), "--target=web", "--canvas", "--port={r.port}"})
     child: process.cmd(argv).cwd(r.project).env("NO_COLOR", "1").env("CI", "1").stdout(.Inherit).stderr(.Inherit).spawn() ?? return Err(Failure{message: "jet dev could not start: {err}"})
     live.server = Val(child)
     wait_page_contains(r.port, "data-jet-edit-loop")
     wait_version(r.port, "")
     Ok()
+}
+
+// A `jet` command line, through the development environment when one is named.
+jet_argv: fn(r: Run, rest: [String]) -> [String] {
+    argv := if r.jet_env == "" -> [String]{"jet"} else -> [String]{"jet", r.jet_env.copy(), "jet"}
+    loop part in rest -> argv.push(part.copy())
+    argv
 }
 
 start_browser: fn(r: Run, live: &Live) Failure! {

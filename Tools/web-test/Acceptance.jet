@@ -27,12 +27,13 @@ C_WAIT_MS: 20000
 C_POLL_MS: 80
 C_BODY_LIMIT: 268435456
 
-// Collects console.log lines before any page script runs.
-C_CONSOLE_HOOK: "() => {{ window.__jetAcceptanceLogs = []; console.log = (...args) => {{ window.__jetAcceptanceLogs.push(args.map((v) => String(v)).join(' ')); }}; }}"
+// Collects console.log lines, and console errors and uncaught page errors
+// (prefixed `error:`), before any page script runs.
+C_CONSOLE_HOOK: "() => {{ window.__jetAcceptanceLogs = []; const keep = (prefix, args) => window.__jetAcceptanceLogs.push(prefix + args.map((v) => String(v)).join(' ')); console.log = (...args) => keep('', args); console.error = (...args) => keep('error: ', args); window.addEventListener('error', (event) => keep('error: ', [event.message])); window.addEventListener('unhandledrejection', (event) => keep('error: ', [event.reason])); }}"
 
-C_DOM_BOX: "(() => {{ const app = document.getElementById('jet-app'); const box = app?.querySelector('[data-jet-node]') || app?.firstElementChild; if (!box) return 'null'; return JSON.stringify({{ children: app.children.length, text: box.textContent || '', background: box.style.background || box.style.backgroundColor || '' }}); }})()"
+C_DOM_BOX: "(() => {{ const app = document.getElementById('jet-app'); const box = app?.firstElementChild; if (!box) return 'null'; return JSON.stringify({{ children: String(app.children.length), text: box.textContent || '', background: box.style.background || box.style.backgroundColor || '' }}); }})()"
 
-C_LIFECYCLE_LABELS: "JSON.stringify(Array.from(document.querySelectorAll('#jet-app [data-jet-node]')).map((el) => el.textContent))"
+C_LIFECYCLE_LABELS: "JSON.stringify(Array.from(document.querySelectorAll('#jet-app > *')).map((el) => el.textContent))"
 
 C_LOGGED_42: "(window.__jetAcceptanceLogs || []).some((line) => line.trim() === '42')"
 
@@ -111,11 +112,11 @@ matrix: fn(d: Driver, origin: String) Failure! {
     check(first.children == 2, "click create: {first.children} children")
     check(first.text.contains("Clicks: 0"), "click initial text: {first.text}")
     check(first.background.contains("rgb(51, 102, 255)") || first.background.contains("#3366ff"), "click initial color: {first.background}")
-    perform(d, "document.querySelector('#jet-app button[data-jet-node]').click()")
+    perform(d, "document.querySelector('#jet-app button').click()")
     second: wait_box(d, "Clicks: 1", "click update")
     check(second.children == 2, "click reuse: {second.children} children")
     check(second.background.contains("rgb(232, 121, 12)") || second.background.contains("#e8790c"), "click updated color: {second.background}")
-    perform(d, "document.querySelector('#jet-app button[data-jet-node]').click()")
+    perform(d, "document.querySelector('#jet-app button').click()")
     third: wait_box(d, "Clicks: 2", "click second update")
     check(third.children == 2, "click still one tree: {third.children} children")
 
@@ -152,7 +153,8 @@ wait_box: fn(d: Driver, fragment: String, label: String) -> DomBox Failure! {
         }
         time.sleep(time.duration_ms(C_POLL_MS))
     }
-    Err(Failure{message: "timed out waiting for {label}"})
+    page: evaluate(d, "document.location.href + ' ' + document.body.innerHTML.slice(0, 400) + ' logs: ' + (window.__jetAcceptanceLogs || []).join(' | ')") ?? "unreadable"
+    Err(Failure{message: "timed out waiting for {label}; the page is {page}"})
 }
 
 // Poll the lifecycle node labels until there are `count` of them; one label
@@ -185,7 +187,10 @@ wait_for: fn(d: Driver, expression: String, label: String) Failure! {
 perform: fn(d: Driver, expression: String) Failure! {
     if evaluate(d, expression) == {
         .Val(_) -> Ok()
-        None -> Err(Failure{message: "page action threw: {expression}"})
+        None -> {
+            page: evaluate(d, "document.body.innerHTML.slice(0, 600)") ?? "unreadable"
+            Err(Failure{message: "page action threw: {expression}; the page is {page}"})
+        }
         .Err(error) -> Err(error)
     }
 }
@@ -272,8 +277,9 @@ text: fn(tree: Dyn) -> String {
     ""
 }
 
+// A count the page sent as decimal text; -1 when it is not one.
 number: fn(tree: Dyn) -> Int {
-    if tree == .Int(value) -> value else -> 0 - 1
+    Int.parse(text(tree)) ?? (0 - 1)
 }
 
 option: fn(args: [String], name: String) -> String? {
