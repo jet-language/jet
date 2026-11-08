@@ -418,14 +418,23 @@ store_seal_local_output: fn(path: String) StoreError! {
 // Clear every write bit through a tree, leaving already-sealed nodes and
 // symlinks untouched.
 store_seal_node: fn(path: String) StoreError! {
+    _: store_seal_tree_changed(path)
+}
+
+// `store_seal_node`, reporting whether it cleared any write bit.
+store_seal_tree_changed: fn(path: String) -> Bool StoreError! {
     metadata: files.stat(path)
-    if metadata.is_symlink -> return
+    if metadata.is_symlink -> return Ok(false)
+    changed := false
     if metadata.is_dir {
-        loop child in files.list_dir(path) -> store_seal_node(child.path)
+        loop child in files.list_dir(path) {
+            if store_seal_tree_changed(child.path) -> changed = true
+        }
     }
     sealed_mode: metadata.mode - ((metadata.mode).bit_and(STORE_MODE_WRITE_BITS))
-    if sealed_mode == metadata.mode -> return
+    if sealed_mode == metadata.mode -> return Ok(changed)
     files.set_mode(path, sealed_mode)
+    Ok(true)
 }
 
 // Workers that flush one tree at once: enough to keep a device queue full.

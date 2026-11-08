@@ -76,13 +76,12 @@ store_share_tree_files_unlocked_with_report: fn(verification: &StoreVerification
     report := SharedCASReport{optimized_files: 0, optimized_bytes: 0}
     touched := false
     loop index in 0..<paths.len() -> store_share_file(paths[index], infos[index], digests[index], shared, used, report, touched)
-    // Linking a file into the pool leaves the object tree as it was. Only a
-    // swap to an existing pool entry renames inside the tree, and only that
-    // needs the tree resealed and made durable again.
-    if touched {
-        store_seal_node(canonical_root)
-        store_fsync_tree(canonical_root)
-    }
+    // Linking a file into the pool leaves the object tree as it was. A swap
+    // to an existing pool entry renames inside the tree, and a retried
+    // publish can meet an object left writable; either needs the tree
+    // resealed and made durable again. Sealing a sealed tree only reads it.
+    if store_seal_tree_changed(canonical_root) -> touched = true
+    if touched -> store_fsync_tree(canonical_root)
     Ok(report)
 }
 
