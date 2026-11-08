@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6679,
-    "rev": 95921,
+    "rev": 95925,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -60018,6 +60018,11 @@
         {
           "at": "2026-11-08",
           "by": "Main",
+          "text": "c7 evidence, not a close (PortsLead-2, ScriptBench full2 on bddfd21c0b's runner, g4/full2/cells.tsv: 810 cells, 321 win, 467 LOSS, 22 other; most cells NOISY because landings overlapped the run). w05 jet-bin loses to every peer (python 1.53, node 2.76, bun 5.35, deno 2.46, perl 3.14, ruby 1.20, lua 1.98, luajit 1.99; php 0.98 wall). w07 jet-bin wins 0.53-0.99 except php 1.12 and perl CPU 1.03. w10 jet-bin wins 0.21-0.72 except bun 1.20 and php 1.49; jet-run loses 1.1-7.9. w11 jet-bin wins 0.09-0.95 except bun 1.21/4.51; jet-run: python 0.94, node 1.04, bun 1.86, deno 1.46, ruby 1.15. A quiet-machine rerun is needed before any cell is judged."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
           "text": "c7 progress (PortsLead-2): 4c36e83022 cuts the perf budget checker over to Tools/perf/budget/Check.jet (byte-identical to check.mjs on a real build trace across 4 flag sets; 6/0 unit tests). live-reload.mjs and the uncalled olevels/sweep.mjs, native-cells-baseline.mjs and test-source-compiler-gate.sh are deleted; git history keeps them. Next: ci-perf-check.sh and source-compiler-gate.sh, the gates. Parked: core-activation.mjs, which measures generated Rust and allocations through LD_PRELOAD, so its Jet form is a method question on #4275 c105; and jetc-trace/summarize.mjs, which waits on a Core local-zone API."
         },
         {
@@ -60261,7 +60266,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-20T14:41:14.806Z",
-      "updated": "2026-11-08T00:41:28.417Z",
+      "updated": "2026-11-08T01:00:43.374Z",
       "updatedBy": "Main",
       "goals": [
         "G4"
@@ -75753,8 +75758,8 @@
       "parentId": "c0xiig3k",
       "needsAcceptance": false,
       "created": "2026-10-29T12:53:42.058Z",
-      "updated": "2026-11-07T23:05:21.581Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-08T01:25:02.053Z",
+      "updatedBy": "Main",
       "criteriaLastN": 50
     },
     {
@@ -93320,6 +93325,11 @@
         {
           "at": "2026-11-08",
           "by": "Main",
+          "text": "PortsLead-2 measured a cold fetch-toolchain before the fix at 135.6 s on its own s1. The c65 fresh run spent about 45 minutes in the same phase (17:10-17:55) under heavy machine load. The gap is unexplained: the per-file sync alone may not account for the 45 minutes."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
           "text": "Root cause of the 45-minute cold fetch-toolchain (c65 run 4df47ce6da, 17:10-17:55; PortsLead-2): AdmissionTransaction.publish_object → store_fsync_tree fsyncs every file and directory of the pack, about 1,900 journal commits at about 1.4 s each. Fix: write everything, one filesystem flush, then the publish rename. That needs a public Core function, because a Core  seam is reserved outside Core (Spellings.jet:13, Sema/Calls/Core.jet:514); ballot D-FS-SYNC1 (A: files.sync_filesystem, B: parallel fsync_tree, C: no API). Internal commit A (runtime syncfs export plus seam rows, no public surface) lands meanwhile; commit B (public function, store change, conformance case) waits on the ballot and the next seed."
         }
       ],
@@ -93342,8 +93352,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T05:33:07.839Z",
-      "updated": "2026-11-08T00:56:59.450Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-08T01:20:01.627Z",
+      "updatedBy": "owner",
       "criteriaLastN": 1
     },
     {
@@ -183619,55 +183629,66 @@
       "group": "conversions",
       "title": "What `Int{f}` means when f is a Float",
       "situation": "",
-      "gist": "Conversions are written `Type{value}`. Should that also turn a Float into an Int, and what happens to a fraction?",
-      "lesson": "`Type{value}` is already Jet's conversion form: `Float{n}`, `U8{n}`, `Int{I64{v}}`. The one gap is Float to Int, which today is an error that points to `Int.from_float(f)`. The choice is whether `Int{f}` works, and whether a fraction stops the program or is cut off.",
+      "gist": "What should `Int{f}` do with a Float, and how do experts pick the exact rounding and overflow behavior they need?",
+      "lesson": "Conversions are written `Type{value}`, and `Float{n}` already stops when the result would be inexact. Across languages and fields, the agreed practice is that the default never loses information silently. The rounding direction is always named. An out-of-range value stops, returns a value you can check, or saturates because you asked. Fields disagree on rounding (games want floor, statistics and money want ties-to-even, everyday arithmetic wants ties-away, audio and pixels want saturation), so no single silent default serves them all.",
       "explainer": "",
-      "story": "Ana has `pos: Float` and wants a list index. Today she writes `Int{pos}`, gets E0112, and has to learn `Int.from_float(pos) ?? 0`. Under the recommended option she writes `Int{math.trunc(pos)}` (or `math.round(pos)`), and `Int{pos}` alone works whenever pos holds a whole number.",
-      "inWild": "Rust `f as i64` truncates and saturates (NaN becomes 0). Python `int(3.7)` truncates and raises on NaN. Swift `Int(3.7)` truncates and traps on NaN or infinity; `Int(exactly: 3.5)` returns nil. Go `int(f)` truncates and is undefined out of range.",
-      "detail": "Today `Int{decimal}` is E0112 when decimal is a Float (D-DOTCTOR3 amendment, syntax-decisions.md:1236). `Int.from_float(f)` truncates toward zero and returns None for NaN, infinity or a value outside Int. `math.round(f)` rounds to nearest. The reverse direction already converts with `Type{value}`: `Float{n}` stops with E3010 when the Int has no exact Float.\n\nOption A makes `Int{f}` exact, the mirror of `Float{n}`. A whole number in range converts; NaN, infinity, a fraction or an out-of-range value stops the program. A literal body is checked at compile time: `Int{3.0}` is 3 and `Int{3.5}` is an error. To cut a fraction, say so: `Int{math.trunc(f)}`, `Int{math.floor(f)}` or `math.round(f)`. `Int.from_float(f)` stays for code that must recover.\n\nOption B keeps today's rule.\n\nOption C makes `Int{f}` truncate toward zero like Python, Swift and Rust, stopping only on NaN, infinity or out of range.\n\nNo option changes `Float{n}`, the integer heads `U8{n}` and `I64{n}`, or `F32{f}`. Under A and C, `I64{f}`, `U8{f}` and the other integer heads follow the same rule as `Int{f}`.",
+      "story": "Ana has `pos: Float` and wants a list index. She writes `Int{pos}`; when pos is 2.0 she gets 2, and when it is 2.5 the program stops. The message offers `math.floor`, `math.trunc`, `math.ceil`, `math.round` and `math.round_even`. She picks `Int{math.floor(pos)}`.\n\nBen writes an audio mixer and wants out-of-range samples clipped, never a stop: he writes `I16.saturating_from(sample * 32767.0)`. Chen totals invoice lines and writes `math.round_even(cents)`, the rounding accountants and IEEE 754 use.",
+      "inWild": "IEEE 754-2019 section 5.8 defines one float-to-integer conversion per rounding direction: toward zero, down, up, nearest-even and nearest-away. Each signals invalid operation on NaN, infinity or out of range, never a silent value (https://standards.ieee.org/ieee/754/6210/).\n\nJulia: `Int(2.5)` throws InexactError and `Int(2.0)` is 2. Rounding is named: `trunc(Int, x)`, `floor(Int, x)`, `ceil(Int, x)` and `round(Int, x)`. `round` is ties-to-even unless a RoundingMode says otherwise, and out of range throws (https://docs.julialang.org/en/v1/manual/mathematical-operations/#Rounding-functions). This is option A's design.\n\nSwift: `Int(3.7)` truncates and traps on NaN, infinity or out of range. `Int(exactly: 3.5)` is nil. `x.rounded(.toNearestOrEven)` names any of six rounding rules (https://developer.apple.com/documentation/swift/floatingpointroundingrule).\n\nRust: `f as i64` truncates and saturates, and NaN becomes 0; before 1.45 it was undefined behavior. `to_int_unchecked` is the unsafe fast form. `round_ties_even` arrived in 1.77, because `round` is ties-away (https://doc.rust-lang.org/reference/expressions/operator-expr.html#numeric-cast). Java and Kotlin `toInt()` also truncate and saturate with NaN as 0.\n\nPython `int(3.7)` truncates and raises on NaN and infinity. Its `round()` is ties-to-even. NumPy, R and C# `Math.Round` also default to ties-to-even. Go `int(f)` truncates and is implementation-defined out of range.",
+      "detail": "WHAT A INCLUDES\n\n1. `Int{f}` is exact. A whole, finite Float inside Int converts; a fraction, NaN, infinity or an out-of-range value stops the program with a registered error naming each rounding function. A literal body is checked at compile time: `Int{3.0}` is 3, `Int{3.5}` is an error.\n\n2. Every rounding direction is named. `Int{math.trunc(f)}`, `Int{math.floor(f)}` and `Int{math.ceil(f)}` use the existing Float functions. `math.round(f) -> Int` keeps ties-away-from-zero (2.5 is 3, -2.5 is -3). New `math.round_even(f) -> Int` rounds ties to even (2.5 is 2, 3.5 is 4), the IEEE 754 default used by statistics and money.\n\n3. `math.round` stops on NaN, infinity or an out-of-range value. Today it returns 0 for NaN and silently clamps, which breaks the rule in item 1. `math.round_even` behaves the same way.\n\n4. The recoverable form stays: `Int.from_float(f)` truncates and returns None on NaN, infinity or out of range.\n\n5. Saturation is an explicit opt-in. New `Int.saturating_from(f)` truncates toward zero, clamps to the type's range and maps NaN to 0, and never stops. Every integer head has it: `U8.saturating_from(f)` for a pixel, `I16.saturating_from(f)` for an audio sample.\n\n6. Cost. `Int{math.floor(f)}` must compile to the CPU's round and convert instructions plus one range check, and the check disappears when the optimizer proves the range. That is why no unchecked `#Unsafe` form is proposed: the check costs one compare.\n\n7. `I64{f}`, `U8{f}` and the other integer heads follow the same rules as `Int{f}`. `Float{n}`, `F32{f}` and integer-to-integer heads do not change.\n\nBEGINNER PATH: `Int{f}`, and the stop message teaches the named roundings. EXPERT PATH: pick the exact rounding (`trunc`, `floor`, `ceil`, `round`, `round_even`) and the exact failure handling (stop with `Int{...}`, None with `from_float`, clamp with `saturating_from`).\n\nEDGE CASES: -0.0 converts to 0. 9223372036854775807.0 is out of range, because the nearest Float is 2^63. A subnormal is not whole, so it stops unless it is rounded first.",
       "options": [
         {
           "key": "A",
-          "name": "Exact: Int{f} needs a whole number",
-          "detail": "`Int{f}` converts a whole-number Float and stops the program on a fraction, NaN, infinity or a value outside Int. Truncation and rounding are written out. `Int.from_float(f)` stays for the recoverable case.",
-          "code": "pos: Float{2.0}\nlo: Int{pos}                // 2; Int{2.5} would stop\ncut: Int{math.trunc(2.7)}   // 2\nn: math.round(2.5)          // 3"
+          "name": "Exact by default, every rounding and overflow behavior named",
+          "detail": "`Int{f}` converts a whole number and stops otherwise. trunc, floor, ceil, round (ties away) and round_even (ties to even) pick the rounding. `from_float` returns None and `saturating_from` clamps. `math.round` stops on NaN and out of range instead of returning 0 or clamping.",
+          "code": "idx: Int{pos}                  // 2.0 -> 2; 2.5 stops\ncell: Int{math.floor(-2.5)}    // -3\ncents: math.round_even(2.5)    // 2\nsample: I16.saturating_from(4.0e4)  // 32767\nmaybe: Int.from_float(pos) ?? 0"
         },
         {
           "key": "B",
-          "name": "Keep: Int{f} is an error",
-          "detail": "A Float never converts through `Int{...}`. Write `Int.from_float(f) ?? fallback` to truncate, or `math.round(f)`.",
-          "code": "pos: Float{2.0}\nlo: Int.from_float(pos) ?? 0\nn: math.round(pos)"
+          "name": "Truncate and stop (Swift, Python)",
+          "detail": "`Int{f}` truncates toward zero and stops only on NaN, infinity or a value outside Int.",
+          "code": "idx: Int{2.7}    // 2\nneg: Int{-2.7}   // -2"
         },
         {
           "key": "C",
-          "name": "Truncate: Int{f} drops the fraction",
-          "detail": "`Int{f}` truncates toward zero and stops only on NaN, infinity or a value outside Int.",
-          "code": "lo: Int{2.7}    // 2\nneg: Int{-2.7}  // -2"
+          "name": "Truncate and saturate, never stop (Rust `as`, Java, Kotlin)",
+          "detail": "`Int{f}` truncates toward zero, clamps to the type's range and maps NaN to 0. It never stops.",
+          "code": "idx: Int{2.7}       // 2\nbig: Int{1.0e30}    // 9223372036854775807\nnan: Int{math.NAN}  // 0"
         }
       ],
       "comparisons": [],
       "rec": "A",
       "recommendation": {
-        "why": "It gives the spelling you expected, `Int{f}`, and mirrors the rule Jet already has for `Float{n}`: a conversion is exact or it stops. A fraction is never lost without the code saying so.",
-        "tradeoff": "A fraction is caught at run time, not at check time, because the checker cannot know whether a Float value is whole. A literal body is still checked at compile time.",
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "Every other scalar conversion is `Type{value}`; Float to Int is the one exception, and it is the one beginners reach for first."
-          },
-          {
-            "key": "C",
-            "reason": "Silent truncation is a classic bug: `Int{-0.5}` is 0 and `Int{2.9999}` is 2 with no sign that a fraction was dropped. Jet's `Float{n}` already refuses inexact results."
-          }
+        "rec": "A",
+        "why": "It is the shared best practice: the default never loses information silently, as in IEEE 754, Julia and Jet's own `Float{n}`. Fields disagree on rounding and overflow, so each choice is named instead of guessed. Beginners get the short spelling with a teaching stop; experts get each IEEE rounding direction and each failure style explicitly.",
+        "tradeoff": "A fraction is caught when the program runs, not at check time, because the checker cannot know whether a Float value is whole. Literal bodies are still checked at compile time.",
+        "gains": [
+          "`Int{f}` works, with the same rule as `Float{n}`.",
+          "Every rounding a field needs is one named call, including ties-to-even, which Jet lacks today.",
+          "Audio, pixel and sensor code gets saturation explicitly, without a stop.",
+          "`math.round` no longer turns NaN into 0 silently."
         ],
         "losses": [
           {
             "loss": "Code that wants truncation writes `Int{math.trunc(f)}` instead of a bare `Int{f}`.",
-            "mitigation": "The stop message names `math.trunc`, `math.floor` and `math.round`, and `jet fix` offers each one."
+            "mitigation": "The stop message names each rounding, and `jet fix` offers them."
           },
           {
-            "loss": "Two forms remain: `Int{f}` stops, `Int.from_float(f)` returns None.",
-            "mitigation": "They differ in failure handling, the same way an indexing stop differs from `.get()`. Beginners use `Int{f}`; recovery code uses `from_float`."
+            "loss": "Three failure styles exist: stop, None and clamp.",
+            "mitigation": "They differ only in failure handling, like indexing versus `.get()`. Beginners meet only `Int{f}`."
+          },
+          {
+            "loss": "`math.round` stopping on NaN changes current behavior.",
+            "mitigation": "Every in-repository caller is migrated in the same cutover; code that wants a fallback writes `Int.from_float`."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Silent truncation is a classic bug: `Int{-0.5}` is 0 and `Int{2.9999}` is 2, with no sign a fraction was dropped. Games also need floor, not truncation, for negative coordinates."
+          },
+          {
+            "key": "C",
+            "reason": "Silent clamping and NaN as 0 turn bad data into plausible numbers; Rust kept `as` only for compatibility and added explicit forms. Saturation belongs to the code that asks for it, which A gives as `saturating_from`."
           }
         ]
       },
@@ -183678,86 +183699,87 @@
       "reviewPasses": null,
       "checkInstructions": null,
       "surface": {
-        "gist": "Should `Int{f}` turn a Float into an Int, and what happens to a fraction?",
-        "lesson": "`Type{value}` already converts numbers. Float to Int is the one gap.",
+        "gist": "What should `Int{f}` do, and how do experts pick the exact rounding and overflow?",
+        "lesson": "Best practice everywhere: never lose information silently, and name the rounding, because fields disagree.",
         "trio": {
           "current": {
-            "note": "Today Int{f} is an error; from_float truncates and returns None on NaN or overflow.",
+            "note": "Today Int{f} is an error; from_float truncates and returns None; math.round turns NaN into 0 and clamps.",
             "code": "lo: Int{pos}                  // E0112\nlo: Int.from_float(pos) ?? 0  // works"
           },
           "wild": {
-            "lang": "Swift",
-            "note": "Swift truncates by default and offers an exact form.",
-            "code": "Int(3.7)          // 3\nInt(exactly: 3.5) // nil"
+            "lang": "Julia",
+            "note": "Julia's `Int(x)` is exact; every rounding is named.",
+            "code": "Int(2.0)          # 2\nInt(2.5)          # InexactError\nfloor(Int, -2.5)  # -3\nround(Int, 2.5)   # 2 (ties to even)"
           }
         },
         "options": [
           {
             "key": "A",
-            "name": "Exact or stop",
-            "gist": "Int{f} works for whole numbers and stops on a fraction.",
+            "name": "Exact default, named control",
+            "gist": "Int{f} is exact; trunc, floor, ceil, round, round_even and saturating_from give experts each behavior.",
             "gains": [
               "Your spelling",
-              "Never drops a fraction silently",
-              "Mirrors Float{n}"
+              "Never loses a fraction silently",
+              "Ties-to-even and saturation available"
             ],
             "losses": [
               "Fractions are caught at run time"
             ],
             "proposed": {
-              "code": "lo: Int{pos}\ncut: Int{math.trunc(pos)}"
+              "code": "idx: Int{pos}\ncell: Int{math.floor(x)}\ncents: math.round_even(c)\ns: I16.saturating_from(v)"
             }
           },
           {
             "key": "B",
-            "name": "Keep the error",
-            "gist": "Int{f} is E0112; use Int.from_float.",
-            "gains": [
-              "No change"
-            ],
-            "losses": [
-              "The one conversion that is not Type{value}"
-            ],
-            "proposed": {
-              "code": "lo: Int.from_float(pos) ?? 0"
-            }
-          },
-          {
-            "key": "C",
             "name": "Truncate",
-            "gist": "Int{f} drops the fraction.",
+            "gist": "Int{f} drops the fraction, stops on NaN.",
             "gains": [
-              "Shortest"
+              "Short"
             ],
             "losses": [
               "Silent loss of the fraction"
             ],
             "proposed": {
-              "code": "lo: Int{2.7}  // 2"
+              "code": "idx: Int{2.7}  // 2"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Saturate",
+            "gist": "Int{f} truncates and clamps; NaN is 0; never stops.",
+            "gains": [
+              "Never stops"
+            ],
+            "losses": [
+              "Bad data becomes plausible numbers"
+            ],
+            "proposed": {
+              "code": "nan: Int{math.NAN}  // 0"
             }
           }
         ],
         "recommendation": {
           "rec": "A",
-          "why": "Your spelling, and nothing is lost without the code saying so.",
+          "why": "The default never loses information, and every field's rounding and overflow is one named call.",
           "gains": [
             "Int{f} works",
-            "Matches Float{n}"
+            "Matches Float{n}",
+            "Experts control rounding and overflow exactly"
           ],
           "losses": [
             {
               "loss": "Truncation is written out.",
-              "mitigation": "The stop message and jet fix offer trunc, floor and round."
+              "mitigation": "The stop message and jet fix offer each rounding."
             }
           ],
           "whyNot": [
             {
               "key": "B",
-              "reason": "Keeps the one exception to Type{value}."
+              "reason": "Drops fractions silently."
             },
             {
               "key": "C",
-              "reason": "Drops fractions silently."
+              "reason": "Turns NaN and overflow into plausible numbers."
             }
           ],
           "tradeoff": "Fractions are caught when the program runs, not at check time."
@@ -184189,8 +184211,10 @@
         }
       },
       "draft": false,
-      "status": "open",
-      "created": "2026-11-08T00:56:50.121Z"
+      "status": "ratified",
+      "created": "2026-11-08T00:56:50.121Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-08"
     }
   ],
   "questions": [
@@ -187246,6 +187270,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-08T01:25:02.053Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-FLOAT-INT1",
+      "note": ""
+    },
+    {
+      "at": "2026-11-08T01:20:01.627Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-FS-SYNC1",
+      "note": "A"
+    },
+    {
+      "at": "2026-11-08T01:00:44.461Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0g93joj",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-08T01:00:43.374Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0qe89cl",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-08T00:56:59.450Z",
       "by": "Main",
