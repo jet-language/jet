@@ -1,0 +1,33 @@
+parse_count: fn(text: String) -> Int Err! {
+    n: Int.parse(text) ?? return Err("not a count: {text}")
+    return Ok(n)
+}
+
+failure_text: fn(error: TaskFailure) -> String {
+    if error == {
+        .Panicked(reason) -> return "panicked: {reason}"
+        .DeadlineBlown -> return "deadline"
+        .Cancelled -> return "cancelled"
+    }
+}
+
+reported: fn(error: TaskFailure) -> Int {
+    print(failure_text(error))
+    return -1
+}
+
+run: fn() {
+    // A Unit body: the failure leaves it at its first statement.
+    worker: task {
+        n: parse_count("seven")
+        print("worker counted {n}")
+    }
+    worker.join() ?? print(failure_text(err))
+    // A valued body: the failure leaves it before it has a value.
+    valued: task { parse_count("8") + parse_count("nine") }
+    total: valued.join() ?? reported(err)
+    print("total {total}")
+    // A body whose calls succeed joins with its value.
+    fine: task { parse_count("4") + parse_count("5") }
+    print("fine {fine.join() ?? -1}")
+}

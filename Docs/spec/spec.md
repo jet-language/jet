@@ -2664,7 +2664,9 @@ and `freeze_capture.out`; UI fixtures are
 `handle.join()` consumes a task handle and returns `T !TaskFailure`. Calling
 `join()` twice is **E0121**. Dropping a bound `Task` without joining, using its
 result, or detaching it is the compile error **L1101**. A failure is `.Panicked(reason)`,
-`.Cancelled`, or `.DeadlineBlown`.
+`.Cancelled`, or `.DeadlineBlown`. An error that leaves a task body whose element
+is not a `Result` or `Option` stops the task as a panic does: its join reports
+`.Panicked(reason)` with the error's text.
 
 `handle.detach()` consumes the handle and lets the task run in the background;
 it suppresses **L1101**. Detach is sound only when the child owns all data it
