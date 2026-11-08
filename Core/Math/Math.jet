@@ -82,44 +82,276 @@ exp: fn(n: Float) -> Float Never! { core.math.exp(n) }
 exp2: fn(n: Float) -> Float Never! { core.math.exp2(n) }
 exp_m1: fn(n: Float) -> Float Never! { core.math.exp_m1(n) }
 expm1: fn(n: Float) -> Float Never! { exp_m1(n) }
-/// Abramowitz & Stegun 7.1.26, retaining the runtime polynomial and operation order.
+/// erf.c from musl 1.2.5: erf of |x| below 0.84375 is x + x*R(x^2); from
+/// there to 28 the erfc fits below (__erfc1, __erfc2) carry it, so every bit
+/// matches musl.
 erf: fn(n: Float) -> Float Never! {
-    if is_nan(n) -> return NAN
-    if is_inf(n) -> return signum(n)
-    sign := Float{1.0}
-    if n < 0.0 -> sign = -1.0
-    magnitude: fabs(n)
-    t: Float{1.0} / (Float{1.0} + Float{0.3275911} * magnitude)
-    polynomial: t * (Float{0.254829592} + t * (-Float{0.284496736} + t * (Float{1.421413741} + t * (-Float{1.453152027} + t * Float{1.061405429}))))
-    sign * (Float{1.0} - polynomial * exp(-magnitude * magnitude))
+    bits: to_bits(n)
+    negative: bits < 0
+    ix: (bits >> 32).bit_and(2147483647)
+    // erf(nan) = nan, erf(+-inf) = +-1
+    if ix >= 2146435072 -> return (if negative -> -Float{1.0} else -> Float{1.0}) + Float{1.0} / n
+    if ix < 1072365568 {
+        // |x| < 2^-28: avoid underflow
+        if ix < 1043333120 -> return Float{0.125} * (Float{8.0} * n + Float{1.0270333367641007} * n)
+        z: n * n
+        r: Float{0.12837916709551256} + z * (Float{-0.3250421072470015} + z * (Float{-0.02848174957559851} + z * (Float{-0.005770270296489442} + z * Float{-0.000023763016656650163})))
+        s: Float{1.0} + z * (Float{0.39791722395915535} + z * (Float{0.0650222499887673} + z * (Float{0.005081306281875766} + z * (Float{0.00013249473800432164} + z * Float{-0.000003960228278775368}))))
+        return n + n * (r / s)
+    }
+    // 0.84375 <= |x| < 6
+    y: if ix < 1075314688 -> Float{1.0} - __erfc2(ix, n) else -> Float{1.0} - Float{2.2250738585072014e-308}
+    if negative -> -y else -> y
 }
-erfc: fn(n: Float) -> Float Never! { 1.0 - erf(n) }
+/// erfc.c from musl 1.2.5, sharing erf's fits.
+erfc: fn(n: Float) -> Float Never! {
+    bits: to_bits(n)
+    negative: bits < 0
+    ix: (bits >> 32).bit_and(2147483647)
+    // erfc(nan) = nan, erfc(+-inf) = 0, 2
+    if ix >= 2146435072 -> return (if negative -> Float{2.0} else -> Float{0.0}) + Float{1.0} / n
+    if ix < 1072365568 {
+        // |x| < 2^-56
+        if ix < 1013972992 -> return Float{1.0} - n
+        z: n * n
+        r: Float{0.12837916709551256} + z * (Float{-0.3250421072470015} + z * (Float{-0.02848174957559851} + z * (Float{-0.005770270296489442} + z * Float{-0.000023763016656650163})))
+        s: Float{1.0} + z * (Float{0.39791722395915535} + z * (Float{0.0650222499887673} + z * (Float{0.005081306281875766} + z * (Float{0.00013249473800432164} + z * Float{-0.000003960228278775368}))))
+        y: r / s
+        // x < 1/4
+        if negative || ix < 1070596096 -> return Float{1.0} - (n + n * y)
+        return Float{0.5} - (n - Float{0.5} + n * y)
+    }
+    // 0.84375 <= |x| < 28
+    if ix < 1077673984 -> return if negative -> Float{2.0} - __erfc2(ix, n) else -> __erfc2(ix, n)
+    if negative -> Float{2.0} - Float{2.2250738585072014e-308} else -> Float{2.2250738585072014e-308} * Float{2.2250738585072014e-308}
+}
+// musl erf.c erfc1(): erfc on [0.84375, 1.25].
+__erfc1: fn(x: Float) -> Float Never! {
+    s: fabs(x) - Float{1.0}
+    p: Float{-0.0023621185607526594} + s * (Float{0.41485611868374833} + s * (Float{-0.3722078760357013} + s * (Float{0.31834661990116175} + s * (Float{-0.11089469428239668} + s * (Float{0.035478304325618236} + s * Float{-0.002166375594868791})))))
+    q: Float{1.0} + s * (Float{0.10642088040084423} + s * (Float{0.540397917702171} + s * (Float{0.07182865441419627} + s * (Float{0.12617121980876164} + s * (Float{0.01363708391202905} + s * Float{0.011984499846799107})))))
+    Float{1.0} - Float{0.8450629115104675} - p / q
+}
+// musl erf.c erfc2(): erfc on [0.84375, 28); ix is the high word of |x|.
+__erfc2: fn(ix: Int, n: Float) -> Float Never! {
+    // |x| < 1.25
+    if ix < 1072955392 -> return __erfc1(n)
+    x: fabs(n)
+    s: Float{1.0} / (x * x)
+    r := Float{0.0}
+    q := Float{0.0}
+    if ix < 1074191213 {
+        // |x| < 1/.35 ~ 2.85714
+        r = Float{-0.009864944034847148} + s * (Float{-0.6938585727071818} + s * (Float{-10.558626225323291} + s * (Float{-62.375332450326006} + s * (Float{-162.39666946257347} + s * (Float{-184.60509290671104} + s * (Float{-81.2874355063066} + s * Float{-9.814329344169145}))))))
+        q = Float{1.0} + s * (Float{19.651271667439257} + s * (Float{137.65775414351904} + s * (Float{434.56587747522923} + s * (Float{645.3872717332679} + s * (Float{429.00814002756783} + s * (Float{108.63500554177944} + s * (Float{6.570249770319282} + s * Float{-0.0604244152148581})))))))
+    } else {
+        // |x| > 1/.35
+        r = Float{-0.0098649429247001} + s * (Float{-0.799283237680523} + s * (Float{-17.757954917754752} + s * (Float{-160.63638485582192} + s * (Float{-637.5664433683896} + s * (Float{-1025.0951316110772} + s * Float{-483.5191916086514})))))
+        q = Float{1.0} + s * (Float{30.33806074348246} + s * (Float{325.7925129965739} + s * (Float{1536.729586084437} + s * (Float{3199.8582195085955} + s * (Float{2553.0504064331644} + s * (Float{474.52854120695537} + s * Float{-22.44095244658582}))))))
+    }
+    // x with its low 32 bits cleared
+    z: from_bits(to_bits(x) - to_bits(x).bit_and(4294967295))
+    exp(-z * z - Float{0.5625}) * exp((z - x) * (z + x) + r / q) / x
+}
+/// tgamma.c from musl 1.2.5: Lanczos approximation with g = 6.0246800407767296,
+/// the error of x + g - 0.5 carried separately, exact factorials for small
+/// whole arguments and the reflection formula below zero.
+gamma: fn(n: Float) -> Float Never! {
+    bits: to_bits(n)
+    negative: bits < 0
+    ix: (bits >> 32).bit_and(2147483647)
+    // gamma(nan) = nan, gamma(inf) = inf, gamma(-inf) = nan
+    if ix >= 2146435072 -> return n + INFINITY
+    // |x| < 2^-54: gamma(x) ~ 1/x
+    if ix < 1016070144 -> return Float{1.0} / n
+    if n == floor(n) {
+        if negative -> return Float{0.0} / Float{0.0}
+        if (n <= Float{23.0}) -> return __GAMMA_FACTORIALS[(Int.from_float(n) ?? 1) - 1]
+    }
+    // x >= 184: inf with overflow; x <= -184: +-0 with underflow
+    if ix >= 1080492032 {
+        if negative {
+            if (floor(n) * Float{0.5} == floor(n * Float{0.5})) -> return Float{0.0}
+            return -Float{0.0}
+        }
+        return n * Float{8.98846567431158e+307}
+    }
+    absx: if negative -> -n else -> n
+    // the error of x + g - 0.5
+    y: absx + Float{5.52468004077673}
+    dy := Float{0.0}
+    if (absx > Float{5.52468004077673}) {
+        dy = y - absx
+        dy = dy - Float{5.52468004077673}
+    } else {
+        dy = y - Float{5.52468004077673}
+        dy = dy - absx
+    }
+    z := absx - Float{0.5}
+    r := __gamma_lanczos(absx) * exp(-y)
+    if (n < Float{0.0}) {
+        // reflection; sin(pi*x) is not 0, whole arguments returned above
+        r = -PI / (__sin_pi(absx) * absx * r)
+        dy = -dy
+        z = -z
+    }
+    r = r + dy * (Float{5.52468004077673} + Float{0.5}) * r / y
+    power: y.pow(Float{0.5} * z)
+    r * power * power
+}
+// musl tgamma.c S(): the Lanczos rational function for positive x, evaluated
+// in 1/x from 8 up so it cannot overflow.
+__gamma_lanczos: fn(x: Float) -> Float Never! {
+    numerator := Float{0.0}
+    denominator := Float{0.0}
+    if (x < Float{8.0}) {
+        i := 12
+        loop i >= 0 {
+            numerator = numerator * x + __GAMMA_NUMERATOR[i]
+            denominator = denominator * x + __GAMMA_DENOMINATOR[i]
+            i = i - 1
+        }
+    } else {
+        loop i in 0..<13 {
+            numerator = numerator / x + __GAMMA_NUMERATOR[i]
+            denominator = denominator / x + __GAMMA_DENOMINATOR[i]
+        }
+    }
+    numerator / denominator
+}
+__GAMMA_NUMERATOR: [Float]{23531376880.41076, 42919803642.6491, 35711959237.35567, 17921034426.03721, 6039542586.352028, 1439720407.3117216, 248874557.86205417, 31426415.585400194, 2876370.6289353725, 186056.26539522348, 8071.672002365816, 210.82427775157936, 2.5066282746310002}
+__GAMMA_DENOMINATOR: [Float]{0.0, 39916800.0, 120543840.0, 150917976.0, 105258076.0, 45995730.0, 13339535.0, 2637558.0, 357423.0, 32670.0, 1925.0, 66.0, 1.0}
+// n! for 1 <= n <= 23, gamma(n + 1).
+__GAMMA_FACTORIALS: [Float]{1.0, 1.0, 2.0, 6.0, 24.0, 120.0, 720.0, 5040.0, 40320.0, 362880.0, 3628800.0, 39916800.0, 479001600.0, 6227020800.0, 87178291200.0, 1307674368000.0, 20922789888000.0, 355687428096000.0, 6402373705728000.0, 121645100408832000.0, 2432902008176640000.0, 51090942171709440000.0, 1.1240007277776077e+21}
+// sin(pi * x) for x > 2^-100 (musl tgamma.c sinpi(), lgamma_r.c sin_pi()):
+// x mod 2 reduced into [-1/4, 1/4] around a multiple of 1/2, then the
+// __sin.c and __cos.c kernels.
+__sin_pi: fn(n: Float) -> Float Never! {
+    x := Float{2.0} * (n * Float{0.5} - floor(n * Float{0.5}))
+    quadrant := Int.from_float(trunc(Float{4.0} * x)) ?? 0
+    quadrant = (quadrant + 1) /% 2
+    x = (x - Float{quadrant} * Float{0.5}) * PI
+    if quadrant == 1 -> return __kernel_cos(x)
+    if quadrant == 2 -> return __kernel_sin(-x)
+    if quadrant == 3 -> return -__kernel_cos(x)
+    __kernel_sin(x)
+}
+// musl __sin.c with no tail: sin on [-pi/4, pi/4].
+__kernel_sin: fn(x: Float) -> Float Never! {
+    z: x * x
+    w: z * z
+    r: Float{0.00833333333332249} + z * (Float{-0.0001984126982985795} + z * Float{0.0000027557313707070068}) + z * w * (Float{-2.5050760253406863e-8} + z * Float{1.58969099521155e-10})
+    x + z * x * (Float{-0.16666666666666632} + z * r)
+}
+// musl __cos.c with no tail: cos on [-pi/4, pi/4].
+__kernel_cos: fn(x: Float) -> Float Never! {
+    z: x * x
+    w: z * z
+    r: z * (Float{0.0416666666666666} + z * (Float{-0.001388888888887411} + z * Float{0.00002480158728947673})) + w * w * (Float{-2.7557314351390663e-7} + z * (Float{2.087572321298175e-9} + z * Float{-1.1359647557788195e-11}))
+    hz: Float{0.5} * z
+    one_minus: Float{1.0} - hz
+    one_minus + (((Float{1.0} - one_minus) - hz) + z * r)
+}
+/// lgamma_r.c from musl 1.2.5: ln|gamma(x)|, by rational fits on [0, 2),
+/// recurrence on [2, 8), Stirling's series above, reflection below zero.
+lgamma: fn(n: Float) -> Float Never! {
+    bits: to_bits(n)
+    negative: bits < 0
+    ix: (bits >> 32).bit_and(2147483647)
+    if ix >= 2146435072 -> return n * n
+    // |x| < 2^-70: -ln|x|
+    if ix < 999292928 -> return if negative -> -ln(-n) else -> -ln(n)
+    x: if negative -> -n else -> n
+    reflection := Float{0.0}
+    if negative {
+        t := __sin_pi(x)
+        // a negative whole number
+        if (t == Float{0.0}) -> return Float{1.0} / (x - x)
+        if (!(t > Float{0.0})) -> t = -t
+        reflection = ln(PI / (t * x))
+    }
+    r := Float{0.0}
+    if (ix == 1072693248 || ix == 1073741824) && bits.bit_and(4294967295) == 0 {
+        // lgamma(1) = lgamma(2) = 0
+        r = Float{0.0}
+    } else if ix < 1073741824 {
+        // x < 2
+        y := Float{0.0}
+        fit := 0
+        if ix <= 1072483532 {
+            // lgamma(x) = lgamma(x + 1) - ln(x)
+            r = -ln(x)
+            if ix >= 1072130372 {
+                y = Float{1.0} - x
+            } else if ix >= 1070442081 {
+                y = x - (Float{1.4616321449683622} - Float{1.0})
+                fit = 1
+            } else {
+                y = x
+                fit = 2
+            }
+        } else if ix >= 1073460419 {
+            // [1.7316, 2]
+            y = Float{2.0} - x
+        } else if ix >= 1072936132 {
+            // [1.23, 1.73]
+            y = x - Float{1.4616321449683622}
+            fit = 1
+        } else {
+            y = x - Float{1.0}
+            fit = 2
+        }
+        if fit == 0 {
+            z: y * y
+            p1: Float{0.07721566490153287} + z * (Float{0.06735230105312927} + z * (Float{0.007385550860814029} + z * (Float{0.0011927076318336207} + z * (Float{0.00022086279071390839} + z * Float{0.000025214456545125733}))))
+            p2: z * (Float{0.3224670334241136} + z * (Float{0.020580808432516733} + z * (Float{0.0028905138367341563} + z * (Float{0.0005100697921535113} + z * (Float{0.00010801156724758394} + z * Float{0.000044864094961891516})))))
+            p: y * p1 + p2
+            r = r + (p - Float{0.5} * y)
+        } else if fit == 1 {
+            z: y * y
+            w: z * y
+            p1: Float{0.48383612272381005} + w * (Float{-0.032788541075985965} + w * (Float{0.006100538702462913} + w * (Float{-0.0014034646998923284} + w * Float{0.00031563207090362595})))
+            p2: Float{-0.1475877229945939} + w * (Float{0.01797067508118204} + w * (Float{-0.0036845201678113826} + w * (Float{0.000881081882437654} + w * Float{-0.00031275416837512086})))
+            p3: Float{0.06462494023913339} + w * (Float{-0.010314224129834144} + w * (Float{0.0022596478090061247} + w * (Float{-0.0005385953053567405} + w * Float{0.0003355291926355191})))
+            p: z * p1 - (Float{-3.638676997039505e-18} - w * (p2 + y * p3))
+            r = r + (Float{-0.12148629053584961} + p)
+        } else {
+            p1: y * (Float{-0.07721566490153287} + y * (Float{0.6328270640250934} + y * (Float{1.4549225013723477} + y * (Float{0.9777175279633727} + y * (Float{0.22896372806469245} + y * Float{0.013381091853678766})))))
+            p2: Float{1.0} + y * (Float{2.4559779371304113} + y * (Float{2.128489763798934} + y * (Float{0.7692851504566728} + y * (Float{0.10422264559336913} + y * Float{0.003217092422824239}))))
+            r = r + (-Float{0.5} * y + p1 / p2)
+        }
+    } else if ix < 1075838976 {
+        // 2 <= x < 8: lgamma(1 + s) = ln(s) + lgamma(s)
+        whole: Int.from_float(trunc(x)) ?? 2
+        y: x - Float{whole}
+        p: y * (Float{-0.07721566490153287} + y * (Float{0.21498241596060885} + y * (Float{0.325778796408931} + y * (Float{0.14635047265246445} + y * (Float{0.02664227030336386} + y * (Float{0.0018402845140733772} + y * Float{0.00003194753265841009}))))))
+        q: Float{1.0} + y * (Float{1.3920053346762105} + y * (Float{0.7219355475671381} + y * (Float{0.17193386563280308} + y * (Float{0.01864591917156529} + y * (Float{0.0007779424963818936} + y * Float{0.000007326684307446256})))))
+        r = Float{0.5} * y + p / q
+        z := Float{1.0}
+        if whole >= 7 -> z = z * (y + Float{6.0})
+        if whole >= 6 -> z = z * (y + Float{5.0})
+        if whole >= 5 -> z = z * (y + Float{4.0})
+        if whole >= 4 -> z = z * (y + Float{3.0})
+        if whole >= 3 {
+            z = z * (y + Float{2.0})
+            r = r + ln(z)
+        }
+    } else if ix < 1133510656 {
+        // 8 <= x < 2^58
+        t: ln(x)
+        z: Float{1.0} / x
+        y: z * z
+        w: Float{0.4189385332046727} + z * (Float{0.08333333333333297} + y * (Float{-0.0027777777772877554} + y * (Float{0.0007936505586430196} + y * (Float{-0.00059518755745034} + y * (Float{0.0008363399189962821} + y * Float{-0.0016309293409657527})))))
+        r = (x - Float{0.5}) * (t - Float{1.0}) + w
+    } else {
+        r = x * (ln(x) - Float{1.0})
+    }
+    if negative -> r = reflection - r
+    r
+}
 floor: fn(n: Float) -> Float Never! { core.math.floor(n) }
 ceil: fn(n: Float) -> Float Never! { core.math.ceil(n) }
 fract: fn(n: Float) -> Float Never! { n - trunc(n) }
-/// Lanczos g=7, n=9, reflected below one half.
-gamma: fn(n: Float) -> Float Never! {
-    if is_nan(n) -> return NAN
-    if n <= 0.0 && n == floor(n) -> return NAN
-    if n < 0.5 -> return PI / (sin(PI * n) * gamma(1.0 - n))
-    z: n - 1.0
-    accumulator := Float{0.99999999999980993}
-    accumulator = accumulator + Float{676.5203681218851} / (z + 1.0)
-    accumulator = accumulator + -Float{1259.1392167224028} / (z + 2.0)
-    accumulator = accumulator + Float{771.32342877765313} / (z + 3.0)
-    accumulator = accumulator + -Float{176.61502916214059} / (z + 4.0)
-    accumulator = accumulator + Float{12.507343278686905} / (z + 5.0)
-    accumulator = accumulator + -Float{0.13857109526572012} / (z + 6.0)
-    accumulator = accumulator + Float{9.984369654078991e-6} / (z + 7.0)
-    accumulator = accumulator + Float{1.5056327351493116e-7} / (z + 8.0)
-    t: z + 7.0 + 0.5
-    sqrt(2.0 * PI) * t.pow(z + 0.5) * exp(-t) * accumulator
-}
-lgamma: fn(n: Float) -> Float Never! {
-    value: gamma(n)
-    if is_nan(value) || value <= 0.0 -> return NAN
-    ln(value)
-}
 hypot: fn(a: Float, b: Float) -> Float Never! { core.math.hypot(a, b) }
 ln: fn(n: Float) -> Float Never! { core.math.ln(n) }
 ln_1p: fn(n: Float) -> Float Never! { core.math.ln_1p(n) }
@@ -637,12 +869,17 @@ copy: fn(n: Float) -> Float Never! { n }
     assert_eq((Int{3}).bit_xor(5), 6)
 }
 
-#Test("math special functions retain their approximation") {
+#Test("math special functions match musl") {
     assert_eq(erf(INFINITY), 1.0)
     assert_eq(erf(-INFINITY), -1.0)
-    assert(is_nan(gamma(0.0)))
-    assert(isclose(gamma(5.0), 24.0, 0.000000000001, 0.0))
-    assert(isclose(erfc(1.0), 1.0 - erf(1.0), 0.0, 0.0))
+    assert_eq(to_bits(erf(1.0)), 4605765593499502731)
+    assert_eq(to_bits(erfc(1.0)), 4594835321492594133)
+    assert_eq(gamma(0.0), INFINITY)
+    assert(is_nan(gamma(-1.0)))
+    assert_eq(gamma(5.0), 24.0)
+    assert_eq(to_bits(gamma(0.5)), to_bits(sqrt(PI)))
+    assert_eq(lgamma(1.0), 0.0)
+    assert_eq(to_bits(lgamma(-0.5)), 4608378179100405206)
 }
 
 // Keep fixed-size lane storage and ordered scalar arithmetic.

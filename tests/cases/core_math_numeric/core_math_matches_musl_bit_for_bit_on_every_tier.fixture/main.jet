@@ -17,6 +17,8 @@ CBRT: comptime { embed_file("corpus/cbrt.txt") }
 CEIL: comptime { embed_file("corpus/ceil.txt") }
 COS: comptime { embed_file("corpus/cos.txt") }
 COSH: comptime { embed_file("corpus/cosh.txt") }
+ERF: comptime { embed_file("corpus/erf.txt") }
+ERFC: comptime { embed_file("corpus/erfc.txt") }
 EXP: comptime { embed_file("corpus/exp.txt") }
 EXP2: comptime { embed_file("corpus/exp2.txt") }
 EXPM1: comptime { embed_file("corpus/expm1.txt") }
@@ -24,6 +26,7 @@ FLOOR: comptime { embed_file("corpus/floor.txt") }
 FMA: comptime { embed_file("corpus/fma.txt") }
 FMOD: comptime { embed_file("corpus/fmod.txt") }
 HYPOT: comptime { embed_file("corpus/hypot.txt") }
+LGAMMA: comptime { embed_file("corpus/lgamma.txt") }
 LOG: comptime { embed_file("corpus/log.txt") }
 LOG10: comptime { embed_file("corpus/log10.txt") }
 LOG1P: comptime { embed_file("corpus/log1p.txt") }
@@ -34,6 +37,7 @@ SINH: comptime { embed_file("corpus/sinh.txt") }
 SQRT: comptime { embed_file("corpus/sqrt.txt") }
 TAN: comptime { embed_file("corpus/tan.txt") }
 TANH: comptime { embed_file("corpus/tanh.txt") }
+TGAMMA: comptime { embed_file("corpus/tgamma.txt") }
 TRUNC: comptime { embed_file("corpus/trunc.txt") }
 
 hex_value: fn(b: U8) -> Int {
@@ -79,6 +83,8 @@ evaluate: fn(name: String, a: [Float]) -> Float {
     if name == "ceil" -> return math.ceil(a[0])
     if name == "cos" -> return math.cos(a[0])
     if name == "cosh" -> return math.cosh(a[0])
+    if name == "erf" -> return math.erf(a[0])
+    if name == "erfc" -> return math.erfc(a[0])
     if name == "exp" -> return math.exp(a[0])
     if name == "exp2" -> return math.exp2(a[0])
     if name == "expm1" -> return math.exp_m1(a[0])
@@ -86,6 +92,7 @@ evaluate: fn(name: String, a: [Float]) -> Float {
     if name == "fma" -> return math.fma(a[0], a[1], a[2])
     if name == "fmod" -> return math.fmod(a[0], a[1])
     if name == "hypot" -> return math.hypot(a[0], a[1])
+    if name == "lgamma" -> return math.lgamma(a[0])
     if name == "log" -> return math.ln(a[0])
     if name == "log10" -> return math.log10(a[0])
     if name == "log1p" -> return math.ln_1p(a[0])
@@ -96,6 +103,7 @@ evaluate: fn(name: String, a: [Float]) -> Float {
     if name == "sqrt" -> return math.sqrt(a[0])
     if name == "tan" -> return math.tan(a[0])
     if name == "tanh" -> return math.tanh(a[0])
+    if name == "tgamma" -> return math.gamma(a[0])
     math.trunc(a[0])
 }
 
@@ -155,6 +163,8 @@ run: fn() {
     check("ceil", CEIL, exact_nan)
     check("cos", COS, exact_nan)
     check("cosh", COSH, exact_nan)
+    check("erf", ERF, exact_nan)
+    check("erfc", ERFC, exact_nan)
     check("exp", EXP, exact_nan)
     check("exp2", EXP2, exact_nan)
     check("expm1", EXPM1, exact_nan)
@@ -162,6 +172,7 @@ run: fn() {
     check("fma", FMA, exact_nan)
     check("fmod", FMOD, exact_nan)
     check("hypot", HYPOT, exact_nan)
+    check("lgamma", LGAMMA, exact_nan)
     check("log", LOG, exact_nan)
     check("log10", LOG10, exact_nan)
     check("log1p", LOG1P, exact_nan)
@@ -172,5 +183,6 @@ run: fn() {
     check("sqrt", SQRT, exact_nan)
     check("tan", TAN, exact_nan)
     check("tanh", TANH, exact_nan)
+    check("tgamma", TGAMMA, exact_nan)
     check("trunc", TRUNC, exact_nan)
 }
