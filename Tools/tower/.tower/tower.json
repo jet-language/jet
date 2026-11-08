@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6686,
-    "rev": 96099,
+    "rev": 96100,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -73674,6 +73674,11 @@
         {
           "at": "2026-11-08",
           "by": "Main",
+          "text": "412154ebff (G1Lead): fixes the I2 ICE at its root, in JetIR ir_call_row. An argument widened to a union is boxed as the callee parameter's own union, registered by the callee signature, rather than a union respelled in the caller's scope. New case core_path_foundations/core_path_calls_core_files_on_every_tier passes on O0/O1/O2 (9 core.files.path functions plus missing paths); seed a0_038 fails it with 8 ir.build faults. A census of Core union parameters (String|Path 46 sites, [String]|HTTPCorsOrigins 1, Int|ServiceWorkflow 7, LocalDate|DateTime 1) is covered by the same fix. Open structural finding, I8: Core declares Path twice (the Core/Compiler/Lang.jet builtin and core.files.path), so user code `files.exists(path.of(\"x\"))` fails with E0112. Making it one Path is a Core API design call that waits for a ballot. Also seen: CoreSurfaceLedger --check fails under the seed on core.files.__walk_release (seed against tree; it clears with the next seed)."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
           "text": "Lander gap closed (Main, 2026-11-08): the precommit census (the lander's census-snap.sh) checked Compiler/JetCli but never Core, unlike Land.jet census selfcheck-core, so a Core spelling no compiler accepts landed in 863e3d6b4e. The census now runs `jet check --threads 12 Core` with keep-going using the compiler it just built, and precommit requires `selfcheck-core rc=0 rows=0`. Probe: dev Core gives rc=0 rows=0; a copy with the old Path.jet:410 spelling gives rc=1 with the same 2 rows (E0047, INCOMPLETE) the a0_039 preflight reported; about 3 s per run."
         },
         {
@@ -73733,7 +73738,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T22:33:22.602Z",
-      "updated": "2026-11-08T13:38:00.955Z",
+      "updated": "2026-11-08T13:47:00.341Z",
       "updatedBy": "Main",
       "goals": [
         "G4"
@@ -188451,6 +188456,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-08T13:47:00.341Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c08m4yum",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-08T13:46:40.057Z",
       "by": "Main",
