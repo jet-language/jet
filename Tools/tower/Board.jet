@@ -61,18 +61,113 @@ Place: struct {
     note: String
 }
 
-// The live board as Tower normalizes it.
+// The live board as Tower normalizes it, one row per record: the fields the
+// projections read, and the record itself as compact JSON that an answer
+// parses back only for a record it prints. A row is decoded from one record
+// at a time, so no tree of the whole board is ever built.
 Live: struct {
-    cards: [Dyn]
-    decisions: [Dyn]
-    questions: [Dyn]
+    cards: [CardRow]
+    decisions: [DecisionRow]
+    questions: [QuestionRow]
     milestones: [Dyn]
-    events: [Dyn]
+    events: [EventRow]
+    // Whether the ballot that supersedes the pre-field verdict is on the board.
+    tier1: Bool
 }
 
 Archive: struct {
-    cards: [Dyn]
-    decisions: [Dyn]
+    cards: [CardRow]
+    decisions: [DecisionRow]
+}
+
+// A store, history file or history shard; any other member is skipped unread.
+#Decode
+BoardFile: struct {
+    cards: [CardRow]?
+    decisions: [DecisionRow]?
+    questions: [QuestionRow]?
+    milestones: [Dyn]?
+    events: [EventRow]?
+}
+
+CardRow: struct {
+    id: String
+    num: Int?
+    // `num` as JSON, for a blocker's label.
+    num_text: String
+    phase: String
+    milestone: String
+    // Why the record fails Tower's normalization, "" when it does not.
+    invalid: String
+    record: String
+}
+
+DecisionRow: struct {
+    id: String
+    card_id: String
+    status: String
+    group: String
+    draft: Bool
+    invalid: String
+    record: String
+}
+
+QuestionRow: struct {
+    card_id: String
+    decision_id: String
+    kind: String
+    status: String
+    record: String
+}
+
+EventRow: struct {
+    draft: Bool
+    // The text of a present `ref`.
+    ref: String?
+}
+
+impl CardRow.Decode {
+    decode: fn(tree: Dyn) -> CardRow [FieldError]! {
+        invalid := ""
+        if normalize_card(tree) == {
+            .Ok(_) -> {}
+            .Err(failure) -> invalid = failure.message.copy()
+        }
+        record: compact(tree) ?? return Err(err)
+        Ok(CardRow{id: text(field(tree, "id")), num: integer(field(tree, "num")), num_text: json.dumps(field(tree, "num")) ?? "", phase: text(field(tree, "phase")), milestone: text(field(tree, "milestoneId")), invalid: invalid, record: record})
+    }
+}
+
+impl DecisionRow.Decode {
+    decode: fn(tree: Dyn) -> DecisionRow [FieldError]! {
+        invalid := ""
+        if normalize_decision(tree) == {
+            .Ok(_) -> {}
+            .Err(failure) -> invalid = failure.message.copy()
+        }
+        record: compact(tree) ?? return Err(err)
+        Ok(DecisionRow{id: text(field(tree, "id")), card_id: text(field(tree, "cardId")), status: text(field(tree, "status")), group: text(field(tree, "group")), draft: truthy(field(tree, "draft")), invalid: invalid, record: record})
+    }
+}
+
+impl QuestionRow.Decode {
+    decode: fn(tree: Dyn) -> QuestionRow [FieldError]! {
+        record: compact(tree) ?? return Err(err)
+        Ok(QuestionRow{card_id: text(field(tree, "cardId")), decision_id: text(field(tree, "decisionId")), kind: text(field(tree, "kind")), status: text(field(tree, "status")), record: record})
+    }
+}
+
+impl EventRow.Decode {
+    decode: fn(tree: Dyn) -> EventRow [FieldError]! {
+        ref: field(tree, "ref")
+        Ok(EventRow{draft: truthy(field(tree, "draft")), ref: if truthy(ref) -> Val(text(ref)) else -> None})
+    }
+}
+
+// The record's compact JSON (`dumps` renders the tree itself, uncopied).
+compact: fn(tree: Dyn) -> String [FieldError]! {
+    record: json.dumps(tree) ?? return Err([FieldError]{FieldError{path: "", reason: "the record cannot be encoded: {err}"}})
+    Ok(record)
 }
 
 run: fn() {
@@ -365,58 +460,107 @@ limits: fn() -> EncodingLimits Never! {
     }
 }
 
-// The parsed file, Null when it does not exist.
-parse_file: fn(path: String, label: String) -[FS]> Dyn Failure! {
-    if !files.exists(path) -> return Ok(Dyn.Null)
+read_source: fn(path: String, label: String) -[FS]> String Failure! {
     bytes: files.read_bytes(path) ?? return Err(fail("E_IO", "cannot read {label}: {path}: {err}"))
     if bytes.len() > MAX_JSON_BYTES -> return Err(fail("E_INVALID", "{label} is larger than Tower reads: {path}"))
     source: String.from_bytes(bytes) ?? return Err(fail("E_INVALID", "{label} is not UTF-8: {path}"))
+    Ok(source)
+}
+
+// The parsed file, Null when it does not exist (the small archive manifest).
+parse_file: fn(path: String, label: String) -[FS]> Dyn Failure! {
+    if !files.exists(path) -> return Ok(Dyn.Null)
+    source: read_source(path, label) ?? return Err(err)
     tree: json.parse_with_limits(source, limits()) ?? return Err(fail("E_INVALID", "{label} is not JSON: {path}: {err}"))
     Ok(tree)
 }
 
+// The file's rows, none when it does not exist or holds `null`.
+read_board: fn(path: String, label: String) -[FS]> BoardFile Failure! {
+    empty: BoardFile{cards: None, decisions: None, questions: None, milestones: None, events: None}
+    if !files.exists(path) -> return Ok(empty)
+    source: read_source(path, label) ?? return Err(err)
+    if json.decode<BoardFile>(source) == .Ok(board) -> return Ok(board)
+    // Only a file the typed read refuses is parsed whole, to say why.
+    tree: json.parse_with_limits(source, limits()) ?? return Err(fail("E_INVALID", "{label} is not JSON: {path}: {err}"))
+    if tree == .Null -> return Ok(empty)
+    if !(tree == .Object(_)) -> return Err(fail("E_INVALID", "{label} must be an object"))
+    reasons := [String]{}
+    if json.decode<BoardFile>(source) == .Err(refused) -> reasons = refused.map(error -> "{error.path}: {error.reason}")
+    Err(fail("E_INVALID", "{label} is not in Tower's format: {path}: {reasons.join("; ")}"))
+}
+
 load_live: fn(place: Place) -[FS]> Live Failure! {
-    board: parse_file(place.file, "live store") ?? return Err(err)
-    if !(board == .Object(_) || board == .Null) -> return Err(fail("E_INVALID", "live store must be an object"))
-    cards := [Dyn]{}
-    loop card in items(field(board, "cards")) -> cards.push(normalize_card(card) ?? return Err(err))
-    decisions := [Dyn]{}
-    loop decision in items(field(board, "decisions")) -> decisions.push(normalize_decision(decision) ?? return Err(err))
-    ids: decisions.map(decision -> text(field(decision, "id")))
-    loop at in 0..<decisions.len() {
-        // D-ONCE-LEDGER1=A: the one supersession edge that predates the field.
-        if is_text(field(decisions[at], "id"), "D-VERDICT-1254-1") && !truthy(field(decisions[at], "supersededBy")) && ids.contains("D-ONCE-TIER1") {
-            decisions[at] = with(decisions[at], "supersededBy", Dyn.Text("D-ONCE-TIER1"))
-        }
+    board: read_board(place.file, "live store") ?? return Err(err)
+    cards: board.cards ?? [CardRow]{}
+    loop card in cards {
+        if card.invalid != "" -> return Err(fail("E_INVALID", card.invalid))
+    }
+    decisions: board.decisions ?? [DecisionRow]{}
+    loop decision in decisions {
+        if decision.invalid != "" -> return Err(fail("E_INVALID", decision.invalid))
     }
     milestones := [Dyn]{}
-    loop milestone in items(field(board, "milestones")) -> milestones.push(normalize_milestone(milestone) ?? return Err(err))
-    Ok(Live{cards: cards, decisions: decisions, questions: items(field(board, "questions")), milestones: milestones, events: items(field(board, "events"))})
+    listed: board.milestones ?? [Dyn]{}
+    loop milestone in listed -> milestones.push(normalize_milestone(milestone) ?? return Err(err))
+    tier1: decisions.any(decision -> decision.id == "D-ONCE-TIER1")
+    Ok(Live{cards: cards, decisions: decisions, questions: board.questions ?? [QuestionRow]{}, milestones: milestones, events: board.events ?? [EventRow]{}, tier1: tier1})
 }
 
 shard_failure: fn(file: String) -> Failure Never! {
     fail("E_INVALID", "history shard history/{file} is missing or does not match history.json; check out history.json and history/ from one board commit")
 }
 
-load_archive: fn(place: Place) -[FS]> Archive Failure! {
+// What an archive load keeps of each record's JSON text: the index verbs read
+// only row fields, and a show verb only the record it asks for.
+ArchiveKeep: enum {
+    Index
+    Card(String)
+    Decision(String)
+}
+
+load_archive: fn(place: Place, keep: ArchiveKeep) -[FS]> Archive Failure! {
     path: "{place.dir}/history.json"
-    if !files.exists(path) -> return Ok(Archive{cards: [Dyn]{}, decisions: [Dyn]{}})
+    if !files.exists(path) -> return Ok(Archive{cards: [CardRow]{}, decisions: [DecisionRow]{}})
     size: files.stat(path) ?? return Err(fail("E_IO", "cannot read history store: {path}: {err}"))
     if size.size <= MANIFEST_BYTES {
         manifest: parse_file(path, "history store") ?? return Err(err)
-        if has(manifest, "layout") -> return load_shards(place, manifest)
+        if has(manifest, "layout") -> return load_shards(place, manifest, keep)
     }
-    history: parse_file(path, "history store") ?? return Err(err)
-    decisions: items(field(history, "decisions")).map(decision -> migrate_losses(decision))
-    Ok(Archive{cards: items(field(history, "cards")), decisions: decisions})
+    history: read_board(path, "history store") ?? return Err(err)
+    cards := history.cards ?? [CardRow]{}
+    decisions := history.decisions ?? [DecisionRow]{}
+    kept_cards(cards, keep)
+    kept_decisions(decisions, keep)
+    Ok(Archive{cards: cards, decisions: decisions})
 }
 
-load_shards: fn(place: Place, manifest: Dyn) -[FS]> Archive Failure! {
+// Every row `find_by_ref` could pick for the asked ref keeps its text.
+kept_cards: fn(rows: &[CardRow], keep: ArchiveKeep) Never! {
+    ref := ""
+    if keep == .Card(asked) -> ref = asked.copy()
+    wanted: if ref == "" -> None else -> ref_number(ref)
+    loop at in 0..<rows.len() {
+        if ref != "" && (rows[at].id == ref || (wanted != None && rows[at].num == wanted)) -> next
+        rows[at].record = ""
+    }
+}
+
+kept_decisions: fn(rows: &[DecisionRow], keep: ArchiveKeep) Never! {
+    ref := ""
+    if keep == .Decision(asked) -> ref = asked.copy()
+    loop at in 0..<rows.len() {
+        if ref != "" && rows[at].id == ref -> next
+        rows[at].record = ""
+    }
+}
+
+load_shards: fn(place: Place, manifest: Dyn, keep: ArchiveKeep) -[FS]> Archive Failure! {
     if !is_text(field(manifest, "layout"), HISTORY_LAYOUT) -> return Err(fail("E_INVALID", "history.json (sharded archive manifest): unknown layout {json.to_string(field(manifest, "layout")) ?? ""}"))
     if !files.is_dir("{place.dir}/history") -> return Err(shard_failure(""))
-    found := [String: [Dyn]]{}
+    cards := [CardRow]{}
+    decisions := [DecisionRow]{}
     loop kind in HISTORY_KINDS {
-        list := [Dyn]{}
         loop shard in items(field(field(manifest, kind), "shards")) {
             file: text(field(shard, "file"))
             path: "{place.dir}/history/{file}"
@@ -424,14 +568,69 @@ load_shards: fn(place: Place, manifest: Dyn) -[FS]> Archive Failure! {
             bytes: files.read_bytes(path) ?? return Err(fail("E_IO", "cannot read unsafe history shard {place.dir}/history/{file}: {err}"))
             if (integer(field(shard, "bytes")) ?? -1) != bytes.len() || !is_text(field(shard, "sha256"), crypto.sha256(bytes).hex()) -> return Err(shard_failure(file))
             source: String.from_bytes(bytes) ?? return Err(shard_failure(file))
-            tree: json.parse_with_limits(source, limits()) ?? return Err(fail("E_INVALID", "history shard history/{file} is not in Tower's shard format"))
-            loop item in items(field(tree, kind)) -> list.push(item)
-            if (integer(field(shard, "items")) ?? -1) != items(field(tree, kind)).len() -> return Err(shard_failure(file))
+            rows: json.decode<BoardFile>(source) ?? return Err(fail("E_INVALID", "history shard history/{file} is not in Tower's shard format"))
+            count := 0
+            if kind == {
+                "cards" -> {
+                    listed := rows.cards ?? [CardRow]{}
+                    count = listed.len()
+                    kept_cards(listed, keep)
+                    loop row in listed -> cards.push(row)
+                }
+                "decisions" -> {
+                    listed := rows.decisions ?? [DecisionRow]{}
+                    count = listed.len()
+                    kept_decisions(listed, keep)
+                    loop row in listed -> decisions.push(row)
+                }
+                else -> count = (rows.events ?? [EventRow]{}).len()
+            }
+            if (integer(field(shard, "items")) ?? -1) != count -> return Err(shard_failure(file))
         }
-        found[kind.copy()] = list
     }
-    decisions: (found.get("decisions") ?? [Dyn]{}).map(decision -> migrate_losses(decision))
-    Ok(Archive{cards: found.get("cards") ?? [Dyn]{}, decisions: decisions})
+    Ok(Archive{cards: cards, decisions: decisions})
+}
+
+// A printed record parsed back from its row.
+record_tree: fn(record: String) -> Dyn Failure! {
+    tree: json.parse_with_limits(record, limits()) ?? return Err(fail("E_INVALID", "a board record does not read back: {err}"))
+    Ok(tree)
+}
+
+// A live card as Tower projects it: normalized, its draft-hidden links removed.
+live_card: fn(row: CardRow, hidden: [String]) -> Dyn Failure! {
+    card: normalize_card(record_tree(row.record) ?? return Err(err)) ?? return Err(err)
+    if hidden.len() == 0 -> return Ok(card)
+    blocked := [Dyn]{}
+    loop id in items(field(card, "blockedBy")) {
+        if !hidden.contains(text(id)) -> blocked.push(id.copy())
+    }
+    out := with(card, "blockedBy", Dyn.Array(blocked))
+    if truthy(field(card, "questions")) {
+        shown := [Dyn]{}
+        loop question in items(field(card, "questions")) {
+            if !hidden.contains(text(field(question, "decisionId"))) -> shown.push(question.copy())
+        }
+        out = with(out, "questions", Dyn.Array(shown))
+    }
+    Ok(out)
+}
+
+// A live decision as Tower normalizes it, with the one supersession edge
+// that predates the `supersededBy` field.
+live_decision: fn(row: DecisionRow, live: Live) -> Dyn Failure! {
+    decision: normalize_decision(record_tree(row.record) ?? return Err(err)) ?? return Err(err)
+    if row.id == "D-VERDICT-1254-1" && !truthy(field(decision, "supersededBy")) && live.tier1 -> return Ok(with(decision, "supersededBy", Dyn.Text("D-ONCE-TIER1")))
+    Ok(decision)
+}
+
+// An archived record as Tower shows it.
+archived_card: fn(row: CardRow) -> Dyn Failure! {
+    Ok(with(record_tree(row.record) ?? return Err(err), "archived", Dyn.Bool(true)))
+}
+
+archived_decision: fn(row: DecisionRow) -> Dyn Failure! {
+    Ok(with(migrate_losses(record_tree(row.record) ?? return Err(err)), "archived", Dyn.Bool(true)))
 }
 
 // --- Normalize (store.mjs normalize) -----------------------------------------
@@ -583,31 +782,36 @@ normalize_milestone: fn(milestone: Dyn) -> Dyn Failure! {
     Ok(out)
 }
 
+// A card linked to a milestone: all its progress reads.
+Linked: struct {
+    id: String
+    phase: String
+}
+
 // The cards linked to each milestone: archived first, a live card replacing
 // its archived copy in place (store.mjs cardsByMilestone).
-cards_by_milestone: fn(cards: [Dyn], archived: [Dyn]) -> [String: [Dyn]] Never! {
-    index := [String: [Dyn]]{}
+cards_by_milestone: fn(cards: [CardRow], archived: [CardRow]) -> [String: [Linked]] Never! {
+    index := [String: [Linked]]{}
     link_cards(index, archived)
     link_cards(index, cards)
     index
 }
 
-link_cards: fn(index: &[String: [Dyn]], cards: [Dyn]) Never! {
+link_cards: fn(index: &[String: [Linked]], cards: [CardRow]) Never! {
     loop card in cards {
-        milestone: text(field(card, "milestoneId"))
-        if milestone == "" -> next
-        key: text(field(card, "id"))
-        linked := index.get(milestone) ?? [Dyn]{}
+        if card.milestone == "" -> next
+        linked := index.get(card.milestone) ?? [Linked]{}
         at := 0
-        loop at < linked.len() && !is_text(field(linked[at], "id"), key) -> at += 1
-        if at < linked.len() -> linked[at] = card.copy() else -> linked.push(card.copy())
-        index[milestone.copy()] = linked
+        loop at < linked.len() && linked[at].id != card.id -> at += 1
+        entry: Linked{id: card.id.copy(), phase: card.phase.copy()}
+        if at < linked.len() -> linked[at] = entry else -> linked.push(entry)
+        index[card.milestone.copy()] = linked
     }
 }
 
 // store.mjs syncMilestone: linked cards all done open the review.
-sync_milestone: fn(milestone: Dyn, linked: [Dyn]) -> Dyn Never! {
-    if linked.len() == 0 || !linked.all(card -> is_text(field(card, "phase"), "done")) {
+sync_milestone: fn(milestone: Dyn, linked: [Linked]) -> Dyn Never! {
+    if linked.len() == 0 || !linked.all(card -> card.phase == "done") {
         cleared: without(without(without(milestone, "verification"), "metAt"), "closeout")
         return with(cleared, "status", Dyn.Text("open"))
     }
@@ -615,8 +819,8 @@ sync_milestone: fn(milestone: Dyn, linked: [Dyn]) -> Dyn Never! {
     with(without(without(milestone, "verification"), "metAt"), "status", Dyn.Text("review-ready"))
 }
 
-milestone_progress: fn(milestone: Dyn, linked: [Dyn]) -> Dyn Never! {
-    done: linked.filter(card -> is_text(field(card, "phase"), "done")).len()
+milestone_progress: fn(milestone: Dyn, linked: [Linked]) -> Dyn Never! {
+    done: linked.filter(card -> card.phase == "done").len()
     ready: linked.len() > 0 && done == linked.len()
     met: ready && is_text(field(milestone, "status"), "met") && truthy(field(milestone, "verification"))
     object([(key: String, value: Dyn)]{
@@ -633,75 +837,39 @@ milestone_progress: fn(milestone: Dyn, linked: [Dyn]) -> Dyn Never! {
 hidden_ids: fn(live: Live) -> [String] Never! {
     hidden := [String]{}
     loop decision in live.decisions {
-        if truthy(field(decision, "draft")) -> hidden.push(text(field(decision, "id")))
+        if decision.draft -> hidden.push(decision.id.copy())
     }
     loop event in live.events {
-        if truthy(field(event, "draft")) && truthy(field(event, "ref")) -> hidden.push(text(field(event, "ref")))
+        if event.draft && event.ref == .Val(ref) -> hidden.push(ref.copy())
     }
     hidden
 }
 
-shown_questions: fn(list: [Dyn], hidden: [String]) -> [Dyn] Never! {
-    shown := [Dyn]{}
-    loop question in list {
-        if !hidden.contains(text(field(question, "decisionId"))) -> shown.push(question.copy())
-    }
-    shown
-}
-
-// store.mjs withoutDrafts.
-without_drafts: fn(live: Live) -> Live Never! {
-    hidden: hidden_ids(live)
-    if hidden.len() == 0 -> return live.copy()
-    cards := [Dyn]{}
-    loop card in live.cards {
-        blocked := [Dyn]{}
-        loop id in items(field(card, "blockedBy")) {
-            if !hidden.contains(text(id)) -> blocked.push(id.copy())
-        }
-        out := with(card, "blockedBy", Dyn.Array(blocked))
-        if truthy(field(card, "questions")) -> out = with(out, "questions", Dyn.Array(shown_questions(items(field(card, "questions")), hidden)))
-        cards.push(out)
-    }
-    decisions := [Dyn]{}
-    loop decision in live.decisions {
-        if !truthy(field(decision, "draft")) -> decisions.push(decision.copy())
-    }
-    events := [Dyn]{}
-    loop event in live.events {
-        if !hidden.contains(text(field(event, "ref"))) -> events.push(event.copy())
-    }
-    Live{cards: cards, decisions: decisions, questions: shown_questions(live.questions, hidden), milestones: live.milestones.copy(), events: events}
-}
-
-find_by_ref: fn(cards: [Dyn], ref: String) -> Dyn? Never! {
-    loop card in cards {
-        if is_text(field(card, "id"), ref) -> return Val(card.copy())
+// Where `ref` names a card: its id, else its number.
+find_by_ref: fn(cards: [CardRow], ref: String) -> Int? Never! {
+    loop (at, card) in cards {
+        if card.id == ref -> return Val(at)
     }
     wanted: ref_number(ref) ?? return None
-    loop card in cards {
-        if (integer(field(card, "num")) ?? -1) == wanted -> return Val(card.copy())
+    loop (at, card) in cards {
+        if (card.num ?? -1) == wanted -> return Val(at)
     }
     None
-}
-
-blocking: fn(decision: Dyn) -> Bool Never! {
-    !is_text(field(decision, "status"), "ratified") && !truthy(field(decision, "draft"))
 }
 
 lane: fn(name: String, who: Dyn, label: String) -> [(key: String, value: Dyn)] Never! {
     [(key: String, value: Dyn)]{(key: "lane", value: Dyn.Text(name.copy())), (key: "who", value: who.copy()), (key: "label", value: Dyn.Text(label.copy()))}
 }
 
-// store.mjs laneOf.
-lane_of: fn(card: Dyn, decisions: [Dyn], cards: [Dyn]) -> Dyn Never! {
+// store.mjs laneOf over the draft-free board: draft ballots are skipped.
+lane_of: fn(card: Dyn, live: Live) -> Dyn Never! {
     phase: text(field(card, "phase"))
     id: text(field(card, "id"))
     if phase == "done" -> return object(lane("done", Dyn.Null, "Done"))
     if phase == "frozen" -> return object(lane("frozen", Dyn.Text("owner"), "Frozen — owner reactivates it"))
     open := [Dyn]{}
-    loop decision in decisions {
-        if is_text(field(decision, "cardId"), id) && blocking(decision) && !is_text(field(decision, "group"), "acceptance") -> open.push(field(decision, "id"))
+    loop decision in live.decisions {
+        if !decision.draft && decision.card_id == id && decision.status != "ratified" && decision.group != "acceptance" -> open.push(Dyn.Text(decision.id.copy()))
     }
     if open.len() > 0 {
         plural: if open.len() > 1 -> "s" else -> ""
@@ -713,15 +881,15 @@ lane_of: fn(card: Dyn, decisions: [Dyn], cards: [Dyn]) -> Dyn Never! {
     labels := [String]{}
     loop blocker in items(field(card, "blockedBy")) {
         ref: if blocker == .Text(value) -> value.copy() else -> (json.to_string(blocker) ?? "")
-        if find_by_ref(cards, ref) == .Val(found) {
-            if is_text(field(found, "phase"), "done") -> next
+        if find_by_ref(live.cards, ref) == .Val(at) {
+            if live.cards[at].phase == "done" -> next
             blockers.push(blocker.copy())
-            labels.push("#{json.to_string(field(found, "num")) ?? ""}")
+            labels.push("#{live.cards[at].num_text}")
             next
         }
-        loop decision in decisions {
-            if !is_text(field(decision, "id"), ref) -> next
-            if !is_text(field(decision, "status"), "ratified") {
+        loop decision in live.decisions {
+            if decision.draft || decision.id != ref -> next
+            if decision.status != "ratified" {
                 blockers.push(blocker.copy())
                 labels.push(ref.copy())
             }
@@ -748,8 +916,8 @@ lane_of: fn(card: Dyn, decisions: [Dyn], cards: [Dyn]) -> Dyn Never! {
         if truthy(field(card, "needsAcceptance")) {
             ballot: "D-ACCEPT-{json.to_string(field(card, "num")) ?? ""}"
             accept_open := false
-            loop decision in decisions {
-                if is_text(field(decision, "id"), ballot) && !is_text(field(decision, "status"), "ratified") -> accept_open = true
+            loop decision in live.decisions {
+                if !decision.draft && decision.id == ballot && decision.status != "ratified" -> accept_open = true
             }
             if accept_open -> return object(lane("verify", Dyn.Text("owner"), "Owner visual/UX acceptance"))
             return object(lane("verify", Dyn.Text("agent"), "Finish criteria before owner visual review"))
@@ -759,22 +927,24 @@ lane_of: fn(card: Dyn, decisions: [Dyn], cards: [Dyn]) -> Dyn Never! {
     object(lane("blocked", Dyn.Null, ""))
 }
 
-// store.mjs projectCardRecord over the draft-free board.
-project_card: fn(card: Dyn, shown: Live) -> Dyn Never! {
+// store.mjs projectCardRecord over the draft-free board, for the live card
+// at `at`.
+project_card: fn(live: Live, at: Int, hidden: [String]) -> Dyn Failure! {
+    card: live_card(live.cards[at], hidden) ?? return Err(err)
     id: text(field(card, "id"))
     linked := [Dyn]{}
     open := [Dyn]{}
-    loop decision in shown.decisions {
-        if !is_text(field(decision, "cardId"), id) -> next
-        linked.push(decision.copy())
-        if !is_text(field(decision, "status"), "ratified") -> open.push(field(decision, "id"))
+    loop decision in live.decisions {
+        if decision.draft || decision.card_id != id -> next
+        linked.push(live_decision(decision, live) ?? return Err(err))
+        if decision.status != "ratified" -> open.push(Dyn.Text(decision.id.copy()))
     }
     questions := [Dyn]{}
     open_questions := 0
-    loop question in shown.questions {
-        if !is_text(field(question, "cardId"), id) -> next
-        questions.push(question.copy())
-        if !is_text(field(question, "kind"), "message") && is_text(field(question, "status"), "open") -> open_questions += 1
+    loop question in live.questions {
+        if hidden.contains(question.decision_id) || question.card_id != id -> next
+        questions.push(record_tree(question.record) ?? return Err(err))
+        if question.kind != "message" && question.status == "open" -> open_questions += 1
     }
     state: if linked.len() == 0 -> "none" else if open.len() > 0 -> "pending" else -> "cleared"
     ratified: linked.len() - open.len()
@@ -789,7 +959,7 @@ project_card: fn(card: Dyn, shown: Live) -> Dyn Never! {
     out = with(out, "decisions", Dyn.Array(linked))
     out = with(out, "questions", Dyn.Array(questions))
     out = with(out, "openQ", Dyn.Int(open_questions))
-    with(out, "lane", lane_of(card, shown.decisions, shown.cards))
+    Ok(with(out, "lane", lane_of(card, live)))
 }
 
 // --- Verbs -------------------------------------------------------------------
@@ -799,8 +969,12 @@ pretty: fn(value: Dyn) -> String Failure! {
     Ok(text)
 }
 
-archived: fn(record: Dyn) -> Dyn Never! {
-    with(record, "archived", Dyn.Bool(true))
+// What `pretty` prints for an array of the already pretty `items`: a list
+// answer is printed one record at a time, never as one tree of them all.
+pretty_list: fn(items: [String]) -> String Never! {
+    if items.len() == 0 -> return "[]"
+    nested := loop item in items -> "  {item.replace("\n", "\n  ")}"
+    "[\n{nested.join(",\n")}\n]"
 }
 
 answer_request: fn(request: Request, place: Place) -[FS]> String Failure! {
@@ -813,27 +987,26 @@ answer_request: fn(request: Request, place: Place) -[FS]> String Failure! {
     }
     if verb == "card show" {
         live: load_live(place) ?? return Err(err)
-        shown: without_drafts(live)
-        if find_by_ref(shown.cards, ref) == .Val(card) -> return pretty(project_card(card, shown))
-        archive: load_archive(place) ?? return Err(err)
-        if find_by_ref(archive.cards, ref) == .Val(card) -> return pretty(archived(card))
+        if find_by_ref(live.cards, ref) == .Val(at) -> return pretty(project_card(live, at, hidden_ids(live)) ?? return Err(err))
+        archive: load_archive(place, ArchiveKeep.Card(ref.copy())) ?? return Err(err)
+        if find_by_ref(archive.cards, ref) == .Val(at) -> return pretty(archived_card(archive.cards[at]) ?? return Err(err))
         return Err(fail("E_NOT_FOUND", "no card {ref}"))
     }
     if verb == "card list" {
         live: load_live(place) ?? return Err(err)
-        shown: without_drafts(live)
-        projected := [Dyn]{}
-        loop card in shown.cards -> projected.push(project_card(card, shown))
-        return pretty(Dyn.Array(projected))
+        hidden: hidden_ids(live)
+        shown := [String]{}
+        loop at in 0..<live.cards.len() -> shown.push(pretty(project_card(live, at, hidden) ?? return Err(err)) ?? return Err(err))
+        return Ok(pretty_list(shown))
     }
     if verb == "decision show" {
         live: load_live(place) ?? return Err(err)
         loop decision in live.decisions {
-            if is_text(field(decision, "id"), ref) -> return pretty(decision)
+            if decision.id == ref -> return pretty(live_decision(decision, live) ?? return Err(err))
         }
-        archive: load_archive(place) ?? return Err(err)
+        archive: load_archive(place, ArchiveKeep.Decision(ref.copy())) ?? return Err(err)
         loop decision in archive.decisions {
-            if is_text(field(decision, "id"), ref) -> return pretty(archived(decision))
+            if decision.id == ref -> return pretty(archived_decision(decision) ?? return Err(err))
         }
         return Err(fail("E_NOT_FOUND", "no decision {ref}"))
     }
@@ -845,24 +1018,24 @@ answer_request: fn(request: Request, place: Place) -[FS]> String Failure! {
         by_card := false
         if request.flags.get("card") == .Val(card_ref) {
             by_card = true
-            if find_by_ref(live.cards, card_ref) == .Val(card) -> card_id = text(field(card, "id"))
+            if find_by_ref(live.cards, card_ref) == .Val(at) -> card_id = live.cards[at].id.copy()
         }
-        list := [Dyn]{}
+        shown := [String]{}
         loop decision in live.decisions {
-            if !drafts && truthy(field(decision, "draft")) -> next
-            if open_only && is_text(field(decision, "status"), "ratified") -> next
-            if by_card && (card_id == "" || !is_text(field(decision, "cardId"), card_id)) -> next
-            list.push(decision.copy())
+            if !drafts && decision.draft -> next
+            if open_only && decision.status == "ratified" -> next
+            if by_card && (card_id == "" || decision.card_id != card_id) -> next
+            shown.push(pretty(live_decision(decision, live) ?? return Err(err)) ?? return Err(err))
         }
-        return pretty(Dyn.Array(list))
+        return Ok(pretty_list(shown))
     }
     if verb == "milestone list" {
         live: load_live(place) ?? return Err(err)
-        archive: load_archive(place) ?? return Err(err)
+        archive: load_archive(place, ArchiveKeep.Index) ?? return Err(err)
         index: cards_by_milestone(live.cards, archive.cards)
         list := [Dyn]{}
         loop milestone in live.milestones {
-            linked: index.get(text(field(milestone, "id"))) ?? [Dyn]{}
+            linked: index.get(text(field(milestone, "id"))) ?? [Linked]{}
             synced: sync_milestone(milestone, linked)
             if !request.flags.has_key("archived") && truthy(field(synced, "archived")) -> next
             if request.flags.get("epoch") == .Val(epoch) {
@@ -906,17 +1079,17 @@ lint_request: fn(request: Request, place: Place) -[FS]> (shown: String, findings
 // Tower record, one finding per ID listing every `Docs/spec/...:LINE` citing it.
 docs_findings: fn(place: Place, docs: String) -[FS]> [Dyn] Failure! {
     live: load_live(place) ?? return Err(err)
-    archive: load_archive(place) ?? return Err(err)
+    archive: load_archive(place, ArchiveKeep.Index) ?? return Err(err)
     known_cards := [String: Bool]{}
     loop card in live.cards {
-        if integer(field(card, "num")) == .Val(num) -> known_cards["{num}"] = true
+        if card.num == .Val(num) -> known_cards["{num}"] = true
     }
     loop card in archive.cards {
-        if integer(field(card, "num")) == .Val(num) -> known_cards["{num}"] = true
+        if card.num == .Val(num) -> known_cards["{num}"] = true
     }
     known_decisions := [String: Bool]{}
-    loop decision in live.decisions -> known_decisions[text(field(decision, "id"))] = true
-    loop decision in archive.decisions -> known_decisions[text(field(decision, "id"))] = true
+    loop decision in live.decisions -> known_decisions[decision.id.copy()] = true
+    loop decision in archive.decisions -> known_decisions[decision.id.copy()] = true
     spec: "{docs}/spec"
     paths := [String]{}
     if files.is_dir(spec) -> spec_files(spec, paths) ?? return Err(err)
@@ -1105,7 +1278,7 @@ numeric_order: fn(left: String, right: String) -> Ordering Never! {
 fixture_live: fn() -> String Never! {
     [String]{
         "{{\"meta\":{{\"rev\":3}},\"cards\":[",
-        "{{\"id\":\"c_a\",\"num\":7,\"title\":\"seven\",\"phase\":\"ready\",\"blockedBy\":[\"#8\",\"D-OPEN\"],\"milestoneId\":\"m1\"}},",
+        "{{\"id\":\"c_a\",\"num\":7,\"title\":\"seven\",\"phase\":\"ready\",\"blockedBy\":[\"#8\",\"D-OPEN\"],\"milestoneId\":\"m1\",\"score\":{{\"weight\":1.50,\"at\":\"2026-01-02T03:04:05.120Z\"}}}},",
         "{{\"id\":\"c_b\",\"num\":8,\"title\":\"eight\",\"phase\":\"done\",\"milestoneId\":\"m1\",\"needsAcceptance\":1}}],",
         "\"decisions\":[",
         "{{\"id\":\"D-OPEN\",\"cardId\":\"c_b\",\"status\":\"open\"}},",
@@ -1168,6 +1341,30 @@ refusal: fn(place: Place, args: [String]) -[FS]> String Never! {
     assert_eq(listed.map(card -> integer(field(card, "num")) ?? 0), [Int]{7, 8})
     assert_eq(refusal(place, [String]{"card", "list"}).starts_with("E_USAGE"), true)
     assert_eq(refusal(place, [String]{"card", "show", "7", "--bogus"}), "E_USAGE")
+    files.remove_all(place.dir) ?? ()
+}
+
+#Test("board prints each record as the store holds it, one list item at a time") {
+    place: fixture_place("records", fixture_history())
+    shown: answer_request(parse_request([String]{"card", "show", "#7", "--json"}) ?? panic("request"), place) ?? panic("answer: {err.message}")
+    assert_eq(shown.contains("\"score\": {{\n    \"weight\": 1.50,\n    \"at\": \"2026-01-02T03:04:05.120Z\"\n  }}"), true)
+    lists: [[String]]{[String]{"card", "list", "--json"}, [String]{"decision", "list", "--json", "--drafts"}}
+    loop args in lists {
+        listed: answer_request(parse_request(args) ?? panic("request"), place) ?? panic("answer: {err.message}")
+        whole: json.parse_with_limits(listed, limits()) ?? panic("answer is not JSON: {err}")
+        assert_eq(listed, pretty(whole) ?? panic("pretty"))
+    }
+    files.remove_all(place.dir) ?? ()
+}
+
+#Test("board refuses a store that is not in Tower's format") {
+    place: fixture_place("shape", "")
+    files.write(place.file, "{{\"cards\":{{}}}}") ?? panic("fixture: {err}")
+    assert_eq(refusal(place, [String]{"card", "show", "#7", "--json"}).starts_with("E_INVALID: live store is not in Tower's format: {place.file}: "), true)
+    files.write(place.file, "[1]") ?? panic("fixture: {err}")
+    assert_eq(refusal(place, [String]{"card", "show", "#7", "--json"}), "E_INVALID: live store must be an object")
+    files.write(place.file, "{{\"cards\":[") ?? panic("fixture: {err}")
+    assert_eq(refusal(place, [String]{"card", "show", "#7", "--json"}).starts_with("E_INVALID: live store is not JSON: {place.file}: "), true)
     files.remove_all(place.dir) ?? ()
 }
 
