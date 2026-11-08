@@ -5919,14 +5919,15 @@ ir_list_walk: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, vari
     ends_after: !takes_parts && ir_end_walked_temporary(m, b, list)
     stride: ir_list_stride(m, row)
     ir_scope_open(b)
-    // A hashed Map walks its entries in key order (ir_map_ordered), which a
-    // variable that may write it first settles in place; a walk that takes
-    // them walks its own holder of the Map (ir_map_walk_take).
+    // A hashed Map, Set or Rank walks its entries in key order
+    // (ir_map_ordered), which a variable that may write it first settles in
+    // place; a walk that takes a Map's entries walks its own holder of the
+    // Map (ir_map_walk_take).
     walked := list
     if takes_parts {
         walked = ir_map_walk_take(m, p, b, list, span)
         if ir_failed(b) -> return
-    } else if ir_map_entry_type(collection_ty) != None {
+    } else if ir_map_entry_type(collection_ty) != None || ir_set_element(collection_ty) != None {
         ir_map_settle_for(m, p, b, collection, list)
         walked = ir_map_ordered(m, p, b, list)
     }
