@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6698,
-    "rev": 96271,
+    "rev": 96273,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -95241,6 +95241,11 @@
         {
           "at": "2026-11-08",
           "by": "Main",
+          "text": "Ballot D-JET-RUN-REMOTE1 posted for the owner (Q25a B): the command that runs code straight from a URL or the registry and asks before its first run. Options A jet run <https-url|name#ver|name> (recommended), B a jet x verb, C jet fetch then run the stored path. c8 applies to the ratified form."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
           "text": "Owner rulings 2026-11-08 (Q25). a: B, ballot a command that runs URL or registry code (jet run <url> or pkg@ver) now; c8 applies to it. b: A, --allow=R acknowledges R (left out of the notice) and resource-qualified rows still confine through Landlock. c: A, the ambient floor (IO, Mem.Alloc, Exec.Args) stays inside every written ceiling and leaves only through an explicit deny. FYI items (jet new writes no authority row; scripts lose the #! -A rule; the notice omits floor effects) stand, no objection."
         },
         {
@@ -95370,7 +95375,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T21:37:13.788Z",
-      "updated": "2026-11-08T18:54:53.359Z",
+      "updated": "2026-11-08T19:18:13.768Z",
       "updatedBy": "Main",
       "criteriaLastN": 12
     },
@@ -186640,6 +186645,173 @@
       "created": "2026-11-08T02:19:45.520Z",
       "outcome": "A",
       "ratifiedAt": "2026-11-08"
+    },
+    {
+      "id": "D-JET-RUN-REMOTE1",
+      "cardId": "c0ihjl6a",
+      "group": "cli",
+      "title": "Run code straight from a URL or the registry, asking before its first run",
+      "situation": "D-AUTH-DEFAULT1 refinement (4) says code run straight from a URL or the registry asks before its first run (card #6614 c8). Q25a=B asked for a ballot on the command itself. Today `jet run` takes local paths only, and `jet X` resolves a command, a job, a retired spelling, a path, then `jet-X` on PATH (D-JET-VERBS1). Jet already fetches remote code in one place: a script's inline `pkg#1.4` dependency. It is resolved through the signed registry index, verified, stored in the Hangar by content hash and pinned in `<script>.jet.lock` (D-JPK-SCRIPTDEP1). This ballot picks the command that runs remote code, what it fetches and pins, and how the first-run question behaves with and without a terminal.",
+      "gist": "How do you run a Jet program that lives at a URL or in the registry?",
+      "lesson": "`jet run` also takes an https URL or a registry package. Jet fetches it, checks it, pins its exact bytes, and asks once before the first run, naming what the program can do. Later runs of the same bytes are silent. Changed bytes or new effects ask again.",
+      "explainer": "The question happens after Jet fetches and checks the code and before its first instruction. Jet knows every effect a program can reach before it starts, so the question names them all at once.\n\nPinning is by content. A registry package is pinned by its signed index entry and artifact hash. A URL is pinned by the hash of the bytes fetched the first time. Nothing is fetched again silently: `--update` re-resolves, and `--locked` refuses any change.\n\nFetching never runs code. Nothing is written to the current folder. The fetched code lives in the Hangar store, and a small per-user record under `$XDG_STATE_HOME/jet/remote` keeps the pin and the effects the user said yes to.",
+      "story": "Sam sees a log-cleaning tool in a blog post. He types `jet run https://example.org/tool.jet`. Jet shows where it came from, its hash and that it reads files and connects to the network, then asks. He says yes and it runs. Next week the author changes the file, and Jet asks again before running the new bytes. In CI, the same command stops and names the `-A` flag to use.",
+      "inWild": "npx asks \"Need to install the following packages. Ok to proceed?\" in a terminal and fails in CI without --yes. Deno runs a URL directly and pins hashes with a lockfile, then prompts per permission while the program runs. Go runs `go run pkg@version` against a checksum database with no question.",
+      "detail": "Option A adds a remote target to `jet run`: an `https://` URL, `name#1.4.2`, `name#1.4` or a bare `name` that is not a local path. A local path always wins. Plain `http://` is refused. In a terminal Jet asks `Run it? [y/N]`, and only `y` runs. Without a terminal it stops before running and its Fix names `jet run -A <target>`.\n\nUnder A, `-A` skips the question, `--allow=R` skips it when R covers the effects, and `--deny=R` still wins. `--sha256=<hex>` pins a URL's first fetch, and `--locked` refuses any re-resolution.\n\nOption B adds a separate verb, `jet x <target>`, with the same fetch, pin and question.\n\nOption C has no remote run form. `jet fetch <target>` stores the code and prints a local path, and the first `jet run` of that path asks.",
+      "options": [
+        {
+          "key": "A",
+          "name": "`jet run` takes a URL or package",
+          "detail": "`jet run` accepts an https URL or a registry package as its target. It fetches, verifies and pins the code, then asks once in a terminal before the first run. Every run flag works as it does for a local file.",
+          "code": "$ jet run https://example.org/tool.jet\ntool.jet from example.org (sha256 3f9a…), new to this machine\nit reads files and connects to the network\nRun it? [y/N] y\ncleaned 12 log files"
+        },
+        {
+          "key": "B",
+          "name": "A separate `jet x` verb",
+          "detail": "A new top-level verb runs remote code with the same fetch, pin and question. `jet run` stays local-only.",
+          "code": "$ jet x https://example.org/tool.jet\ntool.jet from example.org (sha256 3f9a…), new to this machine\nit reads files and connects to the network\nRun it? [y/N] y\ncleaned 12 log files"
+        },
+        {
+          "key": "C",
+          "name": "Fetch first, then run the path",
+          "detail": "`jet fetch` stores the code and prints its local path. The first `jet run` of that path asks.",
+          "code": "$ jet fetch https://example.org/tool.jet\n~/.local/share/jet/hangar/3f9a…/tool.jet\n$ jet run ~/.local/share/jet/hangar/3f9a…/tool.jet\nit reads files and connects to the network\nRun it? [y/N] y\ncleaned 12 log files"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "npx",
+          "note": "npx runs a registry package by name and asks before installing it in a terminal. In CI it fails unless you pass --yes.",
+          "code": "$ npx cowsay hi\nNeed to install the following packages:\ncowsay@1.6.0\nOk to proceed? (y)"
+        },
+        {
+          "lang": "Deno",
+          "note": "Deno runs a URL directly. A lockfile pins the hashes, and it prompts for each permission while the program runs.",
+          "code": "$ deno run https://example.org/tool.ts\n⚠ Deno requests read access to \"logs\". Allow? [y/n/A]"
+        },
+        {
+          "lang": "Go",
+          "note": "Go runs a module at an exact version and checks it against a public checksum database. It never asks.",
+          "code": "$ go run example.org/tool@v1.4.2"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "It is one run command: flags, entry selection and authority work as for a local file. It reuses the `#version` selector, the Hangar store, the signed index and the lock record. The question is the change notice turned into a question.",
+        "tradeoff": "`jet run` gains a second kind of target, so a bare word that is not a local path may reach the registry.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It adds a second run command whose flags must mirror `jet run`, and it takes a top-level word from every project's job names."
+          },
+          {
+            "key": "C",
+            "reason": "It takes two steps for the common case, and the printed store path is long and opaque."
+          }
+        ],
+        "losses": [
+          {
+            "loss": "A typo in a bare package name could reach the registry instead of failing locally.",
+            "mitigation": "The question shows the source and hash before anything runs, and `name#version` or `./name` makes the intent explicit."
+          }
+        ]
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": "Try each option's command on the same remote tool.jet. Check that nothing runs before the question, that CI stops with a Fix naming -A, and that changed bytes ask again.",
+      "surface": {
+        "gist": "How do you run a Jet program that lives at a URL or in the registry?",
+        "lesson": "`jet run` also takes a URL or a registry package. Jet fetches it, pins its exact bytes and asks once before the first run. Changed bytes ask again.",
+        "trio": {
+          "current": {
+            "note": "Today `jet run` takes local files only.",
+            "code": "$ jet run https://example.org/tool.jet\nerror: no file https://example.org/tool.jet"
+          },
+          "wild": {
+            "lang": "npx",
+            "note": "npx asks before installing in a terminal and fails in CI without --yes.",
+            "code": "$ npx cowsay hi\nNeed to install the following packages:\ncowsay@1.6.0\nOk to proceed? (y)"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "`jet run` takes a URL",
+            "gist": "One run command for local and remote code.",
+            "gains": [
+              "One command to learn",
+              "Every run flag works"
+            ],
+            "losses": [
+              "Bare names may reach the registry"
+            ],
+            "proposed": {
+              "code": "$ jet run https://example.org/tool.jet\nit reads files and connects to the network\nRun it? [y/N]"
+            }
+          },
+          {
+            "key": "B",
+            "name": "A `jet x` verb",
+            "gist": "A separate verb for remote code.",
+            "gains": [
+              "Remote runs stand out"
+            ],
+            "losses": [
+              "Second run command",
+              "Takes a job name"
+            ],
+            "proposed": {
+              "code": "$ jet x https://example.org/tool.jet\nit reads files and connects to the network\nRun it? [y/N]"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Fetch, then run",
+            "gist": "Store the code first, then run its path.",
+            "gains": [
+              "No new run target"
+            ],
+            "losses": [
+              "Two steps",
+              "Long store path"
+            ],
+            "proposed": {
+              "code": "$ jet fetch https://example.org/tool.jet\n~/.local/share/jet/hangar/3f9a…/tool.jet\n$ jet run ~/.local/share/jet/hangar/3f9a…/tool.jet\nRun it? [y/N]"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "One run command, and remote code is pinned and named before it runs.",
+          "gains": [
+            "Same flags as local runs",
+            "Pinned by content"
+          ],
+          "losses": [
+            {
+              "loss": "Bare names may reach the registry.",
+              "mitigation": "The question shows source and hash first."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Two run commands to keep in step."
+            },
+            {
+              "key": "C",
+              "reason": "Two steps and an opaque path."
+            }
+          ],
+          "tradeoff": "`jet run` gains remote targets; local paths still win."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-08T19:18:07.783Z"
     }
   ],
   "questions": [
@@ -189699,6 +189871,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-08T19:18:13.768Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ihjl6a",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-08T19:18:07.783Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-JET-RUN-REMOTE1",
+      "note": "Run code straight from a URL or the registry, asking before its first run"
+    },
     {
       "at": "2026-11-08T19:04:31.082Z",
       "by": "Main",
