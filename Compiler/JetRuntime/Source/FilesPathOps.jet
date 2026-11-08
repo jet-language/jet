@@ -96,6 +96,29 @@ files_c_len: fn(name: I64) -> I64 {
     I64{1}
 }
 
+// open (O_RDONLY|O_CLOEXEC, EINTR retried; a directory opens too) then
+// syncfs (EINTR retried): every dirty file and directory on the filesystem
+// holding `path` reaches stable storage. Both fail as Flush.
+#Export(c) jet_std_fs_syncfs_raw: fn(path: I64, error: I64) -> I64 {
+    if !compiler_fs_path(path, HOST_IO_OP_FLUSH, error) -> return I64{0}
+    name: fd_c_path(path)
+    fd := I64{-4}
+    loop {
+        fd = host_call(I64{2}, name, I64{524288}, I64{0})
+        if (fd != I64{-4}) -> break
+    }
+    fd_c_path_drop(name, path)
+    if (fd < I64{0}) -> return compiler_fs_errno(HOST_IO_OP_FLUSH, path, -fd, error)
+    result := I64{-4}
+    loop {
+        result = host_call(I64{306}, fd, I64{0}, I64{0})
+        if (result != I64{-4}) -> break
+    }
+    _ := host_call(I64{3}, fd, I64{0}, I64{0})
+    if (result < I64{0}) -> return compiler_fs_errno(HOST_IO_OP_FLUSH, path, -result, error)
+    I64{1}
+}
+
 // symlink_metadata(path).mode() as the exact Int owner.
 #Export(c) jet_std_fs_stat_mode_raw: fn(path: I64, output: I64, error: I64) -> I64 {
     if !compiler_fs_path(path, HOST_IO_OP_READ, error) -> return I64{0}
