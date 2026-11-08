@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6684,
-    "rev": 95945,
+    "nextNum": 6686,
+    "rev": 95950,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -75753,6 +75753,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-05T15:30:23.246Z"
+        },
+        {
+          "n": 51,
+          "text": "D-FLOAT-INT1 = A is built. Int{f} converts a whole, finite, in-range Float and otherwise stops with a registered error that names math.trunc, floor, ceil, round and round_even; a literal body is checked at compile time. New math.round_even(f) -> Int rounds ties to even. New saturating_from(f) on every integer head (Int, I64, U8, I16, ...) truncates, clamps and maps NaN to 0. math.round and round_even stop on NaN, infinity and out of range. Every in-repository caller is migrated, and each form has a UI snapshot and a golden example on O0, O1, O2 and web.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T01:38:21.183Z"
         }
       ],
       "refs": [],
@@ -75763,9 +75772,9 @@
       "parentId": "c0xiig3k",
       "needsAcceptance": false,
       "created": "2026-10-29T12:53:42.058Z",
-      "updated": "2026-11-08T01:27:15.945Z",
-      "updatedBy": "owner",
-      "criteriaLastN": 50
+      "updated": "2026-11-08T01:38:21.183Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 51
     },
     {
       "id": "c08oghuo",
@@ -93347,6 +93356,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-07T03:30:40.998Z"
+        },
+        {
+          "n": 2,
+          "text": "D-FS-SYNC1 = A is built: core.files.sync_filesystem(path) IOError! -[FS.Write]> (syncfs on Linux, sync where no per-filesystem flush exists, IOError where neither does) with a conformance case, and the store publishes with one sync_filesystem before the publish rename.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T01:38:22.033Z"
         }
       ],
       "refs": [],
@@ -93357,9 +93375,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T05:33:07.839Z",
-      "updated": "2026-11-08T01:20:01.627Z",
-      "updatedBy": "owner",
-      "criteriaLastN": 1
+      "updated": "2026-11-08T01:38:22.033Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 2
     },
     {
       "id": "c0tpf98i",
@@ -99145,11 +99163,12 @@
         {
           "n": 2,
           "text": "A ratified Tower ballot fixes the command's name and flags, the target-library API (what a target receives from the checked program and how it emits text), and the first-party targets, with same-program alternatives and beginner and expert paths.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T16:22:09.119Z"
+          "evidence": "D-EXPORT-TARGET1 ratified A (2026-11-07): one public core.compiler.target Target trait over the explicit program, with required op methods, host leaves and optional idiom hooks; capability errors before output; jet build --to <target>; jet test --to conformance; C and Rust first-party.",
+          "at": "2026-11-08T01:38:23.348Z",
+          "closure": "decision"
         },
         {
           "n": 3,
@@ -99181,8 +99200,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T16:22:00.126Z",
-      "updated": "2026-11-08T01:35:30.413Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-08T01:38:23.348Z",
+      "updatedBy": "Main",
       "criteriaLastN": 6
     },
     {
@@ -99730,6 +99749,122 @@
       "needsAcceptance": false,
       "created": "2026-11-08T01:31:11.556Z",
       "updated": "2026-11-08T01:31:11.556Z",
+      "updatedBy": "Main"
+    },
+    {
+      "id": "c08h4xjb",
+      "num": 6684,
+      "title": "The hosted Jetpack engine takes about 3 minutes to build on a quiet host while the whole compiler self-compiles in about 10 s",
+      "body": "Owner direction 2026-11-07: Pareto speed work for the fresh-clone full profile.\n\nThe packages suite builds the hosted Jetpack engine (Jetpack/Bootstrap/Assemble.jet hosted, then `jet build src/jetpack.jet`, in Compiler/test.jet jetpack_prepare). It took 184 s when it started on a quiet host and about 13 minutes on one core under load. The compiler, a larger codebase, self-compiles in about 10 s (#6527). The ratio points at something specific to the Jetpack build path (the assembled single unit, its optimization level, a pathological function, or a phase that grows superlinearly), not at code size.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A per-phase profile of the hosted engine build (front end, sema, lowering, optimization, emission, link) names where the time goes, and it is recorded on this card with the commit.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T01:42:16.015Z"
+        },
+        {
+          "n": 2,
+          "text": "The root cause is fixed in the compiler or in Jetpack's assembly, and the hosted engine build on a quiet batch host takes at most 30 s, measured and recorded with the commit.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T01:42:16.015Z"
+        },
+        {
+          "n": 3,
+          "text": "The built engine is byte-for-byte the same program as before the fix, or every packages-suite engine claim still passes.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T01:42:16.015Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G11"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-08T01:42:16.015Z",
+      "updated": "2026-11-08T01:42:16.015Z",
+      "updatedBy": "Main"
+    },
+    {
+      "id": "c0slc5oo",
+      "num": 6685,
+      "title": "The Jetpack engine unit's claims all run serially because they share process state",
+      "body": "Owner direction 2026-11-07: card the remaining slow phases.\n\nCompiler/test.jet jetpack_engine_rows runs `jet test src/jetpack.jet --serial` over the assembled engine unit (about 559 claims), because the claims share process state. Every claim waits for the one before it.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The wall time of the engine unit's compile and its serial claim run are measured on the batch host and recorded with the commit.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T01:42:17.232Z"
+        },
+        {
+          "n": 2,
+          "text": "Claims that share process state are isolated (each owns its state, or the shared state is per-claim), so the unit runs without --serial and every claim still passes.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T01:42:17.232Z"
+        },
+        {
+          "n": 3,
+          "text": "The engine unit's claims finish in under 1 minute wall.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T01:42:17.232Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G11"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-08T01:42:17.232Z",
+      "updated": "2026-11-08T01:42:17.232Z",
       "updatedBy": "Main"
     }
   ],
@@ -187584,6 +187719,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-08T01:42:17.232Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0slc5oo",
+      "note": "The Jetpack engine unit's claims all run serially because they share process state"
+    },
+    {
+      "at": "2026-11-08T01:42:16.016Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c08h4xjb",
+      "note": "The hosted Jetpack engine takes about 3 minutes to build on a quiet host while the whole compiler self-compiles in about 10 s"
+    },
+    {
+      "at": "2026-11-08T01:38:23.348Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0b4rnem",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-08T01:38:22.033Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0g93joj",
+      "note": "#2 D-FS-SYNC1 = A is built: core.files.sync_filesystem(path) IO"
+    },
+    {
+      "at": "2026-11-08T01:38:21.183Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0w1wcfc",
+      "note": "#51 D-FLOAT-INT1 = A is built. Int{f} converts a whole, finite, "
+    },
     {
       "at": "2026-11-08T01:35:30.413Z",
       "by": "owner",
