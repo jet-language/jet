@@ -9,9 +9,9 @@
 #define LANGUAGE_VERSION 15
 #define STATE_COUNT 1271
 #define LARGE_STATE_COUNT 1037
-#define SYMBOL_COUNT 188
+#define SYMBOL_COUNT 190
 #define ALIAS_COUNT 0
-#define TOKEN_COUNT 128
+#define TOKEN_COUNT 130
 #define EXTERNAL_TOKEN_COUNT 0
 #define FIELD_COUNT 15
 #define MAX_ALIAS_SEQUENCE_LENGTH 8
@@ -116,97 +116,99 @@ enum ts_symbol_identifiers {
   anon_sym_LT_LT_EQ = 94,
   anon_sym_LT_EQ = 95,
   anon_sym_LT_EQ_GT = 96,
-  anon_sym_EQ_EQ = 97,
-  anon_sym_GT_EQ = 98,
-  anon_sym_GT_GT = 99,
-  anon_sym_GT_GT_EQ = 100,
-  anon_sym_QMARK_DOT = 101,
-  anon_sym_QMARK_QMARK = 102,
-  anon_sym_CARET_EQ = 103,
-  anon_sym_PIPE_EQ = 104,
-  anon_sym_PIPE_PIPE = 105,
-  anon_sym_TILDE_PIPE = 106,
-  anon_sym_TILDE_PIPE_EQ = 107,
-  anon_sym_EQ_GT = 108,
-  anon_sym_DOT_DOT_DOT = 109,
-  anon_sym_COLON_GT = 110,
-  anon_sym_LT_COLON = 111,
-  anon_sym_POUND = 112,
-  anon_sym_DOLLAR = 113,
-  anon_sym_AT = 114,
-  sym__unknown = 115,
-  sym_number_literal = 116,
-  sym_char_literal = 117,
-  anon_sym_DQUOTE = 118,
-  anon_sym_DQUOTE_DQUOTE_DQUOTE = 119,
-  sym_raw_string = 120,
-  aux_sym_string_content_token1 = 121,
-  sym__multiline_quotes = 122,
-  sym_escape_sequence = 123,
-  sym__escaped_string = 124,
-  sym_line_comment = 125,
-  sym_doc_comment = 126,
-  sym_block_comment = 127,
-  sym_source_file = 128,
-  sym_inline_package = 129,
-  sym_record_literal = 130,
-  sym__item = 131,
-  sym__element = 132,
-  sym_function_def = 133,
-  sym_type_parameters = 134,
-  sym_parameters = 135,
-  sym__signature_part = 136,
-  sym__type_part = 137,
-  sym_struct_def = 138,
-  sym_enum_def = 139,
-  sym_trait_def = 140,
-  sym_tag_def = 141,
-  sym_impl_block = 142,
-  sym_module_def = 143,
-  sym__decl_label = 144,
-  sym__head_name = 145,
-  sym__head_part = 146,
-  sym_decl_head = 147,
-  sym_binding = 148,
-  sym_inbody_marker = 149,
-  sym_label = 150,
-  sym__label_name = 151,
-  sym_call_expr = 152,
-  sym_arguments = 153,
-  sym_constructor = 154,
-  sym_record_body = 155,
-  sym_member_expr = 156,
-  sym_method_call_expr = 157,
-  sym__member_name = 158,
-  sym_variant = 159,
-  sym_result_handler_expr = 160,
-  sym__handler_value = 161,
-  sym_paren_expr = 162,
-  sym_bracket_expr = 163,
-  sym_map_type = 164,
-  sym__type = 165,
-  sym_list_import = 166,
-  sym_effect_row = 167,
-  sym_block = 168,
-  sym_attribute_list = 169,
-  sym__keyword_word = 170,
-  sym_self = 171,
-  sym_boolean = 172,
-  sym_primitive_type = 173,
-  sym__operator = 174,
-  sym_string_literal = 175,
-  sym_multiline_string = 176,
-  sym_string_content = 177,
-  sym__multiline_content = 178,
-  sym_interpolation = 179,
-  aux_sym_source_file_repeat1 = 180,
-  aux_sym_function_def_repeat1 = 181,
-  aux_sym_type_parameters_repeat1 = 182,
-  aux_sym_parameters_repeat1 = 183,
-  aux_sym_struct_def_repeat1 = 184,
-  aux_sym_string_literal_repeat1 = 185,
-  aux_sym_multiline_string_repeat1 = 186,
-  aux_sym_interpolation_repeat1 = 187,
+  anon_sym_LT_GT = 97,
+  anon_sym_EQ_EQ = 98,
+  anon_sym_GT_EQ = 99,
+  anon_sym_GT_GT = 100,
+  anon_sym_GT_GT_EQ = 101,
+  anon_sym_QMARK_DOT = 102,
+  anon_sym_QMARK_QMARK = 103,
+  anon_sym_CARET_EQ = 104,
+  anon_sym_PIPE_EQ = 105,
+  anon_sym_PIPE_GT = 106,
+  anon_sym_PIPE_PIPE = 107,
+  anon_sym_TILDE_PIPE = 108,
+  anon_sym_TILDE_PIPE_EQ = 109,
+  anon_sym_EQ_GT = 110,
+  anon_sym_DOT_DOT_DOT = 111,
+  anon_sym_COLON_GT = 112,
+  anon_sym_LT_COLON = 113,
+  anon_sym_POUND = 114,
+  anon_sym_DOLLAR = 115,
+  anon_sym_AT = 116,
+  sym__unknown = 117,
+  sym_number_literal = 118,
+  sym_char_literal = 119,
+  anon_sym_DQUOTE = 120,
+  anon_sym_DQUOTE_DQUOTE_DQUOTE = 121,
+  sym_raw_string = 122,
+  aux_sym_string_content_token1 = 123,
+  sym__multiline_quotes = 124,
+  sym_escape_sequence = 125,
+  sym__escaped_string = 126,
+  sym_line_comment = 127,
+  sym_doc_comment = 128,
+  sym_block_comment = 129,
+  sym_source_file = 130,
+  sym_inline_package = 131,
+  sym_record_literal = 132,
+  sym__item = 133,
+  sym__element = 134,
+  sym_function_def = 135,
+  sym_type_parameters = 136,
+  sym_parameters = 137,
+  sym__signature_part = 138,
+  sym__type_part = 139,
+  sym_struct_def = 140,
+  sym_enum_def = 141,
+  sym_trait_def = 142,
+  sym_tag_def = 143,
+  sym_impl_block = 144,
+  sym_module_def = 145,
+  sym__decl_label = 146,
+  sym__head_name = 147,
+  sym__head_part = 148,
+  sym_decl_head = 149,
+  sym_binding = 150,
+  sym_inbody_marker = 151,
+  sym_label = 152,
+  sym__label_name = 153,
+  sym_call_expr = 154,
+  sym_arguments = 155,
+  sym_constructor = 156,
+  sym_record_body = 157,
+  sym_member_expr = 158,
+  sym_method_call_expr = 159,
+  sym__member_name = 160,
+  sym_variant = 161,
+  sym_result_handler_expr = 162,
+  sym__handler_value = 163,
+  sym_paren_expr = 164,
+  sym_bracket_expr = 165,
+  sym_map_type = 166,
+  sym__type = 167,
+  sym_list_import = 168,
+  sym_effect_row = 169,
+  sym_block = 170,
+  sym_attribute_list = 171,
+  sym__keyword_word = 172,
+  sym_self = 173,
+  sym_boolean = 174,
+  sym_primitive_type = 175,
+  sym__operator = 176,
+  sym_string_literal = 177,
+  sym_multiline_string = 178,
+  sym_string_content = 179,
+  sym__multiline_content = 180,
+  sym_interpolation = 181,
+  aux_sym_source_file_repeat1 = 182,
+  aux_sym_function_def_repeat1 = 183,
+  aux_sym_type_parameters_repeat1 = 184,
+  aux_sym_parameters_repeat1 = 185,
+  aux_sym_struct_def_repeat1 = 186,
+  aux_sym_string_literal_repeat1 = 187,
+  aux_sym_multiline_string_repeat1 = 188,
+  aux_sym_interpolation_repeat1 = 189,
 };
 
 static const char * const ts_symbol_names[] = {
@@ -307,6 +309,7 @@ static const char * const ts_symbol_names[] = {
   [anon_sym_LT_LT_EQ] = "<<=",
   [anon_sym_LT_EQ] = "<=",
   [anon_sym_LT_EQ_GT] = "<=>",
+  [anon_sym_LT_GT] = "<>",
   [anon_sym_EQ_EQ] = "==",
   [anon_sym_GT_EQ] = ">=",
   [anon_sym_GT_GT] = ">>",
@@ -315,6 +318,7 @@ static const char * const ts_symbol_names[] = {
   [anon_sym_QMARK_QMARK] = "\?\?",
   [anon_sym_CARET_EQ] = "^=",
   [anon_sym_PIPE_EQ] = "|=",
+  [anon_sym_PIPE_GT] = "|>",
   [anon_sym_PIPE_PIPE] = "||",
   [anon_sym_TILDE_PIPE] = "~|",
   [anon_sym_TILDE_PIPE_EQ] = "~|=",
@@ -498,6 +502,7 @@ static const TSSymbol ts_symbol_map[] = {
   [anon_sym_LT_LT_EQ] = anon_sym_LT_LT_EQ,
   [anon_sym_LT_EQ] = anon_sym_LT_EQ,
   [anon_sym_LT_EQ_GT] = anon_sym_LT_EQ_GT,
+  [anon_sym_LT_GT] = anon_sym_LT_GT,
   [anon_sym_EQ_EQ] = anon_sym_EQ_EQ,
   [anon_sym_GT_EQ] = anon_sym_GT_EQ,
   [anon_sym_GT_GT] = anon_sym_GT_GT,
@@ -506,6 +511,7 @@ static const TSSymbol ts_symbol_map[] = {
   [anon_sym_QMARK_QMARK] = anon_sym_QMARK_QMARK,
   [anon_sym_CARET_EQ] = anon_sym_CARET_EQ,
   [anon_sym_PIPE_EQ] = anon_sym_PIPE_EQ,
+  [anon_sym_PIPE_GT] = anon_sym_PIPE_GT,
   [anon_sym_PIPE_PIPE] = anon_sym_PIPE_PIPE,
   [anon_sym_TILDE_PIPE] = anon_sym_TILDE_PIPE,
   [anon_sym_TILDE_PIPE_EQ] = anon_sym_TILDE_PIPE_EQ,
@@ -980,6 +986,10 @@ static const TSSymbolMetadata ts_symbol_metadata[] = {
     .visible = true,
     .named = false,
   },
+  [anon_sym_LT_GT] = {
+    .visible = true,
+    .named = false,
+  },
   [anon_sym_EQ_EQ] = {
     .visible = true,
     .named = false,
@@ -1009,6 +1019,10 @@ static const TSSymbolMetadata ts_symbol_metadata[] = {
     .named = false,
   },
   [anon_sym_PIPE_EQ] = {
+    .visible = true,
+    .named = false,
+  },
+  [anon_sym_PIPE_GT] = {
     .visible = true,
     .named = false,
   },
@@ -3627,9 +3641,9 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
       if (eof) ADVANCE(64);
       ADVANCE_MAP(
         '!', 87,
-        '"', 228,
-        '#', 198,
-        '$', 199,
+        '"', 230,
+        '#', 200,
+        '$', 201,
         '%', 166,
         '&', 91,
         '\'', 29,
@@ -3641,14 +3655,14 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
         '-', 101,
         '.', 72,
         '/', 99,
-        '0', 212,
+        '0', 214,
         ':', 66,
-        ';', 202,
+        ';', 204,
         '<', 79,
         '=', 106,
         '>', 81,
         '?', 75,
-        '@', 200,
+        '@', 202,
         'B', 154,
         'C', 149,
         'E', 159,
@@ -3657,10 +3671,10 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
         'S', 162,
         'U', 136,
         '[', 110,
-        '\\', 209,
+        '\\', 211,
         ']', 111,
         '^', 93,
-        '`', 210,
+        '`', 212,
         '{', 107,
         '|', 89,
         '}', 68,
@@ -3668,17 +3682,17 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
       );
       if (('\t' <= lookahead && lookahead <= '\r') ||
           lookahead == ' ') SKIP(60);
-      if (('1' <= lookahead && lookahead <= '9')) ADVANCE(213);
+      if (('1' <= lookahead && lookahead <= '9')) ADVANCE(215);
       if (set_contains(sym_type_identifier_character_set_1, 651, lookahead)) ADVANCE(163);
       if (set_contains(sym_identifier_character_set_1, 1176, lookahead)) ADVANCE(164);
-      if ((!eof && set_contains(sym__unknown_character_set_1, 778, lookahead))) ADVANCE(201);
+      if ((!eof && set_contains(sym__unknown_character_set_1, 778, lookahead))) ADVANCE(203);
       END_STATE();
     case 1:
       ADVANCE_MAP(
         '!', 87,
-        '"', 228,
-        '#', 198,
-        '$', 199,
+        '"', 230,
+        '#', 200,
+        '$', 201,
         '%', 166,
         '&', 91,
         '\'', 29,
@@ -3690,14 +3704,14 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
         '-', 101,
         '.', 72,
         '/', 99,
-        '0', 212,
+        '0', 214,
         ':', 66,
-        ';', 203,
+        ';', 205,
         '<', 79,
         '=', 106,
         '>', 81,
         '?', 75,
-        '@', 200,
+        '@', 202,
         'B', 154,
         'C', 149,
         'E', 159,
@@ -3707,24 +3721,24 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
         'U', 136,
         '[', 110,
         '^', 93,
-        '`', 210,
+        '`', 212,
         '{', 107,
         '|', 89,
         '~', 94,
       );
       if (('\t' <= lookahead && lookahead <= '\r') ||
           lookahead == ' ') SKIP(12);
-      if (('1' <= lookahead && lookahead <= '9')) ADVANCE(213);
+      if (('1' <= lookahead && lookahead <= '9')) ADVANCE(215);
       if (set_contains(sym_type_identifier_character_set_1, 651, lookahead)) ADVANCE(163);
       if (set_contains(sym_identifier_character_set_1, 1176, lookahead)) ADVANCE(164);
-      if ((!eof && set_contains(sym__unknown_character_set_1, 778, lookahead))) ADVANCE(201);
+      if ((!eof && set_contains(sym__unknown_character_set_1, 778, lookahead))) ADVANCE(203);
       END_STATE();
     case 2:
       ADVANCE_MAP(
         '!', 87,
-        '"', 228,
-        '#', 198,
-        '$', 199,
+        '"', 230,
+        '#', 200,
+        '$', 201,
         '%', 166,
         '&', 91,
         '\'', 29,
@@ -3736,14 +3750,14 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
         '-', 101,
         '.', 72,
         '/', 99,
-        '0', 212,
+        '0', 214,
         ':', 66,
-        ';', 203,
+        ';', 205,
         '<', 77,
         '=', 106,
         '>', 81,
         '?', 75,
-        '@', 200,
+        '@', 202,
         'B', 154,
         'C', 149,
         'E', 159,
@@ -3753,24 +3767,24 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
         'U', 136,
         '[', 110,
         '^', 93,
-        '`', 210,
+        '`', 212,
         '{', 107,
         '|', 89,
         '~', 94,
       );
       if (('\t' <= lookahead && lookahead <= '\r') ||
           lookahead == ' ') SKIP(12);
-      if (('1' <= lookahead && lookahead <= '9')) ADVANCE(213);
+      if (('1' <= lookahead && lookahead <= '9')) ADVANCE(215);
       if (set_contains(sym_type_identifier_character_set_1, 651, lookahead)) ADVANCE(163);
       if (set_contains(sym_identifier_character_set_1, 1176, lookahead)) ADVANCE(164);
-      if ((!eof && set_contains(sym__unknown_character_set_1, 778, lookahead))) ADVANCE(201);
+      if ((!eof && set_contains(sym__unknown_character_set_1, 778, lookahead))) ADVANCE(203);
       END_STATE();
     case 3:
       ADVANCE_MAP(
         '!', 87,
-        '"', 228,
-        '#', 198,
-        '$', 199,
+        '"', 230,
+        '#', 200,
+        '$', 201,
         '%', 166,
         '&', 91,
         '\'', 29,
@@ -3781,14 +3795,14 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
         '-', 101,
         '.', 72,
         '/', 99,
-        '0', 212,
+        '0', 214,
         ':', 66,
-        ';', 205,
+        ';', 207,
         '<', 79,
         '=', 106,
         '>', 81,
         '?', 75,
-        '@', 200,
+        '@', 202,
         'B', 154,
         'C', 149,
         'E', 159,
@@ -3799,24 +3813,24 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
         '[', 110,
         ']', 111,
         '^', 93,
-        '`', 210,
+        '`', 212,
         '{', 107,
         '|', 89,
         '~', 94,
       );
       if (('\t' <= lookahead && lookahead <= '\r') ||
           lookahead == ' ') SKIP(14);
-      if (('1' <= lookahead && lookahead <= '9')) ADVANCE(213);
+      if (('1' <= lookahead && lookahead <= '9')) ADVANCE(215);
       if (set_contains(sym_type_identifier_character_set_1, 651, lookahead)) ADVANCE(163);
       if (set_contains(sym_identifier_character_set_1, 1176, lookahead)) ADVANCE(164);
-      if ((!eof && set_contains(sym__unknown_character_set_1, 778, lookahead))) ADVANCE(201);
+      if ((!eof && set_contains(sym__unknown_character_set_1, 778, lookahead))) ADVANCE(203);
       END_STATE();
     case 4:
       ADVANCE_MAP(
         '!', 87,
-        '"', 228,
-        '#', 198,
-        '$', 199,
+        '"', 230,
+        '#', 200,
+        '$', 201,
         '%', 166,
         '&', 91,
         '\'', 29,
@@ -3827,14 +3841,14 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
         '-', 101,
         '.', 72,
         '/', 99,
-        '0', 212,
+        '0', 214,
         ':', 66,
-        ';', 205,
+        ';', 207,
         '<', 77,
         '=', 106,
         '>', 81,
         '?', 75,
-        '@', 200,
+        '@', 202,
         'B', 154,
         'C', 149,
         'E', 159,
@@ -3845,24 +3859,24 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
         '[', 110,
         ']', 111,
         '^', 93,
-        '`', 210,
+        '`', 212,
         '{', 107,
         '|', 89,
         '~', 94,
       );
       if (('\t' <= lookahead && lookahead <= '\r') ||
           lookahead == ' ') SKIP(14);
-      if (('1' <= lookahead && lookahead <= '9')) ADVANCE(213);
+      if (('1' <= lookahead && lookahead <= '9')) ADVANCE(215);
       if (set_contains(sym_type_identifier_character_set_1, 651, lookahead)) ADVANCE(163);
       if (set_contains(sym_identifier_character_set_1, 1176, lookahead)) ADVANCE(164);
-      if ((!eof && set_contains(sym__unknown_character_set_1, 778, lookahead))) ADVANCE(201);
+      if ((!eof && set_contains(sym__unknown_character_set_1, 778, lookahead))) ADVANCE(203);
       END_STATE();
     case 5:
       ADVANCE_MAP(
         '!', 87,
-        '"', 228,
-        '#', 198,
-        '$', 199,
+        '"', 230,
+        '#', 200,
+        '$', 201,
         '%', 166,
         '&', 91,
         '\'', 29,
@@ -3873,14 +3887,14 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
         '-', 101,
         '.', 72,
         '/', 99,
-        '0', 212,
+        '0', 214,
         ':', 66,
-        ';', 206,
+        ';', 208,
         '<', 79,
         '=', 106,
         '>', 81,
         '?', 75,
-        '@', 200,
+        '@', 202,
         'B', 154,
         'C', 149,
         'E', 159,
@@ -3889,9 +3903,9 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
         'S', 162,
         'U', 136,
         '[', 110,
-        '\\', 209,
+        '\\', 211,
         '^', 93,
-        '`', 210,
+        '`', 212,
         '{', 107,
         '|', 89,
         '}', 68,
@@ -3899,17 +3913,17 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
       );
       if (('\t' <= lookahead && lookahead <= '\r') ||
           lookahead == ' ') SKIP(15);
-      if (('1' <= lookahead && lookahead <= '9')) ADVANCE(213);
+      if (('1' <= lookahead && lookahead <= '9')) ADVANCE(215);
       if (set_contains(sym_type_identifier_character_set_1, 651, lookahead)) ADVANCE(163);
       if (set_contains(sym_identifier_character_set_1, 1176, lookahead)) ADVANCE(164);
-      if ((!eof && set_contains(sym__unknown_character_set_1, 778, lookahead))) ADVANCE(201);
+      if ((!eof && set_contains(sym__unknown_character_set_1, 778, lookahead))) ADVANCE(203);
       END_STATE();
     case 6:
       ADVANCE_MAP(
         '!', 87,
-        '"', 228,
-        '#', 198,
-        '$', 199,
+        '"', 230,
+        '#', 200,
+        '$', 201,
         '%', 166,
         '&', 91,
         '\'', 29,
@@ -3920,14 +3934,14 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
         '-', 101,
         '.', 72,
         '/', 99,
-        '0', 212,
+        '0', 214,
         ':', 66,
-        ';', 206,
+        ';', 208,
         '<', 77,
         '=', 106,
         '>', 81,
         '?', 75,
-        '@', 200,
+        '@', 202,
         'B', 154,
         'C', 149,
         'E', 159,
@@ -3936,9 +3950,9 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
         'S', 162,
         'U', 136,
         '[', 110,
-        '\\', 209,
+        '\\', 211,
         '^', 93,
-        '`', 210,
+        '`', 212,
         '{', 107,
         '|', 89,
         '}', 68,
@@ -3946,17 +3960,17 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
       );
       if (('\t' <= lookahead && lookahead <= '\r') ||
           lookahead == ' ') SKIP(15);
-      if (('1' <= lookahead && lookahead <= '9')) ADVANCE(213);
+      if (('1' <= lookahead && lookahead <= '9')) ADVANCE(215);
       if (set_contains(sym_type_identifier_character_set_1, 651, lookahead)) ADVANCE(163);
       if (set_contains(sym_identifier_character_set_1, 1176, lookahead)) ADVANCE(164);
-      if ((!eof && set_contains(sym__unknown_character_set_1, 778, lookahead))) ADVANCE(201);
+      if ((!eof && set_contains(sym__unknown_character_set_1, 778, lookahead))) ADVANCE(203);
       END_STATE();
     case 7:
       ADVANCE_MAP(
         '!', 87,
-        '"', 228,
-        '#', 198,
-        '$', 199,
+        '"', 230,
+        '#', 200,
+        '$', 201,
         '%', 166,
         '&', 91,
         '\'', 29,
@@ -3967,14 +3981,14 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
         '-', 101,
         '.', 72,
         '/', 99,
-        '0', 212,
+        '0', 214,
         ':', 66,
-        ';', 207,
+        ';', 209,
         '<', 79,
         '=', 106,
         '>', 81,
         '?', 75,
-        '@', 200,
+        '@', 202,
         'B', 154,
         'C', 149,
         'E', 159,
@@ -3984,7 +3998,7 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
         'U', 136,
         '[', 110,
         '^', 93,
-        '`', 210,
+        '`', 212,
         '{', 107,
         '|', 89,
         '}', 68,
@@ -3992,17 +4006,17 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
       );
       if (('\t' <= lookahead && lookahead <= '\r') ||
           lookahead == ' ') SKIP(16);
-      if (('1' <= lookahead && lookahead <= '9')) ADVANCE(213);
+      if (('1' <= lookahead && lookahead <= '9')) ADVANCE(215);
       if (set_contains(sym_type_identifier_character_set_1, 651, lookahead)) ADVANCE(163);
       if (set_contains(sym_identifier_character_set_1, 1176, lookahead)) ADVANCE(164);
-      if ((!eof && set_contains(sym__unknown_character_set_1, 778, lookahead))) ADVANCE(201);
+      if ((!eof && set_contains(sym__unknown_character_set_1, 778, lookahead))) ADVANCE(203);
       END_STATE();
     case 8:
       ADVANCE_MAP(
         '!', 87,
-        '"', 228,
-        '#', 198,
-        '$', 199,
+        '"', 230,
+        '#', 200,
+        '$', 201,
         '%', 166,
         '&', 91,
         '\'', 29,
@@ -4013,14 +4027,14 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
         '-', 101,
         '.', 72,
         '/', 99,
-        '0', 212,
+        '0', 214,
         ':', 66,
-        ';', 207,
+        ';', 209,
         '<', 77,
         '=', 106,
         '>', 81,
         '?', 75,
-        '@', 200,
+        '@', 202,
         'B', 154,
         'C', 149,
         'E', 159,
@@ -4030,7 +4044,7 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
         'U', 136,
         '[', 110,
         '^', 93,
-        '`', 210,
+        '`', 212,
         '{', 107,
         '|', 89,
         '}', 68,
@@ -4038,17 +4052,17 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
       );
       if (('\t' <= lookahead && lookahead <= '\r') ||
           lookahead == ' ') SKIP(16);
-      if (('1' <= lookahead && lookahead <= '9')) ADVANCE(213);
+      if (('1' <= lookahead && lookahead <= '9')) ADVANCE(215);
       if (set_contains(sym_type_identifier_character_set_1, 651, lookahead)) ADVANCE(163);
       if (set_contains(sym_identifier_character_set_1, 1176, lookahead)) ADVANCE(164);
-      if ((!eof && set_contains(sym__unknown_character_set_1, 778, lookahead))) ADVANCE(201);
+      if ((!eof && set_contains(sym__unknown_character_set_1, 778, lookahead))) ADVANCE(203);
       END_STATE();
     case 9:
       ADVANCE_MAP(
         '!', 87,
-        '"', 228,
-        '#', 198,
-        '$', 199,
+        '"', 230,
+        '#', 200,
+        '$', 201,
         '%', 166,
         '&', 91,
         '\'', 29,
@@ -4059,14 +4073,14 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
         '-', 101,
         '.', 72,
         '/', 99,
-        '0', 212,
+        '0', 214,
         ':', 66,
-        ';', 208,
+        ';', 210,
         '<', 79,
         '=', 106,
         '>', 81,
         '?', 75,
-        '@', 200,
+        '@', 202,
         'B', 154,
         'C', 149,
         'E', 159,
@@ -4077,24 +4091,24 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
         '[', 110,
         ']', 28,
         '^', 93,
-        '`', 210,
+        '`', 212,
         '{', 107,
         '|', 89,
         '~', 94,
       );
       if (('\t' <= lookahead && lookahead <= '\r') ||
           lookahead == ' ') SKIP(17);
-      if (('1' <= lookahead && lookahead <= '9')) ADVANCE(213);
+      if (('1' <= lookahead && lookahead <= '9')) ADVANCE(215);
       if (set_contains(sym_type_identifier_character_set_1, 651, lookahead)) ADVANCE(163);
       if (set_contains(sym_identifier_character_set_1, 1176, lookahead)) ADVANCE(164);
-      if ((!eof && set_contains(sym__unknown_character_set_1, 778, lookahead))) ADVANCE(201);
+      if ((!eof && set_contains(sym__unknown_character_set_1, 778, lookahead))) ADVANCE(203);
       END_STATE();
     case 10:
       ADVANCE_MAP(
         '!', 87,
-        '"', 228,
-        '#', 198,
-        '$', 199,
+        '"', 230,
+        '#', 200,
+        '$', 201,
         '%', 166,
         '&', 91,
         '\'', 29,
@@ -4105,14 +4119,14 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
         '-', 101,
         '.', 72,
         '/', 99,
-        '0', 212,
+        '0', 214,
         ':', 66,
-        ';', 208,
+        ';', 210,
         '<', 77,
         '=', 106,
         '>', 81,
         '?', 75,
-        '@', 200,
+        '@', 202,
         'B', 154,
         'C', 149,
         'E', 159,
@@ -4123,24 +4137,24 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
         '[', 110,
         ']', 28,
         '^', 93,
-        '`', 210,
+        '`', 212,
         '{', 107,
         '|', 89,
         '~', 94,
       );
       if (('\t' <= lookahead && lookahead <= '\r') ||
           lookahead == ' ') SKIP(17);
-      if (('1' <= lookahead && lookahead <= '9')) ADVANCE(213);
+      if (('1' <= lookahead && lookahead <= '9')) ADVANCE(215);
       if (set_contains(sym_type_identifier_character_set_1, 651, lookahead)) ADVANCE(163);
       if (set_contains(sym_identifier_character_set_1, 1176, lookahead)) ADVANCE(164);
-      if ((!eof && set_contains(sym__unknown_character_set_1, 778, lookahead))) ADVANCE(201);
+      if ((!eof && set_contains(sym__unknown_character_set_1, 778, lookahead))) ADVANCE(203);
       END_STATE();
     case 11:
       ADVANCE_MAP(
         '!', 87,
-        '"', 228,
-        '#', 198,
-        '$', 199,
+        '"', 230,
+        '#', 200,
+        '$', 201,
         '%', 166,
         '&', 91,
         '\'', 29,
@@ -4152,14 +4166,14 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
         '-', 101,
         '.', 72,
         '/', 99,
-        '0', 212,
+        '0', 214,
         ':', 66,
-        ';', 202,
+        ';', 204,
         '<', 77,
         '=', 106,
         '>', 81,
         '?', 75,
-        '@', 200,
+        '@', 202,
         'B', 154,
         'C', 149,
         'E', 159,
@@ -4168,10 +4182,10 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
         'S', 162,
         'U', 136,
         '[', 109,
-        '\\', 209,
+        '\\', 211,
         ']', 111,
         '^', 93,
-        '`', 210,
+        '`', 212,
         '{', 67,
         '|', 89,
         '}', 68,
@@ -4179,17 +4193,17 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
       );
       if (('\t' <= lookahead && lookahead <= '\r') ||
           lookahead == ' ') SKIP(11);
-      if (('1' <= lookahead && lookahead <= '9')) ADVANCE(213);
+      if (('1' <= lookahead && lookahead <= '9')) ADVANCE(215);
       if (set_contains(sym_type_identifier_character_set_1, 651, lookahead)) ADVANCE(163);
       if (set_contains(sym_identifier_character_set_1, 1176, lookahead)) ADVANCE(164);
-      if ((!eof && set_contains(sym__unknown_character_set_1, 778, lookahead))) ADVANCE(201);
+      if ((!eof && set_contains(sym__unknown_character_set_1, 778, lookahead))) ADVANCE(203);
       END_STATE();
     case 12:
       ADVANCE_MAP(
         '!', 87,
-        '"', 228,
-        '#', 198,
-        '$', 199,
+        '"', 230,
+        '#', 200,
+        '$', 201,
         '%', 166,
         '&', 91,
         '\'', 29,
@@ -4201,104 +4215,104 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
         '-', 101,
         '.', 72,
         '/', 99,
-        '0', 212,
-        ':', 66,
-        ';', 203,
-        '<', 77,
-        '=', 106,
-        '>', 81,
-        '?', 75,
-        '@', 200,
-        'B', 154,
-        'C', 149,
-        'E', 159,
-        'F', 140,
-        'I', 135,
-        'S', 162,
-        'U', 136,
-        '[', 109,
-        '^', 93,
-        '`', 210,
-        '{', 67,
-        '|', 89,
-        '~', 94,
-      );
-      if (('\t' <= lookahead && lookahead <= '\r') ||
-          lookahead == ' ') SKIP(12);
-      if (('1' <= lookahead && lookahead <= '9')) ADVANCE(213);
-      if (set_contains(sym_type_identifier_character_set_1, 651, lookahead)) ADVANCE(163);
-      if (set_contains(sym_identifier_character_set_1, 1176, lookahead)) ADVANCE(164);
-      if ((!eof && set_contains(sym__unknown_character_set_1, 778, lookahead))) ADVANCE(201);
-      END_STATE();
-    case 13:
-      ADVANCE_MAP(
-        '!', 87,
-        '"', 228,
-        '#', 198,
-        '$', 199,
-        '%', 166,
-        '&', 91,
-        '\'', 29,
-        '(', 82,
-        '*', 98,
-        '+', 96,
-        ',', 69,
-        '-', 101,
-        '.', 72,
-        '/', 99,
-        '0', 212,
-        ':', 66,
-        ';', 204,
-        '<', 77,
-        '=', 106,
-        '>', 81,
-        '?', 75,
-        '@', 200,
-        'B', 154,
-        'C', 149,
-        'E', 159,
-        'F', 140,
-        'I', 135,
-        'S', 162,
-        'U', 136,
-        '[', 109,
-        '^', 93,
-        '`', 210,
-        '{', 67,
-        '|', 89,
-        '~', 94,
-      );
-      if (('\t' <= lookahead && lookahead <= '\r') ||
-          lookahead == ' ') SKIP(13);
-      if (('1' <= lookahead && lookahead <= '9')) ADVANCE(213);
-      if (set_contains(sym_type_identifier_character_set_1, 651, lookahead)) ADVANCE(163);
-      if (set_contains(sym_identifier_character_set_1, 1176, lookahead)) ADVANCE(164);
-      if ((!eof && set_contains(sym__unknown_character_set_1, 778, lookahead))) ADVANCE(201);
-      END_STATE();
-    case 14:
-      ADVANCE_MAP(
-        '!', 87,
-        '"', 228,
-        '#', 198,
-        '$', 199,
-        '%', 166,
-        '&', 91,
-        '\'', 29,
-        '(', 82,
-        '*', 98,
-        '+', 96,
-        ',', 69,
-        '-', 101,
-        '.', 72,
-        '/', 99,
-        '0', 212,
+        '0', 214,
         ':', 66,
         ';', 205,
         '<', 77,
         '=', 106,
         '>', 81,
         '?', 75,
-        '@', 200,
+        '@', 202,
+        'B', 154,
+        'C', 149,
+        'E', 159,
+        'F', 140,
+        'I', 135,
+        'S', 162,
+        'U', 136,
+        '[', 109,
+        '^', 93,
+        '`', 212,
+        '{', 67,
+        '|', 89,
+        '~', 94,
+      );
+      if (('\t' <= lookahead && lookahead <= '\r') ||
+          lookahead == ' ') SKIP(12);
+      if (('1' <= lookahead && lookahead <= '9')) ADVANCE(215);
+      if (set_contains(sym_type_identifier_character_set_1, 651, lookahead)) ADVANCE(163);
+      if (set_contains(sym_identifier_character_set_1, 1176, lookahead)) ADVANCE(164);
+      if ((!eof && set_contains(sym__unknown_character_set_1, 778, lookahead))) ADVANCE(203);
+      END_STATE();
+    case 13:
+      ADVANCE_MAP(
+        '!', 87,
+        '"', 230,
+        '#', 200,
+        '$', 201,
+        '%', 166,
+        '&', 91,
+        '\'', 29,
+        '(', 82,
+        '*', 98,
+        '+', 96,
+        ',', 69,
+        '-', 101,
+        '.', 72,
+        '/', 99,
+        '0', 214,
+        ':', 66,
+        ';', 206,
+        '<', 77,
+        '=', 106,
+        '>', 81,
+        '?', 75,
+        '@', 202,
+        'B', 154,
+        'C', 149,
+        'E', 159,
+        'F', 140,
+        'I', 135,
+        'S', 162,
+        'U', 136,
+        '[', 109,
+        '^', 93,
+        '`', 212,
+        '{', 67,
+        '|', 89,
+        '~', 94,
+      );
+      if (('\t' <= lookahead && lookahead <= '\r') ||
+          lookahead == ' ') SKIP(13);
+      if (('1' <= lookahead && lookahead <= '9')) ADVANCE(215);
+      if (set_contains(sym_type_identifier_character_set_1, 651, lookahead)) ADVANCE(163);
+      if (set_contains(sym_identifier_character_set_1, 1176, lookahead)) ADVANCE(164);
+      if ((!eof && set_contains(sym__unknown_character_set_1, 778, lookahead))) ADVANCE(203);
+      END_STATE();
+    case 14:
+      ADVANCE_MAP(
+        '!', 87,
+        '"', 230,
+        '#', 200,
+        '$', 201,
+        '%', 166,
+        '&', 91,
+        '\'', 29,
+        '(', 82,
+        '*', 98,
+        '+', 96,
+        ',', 69,
+        '-', 101,
+        '.', 72,
+        '/', 99,
+        '0', 214,
+        ':', 66,
+        ';', 207,
+        '<', 77,
+        '=', 106,
+        '>', 81,
+        '?', 75,
+        '@', 202,
         'B', 154,
         'C', 149,
         'E', 159,
@@ -4309,24 +4323,24 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
         '[', 109,
         ']', 111,
         '^', 93,
-        '`', 210,
+        '`', 212,
         '{', 67,
         '|', 89,
         '~', 94,
       );
       if (('\t' <= lookahead && lookahead <= '\r') ||
           lookahead == ' ') SKIP(14);
-      if (('1' <= lookahead && lookahead <= '9')) ADVANCE(213);
+      if (('1' <= lookahead && lookahead <= '9')) ADVANCE(215);
       if (set_contains(sym_type_identifier_character_set_1, 651, lookahead)) ADVANCE(163);
       if (set_contains(sym_identifier_character_set_1, 1176, lookahead)) ADVANCE(164);
-      if ((!eof && set_contains(sym__unknown_character_set_1, 778, lookahead))) ADVANCE(201);
+      if ((!eof && set_contains(sym__unknown_character_set_1, 778, lookahead))) ADVANCE(203);
       END_STATE();
     case 15:
       ADVANCE_MAP(
         '!', 87,
-        '"', 228,
-        '#', 198,
-        '$', 199,
+        '"', 230,
+        '#', 200,
+        '$', 201,
         '%', 166,
         '&', 91,
         '\'', 29,
@@ -4337,14 +4351,14 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
         '-', 101,
         '.', 72,
         '/', 99,
-        '0', 212,
+        '0', 214,
         ':', 66,
-        ';', 206,
+        ';', 208,
         '<', 77,
         '=', 106,
         '>', 81,
         '?', 75,
-        '@', 200,
+        '@', 202,
         'B', 154,
         'C', 149,
         'E', 159,
@@ -4353,9 +4367,9 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
         'S', 162,
         'U', 136,
         '[', 109,
-        '\\', 209,
+        '\\', 211,
         '^', 93,
-        '`', 210,
+        '`', 212,
         '{', 67,
         '|', 89,
         '}', 68,
@@ -4363,17 +4377,17 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
       );
       if (('\t' <= lookahead && lookahead <= '\r') ||
           lookahead == ' ') SKIP(15);
-      if (('1' <= lookahead && lookahead <= '9')) ADVANCE(213);
+      if (('1' <= lookahead && lookahead <= '9')) ADVANCE(215);
       if (set_contains(sym_type_identifier_character_set_1, 651, lookahead)) ADVANCE(163);
       if (set_contains(sym_identifier_character_set_1, 1176, lookahead)) ADVANCE(164);
-      if ((!eof && set_contains(sym__unknown_character_set_1, 778, lookahead))) ADVANCE(201);
+      if ((!eof && set_contains(sym__unknown_character_set_1, 778, lookahead))) ADVANCE(203);
       END_STATE();
     case 16:
       ADVANCE_MAP(
         '!', 87,
-        '"', 228,
-        '#', 198,
-        '$', 199,
+        '"', 230,
+        '#', 200,
+        '$', 201,
         '%', 166,
         '&', 91,
         '\'', 29,
@@ -4384,14 +4398,14 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
         '-', 101,
         '.', 72,
         '/', 99,
-        '0', 212,
+        '0', 214,
         ':', 66,
-        ';', 207,
+        ';', 209,
         '<', 77,
         '=', 106,
         '>', 81,
         '?', 75,
-        '@', 200,
+        '@', 202,
         'B', 154,
         'C', 149,
         'E', 159,
@@ -4401,7 +4415,7 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
         'U', 136,
         '[', 109,
         '^', 93,
-        '`', 210,
+        '`', 212,
         '{', 67,
         '|', 89,
         '}', 68,
@@ -4409,17 +4423,17 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
       );
       if (('\t' <= lookahead && lookahead <= '\r') ||
           lookahead == ' ') SKIP(16);
-      if (('1' <= lookahead && lookahead <= '9')) ADVANCE(213);
+      if (('1' <= lookahead && lookahead <= '9')) ADVANCE(215);
       if (set_contains(sym_type_identifier_character_set_1, 651, lookahead)) ADVANCE(163);
       if (set_contains(sym_identifier_character_set_1, 1176, lookahead)) ADVANCE(164);
-      if ((!eof && set_contains(sym__unknown_character_set_1, 778, lookahead))) ADVANCE(201);
+      if ((!eof && set_contains(sym__unknown_character_set_1, 778, lookahead))) ADVANCE(203);
       END_STATE();
     case 17:
       ADVANCE_MAP(
         '!', 87,
-        '"', 228,
-        '#', 198,
-        '$', 199,
+        '"', 230,
+        '#', 200,
+        '$', 201,
         '%', 166,
         '&', 91,
         '\'', 29,
@@ -4430,14 +4444,14 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
         '-', 101,
         '.', 72,
         '/', 99,
-        '0', 212,
+        '0', 214,
         ':', 66,
-        ';', 208,
+        ';', 210,
         '<', 77,
         '=', 106,
         '>', 81,
         '?', 75,
-        '@', 200,
+        '@', 202,
         'B', 154,
         'C', 149,
         'E', 159,
@@ -4448,51 +4462,51 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
         '[', 109,
         ']', 28,
         '^', 93,
-        '`', 210,
+        '`', 212,
         '{', 67,
         '|', 89,
         '~', 94,
       );
       if (('\t' <= lookahead && lookahead <= '\r') ||
           lookahead == ' ') SKIP(17);
-      if (('1' <= lookahead && lookahead <= '9')) ADVANCE(213);
+      if (('1' <= lookahead && lookahead <= '9')) ADVANCE(215);
       if (set_contains(sym_type_identifier_character_set_1, 651, lookahead)) ADVANCE(163);
       if (set_contains(sym_identifier_character_set_1, 1176, lookahead)) ADVANCE(164);
-      if ((!eof && set_contains(sym__unknown_character_set_1, 778, lookahead))) ADVANCE(201);
+      if ((!eof && set_contains(sym__unknown_character_set_1, 778, lookahead))) ADVANCE(203);
       END_STATE();
     case 18:
-      if (lookahead == '"') ADVANCE(229);
+      if (lookahead == '"') ADVANCE(231);
       END_STATE();
     case 19:
-      if (lookahead == '"') ADVANCE(247);
+      if (lookahead == '"') ADVANCE(249);
       if (lookahead != 0 &&
           lookahead != '\n' &&
           lookahead != 0x17f &&
           lookahead != 0x212a) ADVANCE(30);
       END_STATE();
     case 20:
-      if (lookahead == '"') ADVANCE(227);
-      if (lookahead == '/') ADVANCE(238);
+      if (lookahead == '"') ADVANCE(229);
+      if (lookahead == '/') ADVANCE(240);
       if (lookahead == '\\') ADVANCE(49);
       if (lookahead == '{') ADVANCE(108);
       if (('\t' <= lookahead && lookahead <= '\r') ||
           lookahead == ' ' ||
-          lookahead == ';') ADVANCE(241);
+          lookahead == ';') ADVANCE(243);
       if (lookahead != 0 &&
           lookahead != 0x17f &&
-          lookahead != 0x212a) ADVANCE(242);
+          lookahead != 0x212a) ADVANCE(244);
       END_STATE();
     case 21:
-      if (lookahead == '"') ADVANCE(244);
-      if (lookahead == '/') ADVANCE(238);
+      if (lookahead == '"') ADVANCE(246);
+      if (lookahead == '/') ADVANCE(240);
       if (lookahead == '\\') ADVANCE(49);
       if (lookahead == '{') ADVANCE(108);
       if (('\t' <= lookahead && lookahead <= '\r') ||
           lookahead == ' ' ||
-          lookahead == ';') ADVANCE(241);
+          lookahead == ';') ADVANCE(243);
       if (lookahead != 0 &&
           lookahead != 0x17f &&
-          lookahead != 0x212a) ADVANCE(242);
+          lookahead != 0x212a) ADVANCE(244);
       END_STATE();
     case 22:
       if (lookahead == '$') ADVANCE(57);
@@ -4505,19 +4519,19 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
       if (set_contains(sym_identifier_character_set_1, 1176, lookahead)) ADVANCE(164);
       END_STATE();
     case 23:
-      if (lookahead == '\'') ADVANCE(226);
+      if (lookahead == '\'') ADVANCE(228);
       END_STATE();
     case 24:
-      if (lookahead == '\'') ADVANCE(226);
+      if (lookahead == '\'') ADVANCE(228);
       if (lookahead == '{') ADVANCE(54);
       END_STATE();
     case 25:
       if (lookahead == '*') ADVANCE(27);
-      if (lookahead == '/') ADVANCE(248);
+      if (lookahead == '/') ADVANCE(250);
       END_STATE();
     case 26:
       if (lookahead == '*') ADVANCE(26);
-      if (lookahead == '/') ADVANCE(251);
+      if (lookahead == '/') ADVANCE(253);
       if (lookahead != 0 &&
           lookahead != 0x17f &&
           lookahead != 0x212a) ADVANCE(27);
@@ -4547,31 +4561,31 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
           lookahead != 0x212a) ADVANCE(30);
       END_STATE();
     case 31:
-      if (lookahead == '`') ADVANCE(230);
+      if (lookahead == '`') ADVANCE(232);
       if (lookahead != 0 &&
           lookahead != 0x17f &&
           lookahead != 0x212a) ADVANCE(31);
       END_STATE();
     case 32:
-      if (lookahead == '`') ADVANCE(230);
+      if (lookahead == '`') ADVANCE(232);
       if (lookahead != 0 &&
           lookahead != 0x17f &&
           lookahead != 0x212a) ADVANCE(39);
       END_STATE();
     case 33:
-      if (lookahead == '`') ADVANCE(230);
+      if (lookahead == '`') ADVANCE(232);
       if (lookahead != 0 &&
           lookahead != 0x17f &&
           lookahead != 0x212a) ADVANCE(41);
       END_STATE();
     case 34:
-      if (lookahead == '`') ADVANCE(230);
+      if (lookahead == '`') ADVANCE(232);
       if (lookahead != 0 &&
           lookahead != 0x17f &&
           lookahead != 0x212a) ADVANCE(37);
       END_STATE();
     case 35:
-      if (lookahead == '`') ADVANCE(231);
+      if (lookahead == '`') ADVANCE(233);
       if (lookahead != 0 &&
           lookahead != 0x17f &&
           lookahead != 0x212a) ADVANCE(36);
@@ -4589,7 +4603,7 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
           lookahead != 0x212a) ADVANCE(37);
       END_STATE();
     case 38:
-      if (lookahead == '`') ADVANCE(235);
+      if (lookahead == '`') ADVANCE(237);
       if (lookahead != 0 &&
           lookahead != 0x17f &&
           lookahead != 0x212a) ADVANCE(36);
@@ -4601,7 +4615,7 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
           lookahead != 0x212a) ADVANCE(39);
       END_STATE();
     case 40:
-      if (lookahead == '`') ADVANCE(232);
+      if (lookahead == '`') ADVANCE(234);
       if (lookahead != 0 &&
           lookahead != 0x17f &&
           lookahead != 0x212a) ADVANCE(47);
@@ -4619,7 +4633,7 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
           lookahead != 0x212a) ADVANCE(47);
       END_STATE();
     case 43:
-      if (lookahead == '`') ADVANCE(234);
+      if (lookahead == '`') ADVANCE(236);
       if (lookahead != 0 &&
           lookahead != 0x17f &&
           lookahead != 0x212a) ADVANCE(47);
@@ -4656,11 +4670,11 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
           lookahead != 0x212a) ADVANCE(23);
       END_STATE();
     case 49:
-      if (lookahead == 'u') ADVANCE(246);
+      if (lookahead == 'u') ADVANCE(248);
       if (lookahead != 0 &&
           lookahead != '\n' &&
           lookahead != 0x17f &&
-          lookahead != 0x212a) ADVANCE(245);
+          lookahead != 0x212a) ADVANCE(247);
       END_STATE();
     case 50:
       if (lookahead == '}') ADVANCE(23);
@@ -4669,16 +4683,16 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
           ('a' <= lookahead && lookahead <= 'f')) ADVANCE(50);
       END_STATE();
     case 51:
-      if (lookahead == '}') ADVANCE(245);
+      if (lookahead == '}') ADVANCE(247);
       if (('0' <= lookahead && lookahead <= '9') ||
           ('A' <= lookahead && lookahead <= 'F') ||
           ('a' <= lookahead && lookahead <= 'f')) ADVANCE(51);
       END_STATE();
     case 52:
-      if (('0' <= lookahead && lookahead <= '9')) ADVANCE(215);
+      if (('0' <= lookahead && lookahead <= '9')) ADVANCE(217);
       END_STATE();
     case 53:
-      if (('0' <= lookahead && lookahead <= '9')) ADVANCE(222);
+      if (('0' <= lookahead && lookahead <= '9')) ADVANCE(224);
       END_STATE();
     case 54:
       if (('0' <= lookahead && lookahead <= '9') ||
@@ -4704,9 +4718,9 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
       if (eof) ADVANCE(64);
       ADVANCE_MAP(
         '!', 87,
-        '"', 228,
-        '#', 198,
-        '$', 199,
+        '"', 230,
+        '#', 200,
+        '$', 201,
         '%', 166,
         '&', 91,
         '\'', 29,
@@ -4717,14 +4731,14 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
         '-', 101,
         '.', 72,
         '/', 99,
-        '0', 212,
+        '0', 214,
         ':', 66,
-        ';', 204,
+        ';', 206,
         '<', 79,
         '=', 106,
         '>', 81,
         '?', 75,
-        '@', 200,
+        '@', 202,
         'B', 154,
         'C', 149,
         'E', 159,
@@ -4734,25 +4748,25 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
         'U', 136,
         '[', 110,
         '^', 93,
-        '`', 210,
+        '`', 212,
         '{', 107,
         '|', 89,
         '~', 94,
       );
       if (('\t' <= lookahead && lookahead <= '\r') ||
           lookahead == ' ') SKIP(61);
-      if (('1' <= lookahead && lookahead <= '9')) ADVANCE(213);
+      if (('1' <= lookahead && lookahead <= '9')) ADVANCE(215);
       if (set_contains(sym_type_identifier_character_set_1, 651, lookahead)) ADVANCE(163);
       if (set_contains(sym_identifier_character_set_1, 1176, lookahead)) ADVANCE(164);
-      if ((!eof && set_contains(sym__unknown_character_set_1, 778, lookahead))) ADVANCE(201);
+      if ((!eof && set_contains(sym__unknown_character_set_1, 778, lookahead))) ADVANCE(203);
       END_STATE();
     case 59:
       if (eof) ADVANCE(64);
       ADVANCE_MAP(
         '!', 87,
-        '"', 228,
-        '#', 198,
-        '$', 199,
+        '"', 230,
+        '#', 200,
+        '$', 201,
         '%', 166,
         '&', 91,
         '\'', 29,
@@ -4763,14 +4777,14 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
         '-', 101,
         '.', 72,
         '/', 99,
-        '0', 212,
+        '0', 214,
         ':', 66,
-        ';', 204,
+        ';', 206,
         '<', 77,
         '=', 106,
         '>', 81,
         '?', 75,
-        '@', 200,
+        '@', 202,
         'B', 154,
         'C', 149,
         'E', 159,
@@ -4780,25 +4794,25 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
         'U', 136,
         '[', 110,
         '^', 93,
-        '`', 210,
+        '`', 212,
         '{', 107,
         '|', 89,
         '~', 94,
       );
       if (('\t' <= lookahead && lookahead <= '\r') ||
           lookahead == ' ') SKIP(61);
-      if (('1' <= lookahead && lookahead <= '9')) ADVANCE(213);
+      if (('1' <= lookahead && lookahead <= '9')) ADVANCE(215);
       if (set_contains(sym_type_identifier_character_set_1, 651, lookahead)) ADVANCE(163);
       if (set_contains(sym_identifier_character_set_1, 1176, lookahead)) ADVANCE(164);
-      if ((!eof && set_contains(sym__unknown_character_set_1, 778, lookahead))) ADVANCE(201);
+      if ((!eof && set_contains(sym__unknown_character_set_1, 778, lookahead))) ADVANCE(203);
       END_STATE();
     case 60:
       if (eof) ADVANCE(64);
       ADVANCE_MAP(
         '!', 87,
-        '"', 228,
-        '#', 198,
-        '$', 199,
+        '"', 230,
+        '#', 200,
+        '$', 201,
         '%', 166,
         '&', 91,
         '\'', 29,
@@ -4810,14 +4824,14 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
         '-', 101,
         '.', 72,
         '/', 99,
-        '0', 212,
+        '0', 214,
         ':', 66,
-        ';', 202,
+        ';', 204,
         '<', 77,
         '=', 106,
         '>', 81,
         '?', 75,
-        '@', 200,
+        '@', 202,
         'B', 154,
         'C', 149,
         'E', 159,
@@ -4826,10 +4840,10 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
         'S', 162,
         'U', 136,
         '[', 109,
-        '\\', 209,
+        '\\', 211,
         ']', 111,
         '^', 93,
-        '`', 210,
+        '`', 212,
         '{', 67,
         '|', 89,
         '}', 68,
@@ -4837,18 +4851,18 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
       );
       if (('\t' <= lookahead && lookahead <= '\r') ||
           lookahead == ' ') SKIP(60);
-      if (('1' <= lookahead && lookahead <= '9')) ADVANCE(213);
+      if (('1' <= lookahead && lookahead <= '9')) ADVANCE(215);
       if (set_contains(sym_type_identifier_character_set_1, 651, lookahead)) ADVANCE(163);
       if (set_contains(sym_identifier_character_set_1, 1176, lookahead)) ADVANCE(164);
-      if ((!eof && set_contains(sym__unknown_character_set_1, 778, lookahead))) ADVANCE(201);
+      if ((!eof && set_contains(sym__unknown_character_set_1, 778, lookahead))) ADVANCE(203);
       END_STATE();
     case 61:
       if (eof) ADVANCE(64);
       ADVANCE_MAP(
         '!', 87,
-        '"', 228,
-        '#', 198,
-        '$', 199,
+        '"', 230,
+        '#', 200,
+        '$', 201,
         '%', 166,
         '&', 91,
         '\'', 29,
@@ -4859,14 +4873,14 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
         '-', 101,
         '.', 72,
         '/', 99,
-        '0', 212,
+        '0', 214,
         ':', 66,
-        ';', 204,
+        ';', 206,
         '<', 77,
         '=', 106,
         '>', 81,
         '?', 75,
-        '@', 200,
+        '@', 202,
         'B', 154,
         'C', 149,
         'E', 159,
@@ -4876,23 +4890,23 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
         'U', 136,
         '[', 109,
         '^', 93,
-        '`', 210,
+        '`', 212,
         '{', 67,
         '|', 89,
         '~', 94,
       );
       if (('\t' <= lookahead && lookahead <= '\r') ||
           lookahead == ' ') SKIP(61);
-      if (('1' <= lookahead && lookahead <= '9')) ADVANCE(213);
+      if (('1' <= lookahead && lookahead <= '9')) ADVANCE(215);
       if (set_contains(sym_type_identifier_character_set_1, 651, lookahead)) ADVANCE(163);
       if (set_contains(sym_identifier_character_set_1, 1176, lookahead)) ADVANCE(164);
-      if ((!eof && set_contains(sym__unknown_character_set_1, 778, lookahead))) ADVANCE(201);
+      if ((!eof && set_contains(sym__unknown_character_set_1, 778, lookahead))) ADVANCE(203);
       END_STATE();
     case 62:
       if (eof) ADVANCE(64);
       ADVANCE_MAP(
         '!', 86,
-        '"', 227,
+        '"', 229,
         '$', 57,
         '&', 90,
         '(', 83,
@@ -4902,7 +4916,7 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
         '-', 102,
         '.', 73,
         '/', 100,
-        '0', 212,
+        '0', 214,
         ':', 65,
         '<', 78,
         '=', 105,
@@ -4924,7 +4938,7 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
       if (('\t' <= lookahead && lookahead <= '\r') ||
           lookahead == ' ' ||
           lookahead == ';') SKIP(63);
-      if (('1' <= lookahead && lookahead <= '9')) ADVANCE(213);
+      if (('1' <= lookahead && lookahead <= '9')) ADVANCE(215);
       if (set_contains(sym_type_identifier_character_set_1, 651, lookahead)) ADVANCE(163);
       if (set_contains(sym_identifier_character_set_1, 1176, lookahead)) ADVANCE(164);
       END_STATE();
@@ -4932,7 +4946,7 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
       if (eof) ADVANCE(64);
       ADVANCE_MAP(
         '!', 86,
-        '"', 227,
+        '"', 229,
         '$', 57,
         '&', 90,
         '(', 82,
@@ -4942,7 +4956,7 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
         '-', 102,
         '.', 73,
         '/', 100,
-        '0', 212,
+        '0', 214,
         ':', 65,
         '<', 76,
         '=', 105,
@@ -4964,7 +4978,7 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
       if (('\t' <= lookahead && lookahead <= '\r') ||
           lookahead == ' ' ||
           lookahead == ';') SKIP(63);
-      if (('1' <= lookahead && lookahead <= '9')) ADVANCE(213);
+      if (('1' <= lookahead && lookahead <= '9')) ADVANCE(215);
       if (set_contains(sym_type_identifier_character_set_1, 651, lookahead)) ADVANCE(163);
       if (set_contains(sym_identifier_character_set_1, 1176, lookahead)) ADVANCE(164);
       END_STATE();
@@ -4978,7 +4992,7 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
       ACCEPT_TOKEN(anon_sym_COLON);
       if (lookahead == ':') ADVANCE(70);
       if (lookahead == '=') ADVANCE(71);
-      if (lookahead == '>') ADVANCE(196);
+      if (lookahead == '>') ADVANCE(198);
       END_STATE();
     case 67:
       ACCEPT_TOKEN(anon_sym_LBRACE);
@@ -5009,34 +5023,36 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
       END_STATE();
     case 75:
       ACCEPT_TOKEN(anon_sym_QMARK);
-      if (lookahead == '.') ADVANCE(187);
-      if (lookahead == '?') ADVANCE(188);
+      if (lookahead == '.') ADVANCE(188);
+      if (lookahead == '?') ADVANCE(189);
       END_STATE();
     case 76:
       ACCEPT_TOKEN(anon_sym_LT);
       END_STATE();
     case 77:
       ACCEPT_TOKEN(anon_sym_LT);
-      if (lookahead == ':') ADVANCE(197);
+      if (lookahead == ':') ADVANCE(199);
       if (lookahead == '<') ADVANCE(179);
       if (lookahead == '=') ADVANCE(181);
+      if (lookahead == '>') ADVANCE(183);
       END_STATE();
     case 78:
       ACCEPT_TOKEN(anon_sym_LT2);
       END_STATE();
     case 79:
       ACCEPT_TOKEN(anon_sym_LT2);
-      if (lookahead == ':') ADVANCE(197);
+      if (lookahead == ':') ADVANCE(199);
       if (lookahead == '<') ADVANCE(179);
       if (lookahead == '=') ADVANCE(181);
+      if (lookahead == '>') ADVANCE(183);
       END_STATE();
     case 80:
       ACCEPT_TOKEN(anon_sym_GT);
       END_STATE();
     case 81:
       ACCEPT_TOKEN(anon_sym_GT);
-      if (lookahead == '=') ADVANCE(184);
-      if (lookahead == '>') ADVANCE(185);
+      if (lookahead == '=') ADVANCE(185);
+      if (lookahead == '>') ADVANCE(186);
       END_STATE();
     case 82:
       ACCEPT_TOKEN(anon_sym_LPAREN);
@@ -5062,8 +5078,9 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
       END_STATE();
     case 89:
       ACCEPT_TOKEN(anon_sym_PIPE);
-      if (lookahead == '=') ADVANCE(190);
-      if (lookahead == '|') ADVANCE(191);
+      if (lookahead == '=') ADVANCE(191);
+      if (lookahead == '>') ADVANCE(192);
+      if (lookahead == '|') ADVANCE(193);
       END_STATE();
     case 90:
       ACCEPT_TOKEN(anon_sym_AMP);
@@ -5078,11 +5095,11 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
       END_STATE();
     case 93:
       ACCEPT_TOKEN(anon_sym_CARET);
-      if (lookahead == '=') ADVANCE(189);
+      if (lookahead == '=') ADVANCE(190);
       END_STATE();
     case 94:
       ACCEPT_TOKEN(anon_sym_TILDE);
-      if (lookahead == '|') ADVANCE(192);
+      if (lookahead == '|') ADVANCE(194);
       END_STATE();
     case 95:
       ACCEPT_TOKEN(anon_sym_PLUS);
@@ -5102,13 +5119,13 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
       ACCEPT_TOKEN(anon_sym_SLASH);
       if (lookahead == '%') ADVANCE(176);
       if (lookahead == '*') ADVANCE(27);
-      if (lookahead == '/') ADVANCE(248);
+      if (lookahead == '/') ADVANCE(250);
       if (lookahead == '=') ADVANCE(178);
       END_STATE();
     case 100:
       ACCEPT_TOKEN(anon_sym_SLASH);
       if (lookahead == '*') ADVANCE(27);
-      if (lookahead == '/') ADVANCE(248);
+      if (lookahead == '/') ADVANCE(250);
       END_STATE();
     case 101:
       ACCEPT_TOKEN(anon_sym_DASH);
@@ -5125,7 +5142,7 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
       END_STATE();
     case 104:
       ACCEPT_TOKEN(anon_sym_DOT_DOT);
-      if (lookahead == '.') ADVANCE(195);
+      if (lookahead == '.') ADVANCE(197);
       if (lookahead == '<') ADVANCE(175);
       END_STATE();
     case 105:
@@ -5133,15 +5150,15 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
       END_STATE();
     case 106:
       ACCEPT_TOKEN(anon_sym_EQ);
-      if (lookahead == '=') ADVANCE(183);
-      if (lookahead == '>') ADVANCE(194);
+      if (lookahead == '=') ADVANCE(184);
+      if (lookahead == '>') ADVANCE(196);
       END_STATE();
     case 107:
       ACCEPT_TOKEN(anon_sym_LBRACE2);
       END_STATE();
     case 108:
       ACCEPT_TOKEN(anon_sym_LBRACE2);
-      if (lookahead == '{') ADVANCE(245);
+      if (lookahead == '{') ADVANCE(247);
       END_STATE();
     case 109:
       ACCEPT_TOKEN(anon_sym_LBRACK);
@@ -5468,53 +5485,59 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
       ACCEPT_TOKEN(anon_sym_LT_EQ_GT);
       END_STATE();
     case 183:
-      ACCEPT_TOKEN(anon_sym_EQ_EQ);
+      ACCEPT_TOKEN(anon_sym_LT_GT);
       END_STATE();
     case 184:
-      ACCEPT_TOKEN(anon_sym_GT_EQ);
+      ACCEPT_TOKEN(anon_sym_EQ_EQ);
       END_STATE();
     case 185:
-      ACCEPT_TOKEN(anon_sym_GT_GT);
-      if (lookahead == '=') ADVANCE(186);
+      ACCEPT_TOKEN(anon_sym_GT_EQ);
       END_STATE();
     case 186:
-      ACCEPT_TOKEN(anon_sym_GT_GT_EQ);
+      ACCEPT_TOKEN(anon_sym_GT_GT);
+      if (lookahead == '=') ADVANCE(187);
       END_STATE();
     case 187:
-      ACCEPT_TOKEN(anon_sym_QMARK_DOT);
+      ACCEPT_TOKEN(anon_sym_GT_GT_EQ);
       END_STATE();
     case 188:
-      ACCEPT_TOKEN(anon_sym_QMARK_QMARK);
+      ACCEPT_TOKEN(anon_sym_QMARK_DOT);
       END_STATE();
     case 189:
-      ACCEPT_TOKEN(anon_sym_CARET_EQ);
+      ACCEPT_TOKEN(anon_sym_QMARK_QMARK);
       END_STATE();
     case 190:
-      ACCEPT_TOKEN(anon_sym_PIPE_EQ);
+      ACCEPT_TOKEN(anon_sym_CARET_EQ);
       END_STATE();
     case 191:
-      ACCEPT_TOKEN(anon_sym_PIPE_PIPE);
+      ACCEPT_TOKEN(anon_sym_PIPE_EQ);
       END_STATE();
     case 192:
-      ACCEPT_TOKEN(anon_sym_TILDE_PIPE);
-      if (lookahead == '=') ADVANCE(193);
+      ACCEPT_TOKEN(anon_sym_PIPE_GT);
       END_STATE();
     case 193:
-      ACCEPT_TOKEN(anon_sym_TILDE_PIPE_EQ);
+      ACCEPT_TOKEN(anon_sym_PIPE_PIPE);
       END_STATE();
     case 194:
-      ACCEPT_TOKEN(anon_sym_EQ_GT);
+      ACCEPT_TOKEN(anon_sym_TILDE_PIPE);
+      if (lookahead == '=') ADVANCE(195);
       END_STATE();
     case 195:
-      ACCEPT_TOKEN(anon_sym_DOT_DOT_DOT);
+      ACCEPT_TOKEN(anon_sym_TILDE_PIPE_EQ);
       END_STATE();
     case 196:
-      ACCEPT_TOKEN(anon_sym_COLON_GT);
+      ACCEPT_TOKEN(anon_sym_EQ_GT);
       END_STATE();
     case 197:
-      ACCEPT_TOKEN(anon_sym_LT_COLON);
+      ACCEPT_TOKEN(anon_sym_DOT_DOT_DOT);
       END_STATE();
     case 198:
+      ACCEPT_TOKEN(anon_sym_COLON_GT);
+      END_STATE();
+    case 199:
+      ACCEPT_TOKEN(anon_sym_LT_COLON);
+      END_STATE();
+    case 200:
       ACCEPT_TOKEN(anon_sym_POUND);
       if (lookahead == '!') ADVANCE(56);
       if (lookahead == '[') ADVANCE(116);
@@ -5522,28 +5545,28 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
           lookahead == '_' ||
           ('a' <= lookahead && lookahead <= 'z')) ADVANCE(115);
       END_STATE();
-    case 199:
+    case 201:
       ACCEPT_TOKEN(anon_sym_DOLLAR);
       if (('A' <= lookahead && lookahead <= 'Z') ||
           lookahead == '_' ||
           ('a' <= lookahead && lookahead <= 'z')) ADVANCE(118);
       END_STATE();
-    case 200:
+    case 202:
       ACCEPT_TOKEN(anon_sym_AT);
       if (('A' <= lookahead && lookahead <= 'Z') ||
           lookahead == '_' ||
           ('a' <= lookahead && lookahead <= 'z')) ADVANCE(117);
       END_STATE();
-    case 201:
+    case 203:
       ACCEPT_TOKEN(sym__unknown);
       END_STATE();
-    case 202:
+    case 204:
       ACCEPT_TOKEN(sym__unknown);
       ADVANCE_MAP(
         '!', 87,
-        '"', 228,
-        '#', 198,
-        '$', 199,
+        '"', 230,
+        '#', 200,
+        '$', 201,
         '%', 166,
         '&', 91,
         '\'', 29,
@@ -5555,14 +5578,14 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
         '-', 101,
         '.', 72,
         '/', 99,
-        '0', 212,
+        '0', 214,
         ':', 66,
-        ';', 202,
+        ';', 204,
         '<', 77,
         '=', 106,
         '>', 81,
         '?', 75,
-        '@', 200,
+        '@', 202,
         'B', 154,
         'C', 149,
         'E', 159,
@@ -5571,10 +5594,10 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
         'S', 162,
         'U', 136,
         '[', 109,
-        '\\', 209,
+        '\\', 211,
         ']', 111,
         '^', 93,
-        '`', 210,
+        '`', 212,
         '{', 67,
         '|', 89,
         '}', 68,
@@ -5582,18 +5605,18 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
       );
       if (('\t' <= lookahead && lookahead <= '\r') ||
           lookahead == ' ') SKIP(11);
-      if (('1' <= lookahead && lookahead <= '9')) ADVANCE(213);
+      if (('1' <= lookahead && lookahead <= '9')) ADVANCE(215);
       if (set_contains(sym_type_identifier_character_set_1, 651, lookahead)) ADVANCE(163);
       if (set_contains(sym_identifier_character_set_1, 1176, lookahead)) ADVANCE(164);
-      if ((!eof && set_contains(sym__unknown_character_set_1, 778, lookahead))) ADVANCE(201);
+      if ((!eof && set_contains(sym__unknown_character_set_1, 778, lookahead))) ADVANCE(203);
       END_STATE();
-    case 203:
+    case 205:
       ACCEPT_TOKEN(sym__unknown);
       ADVANCE_MAP(
         '!', 87,
-        '"', 228,
-        '#', 198,
-        '$', 199,
+        '"', 230,
+        '#', 200,
+        '$', 201,
         '%', 166,
         '&', 91,
         '\'', 29,
@@ -5605,106 +5628,106 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
         '-', 101,
         '.', 72,
         '/', 99,
-        '0', 212,
-        ':', 66,
-        ';', 203,
-        '<', 77,
-        '=', 106,
-        '>', 81,
-        '?', 75,
-        '@', 200,
-        'B', 154,
-        'C', 149,
-        'E', 159,
-        'F', 140,
-        'I', 135,
-        'S', 162,
-        'U', 136,
-        '[', 109,
-        '^', 93,
-        '`', 210,
-        '{', 67,
-        '|', 89,
-        '~', 94,
-      );
-      if (('\t' <= lookahead && lookahead <= '\r') ||
-          lookahead == ' ') SKIP(12);
-      if (('1' <= lookahead && lookahead <= '9')) ADVANCE(213);
-      if (set_contains(sym_type_identifier_character_set_1, 651, lookahead)) ADVANCE(163);
-      if (set_contains(sym_identifier_character_set_1, 1176, lookahead)) ADVANCE(164);
-      if ((!eof && set_contains(sym__unknown_character_set_1, 778, lookahead))) ADVANCE(201);
-      END_STATE();
-    case 204:
-      ACCEPT_TOKEN(sym__unknown);
-      ADVANCE_MAP(
-        '!', 87,
-        '"', 228,
-        '#', 198,
-        '$', 199,
-        '%', 166,
-        '&', 91,
-        '\'', 29,
-        '(', 82,
-        '*', 98,
-        '+', 96,
-        ',', 69,
-        '-', 101,
-        '.', 72,
-        '/', 99,
-        '0', 212,
-        ':', 66,
-        ';', 204,
-        '<', 77,
-        '=', 106,
-        '>', 81,
-        '?', 75,
-        '@', 200,
-        'B', 154,
-        'C', 149,
-        'E', 159,
-        'F', 140,
-        'I', 135,
-        'S', 162,
-        'U', 136,
-        '[', 109,
-        '^', 93,
-        '`', 210,
-        '{', 67,
-        '|', 89,
-        '~', 94,
-      );
-      if (('\t' <= lookahead && lookahead <= '\r') ||
-          lookahead == ' ') SKIP(13);
-      if (('1' <= lookahead && lookahead <= '9')) ADVANCE(213);
-      if (set_contains(sym_type_identifier_character_set_1, 651, lookahead)) ADVANCE(163);
-      if (set_contains(sym_identifier_character_set_1, 1176, lookahead)) ADVANCE(164);
-      if ((!eof && set_contains(sym__unknown_character_set_1, 778, lookahead))) ADVANCE(201);
-      END_STATE();
-    case 205:
-      ACCEPT_TOKEN(sym__unknown);
-      ADVANCE_MAP(
-        '!', 87,
-        '"', 228,
-        '#', 198,
-        '$', 199,
-        '%', 166,
-        '&', 91,
-        '\'', 29,
-        '(', 82,
-        '*', 98,
-        '+', 96,
-        ',', 69,
-        '-', 101,
-        '.', 72,
-        '/', 99,
-        '0', 212,
+        '0', 214,
         ':', 66,
         ';', 205,
         '<', 77,
         '=', 106,
         '>', 81,
         '?', 75,
-        '@', 200,
+        '@', 202,
+        'B', 154,
+        'C', 149,
+        'E', 159,
+        'F', 140,
+        'I', 135,
+        'S', 162,
+        'U', 136,
+        '[', 109,
+        '^', 93,
+        '`', 212,
+        '{', 67,
+        '|', 89,
+        '~', 94,
+      );
+      if (('\t' <= lookahead && lookahead <= '\r') ||
+          lookahead == ' ') SKIP(12);
+      if (('1' <= lookahead && lookahead <= '9')) ADVANCE(215);
+      if (set_contains(sym_type_identifier_character_set_1, 651, lookahead)) ADVANCE(163);
+      if (set_contains(sym_identifier_character_set_1, 1176, lookahead)) ADVANCE(164);
+      if ((!eof && set_contains(sym__unknown_character_set_1, 778, lookahead))) ADVANCE(203);
+      END_STATE();
+    case 206:
+      ACCEPT_TOKEN(sym__unknown);
+      ADVANCE_MAP(
+        '!', 87,
+        '"', 230,
+        '#', 200,
+        '$', 201,
+        '%', 166,
+        '&', 91,
+        '\'', 29,
+        '(', 82,
+        '*', 98,
+        '+', 96,
+        ',', 69,
+        '-', 101,
+        '.', 72,
+        '/', 99,
+        '0', 214,
+        ':', 66,
+        ';', 206,
+        '<', 77,
+        '=', 106,
+        '>', 81,
+        '?', 75,
+        '@', 202,
+        'B', 154,
+        'C', 149,
+        'E', 159,
+        'F', 140,
+        'I', 135,
+        'S', 162,
+        'U', 136,
+        '[', 109,
+        '^', 93,
+        '`', 212,
+        '{', 67,
+        '|', 89,
+        '~', 94,
+      );
+      if (('\t' <= lookahead && lookahead <= '\r') ||
+          lookahead == ' ') SKIP(13);
+      if (('1' <= lookahead && lookahead <= '9')) ADVANCE(215);
+      if (set_contains(sym_type_identifier_character_set_1, 651, lookahead)) ADVANCE(163);
+      if (set_contains(sym_identifier_character_set_1, 1176, lookahead)) ADVANCE(164);
+      if ((!eof && set_contains(sym__unknown_character_set_1, 778, lookahead))) ADVANCE(203);
+      END_STATE();
+    case 207:
+      ACCEPT_TOKEN(sym__unknown);
+      ADVANCE_MAP(
+        '!', 87,
+        '"', 230,
+        '#', 200,
+        '$', 201,
+        '%', 166,
+        '&', 91,
+        '\'', 29,
+        '(', 82,
+        '*', 98,
+        '+', 96,
+        ',', 69,
+        '-', 101,
+        '.', 72,
+        '/', 99,
+        '0', 214,
+        ':', 66,
+        ';', 207,
+        '<', 77,
+        '=', 106,
+        '>', 81,
+        '?', 75,
+        '@', 202,
         'B', 154,
         'C', 149,
         'E', 159,
@@ -5715,25 +5738,25 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
         '[', 109,
         ']', 111,
         '^', 93,
-        '`', 210,
+        '`', 212,
         '{', 67,
         '|', 89,
         '~', 94,
       );
       if (('\t' <= lookahead && lookahead <= '\r') ||
           lookahead == ' ') SKIP(14);
-      if (('1' <= lookahead && lookahead <= '9')) ADVANCE(213);
+      if (('1' <= lookahead && lookahead <= '9')) ADVANCE(215);
       if (set_contains(sym_type_identifier_character_set_1, 651, lookahead)) ADVANCE(163);
       if (set_contains(sym_identifier_character_set_1, 1176, lookahead)) ADVANCE(164);
-      if ((!eof && set_contains(sym__unknown_character_set_1, 778, lookahead))) ADVANCE(201);
+      if ((!eof && set_contains(sym__unknown_character_set_1, 778, lookahead))) ADVANCE(203);
       END_STATE();
-    case 206:
+    case 208:
       ACCEPT_TOKEN(sym__unknown);
       ADVANCE_MAP(
         '!', 87,
-        '"', 228,
-        '#', 198,
-        '$', 199,
+        '"', 230,
+        '#', 200,
+        '$', 201,
         '%', 166,
         '&', 91,
         '\'', 29,
@@ -5744,14 +5767,14 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
         '-', 101,
         '.', 72,
         '/', 99,
-        '0', 212,
+        '0', 214,
         ':', 66,
-        ';', 206,
+        ';', 208,
         '<', 77,
         '=', 106,
         '>', 81,
         '?', 75,
-        '@', 200,
+        '@', 202,
         'B', 154,
         'C', 149,
         'E', 159,
@@ -5760,9 +5783,9 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
         'S', 162,
         'U', 136,
         '[', 109,
-        '\\', 209,
+        '\\', 211,
         '^', 93,
-        '`', 210,
+        '`', 212,
         '{', 67,
         '|', 89,
         '}', 68,
@@ -5770,18 +5793,18 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
       );
       if (('\t' <= lookahead && lookahead <= '\r') ||
           lookahead == ' ') SKIP(15);
-      if (('1' <= lookahead && lookahead <= '9')) ADVANCE(213);
+      if (('1' <= lookahead && lookahead <= '9')) ADVANCE(215);
       if (set_contains(sym_type_identifier_character_set_1, 651, lookahead)) ADVANCE(163);
       if (set_contains(sym_identifier_character_set_1, 1176, lookahead)) ADVANCE(164);
-      if ((!eof && set_contains(sym__unknown_character_set_1, 778, lookahead))) ADVANCE(201);
+      if ((!eof && set_contains(sym__unknown_character_set_1, 778, lookahead))) ADVANCE(203);
       END_STATE();
-    case 207:
+    case 209:
       ACCEPT_TOKEN(sym__unknown);
       ADVANCE_MAP(
         '!', 87,
-        '"', 228,
-        '#', 198,
-        '$', 199,
+        '"', 230,
+        '#', 200,
+        '$', 201,
         '%', 166,
         '&', 91,
         '\'', 29,
@@ -5792,14 +5815,14 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
         '-', 101,
         '.', 72,
         '/', 99,
-        '0', 212,
+        '0', 214,
         ':', 66,
-        ';', 207,
+        ';', 209,
         '<', 77,
         '=', 106,
         '>', 81,
         '?', 75,
-        '@', 200,
+        '@', 202,
         'B', 154,
         'C', 149,
         'E', 159,
@@ -5809,7 +5832,7 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
         'U', 136,
         '[', 109,
         '^', 93,
-        '`', 210,
+        '`', 212,
         '{', 67,
         '|', 89,
         '}', 68,
@@ -5817,18 +5840,18 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
       );
       if (('\t' <= lookahead && lookahead <= '\r') ||
           lookahead == ' ') SKIP(16);
-      if (('1' <= lookahead && lookahead <= '9')) ADVANCE(213);
+      if (('1' <= lookahead && lookahead <= '9')) ADVANCE(215);
       if (set_contains(sym_type_identifier_character_set_1, 651, lookahead)) ADVANCE(163);
       if (set_contains(sym_identifier_character_set_1, 1176, lookahead)) ADVANCE(164);
-      if ((!eof && set_contains(sym__unknown_character_set_1, 778, lookahead))) ADVANCE(201);
+      if ((!eof && set_contains(sym__unknown_character_set_1, 778, lookahead))) ADVANCE(203);
       END_STATE();
-    case 208:
+    case 210:
       ACCEPT_TOKEN(sym__unknown);
       ADVANCE_MAP(
         '!', 87,
-        '"', 228,
-        '#', 198,
-        '$', 199,
+        '"', 230,
+        '#', 200,
+        '$', 201,
         '%', 166,
         '&', 91,
         '\'', 29,
@@ -5839,14 +5862,14 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
         '-', 101,
         '.', 72,
         '/', 99,
-        '0', 212,
+        '0', 214,
         ':', 66,
-        ';', 208,
+        ';', 210,
         '<', 77,
         '=', 106,
         '>', 81,
         '?', 75,
-        '@', 200,
+        '@', 202,
         'B', 154,
         'C', 149,
         'E', 159,
@@ -5857,382 +5880,220 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
         '[', 109,
         ']', 28,
         '^', 93,
-        '`', 210,
+        '`', 212,
         '{', 67,
         '|', 89,
         '~', 94,
       );
       if (('\t' <= lookahead && lookahead <= '\r') ||
           lookahead == ' ') SKIP(17);
-      if (('1' <= lookahead && lookahead <= '9')) ADVANCE(213);
+      if (('1' <= lookahead && lookahead <= '9')) ADVANCE(215);
       if (set_contains(sym_type_identifier_character_set_1, 651, lookahead)) ADVANCE(163);
       if (set_contains(sym_identifier_character_set_1, 1176, lookahead)) ADVANCE(164);
-      if ((!eof && set_contains(sym__unknown_character_set_1, 778, lookahead))) ADVANCE(201);
+      if ((!eof && set_contains(sym__unknown_character_set_1, 778, lookahead))) ADVANCE(203);
       END_STATE();
-    case 209:
+    case 211:
       ACCEPT_TOKEN(sym__unknown);
       if (lookahead == '"') ADVANCE(30);
       END_STATE();
-    case 210:
+    case 212:
       ACCEPT_TOKEN(sym__unknown);
-      if (lookahead == '`') ADVANCE(233);
+      if (lookahead == '`') ADVANCE(235);
       if (lookahead != 0 &&
           lookahead != 0x17f &&
           lookahead != 0x212a) ADVANCE(31);
       END_STATE();
-    case 211:
-      ACCEPT_TOKEN(sym_number_literal);
-      if (lookahead == '.') ADVANCE(52);
-      if (lookahead == '_') ADVANCE(211);
-      if (lookahead == '%' ||
-          lookahead == 0xb0) ADVANCE(225);
-      if (lookahead == 'E' ||
-          lookahead == 'e') ADVANCE(217);
-      if (('0' <= lookahead && lookahead <= '9')) ADVANCE(211);
-      if (lookahead == 0xb2 ||
-          lookahead == 0xb3 ||
-          lookahead == 0xb9 ||
-          (0xbc <= lookahead && lookahead <= 0xbe) ||
-          (0x660 <= lookahead && lookahead <= 0x669) ||
-          (0x6f0 <= lookahead && lookahead <= 0x6f9) ||
-          (0x7c0 <= lookahead && lookahead <= 0x7c9) ||
-          (0x966 <= lookahead && lookahead <= 0x96f) ||
-          (0x9e6 <= lookahead && lookahead <= 0x9ef) ||
-          (0x9f4 <= lookahead && lookahead <= 0x9f9) ||
-          (0xa66 <= lookahead && lookahead <= 0xa6f) ||
-          (0xae6 <= lookahead && lookahead <= 0xaef) ||
-          (0xb66 <= lookahead && lookahead <= 0xb6f) ||
-          (0xb72 <= lookahead && lookahead <= 0xb77) ||
-          (0xbe6 <= lookahead && lookahead <= 0xbf2) ||
-          (0xc66 <= lookahead && lookahead <= 0xc6f) ||
-          (0xc78 <= lookahead && lookahead <= 0xc7e) ||
-          (0xce6 <= lookahead && lookahead <= 0xcef) ||
-          (0xd58 <= lookahead && lookahead <= 0xd5e) ||
-          (0xd66 <= lookahead && lookahead <= 0xd78) ||
-          (0xde6 <= lookahead && lookahead <= 0xdef) ||
-          (0xe50 <= lookahead && lookahead <= 0xe59) ||
-          (0xed0 <= lookahead && lookahead <= 0xed9) ||
-          (0xf20 <= lookahead && lookahead <= 0xf33) ||
-          (0x1040 <= lookahead && lookahead <= 0x1049) ||
-          (0x1090 <= lookahead && lookahead <= 0x1099) ||
-          (0x1369 <= lookahead && lookahead <= 0x137c) ||
-          (0x16ee <= lookahead && lookahead <= 0x16f0) ||
-          (0x17e0 <= lookahead && lookahead <= 0x17e9) ||
-          (0x17f0 <= lookahead && lookahead <= 0x17f9) ||
-          (0x1810 <= lookahead && lookahead <= 0x1819) ||
-          (0x1946 <= lookahead && lookahead <= 0x194f) ||
-          (0x19d0 <= lookahead && lookahead <= 0x19da) ||
-          (0x1a80 <= lookahead && lookahead <= 0x1a89) ||
-          (0x1a90 <= lookahead && lookahead <= 0x1a99) ||
-          (0x1b50 <= lookahead && lookahead <= 0x1b59) ||
-          (0x1bb0 <= lookahead && lookahead <= 0x1bb9) ||
-          (0x1c40 <= lookahead && lookahead <= 0x1c49) ||
-          (0x1c50 <= lookahead && lookahead <= 0x1c59) ||
-          lookahead == 0x2070 ||
-          (0x2074 <= lookahead && lookahead <= 0x2079) ||
-          (0x2080 <= lookahead && lookahead <= 0x2089) ||
-          (0x2150 <= lookahead && lookahead <= 0x2182) ||
-          (0x2185 <= lookahead && lookahead <= 0x2189) ||
-          (0x2460 <= lookahead && lookahead <= 0x249b) ||
-          (0x24ea <= lookahead && lookahead <= 0x24ff) ||
-          (0x2776 <= lookahead && lookahead <= 0x2793) ||
-          lookahead == 0x2cfd ||
-          lookahead == 0x3007 ||
-          (0x3021 <= lookahead && lookahead <= 0x3029) ||
-          (0x3038 <= lookahead && lookahead <= 0x303a) ||
-          (0x3192 <= lookahead && lookahead <= 0x3195) ||
-          (0x3220 <= lookahead && lookahead <= 0x3229) ||
-          (0x3248 <= lookahead && lookahead <= 0x324f) ||
-          (0x3251 <= lookahead && lookahead <= 0x325f) ||
-          (0x3280 <= lookahead && lookahead <= 0x3289) ||
-          (0x32b1 <= lookahead && lookahead <= 0x32bf) ||
-          (0xa620 <= lookahead && lookahead <= 0xa629) ||
-          (0xa6e6 <= lookahead && lookahead <= 0xa6ef) ||
-          (0xa830 <= lookahead && lookahead <= 0xa835) ||
-          (0xa8d0 <= lookahead && lookahead <= 0xa8d9) ||
-          (0xa900 <= lookahead && lookahead <= 0xa909) ||
-          (0xa9d0 <= lookahead && lookahead <= 0xa9d9) ||
-          (0xa9f0 <= lookahead && lookahead <= 0xa9f9) ||
-          (0xaa50 <= lookahead && lookahead <= 0xaa59) ||
-          (0xabf0 <= lookahead && lookahead <= 0xabf9) ||
-          (0xff10 <= lookahead && lookahead <= 0xff19) ||
-          (0x10107 <= lookahead && lookahead <= 0x10133) ||
-          (0x10140 <= lookahead && lookahead <= 0x10178) ||
-          lookahead == 0x1018a ||
-          lookahead == 0x1018b ||
-          (0x102e1 <= lookahead && lookahead <= 0x102fb) ||
-          (0x10320 <= lookahead && lookahead <= 0x10323) ||
-          lookahead == 0x10341 ||
-          lookahead == 0x1034a ||
-          (0x103d1 <= lookahead && lookahead <= 0x103d5) ||
-          (0x104a0 <= lookahead && lookahead <= 0x104a9) ||
-          (0x10858 <= lookahead && lookahead <= 0x1085f) ||
-          (0x10879 <= lookahead && lookahead <= 0x1087f) ||
-          (0x108a7 <= lookahead && lookahead <= 0x108af) ||
-          (0x108fb <= lookahead && lookahead <= 0x108ff) ||
-          (0x10916 <= lookahead && lookahead <= 0x1091b) ||
-          lookahead == 0x109bc ||
-          lookahead == 0x109bd ||
-          (0x109c0 <= lookahead && lookahead <= 0x109cf) ||
-          (0x109d2 <= lookahead && lookahead <= 0x109ff) ||
-          (0x10a40 <= lookahead && lookahead <= 0x10a48) ||
-          lookahead == 0x10a7d ||
-          lookahead == 0x10a7e ||
-          (0x10a9d <= lookahead && lookahead <= 0x10a9f) ||
-          (0x10aeb <= lookahead && lookahead <= 0x10aef) ||
-          (0x10b58 <= lookahead && lookahead <= 0x10b5f) ||
-          (0x10b78 <= lookahead && lookahead <= 0x10b7f) ||
-          (0x10ba9 <= lookahead && lookahead <= 0x10baf) ||
-          (0x10cfa <= lookahead && lookahead <= 0x10cff) ||
-          (0x10d30 <= lookahead && lookahead <= 0x10d39) ||
-          (0x10d40 <= lookahead && lookahead <= 0x10d49) ||
-          (0x10e60 <= lookahead && lookahead <= 0x10e7e) ||
-          (0x10f1d <= lookahead && lookahead <= 0x10f26) ||
-          (0x10f51 <= lookahead && lookahead <= 0x10f54) ||
-          (0x10fc5 <= lookahead && lookahead <= 0x10fcb) ||
-          (0x11052 <= lookahead && lookahead <= 0x1106f) ||
-          (0x110f0 <= lookahead && lookahead <= 0x110f9) ||
-          (0x11136 <= lookahead && lookahead <= 0x1113f) ||
-          (0x111d0 <= lookahead && lookahead <= 0x111d9) ||
-          (0x111e1 <= lookahead && lookahead <= 0x111f4) ||
-          (0x112f0 <= lookahead && lookahead <= 0x112f9) ||
-          (0x11450 <= lookahead && lookahead <= 0x11459) ||
-          (0x114d0 <= lookahead && lookahead <= 0x114d9) ||
-          (0x11650 <= lookahead && lookahead <= 0x11659) ||
-          (0x116c0 <= lookahead && lookahead <= 0x116c9) ||
-          (0x116d0 <= lookahead && lookahead <= 0x116e3) ||
-          (0x11730 <= lookahead && lookahead <= 0x1173b) ||
-          (0x118e0 <= lookahead && lookahead <= 0x118f2) ||
-          (0x11950 <= lookahead && lookahead <= 0x11959) ||
-          (0x11bf0 <= lookahead && lookahead <= 0x11bf9) ||
-          (0x11c50 <= lookahead && lookahead <= 0x11c6c) ||
-          (0x11d50 <= lookahead && lookahead <= 0x11d59) ||
-          (0x11da0 <= lookahead && lookahead <= 0x11da9) ||
-          (0x11f50 <= lookahead && lookahead <= 0x11f59) ||
-          (0x11fc0 <= lookahead && lookahead <= 0x11fd4) ||
-          (0x12400 <= lookahead && lookahead <= 0x1246e) ||
-          (0x16130 <= lookahead && lookahead <= 0x16139) ||
-          (0x16a60 <= lookahead && lookahead <= 0x16a69) ||
-          (0x16ac0 <= lookahead && lookahead <= 0x16ac9) ||
-          (0x16b50 <= lookahead && lookahead <= 0x16b59) ||
-          (0x16b5b <= lookahead && lookahead <= 0x16b61) ||
-          (0x16d70 <= lookahead && lookahead <= 0x16d79) ||
-          (0x16e80 <= lookahead && lookahead <= 0x16e96) ||
-          (0x1ccf0 <= lookahead && lookahead <= 0x1ccf9) ||
-          (0x1d2c0 <= lookahead && lookahead <= 0x1d2d3) ||
-          (0x1d2e0 <= lookahead && lookahead <= 0x1d2f3) ||
-          (0x1d360 <= lookahead && lookahead <= 0x1d378) ||
-          (0x1d7ce <= lookahead && lookahead <= 0x1d7ff) ||
-          (0x1e140 <= lookahead && lookahead <= 0x1e149) ||
-          (0x1e2f0 <= lookahead && lookahead <= 0x1e2f9) ||
-          (0x1e4f0 <= lookahead && lookahead <= 0x1e4f9) ||
-          (0x1e5f1 <= lookahead && lookahead <= 0x1e5fa) ||
-          (0x1e8c7 <= lookahead && lookahead <= 0x1e8cf) ||
-          (0x1e950 <= lookahead && lookahead <= 0x1e959) ||
-          (0x1ec71 <= lookahead && lookahead <= 0x1ecab) ||
-          (0x1ecad <= lookahead && lookahead <= 0x1ecaf) ||
-          (0x1ecb1 <= lookahead && lookahead <= 0x1ecb4) ||
-          (0x1ed01 <= lookahead && lookahead <= 0x1ed2d) ||
-          (0x1ed2f <= lookahead && lookahead <= 0x1ed3d) ||
-          (0x1f100 <= lookahead && lookahead <= 0x1f10c) ||
-          (0x1fbf0 <= lookahead && lookahead <= 0x1fbf9)) ADVANCE(225);
-      if (set_contains(sym_number_literal_character_set_5, 774, lookahead)) ADVANCE(225);
-      END_STATE();
-    case 212:
-      ACCEPT_TOKEN(sym_number_literal);
-      ADVANCE_MAP(
-        '.', 52,
-        '_', 211,
-        'B', 218,
-        'b', 218,
-        'E', 217,
-        'e', 217,
-        'O', 220,
-        'o', 220,
-        'X', 223,
-        'x', 223,
-      );
-      if (('0' <= lookahead && lookahead <= '9')) ADVANCE(213);
-      if (set_contains(sym_number_literal_character_set_4, 682, lookahead)) ADVANCE(225);
-      END_STATE();
     case 213:
       ACCEPT_TOKEN(sym_number_literal);
       if (lookahead == '.') ADVANCE(52);
-      if (lookahead == '_') ADVANCE(211);
+      if (lookahead == '_') ADVANCE(213);
+      if (lookahead == '%' ||
+          lookahead == 0xb0) ADVANCE(227);
       if (lookahead == 'E' ||
-          lookahead == 'e') ADVANCE(217);
+          lookahead == 'e') ADVANCE(219);
       if (('0' <= lookahead && lookahead <= '9')) ADVANCE(213);
-      if (set_contains(sym_number_literal_character_set_4, 682, lookahead)) ADVANCE(225);
+      if (lookahead == 0xb2 ||
+          lookahead == 0xb3 ||
+          lookahead == 0xb9 ||
+          (0xbc <= lookahead && lookahead <= 0xbe) ||
+          (0x660 <= lookahead && lookahead <= 0x669) ||
+          (0x6f0 <= lookahead && lookahead <= 0x6f9) ||
+          (0x7c0 <= lookahead && lookahead <= 0x7c9) ||
+          (0x966 <= lookahead && lookahead <= 0x96f) ||
+          (0x9e6 <= lookahead && lookahead <= 0x9ef) ||
+          (0x9f4 <= lookahead && lookahead <= 0x9f9) ||
+          (0xa66 <= lookahead && lookahead <= 0xa6f) ||
+          (0xae6 <= lookahead && lookahead <= 0xaef) ||
+          (0xb66 <= lookahead && lookahead <= 0xb6f) ||
+          (0xb72 <= lookahead && lookahead <= 0xb77) ||
+          (0xbe6 <= lookahead && lookahead <= 0xbf2) ||
+          (0xc66 <= lookahead && lookahead <= 0xc6f) ||
+          (0xc78 <= lookahead && lookahead <= 0xc7e) ||
+          (0xce6 <= lookahead && lookahead <= 0xcef) ||
+          (0xd58 <= lookahead && lookahead <= 0xd5e) ||
+          (0xd66 <= lookahead && lookahead <= 0xd78) ||
+          (0xde6 <= lookahead && lookahead <= 0xdef) ||
+          (0xe50 <= lookahead && lookahead <= 0xe59) ||
+          (0xed0 <= lookahead && lookahead <= 0xed9) ||
+          (0xf20 <= lookahead && lookahead <= 0xf33) ||
+          (0x1040 <= lookahead && lookahead <= 0x1049) ||
+          (0x1090 <= lookahead && lookahead <= 0x1099) ||
+          (0x1369 <= lookahead && lookahead <= 0x137c) ||
+          (0x16ee <= lookahead && lookahead <= 0x16f0) ||
+          (0x17e0 <= lookahead && lookahead <= 0x17e9) ||
+          (0x17f0 <= lookahead && lookahead <= 0x17f9) ||
+          (0x1810 <= lookahead && lookahead <= 0x1819) ||
+          (0x1946 <= lookahead && lookahead <= 0x194f) ||
+          (0x19d0 <= lookahead && lookahead <= 0x19da) ||
+          (0x1a80 <= lookahead && lookahead <= 0x1a89) ||
+          (0x1a90 <= lookahead && lookahead <= 0x1a99) ||
+          (0x1b50 <= lookahead && lookahead <= 0x1b59) ||
+          (0x1bb0 <= lookahead && lookahead <= 0x1bb9) ||
+          (0x1c40 <= lookahead && lookahead <= 0x1c49) ||
+          (0x1c50 <= lookahead && lookahead <= 0x1c59) ||
+          lookahead == 0x2070 ||
+          (0x2074 <= lookahead && lookahead <= 0x2079) ||
+          (0x2080 <= lookahead && lookahead <= 0x2089) ||
+          (0x2150 <= lookahead && lookahead <= 0x2182) ||
+          (0x2185 <= lookahead && lookahead <= 0x2189) ||
+          (0x2460 <= lookahead && lookahead <= 0x249b) ||
+          (0x24ea <= lookahead && lookahead <= 0x24ff) ||
+          (0x2776 <= lookahead && lookahead <= 0x2793) ||
+          lookahead == 0x2cfd ||
+          lookahead == 0x3007 ||
+          (0x3021 <= lookahead && lookahead <= 0x3029) ||
+          (0x3038 <= lookahead && lookahead <= 0x303a) ||
+          (0x3192 <= lookahead && lookahead <= 0x3195) ||
+          (0x3220 <= lookahead && lookahead <= 0x3229) ||
+          (0x3248 <= lookahead && lookahead <= 0x324f) ||
+          (0x3251 <= lookahead && lookahead <= 0x325f) ||
+          (0x3280 <= lookahead && lookahead <= 0x3289) ||
+          (0x32b1 <= lookahead && lookahead <= 0x32bf) ||
+          (0xa620 <= lookahead && lookahead <= 0xa629) ||
+          (0xa6e6 <= lookahead && lookahead <= 0xa6ef) ||
+          (0xa830 <= lookahead && lookahead <= 0xa835) ||
+          (0xa8d0 <= lookahead && lookahead <= 0xa8d9) ||
+          (0xa900 <= lookahead && lookahead <= 0xa909) ||
+          (0xa9d0 <= lookahead && lookahead <= 0xa9d9) ||
+          (0xa9f0 <= lookahead && lookahead <= 0xa9f9) ||
+          (0xaa50 <= lookahead && lookahead <= 0xaa59) ||
+          (0xabf0 <= lookahead && lookahead <= 0xabf9) ||
+          (0xff10 <= lookahead && lookahead <= 0xff19) ||
+          (0x10107 <= lookahead && lookahead <= 0x10133) ||
+          (0x10140 <= lookahead && lookahead <= 0x10178) ||
+          lookahead == 0x1018a ||
+          lookahead == 0x1018b ||
+          (0x102e1 <= lookahead && lookahead <= 0x102fb) ||
+          (0x10320 <= lookahead && lookahead <= 0x10323) ||
+          lookahead == 0x10341 ||
+          lookahead == 0x1034a ||
+          (0x103d1 <= lookahead && lookahead <= 0x103d5) ||
+          (0x104a0 <= lookahead && lookahead <= 0x104a9) ||
+          (0x10858 <= lookahead && lookahead <= 0x1085f) ||
+          (0x10879 <= lookahead && lookahead <= 0x1087f) ||
+          (0x108a7 <= lookahead && lookahead <= 0x108af) ||
+          (0x108fb <= lookahead && lookahead <= 0x108ff) ||
+          (0x10916 <= lookahead && lookahead <= 0x1091b) ||
+          lookahead == 0x109bc ||
+          lookahead == 0x109bd ||
+          (0x109c0 <= lookahead && lookahead <= 0x109cf) ||
+          (0x109d2 <= lookahead && lookahead <= 0x109ff) ||
+          (0x10a40 <= lookahead && lookahead <= 0x10a48) ||
+          lookahead == 0x10a7d ||
+          lookahead == 0x10a7e ||
+          (0x10a9d <= lookahead && lookahead <= 0x10a9f) ||
+          (0x10aeb <= lookahead && lookahead <= 0x10aef) ||
+          (0x10b58 <= lookahead && lookahead <= 0x10b5f) ||
+          (0x10b78 <= lookahead && lookahead <= 0x10b7f) ||
+          (0x10ba9 <= lookahead && lookahead <= 0x10baf) ||
+          (0x10cfa <= lookahead && lookahead <= 0x10cff) ||
+          (0x10d30 <= lookahead && lookahead <= 0x10d39) ||
+          (0x10d40 <= lookahead && lookahead <= 0x10d49) ||
+          (0x10e60 <= lookahead && lookahead <= 0x10e7e) ||
+          (0x10f1d <= lookahead && lookahead <= 0x10f26) ||
+          (0x10f51 <= lookahead && lookahead <= 0x10f54) ||
+          (0x10fc5 <= lookahead && lookahead <= 0x10fcb) ||
+          (0x11052 <= lookahead && lookahead <= 0x1106f) ||
+          (0x110f0 <= lookahead && lookahead <= 0x110f9) ||
+          (0x11136 <= lookahead && lookahead <= 0x1113f) ||
+          (0x111d0 <= lookahead && lookahead <= 0x111d9) ||
+          (0x111e1 <= lookahead && lookahead <= 0x111f4) ||
+          (0x112f0 <= lookahead && lookahead <= 0x112f9) ||
+          (0x11450 <= lookahead && lookahead <= 0x11459) ||
+          (0x114d0 <= lookahead && lookahead <= 0x114d9) ||
+          (0x11650 <= lookahead && lookahead <= 0x11659) ||
+          (0x116c0 <= lookahead && lookahead <= 0x116c9) ||
+          (0x116d0 <= lookahead && lookahead <= 0x116e3) ||
+          (0x11730 <= lookahead && lookahead <= 0x1173b) ||
+          (0x118e0 <= lookahead && lookahead <= 0x118f2) ||
+          (0x11950 <= lookahead && lookahead <= 0x11959) ||
+          (0x11bf0 <= lookahead && lookahead <= 0x11bf9) ||
+          (0x11c50 <= lookahead && lookahead <= 0x11c6c) ||
+          (0x11d50 <= lookahead && lookahead <= 0x11d59) ||
+          (0x11da0 <= lookahead && lookahead <= 0x11da9) ||
+          (0x11f50 <= lookahead && lookahead <= 0x11f59) ||
+          (0x11fc0 <= lookahead && lookahead <= 0x11fd4) ||
+          (0x12400 <= lookahead && lookahead <= 0x1246e) ||
+          (0x16130 <= lookahead && lookahead <= 0x16139) ||
+          (0x16a60 <= lookahead && lookahead <= 0x16a69) ||
+          (0x16ac0 <= lookahead && lookahead <= 0x16ac9) ||
+          (0x16b50 <= lookahead && lookahead <= 0x16b59) ||
+          (0x16b5b <= lookahead && lookahead <= 0x16b61) ||
+          (0x16d70 <= lookahead && lookahead <= 0x16d79) ||
+          (0x16e80 <= lookahead && lookahead <= 0x16e96) ||
+          (0x1ccf0 <= lookahead && lookahead <= 0x1ccf9) ||
+          (0x1d2c0 <= lookahead && lookahead <= 0x1d2d3) ||
+          (0x1d2e0 <= lookahead && lookahead <= 0x1d2f3) ||
+          (0x1d360 <= lookahead && lookahead <= 0x1d378) ||
+          (0x1d7ce <= lookahead && lookahead <= 0x1d7ff) ||
+          (0x1e140 <= lookahead && lookahead <= 0x1e149) ||
+          (0x1e2f0 <= lookahead && lookahead <= 0x1e2f9) ||
+          (0x1e4f0 <= lookahead && lookahead <= 0x1e4f9) ||
+          (0x1e5f1 <= lookahead && lookahead <= 0x1e5fa) ||
+          (0x1e8c7 <= lookahead && lookahead <= 0x1e8cf) ||
+          (0x1e950 <= lookahead && lookahead <= 0x1e959) ||
+          (0x1ec71 <= lookahead && lookahead <= 0x1ecab) ||
+          (0x1ecad <= lookahead && lookahead <= 0x1ecaf) ||
+          (0x1ecb1 <= lookahead && lookahead <= 0x1ecb4) ||
+          (0x1ed01 <= lookahead && lookahead <= 0x1ed2d) ||
+          (0x1ed2f <= lookahead && lookahead <= 0x1ed3d) ||
+          (0x1f100 <= lookahead && lookahead <= 0x1f10c) ||
+          (0x1fbf0 <= lookahead && lookahead <= 0x1fbf9)) ADVANCE(227);
+      if (set_contains(sym_number_literal_character_set_5, 774, lookahead)) ADVANCE(227);
       END_STATE();
     case 214:
       ACCEPT_TOKEN(sym_number_literal);
-      if (lookahead == '_') ADVANCE(214);
-      if (lookahead == '%' ||
-          lookahead == 0xb0) ADVANCE(225);
-      if (lookahead == 'E' ||
-          lookahead == 'e') ADVANCE(217);
-      if (('0' <= lookahead && lookahead <= '9')) ADVANCE(214);
-      if (lookahead == 0xb2 ||
-          lookahead == 0xb3 ||
-          lookahead == 0xb9 ||
-          (0xbc <= lookahead && lookahead <= 0xbe) ||
-          (0x660 <= lookahead && lookahead <= 0x669) ||
-          (0x6f0 <= lookahead && lookahead <= 0x6f9) ||
-          (0x7c0 <= lookahead && lookahead <= 0x7c9) ||
-          (0x966 <= lookahead && lookahead <= 0x96f) ||
-          (0x9e6 <= lookahead && lookahead <= 0x9ef) ||
-          (0x9f4 <= lookahead && lookahead <= 0x9f9) ||
-          (0xa66 <= lookahead && lookahead <= 0xa6f) ||
-          (0xae6 <= lookahead && lookahead <= 0xaef) ||
-          (0xb66 <= lookahead && lookahead <= 0xb6f) ||
-          (0xb72 <= lookahead && lookahead <= 0xb77) ||
-          (0xbe6 <= lookahead && lookahead <= 0xbf2) ||
-          (0xc66 <= lookahead && lookahead <= 0xc6f) ||
-          (0xc78 <= lookahead && lookahead <= 0xc7e) ||
-          (0xce6 <= lookahead && lookahead <= 0xcef) ||
-          (0xd58 <= lookahead && lookahead <= 0xd5e) ||
-          (0xd66 <= lookahead && lookahead <= 0xd78) ||
-          (0xde6 <= lookahead && lookahead <= 0xdef) ||
-          (0xe50 <= lookahead && lookahead <= 0xe59) ||
-          (0xed0 <= lookahead && lookahead <= 0xed9) ||
-          (0xf20 <= lookahead && lookahead <= 0xf33) ||
-          (0x1040 <= lookahead && lookahead <= 0x1049) ||
-          (0x1090 <= lookahead && lookahead <= 0x1099) ||
-          (0x1369 <= lookahead && lookahead <= 0x137c) ||
-          (0x16ee <= lookahead && lookahead <= 0x16f0) ||
-          (0x17e0 <= lookahead && lookahead <= 0x17e9) ||
-          (0x17f0 <= lookahead && lookahead <= 0x17f9) ||
-          (0x1810 <= lookahead && lookahead <= 0x1819) ||
-          (0x1946 <= lookahead && lookahead <= 0x194f) ||
-          (0x19d0 <= lookahead && lookahead <= 0x19da) ||
-          (0x1a80 <= lookahead && lookahead <= 0x1a89) ||
-          (0x1a90 <= lookahead && lookahead <= 0x1a99) ||
-          (0x1b50 <= lookahead && lookahead <= 0x1b59) ||
-          (0x1bb0 <= lookahead && lookahead <= 0x1bb9) ||
-          (0x1c40 <= lookahead && lookahead <= 0x1c49) ||
-          (0x1c50 <= lookahead && lookahead <= 0x1c59) ||
-          lookahead == 0x2070 ||
-          (0x2074 <= lookahead && lookahead <= 0x2079) ||
-          (0x2080 <= lookahead && lookahead <= 0x2089) ||
-          (0x2150 <= lookahead && lookahead <= 0x2182) ||
-          (0x2185 <= lookahead && lookahead <= 0x2189) ||
-          (0x2460 <= lookahead && lookahead <= 0x249b) ||
-          (0x24ea <= lookahead && lookahead <= 0x24ff) ||
-          (0x2776 <= lookahead && lookahead <= 0x2793) ||
-          lookahead == 0x2cfd ||
-          lookahead == 0x3007 ||
-          (0x3021 <= lookahead && lookahead <= 0x3029) ||
-          (0x3038 <= lookahead && lookahead <= 0x303a) ||
-          (0x3192 <= lookahead && lookahead <= 0x3195) ||
-          (0x3220 <= lookahead && lookahead <= 0x3229) ||
-          (0x3248 <= lookahead && lookahead <= 0x324f) ||
-          (0x3251 <= lookahead && lookahead <= 0x325f) ||
-          (0x3280 <= lookahead && lookahead <= 0x3289) ||
-          (0x32b1 <= lookahead && lookahead <= 0x32bf) ||
-          (0xa620 <= lookahead && lookahead <= 0xa629) ||
-          (0xa6e6 <= lookahead && lookahead <= 0xa6ef) ||
-          (0xa830 <= lookahead && lookahead <= 0xa835) ||
-          (0xa8d0 <= lookahead && lookahead <= 0xa8d9) ||
-          (0xa900 <= lookahead && lookahead <= 0xa909) ||
-          (0xa9d0 <= lookahead && lookahead <= 0xa9d9) ||
-          (0xa9f0 <= lookahead && lookahead <= 0xa9f9) ||
-          (0xaa50 <= lookahead && lookahead <= 0xaa59) ||
-          (0xabf0 <= lookahead && lookahead <= 0xabf9) ||
-          (0xff10 <= lookahead && lookahead <= 0xff19) ||
-          (0x10107 <= lookahead && lookahead <= 0x10133) ||
-          (0x10140 <= lookahead && lookahead <= 0x10178) ||
-          lookahead == 0x1018a ||
-          lookahead == 0x1018b ||
-          (0x102e1 <= lookahead && lookahead <= 0x102fb) ||
-          (0x10320 <= lookahead && lookahead <= 0x10323) ||
-          lookahead == 0x10341 ||
-          lookahead == 0x1034a ||
-          (0x103d1 <= lookahead && lookahead <= 0x103d5) ||
-          (0x104a0 <= lookahead && lookahead <= 0x104a9) ||
-          (0x10858 <= lookahead && lookahead <= 0x1085f) ||
-          (0x10879 <= lookahead && lookahead <= 0x1087f) ||
-          (0x108a7 <= lookahead && lookahead <= 0x108af) ||
-          (0x108fb <= lookahead && lookahead <= 0x108ff) ||
-          (0x10916 <= lookahead && lookahead <= 0x1091b) ||
-          lookahead == 0x109bc ||
-          lookahead == 0x109bd ||
-          (0x109c0 <= lookahead && lookahead <= 0x109cf) ||
-          (0x109d2 <= lookahead && lookahead <= 0x109ff) ||
-          (0x10a40 <= lookahead && lookahead <= 0x10a48) ||
-          lookahead == 0x10a7d ||
-          lookahead == 0x10a7e ||
-          (0x10a9d <= lookahead && lookahead <= 0x10a9f) ||
-          (0x10aeb <= lookahead && lookahead <= 0x10aef) ||
-          (0x10b58 <= lookahead && lookahead <= 0x10b5f) ||
-          (0x10b78 <= lookahead && lookahead <= 0x10b7f) ||
-          (0x10ba9 <= lookahead && lookahead <= 0x10baf) ||
-          (0x10cfa <= lookahead && lookahead <= 0x10cff) ||
-          (0x10d30 <= lookahead && lookahead <= 0x10d39) ||
-          (0x10d40 <= lookahead && lookahead <= 0x10d49) ||
-          (0x10e60 <= lookahead && lookahead <= 0x10e7e) ||
-          (0x10f1d <= lookahead && lookahead <= 0x10f26) ||
-          (0x10f51 <= lookahead && lookahead <= 0x10f54) ||
-          (0x10fc5 <= lookahead && lookahead <= 0x10fcb) ||
-          (0x11052 <= lookahead && lookahead <= 0x1106f) ||
-          (0x110f0 <= lookahead && lookahead <= 0x110f9) ||
-          (0x11136 <= lookahead && lookahead <= 0x1113f) ||
-          (0x111d0 <= lookahead && lookahead <= 0x111d9) ||
-          (0x111e1 <= lookahead && lookahead <= 0x111f4) ||
-          (0x112f0 <= lookahead && lookahead <= 0x112f9) ||
-          (0x11450 <= lookahead && lookahead <= 0x11459) ||
-          (0x114d0 <= lookahead && lookahead <= 0x114d9) ||
-          (0x11650 <= lookahead && lookahead <= 0x11659) ||
-          (0x116c0 <= lookahead && lookahead <= 0x116c9) ||
-          (0x116d0 <= lookahead && lookahead <= 0x116e3) ||
-          (0x11730 <= lookahead && lookahead <= 0x1173b) ||
-          (0x118e0 <= lookahead && lookahead <= 0x118f2) ||
-          (0x11950 <= lookahead && lookahead <= 0x11959) ||
-          (0x11bf0 <= lookahead && lookahead <= 0x11bf9) ||
-          (0x11c50 <= lookahead && lookahead <= 0x11c6c) ||
-          (0x11d50 <= lookahead && lookahead <= 0x11d59) ||
-          (0x11da0 <= lookahead && lookahead <= 0x11da9) ||
-          (0x11f50 <= lookahead && lookahead <= 0x11f59) ||
-          (0x11fc0 <= lookahead && lookahead <= 0x11fd4) ||
-          (0x12400 <= lookahead && lookahead <= 0x1246e) ||
-          (0x16130 <= lookahead && lookahead <= 0x16139) ||
-          (0x16a60 <= lookahead && lookahead <= 0x16a69) ||
-          (0x16ac0 <= lookahead && lookahead <= 0x16ac9) ||
-          (0x16b50 <= lookahead && lookahead <= 0x16b59) ||
-          (0x16b5b <= lookahead && lookahead <= 0x16b61) ||
-          (0x16d70 <= lookahead && lookahead <= 0x16d79) ||
-          (0x16e80 <= lookahead && lookahead <= 0x16e96) ||
-          (0x1ccf0 <= lookahead && lookahead <= 0x1ccf9) ||
-          (0x1d2c0 <= lookahead && lookahead <= 0x1d2d3) ||
-          (0x1d2e0 <= lookahead && lookahead <= 0x1d2f3) ||
-          (0x1d360 <= lookahead && lookahead <= 0x1d378) ||
-          (0x1d7ce <= lookahead && lookahead <= 0x1d7ff) ||
-          (0x1e140 <= lookahead && lookahead <= 0x1e149) ||
-          (0x1e2f0 <= lookahead && lookahead <= 0x1e2f9) ||
-          (0x1e4f0 <= lookahead && lookahead <= 0x1e4f9) ||
-          (0x1e5f1 <= lookahead && lookahead <= 0x1e5fa) ||
-          (0x1e8c7 <= lookahead && lookahead <= 0x1e8cf) ||
-          (0x1e950 <= lookahead && lookahead <= 0x1e959) ||
-          (0x1ec71 <= lookahead && lookahead <= 0x1ecab) ||
-          (0x1ecad <= lookahead && lookahead <= 0x1ecaf) ||
-          (0x1ecb1 <= lookahead && lookahead <= 0x1ecb4) ||
-          (0x1ed01 <= lookahead && lookahead <= 0x1ed2d) ||
-          (0x1ed2f <= lookahead && lookahead <= 0x1ed3d) ||
-          (0x1f100 <= lookahead && lookahead <= 0x1f10c) ||
-          (0x1fbf0 <= lookahead && lookahead <= 0x1fbf9)) ADVANCE(225);
-      if (set_contains(sym_number_literal_character_set_5, 774, lookahead)) ADVANCE(225);
+      ADVANCE_MAP(
+        '.', 52,
+        '_', 213,
+        'B', 220,
+        'b', 220,
+        'E', 219,
+        'e', 219,
+        'O', 222,
+        'o', 222,
+        'X', 225,
+        'x', 225,
+      );
+      if (('0' <= lookahead && lookahead <= '9')) ADVANCE(215);
+      if (set_contains(sym_number_literal_character_set_4, 682, lookahead)) ADVANCE(227);
       END_STATE();
     case 215:
       ACCEPT_TOKEN(sym_number_literal);
-      if (lookahead == '_') ADVANCE(214);
+      if (lookahead == '.') ADVANCE(52);
+      if (lookahead == '_') ADVANCE(213);
       if (lookahead == 'E' ||
-          lookahead == 'e') ADVANCE(217);
+          lookahead == 'e') ADVANCE(219);
       if (('0' <= lookahead && lookahead <= '9')) ADVANCE(215);
-      if (set_contains(sym_number_literal_character_set_4, 682, lookahead)) ADVANCE(225);
+      if (set_contains(sym_number_literal_character_set_4, 682, lookahead)) ADVANCE(227);
       END_STATE();
     case 216:
       ACCEPT_TOKEN(sym_number_literal);
+      if (lookahead == '_') ADVANCE(216);
       if (lookahead == '%' ||
-          lookahead == 0xb0) ADVANCE(225);
+          lookahead == 0xb0) ADVANCE(227);
+      if (lookahead == 'E' ||
+          lookahead == 'e') ADVANCE(219);
       if (('0' <= lookahead && lookahead <= '9')) ADVANCE(216);
       if (lookahead == 0xb2 ||
           lookahead == 0xb3 ||
@@ -6380,174 +6241,313 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
           (0x1ed01 <= lookahead && lookahead <= 0x1ed2d) ||
           (0x1ed2f <= lookahead && lookahead <= 0x1ed3d) ||
           (0x1f100 <= lookahead && lookahead <= 0x1f10c) ||
-          (0x1fbf0 <= lookahead && lookahead <= 0x1fbf9)) ADVANCE(225);
-      if (set_contains(sym_number_literal_character_set_5, 774, lookahead)) ADVANCE(225);
+          (0x1fbf0 <= lookahead && lookahead <= 0x1fbf9)) ADVANCE(227);
+      if (set_contains(sym_number_literal_character_set_5, 774, lookahead)) ADVANCE(227);
       END_STATE();
     case 217:
       ACCEPT_TOKEN(sym_number_literal);
-      if (lookahead == '+' ||
-          lookahead == '-') ADVANCE(53);
-      if (('0' <= lookahead && lookahead <= '9')) ADVANCE(216);
-      if (set_contains(sym_number_literal_character_set_3, 774, lookahead)) ADVANCE(225);
+      if (lookahead == '_') ADVANCE(216);
+      if (lookahead == 'E' ||
+          lookahead == 'e') ADVANCE(219);
+      if (('0' <= lookahead && lookahead <= '9')) ADVANCE(217);
+      if (set_contains(sym_number_literal_character_set_4, 682, lookahead)) ADVANCE(227);
       END_STATE();
     case 218:
       ACCEPT_TOKEN(sym_number_literal);
-      if (lookahead == '0' ||
-          lookahead == '1') ADVANCE(219);
-      if (set_contains(sym_type_identifier_character_set_2, 772, lookahead)) ADVANCE(225);
+      if (lookahead == '%' ||
+          lookahead == 0xb0) ADVANCE(227);
+      if (('0' <= lookahead && lookahead <= '9')) ADVANCE(218);
+      if (lookahead == 0xb2 ||
+          lookahead == 0xb3 ||
+          lookahead == 0xb9 ||
+          (0xbc <= lookahead && lookahead <= 0xbe) ||
+          (0x660 <= lookahead && lookahead <= 0x669) ||
+          (0x6f0 <= lookahead && lookahead <= 0x6f9) ||
+          (0x7c0 <= lookahead && lookahead <= 0x7c9) ||
+          (0x966 <= lookahead && lookahead <= 0x96f) ||
+          (0x9e6 <= lookahead && lookahead <= 0x9ef) ||
+          (0x9f4 <= lookahead && lookahead <= 0x9f9) ||
+          (0xa66 <= lookahead && lookahead <= 0xa6f) ||
+          (0xae6 <= lookahead && lookahead <= 0xaef) ||
+          (0xb66 <= lookahead && lookahead <= 0xb6f) ||
+          (0xb72 <= lookahead && lookahead <= 0xb77) ||
+          (0xbe6 <= lookahead && lookahead <= 0xbf2) ||
+          (0xc66 <= lookahead && lookahead <= 0xc6f) ||
+          (0xc78 <= lookahead && lookahead <= 0xc7e) ||
+          (0xce6 <= lookahead && lookahead <= 0xcef) ||
+          (0xd58 <= lookahead && lookahead <= 0xd5e) ||
+          (0xd66 <= lookahead && lookahead <= 0xd78) ||
+          (0xde6 <= lookahead && lookahead <= 0xdef) ||
+          (0xe50 <= lookahead && lookahead <= 0xe59) ||
+          (0xed0 <= lookahead && lookahead <= 0xed9) ||
+          (0xf20 <= lookahead && lookahead <= 0xf33) ||
+          (0x1040 <= lookahead && lookahead <= 0x1049) ||
+          (0x1090 <= lookahead && lookahead <= 0x1099) ||
+          (0x1369 <= lookahead && lookahead <= 0x137c) ||
+          (0x16ee <= lookahead && lookahead <= 0x16f0) ||
+          (0x17e0 <= lookahead && lookahead <= 0x17e9) ||
+          (0x17f0 <= lookahead && lookahead <= 0x17f9) ||
+          (0x1810 <= lookahead && lookahead <= 0x1819) ||
+          (0x1946 <= lookahead && lookahead <= 0x194f) ||
+          (0x19d0 <= lookahead && lookahead <= 0x19da) ||
+          (0x1a80 <= lookahead && lookahead <= 0x1a89) ||
+          (0x1a90 <= lookahead && lookahead <= 0x1a99) ||
+          (0x1b50 <= lookahead && lookahead <= 0x1b59) ||
+          (0x1bb0 <= lookahead && lookahead <= 0x1bb9) ||
+          (0x1c40 <= lookahead && lookahead <= 0x1c49) ||
+          (0x1c50 <= lookahead && lookahead <= 0x1c59) ||
+          lookahead == 0x2070 ||
+          (0x2074 <= lookahead && lookahead <= 0x2079) ||
+          (0x2080 <= lookahead && lookahead <= 0x2089) ||
+          (0x2150 <= lookahead && lookahead <= 0x2182) ||
+          (0x2185 <= lookahead && lookahead <= 0x2189) ||
+          (0x2460 <= lookahead && lookahead <= 0x249b) ||
+          (0x24ea <= lookahead && lookahead <= 0x24ff) ||
+          (0x2776 <= lookahead && lookahead <= 0x2793) ||
+          lookahead == 0x2cfd ||
+          lookahead == 0x3007 ||
+          (0x3021 <= lookahead && lookahead <= 0x3029) ||
+          (0x3038 <= lookahead && lookahead <= 0x303a) ||
+          (0x3192 <= lookahead && lookahead <= 0x3195) ||
+          (0x3220 <= lookahead && lookahead <= 0x3229) ||
+          (0x3248 <= lookahead && lookahead <= 0x324f) ||
+          (0x3251 <= lookahead && lookahead <= 0x325f) ||
+          (0x3280 <= lookahead && lookahead <= 0x3289) ||
+          (0x32b1 <= lookahead && lookahead <= 0x32bf) ||
+          (0xa620 <= lookahead && lookahead <= 0xa629) ||
+          (0xa6e6 <= lookahead && lookahead <= 0xa6ef) ||
+          (0xa830 <= lookahead && lookahead <= 0xa835) ||
+          (0xa8d0 <= lookahead && lookahead <= 0xa8d9) ||
+          (0xa900 <= lookahead && lookahead <= 0xa909) ||
+          (0xa9d0 <= lookahead && lookahead <= 0xa9d9) ||
+          (0xa9f0 <= lookahead && lookahead <= 0xa9f9) ||
+          (0xaa50 <= lookahead && lookahead <= 0xaa59) ||
+          (0xabf0 <= lookahead && lookahead <= 0xabf9) ||
+          (0xff10 <= lookahead && lookahead <= 0xff19) ||
+          (0x10107 <= lookahead && lookahead <= 0x10133) ||
+          (0x10140 <= lookahead && lookahead <= 0x10178) ||
+          lookahead == 0x1018a ||
+          lookahead == 0x1018b ||
+          (0x102e1 <= lookahead && lookahead <= 0x102fb) ||
+          (0x10320 <= lookahead && lookahead <= 0x10323) ||
+          lookahead == 0x10341 ||
+          lookahead == 0x1034a ||
+          (0x103d1 <= lookahead && lookahead <= 0x103d5) ||
+          (0x104a0 <= lookahead && lookahead <= 0x104a9) ||
+          (0x10858 <= lookahead && lookahead <= 0x1085f) ||
+          (0x10879 <= lookahead && lookahead <= 0x1087f) ||
+          (0x108a7 <= lookahead && lookahead <= 0x108af) ||
+          (0x108fb <= lookahead && lookahead <= 0x108ff) ||
+          (0x10916 <= lookahead && lookahead <= 0x1091b) ||
+          lookahead == 0x109bc ||
+          lookahead == 0x109bd ||
+          (0x109c0 <= lookahead && lookahead <= 0x109cf) ||
+          (0x109d2 <= lookahead && lookahead <= 0x109ff) ||
+          (0x10a40 <= lookahead && lookahead <= 0x10a48) ||
+          lookahead == 0x10a7d ||
+          lookahead == 0x10a7e ||
+          (0x10a9d <= lookahead && lookahead <= 0x10a9f) ||
+          (0x10aeb <= lookahead && lookahead <= 0x10aef) ||
+          (0x10b58 <= lookahead && lookahead <= 0x10b5f) ||
+          (0x10b78 <= lookahead && lookahead <= 0x10b7f) ||
+          (0x10ba9 <= lookahead && lookahead <= 0x10baf) ||
+          (0x10cfa <= lookahead && lookahead <= 0x10cff) ||
+          (0x10d30 <= lookahead && lookahead <= 0x10d39) ||
+          (0x10d40 <= lookahead && lookahead <= 0x10d49) ||
+          (0x10e60 <= lookahead && lookahead <= 0x10e7e) ||
+          (0x10f1d <= lookahead && lookahead <= 0x10f26) ||
+          (0x10f51 <= lookahead && lookahead <= 0x10f54) ||
+          (0x10fc5 <= lookahead && lookahead <= 0x10fcb) ||
+          (0x11052 <= lookahead && lookahead <= 0x1106f) ||
+          (0x110f0 <= lookahead && lookahead <= 0x110f9) ||
+          (0x11136 <= lookahead && lookahead <= 0x1113f) ||
+          (0x111d0 <= lookahead && lookahead <= 0x111d9) ||
+          (0x111e1 <= lookahead && lookahead <= 0x111f4) ||
+          (0x112f0 <= lookahead && lookahead <= 0x112f9) ||
+          (0x11450 <= lookahead && lookahead <= 0x11459) ||
+          (0x114d0 <= lookahead && lookahead <= 0x114d9) ||
+          (0x11650 <= lookahead && lookahead <= 0x11659) ||
+          (0x116c0 <= lookahead && lookahead <= 0x116c9) ||
+          (0x116d0 <= lookahead && lookahead <= 0x116e3) ||
+          (0x11730 <= lookahead && lookahead <= 0x1173b) ||
+          (0x118e0 <= lookahead && lookahead <= 0x118f2) ||
+          (0x11950 <= lookahead && lookahead <= 0x11959) ||
+          (0x11bf0 <= lookahead && lookahead <= 0x11bf9) ||
+          (0x11c50 <= lookahead && lookahead <= 0x11c6c) ||
+          (0x11d50 <= lookahead && lookahead <= 0x11d59) ||
+          (0x11da0 <= lookahead && lookahead <= 0x11da9) ||
+          (0x11f50 <= lookahead && lookahead <= 0x11f59) ||
+          (0x11fc0 <= lookahead && lookahead <= 0x11fd4) ||
+          (0x12400 <= lookahead && lookahead <= 0x1246e) ||
+          (0x16130 <= lookahead && lookahead <= 0x16139) ||
+          (0x16a60 <= lookahead && lookahead <= 0x16a69) ||
+          (0x16ac0 <= lookahead && lookahead <= 0x16ac9) ||
+          (0x16b50 <= lookahead && lookahead <= 0x16b59) ||
+          (0x16b5b <= lookahead && lookahead <= 0x16b61) ||
+          (0x16d70 <= lookahead && lookahead <= 0x16d79) ||
+          (0x16e80 <= lookahead && lookahead <= 0x16e96) ||
+          (0x1ccf0 <= lookahead && lookahead <= 0x1ccf9) ||
+          (0x1d2c0 <= lookahead && lookahead <= 0x1d2d3) ||
+          (0x1d2e0 <= lookahead && lookahead <= 0x1d2f3) ||
+          (0x1d360 <= lookahead && lookahead <= 0x1d378) ||
+          (0x1d7ce <= lookahead && lookahead <= 0x1d7ff) ||
+          (0x1e140 <= lookahead && lookahead <= 0x1e149) ||
+          (0x1e2f0 <= lookahead && lookahead <= 0x1e2f9) ||
+          (0x1e4f0 <= lookahead && lookahead <= 0x1e4f9) ||
+          (0x1e5f1 <= lookahead && lookahead <= 0x1e5fa) ||
+          (0x1e8c7 <= lookahead && lookahead <= 0x1e8cf) ||
+          (0x1e950 <= lookahead && lookahead <= 0x1e959) ||
+          (0x1ec71 <= lookahead && lookahead <= 0x1ecab) ||
+          (0x1ecad <= lookahead && lookahead <= 0x1ecaf) ||
+          (0x1ecb1 <= lookahead && lookahead <= 0x1ecb4) ||
+          (0x1ed01 <= lookahead && lookahead <= 0x1ed2d) ||
+          (0x1ed2f <= lookahead && lookahead <= 0x1ed3d) ||
+          (0x1f100 <= lookahead && lookahead <= 0x1f10c) ||
+          (0x1fbf0 <= lookahead && lookahead <= 0x1fbf9)) ADVANCE(227);
+      if (set_contains(sym_number_literal_character_set_5, 774, lookahead)) ADVANCE(227);
       END_STATE();
     case 219:
       ACCEPT_TOKEN(sym_number_literal);
-      if (lookahead == '0' ||
-          lookahead == '1' ||
-          lookahead == '_') ADVANCE(219);
-      if (set_contains(sym_type_identifier_character_set_2, 772, lookahead)) ADVANCE(225);
+      if (lookahead == '+' ||
+          lookahead == '-') ADVANCE(53);
+      if (('0' <= lookahead && lookahead <= '9')) ADVANCE(218);
+      if (set_contains(sym_number_literal_character_set_3, 774, lookahead)) ADVANCE(227);
       END_STATE();
     case 220:
       ACCEPT_TOKEN(sym_number_literal);
-      if (('0' <= lookahead && lookahead <= '7')) ADVANCE(221);
-      if (set_contains(sym_type_identifier_character_set_2, 772, lookahead)) ADVANCE(225);
+      if (lookahead == '0' ||
+          lookahead == '1') ADVANCE(221);
+      if (set_contains(sym_type_identifier_character_set_2, 772, lookahead)) ADVANCE(227);
       END_STATE();
     case 221:
       ACCEPT_TOKEN(sym_number_literal);
-      if (('0' <= lookahead && lookahead <= '7') ||
+      if (lookahead == '0' ||
+          lookahead == '1' ||
           lookahead == '_') ADVANCE(221);
-      if (set_contains(sym_type_identifier_character_set_2, 772, lookahead)) ADVANCE(225);
+      if (set_contains(sym_type_identifier_character_set_2, 772, lookahead)) ADVANCE(227);
       END_STATE();
     case 222:
       ACCEPT_TOKEN(sym_number_literal);
-      if (('0' <= lookahead && lookahead <= '9')) ADVANCE(222);
-      if (set_contains(sym_number_literal_character_set_4, 682, lookahead)) ADVANCE(225);
+      if (('0' <= lookahead && lookahead <= '7')) ADVANCE(223);
+      if (set_contains(sym_type_identifier_character_set_2, 772, lookahead)) ADVANCE(227);
       END_STATE();
     case 223:
       ACCEPT_TOKEN(sym_number_literal);
-      if (('0' <= lookahead && lookahead <= '9') ||
-          ('A' <= lookahead && lookahead <= 'F') ||
-          ('a' <= lookahead && lookahead <= 'f')) ADVANCE(224);
-      if (set_contains(sym_type_identifier_character_set_2, 772, lookahead)) ADVANCE(225);
+      if (('0' <= lookahead && lookahead <= '7') ||
+          lookahead == '_') ADVANCE(223);
+      if (set_contains(sym_type_identifier_character_set_2, 772, lookahead)) ADVANCE(227);
       END_STATE();
     case 224:
+      ACCEPT_TOKEN(sym_number_literal);
+      if (('0' <= lookahead && lookahead <= '9')) ADVANCE(224);
+      if (set_contains(sym_number_literal_character_set_4, 682, lookahead)) ADVANCE(227);
+      END_STATE();
+    case 225:
+      ACCEPT_TOKEN(sym_number_literal);
+      if (('0' <= lookahead && lookahead <= '9') ||
+          ('A' <= lookahead && lookahead <= 'F') ||
+          ('a' <= lookahead && lookahead <= 'f')) ADVANCE(226);
+      if (set_contains(sym_type_identifier_character_set_2, 772, lookahead)) ADVANCE(227);
+      END_STATE();
+    case 226:
       ACCEPT_TOKEN(sym_number_literal);
       if (('0' <= lookahead && lookahead <= '9') ||
           ('A' <= lookahead && lookahead <= 'F') ||
           lookahead == '_' ||
-          ('a' <= lookahead && lookahead <= 'f')) ADVANCE(224);
-      if (set_contains(sym_type_identifier_character_set_2, 772, lookahead)) ADVANCE(225);
-      END_STATE();
-    case 225:
-      ACCEPT_TOKEN(sym_number_literal);
-      if (set_contains(sym_type_identifier_character_set_2, 772, lookahead)) ADVANCE(225);
-      END_STATE();
-    case 226:
-      ACCEPT_TOKEN(sym_char_literal);
+          ('a' <= lookahead && lookahead <= 'f')) ADVANCE(226);
+      if (set_contains(sym_type_identifier_character_set_2, 772, lookahead)) ADVANCE(227);
       END_STATE();
     case 227:
-      ACCEPT_TOKEN(anon_sym_DQUOTE);
+      ACCEPT_TOKEN(sym_number_literal);
+      if (set_contains(sym_type_identifier_character_set_2, 772, lookahead)) ADVANCE(227);
       END_STATE();
     case 228:
+      ACCEPT_TOKEN(sym_char_literal);
+      END_STATE();
+    case 229:
+      ACCEPT_TOKEN(anon_sym_DQUOTE);
+      END_STATE();
+    case 230:
       ACCEPT_TOKEN(anon_sym_DQUOTE);
       if (lookahead == '"') ADVANCE(18);
       END_STATE();
-    case 229:
+    case 231:
       ACCEPT_TOKEN(anon_sym_DQUOTE_DQUOTE_DQUOTE);
       END_STATE();
-    case 230:
+    case 232:
       ACCEPT_TOKEN(sym_raw_string);
       END_STATE();
-    case 231:
+    case 233:
       ACCEPT_TOKEN(sym_raw_string);
-      if (lookahead == '`') ADVANCE(230);
+      if (lookahead == '`') ADVANCE(232);
       if (lookahead != 0 &&
           lookahead != 0x17f &&
           lookahead != 0x212a) ADVANCE(41);
       END_STATE();
-    case 232:
-      ACCEPT_TOKEN(sym_raw_string);
-      if (lookahead == '`') ADVANCE(230);
-      if (lookahead != 0 &&
-          lookahead != 0x17f &&
-          lookahead != 0x212a) ADVANCE(37);
-      END_STATE();
-    case 233:
-      ACCEPT_TOKEN(sym_raw_string);
-      if (lookahead == '`') ADVANCE(38);
-      if (lookahead != 0 &&
-          lookahead != 0x17f &&
-          lookahead != 0x212a) ADVANCE(39);
-      END_STATE();
     case 234:
       ACCEPT_TOKEN(sym_raw_string);
-      if (lookahead == '`') ADVANCE(34);
+      if (lookahead == '`') ADVANCE(232);
       if (lookahead != 0 &&
           lookahead != 0x17f &&
           lookahead != 0x212a) ADVANCE(37);
       END_STATE();
     case 235:
       ACCEPT_TOKEN(sym_raw_string);
+      if (lookahead == '`') ADVANCE(38);
+      if (lookahead != 0 &&
+          lookahead != 0x17f &&
+          lookahead != 0x212a) ADVANCE(39);
+      END_STATE();
+    case 236:
+      ACCEPT_TOKEN(sym_raw_string);
+      if (lookahead == '`') ADVANCE(34);
+      if (lookahead != 0 &&
+          lookahead != 0x17f &&
+          lookahead != 0x212a) ADVANCE(37);
+      END_STATE();
+    case 237:
+      ACCEPT_TOKEN(sym_raw_string);
       if (lookahead == '`') ADVANCE(43);
       if (lookahead != 0 &&
           lookahead != 0x17f &&
           lookahead != 0x212a) ADVANCE(47);
       END_STATE();
-    case 236:
-      ACCEPT_TOKEN(aux_sym_string_content_token1);
-      if (lookahead == '\n') ADVANCE(242);
-      if (lookahead == '/') ADVANCE(237);
-      if (lookahead != 0 &&
-          lookahead != '"' &&
-          lookahead != '\\' &&
-          lookahead != '{' &&
-          lookahead != 0x17f &&
-          lookahead != 0x212a) ADVANCE(237);
-      END_STATE();
-    case 237:
-      ACCEPT_TOKEN(aux_sym_string_content_token1);
-      if (lookahead == '\n') ADVANCE(242);
-      if (lookahead != 0 &&
-          lookahead != '"' &&
-          lookahead != '\\' &&
-          lookahead != '{' &&
-          lookahead != 0x17f &&
-          lookahead != 0x212a) ADVANCE(237);
-      END_STATE();
     case 238:
       ACCEPT_TOKEN(aux_sym_string_content_token1);
-      if (lookahead == '*') ADVANCE(240);
-      if (lookahead == '/') ADVANCE(236);
+      if (lookahead == '\n') ADVANCE(244);
+      if (lookahead == '/') ADVANCE(239);
       if (lookahead != 0 &&
           lookahead != '"' &&
           lookahead != '\\' &&
           lookahead != '{' &&
           lookahead != 0x17f &&
-          lookahead != 0x212a) ADVANCE(242);
+          lookahead != 0x212a) ADVANCE(239);
       END_STATE();
     case 239:
       ACCEPT_TOKEN(aux_sym_string_content_token1);
-      if (lookahead == '*') ADVANCE(239);
-      if (lookahead == '/') ADVANCE(242);
+      if (lookahead == '\n') ADVANCE(244);
       if (lookahead != 0 &&
           lookahead != '"' &&
           lookahead != '\\' &&
           lookahead != '{' &&
           lookahead != 0x17f &&
-          lookahead != 0x212a) ADVANCE(240);
+          lookahead != 0x212a) ADVANCE(239);
       END_STATE();
     case 240:
       ACCEPT_TOKEN(aux_sym_string_content_token1);
-      if (lookahead == '*') ADVANCE(239);
+      if (lookahead == '*') ADVANCE(242);
+      if (lookahead == '/') ADVANCE(238);
       if (lookahead != 0 &&
           lookahead != '"' &&
           lookahead != '\\' &&
           lookahead != '{' &&
           lookahead != 0x17f &&
-          lookahead != 0x212a) ADVANCE(240);
+          lookahead != 0x212a) ADVANCE(244);
       END_STATE();
     case 241:
       ACCEPT_TOKEN(aux_sym_string_content_token1);
-      if (lookahead == '/') ADVANCE(238);
-      if (('\t' <= lookahead && lookahead <= '\r') ||
-          lookahead == ' ' ||
-          lookahead == ';') ADVANCE(241);
+      if (lookahead == '*') ADVANCE(241);
+      if (lookahead == '/') ADVANCE(244);
       if (lookahead != 0 &&
           lookahead != '"' &&
           lookahead != '\\' &&
@@ -6557,6 +6557,7 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
       END_STATE();
     case 242:
       ACCEPT_TOKEN(aux_sym_string_content_token1);
+      if (lookahead == '*') ADVANCE(241);
       if (lookahead != 0 &&
           lookahead != '"' &&
           lookahead != '\\' &&
@@ -6565,46 +6566,68 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
           lookahead != 0x212a) ADVANCE(242);
       END_STATE();
     case 243:
-      ACCEPT_TOKEN(sym__multiline_quotes);
-      if (lookahead == '"') ADVANCE(229);
+      ACCEPT_TOKEN(aux_sym_string_content_token1);
+      if (lookahead == '/') ADVANCE(240);
+      if (('\t' <= lookahead && lookahead <= '\r') ||
+          lookahead == ' ' ||
+          lookahead == ';') ADVANCE(243);
+      if (lookahead != 0 &&
+          lookahead != '"' &&
+          lookahead != '\\' &&
+          lookahead != '{' &&
+          lookahead != 0x17f &&
+          lookahead != 0x212a) ADVANCE(244);
       END_STATE();
     case 244:
-      ACCEPT_TOKEN(sym__multiline_quotes);
-      if (lookahead == '"') ADVANCE(243);
+      ACCEPT_TOKEN(aux_sym_string_content_token1);
+      if (lookahead != 0 &&
+          lookahead != '"' &&
+          lookahead != '\\' &&
+          lookahead != '{' &&
+          lookahead != 0x17f &&
+          lookahead != 0x212a) ADVANCE(244);
       END_STATE();
     case 245:
-      ACCEPT_TOKEN(sym_escape_sequence);
+      ACCEPT_TOKEN(sym__multiline_quotes);
+      if (lookahead == '"') ADVANCE(231);
       END_STATE();
     case 246:
+      ACCEPT_TOKEN(sym__multiline_quotes);
+      if (lookahead == '"') ADVANCE(245);
+      END_STATE();
+    case 247:
+      ACCEPT_TOKEN(sym_escape_sequence);
+      END_STATE();
+    case 248:
       ACCEPT_TOKEN(sym_escape_sequence);
       if (lookahead == '{') ADVANCE(55);
       END_STATE();
-    case 247:
+    case 249:
       ACCEPT_TOKEN(sym__escaped_string);
       END_STATE();
-    case 248:
-      ACCEPT_TOKEN(sym_line_comment);
-      if (lookahead == '/') ADVANCE(250);
-      if (lookahead != 0 &&
-          lookahead != '\n' &&
-          lookahead != 0x17f &&
-          lookahead != 0x212a) ADVANCE(249);
-      END_STATE();
-    case 249:
-      ACCEPT_TOKEN(sym_line_comment);
-      if (lookahead != 0 &&
-          lookahead != '\n' &&
-          lookahead != 0x17f &&
-          lookahead != 0x212a) ADVANCE(249);
-      END_STATE();
     case 250:
+      ACCEPT_TOKEN(sym_line_comment);
+      if (lookahead == '/') ADVANCE(252);
+      if (lookahead != 0 &&
+          lookahead != '\n' &&
+          lookahead != 0x17f &&
+          lookahead != 0x212a) ADVANCE(251);
+      END_STATE();
+    case 251:
+      ACCEPT_TOKEN(sym_line_comment);
+      if (lookahead != 0 &&
+          lookahead != '\n' &&
+          lookahead != 0x17f &&
+          lookahead != 0x212a) ADVANCE(251);
+      END_STATE();
+    case 252:
       ACCEPT_TOKEN(sym_doc_comment);
       if (lookahead != 0 &&
           lookahead != '\n' &&
           lookahead != 0x17f &&
-          lookahead != 0x212a) ADVANCE(250);
+          lookahead != 0x212a) ADVANCE(252);
       END_STATE();
-    case 251:
+    case 253:
       ACCEPT_TOKEN(sym_block_comment);
       END_STATE();
     default:
@@ -8455,6 +8478,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1),
     [anon_sym_LT_EQ] = ACTIONS(1),
     [anon_sym_LT_EQ_GT] = ACTIONS(1),
+    [anon_sym_LT_GT] = ACTIONS(1),
     [anon_sym_EQ_EQ] = ACTIONS(1),
     [anon_sym_GT_EQ] = ACTIONS(1),
     [anon_sym_GT_GT] = ACTIONS(1),
@@ -8463,6 +8487,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1),
     [anon_sym_CARET_EQ] = ACTIONS(1),
     [anon_sym_PIPE_EQ] = ACTIONS(1),
+    [anon_sym_PIPE_GT] = ACTIONS(1),
     [anon_sym_PIPE_PIPE] = ACTIONS(1),
     [anon_sym_TILDE_PIPE] = ACTIONS(1),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1),
@@ -8615,6 +8640,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(11),
     [anon_sym_LT_EQ] = ACTIONS(11),
     [anon_sym_LT_EQ_GT] = ACTIONS(11),
+    [anon_sym_LT_GT] = ACTIONS(11),
     [anon_sym_EQ_EQ] = ACTIONS(11),
     [anon_sym_GT_EQ] = ACTIONS(11),
     [anon_sym_GT_GT] = ACTIONS(11),
@@ -8623,6 +8649,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(11),
     [anon_sym_CARET_EQ] = ACTIONS(11),
     [anon_sym_PIPE_EQ] = ACTIONS(11),
+    [anon_sym_PIPE_GT] = ACTIONS(11),
     [anon_sym_PIPE_PIPE] = ACTIONS(11),
     [anon_sym_TILDE_PIPE] = ACTIONS(11),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(11),
@@ -8771,6 +8798,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(73),
     [anon_sym_LT_EQ] = ACTIONS(73),
     [anon_sym_LT_EQ_GT] = ACTIONS(73),
+    [anon_sym_LT_GT] = ACTIONS(73),
     [anon_sym_EQ_EQ] = ACTIONS(73),
     [anon_sym_GT_EQ] = ACTIONS(73),
     [anon_sym_GT_GT] = ACTIONS(73),
@@ -8779,6 +8807,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(73),
     [anon_sym_CARET_EQ] = ACTIONS(73),
     [anon_sym_PIPE_EQ] = ACTIONS(73),
+    [anon_sym_PIPE_GT] = ACTIONS(73),
     [anon_sym_PIPE_PIPE] = ACTIONS(73),
     [anon_sym_TILDE_PIPE] = ACTIONS(73),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(73),
@@ -8927,6 +8956,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(75),
     [anon_sym_LT_EQ] = ACTIONS(75),
     [anon_sym_LT_EQ_GT] = ACTIONS(75),
+    [anon_sym_LT_GT] = ACTIONS(75),
     [anon_sym_EQ_EQ] = ACTIONS(75),
     [anon_sym_GT_EQ] = ACTIONS(75),
     [anon_sym_GT_GT] = ACTIONS(75),
@@ -8935,6 +8965,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(75),
     [anon_sym_CARET_EQ] = ACTIONS(75),
     [anon_sym_PIPE_EQ] = ACTIONS(75),
+    [anon_sym_PIPE_GT] = ACTIONS(75),
     [anon_sym_PIPE_PIPE] = ACTIONS(75),
     [anon_sym_TILDE_PIPE] = ACTIONS(75),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(75),
@@ -9083,6 +9114,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(79),
     [anon_sym_LT_EQ] = ACTIONS(79),
     [anon_sym_LT_EQ_GT] = ACTIONS(79),
+    [anon_sym_LT_GT] = ACTIONS(79),
     [anon_sym_EQ_EQ] = ACTIONS(79),
     [anon_sym_GT_EQ] = ACTIONS(79),
     [anon_sym_GT_GT] = ACTIONS(79),
@@ -9091,6 +9123,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(79),
     [anon_sym_CARET_EQ] = ACTIONS(79),
     [anon_sym_PIPE_EQ] = ACTIONS(79),
+    [anon_sym_PIPE_GT] = ACTIONS(79),
     [anon_sym_PIPE_PIPE] = ACTIONS(79),
     [anon_sym_TILDE_PIPE] = ACTIONS(79),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(79),
@@ -9238,6 +9271,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(143),
     [anon_sym_LT_EQ] = ACTIONS(143),
     [anon_sym_LT_EQ_GT] = ACTIONS(143),
+    [anon_sym_LT_GT] = ACTIONS(143),
     [anon_sym_EQ_EQ] = ACTIONS(143),
     [anon_sym_GT_EQ] = ACTIONS(143),
     [anon_sym_GT_GT] = ACTIONS(143),
@@ -9246,6 +9280,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(143),
     [anon_sym_CARET_EQ] = ACTIONS(143),
     [anon_sym_PIPE_EQ] = ACTIONS(143),
+    [anon_sym_PIPE_GT] = ACTIONS(143),
     [anon_sym_PIPE_PIPE] = ACTIONS(143),
     [anon_sym_TILDE_PIPE] = ACTIONS(143),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(143),
@@ -9395,6 +9430,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(75),
     [anon_sym_LT_EQ] = ACTIONS(75),
     [anon_sym_LT_EQ_GT] = ACTIONS(75),
+    [anon_sym_LT_GT] = ACTIONS(75),
     [anon_sym_EQ_EQ] = ACTIONS(75),
     [anon_sym_GT_EQ] = ACTIONS(75),
     [anon_sym_GT_GT] = ACTIONS(75),
@@ -9403,6 +9439,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(75),
     [anon_sym_CARET_EQ] = ACTIONS(75),
     [anon_sym_PIPE_EQ] = ACTIONS(75),
+    [anon_sym_PIPE_GT] = ACTIONS(75),
     [anon_sym_PIPE_PIPE] = ACTIONS(75),
     [anon_sym_TILDE_PIPE] = ACTIONS(75),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(75),
@@ -9551,6 +9588,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(212),
     [anon_sym_LT_EQ] = ACTIONS(212),
     [anon_sym_LT_EQ_GT] = ACTIONS(212),
+    [anon_sym_LT_GT] = ACTIONS(212),
     [anon_sym_EQ_EQ] = ACTIONS(212),
     [anon_sym_GT_EQ] = ACTIONS(212),
     [anon_sym_GT_GT] = ACTIONS(212),
@@ -9559,6 +9597,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(212),
     [anon_sym_CARET_EQ] = ACTIONS(212),
     [anon_sym_PIPE_EQ] = ACTIONS(212),
+    [anon_sym_PIPE_GT] = ACTIONS(212),
     [anon_sym_PIPE_PIPE] = ACTIONS(212),
     [anon_sym_TILDE_PIPE] = ACTIONS(212),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(212),
@@ -9707,6 +9746,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(304),
     [anon_sym_LT_EQ] = ACTIONS(304),
     [anon_sym_LT_EQ_GT] = ACTIONS(304),
+    [anon_sym_LT_GT] = ACTIONS(304),
     [anon_sym_EQ_EQ] = ACTIONS(304),
     [anon_sym_GT_EQ] = ACTIONS(304),
     [anon_sym_GT_GT] = ACTIONS(304),
@@ -9715,6 +9755,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(304),
     [anon_sym_CARET_EQ] = ACTIONS(304),
     [anon_sym_PIPE_EQ] = ACTIONS(304),
+    [anon_sym_PIPE_GT] = ACTIONS(304),
     [anon_sym_PIPE_PIPE] = ACTIONS(304),
     [anon_sym_TILDE_PIPE] = ACTIONS(304),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(304),
@@ -9862,6 +9903,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(366),
     [anon_sym_LT_EQ] = ACTIONS(366),
     [anon_sym_LT_EQ_GT] = ACTIONS(366),
+    [anon_sym_LT_GT] = ACTIONS(366),
     [anon_sym_EQ_EQ] = ACTIONS(366),
     [anon_sym_GT_EQ] = ACTIONS(366),
     [anon_sym_GT_GT] = ACTIONS(366),
@@ -9870,6 +9912,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(366),
     [anon_sym_CARET_EQ] = ACTIONS(366),
     [anon_sym_PIPE_EQ] = ACTIONS(366),
+    [anon_sym_PIPE_GT] = ACTIONS(366),
     [anon_sym_PIPE_PIPE] = ACTIONS(366),
     [anon_sym_TILDE_PIPE] = ACTIONS(366),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(366),
@@ -10019,6 +10062,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(370),
     [anon_sym_LT_EQ] = ACTIONS(370),
     [anon_sym_LT_EQ_GT] = ACTIONS(370),
+    [anon_sym_LT_GT] = ACTIONS(370),
     [anon_sym_EQ_EQ] = ACTIONS(370),
     [anon_sym_GT_EQ] = ACTIONS(370),
     [anon_sym_GT_GT] = ACTIONS(370),
@@ -10027,6 +10071,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(370),
     [anon_sym_CARET_EQ] = ACTIONS(370),
     [anon_sym_PIPE_EQ] = ACTIONS(370),
+    [anon_sym_PIPE_GT] = ACTIONS(370),
     [anon_sym_PIPE_PIPE] = ACTIONS(370),
     [anon_sym_TILDE_PIPE] = ACTIONS(370),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(370),
@@ -10175,6 +10220,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(374),
     [anon_sym_LT_EQ] = ACTIONS(374),
     [anon_sym_LT_EQ_GT] = ACTIONS(374),
+    [anon_sym_LT_GT] = ACTIONS(374),
     [anon_sym_EQ_EQ] = ACTIONS(374),
     [anon_sym_GT_EQ] = ACTIONS(374),
     [anon_sym_GT_GT] = ACTIONS(374),
@@ -10183,6 +10229,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(374),
     [anon_sym_CARET_EQ] = ACTIONS(374),
     [anon_sym_PIPE_EQ] = ACTIONS(374),
+    [anon_sym_PIPE_GT] = ACTIONS(374),
     [anon_sym_PIPE_PIPE] = ACTIONS(374),
     [anon_sym_TILDE_PIPE] = ACTIONS(374),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(374),
@@ -10330,6 +10377,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(381),
     [anon_sym_LT_EQ] = ACTIONS(381),
     [anon_sym_LT_EQ_GT] = ACTIONS(381),
+    [anon_sym_LT_GT] = ACTIONS(381),
     [anon_sym_EQ_EQ] = ACTIONS(381),
     [anon_sym_GT_EQ] = ACTIONS(381),
     [anon_sym_GT_GT] = ACTIONS(381),
@@ -10338,6 +10386,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(381),
     [anon_sym_CARET_EQ] = ACTIONS(381),
     [anon_sym_PIPE_EQ] = ACTIONS(381),
+    [anon_sym_PIPE_GT] = ACTIONS(381),
     [anon_sym_PIPE_PIPE] = ACTIONS(381),
     [anon_sym_TILDE_PIPE] = ACTIONS(381),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(381),
@@ -10487,6 +10536,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(476),
     [anon_sym_LT_EQ] = ACTIONS(476),
     [anon_sym_LT_EQ_GT] = ACTIONS(476),
+    [anon_sym_LT_GT] = ACTIONS(476),
     [anon_sym_EQ_EQ] = ACTIONS(476),
     [anon_sym_GT_EQ] = ACTIONS(476),
     [anon_sym_GT_GT] = ACTIONS(476),
@@ -10495,6 +10545,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(476),
     [anon_sym_CARET_EQ] = ACTIONS(476),
     [anon_sym_PIPE_EQ] = ACTIONS(476),
+    [anon_sym_PIPE_GT] = ACTIONS(476),
     [anon_sym_PIPE_PIPE] = ACTIONS(476),
     [anon_sym_TILDE_PIPE] = ACTIONS(476),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(476),
@@ -10643,6 +10694,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(568),
     [anon_sym_LT_EQ] = ACTIONS(568),
     [anon_sym_LT_EQ_GT] = ACTIONS(568),
+    [anon_sym_LT_GT] = ACTIONS(568),
     [anon_sym_EQ_EQ] = ACTIONS(568),
     [anon_sym_GT_EQ] = ACTIONS(568),
     [anon_sym_GT_GT] = ACTIONS(568),
@@ -10651,6 +10703,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(568),
     [anon_sym_CARET_EQ] = ACTIONS(568),
     [anon_sym_PIPE_EQ] = ACTIONS(568),
+    [anon_sym_PIPE_GT] = ACTIONS(568),
     [anon_sym_PIPE_PIPE] = ACTIONS(568),
     [anon_sym_TILDE_PIPE] = ACTIONS(568),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(568),
@@ -10798,6 +10851,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(572),
     [anon_sym_LT_EQ] = ACTIONS(572),
     [anon_sym_LT_EQ_GT] = ACTIONS(572),
+    [anon_sym_LT_GT] = ACTIONS(572),
     [anon_sym_EQ_EQ] = ACTIONS(572),
     [anon_sym_GT_EQ] = ACTIONS(572),
     [anon_sym_GT_GT] = ACTIONS(572),
@@ -10806,6 +10860,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(572),
     [anon_sym_CARET_EQ] = ACTIONS(572),
     [anon_sym_PIPE_EQ] = ACTIONS(572),
+    [anon_sym_PIPE_GT] = ACTIONS(572),
     [anon_sym_PIPE_PIPE] = ACTIONS(572),
     [anon_sym_TILDE_PIPE] = ACTIONS(572),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(572),
@@ -10954,6 +11009,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(366),
     [anon_sym_LT_EQ] = ACTIONS(366),
     [anon_sym_LT_EQ_GT] = ACTIONS(366),
+    [anon_sym_LT_GT] = ACTIONS(366),
     [anon_sym_EQ_EQ] = ACTIONS(366),
     [anon_sym_GT_EQ] = ACTIONS(366),
     [anon_sym_GT_GT] = ACTIONS(366),
@@ -10962,6 +11018,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(366),
     [anon_sym_CARET_EQ] = ACTIONS(366),
     [anon_sym_PIPE_EQ] = ACTIONS(366),
+    [anon_sym_PIPE_GT] = ACTIONS(366),
     [anon_sym_PIPE_PIPE] = ACTIONS(366),
     [anon_sym_TILDE_PIPE] = ACTIONS(366),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(366),
@@ -11111,6 +11168,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(578),
     [anon_sym_LT_EQ] = ACTIONS(578),
     [anon_sym_LT_EQ_GT] = ACTIONS(578),
+    [anon_sym_LT_GT] = ACTIONS(578),
     [anon_sym_EQ_EQ] = ACTIONS(578),
     [anon_sym_GT_EQ] = ACTIONS(578),
     [anon_sym_GT_GT] = ACTIONS(578),
@@ -11119,6 +11177,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(578),
     [anon_sym_CARET_EQ] = ACTIONS(578),
     [anon_sym_PIPE_EQ] = ACTIONS(578),
+    [anon_sym_PIPE_GT] = ACTIONS(578),
     [anon_sym_PIPE_PIPE] = ACTIONS(578),
     [anon_sym_TILDE_PIPE] = ACTIONS(578),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(578),
@@ -11267,6 +11326,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(582),
     [anon_sym_LT_EQ] = ACTIONS(582),
     [anon_sym_LT_EQ_GT] = ACTIONS(582),
+    [anon_sym_LT_GT] = ACTIONS(582),
     [anon_sym_EQ_EQ] = ACTIONS(582),
     [anon_sym_GT_EQ] = ACTIONS(582),
     [anon_sym_GT_GT] = ACTIONS(582),
@@ -11275,6 +11335,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(582),
     [anon_sym_CARET_EQ] = ACTIONS(582),
     [anon_sym_PIPE_EQ] = ACTIONS(582),
+    [anon_sym_PIPE_GT] = ACTIONS(582),
     [anon_sym_PIPE_PIPE] = ACTIONS(582),
     [anon_sym_TILDE_PIPE] = ACTIONS(582),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(582),
@@ -11423,6 +11484,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(586),
     [anon_sym_LT_EQ] = ACTIONS(586),
     [anon_sym_LT_EQ_GT] = ACTIONS(586),
+    [anon_sym_LT_GT] = ACTIONS(586),
     [anon_sym_EQ_EQ] = ACTIONS(586),
     [anon_sym_GT_EQ] = ACTIONS(586),
     [anon_sym_GT_GT] = ACTIONS(586),
@@ -11431,6 +11493,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(586),
     [anon_sym_CARET_EQ] = ACTIONS(586),
     [anon_sym_PIPE_EQ] = ACTIONS(586),
+    [anon_sym_PIPE_GT] = ACTIONS(586),
     [anon_sym_PIPE_PIPE] = ACTIONS(586),
     [anon_sym_TILDE_PIPE] = ACTIONS(586),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(586),
@@ -11579,6 +11642,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(590),
     [anon_sym_LT_EQ] = ACTIONS(590),
     [anon_sym_LT_EQ_GT] = ACTIONS(590),
+    [anon_sym_LT_GT] = ACTIONS(590),
     [anon_sym_EQ_EQ] = ACTIONS(590),
     [anon_sym_GT_EQ] = ACTIONS(590),
     [anon_sym_GT_GT] = ACTIONS(590),
@@ -11587,6 +11651,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(590),
     [anon_sym_CARET_EQ] = ACTIONS(590),
     [anon_sym_PIPE_EQ] = ACTIONS(590),
+    [anon_sym_PIPE_GT] = ACTIONS(590),
     [anon_sym_PIPE_PIPE] = ACTIONS(590),
     [anon_sym_TILDE_PIPE] = ACTIONS(590),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(590),
@@ -11735,6 +11800,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(594),
     [anon_sym_LT_EQ] = ACTIONS(594),
     [anon_sym_LT_EQ_GT] = ACTIONS(594),
+    [anon_sym_LT_GT] = ACTIONS(594),
     [anon_sym_EQ_EQ] = ACTIONS(594),
     [anon_sym_GT_EQ] = ACTIONS(594),
     [anon_sym_GT_GT] = ACTIONS(594),
@@ -11743,6 +11809,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(594),
     [anon_sym_CARET_EQ] = ACTIONS(594),
     [anon_sym_PIPE_EQ] = ACTIONS(594),
+    [anon_sym_PIPE_GT] = ACTIONS(594),
     [anon_sym_PIPE_PIPE] = ACTIONS(594),
     [anon_sym_TILDE_PIPE] = ACTIONS(594),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(594),
@@ -11891,6 +11958,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(598),
     [anon_sym_LT_EQ] = ACTIONS(598),
     [anon_sym_LT_EQ_GT] = ACTIONS(598),
+    [anon_sym_LT_GT] = ACTIONS(598),
     [anon_sym_EQ_EQ] = ACTIONS(598),
     [anon_sym_GT_EQ] = ACTIONS(598),
     [anon_sym_GT_GT] = ACTIONS(598),
@@ -11899,6 +11967,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(598),
     [anon_sym_CARET_EQ] = ACTIONS(598),
     [anon_sym_PIPE_EQ] = ACTIONS(598),
+    [anon_sym_PIPE_GT] = ACTIONS(598),
     [anon_sym_PIPE_PIPE] = ACTIONS(598),
     [anon_sym_TILDE_PIPE] = ACTIONS(598),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(598),
@@ -12047,6 +12116,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(602),
     [anon_sym_LT_EQ] = ACTIONS(602),
     [anon_sym_LT_EQ_GT] = ACTIONS(602),
+    [anon_sym_LT_GT] = ACTIONS(602),
     [anon_sym_EQ_EQ] = ACTIONS(602),
     [anon_sym_GT_EQ] = ACTIONS(602),
     [anon_sym_GT_GT] = ACTIONS(602),
@@ -12055,6 +12125,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(602),
     [anon_sym_CARET_EQ] = ACTIONS(602),
     [anon_sym_PIPE_EQ] = ACTIONS(602),
+    [anon_sym_PIPE_GT] = ACTIONS(602),
     [anon_sym_PIPE_PIPE] = ACTIONS(602),
     [anon_sym_TILDE_PIPE] = ACTIONS(602),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(602),
@@ -12203,6 +12274,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(606),
     [anon_sym_LT_EQ] = ACTIONS(606),
     [anon_sym_LT_EQ_GT] = ACTIONS(606),
+    [anon_sym_LT_GT] = ACTIONS(606),
     [anon_sym_EQ_EQ] = ACTIONS(606),
     [anon_sym_GT_EQ] = ACTIONS(606),
     [anon_sym_GT_GT] = ACTIONS(606),
@@ -12211,6 +12283,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(606),
     [anon_sym_CARET_EQ] = ACTIONS(606),
     [anon_sym_PIPE_EQ] = ACTIONS(606),
+    [anon_sym_PIPE_GT] = ACTIONS(606),
     [anon_sym_PIPE_PIPE] = ACTIONS(606),
     [anon_sym_TILDE_PIPE] = ACTIONS(606),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(606),
@@ -12359,6 +12432,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(610),
     [anon_sym_LT_EQ] = ACTIONS(610),
     [anon_sym_LT_EQ_GT] = ACTIONS(610),
+    [anon_sym_LT_GT] = ACTIONS(610),
     [anon_sym_EQ_EQ] = ACTIONS(610),
     [anon_sym_GT_EQ] = ACTIONS(610),
     [anon_sym_GT_GT] = ACTIONS(610),
@@ -12367,6 +12441,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(610),
     [anon_sym_CARET_EQ] = ACTIONS(610),
     [anon_sym_PIPE_EQ] = ACTIONS(610),
+    [anon_sym_PIPE_GT] = ACTIONS(610),
     [anon_sym_PIPE_PIPE] = ACTIONS(610),
     [anon_sym_TILDE_PIPE] = ACTIONS(610),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(610),
@@ -12515,6 +12590,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(614),
     [anon_sym_LT_EQ] = ACTIONS(614),
     [anon_sym_LT_EQ_GT] = ACTIONS(614),
+    [anon_sym_LT_GT] = ACTIONS(614),
     [anon_sym_EQ_EQ] = ACTIONS(614),
     [anon_sym_GT_EQ] = ACTIONS(614),
     [anon_sym_GT_GT] = ACTIONS(614),
@@ -12523,6 +12599,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(614),
     [anon_sym_CARET_EQ] = ACTIONS(614),
     [anon_sym_PIPE_EQ] = ACTIONS(614),
+    [anon_sym_PIPE_GT] = ACTIONS(614),
     [anon_sym_PIPE_PIPE] = ACTIONS(614),
     [anon_sym_TILDE_PIPE] = ACTIONS(614),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(614),
@@ -12670,6 +12747,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(618),
     [anon_sym_LT_EQ] = ACTIONS(618),
     [anon_sym_LT_EQ_GT] = ACTIONS(618),
+    [anon_sym_LT_GT] = ACTIONS(618),
     [anon_sym_EQ_EQ] = ACTIONS(618),
     [anon_sym_GT_EQ] = ACTIONS(618),
     [anon_sym_GT_GT] = ACTIONS(618),
@@ -12678,6 +12756,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(618),
     [anon_sym_CARET_EQ] = ACTIONS(618),
     [anon_sym_PIPE_EQ] = ACTIONS(618),
+    [anon_sym_PIPE_GT] = ACTIONS(618),
     [anon_sym_PIPE_PIPE] = ACTIONS(618),
     [anon_sym_TILDE_PIPE] = ACTIONS(618),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(618),
@@ -12825,6 +12904,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(624),
     [anon_sym_LT_EQ] = ACTIONS(624),
     [anon_sym_LT_EQ_GT] = ACTIONS(624),
+    [anon_sym_LT_GT] = ACTIONS(624),
     [anon_sym_EQ_EQ] = ACTIONS(624),
     [anon_sym_GT_EQ] = ACTIONS(624),
     [anon_sym_GT_GT] = ACTIONS(624),
@@ -12833,6 +12913,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(624),
     [anon_sym_CARET_EQ] = ACTIONS(624),
     [anon_sym_PIPE_EQ] = ACTIONS(624),
+    [anon_sym_PIPE_GT] = ACTIONS(624),
     [anon_sym_PIPE_PIPE] = ACTIONS(624),
     [anon_sym_TILDE_PIPE] = ACTIONS(624),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(624),
@@ -12980,6 +13061,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(618),
     [anon_sym_LT_EQ] = ACTIONS(618),
     [anon_sym_LT_EQ_GT] = ACTIONS(618),
+    [anon_sym_LT_GT] = ACTIONS(618),
     [anon_sym_EQ_EQ] = ACTIONS(618),
     [anon_sym_GT_EQ] = ACTIONS(618),
     [anon_sym_GT_GT] = ACTIONS(618),
@@ -12988,6 +13070,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(618),
     [anon_sym_CARET_EQ] = ACTIONS(618),
     [anon_sym_PIPE_EQ] = ACTIONS(618),
+    [anon_sym_PIPE_GT] = ACTIONS(618),
     [anon_sym_PIPE_PIPE] = ACTIONS(618),
     [anon_sym_TILDE_PIPE] = ACTIONS(618),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(618),
@@ -13135,6 +13218,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(688),
     [anon_sym_LT_EQ] = ACTIONS(688),
     [anon_sym_LT_EQ_GT] = ACTIONS(688),
+    [anon_sym_LT_GT] = ACTIONS(688),
     [anon_sym_EQ_EQ] = ACTIONS(688),
     [anon_sym_GT_EQ] = ACTIONS(688),
     [anon_sym_GT_GT] = ACTIONS(688),
@@ -13143,6 +13227,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(688),
     [anon_sym_CARET_EQ] = ACTIONS(688),
     [anon_sym_PIPE_EQ] = ACTIONS(688),
+    [anon_sym_PIPE_GT] = ACTIONS(688),
     [anon_sym_PIPE_PIPE] = ACTIONS(688),
     [anon_sym_TILDE_PIPE] = ACTIONS(688),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(688),
@@ -13290,6 +13375,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(624),
     [anon_sym_LT_EQ] = ACTIONS(624),
     [anon_sym_LT_EQ_GT] = ACTIONS(624),
+    [anon_sym_LT_GT] = ACTIONS(624),
     [anon_sym_EQ_EQ] = ACTIONS(624),
     [anon_sym_GT_EQ] = ACTIONS(624),
     [anon_sym_GT_GT] = ACTIONS(624),
@@ -13298,6 +13384,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(624),
     [anon_sym_CARET_EQ] = ACTIONS(624),
     [anon_sym_PIPE_EQ] = ACTIONS(624),
+    [anon_sym_PIPE_GT] = ACTIONS(624),
     [anon_sym_PIPE_PIPE] = ACTIONS(624),
     [anon_sym_TILDE_PIPE] = ACTIONS(624),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(624),
@@ -13445,6 +13532,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(694),
     [anon_sym_LT_EQ] = ACTIONS(694),
     [anon_sym_LT_EQ_GT] = ACTIONS(694),
+    [anon_sym_LT_GT] = ACTIONS(694),
     [anon_sym_EQ_EQ] = ACTIONS(694),
     [anon_sym_GT_EQ] = ACTIONS(694),
     [anon_sym_GT_GT] = ACTIONS(694),
@@ -13453,6 +13541,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(694),
     [anon_sym_CARET_EQ] = ACTIONS(694),
     [anon_sym_PIPE_EQ] = ACTIONS(694),
+    [anon_sym_PIPE_GT] = ACTIONS(694),
     [anon_sym_PIPE_PIPE] = ACTIONS(694),
     [anon_sym_TILDE_PIPE] = ACTIONS(694),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(694),
@@ -13600,6 +13689,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(694),
     [anon_sym_LT_EQ] = ACTIONS(694),
     [anon_sym_LT_EQ_GT] = ACTIONS(694),
+    [anon_sym_LT_GT] = ACTIONS(694),
     [anon_sym_EQ_EQ] = ACTIONS(694),
     [anon_sym_GT_EQ] = ACTIONS(694),
     [anon_sym_GT_GT] = ACTIONS(694),
@@ -13608,6 +13698,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(694),
     [anon_sym_CARET_EQ] = ACTIONS(694),
     [anon_sym_PIPE_EQ] = ACTIONS(694),
+    [anon_sym_PIPE_GT] = ACTIONS(694),
     [anon_sym_PIPE_PIPE] = ACTIONS(694),
     [anon_sym_TILDE_PIPE] = ACTIONS(694),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(694),
@@ -13755,6 +13846,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(705),
     [anon_sym_LT_EQ] = ACTIONS(705),
     [anon_sym_LT_EQ_GT] = ACTIONS(705),
+    [anon_sym_LT_GT] = ACTIONS(705),
     [anon_sym_EQ_EQ] = ACTIONS(705),
     [anon_sym_GT_EQ] = ACTIONS(705),
     [anon_sym_GT_GT] = ACTIONS(705),
@@ -13763,6 +13855,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(705),
     [anon_sym_CARET_EQ] = ACTIONS(705),
     [anon_sym_PIPE_EQ] = ACTIONS(705),
+    [anon_sym_PIPE_GT] = ACTIONS(705),
     [anon_sym_PIPE_PIPE] = ACTIONS(705),
     [anon_sym_TILDE_PIPE] = ACTIONS(705),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(705),
@@ -13910,6 +14003,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(800),
     [anon_sym_LT_EQ] = ACTIONS(800),
     [anon_sym_LT_EQ_GT] = ACTIONS(800),
+    [anon_sym_LT_GT] = ACTIONS(800),
     [anon_sym_EQ_EQ] = ACTIONS(800),
     [anon_sym_GT_EQ] = ACTIONS(800),
     [anon_sym_GT_GT] = ACTIONS(800),
@@ -13918,6 +14012,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(800),
     [anon_sym_CARET_EQ] = ACTIONS(800),
     [anon_sym_PIPE_EQ] = ACTIONS(800),
+    [anon_sym_PIPE_GT] = ACTIONS(800),
     [anon_sym_PIPE_PIPE] = ACTIONS(800),
     [anon_sym_TILDE_PIPE] = ACTIONS(800),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(800),
@@ -14065,6 +14160,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(893),
     [anon_sym_LT_EQ] = ACTIONS(893),
     [anon_sym_LT_EQ_GT] = ACTIONS(893),
+    [anon_sym_LT_GT] = ACTIONS(893),
     [anon_sym_EQ_EQ] = ACTIONS(893),
     [anon_sym_GT_EQ] = ACTIONS(893),
     [anon_sym_GT_GT] = ACTIONS(893),
@@ -14073,6 +14169,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(893),
     [anon_sym_CARET_EQ] = ACTIONS(893),
     [anon_sym_PIPE_EQ] = ACTIONS(893),
+    [anon_sym_PIPE_GT] = ACTIONS(893),
     [anon_sym_PIPE_PIPE] = ACTIONS(893),
     [anon_sym_TILDE_PIPE] = ACTIONS(893),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(893),
@@ -14220,6 +14317,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(983),
     [anon_sym_LT_EQ] = ACTIONS(983),
     [anon_sym_LT_EQ_GT] = ACTIONS(983),
+    [anon_sym_LT_GT] = ACTIONS(983),
     [anon_sym_EQ_EQ] = ACTIONS(983),
     [anon_sym_GT_EQ] = ACTIONS(983),
     [anon_sym_GT_GT] = ACTIONS(983),
@@ -14228,6 +14326,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(983),
     [anon_sym_CARET_EQ] = ACTIONS(983),
     [anon_sym_PIPE_EQ] = ACTIONS(983),
+    [anon_sym_PIPE_GT] = ACTIONS(983),
     [anon_sym_PIPE_PIPE] = ACTIONS(983),
     [anon_sym_TILDE_PIPE] = ACTIONS(983),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(983),
@@ -14375,6 +14474,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(987),
     [anon_sym_LT_EQ] = ACTIONS(987),
     [anon_sym_LT_EQ_GT] = ACTIONS(987),
+    [anon_sym_LT_GT] = ACTIONS(987),
     [anon_sym_EQ_EQ] = ACTIONS(987),
     [anon_sym_GT_EQ] = ACTIONS(987),
     [anon_sym_GT_GT] = ACTIONS(987),
@@ -14383,6 +14483,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(987),
     [anon_sym_CARET_EQ] = ACTIONS(987),
     [anon_sym_PIPE_EQ] = ACTIONS(987),
+    [anon_sym_PIPE_GT] = ACTIONS(987),
     [anon_sym_PIPE_PIPE] = ACTIONS(987),
     [anon_sym_TILDE_PIPE] = ACTIONS(987),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(987),
@@ -14530,6 +14631,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(993),
     [anon_sym_LT_EQ] = ACTIONS(993),
     [anon_sym_LT_EQ_GT] = ACTIONS(993),
+    [anon_sym_LT_GT] = ACTIONS(993),
     [anon_sym_EQ_EQ] = ACTIONS(993),
     [anon_sym_GT_EQ] = ACTIONS(993),
     [anon_sym_GT_GT] = ACTIONS(993),
@@ -14538,6 +14640,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(993),
     [anon_sym_CARET_EQ] = ACTIONS(993),
     [anon_sym_PIPE_EQ] = ACTIONS(993),
+    [anon_sym_PIPE_GT] = ACTIONS(993),
     [anon_sym_PIPE_PIPE] = ACTIONS(993),
     [anon_sym_TILDE_PIPE] = ACTIONS(993),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(993),
@@ -14685,6 +14788,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(568),
     [anon_sym_LT_EQ] = ACTIONS(568),
     [anon_sym_LT_EQ_GT] = ACTIONS(568),
+    [anon_sym_LT_GT] = ACTIONS(568),
     [anon_sym_EQ_EQ] = ACTIONS(568),
     [anon_sym_GT_EQ] = ACTIONS(568),
     [anon_sym_GT_GT] = ACTIONS(568),
@@ -14693,6 +14797,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(568),
     [anon_sym_CARET_EQ] = ACTIONS(568),
     [anon_sym_PIPE_EQ] = ACTIONS(568),
+    [anon_sym_PIPE_GT] = ACTIONS(568),
     [anon_sym_PIPE_PIPE] = ACTIONS(568),
     [anon_sym_TILDE_PIPE] = ACTIONS(568),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(568),
@@ -14840,6 +14945,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1055),
     [anon_sym_LT_EQ] = ACTIONS(1055),
     [anon_sym_LT_EQ_GT] = ACTIONS(1055),
+    [anon_sym_LT_GT] = ACTIONS(1055),
     [anon_sym_EQ_EQ] = ACTIONS(1055),
     [anon_sym_GT_EQ] = ACTIONS(1055),
     [anon_sym_GT_GT] = ACTIONS(1055),
@@ -14848,6 +14954,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1055),
     [anon_sym_CARET_EQ] = ACTIONS(1055),
     [anon_sym_PIPE_EQ] = ACTIONS(1055),
+    [anon_sym_PIPE_GT] = ACTIONS(1055),
     [anon_sym_PIPE_PIPE] = ACTIONS(1055),
     [anon_sym_TILDE_PIPE] = ACTIONS(1055),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1055),
@@ -14995,6 +15102,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1059),
     [anon_sym_LT_EQ] = ACTIONS(1059),
     [anon_sym_LT_EQ_GT] = ACTIONS(1059),
+    [anon_sym_LT_GT] = ACTIONS(1059),
     [anon_sym_EQ_EQ] = ACTIONS(1059),
     [anon_sym_GT_EQ] = ACTIONS(1059),
     [anon_sym_GT_GT] = ACTIONS(1059),
@@ -15003,6 +15111,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1059),
     [anon_sym_CARET_EQ] = ACTIONS(1059),
     [anon_sym_PIPE_EQ] = ACTIONS(1059),
+    [anon_sym_PIPE_GT] = ACTIONS(1059),
     [anon_sym_PIPE_PIPE] = ACTIONS(1059),
     [anon_sym_TILDE_PIPE] = ACTIONS(1059),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1059),
@@ -15150,6 +15259,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1063),
     [anon_sym_LT_EQ] = ACTIONS(1063),
     [anon_sym_LT_EQ_GT] = ACTIONS(1063),
+    [anon_sym_LT_GT] = ACTIONS(1063),
     [anon_sym_EQ_EQ] = ACTIONS(1063),
     [anon_sym_GT_EQ] = ACTIONS(1063),
     [anon_sym_GT_GT] = ACTIONS(1063),
@@ -15158,6 +15268,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1063),
     [anon_sym_CARET_EQ] = ACTIONS(1063),
     [anon_sym_PIPE_EQ] = ACTIONS(1063),
+    [anon_sym_PIPE_GT] = ACTIONS(1063),
     [anon_sym_PIPE_PIPE] = ACTIONS(1063),
     [anon_sym_TILDE_PIPE] = ACTIONS(1063),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1063),
@@ -15305,6 +15416,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1067),
     [anon_sym_LT_EQ] = ACTIONS(1067),
     [anon_sym_LT_EQ_GT] = ACTIONS(1067),
+    [anon_sym_LT_GT] = ACTIONS(1067),
     [anon_sym_EQ_EQ] = ACTIONS(1067),
     [anon_sym_GT_EQ] = ACTIONS(1067),
     [anon_sym_GT_GT] = ACTIONS(1067),
@@ -15313,6 +15425,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1067),
     [anon_sym_CARET_EQ] = ACTIONS(1067),
     [anon_sym_PIPE_EQ] = ACTIONS(1067),
+    [anon_sym_PIPE_GT] = ACTIONS(1067),
     [anon_sym_PIPE_PIPE] = ACTIONS(1067),
     [anon_sym_TILDE_PIPE] = ACTIONS(1067),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1067),
@@ -15460,6 +15573,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1071),
     [anon_sym_LT_EQ] = ACTIONS(1071),
     [anon_sym_LT_EQ_GT] = ACTIONS(1071),
+    [anon_sym_LT_GT] = ACTIONS(1071),
     [anon_sym_EQ_EQ] = ACTIONS(1071),
     [anon_sym_GT_EQ] = ACTIONS(1071),
     [anon_sym_GT_GT] = ACTIONS(1071),
@@ -15468,6 +15582,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1071),
     [anon_sym_CARET_EQ] = ACTIONS(1071),
     [anon_sym_PIPE_EQ] = ACTIONS(1071),
+    [anon_sym_PIPE_GT] = ACTIONS(1071),
     [anon_sym_PIPE_PIPE] = ACTIONS(1071),
     [anon_sym_TILDE_PIPE] = ACTIONS(1071),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1071),
@@ -15615,6 +15730,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(624),
     [anon_sym_LT_EQ] = ACTIONS(624),
     [anon_sym_LT_EQ_GT] = ACTIONS(624),
+    [anon_sym_LT_GT] = ACTIONS(624),
     [anon_sym_EQ_EQ] = ACTIONS(624),
     [anon_sym_GT_EQ] = ACTIONS(624),
     [anon_sym_GT_GT] = ACTIONS(624),
@@ -15623,6 +15739,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(624),
     [anon_sym_CARET_EQ] = ACTIONS(624),
     [anon_sym_PIPE_EQ] = ACTIONS(624),
+    [anon_sym_PIPE_GT] = ACTIONS(624),
     [anon_sym_PIPE_PIPE] = ACTIONS(624),
     [anon_sym_TILDE_PIPE] = ACTIONS(624),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(624),
@@ -15770,6 +15887,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(694),
     [anon_sym_LT_EQ] = ACTIONS(694),
     [anon_sym_LT_EQ_GT] = ACTIONS(694),
+    [anon_sym_LT_GT] = ACTIONS(694),
     [anon_sym_EQ_EQ] = ACTIONS(694),
     [anon_sym_GT_EQ] = ACTIONS(694),
     [anon_sym_GT_GT] = ACTIONS(694),
@@ -15778,6 +15896,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(694),
     [anon_sym_CARET_EQ] = ACTIONS(694),
     [anon_sym_PIPE_EQ] = ACTIONS(694),
+    [anon_sym_PIPE_GT] = ACTIONS(694),
     [anon_sym_PIPE_PIPE] = ACTIONS(694),
     [anon_sym_TILDE_PIPE] = ACTIONS(694),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(694),
@@ -15925,6 +16044,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(694),
     [anon_sym_LT_EQ] = ACTIONS(694),
     [anon_sym_LT_EQ_GT] = ACTIONS(694),
+    [anon_sym_LT_GT] = ACTIONS(694),
     [anon_sym_EQ_EQ] = ACTIONS(694),
     [anon_sym_GT_EQ] = ACTIONS(694),
     [anon_sym_GT_GT] = ACTIONS(694),
@@ -15933,6 +16053,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(694),
     [anon_sym_CARET_EQ] = ACTIONS(694),
     [anon_sym_PIPE_EQ] = ACTIONS(694),
+    [anon_sym_PIPE_GT] = ACTIONS(694),
     [anon_sym_PIPE_PIPE] = ACTIONS(694),
     [anon_sym_TILDE_PIPE] = ACTIONS(694),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(694),
@@ -16080,6 +16201,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(993),
     [anon_sym_LT_EQ] = ACTIONS(993),
     [anon_sym_LT_EQ_GT] = ACTIONS(993),
+    [anon_sym_LT_GT] = ACTIONS(993),
     [anon_sym_EQ_EQ] = ACTIONS(993),
     [anon_sym_GT_EQ] = ACTIONS(993),
     [anon_sym_GT_GT] = ACTIONS(993),
@@ -16088,6 +16210,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(993),
     [anon_sym_CARET_EQ] = ACTIONS(993),
     [anon_sym_PIPE_EQ] = ACTIONS(993),
+    [anon_sym_PIPE_GT] = ACTIONS(993),
     [anon_sym_PIPE_PIPE] = ACTIONS(993),
     [anon_sym_TILDE_PIPE] = ACTIONS(993),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(993),
@@ -16235,6 +16358,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(694),
     [anon_sym_LT_EQ] = ACTIONS(694),
     [anon_sym_LT_EQ_GT] = ACTIONS(694),
+    [anon_sym_LT_GT] = ACTIONS(694),
     [anon_sym_EQ_EQ] = ACTIONS(694),
     [anon_sym_GT_EQ] = ACTIONS(694),
     [anon_sym_GT_GT] = ACTIONS(694),
@@ -16243,6 +16367,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(694),
     [anon_sym_CARET_EQ] = ACTIONS(694),
     [anon_sym_PIPE_EQ] = ACTIONS(694),
+    [anon_sym_PIPE_GT] = ACTIONS(694),
     [anon_sym_PIPE_PIPE] = ACTIONS(694),
     [anon_sym_TILDE_PIPE] = ACTIONS(694),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(694),
@@ -16390,6 +16515,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1085),
     [anon_sym_LT_EQ] = ACTIONS(1085),
     [anon_sym_LT_EQ_GT] = ACTIONS(1085),
+    [anon_sym_LT_GT] = ACTIONS(1085),
     [anon_sym_EQ_EQ] = ACTIONS(1085),
     [anon_sym_GT_EQ] = ACTIONS(1085),
     [anon_sym_GT_GT] = ACTIONS(1085),
@@ -16398,6 +16524,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1085),
     [anon_sym_CARET_EQ] = ACTIONS(1085),
     [anon_sym_PIPE_EQ] = ACTIONS(1085),
+    [anon_sym_PIPE_GT] = ACTIONS(1085),
     [anon_sym_PIPE_PIPE] = ACTIONS(1085),
     [anon_sym_TILDE_PIPE] = ACTIONS(1085),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1085),
@@ -16545,6 +16672,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1089),
     [anon_sym_LT_EQ] = ACTIONS(1089),
     [anon_sym_LT_EQ_GT] = ACTIONS(1089),
+    [anon_sym_LT_GT] = ACTIONS(1089),
     [anon_sym_EQ_EQ] = ACTIONS(1089),
     [anon_sym_GT_EQ] = ACTIONS(1089),
     [anon_sym_GT_GT] = ACTIONS(1089),
@@ -16553,6 +16681,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1089),
     [anon_sym_CARET_EQ] = ACTIONS(1089),
     [anon_sym_PIPE_EQ] = ACTIONS(1089),
+    [anon_sym_PIPE_GT] = ACTIONS(1089),
     [anon_sym_PIPE_PIPE] = ACTIONS(1089),
     [anon_sym_TILDE_PIPE] = ACTIONS(1089),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1089),
@@ -16700,6 +16829,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(694),
     [anon_sym_LT_EQ] = ACTIONS(694),
     [anon_sym_LT_EQ_GT] = ACTIONS(694),
+    [anon_sym_LT_GT] = ACTIONS(694),
     [anon_sym_EQ_EQ] = ACTIONS(694),
     [anon_sym_GT_EQ] = ACTIONS(694),
     [anon_sym_GT_GT] = ACTIONS(694),
@@ -16708,6 +16838,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(694),
     [anon_sym_CARET_EQ] = ACTIONS(694),
     [anon_sym_PIPE_EQ] = ACTIONS(694),
+    [anon_sym_PIPE_GT] = ACTIONS(694),
     [anon_sym_PIPE_PIPE] = ACTIONS(694),
     [anon_sym_TILDE_PIPE] = ACTIONS(694),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(694),
@@ -16855,6 +16986,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(624),
     [anon_sym_LT_EQ] = ACTIONS(624),
     [anon_sym_LT_EQ_GT] = ACTIONS(624),
+    [anon_sym_LT_GT] = ACTIONS(624),
     [anon_sym_EQ_EQ] = ACTIONS(624),
     [anon_sym_GT_EQ] = ACTIONS(624),
     [anon_sym_GT_GT] = ACTIONS(624),
@@ -16863,6 +16995,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(624),
     [anon_sym_CARET_EQ] = ACTIONS(624),
     [anon_sym_PIPE_EQ] = ACTIONS(624),
+    [anon_sym_PIPE_GT] = ACTIONS(624),
     [anon_sym_PIPE_PIPE] = ACTIONS(624),
     [anon_sym_TILDE_PIPE] = ACTIONS(624),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(624),
@@ -17010,6 +17143,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(624),
     [anon_sym_LT_EQ] = ACTIONS(624),
     [anon_sym_LT_EQ_GT] = ACTIONS(624),
+    [anon_sym_LT_GT] = ACTIONS(624),
     [anon_sym_EQ_EQ] = ACTIONS(624),
     [anon_sym_GT_EQ] = ACTIONS(624),
     [anon_sym_GT_GT] = ACTIONS(624),
@@ -17018,6 +17152,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(624),
     [anon_sym_CARET_EQ] = ACTIONS(624),
     [anon_sym_PIPE_EQ] = ACTIONS(624),
+    [anon_sym_PIPE_GT] = ACTIONS(624),
     [anon_sym_PIPE_PIPE] = ACTIONS(624),
     [anon_sym_TILDE_PIPE] = ACTIONS(624),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(624),
@@ -17165,6 +17300,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(618),
     [anon_sym_LT_EQ] = ACTIONS(618),
     [anon_sym_LT_EQ_GT] = ACTIONS(618),
+    [anon_sym_LT_GT] = ACTIONS(618),
     [anon_sym_EQ_EQ] = ACTIONS(618),
     [anon_sym_GT_EQ] = ACTIONS(618),
     [anon_sym_GT_GT] = ACTIONS(618),
@@ -17173,6 +17309,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(618),
     [anon_sym_CARET_EQ] = ACTIONS(618),
     [anon_sym_PIPE_EQ] = ACTIONS(618),
+    [anon_sym_PIPE_GT] = ACTIONS(618),
     [anon_sym_PIPE_PIPE] = ACTIONS(618),
     [anon_sym_TILDE_PIPE] = ACTIONS(618),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(618),
@@ -17320,6 +17457,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1101),
     [anon_sym_LT_EQ] = ACTIONS(1101),
     [anon_sym_LT_EQ_GT] = ACTIONS(1101),
+    [anon_sym_LT_GT] = ACTIONS(1101),
     [anon_sym_EQ_EQ] = ACTIONS(1101),
     [anon_sym_GT_EQ] = ACTIONS(1101),
     [anon_sym_GT_GT] = ACTIONS(1101),
@@ -17328,6 +17466,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1101),
     [anon_sym_CARET_EQ] = ACTIONS(1101),
     [anon_sym_PIPE_EQ] = ACTIONS(1101),
+    [anon_sym_PIPE_GT] = ACTIONS(1101),
     [anon_sym_PIPE_PIPE] = ACTIONS(1101),
     [anon_sym_TILDE_PIPE] = ACTIONS(1101),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1101),
@@ -17475,6 +17614,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1105),
     [anon_sym_LT_EQ] = ACTIONS(1105),
     [anon_sym_LT_EQ_GT] = ACTIONS(1105),
+    [anon_sym_LT_GT] = ACTIONS(1105),
     [anon_sym_EQ_EQ] = ACTIONS(1105),
     [anon_sym_GT_EQ] = ACTIONS(1105),
     [anon_sym_GT_GT] = ACTIONS(1105),
@@ -17483,6 +17623,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1105),
     [anon_sym_CARET_EQ] = ACTIONS(1105),
     [anon_sym_PIPE_EQ] = ACTIONS(1105),
+    [anon_sym_PIPE_GT] = ACTIONS(1105),
     [anon_sym_PIPE_PIPE] = ACTIONS(1105),
     [anon_sym_TILDE_PIPE] = ACTIONS(1105),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1105),
@@ -17630,6 +17771,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1109),
     [anon_sym_LT_EQ] = ACTIONS(1109),
     [anon_sym_LT_EQ_GT] = ACTIONS(1109),
+    [anon_sym_LT_GT] = ACTIONS(1109),
     [anon_sym_EQ_EQ] = ACTIONS(1109),
     [anon_sym_GT_EQ] = ACTIONS(1109),
     [anon_sym_GT_GT] = ACTIONS(1109),
@@ -17638,6 +17780,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1109),
     [anon_sym_CARET_EQ] = ACTIONS(1109),
     [anon_sym_PIPE_EQ] = ACTIONS(1109),
+    [anon_sym_PIPE_GT] = ACTIONS(1109),
     [anon_sym_PIPE_PIPE] = ACTIONS(1109),
     [anon_sym_TILDE_PIPE] = ACTIONS(1109),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1109),
@@ -17785,6 +17928,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1113),
     [anon_sym_LT_EQ] = ACTIONS(1113),
     [anon_sym_LT_EQ_GT] = ACTIONS(1113),
+    [anon_sym_LT_GT] = ACTIONS(1113),
     [anon_sym_EQ_EQ] = ACTIONS(1113),
     [anon_sym_GT_EQ] = ACTIONS(1113),
     [anon_sym_GT_GT] = ACTIONS(1113),
@@ -17793,6 +17937,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1113),
     [anon_sym_CARET_EQ] = ACTIONS(1113),
     [anon_sym_PIPE_EQ] = ACTIONS(1113),
+    [anon_sym_PIPE_GT] = ACTIONS(1113),
     [anon_sym_PIPE_PIPE] = ACTIONS(1113),
     [anon_sym_TILDE_PIPE] = ACTIONS(1113),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1113),
@@ -17940,6 +18085,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(578),
     [anon_sym_LT_EQ] = ACTIONS(578),
     [anon_sym_LT_EQ_GT] = ACTIONS(578),
+    [anon_sym_LT_GT] = ACTIONS(578),
     [anon_sym_EQ_EQ] = ACTIONS(578),
     [anon_sym_GT_EQ] = ACTIONS(578),
     [anon_sym_GT_GT] = ACTIONS(578),
@@ -17948,6 +18094,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(578),
     [anon_sym_CARET_EQ] = ACTIONS(578),
     [anon_sym_PIPE_EQ] = ACTIONS(578),
+    [anon_sym_PIPE_GT] = ACTIONS(578),
     [anon_sym_PIPE_PIPE] = ACTIONS(578),
     [anon_sym_TILDE_PIPE] = ACTIONS(578),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(578),
@@ -18095,6 +18242,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1117),
     [anon_sym_LT_EQ] = ACTIONS(1117),
     [anon_sym_LT_EQ_GT] = ACTIONS(1117),
+    [anon_sym_LT_GT] = ACTIONS(1117),
     [anon_sym_EQ_EQ] = ACTIONS(1117),
     [anon_sym_GT_EQ] = ACTIONS(1117),
     [anon_sym_GT_GT] = ACTIONS(1117),
@@ -18103,6 +18251,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1117),
     [anon_sym_CARET_EQ] = ACTIONS(1117),
     [anon_sym_PIPE_EQ] = ACTIONS(1117),
+    [anon_sym_PIPE_GT] = ACTIONS(1117),
     [anon_sym_PIPE_PIPE] = ACTIONS(1117),
     [anon_sym_TILDE_PIPE] = ACTIONS(1117),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1117),
@@ -18250,6 +18399,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1121),
     [anon_sym_LT_EQ] = ACTIONS(1121),
     [anon_sym_LT_EQ_GT] = ACTIONS(1121),
+    [anon_sym_LT_GT] = ACTIONS(1121),
     [anon_sym_EQ_EQ] = ACTIONS(1121),
     [anon_sym_GT_EQ] = ACTIONS(1121),
     [anon_sym_GT_GT] = ACTIONS(1121),
@@ -18258,6 +18408,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1121),
     [anon_sym_CARET_EQ] = ACTIONS(1121),
     [anon_sym_PIPE_EQ] = ACTIONS(1121),
+    [anon_sym_PIPE_GT] = ACTIONS(1121),
     [anon_sym_PIPE_PIPE] = ACTIONS(1121),
     [anon_sym_TILDE_PIPE] = ACTIONS(1121),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1121),
@@ -18405,6 +18556,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1125),
     [anon_sym_LT_EQ] = ACTIONS(1125),
     [anon_sym_LT_EQ_GT] = ACTIONS(1125),
+    [anon_sym_LT_GT] = ACTIONS(1125),
     [anon_sym_EQ_EQ] = ACTIONS(1125),
     [anon_sym_GT_EQ] = ACTIONS(1125),
     [anon_sym_GT_GT] = ACTIONS(1125),
@@ -18413,6 +18565,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1125),
     [anon_sym_CARET_EQ] = ACTIONS(1125),
     [anon_sym_PIPE_EQ] = ACTIONS(1125),
+    [anon_sym_PIPE_GT] = ACTIONS(1125),
     [anon_sym_PIPE_PIPE] = ACTIONS(1125),
     [anon_sym_TILDE_PIPE] = ACTIONS(1125),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1125),
@@ -18560,6 +18713,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(618),
     [anon_sym_LT_EQ] = ACTIONS(618),
     [anon_sym_LT_EQ_GT] = ACTIONS(618),
+    [anon_sym_LT_GT] = ACTIONS(618),
     [anon_sym_EQ_EQ] = ACTIONS(618),
     [anon_sym_GT_EQ] = ACTIONS(618),
     [anon_sym_GT_GT] = ACTIONS(618),
@@ -18568,6 +18722,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(618),
     [anon_sym_CARET_EQ] = ACTIONS(618),
     [anon_sym_PIPE_EQ] = ACTIONS(618),
+    [anon_sym_PIPE_GT] = ACTIONS(618),
     [anon_sym_PIPE_PIPE] = ACTIONS(618),
     [anon_sym_TILDE_PIPE] = ACTIONS(618),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(618),
@@ -18715,6 +18870,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1131),
     [anon_sym_LT_EQ] = ACTIONS(1131),
     [anon_sym_LT_EQ_GT] = ACTIONS(1131),
+    [anon_sym_LT_GT] = ACTIONS(1131),
     [anon_sym_EQ_EQ] = ACTIONS(1131),
     [anon_sym_GT_EQ] = ACTIONS(1131),
     [anon_sym_GT_GT] = ACTIONS(1131),
@@ -18723,6 +18879,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1131),
     [anon_sym_CARET_EQ] = ACTIONS(1131),
     [anon_sym_PIPE_EQ] = ACTIONS(1131),
+    [anon_sym_PIPE_GT] = ACTIONS(1131),
     [anon_sym_PIPE_PIPE] = ACTIONS(1131),
     [anon_sym_TILDE_PIPE] = ACTIONS(1131),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1131),
@@ -18870,6 +19027,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(624),
     [anon_sym_LT_EQ] = ACTIONS(624),
     [anon_sym_LT_EQ_GT] = ACTIONS(624),
+    [anon_sym_LT_GT] = ACTIONS(624),
     [anon_sym_EQ_EQ] = ACTIONS(624),
     [anon_sym_GT_EQ] = ACTIONS(624),
     [anon_sym_GT_GT] = ACTIONS(624),
@@ -18878,6 +19036,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(624),
     [anon_sym_CARET_EQ] = ACTIONS(624),
     [anon_sym_PIPE_EQ] = ACTIONS(624),
+    [anon_sym_PIPE_GT] = ACTIONS(624),
     [anon_sym_PIPE_PIPE] = ACTIONS(624),
     [anon_sym_TILDE_PIPE] = ACTIONS(624),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(624),
@@ -19025,6 +19184,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(694),
     [anon_sym_LT_EQ] = ACTIONS(694),
     [anon_sym_LT_EQ_GT] = ACTIONS(694),
+    [anon_sym_LT_GT] = ACTIONS(694),
     [anon_sym_EQ_EQ] = ACTIONS(694),
     [anon_sym_GT_EQ] = ACTIONS(694),
     [anon_sym_GT_GT] = ACTIONS(694),
@@ -19033,6 +19193,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(694),
     [anon_sym_CARET_EQ] = ACTIONS(694),
     [anon_sym_PIPE_EQ] = ACTIONS(694),
+    [anon_sym_PIPE_GT] = ACTIONS(694),
     [anon_sym_PIPE_PIPE] = ACTIONS(694),
     [anon_sym_TILDE_PIPE] = ACTIONS(694),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(694),
@@ -19180,6 +19341,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(694),
     [anon_sym_LT_EQ] = ACTIONS(694),
     [anon_sym_LT_EQ_GT] = ACTIONS(694),
+    [anon_sym_LT_GT] = ACTIONS(694),
     [anon_sym_EQ_EQ] = ACTIONS(694),
     [anon_sym_GT_EQ] = ACTIONS(694),
     [anon_sym_GT_GT] = ACTIONS(694),
@@ -19188,6 +19350,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(694),
     [anon_sym_CARET_EQ] = ACTIONS(694),
     [anon_sym_PIPE_EQ] = ACTIONS(694),
+    [anon_sym_PIPE_GT] = ACTIONS(694),
     [anon_sym_PIPE_PIPE] = ACTIONS(694),
     [anon_sym_TILDE_PIPE] = ACTIONS(694),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(694),
@@ -19335,6 +19498,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(993),
     [anon_sym_LT_EQ] = ACTIONS(993),
     [anon_sym_LT_EQ_GT] = ACTIONS(993),
+    [anon_sym_LT_GT] = ACTIONS(993),
     [anon_sym_EQ_EQ] = ACTIONS(993),
     [anon_sym_GT_EQ] = ACTIONS(993),
     [anon_sym_GT_GT] = ACTIONS(993),
@@ -19343,6 +19507,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(993),
     [anon_sym_CARET_EQ] = ACTIONS(993),
     [anon_sym_PIPE_EQ] = ACTIONS(993),
+    [anon_sym_PIPE_GT] = ACTIONS(993),
     [anon_sym_PIPE_PIPE] = ACTIONS(993),
     [anon_sym_TILDE_PIPE] = ACTIONS(993),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(993),
@@ -19490,6 +19655,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(694),
     [anon_sym_LT_EQ] = ACTIONS(694),
     [anon_sym_LT_EQ_GT] = ACTIONS(694),
+    [anon_sym_LT_GT] = ACTIONS(694),
     [anon_sym_EQ_EQ] = ACTIONS(694),
     [anon_sym_GT_EQ] = ACTIONS(694),
     [anon_sym_GT_GT] = ACTIONS(694),
@@ -19498,6 +19664,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(694),
     [anon_sym_CARET_EQ] = ACTIONS(694),
     [anon_sym_PIPE_EQ] = ACTIONS(694),
+    [anon_sym_PIPE_GT] = ACTIONS(694),
     [anon_sym_PIPE_PIPE] = ACTIONS(694),
     [anon_sym_TILDE_PIPE] = ACTIONS(694),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(694),
@@ -19645,6 +19812,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1145),
     [anon_sym_LT_EQ] = ACTIONS(1145),
     [anon_sym_LT_EQ_GT] = ACTIONS(1145),
+    [anon_sym_LT_GT] = ACTIONS(1145),
     [anon_sym_EQ_EQ] = ACTIONS(1145),
     [anon_sym_GT_EQ] = ACTIONS(1145),
     [anon_sym_GT_GT] = ACTIONS(1145),
@@ -19653,6 +19821,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1145),
     [anon_sym_CARET_EQ] = ACTIONS(1145),
     [anon_sym_PIPE_EQ] = ACTIONS(1145),
+    [anon_sym_PIPE_GT] = ACTIONS(1145),
     [anon_sym_PIPE_PIPE] = ACTIONS(1145),
     [anon_sym_TILDE_PIPE] = ACTIONS(1145),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1145),
@@ -19800,6 +19969,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1149),
     [anon_sym_LT_EQ] = ACTIONS(1149),
     [anon_sym_LT_EQ_GT] = ACTIONS(1149),
+    [anon_sym_LT_GT] = ACTIONS(1149),
     [anon_sym_EQ_EQ] = ACTIONS(1149),
     [anon_sym_GT_EQ] = ACTIONS(1149),
     [anon_sym_GT_GT] = ACTIONS(1149),
@@ -19808,6 +19978,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1149),
     [anon_sym_CARET_EQ] = ACTIONS(1149),
     [anon_sym_PIPE_EQ] = ACTIONS(1149),
+    [anon_sym_PIPE_GT] = ACTIONS(1149),
     [anon_sym_PIPE_PIPE] = ACTIONS(1149),
     [anon_sym_TILDE_PIPE] = ACTIONS(1149),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1149),
@@ -19955,6 +20126,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(624),
     [anon_sym_LT_EQ] = ACTIONS(624),
     [anon_sym_LT_EQ_GT] = ACTIONS(624),
+    [anon_sym_LT_GT] = ACTIONS(624),
     [anon_sym_EQ_EQ] = ACTIONS(624),
     [anon_sym_GT_EQ] = ACTIONS(624),
     [anon_sym_GT_GT] = ACTIONS(624),
@@ -19963,6 +20135,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(624),
     [anon_sym_CARET_EQ] = ACTIONS(624),
     [anon_sym_PIPE_EQ] = ACTIONS(624),
+    [anon_sym_PIPE_GT] = ACTIONS(624),
     [anon_sym_PIPE_PIPE] = ACTIONS(624),
     [anon_sym_TILDE_PIPE] = ACTIONS(624),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(624),
@@ -20110,6 +20283,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(624),
     [anon_sym_LT_EQ] = ACTIONS(624),
     [anon_sym_LT_EQ_GT] = ACTIONS(624),
+    [anon_sym_LT_GT] = ACTIONS(624),
     [anon_sym_EQ_EQ] = ACTIONS(624),
     [anon_sym_GT_EQ] = ACTIONS(624),
     [anon_sym_GT_GT] = ACTIONS(624),
@@ -20118,6 +20292,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(624),
     [anon_sym_CARET_EQ] = ACTIONS(624),
     [anon_sym_PIPE_EQ] = ACTIONS(624),
+    [anon_sym_PIPE_GT] = ACTIONS(624),
     [anon_sym_PIPE_PIPE] = ACTIONS(624),
     [anon_sym_TILDE_PIPE] = ACTIONS(624),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(624),
@@ -20265,6 +20440,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(618),
     [anon_sym_LT_EQ] = ACTIONS(618),
     [anon_sym_LT_EQ_GT] = ACTIONS(618),
+    [anon_sym_LT_GT] = ACTIONS(618),
     [anon_sym_EQ_EQ] = ACTIONS(618),
     [anon_sym_GT_EQ] = ACTIONS(618),
     [anon_sym_GT_GT] = ACTIONS(618),
@@ -20273,6 +20449,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(618),
     [anon_sym_CARET_EQ] = ACTIONS(618),
     [anon_sym_PIPE_EQ] = ACTIONS(618),
+    [anon_sym_PIPE_GT] = ACTIONS(618),
     [anon_sym_PIPE_PIPE] = ACTIONS(618),
     [anon_sym_TILDE_PIPE] = ACTIONS(618),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(618),
@@ -20420,6 +20597,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1159),
     [anon_sym_LT_EQ] = ACTIONS(1159),
     [anon_sym_LT_EQ_GT] = ACTIONS(1159),
+    [anon_sym_LT_GT] = ACTIONS(1159),
     [anon_sym_EQ_EQ] = ACTIONS(1159),
     [anon_sym_GT_EQ] = ACTIONS(1159),
     [anon_sym_GT_GT] = ACTIONS(1159),
@@ -20428,6 +20606,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1159),
     [anon_sym_CARET_EQ] = ACTIONS(1159),
     [anon_sym_PIPE_EQ] = ACTIONS(1159),
+    [anon_sym_PIPE_GT] = ACTIONS(1159),
     [anon_sym_PIPE_PIPE] = ACTIONS(1159),
     [anon_sym_TILDE_PIPE] = ACTIONS(1159),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1159),
@@ -20575,6 +20754,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1163),
     [anon_sym_LT_EQ] = ACTIONS(1163),
     [anon_sym_LT_EQ_GT] = ACTIONS(1163),
+    [anon_sym_LT_GT] = ACTIONS(1163),
     [anon_sym_EQ_EQ] = ACTIONS(1163),
     [anon_sym_GT_EQ] = ACTIONS(1163),
     [anon_sym_GT_GT] = ACTIONS(1163),
@@ -20583,6 +20763,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1163),
     [anon_sym_CARET_EQ] = ACTIONS(1163),
     [anon_sym_PIPE_EQ] = ACTIONS(1163),
+    [anon_sym_PIPE_GT] = ACTIONS(1163),
     [anon_sym_PIPE_PIPE] = ACTIONS(1163),
     [anon_sym_TILDE_PIPE] = ACTIONS(1163),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1163),
@@ -20730,6 +20911,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1167),
     [anon_sym_LT_EQ] = ACTIONS(1167),
     [anon_sym_LT_EQ_GT] = ACTIONS(1167),
+    [anon_sym_LT_GT] = ACTIONS(1167),
     [anon_sym_EQ_EQ] = ACTIONS(1167),
     [anon_sym_GT_EQ] = ACTIONS(1167),
     [anon_sym_GT_GT] = ACTIONS(1167),
@@ -20738,6 +20920,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1167),
     [anon_sym_CARET_EQ] = ACTIONS(1167),
     [anon_sym_PIPE_EQ] = ACTIONS(1167),
+    [anon_sym_PIPE_GT] = ACTIONS(1167),
     [anon_sym_PIPE_PIPE] = ACTIONS(1167),
     [anon_sym_TILDE_PIPE] = ACTIONS(1167),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1167),
@@ -20885,6 +21068,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(594),
     [anon_sym_LT_EQ] = ACTIONS(594),
     [anon_sym_LT_EQ_GT] = ACTIONS(594),
+    [anon_sym_LT_GT] = ACTIONS(594),
     [anon_sym_EQ_EQ] = ACTIONS(594),
     [anon_sym_GT_EQ] = ACTIONS(594),
     [anon_sym_GT_GT] = ACTIONS(594),
@@ -20893,6 +21077,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(594),
     [anon_sym_CARET_EQ] = ACTIONS(594),
     [anon_sym_PIPE_EQ] = ACTIONS(594),
+    [anon_sym_PIPE_GT] = ACTIONS(594),
     [anon_sym_PIPE_PIPE] = ACTIONS(594),
     [anon_sym_TILDE_PIPE] = ACTIONS(594),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(594),
@@ -21040,6 +21225,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1171),
     [anon_sym_LT_EQ] = ACTIONS(1171),
     [anon_sym_LT_EQ_GT] = ACTIONS(1171),
+    [anon_sym_LT_GT] = ACTIONS(1171),
     [anon_sym_EQ_EQ] = ACTIONS(1171),
     [anon_sym_GT_EQ] = ACTIONS(1171),
     [anon_sym_GT_GT] = ACTIONS(1171),
@@ -21048,6 +21234,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1171),
     [anon_sym_CARET_EQ] = ACTIONS(1171),
     [anon_sym_PIPE_EQ] = ACTIONS(1171),
+    [anon_sym_PIPE_GT] = ACTIONS(1171),
     [anon_sym_PIPE_PIPE] = ACTIONS(1171),
     [anon_sym_TILDE_PIPE] = ACTIONS(1171),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1171),
@@ -21195,6 +21382,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1175),
     [anon_sym_LT_EQ] = ACTIONS(1175),
     [anon_sym_LT_EQ_GT] = ACTIONS(1175),
+    [anon_sym_LT_GT] = ACTIONS(1175),
     [anon_sym_EQ_EQ] = ACTIONS(1175),
     [anon_sym_GT_EQ] = ACTIONS(1175),
     [anon_sym_GT_GT] = ACTIONS(1175),
@@ -21203,6 +21391,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1175),
     [anon_sym_CARET_EQ] = ACTIONS(1175),
     [anon_sym_PIPE_EQ] = ACTIONS(1175),
+    [anon_sym_PIPE_GT] = ACTIONS(1175),
     [anon_sym_PIPE_PIPE] = ACTIONS(1175),
     [anon_sym_TILDE_PIPE] = ACTIONS(1175),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1175),
@@ -21350,6 +21539,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1179),
     [anon_sym_LT_EQ] = ACTIONS(1179),
     [anon_sym_LT_EQ_GT] = ACTIONS(1179),
+    [anon_sym_LT_GT] = ACTIONS(1179),
     [anon_sym_EQ_EQ] = ACTIONS(1179),
     [anon_sym_GT_EQ] = ACTIONS(1179),
     [anon_sym_GT_GT] = ACTIONS(1179),
@@ -21358,6 +21548,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1179),
     [anon_sym_CARET_EQ] = ACTIONS(1179),
     [anon_sym_PIPE_EQ] = ACTIONS(1179),
+    [anon_sym_PIPE_GT] = ACTIONS(1179),
     [anon_sym_PIPE_PIPE] = ACTIONS(1179),
     [anon_sym_TILDE_PIPE] = ACTIONS(1179),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1179),
@@ -21505,6 +21696,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(618),
     [anon_sym_LT_EQ] = ACTIONS(618),
     [anon_sym_LT_EQ_GT] = ACTIONS(618),
+    [anon_sym_LT_GT] = ACTIONS(618),
     [anon_sym_EQ_EQ] = ACTIONS(618),
     [anon_sym_GT_EQ] = ACTIONS(618),
     [anon_sym_GT_GT] = ACTIONS(618),
@@ -21513,6 +21705,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(618),
     [anon_sym_CARET_EQ] = ACTIONS(618),
     [anon_sym_PIPE_EQ] = ACTIONS(618),
+    [anon_sym_PIPE_GT] = ACTIONS(618),
     [anon_sym_PIPE_PIPE] = ACTIONS(618),
     [anon_sym_TILDE_PIPE] = ACTIONS(618),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(618),
@@ -21660,6 +21853,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1185),
     [anon_sym_LT_EQ] = ACTIONS(1185),
     [anon_sym_LT_EQ_GT] = ACTIONS(1185),
+    [anon_sym_LT_GT] = ACTIONS(1185),
     [anon_sym_EQ_EQ] = ACTIONS(1185),
     [anon_sym_GT_EQ] = ACTIONS(1185),
     [anon_sym_GT_GT] = ACTIONS(1185),
@@ -21668,6 +21862,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1185),
     [anon_sym_CARET_EQ] = ACTIONS(1185),
     [anon_sym_PIPE_EQ] = ACTIONS(1185),
+    [anon_sym_PIPE_GT] = ACTIONS(1185),
     [anon_sym_PIPE_PIPE] = ACTIONS(1185),
     [anon_sym_TILDE_PIPE] = ACTIONS(1185),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1185),
@@ -21815,6 +22010,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(624),
     [anon_sym_LT_EQ] = ACTIONS(624),
     [anon_sym_LT_EQ_GT] = ACTIONS(624),
+    [anon_sym_LT_GT] = ACTIONS(624),
     [anon_sym_EQ_EQ] = ACTIONS(624),
     [anon_sym_GT_EQ] = ACTIONS(624),
     [anon_sym_GT_GT] = ACTIONS(624),
@@ -21823,6 +22019,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(624),
     [anon_sym_CARET_EQ] = ACTIONS(624),
     [anon_sym_PIPE_EQ] = ACTIONS(624),
+    [anon_sym_PIPE_GT] = ACTIONS(624),
     [anon_sym_PIPE_PIPE] = ACTIONS(624),
     [anon_sym_TILDE_PIPE] = ACTIONS(624),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(624),
@@ -21970,6 +22167,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(694),
     [anon_sym_LT_EQ] = ACTIONS(694),
     [anon_sym_LT_EQ_GT] = ACTIONS(694),
+    [anon_sym_LT_GT] = ACTIONS(694),
     [anon_sym_EQ_EQ] = ACTIONS(694),
     [anon_sym_GT_EQ] = ACTIONS(694),
     [anon_sym_GT_GT] = ACTIONS(694),
@@ -21978,6 +22176,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(694),
     [anon_sym_CARET_EQ] = ACTIONS(694),
     [anon_sym_PIPE_EQ] = ACTIONS(694),
+    [anon_sym_PIPE_GT] = ACTIONS(694),
     [anon_sym_PIPE_PIPE] = ACTIONS(694),
     [anon_sym_TILDE_PIPE] = ACTIONS(694),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(694),
@@ -22125,6 +22324,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(694),
     [anon_sym_LT_EQ] = ACTIONS(694),
     [anon_sym_LT_EQ_GT] = ACTIONS(694),
+    [anon_sym_LT_GT] = ACTIONS(694),
     [anon_sym_EQ_EQ] = ACTIONS(694),
     [anon_sym_GT_EQ] = ACTIONS(694),
     [anon_sym_GT_GT] = ACTIONS(694),
@@ -22133,6 +22333,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(694),
     [anon_sym_CARET_EQ] = ACTIONS(694),
     [anon_sym_PIPE_EQ] = ACTIONS(694),
+    [anon_sym_PIPE_GT] = ACTIONS(694),
     [anon_sym_PIPE_PIPE] = ACTIONS(694),
     [anon_sym_TILDE_PIPE] = ACTIONS(694),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(694),
@@ -22280,6 +22481,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(993),
     [anon_sym_LT_EQ] = ACTIONS(993),
     [anon_sym_LT_EQ_GT] = ACTIONS(993),
+    [anon_sym_LT_GT] = ACTIONS(993),
     [anon_sym_EQ_EQ] = ACTIONS(993),
     [anon_sym_GT_EQ] = ACTIONS(993),
     [anon_sym_GT_GT] = ACTIONS(993),
@@ -22288,6 +22490,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(993),
     [anon_sym_CARET_EQ] = ACTIONS(993),
     [anon_sym_PIPE_EQ] = ACTIONS(993),
+    [anon_sym_PIPE_GT] = ACTIONS(993),
     [anon_sym_PIPE_PIPE] = ACTIONS(993),
     [anon_sym_TILDE_PIPE] = ACTIONS(993),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(993),
@@ -22435,6 +22638,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(694),
     [anon_sym_LT_EQ] = ACTIONS(694),
     [anon_sym_LT_EQ_GT] = ACTIONS(694),
+    [anon_sym_LT_GT] = ACTIONS(694),
     [anon_sym_EQ_EQ] = ACTIONS(694),
     [anon_sym_GT_EQ] = ACTIONS(694),
     [anon_sym_GT_GT] = ACTIONS(694),
@@ -22443,6 +22647,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(694),
     [anon_sym_CARET_EQ] = ACTIONS(694),
     [anon_sym_PIPE_EQ] = ACTIONS(694),
+    [anon_sym_PIPE_GT] = ACTIONS(694),
     [anon_sym_PIPE_PIPE] = ACTIONS(694),
     [anon_sym_TILDE_PIPE] = ACTIONS(694),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(694),
@@ -22590,6 +22795,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1199),
     [anon_sym_LT_EQ] = ACTIONS(1199),
     [anon_sym_LT_EQ_GT] = ACTIONS(1199),
+    [anon_sym_LT_GT] = ACTIONS(1199),
     [anon_sym_EQ_EQ] = ACTIONS(1199),
     [anon_sym_GT_EQ] = ACTIONS(1199),
     [anon_sym_GT_GT] = ACTIONS(1199),
@@ -22598,6 +22804,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1199),
     [anon_sym_CARET_EQ] = ACTIONS(1199),
     [anon_sym_PIPE_EQ] = ACTIONS(1199),
+    [anon_sym_PIPE_GT] = ACTIONS(1199),
     [anon_sym_PIPE_PIPE] = ACTIONS(1199),
     [anon_sym_TILDE_PIPE] = ACTIONS(1199),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1199),
@@ -22745,6 +22952,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1203),
     [anon_sym_LT_EQ] = ACTIONS(1203),
     [anon_sym_LT_EQ_GT] = ACTIONS(1203),
+    [anon_sym_LT_GT] = ACTIONS(1203),
     [anon_sym_EQ_EQ] = ACTIONS(1203),
     [anon_sym_GT_EQ] = ACTIONS(1203),
     [anon_sym_GT_GT] = ACTIONS(1203),
@@ -22753,6 +22961,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1203),
     [anon_sym_CARET_EQ] = ACTIONS(1203),
     [anon_sym_PIPE_EQ] = ACTIONS(1203),
+    [anon_sym_PIPE_GT] = ACTIONS(1203),
     [anon_sym_PIPE_PIPE] = ACTIONS(1203),
     [anon_sym_TILDE_PIPE] = ACTIONS(1203),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1203),
@@ -22900,6 +23109,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(624),
     [anon_sym_LT_EQ] = ACTIONS(624),
     [anon_sym_LT_EQ_GT] = ACTIONS(624),
+    [anon_sym_LT_GT] = ACTIONS(624),
     [anon_sym_EQ_EQ] = ACTIONS(624),
     [anon_sym_GT_EQ] = ACTIONS(624),
     [anon_sym_GT_GT] = ACTIONS(624),
@@ -22908,6 +23118,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(624),
     [anon_sym_CARET_EQ] = ACTIONS(624),
     [anon_sym_PIPE_EQ] = ACTIONS(624),
+    [anon_sym_PIPE_GT] = ACTIONS(624),
     [anon_sym_PIPE_PIPE] = ACTIONS(624),
     [anon_sym_TILDE_PIPE] = ACTIONS(624),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(624),
@@ -23055,6 +23266,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(624),
     [anon_sym_LT_EQ] = ACTIONS(624),
     [anon_sym_LT_EQ_GT] = ACTIONS(624),
+    [anon_sym_LT_GT] = ACTIONS(624),
     [anon_sym_EQ_EQ] = ACTIONS(624),
     [anon_sym_GT_EQ] = ACTIONS(624),
     [anon_sym_GT_GT] = ACTIONS(624),
@@ -23063,6 +23275,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(624),
     [anon_sym_CARET_EQ] = ACTIONS(624),
     [anon_sym_PIPE_EQ] = ACTIONS(624),
+    [anon_sym_PIPE_GT] = ACTIONS(624),
     [anon_sym_PIPE_PIPE] = ACTIONS(624),
     [anon_sym_TILDE_PIPE] = ACTIONS(624),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(624),
@@ -23210,6 +23423,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(618),
     [anon_sym_LT_EQ] = ACTIONS(618),
     [anon_sym_LT_EQ_GT] = ACTIONS(618),
+    [anon_sym_LT_GT] = ACTIONS(618),
     [anon_sym_EQ_EQ] = ACTIONS(618),
     [anon_sym_GT_EQ] = ACTIONS(618),
     [anon_sym_GT_GT] = ACTIONS(618),
@@ -23218,6 +23432,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(618),
     [anon_sym_CARET_EQ] = ACTIONS(618),
     [anon_sym_PIPE_EQ] = ACTIONS(618),
+    [anon_sym_PIPE_GT] = ACTIONS(618),
     [anon_sym_PIPE_PIPE] = ACTIONS(618),
     [anon_sym_TILDE_PIPE] = ACTIONS(618),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(618),
@@ -23365,6 +23580,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1213),
     [anon_sym_LT_EQ] = ACTIONS(1213),
     [anon_sym_LT_EQ_GT] = ACTIONS(1213),
+    [anon_sym_LT_GT] = ACTIONS(1213),
     [anon_sym_EQ_EQ] = ACTIONS(1213),
     [anon_sym_GT_EQ] = ACTIONS(1213),
     [anon_sym_GT_GT] = ACTIONS(1213),
@@ -23373,6 +23589,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1213),
     [anon_sym_CARET_EQ] = ACTIONS(1213),
     [anon_sym_PIPE_EQ] = ACTIONS(1213),
+    [anon_sym_PIPE_GT] = ACTIONS(1213),
     [anon_sym_PIPE_PIPE] = ACTIONS(1213),
     [anon_sym_TILDE_PIPE] = ACTIONS(1213),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1213),
@@ -23520,6 +23737,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1217),
     [anon_sym_LT_EQ] = ACTIONS(1217),
     [anon_sym_LT_EQ_GT] = ACTIONS(1217),
+    [anon_sym_LT_GT] = ACTIONS(1217),
     [anon_sym_EQ_EQ] = ACTIONS(1217),
     [anon_sym_GT_EQ] = ACTIONS(1217),
     [anon_sym_GT_GT] = ACTIONS(1217),
@@ -23528,6 +23746,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1217),
     [anon_sym_CARET_EQ] = ACTIONS(1217),
     [anon_sym_PIPE_EQ] = ACTIONS(1217),
+    [anon_sym_PIPE_GT] = ACTIONS(1217),
     [anon_sym_PIPE_PIPE] = ACTIONS(1217),
     [anon_sym_TILDE_PIPE] = ACTIONS(1217),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1217),
@@ -23675,6 +23894,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1221),
     [anon_sym_LT_EQ] = ACTIONS(1221),
     [anon_sym_LT_EQ_GT] = ACTIONS(1221),
+    [anon_sym_LT_GT] = ACTIONS(1221),
     [anon_sym_EQ_EQ] = ACTIONS(1221),
     [anon_sym_GT_EQ] = ACTIONS(1221),
     [anon_sym_GT_GT] = ACTIONS(1221),
@@ -23683,6 +23903,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1221),
     [anon_sym_CARET_EQ] = ACTIONS(1221),
     [anon_sym_PIPE_EQ] = ACTIONS(1221),
+    [anon_sym_PIPE_GT] = ACTIONS(1221),
     [anon_sym_PIPE_PIPE] = ACTIONS(1221),
     [anon_sym_TILDE_PIPE] = ACTIONS(1221),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1221),
@@ -23830,6 +24051,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(582),
     [anon_sym_LT_EQ] = ACTIONS(582),
     [anon_sym_LT_EQ_GT] = ACTIONS(582),
+    [anon_sym_LT_GT] = ACTIONS(582),
     [anon_sym_EQ_EQ] = ACTIONS(582),
     [anon_sym_GT_EQ] = ACTIONS(582),
     [anon_sym_GT_GT] = ACTIONS(582),
@@ -23838,6 +24060,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(582),
     [anon_sym_CARET_EQ] = ACTIONS(582),
     [anon_sym_PIPE_EQ] = ACTIONS(582),
+    [anon_sym_PIPE_GT] = ACTIONS(582),
     [anon_sym_PIPE_PIPE] = ACTIONS(582),
     [anon_sym_TILDE_PIPE] = ACTIONS(582),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(582),
@@ -23985,6 +24208,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1225),
     [anon_sym_LT_EQ] = ACTIONS(1225),
     [anon_sym_LT_EQ_GT] = ACTIONS(1225),
+    [anon_sym_LT_GT] = ACTIONS(1225),
     [anon_sym_EQ_EQ] = ACTIONS(1225),
     [anon_sym_GT_EQ] = ACTIONS(1225),
     [anon_sym_GT_GT] = ACTIONS(1225),
@@ -23993,6 +24217,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1225),
     [anon_sym_CARET_EQ] = ACTIONS(1225),
     [anon_sym_PIPE_EQ] = ACTIONS(1225),
+    [anon_sym_PIPE_GT] = ACTIONS(1225),
     [anon_sym_PIPE_PIPE] = ACTIONS(1225),
     [anon_sym_TILDE_PIPE] = ACTIONS(1225),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1225),
@@ -24140,6 +24365,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1229),
     [anon_sym_LT_EQ] = ACTIONS(1229),
     [anon_sym_LT_EQ_GT] = ACTIONS(1229),
+    [anon_sym_LT_GT] = ACTIONS(1229),
     [anon_sym_EQ_EQ] = ACTIONS(1229),
     [anon_sym_GT_EQ] = ACTIONS(1229),
     [anon_sym_GT_GT] = ACTIONS(1229),
@@ -24148,6 +24374,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1229),
     [anon_sym_CARET_EQ] = ACTIONS(1229),
     [anon_sym_PIPE_EQ] = ACTIONS(1229),
+    [anon_sym_PIPE_GT] = ACTIONS(1229),
     [anon_sym_PIPE_PIPE] = ACTIONS(1229),
     [anon_sym_TILDE_PIPE] = ACTIONS(1229),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1229),
@@ -24295,6 +24522,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1233),
     [anon_sym_LT_EQ] = ACTIONS(1233),
     [anon_sym_LT_EQ_GT] = ACTIONS(1233),
+    [anon_sym_LT_GT] = ACTIONS(1233),
     [anon_sym_EQ_EQ] = ACTIONS(1233),
     [anon_sym_GT_EQ] = ACTIONS(1233),
     [anon_sym_GT_GT] = ACTIONS(1233),
@@ -24303,6 +24531,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1233),
     [anon_sym_CARET_EQ] = ACTIONS(1233),
     [anon_sym_PIPE_EQ] = ACTIONS(1233),
+    [anon_sym_PIPE_GT] = ACTIONS(1233),
     [anon_sym_PIPE_PIPE] = ACTIONS(1233),
     [anon_sym_TILDE_PIPE] = ACTIONS(1233),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1233),
@@ -24450,6 +24679,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(618),
     [anon_sym_LT_EQ] = ACTIONS(618),
     [anon_sym_LT_EQ_GT] = ACTIONS(618),
+    [anon_sym_LT_GT] = ACTIONS(618),
     [anon_sym_EQ_EQ] = ACTIONS(618),
     [anon_sym_GT_EQ] = ACTIONS(618),
     [anon_sym_GT_GT] = ACTIONS(618),
@@ -24458,6 +24688,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(618),
     [anon_sym_CARET_EQ] = ACTIONS(618),
     [anon_sym_PIPE_EQ] = ACTIONS(618),
+    [anon_sym_PIPE_GT] = ACTIONS(618),
     [anon_sym_PIPE_PIPE] = ACTIONS(618),
     [anon_sym_TILDE_PIPE] = ACTIONS(618),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(618),
@@ -24605,6 +24836,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1239),
     [anon_sym_LT_EQ] = ACTIONS(1239),
     [anon_sym_LT_EQ_GT] = ACTIONS(1239),
+    [anon_sym_LT_GT] = ACTIONS(1239),
     [anon_sym_EQ_EQ] = ACTIONS(1239),
     [anon_sym_GT_EQ] = ACTIONS(1239),
     [anon_sym_GT_GT] = ACTIONS(1239),
@@ -24613,6 +24845,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1239),
     [anon_sym_CARET_EQ] = ACTIONS(1239),
     [anon_sym_PIPE_EQ] = ACTIONS(1239),
+    [anon_sym_PIPE_GT] = ACTIONS(1239),
     [anon_sym_PIPE_PIPE] = ACTIONS(1239),
     [anon_sym_TILDE_PIPE] = ACTIONS(1239),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1239),
@@ -24760,6 +24993,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(624),
     [anon_sym_LT_EQ] = ACTIONS(624),
     [anon_sym_LT_EQ_GT] = ACTIONS(624),
+    [anon_sym_LT_GT] = ACTIONS(624),
     [anon_sym_EQ_EQ] = ACTIONS(624),
     [anon_sym_GT_EQ] = ACTIONS(624),
     [anon_sym_GT_GT] = ACTIONS(624),
@@ -24768,6 +25002,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(624),
     [anon_sym_CARET_EQ] = ACTIONS(624),
     [anon_sym_PIPE_EQ] = ACTIONS(624),
+    [anon_sym_PIPE_GT] = ACTIONS(624),
     [anon_sym_PIPE_PIPE] = ACTIONS(624),
     [anon_sym_TILDE_PIPE] = ACTIONS(624),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(624),
@@ -24915,6 +25150,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(694),
     [anon_sym_LT_EQ] = ACTIONS(694),
     [anon_sym_LT_EQ_GT] = ACTIONS(694),
+    [anon_sym_LT_GT] = ACTIONS(694),
     [anon_sym_EQ_EQ] = ACTIONS(694),
     [anon_sym_GT_EQ] = ACTIONS(694),
     [anon_sym_GT_GT] = ACTIONS(694),
@@ -24923,6 +25159,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(694),
     [anon_sym_CARET_EQ] = ACTIONS(694),
     [anon_sym_PIPE_EQ] = ACTIONS(694),
+    [anon_sym_PIPE_GT] = ACTIONS(694),
     [anon_sym_PIPE_PIPE] = ACTIONS(694),
     [anon_sym_TILDE_PIPE] = ACTIONS(694),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(694),
@@ -25070,6 +25307,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(694),
     [anon_sym_LT_EQ] = ACTIONS(694),
     [anon_sym_LT_EQ_GT] = ACTIONS(694),
+    [anon_sym_LT_GT] = ACTIONS(694),
     [anon_sym_EQ_EQ] = ACTIONS(694),
     [anon_sym_GT_EQ] = ACTIONS(694),
     [anon_sym_GT_GT] = ACTIONS(694),
@@ -25078,6 +25316,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(694),
     [anon_sym_CARET_EQ] = ACTIONS(694),
     [anon_sym_PIPE_EQ] = ACTIONS(694),
+    [anon_sym_PIPE_GT] = ACTIONS(694),
     [anon_sym_PIPE_PIPE] = ACTIONS(694),
     [anon_sym_TILDE_PIPE] = ACTIONS(694),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(694),
@@ -25225,6 +25464,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(993),
     [anon_sym_LT_EQ] = ACTIONS(993),
     [anon_sym_LT_EQ_GT] = ACTIONS(993),
+    [anon_sym_LT_GT] = ACTIONS(993),
     [anon_sym_EQ_EQ] = ACTIONS(993),
     [anon_sym_GT_EQ] = ACTIONS(993),
     [anon_sym_GT_GT] = ACTIONS(993),
@@ -25233,6 +25473,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(993),
     [anon_sym_CARET_EQ] = ACTIONS(993),
     [anon_sym_PIPE_EQ] = ACTIONS(993),
+    [anon_sym_PIPE_GT] = ACTIONS(993),
     [anon_sym_PIPE_PIPE] = ACTIONS(993),
     [anon_sym_TILDE_PIPE] = ACTIONS(993),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(993),
@@ -25380,6 +25621,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(694),
     [anon_sym_LT_EQ] = ACTIONS(694),
     [anon_sym_LT_EQ_GT] = ACTIONS(694),
+    [anon_sym_LT_GT] = ACTIONS(694),
     [anon_sym_EQ_EQ] = ACTIONS(694),
     [anon_sym_GT_EQ] = ACTIONS(694),
     [anon_sym_GT_GT] = ACTIONS(694),
@@ -25388,6 +25630,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(694),
     [anon_sym_CARET_EQ] = ACTIONS(694),
     [anon_sym_PIPE_EQ] = ACTIONS(694),
+    [anon_sym_PIPE_GT] = ACTIONS(694),
     [anon_sym_PIPE_PIPE] = ACTIONS(694),
     [anon_sym_TILDE_PIPE] = ACTIONS(694),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(694),
@@ -25535,6 +25778,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1253),
     [anon_sym_LT_EQ] = ACTIONS(1253),
     [anon_sym_LT_EQ_GT] = ACTIONS(1253),
+    [anon_sym_LT_GT] = ACTIONS(1253),
     [anon_sym_EQ_EQ] = ACTIONS(1253),
     [anon_sym_GT_EQ] = ACTIONS(1253),
     [anon_sym_GT_GT] = ACTIONS(1253),
@@ -25543,6 +25787,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1253),
     [anon_sym_CARET_EQ] = ACTIONS(1253),
     [anon_sym_PIPE_EQ] = ACTIONS(1253),
+    [anon_sym_PIPE_GT] = ACTIONS(1253),
     [anon_sym_PIPE_PIPE] = ACTIONS(1253),
     [anon_sym_TILDE_PIPE] = ACTIONS(1253),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1253),
@@ -25690,6 +25935,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1257),
     [anon_sym_LT_EQ] = ACTIONS(1257),
     [anon_sym_LT_EQ_GT] = ACTIONS(1257),
+    [anon_sym_LT_GT] = ACTIONS(1257),
     [anon_sym_EQ_EQ] = ACTIONS(1257),
     [anon_sym_GT_EQ] = ACTIONS(1257),
     [anon_sym_GT_GT] = ACTIONS(1257),
@@ -25698,6 +25944,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1257),
     [anon_sym_CARET_EQ] = ACTIONS(1257),
     [anon_sym_PIPE_EQ] = ACTIONS(1257),
+    [anon_sym_PIPE_GT] = ACTIONS(1257),
     [anon_sym_PIPE_PIPE] = ACTIONS(1257),
     [anon_sym_TILDE_PIPE] = ACTIONS(1257),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1257),
@@ -25845,6 +26092,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(624),
     [anon_sym_LT_EQ] = ACTIONS(624),
     [anon_sym_LT_EQ_GT] = ACTIONS(624),
+    [anon_sym_LT_GT] = ACTIONS(624),
     [anon_sym_EQ_EQ] = ACTIONS(624),
     [anon_sym_GT_EQ] = ACTIONS(624),
     [anon_sym_GT_GT] = ACTIONS(624),
@@ -25853,6 +26101,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(624),
     [anon_sym_CARET_EQ] = ACTIONS(624),
     [anon_sym_PIPE_EQ] = ACTIONS(624),
+    [anon_sym_PIPE_GT] = ACTIONS(624),
     [anon_sym_PIPE_PIPE] = ACTIONS(624),
     [anon_sym_TILDE_PIPE] = ACTIONS(624),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(624),
@@ -26000,6 +26249,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(624),
     [anon_sym_LT_EQ] = ACTIONS(624),
     [anon_sym_LT_EQ_GT] = ACTIONS(624),
+    [anon_sym_LT_GT] = ACTIONS(624),
     [anon_sym_EQ_EQ] = ACTIONS(624),
     [anon_sym_GT_EQ] = ACTIONS(624),
     [anon_sym_GT_GT] = ACTIONS(624),
@@ -26008,6 +26258,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(624),
     [anon_sym_CARET_EQ] = ACTIONS(624),
     [anon_sym_PIPE_EQ] = ACTIONS(624),
+    [anon_sym_PIPE_GT] = ACTIONS(624),
     [anon_sym_PIPE_PIPE] = ACTIONS(624),
     [anon_sym_TILDE_PIPE] = ACTIONS(624),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(624),
@@ -26155,6 +26406,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(618),
     [anon_sym_LT_EQ] = ACTIONS(618),
     [anon_sym_LT_EQ_GT] = ACTIONS(618),
+    [anon_sym_LT_GT] = ACTIONS(618),
     [anon_sym_EQ_EQ] = ACTIONS(618),
     [anon_sym_GT_EQ] = ACTIONS(618),
     [anon_sym_GT_GT] = ACTIONS(618),
@@ -26163,6 +26415,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(618),
     [anon_sym_CARET_EQ] = ACTIONS(618),
     [anon_sym_PIPE_EQ] = ACTIONS(618),
+    [anon_sym_PIPE_GT] = ACTIONS(618),
     [anon_sym_PIPE_PIPE] = ACTIONS(618),
     [anon_sym_TILDE_PIPE] = ACTIONS(618),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(618),
@@ -26310,6 +26563,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1267),
     [anon_sym_LT_EQ] = ACTIONS(1267),
     [anon_sym_LT_EQ_GT] = ACTIONS(1267),
+    [anon_sym_LT_GT] = ACTIONS(1267),
     [anon_sym_EQ_EQ] = ACTIONS(1267),
     [anon_sym_GT_EQ] = ACTIONS(1267),
     [anon_sym_GT_GT] = ACTIONS(1267),
@@ -26318,6 +26572,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1267),
     [anon_sym_CARET_EQ] = ACTIONS(1267),
     [anon_sym_PIPE_EQ] = ACTIONS(1267),
+    [anon_sym_PIPE_GT] = ACTIONS(1267),
     [anon_sym_PIPE_PIPE] = ACTIONS(1267),
     [anon_sym_TILDE_PIPE] = ACTIONS(1267),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1267),
@@ -26465,6 +26720,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1271),
     [anon_sym_LT_EQ] = ACTIONS(1271),
     [anon_sym_LT_EQ_GT] = ACTIONS(1271),
+    [anon_sym_LT_GT] = ACTIONS(1271),
     [anon_sym_EQ_EQ] = ACTIONS(1271),
     [anon_sym_GT_EQ] = ACTIONS(1271),
     [anon_sym_GT_GT] = ACTIONS(1271),
@@ -26473,6 +26729,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1271),
     [anon_sym_CARET_EQ] = ACTIONS(1271),
     [anon_sym_PIPE_EQ] = ACTIONS(1271),
+    [anon_sym_PIPE_GT] = ACTIONS(1271),
     [anon_sym_PIPE_PIPE] = ACTIONS(1271),
     [anon_sym_TILDE_PIPE] = ACTIONS(1271),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1271),
@@ -26620,6 +26877,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(370),
     [anon_sym_LT_EQ] = ACTIONS(370),
     [anon_sym_LT_EQ_GT] = ACTIONS(370),
+    [anon_sym_LT_GT] = ACTIONS(370),
     [anon_sym_EQ_EQ] = ACTIONS(370),
     [anon_sym_GT_EQ] = ACTIONS(370),
     [anon_sym_GT_GT] = ACTIONS(370),
@@ -26628,6 +26886,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(370),
     [anon_sym_CARET_EQ] = ACTIONS(370),
     [anon_sym_PIPE_EQ] = ACTIONS(370),
+    [anon_sym_PIPE_GT] = ACTIONS(370),
     [anon_sym_PIPE_PIPE] = ACTIONS(370),
     [anon_sym_TILDE_PIPE] = ACTIONS(370),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(370),
@@ -26775,6 +27034,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(586),
     [anon_sym_LT_EQ] = ACTIONS(586),
     [anon_sym_LT_EQ_GT] = ACTIONS(586),
+    [anon_sym_LT_GT] = ACTIONS(586),
     [anon_sym_EQ_EQ] = ACTIONS(586),
     [anon_sym_GT_EQ] = ACTIONS(586),
     [anon_sym_GT_GT] = ACTIONS(586),
@@ -26783,6 +27043,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(586),
     [anon_sym_CARET_EQ] = ACTIONS(586),
     [anon_sym_PIPE_EQ] = ACTIONS(586),
+    [anon_sym_PIPE_GT] = ACTIONS(586),
     [anon_sym_PIPE_PIPE] = ACTIONS(586),
     [anon_sym_TILDE_PIPE] = ACTIONS(586),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(586),
@@ -26930,6 +27191,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1275),
     [anon_sym_LT_EQ] = ACTIONS(1275),
     [anon_sym_LT_EQ_GT] = ACTIONS(1275),
+    [anon_sym_LT_GT] = ACTIONS(1275),
     [anon_sym_EQ_EQ] = ACTIONS(1275),
     [anon_sym_GT_EQ] = ACTIONS(1275),
     [anon_sym_GT_GT] = ACTIONS(1275),
@@ -26938,6 +27200,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1275),
     [anon_sym_CARET_EQ] = ACTIONS(1275),
     [anon_sym_PIPE_EQ] = ACTIONS(1275),
+    [anon_sym_PIPE_GT] = ACTIONS(1275),
     [anon_sym_PIPE_PIPE] = ACTIONS(1275),
     [anon_sym_TILDE_PIPE] = ACTIONS(1275),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1275),
@@ -27085,6 +27348,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1279),
     [anon_sym_LT_EQ] = ACTIONS(1279),
     [anon_sym_LT_EQ_GT] = ACTIONS(1279),
+    [anon_sym_LT_GT] = ACTIONS(1279),
     [anon_sym_EQ_EQ] = ACTIONS(1279),
     [anon_sym_GT_EQ] = ACTIONS(1279),
     [anon_sym_GT_GT] = ACTIONS(1279),
@@ -27093,6 +27357,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1279),
     [anon_sym_CARET_EQ] = ACTIONS(1279),
     [anon_sym_PIPE_EQ] = ACTIONS(1279),
+    [anon_sym_PIPE_GT] = ACTIONS(1279),
     [anon_sym_PIPE_PIPE] = ACTIONS(1279),
     [anon_sym_TILDE_PIPE] = ACTIONS(1279),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1279),
@@ -27240,6 +27505,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1283),
     [anon_sym_LT_EQ] = ACTIONS(1283),
     [anon_sym_LT_EQ_GT] = ACTIONS(1283),
+    [anon_sym_LT_GT] = ACTIONS(1283),
     [anon_sym_EQ_EQ] = ACTIONS(1283),
     [anon_sym_GT_EQ] = ACTIONS(1283),
     [anon_sym_GT_GT] = ACTIONS(1283),
@@ -27248,6 +27514,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1283),
     [anon_sym_CARET_EQ] = ACTIONS(1283),
     [anon_sym_PIPE_EQ] = ACTIONS(1283),
+    [anon_sym_PIPE_GT] = ACTIONS(1283),
     [anon_sym_PIPE_PIPE] = ACTIONS(1283),
     [anon_sym_TILDE_PIPE] = ACTIONS(1283),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1283),
@@ -27395,6 +27662,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(618),
     [anon_sym_LT_EQ] = ACTIONS(618),
     [anon_sym_LT_EQ_GT] = ACTIONS(618),
+    [anon_sym_LT_GT] = ACTIONS(618),
     [anon_sym_EQ_EQ] = ACTIONS(618),
     [anon_sym_GT_EQ] = ACTIONS(618),
     [anon_sym_GT_GT] = ACTIONS(618),
@@ -27403,6 +27671,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(618),
     [anon_sym_CARET_EQ] = ACTIONS(618),
     [anon_sym_PIPE_EQ] = ACTIONS(618),
+    [anon_sym_PIPE_GT] = ACTIONS(618),
     [anon_sym_PIPE_PIPE] = ACTIONS(618),
     [anon_sym_TILDE_PIPE] = ACTIONS(618),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(618),
@@ -27550,6 +27819,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1289),
     [anon_sym_LT_EQ] = ACTIONS(1289),
     [anon_sym_LT_EQ_GT] = ACTIONS(1289),
+    [anon_sym_LT_GT] = ACTIONS(1289),
     [anon_sym_EQ_EQ] = ACTIONS(1289),
     [anon_sym_GT_EQ] = ACTIONS(1289),
     [anon_sym_GT_GT] = ACTIONS(1289),
@@ -27558,6 +27828,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1289),
     [anon_sym_CARET_EQ] = ACTIONS(1289),
     [anon_sym_PIPE_EQ] = ACTIONS(1289),
+    [anon_sym_PIPE_GT] = ACTIONS(1289),
     [anon_sym_PIPE_PIPE] = ACTIONS(1289),
     [anon_sym_TILDE_PIPE] = ACTIONS(1289),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1289),
@@ -27705,6 +27976,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(624),
     [anon_sym_LT_EQ] = ACTIONS(624),
     [anon_sym_LT_EQ_GT] = ACTIONS(624),
+    [anon_sym_LT_GT] = ACTIONS(624),
     [anon_sym_EQ_EQ] = ACTIONS(624),
     [anon_sym_GT_EQ] = ACTIONS(624),
     [anon_sym_GT_GT] = ACTIONS(624),
@@ -27713,6 +27985,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(624),
     [anon_sym_CARET_EQ] = ACTIONS(624),
     [anon_sym_PIPE_EQ] = ACTIONS(624),
+    [anon_sym_PIPE_GT] = ACTIONS(624),
     [anon_sym_PIPE_PIPE] = ACTIONS(624),
     [anon_sym_TILDE_PIPE] = ACTIONS(624),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(624),
@@ -27860,6 +28133,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(694),
     [anon_sym_LT_EQ] = ACTIONS(694),
     [anon_sym_LT_EQ_GT] = ACTIONS(694),
+    [anon_sym_LT_GT] = ACTIONS(694),
     [anon_sym_EQ_EQ] = ACTIONS(694),
     [anon_sym_GT_EQ] = ACTIONS(694),
     [anon_sym_GT_GT] = ACTIONS(694),
@@ -27868,6 +28142,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(694),
     [anon_sym_CARET_EQ] = ACTIONS(694),
     [anon_sym_PIPE_EQ] = ACTIONS(694),
+    [anon_sym_PIPE_GT] = ACTIONS(694),
     [anon_sym_PIPE_PIPE] = ACTIONS(694),
     [anon_sym_TILDE_PIPE] = ACTIONS(694),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(694),
@@ -28015,6 +28290,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(694),
     [anon_sym_LT_EQ] = ACTIONS(694),
     [anon_sym_LT_EQ_GT] = ACTIONS(694),
+    [anon_sym_LT_GT] = ACTIONS(694),
     [anon_sym_EQ_EQ] = ACTIONS(694),
     [anon_sym_GT_EQ] = ACTIONS(694),
     [anon_sym_GT_GT] = ACTIONS(694),
@@ -28023,6 +28299,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(694),
     [anon_sym_CARET_EQ] = ACTIONS(694),
     [anon_sym_PIPE_EQ] = ACTIONS(694),
+    [anon_sym_PIPE_GT] = ACTIONS(694),
     [anon_sym_PIPE_PIPE] = ACTIONS(694),
     [anon_sym_TILDE_PIPE] = ACTIONS(694),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(694),
@@ -28170,6 +28447,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(993),
     [anon_sym_LT_EQ] = ACTIONS(993),
     [anon_sym_LT_EQ_GT] = ACTIONS(993),
+    [anon_sym_LT_GT] = ACTIONS(993),
     [anon_sym_EQ_EQ] = ACTIONS(993),
     [anon_sym_GT_EQ] = ACTIONS(993),
     [anon_sym_GT_GT] = ACTIONS(993),
@@ -28178,6 +28456,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(993),
     [anon_sym_CARET_EQ] = ACTIONS(993),
     [anon_sym_PIPE_EQ] = ACTIONS(993),
+    [anon_sym_PIPE_GT] = ACTIONS(993),
     [anon_sym_PIPE_PIPE] = ACTIONS(993),
     [anon_sym_TILDE_PIPE] = ACTIONS(993),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(993),
@@ -28325,6 +28604,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(694),
     [anon_sym_LT_EQ] = ACTIONS(694),
     [anon_sym_LT_EQ_GT] = ACTIONS(694),
+    [anon_sym_LT_GT] = ACTIONS(694),
     [anon_sym_EQ_EQ] = ACTIONS(694),
     [anon_sym_GT_EQ] = ACTIONS(694),
     [anon_sym_GT_GT] = ACTIONS(694),
@@ -28333,6 +28613,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(694),
     [anon_sym_CARET_EQ] = ACTIONS(694),
     [anon_sym_PIPE_EQ] = ACTIONS(694),
+    [anon_sym_PIPE_GT] = ACTIONS(694),
     [anon_sym_PIPE_PIPE] = ACTIONS(694),
     [anon_sym_TILDE_PIPE] = ACTIONS(694),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(694),
@@ -28480,6 +28761,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1303),
     [anon_sym_LT_EQ] = ACTIONS(1303),
     [anon_sym_LT_EQ_GT] = ACTIONS(1303),
+    [anon_sym_LT_GT] = ACTIONS(1303),
     [anon_sym_EQ_EQ] = ACTIONS(1303),
     [anon_sym_GT_EQ] = ACTIONS(1303),
     [anon_sym_GT_GT] = ACTIONS(1303),
@@ -28488,6 +28770,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1303),
     [anon_sym_CARET_EQ] = ACTIONS(1303),
     [anon_sym_PIPE_EQ] = ACTIONS(1303),
+    [anon_sym_PIPE_GT] = ACTIONS(1303),
     [anon_sym_PIPE_PIPE] = ACTIONS(1303),
     [anon_sym_TILDE_PIPE] = ACTIONS(1303),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1303),
@@ -28635,6 +28918,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1307),
     [anon_sym_LT_EQ] = ACTIONS(1307),
     [anon_sym_LT_EQ_GT] = ACTIONS(1307),
+    [anon_sym_LT_GT] = ACTIONS(1307),
     [anon_sym_EQ_EQ] = ACTIONS(1307),
     [anon_sym_GT_EQ] = ACTIONS(1307),
     [anon_sym_GT_GT] = ACTIONS(1307),
@@ -28643,6 +28927,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1307),
     [anon_sym_CARET_EQ] = ACTIONS(1307),
     [anon_sym_PIPE_EQ] = ACTIONS(1307),
+    [anon_sym_PIPE_GT] = ACTIONS(1307),
     [anon_sym_PIPE_PIPE] = ACTIONS(1307),
     [anon_sym_TILDE_PIPE] = ACTIONS(1307),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1307),
@@ -28790,6 +29075,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(624),
     [anon_sym_LT_EQ] = ACTIONS(624),
     [anon_sym_LT_EQ_GT] = ACTIONS(624),
+    [anon_sym_LT_GT] = ACTIONS(624),
     [anon_sym_EQ_EQ] = ACTIONS(624),
     [anon_sym_GT_EQ] = ACTIONS(624),
     [anon_sym_GT_GT] = ACTIONS(624),
@@ -28798,6 +29084,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(624),
     [anon_sym_CARET_EQ] = ACTIONS(624),
     [anon_sym_PIPE_EQ] = ACTIONS(624),
+    [anon_sym_PIPE_GT] = ACTIONS(624),
     [anon_sym_PIPE_PIPE] = ACTIONS(624),
     [anon_sym_TILDE_PIPE] = ACTIONS(624),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(624),
@@ -28945,6 +29232,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(624),
     [anon_sym_LT_EQ] = ACTIONS(624),
     [anon_sym_LT_EQ_GT] = ACTIONS(624),
+    [anon_sym_LT_GT] = ACTIONS(624),
     [anon_sym_EQ_EQ] = ACTIONS(624),
     [anon_sym_GT_EQ] = ACTIONS(624),
     [anon_sym_GT_GT] = ACTIONS(624),
@@ -28953,6 +29241,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(624),
     [anon_sym_CARET_EQ] = ACTIONS(624),
     [anon_sym_PIPE_EQ] = ACTIONS(624),
+    [anon_sym_PIPE_GT] = ACTIONS(624),
     [anon_sym_PIPE_PIPE] = ACTIONS(624),
     [anon_sym_TILDE_PIPE] = ACTIONS(624),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(624),
@@ -29100,6 +29389,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(618),
     [anon_sym_LT_EQ] = ACTIONS(618),
     [anon_sym_LT_EQ_GT] = ACTIONS(618),
+    [anon_sym_LT_GT] = ACTIONS(618),
     [anon_sym_EQ_EQ] = ACTIONS(618),
     [anon_sym_GT_EQ] = ACTIONS(618),
     [anon_sym_GT_GT] = ACTIONS(618),
@@ -29108,6 +29398,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(618),
     [anon_sym_CARET_EQ] = ACTIONS(618),
     [anon_sym_PIPE_EQ] = ACTIONS(618),
+    [anon_sym_PIPE_GT] = ACTIONS(618),
     [anon_sym_PIPE_PIPE] = ACTIONS(618),
     [anon_sym_TILDE_PIPE] = ACTIONS(618),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(618),
@@ -29255,6 +29546,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1317),
     [anon_sym_LT_EQ] = ACTIONS(1317),
     [anon_sym_LT_EQ_GT] = ACTIONS(1317),
+    [anon_sym_LT_GT] = ACTIONS(1317),
     [anon_sym_EQ_EQ] = ACTIONS(1317),
     [anon_sym_GT_EQ] = ACTIONS(1317),
     [anon_sym_GT_GT] = ACTIONS(1317),
@@ -29263,6 +29555,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1317),
     [anon_sym_CARET_EQ] = ACTIONS(1317),
     [anon_sym_PIPE_EQ] = ACTIONS(1317),
+    [anon_sym_PIPE_GT] = ACTIONS(1317),
     [anon_sym_PIPE_PIPE] = ACTIONS(1317),
     [anon_sym_TILDE_PIPE] = ACTIONS(1317),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1317),
@@ -29410,6 +29703,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1321),
     [anon_sym_LT_EQ] = ACTIONS(1321),
     [anon_sym_LT_EQ_GT] = ACTIONS(1321),
+    [anon_sym_LT_GT] = ACTIONS(1321),
     [anon_sym_EQ_EQ] = ACTIONS(1321),
     [anon_sym_GT_EQ] = ACTIONS(1321),
     [anon_sym_GT_GT] = ACTIONS(1321),
@@ -29418,6 +29712,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1321),
     [anon_sym_CARET_EQ] = ACTIONS(1321),
     [anon_sym_PIPE_EQ] = ACTIONS(1321),
+    [anon_sym_PIPE_GT] = ACTIONS(1321),
     [anon_sym_PIPE_PIPE] = ACTIONS(1321),
     [anon_sym_TILDE_PIPE] = ACTIONS(1321),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1321),
@@ -29565,6 +29860,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1325),
     [anon_sym_LT_EQ] = ACTIONS(1325),
     [anon_sym_LT_EQ_GT] = ACTIONS(1325),
+    [anon_sym_LT_GT] = ACTIONS(1325),
     [anon_sym_EQ_EQ] = ACTIONS(1325),
     [anon_sym_GT_EQ] = ACTIONS(1325),
     [anon_sym_GT_GT] = ACTIONS(1325),
@@ -29573,6 +29869,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1325),
     [anon_sym_CARET_EQ] = ACTIONS(1325),
     [anon_sym_PIPE_EQ] = ACTIONS(1325),
+    [anon_sym_PIPE_GT] = ACTIONS(1325),
     [anon_sym_PIPE_PIPE] = ACTIONS(1325),
     [anon_sym_TILDE_PIPE] = ACTIONS(1325),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1325),
@@ -29720,6 +30017,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(602),
     [anon_sym_LT_EQ] = ACTIONS(602),
     [anon_sym_LT_EQ_GT] = ACTIONS(602),
+    [anon_sym_LT_GT] = ACTIONS(602),
     [anon_sym_EQ_EQ] = ACTIONS(602),
     [anon_sym_GT_EQ] = ACTIONS(602),
     [anon_sym_GT_GT] = ACTIONS(602),
@@ -29728,6 +30026,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(602),
     [anon_sym_CARET_EQ] = ACTIONS(602),
     [anon_sym_PIPE_EQ] = ACTIONS(602),
+    [anon_sym_PIPE_GT] = ACTIONS(602),
     [anon_sym_PIPE_PIPE] = ACTIONS(602),
     [anon_sym_TILDE_PIPE] = ACTIONS(602),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(602),
@@ -29875,6 +30174,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1329),
     [anon_sym_LT_EQ] = ACTIONS(1329),
     [anon_sym_LT_EQ_GT] = ACTIONS(1329),
+    [anon_sym_LT_GT] = ACTIONS(1329),
     [anon_sym_EQ_EQ] = ACTIONS(1329),
     [anon_sym_GT_EQ] = ACTIONS(1329),
     [anon_sym_GT_GT] = ACTIONS(1329),
@@ -29883,6 +30183,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1329),
     [anon_sym_CARET_EQ] = ACTIONS(1329),
     [anon_sym_PIPE_EQ] = ACTIONS(1329),
+    [anon_sym_PIPE_GT] = ACTIONS(1329),
     [anon_sym_PIPE_PIPE] = ACTIONS(1329),
     [anon_sym_TILDE_PIPE] = ACTIONS(1329),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1329),
@@ -30030,6 +30331,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(618),
     [anon_sym_LT_EQ] = ACTIONS(618),
     [anon_sym_LT_EQ_GT] = ACTIONS(618),
+    [anon_sym_LT_GT] = ACTIONS(618),
     [anon_sym_EQ_EQ] = ACTIONS(618),
     [anon_sym_GT_EQ] = ACTIONS(618),
     [anon_sym_GT_GT] = ACTIONS(618),
@@ -30038,6 +30340,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(618),
     [anon_sym_CARET_EQ] = ACTIONS(618),
     [anon_sym_PIPE_EQ] = ACTIONS(618),
+    [anon_sym_PIPE_GT] = ACTIONS(618),
     [anon_sym_PIPE_PIPE] = ACTIONS(618),
     [anon_sym_TILDE_PIPE] = ACTIONS(618),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(618),
@@ -30185,6 +30488,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(624),
     [anon_sym_LT_EQ] = ACTIONS(624),
     [anon_sym_LT_EQ_GT] = ACTIONS(624),
+    [anon_sym_LT_GT] = ACTIONS(624),
     [anon_sym_EQ_EQ] = ACTIONS(624),
     [anon_sym_GT_EQ] = ACTIONS(624),
     [anon_sym_GT_GT] = ACTIONS(624),
@@ -30193,6 +30497,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(624),
     [anon_sym_CARET_EQ] = ACTIONS(624),
     [anon_sym_PIPE_EQ] = ACTIONS(624),
+    [anon_sym_PIPE_GT] = ACTIONS(624),
     [anon_sym_PIPE_PIPE] = ACTIONS(624),
     [anon_sym_TILDE_PIPE] = ACTIONS(624),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(624),
@@ -30340,6 +30645,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(694),
     [anon_sym_LT_EQ] = ACTIONS(694),
     [anon_sym_LT_EQ_GT] = ACTIONS(694),
+    [anon_sym_LT_GT] = ACTIONS(694),
     [anon_sym_EQ_EQ] = ACTIONS(694),
     [anon_sym_GT_EQ] = ACTIONS(694),
     [anon_sym_GT_GT] = ACTIONS(694),
@@ -30348,6 +30654,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(694),
     [anon_sym_CARET_EQ] = ACTIONS(694),
     [anon_sym_PIPE_EQ] = ACTIONS(694),
+    [anon_sym_PIPE_GT] = ACTIONS(694),
     [anon_sym_PIPE_PIPE] = ACTIONS(694),
     [anon_sym_TILDE_PIPE] = ACTIONS(694),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(694),
@@ -30495,6 +30802,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(993),
     [anon_sym_LT_EQ] = ACTIONS(993),
     [anon_sym_LT_EQ_GT] = ACTIONS(993),
+    [anon_sym_LT_GT] = ACTIONS(993),
     [anon_sym_EQ_EQ] = ACTIONS(993),
     [anon_sym_GT_EQ] = ACTIONS(993),
     [anon_sym_GT_GT] = ACTIONS(993),
@@ -30503,6 +30811,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(993),
     [anon_sym_CARET_EQ] = ACTIONS(993),
     [anon_sym_PIPE_EQ] = ACTIONS(993),
+    [anon_sym_PIPE_GT] = ACTIONS(993),
     [anon_sym_PIPE_PIPE] = ACTIONS(993),
     [anon_sym_TILDE_PIPE] = ACTIONS(993),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(993),
@@ -30650,6 +30959,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1341),
     [anon_sym_LT_EQ] = ACTIONS(1341),
     [anon_sym_LT_EQ_GT] = ACTIONS(1341),
+    [anon_sym_LT_GT] = ACTIONS(1341),
     [anon_sym_EQ_EQ] = ACTIONS(1341),
     [anon_sym_GT_EQ] = ACTIONS(1341),
     [anon_sym_GT_GT] = ACTIONS(1341),
@@ -30658,6 +30968,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1341),
     [anon_sym_CARET_EQ] = ACTIONS(1341),
     [anon_sym_PIPE_EQ] = ACTIONS(1341),
+    [anon_sym_PIPE_GT] = ACTIONS(1341),
     [anon_sym_PIPE_PIPE] = ACTIONS(1341),
     [anon_sym_TILDE_PIPE] = ACTIONS(1341),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1341),
@@ -30805,6 +31116,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1345),
     [anon_sym_LT_EQ] = ACTIONS(1345),
     [anon_sym_LT_EQ_GT] = ACTIONS(1345),
+    [anon_sym_LT_GT] = ACTIONS(1345),
     [anon_sym_EQ_EQ] = ACTIONS(1345),
     [anon_sym_GT_EQ] = ACTIONS(1345),
     [anon_sym_GT_GT] = ACTIONS(1345),
@@ -30813,6 +31125,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1345),
     [anon_sym_CARET_EQ] = ACTIONS(1345),
     [anon_sym_PIPE_EQ] = ACTIONS(1345),
+    [anon_sym_PIPE_GT] = ACTIONS(1345),
     [anon_sym_PIPE_PIPE] = ACTIONS(1345),
     [anon_sym_TILDE_PIPE] = ACTIONS(1345),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1345),
@@ -30960,6 +31273,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(624),
     [anon_sym_LT_EQ] = ACTIONS(624),
     [anon_sym_LT_EQ_GT] = ACTIONS(624),
+    [anon_sym_LT_GT] = ACTIONS(624),
     [anon_sym_EQ_EQ] = ACTIONS(624),
     [anon_sym_GT_EQ] = ACTIONS(624),
     [anon_sym_GT_GT] = ACTIONS(624),
@@ -30968,6 +31282,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(624),
     [anon_sym_CARET_EQ] = ACTIONS(624),
     [anon_sym_PIPE_EQ] = ACTIONS(624),
+    [anon_sym_PIPE_GT] = ACTIONS(624),
     [anon_sym_PIPE_PIPE] = ACTIONS(624),
     [anon_sym_TILDE_PIPE] = ACTIONS(624),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(624),
@@ -31115,6 +31430,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(618),
     [anon_sym_LT_EQ] = ACTIONS(618),
     [anon_sym_LT_EQ_GT] = ACTIONS(618),
+    [anon_sym_LT_GT] = ACTIONS(618),
     [anon_sym_EQ_EQ] = ACTIONS(618),
     [anon_sym_GT_EQ] = ACTIONS(618),
     [anon_sym_GT_GT] = ACTIONS(618),
@@ -31123,6 +31439,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(618),
     [anon_sym_CARET_EQ] = ACTIONS(618),
     [anon_sym_PIPE_EQ] = ACTIONS(618),
+    [anon_sym_PIPE_GT] = ACTIONS(618),
     [anon_sym_PIPE_PIPE] = ACTIONS(618),
     [anon_sym_TILDE_PIPE] = ACTIONS(618),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(618),
@@ -31270,6 +31587,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1353),
     [anon_sym_LT_EQ] = ACTIONS(1353),
     [anon_sym_LT_EQ_GT] = ACTIONS(1353),
+    [anon_sym_LT_GT] = ACTIONS(1353),
     [anon_sym_EQ_EQ] = ACTIONS(1353),
     [anon_sym_GT_EQ] = ACTIONS(1353),
     [anon_sym_GT_GT] = ACTIONS(1353),
@@ -31278,6 +31596,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1353),
     [anon_sym_CARET_EQ] = ACTIONS(1353),
     [anon_sym_PIPE_EQ] = ACTIONS(1353),
+    [anon_sym_PIPE_GT] = ACTIONS(1353),
     [anon_sym_PIPE_PIPE] = ACTIONS(1353),
     [anon_sym_TILDE_PIPE] = ACTIONS(1353),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1353),
@@ -31425,6 +31744,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(618),
     [anon_sym_LT_EQ] = ACTIONS(618),
     [anon_sym_LT_EQ_GT] = ACTIONS(618),
+    [anon_sym_LT_GT] = ACTIONS(618),
     [anon_sym_EQ_EQ] = ACTIONS(618),
     [anon_sym_GT_EQ] = ACTIONS(618),
     [anon_sym_GT_GT] = ACTIONS(618),
@@ -31433,6 +31753,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(618),
     [anon_sym_CARET_EQ] = ACTIONS(618),
     [anon_sym_PIPE_EQ] = ACTIONS(618),
+    [anon_sym_PIPE_GT] = ACTIONS(618),
     [anon_sym_PIPE_PIPE] = ACTIONS(618),
     [anon_sym_TILDE_PIPE] = ACTIONS(618),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(618),
@@ -31580,6 +31901,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(590),
     [anon_sym_LT_EQ] = ACTIONS(590),
     [anon_sym_LT_EQ_GT] = ACTIONS(590),
+    [anon_sym_LT_GT] = ACTIONS(590),
     [anon_sym_EQ_EQ] = ACTIONS(590),
     [anon_sym_GT_EQ] = ACTIONS(590),
     [anon_sym_GT_GT] = ACTIONS(590),
@@ -31588,6 +31910,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(590),
     [anon_sym_CARET_EQ] = ACTIONS(590),
     [anon_sym_PIPE_EQ] = ACTIONS(590),
+    [anon_sym_PIPE_GT] = ACTIONS(590),
     [anon_sym_PIPE_PIPE] = ACTIONS(590),
     [anon_sym_TILDE_PIPE] = ACTIONS(590),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(590),
@@ -31735,6 +32058,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1359),
     [anon_sym_LT_EQ] = ACTIONS(1359),
     [anon_sym_LT_EQ_GT] = ACTIONS(1359),
+    [anon_sym_LT_GT] = ACTIONS(1359),
     [anon_sym_EQ_EQ] = ACTIONS(1359),
     [anon_sym_GT_EQ] = ACTIONS(1359),
     [anon_sym_GT_GT] = ACTIONS(1359),
@@ -31743,6 +32067,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1359),
     [anon_sym_CARET_EQ] = ACTIONS(1359),
     [anon_sym_PIPE_EQ] = ACTIONS(1359),
+    [anon_sym_PIPE_GT] = ACTIONS(1359),
     [anon_sym_PIPE_PIPE] = ACTIONS(1359),
     [anon_sym_TILDE_PIPE] = ACTIONS(1359),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1359),
@@ -31890,6 +32215,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(624),
     [anon_sym_LT_EQ] = ACTIONS(624),
     [anon_sym_LT_EQ_GT] = ACTIONS(624),
+    [anon_sym_LT_GT] = ACTIONS(624),
     [anon_sym_EQ_EQ] = ACTIONS(624),
     [anon_sym_GT_EQ] = ACTIONS(624),
     [anon_sym_GT_GT] = ACTIONS(624),
@@ -31898,6 +32224,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(624),
     [anon_sym_CARET_EQ] = ACTIONS(624),
     [anon_sym_PIPE_EQ] = ACTIONS(624),
+    [anon_sym_PIPE_GT] = ACTIONS(624),
     [anon_sym_PIPE_PIPE] = ACTIONS(624),
     [anon_sym_TILDE_PIPE] = ACTIONS(624),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(624),
@@ -32045,6 +32372,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(694),
     [anon_sym_LT_EQ] = ACTIONS(694),
     [anon_sym_LT_EQ_GT] = ACTIONS(694),
+    [anon_sym_LT_GT] = ACTIONS(694),
     [anon_sym_EQ_EQ] = ACTIONS(694),
     [anon_sym_GT_EQ] = ACTIONS(694),
     [anon_sym_GT_GT] = ACTIONS(694),
@@ -32053,6 +32381,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(694),
     [anon_sym_CARET_EQ] = ACTIONS(694),
     [anon_sym_PIPE_EQ] = ACTIONS(694),
+    [anon_sym_PIPE_GT] = ACTIONS(694),
     [anon_sym_PIPE_PIPE] = ACTIONS(694),
     [anon_sym_TILDE_PIPE] = ACTIONS(694),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(694),
@@ -32200,6 +32529,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(993),
     [anon_sym_LT_EQ] = ACTIONS(993),
     [anon_sym_LT_EQ_GT] = ACTIONS(993),
+    [anon_sym_LT_GT] = ACTIONS(993),
     [anon_sym_EQ_EQ] = ACTIONS(993),
     [anon_sym_GT_EQ] = ACTIONS(993),
     [anon_sym_GT_GT] = ACTIONS(993),
@@ -32208,6 +32538,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(993),
     [anon_sym_CARET_EQ] = ACTIONS(993),
     [anon_sym_PIPE_EQ] = ACTIONS(993),
+    [anon_sym_PIPE_GT] = ACTIONS(993),
     [anon_sym_PIPE_PIPE] = ACTIONS(993),
     [anon_sym_TILDE_PIPE] = ACTIONS(993),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(993),
@@ -32355,6 +32686,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1369),
     [anon_sym_LT_EQ] = ACTIONS(1369),
     [anon_sym_LT_EQ_GT] = ACTIONS(1369),
+    [anon_sym_LT_GT] = ACTIONS(1369),
     [anon_sym_EQ_EQ] = ACTIONS(1369),
     [anon_sym_GT_EQ] = ACTIONS(1369),
     [anon_sym_GT_GT] = ACTIONS(1369),
@@ -32363,6 +32695,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1369),
     [anon_sym_CARET_EQ] = ACTIONS(1369),
     [anon_sym_PIPE_EQ] = ACTIONS(1369),
+    [anon_sym_PIPE_GT] = ACTIONS(1369),
     [anon_sym_PIPE_PIPE] = ACTIONS(1369),
     [anon_sym_TILDE_PIPE] = ACTIONS(1369),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1369),
@@ -32510,6 +32843,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1376),
     [anon_sym_LT_EQ] = ACTIONS(1376),
     [anon_sym_LT_EQ_GT] = ACTIONS(1376),
+    [anon_sym_LT_GT] = ACTIONS(1376),
     [anon_sym_EQ_EQ] = ACTIONS(1376),
     [anon_sym_GT_EQ] = ACTIONS(1376),
     [anon_sym_GT_GT] = ACTIONS(1376),
@@ -32518,6 +32852,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1376),
     [anon_sym_CARET_EQ] = ACTIONS(1376),
     [anon_sym_PIPE_EQ] = ACTIONS(1376),
+    [anon_sym_PIPE_GT] = ACTIONS(1376),
     [anon_sym_PIPE_PIPE] = ACTIONS(1376),
     [anon_sym_TILDE_PIPE] = ACTIONS(1376),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1376),
@@ -32665,6 +33000,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(606),
     [anon_sym_LT_EQ] = ACTIONS(606),
     [anon_sym_LT_EQ_GT] = ACTIONS(606),
+    [anon_sym_LT_GT] = ACTIONS(606),
     [anon_sym_EQ_EQ] = ACTIONS(606),
     [anon_sym_GT_EQ] = ACTIONS(606),
     [anon_sym_GT_GT] = ACTIONS(606),
@@ -32673,6 +33009,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(606),
     [anon_sym_CARET_EQ] = ACTIONS(606),
     [anon_sym_PIPE_EQ] = ACTIONS(606),
+    [anon_sym_PIPE_GT] = ACTIONS(606),
     [anon_sym_PIPE_PIPE] = ACTIONS(606),
     [anon_sym_TILDE_PIPE] = ACTIONS(606),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(606),
@@ -32820,6 +33157,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1466),
     [anon_sym_LT_EQ] = ACTIONS(1466),
     [anon_sym_LT_EQ_GT] = ACTIONS(1466),
+    [anon_sym_LT_GT] = ACTIONS(1466),
     [anon_sym_EQ_EQ] = ACTIONS(1466),
     [anon_sym_GT_EQ] = ACTIONS(1466),
     [anon_sym_GT_GT] = ACTIONS(1466),
@@ -32828,6 +33166,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1466),
     [anon_sym_CARET_EQ] = ACTIONS(1466),
     [anon_sym_PIPE_EQ] = ACTIONS(1466),
+    [anon_sym_PIPE_GT] = ACTIONS(1466),
     [anon_sym_PIPE_PIPE] = ACTIONS(1466),
     [anon_sym_TILDE_PIPE] = ACTIONS(1466),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1466),
@@ -32975,6 +33314,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(624),
     [anon_sym_LT_EQ] = ACTIONS(624),
     [anon_sym_LT_EQ_GT] = ACTIONS(624),
+    [anon_sym_LT_GT] = ACTIONS(624),
     [anon_sym_EQ_EQ] = ACTIONS(624),
     [anon_sym_GT_EQ] = ACTIONS(624),
     [anon_sym_GT_GT] = ACTIONS(624),
@@ -32983,6 +33323,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(624),
     [anon_sym_CARET_EQ] = ACTIONS(624),
     [anon_sym_PIPE_EQ] = ACTIONS(624),
+    [anon_sym_PIPE_GT] = ACTIONS(624),
     [anon_sym_PIPE_PIPE] = ACTIONS(624),
     [anon_sym_TILDE_PIPE] = ACTIONS(624),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(624),
@@ -33130,6 +33471,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(694),
     [anon_sym_LT_EQ] = ACTIONS(694),
     [anon_sym_LT_EQ_GT] = ACTIONS(694),
+    [anon_sym_LT_GT] = ACTIONS(694),
     [anon_sym_EQ_EQ] = ACTIONS(694),
     [anon_sym_GT_EQ] = ACTIONS(694),
     [anon_sym_GT_GT] = ACTIONS(694),
@@ -33138,6 +33480,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(694),
     [anon_sym_CARET_EQ] = ACTIONS(694),
     [anon_sym_PIPE_EQ] = ACTIONS(694),
+    [anon_sym_PIPE_GT] = ACTIONS(694),
     [anon_sym_PIPE_PIPE] = ACTIONS(694),
     [anon_sym_TILDE_PIPE] = ACTIONS(694),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(694),
@@ -33285,6 +33628,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(993),
     [anon_sym_LT_EQ] = ACTIONS(993),
     [anon_sym_LT_EQ_GT] = ACTIONS(993),
+    [anon_sym_LT_GT] = ACTIONS(993),
     [anon_sym_EQ_EQ] = ACTIONS(993),
     [anon_sym_GT_EQ] = ACTIONS(993),
     [anon_sym_GT_GT] = ACTIONS(993),
@@ -33293,6 +33637,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(993),
     [anon_sym_CARET_EQ] = ACTIONS(993),
     [anon_sym_PIPE_EQ] = ACTIONS(993),
+    [anon_sym_PIPE_GT] = ACTIONS(993),
     [anon_sym_PIPE_PIPE] = ACTIONS(993),
     [anon_sym_TILDE_PIPE] = ACTIONS(993),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(993),
@@ -33440,6 +33785,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1476),
     [anon_sym_LT_EQ] = ACTIONS(1476),
     [anon_sym_LT_EQ_GT] = ACTIONS(1476),
+    [anon_sym_LT_GT] = ACTIONS(1476),
     [anon_sym_EQ_EQ] = ACTIONS(1476),
     [anon_sym_GT_EQ] = ACTIONS(1476),
     [anon_sym_GT_GT] = ACTIONS(1476),
@@ -33448,6 +33794,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1476),
     [anon_sym_CARET_EQ] = ACTIONS(1476),
     [anon_sym_PIPE_EQ] = ACTIONS(1476),
+    [anon_sym_PIPE_GT] = ACTIONS(1476),
     [anon_sym_PIPE_PIPE] = ACTIONS(1476),
     [anon_sym_TILDE_PIPE] = ACTIONS(1476),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1476),
@@ -33595,6 +33942,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(624),
     [anon_sym_LT_EQ] = ACTIONS(624),
     [anon_sym_LT_EQ_GT] = ACTIONS(624),
+    [anon_sym_LT_GT] = ACTIONS(624),
     [anon_sym_EQ_EQ] = ACTIONS(624),
     [anon_sym_GT_EQ] = ACTIONS(624),
     [anon_sym_GT_GT] = ACTIONS(624),
@@ -33603,6 +33951,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(624),
     [anon_sym_CARET_EQ] = ACTIONS(624),
     [anon_sym_PIPE_EQ] = ACTIONS(624),
+    [anon_sym_PIPE_GT] = ACTIONS(624),
     [anon_sym_PIPE_PIPE] = ACTIONS(624),
     [anon_sym_TILDE_PIPE] = ACTIONS(624),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(624),
@@ -33750,6 +34099,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(610),
     [anon_sym_LT_EQ] = ACTIONS(610),
     [anon_sym_LT_EQ_GT] = ACTIONS(610),
+    [anon_sym_LT_GT] = ACTIONS(610),
     [anon_sym_EQ_EQ] = ACTIONS(610),
     [anon_sym_GT_EQ] = ACTIONS(610),
     [anon_sym_GT_GT] = ACTIONS(610),
@@ -33758,6 +34108,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(610),
     [anon_sym_CARET_EQ] = ACTIONS(610),
     [anon_sym_PIPE_EQ] = ACTIONS(610),
+    [anon_sym_PIPE_GT] = ACTIONS(610),
     [anon_sym_PIPE_PIPE] = ACTIONS(610),
     [anon_sym_TILDE_PIPE] = ACTIONS(610),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(610),
@@ -33905,6 +34256,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1482),
     [anon_sym_LT_EQ] = ACTIONS(1482),
     [anon_sym_LT_EQ_GT] = ACTIONS(1482),
+    [anon_sym_LT_GT] = ACTIONS(1482),
     [anon_sym_EQ_EQ] = ACTIONS(1482),
     [anon_sym_GT_EQ] = ACTIONS(1482),
     [anon_sym_GT_GT] = ACTIONS(1482),
@@ -33913,6 +34265,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1482),
     [anon_sym_CARET_EQ] = ACTIONS(1482),
     [anon_sym_PIPE_EQ] = ACTIONS(1482),
+    [anon_sym_PIPE_GT] = ACTIONS(1482),
     [anon_sym_PIPE_PIPE] = ACTIONS(1482),
     [anon_sym_TILDE_PIPE] = ACTIONS(1482),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1482),
@@ -34060,6 +34413,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(624),
     [anon_sym_LT_EQ] = ACTIONS(624),
     [anon_sym_LT_EQ_GT] = ACTIONS(624),
+    [anon_sym_LT_GT] = ACTIONS(624),
     [anon_sym_EQ_EQ] = ACTIONS(624),
     [anon_sym_GT_EQ] = ACTIONS(624),
     [anon_sym_GT_GT] = ACTIONS(624),
@@ -34068,6 +34422,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(624),
     [anon_sym_CARET_EQ] = ACTIONS(624),
     [anon_sym_PIPE_EQ] = ACTIONS(624),
+    [anon_sym_PIPE_GT] = ACTIONS(624),
     [anon_sym_PIPE_PIPE] = ACTIONS(624),
     [anon_sym_TILDE_PIPE] = ACTIONS(624),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(624),
@@ -34215,6 +34570,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(694),
     [anon_sym_LT_EQ] = ACTIONS(694),
     [anon_sym_LT_EQ_GT] = ACTIONS(694),
+    [anon_sym_LT_GT] = ACTIONS(694),
     [anon_sym_EQ_EQ] = ACTIONS(694),
     [anon_sym_GT_EQ] = ACTIONS(694),
     [anon_sym_GT_GT] = ACTIONS(694),
@@ -34223,6 +34579,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(694),
     [anon_sym_CARET_EQ] = ACTIONS(694),
     [anon_sym_PIPE_EQ] = ACTIONS(694),
+    [anon_sym_PIPE_GT] = ACTIONS(694),
     [anon_sym_PIPE_PIPE] = ACTIONS(694),
     [anon_sym_TILDE_PIPE] = ACTIONS(694),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(694),
@@ -34370,6 +34727,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(993),
     [anon_sym_LT_EQ] = ACTIONS(993),
     [anon_sym_LT_EQ_GT] = ACTIONS(993),
+    [anon_sym_LT_GT] = ACTIONS(993),
     [anon_sym_EQ_EQ] = ACTIONS(993),
     [anon_sym_GT_EQ] = ACTIONS(993),
     [anon_sym_GT_GT] = ACTIONS(993),
@@ -34378,6 +34736,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(993),
     [anon_sym_CARET_EQ] = ACTIONS(993),
     [anon_sym_PIPE_EQ] = ACTIONS(993),
+    [anon_sym_PIPE_GT] = ACTIONS(993),
     [anon_sym_PIPE_PIPE] = ACTIONS(993),
     [anon_sym_TILDE_PIPE] = ACTIONS(993),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(993),
@@ -34525,6 +34884,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1492),
     [anon_sym_LT_EQ] = ACTIONS(1492),
     [anon_sym_LT_EQ_GT] = ACTIONS(1492),
+    [anon_sym_LT_GT] = ACTIONS(1492),
     [anon_sym_EQ_EQ] = ACTIONS(1492),
     [anon_sym_GT_EQ] = ACTIONS(1492),
     [anon_sym_GT_GT] = ACTIONS(1492),
@@ -34533,6 +34893,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1492),
     [anon_sym_CARET_EQ] = ACTIONS(1492),
     [anon_sym_PIPE_EQ] = ACTIONS(1492),
+    [anon_sym_PIPE_GT] = ACTIONS(1492),
     [anon_sym_PIPE_PIPE] = ACTIONS(1492),
     [anon_sym_TILDE_PIPE] = ACTIONS(1492),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1492),
@@ -34680,6 +35041,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(614),
     [anon_sym_LT_EQ] = ACTIONS(614),
     [anon_sym_LT_EQ_GT] = ACTIONS(614),
+    [anon_sym_LT_GT] = ACTIONS(614),
     [anon_sym_EQ_EQ] = ACTIONS(614),
     [anon_sym_GT_EQ] = ACTIONS(614),
     [anon_sym_GT_GT] = ACTIONS(614),
@@ -34688,6 +35050,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(614),
     [anon_sym_CARET_EQ] = ACTIONS(614),
     [anon_sym_PIPE_EQ] = ACTIONS(614),
+    [anon_sym_PIPE_GT] = ACTIONS(614),
     [anon_sym_PIPE_PIPE] = ACTIONS(614),
     [anon_sym_TILDE_PIPE] = ACTIONS(614),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(614),
@@ -34835,6 +35198,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1496),
     [anon_sym_LT_EQ] = ACTIONS(1496),
     [anon_sym_LT_EQ_GT] = ACTIONS(1496),
+    [anon_sym_LT_GT] = ACTIONS(1496),
     [anon_sym_EQ_EQ] = ACTIONS(1496),
     [anon_sym_GT_EQ] = ACTIONS(1496),
     [anon_sym_GT_GT] = ACTIONS(1496),
@@ -34843,6 +35207,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1496),
     [anon_sym_CARET_EQ] = ACTIONS(1496),
     [anon_sym_PIPE_EQ] = ACTIONS(1496),
+    [anon_sym_PIPE_GT] = ACTIONS(1496),
     [anon_sym_PIPE_PIPE] = ACTIONS(1496),
     [anon_sym_TILDE_PIPE] = ACTIONS(1496),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1496),
@@ -34990,6 +35355,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(624),
     [anon_sym_LT_EQ] = ACTIONS(624),
     [anon_sym_LT_EQ_GT] = ACTIONS(624),
+    [anon_sym_LT_GT] = ACTIONS(624),
     [anon_sym_EQ_EQ] = ACTIONS(624),
     [anon_sym_GT_EQ] = ACTIONS(624),
     [anon_sym_GT_GT] = ACTIONS(624),
@@ -34998,6 +35364,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(624),
     [anon_sym_CARET_EQ] = ACTIONS(624),
     [anon_sym_PIPE_EQ] = ACTIONS(624),
+    [anon_sym_PIPE_GT] = ACTIONS(624),
     [anon_sym_PIPE_PIPE] = ACTIONS(624),
     [anon_sym_TILDE_PIPE] = ACTIONS(624),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(624),
@@ -35145,6 +35512,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(694),
     [anon_sym_LT_EQ] = ACTIONS(694),
     [anon_sym_LT_EQ_GT] = ACTIONS(694),
+    [anon_sym_LT_GT] = ACTIONS(694),
     [anon_sym_EQ_EQ] = ACTIONS(694),
     [anon_sym_GT_EQ] = ACTIONS(694),
     [anon_sym_GT_GT] = ACTIONS(694),
@@ -35153,6 +35521,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(694),
     [anon_sym_CARET_EQ] = ACTIONS(694),
     [anon_sym_PIPE_EQ] = ACTIONS(694),
+    [anon_sym_PIPE_GT] = ACTIONS(694),
     [anon_sym_PIPE_PIPE] = ACTIONS(694),
     [anon_sym_TILDE_PIPE] = ACTIONS(694),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(694),
@@ -35300,6 +35669,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(993),
     [anon_sym_LT_EQ] = ACTIONS(993),
     [anon_sym_LT_EQ_GT] = ACTIONS(993),
+    [anon_sym_LT_GT] = ACTIONS(993),
     [anon_sym_EQ_EQ] = ACTIONS(993),
     [anon_sym_GT_EQ] = ACTIONS(993),
     [anon_sym_GT_GT] = ACTIONS(993),
@@ -35308,6 +35678,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(993),
     [anon_sym_CARET_EQ] = ACTIONS(993),
     [anon_sym_PIPE_EQ] = ACTIONS(993),
+    [anon_sym_PIPE_GT] = ACTIONS(993),
     [anon_sym_PIPE_PIPE] = ACTIONS(993),
     [anon_sym_TILDE_PIPE] = ACTIONS(993),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(993),
@@ -35455,6 +35826,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1506),
     [anon_sym_LT_EQ] = ACTIONS(1506),
     [anon_sym_LT_EQ_GT] = ACTIONS(1506),
+    [anon_sym_LT_GT] = ACTIONS(1506),
     [anon_sym_EQ_EQ] = ACTIONS(1506),
     [anon_sym_GT_EQ] = ACTIONS(1506),
     [anon_sym_GT_GT] = ACTIONS(1506),
@@ -35463,6 +35835,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1506),
     [anon_sym_CARET_EQ] = ACTIONS(1506),
     [anon_sym_PIPE_EQ] = ACTIONS(1506),
+    [anon_sym_PIPE_GT] = ACTIONS(1506),
     [anon_sym_PIPE_PIPE] = ACTIONS(1506),
     [anon_sym_TILDE_PIPE] = ACTIONS(1506),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1506),
@@ -35610,6 +35983,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(598),
     [anon_sym_LT_EQ] = ACTIONS(598),
     [anon_sym_LT_EQ_GT] = ACTIONS(598),
+    [anon_sym_LT_GT] = ACTIONS(598),
     [anon_sym_EQ_EQ] = ACTIONS(598),
     [anon_sym_GT_EQ] = ACTIONS(598),
     [anon_sym_GT_GT] = ACTIONS(598),
@@ -35618,6 +35992,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(598),
     [anon_sym_CARET_EQ] = ACTIONS(598),
     [anon_sym_PIPE_EQ] = ACTIONS(598),
+    [anon_sym_PIPE_GT] = ACTIONS(598),
     [anon_sym_PIPE_PIPE] = ACTIONS(598),
     [anon_sym_TILDE_PIPE] = ACTIONS(598),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(598),
@@ -35765,6 +36140,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1510),
     [anon_sym_LT_EQ] = ACTIONS(1510),
     [anon_sym_LT_EQ_GT] = ACTIONS(1510),
+    [anon_sym_LT_GT] = ACTIONS(1510),
     [anon_sym_EQ_EQ] = ACTIONS(1510),
     [anon_sym_GT_EQ] = ACTIONS(1510),
     [anon_sym_GT_GT] = ACTIONS(1510),
@@ -35773,6 +36149,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1510),
     [anon_sym_CARET_EQ] = ACTIONS(1510),
     [anon_sym_PIPE_EQ] = ACTIONS(1510),
+    [anon_sym_PIPE_GT] = ACTIONS(1510),
     [anon_sym_PIPE_PIPE] = ACTIONS(1510),
     [anon_sym_TILDE_PIPE] = ACTIONS(1510),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1510),
@@ -35920,6 +36297,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(624),
     [anon_sym_LT_EQ] = ACTIONS(624),
     [anon_sym_LT_EQ_GT] = ACTIONS(624),
+    [anon_sym_LT_GT] = ACTIONS(624),
     [anon_sym_EQ_EQ] = ACTIONS(624),
     [anon_sym_GT_EQ] = ACTIONS(624),
     [anon_sym_GT_GT] = ACTIONS(624),
@@ -35928,6 +36306,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(624),
     [anon_sym_CARET_EQ] = ACTIONS(624),
     [anon_sym_PIPE_EQ] = ACTIONS(624),
+    [anon_sym_PIPE_GT] = ACTIONS(624),
     [anon_sym_PIPE_PIPE] = ACTIONS(624),
     [anon_sym_TILDE_PIPE] = ACTIONS(624),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(624),
@@ -36075,6 +36454,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(694),
     [anon_sym_LT_EQ] = ACTIONS(694),
     [anon_sym_LT_EQ_GT] = ACTIONS(694),
+    [anon_sym_LT_GT] = ACTIONS(694),
     [anon_sym_EQ_EQ] = ACTIONS(694),
     [anon_sym_GT_EQ] = ACTIONS(694),
     [anon_sym_GT_GT] = ACTIONS(694),
@@ -36083,6 +36463,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(694),
     [anon_sym_CARET_EQ] = ACTIONS(694),
     [anon_sym_PIPE_EQ] = ACTIONS(694),
+    [anon_sym_PIPE_GT] = ACTIONS(694),
     [anon_sym_PIPE_PIPE] = ACTIONS(694),
     [anon_sym_TILDE_PIPE] = ACTIONS(694),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(694),
@@ -36230,6 +36611,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(993),
     [anon_sym_LT_EQ] = ACTIONS(993),
     [anon_sym_LT_EQ_GT] = ACTIONS(993),
+    [anon_sym_LT_GT] = ACTIONS(993),
     [anon_sym_EQ_EQ] = ACTIONS(993),
     [anon_sym_GT_EQ] = ACTIONS(993),
     [anon_sym_GT_GT] = ACTIONS(993),
@@ -36238,6 +36620,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(993),
     [anon_sym_CARET_EQ] = ACTIONS(993),
     [anon_sym_PIPE_EQ] = ACTIONS(993),
+    [anon_sym_PIPE_GT] = ACTIONS(993),
     [anon_sym_PIPE_PIPE] = ACTIONS(993),
     [anon_sym_TILDE_PIPE] = ACTIONS(993),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(993),
@@ -36385,6 +36768,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1520),
     [anon_sym_LT_EQ] = ACTIONS(1520),
     [anon_sym_LT_EQ_GT] = ACTIONS(1520),
+    [anon_sym_LT_GT] = ACTIONS(1520),
     [anon_sym_EQ_EQ] = ACTIONS(1520),
     [anon_sym_GT_EQ] = ACTIONS(1520),
     [anon_sym_GT_GT] = ACTIONS(1520),
@@ -36393,6 +36777,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1520),
     [anon_sym_CARET_EQ] = ACTIONS(1520),
     [anon_sym_PIPE_EQ] = ACTIONS(1520),
+    [anon_sym_PIPE_GT] = ACTIONS(1520),
     [anon_sym_PIPE_PIPE] = ACTIONS(1520),
     [anon_sym_TILDE_PIPE] = ACTIONS(1520),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1520),
@@ -36540,6 +36925,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(79),
     [anon_sym_LT_EQ] = ACTIONS(79),
     [anon_sym_LT_EQ_GT] = ACTIONS(79),
+    [anon_sym_LT_GT] = ACTIONS(79),
     [anon_sym_EQ_EQ] = ACTIONS(79),
     [anon_sym_GT_EQ] = ACTIONS(79),
     [anon_sym_GT_GT] = ACTIONS(79),
@@ -36548,6 +36934,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(79),
     [anon_sym_CARET_EQ] = ACTIONS(79),
     [anon_sym_PIPE_EQ] = ACTIONS(79),
+    [anon_sym_PIPE_GT] = ACTIONS(79),
     [anon_sym_PIPE_PIPE] = ACTIONS(79),
     [anon_sym_TILDE_PIPE] = ACTIONS(79),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(79),
@@ -36695,6 +37082,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(624),
     [anon_sym_LT_EQ] = ACTIONS(624),
     [anon_sym_LT_EQ_GT] = ACTIONS(624),
+    [anon_sym_LT_GT] = ACTIONS(624),
     [anon_sym_EQ_EQ] = ACTIONS(624),
     [anon_sym_GT_EQ] = ACTIONS(624),
     [anon_sym_GT_GT] = ACTIONS(624),
@@ -36703,6 +37091,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(624),
     [anon_sym_CARET_EQ] = ACTIONS(624),
     [anon_sym_PIPE_EQ] = ACTIONS(624),
+    [anon_sym_PIPE_GT] = ACTIONS(624),
     [anon_sym_PIPE_PIPE] = ACTIONS(624),
     [anon_sym_TILDE_PIPE] = ACTIONS(624),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(624),
@@ -36850,6 +37239,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(694),
     [anon_sym_LT_EQ] = ACTIONS(694),
     [anon_sym_LT_EQ_GT] = ACTIONS(694),
+    [anon_sym_LT_GT] = ACTIONS(694),
     [anon_sym_EQ_EQ] = ACTIONS(694),
     [anon_sym_GT_EQ] = ACTIONS(694),
     [anon_sym_GT_GT] = ACTIONS(694),
@@ -36858,6 +37248,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(694),
     [anon_sym_CARET_EQ] = ACTIONS(694),
     [anon_sym_PIPE_EQ] = ACTIONS(694),
+    [anon_sym_PIPE_GT] = ACTIONS(694),
     [anon_sym_PIPE_PIPE] = ACTIONS(694),
     [anon_sym_TILDE_PIPE] = ACTIONS(694),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(694),
@@ -37005,6 +37396,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1528),
     [anon_sym_LT_EQ] = ACTIONS(1528),
     [anon_sym_LT_EQ_GT] = ACTIONS(1528),
+    [anon_sym_LT_GT] = ACTIONS(1528),
     [anon_sym_EQ_EQ] = ACTIONS(1528),
     [anon_sym_GT_EQ] = ACTIONS(1528),
     [anon_sym_GT_GT] = ACTIONS(1528),
@@ -37013,6 +37405,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1528),
     [anon_sym_CARET_EQ] = ACTIONS(1528),
     [anon_sym_PIPE_EQ] = ACTIONS(1528),
+    [anon_sym_PIPE_GT] = ACTIONS(1528),
     [anon_sym_PIPE_PIPE] = ACTIONS(1528),
     [anon_sym_TILDE_PIPE] = ACTIONS(1528),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1528),
@@ -37135,6 +37528,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1534),
     [anon_sym_LT_EQ] = ACTIONS(1534),
     [anon_sym_LT_EQ_GT] = ACTIONS(1534),
+    [anon_sym_LT_GT] = ACTIONS(1534),
     [anon_sym_EQ_EQ] = ACTIONS(1534),
     [anon_sym_GT_EQ] = ACTIONS(1534),
     [anon_sym_GT_GT] = ACTIONS(1534),
@@ -37143,6 +37537,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1534),
     [anon_sym_CARET_EQ] = ACTIONS(1534),
     [anon_sym_PIPE_EQ] = ACTIONS(1534),
+    [anon_sym_PIPE_GT] = ACTIONS(1534),
     [anon_sym_PIPE_PIPE] = ACTIONS(1534),
     [anon_sym_TILDE_PIPE] = ACTIONS(1534),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1534),
@@ -37266,6 +37661,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1552),
     [anon_sym_LT_EQ] = ACTIONS(1552),
     [anon_sym_LT_EQ_GT] = ACTIONS(1552),
+    [anon_sym_LT_GT] = ACTIONS(1552),
     [anon_sym_EQ_EQ] = ACTIONS(1552),
     [anon_sym_GT_EQ] = ACTIONS(1552),
     [anon_sym_GT_GT] = ACTIONS(1552),
@@ -37274,6 +37670,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1552),
     [anon_sym_CARET_EQ] = ACTIONS(1552),
     [anon_sym_PIPE_EQ] = ACTIONS(1552),
+    [anon_sym_PIPE_GT] = ACTIONS(1552),
     [anon_sym_PIPE_PIPE] = ACTIONS(1552),
     [anon_sym_TILDE_PIPE] = ACTIONS(1552),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1552),
@@ -37397,6 +37794,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1556),
     [anon_sym_LT_EQ] = ACTIONS(1556),
     [anon_sym_LT_EQ_GT] = ACTIONS(1556),
+    [anon_sym_LT_GT] = ACTIONS(1556),
     [anon_sym_EQ_EQ] = ACTIONS(1556),
     [anon_sym_GT_EQ] = ACTIONS(1556),
     [anon_sym_GT_GT] = ACTIONS(1556),
@@ -37405,6 +37803,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1556),
     [anon_sym_CARET_EQ] = ACTIONS(1556),
     [anon_sym_PIPE_EQ] = ACTIONS(1556),
+    [anon_sym_PIPE_GT] = ACTIONS(1556),
     [anon_sym_PIPE_PIPE] = ACTIONS(1556),
     [anon_sym_TILDE_PIPE] = ACTIONS(1556),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1556),
@@ -37528,6 +37927,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1560),
     [anon_sym_LT_EQ] = ACTIONS(1560),
     [anon_sym_LT_EQ_GT] = ACTIONS(1560),
+    [anon_sym_LT_GT] = ACTIONS(1560),
     [anon_sym_EQ_EQ] = ACTIONS(1560),
     [anon_sym_GT_EQ] = ACTIONS(1560),
     [anon_sym_GT_GT] = ACTIONS(1560),
@@ -37536,6 +37936,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1560),
     [anon_sym_CARET_EQ] = ACTIONS(1560),
     [anon_sym_PIPE_EQ] = ACTIONS(1560),
+    [anon_sym_PIPE_GT] = ACTIONS(1560),
     [anon_sym_PIPE_PIPE] = ACTIONS(1560),
     [anon_sym_TILDE_PIPE] = ACTIONS(1560),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1560),
@@ -37659,6 +38060,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1562),
     [anon_sym_LT_EQ] = ACTIONS(1562),
     [anon_sym_LT_EQ_GT] = ACTIONS(1562),
+    [anon_sym_LT_GT] = ACTIONS(1562),
     [anon_sym_EQ_EQ] = ACTIONS(1562),
     [anon_sym_GT_EQ] = ACTIONS(1562),
     [anon_sym_GT_GT] = ACTIONS(1562),
@@ -37667,6 +38069,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1562),
     [anon_sym_CARET_EQ] = ACTIONS(1562),
     [anon_sym_PIPE_EQ] = ACTIONS(1562),
+    [anon_sym_PIPE_GT] = ACTIONS(1562),
     [anon_sym_PIPE_PIPE] = ACTIONS(1562),
     [anon_sym_TILDE_PIPE] = ACTIONS(1562),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1562),
@@ -37790,6 +38193,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1566),
     [anon_sym_LT_EQ] = ACTIONS(1566),
     [anon_sym_LT_EQ_GT] = ACTIONS(1566),
+    [anon_sym_LT_GT] = ACTIONS(1566),
     [anon_sym_EQ_EQ] = ACTIONS(1566),
     [anon_sym_GT_EQ] = ACTIONS(1566),
     [anon_sym_GT_GT] = ACTIONS(1566),
@@ -37798,6 +38202,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1566),
     [anon_sym_CARET_EQ] = ACTIONS(1566),
     [anon_sym_PIPE_EQ] = ACTIONS(1566),
+    [anon_sym_PIPE_GT] = ACTIONS(1566),
     [anon_sym_PIPE_PIPE] = ACTIONS(1566),
     [anon_sym_TILDE_PIPE] = ACTIONS(1566),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1566),
@@ -37921,6 +38326,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1570),
     [anon_sym_LT_EQ] = ACTIONS(1570),
     [anon_sym_LT_EQ_GT] = ACTIONS(1570),
+    [anon_sym_LT_GT] = ACTIONS(1570),
     [anon_sym_EQ_EQ] = ACTIONS(1570),
     [anon_sym_GT_EQ] = ACTIONS(1570),
     [anon_sym_GT_GT] = ACTIONS(1570),
@@ -37929,6 +38335,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1570),
     [anon_sym_CARET_EQ] = ACTIONS(1570),
     [anon_sym_PIPE_EQ] = ACTIONS(1570),
+    [anon_sym_PIPE_GT] = ACTIONS(1570),
     [anon_sym_PIPE_PIPE] = ACTIONS(1570),
     [anon_sym_TILDE_PIPE] = ACTIONS(1570),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1570),
@@ -38052,6 +38459,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1572),
     [anon_sym_LT_EQ] = ACTIONS(1572),
     [anon_sym_LT_EQ_GT] = ACTIONS(1572),
+    [anon_sym_LT_GT] = ACTIONS(1572),
     [anon_sym_EQ_EQ] = ACTIONS(1572),
     [anon_sym_GT_EQ] = ACTIONS(1572),
     [anon_sym_GT_GT] = ACTIONS(1572),
@@ -38060,6 +38468,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1572),
     [anon_sym_CARET_EQ] = ACTIONS(1572),
     [anon_sym_PIPE_EQ] = ACTIONS(1572),
+    [anon_sym_PIPE_GT] = ACTIONS(1572),
     [anon_sym_PIPE_PIPE] = ACTIONS(1572),
     [anon_sym_TILDE_PIPE] = ACTIONS(1572),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1572),
@@ -38183,6 +38592,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1574),
     [anon_sym_LT_EQ] = ACTIONS(1574),
     [anon_sym_LT_EQ_GT] = ACTIONS(1574),
+    [anon_sym_LT_GT] = ACTIONS(1574),
     [anon_sym_EQ_EQ] = ACTIONS(1574),
     [anon_sym_GT_EQ] = ACTIONS(1574),
     [anon_sym_GT_GT] = ACTIONS(1574),
@@ -38191,6 +38601,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1574),
     [anon_sym_CARET_EQ] = ACTIONS(1574),
     [anon_sym_PIPE_EQ] = ACTIONS(1574),
+    [anon_sym_PIPE_GT] = ACTIONS(1574),
     [anon_sym_PIPE_PIPE] = ACTIONS(1574),
     [anon_sym_TILDE_PIPE] = ACTIONS(1574),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1574),
@@ -38314,6 +38725,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1578),
     [anon_sym_LT_EQ] = ACTIONS(1578),
     [anon_sym_LT_EQ_GT] = ACTIONS(1578),
+    [anon_sym_LT_GT] = ACTIONS(1578),
     [anon_sym_EQ_EQ] = ACTIONS(1578),
     [anon_sym_GT_EQ] = ACTIONS(1578),
     [anon_sym_GT_GT] = ACTIONS(1578),
@@ -38322,6 +38734,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1578),
     [anon_sym_CARET_EQ] = ACTIONS(1578),
     [anon_sym_PIPE_EQ] = ACTIONS(1578),
+    [anon_sym_PIPE_GT] = ACTIONS(1578),
     [anon_sym_PIPE_PIPE] = ACTIONS(1578),
     [anon_sym_TILDE_PIPE] = ACTIONS(1578),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1578),
@@ -38445,6 +38858,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1582),
     [anon_sym_LT_EQ] = ACTIONS(1582),
     [anon_sym_LT_EQ_GT] = ACTIONS(1582),
+    [anon_sym_LT_GT] = ACTIONS(1582),
     [anon_sym_EQ_EQ] = ACTIONS(1582),
     [anon_sym_GT_EQ] = ACTIONS(1582),
     [anon_sym_GT_GT] = ACTIONS(1582),
@@ -38453,6 +38867,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1582),
     [anon_sym_CARET_EQ] = ACTIONS(1582),
     [anon_sym_PIPE_EQ] = ACTIONS(1582),
+    [anon_sym_PIPE_GT] = ACTIONS(1582),
     [anon_sym_PIPE_PIPE] = ACTIONS(1582),
     [anon_sym_TILDE_PIPE] = ACTIONS(1582),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1582),
@@ -38576,6 +38991,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1584),
     [anon_sym_LT_EQ] = ACTIONS(1584),
     [anon_sym_LT_EQ_GT] = ACTIONS(1584),
+    [anon_sym_LT_GT] = ACTIONS(1584),
     [anon_sym_EQ_EQ] = ACTIONS(1584),
     [anon_sym_GT_EQ] = ACTIONS(1584),
     [anon_sym_GT_GT] = ACTIONS(1584),
@@ -38584,6 +39000,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1584),
     [anon_sym_CARET_EQ] = ACTIONS(1584),
     [anon_sym_PIPE_EQ] = ACTIONS(1584),
+    [anon_sym_PIPE_GT] = ACTIONS(1584),
     [anon_sym_PIPE_PIPE] = ACTIONS(1584),
     [anon_sym_TILDE_PIPE] = ACTIONS(1584),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1584),
@@ -38707,6 +39124,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1586),
     [anon_sym_LT_EQ] = ACTIONS(1586),
     [anon_sym_LT_EQ_GT] = ACTIONS(1586),
+    [anon_sym_LT_GT] = ACTIONS(1586),
     [anon_sym_EQ_EQ] = ACTIONS(1586),
     [anon_sym_GT_EQ] = ACTIONS(1586),
     [anon_sym_GT_GT] = ACTIONS(1586),
@@ -38715,6 +39133,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1586),
     [anon_sym_CARET_EQ] = ACTIONS(1586),
     [anon_sym_PIPE_EQ] = ACTIONS(1586),
+    [anon_sym_PIPE_GT] = ACTIONS(1586),
     [anon_sym_PIPE_PIPE] = ACTIONS(1586),
     [anon_sym_TILDE_PIPE] = ACTIONS(1586),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1586),
@@ -38838,6 +39257,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1590),
     [anon_sym_LT_EQ] = ACTIONS(1590),
     [anon_sym_LT_EQ_GT] = ACTIONS(1590),
+    [anon_sym_LT_GT] = ACTIONS(1590),
     [anon_sym_EQ_EQ] = ACTIONS(1590),
     [anon_sym_GT_EQ] = ACTIONS(1590),
     [anon_sym_GT_GT] = ACTIONS(1590),
@@ -38846,6 +39266,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1590),
     [anon_sym_CARET_EQ] = ACTIONS(1590),
     [anon_sym_PIPE_EQ] = ACTIONS(1590),
+    [anon_sym_PIPE_GT] = ACTIONS(1590),
     [anon_sym_PIPE_PIPE] = ACTIONS(1590),
     [anon_sym_TILDE_PIPE] = ACTIONS(1590),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1590),
@@ -38969,6 +39390,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1592),
     [anon_sym_LT_EQ] = ACTIONS(1592),
     [anon_sym_LT_EQ_GT] = ACTIONS(1592),
+    [anon_sym_LT_GT] = ACTIONS(1592),
     [anon_sym_EQ_EQ] = ACTIONS(1592),
     [anon_sym_GT_EQ] = ACTIONS(1592),
     [anon_sym_GT_GT] = ACTIONS(1592),
@@ -38977,6 +39399,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1592),
     [anon_sym_CARET_EQ] = ACTIONS(1592),
     [anon_sym_PIPE_EQ] = ACTIONS(1592),
+    [anon_sym_PIPE_GT] = ACTIONS(1592),
     [anon_sym_PIPE_PIPE] = ACTIONS(1592),
     [anon_sym_TILDE_PIPE] = ACTIONS(1592),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1592),
@@ -39100,6 +39523,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1594),
     [anon_sym_LT_EQ] = ACTIONS(1594),
     [anon_sym_LT_EQ_GT] = ACTIONS(1594),
+    [anon_sym_LT_GT] = ACTIONS(1594),
     [anon_sym_EQ_EQ] = ACTIONS(1594),
     [anon_sym_GT_EQ] = ACTIONS(1594),
     [anon_sym_GT_GT] = ACTIONS(1594),
@@ -39108,6 +39532,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1594),
     [anon_sym_CARET_EQ] = ACTIONS(1594),
     [anon_sym_PIPE_EQ] = ACTIONS(1594),
+    [anon_sym_PIPE_GT] = ACTIONS(1594),
     [anon_sym_PIPE_PIPE] = ACTIONS(1594),
     [anon_sym_TILDE_PIPE] = ACTIONS(1594),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1594),
@@ -39231,6 +39656,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1534),
     [anon_sym_LT_EQ] = ACTIONS(1534),
     [anon_sym_LT_EQ_GT] = ACTIONS(1534),
+    [anon_sym_LT_GT] = ACTIONS(1534),
     [anon_sym_EQ_EQ] = ACTIONS(1534),
     [anon_sym_GT_EQ] = ACTIONS(1534),
     [anon_sym_GT_GT] = ACTIONS(1534),
@@ -39239,6 +39665,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1534),
     [anon_sym_CARET_EQ] = ACTIONS(1534),
     [anon_sym_PIPE_EQ] = ACTIONS(1534),
+    [anon_sym_PIPE_GT] = ACTIONS(1534),
     [anon_sym_PIPE_PIPE] = ACTIONS(1534),
     [anon_sym_TILDE_PIPE] = ACTIONS(1534),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1534),
@@ -39361,6 +39788,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1586),
     [anon_sym_LT_EQ] = ACTIONS(1586),
     [anon_sym_LT_EQ_GT] = ACTIONS(1586),
+    [anon_sym_LT_GT] = ACTIONS(1586),
     [anon_sym_EQ_EQ] = ACTIONS(1586),
     [anon_sym_GT_EQ] = ACTIONS(1586),
     [anon_sym_GT_GT] = ACTIONS(1586),
@@ -39369,6 +39797,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1586),
     [anon_sym_CARET_EQ] = ACTIONS(1586),
     [anon_sym_PIPE_EQ] = ACTIONS(1586),
+    [anon_sym_PIPE_GT] = ACTIONS(1586),
     [anon_sym_PIPE_PIPE] = ACTIONS(1586),
     [anon_sym_TILDE_PIPE] = ACTIONS(1586),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1586),
@@ -39491,6 +39920,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1590),
     [anon_sym_LT_EQ] = ACTIONS(1590),
     [anon_sym_LT_EQ_GT] = ACTIONS(1590),
+    [anon_sym_LT_GT] = ACTIONS(1590),
     [anon_sym_EQ_EQ] = ACTIONS(1590),
     [anon_sym_GT_EQ] = ACTIONS(1590),
     [anon_sym_GT_GT] = ACTIONS(1590),
@@ -39499,6 +39929,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1590),
     [anon_sym_CARET_EQ] = ACTIONS(1590),
     [anon_sym_PIPE_EQ] = ACTIONS(1590),
+    [anon_sym_PIPE_GT] = ACTIONS(1590),
     [anon_sym_PIPE_PIPE] = ACTIONS(1590),
     [anon_sym_TILDE_PIPE] = ACTIONS(1590),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1590),
@@ -39621,6 +40052,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1592),
     [anon_sym_LT_EQ] = ACTIONS(1592),
     [anon_sym_LT_EQ_GT] = ACTIONS(1592),
+    [anon_sym_LT_GT] = ACTIONS(1592),
     [anon_sym_EQ_EQ] = ACTIONS(1592),
     [anon_sym_GT_EQ] = ACTIONS(1592),
     [anon_sym_GT_GT] = ACTIONS(1592),
@@ -39629,6 +40061,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1592),
     [anon_sym_CARET_EQ] = ACTIONS(1592),
     [anon_sym_PIPE_EQ] = ACTIONS(1592),
+    [anon_sym_PIPE_GT] = ACTIONS(1592),
     [anon_sym_PIPE_PIPE] = ACTIONS(1592),
     [anon_sym_TILDE_PIPE] = ACTIONS(1592),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1592),
@@ -39751,6 +40184,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1590),
     [anon_sym_LT_EQ] = ACTIONS(1590),
     [anon_sym_LT_EQ_GT] = ACTIONS(1590),
+    [anon_sym_LT_GT] = ACTIONS(1590),
     [anon_sym_EQ_EQ] = ACTIONS(1590),
     [anon_sym_GT_EQ] = ACTIONS(1590),
     [anon_sym_GT_GT] = ACTIONS(1590),
@@ -39759,6 +40193,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1590),
     [anon_sym_CARET_EQ] = ACTIONS(1590),
     [anon_sym_PIPE_EQ] = ACTIONS(1590),
+    [anon_sym_PIPE_GT] = ACTIONS(1590),
     [anon_sym_PIPE_PIPE] = ACTIONS(1590),
     [anon_sym_TILDE_PIPE] = ACTIONS(1590),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1590),
@@ -39881,6 +40316,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1534),
     [anon_sym_LT_EQ] = ACTIONS(1534),
     [anon_sym_LT_EQ_GT] = ACTIONS(1534),
+    [anon_sym_LT_GT] = ACTIONS(1534),
     [anon_sym_EQ_EQ] = ACTIONS(1534),
     [anon_sym_GT_EQ] = ACTIONS(1534),
     [anon_sym_GT_GT] = ACTIONS(1534),
@@ -39889,6 +40325,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1534),
     [anon_sym_CARET_EQ] = ACTIONS(1534),
     [anon_sym_PIPE_EQ] = ACTIONS(1534),
+    [anon_sym_PIPE_GT] = ACTIONS(1534),
     [anon_sym_PIPE_PIPE] = ACTIONS(1534),
     [anon_sym_TILDE_PIPE] = ACTIONS(1534),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1534),
@@ -40011,6 +40448,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1552),
     [anon_sym_LT_EQ] = ACTIONS(1552),
     [anon_sym_LT_EQ_GT] = ACTIONS(1552),
+    [anon_sym_LT_GT] = ACTIONS(1552),
     [anon_sym_EQ_EQ] = ACTIONS(1552),
     [anon_sym_GT_EQ] = ACTIONS(1552),
     [anon_sym_GT_GT] = ACTIONS(1552),
@@ -40019,6 +40457,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1552),
     [anon_sym_CARET_EQ] = ACTIONS(1552),
     [anon_sym_PIPE_EQ] = ACTIONS(1552),
+    [anon_sym_PIPE_GT] = ACTIONS(1552),
     [anon_sym_PIPE_PIPE] = ACTIONS(1552),
     [anon_sym_TILDE_PIPE] = ACTIONS(1552),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1552),
@@ -40141,6 +40580,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1574),
     [anon_sym_LT_EQ] = ACTIONS(1574),
     [anon_sym_LT_EQ_GT] = ACTIONS(1574),
+    [anon_sym_LT_GT] = ACTIONS(1574),
     [anon_sym_EQ_EQ] = ACTIONS(1574),
     [anon_sym_GT_EQ] = ACTIONS(1574),
     [anon_sym_GT_GT] = ACTIONS(1574),
@@ -40149,6 +40589,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1574),
     [anon_sym_CARET_EQ] = ACTIONS(1574),
     [anon_sym_PIPE_EQ] = ACTIONS(1574),
+    [anon_sym_PIPE_GT] = ACTIONS(1574),
     [anon_sym_PIPE_PIPE] = ACTIONS(1574),
     [anon_sym_TILDE_PIPE] = ACTIONS(1574),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1574),
@@ -40271,6 +40712,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1556),
     [anon_sym_LT_EQ] = ACTIONS(1556),
     [anon_sym_LT_EQ_GT] = ACTIONS(1556),
+    [anon_sym_LT_GT] = ACTIONS(1556),
     [anon_sym_EQ_EQ] = ACTIONS(1556),
     [anon_sym_GT_EQ] = ACTIONS(1556),
     [anon_sym_GT_GT] = ACTIONS(1556),
@@ -40279,6 +40721,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1556),
     [anon_sym_CARET_EQ] = ACTIONS(1556),
     [anon_sym_PIPE_EQ] = ACTIONS(1556),
+    [anon_sym_PIPE_GT] = ACTIONS(1556),
     [anon_sym_PIPE_PIPE] = ACTIONS(1556),
     [anon_sym_TILDE_PIPE] = ACTIONS(1556),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1556),
@@ -40401,6 +40844,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1560),
     [anon_sym_LT_EQ] = ACTIONS(1560),
     [anon_sym_LT_EQ_GT] = ACTIONS(1560),
+    [anon_sym_LT_GT] = ACTIONS(1560),
     [anon_sym_EQ_EQ] = ACTIONS(1560),
     [anon_sym_GT_EQ] = ACTIONS(1560),
     [anon_sym_GT_GT] = ACTIONS(1560),
@@ -40409,6 +40853,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1560),
     [anon_sym_CARET_EQ] = ACTIONS(1560),
     [anon_sym_PIPE_EQ] = ACTIONS(1560),
+    [anon_sym_PIPE_GT] = ACTIONS(1560),
     [anon_sym_PIPE_PIPE] = ACTIONS(1560),
     [anon_sym_TILDE_PIPE] = ACTIONS(1560),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1560),
@@ -40531,6 +40976,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1562),
     [anon_sym_LT_EQ] = ACTIONS(1562),
     [anon_sym_LT_EQ_GT] = ACTIONS(1562),
+    [anon_sym_LT_GT] = ACTIONS(1562),
     [anon_sym_EQ_EQ] = ACTIONS(1562),
     [anon_sym_GT_EQ] = ACTIONS(1562),
     [anon_sym_GT_GT] = ACTIONS(1562),
@@ -40539,6 +40985,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1562),
     [anon_sym_CARET_EQ] = ACTIONS(1562),
     [anon_sym_PIPE_EQ] = ACTIONS(1562),
+    [anon_sym_PIPE_GT] = ACTIONS(1562),
     [anon_sym_PIPE_PIPE] = ACTIONS(1562),
     [anon_sym_TILDE_PIPE] = ACTIONS(1562),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1562),
@@ -40661,6 +41108,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1566),
     [anon_sym_LT_EQ] = ACTIONS(1566),
     [anon_sym_LT_EQ_GT] = ACTIONS(1566),
+    [anon_sym_LT_GT] = ACTIONS(1566),
     [anon_sym_EQ_EQ] = ACTIONS(1566),
     [anon_sym_GT_EQ] = ACTIONS(1566),
     [anon_sym_GT_GT] = ACTIONS(1566),
@@ -40669,6 +41117,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1566),
     [anon_sym_CARET_EQ] = ACTIONS(1566),
     [anon_sym_PIPE_EQ] = ACTIONS(1566),
+    [anon_sym_PIPE_GT] = ACTIONS(1566),
     [anon_sym_PIPE_PIPE] = ACTIONS(1566),
     [anon_sym_TILDE_PIPE] = ACTIONS(1566),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1566),
@@ -40791,6 +41240,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1570),
     [anon_sym_LT_EQ] = ACTIONS(1570),
     [anon_sym_LT_EQ_GT] = ACTIONS(1570),
+    [anon_sym_LT_GT] = ACTIONS(1570),
     [anon_sym_EQ_EQ] = ACTIONS(1570),
     [anon_sym_GT_EQ] = ACTIONS(1570),
     [anon_sym_GT_GT] = ACTIONS(1570),
@@ -40799,6 +41249,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1570),
     [anon_sym_CARET_EQ] = ACTIONS(1570),
     [anon_sym_PIPE_EQ] = ACTIONS(1570),
+    [anon_sym_PIPE_GT] = ACTIONS(1570),
     [anon_sym_PIPE_PIPE] = ACTIONS(1570),
     [anon_sym_TILDE_PIPE] = ACTIONS(1570),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1570),
@@ -40921,6 +41372,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1572),
     [anon_sym_LT_EQ] = ACTIONS(1572),
     [anon_sym_LT_EQ_GT] = ACTIONS(1572),
+    [anon_sym_LT_GT] = ACTIONS(1572),
     [anon_sym_EQ_EQ] = ACTIONS(1572),
     [anon_sym_GT_EQ] = ACTIONS(1572),
     [anon_sym_GT_GT] = ACTIONS(1572),
@@ -40929,6 +41381,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1572),
     [anon_sym_CARET_EQ] = ACTIONS(1572),
     [anon_sym_PIPE_EQ] = ACTIONS(1572),
+    [anon_sym_PIPE_GT] = ACTIONS(1572),
     [anon_sym_PIPE_PIPE] = ACTIONS(1572),
     [anon_sym_TILDE_PIPE] = ACTIONS(1572),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1572),
@@ -41051,6 +41504,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1574),
     [anon_sym_LT_EQ] = ACTIONS(1574),
     [anon_sym_LT_EQ_GT] = ACTIONS(1574),
+    [anon_sym_LT_GT] = ACTIONS(1574),
     [anon_sym_EQ_EQ] = ACTIONS(1574),
     [anon_sym_GT_EQ] = ACTIONS(1574),
     [anon_sym_GT_GT] = ACTIONS(1574),
@@ -41059,6 +41513,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1574),
     [anon_sym_CARET_EQ] = ACTIONS(1574),
     [anon_sym_PIPE_EQ] = ACTIONS(1574),
+    [anon_sym_PIPE_GT] = ACTIONS(1574),
     [anon_sym_PIPE_PIPE] = ACTIONS(1574),
     [anon_sym_TILDE_PIPE] = ACTIONS(1574),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1574),
@@ -41181,6 +41636,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1578),
     [anon_sym_LT_EQ] = ACTIONS(1578),
     [anon_sym_LT_EQ_GT] = ACTIONS(1578),
+    [anon_sym_LT_GT] = ACTIONS(1578),
     [anon_sym_EQ_EQ] = ACTIONS(1578),
     [anon_sym_GT_EQ] = ACTIONS(1578),
     [anon_sym_GT_GT] = ACTIONS(1578),
@@ -41189,6 +41645,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1578),
     [anon_sym_CARET_EQ] = ACTIONS(1578),
     [anon_sym_PIPE_EQ] = ACTIONS(1578),
+    [anon_sym_PIPE_GT] = ACTIONS(1578),
     [anon_sym_PIPE_PIPE] = ACTIONS(1578),
     [anon_sym_TILDE_PIPE] = ACTIONS(1578),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1578),
@@ -41311,6 +41768,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1582),
     [anon_sym_LT_EQ] = ACTIONS(1582),
     [anon_sym_LT_EQ_GT] = ACTIONS(1582),
+    [anon_sym_LT_GT] = ACTIONS(1582),
     [anon_sym_EQ_EQ] = ACTIONS(1582),
     [anon_sym_GT_EQ] = ACTIONS(1582),
     [anon_sym_GT_GT] = ACTIONS(1582),
@@ -41319,6 +41777,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1582),
     [anon_sym_CARET_EQ] = ACTIONS(1582),
     [anon_sym_PIPE_EQ] = ACTIONS(1582),
+    [anon_sym_PIPE_GT] = ACTIONS(1582),
     [anon_sym_PIPE_PIPE] = ACTIONS(1582),
     [anon_sym_TILDE_PIPE] = ACTIONS(1582),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1582),
@@ -41441,6 +41900,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1584),
     [anon_sym_LT_EQ] = ACTIONS(1584),
     [anon_sym_LT_EQ_GT] = ACTIONS(1584),
+    [anon_sym_LT_GT] = ACTIONS(1584),
     [anon_sym_EQ_EQ] = ACTIONS(1584),
     [anon_sym_GT_EQ] = ACTIONS(1584),
     [anon_sym_GT_GT] = ACTIONS(1584),
@@ -41449,6 +41909,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1584),
     [anon_sym_CARET_EQ] = ACTIONS(1584),
     [anon_sym_PIPE_EQ] = ACTIONS(1584),
+    [anon_sym_PIPE_GT] = ACTIONS(1584),
     [anon_sym_PIPE_PIPE] = ACTIONS(1584),
     [anon_sym_TILDE_PIPE] = ACTIONS(1584),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1584),
@@ -41571,6 +42032,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1586),
     [anon_sym_LT_EQ] = ACTIONS(1586),
     [anon_sym_LT_EQ_GT] = ACTIONS(1586),
+    [anon_sym_LT_GT] = ACTIONS(1586),
     [anon_sym_EQ_EQ] = ACTIONS(1586),
     [anon_sym_GT_EQ] = ACTIONS(1586),
     [anon_sym_GT_GT] = ACTIONS(1586),
@@ -41579,6 +42041,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1586),
     [anon_sym_CARET_EQ] = ACTIONS(1586),
     [anon_sym_PIPE_EQ] = ACTIONS(1586),
+    [anon_sym_PIPE_GT] = ACTIONS(1586),
     [anon_sym_PIPE_PIPE] = ACTIONS(1586),
     [anon_sym_TILDE_PIPE] = ACTIONS(1586),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1586),
@@ -41701,6 +42164,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1590),
     [anon_sym_LT_EQ] = ACTIONS(1590),
     [anon_sym_LT_EQ_GT] = ACTIONS(1590),
+    [anon_sym_LT_GT] = ACTIONS(1590),
     [anon_sym_EQ_EQ] = ACTIONS(1590),
     [anon_sym_GT_EQ] = ACTIONS(1590),
     [anon_sym_GT_GT] = ACTIONS(1590),
@@ -41709,6 +42173,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1590),
     [anon_sym_CARET_EQ] = ACTIONS(1590),
     [anon_sym_PIPE_EQ] = ACTIONS(1590),
+    [anon_sym_PIPE_GT] = ACTIONS(1590),
     [anon_sym_PIPE_PIPE] = ACTIONS(1590),
     [anon_sym_TILDE_PIPE] = ACTIONS(1590),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1590),
@@ -41831,6 +42296,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1592),
     [anon_sym_LT_EQ] = ACTIONS(1592),
     [anon_sym_LT_EQ_GT] = ACTIONS(1592),
+    [anon_sym_LT_GT] = ACTIONS(1592),
     [anon_sym_EQ_EQ] = ACTIONS(1592),
     [anon_sym_GT_EQ] = ACTIONS(1592),
     [anon_sym_GT_GT] = ACTIONS(1592),
@@ -41839,6 +42305,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1592),
     [anon_sym_CARET_EQ] = ACTIONS(1592),
     [anon_sym_PIPE_EQ] = ACTIONS(1592),
+    [anon_sym_PIPE_GT] = ACTIONS(1592),
     [anon_sym_PIPE_PIPE] = ACTIONS(1592),
     [anon_sym_TILDE_PIPE] = ACTIONS(1592),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1592),
@@ -41961,6 +42428,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1594),
     [anon_sym_LT_EQ] = ACTIONS(1594),
     [anon_sym_LT_EQ_GT] = ACTIONS(1594),
+    [anon_sym_LT_GT] = ACTIONS(1594),
     [anon_sym_EQ_EQ] = ACTIONS(1594),
     [anon_sym_GT_EQ] = ACTIONS(1594),
     [anon_sym_GT_GT] = ACTIONS(1594),
@@ -41969,6 +42437,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1594),
     [anon_sym_CARET_EQ] = ACTIONS(1594),
     [anon_sym_PIPE_EQ] = ACTIONS(1594),
+    [anon_sym_PIPE_GT] = ACTIONS(1594),
     [anon_sym_PIPE_PIPE] = ACTIONS(1594),
     [anon_sym_TILDE_PIPE] = ACTIONS(1594),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1594),
@@ -42091,6 +42560,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1534),
     [anon_sym_LT_EQ] = ACTIONS(1534),
     [anon_sym_LT_EQ_GT] = ACTIONS(1534),
+    [anon_sym_LT_GT] = ACTIONS(1534),
     [anon_sym_EQ_EQ] = ACTIONS(1534),
     [anon_sym_GT_EQ] = ACTIONS(1534),
     [anon_sym_GT_GT] = ACTIONS(1534),
@@ -42099,6 +42569,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1534),
     [anon_sym_CARET_EQ] = ACTIONS(1534),
     [anon_sym_PIPE_EQ] = ACTIONS(1534),
+    [anon_sym_PIPE_GT] = ACTIONS(1534),
     [anon_sym_PIPE_PIPE] = ACTIONS(1534),
     [anon_sym_TILDE_PIPE] = ACTIONS(1534),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1534),
@@ -42221,6 +42692,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1552),
     [anon_sym_LT_EQ] = ACTIONS(1552),
     [anon_sym_LT_EQ_GT] = ACTIONS(1552),
+    [anon_sym_LT_GT] = ACTIONS(1552),
     [anon_sym_EQ_EQ] = ACTIONS(1552),
     [anon_sym_GT_EQ] = ACTIONS(1552),
     [anon_sym_GT_GT] = ACTIONS(1552),
@@ -42229,6 +42701,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1552),
     [anon_sym_CARET_EQ] = ACTIONS(1552),
     [anon_sym_PIPE_EQ] = ACTIONS(1552),
+    [anon_sym_PIPE_GT] = ACTIONS(1552),
     [anon_sym_PIPE_PIPE] = ACTIONS(1552),
     [anon_sym_TILDE_PIPE] = ACTIONS(1552),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1552),
@@ -42351,6 +42824,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1556),
     [anon_sym_LT_EQ] = ACTIONS(1556),
     [anon_sym_LT_EQ_GT] = ACTIONS(1556),
+    [anon_sym_LT_GT] = ACTIONS(1556),
     [anon_sym_EQ_EQ] = ACTIONS(1556),
     [anon_sym_GT_EQ] = ACTIONS(1556),
     [anon_sym_GT_GT] = ACTIONS(1556),
@@ -42359,6 +42833,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1556),
     [anon_sym_CARET_EQ] = ACTIONS(1556),
     [anon_sym_PIPE_EQ] = ACTIONS(1556),
+    [anon_sym_PIPE_GT] = ACTIONS(1556),
     [anon_sym_PIPE_PIPE] = ACTIONS(1556),
     [anon_sym_TILDE_PIPE] = ACTIONS(1556),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1556),
@@ -42481,6 +42956,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1560),
     [anon_sym_LT_EQ] = ACTIONS(1560),
     [anon_sym_LT_EQ_GT] = ACTIONS(1560),
+    [anon_sym_LT_GT] = ACTIONS(1560),
     [anon_sym_EQ_EQ] = ACTIONS(1560),
     [anon_sym_GT_EQ] = ACTIONS(1560),
     [anon_sym_GT_GT] = ACTIONS(1560),
@@ -42489,6 +42965,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1560),
     [anon_sym_CARET_EQ] = ACTIONS(1560),
     [anon_sym_PIPE_EQ] = ACTIONS(1560),
+    [anon_sym_PIPE_GT] = ACTIONS(1560),
     [anon_sym_PIPE_PIPE] = ACTIONS(1560),
     [anon_sym_TILDE_PIPE] = ACTIONS(1560),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1560),
@@ -42611,6 +43088,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1562),
     [anon_sym_LT_EQ] = ACTIONS(1562),
     [anon_sym_LT_EQ_GT] = ACTIONS(1562),
+    [anon_sym_LT_GT] = ACTIONS(1562),
     [anon_sym_EQ_EQ] = ACTIONS(1562),
     [anon_sym_GT_EQ] = ACTIONS(1562),
     [anon_sym_GT_GT] = ACTIONS(1562),
@@ -42619,6 +43097,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1562),
     [anon_sym_CARET_EQ] = ACTIONS(1562),
     [anon_sym_PIPE_EQ] = ACTIONS(1562),
+    [anon_sym_PIPE_GT] = ACTIONS(1562),
     [anon_sym_PIPE_PIPE] = ACTIONS(1562),
     [anon_sym_TILDE_PIPE] = ACTIONS(1562),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1562),
@@ -42741,6 +43220,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1566),
     [anon_sym_LT_EQ] = ACTIONS(1566),
     [anon_sym_LT_EQ_GT] = ACTIONS(1566),
+    [anon_sym_LT_GT] = ACTIONS(1566),
     [anon_sym_EQ_EQ] = ACTIONS(1566),
     [anon_sym_GT_EQ] = ACTIONS(1566),
     [anon_sym_GT_GT] = ACTIONS(1566),
@@ -42749,6 +43229,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1566),
     [anon_sym_CARET_EQ] = ACTIONS(1566),
     [anon_sym_PIPE_EQ] = ACTIONS(1566),
+    [anon_sym_PIPE_GT] = ACTIONS(1566),
     [anon_sym_PIPE_PIPE] = ACTIONS(1566),
     [anon_sym_TILDE_PIPE] = ACTIONS(1566),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1566),
@@ -42871,6 +43352,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1570),
     [anon_sym_LT_EQ] = ACTIONS(1570),
     [anon_sym_LT_EQ_GT] = ACTIONS(1570),
+    [anon_sym_LT_GT] = ACTIONS(1570),
     [anon_sym_EQ_EQ] = ACTIONS(1570),
     [anon_sym_GT_EQ] = ACTIONS(1570),
     [anon_sym_GT_GT] = ACTIONS(1570),
@@ -42879,6 +43361,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1570),
     [anon_sym_CARET_EQ] = ACTIONS(1570),
     [anon_sym_PIPE_EQ] = ACTIONS(1570),
+    [anon_sym_PIPE_GT] = ACTIONS(1570),
     [anon_sym_PIPE_PIPE] = ACTIONS(1570),
     [anon_sym_TILDE_PIPE] = ACTIONS(1570),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1570),
@@ -43001,6 +43484,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1572),
     [anon_sym_LT_EQ] = ACTIONS(1572),
     [anon_sym_LT_EQ_GT] = ACTIONS(1572),
+    [anon_sym_LT_GT] = ACTIONS(1572),
     [anon_sym_EQ_EQ] = ACTIONS(1572),
     [anon_sym_GT_EQ] = ACTIONS(1572),
     [anon_sym_GT_GT] = ACTIONS(1572),
@@ -43009,6 +43493,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1572),
     [anon_sym_CARET_EQ] = ACTIONS(1572),
     [anon_sym_PIPE_EQ] = ACTIONS(1572),
+    [anon_sym_PIPE_GT] = ACTIONS(1572),
     [anon_sym_PIPE_PIPE] = ACTIONS(1572),
     [anon_sym_TILDE_PIPE] = ACTIONS(1572),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1572),
@@ -43131,6 +43616,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1574),
     [anon_sym_LT_EQ] = ACTIONS(1574),
     [anon_sym_LT_EQ_GT] = ACTIONS(1574),
+    [anon_sym_LT_GT] = ACTIONS(1574),
     [anon_sym_EQ_EQ] = ACTIONS(1574),
     [anon_sym_GT_EQ] = ACTIONS(1574),
     [anon_sym_GT_GT] = ACTIONS(1574),
@@ -43139,6 +43625,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1574),
     [anon_sym_CARET_EQ] = ACTIONS(1574),
     [anon_sym_PIPE_EQ] = ACTIONS(1574),
+    [anon_sym_PIPE_GT] = ACTIONS(1574),
     [anon_sym_PIPE_PIPE] = ACTIONS(1574),
     [anon_sym_TILDE_PIPE] = ACTIONS(1574),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1574),
@@ -43261,6 +43748,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1578),
     [anon_sym_LT_EQ] = ACTIONS(1578),
     [anon_sym_LT_EQ_GT] = ACTIONS(1578),
+    [anon_sym_LT_GT] = ACTIONS(1578),
     [anon_sym_EQ_EQ] = ACTIONS(1578),
     [anon_sym_GT_EQ] = ACTIONS(1578),
     [anon_sym_GT_GT] = ACTIONS(1578),
@@ -43269,6 +43757,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1578),
     [anon_sym_CARET_EQ] = ACTIONS(1578),
     [anon_sym_PIPE_EQ] = ACTIONS(1578),
+    [anon_sym_PIPE_GT] = ACTIONS(1578),
     [anon_sym_PIPE_PIPE] = ACTIONS(1578),
     [anon_sym_TILDE_PIPE] = ACTIONS(1578),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1578),
@@ -43391,6 +43880,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1582),
     [anon_sym_LT_EQ] = ACTIONS(1582),
     [anon_sym_LT_EQ_GT] = ACTIONS(1582),
+    [anon_sym_LT_GT] = ACTIONS(1582),
     [anon_sym_EQ_EQ] = ACTIONS(1582),
     [anon_sym_GT_EQ] = ACTIONS(1582),
     [anon_sym_GT_GT] = ACTIONS(1582),
@@ -43399,6 +43889,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1582),
     [anon_sym_CARET_EQ] = ACTIONS(1582),
     [anon_sym_PIPE_EQ] = ACTIONS(1582),
+    [anon_sym_PIPE_GT] = ACTIONS(1582),
     [anon_sym_PIPE_PIPE] = ACTIONS(1582),
     [anon_sym_TILDE_PIPE] = ACTIONS(1582),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1582),
@@ -43521,6 +44012,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1584),
     [anon_sym_LT_EQ] = ACTIONS(1584),
     [anon_sym_LT_EQ_GT] = ACTIONS(1584),
+    [anon_sym_LT_GT] = ACTIONS(1584),
     [anon_sym_EQ_EQ] = ACTIONS(1584),
     [anon_sym_GT_EQ] = ACTIONS(1584),
     [anon_sym_GT_GT] = ACTIONS(1584),
@@ -43529,6 +44021,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1584),
     [anon_sym_CARET_EQ] = ACTIONS(1584),
     [anon_sym_PIPE_EQ] = ACTIONS(1584),
+    [anon_sym_PIPE_GT] = ACTIONS(1584),
     [anon_sym_PIPE_PIPE] = ACTIONS(1584),
     [anon_sym_TILDE_PIPE] = ACTIONS(1584),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1584),
@@ -43651,6 +44144,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1586),
     [anon_sym_LT_EQ] = ACTIONS(1586),
     [anon_sym_LT_EQ_GT] = ACTIONS(1586),
+    [anon_sym_LT_GT] = ACTIONS(1586),
     [anon_sym_EQ_EQ] = ACTIONS(1586),
     [anon_sym_GT_EQ] = ACTIONS(1586),
     [anon_sym_GT_GT] = ACTIONS(1586),
@@ -43659,6 +44153,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1586),
     [anon_sym_CARET_EQ] = ACTIONS(1586),
     [anon_sym_PIPE_EQ] = ACTIONS(1586),
+    [anon_sym_PIPE_GT] = ACTIONS(1586),
     [anon_sym_PIPE_PIPE] = ACTIONS(1586),
     [anon_sym_TILDE_PIPE] = ACTIONS(1586),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1586),
@@ -43781,6 +44276,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1590),
     [anon_sym_LT_EQ] = ACTIONS(1590),
     [anon_sym_LT_EQ_GT] = ACTIONS(1590),
+    [anon_sym_LT_GT] = ACTIONS(1590),
     [anon_sym_EQ_EQ] = ACTIONS(1590),
     [anon_sym_GT_EQ] = ACTIONS(1590),
     [anon_sym_GT_GT] = ACTIONS(1590),
@@ -43789,6 +44285,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1590),
     [anon_sym_CARET_EQ] = ACTIONS(1590),
     [anon_sym_PIPE_EQ] = ACTIONS(1590),
+    [anon_sym_PIPE_GT] = ACTIONS(1590),
     [anon_sym_PIPE_PIPE] = ACTIONS(1590),
     [anon_sym_TILDE_PIPE] = ACTIONS(1590),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1590),
@@ -43911,6 +44408,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1592),
     [anon_sym_LT_EQ] = ACTIONS(1592),
     [anon_sym_LT_EQ_GT] = ACTIONS(1592),
+    [anon_sym_LT_GT] = ACTIONS(1592),
     [anon_sym_EQ_EQ] = ACTIONS(1592),
     [anon_sym_GT_EQ] = ACTIONS(1592),
     [anon_sym_GT_GT] = ACTIONS(1592),
@@ -43919,6 +44417,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1592),
     [anon_sym_CARET_EQ] = ACTIONS(1592),
     [anon_sym_PIPE_EQ] = ACTIONS(1592),
+    [anon_sym_PIPE_GT] = ACTIONS(1592),
     [anon_sym_PIPE_PIPE] = ACTIONS(1592),
     [anon_sym_TILDE_PIPE] = ACTIONS(1592),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1592),
@@ -44041,6 +44540,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1594),
     [anon_sym_LT_EQ] = ACTIONS(1594),
     [anon_sym_LT_EQ_GT] = ACTIONS(1594),
+    [anon_sym_LT_GT] = ACTIONS(1594),
     [anon_sym_EQ_EQ] = ACTIONS(1594),
     [anon_sym_GT_EQ] = ACTIONS(1594),
     [anon_sym_GT_GT] = ACTIONS(1594),
@@ -44049,6 +44549,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1594),
     [anon_sym_CARET_EQ] = ACTIONS(1594),
     [anon_sym_PIPE_EQ] = ACTIONS(1594),
+    [anon_sym_PIPE_GT] = ACTIONS(1594),
     [anon_sym_PIPE_PIPE] = ACTIONS(1594),
     [anon_sym_TILDE_PIPE] = ACTIONS(1594),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1594),
@@ -44171,6 +44672,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1534),
     [anon_sym_LT_EQ] = ACTIONS(1534),
     [anon_sym_LT_EQ_GT] = ACTIONS(1534),
+    [anon_sym_LT_GT] = ACTIONS(1534),
     [anon_sym_EQ_EQ] = ACTIONS(1534),
     [anon_sym_GT_EQ] = ACTIONS(1534),
     [anon_sym_GT_GT] = ACTIONS(1534),
@@ -44179,6 +44681,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1534),
     [anon_sym_CARET_EQ] = ACTIONS(1534),
     [anon_sym_PIPE_EQ] = ACTIONS(1534),
+    [anon_sym_PIPE_GT] = ACTIONS(1534),
     [anon_sym_PIPE_PIPE] = ACTIONS(1534),
     [anon_sym_TILDE_PIPE] = ACTIONS(1534),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1534),
@@ -44301,6 +44804,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1592),
     [anon_sym_LT_EQ] = ACTIONS(1592),
     [anon_sym_LT_EQ_GT] = ACTIONS(1592),
+    [anon_sym_LT_GT] = ACTIONS(1592),
     [anon_sym_EQ_EQ] = ACTIONS(1592),
     [anon_sym_GT_EQ] = ACTIONS(1592),
     [anon_sym_GT_GT] = ACTIONS(1592),
@@ -44309,6 +44813,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1592),
     [anon_sym_CARET_EQ] = ACTIONS(1592),
     [anon_sym_PIPE_EQ] = ACTIONS(1592),
+    [anon_sym_PIPE_GT] = ACTIONS(1592),
     [anon_sym_PIPE_PIPE] = ACTIONS(1592),
     [anon_sym_TILDE_PIPE] = ACTIONS(1592),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1592),
@@ -44431,6 +44936,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1594),
     [anon_sym_LT_EQ] = ACTIONS(1594),
     [anon_sym_LT_EQ_GT] = ACTIONS(1594),
+    [anon_sym_LT_GT] = ACTIONS(1594),
     [anon_sym_EQ_EQ] = ACTIONS(1594),
     [anon_sym_GT_EQ] = ACTIONS(1594),
     [anon_sym_GT_GT] = ACTIONS(1594),
@@ -44439,6 +44945,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1594),
     [anon_sym_CARET_EQ] = ACTIONS(1594),
     [anon_sym_PIPE_EQ] = ACTIONS(1594),
+    [anon_sym_PIPE_GT] = ACTIONS(1594),
     [anon_sym_PIPE_PIPE] = ACTIONS(1594),
     [anon_sym_TILDE_PIPE] = ACTIONS(1594),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1594),
@@ -44561,6 +45068,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1586),
     [anon_sym_LT_EQ] = ACTIONS(1586),
     [anon_sym_LT_EQ_GT] = ACTIONS(1586),
+    [anon_sym_LT_GT] = ACTIONS(1586),
     [anon_sym_EQ_EQ] = ACTIONS(1586),
     [anon_sym_GT_EQ] = ACTIONS(1586),
     [anon_sym_GT_GT] = ACTIONS(1586),
@@ -44569,6 +45077,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1586),
     [anon_sym_CARET_EQ] = ACTIONS(1586),
     [anon_sym_PIPE_EQ] = ACTIONS(1586),
+    [anon_sym_PIPE_GT] = ACTIONS(1586),
     [anon_sym_PIPE_PIPE] = ACTIONS(1586),
     [anon_sym_TILDE_PIPE] = ACTIONS(1586),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1586),
@@ -44691,6 +45200,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1552),
     [anon_sym_LT_EQ] = ACTIONS(1552),
     [anon_sym_LT_EQ_GT] = ACTIONS(1552),
+    [anon_sym_LT_GT] = ACTIONS(1552),
     [anon_sym_EQ_EQ] = ACTIONS(1552),
     [anon_sym_GT_EQ] = ACTIONS(1552),
     [anon_sym_GT_GT] = ACTIONS(1552),
@@ -44699,6 +45209,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1552),
     [anon_sym_CARET_EQ] = ACTIONS(1552),
     [anon_sym_PIPE_EQ] = ACTIONS(1552),
+    [anon_sym_PIPE_GT] = ACTIONS(1552),
     [anon_sym_PIPE_PIPE] = ACTIONS(1552),
     [anon_sym_TILDE_PIPE] = ACTIONS(1552),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1552),
@@ -44821,6 +45332,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1572),
     [anon_sym_LT_EQ] = ACTIONS(1572),
     [anon_sym_LT_EQ_GT] = ACTIONS(1572),
+    [anon_sym_LT_GT] = ACTIONS(1572),
     [anon_sym_EQ_EQ] = ACTIONS(1572),
     [anon_sym_GT_EQ] = ACTIONS(1572),
     [anon_sym_GT_GT] = ACTIONS(1572),
@@ -44829,6 +45341,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1572),
     [anon_sym_CARET_EQ] = ACTIONS(1572),
     [anon_sym_PIPE_EQ] = ACTIONS(1572),
+    [anon_sym_PIPE_GT] = ACTIONS(1572),
     [anon_sym_PIPE_PIPE] = ACTIONS(1572),
     [anon_sym_TILDE_PIPE] = ACTIONS(1572),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1572),
@@ -44951,6 +45464,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1556),
     [anon_sym_LT_EQ] = ACTIONS(1556),
     [anon_sym_LT_EQ_GT] = ACTIONS(1556),
+    [anon_sym_LT_GT] = ACTIONS(1556),
     [anon_sym_EQ_EQ] = ACTIONS(1556),
     [anon_sym_GT_EQ] = ACTIONS(1556),
     [anon_sym_GT_GT] = ACTIONS(1556),
@@ -44959,6 +45473,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1556),
     [anon_sym_CARET_EQ] = ACTIONS(1556),
     [anon_sym_PIPE_EQ] = ACTIONS(1556),
+    [anon_sym_PIPE_GT] = ACTIONS(1556),
     [anon_sym_PIPE_PIPE] = ACTIONS(1556),
     [anon_sym_TILDE_PIPE] = ACTIONS(1556),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1556),
@@ -45081,6 +45596,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1560),
     [anon_sym_LT_EQ] = ACTIONS(1560),
     [anon_sym_LT_EQ_GT] = ACTIONS(1560),
+    [anon_sym_LT_GT] = ACTIONS(1560),
     [anon_sym_EQ_EQ] = ACTIONS(1560),
     [anon_sym_GT_EQ] = ACTIONS(1560),
     [anon_sym_GT_GT] = ACTIONS(1560),
@@ -45089,6 +45605,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1560),
     [anon_sym_CARET_EQ] = ACTIONS(1560),
     [anon_sym_PIPE_EQ] = ACTIONS(1560),
+    [anon_sym_PIPE_GT] = ACTIONS(1560),
     [anon_sym_PIPE_PIPE] = ACTIONS(1560),
     [anon_sym_TILDE_PIPE] = ACTIONS(1560),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1560),
@@ -45211,6 +45728,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1562),
     [anon_sym_LT_EQ] = ACTIONS(1562),
     [anon_sym_LT_EQ_GT] = ACTIONS(1562),
+    [anon_sym_LT_GT] = ACTIONS(1562),
     [anon_sym_EQ_EQ] = ACTIONS(1562),
     [anon_sym_GT_EQ] = ACTIONS(1562),
     [anon_sym_GT_GT] = ACTIONS(1562),
@@ -45219,6 +45737,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1562),
     [anon_sym_CARET_EQ] = ACTIONS(1562),
     [anon_sym_PIPE_EQ] = ACTIONS(1562),
+    [anon_sym_PIPE_GT] = ACTIONS(1562),
     [anon_sym_PIPE_PIPE] = ACTIONS(1562),
     [anon_sym_TILDE_PIPE] = ACTIONS(1562),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1562),
@@ -45340,6 +45859,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1725),
     [anon_sym_LT_EQ] = ACTIONS(1725),
     [anon_sym_LT_EQ_GT] = ACTIONS(1725),
+    [anon_sym_LT_GT] = ACTIONS(1725),
     [anon_sym_EQ_EQ] = ACTIONS(1725),
     [anon_sym_GT_EQ] = ACTIONS(1725),
     [anon_sym_GT_GT] = ACTIONS(1725),
@@ -45348,6 +45868,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1725),
     [anon_sym_CARET_EQ] = ACTIONS(1725),
     [anon_sym_PIPE_EQ] = ACTIONS(1725),
+    [anon_sym_PIPE_GT] = ACTIONS(1725),
     [anon_sym_PIPE_PIPE] = ACTIONS(1725),
     [anon_sym_TILDE_PIPE] = ACTIONS(1725),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1725),
@@ -45471,6 +45992,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1566),
     [anon_sym_LT_EQ] = ACTIONS(1566),
     [anon_sym_LT_EQ_GT] = ACTIONS(1566),
+    [anon_sym_LT_GT] = ACTIONS(1566),
     [anon_sym_EQ_EQ] = ACTIONS(1566),
     [anon_sym_GT_EQ] = ACTIONS(1566),
     [anon_sym_GT_GT] = ACTIONS(1566),
@@ -45479,6 +46001,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1566),
     [anon_sym_CARET_EQ] = ACTIONS(1566),
     [anon_sym_PIPE_EQ] = ACTIONS(1566),
+    [anon_sym_PIPE_GT] = ACTIONS(1566),
     [anon_sym_PIPE_PIPE] = ACTIONS(1566),
     [anon_sym_TILDE_PIPE] = ACTIONS(1566),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1566),
@@ -45601,6 +46124,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1570),
     [anon_sym_LT_EQ] = ACTIONS(1570),
     [anon_sym_LT_EQ_GT] = ACTIONS(1570),
+    [anon_sym_LT_GT] = ACTIONS(1570),
     [anon_sym_EQ_EQ] = ACTIONS(1570),
     [anon_sym_GT_EQ] = ACTIONS(1570),
     [anon_sym_GT_GT] = ACTIONS(1570),
@@ -45609,6 +46133,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1570),
     [anon_sym_CARET_EQ] = ACTIONS(1570),
     [anon_sym_PIPE_EQ] = ACTIONS(1570),
+    [anon_sym_PIPE_GT] = ACTIONS(1570),
     [anon_sym_PIPE_PIPE] = ACTIONS(1570),
     [anon_sym_TILDE_PIPE] = ACTIONS(1570),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1570),
@@ -45731,6 +46256,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1572),
     [anon_sym_LT_EQ] = ACTIONS(1572),
     [anon_sym_LT_EQ_GT] = ACTIONS(1572),
+    [anon_sym_LT_GT] = ACTIONS(1572),
     [anon_sym_EQ_EQ] = ACTIONS(1572),
     [anon_sym_GT_EQ] = ACTIONS(1572),
     [anon_sym_GT_GT] = ACTIONS(1572),
@@ -45739,6 +46265,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1572),
     [anon_sym_CARET_EQ] = ACTIONS(1572),
     [anon_sym_PIPE_EQ] = ACTIONS(1572),
+    [anon_sym_PIPE_GT] = ACTIONS(1572),
     [anon_sym_PIPE_PIPE] = ACTIONS(1572),
     [anon_sym_TILDE_PIPE] = ACTIONS(1572),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1572),
@@ -45861,6 +46388,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1574),
     [anon_sym_LT_EQ] = ACTIONS(1574),
     [anon_sym_LT_EQ_GT] = ACTIONS(1574),
+    [anon_sym_LT_GT] = ACTIONS(1574),
     [anon_sym_EQ_EQ] = ACTIONS(1574),
     [anon_sym_GT_EQ] = ACTIONS(1574),
     [anon_sym_GT_GT] = ACTIONS(1574),
@@ -45869,6 +46397,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1574),
     [anon_sym_CARET_EQ] = ACTIONS(1574),
     [anon_sym_PIPE_EQ] = ACTIONS(1574),
+    [anon_sym_PIPE_GT] = ACTIONS(1574),
     [anon_sym_PIPE_PIPE] = ACTIONS(1574),
     [anon_sym_TILDE_PIPE] = ACTIONS(1574),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1574),
@@ -45991,6 +46520,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1578),
     [anon_sym_LT_EQ] = ACTIONS(1578),
     [anon_sym_LT_EQ_GT] = ACTIONS(1578),
+    [anon_sym_LT_GT] = ACTIONS(1578),
     [anon_sym_EQ_EQ] = ACTIONS(1578),
     [anon_sym_GT_EQ] = ACTIONS(1578),
     [anon_sym_GT_GT] = ACTIONS(1578),
@@ -45999,6 +46529,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1578),
     [anon_sym_CARET_EQ] = ACTIONS(1578),
     [anon_sym_PIPE_EQ] = ACTIONS(1578),
+    [anon_sym_PIPE_GT] = ACTIONS(1578),
     [anon_sym_PIPE_PIPE] = ACTIONS(1578),
     [anon_sym_TILDE_PIPE] = ACTIONS(1578),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1578),
@@ -46121,6 +46652,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1582),
     [anon_sym_LT_EQ] = ACTIONS(1582),
     [anon_sym_LT_EQ_GT] = ACTIONS(1582),
+    [anon_sym_LT_GT] = ACTIONS(1582),
     [anon_sym_EQ_EQ] = ACTIONS(1582),
     [anon_sym_GT_EQ] = ACTIONS(1582),
     [anon_sym_GT_GT] = ACTIONS(1582),
@@ -46129,6 +46661,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1582),
     [anon_sym_CARET_EQ] = ACTIONS(1582),
     [anon_sym_PIPE_EQ] = ACTIONS(1582),
+    [anon_sym_PIPE_GT] = ACTIONS(1582),
     [anon_sym_PIPE_PIPE] = ACTIONS(1582),
     [anon_sym_TILDE_PIPE] = ACTIONS(1582),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1582),
@@ -46251,6 +46784,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1584),
     [anon_sym_LT_EQ] = ACTIONS(1584),
     [anon_sym_LT_EQ_GT] = ACTIONS(1584),
+    [anon_sym_LT_GT] = ACTIONS(1584),
     [anon_sym_EQ_EQ] = ACTIONS(1584),
     [anon_sym_GT_EQ] = ACTIONS(1584),
     [anon_sym_GT_GT] = ACTIONS(1584),
@@ -46259,6 +46793,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1584),
     [anon_sym_CARET_EQ] = ACTIONS(1584),
     [anon_sym_PIPE_EQ] = ACTIONS(1584),
+    [anon_sym_PIPE_GT] = ACTIONS(1584),
     [anon_sym_PIPE_PIPE] = ACTIONS(1584),
     [anon_sym_TILDE_PIPE] = ACTIONS(1584),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1584),
@@ -46381,6 +46916,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1552),
     [anon_sym_LT_EQ] = ACTIONS(1552),
     [anon_sym_LT_EQ_GT] = ACTIONS(1552),
+    [anon_sym_LT_GT] = ACTIONS(1552),
     [anon_sym_EQ_EQ] = ACTIONS(1552),
     [anon_sym_GT_EQ] = ACTIONS(1552),
     [anon_sym_GT_GT] = ACTIONS(1552),
@@ -46389,6 +46925,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1552),
     [anon_sym_CARET_EQ] = ACTIONS(1552),
     [anon_sym_PIPE_EQ] = ACTIONS(1552),
+    [anon_sym_PIPE_GT] = ACTIONS(1552),
     [anon_sym_PIPE_PIPE] = ACTIONS(1552),
     [anon_sym_TILDE_PIPE] = ACTIONS(1552),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1552),
@@ -46511,6 +47048,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1578),
     [anon_sym_LT_EQ] = ACTIONS(1578),
     [anon_sym_LT_EQ_GT] = ACTIONS(1578),
+    [anon_sym_LT_GT] = ACTIONS(1578),
     [anon_sym_EQ_EQ] = ACTIONS(1578),
     [anon_sym_GT_EQ] = ACTIONS(1578),
     [anon_sym_GT_GT] = ACTIONS(1578),
@@ -46519,6 +47057,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1578),
     [anon_sym_CARET_EQ] = ACTIONS(1578),
     [anon_sym_PIPE_EQ] = ACTIONS(1578),
+    [anon_sym_PIPE_GT] = ACTIONS(1578),
     [anon_sym_PIPE_PIPE] = ACTIONS(1578),
     [anon_sym_TILDE_PIPE] = ACTIONS(1578),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1578),
@@ -46641,6 +47180,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1582),
     [anon_sym_LT_EQ] = ACTIONS(1582),
     [anon_sym_LT_EQ_GT] = ACTIONS(1582),
+    [anon_sym_LT_GT] = ACTIONS(1582),
     [anon_sym_EQ_EQ] = ACTIONS(1582),
     [anon_sym_GT_EQ] = ACTIONS(1582),
     [anon_sym_GT_GT] = ACTIONS(1582),
@@ -46649,6 +47189,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1582),
     [anon_sym_CARET_EQ] = ACTIONS(1582),
     [anon_sym_PIPE_EQ] = ACTIONS(1582),
+    [anon_sym_PIPE_GT] = ACTIONS(1582),
     [anon_sym_PIPE_PIPE] = ACTIONS(1582),
     [anon_sym_TILDE_PIPE] = ACTIONS(1582),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1582),
@@ -46771,6 +47312,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1584),
     [anon_sym_LT_EQ] = ACTIONS(1584),
     [anon_sym_LT_EQ_GT] = ACTIONS(1584),
+    [anon_sym_LT_GT] = ACTIONS(1584),
     [anon_sym_EQ_EQ] = ACTIONS(1584),
     [anon_sym_GT_EQ] = ACTIONS(1584),
     [anon_sym_GT_GT] = ACTIONS(1584),
@@ -46779,6 +47321,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1584),
     [anon_sym_CARET_EQ] = ACTIONS(1584),
     [anon_sym_PIPE_EQ] = ACTIONS(1584),
+    [anon_sym_PIPE_GT] = ACTIONS(1584),
     [anon_sym_PIPE_PIPE] = ACTIONS(1584),
     [anon_sym_TILDE_PIPE] = ACTIONS(1584),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1584),
@@ -46901,6 +47444,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1586),
     [anon_sym_LT_EQ] = ACTIONS(1586),
     [anon_sym_LT_EQ_GT] = ACTIONS(1586),
+    [anon_sym_LT_GT] = ACTIONS(1586),
     [anon_sym_EQ_EQ] = ACTIONS(1586),
     [anon_sym_GT_EQ] = ACTIONS(1586),
     [anon_sym_GT_GT] = ACTIONS(1586),
@@ -46909,6 +47453,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1586),
     [anon_sym_CARET_EQ] = ACTIONS(1586),
     [anon_sym_PIPE_EQ] = ACTIONS(1586),
+    [anon_sym_PIPE_GT] = ACTIONS(1586),
     [anon_sym_PIPE_PIPE] = ACTIONS(1586),
     [anon_sym_TILDE_PIPE] = ACTIONS(1586),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1586),
@@ -47031,6 +47576,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1590),
     [anon_sym_LT_EQ] = ACTIONS(1590),
     [anon_sym_LT_EQ_GT] = ACTIONS(1590),
+    [anon_sym_LT_GT] = ACTIONS(1590),
     [anon_sym_EQ_EQ] = ACTIONS(1590),
     [anon_sym_GT_EQ] = ACTIONS(1590),
     [anon_sym_GT_GT] = ACTIONS(1590),
@@ -47039,6 +47585,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1590),
     [anon_sym_CARET_EQ] = ACTIONS(1590),
     [anon_sym_PIPE_EQ] = ACTIONS(1590),
+    [anon_sym_PIPE_GT] = ACTIONS(1590),
     [anon_sym_PIPE_PIPE] = ACTIONS(1590),
     [anon_sym_TILDE_PIPE] = ACTIONS(1590),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1590),
@@ -47161,6 +47708,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1592),
     [anon_sym_LT_EQ] = ACTIONS(1592),
     [anon_sym_LT_EQ_GT] = ACTIONS(1592),
+    [anon_sym_LT_GT] = ACTIONS(1592),
     [anon_sym_EQ_EQ] = ACTIONS(1592),
     [anon_sym_GT_EQ] = ACTIONS(1592),
     [anon_sym_GT_GT] = ACTIONS(1592),
@@ -47169,6 +47717,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1592),
     [anon_sym_CARET_EQ] = ACTIONS(1592),
     [anon_sym_PIPE_EQ] = ACTIONS(1592),
+    [anon_sym_PIPE_GT] = ACTIONS(1592),
     [anon_sym_PIPE_PIPE] = ACTIONS(1592),
     [anon_sym_TILDE_PIPE] = ACTIONS(1592),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1592),
@@ -47291,6 +47840,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1594),
     [anon_sym_LT_EQ] = ACTIONS(1594),
     [anon_sym_LT_EQ_GT] = ACTIONS(1594),
+    [anon_sym_LT_GT] = ACTIONS(1594),
     [anon_sym_EQ_EQ] = ACTIONS(1594),
     [anon_sym_GT_EQ] = ACTIONS(1594),
     [anon_sym_GT_GT] = ACTIONS(1594),
@@ -47299,6 +47849,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1594),
     [anon_sym_CARET_EQ] = ACTIONS(1594),
     [anon_sym_PIPE_EQ] = ACTIONS(1594),
+    [anon_sym_PIPE_GT] = ACTIONS(1594),
     [anon_sym_PIPE_PIPE] = ACTIONS(1594),
     [anon_sym_TILDE_PIPE] = ACTIONS(1594),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1594),
@@ -47421,6 +47972,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1556),
     [anon_sym_LT_EQ] = ACTIONS(1556),
     [anon_sym_LT_EQ_GT] = ACTIONS(1556),
+    [anon_sym_LT_GT] = ACTIONS(1556),
     [anon_sym_EQ_EQ] = ACTIONS(1556),
     [anon_sym_GT_EQ] = ACTIONS(1556),
     [anon_sym_GT_GT] = ACTIONS(1556),
@@ -47429,6 +47981,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1556),
     [anon_sym_CARET_EQ] = ACTIONS(1556),
     [anon_sym_PIPE_EQ] = ACTIONS(1556),
+    [anon_sym_PIPE_GT] = ACTIONS(1556),
     [anon_sym_PIPE_PIPE] = ACTIONS(1556),
     [anon_sym_TILDE_PIPE] = ACTIONS(1556),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1556),
@@ -47551,6 +48104,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1534),
     [anon_sym_LT_EQ] = ACTIONS(1534),
     [anon_sym_LT_EQ_GT] = ACTIONS(1534),
+    [anon_sym_LT_GT] = ACTIONS(1534),
     [anon_sym_EQ_EQ] = ACTIONS(1534),
     [anon_sym_GT_EQ] = ACTIONS(1534),
     [anon_sym_GT_GT] = ACTIONS(1534),
@@ -47559,6 +48113,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1534),
     [anon_sym_CARET_EQ] = ACTIONS(1534),
     [anon_sym_PIPE_EQ] = ACTIONS(1534),
+    [anon_sym_PIPE_GT] = ACTIONS(1534),
     [anon_sym_PIPE_PIPE] = ACTIONS(1534),
     [anon_sym_TILDE_PIPE] = ACTIONS(1534),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1534),
@@ -47681,6 +48236,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1552),
     [anon_sym_LT_EQ] = ACTIONS(1552),
     [anon_sym_LT_EQ_GT] = ACTIONS(1552),
+    [anon_sym_LT_GT] = ACTIONS(1552),
     [anon_sym_EQ_EQ] = ACTIONS(1552),
     [anon_sym_GT_EQ] = ACTIONS(1552),
     [anon_sym_GT_GT] = ACTIONS(1552),
@@ -47689,6 +48245,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1552),
     [anon_sym_CARET_EQ] = ACTIONS(1552),
     [anon_sym_PIPE_EQ] = ACTIONS(1552),
+    [anon_sym_PIPE_GT] = ACTIONS(1552),
     [anon_sym_PIPE_PIPE] = ACTIONS(1552),
     [anon_sym_TILDE_PIPE] = ACTIONS(1552),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1552),
@@ -47811,6 +48368,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1566),
     [anon_sym_LT_EQ] = ACTIONS(1566),
     [anon_sym_LT_EQ_GT] = ACTIONS(1566),
+    [anon_sym_LT_GT] = ACTIONS(1566),
     [anon_sym_EQ_EQ] = ACTIONS(1566),
     [anon_sym_GT_EQ] = ACTIONS(1566),
     [anon_sym_GT_GT] = ACTIONS(1566),
@@ -47819,6 +48377,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1566),
     [anon_sym_CARET_EQ] = ACTIONS(1566),
     [anon_sym_PIPE_EQ] = ACTIONS(1566),
+    [anon_sym_PIPE_GT] = ACTIONS(1566),
     [anon_sym_PIPE_PIPE] = ACTIONS(1566),
     [anon_sym_TILDE_PIPE] = ACTIONS(1566),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1566),
@@ -47941,6 +48500,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1570),
     [anon_sym_LT_EQ] = ACTIONS(1570),
     [anon_sym_LT_EQ_GT] = ACTIONS(1570),
+    [anon_sym_LT_GT] = ACTIONS(1570),
     [anon_sym_EQ_EQ] = ACTIONS(1570),
     [anon_sym_GT_EQ] = ACTIONS(1570),
     [anon_sym_GT_GT] = ACTIONS(1570),
@@ -47949,6 +48509,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1570),
     [anon_sym_CARET_EQ] = ACTIONS(1570),
     [anon_sym_PIPE_EQ] = ACTIONS(1570),
+    [anon_sym_PIPE_GT] = ACTIONS(1570),
     [anon_sym_PIPE_PIPE] = ACTIONS(1570),
     [anon_sym_TILDE_PIPE] = ACTIONS(1570),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1570),
@@ -48071,6 +48632,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1556),
     [anon_sym_LT_EQ] = ACTIONS(1556),
     [anon_sym_LT_EQ_GT] = ACTIONS(1556),
+    [anon_sym_LT_GT] = ACTIONS(1556),
     [anon_sym_EQ_EQ] = ACTIONS(1556),
     [anon_sym_GT_EQ] = ACTIONS(1556),
     [anon_sym_GT_GT] = ACTIONS(1556),
@@ -48079,6 +48641,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1556),
     [anon_sym_CARET_EQ] = ACTIONS(1556),
     [anon_sym_PIPE_EQ] = ACTIONS(1556),
+    [anon_sym_PIPE_GT] = ACTIONS(1556),
     [anon_sym_PIPE_PIPE] = ACTIONS(1556),
     [anon_sym_TILDE_PIPE] = ACTIONS(1556),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1556),
@@ -48201,6 +48764,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1560),
     [anon_sym_LT_EQ] = ACTIONS(1560),
     [anon_sym_LT_EQ_GT] = ACTIONS(1560),
+    [anon_sym_LT_GT] = ACTIONS(1560),
     [anon_sym_EQ_EQ] = ACTIONS(1560),
     [anon_sym_GT_EQ] = ACTIONS(1560),
     [anon_sym_GT_GT] = ACTIONS(1560),
@@ -48209,6 +48773,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1560),
     [anon_sym_CARET_EQ] = ACTIONS(1560),
     [anon_sym_PIPE_EQ] = ACTIONS(1560),
+    [anon_sym_PIPE_GT] = ACTIONS(1560),
     [anon_sym_PIPE_PIPE] = ACTIONS(1560),
     [anon_sym_TILDE_PIPE] = ACTIONS(1560),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1560),
@@ -48331,6 +48896,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1560),
     [anon_sym_LT_EQ] = ACTIONS(1560),
     [anon_sym_LT_EQ_GT] = ACTIONS(1560),
+    [anon_sym_LT_GT] = ACTIONS(1560),
     [anon_sym_EQ_EQ] = ACTIONS(1560),
     [anon_sym_GT_EQ] = ACTIONS(1560),
     [anon_sym_GT_GT] = ACTIONS(1560),
@@ -48339,6 +48905,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1560),
     [anon_sym_CARET_EQ] = ACTIONS(1560),
     [anon_sym_PIPE_EQ] = ACTIONS(1560),
+    [anon_sym_PIPE_GT] = ACTIONS(1560),
     [anon_sym_PIPE_PIPE] = ACTIONS(1560),
     [anon_sym_TILDE_PIPE] = ACTIONS(1560),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1560),
@@ -48461,6 +49028,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1562),
     [anon_sym_LT_EQ] = ACTIONS(1562),
     [anon_sym_LT_EQ_GT] = ACTIONS(1562),
+    [anon_sym_LT_GT] = ACTIONS(1562),
     [anon_sym_EQ_EQ] = ACTIONS(1562),
     [anon_sym_GT_EQ] = ACTIONS(1562),
     [anon_sym_GT_GT] = ACTIONS(1562),
@@ -48469,6 +49037,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1562),
     [anon_sym_CARET_EQ] = ACTIONS(1562),
     [anon_sym_PIPE_EQ] = ACTIONS(1562),
+    [anon_sym_PIPE_GT] = ACTIONS(1562),
     [anon_sym_PIPE_PIPE] = ACTIONS(1562),
     [anon_sym_TILDE_PIPE] = ACTIONS(1562),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1562),
@@ -48591,6 +49160,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1566),
     [anon_sym_LT_EQ] = ACTIONS(1566),
     [anon_sym_LT_EQ_GT] = ACTIONS(1566),
+    [anon_sym_LT_GT] = ACTIONS(1566),
     [anon_sym_EQ_EQ] = ACTIONS(1566),
     [anon_sym_GT_EQ] = ACTIONS(1566),
     [anon_sym_GT_GT] = ACTIONS(1566),
@@ -48599,6 +49169,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1566),
     [anon_sym_CARET_EQ] = ACTIONS(1566),
     [anon_sym_PIPE_EQ] = ACTIONS(1566),
+    [anon_sym_PIPE_GT] = ACTIONS(1566),
     [anon_sym_PIPE_PIPE] = ACTIONS(1566),
     [anon_sym_TILDE_PIPE] = ACTIONS(1566),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1566),
@@ -48721,6 +49292,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1570),
     [anon_sym_LT_EQ] = ACTIONS(1570),
     [anon_sym_LT_EQ_GT] = ACTIONS(1570),
+    [anon_sym_LT_GT] = ACTIONS(1570),
     [anon_sym_EQ_EQ] = ACTIONS(1570),
     [anon_sym_GT_EQ] = ACTIONS(1570),
     [anon_sym_GT_GT] = ACTIONS(1570),
@@ -48729,6 +49301,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1570),
     [anon_sym_CARET_EQ] = ACTIONS(1570),
     [anon_sym_PIPE_EQ] = ACTIONS(1570),
+    [anon_sym_PIPE_GT] = ACTIONS(1570),
     [anon_sym_PIPE_PIPE] = ACTIONS(1570),
     [anon_sym_TILDE_PIPE] = ACTIONS(1570),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1570),
@@ -48851,6 +49424,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1572),
     [anon_sym_LT_EQ] = ACTIONS(1572),
     [anon_sym_LT_EQ_GT] = ACTIONS(1572),
+    [anon_sym_LT_GT] = ACTIONS(1572),
     [anon_sym_EQ_EQ] = ACTIONS(1572),
     [anon_sym_GT_EQ] = ACTIONS(1572),
     [anon_sym_GT_GT] = ACTIONS(1572),
@@ -48859,6 +49433,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1572),
     [anon_sym_CARET_EQ] = ACTIONS(1572),
     [anon_sym_PIPE_EQ] = ACTIONS(1572),
+    [anon_sym_PIPE_GT] = ACTIONS(1572),
     [anon_sym_PIPE_PIPE] = ACTIONS(1572),
     [anon_sym_TILDE_PIPE] = ACTIONS(1572),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1572),
@@ -48981,6 +49556,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1574),
     [anon_sym_LT_EQ] = ACTIONS(1574),
     [anon_sym_LT_EQ_GT] = ACTIONS(1574),
+    [anon_sym_LT_GT] = ACTIONS(1574),
     [anon_sym_EQ_EQ] = ACTIONS(1574),
     [anon_sym_GT_EQ] = ACTIONS(1574),
     [anon_sym_GT_GT] = ACTIONS(1574),
@@ -48989,6 +49565,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1574),
     [anon_sym_CARET_EQ] = ACTIONS(1574),
     [anon_sym_PIPE_EQ] = ACTIONS(1574),
+    [anon_sym_PIPE_GT] = ACTIONS(1574),
     [anon_sym_PIPE_PIPE] = ACTIONS(1574),
     [anon_sym_TILDE_PIPE] = ACTIONS(1574),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1574),
@@ -49111,6 +49688,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1562),
     [anon_sym_LT_EQ] = ACTIONS(1562),
     [anon_sym_LT_EQ_GT] = ACTIONS(1562),
+    [anon_sym_LT_GT] = ACTIONS(1562),
     [anon_sym_EQ_EQ] = ACTIONS(1562),
     [anon_sym_GT_EQ] = ACTIONS(1562),
     [anon_sym_GT_GT] = ACTIONS(1562),
@@ -49119,6 +49697,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1562),
     [anon_sym_CARET_EQ] = ACTIONS(1562),
     [anon_sym_PIPE_EQ] = ACTIONS(1562),
+    [anon_sym_PIPE_GT] = ACTIONS(1562),
     [anon_sym_PIPE_PIPE] = ACTIONS(1562),
     [anon_sym_TILDE_PIPE] = ACTIONS(1562),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1562),
@@ -49241,6 +49820,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1578),
     [anon_sym_LT_EQ] = ACTIONS(1578),
     [anon_sym_LT_EQ_GT] = ACTIONS(1578),
+    [anon_sym_LT_GT] = ACTIONS(1578),
     [anon_sym_EQ_EQ] = ACTIONS(1578),
     [anon_sym_GT_EQ] = ACTIONS(1578),
     [anon_sym_GT_GT] = ACTIONS(1578),
@@ -49249,6 +49829,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1578),
     [anon_sym_CARET_EQ] = ACTIONS(1578),
     [anon_sym_PIPE_EQ] = ACTIONS(1578),
+    [anon_sym_PIPE_GT] = ACTIONS(1578),
     [anon_sym_PIPE_PIPE] = ACTIONS(1578),
     [anon_sym_TILDE_PIPE] = ACTIONS(1578),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1578),
@@ -49371,6 +49952,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1582),
     [anon_sym_LT_EQ] = ACTIONS(1582),
     [anon_sym_LT_EQ_GT] = ACTIONS(1582),
+    [anon_sym_LT_GT] = ACTIONS(1582),
     [anon_sym_EQ_EQ] = ACTIONS(1582),
     [anon_sym_GT_EQ] = ACTIONS(1582),
     [anon_sym_GT_GT] = ACTIONS(1582),
@@ -49379,6 +49961,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1582),
     [anon_sym_CARET_EQ] = ACTIONS(1582),
     [anon_sym_PIPE_EQ] = ACTIONS(1582),
+    [anon_sym_PIPE_GT] = ACTIONS(1582),
     [anon_sym_PIPE_PIPE] = ACTIONS(1582),
     [anon_sym_TILDE_PIPE] = ACTIONS(1582),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1582),
@@ -49501,6 +50084,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1584),
     [anon_sym_LT_EQ] = ACTIONS(1584),
     [anon_sym_LT_EQ_GT] = ACTIONS(1584),
+    [anon_sym_LT_GT] = ACTIONS(1584),
     [anon_sym_EQ_EQ] = ACTIONS(1584),
     [anon_sym_GT_EQ] = ACTIONS(1584),
     [anon_sym_GT_GT] = ACTIONS(1584),
@@ -49509,6 +50093,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1584),
     [anon_sym_CARET_EQ] = ACTIONS(1584),
     [anon_sym_PIPE_EQ] = ACTIONS(1584),
+    [anon_sym_PIPE_GT] = ACTIONS(1584),
     [anon_sym_PIPE_PIPE] = ACTIONS(1584),
     [anon_sym_TILDE_PIPE] = ACTIONS(1584),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1584),
@@ -49631,6 +50216,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1594),
     [anon_sym_LT_EQ] = ACTIONS(1594),
     [anon_sym_LT_EQ_GT] = ACTIONS(1594),
+    [anon_sym_LT_GT] = ACTIONS(1594),
     [anon_sym_EQ_EQ] = ACTIONS(1594),
     [anon_sym_GT_EQ] = ACTIONS(1594),
     [anon_sym_GT_GT] = ACTIONS(1594),
@@ -49639,6 +50225,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1594),
     [anon_sym_CARET_EQ] = ACTIONS(1594),
     [anon_sym_PIPE_EQ] = ACTIONS(1594),
+    [anon_sym_PIPE_GT] = ACTIONS(1594),
     [anon_sym_PIPE_PIPE] = ACTIONS(1594),
     [anon_sym_TILDE_PIPE] = ACTIONS(1594),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1594),
@@ -49759,6 +50346,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1818),
     [anon_sym_LT_EQ] = ACTIONS(1818),
     [anon_sym_LT_EQ_GT] = ACTIONS(1818),
+    [anon_sym_LT_GT] = ACTIONS(1818),
     [anon_sym_EQ_EQ] = ACTIONS(1818),
     [anon_sym_GT_EQ] = ACTIONS(1818),
     [anon_sym_GT_GT] = ACTIONS(1818),
@@ -49767,6 +50355,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1818),
     [anon_sym_CARET_EQ] = ACTIONS(1818),
     [anon_sym_PIPE_EQ] = ACTIONS(1818),
+    [anon_sym_PIPE_GT] = ACTIONS(1818),
     [anon_sym_PIPE_PIPE] = ACTIONS(1818),
     [anon_sym_TILDE_PIPE] = ACTIONS(1818),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1818),
@@ -49888,6 +50477,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1824),
     [anon_sym_LT_EQ] = ACTIONS(1824),
     [anon_sym_LT_EQ_GT] = ACTIONS(1824),
+    [anon_sym_LT_GT] = ACTIONS(1824),
     [anon_sym_EQ_EQ] = ACTIONS(1824),
     [anon_sym_GT_EQ] = ACTIONS(1824),
     [anon_sym_GT_GT] = ACTIONS(1824),
@@ -49896,6 +50486,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1824),
     [anon_sym_CARET_EQ] = ACTIONS(1824),
     [anon_sym_PIPE_EQ] = ACTIONS(1824),
+    [anon_sym_PIPE_GT] = ACTIONS(1824),
     [anon_sym_PIPE_PIPE] = ACTIONS(1824),
     [anon_sym_TILDE_PIPE] = ACTIONS(1824),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1824),
@@ -50018,6 +50609,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1725),
     [anon_sym_LT_EQ] = ACTIONS(1725),
     [anon_sym_LT_EQ_GT] = ACTIONS(1725),
+    [anon_sym_LT_GT] = ACTIONS(1725),
     [anon_sym_EQ_EQ] = ACTIONS(1725),
     [anon_sym_GT_EQ] = ACTIONS(1725),
     [anon_sym_GT_GT] = ACTIONS(1725),
@@ -50026,6 +50618,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1725),
     [anon_sym_CARET_EQ] = ACTIONS(1725),
     [anon_sym_PIPE_EQ] = ACTIONS(1725),
+    [anon_sym_PIPE_GT] = ACTIONS(1725),
     [anon_sym_PIPE_PIPE] = ACTIONS(1725),
     [anon_sym_TILDE_PIPE] = ACTIONS(1725),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1725),
@@ -50146,6 +50739,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1852),
     [anon_sym_LT_EQ] = ACTIONS(1852),
     [anon_sym_LT_EQ_GT] = ACTIONS(1852),
+    [anon_sym_LT_GT] = ACTIONS(1852),
     [anon_sym_EQ_EQ] = ACTIONS(1852),
     [anon_sym_GT_EQ] = ACTIONS(1852),
     [anon_sym_GT_GT] = ACTIONS(1852),
@@ -50154,6 +50748,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1852),
     [anon_sym_CARET_EQ] = ACTIONS(1852),
     [anon_sym_PIPE_EQ] = ACTIONS(1852),
+    [anon_sym_PIPE_GT] = ACTIONS(1852),
     [anon_sym_PIPE_PIPE] = ACTIONS(1852),
     [anon_sym_TILDE_PIPE] = ACTIONS(1852),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1852),
@@ -50275,6 +50870,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1856),
     [anon_sym_LT_EQ] = ACTIONS(1856),
     [anon_sym_LT_EQ_GT] = ACTIONS(1856),
+    [anon_sym_LT_GT] = ACTIONS(1856),
     [anon_sym_EQ_EQ] = ACTIONS(1856),
     [anon_sym_GT_EQ] = ACTIONS(1856),
     [anon_sym_GT_GT] = ACTIONS(1856),
@@ -50283,6 +50879,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1856),
     [anon_sym_CARET_EQ] = ACTIONS(1856),
     [anon_sym_PIPE_EQ] = ACTIONS(1856),
+    [anon_sym_PIPE_GT] = ACTIONS(1856),
     [anon_sym_PIPE_PIPE] = ACTIONS(1856),
     [anon_sym_TILDE_PIPE] = ACTIONS(1856),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1856),
@@ -50404,6 +51001,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1860),
     [anon_sym_LT_EQ] = ACTIONS(1860),
     [anon_sym_LT_EQ_GT] = ACTIONS(1860),
+    [anon_sym_LT_GT] = ACTIONS(1860),
     [anon_sym_EQ_EQ] = ACTIONS(1860),
     [anon_sym_GT_EQ] = ACTIONS(1860),
     [anon_sym_GT_GT] = ACTIONS(1860),
@@ -50412,6 +51010,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1860),
     [anon_sym_CARET_EQ] = ACTIONS(1860),
     [anon_sym_PIPE_EQ] = ACTIONS(1860),
+    [anon_sym_PIPE_GT] = ACTIONS(1860),
     [anon_sym_PIPE_PIPE] = ACTIONS(1860),
     [anon_sym_TILDE_PIPE] = ACTIONS(1860),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1860),
@@ -50534,6 +51133,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1725),
     [anon_sym_LT_EQ] = ACTIONS(1725),
     [anon_sym_LT_EQ_GT] = ACTIONS(1725),
+    [anon_sym_LT_GT] = ACTIONS(1725),
     [anon_sym_EQ_EQ] = ACTIONS(1725),
     [anon_sym_GT_EQ] = ACTIONS(1725),
     [anon_sym_GT_GT] = ACTIONS(1725),
@@ -50542,6 +51142,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1725),
     [anon_sym_CARET_EQ] = ACTIONS(1725),
     [anon_sym_PIPE_EQ] = ACTIONS(1725),
+    [anon_sym_PIPE_GT] = ACTIONS(1725),
     [anon_sym_PIPE_PIPE] = ACTIONS(1725),
     [anon_sym_TILDE_PIPE] = ACTIONS(1725),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1725),
@@ -50662,6 +51263,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1890),
     [anon_sym_LT_EQ] = ACTIONS(1890),
     [anon_sym_LT_EQ_GT] = ACTIONS(1890),
+    [anon_sym_LT_GT] = ACTIONS(1890),
     [anon_sym_EQ_EQ] = ACTIONS(1890),
     [anon_sym_GT_EQ] = ACTIONS(1890),
     [anon_sym_GT_GT] = ACTIONS(1890),
@@ -50670,6 +51272,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1890),
     [anon_sym_CARET_EQ] = ACTIONS(1890),
     [anon_sym_PIPE_EQ] = ACTIONS(1890),
+    [anon_sym_PIPE_GT] = ACTIONS(1890),
     [anon_sym_PIPE_PIPE] = ACTIONS(1890),
     [anon_sym_TILDE_PIPE] = ACTIONS(1890),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1890),
@@ -50791,6 +51394,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1894),
     [anon_sym_LT_EQ] = ACTIONS(1894),
     [anon_sym_LT_EQ_GT] = ACTIONS(1894),
+    [anon_sym_LT_GT] = ACTIONS(1894),
     [anon_sym_EQ_EQ] = ACTIONS(1894),
     [anon_sym_GT_EQ] = ACTIONS(1894),
     [anon_sym_GT_GT] = ACTIONS(1894),
@@ -50799,6 +51403,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1894),
     [anon_sym_CARET_EQ] = ACTIONS(1894),
     [anon_sym_PIPE_EQ] = ACTIONS(1894),
+    [anon_sym_PIPE_GT] = ACTIONS(1894),
     [anon_sym_PIPE_PIPE] = ACTIONS(1894),
     [anon_sym_TILDE_PIPE] = ACTIONS(1894),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1894),
@@ -50920,6 +51525,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1898),
     [anon_sym_LT_EQ] = ACTIONS(1898),
     [anon_sym_LT_EQ_GT] = ACTIONS(1898),
+    [anon_sym_LT_GT] = ACTIONS(1898),
     [anon_sym_EQ_EQ] = ACTIONS(1898),
     [anon_sym_GT_EQ] = ACTIONS(1898),
     [anon_sym_GT_GT] = ACTIONS(1898),
@@ -50928,6 +51534,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1898),
     [anon_sym_CARET_EQ] = ACTIONS(1898),
     [anon_sym_PIPE_EQ] = ACTIONS(1898),
+    [anon_sym_PIPE_GT] = ACTIONS(1898),
     [anon_sym_PIPE_PIPE] = ACTIONS(1898),
     [anon_sym_TILDE_PIPE] = ACTIONS(1898),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1898),
@@ -51049,6 +51656,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1902),
     [anon_sym_LT_EQ] = ACTIONS(1902),
     [anon_sym_LT_EQ_GT] = ACTIONS(1902),
+    [anon_sym_LT_GT] = ACTIONS(1902),
     [anon_sym_EQ_EQ] = ACTIONS(1902),
     [anon_sym_GT_EQ] = ACTIONS(1902),
     [anon_sym_GT_GT] = ACTIONS(1902),
@@ -51057,6 +51665,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1902),
     [anon_sym_CARET_EQ] = ACTIONS(1902),
     [anon_sym_PIPE_EQ] = ACTIONS(1902),
+    [anon_sym_PIPE_GT] = ACTIONS(1902),
     [anon_sym_PIPE_PIPE] = ACTIONS(1902),
     [anon_sym_TILDE_PIPE] = ACTIONS(1902),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1902),
@@ -51178,6 +51787,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1906),
     [anon_sym_LT_EQ] = ACTIONS(1906),
     [anon_sym_LT_EQ_GT] = ACTIONS(1906),
+    [anon_sym_LT_GT] = ACTIONS(1906),
     [anon_sym_EQ_EQ] = ACTIONS(1906),
     [anon_sym_GT_EQ] = ACTIONS(1906),
     [anon_sym_GT_GT] = ACTIONS(1906),
@@ -51186,6 +51796,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1906),
     [anon_sym_CARET_EQ] = ACTIONS(1906),
     [anon_sym_PIPE_EQ] = ACTIONS(1906),
+    [anon_sym_PIPE_GT] = ACTIONS(1906),
     [anon_sym_PIPE_PIPE] = ACTIONS(1906),
     [anon_sym_TILDE_PIPE] = ACTIONS(1906),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1906),
@@ -51307,6 +51918,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1908),
     [anon_sym_LT_EQ] = ACTIONS(1908),
     [anon_sym_LT_EQ_GT] = ACTIONS(1908),
+    [anon_sym_LT_GT] = ACTIONS(1908),
     [anon_sym_EQ_EQ] = ACTIONS(1908),
     [anon_sym_GT_EQ] = ACTIONS(1908),
     [anon_sym_GT_GT] = ACTIONS(1908),
@@ -51315,6 +51927,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1908),
     [anon_sym_CARET_EQ] = ACTIONS(1908),
     [anon_sym_PIPE_EQ] = ACTIONS(1908),
+    [anon_sym_PIPE_GT] = ACTIONS(1908),
     [anon_sym_PIPE_PIPE] = ACTIONS(1908),
     [anon_sym_TILDE_PIPE] = ACTIONS(1908),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1908),
@@ -51436,6 +52049,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1910),
     [anon_sym_LT_EQ] = ACTIONS(1910),
     [anon_sym_LT_EQ_GT] = ACTIONS(1910),
+    [anon_sym_LT_GT] = ACTIONS(1910),
     [anon_sym_EQ_EQ] = ACTIONS(1910),
     [anon_sym_GT_EQ] = ACTIONS(1910),
     [anon_sym_GT_GT] = ACTIONS(1910),
@@ -51444,6 +52058,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1910),
     [anon_sym_CARET_EQ] = ACTIONS(1910),
     [anon_sym_PIPE_EQ] = ACTIONS(1910),
+    [anon_sym_PIPE_GT] = ACTIONS(1910),
     [anon_sym_PIPE_PIPE] = ACTIONS(1910),
     [anon_sym_TILDE_PIPE] = ACTIONS(1910),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1910),
@@ -51565,6 +52180,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1912),
     [anon_sym_LT_EQ] = ACTIONS(1912),
     [anon_sym_LT_EQ_GT] = ACTIONS(1912),
+    [anon_sym_LT_GT] = ACTIONS(1912),
     [anon_sym_EQ_EQ] = ACTIONS(1912),
     [anon_sym_GT_EQ] = ACTIONS(1912),
     [anon_sym_GT_GT] = ACTIONS(1912),
@@ -51573,6 +52189,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1912),
     [anon_sym_CARET_EQ] = ACTIONS(1912),
     [anon_sym_PIPE_EQ] = ACTIONS(1912),
+    [anon_sym_PIPE_GT] = ACTIONS(1912),
     [anon_sym_PIPE_PIPE] = ACTIONS(1912),
     [anon_sym_TILDE_PIPE] = ACTIONS(1912),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1912),
@@ -51694,6 +52311,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1914),
     [anon_sym_LT_EQ] = ACTIONS(1914),
     [anon_sym_LT_EQ_GT] = ACTIONS(1914),
+    [anon_sym_LT_GT] = ACTIONS(1914),
     [anon_sym_EQ_EQ] = ACTIONS(1914),
     [anon_sym_GT_EQ] = ACTIONS(1914),
     [anon_sym_GT_GT] = ACTIONS(1914),
@@ -51702,6 +52320,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1914),
     [anon_sym_CARET_EQ] = ACTIONS(1914),
     [anon_sym_PIPE_EQ] = ACTIONS(1914),
+    [anon_sym_PIPE_GT] = ACTIONS(1914),
     [anon_sym_PIPE_PIPE] = ACTIONS(1914),
     [anon_sym_TILDE_PIPE] = ACTIONS(1914),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1914),
@@ -51823,6 +52442,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1916),
     [anon_sym_LT_EQ] = ACTIONS(1916),
     [anon_sym_LT_EQ_GT] = ACTIONS(1916),
+    [anon_sym_LT_GT] = ACTIONS(1916),
     [anon_sym_EQ_EQ] = ACTIONS(1916),
     [anon_sym_GT_EQ] = ACTIONS(1916),
     [anon_sym_GT_GT] = ACTIONS(1916),
@@ -51831,6 +52451,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1916),
     [anon_sym_CARET_EQ] = ACTIONS(1916),
     [anon_sym_PIPE_EQ] = ACTIONS(1916),
+    [anon_sym_PIPE_GT] = ACTIONS(1916),
     [anon_sym_PIPE_PIPE] = ACTIONS(1916),
     [anon_sym_TILDE_PIPE] = ACTIONS(1916),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1916),
@@ -51952,6 +52573,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1920),
     [anon_sym_LT_EQ] = ACTIONS(1920),
     [anon_sym_LT_EQ_GT] = ACTIONS(1920),
+    [anon_sym_LT_GT] = ACTIONS(1920),
     [anon_sym_EQ_EQ] = ACTIONS(1920),
     [anon_sym_GT_EQ] = ACTIONS(1920),
     [anon_sym_GT_GT] = ACTIONS(1920),
@@ -51960,6 +52582,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1920),
     [anon_sym_CARET_EQ] = ACTIONS(1920),
     [anon_sym_PIPE_EQ] = ACTIONS(1920),
+    [anon_sym_PIPE_GT] = ACTIONS(1920),
     [anon_sym_PIPE_PIPE] = ACTIONS(1920),
     [anon_sym_TILDE_PIPE] = ACTIONS(1920),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1920),
@@ -52081,6 +52704,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1924),
     [anon_sym_LT_EQ] = ACTIONS(1924),
     [anon_sym_LT_EQ_GT] = ACTIONS(1924),
+    [anon_sym_LT_GT] = ACTIONS(1924),
     [anon_sym_EQ_EQ] = ACTIONS(1924),
     [anon_sym_GT_EQ] = ACTIONS(1924),
     [anon_sym_GT_GT] = ACTIONS(1924),
@@ -52089,6 +52713,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1924),
     [anon_sym_CARET_EQ] = ACTIONS(1924),
     [anon_sym_PIPE_EQ] = ACTIONS(1924),
+    [anon_sym_PIPE_GT] = ACTIONS(1924),
     [anon_sym_PIPE_PIPE] = ACTIONS(1924),
     [anon_sym_TILDE_PIPE] = ACTIONS(1924),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1924),
@@ -52211,6 +52836,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1725),
     [anon_sym_LT_EQ] = ACTIONS(1725),
     [anon_sym_LT_EQ_GT] = ACTIONS(1725),
+    [anon_sym_LT_GT] = ACTIONS(1725),
     [anon_sym_EQ_EQ] = ACTIONS(1725),
     [anon_sym_GT_EQ] = ACTIONS(1725),
     [anon_sym_GT_GT] = ACTIONS(1725),
@@ -52219,6 +52845,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1725),
     [anon_sym_CARET_EQ] = ACTIONS(1725),
     [anon_sym_PIPE_EQ] = ACTIONS(1725),
+    [anon_sym_PIPE_GT] = ACTIONS(1725),
     [anon_sym_PIPE_PIPE] = ACTIONS(1725),
     [anon_sym_TILDE_PIPE] = ACTIONS(1725),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1725),
@@ -52339,6 +52966,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1950),
     [anon_sym_LT_EQ] = ACTIONS(1950),
     [anon_sym_LT_EQ_GT] = ACTIONS(1950),
+    [anon_sym_LT_GT] = ACTIONS(1950),
     [anon_sym_EQ_EQ] = ACTIONS(1950),
     [anon_sym_GT_EQ] = ACTIONS(1950),
     [anon_sym_GT_GT] = ACTIONS(1950),
@@ -52347,6 +52975,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1950),
     [anon_sym_CARET_EQ] = ACTIONS(1950),
     [anon_sym_PIPE_EQ] = ACTIONS(1950),
+    [anon_sym_PIPE_GT] = ACTIONS(1950),
     [anon_sym_PIPE_PIPE] = ACTIONS(1950),
     [anon_sym_TILDE_PIPE] = ACTIONS(1950),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1950),
@@ -52468,6 +53097,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1952),
     [anon_sym_LT_EQ] = ACTIONS(1952),
     [anon_sym_LT_EQ_GT] = ACTIONS(1952),
+    [anon_sym_LT_GT] = ACTIONS(1952),
     [anon_sym_EQ_EQ] = ACTIONS(1952),
     [anon_sym_GT_EQ] = ACTIONS(1952),
     [anon_sym_GT_GT] = ACTIONS(1952),
@@ -52476,6 +53106,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1952),
     [anon_sym_CARET_EQ] = ACTIONS(1952),
     [anon_sym_PIPE_EQ] = ACTIONS(1952),
+    [anon_sym_PIPE_GT] = ACTIONS(1952),
     [anon_sym_PIPE_PIPE] = ACTIONS(1952),
     [anon_sym_TILDE_PIPE] = ACTIONS(1952),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1952),
@@ -52597,6 +53228,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1954),
     [anon_sym_LT_EQ] = ACTIONS(1954),
     [anon_sym_LT_EQ_GT] = ACTIONS(1954),
+    [anon_sym_LT_GT] = ACTIONS(1954),
     [anon_sym_EQ_EQ] = ACTIONS(1954),
     [anon_sym_GT_EQ] = ACTIONS(1954),
     [anon_sym_GT_GT] = ACTIONS(1954),
@@ -52605,6 +53237,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1954),
     [anon_sym_CARET_EQ] = ACTIONS(1954),
     [anon_sym_PIPE_EQ] = ACTIONS(1954),
+    [anon_sym_PIPE_GT] = ACTIONS(1954),
     [anon_sym_PIPE_PIPE] = ACTIONS(1954),
     [anon_sym_TILDE_PIPE] = ACTIONS(1954),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1954),
@@ -52726,6 +53359,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1956),
     [anon_sym_LT_EQ] = ACTIONS(1956),
     [anon_sym_LT_EQ_GT] = ACTIONS(1956),
+    [anon_sym_LT_GT] = ACTIONS(1956),
     [anon_sym_EQ_EQ] = ACTIONS(1956),
     [anon_sym_GT_EQ] = ACTIONS(1956),
     [anon_sym_GT_GT] = ACTIONS(1956),
@@ -52734,6 +53368,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1956),
     [anon_sym_CARET_EQ] = ACTIONS(1956),
     [anon_sym_PIPE_EQ] = ACTIONS(1956),
+    [anon_sym_PIPE_GT] = ACTIONS(1956),
     [anon_sym_PIPE_PIPE] = ACTIONS(1956),
     [anon_sym_TILDE_PIPE] = ACTIONS(1956),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1956),
@@ -52856,6 +53491,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1725),
     [anon_sym_LT_EQ] = ACTIONS(1725),
     [anon_sym_LT_EQ_GT] = ACTIONS(1725),
+    [anon_sym_LT_GT] = ACTIONS(1725),
     [anon_sym_EQ_EQ] = ACTIONS(1725),
     [anon_sym_GT_EQ] = ACTIONS(1725),
     [anon_sym_GT_GT] = ACTIONS(1725),
@@ -52864,6 +53500,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1725),
     [anon_sym_CARET_EQ] = ACTIONS(1725),
     [anon_sym_PIPE_EQ] = ACTIONS(1725),
+    [anon_sym_PIPE_GT] = ACTIONS(1725),
     [anon_sym_PIPE_PIPE] = ACTIONS(1725),
     [anon_sym_TILDE_PIPE] = ACTIONS(1725),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1725),
@@ -52984,6 +53621,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1982),
     [anon_sym_LT_EQ] = ACTIONS(1982),
     [anon_sym_LT_EQ_GT] = ACTIONS(1982),
+    [anon_sym_LT_GT] = ACTIONS(1982),
     [anon_sym_EQ_EQ] = ACTIONS(1982),
     [anon_sym_GT_EQ] = ACTIONS(1982),
     [anon_sym_GT_GT] = ACTIONS(1982),
@@ -52992,6 +53630,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1982),
     [anon_sym_CARET_EQ] = ACTIONS(1982),
     [anon_sym_PIPE_EQ] = ACTIONS(1982),
+    [anon_sym_PIPE_GT] = ACTIONS(1982),
     [anon_sym_PIPE_PIPE] = ACTIONS(1982),
     [anon_sym_TILDE_PIPE] = ACTIONS(1982),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1982),
@@ -53113,6 +53752,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1986),
     [anon_sym_LT_EQ] = ACTIONS(1986),
     [anon_sym_LT_EQ_GT] = ACTIONS(1986),
+    [anon_sym_LT_GT] = ACTIONS(1986),
     [anon_sym_EQ_EQ] = ACTIONS(1986),
     [anon_sym_GT_EQ] = ACTIONS(1986),
     [anon_sym_GT_GT] = ACTIONS(1986),
@@ -53121,6 +53761,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1986),
     [anon_sym_CARET_EQ] = ACTIONS(1986),
     [anon_sym_PIPE_EQ] = ACTIONS(1986),
+    [anon_sym_PIPE_GT] = ACTIONS(1986),
     [anon_sym_PIPE_PIPE] = ACTIONS(1986),
     [anon_sym_TILDE_PIPE] = ACTIONS(1986),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1986),
@@ -53243,6 +53884,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1725),
     [anon_sym_LT_EQ] = ACTIONS(1725),
     [anon_sym_LT_EQ_GT] = ACTIONS(1725),
+    [anon_sym_LT_GT] = ACTIONS(1725),
     [anon_sym_EQ_EQ] = ACTIONS(1725),
     [anon_sym_GT_EQ] = ACTIONS(1725),
     [anon_sym_GT_GT] = ACTIONS(1725),
@@ -53251,6 +53893,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1725),
     [anon_sym_CARET_EQ] = ACTIONS(1725),
     [anon_sym_PIPE_EQ] = ACTIONS(1725),
+    [anon_sym_PIPE_GT] = ACTIONS(1725),
     [anon_sym_PIPE_PIPE] = ACTIONS(1725),
     [anon_sym_TILDE_PIPE] = ACTIONS(1725),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1725),
@@ -53371,6 +54014,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2012),
     [anon_sym_LT_EQ] = ACTIONS(2012),
     [anon_sym_LT_EQ_GT] = ACTIONS(2012),
+    [anon_sym_LT_GT] = ACTIONS(2012),
     [anon_sym_EQ_EQ] = ACTIONS(2012),
     [anon_sym_GT_EQ] = ACTIONS(2012),
     [anon_sym_GT_GT] = ACTIONS(2012),
@@ -53379,6 +54023,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2012),
     [anon_sym_CARET_EQ] = ACTIONS(2012),
     [anon_sym_PIPE_EQ] = ACTIONS(2012),
+    [anon_sym_PIPE_GT] = ACTIONS(2012),
     [anon_sym_PIPE_PIPE] = ACTIONS(2012),
     [anon_sym_TILDE_PIPE] = ACTIONS(2012),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2012),
@@ -53500,6 +54145,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1912),
     [anon_sym_LT_EQ] = ACTIONS(1912),
     [anon_sym_LT_EQ_GT] = ACTIONS(1912),
+    [anon_sym_LT_GT] = ACTIONS(1912),
     [anon_sym_EQ_EQ] = ACTIONS(1912),
     [anon_sym_GT_EQ] = ACTIONS(1912),
     [anon_sym_GT_GT] = ACTIONS(1912),
@@ -53508,6 +54154,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1912),
     [anon_sym_CARET_EQ] = ACTIONS(1912),
     [anon_sym_PIPE_EQ] = ACTIONS(1912),
+    [anon_sym_PIPE_GT] = ACTIONS(1912),
     [anon_sym_PIPE_PIPE] = ACTIONS(1912),
     [anon_sym_TILDE_PIPE] = ACTIONS(1912),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1912),
@@ -53628,6 +54275,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1902),
     [anon_sym_LT_EQ] = ACTIONS(1902),
     [anon_sym_LT_EQ_GT] = ACTIONS(1902),
+    [anon_sym_LT_GT] = ACTIONS(1902),
     [anon_sym_EQ_EQ] = ACTIONS(1902),
     [anon_sym_GT_EQ] = ACTIONS(1902),
     [anon_sym_GT_GT] = ACTIONS(1902),
@@ -53636,6 +54284,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1902),
     [anon_sym_CARET_EQ] = ACTIONS(1902),
     [anon_sym_PIPE_EQ] = ACTIONS(1902),
+    [anon_sym_PIPE_GT] = ACTIONS(1902),
     [anon_sym_PIPE_PIPE] = ACTIONS(1902),
     [anon_sym_TILDE_PIPE] = ACTIONS(1902),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1902),
@@ -53756,6 +54405,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1952),
     [anon_sym_LT_EQ] = ACTIONS(1952),
     [anon_sym_LT_EQ_GT] = ACTIONS(1952),
+    [anon_sym_LT_GT] = ACTIONS(1952),
     [anon_sym_EQ_EQ] = ACTIONS(1952),
     [anon_sym_GT_EQ] = ACTIONS(1952),
     [anon_sym_GT_GT] = ACTIONS(1952),
@@ -53764,6 +54414,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1952),
     [anon_sym_CARET_EQ] = ACTIONS(1952),
     [anon_sym_PIPE_EQ] = ACTIONS(1952),
+    [anon_sym_PIPE_GT] = ACTIONS(1952),
     [anon_sym_PIPE_PIPE] = ACTIONS(1952),
     [anon_sym_TILDE_PIPE] = ACTIONS(1952),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1952),
@@ -53884,6 +54535,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1908),
     [anon_sym_LT_EQ] = ACTIONS(1908),
     [anon_sym_LT_EQ_GT] = ACTIONS(1908),
+    [anon_sym_LT_GT] = ACTIONS(1908),
     [anon_sym_EQ_EQ] = ACTIONS(1908),
     [anon_sym_GT_EQ] = ACTIONS(1908),
     [anon_sym_GT_GT] = ACTIONS(1908),
@@ -53892,6 +54544,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1908),
     [anon_sym_CARET_EQ] = ACTIONS(1908),
     [anon_sym_PIPE_EQ] = ACTIONS(1908),
+    [anon_sym_PIPE_GT] = ACTIONS(1908),
     [anon_sym_PIPE_PIPE] = ACTIONS(1908),
     [anon_sym_TILDE_PIPE] = ACTIONS(1908),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1908),
@@ -54012,6 +54665,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1910),
     [anon_sym_LT_EQ] = ACTIONS(1910),
     [anon_sym_LT_EQ_GT] = ACTIONS(1910),
+    [anon_sym_LT_GT] = ACTIONS(1910),
     [anon_sym_EQ_EQ] = ACTIONS(1910),
     [anon_sym_GT_EQ] = ACTIONS(1910),
     [anon_sym_GT_GT] = ACTIONS(1910),
@@ -54020,6 +54674,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1910),
     [anon_sym_CARET_EQ] = ACTIONS(1910),
     [anon_sym_PIPE_EQ] = ACTIONS(1910),
+    [anon_sym_PIPE_GT] = ACTIONS(1910),
     [anon_sym_PIPE_PIPE] = ACTIONS(1910),
     [anon_sym_TILDE_PIPE] = ACTIONS(1910),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1910),
@@ -54140,6 +54795,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1924),
     [anon_sym_LT_EQ] = ACTIONS(1924),
     [anon_sym_LT_EQ_GT] = ACTIONS(1924),
+    [anon_sym_LT_GT] = ACTIONS(1924),
     [anon_sym_EQ_EQ] = ACTIONS(1924),
     [anon_sym_GT_EQ] = ACTIONS(1924),
     [anon_sym_GT_GT] = ACTIONS(1924),
@@ -54148,6 +54804,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1924),
     [anon_sym_CARET_EQ] = ACTIONS(1924),
     [anon_sym_PIPE_EQ] = ACTIONS(1924),
+    [anon_sym_PIPE_GT] = ACTIONS(1924),
     [anon_sym_PIPE_PIPE] = ACTIONS(1924),
     [anon_sym_TILDE_PIPE] = ACTIONS(1924),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1924),
@@ -54268,6 +54925,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1914),
     [anon_sym_LT_EQ] = ACTIONS(1914),
     [anon_sym_LT_EQ_GT] = ACTIONS(1914),
+    [anon_sym_LT_GT] = ACTIONS(1914),
     [anon_sym_EQ_EQ] = ACTIONS(1914),
     [anon_sym_GT_EQ] = ACTIONS(1914),
     [anon_sym_GT_GT] = ACTIONS(1914),
@@ -54276,6 +54934,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1914),
     [anon_sym_CARET_EQ] = ACTIONS(1914),
     [anon_sym_PIPE_EQ] = ACTIONS(1914),
+    [anon_sym_PIPE_GT] = ACTIONS(1914),
     [anon_sym_PIPE_PIPE] = ACTIONS(1914),
     [anon_sym_TILDE_PIPE] = ACTIONS(1914),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1914),
@@ -54396,6 +55055,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1916),
     [anon_sym_LT_EQ] = ACTIONS(1916),
     [anon_sym_LT_EQ_GT] = ACTIONS(1916),
+    [anon_sym_LT_GT] = ACTIONS(1916),
     [anon_sym_EQ_EQ] = ACTIONS(1916),
     [anon_sym_GT_EQ] = ACTIONS(1916),
     [anon_sym_GT_GT] = ACTIONS(1916),
@@ -54404,6 +55064,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1916),
     [anon_sym_CARET_EQ] = ACTIONS(1916),
     [anon_sym_PIPE_EQ] = ACTIONS(1916),
+    [anon_sym_PIPE_GT] = ACTIONS(1916),
     [anon_sym_PIPE_PIPE] = ACTIONS(1916),
     [anon_sym_TILDE_PIPE] = ACTIONS(1916),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1916),
@@ -54524,6 +55185,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1890),
     [anon_sym_LT_EQ] = ACTIONS(1890),
     [anon_sym_LT_EQ_GT] = ACTIONS(1890),
+    [anon_sym_LT_GT] = ACTIONS(1890),
     [anon_sym_EQ_EQ] = ACTIONS(1890),
     [anon_sym_GT_EQ] = ACTIONS(1890),
     [anon_sym_GT_GT] = ACTIONS(1890),
@@ -54532,6 +55194,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1890),
     [anon_sym_CARET_EQ] = ACTIONS(1890),
     [anon_sym_PIPE_EQ] = ACTIONS(1890),
+    [anon_sym_PIPE_GT] = ACTIONS(1890),
     [anon_sym_PIPE_PIPE] = ACTIONS(1890),
     [anon_sym_TILDE_PIPE] = ACTIONS(1890),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1890),
@@ -54652,6 +55315,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1894),
     [anon_sym_LT_EQ] = ACTIONS(1894),
     [anon_sym_LT_EQ_GT] = ACTIONS(1894),
+    [anon_sym_LT_GT] = ACTIONS(1894),
     [anon_sym_EQ_EQ] = ACTIONS(1894),
     [anon_sym_GT_EQ] = ACTIONS(1894),
     [anon_sym_GT_GT] = ACTIONS(1894),
@@ -54660,6 +55324,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1894),
     [anon_sym_CARET_EQ] = ACTIONS(1894),
     [anon_sym_PIPE_EQ] = ACTIONS(1894),
+    [anon_sym_PIPE_GT] = ACTIONS(1894),
     [anon_sym_PIPE_PIPE] = ACTIONS(1894),
     [anon_sym_TILDE_PIPE] = ACTIONS(1894),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1894),
@@ -54780,6 +55445,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1906),
     [anon_sym_LT_EQ] = ACTIONS(1906),
     [anon_sym_LT_EQ_GT] = ACTIONS(1906),
+    [anon_sym_LT_GT] = ACTIONS(1906),
     [anon_sym_EQ_EQ] = ACTIONS(1906),
     [anon_sym_GT_EQ] = ACTIONS(1906),
     [anon_sym_GT_GT] = ACTIONS(1906),
@@ -54788,6 +55454,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1906),
     [anon_sym_CARET_EQ] = ACTIONS(1906),
     [anon_sym_PIPE_EQ] = ACTIONS(1906),
+    [anon_sym_PIPE_GT] = ACTIONS(1906),
     [anon_sym_PIPE_PIPE] = ACTIONS(1906),
     [anon_sym_TILDE_PIPE] = ACTIONS(1906),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1906),
@@ -54908,6 +55575,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1920),
     [anon_sym_LT_EQ] = ACTIONS(1920),
     [anon_sym_LT_EQ_GT] = ACTIONS(1920),
+    [anon_sym_LT_GT] = ACTIONS(1920),
     [anon_sym_EQ_EQ] = ACTIONS(1920),
     [anon_sym_GT_EQ] = ACTIONS(1920),
     [anon_sym_GT_GT] = ACTIONS(1920),
@@ -54916,6 +55584,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1920),
     [anon_sym_CARET_EQ] = ACTIONS(1920),
     [anon_sym_PIPE_EQ] = ACTIONS(1920),
+    [anon_sym_PIPE_GT] = ACTIONS(1920),
     [anon_sym_PIPE_PIPE] = ACTIONS(1920),
     [anon_sym_TILDE_PIPE] = ACTIONS(1920),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1920),
@@ -55035,6 +55704,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2051),
     [anon_sym_LT_EQ] = ACTIONS(2051),
     [anon_sym_LT_EQ_GT] = ACTIONS(2051),
+    [anon_sym_LT_GT] = ACTIONS(2051),
     [anon_sym_EQ_EQ] = ACTIONS(2051),
     [anon_sym_GT_EQ] = ACTIONS(2051),
     [anon_sym_GT_GT] = ACTIONS(2051),
@@ -55043,6 +55713,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2051),
     [anon_sym_CARET_EQ] = ACTIONS(2051),
     [anon_sym_PIPE_EQ] = ACTIONS(2051),
+    [anon_sym_PIPE_GT] = ACTIONS(2051),
     [anon_sym_PIPE_PIPE] = ACTIONS(2051),
     [anon_sym_TILDE_PIPE] = ACTIONS(2051),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2051),
@@ -55164,6 +55835,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1924),
     [anon_sym_LT_EQ] = ACTIONS(1924),
     [anon_sym_LT_EQ_GT] = ACTIONS(1924),
+    [anon_sym_LT_GT] = ACTIONS(1924),
     [anon_sym_EQ_EQ] = ACTIONS(1924),
     [anon_sym_GT_EQ] = ACTIONS(1924),
     [anon_sym_GT_GT] = ACTIONS(1924),
@@ -55172,6 +55844,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1924),
     [anon_sym_CARET_EQ] = ACTIONS(1924),
     [anon_sym_PIPE_EQ] = ACTIONS(1924),
+    [anon_sym_PIPE_GT] = ACTIONS(1924),
     [anon_sym_PIPE_PIPE] = ACTIONS(1924),
     [anon_sym_TILDE_PIPE] = ACTIONS(1924),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1924),
@@ -55292,6 +55965,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1950),
     [anon_sym_LT_EQ] = ACTIONS(1950),
     [anon_sym_LT_EQ_GT] = ACTIONS(1950),
+    [anon_sym_LT_GT] = ACTIONS(1950),
     [anon_sym_EQ_EQ] = ACTIONS(1950),
     [anon_sym_GT_EQ] = ACTIONS(1950),
     [anon_sym_GT_GT] = ACTIONS(1950),
@@ -55300,6 +55974,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1950),
     [anon_sym_CARET_EQ] = ACTIONS(1950),
     [anon_sym_PIPE_EQ] = ACTIONS(1950),
+    [anon_sym_PIPE_GT] = ACTIONS(1950),
     [anon_sym_PIPE_PIPE] = ACTIONS(1950),
     [anon_sym_TILDE_PIPE] = ACTIONS(1950),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1950),
@@ -55420,6 +56095,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1954),
     [anon_sym_LT_EQ] = ACTIONS(1954),
     [anon_sym_LT_EQ_GT] = ACTIONS(1954),
+    [anon_sym_LT_GT] = ACTIONS(1954),
     [anon_sym_EQ_EQ] = ACTIONS(1954),
     [anon_sym_GT_EQ] = ACTIONS(1954),
     [anon_sym_GT_GT] = ACTIONS(1954),
@@ -55428,6 +56104,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1954),
     [anon_sym_CARET_EQ] = ACTIONS(1954),
     [anon_sym_PIPE_EQ] = ACTIONS(1954),
+    [anon_sym_PIPE_GT] = ACTIONS(1954),
     [anon_sym_PIPE_PIPE] = ACTIONS(1954),
     [anon_sym_TILDE_PIPE] = ACTIONS(1954),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1954),
@@ -55548,6 +56225,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1956),
     [anon_sym_LT_EQ] = ACTIONS(1956),
     [anon_sym_LT_EQ_GT] = ACTIONS(1956),
+    [anon_sym_LT_GT] = ACTIONS(1956),
     [anon_sym_EQ_EQ] = ACTIONS(1956),
     [anon_sym_GT_EQ] = ACTIONS(1956),
     [anon_sym_GT_GT] = ACTIONS(1956),
@@ -55556,6 +56234,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1956),
     [anon_sym_CARET_EQ] = ACTIONS(1956),
     [anon_sym_PIPE_EQ] = ACTIONS(1956),
+    [anon_sym_PIPE_GT] = ACTIONS(1956),
     [anon_sym_PIPE_PIPE] = ACTIONS(1956),
     [anon_sym_TILDE_PIPE] = ACTIONS(1956),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1956),
@@ -55676,6 +56355,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1982),
     [anon_sym_LT_EQ] = ACTIONS(1982),
     [anon_sym_LT_EQ_GT] = ACTIONS(1982),
+    [anon_sym_LT_GT] = ACTIONS(1982),
     [anon_sym_EQ_EQ] = ACTIONS(1982),
     [anon_sym_GT_EQ] = ACTIONS(1982),
     [anon_sym_GT_GT] = ACTIONS(1982),
@@ -55684,6 +56364,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1982),
     [anon_sym_CARET_EQ] = ACTIONS(1982),
     [anon_sym_PIPE_EQ] = ACTIONS(1982),
+    [anon_sym_PIPE_GT] = ACTIONS(1982),
     [anon_sym_PIPE_PIPE] = ACTIONS(1982),
     [anon_sym_TILDE_PIPE] = ACTIONS(1982),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1982),
@@ -55804,6 +56485,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1986),
     [anon_sym_LT_EQ] = ACTIONS(1986),
     [anon_sym_LT_EQ_GT] = ACTIONS(1986),
+    [anon_sym_LT_GT] = ACTIONS(1986),
     [anon_sym_EQ_EQ] = ACTIONS(1986),
     [anon_sym_GT_EQ] = ACTIONS(1986),
     [anon_sym_GT_GT] = ACTIONS(1986),
@@ -55812,6 +56494,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1986),
     [anon_sym_CARET_EQ] = ACTIONS(1986),
     [anon_sym_PIPE_EQ] = ACTIONS(1986),
+    [anon_sym_PIPE_GT] = ACTIONS(1986),
     [anon_sym_PIPE_PIPE] = ACTIONS(1986),
     [anon_sym_TILDE_PIPE] = ACTIONS(1986),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1986),
@@ -55932,6 +56615,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2012),
     [anon_sym_LT_EQ] = ACTIONS(2012),
     [anon_sym_LT_EQ_GT] = ACTIONS(2012),
+    [anon_sym_LT_GT] = ACTIONS(2012),
     [anon_sym_EQ_EQ] = ACTIONS(2012),
     [anon_sym_GT_EQ] = ACTIONS(2012),
     [anon_sym_GT_GT] = ACTIONS(2012),
@@ -55940,6 +56624,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2012),
     [anon_sym_CARET_EQ] = ACTIONS(2012),
     [anon_sym_PIPE_EQ] = ACTIONS(2012),
+    [anon_sym_PIPE_GT] = ACTIONS(2012),
     [anon_sym_PIPE_PIPE] = ACTIONS(2012),
     [anon_sym_TILDE_PIPE] = ACTIONS(2012),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2012),
@@ -56060,6 +56745,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1818),
     [anon_sym_LT_EQ] = ACTIONS(1818),
     [anon_sym_LT_EQ_GT] = ACTIONS(1818),
+    [anon_sym_LT_GT] = ACTIONS(1818),
     [anon_sym_EQ_EQ] = ACTIONS(1818),
     [anon_sym_GT_EQ] = ACTIONS(1818),
     [anon_sym_GT_GT] = ACTIONS(1818),
@@ -56068,6 +56754,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1818),
     [anon_sym_CARET_EQ] = ACTIONS(1818),
     [anon_sym_PIPE_EQ] = ACTIONS(1818),
+    [anon_sym_PIPE_GT] = ACTIONS(1818),
     [anon_sym_PIPE_PIPE] = ACTIONS(1818),
     [anon_sym_TILDE_PIPE] = ACTIONS(1818),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1818),
@@ -56188,6 +56875,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1824),
     [anon_sym_LT_EQ] = ACTIONS(1824),
     [anon_sym_LT_EQ_GT] = ACTIONS(1824),
+    [anon_sym_LT_GT] = ACTIONS(1824),
     [anon_sym_EQ_EQ] = ACTIONS(1824),
     [anon_sym_GT_EQ] = ACTIONS(1824),
     [anon_sym_GT_GT] = ACTIONS(1824),
@@ -56196,6 +56884,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1824),
     [anon_sym_CARET_EQ] = ACTIONS(1824),
     [anon_sym_PIPE_EQ] = ACTIONS(1824),
+    [anon_sym_PIPE_GT] = ACTIONS(1824),
     [anon_sym_PIPE_PIPE] = ACTIONS(1824),
     [anon_sym_TILDE_PIPE] = ACTIONS(1824),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1824),
@@ -56316,6 +57005,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1852),
     [anon_sym_LT_EQ] = ACTIONS(1852),
     [anon_sym_LT_EQ_GT] = ACTIONS(1852),
+    [anon_sym_LT_GT] = ACTIONS(1852),
     [anon_sym_EQ_EQ] = ACTIONS(1852),
     [anon_sym_GT_EQ] = ACTIONS(1852),
     [anon_sym_GT_GT] = ACTIONS(1852),
@@ -56324,6 +57014,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1852),
     [anon_sym_CARET_EQ] = ACTIONS(1852),
     [anon_sym_PIPE_EQ] = ACTIONS(1852),
+    [anon_sym_PIPE_GT] = ACTIONS(1852),
     [anon_sym_PIPE_PIPE] = ACTIONS(1852),
     [anon_sym_TILDE_PIPE] = ACTIONS(1852),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1852),
@@ -56444,6 +57135,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1856),
     [anon_sym_LT_EQ] = ACTIONS(1856),
     [anon_sym_LT_EQ_GT] = ACTIONS(1856),
+    [anon_sym_LT_GT] = ACTIONS(1856),
     [anon_sym_EQ_EQ] = ACTIONS(1856),
     [anon_sym_GT_EQ] = ACTIONS(1856),
     [anon_sym_GT_GT] = ACTIONS(1856),
@@ -56452,6 +57144,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1856),
     [anon_sym_CARET_EQ] = ACTIONS(1856),
     [anon_sym_PIPE_EQ] = ACTIONS(1856),
+    [anon_sym_PIPE_GT] = ACTIONS(1856),
     [anon_sym_PIPE_PIPE] = ACTIONS(1856),
     [anon_sym_TILDE_PIPE] = ACTIONS(1856),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1856),
@@ -56572,6 +57265,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1860),
     [anon_sym_LT_EQ] = ACTIONS(1860),
     [anon_sym_LT_EQ_GT] = ACTIONS(1860),
+    [anon_sym_LT_GT] = ACTIONS(1860),
     [anon_sym_EQ_EQ] = ACTIONS(1860),
     [anon_sym_GT_EQ] = ACTIONS(1860),
     [anon_sym_GT_GT] = ACTIONS(1860),
@@ -56580,6 +57274,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1860),
     [anon_sym_CARET_EQ] = ACTIONS(1860),
     [anon_sym_PIPE_EQ] = ACTIONS(1860),
+    [anon_sym_PIPE_GT] = ACTIONS(1860),
     [anon_sym_PIPE_PIPE] = ACTIONS(1860),
     [anon_sym_TILDE_PIPE] = ACTIONS(1860),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1860),
@@ -56700,6 +57395,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1890),
     [anon_sym_LT_EQ] = ACTIONS(1890),
     [anon_sym_LT_EQ_GT] = ACTIONS(1890),
+    [anon_sym_LT_GT] = ACTIONS(1890),
     [anon_sym_EQ_EQ] = ACTIONS(1890),
     [anon_sym_GT_EQ] = ACTIONS(1890),
     [anon_sym_GT_GT] = ACTIONS(1890),
@@ -56708,6 +57404,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1890),
     [anon_sym_CARET_EQ] = ACTIONS(1890),
     [anon_sym_PIPE_EQ] = ACTIONS(1890),
+    [anon_sym_PIPE_GT] = ACTIONS(1890),
     [anon_sym_PIPE_PIPE] = ACTIONS(1890),
     [anon_sym_TILDE_PIPE] = ACTIONS(1890),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1890),
@@ -56828,6 +57525,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1894),
     [anon_sym_LT_EQ] = ACTIONS(1894),
     [anon_sym_LT_EQ_GT] = ACTIONS(1894),
+    [anon_sym_LT_GT] = ACTIONS(1894),
     [anon_sym_EQ_EQ] = ACTIONS(1894),
     [anon_sym_GT_EQ] = ACTIONS(1894),
     [anon_sym_GT_GT] = ACTIONS(1894),
@@ -56836,6 +57534,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1894),
     [anon_sym_CARET_EQ] = ACTIONS(1894),
     [anon_sym_PIPE_EQ] = ACTIONS(1894),
+    [anon_sym_PIPE_GT] = ACTIONS(1894),
     [anon_sym_PIPE_PIPE] = ACTIONS(1894),
     [anon_sym_TILDE_PIPE] = ACTIONS(1894),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1894),
@@ -56956,6 +57655,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1952),
     [anon_sym_LT_EQ] = ACTIONS(1952),
     [anon_sym_LT_EQ_GT] = ACTIONS(1952),
+    [anon_sym_LT_GT] = ACTIONS(1952),
     [anon_sym_EQ_EQ] = ACTIONS(1952),
     [anon_sym_GT_EQ] = ACTIONS(1952),
     [anon_sym_GT_GT] = ACTIONS(1952),
@@ -56964,6 +57664,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1952),
     [anon_sym_CARET_EQ] = ACTIONS(1952),
     [anon_sym_PIPE_EQ] = ACTIONS(1952),
+    [anon_sym_PIPE_GT] = ACTIONS(1952),
     [anon_sym_PIPE_PIPE] = ACTIONS(1952),
     [anon_sym_TILDE_PIPE] = ACTIONS(1952),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1952),
@@ -57084,6 +57785,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1898),
     [anon_sym_LT_EQ] = ACTIONS(1898),
     [anon_sym_LT_EQ_GT] = ACTIONS(1898),
+    [anon_sym_LT_GT] = ACTIONS(1898),
     [anon_sym_EQ_EQ] = ACTIONS(1898),
     [anon_sym_GT_EQ] = ACTIONS(1898),
     [anon_sym_GT_GT] = ACTIONS(1898),
@@ -57092,6 +57794,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1898),
     [anon_sym_CARET_EQ] = ACTIONS(1898),
     [anon_sym_PIPE_EQ] = ACTIONS(1898),
+    [anon_sym_PIPE_GT] = ACTIONS(1898),
     [anon_sym_PIPE_PIPE] = ACTIONS(1898),
     [anon_sym_TILDE_PIPE] = ACTIONS(1898),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1898),
@@ -57212,6 +57915,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1902),
     [anon_sym_LT_EQ] = ACTIONS(1902),
     [anon_sym_LT_EQ_GT] = ACTIONS(1902),
+    [anon_sym_LT_GT] = ACTIONS(1902),
     [anon_sym_EQ_EQ] = ACTIONS(1902),
     [anon_sym_GT_EQ] = ACTIONS(1902),
     [anon_sym_GT_GT] = ACTIONS(1902),
@@ -57220,6 +57924,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1902),
     [anon_sym_CARET_EQ] = ACTIONS(1902),
     [anon_sym_PIPE_EQ] = ACTIONS(1902),
+    [anon_sym_PIPE_GT] = ACTIONS(1902),
     [anon_sym_PIPE_PIPE] = ACTIONS(1902),
     [anon_sym_TILDE_PIPE] = ACTIONS(1902),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1902),
@@ -57340,6 +58045,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1906),
     [anon_sym_LT_EQ] = ACTIONS(1906),
     [anon_sym_LT_EQ_GT] = ACTIONS(1906),
+    [anon_sym_LT_GT] = ACTIONS(1906),
     [anon_sym_EQ_EQ] = ACTIONS(1906),
     [anon_sym_GT_EQ] = ACTIONS(1906),
     [anon_sym_GT_GT] = ACTIONS(1906),
@@ -57348,6 +58054,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1906),
     [anon_sym_CARET_EQ] = ACTIONS(1906),
     [anon_sym_PIPE_EQ] = ACTIONS(1906),
+    [anon_sym_PIPE_GT] = ACTIONS(1906),
     [anon_sym_PIPE_PIPE] = ACTIONS(1906),
     [anon_sym_TILDE_PIPE] = ACTIONS(1906),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1906),
@@ -57468,6 +58175,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1908),
     [anon_sym_LT_EQ] = ACTIONS(1908),
     [anon_sym_LT_EQ_GT] = ACTIONS(1908),
+    [anon_sym_LT_GT] = ACTIONS(1908),
     [anon_sym_EQ_EQ] = ACTIONS(1908),
     [anon_sym_GT_EQ] = ACTIONS(1908),
     [anon_sym_GT_GT] = ACTIONS(1908),
@@ -57476,6 +58184,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1908),
     [anon_sym_CARET_EQ] = ACTIONS(1908),
     [anon_sym_PIPE_EQ] = ACTIONS(1908),
+    [anon_sym_PIPE_GT] = ACTIONS(1908),
     [anon_sym_PIPE_PIPE] = ACTIONS(1908),
     [anon_sym_TILDE_PIPE] = ACTIONS(1908),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1908),
@@ -57596,6 +58305,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1910),
     [anon_sym_LT_EQ] = ACTIONS(1910),
     [anon_sym_LT_EQ_GT] = ACTIONS(1910),
+    [anon_sym_LT_GT] = ACTIONS(1910),
     [anon_sym_EQ_EQ] = ACTIONS(1910),
     [anon_sym_GT_EQ] = ACTIONS(1910),
     [anon_sym_GT_GT] = ACTIONS(1910),
@@ -57604,6 +58314,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1910),
     [anon_sym_CARET_EQ] = ACTIONS(1910),
     [anon_sym_PIPE_EQ] = ACTIONS(1910),
+    [anon_sym_PIPE_GT] = ACTIONS(1910),
     [anon_sym_PIPE_PIPE] = ACTIONS(1910),
     [anon_sym_TILDE_PIPE] = ACTIONS(1910),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1910),
@@ -57724,6 +58435,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1912),
     [anon_sym_LT_EQ] = ACTIONS(1912),
     [anon_sym_LT_EQ_GT] = ACTIONS(1912),
+    [anon_sym_LT_GT] = ACTIONS(1912),
     [anon_sym_EQ_EQ] = ACTIONS(1912),
     [anon_sym_GT_EQ] = ACTIONS(1912),
     [anon_sym_GT_GT] = ACTIONS(1912),
@@ -57732,6 +58444,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1912),
     [anon_sym_CARET_EQ] = ACTIONS(1912),
     [anon_sym_PIPE_EQ] = ACTIONS(1912),
+    [anon_sym_PIPE_GT] = ACTIONS(1912),
     [anon_sym_PIPE_PIPE] = ACTIONS(1912),
     [anon_sym_TILDE_PIPE] = ACTIONS(1912),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1912),
@@ -57852,6 +58565,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1914),
     [anon_sym_LT_EQ] = ACTIONS(1914),
     [anon_sym_LT_EQ_GT] = ACTIONS(1914),
+    [anon_sym_LT_GT] = ACTIONS(1914),
     [anon_sym_EQ_EQ] = ACTIONS(1914),
     [anon_sym_GT_EQ] = ACTIONS(1914),
     [anon_sym_GT_GT] = ACTIONS(1914),
@@ -57860,6 +58574,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1914),
     [anon_sym_CARET_EQ] = ACTIONS(1914),
     [anon_sym_PIPE_EQ] = ACTIONS(1914),
+    [anon_sym_PIPE_GT] = ACTIONS(1914),
     [anon_sym_PIPE_PIPE] = ACTIONS(1914),
     [anon_sym_TILDE_PIPE] = ACTIONS(1914),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1914),
@@ -57980,6 +58695,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1916),
     [anon_sym_LT_EQ] = ACTIONS(1916),
     [anon_sym_LT_EQ_GT] = ACTIONS(1916),
+    [anon_sym_LT_GT] = ACTIONS(1916),
     [anon_sym_EQ_EQ] = ACTIONS(1916),
     [anon_sym_GT_EQ] = ACTIONS(1916),
     [anon_sym_GT_GT] = ACTIONS(1916),
@@ -57988,6 +58704,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1916),
     [anon_sym_CARET_EQ] = ACTIONS(1916),
     [anon_sym_PIPE_EQ] = ACTIONS(1916),
+    [anon_sym_PIPE_GT] = ACTIONS(1916),
     [anon_sym_PIPE_PIPE] = ACTIONS(1916),
     [anon_sym_TILDE_PIPE] = ACTIONS(1916),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1916),
@@ -58108,6 +58825,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1818),
     [anon_sym_LT_EQ] = ACTIONS(1818),
     [anon_sym_LT_EQ_GT] = ACTIONS(1818),
+    [anon_sym_LT_GT] = ACTIONS(1818),
     [anon_sym_EQ_EQ] = ACTIONS(1818),
     [anon_sym_GT_EQ] = ACTIONS(1818),
     [anon_sym_GT_GT] = ACTIONS(1818),
@@ -58116,6 +58834,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1818),
     [anon_sym_CARET_EQ] = ACTIONS(1818),
     [anon_sym_PIPE_EQ] = ACTIONS(1818),
+    [anon_sym_PIPE_GT] = ACTIONS(1818),
     [anon_sym_PIPE_PIPE] = ACTIONS(1818),
     [anon_sym_TILDE_PIPE] = ACTIONS(1818),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1818),
@@ -58236,6 +58955,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1824),
     [anon_sym_LT_EQ] = ACTIONS(1824),
     [anon_sym_LT_EQ_GT] = ACTIONS(1824),
+    [anon_sym_LT_GT] = ACTIONS(1824),
     [anon_sym_EQ_EQ] = ACTIONS(1824),
     [anon_sym_GT_EQ] = ACTIONS(1824),
     [anon_sym_GT_GT] = ACTIONS(1824),
@@ -58244,6 +58964,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1824),
     [anon_sym_CARET_EQ] = ACTIONS(1824),
     [anon_sym_PIPE_EQ] = ACTIONS(1824),
+    [anon_sym_PIPE_GT] = ACTIONS(1824),
     [anon_sym_PIPE_PIPE] = ACTIONS(1824),
     [anon_sym_TILDE_PIPE] = ACTIONS(1824),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1824),
@@ -58364,6 +59085,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1852),
     [anon_sym_LT_EQ] = ACTIONS(1852),
     [anon_sym_LT_EQ_GT] = ACTIONS(1852),
+    [anon_sym_LT_GT] = ACTIONS(1852),
     [anon_sym_EQ_EQ] = ACTIONS(1852),
     [anon_sym_GT_EQ] = ACTIONS(1852),
     [anon_sym_GT_GT] = ACTIONS(1852),
@@ -58372,6 +59094,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1852),
     [anon_sym_CARET_EQ] = ACTIONS(1852),
     [anon_sym_PIPE_EQ] = ACTIONS(1852),
+    [anon_sym_PIPE_GT] = ACTIONS(1852),
     [anon_sym_PIPE_PIPE] = ACTIONS(1852),
     [anon_sym_TILDE_PIPE] = ACTIONS(1852),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1852),
@@ -58492,6 +59215,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1856),
     [anon_sym_LT_EQ] = ACTIONS(1856),
     [anon_sym_LT_EQ_GT] = ACTIONS(1856),
+    [anon_sym_LT_GT] = ACTIONS(1856),
     [anon_sym_EQ_EQ] = ACTIONS(1856),
     [anon_sym_GT_EQ] = ACTIONS(1856),
     [anon_sym_GT_GT] = ACTIONS(1856),
@@ -58500,6 +59224,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1856),
     [anon_sym_CARET_EQ] = ACTIONS(1856),
     [anon_sym_PIPE_EQ] = ACTIONS(1856),
+    [anon_sym_PIPE_GT] = ACTIONS(1856),
     [anon_sym_PIPE_PIPE] = ACTIONS(1856),
     [anon_sym_TILDE_PIPE] = ACTIONS(1856),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1856),
@@ -58620,6 +59345,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1952),
     [anon_sym_LT_EQ] = ACTIONS(1952),
     [anon_sym_LT_EQ_GT] = ACTIONS(1952),
+    [anon_sym_LT_GT] = ACTIONS(1952),
     [anon_sym_EQ_EQ] = ACTIONS(1952),
     [anon_sym_GT_EQ] = ACTIONS(1952),
     [anon_sym_GT_GT] = ACTIONS(1952),
@@ -58628,6 +59354,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1952),
     [anon_sym_CARET_EQ] = ACTIONS(1952),
     [anon_sym_PIPE_EQ] = ACTIONS(1952),
+    [anon_sym_PIPE_GT] = ACTIONS(1952),
     [anon_sym_PIPE_PIPE] = ACTIONS(1952),
     [anon_sym_TILDE_PIPE] = ACTIONS(1952),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1952),
@@ -58748,6 +59475,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1860),
     [anon_sym_LT_EQ] = ACTIONS(1860),
     [anon_sym_LT_EQ_GT] = ACTIONS(1860),
+    [anon_sym_LT_GT] = ACTIONS(1860),
     [anon_sym_EQ_EQ] = ACTIONS(1860),
     [anon_sym_GT_EQ] = ACTIONS(1860),
     [anon_sym_GT_GT] = ACTIONS(1860),
@@ -58756,6 +59484,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1860),
     [anon_sym_CARET_EQ] = ACTIONS(1860),
     [anon_sym_PIPE_EQ] = ACTIONS(1860),
+    [anon_sym_PIPE_GT] = ACTIONS(1860),
     [anon_sym_PIPE_PIPE] = ACTIONS(1860),
     [anon_sym_TILDE_PIPE] = ACTIONS(1860),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1860),
@@ -58876,6 +59605,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1920),
     [anon_sym_LT_EQ] = ACTIONS(1920),
     [anon_sym_LT_EQ_GT] = ACTIONS(1920),
+    [anon_sym_LT_GT] = ACTIONS(1920),
     [anon_sym_EQ_EQ] = ACTIONS(1920),
     [anon_sym_GT_EQ] = ACTIONS(1920),
     [anon_sym_GT_GT] = ACTIONS(1920),
@@ -58884,6 +59614,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1920),
     [anon_sym_CARET_EQ] = ACTIONS(1920),
     [anon_sym_PIPE_EQ] = ACTIONS(1920),
+    [anon_sym_PIPE_GT] = ACTIONS(1920),
     [anon_sym_PIPE_PIPE] = ACTIONS(1920),
     [anon_sym_TILDE_PIPE] = ACTIONS(1920),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1920),
@@ -59004,6 +59735,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1950),
     [anon_sym_LT_EQ] = ACTIONS(1950),
     [anon_sym_LT_EQ_GT] = ACTIONS(1950),
+    [anon_sym_LT_GT] = ACTIONS(1950),
     [anon_sym_EQ_EQ] = ACTIONS(1950),
     [anon_sym_GT_EQ] = ACTIONS(1950),
     [anon_sym_GT_GT] = ACTIONS(1950),
@@ -59012,6 +59744,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1950),
     [anon_sym_CARET_EQ] = ACTIONS(1950),
     [anon_sym_PIPE_EQ] = ACTIONS(1950),
+    [anon_sym_PIPE_GT] = ACTIONS(1950),
     [anon_sym_PIPE_PIPE] = ACTIONS(1950),
     [anon_sym_TILDE_PIPE] = ACTIONS(1950),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1950),
@@ -59132,6 +59865,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1954),
     [anon_sym_LT_EQ] = ACTIONS(1954),
     [anon_sym_LT_EQ_GT] = ACTIONS(1954),
+    [anon_sym_LT_GT] = ACTIONS(1954),
     [anon_sym_EQ_EQ] = ACTIONS(1954),
     [anon_sym_GT_EQ] = ACTIONS(1954),
     [anon_sym_GT_GT] = ACTIONS(1954),
@@ -59140,6 +59874,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1954),
     [anon_sym_CARET_EQ] = ACTIONS(1954),
     [anon_sym_PIPE_EQ] = ACTIONS(1954),
+    [anon_sym_PIPE_GT] = ACTIONS(1954),
     [anon_sym_PIPE_PIPE] = ACTIONS(1954),
     [anon_sym_TILDE_PIPE] = ACTIONS(1954),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1954),
@@ -59260,6 +59995,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1890),
     [anon_sym_LT_EQ] = ACTIONS(1890),
     [anon_sym_LT_EQ_GT] = ACTIONS(1890),
+    [anon_sym_LT_GT] = ACTIONS(1890),
     [anon_sym_EQ_EQ] = ACTIONS(1890),
     [anon_sym_GT_EQ] = ACTIONS(1890),
     [anon_sym_GT_GT] = ACTIONS(1890),
@@ -59268,6 +60004,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1890),
     [anon_sym_CARET_EQ] = ACTIONS(1890),
     [anon_sym_PIPE_EQ] = ACTIONS(1890),
+    [anon_sym_PIPE_GT] = ACTIONS(1890),
     [anon_sym_PIPE_PIPE] = ACTIONS(1890),
     [anon_sym_TILDE_PIPE] = ACTIONS(1890),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1890),
@@ -59388,6 +60125,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1894),
     [anon_sym_LT_EQ] = ACTIONS(1894),
     [anon_sym_LT_EQ_GT] = ACTIONS(1894),
+    [anon_sym_LT_GT] = ACTIONS(1894),
     [anon_sym_EQ_EQ] = ACTIONS(1894),
     [anon_sym_GT_EQ] = ACTIONS(1894),
     [anon_sym_GT_GT] = ACTIONS(1894),
@@ -59396,6 +60134,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1894),
     [anon_sym_CARET_EQ] = ACTIONS(1894),
     [anon_sym_PIPE_EQ] = ACTIONS(1894),
+    [anon_sym_PIPE_GT] = ACTIONS(1894),
     [anon_sym_PIPE_PIPE] = ACTIONS(1894),
     [anon_sym_TILDE_PIPE] = ACTIONS(1894),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1894),
@@ -59516,6 +60255,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1906),
     [anon_sym_LT_EQ] = ACTIONS(1906),
     [anon_sym_LT_EQ_GT] = ACTIONS(1906),
+    [anon_sym_LT_GT] = ACTIONS(1906),
     [anon_sym_EQ_EQ] = ACTIONS(1906),
     [anon_sym_GT_EQ] = ACTIONS(1906),
     [anon_sym_GT_GT] = ACTIONS(1906),
@@ -59524,6 +60264,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1906),
     [anon_sym_CARET_EQ] = ACTIONS(1906),
     [anon_sym_PIPE_EQ] = ACTIONS(1906),
+    [anon_sym_PIPE_GT] = ACTIONS(1906),
     [anon_sym_PIPE_PIPE] = ACTIONS(1906),
     [anon_sym_TILDE_PIPE] = ACTIONS(1906),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1906),
@@ -59644,6 +60385,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1890),
     [anon_sym_LT_EQ] = ACTIONS(1890),
     [anon_sym_LT_EQ_GT] = ACTIONS(1890),
+    [anon_sym_LT_GT] = ACTIONS(1890),
     [anon_sym_EQ_EQ] = ACTIONS(1890),
     [anon_sym_GT_EQ] = ACTIONS(1890),
     [anon_sym_GT_GT] = ACTIONS(1890),
@@ -59652,6 +60394,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1890),
     [anon_sym_CARET_EQ] = ACTIONS(1890),
     [anon_sym_PIPE_EQ] = ACTIONS(1890),
+    [anon_sym_PIPE_GT] = ACTIONS(1890),
     [anon_sym_PIPE_PIPE] = ACTIONS(1890),
     [anon_sym_TILDE_PIPE] = ACTIONS(1890),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1890),
@@ -59772,6 +60515,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1894),
     [anon_sym_LT_EQ] = ACTIONS(1894),
     [anon_sym_LT_EQ_GT] = ACTIONS(1894),
+    [anon_sym_LT_GT] = ACTIONS(1894),
     [anon_sym_EQ_EQ] = ACTIONS(1894),
     [anon_sym_GT_EQ] = ACTIONS(1894),
     [anon_sym_GT_GT] = ACTIONS(1894),
@@ -59780,6 +60524,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1894),
     [anon_sym_CARET_EQ] = ACTIONS(1894),
     [anon_sym_PIPE_EQ] = ACTIONS(1894),
+    [anon_sym_PIPE_GT] = ACTIONS(1894),
     [anon_sym_PIPE_PIPE] = ACTIONS(1894),
     [anon_sym_TILDE_PIPE] = ACTIONS(1894),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1894),
@@ -59900,6 +60645,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1906),
     [anon_sym_LT_EQ] = ACTIONS(1906),
     [anon_sym_LT_EQ_GT] = ACTIONS(1906),
+    [anon_sym_LT_GT] = ACTIONS(1906),
     [anon_sym_EQ_EQ] = ACTIONS(1906),
     [anon_sym_GT_EQ] = ACTIONS(1906),
     [anon_sym_GT_GT] = ACTIONS(1906),
@@ -59908,6 +60654,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1906),
     [anon_sym_CARET_EQ] = ACTIONS(1906),
     [anon_sym_PIPE_EQ] = ACTIONS(1906),
+    [anon_sym_PIPE_GT] = ACTIONS(1906),
     [anon_sym_PIPE_PIPE] = ACTIONS(1906),
     [anon_sym_TILDE_PIPE] = ACTIONS(1906),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1906),
@@ -60028,6 +60775,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1920),
     [anon_sym_LT_EQ] = ACTIONS(1920),
     [anon_sym_LT_EQ_GT] = ACTIONS(1920),
+    [anon_sym_LT_GT] = ACTIONS(1920),
     [anon_sym_EQ_EQ] = ACTIONS(1920),
     [anon_sym_GT_EQ] = ACTIONS(1920),
     [anon_sym_GT_GT] = ACTIONS(1920),
@@ -60036,6 +60784,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1920),
     [anon_sym_CARET_EQ] = ACTIONS(1920),
     [anon_sym_PIPE_EQ] = ACTIONS(1920),
+    [anon_sym_PIPE_GT] = ACTIONS(1920),
     [anon_sym_PIPE_PIPE] = ACTIONS(1920),
     [anon_sym_TILDE_PIPE] = ACTIONS(1920),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1920),
@@ -60156,6 +60905,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1924),
     [anon_sym_LT_EQ] = ACTIONS(1924),
     [anon_sym_LT_EQ_GT] = ACTIONS(1924),
+    [anon_sym_LT_GT] = ACTIONS(1924),
     [anon_sym_EQ_EQ] = ACTIONS(1924),
     [anon_sym_GT_EQ] = ACTIONS(1924),
     [anon_sym_GT_GT] = ACTIONS(1924),
@@ -60164,6 +60914,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1924),
     [anon_sym_CARET_EQ] = ACTIONS(1924),
     [anon_sym_PIPE_EQ] = ACTIONS(1924),
+    [anon_sym_PIPE_GT] = ACTIONS(1924),
     [anon_sym_PIPE_PIPE] = ACTIONS(1924),
     [anon_sym_TILDE_PIPE] = ACTIONS(1924),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1924),
@@ -60284,6 +61035,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1920),
     [anon_sym_LT_EQ] = ACTIONS(1920),
     [anon_sym_LT_EQ_GT] = ACTIONS(1920),
+    [anon_sym_LT_GT] = ACTIONS(1920),
     [anon_sym_EQ_EQ] = ACTIONS(1920),
     [anon_sym_GT_EQ] = ACTIONS(1920),
     [anon_sym_GT_GT] = ACTIONS(1920),
@@ -60292,6 +61044,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1920),
     [anon_sym_CARET_EQ] = ACTIONS(1920),
     [anon_sym_PIPE_EQ] = ACTIONS(1920),
+    [anon_sym_PIPE_GT] = ACTIONS(1920),
     [anon_sym_PIPE_PIPE] = ACTIONS(1920),
     [anon_sym_TILDE_PIPE] = ACTIONS(1920),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1920),
@@ -60412,6 +61165,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1954),
     [anon_sym_LT_EQ] = ACTIONS(1954),
     [anon_sym_LT_EQ_GT] = ACTIONS(1954),
+    [anon_sym_LT_GT] = ACTIONS(1954),
     [anon_sym_EQ_EQ] = ACTIONS(1954),
     [anon_sym_GT_EQ] = ACTIONS(1954),
     [anon_sym_GT_GT] = ACTIONS(1954),
@@ -60420,6 +61174,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1954),
     [anon_sym_CARET_EQ] = ACTIONS(1954),
     [anon_sym_PIPE_EQ] = ACTIONS(1954),
+    [anon_sym_PIPE_GT] = ACTIONS(1954),
     [anon_sym_PIPE_PIPE] = ACTIONS(1954),
     [anon_sym_TILDE_PIPE] = ACTIONS(1954),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1954),
@@ -60540,6 +61295,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1956),
     [anon_sym_LT_EQ] = ACTIONS(1956),
     [anon_sym_LT_EQ_GT] = ACTIONS(1956),
+    [anon_sym_LT_GT] = ACTIONS(1956),
     [anon_sym_EQ_EQ] = ACTIONS(1956),
     [anon_sym_GT_EQ] = ACTIONS(1956),
     [anon_sym_GT_GT] = ACTIONS(1956),
@@ -60548,6 +61304,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1956),
     [anon_sym_CARET_EQ] = ACTIONS(1956),
     [anon_sym_PIPE_EQ] = ACTIONS(1956),
+    [anon_sym_PIPE_GT] = ACTIONS(1956),
     [anon_sym_PIPE_PIPE] = ACTIONS(1956),
     [anon_sym_TILDE_PIPE] = ACTIONS(1956),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1956),
@@ -60668,6 +61425,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1982),
     [anon_sym_LT_EQ] = ACTIONS(1982),
     [anon_sym_LT_EQ_GT] = ACTIONS(1982),
+    [anon_sym_LT_GT] = ACTIONS(1982),
     [anon_sym_EQ_EQ] = ACTIONS(1982),
     [anon_sym_GT_EQ] = ACTIONS(1982),
     [anon_sym_GT_GT] = ACTIONS(1982),
@@ -60676,6 +61434,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1982),
     [anon_sym_CARET_EQ] = ACTIONS(1982),
     [anon_sym_PIPE_EQ] = ACTIONS(1982),
+    [anon_sym_PIPE_GT] = ACTIONS(1982),
     [anon_sym_PIPE_PIPE] = ACTIONS(1982),
     [anon_sym_TILDE_PIPE] = ACTIONS(1982),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1982),
@@ -60796,6 +61555,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1986),
     [anon_sym_LT_EQ] = ACTIONS(1986),
     [anon_sym_LT_EQ_GT] = ACTIONS(1986),
+    [anon_sym_LT_GT] = ACTIONS(1986),
     [anon_sym_EQ_EQ] = ACTIONS(1986),
     [anon_sym_GT_EQ] = ACTIONS(1986),
     [anon_sym_GT_GT] = ACTIONS(1986),
@@ -60804,6 +61564,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1986),
     [anon_sym_CARET_EQ] = ACTIONS(1986),
     [anon_sym_PIPE_EQ] = ACTIONS(1986),
+    [anon_sym_PIPE_GT] = ACTIONS(1986),
     [anon_sym_PIPE_PIPE] = ACTIONS(1986),
     [anon_sym_TILDE_PIPE] = ACTIONS(1986),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1986),
@@ -60924,6 +61685,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2012),
     [anon_sym_LT_EQ] = ACTIONS(2012),
     [anon_sym_LT_EQ_GT] = ACTIONS(2012),
+    [anon_sym_LT_GT] = ACTIONS(2012),
     [anon_sym_EQ_EQ] = ACTIONS(2012),
     [anon_sym_GT_EQ] = ACTIONS(2012),
     [anon_sym_GT_GT] = ACTIONS(2012),
@@ -60932,6 +61694,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2012),
     [anon_sym_CARET_EQ] = ACTIONS(2012),
     [anon_sym_PIPE_EQ] = ACTIONS(2012),
+    [anon_sym_PIPE_GT] = ACTIONS(2012),
     [anon_sym_PIPE_PIPE] = ACTIONS(2012),
     [anon_sym_TILDE_PIPE] = ACTIONS(2012),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2012),
@@ -61052,6 +61815,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1818),
     [anon_sym_LT_EQ] = ACTIONS(1818),
     [anon_sym_LT_EQ_GT] = ACTIONS(1818),
+    [anon_sym_LT_GT] = ACTIONS(1818),
     [anon_sym_EQ_EQ] = ACTIONS(1818),
     [anon_sym_GT_EQ] = ACTIONS(1818),
     [anon_sym_GT_GT] = ACTIONS(1818),
@@ -61060,6 +61824,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1818),
     [anon_sym_CARET_EQ] = ACTIONS(1818),
     [anon_sym_PIPE_EQ] = ACTIONS(1818),
+    [anon_sym_PIPE_GT] = ACTIONS(1818),
     [anon_sym_PIPE_PIPE] = ACTIONS(1818),
     [anon_sym_TILDE_PIPE] = ACTIONS(1818),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1818),
@@ -61180,6 +61945,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1824),
     [anon_sym_LT_EQ] = ACTIONS(1824),
     [anon_sym_LT_EQ_GT] = ACTIONS(1824),
+    [anon_sym_LT_GT] = ACTIONS(1824),
     [anon_sym_EQ_EQ] = ACTIONS(1824),
     [anon_sym_GT_EQ] = ACTIONS(1824),
     [anon_sym_GT_GT] = ACTIONS(1824),
@@ -61188,6 +61954,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1824),
     [anon_sym_CARET_EQ] = ACTIONS(1824),
     [anon_sym_PIPE_EQ] = ACTIONS(1824),
+    [anon_sym_PIPE_GT] = ACTIONS(1824),
     [anon_sym_PIPE_PIPE] = ACTIONS(1824),
     [anon_sym_TILDE_PIPE] = ACTIONS(1824),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1824),
@@ -61308,6 +62075,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1852),
     [anon_sym_LT_EQ] = ACTIONS(1852),
     [anon_sym_LT_EQ_GT] = ACTIONS(1852),
+    [anon_sym_LT_GT] = ACTIONS(1852),
     [anon_sym_EQ_EQ] = ACTIONS(1852),
     [anon_sym_GT_EQ] = ACTIONS(1852),
     [anon_sym_GT_GT] = ACTIONS(1852),
@@ -61316,6 +62084,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1852),
     [anon_sym_CARET_EQ] = ACTIONS(1852),
     [anon_sym_PIPE_EQ] = ACTIONS(1852),
+    [anon_sym_PIPE_GT] = ACTIONS(1852),
     [anon_sym_PIPE_PIPE] = ACTIONS(1852),
     [anon_sym_TILDE_PIPE] = ACTIONS(1852),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1852),
@@ -61436,6 +62205,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1856),
     [anon_sym_LT_EQ] = ACTIONS(1856),
     [anon_sym_LT_EQ_GT] = ACTIONS(1856),
+    [anon_sym_LT_GT] = ACTIONS(1856),
     [anon_sym_EQ_EQ] = ACTIONS(1856),
     [anon_sym_GT_EQ] = ACTIONS(1856),
     [anon_sym_GT_GT] = ACTIONS(1856),
@@ -61444,6 +62214,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1856),
     [anon_sym_CARET_EQ] = ACTIONS(1856),
     [anon_sym_PIPE_EQ] = ACTIONS(1856),
+    [anon_sym_PIPE_GT] = ACTIONS(1856),
     [anon_sym_PIPE_PIPE] = ACTIONS(1856),
     [anon_sym_TILDE_PIPE] = ACTIONS(1856),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1856),
@@ -61564,6 +62335,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1860),
     [anon_sym_LT_EQ] = ACTIONS(1860),
     [anon_sym_LT_EQ_GT] = ACTIONS(1860),
+    [anon_sym_LT_GT] = ACTIONS(1860),
     [anon_sym_EQ_EQ] = ACTIONS(1860),
     [anon_sym_GT_EQ] = ACTIONS(1860),
     [anon_sym_GT_GT] = ACTIONS(1860),
@@ -61572,6 +62344,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1860),
     [anon_sym_CARET_EQ] = ACTIONS(1860),
     [anon_sym_PIPE_EQ] = ACTIONS(1860),
+    [anon_sym_PIPE_GT] = ACTIONS(1860),
     [anon_sym_PIPE_PIPE] = ACTIONS(1860),
     [anon_sym_TILDE_PIPE] = ACTIONS(1860),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1860),
@@ -61692,6 +62465,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1924),
     [anon_sym_LT_EQ] = ACTIONS(1924),
     [anon_sym_LT_EQ_GT] = ACTIONS(1924),
+    [anon_sym_LT_GT] = ACTIONS(1924),
     [anon_sym_EQ_EQ] = ACTIONS(1924),
     [anon_sym_GT_EQ] = ACTIONS(1924),
     [anon_sym_GT_GT] = ACTIONS(1924),
@@ -61700,6 +62474,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1924),
     [anon_sym_CARET_EQ] = ACTIONS(1924),
     [anon_sym_PIPE_EQ] = ACTIONS(1924),
+    [anon_sym_PIPE_GT] = ACTIONS(1924),
     [anon_sym_PIPE_PIPE] = ACTIONS(1924),
     [anon_sym_TILDE_PIPE] = ACTIONS(1924),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1924),
@@ -61820,6 +62595,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1898),
     [anon_sym_LT_EQ] = ACTIONS(1898),
     [anon_sym_LT_EQ_GT] = ACTIONS(1898),
+    [anon_sym_LT_GT] = ACTIONS(1898),
     [anon_sym_EQ_EQ] = ACTIONS(1898),
     [anon_sym_GT_EQ] = ACTIONS(1898),
     [anon_sym_GT_GT] = ACTIONS(1898),
@@ -61828,6 +62604,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1898),
     [anon_sym_CARET_EQ] = ACTIONS(1898),
     [anon_sym_PIPE_EQ] = ACTIONS(1898),
+    [anon_sym_PIPE_GT] = ACTIONS(1898),
     [anon_sym_PIPE_PIPE] = ACTIONS(1898),
     [anon_sym_TILDE_PIPE] = ACTIONS(1898),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1898),
@@ -61948,6 +62725,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1902),
     [anon_sym_LT_EQ] = ACTIONS(1902),
     [anon_sym_LT_EQ_GT] = ACTIONS(1902),
+    [anon_sym_LT_GT] = ACTIONS(1902),
     [anon_sym_EQ_EQ] = ACTIONS(1902),
     [anon_sym_GT_EQ] = ACTIONS(1902),
     [anon_sym_GT_GT] = ACTIONS(1902),
@@ -61956,6 +62734,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1902),
     [anon_sym_CARET_EQ] = ACTIONS(1902),
     [anon_sym_PIPE_EQ] = ACTIONS(1902),
+    [anon_sym_PIPE_GT] = ACTIONS(1902),
     [anon_sym_PIPE_PIPE] = ACTIONS(1902),
     [anon_sym_TILDE_PIPE] = ACTIONS(1902),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1902),
@@ -62076,6 +62855,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1908),
     [anon_sym_LT_EQ] = ACTIONS(1908),
     [anon_sym_LT_EQ_GT] = ACTIONS(1908),
+    [anon_sym_LT_GT] = ACTIONS(1908),
     [anon_sym_EQ_EQ] = ACTIONS(1908),
     [anon_sym_GT_EQ] = ACTIONS(1908),
     [anon_sym_GT_GT] = ACTIONS(1908),
@@ -62084,6 +62864,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1908),
     [anon_sym_CARET_EQ] = ACTIONS(1908),
     [anon_sym_PIPE_EQ] = ACTIONS(1908),
+    [anon_sym_PIPE_GT] = ACTIONS(1908),
     [anon_sym_PIPE_PIPE] = ACTIONS(1908),
     [anon_sym_TILDE_PIPE] = ACTIONS(1908),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1908),
@@ -62204,6 +62985,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1910),
     [anon_sym_LT_EQ] = ACTIONS(1910),
     [anon_sym_LT_EQ_GT] = ACTIONS(1910),
+    [anon_sym_LT_GT] = ACTIONS(1910),
     [anon_sym_EQ_EQ] = ACTIONS(1910),
     [anon_sym_GT_EQ] = ACTIONS(1910),
     [anon_sym_GT_GT] = ACTIONS(1910),
@@ -62212,6 +62994,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1910),
     [anon_sym_CARET_EQ] = ACTIONS(1910),
     [anon_sym_PIPE_EQ] = ACTIONS(1910),
+    [anon_sym_PIPE_GT] = ACTIONS(1910),
     [anon_sym_PIPE_PIPE] = ACTIONS(1910),
     [anon_sym_TILDE_PIPE] = ACTIONS(1910),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1910),
@@ -62332,6 +63115,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1912),
     [anon_sym_LT_EQ] = ACTIONS(1912),
     [anon_sym_LT_EQ_GT] = ACTIONS(1912),
+    [anon_sym_LT_GT] = ACTIONS(1912),
     [anon_sym_EQ_EQ] = ACTIONS(1912),
     [anon_sym_GT_EQ] = ACTIONS(1912),
     [anon_sym_GT_GT] = ACTIONS(1912),
@@ -62340,6 +63124,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1912),
     [anon_sym_CARET_EQ] = ACTIONS(1912),
     [anon_sym_PIPE_EQ] = ACTIONS(1912),
+    [anon_sym_PIPE_GT] = ACTIONS(1912),
     [anon_sym_PIPE_PIPE] = ACTIONS(1912),
     [anon_sym_TILDE_PIPE] = ACTIONS(1912),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1912),
@@ -62460,6 +63245,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1914),
     [anon_sym_LT_EQ] = ACTIONS(1914),
     [anon_sym_LT_EQ_GT] = ACTIONS(1914),
+    [anon_sym_LT_GT] = ACTIONS(1914),
     [anon_sym_EQ_EQ] = ACTIONS(1914),
     [anon_sym_GT_EQ] = ACTIONS(1914),
     [anon_sym_GT_GT] = ACTIONS(1914),
@@ -62468,6 +63254,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1914),
     [anon_sym_CARET_EQ] = ACTIONS(1914),
     [anon_sym_PIPE_EQ] = ACTIONS(1914),
+    [anon_sym_PIPE_GT] = ACTIONS(1914),
     [anon_sym_PIPE_PIPE] = ACTIONS(1914),
     [anon_sym_TILDE_PIPE] = ACTIONS(1914),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1914),
@@ -62588,6 +63375,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1916),
     [anon_sym_LT_EQ] = ACTIONS(1916),
     [anon_sym_LT_EQ_GT] = ACTIONS(1916),
+    [anon_sym_LT_GT] = ACTIONS(1916),
     [anon_sym_EQ_EQ] = ACTIONS(1916),
     [anon_sym_GT_EQ] = ACTIONS(1916),
     [anon_sym_GT_GT] = ACTIONS(1916),
@@ -62596,6 +63384,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1916),
     [anon_sym_CARET_EQ] = ACTIONS(1916),
     [anon_sym_PIPE_EQ] = ACTIONS(1916),
+    [anon_sym_PIPE_GT] = ACTIONS(1916),
     [anon_sym_PIPE_PIPE] = ACTIONS(1916),
     [anon_sym_TILDE_PIPE] = ACTIONS(1916),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1916),
@@ -62716,6 +63505,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1950),
     [anon_sym_LT_EQ] = ACTIONS(1950),
     [anon_sym_LT_EQ_GT] = ACTIONS(1950),
+    [anon_sym_LT_GT] = ACTIONS(1950),
     [anon_sym_EQ_EQ] = ACTIONS(1950),
     [anon_sym_GT_EQ] = ACTIONS(1950),
     [anon_sym_GT_GT] = ACTIONS(1950),
@@ -62724,6 +63514,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1950),
     [anon_sym_CARET_EQ] = ACTIONS(1950),
     [anon_sym_PIPE_EQ] = ACTIONS(1950),
+    [anon_sym_PIPE_GT] = ACTIONS(1950),
     [anon_sym_PIPE_PIPE] = ACTIONS(1950),
     [anon_sym_TILDE_PIPE] = ACTIONS(1950),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1950),
@@ -62844,6 +63635,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1954),
     [anon_sym_LT_EQ] = ACTIONS(1954),
     [anon_sym_LT_EQ_GT] = ACTIONS(1954),
+    [anon_sym_LT_GT] = ACTIONS(1954),
     [anon_sym_EQ_EQ] = ACTIONS(1954),
     [anon_sym_GT_EQ] = ACTIONS(1954),
     [anon_sym_GT_GT] = ACTIONS(1954),
@@ -62852,6 +63644,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1954),
     [anon_sym_CARET_EQ] = ACTIONS(1954),
     [anon_sym_PIPE_EQ] = ACTIONS(1954),
+    [anon_sym_PIPE_GT] = ACTIONS(1954),
     [anon_sym_PIPE_PIPE] = ACTIONS(1954),
     [anon_sym_TILDE_PIPE] = ACTIONS(1954),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1954),
@@ -62972,6 +63765,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1956),
     [anon_sym_LT_EQ] = ACTIONS(1956),
     [anon_sym_LT_EQ_GT] = ACTIONS(1956),
+    [anon_sym_LT_GT] = ACTIONS(1956),
     [anon_sym_EQ_EQ] = ACTIONS(1956),
     [anon_sym_GT_EQ] = ACTIONS(1956),
     [anon_sym_GT_GT] = ACTIONS(1956),
@@ -62980,6 +63774,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1956),
     [anon_sym_CARET_EQ] = ACTIONS(1956),
     [anon_sym_PIPE_EQ] = ACTIONS(1956),
+    [anon_sym_PIPE_GT] = ACTIONS(1956),
     [anon_sym_PIPE_PIPE] = ACTIONS(1956),
     [anon_sym_TILDE_PIPE] = ACTIONS(1956),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1956),
@@ -63100,6 +63895,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1952),
     [anon_sym_LT_EQ] = ACTIONS(1952),
     [anon_sym_LT_EQ_GT] = ACTIONS(1952),
+    [anon_sym_LT_GT] = ACTIONS(1952),
     [anon_sym_EQ_EQ] = ACTIONS(1952),
     [anon_sym_GT_EQ] = ACTIONS(1952),
     [anon_sym_GT_GT] = ACTIONS(1952),
@@ -63108,6 +63904,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1952),
     [anon_sym_CARET_EQ] = ACTIONS(1952),
     [anon_sym_PIPE_EQ] = ACTIONS(1952),
+    [anon_sym_PIPE_GT] = ACTIONS(1952),
     [anon_sym_PIPE_PIPE] = ACTIONS(1952),
     [anon_sym_TILDE_PIPE] = ACTIONS(1952),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1952),
@@ -63228,6 +64025,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1982),
     [anon_sym_LT_EQ] = ACTIONS(1982),
     [anon_sym_LT_EQ_GT] = ACTIONS(1982),
+    [anon_sym_LT_GT] = ACTIONS(1982),
     [anon_sym_EQ_EQ] = ACTIONS(1982),
     [anon_sym_GT_EQ] = ACTIONS(1982),
     [anon_sym_GT_GT] = ACTIONS(1982),
@@ -63236,6 +64034,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1982),
     [anon_sym_CARET_EQ] = ACTIONS(1982),
     [anon_sym_PIPE_EQ] = ACTIONS(1982),
+    [anon_sym_PIPE_GT] = ACTIONS(1982),
     [anon_sym_PIPE_PIPE] = ACTIONS(1982),
     [anon_sym_TILDE_PIPE] = ACTIONS(1982),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1982),
@@ -63356,6 +64155,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1986),
     [anon_sym_LT_EQ] = ACTIONS(1986),
     [anon_sym_LT_EQ_GT] = ACTIONS(1986),
+    [anon_sym_LT_GT] = ACTIONS(1986),
     [anon_sym_EQ_EQ] = ACTIONS(1986),
     [anon_sym_GT_EQ] = ACTIONS(1986),
     [anon_sym_GT_GT] = ACTIONS(1986),
@@ -63364,6 +64164,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1986),
     [anon_sym_CARET_EQ] = ACTIONS(1986),
     [anon_sym_PIPE_EQ] = ACTIONS(1986),
+    [anon_sym_PIPE_GT] = ACTIONS(1986),
     [anon_sym_PIPE_PIPE] = ACTIONS(1986),
     [anon_sym_TILDE_PIPE] = ACTIONS(1986),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1986),
@@ -63484,6 +64285,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2012),
     [anon_sym_LT_EQ] = ACTIONS(2012),
     [anon_sym_LT_EQ_GT] = ACTIONS(2012),
+    [anon_sym_LT_GT] = ACTIONS(2012),
     [anon_sym_EQ_EQ] = ACTIONS(2012),
     [anon_sym_GT_EQ] = ACTIONS(2012),
     [anon_sym_GT_GT] = ACTIONS(2012),
@@ -63492,6 +64294,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2012),
     [anon_sym_CARET_EQ] = ACTIONS(2012),
     [anon_sym_PIPE_EQ] = ACTIONS(2012),
+    [anon_sym_PIPE_GT] = ACTIONS(2012),
     [anon_sym_PIPE_PIPE] = ACTIONS(2012),
     [anon_sym_TILDE_PIPE] = ACTIONS(2012),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2012),
@@ -63612,6 +64415,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1818),
     [anon_sym_LT_EQ] = ACTIONS(1818),
     [anon_sym_LT_EQ_GT] = ACTIONS(1818),
+    [anon_sym_LT_GT] = ACTIONS(1818),
     [anon_sym_EQ_EQ] = ACTIONS(1818),
     [anon_sym_GT_EQ] = ACTIONS(1818),
     [anon_sym_GT_GT] = ACTIONS(1818),
@@ -63620,6 +64424,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1818),
     [anon_sym_CARET_EQ] = ACTIONS(1818),
     [anon_sym_PIPE_EQ] = ACTIONS(1818),
+    [anon_sym_PIPE_GT] = ACTIONS(1818),
     [anon_sym_PIPE_PIPE] = ACTIONS(1818),
     [anon_sym_TILDE_PIPE] = ACTIONS(1818),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1818),
@@ -63740,6 +64545,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1824),
     [anon_sym_LT_EQ] = ACTIONS(1824),
     [anon_sym_LT_EQ_GT] = ACTIONS(1824),
+    [anon_sym_LT_GT] = ACTIONS(1824),
     [anon_sym_EQ_EQ] = ACTIONS(1824),
     [anon_sym_GT_EQ] = ACTIONS(1824),
     [anon_sym_GT_GT] = ACTIONS(1824),
@@ -63748,6 +64554,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1824),
     [anon_sym_CARET_EQ] = ACTIONS(1824),
     [anon_sym_PIPE_EQ] = ACTIONS(1824),
+    [anon_sym_PIPE_GT] = ACTIONS(1824),
     [anon_sym_PIPE_PIPE] = ACTIONS(1824),
     [anon_sym_TILDE_PIPE] = ACTIONS(1824),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1824),
@@ -63868,6 +64675,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1852),
     [anon_sym_LT_EQ] = ACTIONS(1852),
     [anon_sym_LT_EQ_GT] = ACTIONS(1852),
+    [anon_sym_LT_GT] = ACTIONS(1852),
     [anon_sym_EQ_EQ] = ACTIONS(1852),
     [anon_sym_GT_EQ] = ACTIONS(1852),
     [anon_sym_GT_GT] = ACTIONS(1852),
@@ -63876,6 +64684,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1852),
     [anon_sym_CARET_EQ] = ACTIONS(1852),
     [anon_sym_PIPE_EQ] = ACTIONS(1852),
+    [anon_sym_PIPE_GT] = ACTIONS(1852),
     [anon_sym_PIPE_PIPE] = ACTIONS(1852),
     [anon_sym_TILDE_PIPE] = ACTIONS(1852),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1852),
@@ -63996,6 +64805,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1856),
     [anon_sym_LT_EQ] = ACTIONS(1856),
     [anon_sym_LT_EQ_GT] = ACTIONS(1856),
+    [anon_sym_LT_GT] = ACTIONS(1856),
     [anon_sym_EQ_EQ] = ACTIONS(1856),
     [anon_sym_GT_EQ] = ACTIONS(1856),
     [anon_sym_GT_GT] = ACTIONS(1856),
@@ -64004,6 +64814,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1856),
     [anon_sym_CARET_EQ] = ACTIONS(1856),
     [anon_sym_PIPE_EQ] = ACTIONS(1856),
+    [anon_sym_PIPE_GT] = ACTIONS(1856),
     [anon_sym_PIPE_PIPE] = ACTIONS(1856),
     [anon_sym_TILDE_PIPE] = ACTIONS(1856),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1856),
@@ -64124,6 +64935,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1860),
     [anon_sym_LT_EQ] = ACTIONS(1860),
     [anon_sym_LT_EQ_GT] = ACTIONS(1860),
+    [anon_sym_LT_GT] = ACTIONS(1860),
     [anon_sym_EQ_EQ] = ACTIONS(1860),
     [anon_sym_GT_EQ] = ACTIONS(1860),
     [anon_sym_GT_GT] = ACTIONS(1860),
@@ -64132,6 +64944,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1860),
     [anon_sym_CARET_EQ] = ACTIONS(1860),
     [anon_sym_PIPE_EQ] = ACTIONS(1860),
+    [anon_sym_PIPE_GT] = ACTIONS(1860),
     [anon_sym_PIPE_PIPE] = ACTIONS(1860),
     [anon_sym_TILDE_PIPE] = ACTIONS(1860),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1860),
@@ -64252,6 +65065,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1890),
     [anon_sym_LT_EQ] = ACTIONS(1890),
     [anon_sym_LT_EQ_GT] = ACTIONS(1890),
+    [anon_sym_LT_GT] = ACTIONS(1890),
     [anon_sym_EQ_EQ] = ACTIONS(1890),
     [anon_sym_GT_EQ] = ACTIONS(1890),
     [anon_sym_GT_GT] = ACTIONS(1890),
@@ -64260,6 +65074,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1890),
     [anon_sym_CARET_EQ] = ACTIONS(1890),
     [anon_sym_PIPE_EQ] = ACTIONS(1890),
+    [anon_sym_PIPE_GT] = ACTIONS(1890),
     [anon_sym_PIPE_PIPE] = ACTIONS(1890),
     [anon_sym_TILDE_PIPE] = ACTIONS(1890),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1890),
@@ -64380,6 +65195,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1894),
     [anon_sym_LT_EQ] = ACTIONS(1894),
     [anon_sym_LT_EQ_GT] = ACTIONS(1894),
+    [anon_sym_LT_GT] = ACTIONS(1894),
     [anon_sym_EQ_EQ] = ACTIONS(1894),
     [anon_sym_GT_EQ] = ACTIONS(1894),
     [anon_sym_GT_GT] = ACTIONS(1894),
@@ -64388,6 +65204,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1894),
     [anon_sym_CARET_EQ] = ACTIONS(1894),
     [anon_sym_PIPE_EQ] = ACTIONS(1894),
+    [anon_sym_PIPE_GT] = ACTIONS(1894),
     [anon_sym_PIPE_PIPE] = ACTIONS(1894),
     [anon_sym_TILDE_PIPE] = ACTIONS(1894),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1894),
@@ -64508,6 +65325,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1906),
     [anon_sym_LT_EQ] = ACTIONS(1906),
     [anon_sym_LT_EQ_GT] = ACTIONS(1906),
+    [anon_sym_LT_GT] = ACTIONS(1906),
     [anon_sym_EQ_EQ] = ACTIONS(1906),
     [anon_sym_GT_EQ] = ACTIONS(1906),
     [anon_sym_GT_GT] = ACTIONS(1906),
@@ -64516,6 +65334,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1906),
     [anon_sym_CARET_EQ] = ACTIONS(1906),
     [anon_sym_PIPE_EQ] = ACTIONS(1906),
+    [anon_sym_PIPE_GT] = ACTIONS(1906),
     [anon_sym_PIPE_PIPE] = ACTIONS(1906),
     [anon_sym_TILDE_PIPE] = ACTIONS(1906),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1906),
@@ -64636,6 +65455,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1920),
     [anon_sym_LT_EQ] = ACTIONS(1920),
     [anon_sym_LT_EQ_GT] = ACTIONS(1920),
+    [anon_sym_LT_GT] = ACTIONS(1920),
     [anon_sym_EQ_EQ] = ACTIONS(1920),
     [anon_sym_GT_EQ] = ACTIONS(1920),
     [anon_sym_GT_GT] = ACTIONS(1920),
@@ -64644,6 +65464,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1920),
     [anon_sym_CARET_EQ] = ACTIONS(1920),
     [anon_sym_PIPE_EQ] = ACTIONS(1920),
+    [anon_sym_PIPE_GT] = ACTIONS(1920),
     [anon_sym_PIPE_PIPE] = ACTIONS(1920),
     [anon_sym_TILDE_PIPE] = ACTIONS(1920),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1920),
@@ -64764,6 +65585,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1924),
     [anon_sym_LT_EQ] = ACTIONS(1924),
     [anon_sym_LT_EQ_GT] = ACTIONS(1924),
+    [anon_sym_LT_GT] = ACTIONS(1924),
     [anon_sym_EQ_EQ] = ACTIONS(1924),
     [anon_sym_GT_EQ] = ACTIONS(1924),
     [anon_sym_GT_GT] = ACTIONS(1924),
@@ -64772,6 +65594,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1924),
     [anon_sym_CARET_EQ] = ACTIONS(1924),
     [anon_sym_PIPE_EQ] = ACTIONS(1924),
+    [anon_sym_PIPE_GT] = ACTIONS(1924),
     [anon_sym_PIPE_PIPE] = ACTIONS(1924),
     [anon_sym_TILDE_PIPE] = ACTIONS(1924),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1924),
@@ -64892,6 +65715,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1956),
     [anon_sym_LT_EQ] = ACTIONS(1956),
     [anon_sym_LT_EQ_GT] = ACTIONS(1956),
+    [anon_sym_LT_GT] = ACTIONS(1956),
     [anon_sym_EQ_EQ] = ACTIONS(1956),
     [anon_sym_GT_EQ] = ACTIONS(1956),
     [anon_sym_GT_GT] = ACTIONS(1956),
@@ -64900,6 +65724,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1956),
     [anon_sym_CARET_EQ] = ACTIONS(1956),
     [anon_sym_PIPE_EQ] = ACTIONS(1956),
+    [anon_sym_PIPE_GT] = ACTIONS(1956),
     [anon_sym_PIPE_PIPE] = ACTIONS(1956),
     [anon_sym_TILDE_PIPE] = ACTIONS(1956),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1956),
@@ -65020,6 +65845,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1950),
     [anon_sym_LT_EQ] = ACTIONS(1950),
     [anon_sym_LT_EQ_GT] = ACTIONS(1950),
+    [anon_sym_LT_GT] = ACTIONS(1950),
     [anon_sym_EQ_EQ] = ACTIONS(1950),
     [anon_sym_GT_EQ] = ACTIONS(1950),
     [anon_sym_GT_GT] = ACTIONS(1950),
@@ -65028,6 +65854,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1950),
     [anon_sym_CARET_EQ] = ACTIONS(1950),
     [anon_sym_PIPE_EQ] = ACTIONS(1950),
+    [anon_sym_PIPE_GT] = ACTIONS(1950),
     [anon_sym_PIPE_PIPE] = ACTIONS(1950),
     [anon_sym_TILDE_PIPE] = ACTIONS(1950),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1950),
@@ -65148,6 +65975,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1954),
     [anon_sym_LT_EQ] = ACTIONS(1954),
     [anon_sym_LT_EQ_GT] = ACTIONS(1954),
+    [anon_sym_LT_GT] = ACTIONS(1954),
     [anon_sym_EQ_EQ] = ACTIONS(1954),
     [anon_sym_GT_EQ] = ACTIONS(1954),
     [anon_sym_GT_GT] = ACTIONS(1954),
@@ -65156,6 +65984,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1954),
     [anon_sym_CARET_EQ] = ACTIONS(1954),
     [anon_sym_PIPE_EQ] = ACTIONS(1954),
+    [anon_sym_PIPE_GT] = ACTIONS(1954),
     [anon_sym_PIPE_PIPE] = ACTIONS(1954),
     [anon_sym_TILDE_PIPE] = ACTIONS(1954),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1954),
@@ -65276,6 +66105,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1956),
     [anon_sym_LT_EQ] = ACTIONS(1956),
     [anon_sym_LT_EQ_GT] = ACTIONS(1956),
+    [anon_sym_LT_GT] = ACTIONS(1956),
     [anon_sym_EQ_EQ] = ACTIONS(1956),
     [anon_sym_GT_EQ] = ACTIONS(1956),
     [anon_sym_GT_GT] = ACTIONS(1956),
@@ -65284,6 +66114,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1956),
     [anon_sym_CARET_EQ] = ACTIONS(1956),
     [anon_sym_PIPE_EQ] = ACTIONS(1956),
+    [anon_sym_PIPE_GT] = ACTIONS(1956),
     [anon_sym_PIPE_PIPE] = ACTIONS(1956),
     [anon_sym_TILDE_PIPE] = ACTIONS(1956),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1956),
@@ -65404,6 +66235,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1982),
     [anon_sym_LT_EQ] = ACTIONS(1982),
     [anon_sym_LT_EQ_GT] = ACTIONS(1982),
+    [anon_sym_LT_GT] = ACTIONS(1982),
     [anon_sym_EQ_EQ] = ACTIONS(1982),
     [anon_sym_GT_EQ] = ACTIONS(1982),
     [anon_sym_GT_GT] = ACTIONS(1982),
@@ -65412,6 +66244,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1982),
     [anon_sym_CARET_EQ] = ACTIONS(1982),
     [anon_sym_PIPE_EQ] = ACTIONS(1982),
+    [anon_sym_PIPE_GT] = ACTIONS(1982),
     [anon_sym_PIPE_PIPE] = ACTIONS(1982),
     [anon_sym_TILDE_PIPE] = ACTIONS(1982),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1982),
@@ -65532,6 +66365,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1986),
     [anon_sym_LT_EQ] = ACTIONS(1986),
     [anon_sym_LT_EQ_GT] = ACTIONS(1986),
+    [anon_sym_LT_GT] = ACTIONS(1986),
     [anon_sym_EQ_EQ] = ACTIONS(1986),
     [anon_sym_GT_EQ] = ACTIONS(1986),
     [anon_sym_GT_GT] = ACTIONS(1986),
@@ -65540,6 +66374,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1986),
     [anon_sym_CARET_EQ] = ACTIONS(1986),
     [anon_sym_PIPE_EQ] = ACTIONS(1986),
+    [anon_sym_PIPE_GT] = ACTIONS(1986),
     [anon_sym_PIPE_PIPE] = ACTIONS(1986),
     [anon_sym_TILDE_PIPE] = ACTIONS(1986),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1986),
@@ -65660,6 +66495,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2012),
     [anon_sym_LT_EQ] = ACTIONS(2012),
     [anon_sym_LT_EQ_GT] = ACTIONS(2012),
+    [anon_sym_LT_GT] = ACTIONS(2012),
     [anon_sym_EQ_EQ] = ACTIONS(2012),
     [anon_sym_GT_EQ] = ACTIONS(2012),
     [anon_sym_GT_GT] = ACTIONS(2012),
@@ -65668,6 +66504,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2012),
     [anon_sym_CARET_EQ] = ACTIONS(2012),
     [anon_sym_PIPE_EQ] = ACTIONS(2012),
+    [anon_sym_PIPE_GT] = ACTIONS(2012),
     [anon_sym_PIPE_PIPE] = ACTIONS(2012),
     [anon_sym_TILDE_PIPE] = ACTIONS(2012),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2012),
@@ -65788,6 +66625,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1818),
     [anon_sym_LT_EQ] = ACTIONS(1818),
     [anon_sym_LT_EQ_GT] = ACTIONS(1818),
+    [anon_sym_LT_GT] = ACTIONS(1818),
     [anon_sym_EQ_EQ] = ACTIONS(1818),
     [anon_sym_GT_EQ] = ACTIONS(1818),
     [anon_sym_GT_GT] = ACTIONS(1818),
@@ -65796,6 +66634,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1818),
     [anon_sym_CARET_EQ] = ACTIONS(1818),
     [anon_sym_PIPE_EQ] = ACTIONS(1818),
+    [anon_sym_PIPE_GT] = ACTIONS(1818),
     [anon_sym_PIPE_PIPE] = ACTIONS(1818),
     [anon_sym_TILDE_PIPE] = ACTIONS(1818),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1818),
@@ -65916,6 +66755,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1824),
     [anon_sym_LT_EQ] = ACTIONS(1824),
     [anon_sym_LT_EQ_GT] = ACTIONS(1824),
+    [anon_sym_LT_GT] = ACTIONS(1824),
     [anon_sym_EQ_EQ] = ACTIONS(1824),
     [anon_sym_GT_EQ] = ACTIONS(1824),
     [anon_sym_GT_GT] = ACTIONS(1824),
@@ -65924,6 +66764,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1824),
     [anon_sym_CARET_EQ] = ACTIONS(1824),
     [anon_sym_PIPE_EQ] = ACTIONS(1824),
+    [anon_sym_PIPE_GT] = ACTIONS(1824),
     [anon_sym_PIPE_PIPE] = ACTIONS(1824),
     [anon_sym_TILDE_PIPE] = ACTIONS(1824),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1824),
@@ -66044,6 +66885,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1852),
     [anon_sym_LT_EQ] = ACTIONS(1852),
     [anon_sym_LT_EQ_GT] = ACTIONS(1852),
+    [anon_sym_LT_GT] = ACTIONS(1852),
     [anon_sym_EQ_EQ] = ACTIONS(1852),
     [anon_sym_GT_EQ] = ACTIONS(1852),
     [anon_sym_GT_GT] = ACTIONS(1852),
@@ -66052,6 +66894,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1852),
     [anon_sym_CARET_EQ] = ACTIONS(1852),
     [anon_sym_PIPE_EQ] = ACTIONS(1852),
+    [anon_sym_PIPE_GT] = ACTIONS(1852),
     [anon_sym_PIPE_PIPE] = ACTIONS(1852),
     [anon_sym_TILDE_PIPE] = ACTIONS(1852),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1852),
@@ -66172,6 +67015,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1856),
     [anon_sym_LT_EQ] = ACTIONS(1856),
     [anon_sym_LT_EQ_GT] = ACTIONS(1856),
+    [anon_sym_LT_GT] = ACTIONS(1856),
     [anon_sym_EQ_EQ] = ACTIONS(1856),
     [anon_sym_GT_EQ] = ACTIONS(1856),
     [anon_sym_GT_GT] = ACTIONS(1856),
@@ -66180,6 +67024,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1856),
     [anon_sym_CARET_EQ] = ACTIONS(1856),
     [anon_sym_PIPE_EQ] = ACTIONS(1856),
+    [anon_sym_PIPE_GT] = ACTIONS(1856),
     [anon_sym_PIPE_PIPE] = ACTIONS(1856),
     [anon_sym_TILDE_PIPE] = ACTIONS(1856),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1856),
@@ -66300,6 +67145,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1860),
     [anon_sym_LT_EQ] = ACTIONS(1860),
     [anon_sym_LT_EQ_GT] = ACTIONS(1860),
+    [anon_sym_LT_GT] = ACTIONS(1860),
     [anon_sym_EQ_EQ] = ACTIONS(1860),
     [anon_sym_GT_EQ] = ACTIONS(1860),
     [anon_sym_GT_GT] = ACTIONS(1860),
@@ -66308,6 +67154,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1860),
     [anon_sym_CARET_EQ] = ACTIONS(1860),
     [anon_sym_PIPE_EQ] = ACTIONS(1860),
+    [anon_sym_PIPE_GT] = ACTIONS(1860),
     [anon_sym_PIPE_PIPE] = ACTIONS(1860),
     [anon_sym_TILDE_PIPE] = ACTIONS(1860),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1860),
@@ -66428,6 +67275,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1982),
     [anon_sym_LT_EQ] = ACTIONS(1982),
     [anon_sym_LT_EQ_GT] = ACTIONS(1982),
+    [anon_sym_LT_GT] = ACTIONS(1982),
     [anon_sym_EQ_EQ] = ACTIONS(1982),
     [anon_sym_GT_EQ] = ACTIONS(1982),
     [anon_sym_GT_GT] = ACTIONS(1982),
@@ -66436,6 +67284,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1982),
     [anon_sym_CARET_EQ] = ACTIONS(1982),
     [anon_sym_PIPE_EQ] = ACTIONS(1982),
+    [anon_sym_PIPE_GT] = ACTIONS(1982),
     [anon_sym_PIPE_PIPE] = ACTIONS(1982),
     [anon_sym_TILDE_PIPE] = ACTIONS(1982),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1982),
@@ -66556,6 +67405,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1898),
     [anon_sym_LT_EQ] = ACTIONS(1898),
     [anon_sym_LT_EQ_GT] = ACTIONS(1898),
+    [anon_sym_LT_GT] = ACTIONS(1898),
     [anon_sym_EQ_EQ] = ACTIONS(1898),
     [anon_sym_GT_EQ] = ACTIONS(1898),
     [anon_sym_GT_GT] = ACTIONS(1898),
@@ -66564,6 +67414,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1898),
     [anon_sym_CARET_EQ] = ACTIONS(1898),
     [anon_sym_PIPE_EQ] = ACTIONS(1898),
+    [anon_sym_PIPE_GT] = ACTIONS(1898),
     [anon_sym_PIPE_PIPE] = ACTIONS(1898),
     [anon_sym_TILDE_PIPE] = ACTIONS(1898),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1898),
@@ -66684,6 +67535,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1902),
     [anon_sym_LT_EQ] = ACTIONS(1902),
     [anon_sym_LT_EQ_GT] = ACTIONS(1902),
+    [anon_sym_LT_GT] = ACTIONS(1902),
     [anon_sym_EQ_EQ] = ACTIONS(1902),
     [anon_sym_GT_EQ] = ACTIONS(1902),
     [anon_sym_GT_GT] = ACTIONS(1902),
@@ -66692,6 +67544,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1902),
     [anon_sym_CARET_EQ] = ACTIONS(1902),
     [anon_sym_PIPE_EQ] = ACTIONS(1902),
+    [anon_sym_PIPE_GT] = ACTIONS(1902),
     [anon_sym_PIPE_PIPE] = ACTIONS(1902),
     [anon_sym_TILDE_PIPE] = ACTIONS(1902),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1902),
@@ -66812,6 +67665,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1986),
     [anon_sym_LT_EQ] = ACTIONS(1986),
     [anon_sym_LT_EQ_GT] = ACTIONS(1986),
+    [anon_sym_LT_GT] = ACTIONS(1986),
     [anon_sym_EQ_EQ] = ACTIONS(1986),
     [anon_sym_GT_EQ] = ACTIONS(1986),
     [anon_sym_GT_GT] = ACTIONS(1986),
@@ -66820,6 +67674,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1986),
     [anon_sym_CARET_EQ] = ACTIONS(1986),
     [anon_sym_PIPE_EQ] = ACTIONS(1986),
+    [anon_sym_PIPE_GT] = ACTIONS(1986),
     [anon_sym_PIPE_PIPE] = ACTIONS(1986),
     [anon_sym_TILDE_PIPE] = ACTIONS(1986),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1986),
@@ -66940,6 +67795,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1908),
     [anon_sym_LT_EQ] = ACTIONS(1908),
     [anon_sym_LT_EQ_GT] = ACTIONS(1908),
+    [anon_sym_LT_GT] = ACTIONS(1908),
     [anon_sym_EQ_EQ] = ACTIONS(1908),
     [anon_sym_GT_EQ] = ACTIONS(1908),
     [anon_sym_GT_GT] = ACTIONS(1908),
@@ -66948,6 +67804,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1908),
     [anon_sym_CARET_EQ] = ACTIONS(1908),
     [anon_sym_PIPE_EQ] = ACTIONS(1908),
+    [anon_sym_PIPE_GT] = ACTIONS(1908),
     [anon_sym_PIPE_PIPE] = ACTIONS(1908),
     [anon_sym_TILDE_PIPE] = ACTIONS(1908),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1908),
@@ -67068,6 +67925,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1910),
     [anon_sym_LT_EQ] = ACTIONS(1910),
     [anon_sym_LT_EQ_GT] = ACTIONS(1910),
+    [anon_sym_LT_GT] = ACTIONS(1910),
     [anon_sym_EQ_EQ] = ACTIONS(1910),
     [anon_sym_GT_EQ] = ACTIONS(1910),
     [anon_sym_GT_GT] = ACTIONS(1910),
@@ -67076,6 +67934,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1910),
     [anon_sym_CARET_EQ] = ACTIONS(1910),
     [anon_sym_PIPE_EQ] = ACTIONS(1910),
+    [anon_sym_PIPE_GT] = ACTIONS(1910),
     [anon_sym_PIPE_PIPE] = ACTIONS(1910),
     [anon_sym_TILDE_PIPE] = ACTIONS(1910),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1910),
@@ -67196,6 +68055,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1912),
     [anon_sym_LT_EQ] = ACTIONS(1912),
     [anon_sym_LT_EQ_GT] = ACTIONS(1912),
+    [anon_sym_LT_GT] = ACTIONS(1912),
     [anon_sym_EQ_EQ] = ACTIONS(1912),
     [anon_sym_GT_EQ] = ACTIONS(1912),
     [anon_sym_GT_GT] = ACTIONS(1912),
@@ -67204,6 +68064,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1912),
     [anon_sym_CARET_EQ] = ACTIONS(1912),
     [anon_sym_PIPE_EQ] = ACTIONS(1912),
+    [anon_sym_PIPE_GT] = ACTIONS(1912),
     [anon_sym_PIPE_PIPE] = ACTIONS(1912),
     [anon_sym_TILDE_PIPE] = ACTIONS(1912),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1912),
@@ -67324,6 +68185,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1914),
     [anon_sym_LT_EQ] = ACTIONS(1914),
     [anon_sym_LT_EQ_GT] = ACTIONS(1914),
+    [anon_sym_LT_GT] = ACTIONS(1914),
     [anon_sym_EQ_EQ] = ACTIONS(1914),
     [anon_sym_GT_EQ] = ACTIONS(1914),
     [anon_sym_GT_GT] = ACTIONS(1914),
@@ -67332,6 +68194,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1914),
     [anon_sym_CARET_EQ] = ACTIONS(1914),
     [anon_sym_PIPE_EQ] = ACTIONS(1914),
+    [anon_sym_PIPE_GT] = ACTIONS(1914),
     [anon_sym_PIPE_PIPE] = ACTIONS(1914),
     [anon_sym_TILDE_PIPE] = ACTIONS(1914),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1914),
@@ -67452,6 +68315,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1916),
     [anon_sym_LT_EQ] = ACTIONS(1916),
     [anon_sym_LT_EQ_GT] = ACTIONS(1916),
+    [anon_sym_LT_GT] = ACTIONS(1916),
     [anon_sym_EQ_EQ] = ACTIONS(1916),
     [anon_sym_GT_EQ] = ACTIONS(1916),
     [anon_sym_GT_GT] = ACTIONS(1916),
@@ -67460,6 +68324,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1916),
     [anon_sym_CARET_EQ] = ACTIONS(1916),
     [anon_sym_PIPE_EQ] = ACTIONS(1916),
+    [anon_sym_PIPE_GT] = ACTIONS(1916),
     [anon_sym_PIPE_PIPE] = ACTIONS(1916),
     [anon_sym_TILDE_PIPE] = ACTIONS(1916),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1916),
@@ -67580,6 +68445,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2012),
     [anon_sym_LT_EQ] = ACTIONS(2012),
     [anon_sym_LT_EQ_GT] = ACTIONS(2012),
+    [anon_sym_LT_GT] = ACTIONS(2012),
     [anon_sym_EQ_EQ] = ACTIONS(2012),
     [anon_sym_GT_EQ] = ACTIONS(2012),
     [anon_sym_GT_GT] = ACTIONS(2012),
@@ -67588,6 +68454,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2012),
     [anon_sym_CARET_EQ] = ACTIONS(2012),
     [anon_sym_PIPE_EQ] = ACTIONS(2012),
+    [anon_sym_PIPE_GT] = ACTIONS(2012),
     [anon_sym_PIPE_PIPE] = ACTIONS(2012),
     [anon_sym_TILDE_PIPE] = ACTIONS(2012),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2012),
@@ -67708,6 +68575,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1898),
     [anon_sym_LT_EQ] = ACTIONS(1898),
     [anon_sym_LT_EQ_GT] = ACTIONS(1898),
+    [anon_sym_LT_GT] = ACTIONS(1898),
     [anon_sym_EQ_EQ] = ACTIONS(1898),
     [anon_sym_GT_EQ] = ACTIONS(1898),
     [anon_sym_GT_GT] = ACTIONS(1898),
@@ -67716,6 +68584,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1898),
     [anon_sym_CARET_EQ] = ACTIONS(1898),
     [anon_sym_PIPE_EQ] = ACTIONS(1898),
+    [anon_sym_PIPE_GT] = ACTIONS(1898),
     [anon_sym_PIPE_PIPE] = ACTIONS(1898),
     [anon_sym_TILDE_PIPE] = ACTIONS(1898),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1898),
@@ -67836,6 +68705,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1952),
     [anon_sym_LT_EQ] = ACTIONS(1952),
     [anon_sym_LT_EQ_GT] = ACTIONS(1952),
+    [anon_sym_LT_GT] = ACTIONS(1952),
     [anon_sym_EQ_EQ] = ACTIONS(1952),
     [anon_sym_GT_EQ] = ACTIONS(1952),
     [anon_sym_GT_GT] = ACTIONS(1952),
@@ -67844,6 +68714,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1952),
     [anon_sym_CARET_EQ] = ACTIONS(1952),
     [anon_sym_PIPE_EQ] = ACTIONS(1952),
+    [anon_sym_PIPE_GT] = ACTIONS(1952),
     [anon_sym_PIPE_PIPE] = ACTIONS(1952),
     [anon_sym_TILDE_PIPE] = ACTIONS(1952),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1952),
@@ -67964,6 +68835,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1902),
     [anon_sym_LT_EQ] = ACTIONS(1902),
     [anon_sym_LT_EQ_GT] = ACTIONS(1902),
+    [anon_sym_LT_GT] = ACTIONS(1902),
     [anon_sym_EQ_EQ] = ACTIONS(1902),
     [anon_sym_GT_EQ] = ACTIONS(1902),
     [anon_sym_GT_GT] = ACTIONS(1902),
@@ -67972,6 +68844,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1902),
     [anon_sym_CARET_EQ] = ACTIONS(1902),
     [anon_sym_PIPE_EQ] = ACTIONS(1902),
+    [anon_sym_PIPE_GT] = ACTIONS(1902),
     [anon_sym_PIPE_PIPE] = ACTIONS(1902),
     [anon_sym_TILDE_PIPE] = ACTIONS(1902),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1902),
@@ -68092,6 +68965,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1898),
     [anon_sym_LT_EQ] = ACTIONS(1898),
     [anon_sym_LT_EQ_GT] = ACTIONS(1898),
+    [anon_sym_LT_GT] = ACTIONS(1898),
     [anon_sym_EQ_EQ] = ACTIONS(1898),
     [anon_sym_GT_EQ] = ACTIONS(1898),
     [anon_sym_GT_GT] = ACTIONS(1898),
@@ -68100,6 +68974,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1898),
     [anon_sym_CARET_EQ] = ACTIONS(1898),
     [anon_sym_PIPE_EQ] = ACTIONS(1898),
+    [anon_sym_PIPE_GT] = ACTIONS(1898),
     [anon_sym_PIPE_PIPE] = ACTIONS(1898),
     [anon_sym_TILDE_PIPE] = ACTIONS(1898),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1898),
@@ -68220,6 +69095,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1908),
     [anon_sym_LT_EQ] = ACTIONS(1908),
     [anon_sym_LT_EQ_GT] = ACTIONS(1908),
+    [anon_sym_LT_GT] = ACTIONS(1908),
     [anon_sym_EQ_EQ] = ACTIONS(1908),
     [anon_sym_GT_EQ] = ACTIONS(1908),
     [anon_sym_GT_GT] = ACTIONS(1908),
@@ -68228,6 +69104,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1908),
     [anon_sym_CARET_EQ] = ACTIONS(1908),
     [anon_sym_PIPE_EQ] = ACTIONS(1908),
+    [anon_sym_PIPE_GT] = ACTIONS(1908),
     [anon_sym_PIPE_PIPE] = ACTIONS(1908),
     [anon_sym_TILDE_PIPE] = ACTIONS(1908),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1908),
@@ -68348,6 +69225,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1910),
     [anon_sym_LT_EQ] = ACTIONS(1910),
     [anon_sym_LT_EQ_GT] = ACTIONS(1910),
+    [anon_sym_LT_GT] = ACTIONS(1910),
     [anon_sym_EQ_EQ] = ACTIONS(1910),
     [anon_sym_GT_EQ] = ACTIONS(1910),
     [anon_sym_GT_GT] = ACTIONS(1910),
@@ -68356,6 +69234,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1910),
     [anon_sym_CARET_EQ] = ACTIONS(1910),
     [anon_sym_PIPE_EQ] = ACTIONS(1910),
+    [anon_sym_PIPE_GT] = ACTIONS(1910),
     [anon_sym_PIPE_PIPE] = ACTIONS(1910),
     [anon_sym_TILDE_PIPE] = ACTIONS(1910),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1910),
@@ -68476,6 +69355,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1912),
     [anon_sym_LT_EQ] = ACTIONS(1912),
     [anon_sym_LT_EQ_GT] = ACTIONS(1912),
+    [anon_sym_LT_GT] = ACTIONS(1912),
     [anon_sym_EQ_EQ] = ACTIONS(1912),
     [anon_sym_GT_EQ] = ACTIONS(1912),
     [anon_sym_GT_GT] = ACTIONS(1912),
@@ -68484,6 +69364,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1912),
     [anon_sym_CARET_EQ] = ACTIONS(1912),
     [anon_sym_PIPE_EQ] = ACTIONS(1912),
+    [anon_sym_PIPE_GT] = ACTIONS(1912),
     [anon_sym_PIPE_PIPE] = ACTIONS(1912),
     [anon_sym_TILDE_PIPE] = ACTIONS(1912),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1912),
@@ -68604,6 +69485,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1914),
     [anon_sym_LT_EQ] = ACTIONS(1914),
     [anon_sym_LT_EQ_GT] = ACTIONS(1914),
+    [anon_sym_LT_GT] = ACTIONS(1914),
     [anon_sym_EQ_EQ] = ACTIONS(1914),
     [anon_sym_GT_EQ] = ACTIONS(1914),
     [anon_sym_GT_GT] = ACTIONS(1914),
@@ -68612,6 +69494,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1914),
     [anon_sym_CARET_EQ] = ACTIONS(1914),
     [anon_sym_PIPE_EQ] = ACTIONS(1914),
+    [anon_sym_PIPE_GT] = ACTIONS(1914),
     [anon_sym_PIPE_PIPE] = ACTIONS(1914),
     [anon_sym_TILDE_PIPE] = ACTIONS(1914),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1914),
@@ -68732,6 +69615,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1916),
     [anon_sym_LT_EQ] = ACTIONS(1916),
     [anon_sym_LT_EQ_GT] = ACTIONS(1916),
+    [anon_sym_LT_GT] = ACTIONS(1916),
     [anon_sym_EQ_EQ] = ACTIONS(1916),
     [anon_sym_GT_EQ] = ACTIONS(1916),
     [anon_sym_GT_GT] = ACTIONS(1916),
@@ -68740,6 +69624,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1916),
     [anon_sym_CARET_EQ] = ACTIONS(1916),
     [anon_sym_PIPE_EQ] = ACTIONS(1916),
+    [anon_sym_PIPE_GT] = ACTIONS(1916),
     [anon_sym_PIPE_PIPE] = ACTIONS(1916),
     [anon_sym_TILDE_PIPE] = ACTIONS(1916),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1916),
@@ -68860,6 +69745,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(1950),
     [anon_sym_LT_EQ] = ACTIONS(1950),
     [anon_sym_LT_EQ_GT] = ACTIONS(1950),
+    [anon_sym_LT_GT] = ACTIONS(1950),
     [anon_sym_EQ_EQ] = ACTIONS(1950),
     [anon_sym_GT_EQ] = ACTIONS(1950),
     [anon_sym_GT_GT] = ACTIONS(1950),
@@ -68868,6 +69754,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(1950),
     [anon_sym_CARET_EQ] = ACTIONS(1950),
     [anon_sym_PIPE_EQ] = ACTIONS(1950),
+    [anon_sym_PIPE_GT] = ACTIONS(1950),
     [anon_sym_PIPE_PIPE] = ACTIONS(1950),
     [anon_sym_TILDE_PIPE] = ACTIONS(1950),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(1950),
@@ -68987,6 +69874,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2051),
     [anon_sym_LT_EQ] = ACTIONS(2051),
     [anon_sym_LT_EQ_GT] = ACTIONS(2051),
+    [anon_sym_LT_GT] = ACTIONS(2051),
     [anon_sym_EQ_EQ] = ACTIONS(2051),
     [anon_sym_GT_EQ] = ACTIONS(2051),
     [anon_sym_GT_GT] = ACTIONS(2051),
@@ -68995,6 +69883,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2051),
     [anon_sym_CARET_EQ] = ACTIONS(2051),
     [anon_sym_PIPE_EQ] = ACTIONS(2051),
+    [anon_sym_PIPE_GT] = ACTIONS(2051),
     [anon_sym_PIPE_PIPE] = ACTIONS(2051),
     [anon_sym_TILDE_PIPE] = ACTIONS(2051),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2051),
@@ -69114,6 +70003,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2051),
     [anon_sym_LT_EQ] = ACTIONS(2051),
     [anon_sym_LT_EQ_GT] = ACTIONS(2051),
+    [anon_sym_LT_GT] = ACTIONS(2051),
     [anon_sym_EQ_EQ] = ACTIONS(2051),
     [anon_sym_GT_EQ] = ACTIONS(2051),
     [anon_sym_GT_GT] = ACTIONS(2051),
@@ -69122,6 +70012,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2051),
     [anon_sym_CARET_EQ] = ACTIONS(2051),
     [anon_sym_PIPE_EQ] = ACTIONS(2051),
+    [anon_sym_PIPE_GT] = ACTIONS(2051),
     [anon_sym_PIPE_PIPE] = ACTIONS(2051),
     [anon_sym_TILDE_PIPE] = ACTIONS(2051),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2051),
@@ -69241,6 +70132,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2051),
     [anon_sym_LT_EQ] = ACTIONS(2051),
     [anon_sym_LT_EQ_GT] = ACTIONS(2051),
+    [anon_sym_LT_GT] = ACTIONS(2051),
     [anon_sym_EQ_EQ] = ACTIONS(2051),
     [anon_sym_GT_EQ] = ACTIONS(2051),
     [anon_sym_GT_GT] = ACTIONS(2051),
@@ -69249,6 +70141,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2051),
     [anon_sym_CARET_EQ] = ACTIONS(2051),
     [anon_sym_PIPE_EQ] = ACTIONS(2051),
+    [anon_sym_PIPE_GT] = ACTIONS(2051),
     [anon_sym_PIPE_PIPE] = ACTIONS(2051),
     [anon_sym_TILDE_PIPE] = ACTIONS(2051),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2051),
@@ -69368,6 +70261,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2051),
     [anon_sym_LT_EQ] = ACTIONS(2051),
     [anon_sym_LT_EQ_GT] = ACTIONS(2051),
+    [anon_sym_LT_GT] = ACTIONS(2051),
     [anon_sym_EQ_EQ] = ACTIONS(2051),
     [anon_sym_GT_EQ] = ACTIONS(2051),
     [anon_sym_GT_GT] = ACTIONS(2051),
@@ -69376,6 +70270,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2051),
     [anon_sym_CARET_EQ] = ACTIONS(2051),
     [anon_sym_PIPE_EQ] = ACTIONS(2051),
+    [anon_sym_PIPE_GT] = ACTIONS(2051),
     [anon_sym_PIPE_PIPE] = ACTIONS(2051),
     [anon_sym_TILDE_PIPE] = ACTIONS(2051),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2051),
@@ -69495,6 +70390,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2051),
     [anon_sym_LT_EQ] = ACTIONS(2051),
     [anon_sym_LT_EQ_GT] = ACTIONS(2051),
+    [anon_sym_LT_GT] = ACTIONS(2051),
     [anon_sym_EQ_EQ] = ACTIONS(2051),
     [anon_sym_GT_EQ] = ACTIONS(2051),
     [anon_sym_GT_GT] = ACTIONS(2051),
@@ -69503,6 +70399,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2051),
     [anon_sym_CARET_EQ] = ACTIONS(2051),
     [anon_sym_PIPE_EQ] = ACTIONS(2051),
+    [anon_sym_PIPE_GT] = ACTIONS(2051),
     [anon_sym_PIPE_PIPE] = ACTIONS(2051),
     [anon_sym_TILDE_PIPE] = ACTIONS(2051),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2051),
@@ -69617,6 +70514,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ_GT] = ACTIONS(2332),
+    [anon_sym_LT_GT] = ACTIONS(2332),
     [anon_sym_EQ_EQ] = ACTIONS(2332),
     [anon_sym_GT_EQ] = ACTIONS(2332),
     [anon_sym_GT_GT] = ACTIONS(2332),
@@ -69625,6 +70523,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2332),
     [anon_sym_CARET_EQ] = ACTIONS(2332),
     [anon_sym_PIPE_EQ] = ACTIONS(2332),
+    [anon_sym_PIPE_GT] = ACTIONS(2332),
     [anon_sym_PIPE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2332),
@@ -69740,6 +70639,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ_GT] = ACTIONS(2332),
+    [anon_sym_LT_GT] = ACTIONS(2332),
     [anon_sym_EQ_EQ] = ACTIONS(2332),
     [anon_sym_GT_EQ] = ACTIONS(2332),
     [anon_sym_GT_GT] = ACTIONS(2332),
@@ -69748,6 +70648,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2332),
     [anon_sym_CARET_EQ] = ACTIONS(2332),
     [anon_sym_PIPE_EQ] = ACTIONS(2332),
+    [anon_sym_PIPE_GT] = ACTIONS(2332),
     [anon_sym_PIPE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2332),
@@ -69862,6 +70763,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2347),
     [anon_sym_LT_EQ] = ACTIONS(2347),
     [anon_sym_LT_EQ_GT] = ACTIONS(2347),
+    [anon_sym_LT_GT] = ACTIONS(2347),
     [anon_sym_EQ_EQ] = ACTIONS(2347),
     [anon_sym_GT_EQ] = ACTIONS(2347),
     [anon_sym_GT_GT] = ACTIONS(2347),
@@ -69870,6 +70772,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2347),
     [anon_sym_CARET_EQ] = ACTIONS(2347),
     [anon_sym_PIPE_EQ] = ACTIONS(2347),
+    [anon_sym_PIPE_GT] = ACTIONS(2347),
     [anon_sym_PIPE_PIPE] = ACTIONS(2347),
     [anon_sym_TILDE_PIPE] = ACTIONS(2347),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2347),
@@ -69985,6 +70888,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ_GT] = ACTIONS(2332),
+    [anon_sym_LT_GT] = ACTIONS(2332),
     [anon_sym_EQ_EQ] = ACTIONS(2332),
     [anon_sym_GT_EQ] = ACTIONS(2332),
     [anon_sym_GT_GT] = ACTIONS(2332),
@@ -69993,6 +70897,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2332),
     [anon_sym_CARET_EQ] = ACTIONS(2332),
     [anon_sym_PIPE_EQ] = ACTIONS(2332),
+    [anon_sym_PIPE_GT] = ACTIONS(2332),
     [anon_sym_PIPE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2332),
@@ -70107,6 +71012,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ_GT] = ACTIONS(2332),
+    [anon_sym_LT_GT] = ACTIONS(2332),
     [anon_sym_EQ_EQ] = ACTIONS(2332),
     [anon_sym_GT_EQ] = ACTIONS(2332),
     [anon_sym_GT_GT] = ACTIONS(2332),
@@ -70115,6 +71021,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2332),
     [anon_sym_CARET_EQ] = ACTIONS(2332),
     [anon_sym_PIPE_EQ] = ACTIONS(2332),
+    [anon_sym_PIPE_GT] = ACTIONS(2332),
     [anon_sym_PIPE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2332),
@@ -70228,6 +71135,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2359),
     [anon_sym_LT_EQ] = ACTIONS(2359),
     [anon_sym_LT_EQ_GT] = ACTIONS(2359),
+    [anon_sym_LT_GT] = ACTIONS(2359),
     [anon_sym_EQ_EQ] = ACTIONS(2359),
     [anon_sym_GT_EQ] = ACTIONS(2359),
     [anon_sym_GT_GT] = ACTIONS(2359),
@@ -70236,6 +71144,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2359),
     [anon_sym_CARET_EQ] = ACTIONS(2359),
     [anon_sym_PIPE_EQ] = ACTIONS(2359),
+    [anon_sym_PIPE_GT] = ACTIONS(2359),
     [anon_sym_PIPE_PIPE] = ACTIONS(2359),
     [anon_sym_TILDE_PIPE] = ACTIONS(2359),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2359),
@@ -70351,6 +71260,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ_GT] = ACTIONS(2332),
+    [anon_sym_LT_GT] = ACTIONS(2332),
     [anon_sym_EQ_EQ] = ACTIONS(2332),
     [anon_sym_GT_EQ] = ACTIONS(2332),
     [anon_sym_GT_GT] = ACTIONS(2332),
@@ -70359,6 +71269,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2332),
     [anon_sym_CARET_EQ] = ACTIONS(2332),
     [anon_sym_PIPE_EQ] = ACTIONS(2332),
+    [anon_sym_PIPE_GT] = ACTIONS(2332),
     [anon_sym_PIPE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2332),
@@ -70472,6 +71383,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2371),
     [anon_sym_LT_EQ] = ACTIONS(2371),
     [anon_sym_LT_EQ_GT] = ACTIONS(2371),
+    [anon_sym_LT_GT] = ACTIONS(2371),
     [anon_sym_EQ_EQ] = ACTIONS(2371),
     [anon_sym_GT_EQ] = ACTIONS(2371),
     [anon_sym_GT_GT] = ACTIONS(2371),
@@ -70480,6 +71392,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2371),
     [anon_sym_CARET_EQ] = ACTIONS(2371),
     [anon_sym_PIPE_EQ] = ACTIONS(2371),
+    [anon_sym_PIPE_GT] = ACTIONS(2371),
     [anon_sym_PIPE_PIPE] = ACTIONS(2371),
     [anon_sym_TILDE_PIPE] = ACTIONS(2371),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2371),
@@ -70594,6 +71507,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2375),
     [anon_sym_LT_EQ] = ACTIONS(2375),
     [anon_sym_LT_EQ_GT] = ACTIONS(2375),
+    [anon_sym_LT_GT] = ACTIONS(2375),
     [anon_sym_EQ_EQ] = ACTIONS(2375),
     [anon_sym_GT_EQ] = ACTIONS(2375),
     [anon_sym_GT_GT] = ACTIONS(2375),
@@ -70602,6 +71516,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2375),
     [anon_sym_CARET_EQ] = ACTIONS(2375),
     [anon_sym_PIPE_EQ] = ACTIONS(2375),
+    [anon_sym_PIPE_GT] = ACTIONS(2375),
     [anon_sym_PIPE_PIPE] = ACTIONS(2375),
     [anon_sym_TILDE_PIPE] = ACTIONS(2375),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2375),
@@ -70716,6 +71631,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2379),
     [anon_sym_LT_EQ] = ACTIONS(2379),
     [anon_sym_LT_EQ_GT] = ACTIONS(2379),
+    [anon_sym_LT_GT] = ACTIONS(2379),
     [anon_sym_EQ_EQ] = ACTIONS(2379),
     [anon_sym_GT_EQ] = ACTIONS(2379),
     [anon_sym_GT_GT] = ACTIONS(2379),
@@ -70724,6 +71640,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2379),
     [anon_sym_CARET_EQ] = ACTIONS(2379),
     [anon_sym_PIPE_EQ] = ACTIONS(2379),
+    [anon_sym_PIPE_GT] = ACTIONS(2379),
     [anon_sym_PIPE_PIPE] = ACTIONS(2379),
     [anon_sym_TILDE_PIPE] = ACTIONS(2379),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2379),
@@ -70838,6 +71755,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2383),
     [anon_sym_LT_EQ] = ACTIONS(2383),
     [anon_sym_LT_EQ_GT] = ACTIONS(2383),
+    [anon_sym_LT_GT] = ACTIONS(2383),
     [anon_sym_EQ_EQ] = ACTIONS(2383),
     [anon_sym_GT_EQ] = ACTIONS(2383),
     [anon_sym_GT_GT] = ACTIONS(2383),
@@ -70846,6 +71764,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2383),
     [anon_sym_CARET_EQ] = ACTIONS(2383),
     [anon_sym_PIPE_EQ] = ACTIONS(2383),
+    [anon_sym_PIPE_GT] = ACTIONS(2383),
     [anon_sym_PIPE_PIPE] = ACTIONS(2383),
     [anon_sym_TILDE_PIPE] = ACTIONS(2383),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2383),
@@ -70960,6 +71879,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ_GT] = ACTIONS(2332),
+    [anon_sym_LT_GT] = ACTIONS(2332),
     [anon_sym_EQ_EQ] = ACTIONS(2332),
     [anon_sym_GT_EQ] = ACTIONS(2332),
     [anon_sym_GT_GT] = ACTIONS(2332),
@@ -70968,6 +71888,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2332),
     [anon_sym_CARET_EQ] = ACTIONS(2332),
     [anon_sym_PIPE_EQ] = ACTIONS(2332),
+    [anon_sym_PIPE_GT] = ACTIONS(2332),
     [anon_sym_PIPE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2332),
@@ -71082,6 +72003,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2391),
     [anon_sym_LT_EQ] = ACTIONS(2391),
     [anon_sym_LT_EQ_GT] = ACTIONS(2391),
+    [anon_sym_LT_GT] = ACTIONS(2391),
     [anon_sym_EQ_EQ] = ACTIONS(2391),
     [anon_sym_GT_EQ] = ACTIONS(2391),
     [anon_sym_GT_GT] = ACTIONS(2391),
@@ -71090,6 +72012,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2391),
     [anon_sym_CARET_EQ] = ACTIONS(2391),
     [anon_sym_PIPE_EQ] = ACTIONS(2391),
+    [anon_sym_PIPE_GT] = ACTIONS(2391),
     [anon_sym_PIPE_PIPE] = ACTIONS(2391),
     [anon_sym_TILDE_PIPE] = ACTIONS(2391),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2391),
@@ -71204,6 +72127,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2395),
     [anon_sym_LT_EQ] = ACTIONS(2395),
     [anon_sym_LT_EQ_GT] = ACTIONS(2395),
+    [anon_sym_LT_GT] = ACTIONS(2395),
     [anon_sym_EQ_EQ] = ACTIONS(2395),
     [anon_sym_GT_EQ] = ACTIONS(2395),
     [anon_sym_GT_GT] = ACTIONS(2395),
@@ -71212,6 +72136,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2395),
     [anon_sym_CARET_EQ] = ACTIONS(2395),
     [anon_sym_PIPE_EQ] = ACTIONS(2395),
+    [anon_sym_PIPE_GT] = ACTIONS(2395),
     [anon_sym_PIPE_PIPE] = ACTIONS(2395),
     [anon_sym_TILDE_PIPE] = ACTIONS(2395),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2395),
@@ -71326,6 +72251,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2399),
     [anon_sym_LT_EQ] = ACTIONS(2399),
     [anon_sym_LT_EQ_GT] = ACTIONS(2399),
+    [anon_sym_LT_GT] = ACTIONS(2399),
     [anon_sym_EQ_EQ] = ACTIONS(2399),
     [anon_sym_GT_EQ] = ACTIONS(2399),
     [anon_sym_GT_GT] = ACTIONS(2399),
@@ -71334,6 +72260,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2399),
     [anon_sym_CARET_EQ] = ACTIONS(2399),
     [anon_sym_PIPE_EQ] = ACTIONS(2399),
+    [anon_sym_PIPE_GT] = ACTIONS(2399),
     [anon_sym_PIPE_PIPE] = ACTIONS(2399),
     [anon_sym_TILDE_PIPE] = ACTIONS(2399),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2399),
@@ -71448,6 +72375,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2403),
     [anon_sym_LT_EQ] = ACTIONS(2403),
     [anon_sym_LT_EQ_GT] = ACTIONS(2403),
+    [anon_sym_LT_GT] = ACTIONS(2403),
     [anon_sym_EQ_EQ] = ACTIONS(2403),
     [anon_sym_GT_EQ] = ACTIONS(2403),
     [anon_sym_GT_GT] = ACTIONS(2403),
@@ -71456,6 +72384,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2403),
     [anon_sym_CARET_EQ] = ACTIONS(2403),
     [anon_sym_PIPE_EQ] = ACTIONS(2403),
+    [anon_sym_PIPE_GT] = ACTIONS(2403),
     [anon_sym_PIPE_PIPE] = ACTIONS(2403),
     [anon_sym_TILDE_PIPE] = ACTIONS(2403),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2403),
@@ -71571,6 +72500,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ_GT] = ACTIONS(2332),
+    [anon_sym_LT_GT] = ACTIONS(2332),
     [anon_sym_EQ_EQ] = ACTIONS(2332),
     [anon_sym_GT_EQ] = ACTIONS(2332),
     [anon_sym_GT_GT] = ACTIONS(2332),
@@ -71579,6 +72509,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2332),
     [anon_sym_CARET_EQ] = ACTIONS(2332),
     [anon_sym_PIPE_EQ] = ACTIONS(2332),
+    [anon_sym_PIPE_GT] = ACTIONS(2332),
     [anon_sym_PIPE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2332),
@@ -71692,6 +72623,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2407),
     [anon_sym_LT_EQ] = ACTIONS(2407),
     [anon_sym_LT_EQ_GT] = ACTIONS(2407),
+    [anon_sym_LT_GT] = ACTIONS(2407),
     [anon_sym_EQ_EQ] = ACTIONS(2407),
     [anon_sym_GT_EQ] = ACTIONS(2407),
     [anon_sym_GT_GT] = ACTIONS(2407),
@@ -71700,6 +72632,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2407),
     [anon_sym_CARET_EQ] = ACTIONS(2407),
     [anon_sym_PIPE_EQ] = ACTIONS(2407),
+    [anon_sym_PIPE_GT] = ACTIONS(2407),
     [anon_sym_PIPE_PIPE] = ACTIONS(2407),
     [anon_sym_TILDE_PIPE] = ACTIONS(2407),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2407),
@@ -71814,6 +72747,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2411),
     [anon_sym_LT_EQ] = ACTIONS(2411),
     [anon_sym_LT_EQ_GT] = ACTIONS(2411),
+    [anon_sym_LT_GT] = ACTIONS(2411),
     [anon_sym_EQ_EQ] = ACTIONS(2411),
     [anon_sym_GT_EQ] = ACTIONS(2411),
     [anon_sym_GT_GT] = ACTIONS(2411),
@@ -71822,6 +72756,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2411),
     [anon_sym_CARET_EQ] = ACTIONS(2411),
     [anon_sym_PIPE_EQ] = ACTIONS(2411),
+    [anon_sym_PIPE_GT] = ACTIONS(2411),
     [anon_sym_PIPE_PIPE] = ACTIONS(2411),
     [anon_sym_TILDE_PIPE] = ACTIONS(2411),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2411),
@@ -71936,6 +72871,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2415),
     [anon_sym_LT_EQ] = ACTIONS(2415),
     [anon_sym_LT_EQ_GT] = ACTIONS(2415),
+    [anon_sym_LT_GT] = ACTIONS(2415),
     [anon_sym_EQ_EQ] = ACTIONS(2415),
     [anon_sym_GT_EQ] = ACTIONS(2415),
     [anon_sym_GT_GT] = ACTIONS(2415),
@@ -71944,6 +72880,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2415),
     [anon_sym_CARET_EQ] = ACTIONS(2415),
     [anon_sym_PIPE_EQ] = ACTIONS(2415),
+    [anon_sym_PIPE_GT] = ACTIONS(2415),
     [anon_sym_PIPE_PIPE] = ACTIONS(2415),
     [anon_sym_TILDE_PIPE] = ACTIONS(2415),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2415),
@@ -72059,6 +72996,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ_GT] = ACTIONS(2332),
+    [anon_sym_LT_GT] = ACTIONS(2332),
     [anon_sym_EQ_EQ] = ACTIONS(2332),
     [anon_sym_GT_EQ] = ACTIONS(2332),
     [anon_sym_GT_GT] = ACTIONS(2332),
@@ -72067,6 +73005,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2332),
     [anon_sym_CARET_EQ] = ACTIONS(2332),
     [anon_sym_PIPE_EQ] = ACTIONS(2332),
+    [anon_sym_PIPE_GT] = ACTIONS(2332),
     [anon_sym_PIPE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2332),
@@ -72181,6 +73120,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ_GT] = ACTIONS(2332),
+    [anon_sym_LT_GT] = ACTIONS(2332),
     [anon_sym_EQ_EQ] = ACTIONS(2332),
     [anon_sym_GT_EQ] = ACTIONS(2332),
     [anon_sym_GT_GT] = ACTIONS(2332),
@@ -72189,6 +73129,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2332),
     [anon_sym_CARET_EQ] = ACTIONS(2332),
     [anon_sym_PIPE_EQ] = ACTIONS(2332),
+    [anon_sym_PIPE_GT] = ACTIONS(2332),
     [anon_sym_PIPE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2332),
@@ -72303,6 +73244,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ_GT] = ACTIONS(2332),
+    [anon_sym_LT_GT] = ACTIONS(2332),
     [anon_sym_EQ_EQ] = ACTIONS(2332),
     [anon_sym_GT_EQ] = ACTIONS(2332),
     [anon_sym_GT_GT] = ACTIONS(2332),
@@ -72311,6 +73253,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2332),
     [anon_sym_CARET_EQ] = ACTIONS(2332),
     [anon_sym_PIPE_EQ] = ACTIONS(2332),
+    [anon_sym_PIPE_GT] = ACTIONS(2332),
     [anon_sym_PIPE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2332),
@@ -72425,6 +73368,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ_GT] = ACTIONS(2332),
+    [anon_sym_LT_GT] = ACTIONS(2332),
     [anon_sym_EQ_EQ] = ACTIONS(2332),
     [anon_sym_GT_EQ] = ACTIONS(2332),
     [anon_sym_GT_GT] = ACTIONS(2332),
@@ -72433,6 +73377,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2332),
     [anon_sym_CARET_EQ] = ACTIONS(2332),
     [anon_sym_PIPE_EQ] = ACTIONS(2332),
+    [anon_sym_PIPE_GT] = ACTIONS(2332),
     [anon_sym_PIPE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2332),
@@ -72547,6 +73492,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ_GT] = ACTIONS(2332),
+    [anon_sym_LT_GT] = ACTIONS(2332),
     [anon_sym_EQ_EQ] = ACTIONS(2332),
     [anon_sym_GT_EQ] = ACTIONS(2332),
     [anon_sym_GT_GT] = ACTIONS(2332),
@@ -72555,6 +73501,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2332),
     [anon_sym_CARET_EQ] = ACTIONS(2332),
     [anon_sym_PIPE_EQ] = ACTIONS(2332),
+    [anon_sym_PIPE_GT] = ACTIONS(2332),
     [anon_sym_PIPE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2332),
@@ -72668,6 +73615,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2439),
     [anon_sym_LT_EQ] = ACTIONS(2439),
     [anon_sym_LT_EQ_GT] = ACTIONS(2439),
+    [anon_sym_LT_GT] = ACTIONS(2439),
     [anon_sym_EQ_EQ] = ACTIONS(2439),
     [anon_sym_GT_EQ] = ACTIONS(2439),
     [anon_sym_GT_GT] = ACTIONS(2439),
@@ -72676,6 +73624,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2439),
     [anon_sym_CARET_EQ] = ACTIONS(2439),
     [anon_sym_PIPE_EQ] = ACTIONS(2439),
+    [anon_sym_PIPE_GT] = ACTIONS(2439),
     [anon_sym_PIPE_PIPE] = ACTIONS(2439),
     [anon_sym_TILDE_PIPE] = ACTIONS(2439),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2439),
@@ -72790,6 +73739,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ_GT] = ACTIONS(2332),
+    [anon_sym_LT_GT] = ACTIONS(2332),
     [anon_sym_EQ_EQ] = ACTIONS(2332),
     [anon_sym_GT_EQ] = ACTIONS(2332),
     [anon_sym_GT_GT] = ACTIONS(2332),
@@ -72798,6 +73748,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2332),
     [anon_sym_CARET_EQ] = ACTIONS(2332),
     [anon_sym_PIPE_EQ] = ACTIONS(2332),
+    [anon_sym_PIPE_GT] = ACTIONS(2332),
     [anon_sym_PIPE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2332),
@@ -72913,6 +73864,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ_GT] = ACTIONS(2332),
+    [anon_sym_LT_GT] = ACTIONS(2332),
     [anon_sym_EQ_EQ] = ACTIONS(2332),
     [anon_sym_GT_EQ] = ACTIONS(2332),
     [anon_sym_GT_GT] = ACTIONS(2332),
@@ -72921,6 +73873,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2332),
     [anon_sym_CARET_EQ] = ACTIONS(2332),
     [anon_sym_PIPE_EQ] = ACTIONS(2332),
+    [anon_sym_PIPE_GT] = ACTIONS(2332),
     [anon_sym_PIPE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2332),
@@ -73035,6 +73988,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ_GT] = ACTIONS(2332),
+    [anon_sym_LT_GT] = ACTIONS(2332),
     [anon_sym_EQ_EQ] = ACTIONS(2332),
     [anon_sym_GT_EQ] = ACTIONS(2332),
     [anon_sym_GT_GT] = ACTIONS(2332),
@@ -73043,6 +73997,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2332),
     [anon_sym_CARET_EQ] = ACTIONS(2332),
     [anon_sym_PIPE_EQ] = ACTIONS(2332),
+    [anon_sym_PIPE_GT] = ACTIONS(2332),
     [anon_sym_PIPE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2332),
@@ -73157,6 +74112,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ_GT] = ACTIONS(2332),
+    [anon_sym_LT_GT] = ACTIONS(2332),
     [anon_sym_EQ_EQ] = ACTIONS(2332),
     [anon_sym_GT_EQ] = ACTIONS(2332),
     [anon_sym_GT_GT] = ACTIONS(2332),
@@ -73165,6 +74121,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2332),
     [anon_sym_CARET_EQ] = ACTIONS(2332),
     [anon_sym_PIPE_EQ] = ACTIONS(2332),
+    [anon_sym_PIPE_GT] = ACTIONS(2332),
     [anon_sym_PIPE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2332),
@@ -73278,6 +74235,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2403),
     [anon_sym_LT_EQ] = ACTIONS(2403),
     [anon_sym_LT_EQ_GT] = ACTIONS(2403),
+    [anon_sym_LT_GT] = ACTIONS(2403),
     [anon_sym_EQ_EQ] = ACTIONS(2403),
     [anon_sym_GT_EQ] = ACTIONS(2403),
     [anon_sym_GT_GT] = ACTIONS(2403),
@@ -73286,6 +74244,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2403),
     [anon_sym_CARET_EQ] = ACTIONS(2403),
     [anon_sym_PIPE_EQ] = ACTIONS(2403),
+    [anon_sym_PIPE_GT] = ACTIONS(2403),
     [anon_sym_PIPE_PIPE] = ACTIONS(2403),
     [anon_sym_TILDE_PIPE] = ACTIONS(2403),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2403),
@@ -73398,6 +74357,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2411),
     [anon_sym_LT_EQ] = ACTIONS(2411),
     [anon_sym_LT_EQ_GT] = ACTIONS(2411),
+    [anon_sym_LT_GT] = ACTIONS(2411),
     [anon_sym_EQ_EQ] = ACTIONS(2411),
     [anon_sym_GT_EQ] = ACTIONS(2411),
     [anon_sym_GT_GT] = ACTIONS(2411),
@@ -73406,6 +74366,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2411),
     [anon_sym_CARET_EQ] = ACTIONS(2411),
     [anon_sym_PIPE_EQ] = ACTIONS(2411),
+    [anon_sym_PIPE_GT] = ACTIONS(2411),
     [anon_sym_PIPE_PIPE] = ACTIONS(2411),
     [anon_sym_TILDE_PIPE] = ACTIONS(2411),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2411),
@@ -73519,6 +74480,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2456),
     [anon_sym_LT_EQ] = ACTIONS(2456),
     [anon_sym_LT_EQ_GT] = ACTIONS(2456),
+    [anon_sym_LT_GT] = ACTIONS(2456),
     [anon_sym_EQ_EQ] = ACTIONS(2456),
     [anon_sym_GT_EQ] = ACTIONS(2456),
     [anon_sym_GT_GT] = ACTIONS(2456),
@@ -73527,6 +74489,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2456),
     [anon_sym_CARET_EQ] = ACTIONS(2456),
     [anon_sym_PIPE_EQ] = ACTIONS(2456),
+    [anon_sym_PIPE_GT] = ACTIONS(2456),
     [anon_sym_PIPE_PIPE] = ACTIONS(2456),
     [anon_sym_TILDE_PIPE] = ACTIONS(2456),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2456),
@@ -73641,6 +74604,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2415),
     [anon_sym_LT_EQ] = ACTIONS(2415),
     [anon_sym_LT_EQ_GT] = ACTIONS(2415),
+    [anon_sym_LT_GT] = ACTIONS(2415),
     [anon_sym_EQ_EQ] = ACTIONS(2415),
     [anon_sym_GT_EQ] = ACTIONS(2415),
     [anon_sym_GT_GT] = ACTIONS(2415),
@@ -73649,6 +74613,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2415),
     [anon_sym_CARET_EQ] = ACTIONS(2415),
     [anon_sym_PIPE_EQ] = ACTIONS(2415),
+    [anon_sym_PIPE_GT] = ACTIONS(2415),
     [anon_sym_PIPE_PIPE] = ACTIONS(2415),
     [anon_sym_TILDE_PIPE] = ACTIONS(2415),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2415),
@@ -73761,6 +74726,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2460),
     [anon_sym_LT_EQ] = ACTIONS(2460),
     [anon_sym_LT_EQ_GT] = ACTIONS(2460),
+    [anon_sym_LT_GT] = ACTIONS(2460),
     [anon_sym_EQ_EQ] = ACTIONS(2460),
     [anon_sym_GT_EQ] = ACTIONS(2460),
     [anon_sym_GT_GT] = ACTIONS(2460),
@@ -73769,6 +74735,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2460),
     [anon_sym_CARET_EQ] = ACTIONS(2460),
     [anon_sym_PIPE_EQ] = ACTIONS(2460),
+    [anon_sym_PIPE_GT] = ACTIONS(2460),
     [anon_sym_PIPE_PIPE] = ACTIONS(2460),
     [anon_sym_TILDE_PIPE] = ACTIONS(2460),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2460),
@@ -73882,6 +74849,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2464),
     [anon_sym_LT_EQ] = ACTIONS(2464),
     [anon_sym_LT_EQ_GT] = ACTIONS(2464),
+    [anon_sym_LT_GT] = ACTIONS(2464),
     [anon_sym_EQ_EQ] = ACTIONS(2464),
     [anon_sym_GT_EQ] = ACTIONS(2464),
     [anon_sym_GT_GT] = ACTIONS(2464),
@@ -73890,6 +74858,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2464),
     [anon_sym_CARET_EQ] = ACTIONS(2464),
     [anon_sym_PIPE_EQ] = ACTIONS(2464),
+    [anon_sym_PIPE_GT] = ACTIONS(2464),
     [anon_sym_PIPE_PIPE] = ACTIONS(2464),
     [anon_sym_TILDE_PIPE] = ACTIONS(2464),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2464),
@@ -74003,6 +74972,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2468),
     [anon_sym_LT_EQ] = ACTIONS(2468),
     [anon_sym_LT_EQ_GT] = ACTIONS(2468),
+    [anon_sym_LT_GT] = ACTIONS(2468),
     [anon_sym_EQ_EQ] = ACTIONS(2468),
     [anon_sym_GT_EQ] = ACTIONS(2468),
     [anon_sym_GT_GT] = ACTIONS(2468),
@@ -74011,6 +74981,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2468),
     [anon_sym_CARET_EQ] = ACTIONS(2468),
     [anon_sym_PIPE_EQ] = ACTIONS(2468),
+    [anon_sym_PIPE_GT] = ACTIONS(2468),
     [anon_sym_PIPE_PIPE] = ACTIONS(2468),
     [anon_sym_TILDE_PIPE] = ACTIONS(2468),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2468),
@@ -74124,6 +75095,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2472),
     [anon_sym_LT_EQ] = ACTIONS(2472),
     [anon_sym_LT_EQ_GT] = ACTIONS(2472),
+    [anon_sym_LT_GT] = ACTIONS(2472),
     [anon_sym_EQ_EQ] = ACTIONS(2472),
     [anon_sym_GT_EQ] = ACTIONS(2472),
     [anon_sym_GT_GT] = ACTIONS(2472),
@@ -74132,6 +75104,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2472),
     [anon_sym_CARET_EQ] = ACTIONS(2472),
     [anon_sym_PIPE_EQ] = ACTIONS(2472),
+    [anon_sym_PIPE_GT] = ACTIONS(2472),
     [anon_sym_PIPE_PIPE] = ACTIONS(2472),
     [anon_sym_TILDE_PIPE] = ACTIONS(2472),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2472),
@@ -74245,6 +75218,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2476),
     [anon_sym_LT_EQ] = ACTIONS(2476),
     [anon_sym_LT_EQ_GT] = ACTIONS(2476),
+    [anon_sym_LT_GT] = ACTIONS(2476),
     [anon_sym_EQ_EQ] = ACTIONS(2476),
     [anon_sym_GT_EQ] = ACTIONS(2476),
     [anon_sym_GT_GT] = ACTIONS(2476),
@@ -74253,6 +75227,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2476),
     [anon_sym_CARET_EQ] = ACTIONS(2476),
     [anon_sym_PIPE_EQ] = ACTIONS(2476),
+    [anon_sym_PIPE_GT] = ACTIONS(2476),
     [anon_sym_PIPE_PIPE] = ACTIONS(2476),
     [anon_sym_TILDE_PIPE] = ACTIONS(2476),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2476),
@@ -74366,6 +75341,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2480),
     [anon_sym_LT_EQ] = ACTIONS(2480),
     [anon_sym_LT_EQ_GT] = ACTIONS(2480),
+    [anon_sym_LT_GT] = ACTIONS(2480),
     [anon_sym_EQ_EQ] = ACTIONS(2480),
     [anon_sym_GT_EQ] = ACTIONS(2480),
     [anon_sym_GT_GT] = ACTIONS(2480),
@@ -74374,6 +75350,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2480),
     [anon_sym_CARET_EQ] = ACTIONS(2480),
     [anon_sym_PIPE_EQ] = ACTIONS(2480),
+    [anon_sym_PIPE_GT] = ACTIONS(2480),
     [anon_sym_PIPE_PIPE] = ACTIONS(2480),
     [anon_sym_TILDE_PIPE] = ACTIONS(2480),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2480),
@@ -74487,6 +75464,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2484),
     [anon_sym_LT_EQ] = ACTIONS(2484),
     [anon_sym_LT_EQ_GT] = ACTIONS(2484),
+    [anon_sym_LT_GT] = ACTIONS(2484),
     [anon_sym_EQ_EQ] = ACTIONS(2484),
     [anon_sym_GT_EQ] = ACTIONS(2484),
     [anon_sym_GT_GT] = ACTIONS(2484),
@@ -74495,6 +75473,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2484),
     [anon_sym_CARET_EQ] = ACTIONS(2484),
     [anon_sym_PIPE_EQ] = ACTIONS(2484),
+    [anon_sym_PIPE_GT] = ACTIONS(2484),
     [anon_sym_PIPE_PIPE] = ACTIONS(2484),
     [anon_sym_TILDE_PIPE] = ACTIONS(2484),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2484),
@@ -74608,6 +75587,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2488),
     [anon_sym_LT_EQ] = ACTIONS(2488),
     [anon_sym_LT_EQ_GT] = ACTIONS(2488),
+    [anon_sym_LT_GT] = ACTIONS(2488),
     [anon_sym_EQ_EQ] = ACTIONS(2488),
     [anon_sym_GT_EQ] = ACTIONS(2488),
     [anon_sym_GT_GT] = ACTIONS(2488),
@@ -74616,6 +75596,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2488),
     [anon_sym_CARET_EQ] = ACTIONS(2488),
     [anon_sym_PIPE_EQ] = ACTIONS(2488),
+    [anon_sym_PIPE_GT] = ACTIONS(2488),
     [anon_sym_PIPE_PIPE] = ACTIONS(2488),
     [anon_sym_TILDE_PIPE] = ACTIONS(2488),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2488),
@@ -74729,6 +75710,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2492),
     [anon_sym_LT_EQ] = ACTIONS(2492),
     [anon_sym_LT_EQ_GT] = ACTIONS(2492),
+    [anon_sym_LT_GT] = ACTIONS(2492),
     [anon_sym_EQ_EQ] = ACTIONS(2492),
     [anon_sym_GT_EQ] = ACTIONS(2492),
     [anon_sym_GT_GT] = ACTIONS(2492),
@@ -74737,6 +75719,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2492),
     [anon_sym_CARET_EQ] = ACTIONS(2492),
     [anon_sym_PIPE_EQ] = ACTIONS(2492),
+    [anon_sym_PIPE_GT] = ACTIONS(2492),
     [anon_sym_PIPE_PIPE] = ACTIONS(2492),
     [anon_sym_TILDE_PIPE] = ACTIONS(2492),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2492),
@@ -74850,6 +75833,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2496),
     [anon_sym_LT_EQ] = ACTIONS(2496),
     [anon_sym_LT_EQ_GT] = ACTIONS(2496),
+    [anon_sym_LT_GT] = ACTIONS(2496),
     [anon_sym_EQ_EQ] = ACTIONS(2496),
     [anon_sym_GT_EQ] = ACTIONS(2496),
     [anon_sym_GT_GT] = ACTIONS(2496),
@@ -74858,6 +75842,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2496),
     [anon_sym_CARET_EQ] = ACTIONS(2496),
     [anon_sym_PIPE_EQ] = ACTIONS(2496),
+    [anon_sym_PIPE_GT] = ACTIONS(2496),
     [anon_sym_PIPE_PIPE] = ACTIONS(2496),
     [anon_sym_TILDE_PIPE] = ACTIONS(2496),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2496),
@@ -74971,6 +75956,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2500),
     [anon_sym_LT_EQ] = ACTIONS(2500),
     [anon_sym_LT_EQ_GT] = ACTIONS(2500),
+    [anon_sym_LT_GT] = ACTIONS(2500),
     [anon_sym_EQ_EQ] = ACTIONS(2500),
     [anon_sym_GT_EQ] = ACTIONS(2500),
     [anon_sym_GT_GT] = ACTIONS(2500),
@@ -74979,6 +75965,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2500),
     [anon_sym_CARET_EQ] = ACTIONS(2500),
     [anon_sym_PIPE_EQ] = ACTIONS(2500),
+    [anon_sym_PIPE_GT] = ACTIONS(2500),
     [anon_sym_PIPE_PIPE] = ACTIONS(2500),
     [anon_sym_TILDE_PIPE] = ACTIONS(2500),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2500),
@@ -75093,6 +76080,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2383),
     [anon_sym_LT_EQ] = ACTIONS(2383),
     [anon_sym_LT_EQ_GT] = ACTIONS(2383),
+    [anon_sym_LT_GT] = ACTIONS(2383),
     [anon_sym_EQ_EQ] = ACTIONS(2383),
     [anon_sym_GT_EQ] = ACTIONS(2383),
     [anon_sym_GT_GT] = ACTIONS(2383),
@@ -75101,6 +76089,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2383),
     [anon_sym_CARET_EQ] = ACTIONS(2383),
     [anon_sym_PIPE_EQ] = ACTIONS(2383),
+    [anon_sym_PIPE_GT] = ACTIONS(2383),
     [anon_sym_PIPE_PIPE] = ACTIONS(2383),
     [anon_sym_TILDE_PIPE] = ACTIONS(2383),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2383),
@@ -75213,6 +76202,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2504),
     [anon_sym_LT_EQ] = ACTIONS(2504),
     [anon_sym_LT_EQ_GT] = ACTIONS(2504),
+    [anon_sym_LT_GT] = ACTIONS(2504),
     [anon_sym_EQ_EQ] = ACTIONS(2504),
     [anon_sym_GT_EQ] = ACTIONS(2504),
     [anon_sym_GT_GT] = ACTIONS(2504),
@@ -75221,6 +76211,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2504),
     [anon_sym_CARET_EQ] = ACTIONS(2504),
     [anon_sym_PIPE_EQ] = ACTIONS(2504),
+    [anon_sym_PIPE_GT] = ACTIONS(2504),
     [anon_sym_PIPE_PIPE] = ACTIONS(2504),
     [anon_sym_TILDE_PIPE] = ACTIONS(2504),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2504),
@@ -75334,6 +76325,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2508),
     [anon_sym_LT_EQ] = ACTIONS(2508),
     [anon_sym_LT_EQ_GT] = ACTIONS(2508),
+    [anon_sym_LT_GT] = ACTIONS(2508),
     [anon_sym_EQ_EQ] = ACTIONS(2508),
     [anon_sym_GT_EQ] = ACTIONS(2508),
     [anon_sym_GT_GT] = ACTIONS(2508),
@@ -75342,6 +76334,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2508),
     [anon_sym_CARET_EQ] = ACTIONS(2508),
     [anon_sym_PIPE_EQ] = ACTIONS(2508),
+    [anon_sym_PIPE_GT] = ACTIONS(2508),
     [anon_sym_PIPE_PIPE] = ACTIONS(2508),
     [anon_sym_TILDE_PIPE] = ACTIONS(2508),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2508),
@@ -75456,6 +76449,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2347),
     [anon_sym_LT_EQ] = ACTIONS(2347),
     [anon_sym_LT_EQ_GT] = ACTIONS(2347),
+    [anon_sym_LT_GT] = ACTIONS(2347),
     [anon_sym_EQ_EQ] = ACTIONS(2347),
     [anon_sym_GT_EQ] = ACTIONS(2347),
     [anon_sym_GT_GT] = ACTIONS(2347),
@@ -75464,6 +76458,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2347),
     [anon_sym_CARET_EQ] = ACTIONS(2347),
     [anon_sym_PIPE_EQ] = ACTIONS(2347),
+    [anon_sym_PIPE_GT] = ACTIONS(2347),
     [anon_sym_PIPE_PIPE] = ACTIONS(2347),
     [anon_sym_TILDE_PIPE] = ACTIONS(2347),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2347),
@@ -75576,6 +76571,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2512),
     [anon_sym_LT_EQ] = ACTIONS(2512),
     [anon_sym_LT_EQ_GT] = ACTIONS(2512),
+    [anon_sym_LT_GT] = ACTIONS(2512),
     [anon_sym_EQ_EQ] = ACTIONS(2512),
     [anon_sym_GT_EQ] = ACTIONS(2512),
     [anon_sym_GT_GT] = ACTIONS(2512),
@@ -75584,6 +76580,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2512),
     [anon_sym_CARET_EQ] = ACTIONS(2512),
     [anon_sym_PIPE_EQ] = ACTIONS(2512),
+    [anon_sym_PIPE_GT] = ACTIONS(2512),
     [anon_sym_PIPE_PIPE] = ACTIONS(2512),
     [anon_sym_TILDE_PIPE] = ACTIONS(2512),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2512),
@@ -75697,6 +76694,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2516),
     [anon_sym_LT_EQ] = ACTIONS(2516),
     [anon_sym_LT_EQ_GT] = ACTIONS(2516),
+    [anon_sym_LT_GT] = ACTIONS(2516),
     [anon_sym_EQ_EQ] = ACTIONS(2516),
     [anon_sym_GT_EQ] = ACTIONS(2516),
     [anon_sym_GT_GT] = ACTIONS(2516),
@@ -75705,6 +76703,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2516),
     [anon_sym_CARET_EQ] = ACTIONS(2516),
     [anon_sym_PIPE_EQ] = ACTIONS(2516),
+    [anon_sym_PIPE_GT] = ACTIONS(2516),
     [anon_sym_PIPE_PIPE] = ACTIONS(2516),
     [anon_sym_TILDE_PIPE] = ACTIONS(2516),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2516),
@@ -75819,6 +76818,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2375),
     [anon_sym_LT_EQ] = ACTIONS(2375),
     [anon_sym_LT_EQ_GT] = ACTIONS(2375),
+    [anon_sym_LT_GT] = ACTIONS(2375),
     [anon_sym_EQ_EQ] = ACTIONS(2375),
     [anon_sym_GT_EQ] = ACTIONS(2375),
     [anon_sym_GT_GT] = ACTIONS(2375),
@@ -75827,6 +76827,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2375),
     [anon_sym_CARET_EQ] = ACTIONS(2375),
     [anon_sym_PIPE_EQ] = ACTIONS(2375),
+    [anon_sym_PIPE_GT] = ACTIONS(2375),
     [anon_sym_PIPE_PIPE] = ACTIONS(2375),
     [anon_sym_TILDE_PIPE] = ACTIONS(2375),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2375),
@@ -75940,6 +76941,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2379),
     [anon_sym_LT_EQ] = ACTIONS(2379),
     [anon_sym_LT_EQ_GT] = ACTIONS(2379),
+    [anon_sym_LT_GT] = ACTIONS(2379),
     [anon_sym_EQ_EQ] = ACTIONS(2379),
     [anon_sym_GT_EQ] = ACTIONS(2379),
     [anon_sym_GT_GT] = ACTIONS(2379),
@@ -75948,6 +76950,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2379),
     [anon_sym_CARET_EQ] = ACTIONS(2379),
     [anon_sym_PIPE_EQ] = ACTIONS(2379),
+    [anon_sym_PIPE_GT] = ACTIONS(2379),
     [anon_sym_PIPE_PIPE] = ACTIONS(2379),
     [anon_sym_TILDE_PIPE] = ACTIONS(2379),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2379),
@@ -76061,6 +77064,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2403),
     [anon_sym_LT_EQ] = ACTIONS(2403),
     [anon_sym_LT_EQ_GT] = ACTIONS(2403),
+    [anon_sym_LT_GT] = ACTIONS(2403),
     [anon_sym_EQ_EQ] = ACTIONS(2403),
     [anon_sym_GT_EQ] = ACTIONS(2403),
     [anon_sym_GT_GT] = ACTIONS(2403),
@@ -76069,6 +77073,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2403),
     [anon_sym_CARET_EQ] = ACTIONS(2403),
     [anon_sym_PIPE_EQ] = ACTIONS(2403),
+    [anon_sym_PIPE_GT] = ACTIONS(2403),
     [anon_sym_PIPE_PIPE] = ACTIONS(2403),
     [anon_sym_TILDE_PIPE] = ACTIONS(2403),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2403),
@@ -76181,6 +77186,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2520),
     [anon_sym_LT_EQ] = ACTIONS(2520),
     [anon_sym_LT_EQ_GT] = ACTIONS(2520),
+    [anon_sym_LT_GT] = ACTIONS(2520),
     [anon_sym_EQ_EQ] = ACTIONS(2520),
     [anon_sym_GT_EQ] = ACTIONS(2520),
     [anon_sym_GT_GT] = ACTIONS(2520),
@@ -76189,6 +77195,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2520),
     [anon_sym_CARET_EQ] = ACTIONS(2520),
     [anon_sym_PIPE_EQ] = ACTIONS(2520),
+    [anon_sym_PIPE_GT] = ACTIONS(2520),
     [anon_sym_PIPE_PIPE] = ACTIONS(2520),
     [anon_sym_TILDE_PIPE] = ACTIONS(2520),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2520),
@@ -76302,6 +77309,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2524),
     [anon_sym_LT_EQ] = ACTIONS(2524),
     [anon_sym_LT_EQ_GT] = ACTIONS(2524),
+    [anon_sym_LT_GT] = ACTIONS(2524),
     [anon_sym_EQ_EQ] = ACTIONS(2524),
     [anon_sym_GT_EQ] = ACTIONS(2524),
     [anon_sym_GT_GT] = ACTIONS(2524),
@@ -76310,6 +77318,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2524),
     [anon_sym_CARET_EQ] = ACTIONS(2524),
     [anon_sym_PIPE_EQ] = ACTIONS(2524),
+    [anon_sym_PIPE_GT] = ACTIONS(2524),
     [anon_sym_PIPE_PIPE] = ACTIONS(2524),
     [anon_sym_TILDE_PIPE] = ACTIONS(2524),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2524),
@@ -76423,6 +77432,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2528),
     [anon_sym_LT_EQ] = ACTIONS(2528),
     [anon_sym_LT_EQ_GT] = ACTIONS(2528),
+    [anon_sym_LT_GT] = ACTIONS(2528),
     [anon_sym_EQ_EQ] = ACTIONS(2528),
     [anon_sym_GT_EQ] = ACTIONS(2528),
     [anon_sym_GT_GT] = ACTIONS(2528),
@@ -76431,6 +77441,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2528),
     [anon_sym_CARET_EQ] = ACTIONS(2528),
     [anon_sym_PIPE_EQ] = ACTIONS(2528),
+    [anon_sym_PIPE_GT] = ACTIONS(2528),
     [anon_sym_PIPE_PIPE] = ACTIONS(2528),
     [anon_sym_TILDE_PIPE] = ACTIONS(2528),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2528),
@@ -76545,6 +77556,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ_GT] = ACTIONS(2332),
+    [anon_sym_LT_GT] = ACTIONS(2332),
     [anon_sym_EQ_EQ] = ACTIONS(2332),
     [anon_sym_GT_EQ] = ACTIONS(2332),
     [anon_sym_GT_GT] = ACTIONS(2332),
@@ -76553,6 +77565,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2332),
     [anon_sym_CARET_EQ] = ACTIONS(2332),
     [anon_sym_PIPE_EQ] = ACTIONS(2332),
+    [anon_sym_PIPE_GT] = ACTIONS(2332),
     [anon_sym_PIPE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2332),
@@ -76665,6 +77678,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2534),
     [anon_sym_LT_EQ] = ACTIONS(2534),
     [anon_sym_LT_EQ_GT] = ACTIONS(2534),
+    [anon_sym_LT_GT] = ACTIONS(2534),
     [anon_sym_EQ_EQ] = ACTIONS(2534),
     [anon_sym_GT_EQ] = ACTIONS(2534),
     [anon_sym_GT_GT] = ACTIONS(2534),
@@ -76673,6 +77687,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2534),
     [anon_sym_CARET_EQ] = ACTIONS(2534),
     [anon_sym_PIPE_EQ] = ACTIONS(2534),
+    [anon_sym_PIPE_GT] = ACTIONS(2534),
     [anon_sym_PIPE_PIPE] = ACTIONS(2534),
     [anon_sym_TILDE_PIPE] = ACTIONS(2534),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2534),
@@ -76786,6 +77801,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2538),
     [anon_sym_LT_EQ] = ACTIONS(2538),
     [anon_sym_LT_EQ_GT] = ACTIONS(2538),
+    [anon_sym_LT_GT] = ACTIONS(2538),
     [anon_sym_EQ_EQ] = ACTIONS(2538),
     [anon_sym_GT_EQ] = ACTIONS(2538),
     [anon_sym_GT_GT] = ACTIONS(2538),
@@ -76794,6 +77810,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2538),
     [anon_sym_CARET_EQ] = ACTIONS(2538),
     [anon_sym_PIPE_EQ] = ACTIONS(2538),
+    [anon_sym_PIPE_GT] = ACTIONS(2538),
     [anon_sym_PIPE_PIPE] = ACTIONS(2538),
     [anon_sym_TILDE_PIPE] = ACTIONS(2538),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2538),
@@ -76907,6 +77924,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2542),
     [anon_sym_LT_EQ] = ACTIONS(2542),
     [anon_sym_LT_EQ_GT] = ACTIONS(2542),
+    [anon_sym_LT_GT] = ACTIONS(2542),
     [anon_sym_EQ_EQ] = ACTIONS(2542),
     [anon_sym_GT_EQ] = ACTIONS(2542),
     [anon_sym_GT_GT] = ACTIONS(2542),
@@ -76915,6 +77933,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2542),
     [anon_sym_CARET_EQ] = ACTIONS(2542),
     [anon_sym_PIPE_EQ] = ACTIONS(2542),
+    [anon_sym_PIPE_GT] = ACTIONS(2542),
     [anon_sym_PIPE_PIPE] = ACTIONS(2542),
     [anon_sym_TILDE_PIPE] = ACTIONS(2542),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2542),
@@ -77029,6 +78048,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2359),
     [anon_sym_LT_EQ] = ACTIONS(2359),
     [anon_sym_LT_EQ_GT] = ACTIONS(2359),
+    [anon_sym_LT_GT] = ACTIONS(2359),
     [anon_sym_EQ_EQ] = ACTIONS(2359),
     [anon_sym_GT_EQ] = ACTIONS(2359),
     [anon_sym_GT_GT] = ACTIONS(2359),
@@ -77037,6 +78057,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2359),
     [anon_sym_CARET_EQ] = ACTIONS(2359),
     [anon_sym_PIPE_EQ] = ACTIONS(2359),
+    [anon_sym_PIPE_GT] = ACTIONS(2359),
     [anon_sym_PIPE_PIPE] = ACTIONS(2359),
     [anon_sym_TILDE_PIPE] = ACTIONS(2359),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2359),
@@ -77149,6 +78170,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2546),
     [anon_sym_LT_EQ] = ACTIONS(2546),
     [anon_sym_LT_EQ_GT] = ACTIONS(2546),
+    [anon_sym_LT_GT] = ACTIONS(2546),
     [anon_sym_EQ_EQ] = ACTIONS(2546),
     [anon_sym_GT_EQ] = ACTIONS(2546),
     [anon_sym_GT_GT] = ACTIONS(2546),
@@ -77157,6 +78179,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2546),
     [anon_sym_CARET_EQ] = ACTIONS(2546),
     [anon_sym_PIPE_EQ] = ACTIONS(2546),
+    [anon_sym_PIPE_GT] = ACTIONS(2546),
     [anon_sym_PIPE_PIPE] = ACTIONS(2546),
     [anon_sym_TILDE_PIPE] = ACTIONS(2546),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2546),
@@ -77271,6 +78294,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ_GT] = ACTIONS(2332),
+    [anon_sym_LT_GT] = ACTIONS(2332),
     [anon_sym_EQ_EQ] = ACTIONS(2332),
     [anon_sym_GT_EQ] = ACTIONS(2332),
     [anon_sym_GT_GT] = ACTIONS(2332),
@@ -77279,6 +78303,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2332),
     [anon_sym_CARET_EQ] = ACTIONS(2332),
     [anon_sym_PIPE_EQ] = ACTIONS(2332),
+    [anon_sym_PIPE_GT] = ACTIONS(2332),
     [anon_sym_PIPE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2332),
@@ -77392,6 +78417,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ_GT] = ACTIONS(2332),
+    [anon_sym_LT_GT] = ACTIONS(2332),
     [anon_sym_EQ_EQ] = ACTIONS(2332),
     [anon_sym_GT_EQ] = ACTIONS(2332),
     [anon_sym_GT_GT] = ACTIONS(2332),
@@ -77400,6 +78426,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2332),
     [anon_sym_CARET_EQ] = ACTIONS(2332),
     [anon_sym_PIPE_EQ] = ACTIONS(2332),
+    [anon_sym_PIPE_GT] = ACTIONS(2332),
     [anon_sym_PIPE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2332),
@@ -77512,6 +78539,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2562),
     [anon_sym_LT_EQ] = ACTIONS(2562),
     [anon_sym_LT_EQ_GT] = ACTIONS(2562),
+    [anon_sym_LT_GT] = ACTIONS(2562),
     [anon_sym_EQ_EQ] = ACTIONS(2562),
     [anon_sym_GT_EQ] = ACTIONS(2562),
     [anon_sym_GT_GT] = ACTIONS(2562),
@@ -77520,6 +78548,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2562),
     [anon_sym_CARET_EQ] = ACTIONS(2562),
     [anon_sym_PIPE_EQ] = ACTIONS(2562),
+    [anon_sym_PIPE_GT] = ACTIONS(2562),
     [anon_sym_PIPE_PIPE] = ACTIONS(2562),
     [anon_sym_TILDE_PIPE] = ACTIONS(2562),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2562),
@@ -77633,6 +78662,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2566),
     [anon_sym_LT_EQ] = ACTIONS(2566),
     [anon_sym_LT_EQ_GT] = ACTIONS(2566),
+    [anon_sym_LT_GT] = ACTIONS(2566),
     [anon_sym_EQ_EQ] = ACTIONS(2566),
     [anon_sym_GT_EQ] = ACTIONS(2566),
     [anon_sym_GT_GT] = ACTIONS(2566),
@@ -77641,6 +78671,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2566),
     [anon_sym_CARET_EQ] = ACTIONS(2566),
     [anon_sym_PIPE_EQ] = ACTIONS(2566),
+    [anon_sym_PIPE_GT] = ACTIONS(2566),
     [anon_sym_PIPE_PIPE] = ACTIONS(2566),
     [anon_sym_TILDE_PIPE] = ACTIONS(2566),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2566),
@@ -77755,6 +78786,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ_GT] = ACTIONS(2332),
+    [anon_sym_LT_GT] = ACTIONS(2332),
     [anon_sym_EQ_EQ] = ACTIONS(2332),
     [anon_sym_GT_EQ] = ACTIONS(2332),
     [anon_sym_GT_GT] = ACTIONS(2332),
@@ -77763,6 +78795,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2332),
     [anon_sym_CARET_EQ] = ACTIONS(2332),
     [anon_sym_PIPE_EQ] = ACTIONS(2332),
+    [anon_sym_PIPE_GT] = ACTIONS(2332),
     [anon_sym_PIPE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2332),
@@ -77875,6 +78908,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2576),
     [anon_sym_LT_EQ] = ACTIONS(2576),
     [anon_sym_LT_EQ_GT] = ACTIONS(2576),
+    [anon_sym_LT_GT] = ACTIONS(2576),
     [anon_sym_EQ_EQ] = ACTIONS(2576),
     [anon_sym_GT_EQ] = ACTIONS(2576),
     [anon_sym_GT_GT] = ACTIONS(2576),
@@ -77883,6 +78917,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2576),
     [anon_sym_CARET_EQ] = ACTIONS(2576),
     [anon_sym_PIPE_EQ] = ACTIONS(2576),
+    [anon_sym_PIPE_GT] = ACTIONS(2576),
     [anon_sym_PIPE_PIPE] = ACTIONS(2576),
     [anon_sym_TILDE_PIPE] = ACTIONS(2576),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2576),
@@ -77996,6 +79031,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2580),
     [anon_sym_LT_EQ] = ACTIONS(2580),
     [anon_sym_LT_EQ_GT] = ACTIONS(2580),
+    [anon_sym_LT_GT] = ACTIONS(2580),
     [anon_sym_EQ_EQ] = ACTIONS(2580),
     [anon_sym_GT_EQ] = ACTIONS(2580),
     [anon_sym_GT_GT] = ACTIONS(2580),
@@ -78004,6 +79040,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2580),
     [anon_sym_CARET_EQ] = ACTIONS(2580),
     [anon_sym_PIPE_EQ] = ACTIONS(2580),
+    [anon_sym_PIPE_GT] = ACTIONS(2580),
     [anon_sym_PIPE_PIPE] = ACTIONS(2580),
     [anon_sym_TILDE_PIPE] = ACTIONS(2580),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2580),
@@ -78118,6 +79155,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2375),
     [anon_sym_LT_EQ] = ACTIONS(2375),
     [anon_sym_LT_EQ_GT] = ACTIONS(2375),
+    [anon_sym_LT_GT] = ACTIONS(2375),
     [anon_sym_EQ_EQ] = ACTIONS(2375),
     [anon_sym_GT_EQ] = ACTIONS(2375),
     [anon_sym_GT_GT] = ACTIONS(2375),
@@ -78126,6 +79164,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2375),
     [anon_sym_CARET_EQ] = ACTIONS(2375),
     [anon_sym_PIPE_EQ] = ACTIONS(2375),
+    [anon_sym_PIPE_GT] = ACTIONS(2375),
     [anon_sym_PIPE_PIPE] = ACTIONS(2375),
     [anon_sym_TILDE_PIPE] = ACTIONS(2375),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2375),
@@ -78239,6 +79278,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2379),
     [anon_sym_LT_EQ] = ACTIONS(2379),
     [anon_sym_LT_EQ_GT] = ACTIONS(2379),
+    [anon_sym_LT_GT] = ACTIONS(2379),
     [anon_sym_EQ_EQ] = ACTIONS(2379),
     [anon_sym_GT_EQ] = ACTIONS(2379),
     [anon_sym_GT_GT] = ACTIONS(2379),
@@ -78247,6 +79287,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2379),
     [anon_sym_CARET_EQ] = ACTIONS(2379),
     [anon_sym_PIPE_EQ] = ACTIONS(2379),
+    [anon_sym_PIPE_GT] = ACTIONS(2379),
     [anon_sym_PIPE_PIPE] = ACTIONS(2379),
     [anon_sym_TILDE_PIPE] = ACTIONS(2379),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2379),
@@ -78359,6 +79400,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2584),
     [anon_sym_LT_EQ] = ACTIONS(2584),
     [anon_sym_LT_EQ_GT] = ACTIONS(2584),
+    [anon_sym_LT_GT] = ACTIONS(2584),
     [anon_sym_EQ_EQ] = ACTIONS(2584),
     [anon_sym_GT_EQ] = ACTIONS(2584),
     [anon_sym_GT_GT] = ACTIONS(2584),
@@ -78367,6 +79409,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2584),
     [anon_sym_CARET_EQ] = ACTIONS(2584),
     [anon_sym_PIPE_EQ] = ACTIONS(2584),
+    [anon_sym_PIPE_GT] = ACTIONS(2584),
     [anon_sym_PIPE_PIPE] = ACTIONS(2584),
     [anon_sym_TILDE_PIPE] = ACTIONS(2584),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2584),
@@ -78481,6 +79524,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2391),
     [anon_sym_LT_EQ] = ACTIONS(2391),
     [anon_sym_LT_EQ_GT] = ACTIONS(2391),
+    [anon_sym_LT_GT] = ACTIONS(2391),
     [anon_sym_EQ_EQ] = ACTIONS(2391),
     [anon_sym_GT_EQ] = ACTIONS(2391),
     [anon_sym_GT_GT] = ACTIONS(2391),
@@ -78489,6 +79533,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2391),
     [anon_sym_CARET_EQ] = ACTIONS(2391),
     [anon_sym_PIPE_EQ] = ACTIONS(2391),
+    [anon_sym_PIPE_GT] = ACTIONS(2391),
     [anon_sym_PIPE_PIPE] = ACTIONS(2391),
     [anon_sym_TILDE_PIPE] = ACTIONS(2391),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2391),
@@ -78601,6 +79646,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2591),
     [anon_sym_LT_EQ] = ACTIONS(2591),
     [anon_sym_LT_EQ_GT] = ACTIONS(2591),
+    [anon_sym_LT_GT] = ACTIONS(2591),
     [anon_sym_EQ_EQ] = ACTIONS(2591),
     [anon_sym_GT_EQ] = ACTIONS(2591),
     [anon_sym_GT_GT] = ACTIONS(2591),
@@ -78609,6 +79655,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2591),
     [anon_sym_CARET_EQ] = ACTIONS(2591),
     [anon_sym_PIPE_EQ] = ACTIONS(2591),
+    [anon_sym_PIPE_GT] = ACTIONS(2591),
     [anon_sym_PIPE_PIPE] = ACTIONS(2591),
     [anon_sym_TILDE_PIPE] = ACTIONS(2591),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2591),
@@ -78723,6 +79770,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ_GT] = ACTIONS(2332),
+    [anon_sym_LT_GT] = ACTIONS(2332),
     [anon_sym_EQ_EQ] = ACTIONS(2332),
     [anon_sym_GT_EQ] = ACTIONS(2332),
     [anon_sym_GT_GT] = ACTIONS(2332),
@@ -78731,6 +79779,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2332),
     [anon_sym_CARET_EQ] = ACTIONS(2332),
     [anon_sym_PIPE_EQ] = ACTIONS(2332),
+    [anon_sym_PIPE_GT] = ACTIONS(2332),
     [anon_sym_PIPE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2332),
@@ -78843,6 +79892,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2597),
     [anon_sym_LT_EQ] = ACTIONS(2597),
     [anon_sym_LT_EQ_GT] = ACTIONS(2597),
+    [anon_sym_LT_GT] = ACTIONS(2597),
     [anon_sym_EQ_EQ] = ACTIONS(2597),
     [anon_sym_GT_EQ] = ACTIONS(2597),
     [anon_sym_GT_GT] = ACTIONS(2597),
@@ -78851,6 +79901,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2597),
     [anon_sym_CARET_EQ] = ACTIONS(2597),
     [anon_sym_PIPE_EQ] = ACTIONS(2597),
+    [anon_sym_PIPE_GT] = ACTIONS(2597),
     [anon_sym_PIPE_PIPE] = ACTIONS(2597),
     [anon_sym_TILDE_PIPE] = ACTIONS(2597),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2597),
@@ -78965,6 +80016,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2359),
     [anon_sym_LT_EQ] = ACTIONS(2359),
     [anon_sym_LT_EQ_GT] = ACTIONS(2359),
+    [anon_sym_LT_GT] = ACTIONS(2359),
     [anon_sym_EQ_EQ] = ACTIONS(2359),
     [anon_sym_GT_EQ] = ACTIONS(2359),
     [anon_sym_GT_GT] = ACTIONS(2359),
@@ -78973,6 +80025,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2359),
     [anon_sym_CARET_EQ] = ACTIONS(2359),
     [anon_sym_PIPE_EQ] = ACTIONS(2359),
+    [anon_sym_PIPE_GT] = ACTIONS(2359),
     [anon_sym_PIPE_PIPE] = ACTIONS(2359),
     [anon_sym_TILDE_PIPE] = ACTIONS(2359),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2359),
@@ -79085,6 +80138,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2601),
     [anon_sym_LT_EQ] = ACTIONS(2601),
     [anon_sym_LT_EQ_GT] = ACTIONS(2601),
+    [anon_sym_LT_GT] = ACTIONS(2601),
     [anon_sym_EQ_EQ] = ACTIONS(2601),
     [anon_sym_GT_EQ] = ACTIONS(2601),
     [anon_sym_GT_GT] = ACTIONS(2601),
@@ -79093,6 +80147,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2601),
     [anon_sym_CARET_EQ] = ACTIONS(2601),
     [anon_sym_PIPE_EQ] = ACTIONS(2601),
+    [anon_sym_PIPE_GT] = ACTIONS(2601),
     [anon_sym_PIPE_PIPE] = ACTIONS(2601),
     [anon_sym_TILDE_PIPE] = ACTIONS(2601),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2601),
@@ -79207,6 +80262,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2395),
     [anon_sym_LT_EQ] = ACTIONS(2395),
     [anon_sym_LT_EQ_GT] = ACTIONS(2395),
+    [anon_sym_LT_GT] = ACTIONS(2395),
     [anon_sym_EQ_EQ] = ACTIONS(2395),
     [anon_sym_GT_EQ] = ACTIONS(2395),
     [anon_sym_GT_GT] = ACTIONS(2395),
@@ -79215,6 +80271,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2395),
     [anon_sym_CARET_EQ] = ACTIONS(2395),
     [anon_sym_PIPE_EQ] = ACTIONS(2395),
+    [anon_sym_PIPE_GT] = ACTIONS(2395),
     [anon_sym_PIPE_PIPE] = ACTIONS(2395),
     [anon_sym_TILDE_PIPE] = ACTIONS(2395),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2395),
@@ -79327,6 +80384,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2605),
     [anon_sym_LT_EQ] = ACTIONS(2605),
     [anon_sym_LT_EQ_GT] = ACTIONS(2605),
+    [anon_sym_LT_GT] = ACTIONS(2605),
     [anon_sym_EQ_EQ] = ACTIONS(2605),
     [anon_sym_GT_EQ] = ACTIONS(2605),
     [anon_sym_GT_GT] = ACTIONS(2605),
@@ -79335,6 +80393,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2605),
     [anon_sym_CARET_EQ] = ACTIONS(2605),
     [anon_sym_PIPE_EQ] = ACTIONS(2605),
+    [anon_sym_PIPE_GT] = ACTIONS(2605),
     [anon_sym_PIPE_PIPE] = ACTIONS(2605),
     [anon_sym_TILDE_PIPE] = ACTIONS(2605),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2605),
@@ -79448,6 +80507,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2609),
     [anon_sym_LT_EQ] = ACTIONS(2609),
     [anon_sym_LT_EQ_GT] = ACTIONS(2609),
+    [anon_sym_LT_GT] = ACTIONS(2609),
     [anon_sym_EQ_EQ] = ACTIONS(2609),
     [anon_sym_GT_EQ] = ACTIONS(2609),
     [anon_sym_GT_GT] = ACTIONS(2609),
@@ -79456,6 +80516,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2609),
     [anon_sym_CARET_EQ] = ACTIONS(2609),
     [anon_sym_PIPE_EQ] = ACTIONS(2609),
+    [anon_sym_PIPE_GT] = ACTIONS(2609),
     [anon_sym_PIPE_PIPE] = ACTIONS(2609),
     [anon_sym_TILDE_PIPE] = ACTIONS(2609),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2609),
@@ -79569,6 +80630,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2613),
     [anon_sym_LT_EQ] = ACTIONS(2613),
     [anon_sym_LT_EQ_GT] = ACTIONS(2613),
+    [anon_sym_LT_GT] = ACTIONS(2613),
     [anon_sym_EQ_EQ] = ACTIONS(2613),
     [anon_sym_GT_EQ] = ACTIONS(2613),
     [anon_sym_GT_GT] = ACTIONS(2613),
@@ -79577,6 +80639,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2613),
     [anon_sym_CARET_EQ] = ACTIONS(2613),
     [anon_sym_PIPE_EQ] = ACTIONS(2613),
+    [anon_sym_PIPE_GT] = ACTIONS(2613),
     [anon_sym_PIPE_PIPE] = ACTIONS(2613),
     [anon_sym_TILDE_PIPE] = ACTIONS(2613),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2613),
@@ -79690,6 +80753,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2617),
     [anon_sym_LT_EQ] = ACTIONS(2617),
     [anon_sym_LT_EQ_GT] = ACTIONS(2617),
+    [anon_sym_LT_GT] = ACTIONS(2617),
     [anon_sym_EQ_EQ] = ACTIONS(2617),
     [anon_sym_GT_EQ] = ACTIONS(2617),
     [anon_sym_GT_GT] = ACTIONS(2617),
@@ -79698,6 +80762,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2617),
     [anon_sym_CARET_EQ] = ACTIONS(2617),
     [anon_sym_PIPE_EQ] = ACTIONS(2617),
+    [anon_sym_PIPE_GT] = ACTIONS(2617),
     [anon_sym_PIPE_PIPE] = ACTIONS(2617),
     [anon_sym_TILDE_PIPE] = ACTIONS(2617),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2617),
@@ -79811,6 +80876,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2621),
     [anon_sym_LT_EQ] = ACTIONS(2621),
     [anon_sym_LT_EQ_GT] = ACTIONS(2621),
+    [anon_sym_LT_GT] = ACTIONS(2621),
     [anon_sym_EQ_EQ] = ACTIONS(2621),
     [anon_sym_GT_EQ] = ACTIONS(2621),
     [anon_sym_GT_GT] = ACTIONS(2621),
@@ -79819,6 +80885,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2621),
     [anon_sym_CARET_EQ] = ACTIONS(2621),
     [anon_sym_PIPE_EQ] = ACTIONS(2621),
+    [anon_sym_PIPE_GT] = ACTIONS(2621),
     [anon_sym_PIPE_PIPE] = ACTIONS(2621),
     [anon_sym_TILDE_PIPE] = ACTIONS(2621),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2621),
@@ -79932,6 +80999,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2625),
     [anon_sym_LT_EQ] = ACTIONS(2625),
     [anon_sym_LT_EQ_GT] = ACTIONS(2625),
+    [anon_sym_LT_GT] = ACTIONS(2625),
     [anon_sym_EQ_EQ] = ACTIONS(2625),
     [anon_sym_GT_EQ] = ACTIONS(2625),
     [anon_sym_GT_GT] = ACTIONS(2625),
@@ -79940,6 +81008,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2625),
     [anon_sym_CARET_EQ] = ACTIONS(2625),
     [anon_sym_PIPE_EQ] = ACTIONS(2625),
+    [anon_sym_PIPE_GT] = ACTIONS(2625),
     [anon_sym_PIPE_PIPE] = ACTIONS(2625),
     [anon_sym_TILDE_PIPE] = ACTIONS(2625),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2625),
@@ -80054,6 +81123,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2399),
     [anon_sym_LT_EQ] = ACTIONS(2399),
     [anon_sym_LT_EQ_GT] = ACTIONS(2399),
+    [anon_sym_LT_GT] = ACTIONS(2399),
     [anon_sym_EQ_EQ] = ACTIONS(2399),
     [anon_sym_GT_EQ] = ACTIONS(2399),
     [anon_sym_GT_GT] = ACTIONS(2399),
@@ -80062,6 +81132,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2399),
     [anon_sym_CARET_EQ] = ACTIONS(2399),
     [anon_sym_PIPE_EQ] = ACTIONS(2399),
+    [anon_sym_PIPE_GT] = ACTIONS(2399),
     [anon_sym_PIPE_PIPE] = ACTIONS(2399),
     [anon_sym_TILDE_PIPE] = ACTIONS(2399),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2399),
@@ -80174,6 +81245,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2629),
     [anon_sym_LT_EQ] = ACTIONS(2629),
     [anon_sym_LT_EQ_GT] = ACTIONS(2629),
+    [anon_sym_LT_GT] = ACTIONS(2629),
     [anon_sym_EQ_EQ] = ACTIONS(2629),
     [anon_sym_GT_EQ] = ACTIONS(2629),
     [anon_sym_GT_GT] = ACTIONS(2629),
@@ -80182,6 +81254,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2629),
     [anon_sym_CARET_EQ] = ACTIONS(2629),
     [anon_sym_PIPE_EQ] = ACTIONS(2629),
+    [anon_sym_PIPE_GT] = ACTIONS(2629),
     [anon_sym_PIPE_PIPE] = ACTIONS(2629),
     [anon_sym_TILDE_PIPE] = ACTIONS(2629),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2629),
@@ -80295,6 +81368,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2633),
     [anon_sym_LT_EQ] = ACTIONS(2633),
     [anon_sym_LT_EQ_GT] = ACTIONS(2633),
+    [anon_sym_LT_GT] = ACTIONS(2633),
     [anon_sym_EQ_EQ] = ACTIONS(2633),
     [anon_sym_GT_EQ] = ACTIONS(2633),
     [anon_sym_GT_GT] = ACTIONS(2633),
@@ -80303,6 +81377,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2633),
     [anon_sym_CARET_EQ] = ACTIONS(2633),
     [anon_sym_PIPE_EQ] = ACTIONS(2633),
+    [anon_sym_PIPE_GT] = ACTIONS(2633),
     [anon_sym_PIPE_PIPE] = ACTIONS(2633),
     [anon_sym_TILDE_PIPE] = ACTIONS(2633),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2633),
@@ -80416,6 +81491,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2637),
     [anon_sym_LT_EQ] = ACTIONS(2637),
     [anon_sym_LT_EQ_GT] = ACTIONS(2637),
+    [anon_sym_LT_GT] = ACTIONS(2637),
     [anon_sym_EQ_EQ] = ACTIONS(2637),
     [anon_sym_GT_EQ] = ACTIONS(2637),
     [anon_sym_GT_GT] = ACTIONS(2637),
@@ -80424,6 +81500,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2637),
     [anon_sym_CARET_EQ] = ACTIONS(2637),
     [anon_sym_PIPE_EQ] = ACTIONS(2637),
+    [anon_sym_PIPE_GT] = ACTIONS(2637),
     [anon_sym_PIPE_PIPE] = ACTIONS(2637),
     [anon_sym_TILDE_PIPE] = ACTIONS(2637),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2637),
@@ -80537,6 +81614,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2641),
     [anon_sym_LT_EQ] = ACTIONS(2641),
     [anon_sym_LT_EQ_GT] = ACTIONS(2641),
+    [anon_sym_LT_GT] = ACTIONS(2641),
     [anon_sym_EQ_EQ] = ACTIONS(2641),
     [anon_sym_GT_EQ] = ACTIONS(2641),
     [anon_sym_GT_GT] = ACTIONS(2641),
@@ -80545,6 +81623,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2641),
     [anon_sym_CARET_EQ] = ACTIONS(2641),
     [anon_sym_PIPE_EQ] = ACTIONS(2641),
+    [anon_sym_PIPE_GT] = ACTIONS(2641),
     [anon_sym_PIPE_PIPE] = ACTIONS(2641),
     [anon_sym_TILDE_PIPE] = ACTIONS(2641),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2641),
@@ -80659,6 +81738,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ_GT] = ACTIONS(2332),
+    [anon_sym_LT_GT] = ACTIONS(2332),
     [anon_sym_EQ_EQ] = ACTIONS(2332),
     [anon_sym_GT_EQ] = ACTIONS(2332),
     [anon_sym_GT_GT] = ACTIONS(2332),
@@ -80667,6 +81747,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2332),
     [anon_sym_CARET_EQ] = ACTIONS(2332),
     [anon_sym_PIPE_EQ] = ACTIONS(2332),
+    [anon_sym_PIPE_GT] = ACTIONS(2332),
     [anon_sym_PIPE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2332),
@@ -80779,6 +81860,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2647),
     [anon_sym_LT_EQ] = ACTIONS(2647),
     [anon_sym_LT_EQ_GT] = ACTIONS(2647),
+    [anon_sym_LT_GT] = ACTIONS(2647),
     [anon_sym_EQ_EQ] = ACTIONS(2647),
     [anon_sym_GT_EQ] = ACTIONS(2647),
     [anon_sym_GT_GT] = ACTIONS(2647),
@@ -80787,6 +81869,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2647),
     [anon_sym_CARET_EQ] = ACTIONS(2647),
     [anon_sym_PIPE_EQ] = ACTIONS(2647),
+    [anon_sym_PIPE_GT] = ACTIONS(2647),
     [anon_sym_PIPE_PIPE] = ACTIONS(2647),
     [anon_sym_TILDE_PIPE] = ACTIONS(2647),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2647),
@@ -80901,6 +81984,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2371),
     [anon_sym_LT_EQ] = ACTIONS(2371),
     [anon_sym_LT_EQ_GT] = ACTIONS(2371),
+    [anon_sym_LT_GT] = ACTIONS(2371),
     [anon_sym_EQ_EQ] = ACTIONS(2371),
     [anon_sym_GT_EQ] = ACTIONS(2371),
     [anon_sym_GT_GT] = ACTIONS(2371),
@@ -80909,6 +81993,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2371),
     [anon_sym_CARET_EQ] = ACTIONS(2371),
     [anon_sym_PIPE_EQ] = ACTIONS(2371),
+    [anon_sym_PIPE_GT] = ACTIONS(2371),
     [anon_sym_PIPE_PIPE] = ACTIONS(2371),
     [anon_sym_TILDE_PIPE] = ACTIONS(2371),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2371),
@@ -81022,6 +82107,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2439),
     [anon_sym_LT_EQ] = ACTIONS(2439),
     [anon_sym_LT_EQ_GT] = ACTIONS(2439),
+    [anon_sym_LT_GT] = ACTIONS(2439),
     [anon_sym_EQ_EQ] = ACTIONS(2439),
     [anon_sym_GT_EQ] = ACTIONS(2439),
     [anon_sym_GT_GT] = ACTIONS(2439),
@@ -81030,6 +82116,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2439),
     [anon_sym_CARET_EQ] = ACTIONS(2439),
     [anon_sym_PIPE_EQ] = ACTIONS(2439),
+    [anon_sym_PIPE_GT] = ACTIONS(2439),
     [anon_sym_PIPE_PIPE] = ACTIONS(2439),
     [anon_sym_TILDE_PIPE] = ACTIONS(2439),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2439),
@@ -81142,6 +82229,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2651),
     [anon_sym_LT_EQ] = ACTIONS(2651),
     [anon_sym_LT_EQ_GT] = ACTIONS(2651),
+    [anon_sym_LT_GT] = ACTIONS(2651),
     [anon_sym_EQ_EQ] = ACTIONS(2651),
     [anon_sym_GT_EQ] = ACTIONS(2651),
     [anon_sym_GT_GT] = ACTIONS(2651),
@@ -81150,6 +82238,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2651),
     [anon_sym_CARET_EQ] = ACTIONS(2651),
     [anon_sym_PIPE_EQ] = ACTIONS(2651),
+    [anon_sym_PIPE_GT] = ACTIONS(2651),
     [anon_sym_PIPE_PIPE] = ACTIONS(2651),
     [anon_sym_TILDE_PIPE] = ACTIONS(2651),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2651),
@@ -81264,6 +82353,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ_GT] = ACTIONS(2332),
+    [anon_sym_LT_GT] = ACTIONS(2332),
     [anon_sym_EQ_EQ] = ACTIONS(2332),
     [anon_sym_GT_EQ] = ACTIONS(2332),
     [anon_sym_GT_GT] = ACTIONS(2332),
@@ -81272,6 +82362,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2332),
     [anon_sym_CARET_EQ] = ACTIONS(2332),
     [anon_sym_PIPE_EQ] = ACTIONS(2332),
+    [anon_sym_PIPE_GT] = ACTIONS(2332),
     [anon_sym_PIPE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2332),
@@ -81384,6 +82475,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2657),
     [anon_sym_LT_EQ] = ACTIONS(2657),
     [anon_sym_LT_EQ_GT] = ACTIONS(2657),
+    [anon_sym_LT_GT] = ACTIONS(2657),
     [anon_sym_EQ_EQ] = ACTIONS(2657),
     [anon_sym_GT_EQ] = ACTIONS(2657),
     [anon_sym_GT_GT] = ACTIONS(2657),
@@ -81392,6 +82484,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2657),
     [anon_sym_CARET_EQ] = ACTIONS(2657),
     [anon_sym_PIPE_EQ] = ACTIONS(2657),
+    [anon_sym_PIPE_GT] = ACTIONS(2657),
     [anon_sym_PIPE_PIPE] = ACTIONS(2657),
     [anon_sym_TILDE_PIPE] = ACTIONS(2657),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2657),
@@ -81506,6 +82599,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2407),
     [anon_sym_LT_EQ] = ACTIONS(2407),
     [anon_sym_LT_EQ_GT] = ACTIONS(2407),
+    [anon_sym_LT_GT] = ACTIONS(2407),
     [anon_sym_EQ_EQ] = ACTIONS(2407),
     [anon_sym_GT_EQ] = ACTIONS(2407),
     [anon_sym_GT_GT] = ACTIONS(2407),
@@ -81514,6 +82608,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2407),
     [anon_sym_CARET_EQ] = ACTIONS(2407),
     [anon_sym_PIPE_EQ] = ACTIONS(2407),
+    [anon_sym_PIPE_GT] = ACTIONS(2407),
     [anon_sym_PIPE_PIPE] = ACTIONS(2407),
     [anon_sym_TILDE_PIPE] = ACTIONS(2407),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2407),
@@ -81626,6 +82721,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2661),
     [anon_sym_LT_EQ] = ACTIONS(2661),
     [anon_sym_LT_EQ_GT] = ACTIONS(2661),
+    [anon_sym_LT_GT] = ACTIONS(2661),
     [anon_sym_EQ_EQ] = ACTIONS(2661),
     [anon_sym_GT_EQ] = ACTIONS(2661),
     [anon_sym_GT_GT] = ACTIONS(2661),
@@ -81634,6 +82730,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2661),
     [anon_sym_CARET_EQ] = ACTIONS(2661),
     [anon_sym_PIPE_EQ] = ACTIONS(2661),
+    [anon_sym_PIPE_GT] = ACTIONS(2661),
     [anon_sym_PIPE_PIPE] = ACTIONS(2661),
     [anon_sym_TILDE_PIPE] = ACTIONS(2661),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2661),
@@ -81747,6 +82844,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2665),
     [anon_sym_LT_EQ] = ACTIONS(2665),
     [anon_sym_LT_EQ_GT] = ACTIONS(2665),
+    [anon_sym_LT_GT] = ACTIONS(2665),
     [anon_sym_EQ_EQ] = ACTIONS(2665),
     [anon_sym_GT_EQ] = ACTIONS(2665),
     [anon_sym_GT_GT] = ACTIONS(2665),
@@ -81755,6 +82853,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2665),
     [anon_sym_CARET_EQ] = ACTIONS(2665),
     [anon_sym_PIPE_EQ] = ACTIONS(2665),
+    [anon_sym_PIPE_GT] = ACTIONS(2665),
     [anon_sym_PIPE_PIPE] = ACTIONS(2665),
     [anon_sym_TILDE_PIPE] = ACTIONS(2665),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2665),
@@ -81868,6 +82967,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2669),
     [anon_sym_LT_EQ] = ACTIONS(2669),
     [anon_sym_LT_EQ_GT] = ACTIONS(2669),
+    [anon_sym_LT_GT] = ACTIONS(2669),
     [anon_sym_EQ_EQ] = ACTIONS(2669),
     [anon_sym_GT_EQ] = ACTIONS(2669),
     [anon_sym_GT_GT] = ACTIONS(2669),
@@ -81876,6 +82976,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2669),
     [anon_sym_CARET_EQ] = ACTIONS(2669),
     [anon_sym_PIPE_EQ] = ACTIONS(2669),
+    [anon_sym_PIPE_GT] = ACTIONS(2669),
     [anon_sym_PIPE_PIPE] = ACTIONS(2669),
     [anon_sym_TILDE_PIPE] = ACTIONS(2669),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2669),
@@ -81990,6 +83091,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2411),
     [anon_sym_LT_EQ] = ACTIONS(2411),
     [anon_sym_LT_EQ_GT] = ACTIONS(2411),
+    [anon_sym_LT_GT] = ACTIONS(2411),
     [anon_sym_EQ_EQ] = ACTIONS(2411),
     [anon_sym_GT_EQ] = ACTIONS(2411),
     [anon_sym_GT_GT] = ACTIONS(2411),
@@ -81998,6 +83100,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2411),
     [anon_sym_CARET_EQ] = ACTIONS(2411),
     [anon_sym_PIPE_EQ] = ACTIONS(2411),
+    [anon_sym_PIPE_GT] = ACTIONS(2411),
     [anon_sym_PIPE_PIPE] = ACTIONS(2411),
     [anon_sym_TILDE_PIPE] = ACTIONS(2411),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2411),
@@ -82111,6 +83214,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2359),
     [anon_sym_LT_EQ] = ACTIONS(2359),
     [anon_sym_LT_EQ_GT] = ACTIONS(2359),
+    [anon_sym_LT_GT] = ACTIONS(2359),
     [anon_sym_EQ_EQ] = ACTIONS(2359),
     [anon_sym_GT_EQ] = ACTIONS(2359),
     [anon_sym_GT_GT] = ACTIONS(2359),
@@ -82119,6 +83223,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2359),
     [anon_sym_CARET_EQ] = ACTIONS(2359),
     [anon_sym_PIPE_EQ] = ACTIONS(2359),
+    [anon_sym_PIPE_GT] = ACTIONS(2359),
     [anon_sym_PIPE_PIPE] = ACTIONS(2359),
     [anon_sym_TILDE_PIPE] = ACTIONS(2359),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2359),
@@ -82231,6 +83336,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2673),
     [anon_sym_LT_EQ] = ACTIONS(2673),
     [anon_sym_LT_EQ_GT] = ACTIONS(2673),
+    [anon_sym_LT_GT] = ACTIONS(2673),
     [anon_sym_EQ_EQ] = ACTIONS(2673),
     [anon_sym_GT_EQ] = ACTIONS(2673),
     [anon_sym_GT_GT] = ACTIONS(2673),
@@ -82239,6 +83345,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2673),
     [anon_sym_CARET_EQ] = ACTIONS(2673),
     [anon_sym_PIPE_EQ] = ACTIONS(2673),
+    [anon_sym_PIPE_GT] = ACTIONS(2673),
     [anon_sym_PIPE_PIPE] = ACTIONS(2673),
     [anon_sym_TILDE_PIPE] = ACTIONS(2673),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2673),
@@ -82352,6 +83459,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2677),
     [anon_sym_LT_EQ] = ACTIONS(2677),
     [anon_sym_LT_EQ_GT] = ACTIONS(2677),
+    [anon_sym_LT_GT] = ACTIONS(2677),
     [anon_sym_EQ_EQ] = ACTIONS(2677),
     [anon_sym_GT_EQ] = ACTIONS(2677),
     [anon_sym_GT_GT] = ACTIONS(2677),
@@ -82360,6 +83468,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2677),
     [anon_sym_CARET_EQ] = ACTIONS(2677),
     [anon_sym_PIPE_EQ] = ACTIONS(2677),
+    [anon_sym_PIPE_GT] = ACTIONS(2677),
     [anon_sym_PIPE_PIPE] = ACTIONS(2677),
     [anon_sym_TILDE_PIPE] = ACTIONS(2677),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2677),
@@ -82474,6 +83583,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2403),
     [anon_sym_LT_EQ] = ACTIONS(2403),
     [anon_sym_LT_EQ_GT] = ACTIONS(2403),
+    [anon_sym_LT_GT] = ACTIONS(2403),
     [anon_sym_EQ_EQ] = ACTIONS(2403),
     [anon_sym_GT_EQ] = ACTIONS(2403),
     [anon_sym_GT_GT] = ACTIONS(2403),
@@ -82482,6 +83592,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2403),
     [anon_sym_CARET_EQ] = ACTIONS(2403),
     [anon_sym_PIPE_EQ] = ACTIONS(2403),
+    [anon_sym_PIPE_GT] = ACTIONS(2403),
     [anon_sym_PIPE_PIPE] = ACTIONS(2403),
     [anon_sym_TILDE_PIPE] = ACTIONS(2403),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2403),
@@ -82594,6 +83705,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2681),
     [anon_sym_LT_EQ] = ACTIONS(2681),
     [anon_sym_LT_EQ_GT] = ACTIONS(2681),
+    [anon_sym_LT_GT] = ACTIONS(2681),
     [anon_sym_EQ_EQ] = ACTIONS(2681),
     [anon_sym_GT_EQ] = ACTIONS(2681),
     [anon_sym_GT_GT] = ACTIONS(2681),
@@ -82602,6 +83714,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2681),
     [anon_sym_CARET_EQ] = ACTIONS(2681),
     [anon_sym_PIPE_EQ] = ACTIONS(2681),
+    [anon_sym_PIPE_GT] = ACTIONS(2681),
     [anon_sym_PIPE_PIPE] = ACTIONS(2681),
     [anon_sym_TILDE_PIPE] = ACTIONS(2681),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2681),
@@ -82715,6 +83828,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2685),
     [anon_sym_LT_EQ] = ACTIONS(2685),
     [anon_sym_LT_EQ_GT] = ACTIONS(2685),
+    [anon_sym_LT_GT] = ACTIONS(2685),
     [anon_sym_EQ_EQ] = ACTIONS(2685),
     [anon_sym_GT_EQ] = ACTIONS(2685),
     [anon_sym_GT_GT] = ACTIONS(2685),
@@ -82723,6 +83837,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2685),
     [anon_sym_CARET_EQ] = ACTIONS(2685),
     [anon_sym_PIPE_EQ] = ACTIONS(2685),
+    [anon_sym_PIPE_GT] = ACTIONS(2685),
     [anon_sym_PIPE_PIPE] = ACTIONS(2685),
     [anon_sym_TILDE_PIPE] = ACTIONS(2685),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2685),
@@ -82837,6 +83952,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2375),
     [anon_sym_LT_EQ] = ACTIONS(2375),
     [anon_sym_LT_EQ_GT] = ACTIONS(2375),
+    [anon_sym_LT_GT] = ACTIONS(2375),
     [anon_sym_EQ_EQ] = ACTIONS(2375),
     [anon_sym_GT_EQ] = ACTIONS(2375),
     [anon_sym_GT_GT] = ACTIONS(2375),
@@ -82845,6 +83961,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2375),
     [anon_sym_CARET_EQ] = ACTIONS(2375),
     [anon_sym_PIPE_EQ] = ACTIONS(2375),
+    [anon_sym_PIPE_GT] = ACTIONS(2375),
     [anon_sym_PIPE_PIPE] = ACTIONS(2375),
     [anon_sym_TILDE_PIPE] = ACTIONS(2375),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2375),
@@ -82958,6 +84075,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2379),
     [anon_sym_LT_EQ] = ACTIONS(2379),
     [anon_sym_LT_EQ_GT] = ACTIONS(2379),
+    [anon_sym_LT_GT] = ACTIONS(2379),
     [anon_sym_EQ_EQ] = ACTIONS(2379),
     [anon_sym_GT_EQ] = ACTIONS(2379),
     [anon_sym_GT_GT] = ACTIONS(2379),
@@ -82966,6 +84084,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2379),
     [anon_sym_CARET_EQ] = ACTIONS(2379),
     [anon_sym_PIPE_EQ] = ACTIONS(2379),
+    [anon_sym_PIPE_GT] = ACTIONS(2379),
     [anon_sym_PIPE_PIPE] = ACTIONS(2379),
     [anon_sym_TILDE_PIPE] = ACTIONS(2379),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2379),
@@ -83079,6 +84198,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2403),
     [anon_sym_LT_EQ] = ACTIONS(2403),
     [anon_sym_LT_EQ_GT] = ACTIONS(2403),
+    [anon_sym_LT_GT] = ACTIONS(2403),
     [anon_sym_EQ_EQ] = ACTIONS(2403),
     [anon_sym_GT_EQ] = ACTIONS(2403),
     [anon_sym_GT_GT] = ACTIONS(2403),
@@ -83087,6 +84207,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2403),
     [anon_sym_CARET_EQ] = ACTIONS(2403),
     [anon_sym_PIPE_EQ] = ACTIONS(2403),
+    [anon_sym_PIPE_GT] = ACTIONS(2403),
     [anon_sym_PIPE_PIPE] = ACTIONS(2403),
     [anon_sym_TILDE_PIPE] = ACTIONS(2403),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2403),
@@ -83200,6 +84321,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2439),
     [anon_sym_LT_EQ] = ACTIONS(2439),
     [anon_sym_LT_EQ_GT] = ACTIONS(2439),
+    [anon_sym_LT_GT] = ACTIONS(2439),
     [anon_sym_EQ_EQ] = ACTIONS(2439),
     [anon_sym_GT_EQ] = ACTIONS(2439),
     [anon_sym_GT_GT] = ACTIONS(2439),
@@ -83208,6 +84330,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2439),
     [anon_sym_CARET_EQ] = ACTIONS(2439),
     [anon_sym_PIPE_EQ] = ACTIONS(2439),
+    [anon_sym_PIPE_GT] = ACTIONS(2439),
     [anon_sym_PIPE_PIPE] = ACTIONS(2439),
     [anon_sym_TILDE_PIPE] = ACTIONS(2439),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2439),
@@ -83320,6 +84443,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2689),
     [anon_sym_LT_EQ] = ACTIONS(2689),
     [anon_sym_LT_EQ_GT] = ACTIONS(2689),
+    [anon_sym_LT_GT] = ACTIONS(2689),
     [anon_sym_EQ_EQ] = ACTIONS(2689),
     [anon_sym_GT_EQ] = ACTIONS(2689),
     [anon_sym_GT_GT] = ACTIONS(2689),
@@ -83328,6 +84452,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2689),
     [anon_sym_CARET_EQ] = ACTIONS(2689),
     [anon_sym_PIPE_EQ] = ACTIONS(2689),
+    [anon_sym_PIPE_GT] = ACTIONS(2689),
     [anon_sym_PIPE_PIPE] = ACTIONS(2689),
     [anon_sym_TILDE_PIPE] = ACTIONS(2689),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2689),
@@ -83442,6 +84567,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ_GT] = ACTIONS(2332),
+    [anon_sym_LT_GT] = ACTIONS(2332),
     [anon_sym_EQ_EQ] = ACTIONS(2332),
     [anon_sym_GT_EQ] = ACTIONS(2332),
     [anon_sym_GT_GT] = ACTIONS(2332),
@@ -83450,6 +84576,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2332),
     [anon_sym_CARET_EQ] = ACTIONS(2332),
     [anon_sym_PIPE_EQ] = ACTIONS(2332),
+    [anon_sym_PIPE_GT] = ACTIONS(2332),
     [anon_sym_PIPE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2332),
@@ -83562,6 +84689,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2699),
     [anon_sym_LT_EQ] = ACTIONS(2699),
     [anon_sym_LT_EQ_GT] = ACTIONS(2699),
+    [anon_sym_LT_GT] = ACTIONS(2699),
     [anon_sym_EQ_EQ] = ACTIONS(2699),
     [anon_sym_GT_EQ] = ACTIONS(2699),
     [anon_sym_GT_GT] = ACTIONS(2699),
@@ -83570,6 +84698,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2699),
     [anon_sym_CARET_EQ] = ACTIONS(2699),
     [anon_sym_PIPE_EQ] = ACTIONS(2699),
+    [anon_sym_PIPE_GT] = ACTIONS(2699),
     [anon_sym_PIPE_PIPE] = ACTIONS(2699),
     [anon_sym_TILDE_PIPE] = ACTIONS(2699),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2699),
@@ -83684,6 +84813,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2371),
     [anon_sym_LT_EQ] = ACTIONS(2371),
     [anon_sym_LT_EQ_GT] = ACTIONS(2371),
+    [anon_sym_LT_GT] = ACTIONS(2371),
     [anon_sym_EQ_EQ] = ACTIONS(2371),
     [anon_sym_GT_EQ] = ACTIONS(2371),
     [anon_sym_GT_GT] = ACTIONS(2371),
@@ -83692,6 +84822,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2371),
     [anon_sym_CARET_EQ] = ACTIONS(2371),
     [anon_sym_PIPE_EQ] = ACTIONS(2371),
+    [anon_sym_PIPE_GT] = ACTIONS(2371),
     [anon_sym_PIPE_PIPE] = ACTIONS(2371),
     [anon_sym_TILDE_PIPE] = ACTIONS(2371),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2371),
@@ -83804,6 +84935,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2703),
     [anon_sym_LT_EQ] = ACTIONS(2703),
     [anon_sym_LT_EQ_GT] = ACTIONS(2703),
+    [anon_sym_LT_GT] = ACTIONS(2703),
     [anon_sym_EQ_EQ] = ACTIONS(2703),
     [anon_sym_GT_EQ] = ACTIONS(2703),
     [anon_sym_GT_GT] = ACTIONS(2703),
@@ -83812,6 +84944,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2703),
     [anon_sym_CARET_EQ] = ACTIONS(2703),
     [anon_sym_PIPE_EQ] = ACTIONS(2703),
+    [anon_sym_PIPE_GT] = ACTIONS(2703),
     [anon_sym_PIPE_PIPE] = ACTIONS(2703),
     [anon_sym_TILDE_PIPE] = ACTIONS(2703),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2703),
@@ -83925,6 +85058,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2407),
     [anon_sym_LT_EQ] = ACTIONS(2407),
     [anon_sym_LT_EQ_GT] = ACTIONS(2407),
+    [anon_sym_LT_GT] = ACTIONS(2407),
     [anon_sym_EQ_EQ] = ACTIONS(2407),
     [anon_sym_GT_EQ] = ACTIONS(2407),
     [anon_sym_GT_GT] = ACTIONS(2407),
@@ -83933,6 +85067,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2407),
     [anon_sym_CARET_EQ] = ACTIONS(2407),
     [anon_sym_PIPE_EQ] = ACTIONS(2407),
+    [anon_sym_PIPE_GT] = ACTIONS(2407),
     [anon_sym_PIPE_PIPE] = ACTIONS(2407),
     [anon_sym_TILDE_PIPE] = ACTIONS(2407),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2407),
@@ -84046,6 +85181,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2707),
     [anon_sym_LT_EQ] = ACTIONS(2707),
     [anon_sym_LT_EQ_GT] = ACTIONS(2707),
+    [anon_sym_LT_GT] = ACTIONS(2707),
     [anon_sym_EQ_EQ] = ACTIONS(2707),
     [anon_sym_GT_EQ] = ACTIONS(2707),
     [anon_sym_GT_GT] = ACTIONS(2707),
@@ -84054,6 +85190,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2707),
     [anon_sym_CARET_EQ] = ACTIONS(2707),
     [anon_sym_PIPE_EQ] = ACTIONS(2707),
+    [anon_sym_PIPE_GT] = ACTIONS(2707),
     [anon_sym_PIPE_PIPE] = ACTIONS(2707),
     [anon_sym_TILDE_PIPE] = ACTIONS(2707),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2707),
@@ -84167,6 +85304,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2711),
     [anon_sym_LT_EQ] = ACTIONS(2711),
     [anon_sym_LT_EQ_GT] = ACTIONS(2711),
+    [anon_sym_LT_GT] = ACTIONS(2711),
     [anon_sym_EQ_EQ] = ACTIONS(2711),
     [anon_sym_GT_EQ] = ACTIONS(2711),
     [anon_sym_GT_GT] = ACTIONS(2711),
@@ -84175,6 +85313,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2711),
     [anon_sym_CARET_EQ] = ACTIONS(2711),
     [anon_sym_PIPE_EQ] = ACTIONS(2711),
+    [anon_sym_PIPE_GT] = ACTIONS(2711),
     [anon_sym_PIPE_PIPE] = ACTIONS(2711),
     [anon_sym_TILDE_PIPE] = ACTIONS(2711),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2711),
@@ -84288,6 +85427,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2715),
     [anon_sym_LT_EQ] = ACTIONS(2715),
     [anon_sym_LT_EQ_GT] = ACTIONS(2715),
+    [anon_sym_LT_GT] = ACTIONS(2715),
     [anon_sym_EQ_EQ] = ACTIONS(2715),
     [anon_sym_GT_EQ] = ACTIONS(2715),
     [anon_sym_GT_GT] = ACTIONS(2715),
@@ -84296,6 +85436,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2715),
     [anon_sym_CARET_EQ] = ACTIONS(2715),
     [anon_sym_PIPE_EQ] = ACTIONS(2715),
+    [anon_sym_PIPE_GT] = ACTIONS(2715),
     [anon_sym_PIPE_PIPE] = ACTIONS(2715),
     [anon_sym_TILDE_PIPE] = ACTIONS(2715),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2715),
@@ -84410,6 +85551,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2359),
     [anon_sym_LT_EQ] = ACTIONS(2359),
     [anon_sym_LT_EQ_GT] = ACTIONS(2359),
+    [anon_sym_LT_GT] = ACTIONS(2359),
     [anon_sym_EQ_EQ] = ACTIONS(2359),
     [anon_sym_GT_EQ] = ACTIONS(2359),
     [anon_sym_GT_GT] = ACTIONS(2359),
@@ -84418,6 +85560,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2359),
     [anon_sym_CARET_EQ] = ACTIONS(2359),
     [anon_sym_PIPE_EQ] = ACTIONS(2359),
+    [anon_sym_PIPE_GT] = ACTIONS(2359),
     [anon_sym_PIPE_PIPE] = ACTIONS(2359),
     [anon_sym_TILDE_PIPE] = ACTIONS(2359),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2359),
@@ -84530,6 +85673,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2719),
     [anon_sym_LT_EQ] = ACTIONS(2719),
     [anon_sym_LT_EQ_GT] = ACTIONS(2719),
+    [anon_sym_LT_GT] = ACTIONS(2719),
     [anon_sym_EQ_EQ] = ACTIONS(2719),
     [anon_sym_GT_EQ] = ACTIONS(2719),
     [anon_sym_GT_GT] = ACTIONS(2719),
@@ -84538,6 +85682,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2719),
     [anon_sym_CARET_EQ] = ACTIONS(2719),
     [anon_sym_PIPE_EQ] = ACTIONS(2719),
+    [anon_sym_PIPE_GT] = ACTIONS(2719),
     [anon_sym_PIPE_PIPE] = ACTIONS(2719),
     [anon_sym_TILDE_PIPE] = ACTIONS(2719),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2719),
@@ -84651,6 +85796,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2723),
     [anon_sym_LT_EQ] = ACTIONS(2723),
     [anon_sym_LT_EQ_GT] = ACTIONS(2723),
+    [anon_sym_LT_GT] = ACTIONS(2723),
     [anon_sym_EQ_EQ] = ACTIONS(2723),
     [anon_sym_GT_EQ] = ACTIONS(2723),
     [anon_sym_GT_GT] = ACTIONS(2723),
@@ -84659,6 +85805,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2723),
     [anon_sym_CARET_EQ] = ACTIONS(2723),
     [anon_sym_PIPE_EQ] = ACTIONS(2723),
+    [anon_sym_PIPE_GT] = ACTIONS(2723),
     [anon_sym_PIPE_PIPE] = ACTIONS(2723),
     [anon_sym_TILDE_PIPE] = ACTIONS(2723),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2723),
@@ -84773,6 +85920,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ_GT] = ACTIONS(2332),
+    [anon_sym_LT_GT] = ACTIONS(2332),
     [anon_sym_EQ_EQ] = ACTIONS(2332),
     [anon_sym_GT_EQ] = ACTIONS(2332),
     [anon_sym_GT_GT] = ACTIONS(2332),
@@ -84781,6 +85929,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2332),
     [anon_sym_CARET_EQ] = ACTIONS(2332),
     [anon_sym_PIPE_EQ] = ACTIONS(2332),
+    [anon_sym_PIPE_GT] = ACTIONS(2332),
     [anon_sym_PIPE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2332),
@@ -84893,6 +86042,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2733),
     [anon_sym_LT_EQ] = ACTIONS(2733),
     [anon_sym_LT_EQ_GT] = ACTIONS(2733),
+    [anon_sym_LT_GT] = ACTIONS(2733),
     [anon_sym_EQ_EQ] = ACTIONS(2733),
     [anon_sym_GT_EQ] = ACTIONS(2733),
     [anon_sym_GT_GT] = ACTIONS(2733),
@@ -84901,6 +86051,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2733),
     [anon_sym_CARET_EQ] = ACTIONS(2733),
     [anon_sym_PIPE_EQ] = ACTIONS(2733),
+    [anon_sym_PIPE_GT] = ACTIONS(2733),
     [anon_sym_PIPE_PIPE] = ACTIONS(2733),
     [anon_sym_TILDE_PIPE] = ACTIONS(2733),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2733),
@@ -85014,6 +86165,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2737),
     [anon_sym_LT_EQ] = ACTIONS(2737),
     [anon_sym_LT_EQ_GT] = ACTIONS(2737),
+    [anon_sym_LT_GT] = ACTIONS(2737),
     [anon_sym_EQ_EQ] = ACTIONS(2737),
     [anon_sym_GT_EQ] = ACTIONS(2737),
     [anon_sym_GT_GT] = ACTIONS(2737),
@@ -85022,6 +86174,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2737),
     [anon_sym_CARET_EQ] = ACTIONS(2737),
     [anon_sym_PIPE_EQ] = ACTIONS(2737),
+    [anon_sym_PIPE_GT] = ACTIONS(2737),
     [anon_sym_PIPE_PIPE] = ACTIONS(2737),
     [anon_sym_TILDE_PIPE] = ACTIONS(2737),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2737),
@@ -85136,6 +86289,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2391),
     [anon_sym_LT_EQ] = ACTIONS(2391),
     [anon_sym_LT_EQ_GT] = ACTIONS(2391),
+    [anon_sym_LT_GT] = ACTIONS(2391),
     [anon_sym_EQ_EQ] = ACTIONS(2391),
     [anon_sym_GT_EQ] = ACTIONS(2391),
     [anon_sym_GT_GT] = ACTIONS(2391),
@@ -85144,6 +86298,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2391),
     [anon_sym_CARET_EQ] = ACTIONS(2391),
     [anon_sym_PIPE_EQ] = ACTIONS(2391),
+    [anon_sym_PIPE_GT] = ACTIONS(2391),
     [anon_sym_PIPE_PIPE] = ACTIONS(2391),
     [anon_sym_TILDE_PIPE] = ACTIONS(2391),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2391),
@@ -85256,6 +86411,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2741),
     [anon_sym_LT_EQ] = ACTIONS(2741),
     [anon_sym_LT_EQ_GT] = ACTIONS(2741),
+    [anon_sym_LT_GT] = ACTIONS(2741),
     [anon_sym_EQ_EQ] = ACTIONS(2741),
     [anon_sym_GT_EQ] = ACTIONS(2741),
     [anon_sym_GT_GT] = ACTIONS(2741),
@@ -85264,6 +86420,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2741),
     [anon_sym_CARET_EQ] = ACTIONS(2741),
     [anon_sym_PIPE_EQ] = ACTIONS(2741),
+    [anon_sym_PIPE_GT] = ACTIONS(2741),
     [anon_sym_PIPE_PIPE] = ACTIONS(2741),
     [anon_sym_TILDE_PIPE] = ACTIONS(2741),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2741),
@@ -85378,6 +86535,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2395),
     [anon_sym_LT_EQ] = ACTIONS(2395),
     [anon_sym_LT_EQ_GT] = ACTIONS(2395),
+    [anon_sym_LT_GT] = ACTIONS(2395),
     [anon_sym_EQ_EQ] = ACTIONS(2395),
     [anon_sym_GT_EQ] = ACTIONS(2395),
     [anon_sym_GT_GT] = ACTIONS(2395),
@@ -85386,6 +86544,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2395),
     [anon_sym_CARET_EQ] = ACTIONS(2395),
     [anon_sym_PIPE_EQ] = ACTIONS(2395),
+    [anon_sym_PIPE_GT] = ACTIONS(2395),
     [anon_sym_PIPE_PIPE] = ACTIONS(2395),
     [anon_sym_TILDE_PIPE] = ACTIONS(2395),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2395),
@@ -85499,6 +86658,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2399),
     [anon_sym_LT_EQ] = ACTIONS(2399),
     [anon_sym_LT_EQ_GT] = ACTIONS(2399),
+    [anon_sym_LT_GT] = ACTIONS(2399),
     [anon_sym_EQ_EQ] = ACTIONS(2399),
     [anon_sym_GT_EQ] = ACTIONS(2399),
     [anon_sym_GT_GT] = ACTIONS(2399),
@@ -85507,6 +86667,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2399),
     [anon_sym_CARET_EQ] = ACTIONS(2399),
     [anon_sym_PIPE_EQ] = ACTIONS(2399),
+    [anon_sym_PIPE_GT] = ACTIONS(2399),
     [anon_sym_PIPE_PIPE] = ACTIONS(2399),
     [anon_sym_TILDE_PIPE] = ACTIONS(2399),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2399),
@@ -85620,6 +86781,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ_GT] = ACTIONS(2332),
+    [anon_sym_LT_GT] = ACTIONS(2332),
     [anon_sym_EQ_EQ] = ACTIONS(2332),
     [anon_sym_GT_EQ] = ACTIONS(2332),
     [anon_sym_GT_GT] = ACTIONS(2332),
@@ -85628,6 +86790,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2332),
     [anon_sym_CARET_EQ] = ACTIONS(2332),
     [anon_sym_PIPE_EQ] = ACTIONS(2332),
+    [anon_sym_PIPE_GT] = ACTIONS(2332),
     [anon_sym_PIPE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2332),
@@ -85740,6 +86903,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2383),
     [anon_sym_LT_EQ] = ACTIONS(2383),
     [anon_sym_LT_EQ_GT] = ACTIONS(2383),
+    [anon_sym_LT_GT] = ACTIONS(2383),
     [anon_sym_EQ_EQ] = ACTIONS(2383),
     [anon_sym_GT_EQ] = ACTIONS(2383),
     [anon_sym_GT_GT] = ACTIONS(2383),
@@ -85748,6 +86912,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2383),
     [anon_sym_CARET_EQ] = ACTIONS(2383),
     [anon_sym_PIPE_EQ] = ACTIONS(2383),
+    [anon_sym_PIPE_GT] = ACTIONS(2383),
     [anon_sym_PIPE_PIPE] = ACTIONS(2383),
     [anon_sym_TILDE_PIPE] = ACTIONS(2383),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2383),
@@ -85862,6 +87027,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2359),
     [anon_sym_LT_EQ] = ACTIONS(2359),
     [anon_sym_LT_EQ_GT] = ACTIONS(2359),
+    [anon_sym_LT_GT] = ACTIONS(2359),
     [anon_sym_EQ_EQ] = ACTIONS(2359),
     [anon_sym_GT_EQ] = ACTIONS(2359),
     [anon_sym_GT_GT] = ACTIONS(2359),
@@ -85870,6 +87036,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2359),
     [anon_sym_CARET_EQ] = ACTIONS(2359),
     [anon_sym_PIPE_EQ] = ACTIONS(2359),
+    [anon_sym_PIPE_GT] = ACTIONS(2359),
     [anon_sym_PIPE_PIPE] = ACTIONS(2359),
     [anon_sym_TILDE_PIPE] = ACTIONS(2359),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2359),
@@ -85982,6 +87149,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2747),
     [anon_sym_LT_EQ] = ACTIONS(2747),
     [anon_sym_LT_EQ_GT] = ACTIONS(2747),
+    [anon_sym_LT_GT] = ACTIONS(2747),
     [anon_sym_EQ_EQ] = ACTIONS(2747),
     [anon_sym_GT_EQ] = ACTIONS(2747),
     [anon_sym_GT_GT] = ACTIONS(2747),
@@ -85990,6 +87158,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2747),
     [anon_sym_CARET_EQ] = ACTIONS(2747),
     [anon_sym_PIPE_EQ] = ACTIONS(2747),
+    [anon_sym_PIPE_GT] = ACTIONS(2747),
     [anon_sym_PIPE_PIPE] = ACTIONS(2747),
     [anon_sym_TILDE_PIPE] = ACTIONS(2747),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2747),
@@ -86104,6 +87273,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2407),
     [anon_sym_LT_EQ] = ACTIONS(2407),
     [anon_sym_LT_EQ_GT] = ACTIONS(2407),
+    [anon_sym_LT_GT] = ACTIONS(2407),
     [anon_sym_EQ_EQ] = ACTIONS(2407),
     [anon_sym_GT_EQ] = ACTIONS(2407),
     [anon_sym_GT_GT] = ACTIONS(2407),
@@ -86112,6 +87282,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2407),
     [anon_sym_CARET_EQ] = ACTIONS(2407),
     [anon_sym_PIPE_EQ] = ACTIONS(2407),
+    [anon_sym_PIPE_GT] = ACTIONS(2407),
     [anon_sym_PIPE_PIPE] = ACTIONS(2407),
     [anon_sym_TILDE_PIPE] = ACTIONS(2407),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2407),
@@ -86225,6 +87396,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2411),
     [anon_sym_LT_EQ] = ACTIONS(2411),
     [anon_sym_LT_EQ_GT] = ACTIONS(2411),
+    [anon_sym_LT_GT] = ACTIONS(2411),
     [anon_sym_EQ_EQ] = ACTIONS(2411),
     [anon_sym_GT_EQ] = ACTIONS(2411),
     [anon_sym_GT_GT] = ACTIONS(2411),
@@ -86233,6 +87405,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2411),
     [anon_sym_CARET_EQ] = ACTIONS(2411),
     [anon_sym_PIPE_EQ] = ACTIONS(2411),
+    [anon_sym_PIPE_GT] = ACTIONS(2411),
     [anon_sym_PIPE_PIPE] = ACTIONS(2411),
     [anon_sym_TILDE_PIPE] = ACTIONS(2411),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2411),
@@ -86345,6 +87518,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2347),
     [anon_sym_LT_EQ] = ACTIONS(2347),
     [anon_sym_LT_EQ_GT] = ACTIONS(2347),
+    [anon_sym_LT_GT] = ACTIONS(2347),
     [anon_sym_EQ_EQ] = ACTIONS(2347),
     [anon_sym_GT_EQ] = ACTIONS(2347),
     [anon_sym_GT_GT] = ACTIONS(2347),
@@ -86353,6 +87527,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2347),
     [anon_sym_CARET_EQ] = ACTIONS(2347),
     [anon_sym_PIPE_EQ] = ACTIONS(2347),
+    [anon_sym_PIPE_GT] = ACTIONS(2347),
     [anon_sym_PIPE_PIPE] = ACTIONS(2347),
     [anon_sym_TILDE_PIPE] = ACTIONS(2347),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2347),
@@ -86466,6 +87641,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2751),
     [anon_sym_LT_EQ] = ACTIONS(2751),
     [anon_sym_LT_EQ_GT] = ACTIONS(2751),
+    [anon_sym_LT_GT] = ACTIONS(2751),
     [anon_sym_EQ_EQ] = ACTIONS(2751),
     [anon_sym_GT_EQ] = ACTIONS(2751),
     [anon_sym_GT_GT] = ACTIONS(2751),
@@ -86474,6 +87650,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2751),
     [anon_sym_CARET_EQ] = ACTIONS(2751),
     [anon_sym_PIPE_EQ] = ACTIONS(2751),
+    [anon_sym_PIPE_GT] = ACTIONS(2751),
     [anon_sym_PIPE_PIPE] = ACTIONS(2751),
     [anon_sym_TILDE_PIPE] = ACTIONS(2751),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2751),
@@ -86587,6 +87764,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2755),
     [anon_sym_LT_EQ] = ACTIONS(2755),
     [anon_sym_LT_EQ_GT] = ACTIONS(2755),
+    [anon_sym_LT_GT] = ACTIONS(2755),
     [anon_sym_EQ_EQ] = ACTIONS(2755),
     [anon_sym_GT_EQ] = ACTIONS(2755),
     [anon_sym_GT_GT] = ACTIONS(2755),
@@ -86595,6 +87773,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2755),
     [anon_sym_CARET_EQ] = ACTIONS(2755),
     [anon_sym_PIPE_EQ] = ACTIONS(2755),
+    [anon_sym_PIPE_GT] = ACTIONS(2755),
     [anon_sym_PIPE_PIPE] = ACTIONS(2755),
     [anon_sym_TILDE_PIPE] = ACTIONS(2755),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2755),
@@ -86709,6 +87888,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2415),
     [anon_sym_LT_EQ] = ACTIONS(2415),
     [anon_sym_LT_EQ_GT] = ACTIONS(2415),
+    [anon_sym_LT_GT] = ACTIONS(2415),
     [anon_sym_EQ_EQ] = ACTIONS(2415),
     [anon_sym_GT_EQ] = ACTIONS(2415),
     [anon_sym_GT_GT] = ACTIONS(2415),
@@ -86717,6 +87897,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2415),
     [anon_sym_CARET_EQ] = ACTIONS(2415),
     [anon_sym_PIPE_EQ] = ACTIONS(2415),
+    [anon_sym_PIPE_GT] = ACTIONS(2415),
     [anon_sym_PIPE_PIPE] = ACTIONS(2415),
     [anon_sym_TILDE_PIPE] = ACTIONS(2415),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2415),
@@ -86830,6 +88011,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2383),
     [anon_sym_LT_EQ] = ACTIONS(2383),
     [anon_sym_LT_EQ_GT] = ACTIONS(2383),
+    [anon_sym_LT_GT] = ACTIONS(2383),
     [anon_sym_EQ_EQ] = ACTIONS(2383),
     [anon_sym_GT_EQ] = ACTIONS(2383),
     [anon_sym_GT_GT] = ACTIONS(2383),
@@ -86838,6 +88020,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2383),
     [anon_sym_CARET_EQ] = ACTIONS(2383),
     [anon_sym_PIPE_EQ] = ACTIONS(2383),
+    [anon_sym_PIPE_GT] = ACTIONS(2383),
     [anon_sym_PIPE_PIPE] = ACTIONS(2383),
     [anon_sym_TILDE_PIPE] = ACTIONS(2383),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2383),
@@ -86951,6 +88134,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2347),
     [anon_sym_LT_EQ] = ACTIONS(2347),
     [anon_sym_LT_EQ_GT] = ACTIONS(2347),
+    [anon_sym_LT_GT] = ACTIONS(2347),
     [anon_sym_EQ_EQ] = ACTIONS(2347),
     [anon_sym_GT_EQ] = ACTIONS(2347),
     [anon_sym_GT_GT] = ACTIONS(2347),
@@ -86959,6 +88143,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2347),
     [anon_sym_CARET_EQ] = ACTIONS(2347),
     [anon_sym_PIPE_EQ] = ACTIONS(2347),
+    [anon_sym_PIPE_GT] = ACTIONS(2347),
     [anon_sym_PIPE_PIPE] = ACTIONS(2347),
     [anon_sym_TILDE_PIPE] = ACTIONS(2347),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2347),
@@ -87071,6 +88256,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2415),
     [anon_sym_LT_EQ] = ACTIONS(2415),
     [anon_sym_LT_EQ_GT] = ACTIONS(2415),
+    [anon_sym_LT_GT] = ACTIONS(2415),
     [anon_sym_EQ_EQ] = ACTIONS(2415),
     [anon_sym_GT_EQ] = ACTIONS(2415),
     [anon_sym_GT_GT] = ACTIONS(2415),
@@ -87079,6 +88265,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2415),
     [anon_sym_CARET_EQ] = ACTIONS(2415),
     [anon_sym_PIPE_EQ] = ACTIONS(2415),
+    [anon_sym_PIPE_GT] = ACTIONS(2415),
     [anon_sym_PIPE_PIPE] = ACTIONS(2415),
     [anon_sym_TILDE_PIPE] = ACTIONS(2415),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2415),
@@ -87193,6 +88380,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2391),
     [anon_sym_LT_EQ] = ACTIONS(2391),
     [anon_sym_LT_EQ_GT] = ACTIONS(2391),
+    [anon_sym_LT_GT] = ACTIONS(2391),
     [anon_sym_EQ_EQ] = ACTIONS(2391),
     [anon_sym_GT_EQ] = ACTIONS(2391),
     [anon_sym_GT_GT] = ACTIONS(2391),
@@ -87201,6 +88389,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2391),
     [anon_sym_CARET_EQ] = ACTIONS(2391),
     [anon_sym_PIPE_EQ] = ACTIONS(2391),
+    [anon_sym_PIPE_GT] = ACTIONS(2391),
     [anon_sym_PIPE_PIPE] = ACTIONS(2391),
     [anon_sym_TILDE_PIPE] = ACTIONS(2391),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2391),
@@ -87314,6 +88503,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2395),
     [anon_sym_LT_EQ] = ACTIONS(2395),
     [anon_sym_LT_EQ_GT] = ACTIONS(2395),
+    [anon_sym_LT_GT] = ACTIONS(2395),
     [anon_sym_EQ_EQ] = ACTIONS(2395),
     [anon_sym_GT_EQ] = ACTIONS(2395),
     [anon_sym_GT_GT] = ACTIONS(2395),
@@ -87322,6 +88512,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2395),
     [anon_sym_CARET_EQ] = ACTIONS(2395),
     [anon_sym_PIPE_EQ] = ACTIONS(2395),
+    [anon_sym_PIPE_GT] = ACTIONS(2395),
     [anon_sym_PIPE_PIPE] = ACTIONS(2395),
     [anon_sym_TILDE_PIPE] = ACTIONS(2395),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2395),
@@ -87435,6 +88626,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2371),
     [anon_sym_LT_EQ] = ACTIONS(2371),
     [anon_sym_LT_EQ_GT] = ACTIONS(2371),
+    [anon_sym_LT_GT] = ACTIONS(2371),
     [anon_sym_EQ_EQ] = ACTIONS(2371),
     [anon_sym_GT_EQ] = ACTIONS(2371),
     [anon_sym_GT_GT] = ACTIONS(2371),
@@ -87443,6 +88635,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2371),
     [anon_sym_CARET_EQ] = ACTIONS(2371),
     [anon_sym_PIPE_EQ] = ACTIONS(2371),
+    [anon_sym_PIPE_GT] = ACTIONS(2371),
     [anon_sym_PIPE_PIPE] = ACTIONS(2371),
     [anon_sym_TILDE_PIPE] = ACTIONS(2371),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2371),
@@ -87556,6 +88749,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2439),
     [anon_sym_LT_EQ] = ACTIONS(2439),
     [anon_sym_LT_EQ_GT] = ACTIONS(2439),
+    [anon_sym_LT_GT] = ACTIONS(2439),
     [anon_sym_EQ_EQ] = ACTIONS(2439),
     [anon_sym_GT_EQ] = ACTIONS(2439),
     [anon_sym_GT_GT] = ACTIONS(2439),
@@ -87564,6 +88758,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2439),
     [anon_sym_CARET_EQ] = ACTIONS(2439),
     [anon_sym_PIPE_EQ] = ACTIONS(2439),
+    [anon_sym_PIPE_GT] = ACTIONS(2439),
     [anon_sym_PIPE_PIPE] = ACTIONS(2439),
     [anon_sym_TILDE_PIPE] = ACTIONS(2439),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2439),
@@ -87677,6 +88872,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2399),
     [anon_sym_LT_EQ] = ACTIONS(2399),
     [anon_sym_LT_EQ_GT] = ACTIONS(2399),
+    [anon_sym_LT_GT] = ACTIONS(2399),
     [anon_sym_EQ_EQ] = ACTIONS(2399),
     [anon_sym_GT_EQ] = ACTIONS(2399),
     [anon_sym_GT_GT] = ACTIONS(2399),
@@ -87685,6 +88881,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2399),
     [anon_sym_CARET_EQ] = ACTIONS(2399),
     [anon_sym_PIPE_EQ] = ACTIONS(2399),
+    [anon_sym_PIPE_GT] = ACTIONS(2399),
     [anon_sym_PIPE_PIPE] = ACTIONS(2399),
     [anon_sym_TILDE_PIPE] = ACTIONS(2399),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2399),
@@ -87798,6 +88995,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2371),
     [anon_sym_LT_EQ] = ACTIONS(2371),
     [anon_sym_LT_EQ_GT] = ACTIONS(2371),
+    [anon_sym_LT_GT] = ACTIONS(2371),
     [anon_sym_EQ_EQ] = ACTIONS(2371),
     [anon_sym_GT_EQ] = ACTIONS(2371),
     [anon_sym_GT_GT] = ACTIONS(2371),
@@ -87806,6 +89004,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2371),
     [anon_sym_CARET_EQ] = ACTIONS(2371),
     [anon_sym_PIPE_EQ] = ACTIONS(2371),
+    [anon_sym_PIPE_GT] = ACTIONS(2371),
     [anon_sym_PIPE_PIPE] = ACTIONS(2371),
     [anon_sym_TILDE_PIPE] = ACTIONS(2371),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2371),
@@ -87919,6 +89118,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2439),
     [anon_sym_LT_EQ] = ACTIONS(2439),
     [anon_sym_LT_EQ_GT] = ACTIONS(2439),
+    [anon_sym_LT_GT] = ACTIONS(2439),
     [anon_sym_EQ_EQ] = ACTIONS(2439),
     [anon_sym_GT_EQ] = ACTIONS(2439),
     [anon_sym_GT_GT] = ACTIONS(2439),
@@ -87927,6 +89127,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2439),
     [anon_sym_CARET_EQ] = ACTIONS(2439),
     [anon_sym_PIPE_EQ] = ACTIONS(2439),
+    [anon_sym_PIPE_GT] = ACTIONS(2439),
     [anon_sym_PIPE_PIPE] = ACTIONS(2439),
     [anon_sym_TILDE_PIPE] = ACTIONS(2439),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2439),
@@ -88040,6 +89241,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2383),
     [anon_sym_LT_EQ] = ACTIONS(2383),
     [anon_sym_LT_EQ_GT] = ACTIONS(2383),
+    [anon_sym_LT_GT] = ACTIONS(2383),
     [anon_sym_EQ_EQ] = ACTIONS(2383),
     [anon_sym_GT_EQ] = ACTIONS(2383),
     [anon_sym_GT_GT] = ACTIONS(2383),
@@ -88048,6 +89250,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2383),
     [anon_sym_CARET_EQ] = ACTIONS(2383),
     [anon_sym_PIPE_EQ] = ACTIONS(2383),
+    [anon_sym_PIPE_GT] = ACTIONS(2383),
     [anon_sym_PIPE_PIPE] = ACTIONS(2383),
     [anon_sym_TILDE_PIPE] = ACTIONS(2383),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2383),
@@ -88161,6 +89364,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2407),
     [anon_sym_LT_EQ] = ACTIONS(2407),
     [anon_sym_LT_EQ_GT] = ACTIONS(2407),
+    [anon_sym_LT_GT] = ACTIONS(2407),
     [anon_sym_EQ_EQ] = ACTIONS(2407),
     [anon_sym_GT_EQ] = ACTIONS(2407),
     [anon_sym_GT_GT] = ACTIONS(2407),
@@ -88169,6 +89373,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2407),
     [anon_sym_CARET_EQ] = ACTIONS(2407),
     [anon_sym_PIPE_EQ] = ACTIONS(2407),
+    [anon_sym_PIPE_GT] = ACTIONS(2407),
     [anon_sym_PIPE_PIPE] = ACTIONS(2407),
     [anon_sym_TILDE_PIPE] = ACTIONS(2407),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2407),
@@ -88282,6 +89487,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2411),
     [anon_sym_LT_EQ] = ACTIONS(2411),
     [anon_sym_LT_EQ_GT] = ACTIONS(2411),
+    [anon_sym_LT_GT] = ACTIONS(2411),
     [anon_sym_EQ_EQ] = ACTIONS(2411),
     [anon_sym_GT_EQ] = ACTIONS(2411),
     [anon_sym_GT_GT] = ACTIONS(2411),
@@ -88290,6 +89496,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2411),
     [anon_sym_CARET_EQ] = ACTIONS(2411),
     [anon_sym_PIPE_EQ] = ACTIONS(2411),
+    [anon_sym_PIPE_GT] = ACTIONS(2411),
     [anon_sym_PIPE_PIPE] = ACTIONS(2411),
     [anon_sym_TILDE_PIPE] = ACTIONS(2411),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2411),
@@ -88403,6 +89610,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2347),
     [anon_sym_LT_EQ] = ACTIONS(2347),
     [anon_sym_LT_EQ_GT] = ACTIONS(2347),
+    [anon_sym_LT_GT] = ACTIONS(2347),
     [anon_sym_EQ_EQ] = ACTIONS(2347),
     [anon_sym_GT_EQ] = ACTIONS(2347),
     [anon_sym_GT_GT] = ACTIONS(2347),
@@ -88411,6 +89619,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2347),
     [anon_sym_CARET_EQ] = ACTIONS(2347),
     [anon_sym_PIPE_EQ] = ACTIONS(2347),
+    [anon_sym_PIPE_GT] = ACTIONS(2347),
     [anon_sym_PIPE_PIPE] = ACTIONS(2347),
     [anon_sym_TILDE_PIPE] = ACTIONS(2347),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2347),
@@ -88524,6 +89733,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2415),
     [anon_sym_LT_EQ] = ACTIONS(2415),
     [anon_sym_LT_EQ_GT] = ACTIONS(2415),
+    [anon_sym_LT_GT] = ACTIONS(2415),
     [anon_sym_EQ_EQ] = ACTIONS(2415),
     [anon_sym_GT_EQ] = ACTIONS(2415),
     [anon_sym_GT_GT] = ACTIONS(2415),
@@ -88532,6 +89742,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2415),
     [anon_sym_CARET_EQ] = ACTIONS(2415),
     [anon_sym_PIPE_EQ] = ACTIONS(2415),
+    [anon_sym_PIPE_GT] = ACTIONS(2415),
     [anon_sym_PIPE_PIPE] = ACTIONS(2415),
     [anon_sym_TILDE_PIPE] = ACTIONS(2415),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2415),
@@ -88645,6 +89856,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2391),
     [anon_sym_LT_EQ] = ACTIONS(2391),
     [anon_sym_LT_EQ_GT] = ACTIONS(2391),
+    [anon_sym_LT_GT] = ACTIONS(2391),
     [anon_sym_EQ_EQ] = ACTIONS(2391),
     [anon_sym_GT_EQ] = ACTIONS(2391),
     [anon_sym_GT_GT] = ACTIONS(2391),
@@ -88653,6 +89865,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2391),
     [anon_sym_CARET_EQ] = ACTIONS(2391),
     [anon_sym_PIPE_EQ] = ACTIONS(2391),
+    [anon_sym_PIPE_GT] = ACTIONS(2391),
     [anon_sym_PIPE_PIPE] = ACTIONS(2391),
     [anon_sym_TILDE_PIPE] = ACTIONS(2391),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2391),
@@ -88766,6 +89979,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2395),
     [anon_sym_LT_EQ] = ACTIONS(2395),
     [anon_sym_LT_EQ_GT] = ACTIONS(2395),
+    [anon_sym_LT_GT] = ACTIONS(2395),
     [anon_sym_EQ_EQ] = ACTIONS(2395),
     [anon_sym_GT_EQ] = ACTIONS(2395),
     [anon_sym_GT_GT] = ACTIONS(2395),
@@ -88774,6 +89988,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2395),
     [anon_sym_CARET_EQ] = ACTIONS(2395),
     [anon_sym_PIPE_EQ] = ACTIONS(2395),
+    [anon_sym_PIPE_GT] = ACTIONS(2395),
     [anon_sym_PIPE_PIPE] = ACTIONS(2395),
     [anon_sym_TILDE_PIPE] = ACTIONS(2395),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2395),
@@ -88887,6 +90102,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2399),
     [anon_sym_LT_EQ] = ACTIONS(2399),
     [anon_sym_LT_EQ_GT] = ACTIONS(2399),
+    [anon_sym_LT_GT] = ACTIONS(2399),
     [anon_sym_EQ_EQ] = ACTIONS(2399),
     [anon_sym_GT_EQ] = ACTIONS(2399),
     [anon_sym_GT_GT] = ACTIONS(2399),
@@ -88895,6 +90111,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2399),
     [anon_sym_CARET_EQ] = ACTIONS(2399),
     [anon_sym_PIPE_EQ] = ACTIONS(2399),
+    [anon_sym_PIPE_GT] = ACTIONS(2399),
     [anon_sym_PIPE_PIPE] = ACTIONS(2399),
     [anon_sym_TILDE_PIPE] = ACTIONS(2399),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2399),
@@ -89008,6 +90225,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2383),
     [anon_sym_LT_EQ] = ACTIONS(2383),
     [anon_sym_LT_EQ_GT] = ACTIONS(2383),
+    [anon_sym_LT_GT] = ACTIONS(2383),
     [anon_sym_EQ_EQ] = ACTIONS(2383),
     [anon_sym_GT_EQ] = ACTIONS(2383),
     [anon_sym_GT_GT] = ACTIONS(2383),
@@ -89016,6 +90234,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2383),
     [anon_sym_CARET_EQ] = ACTIONS(2383),
     [anon_sym_PIPE_EQ] = ACTIONS(2383),
+    [anon_sym_PIPE_GT] = ACTIONS(2383),
     [anon_sym_PIPE_PIPE] = ACTIONS(2383),
     [anon_sym_TILDE_PIPE] = ACTIONS(2383),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2383),
@@ -89129,6 +90348,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2375),
     [anon_sym_LT_EQ] = ACTIONS(2375),
     [anon_sym_LT_EQ_GT] = ACTIONS(2375),
+    [anon_sym_LT_GT] = ACTIONS(2375),
     [anon_sym_EQ_EQ] = ACTIONS(2375),
     [anon_sym_GT_EQ] = ACTIONS(2375),
     [anon_sym_GT_GT] = ACTIONS(2375),
@@ -89137,6 +90357,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2375),
     [anon_sym_CARET_EQ] = ACTIONS(2375),
     [anon_sym_PIPE_EQ] = ACTIONS(2375),
+    [anon_sym_PIPE_GT] = ACTIONS(2375),
     [anon_sym_PIPE_PIPE] = ACTIONS(2375),
     [anon_sym_TILDE_PIPE] = ACTIONS(2375),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2375),
@@ -89250,6 +90471,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2379),
     [anon_sym_LT_EQ] = ACTIONS(2379),
     [anon_sym_LT_EQ_GT] = ACTIONS(2379),
+    [anon_sym_LT_GT] = ACTIONS(2379),
     [anon_sym_EQ_EQ] = ACTIONS(2379),
     [anon_sym_GT_EQ] = ACTIONS(2379),
     [anon_sym_GT_GT] = ACTIONS(2379),
@@ -89258,6 +90480,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2379),
     [anon_sym_CARET_EQ] = ACTIONS(2379),
     [anon_sym_PIPE_EQ] = ACTIONS(2379),
+    [anon_sym_PIPE_GT] = ACTIONS(2379),
     [anon_sym_PIPE_PIPE] = ACTIONS(2379),
     [anon_sym_TILDE_PIPE] = ACTIONS(2379),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2379),
@@ -89370,6 +90593,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2759),
     [anon_sym_LT_EQ] = ACTIONS(2759),
     [anon_sym_LT_EQ_GT] = ACTIONS(2759),
+    [anon_sym_LT_GT] = ACTIONS(2759),
     [anon_sym_EQ_EQ] = ACTIONS(2759),
     [anon_sym_GT_EQ] = ACTIONS(2759),
     [anon_sym_GT_GT] = ACTIONS(2759),
@@ -89378,6 +90602,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2759),
     [anon_sym_CARET_EQ] = ACTIONS(2759),
     [anon_sym_PIPE_EQ] = ACTIONS(2759),
+    [anon_sym_PIPE_GT] = ACTIONS(2759),
     [anon_sym_PIPE_PIPE] = ACTIONS(2759),
     [anon_sym_TILDE_PIPE] = ACTIONS(2759),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2759),
@@ -89492,6 +90717,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2407),
     [anon_sym_LT_EQ] = ACTIONS(2407),
     [anon_sym_LT_EQ_GT] = ACTIONS(2407),
+    [anon_sym_LT_GT] = ACTIONS(2407),
     [anon_sym_EQ_EQ] = ACTIONS(2407),
     [anon_sym_GT_EQ] = ACTIONS(2407),
     [anon_sym_GT_GT] = ACTIONS(2407),
@@ -89500,6 +90726,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2407),
     [anon_sym_CARET_EQ] = ACTIONS(2407),
     [anon_sym_PIPE_EQ] = ACTIONS(2407),
+    [anon_sym_PIPE_GT] = ACTIONS(2407),
     [anon_sym_PIPE_PIPE] = ACTIONS(2407),
     [anon_sym_TILDE_PIPE] = ACTIONS(2407),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2407),
@@ -89613,6 +90840,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2411),
     [anon_sym_LT_EQ] = ACTIONS(2411),
     [anon_sym_LT_EQ_GT] = ACTIONS(2411),
+    [anon_sym_LT_GT] = ACTIONS(2411),
     [anon_sym_EQ_EQ] = ACTIONS(2411),
     [anon_sym_GT_EQ] = ACTIONS(2411),
     [anon_sym_GT_GT] = ACTIONS(2411),
@@ -89621,6 +90849,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2411),
     [anon_sym_CARET_EQ] = ACTIONS(2411),
     [anon_sym_PIPE_EQ] = ACTIONS(2411),
+    [anon_sym_PIPE_GT] = ACTIONS(2411),
     [anon_sym_PIPE_PIPE] = ACTIONS(2411),
     [anon_sym_TILDE_PIPE] = ACTIONS(2411),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2411),
@@ -89734,6 +90963,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2347),
     [anon_sym_LT_EQ] = ACTIONS(2347),
     [anon_sym_LT_EQ_GT] = ACTIONS(2347),
+    [anon_sym_LT_GT] = ACTIONS(2347),
     [anon_sym_EQ_EQ] = ACTIONS(2347),
     [anon_sym_GT_EQ] = ACTIONS(2347),
     [anon_sym_GT_GT] = ACTIONS(2347),
@@ -89742,6 +90972,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2347),
     [anon_sym_CARET_EQ] = ACTIONS(2347),
     [anon_sym_PIPE_EQ] = ACTIONS(2347),
+    [anon_sym_PIPE_GT] = ACTIONS(2347),
     [anon_sym_PIPE_PIPE] = ACTIONS(2347),
     [anon_sym_TILDE_PIPE] = ACTIONS(2347),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2347),
@@ -89855,6 +91086,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2415),
     [anon_sym_LT_EQ] = ACTIONS(2415),
     [anon_sym_LT_EQ_GT] = ACTIONS(2415),
+    [anon_sym_LT_GT] = ACTIONS(2415),
     [anon_sym_EQ_EQ] = ACTIONS(2415),
     [anon_sym_GT_EQ] = ACTIONS(2415),
     [anon_sym_GT_GT] = ACTIONS(2415),
@@ -89863,6 +91095,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2415),
     [anon_sym_CARET_EQ] = ACTIONS(2415),
     [anon_sym_PIPE_EQ] = ACTIONS(2415),
+    [anon_sym_PIPE_GT] = ACTIONS(2415),
     [anon_sym_PIPE_PIPE] = ACTIONS(2415),
     [anon_sym_TILDE_PIPE] = ACTIONS(2415),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2415),
@@ -89976,6 +91209,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2391),
     [anon_sym_LT_EQ] = ACTIONS(2391),
     [anon_sym_LT_EQ_GT] = ACTIONS(2391),
+    [anon_sym_LT_GT] = ACTIONS(2391),
     [anon_sym_EQ_EQ] = ACTIONS(2391),
     [anon_sym_GT_EQ] = ACTIONS(2391),
     [anon_sym_GT_GT] = ACTIONS(2391),
@@ -89984,6 +91218,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2391),
     [anon_sym_CARET_EQ] = ACTIONS(2391),
     [anon_sym_PIPE_EQ] = ACTIONS(2391),
+    [anon_sym_PIPE_GT] = ACTIONS(2391),
     [anon_sym_PIPE_PIPE] = ACTIONS(2391),
     [anon_sym_TILDE_PIPE] = ACTIONS(2391),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2391),
@@ -90097,6 +91332,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2395),
     [anon_sym_LT_EQ] = ACTIONS(2395),
     [anon_sym_LT_EQ_GT] = ACTIONS(2395),
+    [anon_sym_LT_GT] = ACTIONS(2395),
     [anon_sym_EQ_EQ] = ACTIONS(2395),
     [anon_sym_GT_EQ] = ACTIONS(2395),
     [anon_sym_GT_GT] = ACTIONS(2395),
@@ -90105,6 +91341,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2395),
     [anon_sym_CARET_EQ] = ACTIONS(2395),
     [anon_sym_PIPE_EQ] = ACTIONS(2395),
+    [anon_sym_PIPE_GT] = ACTIONS(2395),
     [anon_sym_PIPE_PIPE] = ACTIONS(2395),
     [anon_sym_TILDE_PIPE] = ACTIONS(2395),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2395),
@@ -90218,6 +91455,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2399),
     [anon_sym_LT_EQ] = ACTIONS(2399),
     [anon_sym_LT_EQ_GT] = ACTIONS(2399),
+    [anon_sym_LT_GT] = ACTIONS(2399),
     [anon_sym_EQ_EQ] = ACTIONS(2399),
     [anon_sym_GT_EQ] = ACTIONS(2399),
     [anon_sym_GT_GT] = ACTIONS(2399),
@@ -90226,6 +91464,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2399),
     [anon_sym_CARET_EQ] = ACTIONS(2399),
     [anon_sym_PIPE_EQ] = ACTIONS(2399),
+    [anon_sym_PIPE_GT] = ACTIONS(2399),
     [anon_sym_PIPE_PIPE] = ACTIONS(2399),
     [anon_sym_TILDE_PIPE] = ACTIONS(2399),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2399),
@@ -90339,6 +91578,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2383),
     [anon_sym_LT_EQ] = ACTIONS(2383),
     [anon_sym_LT_EQ_GT] = ACTIONS(2383),
+    [anon_sym_LT_GT] = ACTIONS(2383),
     [anon_sym_EQ_EQ] = ACTIONS(2383),
     [anon_sym_GT_EQ] = ACTIONS(2383),
     [anon_sym_GT_GT] = ACTIONS(2383),
@@ -90347,6 +91587,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2383),
     [anon_sym_CARET_EQ] = ACTIONS(2383),
     [anon_sym_PIPE_EQ] = ACTIONS(2383),
+    [anon_sym_PIPE_GT] = ACTIONS(2383),
     [anon_sym_PIPE_PIPE] = ACTIONS(2383),
     [anon_sym_TILDE_PIPE] = ACTIONS(2383),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2383),
@@ -90460,6 +91701,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2407),
     [anon_sym_LT_EQ] = ACTIONS(2407),
     [anon_sym_LT_EQ_GT] = ACTIONS(2407),
+    [anon_sym_LT_GT] = ACTIONS(2407),
     [anon_sym_EQ_EQ] = ACTIONS(2407),
     [anon_sym_GT_EQ] = ACTIONS(2407),
     [anon_sym_GT_GT] = ACTIONS(2407),
@@ -90468,6 +91710,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2407),
     [anon_sym_CARET_EQ] = ACTIONS(2407),
     [anon_sym_PIPE_EQ] = ACTIONS(2407),
+    [anon_sym_PIPE_GT] = ACTIONS(2407),
     [anon_sym_PIPE_PIPE] = ACTIONS(2407),
     [anon_sym_TILDE_PIPE] = ACTIONS(2407),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2407),
@@ -90581,6 +91824,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2411),
     [anon_sym_LT_EQ] = ACTIONS(2411),
     [anon_sym_LT_EQ_GT] = ACTIONS(2411),
+    [anon_sym_LT_GT] = ACTIONS(2411),
     [anon_sym_EQ_EQ] = ACTIONS(2411),
     [anon_sym_GT_EQ] = ACTIONS(2411),
     [anon_sym_GT_GT] = ACTIONS(2411),
@@ -90589,6 +91833,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2411),
     [anon_sym_CARET_EQ] = ACTIONS(2411),
     [anon_sym_PIPE_EQ] = ACTIONS(2411),
+    [anon_sym_PIPE_GT] = ACTIONS(2411),
     [anon_sym_PIPE_PIPE] = ACTIONS(2411),
     [anon_sym_TILDE_PIPE] = ACTIONS(2411),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2411),
@@ -90702,6 +91947,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2347),
     [anon_sym_LT_EQ] = ACTIONS(2347),
     [anon_sym_LT_EQ_GT] = ACTIONS(2347),
+    [anon_sym_LT_GT] = ACTIONS(2347),
     [anon_sym_EQ_EQ] = ACTIONS(2347),
     [anon_sym_GT_EQ] = ACTIONS(2347),
     [anon_sym_GT_GT] = ACTIONS(2347),
@@ -90710,6 +91956,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2347),
     [anon_sym_CARET_EQ] = ACTIONS(2347),
     [anon_sym_PIPE_EQ] = ACTIONS(2347),
+    [anon_sym_PIPE_GT] = ACTIONS(2347),
     [anon_sym_PIPE_PIPE] = ACTIONS(2347),
     [anon_sym_TILDE_PIPE] = ACTIONS(2347),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2347),
@@ -90823,6 +92070,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2415),
     [anon_sym_LT_EQ] = ACTIONS(2415),
     [anon_sym_LT_EQ_GT] = ACTIONS(2415),
+    [anon_sym_LT_GT] = ACTIONS(2415),
     [anon_sym_EQ_EQ] = ACTIONS(2415),
     [anon_sym_GT_EQ] = ACTIONS(2415),
     [anon_sym_GT_GT] = ACTIONS(2415),
@@ -90831,6 +92079,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2415),
     [anon_sym_CARET_EQ] = ACTIONS(2415),
     [anon_sym_PIPE_EQ] = ACTIONS(2415),
+    [anon_sym_PIPE_GT] = ACTIONS(2415),
     [anon_sym_PIPE_PIPE] = ACTIONS(2415),
     [anon_sym_TILDE_PIPE] = ACTIONS(2415),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2415),
@@ -90944,6 +92193,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2375),
     [anon_sym_LT_EQ] = ACTIONS(2375),
     [anon_sym_LT_EQ_GT] = ACTIONS(2375),
+    [anon_sym_LT_GT] = ACTIONS(2375),
     [anon_sym_EQ_EQ] = ACTIONS(2375),
     [anon_sym_GT_EQ] = ACTIONS(2375),
     [anon_sym_GT_GT] = ACTIONS(2375),
@@ -90952,6 +92202,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2375),
     [anon_sym_CARET_EQ] = ACTIONS(2375),
     [anon_sym_PIPE_EQ] = ACTIONS(2375),
+    [anon_sym_PIPE_GT] = ACTIONS(2375),
     [anon_sym_PIPE_PIPE] = ACTIONS(2375),
     [anon_sym_TILDE_PIPE] = ACTIONS(2375),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2375),
@@ -91064,6 +92315,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2391),
     [anon_sym_LT_EQ] = ACTIONS(2391),
     [anon_sym_LT_EQ_GT] = ACTIONS(2391),
+    [anon_sym_LT_GT] = ACTIONS(2391),
     [anon_sym_EQ_EQ] = ACTIONS(2391),
     [anon_sym_GT_EQ] = ACTIONS(2391),
     [anon_sym_GT_GT] = ACTIONS(2391),
@@ -91072,6 +92324,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2391),
     [anon_sym_CARET_EQ] = ACTIONS(2391),
     [anon_sym_PIPE_EQ] = ACTIONS(2391),
+    [anon_sym_PIPE_GT] = ACTIONS(2391),
     [anon_sym_PIPE_PIPE] = ACTIONS(2391),
     [anon_sym_TILDE_PIPE] = ACTIONS(2391),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2391),
@@ -91185,6 +92438,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ_GT] = ACTIONS(2332),
+    [anon_sym_LT_GT] = ACTIONS(2332),
     [anon_sym_EQ_EQ] = ACTIONS(2332),
     [anon_sym_GT_EQ] = ACTIONS(2332),
     [anon_sym_GT_GT] = ACTIONS(2332),
@@ -91193,6 +92447,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2332),
     [anon_sym_CARET_EQ] = ACTIONS(2332),
     [anon_sym_PIPE_EQ] = ACTIONS(2332),
+    [anon_sym_PIPE_GT] = ACTIONS(2332),
     [anon_sym_PIPE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2332),
@@ -91307,6 +92562,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2379),
     [anon_sym_LT_EQ] = ACTIONS(2379),
     [anon_sym_LT_EQ_GT] = ACTIONS(2379),
+    [anon_sym_LT_GT] = ACTIONS(2379),
     [anon_sym_EQ_EQ] = ACTIONS(2379),
     [anon_sym_GT_EQ] = ACTIONS(2379),
     [anon_sym_GT_GT] = ACTIONS(2379),
@@ -91315,6 +92571,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2379),
     [anon_sym_CARET_EQ] = ACTIONS(2379),
     [anon_sym_PIPE_EQ] = ACTIONS(2379),
+    [anon_sym_PIPE_GT] = ACTIONS(2379),
     [anon_sym_PIPE_PIPE] = ACTIONS(2379),
     [anon_sym_TILDE_PIPE] = ACTIONS(2379),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2379),
@@ -91428,6 +92685,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2403),
     [anon_sym_LT_EQ] = ACTIONS(2403),
     [anon_sym_LT_EQ_GT] = ACTIONS(2403),
+    [anon_sym_LT_GT] = ACTIONS(2403),
     [anon_sym_EQ_EQ] = ACTIONS(2403),
     [anon_sym_GT_EQ] = ACTIONS(2403),
     [anon_sym_GT_GT] = ACTIONS(2403),
@@ -91436,6 +92694,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2403),
     [anon_sym_CARET_EQ] = ACTIONS(2403),
     [anon_sym_PIPE_EQ] = ACTIONS(2403),
+    [anon_sym_PIPE_GT] = ACTIONS(2403),
     [anon_sym_PIPE_PIPE] = ACTIONS(2403),
     [anon_sym_TILDE_PIPE] = ACTIONS(2403),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2403),
@@ -91548,6 +92807,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2395),
     [anon_sym_LT_EQ] = ACTIONS(2395),
     [anon_sym_LT_EQ_GT] = ACTIONS(2395),
+    [anon_sym_LT_GT] = ACTIONS(2395),
     [anon_sym_EQ_EQ] = ACTIONS(2395),
     [anon_sym_GT_EQ] = ACTIONS(2395),
     [anon_sym_GT_GT] = ACTIONS(2395),
@@ -91556,6 +92816,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2395),
     [anon_sym_CARET_EQ] = ACTIONS(2395),
     [anon_sym_PIPE_EQ] = ACTIONS(2395),
+    [anon_sym_PIPE_GT] = ACTIONS(2395),
     [anon_sym_PIPE_PIPE] = ACTIONS(2395),
     [anon_sym_TILDE_PIPE] = ACTIONS(2395),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2395),
@@ -91669,6 +92930,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2399),
     [anon_sym_LT_EQ] = ACTIONS(2399),
     [anon_sym_LT_EQ_GT] = ACTIONS(2399),
+    [anon_sym_LT_GT] = ACTIONS(2399),
     [anon_sym_EQ_EQ] = ACTIONS(2399),
     [anon_sym_GT_EQ] = ACTIONS(2399),
     [anon_sym_GT_GT] = ACTIONS(2399),
@@ -91677,6 +92939,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2399),
     [anon_sym_CARET_EQ] = ACTIONS(2399),
     [anon_sym_PIPE_EQ] = ACTIONS(2399),
+    [anon_sym_PIPE_GT] = ACTIONS(2399),
     [anon_sym_PIPE_PIPE] = ACTIONS(2399),
     [anon_sym_TILDE_PIPE] = ACTIONS(2399),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2399),
@@ -91791,6 +93054,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2371),
     [anon_sym_LT_EQ] = ACTIONS(2371),
     [anon_sym_LT_EQ_GT] = ACTIONS(2371),
+    [anon_sym_LT_GT] = ACTIONS(2371),
     [anon_sym_EQ_EQ] = ACTIONS(2371),
     [anon_sym_GT_EQ] = ACTIONS(2371),
     [anon_sym_GT_GT] = ACTIONS(2371),
@@ -91799,6 +93063,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2371),
     [anon_sym_CARET_EQ] = ACTIONS(2371),
     [anon_sym_PIPE_EQ] = ACTIONS(2371),
+    [anon_sym_PIPE_GT] = ACTIONS(2371),
     [anon_sym_PIPE_PIPE] = ACTIONS(2371),
     [anon_sym_TILDE_PIPE] = ACTIONS(2371),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2371),
@@ -91911,6 +93176,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2766),
     [anon_sym_LT_EQ] = ACTIONS(2766),
     [anon_sym_LT_EQ_GT] = ACTIONS(2766),
+    [anon_sym_LT_GT] = ACTIONS(2766),
     [anon_sym_EQ_EQ] = ACTIONS(2766),
     [anon_sym_GT_EQ] = ACTIONS(2766),
     [anon_sym_GT_GT] = ACTIONS(2766),
@@ -91919,6 +93185,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2766),
     [anon_sym_CARET_EQ] = ACTIONS(2766),
     [anon_sym_PIPE_EQ] = ACTIONS(2766),
+    [anon_sym_PIPE_GT] = ACTIONS(2766),
     [anon_sym_PIPE_PIPE] = ACTIONS(2766),
     [anon_sym_TILDE_PIPE] = ACTIONS(2766),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2766),
@@ -92032,6 +93299,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2770),
     [anon_sym_LT_EQ] = ACTIONS(2770),
     [anon_sym_LT_EQ_GT] = ACTIONS(2770),
+    [anon_sym_LT_GT] = ACTIONS(2770),
     [anon_sym_EQ_EQ] = ACTIONS(2770),
     [anon_sym_GT_EQ] = ACTIONS(2770),
     [anon_sym_GT_GT] = ACTIONS(2770),
@@ -92040,6 +93308,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2770),
     [anon_sym_CARET_EQ] = ACTIONS(2770),
     [anon_sym_PIPE_EQ] = ACTIONS(2770),
+    [anon_sym_PIPE_GT] = ACTIONS(2770),
     [anon_sym_PIPE_PIPE] = ACTIONS(2770),
     [anon_sym_TILDE_PIPE] = ACTIONS(2770),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2770),
@@ -92153,6 +93422,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ_GT] = ACTIONS(2332),
+    [anon_sym_LT_GT] = ACTIONS(2332),
     [anon_sym_EQ_EQ] = ACTIONS(2332),
     [anon_sym_GT_EQ] = ACTIONS(2332),
     [anon_sym_GT_GT] = ACTIONS(2332),
@@ -92161,6 +93431,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2332),
     [anon_sym_CARET_EQ] = ACTIONS(2332),
     [anon_sym_PIPE_EQ] = ACTIONS(2332),
+    [anon_sym_PIPE_GT] = ACTIONS(2332),
     [anon_sym_PIPE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2332),
@@ -92274,6 +93545,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ_GT] = ACTIONS(2332),
+    [anon_sym_LT_GT] = ACTIONS(2332),
     [anon_sym_EQ_EQ] = ACTIONS(2332),
     [anon_sym_GT_EQ] = ACTIONS(2332),
     [anon_sym_GT_GT] = ACTIONS(2332),
@@ -92282,6 +93554,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2332),
     [anon_sym_CARET_EQ] = ACTIONS(2332),
     [anon_sym_PIPE_EQ] = ACTIONS(2332),
+    [anon_sym_PIPE_GT] = ACTIONS(2332),
     [anon_sym_PIPE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2332),
@@ -92395,6 +93668,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ_GT] = ACTIONS(2332),
+    [anon_sym_LT_GT] = ACTIONS(2332),
     [anon_sym_EQ_EQ] = ACTIONS(2332),
     [anon_sym_GT_EQ] = ACTIONS(2332),
     [anon_sym_GT_GT] = ACTIONS(2332),
@@ -92403,6 +93677,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2332),
     [anon_sym_CARET_EQ] = ACTIONS(2332),
     [anon_sym_PIPE_EQ] = ACTIONS(2332),
+    [anon_sym_PIPE_GT] = ACTIONS(2332),
     [anon_sym_PIPE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2332),
@@ -92516,6 +93791,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ_GT] = ACTIONS(2332),
+    [anon_sym_LT_GT] = ACTIONS(2332),
     [anon_sym_EQ_EQ] = ACTIONS(2332),
     [anon_sym_GT_EQ] = ACTIONS(2332),
     [anon_sym_GT_GT] = ACTIONS(2332),
@@ -92524,6 +93800,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2332),
     [anon_sym_CARET_EQ] = ACTIONS(2332),
     [anon_sym_PIPE_EQ] = ACTIONS(2332),
+    [anon_sym_PIPE_GT] = ACTIONS(2332),
     [anon_sym_PIPE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2332),
@@ -92638,6 +93915,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2439),
     [anon_sym_LT_EQ] = ACTIONS(2439),
     [anon_sym_LT_EQ_GT] = ACTIONS(2439),
+    [anon_sym_LT_GT] = ACTIONS(2439),
     [anon_sym_EQ_EQ] = ACTIONS(2439),
     [anon_sym_GT_EQ] = ACTIONS(2439),
     [anon_sym_GT_GT] = ACTIONS(2439),
@@ -92646,6 +93924,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2439),
     [anon_sym_CARET_EQ] = ACTIONS(2439),
     [anon_sym_PIPE_EQ] = ACTIONS(2439),
+    [anon_sym_PIPE_GT] = ACTIONS(2439),
     [anon_sym_PIPE_PIPE] = ACTIONS(2439),
     [anon_sym_TILDE_PIPE] = ACTIONS(2439),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2439),
@@ -92758,6 +94037,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2609),
     [anon_sym_LT_EQ] = ACTIONS(2609),
     [anon_sym_LT_EQ_GT] = ACTIONS(2609),
+    [anon_sym_LT_GT] = ACTIONS(2609),
     [anon_sym_EQ_EQ] = ACTIONS(2609),
     [anon_sym_GT_EQ] = ACTIONS(2609),
     [anon_sym_GT_GT] = ACTIONS(2609),
@@ -92766,6 +94046,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2609),
     [anon_sym_CARET_EQ] = ACTIONS(2609),
     [anon_sym_PIPE_EQ] = ACTIONS(2609),
+    [anon_sym_PIPE_GT] = ACTIONS(2609),
     [anon_sym_PIPE_PIPE] = ACTIONS(2609),
     [anon_sym_TILDE_PIPE] = ACTIONS(2609),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2609),
@@ -92878,6 +94159,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2538),
     [anon_sym_LT_EQ] = ACTIONS(2538),
     [anon_sym_LT_EQ_GT] = ACTIONS(2538),
+    [anon_sym_LT_GT] = ACTIONS(2538),
     [anon_sym_EQ_EQ] = ACTIONS(2538),
     [anon_sym_GT_EQ] = ACTIONS(2538),
     [anon_sym_GT_GT] = ACTIONS(2538),
@@ -92886,6 +94168,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2538),
     [anon_sym_CARET_EQ] = ACTIONS(2538),
     [anon_sym_PIPE_EQ] = ACTIONS(2538),
+    [anon_sym_PIPE_GT] = ACTIONS(2538),
     [anon_sym_PIPE_PIPE] = ACTIONS(2538),
     [anon_sym_TILDE_PIPE] = ACTIONS(2538),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2538),
@@ -92998,6 +94281,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2766),
     [anon_sym_LT_EQ] = ACTIONS(2766),
     [anon_sym_LT_EQ_GT] = ACTIONS(2766),
+    [anon_sym_LT_GT] = ACTIONS(2766),
     [anon_sym_EQ_EQ] = ACTIONS(2766),
     [anon_sym_GT_EQ] = ACTIONS(2766),
     [anon_sym_GT_GT] = ACTIONS(2766),
@@ -93006,6 +94290,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2766),
     [anon_sym_CARET_EQ] = ACTIONS(2766),
     [anon_sym_PIPE_EQ] = ACTIONS(2766),
+    [anon_sym_PIPE_GT] = ACTIONS(2766),
     [anon_sym_PIPE_PIPE] = ACTIONS(2766),
     [anon_sym_TILDE_PIPE] = ACTIONS(2766),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2766),
@@ -93118,6 +94403,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2770),
     [anon_sym_LT_EQ] = ACTIONS(2770),
     [anon_sym_LT_EQ_GT] = ACTIONS(2770),
+    [anon_sym_LT_GT] = ACTIONS(2770),
     [anon_sym_EQ_EQ] = ACTIONS(2770),
     [anon_sym_GT_EQ] = ACTIONS(2770),
     [anon_sym_GT_GT] = ACTIONS(2770),
@@ -93126,6 +94412,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2770),
     [anon_sym_CARET_EQ] = ACTIONS(2770),
     [anon_sym_PIPE_EQ] = ACTIONS(2770),
+    [anon_sym_PIPE_GT] = ACTIONS(2770),
     [anon_sym_PIPE_PIPE] = ACTIONS(2770),
     [anon_sym_TILDE_PIPE] = ACTIONS(2770),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2770),
@@ -93238,6 +94525,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ_GT] = ACTIONS(2332),
+    [anon_sym_LT_GT] = ACTIONS(2332),
     [anon_sym_EQ_EQ] = ACTIONS(2332),
     [anon_sym_GT_EQ] = ACTIONS(2332),
     [anon_sym_GT_GT] = ACTIONS(2332),
@@ -93246,6 +94534,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2332),
     [anon_sym_CARET_EQ] = ACTIONS(2332),
     [anon_sym_PIPE_EQ] = ACTIONS(2332),
+    [anon_sym_PIPE_GT] = ACTIONS(2332),
     [anon_sym_PIPE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2332),
@@ -93358,6 +94647,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ_GT] = ACTIONS(2332),
+    [anon_sym_LT_GT] = ACTIONS(2332),
     [anon_sym_EQ_EQ] = ACTIONS(2332),
     [anon_sym_GT_EQ] = ACTIONS(2332),
     [anon_sym_GT_GT] = ACTIONS(2332),
@@ -93366,6 +94656,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2332),
     [anon_sym_CARET_EQ] = ACTIONS(2332),
     [anon_sym_PIPE_EQ] = ACTIONS(2332),
+    [anon_sym_PIPE_GT] = ACTIONS(2332),
     [anon_sym_PIPE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2332),
@@ -93478,6 +94769,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ_GT] = ACTIONS(2332),
+    [anon_sym_LT_GT] = ACTIONS(2332),
     [anon_sym_EQ_EQ] = ACTIONS(2332),
     [anon_sym_GT_EQ] = ACTIONS(2332),
     [anon_sym_GT_GT] = ACTIONS(2332),
@@ -93486,6 +94778,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2332),
     [anon_sym_CARET_EQ] = ACTIONS(2332),
     [anon_sym_PIPE_EQ] = ACTIONS(2332),
+    [anon_sym_PIPE_GT] = ACTIONS(2332),
     [anon_sym_PIPE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2332),
@@ -93598,6 +94891,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ_GT] = ACTIONS(2332),
+    [anon_sym_LT_GT] = ACTIONS(2332),
     [anon_sym_EQ_EQ] = ACTIONS(2332),
     [anon_sym_GT_EQ] = ACTIONS(2332),
     [anon_sym_GT_GT] = ACTIONS(2332),
@@ -93606,6 +94900,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2332),
     [anon_sym_CARET_EQ] = ACTIONS(2332),
     [anon_sym_PIPE_EQ] = ACTIONS(2332),
+    [anon_sym_PIPE_GT] = ACTIONS(2332),
     [anon_sym_PIPE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2332),
@@ -93718,6 +95013,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2759),
     [anon_sym_LT_EQ] = ACTIONS(2759),
     [anon_sym_LT_EQ_GT] = ACTIONS(2759),
+    [anon_sym_LT_GT] = ACTIONS(2759),
     [anon_sym_EQ_EQ] = ACTIONS(2759),
     [anon_sym_GT_EQ] = ACTIONS(2759),
     [anon_sym_GT_GT] = ACTIONS(2759),
@@ -93726,6 +95022,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2759),
     [anon_sym_CARET_EQ] = ACTIONS(2759),
     [anon_sym_PIPE_EQ] = ACTIONS(2759),
+    [anon_sym_PIPE_GT] = ACTIONS(2759),
     [anon_sym_PIPE_PIPE] = ACTIONS(2759),
     [anon_sym_TILDE_PIPE] = ACTIONS(2759),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2759),
@@ -93838,6 +95135,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2391),
     [anon_sym_LT_EQ] = ACTIONS(2391),
     [anon_sym_LT_EQ_GT] = ACTIONS(2391),
+    [anon_sym_LT_GT] = ACTIONS(2391),
     [anon_sym_EQ_EQ] = ACTIONS(2391),
     [anon_sym_GT_EQ] = ACTIONS(2391),
     [anon_sym_GT_GT] = ACTIONS(2391),
@@ -93846,6 +95144,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2391),
     [anon_sym_CARET_EQ] = ACTIONS(2391),
     [anon_sym_PIPE_EQ] = ACTIONS(2391),
+    [anon_sym_PIPE_GT] = ACTIONS(2391),
     [anon_sym_PIPE_PIPE] = ACTIONS(2391),
     [anon_sym_TILDE_PIPE] = ACTIONS(2391),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2391),
@@ -93958,6 +95257,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2566),
     [anon_sym_LT_EQ] = ACTIONS(2566),
     [anon_sym_LT_EQ_GT] = ACTIONS(2566),
+    [anon_sym_LT_GT] = ACTIONS(2566),
     [anon_sym_EQ_EQ] = ACTIONS(2566),
     [anon_sym_GT_EQ] = ACTIONS(2566),
     [anon_sym_GT_GT] = ACTIONS(2566),
@@ -93966,6 +95266,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2566),
     [anon_sym_CARET_EQ] = ACTIONS(2566),
     [anon_sym_PIPE_EQ] = ACTIONS(2566),
+    [anon_sym_PIPE_GT] = ACTIONS(2566),
     [anon_sym_PIPE_PIPE] = ACTIONS(2566),
     [anon_sym_TILDE_PIPE] = ACTIONS(2566),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2566),
@@ -94078,6 +95379,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2580),
     [anon_sym_LT_EQ] = ACTIONS(2580),
     [anon_sym_LT_EQ_GT] = ACTIONS(2580),
+    [anon_sym_LT_GT] = ACTIONS(2580),
     [anon_sym_EQ_EQ] = ACTIONS(2580),
     [anon_sym_GT_EQ] = ACTIONS(2580),
     [anon_sym_GT_GT] = ACTIONS(2580),
@@ -94086,6 +95388,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2580),
     [anon_sym_CARET_EQ] = ACTIONS(2580),
     [anon_sym_PIPE_EQ] = ACTIONS(2580),
+    [anon_sym_PIPE_GT] = ACTIONS(2580),
     [anon_sym_PIPE_PIPE] = ACTIONS(2580),
     [anon_sym_TILDE_PIPE] = ACTIONS(2580),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2580),
@@ -94198,6 +95501,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2584),
     [anon_sym_LT_EQ] = ACTIONS(2584),
     [anon_sym_LT_EQ_GT] = ACTIONS(2584),
+    [anon_sym_LT_GT] = ACTIONS(2584),
     [anon_sym_EQ_EQ] = ACTIONS(2584),
     [anon_sym_GT_EQ] = ACTIONS(2584),
     [anon_sym_GT_GT] = ACTIONS(2584),
@@ -94206,6 +95510,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2584),
     [anon_sym_CARET_EQ] = ACTIONS(2584),
     [anon_sym_PIPE_EQ] = ACTIONS(2584),
+    [anon_sym_PIPE_GT] = ACTIONS(2584),
     [anon_sym_PIPE_PIPE] = ACTIONS(2584),
     [anon_sym_TILDE_PIPE] = ACTIONS(2584),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2584),
@@ -94318,6 +95623,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2464),
     [anon_sym_LT_EQ] = ACTIONS(2464),
     [anon_sym_LT_EQ_GT] = ACTIONS(2464),
+    [anon_sym_LT_GT] = ACTIONS(2464),
     [anon_sym_EQ_EQ] = ACTIONS(2464),
     [anon_sym_GT_EQ] = ACTIONS(2464),
     [anon_sym_GT_GT] = ACTIONS(2464),
@@ -94326,6 +95632,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2464),
     [anon_sym_CARET_EQ] = ACTIONS(2464),
     [anon_sym_PIPE_EQ] = ACTIONS(2464),
+    [anon_sym_PIPE_GT] = ACTIONS(2464),
     [anon_sym_PIPE_PIPE] = ACTIONS(2464),
     [anon_sym_TILDE_PIPE] = ACTIONS(2464),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2464),
@@ -94438,6 +95745,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2747),
     [anon_sym_LT_EQ] = ACTIONS(2747),
     [anon_sym_LT_EQ_GT] = ACTIONS(2747),
+    [anon_sym_LT_GT] = ACTIONS(2747),
     [anon_sym_EQ_EQ] = ACTIONS(2747),
     [anon_sym_GT_EQ] = ACTIONS(2747),
     [anon_sym_GT_GT] = ACTIONS(2747),
@@ -94446,6 +95754,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2747),
     [anon_sym_CARET_EQ] = ACTIONS(2747),
     [anon_sym_PIPE_EQ] = ACTIONS(2747),
+    [anon_sym_PIPE_GT] = ACTIONS(2747),
     [anon_sym_PIPE_PIPE] = ACTIONS(2747),
     [anon_sym_TILDE_PIPE] = ACTIONS(2747),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2747),
@@ -94558,6 +95867,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2741),
     [anon_sym_LT_EQ] = ACTIONS(2741),
     [anon_sym_LT_EQ_GT] = ACTIONS(2741),
+    [anon_sym_LT_GT] = ACTIONS(2741),
     [anon_sym_EQ_EQ] = ACTIONS(2741),
     [anon_sym_GT_EQ] = ACTIONS(2741),
     [anon_sym_GT_GT] = ACTIONS(2741),
@@ -94566,6 +95876,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2741),
     [anon_sym_CARET_EQ] = ACTIONS(2741),
     [anon_sym_PIPE_EQ] = ACTIONS(2741),
+    [anon_sym_PIPE_GT] = ACTIONS(2741),
     [anon_sym_PIPE_PIPE] = ACTIONS(2741),
     [anon_sym_TILDE_PIPE] = ACTIONS(2741),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2741),
@@ -94678,6 +95989,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2591),
     [anon_sym_LT_EQ] = ACTIONS(2591),
     [anon_sym_LT_EQ_GT] = ACTIONS(2591),
+    [anon_sym_LT_GT] = ACTIONS(2591),
     [anon_sym_EQ_EQ] = ACTIONS(2591),
     [anon_sym_GT_EQ] = ACTIONS(2591),
     [anon_sym_GT_GT] = ACTIONS(2591),
@@ -94686,6 +95998,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2591),
     [anon_sym_CARET_EQ] = ACTIONS(2591),
     [anon_sym_PIPE_EQ] = ACTIONS(2591),
+    [anon_sym_PIPE_GT] = ACTIONS(2591),
     [anon_sym_PIPE_PIPE] = ACTIONS(2591),
     [anon_sym_TILDE_PIPE] = ACTIONS(2591),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2591),
@@ -94798,6 +96111,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2601),
     [anon_sym_LT_EQ] = ACTIONS(2601),
     [anon_sym_LT_EQ_GT] = ACTIONS(2601),
+    [anon_sym_LT_GT] = ACTIONS(2601),
     [anon_sym_EQ_EQ] = ACTIONS(2601),
     [anon_sym_GT_EQ] = ACTIONS(2601),
     [anon_sym_GT_GT] = ACTIONS(2601),
@@ -94806,6 +96120,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2601),
     [anon_sym_CARET_EQ] = ACTIONS(2601),
     [anon_sym_PIPE_EQ] = ACTIONS(2601),
+    [anon_sym_PIPE_GT] = ACTIONS(2601),
     [anon_sym_PIPE_PIPE] = ACTIONS(2601),
     [anon_sym_TILDE_PIPE] = ACTIONS(2601),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2601),
@@ -94918,6 +96233,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2395),
     [anon_sym_LT_EQ] = ACTIONS(2395),
     [anon_sym_LT_EQ_GT] = ACTIONS(2395),
+    [anon_sym_LT_GT] = ACTIONS(2395),
     [anon_sym_EQ_EQ] = ACTIONS(2395),
     [anon_sym_GT_EQ] = ACTIONS(2395),
     [anon_sym_GT_GT] = ACTIONS(2395),
@@ -94926,6 +96242,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2395),
     [anon_sym_CARET_EQ] = ACTIONS(2395),
     [anon_sym_PIPE_EQ] = ACTIONS(2395),
+    [anon_sym_PIPE_GT] = ACTIONS(2395),
     [anon_sym_PIPE_PIPE] = ACTIONS(2395),
     [anon_sym_TILDE_PIPE] = ACTIONS(2395),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2395),
@@ -95038,6 +96355,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2460),
     [anon_sym_LT_EQ] = ACTIONS(2460),
     [anon_sym_LT_EQ_GT] = ACTIONS(2460),
+    [anon_sym_LT_GT] = ACTIONS(2460),
     [anon_sym_EQ_EQ] = ACTIONS(2460),
     [anon_sym_GT_EQ] = ACTIONS(2460),
     [anon_sym_GT_GT] = ACTIONS(2460),
@@ -95046,6 +96364,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2460),
     [anon_sym_CARET_EQ] = ACTIONS(2460),
     [anon_sym_PIPE_EQ] = ACTIONS(2460),
+    [anon_sym_PIPE_GT] = ACTIONS(2460),
     [anon_sym_PIPE_PIPE] = ACTIONS(2460),
     [anon_sym_TILDE_PIPE] = ACTIONS(2460),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2460),
@@ -95158,6 +96477,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2609),
     [anon_sym_LT_EQ] = ACTIONS(2609),
     [anon_sym_LT_EQ_GT] = ACTIONS(2609),
+    [anon_sym_LT_GT] = ACTIONS(2609),
     [anon_sym_EQ_EQ] = ACTIONS(2609),
     [anon_sym_GT_EQ] = ACTIONS(2609),
     [anon_sym_GT_GT] = ACTIONS(2609),
@@ -95166,6 +96486,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2609),
     [anon_sym_CARET_EQ] = ACTIONS(2609),
     [anon_sym_PIPE_EQ] = ACTIONS(2609),
+    [anon_sym_PIPE_GT] = ACTIONS(2609),
     [anon_sym_PIPE_PIPE] = ACTIONS(2609),
     [anon_sym_TILDE_PIPE] = ACTIONS(2609),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2609),
@@ -95278,6 +96599,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2480),
     [anon_sym_LT_EQ] = ACTIONS(2480),
     [anon_sym_LT_EQ_GT] = ACTIONS(2480),
+    [anon_sym_LT_GT] = ACTIONS(2480),
     [anon_sym_EQ_EQ] = ACTIONS(2480),
     [anon_sym_GT_EQ] = ACTIONS(2480),
     [anon_sym_GT_GT] = ACTIONS(2480),
@@ -95286,6 +96608,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2480),
     [anon_sym_CARET_EQ] = ACTIONS(2480),
     [anon_sym_PIPE_EQ] = ACTIONS(2480),
+    [anon_sym_PIPE_GT] = ACTIONS(2480),
     [anon_sym_PIPE_PIPE] = ACTIONS(2480),
     [anon_sym_TILDE_PIPE] = ACTIONS(2480),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2480),
@@ -95398,6 +96721,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2617),
     [anon_sym_LT_EQ] = ACTIONS(2617),
     [anon_sym_LT_EQ_GT] = ACTIONS(2617),
+    [anon_sym_LT_GT] = ACTIONS(2617),
     [anon_sym_EQ_EQ] = ACTIONS(2617),
     [anon_sym_GT_EQ] = ACTIONS(2617),
     [anon_sym_GT_GT] = ACTIONS(2617),
@@ -95406,6 +96730,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2617),
     [anon_sym_CARET_EQ] = ACTIONS(2617),
     [anon_sym_PIPE_EQ] = ACTIONS(2617),
+    [anon_sym_PIPE_GT] = ACTIONS(2617),
     [anon_sym_PIPE_PIPE] = ACTIONS(2617),
     [anon_sym_TILDE_PIPE] = ACTIONS(2617),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2617),
@@ -95518,6 +96843,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2651),
     [anon_sym_LT_EQ] = ACTIONS(2651),
     [anon_sym_LT_EQ_GT] = ACTIONS(2651),
+    [anon_sym_LT_GT] = ACTIONS(2651),
     [anon_sym_EQ_EQ] = ACTIONS(2651),
     [anon_sym_GT_EQ] = ACTIONS(2651),
     [anon_sym_GT_GT] = ACTIONS(2651),
@@ -95526,6 +96852,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2651),
     [anon_sym_CARET_EQ] = ACTIONS(2651),
     [anon_sym_PIPE_EQ] = ACTIONS(2651),
+    [anon_sym_PIPE_GT] = ACTIONS(2651),
     [anon_sym_PIPE_PIPE] = ACTIONS(2651),
     [anon_sym_TILDE_PIPE] = ACTIONS(2651),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2651),
@@ -95638,6 +96965,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2625),
     [anon_sym_LT_EQ] = ACTIONS(2625),
     [anon_sym_LT_EQ_GT] = ACTIONS(2625),
+    [anon_sym_LT_GT] = ACTIONS(2625),
     [anon_sym_EQ_EQ] = ACTIONS(2625),
     [anon_sym_GT_EQ] = ACTIONS(2625),
     [anon_sym_GT_GT] = ACTIONS(2625),
@@ -95646,6 +96974,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2625),
     [anon_sym_CARET_EQ] = ACTIONS(2625),
     [anon_sym_PIPE_EQ] = ACTIONS(2625),
+    [anon_sym_PIPE_GT] = ACTIONS(2625),
     [anon_sym_PIPE_PIPE] = ACTIONS(2625),
     [anon_sym_TILDE_PIPE] = ACTIONS(2625),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2625),
@@ -95758,6 +97087,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2456),
     [anon_sym_LT_EQ] = ACTIONS(2456),
     [anon_sym_LT_EQ_GT] = ACTIONS(2456),
+    [anon_sym_LT_GT] = ACTIONS(2456),
     [anon_sym_EQ_EQ] = ACTIONS(2456),
     [anon_sym_GT_EQ] = ACTIONS(2456),
     [anon_sym_GT_GT] = ACTIONS(2456),
@@ -95766,6 +97096,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2456),
     [anon_sym_CARET_EQ] = ACTIONS(2456),
     [anon_sym_PIPE_EQ] = ACTIONS(2456),
+    [anon_sym_PIPE_GT] = ACTIONS(2456),
     [anon_sym_PIPE_PIPE] = ACTIONS(2456),
     [anon_sym_TILDE_PIPE] = ACTIONS(2456),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2456),
@@ -95878,6 +97209,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2641),
     [anon_sym_LT_EQ] = ACTIONS(2641),
     [anon_sym_LT_EQ_GT] = ACTIONS(2641),
+    [anon_sym_LT_GT] = ACTIONS(2641),
     [anon_sym_EQ_EQ] = ACTIONS(2641),
     [anon_sym_GT_EQ] = ACTIONS(2641),
     [anon_sym_GT_GT] = ACTIONS(2641),
@@ -95886,6 +97218,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2641),
     [anon_sym_CARET_EQ] = ACTIONS(2641),
     [anon_sym_PIPE_EQ] = ACTIONS(2641),
+    [anon_sym_PIPE_GT] = ACTIONS(2641),
     [anon_sym_PIPE_PIPE] = ACTIONS(2641),
     [anon_sym_TILDE_PIPE] = ACTIONS(2641),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2641),
@@ -95998,6 +97331,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2472),
     [anon_sym_LT_EQ] = ACTIONS(2472),
     [anon_sym_LT_EQ_GT] = ACTIONS(2472),
+    [anon_sym_LT_GT] = ACTIONS(2472),
     [anon_sym_EQ_EQ] = ACTIONS(2472),
     [anon_sym_GT_EQ] = ACTIONS(2472),
     [anon_sym_GT_GT] = ACTIONS(2472),
@@ -96006,6 +97340,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2472),
     [anon_sym_CARET_EQ] = ACTIONS(2472),
     [anon_sym_PIPE_EQ] = ACTIONS(2472),
+    [anon_sym_PIPE_GT] = ACTIONS(2472),
     [anon_sym_PIPE_PIPE] = ACTIONS(2472),
     [anon_sym_TILDE_PIPE] = ACTIONS(2472),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2472),
@@ -96118,6 +97453,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ_GT] = ACTIONS(2332),
+    [anon_sym_LT_GT] = ACTIONS(2332),
     [anon_sym_EQ_EQ] = ACTIONS(2332),
     [anon_sym_GT_EQ] = ACTIONS(2332),
     [anon_sym_GT_GT] = ACTIONS(2332),
@@ -96126,6 +97462,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2332),
     [anon_sym_CARET_EQ] = ACTIONS(2332),
     [anon_sym_PIPE_EQ] = ACTIONS(2332),
+    [anon_sym_PIPE_GT] = ACTIONS(2332),
     [anon_sym_PIPE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2332),
@@ -96238,6 +97575,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2399),
     [anon_sym_LT_EQ] = ACTIONS(2399),
     [anon_sym_LT_EQ_GT] = ACTIONS(2399),
+    [anon_sym_LT_GT] = ACTIONS(2399),
     [anon_sym_EQ_EQ] = ACTIONS(2399),
     [anon_sym_GT_EQ] = ACTIONS(2399),
     [anon_sym_GT_GT] = ACTIONS(2399),
@@ -96246,6 +97584,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2399),
     [anon_sym_CARET_EQ] = ACTIONS(2399),
     [anon_sym_PIPE_EQ] = ACTIONS(2399),
+    [anon_sym_PIPE_GT] = ACTIONS(2399),
     [anon_sym_PIPE_PIPE] = ACTIONS(2399),
     [anon_sym_TILDE_PIPE] = ACTIONS(2399),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2399),
@@ -96358,6 +97697,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2496),
     [anon_sym_LT_EQ] = ACTIONS(2496),
     [anon_sym_LT_EQ_GT] = ACTIONS(2496),
+    [anon_sym_LT_GT] = ACTIONS(2496),
     [anon_sym_EQ_EQ] = ACTIONS(2496),
     [anon_sym_GT_EQ] = ACTIONS(2496),
     [anon_sym_GT_GT] = ACTIONS(2496),
@@ -96366,6 +97706,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2496),
     [anon_sym_CARET_EQ] = ACTIONS(2496),
     [anon_sym_PIPE_EQ] = ACTIONS(2496),
+    [anon_sym_PIPE_GT] = ACTIONS(2496),
     [anon_sym_PIPE_PIPE] = ACTIONS(2496),
     [anon_sym_TILDE_PIPE] = ACTIONS(2496),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2496),
@@ -96478,6 +97819,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2383),
     [anon_sym_LT_EQ] = ACTIONS(2383),
     [anon_sym_LT_EQ_GT] = ACTIONS(2383),
+    [anon_sym_LT_GT] = ACTIONS(2383),
     [anon_sym_EQ_EQ] = ACTIONS(2383),
     [anon_sym_GT_EQ] = ACTIONS(2383),
     [anon_sym_GT_GT] = ACTIONS(2383),
@@ -96486,6 +97828,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2383),
     [anon_sym_CARET_EQ] = ACTIONS(2383),
     [anon_sym_PIPE_EQ] = ACTIONS(2383),
+    [anon_sym_PIPE_GT] = ACTIONS(2383),
     [anon_sym_PIPE_PIPE] = ACTIONS(2383),
     [anon_sym_TILDE_PIPE] = ACTIONS(2383),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2383),
@@ -96598,6 +97941,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2538),
     [anon_sym_LT_EQ] = ACTIONS(2538),
     [anon_sym_LT_EQ_GT] = ACTIONS(2538),
+    [anon_sym_LT_GT] = ACTIONS(2538),
     [anon_sym_EQ_EQ] = ACTIONS(2538),
     [anon_sym_GT_EQ] = ACTIONS(2538),
     [anon_sym_GT_GT] = ACTIONS(2538),
@@ -96606,6 +97950,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2538),
     [anon_sym_CARET_EQ] = ACTIONS(2538),
     [anon_sym_PIPE_EQ] = ACTIONS(2538),
+    [anon_sym_PIPE_GT] = ACTIONS(2538),
     [anon_sym_PIPE_PIPE] = ACTIONS(2538),
     [anon_sym_TILDE_PIPE] = ACTIONS(2538),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2538),
@@ -96718,6 +98063,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2566),
     [anon_sym_LT_EQ] = ACTIONS(2566),
     [anon_sym_LT_EQ_GT] = ACTIONS(2566),
+    [anon_sym_LT_GT] = ACTIONS(2566),
     [anon_sym_EQ_EQ] = ACTIONS(2566),
     [anon_sym_GT_EQ] = ACTIONS(2566),
     [anon_sym_GT_GT] = ACTIONS(2566),
@@ -96726,6 +98072,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2566),
     [anon_sym_CARET_EQ] = ACTIONS(2566),
     [anon_sym_PIPE_EQ] = ACTIONS(2566),
+    [anon_sym_PIPE_GT] = ACTIONS(2566),
     [anon_sym_PIPE_PIPE] = ACTIONS(2566),
     [anon_sym_TILDE_PIPE] = ACTIONS(2566),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2566),
@@ -96838,6 +98185,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2580),
     [anon_sym_LT_EQ] = ACTIONS(2580),
     [anon_sym_LT_EQ_GT] = ACTIONS(2580),
+    [anon_sym_LT_GT] = ACTIONS(2580),
     [anon_sym_EQ_EQ] = ACTIONS(2580),
     [anon_sym_GT_EQ] = ACTIONS(2580),
     [anon_sym_GT_GT] = ACTIONS(2580),
@@ -96846,6 +98194,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2580),
     [anon_sym_CARET_EQ] = ACTIONS(2580),
     [anon_sym_PIPE_EQ] = ACTIONS(2580),
+    [anon_sym_PIPE_GT] = ACTIONS(2580),
     [anon_sym_PIPE_PIPE] = ACTIONS(2580),
     [anon_sym_TILDE_PIPE] = ACTIONS(2580),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2580),
@@ -96958,6 +98307,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2584),
     [anon_sym_LT_EQ] = ACTIONS(2584),
     [anon_sym_LT_EQ_GT] = ACTIONS(2584),
+    [anon_sym_LT_GT] = ACTIONS(2584),
     [anon_sym_EQ_EQ] = ACTIONS(2584),
     [anon_sym_GT_EQ] = ACTIONS(2584),
     [anon_sym_GT_GT] = ACTIONS(2584),
@@ -96966,6 +98316,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2584),
     [anon_sym_CARET_EQ] = ACTIONS(2584),
     [anon_sym_PIPE_EQ] = ACTIONS(2584),
+    [anon_sym_PIPE_GT] = ACTIONS(2584),
     [anon_sym_PIPE_PIPE] = ACTIONS(2584),
     [anon_sym_TILDE_PIPE] = ACTIONS(2584),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2584),
@@ -97078,6 +98429,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2591),
     [anon_sym_LT_EQ] = ACTIONS(2591),
     [anon_sym_LT_EQ_GT] = ACTIONS(2591),
+    [anon_sym_LT_GT] = ACTIONS(2591),
     [anon_sym_EQ_EQ] = ACTIONS(2591),
     [anon_sym_GT_EQ] = ACTIONS(2591),
     [anon_sym_GT_GT] = ACTIONS(2591),
@@ -97086,6 +98438,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2591),
     [anon_sym_CARET_EQ] = ACTIONS(2591),
     [anon_sym_PIPE_EQ] = ACTIONS(2591),
+    [anon_sym_PIPE_GT] = ACTIONS(2591),
     [anon_sym_PIPE_PIPE] = ACTIONS(2591),
     [anon_sym_TILDE_PIPE] = ACTIONS(2591),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2591),
@@ -97198,6 +98551,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2601),
     [anon_sym_LT_EQ] = ACTIONS(2601),
     [anon_sym_LT_EQ_GT] = ACTIONS(2601),
+    [anon_sym_LT_GT] = ACTIONS(2601),
     [anon_sym_EQ_EQ] = ACTIONS(2601),
     [anon_sym_GT_EQ] = ACTIONS(2601),
     [anon_sym_GT_GT] = ACTIONS(2601),
@@ -97206,6 +98560,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2601),
     [anon_sym_CARET_EQ] = ACTIONS(2601),
     [anon_sym_PIPE_EQ] = ACTIONS(2601),
+    [anon_sym_PIPE_GT] = ACTIONS(2601),
     [anon_sym_PIPE_PIPE] = ACTIONS(2601),
     [anon_sym_TILDE_PIPE] = ACTIONS(2601),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2601),
@@ -97318,6 +98673,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2609),
     [anon_sym_LT_EQ] = ACTIONS(2609),
     [anon_sym_LT_EQ_GT] = ACTIONS(2609),
+    [anon_sym_LT_GT] = ACTIONS(2609),
     [anon_sym_EQ_EQ] = ACTIONS(2609),
     [anon_sym_GT_EQ] = ACTIONS(2609),
     [anon_sym_GT_GT] = ACTIONS(2609),
@@ -97326,6 +98682,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2609),
     [anon_sym_CARET_EQ] = ACTIONS(2609),
     [anon_sym_PIPE_EQ] = ACTIONS(2609),
+    [anon_sym_PIPE_GT] = ACTIONS(2609),
     [anon_sym_PIPE_PIPE] = ACTIONS(2609),
     [anon_sym_TILDE_PIPE] = ACTIONS(2609),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2609),
@@ -97438,6 +98795,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2617),
     [anon_sym_LT_EQ] = ACTIONS(2617),
     [anon_sym_LT_EQ_GT] = ACTIONS(2617),
+    [anon_sym_LT_GT] = ACTIONS(2617),
     [anon_sym_EQ_EQ] = ACTIONS(2617),
     [anon_sym_GT_EQ] = ACTIONS(2617),
     [anon_sym_GT_GT] = ACTIONS(2617),
@@ -97446,6 +98804,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2617),
     [anon_sym_CARET_EQ] = ACTIONS(2617),
     [anon_sym_PIPE_EQ] = ACTIONS(2617),
+    [anon_sym_PIPE_GT] = ACTIONS(2617),
     [anon_sym_PIPE_PIPE] = ACTIONS(2617),
     [anon_sym_TILDE_PIPE] = ACTIONS(2617),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2617),
@@ -97558,6 +98917,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2625),
     [anon_sym_LT_EQ] = ACTIONS(2625),
     [anon_sym_LT_EQ_GT] = ACTIONS(2625),
+    [anon_sym_LT_GT] = ACTIONS(2625),
     [anon_sym_EQ_EQ] = ACTIONS(2625),
     [anon_sym_GT_EQ] = ACTIONS(2625),
     [anon_sym_GT_GT] = ACTIONS(2625),
@@ -97566,6 +98926,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2625),
     [anon_sym_CARET_EQ] = ACTIONS(2625),
     [anon_sym_PIPE_EQ] = ACTIONS(2625),
+    [anon_sym_PIPE_GT] = ACTIONS(2625),
     [anon_sym_PIPE_PIPE] = ACTIONS(2625),
     [anon_sym_TILDE_PIPE] = ACTIONS(2625),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2625),
@@ -97678,6 +99039,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2641),
     [anon_sym_LT_EQ] = ACTIONS(2641),
     [anon_sym_LT_EQ_GT] = ACTIONS(2641),
+    [anon_sym_LT_GT] = ACTIONS(2641),
     [anon_sym_EQ_EQ] = ACTIONS(2641),
     [anon_sym_GT_EQ] = ACTIONS(2641),
     [anon_sym_GT_GT] = ACTIONS(2641),
@@ -97686,6 +99048,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2641),
     [anon_sym_CARET_EQ] = ACTIONS(2641),
     [anon_sym_PIPE_EQ] = ACTIONS(2641),
+    [anon_sym_PIPE_GT] = ACTIONS(2641),
     [anon_sym_PIPE_PIPE] = ACTIONS(2641),
     [anon_sym_TILDE_PIPE] = ACTIONS(2641),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2641),
@@ -97798,6 +99161,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2782),
     [anon_sym_LT_EQ] = ACTIONS(2782),
     [anon_sym_LT_EQ_GT] = ACTIONS(2782),
+    [anon_sym_LT_GT] = ACTIONS(2782),
     [anon_sym_EQ_EQ] = ACTIONS(2782),
     [anon_sym_GT_EQ] = ACTIONS(2782),
     [anon_sym_GT_GT] = ACTIONS(2782),
@@ -97806,6 +99170,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2782),
     [anon_sym_CARET_EQ] = ACTIONS(2782),
     [anon_sym_PIPE_EQ] = ACTIONS(2782),
+    [anon_sym_PIPE_GT] = ACTIONS(2782),
     [anon_sym_PIPE_PIPE] = ACTIONS(2782),
     [anon_sym_TILDE_PIPE] = ACTIONS(2782),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2782),
@@ -97918,6 +99283,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2751),
     [anon_sym_LT_EQ] = ACTIONS(2751),
     [anon_sym_LT_EQ_GT] = ACTIONS(2751),
+    [anon_sym_LT_GT] = ACTIONS(2751),
     [anon_sym_EQ_EQ] = ACTIONS(2751),
     [anon_sym_GT_EQ] = ACTIONS(2751),
     [anon_sym_GT_GT] = ACTIONS(2751),
@@ -97926,6 +99292,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2751),
     [anon_sym_CARET_EQ] = ACTIONS(2751),
     [anon_sym_PIPE_EQ] = ACTIONS(2751),
+    [anon_sym_PIPE_GT] = ACTIONS(2751),
     [anon_sym_PIPE_PIPE] = ACTIONS(2751),
     [anon_sym_TILDE_PIPE] = ACTIONS(2751),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2751),
@@ -98038,6 +99405,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2395),
     [anon_sym_LT_EQ] = ACTIONS(2395),
     [anon_sym_LT_EQ_GT] = ACTIONS(2395),
+    [anon_sym_LT_GT] = ACTIONS(2395),
     [anon_sym_EQ_EQ] = ACTIONS(2395),
     [anon_sym_GT_EQ] = ACTIONS(2395),
     [anon_sym_GT_GT] = ACTIONS(2395),
@@ -98046,6 +99414,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2395),
     [anon_sym_CARET_EQ] = ACTIONS(2395),
     [anon_sym_PIPE_EQ] = ACTIONS(2395),
+    [anon_sym_PIPE_GT] = ACTIONS(2395),
     [anon_sym_PIPE_PIPE] = ACTIONS(2395),
     [anon_sym_TILDE_PIPE] = ACTIONS(2395),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2395),
@@ -98158,6 +99527,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2755),
     [anon_sym_LT_EQ] = ACTIONS(2755),
     [anon_sym_LT_EQ_GT] = ACTIONS(2755),
+    [anon_sym_LT_GT] = ACTIONS(2755),
     [anon_sym_EQ_EQ] = ACTIONS(2755),
     [anon_sym_GT_EQ] = ACTIONS(2755),
     [anon_sym_GT_GT] = ACTIONS(2755),
@@ -98166,6 +99536,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2755),
     [anon_sym_CARET_EQ] = ACTIONS(2755),
     [anon_sym_PIPE_EQ] = ACTIONS(2755),
+    [anon_sym_PIPE_GT] = ACTIONS(2755),
     [anon_sym_PIPE_PIPE] = ACTIONS(2755),
     [anon_sym_TILDE_PIPE] = ACTIONS(2755),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2755),
@@ -98278,6 +99649,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2751),
     [anon_sym_LT_EQ] = ACTIONS(2751),
     [anon_sym_LT_EQ_GT] = ACTIONS(2751),
+    [anon_sym_LT_GT] = ACTIONS(2751),
     [anon_sym_EQ_EQ] = ACTIONS(2751),
     [anon_sym_GT_EQ] = ACTIONS(2751),
     [anon_sym_GT_GT] = ACTIONS(2751),
@@ -98286,6 +99658,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2751),
     [anon_sym_CARET_EQ] = ACTIONS(2751),
     [anon_sym_PIPE_EQ] = ACTIONS(2751),
+    [anon_sym_PIPE_GT] = ACTIONS(2751),
     [anon_sym_PIPE_PIPE] = ACTIONS(2751),
     [anon_sym_TILDE_PIPE] = ACTIONS(2751),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2751),
@@ -98398,6 +99771,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2751),
     [anon_sym_LT_EQ] = ACTIONS(2751),
     [anon_sym_LT_EQ_GT] = ACTIONS(2751),
+    [anon_sym_LT_GT] = ACTIONS(2751),
     [anon_sym_EQ_EQ] = ACTIONS(2751),
     [anon_sym_GT_EQ] = ACTIONS(2751),
     [anon_sym_GT_GT] = ACTIONS(2751),
@@ -98406,6 +99780,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2751),
     [anon_sym_CARET_EQ] = ACTIONS(2751),
     [anon_sym_PIPE_EQ] = ACTIONS(2751),
+    [anon_sym_PIPE_GT] = ACTIONS(2751),
     [anon_sym_PIPE_PIPE] = ACTIONS(2751),
     [anon_sym_TILDE_PIPE] = ACTIONS(2751),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2751),
@@ -98518,6 +99893,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2755),
     [anon_sym_LT_EQ] = ACTIONS(2755),
     [anon_sym_LT_EQ_GT] = ACTIONS(2755),
+    [anon_sym_LT_GT] = ACTIONS(2755),
     [anon_sym_EQ_EQ] = ACTIONS(2755),
     [anon_sym_GT_EQ] = ACTIONS(2755),
     [anon_sym_GT_GT] = ACTIONS(2755),
@@ -98526,6 +99902,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2755),
     [anon_sym_CARET_EQ] = ACTIONS(2755),
     [anon_sym_PIPE_EQ] = ACTIONS(2755),
+    [anon_sym_PIPE_GT] = ACTIONS(2755),
     [anon_sym_PIPE_PIPE] = ACTIONS(2755),
     [anon_sym_TILDE_PIPE] = ACTIONS(2755),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2755),
@@ -98638,6 +100015,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2755),
     [anon_sym_LT_EQ] = ACTIONS(2755),
     [anon_sym_LT_EQ_GT] = ACTIONS(2755),
+    [anon_sym_LT_GT] = ACTIONS(2755),
     [anon_sym_EQ_EQ] = ACTIONS(2755),
     [anon_sym_GT_EQ] = ACTIONS(2755),
     [anon_sym_GT_GT] = ACTIONS(2755),
@@ -98646,6 +100024,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2755),
     [anon_sym_CARET_EQ] = ACTIONS(2755),
     [anon_sym_PIPE_EQ] = ACTIONS(2755),
+    [anon_sym_PIPE_GT] = ACTIONS(2755),
     [anon_sym_PIPE_PIPE] = ACTIONS(2755),
     [anon_sym_TILDE_PIPE] = ACTIONS(2755),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2755),
@@ -98758,6 +100137,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2468),
     [anon_sym_LT_EQ] = ACTIONS(2468),
     [anon_sym_LT_EQ_GT] = ACTIONS(2468),
+    [anon_sym_LT_GT] = ACTIONS(2468),
     [anon_sym_EQ_EQ] = ACTIONS(2468),
     [anon_sym_GT_EQ] = ACTIONS(2468),
     [anon_sym_GT_GT] = ACTIONS(2468),
@@ -98766,6 +100146,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2468),
     [anon_sym_CARET_EQ] = ACTIONS(2468),
     [anon_sym_PIPE_EQ] = ACTIONS(2468),
+    [anon_sym_PIPE_GT] = ACTIONS(2468),
     [anon_sym_PIPE_PIPE] = ACTIONS(2468),
     [anon_sym_TILDE_PIPE] = ACTIONS(2468),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2468),
@@ -98878,6 +100259,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2407),
     [anon_sym_LT_EQ] = ACTIONS(2407),
     [anon_sym_LT_EQ_GT] = ACTIONS(2407),
+    [anon_sym_LT_GT] = ACTIONS(2407),
     [anon_sym_EQ_EQ] = ACTIONS(2407),
     [anon_sym_GT_EQ] = ACTIONS(2407),
     [anon_sym_GT_GT] = ACTIONS(2407),
@@ -98886,6 +100268,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2407),
     [anon_sym_CARET_EQ] = ACTIONS(2407),
     [anon_sym_PIPE_EQ] = ACTIONS(2407),
+    [anon_sym_PIPE_GT] = ACTIONS(2407),
     [anon_sym_PIPE_PIPE] = ACTIONS(2407),
     [anon_sym_TILDE_PIPE] = ACTIONS(2407),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2407),
@@ -98998,6 +100381,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2476),
     [anon_sym_LT_EQ] = ACTIONS(2476),
     [anon_sym_LT_EQ_GT] = ACTIONS(2476),
+    [anon_sym_LT_GT] = ACTIONS(2476),
     [anon_sym_EQ_EQ] = ACTIONS(2476),
     [anon_sym_GT_EQ] = ACTIONS(2476),
     [anon_sym_GT_GT] = ACTIONS(2476),
@@ -99006,6 +100390,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2476),
     [anon_sym_CARET_EQ] = ACTIONS(2476),
     [anon_sym_PIPE_EQ] = ACTIONS(2476),
+    [anon_sym_PIPE_GT] = ACTIONS(2476),
     [anon_sym_PIPE_PIPE] = ACTIONS(2476),
     [anon_sym_TILDE_PIPE] = ACTIONS(2476),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2476),
@@ -99118,6 +100503,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ_GT] = ACTIONS(2332),
+    [anon_sym_LT_GT] = ACTIONS(2332),
     [anon_sym_EQ_EQ] = ACTIONS(2332),
     [anon_sym_GT_EQ] = ACTIONS(2332),
     [anon_sym_GT_GT] = ACTIONS(2332),
@@ -99126,6 +100512,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2332),
     [anon_sym_CARET_EQ] = ACTIONS(2332),
     [anon_sym_PIPE_EQ] = ACTIONS(2332),
+    [anon_sym_PIPE_GT] = ACTIONS(2332),
     [anon_sym_PIPE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2332),
@@ -99238,6 +100625,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2484),
     [anon_sym_LT_EQ] = ACTIONS(2484),
     [anon_sym_LT_EQ_GT] = ACTIONS(2484),
+    [anon_sym_LT_GT] = ACTIONS(2484),
     [anon_sym_EQ_EQ] = ACTIONS(2484),
     [anon_sym_GT_EQ] = ACTIONS(2484),
     [anon_sym_GT_GT] = ACTIONS(2484),
@@ -99246,6 +100634,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2484),
     [anon_sym_CARET_EQ] = ACTIONS(2484),
     [anon_sym_PIPE_EQ] = ACTIONS(2484),
+    [anon_sym_PIPE_GT] = ACTIONS(2484),
     [anon_sym_PIPE_PIPE] = ACTIONS(2484),
     [anon_sym_TILDE_PIPE] = ACTIONS(2484),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2484),
@@ -99358,6 +100747,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2488),
     [anon_sym_LT_EQ] = ACTIONS(2488),
     [anon_sym_LT_EQ_GT] = ACTIONS(2488),
+    [anon_sym_LT_GT] = ACTIONS(2488),
     [anon_sym_EQ_EQ] = ACTIONS(2488),
     [anon_sym_GT_EQ] = ACTIONS(2488),
     [anon_sym_GT_GT] = ACTIONS(2488),
@@ -99366,6 +100756,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2488),
     [anon_sym_CARET_EQ] = ACTIONS(2488),
     [anon_sym_PIPE_EQ] = ACTIONS(2488),
+    [anon_sym_PIPE_GT] = ACTIONS(2488),
     [anon_sym_PIPE_PIPE] = ACTIONS(2488),
     [anon_sym_TILDE_PIPE] = ACTIONS(2488),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2488),
@@ -99478,6 +100869,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2492),
     [anon_sym_LT_EQ] = ACTIONS(2492),
     [anon_sym_LT_EQ_GT] = ACTIONS(2492),
+    [anon_sym_LT_GT] = ACTIONS(2492),
     [anon_sym_EQ_EQ] = ACTIONS(2492),
     [anon_sym_GT_EQ] = ACTIONS(2492),
     [anon_sym_GT_GT] = ACTIONS(2492),
@@ -99486,6 +100878,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2492),
     [anon_sym_CARET_EQ] = ACTIONS(2492),
     [anon_sym_PIPE_EQ] = ACTIONS(2492),
+    [anon_sym_PIPE_GT] = ACTIONS(2492),
     [anon_sym_PIPE_PIPE] = ACTIONS(2492),
     [anon_sym_TILDE_PIPE] = ACTIONS(2492),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2492),
@@ -99598,6 +100991,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2468),
     [anon_sym_LT_EQ] = ACTIONS(2468),
     [anon_sym_LT_EQ_GT] = ACTIONS(2468),
+    [anon_sym_LT_GT] = ACTIONS(2468),
     [anon_sym_EQ_EQ] = ACTIONS(2468),
     [anon_sym_GT_EQ] = ACTIONS(2468),
     [anon_sym_GT_GT] = ACTIONS(2468),
@@ -99606,6 +101000,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2468),
     [anon_sym_CARET_EQ] = ACTIONS(2468),
     [anon_sym_PIPE_EQ] = ACTIONS(2468),
+    [anon_sym_PIPE_GT] = ACTIONS(2468),
     [anon_sym_PIPE_PIPE] = ACTIONS(2468),
     [anon_sym_TILDE_PIPE] = ACTIONS(2468),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2468),
@@ -99718,6 +101113,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2500),
     [anon_sym_LT_EQ] = ACTIONS(2500),
     [anon_sym_LT_EQ_GT] = ACTIONS(2500),
+    [anon_sym_LT_GT] = ACTIONS(2500),
     [anon_sym_EQ_EQ] = ACTIONS(2500),
     [anon_sym_GT_EQ] = ACTIONS(2500),
     [anon_sym_GT_GT] = ACTIONS(2500),
@@ -99726,6 +101122,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2500),
     [anon_sym_CARET_EQ] = ACTIONS(2500),
     [anon_sym_PIPE_EQ] = ACTIONS(2500),
+    [anon_sym_PIPE_GT] = ACTIONS(2500),
     [anon_sym_PIPE_PIPE] = ACTIONS(2500),
     [anon_sym_TILDE_PIPE] = ACTIONS(2500),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2500),
@@ -99838,6 +101235,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2460),
     [anon_sym_LT_EQ] = ACTIONS(2460),
     [anon_sym_LT_EQ_GT] = ACTIONS(2460),
+    [anon_sym_LT_GT] = ACTIONS(2460),
     [anon_sym_EQ_EQ] = ACTIONS(2460),
     [anon_sym_GT_EQ] = ACTIONS(2460),
     [anon_sym_GT_GT] = ACTIONS(2460),
@@ -99846,6 +101244,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2460),
     [anon_sym_CARET_EQ] = ACTIONS(2460),
     [anon_sym_PIPE_EQ] = ACTIONS(2460),
+    [anon_sym_PIPE_GT] = ACTIONS(2460),
     [anon_sym_PIPE_PIPE] = ACTIONS(2460),
     [anon_sym_TILDE_PIPE] = ACTIONS(2460),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2460),
@@ -99958,6 +101357,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2504),
     [anon_sym_LT_EQ] = ACTIONS(2504),
     [anon_sym_LT_EQ_GT] = ACTIONS(2504),
+    [anon_sym_LT_GT] = ACTIONS(2504),
     [anon_sym_EQ_EQ] = ACTIONS(2504),
     [anon_sym_GT_EQ] = ACTIONS(2504),
     [anon_sym_GT_GT] = ACTIONS(2504),
@@ -99966,6 +101366,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2504),
     [anon_sym_CARET_EQ] = ACTIONS(2504),
     [anon_sym_PIPE_EQ] = ACTIONS(2504),
+    [anon_sym_PIPE_GT] = ACTIONS(2504),
     [anon_sym_PIPE_PIPE] = ACTIONS(2504),
     [anon_sym_TILDE_PIPE] = ACTIONS(2504),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2504),
@@ -100078,6 +101479,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2411),
     [anon_sym_LT_EQ] = ACTIONS(2411),
     [anon_sym_LT_EQ_GT] = ACTIONS(2411),
+    [anon_sym_LT_GT] = ACTIONS(2411),
     [anon_sym_EQ_EQ] = ACTIONS(2411),
     [anon_sym_GT_EQ] = ACTIONS(2411),
     [anon_sym_GT_GT] = ACTIONS(2411),
@@ -100086,6 +101488,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2411),
     [anon_sym_CARET_EQ] = ACTIONS(2411),
     [anon_sym_PIPE_EQ] = ACTIONS(2411),
+    [anon_sym_PIPE_GT] = ACTIONS(2411),
     [anon_sym_PIPE_PIPE] = ACTIONS(2411),
     [anon_sym_TILDE_PIPE] = ACTIONS(2411),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2411),
@@ -100198,6 +101601,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2508),
     [anon_sym_LT_EQ] = ACTIONS(2508),
     [anon_sym_LT_EQ_GT] = ACTIONS(2508),
+    [anon_sym_LT_GT] = ACTIONS(2508),
     [anon_sym_EQ_EQ] = ACTIONS(2508),
     [anon_sym_GT_EQ] = ACTIONS(2508),
     [anon_sym_GT_GT] = ACTIONS(2508),
@@ -100206,6 +101610,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2508),
     [anon_sym_CARET_EQ] = ACTIONS(2508),
     [anon_sym_PIPE_EQ] = ACTIONS(2508),
+    [anon_sym_PIPE_GT] = ACTIONS(2508),
     [anon_sym_PIPE_PIPE] = ACTIONS(2508),
     [anon_sym_TILDE_PIPE] = ACTIONS(2508),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2508),
@@ -100318,6 +101723,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2347),
     [anon_sym_LT_EQ] = ACTIONS(2347),
     [anon_sym_LT_EQ_GT] = ACTIONS(2347),
+    [anon_sym_LT_GT] = ACTIONS(2347),
     [anon_sym_EQ_EQ] = ACTIONS(2347),
     [anon_sym_GT_EQ] = ACTIONS(2347),
     [anon_sym_GT_GT] = ACTIONS(2347),
@@ -100326,6 +101732,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2347),
     [anon_sym_CARET_EQ] = ACTIONS(2347),
     [anon_sym_PIPE_EQ] = ACTIONS(2347),
+    [anon_sym_PIPE_GT] = ACTIONS(2347),
     [anon_sym_PIPE_PIPE] = ACTIONS(2347),
     [anon_sym_TILDE_PIPE] = ACTIONS(2347),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2347),
@@ -100438,6 +101845,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2512),
     [anon_sym_LT_EQ] = ACTIONS(2512),
     [anon_sym_LT_EQ_GT] = ACTIONS(2512),
+    [anon_sym_LT_GT] = ACTIONS(2512),
     [anon_sym_EQ_EQ] = ACTIONS(2512),
     [anon_sym_GT_EQ] = ACTIONS(2512),
     [anon_sym_GT_GT] = ACTIONS(2512),
@@ -100446,6 +101854,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2512),
     [anon_sym_CARET_EQ] = ACTIONS(2512),
     [anon_sym_PIPE_EQ] = ACTIONS(2512),
+    [anon_sym_PIPE_GT] = ACTIONS(2512),
     [anon_sym_PIPE_PIPE] = ACTIONS(2512),
     [anon_sym_TILDE_PIPE] = ACTIONS(2512),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2512),
@@ -100558,6 +101967,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2516),
     [anon_sym_LT_EQ] = ACTIONS(2516),
     [anon_sym_LT_EQ_GT] = ACTIONS(2516),
+    [anon_sym_LT_GT] = ACTIONS(2516),
     [anon_sym_EQ_EQ] = ACTIONS(2516),
     [anon_sym_GT_EQ] = ACTIONS(2516),
     [anon_sym_GT_GT] = ACTIONS(2516),
@@ -100566,6 +101976,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2516),
     [anon_sym_CARET_EQ] = ACTIONS(2516),
     [anon_sym_PIPE_EQ] = ACTIONS(2516),
+    [anon_sym_PIPE_GT] = ACTIONS(2516),
     [anon_sym_PIPE_PIPE] = ACTIONS(2516),
     [anon_sym_TILDE_PIPE] = ACTIONS(2516),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2516),
@@ -100678,6 +102089,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2520),
     [anon_sym_LT_EQ] = ACTIONS(2520),
     [anon_sym_LT_EQ_GT] = ACTIONS(2520),
+    [anon_sym_LT_GT] = ACTIONS(2520),
     [anon_sym_EQ_EQ] = ACTIONS(2520),
     [anon_sym_GT_EQ] = ACTIONS(2520),
     [anon_sym_GT_GT] = ACTIONS(2520),
@@ -100686,6 +102098,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2520),
     [anon_sym_CARET_EQ] = ACTIONS(2520),
     [anon_sym_PIPE_EQ] = ACTIONS(2520),
+    [anon_sym_PIPE_GT] = ACTIONS(2520),
     [anon_sym_PIPE_PIPE] = ACTIONS(2520),
     [anon_sym_TILDE_PIPE] = ACTIONS(2520),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2520),
@@ -100798,6 +102211,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2524),
     [anon_sym_LT_EQ] = ACTIONS(2524),
     [anon_sym_LT_EQ_GT] = ACTIONS(2524),
+    [anon_sym_LT_GT] = ACTIONS(2524),
     [anon_sym_EQ_EQ] = ACTIONS(2524),
     [anon_sym_GT_EQ] = ACTIONS(2524),
     [anon_sym_GT_GT] = ACTIONS(2524),
@@ -100806,6 +102220,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2524),
     [anon_sym_CARET_EQ] = ACTIONS(2524),
     [anon_sym_PIPE_EQ] = ACTIONS(2524),
+    [anon_sym_PIPE_GT] = ACTIONS(2524),
     [anon_sym_PIPE_PIPE] = ACTIONS(2524),
     [anon_sym_TILDE_PIPE] = ACTIONS(2524),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2524),
@@ -100918,6 +102333,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2528),
     [anon_sym_LT_EQ] = ACTIONS(2528),
     [anon_sym_LT_EQ_GT] = ACTIONS(2528),
+    [anon_sym_LT_GT] = ACTIONS(2528),
     [anon_sym_EQ_EQ] = ACTIONS(2528),
     [anon_sym_GT_EQ] = ACTIONS(2528),
     [anon_sym_GT_GT] = ACTIONS(2528),
@@ -100926,6 +102342,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2528),
     [anon_sym_CARET_EQ] = ACTIONS(2528),
     [anon_sym_PIPE_EQ] = ACTIONS(2528),
+    [anon_sym_PIPE_GT] = ACTIONS(2528),
     [anon_sym_PIPE_PIPE] = ACTIONS(2528),
     [anon_sym_TILDE_PIPE] = ACTIONS(2528),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2528),
@@ -101038,6 +102455,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2407),
     [anon_sym_LT_EQ] = ACTIONS(2407),
     [anon_sym_LT_EQ_GT] = ACTIONS(2407),
+    [anon_sym_LT_GT] = ACTIONS(2407),
     [anon_sym_EQ_EQ] = ACTIONS(2407),
     [anon_sym_GT_EQ] = ACTIONS(2407),
     [anon_sym_GT_GT] = ACTIONS(2407),
@@ -101046,6 +102464,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2407),
     [anon_sym_CARET_EQ] = ACTIONS(2407),
     [anon_sym_PIPE_EQ] = ACTIONS(2407),
+    [anon_sym_PIPE_GT] = ACTIONS(2407),
     [anon_sym_PIPE_PIPE] = ACTIONS(2407),
     [anon_sym_TILDE_PIPE] = ACTIONS(2407),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2407),
@@ -101158,6 +102577,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2534),
     [anon_sym_LT_EQ] = ACTIONS(2534),
     [anon_sym_LT_EQ_GT] = ACTIONS(2534),
+    [anon_sym_LT_GT] = ACTIONS(2534),
     [anon_sym_EQ_EQ] = ACTIONS(2534),
     [anon_sym_GT_EQ] = ACTIONS(2534),
     [anon_sym_GT_GT] = ACTIONS(2534),
@@ -101166,6 +102586,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2534),
     [anon_sym_CARET_EQ] = ACTIONS(2534),
     [anon_sym_PIPE_EQ] = ACTIONS(2534),
+    [anon_sym_PIPE_GT] = ACTIONS(2534),
     [anon_sym_PIPE_PIPE] = ACTIONS(2534),
     [anon_sym_TILDE_PIPE] = ACTIONS(2534),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2534),
@@ -101278,6 +102699,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2476),
     [anon_sym_LT_EQ] = ACTIONS(2476),
     [anon_sym_LT_EQ_GT] = ACTIONS(2476),
+    [anon_sym_LT_GT] = ACTIONS(2476),
     [anon_sym_EQ_EQ] = ACTIONS(2476),
     [anon_sym_GT_EQ] = ACTIONS(2476),
     [anon_sym_GT_GT] = ACTIONS(2476),
@@ -101286,6 +102708,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2476),
     [anon_sym_CARET_EQ] = ACTIONS(2476),
     [anon_sym_PIPE_EQ] = ACTIONS(2476),
+    [anon_sym_PIPE_GT] = ACTIONS(2476),
     [anon_sym_PIPE_PIPE] = ACTIONS(2476),
     [anon_sym_TILDE_PIPE] = ACTIONS(2476),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2476),
@@ -101398,6 +102821,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2542),
     [anon_sym_LT_EQ] = ACTIONS(2542),
     [anon_sym_LT_EQ_GT] = ACTIONS(2542),
+    [anon_sym_LT_GT] = ACTIONS(2542),
     [anon_sym_EQ_EQ] = ACTIONS(2542),
     [anon_sym_GT_EQ] = ACTIONS(2542),
     [anon_sym_GT_GT] = ACTIONS(2542),
@@ -101406,6 +102830,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2542),
     [anon_sym_CARET_EQ] = ACTIONS(2542),
     [anon_sym_PIPE_EQ] = ACTIONS(2542),
+    [anon_sym_PIPE_GT] = ACTIONS(2542),
     [anon_sym_PIPE_PIPE] = ACTIONS(2542),
     [anon_sym_TILDE_PIPE] = ACTIONS(2542),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2542),
@@ -101518,6 +102943,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2546),
     [anon_sym_LT_EQ] = ACTIONS(2546),
     [anon_sym_LT_EQ_GT] = ACTIONS(2546),
+    [anon_sym_LT_GT] = ACTIONS(2546),
     [anon_sym_EQ_EQ] = ACTIONS(2546),
     [anon_sym_GT_EQ] = ACTIONS(2546),
     [anon_sym_GT_GT] = ACTIONS(2546),
@@ -101526,6 +102952,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2546),
     [anon_sym_CARET_EQ] = ACTIONS(2546),
     [anon_sym_PIPE_EQ] = ACTIONS(2546),
+    [anon_sym_PIPE_GT] = ACTIONS(2546),
     [anon_sym_PIPE_PIPE] = ACTIONS(2546),
     [anon_sym_TILDE_PIPE] = ACTIONS(2546),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2546),
@@ -101638,6 +103065,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2484),
     [anon_sym_LT_EQ] = ACTIONS(2484),
     [anon_sym_LT_EQ_GT] = ACTIONS(2484),
+    [anon_sym_LT_GT] = ACTIONS(2484),
     [anon_sym_EQ_EQ] = ACTIONS(2484),
     [anon_sym_GT_EQ] = ACTIONS(2484),
     [anon_sym_GT_GT] = ACTIONS(2484),
@@ -101646,6 +103074,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2484),
     [anon_sym_CARET_EQ] = ACTIONS(2484),
     [anon_sym_PIPE_EQ] = ACTIONS(2484),
+    [anon_sym_PIPE_GT] = ACTIONS(2484),
     [anon_sym_PIPE_PIPE] = ACTIONS(2484),
     [anon_sym_TILDE_PIPE] = ACTIONS(2484),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2484),
@@ -101758,6 +103187,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2562),
     [anon_sym_LT_EQ] = ACTIONS(2562),
     [anon_sym_LT_EQ_GT] = ACTIONS(2562),
+    [anon_sym_LT_GT] = ACTIONS(2562),
     [anon_sym_EQ_EQ] = ACTIONS(2562),
     [anon_sym_GT_EQ] = ACTIONS(2562),
     [anon_sym_GT_GT] = ACTIONS(2562),
@@ -101766,6 +103196,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2562),
     [anon_sym_CARET_EQ] = ACTIONS(2562),
     [anon_sym_PIPE_EQ] = ACTIONS(2562),
+    [anon_sym_PIPE_GT] = ACTIONS(2562),
     [anon_sym_PIPE_PIPE] = ACTIONS(2562),
     [anon_sym_TILDE_PIPE] = ACTIONS(2562),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2562),
@@ -101878,6 +103309,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2488),
     [anon_sym_LT_EQ] = ACTIONS(2488),
     [anon_sym_LT_EQ_GT] = ACTIONS(2488),
+    [anon_sym_LT_GT] = ACTIONS(2488),
     [anon_sym_EQ_EQ] = ACTIONS(2488),
     [anon_sym_GT_EQ] = ACTIONS(2488),
     [anon_sym_GT_GT] = ACTIONS(2488),
@@ -101886,6 +103318,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2488),
     [anon_sym_CARET_EQ] = ACTIONS(2488),
     [anon_sym_PIPE_EQ] = ACTIONS(2488),
+    [anon_sym_PIPE_GT] = ACTIONS(2488),
     [anon_sym_PIPE_PIPE] = ACTIONS(2488),
     [anon_sym_TILDE_PIPE] = ACTIONS(2488),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2488),
@@ -101998,6 +103431,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2576),
     [anon_sym_LT_EQ] = ACTIONS(2576),
     [anon_sym_LT_EQ_GT] = ACTIONS(2576),
+    [anon_sym_LT_GT] = ACTIONS(2576),
     [anon_sym_EQ_EQ] = ACTIONS(2576),
     [anon_sym_GT_EQ] = ACTIONS(2576),
     [anon_sym_GT_GT] = ACTIONS(2576),
@@ -102006,6 +103440,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2576),
     [anon_sym_CARET_EQ] = ACTIONS(2576),
     [anon_sym_PIPE_EQ] = ACTIONS(2576),
+    [anon_sym_PIPE_GT] = ACTIONS(2576),
     [anon_sym_PIPE_PIPE] = ACTIONS(2576),
     [anon_sym_TILDE_PIPE] = ACTIONS(2576),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2576),
@@ -102118,6 +103553,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2492),
     [anon_sym_LT_EQ] = ACTIONS(2492),
     [anon_sym_LT_EQ_GT] = ACTIONS(2492),
+    [anon_sym_LT_GT] = ACTIONS(2492),
     [anon_sym_EQ_EQ] = ACTIONS(2492),
     [anon_sym_GT_EQ] = ACTIONS(2492),
     [anon_sym_GT_GT] = ACTIONS(2492),
@@ -102126,6 +103562,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2492),
     [anon_sym_CARET_EQ] = ACTIONS(2492),
     [anon_sym_PIPE_EQ] = ACTIONS(2492),
+    [anon_sym_PIPE_GT] = ACTIONS(2492),
     [anon_sym_PIPE_PIPE] = ACTIONS(2492),
     [anon_sym_TILDE_PIPE] = ACTIONS(2492),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2492),
@@ -102238,6 +103675,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2759),
     [anon_sym_LT_EQ] = ACTIONS(2759),
     [anon_sym_LT_EQ_GT] = ACTIONS(2759),
+    [anon_sym_LT_GT] = ACTIONS(2759),
     [anon_sym_EQ_EQ] = ACTIONS(2759),
     [anon_sym_GT_EQ] = ACTIONS(2759),
     [anon_sym_GT_GT] = ACTIONS(2759),
@@ -102246,6 +103684,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2759),
     [anon_sym_CARET_EQ] = ACTIONS(2759),
     [anon_sym_PIPE_EQ] = ACTIONS(2759),
+    [anon_sym_PIPE_GT] = ACTIONS(2759),
     [anon_sym_PIPE_PIPE] = ACTIONS(2759),
     [anon_sym_TILDE_PIPE] = ACTIONS(2759),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2759),
@@ -102358,6 +103797,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2500),
     [anon_sym_LT_EQ] = ACTIONS(2500),
     [anon_sym_LT_EQ_GT] = ACTIONS(2500),
+    [anon_sym_LT_GT] = ACTIONS(2500),
     [anon_sym_EQ_EQ] = ACTIONS(2500),
     [anon_sym_GT_EQ] = ACTIONS(2500),
     [anon_sym_GT_GT] = ACTIONS(2500),
@@ -102366,6 +103806,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2500),
     [anon_sym_CARET_EQ] = ACTIONS(2500),
     [anon_sym_PIPE_EQ] = ACTIONS(2500),
+    [anon_sym_PIPE_GT] = ACTIONS(2500),
     [anon_sym_PIPE_PIPE] = ACTIONS(2500),
     [anon_sym_TILDE_PIPE] = ACTIONS(2500),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2500),
@@ -102478,6 +103919,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2480),
     [anon_sym_LT_EQ] = ACTIONS(2480),
     [anon_sym_LT_EQ_GT] = ACTIONS(2480),
+    [anon_sym_LT_GT] = ACTIONS(2480),
     [anon_sym_EQ_EQ] = ACTIONS(2480),
     [anon_sym_GT_EQ] = ACTIONS(2480),
     [anon_sym_GT_GT] = ACTIONS(2480),
@@ -102486,6 +103928,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2480),
     [anon_sym_CARET_EQ] = ACTIONS(2480),
     [anon_sym_PIPE_EQ] = ACTIONS(2480),
+    [anon_sym_PIPE_GT] = ACTIONS(2480),
     [anon_sym_PIPE_PIPE] = ACTIONS(2480),
     [anon_sym_TILDE_PIPE] = ACTIONS(2480),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2480),
@@ -102598,6 +104041,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2504),
     [anon_sym_LT_EQ] = ACTIONS(2504),
     [anon_sym_LT_EQ_GT] = ACTIONS(2504),
+    [anon_sym_LT_GT] = ACTIONS(2504),
     [anon_sym_EQ_EQ] = ACTIONS(2504),
     [anon_sym_GT_EQ] = ACTIONS(2504),
     [anon_sym_GT_GT] = ACTIONS(2504),
@@ -102606,6 +104050,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2504),
     [anon_sym_CARET_EQ] = ACTIONS(2504),
     [anon_sym_PIPE_EQ] = ACTIONS(2504),
+    [anon_sym_PIPE_GT] = ACTIONS(2504),
     [anon_sym_PIPE_PIPE] = ACTIONS(2504),
     [anon_sym_TILDE_PIPE] = ACTIONS(2504),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2504),
@@ -102718,6 +104163,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2597),
     [anon_sym_LT_EQ] = ACTIONS(2597),
     [anon_sym_LT_EQ_GT] = ACTIONS(2597),
+    [anon_sym_LT_GT] = ACTIONS(2597),
     [anon_sym_EQ_EQ] = ACTIONS(2597),
     [anon_sym_GT_EQ] = ACTIONS(2597),
     [anon_sym_GT_GT] = ACTIONS(2597),
@@ -102726,6 +104172,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2597),
     [anon_sym_CARET_EQ] = ACTIONS(2597),
     [anon_sym_PIPE_EQ] = ACTIONS(2597),
+    [anon_sym_PIPE_GT] = ACTIONS(2597),
     [anon_sym_PIPE_PIPE] = ACTIONS(2597),
     [anon_sym_TILDE_PIPE] = ACTIONS(2597),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2597),
@@ -102838,6 +104285,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2411),
     [anon_sym_LT_EQ] = ACTIONS(2411),
     [anon_sym_LT_EQ_GT] = ACTIONS(2411),
+    [anon_sym_LT_GT] = ACTIONS(2411),
     [anon_sym_EQ_EQ] = ACTIONS(2411),
     [anon_sym_GT_EQ] = ACTIONS(2411),
     [anon_sym_GT_GT] = ACTIONS(2411),
@@ -102846,6 +104294,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2411),
     [anon_sym_CARET_EQ] = ACTIONS(2411),
     [anon_sym_PIPE_EQ] = ACTIONS(2411),
+    [anon_sym_PIPE_GT] = ACTIONS(2411),
     [anon_sym_PIPE_PIPE] = ACTIONS(2411),
     [anon_sym_TILDE_PIPE] = ACTIONS(2411),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2411),
@@ -102958,6 +104407,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2605),
     [anon_sym_LT_EQ] = ACTIONS(2605),
     [anon_sym_LT_EQ_GT] = ACTIONS(2605),
+    [anon_sym_LT_GT] = ACTIONS(2605),
     [anon_sym_EQ_EQ] = ACTIONS(2605),
     [anon_sym_GT_EQ] = ACTIONS(2605),
     [anon_sym_GT_GT] = ACTIONS(2605),
@@ -102966,6 +104416,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2605),
     [anon_sym_CARET_EQ] = ACTIONS(2605),
     [anon_sym_PIPE_EQ] = ACTIONS(2605),
+    [anon_sym_PIPE_GT] = ACTIONS(2605),
     [anon_sym_PIPE_PIPE] = ACTIONS(2605),
     [anon_sym_TILDE_PIPE] = ACTIONS(2605),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2605),
@@ -103078,6 +104529,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2508),
     [anon_sym_LT_EQ] = ACTIONS(2508),
     [anon_sym_LT_EQ_GT] = ACTIONS(2508),
+    [anon_sym_LT_GT] = ACTIONS(2508),
     [anon_sym_EQ_EQ] = ACTIONS(2508),
     [anon_sym_GT_EQ] = ACTIONS(2508),
     [anon_sym_GT_GT] = ACTIONS(2508),
@@ -103086,6 +104538,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2508),
     [anon_sym_CARET_EQ] = ACTIONS(2508),
     [anon_sym_PIPE_EQ] = ACTIONS(2508),
+    [anon_sym_PIPE_GT] = ACTIONS(2508),
     [anon_sym_PIPE_PIPE] = ACTIONS(2508),
     [anon_sym_TILDE_PIPE] = ACTIONS(2508),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2508),
@@ -103198,6 +104651,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2613),
     [anon_sym_LT_EQ] = ACTIONS(2613),
     [anon_sym_LT_EQ_GT] = ACTIONS(2613),
+    [anon_sym_LT_GT] = ACTIONS(2613),
     [anon_sym_EQ_EQ] = ACTIONS(2613),
     [anon_sym_GT_EQ] = ACTIONS(2613),
     [anon_sym_GT_GT] = ACTIONS(2613),
@@ -103206,6 +104660,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2613),
     [anon_sym_CARET_EQ] = ACTIONS(2613),
     [anon_sym_PIPE_EQ] = ACTIONS(2613),
+    [anon_sym_PIPE_GT] = ACTIONS(2613),
     [anon_sym_PIPE_PIPE] = ACTIONS(2613),
     [anon_sym_TILDE_PIPE] = ACTIONS(2613),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2613),
@@ -103318,6 +104773,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2347),
     [anon_sym_LT_EQ] = ACTIONS(2347),
     [anon_sym_LT_EQ_GT] = ACTIONS(2347),
+    [anon_sym_LT_GT] = ACTIONS(2347),
     [anon_sym_EQ_EQ] = ACTIONS(2347),
     [anon_sym_GT_EQ] = ACTIONS(2347),
     [anon_sym_GT_GT] = ACTIONS(2347),
@@ -103326,6 +104782,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2347),
     [anon_sym_CARET_EQ] = ACTIONS(2347),
     [anon_sym_PIPE_EQ] = ACTIONS(2347),
+    [anon_sym_PIPE_GT] = ACTIONS(2347),
     [anon_sym_PIPE_PIPE] = ACTIONS(2347),
     [anon_sym_TILDE_PIPE] = ACTIONS(2347),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2347),
@@ -103438,6 +104895,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2621),
     [anon_sym_LT_EQ] = ACTIONS(2621),
     [anon_sym_LT_EQ_GT] = ACTIONS(2621),
+    [anon_sym_LT_GT] = ACTIONS(2621),
     [anon_sym_EQ_EQ] = ACTIONS(2621),
     [anon_sym_GT_EQ] = ACTIONS(2621),
     [anon_sym_GT_GT] = ACTIONS(2621),
@@ -103446,6 +104904,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2621),
     [anon_sym_CARET_EQ] = ACTIONS(2621),
     [anon_sym_PIPE_EQ] = ACTIONS(2621),
+    [anon_sym_PIPE_GT] = ACTIONS(2621),
     [anon_sym_PIPE_PIPE] = ACTIONS(2621),
     [anon_sym_TILDE_PIPE] = ACTIONS(2621),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2621),
@@ -103558,6 +105017,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2512),
     [anon_sym_LT_EQ] = ACTIONS(2512),
     [anon_sym_LT_EQ_GT] = ACTIONS(2512),
+    [anon_sym_LT_GT] = ACTIONS(2512),
     [anon_sym_EQ_EQ] = ACTIONS(2512),
     [anon_sym_GT_EQ] = ACTIONS(2512),
     [anon_sym_GT_GT] = ACTIONS(2512),
@@ -103566,6 +105026,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2512),
     [anon_sym_CARET_EQ] = ACTIONS(2512),
     [anon_sym_PIPE_EQ] = ACTIONS(2512),
+    [anon_sym_PIPE_GT] = ACTIONS(2512),
     [anon_sym_PIPE_PIPE] = ACTIONS(2512),
     [anon_sym_TILDE_PIPE] = ACTIONS(2512),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2512),
@@ -103678,6 +105139,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2629),
     [anon_sym_LT_EQ] = ACTIONS(2629),
     [anon_sym_LT_EQ_GT] = ACTIONS(2629),
+    [anon_sym_LT_GT] = ACTIONS(2629),
     [anon_sym_EQ_EQ] = ACTIONS(2629),
     [anon_sym_GT_EQ] = ACTIONS(2629),
     [anon_sym_GT_GT] = ACTIONS(2629),
@@ -103686,6 +105148,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2629),
     [anon_sym_CARET_EQ] = ACTIONS(2629),
     [anon_sym_PIPE_EQ] = ACTIONS(2629),
+    [anon_sym_PIPE_GT] = ACTIONS(2629),
     [anon_sym_PIPE_PIPE] = ACTIONS(2629),
     [anon_sym_TILDE_PIPE] = ACTIONS(2629),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2629),
@@ -103798,6 +105261,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2633),
     [anon_sym_LT_EQ] = ACTIONS(2633),
     [anon_sym_LT_EQ_GT] = ACTIONS(2633),
+    [anon_sym_LT_GT] = ACTIONS(2633),
     [anon_sym_EQ_EQ] = ACTIONS(2633),
     [anon_sym_GT_EQ] = ACTIONS(2633),
     [anon_sym_GT_GT] = ACTIONS(2633),
@@ -103806,6 +105270,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2633),
     [anon_sym_CARET_EQ] = ACTIONS(2633),
     [anon_sym_PIPE_EQ] = ACTIONS(2633),
+    [anon_sym_PIPE_GT] = ACTIONS(2633),
     [anon_sym_PIPE_PIPE] = ACTIONS(2633),
     [anon_sym_TILDE_PIPE] = ACTIONS(2633),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2633),
@@ -103918,6 +105383,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2637),
     [anon_sym_LT_EQ] = ACTIONS(2637),
     [anon_sym_LT_EQ_GT] = ACTIONS(2637),
+    [anon_sym_LT_GT] = ACTIONS(2637),
     [anon_sym_EQ_EQ] = ACTIONS(2637),
     [anon_sym_GT_EQ] = ACTIONS(2637),
     [anon_sym_GT_GT] = ACTIONS(2637),
@@ -103926,6 +105392,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2637),
     [anon_sym_CARET_EQ] = ACTIONS(2637),
     [anon_sym_PIPE_EQ] = ACTIONS(2637),
+    [anon_sym_PIPE_GT] = ACTIONS(2637),
     [anon_sym_PIPE_PIPE] = ACTIONS(2637),
     [anon_sym_TILDE_PIPE] = ACTIONS(2637),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2637),
@@ -104038,6 +105505,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2516),
     [anon_sym_LT_EQ] = ACTIONS(2516),
     [anon_sym_LT_EQ_GT] = ACTIONS(2516),
+    [anon_sym_LT_GT] = ACTIONS(2516),
     [anon_sym_EQ_EQ] = ACTIONS(2516),
     [anon_sym_GT_EQ] = ACTIONS(2516),
     [anon_sym_GT_GT] = ACTIONS(2516),
@@ -104046,6 +105514,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2516),
     [anon_sym_CARET_EQ] = ACTIONS(2516),
     [anon_sym_PIPE_EQ] = ACTIONS(2516),
+    [anon_sym_PIPE_GT] = ACTIONS(2516),
     [anon_sym_PIPE_PIPE] = ACTIONS(2516),
     [anon_sym_TILDE_PIPE] = ACTIONS(2516),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2516),
@@ -104158,6 +105627,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2520),
     [anon_sym_LT_EQ] = ACTIONS(2520),
     [anon_sym_LT_EQ_GT] = ACTIONS(2520),
+    [anon_sym_LT_GT] = ACTIONS(2520),
     [anon_sym_EQ_EQ] = ACTIONS(2520),
     [anon_sym_GT_EQ] = ACTIONS(2520),
     [anon_sym_GT_GT] = ACTIONS(2520),
@@ -104166,6 +105636,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2520),
     [anon_sym_CARET_EQ] = ACTIONS(2520),
     [anon_sym_PIPE_EQ] = ACTIONS(2520),
+    [anon_sym_PIPE_GT] = ACTIONS(2520),
     [anon_sym_PIPE_PIPE] = ACTIONS(2520),
     [anon_sym_TILDE_PIPE] = ACTIONS(2520),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2520),
@@ -104278,6 +105749,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2647),
     [anon_sym_LT_EQ] = ACTIONS(2647),
     [anon_sym_LT_EQ_GT] = ACTIONS(2647),
+    [anon_sym_LT_GT] = ACTIONS(2647),
     [anon_sym_EQ_EQ] = ACTIONS(2647),
     [anon_sym_GT_EQ] = ACTIONS(2647),
     [anon_sym_GT_GT] = ACTIONS(2647),
@@ -104286,6 +105758,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2647),
     [anon_sym_CARET_EQ] = ACTIONS(2647),
     [anon_sym_PIPE_EQ] = ACTIONS(2647),
+    [anon_sym_PIPE_GT] = ACTIONS(2647),
     [anon_sym_PIPE_PIPE] = ACTIONS(2647),
     [anon_sym_TILDE_PIPE] = ACTIONS(2647),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2647),
@@ -104398,6 +105871,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2657),
     [anon_sym_LT_EQ] = ACTIONS(2657),
     [anon_sym_LT_EQ_GT] = ACTIONS(2657),
+    [anon_sym_LT_GT] = ACTIONS(2657),
     [anon_sym_EQ_EQ] = ACTIONS(2657),
     [anon_sym_GT_EQ] = ACTIONS(2657),
     [anon_sym_GT_GT] = ACTIONS(2657),
@@ -104406,6 +105880,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2657),
     [anon_sym_CARET_EQ] = ACTIONS(2657),
     [anon_sym_PIPE_EQ] = ACTIONS(2657),
+    [anon_sym_PIPE_GT] = ACTIONS(2657),
     [anon_sym_PIPE_PIPE] = ACTIONS(2657),
     [anon_sym_TILDE_PIPE] = ACTIONS(2657),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2657),
@@ -104518,6 +105993,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2661),
     [anon_sym_LT_EQ] = ACTIONS(2661),
     [anon_sym_LT_EQ_GT] = ACTIONS(2661),
+    [anon_sym_LT_GT] = ACTIONS(2661),
     [anon_sym_EQ_EQ] = ACTIONS(2661),
     [anon_sym_GT_EQ] = ACTIONS(2661),
     [anon_sym_GT_GT] = ACTIONS(2661),
@@ -104526,6 +106002,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2661),
     [anon_sym_CARET_EQ] = ACTIONS(2661),
     [anon_sym_PIPE_EQ] = ACTIONS(2661),
+    [anon_sym_PIPE_GT] = ACTIONS(2661),
     [anon_sym_PIPE_PIPE] = ACTIONS(2661),
     [anon_sym_TILDE_PIPE] = ACTIONS(2661),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2661),
@@ -104638,6 +106115,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2665),
     [anon_sym_LT_EQ] = ACTIONS(2665),
     [anon_sym_LT_EQ_GT] = ACTIONS(2665),
+    [anon_sym_LT_GT] = ACTIONS(2665),
     [anon_sym_EQ_EQ] = ACTIONS(2665),
     [anon_sym_GT_EQ] = ACTIONS(2665),
     [anon_sym_GT_GT] = ACTIONS(2665),
@@ -104646,6 +106124,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2665),
     [anon_sym_CARET_EQ] = ACTIONS(2665),
     [anon_sym_PIPE_EQ] = ACTIONS(2665),
+    [anon_sym_PIPE_GT] = ACTIONS(2665),
     [anon_sym_PIPE_PIPE] = ACTIONS(2665),
     [anon_sym_TILDE_PIPE] = ACTIONS(2665),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2665),
@@ -104758,6 +106237,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2669),
     [anon_sym_LT_EQ] = ACTIONS(2669),
     [anon_sym_LT_EQ_GT] = ACTIONS(2669),
+    [anon_sym_LT_GT] = ACTIONS(2669),
     [anon_sym_EQ_EQ] = ACTIONS(2669),
     [anon_sym_GT_EQ] = ACTIONS(2669),
     [anon_sym_GT_GT] = ACTIONS(2669),
@@ -104766,6 +106246,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2669),
     [anon_sym_CARET_EQ] = ACTIONS(2669),
     [anon_sym_PIPE_EQ] = ACTIONS(2669),
+    [anon_sym_PIPE_GT] = ACTIONS(2669),
     [anon_sym_PIPE_PIPE] = ACTIONS(2669),
     [anon_sym_TILDE_PIPE] = ACTIONS(2669),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2669),
@@ -104878,6 +106359,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2673),
     [anon_sym_LT_EQ] = ACTIONS(2673),
     [anon_sym_LT_EQ_GT] = ACTIONS(2673),
+    [anon_sym_LT_GT] = ACTIONS(2673),
     [anon_sym_EQ_EQ] = ACTIONS(2673),
     [anon_sym_GT_EQ] = ACTIONS(2673),
     [anon_sym_GT_GT] = ACTIONS(2673),
@@ -104886,6 +106368,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2673),
     [anon_sym_CARET_EQ] = ACTIONS(2673),
     [anon_sym_PIPE_EQ] = ACTIONS(2673),
+    [anon_sym_PIPE_GT] = ACTIONS(2673),
     [anon_sym_PIPE_PIPE] = ACTIONS(2673),
     [anon_sym_TILDE_PIPE] = ACTIONS(2673),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2673),
@@ -104998,6 +106481,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2677),
     [anon_sym_LT_EQ] = ACTIONS(2677),
     [anon_sym_LT_EQ_GT] = ACTIONS(2677),
+    [anon_sym_LT_GT] = ACTIONS(2677),
     [anon_sym_EQ_EQ] = ACTIONS(2677),
     [anon_sym_GT_EQ] = ACTIONS(2677),
     [anon_sym_GT_GT] = ACTIONS(2677),
@@ -105006,6 +106490,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2677),
     [anon_sym_CARET_EQ] = ACTIONS(2677),
     [anon_sym_PIPE_EQ] = ACTIONS(2677),
+    [anon_sym_PIPE_GT] = ACTIONS(2677),
     [anon_sym_PIPE_PIPE] = ACTIONS(2677),
     [anon_sym_TILDE_PIPE] = ACTIONS(2677),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2677),
@@ -105118,6 +106603,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2524),
     [anon_sym_LT_EQ] = ACTIONS(2524),
     [anon_sym_LT_EQ_GT] = ACTIONS(2524),
+    [anon_sym_LT_GT] = ACTIONS(2524),
     [anon_sym_EQ_EQ] = ACTIONS(2524),
     [anon_sym_GT_EQ] = ACTIONS(2524),
     [anon_sym_GT_GT] = ACTIONS(2524),
@@ -105126,6 +106612,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2524),
     [anon_sym_CARET_EQ] = ACTIONS(2524),
     [anon_sym_PIPE_EQ] = ACTIONS(2524),
+    [anon_sym_PIPE_GT] = ACTIONS(2524),
     [anon_sym_PIPE_PIPE] = ACTIONS(2524),
     [anon_sym_TILDE_PIPE] = ACTIONS(2524),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2524),
@@ -105238,6 +106725,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2681),
     [anon_sym_LT_EQ] = ACTIONS(2681),
     [anon_sym_LT_EQ_GT] = ACTIONS(2681),
+    [anon_sym_LT_GT] = ACTIONS(2681),
     [anon_sym_EQ_EQ] = ACTIONS(2681),
     [anon_sym_GT_EQ] = ACTIONS(2681),
     [anon_sym_GT_GT] = ACTIONS(2681),
@@ -105246,6 +106734,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2681),
     [anon_sym_CARET_EQ] = ACTIONS(2681),
     [anon_sym_PIPE_EQ] = ACTIONS(2681),
+    [anon_sym_PIPE_GT] = ACTIONS(2681),
     [anon_sym_PIPE_PIPE] = ACTIONS(2681),
     [anon_sym_TILDE_PIPE] = ACTIONS(2681),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2681),
@@ -105358,6 +106847,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2685),
     [anon_sym_LT_EQ] = ACTIONS(2685),
     [anon_sym_LT_EQ_GT] = ACTIONS(2685),
+    [anon_sym_LT_GT] = ACTIONS(2685),
     [anon_sym_EQ_EQ] = ACTIONS(2685),
     [anon_sym_GT_EQ] = ACTIONS(2685),
     [anon_sym_GT_GT] = ACTIONS(2685),
@@ -105366,6 +106856,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2685),
     [anon_sym_CARET_EQ] = ACTIONS(2685),
     [anon_sym_PIPE_EQ] = ACTIONS(2685),
+    [anon_sym_PIPE_GT] = ACTIONS(2685),
     [anon_sym_PIPE_PIPE] = ACTIONS(2685),
     [anon_sym_TILDE_PIPE] = ACTIONS(2685),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2685),
@@ -105478,6 +106969,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2689),
     [anon_sym_LT_EQ] = ACTIONS(2689),
     [anon_sym_LT_EQ_GT] = ACTIONS(2689),
+    [anon_sym_LT_GT] = ACTIONS(2689),
     [anon_sym_EQ_EQ] = ACTIONS(2689),
     [anon_sym_GT_EQ] = ACTIONS(2689),
     [anon_sym_GT_GT] = ACTIONS(2689),
@@ -105486,6 +106978,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2689),
     [anon_sym_CARET_EQ] = ACTIONS(2689),
     [anon_sym_PIPE_EQ] = ACTIONS(2689),
+    [anon_sym_PIPE_GT] = ACTIONS(2689),
     [anon_sym_PIPE_PIPE] = ACTIONS(2689),
     [anon_sym_TILDE_PIPE] = ACTIONS(2689),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2689),
@@ -105598,6 +107091,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2415),
     [anon_sym_LT_EQ] = ACTIONS(2415),
     [anon_sym_LT_EQ_GT] = ACTIONS(2415),
+    [anon_sym_LT_GT] = ACTIONS(2415),
     [anon_sym_EQ_EQ] = ACTIONS(2415),
     [anon_sym_GT_EQ] = ACTIONS(2415),
     [anon_sym_GT_GT] = ACTIONS(2415),
@@ -105606,6 +107100,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2415),
     [anon_sym_CARET_EQ] = ACTIONS(2415),
     [anon_sym_PIPE_EQ] = ACTIONS(2415),
+    [anon_sym_PIPE_GT] = ACTIONS(2415),
     [anon_sym_PIPE_PIPE] = ACTIONS(2415),
     [anon_sym_TILDE_PIPE] = ACTIONS(2415),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2415),
@@ -105718,6 +107213,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2528),
     [anon_sym_LT_EQ] = ACTIONS(2528),
     [anon_sym_LT_EQ_GT] = ACTIONS(2528),
+    [anon_sym_LT_GT] = ACTIONS(2528),
     [anon_sym_EQ_EQ] = ACTIONS(2528),
     [anon_sym_GT_EQ] = ACTIONS(2528),
     [anon_sym_GT_GT] = ACTIONS(2528),
@@ -105726,6 +107222,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2528),
     [anon_sym_CARET_EQ] = ACTIONS(2528),
     [anon_sym_PIPE_EQ] = ACTIONS(2528),
+    [anon_sym_PIPE_GT] = ACTIONS(2528),
     [anon_sym_PIPE_PIPE] = ACTIONS(2528),
     [anon_sym_TILDE_PIPE] = ACTIONS(2528),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2528),
@@ -105838,6 +107335,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2699),
     [anon_sym_LT_EQ] = ACTIONS(2699),
     [anon_sym_LT_EQ_GT] = ACTIONS(2699),
+    [anon_sym_LT_GT] = ACTIONS(2699),
     [anon_sym_EQ_EQ] = ACTIONS(2699),
     [anon_sym_GT_EQ] = ACTIONS(2699),
     [anon_sym_GT_GT] = ACTIONS(2699),
@@ -105846,6 +107344,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2699),
     [anon_sym_CARET_EQ] = ACTIONS(2699),
     [anon_sym_PIPE_EQ] = ACTIONS(2699),
+    [anon_sym_PIPE_GT] = ACTIONS(2699),
     [anon_sym_PIPE_PIPE] = ACTIONS(2699),
     [anon_sym_TILDE_PIPE] = ACTIONS(2699),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2699),
@@ -105958,6 +107457,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2468),
     [anon_sym_LT_EQ] = ACTIONS(2468),
     [anon_sym_LT_EQ_GT] = ACTIONS(2468),
+    [anon_sym_LT_GT] = ACTIONS(2468),
     [anon_sym_EQ_EQ] = ACTIONS(2468),
     [anon_sym_GT_EQ] = ACTIONS(2468),
     [anon_sym_GT_GT] = ACTIONS(2468),
@@ -105966,6 +107466,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2468),
     [anon_sym_CARET_EQ] = ACTIONS(2468),
     [anon_sym_PIPE_EQ] = ACTIONS(2468),
+    [anon_sym_PIPE_GT] = ACTIONS(2468),
     [anon_sym_PIPE_PIPE] = ACTIONS(2468),
     [anon_sym_TILDE_PIPE] = ACTIONS(2468),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2468),
@@ -106078,6 +107579,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2703),
     [anon_sym_LT_EQ] = ACTIONS(2703),
     [anon_sym_LT_EQ_GT] = ACTIONS(2703),
+    [anon_sym_LT_GT] = ACTIONS(2703),
     [anon_sym_EQ_EQ] = ACTIONS(2703),
     [anon_sym_GT_EQ] = ACTIONS(2703),
     [anon_sym_GT_GT] = ACTIONS(2703),
@@ -106086,6 +107588,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2703),
     [anon_sym_CARET_EQ] = ACTIONS(2703),
     [anon_sym_PIPE_EQ] = ACTIONS(2703),
+    [anon_sym_PIPE_GT] = ACTIONS(2703),
     [anon_sym_PIPE_PIPE] = ACTIONS(2703),
     [anon_sym_TILDE_PIPE] = ACTIONS(2703),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2703),
@@ -106198,6 +107701,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2534),
     [anon_sym_LT_EQ] = ACTIONS(2534),
     [anon_sym_LT_EQ_GT] = ACTIONS(2534),
+    [anon_sym_LT_GT] = ACTIONS(2534),
     [anon_sym_EQ_EQ] = ACTIONS(2534),
     [anon_sym_GT_EQ] = ACTIONS(2534),
     [anon_sym_GT_GT] = ACTIONS(2534),
@@ -106206,6 +107710,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2534),
     [anon_sym_CARET_EQ] = ACTIONS(2534),
     [anon_sym_PIPE_EQ] = ACTIONS(2534),
+    [anon_sym_PIPE_GT] = ACTIONS(2534),
     [anon_sym_PIPE_PIPE] = ACTIONS(2534),
     [anon_sym_TILDE_PIPE] = ACTIONS(2534),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2534),
@@ -106318,6 +107823,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2707),
     [anon_sym_LT_EQ] = ACTIONS(2707),
     [anon_sym_LT_EQ_GT] = ACTIONS(2707),
+    [anon_sym_LT_GT] = ACTIONS(2707),
     [anon_sym_EQ_EQ] = ACTIONS(2707),
     [anon_sym_GT_EQ] = ACTIONS(2707),
     [anon_sym_GT_GT] = ACTIONS(2707),
@@ -106326,6 +107832,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2707),
     [anon_sym_CARET_EQ] = ACTIONS(2707),
     [anon_sym_PIPE_EQ] = ACTIONS(2707),
+    [anon_sym_PIPE_GT] = ACTIONS(2707),
     [anon_sym_PIPE_PIPE] = ACTIONS(2707),
     [anon_sym_TILDE_PIPE] = ACTIONS(2707),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2707),
@@ -106438,6 +107945,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2711),
     [anon_sym_LT_EQ] = ACTIONS(2711),
     [anon_sym_LT_EQ_GT] = ACTIONS(2711),
+    [anon_sym_LT_GT] = ACTIONS(2711),
     [anon_sym_EQ_EQ] = ACTIONS(2711),
     [anon_sym_GT_EQ] = ACTIONS(2711),
     [anon_sym_GT_GT] = ACTIONS(2711),
@@ -106446,6 +107954,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2711),
     [anon_sym_CARET_EQ] = ACTIONS(2711),
     [anon_sym_PIPE_EQ] = ACTIONS(2711),
+    [anon_sym_PIPE_GT] = ACTIONS(2711),
     [anon_sym_PIPE_PIPE] = ACTIONS(2711),
     [anon_sym_TILDE_PIPE] = ACTIONS(2711),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2711),
@@ -106558,6 +108067,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2715),
     [anon_sym_LT_EQ] = ACTIONS(2715),
     [anon_sym_LT_EQ_GT] = ACTIONS(2715),
+    [anon_sym_LT_GT] = ACTIONS(2715),
     [anon_sym_EQ_EQ] = ACTIONS(2715),
     [anon_sym_GT_EQ] = ACTIONS(2715),
     [anon_sym_GT_GT] = ACTIONS(2715),
@@ -106566,6 +108076,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2715),
     [anon_sym_CARET_EQ] = ACTIONS(2715),
     [anon_sym_PIPE_EQ] = ACTIONS(2715),
+    [anon_sym_PIPE_GT] = ACTIONS(2715),
     [anon_sym_PIPE_PIPE] = ACTIONS(2715),
     [anon_sym_TILDE_PIPE] = ACTIONS(2715),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2715),
@@ -106678,6 +108189,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2391),
     [anon_sym_LT_EQ] = ACTIONS(2391),
     [anon_sym_LT_EQ_GT] = ACTIONS(2391),
+    [anon_sym_LT_GT] = ACTIONS(2391),
     [anon_sym_EQ_EQ] = ACTIONS(2391),
     [anon_sym_GT_EQ] = ACTIONS(2391),
     [anon_sym_GT_GT] = ACTIONS(2391),
@@ -106686,6 +108198,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2391),
     [anon_sym_CARET_EQ] = ACTIONS(2391),
     [anon_sym_PIPE_EQ] = ACTIONS(2391),
+    [anon_sym_PIPE_GT] = ACTIONS(2391),
     [anon_sym_PIPE_PIPE] = ACTIONS(2391),
     [anon_sym_TILDE_PIPE] = ACTIONS(2391),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2391),
@@ -106798,6 +108311,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2719),
     [anon_sym_LT_EQ] = ACTIONS(2719),
     [anon_sym_LT_EQ_GT] = ACTIONS(2719),
+    [anon_sym_LT_GT] = ACTIONS(2719),
     [anon_sym_EQ_EQ] = ACTIONS(2719),
     [anon_sym_GT_EQ] = ACTIONS(2719),
     [anon_sym_GT_GT] = ACTIONS(2719),
@@ -106806,6 +108320,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2719),
     [anon_sym_CARET_EQ] = ACTIONS(2719),
     [anon_sym_PIPE_EQ] = ACTIONS(2719),
+    [anon_sym_PIPE_GT] = ACTIONS(2719),
     [anon_sym_PIPE_PIPE] = ACTIONS(2719),
     [anon_sym_TILDE_PIPE] = ACTIONS(2719),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2719),
@@ -106918,6 +108433,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2723),
     [anon_sym_LT_EQ] = ACTIONS(2723),
     [anon_sym_LT_EQ_GT] = ACTIONS(2723),
+    [anon_sym_LT_GT] = ACTIONS(2723),
     [anon_sym_EQ_EQ] = ACTIONS(2723),
     [anon_sym_GT_EQ] = ACTIONS(2723),
     [anon_sym_GT_GT] = ACTIONS(2723),
@@ -106926,6 +108442,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2723),
     [anon_sym_CARET_EQ] = ACTIONS(2723),
     [anon_sym_PIPE_EQ] = ACTIONS(2723),
+    [anon_sym_PIPE_GT] = ACTIONS(2723),
     [anon_sym_PIPE_PIPE] = ACTIONS(2723),
     [anon_sym_TILDE_PIPE] = ACTIONS(2723),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2723),
@@ -107038,6 +108555,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2733),
     [anon_sym_LT_EQ] = ACTIONS(2733),
     [anon_sym_LT_EQ_GT] = ACTIONS(2733),
+    [anon_sym_LT_GT] = ACTIONS(2733),
     [anon_sym_EQ_EQ] = ACTIONS(2733),
     [anon_sym_GT_EQ] = ACTIONS(2733),
     [anon_sym_GT_GT] = ACTIONS(2733),
@@ -107046,6 +108564,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2733),
     [anon_sym_CARET_EQ] = ACTIONS(2733),
     [anon_sym_PIPE_EQ] = ACTIONS(2733),
+    [anon_sym_PIPE_GT] = ACTIONS(2733),
     [anon_sym_PIPE_PIPE] = ACTIONS(2733),
     [anon_sym_TILDE_PIPE] = ACTIONS(2733),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2733),
@@ -107158,6 +108677,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2737),
     [anon_sym_LT_EQ] = ACTIONS(2737),
     [anon_sym_LT_EQ_GT] = ACTIONS(2737),
+    [anon_sym_LT_GT] = ACTIONS(2737),
     [anon_sym_EQ_EQ] = ACTIONS(2737),
     [anon_sym_GT_EQ] = ACTIONS(2737),
     [anon_sym_GT_GT] = ACTIONS(2737),
@@ -107166,6 +108686,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2737),
     [anon_sym_CARET_EQ] = ACTIONS(2737),
     [anon_sym_PIPE_EQ] = ACTIONS(2737),
+    [anon_sym_PIPE_GT] = ACTIONS(2737),
     [anon_sym_PIPE_PIPE] = ACTIONS(2737),
     [anon_sym_TILDE_PIPE] = ACTIONS(2737),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2737),
@@ -107278,6 +108799,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2542),
     [anon_sym_LT_EQ] = ACTIONS(2542),
     [anon_sym_LT_EQ_GT] = ACTIONS(2542),
+    [anon_sym_LT_GT] = ACTIONS(2542),
     [anon_sym_EQ_EQ] = ACTIONS(2542),
     [anon_sym_GT_EQ] = ACTIONS(2542),
     [anon_sym_GT_GT] = ACTIONS(2542),
@@ -107286,6 +108808,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2542),
     [anon_sym_CARET_EQ] = ACTIONS(2542),
     [anon_sym_PIPE_EQ] = ACTIONS(2542),
+    [anon_sym_PIPE_GT] = ACTIONS(2542),
     [anon_sym_PIPE_PIPE] = ACTIONS(2542),
     [anon_sym_TILDE_PIPE] = ACTIONS(2542),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2542),
@@ -107398,6 +108921,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2407),
     [anon_sym_LT_EQ] = ACTIONS(2407),
     [anon_sym_LT_EQ_GT] = ACTIONS(2407),
+    [anon_sym_LT_GT] = ACTIONS(2407),
     [anon_sym_EQ_EQ] = ACTIONS(2407),
     [anon_sym_GT_EQ] = ACTIONS(2407),
     [anon_sym_GT_GT] = ACTIONS(2407),
@@ -107406,6 +108930,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2407),
     [anon_sym_CARET_EQ] = ACTIONS(2407),
     [anon_sym_PIPE_EQ] = ACTIONS(2407),
+    [anon_sym_PIPE_GT] = ACTIONS(2407),
     [anon_sym_PIPE_PIPE] = ACTIONS(2407),
     [anon_sym_TILDE_PIPE] = ACTIONS(2407),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2407),
@@ -107518,6 +109043,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2546),
     [anon_sym_LT_EQ] = ACTIONS(2546),
     [anon_sym_LT_EQ_GT] = ACTIONS(2546),
+    [anon_sym_LT_GT] = ACTIONS(2546),
     [anon_sym_EQ_EQ] = ACTIONS(2546),
     [anon_sym_GT_EQ] = ACTIONS(2546),
     [anon_sym_GT_GT] = ACTIONS(2546),
@@ -107526,6 +109052,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2546),
     [anon_sym_CARET_EQ] = ACTIONS(2546),
     [anon_sym_PIPE_EQ] = ACTIONS(2546),
+    [anon_sym_PIPE_GT] = ACTIONS(2546),
     [anon_sym_PIPE_PIPE] = ACTIONS(2546),
     [anon_sym_TILDE_PIPE] = ACTIONS(2546),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2546),
@@ -107638,6 +109165,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2476),
     [anon_sym_LT_EQ] = ACTIONS(2476),
     [anon_sym_LT_EQ_GT] = ACTIONS(2476),
+    [anon_sym_LT_GT] = ACTIONS(2476),
     [anon_sym_EQ_EQ] = ACTIONS(2476),
     [anon_sym_GT_EQ] = ACTIONS(2476),
     [anon_sym_GT_GT] = ACTIONS(2476),
@@ -107646,6 +109174,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2476),
     [anon_sym_CARET_EQ] = ACTIONS(2476),
     [anon_sym_PIPE_EQ] = ACTIONS(2476),
+    [anon_sym_PIPE_GT] = ACTIONS(2476),
     [anon_sym_PIPE_PIPE] = ACTIONS(2476),
     [anon_sym_TILDE_PIPE] = ACTIONS(2476),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2476),
@@ -107758,6 +109287,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2562),
     [anon_sym_LT_EQ] = ACTIONS(2562),
     [anon_sym_LT_EQ_GT] = ACTIONS(2562),
+    [anon_sym_LT_GT] = ACTIONS(2562),
     [anon_sym_EQ_EQ] = ACTIONS(2562),
     [anon_sym_GT_EQ] = ACTIONS(2562),
     [anon_sym_GT_GT] = ACTIONS(2562),
@@ -107766,6 +109296,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2562),
     [anon_sym_CARET_EQ] = ACTIONS(2562),
     [anon_sym_PIPE_EQ] = ACTIONS(2562),
+    [anon_sym_PIPE_GT] = ACTIONS(2562),
     [anon_sym_PIPE_PIPE] = ACTIONS(2562),
     [anon_sym_TILDE_PIPE] = ACTIONS(2562),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2562),
@@ -107878,6 +109409,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2651),
     [anon_sym_LT_EQ] = ACTIONS(2651),
     [anon_sym_LT_EQ_GT] = ACTIONS(2651),
+    [anon_sym_LT_GT] = ACTIONS(2651),
     [anon_sym_EQ_EQ] = ACTIONS(2651),
     [anon_sym_GT_EQ] = ACTIONS(2651),
     [anon_sym_GT_GT] = ACTIONS(2651),
@@ -107886,6 +109418,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2651),
     [anon_sym_CARET_EQ] = ACTIONS(2651),
     [anon_sym_PIPE_EQ] = ACTIONS(2651),
+    [anon_sym_PIPE_GT] = ACTIONS(2651),
     [anon_sym_PIPE_PIPE] = ACTIONS(2651),
     [anon_sym_TILDE_PIPE] = ACTIONS(2651),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2651),
@@ -107998,6 +109531,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2576),
     [anon_sym_LT_EQ] = ACTIONS(2576),
     [anon_sym_LT_EQ_GT] = ACTIONS(2576),
+    [anon_sym_LT_GT] = ACTIONS(2576),
     [anon_sym_EQ_EQ] = ACTIONS(2576),
     [anon_sym_GT_EQ] = ACTIONS(2576),
     [anon_sym_GT_GT] = ACTIONS(2576),
@@ -108006,6 +109540,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2576),
     [anon_sym_CARET_EQ] = ACTIONS(2576),
     [anon_sym_PIPE_EQ] = ACTIONS(2576),
+    [anon_sym_PIPE_GT] = ACTIONS(2576),
     [anon_sym_PIPE_PIPE] = ACTIONS(2576),
     [anon_sym_TILDE_PIPE] = ACTIONS(2576),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2576),
@@ -108118,6 +109653,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2484),
     [anon_sym_LT_EQ] = ACTIONS(2484),
     [anon_sym_LT_EQ_GT] = ACTIONS(2484),
+    [anon_sym_LT_GT] = ACTIONS(2484),
     [anon_sym_EQ_EQ] = ACTIONS(2484),
     [anon_sym_GT_EQ] = ACTIONS(2484),
     [anon_sym_GT_GT] = ACTIONS(2484),
@@ -108126,6 +109662,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2484),
     [anon_sym_CARET_EQ] = ACTIONS(2484),
     [anon_sym_PIPE_EQ] = ACTIONS(2484),
+    [anon_sym_PIPE_GT] = ACTIONS(2484),
     [anon_sym_PIPE_PIPE] = ACTIONS(2484),
     [anon_sym_TILDE_PIPE] = ACTIONS(2484),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2484),
@@ -108238,6 +109775,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2488),
     [anon_sym_LT_EQ] = ACTIONS(2488),
     [anon_sym_LT_EQ_GT] = ACTIONS(2488),
+    [anon_sym_LT_GT] = ACTIONS(2488),
     [anon_sym_EQ_EQ] = ACTIONS(2488),
     [anon_sym_GT_EQ] = ACTIONS(2488),
     [anon_sym_GT_GT] = ACTIONS(2488),
@@ -108246,6 +109784,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2488),
     [anon_sym_CARET_EQ] = ACTIONS(2488),
     [anon_sym_PIPE_EQ] = ACTIONS(2488),
+    [anon_sym_PIPE_GT] = ACTIONS(2488),
     [anon_sym_PIPE_PIPE] = ACTIONS(2488),
     [anon_sym_TILDE_PIPE] = ACTIONS(2488),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2488),
@@ -108358,6 +109897,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2492),
     [anon_sym_LT_EQ] = ACTIONS(2492),
     [anon_sym_LT_EQ_GT] = ACTIONS(2492),
+    [anon_sym_LT_GT] = ACTIONS(2492),
     [anon_sym_EQ_EQ] = ACTIONS(2492),
     [anon_sym_GT_EQ] = ACTIONS(2492),
     [anon_sym_GT_GT] = ACTIONS(2492),
@@ -108366,6 +109906,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2492),
     [anon_sym_CARET_EQ] = ACTIONS(2492),
     [anon_sym_PIPE_EQ] = ACTIONS(2492),
+    [anon_sym_PIPE_GT] = ACTIONS(2492),
     [anon_sym_PIPE_PIPE] = ACTIONS(2492),
     [anon_sym_TILDE_PIPE] = ACTIONS(2492),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2492),
@@ -108478,6 +110019,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2770),
     [anon_sym_LT_EQ] = ACTIONS(2770),
     [anon_sym_LT_EQ_GT] = ACTIONS(2770),
+    [anon_sym_LT_GT] = ACTIONS(2770),
     [anon_sym_EQ_EQ] = ACTIONS(2770),
     [anon_sym_GT_EQ] = ACTIONS(2770),
     [anon_sym_GT_GT] = ACTIONS(2770),
@@ -108486,6 +110028,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2770),
     [anon_sym_CARET_EQ] = ACTIONS(2770),
     [anon_sym_PIPE_EQ] = ACTIONS(2770),
+    [anon_sym_PIPE_GT] = ACTIONS(2770),
     [anon_sym_PIPE_PIPE] = ACTIONS(2770),
     [anon_sym_TILDE_PIPE] = ACTIONS(2770),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2770),
@@ -108598,6 +110141,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2500),
     [anon_sym_LT_EQ] = ACTIONS(2500),
     [anon_sym_LT_EQ_GT] = ACTIONS(2500),
+    [anon_sym_LT_GT] = ACTIONS(2500),
     [anon_sym_EQ_EQ] = ACTIONS(2500),
     [anon_sym_GT_EQ] = ACTIONS(2500),
     [anon_sym_GT_GT] = ACTIONS(2500),
@@ -108606,6 +110150,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2500),
     [anon_sym_CARET_EQ] = ACTIONS(2500),
     [anon_sym_PIPE_EQ] = ACTIONS(2500),
+    [anon_sym_PIPE_GT] = ACTIONS(2500),
     [anon_sym_PIPE_PIPE] = ACTIONS(2500),
     [anon_sym_TILDE_PIPE] = ACTIONS(2500),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2500),
@@ -108718,6 +110263,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2597),
     [anon_sym_LT_EQ] = ACTIONS(2597),
     [anon_sym_LT_EQ_GT] = ACTIONS(2597),
+    [anon_sym_LT_GT] = ACTIONS(2597),
     [anon_sym_EQ_EQ] = ACTIONS(2597),
     [anon_sym_GT_EQ] = ACTIONS(2597),
     [anon_sym_GT_GT] = ACTIONS(2597),
@@ -108726,6 +110272,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2597),
     [anon_sym_CARET_EQ] = ACTIONS(2597),
     [anon_sym_PIPE_EQ] = ACTIONS(2597),
+    [anon_sym_PIPE_GT] = ACTIONS(2597),
     [anon_sym_PIPE_PIPE] = ACTIONS(2597),
     [anon_sym_TILDE_PIPE] = ACTIONS(2597),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2597),
@@ -108838,6 +110385,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2456),
     [anon_sym_LT_EQ] = ACTIONS(2456),
     [anon_sym_LT_EQ_GT] = ACTIONS(2456),
+    [anon_sym_LT_GT] = ACTIONS(2456),
     [anon_sym_EQ_EQ] = ACTIONS(2456),
     [anon_sym_GT_EQ] = ACTIONS(2456),
     [anon_sym_GT_GT] = ACTIONS(2456),
@@ -108846,6 +110394,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2456),
     [anon_sym_CARET_EQ] = ACTIONS(2456),
     [anon_sym_PIPE_EQ] = ACTIONS(2456),
+    [anon_sym_PIPE_GT] = ACTIONS(2456),
     [anon_sym_PIPE_PIPE] = ACTIONS(2456),
     [anon_sym_TILDE_PIPE] = ACTIONS(2456),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2456),
@@ -108958,6 +110507,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2391),
     [anon_sym_LT_EQ] = ACTIONS(2391),
     [anon_sym_LT_EQ_GT] = ACTIONS(2391),
+    [anon_sym_LT_GT] = ACTIONS(2391),
     [anon_sym_EQ_EQ] = ACTIONS(2391),
     [anon_sym_GT_EQ] = ACTIONS(2391),
     [anon_sym_GT_GT] = ACTIONS(2391),
@@ -108966,6 +110516,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2391),
     [anon_sym_CARET_EQ] = ACTIONS(2391),
     [anon_sym_PIPE_EQ] = ACTIONS(2391),
+    [anon_sym_PIPE_GT] = ACTIONS(2391),
     [anon_sym_PIPE_PIPE] = ACTIONS(2391),
     [anon_sym_TILDE_PIPE] = ACTIONS(2391),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2391),
@@ -109078,6 +110629,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2605),
     [anon_sym_LT_EQ] = ACTIONS(2605),
     [anon_sym_LT_EQ_GT] = ACTIONS(2605),
+    [anon_sym_LT_GT] = ACTIONS(2605),
     [anon_sym_EQ_EQ] = ACTIONS(2605),
     [anon_sym_GT_EQ] = ACTIONS(2605),
     [anon_sym_GT_GT] = ACTIONS(2605),
@@ -109086,6 +110638,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2605),
     [anon_sym_CARET_EQ] = ACTIONS(2605),
     [anon_sym_PIPE_EQ] = ACTIONS(2605),
+    [anon_sym_PIPE_GT] = ACTIONS(2605),
     [anon_sym_PIPE_PIPE] = ACTIONS(2605),
     [anon_sym_TILDE_PIPE] = ACTIONS(2605),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2605),
@@ -109198,6 +110751,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2504),
     [anon_sym_LT_EQ] = ACTIONS(2504),
     [anon_sym_LT_EQ_GT] = ACTIONS(2504),
+    [anon_sym_LT_GT] = ACTIONS(2504),
     [anon_sym_EQ_EQ] = ACTIONS(2504),
     [anon_sym_GT_EQ] = ACTIONS(2504),
     [anon_sym_GT_GT] = ACTIONS(2504),
@@ -109206,6 +110760,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2504),
     [anon_sym_CARET_EQ] = ACTIONS(2504),
     [anon_sym_PIPE_EQ] = ACTIONS(2504),
+    [anon_sym_PIPE_GT] = ACTIONS(2504),
     [anon_sym_PIPE_PIPE] = ACTIONS(2504),
     [anon_sym_TILDE_PIPE] = ACTIONS(2504),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2504),
@@ -109318,6 +110873,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2613),
     [anon_sym_LT_EQ] = ACTIONS(2613),
     [anon_sym_LT_EQ_GT] = ACTIONS(2613),
+    [anon_sym_LT_GT] = ACTIONS(2613),
     [anon_sym_EQ_EQ] = ACTIONS(2613),
     [anon_sym_GT_EQ] = ACTIONS(2613),
     [anon_sym_GT_GT] = ACTIONS(2613),
@@ -109326,6 +110882,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2613),
     [anon_sym_CARET_EQ] = ACTIONS(2613),
     [anon_sym_PIPE_EQ] = ACTIONS(2613),
+    [anon_sym_PIPE_GT] = ACTIONS(2613),
     [anon_sym_PIPE_PIPE] = ACTIONS(2613),
     [anon_sym_TILDE_PIPE] = ACTIONS(2613),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2613),
@@ -109438,6 +110995,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2621),
     [anon_sym_LT_EQ] = ACTIONS(2621),
     [anon_sym_LT_EQ_GT] = ACTIONS(2621),
+    [anon_sym_LT_GT] = ACTIONS(2621),
     [anon_sym_EQ_EQ] = ACTIONS(2621),
     [anon_sym_GT_EQ] = ACTIONS(2621),
     [anon_sym_GT_GT] = ACTIONS(2621),
@@ -109446,6 +111004,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2621),
     [anon_sym_CARET_EQ] = ACTIONS(2621),
     [anon_sym_PIPE_EQ] = ACTIONS(2621),
+    [anon_sym_PIPE_GT] = ACTIONS(2621),
     [anon_sym_PIPE_PIPE] = ACTIONS(2621),
     [anon_sym_TILDE_PIPE] = ACTIONS(2621),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2621),
@@ -109558,6 +111117,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2411),
     [anon_sym_LT_EQ] = ACTIONS(2411),
     [anon_sym_LT_EQ_GT] = ACTIONS(2411),
+    [anon_sym_LT_GT] = ACTIONS(2411),
     [anon_sym_EQ_EQ] = ACTIONS(2411),
     [anon_sym_GT_EQ] = ACTIONS(2411),
     [anon_sym_GT_GT] = ACTIONS(2411),
@@ -109566,6 +111126,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2411),
     [anon_sym_CARET_EQ] = ACTIONS(2411),
     [anon_sym_PIPE_EQ] = ACTIONS(2411),
+    [anon_sym_PIPE_GT] = ACTIONS(2411),
     [anon_sym_PIPE_PIPE] = ACTIONS(2411),
     [anon_sym_TILDE_PIPE] = ACTIONS(2411),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2411),
@@ -109678,6 +111239,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2629),
     [anon_sym_LT_EQ] = ACTIONS(2629),
     [anon_sym_LT_EQ_GT] = ACTIONS(2629),
+    [anon_sym_LT_GT] = ACTIONS(2629),
     [anon_sym_EQ_EQ] = ACTIONS(2629),
     [anon_sym_GT_EQ] = ACTIONS(2629),
     [anon_sym_GT_GT] = ACTIONS(2629),
@@ -109686,6 +111248,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2629),
     [anon_sym_CARET_EQ] = ACTIONS(2629),
     [anon_sym_PIPE_EQ] = ACTIONS(2629),
+    [anon_sym_PIPE_GT] = ACTIONS(2629),
     [anon_sym_PIPE_PIPE] = ACTIONS(2629),
     [anon_sym_TILDE_PIPE] = ACTIONS(2629),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2629),
@@ -109798,6 +111361,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2395),
     [anon_sym_LT_EQ] = ACTIONS(2395),
     [anon_sym_LT_EQ_GT] = ACTIONS(2395),
+    [anon_sym_LT_GT] = ACTIONS(2395),
     [anon_sym_EQ_EQ] = ACTIONS(2395),
     [anon_sym_GT_EQ] = ACTIONS(2395),
     [anon_sym_GT_GT] = ACTIONS(2395),
@@ -109806,6 +111370,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2395),
     [anon_sym_CARET_EQ] = ACTIONS(2395),
     [anon_sym_PIPE_EQ] = ACTIONS(2395),
+    [anon_sym_PIPE_GT] = ACTIONS(2395),
     [anon_sym_PIPE_PIPE] = ACTIONS(2395),
     [anon_sym_TILDE_PIPE] = ACTIONS(2395),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2395),
@@ -109918,6 +111483,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2633),
     [anon_sym_LT_EQ] = ACTIONS(2633),
     [anon_sym_LT_EQ_GT] = ACTIONS(2633),
+    [anon_sym_LT_GT] = ACTIONS(2633),
     [anon_sym_EQ_EQ] = ACTIONS(2633),
     [anon_sym_GT_EQ] = ACTIONS(2633),
     [anon_sym_GT_GT] = ACTIONS(2633),
@@ -109926,6 +111492,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2633),
     [anon_sym_CARET_EQ] = ACTIONS(2633),
     [anon_sym_PIPE_EQ] = ACTIONS(2633),
+    [anon_sym_PIPE_GT] = ACTIONS(2633),
     [anon_sym_PIPE_PIPE] = ACTIONS(2633),
     [anon_sym_TILDE_PIPE] = ACTIONS(2633),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2633),
@@ -110038,6 +111605,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2637),
     [anon_sym_LT_EQ] = ACTIONS(2637),
     [anon_sym_LT_EQ_GT] = ACTIONS(2637),
+    [anon_sym_LT_GT] = ACTIONS(2637),
     [anon_sym_EQ_EQ] = ACTIONS(2637),
     [anon_sym_GT_EQ] = ACTIONS(2637),
     [anon_sym_GT_GT] = ACTIONS(2637),
@@ -110046,6 +111614,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2637),
     [anon_sym_CARET_EQ] = ACTIONS(2637),
     [anon_sym_PIPE_EQ] = ACTIONS(2637),
+    [anon_sym_PIPE_GT] = ACTIONS(2637),
     [anon_sym_PIPE_PIPE] = ACTIONS(2637),
     [anon_sym_TILDE_PIPE] = ACTIONS(2637),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2637),
@@ -110158,6 +111727,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2508),
     [anon_sym_LT_EQ] = ACTIONS(2508),
     [anon_sym_LT_EQ_GT] = ACTIONS(2508),
+    [anon_sym_LT_GT] = ACTIONS(2508),
     [anon_sym_EQ_EQ] = ACTIONS(2508),
     [anon_sym_GT_EQ] = ACTIONS(2508),
     [anon_sym_GT_GT] = ACTIONS(2508),
@@ -110166,6 +111736,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2508),
     [anon_sym_CARET_EQ] = ACTIONS(2508),
     [anon_sym_PIPE_EQ] = ACTIONS(2508),
+    [anon_sym_PIPE_GT] = ACTIONS(2508),
     [anon_sym_PIPE_PIPE] = ACTIONS(2508),
     [anon_sym_TILDE_PIPE] = ACTIONS(2508),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2508),
@@ -110278,6 +111849,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2347),
     [anon_sym_LT_EQ] = ACTIONS(2347),
     [anon_sym_LT_EQ_GT] = ACTIONS(2347),
+    [anon_sym_LT_GT] = ACTIONS(2347),
     [anon_sym_EQ_EQ] = ACTIONS(2347),
     [anon_sym_GT_EQ] = ACTIONS(2347),
     [anon_sym_GT_GT] = ACTIONS(2347),
@@ -110286,6 +111858,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2347),
     [anon_sym_CARET_EQ] = ACTIONS(2347),
     [anon_sym_PIPE_EQ] = ACTIONS(2347),
+    [anon_sym_PIPE_GT] = ACTIONS(2347),
     [anon_sym_PIPE_PIPE] = ACTIONS(2347),
     [anon_sym_TILDE_PIPE] = ACTIONS(2347),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2347),
@@ -110398,6 +111971,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2647),
     [anon_sym_LT_EQ] = ACTIONS(2647),
     [anon_sym_LT_EQ_GT] = ACTIONS(2647),
+    [anon_sym_LT_GT] = ACTIONS(2647),
     [anon_sym_EQ_EQ] = ACTIONS(2647),
     [anon_sym_GT_EQ] = ACTIONS(2647),
     [anon_sym_GT_GT] = ACTIONS(2647),
@@ -110406,6 +111980,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2647),
     [anon_sym_CARET_EQ] = ACTIONS(2647),
     [anon_sym_PIPE_EQ] = ACTIONS(2647),
+    [anon_sym_PIPE_GT] = ACTIONS(2647),
     [anon_sym_PIPE_PIPE] = ACTIONS(2647),
     [anon_sym_TILDE_PIPE] = ACTIONS(2647),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2647),
@@ -110518,6 +112093,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2512),
     [anon_sym_LT_EQ] = ACTIONS(2512),
     [anon_sym_LT_EQ_GT] = ACTIONS(2512),
+    [anon_sym_LT_GT] = ACTIONS(2512),
     [anon_sym_EQ_EQ] = ACTIONS(2512),
     [anon_sym_GT_EQ] = ACTIONS(2512),
     [anon_sym_GT_GT] = ACTIONS(2512),
@@ -110526,6 +112102,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2512),
     [anon_sym_CARET_EQ] = ACTIONS(2512),
     [anon_sym_PIPE_EQ] = ACTIONS(2512),
+    [anon_sym_PIPE_GT] = ACTIONS(2512),
     [anon_sym_PIPE_PIPE] = ACTIONS(2512),
     [anon_sym_TILDE_PIPE] = ACTIONS(2512),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2512),
@@ -110638,6 +112215,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2657),
     [anon_sym_LT_EQ] = ACTIONS(2657),
     [anon_sym_LT_EQ_GT] = ACTIONS(2657),
+    [anon_sym_LT_GT] = ACTIONS(2657),
     [anon_sym_EQ_EQ] = ACTIONS(2657),
     [anon_sym_GT_EQ] = ACTIONS(2657),
     [anon_sym_GT_GT] = ACTIONS(2657),
@@ -110646,6 +112224,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2657),
     [anon_sym_CARET_EQ] = ACTIONS(2657),
     [anon_sym_PIPE_EQ] = ACTIONS(2657),
+    [anon_sym_PIPE_GT] = ACTIONS(2657),
     [anon_sym_PIPE_PIPE] = ACTIONS(2657),
     [anon_sym_TILDE_PIPE] = ACTIONS(2657),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2657),
@@ -110758,6 +112337,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2661),
     [anon_sym_LT_EQ] = ACTIONS(2661),
     [anon_sym_LT_EQ_GT] = ACTIONS(2661),
+    [anon_sym_LT_GT] = ACTIONS(2661),
     [anon_sym_EQ_EQ] = ACTIONS(2661),
     [anon_sym_GT_EQ] = ACTIONS(2661),
     [anon_sym_GT_GT] = ACTIONS(2661),
@@ -110766,6 +112346,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2661),
     [anon_sym_CARET_EQ] = ACTIONS(2661),
     [anon_sym_PIPE_EQ] = ACTIONS(2661),
+    [anon_sym_PIPE_GT] = ACTIONS(2661),
     [anon_sym_PIPE_PIPE] = ACTIONS(2661),
     [anon_sym_TILDE_PIPE] = ACTIONS(2661),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2661),
@@ -110878,6 +112459,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2665),
     [anon_sym_LT_EQ] = ACTIONS(2665),
     [anon_sym_LT_EQ_GT] = ACTIONS(2665),
+    [anon_sym_LT_GT] = ACTIONS(2665),
     [anon_sym_EQ_EQ] = ACTIONS(2665),
     [anon_sym_GT_EQ] = ACTIONS(2665),
     [anon_sym_GT_GT] = ACTIONS(2665),
@@ -110886,6 +112468,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2665),
     [anon_sym_CARET_EQ] = ACTIONS(2665),
     [anon_sym_PIPE_EQ] = ACTIONS(2665),
+    [anon_sym_PIPE_GT] = ACTIONS(2665),
     [anon_sym_PIPE_PIPE] = ACTIONS(2665),
     [anon_sym_TILDE_PIPE] = ACTIONS(2665),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2665),
@@ -110998,6 +112581,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2669),
     [anon_sym_LT_EQ] = ACTIONS(2669),
     [anon_sym_LT_EQ_GT] = ACTIONS(2669),
+    [anon_sym_LT_GT] = ACTIONS(2669),
     [anon_sym_EQ_EQ] = ACTIONS(2669),
     [anon_sym_GT_EQ] = ACTIONS(2669),
     [anon_sym_GT_GT] = ACTIONS(2669),
@@ -111006,6 +112590,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2669),
     [anon_sym_CARET_EQ] = ACTIONS(2669),
     [anon_sym_PIPE_EQ] = ACTIONS(2669),
+    [anon_sym_PIPE_GT] = ACTIONS(2669),
     [anon_sym_PIPE_PIPE] = ACTIONS(2669),
     [anon_sym_TILDE_PIPE] = ACTIONS(2669),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2669),
@@ -111118,6 +112703,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2399),
     [anon_sym_LT_EQ] = ACTIONS(2399),
     [anon_sym_LT_EQ_GT] = ACTIONS(2399),
+    [anon_sym_LT_GT] = ACTIONS(2399),
     [anon_sym_EQ_EQ] = ACTIONS(2399),
     [anon_sym_GT_EQ] = ACTIONS(2399),
     [anon_sym_GT_GT] = ACTIONS(2399),
@@ -111126,6 +112712,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2399),
     [anon_sym_CARET_EQ] = ACTIONS(2399),
     [anon_sym_PIPE_EQ] = ACTIONS(2399),
+    [anon_sym_PIPE_GT] = ACTIONS(2399),
     [anon_sym_PIPE_PIPE] = ACTIONS(2399),
     [anon_sym_TILDE_PIPE] = ACTIONS(2399),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2399),
@@ -111238,6 +112825,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2673),
     [anon_sym_LT_EQ] = ACTIONS(2673),
     [anon_sym_LT_EQ_GT] = ACTIONS(2673),
+    [anon_sym_LT_GT] = ACTIONS(2673),
     [anon_sym_EQ_EQ] = ACTIONS(2673),
     [anon_sym_GT_EQ] = ACTIONS(2673),
     [anon_sym_GT_GT] = ACTIONS(2673),
@@ -111246,6 +112834,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2673),
     [anon_sym_CARET_EQ] = ACTIONS(2673),
     [anon_sym_PIPE_EQ] = ACTIONS(2673),
+    [anon_sym_PIPE_GT] = ACTIONS(2673),
     [anon_sym_PIPE_PIPE] = ACTIONS(2673),
     [anon_sym_TILDE_PIPE] = ACTIONS(2673),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2673),
@@ -111358,6 +112947,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2677),
     [anon_sym_LT_EQ] = ACTIONS(2677),
     [anon_sym_LT_EQ_GT] = ACTIONS(2677),
+    [anon_sym_LT_GT] = ACTIONS(2677),
     [anon_sym_EQ_EQ] = ACTIONS(2677),
     [anon_sym_GT_EQ] = ACTIONS(2677),
     [anon_sym_GT_GT] = ACTIONS(2677),
@@ -111366,6 +112956,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2677),
     [anon_sym_CARET_EQ] = ACTIONS(2677),
     [anon_sym_PIPE_EQ] = ACTIONS(2677),
+    [anon_sym_PIPE_GT] = ACTIONS(2677),
     [anon_sym_PIPE_PIPE] = ACTIONS(2677),
     [anon_sym_TILDE_PIPE] = ACTIONS(2677),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2677),
@@ -111478,6 +113069,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2681),
     [anon_sym_LT_EQ] = ACTIONS(2681),
     [anon_sym_LT_EQ_GT] = ACTIONS(2681),
+    [anon_sym_LT_GT] = ACTIONS(2681),
     [anon_sym_EQ_EQ] = ACTIONS(2681),
     [anon_sym_GT_EQ] = ACTIONS(2681),
     [anon_sym_GT_GT] = ACTIONS(2681),
@@ -111486,6 +113078,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2681),
     [anon_sym_CARET_EQ] = ACTIONS(2681),
     [anon_sym_PIPE_EQ] = ACTIONS(2681),
+    [anon_sym_PIPE_GT] = ACTIONS(2681),
     [anon_sym_PIPE_PIPE] = ACTIONS(2681),
     [anon_sym_TILDE_PIPE] = ACTIONS(2681),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2681),
@@ -111598,6 +113191,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2685),
     [anon_sym_LT_EQ] = ACTIONS(2685),
     [anon_sym_LT_EQ_GT] = ACTIONS(2685),
+    [anon_sym_LT_GT] = ACTIONS(2685),
     [anon_sym_EQ_EQ] = ACTIONS(2685),
     [anon_sym_GT_EQ] = ACTIONS(2685),
     [anon_sym_GT_GT] = ACTIONS(2685),
@@ -111606,6 +113200,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2685),
     [anon_sym_CARET_EQ] = ACTIONS(2685),
     [anon_sym_PIPE_EQ] = ACTIONS(2685),
+    [anon_sym_PIPE_GT] = ACTIONS(2685),
     [anon_sym_PIPE_PIPE] = ACTIONS(2685),
     [anon_sym_TILDE_PIPE] = ACTIONS(2685),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2685),
@@ -111718,6 +113313,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2689),
     [anon_sym_LT_EQ] = ACTIONS(2689),
     [anon_sym_LT_EQ_GT] = ACTIONS(2689),
+    [anon_sym_LT_GT] = ACTIONS(2689),
     [anon_sym_EQ_EQ] = ACTIONS(2689),
     [anon_sym_GT_EQ] = ACTIONS(2689),
     [anon_sym_GT_GT] = ACTIONS(2689),
@@ -111726,6 +113322,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2689),
     [anon_sym_CARET_EQ] = ACTIONS(2689),
     [anon_sym_PIPE_EQ] = ACTIONS(2689),
+    [anon_sym_PIPE_GT] = ACTIONS(2689),
     [anon_sym_PIPE_PIPE] = ACTIONS(2689),
     [anon_sym_TILDE_PIPE] = ACTIONS(2689),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2689),
@@ -111838,6 +113435,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2415),
     [anon_sym_LT_EQ] = ACTIONS(2415),
     [anon_sym_LT_EQ_GT] = ACTIONS(2415),
+    [anon_sym_LT_GT] = ACTIONS(2415),
     [anon_sym_EQ_EQ] = ACTIONS(2415),
     [anon_sym_GT_EQ] = ACTIONS(2415),
     [anon_sym_GT_GT] = ACTIONS(2415),
@@ -111846,6 +113444,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2415),
     [anon_sym_CARET_EQ] = ACTIONS(2415),
     [anon_sym_PIPE_EQ] = ACTIONS(2415),
+    [anon_sym_PIPE_GT] = ACTIONS(2415),
     [anon_sym_PIPE_PIPE] = ACTIONS(2415),
     [anon_sym_TILDE_PIPE] = ACTIONS(2415),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2415),
@@ -111958,6 +113557,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2699),
     [anon_sym_LT_EQ] = ACTIONS(2699),
     [anon_sym_LT_EQ_GT] = ACTIONS(2699),
+    [anon_sym_LT_GT] = ACTIONS(2699),
     [anon_sym_EQ_EQ] = ACTIONS(2699),
     [anon_sym_GT_EQ] = ACTIONS(2699),
     [anon_sym_GT_GT] = ACTIONS(2699),
@@ -111966,6 +113566,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2699),
     [anon_sym_CARET_EQ] = ACTIONS(2699),
     [anon_sym_PIPE_EQ] = ACTIONS(2699),
+    [anon_sym_PIPE_GT] = ACTIONS(2699),
     [anon_sym_PIPE_PIPE] = ACTIONS(2699),
     [anon_sym_TILDE_PIPE] = ACTIONS(2699),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2699),
@@ -112078,6 +113679,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2516),
     [anon_sym_LT_EQ] = ACTIONS(2516),
     [anon_sym_LT_EQ_GT] = ACTIONS(2516),
+    [anon_sym_LT_GT] = ACTIONS(2516),
     [anon_sym_EQ_EQ] = ACTIONS(2516),
     [anon_sym_GT_EQ] = ACTIONS(2516),
     [anon_sym_GT_GT] = ACTIONS(2516),
@@ -112086,6 +113688,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2516),
     [anon_sym_CARET_EQ] = ACTIONS(2516),
     [anon_sym_PIPE_EQ] = ACTIONS(2516),
+    [anon_sym_PIPE_GT] = ACTIONS(2516),
     [anon_sym_PIPE_PIPE] = ACTIONS(2516),
     [anon_sym_TILDE_PIPE] = ACTIONS(2516),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2516),
@@ -112198,6 +113801,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2703),
     [anon_sym_LT_EQ] = ACTIONS(2703),
     [anon_sym_LT_EQ_GT] = ACTIONS(2703),
+    [anon_sym_LT_GT] = ACTIONS(2703),
     [anon_sym_EQ_EQ] = ACTIONS(2703),
     [anon_sym_GT_EQ] = ACTIONS(2703),
     [anon_sym_GT_GT] = ACTIONS(2703),
@@ -112206,6 +113810,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2703),
     [anon_sym_CARET_EQ] = ACTIONS(2703),
     [anon_sym_PIPE_EQ] = ACTIONS(2703),
+    [anon_sym_PIPE_GT] = ACTIONS(2703),
     [anon_sym_PIPE_PIPE] = ACTIONS(2703),
     [anon_sym_TILDE_PIPE] = ACTIONS(2703),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2703),
@@ -112318,6 +113923,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2707),
     [anon_sym_LT_EQ] = ACTIONS(2707),
     [anon_sym_LT_EQ_GT] = ACTIONS(2707),
+    [anon_sym_LT_GT] = ACTIONS(2707),
     [anon_sym_EQ_EQ] = ACTIONS(2707),
     [anon_sym_GT_EQ] = ACTIONS(2707),
     [anon_sym_GT_GT] = ACTIONS(2707),
@@ -112326,6 +113932,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2707),
     [anon_sym_CARET_EQ] = ACTIONS(2707),
     [anon_sym_PIPE_EQ] = ACTIONS(2707),
+    [anon_sym_PIPE_GT] = ACTIONS(2707),
     [anon_sym_PIPE_PIPE] = ACTIONS(2707),
     [anon_sym_TILDE_PIPE] = ACTIONS(2707),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2707),
@@ -112438,6 +114045,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2711),
     [anon_sym_LT_EQ] = ACTIONS(2711),
     [anon_sym_LT_EQ_GT] = ACTIONS(2711),
+    [anon_sym_LT_GT] = ACTIONS(2711),
     [anon_sym_EQ_EQ] = ACTIONS(2711),
     [anon_sym_GT_EQ] = ACTIONS(2711),
     [anon_sym_GT_GT] = ACTIONS(2711),
@@ -112446,6 +114054,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2711),
     [anon_sym_CARET_EQ] = ACTIONS(2711),
     [anon_sym_PIPE_EQ] = ACTIONS(2711),
+    [anon_sym_PIPE_GT] = ACTIONS(2711),
     [anon_sym_PIPE_PIPE] = ACTIONS(2711),
     [anon_sym_TILDE_PIPE] = ACTIONS(2711),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2711),
@@ -112558,6 +114167,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2715),
     [anon_sym_LT_EQ] = ACTIONS(2715),
     [anon_sym_LT_EQ_GT] = ACTIONS(2715),
+    [anon_sym_LT_GT] = ACTIONS(2715),
     [anon_sym_EQ_EQ] = ACTIONS(2715),
     [anon_sym_GT_EQ] = ACTIONS(2715),
     [anon_sym_GT_GT] = ACTIONS(2715),
@@ -112566,6 +114176,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2715),
     [anon_sym_CARET_EQ] = ACTIONS(2715),
     [anon_sym_PIPE_EQ] = ACTIONS(2715),
+    [anon_sym_PIPE_GT] = ACTIONS(2715),
     [anon_sym_PIPE_PIPE] = ACTIONS(2715),
     [anon_sym_TILDE_PIPE] = ACTIONS(2715),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2715),
@@ -112678,6 +114289,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2520),
     [anon_sym_LT_EQ] = ACTIONS(2520),
     [anon_sym_LT_EQ_GT] = ACTIONS(2520),
+    [anon_sym_LT_GT] = ACTIONS(2520),
     [anon_sym_EQ_EQ] = ACTIONS(2520),
     [anon_sym_GT_EQ] = ACTIONS(2520),
     [anon_sym_GT_GT] = ACTIONS(2520),
@@ -112686,6 +114298,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2520),
     [anon_sym_CARET_EQ] = ACTIONS(2520),
     [anon_sym_PIPE_EQ] = ACTIONS(2520),
+    [anon_sym_PIPE_GT] = ACTIONS(2520),
     [anon_sym_PIPE_PIPE] = ACTIONS(2520),
     [anon_sym_TILDE_PIPE] = ACTIONS(2520),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2520),
@@ -112798,6 +114411,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2719),
     [anon_sym_LT_EQ] = ACTIONS(2719),
     [anon_sym_LT_EQ_GT] = ACTIONS(2719),
+    [anon_sym_LT_GT] = ACTIONS(2719),
     [anon_sym_EQ_EQ] = ACTIONS(2719),
     [anon_sym_GT_EQ] = ACTIONS(2719),
     [anon_sym_GT_GT] = ACTIONS(2719),
@@ -112806,6 +114420,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2719),
     [anon_sym_CARET_EQ] = ACTIONS(2719),
     [anon_sym_PIPE_EQ] = ACTIONS(2719),
+    [anon_sym_PIPE_GT] = ACTIONS(2719),
     [anon_sym_PIPE_PIPE] = ACTIONS(2719),
     [anon_sym_TILDE_PIPE] = ACTIONS(2719),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2719),
@@ -112918,6 +114533,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2723),
     [anon_sym_LT_EQ] = ACTIONS(2723),
     [anon_sym_LT_EQ_GT] = ACTIONS(2723),
+    [anon_sym_LT_GT] = ACTIONS(2723),
     [anon_sym_EQ_EQ] = ACTIONS(2723),
     [anon_sym_GT_EQ] = ACTIONS(2723),
     [anon_sym_GT_GT] = ACTIONS(2723),
@@ -112926,6 +114542,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2723),
     [anon_sym_CARET_EQ] = ACTIONS(2723),
     [anon_sym_PIPE_EQ] = ACTIONS(2723),
+    [anon_sym_PIPE_GT] = ACTIONS(2723),
     [anon_sym_PIPE_PIPE] = ACTIONS(2723),
     [anon_sym_TILDE_PIPE] = ACTIONS(2723),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2723),
@@ -113038,6 +114655,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2733),
     [anon_sym_LT_EQ] = ACTIONS(2733),
     [anon_sym_LT_EQ_GT] = ACTIONS(2733),
+    [anon_sym_LT_GT] = ACTIONS(2733),
     [anon_sym_EQ_EQ] = ACTIONS(2733),
     [anon_sym_GT_EQ] = ACTIONS(2733),
     [anon_sym_GT_GT] = ACTIONS(2733),
@@ -113046,6 +114664,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2733),
     [anon_sym_CARET_EQ] = ACTIONS(2733),
     [anon_sym_PIPE_EQ] = ACTIONS(2733),
+    [anon_sym_PIPE_GT] = ACTIONS(2733),
     [anon_sym_PIPE_PIPE] = ACTIONS(2733),
     [anon_sym_TILDE_PIPE] = ACTIONS(2733),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2733),
@@ -113158,6 +114777,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2737),
     [anon_sym_LT_EQ] = ACTIONS(2737),
     [anon_sym_LT_EQ_GT] = ACTIONS(2737),
+    [anon_sym_LT_GT] = ACTIONS(2737),
     [anon_sym_EQ_EQ] = ACTIONS(2737),
     [anon_sym_GT_EQ] = ACTIONS(2737),
     [anon_sym_GT_GT] = ACTIONS(2737),
@@ -113166,6 +114786,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2737),
     [anon_sym_CARET_EQ] = ACTIONS(2737),
     [anon_sym_PIPE_EQ] = ACTIONS(2737),
+    [anon_sym_PIPE_GT] = ACTIONS(2737),
     [anon_sym_PIPE_PIPE] = ACTIONS(2737),
     [anon_sym_TILDE_PIPE] = ACTIONS(2737),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2737),
@@ -113278,6 +114899,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ_GT] = ACTIONS(2332),
+    [anon_sym_LT_GT] = ACTIONS(2332),
     [anon_sym_EQ_EQ] = ACTIONS(2332),
     [anon_sym_GT_EQ] = ACTIONS(2332),
     [anon_sym_GT_GT] = ACTIONS(2332),
@@ -113286,6 +114908,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2332),
     [anon_sym_CARET_EQ] = ACTIONS(2332),
     [anon_sym_PIPE_EQ] = ACTIONS(2332),
+    [anon_sym_PIPE_GT] = ACTIONS(2332),
     [anon_sym_PIPE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2332),
@@ -113398,6 +115021,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2407),
     [anon_sym_LT_EQ] = ACTIONS(2407),
     [anon_sym_LT_EQ_GT] = ACTIONS(2407),
+    [anon_sym_LT_GT] = ACTIONS(2407),
     [anon_sym_EQ_EQ] = ACTIONS(2407),
     [anon_sym_GT_EQ] = ACTIONS(2407),
     [anon_sym_GT_GT] = ACTIONS(2407),
@@ -113406,6 +115030,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2407),
     [anon_sym_CARET_EQ] = ACTIONS(2407),
     [anon_sym_PIPE_EQ] = ACTIONS(2407),
+    [anon_sym_PIPE_GT] = ACTIONS(2407),
     [anon_sym_PIPE_PIPE] = ACTIONS(2407),
     [anon_sym_TILDE_PIPE] = ACTIONS(2407),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2407),
@@ -113518,6 +115143,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2524),
     [anon_sym_LT_EQ] = ACTIONS(2524),
     [anon_sym_LT_EQ_GT] = ACTIONS(2524),
+    [anon_sym_LT_GT] = ACTIONS(2524),
     [anon_sym_EQ_EQ] = ACTIONS(2524),
     [anon_sym_GT_EQ] = ACTIONS(2524),
     [anon_sym_GT_GT] = ACTIONS(2524),
@@ -113526,6 +115152,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2524),
     [anon_sym_CARET_EQ] = ACTIONS(2524),
     [anon_sym_PIPE_EQ] = ACTIONS(2524),
+    [anon_sym_PIPE_GT] = ACTIONS(2524),
     [anon_sym_PIPE_PIPE] = ACTIONS(2524),
     [anon_sym_TILDE_PIPE] = ACTIONS(2524),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2524),
@@ -113638,6 +115265,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2528),
     [anon_sym_LT_EQ] = ACTIONS(2528),
     [anon_sym_LT_EQ_GT] = ACTIONS(2528),
+    [anon_sym_LT_GT] = ACTIONS(2528),
     [anon_sym_EQ_EQ] = ACTIONS(2528),
     [anon_sym_GT_EQ] = ACTIONS(2528),
     [anon_sym_GT_GT] = ACTIONS(2528),
@@ -113646,6 +115274,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2528),
     [anon_sym_CARET_EQ] = ACTIONS(2528),
     [anon_sym_PIPE_EQ] = ACTIONS(2528),
+    [anon_sym_PIPE_GT] = ACTIONS(2528),
     [anon_sym_PIPE_PIPE] = ACTIONS(2528),
     [anon_sym_TILDE_PIPE] = ACTIONS(2528),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2528),
@@ -113758,6 +115387,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2766),
     [anon_sym_LT_EQ] = ACTIONS(2766),
     [anon_sym_LT_EQ_GT] = ACTIONS(2766),
+    [anon_sym_LT_GT] = ACTIONS(2766),
     [anon_sym_EQ_EQ] = ACTIONS(2766),
     [anon_sym_GT_EQ] = ACTIONS(2766),
     [anon_sym_GT_GT] = ACTIONS(2766),
@@ -113766,6 +115396,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2766),
     [anon_sym_CARET_EQ] = ACTIONS(2766),
     [anon_sym_PIPE_EQ] = ACTIONS(2766),
+    [anon_sym_PIPE_GT] = ACTIONS(2766),
     [anon_sym_PIPE_PIPE] = ACTIONS(2766),
     [anon_sym_TILDE_PIPE] = ACTIONS(2766),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2766),
@@ -113878,6 +115509,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2770),
     [anon_sym_LT_EQ] = ACTIONS(2770),
     [anon_sym_LT_EQ_GT] = ACTIONS(2770),
+    [anon_sym_LT_GT] = ACTIONS(2770),
     [anon_sym_EQ_EQ] = ACTIONS(2770),
     [anon_sym_GT_EQ] = ACTIONS(2770),
     [anon_sym_GT_GT] = ACTIONS(2770),
@@ -113886,6 +115518,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2770),
     [anon_sym_CARET_EQ] = ACTIONS(2770),
     [anon_sym_PIPE_EQ] = ACTIONS(2770),
+    [anon_sym_PIPE_GT] = ACTIONS(2770),
     [anon_sym_PIPE_PIPE] = ACTIONS(2770),
     [anon_sym_TILDE_PIPE] = ACTIONS(2770),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2770),
@@ -113998,6 +115631,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ_GT] = ACTIONS(2332),
+    [anon_sym_LT_GT] = ACTIONS(2332),
     [anon_sym_EQ_EQ] = ACTIONS(2332),
     [anon_sym_GT_EQ] = ACTIONS(2332),
     [anon_sym_GT_GT] = ACTIONS(2332),
@@ -114006,6 +115640,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2332),
     [anon_sym_CARET_EQ] = ACTIONS(2332),
     [anon_sym_PIPE_EQ] = ACTIONS(2332),
+    [anon_sym_PIPE_GT] = ACTIONS(2332),
     [anon_sym_PIPE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2332),
@@ -114118,6 +115753,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ_GT] = ACTIONS(2332),
+    [anon_sym_LT_GT] = ACTIONS(2332),
     [anon_sym_EQ_EQ] = ACTIONS(2332),
     [anon_sym_GT_EQ] = ACTIONS(2332),
     [anon_sym_GT_GT] = ACTIONS(2332),
@@ -114126,6 +115762,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2332),
     [anon_sym_CARET_EQ] = ACTIONS(2332),
     [anon_sym_PIPE_EQ] = ACTIONS(2332),
+    [anon_sym_PIPE_GT] = ACTIONS(2332),
     [anon_sym_PIPE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2332),
@@ -114238,6 +115875,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ_GT] = ACTIONS(2332),
+    [anon_sym_LT_GT] = ACTIONS(2332),
     [anon_sym_EQ_EQ] = ACTIONS(2332),
     [anon_sym_GT_EQ] = ACTIONS(2332),
     [anon_sym_GT_GT] = ACTIONS(2332),
@@ -114246,6 +115884,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2332),
     [anon_sym_CARET_EQ] = ACTIONS(2332),
     [anon_sym_PIPE_EQ] = ACTIONS(2332),
+    [anon_sym_PIPE_GT] = ACTIONS(2332),
     [anon_sym_PIPE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2332),
@@ -114358,6 +115997,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ_GT] = ACTIONS(2332),
+    [anon_sym_LT_GT] = ACTIONS(2332),
     [anon_sym_EQ_EQ] = ACTIONS(2332),
     [anon_sym_GT_EQ] = ACTIONS(2332),
     [anon_sym_GT_GT] = ACTIONS(2332),
@@ -114366,6 +116006,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2332),
     [anon_sym_CARET_EQ] = ACTIONS(2332),
     [anon_sym_PIPE_EQ] = ACTIONS(2332),
+    [anon_sym_PIPE_GT] = ACTIONS(2332),
     [anon_sym_PIPE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2332),
@@ -114478,6 +116119,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2411),
     [anon_sym_LT_EQ] = ACTIONS(2411),
     [anon_sym_LT_EQ_GT] = ACTIONS(2411),
+    [anon_sym_LT_GT] = ACTIONS(2411),
     [anon_sym_EQ_EQ] = ACTIONS(2411),
     [anon_sym_GT_EQ] = ACTIONS(2411),
     [anon_sym_GT_GT] = ACTIONS(2411),
@@ -114486,6 +116128,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2411),
     [anon_sym_CARET_EQ] = ACTIONS(2411),
     [anon_sym_PIPE_EQ] = ACTIONS(2411),
+    [anon_sym_PIPE_GT] = ACTIONS(2411),
     [anon_sym_PIPE_PIPE] = ACTIONS(2411),
     [anon_sym_TILDE_PIPE] = ACTIONS(2411),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2411),
@@ -114598,6 +116241,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2759),
     [anon_sym_LT_EQ] = ACTIONS(2759),
     [anon_sym_LT_EQ_GT] = ACTIONS(2759),
+    [anon_sym_LT_GT] = ACTIONS(2759),
     [anon_sym_EQ_EQ] = ACTIONS(2759),
     [anon_sym_GT_EQ] = ACTIONS(2759),
     [anon_sym_GT_GT] = ACTIONS(2759),
@@ -114606,6 +116250,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2759),
     [anon_sym_CARET_EQ] = ACTIONS(2759),
     [anon_sym_PIPE_EQ] = ACTIONS(2759),
+    [anon_sym_PIPE_GT] = ACTIONS(2759),
     [anon_sym_PIPE_PIPE] = ACTIONS(2759),
     [anon_sym_TILDE_PIPE] = ACTIONS(2759),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2759),
@@ -114718,6 +116363,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2391),
     [anon_sym_LT_EQ] = ACTIONS(2391),
     [anon_sym_LT_EQ_GT] = ACTIONS(2391),
+    [anon_sym_LT_GT] = ACTIONS(2391),
     [anon_sym_EQ_EQ] = ACTIONS(2391),
     [anon_sym_GT_EQ] = ACTIONS(2391),
     [anon_sym_GT_GT] = ACTIONS(2391),
@@ -114726,6 +116372,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2391),
     [anon_sym_CARET_EQ] = ACTIONS(2391),
     [anon_sym_PIPE_EQ] = ACTIONS(2391),
+    [anon_sym_PIPE_GT] = ACTIONS(2391),
     [anon_sym_PIPE_PIPE] = ACTIONS(2391),
     [anon_sym_TILDE_PIPE] = ACTIONS(2391),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2391),
@@ -114838,6 +116485,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2464),
     [anon_sym_LT_EQ] = ACTIONS(2464),
     [anon_sym_LT_EQ_GT] = ACTIONS(2464),
+    [anon_sym_LT_GT] = ACTIONS(2464),
     [anon_sym_EQ_EQ] = ACTIONS(2464),
     [anon_sym_GT_EQ] = ACTIONS(2464),
     [anon_sym_GT_GT] = ACTIONS(2464),
@@ -114846,6 +116494,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2464),
     [anon_sym_CARET_EQ] = ACTIONS(2464),
     [anon_sym_PIPE_EQ] = ACTIONS(2464),
+    [anon_sym_PIPE_GT] = ACTIONS(2464),
     [anon_sym_PIPE_PIPE] = ACTIONS(2464),
     [anon_sym_TILDE_PIPE] = ACTIONS(2464),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2464),
@@ -114958,6 +116607,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2747),
     [anon_sym_LT_EQ] = ACTIONS(2747),
     [anon_sym_LT_EQ_GT] = ACTIONS(2747),
+    [anon_sym_LT_GT] = ACTIONS(2747),
     [anon_sym_EQ_EQ] = ACTIONS(2747),
     [anon_sym_GT_EQ] = ACTIONS(2747),
     [anon_sym_GT_GT] = ACTIONS(2747),
@@ -114966,6 +116616,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2747),
     [anon_sym_CARET_EQ] = ACTIONS(2747),
     [anon_sym_PIPE_EQ] = ACTIONS(2747),
+    [anon_sym_PIPE_GT] = ACTIONS(2747),
     [anon_sym_PIPE_PIPE] = ACTIONS(2747),
     [anon_sym_TILDE_PIPE] = ACTIONS(2747),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2747),
@@ -115078,6 +116729,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2741),
     [anon_sym_LT_EQ] = ACTIONS(2741),
     [anon_sym_LT_EQ_GT] = ACTIONS(2741),
+    [anon_sym_LT_GT] = ACTIONS(2741),
     [anon_sym_EQ_EQ] = ACTIONS(2741),
     [anon_sym_GT_EQ] = ACTIONS(2741),
     [anon_sym_GT_GT] = ACTIONS(2741),
@@ -115086,6 +116738,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2741),
     [anon_sym_CARET_EQ] = ACTIONS(2741),
     [anon_sym_PIPE_EQ] = ACTIONS(2741),
+    [anon_sym_PIPE_GT] = ACTIONS(2741),
     [anon_sym_PIPE_PIPE] = ACTIONS(2741),
     [anon_sym_TILDE_PIPE] = ACTIONS(2741),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2741),
@@ -115198,6 +116851,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2472),
     [anon_sym_LT_EQ] = ACTIONS(2472),
     [anon_sym_LT_EQ_GT] = ACTIONS(2472),
+    [anon_sym_LT_GT] = ACTIONS(2472),
     [anon_sym_EQ_EQ] = ACTIONS(2472),
     [anon_sym_GT_EQ] = ACTIONS(2472),
     [anon_sym_GT_GT] = ACTIONS(2472),
@@ -115206,6 +116860,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2472),
     [anon_sym_CARET_EQ] = ACTIONS(2472),
     [anon_sym_PIPE_EQ] = ACTIONS(2472),
+    [anon_sym_PIPE_GT] = ACTIONS(2472),
     [anon_sym_PIPE_PIPE] = ACTIONS(2472),
     [anon_sym_TILDE_PIPE] = ACTIONS(2472),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2472),
@@ -115318,6 +116973,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2534),
     [anon_sym_LT_EQ] = ACTIONS(2534),
     [anon_sym_LT_EQ_GT] = ACTIONS(2534),
+    [anon_sym_LT_GT] = ACTIONS(2534),
     [anon_sym_EQ_EQ] = ACTIONS(2534),
     [anon_sym_GT_EQ] = ACTIONS(2534),
     [anon_sym_GT_GT] = ACTIONS(2534),
@@ -115326,6 +116982,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2534),
     [anon_sym_CARET_EQ] = ACTIONS(2534),
     [anon_sym_PIPE_EQ] = ACTIONS(2534),
+    [anon_sym_PIPE_GT] = ACTIONS(2534),
     [anon_sym_PIPE_PIPE] = ACTIONS(2534),
     [anon_sym_TILDE_PIPE] = ACTIONS(2534),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2534),
@@ -115438,6 +117095,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2395),
     [anon_sym_LT_EQ] = ACTIONS(2395),
     [anon_sym_LT_EQ_GT] = ACTIONS(2395),
+    [anon_sym_LT_GT] = ACTIONS(2395),
     [anon_sym_EQ_EQ] = ACTIONS(2395),
     [anon_sym_GT_EQ] = ACTIONS(2395),
     [anon_sym_GT_GT] = ACTIONS(2395),
@@ -115446,6 +117104,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2395),
     [anon_sym_CARET_EQ] = ACTIONS(2395),
     [anon_sym_PIPE_EQ] = ACTIONS(2395),
+    [anon_sym_PIPE_GT] = ACTIONS(2395),
     [anon_sym_PIPE_PIPE] = ACTIONS(2395),
     [anon_sym_TILDE_PIPE] = ACTIONS(2395),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2395),
@@ -115558,6 +117217,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2460),
     [anon_sym_LT_EQ] = ACTIONS(2460),
     [anon_sym_LT_EQ_GT] = ACTIONS(2460),
+    [anon_sym_LT_GT] = ACTIONS(2460),
     [anon_sym_EQ_EQ] = ACTIONS(2460),
     [anon_sym_GT_EQ] = ACTIONS(2460),
     [anon_sym_GT_GT] = ACTIONS(2460),
@@ -115566,6 +117226,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2460),
     [anon_sym_CARET_EQ] = ACTIONS(2460),
     [anon_sym_PIPE_EQ] = ACTIONS(2460),
+    [anon_sym_PIPE_GT] = ACTIONS(2460),
     [anon_sym_PIPE_PIPE] = ACTIONS(2460),
     [anon_sym_TILDE_PIPE] = ACTIONS(2460),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2460),
@@ -115678,6 +117339,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2480),
     [anon_sym_LT_EQ] = ACTIONS(2480),
     [anon_sym_LT_EQ_GT] = ACTIONS(2480),
+    [anon_sym_LT_GT] = ACTIONS(2480),
     [anon_sym_EQ_EQ] = ACTIONS(2480),
     [anon_sym_GT_EQ] = ACTIONS(2480),
     [anon_sym_GT_GT] = ACTIONS(2480),
@@ -115686,6 +117348,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2480),
     [anon_sym_CARET_EQ] = ACTIONS(2480),
     [anon_sym_PIPE_EQ] = ACTIONS(2480),
+    [anon_sym_PIPE_GT] = ACTIONS(2480),
     [anon_sym_PIPE_PIPE] = ACTIONS(2480),
     [anon_sym_TILDE_PIPE] = ACTIONS(2480),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2480),
@@ -115798,6 +117461,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2542),
     [anon_sym_LT_EQ] = ACTIONS(2542),
     [anon_sym_LT_EQ_GT] = ACTIONS(2542),
+    [anon_sym_LT_GT] = ACTIONS(2542),
     [anon_sym_EQ_EQ] = ACTIONS(2542),
     [anon_sym_GT_EQ] = ACTIONS(2542),
     [anon_sym_GT_GT] = ACTIONS(2542),
@@ -115806,6 +117470,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2542),
     [anon_sym_CARET_EQ] = ACTIONS(2542),
     [anon_sym_PIPE_EQ] = ACTIONS(2542),
+    [anon_sym_PIPE_GT] = ACTIONS(2542),
     [anon_sym_PIPE_PIPE] = ACTIONS(2542),
     [anon_sym_TILDE_PIPE] = ACTIONS(2542),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2542),
@@ -115918,6 +117583,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2651),
     [anon_sym_LT_EQ] = ACTIONS(2651),
     [anon_sym_LT_EQ_GT] = ACTIONS(2651),
+    [anon_sym_LT_GT] = ACTIONS(2651),
     [anon_sym_EQ_EQ] = ACTIONS(2651),
     [anon_sym_GT_EQ] = ACTIONS(2651),
     [anon_sym_GT_GT] = ACTIONS(2651),
@@ -115926,6 +117592,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2651),
     [anon_sym_CARET_EQ] = ACTIONS(2651),
     [anon_sym_PIPE_EQ] = ACTIONS(2651),
+    [anon_sym_PIPE_GT] = ACTIONS(2651),
     [anon_sym_PIPE_PIPE] = ACTIONS(2651),
     [anon_sym_TILDE_PIPE] = ACTIONS(2651),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2651),
@@ -116038,6 +117705,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2399),
     [anon_sym_LT_EQ] = ACTIONS(2399),
     [anon_sym_LT_EQ_GT] = ACTIONS(2399),
+    [anon_sym_LT_GT] = ACTIONS(2399),
     [anon_sym_EQ_EQ] = ACTIONS(2399),
     [anon_sym_GT_EQ] = ACTIONS(2399),
     [anon_sym_GT_GT] = ACTIONS(2399),
@@ -116046,6 +117714,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2399),
     [anon_sym_CARET_EQ] = ACTIONS(2399),
     [anon_sym_PIPE_EQ] = ACTIONS(2399),
+    [anon_sym_PIPE_GT] = ACTIONS(2399),
     [anon_sym_PIPE_PIPE] = ACTIONS(2399),
     [anon_sym_TILDE_PIPE] = ACTIONS(2399),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2399),
@@ -116158,6 +117827,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2456),
     [anon_sym_LT_EQ] = ACTIONS(2456),
     [anon_sym_LT_EQ_GT] = ACTIONS(2456),
+    [anon_sym_LT_GT] = ACTIONS(2456),
     [anon_sym_EQ_EQ] = ACTIONS(2456),
     [anon_sym_GT_EQ] = ACTIONS(2456),
     [anon_sym_GT_GT] = ACTIONS(2456),
@@ -116166,6 +117836,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2456),
     [anon_sym_CARET_EQ] = ACTIONS(2456),
     [anon_sym_PIPE_EQ] = ACTIONS(2456),
+    [anon_sym_PIPE_GT] = ACTIONS(2456),
     [anon_sym_PIPE_PIPE] = ACTIONS(2456),
     [anon_sym_TILDE_PIPE] = ACTIONS(2456),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2456),
@@ -116278,6 +117949,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2546),
     [anon_sym_LT_EQ] = ACTIONS(2546),
     [anon_sym_LT_EQ_GT] = ACTIONS(2546),
+    [anon_sym_LT_GT] = ACTIONS(2546),
     [anon_sym_EQ_EQ] = ACTIONS(2546),
     [anon_sym_GT_EQ] = ACTIONS(2546),
     [anon_sym_GT_GT] = ACTIONS(2546),
@@ -116286,6 +117958,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2546),
     [anon_sym_CARET_EQ] = ACTIONS(2546),
     [anon_sym_PIPE_EQ] = ACTIONS(2546),
+    [anon_sym_PIPE_GT] = ACTIONS(2546),
     [anon_sym_PIPE_PIPE] = ACTIONS(2546),
     [anon_sym_TILDE_PIPE] = ACTIONS(2546),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2546),
@@ -116398,6 +118071,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2472),
     [anon_sym_LT_EQ] = ACTIONS(2472),
     [anon_sym_LT_EQ_GT] = ACTIONS(2472),
+    [anon_sym_LT_GT] = ACTIONS(2472),
     [anon_sym_EQ_EQ] = ACTIONS(2472),
     [anon_sym_GT_EQ] = ACTIONS(2472),
     [anon_sym_GT_GT] = ACTIONS(2472),
@@ -116406,6 +118080,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2472),
     [anon_sym_CARET_EQ] = ACTIONS(2472),
     [anon_sym_PIPE_EQ] = ACTIONS(2472),
+    [anon_sym_PIPE_GT] = ACTIONS(2472),
     [anon_sym_PIPE_PIPE] = ACTIONS(2472),
     [anon_sym_TILDE_PIPE] = ACTIONS(2472),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2472),
@@ -116518,6 +118193,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2562),
     [anon_sym_LT_EQ] = ACTIONS(2562),
     [anon_sym_LT_EQ_GT] = ACTIONS(2562),
+    [anon_sym_LT_GT] = ACTIONS(2562),
     [anon_sym_EQ_EQ] = ACTIONS(2562),
     [anon_sym_GT_EQ] = ACTIONS(2562),
     [anon_sym_GT_GT] = ACTIONS(2562),
@@ -116526,6 +118202,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2562),
     [anon_sym_CARET_EQ] = ACTIONS(2562),
     [anon_sym_PIPE_EQ] = ACTIONS(2562),
+    [anon_sym_PIPE_GT] = ACTIONS(2562),
     [anon_sym_PIPE_PIPE] = ACTIONS(2562),
     [anon_sym_TILDE_PIPE] = ACTIONS(2562),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2562),
@@ -116638,6 +118315,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2399),
     [anon_sym_LT_EQ] = ACTIONS(2399),
     [anon_sym_LT_EQ_GT] = ACTIONS(2399),
+    [anon_sym_LT_GT] = ACTIONS(2399),
     [anon_sym_EQ_EQ] = ACTIONS(2399),
     [anon_sym_GT_EQ] = ACTIONS(2399),
     [anon_sym_GT_GT] = ACTIONS(2399),
@@ -116646,6 +118324,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2399),
     [anon_sym_CARET_EQ] = ACTIONS(2399),
     [anon_sym_PIPE_EQ] = ACTIONS(2399),
+    [anon_sym_PIPE_GT] = ACTIONS(2399),
     [anon_sym_PIPE_PIPE] = ACTIONS(2399),
     [anon_sym_TILDE_PIPE] = ACTIONS(2399),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2399),
@@ -116758,6 +118437,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2496),
     [anon_sym_LT_EQ] = ACTIONS(2496),
     [anon_sym_LT_EQ_GT] = ACTIONS(2496),
+    [anon_sym_LT_GT] = ACTIONS(2496),
     [anon_sym_EQ_EQ] = ACTIONS(2496),
     [anon_sym_GT_EQ] = ACTIONS(2496),
     [anon_sym_GT_GT] = ACTIONS(2496),
@@ -116766,6 +118446,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2496),
     [anon_sym_CARET_EQ] = ACTIONS(2496),
     [anon_sym_PIPE_EQ] = ACTIONS(2496),
+    [anon_sym_PIPE_GT] = ACTIONS(2496),
     [anon_sym_PIPE_PIPE] = ACTIONS(2496),
     [anon_sym_TILDE_PIPE] = ACTIONS(2496),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2496),
@@ -116878,6 +118559,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2383),
     [anon_sym_LT_EQ] = ACTIONS(2383),
     [anon_sym_LT_EQ_GT] = ACTIONS(2383),
+    [anon_sym_LT_GT] = ACTIONS(2383),
     [anon_sym_EQ_EQ] = ACTIONS(2383),
     [anon_sym_GT_EQ] = ACTIONS(2383),
     [anon_sym_GT_GT] = ACTIONS(2383),
@@ -116886,6 +118568,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2383),
     [anon_sym_CARET_EQ] = ACTIONS(2383),
     [anon_sym_PIPE_EQ] = ACTIONS(2383),
+    [anon_sym_PIPE_GT] = ACTIONS(2383),
     [anon_sym_PIPE_PIPE] = ACTIONS(2383),
     [anon_sym_TILDE_PIPE] = ACTIONS(2383),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2383),
@@ -116998,6 +118681,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2538),
     [anon_sym_LT_EQ] = ACTIONS(2538),
     [anon_sym_LT_EQ_GT] = ACTIONS(2538),
+    [anon_sym_LT_GT] = ACTIONS(2538),
     [anon_sym_EQ_EQ] = ACTIONS(2538),
     [anon_sym_GT_EQ] = ACTIONS(2538),
     [anon_sym_GT_GT] = ACTIONS(2538),
@@ -117006,6 +118690,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2538),
     [anon_sym_CARET_EQ] = ACTIONS(2538),
     [anon_sym_PIPE_EQ] = ACTIONS(2538),
+    [anon_sym_PIPE_GT] = ACTIONS(2538),
     [anon_sym_PIPE_PIPE] = ACTIONS(2538),
     [anon_sym_TILDE_PIPE] = ACTIONS(2538),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2538),
@@ -117118,6 +118803,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2566),
     [anon_sym_LT_EQ] = ACTIONS(2566),
     [anon_sym_LT_EQ_GT] = ACTIONS(2566),
+    [anon_sym_LT_GT] = ACTIONS(2566),
     [anon_sym_EQ_EQ] = ACTIONS(2566),
     [anon_sym_GT_EQ] = ACTIONS(2566),
     [anon_sym_GT_GT] = ACTIONS(2566),
@@ -117126,6 +118812,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2566),
     [anon_sym_CARET_EQ] = ACTIONS(2566),
     [anon_sym_PIPE_EQ] = ACTIONS(2566),
+    [anon_sym_PIPE_GT] = ACTIONS(2566),
     [anon_sym_PIPE_PIPE] = ACTIONS(2566),
     [anon_sym_TILDE_PIPE] = ACTIONS(2566),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2566),
@@ -117238,6 +118925,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2580),
     [anon_sym_LT_EQ] = ACTIONS(2580),
     [anon_sym_LT_EQ_GT] = ACTIONS(2580),
+    [anon_sym_LT_GT] = ACTIONS(2580),
     [anon_sym_EQ_EQ] = ACTIONS(2580),
     [anon_sym_GT_EQ] = ACTIONS(2580),
     [anon_sym_GT_GT] = ACTIONS(2580),
@@ -117246,6 +118934,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2580),
     [anon_sym_CARET_EQ] = ACTIONS(2580),
     [anon_sym_PIPE_EQ] = ACTIONS(2580),
+    [anon_sym_PIPE_GT] = ACTIONS(2580),
     [anon_sym_PIPE_PIPE] = ACTIONS(2580),
     [anon_sym_TILDE_PIPE] = ACTIONS(2580),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2580),
@@ -117358,6 +119047,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2584),
     [anon_sym_LT_EQ] = ACTIONS(2584),
     [anon_sym_LT_EQ_GT] = ACTIONS(2584),
+    [anon_sym_LT_GT] = ACTIONS(2584),
     [anon_sym_EQ_EQ] = ACTIONS(2584),
     [anon_sym_GT_EQ] = ACTIONS(2584),
     [anon_sym_GT_GT] = ACTIONS(2584),
@@ -117366,6 +119056,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2584),
     [anon_sym_CARET_EQ] = ACTIONS(2584),
     [anon_sym_PIPE_EQ] = ACTIONS(2584),
+    [anon_sym_PIPE_GT] = ACTIONS(2584),
     [anon_sym_PIPE_PIPE] = ACTIONS(2584),
     [anon_sym_TILDE_PIPE] = ACTIONS(2584),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2584),
@@ -117478,6 +119169,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2591),
     [anon_sym_LT_EQ] = ACTIONS(2591),
     [anon_sym_LT_EQ_GT] = ACTIONS(2591),
+    [anon_sym_LT_GT] = ACTIONS(2591),
     [anon_sym_EQ_EQ] = ACTIONS(2591),
     [anon_sym_GT_EQ] = ACTIONS(2591),
     [anon_sym_GT_GT] = ACTIONS(2591),
@@ -117486,6 +119178,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2591),
     [anon_sym_CARET_EQ] = ACTIONS(2591),
     [anon_sym_PIPE_EQ] = ACTIONS(2591),
+    [anon_sym_PIPE_GT] = ACTIONS(2591),
     [anon_sym_PIPE_PIPE] = ACTIONS(2591),
     [anon_sym_TILDE_PIPE] = ACTIONS(2591),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2591),
@@ -117598,6 +119291,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2601),
     [anon_sym_LT_EQ] = ACTIONS(2601),
     [anon_sym_LT_EQ_GT] = ACTIONS(2601),
+    [anon_sym_LT_GT] = ACTIONS(2601),
     [anon_sym_EQ_EQ] = ACTIONS(2601),
     [anon_sym_GT_EQ] = ACTIONS(2601),
     [anon_sym_GT_GT] = ACTIONS(2601),
@@ -117606,6 +119300,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2601),
     [anon_sym_CARET_EQ] = ACTIONS(2601),
     [anon_sym_PIPE_EQ] = ACTIONS(2601),
+    [anon_sym_PIPE_GT] = ACTIONS(2601),
     [anon_sym_PIPE_PIPE] = ACTIONS(2601),
     [anon_sym_TILDE_PIPE] = ACTIONS(2601),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2601),
@@ -117718,6 +119413,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2609),
     [anon_sym_LT_EQ] = ACTIONS(2609),
     [anon_sym_LT_EQ_GT] = ACTIONS(2609),
+    [anon_sym_LT_GT] = ACTIONS(2609),
     [anon_sym_EQ_EQ] = ACTIONS(2609),
     [anon_sym_GT_EQ] = ACTIONS(2609),
     [anon_sym_GT_GT] = ACTIONS(2609),
@@ -117726,6 +119422,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2609),
     [anon_sym_CARET_EQ] = ACTIONS(2609),
     [anon_sym_PIPE_EQ] = ACTIONS(2609),
+    [anon_sym_PIPE_GT] = ACTIONS(2609),
     [anon_sym_PIPE_PIPE] = ACTIONS(2609),
     [anon_sym_TILDE_PIPE] = ACTIONS(2609),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2609),
@@ -117838,6 +119535,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2617),
     [anon_sym_LT_EQ] = ACTIONS(2617),
     [anon_sym_LT_EQ_GT] = ACTIONS(2617),
+    [anon_sym_LT_GT] = ACTIONS(2617),
     [anon_sym_EQ_EQ] = ACTIONS(2617),
     [anon_sym_GT_EQ] = ACTIONS(2617),
     [anon_sym_GT_GT] = ACTIONS(2617),
@@ -117846,6 +119544,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2617),
     [anon_sym_CARET_EQ] = ACTIONS(2617),
     [anon_sym_PIPE_EQ] = ACTIONS(2617),
+    [anon_sym_PIPE_GT] = ACTIONS(2617),
     [anon_sym_PIPE_PIPE] = ACTIONS(2617),
     [anon_sym_TILDE_PIPE] = ACTIONS(2617),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2617),
@@ -117958,6 +119657,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2625),
     [anon_sym_LT_EQ] = ACTIONS(2625),
     [anon_sym_LT_EQ_GT] = ACTIONS(2625),
+    [anon_sym_LT_GT] = ACTIONS(2625),
     [anon_sym_EQ_EQ] = ACTIONS(2625),
     [anon_sym_GT_EQ] = ACTIONS(2625),
     [anon_sym_GT_GT] = ACTIONS(2625),
@@ -117966,6 +119666,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2625),
     [anon_sym_CARET_EQ] = ACTIONS(2625),
     [anon_sym_PIPE_EQ] = ACTIONS(2625),
+    [anon_sym_PIPE_GT] = ACTIONS(2625),
     [anon_sym_PIPE_PIPE] = ACTIONS(2625),
     [anon_sym_TILDE_PIPE] = ACTIONS(2625),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2625),
@@ -118078,6 +119779,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2641),
     [anon_sym_LT_EQ] = ACTIONS(2641),
     [anon_sym_LT_EQ_GT] = ACTIONS(2641),
+    [anon_sym_LT_GT] = ACTIONS(2641),
     [anon_sym_EQ_EQ] = ACTIONS(2641),
     [anon_sym_GT_EQ] = ACTIONS(2641),
     [anon_sym_GT_GT] = ACTIONS(2641),
@@ -118086,6 +119788,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2641),
     [anon_sym_CARET_EQ] = ACTIONS(2641),
     [anon_sym_PIPE_EQ] = ACTIONS(2641),
+    [anon_sym_PIPE_GT] = ACTIONS(2641),
     [anon_sym_PIPE_PIPE] = ACTIONS(2641),
     [anon_sym_TILDE_PIPE] = ACTIONS(2641),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2641),
@@ -118198,6 +119901,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ_GT] = ACTIONS(2332),
+    [anon_sym_LT_GT] = ACTIONS(2332),
     [anon_sym_EQ_EQ] = ACTIONS(2332),
     [anon_sym_GT_EQ] = ACTIONS(2332),
     [anon_sym_GT_GT] = ACTIONS(2332),
@@ -118206,6 +119910,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2332),
     [anon_sym_CARET_EQ] = ACTIONS(2332),
     [anon_sym_PIPE_EQ] = ACTIONS(2332),
+    [anon_sym_PIPE_GT] = ACTIONS(2332),
     [anon_sym_PIPE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2332),
@@ -118318,6 +120023,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2576),
     [anon_sym_LT_EQ] = ACTIONS(2576),
     [anon_sym_LT_EQ_GT] = ACTIONS(2576),
+    [anon_sym_LT_GT] = ACTIONS(2576),
     [anon_sym_EQ_EQ] = ACTIONS(2576),
     [anon_sym_GT_EQ] = ACTIONS(2576),
     [anon_sym_GT_GT] = ACTIONS(2576),
@@ -118326,6 +120032,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2576),
     [anon_sym_CARET_EQ] = ACTIONS(2576),
     [anon_sym_PIPE_EQ] = ACTIONS(2576),
+    [anon_sym_PIPE_GT] = ACTIONS(2576),
     [anon_sym_PIPE_PIPE] = ACTIONS(2576),
     [anon_sym_TILDE_PIPE] = ACTIONS(2576),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2576),
@@ -118438,6 +120145,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2791),
     [anon_sym_LT_EQ] = ACTIONS(2791),
     [anon_sym_LT_EQ_GT] = ACTIONS(2791),
+    [anon_sym_LT_GT] = ACTIONS(2791),
     [anon_sym_EQ_EQ] = ACTIONS(2791),
     [anon_sym_GT_EQ] = ACTIONS(2791),
     [anon_sym_GT_GT] = ACTIONS(2791),
@@ -118446,6 +120154,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2791),
     [anon_sym_CARET_EQ] = ACTIONS(2791),
     [anon_sym_PIPE_EQ] = ACTIONS(2791),
+    [anon_sym_PIPE_GT] = ACTIONS(2791),
     [anon_sym_PIPE_PIPE] = ACTIONS(2791),
     [anon_sym_TILDE_PIPE] = ACTIONS(2791),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2791),
@@ -118558,6 +120267,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ_GT] = ACTIONS(2332),
+    [anon_sym_LT_GT] = ACTIONS(2332),
     [anon_sym_EQ_EQ] = ACTIONS(2332),
     [anon_sym_GT_EQ] = ACTIONS(2332),
     [anon_sym_GT_GT] = ACTIONS(2332),
@@ -118566,6 +120276,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2332),
     [anon_sym_CARET_EQ] = ACTIONS(2332),
     [anon_sym_PIPE_EQ] = ACTIONS(2332),
+    [anon_sym_PIPE_GT] = ACTIONS(2332),
     [anon_sym_PIPE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2332),
@@ -118678,6 +120389,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2751),
     [anon_sym_LT_EQ] = ACTIONS(2751),
     [anon_sym_LT_EQ_GT] = ACTIONS(2751),
+    [anon_sym_LT_GT] = ACTIONS(2751),
     [anon_sym_EQ_EQ] = ACTIONS(2751),
     [anon_sym_GT_EQ] = ACTIONS(2751),
     [anon_sym_GT_GT] = ACTIONS(2751),
@@ -118686,6 +120398,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2751),
     [anon_sym_CARET_EQ] = ACTIONS(2751),
     [anon_sym_PIPE_EQ] = ACTIONS(2751),
+    [anon_sym_PIPE_GT] = ACTIONS(2751),
     [anon_sym_PIPE_PIPE] = ACTIONS(2751),
     [anon_sym_TILDE_PIPE] = ACTIONS(2751),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2751),
@@ -118798,6 +120511,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2383),
     [anon_sym_LT_EQ] = ACTIONS(2383),
     [anon_sym_LT_EQ_GT] = ACTIONS(2383),
+    [anon_sym_LT_GT] = ACTIONS(2383),
     [anon_sym_EQ_EQ] = ACTIONS(2383),
     [anon_sym_GT_EQ] = ACTIONS(2383),
     [anon_sym_GT_GT] = ACTIONS(2383),
@@ -118806,6 +120520,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2383),
     [anon_sym_CARET_EQ] = ACTIONS(2383),
     [anon_sym_PIPE_EQ] = ACTIONS(2383),
+    [anon_sym_PIPE_GT] = ACTIONS(2383),
     [anon_sym_PIPE_PIPE] = ACTIONS(2383),
     [anon_sym_TILDE_PIPE] = ACTIONS(2383),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2383),
@@ -118918,6 +120633,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2468),
     [anon_sym_LT_EQ] = ACTIONS(2468),
     [anon_sym_LT_EQ_GT] = ACTIONS(2468),
+    [anon_sym_LT_GT] = ACTIONS(2468),
     [anon_sym_EQ_EQ] = ACTIONS(2468),
     [anon_sym_GT_EQ] = ACTIONS(2468),
     [anon_sym_GT_GT] = ACTIONS(2468),
@@ -118926,6 +120642,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2468),
     [anon_sym_CARET_EQ] = ACTIONS(2468),
     [anon_sym_PIPE_EQ] = ACTIONS(2468),
+    [anon_sym_PIPE_GT] = ACTIONS(2468),
     [anon_sym_PIPE_PIPE] = ACTIONS(2468),
     [anon_sym_TILDE_PIPE] = ACTIONS(2468),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2468),
@@ -119038,6 +120755,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2407),
     [anon_sym_LT_EQ] = ACTIONS(2407),
     [anon_sym_LT_EQ_GT] = ACTIONS(2407),
+    [anon_sym_LT_GT] = ACTIONS(2407),
     [anon_sym_EQ_EQ] = ACTIONS(2407),
     [anon_sym_GT_EQ] = ACTIONS(2407),
     [anon_sym_GT_GT] = ACTIONS(2407),
@@ -119046,6 +120764,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2407),
     [anon_sym_CARET_EQ] = ACTIONS(2407),
     [anon_sym_PIPE_EQ] = ACTIONS(2407),
+    [anon_sym_PIPE_GT] = ACTIONS(2407),
     [anon_sym_PIPE_PIPE] = ACTIONS(2407),
     [anon_sym_TILDE_PIPE] = ACTIONS(2407),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2407),
@@ -119158,6 +120877,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2476),
     [anon_sym_LT_EQ] = ACTIONS(2476),
     [anon_sym_LT_EQ_GT] = ACTIONS(2476),
+    [anon_sym_LT_GT] = ACTIONS(2476),
     [anon_sym_EQ_EQ] = ACTIONS(2476),
     [anon_sym_GT_EQ] = ACTIONS(2476),
     [anon_sym_GT_GT] = ACTIONS(2476),
@@ -119166,6 +120886,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2476),
     [anon_sym_CARET_EQ] = ACTIONS(2476),
     [anon_sym_PIPE_EQ] = ACTIONS(2476),
+    [anon_sym_PIPE_GT] = ACTIONS(2476),
     [anon_sym_PIPE_PIPE] = ACTIONS(2476),
     [anon_sym_TILDE_PIPE] = ACTIONS(2476),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2476),
@@ -119278,6 +120999,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2496),
     [anon_sym_LT_EQ] = ACTIONS(2496),
     [anon_sym_LT_EQ_GT] = ACTIONS(2496),
+    [anon_sym_LT_GT] = ACTIONS(2496),
     [anon_sym_EQ_EQ] = ACTIONS(2496),
     [anon_sym_GT_EQ] = ACTIONS(2496),
     [anon_sym_GT_GT] = ACTIONS(2496),
@@ -119286,6 +121008,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2496),
     [anon_sym_CARET_EQ] = ACTIONS(2496),
     [anon_sym_PIPE_EQ] = ACTIONS(2496),
+    [anon_sym_PIPE_GT] = ACTIONS(2496),
     [anon_sym_PIPE_PIPE] = ACTIONS(2496),
     [anon_sym_TILDE_PIPE] = ACTIONS(2496),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2496),
@@ -119398,6 +121121,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2484),
     [anon_sym_LT_EQ] = ACTIONS(2484),
     [anon_sym_LT_EQ_GT] = ACTIONS(2484),
+    [anon_sym_LT_GT] = ACTIONS(2484),
     [anon_sym_EQ_EQ] = ACTIONS(2484),
     [anon_sym_GT_EQ] = ACTIONS(2484),
     [anon_sym_GT_GT] = ACTIONS(2484),
@@ -119406,6 +121130,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2484),
     [anon_sym_CARET_EQ] = ACTIONS(2484),
     [anon_sym_PIPE_EQ] = ACTIONS(2484),
+    [anon_sym_PIPE_GT] = ACTIONS(2484),
     [anon_sym_PIPE_PIPE] = ACTIONS(2484),
     [anon_sym_TILDE_PIPE] = ACTIONS(2484),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2484),
@@ -119518,6 +121243,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2488),
     [anon_sym_LT_EQ] = ACTIONS(2488),
     [anon_sym_LT_EQ_GT] = ACTIONS(2488),
+    [anon_sym_LT_GT] = ACTIONS(2488),
     [anon_sym_EQ_EQ] = ACTIONS(2488),
     [anon_sym_GT_EQ] = ACTIONS(2488),
     [anon_sym_GT_GT] = ACTIONS(2488),
@@ -119526,6 +121252,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2488),
     [anon_sym_CARET_EQ] = ACTIONS(2488),
     [anon_sym_PIPE_EQ] = ACTIONS(2488),
+    [anon_sym_PIPE_GT] = ACTIONS(2488),
     [anon_sym_PIPE_PIPE] = ACTIONS(2488),
     [anon_sym_TILDE_PIPE] = ACTIONS(2488),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2488),
@@ -119638,6 +121365,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2492),
     [anon_sym_LT_EQ] = ACTIONS(2492),
     [anon_sym_LT_EQ_GT] = ACTIONS(2492),
+    [anon_sym_LT_GT] = ACTIONS(2492),
     [anon_sym_EQ_EQ] = ACTIONS(2492),
     [anon_sym_GT_EQ] = ACTIONS(2492),
     [anon_sym_GT_GT] = ACTIONS(2492),
@@ -119646,6 +121374,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2492),
     [anon_sym_CARET_EQ] = ACTIONS(2492),
     [anon_sym_PIPE_EQ] = ACTIONS(2492),
+    [anon_sym_PIPE_GT] = ACTIONS(2492),
     [anon_sym_PIPE_PIPE] = ACTIONS(2492),
     [anon_sym_TILDE_PIPE] = ACTIONS(2492),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2492),
@@ -119758,6 +121487,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2597),
     [anon_sym_LT_EQ] = ACTIONS(2597),
     [anon_sym_LT_EQ_GT] = ACTIONS(2597),
+    [anon_sym_LT_GT] = ACTIONS(2597),
     [anon_sym_EQ_EQ] = ACTIONS(2597),
     [anon_sym_GT_EQ] = ACTIONS(2597),
     [anon_sym_GT_GT] = ACTIONS(2597),
@@ -119766,6 +121496,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2597),
     [anon_sym_CARET_EQ] = ACTIONS(2597),
     [anon_sym_PIPE_EQ] = ACTIONS(2597),
+    [anon_sym_PIPE_GT] = ACTIONS(2597),
     [anon_sym_PIPE_PIPE] = ACTIONS(2597),
     [anon_sym_TILDE_PIPE] = ACTIONS(2597),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2597),
@@ -119878,6 +121609,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2500),
     [anon_sym_LT_EQ] = ACTIONS(2500),
     [anon_sym_LT_EQ_GT] = ACTIONS(2500),
+    [anon_sym_LT_GT] = ACTIONS(2500),
     [anon_sym_EQ_EQ] = ACTIONS(2500),
     [anon_sym_GT_EQ] = ACTIONS(2500),
     [anon_sym_GT_GT] = ACTIONS(2500),
@@ -119886,6 +121618,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2500),
     [anon_sym_CARET_EQ] = ACTIONS(2500),
     [anon_sym_PIPE_EQ] = ACTIONS(2500),
+    [anon_sym_PIPE_GT] = ACTIONS(2500),
     [anon_sym_PIPE_PIPE] = ACTIONS(2500),
     [anon_sym_TILDE_PIPE] = ACTIONS(2500),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2500),
@@ -119998,6 +121731,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2504),
     [anon_sym_LT_EQ] = ACTIONS(2504),
     [anon_sym_LT_EQ_GT] = ACTIONS(2504),
+    [anon_sym_LT_GT] = ACTIONS(2504),
     [anon_sym_EQ_EQ] = ACTIONS(2504),
     [anon_sym_GT_EQ] = ACTIONS(2504),
     [anon_sym_GT_GT] = ACTIONS(2504),
@@ -120006,6 +121740,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2504),
     [anon_sym_CARET_EQ] = ACTIONS(2504),
     [anon_sym_PIPE_EQ] = ACTIONS(2504),
+    [anon_sym_PIPE_GT] = ACTIONS(2504),
     [anon_sym_PIPE_PIPE] = ACTIONS(2504),
     [anon_sym_TILDE_PIPE] = ACTIONS(2504),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2504),
@@ -120118,6 +121853,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2411),
     [anon_sym_LT_EQ] = ACTIONS(2411),
     [anon_sym_LT_EQ_GT] = ACTIONS(2411),
+    [anon_sym_LT_GT] = ACTIONS(2411),
     [anon_sym_EQ_EQ] = ACTIONS(2411),
     [anon_sym_GT_EQ] = ACTIONS(2411),
     [anon_sym_GT_GT] = ACTIONS(2411),
@@ -120126,6 +121862,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2411),
     [anon_sym_CARET_EQ] = ACTIONS(2411),
     [anon_sym_PIPE_EQ] = ACTIONS(2411),
+    [anon_sym_PIPE_GT] = ACTIONS(2411),
     [anon_sym_PIPE_PIPE] = ACTIONS(2411),
     [anon_sym_TILDE_PIPE] = ACTIONS(2411),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2411),
@@ -120238,6 +121975,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2508),
     [anon_sym_LT_EQ] = ACTIONS(2508),
     [anon_sym_LT_EQ_GT] = ACTIONS(2508),
+    [anon_sym_LT_GT] = ACTIONS(2508),
     [anon_sym_EQ_EQ] = ACTIONS(2508),
     [anon_sym_GT_EQ] = ACTIONS(2508),
     [anon_sym_GT_GT] = ACTIONS(2508),
@@ -120246,6 +121984,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2508),
     [anon_sym_CARET_EQ] = ACTIONS(2508),
     [anon_sym_PIPE_EQ] = ACTIONS(2508),
+    [anon_sym_PIPE_GT] = ACTIONS(2508),
     [anon_sym_PIPE_PIPE] = ACTIONS(2508),
     [anon_sym_TILDE_PIPE] = ACTIONS(2508),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2508),
@@ -120358,6 +122097,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2347),
     [anon_sym_LT_EQ] = ACTIONS(2347),
     [anon_sym_LT_EQ_GT] = ACTIONS(2347),
+    [anon_sym_LT_GT] = ACTIONS(2347),
     [anon_sym_EQ_EQ] = ACTIONS(2347),
     [anon_sym_GT_EQ] = ACTIONS(2347),
     [anon_sym_GT_GT] = ACTIONS(2347),
@@ -120366,6 +122106,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2347),
     [anon_sym_CARET_EQ] = ACTIONS(2347),
     [anon_sym_PIPE_EQ] = ACTIONS(2347),
+    [anon_sym_PIPE_GT] = ACTIONS(2347),
     [anon_sym_PIPE_PIPE] = ACTIONS(2347),
     [anon_sym_TILDE_PIPE] = ACTIONS(2347),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2347),
@@ -120478,6 +122219,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2512),
     [anon_sym_LT_EQ] = ACTIONS(2512),
     [anon_sym_LT_EQ_GT] = ACTIONS(2512),
+    [anon_sym_LT_GT] = ACTIONS(2512),
     [anon_sym_EQ_EQ] = ACTIONS(2512),
     [anon_sym_GT_EQ] = ACTIONS(2512),
     [anon_sym_GT_GT] = ACTIONS(2512),
@@ -120486,6 +122228,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2512),
     [anon_sym_CARET_EQ] = ACTIONS(2512),
     [anon_sym_PIPE_EQ] = ACTIONS(2512),
+    [anon_sym_PIPE_GT] = ACTIONS(2512),
     [anon_sym_PIPE_PIPE] = ACTIONS(2512),
     [anon_sym_TILDE_PIPE] = ACTIONS(2512),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2512),
@@ -120598,6 +122341,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2516),
     [anon_sym_LT_EQ] = ACTIONS(2516),
     [anon_sym_LT_EQ_GT] = ACTIONS(2516),
+    [anon_sym_LT_GT] = ACTIONS(2516),
     [anon_sym_EQ_EQ] = ACTIONS(2516),
     [anon_sym_GT_EQ] = ACTIONS(2516),
     [anon_sym_GT_GT] = ACTIONS(2516),
@@ -120606,6 +122350,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2516),
     [anon_sym_CARET_EQ] = ACTIONS(2516),
     [anon_sym_PIPE_EQ] = ACTIONS(2516),
+    [anon_sym_PIPE_GT] = ACTIONS(2516),
     [anon_sym_PIPE_PIPE] = ACTIONS(2516),
     [anon_sym_TILDE_PIPE] = ACTIONS(2516),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2516),
@@ -120718,6 +122463,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2520),
     [anon_sym_LT_EQ] = ACTIONS(2520),
     [anon_sym_LT_EQ_GT] = ACTIONS(2520),
+    [anon_sym_LT_GT] = ACTIONS(2520),
     [anon_sym_EQ_EQ] = ACTIONS(2520),
     [anon_sym_GT_EQ] = ACTIONS(2520),
     [anon_sym_GT_GT] = ACTIONS(2520),
@@ -120726,6 +122472,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2520),
     [anon_sym_CARET_EQ] = ACTIONS(2520),
     [anon_sym_PIPE_EQ] = ACTIONS(2520),
+    [anon_sym_PIPE_GT] = ACTIONS(2520),
     [anon_sym_PIPE_PIPE] = ACTIONS(2520),
     [anon_sym_TILDE_PIPE] = ACTIONS(2520),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2520),
@@ -120838,6 +122585,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2524),
     [anon_sym_LT_EQ] = ACTIONS(2524),
     [anon_sym_LT_EQ_GT] = ACTIONS(2524),
+    [anon_sym_LT_GT] = ACTIONS(2524),
     [anon_sym_EQ_EQ] = ACTIONS(2524),
     [anon_sym_GT_EQ] = ACTIONS(2524),
     [anon_sym_GT_GT] = ACTIONS(2524),
@@ -120846,6 +122594,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2524),
     [anon_sym_CARET_EQ] = ACTIONS(2524),
     [anon_sym_PIPE_EQ] = ACTIONS(2524),
+    [anon_sym_PIPE_GT] = ACTIONS(2524),
     [anon_sym_PIPE_PIPE] = ACTIONS(2524),
     [anon_sym_TILDE_PIPE] = ACTIONS(2524),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2524),
@@ -120958,6 +122707,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2528),
     [anon_sym_LT_EQ] = ACTIONS(2528),
     [anon_sym_LT_EQ_GT] = ACTIONS(2528),
+    [anon_sym_LT_GT] = ACTIONS(2528),
     [anon_sym_EQ_EQ] = ACTIONS(2528),
     [anon_sym_GT_EQ] = ACTIONS(2528),
     [anon_sym_GT_GT] = ACTIONS(2528),
@@ -120966,6 +122716,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2528),
     [anon_sym_CARET_EQ] = ACTIONS(2528),
     [anon_sym_PIPE_EQ] = ACTIONS(2528),
+    [anon_sym_PIPE_GT] = ACTIONS(2528),
     [anon_sym_PIPE_PIPE] = ACTIONS(2528),
     [anon_sym_TILDE_PIPE] = ACTIONS(2528),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2528),
@@ -121078,6 +122829,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2605),
     [anon_sym_LT_EQ] = ACTIONS(2605),
     [anon_sym_LT_EQ_GT] = ACTIONS(2605),
+    [anon_sym_LT_GT] = ACTIONS(2605),
     [anon_sym_EQ_EQ] = ACTIONS(2605),
     [anon_sym_GT_EQ] = ACTIONS(2605),
     [anon_sym_GT_GT] = ACTIONS(2605),
@@ -121086,6 +122838,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2605),
     [anon_sym_CARET_EQ] = ACTIONS(2605),
     [anon_sym_PIPE_EQ] = ACTIONS(2605),
+    [anon_sym_PIPE_GT] = ACTIONS(2605),
     [anon_sym_PIPE_PIPE] = ACTIONS(2605),
     [anon_sym_TILDE_PIPE] = ACTIONS(2605),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2605),
@@ -121198,6 +122951,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2534),
     [anon_sym_LT_EQ] = ACTIONS(2534),
     [anon_sym_LT_EQ_GT] = ACTIONS(2534),
+    [anon_sym_LT_GT] = ACTIONS(2534),
     [anon_sym_EQ_EQ] = ACTIONS(2534),
     [anon_sym_GT_EQ] = ACTIONS(2534),
     [anon_sym_GT_GT] = ACTIONS(2534),
@@ -121206,6 +122960,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2534),
     [anon_sym_CARET_EQ] = ACTIONS(2534),
     [anon_sym_PIPE_EQ] = ACTIONS(2534),
+    [anon_sym_PIPE_GT] = ACTIONS(2534),
     [anon_sym_PIPE_PIPE] = ACTIONS(2534),
     [anon_sym_TILDE_PIPE] = ACTIONS(2534),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2534),
@@ -121318,6 +123073,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2383),
     [anon_sym_LT_EQ] = ACTIONS(2383),
     [anon_sym_LT_EQ_GT] = ACTIONS(2383),
+    [anon_sym_LT_GT] = ACTIONS(2383),
     [anon_sym_EQ_EQ] = ACTIONS(2383),
     [anon_sym_GT_EQ] = ACTIONS(2383),
     [anon_sym_GT_GT] = ACTIONS(2383),
@@ -121326,6 +123082,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2383),
     [anon_sym_CARET_EQ] = ACTIONS(2383),
     [anon_sym_PIPE_EQ] = ACTIONS(2383),
+    [anon_sym_PIPE_GT] = ACTIONS(2383),
     [anon_sym_PIPE_PIPE] = ACTIONS(2383),
     [anon_sym_TILDE_PIPE] = ACTIONS(2383),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2383),
@@ -121438,6 +123195,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2542),
     [anon_sym_LT_EQ] = ACTIONS(2542),
     [anon_sym_LT_EQ_GT] = ACTIONS(2542),
+    [anon_sym_LT_GT] = ACTIONS(2542),
     [anon_sym_EQ_EQ] = ACTIONS(2542),
     [anon_sym_GT_EQ] = ACTIONS(2542),
     [anon_sym_GT_GT] = ACTIONS(2542),
@@ -121446,6 +123204,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2542),
     [anon_sym_CARET_EQ] = ACTIONS(2542),
     [anon_sym_PIPE_EQ] = ACTIONS(2542),
+    [anon_sym_PIPE_GT] = ACTIONS(2542),
     [anon_sym_PIPE_PIPE] = ACTIONS(2542),
     [anon_sym_TILDE_PIPE] = ACTIONS(2542),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2542),
@@ -121558,6 +123317,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2613),
     [anon_sym_LT_EQ] = ACTIONS(2613),
     [anon_sym_LT_EQ_GT] = ACTIONS(2613),
+    [anon_sym_LT_GT] = ACTIONS(2613),
     [anon_sym_EQ_EQ] = ACTIONS(2613),
     [anon_sym_GT_EQ] = ACTIONS(2613),
     [anon_sym_GT_GT] = ACTIONS(2613),
@@ -121566,6 +123326,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2613),
     [anon_sym_CARET_EQ] = ACTIONS(2613),
     [anon_sym_PIPE_EQ] = ACTIONS(2613),
+    [anon_sym_PIPE_GT] = ACTIONS(2613),
     [anon_sym_PIPE_PIPE] = ACTIONS(2613),
     [anon_sym_TILDE_PIPE] = ACTIONS(2613),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2613),
@@ -121678,6 +123439,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2546),
     [anon_sym_LT_EQ] = ACTIONS(2546),
     [anon_sym_LT_EQ_GT] = ACTIONS(2546),
+    [anon_sym_LT_GT] = ACTIONS(2546),
     [anon_sym_EQ_EQ] = ACTIONS(2546),
     [anon_sym_GT_EQ] = ACTIONS(2546),
     [anon_sym_GT_GT] = ACTIONS(2546),
@@ -121686,6 +123448,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2546),
     [anon_sym_CARET_EQ] = ACTIONS(2546),
     [anon_sym_PIPE_EQ] = ACTIONS(2546),
+    [anon_sym_PIPE_GT] = ACTIONS(2546),
     [anon_sym_PIPE_PIPE] = ACTIONS(2546),
     [anon_sym_TILDE_PIPE] = ACTIONS(2546),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2546),
@@ -121798,6 +123561,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2562),
     [anon_sym_LT_EQ] = ACTIONS(2562),
     [anon_sym_LT_EQ_GT] = ACTIONS(2562),
+    [anon_sym_LT_GT] = ACTIONS(2562),
     [anon_sym_EQ_EQ] = ACTIONS(2562),
     [anon_sym_GT_EQ] = ACTIONS(2562),
     [anon_sym_GT_GT] = ACTIONS(2562),
@@ -121806,6 +123570,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2562),
     [anon_sym_CARET_EQ] = ACTIONS(2562),
     [anon_sym_PIPE_EQ] = ACTIONS(2562),
+    [anon_sym_PIPE_GT] = ACTIONS(2562),
     [anon_sym_PIPE_PIPE] = ACTIONS(2562),
     [anon_sym_TILDE_PIPE] = ACTIONS(2562),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2562),
@@ -121918,6 +123683,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2621),
     [anon_sym_LT_EQ] = ACTIONS(2621),
     [anon_sym_LT_EQ_GT] = ACTIONS(2621),
+    [anon_sym_LT_GT] = ACTIONS(2621),
     [anon_sym_EQ_EQ] = ACTIONS(2621),
     [anon_sym_GT_EQ] = ACTIONS(2621),
     [anon_sym_GT_GT] = ACTIONS(2621),
@@ -121926,6 +123692,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2621),
     [anon_sym_CARET_EQ] = ACTIONS(2621),
     [anon_sym_PIPE_EQ] = ACTIONS(2621),
+    [anon_sym_PIPE_GT] = ACTIONS(2621),
     [anon_sym_PIPE_PIPE] = ACTIONS(2621),
     [anon_sym_TILDE_PIPE] = ACTIONS(2621),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2621),
@@ -122038,6 +123805,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2576),
     [anon_sym_LT_EQ] = ACTIONS(2576),
     [anon_sym_LT_EQ_GT] = ACTIONS(2576),
+    [anon_sym_LT_GT] = ACTIONS(2576),
     [anon_sym_EQ_EQ] = ACTIONS(2576),
     [anon_sym_GT_EQ] = ACTIONS(2576),
     [anon_sym_GT_GT] = ACTIONS(2576),
@@ -122046,6 +123814,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2576),
     [anon_sym_CARET_EQ] = ACTIONS(2576),
     [anon_sym_PIPE_EQ] = ACTIONS(2576),
+    [anon_sym_PIPE_GT] = ACTIONS(2576),
     [anon_sym_PIPE_PIPE] = ACTIONS(2576),
     [anon_sym_TILDE_PIPE] = ACTIONS(2576),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2576),
@@ -122158,6 +123927,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2538),
     [anon_sym_LT_EQ] = ACTIONS(2538),
     [anon_sym_LT_EQ_GT] = ACTIONS(2538),
+    [anon_sym_LT_GT] = ACTIONS(2538),
     [anon_sym_EQ_EQ] = ACTIONS(2538),
     [anon_sym_GT_EQ] = ACTIONS(2538),
     [anon_sym_GT_GT] = ACTIONS(2538),
@@ -122166,6 +123936,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2538),
     [anon_sym_CARET_EQ] = ACTIONS(2538),
     [anon_sym_PIPE_EQ] = ACTIONS(2538),
+    [anon_sym_PIPE_GT] = ACTIONS(2538),
     [anon_sym_PIPE_PIPE] = ACTIONS(2538),
     [anon_sym_TILDE_PIPE] = ACTIONS(2538),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2538),
@@ -122278,6 +124049,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2629),
     [anon_sym_LT_EQ] = ACTIONS(2629),
     [anon_sym_LT_EQ_GT] = ACTIONS(2629),
+    [anon_sym_LT_GT] = ACTIONS(2629),
     [anon_sym_EQ_EQ] = ACTIONS(2629),
     [anon_sym_GT_EQ] = ACTIONS(2629),
     [anon_sym_GT_GT] = ACTIONS(2629),
@@ -122286,6 +124058,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2629),
     [anon_sym_CARET_EQ] = ACTIONS(2629),
     [anon_sym_PIPE_EQ] = ACTIONS(2629),
+    [anon_sym_PIPE_GT] = ACTIONS(2629),
     [anon_sym_PIPE_PIPE] = ACTIONS(2629),
     [anon_sym_TILDE_PIPE] = ACTIONS(2629),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2629),
@@ -122398,6 +124171,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2633),
     [anon_sym_LT_EQ] = ACTIONS(2633),
     [anon_sym_LT_EQ_GT] = ACTIONS(2633),
+    [anon_sym_LT_GT] = ACTIONS(2633),
     [anon_sym_EQ_EQ] = ACTIONS(2633),
     [anon_sym_GT_EQ] = ACTIONS(2633),
     [anon_sym_GT_GT] = ACTIONS(2633),
@@ -122406,6 +124180,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2633),
     [anon_sym_CARET_EQ] = ACTIONS(2633),
     [anon_sym_PIPE_EQ] = ACTIONS(2633),
+    [anon_sym_PIPE_GT] = ACTIONS(2633),
     [anon_sym_PIPE_PIPE] = ACTIONS(2633),
     [anon_sym_TILDE_PIPE] = ACTIONS(2633),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2633),
@@ -122518,6 +124293,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2597),
     [anon_sym_LT_EQ] = ACTIONS(2597),
     [anon_sym_LT_EQ_GT] = ACTIONS(2597),
+    [anon_sym_LT_GT] = ACTIONS(2597),
     [anon_sym_EQ_EQ] = ACTIONS(2597),
     [anon_sym_GT_EQ] = ACTIONS(2597),
     [anon_sym_GT_GT] = ACTIONS(2597),
@@ -122526,6 +124302,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2597),
     [anon_sym_CARET_EQ] = ACTIONS(2597),
     [anon_sym_PIPE_EQ] = ACTIONS(2597),
+    [anon_sym_PIPE_GT] = ACTIONS(2597),
     [anon_sym_PIPE_PIPE] = ACTIONS(2597),
     [anon_sym_TILDE_PIPE] = ACTIONS(2597),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2597),
@@ -122638,6 +124415,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2637),
     [anon_sym_LT_EQ] = ACTIONS(2637),
     [anon_sym_LT_EQ_GT] = ACTIONS(2637),
+    [anon_sym_LT_GT] = ACTIONS(2637),
     [anon_sym_EQ_EQ] = ACTIONS(2637),
     [anon_sym_GT_EQ] = ACTIONS(2637),
     [anon_sym_GT_GT] = ACTIONS(2637),
@@ -122646,6 +124424,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2637),
     [anon_sym_CARET_EQ] = ACTIONS(2637),
     [anon_sym_PIPE_EQ] = ACTIONS(2637),
+    [anon_sym_PIPE_GT] = ACTIONS(2637),
     [anon_sym_PIPE_PIPE] = ACTIONS(2637),
     [anon_sym_TILDE_PIPE] = ACTIONS(2637),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2637),
@@ -122758,6 +124537,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2605),
     [anon_sym_LT_EQ] = ACTIONS(2605),
     [anon_sym_LT_EQ_GT] = ACTIONS(2605),
+    [anon_sym_LT_GT] = ACTIONS(2605),
     [anon_sym_EQ_EQ] = ACTIONS(2605),
     [anon_sym_GT_EQ] = ACTIONS(2605),
     [anon_sym_GT_GT] = ACTIONS(2605),
@@ -122766,6 +124546,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2605),
     [anon_sym_CARET_EQ] = ACTIONS(2605),
     [anon_sym_PIPE_EQ] = ACTIONS(2605),
+    [anon_sym_PIPE_GT] = ACTIONS(2605),
     [anon_sym_PIPE_PIPE] = ACTIONS(2605),
     [anon_sym_TILDE_PIPE] = ACTIONS(2605),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2605),
@@ -122878,6 +124659,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2613),
     [anon_sym_LT_EQ] = ACTIONS(2613),
     [anon_sym_LT_EQ_GT] = ACTIONS(2613),
+    [anon_sym_LT_GT] = ACTIONS(2613),
     [anon_sym_EQ_EQ] = ACTIONS(2613),
     [anon_sym_GT_EQ] = ACTIONS(2613),
     [anon_sym_GT_GT] = ACTIONS(2613),
@@ -122886,6 +124668,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2613),
     [anon_sym_CARET_EQ] = ACTIONS(2613),
     [anon_sym_PIPE_EQ] = ACTIONS(2613),
+    [anon_sym_PIPE_GT] = ACTIONS(2613),
     [anon_sym_PIPE_PIPE] = ACTIONS(2613),
     [anon_sym_TILDE_PIPE] = ACTIONS(2613),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2613),
@@ -122998,6 +124781,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2566),
     [anon_sym_LT_EQ] = ACTIONS(2566),
     [anon_sym_LT_EQ_GT] = ACTIONS(2566),
+    [anon_sym_LT_GT] = ACTIONS(2566),
     [anon_sym_EQ_EQ] = ACTIONS(2566),
     [anon_sym_GT_EQ] = ACTIONS(2566),
     [anon_sym_GT_GT] = ACTIONS(2566),
@@ -123006,6 +124790,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2566),
     [anon_sym_CARET_EQ] = ACTIONS(2566),
     [anon_sym_PIPE_EQ] = ACTIONS(2566),
+    [anon_sym_PIPE_GT] = ACTIONS(2566),
     [anon_sym_PIPE_PIPE] = ACTIONS(2566),
     [anon_sym_TILDE_PIPE] = ACTIONS(2566),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2566),
@@ -123118,6 +124903,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2621),
     [anon_sym_LT_EQ] = ACTIONS(2621),
     [anon_sym_LT_EQ_GT] = ACTIONS(2621),
+    [anon_sym_LT_GT] = ACTIONS(2621),
     [anon_sym_EQ_EQ] = ACTIONS(2621),
     [anon_sym_GT_EQ] = ACTIONS(2621),
     [anon_sym_GT_GT] = ACTIONS(2621),
@@ -123126,6 +124912,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2621),
     [anon_sym_CARET_EQ] = ACTIONS(2621),
     [anon_sym_PIPE_EQ] = ACTIONS(2621),
+    [anon_sym_PIPE_GT] = ACTIONS(2621),
     [anon_sym_PIPE_PIPE] = ACTIONS(2621),
     [anon_sym_TILDE_PIPE] = ACTIONS(2621),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2621),
@@ -123238,6 +125025,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2629),
     [anon_sym_LT_EQ] = ACTIONS(2629),
     [anon_sym_LT_EQ_GT] = ACTIONS(2629),
+    [anon_sym_LT_GT] = ACTIONS(2629),
     [anon_sym_EQ_EQ] = ACTIONS(2629),
     [anon_sym_GT_EQ] = ACTIONS(2629),
     [anon_sym_GT_GT] = ACTIONS(2629),
@@ -123246,6 +125034,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2629),
     [anon_sym_CARET_EQ] = ACTIONS(2629),
     [anon_sym_PIPE_EQ] = ACTIONS(2629),
+    [anon_sym_PIPE_GT] = ACTIONS(2629),
     [anon_sym_PIPE_PIPE] = ACTIONS(2629),
     [anon_sym_TILDE_PIPE] = ACTIONS(2629),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2629),
@@ -123358,6 +125147,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2633),
     [anon_sym_LT_EQ] = ACTIONS(2633),
     [anon_sym_LT_EQ_GT] = ACTIONS(2633),
+    [anon_sym_LT_GT] = ACTIONS(2633),
     [anon_sym_EQ_EQ] = ACTIONS(2633),
     [anon_sym_GT_EQ] = ACTIONS(2633),
     [anon_sym_GT_GT] = ACTIONS(2633),
@@ -123366,6 +125156,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2633),
     [anon_sym_CARET_EQ] = ACTIONS(2633),
     [anon_sym_PIPE_EQ] = ACTIONS(2633),
+    [anon_sym_PIPE_GT] = ACTIONS(2633),
     [anon_sym_PIPE_PIPE] = ACTIONS(2633),
     [anon_sym_TILDE_PIPE] = ACTIONS(2633),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2633),
@@ -123478,6 +125269,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2637),
     [anon_sym_LT_EQ] = ACTIONS(2637),
     [anon_sym_LT_EQ_GT] = ACTIONS(2637),
+    [anon_sym_LT_GT] = ACTIONS(2637),
     [anon_sym_EQ_EQ] = ACTIONS(2637),
     [anon_sym_GT_EQ] = ACTIONS(2637),
     [anon_sym_GT_GT] = ACTIONS(2637),
@@ -123486,6 +125278,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2637),
     [anon_sym_CARET_EQ] = ACTIONS(2637),
     [anon_sym_PIPE_EQ] = ACTIONS(2637),
+    [anon_sym_PIPE_GT] = ACTIONS(2637),
     [anon_sym_PIPE_PIPE] = ACTIONS(2637),
     [anon_sym_TILDE_PIPE] = ACTIONS(2637),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2637),
@@ -123598,6 +125391,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2580),
     [anon_sym_LT_EQ] = ACTIONS(2580),
     [anon_sym_LT_EQ_GT] = ACTIONS(2580),
+    [anon_sym_LT_GT] = ACTIONS(2580),
     [anon_sym_EQ_EQ] = ACTIONS(2580),
     [anon_sym_GT_EQ] = ACTIONS(2580),
     [anon_sym_GT_GT] = ACTIONS(2580),
@@ -123606,6 +125400,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2580),
     [anon_sym_CARET_EQ] = ACTIONS(2580),
     [anon_sym_PIPE_EQ] = ACTIONS(2580),
+    [anon_sym_PIPE_GT] = ACTIONS(2580),
     [anon_sym_PIPE_PIPE] = ACTIONS(2580),
     [anon_sym_TILDE_PIPE] = ACTIONS(2580),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2580),
@@ -123718,6 +125513,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2647),
     [anon_sym_LT_EQ] = ACTIONS(2647),
     [anon_sym_LT_EQ_GT] = ACTIONS(2647),
+    [anon_sym_LT_GT] = ACTIONS(2647),
     [anon_sym_EQ_EQ] = ACTIONS(2647),
     [anon_sym_GT_EQ] = ACTIONS(2647),
     [anon_sym_GT_GT] = ACTIONS(2647),
@@ -123726,6 +125522,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2647),
     [anon_sym_CARET_EQ] = ACTIONS(2647),
     [anon_sym_PIPE_EQ] = ACTIONS(2647),
+    [anon_sym_PIPE_GT] = ACTIONS(2647),
     [anon_sym_PIPE_PIPE] = ACTIONS(2647),
     [anon_sym_TILDE_PIPE] = ACTIONS(2647),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2647),
@@ -123838,6 +125635,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2647),
     [anon_sym_LT_EQ] = ACTIONS(2647),
     [anon_sym_LT_EQ_GT] = ACTIONS(2647),
+    [anon_sym_LT_GT] = ACTIONS(2647),
     [anon_sym_EQ_EQ] = ACTIONS(2647),
     [anon_sym_GT_EQ] = ACTIONS(2647),
     [anon_sym_GT_GT] = ACTIONS(2647),
@@ -123846,6 +125644,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2647),
     [anon_sym_CARET_EQ] = ACTIONS(2647),
     [anon_sym_PIPE_EQ] = ACTIONS(2647),
+    [anon_sym_PIPE_GT] = ACTIONS(2647),
     [anon_sym_PIPE_PIPE] = ACTIONS(2647),
     [anon_sym_TILDE_PIPE] = ACTIONS(2647),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2647),
@@ -123958,6 +125757,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2657),
     [anon_sym_LT_EQ] = ACTIONS(2657),
     [anon_sym_LT_EQ_GT] = ACTIONS(2657),
+    [anon_sym_LT_GT] = ACTIONS(2657),
     [anon_sym_EQ_EQ] = ACTIONS(2657),
     [anon_sym_GT_EQ] = ACTIONS(2657),
     [anon_sym_GT_GT] = ACTIONS(2657),
@@ -123966,6 +125766,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2657),
     [anon_sym_CARET_EQ] = ACTIONS(2657),
     [anon_sym_PIPE_EQ] = ACTIONS(2657),
+    [anon_sym_PIPE_GT] = ACTIONS(2657),
     [anon_sym_PIPE_PIPE] = ACTIONS(2657),
     [anon_sym_TILDE_PIPE] = ACTIONS(2657),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2657),
@@ -124078,6 +125879,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2661),
     [anon_sym_LT_EQ] = ACTIONS(2661),
     [anon_sym_LT_EQ_GT] = ACTIONS(2661),
+    [anon_sym_LT_GT] = ACTIONS(2661),
     [anon_sym_EQ_EQ] = ACTIONS(2661),
     [anon_sym_GT_EQ] = ACTIONS(2661),
     [anon_sym_GT_GT] = ACTIONS(2661),
@@ -124086,6 +125888,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2661),
     [anon_sym_CARET_EQ] = ACTIONS(2661),
     [anon_sym_PIPE_EQ] = ACTIONS(2661),
+    [anon_sym_PIPE_GT] = ACTIONS(2661),
     [anon_sym_PIPE_PIPE] = ACTIONS(2661),
     [anon_sym_TILDE_PIPE] = ACTIONS(2661),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2661),
@@ -124198,6 +126001,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2665),
     [anon_sym_LT_EQ] = ACTIONS(2665),
     [anon_sym_LT_EQ_GT] = ACTIONS(2665),
+    [anon_sym_LT_GT] = ACTIONS(2665),
     [anon_sym_EQ_EQ] = ACTIONS(2665),
     [anon_sym_GT_EQ] = ACTIONS(2665),
     [anon_sym_GT_GT] = ACTIONS(2665),
@@ -124206,6 +126010,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2665),
     [anon_sym_CARET_EQ] = ACTIONS(2665),
     [anon_sym_PIPE_EQ] = ACTIONS(2665),
+    [anon_sym_PIPE_GT] = ACTIONS(2665),
     [anon_sym_PIPE_PIPE] = ACTIONS(2665),
     [anon_sym_TILDE_PIPE] = ACTIONS(2665),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2665),
@@ -124318,6 +126123,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2669),
     [anon_sym_LT_EQ] = ACTIONS(2669),
     [anon_sym_LT_EQ_GT] = ACTIONS(2669),
+    [anon_sym_LT_GT] = ACTIONS(2669),
     [anon_sym_EQ_EQ] = ACTIONS(2669),
     [anon_sym_GT_EQ] = ACTIONS(2669),
     [anon_sym_GT_GT] = ACTIONS(2669),
@@ -124326,6 +126132,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2669),
     [anon_sym_CARET_EQ] = ACTIONS(2669),
     [anon_sym_PIPE_EQ] = ACTIONS(2669),
+    [anon_sym_PIPE_GT] = ACTIONS(2669),
     [anon_sym_PIPE_PIPE] = ACTIONS(2669),
     [anon_sym_TILDE_PIPE] = ACTIONS(2669),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2669),
@@ -124438,6 +126245,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2673),
     [anon_sym_LT_EQ] = ACTIONS(2673),
     [anon_sym_LT_EQ_GT] = ACTIONS(2673),
+    [anon_sym_LT_GT] = ACTIONS(2673),
     [anon_sym_EQ_EQ] = ACTIONS(2673),
     [anon_sym_GT_EQ] = ACTIONS(2673),
     [anon_sym_GT_GT] = ACTIONS(2673),
@@ -124446,6 +126254,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2673),
     [anon_sym_CARET_EQ] = ACTIONS(2673),
     [anon_sym_PIPE_EQ] = ACTIONS(2673),
+    [anon_sym_PIPE_GT] = ACTIONS(2673),
     [anon_sym_PIPE_PIPE] = ACTIONS(2673),
     [anon_sym_TILDE_PIPE] = ACTIONS(2673),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2673),
@@ -124558,6 +126367,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2677),
     [anon_sym_LT_EQ] = ACTIONS(2677),
     [anon_sym_LT_EQ_GT] = ACTIONS(2677),
+    [anon_sym_LT_GT] = ACTIONS(2677),
     [anon_sym_EQ_EQ] = ACTIONS(2677),
     [anon_sym_GT_EQ] = ACTIONS(2677),
     [anon_sym_GT_GT] = ACTIONS(2677),
@@ -124566,6 +126376,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2677),
     [anon_sym_CARET_EQ] = ACTIONS(2677),
     [anon_sym_PIPE_EQ] = ACTIONS(2677),
+    [anon_sym_PIPE_GT] = ACTIONS(2677),
     [anon_sym_PIPE_PIPE] = ACTIONS(2677),
     [anon_sym_TILDE_PIPE] = ACTIONS(2677),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2677),
@@ -124678,6 +126489,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2681),
     [anon_sym_LT_EQ] = ACTIONS(2681),
     [anon_sym_LT_EQ_GT] = ACTIONS(2681),
+    [anon_sym_LT_GT] = ACTIONS(2681),
     [anon_sym_EQ_EQ] = ACTIONS(2681),
     [anon_sym_GT_EQ] = ACTIONS(2681),
     [anon_sym_GT_GT] = ACTIONS(2681),
@@ -124686,6 +126498,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2681),
     [anon_sym_CARET_EQ] = ACTIONS(2681),
     [anon_sym_PIPE_EQ] = ACTIONS(2681),
+    [anon_sym_PIPE_GT] = ACTIONS(2681),
     [anon_sym_PIPE_PIPE] = ACTIONS(2681),
     [anon_sym_TILDE_PIPE] = ACTIONS(2681),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2681),
@@ -124798,6 +126611,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2685),
     [anon_sym_LT_EQ] = ACTIONS(2685),
     [anon_sym_LT_EQ_GT] = ACTIONS(2685),
+    [anon_sym_LT_GT] = ACTIONS(2685),
     [anon_sym_EQ_EQ] = ACTIONS(2685),
     [anon_sym_GT_EQ] = ACTIONS(2685),
     [anon_sym_GT_GT] = ACTIONS(2685),
@@ -124806,6 +126620,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2685),
     [anon_sym_CARET_EQ] = ACTIONS(2685),
     [anon_sym_PIPE_EQ] = ACTIONS(2685),
+    [anon_sym_PIPE_GT] = ACTIONS(2685),
     [anon_sym_PIPE_PIPE] = ACTIONS(2685),
     [anon_sym_TILDE_PIPE] = ACTIONS(2685),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2685),
@@ -124918,6 +126733,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2689),
     [anon_sym_LT_EQ] = ACTIONS(2689),
     [anon_sym_LT_EQ_GT] = ACTIONS(2689),
+    [anon_sym_LT_GT] = ACTIONS(2689),
     [anon_sym_EQ_EQ] = ACTIONS(2689),
     [anon_sym_GT_EQ] = ACTIONS(2689),
     [anon_sym_GT_GT] = ACTIONS(2689),
@@ -124926,6 +126742,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2689),
     [anon_sym_CARET_EQ] = ACTIONS(2689),
     [anon_sym_PIPE_EQ] = ACTIONS(2689),
+    [anon_sym_PIPE_GT] = ACTIONS(2689),
     [anon_sym_PIPE_PIPE] = ACTIONS(2689),
     [anon_sym_TILDE_PIPE] = ACTIONS(2689),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2689),
@@ -125038,6 +126855,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2415),
     [anon_sym_LT_EQ] = ACTIONS(2415),
     [anon_sym_LT_EQ_GT] = ACTIONS(2415),
+    [anon_sym_LT_GT] = ACTIONS(2415),
     [anon_sym_EQ_EQ] = ACTIONS(2415),
     [anon_sym_GT_EQ] = ACTIONS(2415),
     [anon_sym_GT_GT] = ACTIONS(2415),
@@ -125046,6 +126864,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2415),
     [anon_sym_CARET_EQ] = ACTIONS(2415),
     [anon_sym_PIPE_EQ] = ACTIONS(2415),
+    [anon_sym_PIPE_GT] = ACTIONS(2415),
     [anon_sym_PIPE_PIPE] = ACTIONS(2415),
     [anon_sym_TILDE_PIPE] = ACTIONS(2415),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2415),
@@ -125158,6 +126977,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2657),
     [anon_sym_LT_EQ] = ACTIONS(2657),
     [anon_sym_LT_EQ_GT] = ACTIONS(2657),
+    [anon_sym_LT_GT] = ACTIONS(2657),
     [anon_sym_EQ_EQ] = ACTIONS(2657),
     [anon_sym_GT_EQ] = ACTIONS(2657),
     [anon_sym_GT_GT] = ACTIONS(2657),
@@ -125166,6 +126986,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2657),
     [anon_sym_CARET_EQ] = ACTIONS(2657),
     [anon_sym_PIPE_EQ] = ACTIONS(2657),
+    [anon_sym_PIPE_GT] = ACTIONS(2657),
     [anon_sym_PIPE_PIPE] = ACTIONS(2657),
     [anon_sym_TILDE_PIPE] = ACTIONS(2657),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2657),
@@ -125278,6 +127099,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2699),
     [anon_sym_LT_EQ] = ACTIONS(2699),
     [anon_sym_LT_EQ_GT] = ACTIONS(2699),
+    [anon_sym_LT_GT] = ACTIONS(2699),
     [anon_sym_EQ_EQ] = ACTIONS(2699),
     [anon_sym_GT_EQ] = ACTIONS(2699),
     [anon_sym_GT_GT] = ACTIONS(2699),
@@ -125286,6 +127108,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2699),
     [anon_sym_CARET_EQ] = ACTIONS(2699),
     [anon_sym_PIPE_EQ] = ACTIONS(2699),
+    [anon_sym_PIPE_GT] = ACTIONS(2699),
     [anon_sym_PIPE_PIPE] = ACTIONS(2699),
     [anon_sym_TILDE_PIPE] = ACTIONS(2699),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2699),
@@ -125398,6 +127221,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2661),
     [anon_sym_LT_EQ] = ACTIONS(2661),
     [anon_sym_LT_EQ_GT] = ACTIONS(2661),
+    [anon_sym_LT_GT] = ACTIONS(2661),
     [anon_sym_EQ_EQ] = ACTIONS(2661),
     [anon_sym_GT_EQ] = ACTIONS(2661),
     [anon_sym_GT_GT] = ACTIONS(2661),
@@ -125406,6 +127230,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2661),
     [anon_sym_CARET_EQ] = ACTIONS(2661),
     [anon_sym_PIPE_EQ] = ACTIONS(2661),
+    [anon_sym_PIPE_GT] = ACTIONS(2661),
     [anon_sym_PIPE_PIPE] = ACTIONS(2661),
     [anon_sym_TILDE_PIPE] = ACTIONS(2661),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2661),
@@ -125518,6 +127343,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2703),
     [anon_sym_LT_EQ] = ACTIONS(2703),
     [anon_sym_LT_EQ_GT] = ACTIONS(2703),
+    [anon_sym_LT_GT] = ACTIONS(2703),
     [anon_sym_EQ_EQ] = ACTIONS(2703),
     [anon_sym_GT_EQ] = ACTIONS(2703),
     [anon_sym_GT_GT] = ACTIONS(2703),
@@ -125526,6 +127352,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2703),
     [anon_sym_CARET_EQ] = ACTIONS(2703),
     [anon_sym_PIPE_EQ] = ACTIONS(2703),
+    [anon_sym_PIPE_GT] = ACTIONS(2703),
     [anon_sym_PIPE_PIPE] = ACTIONS(2703),
     [anon_sym_TILDE_PIPE] = ACTIONS(2703),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2703),
@@ -125638,6 +127465,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2665),
     [anon_sym_LT_EQ] = ACTIONS(2665),
     [anon_sym_LT_EQ_GT] = ACTIONS(2665),
+    [anon_sym_LT_GT] = ACTIONS(2665),
     [anon_sym_EQ_EQ] = ACTIONS(2665),
     [anon_sym_GT_EQ] = ACTIONS(2665),
     [anon_sym_GT_GT] = ACTIONS(2665),
@@ -125646,6 +127474,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2665),
     [anon_sym_CARET_EQ] = ACTIONS(2665),
     [anon_sym_PIPE_EQ] = ACTIONS(2665),
+    [anon_sym_PIPE_GT] = ACTIONS(2665),
     [anon_sym_PIPE_PIPE] = ACTIONS(2665),
     [anon_sym_TILDE_PIPE] = ACTIONS(2665),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2665),
@@ -125758,6 +127587,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2707),
     [anon_sym_LT_EQ] = ACTIONS(2707),
     [anon_sym_LT_EQ_GT] = ACTIONS(2707),
+    [anon_sym_LT_GT] = ACTIONS(2707),
     [anon_sym_EQ_EQ] = ACTIONS(2707),
     [anon_sym_GT_EQ] = ACTIONS(2707),
     [anon_sym_GT_GT] = ACTIONS(2707),
@@ -125766,6 +127596,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2707),
     [anon_sym_CARET_EQ] = ACTIONS(2707),
     [anon_sym_PIPE_EQ] = ACTIONS(2707),
+    [anon_sym_PIPE_GT] = ACTIONS(2707),
     [anon_sym_PIPE_PIPE] = ACTIONS(2707),
     [anon_sym_TILDE_PIPE] = ACTIONS(2707),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2707),
@@ -125878,6 +127709,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2711),
     [anon_sym_LT_EQ] = ACTIONS(2711),
     [anon_sym_LT_EQ_GT] = ACTIONS(2711),
+    [anon_sym_LT_GT] = ACTIONS(2711),
     [anon_sym_EQ_EQ] = ACTIONS(2711),
     [anon_sym_GT_EQ] = ACTIONS(2711),
     [anon_sym_GT_GT] = ACTIONS(2711),
@@ -125886,6 +127718,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2711),
     [anon_sym_CARET_EQ] = ACTIONS(2711),
     [anon_sym_PIPE_EQ] = ACTIONS(2711),
+    [anon_sym_PIPE_GT] = ACTIONS(2711),
     [anon_sym_PIPE_PIPE] = ACTIONS(2711),
     [anon_sym_TILDE_PIPE] = ACTIONS(2711),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2711),
@@ -125998,6 +127831,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2715),
     [anon_sym_LT_EQ] = ACTIONS(2715),
     [anon_sym_LT_EQ_GT] = ACTIONS(2715),
+    [anon_sym_LT_GT] = ACTIONS(2715),
     [anon_sym_EQ_EQ] = ACTIONS(2715),
     [anon_sym_GT_EQ] = ACTIONS(2715),
     [anon_sym_GT_GT] = ACTIONS(2715),
@@ -126006,6 +127840,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2715),
     [anon_sym_CARET_EQ] = ACTIONS(2715),
     [anon_sym_PIPE_EQ] = ACTIONS(2715),
+    [anon_sym_PIPE_GT] = ACTIONS(2715),
     [anon_sym_PIPE_PIPE] = ACTIONS(2715),
     [anon_sym_TILDE_PIPE] = ACTIONS(2715),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2715),
@@ -126118,6 +127953,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2669),
     [anon_sym_LT_EQ] = ACTIONS(2669),
     [anon_sym_LT_EQ_GT] = ACTIONS(2669),
+    [anon_sym_LT_GT] = ACTIONS(2669),
     [anon_sym_EQ_EQ] = ACTIONS(2669),
     [anon_sym_GT_EQ] = ACTIONS(2669),
     [anon_sym_GT_GT] = ACTIONS(2669),
@@ -126126,6 +127962,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2669),
     [anon_sym_CARET_EQ] = ACTIONS(2669),
     [anon_sym_PIPE_EQ] = ACTIONS(2669),
+    [anon_sym_PIPE_GT] = ACTIONS(2669),
     [anon_sym_PIPE_PIPE] = ACTIONS(2669),
     [anon_sym_TILDE_PIPE] = ACTIONS(2669),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2669),
@@ -126238,6 +128075,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2719),
     [anon_sym_LT_EQ] = ACTIONS(2719),
     [anon_sym_LT_EQ_GT] = ACTIONS(2719),
+    [anon_sym_LT_GT] = ACTIONS(2719),
     [anon_sym_EQ_EQ] = ACTIONS(2719),
     [anon_sym_GT_EQ] = ACTIONS(2719),
     [anon_sym_GT_GT] = ACTIONS(2719),
@@ -126246,6 +128084,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2719),
     [anon_sym_CARET_EQ] = ACTIONS(2719),
     [anon_sym_PIPE_EQ] = ACTIONS(2719),
+    [anon_sym_PIPE_GT] = ACTIONS(2719),
     [anon_sym_PIPE_PIPE] = ACTIONS(2719),
     [anon_sym_TILDE_PIPE] = ACTIONS(2719),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2719),
@@ -126358,6 +128197,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2723),
     [anon_sym_LT_EQ] = ACTIONS(2723),
     [anon_sym_LT_EQ_GT] = ACTIONS(2723),
+    [anon_sym_LT_GT] = ACTIONS(2723),
     [anon_sym_EQ_EQ] = ACTIONS(2723),
     [anon_sym_GT_EQ] = ACTIONS(2723),
     [anon_sym_GT_GT] = ACTIONS(2723),
@@ -126366,6 +128206,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2723),
     [anon_sym_CARET_EQ] = ACTIONS(2723),
     [anon_sym_PIPE_EQ] = ACTIONS(2723),
+    [anon_sym_PIPE_GT] = ACTIONS(2723),
     [anon_sym_PIPE_PIPE] = ACTIONS(2723),
     [anon_sym_TILDE_PIPE] = ACTIONS(2723),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2723),
@@ -126478,6 +128319,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2733),
     [anon_sym_LT_EQ] = ACTIONS(2733),
     [anon_sym_LT_EQ_GT] = ACTIONS(2733),
+    [anon_sym_LT_GT] = ACTIONS(2733),
     [anon_sym_EQ_EQ] = ACTIONS(2733),
     [anon_sym_GT_EQ] = ACTIONS(2733),
     [anon_sym_GT_GT] = ACTIONS(2733),
@@ -126486,6 +128328,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2733),
     [anon_sym_CARET_EQ] = ACTIONS(2733),
     [anon_sym_PIPE_EQ] = ACTIONS(2733),
+    [anon_sym_PIPE_GT] = ACTIONS(2733),
     [anon_sym_PIPE_PIPE] = ACTIONS(2733),
     [anon_sym_TILDE_PIPE] = ACTIONS(2733),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2733),
@@ -126598,6 +128441,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2737),
     [anon_sym_LT_EQ] = ACTIONS(2737),
     [anon_sym_LT_EQ_GT] = ACTIONS(2737),
+    [anon_sym_LT_GT] = ACTIONS(2737),
     [anon_sym_EQ_EQ] = ACTIONS(2737),
     [anon_sym_GT_EQ] = ACTIONS(2737),
     [anon_sym_GT_GT] = ACTIONS(2737),
@@ -126606,6 +128450,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2737),
     [anon_sym_CARET_EQ] = ACTIONS(2737),
     [anon_sym_PIPE_EQ] = ACTIONS(2737),
+    [anon_sym_PIPE_GT] = ACTIONS(2737),
     [anon_sym_PIPE_PIPE] = ACTIONS(2737),
     [anon_sym_TILDE_PIPE] = ACTIONS(2737),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2737),
@@ -126718,6 +128563,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2673),
     [anon_sym_LT_EQ] = ACTIONS(2673),
     [anon_sym_LT_EQ_GT] = ACTIONS(2673),
+    [anon_sym_LT_GT] = ACTIONS(2673),
     [anon_sym_EQ_EQ] = ACTIONS(2673),
     [anon_sym_GT_EQ] = ACTIONS(2673),
     [anon_sym_GT_GT] = ACTIONS(2673),
@@ -126726,6 +128572,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2673),
     [anon_sym_CARET_EQ] = ACTIONS(2673),
     [anon_sym_PIPE_EQ] = ACTIONS(2673),
+    [anon_sym_PIPE_GT] = ACTIONS(2673),
     [anon_sym_PIPE_PIPE] = ACTIONS(2673),
     [anon_sym_TILDE_PIPE] = ACTIONS(2673),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2673),
@@ -126838,6 +128685,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ_GT] = ACTIONS(2332),
+    [anon_sym_LT_GT] = ACTIONS(2332),
     [anon_sym_EQ_EQ] = ACTIONS(2332),
     [anon_sym_GT_EQ] = ACTIONS(2332),
     [anon_sym_GT_GT] = ACTIONS(2332),
@@ -126846,6 +128694,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2332),
     [anon_sym_CARET_EQ] = ACTIONS(2332),
     [anon_sym_PIPE_EQ] = ACTIONS(2332),
+    [anon_sym_PIPE_GT] = ACTIONS(2332),
     [anon_sym_PIPE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2332),
@@ -126958,6 +128807,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2801),
     [anon_sym_LT_EQ] = ACTIONS(2801),
     [anon_sym_LT_EQ_GT] = ACTIONS(2801),
+    [anon_sym_LT_GT] = ACTIONS(2801),
     [anon_sym_EQ_EQ] = ACTIONS(2801),
     [anon_sym_GT_EQ] = ACTIONS(2801),
     [anon_sym_GT_GT] = ACTIONS(2801),
@@ -126966,6 +128816,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2801),
     [anon_sym_CARET_EQ] = ACTIONS(2801),
     [anon_sym_PIPE_EQ] = ACTIONS(2801),
+    [anon_sym_PIPE_GT] = ACTIONS(2801),
     [anon_sym_PIPE_PIPE] = ACTIONS(2801),
     [anon_sym_TILDE_PIPE] = ACTIONS(2801),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2801),
@@ -127078,6 +128929,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2677),
     [anon_sym_LT_EQ] = ACTIONS(2677),
     [anon_sym_LT_EQ_GT] = ACTIONS(2677),
+    [anon_sym_LT_GT] = ACTIONS(2677),
     [anon_sym_EQ_EQ] = ACTIONS(2677),
     [anon_sym_GT_EQ] = ACTIONS(2677),
     [anon_sym_GT_GT] = ACTIONS(2677),
@@ -127086,6 +128938,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2677),
     [anon_sym_CARET_EQ] = ACTIONS(2677),
     [anon_sym_PIPE_EQ] = ACTIONS(2677),
+    [anon_sym_PIPE_GT] = ACTIONS(2677),
     [anon_sym_PIPE_PIPE] = ACTIONS(2677),
     [anon_sym_TILDE_PIPE] = ACTIONS(2677),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2677),
@@ -127198,6 +129051,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2584),
     [anon_sym_LT_EQ] = ACTIONS(2584),
     [anon_sym_LT_EQ_GT] = ACTIONS(2584),
+    [anon_sym_LT_GT] = ACTIONS(2584),
     [anon_sym_EQ_EQ] = ACTIONS(2584),
     [anon_sym_GT_EQ] = ACTIONS(2584),
     [anon_sym_GT_GT] = ACTIONS(2584),
@@ -127206,6 +129060,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2584),
     [anon_sym_CARET_EQ] = ACTIONS(2584),
     [anon_sym_PIPE_EQ] = ACTIONS(2584),
+    [anon_sym_PIPE_GT] = ACTIONS(2584),
     [anon_sym_PIPE_PIPE] = ACTIONS(2584),
     [anon_sym_TILDE_PIPE] = ACTIONS(2584),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2584),
@@ -127318,6 +129173,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2681),
     [anon_sym_LT_EQ] = ACTIONS(2681),
     [anon_sym_LT_EQ_GT] = ACTIONS(2681),
+    [anon_sym_LT_GT] = ACTIONS(2681),
     [anon_sym_EQ_EQ] = ACTIONS(2681),
     [anon_sym_GT_EQ] = ACTIONS(2681),
     [anon_sym_GT_GT] = ACTIONS(2681),
@@ -127326,6 +129182,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2681),
     [anon_sym_CARET_EQ] = ACTIONS(2681),
     [anon_sym_PIPE_EQ] = ACTIONS(2681),
+    [anon_sym_PIPE_GT] = ACTIONS(2681),
     [anon_sym_PIPE_PIPE] = ACTIONS(2681),
     [anon_sym_TILDE_PIPE] = ACTIONS(2681),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2681),
@@ -127438,6 +129295,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2766),
     [anon_sym_LT_EQ] = ACTIONS(2766),
     [anon_sym_LT_EQ_GT] = ACTIONS(2766),
+    [anon_sym_LT_GT] = ACTIONS(2766),
     [anon_sym_EQ_EQ] = ACTIONS(2766),
     [anon_sym_GT_EQ] = ACTIONS(2766),
     [anon_sym_GT_GT] = ACTIONS(2766),
@@ -127446,6 +129304,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2766),
     [anon_sym_CARET_EQ] = ACTIONS(2766),
     [anon_sym_PIPE_EQ] = ACTIONS(2766),
+    [anon_sym_PIPE_GT] = ACTIONS(2766),
     [anon_sym_PIPE_PIPE] = ACTIONS(2766),
     [anon_sym_TILDE_PIPE] = ACTIONS(2766),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2766),
@@ -127558,6 +129417,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2770),
     [anon_sym_LT_EQ] = ACTIONS(2770),
     [anon_sym_LT_EQ_GT] = ACTIONS(2770),
+    [anon_sym_LT_GT] = ACTIONS(2770),
     [anon_sym_EQ_EQ] = ACTIONS(2770),
     [anon_sym_GT_EQ] = ACTIONS(2770),
     [anon_sym_GT_GT] = ACTIONS(2770),
@@ -127566,6 +129426,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2770),
     [anon_sym_CARET_EQ] = ACTIONS(2770),
     [anon_sym_PIPE_EQ] = ACTIONS(2770),
+    [anon_sym_PIPE_GT] = ACTIONS(2770),
     [anon_sym_PIPE_PIPE] = ACTIONS(2770),
     [anon_sym_TILDE_PIPE] = ACTIONS(2770),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2770),
@@ -127678,6 +129539,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ_GT] = ACTIONS(2332),
+    [anon_sym_LT_GT] = ACTIONS(2332),
     [anon_sym_EQ_EQ] = ACTIONS(2332),
     [anon_sym_GT_EQ] = ACTIONS(2332),
     [anon_sym_GT_GT] = ACTIONS(2332),
@@ -127686,6 +129548,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2332),
     [anon_sym_CARET_EQ] = ACTIONS(2332),
     [anon_sym_PIPE_EQ] = ACTIONS(2332),
+    [anon_sym_PIPE_GT] = ACTIONS(2332),
     [anon_sym_PIPE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2332),
@@ -127798,6 +129661,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ_GT] = ACTIONS(2332),
+    [anon_sym_LT_GT] = ACTIONS(2332),
     [anon_sym_EQ_EQ] = ACTIONS(2332),
     [anon_sym_GT_EQ] = ACTIONS(2332),
     [anon_sym_GT_GT] = ACTIONS(2332),
@@ -127806,6 +129670,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2332),
     [anon_sym_CARET_EQ] = ACTIONS(2332),
     [anon_sym_PIPE_EQ] = ACTIONS(2332),
+    [anon_sym_PIPE_GT] = ACTIONS(2332),
     [anon_sym_PIPE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2332),
@@ -127918,6 +129783,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ_GT] = ACTIONS(2332),
+    [anon_sym_LT_GT] = ACTIONS(2332),
     [anon_sym_EQ_EQ] = ACTIONS(2332),
     [anon_sym_GT_EQ] = ACTIONS(2332),
     [anon_sym_GT_GT] = ACTIONS(2332),
@@ -127926,6 +129792,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2332),
     [anon_sym_CARET_EQ] = ACTIONS(2332),
     [anon_sym_PIPE_EQ] = ACTIONS(2332),
+    [anon_sym_PIPE_GT] = ACTIONS(2332),
     [anon_sym_PIPE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2332),
@@ -128038,6 +129905,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ_GT] = ACTIONS(2332),
+    [anon_sym_LT_GT] = ACTIONS(2332),
     [anon_sym_EQ_EQ] = ACTIONS(2332),
     [anon_sym_GT_EQ] = ACTIONS(2332),
     [anon_sym_GT_GT] = ACTIONS(2332),
@@ -128046,6 +129914,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2332),
     [anon_sym_CARET_EQ] = ACTIONS(2332),
     [anon_sym_PIPE_EQ] = ACTIONS(2332),
+    [anon_sym_PIPE_GT] = ACTIONS(2332),
     [anon_sym_PIPE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2332),
@@ -128158,6 +130027,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2759),
     [anon_sym_LT_EQ] = ACTIONS(2759),
     [anon_sym_LT_EQ_GT] = ACTIONS(2759),
+    [anon_sym_LT_GT] = ACTIONS(2759),
     [anon_sym_EQ_EQ] = ACTIONS(2759),
     [anon_sym_GT_EQ] = ACTIONS(2759),
     [anon_sym_GT_GT] = ACTIONS(2759),
@@ -128166,6 +130036,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2759),
     [anon_sym_CARET_EQ] = ACTIONS(2759),
     [anon_sym_PIPE_EQ] = ACTIONS(2759),
+    [anon_sym_PIPE_GT] = ACTIONS(2759),
     [anon_sym_PIPE_PIPE] = ACTIONS(2759),
     [anon_sym_TILDE_PIPE] = ACTIONS(2759),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2759),
@@ -128278,6 +130149,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2685),
     [anon_sym_LT_EQ] = ACTIONS(2685),
     [anon_sym_LT_EQ_GT] = ACTIONS(2685),
+    [anon_sym_LT_GT] = ACTIONS(2685),
     [anon_sym_EQ_EQ] = ACTIONS(2685),
     [anon_sym_GT_EQ] = ACTIONS(2685),
     [anon_sym_GT_GT] = ACTIONS(2685),
@@ -128286,6 +130158,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2685),
     [anon_sym_CARET_EQ] = ACTIONS(2685),
     [anon_sym_PIPE_EQ] = ACTIONS(2685),
+    [anon_sym_PIPE_GT] = ACTIONS(2685),
     [anon_sym_PIPE_PIPE] = ACTIONS(2685),
     [anon_sym_TILDE_PIPE] = ACTIONS(2685),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2685),
@@ -128398,6 +130271,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2689),
     [anon_sym_LT_EQ] = ACTIONS(2689),
     [anon_sym_LT_EQ_GT] = ACTIONS(2689),
+    [anon_sym_LT_GT] = ACTIONS(2689),
     [anon_sym_EQ_EQ] = ACTIONS(2689),
     [anon_sym_GT_EQ] = ACTIONS(2689),
     [anon_sym_GT_GT] = ACTIONS(2689),
@@ -128406,6 +130280,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2689),
     [anon_sym_CARET_EQ] = ACTIONS(2689),
     [anon_sym_PIPE_EQ] = ACTIONS(2689),
+    [anon_sym_PIPE_GT] = ACTIONS(2689),
     [anon_sym_PIPE_PIPE] = ACTIONS(2689),
     [anon_sym_TILDE_PIPE] = ACTIONS(2689),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2689),
@@ -128518,6 +130393,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2415),
     [anon_sym_LT_EQ] = ACTIONS(2415),
     [anon_sym_LT_EQ_GT] = ACTIONS(2415),
+    [anon_sym_LT_GT] = ACTIONS(2415),
     [anon_sym_EQ_EQ] = ACTIONS(2415),
     [anon_sym_GT_EQ] = ACTIONS(2415),
     [anon_sym_GT_GT] = ACTIONS(2415),
@@ -128526,6 +130402,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2415),
     [anon_sym_CARET_EQ] = ACTIONS(2415),
     [anon_sym_PIPE_EQ] = ACTIONS(2415),
+    [anon_sym_PIPE_GT] = ACTIONS(2415),
     [anon_sym_PIPE_PIPE] = ACTIONS(2415),
     [anon_sym_TILDE_PIPE] = ACTIONS(2415),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2415),
@@ -128638,6 +130515,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2464),
     [anon_sym_LT_EQ] = ACTIONS(2464),
     [anon_sym_LT_EQ_GT] = ACTIONS(2464),
+    [anon_sym_LT_GT] = ACTIONS(2464),
     [anon_sym_EQ_EQ] = ACTIONS(2464),
     [anon_sym_GT_EQ] = ACTIONS(2464),
     [anon_sym_GT_GT] = ACTIONS(2464),
@@ -128646,6 +130524,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2464),
     [anon_sym_CARET_EQ] = ACTIONS(2464),
     [anon_sym_PIPE_EQ] = ACTIONS(2464),
+    [anon_sym_PIPE_GT] = ACTIONS(2464),
     [anon_sym_PIPE_PIPE] = ACTIONS(2464),
     [anon_sym_TILDE_PIPE] = ACTIONS(2464),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2464),
@@ -128758,6 +130637,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2747),
     [anon_sym_LT_EQ] = ACTIONS(2747),
     [anon_sym_LT_EQ_GT] = ACTIONS(2747),
+    [anon_sym_LT_GT] = ACTIONS(2747),
     [anon_sym_EQ_EQ] = ACTIONS(2747),
     [anon_sym_GT_EQ] = ACTIONS(2747),
     [anon_sym_GT_GT] = ACTIONS(2747),
@@ -128766,6 +130646,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2747),
     [anon_sym_CARET_EQ] = ACTIONS(2747),
     [anon_sym_PIPE_EQ] = ACTIONS(2747),
+    [anon_sym_PIPE_GT] = ACTIONS(2747),
     [anon_sym_PIPE_PIPE] = ACTIONS(2747),
     [anon_sym_TILDE_PIPE] = ACTIONS(2747),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2747),
@@ -128878,6 +130759,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2741),
     [anon_sym_LT_EQ] = ACTIONS(2741),
     [anon_sym_LT_EQ_GT] = ACTIONS(2741),
+    [anon_sym_LT_GT] = ACTIONS(2741),
     [anon_sym_EQ_EQ] = ACTIONS(2741),
     [anon_sym_GT_EQ] = ACTIONS(2741),
     [anon_sym_GT_GT] = ACTIONS(2741),
@@ -128886,6 +130768,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2741),
     [anon_sym_CARET_EQ] = ACTIONS(2741),
     [anon_sym_PIPE_EQ] = ACTIONS(2741),
+    [anon_sym_PIPE_GT] = ACTIONS(2741),
     [anon_sym_PIPE_PIPE] = ACTIONS(2741),
     [anon_sym_TILDE_PIPE] = ACTIONS(2741),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2741),
@@ -128998,6 +130881,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2699),
     [anon_sym_LT_EQ] = ACTIONS(2699),
     [anon_sym_LT_EQ_GT] = ACTIONS(2699),
+    [anon_sym_LT_GT] = ACTIONS(2699),
     [anon_sym_EQ_EQ] = ACTIONS(2699),
     [anon_sym_GT_EQ] = ACTIONS(2699),
     [anon_sym_GT_GT] = ACTIONS(2699),
@@ -129006,6 +130890,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2699),
     [anon_sym_CARET_EQ] = ACTIONS(2699),
     [anon_sym_PIPE_EQ] = ACTIONS(2699),
+    [anon_sym_PIPE_GT] = ACTIONS(2699),
     [anon_sym_PIPE_PIPE] = ACTIONS(2699),
     [anon_sym_TILDE_PIPE] = ACTIONS(2699),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2699),
@@ -129118,6 +131003,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2703),
     [anon_sym_LT_EQ] = ACTIONS(2703),
     [anon_sym_LT_EQ_GT] = ACTIONS(2703),
+    [anon_sym_LT_GT] = ACTIONS(2703),
     [anon_sym_EQ_EQ] = ACTIONS(2703),
     [anon_sym_GT_EQ] = ACTIONS(2703),
     [anon_sym_GT_GT] = ACTIONS(2703),
@@ -129126,6 +131012,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2703),
     [anon_sym_CARET_EQ] = ACTIONS(2703),
     [anon_sym_PIPE_EQ] = ACTIONS(2703),
+    [anon_sym_PIPE_GT] = ACTIONS(2703),
     [anon_sym_PIPE_PIPE] = ACTIONS(2703),
     [anon_sym_TILDE_PIPE] = ACTIONS(2703),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2703),
@@ -129238,6 +131125,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2460),
     [anon_sym_LT_EQ] = ACTIONS(2460),
     [anon_sym_LT_EQ_GT] = ACTIONS(2460),
+    [anon_sym_LT_GT] = ACTIONS(2460),
     [anon_sym_EQ_EQ] = ACTIONS(2460),
     [anon_sym_GT_EQ] = ACTIONS(2460),
     [anon_sym_GT_GT] = ACTIONS(2460),
@@ -129246,6 +131134,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2460),
     [anon_sym_CARET_EQ] = ACTIONS(2460),
     [anon_sym_PIPE_EQ] = ACTIONS(2460),
+    [anon_sym_PIPE_GT] = ACTIONS(2460),
     [anon_sym_PIPE_PIPE] = ACTIONS(2460),
     [anon_sym_TILDE_PIPE] = ACTIONS(2460),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2460),
@@ -129358,6 +131247,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2464),
     [anon_sym_LT_EQ] = ACTIONS(2464),
     [anon_sym_LT_EQ_GT] = ACTIONS(2464),
+    [anon_sym_LT_GT] = ACTIONS(2464),
     [anon_sym_EQ_EQ] = ACTIONS(2464),
     [anon_sym_GT_EQ] = ACTIONS(2464),
     [anon_sym_GT_GT] = ACTIONS(2464),
@@ -129366,6 +131256,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2464),
     [anon_sym_CARET_EQ] = ACTIONS(2464),
     [anon_sym_PIPE_EQ] = ACTIONS(2464),
+    [anon_sym_PIPE_GT] = ACTIONS(2464),
     [anon_sym_PIPE_PIPE] = ACTIONS(2464),
     [anon_sym_TILDE_PIPE] = ACTIONS(2464),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2464),
@@ -129478,6 +131369,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2480),
     [anon_sym_LT_EQ] = ACTIONS(2480),
     [anon_sym_LT_EQ_GT] = ACTIONS(2480),
+    [anon_sym_LT_GT] = ACTIONS(2480),
     [anon_sym_EQ_EQ] = ACTIONS(2480),
     [anon_sym_GT_EQ] = ACTIONS(2480),
     [anon_sym_GT_GT] = ACTIONS(2480),
@@ -129486,6 +131378,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2480),
     [anon_sym_CARET_EQ] = ACTIONS(2480),
     [anon_sym_PIPE_EQ] = ACTIONS(2480),
+    [anon_sym_PIPE_GT] = ACTIONS(2480),
     [anon_sym_PIPE_PIPE] = ACTIONS(2480),
     [anon_sym_TILDE_PIPE] = ACTIONS(2480),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2480),
@@ -129598,6 +131491,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2707),
     [anon_sym_LT_EQ] = ACTIONS(2707),
     [anon_sym_LT_EQ_GT] = ACTIONS(2707),
+    [anon_sym_LT_GT] = ACTIONS(2707),
     [anon_sym_EQ_EQ] = ACTIONS(2707),
     [anon_sym_GT_EQ] = ACTIONS(2707),
     [anon_sym_GT_GT] = ACTIONS(2707),
@@ -129606,6 +131500,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2707),
     [anon_sym_CARET_EQ] = ACTIONS(2707),
     [anon_sym_PIPE_EQ] = ACTIONS(2707),
+    [anon_sym_PIPE_GT] = ACTIONS(2707),
     [anon_sym_PIPE_PIPE] = ACTIONS(2707),
     [anon_sym_TILDE_PIPE] = ACTIONS(2707),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2707),
@@ -129718,6 +131613,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2651),
     [anon_sym_LT_EQ] = ACTIONS(2651),
     [anon_sym_LT_EQ_GT] = ACTIONS(2651),
+    [anon_sym_LT_GT] = ACTIONS(2651),
     [anon_sym_EQ_EQ] = ACTIONS(2651),
     [anon_sym_GT_EQ] = ACTIONS(2651),
     [anon_sym_GT_GT] = ACTIONS(2651),
@@ -129726,6 +131622,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2651),
     [anon_sym_CARET_EQ] = ACTIONS(2651),
     [anon_sym_PIPE_EQ] = ACTIONS(2651),
+    [anon_sym_PIPE_GT] = ACTIONS(2651),
     [anon_sym_PIPE_PIPE] = ACTIONS(2651),
     [anon_sym_TILDE_PIPE] = ACTIONS(2651),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2651),
@@ -129838,6 +131735,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2456),
     [anon_sym_LT_EQ] = ACTIONS(2456),
     [anon_sym_LT_EQ_GT] = ACTIONS(2456),
+    [anon_sym_LT_GT] = ACTIONS(2456),
     [anon_sym_EQ_EQ] = ACTIONS(2456),
     [anon_sym_GT_EQ] = ACTIONS(2456),
     [anon_sym_GT_GT] = ACTIONS(2456),
@@ -129846,6 +131744,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2456),
     [anon_sym_CARET_EQ] = ACTIONS(2456),
     [anon_sym_PIPE_EQ] = ACTIONS(2456),
+    [anon_sym_PIPE_GT] = ACTIONS(2456),
     [anon_sym_PIPE_PIPE] = ACTIONS(2456),
     [anon_sym_TILDE_PIPE] = ACTIONS(2456),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2456),
@@ -129958,6 +131857,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2711),
     [anon_sym_LT_EQ] = ACTIONS(2711),
     [anon_sym_LT_EQ_GT] = ACTIONS(2711),
+    [anon_sym_LT_GT] = ACTIONS(2711),
     [anon_sym_EQ_EQ] = ACTIONS(2711),
     [anon_sym_GT_EQ] = ACTIONS(2711),
     [anon_sym_GT_GT] = ACTIONS(2711),
@@ -129966,6 +131866,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2711),
     [anon_sym_CARET_EQ] = ACTIONS(2711),
     [anon_sym_PIPE_EQ] = ACTIONS(2711),
+    [anon_sym_PIPE_GT] = ACTIONS(2711),
     [anon_sym_PIPE_PIPE] = ACTIONS(2711),
     [anon_sym_TILDE_PIPE] = ACTIONS(2711),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2711),
@@ -130078,6 +131979,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2715),
     [anon_sym_LT_EQ] = ACTIONS(2715),
     [anon_sym_LT_EQ_GT] = ACTIONS(2715),
+    [anon_sym_LT_GT] = ACTIONS(2715),
     [anon_sym_EQ_EQ] = ACTIONS(2715),
     [anon_sym_GT_EQ] = ACTIONS(2715),
     [anon_sym_GT_GT] = ACTIONS(2715),
@@ -130086,6 +131988,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2715),
     [anon_sym_CARET_EQ] = ACTIONS(2715),
     [anon_sym_PIPE_EQ] = ACTIONS(2715),
+    [anon_sym_PIPE_GT] = ACTIONS(2715),
     [anon_sym_PIPE_PIPE] = ACTIONS(2715),
     [anon_sym_TILDE_PIPE] = ACTIONS(2715),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2715),
@@ -130198,6 +132101,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2472),
     [anon_sym_LT_EQ] = ACTIONS(2472),
     [anon_sym_LT_EQ_GT] = ACTIONS(2472),
+    [anon_sym_LT_GT] = ACTIONS(2472),
     [anon_sym_EQ_EQ] = ACTIONS(2472),
     [anon_sym_GT_EQ] = ACTIONS(2472),
     [anon_sym_GT_GT] = ACTIONS(2472),
@@ -130206,6 +132110,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2472),
     [anon_sym_CARET_EQ] = ACTIONS(2472),
     [anon_sym_PIPE_EQ] = ACTIONS(2472),
+    [anon_sym_PIPE_GT] = ACTIONS(2472),
     [anon_sym_PIPE_PIPE] = ACTIONS(2472),
     [anon_sym_TILDE_PIPE] = ACTIONS(2472),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2472),
@@ -130318,6 +132223,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2591),
     [anon_sym_LT_EQ] = ACTIONS(2591),
     [anon_sym_LT_EQ_GT] = ACTIONS(2591),
+    [anon_sym_LT_GT] = ACTIONS(2591),
     [anon_sym_EQ_EQ] = ACTIONS(2591),
     [anon_sym_GT_EQ] = ACTIONS(2591),
     [anon_sym_GT_GT] = ACTIONS(2591),
@@ -130326,6 +132232,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2591),
     [anon_sym_CARET_EQ] = ACTIONS(2591),
     [anon_sym_PIPE_EQ] = ACTIONS(2591),
+    [anon_sym_PIPE_GT] = ACTIONS(2591),
     [anon_sym_PIPE_PIPE] = ACTIONS(2591),
     [anon_sym_TILDE_PIPE] = ACTIONS(2591),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2591),
@@ -130438,6 +132345,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2719),
     [anon_sym_LT_EQ] = ACTIONS(2719),
     [anon_sym_LT_EQ_GT] = ACTIONS(2719),
+    [anon_sym_LT_GT] = ACTIONS(2719),
     [anon_sym_EQ_EQ] = ACTIONS(2719),
     [anon_sym_GT_EQ] = ACTIONS(2719),
     [anon_sym_GT_GT] = ACTIONS(2719),
@@ -130446,6 +132354,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2719),
     [anon_sym_CARET_EQ] = ACTIONS(2719),
     [anon_sym_PIPE_EQ] = ACTIONS(2719),
+    [anon_sym_PIPE_GT] = ACTIONS(2719),
     [anon_sym_PIPE_PIPE] = ACTIONS(2719),
     [anon_sym_TILDE_PIPE] = ACTIONS(2719),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2719),
@@ -130558,6 +132467,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2496),
     [anon_sym_LT_EQ] = ACTIONS(2496),
     [anon_sym_LT_EQ_GT] = ACTIONS(2496),
+    [anon_sym_LT_GT] = ACTIONS(2496),
     [anon_sym_EQ_EQ] = ACTIONS(2496),
     [anon_sym_GT_EQ] = ACTIONS(2496),
     [anon_sym_GT_GT] = ACTIONS(2496),
@@ -130566,6 +132476,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2496),
     [anon_sym_CARET_EQ] = ACTIONS(2496),
     [anon_sym_PIPE_EQ] = ACTIONS(2496),
+    [anon_sym_PIPE_GT] = ACTIONS(2496),
     [anon_sym_PIPE_PIPE] = ACTIONS(2496),
     [anon_sym_TILDE_PIPE] = ACTIONS(2496),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2496),
@@ -130678,6 +132589,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2383),
     [anon_sym_LT_EQ] = ACTIONS(2383),
     [anon_sym_LT_EQ_GT] = ACTIONS(2383),
+    [anon_sym_LT_GT] = ACTIONS(2383),
     [anon_sym_EQ_EQ] = ACTIONS(2383),
     [anon_sym_GT_EQ] = ACTIONS(2383),
     [anon_sym_GT_GT] = ACTIONS(2383),
@@ -130686,6 +132598,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2383),
     [anon_sym_CARET_EQ] = ACTIONS(2383),
     [anon_sym_PIPE_EQ] = ACTIONS(2383),
+    [anon_sym_PIPE_GT] = ACTIONS(2383),
     [anon_sym_PIPE_PIPE] = ACTIONS(2383),
     [anon_sym_TILDE_PIPE] = ACTIONS(2383),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2383),
@@ -130798,6 +132711,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2538),
     [anon_sym_LT_EQ] = ACTIONS(2538),
     [anon_sym_LT_EQ_GT] = ACTIONS(2538),
+    [anon_sym_LT_GT] = ACTIONS(2538),
     [anon_sym_EQ_EQ] = ACTIONS(2538),
     [anon_sym_GT_EQ] = ACTIONS(2538),
     [anon_sym_GT_GT] = ACTIONS(2538),
@@ -130806,6 +132720,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2538),
     [anon_sym_CARET_EQ] = ACTIONS(2538),
     [anon_sym_PIPE_EQ] = ACTIONS(2538),
+    [anon_sym_PIPE_GT] = ACTIONS(2538),
     [anon_sym_PIPE_PIPE] = ACTIONS(2538),
     [anon_sym_TILDE_PIPE] = ACTIONS(2538),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2538),
@@ -130918,6 +132833,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2566),
     [anon_sym_LT_EQ] = ACTIONS(2566),
     [anon_sym_LT_EQ_GT] = ACTIONS(2566),
+    [anon_sym_LT_GT] = ACTIONS(2566),
     [anon_sym_EQ_EQ] = ACTIONS(2566),
     [anon_sym_GT_EQ] = ACTIONS(2566),
     [anon_sym_GT_GT] = ACTIONS(2566),
@@ -130926,6 +132842,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2566),
     [anon_sym_CARET_EQ] = ACTIONS(2566),
     [anon_sym_PIPE_EQ] = ACTIONS(2566),
+    [anon_sym_PIPE_GT] = ACTIONS(2566),
     [anon_sym_PIPE_PIPE] = ACTIONS(2566),
     [anon_sym_TILDE_PIPE] = ACTIONS(2566),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2566),
@@ -131038,6 +132955,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2580),
     [anon_sym_LT_EQ] = ACTIONS(2580),
     [anon_sym_LT_EQ_GT] = ACTIONS(2580),
+    [anon_sym_LT_GT] = ACTIONS(2580),
     [anon_sym_EQ_EQ] = ACTIONS(2580),
     [anon_sym_GT_EQ] = ACTIONS(2580),
     [anon_sym_GT_GT] = ACTIONS(2580),
@@ -131046,6 +132964,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2580),
     [anon_sym_CARET_EQ] = ACTIONS(2580),
     [anon_sym_PIPE_EQ] = ACTIONS(2580),
+    [anon_sym_PIPE_GT] = ACTIONS(2580),
     [anon_sym_PIPE_PIPE] = ACTIONS(2580),
     [anon_sym_TILDE_PIPE] = ACTIONS(2580),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2580),
@@ -131158,6 +133077,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2584),
     [anon_sym_LT_EQ] = ACTIONS(2584),
     [anon_sym_LT_EQ_GT] = ACTIONS(2584),
+    [anon_sym_LT_GT] = ACTIONS(2584),
     [anon_sym_EQ_EQ] = ACTIONS(2584),
     [anon_sym_GT_EQ] = ACTIONS(2584),
     [anon_sym_GT_GT] = ACTIONS(2584),
@@ -131166,6 +133086,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2584),
     [anon_sym_CARET_EQ] = ACTIONS(2584),
     [anon_sym_PIPE_EQ] = ACTIONS(2584),
+    [anon_sym_PIPE_GT] = ACTIONS(2584),
     [anon_sym_PIPE_PIPE] = ACTIONS(2584),
     [anon_sym_TILDE_PIPE] = ACTIONS(2584),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2584),
@@ -131278,6 +133199,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2591),
     [anon_sym_LT_EQ] = ACTIONS(2591),
     [anon_sym_LT_EQ_GT] = ACTIONS(2591),
+    [anon_sym_LT_GT] = ACTIONS(2591),
     [anon_sym_EQ_EQ] = ACTIONS(2591),
     [anon_sym_GT_EQ] = ACTIONS(2591),
     [anon_sym_GT_GT] = ACTIONS(2591),
@@ -131286,6 +133208,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2591),
     [anon_sym_CARET_EQ] = ACTIONS(2591),
     [anon_sym_PIPE_EQ] = ACTIONS(2591),
+    [anon_sym_PIPE_GT] = ACTIONS(2591),
     [anon_sym_PIPE_PIPE] = ACTIONS(2591),
     [anon_sym_TILDE_PIPE] = ACTIONS(2591),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2591),
@@ -131398,6 +133321,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2601),
     [anon_sym_LT_EQ] = ACTIONS(2601),
     [anon_sym_LT_EQ_GT] = ACTIONS(2601),
+    [anon_sym_LT_GT] = ACTIONS(2601),
     [anon_sym_EQ_EQ] = ACTIONS(2601),
     [anon_sym_GT_EQ] = ACTIONS(2601),
     [anon_sym_GT_GT] = ACTIONS(2601),
@@ -131406,6 +133330,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2601),
     [anon_sym_CARET_EQ] = ACTIONS(2601),
     [anon_sym_PIPE_EQ] = ACTIONS(2601),
+    [anon_sym_PIPE_GT] = ACTIONS(2601),
     [anon_sym_PIPE_PIPE] = ACTIONS(2601),
     [anon_sym_TILDE_PIPE] = ACTIONS(2601),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2601),
@@ -131518,6 +133443,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2609),
     [anon_sym_LT_EQ] = ACTIONS(2609),
     [anon_sym_LT_EQ_GT] = ACTIONS(2609),
+    [anon_sym_LT_GT] = ACTIONS(2609),
     [anon_sym_EQ_EQ] = ACTIONS(2609),
     [anon_sym_GT_EQ] = ACTIONS(2609),
     [anon_sym_GT_GT] = ACTIONS(2609),
@@ -131526,6 +133452,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2609),
     [anon_sym_CARET_EQ] = ACTIONS(2609),
     [anon_sym_PIPE_EQ] = ACTIONS(2609),
+    [anon_sym_PIPE_GT] = ACTIONS(2609),
     [anon_sym_PIPE_PIPE] = ACTIONS(2609),
     [anon_sym_TILDE_PIPE] = ACTIONS(2609),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2609),
@@ -131638,6 +133565,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2617),
     [anon_sym_LT_EQ] = ACTIONS(2617),
     [anon_sym_LT_EQ_GT] = ACTIONS(2617),
+    [anon_sym_LT_GT] = ACTIONS(2617),
     [anon_sym_EQ_EQ] = ACTIONS(2617),
     [anon_sym_GT_EQ] = ACTIONS(2617),
     [anon_sym_GT_GT] = ACTIONS(2617),
@@ -131646,6 +133574,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2617),
     [anon_sym_CARET_EQ] = ACTIONS(2617),
     [anon_sym_PIPE_EQ] = ACTIONS(2617),
+    [anon_sym_PIPE_GT] = ACTIONS(2617),
     [anon_sym_PIPE_PIPE] = ACTIONS(2617),
     [anon_sym_TILDE_PIPE] = ACTIONS(2617),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2617),
@@ -131758,6 +133687,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2625),
     [anon_sym_LT_EQ] = ACTIONS(2625),
     [anon_sym_LT_EQ_GT] = ACTIONS(2625),
+    [anon_sym_LT_GT] = ACTIONS(2625),
     [anon_sym_EQ_EQ] = ACTIONS(2625),
     [anon_sym_GT_EQ] = ACTIONS(2625),
     [anon_sym_GT_GT] = ACTIONS(2625),
@@ -131766,6 +133696,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2625),
     [anon_sym_CARET_EQ] = ACTIONS(2625),
     [anon_sym_PIPE_EQ] = ACTIONS(2625),
+    [anon_sym_PIPE_GT] = ACTIONS(2625),
     [anon_sym_PIPE_PIPE] = ACTIONS(2625),
     [anon_sym_TILDE_PIPE] = ACTIONS(2625),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2625),
@@ -131878,6 +133809,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2641),
     [anon_sym_LT_EQ] = ACTIONS(2641),
     [anon_sym_LT_EQ_GT] = ACTIONS(2641),
+    [anon_sym_LT_GT] = ACTIONS(2641),
     [anon_sym_EQ_EQ] = ACTIONS(2641),
     [anon_sym_GT_EQ] = ACTIONS(2641),
     [anon_sym_GT_GT] = ACTIONS(2641),
@@ -131886,6 +133818,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2641),
     [anon_sym_CARET_EQ] = ACTIONS(2641),
     [anon_sym_PIPE_EQ] = ACTIONS(2641),
+    [anon_sym_PIPE_GT] = ACTIONS(2641),
     [anon_sym_PIPE_PIPE] = ACTIONS(2641),
     [anon_sym_TILDE_PIPE] = ACTIONS(2641),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2641),
@@ -131998,6 +133931,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2723),
     [anon_sym_LT_EQ] = ACTIONS(2723),
     [anon_sym_LT_EQ_GT] = ACTIONS(2723),
+    [anon_sym_LT_GT] = ACTIONS(2723),
     [anon_sym_EQ_EQ] = ACTIONS(2723),
     [anon_sym_GT_EQ] = ACTIONS(2723),
     [anon_sym_GT_GT] = ACTIONS(2723),
@@ -132006,6 +133940,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2723),
     [anon_sym_CARET_EQ] = ACTIONS(2723),
     [anon_sym_PIPE_EQ] = ACTIONS(2723),
+    [anon_sym_PIPE_GT] = ACTIONS(2723),
     [anon_sym_PIPE_PIPE] = ACTIONS(2723),
     [anon_sym_TILDE_PIPE] = ACTIONS(2723),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2723),
@@ -132118,6 +134053,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2733),
     [anon_sym_LT_EQ] = ACTIONS(2733),
     [anon_sym_LT_EQ_GT] = ACTIONS(2733),
+    [anon_sym_LT_GT] = ACTIONS(2733),
     [anon_sym_EQ_EQ] = ACTIONS(2733),
     [anon_sym_GT_EQ] = ACTIONS(2733),
     [anon_sym_GT_GT] = ACTIONS(2733),
@@ -132126,6 +134062,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2733),
     [anon_sym_CARET_EQ] = ACTIONS(2733),
     [anon_sym_PIPE_EQ] = ACTIONS(2733),
+    [anon_sym_PIPE_GT] = ACTIONS(2733),
     [anon_sym_PIPE_PIPE] = ACTIONS(2733),
     [anon_sym_TILDE_PIPE] = ACTIONS(2733),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2733),
@@ -132238,6 +134175,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2737),
     [anon_sym_LT_EQ] = ACTIONS(2737),
     [anon_sym_LT_EQ_GT] = ACTIONS(2737),
+    [anon_sym_LT_GT] = ACTIONS(2737),
     [anon_sym_EQ_EQ] = ACTIONS(2737),
     [anon_sym_GT_EQ] = ACTIONS(2737),
     [anon_sym_GT_GT] = ACTIONS(2737),
@@ -132246,6 +134184,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2737),
     [anon_sym_CARET_EQ] = ACTIONS(2737),
     [anon_sym_PIPE_EQ] = ACTIONS(2737),
+    [anon_sym_PIPE_GT] = ACTIONS(2737),
     [anon_sym_PIPE_PIPE] = ACTIONS(2737),
     [anon_sym_TILDE_PIPE] = ACTIONS(2737),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2737),
@@ -132358,6 +134297,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2601),
     [anon_sym_LT_EQ] = ACTIONS(2601),
     [anon_sym_LT_EQ_GT] = ACTIONS(2601),
+    [anon_sym_LT_GT] = ACTIONS(2601),
     [anon_sym_EQ_EQ] = ACTIONS(2601),
     [anon_sym_GT_EQ] = ACTIONS(2601),
     [anon_sym_GT_GT] = ACTIONS(2601),
@@ -132366,6 +134306,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2601),
     [anon_sym_CARET_EQ] = ACTIONS(2601),
     [anon_sym_PIPE_EQ] = ACTIONS(2601),
+    [anon_sym_PIPE_GT] = ACTIONS(2601),
     [anon_sym_PIPE_PIPE] = ACTIONS(2601),
     [anon_sym_TILDE_PIPE] = ACTIONS(2601),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2601),
@@ -132478,6 +134419,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2751),
     [anon_sym_LT_EQ] = ACTIONS(2751),
     [anon_sym_LT_EQ_GT] = ACTIONS(2751),
+    [anon_sym_LT_GT] = ACTIONS(2751),
     [anon_sym_EQ_EQ] = ACTIONS(2751),
     [anon_sym_GT_EQ] = ACTIONS(2751),
     [anon_sym_GT_GT] = ACTIONS(2751),
@@ -132486,6 +134428,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2751),
     [anon_sym_CARET_EQ] = ACTIONS(2751),
     [anon_sym_PIPE_EQ] = ACTIONS(2751),
+    [anon_sym_PIPE_GT] = ACTIONS(2751),
     [anon_sym_PIPE_PIPE] = ACTIONS(2751),
     [anon_sym_TILDE_PIPE] = ACTIONS(2751),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2751),
@@ -132598,6 +134541,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ_GT] = ACTIONS(2332),
+    [anon_sym_LT_GT] = ACTIONS(2332),
     [anon_sym_EQ_EQ] = ACTIONS(2332),
     [anon_sym_GT_EQ] = ACTIONS(2332),
     [anon_sym_GT_GT] = ACTIONS(2332),
@@ -132606,6 +134550,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2332),
     [anon_sym_CARET_EQ] = ACTIONS(2332),
     [anon_sym_PIPE_EQ] = ACTIONS(2332),
+    [anon_sym_PIPE_GT] = ACTIONS(2332),
     [anon_sym_PIPE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2332),
@@ -132718,6 +134663,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2755),
     [anon_sym_LT_EQ] = ACTIONS(2755),
     [anon_sym_LT_EQ_GT] = ACTIONS(2755),
+    [anon_sym_LT_GT] = ACTIONS(2755),
     [anon_sym_EQ_EQ] = ACTIONS(2755),
     [anon_sym_GT_EQ] = ACTIONS(2755),
     [anon_sym_GT_GT] = ACTIONS(2755),
@@ -132726,6 +134672,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2755),
     [anon_sym_CARET_EQ] = ACTIONS(2755),
     [anon_sym_PIPE_EQ] = ACTIONS(2755),
+    [anon_sym_PIPE_GT] = ACTIONS(2755),
     [anon_sym_PIPE_PIPE] = ACTIONS(2755),
     [anon_sym_TILDE_PIPE] = ACTIONS(2755),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2755),
@@ -132838,6 +134785,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ_GT] = ACTIONS(2332),
+    [anon_sym_LT_GT] = ACTIONS(2332),
     [anon_sym_EQ_EQ] = ACTIONS(2332),
     [anon_sym_GT_EQ] = ACTIONS(2332),
     [anon_sym_GT_GT] = ACTIONS(2332),
@@ -132846,6 +134794,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2332),
     [anon_sym_CARET_EQ] = ACTIONS(2332),
     [anon_sym_PIPE_EQ] = ACTIONS(2332),
+    [anon_sym_PIPE_GT] = ACTIONS(2332),
     [anon_sym_PIPE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2332),
@@ -132958,6 +134907,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2617),
     [anon_sym_LT_EQ] = ACTIONS(2617),
     [anon_sym_LT_EQ_GT] = ACTIONS(2617),
+    [anon_sym_LT_GT] = ACTIONS(2617),
     [anon_sym_EQ_EQ] = ACTIONS(2617),
     [anon_sym_GT_EQ] = ACTIONS(2617),
     [anon_sym_GT_GT] = ACTIONS(2617),
@@ -132966,6 +134916,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2617),
     [anon_sym_CARET_EQ] = ACTIONS(2617),
     [anon_sym_PIPE_EQ] = ACTIONS(2617),
+    [anon_sym_PIPE_GT] = ACTIONS(2617),
     [anon_sym_PIPE_PIPE] = ACTIONS(2617),
     [anon_sym_TILDE_PIPE] = ACTIONS(2617),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2617),
@@ -133078,6 +135029,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2747),
     [anon_sym_LT_EQ] = ACTIONS(2747),
     [anon_sym_LT_EQ_GT] = ACTIONS(2747),
+    [anon_sym_LT_GT] = ACTIONS(2747),
     [anon_sym_EQ_EQ] = ACTIONS(2747),
     [anon_sym_GT_EQ] = ACTIONS(2747),
     [anon_sym_GT_GT] = ACTIONS(2747),
@@ -133086,6 +135038,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2747),
     [anon_sym_CARET_EQ] = ACTIONS(2747),
     [anon_sym_PIPE_EQ] = ACTIONS(2747),
+    [anon_sym_PIPE_GT] = ACTIONS(2747),
     [anon_sym_PIPE_PIPE] = ACTIONS(2747),
     [anon_sym_TILDE_PIPE] = ACTIONS(2747),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2747),
@@ -133198,6 +135151,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2625),
     [anon_sym_LT_EQ] = ACTIONS(2625),
     [anon_sym_LT_EQ_GT] = ACTIONS(2625),
+    [anon_sym_LT_GT] = ACTIONS(2625),
     [anon_sym_EQ_EQ] = ACTIONS(2625),
     [anon_sym_GT_EQ] = ACTIONS(2625),
     [anon_sym_GT_GT] = ACTIONS(2625),
@@ -133206,6 +135160,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2625),
     [anon_sym_CARET_EQ] = ACTIONS(2625),
     [anon_sym_PIPE_EQ] = ACTIONS(2625),
+    [anon_sym_PIPE_GT] = ACTIONS(2625),
     [anon_sym_PIPE_PIPE] = ACTIONS(2625),
     [anon_sym_TILDE_PIPE] = ACTIONS(2625),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2625),
@@ -133318,6 +135273,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2468),
     [anon_sym_LT_EQ] = ACTIONS(2468),
     [anon_sym_LT_EQ_GT] = ACTIONS(2468),
+    [anon_sym_LT_GT] = ACTIONS(2468),
     [anon_sym_EQ_EQ] = ACTIONS(2468),
     [anon_sym_GT_EQ] = ACTIONS(2468),
     [anon_sym_GT_GT] = ACTIONS(2468),
@@ -133326,6 +135282,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2468),
     [anon_sym_CARET_EQ] = ACTIONS(2468),
     [anon_sym_PIPE_EQ] = ACTIONS(2468),
+    [anon_sym_PIPE_GT] = ACTIONS(2468),
     [anon_sym_PIPE_PIPE] = ACTIONS(2468),
     [anon_sym_TILDE_PIPE] = ACTIONS(2468),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2468),
@@ -133438,6 +135395,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2766),
     [anon_sym_LT_EQ] = ACTIONS(2766),
     [anon_sym_LT_EQ_GT] = ACTIONS(2766),
+    [anon_sym_LT_GT] = ACTIONS(2766),
     [anon_sym_EQ_EQ] = ACTIONS(2766),
     [anon_sym_GT_EQ] = ACTIONS(2766),
     [anon_sym_GT_GT] = ACTIONS(2766),
@@ -133446,6 +135404,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2766),
     [anon_sym_CARET_EQ] = ACTIONS(2766),
     [anon_sym_PIPE_EQ] = ACTIONS(2766),
+    [anon_sym_PIPE_GT] = ACTIONS(2766),
     [anon_sym_PIPE_PIPE] = ACTIONS(2766),
     [anon_sym_TILDE_PIPE] = ACTIONS(2766),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2766),
@@ -133558,6 +135517,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2476),
     [anon_sym_LT_EQ] = ACTIONS(2476),
     [anon_sym_LT_EQ_GT] = ACTIONS(2476),
+    [anon_sym_LT_GT] = ACTIONS(2476),
     [anon_sym_EQ_EQ] = ACTIONS(2476),
     [anon_sym_GT_EQ] = ACTIONS(2476),
     [anon_sym_GT_GT] = ACTIONS(2476),
@@ -133566,6 +135526,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2476),
     [anon_sym_CARET_EQ] = ACTIONS(2476),
     [anon_sym_PIPE_EQ] = ACTIONS(2476),
+    [anon_sym_PIPE_GT] = ACTIONS(2476),
     [anon_sym_PIPE_PIPE] = ACTIONS(2476),
     [anon_sym_TILDE_PIPE] = ACTIONS(2476),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2476),
@@ -133678,6 +135639,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2770),
     [anon_sym_LT_EQ] = ACTIONS(2770),
     [anon_sym_LT_EQ_GT] = ACTIONS(2770),
+    [anon_sym_LT_GT] = ACTIONS(2770),
     [anon_sym_EQ_EQ] = ACTIONS(2770),
     [anon_sym_GT_EQ] = ACTIONS(2770),
     [anon_sym_GT_GT] = ACTIONS(2770),
@@ -133686,6 +135648,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2770),
     [anon_sym_CARET_EQ] = ACTIONS(2770),
     [anon_sym_PIPE_EQ] = ACTIONS(2770),
+    [anon_sym_PIPE_GT] = ACTIONS(2770),
     [anon_sym_PIPE_PIPE] = ACTIONS(2770),
     [anon_sym_TILDE_PIPE] = ACTIONS(2770),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2770),
@@ -133798,6 +135761,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2484),
     [anon_sym_LT_EQ] = ACTIONS(2484),
     [anon_sym_LT_EQ_GT] = ACTIONS(2484),
+    [anon_sym_LT_GT] = ACTIONS(2484),
     [anon_sym_EQ_EQ] = ACTIONS(2484),
     [anon_sym_GT_EQ] = ACTIONS(2484),
     [anon_sym_GT_GT] = ACTIONS(2484),
@@ -133806,6 +135770,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2484),
     [anon_sym_CARET_EQ] = ACTIONS(2484),
     [anon_sym_PIPE_EQ] = ACTIONS(2484),
+    [anon_sym_PIPE_GT] = ACTIONS(2484),
     [anon_sym_PIPE_PIPE] = ACTIONS(2484),
     [anon_sym_TILDE_PIPE] = ACTIONS(2484),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2484),
@@ -133918,6 +135883,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2488),
     [anon_sym_LT_EQ] = ACTIONS(2488),
     [anon_sym_LT_EQ_GT] = ACTIONS(2488),
+    [anon_sym_LT_GT] = ACTIONS(2488),
     [anon_sym_EQ_EQ] = ACTIONS(2488),
     [anon_sym_GT_EQ] = ACTIONS(2488),
     [anon_sym_GT_GT] = ACTIONS(2488),
@@ -133926,6 +135892,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2488),
     [anon_sym_CARET_EQ] = ACTIONS(2488),
     [anon_sym_PIPE_EQ] = ACTIONS(2488),
+    [anon_sym_PIPE_GT] = ACTIONS(2488),
     [anon_sym_PIPE_PIPE] = ACTIONS(2488),
     [anon_sym_TILDE_PIPE] = ACTIONS(2488),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2488),
@@ -134038,6 +136005,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2492),
     [anon_sym_LT_EQ] = ACTIONS(2492),
     [anon_sym_LT_EQ_GT] = ACTIONS(2492),
+    [anon_sym_LT_GT] = ACTIONS(2492),
     [anon_sym_EQ_EQ] = ACTIONS(2492),
     [anon_sym_GT_EQ] = ACTIONS(2492),
     [anon_sym_GT_GT] = ACTIONS(2492),
@@ -134046,6 +136014,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2492),
     [anon_sym_CARET_EQ] = ACTIONS(2492),
     [anon_sym_PIPE_EQ] = ACTIONS(2492),
+    [anon_sym_PIPE_GT] = ACTIONS(2492),
     [anon_sym_PIPE_PIPE] = ACTIONS(2492),
     [anon_sym_TILDE_PIPE] = ACTIONS(2492),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2492),
@@ -134158,6 +136127,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ_GT] = ACTIONS(2332),
+    [anon_sym_LT_GT] = ACTIONS(2332),
     [anon_sym_EQ_EQ] = ACTIONS(2332),
     [anon_sym_GT_EQ] = ACTIONS(2332),
     [anon_sym_GT_GT] = ACTIONS(2332),
@@ -134166,6 +136136,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2332),
     [anon_sym_CARET_EQ] = ACTIONS(2332),
     [anon_sym_PIPE_EQ] = ACTIONS(2332),
+    [anon_sym_PIPE_GT] = ACTIONS(2332),
     [anon_sym_PIPE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2332),
@@ -134278,6 +136249,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2500),
     [anon_sym_LT_EQ] = ACTIONS(2500),
     [anon_sym_LT_EQ_GT] = ACTIONS(2500),
+    [anon_sym_LT_GT] = ACTIONS(2500),
     [anon_sym_EQ_EQ] = ACTIONS(2500),
     [anon_sym_GT_EQ] = ACTIONS(2500),
     [anon_sym_GT_GT] = ACTIONS(2500),
@@ -134286,6 +136258,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2500),
     [anon_sym_CARET_EQ] = ACTIONS(2500),
     [anon_sym_PIPE_EQ] = ACTIONS(2500),
+    [anon_sym_PIPE_GT] = ACTIONS(2500),
     [anon_sym_PIPE_PIPE] = ACTIONS(2500),
     [anon_sym_TILDE_PIPE] = ACTIONS(2500),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2500),
@@ -134398,6 +136371,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ_GT] = ACTIONS(2332),
+    [anon_sym_LT_GT] = ACTIONS(2332),
     [anon_sym_EQ_EQ] = ACTIONS(2332),
     [anon_sym_GT_EQ] = ACTIONS(2332),
     [anon_sym_GT_GT] = ACTIONS(2332),
@@ -134406,6 +136380,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2332),
     [anon_sym_CARET_EQ] = ACTIONS(2332),
     [anon_sym_PIPE_EQ] = ACTIONS(2332),
+    [anon_sym_PIPE_GT] = ACTIONS(2332),
     [anon_sym_PIPE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2332),
@@ -134518,6 +136493,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2504),
     [anon_sym_LT_EQ] = ACTIONS(2504),
     [anon_sym_LT_EQ_GT] = ACTIONS(2504),
+    [anon_sym_LT_GT] = ACTIONS(2504),
     [anon_sym_EQ_EQ] = ACTIONS(2504),
     [anon_sym_GT_EQ] = ACTIONS(2504),
     [anon_sym_GT_GT] = ACTIONS(2504),
@@ -134526,6 +136502,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2504),
     [anon_sym_CARET_EQ] = ACTIONS(2504),
     [anon_sym_PIPE_EQ] = ACTIONS(2504),
+    [anon_sym_PIPE_GT] = ACTIONS(2504),
     [anon_sym_PIPE_PIPE] = ACTIONS(2504),
     [anon_sym_TILDE_PIPE] = ACTIONS(2504),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2504),
@@ -134638,6 +136615,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ_GT] = ACTIONS(2332),
+    [anon_sym_LT_GT] = ACTIONS(2332),
     [anon_sym_EQ_EQ] = ACTIONS(2332),
     [anon_sym_GT_EQ] = ACTIONS(2332),
     [anon_sym_GT_GT] = ACTIONS(2332),
@@ -134646,6 +136624,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2332),
     [anon_sym_CARET_EQ] = ACTIONS(2332),
     [anon_sym_PIPE_EQ] = ACTIONS(2332),
+    [anon_sym_PIPE_GT] = ACTIONS(2332),
     [anon_sym_PIPE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2332),
@@ -134758,6 +136737,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2508),
     [anon_sym_LT_EQ] = ACTIONS(2508),
     [anon_sym_LT_EQ_GT] = ACTIONS(2508),
+    [anon_sym_LT_GT] = ACTIONS(2508),
     [anon_sym_EQ_EQ] = ACTIONS(2508),
     [anon_sym_GT_EQ] = ACTIONS(2508),
     [anon_sym_GT_GT] = ACTIONS(2508),
@@ -134766,6 +136746,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2508),
     [anon_sym_CARET_EQ] = ACTIONS(2508),
     [anon_sym_PIPE_EQ] = ACTIONS(2508),
+    [anon_sym_PIPE_GT] = ACTIONS(2508),
     [anon_sym_PIPE_PIPE] = ACTIONS(2508),
     [anon_sym_TILDE_PIPE] = ACTIONS(2508),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2508),
@@ -134878,6 +136859,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2347),
     [anon_sym_LT_EQ] = ACTIONS(2347),
     [anon_sym_LT_EQ_GT] = ACTIONS(2347),
+    [anon_sym_LT_GT] = ACTIONS(2347),
     [anon_sym_EQ_EQ] = ACTIONS(2347),
     [anon_sym_GT_EQ] = ACTIONS(2347),
     [anon_sym_GT_GT] = ACTIONS(2347),
@@ -134886,6 +136868,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2347),
     [anon_sym_CARET_EQ] = ACTIONS(2347),
     [anon_sym_PIPE_EQ] = ACTIONS(2347),
+    [anon_sym_PIPE_GT] = ACTIONS(2347),
     [anon_sym_PIPE_PIPE] = ACTIONS(2347),
     [anon_sym_TILDE_PIPE] = ACTIONS(2347),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2347),
@@ -134998,6 +136981,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2512),
     [anon_sym_LT_EQ] = ACTIONS(2512),
     [anon_sym_LT_EQ_GT] = ACTIONS(2512),
+    [anon_sym_LT_GT] = ACTIONS(2512),
     [anon_sym_EQ_EQ] = ACTIONS(2512),
     [anon_sym_GT_EQ] = ACTIONS(2512),
     [anon_sym_GT_GT] = ACTIONS(2512),
@@ -135006,6 +136990,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2512),
     [anon_sym_CARET_EQ] = ACTIONS(2512),
     [anon_sym_PIPE_EQ] = ACTIONS(2512),
+    [anon_sym_PIPE_GT] = ACTIONS(2512),
     [anon_sym_PIPE_PIPE] = ACTIONS(2512),
     [anon_sym_TILDE_PIPE] = ACTIONS(2512),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2512),
@@ -135118,6 +137103,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2516),
     [anon_sym_LT_EQ] = ACTIONS(2516),
     [anon_sym_LT_EQ_GT] = ACTIONS(2516),
+    [anon_sym_LT_GT] = ACTIONS(2516),
     [anon_sym_EQ_EQ] = ACTIONS(2516),
     [anon_sym_GT_EQ] = ACTIONS(2516),
     [anon_sym_GT_GT] = ACTIONS(2516),
@@ -135126,6 +137112,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2516),
     [anon_sym_CARET_EQ] = ACTIONS(2516),
     [anon_sym_PIPE_EQ] = ACTIONS(2516),
+    [anon_sym_PIPE_GT] = ACTIONS(2516),
     [anon_sym_PIPE_PIPE] = ACTIONS(2516),
     [anon_sym_TILDE_PIPE] = ACTIONS(2516),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2516),
@@ -135238,6 +137225,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2520),
     [anon_sym_LT_EQ] = ACTIONS(2520),
     [anon_sym_LT_EQ_GT] = ACTIONS(2520),
+    [anon_sym_LT_GT] = ACTIONS(2520),
     [anon_sym_EQ_EQ] = ACTIONS(2520),
     [anon_sym_GT_EQ] = ACTIONS(2520),
     [anon_sym_GT_GT] = ACTIONS(2520),
@@ -135246,6 +137234,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2520),
     [anon_sym_CARET_EQ] = ACTIONS(2520),
     [anon_sym_PIPE_EQ] = ACTIONS(2520),
+    [anon_sym_PIPE_GT] = ACTIONS(2520),
     [anon_sym_PIPE_PIPE] = ACTIONS(2520),
     [anon_sym_TILDE_PIPE] = ACTIONS(2520),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2520),
@@ -135358,6 +137347,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2524),
     [anon_sym_LT_EQ] = ACTIONS(2524),
     [anon_sym_LT_EQ_GT] = ACTIONS(2524),
+    [anon_sym_LT_GT] = ACTIONS(2524),
     [anon_sym_EQ_EQ] = ACTIONS(2524),
     [anon_sym_GT_EQ] = ACTIONS(2524),
     [anon_sym_GT_GT] = ACTIONS(2524),
@@ -135366,6 +137356,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2524),
     [anon_sym_CARET_EQ] = ACTIONS(2524),
     [anon_sym_PIPE_EQ] = ACTIONS(2524),
+    [anon_sym_PIPE_GT] = ACTIONS(2524),
     [anon_sym_PIPE_PIPE] = ACTIONS(2524),
     [anon_sym_TILDE_PIPE] = ACTIONS(2524),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2524),
@@ -135478,6 +137469,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2528),
     [anon_sym_LT_EQ] = ACTIONS(2528),
     [anon_sym_LT_EQ_GT] = ACTIONS(2528),
+    [anon_sym_LT_GT] = ACTIONS(2528),
     [anon_sym_EQ_EQ] = ACTIONS(2528),
     [anon_sym_GT_EQ] = ACTIONS(2528),
     [anon_sym_GT_GT] = ACTIONS(2528),
@@ -135486,6 +137478,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2528),
     [anon_sym_CARET_EQ] = ACTIONS(2528),
     [anon_sym_PIPE_EQ] = ACTIONS(2528),
+    [anon_sym_PIPE_GT] = ACTIONS(2528),
     [anon_sym_PIPE_PIPE] = ACTIONS(2528),
     [anon_sym_TILDE_PIPE] = ACTIONS(2528),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2528),
@@ -135598,6 +137591,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ_GT] = ACTIONS(2332),
+    [anon_sym_LT_GT] = ACTIONS(2332),
     [anon_sym_EQ_EQ] = ACTIONS(2332),
     [anon_sym_GT_EQ] = ACTIONS(2332),
     [anon_sym_GT_GT] = ACTIONS(2332),
@@ -135606,6 +137600,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2332),
     [anon_sym_CARET_EQ] = ACTIONS(2332),
     [anon_sym_PIPE_EQ] = ACTIONS(2332),
+    [anon_sym_PIPE_GT] = ACTIONS(2332),
     [anon_sym_PIPE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2332),
@@ -135718,6 +137713,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2534),
     [anon_sym_LT_EQ] = ACTIONS(2534),
     [anon_sym_LT_EQ_GT] = ACTIONS(2534),
+    [anon_sym_LT_GT] = ACTIONS(2534),
     [anon_sym_EQ_EQ] = ACTIONS(2534),
     [anon_sym_GT_EQ] = ACTIONS(2534),
     [anon_sym_GT_GT] = ACTIONS(2534),
@@ -135726,6 +137722,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2534),
     [anon_sym_CARET_EQ] = ACTIONS(2534),
     [anon_sym_PIPE_EQ] = ACTIONS(2534),
+    [anon_sym_PIPE_GT] = ACTIONS(2534),
     [anon_sym_PIPE_PIPE] = ACTIONS(2534),
     [anon_sym_TILDE_PIPE] = ACTIONS(2534),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2534),
@@ -135838,6 +137835,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2759),
     [anon_sym_LT_EQ] = ACTIONS(2759),
     [anon_sym_LT_EQ_GT] = ACTIONS(2759),
+    [anon_sym_LT_GT] = ACTIONS(2759),
     [anon_sym_EQ_EQ] = ACTIONS(2759),
     [anon_sym_GT_EQ] = ACTIONS(2759),
     [anon_sym_GT_GT] = ACTIONS(2759),
@@ -135846,6 +137844,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2759),
     [anon_sym_CARET_EQ] = ACTIONS(2759),
     [anon_sym_PIPE_EQ] = ACTIONS(2759),
+    [anon_sym_PIPE_GT] = ACTIONS(2759),
     [anon_sym_PIPE_PIPE] = ACTIONS(2759),
     [anon_sym_TILDE_PIPE] = ACTIONS(2759),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2759),
@@ -135958,6 +137957,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2542),
     [anon_sym_LT_EQ] = ACTIONS(2542),
     [anon_sym_LT_EQ_GT] = ACTIONS(2542),
+    [anon_sym_LT_GT] = ACTIONS(2542),
     [anon_sym_EQ_EQ] = ACTIONS(2542),
     [anon_sym_GT_EQ] = ACTIONS(2542),
     [anon_sym_GT_GT] = ACTIONS(2542),
@@ -135966,6 +137966,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2542),
     [anon_sym_CARET_EQ] = ACTIONS(2542),
     [anon_sym_PIPE_EQ] = ACTIONS(2542),
+    [anon_sym_PIPE_GT] = ACTIONS(2542),
     [anon_sym_PIPE_PIPE] = ACTIONS(2542),
     [anon_sym_TILDE_PIPE] = ACTIONS(2542),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2542),
@@ -136078,6 +138079,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2391),
     [anon_sym_LT_EQ] = ACTIONS(2391),
     [anon_sym_LT_EQ_GT] = ACTIONS(2391),
+    [anon_sym_LT_GT] = ACTIONS(2391),
     [anon_sym_EQ_EQ] = ACTIONS(2391),
     [anon_sym_GT_EQ] = ACTIONS(2391),
     [anon_sym_GT_GT] = ACTIONS(2391),
@@ -136086,6 +138088,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2391),
     [anon_sym_CARET_EQ] = ACTIONS(2391),
     [anon_sym_PIPE_EQ] = ACTIONS(2391),
+    [anon_sym_PIPE_GT] = ACTIONS(2391),
     [anon_sym_PIPE_PIPE] = ACTIONS(2391),
     [anon_sym_TILDE_PIPE] = ACTIONS(2391),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2391),
@@ -136198,6 +138201,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2546),
     [anon_sym_LT_EQ] = ACTIONS(2546),
     [anon_sym_LT_EQ_GT] = ACTIONS(2546),
+    [anon_sym_LT_GT] = ACTIONS(2546),
     [anon_sym_EQ_EQ] = ACTIONS(2546),
     [anon_sym_GT_EQ] = ACTIONS(2546),
     [anon_sym_GT_GT] = ACTIONS(2546),
@@ -136206,6 +138210,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2546),
     [anon_sym_CARET_EQ] = ACTIONS(2546),
     [anon_sym_PIPE_EQ] = ACTIONS(2546),
+    [anon_sym_PIPE_GT] = ACTIONS(2546),
     [anon_sym_PIPE_PIPE] = ACTIONS(2546),
     [anon_sym_TILDE_PIPE] = ACTIONS(2546),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2546),
@@ -136318,6 +138323,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2562),
     [anon_sym_LT_EQ] = ACTIONS(2562),
     [anon_sym_LT_EQ_GT] = ACTIONS(2562),
+    [anon_sym_LT_GT] = ACTIONS(2562),
     [anon_sym_EQ_EQ] = ACTIONS(2562),
     [anon_sym_GT_EQ] = ACTIONS(2562),
     [anon_sym_GT_GT] = ACTIONS(2562),
@@ -136326,6 +138332,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2562),
     [anon_sym_CARET_EQ] = ACTIONS(2562),
     [anon_sym_PIPE_EQ] = ACTIONS(2562),
+    [anon_sym_PIPE_GT] = ACTIONS(2562),
     [anon_sym_PIPE_PIPE] = ACTIONS(2562),
     [anon_sym_TILDE_PIPE] = ACTIONS(2562),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2562),
@@ -136438,6 +138445,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2641),
     [anon_sym_LT_EQ] = ACTIONS(2641),
     [anon_sym_LT_EQ_GT] = ACTIONS(2641),
+    [anon_sym_LT_GT] = ACTIONS(2641),
     [anon_sym_EQ_EQ] = ACTIONS(2641),
     [anon_sym_GT_EQ] = ACTIONS(2641),
     [anon_sym_GT_GT] = ACTIONS(2641),
@@ -136446,6 +138454,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2641),
     [anon_sym_CARET_EQ] = ACTIONS(2641),
     [anon_sym_PIPE_EQ] = ACTIONS(2641),
+    [anon_sym_PIPE_GT] = ACTIONS(2641),
     [anon_sym_PIPE_PIPE] = ACTIONS(2641),
     [anon_sym_TILDE_PIPE] = ACTIONS(2641),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2641),
@@ -136558,6 +138567,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2576),
     [anon_sym_LT_EQ] = ACTIONS(2576),
     [anon_sym_LT_EQ_GT] = ACTIONS(2576),
+    [anon_sym_LT_GT] = ACTIONS(2576),
     [anon_sym_EQ_EQ] = ACTIONS(2576),
     [anon_sym_GT_EQ] = ACTIONS(2576),
     [anon_sym_GT_GT] = ACTIONS(2576),
@@ -136566,6 +138576,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2576),
     [anon_sym_CARET_EQ] = ACTIONS(2576),
     [anon_sym_PIPE_EQ] = ACTIONS(2576),
+    [anon_sym_PIPE_GT] = ACTIONS(2576),
     [anon_sym_PIPE_PIPE] = ACTIONS(2576),
     [anon_sym_TILDE_PIPE] = ACTIONS(2576),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2576),
@@ -136678,6 +138689,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2464),
     [anon_sym_LT_EQ] = ACTIONS(2464),
     [anon_sym_LT_EQ_GT] = ACTIONS(2464),
+    [anon_sym_LT_GT] = ACTIONS(2464),
     [anon_sym_EQ_EQ] = ACTIONS(2464),
     [anon_sym_GT_EQ] = ACTIONS(2464),
     [anon_sym_GT_GT] = ACTIONS(2464),
@@ -136686,6 +138698,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2464),
     [anon_sym_CARET_EQ] = ACTIONS(2464),
     [anon_sym_PIPE_EQ] = ACTIONS(2464),
+    [anon_sym_PIPE_GT] = ACTIONS(2464),
     [anon_sym_PIPE_PIPE] = ACTIONS(2464),
     [anon_sym_TILDE_PIPE] = ACTIONS(2464),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2464),
@@ -136798,6 +138811,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2747),
     [anon_sym_LT_EQ] = ACTIONS(2747),
     [anon_sym_LT_EQ_GT] = ACTIONS(2747),
+    [anon_sym_LT_GT] = ACTIONS(2747),
     [anon_sym_EQ_EQ] = ACTIONS(2747),
     [anon_sym_GT_EQ] = ACTIONS(2747),
     [anon_sym_GT_GT] = ACTIONS(2747),
@@ -136806,6 +138820,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2747),
     [anon_sym_CARET_EQ] = ACTIONS(2747),
     [anon_sym_PIPE_EQ] = ACTIONS(2747),
+    [anon_sym_PIPE_GT] = ACTIONS(2747),
     [anon_sym_PIPE_PIPE] = ACTIONS(2747),
     [anon_sym_TILDE_PIPE] = ACTIONS(2747),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2747),
@@ -136918,6 +138933,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2741),
     [anon_sym_LT_EQ] = ACTIONS(2741),
     [anon_sym_LT_EQ_GT] = ACTIONS(2741),
+    [anon_sym_LT_GT] = ACTIONS(2741),
     [anon_sym_EQ_EQ] = ACTIONS(2741),
     [anon_sym_GT_EQ] = ACTIONS(2741),
     [anon_sym_GT_GT] = ACTIONS(2741),
@@ -136926,6 +138942,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2741),
     [anon_sym_CARET_EQ] = ACTIONS(2741),
     [anon_sym_PIPE_EQ] = ACTIONS(2741),
+    [anon_sym_PIPE_GT] = ACTIONS(2741),
     [anon_sym_PIPE_PIPE] = ACTIONS(2741),
     [anon_sym_TILDE_PIPE] = ACTIONS(2741),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2741),
@@ -137038,6 +139055,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2597),
     [anon_sym_LT_EQ] = ACTIONS(2597),
     [anon_sym_LT_EQ_GT] = ACTIONS(2597),
+    [anon_sym_LT_GT] = ACTIONS(2597),
     [anon_sym_EQ_EQ] = ACTIONS(2597),
     [anon_sym_GT_EQ] = ACTIONS(2597),
     [anon_sym_GT_GT] = ACTIONS(2597),
@@ -137046,6 +139064,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2597),
     [anon_sym_CARET_EQ] = ACTIONS(2597),
     [anon_sym_PIPE_EQ] = ACTIONS(2597),
+    [anon_sym_PIPE_GT] = ACTIONS(2597),
     [anon_sym_PIPE_PIPE] = ACTIONS(2597),
     [anon_sym_TILDE_PIPE] = ACTIONS(2597),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2597),
@@ -137158,6 +139177,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2741),
     [anon_sym_LT_EQ] = ACTIONS(2741),
     [anon_sym_LT_EQ_GT] = ACTIONS(2741),
+    [anon_sym_LT_GT] = ACTIONS(2741),
     [anon_sym_EQ_EQ] = ACTIONS(2741),
     [anon_sym_GT_EQ] = ACTIONS(2741),
     [anon_sym_GT_GT] = ACTIONS(2741),
@@ -137166,6 +139186,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2741),
     [anon_sym_CARET_EQ] = ACTIONS(2741),
     [anon_sym_PIPE_EQ] = ACTIONS(2741),
+    [anon_sym_PIPE_GT] = ACTIONS(2741),
     [anon_sym_PIPE_PIPE] = ACTIONS(2741),
     [anon_sym_TILDE_PIPE] = ACTIONS(2741),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2741),
@@ -137278,6 +139299,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2605),
     [anon_sym_LT_EQ] = ACTIONS(2605),
     [anon_sym_LT_EQ_GT] = ACTIONS(2605),
+    [anon_sym_LT_GT] = ACTIONS(2605),
     [anon_sym_EQ_EQ] = ACTIONS(2605),
     [anon_sym_GT_EQ] = ACTIONS(2605),
     [anon_sym_GT_GT] = ACTIONS(2605),
@@ -137286,6 +139308,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2605),
     [anon_sym_CARET_EQ] = ACTIONS(2605),
     [anon_sym_PIPE_EQ] = ACTIONS(2605),
+    [anon_sym_PIPE_GT] = ACTIONS(2605),
     [anon_sym_PIPE_PIPE] = ACTIONS(2605),
     [anon_sym_TILDE_PIPE] = ACTIONS(2605),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2605),
@@ -137398,6 +139421,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2395),
     [anon_sym_LT_EQ] = ACTIONS(2395),
     [anon_sym_LT_EQ_GT] = ACTIONS(2395),
+    [anon_sym_LT_GT] = ACTIONS(2395),
     [anon_sym_EQ_EQ] = ACTIONS(2395),
     [anon_sym_GT_EQ] = ACTIONS(2395),
     [anon_sym_GT_GT] = ACTIONS(2395),
@@ -137406,6 +139430,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2395),
     [anon_sym_CARET_EQ] = ACTIONS(2395),
     [anon_sym_PIPE_EQ] = ACTIONS(2395),
+    [anon_sym_PIPE_GT] = ACTIONS(2395),
     [anon_sym_PIPE_PIPE] = ACTIONS(2395),
     [anon_sym_TILDE_PIPE] = ACTIONS(2395),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2395),
@@ -137518,6 +139543,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2613),
     [anon_sym_LT_EQ] = ACTIONS(2613),
     [anon_sym_LT_EQ_GT] = ACTIONS(2613),
+    [anon_sym_LT_GT] = ACTIONS(2613),
     [anon_sym_EQ_EQ] = ACTIONS(2613),
     [anon_sym_GT_EQ] = ACTIONS(2613),
     [anon_sym_GT_GT] = ACTIONS(2613),
@@ -137526,6 +139552,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2613),
     [anon_sym_CARET_EQ] = ACTIONS(2613),
     [anon_sym_PIPE_EQ] = ACTIONS(2613),
+    [anon_sym_PIPE_GT] = ACTIONS(2613),
     [anon_sym_PIPE_PIPE] = ACTIONS(2613),
     [anon_sym_TILDE_PIPE] = ACTIONS(2613),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2613),
@@ -137638,6 +139665,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2460),
     [anon_sym_LT_EQ] = ACTIONS(2460),
     [anon_sym_LT_EQ_GT] = ACTIONS(2460),
+    [anon_sym_LT_GT] = ACTIONS(2460),
     [anon_sym_EQ_EQ] = ACTIONS(2460),
     [anon_sym_GT_EQ] = ACTIONS(2460),
     [anon_sym_GT_GT] = ACTIONS(2460),
@@ -137646,6 +139674,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2460),
     [anon_sym_CARET_EQ] = ACTIONS(2460),
     [anon_sym_PIPE_EQ] = ACTIONS(2460),
+    [anon_sym_PIPE_GT] = ACTIONS(2460),
     [anon_sym_PIPE_PIPE] = ACTIONS(2460),
     [anon_sym_TILDE_PIPE] = ACTIONS(2460),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2460),
@@ -137758,6 +139787,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2621),
     [anon_sym_LT_EQ] = ACTIONS(2621),
     [anon_sym_LT_EQ_GT] = ACTIONS(2621),
+    [anon_sym_LT_GT] = ACTIONS(2621),
     [anon_sym_EQ_EQ] = ACTIONS(2621),
     [anon_sym_GT_EQ] = ACTIONS(2621),
     [anon_sym_GT_GT] = ACTIONS(2621),
@@ -137766,6 +139796,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2621),
     [anon_sym_CARET_EQ] = ACTIONS(2621),
     [anon_sym_PIPE_EQ] = ACTIONS(2621),
+    [anon_sym_PIPE_GT] = ACTIONS(2621),
     [anon_sym_PIPE_PIPE] = ACTIONS(2621),
     [anon_sym_TILDE_PIPE] = ACTIONS(2621),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2621),
@@ -137878,6 +139909,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2629),
     [anon_sym_LT_EQ] = ACTIONS(2629),
     [anon_sym_LT_EQ_GT] = ACTIONS(2629),
+    [anon_sym_LT_GT] = ACTIONS(2629),
     [anon_sym_EQ_EQ] = ACTIONS(2629),
     [anon_sym_GT_EQ] = ACTIONS(2629),
     [anon_sym_GT_GT] = ACTIONS(2629),
@@ -137886,6 +139918,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2629),
     [anon_sym_CARET_EQ] = ACTIONS(2629),
     [anon_sym_PIPE_EQ] = ACTIONS(2629),
+    [anon_sym_PIPE_GT] = ACTIONS(2629),
     [anon_sym_PIPE_PIPE] = ACTIONS(2629),
     [anon_sym_TILDE_PIPE] = ACTIONS(2629),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2629),
@@ -137998,6 +140031,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2633),
     [anon_sym_LT_EQ] = ACTIONS(2633),
     [anon_sym_LT_EQ_GT] = ACTIONS(2633),
+    [anon_sym_LT_GT] = ACTIONS(2633),
     [anon_sym_EQ_EQ] = ACTIONS(2633),
     [anon_sym_GT_EQ] = ACTIONS(2633),
     [anon_sym_GT_GT] = ACTIONS(2633),
@@ -138006,6 +140040,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2633),
     [anon_sym_CARET_EQ] = ACTIONS(2633),
     [anon_sym_PIPE_EQ] = ACTIONS(2633),
+    [anon_sym_PIPE_GT] = ACTIONS(2633),
     [anon_sym_PIPE_PIPE] = ACTIONS(2633),
     [anon_sym_TILDE_PIPE] = ACTIONS(2633),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2633),
@@ -138118,6 +140153,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2637),
     [anon_sym_LT_EQ] = ACTIONS(2637),
     [anon_sym_LT_EQ_GT] = ACTIONS(2637),
+    [anon_sym_LT_GT] = ACTIONS(2637),
     [anon_sym_EQ_EQ] = ACTIONS(2637),
     [anon_sym_GT_EQ] = ACTIONS(2637),
     [anon_sym_GT_GT] = ACTIONS(2637),
@@ -138126,6 +140162,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2637),
     [anon_sym_CARET_EQ] = ACTIONS(2637),
     [anon_sym_PIPE_EQ] = ACTIONS(2637),
+    [anon_sym_PIPE_GT] = ACTIONS(2637),
     [anon_sym_PIPE_PIPE] = ACTIONS(2637),
     [anon_sym_TILDE_PIPE] = ACTIONS(2637),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2637),
@@ -138238,6 +140275,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2480),
     [anon_sym_LT_EQ] = ACTIONS(2480),
     [anon_sym_LT_EQ_GT] = ACTIONS(2480),
+    [anon_sym_LT_GT] = ACTIONS(2480),
     [anon_sym_EQ_EQ] = ACTIONS(2480),
     [anon_sym_GT_EQ] = ACTIONS(2480),
     [anon_sym_GT_GT] = ACTIONS(2480),
@@ -138246,6 +140284,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2480),
     [anon_sym_CARET_EQ] = ACTIONS(2480),
     [anon_sym_PIPE_EQ] = ACTIONS(2480),
+    [anon_sym_PIPE_GT] = ACTIONS(2480),
     [anon_sym_PIPE_PIPE] = ACTIONS(2480),
     [anon_sym_TILDE_PIPE] = ACTIONS(2480),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2480),
@@ -138358,6 +140397,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2766),
     [anon_sym_LT_EQ] = ACTIONS(2766),
     [anon_sym_LT_EQ_GT] = ACTIONS(2766),
+    [anon_sym_LT_GT] = ACTIONS(2766),
     [anon_sym_EQ_EQ] = ACTIONS(2766),
     [anon_sym_GT_EQ] = ACTIONS(2766),
     [anon_sym_GT_GT] = ACTIONS(2766),
@@ -138366,6 +140406,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2766),
     [anon_sym_CARET_EQ] = ACTIONS(2766),
     [anon_sym_PIPE_EQ] = ACTIONS(2766),
+    [anon_sym_PIPE_GT] = ACTIONS(2766),
     [anon_sym_PIPE_PIPE] = ACTIONS(2766),
     [anon_sym_TILDE_PIPE] = ACTIONS(2766),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2766),
@@ -138478,6 +140519,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2647),
     [anon_sym_LT_EQ] = ACTIONS(2647),
     [anon_sym_LT_EQ_GT] = ACTIONS(2647),
+    [anon_sym_LT_GT] = ACTIONS(2647),
     [anon_sym_EQ_EQ] = ACTIONS(2647),
     [anon_sym_GT_EQ] = ACTIONS(2647),
     [anon_sym_GT_GT] = ACTIONS(2647),
@@ -138486,6 +140528,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2647),
     [anon_sym_CARET_EQ] = ACTIONS(2647),
     [anon_sym_PIPE_EQ] = ACTIONS(2647),
+    [anon_sym_PIPE_GT] = ACTIONS(2647),
     [anon_sym_PIPE_PIPE] = ACTIONS(2647),
     [anon_sym_TILDE_PIPE] = ACTIONS(2647),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2647),
@@ -138598,6 +140641,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2651),
     [anon_sym_LT_EQ] = ACTIONS(2651),
     [anon_sym_LT_EQ_GT] = ACTIONS(2651),
+    [anon_sym_LT_GT] = ACTIONS(2651),
     [anon_sym_EQ_EQ] = ACTIONS(2651),
     [anon_sym_GT_EQ] = ACTIONS(2651),
     [anon_sym_GT_GT] = ACTIONS(2651),
@@ -138606,6 +140650,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2651),
     [anon_sym_CARET_EQ] = ACTIONS(2651),
     [anon_sym_PIPE_EQ] = ACTIONS(2651),
+    [anon_sym_PIPE_GT] = ACTIONS(2651),
     [anon_sym_PIPE_PIPE] = ACTIONS(2651),
     [anon_sym_TILDE_PIPE] = ACTIONS(2651),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2651),
@@ -138718,6 +140763,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2657),
     [anon_sym_LT_EQ] = ACTIONS(2657),
     [anon_sym_LT_EQ_GT] = ACTIONS(2657),
+    [anon_sym_LT_GT] = ACTIONS(2657),
     [anon_sym_EQ_EQ] = ACTIONS(2657),
     [anon_sym_GT_EQ] = ACTIONS(2657),
     [anon_sym_GT_GT] = ACTIONS(2657),
@@ -138726,6 +140772,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2657),
     [anon_sym_CARET_EQ] = ACTIONS(2657),
     [anon_sym_PIPE_EQ] = ACTIONS(2657),
+    [anon_sym_PIPE_GT] = ACTIONS(2657),
     [anon_sym_PIPE_PIPE] = ACTIONS(2657),
     [anon_sym_TILDE_PIPE] = ACTIONS(2657),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2657),
@@ -138838,6 +140885,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2661),
     [anon_sym_LT_EQ] = ACTIONS(2661),
     [anon_sym_LT_EQ_GT] = ACTIONS(2661),
+    [anon_sym_LT_GT] = ACTIONS(2661),
     [anon_sym_EQ_EQ] = ACTIONS(2661),
     [anon_sym_GT_EQ] = ACTIONS(2661),
     [anon_sym_GT_GT] = ACTIONS(2661),
@@ -138846,6 +140894,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2661),
     [anon_sym_CARET_EQ] = ACTIONS(2661),
     [anon_sym_PIPE_EQ] = ACTIONS(2661),
+    [anon_sym_PIPE_GT] = ACTIONS(2661),
     [anon_sym_PIPE_PIPE] = ACTIONS(2661),
     [anon_sym_TILDE_PIPE] = ACTIONS(2661),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2661),
@@ -138958,6 +141007,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2665),
     [anon_sym_LT_EQ] = ACTIONS(2665),
     [anon_sym_LT_EQ_GT] = ACTIONS(2665),
+    [anon_sym_LT_GT] = ACTIONS(2665),
     [anon_sym_EQ_EQ] = ACTIONS(2665),
     [anon_sym_GT_EQ] = ACTIONS(2665),
     [anon_sym_GT_GT] = ACTIONS(2665),
@@ -138966,6 +141016,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2665),
     [anon_sym_CARET_EQ] = ACTIONS(2665),
     [anon_sym_PIPE_EQ] = ACTIONS(2665),
+    [anon_sym_PIPE_GT] = ACTIONS(2665),
     [anon_sym_PIPE_PIPE] = ACTIONS(2665),
     [anon_sym_TILDE_PIPE] = ACTIONS(2665),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2665),
@@ -139078,6 +141129,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2669),
     [anon_sym_LT_EQ] = ACTIONS(2669),
     [anon_sym_LT_EQ_GT] = ACTIONS(2669),
+    [anon_sym_LT_GT] = ACTIONS(2669),
     [anon_sym_EQ_EQ] = ACTIONS(2669),
     [anon_sym_GT_EQ] = ACTIONS(2669),
     [anon_sym_GT_GT] = ACTIONS(2669),
@@ -139086,6 +141138,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2669),
     [anon_sym_CARET_EQ] = ACTIONS(2669),
     [anon_sym_PIPE_EQ] = ACTIONS(2669),
+    [anon_sym_PIPE_GT] = ACTIONS(2669),
     [anon_sym_PIPE_PIPE] = ACTIONS(2669),
     [anon_sym_TILDE_PIPE] = ACTIONS(2669),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2669),
@@ -139198,6 +141251,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2673),
     [anon_sym_LT_EQ] = ACTIONS(2673),
     [anon_sym_LT_EQ_GT] = ACTIONS(2673),
+    [anon_sym_LT_GT] = ACTIONS(2673),
     [anon_sym_EQ_EQ] = ACTIONS(2673),
     [anon_sym_GT_EQ] = ACTIONS(2673),
     [anon_sym_GT_GT] = ACTIONS(2673),
@@ -139206,6 +141260,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2673),
     [anon_sym_CARET_EQ] = ACTIONS(2673),
     [anon_sym_PIPE_EQ] = ACTIONS(2673),
+    [anon_sym_PIPE_GT] = ACTIONS(2673),
     [anon_sym_PIPE_PIPE] = ACTIONS(2673),
     [anon_sym_TILDE_PIPE] = ACTIONS(2673),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2673),
@@ -139318,6 +141373,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2677),
     [anon_sym_LT_EQ] = ACTIONS(2677),
     [anon_sym_LT_EQ_GT] = ACTIONS(2677),
+    [anon_sym_LT_GT] = ACTIONS(2677),
     [anon_sym_EQ_EQ] = ACTIONS(2677),
     [anon_sym_GT_EQ] = ACTIONS(2677),
     [anon_sym_GT_GT] = ACTIONS(2677),
@@ -139326,6 +141382,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2677),
     [anon_sym_CARET_EQ] = ACTIONS(2677),
     [anon_sym_PIPE_EQ] = ACTIONS(2677),
+    [anon_sym_PIPE_GT] = ACTIONS(2677),
     [anon_sym_PIPE_PIPE] = ACTIONS(2677),
     [anon_sym_TILDE_PIPE] = ACTIONS(2677),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2677),
@@ -139438,6 +141495,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2681),
     [anon_sym_LT_EQ] = ACTIONS(2681),
     [anon_sym_LT_EQ_GT] = ACTIONS(2681),
+    [anon_sym_LT_GT] = ACTIONS(2681),
     [anon_sym_EQ_EQ] = ACTIONS(2681),
     [anon_sym_GT_EQ] = ACTIONS(2681),
     [anon_sym_GT_GT] = ACTIONS(2681),
@@ -139446,6 +141504,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2681),
     [anon_sym_CARET_EQ] = ACTIONS(2681),
     [anon_sym_PIPE_EQ] = ACTIONS(2681),
+    [anon_sym_PIPE_GT] = ACTIONS(2681),
     [anon_sym_PIPE_PIPE] = ACTIONS(2681),
     [anon_sym_TILDE_PIPE] = ACTIONS(2681),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2681),
@@ -139558,6 +141617,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2685),
     [anon_sym_LT_EQ] = ACTIONS(2685),
     [anon_sym_LT_EQ_GT] = ACTIONS(2685),
+    [anon_sym_LT_GT] = ACTIONS(2685),
     [anon_sym_EQ_EQ] = ACTIONS(2685),
     [anon_sym_GT_EQ] = ACTIONS(2685),
     [anon_sym_GT_GT] = ACTIONS(2685),
@@ -139566,6 +141626,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2685),
     [anon_sym_CARET_EQ] = ACTIONS(2685),
     [anon_sym_PIPE_EQ] = ACTIONS(2685),
+    [anon_sym_PIPE_GT] = ACTIONS(2685),
     [anon_sym_PIPE_PIPE] = ACTIONS(2685),
     [anon_sym_TILDE_PIPE] = ACTIONS(2685),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2685),
@@ -139678,6 +141739,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2689),
     [anon_sym_LT_EQ] = ACTIONS(2689),
     [anon_sym_LT_EQ_GT] = ACTIONS(2689),
+    [anon_sym_LT_GT] = ACTIONS(2689),
     [anon_sym_EQ_EQ] = ACTIONS(2689),
     [anon_sym_GT_EQ] = ACTIONS(2689),
     [anon_sym_GT_GT] = ACTIONS(2689),
@@ -139686,6 +141748,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2689),
     [anon_sym_CARET_EQ] = ACTIONS(2689),
     [anon_sym_PIPE_EQ] = ACTIONS(2689),
+    [anon_sym_PIPE_GT] = ACTIONS(2689),
     [anon_sym_PIPE_PIPE] = ACTIONS(2689),
     [anon_sym_TILDE_PIPE] = ACTIONS(2689),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2689),
@@ -139798,6 +141861,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2415),
     [anon_sym_LT_EQ] = ACTIONS(2415),
     [anon_sym_LT_EQ_GT] = ACTIONS(2415),
+    [anon_sym_LT_GT] = ACTIONS(2415),
     [anon_sym_EQ_EQ] = ACTIONS(2415),
     [anon_sym_GT_EQ] = ACTIONS(2415),
     [anon_sym_GT_GT] = ACTIONS(2415),
@@ -139806,6 +141870,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2415),
     [anon_sym_CARET_EQ] = ACTIONS(2415),
     [anon_sym_PIPE_EQ] = ACTIONS(2415),
+    [anon_sym_PIPE_GT] = ACTIONS(2415),
     [anon_sym_PIPE_PIPE] = ACTIONS(2415),
     [anon_sym_TILDE_PIPE] = ACTIONS(2415),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2415),
@@ -139918,6 +141983,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2456),
     [anon_sym_LT_EQ] = ACTIONS(2456),
     [anon_sym_LT_EQ_GT] = ACTIONS(2456),
+    [anon_sym_LT_GT] = ACTIONS(2456),
     [anon_sym_EQ_EQ] = ACTIONS(2456),
     [anon_sym_GT_EQ] = ACTIONS(2456),
     [anon_sym_GT_GT] = ACTIONS(2456),
@@ -139926,6 +141992,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2456),
     [anon_sym_CARET_EQ] = ACTIONS(2456),
     [anon_sym_PIPE_EQ] = ACTIONS(2456),
+    [anon_sym_PIPE_GT] = ACTIONS(2456),
     [anon_sym_PIPE_PIPE] = ACTIONS(2456),
     [anon_sym_TILDE_PIPE] = ACTIONS(2456),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2456),
@@ -140038,6 +142105,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2699),
     [anon_sym_LT_EQ] = ACTIONS(2699),
     [anon_sym_LT_EQ_GT] = ACTIONS(2699),
+    [anon_sym_LT_GT] = ACTIONS(2699),
     [anon_sym_EQ_EQ] = ACTIONS(2699),
     [anon_sym_GT_EQ] = ACTIONS(2699),
     [anon_sym_GT_GT] = ACTIONS(2699),
@@ -140046,6 +142114,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2699),
     [anon_sym_CARET_EQ] = ACTIONS(2699),
     [anon_sym_PIPE_EQ] = ACTIONS(2699),
+    [anon_sym_PIPE_GT] = ACTIONS(2699),
     [anon_sym_PIPE_PIPE] = ACTIONS(2699),
     [anon_sym_TILDE_PIPE] = ACTIONS(2699),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2699),
@@ -140158,6 +142227,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2703),
     [anon_sym_LT_EQ] = ACTIONS(2703),
     [anon_sym_LT_EQ_GT] = ACTIONS(2703),
+    [anon_sym_LT_GT] = ACTIONS(2703),
     [anon_sym_EQ_EQ] = ACTIONS(2703),
     [anon_sym_GT_EQ] = ACTIONS(2703),
     [anon_sym_GT_GT] = ACTIONS(2703),
@@ -140166,6 +142236,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2703),
     [anon_sym_CARET_EQ] = ACTIONS(2703),
     [anon_sym_PIPE_EQ] = ACTIONS(2703),
+    [anon_sym_PIPE_GT] = ACTIONS(2703),
     [anon_sym_PIPE_PIPE] = ACTIONS(2703),
     [anon_sym_TILDE_PIPE] = ACTIONS(2703),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2703),
@@ -140278,6 +142349,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2707),
     [anon_sym_LT_EQ] = ACTIONS(2707),
     [anon_sym_LT_EQ_GT] = ACTIONS(2707),
+    [anon_sym_LT_GT] = ACTIONS(2707),
     [anon_sym_EQ_EQ] = ACTIONS(2707),
     [anon_sym_GT_EQ] = ACTIONS(2707),
     [anon_sym_GT_GT] = ACTIONS(2707),
@@ -140286,6 +142358,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2707),
     [anon_sym_CARET_EQ] = ACTIONS(2707),
     [anon_sym_PIPE_EQ] = ACTIONS(2707),
+    [anon_sym_PIPE_GT] = ACTIONS(2707),
     [anon_sym_PIPE_PIPE] = ACTIONS(2707),
     [anon_sym_TILDE_PIPE] = ACTIONS(2707),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2707),
@@ -140398,6 +142471,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2711),
     [anon_sym_LT_EQ] = ACTIONS(2711),
     [anon_sym_LT_EQ_GT] = ACTIONS(2711),
+    [anon_sym_LT_GT] = ACTIONS(2711),
     [anon_sym_EQ_EQ] = ACTIONS(2711),
     [anon_sym_GT_EQ] = ACTIONS(2711),
     [anon_sym_GT_GT] = ACTIONS(2711),
@@ -140406,6 +142480,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2711),
     [anon_sym_CARET_EQ] = ACTIONS(2711),
     [anon_sym_PIPE_EQ] = ACTIONS(2711),
+    [anon_sym_PIPE_GT] = ACTIONS(2711),
     [anon_sym_PIPE_PIPE] = ACTIONS(2711),
     [anon_sym_TILDE_PIPE] = ACTIONS(2711),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2711),
@@ -140518,6 +142593,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2715),
     [anon_sym_LT_EQ] = ACTIONS(2715),
     [anon_sym_LT_EQ_GT] = ACTIONS(2715),
+    [anon_sym_LT_GT] = ACTIONS(2715),
     [anon_sym_EQ_EQ] = ACTIONS(2715),
     [anon_sym_GT_EQ] = ACTIONS(2715),
     [anon_sym_GT_GT] = ACTIONS(2715),
@@ -140526,6 +142602,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2715),
     [anon_sym_CARET_EQ] = ACTIONS(2715),
     [anon_sym_PIPE_EQ] = ACTIONS(2715),
+    [anon_sym_PIPE_GT] = ACTIONS(2715),
     [anon_sym_PIPE_PIPE] = ACTIONS(2715),
     [anon_sym_TILDE_PIPE] = ACTIONS(2715),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2715),
@@ -140638,6 +142715,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ_GT] = ACTIONS(2332),
+    [anon_sym_LT_GT] = ACTIONS(2332),
     [anon_sym_EQ_EQ] = ACTIONS(2332),
     [anon_sym_GT_EQ] = ACTIONS(2332),
     [anon_sym_GT_GT] = ACTIONS(2332),
@@ -140646,6 +142724,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2332),
     [anon_sym_CARET_EQ] = ACTIONS(2332),
     [anon_sym_PIPE_EQ] = ACTIONS(2332),
+    [anon_sym_PIPE_GT] = ACTIONS(2332),
     [anon_sym_PIPE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2332),
@@ -140758,6 +142837,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2719),
     [anon_sym_LT_EQ] = ACTIONS(2719),
     [anon_sym_LT_EQ_GT] = ACTIONS(2719),
+    [anon_sym_LT_GT] = ACTIONS(2719),
     [anon_sym_EQ_EQ] = ACTIONS(2719),
     [anon_sym_GT_EQ] = ACTIONS(2719),
     [anon_sym_GT_GT] = ACTIONS(2719),
@@ -140766,6 +142846,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2719),
     [anon_sym_CARET_EQ] = ACTIONS(2719),
     [anon_sym_PIPE_EQ] = ACTIONS(2719),
+    [anon_sym_PIPE_GT] = ACTIONS(2719),
     [anon_sym_PIPE_PIPE] = ACTIONS(2719),
     [anon_sym_TILDE_PIPE] = ACTIONS(2719),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2719),
@@ -140878,6 +142959,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2723),
     [anon_sym_LT_EQ] = ACTIONS(2723),
     [anon_sym_LT_EQ_GT] = ACTIONS(2723),
+    [anon_sym_LT_GT] = ACTIONS(2723),
     [anon_sym_EQ_EQ] = ACTIONS(2723),
     [anon_sym_GT_EQ] = ACTIONS(2723),
     [anon_sym_GT_GT] = ACTIONS(2723),
@@ -140886,6 +142968,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2723),
     [anon_sym_CARET_EQ] = ACTIONS(2723),
     [anon_sym_PIPE_EQ] = ACTIONS(2723),
+    [anon_sym_PIPE_GT] = ACTIONS(2723),
     [anon_sym_PIPE_PIPE] = ACTIONS(2723),
     [anon_sym_TILDE_PIPE] = ACTIONS(2723),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2723),
@@ -140998,6 +143081,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2733),
     [anon_sym_LT_EQ] = ACTIONS(2733),
     [anon_sym_LT_EQ_GT] = ACTIONS(2733),
+    [anon_sym_LT_GT] = ACTIONS(2733),
     [anon_sym_EQ_EQ] = ACTIONS(2733),
     [anon_sym_GT_EQ] = ACTIONS(2733),
     [anon_sym_GT_GT] = ACTIONS(2733),
@@ -141006,6 +143090,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2733),
     [anon_sym_CARET_EQ] = ACTIONS(2733),
     [anon_sym_PIPE_EQ] = ACTIONS(2733),
+    [anon_sym_PIPE_GT] = ACTIONS(2733),
     [anon_sym_PIPE_PIPE] = ACTIONS(2733),
     [anon_sym_TILDE_PIPE] = ACTIONS(2733),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2733),
@@ -141118,6 +143203,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2737),
     [anon_sym_LT_EQ] = ACTIONS(2737),
     [anon_sym_LT_EQ_GT] = ACTIONS(2737),
+    [anon_sym_LT_GT] = ACTIONS(2737),
     [anon_sym_EQ_EQ] = ACTIONS(2737),
     [anon_sym_GT_EQ] = ACTIONS(2737),
     [anon_sym_GT_GT] = ACTIONS(2737),
@@ -141126,6 +143212,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2737),
     [anon_sym_CARET_EQ] = ACTIONS(2737),
     [anon_sym_PIPE_EQ] = ACTIONS(2737),
+    [anon_sym_PIPE_GT] = ACTIONS(2737),
     [anon_sym_PIPE_PIPE] = ACTIONS(2737),
     [anon_sym_TILDE_PIPE] = ACTIONS(2737),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2737),
@@ -141238,6 +143325,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2472),
     [anon_sym_LT_EQ] = ACTIONS(2472),
     [anon_sym_LT_EQ_GT] = ACTIONS(2472),
+    [anon_sym_LT_GT] = ACTIONS(2472),
     [anon_sym_EQ_EQ] = ACTIONS(2472),
     [anon_sym_GT_EQ] = ACTIONS(2472),
     [anon_sym_GT_GT] = ACTIONS(2472),
@@ -141246,6 +143334,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2472),
     [anon_sym_CARET_EQ] = ACTIONS(2472),
     [anon_sym_PIPE_EQ] = ACTIONS(2472),
+    [anon_sym_PIPE_GT] = ACTIONS(2472),
     [anon_sym_PIPE_PIPE] = ACTIONS(2472),
     [anon_sym_TILDE_PIPE] = ACTIONS(2472),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2472),
@@ -141358,6 +143447,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ] = ACTIONS(2332),
     [anon_sym_LT_EQ_GT] = ACTIONS(2332),
+    [anon_sym_LT_GT] = ACTIONS(2332),
     [anon_sym_EQ_EQ] = ACTIONS(2332),
     [anon_sym_GT_EQ] = ACTIONS(2332),
     [anon_sym_GT_GT] = ACTIONS(2332),
@@ -141366,6 +143456,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2332),
     [anon_sym_CARET_EQ] = ACTIONS(2332),
     [anon_sym_PIPE_EQ] = ACTIONS(2332),
+    [anon_sym_PIPE_GT] = ACTIONS(2332),
     [anon_sym_PIPE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE] = ACTIONS(2332),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2332),
@@ -141478,6 +143569,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2399),
     [anon_sym_LT_EQ] = ACTIONS(2399),
     [anon_sym_LT_EQ_GT] = ACTIONS(2399),
+    [anon_sym_LT_GT] = ACTIONS(2399),
     [anon_sym_EQ_EQ] = ACTIONS(2399),
     [anon_sym_GT_EQ] = ACTIONS(2399),
     [anon_sym_GT_GT] = ACTIONS(2399),
@@ -141486,6 +143578,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2399),
     [anon_sym_CARET_EQ] = ACTIONS(2399),
     [anon_sym_PIPE_EQ] = ACTIONS(2399),
+    [anon_sym_PIPE_GT] = ACTIONS(2399),
     [anon_sym_PIPE_PIPE] = ACTIONS(2399),
     [anon_sym_TILDE_PIPE] = ACTIONS(2399),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2399),
@@ -141598,6 +143691,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2496),
     [anon_sym_LT_EQ] = ACTIONS(2496),
     [anon_sym_LT_EQ_GT] = ACTIONS(2496),
+    [anon_sym_LT_GT] = ACTIONS(2496),
     [anon_sym_EQ_EQ] = ACTIONS(2496),
     [anon_sym_GT_EQ] = ACTIONS(2496),
     [anon_sym_GT_GT] = ACTIONS(2496),
@@ -141606,6 +143700,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2496),
     [anon_sym_CARET_EQ] = ACTIONS(2496),
     [anon_sym_PIPE_EQ] = ACTIONS(2496),
+    [anon_sym_PIPE_GT] = ACTIONS(2496),
     [anon_sym_PIPE_PIPE] = ACTIONS(2496),
     [anon_sym_TILDE_PIPE] = ACTIONS(2496),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2496),
@@ -141718,6 +143813,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_LT_LT_EQ] = ACTIONS(2755),
     [anon_sym_LT_EQ] = ACTIONS(2755),
     [anon_sym_LT_EQ_GT] = ACTIONS(2755),
+    [anon_sym_LT_GT] = ACTIONS(2755),
     [anon_sym_EQ_EQ] = ACTIONS(2755),
     [anon_sym_GT_EQ] = ACTIONS(2755),
     [anon_sym_GT_GT] = ACTIONS(2755),
@@ -141726,6 +143822,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_QMARK_QMARK] = ACTIONS(2755),
     [anon_sym_CARET_EQ] = ACTIONS(2755),
     [anon_sym_PIPE_EQ] = ACTIONS(2755),
+    [anon_sym_PIPE_GT] = ACTIONS(2755),
     [anon_sym_PIPE_PIPE] = ACTIONS(2755),
     [anon_sym_TILDE_PIPE] = ACTIONS(2755),
     [anon_sym_TILDE_PIPE_EQ] = ACTIONS(2755),

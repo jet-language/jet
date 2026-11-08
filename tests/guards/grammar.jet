@@ -167,3 +167,32 @@ s5_grammar_first_quoted: fn(text: String, start: Int) -> String? {
     assert(parsed.code == 0, "tree-sitter parse failed: {process.combined_output(parsed).trim()}")
     files.remove_all(scratch) ?? panic("remove {scratch}: {err}")
 }
+
+// Zed drops the whole Jet language when one of its queries fails to compile
+// (an impossible pattern, a child listed out of source order, a node the
+// grammar lacks), so every query must compile against the generated parser.
+#Test("every_zed_query_compiles_against_the_tree_sitter_grammar") {
+    guards_enter_root()
+    tree_sitter: process.which("tree-sitter") ?? {
+        print("SKIP-HOST: tree-sitter is not on PATH")
+        return
+    }
+    if process.which("cc") == None {
+        print("SKIP-HOST: tree-sitter builds its parser with `cc`, which is not on PATH")
+        return
+    }
+    scratch: testing.temp_dir("tree-sitter-queries")
+    library: files.join(scratch, "jet.so")
+    built: process.cmd([tree_sitter, "build", "-o", library, "Tools/editors/tree-sitter"]).stdout(.Capture).stderr(.Capture).run() ?? panic("run tree-sitter build: {err}")
+    assert(built.code == 0, "tree-sitter build failed: {process.combined_output(built).trim()}")
+    sample: files.join(scratch, "sample.jet")
+    files.write(sample, "Point: struct {{\n    x: Int\n}}\nmain: fn() {{\n    print(\"hi\")\n}}\n") ?? panic("write {sample}: {err}")
+    failures := [String]{}
+    loop name in ["highlights", "outline", "brackets", "indents", "overrides"] {
+        query: "Tools/editors/zed/languages/jet/{name}.scm"
+        ran: process.cmd([tree_sitter, "query", "--quiet", "--lib-path", library, "--lang-name", "jet", query, sample]).stdout(.Capture).stderr(.Capture).run() ?? panic("run tree-sitter query: {err}")
+        if ran.code != 0 -> failures.push("{query}: {process.combined_output(ran).trim()}")
+    }
+    assert(failures.len() == 0, "Zed would drop the Jet language; these queries do not compile:\n{failures.join("\n")}")
+    files.remove_all(scratch) ?? panic("remove {scratch}: {err}")
+}
