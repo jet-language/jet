@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6698,
-    "rev": 96276,
+    "nextNum": 6700,
+    "rev": 96278,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -101659,6 +101659,71 @@
       "updated": "2026-11-08T18:44:04.877Z",
       "updatedBy": "Main",
       "criteriaLastN": 3
+    },
+    {
+      "id": "c0jbo2e2",
+      "num": 6698,
+      "title": "JetDevserver does not parse or check with the current seed",
+      "body": "Found by CFreeLead (#6692 CFreeLead-1, 2026-11-08). jet check of any file in Compiler/JetDevserver reports 467 problems package-wide. First: E0002 at Source/BrowserWebAdapter.jet:467:10 (PAGE_JS triple-quoted string never closes), then E-ERR-PROPAGATE and E0114 at Source/Canvas/EditActions.jet:93/95; WatchService.jet parse errors at 21:11 (E-SEMICOLON), 48:28, 117:53 and more; Source/WebHost02.jet:684-685 writes comma-separated enum cases the parser rejects (E0003; the separator rule goes to an owner ballot under #6281 c4). JetDevserver is not a Compiler/package.jet member, so the census never sees it; JetLSP depends on it, and jet dev watching/web hosting cannot run as a case until it checks.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": "jet check Compiler/JetDevserver reports 0 errors with the admitted seed; JetDevserver joins the census (Compiler/package.jet member or the census manifest) so it cannot rot again",
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [
+        "#6692",
+        "#6281"
+      ],
+      "tags": [
+        "bug",
+        "devserver"
+      ],
+      "goals": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-08T19:22:04.837Z",
+      "updated": "2026-11-08T19:22:04.837Z",
+      "updatedBy": "Main"
+    },
+    {
+      "id": "c0eb35hy",
+      "num": 6699,
+      "title": "Diagnostics from b.generate modules render against the entry file at generated offsets",
+      "body": "Found by MetaLead (2026-11-08). A diagnostic in a module produced by b.generate in a build.jet is rendered with the entry file path and source text at the generated module offsets, so the caret and snippet point at unrelated entry-file lines. Repro: $JET_SCRATCH_ROOT/lanes/MetaLead/p9, jet build run.jet (copy the repro into a fixture). Expected: the diagnostic names the generated module (a stable virtual path) and shows its generated text, with the generating build.jet call as a note.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": "a UI snapshot case: a build.jet that generates a module with a type error renders the error against the generated module path and text, with a note at the b.generate call",
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [
+        "bug",
+        "diagnostics"
+      ],
+      "goals": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-08T19:22:24.124Z",
+      "updated": "2026-11-08T19:22:24.124Z",
+      "updatedBy": "Main"
     }
   ],
   "decisions": [
@@ -189876,6 +189941,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-08T19:22:24.125Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0eb35hy",
+      "note": "Diagnostics from b.generate modules render against the entry file at generated offsets"
+    },
+    {
+      "at": "2026-11-08T19:22:04.837Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0jbo2e2",
+      "note": "JetDevserver does not parse or check with the current seed"
+    },
     {
       "at": "2026-11-08T19:21:09.944Z",
       "by": "Main",
