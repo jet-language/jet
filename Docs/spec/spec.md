@@ -5048,6 +5048,10 @@ step's result is cached. A step that
 declares no output is refused at its `b.run` call (E3502), since only declared
 outputs leave its sandbox, and `.arg` text that names a package file is
 refused with the fix `.input(path)`, so the step can't read an undeclared file.
+An output that would overwrite a file no build made, such as a committed one,
+is refused before anything runs (E3502), as generated sources are: a step
+replaces only what the last build's receipt lists as a step's output. Example:
+[`tests/cases/build_entry/run_steps_refuse_to_overwrite_a_file.case`](../../tests/cases/build_entry/run_steps_refuse_to_overwrite_a_file.case).
 `.timeout(10min)` bounds how long the step may run. The `action_timeout` build
 option (stock `30s`; the profile field `action_timeout: 10min`, the call
 `b.action_timeout(10min)` and the flag `--action-timeout=10min`) bounds every

@@ -138,6 +138,10 @@ jet_cli_build_run_graph: fn(graph: BuildPlanExecution, receipt: BuildGraph, sele
             return jet_cli_build_execution_failed("E3502", "step `{graph.actions[step].name}` runs `b.image({name})`, a Linux x86-64 image, which a step's sandbox on this machine ({cli_sys.name()} {cli_sys.arch()}) can't run", None, "run this build on Linux x86-64", color)
         }
     }
+    // copy: `overwritten` is a payload view of the check's result.
+    if jet_cli_build_overwrite(root, graph, needs.steps) == .Val(overwritten) {
+        return jet_cli_build_execution_failed("E3502", overwritten.copy(), None, "move the file, or declare the step's output at another path", color)
+    }
     grants: jet_cli_build_grants(policy, workspace, invocation)
     loop step in needs.steps {
         action: plan.actions[step]
@@ -281,6 +285,32 @@ jet_cli_build_record: fn(root: String, receipt: BuildGraph, reused: [Int: Bool],
     cli_files.write(receipt_path, jet_driver_build_graph_json(graph)) ?? return Val(jet_cli_build_failed("couldn't write the build receipt `{receipt_path}`: {err}", jet_cli_why("E2105"), fix, color))
     times_path: cli_files.join(directory, "times.json")
     cli_files.write(times_path, jet_driver_build_times_json(times)) ?? return Val(jet_cli_build_failed("couldn't write the build times `{times_path}`: {err}", jet_cli_why("E2105"), fix, color))
+    None
+}
+
+// What refuses the run when a step in `steps` would overwrite a file the
+// build didn't make, such as a committed one, as generated sources are
+// refused (jet_cli_generated_shadow): an output may replace only a file the
+// last build's receipt lists as a step's output. None when no step would.
+jet_cli_build_overwrite: fn(root: String, graph: BuildPlanExecution, steps: [Int]) -[FS]> String? Never! {
+    made := [String]{}
+    receipt_text: cli_files.read(jet_cli_entry_join(root, ".jet/build/receipt.json")) ?? ""
+    if jet_cli_status_value_parse(receipt_text) == .Ok(receipt) {
+        actions: jet_cli_status_list(jet_cli_status_get(receipt, "actions")) ?? [JetCLIStatusValue]{}
+        loop action in actions {
+            outputs: jet_cli_status_list(jet_cli_status_get(action, "outputs")) ?? [JetCLIStatusValue]{}
+            loop output in outputs {
+                if jet_cli_status_string(Val(output)) == .Val(path) -> made.push(path.copy())
+            }
+        }
+    }
+    loop step in steps {
+        loop output in graph.actions[step].outputs {
+            path: jet_cli_entry_join(root, output)
+            if made.contains(output) || !(cli_files.exists(path) || cli_files.is_symlink(path)) -> next
+            return Val("step `{graph.actions[step].name}` would overwrite `{output}`, a file no build made")
+        }
+    }
     None
 }
 
