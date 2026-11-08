@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6687,
-    "rev": 96125,
+    "nextNum": 6694,
+    "rev": 96150,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -100518,6 +100518,418 @@
       "updated": "2026-11-08T15:40:46.190Z",
       "updatedBy": "Main",
       "criteriaLastN": 4
+    },
+    {
+      "id": "c0lscvc9",
+      "num": 6687,
+      "title": "Jet depends on no other language: port every C dependency (musl, libgcc, SQLite, mbedtls) to Jet",
+      "body": "Owner order 2026-11-08: \"We need to fix the issue blocking build.jet but also need to remove the C dependencies. Start by directly porting the functions being used but we also need full coverage of the libraries that are dependencies. Ensure all are tracked.\"\n\nCensus (Main, dev 9b21994eb3, seed a0_038): jet_runtime_jet.o has 55 undefined symbols, 54 from musl (33 math, 6 pthread, 4 DNS, 11 process, terminal and filesystem calls) plus jet_rt_fault_report. The source has 72 #Import(c) or #FFI(c) sites outside tests, fixtures, binders and examples: JetRuntime CompilerNeededMath.jet 29, RouteSys.jet 8, Thread.jet 6, HostNetResolver.jet 4, RouteTerm.jet 2, and TextFmt, Sync, ProcessSignal, NetRoutes and HostSpawn 1 each; JetDevserver WatchService.jet 7 and WebHost02.jet 4; JetCli Host.jet 2; JetTestKit RequireTool.jet and Assets/no_nix.jet 1 each; Tools/ci/CompiledWorkloadPeerLauncher.jet 1; and Tools/agent-eval/ffi-assurance 2 (a C-interop proof, which stays). The runtime pack links musl libc.a, libgcc.a and libgcc_eh.a (jet-runtime/foreign/platform). Vendored C: Core/Vendor/Sqlite3 (core.db) and Core/Vendor/Mbedtls (core.net TLS), together about 474k lines of C and headers. The clang C toolchain pack serves only users' C interop and `jet cc`, a feature that stays.\n\nOrder: first port the functions Jet uses today (math, threads, syscall wrappers, DNS, the compiler's and tools' own C imports), so the runtime pack drops musl and libgcc. Then port the vendored libraries in full: mbedtls, then SQLite. Each library port covers the whole library that the dependency provided, not only today's call sites. #6682 c4's fresh-clone C compiler requirement disappears once the runtime pack and every artifact jet build Compiler makes contain no C.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Every child card is done.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T15:46:44.629Z"
+        },
+        {
+          "n": 2,
+          "text": "`jet build Compiler` on a fresh clone with no C compiler, no musl and no Nix builds jet, jetpack and the runtime pack (receipt on a clean HOME with PATH holding only the seed jet and coreutils).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T15:46:45.700Z"
+        },
+        {
+          "n": 3,
+          "text": "jet, jetpack and every runtime pack file contain no object compiled from C: a symbol and section census of each artifact names only Jet-produced objects, and the pack's foreign/platform directory is gone.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T15:46:46.892Z"
+        },
+        {
+          "n": 4,
+          "text": "No #Import(c) or #FFI(c) remains in Compiler, Core, Jetpack or Tools outside the C-interop feature itself, its tests and its proofs (census command and output in the receipt).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T15:46:47.959Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "no-c",
+        "owner-direction"
+      ],
+      "goals": [
+        "G1",
+        "G7"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-08T15:46:43.606Z",
+      "updated": "2026-11-08T15:46:47.959Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 4
+    },
+    {
+      "id": "c0bzrof5",
+      "num": 6688,
+      "title": "No C: port the runtime's 33 libm functions to Jet, then all of math.h",
+      "body": "Owner order 2026-11-08: \"We need to fix the issue blocking build.jet but also need to remove the C dependencies. Start by directly porting the functions being used but we also need full coverage of the libraries that are dependencies. Ensure all are tracked.\"\n\nCompiler/JetRuntime/Source/CompilerNeededMath.jet imports acos, acosh, asin, asinh, atan, atan2, atanh, cbrt, ceil, cos, cosh, exp, exp2, expm1, floor, fma, fmod, hypot, log, log10, log1p, log2, pow, round, sin, sinh, sqrt, tan, tanh and trunc from musl. Port them to Jet first; sqrt, floor, ceil, trunc, round and fma may lower to the x86-64 instructions where those give the IEEE result. Then cover every remaining C23 math.h function Core exposes or will expose. Every function returns the same bits as musl's on every tier (I9), web included.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The 33 functions are Jet, CompilerNeededMath.jet imports nothing from C, and the runtime object asks libc for no math symbol (symbol census receipt).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T15:46:50.677Z"
+        },
+        {
+          "n": 2,
+          "text": "Each ported function matches musl bit for bit on a committed corpus: special values (signed zeros, infinities, NaNs, subnormals), musl libc-test math vectors and random inputs, on O0, O1, O2 and web.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T15:46:51.734Z"
+        },
+        {
+          "n": 3,
+          "text": "Full coverage: every C23 math.h function (float and double forms, frexp, ldexp, modf, remquo, nextafter, erf, tgamma, lgamma and the rest) exists in Jet with the same musl-equivalence corpus.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T15:46:52.767Z"
+        },
+        {
+          "n": 4,
+          "text": "A paired perf cell compares each hot function (sin, cos, exp, log, pow) with musl's; Jet is not slower.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T15:46:53.807Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "no-c",
+        "owner-direction"
+      ],
+      "goals": [
+        "G1",
+        "G7"
+      ],
+      "parentId": "c0lscvc9",
+      "needsAcceptance": false,
+      "created": "2026-11-08T15:46:49.544Z",
+      "updated": "2026-11-08T15:46:53.807Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 4
+    },
+    {
+      "id": "c0x92nsv",
+      "num": 6689,
+      "title": "No C: threads without pthread (Thread.jet, Sync.jet)",
+      "body": "Owner order 2026-11-08: \"We need to fix the issue blocking build.jet but also need to remove the C dependencies. Start by directly porting the functions being used but we also need full coverage of the libraries that are dependencies. Ensure all are tracked.\"\n\nThread.jet imports pthread_create, pthread_join, pthread_detach, pthread_attr_init, pthread_attr_setstacksize and pthread_attr_destroy; Sync.jet imports one more C symbol. Replace them with clone3 or clone, Jet-owned stacks and Jet's own thread control block and thread-local area, with futex join.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Thread.jet and Sync.jet import nothing from C, and the runtime object asks libc for no pthread symbol.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T15:46:56.135Z"
+        },
+        {
+          "n": 2,
+          "text": "Thread spawn, join, detach, stack size, thread-locals, panics in threads and the scheduler's carriers keep their behavior: the thread, task and scheduler cases pass on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T15:46:57.113Z"
+        },
+        {
+          "n": 3,
+          "text": "Spawn and join cost is measured against the pthread build, and the Jet build is not slower.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T15:46:58.114Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "no-c",
+        "owner-direction"
+      ],
+      "goals": [
+        "G1",
+        "G7"
+      ],
+      "parentId": "c0lscvc9",
+      "needsAcceptance": false,
+      "created": "2026-11-08T15:46:55.183Z",
+      "updated": "2026-11-08T15:46:58.114Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 3
+    },
+    {
+      "id": "c0wl6r2h",
+      "num": 6690,
+      "title": "No C: direct syscalls for the runtime's process, terminal and filesystem calls",
+      "body": "Owner order 2026-11-08: \"We need to fix the issue blocking build.jet but also need to remove the C dependencies. Start by directly porting the functions being used but we also need full coverage of the libraries that are dependencies. Ensure all are tracked.\"\n\nRuntime imports to replace: fork (HostSpawn.jet), getgroups and initgroups, getloadavg, sysconf, times, clock_gettime, mkfifo, realpath, utime, signal, tcgetattr and tcsetattr, inet_pton, __errno_location, and the C imports of RouteSys.jet (8), RouteTerm.jet (2), ProcessSignal.jet, TextFmt.jet and NetRoutes.jet. Use the Linux syscalls directly (clock_gettime through the vDSO, signal through rt_sigaction with a Jet restorer, initgroups and getgroups from /etc/group, getloadavg from /proc/loadavg, sysconf from the auxiliary vector and /proc, realpath with Jet path resolution, tcgetattr and tcsetattr through ioctl).",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "None of these runtime files imports anything from C, and the runtime object asks libc for none of these symbols (symbol census receipt).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T15:47:00.501Z"
+        },
+        {
+          "n": 2,
+          "text": "Every Core API built on them keeps its behavior and error kinds: the process, signal, terminal, time, files and net cases pass on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T15:47:01.468Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "no-c",
+        "owner-direction"
+      ],
+      "goals": [
+        "G1",
+        "G7"
+      ],
+      "parentId": "c0lscvc9",
+      "needsAcceptance": false,
+      "created": "2026-11-08T15:46:59.496Z",
+      "updated": "2026-11-08T15:47:01.468Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 2
+    },
+    {
+      "id": "c0esaekb",
+      "num": 6691,
+      "title": "No C: a Jet DNS resolver replaces getaddrinfo",
+      "body": "Owner order 2026-11-08: \"We need to fix the issue blocking build.jet but also need to remove the C dependencies. Start by directly porting the functions being used but we also need full coverage of the libraries that are dependencies. Ensure all are tracked.\"\n\nHostNetResolver.jet imports getaddrinfo, freeaddrinfo and gai_strerror. Replace them with a Jet resolver that reads /etc/hosts, /etc/resolv.conf (nameserver, search, ndots, timeout, attempts, rotate) and /etc/nsswitch.conf's hosts line, queries over UDP with TCP fallback on truncation, and orders A and AAAA answers by RFC 6724 the way getaddrinfo does. Go's pure resolver is the reference for scope.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "HostNetResolver.jet imports nothing from C, and the runtime object asks libc for no resolver symbol.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T15:47:03.728Z"
+        },
+        {
+          "n": 2,
+          "text": "For localhost, names in /etc/hosts, numeric hosts, a local test DNS server (A, AAAA, CNAME, NXDOMAIN, SERVFAIL, truncation then TCP, timeout) and search domains, the Jet resolver returns the same addresses in the same order and the same error kinds as getaddrinfo did; case-tested.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T15:47:04.748Z"
+        },
+        {
+          "n": 3,
+          "text": "Resolution runs on the scheduler without blocking a carrier.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T15:47:05.799Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "no-c",
+        "owner-direction"
+      ],
+      "goals": [
+        "G1",
+        "G7"
+      ],
+      "parentId": "c0lscvc9",
+      "needsAcceptance": false,
+      "created": "2026-11-08T15:47:02.773Z",
+      "updated": "2026-11-08T15:47:05.799Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 3
+    },
+    {
+      "id": "c0hzvj2s",
+      "num": 6692,
+      "title": "No C: the compiler's and tools' own C imports (JetDevserver, JetCli, JetTestKit, Tools/ci)",
+      "body": "Owner order 2026-11-08: \"We need to fix the issue blocking build.jet but also need to remove the C dependencies. Start by directly porting the functions being used but we also need full coverage of the libraries that are dependencies. Ensure all are tracked.\"\n\nWatchService.jet declares close, inotify_add_watch, inotify_init1, pipe, poll, read and write through #FFI(c). WebHost02.jet declares mkdirat, openat, renameat and unlinkat. JetCli Host.jet has 2 C imports, JetTestKit RequireTool.jet and Assets/no_nix.jet 1 each, and Tools/ci/CompiledWorkloadPeerLauncher.jet 1. Replace each with the Core or runtime API that does the same job, adding the missing Core surface (an inotify-backed watch, say) where none exists, through the normal Core review.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "None of these files declares or imports a C function (census receipt).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T15:47:08.394Z"
+        },
+        {
+          "n": 2,
+          "text": "jet dev's file watching and web host, the CLI paths, the testkit's requires: probes and the peer launcher keep their behavior (their cases pass).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T15:47:09.431Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "no-c",
+        "owner-direction"
+      ],
+      "goals": [
+        "G1",
+        "G7"
+      ],
+      "parentId": "c0lscvc9",
+      "needsAcceptance": false,
+      "created": "2026-11-08T15:47:07.321Z",
+      "updated": "2026-11-08T15:47:09.431Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 2
+    },
+    {
+      "id": "c03a0dhc",
+      "num": 6693,
+      "title": "No C: the runtime pack and program links drop musl, libgcc and libgcc_eh",
+      "body": "Owner order 2026-11-08: \"We need to fix the issue blocking build.jet but also need to remove the C dependencies. Start by directly porting the functions being used but we also need full coverage of the libraries that are dependencies. Ensure all are tracked.\"\n\nOnce the math, thread, syscall, DNS and compiler-import cards land, the runtime needs nothing from libc. Remove musl's libc.a, libgcc.a and libgcc_eh.a from Tools/packaging/PrebuildRuntime.jet and from Compiler/build.jet's runtime step (JET_PACK_MUSL_LIB, PLATFORM_ARCHIVES, the nolibc section split in Image/RuntimePack.jet, and jet-runtime/foreign/platform). The runtime pack then builds with no C compiler. Programs with C interop still link their C closure; this card decides nothing about that feature.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [
+        "no-c",
+        "owner-direction"
+      ],
+      "goals": [
+        "G1",
+        "G7"
+      ],
+      "parentId": "c0lscvc9",
+      "needsAcceptance": false,
+      "created": "2026-11-08T15:47:10.785Z",
+      "updated": "2026-11-08T15:47:10.785Z",
+      "updatedBy": "Main"
     }
   ],
   "decisions": [
@@ -188568,6 +188980,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-08T15:47:10.785Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c03a0dhc",
+      "note": "No C: the runtime pack and program links drop musl, libgcc and libgcc_eh"
+    },
+    {
+      "at": "2026-11-08T15:47:09.431Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0hzvj2s",
+      "note": "#2 jet dev's file watching and web host, the CLI paths, the tes"
+    },
+    {
+      "at": "2026-11-08T15:47:08.394Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0hzvj2s",
+      "note": "#1 None of these files declares or imports a C function (census"
+    },
+    {
+      "at": "2026-11-08T15:47:07.321Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0hzvj2s",
+      "note": "No C: the compiler's and tools' own C imports (JetDevserver, JetCli, JetTestKit, Tools/ci)"
+    },
+    {
+      "at": "2026-11-08T15:47:05.799Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0esaekb",
+      "note": "#3 Resolution runs on the scheduler without blocking a carrier."
+    },
+    {
+      "at": "2026-11-08T15:47:04.749Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0esaekb",
+      "note": "#2 For localhost, names in /etc/hosts, numeric hosts, a local t"
+    },
+    {
+      "at": "2026-11-08T15:47:03.728Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0esaekb",
+      "note": "#1 HostNetResolver.jet imports nothing from C, and the runtime "
+    },
+    {
+      "at": "2026-11-08T15:47:02.774Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0esaekb",
+      "note": "No C: a Jet DNS resolver replaces getaddrinfo"
+    },
+    {
+      "at": "2026-11-08T15:47:01.468Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0wl6r2h",
+      "note": "#2 Every Core API built on them keeps its behavior and error ki"
+    },
+    {
+      "at": "2026-11-08T15:47:00.501Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0wl6r2h",
+      "note": "#1 None of these runtime files imports anything from C, and the"
+    },
+    {
+      "at": "2026-11-08T15:46:59.496Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0wl6r2h",
+      "note": "No C: direct syscalls for the runtime's process, terminal and filesystem calls"
+    },
+    {
+      "at": "2026-11-08T15:46:58.114Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0x92nsv",
+      "note": "#3 Spawn and join cost is measured against the pthread build, a"
+    },
+    {
+      "at": "2026-11-08T15:46:57.113Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0x92nsv",
+      "note": "#2 Thread spawn, join, detach, stack size, thread-locals, panic"
+    },
+    {
+      "at": "2026-11-08T15:46:56.135Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0x92nsv",
+      "note": "#1 Thread.jet and Sync.jet import nothing from C, and the runti"
+    },
+    {
+      "at": "2026-11-08T15:46:55.183Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0x92nsv",
+      "note": "No C: threads without pthread (Thread.jet, Sync.jet)"
+    },
+    {
+      "at": "2026-11-08T15:46:53.807Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0bzrof5",
+      "note": "#4 A paired perf cell compares each hot function (sin, cos, exp"
+    },
+    {
+      "at": "2026-11-08T15:46:52.767Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0bzrof5",
+      "note": "#3 Full coverage: every C23 math.h function (float and double f"
+    },
+    {
+      "at": "2026-11-08T15:46:51.734Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0bzrof5",
+      "note": "#2 Each ported function matches musl bit for bit on a committed"
+    },
+    {
+      "at": "2026-11-08T15:46:50.677Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0bzrof5",
+      "note": "#1 The 33 functions are Jet, CompilerNeededMath.jet imports not"
+    },
+    {
+      "at": "2026-11-08T15:46:49.544Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0bzrof5",
+      "note": "No C: port the runtime's 33 libm functions to Jet, then all of math.h"
+    },
+    {
+      "at": "2026-11-08T15:46:47.959Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0lscvc9",
+      "note": "#4 No #Import(c) or #FFI(c) remains in Compiler, Core, Jetpack "
+    },
+    {
+      "at": "2026-11-08T15:46:46.892Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0lscvc9",
+      "note": "#3 jet, jetpack and every runtime pack file contain no object c"
+    },
+    {
+      "at": "2026-11-08T15:46:45.700Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0lscvc9",
+      "note": "#2 `jet build Compiler` on a fresh clone with no C compiler, no"
+    },
+    {
+      "at": "2026-11-08T15:46:44.629Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0lscvc9",
+      "note": "#1 Every child card is done."
+    },
+    {
+      "at": "2026-11-08T15:46:43.606Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0lscvc9",
+      "note": "Jet depends on no other language: port every C dependency (musl, libgcc, SQLite, mbedtls) to Jet"
+    },
     {
       "at": "2026-11-08T15:40:46.190Z",
       "by": "Main",
