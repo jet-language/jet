@@ -1044,3 +1044,99 @@ tests/cases/task_control_tiers/a_cancel_at_cleanup_entry_waits_out_the_close_on_
 tests/guards/corpus_ast: corpus policy dogfood gate	#3590	368 pre-existing Jetpack sites (c198): 246 dogfood-json (wire text built by hand instead of the typed JSON seam) and 122 dogfood-path-containment (string-prefix containment instead of Path.is_within)
 tests/guards/corpus_ast: failure surface has no active retired spelling	#6582	278 retired failure `?` lines, all in Compiler/JetDevserver, which is Rust transliterated into Jet syntax and is ported under #6582
 tests/cases/corelib_net/net_http_service_policy_tests_pass.case	#3595	7 passed, 1 failed: a second body().text on server.response's one-shot body is not Err(.BodyConsumed); body() hands out a copy of the Body value, which carries no take state (c15)
+Core/Args/Args.jet [none]	#6530	`Dyn` and `Dyn?` have no `==`, so `assert_eq` on decoded trees is E0312: repeated value options replace their tuple slot without changing order
+Core/Auth/Auth.jet [none]: JWT errors keep their variants and payloads	#3550	runtime: `jwt_outcome` of a fractional `exp` claim is not "MalformedToken(claim `exp` must be an integer)"
+Core/Crypto/Uuid.jet [none]	#3548	Clock's manual-time methods mutate their receiver, but the test binds the Clock with `:` (E0111): UUID v7 keeps the manual Clock timestamp and RFC version and variant
+Core/Data/Data.jet [none]	#3550	test drift: `ascending` pushed then reused (E0209), errors is one `DataError`, not a list (E0102, E0505); hidden runtime: deferred queries `joined[1].right` is not None
+Core/Encoding/Base32.jet [none]	#6530	`assert_eq(x, Ok(…))` is E0404: `Ok(…)` takes no fallible expected type from assert_eq's other argument
+Core/Encoding/Base64.jet [none]	#6530	`assert_eq(x, Ok(…))` is E0404: `Ok(…)` takes no fallible expected type from assert_eq's other argument
+Core/Encoding/Cbor.jet [none]	#6530	`assert_eq(x, Ok(…))` is E0404: `Ok(…)` takes no fallible expected type from assert_eq's other argument (6 tests)
+Core/Encoding/CborParse.jet [none]	#6530	ICE `ir.build unlowered`: a field of UTF8Error in CBOR borrowed UTF-8 validation equals strict String decoding
+Core/Encoding/CborStream.jet [none]: CBOR buffer release resets borrowed storage and returns its heap charge	#3548	runtime: `mem.__list_capacity` of a released borrowed buffer is 8, not 0
+Core/Encoding/Eetf.jet [none]	#6530	`assert_eq(x, Ok(…))` is E0404: `Ok(…)` takes no fallible expected type from assert_eq's other argument
+Core/Encoding/Json.jet [none]	#6530	`Dyn` and `Dyn?` have no `==`, so `assert_eq` on decoded trees is E0312 (2 tests); a closure pushes borrowed `line` without a move (E0201, #3548)
+Core/Encoding/Jsonl.jet [none]	#3548	test drift: `reader` takes a FileReader, the tests pass String text
+Core/Encoding/Toml.jet [none]	#6530	`Dyn` and `Dyn?` have no `==`, so `assert_eq` on decoded trees is E0312
+Core/Encoding/XmlEngine.jet [none]	#3548	test drift: `lexer.next_token()` in the UTF16 lexer test has no `XMLFault` conversion to the test's Err
+Core/Encoding/Xml.jet [none]	#3548	test drift: `attribute(…) ?? panic` is String, compared with `Val(…)`
+Core/Event/Event.jet [none]	#3549	`EventConfigError` has no `==`, so assert_eq on it is E0312
+Core/Files/Files.jet [none]	#3548	test drift (7 tests): `compiler_with_process_directory` is #Unsafe, `read` is `String IOError!` matched as `.Ok`, IOOperation and IOError have no `==`, TempDir/TempFile have no `expect`, `String.from_bytes` compared with `Val`; hidden runtime: files_stat_takes_the_read_fault and files_getmtime_takes_the_read_fault see no read fault
+Core/Http/Server.jet [none]	#3550	test drift: the route text "/a/{id}" interpolates `id`; it needs `{{id}}`
+Core/Math/Math.jet [none]	#3548	test drift: `.to_bits()` is no method of Float, F64 or a Decimal literal (E0311, E0102; Units uses the free `math.to_bits`) in 3 tests, and Float{9007199254740993} is E1003; ICE `ir.build unlowered` (#6530): precise builtins Point2.sub and Delta2.sub in Device and dynamic coordinates retain seed frame policy
+Core/Net/Url.jet [none]	#3549	test drift: the URL pattern hole `{path}` collides with the binding `path`, and URL{"data://example.test/a~/{payload}"} is an invalid literal
+Core/Process/Process.jet [none]	#3549	test drift: `pipe_line(…) ?? panic` is String, compared with `Val("")` and bare `None`
+Core/Sys/Sys.jet [none]	#6530	`assert_eq(x, Ok(…))` is E0404: `Ok(…)` takes no fallible expected type from assert_eq's other argument (2 tests); `EnvError` has no `==` (#3549)
+Core/Term/Term.jet [none]	#3549	test drift: the negative byte take returns `[U8]`, matched as `.Ok`/`.Err`
+Core/Time/Time.jet [none]	#3548	Clock's manual-time methods mutate their receiver, but the test binds the Clock with `:` (E0111) (2 tests); `Dyn` and `Dyn?` have no `==`, so `assert_eq` on decoded trees is E0312 (#6530); ICE `ir.build unlowered` (#6530): display of Shared<__ClockState> in Clock Show and Debug, an `.expect_fail` stop edge out of a #Transact block in Nonpositive sleeps
+Core/Ui/Host.jet [none]	#3551	test drift: UIShortcutModifiers{} lacks `bits`, and `x == .InvalidRequest(message)`/`== .Val(name)` bind no names
+Core/Ui/Host/Shortcuts.jet [none]	#3551	test drift: `core.ui.host.UIShortcutModifiers` is no type by that path, and `error == .InvalidRequest(message)` binds no name
+Core/Ui/Ui.jet [none]	#3551	`UIPreviewDevice` and `ui.UIPreviewDevice` are two types in the preview viewport test
+Core/Units/Units.jet [none]: Measurement Float kernels preserve retained arithmetic bits	#3548	runtime: `math.to_bits` is a signed Int, compared with the U64 13846317054350589952
+Core/Units/Units.jet [none]: Measurement source surface keeps observations and formatting	#3548	runtime: `show` of a tiny Measurement prints "1e-8 ± 0.0", not "0.00000001 ± 0"
+Core/Web/Browser.jet [none]	#6530	`assert_eq(x, Ok(…))` is E0404: `Ok(…)` takes no fallible expected type from assert_eq's other argument; hidden runtime (#3550): browser configuration helpers index 33 of a 32-item list
+Core/Web/Storage/Local.jet [none]	#3550	test drift: `core.web.storage.session.set` by full path is E1004 "not in this position", and the task loops collect no item (E0073)
+Core/Web/Storage/Session.jet [none]	#3550	test drift: `core.web.storage.local.set` by full path is E1004 "not in this position"
+Core/Args/Args.jet [basic]	#6530	`Dyn` and `Dyn?` have no `==`, so `assert_eq` on decoded trees is E0312: repeated value options replace their tuple slot without changing order
+Core/Auth/Auth.jet [basic]: JWT errors keep their variants and payloads	#3550	runtime: `jwt_outcome` of a fractional `exp` claim is not "MalformedToken(claim `exp` must be an integer)"
+Core/Crypto/Uuid.jet [basic]	#3548	Clock's manual-time methods mutate their receiver, but the test binds the Clock with `:` (E0111): UUID v7 keeps the manual Clock timestamp and RFC version and variant
+Core/Data/Data.jet [basic]	#3550	test drift: `ascending` pushed then reused (E0209), errors is one `DataError`, not a list (E0102, E0505); hidden runtime: deferred queries `joined[1].right` is not None
+Core/Encoding/Base32.jet [basic]	#6530	`assert_eq(x, Ok(…))` is E0404: `Ok(…)` takes no fallible expected type from assert_eq's other argument
+Core/Encoding/Base64.jet [basic]	#6530	`assert_eq(x, Ok(…))` is E0404: `Ok(…)` takes no fallible expected type from assert_eq's other argument
+Core/Encoding/Cbor.jet [basic]	#6530	`assert_eq(x, Ok(…))` is E0404: `Ok(…)` takes no fallible expected type from assert_eq's other argument (6 tests)
+Core/Encoding/CborParse.jet [basic]	#6530	ICE `ir.build unlowered`: a field of UTF8Error in CBOR borrowed UTF-8 validation equals strict String decoding
+Core/Encoding/CborStream.jet [basic]: CBOR buffer release resets borrowed storage and returns its heap charge	#3548	runtime: `mem.__list_capacity` of a released borrowed buffer is 8, not 0
+Core/Encoding/Eetf.jet [basic]	#6530	`assert_eq(x, Ok(…))` is E0404: `Ok(…)` takes no fallible expected type from assert_eq's other argument
+Core/Encoding/Json.jet [basic]	#6530	`Dyn` and `Dyn?` have no `==`, so `assert_eq` on decoded trees is E0312 (2 tests); a closure pushes borrowed `line` without a move (E0201, #3548)
+Core/Encoding/Jsonl.jet [basic]	#3548	test drift: `reader` takes a FileReader, the tests pass String text
+Core/Encoding/Toml.jet [basic]	#6530	`Dyn` and `Dyn?` have no `==`, so `assert_eq` on decoded trees is E0312
+Core/Encoding/XmlEngine.jet [basic]	#3548	test drift: `lexer.next_token()` in the UTF16 lexer test has no `XMLFault` conversion to the test's Err
+Core/Encoding/Xml.jet [basic]	#3548	test drift: `attribute(…) ?? panic` is String, compared with `Val(…)`
+Core/Event/Event.jet [basic]	#3549	`EventConfigError` has no `==`, so assert_eq on it is E0312
+Core/Files/Files.jet [basic]	#3548	test drift (7 tests): `compiler_with_process_directory` is #Unsafe, `read` is `String IOError!` matched as `.Ok`, IOOperation and IOError have no `==`, TempDir/TempFile have no `expect`, `String.from_bytes` compared with `Val`; hidden runtime: files_stat_takes_the_read_fault and files_getmtime_takes_the_read_fault see no read fault
+Core/Http/Server.jet [basic]	#3550	test drift: the route text "/a/{id}" interpolates `id`; it needs `{{id}}`
+Core/Math/Math.jet [basic]	#3548	test drift: `.to_bits()` is no method of Float, F64 or a Decimal literal (E0311, E0102; Units uses the free `math.to_bits`) in 3 tests, and Float{9007199254740993} is E1003; ICE `ir.build unlowered` (#6530): precise builtins Point2.sub and Delta2.sub in Device and dynamic coordinates retain seed frame policy
+Core/Net/Url.jet [basic]	#3549	test drift: the URL pattern hole `{path}` collides with the binding `path`, and URL{"data://example.test/a~/{payload}"} is an invalid literal
+Core/Process/Process.jet [basic]	#3549	test drift: `pipe_line(…) ?? panic` is String, compared with `Val("")` and bare `None`
+Core/Sys/Sys.jet [basic]	#6530	`assert_eq(x, Ok(…))` is E0404: `Ok(…)` takes no fallible expected type from assert_eq's other argument (2 tests); `EnvError` has no `==` (#3549)
+Core/Term/Term.jet [basic]	#3549	test drift: the negative byte take returns `[U8]`, matched as `.Ok`/`.Err`
+Core/Time/Time.jet [basic]	#3548	Clock's manual-time methods mutate their receiver, but the test binds the Clock with `:` (E0111) (2 tests); `Dyn` and `Dyn?` have no `==`, so `assert_eq` on decoded trees is E0312 (#6530); ICE `ir.build unlowered` (#6530): display of Shared<__ClockState> in Clock Show and Debug, an `.expect_fail` stop edge out of a #Transact block in Nonpositive sleeps
+Core/Ui/Host.jet [basic]	#3551	test drift: UIShortcutModifiers{} lacks `bits`, and `x == .InvalidRequest(message)`/`== .Val(name)` bind no names
+Core/Ui/Host/Shortcuts.jet [basic]	#3551	test drift: `core.ui.host.UIShortcutModifiers` is no type by that path, and `error == .InvalidRequest(message)` binds no name
+Core/Ui/Ui.jet [basic]	#3551	`UIPreviewDevice` and `ui.UIPreviewDevice` are two types in the preview viewport test
+Core/Units/Units.jet [basic]: Measurement Float kernels preserve retained arithmetic bits	#3548	runtime: `math.to_bits` is a signed Int, compared with the U64 13846317054350589952
+Core/Units/Units.jet [basic]: Measurement source surface keeps observations and formatting	#3548	runtime: `show` of a tiny Measurement prints "1e-8 ± 0.0", not "0.00000001 ± 0"
+Core/Web/Browser.jet [basic]	#6530	`assert_eq(x, Ok(…))` is E0404: `Ok(…)` takes no fallible expected type from assert_eq's other argument; hidden runtime (#3550): browser configuration helpers index 33 of a 32-item list
+Core/Web/Storage/Local.jet [basic]	#3550	test drift: `core.web.storage.session.set` by full path is E1004 "not in this position", and the task loops collect no item (E0073)
+Core/Web/Storage/Session.jet [basic]	#3550	test drift: `core.web.storage.local.set` by full path is E1004 "not in this position"
+Core/Args/Args.jet [full]	#6530	`Dyn` and `Dyn?` have no `==`, so `assert_eq` on decoded trees is E0312: repeated value options replace their tuple slot without changing order
+Core/Auth/Auth.jet [full]: JWT errors keep their variants and payloads	#3550	runtime: `jwt_outcome` of a fractional `exp` claim is not "MalformedToken(claim `exp` must be an integer)"
+Core/Crypto/Uuid.jet [full]	#3548	Clock's manual-time methods mutate their receiver, but the test binds the Clock with `:` (E0111): UUID v7 keeps the manual Clock timestamp and RFC version and variant
+Core/Data/Data.jet [full]	#3550	test drift: `ascending` pushed then reused (E0209), errors is one `DataError`, not a list (E0102, E0505); hidden runtime: deferred queries `joined[1].right` is not None
+Core/Encoding/Base32.jet [full]	#6530	`assert_eq(x, Ok(…))` is E0404: `Ok(…)` takes no fallible expected type from assert_eq's other argument
+Core/Encoding/Base64.jet [full]	#6530	`assert_eq(x, Ok(…))` is E0404: `Ok(…)` takes no fallible expected type from assert_eq's other argument
+Core/Encoding/Cbor.jet [full]	#6530	`assert_eq(x, Ok(…))` is E0404: `Ok(…)` takes no fallible expected type from assert_eq's other argument (6 tests)
+Core/Encoding/CborParse.jet [full]	#6530	ICE `ir.build unlowered`: a field of UTF8Error in CBOR borrowed UTF-8 validation equals strict String decoding
+Core/Encoding/CborStream.jet [full]: CBOR buffer release resets borrowed storage and returns its heap charge	#3548	runtime: `mem.__list_capacity` of a released borrowed buffer is 8, not 0
+Core/Encoding/Eetf.jet [full]	#6530	`assert_eq(x, Ok(…))` is E0404: `Ok(…)` takes no fallible expected type from assert_eq's other argument
+Core/Encoding/Json.jet [full]	#6530	`Dyn` and `Dyn?` have no `==`, so `assert_eq` on decoded trees is E0312 (2 tests); a closure pushes borrowed `line` without a move (E0201, #3548)
+Core/Encoding/Jsonl.jet [full]	#3548	test drift: `reader` takes a FileReader, the tests pass String text
+Core/Encoding/Toml.jet [full]	#6530	`Dyn` and `Dyn?` have no `==`, so `assert_eq` on decoded trees is E0312
+Core/Encoding/XmlEngine.jet [full]	#3548	test drift: `lexer.next_token()` in the UTF16 lexer test has no `XMLFault` conversion to the test's Err
+Core/Encoding/Xml.jet [full]	#3548	test drift: `attribute(…) ?? panic` is String, compared with `Val(…)`
+Core/Event/Event.jet [full]	#3549	`EventConfigError` has no `==`, so assert_eq on it is E0312
+Core/Files/Files.jet [full]	#3548	test drift (7 tests): `compiler_with_process_directory` is #Unsafe, `read` is `String IOError!` matched as `.Ok`, IOOperation and IOError have no `==`, TempDir/TempFile have no `expect`, `String.from_bytes` compared with `Val`; hidden runtime: files_stat_takes_the_read_fault and files_getmtime_takes_the_read_fault see no read fault
+Core/Http/Server.jet [full]	#3550	test drift: the route text "/a/{id}" interpolates `id`; it needs `{{id}}`
+Core/Math/Math.jet [full]	#3548	test drift: `.to_bits()` is no method of Float, F64 or a Decimal literal (E0311, E0102; Units uses the free `math.to_bits`) in 3 tests, and Float{9007199254740993} is E1003; ICE `ir.build unlowered` (#6530): precise builtins Point2.sub and Delta2.sub in Device and dynamic coordinates retain seed frame policy
+Core/Net/Url.jet [full]	#3549	test drift: the URL pattern hole `{path}` collides with the binding `path`, and URL{"data://example.test/a~/{payload}"} is an invalid literal
+Core/Process/Process.jet [full]	#3549	test drift: `pipe_line(…) ?? panic` is String, compared with `Val("")` and bare `None`
+Core/Sys/Sys.jet [full]	#6530	`assert_eq(x, Ok(…))` is E0404: `Ok(…)` takes no fallible expected type from assert_eq's other argument (2 tests); `EnvError` has no `==` (#3549)
+Core/Term/Term.jet [full]	#3549	test drift: the negative byte take returns `[U8]`, matched as `.Ok`/`.Err`
+Core/Time/Time.jet [full]	#3548	Clock's manual-time methods mutate their receiver, but the test binds the Clock with `:` (E0111) (2 tests); `Dyn` and `Dyn?` have no `==`, so `assert_eq` on decoded trees is E0312 (#6530); ICE `ir.build unlowered` (#6530): display of Shared<__ClockState> in Clock Show and Debug, an `.expect_fail` stop edge out of a #Transact block in Nonpositive sleeps
+Core/Ui/Host.jet [full]	#3551	test drift: UIShortcutModifiers{} lacks `bits`, and `x == .InvalidRequest(message)`/`== .Val(name)` bind no names
+Core/Ui/Host/Shortcuts.jet [full]	#3551	test drift: `core.ui.host.UIShortcutModifiers` is no type by that path, and `error == .InvalidRequest(message)` binds no name
+Core/Ui/Ui.jet [full]	#3551	`UIPreviewDevice` and `ui.UIPreviewDevice` are two types in the preview viewport test
+Core/Units/Units.jet [full]: Measurement Float kernels preserve retained arithmetic bits	#3548	runtime: `math.to_bits` is a signed Int, compared with the U64 13846317054350589952
+Core/Units/Units.jet [full]: Measurement source surface keeps observations and formatting	#3548	runtime: `show` of a tiny Measurement prints "1e-8 ± 0.0", not "0.00000001 ± 0"
+Core/Web/Browser.jet [full]	#6530	`assert_eq(x, Ok(…))` is E0404: `Ok(…)` takes no fallible expected type from assert_eq's other argument; hidden runtime (#3550): browser configuration helpers index 33 of a 32-item list
+Core/Web/Storage/Local.jet [full]	#3550	test drift: `core.web.storage.session.set` by full path is E1004 "not in this position", and the task loops collect no item (E0073)
+Core/Web/Storage/Session.jet [full]	#3550	test drift: `core.web.storage.local.set` by full path is E1004 "not in this position"

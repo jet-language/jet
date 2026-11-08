@@ -1498,10 +1498,11 @@ jet_cli_prepare_overlays: fn(anchor: String, entry: String, overlays: [JetCLIOve
 
 // The request that compiles `snapshot` against the Core sources of the
 // toolchain of `core_input` (the snapshot's entry when `None`);
-// `core_checked` as jet_cli_core_sources's `checked`. The organization's gate
+// `core_checked` as jet_cli_core_sources's `checked`; `core_tests` as
+// JetDriverCompileRequest.core_tests. The organization's gate
 // policy (`JET_ORG_UNSAFE_POLICY`) is its outermost policy rung; a configured
 // policy that can't be read is refused (E3109), never skipped.
-jet_cli_prepare_request: fn(snapshot: JetDriverAuthorizedSourceSnapshot, color: Bool, threads: Int?, mode: JetDriverCompileMode, core_checked: Bool, core_input: String?{None}) -> JetCLIPrepared {
+jet_cli_prepare_request: fn(snapshot: JetDriverAuthorizedSourceSnapshot, color: Bool, threads: Int?, mode: JetDriverCompileMode, core_checked: Bool, core_input: String?{None}, core_tests: String{""}) -> JetCLIPrepared {
     core_sources: if jet_cli_core_sources(core_input ?? snapshot.entry_path, core_checked) == {
         .Loaded(sources) -> sources
         .Missing(what, fix) -> { return jet_cli_prepare_refused(what, fix, color) }
@@ -1509,6 +1510,7 @@ jet_cli_prepare_request: fn(snapshot: JetDriverAuthorizedSourceSnapshot, color: 
     organization: pkg_load_organization_gate_policy() ? declarations -> declarations ! error -> return JetCLIPrepared.Refused{output: JetDriverVerbOutput{stdout: "", stderr: jet_driver_report_problems("", "", error.diagnostics, color, true), exit_code: JET_DRIVER_EXIT_USER_ERROR}}
     request := jet_cli_driver_request(snapshot, core_sources, threads, mode)
     request.organization_policy = organization
+    request.core_tests = core_tests
     JetCLIPrepared.Prepared{request: request.move(), snapshot: snapshot}
 }
 
@@ -1524,6 +1526,66 @@ jet_cli_core_check_source: fn() -> String Never! {
     }
     lines.push("\nmain: fn() {{}}\n")
     lines.join("")
+}
+
+// The Core row path of `file` when it is a source of the Core library of the
+// toolchain a compile there reads (jet_cli_toolchain_root), not a runtime
+// unit: `jet test Core/Encoding/Cbor.jet` runs that Core unit's #Tests
+// (jet_cli_core_test_source). A runtime unit's exact bytes are their own
+// entry (Loader.jet jet_driver_runtime_entry_row).
+jet_cli_core_test_path: fn(file: String) -[FS, Env]> String? Never! {
+    root: if jet_cli_toolchain_root(file) == {
+        .Found(found) -> cli_files.realpath(found) ?? return None
+        .Missing(_, _) -> return None
+    }
+    path: cli_files.realpath(file) ?? return None
+    prefix: "{root}/"
+    if !path.starts_with(prefix) -> return None
+    relative: path.removeprefix(prefix)
+    loop row in CORE_SOURCE_OWNED_ROWS {
+        if !row.runtime && row.path == relative -> return Val(row.path.copy())
+    }
+    None
+}
+
+// The entry of a `jet test` of the Core source at the row path `path`
+// (jet_cli_core_test_path): one import of the module that loads it, its
+// owner when it is a compiler-private part, under an alias no code names.
+jet_cli_core_test_source: fn(path: String) -> String Never! {
+    loop row in CORE_SOURCE_OWNED_ROWS {
+        if row.path == path -> return "use _core_test: {if row.owner != "" -> row.owner else -> row.module_name}\n"
+    }
+    ""
+}
+
+// The Core sources under `directory` that declare #Tests, when `directory`
+// is in the Core library of the toolchain a compile there reads:
+// `jet test Core/Encoding` runs `jet test <file>` for each. `names` are
+// their row paths, `files` the toolchain files, in row order.
+JetCLICoreTestFiles: struct {
+    names: [String]
+    files: [String]
+}
+
+jet_cli_core_test_files: fn(directory: String) -[FS, Env]> JetCLICoreTestFiles? Never! {
+    root: if jet_cli_toolchain_root(directory) == {
+        .Found(found) -> cli_files.realpath(found) ?? return None
+        .Missing(_, _) -> return None
+    }
+    path: cli_files.realpath(directory) ?? return None
+    if path != "{root}/Core" && !path.starts_with("{root}/Core/") -> return None
+    within: "{path.removeprefix("{root}/")}/"
+    found := JetCLICoreTestFiles{names: [String]{}, files: [String]{}}
+    loop row in CORE_SOURCE_OWNED_ROWS {
+        if !row.path.starts_with(within) || found.names.contains(row.path) -> next
+        file: jet_cli_authority_path(root, row.path)
+        source: cli_files.read(file) ?? next
+        if !source.starts_with("#Test(") && !source.contains("\n#Test(") -> next
+        found.names.push(row.path.copy())
+        found.files.push(file)
+    }
+    if found.names.len() == 0 -> return None
+    Val(found)
 }
 
 // Whether the entry at `entry_path` (or its overlay) is a script: its first

@@ -818,6 +818,14 @@ traps, each unrun check fails with E3015 rather than running against fresh
 state in the final reporter. Its
 captured output is shown under `--capture=all`, or for a failed run under the
 default `--capture=failed`; the exit is 0 when the harness passed, else 1.
+A source of the toolchain's Core library (`jet test Core/Encoding/Cbor.jet`)
+tests as the Core unit the compiler loads, with Core's privileges: its
+`__core_*` imports and `__` names resolve as in any Core compile, and only its
+own #Tests run; a runtime unit tests as itself. `jet test` of a directory of
+the Core library (`jet test Core/Encoding`) runs `jet test <file>` for each
+Core source under it that declares #Tests, as a workspace runs its members.
+`jet test Compiler --profile core` runs every Core #Test at optimize none,
+basic and full.
 Each test setting (D-TEST-INVOKE1=A, the `JET_TEST_SETTINGS` table in
 `Compiler/JetFoundation/Source/Registry/TestSettings.jet`) has three
 spellings from one row: the flag `--shard=3/8`, the TestProfile field

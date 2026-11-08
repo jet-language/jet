@@ -3726,8 +3726,10 @@ JetDriverParseJob: enum {
     // A Compiler/Prelude source checked as the compiler embeds it
     // (`jet check --prelude`).
     Prelude(text: String)
-    // An embedded Core module; runtime units retain every function.
-    Core(text: String, module_name: String, owned_members: [String], runtime: Bool)
+    // An embedded Core module; runtime units retain every function. A
+    // `tested` unit is the Core source a `jet test` of that file runs
+    // (JetDriverCompileRequest.core_tests): it keeps its #Test controls.
+    Core(text: String, module_name: String, owned_members: [String], runtime: Bool, tested: Bool)
     // A Core unit whose row is out of range: an empty program.
     Missing
 }
@@ -3768,7 +3770,7 @@ jet_driver_parse_job: fn(request: JetDriverCompileRequest, unit: JetDriverSource
     }
     if unit.file_index < 0 || unit.file_index >= request.core_sources.len() -> return JetDriverParseJob.Missing
     row: request.core_sources[unit.file_index]
-    JetDriverParseJob.Core{text: row.source(), module_name: row.module_name, owned_members: row.owned_members, runtime: row.runtime}
+    JetDriverParseJob.Core{text: row.source(), module_name: row.module_name, owned_members: row.owned_members, runtime: row.runtime, tested: request.core_tests != "" && row.path == request.core_tests}
 }
 
 jet_driver_parse_job_bytes: fn(job: JetDriverParseJob) -> Int Never! {
@@ -3776,7 +3778,7 @@ jet_driver_parse_job_bytes: fn(job: JetDriverParseJob) -> Int Never! {
         .Source(text) -> text.len()
         .RuntimeEntry(text) -> text.len()
         .Prelude(text) -> text.len()
-        .Core(text, _, _, _) -> text.len()
+        .Core(text, _, _, _, _) -> text.len()
         .Missing -> 0
     }
 }
@@ -3789,7 +3791,7 @@ jet_driver_parse_one: fn(job: JetDriverParseJob, threads: CompilerThreads) -> Je
         .Source(text) -> jet_driver_parse_user_unit_threads(text, true, threads)
         .RuntimeEntry(text) -> jet_driver_parse_core_source(text, "", [String]{}, true, true, threads)
         .Prelude(text) -> jet_driver_parse_prelude_source(text, threads)
-        .Core(text, module_name, owned_members, runtime) -> jet_driver_parse_core_source(text, module_name, owned_members, runtime, false, threads)
+        .Core(text, module_name, owned_members, runtime, tested) -> jet_driver_parse_core_source(text, module_name, owned_members, runtime, tested, threads)
         .Missing -> JetDriverParsedUnit{parsed: ParseResult{program: ast_program(), diagnostics: [Diagnostic]{}}, demand: jet_driver_empty_core_identifier_demand()}
     }
 }
@@ -3797,8 +3799,10 @@ jet_driver_parse_one: fn(job: JetDriverParseJob, threads: CompilerThreads) -> Je
 // Parse one embedded Core module. Source metadata selects the public members
 // that have crossed the Core cutover: private helpers and declarations stay,
 // but a public function outside `owned_members` is dropped so its calls keep
-// the compiler-owned route. Parser lints never reach user output.
-jet_driver_parse_core_source: fn(text: String, module_name: String, owned_members: [String], runtime: Bool, runtime_entry: Bool, threads: CompilerThreads) -> JetDriverParsedUnit {
+// the compiler-owned route. Parser lints never reach user output. An `entry`
+// is the unit a `jet test` runs (an exact runtime entry, or the tested Core
+// source): it keeps its `#Test` controls and is reached whole.
+jet_driver_parse_core_source: fn(text: String, module_name: String, owned_members: [String], runtime: Bool, entry: Bool, threads: CompilerThreads) -> JetDriverParsedUnit {
     source := text.bytes()
     carrier: jet_driver_inline_package_threads(text, source, threads)
     if carrier.found -> jet_driver_blank_bytes(source, carrier.start, carrier.end)
@@ -3806,27 +3810,28 @@ jet_driver_parse_core_source: fn(text: String, module_name: String, owned_member
     tokens: lexed.lexed.tokens.len()
     lines: lexed.line_starts.len() - 1
     comments: jet_driver_comment_spans(lexed.lexed.tokens)
-    scanned := jet_driver_collect_core_identifier_demand_threads(lexed.lexed.move(), lexed.runs, true, runtime_entry, threads)
+    scanned := jet_driver_collect_core_identifier_demand_threads(lexed.lexed.move(), lexed.runs, true, entry, threads)
     demand := scanned.demand.move()
     parsed := parse_lexed_with_source_threads(scanned.lexed.move(), source, lexed.line_starts, lexed.runs, threads)
     kept := [Item]{}
     loop item in parsed.program.items {
         if item == {
-            // A runtime unit keeps every item; its `#Test` controls run only
-            // when the unit itself is the entry (`jet_driver_runtime_entry_row`).
+            // A runtime unit keeps every item; `#Test` controls run only
+            // when the unit is the entry a `jet test` runs.
             .Func(value) -> {
                 if !runtime && core_module_has_member(module_name, value.name) && !owned_members.contains(value.name) -> next
             }
             .Test(_) -> {
-                if !runtime_entry -> next
+                if !entry -> next
             }
             else -> {}
         }
         kept.push(item)
     }
     // A lazy declaration of a public module or private part counts once the
-    // program reaches it; a runtime unit is reached whole (CoreReach.jet).
-    words: jet_driver_unit_words(source, comments, kept, !runtime && !runtime_entry, if module_name.starts_with("__") -> owned_members else -> [String]{})
+    // program reaches it; a runtime unit or an entry is reached whole
+    // (CoreReach.jet).
+    words: jet_driver_unit_words(source, comments, kept, !runtime && !entry, if module_name.starts_with("__") -> owned_members else -> [String]{})
     parsed.program.items = kept
     diagnostics := [Diagnostic]{}
     loop diagnostic in parsed.diagnostics {
@@ -4258,7 +4263,7 @@ jet_driver_parse_wave: fn(request: JetDriverCompileRequest, source_units: [JetDr
                     user_source_units += 1
                     user_job = true
                 }
-                .Core(text, _, _, _) -> {
+                .Core(text, _, _, _, _) -> {
                     core_input_bytes += text.count_bytes()
                     core_source_units += 1
                 }
@@ -4942,7 +4947,12 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
                     } else if is_core {
                         target_index = jet_driver_core_part_unit(source_units, queued, generated_records, request.core_sources, name)
                         if target_index == None {
+                            // A name no cataloged part has and no module
+                            // beside the importer holds is E1001, so `jet
+                            // check` and `jet run` stop on it alike (#6530).
+                            diagnostics_before: diagnostics.len()
                             target_index = jet_driver_find_module_import_target(unit, name, scoped.declaration.inline_version, catalog.packages, source_units, source_index_result.index, span, diagnostics)
+                            if target_index == None && diagnostics.len() == diagnostics_before -> diagnostics.push(jet_driver_unknown_core_module(name, span, "use"))
                         }
                     } else {
                         target_index = jet_driver_find_module_import_target(

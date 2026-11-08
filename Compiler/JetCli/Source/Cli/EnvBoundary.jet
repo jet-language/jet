@@ -110,7 +110,8 @@ jet_cli_environment_active: fn(root: String, preset: String?, environment: Strin
 
 // The first import in the program graph from
 // `start` that needs the environment. A directory target reads every
-// package source; a file follows its local imports.
+// package source, or outside a package the sources under it; a file follows
+// its local imports.
 jet_cli_project_package_import: fn(start: String, environment_root: String) -[FS, Env]> String? Never! {
     directory: cli_files.is_dir(start)
     search: if directory -> start else -> jet_cli_parent(start) ?? "."
@@ -134,7 +135,9 @@ jet_cli_project_package_import: fn(start: String, environment_root: String) -[FS
             }
         }
     }
-    canonical_root: cli_files.realpath(project_root) ?? project_root
+    // Outside a package, a directory target's programs are the sources under
+    // it, never the environment root's others.
+    canonical_root: if directory && allow_inline -> cli_files.realpath(start) ?? start else -> cli_files.realpath(project_root) ?? project_root
     sources := [JetDriverAuthorizedSourceFile]{}
     _ := jet_cli_discover_sources(canonical_root, sources)
     pending := [String]{}

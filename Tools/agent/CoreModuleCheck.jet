@@ -3,15 +3,16 @@
 // alone. A whole-program build only checks the Core items its callers reach, so
 // a module whose own source no longer checks stays hidden until some program
 // imports it. This sweep checks each `module … exports` row of
-// Compiler/Prelude/Core.jet in its own one-import probe and reports every
-// failing module, not the first one.
+// Compiler/Prelude/Core.jet in its own one-import probe, then every Core body,
+// called or not, as `jet check Core` (the row EVERY_BODY), and reports every
+// failing row, not the first one.
 //
 // JET=/path/to/jet jet Tools/agent/CoreModuleCheck.jet [--check|--write] [--jobs N] [--only a,b] [--scratch DIR]
-// --check fails when a module outside the ratchet fails, or a ratcheted module
-// reports more errors than its ceiling. A ratcheted module that now checks
+// --check fails when a row outside the ratchet fails, or a ratcheted row
+// reports more errors than its ceiling. A ratcheted row that now checks
 // cleanly or with fewer errors also fails --check until --write lowers it.
 // --write initializes or lowers the committed ceilings; it never raises one.
-// --only checks the named modules and gates only them.
+// --only checks the named modules and gates only them, without EVERY_BODY.
 use {
     files: core.files
     json: core.encoding.json
@@ -26,6 +27,9 @@ TOOL: "/Tools/agent/CoreModuleCheck.jet"
 RATCHET: "Tools/agent/core-module-check-ratchet.json"
 MAX_JOBS: 8
 CHECK_TIMEOUT_MS: 300000
+// The ratchet row of `jet check Core`: every body of every public Core
+// module and private part.
+EVERY_BODY: "jet check Core"
 
 #Error
 CheckError: struct {
@@ -217,23 +221,36 @@ ceilings_text: fn(ceilings: [Ceiling]) -> String Never! {
     "{{\n{rows.join(",\n")}\n}}\n"
 }
 
-sweep: fn(jet: String, root: String, modules: [String], jobs: Int, scratch: String) -[Env, Exec, FS, Time.Wait]> [Summary] CheckError! {
+// The probe of each of `modules`, then EVERY_BODY when `every`, at most
+// `jobs` at once; one Summary per row, in that order.
+sweep: fn(jet: String, root: String, modules: [String], every: Bool, jobs: Int, scratch: String) -[Env, Exec, FS, Time.Wait]> [Summary] CheckError! {
     specs := [ProcessSpec]{}
+    names := [String]{}
     loop name in modules {
         file: "{scratch}/{name.replace(".", "_")}.jet"
         files.write(file, probe_source(name)) ?? return Err(problem("`{file}` cannot be written: {err}"))
-        specs.push(process.cmd([String]{jet, "check", file}).cwd(scratch).env("NO_COLOR", "1").env("JET_TOOLCHAIN_ROOT", root)
-            .timeout(time.duration_ms(CHECK_TIMEOUT_MS)).output_limit(4194304))
+        specs.push(check_spec(jet, root, file, scratch))
+        names.push(name.copy())
+    }
+    if every {
+        specs.push(check_spec(jet, root, "{root}/Core", scratch))
+        names.push(EVERY_BODY)
     }
     ran: process.run_all(specs, jobs) ?? return Err(problem("the probes cannot run: {err}"))
     results := [Summary]{}
-    loop at in 0..<modules.len() {
+    loop at in 0..<names.len() {
         results.push(if ran[at] == {
-            .Ok(receipt) -> check_summary(modules[at], "{receipt.output}{receipt.errors}", if receipt.signal != None || receipt.timed_out -> 128 else -> receipt.code)
-            .Err(failure) -> check_summary(modules[at], "spawn failed: {failure}", 127)
+            .Ok(receipt) -> check_summary(names[at], "{receipt.output}{receipt.errors}", if receipt.signal != None || receipt.timed_out -> 128 else -> receipt.code)
+            .Err(failure) -> check_summary(names[at], "spawn failed: {failure}", 127)
         })
     }
     results
+}
+
+// `jet check <target>` against the checkout `root`'s Core.
+check_spec: fn(jet: String, root: String, target: String, scratch: String) -> ProcessSpec Never! {
+    process.cmd([String]{jet, "check", target}).cwd(scratch).env("NO_COLOR", "1").env("JET_TOOLCHAIN_ROOT", root)
+        .timeout(time.duration_ms(CHECK_TIMEOUT_MS)).output_limit(4194304)
 }
 
 main: fn(args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Int CheckError! {
@@ -257,7 +274,7 @@ main: fn(args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Int CheckError! 
     files.create_dir_all(scratch) ?? return Err(problem("`{scratch}` cannot be created: {err}"))
     results := [Summary]{}
     failure := ""
-    if sweep(jet, root, modules, jobs, scratch) == {
+    if sweep(jet, root, modules, option(args, "--only") == None, jobs, scratch) == {
         .Ok(found) -> { results = found }
         .Err(problem_found) -> { failure = problem_found.message.copy() }
     }
@@ -265,7 +282,7 @@ main: fn(args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Int CheckError! 
     if failure != "" -> return Err(problem(failure))
     failing: results.filter(result -> result.errors > 0)
     loop result in failing -> print("{result.name}: {result.errors} errors; {result.first}")
-    print("core modules: {results.len()} checked, {results.len() - failing.len()} clean, {failing.len()} failing")
+    print("core modules: {results.len()} checked, {results.len() - failing.len()} clean, {failing.len()} failing{if option(args, "--only") == None -> " (with {EVERY_BODY})" else -> ""}")
     if write {
         lowered: lowered_ceilings(committed, results)
         if lowered.rises.len() > 0 {

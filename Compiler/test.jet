@@ -1,6 +1,6 @@
 // The compiler workspace's code suites, run by the test
-// profiles of package.jet: `jet test Compiler --profile packages`, `selfhost`
-// or `perf`. Each runs in its own child, where JET names the jet under test,
+// profiles of package.jet: `jet test Compiler --profile packages`, `core`,
+// `selfhost` or `perf`. Each runs in its own child, where JET names the jet under test,
 // JET_COMPILER_IDENTITY its identity (that jet sets it when the caller didn't)
 // and JET_TEST_SUITE_ROOT this package's directory; the checkout is its
 // parent. A row is one check; the profile compares the rows with
@@ -72,6 +72,7 @@ PERF_COLUMN: "225K"
 
 test: fn(t: Test) -> Int {
     t.suite("packages", package_suite_rows)
+    t.suite("core", core_rows)
     t.suite("selfhost", selfhost_rows)
     t.suite("perf", perf_rows)
     t.run()
@@ -597,6 +598,53 @@ test_names: fn(text: String) -> [String] {
         if end >= 0 -> names.push(rest.slice(0, end).copy())
     }
     names
+}
+
+// ---------------------------------------------------------------------------
+// core: one row per Core #Test at each CORE_LEVELS level, `<file> [<level>]:
+// <test>`, from `jet test <file> --optimize=<level>` for every Core source that
+// declares #Tests. A Core source tests as the Core unit the compiler loads,
+// with Core's privileges; a file whose tests didn't run is the failing row
+// `<file> [<level>]`. CORE_LEVELS copies the `optimize` row's values in
+// JetFoundation/Source/Registry/BuildOptions.jet, which a script can't
+// import; tests/guards/closed_lists.jet fails when the two differ.
+CORE_LEVELS: [String]{"none", "basic", "full"}
+
+core_rows: fn(rows: TestRows) {
+    setup: suite_setup(rows) ?? return
+    paths := [String]{}
+    jet_sources(setup.checkout, "Core", paths) ?? {
+        rows.fail("Core", err.message)
+        return
+    }
+    paths.sort()
+    tested := [String]{}
+    loop path in paths {
+        text: files.read(files.join(setup.checkout, path)) ?? {
+            rows.fail(path, "couldn't read `{path}`: {err}")
+            next
+        }
+        if test_names(text).len() > 0 -> tested.push(path.copy())
+    }
+    runs := [(path: String, level: String)]{}
+    specs := [ProcessSpec]{}
+    loop level in CORE_LEVELS {
+        loop path in tested {
+            runs.push((path: path.copy(), level: level.copy()))
+            specs.push(jet_command(setup, setup.jet, [String]{"test", path, "--optimize={level}"}))
+        }
+    }
+    results: process.run_all(specs, package_jobs()) ?? {
+        rows.fail("core", "couldn't start the Core runs: {err}")
+        return
+    }
+    loop (index, run) in runs {
+        id: "{run.path} [{run.level}]"
+        if results[index] == {
+            .Ok(receipt) -> { _ := package_rows(rows, id, receipt) }
+            .Err(error) -> rows.fail(id, "couldn't run `jet test {run.path} --optimize={run.level}`: {error}")
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

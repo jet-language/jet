@@ -270,6 +270,13 @@ JetDriverCompileRequest: struct {
     // `jet check Core`: every declaration of each loaded Core module loads
     // and every Core body is checked, called or not, as under JET_KEEP_GOING.
     every_core_body: Bool{false}
+    // `jet test` of a Core source: the Core row path (`Core/Encoding/Cbor.jet`)
+    // whose unit keeps its #Test controls (Loader.jet JetDriverParseJob.Core)
+    // and whose tests the run collects (Pipeline.jet jet_driver_test_modules),
+    // with Core's privileges. Every declaration of each loaded Core module
+    // loads, as under `every_core_body`, so a private part loads with its
+    // owner. "": none.
+    core_tests: String{""}
     // Selection is separate from compilation/lowering mode: checking validates
     // all links/defaults; running selects one address; testing selects Checks.
     output_intent: SemaOutputIntent{SemaOutputIntent.Check}

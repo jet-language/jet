@@ -2731,10 +2731,18 @@ jet_driver_runnable_test_count: fn(graph: SemaRegistrationGraph) -> Int Never! {
 // Checked named tests and selected Check Outputs share the canonical Test
 // harness, in declaration order. Coverage remains a separate request route.
 // The modules whose tests a test run collects: the entry, plus every member file of the
-// entry's package namespace (a package's tests are all of its #Tests).
-jet_driver_test_modules: fn(load: JetDriverLoadResult) -> [String:Bool] Never! {
+// entry's package namespace (a package's tests are all of its #Tests), or, for
+// a `jet test` of a Core source, the Core unit at the row path `core_tests`.
+jet_driver_test_modules: fn(load: JetDriverLoadResult, core_tests: String) -> [String:Bool] Never! {
     members := [String:Bool]{}
     members[load.entry_module_identity] = true
+    if core_tests != "" {
+        loop loaded in load.modules {
+            unit: load.source_units[loaded.source_unit_index]
+            if jet_driver_unit_is_core(unit) && unit.relative_path == core_tests -> members[loaded.module_identity] = true
+        }
+        return members
+    }
     namespace := ""
     package := ""
     loop loaded in load.modules {
@@ -3491,8 +3499,9 @@ jet_driver_compile_stages: fn(request: JetDriverCompileRequest, kg: &JetDriverKe
     // return abandons is closed by the next enclosing end the host records.
     if request.trace_sink == .Val(sink) -> sink.begin("load", "", -1, -1)
     // JET_KEEP_GOING and `jet check Core` load every declaration of each
-    // loaded Core module, so they check the Core bodies no program calls too.
-    load := jet_driver_load_reach(request, !kg.enabled && !request.every_core_body)
+    // loaded Core module, so they check the Core bodies no program calls too;
+    // so does a `jet test` of a Core source, so its unit loads with its owner.
+    load := jet_driver_load_reach(request, !kg.enabled && !request.every_core_body && request.core_tests == "")
     if request.trace_sink == .Val(sink) -> sink.end("load", load.modules.len())
     result := jet_driver_compile_loaded_stages(request, kg, load, checked_projection, capture)
     // The compile is over: no comptime child may outlive it (Native.jet).
@@ -4150,10 +4159,20 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     command_record: sema_cli_command_record(registration_graph)
     budget_spans: jet_driver_effect_budget_name_spans(load, registration_graph)
     // A user module only compile-time code uses is left out like an
-    // unreached Core module; a Test compile keeps every module's bodies.
+    // unreached Core module; a Test compile keeps every module's bodies, and
+    // the Core unit a `jet test` of a Core source runs is rooted whole, as an
+    // entry is, so its #Test bodies lower.
     prunable_modules := jet_driver_prunable_core_modules(load, request.core_sources, runtime_semantic_modules)
     if request.mode != JetDriverCompileMode.Test {
         loop identity in registration_graph.comptime_only_modules -> prunable_modules.push(identity)
+    }
+    if request.core_tests != "" {
+        tested: jet_driver_test_modules(load, request.core_tests)
+        kept := [String]{}
+        loop identity in prunable_modules {
+            if tested.get(identity) == None -> kept.push(identity)
+        }
+        prunable_modules = kept
     }
     decls := registration_graph.decls.move()
     registration_graph.decls = DeclTable{}
@@ -4186,7 +4205,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     tests := [TTestFact]{}
     output_checks := [TOutputCheckFact]{}
     if request.mode == JetDriverCompileMode.Test {
-        jet_driver_test_plan(jet_driver_test_modules(load), checked_graph, sema_functions, tests, output_checks, entry_diagnostics)
+        jet_driver_test_plan(jet_driver_test_modules(load, request.core_tests), checked_graph, sema_functions, tests, output_checks, entry_diagnostics)
     } else if request.mode == JetDriverCompileMode.Eval || request.mode == JetDriverCompileMode.RootRun {
         // An evaluation runs the entry module's selected function, never
         // the package's executable entry.

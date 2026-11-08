@@ -30,8 +30,9 @@
 // A Core source is checked as Core, the library that may define `__` names:
 // a public module or a private part (its CoreSourceOwned.jet row) as the
 // one-import probe of its module that Tools/agent/CoreModuleCheck.jet uses,
-// with this checkout as the toolchain root; a runtime unit as itself, which
-// the compiler admits as that Core row. A Core path with no row fails.
+// then as `jet check Core` (every Core body, called or not), with this
+// checkout as the toolchain root; a runtime unit as itself, which the
+// compiler admits as that Core row. A Core path with no row fails.
 // Every mode first runs the personal-information guard (#6564 c5),
 // Jetpack/Bootstrap/Assemble.jet's check mode, which refuses an unlisted Jetpack source
 // or a drifted compiler slice, the unsafe-region ratchet in --check mode
@@ -502,7 +503,10 @@ core_probe_source: fn(name: String) -> String Never! {
 }
 
 // `relative` (a Core source) checked as the compiler loads Core: from this
-// checkout (run_check's JET_TOOLCHAIN_ROOT), with Core's privileges.
+// checkout (run_check's JET_TOOLCHAIN_ROOT), with Core's privileges. A public
+// module or a private part checks as its module's one-import probe, which
+// checks the bodies a program importing it alone reaches, then as `jet check
+// Core`, which checks every Core body, called or not.
 core_check: fn(repo: String, jet: String, relative: String, target: String, scratch: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Ran Never! {
     registry: files.read("{repo}/{CORE_ROWS}") ?? return Ran{code: 1, text: "lane-check: cannot read {CORE_ROWS}: {err}\n"}
     row: core_row(registry, relative) ?? return Ran{code: 1, text: "lane-check: {relative} has no Core source row in {CORE_ROWS}; run jet Tools/agent/CoreSourceRows.jet\n"}
@@ -511,8 +515,10 @@ core_check: fn(repo: String, jet: String, relative: String, target: String, scra
     files.create_dir_all(dir) ?? return Ran{code: 1, text: "lane-check: cannot create {dir}: {err}\n"}
     probe: "{dir}/probe.jet"
     files.write(probe, core_probe_source(row.probe_module)) ?? return Ran{code: 1, text: "lane-check: cannot write {probe}: {err}\n"}
-    term.eprint("lane-check: {relative} checks as Core module {row.probe_module}: {probe}")
-    run_check(repo, jet, [String]{"check", probe}, scratch)
+    term.eprint("lane-check: {relative} checks as Core module {row.probe_module}: {probe}, then as `jet check Core`")
+    alone: run_check(repo, jet, [String]{"check", probe}, scratch)
+    every: run_check(repo, jet, [String]{"check", "{repo}/Core"}, scratch)
+    Ran{code: if alone.code != 0 -> alone.code else -> every.code, text: "{alone.text}{every.text}"}
 }
 
 // --- assembled runtime ------------------------------------------------------
