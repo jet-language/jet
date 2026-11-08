@@ -27,12 +27,12 @@ static void observe_alloc(H a, H bytes, H align) {if(tracking){assert(a&&bytes>0
 static void observe_free(H a,H bytes,H align){if(tracking){for(size_t i=allocations;i>0;--i)if(ledger[i-1].address==a&&ledger[i-1].live){assert(ledger[i-1].bytes==bytes&&ledger[i-1].align==align);ledger[i-1].live=false;++frees;return;}assert(!"untracked/static/double free");}}
 static H h(const void *p){return (H)(uintptr_t)p;}
 static void balanced(void){assert(allocations==frees);for(size_t i=0;i<allocations;++i)assert(!ledger[i].live);allocations=frees=0;}
-/* Producers consume heap texts: one counted block at t-8 plus the byte buffer. */
+/* Producers consume heap texts: one counted block at t-8, plus a separate byte buffer past 64 bytes. */
 static H owned(const void *bytes,size_t n){return h(jet_rt_string_from_static(bytes,(H)n));}
 /* Heap text is [count][data,len,cap,cache]; the owner count is the word before. */
 static int64_t owners(Text *t){return *(int64_t *)((char *)t-8)&INT64_C(0x3fffffffffffffff);}
-/* A runtime static text (cap 0, data not the empty sentinel 1) is immortal: shared, never counted. */
-static bool counted(Text *t){return t->cap||t->data==(unsigned char *)(uintptr_t)1;}
+/* A runtime static text (cap 0) is immortal: shared, never counted. A heap text's cap is never 0. */
+static bool counted(Text *t){return t->cap!=0;}
 /* An owned copy of t whose first byte differs: clones share t's bytes, so a
  * differing field is a different text, never a write through a shared one. */
 static Text *flipped(Text *t){char raw[64];assert(t->len>0&&t->len<=64);memcpy(raw,t->data,(size_t)t->len);raw[0]^=1;return jet_rt_string_from_static(raw,(H)t->len);}

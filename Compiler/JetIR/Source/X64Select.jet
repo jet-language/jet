@@ -1313,11 +1313,11 @@ ir_x64_string_clone: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64A
 
 // jet_rt_string_drop(slot) inline: a header with a buffer and a count above
 // 1 loses one owner by one `lock dec` (a plain dec in a single-thread
-// program, IRModule.single_thread); a null header is left alone. The
-// last owner (a count of 1) and a header without a buffer call the routine,
-// which frees or leaves a static text. A `lock dec` that reaches zero
-// because another owner dropped meanwhile takes the count back to 1 (no
-// other owner is left to see it) and calls the routine too.
+// program, IRModule.single_thread); a null header and a static text (a
+// capacity word of 0, which no heap text has) are left alone. The last owner
+// (a count of 1) calls the routine, which frees the text. A `lock dec` that
+// reaches zero because another owner dropped meanwhile takes the count back
+// to 1 (no other owner is left to see it) and calls the routine too.
 ir_x64_string_drop: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, slot: Int) Never! {
     sites := [Int]{}
     done := [Int]{}
@@ -1326,7 +1326,7 @@ ir_x64_string_drop: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Al
     done.push(x64_jcc_rel32(e.code, X64Cond.E))
     x64_load(e.code, X64_RCX, reg, 16)
     x64_test_rr(e.code, X64_RCX, X64_RCX)
-    sites.push(x64_jcc_rel32(e.code, X64Cond.E))
+    done.push(x64_jcc_rel32(e.code, X64Cond.E))
     x64_load(e.code, X64_RCX, reg, -8)
     x64_alu_ri(e.code, X64Alu.Cmp, X64_RCX, 1)
     sites.push(x64_jcc_rel32(e.code, X64Cond.LE))

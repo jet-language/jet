@@ -61,14 +61,15 @@ static void observe_free(void *ptr,int64_t size,int64_t align) {
         break;
     }
 }
-// Heap text is [count][data,len,cap,cache]: a 40-byte block at text-8 whose
-// first word is the owner count, plus the byte buffer when cap > 0.
+// Heap text is [count][data,len,cap,cache][64 inline bytes]: a 104-byte block
+// at text-8 whose first word is the owner count, plus a separate byte buffer
+// when data is not the inline bytes.
 static int64_t owners(Text *t) { return *(int64_t *)((char *)t-8)&INT64_C(0x3fffffffffffffff); }
 static Text *heap(const void *bytes,int64_t len) { return jet_rt_string_from_static(bytes,len); }
 static void text_watch(Text *value) {
     assert(value && value->len>=0 && value->cap>=value->len);
-    watch((char *)value-8,40,8);
-    if(value->cap) watch(value->data,value->cap,1);
+    watch((char *)value-8,104,8);
+    if((const char *)value->data!=(const char *)value+32) watch(value->data,value->cap,1);
 }
 static void outcome_watch(TaskOutcome *value) {
     assert(value);

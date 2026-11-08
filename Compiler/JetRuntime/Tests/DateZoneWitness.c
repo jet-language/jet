@@ -57,11 +57,11 @@ static void done(void) { assert(intercepted); for(size_t i=0;i<count;++i) assert
 // Every watched block is freed exactly once except a still-owned text, which is untouched.
 static void done_except(Text *t) {
     assert(intercepted);
-    for(size_t i=0;i<count;++i) assert(watched[i].frees==((watched[i].p==(char *)(t)-8 || (t->capacity && watched[i].p==t->data)) ? 0u : 1u));
+    for(size_t i=0;i<count;++i) assert(watched[i].frees==((watched[i].p==(char *)(t)-8 || ((const char *)t->data!=(const char *)t+32 && watched[i].p==t->data)) ? 0u : 1u));
     count=0;
 }
 static int64_t owners(Text *t) { return *(int64_t *)((char *)t-8) & 0x3fffffffffffffff; }
-static void watch_text(Text *t) { watch((char *)(t)-8,40,8); if(t->capacity) watch(t->data,t->capacity,1); }
+static void watch_text(Text *t) { watch((char *)(t)-8,104,8); if((const char *)t->data!=(const char *)t+32) watch(t->data,t->capacity,1); }
 static void watch_rows(Rows *r) { watch(r,24,8); if(r->capacity) watch(r->data,r->capacity*16,8); }
 // A zone owns its record and rows; its name is freed only by the last owner.
 static void watch_zone(Zone *z,bool name) { watch(z,24,8); if(name) watch_text(z->name); watch_rows(z->transitions); watch_rows(z->infos); }

@@ -71,7 +71,7 @@ static void watch(void *p,int64_t bytes,int64_t align) {
     for(size_t i=0;i<count;++i) if(watched[i].p==p) { assert(!watched[i].frees && bytes==watched[i].bytes && align==watched[i].align); return; }
     watched[count].p=p; watched[count].bytes=bytes; watched[count].align=align; watched[count++].frees=0;
 }
-static void watch_text(Text *t) { if(t) { watch((char *)(t)-8,40,8); if(t->capacity) watch(t->data,t->capacity,1); } }
+static void watch_text(Text *t) { if(t) { watch((char *)(t)-8,104,8); if((const char *)t->data!=(const char *)t+32) watch(t->data,t->capacity,1); } }
 // Heap text is [count][data,len,cap,cache]; the owner count is the word before.
 static int64_t owners(Text *t) { return *(int64_t *)((char *)t-8)&INT64_C(0x3fffffffffffffff); }
 // An owned copy of t whose first byte differs: clones share t's bytes, so a

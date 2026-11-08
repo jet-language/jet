@@ -77,7 +77,7 @@ static void watch(void *p,int64_t bytes,int64_t align) {
     watched[watched_count].pointer=p; watched[watched_count].bytes=bytes; watched[watched_count].align=align; watched[watched_count++].frees=0;
 }
 static int64_t owners(Text *t) { return *(int64_t *)((char *)t-8) & 0x3fffffffffffffff; }
-static void watch_text(Text *t) { watch((char *)(t)-8,40,8); if(t->capacity) watch(t->data,t->capacity,1); }
+static void watch_text(Text *t) { watch((char *)(t)-8,104,8); if((const char *)t->data!=(const char *)t+32) watch(t->data,t->capacity,1); }
 static void watch_detail(Detail *d) { watch(d,48,8); watch_text(d->operation); if(d->address) watch_text(d->address); if(d->name) watch_text(d->name); watch_text(d->message); }
 static void watch_error(Error *e) { watch(e,16,8); if(e->tag==11) { DNS *d=e->payload; watch(d,16,8); watch_text(d->text); } else watch_detail(e->payload); }
 static Text *text(const char *s) { return jet_rt_string_from_static(s,(int64_t)strlen(s)); }

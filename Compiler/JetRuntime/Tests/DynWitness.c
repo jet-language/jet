@@ -89,8 +89,8 @@ static void watch(void *pointer, int64_t size, int64_t align) {
 // Heap text is [count][data,len,cap,cache]; the owner count is the word before.
 static int64_t owners(Text *text) { return *(int64_t *)((char *)text - 8) & INT64_C(0x3fffffffffffffff); }
 static void watch_text(Text *text) {
-    watch((char *)(text)-8,40,8);
-    if (text->capacity) watch(text->data, text->capacity, 1);
+    watch((char *)(text)-8,104,8);
+    if((const char *)text->data!=(const char *)text+32) watch(text->data, text->capacity, 1);
 }
 static void watch_tree(Tree *tree) {
     watch(tree, 16, 8);

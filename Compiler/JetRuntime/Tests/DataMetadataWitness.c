@@ -57,7 +57,7 @@ static void observe_free(void *ptr,int64_t size,int64_t align) {
 // Texts are shared by refcount, so a carrier and its clone can name the same
 // text block; each block is watched once and must be freed exactly once.
 static void watch(void *p,int64_t n,int64_t a){for(size_t i=0;i<count;i++)if(watched[i].ptr==p){assert(watched[i].size==n && watched[i].align==a);return;}assert(count<128);watched[count].ptr=p;watched[count].size=n;watched[count].align=a;watched[count++].frees=0;}
-static void watch_text(Text *t){watch((char *)(t)-8,40,8);if(t->cap)watch(t->data,t->cap,1);}
+static void watch_text(Text *t){watch((char *)(t)-8,104,8);if((const char *)t->data!=(const char *)t+32)watch(t->data,t->cap,1);}
 static void watch_authority(Authority *a){watch(a,16,8);watch_text(a->scope);watch_text(a->revision);}
 static void watch_source_shell(Source *s){watch(s,32,8);watch(s->parameters,24,8);if(s->parameters->cap)watch(s->parameters->data,s->parameters->cap*8,8);}
 static void watch_source(Source *s){watch_source_shell(s);watch_text(s->locator);watch_text(s->member);for(int64_t i=0;i<s->parameters->len;i++)watch_text(s->parameters->data[i]);}

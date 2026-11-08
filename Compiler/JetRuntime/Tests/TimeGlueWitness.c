@@ -66,8 +66,8 @@ static void watch(void *p,int64_t bytes,int64_t align) {
     assert(p && count<16); for(size_t i=0;i<count;++i) assert(watched[i].pointer!=p);
     watched[count].pointer=p; watched[count].bytes=bytes; watched[count].align=align; watched[count++].frees=0;
 }
-// A text is one 40-byte block: its owner word, then the 32-byte body the pointer names.
-static void watch_text(Text *t) { watch((char *)(t)-8,40,8); if(t->capacity) watch(t->data,t->capacity,1); }
+// A text is one 104-byte block: its owner word, the 32-byte body the pointer names and 64 inline bytes, plus a separate buffer past them.
+static void watch_text(Text *t) { watch((char *)(t)-8,104,8); if((const char *)t->data!=(const char *)t+32) watch(t->data,t->capacity,1); }
 static void done(void) { assert(intercepted>0); for(size_t i=0;i<count;++i) assert(watched[i].frees==1); count=0; }
 static void text_is(Text *t,const char *s) { assert(t->length==(int64_t)strlen(s)); assert(memcmp(t->data,s,(size_t)t->length)==0); }
 static void golden(Text *a,Text *b,Text *c,const char *s) {

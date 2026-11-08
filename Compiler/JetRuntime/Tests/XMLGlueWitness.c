@@ -74,11 +74,11 @@ static void watch(void *p,int64_t bytes,int64_t align) {
     watched[count].pointer=p; watched[count].bytes=bytes;
     watched[count].align=align; watched[count++].frees=0;
 }
-static void watch_text(Text *t) { watch((char *)(t)-8,40,8); if(t->capacity) watch(t->data,t->capacity,1); }
+static void watch_text(Text *t) { watch((char *)(t)-8,104,8); if((const char *)t->data!=(const char *)t+32) watch(t->data,t->capacity,1); }
 static void watch_error(Error *e) { watch(e,72,8); watch_text(e->path); watch_text(e->reason); }
 // Heap text is [count][data,len,cap,cache]; the owner count is the word before.
 static int64_t owners(Text *t) { return *(int64_t *)((char *)t-8)&INT64_C(0x3fffffffffffffff); }
-static bool text_block(Text *t,void *p) { return p==(char *)t-8 || (t->capacity && p==t->data); }
+static bool text_block(Text *t,void *p) { return p==(char *)t-8 || ((const char *)t->data!=(const char *)t+32 && p==t->data); }
 // Every watched block is freed once except the texts the getters still own.
 static void held(Text *p,Text *r) {
     for(size_t i=0;i<count;++i) assert(watched[i].frees==((text_block(p,watched[i].pointer)||text_block(r,watched[i].pointer))?0u:1u));

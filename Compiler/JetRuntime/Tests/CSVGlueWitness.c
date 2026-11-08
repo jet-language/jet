@@ -43,8 +43,8 @@ static void watch_row(Row *row,bool texts) {
     watch(row,16,8); watch(row->fields,24,8);
     if(row->fields->capacity) watch(row->fields->data,row->fields->capacity*8,8);
     for(int64_t i=0;texts && i<row->fields->length;++i) {
-        Text *t=row->fields->data[i]; watch((char *)(t)-8,40,8);
-        if(t->capacity) watch(t->data,t->capacity,1);
+        Text *t=row->fields->data[i]; watch((char *)(t)-8,104,8);
+        if((const char *)t->data!=(const char *)t+32) watch(t->data,t->capacity,1);
     }
 }
 static void done(void) { assert(intercepted); for(size_t i=0;i<count;++i) assert(watched[i].frees==1); count=0; }

@@ -79,8 +79,8 @@ static int64_t owners(Text *text) { return *(int64_t *)((char *)text - 8) & INT6
 static void watch_event(Event *event) {
     watch(event,16,8);
     if (event->tag == 4 || event->tag == 5 || event->tag == 10) {
-        Text *text = (Text *)event->payload; watch((char *)(text)-8,40,8);
-        if (text->capacity) watch(text->data,text->capacity,1);
+        Text *text = (Text *)event->payload; watch((char *)(text)-8,104,8);
+        if((const char *)text->data!=(const char *)text+32) watch(text->data,text->capacity,1);
     } else if (event->tag == 6) {
         Sequence *seq = (Sequence *)event->payload; watch(seq,24,8);
         if (seq->capacity) watch(seq->data,seq->capacity * DATA_EVENT_U8_STRIDE,8);

@@ -74,7 +74,7 @@ static void observe_free(void *p,int64_t size,int64_t align) {
 // block: it is watched once and must be freed exactly once.
 static void watch(void *p,int64_t size,int64_t align) { for(size_t i=0;i<count;++i) if(watched[i].pointer==p) { assert(watched[i].size==size && watched[i].align==align);return; } assert(count<32);watched[count].pointer=p;watched[count].size=size;watched[count].align=align;watched[count++].frees=0; }
 static void freed(unsigned before) { assert(intercepted>before);for(size_t i=0;i<count;++i) assert(watched[i].frees==1);count=0; }
-static void watch_text(Text *t) { watch((char *)(t)-8,40,8);if(t->capacity) watch(t->data,t->capacity,1); }
+static void watch_text(Text *t) { watch((char *)(t)-8,104,8);if((const char *)t->data!=(const char *)t+32) watch(t->data,t->capacity,1); }
 static void unfreed(Text *t) { for(size_t i=0;i<count;++i) if(watched[i].pointer==(char *)(t)-8) { assert(watched[i].frees==0);return; } assert(!"text not watched"); }
 static int64_t owners(Text *t) { return *(int64_t *)((char *)t-8) & 0x3fffffffffffffff; }
 static Text *text(const char *s) { return jet_rt_string_from_static(s,(int64_t)strlen(s)); }
