@@ -48,6 +48,9 @@ BuildExecutionError: enum {
     // ran now or its failure was restored from the cache.
     Reported(report: DiagnosticBuildError)
     InvalidGraph(HermeticBuildError)
+    // The action's kept output `path` holds bytes no build wrote, so the
+    // action published none of its outputs.
+    HandEdited(action: String, path: String)
 
     report: fn(self) -> DiagnosticBuildError? Never! {
         if self == {
@@ -297,7 +300,8 @@ build_start_action: fn(plan: HermeticBuildPlan, action: HermeticBuildAction, pro
                     return Err(BuildExecutionError.Reported{report})
                 }
                 if build_restore_action_outputs(artifact_store, project_root, action, record) == {
-                    .Ok(_) -> {
+                    .Ok(edited) -> {
+                        if edited == .Val(path) -> return Err(BuildExecutionError.HandEdited{action: action.name, path})
                         build_record_cache_event(action.name, key, ActionCacheStatus.Hit(.LocalActionRecordMatched), "restore", Val(ActionOutcome.RestoredFromCache))
                         return Ok(BuildActionStart.Restored)
                     }
@@ -377,7 +381,14 @@ build_finish_action: fn(run: BuildActionRun, receipt: ProcessReceipt, project_ro
         }
         return Err(BuildExecutionError.Reported{report})
     }
-    build_publish_sandbox_outputs(sandbox, project_root, action) ?? return Err(build_io_action(action, err))
+    edited: if build_publish_sandbox_outputs(sandbox, project_root, action) == {
+        .Ok(value) -> value
+        .Err(error) -> { return Err(build_io_action(action, error)) }
+    }
+    if edited == .Val(path) {
+        files.remove_all(sandbox).drop("the action sandbox is removed best-effort; the hand edit is reported")
+        return Err(BuildExecutionError.HandEdited{action: action.name, path})
+    }
     outcome: ActionOutcome.Succeeded{exit_code: code}
     if action.cache == ActionCache.Cached {
         record: build_capture_declared_outputs(artifact_store, project_root, action, key, outcome, ActionCacheStatus.Miss(.NoLocalActionRecord)) ?? return Err(build_io_action(action, err))
@@ -393,21 +404,31 @@ build_finish_action: fn(run: BuildActionRun, receipt: ProcessReceipt, project_ro
 // other special file is refused before any blocking open; the per-file and
 // per-action limits are checked against the opened file's size before a byte
 // is read). Only when all of them are read are they restored atomically
-// under the project root, so a refused output publishes nothing.
-build_publish_sandbox_outputs: fn(sandbox: String, project_root: String, action: HermeticBuildAction) BuildIOError! -[FS, Rand]> {
+// under the project root, so a refused output publishes nothing. A kept
+// output that already holds its bytes is left as it is; when one holds bytes
+// no build wrote (build_output_write), nothing is published and its path is
+// returned.
+build_publish_sandbox_outputs: fn(sandbox: String, project_root: String, action: HermeticBuildAction) -[FS, Rand]> String? BuildIOError! {
     contents := [[U8]]{}
+    writes := [BuildOutputWrite]{}
     total := 0
     loop declared in action.outputs {
         from: build_resolve_under(sandbox, declared)
         bytes: build_secure_read_file(sandbox, from, build_read_budget(total))
         total += bytes.len()
+        write := BuildOutputWrite.Write
+        if build_kept_output(action, declared) == .Val(kept) -> write = build_output_write(project_root, kept, ContentDigest.from_bytes(bytes))
+        if write == .HandEdited -> return Ok(Val(declared.copy()))
+        writes.push(write)
         contents.push(bytes)
     }
     loop index in 0..<action.outputs.len() {
+        if writes[index] == .Unchanged -> next
         to: build_resolve_under(project_root, action.outputs[index])
         build_prepare_output_destination(project_root, to)
         build_atomic_restore_file(project_root, to, contents[index])
     }
+    Ok(None)
 }
 
 // Rust `execute_probes`: each selected probe resolves through its toolchain

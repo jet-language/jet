@@ -179,10 +179,12 @@ sema_call_try_build_context_method: fn(receiver: Expr, receiver_value: TExpr, me
 // The calls on a `b.run` step (BuildAction) and on a BuildFile: each file
 // call declares the file and passes its path to the tool at once, and
 // `flag:` puts a prefix such as `"--in="` before that path in one argument.
+// `kept: true` on an output keeps the file it makes in git.
 SemaBuildStepContract: struct {
     parameters: [Type]
     result: Type
     flag: Bool
+    kept: Bool
 }
 
 SEMA_BUILD_STEP_METHODS: "input, output, file, arg, reads, writes, timeout, toolchain or sign"
@@ -191,18 +193,19 @@ sema_build_step_contract: fn(owner: String, method: String) -> SemaBuildStepCont
     unit: Type.Named{name: "Unit"}
     file: Type.Named{name: "BuildFile"}
     if owner == "BuildFile" {
-        if method == "path" -> return Val(SemaBuildStepContract{parameters: [Type]{}, result: Type.String, flag: false})
-        if method == "file" -> return Val(SemaBuildStepContract{parameters: [Type]{Type.String}, result: file, flag: false})
+        if method == "path" -> return Val(SemaBuildStepContract{parameters: [Type]{}, result: Type.String, flag: false, kept: false})
+        if method == "file" -> return Val(SemaBuildStepContract{parameters: [Type]{Type.String}, result: file, flag: false, kept: false})
         return None
     }
     if method == {
-        "input" -> Val(SemaBuildStepContract{parameters: [Type]{Type.String}, result: unit, flag: true})
-        "output" -> Val(SemaBuildStepContract{parameters: [Type]{Type.String}, result: file, flag: true})
-        "file" -> Val(SemaBuildStepContract{parameters: [Type]{file}, result: unit, flag: true})
-        "arg" | "reads" | "writes" -> Val(SemaBuildStepContract{parameters: [Type]{Type.String}, result: unit, flag: false})
-        "timeout" -> Val(SemaBuildStepContract{parameters: [Type]{Type.Named{name: "Duration"}}, result: unit, flag: false})
-        "toolchain" -> Val(SemaBuildStepContract{parameters: [Type]{Type.Named{name: "BuildToolchain"}}, result: unit, flag: false})
-        "sign" -> Val(SemaBuildStepContract{parameters: [Type]{Type.Named{name: "BuildSigningIdentity"}}, result: unit, flag: false})
+        "input" -> Val(SemaBuildStepContract{parameters: [Type]{Type.String}, result: unit, flag: true, kept: false})
+        "output" -> Val(SemaBuildStepContract{parameters: [Type]{Type.String}, result: file, flag: true, kept: true})
+        "file" -> Val(SemaBuildStepContract{parameters: [Type]{file}, result: unit, flag: true, kept: false})
+        "writes" -> Val(SemaBuildStepContract{parameters: [Type]{Type.String}, result: unit, flag: false, kept: true})
+        "arg" | "reads" -> Val(SemaBuildStepContract{parameters: [Type]{Type.String}, result: unit, flag: false, kept: false})
+        "timeout" -> Val(SemaBuildStepContract{parameters: [Type]{Type.Named{name: "Duration"}}, result: unit, flag: false, kept: false})
+        "toolchain" -> Val(SemaBuildStepContract{parameters: [Type]{Type.Named{name: "BuildToolchain"}}, result: unit, flag: false, kept: false})
+        "sign" -> Val(SemaBuildStepContract{parameters: [Type]{Type.Named{name: "BuildSigningIdentity"}}, result: unit, flag: false, kept: false})
         else -> None
     }
 }
@@ -222,19 +225,31 @@ sema_call_try_build_step_method: fn(receiver: Expr, receiver_value: TExpr, metho
     shape: if {
         contract.parameters.len() == 0 -> "file.{method}()"
         owner == "BuildFile" -> "b.dependency(name).{method}(path)"
+        contract.flag && contract.kept -> "step.{method}(value)`, `step.{method}(value, flag: \"--in=\")` or `step.{method}(value, kept: true)"
         contract.flag -> "step.{method}(value)` or `step.{method}(value, flag: \"--in=\")"
+        contract.kept -> "step.{method}(value)` or `step.{method}(value, kept: true)"
         else -> "step.{method}(value)"
     }
     positional := [CallArg]{}
     flag := CallArg?{None}
+    kept := CallArg?{None}
     loop argument in args {
         label: if argument.label == .Val(written) -> written.name.copy() else -> ""
-        if argument.spread || argument.flags.template_items != None || (argument.label != None && (label != "flag" || !contract.flag || flag != None)) {
-            diagnostics.push(sema_error("E0764", argument.span, "`{owner}.{method}` doesn't take this argument", "a step call takes its value, and a file call also takes one `flag:`", "write `{shape}`"))
+        takes: if label == {
+            "" -> true
+            "flag" -> contract.flag && flag == None
+            "kept" -> contract.kept && kept == None
+            else -> false
+        }
+        if argument.spread || argument.flags.template_items != None || !takes {
+            diagnostics.push(sema_error("E0764", argument.span, "`{owner}.{method}` doesn't take this argument", "a step call takes its value; a file call also takes one `flag:`, and an output one `kept:`", "write `{shape}`"))
             return failed
         }
-        if argument.label != None -> flag = Val(argument.copy())
-        else -> positional.push(argument.copy())
+        if label == {
+            "flag" -> flag = Val(argument.copy())
+            "kept" -> kept = Val(argument.copy())
+            else -> positional.push(argument.copy())
+        }
     }
     if positional.len() != contract.parameters.len() {
         diagnostics.push(sema_error("E0104", span, "`{owner}.{method}` expects {contract.parameters.len()} arguments, got {positional.len()}", "a step call passes one value", "write `{shape}`"))
@@ -254,10 +269,20 @@ sema_call_try_build_step_method: fn(receiver: Expr, receiver_value: TExpr, metho
         }
         values.push(sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: text}}}, argument.span))
     } else {
+        // The session reads the values in this order: the positional ones,
+        // then `flag:`'s String, then `kept:`'s Bool.
         checked := positional.copy()
-        if flag == .Val(labelled) -> checked.push(labelled.copy())
+        required_types := contract.parameters.copy()
+        if flag == .Val(labelled) {
+            checked.push(labelled.copy())
+            required_types.push(Type.String)
+        }
+        if kept == .Val(labelled) {
+            checked.push(labelled.copy())
+            required_types.push(Type.Bool)
+        }
         loop (index, argument) in checked {
-            required: if index < contract.parameters.len() -> contract.parameters[index] else -> Type.String
+            required: required_types[index]
             value: sema_check_expression(argument.expr, Val(required), environment, program, scopes, state, tail_store, context, diagnostics) ?? return failed
             compatible: sema_call_type_assignable(required, value.ty, environment, program) ?? return failed
             if !compatible {

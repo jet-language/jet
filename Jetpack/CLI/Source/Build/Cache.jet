@@ -155,8 +155,10 @@ build_read_budget: fn(used: Int) -> Int Never! {
 }
 
 // Rust `restore_action_outputs`: the record must name exactly the declared
-// outputs, in order, before any byte is restored.
-build_restore_action_outputs: fn(store: BuildArtifactStoreHandle, base: String, action: HermeticBuildAction, record: ActionResultRecord) BuildIOError! -[FS, Env, Exec, Time, Rand]> {
+// outputs, in order, before any byte is restored. A kept output that already
+// holds the recorded bytes is left as it is; when one holds bytes no build
+// wrote (build_output_write), nothing is restored and its path is returned.
+build_restore_action_outputs: fn(store: BuildArtifactStoreHandle, base: String, action: HermeticBuildAction, record: ActionResultRecord) -[FS, Env, Exec, Time, Rand]> String? BuildIOError! {
     matches := record.outputs.len() == action.outputs.len()
     if matches {
         loop index in 0..<record.outputs.len() {
@@ -164,7 +166,16 @@ build_restore_action_outputs: fn(store: BuildArtifactStoreHandle, base: String, 
         }
     }
     if !matches -> return Err(BuildIOError.new(.InvalidData, "cached output record does not exactly match action declarations"))
+    writes := [BuildOutputWrite]{}
     loop output in record.outputs {
+        write := BuildOutputWrite.Write
+        if build_kept_output(action, output.path) == .Val(kept) -> write = build_output_write(base, kept, output.digest)
+        if write == .HandEdited -> return Ok(Val(output.path.copy()))
+        writes.push(write)
+    }
+    loop index in 0..<record.outputs.len() {
+        if writes[index] == .Unchanged -> next
+        output: record.outputs[index]
         path: build_resolve_under(base, output.path)
         found: if store.get_blob(output.digest) == {
             .Val(blob) -> blob
@@ -173,6 +184,45 @@ build_restore_action_outputs: fn(store: BuildArtifactStoreHandle, base: String, 
         }
         build_atomic_restore_file(base, path, found)
     }
+    Ok(None)
+}
+
+// What publishing a declared output does to the file under the project root.
+BuildOutputWrite: enum {
+    // Write the made bytes.
+    Write
+    // A kept output already holds them: it is left as it is.
+    Unchanged
+    // A kept output holds bytes no build wrote: it was edited by hand.
+    HandEdited
+}
+
+// The KeptOutput row of `action`'s declared output `output`, if it is kept.
+build_kept_output: fn(action: HermeticBuildAction, output: String) -> KeptOutput? Never! {
+    loop kept in action.kept {
+        if kept.path == output -> return Val(kept.copy())
+    }
+    None
+}
+
+// What publishing the bytes `made` names at kept output `kept` under `base`
+// does: a missing file is written; one already holding those bytes is left
+// as it is; one holding bytes that are neither those nor the ones the last
+// build wrote there (`kept.written`) was edited by hand. With no build
+// before (a fresh checkout), the file is written whenever its bytes differ.
+build_output_write: fn(base: String, kept: KeptOutput, made: ContentDigest) -[FS]> BuildOutputWrite BuildIOError! {
+    path: build_resolve_under(base, kept.path)
+    bytes: if build_secure_read_file(base, path, BUILD_MAX_ACTION_FILE_BYTES) == {
+        .Ok(found) -> found
+        .Err(error) -> {
+            if error.kind == BuildIOKind.NotFound -> return Ok(BuildOutputWrite.Write)
+            return Err(error)
+        }
+    }
+    held: ContentDigest.from_bytes(bytes).as_str()
+    if held == made.as_str() -> return Ok(BuildOutputWrite.Unchanged)
+    if kept.written == .Val(written) && written != held -> return Ok(BuildOutputWrite.HandEdited)
+    Ok(BuildOutputWrite.Write)
 }
 
 // `path` relative to `base` as its normal components (Rust `strip_prefix`

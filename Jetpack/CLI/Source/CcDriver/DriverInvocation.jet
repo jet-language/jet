@@ -483,6 +483,7 @@ cli_cc_report_execution_error: fn(error: BuildExecutionError) -[IO, Env, Time.Wa
         .TimedOut(action, limit_ms) -> theme.error_coded("E1340", "C/C++ build action ran past its time limit", "action `{action}` was stopped after {limit_ms}ms", "check the compiler invocation for a hang, then retry")
         .ProbeFailed(probe, detail) -> theme.error_coded("E1340", "C/C++ build probe failed", "probe `{probe}`: {detail}", "repair the pinned toolchain or target descriptor, then retry")
         .InvalidGraph(graph_error) -> theme.error_coded("E1340", "C/C++ build graph is invalid", graph_error.debug_text(), "report the graph error; the compiler action was not accepted")
+        .HandEdited(action, path) -> theme.error_coded("E1340", "C/C++ build output was edited by hand", "action `{action}` would overwrite `{path}`, which holds bytes no build wrote", "undo the edit to `{path}`, then retry")
     }
 }
 

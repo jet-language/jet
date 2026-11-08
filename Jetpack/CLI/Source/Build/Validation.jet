@@ -149,6 +149,9 @@ build_validate_action: fn(name: String, spec: ActionSpec) HermeticBuildError! {
         if seen.contains(output) -> return Err(HermeticBuildError.DuplicateActionOutput{action: name, output})
         seen.push(output.copy())
     }
+    loop kept in spec.kept {
+        if !spec.outputs.contains(kept.path) -> return Err(HermeticBuildError.UndeclaredKeptOutput{action: name, output: kept.path})
+    }
 }
 
 // Rust `validate_action_output_owners`: one owner per declared output.

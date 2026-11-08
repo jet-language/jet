@@ -16,7 +16,7 @@ build_session_add_run: fn(state: &BuildSessionState, args: [BuildSessionValue], 
     inputs := [String]{}
     if file.probe == .Val(probe) -> probes.push(probe)
     if file.kind == "output" || file.kind == "host" || file.kind == "image" || file.kind == "dependency" -> inputs.push(file.path.copy())
-    action: BuildSessionAction{name: name, inputs: inputs, outputs: [String]{}, argv: [String]{file.path.copy()}, caps: caps, toolchain: 0, probes: probes, signing: None, tool: tool, start: start, end: end}
+    action: BuildSessionAction{name: name, inputs: inputs, outputs: [String]{}, kept: [String]{}, argv: [String]{file.path.copy()}, caps: caps, toolchain: 0, probes: probes, signing: None, tool: tool, start: start, end: end}
     if action.name.trim() == "" -> return build_session_error_fail(state, .EmptyActionName)
     if state.actions.len() >= 100000 -> return build_session_fail(state, "action graph exceeds 100000 actions")
     loop old in state.actions { if old.name == action.name -> return build_session_error_fail(state, BuildSessionError.DuplicateActionName{value: action.name}) }
@@ -110,7 +110,9 @@ build_session_file_path: fn(state: &BuildSessionState, args: [BuildSessionValue]
 
 // One call on a `b.run` step (args: the step, then the call's values). A
 // file call declares the file and appends its path, after its `flag:` text
-// when one is given, to the tool's arguments.
+// when one is given, to the tool's arguments. An output with `kept: true`
+// stays in git: the build rewrites it and refuses a hand edit of it, so it
+// can't be under `.jet/`, which is never committed.
 build_session_step_call: fn(state: &BuildSessionState, method: String, args: [BuildSessionValue]) -> BuildSessionReply {
     if args.len() == 0 -> return build_session_fail(state, "step call lost its step")
     id: build_session_handle(state, args[0], "BuildAction") ?? return build_session_fail(state, "the step does not belong to this build")
@@ -129,9 +131,12 @@ build_session_step_call: fn(state: &BuildSessionState, method: String, args: [Bu
         "output" | "writes" -> {
             path: build_session_text(args, 1) ?? return build_session_fail(state, "`.{method}` takes a path")
             if build_session_path_error(path) == .Val(error) -> return build_session_error_fail(state, error)
+            kept: build_session_kept(args)
+            if kept && (path == ".jet" || path.starts_with(".jet/")) -> return build_session_fail(state, "step `{step.name}` keeps `{path}` in git, and nothing under `.jet/` is ever committed; keep a file outside `.jet/`, or drop `kept: true`")
             if build_session_contains_string(step.outputs, path) -> return build_session_error_fail(state, BuildSessionError.DuplicateActionOutput{action: step.name, output: path})
             loop generated in state.generated { if generated.path == path -> return build_session_error_fail(state, BuildSessionError.GeneratedModuleCycle{name: generated.name, path: path}) }
             step.outputs.push(path.copy())
+            if kept -> step.kept.push(path.copy())
             if method == "writes" {
                 state.actions[id] = step
                 return unit
@@ -178,6 +183,15 @@ build_session_step_call: fn(state: &BuildSessionState, method: String, args: [Bu
         }
         else -> return build_session_fail(state, "unknown step call `.{method}`")
     }
+}
+
+// The `kept:` value of an output call: the Bool after its path and its
+// optional `flag:` text; false when the call doesn't give one.
+build_session_kept: fn(args: [BuildSessionValue]) -> Bool Never! {
+    loop index in 2..<args.len() {
+        if args[index] == .Bool(value) -> return value
+    }
+    false
 }
 
 build_session_add_target: fn(state: &BuildSessionState, method: String, args: [BuildSessionValue]) -> BuildSessionReply {

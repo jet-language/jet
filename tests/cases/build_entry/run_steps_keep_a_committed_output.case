@@ -1,0 +1,41 @@
+# A step output kept in git (`.output(path, kept: true)`) may replace a
+# committed file. The build writes it only when the step makes other bytes,
+# and refuses a hand edit of it, publishing nothing, whether the step runs or
+# its outputs come from the store.
+fixture: fixtures/run_steps_keep_a_committed_output
+requires: tool:sh
+requires: tool:bwrap
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/store
+step: jet build main.jet --allow=Exec,FS
+exit: 0
+file: table.txt = "v1\n" # the committed file already held what the step makes
+file: .jet/build/receipt.json ~ "\"kept\":[{\"path\":\"table.txt\",\"digest\":\"sha256:" # the receipt records the bytes the build left there
+step: jet build main.jet --allow=Exec,FS
+exit: 0
+file: .jet/build/receipt.json ~ "\"cache_hit\":true" # nothing changed, so the store gave the step back
+file: table.txt = "v1\n"
+write: version.txt = "v2\n"
+step: jet build main.jet --allow=Exec,FS
+exit: 0
+file: table.txt = "v2\n" # a changed input rewrites the kept file
+write: table.txt = "edited by hand\n"
+step: jet build main.jet --allow=Exec,FS
+exit: 1
+stderr: ~ "E3502" # the hand edit is refused when the store gives the step back
+stderr: ~ "Step `table` would overwrite `table.txt`, which it keeps in git and which holds bytes no build wrote" # names the step and the file
+stderr: ~ "git checkout -- table.txt" # the fix undoes the edit
+file: table.txt = "edited by hand\n"
+write: version.txt = "v3\n"
+step: jet build main.jet --allow=Exec,FS
+exit: 1
+stderr: ~ "Step `table` would overwrite `table.txt`, which it keeps in git and which holds bytes no build wrote" # and when the step runs again
+file: table.txt = "edited by hand\n"
+write: table.txt = "v3\n"
+step: jet build main.jet --allow=Exec,FS
+exit: 0
+file: table.txt = "v3\n" # a file already holding the step's bytes, as a pull brings it, is no hand edit
+remove: table.txt
+step: jet build main.jet --allow=Exec,FS
+exit: 0
+file: table.txt = "v3\n" # a deleted kept file is made again

@@ -5054,6 +5054,16 @@ An output that would overwrite a file no build made, such as a committed one,
 is refused before anything runs (E3502), as generated sources are: a step
 replaces only what the last build's receipt lists as a step's output. Example:
 [`tests/cases/build_entry/run_steps_refuse_to_overwrite_a_file.case`](../../tests/cases/build_entry/run_steps_refuse_to_overwrite_a_file.case).
+`.output` and `.writes` take `kept: true` for a file that stays in git, such
+as a generated table: the step may replace it though no build made it, and
+the build writes it only when the step makes other bytes than it holds. When
+it holds bytes that are neither those nor the ones the last build left there,
+it was edited by hand: the step publishes none of its outputs and the build
+fails with E3502, so the fix goes into the step's inputs instead. A fresh
+checkout, with no receipt yet, writes a kept file only when its bytes differ.
+A kept path under `.jet/`, which is never committed, is refused (E3502).
+Example:
+[`tests/cases/build_entry/run_steps_keep_a_committed_output.case`](../../tests/cases/build_entry/run_steps_keep_a_committed_output.case).
 `.timeout(10min)` bounds how long the step may run. The `action_timeout` build
 option (stock `30s`; the profile field `action_timeout: 10min`, the call
 `b.action_timeout(10min)` and the flag `--action-timeout=10min`) bounds every
@@ -5116,7 +5126,9 @@ store. `times.json` is its `BuildTimes`: one `BuildTime` row (`name`, `kind`
 `step`, `host`, `image` or `library`, `wall_ms`, `reused`) per step and target,
 in the order each finished. A step's `wall_ms` is the time of the steps that ran
 with it, and a target is `reused` when its image came from the store. Both are
-JSON objects whose fields are the value's own, in declaration order.
+JSON objects whose fields are the value's own, in declaration order; after
+them `receipt.json` has `kept`, one `path` and `digest` (`sha256:<hex>`) per
+kept output, of the bytes the build left there.
 `jet inspect build --times` shows the last build's rows (`kind`, `name`,
 `wall_ms`, and `made` or `reused`), or the record itself under `--json`;
 before any build has recorded one it fails with E2104. Example:

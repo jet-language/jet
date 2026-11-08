@@ -90,13 +90,14 @@ BuildSessionPlugin: struct {
 }
 
 // A `b.run` step: the BuildFile `tool` it runs, its arguments, the files it
-// reads and makes, its own time limit in milliseconds (None: the
-// `action_timeout` option's), and the span of its `b.run` call, where a step
-// that declares no output is reported.
+// reads and makes (`kept` the outputs that stay in git), its own time limit
+// in milliseconds (None: the `action_timeout` option's), and the span of its
+// `b.run` call, where a step that declares no output is reported.
 BuildSessionAction: struct {
     name: String
     inputs: [String]
     outputs: [String]
+    kept: [String]
     argv: [String]
     caps: [String]
     toolchain: Int

@@ -216,7 +216,9 @@ build_canonical_effective_action_key: fn(plan: HermeticBuildPlan, action: Hermet
         w.flag(fact.success)
         w.text(fact.detail)
         w.text(fact.reproducibility.debug_name())
-        w.text("{fact.toolchain.context}:{fact.toolchain.id}")
+        // The toolchain by its place in the plan: its context is this run's
+        // own number, which would split the key of every build after it.
+        w.number(fact.toolchain.id)
         w.text(fact.toolchain_provenance.as_str())
     }
     w.text("compiler-identity")

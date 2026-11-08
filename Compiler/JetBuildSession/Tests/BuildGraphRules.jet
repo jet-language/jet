@@ -214,6 +214,22 @@ build_graph_rules_made: fn(session: &BuildSession, tool: BuildSessionValue, name
     assert_eq(second.outputs, [String]{"made.txt"})
 }
 
+#Test("kept_outputs_stay_outside_jet") {
+    session := build_graph_rules_session(95)
+    tool: build_graph_rules_tool(session)
+    step: build_graph_rules_value(build_session_call(session, "run", [BuildSessionValue]{.Text(value: "table"), tool, build_graph_rules_list([String]{"FS"})}, None, true, 5, 6))
+    assert(build_graph_rules_ok(build_graph_rules_step(session, "output", step, [BuildSessionValue]{.Text(value: "table.jet"), .Text(value: "--out="), .Bool(value: true)})))
+    assert(build_graph_rules_ok(build_graph_rules_step(session, "writes", step, [BuildSessionValue]{.Text(value: "index.txt"), .Bool(value: true)})))
+    assert(build_graph_rules_ok(build_graph_rules_step(session, "output", step, [BuildSessionValue]{.Text(value: "scratch.txt"), .Bool(value: false)})))
+    assert(build_graph_rules_failed(build_graph_rules_step(session, "output", step, [BuildSessionValue]{.Text(value: ".jet/generated/table.jet"), .Bool(value: true)})))
+    assert(build_graph_rules_failed(build_graph_rules_step(session, "writes", step, [BuildSessionValue]{.Text(value: ".jet"), .Bool(value: true)})))
+    permit: session.storage.guard_read()
+    action: permit.value.actions[0]
+    assert_eq(action.argv, [String]{"tool", "--out=table.jet", "scratch.txt"})
+    assert_eq(action.outputs, [String]{"table.jet", "index.txt", "scratch.txt"})
+    assert_eq(action.kept, [String]{"table.jet", "index.txt"})
+}
+
 #Test("host_image_and_jet_tools_are_step_files") {
     session := build_graph_rules_session(99)
     caps: build_graph_rules_list([String]{"Exec", "FS"})
