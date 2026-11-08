@@ -410,22 +410,34 @@ jet_cli_script_promoted: fn(lock: &&cli_files.FileLock, keep: JetCLIScriptKeep, 
     close(lock.move())
 }
 
-// Mark the slot record `record`, whose text is `text`, as just used: a copy
-// written beside it and renamed over it, so a concurrent run reads either
-// record whole and the oldest-used slots are the ones trimmed. A record
+// Mark the slot record `record`, whose text is `text`, as just used, so the
+// oldest-used slots are the ones trimmed (jet_cli_script_record_put). A record
 // written less than JET_CLI_SCRIPT_USED_GRAIN_NS ago is already marked, so
-// the rerun leaves it alone; a rename over a file can wait on the file
-// system's journal, far longer than the run. A keep that replaced the record
-// meanwhile is undone, leaving the next run to compile again (its program may
-// be gone).
+// the rerun leaves it alone. A keep that replaced the record meanwhile is
+// undone, leaving the next run to compile again (its program may be gone).
 jet_cli_script_used: fn(record: String, text: String) {
     status: cli_files.stat(record) ?? return
     written: status.modified.to_unix_ns() ?? return
     since: cli_time.unix_ns() - written
     if since >= 0 && since < JET_CLI_SCRIPT_USED_GRAIN_NS -> return
+    _: jet_cli_script_record_put(record, text)
+}
+
+// Put the slot record `text` at `record`: written beside it, the old record
+// removed, then renamed into the free name, so a concurrent run reads a whole
+// record or none, and none compiles again. A rename over an existing file
+// would make ext4 write the new file's data out first (auto_da_alloc), which
+// on a busy disk waits on its journal far longer than the run. Returns
+// whether the record is in place.
+jet_cli_script_record_put: fn(record: String, text: String) -> Bool {
     staged: "{record}.{cli_sys.pid()}"
-    cli_files.write(staged, text) ?? return
-    if cli_files.rename(staged, record) == .Err(_) -> cli_files.remove(staged).drop("a staged record is never read")
+    cli_files.write(staged, text) ?? return false
+    cli_files.remove(record).drop("a slot without a record has nothing to remove")
+    if cli_files.rename(staged, record) == .Err(_) {
+        cli_files.remove(staged).drop("a staged record is never read")
+        return false
+    }
+    true
 }
 
 // Remove the least recently used slots of `directory` past
@@ -509,9 +521,10 @@ jet_cli_script_inputs_read: fn(log: Shared<JetDriverComptimeInputLog>) -> Int Ne
 // the toolchain the compile started from, so a toolchain that changed while
 // it compiled leaves a record no later run matches. The program goes to a
 // file of its own, named by the slot, this process and its sources. Each file
-// is written beside its place and renamed into it, and the record last, so a
-// concurrent run never sees a partial one. A cache that can't be written
-// leaves the next run to compile again. Returns whether the program was kept.
+// is written beside its place and renamed into it, and the record last
+// (jet_cli_script_record_put), so a concurrent run never sees a partial one.
+// A cache that can't be written leaves the next run to compile again.
+// Returns whether the program was kept.
 jet_cli_script_keep: fn(keep: JetCLIScriptKeep, executable: X64Executable, authority: JetCLIAuthority, level: String) -> Bool {
     if jet_cli_script_inputs_read(keep.input_log) > 0 -> return false
     directory: jet_cli_script_cache_dir() ?? return false
@@ -529,8 +542,7 @@ jet_cli_script_keep: fn(keep: JetCLIScriptKeep, executable: X64Executable, autho
         return false
     }
     cli_files.rename(staged, "{directory}/{program}") ?? return false
-    cli_files.write("{record}.{pid}", jet_cli_script_record_encode(program, keep, level, authority)) ?? return false
-    cli_files.rename("{record}.{pid}", record) ?? return false
+    if !jet_cli_script_record_put(record, jet_cli_script_record_encode(program, keep, level, authority)) -> return false
     if previous == .Val(old) {
         if old != program -> cli_files.remove("{directory}/{old}").drop("a stale program only takes space")
     }
