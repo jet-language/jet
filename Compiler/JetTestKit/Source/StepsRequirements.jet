@@ -36,8 +36,11 @@ kit_steps_tools_all: fn(text: String) -> Bool {
     true
 }
 
+// `text` may end in the requirement's `# reason`, which only its stdout
+// assertion reads.
 kit_steps_probe: fn(text: String, env: KitEnv, work: String, scratch: String) -> Bool {
-    tokens: kit_steps_tokens(text) ?? return false
+    body: kit_steps_byte_slice(text, 0, kit_steps_comment(text))
+    tokens: kit_steps_tokens(body) ?? return false
     if tokens.len() == 0 -> return false
     argv := [String]{}
     boundary := tokens.len()
@@ -56,7 +59,7 @@ kit_steps_probe: fn(text: String, env: KitEnv, work: String, scratch: String) ->
     if boundary == tokens.len() -> return true
     if tokens[boundary].text == "json" {
         if tokens.len() < boundary + 4 || tokens[boundary + 2].text != "=" -> return false
-        literal: kit_steps_byte_slice(text, tokens[boundary + 3].start, text.count_bytes()).trim().copy()
+        literal: kit_steps_byte_slice(body, tokens[boundary + 3].start, body.count_bytes()).trim().copy()
         return kit_steps_json_test(result.stdout, "doc", tokens[boundary + 1].text, "=", literal) == None
     }
     assertion: kit_steps_stream_assertion("stdout", kit_steps_byte_slice(text, tokens[boundary].end, text.count_bytes())) ?? return false
