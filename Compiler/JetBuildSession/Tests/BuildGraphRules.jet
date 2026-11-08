@@ -214,7 +214,7 @@ build_graph_rules_made: fn(session: &BuildSession, tool: BuildSessionValue, name
     assert_eq(second.outputs, [String]{"made.txt"})
 }
 
-#Test("host_and_jet_tools_are_step_tools") {
+#Test("host_image_and_jet_tools_are_step_files") {
     session := build_graph_rules_session(99)
     caps: build_graph_rules_list([String]{"Exec", "FS"})
     empty: build_graph_rules_list([String]{})
@@ -223,6 +223,9 @@ build_graph_rules_made: fn(session: &BuildSession, tool: BuildSessionValue, name
     assert(build_graph_rules_failed(build_session_call(session, "host", [BuildSessionValue]{lib}, None, false, 5, 6)))
     host: build_graph_rules_value(build_session_call(session, "host", [BuildSessionValue]{gen}, None, false, 7, 8))
     assert_eq(build_session_call(session, "file.path", [BuildSessionValue]{host}, None, false, 9, 10), BuildSessionReply.Value{value: BuildSessionValue.Text{value: ".jet/build/host/gen"}})
+    assert(build_graph_rules_failed(build_session_call(session, "image", [BuildSessionValue]{lib}, None, false, 21, 22)))
+    image: build_graph_rules_value(build_session_call(session, "image", [BuildSessionValue]{gen}, None, false, 23, 24))
+    assert_eq(build_session_call(session, "file.path", [BuildSessionValue]{image}, None, false, 25, 26), BuildSessionReply.Value{value: BuildSessionValue.Text{value: ".jet/build/image/gen"}})
     jet: build_graph_rules_value(build_session_call(session, "jet", [BuildSessionValue]{}, None, false, 11, 12))
     assert(build_graph_rules_failed(build_session_call(session, "file.path", [BuildSessionValue]{jet}, None, false, 13, 14)))
     table: build_graph_rules_value(build_session_call(session, "run", [BuildSessionValue]{.Text(value: "table"), host, caps}, None, true, 15, 16))
@@ -230,14 +233,15 @@ build_graph_rules_made: fn(session: &BuildSession, tool: BuildSessionValue, name
     check: build_graph_rules_value(build_session_call(session, "run", [BuildSessionValue]{.Text(value: "check"), jet, caps}, None, true, 17, 18))
     assert(build_graph_rules_ok(build_graph_rules_step(session, "arg", check, [BuildSessionValue]{.Text(value: "check")})))
     assert(build_graph_rules_ok(build_graph_rules_step(session, "file", check, [BuildSessionValue]{host})))
+    assert(build_graph_rules_ok(build_graph_rules_step(session, "file", check, [BuildSessionValue]{image})))
     assert(build_graph_rules_failed(build_graph_rules_step(session, "file", check, [BuildSessionValue]{jet})))
     toolchain: build_graph_rules_value(build_session_call(session, "toolchain", [BuildSessionValue]{.Text(value: "cross"), .Text(value: "wasm32-wasi")}, None, false, 19, 20))
     assert(build_graph_rules_failed(build_graph_rules_step(session, "toolchain", check, [BuildSessionValue]{toolchain})))
     permit: session.storage.guard_read()
     assert_eq(permit.value.actions[0].argv, [String]{".jet/build/host/gen", "table.jet"})
     assert_eq(permit.value.actions[0].inputs, [String]{".jet/build/host/gen"})
-    assert_eq(permit.value.actions[1].argv, [String]{"jet", "check", ".jet/build/host/gen"})
-    assert_eq(permit.value.actions[1].inputs, [String]{".jet/build/host/gen"})
+    assert_eq(permit.value.actions[1].argv, [String]{"jet", "check", ".jet/build/host/gen", ".jet/build/image/gen"})
+    assert_eq(permit.value.actions[1].inputs, [String]{".jet/build/host/gen", ".jet/build/image/gen"})
 }
 
 #Test("dependency_files_are_step_files_under_jet_deps") {

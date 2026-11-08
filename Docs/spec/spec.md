@@ -5014,7 +5014,16 @@ step can build the tool the next one runs. `b.host(target)` is the executable
 to compile, and the one graph builds it whether or not it is selected. Only an
 executable target with a source can be built so (E3502), and on a machine the
 native backend doesn't write images for, a step that runs one is refused
-before anything runs. `b.jet()` is the compiler running the build; its step
+before anything runs. `b.image(target)` is the same target built for the
+build's selected platform, the image a step packs or ships, copied to
+`.jet/build/image/<name>` once it compiles; a step that reads or runs it
+waits for it, the one graph builds it whether or not it is selected, and only
+an executable target with a source has one (E3502). When the build selects
+the machine's own platform, a target's image and host build are one file,
+built once. A step runs an image only where a sandbox can (Linux x86-64);
+elsewhere it is refused before anything runs. Example:
+[`tests/cases/build_entry/run_steps_read_an_image.case`](../../tests/cases/build_entry/run_steps_read_an_image.case).
+`b.jet()` is the compiler running the build; its step
 runs it from its own folder, mounted read-only, so a step can check, run or
 build Jet code. `b.dependency(name)` is the folder of the package package.jet
 lists as `name` (an unlisted name is E3502), and `.file(path)` on it is a

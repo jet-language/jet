@@ -46,7 +46,7 @@ sema_build_context_method_contract: fn(method: String, arity: Int) -> SemaBuildC
             parameters = [Type]{Type.Named{name: "BuildProbe"}}
             result = Type.Named{name: "BuildFile"}
         }
-        method == "host" && arity == 1 -> {
+        (method == "host" || method == "image") && arity == 1 -> {
             parameters = [Type]{target}
             result = Type.Named{name: "BuildFile"}
         }
@@ -102,7 +102,7 @@ sema_build_context_arity_description: fn(method: String) -> String Never! {
     if method == "toolchain" -> return "2 to 6"
     if method == "probe" -> return "3 to 6"
     if method == "plan" -> return "0 or 1"
-    if method == "default" || method == "found" || method == "host" || method == "dependency" -> return "1"
+    if method == "default" || method == "found" || method == "host" || method == "image" || method == "dependency" -> return "1"
     if method == "run" -> return "3"
     if method == "args" || method == "jet" -> return "0"
     if method == "find" || method == "embed" -> return "1"

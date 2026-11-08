@@ -11,7 +11,7 @@ use {
     cli_sys: core.sys
     cli_time: core.time
     core.build.[BuildGraph, BuildGraphAction]
-    jet_build_session.[BUILD_SESSION_HOST_DIR, BuildPlanExecution, BuildPlanSelection, BuildSessionAction, BuildSessionTarget, BuildSessionToolchain]
+    jet_build_session.[BUILD_SESSION_HOST_DIR, BUILD_SESSION_IMAGE_DIR, BuildPlanExecution, BuildPlanSelection, BuildSessionAction, BuildSessionTarget, BuildSessionToolchain]
     jet_driver.[JetDriverAuthorityPolicy, JetDriverAuthorizedSourceFile, JetDriverBuildTime, JetDriverFailure, JetDriverGeneratedModule, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR, jet_driver_build_graph_json, jet_driver_build_times_json]
     jet_foundation.[BuildOptions, Diagnostic, build_option_duration_ms, build_options_value, diagnostic_from_registry, diagnostic_registry_row, diagnostic_render_all]
     jet_pkg_model.[OverlayPolicy, WorkspaceDeclarationCache, pkg_build_entry_source, pkg_parse_workspace_policy, pkg_resolve_workspace_source]
@@ -61,11 +61,12 @@ jet_cli_package_declares_build_entry: fn(file: String) -[FS, Env]> Bool Never! {
     pkg_build_entry_source(source) != None
 }
 
-// One node of the graph a package build runs: a step (`id` its action), a
-// selected executable compiled to its image or library checked (`id` its
-// index in the selection's list), or a target only steps use, built for
-// the machine running the build (`id` its target). `name` is the step's or
-// target's own; `needs` are the nodes that finish before it starts.
+// One node of the graph a package build runs: a step (`id` its action), an
+// executable compiled to its image (`id` its target; selected, or one whose
+// image a step reads), a selected library checked (`id` its index in the
+// selection's list), or a target only steps run, built for the machine
+// running the build (`id` its target). `name` is the step's or target's own;
+// `needs` are the nodes that finish before it starts.
 JetCLIBuildNode: struct {
     kind: JetCLIBuildNodeKind
     id: Int
@@ -80,22 +81,26 @@ JetCLIBuildNodeKind: enum {
     Host
 }
 
-// The steps a build runs and the targets it builds for the machine running
-// it (`b.host`), each target only steps use.
+// The steps a build runs, the targets it builds for the machine running it
+// (`b.host`), and the targets whose image a step reads (`b.image`); the
+// steps use each such target whether or not it is selected.
 JetCLIBuildNeeds: struct {
     steps: [Int]
     host: [Int]
+    images: [Int]
 }
 
 // Run the graph `build: fn` declared under the project root `root`, as one
 // graph of steps and targets: the selected targets, the steps they need and
-// their prerequisites, and every target a step runs as its `b.host` tool.
+// their prerequisites, and every target a step runs as its `b.host` tool or
+// reads as its `b.image`.
 // Every step's effects are granted (by the package `policy`, the enclosing
 // workspace's build policy and this invocation) and every probe ran before
 // anything else does. Then whatever has its inputs ready runs: the ready
 // steps together in the native sandbox, up to `threads` at once, and each
 // ready target compiles (an executable, into its image and, when a step runs
-// it, its host copy) or is checked (a library). A failure stops only what
+// it, its host copy, or reads its image, a copy at `.jet/build/image/`) or is
+// checked (a library). A failure stops only what
 // waits on it, and every failure is reported. `member` names the workspace
 // member a workspace build runs this graph for; its invocation grant is
 // None. A step without its own time limit gets the `action_timeout` option.
@@ -104,9 +109,9 @@ jet_cli_build_run_graph: fn(graph: BuildPlanExecution, receipt: BuildGraph, sele
     action_timeout_ms: build_option_duration_ms(build_options_value(options, "action_timeout")) ?? panic("the resolved `action_timeout` is a checked duration")
     if graph.actions.len() == 0 && graph.probes.len() == 0 {
         nodes := [JetCLIBuildNode]{}
-        loop index in 0..<selected.executables.len() -> nodes.push(JetCLIBuildNode{kind: .Image, id: index, name: selected.executables[index].name.copy(), needs: [Int]{}})
+        loop index in 0..<selected.executables.len() -> nodes.push(JetCLIBuildNode{kind: .Image, id: selected.executables[index].target, name: selected.executables[index].name.copy(), needs: [Int]{}})
         loop index in 0..<selected.libraries.len() -> nodes.push(JetCLIBuildNode{kind: .Library, id: index, name: selected.libraries[index].name.copy(), needs: [Int]{}})
-        return jet_cli_build_run_nodes(nodes, None, None, [BuildEffect]{}, [BuildProbeFact]{}, graph, receipt, selected, [Int]{}, root, member, options, threads, invocation, generated, trace_sink, color)
+        return jet_cli_build_run_nodes(nodes, None, None, [BuildEffect]{}, [BuildProbeFact]{}, graph, receipt, selected, JetCLIBuildNeeds{steps: [Int]{}, host: [Int]{}, images: [Int]{}}, root, member, options, threads, invocation, generated, trace_sink, color)
     }
     workspace := OverlayPolicy.empty()
     // copy: `refused` is a payload view of the policy read's result.
@@ -122,6 +127,16 @@ jet_cli_build_run_graph: fn(graph: BuildPlanExecution, receipt: BuildGraph, sele
     if needs.host.len() > 0 && !(cli_sys.is_linux() && cli_sys.arch() == "x86_64") {
         tool: graph.targets[needs.host[0]].name
         return jet_cli_build_execution_failed("E3502", "step tool `b.host({tool})` must build `{tool}` for this machine ({cli_sys.name()} {cli_sys.arch()}), and the native backend writes Linux x86-64 images only", None, "run this build on Linux x86-64", color)
+    }
+    // A `build: fn` builds Linux x86-64 images (a web build of one is refused
+    // before its plan), which a step's sandbox runs only on such a machine.
+    if !(cli_sys.is_linux() && cli_sys.arch() == "x86_64") {
+        loop step in needs.steps {
+            tool: graph.files[graph.actions[step].tool]
+            if tool.kind != "image" -> next
+            name: graph.targets[tool.target ?? panic("an image names its target")].name
+            return jet_cli_build_execution_failed("E3502", "step `{graph.actions[step].name}` runs `b.image({name})`, a Linux x86-64 image, which a step's sandbox on this machine ({cli_sys.name()} {cli_sys.arch()}) can't run", None, "run this build on Linux x86-64", color)
+        }
     }
     grants: jet_cli_build_grants(policy, workspace, invocation)
     loop step in needs.steps {
@@ -159,7 +174,7 @@ jet_cli_build_run_graph: fn(graph: BuildPlanExecution, receipt: BuildGraph, sele
     if needs.steps.len() > 0 {
         store = Val(BuildArtifactStoreHandle.open() ?? return jet_cli_build_execution_failed("E3505", "couldn't open the build store: {err.message()}", None, "point `JET_STORE_DIR` at a writable store directory", color))
     }
-    jet_cli_build_run_nodes(nodes, Val(plan), store, grants, probes, graph, receipt, selected, needs.host, root, member, options, threads, invocation, generated, trace_sink, color)
+    jet_cli_build_run_nodes(nodes, Val(plan), store, grants, probes, graph, receipt, selected, needs, root, member, options, threads, invocation, generated, trace_sink, color)
 }
 
 // Run `nodes` to the end: each round runs every ready step at once, then
@@ -167,7 +182,7 @@ jet_cli_build_run_graph: fn(graph: BuildPlanExecution, receipt: BuildGraph, sele
 // failed one never starts. Every failure is reported, in the order it
 // happened. Then the run records `receipt`, with each step's reuse, and the
 // time of every node that ran (jet_cli_build_record).
-jet_cli_build_run_nodes: fn(nodes: [JetCLIBuildNode], plan: HermeticBuildPlan?, store: BuildArtifactStoreHandle?, grants: [BuildEffect], probes: [BuildProbeFact], graph: BuildPlanExecution, receipt: BuildGraph, selected: BuildPlanSelection, host: [Int], root: String, member: String?, options: BuildOptions, threads: Int?, invocation: JetCLIInvocationAuthority?, generated: [JetDriverGeneratedModule], trace_sink: JetCLITraceSink?, color: Bool) -> JetDriverVerbOutput {
+jet_cli_build_run_nodes: fn(nodes: [JetCLIBuildNode], plan: HermeticBuildPlan?, store: BuildArtifactStoreHandle?, grants: [BuildEffect], probes: [BuildProbeFact], graph: BuildPlanExecution, receipt: BuildGraph, selected: BuildPlanSelection, needs: JetCLIBuildNeeds, root: String, member: String?, options: BuildOptions, threads: Int?, invocation: JetCLIInvocationAuthority?, generated: [JetDriverGeneratedModule], trace_sink: JetCLITraceSink?, color: Bool) -> JetDriverVerbOutput {
     jobs: threads ?? cli_sys.cpu_count()
     // Per node: 0 waiting, 1 done, 2 failed, 3 never started.
     states := [Int]{}
@@ -222,7 +237,7 @@ jet_cli_build_run_nodes: fn(nodes: [JetCLIBuildNode], plan: HermeticBuildPlan?, 
         }
         if ready_target < 0 -> break
         watch: cli_time.start()
-        built: jet_cli_build_target_node(nodes[ready_target], graph, selected, host, root, options, threads, invocation, generated, trace_sink, color)
+        built: jet_cli_build_target_node(nodes[ready_target], graph, selected, needs, root, options, threads, invocation, generated, trace_sink, color)
         times.push(JetDriverBuildTime{name: nodes[ready_target].name.copy(), kind: jet_cli_build_node_kind(nodes[ready_target].kind), wall_ms: watch.elapsed_millis(), reused: built.reused})
         if built.exit_code == JET_DRIVER_EXIT_OK -> states[ready_target] = 1 else {
             states[ready_target] = 2
@@ -276,19 +291,20 @@ jet_cli_build_step_node: fn(nodes: [JetCLIBuildNode], action: Int) -> Int Never!
     panic("a step that ran has no node")
 }
 
-// Compile or check one target node; an executable a step runs also gets
-// its host copy, built for this machine: the cross options (`os`, `min_os`)
-// are the host's and every other option follows the build. When the build
+// Compile or check one target node. An executable a step runs also gets its
+// host copy, built for this machine: the cross options (`os`, `min_os`) are
+// the host's and every other option follows the build. When the build
 // selects the host's own platform, the image and host copy are the same
-// file, built once.
-jet_cli_build_target_node: fn(node: JetCLIBuildNode, graph: BuildPlanExecution, selected: BuildPlanSelection, host: [Int], root: String, options: BuildOptions, threads: Int?, invocation: JetCLIInvocationAuthority?, generated: [JetDriverGeneratedModule], trace_sink: JetCLITraceSink?, color: Bool) -> JetDriverVerbOutput {
+// file, built once. An executable whose image a step reads (`b.image`) gets a
+// copy of it at `.jet/build/image/<name>`; a host-only node builds no image.
+jet_cli_build_target_node: fn(node: JetCLIBuildNode, graph: BuildPlanExecution, selected: BuildPlanSelection, needs: JetCLIBuildNeeds, root: String, options: BuildOptions, threads: Int?, invocation: JetCLIInvocationAuthority?, generated: [JetDriverGeneratedModule], trace_sink: JetCLITraceSink?, color: Bool) -> JetDriverVerbOutput {
     if node.kind == .Library {
         library: selected.libraries[node.id]
         source_path: jet_cli_entry_join(root, library.source)
         source: cli_files.read(source_path) ?? return jet_cli_build_failed("couldn't read the target source `{source_path}`: {err}", jet_cli_why("E2105"), "correct the source path given to `b.add_library`", color)
         return jet_cli_check_library(source_path, source, library.sources, generated, color, threads, trace_sink)
     }
-    target: if node.kind == .Image -> selected.executables[node.id].target else -> node.id
+    target: node.id
     row: graph.targets[target]
     source_path: jet_cli_entry_join(root, row.sources[0])
     source: cli_files.read(source_path) ?? return jet_cli_build_failed("couldn't read the target source `{source_path}`: {err}", jet_cli_why("E2105"), "correct the source path given to `b.add_executable`", color)
@@ -298,8 +314,11 @@ jet_cli_build_target_node: fn(node: JetCLIBuildNode, graph: BuildPlanExecution, 
     host_options = jet_cli_build_options_set(host_options, "min_os", "")
     if node.kind == .Host -> return jet_cli_compile_target(source_path, row.name, source, row.sources, generated, color, host_options, threads, invocation, trace_sink)
     built: jet_cli_compile_target(source_path, row.name, source, row.sources, generated, color, options.copy(), threads, invocation, trace_sink)
-    if built.exit_code != JET_DRIVER_EXIT_OK || !host.contains(target) -> return built
-    if build_options_value(options, "os") != "linux" || build_options_value(options, "min_os") != "" {
+    if built.exit_code != JET_DRIVER_EXIT_OK -> return built
+    wants_host: needs.host.contains(target)
+    cross: build_options_value(options, "os") != "linux" || build_options_value(options, "min_os") != ""
+    if !needs.images.contains(target) && (!wants_host || cross) {
+        if !wants_host -> return built
         return jet_cli_compile_target(source_path, row.name, source, row.sources, generated, color, host_options, threads, invocation, trace_sink)
     }
     // The image is where jet_cli_compile_target wrote it: under the source's
@@ -311,7 +330,17 @@ jet_cli_build_target_node: fn(node: JetCLIBuildNode, graph: BuildPlanExecution, 
     written: build_options_value(options, "output_dir")
     image_dir: if { written == "" -> "{source_root}/.jet/build" written.starts_with("/") -> written.copy() else -> "{source_root}/{written}" }
     image: cli_files.join(image_dir, row.name)
+    if needs.images.contains(target) {
+        copies_dir: jet_cli_entry_join(root, BUILD_SESSION_IMAGE_DIR)
+        copied: cli_files.join(copies_dir, row.name)
+        cli_files.create_dir_all(copies_dir) ?? return jet_cli_build_failed("couldn't create `{copies_dir}` for the images steps read: {err}", jet_cli_why("E2105"), "make `{copies_dir}` writable", color)
+        cli_files.copy2(image, copied) ?? return jet_cli_build_failed("couldn't copy `{row.name}`'s image `{image}` to `{copied}`, where a step reads it: {err}", jet_cli_why("E2105"), "make `{copies_dir}` writable", color)
+        cli_files.set_mode(copied, 493) ?? return jet_cli_build_failed("couldn't make `{copied}` executable: {err}", jet_cli_why("E2105"), "make `{copies_dir}` writable", color)
+    }
+    if !wants_host -> return built
+    if cross -> return jet_cli_compile_target(source_path, row.name, source, row.sources, generated, color, host_options, threads, invocation, trace_sink)
     tool: cli_files.join(host_dir, row.name)
+    cli_files.create_dir_all(host_dir) ?? return jet_cli_build_failed("couldn't create `{host_dir}` for the host copy of `{row.name}`: {err}", jet_cli_why("E2105"), "make `{host_dir}` writable", color)
     cli_files.copy2(image, tool) ?? return jet_cli_build_failed("couldn't copy `{row.name}`'s image to its host copy `{tool}`: {err}", jet_cli_why("E2105"), "make `{host_dir}` writable", color)
     cli_files.set_mode(tool, 493) ?? return jet_cli_build_failed("couldn't make the host copy `{tool}` executable: {err}", jet_cli_why("E2105"), "make `{host_dir}` writable", color)
     built
@@ -348,8 +377,9 @@ jet_cli_build_failures: fn(failures: [JetDriverVerbOutput]) -> JetDriverVerbOutp
 }
 
 // The steps a build runs: the selected ones, the ones each selected target
-// needs, and their prerequisites; for each `b.host` tool a step runs, its
-// target and the steps it needs. Steps ascending, targets in first use.
+// needs, and their prerequisites; for each `b.host` tool a step runs and each
+// `b.image` it reads, its target and the steps it needs. Steps ascending,
+// targets in first use.
 jet_cli_build_needs: fn(graph: BuildPlanExecution, plan: HermeticBuildPlan, selected: BuildPlanSelection, prereqs: [Int: [Int]]) -> JetCLIBuildNeeds HermeticBuildError! {
     steps := plan.selected_action_ids() ?? return Err(err)
     loop executable in selected.executables {
@@ -363,13 +393,19 @@ jet_cli_build_needs: fn(graph: BuildPlanExecution, plan: HermeticBuildPlan, sele
         }
     }
     host := [Int]{}
+    images := [Int]{}
     pending := steps.copy()
     loop pending.len() > 0 {
         step: pending.pop() ?? break
         more := prereqs.get(step) ?? [Int]{}
-        loop target in jet_cli_build_host_tools(graph, graph.actions[step]) {
+        loop target in jet_cli_build_step_targets(graph, graph.actions[step], "host") {
             if host.contains(target) -> next
             host.push(target)
+            loop need in jet_cli_build_target_steps(graph, target) -> more.push(need)
+        }
+        loop target in jet_cli_build_step_targets(graph, graph.actions[step], "image") {
+            if images.contains(target) -> next
+            images.push(target)
             loop need in jet_cli_build_target_steps(graph, target) -> more.push(need)
         }
         loop need in more {
@@ -380,14 +416,15 @@ jet_cli_build_needs: fn(graph: BuildPlanExecution, plan: HermeticBuildPlan, sele
         }
     }
     steps.sort()
-    Ok(JetCLIBuildNeeds{steps, host})
+    Ok(JetCLIBuildNeeds{steps, host, images})
 }
 
-// The targets whose host build `action` reads (`b.host`).
-jet_cli_build_host_tools: fn(graph: BuildPlanExecution, action: BuildSessionAction) -> [Int] Never! {
+// The targets whose `kind` build `action` reads: `host` for its `b.host`
+// tools, `image` for the `b.image` files it reads.
+jet_cli_build_step_targets: fn(graph: BuildPlanExecution, action: BuildSessionAction, kind: String) -> [Int] Never! {
     out := [Int]{}
     loop file in graph.files {
-        if file.kind != "host" || !action.inputs.contains(file.path) -> next
+        if file.kind != kind || !action.inputs.contains(file.path) -> next
         target: file.target ?? next
         if !out.contains(target) -> out.push(target)
     }
@@ -423,7 +460,8 @@ jet_cli_build_target_steps: fn(graph: BuildPlanExecution, target: Int) -> [Int] 
 }
 
 // The nodes of the build: the steps, the selected executables and
-// libraries, then the host-only targets, each with what it waits on.
+// libraries, then the unselected targets whose image a step reads, then the
+// host-only targets, each with what it waits on.
 jet_cli_build_nodes: fn(graph: BuildPlanExecution, selected: BuildPlanSelection, needs: JetCLIBuildNeeds, prereqs: [Int: [Int]]) -> [JetCLIBuildNode] Never! {
     nodes := [JetCLIBuildNode]{}
     step_nodes := [Int: Int]{}
@@ -431,28 +469,34 @@ jet_cli_build_nodes: fn(graph: BuildPlanExecution, selected: BuildPlanSelection,
         step_nodes[step] = nodes.len()
         nodes.push(JetCLIBuildNode{kind: .Step, id: step, name: graph.actions[step].name.copy(), needs: [Int]{}})
     }
-    // The node that builds each host tool's target.
-    tool_nodes := [Int: Int]{}
-    loop index in 0..<selected.executables.len() {
-        executable: selected.executables[index]
-        if needs.host.contains(executable.target) -> tool_nodes[executable.target] = nodes.len()
-        nodes.push(JetCLIBuildNode{kind: .Image, id: index, name: executable.name.copy(), needs: jet_cli_build_step_nodes(step_nodes, jet_cli_build_target_steps(graph, executable.target))})
+    // The node that builds each executable target a step uses.
+    target_nodes := [Int: Int]{}
+    loop executable in selected.executables {
+        target_nodes[executable.target] = nodes.len()
+        nodes.push(JetCLIBuildNode{kind: .Image, id: executable.target, name: executable.name.copy(), needs: jet_cli_build_step_nodes(step_nodes, jet_cli_build_target_steps(graph, executable.target))})
     }
     loop index in 0..<selected.libraries.len() {
         library: selected.libraries[index]
         nodes.push(JetCLIBuildNode{kind: .Library, id: index, name: library.name.copy(), needs: jet_cli_build_step_nodes(step_nodes, jet_cli_build_target_steps(graph, library.target))})
     }
+    loop target in needs.images {
+        if target_nodes.get(target) != None -> next
+        target_nodes[target] = nodes.len()
+        nodes.push(JetCLIBuildNode{kind: .Image, id: target, name: graph.targets[target].name.copy(), needs: jet_cli_build_step_nodes(step_nodes, jet_cli_build_target_steps(graph, target))})
+    }
     loop target in needs.host {
-        if tool_nodes.get(target) != None -> next
-        tool_nodes[target] = nodes.len()
+        if target_nodes.get(target) != None -> next
+        target_nodes[target] = nodes.len()
         nodes.push(JetCLIBuildNode{kind: .Host, id: target, name: graph.targets[target].name.copy(), needs: jet_cli_build_step_nodes(step_nodes, jet_cli_build_target_steps(graph, target))})
     }
     loop step in needs.steps {
         index: step_nodes.get(step) ?? panic("a needed step has a node")
         waits := jet_cli_build_step_nodes(step_nodes, prereqs.get(step) ?? [Int]{})
-        loop target in jet_cli_build_host_tools(graph, graph.actions[step]) {
-            tool: tool_nodes.get(target) ?? panic("a step's host tool has a node")
-            if !waits.contains(tool) -> waits.push(tool)
+        uses := jet_cli_build_step_targets(graph, graph.actions[step], "host")
+        loop target in jet_cli_build_step_targets(graph, graph.actions[step], "image") -> uses.push(target)
+        loop target in uses {
+            made: target_nodes.get(target) ?? panic("a target a step uses has a node")
+            if !waits.contains(made) -> waits.push(made)
         }
         node := nodes[index].copy()
         node.needs = waits

@@ -15,7 +15,7 @@ build_session_add_run: fn(state: &BuildSessionState, args: [BuildSessionValue], 
     probes := [Int]{}
     inputs := [String]{}
     if file.probe == .Val(probe) -> probes.push(probe)
-    if file.kind == "output" || file.kind == "host" || file.kind == "dependency" -> inputs.push(file.path.copy())
+    if file.kind == "output" || file.kind == "host" || file.kind == "image" || file.kind == "dependency" -> inputs.push(file.path.copy())
     action: BuildSessionAction{name: name, inputs: inputs, outputs: [String]{}, argv: [String]{file.path.copy()}, caps: caps, toolchain: 0, probes: probes, signing: None, tool: tool, start: start, end: end}
     if action.name.trim() == "" -> return build_session_error_fail(state, .EmptyActionName)
     if state.actions.len() >= 100000 -> return build_session_fail(state, "action graph exceeds 100000 actions")
@@ -36,15 +36,22 @@ build_session_found: fn(state: &BuildSessionState, args: [BuildSessionValue]) ->
 
 // Where `b.host(target)` puts the target's host build, never installed.
 BUILD_SESSION_HOST_DIR: ".jet/build/host"
+// Where `b.image(target)` puts a copy of the target's image for steps.
+BUILD_SESSION_IMAGE_DIR: ".jet/build/image"
 
 // `b.host(target)`: the executable `target` built for the machine running
-// the build, the tool a step runs on it.
-build_session_host: fn(state: &BuildSessionState, args: [BuildSessionValue]) -> BuildSessionReply {
-    if args.len() != 1 -> return build_session_fail(state, "`b.host` takes one target")
+// the build, the tool a step runs on it. `b.image(target)` (`image` true):
+// the same target built for the build's selected platform, the program a
+// step packs or ships.
+build_session_host: fn(state: &BuildSessionState, args: [BuildSessionValue], image: Bool) -> BuildSessionReply {
+    call: if image -> "b.image" else -> "b.host"
+    if args.len() != 1 -> return build_session_fail(state, "`{call}` takes one target")
     target: build_session_handle(state, args[0], "BuildTarget") ?? return build_session_fail(state, "the target does not belong to this build")
     row: state.targets[target]
-    if row.kind != "executable" || row.sources.len() == 0 -> return build_session_fail(state, "`b.host` builds an executable target from its source, and `{row.name}` is a {row.kind} target{if row.sources.len() == 0 -> " with no source" else -> ""}")
-    build_session_new_file(state, BuildSessionFile{kind: "host", path: "{BUILD_SESSION_HOST_DIR}/{row.name}", probe: None, action: None, target: Val(target)})
+    if row.kind != "executable" || row.sources.len() == 0 -> return build_session_fail(state, "`{call}` builds an executable target from its source, and `{row.name}` is a {row.kind} target{if row.sources.len() == 0 -> " with no source" else -> ""}")
+    kind: if image -> "image" else -> "host"
+    folder: if image -> BUILD_SESSION_IMAGE_DIR else -> BUILD_SESSION_HOST_DIR
+    build_session_new_file(state, BuildSessionFile{kind: kind, path: "{folder}/{row.name}", probe: None, action: None, target: Val(target)})
 }
 
 // `b.jet()`: the compiler running the build, as a tool.
