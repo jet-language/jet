@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6697,
-    "rev": 96215,
+    "rev": 96217,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -100219,6 +100219,11 @@
         {
           "at": "2026-11-08",
           "by": "Main",
+          "text": "SpeedLead: build.jet cannot list a folder at plan time (b.find returns files only, walks into .jet, and is not recorded as a plan input; #4833 known-failing). So c6 keeps STAGE_FOLDERS and STAGE_FILES as a kernel.tsv row, plus a tests/guards check that every top-level entry of a split stage package (except Generated and dot entries) is listed, so the list cannot go stale silently. The .jet/deps alias hole touches 5 to 6 files in two packages and is now its own criterion; c6 does not depend on it."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
           "text": "c6 layout ruling (Main): the build-graph contract stays. SpeedLead moves the 4 kept generated sources into <pkg>/Generated/ (JetFoundation PreludeMarkers, JetSema PreludeDerives and PreludeUnits, JetLexer KeywordSpans). Stages read those packages top-level entries minus Generated/, derived at plan time, not a hand list, plus the kept files through .reads. The rejected alternative (narrow folders plus about 105 explicit files) would be a stale-prone closed list. Owner Q20 is withdrawn. Validator defect found by SpeedLead: both validators compare spelled folder paths, so a dependency bound at .jet/deps on the same real folder escapes the rule. It is fixed in the same patch by comparing resolved folders, with a #Test."
         },
         {
@@ -100345,6 +100350,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-08T01:30:57.119Z"
+        },
+        {
+          "n": 8,
+          "text": "The step-output-in-read-folder rule (Graph.jet and Jetpack Validation.jet, spec.md:5050, E3502) compares resolved real folders, not spelled paths. A dependency bound at .jet/deps (or any other alias) that resolves to a folder holding a step output is refused. The project root and each dependency root are threaded into both validators and resolved through the host. A BuildGraphRules #Test covers the alias case.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T18:12:22.444Z"
         }
       ],
       "refs": [],
@@ -100355,8 +100369,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-08T01:30:57.119Z",
-      "updated": "2026-11-08T18:08:19.160Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-08T18:12:23.576Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 8
     },
     {
       "id": "c0zizxhx",
@@ -189478,6 +189493,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-08T18:12:23.576Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0crz3ra",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-08T18:12:22.444Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0crz3ra",
+      "note": "#8 The step-output-in-read-folder rule (Graph.jet and Jetpack V"
+    },
     {
       "at": "2026-11-08T18:08:19.160Z",
       "by": "Main",
