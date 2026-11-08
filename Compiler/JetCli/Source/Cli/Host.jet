@@ -1616,6 +1616,9 @@ jet_cli_finish: fn(output: JetDriverVerbOutput) -> Never {
 // Launching its own path again runs it the way it runs now: this jet, this
 // profile and build-option flags, this invocation's authority
 // (`jet run [--profile=…] [--optimize=…] [--log=…] [--gate=…] [-A] [--allow=…] [--deny=…]`).
+// A run confined by `--allow=FS.Read:<path>` (jet_cli_read_scope) reads
+// only those paths, and JET_READ_SCOPE names them, so the runtime's refusal
+// of any other read names the grant.
 jet_cli_launch_plan: fn(file: String, program_args: [String], options: BuildOptions, invocation: JetCLIInvocationAuthority?, vars: [JetCLIEnvVar]) -> X64Launch {
     executable: cli_files.absolute(file) ?? file
     argv := [String]{executable}
@@ -1634,7 +1637,11 @@ jet_cli_launch_plan: fn(file: String, program_args: [String], options: BuildOpti
         if rows.allow.len() > 0 -> relaunch.push("--allow={rows.allow.join(",")}")
         if rows.deny.len() > 0 -> relaunch.push("--deny={rows.deny.join(",")}")
     }
-    X64Launch{argv: argv, env: jet_cli_launch_env(vars), executable: executable, name: jet_cli_stem(file), relaunch: relaunch, parent_death: true}
+    scope: jet_cli_read_scope(invocation)
+    // copy: `vars` is the caller's; the launch's rows own their own.
+    env_vars := vars.copy()
+    if scope.len() > 0 -> env_vars.push(JetCLIEnvVar{name: "JET_READ_SCOPE", value: scope.join(", ")})
+    X64Launch{argv: argv, env: jet_cli_launch_env(env_vars), executable: executable, name: jet_cli_stem(file), relaunch: relaunch, parent_death: true, read_scope: scope}
 }
 
 // The environment of an observed run (`jet run --observe`, `jet perf test`):

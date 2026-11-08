@@ -93,6 +93,8 @@ X64LoadedImage: struct {
 // undecoded, the way a kernel exec of the file would get it. `parent_death`:
 // a spawned child gets SIGTERM when the thread that spawned it ends (see
 // loader_plan); only a spawn from jet's main thread may ask for it.
+// `read_scope`: when not empty, the only files and directories the program
+// may read (x64_confine_reads).
 X64Launch: struct {
     argv: [String]
     env: [String]?
@@ -100,6 +102,7 @@ X64Launch: struct {
     name: String
     relaunch: [String]
     parent_death: Bool
+    read_scope: [String]
 }
 
 // A process started from an image: its pid, else why it didn't start.
@@ -1197,12 +1200,17 @@ loader_plan: fn(image: X64LoadedImage, launch: X64Launch, fds: [Int], fork: Bool
 
 // Run `image` in place of this process, as execve would; returns only when
 // it can't, with why (nothing has been changed then). The caller flushes
-// its own output first.
+// its own output first. A launch with a read scope is confined last.
 x64_image_exec: fn(image: X64LoadedImage, launch: X64Launch) -> String {
     threads: x64_process_threads()
     if threads != 1 -> return "{threads} threads are running"
     plan: loader_plan(image, launch, [Int]{}, false)
     if plan.failure != "" -> return plan.failure
+    confined: x64_confine_reads(launch.read_scope)
+    if confined != "" {
+        loader_free(plan)
+        return confined
+    }
     #Unsafe("the executor's records only reset process state; it then enters the loaded image on its own stack") {
         _ := os_call_address(plan.executor, plan.plan)
     }
@@ -1210,10 +1218,17 @@ x64_image_exec: fn(image: X64LoadedImage, launch: X64Launch) -> String {
 }
 
 // Start `image` in a forked child (fds as for loader_plan). This process
-// keeps its own copy of the image; the caller unloads it when done.
+// keeps its own copy of the image; the caller unloads it when done. A launch
+// with a read scope confines this thread before the fork, so the child
+// starts confined.
 x64_image_spawn: fn(image: X64LoadedImage, launch: X64Launch, fds: [Int]) -> X64Spawned {
     plan: loader_plan(image, launch, fds, true)
     if plan.failure != "" -> return X64Spawned{pid: -1, failure: plan.failure}
+    confined: x64_confine_reads(launch.read_scope)
+    if confined != "" {
+        loader_free(plan)
+        return X64Spawned{pid: -1, failure: confined}
+    }
     pid := 0
     #Unsafe("the executor's first record forks; the child runs only the executor and enters the image, the parent returns here") {
         pid = os_call_address(plan.executor, plan.plan)
@@ -1221,6 +1236,77 @@ x64_image_spawn: fn(image: X64LoadedImage, launch: X64Launch, fds: [Int]) -> X64
     loader_free(plan)
     if os_failed(pid) -> return X64Spawned{pid: -1, failure: "fork failed (errno {-pid})"}
     X64Spawned{pid: pid, failure: ""}
+}
+
+// Landlock's file-system access rights (`LANDLOCK_ACCESS_FS_*`) a read
+// confinement handles, and its one rule kind: rights beneath an opened path.
+LOADER_LANDLOCK_READ_FILE: 4
+LOADER_LANDLOCK_READ_DIR: 8
+LOADER_LANDLOCK_RULE_PATH_BENEATH: 1
+
+// Confine this thread, and every process it becomes or starts, to reading
+// only what `paths` name, with Landlock: each a directory and everything
+// beneath it, or one file, relative to the working directory. The kernel
+// checks the file an open reaches, so neither `..` nor a symbolic link leads
+// out. Writing, running programs and every other access stay as they were.
+// "" when it holds or `paths` is empty; else why it couldn't, and then
+// nothing is confined.
+x64_confine_reads: fn(paths: [String]) -> String {
+    if paths.len() == 0 -> return ""
+    page: os_map(OS_PAGE_SIZE, OS_PROT_READ + OS_PROT_WRITE)
+    if os_failed(page) -> return "mapping the read confinement failed (errno {-page})"
+    ruleset := 0
+    #Unsafe("landlock_create_ruleset reads the 8-byte handled-access word at the start of the fresh page") {
+        os_store_word(page, LOADER_LANDLOCK_READ_FILE + LOADER_LANDLOCK_READ_DIR)
+        ruleset = os_syscall(OS_SYS_LANDLOCK_CREATE_RULESET, page, 8, 0, 0, 0, 0)
+    }
+    if os_failed(ruleset) {
+        _ := os_unmap(page, OS_PAGE_SIZE)
+        return "this kernel can't confine a program's reads (Landlock, errno {-ruleset})"
+    }
+    failure := ""
+    loop path in paths {
+        failure = loader_landlock_allow(ruleset, page, path)
+        if failure != "" -> break
+    }
+    #Unsafe("no_new_privs and landlock_restrict_self change only this thread's own rights; the ruleset fd is this function's") {
+        if failure == "" {
+            result := os_syscall(OS_SYS_PRCTL, OS_PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0, 0)
+            if !os_failed(result) -> result = os_syscall(OS_SYS_LANDLOCK_RESTRICT_SELF, ruleset, 0, 0, 0, 0, 0)
+            if os_failed(result) -> failure = "the kernel refused the read confinement (errno {-result})"
+        }
+        _ := os_syscall(OS_SYS_CLOSE, ruleset, 0, 0, 0, 0, 0)
+    }
+    _ := os_unmap(page, OS_PAGE_SIZE)
+    failure
+}
+
+// Let `ruleset` read `path`: a directory and everything beneath it, or one
+// file. The rule (its access word, then the 32-bit fd of the opened path)
+// goes in the scratch `page`. "" when added, else why not.
+loader_landlock_allow: fn(ruleset: Int, page: Int, path: String) -> String {
+    name: loader_c_string(path)
+    if name == 0 -> return "mapping the granted path `{path}` failed"
+    access := LOADER_LANDLOCK_READ_FILE + LOADER_LANDLOCK_READ_DIR
+    fd := 0
+    #Unsafe("openat reads the NUL-terminated path at `name`") {
+        fd = os_syscall(OS_SYS_OPENAT, OS_AT_FDCWD, name, OS_O_PATH_CLOEXEC + OS_O_DIRECTORY, 0, 0, 0)
+        if fd == -OS_ENOTDIR {
+            access = LOADER_LANDLOCK_READ_FILE
+            fd = os_syscall(OS_SYS_OPENAT, OS_AT_FDCWD, name, OS_O_PATH_CLOEXEC, 0, 0, 0)
+        }
+    }
+    _ := os_unmap(name, path.len() + 1)
+    if os_failed(fd) -> return "the granted path `{path}` can't be opened (errno {-fd})"
+    result := 0
+    #Unsafe("landlock_add_rule reads the packed 12-byte rule at the start of the caller's page; the O_PATH fd is this function's") {
+        os_store_word(page, access)
+        os_store_word(page + 8, fd)
+        result = os_syscall(OS_SYS_LANDLOCK_ADD_RULE, ruleset, LOADER_LANDLOCK_RULE_PATH_BENEATH, page, 0, 0, 0)
+        _ := os_syscall(OS_SYS_CLOSE, fd, 0, 0, 0, 0, 0)
+    }
+    if os_failed(result) -> return "the kernel refused to let the program read `{path}` (errno {-result})"
+    ""
 }
 
 // Wait for the child `pid`: its wait status, or -errno.
@@ -1277,7 +1363,8 @@ x64_process_mirror: fn(status: Int) -> Int {
 }
 
 // The fallback: execute the image file at `path` in place of this process
-// with `launch`'s argv and environment. Returns only on failure, with why.
+// with `launch`'s argv and environment, confined to its read scope first
+// (x64_confine_reads). Returns only on failure, with why.
 x64_file_exec: fn(path: String, launch: X64Launch) -> String {
     environ: loader_environ(launch.env) ?? return "couldn't read /proc/self/environ"
     starts: loader_environ_starts(environ)
@@ -1297,6 +1384,11 @@ x64_file_exec: fn(path: String, launch: X64Launch) -> String {
     }
     argv: block + 16
     envp: argv + 8 * (launch.argv.len() + 1)
+    confined: x64_confine_reads(launch.read_scope)
+    if confined != "" {
+        _ := os_unmap(block, size)
+        return confined
+    }
     result := 0
     #Unsafe("execve reads the NUL-terminated strings and the two NULL-ended arrays in the block; the empty signal set at the block's start") {
         loop k in 0..<launch.argv.len() { os_store_word(argv + 8 * k, addresses[1 + k]) }

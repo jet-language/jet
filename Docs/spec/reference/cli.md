@@ -751,6 +751,18 @@ E1803, exit 1; a file with no package manifest leads the Fix with the exact
 receipts, and lint-policy enforcement are not ported yet: the Jet host always
 answers as a non-interactive run.
 
+`jet run --allow=FS.Read:<path>` grants `FS.Read` confined to that path: the
+program may read the named file, or the named directory and everything
+beneath it, and nothing else (several such rows grant each path; `-A`,
+`--allow=FS` and `--allow=FS.Read` lift the confinement). The path is
+relative to the working directory. The kernel enforces it (Linux Landlock,
+[`Loader.jet`](../../../Compiler/JetBackend/Source/Image/Loader.jet)
+`x64_confine_reads`) on the file an open reaches, so neither `..` nor a
+symbolic link leads out, and processes the program starts are confined too.
+Any other read fails with a `PermissionDenied` error whose cause names E1803
+and the granted paths (`JET_READ_SCOPE`). A kernel that can't confine the
+run refuses it instead of running it unconfined.
+
 `jet doc --check [<file.jet|dir>]` exits 1 when a public API item has no `///`
 summary (L2201). Command entries are not library API: a module-level `run: fn`,
 `build: fn`, `test: fn` or `dev: fn` (a `#CLI` program's entry is its `run: fn`)

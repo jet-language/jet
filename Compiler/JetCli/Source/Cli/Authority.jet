@@ -173,6 +173,8 @@ jet_cli_policy_authority: fn(required: [String], authority_policy: JetDriverAuth
 
 // `authority` with this invocation's rows merged in: `-A` grants every
 // grantable right, `--allow` its rights, and `--deny` denies, which wins.
+// `--allow=FS.Read:<path>` grants `FS.Read` itself: the run it launches can
+// read only those paths (jet_cli_read_scope).
 jet_cli_with_invocation: fn(authority: &JetCLIAuthority, invocation: JetCLIInvocationAuthority?) Never! {
     rows: invocation ?? return
     // copy: the policy rows stay in `authority` until the merged rows replace them.
@@ -181,6 +183,7 @@ jet_cli_with_invocation: fn(authority: &JetCLIAuthority, invocation: JetCLIInvoc
         loop root in authority_grantable_roots() -> granted.push(root)
     }
     loop right in rows.allow -> granted.push(right)
+    if jet_cli_read_scope(invocation).len() > 0 -> granted.push("FS.Read")
     // copy: as `granted` above.
     denied := authority.denied.copy()
     loop right in rows.deny -> denied.push(right)
@@ -188,6 +191,21 @@ jet_cli_with_invocation: fn(authority: &JetCLIAuthority, invocation: JetCLIInvoc
     authority.denied = jet_cli_sorted_set(denied)
     authority.invocation_denied = jet_cli_sorted_set(rows.deny)
     authority.authority = "{authority.authority} + CLI invocation"
+}
+
+// The paths `--allow=FS.Read:<path>` rows confine a run's reads to: its
+// launch lets the program read those files and directories and nothing else
+// (Loader.jet x64_confine_reads). Empty when the invocation names none, or
+// also lets it read everything (`-A`, `--allow=FS`, `--allow=FS.Read`).
+jet_cli_read_scope: fn(invocation: JetCLIInvocationAuthority?) -> [String] Never! {
+    rows: invocation ?? return [String]{}
+    if rows.all -> return [String]{}
+    paths := [String]{}
+    loop right in rows.allow {
+        if right == "FS" || right == "FS.Read" -> return [String]{}
+        if right.starts_with("FS.Read:") -> paths.push(right.slice(8..<right.len()))
+    }
+    paths
 }
 
 // Required rights with no policy verdict. Deny-only rights (the Panic and Mem

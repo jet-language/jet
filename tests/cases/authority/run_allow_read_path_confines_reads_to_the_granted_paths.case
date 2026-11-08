@@ -1,0 +1,28 @@
+# Claim (#5949 c11): `jet run --allow=FS.Read:<path>` lets the program read the
+# granted directory and everything beneath it, or exactly the granted file, and
+# refuses every other read with E1803 naming the refused path and the grant:
+# a file beside the grant, a `..` path and a symbolic link (to a file or to a
+# directory) that lead out are all refused. An unscoped `--allow=FS.Read`
+# lifts the confinement.
+fixture: run_allow_read_path_confines_reads_to_the_granted_paths.fixture
+env: NO_COLOR=1
+env: XDG_CACHE_HOME={work}/cache
+env: JET_STORE_DIR={work}/store
+step links: sh -c "ln -s ../other.txt data/link.txt && ln -s .. data/up"
+exit: 0
+step directory: jet run --allow=FS.Read:./data bin/s.jet data/a.txt data/b.txt other.txt data/../other.txt data/link.txt data/up/other.txt
+exit: 0
+stdout: = "data/a.txt: data-a\ndata/b.txt: data-b\nother.txt: permission denied during read `other.txt`: Permission denied (os error 13); E1803: this run may read only ./data (`--allow=FS.Read:<path>`)\ndata/../other.txt: permission denied during read `data/../other.txt`: Permission denied (os error 13); E1803: this run may read only ./data (`--allow=FS.Read:<path>`)\ndata/link.txt: permission denied during read `data/link.txt`: Permission denied (os error 13); E1803: this run may read only ./data (`--allow=FS.Read:<path>`)\ndata/up/other.txt: permission denied during read `data/up/other.txt`: Permission denied (os error 13); E1803: this run may read only ./data (`--allow=FS.Read:<path>`)\n"
+stderr: = ""
+step file: jet run --allow=FS.Read:./data/a.txt bin/s.jet data/a.txt data/b.txt
+exit: 0
+stdout: = "data/a.txt: data-a\ndata/b.txt: permission denied during read `data/b.txt`: Permission denied (os error 13); E1803: this run may read only ./data/a.txt (`--allow=FS.Read:<path>`)\n"
+stderr: = ""
+step release: jet run --release --allow=FS.Read:./data bin/s.jet data/a.txt other.txt
+exit: 0
+stdout: = "data/a.txt: data-a\nother.txt: permission denied during read `other.txt`: Permission denied (os error 13); E1803: this run may read only ./data (`--allow=FS.Read:<path>`)\n"
+stderr: = ""
+step unscoped: jet run --allow=FS.Read bin/s.jet data/a.txt other.txt data/link.txt
+exit: 0
+stdout: = "data/a.txt: data-a\nother.txt: other\ndata/link.txt: other\n"
+stderr: = ""
