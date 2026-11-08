@@ -13,8 +13,12 @@ use {
     sys: core.sys
 }
 
-// The packages a `packages` run tests at once.
+// The packages a `packages` run tests at once: a quarter of the CPUs, at
+// least PACKAGE_JOBS and at most PACKAGE_JOBS_MAX (package_jobs). One
+// package run can hold about 5.5 GB, so the cap keeps a batch inside a
+// 64 GB host.
 PACKAGE_JOBS: 4
+PACKAGE_JOBS_MAX: 8
 
 // The trees whose packages a `packages` run tests, from the checkout:
 // tests/guards holds the repository guard packages (the top package,
@@ -167,18 +171,27 @@ package_suite_rows: fn(rows: TestRows) {
     loop source in sources {
         if source.script && test_frozen_tree(source.path) == "" -> runs.push(source.path.copy())
     }
+    // The engine unit is assembled first, so the hosted engine's build runs
+    // as the batch's first job: it overlaps the package runs instead of
+    // following them, and it starts while the host is still quiet.
+    prep: jetpack_prepare(setup)
     specs := [ProcessSpec]{}
+    first := 0
+    if prep.build == .Val(build) {
+        specs.push(build.copy())
+        first = 1
+    }
     loop run in runs {
         specs.push(jet_command(setup, setup.jet, [String]{"test", run}).env("JET_BIN", setup.jet))
     }
-    results: process.run_all(specs, PACKAGE_JOBS) ?? {
+    results: process.run_all(specs, package_jobs()) ?? {
         rows.fail("packages", "couldn't start the package runs: {err}")
         return
     }
     ran := [String: [String]]{}
     broke := [String]{}
     loop (index, run) in runs {
-        if results[index] == {
+        if results[index + first] == {
             .Ok(receipt) -> {
                 if package_rows(rows, run, receipt) == {
                     .Val(names) -> { ran[run] = names }
@@ -191,7 +204,21 @@ package_suite_rows: fn(rows: TestRows) {
             }
         }
     }
-    unit: jetpack_engine_rows(rows, setup)
+    // The hosted engine's build, when the batch ran it: why it left no
+    // engine, else "".
+    build_failure := ""
+    if first == 1 {
+        if results[0] == {
+            .Ok(receipt) -> {
+                if !receipt.success || !files.is_file(prep.engine) {
+                    detail: failure_line(receipt.errors)
+                    build_failure = "the hosted engine didn't build (exit {receipt.code}): {if detail == "" -> failure_line(receipt.output) else -> detail}"
+                }
+            }
+            .Err(error) -> { build_failure = "couldn't build the hosted engine: {error}" }
+        }
+    }
+    unit: jetpack_engine_rows(rows, setup, prep, build_failure)
     if listing != "" {
         rows.fail(COVERAGE_ROW, listing)
         return
@@ -199,34 +226,72 @@ package_suite_rows: fn(rows: TestRows) {
     test_coverage_rows(rows, setup, members, sources, TestRuns{ran, broke, unit})
 }
 
+// The package runs at once (PACKAGE_JOBS).
+package_jobs: fn() -[Env]> Int {
+    count: sys.cpu_count() /% 4
+    if count < PACKAGE_JOBS -> return PACKAGE_JOBS
+    if count > PACKAGE_JOBS_MAX -> return PACKAGE_JOBS_MAX
+    count
+}
+
+// The engine unit made ready before the package runs: its assembled `aot`
+// directory and source map, and the engine its process claims run. Unless
+// JETPACK_BIN names an engine, `engine` is the hosted engine's binary and
+// `build` its `jet build`, which package_suite_rows runs in the package
+// batch. A non-empty `error` leaves no unit to run.
+JetpackPrep: struct {
+    assembled: String
+    map: JetpackMap
+    engine: String
+    build: ProcessSpec?
+    error: String
+}
+
+// `jet Jetpack/Bootstrap/Assemble.jet` in `aot` mode and, without
+// JETPACK_BIN, in `hosted` mode: the hosted engine is `jet build` of every
+// implementation file and Jetpack/run.jet, and jet's own build cache makes an
+// unchanged rebuild cheap.
+jetpack_prepare: fn(setup: SuiteSetup) -> JetpackPrep {
+    scratch: files.join(setup.checkout, JETPACK_ENGINE_SCRATCH)
+    prep := JetpackPrep{assembled: "", map: JetpackMap{claims: [JetpackClaim]{}, files: [String]{}}, engine: sys.get("JETPACK_BIN") ?? "", build: None, error: ""}
+    assembled: jetpack_assemble(setup, scratch, "aot") ?? {
+        prep.error = err.message.copy()
+        return prep
+    }
+    prep.assembled = assembled.copy()
+    prep.map = jetpack_map(files.join(scratch, "aot/jetpack.map.json")) ?? {
+        prep.error = err.message.copy()
+        return prep
+    }
+    if prep.engine != "" -> return prep
+    hosted: jetpack_assemble(setup, scratch, "hosted") ?? {
+        prep.error = err.message.copy()
+        return prep
+    }
+    project: files.join(hosted, "project")
+    prep.engine = files.join(project, ".jet/build/jetpack")
+    prep.build = Val(jet_command(setup, setup.jet, [String]{"build", "src/jetpack.jet"}).cwd(project))
+    prep
+}
+
 // The Jetpack engine areas' claims, one row each, `Jetpack/<section>:
 // <claim>`: Assemble.jet joins every implementation file and the claims of
 // JETPACK_ENGINE_SECTIONS into one unit, and `jet test` runs it serially (the
 // claims share process state). JET_BIN names the jet under test; process
 // claims run the engine named by JETPACK_BIN, the caller's, else the hosted
-// engine built here from this checkout. A unit that didn't run to its
-// summary is the failing row `Jetpack engine`. Returns the unit's files and
-// the claims it reported, or a unit that didn't run.
-jetpack_engine_rows: fn(rows: TestRows, setup: SuiteSetup) -> JetpackUnit {
+// engine `prep` built; `build_failure` says why that build left no engine.
+// A unit that didn't run to its summary is the failing row `Jetpack engine`.
+// Returns the unit's files and the claims it reported, or a unit that didn't
+// run.
+jetpack_engine_rows: fn(rows: TestRows, setup: SuiteSetup, prep: JetpackPrep, build_failure: String) -> JetpackUnit {
     unit: "Jetpack engine"
     none: JetpackUnit{ran: false, files: [String]{}, claims: [String]{}}
-    scratch: files.join(setup.checkout, JETPACK_ENGINE_SCRATCH)
-    assembled: jetpack_assemble(setup, scratch, "aot") ?? {
-        rows.fail(unit, err.message)
+    if prep.error != "" || build_failure != "" {
+        rows.fail(unit, if prep.error != "" -> prep.error else -> build_failure)
         return none
     }
-    map: jetpack_map(files.join(scratch, "aot/jetpack.map.json")) ?? {
-        rows.fail(unit, err.message)
-        return none
-    }
-    engine := sys.get("JETPACK_BIN") ?? ""
-    if engine == "" {
-        engine = jetpack_hosted(setup, scratch) ?? {
-            rows.fail(unit, err.message)
-            return none
-        }
-    }
-    receipt: jet_command(setup, setup.jet, [String]{"test", "src/jetpack.jet", "--serial"}).cwd(files.join(assembled, "project")).env("JET_BIN", setup.jet).env("JETPACK_BIN", engine).run() ?? {
+    map: prep.map
+    receipt: jet_command(setup, setup.jet, [String]{"test", "src/jetpack.jet", "--serial"}).cwd(files.join(prep.assembled, "project")).env("JET_BIN", setup.jet).env("JETPACK_BIN", prep.engine).run() ?? {
         rows.fail(unit, "couldn't run `jet test` on the engine unit: {err}")
         return none
     }
@@ -280,20 +345,6 @@ jetpack_assemble: fn(setup: SuiteSetup, scratch: String, mode: String) -> String
     ran: jet_command(setup, setup.jet, [String]{script, mode}).env("JET_BIN", setup.jet).env("JETPACK_BOOTSTRAP_SCRATCH", scratch).env("JETPACK_BOOTSTRAP_TEST_AREAS", JETPACK_ENGINE_SECTIONS).env_remove("JETPACK_BOOTSTRAP_SOURCE_ROOT").env_remove("JETPACK_BOOTSTRAP_AREAS").env_remove("JETPACK_BOOTSTRAP_OWN_AREA").run() ?? return Err("couldn't run `{setup.jet} {script} {mode}`: {err}")
     if !ran.success -> return Err("`Assemble.jet {mode}` exited {ran.code}: {failure_line(ran.errors)}")
     Ok(files.join(scratch, mode))
-}
-
-// The hosted engine, `jet build` of every implementation file and
-// Jetpack/run.jet; jet's own build cache makes an unchanged rebuild cheap.
-jetpack_hosted: fn(setup: SuiteSetup, scratch: String) -> String Err! {
-    hosted: jetpack_assemble(setup, scratch, "hosted") ?? return Err(err.message)
-    project: files.join(hosted, "project")
-    built: jet_command(setup, setup.jet, [String]{"build", "src/jetpack.jet"}).cwd(project).run() ?? return Err("couldn't build the hosted engine: {err}")
-    binary: files.join(project, ".jet/build/jetpack")
-    if !built.success || !files.is_file(binary) {
-        detail: failure_line(built.errors)
-        return Err("the hosted engine didn't build (exit {built.code}): {if detail == "" -> failure_line(built.output) else -> detail}")
-    }
-    Ok(binary)
 }
 
 // The unit's claims in order with their sections, and the source files it
