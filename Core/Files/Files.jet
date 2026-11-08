@@ -484,6 +484,18 @@ Directory: struct {
         }
     }
 
+    /// A fresh handle to this same directory, independent of this one:
+    /// closing either leaves the other open, and both keep naming the
+    /// directory after its path is renamed. The new handle is opened through
+    /// this one, never by path. `spec.keep_open(directory.duplicate())`
+    /// keeps the directory open in a child while this handle stays usable.
+    duplicate: fn(self) -[FS.Read]> Directory IOError! {
+        key: core.files.__open_directory(self.handle, ".")
+        Ok(Directory{path: self.path.copy(), handle: key})
+    }
+
+    // Kept only for CacheLease, which passes one lease directory into many
+    // specs; every other caller uses ProcessSpec.keep_open (#6677).
     /// Pass this directory to the process `spec` starts, open at descriptor
     /// `at` (3 or more): the child inherits a duplicate, so renaming or
     /// closing the directory here afterwards does not change what it sees.
@@ -530,6 +542,31 @@ process_directory: fn(spec: ProcessSpec, directory: Directory, child_fd: Int, as
             cause: Val("the requested inherited directory descriptor slot is already passed to this process")}))
     }
     Ok(row.spec)
+}
+
+// `spec.keep_open(handle, at:)`, the Core body every tier runs. The child
+// `spec` starts gets a duplicate of `handle` at descriptor `at`, or at the
+// handle's own number when `at` is None. The spec takes the handle, so the
+// parent's descriptor closes here and the duplicate closes with the spec. A
+// refusal is recorded on the spec and returned by spawn, run, run_checked and
+// plan before any child exists: a slot outside 3 to 2147483646 or one the
+// spec already keeps is IOError.InvalidInput, and a failed duplication is
+// IOError.Other. A FileLock is IOError.Unsupported until the seed carries
+// `__lock_fd` (#6677 phase 1 of 2); -3 is the runtime's
+// PROCESS_KEEP_REFUSED_UNSUPPORTED source.
+__spec_keep_open: fn(spec: ProcessSpec, handle: &&FileReader | FileWriter | FileLock | Directory, at: Int?{None}) -[FS]> ProcessSpec Never! {
+    fd: if handle == {
+        .FileReader(reader) -> core.files.__reader_fd(reader) ?? -1
+        .FileWriter(writer) -> core.files.__writer_fd(writer) ?? -1
+        .FileLock(_) -> -3
+        .Directory(directory) -> {
+            held: core.files.__directory_fd(directory.handle)
+            if held.available && held.held -> held.fd else -> -1
+        }
+    }
+    slot: at ?? fd
+    child: if slot < 3 || slot > 2147483646 -> -1 else -> slot
+    core.process.__keep_open_raw(spec, fd, child, false).spec
 }
 
 #Test("compiler process directories retain authority after rename and close") {
@@ -582,6 +619,31 @@ process_directory: fn(spec: ProcessSpec, directory: Directory, child_fd: Int, as
         assert(core.files.__reader_fd(reader) == .Ok(reader_fd))
         close(reader)
         close(writer)
+        remove_all(root) ?? panic("cleanup")
+    }
+}
+
+#Test("a duplicated directory is independent of the original and keeps the same directory") {
+    if sys.name() == "linux" {
+        root: mktemp("duplicate-directory-test")
+        held_path: join(root, "held")
+        create_dir_all(held_path) ?? panic("held")
+        write(join(held_path, "held.txt"), "held\n") ?? panic("marker")
+        original: open_directory(held_path) ?? panic("hold")
+        twin: original.duplicate() ?? panic("duplicate")
+        assert(twin.path == original.path)
+        original_fd: core.files.__directory_fd(original.handle)
+        twin_fd: core.files.__directory_fd(twin.handle)
+        assert(original_fd.held && twin_fd.held && original_fd.fd != twin_fd.fd)
+        rename(held_path, join(root, "moved")) ?? panic("rename")
+        create_dir_all(held_path) ?? panic("replacement")
+        write(join(held_path, "replacement.txt"), "wrong\n") ?? panic("replacement marker")
+        close(original)
+        names := [String]{}
+        entries: twin.list() ?? panic("list through the duplicate")
+        loop entry in entries -> names.push(entry.name)
+        assert(names == [String]{"held.txt"})
+        close(twin)
         remove_all(root) ?? panic("cleanup")
     }
 }

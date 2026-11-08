@@ -309,6 +309,7 @@ pipeline_text: fn(builder: I64) -> I64 { rt_text_copy(rt_text_data(builder), rt_
     at := I64{0}
     loop at < count {
         if (fd_word(fd_word(specs, at * I64{8}), PROCESS_SPEC_POLICY_WIRE) != I64{0}) -> return host_io_other_take(HOST_IO_OP_RESOLVE, jet_rt_string_clone(rt_static_text("process.pipeline")), jet_rt_string_clone(rt_static_text("authority-bound pipelines need one auditable launch transaction; refusing before spawn")), err)
+        if process_execution_keep_refused(fd_word(specs, at * I64{8}), err) -> return I64{0}
         at += I64{1}
     }
     direct := true

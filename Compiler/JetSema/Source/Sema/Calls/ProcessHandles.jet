@@ -1,6 +1,7 @@
 // Checked process and command-line handle methods. The caller supplies a checked
 // receiver; this module owns only these compiler-provided handle contracts.
 use jet_foundation.[
+    AST_NODE_GENERATED,
     AccessConvention,
     CallArg,
     Diagnostic,
@@ -296,7 +297,7 @@ sema_process_parsed_args_method: fn(receiver: Expr, receiver_value: TExpr, metho
 }
 
 sema_process_spec_known_method: fn(method: String) -> Bool Never! {
-    method == "cwd" || method == "env_remove" || method == "stdin" || method == "stdout" || method == "stderr" || method == "env" || method == "arg" || method == "args_extend" || method == "terminal" || method == "env_clear" || method == "detached" || method == "abilities" || method == "timeout" || method == "cpu_time_limit" || method == "output_limit" || method == "memory_limit" || method == "memory_scope" || method == "open_file_limit" || method == "cpu_affinity" || method == "io_priority" || method == "io_idle" || method == "under" || method == "plan" || method == "run" || method == "run_checked" || method == "spawn"
+    method == "cwd" || method == "env_remove" || method == "stdin" || method == "stdout" || method == "stderr" || method == "env" || method == "arg" || method == "args_extend" || method == "terminal" || method == "env_clear" || method == "detached" || method == "abilities" || method == "keep_open" || method == "timeout" || method == "cpu_time_limit" || method == "output_limit" || method == "memory_limit" || method == "memory_scope" || method == "open_file_limit" || method == "cpu_affinity" || method == "io_priority" || method == "io_idle" || method == "under" || method == "plan" || method == "run" || method == "run_checked" || method == "spawn"
 }
 
 sema_process_spec_result: fn(method: String, argc: Int, span: Span, diagnostics: &[Diagnostic]) -> Type? {
@@ -320,6 +321,9 @@ sema_process_spec_result: fn(method: String, argc: Int, span: Span, diagnostics:
         "abilities" -> {
             if argc == 0 -> return Val(Type.Tagged{marker: TagMarker.Internal{internal_tag: InternalTag.TerminalFactSet}, inner: Type.Apply{name: "Set", args: [Type]{Type.String}}})
         }
+        "keep_open" -> {
+            if argc == 1 || argc == 2 -> return Val(spec)
+        }
         "timeout" | "cpu_time_limit" | "output_limit" | "memory_limit" | "memory_scope" | "open_file_limit" | "cpu_affinity" | "io_priority" -> {
             if argc == 1 -> return Val(spec)
         }
@@ -341,6 +345,9 @@ sema_process_spec_result: fn(method: String, argc: Int, span: Span, diagnostics:
     if {
         method == "terminal" -> {
             diagnostics.push(sema_error("E0104", span, "`terminal` expects 0 or 1 arguments, got {argc}", "`terminal()` uses portable defaults; `terminal(policy)` uses one TerminalPolicy", "pass no argument or one TerminalPolicy"))
+        }
+        method == "keep_open" -> {
+            diagnostics.push(sema_error("E0104", span, "`keep_open` expects 1 or 2 arguments, got {argc}", "`keep_open(handle)` keeps the handle at its own descriptor number; `keep_open(handle, at: slot)` keeps it at `slot`", "pass the handle, then optionally `at:` and a descriptor slot"))
         }
         method == "env" -> {
             sema_process_wrong_arity(method, 2, argc, span, diagnostics)
@@ -381,6 +388,10 @@ sema_process_spec_method: fn(receiver: Expr, receiver_value: TExpr, method: Stri
         sema_process_infer_args(args, environment, program, scopes, state, tail_store, context, diagnostics)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
+    // `spec.keep_open(handle, at:)` is the ordinary Core source body
+    // `core.files.__spec_keep_open`; its declaration types the handle union
+    // and the slot, and the spec takes the handle.
+    if method == "keep_open" -> return sema_process_spec_keep_open(receiver, receiver_value, args, result, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     required: sema_process_spec_arg_types(method, args.len())
     values: sema_process_check_args(args, required, environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     // Rust types ProcessSpec builders through `process_spec_method_return`
@@ -410,6 +421,51 @@ sema_process_spec_method: fn(receiver: Expr, receiver_value: TExpr, method: Stri
     }
     effect_name: if method == "run" || method == "run_checked" || method == "spawn" -> "Exec" else -> ""
     sema_process_finish(receiver_value, THandleOp.ProcessSpecMethod{method: method, args_len: args.len()}, values, result, effect_name, "ProcessSpec.{method}", span, expected, environment, program, scopes, context, diagnostics)
+}
+
+sema_process_spec_keep_open: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg], result: Type, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    rejected: SemaMethodSpecialCheck{handled: true, value: None}
+    loop (index, argument) in args {
+        if argument.label == .Val(label) {
+            if index == 1 && label.name == "at" -> next
+            diagnostics.push(sema_error("E0764", label.span, "`ProcessSpec.keep_open` has no parameter labelled `{label.name}`", "a label binds an argument to the parameter of that name", "pass the handle without a label, then the slot as `at:`"))
+            sema_process_infer_args(args, environment, program, scopes, state, tail_store, context, diagnostics)
+            return rejected
+        }
+    }
+    route: sema_call_core_resolve_route(environment, program, "core.files", "__spec_keep_open", [Type]{}, 3, false, span, diagnostics) ?? return rejected
+    target: if route == {
+        .Source(source) -> source
+        .Core(_) | .SharedSite(_) -> panic("ProcessSpec.keep_open must resolve its canonical Jet source body")
+    }
+    params: if target.signature == {
+        .Fn(params, _, _, _, _, _) -> params
+        else -> panic("ProcessSpec.keep_open's source body has a function type")
+    }
+    handle_type: sema_call_resolved_type(params[1], environment, program)
+    slot_type: sema_call_resolved_type(params[2], environment, program)
+    handle_checked: sema_check_expression(args[0].expr, Val(handle_type), environment, program, scopes, state, tail_store, context, diagnostics) ?? return rejected
+    handle_value: sema_expr_expected_owned(handle_checked, Val(handle_type), environment, program, diagnostics) ?? return rejected
+    // An omitted slot is the declaration's `None`: the handle's own number.
+    slot_expr: if args.len() == 2 -> args[1].expr else -> Expr.Absent{span: span, id: AST_NODE_GENERATED}
+    slot_checked: sema_check_expression(slot_expr, Val(slot_type), environment, program, scopes, state, tail_store, context, diagnostics) ?? return rejected
+    slot_value: sema_expr_expected_owned(slot_checked, Val(slot_type), environment, program, diagnostics) ?? return rejected
+    // The handle moves into the spec exactly as at any `&&` parameter: a
+    // named handle is taken out of its place, so its scope no longer closes it.
+    taken := sema_call_marked_move_place(args[0].expr, handle_value)
+    if taken && sema_ownership_binding_for_expr(state, args[0].expr, scopes) == .Val(root) -> taken = !sema_ownership_binding_is_borrowed_param(root)
+    stored: sema_call_marked_move_value(state, taken, args[0].expr, handle_value, scopes, diagnostics) ?? return rejected
+    if !sema_process_check_method_ownership(receiver, "ProcessSpec.keep_open", args, [Type]{handle_type, slot_type}, [Bool]{true, false}, AccessConvention.Read, span, scopes, state, diagnostics) -> return rejected
+    sema_receiver_mark_forget(state, receiver)
+    if receiver == .Ident(_, _, _) {
+        if !sema_ownership_mark_unmarked_move(state, receiver, scopes, "`ProcessSpec.keep_open`", diagnostics) -> return rejected
+    }
+    if !sema_process_record_intrinsic(result, "FS", "ProcessSpec.keep_open", span, environment, program, scopes, context, diagnostics) -> return rejected
+    callee: sema_call_callee_decl(program, target.symbol.id, span, diagnostics) ?? return rejected
+    handle_arg := sema_value_method_source_arg(stored)
+    handle_arg.widen_to_union = sema_call_widen_union(handle_type, stored.ty)
+    value := sema_tree_node(result, TExprKind.Call{callee: callee, type_args: [Type]{}, args: [TCallArg]{sema_value_method_source_arg(receiver_value), handle_arg, sema_value_method_source_arg(slot_value)}}, span)
+    SemaMethodSpecialCheck{handled: true, value: sema_expression_call_expected(value, expected, environment, program, context, diagnostics)}
 }
 
 sema_process_child_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {

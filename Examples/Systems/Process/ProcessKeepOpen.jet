@@ -1,0 +1,63 @@
+package: {
+    name: "process_keep_open"
+    authority: { allow: [FS, FS.Read, FS.Write, IO, Exec, Env, Mem.Alloc] }
+}
+
+// spec.keep_open(handle, at:) keeps a FileReader, FileWriter or Directory
+// open in the child at descriptor `at`, or at the handle's own number when
+// `at` is left out. The spec takes the handle and the child gets a
+// duplicate, so renaming the directory here afterwards does not change what
+// the child reads through the slot. A slot the spec already keeps, or one of
+// the standard streams 0 to 2, is refused when the spec runs, before any
+// child starts. `directory.duplicate()` hands the child a fresh handle to
+// the same directory, so the parent keeps using its own.
+
+use {
+    files: core.files
+    process: core.process
+}
+
+run: fn() {
+    scratch: files.temp_dir("keep-open")
+    held_path: files.join(scratch.path, "held")
+    files.create_dir_all(held_path)
+    files.write(files.join(held_path, "marker.txt"), "held directory\n")
+    files.write(files.join(scratch.path, "input.txt"), "reader line\n")
+    files.write(files.join(scratch.path, "own.txt"), "own number\n")
+    directory: files.open_directory(held_path)
+    reader: files.open(files.join(scratch.path, "input.txt"))
+    writer: files.create(files.join(scratch.path, "output.txt"))
+    own: files.open(files.join(scratch.path, "own.txt"))
+    script: "echo directory: $(cat /proc/self/fd/70/marker.txt); echo reader: $(cat /proc/self/fd/71); echo writer line >> /proc/self/fd/72; echo own number kept: $(for f in /proc/self/fd/*; do readlink $f; done | grep -c own.txt)"
+    spec: process.cmd(["sh", "-c", script])
+        .keep_open(directory, at: 70)
+        .keep_open(reader, at: 71)
+        .keep_open(writer, at: 72)
+        .keep_open(own)
+    files.rename(held_path, files.join(scratch.path, "moved"))
+    files.create_dir_all(held_path)
+    files.write(files.join(held_path, "marker.txt"), "replacement\n")
+    receipt: spec.run()
+    print(receipt.output.trim())
+    written: files.read(files.join(scratch.path, "output.txt"))
+    print("child wrote: {written.trim()}")
+
+    kept: files.open_directory(files.join(scratch.path, "moved"))
+    twin: kept.duplicate()
+    shared: process.cmd(["sh", "-c", "cat /proc/self/fd/74/marker.txt"]).keep_open(twin, at: 74).run()
+    print("duplicate: {shared.output.trim()}")
+    listed: kept.list()
+    print("parent still lists: {listed.len()} entry")
+
+    first: files.open(files.join(scratch.path, "input.txt"))
+    second: files.open(files.join(scratch.path, "input.txt"))
+    if process.cmd(["true"]).keep_open(first, at: 73).keep_open(second, at: 73).run() == {
+        .Ok(_) -> print("same slot twice: started")
+        .Err(error) -> print("same slot twice: {error == .InvalidInput(_)}")
+    }
+    stdio: files.open(files.join(scratch.path, "input.txt"))
+    if process.cmd(["true"]).keep_open(stdio, at: 2).run() == {
+        .Ok(_) -> print("stdio slot: started")
+        .Err(error) -> print("stdio slot: {error == .InvalidInput(_)}")
+    }
+}

@@ -1,0 +1,30 @@
+use files: core.files
+use process: core.process
+
+// Phase 1 of #6677: a spec takes a FileLock but refuses it when it runs, as
+// IOError.Unsupported, and an authority-bound spec refuses any kept handle
+// when it plans. Neither starts a child.
+why: fn(error: IOError) -> String {
+    if error == {
+        .Unsupported(context) -> "Unsupported: {context.cause ?? ""}"
+        .Other(context) -> "Other: {context.cause ?? ""}"
+        else -> "another error"
+    }
+}
+
+run: fn() -[IO, FS, Exec, Env]> {
+    root: files.cwd() ?? panic("cwd")
+    marker: files.join(root, "started")
+    lock: files.lock(files.join(root, "held.lock")) ?? panic("lock")
+    if process.cmd(["sh", "-c", "touch {marker}"]).keep_open(lock, at: 9).run() == {
+        .Ok(_) -> print("file lock: started")
+        .Err(error) -> print("file lock: {why(error)}")
+    }
+    directory: files.open_directory(root) ?? panic("open directory")
+    bound: process.cmd(["sh", "-c", "touch {marker}"]).cwd("/tmp").keep_open(directory, at: 9).under(Authority.from_rights(["Exec"]))
+    if bound.plan() == {
+        .Ok(_) -> print("authority-bound keep: planned")
+        .Err(error) -> print("authority-bound keep: {why(error)}")
+    }
+    print("child started: {files.exists(marker)}")
+}

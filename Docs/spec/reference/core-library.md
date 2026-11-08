@@ -1017,6 +1017,13 @@ D-CORE-FILELOCK1):
   `close(lock)` or scope exit releases it, without deleting a name. Systems
   without directory flock report `Unsupported`. This differs from locking
   the regular file named by `files.lock(path)`.
+- `directory.duplicate()` returns a fresh `Directory` with the same `path`
+  that holds the same directory through its own close-on-exec descriptor,
+  opened through the held one, never by path. Closing either handle leaves
+  the other open, and both keep naming the directory after its path is
+  renamed or replaced; a closed original is `IOError.Closed`. It is how a
+  parent passes a directory to a child and keeps using its own:
+  `spec.keep_open(directory.duplicate() ?? return, at: 9)`.
 - Publish through a held directory by exclusively creating a temporary sibling,
   writing and setting mode through its handle, calling `writer.fsync()`, then
   `directory.rename(temp, destination)` and `directory.fsync()`. Rename replaces
@@ -2362,6 +2369,21 @@ reaped ends its scope with its last handle. The receipt and plan limits carry
 a detached spec (`a detached process outlives its handle, and a memory_scope
 ends with it`); nothing starts.
 `Examples/Systems/Process/ProcessMemoryScope.jet` is the golden.
+
+`.keep_open(handle, at: Int?{None})` keeps a `FileReader`, `FileWriter`,
+`FileLock` or `Directory` open in the child at descriptor `at`, or at the
+handle's own descriptor number when `at` is `None`. The spec takes the handle:
+the parent's descriptor closes at the call, and the child's duplicate is the
+spec's, so renaming or replacing the file or directory afterwards does not
+change what the child sees through the slot. The call never fails; a refusal
+is kept on the spec, and `.spawn()`, `.run()`, `.run_checked()` and `.plan()`
+return it before any child starts. A slot outside 3 to 2147483646 is
+`IOError.InvalidInput` (`keep_open needs a descriptor slot from 3 to
+2147483646; 0 to 2 are the standard streams`), as is a slot the spec already
+keeps; a descriptor the host cannot duplicate is `IOError.Other` with the
+host's error. A `FileLock` is `IOError.Unsupported` (`keep_open does not keep
+a FileLock yet`).
+`Examples/Systems/Process/ProcessKeepOpen.jet` is the golden.
 #### Authority and output boundaries
 
 An authority is explicit at the process boundary. `Authority.from_rights` can
@@ -2398,7 +2420,8 @@ discarded and recorded in the plan and receipt.
 Authority-bound terminal sessions and authority-bound pipelines refuse before
 spawn. A terminal or pipeline cannot bypass the authority's captured, redacted
 receipt boundary; ordinary unbound terminal sessions and pipelines retain their
-separate APIs.
+separate APIs. An authority-bound specification that keeps a parent handle
+open (`.keep_open`) is refused the same way, at `.plan()` and at launch.
 
 #### Cleanup and waiting
 

@@ -59,7 +59,7 @@ Run a lesson from the repository root, for example `jet run Examples/Systems/<Le
 - [ProcessExitCleanup](Process/ProcessExitCleanup.jet) — Explicit process termination runs the one cleanup boundary.
 - [ProcessIOPriority](Process/ProcessIOPriority.jet) — `.io_idle()` and `.io_priority(level)` run the child in the idle or a best-effort I/O class.
 - [ProcessMemoryScope](Process/ProcessMemoryScope.jet) — `.memory_scope(bytes)` caps the child and everything it starts together, and ends them at the reap.
-- [ProcessPassDirectory](Process/ProcessPassDirectory.jet)
+- [ProcessKeepOpen](Process/ProcessKeepOpen.jet) — `spec.keep_open(handle, at:)` keeps a file, writer or directory open in the child at a chosen descriptor; `directory.duplicate()` passes one while the parent keeps its own.
 - [ProcessRunAll](Process/ProcessRunAll.jet) — process.run_all runs a list of specs through a bounded worker pool.
 - [ProcessRunAllParentDeath](Process/ProcessRunAllParentDeath.jet) — A program killed while its process.run_all pool runs leaves no job behind.
 - [ProcessStdinClose](Process/ProcessStdinClose.jet) — A spawned child owns an explicit closeable stdin pipe.
