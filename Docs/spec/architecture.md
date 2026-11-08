@@ -1301,21 +1301,30 @@ generated runtime uses the existing std-only WebSocket and strict JSON codecs
 to speak WebDriver BiDi. It does not require Node, Playwright, or a Canvas
 facade. Browser installation is Jetpack work: `jetpack browser lock|provision`
 writes `[[browser]]` entries into `.jet/lock`, and `browser.locked(engine)`
-reads that pin (FS) so launch resolves a deterministic binary.
-`browser.launch(engine)` starts the locked Firefox headless on a throwaway
-profile with `--remote-debugging-port=0`, reads the BiDi port Firefox records
-in that profile, and connects with the lock's protocol profile. The session
-bus is disabled for the child because a desktop D-Bus can stall Firefox
-before its BiDi server answers. The session owns the engine: `close()` or the
-last owner's drop stops it and removes the profile. Chromium serves BiDi only
-through a WebDriver driver, which the lock does not pin, so `launch` refuses
-it with a `missing driver` error.
+reads that pin (FS) so launch resolves a deterministic binary. An engine that
+serves BiDi only through a WebDriver driver also pins that driver in its entry
+(`driver`, `driver-size`): `jetpack browser lock chromium --driver <path>`, or
+`jetpack browser provision chromium@<source>`, which realizes
+`chromedriver@<source>` beside it so the two versions match.
+`browser.launch(engine)` starts the locked engine headless on a throwaway
+profile and connects with the lock's protocol profile. Firefox serves BiDi
+itself: launch passes `--remote-debugging-port=0`, reads the BiDi port Firefox
+records in that profile, and disables the session bus for the child because a
+desktop D-Bus can stall Firefox before its BiDi server answers. Chromium goes
+through the pinned chromedriver: launch starts it on a free port, creates a
+WebDriver classic session with `webSocketUrl`, and connects to that session's
+BiDi socket. Without a pinned driver, launch refuses Chromium with a
+`missing driver` error. The session owns the engine: `close()` or the last
+owner's drop stops it (for Chromium, by deleting the driver session, since
+Chromium outlives a killed driver) and removes the profile.
 
 `BrowserProfile` pins a client command contract; it is not a claim about a
 server version. The runtime gates raw commands against that contract. A
 connection checks `session.status`, then creates the session with
 `session.new`; only that command's matched feature map enables optional
-protocols such as CDP. `Browser.context()` creates an isolated BiDi user
+protocols such as CDP. A Chromium launch is the one exception: chromedriver
+already created the session, so the connection skips both commands, and CDP is
+enabled because chromedriver's BiDi mapper serves `goog:cdp.*`. `Browser.context()` creates an isolated BiDi user
 context. `context.page()` and `context.tab()` both create a BiDi tab under
 that context; the context owns its pages. `page.main_frame()` and
 `page.frames()` expose the browsing-context tree (main plus child frames)

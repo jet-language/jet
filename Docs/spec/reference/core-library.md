@@ -1439,7 +1439,7 @@ thread that opened them (**E1102**).
 | `config()` / `config_from_env()` | `BrowserTestConfig !BrowserError` | Load checked browser-test configuration. |
 | `make_profile(name)` / `profile(name)` / `timeout(ms)` | `BrowserProfile` / `BrowserProfile !BrowserError` / `BrowserTimeout !BrowserError` | Construct an isolated profile, check a pinned BiDi profile (`bidi-2024.11` or `bidi-2025.5`), or check a timeout in `1..=600000` milliseconds. |
 | `locked(engine)` | `BrowserLocked !BrowserError` | Read and verify the provider's locked browser record. |
-| `launch(engine)` | `Browser !BrowserError` | Start the locked engine headless on a throwaway profile and connect over its BiDi endpoint; closing the session stops the engine. Firefox only: Chromium needs a locked WebDriver driver. |
+| `launch(engine)` | `Browser !BrowserError` | Start the locked engine headless on a throwaway profile and connect over BiDi; closing the session stops the engine. Firefox serves BiDi itself; Chromium launches through the chromedriver its lock entry pins, with `protocol("cdp")` available. |
 | `connect(endpoint)` / `connect_profile(endpoint, profile, timeout)` / `connect_browser_profile(profile, timeout)` | `Browser !BrowserError` | Connect to an endpoint with the default or a named profile. |
 | `browser.context()` | `BrowserContext !BrowserError` | Open an isolated browsing context. |
 | `context.page()` / `context.tab()` | `BrowserPage` | Open a page or tab in a context. |

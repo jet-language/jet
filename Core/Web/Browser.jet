@@ -9,6 +9,7 @@ use {
     json: core.encoding.json
     base64: core.encoding.base64
     files: core.files
+    http: core.http
     net: core.net
     process: core.process
     time: core.time
@@ -147,16 +148,21 @@ __BrowserState: struct {
 
 // The engine process and throwaway profile that `launch` started. The
 // session state is its one owner, so the last Browser copy (or close) stops
-// the engine and removes the profile.
+// the engine and removes the profile. For Chromium the process is
+// chromedriver and `session_url` is its WebDriver session; Chromium outlives
+// a killed chromedriver, so close deletes that session (which quits the
+// browser) before stopping the driver.
 __BrowserEngine: struct {
     child: ProcessChild
     profile: String
+    session_url: String
 }
 
 impl __BrowserEngine.Close {
     close: fn(&&self) {
         // Close cannot fail: an engine that already exited cannot be
         // signalled, and wait still reaps it.
+        if self.session_url != "" -> http.__request("DELETE", self.session_url).send().drop("a gone driver session needs no delete")
         self.child.kill().drop("an exited engine needs no signal")
         self.child.wait().drop("the engine receipt is not reported")
         files.remove_all(self.profile).drop("profile removal at close is best-effort")
@@ -557,6 +563,10 @@ BrowserLocked: struct {
     protocol: String
     size: Int
     output_hash: String
+    // The WebDriver driver a launch goes through ("" when the engine serves
+    // BiDi itself) and its locked size.
+    driver: String
+    driver_size: Int
 
     engine: fn(self) -> String Never! { self.engine }
     version: fn(self) -> String Never! { self.version }
@@ -566,7 +576,7 @@ BrowserLocked: struct {
         if !files.is_file(self.binary) -> return Err(BrowserError{kind: "missing binary"})
         size: files.getsize(self.binary) ?? return Err(BrowserError{kind: "missing binary"})
         if size != self.size -> return Err(BrowserError{kind: "size mismatch"})
-        Ok()
+        __verify_driver(self)
     }
 }
 
@@ -750,18 +760,29 @@ locked: fn(engine: String) -[FS, IO]> BrowserLocked BrowserError! {
     if !files.is_file(entry.binary) -> return Err(BrowserError{kind: "missing binary"})
     size: files.getsize(entry.binary) ?? return Err(BrowserError{kind: "missing binary"})
     if size != entry.size -> return Err(BrowserError{kind: "size mismatch"})
+    __verify_driver(entry)
     Ok(entry)
 }
 
+// A pinned driver must still be the locked file; no driver pins nothing.
+__verify_driver: fn(entry: BrowserLocked) BrowserError! -[FS]> {
+    if entry.driver == "" -> return Ok()
+    if !files.is_file(entry.driver) -> return Err(BrowserError{kind: "missing driver"})
+    size: files.getsize(entry.driver) ?? return Err(BrowserError{kind: "missing driver"})
+    if size != entry.driver_size -> return Err(BrowserError{kind: "size mismatch"})
+    Ok()
+}
+
 // Start the engine pinned by `locked(engine)` headless on a throwaway profile
-// and connect over the engine's own WebDriver BiDi endpoint. Firefox serves
-// BiDi itself. Chromium speaks BiDi only through a WebDriver driver, which the
-// lock does not pin, so it refuses with "missing driver". The session's last
-// owner, or close, stops the engine and removes the profile.
+// and connect over WebDriver BiDi. Firefox serves BiDi itself; Chromium goes
+// through the chromedriver the lock pins beside it and refuses with
+// "missing driver" when none is pinned. The session's last owner, or close,
+// stops the engine and removes the profile.
 launch: fn(engine: String) -[Exec, FS, IO, Net, Time, Time.Wait]> Browser BrowserError! {
     pin: locked(engine)
-    if pin.engine != "firefox" -> return Err(BrowserError{kind: "missing driver"})
     p: profile(pin.protocol)
+    if pin.engine == "chromium" -> return __launch_chromium(pin, p)
+    if pin.engine != "firefox" -> return Err(BrowserError{kind: "missing driver"})
     dir: files.temp_dir("jet-browser-") ?? return Err(BrowserError{kind: "transport"})
     // Port 0 picks a free port, which Firefox records in the profile. The
     // session bus stays off: a desktop D-Bus can stall Firefox's startup
@@ -772,11 +793,63 @@ launch: fn(engine: String) -[Exec, FS, IO, Net, Time, Time.Wait]> Browser Browse
         files.remove_all(dir.path).drop("a failed launch leaves no profile")
         return Err(BrowserError{kind: "transport"})
     }
-    held := __BrowserEngine{child: child, profile: dir.path.copy()}
+    held := __BrowserEngine{child: child, profile: dir.path.copy(), session_url: ""}
     port: __launched_bidi_port(held, "{dir.path}/WebDriverBiDiServer.json", 60000)
     browser: connect_profile("ws://127.0.0.1:{port}/session", p, BrowserTimeout{milliseconds: 30000})
     __browser_own_engine(browser, held)
     Ok(browser)
+}
+
+// Chromium serves BiDi through chromedriver. The driver picks a free port
+// (`--port=0`) and prints it; a WebDriver classic new session with
+// `webSocketUrl` starts Chromium on a throwaway profile, and that session's
+// BiDi socket is the connection. The session already exists, so the
+// connection skips `session.new`. chromedriver's BiDi mapper serves
+// `goog:cdp.*`, so `protocol("cdp")` is available.
+__launch_chromium: fn(pin: BrowserLocked, p: BrowserProfile) -[Exec, FS, Net, Time, Time.Wait]> Browser BrowserError! {
+    if pin.driver == "" -> return Err(BrowserError{kind: "missing driver"})
+    dir: files.temp_dir("jet-browser-") ?? return Err(BrowserError{kind: "transport"})
+    child: process.cmd([String]{pin.driver, "--port=0"}).stdout(.Capture).stderr(.Capture).spawn() ?? {
+        files.remove_all(dir.path).drop("a failed launch leaves no profile")
+        return Err(BrowserError{kind: "transport"})
+    }
+    held := __BrowserEngine{child: child, profile: dir.path.copy(), session_url: ""}
+    port := 0
+    loop line in held.child.stdout.lines() {
+        pair: parse.split_once(line, "started successfully on port ")
+        if pair.found {
+            port = parse_i64(text.trim(pair.tail).replace(".", "")) ?? 0
+            break
+        }
+    }
+    if port <= 0 || port > 65535 -> return Err(BrowserError{kind: "transport"})
+    driver_url: "http://127.0.0.1:{port}"
+    args: Dyn.Array([Dyn]{Dyn.Text("--headless=new"), Dyn.Text("--no-first-run"), Dyn.Text("--user-data-dir={dir.path}")})
+    options: obj([(key: "binary", value: Dyn.Text(pin.binary.copy())), (key: "args", value: args)])
+    always: obj([(key: "browserName", value: Dyn.Text("chrome")), (key: "webSocketUrl", value: Dyn.Bool(true)), (key: "goog:chromeOptions", value: options)])
+    request: json.dumps(obj([(key: "capabilities", value: obj([(key: "alwaysMatch", value: always)]))])) ?? return Err(BrowserError{kind: "protocol"})
+    response: http.post("{driver_url}/session", request) ?? return Err(BrowserError{kind: "transport"})
+    body: response.body.text(C_MAX_SOURCE_BYTES) ?? return Err(BrowserError{kind: "transport"})
+    reply: json.parse(body) ?? return Err(BrowserError{kind: "protocol"})
+    value: browser_get(reply, "value") ?? return Err(BrowserError{kind: "protocol"})
+    session_id: browser_text(value, "sessionId") ?? return Err(BrowserError{kind: "protocol"})
+    held.session_url = "{driver_url}/session/{session_id}"
+    capabilities: browser_get(value, "capabilities") ?? return Err(BrowserError{kind: "protocol"})
+    socket: browser_text(capabilities, "webSocketUrl") ?? return Err(BrowserError{kind: "protocol"})
+    if !socket.starts_with("ws://127.0.0.1:") -> return Err(BrowserError{kind: "protocol"})
+    browser: __connect_session(socket, p, BrowserTimeout{milliseconds: 30000})
+    __browser_own_engine(browser, held)
+    Ok(browser)
+}
+
+// The BiDi socket of a session a driver already created: no `session.status`
+// or `session.new`, and close ends it through the engine's driver session.
+__connect_session: fn(endpoint: String, p: BrowserProfile, t: BrowserTimeout) -[Net, Time]> Browser BrowserError! {
+    conn: core.net.ws.__connect(endpoint) ? value -> value ! error -> return Err(browser_ws_error(error))
+    Ok(Browser{__state: shared __BrowserState{
+        conn: conn.move(), next_id: 1, closed: false, session_started: false, timeout_ms: t.milliseconds,
+        profile: p.name, cdp: true, trace: [String]{"connect"}, trace_bytes: 7, events: [BrowserEvent]{}, engine: None
+    }})
 }
 
 // The BiDi port the engine records in its profile. A read can race the
@@ -1067,7 +1140,7 @@ C_BIDI_2024_11: [String]{
     "input.performActions", "input.releaseActions", "input.setFiles",
     "network.addIntercept", "network.continueRequest", "network.failRequest", "network.provideResponse", "network.removeIntercept",
     "storage.getCookies", "storage.setCookie", "storage.deleteCookies",
-    "script.callFunction", "script.disown", "script.evaluate", "script.getRealms",
+    "script.addPreloadScript", "script.callFunction", "script.disown", "script.evaluate", "script.getRealms", "script.removePreloadScript",
     "goog:cdp.sendCommand"
 }
 
@@ -1076,7 +1149,7 @@ profile_allows: fn(name: String, method: String) -> Bool Never! {
     loop allowed in C_BIDI_2024_11 {
         if allowed == method -> return true
     }
-    name == "bidi-2025.5" && (method == "permissions.setPermission" || method == "webExtension.install" || method == "webExtension.uninstall")
+    name == "bidi-2025.5" && (method == "permissions.setPermission" || method == "webExtension.install" || method == "webExtension.uninstall" || method == "emulation.setNetworkConditions")
 }
 
 phase_ok: fn(phase: String) -> Bool Never! {
@@ -1824,6 +1897,9 @@ C_REPORT_HTML_TAIL: "</script><script>\nconst data=JSON.parse(document.getElemen
     assert(profile_allows("bidi-2024.11", "session.new"))
     assert(!profile_allows("bidi-2024.11", "permissions.setPermission"))
     assert(profile_allows("bidi-2025.5", "permissions.setPermission"))
+    assert(profile_allows("bidi-2024.11", "script.addPreloadScript") && profile_allows("bidi-2024.11", "script.removePreloadScript"))
+    assert(!profile_allows("bidi-2024.11", "emulation.setNetworkConditions"))
+    assert(profile_allows("bidi-2025.5", "emulation.setNetworkConditions"))
     assert(!profile_allows("bidi-2026.1", "session.new"))
     assert(cdp_method_ok("Runtime.evaluate"))
     assert(!cdp_method_ok("runtime.evaluate"))
@@ -2002,7 +2078,7 @@ config_from_snapshot: fn(root: String, env: [(name: [U8], value: [U8])]) -[FS]> 
 }
 
 parse_locked: fn(raw: String, engine: String) -> BrowserLocked BrowserError! {
-    current := BrowserLocked{engine: "", version: "", binary: "", protocol: "", size: 0, output_hash: ""}
+    current := BrowserLocked{engine: "", version: "", binary: "", protocol: "", size: 0, output_hash: "", driver: "", driver_size: 0}
     in_browser := false
     found := BrowserLocked?{None}
     loop raw_line in parse.split(raw, "\n") {
@@ -2012,7 +2088,7 @@ parse_locked: fn(raw: String, engine: String) -> BrowserLocked BrowserError! {
         if bytes[0] == (U8{91}) {
             if in_browser && current.engine == engine -> found = Val(current)
             in_browser = line == "[[browser]]"
-            current = BrowserLocked{engine: "", version: "", binary: "", protocol: "", size: 0, output_hash: ""}
+            current = BrowserLocked{engine: "", version: "", binary: "", protocol: "", size: 0, output_hash: "", driver: "", driver_size: 0}
             next
         }
         if !in_browser -> next
@@ -2027,6 +2103,8 @@ parse_locked: fn(raw: String, engine: String) -> BrowserLocked BrowserError! {
             "protocol" -> current.protocol = value
             "size" -> current.size = parse_i64(value) ?? return Err(BrowserError{kind: "invalid lock"})
             "output-hash" -> current.output_hash = value
+            "driver" -> current.driver = value
+            "driver-size" -> current.driver_size = parse_i64(value) ?? return Err(BrowserError{kind: "invalid lock"})
             else -> {}
         }
     }

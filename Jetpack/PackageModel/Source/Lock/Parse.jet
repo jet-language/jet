@@ -819,6 +819,8 @@ PartialBrowser: struct {
     binary: String?{None}
     protocol: String?{None}
     size: Int?{None}
+    driver: String{""}
+    driver_size: Int{0}
     envelope: LockEnvelope{LockEnvelope.empty()}
 
     assign: fn(&self, key: String, value: String) LockError! {
@@ -828,6 +830,8 @@ PartialBrowser: struct {
             "binary" -> self.binary = Val(pkg_lock_unescape(value))
             "protocol" -> self.protocol = Val(pkg_lock_unescape(value))
             "size" -> self.size = Val(pkg_lock_parse_unsigned(pkg_lock_trim_quotes(value), 9223372036854775807) ?? return Err(LockError.Invalid("invalid browser size: {value}")))
+            "driver" -> self.driver = pkg_lock_unescape(value)
+            "driver-size" -> self.driver_size = pkg_lock_parse_unsigned(pkg_lock_trim_quotes(value), 9223372036854775807) ?? return Err(LockError.Invalid("invalid browser driver size: {value}"))
             else -> pkg_lock_assign_envelope(self.envelope, key, value)
         }
     }
@@ -839,7 +843,9 @@ PartialBrowser: struct {
             binary: self.binary ?? return Err(LockError.Invalid("missing browser binary")),
             protocol: self.protocol ?? return Err(LockError.Invalid("missing browser protocol")),
             size: self.size ?? return Err(LockError.Invalid("missing browser size")),
-            envelope: self.envelope
+            envelope: self.envelope,
+            driver: self.driver,
+            driver_size: self.driver_size
         }
     }
 }

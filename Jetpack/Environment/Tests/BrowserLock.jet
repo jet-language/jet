@@ -34,12 +34,29 @@ env_browser_test_drifted: fn(result: LockedBrowser BrowserLockError!) -> Bool {
 #Test("browser lock resolve and hash drift") {
     root: env_browser_test_root("ok")
     bin: env_browser_test_fake(root, "#!/bin/sh\necho Chromium 131.0\n")
-    locked: env_browser_lock_binary(root, "chromium", bin, "131.0", BROWSER_DEFAULT_PROTOCOL, "test fixture") ?? panic("lock the fake browser")
+    locked: env_browser_lock_binary(root, "chromium", bin, "131.0", BROWSER_DEFAULT_PROTOCOL, "", "test fixture") ?? panic("lock the fake browser")
     assert_eq(locked.engine, "chromium")
+    assert_eq(locked.driver, "")
     resolved: env_browser_resolve(root, "chromium") ?? panic("resolve the locked browser")
     assert_eq(resolved.binary, locked.binary)
     assert_eq(resolved.envelope.output_hash, locked.envelope.output_hash)
     files.write(bin, "#!/bin/sh\necho Chromium 999\n") ?? panic("drift the binary")
+    assert(env_browser_test_drifted(env_browser_resolve(root, "chromium")))
+    files.remove_all(root).drop("test cleanup")
+}
+
+#Test("browser lock pins the driver and catches its drift") {
+    root: env_browser_test_root("driver")
+    bin: env_browser_test_fake(root, "#!/bin/sh\necho Chromium 131.0\n")
+    driver: files.join(root, "fake-chromedriver")
+    files.write(driver, "#!/bin/sh\n") ?? panic("fake driver")
+    locked: env_browser_lock_binary(root, "chromium", bin, "131.0", BROWSER_DEFAULT_PROTOCOL, driver, "test fixture") ?? panic("lock the fake browser and driver")
+    assert_eq(locked.driver, files.canonicalize(driver) ?? panic("driver path"))
+    assert_eq(locked.driver_size, 10)
+    resolved: env_browser_resolve(root, "chromium") ?? panic("resolve the locked browser")
+    assert_eq(resolved.driver, locked.driver)
+    assert_eq(resolved.driver_size, 10)
+    files.write(driver, "#!/bin/sh\nexit 1\n") ?? panic("drift the driver")
     assert(env_browser_test_drifted(env_browser_resolve(root, "chromium")))
     files.remove_all(root).drop("test cleanup")
 }
@@ -75,5 +92,11 @@ env_browser_test_drifted: fn(result: LockedBrowser BrowserLockError!) -> Bool {
     files.write(chromium, "x") ?? panic("chromium")
     found: env_browser_find_engine_binary(files.join(root, "out"), "chromium") ?? panic("find chromium")
     assert_eq(found, chromium)
+    assert_eq(env_browser_driver_package("chromium") ?? panic("chromium driver"), "chromedriver")
+    assert_eq(env_browser_driver_package("firefox") ?? panic("firefox driver"), "")
+    if env_browser_find_driver(files.join(root, "out"), "chromedriver") == .Ok(_) -> panic("no driver is realized yet")
+    chromedriver: files.join(bin_dir, "chromedriver")
+    files.write(chromedriver, "x") ?? panic("chromedriver")
+    assert_eq(env_browser_find_driver(files.join(root, "out"), "chromedriver") ?? panic("find chromedriver"), chromedriver)
     files.remove_all(root).drop("test cleanup")
 }
