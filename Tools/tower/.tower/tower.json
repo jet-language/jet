@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6679,
-    "rev": 95913,
+    "rev": 95917,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -60016,6 +60016,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-08",
+          "by": "Main",
+          "text": "c7 progress (PortsLead-2): 4c36e83022 cuts the perf budget checker over to Tools/perf/budget/Check.jet (byte-identical to check.mjs on a real build trace across 4 flag sets; 6/0 unit tests). live-reload.mjs and the uncalled olevels/sweep.mjs, native-cells-baseline.mjs and test-source-compiler-gate.sh are deleted; git history keeps them. Next: ci-perf-check.sh and source-compiler-gate.sh, the gates. Parked: core-activation.mjs, which measures generated Rust and allocations through LD_PRELOAD, so its Jet form is a method question on #4275 c105; and jetc-trace/summarize.mjs, which waits on a Core local-zone API."
+        },
+        {
           "at": "2026-11-07",
           "by": "Main",
           "text": "Conflict found 2026-11-07 (Main): c12-c15 keep a non-Jet original in the repository as each gauntlet entry's reference until its Jet twin wins the c14 bars. The owner's later ruling (Docs/spec/philosophy.md priority 6, dev acec3d1a06: Jet fills every role; a Core gap is fixed in Core, never with a fallback tool) and the #6035 c3 cutover delete those originals outright. Under the authority order the newer ruling wins, so c12-c15 are not built as written. A reference original may live only outside the repository (a pinned path in the entry manifest), and the bars in c14 stay as the comparison. Only this card's owner wording changes that."
@@ -60256,7 +60261,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-20T14:41:14.806Z",
-      "updated": "2026-11-07T21:57:03.997Z",
+      "updated": "2026-11-08T00:41:28.417Z",
       "updatedBy": "Main",
       "goals": [
         "G4"
@@ -69987,6 +69992,16 @@
         {
           "at": "2026-11-08",
           "by": "Main",
+          "text": "c3: first full self-host chain through the Jet Tools/agent/Chain.jet (no chain.sh): release admit of 574a9fd134 from a0_034 reaches the fixed point s2 == s3 (jet b0998cecbf79b5c5), no Rust, pack1 == pack2 bytes. The one defect found on the way (inroot re-launched the script path, so every canonical stage died with 'unknown argument inroot') is fixed by 6ddd076fc0."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
+          "text": "c3 end-to-end driver run at 574a9fd134 (TestSystemLead-2: HEAD s1, chromium-152, chromedriver-152 and firefox-157 on PATH). fd8ea5976b fixes what the real run exposed: Serve.jet sends COOP/COEP (app.js died on 'SharedArrayBuffer is not defined'), Acceptance reads #jet-app children (the runtime no longer writes data-jet-node), ReferenceApp's --jet-env is optional. The Jet drivers now drive real Chromium through click, reactive and compute. Product gaps below the drivers, outside c3: (a) web builds emit no source maps (no status m2, sourceMappingURL or app.js.map/app.wasm.map), which fails web_browser_aot_acceptance at the /click manifest and blocks the sourcemap.mjs port proof; (b) jet build --target=web publishes its generic index.html and ignores the #HTML page (callback fixture, no #go button); (c) the hybrid fixture claims/run.jet calls an undefined s5_web_wait_up (E0102) before the browser step; (d) jet notebook is unbuilt (E2104, #6418); (e) the reference loop stays KF #6665; (f) a jet run program that calls core.web.browser launch fails E1004 unless JET_TOOLCHAIN_ROOT is set."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
           "text": "c3 browser drivers, dev 574a9fd134. Landed: Browser.launch for locked Firefox over BiDi (50af4c1f70) and locked Chromium through locked chromedriver with CDP (40b6a16571; 6 browser_lock rows PASS). The CompiledWorkloads web tier runs through Tools/web-test/BrowserRun.jet, not node (73c14677c6; CompiledWorkloads 11/0). notebook-test/acceptance, web-test/acceptance, web-dev-test/hybrid and reference_app are Jet and the .mjs are deleted (a188650c5f; same verdicts before and after on this host, end-to-end runs pending with browsers on PATH). The acceptance fixtures compile and http-ready has Net (574a9fd134). Still on node: canvas-test/driver.mjs (forms_table template), web-test/sourcemap.mjs (blocked: the web build emits no sourceMappingURL, so the sourcemap row fails before the driver; needs a web-build owner), canvas-test/native-lifecycle.mjs (blocked: jet dev --canvas is unbuilt, E2104, #6386), and web-test/live-reload.mjs (gauntlet only). Then Tools/perf and Tools/gauntlet (#5072 c7/c8)."
         },
         {
@@ -71266,7 +71281,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T17:15:48.068Z",
-      "updated": "2026-11-08T00:30:51.083Z",
+      "updated": "2026-11-08T00:35:37.788Z",
       "updatedBy": "Main",
       "goals": [
         "G1"
@@ -73821,6 +73836,11 @@
         {
           "at": "2026-11-08",
           "by": "Main",
+          "text": "c65 timing (fresh run of 4df47ce6da, a0_034, 17:06-18:59): 4 min clone and engine assembly; 45 min cold fetch-toolchain (17:10-17:55, about 1,900 hangar files at about 1.4 s each, the per-file sync of #6592, which PortsLead-2 now owns); 64 min of suites. The corpus rows total 248 CPU-minutes, but the packages suite runs  at PACKAGE_JOBS=4, each child single-core at up to 5.5 GB RSS, so the full profile's wall time follows the package suite, not the corpora. In progress: a warm-state verification of candidate a0_035 (s2 b0998cecbf79, export of 574a9fd134, env -i, no cargo or rustc on PATH) to confirm the full profile passes before the fresh-clone run."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
           "text": "c65: release a0_035 is underway. Land.jet census of 50af4c1f70 by seed a0_034: check, build, runtime and selfcheck rc=0 with 0 rows (preflight receipt 6ae49176...). Tools/release admit 50af4c1f70 --check-gate admitted it, and the admit run started (chain slot, work dir under the release cache). When a0_035 publishes, fresh-c65.sh runs with a0_035 at 50af4c1f70 on a quiet machine."
         },
         {
@@ -74523,7 +74543,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-29T02:09:17.141Z",
-      "updated": "2026-11-08T00:11:56.526Z",
+      "updated": "2026-11-08T00:51:38.524Z",
       "updatedBy": "Main",
       "criteriaLastN": 74
     },
@@ -187061,6 +187081,34 @@
   ],
   "events": [
     {
+      "at": "2026-11-08T00:51:38.524Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0h06654",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-08T00:41:28.417Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0qe89cl",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-08T00:35:37.788Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0pgowhn",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-08T00:35:27.864Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0pgowhn",
+      "note": "logEntry"
+    },
+    {
       "at": "2026-11-08T00:32:52.815Z",
       "by": "Main",
       "action": "card.criteria-meet",
@@ -190531,713 +190579,6 @@
       "action": "card.criteria-meet",
       "ref": "c0yy2xbx",
       "note": "#2"
-    },
-    {
-      "at": "2026-11-07T04:47:15.420Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0h06654",
-      "note": "#73"
-    },
-    {
-      "at": "2026-11-07T04:20:45.481Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0h18kyi",
-      "note": "#94"
-    },
-    {
-      "at": "2026-11-07T04:10:06.577Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0h18kyi",
-      "note": "#91"
-    },
-    {
-      "at": "2026-11-07T04:10:05.593Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0h18kyi",
-      "note": "#90"
-    },
-    {
-      "at": "2026-11-07T04:10:04.709Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0h18kyi",
-      "note": "#89"
-    },
-    {
-      "at": "2026-11-07T04:05:22.435Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c081c9o8",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-07T04:05:21.642Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c081c9o8",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T04:03:31.268Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0dvyqnu",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-07T04:02:56.296Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c08fc2sx",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T04:02:54.862Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0pjwkhn",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T04:02:53.480Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0ewbdj1",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T04:02:51.972Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0awiifz",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T04:02:50.309Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0f1eda4",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T04:02:48.731Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0wssehw",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T04:02:47.143Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0u19cev",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T04:02:45.679Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0p2n50x",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T04:02:44.328Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0y7kqfw",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T04:02:42.693Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c05p5u7s",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T04:02:41.315Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c00w7rum",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T04:02:39.988Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0x9nq8j",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T04:02:38.603Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c078tv7g",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T04:02:37.261Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0zy9mhn",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T04:02:35.903Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0bmxzrb",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T04:02:34.558Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c04pd50v",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T04:02:33.171Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0dm29w2",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T04:02:31.840Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0h063eg",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T04:02:30.459Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0kz2hdf",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T04:02:29.081Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0qbikgx",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T04:02:27.719Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0tbm7r0",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T04:02:26.380Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0bcerww",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T04:02:25.040Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0uhfjtt",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T04:02:23.671Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0xf8qpl",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T04:02:22.291Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0aqrdp0",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T04:02:20.955Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0g5cadm",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T04:02:19.566Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c07hz2zg",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T04:02:18.206Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0qz3x03",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T04:02:16.802Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c098yuyt",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T04:02:15.341Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c01ruyp3",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T04:02:13.881Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0uq7n80",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T04:02:12.369Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c05i2uiq",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T04:02:10.876Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0vzmbkk",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T04:02:10.160Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0zy8wm1",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-07T04:02:08.202Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c07yeb2k",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T04:02:07.340Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0zy8wm1",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-07T04:02:06.010Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c00tizy7",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T04:02:04.437Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c064zxf4",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T04:02:02.828Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0otj2s1",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T04:02:01.292Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0r2z34q",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T04:01:59.868Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0wesey9",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T04:01:58.295Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0r2eell",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T04:01:56.905Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0hmglyn",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T04:01:55.408Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0efae83",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T04:01:53.933Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0jlyc69",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T04:01:52.513Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0xk73ss",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T04:01:50.923Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0wtvbj7",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T04:01:49.264Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c035bwsi",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T04:01:47.389Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0ui9zol",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T04:01:45.851Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0p4qylf",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T04:01:44.145Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0meo2tr",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T04:01:42.555Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0e3wgi0",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T04:01:41.153Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0y5r79w",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T04:01:39.574Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c09brw5t",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T04:01:37.424Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c03jg20v",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T04:01:35.309Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0y7zq8s",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T04:01:33.490Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0tl2yuc",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T04:01:31.836Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c06wbg4r",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T04:01:30.232Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0byuovb",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T04:01:28.204Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0l09me0",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T04:01:26.393Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0l7lwif",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T04:01:24.191Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c06he0ee",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T04:01:22.286Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0ct4a0i",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T04:01:20.456Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0vhdiiv",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T04:01:18.927Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0q31aks",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T04:01:17.310Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0920a2g",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T04:01:15.344Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0mhdm27",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T04:01:13.414Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0qrom2s",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T04:01:11.317Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0tr523z",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T04:01:09.377Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c08u6j84",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T04:01:07.220Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0j8dr0e",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T04:01:05.554Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0eo2mnm",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T04:01:03.612Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0509i8n",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T04:00:15.840Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0xq1afz",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T04:00:14.256Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0xq1afz",
-      "note": "#1 Two Pool ids compare with == and != by slot and generation ("
-    },
-    {
-      "at": "2026-11-07T04:00:13.365Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c08oghuo",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-07T03:58:51.887Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0rdxo6y",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-07T03:56:05.986Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c07pwu5t",
-      "note": "title"
-    },
-    {
-      "at": "2026-11-07T03:56:04.216Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c07pwu5t",
-      "note": "#1: The old row asked for a second spelling. D-FAIL-UNIT1=A (syntax-decisions.md:8504-8506) fixes the order, and the ratified form already checks on a0_029 (MechD-3). The defect is the misleading E0003 fix text.; was: `build: fn(b: Build) -[Exec, FS]> BuildError!` parses and checks: an effect row composes with a unit-fallible rail as it does with a result type, proven by a ui or golden row."
-    },
-    {
-      "at": "2026-11-07T03:54:55.297Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c08oghuo",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-07T03:48:57.373Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0max8v8",
-      "note": "#23"
-    },
-    {
-      "at": "2026-11-07T03:48:56.480Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0m0ims7",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-07T03:48:45.200Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0rodlty",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-07T03:48:40.234Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0rodlty",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-07T03:48:04.592Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0tjjr66",
-      "note": "#6"
-    },
-    {
-      "at": "2026-11-07T03:48:03.542Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0manzdq",
-      "note": "#6"
-    },
-    {
-      "at": "2026-11-07T03:48:02.539Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0m0ims7",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-07T03:48:01.354Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0hn7w1n",
-      "note": "#125"
-    },
-    {
-      "at": "2026-11-07T03:48:00.318Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0hn7w1n",
-      "note": "#124"
-    },
-    {
-      "at": "2026-11-07T03:47:59.284Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0rkebo4",
-      "note": "#28"
-    },
-    {
-      "at": "2026-11-07T03:47:58.293Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0rkebo4",
-      "note": "#26"
-    },
-    {
-      "at": "2026-11-07T03:47:57.234Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0oev2ib",
-      "note": "#112"
-    },
-    {
-      "at": "2026-11-07T03:47:56.220Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0oev2ib",
-      "note": "#101"
     }
   ],
   "nextNum": 368,
