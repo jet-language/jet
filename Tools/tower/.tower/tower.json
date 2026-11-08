@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6686,
-    "rev": 96120,
+    "nextNum": 6687,
+    "rev": 96125,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -100446,6 +100446,78 @@
       "created": "2026-11-08T01:42:17.232Z",
       "updated": "2026-11-08T03:19:25.836Z",
       "updatedBy": "Main"
+    },
+    {
+      "id": "c086wraw",
+      "num": 6686,
+      "title": "Plain jet decides by file extension: `jet run x.c`, `jet build x.c` and `jet x.c` compile C (and C++) instead of parsing it as Jet",
+      "body": "Owner order 2026-11-08: \"Yes obviously we should decide behavior based on extension. That needs to be fixed.\" Probe on seed a0_038: `jet run hello.c`, `jet build hello.c` and `jet hello.c` parse the C file as Jet and print jet.InvalidStatement (\"Expected a call... found <\"). `jet cc hello.c` took 75 s and then failed with E1275 (C/C++ build sandbox unavailable). Plain jet already compiles C inside Jet programs (c@path deps and #FFI(c) bodies, Compiler/JetCli/Source/Cli/ForeignLink.jet) through the toolchain C pack or CC; the entry commands must route a C or C++ source through that same one mechanism (I8), not through a second path.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "`jet run x.c`, `jet build x.c` and `jet x.c` (and .cc, .cpp, .cxx for C++) compile the source with the toolchain C path that Jet programs already use for their C, then link and run it; each prints the program output and exit code on this host with no extra flag, case-tested.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T15:40:42.622Z"
+        },
+        {
+          "n": 2,
+          "text": "A source whose extension jet does not handle gets a registered diagnostic naming the extension and the extensions jet accepts, with what/why/fix text and a UI snapshot (I4), never a Jet parse error.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T15:40:43.730Z"
+        },
+        {
+          "n": 3,
+          "text": "`jet cc hello.c` and `jet run hello.c` work on this development host: the E1275 sandbox refusal seen on 2026-11-08 is root-caused and fixed, and a fresh C compile finishes in seconds, not 75 s (receipt with times).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T15:40:44.957Z"
+        },
+        {
+          "n": 4,
+          "text": "An Examples/ entry runs a C file with plain `jet run`, golden-tested (I5).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T15:40:46.190Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "cli",
+        "ffi",
+        "owner-direction"
+      ],
+      "goals": [
+        "G4"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-08T15:40:30.554Z",
+      "updated": "2026-11-08T15:40:46.190Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 4
     }
   ],
   "decisions": [
@@ -188496,6 +188568,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-08T15:40:46.190Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c086wraw",
+      "note": "#4 An Examples/ entry runs a C file with plain `jet run`, golde"
+    },
+    {
+      "at": "2026-11-08T15:40:44.957Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c086wraw",
+      "note": "#3 `jet cc hello.c` and `jet run hello.c` work on this developm"
+    },
+    {
+      "at": "2026-11-08T15:40:43.730Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c086wraw",
+      "note": "#2 A source whose extension jet does not handle gets a register"
+    },
+    {
+      "at": "2026-11-08T15:40:42.622Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c086wraw",
+      "note": "#1 `jet run x.c`, `jet build x.c` and `jet x.c` (and .cc, .cpp,"
+    },
+    {
+      "at": "2026-11-08T15:40:30.554Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c086wraw",
+      "note": "Plain jet decides by file extension: `jet run x.c`, `jet build x.c` and `jet x.c` compile C (and C++) instead of parsing it as Jet"
+    },
     {
       "at": "2026-11-08T15:38:31.074Z",
       "by": "Main",
