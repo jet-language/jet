@@ -20,11 +20,13 @@
 // it: CoreSourceRows.jet for Core.jet, CoreSourceParts.tsv, Effects.jet and
 // CoreCallExtensions.jet, the Core surface ledger for CoreSurfaceInventory.jet,
 // DiagnosticRows.jet for Diagnostics.jet, OwnedTraitRows.jet for Traits.jet
-// and core/prelude.jet, and PreludeSources.jet for Markers.jet, Derives.jet,
-// Errors.jet and Units.jet. Then every Prelude Jet file the compiler embeds
-// gets `jet check --prelude`: all but the inputs only a generator reads
-// (Core.jet, CoreSurfaceInventory.jet and the readers' core/prelude.jet); a
-// jet without that mode prints PRELUDE UNCHECKED and never CHECK OK.
+// and core/prelude.jet, and Compiler/Toolchain/PreludeSources.jet (the
+// `prelude-sources` step of `jet build Compiler`, run from Compiler/) for
+// Markers.jet, Derives.jet, Errors.jet and Units.jet. Then every Prelude Jet
+// file the compiler embeds gets `jet check --prelude`: all but the inputs
+// only a generator reads (Core.jet, CoreSurfaceInventory.jet and the readers'
+// core/prelude.jet); a jet without that mode prints PRELUDE UNCHECKED and
+// never CHECK OK.
 // A Core source is checked as Core, the library that may define `__` names:
 // a public module or a private part (its CoreSourceOwned.jet row) as the
 // one-import probe of its module that Tools/agent/CoreModuleCheck.jet uses,
@@ -203,14 +205,16 @@ prelude_source: fn(relative: String) -> Bool Never! {
 
 // The command whose `--check` holds the compiler's copies of Prelude file
 // `name` (its path under Compiler/Prelude) equal to it, run with `jet`; empty
-// when no generator reads the file.
+// when no generator reads the file. A Toolchain/ generator is a step of
+// `jet build Compiler` and runs from the Compiler package; the rest run from
+// the checkout.
 prelude_generator: fn(name: String, jet: String) -> [String] Never! {
     if name == {
         "Core.jet" | "CoreSourceParts.tsv" | "Effects.jet" | "CoreCallExtensions.jet" -> [String]{jet, "Tools/agent/CoreSourceRows.jet", "--check"}
         "CoreSurfaceInventory.jet" -> [String]{jet, "Tools/agent/CoreSurfaceLedger.jet", "--check"}
         "Diagnostics.jet" -> [String]{jet, "Tools/agent/DiagnosticRows.jet", "--check"}
         "Traits.jet" | "core/prelude.jet" -> [String]{jet, "Tools/agent/OwnedTraitRows.jet", "--check"}
-        "Markers.jet" | "Derives.jet" | "Errors.jet" | "Units.jet" -> [String]{jet, "Tools/agent/PreludeSources.jet", "--check"}
+        "Markers.jet" | "Derives.jet" | "Errors.jet" | "Units.jet" -> [String]{jet, "Toolchain/PreludeSources.jet", "--check"}
         else -> [String]{}
     }
 }
@@ -232,7 +236,8 @@ prelude_check: fn(repo: String, jet: String, relative: String, target: String, s
     generated := 0
     if generator.len() > 0 {
         command: generator.join(" ")
-        receipt: process.cmd(generator).cwd(repo).env("JET_TOOLCHAIN_ROOT", env_or("JET_TOOLCHAIN_ROOT", repo)).output_limit(268435456).run() ?? return Val(Ran{code: 127, text: "error: {relative}: `{command}` could not start: {err}\n"})
+        folder: if generator[1].starts_with("Toolchain/") -> "{repo}/Compiler" else -> repo
+        receipt: process.cmd(generator).cwd(folder).env("JET_TOOLCHAIN_ROOT", env_or("JET_TOOLCHAIN_ROOT", repo)).output_limit(268435456).run() ?? return Val(Ran{code: 127, text: "error: {relative}: `{command}` could not start: {err}\n"})
         output: process.combined_output(receipt)
         text = output
         if receipt.code != 0 || receipt.signal != None {
@@ -989,7 +994,7 @@ first_hit: fn(dir: String, file: String, args: [String], flags: [String]) -[Exec
     assert_eq(prelude_generator("CoreSurfaceInventory.jet", "/j"), [String]{"/j", "Tools/agent/CoreSurfaceLedger.jet", "--check"})
     assert_eq(prelude_generator("Diagnostics.jet", "/j")[1], "Tools/agent/DiagnosticRows.jet")
     assert_eq(prelude_generator("core/prelude.jet", "/j")[1], "Tools/agent/OwnedTraitRows.jet")
-    assert_eq(prelude_generator("Units.jet", "/j")[1], "Tools/agent/PreludeSources.jet")
+    assert_eq(prelude_generator("Units.jet", "/j")[1], "Toolchain/PreludeSources.jet")
     assert_eq(prelude_generator("Facts.jet", "/j").len(), 0)
     assert(PRELUDE_GENERATOR_INPUTS.contains("core/prelude.jet") && PRELUDE_GENERATOR_INPUTS.contains("Core.jet") && !PRELUDE_GENERATOR_INPUTS.contains("Traits.jet"))
 }
