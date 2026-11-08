@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6686,
-    "rev": 96116,
+    "rev": 96117,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -80851,6 +80851,11 @@
         {
           "at": "2026-11-08",
           "by": "Main",
+          "text": "Warm jet run driver profile (SchedLead, 2026-11-08, dev c2be1e72ac, 20 warm runs of ScriptBench w11, $JET_SCRATCH_ROOT/lanes/SchedLead/prof/run-g.data): the jet driver is 32.6% of all cycles (the program 65.8%). Inclusive, as a share of the driver: package-root search 27.6% (manifest root 24.0%, workspace root 10.8%, entry_has_workspace 12.3%, the same search done three times), production receipt env 26.6%, plan/resolver 18.3% (authority walk 12.6%), pinned toolchain 15.3%, script cache 12.5%, launch 10.2%, C-header bind refresh 8.1% (reads headers with no binding declared), list_dir 8.0%. About 20% self is string copy and alloc/free. Fix in the general driver path (item 4 of the startup plan): find the root once per invocation, skip the header bind when nothing binds, and remove the copies. Routed to QuickLead."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
           "text": "Main 2026-11-08 07:00 owner adopted the no-cache startup plan and its recommended fixes: (1) Core/Prelude precompiled inside jet (new criterion), (2) a single-threaded compile for small programs (new criterion), (3) close the #6527 compiler phase budgets (throughput, which also makes edit-runs fast without incremental state), (4) a leaner jet process start (lazy init, a smaller touched page set), (5) remove the kept-program cache once the cold path beats it (new criterion). c18/c19/c20 are reworded to no-cache runs; #5949 c17 (incremental re-check) is retired as obsolete. Target: jet run at or below one exec plus a user-code-only compile, about 0.2-0.3 ms for hello, below luajit 0.58 and lua 0.75."
         },
         {
@@ -81245,7 +81250,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T16:05:34.496Z",
-      "updated": "2026-11-08T11:18:00.927Z",
+      "updated": "2026-11-08T14:38:05.915Z",
       "updatedBy": "Main",
       "criteriaLastN": 24
     },
@@ -188476,6 +188481,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-08T14:38:05.915Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c08r6ogl",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-08T14:37:41.331Z",
       "by": "Main",
