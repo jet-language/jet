@@ -280,6 +280,16 @@ The following sources are retained as a compact reading index. Their arguments
 inform the comparisons above; the linked Jet source and examples define Jet's
 actual contracts.
 
+Every source that a mining run reads has a row here, in a section for that
+run: `### Subject (mined YYYY-MM-DD)`, then the run ID and the report or the
+Tower cards that hold its findings, then one row per source URL. A mining run
+adds its rows before hand-in; `check_coverage.mjs` in the `mine-for-jet-v2`
+skill fails while any mined source in the run has no row or the run ID is
+missing. A row records that a run read the source. It does not record that the
+reading was complete: rows marked "first pass only" were read in full but did
+not pass the depth gate, and a re-mine of them still needs owner approval
+(`check_sources.py --allow-rerun`).
+
 ### Systems, safety, and tooling
 
 - https://www.youtube.com/watch?v=H1TSClkkHy0
@@ -353,6 +363,76 @@ actual contracts.
 - https://podscripts.co/podcasts/the-standup-with-theprimeagen/legendary-game-dev-jonathan-blow
 - https://youtu.be/OPuztQfM3Fg
 
+### Video mines recorded only on Tower (mined 2026-07-16 to 2026-08-12)
+
+These runs kept no report in the repository. Each row names the Tower cards
+that hold the findings and the date the cards give for the mine. The owner
+queued the 14 Python videos as Tower ideas on 2026-08-03, and cards #1402 to
+#1407 came from that batch. Rows without a card were in the batch, but no
+surviving record shows what was read from them.
+
+- Compiler latency, #676 (2026-07-16; crosswalk [compiler-latency-video-crosswalk-2026-08-24](../../audits/compiler-latency-video-crosswalk-2026-08-24.md)) — https://www.youtube.com/watch?v=M9UWgw_aW28
+- Semaphores, #1337 and #1338 (2026-07-30) — https://www.youtube.com/watch?v=_0Yu7wCJE-4
+- Python dispatch tables, #1357 (2026-07-31) — https://www.youtube.com/watch?v=d7dhT2cBkJE
+- Python and Matplotlib plotting, #1403 (2026-08-03) — https://www.youtube.com/watch?v=gamozygB2xE
+- Python parallel map, #1405 (2026-08-03) — https://www.youtube.com/watch?v=p14mkEoY88I
+- Python progress bars, #1402 (2026-08-03) — https://www.youtube.com/watch?v=VAoGebgGTdM
+- Python lists, tuples and sets, #1404 (2026-08-03) — https://www.youtube.com/watch?v=11WrzU81q68
+- Python variables, #1407 (2026-08-03) — https://www.youtube.com/watch?v=KQQ10D0lits
+- Python init, batch only (2026-08-03) — https://www.youtube.com/watch?v=KZpYtNtGxSU
+- Python, batch only (2026-08-03) — https://www.youtube.com/watch?v=Gqv7S21CHD4
+- Python dicts, batch only (2026-08-03) — https://www.youtube.com/watch?v=4t10v2QmTHU
+- Python lambdas, batch only (2026-08-03) — https://www.youtube.com/watch?v=j6FCewxjrBM
+- Python file handling, batch only (2026-08-03) — https://www.youtube.com/watch?v=PXySDMxOPnI
+- Python context managers, batch only (2026-08-03) — https://www.youtube.com/watch?v=LffQVBq3P9o
+- Python error handling, batch only (2026-08-03) — https://www.youtube.com/watch?v=XN3udSTGAOM
+- Python enumerate, batch only (2026-08-03) — https://www.youtube.com/watch?v=u5V8j66lYcI
+- Python zip, batch only (2026-08-03) — https://www.youtube.com/watch?v=1cG6RpAH9Xk
+- Bedrock Linux, #1423 to #1425 (2026-08-04) — https://www.youtube.com/watch?v=ENejkGhMTww
+- Bedrock Linux documentation, #1423 to #1425 (2026-08-04) — https://bedrocklinux.org
+- Xcode and Swift compile times, #1496 and #1498 (2026-08-06) — https://www.youtube.com/watch?v=zqOrriq20Tc
+- Untrusted input type, #1655 (2026-08-10) — https://www.youtube.com/watch?v=iu_ALBDtoHo
+- Python memoization, #1871 and #1872 (2026-08-10) — https://www.youtube.com/watch?v=jW3PChEAWWQ
+- Zig memory-safe build mode, #1883 to #1888 (2026-08-12) — https://www.youtube.com/watch?v=7H--tn8RLSc
+
+### Devenv (mined 2026-07-24)
+
+Report: [2026-07-24-devenv-parity](../../audits/2026-07-24-devenv-parity.md).
+
+- https://www.youtube.com/watch?v=jldArhyi6jM
+- https://devenv.sh
+- https://devenv.sh/reference/options/
+
+### deploy-rs (mined 2026-08-06)
+
+Report: [deploy-rs-lessons-2026-08-06](../../audits/deploy-rs-lessons-2026-08-06.md).
+
+- https://www.youtube.com/watch?v=8gh4YXi_Cgk
+- https://github.com/serokell/deploy-rs
+
+### Compiler algorithms, selection and performance (mined 2026-09-10)
+
+Reports: [mine-for-jet-2026-09-10](../../audits/mine-for-jet-2026-09-10.md) (Tower #3009) and
+[mine-for-jet-casey-2026-09-10](../../audits/mine-for-jet-casey-2026-09-10.md) (Tower #3015).
+All three videos came from the owner playlist listed under 2026-09-28.
+
+- https://www.youtube.com/watch?v=YlFYXewYJ8M
+- https://www.youtube.com/watch?v=5JXpNOZWAHM
+- https://www.youtube.com/watch?v=8xBJPa_480Q
+
+### Eight programming videos (mined 2026-09-12)
+
+Report: [mine-for-jet-2026-09-12](../../research/mine-for-jet-2026-09-12.md).
+
+- https://www.youtube.com/watch?v=JaOzpMQEUnI
+- https://www.youtube.com/watch?v=nzjy0EFrzbk
+- https://www.youtube.com/watch?v=RhBhdgiKgGw
+- https://www.youtube.com/watch?v=07aopKNVFjQ
+- https://www.youtube.com/watch?v=d6PG6xdoU4c
+- https://www.youtube.com/watch?v=XqmOZ1TyLCk
+- https://www.youtube.com/watch?v=jCZnFKk6M9A
+- https://www.youtube.com/watch?v=lcVx3g3SmmY
+
 ### Owner playlist and sync-engine sources (mined 2026-09-28)
 
 Report: [mine-for-jet-2026-09-28](../../research/mine-for-jet-2026-09-28.md).
@@ -375,6 +455,7 @@ source of the honest versus dishonest framing used by D-HONEST-SIG1.
 - https://www.youtube.com/watch?v=0nwZ2jdFrMg
 - https://www.youtube.com/watch?v=z7wVUfnm7M0
 - https://www.youtube.com/watch?v=ccV9aae8DIc
+- Earlier upload of the clip above, not mined itself — https://www.youtube.com/watch?v=YuIGA3q0heI
 - https://www.youtube.com/watch?v=2jIQJ2GuCMU
 - https://www.youtube.com/watch?v=xP6fIK5g9EQ
 - https://www.youtube.com/watch?v=oitYvDe4nps
@@ -441,6 +522,13 @@ Report: [mine-for-jet-2026-09-30-spj-papers](../../research/mine-for-jet-2026-09
 - Champagne Prototyping (VL/HCC 2004) — https://www.microsoft.com/en-us/research/publication/champagne-prototyping-research-technique-early-evaluation-complex-end-user-programming-systems
 - A Monad for Deterministic Parallelism (Haskell 2011) — https://simon.peytonjones.org/deterministic-parallelism
 
+### Jonathan Blow's code visualizer clip (mined 2026-09-30)
+
+Report: [mine-for-jet-2026-09-30-code-map](../../research/mine-for-jet-2026-09-30-code-map.md).
+The clip is cut from a longer keynote, which was not mined.
+
+- https://www.youtube.com/watch?v=PbVHBToltXk
+
 ### Systems-language talks and sources (mined 2026-10-01)
 
 Report: [mine-for-jet-2026-10-01-systems-langs](../../research/mine-for-jet-2026-10-01-systems-langs.md).
@@ -466,10 +554,11 @@ Report: [mine-for-jet-2026-10-02-vale-valen](../../research/mine-for-jet-2026-10
 
 - https://www.youtube.com/watch?v=UavYVf0UEoc
 - https://verdagon.dev/blog/golden-spike-reviving-vale-valen
+- https://gist.github.com/nmsmith/cdaa94aa74e8e0611221e65db8e41f7b
 - https://verdagon.dev/blog/group-borrowing
 - https://verdagon.dev/blog/generational-references
 - https://verdagon.dev/blog/hybrid-generational-memory
-- https://verdagon.dev/blog/zero-cost-memory-safety-regions-overview
+- https://verdagon.dev/blog/zero-cost-borrowing-regions-overview
 - https://verdagon.dev/blog/first-regions-prototype
 - https://verdagon.dev/blog/seamless-fearless-structured-concurrency
 - https://verdagon.dev/blog/higher-raii-uses-linear-types
@@ -479,6 +568,63 @@ Report: [mine-for-jet-2026-10-02-vale-valen](../../research/mine-for-jet-2026-10
 - https://verdagon.dev/blog/perfect-replayability-prototyped
 - https://verdagon.dev/blog/fearless-ffi
 - https://vale.dev/guide/references
+
+### Owner playlist, 50 videos (mined 2026-10-05)
+
+Report: [mining-playlist-2026-10-05](../../research/mining-playlist-2026-10-05.md).
+Ten videos passed the depth gate in the H1/H2, P1/P2, S1 and S2 shards. The
+other 40 are first pass only: read in full, never ledgered against the gate.
+
+- Depth-gated (H1/H2) — https://www.youtube.com/watch?v=FknTw9bJsXM
+- Depth-gated (P1/P2) — https://www.youtube.com/watch?v=4M87qBgpafk
+- Depth-gated (S1) — https://www.youtube.com/watch?v=DaJWWePhRsM
+- Depth-gated (S2) — https://www.youtube.com/watch?v=vO5Ykk7O9r0
+- Depth-gated (S2) — https://www.youtube.com/watch?v=jF3W7EkXd4k
+- Depth-gated (S2) — https://www.youtube.com/watch?v=PbVHBToltXk
+- Depth-gated (S2) — https://www.youtube.com/watch?v=A2U_GMWl9l4
+- Depth-gated (S2) — https://www.youtube.com/watch?v=cKyrT8OVbDo
+- Depth-gated (S2) — https://www.youtube.com/watch?v=hD0fyLtWIIE
+- Depth-gated (S2) — https://www.youtube.com/watch?v=eP3DFpsWABc
+- First pass only, not depth-gated — https://www.youtube.com/watch?v=maw2hptpErI
+- First pass only, not depth-gated — https://www.youtube.com/watch?v=RntfkL8lUY4
+- First pass only, not depth-gated — https://www.youtube.com/watch?v=IGmwiyines0
+- First pass only, not depth-gated — https://www.youtube.com/watch?v=DzhIprQan68
+- First pass only, not depth-gated — https://www.youtube.com/watch?v=DuGy1tmKP-w
+- First pass only, not depth-gated — https://www.youtube.com/watch?v=zHzpoVgqgc4
+- First pass only, not depth-gated — https://www.youtube.com/watch?v=yKl2fSdnw7w
+- First pass only, not depth-gated — https://www.youtube.com/watch?v=IxQ586TS8Gw
+- First pass only, not depth-gated — https://www.youtube.com/watch?v=CBUWcUuG6Ss
+- First pass only, not depth-gated — https://www.youtube.com/watch?v=_oiBWfuf0Oo
+- First pass only, not depth-gated — https://www.youtube.com/watch?v=BiFt4vw1-uM
+- First pass only, not depth-gated — https://www.youtube.com/watch?v=v5FBAbnLjUQ
+- First pass only, not depth-gated — https://www.youtube.com/watch?v=OziieTomAgs
+- First pass only, not depth-gated — https://www.youtube.com/watch?v=pvbD8CbaOWM
+- First pass only, not depth-gated — https://www.youtube.com/watch?v=wgJojeXcuc4
+- First pass only, not depth-gated — https://www.youtube.com/watch?v=l3AeN4wQirE
+- First pass only, not depth-gated — https://www.youtube.com/watch?v=ts38mSIUPSg
+- First pass only, not depth-gated — https://www.youtube.com/watch?v=18tFu7eLC5o
+- First pass only, not depth-gated — https://www.youtube.com/watch?v=8WE36xcgF24
+- First pass only, not depth-gated — https://www.youtube.com/watch?v=cywK3XYYJ2o
+- First pass only, not depth-gated — https://www.youtube.com/watch?v=KxREK-DYu70
+- First pass only, not depth-gated — https://www.youtube.com/watch?v=7_o-YRxf_cc
+- First pass only, not depth-gated — https://www.youtube.com/watch?v=40JzyaOYJeY
+- First pass only, not depth-gated — https://www.youtube.com/watch?v=t_h_A6RkM7A
+- First pass only, not depth-gated — https://www.youtube.com/watch?v=eP_P4KOjwhs
+- First pass only, not depth-gated — https://www.youtube.com/watch?v=9HI8tExWl5c
+- First pass only, not depth-gated — https://www.youtube.com/watch?v=i_wDa2AS_8w
+- First pass only, not depth-gated — https://www.youtube.com/watch?v=mS9755gF66w
+- First pass only, not depth-gated — https://www.youtube.com/watch?v=2Q9GRPxqCAk
+- First pass only, not depth-gated — https://www.youtube.com/watch?v=SmlLdd1Q2V8
+- First pass only, not depth-gated — https://www.youtube.com/watch?v=eopps3YF6aE
+- First pass only, not depth-gated — https://www.youtube.com/watch?v=pjnSE99-cz0
+- First pass only, not depth-gated — https://www.youtube.com/watch?v=RAjgkqJ-8xQ
+- First pass only, not depth-gated — https://www.youtube.com/watch?v=Wt4dxDNmDA8
+- First pass only, not depth-gated — https://www.youtube.com/watch?v=qLJCSpOrb9s
+- First pass only, not depth-gated — https://www.youtube.com/watch?v=HfRQjix9tU4
+- First pass only, not depth-gated — https://www.youtube.com/watch?v=65-y9FaN--s
+- First pass only, not depth-gated — https://www.youtube.com/watch?v=JAmGgadALQQ
+- First pass only, not depth-gated — https://www.youtube.com/watch?v=U8L_KOQmDj4
+- First pass only, not depth-gated — https://www.youtube.com/watch?v=nTMP_rLZOYM
 
 ### Jai: Tsoding playlist, Jonathan Blow's demos and public references (mined 2026-10-15)
 
@@ -591,6 +737,10 @@ livestreams.
 - https://github.com/tsoding/infinite-pong-jai-wasm64
 - https://github.com/tsoding/jaibreak
 - https://github.com/tsoding/tetris-jai
+- https://github.com/tsoding/jaison
+- https://github.com/tsoding/rope-jai
+- https://github.com/tsoding/jai-ctags
+- https://github.com/tsoding/twitch_irc
 - https://github.com/PixelRifts/Jai-Shader-Transpiler
 - https://github.com/onelivesleft/Metaprogram
 - https://github.com/kujukuju/MetaThreadSafe
@@ -610,6 +760,44 @@ Report: [mine-for-jet-2026-10-16-vlang](../../research/mine-for-jet-2026-10-16-v
 - https://github.com/vlang/ved
 - https://github.com/vox-browser/vox
 - https://mawfig.github.io/2022/06/18/v-lang-in-2022.html
+
+### Jonathan Blow on compiler error reporting (mined 2026-10-30)
+
+Report: [2026-10-30-blow-error-reporting-talk](../../research/2026-10-30-blow-error-reporting-talk.md) (Tower #6377).
+The clip is cut from a longer stream, which was not mined.
+
+- https://www.youtube.com/watch?v=ZF1m1DsW3Rg
+- Earlier upload of the same clip, now unavailable, not mined itself — https://www.youtube.com/watch?v=BBYYHFrCBOA
+
+### Jonathan Blow on Jai reflection (mined 2026-11-04)
+
+Run: `jai-reflection-tSv-2026-11-04`. Report: [reflection-2026-11-04](../../proposals/reflection-2026-11-04.md).
+The clip is cut from a longer talk, which was not mined.
+
+- https://www.youtube.com/watch?v=tSv-872TXpQ
+
+### Jet dev against incumbent dev servers (mined 2026-11-04)
+
+Run: `jetdev-vs-incumbents-2026-11-04`. Report: [2026-11-04-jet-dev-vs-incumbents](../../research/2026-11-04-jet-dev-vs-incumbents.md).
+The run's live captures of Jet are its own evidence and need no row.
+
+- https://docs.astro.build/en/reference/cli-reference/
+- https://docs.astro.build/en/guides/dev-toolbar/
+- https://bun.com/docs/bundler/fullstack.md
+- https://bun.com/docs/runtime/watch-mode.md
+- https://docs.deno.com/runtime/reference/cli/serve.md
+- https://docs.expo.dev/more/expo-cli.md
+- https://nextjs.org/docs/app/api-reference/cli/next.md
+- https://nextjs.org/docs/app/api-reference/config/next-config-js/devIndicators.md
+- https://nextjs.org/docs/app/guides/local-development.md
+- https://parceljs.org/features/development/
+- https://rsbuild.rs/guide/basic/server.md
+- https://rsbuild.rs/guide/advanced/hmr.md
+- https://vite.dev/guide/cli.md
+- https://vite.dev/guide/dep-pre-bundling.md
+- https://vite.dev/guide/env-and-mode.md
+- https://vite.dev/guide/features.md
+- https://vite.dev/config/server-options.md
 
 ## Developer experience (e14)
 
