@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6697,
-    "rev": 96183,
+    "rev": 96185,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -100751,6 +100751,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-08T15:46:58.114Z"
+        },
+        {
+          "n": 4,
+          "text": "setuid, setgid and setgroups (and initgroups, ported to Jet with /etc/group plus the nscd GETINITGR query) apply to every thread in the process through a Jet synccall over the thread registry, as POSIX and musl define. Today the raw per-thread setuid and setgid in HostProcess.jet change only the calling carrier, a privilege-drop defect. A case drops privileges with tasks on several carriers and checks every /proc/self/task/*/status.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-08T15:56:28.862Z"
         }
       ],
       "refs": [],
@@ -100765,9 +100774,9 @@
       "parentId": "c0lscvc9",
       "needsAcceptance": false,
       "created": "2026-11-08T15:46:55.183Z",
-      "updated": "2026-11-08T15:48:42.713Z",
+      "updated": "2026-11-08T15:56:28.862Z",
       "updatedBy": "Main",
-      "criteriaLastN": 3
+      "criteriaLastN": 4
     },
     {
       "id": "c0wl6r2h",
@@ -100787,6 +100796,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-08",
+          "by": "Main",
+          "text": "Main 2026-11-08: initgroups and setgroups stay on musl in #6690. They move to Jet with the synccall of #6689, because a per-thread port would regress the process-wide behavior of today. Found by SchedLead: the Jet setuid and setgid (HostProcess.jet) are raw per-thread syscalls that change only the calling carrier; the fix is the new synccall criterion of #6689."
+        },
         {
           "at": "2026-11-08",
           "by": "Main",
@@ -100825,7 +100839,7 @@
       "parentId": "c0lscvc9",
       "needsAcceptance": false,
       "created": "2026-11-08T15:46:59.496Z",
-      "updated": "2026-11-08T15:47:50.881Z",
+      "updated": "2026-11-08T15:56:29.867Z",
       "updatedBy": "Main",
       "criteriaLastN": 2
     },
@@ -189304,6 +189318,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-08T15:56:29.867Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0wl6r2h",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-08T15:56:28.862Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0x92nsv",
+      "note": "#4 setuid, setgid and setgroups (and initgroups, ported to Jet "
+    },
     {
       "at": "2026-11-08T15:56:09.223Z",
       "by": "Main",
