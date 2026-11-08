@@ -1358,11 +1358,11 @@ unexercised native carrier or runtime receipt.
 | `core.encoding.__write_bytes` | `stream.jet` JSON push and `csv.jet` writer | Existing file write-all; source owns encoding and limits |
 | `core.encoding.__flush` | `stream.jet` JSON push and `csv.jet` writer | Existing file flush; source owns sticky terminal failure |
 | `core.encoding.__utf8_validate` | `cbor_parse.jet` text chunks and `stream.jet` text conversion | Existing strict validator; source chooses validation point and maps errors |
-| `core.encoding.__bytes_into_text` | `stream.jet` and `csv.jet` validated text transfer | Consume exact validated UTF-8 allocation without copying |
+| `core.encoding.__bytes_into_text` | `stream.jet` and `csv.jet` validated text transfer | Borrow exact validated UTF-8 bytes; the String is one copy and the list stays the caller's |
 | `core.encoding.__string_byte` | `stream.jet` checked string-byte accessor | Borrow byte only after source bounds proof |
 | `core.encoding.__object_from_entries` | `stream.jet` owned object construction | Move ordered entries into the existing native carrier |
 | `core.encoding.__write_text` | `csv.jet` field output and `stream.jet` JSON push | Borrow UTF-8 storage for existing file write-all |
-| `core.encoding.__text_into_bytes` | `stream.jet` record accounting and canonical numbers | Consume text allocation without copying |
+| `core.encoding.__text_into_bytes` | `stream.jet` record accounting and canonical numbers | Consume the text; its bytes are copied into the list and the text is released |
 | `core.encoding.__typed_text` | `stream.jet` typed-text retention | Move text into the existing private Decode carrier |
 | `core.encoding.__object_entries_view` | `stream.jet` checked Object view | Borrow ordered entries, preserving the owner |
 | `core.encoding.__bytes_view` | `stream.jet` checked Bytes view | Borrow payload, preserving the owner |

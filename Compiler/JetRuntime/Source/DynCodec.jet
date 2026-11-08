@@ -5,7 +5,9 @@
 #Export(c) jet_rt_codec_encode_bool: fn(value: U8) -> I64 { jet_rt_record_new_dyn_bool(value != U8{0}) }
 #Export(c) jet_rt_codec_encode_float: fn(value: Float) -> I64 { jet_rt_record_new_dyn_float(value) }
 #Export(c) jet_rt_codec_encode_string: fn(value: I64) -> I64 { jet_rt_record_new_dyn_text(value) }
-#Export(c) jet_raw_typed_text: fn(value: I64) -> I64 { jet_rt_record_new_dyn_text(value) }
+// The typed decoder's text moves in (core.encoding.__typed_text): the tree
+// owns the parsed String, with no copy.
+#Export(c) jet_raw_typed_text: fn(value: I64) -> I64 { dyn_new(DYN_TEXT, value) }
 #Export(c) jet_rt_codec_encode_char: fn(value: I64) -> I64 {
     // The existing scalar adapter replaces an invalid Unicode scalar with U+FFFD.
     dyn_new(DYN_TEXT, jet_rt_char_to_string(value))

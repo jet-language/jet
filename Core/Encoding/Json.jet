@@ -799,6 +799,87 @@ impl Parser {
         if !self.__cursor_ws() -> return
         if !self.eof() -> self.__cursor_fail(self.err("extra text after JSON value"))
     }
+
+    // A value no read takes, read with parse_value's checks in its order and
+    // kept nowhere: skipping a member builds no tree of it.
+    __cursor_skip: fn(&self) EncodingError! {
+        self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
+        b: self.peek() ?? return Err(truncated_error(EncodingFormat.JSON, self.index, self.line, self.column, "/{self.path.join("/")}"))
+        if b == (U8{91}) -> return self.__cursor_skip_array()
+        if b == (U8{123}) -> return self.__cursor_skip_object()
+        _ := self.parse_value() ?? return Err(err)
+        Ok(())
+    }
+
+    // parse_array, keeping no item.
+    __cursor_skip_array: fn(&self) EncodingError! {
+        if !self.expect(U8{91}) -> return Err(self.err("expected '['"))
+        if !self.enter() -> return Err(self.err("nesting exceeds max_depth ({self.max_depth})"))
+        self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
+        if (self.peek() ?? (U8{0})) == (U8{93}) {
+            _: self.bump()
+            self.depth -= 1
+            return Ok(())
+        }
+        index := 0
+        loop {
+            self.path.push("{index}")
+            self.__cursor_skip() ?? return Err(err)
+            _: self.path.pop()
+            self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
+            b: self.peek() ?? return Err(self.err("unterminated array"))
+            if b == (U8{93}) {
+                _: self.bump()
+                self.depth -= 1
+                return Ok(())
+            }
+            if b != (U8{44}) -> return Err(self.err("expected ',' or ']' after an array element"))
+            _: self.bump()
+            self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
+            if (self.peek() ?? (U8{0})) == (U8{93}) -> return Err(self.err("trailing commas are not allowed in JSON"))
+            index += 1
+        }
+    }
+
+    // parse_object, keeping only the member names, for its duplicate check.
+    __cursor_skip_object: fn(&self) EncodingError! {
+        if !self.expect(U8{123}) -> return Err(self.err("expected '{{'"))
+        if !self.enter() -> return Err(self.err("nesting exceeds max_depth ({self.max_depth})"))
+        names := [String: Bool]{}
+        self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
+        if (self.peek() ?? (U8{0})) == (U8{125}) {
+            _: self.bump()
+            self.depth -= 1
+            return Ok(())
+        }
+        loop {
+            self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
+            if (self.peek() ?? (U8{0})) != (U8{34}) -> return Err(self.err("object keys must be strings"))
+            key: self.parse_string() ?? return Err(err)
+            self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
+            if !self.expect(U8{58}) -> return Err(self.err("expected ':' after an object key"))
+            self.path.push(key.copy())
+            if names.get(key) != None && !self.allow_duplicates {
+                error: self.err("duplicate object key `{key}`")
+                _: self.path.pop()
+                return Err(error)
+            }
+            self.__cursor_skip() ?? return Err(err)
+            names[key] = true
+            _: self.path.pop()
+            self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
+            b: self.peek() ?? return Err(self.err("unterminated object"))
+            if b == (U8{125}) {
+                _: self.bump()
+                self.depth -= 1
+                return Ok(())
+            }
+            if b != (U8{44}) -> return Err(self.err("expected ',' or '}}' after an object member"))
+            _: self.bump()
+            self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
+            if (self.peek() ?? (U8{0})) == (U8{125}) -> return Err(self.err("trailing commas are not allowed in JSON"))
+        }
+    }
 }
 
 // A failed read's result never surfaces: the decode fails with the latched
@@ -923,7 +1004,11 @@ impl Parser.__DecodeSource {
     }
 
     skip: fn(&self) Never! {
-        _ := self.capture()
+        if self.failure != None -> return
+        if self.__cursor_skip() == {
+            .Ok(_) -> {}
+            .Err(error) -> self.__cursor_fail(error)
+        }
     }
 
     capture: fn(&self) -> Dyn Never! {
@@ -1293,7 +1378,7 @@ write_json_bytes: fn(out: &[U8], bytes: [U8]) Never! {
 }
 
 write_ascii: fn(out: &[U8], text: String) Never! {
-    loop b in text.bytes() -> out.push(b)
+    out.extend(text.bytes())
 }
 
 write_indent: fn(out: &[U8], n: Int) Never! {
@@ -1303,10 +1388,16 @@ write_indent: fn(out: &[U8], n: Int) Never! {
     }
 }
 
+// A string with nothing to escape is appended whole; otherwise byte by byte.
 write_json_string: fn(out: &[U8], text: String) Never! {
+    bytes: text.bytes()
     out.push(U8{34})
-    loop index in 0..<text.count_bytes() {
-        b: stream.byte_at(text, index)
+    if !bytes.any(b -> b == (U8{34}) || b == (U8{92}) || b < (U8{32})) {
+        out.extend(bytes)
+        out.push(U8{34})
+        return
+    }
+    loop b in bytes {
         n: b
         if n == 34 {
             write_ascii(out, "\\\"")
