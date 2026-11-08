@@ -113,8 +113,8 @@ WorkspaceDeclarationProbe: struct {
 }
 
 // Root discovery shares this owned cache across its workspace-source probes.
-// Each distinct source is lexed once per discovery session, keyed by its byte
-// length and SHA-256; repeated scans must use the same cache.
+// Each distinct source that names `workspace` is lexed once per discovery
+// session, keyed by its text; repeated scans must use the same cache.
 WorkspaceDeclarationCache: struct {
     priv probes: [String: WorkspaceDeclarationProbe]
     // Lexes actually performed by this session, excluding memo hits.
@@ -125,14 +125,31 @@ WorkspaceDeclarationCache: struct {
     }
 }
 
+// A declaration's head is the identifier `workspace`, then `:`, with only
+// spaces or comments between. Discovery reads every `.jet` file of every
+// directory it climbs through, and a file where no `workspace` is followed by
+// `:` or by a comment declares nothing, so it is never lexed.
 pkg_workspace_declaration_probe: fn(cache: &WorkspaceDeclarationCache, src: String) -> WorkspaceDeclarationProbe Never! {
-    bytes: src.bytes()
-    key: "{bytes.len()}:{pkg_sha256_hex(bytes)}"
-    if cache.probes.get(key) == .Val(probe) -> return probe
+    if !pkg_workspace_head_possible(src) -> return WorkspaceDeclarationProbe{declares_module: false, declares_members: false}
+    if cache.probes.get(src) == .Val(probe) -> return probe
     cache.lexes += 1
-    probe: pkg_lex_workspace_declaration(bytes)
-    cache.probes[key] = probe
+    probe: pkg_lex_workspace_declaration(src.bytes())
+    cache.probes[src.copy()] = probe
     probe
+}
+
+pkg_workspace_head_possible: fn(src: String) -> Bool Never! {
+    if !src.contains(NS_WORKSPACE) -> return false
+    head := true
+    loop part in src.split(NS_WORKSPACE) {
+        if head {
+            head = false
+            next
+        }
+        rest: part.trim_start()
+        if rest.starts_with(":") || rest.starts_with("/") -> return true
+    }
+    false
 }
 
 // Lex `src` once; both declaration facts come from the same comment-free
