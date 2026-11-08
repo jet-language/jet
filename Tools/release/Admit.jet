@@ -331,9 +331,10 @@ compare_suites: fn(before_rows: [SuiteRow], after_rows: [SuiteRow], retry: [Suit
     // A dispositioned lost row is tracked by its card, and a flaky row (one
     // the release passes and the candidate passes on its retry) is reported
     // as flaky, so neither counts as untracked. A row the candidate timed
-    // out on is retried whatever the release did, and when its retry passes
-    // it is flaky too: it missed a wall-clock limit under the kit's load, and
-    // the report still lists it.
+    // out on is retried whatever the release did: it missed a wall-clock
+    // limit under the kit's load. When its retry passes it is flaky; when
+    // its retry ends in a tracked status (a known-failing line, a host skip)
+    // that line owns it. The report still lists it either way.
     tracked := [String: Bool]{}
     loop lost in out.lost {
         if lost.disposed -> tracked[row_key(lost.suite, lost.id, lost.tier)] = true
@@ -343,7 +344,7 @@ compare_suites: fn(before_rows: [SuiteRow], after_rows: [SuiteRow], retry: [Suit
         if !is_untracked(item.status) -> next
         key: row_key(item.suite, item.id, item.tier)
         if tracked.has_key(key) -> next
-        if item.status == "TIMEOUT" && again.at.get(key) == .Val(at) && passes(retry[at].status) {
+        if item.status == "TIMEOUT" && again.at.get(key) == .Val(at) && !is_untracked(retry[at].status) {
             out.flaky.push(item.copy())
             tracked[key.copy()] = true
             next
