@@ -271,6 +271,18 @@ jet_cli_is_toolchain: fn(directory: String) -[FS]> Bool Never! {
     cli_files.is_dir(jet_cli_authority_path(directory, "Core")) && cli_files.is_dir(jet_cli_authority_path(directory, "Compiler/Prelude"))
 }
 
+// Whether `directory` is the Core library of the toolchain whose sources a
+// compile there reads (jet_cli_toolchain_root): `jet check Core`.
+jet_cli_is_core_library: fn(directory: String) -[FS, Env]> Bool Never! {
+    if jet_cli_toolchain_root(directory) == {
+        .Found(root) -> {
+            core: cli_files.realpath(jet_cli_authority_path(root, "Core")) ?? return false
+            (cli_files.realpath(directory) ?? return false) == core
+        }
+        .Missing(_, _) -> false
+    }
+}
+
 // Where the toolchain sources a request for `input` (a file or directory) come from.
 JetCLIToolchainRoot: enum {
     Found(root: String)
@@ -1373,8 +1385,9 @@ jet_cli_prepared_file_count: fn(prepared: JetCLIPrepared) -> Int Never! {
 // records every comptime input file the compile reads (`embed_file`,
 // `embed_bytes`, `find`); `settings` are the `--set` writers; a non-empty
 // `profile` is the selected `--profile`; `prelude` checks the entry as a
-// Compiler/Prelude source (`jet check --prelude`).
-jet_cli_compile_prepared: fn(prepared: &&JetCLIPrepared, input_log: Shared<JetDriverComptimeInputLog>?, trace_sink: JetCLITraceSink?, settings: [BuildSettingOverride]{[BuildSettingOverride]{}}, profile: String{""}, prelude: Bool{false}) -> JetCLICompiled {
+// Compiler/Prelude source (`jet check --prelude`); `every_core_body` checks
+// every Core body, called or not (`jet check Core`).
+jet_cli_compile_prepared: fn(prepared: &&JetCLIPrepared, input_log: Shared<JetDriverComptimeInputLog>?, trace_sink: JetCLITraceSink?, settings: [BuildSettingOverride]{[BuildSettingOverride]{}}, profile: String{""}, prelude: Bool{false}, every_core_body: Bool{false}) -> JetCLICompiled {
     if prepared.move() == {
         .Refused(output) -> JetCLICompiled.Refused{output: output}
         .Prepared(request, snapshot) -> {
@@ -1385,6 +1398,7 @@ jet_cli_compile_prepared: fn(prepared: &&JetCLIPrepared, input_log: Shared<JetDr
             selected.setting_overrides = settings
             if profile != "" -> selected.profile = profile
             selected.prelude_entry = prelude
+            selected.every_core_body = every_core_body
             // The runtime-library seam is `jet doc`'s (Host.jet jet_cli_doc_result):
             // a check, test or build under a stray JET_FRONT_LIBRARY_OBJECT_OUTPUT
             // stays that verb's compile.
@@ -1482,13 +1496,13 @@ jet_cli_prepare_overlays: fn(anchor: String, entry: String, overlays: [JetCLIOve
     }
 }
 
-// The request that compiles `snapshot` against the Core sources of this
-// toolchain; `core_checked` as jet_cli_core_sources's `checked`. The
-// organization's gate policy (`JET_ORG_UNSAFE_POLICY`) is its outermost policy
-// rung; a configured policy that can't be read is refused (E3109), never
-// skipped.
-jet_cli_prepare_request: fn(snapshot: JetDriverAuthorizedSourceSnapshot, color: Bool, threads: Int?, mode: JetDriverCompileMode, core_checked: Bool) -> JetCLIPrepared {
-    core_sources: if jet_cli_core_sources(snapshot.entry_path, core_checked) == {
+// The request that compiles `snapshot` against the Core sources of the
+// toolchain of `core_input` (the snapshot's entry when `None`);
+// `core_checked` as jet_cli_core_sources's `checked`. The organization's gate
+// policy (`JET_ORG_UNSAFE_POLICY`) is its outermost policy rung; a configured
+// policy that can't be read is refused (E3109), never skipped.
+jet_cli_prepare_request: fn(snapshot: JetDriverAuthorizedSourceSnapshot, color: Bool, threads: Int?, mode: JetDriverCompileMode, core_checked: Bool, core_input: String?{None}) -> JetCLIPrepared {
+    core_sources: if jet_cli_core_sources(core_input ?? snapshot.entry_path, core_checked) == {
         .Loaded(sources) -> sources
         .Missing(what, fix) -> { return jet_cli_prepare_refused(what, fix, color) }
     }
@@ -1496,6 +1510,20 @@ jet_cli_prepare_request: fn(snapshot: JetDriverAuthorizedSourceSnapshot, color: 
     request := jet_cli_driver_request(snapshot, core_sources, threads, mode)
     request.organization_policy = organization
     JetCLIPrepared.Prepared{request: request.move(), snapshot: snapshot}
+}
+
+// `jet check Core`'s entry: one import of each public Core module, under an
+// alias no code names (its `_` keeps the import from L0103).
+jet_cli_core_check_source: fn() -> String Never! {
+    seen := [String:Bool]{}
+    lines := [String]{}
+    loop row in CORE_SOURCE_OWNED_ROWS {
+        if row.owner != "" || row.runtime || seen.get(row.module_name) != None -> next
+        seen[row.module_name] = true
+        lines.push("use _core_{lines.len()}: {row.module_name}\n")
+    }
+    lines.push("\nmain: fn() {{}}\n")
+    lines.join("")
 }
 
 // Whether the entry at `entry_path` (or its overlay) is a script: its first

@@ -95,6 +95,10 @@ JetCLIPlan: enum {
     // checked as the compiler embeds it (Host.jet
     // `jet_cli_compile_prelude_check`).
     CheckPrelude(file: String, source: String, color: Bool, quiet: Bool, threads: Int?, json: Bool)
+    // `jet check Core`: every public module of the toolchain's Core library
+    // (`core`, its directory), each body checked whether a program calls it
+    // or not (Host.jet `jet_cli_compile_core_check`).
+    CheckCore(core: String, color: Bool, quiet: Bool, threads: Int?, json: Bool)
     // `jet build <file>`: the entry and its bytes; `options` are the build
     // options it compiles under (jet_cli_build_options: stock, profile, flags);
     // `invocation` holds the `--allow`/`--deny` rows; `json` reports its
@@ -848,6 +852,7 @@ jet_cli_check: fn(jet_argv: [String], args: [String], command: String, color: Bo
     }
     target: args[1]
     if cli_files.is_dir(target) {
+        if command == "check" && jet_cli_is_core_library(target) -> return JetCLIPlan.CheckCore{core: target, color: color, quiet: quiet, threads: threads, json: json}
         if command == "check" && member_flag == None {
             if jet_cli_check_workspace_plan(target, color, quiet, threads, status, json) == .Val(workspace) -> return workspace
         }

@@ -264,6 +264,36 @@ jet_cli_compile_prelude_check: fn(file: String, source: String, color: Bool, qui
     output
 }
 
+// `jet check Core`: one Check compile of an entry that imports every public
+// module of the Core library `core` (jet_cli_core_check_source), written to a
+// scratch directory, with every declaration of each module loaded and every
+// body checked whether a program calls it or not; reported as `jet check`
+// reports `core`.
+jet_cli_compile_core_check: fn(core: String, color: Bool, quiet: Bool, threads: Int?, json: Bool, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
+    watch: cli_time.start()
+    scratch: cli_files.temp_dir("jet-check-core") ?? return JetDriverVerbOutput{stdout: "", stderr: "jet check: couldn't create a scratch directory for the Core entry: {err}\n", exit_code: JET_DRIVER_EXIT_USER_ERROR}
+    entry: "{scratch.path}/core.jet"
+    source: jet_cli_core_check_source()
+    cli_files.write(entry, source) ?? return JetDriverVerbOutput{stdout: "", stderr: "jet check: couldn't write the Core entry `{entry}`: {err}\n", exit_code: JET_DRIVER_EXIT_USER_ERROR}
+    prepared := if jet_cli_prepare_snapshot(entry, entry, [JetCLIOverlay]{}, color, true) == {
+        .Refused(refusal) -> JetCLIPrepared.Refused{output: refusal}
+        .Held(snapshot) -> jet_cli_prepare_request(snapshot, color, threads, JetDriverCompileMode.Check, false, Val(core))
+    }
+    compiled: jet_cli_compile_prepared(prepared, None, trace_sink, [BuildSettingOverride]{}, "", false, true)
+    output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    if compiled == {
+        .Refused(refusal) -> output = refusal.move()
+        .Compiled(result, snapshot) -> {
+            diagnostics: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
+            output = if json -> jet_cli_check_json_outcome(core, source, diagnostics, watch.elapsed_millis(), JET_BUILD_DEFAULT_PROFILE) else -> jet_driver_check_outcome(core, source, diagnostics, color, quiet)
+            if jet_cli_errors(diagnostics).len() == 0 {
+                if result.internal_problem == .Val(problem) -> output = jet_cli_ice(problem)
+            }
+        }
+    }
+    output
+}
+
 // `jet check` of a workspace root: each member no other member depends on
 // checks in project scope; its compile loads every other member, and a
 // failing member's errors are reported inline before its E0626. Each outcome
@@ -3261,7 +3291,7 @@ jet_cli_write_output: fn(output: JetDriverVerbOutput) {
 // The plans whose compile `--trace` and JET_TRACE_FILE trace.
 jet_cli_plan_compiles: fn(plan: JetCLIPlan) -> Bool Never! {
     if plan == {
-        .Check(_, _, _, _, _, _, _, _, _, _, _) | .CheckWorkspace(_, _, _, _, _, _, _, _, _) | .CheckPrelude(_, _, _, _, _, _) | .Build(_, _, _, _, _, _, _, _, _, _, _) | .BuildPackage(_, _, _, _, _, _, _, _) | .Run(_, _, _, _, _, _, _, _, _, _, _, _) | .DevWeb(_, _, _, _, _, _, _, _) | .Test(_, _, _, _, _, _) | .Emit(_, _, _, _, _, _) -> true
+        .Check(_, _, _, _, _, _, _, _, _, _, _) | .CheckWorkspace(_, _, _, _, _, _, _, _, _) | .CheckPrelude(_, _, _, _, _, _) | .CheckCore(_, _, _, _, _) | .Build(_, _, _, _, _, _, _, _, _, _, _) | .BuildPackage(_, _, _, _, _, _, _, _) | .Run(_, _, _, _, _, _, _, _, _, _, _, _) | .DevWeb(_, _, _, _, _, _, _, _) | .Test(_, _, _, _, _, _) | .Emit(_, _, _, _, _, _) -> true
         else -> false
     }
 }
@@ -3293,6 +3323,7 @@ jet_cli_execute: fn(plan: &&JetCLIPlan, trace_sink: JetCLITraceSink?{None}, reco
             output = jet_cli_check_workspace(files, sources, color, quiet, threads, json, settings, profile, trace_sink)
         }
         .CheckPrelude(file, source, color, quiet, threads, json) -> output = jet_cli_compile_prelude_check(file, source, color, quiet, threads, json, trace_sink)
+        .CheckCore(core, color, quiet, threads, json) -> output = jet_cli_compile_core_check(core, color, quiet, threads, json, trace_sink)
         .Build(file, source, color, options, threads, invocation, notice, json, sbom, quiet, verbose) -> {
             jet_cli_write_notice(notice)
             output = jet_cli_compile_build(file, source, color, options, threads, invocation, json, sbom, quiet, verbose, trace_sink)

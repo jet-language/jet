@@ -3489,7 +3489,9 @@ jet_driver_compile_stages: fn(request: JetDriverCompileRequest, kg: &JetDriverKe
     // Phase spans for the host trace (JET_TRACE_FILE). A phase an early
     // return abandons is closed by the next enclosing end the host records.
     if request.trace_sink == .Val(sink) -> sink.begin("load", "", -1, -1)
-    load := jet_driver_load(request)
+    // JET_KEEP_GOING and `jet check Core` load every declaration of each
+    // loaded Core module, so they check the Core bodies no program calls too.
+    load := jet_driver_load_reach(request, !kg.enabled && !request.every_core_body)
     if request.trace_sink == .Val(sink) -> sink.end("load", load.modules.len())
     result := jet_driver_compile_loaded_stages(request, kg, load, checked_projection, capture)
     // The compile is over: no comptime child may outlive it (Native.jet).
@@ -3706,9 +3708,10 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     if request.mode == JetDriverCompileMode.Check -> registration_graph.check_tests = true
     if checked_projection || request.mode == JetDriverCompileMode.Doc -> registration_graph.retain_programs = true
     if request.doc_core_on_demand -> registration_graph.retained_core_demand = true
+    if kg.enabled || request.every_core_body -> registration_graph.every_core_body = true
     // A compile that lowers, a Check compile and a `doc_core_on_demand` Doc
     // compile check Core bodies on demand (CoreDemand.jet); JET_KEEP_GOING
-    // checks every body.
+    // and `jet check Core` check every body.
     lowers: request.mode == JetDriverCompileMode.Program || request.mode == JetDriverCompileMode.Test || request.mode == JetDriverCompileMode.Eval || request.mode == JetDriverCompileMode.RootRun
     if lowers && !kg.enabled -> registration_graph.core_lowering_roots = Val(jet_driver_core_lowering_roots(registration_graph))
     if registration_graph.internal_problem != None {
