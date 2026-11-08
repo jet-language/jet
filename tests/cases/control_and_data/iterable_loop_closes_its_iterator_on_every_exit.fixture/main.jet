@@ -1,0 +1,84 @@
+// A loop over an Iterable owns the iterator `iter` returns. An iterator
+// with a Close impl closes once when the loop ends: at its end, at `break`,
+// at a `return` from inside the body and at a failure the body propagates.
+// `next` does not close it.
+Count: struct {
+    priv at: Int
+    priv end: Int
+    priv name: String
+}
+
+impl Count.Iterator {
+    Item: Int
+
+    next: fn(&self) -> Int? {
+        if self.at >= self.end -> return None
+        self.at += 1
+        Val(self.at)
+    }
+}
+
+impl Count.Close {
+    close: fn(&&self) {
+        print("close {self.name} at {self.at}")
+    }
+}
+
+Counts: struct {
+    priv end: Int
+    priv name: String
+}
+
+impl Counts.Iterable {
+    Iter: Count
+
+    iter: fn(&&self) -> Count {
+        Count{at: 0, end: self.end, name: self.name}
+    }
+}
+
+counts: fn(end: Int, name: String) -> Counts { Counts{end: end, name: name} }
+
+first_over: fn(limit: Int) -> Int {
+    loop item in counts(5, "return") {
+        if item > limit -> return item
+    }
+    0
+}
+
+checked: fn(item: Int, stop: Int) -> Int Err! {
+    if item == stop -> return Err("stopped at {item}")
+    Ok(item)
+}
+
+fails_at: fn(stop: Int) -> Int Err! {
+    total := 0
+    loop item in counts(5, "failure") -> total += checked(item, stop)
+    Ok(total)
+}
+
+run: fn() {
+    loop item in counts(3, "end") -> print("end {item}")
+    print("after end")
+    loop item in counts(5, "break") {
+        print("break {item}")
+        if item == 2 -> break
+    }
+    print("after break")
+    loop item in counts(3, "next") {
+        if item == 2 -> next
+        print("next {item}")
+    }
+    print("after next")
+    print("returned {first_over(3)}")
+    if fails_at(2) == {
+        .Ok(total) -> print("total {total}")
+        .Err(_) -> print("failed")
+    }
+    loop outer in counts(2, "outer") {
+        loop inner in counts(3, "inner {outer}") {
+            if inner == 2 -> break
+        }
+    }
+    print("done")
+}

@@ -2136,7 +2136,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/FilesWalk.jet",
-      "line": 33,
+      "line": 36,
       "column": 5,
       "reason": "runtime-init runs before any other thread exists"
     },
@@ -9994,7 +9994,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/FaultSchedule.jet | 32:9 | "an idempotent install: every writer stores the same code address" |
 | Compiler | Compiler/JetRuntime/Source/FilesPathOps.jet | 35:5 | "the terminated raw path and the 128-byte stat fact row are live for the syscall" |
 | Compiler | Compiler/JetRuntime/Source/FilesStreams.jet | 34:9 | "the freshly opened owned descriptor and the 128-byte stat fact row are live for fstat" |
-| Compiler | Compiler/JetRuntime/Source/FilesWalk.jet | 33:5 | "runtime-init runs before any other thread exists" |
+| Compiler | Compiler/JetRuntime/Source/FilesWalk.jet | 36:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/GeometryGlue.jet | 4:5 | "borrows an initialized aligned word inside a live native geometry carrier" |
 | Compiler | Compiler/JetRuntime/Source/GeometryGlue.jet | 7:5 | "owns a writable aligned word in a fresh native geometry carrier" |
 | Compiler | Compiler/JetRuntime/Source/HTTPBody.jet | 37:5 | "borrows an initialized word in the live body, chunks, closure, List or E4 allocation" |

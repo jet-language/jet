@@ -6,13 +6,16 @@
 // reference: an operation in flight keeps the context alive, a repeated close
 // is a no-op, and a key that is not live panics "live walk context". Root24:
 // mutex @0, next key @8, list head @16. Node24: next @0, key @8, context (the
-// table's reference) @16. Context64: lock @0, owned root bytes @8 / length @16
+// table's reference) @16. Context72: lock @0, owned root bytes @8 / length @16
 // (NUL-terminated), owned ignore-file name E4 or 0 @24, slot words @32, count
-// @40, capacity @48, references @56. Slot32: owned path bytes @0 (length+1,
-// NUL-terminated), length @8, shared FilesIgnore matcher or 0 @16, directory
-// stream or 0 @24. Stream40: fd @0, getdents64 buffer @8, filled @16, position
-// @24, ended @32.
-WALK_CONTEXT_BYTES: I64{64}
+// @40, capacity @48, references @56, free slot list head (index + 1, 0 for
+// none) @64. Slot32: owned path bytes @0 (length+1, NUL-terminated; 0 once
+// released), length @8 (a released slot's next free index + 1), shared
+// FilesIgnore matcher or 0 @16, directory stream or 0 @24. A released slot is
+// the next one a push takes, so a walk that releases each slot it is done
+// with holds as many as its open path needs. Stream40: fd @0, getdents64
+// buffer @8, filled @16, position @24, ended @32.
+WALK_CONTEXT_BYTES: I64{72}
 WALK_SLOT_BYTES: I64{32}
 WALK_STREAM_BYTES: I64{40}
 WALK_NUL: I64{-5000}
@@ -58,10 +61,7 @@ walk_release: fn(context: I64) {
     count: rt_text_word(wrapping(context + I64{40}))
     at := I64{0}
     loop at < count {
-        slot: walk_slot(context, at)
-        jet_rt_free(rt_text_word(slot), rt_text_word(wrapping(slot + I64{8})) + I64{1}, I64{1})
-        ignore_matcher_drop(rt_text_word(wrapping(slot + I64{16})))
-        walk_stream_close(rt_text_word(wrapping(slot + I64{24})))
+        walk_slot_clear(walk_slot(context, at))
         at += I64{1}
     }
     capacity: rt_text_word(wrapping(context + I64{48}))
@@ -97,8 +97,18 @@ walk_slot: fn(context: I64, index: I64) -> I64 { rt_text_word(wrapping(context +
 walk_slot_data: fn(context: I64, index: I64) -> I64 { rt_text_word(walk_slot(context, index)) }
 walk_slot_length: fn(context: I64, index: I64) -> I64 { rt_text_word(wrapping(walk_slot(context, index) + I64{8})) }
 
-// Takes ownership of `bytes` (length+1, NUL-terminated).
+// Takes ownership of `bytes` (length+1, NUL-terminated): the first released
+// slot, else a new one.
 walk_slot_push: fn(context: I64, bytes: I64, length: I64) -> I64 {
+    free: rt_text_word(wrapping(context + I64{64}))
+    if (free != I64{0}) {
+        index: free - I64{1}
+        slot: walk_slot(context, index)
+        rt_text_store(wrapping(context + I64{64}), rt_text_word(wrapping(slot + I64{8})))
+        rt_text_store(slot, bytes)
+        rt_text_store(wrapping(slot + I64{8}), length)
+        return index
+    }
     count: rt_text_word(wrapping(context + I64{40}))
     capacity: rt_text_word(wrapping(context + I64{48}))
     if (count == capacity) {
@@ -117,6 +127,20 @@ walk_slot_push: fn(context: I64, bytes: I64, length: I64) -> I64 {
     rt_text_store(wrapping(slot + I64{24}), I64{0})
     rt_text_store(wrapping(context + I64{40}), count + I64{1})
     count
+}
+
+// Frees what the slot owns: its path bytes, its matcher reference and its
+// directory stream, closing the stream's descriptor. A released slot owns
+// nothing.
+walk_slot_clear: fn(slot: I64) {
+    bytes: rt_text_word(slot)
+    if (bytes == I64{0}) -> return
+    jet_rt_free(bytes, rt_text_word(wrapping(slot + I64{8})) + I64{1}, I64{1})
+    rt_text_store(slot, I64{0})
+    ignore_matcher_drop(rt_text_word(wrapping(slot + I64{16})))
+    rt_text_store(wrapping(slot + I64{16}), I64{0})
+    walk_stream_close(rt_text_word(wrapping(slot + I64{24})))
+    rt_text_store(wrapping(slot + I64{24}), I64{0})
 }
 
 walk_stream_close: fn(stream: I64) {
@@ -337,6 +361,7 @@ walk_out_error: fn(failure: I64, kind: I64, code_tag: I64, code: I64, cause_tag:
     rt_text_store(wrapping(context + I64{40}), I64{0})
     rt_text_store(wrapping(context + I64{48}), I64{0})
     sync_store(wrapping(context + I64{56}), I64{1})
+    rt_text_store(wrapping(context + I64{64}), I64{0})
     _ := walk_slot_push(context, walk_bytes_new(rt_text_data(root), length), length)
     node: jet_rt_alloc(I64{24}, I64{8})
     root_table: walk_root
@@ -434,6 +459,23 @@ walk_out_error: fn(failure: I64, kind: I64, code_tag: I64, code: I64, cause_tag:
     result: walk_path_compare(walk_slot_data(context, left), walk_slot_length(context, left), walk_slot_data(context, right), walk_slot_length(context, right))
     walk_leave(context)
     result < I64{0}
+}
+
+// Release the slot `slot` once the walk is done with it (walk_slot_clear),
+// closing its directory stream if one is open; a later push takes it. The
+// root's slot 0 and a slot already released stay as they are.
+#Export(c) jet_walk8_release: fn(key: I64, slot: I64) {
+    context: walk_enter(key)
+    if (context == I64{0}) -> return
+    if (slot > I64{0} && slot < rt_text_word(wrapping(context + I64{40}))) {
+        target: walk_slot(context, slot)
+        if (rt_text_word(target) != I64{0}) {
+            walk_slot_clear(target)
+            rt_text_store(wrapping(target + I64{8}), rt_text_word(wrapping(context + I64{64})))
+            rt_text_store(wrapping(context + I64{64}), slot + I64{1})
+        }
+    }
+    walk_leave(context)
 }
 
 #Export(c) jet_walk8_matcher_new: fn(key: I64) {

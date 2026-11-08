@@ -6047,7 +6047,9 @@ ir_slice_walk_window: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, ba
 
 // `loop x in value` over a type with an `Iterable` impl: `iter` takes the
 // value into its iterator, which the loop owns; each step calls
-// `next(iterator)`, and the walk ends at its first None. The item a step
+// `next(iterator)`, and the walk ends at its first None. An iterator that
+// closes closes when the loop ends, by its end, `break`, `return` or a
+// failure, as a variable holding it would. The item a step
 // takes out of the Option belongs to that step: `break`, `next` and the end
 // of the body drop it unless the body moved it. A step runs the body on
 // every n-th item from the first; the others are taken and dropped.
@@ -6068,6 +6070,7 @@ ir_iterable_walk: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, 
     if ir_failed(b) || iterator < 0 -> return
     b.fresh[iterator] = false
     b.bindings.push(IRBinding{name: "", slot: iterator, owned: true})
+    ir_close_arm(m, p, b, iterator, false, span)
     iterator_ty: m.types[b.f.slot_type[iterator]].ty
     next_args: ir_owner_args(p, p.functions[next_row], iterator_ty) ?? return ir_fail(b, span, "iterator {ir_type_name(iterator_ty)}, which does not spell its owner's type arguments")
     countdown: ir_walk_countdown(m, b, stride)
