@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6697,
-    "rev": 96202,
+    "rev": 96204,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -83321,6 +83321,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-08",
+          "by": "Main",
+          "text": "Evidence from TlsLead (#6694 S1, b53a78981d), the emitted x64 of core_crypto___jet_hashes_dcompress (portable SHA-512 compress, about 935 ns per block against about 280 ns for mbedtls): (1) 4670 instructions, 2564 mov and 1209 rbp spills, about 6 GPRs used (#6478); (2) no rol or ror: a constant rotate lowers to a shift-by-cl pair plus and 0x1f, and there are 107 shl or shr 0x20 U32 zero-extends; (3) per call 65 jet_rt_list_bounds_stop, 76 jet_ir_stop_poll inside fixed-trip loops (#6472), 32 cleanup enter and leave, 43 jet_rt_int_drop; (4) wrapping(U8{x}) from an out-of-range Int costs about 260 ns (global masks, boxed-Int drops, jo checks) against 9 ns for U8{x %% 256}; (5) list copy and push cost 1.5 to 2 ns per element; (6) a fixed-list global is re-materialized on every access (64 stores); (7) hash_start plus Close costs about 256 ns. Each is a general codegen root; the crypto engine is the second program for the perf rule."
+        },
+        {
           "at": "2026-11-06",
           "by": "Main",
           "text": "Deconfliction 2026-11-06: reworded to match the AGENTS.md Performance gate (Jet/peer < 1.00 with no Rust band, then the asm-parity ceiling)."
@@ -83976,7 +83981,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T00:36:48.109Z",
-      "updated": "2026-11-07T03:23:03.043Z",
+      "updated": "2026-11-08T17:34:46.227Z",
       "updatedBy": "Main",
       "criteriaLastN": 53
     },
@@ -101142,6 +101147,11 @@
         {
           "at": "2026-11-08",
           "by": "Main",
+          "text": "S1 landed b53a78981d (TlsLead; precommit passed; queued for the Main batch). One hash engine (priv hashes in Crypto.jet) for SHA-1, SHA-2, SHA-3, HMAC, HKDF and PBKDF2; old copies in Crypto.jet, Expert.jet and Service.jet deleted; public surface unchanged. Case core_crypto_api/digests_macs_and_kdfs_match_the_mbedtls_and_wycheproof_vectors_on_every_tier passes on jet run, run --release and dev with 0 failures: mbedtls shax 589, md 100, hkdf 3, pkcs5 7; wycheproof hmac_sha256 174, hkdf_sha256 86, pbkdf2 60. Pins in input/vectors/UPSTREAM.md. Cases crypto 44/0, uuid 2/0, service 75/0. Perf against mbedtls 3.6.7 (load about 30, noisy): sha256 5x faster (SHA-NI), pbkdf2 3x faster; sha1 12x, sha512 3.2x and sha3 7.5x slower, and hmac 64 B 2.1 us against 943 ns. c5 is open on those. MD5 and RIPEMD-160 move to R1 (__core_crypto_hash)."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
           "text": "TlsLead plan accepted 2026-11-08. Scope from the vendored mbedtls 3.6.7 default config (129,589 C lines in 117 files): every hash, MAC, KDF, cipher and mode, AEAD, DRBG, constant-time bignum, 13 ECC curves, RSA, DHM, LMS, ASN.1, PEM, PK, PKCS#5/7/12, X.509 parse, verify and write, TLS 1.2 and 1.3 client and server with every key exchange and extension built, and DTLS 1.2. Slices: S1 hashes, S2 AES with every mode, S3 AEAD, S4 AES-NI and PCLMULQDQ leaves, S5 ARIA, Camellia, DES and DRBG, S6 bignum, S7 ECC, S8 RSA, DHM and LMS, S9 ASN.1, PEM and PK, S10 X.509, S11 record layer and TLS 1.3 key schedule, S12 TLS 1.3, S13 TLS 1.2, S14 tickets and DTLS, S15 the one-commit cutover. Main rulings: G-a uses private runtime leaves for the wide multiply (a public U64.mul_wide is an owner question); G-c TlsLead owns the X64 crypto forms and JetRuntime crypto leaves; O1 ports full function and maps the C plumbing onto Jet facilities (told the owner); O2 DTLS public API is an owner question; O3 vectors go in-repo with upstream pins and the Apache-2.0 license. Existing Core/Crypto is about 10x off the mbedtls throughput (ChaCha20-Poly1305 51 ms/MiB, SHA-256 18 ms/MiB scalar), so its cores move to fixed inline arrays."
         },
         {
@@ -101214,7 +101224,7 @@
       "parentId": "c0lscvc9",
       "needsAcceptance": false,
       "created": "2026-11-08T15:47:15.645Z",
-      "updated": "2026-11-08T16:00:03.194Z",
+      "updated": "2026-11-08T17:34:45.191Z",
       "updatedBy": "Main",
       "criteriaLastN": 5
     },
@@ -189414,6 +189424,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-08T17:34:46.227Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0i891tv",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-08T17:34:45.191Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0bnp1zw",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-08T17:25:41.355Z",
       "by": "Main",
