@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6703,
-    "rev": 96310,
+    "rev": 96311,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -100987,6 +100987,11 @@
         {
           "at": "2026-11-08",
           "by": "Main",
+          "text": "Adversarial review of the C-gate design ($JET_SCRATCH_ROOT/lanes/SchedLead/c-gate-design.md) by a fresh GPT-family reviewer: redesign needed. Findings: shared FS aliases TLS and pthread identity (probe showed kernel writes corrupting live TLS); blocking hooks miss FILE locks, PI mutexes and raw syscalls; the Jet registry misses C-created threads (setxid broadcast, quiescence); lane affinity, nested callbacks, cancellation and fork continuation underspecified. Gate stays unbuilt until a redesign passes review; SchedLead also weighs deferring clone carriers until #6694/#6695 remove the remaining C so no gate is needed."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
           "text": "Owner ruling 2026-11-08 (Q9): \"lean towards A but need downsides engineered away\". Direction: a process-wide C gate. Before building, the design must remove or mitigate each downside of A (serialized parallel TLS handshakes and blocking C calls until mbedtls is ported, user C serialized forever, reentrancy when C calls back into Jet, a blocking C call stalling every other C caller, fork) and pass an adversarial review; the redesign goes back to the owner with each remaining cost named."
         },
         {
@@ -101050,7 +101055,7 @@
       "parentId": "c0lscvc9",
       "needsAcceptance": false,
       "created": "2026-11-08T15:46:55.183Z",
-      "updated": "2026-11-08T18:43:22.905Z",
+      "updated": "2026-11-08T20:00:32.412Z",
       "updatedBy": "Main",
       "criteriaLastN": 4
     },
@@ -190098,6 +190103,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-08T20:00:32.412Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0x92nsv",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-08T19:59:57.220Z",
       "by": "Main",
