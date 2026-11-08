@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6686,
-    "rev": 96074,
+    "rev": 96075,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -99978,6 +99978,11 @@
         {
           "at": "2026-11-08",
           "by": "Main",
+          "text": "Owner ruling 2026-11-08 (asked via Main): D-BUILD-ROWS1 = A. Generated tables stay in git as build outputs (.output(path, kept: true)): jet build Compiler rewrites them when inputs change and refuses hand edits; the precommit freshness check becomes build plus clean tree. D-BUILD-TREES1: owner accepts folder inputs but rejects the scope as drafted: Tools are separate from the compiler build (Compiler/build.jet covers the compiler and Core, not Tools), and questions why the compiler build needs C sources, cc and musl at all. Scope question pending. Blocker (1) is cleared: a0_037 (3a8dd83e79) contains every D-BUILD-GRAPH1 step (4361eec2f4 is an ancestor)."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
           "text": "Main 2026-11-08 02:00, BuildLead final handoff (slot ended). Landed: C4 profiles 3af734e9cb; step 1 b.run/b.found/action_timeout ccf9915f44; b.action and b.legacy retired 74942e812c; step 2 b.host/b.jet/one parallel graph c9c3ce97a6; gate fix 8a85d45051 (a b.jet() step gets the running compiler's identity); step 4 receipts, times and jet inspect build --times 64f57f1583; step 5 b.dependency(name).file(path) 509708b651; step 6 b.image(target) a749167d57; step 7 a step never overwrites a file no build made 4361eec2f4; closed-list kernel rows ec519cce83. Criteria per BuildLead: 6 and 7 met in code (Main meets them after the c65 run #3 proof); 1 partly met (the graph and the jet target; other targets need D-BUILD-TREES1); 2 blocked by D-BUILD-ROWS1 (every generator writes committed files a step may not overwrite; CoreSourceRows also writes outside Compiler/); 3 and 4 blocked by D-BUILD-TREES1 (jet embeds all of Core/, PrebuildRuntime.jet is in Tools/, and no probe finds a folder); 5 blocked by #6623. Owner ballots drafted, not yet adversarially reviewed, in $JET_SCRATCH_ROOT/lanes/BuildLead/ballots/. D-BUILD-ROWS1 recommends kept outputs: .output(path, kept: true) rewrites a committed table when its inputs change and refuses hand edits; the alternatives are build-only files or today's hand-run generators. D-BUILD-TREES1 recommends folder inputs (b.dependency(name).folder(path), b.folder(path)) plus a find_folder probe; the alternatives are listing a dependency's files one by one, or keeping the scripts. Both pass Validate.jet apart from draft:true and an empty reviewPasses. No scripts were deleted."
         },
         {
@@ -100069,7 +100074,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-08T01:30:57.119Z",
-      "updated": "2026-11-08T06:54:05.595Z",
+      "updated": "2026-11-08T11:43:03.088Z",
       "updatedBy": "Main"
     },
     {
@@ -188314,6 +188319,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-08T11:43:03.089Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0crz3ra",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-08T11:28:30.566Z",
       "by": "Main",
