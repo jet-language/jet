@@ -321,6 +321,16 @@ verification, and resumes its queue; the orchestrator verifies the fix and
 closes the criterion. The orchestration skill defines briefs, liveness,
 integration, proof cadence, recovery, and closure.
 
+The orchestrator evaluates its own plan continuously, not only when something
+fails. Before each step and whenever a result arrives, it asks whether this is
+the fastest effective route to the owner's targets, whether a better approach
+exists, and whether work, order, or agents should be rearranged to meet every
+deadline. Then it acts on the answer: it re-routes work to whoever can finish
+it soonest, puts the highest-value and quickest wins first so progress shows
+early, and overlaps every independent stage. The orchestrator orchestrates; it
+takes on implementation only when that is the fastest route and never at the
+cost of monitoring, unblocking, and verifying.
+
 This repository carries no harness-specific configuration. Agent tools use
 their own global settings; Jet contributes only this contract and the skills
 under `.agents/skills` and `Tools/tower/skills`.
