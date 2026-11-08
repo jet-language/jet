@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6686,
-    "rev": 95957,
+    "rev": 95968,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -69996,7 +69996,7 @@
       "track": "epoch",
       "epoch": "e5",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P1",
       "plan": null,
       "checkSteps": null,
@@ -70005,6 +70005,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-08",
+          "by": "Main",
+          "text": "Main 2026-11-07 21:5x: every criterion is met (c3 last, at dcb9078d46). Closing."
+        },
         {
           "at": "2026-11-08",
           "by": "Main",
@@ -70622,8 +70627,9 @@
           "status": "met",
           "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "CardClose-1 2026-10-31 (wave 9b tree): tower.json: D-TEST-PROFILE1 status=ratified outcome=A ratifiedAt=2026-10-30 (card #6035)",
-          "at": "2026-10-31T14:23:59.125Z"
+          "evidence": "tower.json: D-TEST-PROFILE1 status=ratified outcome=A ratifiedAt=2026-10-30 (card #6035).",
+          "at": "2026-11-08T02:34:30.605Z",
+          "closure": "decision"
         },
         {
           "n": 2,
@@ -70631,18 +70637,18 @@
           "status": "met",
           "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "Owner ruling 2026-11-06 ~18:25 in chat: \"Nothing at repo root, test goes in the dir with package.jet and build.jet. Cd into the compiler folder if you don't want to add Compiler/\". c2's repository-root test.jet is replaced by the criterion added beside it (Compiler/test.jet with the package's profiles).",
-          "at": "2026-11-06T23:09:23.590Z",
+          "evidence": "Replaced by the owner ruling 2026-11-06 ~18:25 in chat (\"Nothing at repo root, test goes in the dir with package.jet and build.jet\"); Compiler/test.jet declares the profiles, under the criterion added beside this one.",
+          "at": "2026-11-08T02:34:41.492Z",
           "closure": "obsolete"
         },
         {
           "n": 3,
           "text": "Tools/testkit and the Node/shell test and gate scripts under Tools/agent and Tools/ci are deleted, and no receipt or gate needs a non-Jet tool.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-28T17:15:48.068Z"
+          "evidence": "dev dcb9078d46: Tools/testkit is gone, and `git ls-files Tools/agent Tools/ci Tools/testkit Tools/canvas-test Tools/web-test` holds no .mjs/.js/.cjs/.sh/.py/.bash except Tools/agent/roots.sh and roots.mjs, the root tables AGENTS.md requires (not test or gate scripts). Last Node test tools cut over: 70532ccd85 (sourcemap.mjs -> SourceMap.jet; the case is known-failing because web builds emit no map), 9e9b45b8b8 (every Tools/canvas-test/*.mjs -> CanvasDriver.jet over BiDi, Harness.jet, Run.jet; the 88 scenarios moved to #6418 c145 because the canvas cannot run), dcb9078d46 (tests/fixtures/browser_bidi_mock.mjs -> BrowserBidiMock.jet; browser_bidi 17 PASS / 8 KNOWN-FAILING before and after). Main re-ran native_bidi_browser_surface_matrix_success with PATH=git:/usr/bin:/bin (no node): PASS. Remaining non-Jet programs in cases are what the tests exercise, not tooling: the web tier runs compiled app.js and its wasm/DOM hosts under a JS engine, agent_workloads and encoding_parity compare peer bash/python/node programs, and foreign_build_hosts and source_import exercise foreign-language inputs.",
+          "at": "2026-11-08T02:33:49.645Z"
         },
         {
           "n": 4,
@@ -71302,12 +71308,13 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T17:15:48.068Z",
-      "updated": "2026-11-08T01:59:59.132Z",
+      "updated": "2026-11-08T02:34:45.301Z",
       "updatedBy": "Main",
       "goals": [
         "G1"
       ],
-      "criteriaLastN": 73
+      "criteriaLastN": 73,
+      "completedAt": "2026-11-08T02:34:45.301Z"
     },
     {
       "id": "c03pi177",
@@ -83644,6 +83651,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-08",
+          "by": "Main",
+          "text": "Main 2026-11-07: 9e9b45b8b8 deleted Tools/canvas-test/scenario.mjs (88 scenarios) after porting the harness, CanvasDriver.jet (BiDi), Run.jet and the native/driver/gecko lifecycles to Jet. The scenario source is `git show 6b9210090e:Tools/canvas-test/scenario.mjs` (unchanged through 591744cc94); criterion 145 ports it. `Run.jet scenario --scenario N` refuses with \"scenario N is not ported to Jet yet (#6418)\"."
+        },
+        {
           "at": "2026-11-07",
           "by": "Main",
           "text": "CoreCliLead-2 triage (7e5c4fd162 rewrote the budget comments to describe the Jet code). c5: explain_e2211_golden's KF reason (#6419 E2104) is wrong; the golden explain_E2211.txt holds retired Rust-era text while the output comes from the registry. The fix (refresh the golden, drop the KF line) is assigned to the Closer. explain_syntax_dictionary_golden and explain_json_uses_the_report_schema_for_registered_queries wait on the at-sign registration ballot. c1: bind <name>, --shape, --freeze, --policy, --update and inspect bind <name> (binding plan) are unbuilt; BindingPlan.jet exists but isn't wired to the CLI. The jet bind <header> spelling: Docs/spec/cli.md wins, so jet inspect bind is canonical (new criterion)."
@@ -84959,7 +84971,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T01:11:55.199Z",
-      "updated": "2026-11-08T01:59:57.985Z",
+      "updated": "2026-11-08T02:14:26.168Z",
       "updatedBy": "Main",
       "criteriaLastN": 145
     },
@@ -93359,6 +93371,11 @@
         {
           "at": "2026-11-08",
           "by": "Main",
+          "text": "Main 2026-11-07: g13 landed as 591744cc94 (a cold fetch-toolchain hashes once; 20.6 s cold on the home NVMe, 1131 s before) and b1f1abe895 (the shared-CAS pass reseals a tree left writable). The Jetpack Engine+Environment aot jet test (seed a0_034): baseline eaa085b237 and fixed tree have the same 13 FAIL rows (empty diff), none from #6592: 2 lease recovery (recover_stale_leases and store_recover_hangar give 0, expected 1); 1 clean-plan quarantine (closure record has no dependency references); native runtime split (the test expects Rust `fn main()`, the generator emits `main: fn()`); 8 recipe sandbox rows (E1238 instead of E1236/E1237/E1275: the sandbox cannot start inside the test systemd scope); shared_hostile_corpus (Assemble does not copy tests/fixtures/build_sandbox/hostile-corpus.tsv). None is in the a0_034 full-profile run. Logs: $JET_SCRATCH_ROOT/lanes/PortsLead/g13/tests-base.log and tests-fix.log."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
           "text": "PortsLead-2 AFTER numbers, g13 batch (link CAS, parallel fsync pool, hashing on worker tasks, one tree pass with a memo), not yet landed. Cold `jetpack env fetch-toolchain --json` from an empty HOME and state: 20.6 s wall on the home NVMe; 43.4 s on the contended scratch NVMe, and 96.6 s on a rerun at load 10, where the fsync writeback of 442 MB dominates. BEFORE was 1131.1 s. Tree hash unchanged: sha256-700385c9c906 (5931 files, 442377517 B); CAS 4019 entries, linked. Scratch split: verify 2.2 s, untar 7.1 s, seal 1.2 s, parallel hash 16.6 s, publish fsync 24.1 s, hangar 0.6 s. core.crypto SHA-256 runs at 45-50 MB/s at O1/O2, about 10x slower than a scalar native implementation (~500 MB/s) and 40x slower than SHA-NI; that work is on #6681."
         },
         {
@@ -93400,7 +93417,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T05:33:07.839Z",
-      "updated": "2026-11-08T01:43:35.197Z",
+      "updated": "2026-11-08T02:14:11.617Z",
       "updatedBy": "Main",
       "criteriaLastN": 2
     },
@@ -99649,7 +99666,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-08",
+          "by": "Main",
+          "text": "Main 2026-11-07: BuildLead drafted D-BUILD-GRAPH1 (a build step can run a program the same build makes; host-built tools; files declared where passed; Duration limits; times.json), the ballot that unblocks c1/c2/c3/c5/c6. Main ran the adversarial pass (same model family) and BuildLead redesigned it; claims with file:line are in the ballot. A cross-family review pass is still owed before ratification, because the owner allowed no further agent slot tonight. c4 (build profiles) is held until the a0_035 release ends; c7 waits on #6623."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -99723,7 +99746,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-08T01:30:57.119Z",
-      "updated": "2026-11-08T01:30:57.119Z",
+      "updated": "2026-11-08T02:19:52.985Z",
       "updatedBy": "Main"
     },
     {
@@ -184700,6 +184723,201 @@
       "created": "2026-11-08T00:56:50.121Z",
       "outcome": "A",
       "ratifiedAt": "2026-11-08"
+    },
+    {
+      "id": "D-BUILD-GRAPH1",
+      "cardId": "c0crz3ra",
+      "group": "build",
+      "title": "A build step can run a program the same build makes, built for this machine, with each file declared where it is passed",
+      "situation": "A build function is a short Jet program that tells `jet build` what a project makes. Today it can list programs and simple steps. But a step cannot run a program the same build makes. It cannot run longer than 30 seconds, and it cannot read files outside its own folder. So the Jet repository keeps its real build in separate scripts that run one after another. They cover the compiler's self-check, the runtime pack, the Jetpack engine and the generated tables, and a stale table already broke a landing. You are asked how far a build function should reach. We recommend letting a step run what the build makes, inside the build graph Jet already has, with time limits and a timing record.",
+      "gist": "How far should a build function reach: running programs it builds, long steps, other folders, and timing records?",
+      "lesson": "A build function describes steps, and `jet build` runs them, reuses unchanged ones and seals each one off from the machine. Today a step may only use tools the machine already has, so anything that needs a freshly built program lives in scripts. Letting a step run a program the same build makes, as Zig and Bazel do, moves those scripts into the build and keeps reuse and sealing.",
+      "explainer": "",
+      "story": "Adding one value to a Core enum means running Tools/agent/CoreSourceRows.jet by hand to rewrite the generated row tables. Forgetting it fails the next landing, as a stale CoreEnumRows did on 2026-11-07. The packages suite builds its own Jetpack engine, which takes 3 minutes on a quiet machine and 13 under load. The self-host chain, the runtime pack and the release are separate Jet scripts that run one after another.\n\nWith this change, Compiler/build.jet says all of it once. The table generator is a program the build makes and then runs, so the tables are never stale. The engine is built once and reused by the test suite. The self-host stages are steps whose tool is the previous stage, so an unchanged stage is reused. Every build leaves a record of what ran and how long each part took.",
+      "inWild": "Zig's build.zig is the closest match. `b.addRunArtifact(exe)` makes a step that runs a program the same build compiles. `addFileArg` and `addOutputFileArg` declare a file and pass it in one call. A tool is built for `b.graph.host`, the machine running the build. Steps run in parallel, and `zig build --summary all` prints each step's time. Bazel and Buck2 build the programs a rule runs for the machine that runs it. CMake turns a target named in a command into its built file. Jai runs its build program with `#run` and runs commands directly, with no reuse or sealing. Cargo runs `build.rs` before compiling a crate, unsealed.",
+      "detail": "Option A has three parts: files, steps and records.\n\nFiles. A BuildFile is a file or folder the build knows. The call `b.host(target)` is a target built for the machine running the build. The call `b.image(target)` is the same target built for the build's selected platform. The call `b.jet()` is the compiler running the build. The call `b.found(probe)` is the path a probe found. The call `b.dependency(name).file(path)` is a file inside a package that package.jet lists.\n\nWhy both host and image. In a native build they are one file, built once, because their options match. In a cross build such as `jet build --target web` they differ. A step that runs gen needs the host build. A step that packs the shipped compiler needs the image. One call would have to guess which one a step meant.\n\nThe host rule. A tool always runs on the machine running the build. So `b.host(target)` takes that machine's os and arch and ignores the cross options. Every other option, such as optimize, follows the build. A target that is both a tool and a shipped program builds twice in a cross build. The host copy goes under `.jet/build/host/` and is never installed.\n\nHost edge cases. A host-only tool in a cross build builds for the host only. A tool that cannot build for the host is refused before anything runs. That happens when its source needs a web-only feature, or when the native backend cannot write images for this machine. The registered error names the tool, the host and the reason. A web image used as a tool is refused the same way, since a sandbox cannot run it.\n\nSteps. The call `b.run(name, tool, caps)` takes a BuildFile as its tool and returns a BuildAction. Its arguments are added one call at a time, and each call that passes a file also declares it. The call `.input(path)` declares a source file or folder and passes its path. The call `.output(path)` declares an output, passes its path and returns its BuildFile.\n\nMore step calls. The call `.file(file)` passes a BuildFile that a target or another step makes. The call `.arg(text)` passes plain text. Each file call takes an optional `flag:` such as `flag: \"--in=\"`, for tools that want one joined argument. The calls `.reads(path)` and `.writes(path)` declare files the tool uses without being told their names.\n\nNo undeclared argument file. The only way to pass a file is a call that declares it. The call `.arg(text)` refuses text that names a file in the package, and the fix points to `.input`. A step that never passes or declares an output it writes fails, because only declared outputs leave the sealed folder.\n\nOne step call replaces `b.action`. A machine tool is `b.found` of a find_program probe. The trailing toolchain and signing arguments of `b.action` become `.toolchain(t)` and `.sign(s)`. Every `b.action` caller migrates in the same change.\n\nTime limits are Durations, written with the Time unit literals such as `30s` and `10min`. The call `.timeout(10min)` sets one step's limit. A new build option `action_timeout` sets the default, 30s when unset. It gets a new Duration kind: profile field `action_timeout: 10min`, flag `--action-timeout=10min`, call `b.action_timeout(10min)`. A zero or negative limit is refused.\n\nOrder and failure. The executor treats targets and steps as one graph. Everything whose inputs are ready runs at once, up to `--threads`. A target compiles once its steps finish. A step waits for its tool and its files. A failure stops only what depends on it, and every failure is reported in one pass.\n\nStep edge cases. A tool built from its own step's output is a cycle, refused before anything runs. A step past its limit fails with a registered error naming the step and the limit. A rebuilt tool has a new digest, so its steps run again. Two steps that declare the same output are refused. An output that would overwrite a committed file is refused, as generated sources already are.\n\nRecords. Every `jet build` writes `.jet/build/receipt.json`, the core.build BuildGraph it built. It also writes `.jet/build/times.json`, a new core.build BuildTimes value. Each row holds a target or step name, its kind, its wall time and whether it was reused. Times stay out of BuildGraph, so receipt_diff still finds equal graphs equal. The command `jet inspect build --times` prints the record.\n\nBeginner path: nothing changes. The calls `b.add_executable` and `b.default` stay the whole build. A first generator adds one `b.run` with an input and an output. Expert path: each self-host stage is a step whose tool is the previous stage's output. A last step compares two stages byte for byte, and receipts and times are diffed between commits.\n\nOption B makes the build function run things immediately, like Jai. The call `b.compile(name, sources)` builds a program for the host and returns its path. The call `b.exec(argv)` runs a command at once, unsealed. Nothing is reused unless the build code checks for itself. Commands run one after another, and `jet inspect build` cannot list steps without running them.\n\nOption C adds nothing. Most criteria of card #6682 close as out of scope. The scripts stay: Tools/agent/Chain.jet, Tools/packaging/PrebuildRuntime.jet, and the CoreSourceRows.jet check in the precommit.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Steps can run what the build makes",
+          "detail": "Add BuildFile values (b.host, b.image, b.jet, b.found, dependency files) and one step call, b.run, whose argument calls declare each file where they pass it. Tools build for the machine running the build. Limits are Durations. b.run replaces b.action. The executor runs one parallel graph, and every build writes receipt.json and times.json.",
+          "code": "build: fn(b: Build) -[Exec, FS]> {\n    gen: b.add_executable(\"gen\", [\"Tools/Gen.jet\"], [])\n    #Impure(\"make the rows table with gen\") {\n        rows: b.run(\"rows\", b.host(gen), [\"FS\"])  // gen built for this machine\n        rows.input(\"rows.tsv\")                     // declared and passed at once\n        table: rows.output(\"Registry/Rows.jet\")    // declared, passed, returned\n        rows.timeout(2min)\n        app: b.add_executable(\"app\", [\"run.jet\", table.path()], [rows])\n        b.default(app)\n    }\n}"
+        },
+        {
+          "key": "B",
+          "name": "An eager build program, like Jai",
+          "detail": "Add b.compile(name, sources) -> String, which builds a host program now and returns its file, and b.exec(argv), which runs now, unsealed. The build function reads like a script. Nothing is reused, sealed or run in parallel unless the build code does it itself.",
+          "code": "build: fn(b: Build) -[Exec, FS]> {\n    // each line finishes before the next one starts\n    gen: b.compile(\"gen\", [\"Tools/Gen.jet\"])\n    b.exec([String]{gen, \"rows.tsv\", \"Registry/Rows.jet\"})\n    app: b.add_executable(\"app\", [\"run.jet\", \"Registry/Rows.jet\"], [])\n    b.default(app)\n}"
+        },
+        {
+          "key": "C",
+          "name": "No new API; keep the scripts",
+          "detail": "The Build API stays as it is. The repository keeps its build in Jet scripts that run jet and the programs it makes, one after another.",
+          "code": "// Tools/project/Build.jet: an ordinary Jet program\nrun: fn() {\n    process.cmd([String]{\"jet\", \"build\", \"--output-dir=out\", \"Gen\"}).run() ?? fail(\"gen\")\n    process.cmd([String]{\"out/gen\", \"rows.tsv\", \"Registry/Rows.jet\"}).run() ?? fail(\"rows\")\n    process.cmd([String]{\"jet\", \"build\", \"App\"}).run() ?? fail(\"app\")\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "CMake",
+          "note": "Naming the target gen in COMMAND passes its built file and orders the step after it. Files are still written twice, in OUTPUT or DEPENDS and in COMMAND. Its best case: one build file drives Make, Ninja and IDEs, and DEPFILE adds inputs found while running, which A lacks. Cross builds need a separate host build of gen, which A makes for you.",
+          "code": "add_executable(gen gen.c)\nadd_custom_command(OUTPUT rows.c\n  COMMAND gen ${CMAKE_CURRENT_SOURCE_DIR}/rows.tsv rows.c\n  DEPENDS gen rows.tsv)\nadd_executable(app main.c rows.c)"
+        },
+        {
+          "lang": "Bazel",
+          "note": "A genrule lists the programs it runs as tools, and Bazel builds them for the machine that runs the step, as A's host rule does. Its best case goes further than A: steps run remotely and share results across machines, and the sandbox is strict. A runs every step locally.",
+          "code": "genrule(\n    name = \"rows\",\n    srcs = [\"rows.tsv\"],\n    outs = [\"rows.jet\"],\n    tools = [\":gen\"],\n    cmd = \"$(location :gen) $(SRCS) $@\",\n)"
+        },
+        {
+          "lang": "Zig",
+          "note": "This is the model for A. One call declares a file and passes it, a tool is built for the host, steps run in parallel, and the summary prints times. Zig does not seal steps from the machine, which A does. Zig can also check a step's output directly with expectStdOutEqual.",
+          "code": "const gen = b.addExecutable(.{ .name = \"gen\", .root_source_file = b.path(\"gen.zig\"), .target = b.graph.host });\nconst run = b.addRunArtifact(gen);\nrun.addFileArg(b.path(\"rows.tsv\"));\nconst rows = run.addOutputFileArg(\"rows.zig\");\nexe.root_module.addAnonymousImport(\"rows\", .{ .root_source_file = rows });"
+        },
+        {
+          "lang": "Rust (Cargo)",
+          "note": "A build.rs program runs before its crate compiles, and its build-dependencies are built for the host. Its best case: rerun-if-changed lets the script name inputs it discovers while running, which A cannot. It is unsealed and can only feed its own crate.",
+          "code": "// build.rs\nfn main() {\n    println!(\"cargo::rerun-if-changed=rows.tsv\");\n    let out = std::env::var(\"OUT_DIR\").unwrap();\n    gen::write_rows(\"rows.tsv\", &format!(\"{out}/rows.rs\"));\n}"
+        },
+        {
+          "lang": "Buck2",
+          "note": "The exe macro builds gen for the machine that runs the step. Inside rules, an output is declared where it is passed, as A does. Its best case goes further than A: remote execution, and dynamic outputs that let one step's result shape later steps.",
+          "code": "genrule(\n    name = \"rows\",\n    srcs = [\"rows.tsv\"],\n    out = \"rows.jet\",\n    cmd = \"$(exe :gen) $SRCS $OUT\",\n)"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "It moves every script the card names into the build graph Jet already has. Steps keep reuse, sealing and parallel runs, and beginner builds do not change. Most of the machinery exists: the executor already models tool paths, mounts and probe results.",
+        "tradeoff": "About a dozen new Build calls, a Duration option kind and the retirement of b.action, in exchange for one build graph for the whole project.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Every build reruns everything, unsealed and one step at a time. `jet inspect build` cannot list steps without running them, and reuse becomes each project's own code."
+          },
+          {
+            "key": "C",
+            "reason": "The scripts stay, generated tables can still go stale, and the packages suite keeps building its own engine."
+          }
+        ],
+        "losses": [
+          {
+            "loss": "More Build calls to learn.",
+            "mitigation": "Beginner builds do not change. The new calls appear only when a step runs a program the build makes, and the docs show one example per call."
+          },
+          {
+            "loss": "Every b.action caller must move to b.run.",
+            "mitigation": "The callers are about 50 test fixtures and docs, all in this repository. They move in the same change, and each move is mechanical."
+          },
+          {
+            "loss": "A sealed step needs the built tool's files bound in.",
+            "mitigation": "The executor already binds declared toolchain mounts read-only. A built tool adds its file and runtime pack the same way."
+          }
+        ]
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: Claude. Fresh agent: Main. It found no host rule for tools, arguments that listed each file twice, an Int time limit, and no comparisons; the redesign fixes each."
+      },
+      "checkInstructions": null,
+      "surface": {
+        "gist": "How far should a build function reach: running programs it builds, long steps, other folders, and timing records?",
+        "lesson": "A build function lists steps, and `jet build` runs them, reuses unchanged ones and seals each off. Today a step may only use tools already on the machine, so work needing a freshly built program lives in scripts. Letting a step run what the build makes moves those scripts into the build.",
+        "trio": {
+          "current": {
+            "note": "Today gen cannot run, every file is written twice, and steps stop at 30 seconds.",
+            "code": "build: fn(b: Build) -[Exec, FS]> {\n    #Impure(\"make the rows table\") {\n        // only tools already on the machine; runs before gen exists\n        rows: b.action(\"rows\", [\"rows.tsv\"], [\"Registry/Rows.jet\"],\n            [\"gen\", \"rows.tsv\", \"Registry/Rows.jet\"], [\"FS\"])\n        app: b.add_executable(\"app\", [\"run.jet\", \"Registry/Rows.jet\"], [rows])\n        b.default(app)\n    }\n}"
+          },
+          "wild": {
+            "lang": "Zig",
+            "note": "Zig builds gen for this machine, runs it, and compiles its output into the app.",
+            "code": "const gen = b.addExecutable(.{ .name = \"gen\", .root_source_file = b.path(\"gen.zig\"), .target = b.graph.host });\nconst run = b.addRunArtifact(gen);\nrun.addFileArg(b.path(\"rows.tsv\"));\nconst rows = run.addOutputFileArg(\"rows.zig\");\nexe.root_module.addAnonymousImport(\"rows\", .{ .root_source_file = rows });"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Steps can run what the build makes",
+            "gist": "One graph: build gen for this machine, run it sealed, reuse it when unchanged.",
+            "gains": [
+              "Generated tables can never be stale",
+              "Each file is declared where it is passed",
+              "Every build records how long each part took"
+            ],
+            "losses": [
+              "More Build calls",
+              "Every b.action caller moves to b.run"
+            ],
+            "proposed": {
+              "code": "build: fn(b: Build) -[Exec, FS]> {\n    gen: b.add_executable(\"gen\", [\"Tools/Gen.jet\"], [])\n    #Impure(\"make the rows table with gen\") {\n        rows: b.run(\"rows\", b.host(gen), [\"FS\"])  // gen built for this machine\n        rows.input(\"rows.tsv\")                     // declared and passed at once\n        table: rows.output(\"Registry/Rows.jet\")    // declared, passed, returned\n        rows.timeout(2min)\n        app: b.add_executable(\"app\", [\"run.jet\", table.path()], [rows])\n        b.default(app)\n    }\n}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "An eager build program, like Jai",
+            "gist": "Each line builds or runs at once, like a script.",
+            "gains": [
+              "Reads like an ordinary script"
+            ],
+            "losses": [
+              "Nothing is reused or sealed",
+              "Steps run one at a time",
+              "Steps cannot be listed without running them"
+            ],
+            "proposed": {
+              "code": "build: fn(b: Build) -[Exec, FS]> {\n    // each line finishes before the next one starts\n    gen: b.compile(\"gen\", [\"Tools/Gen.jet\"])\n    b.exec([String]{gen, \"rows.tsv\", \"Registry/Rows.jet\"})\n    app: b.add_executable(\"app\", [\"run.jet\", \"Registry/Rows.jet\"], [])\n    b.default(app)\n}"
+            }
+          },
+          {
+            "key": "C",
+            "name": "No new API; keep the scripts",
+            "gist": "The build function stays small; scripts do the rest.",
+            "gains": [
+              "Nothing new to learn"
+            ],
+            "losses": [
+              "Generated tables can go stale",
+              "Scripts run one after another"
+            ],
+            "proposed": {
+              "code": "// Tools/project/Build.jet: an ordinary Jet program\nrun: fn() {\n    process.cmd([String]{\"jet\", \"build\", \"--output-dir=out\", \"Gen\"}).run() ?? fail(\"gen\")\n    process.cmd([String]{\"out/gen\", \"rows.tsv\", \"Registry/Rows.jet\"}).run() ?? fail(\"rows\")\n    process.cmd([String]{\"jet\", \"build\", \"App\"}).run() ?? fail(\"app\")\n}"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "It moves the scripts into the build graph Jet already has. Steps keep reuse, sealing and parallel runs, tools build for this machine, and beginner builds do not change.",
+          "gains": [
+            "One build graph for the whole project",
+            "Unchanged steps are reused",
+            "Beginner builds stay the same"
+          ],
+          "losses": [
+            {
+              "loss": "More Build calls to learn.",
+              "mitigation": "They appear only when a step runs a built program."
+            },
+            {
+              "loss": "Every b.action caller moves to b.run.",
+              "mitigation": "About 50 test fixtures and docs in this repository move in the same change."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Every build reruns everything, one step at a time."
+            },
+            {
+              "key": "C",
+              "reason": "Stale tables and serial scripts stay."
+            }
+          ],
+          "tradeoff": "A dozen new calls for one whole-project build."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-08T02:19:45.520Z"
     }
   ],
   "questions": [
@@ -187759,6 +187977,83 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-08T02:34:45.301Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0pgowhn",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-08T02:34:41.492Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0pgowhn",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-08T02:34:32.030Z",
+      "by": "Main",
+      "action": "card.criteria-reopen",
+      "ref": "c0pgowhn",
+      "note": "#2: restate as a decision criterion"
+    },
+    {
+      "at": "2026-11-08T02:34:30.605Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0pgowhn",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-08T02:34:29.363Z",
+      "by": "Main",
+      "action": "card.criteria-reopen",
+      "ref": "c0pgowhn",
+      "note": "#1: restate as a decision criterion"
+    },
+    {
+      "at": "2026-11-08T02:33:58.427Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0pgowhn",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-08T02:33:49.645Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0pgowhn",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-08T02:19:52.986Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0crz3ra",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-08T02:19:45.520Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-BUILD-GRAPH1",
+      "note": "A build step can run a program the same build makes, built for this machine, with each file declared where it is passed"
+    },
+    {
+      "at": "2026-11-08T02:14:26.168Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0hn7w1n",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-08T02:14:11.617Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0g93joj",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-08T01:59:59.133Z",
       "by": "Main",
