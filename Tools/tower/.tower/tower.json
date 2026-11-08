@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6686,
-    "rev": 96059,
+    "rev": 96060,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -73479,6 +73479,11 @@
         {
           "at": "2026-11-08",
           "by": "Main",
+          "text": "Owner decision 2026-11-08 (to Main): build the async-I/O scheduler redesign now, no ballot. Tasks are multiplexed on few threads, with the epoll wait run on the waiting thread (the D-PARA-LIMIT1 path) instead of an OS thread per in-flight wait plus a poller-thread hop. Scope covers the same root in #6403 (a blocked task holds its worker) and #6440 (generator yield is a park/wake, about 20 us). Engineer away the downsides (task/channel/cancellation semantics unchanged on every tier, blocking foreign calls and OS waits offloaded, fairness and deadlines, I9 parity, debuggability), then build. Target: w11 beats every peer on wall, CPU and RSS (bun 9.25 ms CPU; jet 19.5 ms after fixes 1-4)."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
           "text": "Main 2026-11-08 04:55 w11 fix 3 landed bee6af85ed (inet_pton for literal hosts, no getaddrinfo): perf task-clock -r30 25.4 -> 21.2 ms CPU, hyperfine user+sys 20.7 -> 17.7 ms, wall unchanged at 87 ms (G1Lead). Fix 2 (persistent epoll registration, 21.2 -> 20.9 ms) is queued in lane-commit; fix 1 (wake after unlock, 20.9 -> 20.3 ms) passed VERIFY and is next. bun stays at 9.25 ms CPU; c2 still fails pending the scheduler redesign."
         },
         {
@@ -73596,7 +73601,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T22:33:20.042Z",
-      "updated": "2026-11-08T09:42:09.100Z",
+      "updated": "2026-11-08T11:04:51.808Z",
       "updatedBy": "Main",
       "goals": [
         "G4"
@@ -188241,6 +188246,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-08T11:04:51.808Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c02a1ynr",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-08T11:02:18.346Z",
       "by": "Main",
