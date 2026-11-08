@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6697,
-    "rev": 96206,
+    "rev": 96209,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -100704,6 +100704,11 @@
         {
           "at": "2026-11-08",
           "by": "Main",
+          "text": "G1Lead landed 71ec4588bb (c1: 29 libm routes in Jet; musl-equivalence corpus 74,409 rows, 0 differ on O0, O1, O2 and web; the m runtime has 25 undefined symbols, none math) and 66879594c0 (c2 part: erf, erfc, lgamma and gamma on musl 1.2.5 algorithms, 2,554 rows, 0 differ). Both queued for Main batch verification; not met until then. c4 is blocked: Jet is slower than musl with identical bits at O1 (sin 1.23x, cos 1.34x, exp 1.82x, log 2.04x, pow 1.74x; O2 similar). G1Lead is finding the root; general codegen roots go to #6414."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
           "text": "G1Lead progress 2026-11-08: all 29 runtime libm routes are ported (trig, exp and log, pow, cbrt, hypot, hyperbolics) and being verified. The libm C imports, the web host math entries and the C platform-libm fixture are gone. Found: erf, erfc, lgamma and tgamma are Abramowitz and Stegun approximations, not musl; Main approved switching them to musl bits under c2. The c3 public surface (about 45 C23 names and F32 forms) is an owner question. Options: A in core.math with F32 overloads; B a separate core.math.f32; C C-ABI exports only."
         },
         {
@@ -100762,7 +100767,7 @@
       "parentId": "c0lscvc9",
       "needsAcceptance": false,
       "created": "2026-11-08T15:46:49.544Z",
-      "updated": "2026-11-08T16:58:28.433Z",
+      "updated": "2026-11-08T17:52:13.830Z",
       "updatedBy": "Main",
       "criteriaLastN": 4
     },
@@ -101346,18 +101351,23 @@
         {
           "at": "2026-11-08",
           "by": "Main",
+          "text": "G1Lead landed 6dedd63f5a (Tools/agent/LibcCensus.jet plus Docs/audits/libc-census.md): 261 families, 1,482 functions, every POSIX.1-2024 function once plus the C23 additions; 119 covered, 40 partial, 23 language, 79 GAP. The committed generated doc breaks AGENTS.md, and the fault is in the Main criterion. c1 is reworded, and G1Lead is removing the doc and keeping the script on demand. GAP areas: math (rint family, issignaling, Bessel, C23 pi-trig, exp10 and log2p1 family, pown and rootn family, fromfp, fmaximum family, narrowing ops, canonicalize, totalorder, payload); all of fenv; complex elementary functions plus carg and cproj; isblank, isgraph, ispunct, isxdigit, the isw forms, wctype, wctrans and the _l variants; memset_explicit, swab; a64l, l64a; fdopen, fileno, ungetc, setbuf, setvbuf, ctermid; posix_fadvise, fallocate, readv, writev, mknod, statvfs, pathconf; dup family, isatty, ttyname, aio, posix_devctl; mlock and typed memory; posix_spawnattr and sched policy; signal sets and masks, sigwait, sigqueue, sigaltstack, pthread_kill; pthread attributes, mutex and cond attributes, rwlock, spin, once, TLS keys, atfork, semaphores; atomic fences; clock_settime and CPU-time clocks; set-uid and set-gid family, the group database, utmpx, crypt; sendmsg, recvmsg, socketpair, sockatmark, netdb iteration, if_nameindex; mq, shm_open, SysV IPC; tcgetpgrp, tcsetpgrp, pty functions; setlocale, locale_t, nl_langinfo, gettext, catgets, fmtmsg. Which gaps get Jet surface is an owner question (Q18); each new public API needs a ballot."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
           "text": "Assigned to G1Lead 2026-11-08, after #6688 c1 and c2 land: a committed census script listing every C23 and POSIX.1-2024 function family against Jet Core or runtime coverage."
         }
       ],
       "criteria": [
         {
           "n": 1,
-          "text": "A committed census lists every libc function family (C23 and POSIX.1-2024) with the Jet Core or runtime API that covers it, or names it as a gap; produced by a script, not by hand.",
+          "text": "A committed census script (Tools/agent/LibcCensus.jet) lists every libc function family (C23 and POSIX.1-2024) with the Jet Core or runtime API that covers it, or names it as a gap, and checks that every named Jet API exists. It prints its table on demand; no generated census file is committed.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-08T15:55:05.521Z"
+          "at": "2026-11-08T17:52:11.877Z"
         },
         {
           "n": 2,
@@ -101381,7 +101391,7 @@
       "parentId": "c0lscvc9",
       "needsAcceptance": false,
       "created": "2026-11-08T15:54:55.014Z",
-      "updated": "2026-11-08T16:58:29.655Z",
+      "updated": "2026-11-08T17:52:12.855Z",
       "updatedBy": "Main",
       "criteriaLastN": 2
     }
@@ -189434,6 +189444,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-08T17:52:13.830Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0bzrof5",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-08T17:52:12.855Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0cs6xlg",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-08T17:52:11.877Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0cs6xlg",
+      "note": "#1: A committed generated census file breaks AGENTS.md (never commit generated status); the script is the census.; was: A committed census lists every libc function family (C23 and POSIX.1-2024) with the Jet Core or runtime API that covers it, or names it as a gap; produced by a script, not by hand."
+    },
     {
       "at": "2026-11-08T17:42:51.186Z",
       "by": "Main",
