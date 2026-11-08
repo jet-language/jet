@@ -37,6 +37,7 @@ use {
         TOKEN_LBRACKET,
         TOKEN_LPAREN,
         TOKEN_LT,
+        TOKEN_LT_GT,
         TOKEN_MINUS,
         TOKEN_PIPE,
         TOKEN_PLUS,
@@ -349,6 +350,14 @@ parser_parse_type_base: fn(state: &JetParserState, depth: Int) -> ParsedType {
             }
             if parser_current_kind(state) == TOKEN_LT {
                 return parser_parse_applied_type(state, name, parser_cover(start.span, end), depth + 1)
+            }
+            // `Box<>`: `<>` is one token, the value a pipe step receives, so
+            // an empty type-argument list is read and refused here.
+            if parser_current_kind(state) == TOKEN_LT_GT {
+                empty: parser_bump(state)
+                diagnostic: diagnostic_from_registry("E0440", Val(empty.span), "`{name}<>` has an empty type-argument list", "a type's arguments go between `<` and `>`; `<>` lists none, so it only adds noise", "Write the type arguments, such as `{name}<Int>`, or drop the `<>`")
+                state.diagnostics.push(diagnostic_with_edit(diagnostic, TextEdit{span: empty.span, new_text: ""}))
+                return ParsedType{ty: foundation_named_type(name), span: parser_cover(start.span, empty.span)}
             }
             // E0119: a `$fact` path segment reads a compile-time fact value,
             // which never names a type outside a derive template.

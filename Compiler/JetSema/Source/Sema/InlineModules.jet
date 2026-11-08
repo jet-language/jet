@@ -65,6 +65,7 @@ use {
         NamedType,
         OrFallback,
         Param,
+        PipeStep,
         Program,
         Span,
         Stmt,
@@ -989,6 +990,12 @@ sema_inline_rewrite_expr: fn(rewrite: &SemaInlineRewrite, expression: Expr) -> E
         .CallValue(callee, args, span, node) -> return Expr.CallValue{callee: sema_inline_rewrite_expr(rewrite, callee), args: sema_inline_rewrite_call_args(rewrite, args), span: span, id: node}
         .PtrFromAddr(alias, alias_span, elem, addr, span, node) -> return Expr.PtrFromAddr{alias: alias, alias_span: alias_span, elem: sema_inline_rewrite_type(rewrite, elem), addr: sema_inline_rewrite_expr(rewrite, addr), span: span, id: node}
         .Paren(value, span, node) -> return Expr.Paren{value: sema_inline_rewrite_expr(rewrite, value), span: span, id: node}
+        .Pipe(head, steps, span, node) -> {
+            mapped_head: sema_inline_rewrite_expr(rewrite, head)
+            mapped := [PipeStep]{}
+            loop step in steps -> mapped.push(PipeStep{name: step.name, value: sema_inline_rewrite_expr(rewrite, step.value), reads: step.reads, span: step.span})
+            return Expr.Pipe{head: mapped_head, steps: mapped, span: span, id: node}
+        }
         else -> {}
     }
     // copy: the rewrite walks the module program by borrowed payload views (Jet has no consuming

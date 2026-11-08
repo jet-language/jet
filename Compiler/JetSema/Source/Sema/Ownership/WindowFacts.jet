@@ -383,6 +383,10 @@ sema_window_scan_expr: fn(expr: Expr, param: String, scan: &SemaWindowScan) {
         .Ok(base, _, _) | .Err(base, _, _) | .Paren(base, _, _) | .Unary(_, base, _, _) -> sema_window_scan_expr(base, param, scan)
         .PatternTest(subject, _, _, _) -> sema_window_scan_expr(subject, param, scan)
         .PtrFromAddr(_, _, _, addr, _, _) -> sema_window_scan_expr(addr, param, scan)
+        .Pipe(head, steps, _, _) -> {
+            sema_window_scan_expr(head, param, scan)
+            loop step in steps -> sema_window_scan_expr(step.value, param, scan)
+        }
         .Index(base, index, _, _, _) -> {
             sema_window_scan_expr(base, param, scan)
             sema_window_scan_expr(index, param, scan)

@@ -990,6 +990,15 @@ sema_taint_tags_of: fn(state: &SemaTaintFlowState, expression: Expr) -> [String]
             return tags
         }
         .PtrFromAddr(_, _, _, addr, _, _) -> return sema_taint_tags_of(state, addr)
+        // Each step's hidden name carries the tags of the value it receives.
+        .Pipe(head, steps, _, _) -> {
+            tags := sema_taint_tags_of(state, head)
+            loop step in steps {
+                sema_taint_set_binding(state.bindings, step.name, tags, None)
+                tags = sema_taint_tags_of(state, step.value)
+            }
+            return tags
+        }
         .Lambda(_, _) -> return [String]{}
         else -> return [String]{}
     }
@@ -1159,6 +1168,15 @@ sema_taint_check_expr: fn(graph: SemaRegistrationGraph, state: &SemaTaintFlowSta
             sema_taint_merge_paths(state, before, [SemaTaintSnapshot]{then_path, else_path})
         }
         .PtrFromAddr(_, _, _, addr, _, _) -> sema_taint_check_expr(graph, state, addr)
+        .Pipe(head, steps, _, _) -> {
+            sema_taint_check_expr(graph, state, head)
+            received := sema_taint_tags_of(state, head)
+            loop step in steps {
+                sema_taint_set_binding(state.bindings, step.name, received, None)
+                sema_taint_check_expr(graph, state, step.value)
+                received = sema_taint_tags_of(state, step.value)
+            }
+        }
         .Lambda(lambda, _) -> {
             if lambda.body == {
                 .Expr(value) -> sema_taint_check_expr(graph, state, value)

@@ -338,6 +338,13 @@ sema_expression_lambda_uses_outer: fn(expr: Expr, frame: Int, params: [String], 
         }
         .PatternTest(subject, pattern, _, _) -> sema_expression_lambda_uses_outer(subject, frame, params, scopes) || sema_expression_lambda_pattern_use_outer(pattern, frame, params, scopes)
         .PtrFromAddr(_, _, _, addr, _, _) -> sema_expression_lambda_uses_outer(addr, frame, params, scopes)
+        .Pipe(head, steps, _, _) -> {
+            if sema_expression_lambda_uses_outer(head, frame, params, scopes) -> return true
+            loop step in steps {
+                if sema_expression_lambda_uses_outer(step.value, frame, params, scopes) -> return true
+            }
+            false
+        }
         else -> false
     }
 }

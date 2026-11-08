@@ -1221,6 +1221,11 @@ semindex_expr: fn(expr: Expr, db: &SemDB, ctx: &SemWalk, modules: [JetDriverDocM
     semindex_push_parent(ctx, structural_id)
     if expr == {
         .PtrFromAddr(_, _, _, addr, _, _) -> semindex_scalar("address", addr, db, ctx, modules)
+        .Pipe(head, steps, _, _) -> {
+            semindex_scalar("head", head, db, ctx, modules)
+            values: loop step in steps -> step.value
+            semindex_list("steps", values, db, ctx, modules)
+        }
         .Ident(name, span, _) -> db.refs.push(semindex_scoped_ref(name, span, ctx))
         .Call(call, _) -> {
             loop argument in call.args {

@@ -554,6 +554,15 @@ sema_contract_result_ident_in_expr: fn(expr: Expr) -> Span? {
             .Block(body) -> sema_contract_result_ident_in_statements(body)
         }
         .PtrFromAddr(_, _, _, address, _, _) -> sema_contract_result_ident_in_expr(address)
+        .Pipe(head, steps, _, _) -> {
+            found := sema_contract_result_ident_in_expr(head)
+            if found != None -> return found
+            loop step in steps {
+                step_found: sema_contract_result_ident_in_expr(step.value)
+                if step_found != None -> return step_found
+            }
+            None
+        }
         else -> None
     }
 }

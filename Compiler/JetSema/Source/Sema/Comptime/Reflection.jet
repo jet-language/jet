@@ -1029,6 +1029,10 @@ sema_comptime_reflection_append_arithmetic_expr: fn(expr: Expr, values: &[TCompt
             loop argument in args -> sema_comptime_reflection_append_arithmetic_expr(argument.expr, values)
         }
         .PtrFromAddr(_, _, _, address, _, _) -> sema_comptime_reflection_append_arithmetic_expr(address, values)
+        .Pipe(head, steps, _, _) -> {
+            sema_comptime_reflection_append_arithmetic_expr(head, values)
+            loop step in steps -> sema_comptime_reflection_append_arithmetic_expr(step.value, values)
+        }
         else -> {}
     }
 }

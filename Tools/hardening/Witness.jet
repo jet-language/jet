@@ -333,6 +333,10 @@ walk_expr: fn(expression: Expr, chain: [String], walk: Walk, hits: &[Hit]) Never
             .Block(body) -> walk_body(body, with_frame(chain, "lambda"), walk, hits)
         }
         .PtrFromAddr(_, _, _, address, _, _) -> walk_expr(address, with_frame(chain, "other"), walk, hits)
+        .Pipe(head, steps, _, _) -> {
+            walk_expr(head, with_frame(chain, "other"), walk, hits)
+            loop step in steps -> walk_expr(step.value, with_frame(chain, "other"), walk, hits)
+        }
         else -> {}
     }
 }

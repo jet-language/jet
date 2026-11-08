@@ -2107,6 +2107,10 @@ sema_inline_always_scan_expr: fn(expression: Expr, scan: &SemaInlineAlwaysScan) 
         .Ok(base, _, _) | .Err(base, _, _) | .Paren(base, _, _) | .Unary(_, base, _, _) | .Place(base, _, _, _) -> sema_inline_always_scan_expr(base, scan)
         .PatternTest(subject, _, _, _) -> sema_inline_always_scan_expr(subject, scan)
         .PtrFromAddr(_, _, _, addr, _, _) -> sema_inline_always_scan_expr(addr, scan)
+        .Pipe(head, steps, _, _) -> {
+            sema_inline_always_scan_expr(head, scan)
+            loop step in steps -> sema_inline_always_scan_expr(step.value, scan)
+        }
         .Index(base, index, _, _, _) -> {
             sema_inline_always_scan_expr(base, scan)
             sema_inline_always_scan_expr(index, scan)

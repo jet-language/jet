@@ -58,7 +58,28 @@ Expr: enum {
     PtrFromAddr(alias: String, alias_span: Span, elem: Type, addr: Expr, span: Span, id: Int)
     ComptimeName(name: String, span: Span, value: CtValue?, id: Int)
     Paren(value: Expr, span: Span, id: Int)
+    // `head |> step |> step`: each step reads the value of the
+    // line above as `<>`, which the parser spells as the step's hidden name.
+    Pipe(head: Expr, steps: [PipeStep], span: Span, id: Int)
 }
+
+// One `|> value` step of a pipe. `name` is the hidden binding that holds the
+// value the step receives; every `<>` in `value` is an `Ident` of it, and
+// `reads` counts them as written.
+PipeStep: struct {
+    name: String
+    value: Expr
+    reads: Int
+    span: Span
+}
+
+// The hidden binding a pipe step's `<>` reads, named by the step's `|>`.
+PIPE_VALUE_PREFIX: "__jet_pipe_"
+
+pipe_value_name: fn(step_start: Int) -> String Never! { "{PIPE_VALUE_PREFIX}{step_start}" }
+
+// Whether `name` is a pipe step's hidden binding, which source spells `<>`.
+pipe_value_is_name: fn(name: String) -> Bool Never! { name.starts_with(PIPE_VALUE_PREFIX) }
 
 IntegerWidth: struct {
     signed: Bool
@@ -532,6 +553,7 @@ expr_span: fn(expr: Expr) -> Span {
         .PtrFromAddr(_, _, _, _, span, _) -> return span
         .ComptimeName(_, span, _, _) -> return span
         .Paren(_, span, _) -> return span
+        .Pipe(_, _, span, _) -> return span
     }
     Span{start: 0, end: 0}
 }
@@ -588,6 +610,7 @@ expr_node_id: fn(expr: Expr) -> Int Never! {
         .PtrFromAddr(_, _, _, _, _, id) -> id
         .ComptimeName(_, _, _, id) -> id
         .Paren(_, _, id) -> id
+        .Pipe(_, _, _, id) -> id
     }
 }
 

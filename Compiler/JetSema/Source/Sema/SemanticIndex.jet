@@ -742,6 +742,7 @@ sema_compiler_index_expr_shape: fn(expression: Expr) -> String {
         .ComptimeName(_, _, _, _) -> 47
         .Paren(_, _, _) -> 48
         .OptMethodCall(_, _, _, _, _, _, _) -> 49
+        .Pipe(_, _, _, _) -> 50
     }
     "Discriminant({index})"
 }
@@ -968,6 +969,10 @@ sema_compiler_index_walk_expr: fn(state: &SemaCompilerIndexWalkState, expression
             sema_compiler_index_walk_call_args(state, args, module_path)
         }
         .PtrFromAddr(_, _, _, address, _, _) -> sema_compiler_index_walk_expr_slot(state, "address", address, module_path)
+        .Pipe(head, steps, _, _) -> {
+            sema_compiler_index_walk_expr_slot(state, "head", head, module_path)
+            sema_compiler_index_walk_expr_list(state, "steps", loop step in steps -> step.value, module_path)
+        }
         .Field(base, _, _, _) | .OptField(base, _, _, _, _, _) | .MemberSpread(base, _, _, _) -> sema_compiler_index_walk_expr_slot(state, "base", base, module_path)
         .Binary(_, left, right, _, _) -> {
             sema_compiler_index_walk_expr_slot(state, "lhs", left, module_path)

@@ -800,6 +800,15 @@ OP_FALLBACK: "??"
 /// and short-circuits to absent on the first missing link.
 OP_OPTIONAL_CHAIN: "?."
 
+/// The pipe: `head |> step |> step` runs each step on the value of the line
+/// above, which the step reads as `<>`. Steps are left-associative and the
+/// loosest form, and each step may carry its own `??` route.
+OP_PIPE_STEP: "|>"
+
+/// Inside a `|>` step, the value that step receives. Legal only in a step;
+/// the nearest enclosing step wins, through lambdas and string holes.
+OP_PIPE_VALUE: "<>"
+
 /// S71 (ratified 2026-06-15): the retired word fallback; the fallback is
 /// `??` and no rule accepts `or`.
 FOREIGN_OR_FALLBACK: "or"

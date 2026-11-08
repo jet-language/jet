@@ -253,6 +253,12 @@ sema_shared_access_expr_touches_shared: fn(value: Expr, scopes: SemaScopeTable) 
         .CallValue(callee, args, _, _) -> return sema_shared_access_expr_touches_shared(callee, scopes) || sema_shared_access_expr_call_args_touches_shared(args, scopes)
         .PtrFromAddr(_, _, _, address, _, _) -> return sema_shared_access_expr_touches_shared(address, scopes)
         .Paren(inner, _, _) -> return sema_shared_access_expr_touches_shared(inner, scopes)
+        .Pipe(head, steps, _, _) -> {
+            if sema_shared_access_expr_touches_shared(head, scopes) -> return true
+            loop step in steps {
+                if sema_shared_access_expr_touches_shared(step.value, scopes) -> return true
+            }
+        }
         else -> {}
     }
     false

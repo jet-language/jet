@@ -20,6 +20,7 @@ use {
         ParamZone,
         PatSlot,
         Pattern,
+        PipeStep,
         PlaceAccess,
         Span,
         Stmt,
@@ -31,6 +32,7 @@ use {
         dimension_display_name,
         expr_span,
         measure_expression,
+        pipe_value_is_name,
         type_name,
     ]
     jet_lexer.[
@@ -1460,7 +1462,9 @@ jfmt_fmt_expr: fn(f: &JetFmt, expr: Expr, prec: Int) {
             jfmt_fmt_expr(f, end, JFMT_PREC_OR)
             if wrap -> jfmt_write(f, ")")
         }
-        .Ident(name, _, _) -> jfmt_write(f, name)
+        // A pipe step's hidden name, or the head's name its first step
+        // reads in place, is written `<>`.
+        .Ident(name, _, _) -> jfmt_write(f, if pipe_value_is_name(name) || f.pipe_names.contains(name) -> "<>" else -> name)
         .Call(call, _) -> jfmt_fmt_call(f, call)
         .Unary(op, inner, _, _) -> {
             // Wrap only when the surrounding slot binds tighter.
@@ -1669,6 +1673,56 @@ jfmt_fmt_expr: fn(f: &JetFmt, expr: Expr, prec: Int) {
             jfmt_fmt_expr(f, addr, JFMT_PREC_OR_FALLBACK)
             jfmt_write(f, ")")
         }
+        // A pipe: the head, then one `|> step` per line, one level in; a
+        // lone step stays on the head's line. A step that only calls a
+        // method on `<>` joins the line above as `.method(…)`.
+        .Pipe(head, steps, _, _) -> {
+            // copy: the joined pieces are new expressions; the pipe keeps its own.
+            joined := head.copy()
+            rest := [Expr]{}
+            // A first step that reads the head's name in place prints that
+            // name as `<>` while it stays its own line.
+            in_place := ""
+            loop (index, step) in steps {
+                if rest.len() == 0 {
+                    if jfmt_pipe_step_joins(step, joined) == .Val(call) {
+                        joined = call
+                        next
+                    }
+                } else {
+                    last: rest.len() - 1
+                    if jfmt_pipe_step_joins(step, rest[last]) == .Val(call) {
+                        rest[last] = call
+                        next
+                    }
+                }
+                // copy: the printed step is the pipe's own value, read in place.
+                rest.push(step.value.copy())
+                // copy: the printer's open-name stack keeps the step's name.
+                if index == 0 && !pipe_value_is_name(step.name) -> in_place = step.name.copy()
+            }
+            if rest.len() == 0 {
+                jfmt_fmt_expr(f, joined, prec)
+            } else {
+                if prec > JFMT_PREC_OR_FALLBACK -> jfmt_write(f, "(")
+                jfmt_fmt_expr(f, joined, JFMT_PREC_OR_FALLBACK)
+                f.indent += if rest.len() == 1 -> 0 else -> 1
+                loop (index, value) in rest {
+                    if rest.len() == 1 {
+                        jfmt_write(f, " |> ")
+                    } else {
+                        jfmt_newline(f)
+                        jfmt_write(f, "|> ")
+                    }
+                    // copy: the stack keeps its own name while the step prints.
+                    if index == 0 && in_place != "" -> f.pipe_names.push(in_place.copy())
+                    jfmt_fmt_expr(f, value, JFMT_PREC_OR_FALLBACK)
+                    if index == 0 && in_place != "" -> _ := f.pipe_names.pop()
+                }
+                f.indent -= if rest.len() == 1 -> 0 else -> 1
+                if prec > JFMT_PREC_OR_FALLBACK -> jfmt_write(f, ")")
+            }
+        }
         // The mark is part of the name.
         .ComptimeName(name, _, _, _) -> jfmt_write(f, name)
         // Author-written grouping parens are re-emitted; the generated one
@@ -1688,6 +1742,25 @@ jfmt_fmt_expr: fn(f: &JetFmt, expr: Expr, prec: Int) {
             jfmt_fmt_expr(f, inner, JFMT_PREC_POSTFIX)
         }
     }
+}
+
+// A pipe step that only calls a method on its `<>`, read once, written as
+// that call on `previous` when `previous` already prints as a postfix
+// operand; a `?? route` or operator line above keeps the step.
+jfmt_pipe_step_joins: fn(step: PipeStep, previous: Expr) -> Expr? {
+    if step.reads != 1 -> return None
+    postfix: if previous == {
+        .Ident(_, _, _) | .Call(_, _) | .MethodCall(_, _, _, _, _, _, _) | .Field(_, _, _, _) | .Index(_, _, _, _, _) | .Paren(_, _, _) -> true
+        else -> false
+    }
+    if !postfix -> return None
+    if step.value == .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, node) {
+        if receiver == .Ident(name, _, _) {
+            // copy: the joined call is a new expression; the pipe keeps its parts.
+            if name == step.name -> return Val(Expr.MethodCall{receiver: previous.copy(), method: method.copy(), method_span: method_span, owner_type_args: owner_type_args.copy(), type_args: type_args.copy(), args: args.copy(), id: node})
+        }
+    }
+    None
 }
 
 jfmt_fmt_value_loop: fn(f: &JetFmt, body: [Stmt], route_attached: Bool) {

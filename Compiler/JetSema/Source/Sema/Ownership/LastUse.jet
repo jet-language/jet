@@ -35,6 +35,12 @@ sema_ownership_last_use_expr: fn(expr: Expr, name: String) -> Bool {
         }
         .Unary(_, operand, _, _) | .Deref(operand, _, _) | .RawOf(operand, _, _) | .Copy(operand, _, _) | .Place(operand, _, _, _) | .Field(operand, _, _, _) | .OptField(operand, _, _, _, _, _) | .Tainted(operand, _, _, _) | .Present(operand, _, _) | .Paren(operand, _, _) | .Spread(operand, _, _) -> return sema_ownership_last_use_expr(operand, name)
         .PtrFromAddr(_, _, _, addr, _, _) -> return sema_ownership_last_use_expr(addr, name)
+        .Pipe(head, steps, _, _) -> {
+            if sema_ownership_last_use_expr(head, name) -> return true
+            loop index in 0..<steps.len() {
+                if sema_ownership_last_use_expr(steps[index].value, name) -> return true
+            }
+        }
         .Binary(_, left, right, _, _) -> return sema_ownership_last_use_expr(left, name) || sema_ownership_last_use_expr(right, name)
         .CompareChain(operands, _, _, _, _) -> {
             loop index in 0..<operands.len() {

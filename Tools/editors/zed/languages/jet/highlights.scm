@@ -102,7 +102,7 @@
 ; marker.rule: ABI Allow Arithmetic Bindgen CLI Close Codable CodableAsBase Commutative Comparable Context Debug DebugOnly Decode DenyUnknownFields Deprecated DevPanel Discriminant Doc Encode Env Equatable Error Every FFI FX Flag Flatten HTML Impure Inline Interrupt Job Kernel Layout Live Local Memo Meta MustUse NoPrelude Nondeterministic Numeric Off Patchable Persist Policy Post Pre Printable PublishedSchema Reactive Receipt Redact Region Rename RenameAll Replayable Root SQL Scalar Scrub Shared Shield Short SingleUse Skip State Static Target Test Todo Track Transact Transition Undo UnitFamily Unsafe Untagged WasmExport wire
 ; take: &&
 ; sigil: # $ & ... : := :> <:
-; operator: ! != % %% %%= %= && * *= + += - -= -> .. ..< .[ / /% /%= /= < << <<= <= <=> == > >= >> >>= ? ?. ?? | ||
+; operator: ! != % %% %%= %= && * *= + += - -= -> .. ..< .[ / /% /%= /= < << <<= <= <=> <> == > >= >> >>= ? ?. ?? | |> ||
 ; END GENERATED JET SYNTAX HIGHLIGHTS
 
 ; Operators and punctuation

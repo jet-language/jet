@@ -622,6 +622,10 @@ sema_casing_expr: fn(expr: Expr, diagnostics: &[Diagnostic]) {
             sema_casing_expr(else_value, diagnostics)
         }
         .PtrFromAddr(_, _, _, addr, _, _) -> sema_casing_expr(addr, diagnostics)
+        .Pipe(head, steps, _, _) -> {
+            sema_casing_expr(head, diagnostics)
+            loop step in steps -> sema_casing_expr(step.value, diagnostics)
+        }
         else -> {}
     }
 }
