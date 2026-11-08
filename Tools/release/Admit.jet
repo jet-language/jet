@@ -61,8 +61,10 @@
 // candidate with the same identity, and gated an ancestor of COMMIT whose diff to COMMIT
 // modifies files only under tests/ or Examples/ (or under paths no suite reads: Docs/,
 // .agents/, AGENTS.md, Tools/release/). Each changed file must sit at or under a directory that
-// holds a row. Every such row runs again on both sides. Otherwise the gate stops, and nothing
-// is reused.
+// holds a row. Every such row runs again on both sides, as does every untracked failure of the
+// earlier run (the one failure a reuse verifies instead of rerunning everything). Otherwise the
+// gate stops, and nothing is reused. DIR must not be COMMIT's own work directory, which the gate
+// clears first; copy its REPORT.md and evidence/ elsewhere.
 //
 // Environment: the roots of Tools/agent/roots.sh, JET_RELEASE_WORK (default
 // $JET_STATE_ROOT/release), JET_RELEASE_SLOT (empty runs without a build slot),
@@ -1101,7 +1103,8 @@ reuse_plan: fn(ctx: &Ctx) -[Exec, FS, Time.Wait]> ReusePlan Never! {
     dir: ctx.options.reuse.copy()
     if dir == "" -> return plan
     plan.active = true
-    text: read_text(files.join(dir, "REPORT.md")) ?? ""
+    own: dir == ctx.work || dir == "{ctx.work}/"
+    text: if own -> "" else -> read_text(files.join(dir, "REPORT.md")) ?? ""
     seed: report_field(text, "Seed: ")
     built: report_field(text, "Candidate: ")
     marker: "release gate of dev "
@@ -1175,15 +1178,23 @@ suites_stage: fn(ctx: &Ctx) Never! -[Env, Exec, FS, IO, Time, Time.Wait]> {
         return
     }
     reran := [String]{}
+    verified := [String]{}
     loop suite in SUITES {
         release := SuiteRun{rows: [SuiteRow]{}, error: ""}
         candidate := SuiteRun{rows: [SuiteRow]{}, error: ""}
         if plan.active {
             // The earlier run's rows stand, except those a changed file
-            // reaches, which run again on both sides.
+            // reaches and the earlier run's untracked failures (the failures
+            // a reuse exists to verify), which run again on both sides.
             before: prior_rows(ctx.options.reuse, "release", suite) ?? [SuiteRow]{}
             after: prior_rows(ctx.options.reuse, "candidate", suite) ?? [SuiteRow]{}
-            ids: rerun_ids(after, plan.paths)
+            ids := rerun_ids(after, plan.paths)
+            loop item in compare_suites(before, after, [SuiteRow]{}, ctx.dispositions).untracked {
+                if !ids.contains(item.id) {
+                    ids.push(item.id.copy())
+                    verified.push(item.id.copy())
+                }
+            }
             release = SuiteRun{rows: before.copy(), error: ""}
             candidate = SuiteRun{rows: after.copy(), error: ""}
             if ids.len() > 0 {
@@ -1257,7 +1268,7 @@ suites_stage: fn(ctx: &Ctx) Never! -[Env, Exec, FS, IO, Time, Time.Wait]> {
         untracked: untracked_row(suite, compared)
         row(ctx, untracked.check, untracked.status, untracked.detail)
     }
-    if plan.active -> row(ctx, "reuse", "NOTE", "suite rows of {short(plan.prior, 10)} reused from {ctx.options.reuse}; {plan.paths.len()} changed file(s); rows run again: {reran.join(", ")}")
+    if plan.active -> row(ctx, "reuse", "NOTE", "suite rows of {short(plan.prior, 10)} reused from {ctx.options.reuse}; {plan.paths.len()} changed file(s); rows run again: {reran.join(", ")}; earlier untracked failures verified again: {if verified.len() == 0 -> "none" else -> verified.join(" | ")}")
     unused := [String]{}
     loop entry in ctx.dispositions {
         used := false
