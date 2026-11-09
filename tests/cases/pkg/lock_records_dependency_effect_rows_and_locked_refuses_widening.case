@@ -12,20 +12,20 @@ step: jet build run.jet
 exit: 0
 stderr: !~ "now reaches" # the first row is recorded, not reported
 file: .jet/lock ~ "effect-authority" # dep's row, reaching nothing
-file: .jet/lock !~ "FS.Read"
+file: .jet/lock !~ "FS.Read" # the lock must not record it yet
 step: jet fetch
 exit: 0
 file: .jet/lock ~ "effect-authority" # the refetch keeps the recorded row
 write: dep/dep.jet dep.files.template
 step: jet build --locked run.jet
 exit: nonzero
-stderr: ~ "E3513"
-stderr: ~ "Dependency `dep` now reaches `FS.Read`, which `.jet/lock` doesn't record for it"
+stderr: ~ "E3513" # the registered code
+stderr: ~ "Dependency `dep` now reaches `FS.Read`, which `.jet/lock` doesn't record for it" # the diagnostic says it
 file: .jet/lock !~ "FS.Read" # a locked build writes no lock
 step: jet build run.jet
 exit: 0
-stderr: ~ "note: `dep` now reaches `FS.Read`; `.jet/lock` records its wider effect row"
-file: .jet/lock ~ "FS.Read"
+stderr: ~ "note: `dep` now reaches `FS.Read`; `.jet/lock` records its wider effect row" # the diagnostic says it
+file: .jet/lock ~ "FS.Read" # the file records it
 step: jet build --locked run.jet
 exit: 0
 stderr: !~ "now reaches" # the recorded row covers it

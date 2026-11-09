@@ -14,18 +14,18 @@ stderr: ~ "`total` reaches the `FS.Read` effect, which type `Rates` denies" # th
 stderr: ~ "`text` reaches the `FS.Read` effect, which type `Rates` denies" # a trait impl in the type's body
 stderr: ~ "`reload` reaches the `FS.Read` effect, which type `Rates` denies" # an impl block apart from the body
 stderr: !~ "`read_rates` reaches" # a function outside the type is not bound
-stderr: ~ "type `Rates` is capped here"
+stderr: ~ "type `Rates` is capped here" # the diagnostic says it
 step: jet build deny.jet
 exit: 1
 stderr: count "[jet.ProhibitedEffectReached]" = 3 # build refuses before anything is emitted
 step: jet check module.jet
 exit: 1
-stderr: count "Error [" = 1
+stderr: count "Error [" = 1 # exactly this many
 stderr: ~ "`load` reaches the `FS.Read` effect, which module `store` denies" # a module cap reaches the methods of a type inside it
 step: jet check unknown.jet
 exit: 1
-stderr: ~ "`Nett` isn't a known effect"
-stderr: ~ "`Panic` can't be granted, only denied"
+stderr: ~ "`Nett` isn't a known effect" # the diagnostic says it
+stderr: ~ "`Panic` can't be granted, only denied" # the diagnostic says it
 step: jet run within.jet
 exit: 0
 stdout: = "hello jet\nplain\n"

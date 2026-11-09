@@ -6,8 +6,8 @@ env: NO_COLOR=1
 step: jet check deny.jet
 exit: 1
 stderr: count "[jet.ProhibitedEffectReached]" = 1 # the one instance's `hush` prints
-stderr: ~ "reaches the `IO` effect, which module `quiet` denies"
-stderr: ~ "module `quiet` is capped here"
+stderr: ~ "reaches the `IO` effect, which module `quiet` denies" # the diagnostic says it
+stderr: ~ "module `quiet` is capped here" # the diagnostic says it
 step: jet run within.jet
 exit: 0
 stdout: = "bump\n2\n"
@@ -18,5 +18,5 @@ step: jet check within.jet
 exit: 0
 step: jet check unknown.jet
 exit: 1
-stderr: ~ "`Nett` isn't a known effect"
-stderr: ~ "`FFI.Klingon` isn't a declared effect"
+stderr: ~ "`Nett` isn't a known effect" # the diagnostic says it
+stderr: ~ "`FFI.Klingon` isn't a declared effect" # the diagnostic says it

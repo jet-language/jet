@@ -15,29 +15,29 @@ step bare_name: jet run greet
 pty: true
 stdin: yes.stdin
 exit: 0
-stdout: ~ "greet 1.2.0 from the registry (sha256 "
-stdout: ~ "new to this machine"
-stdout: ~ "Run it? [y/N]"
-stdout: ~ "greet 1.2.0"
+stdout: ~ "greet 1.2.0 from the registry (sha256 " # the step prints it
+stdout: ~ "new to this machine" # the step prints it
+stdout: ~ "Run it? [y/N]" # the step prints it
+stdout: ~ "greet 1.2.0" # the step prints it
 step bare_name_again: jet run greet
 pty: true
 exit: 0
 stdout: !~ "Run it?" # the pinned version was accepted
-stdout: ~ "greet 1.2.0"
+stdout: ~ "greet 1.2.0" # the step prints it
 step other_target: jet run greet#1.0
 exit: 1
 stderr: ~ "jet.RemoteRunNeedsConsent" # E1804
-stdout: !~ "greet 1.0.0"
+stdout: !~ "greet 1.0.0" # this step must not print it
 step allow_all: jet run -A greet#1.0
 exit: 0
-stdout: ~ "greet 1.0.0"
-stderr: !~ "jet.RemoteRunNeedsConsent"
+stdout: ~ "greet 1.0.0" # the step prints it
+stderr: !~ "jet.RemoteRunNeedsConsent" # this step must not print it
 step locked: jet run --locked greet
 pty: true
 exit: 0
-stdout: !~ "Run it?"
-stdout: ~ "greet 1.2.0"
+stdout: !~ "Run it?" # this step must not print it
+stdout: ~ "greet 1.2.0" # the step prints it
 step locked_unpinned: jet run --locked greet#1.2.0
 exit: 1
 stderr: ~ "jet.RemoteSourceRefused" # E1805
-stderr: ~ "`--locked` refuses to resolve it"
+stderr: ~ "`--locked` refuses to resolve it" # the diagnostic says it

@@ -24,51 +24,51 @@ sleep: 250ms
 step no_terminal: jet run https://localhost:{free-port:tls}/tool.jet
 exit: 1
 stderr: ~ "jet.RemoteRunNeedsConsent" # E1804
-stderr: ~ "there is no terminal to ask"
-stdout: !~ "tool ran"
+stderr: ~ "there is no terminal to ask" # the diagnostic says it
+stdout: !~ "tool ran" # this step must not print it
 entries: state/jet/remote >= 1 # the fetch is pinned before the question
 step answer_no: jet run https://localhost:{free-port:tls}/tool.jet
 pty: true
 stdin: no.stdin
 exit: 1
-stdout: ~ "tool.jet from localhost (sha256 "
-stdout: ~ "new to this machine"
-stdout: ~ "it reads the clock"
-stdout: ~ "Run it? [y/N]"
-stdout: ~ "not run"
-stdout: !~ "tool ran"
+stdout: ~ "tool.jet from localhost (sha256 " # the step prints it
+stdout: ~ "new to this machine" # the step prints it
+stdout: ~ "it reads the clock" # the step prints it
+stdout: ~ "Run it? [y/N]" # the step prints it
+stdout: ~ "not run" # the step prints it
+stdout: !~ "tool ran" # this step must not print it
 step answer_yes: jet run https://localhost:{free-port:tls}/tool.jet
 pty: true
 stdin: yes.stdin
 exit: 0
-stdout: ~ "Run it? [y/N]"
-stdout: ~ "tool ran"
+stdout: ~ "Run it? [y/N]" # the step prints it
+stdout: ~ "tool ran" # the step prints it
 step accepted: jet run https://localhost:{free-port:tls}/tool.jet
 pty: true
 exit: 0
 stdout: !~ "Run it?" # the pinned bytes were accepted with these effects
-stdout: ~ "tool ran"
+stdout: ~ "tool ran" # the step prints it
 step locked: jet run --locked https://localhost:{free-port:tls}/tool.jet
 exit: 0
-stdout: ~ "tool ran"
-stderr: !~ "jet.RemoteRunNeedsConsent"
+stdout: ~ "tool ran" # the step prints it
+stderr: !~ "jet.RemoteRunNeedsConsent" # this step must not print it
 step pin_mismatch: jet run --sha256=0000000000000000000000000000000000000000000000000000000000000000 https://localhost:{free-port:tls}/tool.jet
 exit: 1
 stderr: ~ "jet.RemoteSourceRefused" # E1805
-stderr: ~ "doesn't match the bytes pinned"
+stderr: ~ "doesn't match the bytes pinned" # the diagnostic says it
 step own_allow_row: jet run https://localhost:{free-port:tls}/self_allowed.jet
 exit: 1
-stderr: ~ "jet.RemoteRunNeedsConsent"
-stdout: !~ "self allowed ran"
+stderr: ~ "jet.RemoteRunNeedsConsent" # the registered code
+stdout: !~ "self allowed ran" # this step must not print it
 step allow_all: jet run -A https://localhost:{free-port:tls}/self_allowed.jet
 exit: 0
-stdout: ~ "self allowed ran"
-stderr: !~ "jet.RemoteRunNeedsConsent"
+stdout: ~ "self allowed ran" # the step prints it
+stderr: !~ "jet.RemoteRunNeedsConsent" # this step must not print it
 step first_fetch_mismatch: jet run --sha256=0000000000000000000000000000000000000000000000000000000000000000 https://localhost:{free-port:tls}/clock.jet
 exit: 1
-stderr: ~ "jet.RemoteSourceRefused"
-stderr: ~ "don't match `--sha256`"
-stdout: !~ "tool ran"
+stderr: ~ "jet.RemoteSourceRefused" # the registered code
+stderr: ~ "don't match `--sha256`" # the diagnostic says it
+stdout: !~ "tool ran" # this step must not print it
 signal tls: KILL
 close tls
 exit: any # s_server is killed by the case; its exit status is not part of the contract
