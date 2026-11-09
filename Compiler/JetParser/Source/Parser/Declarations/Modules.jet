@@ -404,10 +404,10 @@ parser_module_fx_cap: fn(state: &JetParserState, marker: Marker, owner: String) 
     Val(ModuleCap{owner: owner, entries: entries, span: marker.span})
 }
 
-// `#FX(Log, !Net) Client: struct { … }` (or `enum`), or an `#FX: (…)` line in
-// the type's body, caps every method of the type. The parser reads the cap;
-// sema binds it to the methods, including trait impls written apart from the
-// type body.
+// `#FX(Log, !Net) Client: struct { … }` (or `enum`, or `trait`), or an `#FX:
+// (…)` line in the type's body, caps every method of the type. The parser
+// reads the cap; sema binds it to the methods, including trait impls written
+// apart from the type body, and a trait's cap to every impl of its methods.
 parser_type_fx_cap: fn(state: &JetParserState, markers: [Marker], type_name: String) -> ModuleCap? {
     loop marker in markers {
         if marker.name != MARKER_FX -> next

@@ -54,6 +54,7 @@ use jet_foundation.[
     TEffectFacts,
     TEffectSpan,
     TFailureCarrier,
+    TFuncKind,
     Type,
     compiler_take_rows,
     compiler_threads_admit,
@@ -101,6 +102,10 @@ SemaEffectFunctionSource: struct {
     module_caps: [ModuleCap]{[ModuleCap]{}}
     // The `#FX(…)` cap of the struct or enum this method belongs to (E0749).
     type_cap: SemaEffectModuleCap?{None}
+    // The trait this impl method implements, `{module}|{trait}`
+    // (sema_effect_trait_cap_key), resolved where its `impl` block is
+    // written; "" for any other function (E0754).
+    trait_key: String{""}
 }
 
 // One `#FX(…)` region: its parsed caps, the head span E0712 points at, and
@@ -211,6 +216,42 @@ SemaEffectCallbackBound: struct {
     span: Span
 }
 
+// A call through a type parameter's trait bound (`self.inner.work()` with
+// `inner: T`, `T: Worker`). Which implementation runs is fixed where the
+// instantiation is written, so the call's effects belong to the caller that
+// binds `param`, not to this function's own row.
+SemaEffectParamDispatch: struct {
+    param: String
+    // `{trait module}|{trait}::{method}`, the `trait_impls` key prefix.
+    impls_key: String
+}
+
+// A call into a generic function or a generic type's method, with the type
+// arguments it binds: the owner type's, then the function's own.
+SemaEffectInstantiation: struct {
+    callee: String
+    owner_args: [Type]
+    type_args: [Type]
+    // `Traced<Loud>` or `apply<Loud>`: the instantiation a report names.
+    label: String
+    span: Span
+}
+
+// An implementation a caller runs through an instantiation it writes.
+SemaEffectInstanceReach: struct {
+    label: String
+    target: String
+    span: Span
+}
+
+// An instance reach with its target's solved row, for reports.
+SemaEffectInstanceNote: struct {
+    label: String
+    callee: String
+    row: [String]
+    span: Span
+}
+
 SemaEffectNode: struct {
     key: String
     name: String
@@ -233,8 +274,9 @@ SemaEffectNode: struct {
     unsafe_reason: String?
     unsafe_span: Span?
     effect_via: NamedSpan?
-    // Calls through a trait value whose trait method declares no effect row
-    // (`Trait::method` at the call). A ceiling above them is E0743.
+    // Calls through a trait value with no bound: the trait method declares
+    // no row, the trait has no `#FX(…)` ceiling, and the program's
+    // implementations can't be summed. A ceiling above them is E0743.
     dispatches: [TEffectSpan]
     // The functions this body takes as values (TEffectFacts.value_edges).
     value_edges: [String]{[String]{}}
@@ -267,8 +309,20 @@ SemaEffectNode: struct {
     module_caps: [ModuleCap]{[ModuleCap]{}}
     // The `#FX(…)` cap of the struct or enum this method belongs to.
     type_cap: SemaEffectModuleCap?{None}
+    // `{module}|{trait}` of the trait this method implements
+    // (sema_effect_trait_cap_key), "" for any other function.
+    trait_key: String{""}
     // The bounded callback slots this body fills with named functions.
     callback_bounds: [SemaEffectCallbackBound]{[SemaEffectCallbackBound]{}}
+    // This function's type parameters, its owner type's first, and the
+    // owner type's parameters in the order its type arguments bind them.
+    type_params: [String]{[String]{}}
+    owner_params: [String]{[String]{}}
+    // Calls through a type parameter (sema_effect_resolve_type_params).
+    param_dispatches: [SemaEffectParamDispatch]{[SemaEffectParamDispatch]{}}
+    // Calls that bind type parameters, and what they reach through them.
+    instantiations: [SemaEffectInstantiation]{[SemaEffectInstantiation]{}}
+    instance_reaches: [SemaEffectInstanceReach]{[SemaEffectInstanceReach]{}}
 }
 
 sema_effect_source_from_function: fn(func: Func, module_identity: String) -> SemaEffectFunctionSource Never! {
@@ -920,7 +974,7 @@ SemaEffectModuleCap: struct {
     site: String?
 }
 
-// A struct's or enum's cap and the module that declares the type.
+// A struct's, enum's or trait's cap and the module that declares it.
 SemaEffectTypeCap: struct {
     module_identity: String
     cap: SemaEffectModuleCap
@@ -932,7 +986,7 @@ SemaEffectTypeCap: struct {
 // function declares may only narrow the cap, so a declared effect outside it
 // is E0749 too, even when the body doesn't use it. Names were validated once
 // per cap (sema_effect_module_cap_names).
-sema_effect_check_module_cap: fn(nodes: [SemaEffectNode], node_by_key: NameRows, node_index: Int, solved: [String], cap: SemaEffectModuleCap, diagnostics: &[Diagnostic]) {
+sema_effect_check_module_cap: fn(nodes: [SemaEffectNode], node_by_key: NameRows, node_index: Int, solved: [String], cap: SemaEffectModuleCap, notes: [SemaEffectInstanceNote], diagnostics: &[Diagnostic]) {
     node: nodes[node_index]
     ceiling := [String]{}
     loop entry in cap.cap.entries {
@@ -959,12 +1013,12 @@ sema_effect_check_module_cap: fn(nodes: [SemaEffectNode], node_by_key: NameRows,
             seen := (loop _ in nodes -> false)
             if sema_effect_panic_site(nodes, node_by_key, node_index, seen) == .Val(stop) -> panic_site = nodes[stop].chain_name
         }
-        diagnostics.push(sema_effect_module_denied_diagnostic(node, reached, effect_name, panic_site, cap))
+        diagnostics.push(sema_effect_with_instance_notes(sema_effect_module_denied_diagnostic(node, reached, effect_name, panic_site, cap), notes, reached))
     }
     if ceiling.len() == 0 -> return
     over: sema_effect_uncovered(solved, ceiling)
     if over.len() > 0 {
-        diagnostics.push(sema_effect_module_ceiling_diagnostic(node, over, ceiling, cap))
+        diagnostics.push(sema_effect_with_instance_notes(sema_effect_module_ceiling_diagnostic(node, over, ceiling, cap), notes, over))
         return
     }
     wider: sema_effect_uncovered(node.declared, ceiling)
@@ -986,7 +1040,7 @@ sema_effect_module_row_denied_diagnostic: fn(node: SemaEffectNode, declared: [St
     scope: cap.cap.scope
     owner: cap.cap.owner
     declared_list: sema_effect_show(declared)
-    diagnostic: sema_error("E0749", node.row_span ?? node.name_span, "`{name}`'s row declares `{declared_list}`, which {scope} `{owner}` denies", "a row written inside a cap may only narrow it; the {scope}'s `#FX(…)` cap denies `{denied}` to {sema_effect_cap_members(cap)}{sema_effect_module_cap_where(cap)}", "drop `{declared_list}` from `{name}`'s row, move `{name}` out of {scope} `{owner}`, or drop `!{denied}` from the {scope}'s `#FX(…)` cap")
+    diagnostic: sema_error(sema_effect_cap_code(cap), node.row_span ?? node.name_span, "`{name}`'s row declares `{declared_list}`, which {scope} `{owner}` denies", "a row written inside a cap may only narrow it; the {scope}'s `#FX(…)` cap denies `{denied}` to {sema_effect_cap_members(cap)}{sema_effect_module_cap_where(cap)}", "drop `{declared_list}` from `{name}`'s row, {sema_effect_cap_move(name, cap)}or drop `!{denied}` from the {scope}'s `#FX(…)` cap")
     sema_effect_module_cap_report(diagnostic, [String]{name}, cap)
 }
 
@@ -997,7 +1051,7 @@ sema_effect_module_row_ceiling_diagnostic: fn(node: SemaEffectNode, wider: [Stri
     sorted := wider.copy()
     sorted.sort()
     wider_list: sema_effect_show(sorted)
-    diagnostic: sema_error("E0749", node.row_span ?? node.name_span, "`{name}`'s row declares `{wider_list}`, which {scope} `{owner}`'s `#FX(…)` cap doesn't allow", "a row written inside a cap may only narrow it; the {scope}'s cap allows only `{sema_effect_show(ceiling)}` in {sema_effect_cap_members(cap)}{sema_effect_module_cap_where(cap)}", "narrow `{name}`'s row to `{sema_effect_show(ceiling)}`, or add `{wider_list}` to the {scope}'s `#FX(…)` cap")
+    diagnostic: sema_error(sema_effect_cap_code(cap), node.row_span ?? node.name_span, "`{name}`'s row declares `{wider_list}`, which {scope} `{owner}`'s `#FX(…)` cap doesn't allow", "a row written inside a cap may only narrow it; the {scope}'s cap allows only `{sema_effect_show(ceiling)}` in {sema_effect_cap_members(cap)}{sema_effect_module_cap_where(cap)}", "narrow `{name}`'s row to `{sema_effect_show(ceiling)}`, or add `{wider_list}` to the {scope}'s `#FX(…)` cap")
     sema_effect_module_cap_report(diagnostic, [String]{name}, cap)
 }
 
@@ -1006,10 +1060,26 @@ sema_effect_module_cap_where: fn(cap: SemaEffectModuleCap) -> String Never! {
     ""
 }
 
-// Who the cap binds: a module's functions or a type's methods.
+// Who the cap binds: a module's functions, a type's methods or the
+// implementations of a trait's methods.
 sema_effect_cap_members: fn(cap: SemaEffectModuleCap) -> String Never! {
     if cap.cap.scope == "type" -> return "every method of the type"
+    if cap.cap.scope == "trait" -> return "every implementation of the trait's methods"
     "every function inside it"
+}
+
+// A trait's cap binds implementations written in any package, so it is its
+// own code; a module's or a type's is E0749.
+sema_effect_cap_code: fn(cap: SemaEffectModuleCap) -> String Never! {
+    if cap.cap.scope == "trait" -> return "E0754"
+    "E0749"
+}
+
+// The fix that moves the function out from under the cap, with its trailing
+// `, `. An implementation of a capped trait's method can't leave the trait.
+sema_effect_cap_move: fn(name: String, cap: SemaEffectModuleCap) -> String Never! {
+    if cap.cap.scope == "trait" -> return ""
+    "move `{name}` out of {cap.cap.scope} `{cap.cap.owner}`, "
 }
 
 sema_effect_module_cap_report: fn(diagnostic: Diagnostic, chain: [String], cap: SemaEffectModuleCap) -> Diagnostic {
@@ -1025,11 +1095,11 @@ sema_effect_module_denied_diagnostic: fn(node: SemaEffectNode, reached: [String]
     members: sema_effect_cap_members(cap)
     where: sema_effect_module_cap_where(cap)
     if sema_effect_root(denied) == "Panic" {
-        diagnostic: sema_error("E0749", node.name_span, "`{name}` can stop, but {scope} `{owner}` denies Panic", "`{panic_site}` can stop; the {scope}'s `#FX(!Panic)` cap means {members} and every callee it can reach must not stop{where}", "return a fallible result for expected failure, add facts or a `#Pre`/refinement proof for a programmer-error stop, or drop `!Panic` from the {scope}'s `#FX(…)` cap")
+        diagnostic: sema_error(sema_effect_cap_code(cap), node.name_span, "`{name}` can stop, but {scope} `{owner}` denies Panic", "`{panic_site}` can stop; the {scope}'s `#FX(!Panic)` cap means {members} and every callee it can reach must not stop{where}", "return a fallible result for expected failure, add facts or a `#Pre`/refinement proof for a programmer-error stop, or drop `!Panic` from the {scope}'s `#FX(…)` cap")
         return sema_effect_module_cap_report(diagnostic, [String]{name, panic_site}, cap)
     }
     reached_list: sema_effect_show(reached)
-    diagnostic: sema_error("E0749", node.name_span, "`{name}` reaches the `{reached_list}` effect, which {scope} `{owner}` denies", "the {scope}'s `#FX(…)` cap denies `{denied}` to {members} and every callee it can reach{where}", "remove the call that introduces `{reached_list}`, move `{name}` out of {scope} `{owner}`, or drop `!{denied}` from the {scope}'s `#FX(…)` cap")
+    diagnostic: sema_error(sema_effect_cap_code(cap), node.name_span, "`{name}` reaches the `{reached_list}` effect, which {scope} `{owner}` denies", "the {scope}'s `#FX(…)` cap denies `{denied}` to {members} and every callee it can reach{where}", "remove the call that introduces `{reached_list}`, {sema_effect_cap_move(name, cap)}or drop `!{denied}` from the {scope}'s `#FX(…)` cap")
     sema_effect_module_cap_report(diagnostic, [String]{name}, cap)
 }
 
@@ -1040,13 +1110,55 @@ sema_effect_module_ceiling_diagnostic: fn(node: SemaEffectNode, over: [String], 
     sorted := over.copy()
     sorted.sort()
     over_list: sema_effect_show(sorted)
-    diagnostic: sema_error("E0749", node.name_span, "`{name}` uses the effect `{over_list}`, which {scope} `{owner}`'s `#FX(…)` cap doesn't allow", "the {scope}'s cap allows only `{sema_effect_show(ceiling)}` in {sema_effect_cap_members(cap)}, even through a call{sema_effect_module_cap_where(cap)}", "add `{over_list}` to the {scope}'s `#FX(…)` cap, or move that work out of {scope} `{owner}`")
+    elsewhere: if cap.cap.scope == "trait" -> "remove that work from `{name}`" else -> "move that work out of {scope} `{owner}`"
+    diagnostic: sema_error(sema_effect_cap_code(cap), node.name_span, "`{name}` uses the effect `{over_list}`, which {scope} `{owner}`'s `#FX(…)` cap doesn't allow", "the {scope}'s cap allows only `{sema_effect_show(ceiling)}` in {sema_effect_cap_members(cap)}, even through a call{sema_effect_module_cap_where(cap)}", "add `{over_list}` to the {scope}'s `#FX(…)` cap, or {elsewhere}")
     sema_effect_module_cap_report(diagnostic, [String]{name}, cap)
 }
 
-// Each `#FX(…)` cap on a module, generic module, struct or enum declared in
-// `items`, nested modules included, names known effects; a positive `Panic` is
-// rejected as in a row (E0749). Reported once per cap, where it is written.
+// A function-typed field of a capped type whose fixed row reaches outside
+// the cap, reported at the field (E0755). Its row runs wherever a method
+// calls the field, so each calling method is E0749 too; this names the
+// field path itself, called or not.
+sema_effect_check_field_rows: fn(module_row: SemaRegistrationModule, caps: [String:SemaEffectTypeCap], diagnostics: &[Diagnostic]) {
+    loop nominal in module_row.nominals {
+        found: caps.get(nominal.symbol.id.key) ?? next
+        cap: SemaEffectModuleCap{cap: found.cap.cap, site: None}
+        ceiling: sema_effect_cap_ceiling(cap.cap)
+        loop field in nominal.fields {
+            row: if field.ty == .Fn(_, _, bound, _, _, _) -> bound ?? next else -> next
+            declared := [String]{}
+            loop entry in row {
+                if entry.name.starts_with("!") || entry.name.starts_with("..") -> next
+                effect_name: sema_effect_parse_name(entry.name) ?? next
+                sema_effect_set_add(declared, effect_name)
+            }
+            outside := [String]{}
+            loop entry in cap.cap.entries {
+                if !entry.name.starts_with("!") -> next
+                denied: sema_effect_parse_name(entry.name.slice(1, entry.name.len())) ?? next
+                loop hit in sema_effect_declared_hits(declared, denied) -> sema_effect_set_add(outside, hit)
+            }
+            if ceiling.len() > 0 {
+                loop wider in sema_effect_uncovered(declared, ceiling) -> sema_effect_set_add(outside, wider)
+            }
+            if outside.len() > 0 -> diagnostics.push(sema_effect_field_row_diagnostic(field.symbol.name, field.symbol.span, outside, cap))
+        }
+    }
+}
+
+sema_effect_field_row_diagnostic: fn(name: String, span: Span, outside: [String], cap: SemaEffectModuleCap) -> Diagnostic {
+    sorted := outside.copy()
+    sorted.sort()
+    outside_list: sema_effect_show(sorted)
+    owner: cap.cap.owner
+    diagnostic: sema_error("E0755", span, "field `{name}`'s row declares `{outside_list}`, which type `{owner}` doesn't allow", "a method that calls `{name}` runs its row, and the type's `#FX(…)` cap bounds every method of the type", "narrow `{name}`'s row to fit the cap, move `{name}` out of type `{owner}`, or widen the type's `#FX(…)` cap")
+    sema_effect_module_cap_report(diagnostic, [String]{name}, cap)
+}
+
+// Each `#FX(…)` cap on a module, generic module, struct, enum or trait
+// declared in `items`, nested modules included, names known effects; a
+// positive `Panic` is rejected as in a row (E0749). Reported once per cap,
+// where it is written.
 sema_effect_module_cap_names: fn(items: [Item], diagnostics: &[Diagnostic]) {
     loop item in items {
         if item == {
@@ -1062,6 +1174,9 @@ sema_effect_module_cap_names: fn(items: [Item], diagnostics: &[Diagnostic]) {
                 if definition.cap == .Val(cap) -> sema_effect_cap_entry_names(cap, diagnostics)
             }
             .Enum(definition) -> {
+                if definition.cap == .Val(cap) -> sema_effect_cap_entry_names(cap, diagnostics)
+            }
+            .Trait(definition) -> {
                 if definition.cap == .Val(cap) -> sema_effect_cap_entry_names(cap, diagnostics)
             }
             else -> {}
@@ -1091,6 +1206,38 @@ sema_effect_type_caps: fn(graph_modules: [SemaRegistrationModule]) -> [String:Se
         }
     }
     caps
+}
+
+// The `#FX(…)` cap of every trait in the graph, by its
+// sema_effect_trait_cap_key, each with the `file:line` it is written at.
+sema_effect_trait_caps: fn(graph_modules: [SemaRegistrationModule]) -> [String:SemaEffectTypeCap] {
+    caps := [String:SemaEffectTypeCap]{}
+    loop module_row in graph_modules {
+        loop item in module_row.declarations {
+            if item == .Trait(definition) {
+                cap: definition.cap ?? next
+                caps["{module_row.module_identity}|{definition.name}"] = SemaEffectTypeCap{module_identity: module_row.module_identity, cap: SemaEffectModuleCap{cap: cap, site: Val(sema_effect_cap_site(module_row, cap.span))}}
+            }
+        }
+    }
+    caps
+}
+
+// `{module}|{trait}` for a trait's symbol key: how an implementation and a
+// trait-value call both name the trait.
+sema_effect_trait_cap_key: fn(trait_key: String) -> String Never! {
+    "{sema_effect_symbol_module(trait_key) ?? ""}|{sema_effect_symbol_leaf(trait_key)}"
+}
+
+// The plain entries of a cap, its ceiling; empty when it only denies.
+sema_effect_cap_ceiling: fn(cap: ModuleCap) -> [String] Never! {
+    ceiling := [String]{}
+    loop entry in cap.entries {
+        if entry.name.starts_with("!") -> next
+        effect_name: sema_effect_parse_name(entry.name) ?? next
+        if sema_effect_root(effect_name) != "Panic" -> sema_effect_set_add(ceiling, effect_name)
+    }
+    ceiling
 }
 
 sema_effect_nominal_cap: fn(nominal: SemaRegistrationNominal) -> ModuleCap? Never! {
@@ -1323,6 +1470,10 @@ sema_effect_node_from_source: fn(function: FnBody, sources: [SemaEffectFunctionS
     node.display_key = "{function.module_name}::{function.name}"
     node.source_display = sema_effect_source_display(function.source_file)
     node.chain_name = sema_effect_chain_name(function)
+    node.owner_params = sema_effect_owner_params(function.kind)
+    node.type_params = node.owner_params.copy()
+    loop param in function.generic_params -> sema_effect_set_add(node.type_params, param.name)
+    if function.kind == .TraitMethod(_, _, _, trait_symbol, _) -> node.trait_key = sema_effect_trait_cap_key(trait_symbol.key)
     at: source_position ?? {
         sema_effect_check_tfunc_unsafe(function, diagnostics)
         return node
@@ -1346,6 +1497,7 @@ sema_effect_node_from_source: fn(function: FnBody, sources: [SemaEffectFunctionS
     node.kernel = actual.kernel
     node.module_caps = actual.module_caps.copy()
     if actual.type_cap == .Val(type_cap) -> node.type_cap = Val(type_cap.copy())
+    if actual.trait_key != "" -> node.trait_key = actual.trait_key
     if actual.is_unsafe && !sema_effect_check_unsafe_function(actual, diagnostics) {
         // The diagnostic is already source-backed; retain the node so the graph
         // remains inspectable after a failed gate check.
@@ -1525,6 +1677,12 @@ SemaEffectCallIndex: struct {
     // implementation's own summary key, one flat map (no per-trait map copied
     // on every insert).
     trait_impls: [String:String]{[String:String]{}}
+    // "{module}|{trait}::{method}" (sema_effect_trait_cap_key) -> the keys
+    // of every implementation of the method in the program, inherited
+    // defaults included: the targets of a call through a trait value.
+    dyn_impls: [String:[String]]{[String:[String]]{}}
+    // The `#FX(…)` cap of each capped trait (sema_effect_trait_caps).
+    trait_caps: [String:SemaEffectTypeCap]{[String:SemaEffectTypeCap]{}}
     // The name of the node each `#Unsafe` function's key names
     // (`node_by_key`), so an unsafe-call check reads no node.
     unsafe_names: [String:String]{[String:String]{}}
@@ -1811,18 +1969,35 @@ sema_effect_symbol_leaf: fn(key: String) -> String Never! {
     if parts.len() == 0 -> key else -> parts[parts.len() - 1]
 }
 
-// A call through a trait value sees the trait method's declared
-// dispatch bound, not one implementation body. A trait method with no
-// declared row is an open-world dispatch (E0743 under a ceiling).
-sema_effect_record_dispatch: fn(nodes: &[SemaEffectNode], node_index: Int, tree: BodyTree, expression: BodyNode, fact: SemaCallSiteFact) Never! {
+// A call through a trait value runs whichever implementation the value
+// holds. A trait method's declared row bounds it (recorded with the call).
+// Otherwise the trait's `#FX(…)` ceiling is its row, and with no ceiling it
+// takes the union of every implementation of the method in the program,
+// inherited defaults included. A trait with no implementation is the
+// open-world dispatch (E0743 under a ceiling).
+sema_effect_record_dispatch: fn(nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, node_index: Int, tree: BodyTree, expression: BodyNode, fact: SemaCallSiteFact) Never! {
     if fact.facts.effect_bound != None -> return
     if expression.kind == {
         .MethodCall(receiver, method, _, _) -> {
             trait_owner: method.trait_owner ?? return
             if body_type(tree, receiver) == {
-                .TraitObject(_) -> nodes[node_index].dispatches.push(TEffectSpan{name: "{sema_effect_symbol_leaf(trait_owner.key)}::{method.name}", span: fact.span})
-                else -> {}
+                .TraitObject(_) -> {}
+                else -> return
             }
+            trait_key: sema_effect_trait_cap_key(trait_owner.key)
+            if facts.trait_caps.get(trait_key) == .Val(found) {
+                ceiling: sema_effect_cap_ceiling(found.cap.cap)
+                if ceiling.len() > 0 {
+                    loop effect_name in ceiling -> sema_effect_node_add_direct(nodes, node_index, effect_name, fact.span)
+                    return
+                }
+            }
+            impls: facts.dyn_impls.get("{trait_key}::{method.name}") ?? [String]{}
+            if impls.len() == 0 {
+                nodes[node_index].dispatches.push(TEffectSpan{name: "{sema_effect_symbol_leaf(trait_owner.key)}::{method.name}", span: fact.span})
+                return
+            }
+            loop impl_key in impls -> sema_effect_node_add_edge(nodes, node_index, impl_key)
         }
         else -> {}
     }
@@ -1862,43 +2037,232 @@ sema_effect_record_value_reads: fn(nodes: &[SemaEffectNode], facts: SemaEffectCa
 
 // Rust `seed_trait_dispatch_effects` / generic dispatch: a call through a
 // generic bound (`producer: P` with `P: Producer`) is statically selected after
-// type inference, so it reaches the trait method's `<static>` node: the
-// declared row when the method has one, otherwise the union of every
-// implementation's summary. An implementing type with no summary of its own for
-// the method (a trait default body, an unloaded impl) is unresolved, and so is
-// a trait with no implementation: either forces the maximal row, as in Rust.
-// Only a trait-object receiver is the open-world dispatch that stays maximal
-// for a row-less method.
+// type inference. When the trait method declares a row, the call has that
+// row. Otherwise, when the receiver's type is one of this function's type
+// parameters, the call is a param dispatch: the caller that binds the
+// parameter runs the selected implementation (sema_effect_resolve_type_params).
+// Any other receiver takes the union of every implementation's summary
+// (sema_effect_add_dispatch_union). Only a trait-object receiver is the
+// open-world dispatch that stays maximal for a row-less method.
 sema_effect_record_static_dispatch: fn(nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, node_index: Int, tree: BodyTree, expression: BodyNode, fact: SemaCallSiteFact) -> Bool Never! {
     if fact.facts.effect_bound != None -> return false
     if expression.kind == {
         .MethodCall(receiver, method, _, _) -> {
             trait_owner: method.trait_owner ?? return false
-            if body_type(tree, receiver) == .TraitObject(_) -> return false
+            receiver_type: body_type(tree, receiver)
+            if receiver_type == .TraitObject(_) -> return false
             if sema_effect_node_index(facts.node_by_key, method.symbol.key) != None -> return false
             sema_effect_record_memory_open(nodes, node_index, fact.span, "generic trait dispatch has no sealed target set")
-            // Rust seeds the `<static>` node per module from that module's
-            // own items, so only the trait's declaring module contributes.
+            // Implementations group under the trait's own module, from
+            // whichever module they are written in (sema_effect_add_trait_impls).
             trait_name: sema_effect_symbol_leaf(trait_owner.key)
             trait_module: sema_effect_symbol_module(trait_owner.key) ?? ""
-            owners: facts.trait_implementers.get("{trait_module}|{trait_name}") ?? [String]{}
             impls_key: "{trait_module}|{trait_name}::{method.name}"
-            unresolved := owners.len() == 0
-            loop owner in owners {
-                if facts.trait_impls.get("{impls_key}#{owner}") == .Val(impl_key) {
-                    sema_effect_node_add_edge(nodes, node_index, impl_key)
-                } else {
-                    unresolved = true
-                }
+            if receiver_type == .Named(param) && nodes[node_index].type_params.contains(param) {
+                nodes[node_index].param_dispatches.push(SemaEffectParamDispatch{param: param, impls_key: impls_key})
+                return true
             }
-            if unresolved {
-                nodes[node_index].maximal = true
-                nodes[node_index].maximal_span = Val(fact.span)
-            }
+            sema_effect_add_dispatch_union(nodes, facts, node_index, impls_key, fact.span)
             true
         }
         else -> false
     }
+}
+
+// Every implementation of `impls_key` (`{module}|{trait}::{method}`) as a call
+// edge of `node_index`. An implementing type with no summary of its own for
+// the method (a trait default body, an unloaded impl) is unresolved, and so
+// is a trait with no implementation: either forces the maximal row, as in
+// Rust.
+sema_effect_add_dispatch_union: fn(nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, node_index: Int, impls_key: String, span: Span) Never! {
+    trait_key: impls_key.cut_last("::") ?? return
+    owners: facts.trait_implementers.get(trait_key.before) ?? [String]{}
+    unresolved := owners.len() == 0
+    loop owner in owners {
+        if facts.trait_impls.get("{impls_key}#{owner}") == .Val(impl_key) {
+            sema_effect_node_add_edge(nodes, node_index, impl_key)
+        } else {
+            unresolved = true
+        }
+    }
+    if unresolved {
+        nodes[node_index].maximal = true
+        nodes[node_index].maximal_span = Val(span)
+    }
+}
+
+// A call that binds type parameters: a method of a generic type (`t.run()`
+// with `t: Traced<Loud>`, or `Traced<Loud>.new()`) or a generic function
+// with its type arguments.
+sema_effect_record_instantiation: fn(nodes: &[SemaEffectNode], node_index: Int, tree: BodyTree, expression: BodyNode, fact: SemaCallSiteFact) Never! {
+    callee: fact.callee ?? return
+    owner_args := [Type]{}
+    type_args := [Type]{}
+    owner_label := ""
+    if expression.kind == {
+        .MethodCall(receiver, _, args, _) -> {
+            receiver_type: body_type(tree, receiver)
+            if receiver_type == .Apply(_, values) {
+                owner_args = values
+                owner_label = type_name(receiver_type)
+            }
+            type_args = args
+        }
+        .StaticCall(_, owner_type, _, args, _) -> {
+            if owner_type == .Val(owner) {
+                if owner == .Apply(_, values) {
+                    owner_args = values
+                    owner_label = type_name(owner)
+                }
+            }
+            type_args = args
+        }
+        .Call(_, args, _) -> type_args = args
+        else -> return
+    }
+    if owner_args.len() == 0 && type_args.len() == 0 -> return
+    label := owner_label
+    if type_args.len() > 0 {
+        shown: (loop arg in type_args -> type_name(arg)).join(", ")
+        name: sema_effect_symbol_leaf(callee.key)
+        label = if owner_label == "" -> "{name}<{shown}>" else -> "{owner_label}.{name}<{shown}>"
+    }
+    nodes[node_index].instantiations.push(SemaEffectInstantiation{callee: callee.key, owner_args: owner_args, type_args: type_args, label: label, span: fact.span})
+}
+
+// The owner type's parameters of a method, in the order a receiver's type
+// arguments bind them; none when the owner isn't written with bare
+// parameters (`impl Box<Int>`), so no site binds them by position.
+sema_effect_owner_params: fn(kind: TFuncKind) -> [String] Never! {
+    owner_type: if kind == {
+        .Method(_, owner) -> owner
+        .TraitMethod(_, _, owner, _, _) -> owner
+        .TopLevel -> return [String]{}
+    }
+    names := [String]{}
+    if owner_type == .Apply(_, args) {
+        loop arg in args {
+            if arg == .Named(name) {
+                names.push(name)
+            } else {
+                return [String]{}
+            }
+        }
+    }
+    names
+}
+
+// The type `site` binds to `callee`'s parameter `param`, if it binds one.
+sema_effect_param_binding: fn(callee: SemaEffectNode, site: SemaEffectInstantiation, param: String) -> Type? Never! {
+    loop (position, name) in callee.owner_params {
+        if name == param {
+            if callee.owner_params.len() != site.owner_args.len() -> return None
+            return Val(site.owner_args[position])
+        }
+    }
+    own := 0
+    loop name in callee.type_params {
+        if callee.owner_params.contains(name) -> next
+        if name == param {
+            if own < site.type_args.len() -> return Val(site.type_args[own])
+            return None
+        }
+        own += 1
+    }
+    None
+}
+
+sema_effect_has_param_dispatch: fn(rows: [SemaEffectParamDispatch], wanted: SemaEffectParamDispatch) -> Bool Never! {
+    loop row in rows {
+        if row.param == wanted.param && row.impls_key == wanted.impls_key -> return true
+    }
+    false
+}
+
+// What a type or function parameter does belongs to the caller that binds
+// it: `Traced<Parser>` does Traced's work plus Parser's, charged where
+// `Traced<Parser>` is written. A function's own row leaves out its param
+// dispatches. A site that binds a parameter to one of its caller's own
+// parameters forwards the dispatch to the caller (a fixed point). A site that
+// binds it to a concrete type adds that type's implementation as the
+// caller's call edge and an instance reach naming the instantiation. A
+// binding the walk didn't see (a call recorded without its type arguments,
+// or a type with no implementation of its own) takes every implementation,
+// as an unbound generic dispatch does.
+sema_effect_resolve_type_params: fn(nodes: &[SemaEffectNode], calls: SemaEffectCallIndex) Never! {
+    open := loop node in nodes -> node.param_dispatches.copy()
+    changed := true
+    loop changed {
+        changed = false
+        loop index in 0..<nodes.len() {
+            loop site in nodes[index].instantiations {
+                callee: sema_effect_node_index(calls.node_by_key, site.callee) ?? next
+                forwarded := [SemaEffectParamDispatch]{}
+                loop dispatch in open[callee] {
+                    bound: sema_effect_param_binding(nodes[callee], site, dispatch.param) ?? next
+                    if bound == .Named(name) && nodes[index].type_params.contains(name) -> forwarded.push(SemaEffectParamDispatch{param: name, impls_key: dispatch.impls_key})
+                }
+                loop row in forwarded {
+                    if sema_effect_has_param_dispatch(open[index], row) -> next
+                    open[index].push(row)
+                    changed = true
+                }
+            }
+        }
+    }
+    loop index in 0..<nodes.len() {
+        bound_callees := [String]{}
+        sites: nodes[index].instantiations.copy()
+        loop site in sites {
+            callee: sema_effect_node_index(calls.node_by_key, site.callee) ?? next
+            sema_effect_set_add(bound_callees, site.callee)
+            loop dispatch in open[callee] {
+                bound: sema_effect_param_binding(nodes[callee], site, dispatch.param)
+                if bound == .Val(ty) {
+                    if ty == .Named(name) && nodes[index].type_params.contains(name) -> next
+                    owner: sema_effect_symbol_leaf(type_name(ty))
+                    if calls.trait_impls.get("{dispatch.impls_key}#{owner}") == .Val(impl_key) {
+                        sema_effect_node_add_edge(nodes, index, impl_key)
+                        nodes[index].instance_reaches.push(SemaEffectInstanceReach{label: site.label, target: impl_key, span: site.span})
+                        next
+                    }
+                }
+                sema_effect_add_dispatch_union(nodes, calls, index, dispatch.impls_key, site.span)
+            }
+        }
+        edges: nodes[index].call_edges.copy()
+        span: nodes[index].span
+        loop edge in edges {
+            callee: sema_effect_node_index(calls.node_by_key, edge) ?? next
+            if open[callee].len() == 0 || bound_callees.contains(edge) -> next
+            loop dispatch in open[callee] -> sema_effect_add_dispatch_union(nodes, calls, index, dispatch.impls_key, span)
+        }
+    }
+}
+
+// The instance reaches of `node` with each target's solved row.
+sema_effect_instance_notes: fn(nodes: [SemaEffectNode], node_by_key: NameRows, solved: [[String]], node: SemaEffectNode) -> [SemaEffectInstanceNote] Never! {
+    notes := [SemaEffectInstanceNote]{}
+    loop reach in node.instance_reaches {
+        target: sema_effect_node_index(node_by_key, reach.target) ?? next
+        notes.push(SemaEffectInstanceNote{label: reach.label, callee: nodes[target].chain_name, row: solved[target], span: reach.span})
+    }
+    notes
+}
+
+// A report over `reported` effects labels each instantiation whose
+// implementation brings one of them, naming the instantiation.
+sema_effect_with_instance_notes: fn(diagnostic: Diagnostic, notes: [SemaEffectInstanceNote], reported: [String]) -> Diagnostic {
+    labeled := diagnostic
+    loop note in notes {
+        hits := [String]{}
+        loop effect_name in note.row {
+            if sema_effect_declared_hits(reported, effect_name).len() > 0 -> sema_effect_set_add(hits, effect_name)
+        }
+        if hits.len() == 0 -> next
+        labeled = diagnostic_with_label(labeled, note.span, "`{note.label}` runs `{note.callee}` here, which uses `{sema_effect_show(hits)}`")
+    }
+    labeled
 }
 
 // A Core call's declared effects from its record: the root of its effect
@@ -1986,7 +2350,8 @@ sema_effect_walk_expr_enter: fn(nodes: &[SemaEffectNode], node_index: Int, tree:
                     } else if !sema_effect_report_nondeterministic_intrinsic(nodes, node_index, value, node.span, diagnostics) {
                         if !sema_effect_record_static_dispatch(nodes, facts, node_index, tree, node, value) {
                             sema_effect_record_fact(nodes, facts.node_by_key, node_index, value, diagnostics)
-                            sema_effect_record_dispatch(nodes, node_index, tree, node, value)
+                            sema_effect_record_dispatch(nodes, facts, node_index, tree, node, value)
+                            sema_effect_record_instantiation(nodes, node_index, tree, node, value)
                         }
                     }
                 }
@@ -2463,7 +2828,7 @@ sema_effect_secret_diagnostic: fn(node: SemaEffectNode) -> Diagnostic {
 }
 
 sema_effect_unbounded_dispatch_diagnostic: fn(dispatch: TEffectSpan) -> Diagnostic {
-    sema_error("E0743", dispatch.span, "dynamic call `{dispatch.name}` has no effect bound", "a trait value can select any implementation at runtime, so an enclosing effect ceiling needs the trait method's declared upper bound", "declare an effect row on `{dispatch.name}`, such as `-[]>` for pure dispatch, or move this dynamic call outside the bounded function")
+    sema_error("E0743", dispatch.span, "dynamic call `{dispatch.name}` has no effect bound", "a trait value can select any implementation at runtime, and the program holds none of this method to bound the call, so an enclosing effect ceiling needs the trait method's declared row or a ceiling in the trait's `#FX(…)` cap", "declare an effect row on `{dispatch.name}`, such as `-[]>` for pure dispatch, put an `#FX(…)` ceiling above the trait, or move this dynamic call outside the bounded function")
 }
 
 sema_effect_locate_dispatch: fn(site: SemaEffectDispatchSite, inputs: [SemaEffectModuleInput]) -> Diagnostic Never! {
@@ -2530,7 +2895,8 @@ sema_effect_check_trait_bounds: fn(module_row: SemaEffectModuleInput, functions:
     loop function in functions {
         // An owned operator or CheckedText trait (`impl Vec2.Add`) has no
         // source row, so its method is checked as a plain one named in
-        // `owned_trait_hooks`.
+        // `owned_trait_hooks`. A method of an `impl Trait` block in a struct
+        // or enum body names its trait through its source.
         owner_type: if function.kind == {
             .Method(_, owner) -> owner
             .TraitMethod(_, _, owner, _, _) -> owner
@@ -2538,11 +2904,11 @@ sema_effect_check_trait_bounds: fn(module_row: SemaEffectModuleInput, functions:
                 next
             }
         }
-        trait_name: if function.kind == {
-            .TraitMethod(_, _, _, trait_symbol, _) -> sema_effect_symbol_leaf(trait_symbol.key)
-            else -> module_row.owned_trait_hooks.get(function.key) ?? next
-        }
         node_index: sema_effect_node_index(node_by_key, function.key) ?? next
+        trait_name := module_row.owned_trait_hooks.get(function.key) ?? ""
+        if nodes[node_index].trait_key.cut_last("|") == .Val(split) -> trait_name = split.after
+        if function.kind == .TraitMethod(_, _, _, trait_symbol, _) -> trait_name = sema_effect_symbol_leaf(trait_symbol.key)
+        if trait_name == "" -> next
         method: sema_effect_method_name(function, module_row.sources, source_index)
         loop bound in module_row.trait_bounds {
             if bound.trait_name != trait_name || bound.method != method -> next
@@ -2771,7 +3137,7 @@ sema_effect_check_memory_denials: fn(nodes: [SemaEffectNode], node_by_key: NameR
 
 // A pure body's reached effects go to `pure_reached`; E3401 is reported once
 // the solved rows are stamped, so it can name the call that reaches them.
-sema_effect_check_node: fn(node: SemaEffectNode, solved: [String], secret_reached: Bool, dispatch: Diagnostic?, panic_site: String, pure_reached: &[String], diagnostics: &[Diagnostic]) -> Bool {
+sema_effect_check_node: fn(node: SemaEffectNode, solved: [String], secret_reached: Bool, dispatch: Diagnostic?, panic_site: String, notes: [SemaEffectInstanceNote], pure_reached: &[String], diagnostics: &[Diagnostic]) -> Bool {
     valid := true
     // This rule with (Rust `check_inferred_memo`, E0938): a
     // `#Memo` function that is not declared pure is judged by its solved row;
@@ -2821,14 +3187,14 @@ sema_effect_check_node: fn(node: SemaEffectNode, solved: [String], secret_reache
         node.has_declared_row && node.declared.len() > 0 -> {
             over: sema_effect_uncovered(solved, node.declared)
             if over.len() > 0 {
-                diagnostics.push(sema_effect_bound_diagnostic(node, over))
+                diagnostics.push(sema_effect_with_instance_notes(sema_effect_bound_diagnostic(node, over), notes, over))
                 valid = false
             }
         }
     }
     prohibited: sema_effect_covered(solved, node.prohibited)
     if prohibited.len() > 0 {
-        diagnostics.push(sema_effect_prohibited_diagnostic(node, prohibited, panic_site))
+        diagnostics.push(sema_effect_with_instance_notes(sema_effect_prohibited_diagnostic(node, prohibited, panic_site), notes, prohibited))
         valid = false
     }
     if node.is_replayable {
@@ -2929,9 +3295,10 @@ sema_effect_region_inferred: fn(nodes: &[SemaEffectNode], solved: [[String]], ow
 // `package_denials` is the root package's `authority.deny` row; `denial_modules`
 // marks, by graph module index, the modules that row binds. `file_caps` holds,
 // by graph module index, the `#FX(…)` caps a file module takes from the
-// `name: module` declarations above it. `decls` is the run's declaration
+// `name: module` declarations above it. `trait_caps` is each capped trait's
+// `#FX(…)` cap (sema_effect_trait_caps). `decls` is the run's declaration
 // table, which direct callees name.
-sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaEffectModuleInput], prepared: &&SemaEffectPrepared, package_denials: [String], denial_modules: [Bool], file_caps: [[SemaEffectModuleCap]], decls: DeclTable, threads: CompilerThreads) -> SemaEffectGraphResult {
+sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaEffectModuleInput], prepared: &&SemaEffectPrepared, package_denials: [String], denial_modules: [Bool], file_caps: [[SemaEffectModuleCap]], trait_caps: [String:SemaEffectTypeCap], decls: DeclTable, threads: CompilerThreads) -> SemaEffectGraphResult {
     owned_prepared := prepared.move()
     diagnostics := owned_prepared.diagnostics.move()
     nodes := owned_prepared.nodes.move()
@@ -2939,39 +3306,24 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
     source_indices := owned_prepared.source_indices.move()
     node_keys := owned_prepared.node_keys.move()
     node_by_key := sema_effect_node_key_table(node_keys)
-    // Rust `seed_trait_dispatch_effects` (one module's items at a time):
-    // implementing types by `{module}|{trait}`, and each
-    // `{module}|{trait}::{method}`'s own summary per implementing type.
-    // Owners group per trait key in first-seen order, each owner once
-    // (`implementer_seen`), appended in place: O(rows), not a list scan and
-    // copy per row.
-    implementer_groups := [String:Int]{}
-    implementer_keys := [String]{}
-    implementer_lists := [[String]]{}
-    implementer_seen := [String:Bool]{}
-    trait_impls := [String:String]{}
+    // Rust `seed_trait_dispatch_effects`: implementing types by
+    // `{module}|{trait}`, and each `{module}|{trait}::{method}`'s own summary
+    // per implementing type (sema_effect_add_trait_impls).
+    tables := SemaEffectImplTables{}
     loop module_index in 0..<inputs.len() {
         module_row: inputs[module_index]
         module_identity: modules[module_row.module_index].module_identity
         loop row in module_row.trait_implementers {
             pair: row.cut_last("::") ?? next
-            trait_key: "{module_identity}|{pair.before}"
-            group_row := implementer_groups.get(trait_key) ?? -1
-            if group_row < 0 {
-                group_row = implementer_lists.len()
-                implementer_groups[trait_key] = group_row
-                implementer_keys.push(trait_key)
-                implementer_lists.push([String]{})
-            }
-            seen_key: "{module_identity}|{row}"
-            if implementer_seen.get(seen_key) != None -> next
-            implementer_seen[seen_key] = true
-            implementer_lists[group_row].push(pair.after)
+            sema_effect_add_implementer(tables, "{module_identity}|{pair.before}", pair.after)
         }
-        sema_effect_add_trait_impls(modules[module_row.module_index].functions, module_row, module_identity, source_indices[module_index], trait_impls)
+        sema_effect_add_trait_impls(modules[module_row.module_index].functions, module_row, source_indices[module_index], tables)
     }
     trait_implementers := [String:[String]]{}
-    loop (group_row, trait_key) in implementer_keys -> trait_implementers[trait_key] = implementer_lists[group_row]
+    loop (group_row, trait_key) in tables.implementer_keys -> trait_implementers[trait_key] = tables.implementer_lists[group_row]
+    dyn_impls := [String:[String]]{}
+    loop (group_row, method_key) in tables.dyn_keys -> dyn_impls[method_key] = tables.dyn_lists[group_row]
+    trait_impls := tables.trait_impls.move()
     // The `…:close` method keys in key order, grouped by owner type.
     close_keys := [String]{}
     loop key in node_by_key.texts {
@@ -2992,12 +3344,13 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
         if nodes[node_index].is_unsafe -> unsafe_names[key] = nodes[node_index].name
     }
     node_by_decl := sema_effect_nodes_by_decl(node_by_key, owned_prepared.node_decls, decls.rows.len())
-    calls := SemaEffectCallIndex{modules: owned_prepared.calls.move(), node_by_key: node_by_key.move(), trait_implementers: trait_implementers.move(), trait_impls: trait_impls.move(), close_methods: close_methods.move(), unsafe_names: unsafe_names.move(), node_by_decl: node_by_decl.move(), node_keys: node_keys.move()}
+    calls := SemaEffectCallIndex{modules: owned_prepared.calls.move(), node_by_key: node_by_key.move(), trait_implementers: trait_implementers.move(), trait_impls: trait_impls.move(), dyn_impls: dyn_impls.move(), trait_caps: trait_caps.copy(), close_methods: close_methods.move(), unsafe_names: unsafe_names.move(), node_by_decl: node_by_decl.move(), node_keys: node_keys.move()}
     unsafe_node: loop node in nodes {
         if node.is_unsafe -> break true
     } ?? false
     any_unsafe: unsafe_node || sema_effect_calls_any_unsafe_foreign(calls.modules)
     calls = sema_effect_collect_threads(modules, inputs, nodes, calls, any_unsafe, diagnostics, threads)
+    sema_effect_resolve_type_params(nodes, calls)
     callers: sema_effect_callers(nodes, calls.node_by_key)
     solved: sema_effect_solve(nodes, callers)
     loop module_index in 0..<inputs.len() {
@@ -3046,7 +3399,8 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
             seen := (loop _ in nodes -> false)
             if sema_effect_panic_site(nodes, calls.node_by_key, node_index, seen) == .Val(stop) -> panic_site = nodes[stop].chain_name
         }
-        if !sema_effect_check_node(nodes[node_index], solved[node_index], secret_reach[node_index], dispatch, panic_site, pure_reached, function_diagnostics) {
+        notes: sema_effect_instance_notes(nodes, calls.node_by_key, solved, nodes[node_index])
+        if !sema_effect_check_node(nodes[node_index], solved[node_index], secret_reach[node_index], dispatch, panic_site, notes, pure_reached, function_diagnostics) {
             // Keep all diagnostics; the caller receives one complete graph
             // result instead of a partially updated function list.
         }
@@ -3114,13 +3468,14 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
                 if sema_effect_panic_site(nodes, calls.node_by_key, node_index, seen) == .Val(stop) -> panic_site = nodes[stop].chain_name
             }
             denial_diagnostics := [Diagnostic]{}
-            denial_diagnostics.push(sema_effect_package_denied_diagnostic(nodes[node_index], reached, denied, panic_site))
+            denial_diagnostics.push(sema_effect_with_instance_notes(sema_effect_package_denied_diagnostic(nodes[node_index], reached, denied, panic_site), sema_effect_instance_notes(nodes, calls.node_by_key, solved, nodes[node_index]), reached))
             sema_effect_publish_diagnostics(diagnostics, inputs[nodes[node_index].module_index].source_segments, denial_diagnostics)
         }
     }
     // A module's `#FX(…)` caps bind every function inside it: a file
     // module's from the module graph, an inline module's from the function.
-    // A type's cap binds each of its methods.
+    // A type's cap binds each of its methods, and a trait's cap every
+    // implementation of its methods, in any package.
     loop node_index in 0..<nodes.len() {
         graph_module: inputs[nodes[node_index].module_index].module_index
         caps := [SemaEffectModuleCap]{}
@@ -3129,9 +3484,16 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
         }
         loop cap in nodes[node_index].module_caps -> caps.push(SemaEffectModuleCap{cap: cap, site: None})
         if nodes[node_index].type_cap == .Val(type_cap) -> caps.push(type_cap.copy())
+        if nodes[node_index].trait_key != "" {
+            if calls.trait_caps.get(nodes[node_index].trait_key) == .Val(found) {
+                site: if found.module_identity == nodes[node_index].module_identity -> None else -> found.cap.site
+                caps.push(SemaEffectModuleCap{cap: found.cap.cap, site: site})
+            }
+        }
         if caps.len() == 0 -> next
         cap_diagnostics := [Diagnostic]{}
-        loop cap in caps -> sema_effect_check_module_cap(nodes, calls.node_by_key, node_index, solved[node_index], cap, cap_diagnostics)
+        notes: sema_effect_instance_notes(nodes, calls.node_by_key, solved, nodes[node_index])
+        loop cap in caps -> sema_effect_check_module_cap(nodes, calls.node_by_key, node_index, solved[node_index], cap, notes, cap_diagnostics)
         sema_effect_publish_diagnostics(diagnostics, inputs[nodes[node_index].module_index].source_segments, cap_diagnostics)
     }
     loop module_index in 0..<inputs.len() {
@@ -3230,15 +3592,70 @@ sema_effect_node_key_table: fn(node_keys: [String]) -> NameRows Never! {
     table
 }
 
-// Each `{module}|{trait}::{method}` implementation's node key per
-// implementing type, first one kept (Rust `seed_trait_dispatch_effects`).
-sema_effect_add_trait_impls: fn(functions: [FnBody], module_row: SemaEffectModuleInput, module_identity: String, source_index: SemaEffectSourceIndex, trait_impls: &[String:String]) {
+// The trait-implementation tables of one effect check. Owners group per
+// `{module}|{trait}` key in first-seen order, each owner once
+// (`implementer_seen`), appended in place: O(rows), not a list scan and copy
+// per row. `trait_impls` is each `{module}|{trait}::{method}#{owner}`
+// implementation's node key. Every implementation of a trait method also
+// joins its `{module}|{trait}::{method}` group (`dyn_lists` by
+// `dyn_groups`), the targets of a call through a trait value.
+SemaEffectImplTables: struct {
+    implementer_groups: [String:Int]{[String:Int]{}}
+    implementer_keys: [String]{[String]{}}
+    implementer_lists: [[String]]{[[String]]{}}
+    implementer_seen: [String:Bool]{[String:Bool]{}}
+    trait_impls: [String:String]{[String:String]{}}
+    dyn_groups: [String:Int]{[String:Int]{}}
+    dyn_keys: [String]{[String]{}}
+    dyn_lists: [[String]]{[[String]]{}}
+}
+
+// `owner` as an implementing type of trait `trait_key`, once.
+sema_effect_add_implementer: fn(tables: &SemaEffectImplTables, trait_key: String, owner: String) {
+    seen_key: "{trait_key}::{owner}"
+    if tables.implementer_seen.get(seen_key) != None -> return
+    tables.implementer_seen[seen_key] = true
+    group_row := tables.implementer_groups.get(trait_key) ?? -1
+    if group_row < 0 {
+        group_row = tables.implementer_lists.len()
+        tables.implementer_groups[trait_key] = group_row
+        tables.implementer_keys.push(trait_key.copy())
+        tables.implementer_lists.push([String]{})
+    }
+    tables.implementer_lists[group_row].push(owner.copy())
+}
+
+// Each implementation's node key per implementing type, first one kept
+// (Rust `seed_trait_dispatch_effects`), its owner as an implementer, and its
+// place in its method's trait-value group. The trait is the one its source
+// resolved where the `impl` block is written, so an `impl Trait` block in a
+// struct or enum body and an impl of another module's trait count too.
+sema_effect_add_trait_impls: fn(functions: [FnBody], module_row: SemaEffectModuleInput, source_index: SemaEffectSourceIndex, tables: &SemaEffectImplTables) {
     loop function in functions {
-        if function.kind == .TraitMethod(_, _, owner_type, trait_symbol, _) {
-            method: sema_effect_method_name(function, module_row.sources, source_index)
-            key: "{module_identity}|{sema_effect_symbol_leaf(trait_symbol.key)}::{method}#{sema_effect_symbol_leaf(type_name(owner_type))}"
-            if trait_impls.get(key) == None -> trait_impls[key] = function.key
+        trait_key := ""
+        if sema_effect_source_position(function, source_index) == .Val(at) -> trait_key = module_row.sources[at].trait_key
+        owner_type: if function.kind == {
+            .TraitMethod(_, _, owner_type, trait_symbol, _) -> {
+                if trait_key == "" -> trait_key = sema_effect_trait_cap_key(trait_symbol.key)
+                owner_type
+            }
+            .Method(_, owner_type) -> owner_type
+            else -> next
         }
+        if trait_key == "" -> next
+        owner: sema_effect_symbol_leaf(type_name(owner_type))
+        sema_effect_add_implementer(tables, trait_key, owner)
+        method_key: "{trait_key}::{sema_effect_method_name(function, module_row.sources, source_index)}"
+        impl_key: "{method_key}#{owner}"
+        if tables.trait_impls.get(impl_key) == None -> tables.trait_impls[impl_key] = function.key
+        group_row := tables.dyn_groups.get(method_key) ?? -1
+        if group_row < 0 {
+            group_row = tables.dyn_lists.len()
+            tables.dyn_groups[method_key] = group_row
+            tables.dyn_keys.push(method_key)
+            tables.dyn_lists.push([String]{})
+        }
+        sema_effect_set_add(tables.dyn_lists[group_row], function.key)
     }
 }
 

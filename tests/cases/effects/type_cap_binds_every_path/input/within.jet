@@ -1,0 +1,31 @@
+// A type whose every path stays inside its cap checks clean, and the cap
+// leaves no trace in the program: it prints the same on every tier.
+Shape: trait {
+    area: fn(self) -> Int
+    twice: fn(self) -> Int { self.area() * 2 }
+}
+
+#FX(!IO, !FS)
+Square: struct {
+    side: Int
+    scale: fn(Int) -[]> Int
+
+    impl Shape {
+        area: fn(self) -> Int { self.side * self.side }
+    }
+
+    grown: fn(self) -> Int {
+        bump: (x: Int) -> x + 1
+        bump(self.scale(self.twice()))
+    }
+}
+
+impl Square.Close {
+    close: fn(&&self) {}
+}
+
+run: fn() {
+    s: Square{side: 3, scale: (x: Int) -> x * 10}
+    print(s.grown())
+    close(s)
+}

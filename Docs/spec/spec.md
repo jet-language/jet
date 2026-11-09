@@ -2026,7 +2026,11 @@ file's `use` lines, `#FX(...)` caps every function in the file. A plain entry
 is a ceiling and a `!` entry is a denial; reaching outside either one is E0749
 at the offending function, with the cap as the secondary label. A row written
 inside a cap may only narrow it: a declared effect outside the ceiling, or one
-the cap denies, is E0749 even when the body never uses it. An
+the cap denies, is E0749 even when the body never uses it. A type's cap also
+binds the lambdas written in its methods, the trait default bodies it
+inherits, its `Close` impl, its function-typed fields and calls through its
+trait-value fields. A function-typed field whose row reaches outside the cap
+is E0755 at the field, and each method that calls it is E0749. An
 `#FX: (...)` line in the body is the same cap. A type without `#FX` keeps its
 inferred rows unchanged.
 
@@ -2073,11 +2077,31 @@ impl Square.Shape {
 Every implementation must fit the bound or E0742 is reported. An impl method
 that writes no row takes the trait's bound as its ceiling, so
 `area: fn(self) -> Int { … }` is pure here; this holds for the Prelude's
-`CheckedText.check` and `encode_hole` too. A dynamic call
-uses the trait's declared bound because its concrete implementation is unknown
-at the call site. An unannotated method is inferred per implementation under
-static dispatch; a dynamic-dispatch call that needs a bound receives the
-annotate-the-method diagnostic (D-EFF2, D-EFF3).
+`CheckedText.check` and `encode_hole` too. A call through a trait value counts
+with the trait method's declared row. With no row, it counts with the ceiling
+of the trait's `#FX(...)` cap, and with neither, with the union of every
+implementation of the method in the program, in any package. A dynamic call
+of a row-less method that has no implementation to bound it, under an
+enclosing ceiling, receives the annotate-the-method diagnostic E0743 (D-EFF2,
+D-EFF3).
+
+Written above a trait, `#FX(...)` caps every implementation of the trait's
+methods, in any package, with the same list, including what each reaches
+through a call. An `impl Trait` block written in a struct's body and one
+written apart from the type are both bound. Reaching outside the cap is
+E0754 at the offending method, with the cap as the secondary label:
+
+```jet
+#FX(!FS)
+Source: trait { text: fn(self) -> String }
+```
+
+A call through a type parameter belongs to the caller that binds it. Inside
+`Traced: struct<T: Worker>`, `self.inner.work()` is not part of `Traced`'s
+rows or its cap; `Traced<Loud>` does `Traced`'s work plus `Loud`'s, charged
+where `Traced<Loud>` is written. A report there names the instantiation and
+the implementation it runs. A binding the compiler cannot see takes every
+implementation, as an unbound generic call does.
 
 ### Opaque cryptographic values
 

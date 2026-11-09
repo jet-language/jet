@@ -5437,11 +5437,11 @@ MissingDynamicEffectBound: struct {
 
     impl Diagnostic {
         code: "E0743"
-        meaning: "Dynamic trait dispatch has no declared effect bound under an enclosing effect ceiling"
+        meaning: "Dynamic trait dispatch has no effect bound under an enclosing effect ceiling"
         detail: true
         what: fn(self) -> String { "Dynamic call `{self.trait_name}::{self.method}` has no effect bound." }
-        why: fn(self) -> String { "A trait value can select any implementation at runtime, so an enclosing effect ceiling needs the trait method's declared upper bound." }
-        fix: fn(self) -> String { "Declare an effect row on the trait method, such as `-[]>` for pure dispatch, or move the dynamic call outside the bounded function." }
+        why: fn(self) -> String { "A trait value can select any implementation at runtime, and the program holds none of this method to bound the call, so an enclosing effect ceiling needs the trait method's declared row or a ceiling in the trait's `#FX(…)` cap." }
+        fix: fn(self) -> String { "Declare an effect row on the trait method, such as `-[]>` for pure dispatch, put an `#FX(…)` ceiling above the trait, or move the dynamic call outside the bounded function." }
     }
 }
 
@@ -5676,6 +5676,26 @@ ProhibitedEffectReached: struct {
         what: fn(self) -> String { "A function reaches an effect outside a ceiling it answers to (a package `authority` `allow` row or a module `#FX(…)` cap), or one a `-[!E]>` row, module cap or package `deny` prohibits, including a denied `Panic` stop" }
         why: fn(self) -> String { "The registered sema rule names the effect or panic site, the call chain that reaches it and the scope that set the limit" }
         fix: fn(self) -> String { "Remove the offending effect, return a fallible result, add facts or a `#Pre`/refinement proof, widen the ceiling, or drop the prohibition" }
+    }
+}
+
+TraitCapExceeded: struct {
+    impl Diagnostic {
+        code: "E0754"
+        meaning: "An implementation of a capped trait's method reaches or declares an effect outside the trait's `#FX(…)` cap"
+        what: fn(self) -> String { "An implementation of a trait's method reaches an effect outside the trait's `#FX(…)` ceiling or one the cap denies, or its row declares one" }
+        why: fn(self) -> String { "`#FX(…)` above a trait bounds every implementation of its methods, in any package and inherited defaults included, through every callee they can reach; a row on an implementation may only narrow it" }
+        fix: fn(self) -> String { "Remove the work that needs the effect from the implementation, narrow its row, or widen the trait's `#FX(…)` cap" }
+    }
+}
+
+TypeFieldCapExceeded: struct {
+    impl Diagnostic {
+        code: "E0755"
+        meaning: "A function-typed field of a capped type declares a row outside the type's `#FX(…)` cap"
+        what: fn(self) -> String { "A function-typed field's row declares an effect the type's `#FX(…)` cap denies or its ceiling leaves out" }
+        why: fn(self) -> String { "A method that calls the field runs its row, and `#FX(…)` above a type bounds every method of the type through every path it runs" }
+        fix: fn(self) -> String { "Narrow the field's row to fit the cap, move the field out of the type, or widen the type's `#FX(…)` cap" }
     }
 }
 

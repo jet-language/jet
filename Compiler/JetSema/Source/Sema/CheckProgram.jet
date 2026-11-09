@@ -8039,7 +8039,10 @@ sema_comptime_dependency_cycle_diagnostic: fn(name: String, span: Span) -> Diagn
 
 // `type_caps` (sema_effect_type_caps) binds a struct's or enum's `#FX(…)` cap
 // to each of its methods, trait impls written apart from its body included.
-sema_comptime_effect_sources: fn(source_module: SemaRegistrationModule, type_caps: [String:SemaEffectTypeCap]) -> [SemaEffectFunctionSource] Never! {
+// Each trait impl method also takes the trait it implements, resolved in
+// `graph` where its `impl` block is written, which binds the trait's cap
+// and its trait-value calls to it.
+sema_comptime_effect_sources: fn(graph: SemaRegistrationGraph, source_module: SemaRegistrationModule, type_caps: [String:SemaEffectTypeCap]) -> [SemaEffectFunctionSource] Never! {
     sources := [SemaEffectFunctionSource]{}
     compute_aliases: sema_kernel_compute_aliases(source_module)
     loop function in source_module.functions {
@@ -8048,27 +8051,59 @@ sema_comptime_effect_sources: fn(source_module: SemaRegistrationModule, type_cap
         sources.push(source)
     }
     loop nominal in source_module.nominals {
-        loop function in nominal.methods {
+        block_traits: sema_effect_body_block_traits(graph, source_module.module_identity, nominal)
+        loop (index, function) in nominal.methods {
             source := sema_effect_source_from_function_key(function.declaration, source_module.module_identity, function.symbol.id.key)
             sema_effect_bind_type_cap(source, type_caps, Val(nominal.symbol.id.key), source_module.module_identity)
+            if index < block_traits.len() -> source.trait_key = block_traits[index]
             sources.push(source)
         }
     }
     loop implementation in source_module.impls {
+        trait_key := ""
+        if implementation.trait_name == .Val(trait_name) {
+            trait_symbol := implementation.trait_symbol
+            if trait_symbol == None -> trait_symbol = sema_type_graph_trait_symbol(graph, source_module.module_identity, trait_name)
+            if trait_symbol == .Val(symbol) -> trait_key = sema_effect_trait_cap_key(symbol.id.key)
+        }
         loop function in implementation.methods {
             source := sema_effect_source_from_function_key(function.declaration, source_module.module_identity, function.symbol.id.key)
             sema_effect_bind_type_cap(source, type_caps, implementation.target_nominal_key, source_module.module_identity)
+            source.trait_key = trait_key
             sources.push(source)
         }
     }
     sources
 }
 
-// One checked module's effect inputs, read in place from its registration row.
-sema_effect_module_input: fn(source: SemaRegistrationModule, module_index: Int, type_caps: [String:SemaEffectTypeCap]) -> SemaEffectModuleInput Never! {
+// The trait key (sema_effect_trait_cap_key) of each of `nominal`'s methods,
+// by method row: "" for a method of its own, the block's trait for one an
+// `impl Trait` block in its body writes. The registration rows a nominal's
+// own methods first, then each block's methods in block order.
+sema_effect_body_block_traits: fn(graph: SemaRegistrationGraph, module_identity: String, nominal: SemaRegistrationNominal) -> [String] Never! {
+    rows := [String]{}
+    if nominal.source == .SourceAST(item) {
+        own: if item == {
+            .Struct(definition) -> definition.methods.len()
+            .Enum(definition) -> definition.methods.len()
+            else -> return rows
+        }
+        loop _ in 0..<own -> rows.push("")
+        loop block in sema_registration_item_trait_blocks(item) {
+            trait_key: if sema_type_graph_trait_symbol(graph, module_identity, block.trait_name) == .Val(symbol) -> sema_effect_trait_cap_key(symbol.id.key) else -> ""
+            loop _ in block.methods -> rows.push(trait_key.copy())
+        }
+    }
+    rows
+}
+
+// One checked module's effect inputs, read in place from its registration
+// row `graph.modules[source_index]`.
+sema_effect_module_input: fn(graph: SemaRegistrationGraph, source_index: Int, module_index: Int, type_caps: [String:SemaEffectTypeCap]) -> SemaEffectModuleInput Never! {
+    source: graph.modules[source_index]
     SemaEffectModuleInput{
         module_index: module_index,
-        sources: sema_comptime_effect_sources(source, type_caps),
+        sources: sema_comptime_effect_sources(graph, source, type_caps),
         // copy: the effect inputs locate their diagnostics; the graph keeps its segments.
         source_segments: source.source_segments.copy(),
         trait_bounds: sema_effect_trait_bounds(source.program.items),
@@ -9235,18 +9270,22 @@ sema_finalize_graph: fn(resolved: &&SemaRegistrationGraph, trail: &SemaGraphTrai
     loop graph_module in final_graph.modules -> denial_modules.push(graph_module.package_identity == final_graph.package_identity)
     // Each `#FX(…)` module cap names known effects, checked once where it is
     // written; a file module's caps reach its file through the module graph,
-    // and an erased generic-module template leaves its cap behind.
+    // and an erased generic-module template leaves its cap behind. A capped
+    // type's function-typed fields fit its cap where they are declared.
+    field_caps: sema_effect_type_caps(final_graph.modules)
     loop graph_module in final_graph.modules {
         cap_diagnostics := [Diagnostic]{}
         if graph_module.program.file_cap == .Val(head) -> sema_effect_cap_entry_names(head, cap_diagnostics)
         loop cap in graph_module.template_caps -> sema_effect_cap_entry_names(cap, cap_diagnostics)
         sema_effect_module_cap_names(graph_module.program.items, cap_diagnostics)
+        sema_effect_check_field_rows(graph_module, field_caps, cap_diagnostics)
         sema_effect_publish_diagnostics(diagnostics, graph_module.source_segments, cap_diagnostics)
     }
     file_caps: sema_effect_file_module_caps(final_graph.modules, final_graph.edges)
+    trait_caps: sema_effect_trait_caps(final_graph.modules)
     // The effect graph reads every checked body in place and stamps each
     // solved row onto `modules`.
-    effects := sema_effects_check_modules(modules, effect_inputs, effect_prepared, package_denials, denial_modules, file_caps, final_graph.decls, threads)
+    effects := sema_effects_check_modules(modules, effect_inputs, effect_prepared, package_denials, denial_modules, file_caps, trait_caps, final_graph.decls, threads)
     if trace_sink == .Val(sink) -> sink.end("sema.effects", effect_inputs.len())
     loop diagnostic in effects.diagnostics -> diagnostics.push(diagnostic)
     if !effects.complete -> complete = false
@@ -9844,7 +9883,7 @@ sema_finalize_side_run: fn(job: Int, graph: SemaRegistrationGraph, modules: [Sem
             type_caps: sema_effect_type_caps(graph.modules)
             loop module_index in first..<last {
                 source_index: sema_registration_module_index(graph, modules[module_index].module_identity) ?? next
-                input := sema_effect_module_input(graph.modules[source_index], module_index, type_caps)
+                input := sema_effect_module_input(graph, source_index, module_index, type_caps)
                 // Input positions count from the part's first input; the join shifts them.
                 sema_effect_prepare_module(side.effect_prepared, modules[module_index].functions, modules[module_index].call_facts, input, side.effect_inputs.len(), graph.decls)
                 side.effect_inputs.push(input)

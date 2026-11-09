@@ -561,7 +561,8 @@ sema_marker_module_check_unbuilt_rules: fn(catalog: SemaScopeMembersMarkerRegist
 // A builtin rule written at a site its registry row does not allow is E0355.
 // The unbuilt-rule check above reports its own applications; this one covers
 // every other site: a declaration, a function, a method, a module. `#FX`
-// caps a block or a module; a function states its limit in its effect row.
+// caps a block, a module, a type or a trait; a function states its limit in
+// its effect row.
 // Without this refusal `#FX` above a `fn` reached body checking as an
 // internal fault, and a misplaced rule such as `#Job` on a method checked
 // clean.
@@ -580,7 +581,7 @@ sema_marker_module_check_builtin_sites: fn(catalog: SemaScopeMembersMarkerRegist
         reported[key] = true
         if sema_marker_rules_fact_allows(catalog.applied_rules[index], application, applications) -> next
         if application.marker.name == MARKER_FX && (site == RuleSite.Function || site == RuleSite.Method) {
-            diagnostics.push(sema_error("E0355", application.marker.span, "`#FX` cannot attach to a function", "`#FX(…)` caps a block or a module; a function states its limit in its effect row", "write the limit in the function's row, such as `show: fn() -[IO]> {{ … }}`, or put `#FX(…)` on a block inside it"))
+            diagnostics.push(sema_error("E0355", application.marker.span, "`#FX` cannot attach to a function", "`#FX(…)` caps a block, a module, a type or a trait; a function states its limit in its effect row", "write the limit in the function's row, such as `show: fn() -[IO]> {{ … }}`, or put `#FX(…)` on a block inside it"))
             next
         }
         diagnostics.push(sema_marker_rules_applied_site_error(application.marker, catalog.applied_rules[index], site))

@@ -30,13 +30,15 @@ Run a lesson from the repository root, for example `jet run Examples/ErrorsAndEf
 - [EffectTraitBound](Effects/EffectTraitBound.jet) — A trait method may declare an effect upper bound.
 - [EffectTree](Effects/EffectTree.jet) — The ten effect names (`Net`, `FS`, `DB`, …) are tree ROOTS.
 - [FileScope](Effects/FileScope.jet)
+- [GenericRow](Effects/GenericRow.jet) — A generic type's row belongs to each instance: what `Traced` does through its type parameter is charged to the caller that writes `Traced<Parser>`.
 - [MethodReceivers](Effects/MethodReceivers.jet) — Method receivers — &self (write), &&self (consume), self (read).
-- [ModuleCap](Effects/ModuleCap.jet) — A module cap: `#FX(…)` on a module bounds every function inside it, the function-row rule applied to a whole module.
+- [ModuleCap](Effects/ModuleCap.jet) — A module cap: `#FX(…)` on a module bounds every function inside it, the function-row rule applied to a whole module; a deterministic offline module denies `Net`, `FS`, `Exec`, `Time` and `Rand`.
 - [Pure](Effects/Pure.jet)
 - [SelfMutation](Effects/SelfMutation.jet) — Self-mutation in `&self` methods.
 - [SingleUse](Effects/SingleUse.jet) — Single-use (must-consume) values.
 - [SmartContext](Effects/SmartContext.jet) — Smart Context — `#Context(field: value) { … }`.
 - [Taint](Effects/Taint.jet) — External values carry origin facts until a typed decode or an explicit #Scrub gate clears them.
+- [TraitCap](Effects/TraitCap.jet) — A trait cap and a method bound together: `#FX(…)` above a trait bounds every implementation of its methods, and a row on one method narrows it further.
 - [TypeCap](Effects/TypeCap.jet) — A type cap: `#FX(…)` on a struct or enum bounds every method of the type, in its body or in an `impl` block apart from it.
 
 ## Errors

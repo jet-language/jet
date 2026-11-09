@@ -1,0 +1,18 @@
+Worker: trait { work: fn(self) -> Int }
+Loud: struct {
+    impl Worker {
+        work: fn(self) -> Int {
+            print("loud")
+            1
+        }
+    }
+}
+#FX(!IO)
+Traced: struct<T: Worker> {
+    inner: T
+    step: fn(self) -> Int { self.inner.work() + 1 }
+}
+run: fn() {
+    t: Traced<Loud>{inner: Loud{}}
+    print(t.step())
+}

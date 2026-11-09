@@ -2596,7 +2596,13 @@ parser_parse_trait: fn(state: &JetParserState, modifiers: ParsedItemModifiers) -
     close: parser_expect(state, TOKEN_RBRACE, "`}}` after trait members")
     trait_name: parser_value(state, name)
     markers: parser_merge_inbody_markers(state, modifiers.markers, inside, modifiers.start_span.start, close.span.start, "trait `{trait_name}`")
-    TraitDef{span: parser_cover(modifiers.start_span, close.span), is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, name: trait_name, name_span: name.span, supertraits: supertraits, assoc_types: assoc_types, constants: constants, methods: methods, markers: markers}
+    cap := parser_type_fx_cap(state, markers, trait_name)
+    if cap == .Val(written) {
+        scoped := written
+        scoped.scope = "trait"
+        cap = Val(scoped)
+    }
+    TraitDef{span: parser_cover(modifiers.start_span, close.span), is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, name: trait_name, name_span: name.span, supertraits: supertraits, assoc_types: assoc_types, constants: constants, methods: methods, markers: markers, cap: cap}
 }
 
 // The trait bounds after a `:` (Rust `parse_trait_bounds`): a bracketed list
