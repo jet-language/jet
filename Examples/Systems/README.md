@@ -40,6 +40,7 @@ Run a lesson from the repository root, for example `jet run Examples/Systems/<Le
 - [FilesReaderSeek](Files/FilesReaderSeek.jet)
 - [FilesRootedLifecycle](Files/FilesRootedLifecycle.jet) — Rooted file and temporary-resource lifecycle (CORE-F010, SCRIPT-F13).
 - [FilesSetMode](Files/FilesSetMode.jet) — `files.set_mode` replaces a path's permission bits and `files.stat` reads them back; a missing path is a typed `IOError`.
+- [FilesSpace](Files/FilesSpace.jet) — `files.space` reports a file system's total, free and available bytes (statvfs) and `df`'s used percent; a missing path is a typed `IOError`.
 - [FilesStatLinks](Files/FilesStatLinks.jet)
 - [FilesStorePrimitives](Files/FilesStorePrimitives.jet)
 - [Path](Files/Path.jet) — Typed Path API — construction, decomposition, and directory listing.

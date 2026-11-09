@@ -6,12 +6,13 @@
 // names that do the same job.
 //
 // A row's `jet` names are checked, never trusted: `core.<module>.<member>` (or
-// a bare module) must be exported by Compiler/Prelude/Core.jet, and
-// `<Type>.<method>` must be a built-in method, static or collection operation
-// row. Every unresolved name is reported. With no argument the script checks
-// the rows, then prints the census as Markdown: the per-area summary, the gap
-// list by area and every family. --check (and this file's #Test) checks the
-// rows only.
+// a bare module) must be exported by Compiler/Prelude/Core.jet,
+// `core.<module>.<Type>.<method>` must name a type that module exports and a
+// method its source declares, and `<Type>.<method>` must be a built-in method,
+// static or collection operation row. Every unresolved name is reported. With
+// no argument the script checks the rows, then prints the census as Markdown:
+// the per-area summary, the gap list by area and every family. --check (and
+// this file's #Test) checks the rows only.
 //
 // Usage (from the repository root): jet Tools/agent/LibcCensus.jet [--check]
 use {
@@ -183,7 +184,7 @@ FAMILIES: [Family]{
     {area: "Streams", header: "stdio.h", standard: POSIX, names: "fmemopen open_memstream", variants: "", jet: "Bytes.read Bytes.write Bytes.seek", coverage: .Covered, note: "a Bytes buffer is the memory stream"},
     {area: "Streams", header: "stdio.h", standard: C23, names: "fgetc fgets fputc fputs getc getchar putc putchar puts", variants: "", jet: "core.term.readline core.term.read_key core.term.print core.files.read_lines", coverage: .Covered, note: ""},
     {area: "Streams", header: "stdio.h", standard: POSIX, names: "getline getdelim", variants: "", jet: "core.term.readline core.term.read_until core.files.read_lines", coverage: .Covered, note: ""},
-    {area: "Streams", header: "stdio.h", standard: C23, names: "ungetc", variants: "", jet: "", coverage: .Gap, note: "no push-back on a stream"},
+    {area: "Streams", header: "stdio.h", standard: C23, names: "ungetc", variants: "", jet: "Bytes.seek", coverage: .Language, note: "a parser keeps the byte it looked at as a value; Bytes.seek steps a memory stream back"},
     {area: "Streams", header: "stdio.h", standard: C23, names: "fseek ftell rewind fgetpos fsetpos", variants: "", jet: "core.files.read_at core.files.write_at Bytes.seek Bytes.rewind Bytes.position", coverage: .Partial, note: "positioned file reads and writes; no seek on a file handle"},
     {area: "Streams", header: "stdio.h", standard: POSIX, names: "fseeko ftello", variants: "", jet: "core.files.read_at core.files.write_at", coverage: .Partial, note: "positioned file reads and writes; no seek on a file handle"},
     {area: "Streams", header: "stdio.h", standard: C23, names: "clearerr feof ferror", variants: "", jet: "Bytes.eof", coverage: .Language, note: "I/O failures are typed errors returned by each call"},
@@ -191,16 +192,16 @@ FAMILIES: [Family]{
     {area: "Streams", header: "stdio.h", standard: POSIX, names: "flockfile ftrylockfile funlockfile getc_unlocked getchar_unlocked putc_unlocked putchar_unlocked", variants: "", jet: "", coverage: .Language, note: "a handle has one owner, so there is no stream lock to take"},
     {area: "Streams", header: "stdio.h", standard: C23, names: "perror", variants: "", jet: "core.term.eprint", coverage: .Language, note: "errors print their own message"},
     {area: "Streams", header: "stdio.h", standard: C23, names: "remove rename tmpfile tmpnam", variants: "", jet: "core.files.remove core.files.rename core.files.temp_file", coverage: .Covered, note: ""},
-    {area: "Streams", header: "stdio.h", standard: POSIX, names: "renameat", variants: "", jet: "core.files.rename", coverage: .Partial, note: "no directory-relative form"},
+    {area: "Streams", header: "stdio.h", standard: POSIX, names: "renameat", variants: "", jet: "core.files.Directory.rename", coverage: .Covered, note: "relative to held directories"},
     {area: "Streams", header: "stdio.h", standard: POSIX, names: "ctermid", variants: "", jet: "", coverage: .NotNeeded, note: "obsolete: it names /dev/tty (owner ruling on #6696)"},
     // ---- Files and directories ----
     {area: "Files and directories", header: "fcntl.h", standard: POSIX, names: "open creat", variants: "", jet: "core.files.open core.files.create", coverage: .Covered, note: ""},
-    {area: "Files and directories", header: "fcntl.h", standard: POSIX, names: "openat", variants: "", jet: "core.files.open_directory", coverage: .Partial, note: "directory handles; no general directory-relative open"},
+    {area: "Files and directories", header: "fcntl.h", standard: POSIX, names: "openat", variants: "", jet: "core.files.Directory.open core.files.Directory.create core.files.Directory.open_directory core.files.Directory.create_directory", coverage: .Covered, note: "relative to a held directory"},
     {area: "Files and directories", header: "fcntl.h", standard: POSIX, names: "fcntl", variants: "", jet: "core.files.lock core.files.try_lock", coverage: .Partial, note: "advisory locks only; no descriptor flags"},
     {area: "Files and directories", header: "unistd.h", standard: POSIX, names: "lockf", variants: "", jet: "core.files.lock core.files.try_lock", coverage: .Covered, note: ""},
     {area: "Files and directories", header: "fcntl.h", standard: POSIX, names: "posix_fadvise posix_fallocate", variants: "", jet: "", coverage: .Gap, note: ""},
     {area: "Files and directories", header: "unistd.h", standard: POSIX, names: "read write pread pwrite lseek", variants: "", jet: "core.files.read core.files.write core.files.read_at core.files.write_at", coverage: .Covered, note: ""},
-    {area: "Files and directories", header: "sys/uio.h", standard: POSIX, names: "readv writev", variants: "", jet: "", coverage: .Gap, note: "no vectored I/O"},
+    {area: "Files and directories", header: "sys/uio.h", standard: POSIX, names: "readv writev", variants: "", jet: "", coverage: .Language, note: "a FileWriter buffers, so writing each slice in turn shares its system calls"},
     {area: "Files and directories", header: "sys/stat.h", standard: POSIX, names: "stat fstat lstat fstatat", variants: "", jet: "core.files.stat core.files.lstat", coverage: .Covered, note: ""},
     {area: "Files and directories", header: "sys/stat.h", standard: POSIX, names: "chmod fchmod fchmodat umask", variants: "", jet: "core.files.chmod core.files.set_mode core.sys.umask", coverage: .Covered, note: ""},
     {area: "Files and directories", header: "unistd.h", standard: POSIX, names: "chown fchown lchown fchownat", variants: "", jet: "core.files.chown", coverage: .Covered, note: ""},
@@ -223,8 +224,8 @@ FAMILIES: [Family]{
     {area: "Files and directories", header: "glob.h", standard: POSIX, names: "glob globfree", variants: "", jet: "core.files.glob", coverage: .Covered, note: ""},
     {area: "Files and directories", header: "fnmatch.h", standard: POSIX, names: "fnmatch", variants: "", jet: "core.files.fnmatch", coverage: .Covered, note: ""},
     {area: "Files and directories", header: "wordexp.h", standard: POSIX, names: "wordexp wordfree", variants: "", jet: "core.files.expanduser core.files.expandvars", coverage: .Partial, note: "tilde and variable expansion; no command substitution or field splitting"},
-    {area: "Files and directories", header: "sys/statvfs.h", standard: POSIX, names: "statvfs fstatvfs", variants: "", jet: "", coverage: .Gap, note: "no file-system capacity query"},
-    {area: "Files and directories", header: "unistd.h", standard: POSIX, names: "pathconf fpathconf", variants: "", jet: "", coverage: .Gap, note: ""},
+    {area: "Files and directories", header: "sys/statvfs.h", standard: POSIX, names: "statvfs fstatvfs", variants: "", jet: "core.files.space core.files.DiskSpace.used core.files.DiskSpace.used_percent", coverage: .Covered, note: "for an open file, space(file.path)"},
+    {area: "Files and directories", header: "unistd.h", standard: POSIX, names: "pathconf fpathconf", variants: "", jet: "", coverage: .Language, note: "a name past the file system's limits fails its own call with a typed IOError"},
     // ---- File descriptors ----
     {area: "File descriptors", header: "unistd.h", standard: POSIX, names: "close posix_close", variants: "", jet: "core.sys.close_fd", coverage: .Covered, note: "handles close when dropped"},
     {area: "File descriptors", header: "unistd.h", standard: POSIX, names: "dup dup2 dup3", variants: "", jet: "", coverage: .Gap, note: "no descriptor duplication (child stdio redirection is ProcessSpec's)"},
@@ -418,6 +419,43 @@ core_exports: fn() -[FS]> [String: [String]] CensusError! {
     Ok(out)
 }
 
+// Core.jet's source file of each source module, keyed by module.
+core_sources: fn() -[FS]> [String: String] CensusError! {
+    text: files.read(CORE_PRELUDE_PATH) ?? return Err(census_fail("cannot read {CORE_PRELUDE_PATH}: {err}"))
+    out := [String: String]{}
+    loop line in text.split("\n") {
+        if !line.starts_with("source_module ") -> next
+        at: line.find(" path ")
+        if at < 0 -> next
+        rest: line.slice(at + 6, line.len())
+        end: rest.find(" ")
+        if end < 0 -> next
+        out[line.slice(14, at)] = rest.slice(0, end)
+    }
+    Ok(out)
+}
+
+// Whether `source` declares method `method` of `type_name`: a `method: fn`
+// line (after any markers) inside the type's `Type: struct {` body or one of
+// its `impl Type` blocks.
+declares_method: fn(source: String, type_name: String, method: String) -> Bool Never! {
+    inside := false
+    loop line in source.split("\n") {
+        if line == "}}" {
+            inside = false
+            next
+        }
+        if !line.starts_with(" ") && line != "" {
+            inside = line.starts_with("{type_name}: struct {{") || line.starts_with("impl {type_name} {{") || line.starts_with("impl {type_name}.")
+            next
+        }
+        if !inside -> next
+        item: line.trim()
+        if item.starts_with("{method}: fn") || item.contains(") {method}: fn") -> return true
+    }
+    false
+}
+
 // The receiver families of the built-in tables that a `<Type>.<method>` claim
 // may name.
 METHOD_RECEIVERS: [String: [String]]{
@@ -441,7 +479,7 @@ builtin_resolves: fn(owner: String, method: String, methods: String, statics: St
 }
 
 // Every claimed Jet name that does not resolve.
-unresolved: fn(exports: [String: [String]]) -[FS]> [String] CensusError! {
+unresolved: fn(exports: [String: [String]], sources: [String: String]) -[FS]> [String] CensusError! {
     methods: files.read(BUILTIN_METHODS_PATH) ?? return Err(census_fail("cannot read {BUILTIN_METHODS_PATH}: {err}"))
     statics: files.read(BUILTIN_STATICS_PATH) ?? return Err(census_fail("cannot read {BUILTIN_STATICS_PATH}: {err}"))
     collections: files.read(COLLECTIONS_PATH) ?? return Err(census_fail("cannot read {COLLECTIONS_PATH}: {err}"))
@@ -460,8 +498,25 @@ unresolved: fn(exports: [String: [String]]) -[FS]> [String] CensusError! {
                 dot: claim.rfind(".")
                 owner: claim.slice(0, dot)
                 member: claim.slice(dot + 1, claim.len())
-                members: exports.get(owner) ?? [String]{}
-                if !members.contains(member) -> problems.push("{family.names}: {claim} is not exported by {CORE_PRELUDE_PATH}")
+                if exports.has_key(owner) {
+                    members: exports.get(owner) ?? [String]{}
+                    if !members.contains(member) -> problems.push("{family.names}: {claim} is not exported by {CORE_PRELUDE_PATH}")
+                    next
+                }
+                type_dot: owner.rfind(".")
+                home: owner.slice(0, type_dot)
+                type_name: owner.slice(type_dot + 1, owner.len())
+                if !(exports.get(home) ?? [String]{}).contains(type_name) {
+                    problems.push("{family.names}: {claim}: {owner} is neither a module nor a type exported by {CORE_PRELUDE_PATH}")
+                    next
+                }
+                path: sources.get(home) ?? ""
+                if path == "" {
+                    problems.push("{family.names}: {claim}: {CORE_PRELUDE_PATH} names no source file for {home}")
+                    next
+                }
+                source: files.read(path) ?? return Err(census_fail("cannot read {path}: {err}"))
+                if !declares_method(source, type_name, member) -> problems.push("{family.names}: {claim}: {path} declares no method {member} of {type_name}")
                 next
             }
             dot: claim.find(".")
@@ -594,7 +649,8 @@ census_main: fn(args: [String]) -[FS]> String CensusError! {
     check_only: args.len() == 1 && args[0] == "--check"
     if args.len() > 1 || (args.len() == 1 && !check_only) -> return Err(census_fail(USAGE))
     exports: core_exports()
-    problems: unresolved(exports)
+    sources: core_sources()
+    problems: unresolved(exports, sources)
     if problems.len() > 0 -> return Err(census_fail("libc census: {problems.len()} row problem(s)\n{problems.join("\n")}"))
     if check_only -> return Ok("libc census: every Jet API of {FAMILIES.len()} families resolves")
     Ok(report())
@@ -602,7 +658,7 @@ census_main: fn(args: [String]) -[FS]> String CensusError! {
 
 #Test("every Jet API the census names exists") {
     exports: core_exports() ?? panic(err.message)
-    problems: unresolved(exports) ?? panic(err.message)
+    problems: unresolved(exports, core_sources() ?? panic(err.message)) ?? panic(err.message)
     assert_eq(problems.join("\n"), "")
 }
 

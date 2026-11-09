@@ -172,6 +172,29 @@ Stat: struct {
     created: DateTime?
 }
 
+/// The room on the file system holding a path, in bytes (`space`). `free`
+/// counts every unused byte; `available` is the part an unprivileged program
+/// may fill, what is left after the blocks the system keeps for its
+/// superuser.
+DiskSpace: struct {
+    total: Int
+    free: Int
+    available: Int
+
+    /// The bytes in use: everything that is not free.
+    used: fn(self) -> Int Never! { self.total - self.free }
+
+    /// The share in use from 0.0 to 100.0, as `df` reports it: used bytes
+    /// over used plus available. The superuser's reserve counts as neither,
+    /// so a file system that only the superuser can still fill reads 100.
+    used_percent: fn(self) -> Float Never! {
+        used: self.total - self.free
+        room: used + self.available
+        if room <= 0 -> return 0.0
+        Float{used} * 100.0 / Float{room}
+    }
+}
+
 WalkEntry: struct {
     path: String
     relative: String
@@ -932,6 +955,15 @@ sync_filesystem: fn(path: String | Path) IOError! -[FS.Write]> {
     text: path_text(path)
     files8_preflight("FS.Write", .Flush, text)
     core.files.__syncfs_raw(text)
+}
+
+
+/// The room on the file system holding `path` (statvfs).
+space: fn(path: String | Path) -[FS.Read]> DiskSpace IOError! {
+    text: path_text(path)
+    files8_preflight("FS.Read", .Read, text)
+    row: core.files.__space(text)
+    Ok(DiskSpace{total: row[0], free: row[1], available: row[2]})
 }
 
 

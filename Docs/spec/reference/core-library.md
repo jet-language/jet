@@ -905,6 +905,7 @@ Whole-file and metadata functions. `read`, `read_bytes`, `write`,
 | `write_at(path, offset, bytes)` | `!IOError` | Write bytes at an offset; negative offset is clamped to zero. |
 | `write_atomic(path, bytes)` | `!IOError` | Reserve one of 128 same-directory `.jet_tmp_<pid>_<sequence>` names, write and sync it, preserve available target permissions, close, then rename; on Unix, sync the parent after publication. |
 | `fsync(path)` | `!IOError` | Flush a file, or a folder so earlier renames inside it are durable. |
+| `space(path)` | `DiskSpace !IOError` | The room on the file system holding `path` (statvfs), in bytes: `total`, `free`, and `available` (what an unprivileged program may fill). `used()` is `total - free`; `used_percent()` is `df`'s figure, used over used plus available, 0.0 to 100.0. |
 | `open(path, links:)` / `create(path, if_exists:, mode:, links:)` / `append(path, mode:, links:)` | `FileReader` / `FileWriter !IOError` | Open a close-on-exec stream handle. `if_exists: .Refuse` creates exclusively, `mode` sets a new file's bits before the umask, and `links: .Refuse` refuses a final symbolic link. |
 | `open_directory(path)` | `Directory !IOError` | Hold a directory whose last part is a real directory, not a link. |
 | `samefile(a, b)` | `Bool !IOError` | Compare the two entries' `FileID`s. |
