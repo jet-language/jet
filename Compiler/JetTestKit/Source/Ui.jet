@@ -19,6 +19,10 @@ kit_ui_directives: fn() -> [KitUIDirective] {
         // `jet build --locked` of a project whose staged `state/lock` records
         // the generated-input hashes the build must match (E3512 on drift).
         {name: "build_locked", argv: ["build", "$file", "--locked"], parent: false, exit: "nonzero", streams: "both", capability: ""},
+        // The same of a project with dependencies, after a plain `jet fetch`
+        // stores them (kit_ui_outcomes): its staged `state/lock` records the
+        // effect rows the dependencies must stay within (E3513).
+        {name: "fetched_build_locked", argv: ["build", "$file", "--locked"], parent: false, exit: "nonzero", streams: "both", capability: ""},
         // A freestanding (`no-os`) or cross-target fixture is a `jet build` for
         // that target: the surface where E3301-E3305 are reported.
         {name: "no-os", argv: ["build", "$file", "--target=wasm.no-os"], parent: false, exit: "nonzero", streams: "rendered", capability: ""},
@@ -146,6 +150,7 @@ kit_ui_invocation: fn(source: String, file: String, lint: Bool) -> KitUICall {
         call.streams = if lint && row.name != "a11y_cli" -> "lint" else -> row.streams
         call.unlocked_toolchain = row.name == "jetpack_e1250"
         call.hangar_tamper = row.name == "jetpack_hangar_digest_mismatch"
+        call.fetch_first = row.name == "fetched_build_locked"
         if row.name == "repl_deny" {
             loop line in source.split("\n") {
                 trimmed: line.trim().copy()
@@ -433,6 +438,10 @@ kit_ui_outcomes: fn(entry: KitEntry, ctx: KitCtx) -> [KitOutcome] {
         if ctx.env.jetpack == "" -> return [KitOutcome{verdict: kit_expect_verdict("ERROR", "jetpack binary required"), run: kit_exec_failed("jetpack binary required"), tier: "-"}]
         digest: kit_ui_hangar_tamper(ctx, source, overlay) ?? return [KitOutcome{verdict: kit_expect_verdict("ERROR", "{err}"), run: kit_exec_failed("{err}"), tier: "-"}]
         args.push(digest)
+    }
+    if call.fetch_first {
+        fetched: kit_exec_invoke_with_env(ctx.env, [ctx.env.jet, "fetch"], work, ctx.scratch, [U8]{}, overlay)
+        if fetched.code != 0 -> return [KitOutcome{verdict: kit_expect_verdict("ERROR", "jet fetch exited {fetched.code}: {fetched.stderr}"), run: fetched, tier: "-"}]
     }
     result: kit_exec_invoke_with_env(ctx.env, args, if call.parent -> work else -> source, ctx.scratch, call.stdin.bytes(), overlay)
     actual: kit_ui_normalize(entry.path, kit_ui_actual(call, result), source)

@@ -324,12 +324,13 @@ pkg_effect_summary_line: fn(entries: [PackageEffects]) -> String Never! {
     "effects: {all.join(", ")} (across root + {dependency_count} dependenc{suffix})"
 }
 
-// Per-package effect names, sorted, for lockfile provenance.
-pkg_effect_provenance_for: fn(entries: [PackageEffects], name: String) -> [String] Never! {
+// The inferred effect row of the package named `name`; None when the build
+// loads none of its modules.
+pkg_effect_row_for: fn(entries: [PackageEffects], name: String) -> [String]? Never! {
     loop entry in entries {
-        if entry.name == name -> return entry.effects
+        if entry.name == name -> return Val(entry.effects.copy())
     }
-    [String]{}
+    None
 }
 
 // Budget rows share the authority parser; deny-only rights remain enforceable.
@@ -395,30 +396,82 @@ pkg_effect_grant_for: fn(manifest: PackageFacts, dependency: String) -> [String]
     None
 }
 
-// Write per-package effect provenance (and configured `authority.grants`)
-// into an existing lockfile's package entries in place. A package the lock
-// does not list yet is left for `jet store fetch` to add.
-pkg_update_lock_provenance: fn(lock: &LockFile, entries: [PackageEffects], manifest: PackageFacts) {
-    lock.authority = if manifest.authority != PackageAuthority.default() -> Val(manifest.authority) else -> None
+// A dependency whose inferred effect row reaches effects the row the project
+// lock recorded for it doesn't cover: what a dependency update widened.
+PackageEffectGain: struct {
+    name: String
+    effects: [String]
+}
+
+// Record each dependency's inferred effect row (`entries`, one build's
+// pkg_compute_package_effects) in the project lock at `project_root`, and
+// return the effects each dependency gained over the row recorded before, in
+// lock order. A recorded row only widens: it holds every effect a build of
+// the project saw the dependency's own code reach, so two entries that reach
+// different parts of one dependency don't undo each other's row. A
+// dependency's first row is recorded, not reported; one the build loads no
+// module of keeps its row. `locked` writes nothing, and the caller refuses
+// each gain (pkg_lock_e3513). A project without a readable lock records
+// nothing: `jet fetch` writes the lock, and `jet fetch --locked` refuses one
+// it can't read.
+pkg_lock_record_effect_rows: fn(project_root: String, entries: [PackageEffects], locked: Bool) -[FS, Env, Time]> [PackageEffectGain] LockError! {
+    lock := pkg_lock_load(project_root) ?? return Ok([PackageEffectGain]{})
+    grants: if lock.authority == {
+        .Val(authority) -> authority.grants.copy()
+        .None -> [PackageGrant]{}
+    }
+    gains := [PackageEffectGain]{}
+    changed := false
     loop index in 0..<lock.packages.len() {
         package := lock.packages[index]
-        is_root: package.source == LockSource.Root
-        key: if is_root -> EFFECT_ROOT_PACKAGE else -> package.name
-        package.required_effects = pkg_effect_provenance_for(entries, key)
-        package.effects = package.required_effects
-        granted := [String]{}
-        loop grant in manifest.authority.grants {
-            if grant.package == package.name {
-                granted = grant.rights
-                break
-            }
+        if package.is_root() -> next
+        inferred: pkg_effect_row_for(entries, package.name) ?? next
+        recorded: package.required_effect_roles()
+        gained := [String]{}
+        loop effect_name in inferred {
+            if !authority_covers_any(recorded, effect_name) -> gained.push(effect_name.copy())
         }
-        package.granted_effects = granted
+        first: package.effect_authority == None
+        if !first && gained.len() == 0 -> next
+        if !first -> gains.push(PackageEffectGain{name: package.name.copy(), effects: gained.copy()})
+        row := recorded.copy()
+        loop effect_name in gained -> row.push(effect_name)
+        granted := [String]{}
+        loop grant in grants {
+            if grant.package == package.name -> granted = grant.rights.copy()
+        }
+        package.effect_authority = Val(if granted.len() == 0 -> EFFECT_AUTHORITY_PACKAGE else -> EFFECT_AUTHORITY_PACKAGE_GRANTS)
+        package.effects = authority_holds(row)
+        package.required_effects = package.effects.copy()
+        package.granted_effects = granted.copy()
         package.effect_grants = granted
-        package.denied_effects = manifest.authority.deny ?? [String]{}
-        package.effect_authority = Val(if is_root || granted.len() == 0 -> EFFECT_AUTHORITY_PACKAGE else -> EFFECT_AUTHORITY_PACKAGE_GRANTS)
         lock.packages[index] = package
+        changed = true
     }
+    if locked || !changed -> return Ok(gains)
+    pkg_lock_write_atomically(project_root, pkg_lock_write(lock).bytes()) ?? return Err(LockError.Reported(diagnostic_from_registry("E3502", None,
+        "the dependency effect rows could not update `{pkg_lock_file_path(project_root)}`",
+        "the project lock update is transactional and the filesystem rejected it: {err.message()}",
+        "make the project lock directory writable and rerun the build")))
+    Ok(gains)
+}
+
+// E3513: `--locked` refuses a dependency whose inferred effect row gained an
+// effect the project lock doesn't record for it.
+pkg_lock_e3513: fn(gain: PackageEffectGain) -> Diagnostic Never! {
+    diagnostic_from_registry("E3513", None,
+        "dependency `{gain.name}` now reaches {pkg_effect_gain_list(gain.effects)}, which `.jet/lock` doesn't record for it",
+        "`--locked` requires each dependency's inferred effect row to stay within the row the project lock records",
+        "review the change to `{gain.name}`, then rerun without `--locked` to record its wider row")
+}
+
+// `effects` as prose: "`FS.Read`", "`FS.Read` and `Net`", "`A`, `B` and `C`".
+pkg_effect_gain_list: fn(effects: [String]) -> String Never! {
+    quoted := [String]{}
+    loop effect_name in effects -> quoted.push("`{effect_name}`")
+    if quoted.len() <= 1 -> return quoted.join("")
+    last: quoted.pop() ?? ""
+    "{quoted.join(", ")} and {last}"
 }
 
 // E1220: a package reaches an effect outside this package's budget.

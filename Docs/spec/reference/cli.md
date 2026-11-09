@@ -564,8 +564,9 @@ exactly the flags the command takes.
   acknowledges every right on `run` and `build`, so a run names none; `jet inspect gates` records these and the other
   invocation choices as gate rows; `--offline` reuses only cached
   signed toolchain and package data.
-- `--locked` requires locked dependency and provenance facts; `--fixtures`
-  selects an explicit fixture bundle.
+- `--locked` requires locked dependency and provenance facts, and refuses a
+  dependency whose inferred effect row is wider than the one `.jet/lock`
+  records (E3513); `--fixtures` selects an explicit fixture bundle.
 - `--lib` makes `build` emit the native Library and C header; `--output` selects
   a named output; `--small` favors a smaller binary; `--checked-alloc` on
   `build`, `run` and `test` links the checked memory allocator, which stops at

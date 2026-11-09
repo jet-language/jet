@@ -1894,9 +1894,12 @@ Reaching one is E0749 with the call chain (D-AUTHORITY-DENYROW1). `jet new`
 writes no authority row. A ceiling is something a team chooses to write; it
 is not the price of running.
 
-Jetpack records each dependency's inferred effect row in the lock. An update
-that widens a dependency's row prints which package gained which effect, and
-`--locked` refuses the widening. Code run straight from a URL or the registry
+Jetpack records each dependency's inferred effect row in the lock: the first
+build or run after `jet fetch` records it, and a refetch or update keeps it.
+When an update or an edit widens a dependency's row, the next build or run
+prints which package gained which effect and records the wider row; a row
+only widens. `jet build --locked` refuses the widening (E3513) and writes no
+lock. Code run straight from a URL or the registry
 is pinned by content hash and asks before its first run in a terminal; its
 own `allow` rows acknowledge nothing. A yes is kept with the pinned bytes, and
 changed bytes or new effects ask again. Without a terminal it stops before

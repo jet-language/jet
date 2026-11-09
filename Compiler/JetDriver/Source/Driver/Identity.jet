@@ -2,7 +2,7 @@ use {
     core.build.[BuildGraphNode]
     // Source, module, and package identities remain separate at the driver boundary.
     jet_sema.[SemaOutputIntent]
-    jet_pkg_model.[BuildStamp, ImportBoundary, LockedBuildContribution, PackageGrant]
+    jet_pkg_model.[BuildStamp, ImportBoundary, LockedBuildContribution, PackageEffects, PackageGrant]
     jet_foundation.[
         AppAuthorizedDirectory,
         AppRouteRoot,
@@ -663,6 +663,11 @@ JetDriverCompileResult: struct {
     // The effects the checked entry function requires: its own declared
     // effects and those of every function it reaches through call edges.
     entry_effects: [String]{[String]{}}
+    // A build's or a run's inferred effect row of each package the entry
+    // reaches (`root` the building package), when the build has a dependency
+    // or writes a package effect budget; the project lock records each
+    // dependency's (Jetpack pkg_lock_record_effect_rows).
+    package_effects: [PackageEffects]{[PackageEffects]{}}
     comptime_stdout: String
     comptime_stderr: String
     soft_stop: Bool
