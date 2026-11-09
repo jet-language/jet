@@ -115,16 +115,19 @@ coll_copy: fn(source: I64, target: I64, size: I64) {
     target
 }
 
-// The low byte of `value` in each of `count` bytes: whole words by one string
-// store, then the tail.
+// The low byte of `value` in each of `count` bytes: whole words first, then
+// the tail.
 #Export(c) memset: fn(target: I64, value: I64, count: I64) -> I64 {
     if (count <= I64{0}) -> return target
     byte: value.bit_and(I64{255})
     words: count >> I64{3}
     #Unsafe("C's caller owns count writable bytes at target") {
-        if (words > I64{0}) {
-            // The byte in all eight lanes of a word.
-            os_fill_words_i64(target, wrapping(byte * I64{72340172838076673}), words)
+        // The byte in all eight lanes of a word.
+        pattern: wrapping(byte * I64{72340172838076673})
+        word := I64{0}
+        loop word < words {
+            os_store_i64(wrapping(target + (word << I64{3})), pattern)
+            word += I64{1}
         }
         at := words << I64{3}
         loop at < count {
