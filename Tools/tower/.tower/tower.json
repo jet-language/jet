@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6717,
-    "rev": 96460,
+    "nextNum": 6718,
+    "rev": 96464,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -101676,6 +101676,63 @@
       "created": "2026-11-09T11:36:13.235Z",
       "updated": "2026-11-09T11:36:13.235Z",
       "updatedBy": "Main"
+    },
+    {
+      "id": "c0qyk2os",
+      "num": 6717,
+      "title": "Release cut in 10 minutes or less: faster golden and cases suites",
+      "body": "Owner order (2026-11-09): the whole seed-cut process (preflight, self-host chain, packs, the golden/ui/cases gates, tag and publish) takes at most 10 minutes of wall-clock time. Today a fresh cut takes about 37 minutes: chain ~3, packs ~2, golden ~10.6, ui ~2, cases ~20 (the suites run one after another with 4 shards x --jobs; the baseline side and the retries add more). Speed it up without weakening the gate. Every row still runs or is soundly reused by content identity; no dropped rows, no easier tier, I9 parity is kept, and timeouts are not hidden as flakes.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e5",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P0",
+      "plan": "1. Profile one fresh admit: wall time per phase, and per-row cost split by compile, link, run and harness overhead; find the slowest rows and the idle cores. 2. Find the levers: concurrency (shards and jobs sized to cores and memory, the three suites run concurrently), baseline rows reused from the previous seed's recorded evidence instead of rerunning the release side, fine-grained input-hash reuse of candidate rows, compiler start-up and per-row compile cost (cached Core and Prelude artifacts, one compile shared by the O0/O1/O2 rows where the meaning allows), fewer process spawns, and timeout and retry policy. 3. Implement in Tools/release and the testkit, and measure the result on a real admit.",
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A fresh release admit of a dev commit with no reuse of candidate rows from an earlier admit, on this workstation, runs from the preflight to publish in at most 10 minutes of wall-clock time, with its timestamped log as evidence.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T12:32:46.671Z"
+        },
+        {
+          "n": 2,
+          "text": "The gate keeps its strength: every golden, ui and cases row runs on the candidate or is reused by an exact content identity of every input; the lost-row comparison against the previous seed is unchanged; there are no new skips and no dropped tiers.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T12:32:47.649Z"
+        },
+        {
+          "n": 3,
+          "text": "The flaky-timeout rate under the new concurrency is no higher than today's: retried TIMEOUT rows are counted and reported.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T12:32:48.491Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-09T12:32:41.154Z",
+      "updated": "2026-11-09T12:32:48.491Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 3
     }
   ],
   "decisions": [
@@ -190242,6 +190299,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-09T12:32:48.491Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0qyk2os",
+      "note": "#3 The flaky-timeout rate under the new concurrency is no highe"
+    },
+    {
+      "at": "2026-11-09T12:32:47.649Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0qyk2os",
+      "note": "#2 The gate keeps its strength: every golden, ui and cases row "
+    },
+    {
+      "at": "2026-11-09T12:32:46.671Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0qyk2os",
+      "note": "#1 A fresh release admit of a dev commit with no reuse of candi"
+    },
+    {
+      "at": "2026-11-09T12:32:41.154Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0qyk2os",
+      "note": "Release cut in 10 minutes or less: faster golden and cases suites"
+    },
     {
       "at": "2026-11-09T11:36:13.235Z",
       "by": "Main",
