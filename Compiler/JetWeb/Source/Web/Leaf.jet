@@ -152,6 +152,9 @@ web_leaf: fn(e: &WebEmitter, st: &WebState, name: String, args: [Int], result: B
         // Only a caller that saw the SHA extensions in cpuid runs this leaf,
         // and no web host reports them.
         "os_sha256_block_i64" -> web_op(e, 0x00)
+        // Likewise AES-NI and PCLMULQDQ: only a caller that saw them in
+        // cpuid runs these leaves.
+        "os_aes_encrypt4_10_i64" | "os_aes_encrypt4_12_i64" | "os_aes_encrypt4_14_i64" | "os_aes_decrypt4_10_i64" | "os_aes_decrypt4_12_i64" | "os_aes_decrypt4_14_i64" | "os_aes_encrypt1_10_i64" | "os_aes_encrypt1_12_i64" | "os_aes_encrypt1_14_i64" | "os_ghash1_i64" | "os_ghash4_i64" -> web_op(e, 0x00)
         // Only a carrier thread switches fibers or moves GS, and the web
         // target starts no thread (clone below refuses).
         "os_fiber_switch_i64" | "os_gs_base_write_i64" -> web_op(e, 0x00)
