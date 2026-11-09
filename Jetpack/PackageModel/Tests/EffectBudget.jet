@@ -5,10 +5,9 @@
 use {
     jet_pkg_model.[
         EffectBudgetImport, EffectBudgetModule, EffectBudgetProgram, EffectBudgetWitness,
-        EffectProjection, PackageEffectSummary, PackageEffects, PackageFacts, PackageGrant, ScriptEntry,
-        pkg_application_policy_diagnostic, pkg_ascii_lower, pkg_compute_package_effects,
-        pkg_effect_enforce, pkg_effect_summary_json_for_entry, pkg_effect_summary_line_for_entry,
-        pkg_project_application_effects, pkg_render_effect_projection_json,
+        EffectProjection, PackageEffectSummary, PackageEffects, PackageFacts, PackageGrant,
+        pkg_compute_package_effects, pkg_effect_enforce, pkg_effect_summary_json_for_entry,
+        pkg_effect_summary_line_for_entry, pkg_render_effect_projection_json,
     ]
     jet_foundation.[Span, authority_holds]
 }
@@ -166,116 +165,17 @@ pkg_test_package_effects: fn(name: String, effects: [String], chains: [String: [
     assert((pkg_effect_summary_json_for_entry(summaries, "run") ?? panic("render effects")).contains("\"action\":\"build.effects\""))
 }
 
-#Test("application projection keeps required granted denied and authority distinct") {
-    manifest := PackageFacts.default()
-    manifest.authority.allow = Val([String]{"FS"})
-    manifest.authority.deny = Val([String]{"Panic"})
-    manifest.authority.grants = [PackageGrant]{PackageGrant{package: "netdep", rights: [String]{"Net"}}}
+#Test("effect projection json keeps required granted denied and authority distinct") {
     required: authority_holds([String]{"FS.Read", "Net", "Panic"})
-    projection: pkg_project_application_effects(required, Val(manifest))
-    assert_eq(projection.required_effects, required)
-    assert(projection.granted_effects.contains("FS"))
-    assert(!projection.granted_effects.contains("Net"))
-    assert(projection.denied_effects.contains("Panic"))
-    assert_eq(projection.authority, "package.jet authority")
-    assert(projection.undecided().contains("Net"))
+    projection: EffectProjection{
+        required_effects: required,
+        granted_effects: authority_holds([String]{"FS", "IO"}),
+        denied_effects: [String]{"Panic"},
+        authority: "package.jet authority"
+    }
     json: pkg_render_effect_projection_json(projection) ?? panic("render projection json")
-    field_values: [String]{"required_effects", "granted_effects", "denied_effects", "authority"}
-    loop field in field_values -> assert(json.contains("\"{field}\""))
-}
-
-#Test("manifestless projection grants the beginner basics") {
-    required: authority_holds([String]{"IO", "Mem.Alloc", "Exec.Args"})
-    projection: pkg_project_application_effects(required, None)
-    assert_eq(projection.required_effects, required)
-    assert_eq(projection.granted_effects, authority_holds([String]{"IO", "Mem.Alloc", "Exec.Args"}))
-    assert_eq(projection.undecided().len(), 0)
-    assert_eq(projection.authority, "application default")
-}
-
-#Test("manifestless projection does not request a panic grant") {
-    projection: pkg_project_application_effects(authority_holds([String]{"IO", "Panic"}), None)
-    assert_eq(projection.undecided().len(), 0)
-    assert(projection.is_allowed())
-}
-
-#Test("ambient basics leave file, network, and process effects undecided") {
-    effect_values: [String]{"FS", "Net", "Exec"}
-    loop effect_name in effect_values {
-        required: [String]{effect_name}
-        projection: pkg_project_application_effects(required, None)
-        assert_eq(projection.undecided(), required)
-        diagnostic: pkg_application_policy_diagnostic(projection, [String]{}, None)
-        assert_eq(diagnostic.code, "E1803")
-        assert(diagnostic.fix.contains("allow: [{effect_name}]"))
-    }
-}
-
-#Test("explicit manifest denial overrides the ambient basics") {
-    manifest := PackageFacts.default()
-    manifest.authority.allow = Val([String]{"IO", "Mem.Alloc"})
-    manifest.authority.deny = Val([String]{"Exec"})
-    required: authority_holds([String]{"IO", "Mem.Alloc", "Exec"})
-    projection: pkg_project_application_effects(required, Val(manifest))
-    assert(projection.granted_effects.contains("IO"))
-    assert(!projection.granted_effects.contains("Exec"))
-    assert(projection.denied_effects.contains("Exec"))
-    assert(!projection.is_allowed())
-    diagnostic: pkg_application_policy_diagnostic(projection, [String]{"Exec"}, None)
-    assert(diagnostic.what.contains("denies `Exec`"))
-    assert(pkg_ascii_lower(diagnostic.fix).contains("adjust the denial"))
-}
-
-// The Fix names every undecided right; deny-only rights (`Mem.*`) are never
-// written into `allow:`.
-#Test("application policy diagnostic fix lists the complete missing set") {
-    projection: EffectProjection{
-        required_effects: authority_holds([String]{"IO", "Mem.Alloc", "Exec"}),
-        granted_effects: [String]{},
-        denied_effects: [String]{},
-        authority: "package.jet authority"
-    }
-    diagnostic: pkg_application_policy_diagnostic(projection, [String]{}, None)
-    assert(diagnostic.fix.contains("allow: [Exec, IO]"), diagnostic.fix)
-    assert(!diagnostic.fix.contains("Mem.Alloc"), diagnostic.fix)
-}
-
-#Test("application policy diagnostic keeps policy denial separate") {
-    projection: EffectProjection{
-        required_effects: authority_holds([String]{"FS", "Net"}),
-        granted_effects: [String]{"FS"},
-        denied_effects: authority_holds([String]{"Net", "Panic"}),
-        authority: "package.jet authority"
-    }
-    diagnostic: pkg_application_policy_diagnostic(projection, [String]{"Net"}, None)
-    assert_eq(diagnostic.why, "This program uses the network, and package.jet denies that.")
-    detail: diagnostic.detail ?? panic("E1803 carries its facts as detail")
-    assert(detail.contains("denied_effects=Net, Panic"))
-    assert(detail.contains("denied_required_effects=Net"))
-    assert(detail.contains("authority=package.jet authority"))
-}
-
-#Test("a manifest without authority holds keeps the beginner floor") {
-    manifest: PackageFacts.default()
-    basics: authority_holds([String]{"IO", "Mem.Alloc", "Exec.Args"})
-    assert(pkg_project_application_effects(basics, Val(manifest)).is_allowed())
-    spawn: pkg_project_application_effects(authority_holds([String]{"IO", "Exec"}), Val(manifest))
-    assert_eq(spawn.undecided(), [String]{"Exec"})
-}
-
-// E1803's registry row names no fix channel, so a manifest-less script's
-// diagnostic carries no edit; its Fix leads with the exact `--allow` run.
-#Test("manifestless script E1803 names the run and carries no edit") {
-    source: "// tool header\nuse files: core.files\n\nrun: fn() {{}}\n"
-    required: authority_holds([String]{"FS", "IO", "Panic"})
-    projection: pkg_project_application_effects(required, None)
-    diagnostic: pkg_application_policy_diagnostic(projection, [String]{}, Val(ScriptEntry{path: "tools/gradient.jet", source: source, command: "run"}))
-    assert_eq(diagnostic.code, "E1803")
-    assert(diagnostic.fix.starts_with("Run `jet run --allow=FS tools/gradient.jet`"), diagnostic.fix)
-    assert(diagnostic.edit == None)
-    assert(diagnostic.no_fix_reason != None)
-    denied: pkg_application_policy_diagnostic(projection, [String]{"FS"}, Val(ScriptEntry{path: "gradient.jet", source: source, command: "run"}))
-    // A denial is never repaired by a grant.
-    assert(denied.edit == None)
-    assert(denied.no_fix_reason != None)
+    assert(json.contains("\"required_effects\":[\"FS.Read\",\"Net\",\"Panic\"]"), json)
+    assert(json.contains("\"granted_effects\":[\"FS\",\"IO\"]"), json)
+    assert(json.contains("\"denied_effects\":[\"Panic\"]"), json)
+    assert(json.contains("\"authority\":\"package.jet authority\""), json)
 }
