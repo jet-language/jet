@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6724,
-    "rev": 96498,
+    "nextNum": 6725,
+    "rev": 96500,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -102092,6 +102092,45 @@
       "updated": "2026-11-09T14:13:17.814Z",
       "updatedBy": "Main",
       "criteriaLastN": 1
+    },
+    {
+      "id": "c0pxauid",
+      "num": 6724,
+      "title": "I1: branch lowerings carry a move from one path onto the other, so values leak (same class as the ?? fallback leak)",
+      "body": "ReplMem's audit after fixing ir_or_fallback (ReplMem-1): these lowerings in Compiler/JetIR lower user code inside a branch without saving and joining binding ownership, so a .move() on one path disowns the binding on the other path too and the value is never dropped. ir_short_circuit (&&/|| right side), ir_condition .And, ir_optional_call (x?.f(y.move())), ir_range_switch and ir_mixed_switch (arm fall-through), the require/require_eq message branches and the contract message (BuildContracts.jet), and contract post clauses under present. Fix them all through the shared save/restore plus ir_meet_paths join, as for the valued if and ??. Separate residual: about 12 MB per REPL turn inside jet_eval_native_load (the per-compile native session's image and stub buffers).",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e5",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Each listed lowering saves ownership before its branch and joins the paths after it, through the shared join, with one regression case per shape (an ordinary program whose lock or descriptor count proves the drop), at O0, O1 and O2 and in an AOT build, failing on the base compiler.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T14:13:55.500Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-09T14:13:43.430Z",
+      "updated": "2026-11-09T14:13:55.501Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1
     }
   ],
   "decisions": [
@@ -190927,6 +190966,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-09T14:13:55.501Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0pxauid",
+      "note": "#1 Each listed lowering saves ownership before its branch and j"
+    },
+    {
+      "at": "2026-11-09T14:13:43.431Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0pxauid",
+      "note": "I1: branch lowerings carry a move from one path onto the other, so values leak (same class as the ?? fallback leak)"
+    },
     {
       "at": "2026-11-09T14:13:17.814Z",
       "by": "Main",
