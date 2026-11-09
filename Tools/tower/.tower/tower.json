@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6728,
-    "rev": 96514,
+    "nextNum": 6729,
+    "rev": 96518,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -102297,6 +102297,63 @@
       "updated": "2026-11-09T14:54:54.140Z",
       "updatedBy": "Main",
       "criteriaLastN": 4
+    },
+    {
+      "id": "c0qzu2ay",
+      "num": 6728,
+      "title": "Release gate: a baseline column that cannot run (E2105) is used as a baseline, so nonzero-exit cases pass falsely and the comparison is noise",
+      "body": "The a0_042 admit (c37151785b) reported 9643 gains and two 'lost' rows. LostRows found that the release/baseline column ran a compiler that can't read dev's Core (E2105 Can't read Core/Game/Raylib.jet), so every step failed. Cases that assert only exit nonzero or a !~ stream predicate then 'passed' in that column without testing anything, which made false UNEXPECTED-PASS rows and false 'lost' rows, and the thousands of FAIL->PASS gains are noise. The gate must refuse a baseline column whose compiler can't load the tree's Core (a preflight probe), name which compiler each column ran, and treat an all-failing column as an error, not a baseline.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e5",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Admit refuses to start, with a named error, when a column's compiler cannot check a one-line program against the tree's Core.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T15:03:04.731Z"
+        },
+        {
+          "n": 2,
+          "text": "REPORT.md names the compiler path and identity each column ran.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T15:03:05.992Z"
+        },
+        {
+          "n": 3,
+          "text": "A test admit with a deliberately broken baseline compiler fails at preflight, not with false gains or losses.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T15:03:07.212Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-09T15:02:55.212Z",
+      "updated": "2026-11-09T15:03:07.212Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 3
     }
   ],
   "decisions": [
@@ -191132,6 +191189,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-09T15:03:07.212Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0qzu2ay",
+      "note": "#3 A test admit with a deliberately broken baseline compiler fa"
+    },
+    {
+      "at": "2026-11-09T15:03:05.992Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0qzu2ay",
+      "note": "#2 REPORT.md names the compiler path and identity each column r"
+    },
+    {
+      "at": "2026-11-09T15:03:04.731Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0qzu2ay",
+      "note": "#1 Admit refuses to start, with a named error, when a column's "
+    },
+    {
+      "at": "2026-11-09T15:02:55.212Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0qzu2ay",
+      "note": "Release gate: a baseline column that cannot run (E2105) is used as a baseline, so nonzero-exit cases pass falsely and the comparison is noise"
+    },
     {
       "at": "2026-11-09T14:59:59.148Z",
       "by": "Main",
