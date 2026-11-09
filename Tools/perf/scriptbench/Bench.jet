@@ -430,7 +430,7 @@ run: fn() {
     if !gen.success -> fail("Gen.jet failed (exit {gen.code}): {gen.output}{gen.errors}")
     errors := 0
     losses := 0
-    rows := ["workload\ttier\tpeer\tmetric\tjet\tpeer_value\tratio\tverdict"]
+    rows := ["workload\ttier\tpeer\tmetric\tjet\tpeer_value\tratio\tverdict\tcards"]
     loop w in m.workloads {
         if opts.only.len() > 0 && !opts.only.contains(w.id) -> next
         print("== {w.id} {w.dir}: {w.what} ({w.cards.join(", ")})")
@@ -503,11 +503,12 @@ run: fn() {
                 if ji < 0 -> next
                 j: stats[ji]
                 report_only: m.report_only.contains("{w.id}/{tier}")
+                owners: w.cards.join(",")
                 loop name in w.peers {
                     pi: stat_index(stats, name)
                     if pi < 0 {
                         if timed_out.contains(name) {
-                            rows.push("{w.id}\t{tier}\t{name}\twall\t{j.wall}\t>{m.method.timeout_s}s\t<1\twin")
+                            rows.push("{w.id}\t{tier}\t{name}\twall\t{j.wall}\t>{m.method.timeout_s}s\t<1\twin\t{owners}")
                             print("  {tier} / {name}: the peer overran {m.method.timeout_s} s (wall and cpu win as a lower bound; rss unmeasured)")
                         }
                         next
@@ -525,8 +526,9 @@ run: fn() {
                         if lost && !report_only -> losses += 1
                         shown_j: if metric == "rss" -> mb_text(jv) else -> ms_text(jv)
                         shown_p: if metric == "rss" -> mb_text(pv) else -> ms_text(pv)
-                        rows.push("{w.id}\t{tier}\t{name}\t{metric}\t{jv}\t{pv}\t{ratio_text(jv, pv)}\t{verdict}")
-                        print("  {tier} / {name.pad_end(6, " ")} {metric.pad_end(4, " ")} {shown_j.pad_start(11, " ")} vs {shown_p.pad_start(11, " ")}  {ratio_text(jv, pv).pad_start(6, " ")}  {verdict}")
+                        rows.push("{w.id}\t{tier}\t{name}\t{metric}\t{jv}\t{pv}\t{ratio_text(jv, pv)}\t{verdict}\t{owners}")
+                        owned: if lost -> " ({owners})" else -> ""
+                        print("  {tier} / {name.pad_end(6, " ")} {metric.pad_end(4, " ")} {shown_j.pad_start(11, " ")} vs {shown_p.pad_start(11, " ")}  {ratio_text(jv, pv).pad_start(6, " ")}  {verdict}{owned}")
                     }
                 }
             }

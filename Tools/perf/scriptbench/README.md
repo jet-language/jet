@@ -36,9 +36,10 @@ A full run does the following:
    RSS (the largest across runs). The w08 and w11 fixture server, `server.js`, runs only while
    its workload does.
 5. One cell is printed per workload, tier, peer and metric, with the ratio Jet / peer; each
-   jet-run phase is its own tier. The cells are also written to `OUT/cells.tsv`. The exit is 1
-   on any `LOSS` (a ratio of 1.00 or more) or any wrong output. A jet-run number cited on a card
-   names its phase.
+   jet-run phase is its own tier. The cells are also written to `OUT/cells.tsv`, whose `cards`
+   column names the cards that own the workload's cells (the manifest's `cards`); a printed
+   `LOSS` names them too. The exit is 1 on any `LOSS` (a ratio of 1.00 or more) or any wrong
+   output. A jet-run number cited on a card names its phase.
 
 The comparator is the AGENTS.md rule: Jet beats every peer on every metric, with no averaging
 across peers or workloads. A peer that overruns the 120 s timeout is reported as such: its wall
