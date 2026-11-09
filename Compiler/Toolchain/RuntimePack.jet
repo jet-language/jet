@@ -2,7 +2,7 @@
 // The Jet runtime pack beside a hosted compiler, made by Compiler/build.jet's
 // `runtime` step, and the runtime's one-namespace unit.
 //
-//   jet Toolchain/RuntimePack.jet pack --jet=JET --cc=CC --ar=AR --nm=NM
+//   jet Toolchain/RuntimePack.jet pack --jet=JET --cc=CC --ar=AR
 //       --sqlite3=DIR --mbedtls=DIR --tree=DIR... --policy=FILE --out=DIR --identity=FILE
 //   jet Toolchain/RuntimePack.jet [--root DIR] unit OUT [--test NAME]...
 //   jet Toolchain/RuntimePack.jet [--root DIR] unit OUT --check
@@ -16,9 +16,10 @@
 // object with JET, the jet this build made: its native library hook writes
 // the object, the prelinked pack and image, and the web partition. Jet's
 // linker binds that object alone; the pack links no C (#6693). No Rust
-// compiler, Rust runtime or system linker runs, and NM checks every object
-// for Rust symbols. The `--tree` folders are the runtime's and its
-// producer's sources: the IR builder, optimizer and selector, the x86-64
+// compiler, Rust runtime or system linker runs, and no `nm`: the step reads
+// the symbol tables of every object and archive it makes itself and refuses
+// Rust symbols (rust_problem). The `--tree` folders are the runtime's and
+// its producer's sources: the IR builder, optimizer and selector, the x86-64
 // encoder, object writer and linker, and the WebAssembly selector and
 // encoder of the web partition. Their files make up the pack's identity.
 //
@@ -56,7 +57,7 @@ use {
     term: core.term
 }
 
-USAGE: "usage: jet Toolchain/RuntimePack.jet pack --jet=JET --cc=CC --ar=AR --nm=NM --sqlite3=DIR --mbedtls=DIR --tree=DIR... --policy=FILE --out=DIR --identity=FILE\n       jet Toolchain/RuntimePack.jet [--root DIR] unit OUT [--test NAME]...|--check"
+USAGE: "usage: jet Toolchain/RuntimePack.jet pack --jet=JET --cc=CC --ar=AR --sqlite3=DIR --mbedtls=DIR --tree=DIR... --policy=FILE --out=DIR --identity=FILE\n       jet Toolchain/RuntimePack.jet [--root DIR] unit OUT [--test NAME]...|--check"
 // The checkout folder of the Compiler package, which every recorded path names.
 PACKAGE: "Compiler"
 RUNTIME_SOURCES: "Compiler/JetRuntime/sources.list"
@@ -84,7 +85,6 @@ Toolchain: struct {
     // `name@version` of the jet's identity, the running compiler's.
     version: String
     out: String
-    nm: String
 }
 
 fail: fn(message: String) -> Never {
@@ -139,20 +139,104 @@ output_of: fn(spec: ProcessSpec, what: String) -> String {
     receipt.output
 }
 
-// A Rust runtime input or Rust symbol in `path`, else "".
-rust_problem: fn(tool: Toolchain, path: String) -> String {
-    if path.ends_with(".rlib") || path.ends_with(".rs") -> return "Rust runtime input forbidden: {path}"
-    receipt: process.cmd([String]{tool.nm.copy(), "--format=posix", path.copy()}).output_limit(268435456).run() ?? return "nm {path} could not start: {err}"
-    if receipt.code != 0 || receipt.signal != None -> return "nm {path} failed ({receipt.code}):\n{receipt.errors}"
-    rows: receipt.output.split("\n").to_list()
-    rust: Regex{"(?:^|\s)(?:_R[A-Z]|_ZN\d|__rust_|__rdl_)"}
-    forbidden: loop row in rows if re.is_match(rust, row) -> row.copy()
-    if forbidden.len() > 0 -> return "Rust symbols in {path}:\n{forbidden.join("\n")}"
+// The `width`-byte little-endian unsigned value at `at` in `b`, -1 when it
+// runs past the end.
+le: fn(b: [U8], at: Int, width: Int) -> Int {
+    if at < 0 || at + width > b.len() -> return -1
+    value := 0
+    loop k in 0..<width -> value = value * 256 + Int.from_u8(b[at + width - 1 - k])
+    value
+}
+
+// The NUL-terminated name at `at`, ending at `end` at the latest.
+c_string: fn(b: [U8], at: Int, end: Int) -> String {
+    stop := at
+    loop stop < end && Int.from_u8(b[stop]) != 0 -> stop += 1
+    String.from_bytes_lossy(b.slice(at, stop))
+}
+
+// Appends every name in the symbol tables (SHT_SYMTAB and SHT_DYNSYM) of the
+// 64-bit little-endian ELF object at b[base..<end] to `names`; what is wrong
+// with it, else "".
+elf_symbol_names: fn(b: [U8], base: Int, end: Int, what: String, names: &[String]) -> String {
+    size: end - base
+    if size < 64 || le(b, base, 4) != 1179403647 || le(b, base + 4, 2) != 258 -> return "{what} is not a 64-bit little-endian ELF object"
+    shoff: le(b, base + 40, 8)
+    shentsize: le(b, base + 58, 2)
+    shnum := le(b, base + 60, 2)
+    if shoff == 0 -> return ""
+    if shentsize < 64 || shoff < 0 || shoff + shentsize > size -> return "{what} has a malformed section header table"
+    // More than 0xff00 sections: section 0's sh_size holds the count.
+    if shnum == 0 -> shnum = le(b, base + shoff + 32, 8)
+    if shnum < 0 || shoff + shnum * shentsize > size -> return "{what} has a malformed section header table"
+    loop i in 0..<shnum {
+        header: base + shoff + i * shentsize
+        kind: le(b, header + 4, 4)
+        if kind != 2 && kind != 11 -> next
+        table: le(b, header + 24, 8)
+        table_size: le(b, header + 32, 8)
+        link: le(b, header + 40, 4)
+        entry: le(b, header + 56, 8)
+        if entry < 24 || link >= shnum || table < 0 || table_size < 0 || table + table_size > size -> return "{what} has a malformed symbol table"
+        strings: le(b, base + shoff + link * shentsize + 24, 8)
+        strings_size: le(b, base + shoff + link * shentsize + 32, 8)
+        if strings < 0 || strings_size < 0 || strings + strings_size > size -> return "{what} has a malformed string table"
+        at := base + table
+        loop at + entry <= base + table + table_size {
+            name: le(b, at, 4)
+            if name >= strings_size -> return "{what} has a symbol name outside its string table"
+            text: c_string(b, base + strings + name, base + strings + strings_size)
+            if text != "" -> names.push(text)
+            at += entry
+        }
+    }
     ""
 }
 
-no_rust: fn(tool: Toolchain, path: String) {
-    problem: rust_problem(tool, path)
+// Appends every symbol name of the ELF object, or of each object member of
+// the ar archive, `b` (the file `what`) to `names`; the first problem, else "".
+symbol_names: fn(b: [U8], what: String, names: &[String]) -> String {
+    if b.len() < 8 || String.from_bytes_lossy(b.slice(0, 8)) != "!<arch>\n" -> return elf_symbol_names(b, 0, b.len(), what, names)
+    at := 8
+    loop at < b.len() {
+        if at + 60 > b.len() -> return "{what} ends inside a member header"
+        header: String.from_bytes_lossy(b.slice(at, at + 60))
+        if !header.ends_with("`\n") -> return "{what} has a malformed member header at byte {at}"
+        member: header.slice(0..<16).trim()
+        size: Int.parse(header.slice(48..<58).trim()) ?? return "{what} has a malformed member size at byte {at}"
+        data: at + 60
+        if size < 0 || data + size > b.len() -> return "{what} has a truncated member `{member}`"
+        // The symbol index and the long-name table are not objects.
+        if member != "/" && member != "//" && member != "/SYM64/" {
+            problem: elf_symbol_names(b, data, data + size, "{what}({member})", names)
+            if problem != "" -> return problem
+        }
+        at = data + size + size % 2
+    }
+    ""
+}
+
+// A Rust runtime input or Rust symbol in `path`, else "".
+rust_problem: fn(path: String) -> String {
+    if path.ends_with(".rlib") || path.ends_with(".rs") -> return "Rust runtime input forbidden: {path}"
+    bytes: files.read_bytes(path) ?? return "cannot read `{path}`: {err}"
+    rust_symbols(bytes, path)
+}
+
+// The Rust symbols among the symbol names of `bytes` (the file `what`), or
+// why they can't be read, else "".
+rust_symbols: fn(bytes: [U8], what: String) -> String {
+    names := [String]{}
+    problem: symbol_names(bytes, what, names)
+    if problem != "" -> return problem
+    rust: Regex{"^(?:_R[A-Z]|_ZN\d|__rust_|__rdl_)"}
+    forbidden: loop name in names if re.is_match(rust, name) -> name.copy()
+    if forbidden.len() > 0 -> return "Rust symbols in {what}:\n{forbidden.join("\n")}"
+    ""
+}
+
+no_rust: fn(path: String) {
+    problem: rust_problem(path)
     if problem != "" -> fail(problem)
 }
 
@@ -271,7 +355,7 @@ absolute: fn(path: String) -> String {
 
 pack: fn(args: [String]) {
     flags: parse_flags(args)
-    known: [String]{"jet", "cc", "ar", "nm", "sqlite3", "mbedtls", "policy", "out", "identity"}
+    known: [String]{"jet", "cc", "ar", "sqlite3", "mbedtls", "policy", "out", "identity"}
     loop entry in flags.values {
         if !known.contains(entry.key) -> fail("unknown flag --{entry.key}\n{USAGE}")
     }
@@ -283,7 +367,7 @@ pack: fn(args: [String]) {
     running: process.env_get("JET_COMPILER_IDENTITY") ?? ""
     version: running.partition("#").head
     if !version.contains("@") -> fail("JET_COMPILER_IDENTITY `{running}` names no `name@version`")
-    tool: Toolchain{root: root, jet: absolute(flag(flags, "jet")), version: version.copy(), out: absolute(flag(flags, "out")), nm: absolute(flag(flags, "nm"))}
+    tool: Toolchain{root: root, jet: absolute(flag(flags, "jet")), version: version.copy(), out: absolute(flag(flags, "out"))}
     foreign: foreign_c(flags)
     manifest: files.read(at(root, RUNTIME_SOURCES)) ?? fail("cannot read `{RUNTIME_SOURCES}`: {err}")
     sources: runtime_sources(manifest)
@@ -381,9 +465,9 @@ build: fn(tool: Toolchain, foreign: ForeignC, work: String, source: Inventory, b
         keep_issues(work, tool.out)
         fail(problems.join("\n"))
     }
-    archives: foreign_c_archives(tool, foreign, libraries)
+    archives: foreign_c_archives(foreign, libraries)
     built_objects: [String]{"{prefix}.o", pack, image}
-    loop path in built_objects -> no_rust(tool, path)
+    loop path in built_objects -> no_rust(path)
     abi_text: files.read("{prefix}.abi.json") ?? fail("cannot read the runtime ABI inventory: {err}")
     symbols: abi_symbols(abi_text)
     if symbols.len() == 0 -> fail("runtime ABI inventory is empty")
@@ -592,13 +676,13 @@ vendor_recipe: fn(foreign: ForeignC) -> String {
 }
 
 // Archive each built library, checked for Rust symbols.
-foreign_c_archives: fn(tool: Toolchain, foreign: ForeignC, libraries: [Library]) -> [ForeignArchive] {
+foreign_c_archives: fn(foreign: ForeignC, libraries: [Library]) -> [ForeignArchive] {
     archives := [ForeignArchive]{}
     loop item in libraries {
         argv := [String]{foreign.ar.copy(), "rcsD", item.archive.copy()}
         argv.extend(item.objects.copy())
         _: output_of(process.cmd(argv), "{foreign.ar} rcsD {item.archive}")
-        no_rust(tool, item.archive)
+        no_rust(item.archive)
         archives.push(ForeignArchive{name: item.name.copy(), path: "foreign/{item.name}/lib{item.name}.a", sha256: sha256_file(item.archive)})
     }
     archives
@@ -848,4 +932,104 @@ run: fn() {
     assert(core_import("core.text.[Text, Rune]"))
     assert(!core_import("jet_lexer.[lex]"))
     assert(!core_import("pub: jet.x"))
+}
+
+// Test input: `value` as `width` little-endian bytes at `at` of `b`.
+put: fn(b: &[U8], at: Int, width: Int, value: Int) {
+    rest := value
+    loop k in 0..<width {
+        b[at + k] = U8.from_int(rest % 256) ?? U8{0}
+        rest /%= 256
+    }
+}
+
+// Test input: a 64-bit little-endian ELF relocatable whose .symtab names
+// `names` after the null symbol, its .strtab first.
+elf_with_symbols: fn(names: [String]) -> [U8] {
+    strings := [U8]{U8{0}}
+    offsets := [Int]{}
+    loop name in names {
+        offsets.push(strings.len())
+        strings.extend(name.bytes())
+        strings.push(U8{0})
+    }
+    symtab: (64 + strings.len() + 7) /% 8 * 8
+    symtab_size: (names.len() + 1) * 24
+    shoff: symtab + symtab_size
+    b := [U8]{}
+    loop _ in 0..<(shoff + 3 * 64) -> b.push(U8{0})
+    put(b, 0, 4, 1179403647)
+    // ELFCLASS64, ELFDATA2LSB, EV_CURRENT; ET_REL; EM_X86_64.
+    put(b, 4, 3, 65794)
+    put(b, 16, 2, 1)
+    put(b, 18, 2, 62)
+    put(b, 40, 8, shoff)
+    put(b, 52, 2, 64)
+    put(b, 58, 2, 64)
+    put(b, 60, 2, 3)
+    loop k in 0..<strings.len() -> b[64 + k] = strings[k]
+    loop index in 0..<offsets.len() -> put(b, symtab + (index + 1) * 24, 4, offsets[index])
+    // Section 1: .symtab, linked to section 2, .strtab.
+    put(b, shoff + 64 + 4, 4, 2)
+    put(b, shoff + 64 + 24, 8, symtab)
+    put(b, shoff + 64 + 32, 8, symtab_size)
+    put(b, shoff + 64 + 40, 4, 2)
+    put(b, shoff + 64 + 56, 8, 24)
+    put(b, shoff + 128 + 4, 4, 3)
+    put(b, shoff + 128 + 24, 8, 64)
+    put(b, shoff + 128 + 32, 8, strings.len())
+    b
+}
+
+// Test input: one ar member header, `name` and `size` space-padded.
+ar_header: fn(name: String, size: Int) -> [U8] {
+    fields: [String]{name.copy(), "0", "0", "0", "644", "{size}"}
+    widths: [Int]{16, 12, 6, 6, 8, 10}
+    out := [U8]{}
+    loop index in 0..<fields.len() {
+        out.extend(fields[index].bytes())
+        loop _ in fields[index].count_bytes()..<widths[index] -> out.push(U8{32})
+    }
+    out.extend("`\n".bytes())
+    out
+}
+
+// Test input: `out` with the ar member `name` holding `data`, padded to an
+// even offset.
+ar_member: fn(out: &[U8], name: String, data: [U8]) {
+    out.extend(ar_header(name, data.len()))
+    out.extend(data.copy())
+    if data.len() % 2 == 1 -> out.push(U8{10})
+}
+
+// Test input: an ar archive holding `members` after a symbol index and a
+// long-name table.
+ar_of: fn(members: [[U8]]) -> [U8] {
+    out := "!<arch>\n".bytes()
+    ar_member(out, "/", [U8]{U8{0}, U8{0}, U8{0}, U8{0}, U8{0}})
+    ar_member(out, "//", "a_member_name_longer_than_sixteen.o/\n".bytes())
+    loop at in 0..<members.len() -> ar_member(out, "/{at * 37}", members[at])
+    out
+}
+
+#Test("the Rust check reads ELF and ar symbol tables itself") {
+    rusty: elf_with_symbols([String]{"jet_main", "_ZN3foo3barE", "__rust_alloc"})
+    assert_eq(rust_symbols(rusty, "r.o"), "Rust symbols in r.o:\n_ZN3foo3barE\n__rust_alloc")
+    clean: elf_with_symbols([String]{"jet_main", "memcpy", "x_ZN1a"})
+    assert_eq(rust_symbols(clean, "c.o"), "")
+    names := [String]{}
+    assert_eq(symbol_names(clean, "c.o", names), "")
+    assert_eq(names, [String]{"jet_main", "memcpy", "x_ZN1a"})
+    odd := clean.copy()
+    odd.push(U8{0})
+    archive: ar_of([[U8]]{odd, rusty.copy()})
+    found := [String]{}
+    assert_eq(symbol_names(archive, "lib.a", found), "")
+    assert_eq(found, [String]{"jet_main", "memcpy", "x_ZN1a", "jet_main", "_ZN3foo3barE", "__rust_alloc"})
+    assert_eq(rust_symbols(archive, "lib.a"), "Rust symbols in lib.a:\n_ZN3foo3barE\n__rust_alloc")
+    assert_eq(rust_symbols(ar_of([[U8]]{clean.copy()}), "lib.a"), "")
+    assert_eq(rust_symbols("not an object".bytes(), "x"), "x is not a 64-bit little-endian ELF object")
+    assert_eq(rust_symbols(ar_of([[U8]]{"text".bytes()}), "lib.a"), "lib.a(/0) is not a 64-bit little-endian ELF object")
+    truncated: rusty.slice(0, rusty.len() - 8)
+    assert_eq(rust_symbols(truncated, "t.o"), "t.o has a malformed section header table")
 }
