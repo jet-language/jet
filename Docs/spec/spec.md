@@ -2150,8 +2150,10 @@ the same way on every backend.
 `clear_background`, the 2D shapes (pixels, rectangles with outlines, gradients
 and rounded corners, lines, circles, ellipses, rings and sectors, triangles and
 regular polygons) and `draw_text` (anti-aliased Atkinson Hyperlegible Next at
-any pixel size, whose width `measure_text` reports without an effect) paint an RGBA
-canvas the size of the window with src-over blending; the frame presents the
+any pixel size, whose width `measure_text` reports without an effect) paint a
+premultiplied RGBA canvas the size of the window by core.ui's one blend rule,
+source-over on the sRGB bytes (each byte becomes `s + (d * (255 - a) + 127) / 255`
+for the premultiplied source byte `s`); the frame presents the
 canvas when the next frame begins unless the program presented its own pixels.
 `load_texture_atlas` decodes the atlas's PNG texture in Jet, and `draw_sprite`
 blits a named region of it onto the canvas. The collision checks

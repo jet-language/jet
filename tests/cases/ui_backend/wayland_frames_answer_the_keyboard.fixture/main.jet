@@ -237,9 +237,10 @@ fake_commit: fn(&f: Fake) -[Env, Net, Time]> {
     fake_phase(f)
 }
 
-// Where the chrome is and which buttons wear the focus ring: a dark pixel
-// 17 units right of a button's centre, on the ring 16 to 18 units out,
-// where the header is light otherwise.
+// Where the chrome is and which buttons wear the focus ring: a light pixel
+// 11 units right of a button's centre, on the ring 11 to 12.5 units out,
+// halfway down the 34-unit header, which is dark otherwise. The centres
+// are 8 + 9 units in from the window's right edge, then 28 apart.
 fake_report: fn(&f: Fake) {
     chrome: fake_buffer(f, f.chrome_shown) ?? {
         fake_fail(f, "the chrome shows no wl_buffer")
@@ -249,10 +250,10 @@ fake_report: fn(&f: Fake) {
     names: [String]{"close", "maximize", "minimize"}
     ringed := [String]{}
     loop k in 0..<3 {
-        cx: 400 - 24 - k * 36
-        pixel: fake_pixel(f, chrome, cx + 17 + m, 23 + m)
-        // Bytes B, G, R, A: the header's red is 0xED, the ink's 0x1C.
-        if pixel.len() == 4 && Int.from_u8(pixel[2]) < 128 -> ringed.push(names[k])
+        cx: 400 - 17 - k * 28
+        pixel: fake_pixel(f, chrome, cx + 11 + m, 17 + m)
+        // Bytes B, G, R, A: the header's red is 0x0B, the ring's 0xEC.
+        if pixel.len() == 4 && Int.from_u8(pixel[2]) >= 128 -> ringed.push(names[k])
     }
     f.report.push("chrome at {f.shown_x},{f.shown_y}, ringed {ringed}")
 }

@@ -153,7 +153,7 @@ fake_read_all: fn(&f: Fake, fd: sys.Fd) -[Env]> [U8] {
 }
 
 // The queued events go out with `fd`, which this end then drops.
-fake_send_fd: fn(&f: Fake, fd: sys.Fd) -[Net, Time]> {
+fake_send_fd: fn(&f: Fake, fd: &&sys.Fd) -[Net, Time]> {
     out: f.out.copy()
     f.out = [U8]{}
     net.unix_send(f.stream, out, [sys.Fd]{fd}) ?? {

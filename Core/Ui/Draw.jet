@@ -1,24 +1,28 @@
 use {
     core: core
     font: core.ui.font
-    core.ui.[Color, Point, Rect]
+    core.ui.[Color, Point, Rect, UIRect]
 }
 // __core_ui_draw — core.ui's software rasterizer, a private part of
 // core.ui: 2D drawing, images, text, textures and collision checks in Jet.
 //
-// Drawing paints into an `Image`, straight-alpha RGBA8 pixels, row-major,
-// and touches nothing else: no device, no effect. Every primitive
-// scan-converts into runs, rectangles of one packed 0xRRGGBBAA color
-// clipped to the image, and `fill` paints each run, src-over with
-// rounding, (src * a + dst * (255 - a) + 127) / 255 on every channel,
-// alpha included, the straight-alpha blend (a clear copies instead).
+// Drawing paints into an `Image`, premultiplied RGBA8 pixels, row-major:
+// each of red, green and blue already scaled by the pixel's alpha. It
+// touches nothing else: no device, no effect. Colors come in straight and
+// premultiply on entry, each channel (c * a + 127) / 255, and read back
+// straight, (c * 255 + a / 2) / a; a PNG premultiplies as it loads. Every
+// primitive scan-converts into runs, rectangles of one packed 0xRRGGBBAA
+// color clipped to the image, and `fill` paints each run source-over in
+// sRGB, the one blend rule of core.ui: each byte becomes
+// s + (d * (255 - sa) + 127) / 255, the premultiplied source's byte plus
+// the rest of the image's, alpha included (a clear stores instead).
 // Opaque paint that covers much of the image goes through `stitch`, which
 // rebuilds the pixels from whole-list copies of the untouched bytes and of
 // one painted row; it writes the same bytes as storing them one at a time.
 // Text is Atkinson Hyperlegible Next from core.ui.font, its anti-aliased
 // glyph masks blended as `fill` blends, each mask pixel's coverage scaling
-// the color's alpha. The same integer code runs on every tier and target,
-// so a checksum of the pixels is exact everywhere.
+// the color's alpha. Blending is the same integer arithmetic on every tier
+// and target; a gradient's colors are interpolated in Float first.
 //
 // Textures decode here too: `load_texture_atlas` reads an atlas's region
 // list and its PNG, and `draw_sprite` blends a region onto an image.
@@ -169,15 +173,15 @@ get_collision_rec: fn(rec1: Rect, rec2: Rect) -> Rect Never! {
     Rect{x: 0.0, y: 0.0, width: 0.0, height: 0.0}
 }
 
-// CPU image functions on an RGBA8 Image. They need no window and no
-// effect. The functions that change an image take it through `&` and leave
-// an image with no pixels as it is.
+// CPU image functions on an RGBA8 Image, premultiplied as drawing keeps
+// it. They need no window and no effect. The functions that change an
+// image take it through `&` and leave an image with no pixels as it is.
 
 // A plain image. A side below 1, a side above 16384 or more than 2^24 pixels
 // makes no image.
 gen_image_color: fn(width: Int, height: Int, color: Color) -> Image Never! {
     if !image_size_ok(width, height) -> return no_image()
-    Image{width: width, height: height, pixels: solid_row(pack_rgba(color), width * height)}
+    Image{width: width, height: height, pixels: solid_row(premultiply(pack_rgba(color)), width * height)}
 }
 
 // Checks of checks_x by checks_y pixels with `first` at the top left; a check
@@ -186,8 +190,8 @@ gen_image_checked: fn(width: Int, height: Int, checks_x: Int, checks_y: Int, fir
     if !image_size_ok(width, height) -> return no_image()
     step_x: max_int(checks_x, 1)
     step_y: max_int(checks_y, 1)
-    even: pack_rgba(first)
-    odd: pack_rgba(second)
+    even: premultiply(pack_rgba(first))
+    odd: premultiply(pack_rgba(second))
     pixels := [U8]{}
     loop y in 0..<height {
         loop x in 0..<width {
@@ -198,16 +202,17 @@ gen_image_checked: fn(width: Int, height: Int, checks_x: Int, checks_y: Int, fir
     Image{width: width, height: height, pixels: pixels}
 }
 
-// The pixel at (x, y), or a zero color outside the image.
+// The pixel at (x, y), straight again, or a zero color outside the image.
 get_image_color: fn(image: Image, x: Int, y: Int) -> Color Never! {
     if x < 0 || x >= image.width || y < 0 || y >= image.height -> return Color{r: 0, g: 0, b: 0, a: 0}
-    at: (y * image.width + x) * 4
-    Color{r: byte_at(image.pixels, at), g: byte_at(image.pixels, at + 1), b: byte_at(image.pixels, at + 2), a: byte_at(image.pixels, at + 3)}
+    rgba: straight_at(image.pixels, (y * image.width + x) * 4)
+    Color{r: (rgba >> 24).bit_and(255), g: (rgba >> 16).bit_and(255), b: (rgba >> 8).bit_and(255), a: rgba.bit_and(255)}
 }
 
-// Image drawing copies the color, alpha included; it does not blend.
+// Image drawing stores the color, premultiplied, alpha included; it does
+// not blend.
 image_clear_background: fn(image: &Image, color: Color) Never! {
-    rgba: pack_rgba(color)
+    rgba: premultiply(pack_rgba(color))
     at := 0
     loop at < image.pixels.len() {
         put_rgba(image.pixels, at, rgba)
@@ -217,7 +222,7 @@ image_clear_background: fn(image: &Image, color: Color) Never! {
 
 image_draw_pixel: fn(image: &Image, x: Int, y: Int, color: Color) Never! {
     if x < 0 || x >= image.width || y < 0 || y >= image.height -> return
-    put_rgba(image.pixels, (y * image.width + x) * 4, pack_rgba(color))
+    put_rgba(image.pixels, (y * image.width + x) * 4, premultiply(pack_rgba(color)))
 }
 
 image_draw_rectangle: fn(image: &Image, x: Int, y: Int, width: Int, height: Int, color: Color) Never! {
@@ -253,7 +258,7 @@ image_draw_rectangle_rec: fn(image: &Image, rec: Rect, color: Color) Never! {
     left: trunc_int(x)
     top: trunc_int(y)
     columns: trunc_int(width)
-    rgba: pack_rgba(color)
+    rgba: premultiply(pack_rgba(color))
     if columns < 1 {
         put_rgba(image.pixels, (top * image.width + left) * 4, rgba)
         return
@@ -306,7 +311,7 @@ image_crop: fn(image: &Image, crop: Rect) Never! {
     image.height = rows
 }
 
-// Nearest neighbour: source column (x * ratio) >> 16 with
+// Nearest neighbor: source column (x * ratio) >> 16 with
 // ratio = (width << 16) / new_width + 1, and rows alike. A source past the
 // last column or row, which the C original reads beyond the image at extreme
 // enlargements, takes the last one. A new size outside gen_image_color's
@@ -380,19 +385,34 @@ image_rotate_ccw: fn(image: &Image) Never! {
     turn_image(image, pixels)
 }
 
+// The color operations work on each pixel's straight color and store it
+// premultiplied again.
+
 // Each channel becomes channel * tint / 255, rounded
 // down, alpha included.
 image_color_tint: fn(image: &Image, color: Color) Never! {
-    tint: [Int]{clamp8(color.r), clamp8(color.g), clamp8(color.b), clamp8(color.a)}
-    loop at in 0..<image.pixels.len() {
-        image.pixels[at] = U8{byte_at(image.pixels, at) * tint[at %% 4] /% 255}
+    tint: pack_rgba(color)
+    at := 0
+    loop at + 4 <= image.pixels.len() {
+        rgba: straight_at(image.pixels, at)
+        tinted := 0
+        shift := 24
+        loop shift >= 0 {
+            tinted = (tinted << 8) + (rgba >> shift).bit_and(255) * (tint >> shift).bit_and(255) /% 255
+            shift -= 8
+        }
+        put_rgba(image.pixels, at, premultiply(tinted))
+        at += 4
     }
 }
 
 // Red, green and blue become 255 minus themselves.
 image_color_invert: fn(image: &Image) Never! {
-    loop at in 0..<image.pixels.len() {
-        if at %% 4 != 3 -> image.pixels[at] = U8{255 - byte_at(image.pixels, at)}
+    at := 0
+    loop at + 4 <= image.pixels.len() {
+        rgba: straight_at(image.pixels, at)
+        put_rgba(image.pixels, at, premultiply(0xFFFFFF00 - rgba.bit_and(0xFFFFFF00) + rgba.bit_and(255)))
+        at += 4
     }
 }
 
@@ -401,20 +421,28 @@ image_color_invert: fn(image: &Image) Never! {
 // sum below 0 becomes 1.
 image_color_brightness: fn(image: &Image, brightness: Int) Never! {
     amount: max_int(min_int(brightness, 255), -255)
-    loop at in 0..<image.pixels.len() {
-        if at %% 4 != 3 {
-            sum: byte_at(image.pixels, at) + amount
+    at := 0
+    loop at + 4 <= image.pixels.len() {
+        rgba: straight_at(image.pixels, at)
+        bright := 0
+        shift := 24
+        loop shift >= 8 {
+            sum: (rgba >> shift).bit_and(255) + amount
             value: if sum < 0 -> 1 else -> min_int(sum, 255)
-            image.pixels[at] = U8{value}
+            bright = (bright << 8) + value
+            shift -= 8
         }
+        put_rgba(image.pixels, at, premultiply((bright << 8) + rgba.bit_and(255)))
+        at += 4
     }
 }
 
-// Pixels equal to `color` in all four channels
-// become `replace`.
+// Pixels that hold `color` become `replace`: a pixel holds a color when its
+// bytes are that color premultiplied, so every clear pixel holds every
+// color of alpha 0.
 image_color_replace: fn(image: &Image, color: Color, replace: Color) Never! {
-    target: pack_rgba(color)
-    rgba: pack_rgba(replace)
+    target: premultiply(pack_rgba(color))
+    rgba: premultiply(pack_rgba(replace))
     at := 0
     loop at < image.pixels.len() {
         if image_rgba(image.pixels, at) == target -> put_rgba(image.pixels, at, rgba)
@@ -435,6 +463,46 @@ push_rgba: fn(pixels: &[U8], rgba: Int) {
 
 image_rgba: fn(pixels: [U8], at: Int) -> Int {
     png_rgba(byte_at(pixels, at), byte_at(pixels, at + 1), byte_at(pixels, at + 2), byte_at(pixels, at + 3))
+}
+
+// The packed straight color at byte `at` of premultiplied pixels.
+straight_at: fn(pixels: [U8], at: Int) -> Int {
+    unpremultiply(image_rgba(pixels, at))
+}
+
+// Premultiplied pixels straight again, each as unpremultiply makes it.
+straight_pixels: fn(pixels: [U8]) -> [U8] {
+    out := [U8]{}
+    at := 0
+    loop at + 4 <= pixels.len() {
+        push_rgba(out, straight_at(pixels, at))
+        at += 4
+    }
+    out
+}
+
+// A straight 0xRRGGBBAA color as the canvas holds it: red, green and blue
+// each (c * a + 127) / 255.
+premultiply: fn(rgba: Int) -> Int {
+    alpha: rgba.bit_and(255)
+    if alpha == 255 -> return rgba
+    red: div255((rgba >> 24).bit_and(255) * alpha + 127)
+    green: div255((rgba >> 16).bit_and(255) * alpha + 127)
+    blue: div255((rgba >> 8).bit_and(255) * alpha + 127)
+    (red << 24) + (green << 16) + (blue << 8) + alpha
+}
+
+// A premultiplied 0xRRGGBBAA color straight again: red, green and blue
+// each (c * 255 + a / 2) / a, at most 255; alpha 0 is clear black.
+unpremultiply: fn(rgba: Int) -> Int {
+    alpha: rgba.bit_and(255)
+    if alpha == 255 -> return rgba
+    if alpha == 0 -> return 0
+    half: alpha /% 2
+    red: min_int((rgba >> 24).bit_and(255) * 255 + half, alpha * 255) /% alpha
+    green: min_int((rgba >> 16).bit_and(255) * 255 + half, alpha * 255) /% alpha
+    blue: min_int((rgba >> 8).bit_and(255) * 255 + half, alpha * 255) /% alpha
+    (red << 24) + (green << 16) + (blue << 8) + alpha
 }
 
 turn_image: fn(image: &Image, pixels: [U8]) {
@@ -461,23 +529,16 @@ draw_rectangle: fn(target: &Image, x: Int, y: Int, width: Int, height: Int, colo
     fill(target, x, y, width, height, pack_rgba(color), false)
 }
 
-// The built-in face, loaded on first use, and the glyph masks drawn with
-// it. A window keeps one, so its text loads the face once and draws each
+// The built-in face and the glyph masks drawn with it. A window keeps one,
+// so its text reads and checks the face's tables once and draws each
 // glyph's mask once per size and quarter-pixel position.
 Typeset: struct {
-    face: font.Face?
+    face: font.Face
     cache: font.GlyphCache
 }
 
 typeset: fn() -> Typeset {
-    Typeset{face: None, cache: font.cache()}
-}
-
-typeset_face: fn(set: &Typeset) -> font.Face {
-    if set.face == .Val(face) -> return face
-    loaded: font.regular()
-    set.face = Val(loaded.copy())
-    loaded
+    Typeset{face: font.regular(), cache: font.cache()}
 }
 
 // Text in Atkinson Hyperlegible Next at `size` pixels to the em: the first
@@ -486,16 +547,22 @@ typeset_face: fn(set: &Typeset) -> font.Face {
 // line gap, rounded). Glyphs sit at quarter-pixel positions along the
 // kerned layout from `x`, and each mask pixel blends the color as `fill`
 // does with its alpha scaled by the pixel's coverage. A size below 1 draws
-// nothing.
-draw_text: fn(target: &Image, set: &Typeset, text: String, x: Int, y: Int, size: Int, color: Color) Never! {
-    if size < 1 || target.pixels.len() != target.width * target.height * 4 -> return
+// nothing. Returns the pixels its glyphs' masks cover, unclipped (width
+// 0 when none).
+draw_text: fn(target: &Image, set: &Typeset, text: String, x: Int, y: Int, size: Int, color: Color) -> UIRect Never! {
+    none: UIRect{x: x, y: y, width: 0, height: 0}
+    if size < 1 || target.pixels.len() != target.width * target.height * 4 -> return none
     rgba: pack_rgba(color)
-    if rgba.bit_and(255) == 0 -> return
-    face: typeset_face(set)
+    if rgba.bit_and(255) == 0 -> return none
+    face: set.face
     px: Float{size}
     metrics: face.metrics(px)
     step: line_height(metrics)
     baseline := y + round_px(metrics.ascent)
+    x0 := 0
+    y0 := 0
+    x1 := 0
+    y1 := 0
     loop line in text_lines(text) {
         if baseline - step >= target.height -> break
         if line != "" && baseline + step > 0 {
@@ -504,19 +571,37 @@ draw_text: fn(target: &Image, set: &Typeset, text: String, x: Int, y: Int, size:
                 at: Float{x} + glyph.x
                 whole: floor_px(at)
                 mask: set.cache.glyph(face, glyph.id, px, at - Float{whole})
-                paint_mask(target, mask, whole, baseline + round_px(glyph.y), rgba)
+                origin_y: baseline + round_px(glyph.y)
+                paint_mask(target, mask, whole, origin_y, rgba)
+                if mask.width > 0 && mask.height > 0 {
+                    left: whole + mask.left
+                    top: origin_y - mask.top
+                    if x1 == x0 {
+                        x0 = left
+                        y0 = top
+                        x1 = left + mask.width
+                        y1 = top + mask.height
+                    } else {
+                        x0 = min_int(x0, left)
+                        y0 = min_int(y0, top)
+                        x1 = max_int(x1, left + mask.width)
+                        y1 = max_int(y1, top + mask.height)
+                    }
+                }
             }
         }
         baseline += step
     }
+    if x1 == x0 -> return none
+    UIRect{x: x0, y: y0, width: x1 - x0, height: y1 - y0}
 }
 
 // The width in pixels of the widest line draw_text draws: the line's
 // kerned advance, rounded. Lines split at "\n", and empty text, empty
 // lines and a size below 1 measure 0.
-measure_text: fn(set: &Typeset, text: String, size: Int) -> Int Never! {
+measure_text: fn(text: String, size: Int) -> Int Never! {
     if size < 1 -> return 0
-    face: typeset_face(set)
+    face: font.regular()
     widest := 0
     loop line in text_lines(text) {
         if line != "" -> widest = max_int(widest, round_px(face.layout(line, Float{size}).advance))
@@ -571,8 +656,9 @@ paint_mask: fn(target: &Image, mask: font.GlyphMask, x: Int, y: Int, rgba: Int) 
     }
 }
 
-// The pixel at byte `at` src-over the color (red, green, blue) at alpha
-// `alpha`, as `fill` blends; alpha 255 copies and alpha 0 leaves it.
+// The pixel at byte `at` src-over the straight color (red, green, blue) at
+// alpha `alpha`, premultiplied and blended as `fill` does; alpha 255
+// copies and alpha 0 leaves it.
 blend_pixel: fn(pixels: &[U8], at: Int, red: Int, green: Int, blue: Int, alpha: Int) {
     if alpha == 0 -> return
     if alpha == 255 {
@@ -583,10 +669,10 @@ blend_pixel: fn(pixels: &[U8], at: Int, red: Int, green: Int, blue: Int, alpha: 
         return
     }
     rest: 255 - alpha
-    pixels[at] = U8{div255(red * alpha + Int.from_u8(pixels[at]) * rest + 127)}
-    pixels[at + 1] = U8{div255(green * alpha + Int.from_u8(pixels[at + 1]) * rest + 127)}
-    pixels[at + 2] = U8{div255(blue * alpha + Int.from_u8(pixels[at + 2]) * rest + 127)}
-    pixels[at + 3] = U8{div255(alpha * alpha + Int.from_u8(pixels[at + 3]) * rest + 127)}
+    pixels[at] = U8{over(div255(red * alpha + 127), Int.from_u8(pixels[at]), rest)}
+    pixels[at + 1] = U8{over(div255(green * alpha + 127), Int.from_u8(pixels[at + 1]), rest)}
+    pixels[at + 2] = U8{over(div255(blue * alpha + 127), Int.from_u8(pixels[at + 2]), rest)}
+    pixels[at + 3] = U8{over(alpha, Int.from_u8(pixels[at + 3]), rest)}
 }
 
 // A Float rounded to the nearest whole pixel, halves up; past the Int
@@ -944,11 +1030,20 @@ parse_atlas: fn(path: String, text: String) -> TextureAtlas Never! {
     TextureAtlas{path: path, name: name, texture_path: texture, regions: regions, texture: no_image()}
 }
 
+// The pixels draw_sprite may paint: the first region named `source` at
+// (x, y), unclipped; width 0 for an unknown one.
+sprite_bounds: fn(atlas: TextureAtlas, source: String, x: Int, y: Int) -> UIRect {
+    loop region in atlas.regions {
+        if region.name == source -> return UIRect{x: x, y: y, width: region.width, height: region.height}
+    }
+    UIRect{x: x, y: y, width: 0, height: 0}
+}
+
 // Blends the first region named `source` onto the image with its top-left
-// corner at (x, y), each texture pixel src-over as `fill` blends: alpha 255
-// copies and alpha 0 leaves the image as it was. The parts of the region
-// outside the texture or the image draw nothing, as does an unknown region
-// or an atlas without a texture.
+// corner at (x, y), each premultiplied texture pixel src-over as `fill`
+// blends: alpha 255 copies and alpha 0 leaves the image as it was. The
+// parts of the region outside the texture or the image draw nothing, as
+// does an unknown region or an atlas without a texture.
 draw_sprite: fn(target: &Image, atlas: TextureAtlas, source: String, x: Int, y: Int) Never! {
     texture: atlas.texture
     if texture.width == 0 || target.pixels.len() != target.width * target.height * 4 -> return
@@ -967,8 +1062,8 @@ draw_sprite: fn(target: &Image, atlas: TextureAtlas, source: String, x: Int, y: 
                 if alpha == 255 {
                     loop channel in 0..<4 -> target.pixels[at + channel] = texture.pixels[from + channel]
                 } else if alpha != 0 {
-                    loop channel in 0..<3 -> target.pixels[at + channel] = U8{blend(byte_at(texture.pixels, from + channel), byte_at(target.pixels, at + channel), alpha)}
-                    target.pixels[at + 3] = U8{blend(alpha, byte_at(target.pixels, at + 3), alpha)}
+                    rest: 255 - alpha
+                    loop channel in 0..<4 -> target.pixels[at + channel] = U8{over(byte_at(texture.pixels, from + channel), byte_at(target.pixels, at + channel), rest)}
                 }
                 from += 4
                 at += 4
@@ -1071,7 +1166,7 @@ split_fields: fn(text: String) -> [String] {
     out
 }
 
-clamp8: fn(value: Int) -> Int {
+clamp8: fn(value: Int) -> Int Never! {
     if value < 0 -> return 0
     if value > 255 -> return 255
     value
@@ -1099,8 +1194,9 @@ extent_of: fn(image: Image) -> Extent {
 }
 
 // Opaque paint covering at least 1 / BULK_SHARE of the image goes through
-// `stitch`; smaller or translucent paint stores pixel by pixel.
-BULK_SHARE: 16
+// `stitch`; smaller or translucent paint stores pixel by pixel. A stitch
+// copies the whole image at about a quarter of a store's cost per pixel.
+BULK_SHARE: 4
 
 // Paints the runs as `fill` does. One primitive's runs share a color and
 // come row by row, left to right, so opaque runs covering much of the image
@@ -1141,10 +1237,10 @@ paint: fn(target: &Image, runs: [Run]) {
 }
 
 // Paints the `width` x `height` rectangle at (x, y), clipped to the image,
-// in the packed color `rgba`. A `replace` copies the color as it is (a
-// clear); otherwise each channel blends src-over (see blend), and alpha 0
-// leaves the image as it was. An image whose pixels do not match its size
-// takes nothing.
+// in the straight packed color `rgba`, premultiplied on entry. A `replace`
+// stores the premultiplied color (a clear); otherwise it goes src-over
+// (see over), and alpha 0 leaves the image as it was. An image whose
+// pixels do not match its size takes nothing.
 fill: fn(target: &Image, x: Int, y: Int, width: Int, height: Int, rgba: Int, replace: Bool) {
     if width <= 0 || height <= 0 -> return
     if target.pixels.len() != target.width * target.height * 4 -> return
@@ -1155,9 +1251,9 @@ fill: fn(target: &Image, x: Int, y: Int, width: Int, height: Int, rgba: Int, rep
     right: min_int(x + width, target.width)
     bottom: min_int(y + height, target.height)
     if left >= right || top >= bottom -> return
-    red: (rgba >> 24).bit_and(255)
-    green: (rgba >> 16).bit_and(255)
-    blue: (rgba >> 8).bit_and(255)
+    red: div255((rgba >> 24).bit_and(255) * alpha + 127)
+    green: div255((rgba >> 16).bit_and(255) * alpha + 127)
+    blue: div255((rgba >> 8).bit_and(255) * alpha + 127)
     if replace || alpha == 255 {
         if (right - left) * (bottom - top) * BULK_SHARE >= target.width * target.height {
             starts := [Int]{}
@@ -1168,47 +1264,51 @@ fill: fn(target: &Image, x: Int, y: Int, width: Int, height: Int, rgba: Int, rep
                 counts.push((right - left) * 4)
                 picks.push(0)
             }
-            stitch(target, starts, counts, picks, [[U8]]{solid_row(rgba, right - left)})
+            stitch(target, starts, counts, picks, [[U8]]{solid_row((red << 24) + (green << 16) + (blue << 8) + alpha, right - left)})
             return
         }
         r8: U8{red}
         g8: U8{green}
         b8: U8{blue}
         a8: U8{alpha}
+        // The pixels move into a local for the stores and back after:
+        // stores through `target` cost several times as much.
+        pixels := target.pixels
+        target.pixels = [U8]{}
         loop row in top..<bottom {
             at := (row * target.width + left) * 4
             loop _ in left..<right {
-                target.pixels[at] = r8
-                target.pixels[at + 1] = g8
-                target.pixels[at + 2] = b8
-                target.pixels[at + 3] = a8
+                pixels[at] = r8
+                pixels[at + 1] = g8
+                pixels[at + 2] = b8
+                pixels[at + 3] = a8
                 at += 4
             }
         }
+        target.pixels = pixels
         return
     }
-    // blend's sums, the source's share hoisted; x / 255 is
+    // over's sums, the source's bytes hoisted; x / 255 is
     // (x + 1 + (x >> 8)) >> 8 for every sum src-over makes (at most
     // 255 * 255 + 127).
     rest: 255 - alpha
-    sr: red * alpha + 127
-    sg: green * alpha + 127
-    sb: blue * alpha + 127
-    sa: alpha * alpha + 127
+    pixels := target.pixels
+    target.pixels = [U8]{}
     loop row in top..<bottom {
         at := (row * target.width + left) * 4
         loop _ in left..<right {
-            r: sr + Int.from_u8(target.pixels[at]) * rest
-            g: sg + Int.from_u8(target.pixels[at + 1]) * rest
-            b: sb + Int.from_u8(target.pixels[at + 2]) * rest
-            a: sa + Int.from_u8(target.pixels[at + 3]) * rest
-            target.pixels[at] = U8{(r + 1 + (r >> 8)) >> 8}
-            target.pixels[at + 1] = U8{(g + 1 + (g >> 8)) >> 8}
-            target.pixels[at + 2] = U8{(b + 1 + (b >> 8)) >> 8}
-            target.pixels[at + 3] = U8{(a + 1 + (a >> 8)) >> 8}
+            r: Int.from_u8(pixels[at]) * rest + 127
+            g: Int.from_u8(pixels[at + 1]) * rest + 127
+            b: Int.from_u8(pixels[at + 2]) * rest + 127
+            a: Int.from_u8(pixels[at + 3]) * rest + 127
+            pixels[at] = U8{red + ((r + 1 + (r >> 8)) >> 8)}
+            pixels[at + 1] = U8{green + ((g + 1 + (g >> 8)) >> 8)}
+            pixels[at + 2] = U8{blue + ((b + 1 + (b >> 8)) >> 8)}
+            pixels[at + 3] = U8{alpha + ((a + 1 + (a >> 8)) >> 8)}
             at += 4
         }
     }
+    target.pixels = pixels
 }
 
 // Rebuilds the pixels with the first counts[k] bytes of rows[picks[k]] at
@@ -1239,10 +1339,10 @@ solid_row: fn(rgba: Int, count: Int) -> [U8] {
     row
 }
 
-// One channel src-over with rounding: the source
-// weighs `alpha`, the image the rest.
-blend: fn(source: Int, target: Int, alpha: Int) -> Int {
-    (source * alpha + target * (255 - alpha) + 127) /% 255
+// One premultiplied byte src-over: the source's byte plus `rest`
+// (255 minus the source's alpha) of the image's, rounded.
+over: fn(source: Int, target: Int, rest: Int) -> Int {
+    source + div255(target * rest + 127)
 }
 
 // x / 255 rounded down, for 0 <= x <= 255 * 255 + 127: the sums src-over
@@ -1536,7 +1636,7 @@ lines_ex_bands: fn(rec: Rect, line_thick: Float) -> [Rect] {
 
 // The corner colors blend linearly over the two triangles a GPU draws the
 // quad as, split on the top-left to bottom-right diagonal; each pixel takes
-// the blend at its center, rounded to the nearest level. Equal neighbours in
+// the blend at its center, rounded to the nearest level. Equal neighbors in
 // a row share a run.
 gradient_runs: fn(extent: Extent, rec: Rect, top_left: Int, bottom_left: Int, bottom_right: Int, top_right: Int) -> [Run] {
     runs := [Run]{}
@@ -1780,7 +1880,7 @@ cover_runs: fn(extent: Extent, cover: Cover, rgba: Int) -> [Run] {
     runs
 }
 
-// The cover's pixels with a 4-neighbour outside it.
+// The cover's pixels with a 4-neighbor outside it.
 outline_runs: fn(extent: Extent, cover: Cover, rgba: Int) -> [Run] {
     runs := [Run]{}
     loop k in 0..<(cover.starts.len() - 1) {
@@ -2101,7 +2201,7 @@ decode_png: fn(data: [U8]) -> Image {
             line: png_unfilter(raw, offset, row_bytes, step, previous) ?? return no_image()
             loop column in 0..<pass_width {
                 target: ((origin_y + row * step_y) * width + origin_x + column * step_x) * 4
-                put_rgba(pixels, target, png_sample(line, column, format, palette, key))
+                put_rgba(pixels, target, premultiply(png_sample(line, column, format, palette, key)))
             }
             previous = line
             offset += 1 + row_bytes
@@ -2314,25 +2414,28 @@ coverage: fn(runs: [Run], width: Int, height: Int) -> [Int] {
     // A 2x2 mask one pixel left of and one above its origin, at origin
     // (2, 1): it covers columns 1..2 of rows 0..1. The weight of coverage c
     // is (c * 255 + 127) / 255, so c itself for an opaque color; each
-    // channel then blends as fill does:
+    // color channel premultiplies by it and blends as fill does, over
+    // black adding nothing, and alpha is c + (255 * (255 - c) + 127) / 255
+    // = 255 on an opaque image:
     // c = 255 copies (200, 100, 50, 255);
     // c = 128: (200 * 128 + 127) / 255 = 100, (100 * 128 + 127) / 255 = 50,
-    // (50 * 128 + 127) / 255 = 25, (128 * 128 + 255 * 127 + 127) / 255 = 191;
+    // (50 * 128 + 127) / 255 = 25, alpha 255;
     // c = 0 leaves black;
     // c = 51: (200 * 51 + 127) / 255 = 40, (100 * 51 + 127) / 255 = 20,
-    // (50 * 51 + 127) / 255 = 10, (51 * 51 + 255 * 204 + 127) / 255 = 214.
+    // (50 * 51 + 127) / 255 = 10, alpha 255.
     mask: font.GlyphMask{width: 2, height: 2, left: -1, top: 1, coverage: [U8]{255, 128, 0, 51}}
     drawn := gen_image_color(3, 2, color(0, 0, 0, 255))
     paint_mask(drawn, mask, 2, 1, pack_rgba(color(200, 100, 50, 255)))
-    assert_eq(image_words(drawn), [Int]{3, 2, black, png_rgba(200, 100, 50, 255), png_rgba(100, 50, 25, 191), black, black, png_rgba(40, 20, 10, 214)})
+    assert_eq(image_words(drawn), [Int]{3, 2, black, png_rgba(200, 100, 50, 255), png_rgba(100, 50, 25, 255), black, black, png_rgba(40, 20, 10, 255)})
     // At origin (0, 0) only the mask's bottom right pixel lands, on (0, 0).
     clipped := gen_image_color(2, 1, color(0, 0, 0, 255))
     paint_mask(clipped, mask, 0, 0, pack_rgba(color(200, 100, 50, 255)))
-    assert_eq(image_words(clipped), [Int]{2, 1, png_rgba(40, 20, 10, 214), black})
-    // A color at alpha 128 weighs coverage 255 as (255 * 128 + 127) / 255 = 128.
+    assert_eq(image_words(clipped), [Int]{2, 1, png_rgba(40, 20, 10, 255), black})
+    // A color at alpha 128 weighs coverage 255 as (255 * 128 + 127) / 255 =
+    // 128, and the opaque image stays opaque.
     half := gen_image_color(1, 1, color(0, 0, 0, 255))
     paint_mask(half, font.GlyphMask{width: 1, height: 1, left: 0, top: 1, coverage: [U8]{255}}, 0, 1, pack_rgba(color(200, 100, 50, 128)))
-    assert_eq(image_words(half), [Int]{1, 1, png_rgba(100, 50, 25, 191)})
+    assert_eq(image_words(half), [Int]{1, 1, png_rgba(100, 50, 25, 255)})
 }
 
 #Test("raster text splits lines and rounds its metrics to whole pixels") {
@@ -2393,12 +2496,14 @@ coverage: fn(runs: [Run], width: Int, height: Int) -> [Int] {
 reference_paint: fn(image: &Image, runs: [Run]) {
     loop run in runs {
         alpha: run.rgba.bit_and(255)
+        rest: 255 - alpha
         loop row in run.y..<(run.y + run.height) {
             loop column in run.x..<(run.x + run.width) {
                 at: (row * image.width + column) * 4
-                loop k in 0..<4 {
-                    image.pixels[at + k] = U8{blend((run.rgba >> (24 - 8 * k)).bit_and(255), Int.from_u8(image.pixels[at + k]), alpha)}
+                loop k in 0..<3 {
+                    image.pixels[at + k] = U8{over(div255((run.rgba >> (24 - 8 * k)).bit_and(255) * alpha + 127), Int.from_u8(image.pixels[at + k]), rest)}
                 }
+                image.pixels[at + 3] = U8{over(alpha, Int.from_u8(image.pixels[at + 3]), rest)}
             }
         }
     }
@@ -2677,18 +2782,39 @@ piece_words: fn(pieces: [Piece]) -> [Int] {
     assert(get_image_color(tone, 0, 0).r == 255 && get_image_color(tone, 0, 0).b == 0)
     image_clear_background(tone, blue)
     assert(get_image_color(tone, 0, 0).b == 255)
+    // Half-alpha (200, 100, 50) premultiplies to (200 * 128 + 127) / 255 =
+    // 100, (100 * 128 + 127) / 255 = 50 and (50 * 128 + 127) / 255 = 25,
+    // and reads back as (100 * 255 + 64) / 128 = 199, (50 * 255 + 64) /
+    // 128 = 100 and (25 * 255 + 64) / 128 = 50.
+    soft := gen_image_color(1, 1, Color{r: 200, g: 100, b: 50, a: 128})
+    assert_eq(image_words(soft), [Int]{1, 1, png_rgba(100, 50, 25, 128)})
+    back: get_image_color(soft, 0, 0)
+    assert(back.r == 199 && back.g == 100 && back.b == 50 && back.a == 128)
+    // A clear pixel is all zeros and holds every color of alpha 0.
+    image_clear_background(soft, Color{r: 1, g: 2, b: 3, a: 0})
+    assert_eq(image_words(soft), [Int]{1, 1, 0})
+    image_color_replace(soft, Color{r: 9, g: 9, b: 9, a: 0}, red)
+    assert_eq(image_words(soft), [Int]{1, 1, png_rgba(255, 0, 0, 255)})
 }
 
 #Test("measure_text spans the widest line's rounded advance") {
-    set := typeset()
-    assert_eq(measure_text(set, "", 16), 0)
-    assert_eq(measure_text(set, "\n", 16), 0)
-    assert_eq(measure_text(set, "Hi", 0), 0)
-    face: typeset_face(set)
-    assert_eq(measure_text(set, "Hi", 20), round_px(face.layout("Hi", 20.0).advance))
-    assert_eq(measure_text(set, "ab\nlonger\nc", 16), measure_text(set, "longer", 16))
-    assert(measure_text(set, "HH", 16) > measure_text(set, "H", 16))
-    assert(measure_text(set, "H", 16) > 0)
+    assert_eq(measure_text("", 16), 0)
+    assert_eq(measure_text("\n", 16), 0)
+    assert_eq(measure_text("Hi", 0), 0)
+    face: font.regular()
+    assert_eq(measure_text("Hi", 20), round_px(face.layout("Hi", 20.0).advance))
+    assert_eq(measure_text("ab\nlonger\nc", 16), measure_text("longer", 16))
+    assert(measure_text("HH", 16) > measure_text("H", 16))
+    assert(measure_text("H", 16) > 0)
+}
+
+#Test("a typeset draws with the shipped regular face") {
+    set: typeset()
+    now: font.regular()
+    assert_eq(set.face.glyph_count(), now.glyph_count())
+    assert_eq(set.face.metrics(16.0), now.metrics(16.0))
+    sample: "AVATAR Wavy, Type 0O 1lI fi"
+    assert_eq(set.face.layout(sample, 16.0).advance, now.layout(sample, 16.0).advance)
 }
 
 push_be32: fn(out: &[U8], value: Int) {
@@ -2744,8 +2870,10 @@ gray: fn(value: Int) -> Int {
 
 #Test("png palettes, low depths and tRNS keys") {
     palette: [U8]{255, 0, 0, 0, 255, 0, 0, 0, 255}
+    // Red at tRNS alpha 128 loads premultiplied, (255 * 128 + 127) / 255 =
+    // 128.
     indexed: decode_png(png_bytes(3, 1, 2, 3, 0, palette, [U8]{128}, [U8]{0, 0x18}))
-    assert_eq(image_words(indexed), [Int]{3, 1, 0xFF000080, 0x00FF00FF, 0x0000FFFF})
+    assert_eq(image_words(indexed), [Int]{3, 1, 0x80000080, 0x00FF00FF, 0x0000FFFF})
     bits: decode_png(png_bytes(3, 1, 1, 0, 0, [U8]{}, [U8]{0, 0}, [U8]{0, 0xA0}))
     assert_eq(image_words(bits), [Int]{3, 1, 0xFFFFFFFF, 0, 0xFFFFFFFF})
     keyed: decode_png(png_bytes(1, 1, 16, 2, 0, [U8]{}, [U8]{0, 1, 0, 2, 0, 3}, [U8]{0, 0, 1, 0, 2, 0, 3}))
@@ -2753,10 +2881,14 @@ gray: fn(value: Int) -> Int {
 }
 
 #Test("png sixteen-bit samples, gray alpha and Adam7") {
+    // (0x12, 0x56, 0x9A) at alpha 0xDE = 222 premultiplies to
+    // (18 * 222 + 127) / 255 = 16, (86 * 222 + 127) / 255 = 75 and
+    // (154 * 222 + 127) / 255 = 134.
     wide: decode_png(png_bytes(1, 1, 16, 6, 0, [U8]{}, [U8]{}, [U8]{0, 0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0}))
-    assert_eq(image_words(wide), [Int]{1, 1, 0x12569ADE})
+    assert_eq(image_words(wide), [Int]{1, 1, 0x104B86DE})
+    // Gray 77 at alpha 33: (77 * 33 + 127) / 255 = 10.
     alpha: decode_png(png_bytes(1, 1, 8, 4, 0, [U8]{}, [U8]{}, [U8]{0, 77, 33}))
-    assert_eq(image_words(alpha), [Int]{1, 1, png_rgba(77, 77, 77, 33)})
+    assert_eq(image_words(alpha), [Int]{1, 1, png_rgba(10, 10, 10, 33)})
     interlaced: decode_png(png_bytes(2, 2, 8, 0, 1, [U8]{}, [U8]{}, [U8]{0, 1, 0, 2, 0, 3, 4}))
     assert_eq(image_words(interlaced), [Int]{2, 2, gray(1), gray(2), gray(3), gray(4)})
 }
@@ -2769,23 +2901,40 @@ gray: fn(value: Int) -> Int {
     assert_eq(decode_png(png_bytes(1, 1, 3, 0, 0, [U8]{}, [U8]{}, [U8]{0, 0})).width, 0)
 }
 
-#Test("fills blend src-over with rounding, clip, and clears copy") {
-    // (255 * 128 + 127) / 255 = 128; alpha (128 * 128 + 255 * 127 + 127) / 255 = 191.
+#Test("fills premultiply and blend source-over in sRGB with rounding, clip, and clears store") {
+    // Red at alpha 128 premultiplies to (255 * 128 + 127) / 255 = 128, and
+    // over black adds (0 * 127 + 127) / 255 = 0; alpha is
+    // 128 + (255 * 127 + 127) / 255 = 255: the image stays opaque.
     image := gen_image_color(2, 1, color(0, 0, 0, 255))
     draw_rectangle(image, 0, 0, 1, 1, color(255, 0, 0, 128))
-    assert_eq(image_words(image), [Int]{2, 1, png_rgba(128, 0, 0, 191), png_rgba(0, 0, 0, 255)})
+    assert_eq(image_words(image), [Int]{2, 1, png_rgba(128, 0, 0, 255), png_rgba(0, 0, 0, 255)})
     draw_rectangle(image, -5, 0, 9, 4, color(9, 9, 9, 0))
-    assert_eq(image_words(image), [Int]{2, 1, png_rgba(128, 0, 0, 191), png_rgba(0, 0, 0, 255)})
+    assert_eq(image_words(image), [Int]{2, 1, png_rgba(128, 0, 0, 255), png_rgba(0, 0, 0, 255)})
     draw_rectangle(image, 1, -3, 4, 9, color(7, 8, 9, 255))
-    assert_eq(image_words(image), [Int]{2, 1, png_rgba(128, 0, 0, 191), png_rgba(7, 8, 9, 255)})
+    assert_eq(image_words(image), [Int]{2, 1, png_rgba(128, 0, 0, 255), png_rgba(7, 8, 9, 255)})
     draw_rectangle(image, 2, 0, 1, 1, color(255, 255, 255, 255))
     draw_rectangle(image, 0, 1, 2, 1, color(255, 255, 255, 255))
-    assert_eq(image_words(image), [Int]{2, 1, png_rgba(128, 0, 0, 191), png_rgba(7, 8, 9, 255)})
+    assert_eq(image_words(image), [Int]{2, 1, png_rgba(128, 0, 0, 255), png_rgba(7, 8, 9, 255)})
+    // A clear stores the color premultiplied: alpha 0 is all zeros.
     clear_background(image, color(1, 2, 3, 0))
-    assert_eq(image_words(image), [Int]{2, 1, png_rgba(1, 2, 3, 0), png_rgba(1, 2, 3, 0)})
-    assert_eq(blend(0, 255, 128), 127)
-    assert_eq(blend(200, 100, 0), 100)
-    assert_eq(blend(200, 100, 255), 200)
+    assert_eq(image_words(image), [Int]{2, 1, 0, 0})
+    // Half-alpha red over a clear image: red 128 + (0 * 127 + 127) / 255 =
+    // 128, green and blue 0, and alpha 128 + 0 = 128.
+    clear := gen_image_color(1, 1, color(0, 0, 0, 0))
+    draw_rectangle(clear, 0, 0, 1, 1, color(255, 0, 0, 128))
+    assert_eq(image_words(clear), [Int]{1, 1, png_rgba(128, 0, 0, 128)})
+    // White at alpha 20 over Jet black, #0B0B0D: the source is
+    // (255 * 20 + 127) / 255 = 20 and each byte adds
+    // (d * 235 + 127) / 255 of the image, 10 of 11 and 12 of 13, so
+    // #1E1E20; alpha 20 + (255 * 235 + 127) / 255 = 255.
+    ink := gen_image_color(1, 1, color(11, 11, 13, 255))
+    draw_rectangle(ink, 0, 0, 1, 1, color(255, 255, 255, 20))
+    assert_eq(image_words(ink), [Int]{1, 1, png_rgba(30, 30, 32, 255)})
+    // A clear source keeps (255 * 127 + 127) / 255 = 127 of white under
+    // rest 127; an opaque one is its byte; rest 255 keeps the image.
+    assert_eq(over(0, 255, 127), 127)
+    assert_eq(over(200, 100, 0), 200)
+    assert_eq(over(0, 100, 255), 100)
     // An image whose pixels do not match its size takes nothing.
     broken := Image{width: 2, height: 2, pixels: [U8]{0, 0, 0, 0}}
     draw_rectangle(broken, 0, 0, 2, 2, color(255, 255, 255, 255))
@@ -2814,11 +2963,16 @@ changed_pixels: fn(before: Image, after: Image) -> [Int] {
     white: color(255, 255, 255, 255)
     blank: gen_image_color(60, 50, color(0, 0, 0, 255))
     hi := gen_image_color(60, 50, color(0, 0, 0, 255))
-    draw_text(hi, set, "Hi", 4, 3, 16, white)
+    box: draw_text(hi, set, "Hi", 4, 3, 16, white)
     marks: changed_pixels(blank, hi)
     assert(marks.len() > 0)
-    metrics: typeset_face(set).metrics(16.0)
-    width: measure_text(set, "Hi", 16)
+    // The box it returns holds every pixel it changed.
+    loop k in 0..<(marks.len() /% 2) {
+        assert(marks[2 * k] >= box.x && marks[2 * k] < box.x + box.width)
+        assert(marks[2 * k + 1] >= box.y && marks[2 * k + 1] < box.y + box.height)
+    }
+    metrics: font.regular().metrics(16.0)
+    width: measure_text("Hi", 16)
     // "Hi" has no descender: its ink lies between x and its advance, and
     // between the line's top and its baseline.
     loop k in 0..<(marks.len() /% 2) {
@@ -2827,7 +2981,7 @@ changed_pixels: fn(before: Image, after: Image) -> [Int] {
     }
     // A whole pixel to the right draws the same pixels one column over.
     moved := gen_image_color(60, 50, color(0, 0, 0, 255))
-    draw_text(moved, set, "Hi", 5, 3, 16, white)
+    _: draw_text(moved, set, "Hi", 5, 3, 16, white)
     shifted: changed_pixels(blank, moved)
     assert_eq(shifted.len(), marks.len())
     loop k in 0..<(marks.len() /% 2) {
@@ -2838,9 +2992,9 @@ changed_pixels: fn(before: Image, after: Image) -> [Int] {
     }
     // A second line draws the first's ink again, one line height lower.
     one := gen_image_color(60, 50, color(0, 0, 0, 255))
-    draw_text(one, set, "H", 4, 3, 16, white)
+    _: draw_text(one, set, "H", 4, 3, 16, white)
     two := gen_image_color(60, 50, color(0, 0, 0, 255))
-    draw_text(two, set, "H\nH", 4, 3, 16, white)
+    _: draw_text(two, set, "H\nH", 4, 3, 16, white)
     ink: changed_pixels(blank, one)
     both: changed_pixels(blank, two)
     step: line_height(metrics)
@@ -2851,23 +3005,27 @@ changed_pixels: fn(before: Image, after: Image) -> [Int] {
     }
     // A clear color, a size below 1 and empty text leave the image.
     same := gen_image_color(60, 50, color(0, 0, 0, 255))
-    draw_text(same, set, "Hi", 4, 3, 0, white)
-    draw_text(same, set, "Hi", 4, 3, 16, color(255, 255, 255, 0))
-    draw_text(same, set, "", 4, 3, 16, white)
+    assert_eq(draw_text(same, set, "Hi", 4, 3, 0, white).width, 0)
+    assert_eq(draw_text(same, set, "Hi", 4, 3, 16, color(255, 255, 255, 0)).width, 0)
+    assert_eq(draw_text(same, set, "", 4, 3, 16, white).width, 0)
     assert_eq(changed_pixels(blank, same).len(), 0)
 }
 
 #Test("sprites copy opaque texels, skip clear ones and blend the rest") {
-    texture: Image{width: 2, height: 2, pixels: [U8]{255, 0, 0, 255, 0, 255, 0, 0, 0, 0, 255, 128, 9, 9, 9, 255}}
+    // Premultiplied texels: opaque red, a clear one, half-alpha blue
+    // ((255 * 128 + 127) / 255 = 128) and opaque gray.
+    texture: Image{width: 2, height: 2, pixels: [U8]{255, 0, 0, 255, 0, 0, 0, 0, 0, 0, 128, 128, 9, 9, 9, 255}}
     regions: [Region]{Region{name: "a", x: 0, y: 0, width: 2, height: 2}, Region{name: "a", x: 1, y: 1, width: 1, height: 1}}
     atlas: TextureAtlas{path: "t.atlas", name: "t", texture_path: "t.png", regions: regions, texture: texture}
-    base: png_rgba(10, 20, 30, 40)
+    // (10, 20, 30, 40) premultiplies to (10 * 40 + 127) / 255 = 2,
+    // (20 * 40 + 127) / 255 = 3 and (30 * 40 + 127) / 255 = 5.
+    base: png_rgba(2, 3, 5, 40)
     image := gen_image_color(3, 2, color(10, 20, 30, 40))
     draw_sprite(image, atlas, "a", 1, 0)
-    // Texel (0, 1) at alpha 128 over (10, 20, 30, 40): (0 * 128 + 10 * 127 + 127) / 255 = 5,
-    // (20 * 127 + 127) / 255 = 10, (255 * 128 + 30 * 127 + 127) / 255 = 143,
-    // (128 * 128 + 40 * 127 + 127) / 255 = 84.
-    assert_eq(image_words(image), [Int]{3, 2, base, png_rgba(255, 0, 0, 255), base, base, png_rgba(5, 10, 143, 84), png_rgba(9, 9, 9, 255)})
+    // Texel (0, 1), (0, 0, 128, 128), over (2, 3, 5, 40) keeps
+    // (d * 127 + 127) / 255 of each byte: 0 + 1, 0 + 1, 128 + 2 and
+    // 128 + 20.
+    assert_eq(image_words(image), [Int]{3, 2, base, png_rgba(255, 0, 0, 255), base, base, png_rgba(1, 1, 130, 148), png_rgba(9, 9, 9, 255)})
     // Hanging off the left edge, only the region's right column lands.
     left := gen_image_color(3, 2, color(10, 20, 30, 40))
     draw_sprite(left, atlas, "a", -1, 0)

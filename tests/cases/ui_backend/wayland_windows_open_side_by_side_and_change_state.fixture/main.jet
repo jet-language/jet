@@ -96,7 +96,7 @@ fake_flush: fn(&f: Fake) -[Net, Time]> {
 }
 
 fake_fail: fn(&f: Fake, message: String) {
-    if f.failures.len() < 8 -> f.failures.push(message)
+    if f.failures.len() < 8 -> f.failures.push(message.copy())
 }
 
 // xdg_toplevel.configure at `width` x `height` logical units with
@@ -255,7 +255,7 @@ fake_dispatch: fn(&f: Fake) {
 }
 
 // Serves one window until it disconnects.
-fake_serve: fn(stream: net.UnixStream) -[Net, Time]> Fake {
+fake_serve: fn(stream: &&net.UnixStream) -[Net, Time]> Fake {
     f := Fake{
         stream: stream, inbox: [U8]{}, out: [U8]{}, registry: 0, compositor: 0, shm: 0, wm_base: 0,
         surface: 0, xdg_surface: 0, toplevel: 0, title: "", fds: [sys.Fd]{}, pool_fds: [sys.Fd]{},
@@ -288,12 +288,11 @@ fake_serve: fn(stream: net.UnixStream) -[Net, Time]> Fake {
 }
 
 // Accepts the two windows, whichever connects first, and serves both at
-// once.
+// once: each side accepts its own connection, so the child owns its stream
+// from the start.
 fake_serve_two: fn(listener: net.UnixListener) -[Net, Time]> [Fake] {
-    first_stream: net.unix_accept(listener) ?? panic("accept: {err}")
-    first: task { fake_serve(first_stream) }
-    second_stream: net.unix_accept(listener) ?? panic("accept: {err}")
-    second: fake_serve(second_stream)
+    first: task { fake_serve(net.unix_accept(listener) ?? panic("accept: {err}")) }
+    second: fake_serve(net.unix_accept(listener) ?? panic("accept: {err}"))
     [Fake]{first.join() ?? panic("compositor task failed"), second}
 }
 

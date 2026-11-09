@@ -1,7 +1,9 @@
 # The program saves its headless window's first frame as Frame.pam; every
 # tier must rasterize the same bytes. The SHA-256 is that of the clear and
-# three rectangles under straight-alpha src-over, (s * a + d * (255 - a) +
-# 127) / 255 on each channel, computed apart from Jet.
+# three rectangles under core.ui's one blend rule, computed apart from Jet:
+# each color premultiplies on entry, (c * a + 127) / 255, and each byte,
+# alpha included, becomes s + (d * (255 - a) + 127) / 255. The frame ends
+# opaque, so its straight bytes are the canvas's.
 step: built
 stdout: = DrawCanvas.out
-file: Frame.pam sha256 = "63446d5308256561da2b378369c5b29636d573dd5f14c5f8dfc10fa7b04b5817"
+file: Frame.pam sha256 = "afe46603a5d6d82778a8d2e4a680182467a3a1b07b8df563446494f0836ed374"

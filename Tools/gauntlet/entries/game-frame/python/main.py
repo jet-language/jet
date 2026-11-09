@@ -1,9 +1,11 @@
 # game-frame: 1200 frames of a 2D game scene on a 320x200 RGBA8 software
 # canvas. Each frame clears, draws a scrolling tile map, 48 translucent
-# sprites, a translucent HUD bar and two lines of 5x7 bitmap-font text. Every
-# rectangle clips to the canvas and blends src-over per channel, alpha
-# included: (s * a + d * (255 - a) + 127) // 255. With JET_FRAME_CAPTURE set,
-# every presented frame is written there as a PAM image.
+# sprites, a translucent HUD bar and two lines of 5x7 bitmap-font text. The
+# canvas is premultiplied, as core.ui's is: a color premultiplies on entry,
+# (c * a + 127) // 255, and every rectangle clips to the canvas and blends
+# src-over per channel, alpha included: s + (d * (255 - a) + 127) // 255.
+# With JET_FRAME_CAPTURE set, every presented frame is written there as a
+# PAM image; the canvas is opaque, so its bytes are the straight ones.
 import os
 
 W = 320
@@ -35,16 +37,20 @@ FONT5X7 = bytes([
 ])
 
 canvas = bytearray(W * H * 4)
-# The blend of source `s` at alpha `a` over every target byte, as a
-# bytes.translate table: one per (s, a) seen.
+# The blend of premultiplied source byte `s` at alpha `a` over every target
+# byte, as a bytes.translate table: one per (s, a) seen.
 tables = {}
+
+
+def mul(a, b):
+    return (a * b + 127) // 255
 
 
 def blend_table(source, alpha):
     key = (source << 8) | alpha
     table = tables.get(key)
     if table is None:
-        table = bytes((source * alpha + target * (255 - alpha) + 127) // 255 for target in range(256))
+        table = bytes(source + mul(target, 255 - alpha) for target in range(256))
         tables[key] = table
     return table
 
@@ -59,9 +65,9 @@ def fill(x, y, width, height, color, replace):
     y1 = min(y + height, H)
     if x1 <= x0 or y1 <= y0:
         return
-    red = color >> 24
-    green = (color >> 16) & 255
-    blue = (color >> 8) & 255
+    red = mul(color >> 24, alpha)
+    green = mul((color >> 16) & 255, alpha)
+    blue = mul((color >> 8) & 255, alpha)
     if replace or alpha == 255:
         run = bytes((red, green, blue, alpha)) * (x1 - x0)
         for row in range(y0, y1):

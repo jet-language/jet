@@ -1,0 +1,18 @@
+# #6701: a Wayland window keeps a thousand frames a second at 2560x1440.
+# A fake compositor on $WAYLAND_DISPLAY configures the window 2560x1440
+# (its content 2560x1406 under Jet's 34-pixel title bar) and answers each
+# commit's frame callback at once. The window paints its scene once, then
+# animates streaks, a counter, a bar graph and a caret, drawing only what
+# moved; over 600 frames after 60 to warm up, the drawing and the time
+# from one frame to the next (drawing, the copy to the shared buffer and
+# the commit) stay within 1 ms at the 99th percentile. Release builds
+# measured 144-186 us and 220-267 us on a loaded machine.
+requires: os:linux
+fixture: wayland_windows_hold_a_one_millisecond_frame.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: WAYLAND_DISPLAY={work}/wl.sock
+step release: jet run --release main.jet
+exit: 0
+stdout: = "2560x1406: 600 frames drawn and 600 frame to frame times measured\ndraw p99 within 1 ms: true\nframe to frame p99 within 1 ms: true\n"
+stderr: empty

@@ -3,7 +3,7 @@ use {
     sys: core.sys
     net: core.net
     core.term.[Key]
-    core.ui.[FrameStats, UICursor, UIError, UIEvent, UIIcon, UIPointerButton, UIRect]
+    core.ui.[FrameStats, UICursor, UIError, UIEvent, UIIcon, UIIconImage, UIPointerButton, UIRect]
     core.ui.host.[UITextRange]
     core.ui.host.ime.[UIIMEComposition]
     frame: __core_ui_frame
@@ -76,18 +76,19 @@ TEXT_TYPES: [String]{"text/plain;charset=utf-8", "UTF8_STRING", "text/plain", "T
 // waits on the other client.
 CLIPBOARD_MAX: 16777216
 CLIPBOARD_WAIT_NS: 2000000000
+// The most rectangles a damage list keeps apart (past that the two that
+// add the least area join); rectangles closer than DAMAGE_GAP pixels join.
+DAMAGE_RECTS: 64
+DAMAGE_GAP: 8
 
-// A buffer of the pool. `stale_*` bound what changed in the frames since
-// this buffer was last drawn (empty when x1 <= x0); drawing into it again
-// copies only that plus the new damage.
+// A buffer of the pool. `stale` is what changed in the frames since this
+// buffer was last drawn, as a damage list (grow_damage); drawing into it
+// again copies only that plus the new damage.
 Buffer: struct {
     id: Int
     offset: Int
     busy: Bool
-    stale_x0: Int
-    stale_y0: Int
-    stale_x1: Int
-    stale_y1: Int
+    stale: [UIRect]
 }
 
 // A buffer of the chrome's pool. `ring` names the shadow ring it holds
@@ -255,6 +256,10 @@ Connection: struct {
     priv subcompositor: Int
     priv decoration: Int
     priv framed: Bool
+    // JET_UI_UNCAPPED=1: a frame starts whenever a buffer is free, not when
+    // the compositor's frame callback fires, so the program renders as fast
+    // as it can and the display shows the latest frame at each refresh.
+    priv uncapped: Bool
     priv chrome: Int
     priv chrome_subsurface: Int
     priv chrome_viewport: Int
@@ -268,7 +273,7 @@ Connection: struct {
     // The chrome must be drawn again before it is next seen.
     priv chrome_stale: Bool
     priv painter: frame.Painter
-    // The title, icon, focus, states and pressed buttons the frame shows.
+    // The title, focus, states and pressed buttons the frame shows.
     priv look: frame.FrameLook
     priv fullscreen: Bool
     // The window geometry set last (x, y, width, height); empty before.
@@ -411,7 +416,7 @@ connect: fn(width: Int, height: Int, title: String) -[Env, Net, Time]> Connectio
     chrome_memory: sys.shared_memory(4096) ?? return Err(UIError.Protocol("allocating window buffers failed: {err}"))
     look: frame.FrameLook{
         title: title.copy(), active: true, square: false, maximized: false, coarse: false,
-        hover: frame.FrameButton.Nothing, pressed: frame.FrameButton.Nothing, focus: frame.FrameButton.Nothing, icon: [U8]{}, icon_side: 0,
+        hover: frame.FrameButton.Nothing, pressed: frame.FrameButton.Nothing, focus: frame.FrameButton.Nothing,
     }
     c := Connection{
         stream: stream, out: [U8]{}, out_fds: [sys.Fd]{}, inbox: [U8]{}, inbox_fds: [sys.Fd]{},
@@ -430,7 +435,7 @@ connect: fn(width: Int, height: Int, title: String) -[Env, Net, Time]> Connectio
         time_ns: 0, delta_ns: 0, frame_start: 0, costs: [Int]{}, cost_at: 0, safety_ns: 0, input_ms: -1,
         presented: 0, missed: 0, discarded: 0, presented_abs: 0, intervals: [Int]{}, interval_at: 0,
         latencies: [Int]{}, latency_at: 0,
-        subcompositor: 0, decoration: 0, framed: false, chrome: 0, chrome_subsurface: 0, chrome_viewport: 0,
+        subcompositor: 0, decoration: 0, framed: false, uncapped: sys_get("JET_UI_UNCAPPED") == "1", chrome: 0, chrome_subsurface: 0, chrome_viewport: 0,
         chrome_pool: 0, chrome_memory: chrome_memory, chrome_buffers: [ChromeBuffer]{}, chrome_width: 0, chrome_height: 0,
         chrome_shown: false, chrome_stale: true, painter: frame.painter(), look: look, fullscreen: false, geometry: [Int]{},
         on_chrome: false, chrome_fx: 0, chrome_fy: 0, chrome_shape: 0, title_press_ms: -1, touch: 0, touch_id: -1,
@@ -460,6 +465,8 @@ connect: fn(width: Int, height: Int, title: String) -[Env, Net, Time]> Connectio
     request(c, c.xdg_surface, 1, words([Int]{c.toplevel}))
     request(c, c.toplevel, 2, text_argument(title))
     request(c, c.toplevel, 3, text_argument(DEFAULT_APP_ID))
+    // The taskbar shows Jet's mark until the program names its own icon.
+    set_icon(c, jet_icon()) ?? ()
     // Fractional scaling: the compositor names the scale in 120ths and
     // the viewport maps the pixel-sized buffer onto the logical size.
     if c.fractional_manager != 0 && c.viewporter != 0 {
@@ -510,10 +517,12 @@ connect: fn(width: Int, height: Int, title: String) -[Env, Net, Time]> Connectio
 
 // Waits for the next frame and returns the events that arrived meanwhile.
 // The compositor alone paces frames, the way a GTK frame clock or a
-// Chromium BeginFrame does: exactly one frame is in flight, the next is
-// due when its wl_surface.frame callback fires, and nothing ever waits
-// on a frame rate. Input is read the moment it arrives and goes out with
-// the next frame.
+// Chromium BeginFrame does: exactly one frame callback is in flight, the
+// next frame is due when it fires, and nothing ever waits on a frame
+// rate. Input is read the moment it arrives; a key, text, a composition
+// or a button (`urgent`) starts a frame at once when a buffer is free,
+// so it reaches the screen at the next vblank, and the callback paces
+// the frames after it.
 //
 // A frame starts late, its measured draw time plus a safety margin
 // before the vblank it aims for, so its input is as fresh as possible;
@@ -523,14 +532,22 @@ connect: fn(width: Int, height: Int, title: String) -[Env, Net, Time]> Connectio
 // A frame that presents nothing lets the window sleep until input
 // arrives. A failure ends the stream with `.Close`; `failure()` says why.
 next_frame: fn(&c: Connection) -[Env, Net, Time]> [UIEvent] {
-    loop c.failure == None && !c.frame_due && !has_close(c.events) {
+    // Uncapped, nothing waits for the callback: read what has arrived.
+    if c.uncapped && c.mapped -> receive(c, 0)
+    loop c.failure == None && !c.frame_due && !has_close(c.events) && !urgent(c) {
         // Idle (the last frame presented nothing): ask for a frame once
         // something happens.
         if c.mapped && c.frame_callback == 0 && (c.events.len() > 0 || wants_reshape(c)) -> request_frame(c)
         flush(c)
         receive(c, -1)
     }
-    if c.frame_due && c.failure == None && !has_close(c.events) {
+    if c.uncapped {
+        // Uncapped, a frame is for now: `time` and `delta` follow the
+        // program's own rate, never the display's.
+        c.frame_due = false
+        c.target_ns = core.time.__clock_mono_ns()
+        c.follows = false
+    } else if c.frame_due && c.failure == None && !has_close(c.events) {
         c.frame_due = false
         // Frames step one refresh at a time; prediction jitter of a
         // refresh never moves `time`. Only a gap of more than one refresh
@@ -541,13 +558,15 @@ next_frame: fn(&c: Connection) -[Env, Net, Time]> [UIEvent] {
         c.target_ns = if c.follows -> c.target_ns + refresh else -> predicted
         // Draw late: wait for the frame's start, reading input meanwhile.
         start: c.target_ns - draw_budget(c) - safety(c)
-        loop c.failure == None && !has_close(c.events) {
+        loop c.failure == None && !has_close(c.events) && !urgent(c) {
             now: core.time.__clock_mono_ns()
             if now >= start -> break
             receive(c, start - now)
         }
     } else {
-        c.target_ns = core.time.__clock_mono_ns()
+        // Idle, or urgent input between callbacks: the frame is for now,
+        // and never earlier than the frame before it.
+        c.target_ns = max_int(core.time.__clock_mono_ns(), c.target_ns)
         c.follows = false
     }
     if c.first_target < 0 -> c.first_target = c.target_ns
@@ -572,6 +591,25 @@ next_frame: fn(&c: Connection) -[Env, Net, Time]> [UIEvent] {
     events: c.events.copy()
     c.events.clear()
     events
+}
+
+// Whether input a person waits to see has arrived (a key, text, a
+// composition or a button) and a buffer is free to show it in; uncapped,
+// a free buffer alone is enough.
+urgent: fn(c: Connection) -> Bool {
+    if !c.mapped || free_buffer(c) < 0 -> return false
+    if c.uncapped -> return true
+    loop event in c.events {
+        if event == {
+            .KeyDown(_) -> return true
+            .Text(_) -> return true
+            .Compose(_) -> return true
+            .PointerDown(_) -> return true
+            .PointerUp(_) -> return true
+            else -> {}
+        }
+    }
+    false
 }
 
 // The refresh interval in nanoseconds, or 0 while unknown.
@@ -689,55 +727,31 @@ present: fn(&c: Connection, pixels: [U8], damage: [UIRect]) UIError! -[Env, Net,
         if c.failure == .Val(failure) -> return Err(failure)
         if free < 0 -> return Err(UIError.Protocol("the compositor released no buffer for a second"))
     }
-    // The damage's bounds, clipped to the window.
-    x0 := c.width
-    y0 := c.height
-    x1 := 0
-    y1 := 0
+    // The damage clipped to the window; the copy is it plus what changed
+    // since this buffer was last drawn, rectangle by rectangle.
+    shown := [UIRect]{}
     loop rect in damage {
         left: max_int(rect.x, 0)
         top: max_int(rect.y, 0)
         right: min_int(rect.x + rect.width, c.width)
         bottom: min_int(rect.y + rect.height, c.height)
-        if right > left && bottom > top {
-            x0 = min_int(x0, left)
-            y0 = min_int(y0, top)
-            x1 = max_int(x1, right)
-            y1 = max_int(y1, bottom)
-        }
+        if right > left && bottom > top -> shown.push(UIRect{x: left, y: top, width: right - left, height: bottom - top})
     }
-    target: c.buffers[free]
-    stale: target.stale_x1 > target.stale_x0
-    copy_x0: if stale -> min_int(x0, target.stale_x0) else -> x0
-    copy_y0: if stale -> min_int(y0, target.stale_y0) else -> y0
-    copy_x1: if stale -> max_int(x1, target.stale_x1) else -> x1
-    copy_y1: if stale -> max_int(y1, target.stale_y1) else -> y1
-    if copy_x1 > copy_x0 && copy_y1 > copy_y0 {
-        shm_pixels(c.memory, target.offset, pixels, c.width * 4, copy_x0, copy_y0, copy_x1 - copy_x0, copy_y1 - copy_y0, c.format) ?? return Err(err)
-        if rounded(c) -> cover_corners(c, target.offset, copy_x0, copy_y0, copy_x1, copy_y1)
+    copies := c.buffers[free].stale.copy()
+    loop rect in shown -> grow_damage(copies, rect)
+    offset: c.buffers[free].offset
+    loop rect in copies {
+        shm_pixels(c.memory, offset, pixels, c.width * 4, rect.x, rect.y, rect.width, rect.height, c.format) ?? return Err(err)
+        if rounded(c) -> cover_corners(c, offset, rect.x, rect.y, rect.x + rect.width, rect.y + rect.height)
     }
     // The chrome commits first; the content's commit shows both.
     if c.chrome_stale -> draw_chrome(c)
     if c.failure == .Val(failure) -> return Err(failure)
     loop index in 0..<c.buffers.len() {
         if index == free {
-            c.buffers[index].stale_x0 = 0
-            c.buffers[index].stale_y0 = 0
-            c.buffers[index].stale_x1 = 0
-            c.buffers[index].stale_y1 = 0
-        } else if x1 > x0 && y1 > y0 {
-            other: c.buffers[index]
-            if other.stale_x1 > other.stale_x0 {
-                c.buffers[index].stale_x0 = min_int(other.stale_x0, x0)
-                c.buffers[index].stale_y0 = min_int(other.stale_y0, y0)
-                c.buffers[index].stale_x1 = max_int(other.stale_x1, x1)
-                c.buffers[index].stale_y1 = max_int(other.stale_y1, y1)
-            } else {
-                c.buffers[index].stale_x0 = x0
-                c.buffers[index].stale_y0 = y0
-                c.buffers[index].stale_x1 = x1
-                c.buffers[index].stale_y1 = y1
-            }
+            c.buffers[index].stale = [UIRect]{}
+        } else {
+            loop rect in shown -> grow_damage(c.buffers[index].stale, rect)
         }
     }
     c.buffers[free].busy = true
@@ -745,18 +759,12 @@ present: fn(&c: Connection, pixels: [U8], damage: [UIRect]) UIError! -[Env, Net,
     put32(c.out, c.buffers[free].id)
     put32(c.out, 0)
     put32(c.out, 0)
-    loop rect in damage {
-        left: max_int(rect.x, 0)
-        top: max_int(rect.y, 0)
-        right: min_int(rect.x + rect.width, c.width)
-        bottom: min_int(rect.y + rect.height, c.height)
-        if right > left && bottom > top {
-            header(c, c.surface, 9, 16)
-            put32(c.out, left)
-            put32(c.out, top)
-            put32(c.out, right - left)
-            put32(c.out, bottom - top)
-        }
+    loop rect in shown {
+        header(c, c.surface, 9, 16)
+        put32(c.out, rect.x)
+        put32(c.out, rect.y)
+        put32(c.out, rect.width)
+        put32(c.out, rect.height)
     }
     if c.frame_callback == 0 {
         c.frame_callback = new_id(c)
@@ -790,6 +798,66 @@ free_buffer: fn(c: Connection) -> Int {
         if !c.buffers[index].busy -> return index
     }
     -1
+}
+
+// Adds `rect` to a damage list: it joins every rectangle it overlaps or
+// comes within DAMAGE_GAP pixels of, as their bounds, until it meets none.
+// When it meets none and the list already holds DAMAGE_RECTS, it joins the
+// one whose bounds with it add the least area, and goes on meeting others.
+// An empty rectangle adds nothing.
+grow_damage: fn(&damage: [UIRect], rect: UIRect) {
+    if rect.width <= 0 || rect.height <= 0 -> return
+    // The list moves into a local for the scans and back after: reads
+    // through `damage` cost several times as much.
+    rects := damage
+    damage = [UIRect]{}
+    merged := rect
+    inside := false
+    loop {
+        // The newest rectangles are the likeliest near: from the end.
+        hit := -1
+        k := rects.len() - 1
+        loop k >= 0 && hit < 0 {
+            if near(rects[k], merged) -> hit = k
+            k -= 1
+        }
+        if hit < 0 && rects.len() >= DAMAGE_RECTS {
+            least := -1
+            loop i in 0..<rects.len() {
+                cost: area(bounds(rects[i], merged)) - area(rects[i])
+                if least < 0 || cost < least {
+                    least = cost
+                    hit = i
+                }
+            }
+        }
+        if hit < 0 -> break
+        // Inside what it met, it changes nothing.
+        if contains(rects[hit], merged) {
+            inside = true
+            break
+        }
+        merged = bounds(rects[hit], merged)
+        _: rects.remove(hit, .Slot)
+    }
+    if !inside -> rects.push(merged)
+    damage = rects
+}
+
+area: fn(r: UIRect) -> Int { r.width * r.height }
+
+contains: fn(a: UIRect, b: UIRect) -> Bool {
+    a.x <= b.x && a.y <= b.y && b.x + b.width <= a.x + a.width && b.y + b.height <= a.y + a.height
+}
+
+near: fn(a: UIRect, b: UIRect) -> Bool {
+    a.x <= b.x + b.width + DAMAGE_GAP && b.x <= a.x + a.width + DAMAGE_GAP && a.y <= b.y + b.height + DAMAGE_GAP && b.y <= a.y + a.height + DAMAGE_GAP
+}
+
+bounds: fn(a: UIRect, b: UIRect) -> UIRect {
+    x: min_int(a.x, b.x)
+    y: min_int(a.y, b.y)
+    UIRect{x: x, y: y, width: max_int(a.x + a.width, b.x + b.width) - x, height: max_int(a.y + a.height, b.y + b.height) - y}
 }
 
 fail: fn(&c: Connection, failure: UIError) {
@@ -862,25 +930,23 @@ receive: fn(&c: Connection, timeout_ns: Int) -[Env, Net, Time]> {
         fail(c, UIError.Protocol("waiting for the compositor failed: {err}"))
         return
     }
-    if !ready {
-        repeat_key(c)
-        return
+    if ready {
+        message: net.unix_receive(c.stream, RECEIVE_MAX) ?? {
+            fail(c, UIError.Protocol("reading from the compositor failed: {err}"))
+            return
+        }
+        if message.bytes.len() == 0 && message.fds.len() == 0 {
+            fail(c, UIError.Protocol("the compositor closed the connection"))
+            return
+        }
+        loop b in message.bytes -> c.inbox.push(b)
+        // Newest first, so `pop` yields the oldest queued descriptor.
+        loop fd in message.fds.move() { c.inbox_fds.insert(0, fd) }
+        dispatch(c)
     }
-    message: net.unix_receive(c.stream, RECEIVE_MAX) ?? {
-        fail(c, UIError.Protocol("reading from the compositor failed: {err}"))
-        return
-    }
-    if message.bytes.len() == 0 && message.fds.len() == 0 {
-        fail(c, UIError.Protocol("the compositor closed the connection"))
-        return
-    }
-    loop b in message.bytes -> c.inbox.push(b)
-    // Newest first, so `pop` yields the oldest queued descriptor.
-    loop fd in message.fds.move() { c.inbox_fds.insert(0, fd) }
-    dispatch(c)
     repeat_key(c)
-    // What only the frame shows (a hover, focus, a pressed button) goes
-    // out now; a new size waits for the frame drawn at it.
+    // What only the frame shows (a hover, focus, a pressed button) goes out
+    // now; a new size waits for the frame drawn at it.
     if c.chrome_stale && c.mapped && !wants_reshape(c) -> refresh_chrome(c)
     flush(c)
 }
@@ -1816,7 +1882,6 @@ set_app_id: fn(&c: Connection, app_id: String) {
 // unsets the window's. A compositor without the protocol keeps the icon
 // of the app_id's desktop entry.
 set_icon: fn(&c: Connection, icon: UIIcon) UIError! -[Env]> {
-    frame_icon(c, icon)
     if c.icon_manager == 0 -> return Ok()
     toplevel: c.toplevel
     manager: c.icon_manager
@@ -1861,6 +1926,14 @@ set_icon: fn(&c: Connection, icon: UIIcon) UIError! -[Env]> {
     c.icon_pool = pool
     c.icon_buffers = buffers
     Ok()
+}
+
+// Jet's mark, at the sizes taskbars and window switchers show most.
+jet_icon: fn() -> UIIcon {
+    images := [UIIconImage]{}
+    sides: [Int]{32, 64, 128}
+    loop side in sides -> images.push(UIIconImage{side: side, pixels: frame.app_icon(side)})
+    UIIcon{name: "", images: images}
 }
 
 // Straight-alpha RGBA pixels as premultiplied ARGB8888 words stored
@@ -2035,7 +2108,7 @@ allocate: fn(&c: Connection, width: Int, height: Int) -[Env, Net, Time]> {
     loop k in 0..<BUFFER_COUNT {
         id: new_id(c)
         request(c, c.pool, 0, words([Int]{id, k * frame_bytes, w, h, w * 4, format}))
-        c.buffers.push(Buffer{id: id, offset: k * frame_bytes, busy: false, stale_x0: 0, stale_y0: 0, stale_x1: w, stale_y1: h})
+        c.buffers.push(Buffer{id: id, offset: k * frame_bytes, busy: false, stale: [UIRect]{UIRect{x: 0, y: 0, width: w, height: h}}})
     }
     c.memory = memory
     flush(c)
@@ -2083,10 +2156,7 @@ toplevel_states: fn(&c: Connection, body: [U8]) {
 // corners are drawn again.
 restale: fn(&c: Connection) {
     loop index in 0..<c.buffers.len() {
-        c.buffers[index].stale_x0 = 0
-        c.buffers[index].stale_y0 = 0
-        c.buffers[index].stale_x1 = c.width
-        c.buffers[index].stale_y1 = c.height
+        c.buffers[index].stale = [UIRect]{UIRect{x: 0, y: 0, width: c.width, height: c.height}}
     }
     c.chrome_stale = true
 }
@@ -2540,7 +2610,7 @@ set_focus: fn(&c: Connection, button: frame.FrameButton) {
 // The compositor's window menu, under the focused button or else the
 // title's start, at the header's foot (content surface coordinates).
 window_menu: fn(&c: Connection, serial: Int) {
-    x: if c.look.focus == .Nothing -> frame.ICON_X else -> frame.button_centre(c.look.focus, c.logical_width, c.look)
+    x: if c.look.focus == .Nothing -> frame.TITLE_INSET else -> frame.button_center(c.look.focus, c.logical_width, c.look)
     request(c, c.toplevel, 4, words([Int]{c.seat, serial, x, 0}))
 }
 
@@ -2578,31 +2648,6 @@ edge_cursor: fn(edges: Int) -> UICursor {
     if edges == frame.EDGE_TOP + frame.EDGE_RIGHT -> return UICursor.ResizeNE
     if edges == frame.EDGE_BOTTOM + frame.EDGE_LEFT -> return UICursor.ResizeSW
     UICursor.ResizeSE
-}
-
-// The image of `icon` the title bar shows: the smallest at least the
-// icon's size in pixels, else the largest; none shows Jet's own mark.
-frame_icon: fn(&c: Connection, icon: UIIcon) {
-    want: frame.px(frame.ICON_SIZE, c.scale120)
-    best := -1
-    loop index in 0..<icon.images.len() {
-        side: icon.images[index].side
-        if best < 0 {
-            best = index
-            next
-        }
-        current: icon.images[best].side
-        better: if current < want -> side > current else -> side >= want && side < current
-        if better -> best = index
-    }
-    if best < 0 {
-        c.look.icon = [U8]{}
-        c.look.icon_side = 0
-    } else {
-        c.look.icon = icon.images[best].pixels.copy()
-        c.look.icon_side = icon.images[best].side
-    }
-    c.chrome_stale = true
 }
 
 // ---- keys -------------------------------------------------------------

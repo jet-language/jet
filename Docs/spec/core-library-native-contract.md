@@ -315,7 +315,7 @@ read cannot be folded into the default while compiling the program. Prelude
 `Perf.*` calls load the same source module as an explicit `core.perf` import.
 
 `core.ui` drawing runs entirely in Jet: the `color` constructor clamps each
-channel to `0..255`, and the rasterizer paints straight-alpha RGBA pixels in
+channel to `0..255`, and the rasterizer paints premultiplied RGBA pixels in
 Jet code that is the same on every tier, so no native or compile-time drawing
 route duplicates it.
 

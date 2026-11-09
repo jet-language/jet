@@ -444,16 +444,19 @@ impl TUIBackend {
 // window's frames (`frame.draw_rectangle(…)`) and into Images in memory
 // (`image_draw_rectangle(image, …)`). It is pure Jet: every tier and
 // target draws the same bytes. A primitive covers the pixels whose
-// centers lie inside it and blends src-over with rounding,
-// (src * a + dst * (255 - a) + 127) / 255 on every channel, alpha
-// included; a clear copies its color. Float geometry (Point, Rect) is in
+// centers lie inside it and blends source-over in sRGB, the one blend rule
+// of core.ui: drawing keeps premultiplied RGBA8 pixels, a color
+// premultiplies as it comes in, each channel (c * a + 127) / 255, and each
+// byte becomes s + (d * (255 - sa) + 127) / 255, alpha included; a clear
+// stores its color. Float geometry (Point, Rect) is in
 // pixels and snaps to a 1/256-pixel grid. Text is Atkinson Hyperlegible
 // Next, anti-aliased, kerned, at any whole-pixel size. The names and
 // argument orders are the classic immediate-mode 2D ones, so such programs
 // port line for line.
 
-// An image in memory: `width` x `height` RGBA pixels, row-major, alpha
-// straight. An image of width 0 holds no pixels.
+// An image in memory: `width` x `height` RGBA pixels, row-major. It keeps
+// them premultiplied and hands them out straight. An image of width 0
+// holds no pixels.
 Image: struct {
     priv canvas: draw.Image
 }
@@ -463,9 +466,10 @@ impl Image {
 
     height: fn(self) -> Int { self.canvas.height }
 
-    // `height` rows of `width` RGBA pixels, 4 bytes each, as
-    // `Frame.present` takes them.
-    pixels: fn(self) -> [U8] { self.canvas.pixels.copy() }
+    // `height` rows of `width` RGBA pixels, 4 bytes each, alpha straight,
+    // as `Frame.present` takes them: each color channel (c * 255 + a / 2)
+    // / a of the premultiplied pixel, and a clear pixel all zeros.
+    pixels: fn(self) -> [U8] { draw.straight_pixels(self.canvas.pixels) }
 }
 
 // A texture atlas: named regions of one PNG texture.
@@ -496,11 +500,9 @@ load_texture_atlas: fn(path: String) -[FS]> TextureAtlas Never! {
 
 // The width in pixels of the widest line `draw_text` draws at `size`: its
 // kerned advance in Atkinson Hyperlegible Next, rounded to a whole pixel.
-// Lines split at "\n". Each call loads the face.
-measure_text: fn(text: String, size: Int) -> Int Never! {
-    set := draw.typeset()
-    draw.measure_text(set, text, size)
-}
+// Lines split at "\n". The face is read while building, so a call only
+// lays out the text.
+measure_text: fn(text: String, size: Int) -> Int Never! { draw.measure_text(text, size) }
 
 // Collision checks: they draw nothing and need no window.
 check_collision_recs: fn(rec1: Rect, rec2: Rect) -> Bool Never! { draw.check_collision_recs(rec1, rec2) }
@@ -587,7 +589,7 @@ image_draw_rectangle_rec: fn(image: &Image, rec: Rect, color: Color) Never! { dr
 // truncated sides (not below 0) as the size.
 image_crop: fn(image: &Image, crop: Rect) Never! { draw.image_crop(image.canvas, crop) }
 
-// Nearest neighbour; a new size an image cannot have leaves the image as
+// Nearest neighbor; a new size an image cannot have leaves the image as
 // it is.
 image_resize_nn: fn(image: &Image, new_width: Int, new_height: Int) Never! { draw.image_resize_nn(image.canvas, new_width, new_height) }
 
@@ -612,7 +614,8 @@ image_color_invert: fn(image: &Image) Never! { draw.image_color_invert(image.can
 // above 255 becomes 255 and one below 0 becomes 1.
 image_color_brightness: fn(image: &Image, brightness: Int) Never! { draw.image_color_brightness(image.canvas, brightness) }
 
-// Pixels equal to `color` in all four channels become `replace`.
+// Pixels that hold `color` become `replace`. An image keeps its pixels
+// premultiplied, so a clear pixel holds every color of alpha 0.
 image_color_replace: fn(image: &Image, color: Color, replace: Color) Never! { draw.image_color_replace(image.canvas, color, replace) }
 
 // ---- windows ----------------------------------------------------------
@@ -775,12 +778,14 @@ WindowState: struct {
     priv script: [[UIEvent]]
     priv checksums: [Int]
     priv cursor: UICursor
-    // What the frames drew, and whether the latest frame drew or presented.
+    // What the frames drew, whether the latest frame drew or presented,
+    // and the pixels its draws changed (a damage list, grow_damage).
     priv canvas: draw.Image
-    // The face text draws in, loaded at the first draw_text, and its masks.
+    // The glyph masks text draws with.
     priv typeset: draw.Typeset
     priv drawn: Bool
     priv presented: Bool
+    priv damage: [UIRect]
     // The keys and pointer buttons held and the pointer's place, as of
     // the latest frame's events.
     priv keys: [Key]
@@ -810,7 +815,7 @@ open: fn(*, width: Int, height: Int, title: String) -[Env, Net, Time]> Window UI
     state: WindowState{
         width: link.width(), height: link.height(), scale: link.scale(), frames: 0, closed: false, failure: None,
         link: Val(shared link), script: [[UIEvent]]{}, checksums: [Int]{}, cursor: UICursor.Default,
-        canvas: draw.no_image(), typeset: draw.typeset(), drawn: false, presented: false, keys: [Key]{}, buttons: [UIPointerButton]{}, mouse_x: 0, mouse_y: 0, clipboard: "",
+        canvas: draw.no_image(), typeset: draw.typeset(), drawn: false, presented: false, damage: [UIRect]{}, keys: [Key]{}, buttons: [UIPointerButton]{}, mouse_x: 0, mouse_y: 0, clipboard: "",
         maximized: false, fullscreen: false,
     }
     Ok(Window{state: shared state})
@@ -826,7 +831,7 @@ headless: fn(*, width: Int, height: Int, script: [[UIEvent]]) -> Window UIError!
     state: WindowState{
         width: width, height: height, scale: 1.0, frames: 0, closed: false, failure: None,
         link: None, script: script, checksums: [Int]{}, cursor: UICursor.Default,
-        canvas: draw.no_image(), typeset: draw.typeset(), drawn: false, presented: false, keys: [Key]{}, buttons: [UIPointerButton]{}, mouse_x: 0, mouse_y: 0, clipboard: "",
+        canvas: draw.no_image(), typeset: draw.typeset(), drawn: false, presented: false, damage: [UIRect]{}, keys: [Key]{}, buttons: [UIPointerButton]{}, mouse_x: 0, mouse_y: 0, clipboard: "",
         maximized: false, fullscreen: false,
     }
     Ok(Window{state: shared state})
@@ -928,9 +933,11 @@ impl Window {
         Ok()
     }
 
-    // Shows `icon` as the window's icon; one with no name and no images
-    // unsets it. A display server without xdg_toplevel_icon_v1 shows
-    // the icon of the app_id's desktop entry instead.
+    // Shows `icon` as the window's icon in the taskbar and window
+    // switcher. Until it is set, a window shows Jet's mark. One with no
+    // name and no images unsets it, and so does a display server without
+    // xdg_toplevel_icon_v1: both show the icon of the app_id's desktop
+    // entry instead.
     set_icon: fn(self, icon: UIIcon) UIError! -[Env]> {
         if has_nul(icon.name) -> return Err(UIError.Invalid("an icon name has no NUL byte"))
         loop image in icon.images {
@@ -1073,15 +1080,16 @@ impl FrameCursor.Iterator {
     Item: Frame
     // The next frame, once it is due; none after the frame that carried
     // `.Close`. A frame that drew and presented nothing shows what it drew
-    // first; a display server that fails then records the failure and
-    // ends the frames.
+    // first, copying only the pixels its draws changed (one pixel when
+    // they all fell outside, so its frames keep coming); a display server
+    // that fails then records the failure and ends the frames.
     next: fn(&self) -[Env, Net, Time]> Frame? {
         guard := self.state.guard_edit()
         if guard.value.drawn && !guard.value.presented {
-            whole: [UIRect]{UIRect{x: 0, y: 0, width: guard.value.canvas.width, height: guard.value.canvas.height}}
             if guard.value.link == .Val(link) {
+                damage: if guard.value.damage.len() > 0 -> guard.value.damage.copy() else -> [UIRect]{UIRect{x: 0, y: 0, width: 1, height: 1}}
                 connection := link.guard_edit()
-                if wayland.present(connection.value, guard.value.canvas.pixels, whole) == .Err(error) {
+                if wayland.present(connection.value, guard.value.canvas.pixels, damage) == .Err(error) {
                     guard.value.failure = Val(error)
                     guard.value.closed = true
                 }
@@ -1091,6 +1099,7 @@ impl FrameCursor.Iterator {
         }
         guard.value.drawn = false
         guard.value.presented = false
+        guard.value.damage.clear()
         if guard.value.closed -> return None
         events := [UIEvent]{}
         index: guard.value.frames
@@ -1236,14 +1245,14 @@ impl Frame {
         guard := self.state.guard_edit()
         draw.fit(guard.value.canvas, self.width, self.height)
         draw.clear_background(guard.value.canvas, color)
-        guard.value.drawn = true
+        internal.mark(guard.value, UIRect{x: 0, y: 0, width: self.width, height: self.height})
     }
 
     draw_pixel: fn(self, x: Int, y: Int, color: Color) {
         guard := self.state.guard_edit()
         draw.fit(guard.value.canvas, self.width, self.height)
         draw.draw_pixel(guard.value.canvas, x, y, color)
-        guard.value.drawn = true
+        internal.mark(guard.value, UIRect{x: x, y: y, width: 1, height: 1})
     }
 
     // A line; both endpoints are drawn.
@@ -1251,7 +1260,7 @@ impl Frame {
         guard := self.state.guard_edit()
         draw.fit(guard.value.canvas, self.width, self.height)
         draw.draw_line(guard.value.canvas, start_x, start_y, end_x, end_y, color)
-        guard.value.drawn = true
+        internal.mark(guard.value, internal.spanning(start_x, start_y, end_x, end_y))
     }
 
     // A filled circle with a whole-pixel radius; a radius below 1 draws
@@ -1260,7 +1269,7 @@ impl Frame {
         guard := self.state.guard_edit()
         draw.fit(guard.value.canvas, self.width, self.height)
         draw.draw_circle(guard.value.canvas, center_x, center_y, radius, color)
-        guard.value.drawn = true
+        internal.mark(guard.value, UIRect{x: center_x - radius - 1, y: center_y - radius - 1, width: 2 * radius + 3, height: 2 * radius + 3})
     }
 
     // The pixels of draw_circle's disc that touch a pixel outside it.
@@ -1268,7 +1277,7 @@ impl Frame {
         guard := self.state.guard_edit()
         draw.fit(guard.value.canvas, self.width, self.height)
         draw.draw_circle_lines(guard.value.canvas, center_x, center_y, radius, color)
-        guard.value.drawn = true
+        internal.mark(guard.value, UIRect{x: center_x - radius - 1, y: center_y - radius - 1, width: 2 * radius + 3, height: 2 * radius + 3})
     }
 
     // The pixels at whole offsets (dx, dy) from the center with
@@ -1277,7 +1286,7 @@ impl Frame {
         guard := self.state.guard_edit()
         draw.fit(guard.value.canvas, self.width, self.height)
         draw.draw_ellipse(guard.value.canvas, center_x, center_y, radius_h, radius_v, color)
-        guard.value.drawn = true
+        internal.mark(guard.value, internal.around(Float{center_x} - radius_h, Float{center_y} - radius_v, Float{center_x} + radius_h, Float{center_y} + radius_v))
     }
 
     // The pixels of draw_ellipse's area that touch a pixel outside it.
@@ -1285,7 +1294,7 @@ impl Frame {
         guard := self.state.guard_edit()
         draw.fit(guard.value.canvas, self.width, self.height)
         draw.draw_ellipse_lines(guard.value.canvas, center_x, center_y, radius_h, radius_v, color)
-        guard.value.drawn = true
+        internal.mark(guard.value, internal.around(Float{center_x} - radius_h, Float{center_y} - radius_v, Float{center_x} + radius_h, Float{center_y} + radius_v))
     }
 
     // The annulus sector between the radii from `start_angle` to
@@ -1296,7 +1305,7 @@ impl Frame {
         guard := self.state.guard_edit()
         draw.fit(guard.value.canvas, self.width, self.height)
         draw.draw_ring(guard.value.canvas, center, inner_radius, outer_radius, start_angle, end_angle, segments, color)
-        guard.value.drawn = true
+        internal.mark(guard.value, internal.around(center.x - outer_radius, center.y - outer_radius, center.x + outer_radius, center.y + outer_radius))
     }
 
     // The pixels of draw_ring's area that touch a pixel outside it.
@@ -1304,21 +1313,21 @@ impl Frame {
         guard := self.state.guard_edit()
         draw.fit(guard.value.canvas, self.width, self.height)
         draw.draw_ring_lines(guard.value.canvas, center, inner_radius, outer_radius, start_angle, end_angle, segments, color)
-        guard.value.drawn = true
+        internal.mark(guard.value, internal.around(center.x - outer_radius, center.y - outer_radius, center.x + outer_radius, center.y + outer_radius))
     }
 
     draw_rectangle: fn(self, x: Int, y: Int, width: Int, height: Int, color: Color) {
         guard := self.state.guard_edit()
         draw.fit(guard.value.canvas, self.width, self.height)
         draw.draw_rectangle(guard.value.canvas, x, y, width, height, color)
-        guard.value.drawn = true
+        internal.mark(guard.value, internal.solid(x, y, width, height))
     }
 
     draw_rectangle_rec: fn(self, rec: Rect, color: Color) {
         guard := self.state.guard_edit()
         draw.fit(guard.value.canvas, self.width, self.height)
         draw.draw_rectangle_rec(guard.value.canvas, rec, color)
-        guard.value.drawn = true
+        internal.mark(guard.value, internal.around(rec.x, rec.y, rec.x + rec.width, rec.y + rec.height))
     }
 
     // A one-pixel border inside the rectangle.
@@ -1326,7 +1335,7 @@ impl Frame {
         guard := self.state.guard_edit()
         draw.fit(guard.value.canvas, self.width, self.height)
         draw.draw_rectangle_lines(guard.value.canvas, x, y, width, height, color)
-        guard.value.drawn = true
+        internal.mark(guard.value, internal.solid(x, y, width, height))
     }
 
     // A border `line_thick` wide inside the rectangle.
@@ -1334,7 +1343,7 @@ impl Frame {
         guard := self.state.guard_edit()
         draw.fit(guard.value.canvas, self.width, self.height)
         draw.draw_rectangle_lines_ex(guard.value.canvas, rec, line_thick, color)
-        guard.value.drawn = true
+        internal.mark(guard.value, internal.around(rec.x, rec.y, rec.x + rec.width, rec.y + rec.height))
     }
 
     // `top` along the top edge, `bottom` along the bottom edge.
@@ -1342,7 +1351,7 @@ impl Frame {
         guard := self.state.guard_edit()
         draw.fit(guard.value.canvas, self.width, self.height)
         draw.draw_rectangle_gradient_v(guard.value.canvas, x, y, width, height, top, bottom)
-        guard.value.drawn = true
+        internal.mark(guard.value, internal.solid(x, y, width, height))
     }
 
     // `left` along the left edge, `right` along the right edge.
@@ -1350,7 +1359,7 @@ impl Frame {
         guard := self.state.guard_edit()
         draw.fit(guard.value.canvas, self.width, self.height)
         draw.draw_rectangle_gradient_h(guard.value.canvas, x, y, width, height, left, right)
-        guard.value.drawn = true
+        internal.mark(guard.value, internal.solid(x, y, width, height))
     }
 
     // The corner colors run counterclockwise from the top left.
@@ -1358,7 +1367,7 @@ impl Frame {
         guard := self.state.guard_edit()
         draw.fit(guard.value.canvas, self.width, self.height)
         draw.draw_rectangle_gradient_ex(guard.value.canvas, rec, top_left, bottom_left, bottom_right, top_right)
-        guard.value.drawn = true
+        internal.mark(guard.value, internal.around(rec.x, rec.y, rec.x + rec.width, rec.y + rec.height))
     }
 
     // Four corner arcs `roundness` (0..1) of the shorter side across; a
@@ -1368,7 +1377,7 @@ impl Frame {
         guard := self.state.guard_edit()
         draw.fit(guard.value.canvas, self.width, self.height)
         draw.draw_rectangle_rounded(guard.value.canvas, rec, roundness, segments, color)
-        guard.value.drawn = true
+        internal.mark(guard.value, internal.around(rec.x, rec.y, rec.x + rec.width, rec.y + rec.height))
     }
 
     // A one-pixel band just outside the rounded rectangle.
@@ -1376,7 +1385,7 @@ impl Frame {
         guard := self.state.guard_edit()
         draw.fit(guard.value.canvas, self.width, self.height)
         draw.draw_rectangle_rounded_lines(guard.value.canvas, rec, roundness, segments, color)
-        guard.value.drawn = true
+        internal.mark(guard.value, internal.around(rec.x, rec.y, rec.x + rec.width, rec.y + rec.height))
     }
 
     // A filled triangle on integer vertices, in either winding; a
@@ -1385,7 +1394,7 @@ impl Frame {
         guard := self.state.guard_edit()
         draw.fit(guard.value.canvas, self.width, self.height)
         draw.draw_triangle(guard.value.canvas, x0, y0, x1, y1, x2, y2, color)
-        guard.value.drawn = true
+        internal.mark(guard.value, internal.spanning(internal.min_of(x0, internal.min_of(x1, x2)), internal.min_of(y0, internal.min_of(y1, y2)), internal.max_of(x0, internal.max_of(x1, x2)), internal.max_of(y0, internal.max_of(y1, y2))))
     }
 
     // A regular polygon with its first vertex at `rotation` degrees;
@@ -1394,7 +1403,7 @@ impl Frame {
         guard := self.state.guard_edit()
         draw.fit(guard.value.canvas, self.width, self.height)
         draw.draw_poly(guard.value.canvas, center, sides, radius, rotation, color)
-        guard.value.drawn = true
+        internal.mark(guard.value, internal.around(center.x - radius, center.y - radius, center.x + radius, center.y + radius))
     }
 
     // The pixels of draw_poly's area that touch a pixel outside it.
@@ -1402,7 +1411,7 @@ impl Frame {
         guard := self.state.guard_edit()
         draw.fit(guard.value.canvas, self.width, self.height)
         draw.draw_poly_lines(guard.value.canvas, center, sides, radius, rotation, color)
-        guard.value.drawn = true
+        internal.mark(guard.value, internal.around(center.x - radius, center.y - radius, center.x + radius, center.y + radius))
     }
 
     // Text in Atkinson Hyperlegible Next, anti-aliased, `size` pixels to
@@ -1412,8 +1421,8 @@ impl Frame {
     draw_text: fn(self, text: String, x: Int, y: Int, size: Int, color: Color) {
         guard := self.state.guard_edit()
         draw.fit(guard.value.canvas, self.width, self.height)
-        draw.draw_text(guard.value.canvas, guard.value.typeset, text, x, y, size, color)
-        guard.value.drawn = true
+        inked: draw.draw_text(guard.value.canvas, guard.value.typeset, text, x, y, size, color)
+        internal.mark(guard.value, inked)
     }
 
     // Blends the first region named `name` onto the frame with its
@@ -1423,13 +1432,50 @@ impl Frame {
         guard := self.state.guard_edit()
         draw.fit(guard.value.canvas, self.width, self.height)
         draw.draw_sprite(guard.value.canvas, atlas.atlas, name, x, y)
-        guard.value.drawn = true
+        internal.mark(guard.value, draw.sprite_bounds(atlas.atlas, name, x, y))
     }
 }
 
 // How a headless frame is recorded, input is tracked and the backends
 // measure, lay out and paint: not part of the ui surface.
 priv internal: module {
+    // Notes that a draw call changed the pixels in `rect` (unclipped).
+    mark: fn(&state: WindowState, rect: UIRect) {
+        state.drawn = true
+        wayland.grow_damage(state.damage, rect)
+    }
+
+    // The whole pixels a shape between (x0, y0) and (x1, y1) can touch with
+    // its anti-aliased edge, two pixels to spare; the whole window for a
+    // coordinate no Int holds.
+    around: fn(x0: Float, y0: Float, x1: Float, y1: Float) -> UIRect {
+        whole: UIRect{x: 0, y: 0, width: SIDE_MAX, height: SIDE_MAX}
+        left: Int.from_float(core.math.floor(x0)) ?? return whole
+        top: Int.from_float(core.math.floor(y0)) ?? return whole
+        right: Int.from_float(core.math.floor(x1)) ?? return whole
+        bottom: Int.from_float(core.math.floor(y1)) ?? return whole
+        x: min_of(left, right) - 2
+        y: min_of(top, bottom) - 2
+        UIRect{x: x, y: y, width: max_of(left, right) + 3 - x, height: max_of(top, bottom) + 3 - y}
+    }
+
+    // The pixels from (x0, y0) to (x1, y1), both corners included, in
+    // either order.
+    spanning: fn(x0: Int, y0: Int, x1: Int, y1: Int) -> UIRect {
+        x: min_of(x0, x1)
+        y: min_of(y0, y1)
+        UIRect{x: x, y: y, width: max_of(x0, x1) - x + 1, height: max_of(y0, y1) - y + 1}
+    }
+
+    // A filled shape's pixels at (x, y), at least one pixel each way.
+    solid: fn(x: Int, y: Int, width: Int, height: Int) -> UIRect {
+        UIRect{x: x, y: y, width: max_of(width, 1), height: max_of(height, 1)}
+    }
+
+    min_of: fn(a: Int, b: Int) -> Int { if a < b -> a else -> b }
+
+    max_of: fn(a: Int, b: Int) -> Int { if a > b -> a else -> b }
+
     // FNV-1a, 32-bit.
     checksum: fn(bytes: [U8]) -> Int {
         hash := 2166136261
@@ -1847,4 +1893,37 @@ priv internal: module {
     assert(measure_text("Hi", 10) > 0)
     assert_eq(measure_text("Hi\nH", 10), measure_text("Hi", 10))
     assert_eq(measure_text("", 10), 0)
+}
+
+#Test("a frame's damage joins near rectangles and keeps far ones apart") {
+    rects := [UIRect]{}
+    wayland.grow_damage(rects, UIRect{x: 0, y: 0, width: 10, height: 10})
+    // 15 is within 8 of the first's right edge, 10: one rectangle.
+    wayland.grow_damage(rects, UIRect{x: 15, y: 0, width: 5, height: 5})
+    assert(rects == [UIRect]{UIRect{x: 0, y: 0, width: 20, height: 10}})
+    // Far away, and 30 is 10 past 20: three rectangles.
+    wayland.grow_damage(rects, UIRect{x: 100, y: 100, width: 4, height: 4})
+    wayland.grow_damage(rects, UIRect{x: 30, y: 0, width: 2, height: 2})
+    assert_eq(rects.len(), 3)
+    // (24, 0) joins the first, which then reaches 28, within 8 of 30.
+    wayland.grow_damage(rects, UIRect{x: 24, y: 0, width: 4, height: 4})
+    assert(rects == [UIRect]{UIRect{x: 100, y: 100, width: 4, height: 4}, UIRect{x: 0, y: 0, width: 32, height: 10}})
+    wayland.grow_damage(rects, UIRect{x: 50, y: 50, width: 0, height: 9})
+    assert_eq(rects.len(), 2)
+    // A far rectangle meeting 64 joins the one whose bounds add the least:
+    // the 65th, at 6400, adds (6401 - 100k) - 1 pixels to the one at 100k,
+    // least for its neighbor at 6300, and the two join as
+    // (6300, 500, 101, 1), 99 past the next at 6200. Sixty-four rectangles
+    // stay, covering 63 + 101 pixels.
+    apart := [UIRect]{}
+    loop k in 0..<65 -> wayland.grow_damage(apart, UIRect{x: k * 100, y: 500, width: 1, height: 1})
+    assert_eq(apart.len(), 64)
+    covered := 0
+    joined := 0
+    loop r in apart {
+        covered += r.width * r.height
+        if r == UIRect{x: 6300, y: 500, width: 101, height: 1} -> joined += 1
+    }
+    assert_eq(covered, 164)
+    assert_eq(joined, 1)
 }

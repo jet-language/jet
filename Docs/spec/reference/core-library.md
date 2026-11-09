@@ -4376,10 +4376,18 @@ existing public capability row.
 
 #### Drawing
 
-A `Frame` also draws: its `clear_background` and `draw_*` calls paint an RGBA
-canvas of the frame's size in Jet, the same on every backend and tier, blended
-src-over and clipped to the canvas, and the frame presents that canvas when the
-next frame begins unless the program called `present` itself. Shapes that take
+A `Frame` also draws: its `clear_background` and `draw_*` calls paint a canvas
+of the frame's size in Jet, the same on every backend and tier, clipped to the
+canvas, and the frame presents that canvas when the next frame begins unless
+the program called `present` itself. The canvas, like every `Image`, holds
+premultiplied RGBA8 pixels, and every draw follows core.ui's one blend rule,
+source-over on the sRGB bytes as they are: a color comes in straight and
+premultiplies, red, green and blue each `(c * a + 127) / 255`, and each byte
+of the canvas, alpha included, becomes `s + (d * (255 - a) + 127) / 255` for
+the premultiplied source byte `s` (alpha 20 white over `#0B0B0D` gives
+`#1E1E20`). A clear stores its color instead. Pixels read back straight: each
+color channel `(c * 255 + a / 2) / a`, at most 255, and a clear pixel all
+zeros. Shapes that take
 a `Point` or `Rect` fill the pixels whose centers lie inside, with coordinates
 snapped to 1/256 pixel; a pixel whose center lies on a left or top edge is
 inside, one on a right or bottom edge is not. The collision checks and the
@@ -4420,16 +4428,16 @@ inside, one on a right or bottom edge is not. The collision checks and the
 | `check_collision_lines(start1, end1, start2, end2)` | `Point?` | The point where two segments cross, or `None` when they are parallel or cross outside either segment. |
 | `get_collision_rec(rec1, rec2)` | `Rect` | The overlap of two rectangles, or a zero rectangle when they do not overlap. |
 | `gen_image_color(width, height, color)` / `gen_image_checked(width, height, checks_x, checks_y, first, second)` | `Image` | A new RGBA image of one color, or of `checks_x` by `checks_y` pixel checks starting with `first` at the top left. A side below 1 or above 16384, or more than 2^24 pixels, gives an image with no pixels. |
-| `get_image_color(image, x, y)` | `Color` | The pixel at `(x, y)`, or a zero color outside the image. |
-| `image_clear_background(image, color)` / `image_draw_pixel(image, x, y, color)` | `Unit` | Set every pixel, or one pixel inside the image, to `color`, alpha included. |
+| `get_image_color(image, x, y)` | `Color` | The pixel at `(x, y)`, read back straight, or a zero color outside the image. |
+| `image_clear_background(image, color)` / `image_draw_pixel(image, x, y, color)` | `Unit` | Set every pixel, or one pixel inside the image, to `color` premultiplied, alpha included. |
 | `image_draw_rectangle(image, x, y, width, height, color)` / `image_draw_rectangle_rec(image, rec, color)` | `Unit` | Set the rectangle's pixels, clipped to the image and truncated to whole pixels. Less than one column still sets the first pixel unless the rectangle ends at the left edge, and less than one row still fills the first row. |
 | `image_crop(image, rec)` | `Unit` | Keep the rectangle's pixels, clipped to the image and truncated to whole pixels. A rectangle starting past the image leaves it unchanged. One with no whole column or row leaves no pixels, and the truncated sides (not below 0) become the image's size. |
 | `image_resize_nn(image, width, height)` | `Unit` | Nearest-neighbour resize with a 16.16 fixed-point source index. A size outside `gen_image_color`'s limits leaves the image unchanged. |
 | `image_flip_vertical(image)` / `image_flip_horizontal(image)` / `image_rotate_cw(image)` / `image_rotate_ccw(image)` | `Unit` | Mirror the rows or columns, or turn the image a quarter turn; a turn swaps width and height. |
-| `image_color_tint(image, color)` / `image_color_invert(image)` | `Unit` | Scale each channel by `color`'s channel / 255, rounded down, alpha included; or replace red, green and blue with 255 minus themselves. |
-| `image_color_brightness(image, amount)` / `image_color_replace(image, color, replace)` | `Unit` | Add `amount`, clamped to -255..255, to red, green and blue, capped at 255; a sum below 0 becomes 1. Or replace every pixel equal to `color` in all four channels with `replace`. |
-| `load_texture_atlas(path)` | `TextureAtlas -[FS]>` | Load an atlas and decode its PNG texture (every color type, bit depth and Adam7; sixteen-bit samples keep their high byte). A missing or malformed PNG leaves the atlas without a texture. |
-| `Image` | type | An RGBA8 image held in memory: `width()`, `height()` and `pixels()` (four `U8` per pixel, row by row, as `Frame.present` takes them). A width of 0 means no image. |
+| `image_color_tint(image, color)` / `image_color_invert(image)` | `Unit` | On each pixel's straight color, stored premultiplied again: scale each channel by `color`'s channel / 255, rounded down, alpha included; or replace red, green and blue with 255 minus themselves. |
+| `image_color_brightness(image, amount)` / `image_color_replace(image, color, replace)` | `Unit` | Add `amount`, clamped to -255..255, to each pixel's straight red, green and blue, capped at 255; a sum below 0 becomes 1. Or replace every pixel that holds `color` premultiplied, in all four bytes, with `replace`; a clear pixel holds every color of alpha 0. |
+| `load_texture_atlas(path)` | `TextureAtlas -[FS]>` | Load an atlas and decode its PNG texture (every color type, bit depth and Adam7; sixteen-bit samples keep their high byte), premultiplied as it loads. A missing or malformed PNG leaves the atlas without a texture. |
+| `Image` | type | An RGBA8 image held in memory, premultiplied: `width()`, `height()` and `pixels()` (four `U8` per pixel, row by row, straight, as `Frame.present` takes them). A width of 0 means no image. |
 | `TextureAtlas` / `.name() -> String` / `.loaded() -> Bool` | type | Named regions of one decoded PNG texture; the atlas text's `atlas:` line or its file's stem, and whether the texture decoded. |
 | `Window.load_image_from_screen() -> Image` | image | A copy of the canvas the frames draw on, as last drawn. |
 | `Frame.is_key_down(key)` / `.is_key_up(key)` / `.is_key_pressed(key)` / `.is_key_released(key)` | `Bool` | Whether `key` is held during the frame, or went down or up since the previous one. |
@@ -4477,7 +4485,7 @@ Every fault in a font file is a typed `FontError{reason}`.
 | `Face.layout(text: String, size_px: Float) -> TextRun` / `.wrap(text, size_px, max_width) -> [TextLine]` | layout | Place a line of glyphs with kerning, and break text into lines after spaces and hyphens. |
 | `Face.raster(id: Int, size_px: Float, x_frac: Float) -> GlyphMask` | mask | A glyph's anti-aliased coverage, unhinted, at a sub-pixel position. |
 | `cache() -> GlyphCache` / `cache_within(budget: Int)` / `GlyphCache.glyph(face, id, size_px, x_frac)` | cache | Masks kept per face, glyph, size and quarter pixel, within about `budget` bytes (CACHE_BYTES_MAX, 4 MiB, by default). |
-| `blend(&pixels, width, height, stride_bytes, mask, x, y, argb, clip: UIRect)` | — | Paint a mask source-over, in linear light, onto premultiplied ARGB8888 pixels (bytes B, G, R, A, `stride_bytes` per row). Only pixels inside `clip` and the canvas change. |
+| `blend(&pixels, width, height, stride_bytes, mask, x, y, argb, clip: UIRect)` | — | Paint a mask onto premultiplied ARGB8888 pixels (bytes B, G, R, A, `stride_bytes` per row) by core.ui's one blend rule, source-over on the sRGB bytes: the source covers `sa = (A * coverage + 127) / 255` of a pixel, and each byte `d` becomes `s + (d * (255 - sa) + 127) / 255`, with `s = (C * sa + 127) / 255` for a color byte and `sa` for alpha. Only pixels inside `clip` and the canvas change. |
 | `draw_text(&pixels, width, height, stride_bytes, &cache, face, text, size_px, x, baseline_y, argb, clip) -> Int` | advance | Lay out and paint a line of text at quarter-pixel positions, and return its advance in whole pixels. |
 
 ### `core.reactive` — explicit signals and dependency tracking

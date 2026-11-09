@@ -1,9 +1,11 @@
 // game-frame: 1200 frames of a 2D game scene on a 320x200 RGBA8 software
 // canvas. Each frame clears, draws a scrolling tile map, 48 translucent
-// sprites, a translucent HUD bar and two lines of 5x7 bitmap-font text. Every
-// rectangle clips to the canvas and blends src-over per channel, alpha
-// included: (s * a + d * (255 - a) + 127) / 255. With JET_FRAME_CAPTURE set,
-// every presented frame is written there as a PAM image.
+// sprites, a translucent HUD bar and two lines of 5x7 bitmap-font text. The
+// canvas is premultiplied, as core.ui's is: a color premultiplies on entry,
+// (c * a + 127) / 255, and every rectangle clips to the canvas and blends
+// src-over per channel, alpha included: s + (d * (255 - a) + 127) / 255.
+// With JET_FRAME_CAPTURE set, every presented frame is written there as a
+// PAM image; the canvas is opaque, so its bytes are the straight ones.
 const std = @import("std");
 
 const W: i64 = 320;
@@ -40,8 +42,8 @@ fn rgba(r: i64, g: i64, b: i64, a: i64) u32 {
     return (@as(u32, @intCast(r)) << 24) | (@as(u32, @intCast(g)) << 16) | (@as(u32, @intCast(b)) << 8) | @as(u32, @intCast(a));
 }
 
-fn blend(source: u32, target: u8, alpha: u32) u8 {
-    return @intCast((source * alpha + @as(u32, target) * (255 - alpha) + 127) / 255);
+fn mul(a: u32, b: u32) u32 {
+    return (a * b + 127) / 255;
 }
 
 fn fill(x: i64, y: i64, width: i64, height: i64, color: u32, replace: bool) void {
@@ -52,9 +54,10 @@ fn fill(x: i64, y: i64, width: i64, height: i64, color: u32, replace: bool) void
     const x1 = @min(x + width, W);
     const y1 = @min(y + height, H);
     if (x1 <= x0 or y1 <= y0) return;
-    const red = color >> 24;
-    const green = (color >> 16) & 255;
-    const blue = (color >> 8) & 255;
+    const red = mul(color >> 24, alpha);
+    const green = mul((color >> 16) & 255, alpha);
+    const blue = mul((color >> 8) & 255, alpha);
+    const rest = 255 - alpha;
     const opaque_fill = replace or alpha == 255;
     var row = y0;
     while (row < y1) : (row += 1) {
@@ -67,10 +70,10 @@ fn fill(x: i64, y: i64, width: i64, height: i64, color: u32, replace: bool) void
                 canvas[at + 2] = @intCast(blue);
                 canvas[at + 3] = @intCast(alpha);
             } else {
-                canvas[at] = blend(red, canvas[at], alpha);
-                canvas[at + 1] = blend(green, canvas[at + 1], alpha);
-                canvas[at + 2] = blend(blue, canvas[at + 2], alpha);
-                canvas[at + 3] = blend(alpha, canvas[at + 3], alpha);
+                canvas[at] = @intCast(red + mul(canvas[at], rest));
+                canvas[at + 1] = @intCast(green + mul(canvas[at + 1], rest));
+                canvas[at + 2] = @intCast(blue + mul(canvas[at + 2], rest));
+                canvas[at + 3] = @intCast(alpha + mul(canvas[at + 3], rest));
             }
         }
     }
