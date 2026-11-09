@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6710,
-    "rev": 96378,
+    "rev": 96379,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -97783,7 +97783,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T05:21:20.878Z",
-      "updated": "2026-11-09T04:53:12.736Z",
+      "updated": "2026-11-09T04:56:17.964Z",
       "updatedBy": "Main",
       "criteriaLastN": 2
     },
@@ -186051,6 +186051,173 @@
       "created": "2026-11-08T19:18:07.783Z",
       "outcome": "A",
       "ratifiedAt": "2026-11-08"
+    },
+    {
+      "id": "D-EDITOR-DEV-PORT1",
+      "cardId": "c0afjv0e",
+      "group": "tooling",
+      "title": "Port the editor server now and keep the unbuilt dev server out of the package tests until `jet dev` is rebuilt",
+      "situation": "Two tool packages in the compiler tree, the editor server JetLSP and the dev server JetDevserver, are Rust code rewritten line by line into Jet syntax. Neither has ever compiled. Together they are about 48,000 lines. No command runs them today: `jet self lsp` and `jet dev` both report that they are not built yet. The full test profile still runs every package, so both fail it. The clean-clone gate for the Rust removal goal cannot pass while they fail. This vote decides what to port now and what the full profile runs meanwhile.",
+      "gist": "Should Jet port the editor server now and keep the unbuilt dev server out of the package tests until `jet dev` is rebuilt?",
+      "lesson": "The full test profile compiles and tests every package in the tree, including tools no command uses yet. A package that cannot compile fails the whole profile. Jet already handles a frozen tree this way: the owner names it, the profile skips it as one visible row, and nothing deletes it.",
+      "explainer": "",
+      "story": "Ana clones Jet on a machine with no Rust and runs the full test profile. Today it fails on four rows for two packages she never uses. With A, the editor server builds and passes, and the dev server shows as one skipped row naming its card.",
+      "inWild": "// Compiler/test.jet today: only JetOS is frozen\nFROZEN_TREES: [String]{\"Jetpack/JetOS\"}",
+      "detail": "Today. Compiler/JetLSP is 18.7k lines in 113 files and reports 565 problems. About 480 of them come from its dependency on Compiler/JetDevserver. JetDevserver is 29.9k lines in 79 files and reports 480 problems. It uses Rust's standard library names (sync, net, io), unwrap and the old error-propagation operator. Four known-failing rows name card 6650. A fifth, the corpus check for retired failure spellings, names card 6582: its 278 lines are all in JetDevserver.\n\nWhat A does. Port JetLSP against current Core and drop its JetDevserver dependency. It uses the editor host module (EditorHost.jet, 801 lines) and its five method-name constants, and those move into JetLSP. Add Compiler/JetDevserver to FROZEN_TREES in Compiler/test.jet. Teach package_dirs to skip frozen trees, and have the corpus spelling check skip them too. Remove the JetDevserver and #6582 known-failing rows at once, and the JetLSP rows when its port lands. Cost: about 12-20 agent-hours for JetLSP, plus about 1 for the freeze.\n\nWhat B does. Port both packages. No suite change. Cost: about 45-60 agent-hours. JetDevserver also needs Core sockets and threads it may not have yet.\n\nWhat C does. Freeze both trees as in A and port neither now. Cost: about 1 agent-hour.\n\nWhat the gate then proves. With A, every package under Compiler/ and Jetpack/ builds and passes except JetDevserver, shown as one skipped row. With B, every package builds and passes. With C, the same as A minus JetLSP.\n\nEdge cases. A frozen tree is never deleted and still counts in the coverage row as owner-frozen, so nobody mistakes it for passing.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Port JetLSP now, freeze JetDevserver until `jet dev` is rebuilt",
+          "detail": "Port the editor server against current Core and move the editor host module into it. Skip the dev server as one named frozen row until `jet dev` is rebuilt on Core.",
+          "technical": "FROZEN_TREES gains Compiler/JetDevserver; package_dirs and the corpus retired-spelling check skip frozen trees. Known-failing rows for JetDevserver and #6582 go at once, JetLSP's when its port lands.",
+          "code": "// Compiler/test.jet\nFROZEN_TREES: [String]{\"Jetpack/JetOS\", \"Compiler/JetDevserver\"}"
+        },
+        {
+          "key": "B",
+          "name": "Port both packages",
+          "detail": "Port the editor server and the dev server now. Nothing is skipped.",
+          "technical": "No suite change. The five known-failing rows go when each port lands.",
+          "code": "// Compiler/test.jet: unchanged\nFROZEN_TREES: [String]{\"Jetpack/JetOS\"}"
+        },
+        {
+          "key": "C",
+          "name": "Freeze both until their commands are built",
+          "detail": "Port neither now. Skip both as named frozen rows until `jet self lsp` and `jet dev` are built.",
+          "technical": "FROZEN_TREES gains both trees; package_dirs and the corpus retired-spelling check skip frozen trees. All five known-failing rows go at once.",
+          "code": "// Compiler/test.jet\nFROZEN_TREES: [String]{\"Jetpack/JetOS\", \"Compiler/JetDevserver\", \"Compiler/JetLSP\"}"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "why": "The editor server is the smaller port and is closest to a working `jet self lsp`. The dev server is waiting to be rebuilt on Core, so porting its Rust shape now risks throwaway work.",
+        "gains": [
+          "The clean-clone gate can pass within about a day of work.",
+          "The editor server builds and its tests run.",
+          "No package is deleted or hidden."
+        ],
+        "losses": [
+          {
+            "loss": "Dev server tests stay unrun until `jet dev` is rebuilt.",
+            "mitigation": "The skipped row names card 6650, and no file is deleted."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "About 45-60 agent-hours, much of it on dev server code that `jet dev` will replace."
+          },
+          {
+            "key": "C",
+            "reason": "Leaves the editor server rotting although its port is small."
+          }
+        ],
+        "tradeoff": "The dev server's tests stay unrun, as one visible skipped row, until `jet dev` is rebuilt."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": "Card 6650 log (2026-11-07) has the problem counts. Line counts: Compiler/JetLSP and Compiler/JetDevserver .jet files at dev 2a884927e5. Frozen trees: Compiler/test.jet FROZEN_TREES and test_coverage_rows. Known-failing rows: tests/known-failing.tsv rows naming #6650 and #6582.",
+      "surface": {
+        "gist": "Should Jet port the editor server now and keep the unbuilt dev server out of the package tests for now?",
+        "lesson": "The full test profile builds every package in the tree, even tools no command uses yet. One package that cannot compile fails the whole profile. A frozen tree is skipped as one visible row and is never deleted.",
+        "trio": {
+          "current": {
+            "note": "Only JetOS is frozen today, so both servers fail the full profile.",
+            "code": "FROZEN_TREES: [String]{\"Jetpack/JetOS\"}"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "Cargo workspaces can leave a crate out of the default test run with default-members.",
+            "code": "[workspace]\nmembers = [\"lsp\", \"devserver\"]\ndefault-members = [\"lsp\"]"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Port JetLSP now, freeze JetDevserver until `jet dev` is rebuilt",
+            "gist": "Port the small editor server, skip the dev server visibly.",
+            "gains": [
+              "The gate can pass within about a day of work.",
+              "The editor server builds and its tests run."
+            ],
+            "losses": [
+              "Dev server tests stay unrun until `jet dev` is rebuilt."
+            ],
+            "proposed": {
+              "code": "FROZEN_TREES: [String]{\"Jetpack/JetOS\", \"Compiler/JetDevserver\"}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Port both packages",
+            "gist": "Port both servers now and skip nothing.",
+            "gains": [
+              "Every package builds and passes."
+            ],
+            "losses": [
+              "About 45-60 agent-hours before the gate can pass.",
+              "Most of it ports dev server code `jet dev` will replace."
+            ],
+            "proposed": {
+              "code": "FROZEN_TREES: [String]{\"Jetpack/JetOS\"}"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Freeze both until their commands are built",
+            "gist": "Port neither now and skip both visibly.",
+            "gains": [
+              "The gate can pass within about an hour."
+            ],
+            "losses": [
+              "The editor server keeps rotting although its port is small."
+            ],
+            "proposed": {
+              "code": "FROZEN_TREES: [String]{\"Jetpack/JetOS\", \"Compiler/JetDevserver\", \"Compiler/JetLSP\"}"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "The editor server is the smaller port and closest to working. The dev server waits for a rebuild on Core, so porting it now risks throwaway work.",
+          "gains": [
+            "The gate can pass within about a day.",
+            "The editor server builds and its tests run."
+          ],
+          "losses": [
+            {
+              "loss": "Dev server tests stay unrun until `jet dev` is rebuilt.",
+              "mitigation": "The skipped row names card 6650, and no file is deleted."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "About 45-60 agent-hours, mostly on code `jet dev` will replace."
+            },
+            {
+              "key": "C",
+              "reason": "Leaves the editor server rotting although its port is small."
+            }
+          ],
+          "tradeoff": "Dev server tests stay unrun, as one visible skipped row, until `jet dev` is rebuilt."
+        }
+      },
+      "designAway": [
+        {
+          "loss": "Dev server tests stay unrun until `jet dev` is rebuilt.",
+          "attempts": [
+            "Port only the dev server modules the editor server uses: done in A, which moves EditorHost.jet into JetLSP."
+          ],
+          "result": "The rest of the dev server serves only `jet dev`, which is to be rebuilt on Core. The skipped row names card 6650, so it stays visible."
+        }
+      ],
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-09T04:56:17.964Z"
     }
   ],
   "questions": [
@@ -189110,6 +189277,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-09T04:56:17.964Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-EDITOR-DEV-PORT1",
+      "note": "Port the editor server now and keep the unbuilt dev server out of the package tests until `jet dev` is rebuilt"
+    },
     {
       "at": "2026-11-09T04:53:12.736Z",
       "by": "Main",
