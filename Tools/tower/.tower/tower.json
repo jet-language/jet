@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 98152,
+    "rev": 98154,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -72845,11 +72845,11 @@
         {
           "n": 7,
           "text": "a0_039 regression (QuickLead 2026-11-08): under LaneCheck default 20G address-space cap (JET_CHECK_MEM, RLIMIT_AS) the compiler dies within 5-15 s where a0_038 fits, likely fiber stack reservations since afe2acc8c8. Reserved address space stays bounded by design (no raised cap); LaneCheck at the default cap passes on a dev-built compiler.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-08T17:57:16.718Z"
+          "evidence": "Train-1 compiler built from dev 0f193199cc (stack reservations bounded under RLIMIT_AS by 5987d18926, an ancestor): with JET_CHECK_MEM unset, jet Tools/agent/LaneCheck.jet from the dev worktree gives CHECK OK, rc 0, 38.4 s. LaneCheck.jet:403 still defaults JET_CHECK_MEM to 20G, so each check ran at the default cap; no cap was raised.",
+          "at": "2026-11-09T22:42:10.440Z"
         },
         {
           "n": 8,
@@ -72890,7 +72890,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T22:33:20.042Z",
-      "updated": "2026-11-09T20:43:49.965Z",
+      "updated": "2026-11-09T22:42:10.440Z",
       "updatedBy": "Main",
       "goals": [
         "G11"
@@ -81963,11 +81963,11 @@
         {
           "n": 5,
           "text": "(was #6404) r09_many_quick_tasks.jet prints `done` under `ulimit -v 4000000` on a 32-CPU machine; a fixture runs it under that limit.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:16:34.386Z"
+          "evidence": "Landed 3987b69eee on dev (train 1). Train-1 compiler from dev 0f193199cc, at load 4: jet test Compiler --profile cases --filter many_quick_tasks_run_under_a_4_gb_address_space_limit PASS 1, FAIL 0, TIMEOUT 0 (1.5 s), and PASS inside the whole fiber_liveness/ group. The case builds tests/cases/fiber_liveness/fixtures/many_quick/main.jet (10,000 quick tasks; it stands in for r09_many_quick_tasks.jet, which exists nowhere in the repository or its history) at O0, O1 and O2 and runs each under limit memory=4000000 (ulimit -v 4000000) with 32 carriers on a 32-CPU host; stdout total 29994 then done.",
+          "at": "2026-11-09T22:42:08.717Z"
         },
         {
           "n": 6,
@@ -82006,7 +82006,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T21:41:14.674Z",
-      "updated": "2026-11-09T21:34:57.779Z",
+      "updated": "2026-11-09T22:42:08.717Z",
       "updatedBy": "Main",
       "criteriaLastN": 8
     },
@@ -193592,6 +193592,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-09T22:42:10.440Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c02a1ynr",
+      "note": "#7"
+    },
+    {
+      "at": "2026-11-09T22:42:08.717Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0ih6z1d",
+      "note": "#5"
+    },
     {
       "at": "2026-11-09T21:35:15.921Z",
       "by": "Main",
