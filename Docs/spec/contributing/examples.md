@@ -100,8 +100,9 @@ summary counts a failed or unexpected-pass test, else 0.
 Golden sidecars live beside expected streams as `<stem>.case`; runtime-test
 streams and sidecars live beside their source or project directory.
 
-Sidecars replace filename-specific harness rules. `requires:` declares GTK,
-foreign tools, or environment requirements; missing hosts report `SKIP-HOST`.
+Sidecars replace filename-specific harness rules. `requires:` declares foreign
+tools, host OS or architecture, or environment requirements; missing hosts
+report `SKIP-HOST`.
 `run: none` keeps a serves-until-stopped entry compile-only. `host-port: N`
 declares a fixed TCP port the program binds; the kit holds the host-wide flock
 `/tmp/jet-host-port-N.lock` while the case runs, waiting at most one step

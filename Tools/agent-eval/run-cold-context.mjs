@@ -27,7 +27,7 @@ const unavailableExit = 78;
 const usageExit = 64;
 const requiredAdapterFamilies = ["openai", "anthropic"];
 const requiredVerbs = [
-  "term.print", "term.eprint", "term.input", "term.readline",
+  "term.print", "term.eprint", "term.confirm", "term.readline",
   "term.read_all_input", "files.read", "files.write", "files.read_bytes",
   "files.write_bytes", "files.exists", "files.list_dir", "files.walk",
   "process.argv", "process.run", "process.cmd", "sys.get", "sys.set",

@@ -90,6 +90,23 @@ folder is capitalized. Keep the top level small: new tooling goes under
 `Tools/`, new documentation under `Docs/`. Never commit build output, scratch
 files, or one-off run artifacts.
 
+## Tooling in other languages
+
+Repository tooling is Jet. New tooling may be written first in another
+language and proven working; then its Jet twin is written and proven to print
+the same output. The pair is a gauntlet entry: an entry under
+`Tools/gauntlet/entries/` with `"mode": "tool"` names the original as
+`tool.original` and the twin as `tool.jet`, and holds the shared fixtures and
+the parity cases with their expected output. The repository keeps running the
+original until the Jet twin wins every port bar (#5072: identical output,
+faster in wall time and peak memory, no more source tokens, and no harder to
+reason about); then the repository switches to the Jet twin and keeps the
+original only as the entry's reference. `Tools/agent/ScriptPairing.jet
+--check`, which every lane check runs, refuses a change that adds a script in
+another language without its pair; browser-executed JavaScript, Nix files,
+and test and example subjects are exempt. `--census` lists every script in
+another language in the checkout and its pair.
+
 ## Greenfield cutover
 
 Jet owes no compatibility to its own history until the owner declares

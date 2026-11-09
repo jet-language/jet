@@ -267,7 +267,7 @@ impl NativeOverlayAdapter {
         if sequence != context.sequence -> return Err(NativeOverlayAdapterError.StaleSequence(expected: context.sequence, received: sequence))
     }
     check_projection_order: fn(self, projection: DevtoolsProjection) NativeOverlayAdapterError! {
-        current_sequence: self.sequence ?? return Ok(())
+        current_sequence: self.sequence ?? return Ok()
         if self.revision == .Val(current_revision) {
             if projection.revision != current_revision && projection.sequence <= current_sequence -> return Err(NativeOverlayAdapterError.StaleRevision(expected: current_revision, received: projection.revision))
         }

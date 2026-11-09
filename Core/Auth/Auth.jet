@@ -192,6 +192,9 @@ int_claim: fn(fields: encoding.Dyn, text: String, name: String) -> Int? AuthErro
     if value == {
         .Int(_) | .Number(_) -> {
             lexeme: number_lexeme(text, name) ?? return Err(AuthError.MalformedToken("claim `{name}` must be an exact integer"))
+            // A fraction or exponent is no integer at all; an integer lexeme
+            // outside the signed 64-bit range (or `-0`) is an inexact one.
+            if lexeme.contains(".") || lexeme.contains("e") || lexeme.contains("E") -> return Err(AuthError.MalformedToken("claim `{name}` must be an integer"))
             number: json_i64(lexeme) ?? return Err(AuthError.MalformedToken("claim `{name}` must be an exact integer"))
             Val(number)
         }

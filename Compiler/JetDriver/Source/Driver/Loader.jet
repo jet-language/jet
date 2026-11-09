@@ -37,6 +37,7 @@ use {
         compiler_threads_partition,
         compiler_threads_single,
         core_bare_source_module,
+        core_input_method_modules,
         core_module_export,
         core_module_has_member,
         owned_trait,
@@ -106,6 +107,7 @@ use {
         sema_registration_unit_family_type_names,
         sema_marker_rules_applied_row,
         sema_core_error_family_member,
+        sema_eval_entry_show,
         sema_source_words,
         sema_source_wanted_words,
         sema_unknown_module_alias,
@@ -3314,7 +3316,10 @@ jet_driver_inline_package_body: fn(source: String, carrier: JetDriverInlinePacka
 JetDriverCoreIdentifierDemand: struct {
     bare_names: [String]
     option_or_err: Bool
-    math_abs_receiver: Bool
+    // A `.abs` or `.pow` receiver call: Int `abs` and the typed `abs`
+    // helpers, and Float and F32 `pow`, lower to their `Core/Math/Math.jet`
+    // source helpers, so core.math loads.
+    math_receiver: Bool
     // A `Regex{…}` checked literal (produced by `core.regex.compile`) or a
     // `.matches(…)`/`.match(…)` receiver call (String's pattern methods run
     // the `core.regex` engine): core.regex loads.
@@ -3356,6 +3361,11 @@ JetDriverCoreIdentifierDemand: struct {
     // segment names a Core module, and the loader loads that module when
     // `<head>` aliases `core`.
     core_paths: [String]
+    // The method of each `input.<method>` call the source spells (`input`
+    // not itself a member): `input.csv<Row>()` is core.encoding.csv
+    // `__input_csv` (core_input_method_modules), so the encoding module the
+    // method names loads when it is one.
+    input_methods: [String]{[String]{}}
 }
 
 // `lines` (newlines) and `tokens` are the unit's parse work, which a traced
@@ -3372,7 +3382,7 @@ JetDriverParsedUnit: struct {
 }
 
 jet_driver_empty_core_identifier_demand: fn() -> JetDriverCoreIdentifierDemand Never! {
-    JetDriverCoreIdentifierDemand{bare_names: [String]{}, option_or_err: false, math_abs_receiver: false, regex_source: false, core_paths: [String]{}}
+    JetDriverCoreIdentifierDemand{bare_names: [String]{}, option_or_err: false, math_receiver: false, regex_source: false, core_paths: [String]{}}
 }
 
 // The spellings the demand scan looks for, as ids of one lexed source's
@@ -3380,12 +3390,13 @@ jet_driver_empty_core_identifier_demand: fn() -> JetDriverCoreIdentifierDemand N
 // which no token carries), so the scan compares ids, never Strings. Each
 // bare module row has its name's id and, for `URL`, the id of `url` too;
 // `$here` builds a `SourceLocation`, so it is that row's alias.
-// The fields are not spelled `or_err`, `abs` or `regex`: this scan runs on
-// the compiler's own source too, and `names.abs` would be an `abs` receiver
-// demand of the self-compile.
+// The fields are not spelled `or_err`, `abs`, `pow` or `regex`: this scan
+// runs on the compiler's own source too, and `names.abs` would be an `abs`
+// receiver demand of the self-compile.
 JetDriverCoreDemandNames: struct {
     or_err_name: Int
     abs_name: Int
+    pow_name: Int
     regex_name: Int
     pattern_matches_name: Int
     pattern_match_name: Int
@@ -3396,6 +3407,7 @@ JetDriverCoreDemandNames: struct {
     decode_name: Int
     migration_name: Int
     field_error_name: Int
+    input_name: Int
     field_error_under_name: Int
     bare: [Int]
     bare_alias: [Int]
@@ -3439,7 +3451,7 @@ jet_driver_core_demand_names: fn(tables: TokenTables) -> JetDriverCoreDemandName
             if id >= 0 && !core_segments.contains(id) -> core_segments.push(id)
         }
     }
-    JetDriverCoreDemandNames{or_err_name: jet_driver_core_demand_name(tables, "or_err"), abs_name: jet_driver_core_demand_name(tables, "abs"), regex_name: jet_driver_core_demand_name(tables, "Regex"), pattern_matches_name: jet_driver_core_demand_name(tables, "matches"), pattern_match_name: jet_driver_core_demand_name(tables, "match"), test_suite_name: jet_driver_core_demand_name(tables, "suite"), expect_name: jet_driver_core_demand_name(tables, "expect"), event_time_name: jet_driver_core_demand_name(tables, "with_event_time"), unit_family_name: jet_driver_core_demand_name(tables, "UnitFamily"), decode_name: jet_driver_core_demand_name(tables, "decode"), migration_name: jet_driver_core_demand_name(tables, "migration"), field_error_name: jet_driver_core_demand_name(tables, "FieldError"), field_error_under_name: jet_driver_core_demand_name(tables, "under"), bare: bare, bare_alias: bare_alias, bare_rows: bare_rows, core_segments: core_segments}
+    JetDriverCoreDemandNames{or_err_name: jet_driver_core_demand_name(tables, "or_err"), abs_name: jet_driver_core_demand_name(tables, "abs"), pow_name: jet_driver_core_demand_name(tables, "pow"), regex_name: jet_driver_core_demand_name(tables, "Regex"), pattern_matches_name: jet_driver_core_demand_name(tables, "matches"), pattern_match_name: jet_driver_core_demand_name(tables, "match"), test_suite_name: jet_driver_core_demand_name(tables, "suite"), expect_name: jet_driver_core_demand_name(tables, "expect"), event_time_name: jet_driver_core_demand_name(tables, "with_event_time"), unit_family_name: jet_driver_core_demand_name(tables, "UnitFamily"), decode_name: jet_driver_core_demand_name(tables, "decode"), migration_name: jet_driver_core_demand_name(tables, "migration"), field_error_name: jet_driver_core_demand_name(tables, "FieldError"), field_error_under_name: jet_driver_core_demand_name(tables, "under"), input_name: jet_driver_core_demand_name(tables, "input"), bare: bare, bare_alias: bare_alias, bare_rows: bare_rows, core_segments: core_segments}
 }
 
 jet_driver_core_demand_bare_row: fn(rows: &[Int], id: Int, at: Int) Never! {
@@ -3465,11 +3477,12 @@ jet_driver_collect_core_identifier_demand_ids: fn(tokens: [Token], tables: Token
             if name == names.decode_name && index > from && tokens[index - 1].kind == TOKEN_DOT && index + 1 < to && tokens[index + 1].kind == TOKEN_LT -> demand.codec_decode = true
             if name == names.migration_name && index + 2 < to && tokens[index + 1].kind == TOKEN_IDENT && tokens[index + 2].kind == TOKEN_LBRACE -> demand.codec_decode = true
             // Loading a potential source owner is syntactic; Sema alone
-            // decides whether this receiver is the canonical primitive Int.
-            if name == names.abs_name {
+            // decides whether this receiver is the canonical primitive Int,
+            // or a Float or F32 whose `pow` calls its Core power.
+            if name == names.abs_name || name == names.pow_name {
                 previous := index - 1
                 loop previous >= from && (tokens[previous].kind == TOKEN_LINE_COMMENT || tokens[previous].kind == TOKEN_BLOCK_COMMENT) -> previous -= 1
-                if previous >= from && (tokens[previous].kind == TOKEN_DOT || tokens[previous].kind == TOKEN_QUESTION_DOT) -> demand.math_abs_receiver = true
+                if previous >= from && (tokens[previous].kind == TOKEN_DOT || tokens[previous].kind == TOKEN_QUESTION_DOT) -> demand.math_receiver = true
             }
             if name == names.regex_name && index + 1 < to && tokens[index + 1].kind == TOKEN_LBRACE -> demand.regex_source = true
             if name == names.unit_family_name && index > from && tokens[index - 1].kind == TOKEN_HASH -> demand.unit_family = true
@@ -3489,6 +3502,10 @@ jet_driver_collect_core_identifier_demand_ids: fn(tokens: [Token], tables: Token
             if name == names.test_suite_name && index > from && tokens[index - 1].kind == TOKEN_DOT && index + 1 < to && tokens[index + 1].kind == TOKEN_LPAREN -> demand.test_suite = true
             if name == names.expect_name && (index == from || tokens[index - 1].kind != TOKEN_DOT) && index + 1 < to && tokens[index + 1].kind == TOKEN_LPAREN -> demand.test_suite = true
             if name == names.event_time_name && index > from && tokens[index - 1].kind == TOKEN_DOT && index + 1 < to && tokens[index + 1].kind == TOKEN_LPAREN -> demand.stream_event_time = true
+            if name == names.input_name && index + 2 < to && tokens[index + 1].kind == TOKEN_DOT && tokens[index + 2].kind == TOKEN_IDENT && (index == from || tokens[index - 1].kind != TOKEN_DOT) {
+                method: token_decoded(tables, tokens[index + 2])
+                if !demand.input_methods.contains(method) -> demand.input_methods.push(method.copy())
+            }
             if index + 4 < to && tokens[index + 1].kind == TOKEN_DOT && tokens[index + 2].kind == TOKEN_IDENT && tokens[index + 3].kind == TOKEN_DOT && tokens[index + 4].kind == TOKEN_IDENT && (index == from || tokens[index - 1].kind != TOKEN_DOT) && names.core_segments.contains(name_index(tokens[index + 2].decoded)) {
                 path: "{token_decoded(tables, tokens[index])}.{token_decoded(tables, tokens[index + 2])}"
                 if !demand.core_paths.contains(path) -> demand.core_paths.push(path.copy())
@@ -3588,7 +3605,7 @@ jet_driver_collect_core_identifier_demand_threads: fn(input: &&Lexed, runs: [Int
     loop part in parts {
         output := jet_driver_demand_part_take(part)
         if output.option_or_err -> demand.option_or_err = true
-        if output.math_abs_receiver -> demand.math_abs_receiver = true
+        if output.math_receiver -> demand.math_receiver = true
         if output.regex_source -> demand.regex_source = true
         if output.format_selector -> demand.format_selector = true
         if output.test_suite -> demand.test_suite = true
@@ -3601,6 +3618,9 @@ jet_driver_collect_core_identifier_demand_threads: fn(input: &&Lexed, runs: [Int
         }
         loop path in output.core_paths {
             if !demand.core_paths.contains(path) -> demand.core_paths.push(path)
+        }
+        loop method in output.input_methods {
+            if !demand.input_methods.contains(method) -> demand.input_methods.push(method)
         }
     }
     JetDriverDemandScan{lexed: jet_driver_demand_shared_take(inputs), demand: demand.move()}
@@ -4776,6 +4796,7 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
             modules.push(jet_driver_loaded_module(source_unit_index, unit, module_identity, program, declared_modules.get(source_unit_index) ?? ""))
             next
         }
+        if request.eval_entry && !is_core && source_unit_index == (entry_index ?? -1) -> sema_eval_entry_show(program)
         // Established bare names use the same declaring-owner table as Rust.
         // The lowercase URL typed head remains supported without adding a
         // lowercase nominal alias.
@@ -4793,7 +4814,7 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
                 }
             }
         }
-        if demand.math_abs_receiver || demand.unit_family {
+        if demand.math_receiver || demand.unit_family {
             if !bare_modules.contains("core.math") -> bare_modules.push("core.math")
             jet_driver_reach_open(reach, "core.math")
             owner_index: jet_driver_core_unit(source_units, queued, pending, generated_records, request.core_sources, "core.math", importer_core, entry_module, entry_index ?? 0, Span{start: 0, end: 0}, diagnostics)
@@ -4812,6 +4833,26 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
                 if !queued[index] {
                     queued[index] = true
                     pending.push(index)
+                }
+            }
+        }
+        // `input.csv<Row>()`: the encoding module an ambient `input` method
+        // names owns its `__input_<method>` (core_input_method_modules).
+        if !is_core {
+            loop method in demand.input_methods {
+                loop module_name in core_input_method_modules(method) {
+                    sourced := false
+                    loop row in request.core_sources {
+                        if row.owner == "" && row.module_name == module_name && !row.runtime -> sourced = true
+                    }
+                    if !sourced -> next
+                    input_index: jet_driver_core_unit(source_units, queued, pending, generated_records, request.core_sources, module_name, false, entry_module, entry_index ?? 0, Span{start: 0, end: 0}, diagnostics)
+                    if input_index == .Val(index) {
+                        if !queued[index] {
+                            queued[index] = true
+                            pending.push(index)
+                        }
+                    }
                 }
             }
         }

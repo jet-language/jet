@@ -13,15 +13,14 @@ function receipt(t) {
   const abi = JSON.stringify([{ symbol: 'jet_rt_alloc_init', parameters: [], result: null }]);
   const threads = 'jet_rt_alloc_init';
   const source = hash('runtime'), backend = hash('backend'), lifecycle = hash('lifecycle');
-  const platform = [hash('platform')], compiler = hash('compiler'), vendoredRecipe = hash('vendored recipe');
+  const compiler = hash('compiler'), vendoredRecipe = hash('vendored recipe');
   const archive = Buffer.from('vendored archive bytes');
-  const recipe = nativePackRecipe(source, backend, lifecycle, platform, compiler, vendoredRecipe);
-  const key = hash(JSON.stringify({ format: 'jet-native-runtime/v2', source, abi: hash(abi), threads: hash(threads), backend, lifecycle, platform, vendored: [hash(archive)] }));
+  const recipe = nativePackRecipe(source, backend, lifecycle, compiler, vendoredRecipe);
+  const key = hash(JSON.stringify({ format: 'jet-native-runtime/v3', source, abi: hash(abi), threads: hash(threads), backend, lifecycle, vendored: [hash(archive)] }));
   const directory = root;
   mkdirSync(join(directory, 'foreign', 'sqlite3'), { recursive: true });
   const provenance = { backend: 'jet-native', runtimeKey: key, rustObjects: 0, llvmObjects: 0,
     source: { sha256: source }, backendInputs: { sha256: backend }, lifecycle: { sha256: lifecycle },
-    cPlatformArchives: platform.map(sha256 => ({ sha256 })),
     vendoredC: { recipeSha256: vendoredRecipe, archives: [{ name: 'sqlite3', path: 'foreign/sqlite3/libsqlite3.a', sha256: hash(archive) }] },
     compilerSha256: compiler,
     recipeSha256: recipe, objectSha256: hash(object), packSha256: hash(pack), imageSha256: hash(image), abiSha256: hash(abi), threadsSha256: hash(threads) };
@@ -33,11 +32,11 @@ function receipt(t) {
 }
 
 test('toolchain recipe changes for every semantic/ABI producer input', () => {
-  const inputs = ['source', 'backend', 'lifecycle', ['archive'], 'compiler', 'vendored'];
+  const inputs = ['source', 'backend', 'lifecycle', 'compiler', 'vendored'];
   const expected = nativePackRecipe(...inputs);
   assert.equal(nativePackRecipe(...inputs), expected);
   for (let index = 0; index < inputs.length; index++) {
-    const changed = [...inputs]; changed[index] = index === 3 ? ['other archive'] : 'changed';
+    const changed = [...inputs]; changed[index] = 'changed';
     assert.notEqual(nativePackRecipe(...changed), expected);
   }
 });

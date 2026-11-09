@@ -191,6 +191,12 @@ store_path_strip_prefix: fn(path: String, prefix: String) -> String? Never! {
     Val(rest.join("/"))
 }
 
+// Whether `path` lies strictly below `prefix`: `Path::starts_with` with at
+// least one component left over.
+store_path_below: fn(path: String, prefix: String) -> Bool Never! {
+    (store_path_strip_prefix(path, prefix) ?? "") != ""
+}
+
 // Whether `path` is one or more normal relative components (no root, no
 // `..`, no leading `.`), Rust `components().all(Normal)` on a relative path.
 store_path_is_normal_relative: fn(path: String) -> Bool Never! {

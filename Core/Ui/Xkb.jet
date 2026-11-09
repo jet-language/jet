@@ -1,0 +1,2179 @@
+use {
+    tables: __core_ui_xkb_tables
+    core.term.[Key]
+    core.ui.[UIError]
+    internal.[lex, keysym_names, parse_keymap, compile, key_at, press_text, ui_key, refresh, update_key, one_sym, real_mod_index, hex, test_keymap_source, test_keymap, exercise]
+}
+// core.ui.xkb — the XKB keyboard engine for native windows, in pure Jet.
+//
+// `keymap` compiles an XKB text-v1 keymap (the include-resolved text a
+// Wayland compositor sends with wl_keyboard.keymap, or `xkbcli
+// compile-keymap` prints): its keycodes, types, compatibility interprets and
+// symbols. A Keymap then tracks the keyboard state and turns evdev key codes
+// into a core.term Key plus the text the key types:
+// - modifier state: depressed, latched and locked modifiers and the layout
+//   group. The compositor's wl_keyboard.modifiers event sets it through
+//   `modifiers`; without one (headless runs, tests) the keys' own actions
+//   (SetMods, LatchMods, LockMods, SetGroup, LatchGroup, LockGroup) drive it,
+//   as libxkbcommon's xkb_state_update_key does.
+// - levels: each key type's modifier map picks the level, with the Lock
+//   capitalization and Control transformations as libxkbcommon applies them.
+// - compose: dead keys and Multi_key sequences of the en_US.UTF-8 Compose
+//   table, fed as xkb_compose_state_feed feeds them.
+// - key repeat: `repeats` says which keys repeat and Repeat schedules them
+//   from wl_keyboard.repeat_info.
+// - queries: `keysym`, `keysym_name`, `layout` and `active` report the
+//   state as xkb_state_key_get_one_sym, xkb_keysym_get_name,
+//   xkb_keymap_layout_get_name and xkb_state_mod_name_is_active do.
+// Keysym names, values and texts come from the generated Core/Ui/XkbTables.jet.
+
+SHIFT: 1
+LOCK: 2
+CONTROL: 4
+REAL_MODS: 255
+ALL_MODS: 4294967295
+// Keysyms a keymap names but the keysym table does not know get ids from
+// here up, so interprets still match them by name.
+SYNTHETIC_KEYSYM: 2130706432
+
+T_WORD: 1
+T_NUMBER: 2
+T_STRING: 3
+T_KEY: 4
+T_PUNCT: 5
+T_END: 6
+
+ACT_NONE: 0
+ACT_SET_MODS: 1
+ACT_LATCH_MODS: 2
+ACT_LOCK_MODS: 3
+ACT_SET_GROUP: 4
+ACT_LATCH_GROUP: 5
+ACT_LOCK_GROUP: 6
+// Pointer buttons, controls, screen switches and Terminate break a latch.
+ACT_BREAKS_LATCH: 7
+ACT_OTHER: 8
+
+MATCH_NONE_OF: 0
+MATCH_ANY_OR_NONE: 1
+MATCH_ANY_OF: 2
+MATCH_ALL_OF: 3
+MATCH_EXACTLY: 4
+
+LATCH_NONE: 0
+LATCH_KEY_DOWN: 1
+LATCH_PENDING: 2
+
+GROUPS_WRAP: 0
+GROUPS_CLAMP: 1
+GROUPS_REDIRECT: 2
+
+/// Key repeat timing from wl_keyboard.repeat_info: `rate` repeats per second
+/// (0 disables repeat) after the key has been held `delay` milliseconds.
+Repeat: struct {
+    rate: Int
+    delay: Int
+}
+
+impl Repeat {
+    /// How many repeats a key held `held_ms` milliseconds has produced in
+    /// total: the first at `delay`, then one every 1000 / `rate` ms.
+    due: fn(self, held_ms: Int) -> Int {
+        if self.rate <= 0 || held_ms < self.delay -> return 0
+        // Split so that a hostile rate (any int32) cannot overflow.
+        held: held_ms - self.delay
+        1 + (held /% 1000) * self.rate + (held %% 1000) * self.rate /% 1000
+    }
+
+    /// The repeats that fall due while the hold grows from `from_ms` to `to_ms`.
+    between: fn(self, from_ms: Int, to_ms: Int) -> Int {
+        self.due(to_ms) - self.due(from_ms)
+    }
+}
+
+Token: struct {
+    kind: Int
+    text: String
+    value: Int
+    line: Int
+}
+
+TypeEntry: struct {
+    mods: Int
+    mask: Int
+    level: Int
+    preserve: Int
+    preserve_mask: Int
+}
+
+KeyType: struct {
+    name: String
+    mods: Int
+    mask: Int
+    levels: Int
+    entries: [TypeEntry]
+}
+
+Action: struct {
+    kind: Int
+    mods: Int
+    mask: Int
+    modmap: Bool
+    group: Int
+    absolute: Bool
+    clear_locks: Bool
+    latch_to_lock: Bool
+    lock: Bool
+    unlock: Bool
+}
+
+Interp: struct {
+    sym: Int
+    any: Bool
+    match: Int
+    mods: Int
+    action: Action
+    vmod: Int
+    level_one: Bool
+    repeat: Bool
+}
+
+Group: struct {
+    type_name: String
+    explicit_type: Bool
+    type: Int
+    levels: [[Int]]
+    actions: [Action]
+}
+
+KeyDef: struct {
+    name: String
+    code: Int
+    groups: [Group]
+    explicit_actions: Bool
+    repeat: Int
+    vmods: Int
+    explicit_vmods: Bool
+    modmap: Int
+    vmodmap: Int
+    out_of_range: Int
+    redirect: Int
+    repeats: Bool
+}
+
+ModmapEntry: struct {
+    mod: Int
+    key: String
+    sym: Int
+}
+
+Filter: struct {
+    code: Int
+    action: Action
+    refcnt: Int
+    saved: Int
+    latch: Int
+    active: Bool
+}
+
+Parser: struct {
+    toks: [Token]
+    at: Int
+    names: [String: Int]
+    synthetic: [String: Int]
+    codes: [String: Int]
+    aliases: [String: String]
+    vmods: [String]
+    vmod_fixed: [Int]
+    types: [KeyType]
+    interps: [Interp]
+    default_repeat: Bool
+    default_level_one: Bool
+    keys: [KeyDef]
+    key_index: [String: Int]
+    modmap: [ModmapEntry]
+    layouts: [String]
+}
+
+/// A compiled keymap and the keyboard state it tracks.
+Keymap: struct {
+    priv keys: [KeyDef]
+    priv by_code: [Int]
+    priv types: [KeyType]
+    priv group_count: Int
+    priv base_mods: Int
+    priv latched_mods: Int
+    priv locked_mods: Int
+    priv base_group: Int
+    priv latched_group: Int
+    priv locked_group: Int
+    priv mods: Int
+    priv group: Int
+    priv set_mods: Int
+    priv clear_mods: Int
+    priv mod_counts: [Int]
+    priv filters: [Filter]
+    priv server: Bool
+    priv compose: Int
+    // Group names (name[GroupN]), virtual modifier names and their real masks.
+    priv layouts: [String]
+    priv vmod_names: [String]
+    priv vmod_masks: [Int]
+    priv sym_names: [Int: String]
+}
+
+/// Compiles an XKB text-v1 keymap. Every failure is `UIError.Protocol`.
+keymap: fn(bytes: [U8]) -> Keymap UIError! {
+    p := Parser{
+        toks: lex(bytes), at: 0, names: keysym_names(), synthetic: [String: Int]{},
+        codes: [String: Int]{}, aliases: [String: String]{}, vmods: [String]{}, vmod_fixed: [Int]{},
+        types: [KeyType]{}, interps: [Interp]{}, default_repeat: true, default_level_one: false,
+        keys: [KeyDef]{}, key_index: [String: Int]{}, modmap: [ModmapEntry]{}, layouts: [String]{},
+    }
+    parse_keymap(p)
+    compile(p)
+}
+
+impl Keymap {
+    /// Sets the state from the compositor's wl_keyboard.modifiers event.
+    /// From then on the compositor owns the state and `press` stops
+    /// applying key actions, as libxkbcommon requires.
+    modifiers: fn(&self, depressed: Int, latched: Int, locked: Int, group: Int) {
+        // The event's fields are uint32; the group is read as libxkbcommon
+        // reads it, as an int32 that wraps into the key's groups.
+        layout: group.bit_and(4294967295)
+        self.server = true
+        self.base_mods = depressed.bit_and(4294967295)
+        self.latched_mods = latched.bit_and(4294967295)
+        self.locked_mods = locked.bit_and(4294967295)
+        self.base_group = 0
+        self.latched_group = 0
+        self.locked_group = if layout >= 2147483648 -> layout - 4294967296 else -> layout
+        refresh(self)
+    }
+
+    /// A key press (`down`) or release of evdev key `code`: the key's
+    /// level-1 symbol in the active group, and on a press the text it types
+    /// ("" for none, for control characters and inside a Compose sequence).
+    press: fn(&self, code: Int, down: Bool) -> (key: Key, text: String) {
+        index: key_at(self, code + 8)
+        if index < 0 -> return (key: Key.Unknown, text: "")
+        key: ui_key(self, index)
+        text: if down -> press_text(self, index) else -> ""
+        if !self.server -> update_key(self, index, down)
+        (key: key, text: text)
+    }
+
+    /// True when holding evdev key `code` repeats it. Modifier keys do not.
+    repeats: fn(self, code: Int) -> Bool {
+        index: key_at(self, code + 8)
+        index >= 0 && self.keys[index].repeats
+    }
+
+    /// The evdev codes of the keys with symbols at level 1 of group 1, in order.
+    codes: fn(self) -> [Int] {
+        out := [Int]{}
+        loop keycode in 9..<self.by_code.len() {
+            index: self.by_code[keycode]
+            if index < 0 -> next
+            groups: self.keys[index].groups
+            if groups.len() > 0 && groups[0].levels.len() > 0 && groups[0].levels[0].len() > 0 -> out.push(keycode - 8)
+        }
+        out
+    }
+
+    /// The keysym evdev key `code` produces in the current state, as
+    /// xkb_state_key_get_one_sym; 0 for none. Ask before `press`.
+    keysym: fn(self, code: Int) -> Int {
+        index: key_at(self, code + 8)
+        if index < 0 -> return 0
+        one_sym(self, index)
+    }
+
+    /// The name of keysym `sym` as xkb_keysym_get_name writes it: "eacute",
+    /// "Shift_L", "NoSymbol" for 0, "U20AC" for an unnamed Unicode keysym,
+    /// else "0x" and eight hex digits. `sym` is read as a uint32.
+    keysym_name: fn(self, sym: Int) -> String {
+        value: sym.bit_and(4294967295)
+        if self.sym_names.get(value) == .Val(name) -> return name
+        if value >= 16777472 && value <= 17891327 -> return "U{hex(value - 16777216, 4)}"
+        "0x{hex(value, 8).lower()}"
+    }
+
+    /// The active layout's name (name[GroupN]), else "Group N".
+    layout: fn(self) -> String {
+        if self.group >= 0 && self.group < self.layouts.len() && self.layouts[self.group] != "" -> return self.layouts[self.group].copy()
+        "Group {self.group + 1}"
+    }
+
+    /// True when modifier `name` is in effect: a real modifier ("Shift",
+    /// "Lock", "Control", "Mod1".."Mod5") or a virtual one the keymap maps
+    /// ("Alt", "NumLock", "LevelThree", "Super").
+    active: fn(self, name: String) -> Bool {
+        real: real_mod_index(name)
+        if real >= 0 -> return (self.mods >> real).bit_and(1) == 1
+        loop v in 0..<self.vmod_names.len() {
+            if self.vmod_names[v].lower() == name.lower() -> return self.vmod_masks[v] != 0 && self.mods.bit_and(self.vmod_masks[v]) != 0
+        }
+        false
+    }
+}
+
+// The parser, compiler and state machine behind the public items above:
+// not part of the surface.
+priv internal: module {
+    // At least `width` upper-case hex digits.
+    hex: fn(value: Int, width: Int) -> String {
+        digits: "0123456789ABCDEF".bytes()
+        out := [U8]{}
+        v := value
+        loop v > 0 || out.len() < width {
+            out.push(digits[v %% 16])
+            v = v /% 16
+        }
+        out.reverse()
+        String.from_bytes(out) ?? ""
+    }
+
+    syntax: fn(line: Int, message: String) -> UIError {
+        UIError.Protocol("xkb keymap line {line}: {message}")
+    }
+
+    is_word_byte: fn(c: Int) -> Bool {
+        (c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c == 95
+    }
+
+    hex_digit: fn(c: Int) -> Int {
+        if c >= 48 && c <= 57 -> return c - 48
+        if c >= 65 && c <= 70 -> return c - 55
+        if c >= 97 && c <= 102 -> return c - 87
+        Int{-1}
+    }
+
+    // A number word's value: decimal, or hex after `0x`; -1 when not a number.
+    number_value: fn(word: [U8]) -> Int {
+        if word.len() > 2 && Int.from_u8(word[0]) == 48 && (Int.from_u8(word[1]) == 120 || Int.from_u8(word[1]) == 88) {
+            if word.len() > 10 -> return -1
+            value := 0
+            loop i in 2..<word.len() {
+                digit: hex_digit(Int.from_u8(word[i]))
+                if digit < 0 -> return -1
+                value = value * 16 + digit
+            }
+            return value
+        }
+        if word.len() > 12 -> return -1
+        value := 0
+        loop b in word {
+            c: Int.from_u8(b)
+            if c < 48 || c > 57 -> return -1
+            value = value * 10 + c - 48
+        }
+        value
+    }
+
+    lex: fn(source: [U8]) -> [Token] UIError! {
+        out := [Token]{}
+        n: source.len()
+        i := 0
+        line := 1
+        loop i < n {
+            c: Int.from_u8(source[i])
+            if c == 10 {
+                line += 1
+                i += 1
+            } else if c == 32 || c == 9 || c == 13 || c == 12 || c == 0 {
+                i += 1
+            } else if c == 35 || (c == 47 && i + 1 < n && Int.from_u8(source[i + 1]) == 47) {
+                loop i < n && Int.from_u8(source[i]) != 10 {
+                    i += 1
+                }
+            } else if c == 34 {
+                start_line: line
+                text := [U8]{}
+                i += 1
+                loop i < n && Int.from_u8(source[i]) != 34 {
+                    if Int.from_u8(source[i]) == 92 && i + 1 < n -> i += 1
+                    if Int.from_u8(source[i]) == 10 -> line += 1
+                    text.push(source[i])
+                    i += 1
+                }
+                if i >= n -> return Err(syntax(start_line, "unterminated string"))
+                i += 1
+                out.push(Token{kind: T_STRING, text: String.from_bytes(text) ?? return Err(syntax(start_line, "a string is not UTF-8")), value: 0, line: start_line})
+            } else if c == 60 {
+                start: i + 1
+                i += 1
+                loop i < n && Int.from_u8(source[i]) != 62 && Int.from_u8(source[i]) != 10 {
+                    i += 1
+                }
+                if i >= n || Int.from_u8(source[i]) != 62 -> return Err(syntax(line, "unterminated key name"))
+                name: String.from_bytes(source[start..<i]) ?? return Err(syntax(line, "a key name is not UTF-8"))
+                i += 1
+                out.push(Token{kind: T_KEY, text: name, value: 0, line: line})
+            } else if is_word_byte(c) {
+                start: i
+                loop i < n && is_word_byte(Int.from_u8(source[i])) {
+                    i += 1
+                }
+                word: source[start..<i]
+                text: String.from_bytes(word) ?? ""
+                value: if c >= 48 && c <= 57 -> number_value(word) else -> Int{-1}
+                if value >= 0 {
+                    out.push(Token{kind: T_NUMBER, text: text, value: value, line: line})
+                } else {
+                    out.push(Token{kind: T_WORD, text: text, value: 0, line: line})
+                }
+            } else if c >= 128 {
+                return Err(syntax(line, "unexpected non-ASCII byte"))
+            } else {
+                out.push(Token{kind: T_PUNCT, text: utf8(c), value: 0, line: line})
+                i += 1
+            }
+        }
+        out.push(Token{kind: T_END, text: "", value: 0, line: line})
+        Ok(out)
+    }
+
+    kind_at: fn(p: Parser) -> Int { p.toks[p.at].kind }
+
+    line_at: fn(p: Parser) -> Int { p.toks[p.at].line }
+
+    is_punct: fn(p: Parser, ch: String) -> Bool {
+        p.toks[p.at].kind == T_PUNCT && p.toks[p.at].text == ch
+    }
+
+    is_word: fn(p: Parser) -> Bool { p.toks[p.at].kind == T_WORD }
+
+    // The current word, lower-cased; "" when the token is not a word.
+    word_lower: fn(p: Parser) -> String {
+        if p.toks[p.at].kind != T_WORD -> return ""
+        p.toks[p.at].text.lower()
+    }
+
+    advance: fn(&p: Parser) {
+        if p.toks[p.at].kind != T_END -> p.at += 1
+    }
+
+    accept: fn(&p: Parser, ch: String) -> Bool {
+        if !is_punct(p, ch) -> return false
+        p.at += 1
+        true
+    }
+
+    describe: fn(p: Parser) -> String {
+        t: p.toks[p.at]
+        if t.kind == T_END -> return "the end of the keymap"
+        if t.kind == T_STRING -> return "\"{t.text}\""
+        if t.kind == T_KEY -> return "<{t.text}>"
+        "'{t.text}'"
+    }
+
+    expect: fn(&p: Parser, ch: String) UIError! {
+        if !accept(p, ch) -> return Err(syntax(line_at(p), "expected '{ch}', found {describe(p)}"))
+        Ok()
+    }
+
+    expect_word: fn(&p: Parser) -> String UIError! {
+        if !is_word(p) -> return Err(syntax(line_at(p), "expected a name, found {describe(p)}"))
+        text: p.toks[p.at].text.copy()
+        p.at += 1
+        Ok(text)
+    }
+
+    expect_string: fn(&p: Parser) -> String UIError! {
+        if kind_at(p) != T_STRING -> return Err(syntax(line_at(p), "expected a string, found {describe(p)}"))
+        text: p.toks[p.at].text.copy()
+        p.at += 1
+        Ok(text)
+    }
+
+    expect_key: fn(&p: Parser) -> String UIError! {
+        if kind_at(p) != T_KEY -> return Err(syntax(line_at(p), "expected a key name, found {describe(p)}"))
+        text: p.toks[p.at].text.copy()
+        p.at += 1
+        Ok(text)
+    }
+
+    expect_number: fn(&p: Parser) -> Int UIError! {
+        if kind_at(p) != T_NUMBER -> return Err(syntax(line_at(p), "expected a number, found {describe(p)}"))
+        value: p.toks[p.at].value
+        p.at += 1
+        Ok(value)
+    }
+
+    // Skips tokens up to the end of the current statement: past its `;`, or up
+    // to a closing `}` (or `,` when `items`) at nesting depth 0.
+    skip_statement: fn(&p: Parser, items: Bool) UIError! {
+        depth := 0
+        loop {
+            k: kind_at(p)
+            if k == T_END -> return Err(syntax(line_at(p), "unexpected end of the keymap"))
+            if k == T_PUNCT {
+                t: p.toks[p.at].text.copy()
+                if depth == 0 && t == ";" {
+                    p.at += 1
+                    return Ok()
+                }
+                if depth == 0 && (t == "}}" || (items && t == ",")) -> return Ok()
+                if t == "{{" || t == "[" || t == "(" -> depth += 1
+                if t == "}}" || t == "]" || t == ")" -> depth -= 1
+            }
+            p.at += 1
+        }
+    }
+
+    // The 1-based index after `name` in a level or group name (`Level2`,
+    // `Group1`), or a plain number.
+    indexed: fn(&p: Parser, prefix: String) -> Int UIError! {
+        if kind_at(p) == T_NUMBER -> return Ok(expect_number(p))
+        word: word_lower(p)
+        if word.starts_with(prefix) {
+            value: number_value(word.remove_prefix(prefix).bytes())
+            if value > 0 {
+                p.at += 1
+                return Ok(value)
+            }
+        }
+        Err(syntax(line_at(p), "expected a {prefix} number, found {describe(p)}"))
+    }
+
+    // A 0-based group index from `[N]` / `[GroupN]`.
+    group_index: fn(&p: Parser) -> Int UIError! {
+        expect(p, "[")
+        group: indexed(p, "group")
+        expect(p, "]")
+        if group < 1 || group > 32 -> return Err(syntax(line_at(p), "group {group} is out of range"))
+        Ok(group - 1)
+    }
+
+    parse_bool: fn(&p: Parser) -> Bool UIError! {
+        word: expect_word(p).lower()
+        if word == "true" || word == "yes" || word == "on" -> return Ok(true)
+        if word == "false" || word == "no" || word == "off" -> return Ok(false)
+        Err(syntax(line_at(p), "expected true or false, found '{word}'"))
+    }
+
+    real_mod_index: fn(name: String) -> Int {
+        if name.lower() == {
+            "shift" -> 0
+            "lock" -> 1
+            "control" | "ctrl" -> 2
+            "mod1" -> 3
+            "mod2" -> 4
+            "mod3" -> 5
+            "mod4" -> 6
+            "mod5" -> 7
+            else -> -1
+        }
+    }
+
+    vmod_index: fn(p: Parser, name: String) -> Int {
+        loop i in 0..<p.vmods.len() {
+            if p.vmods[i] == name -> return i
+        }
+        Int{-1}
+    }
+
+    // A modifier mask: real and virtual modifier names, `none`, `all` or a
+    // number, joined by `+`. Virtual modifier i is bit 8 + i.
+    mod_expr: fn(&p: Parser) -> Int UIError! {
+        mask := 0
+        loop {
+            if kind_at(p) == T_NUMBER {
+                mask = mask.bit_or(expect_number(p))
+            } else {
+                name: expect_word(p)
+                lower: name.lower()
+                real: real_mod_index(name)
+                vmod: vmod_index(p, name)
+                if lower == "all" {
+                    mask = ALL_MODS
+                } else if real >= 0 {
+                    mask = mask.bit_or(1 << real)
+                } else if vmod >= 0 {
+                    mask = mask.bit_or(1 << (8 + vmod))
+                } else if lower != "none" {
+                    return Err(syntax(line_at(p), "unknown modifier '{name}'"))
+                }
+            }
+            if !accept(p, "+") && !accept(p, "|") -> break
+        }
+        Ok(mask)
+    }
+
+    // `virtual_modifiers A, B = 0x4000;`: declares virtual modifiers, with an
+    // optional fixed mapping.
+    virtual_modifiers: fn(&p: Parser) UIError! {
+        loop {
+            name: expect_word(p)
+            fixed := Int{-1}
+            if accept(p, "=") -> fixed = mod_expr(p)
+            index: vmod_index(p, name)
+            if index >= 0 {
+                if fixed >= 0 -> p.vmod_fixed[index] = fixed
+            } else {
+                if p.vmods.len() >= 24 -> return Err(syntax(line_at(p), "more than 24 virtual modifiers"))
+                p.vmods.push(name)
+                p.vmod_fixed.push(fixed)
+            }
+            if !accept(p, ",") -> break
+        }
+        expect(p, ";")
+    }
+
+    be: fn(bytes: [U8], at: Int, width: Int) -> Int {
+        value := 0
+        loop k in 0..<width -> value = (value << 8) + Int.from_u8(bytes[at + k])
+        value
+    }
+
+    keysym_names: fn() -> [String: Int] {
+        out := [String: Int]{}
+        values: tables.XKB_KEYSYM_VALUES
+        names: tables.XKB_KEYSYM_NAMES.split("\n").to_list()
+        loop i in 0..<names.len() {
+            if out.get(names[i]) == None -> _: out.add(names[i].copy(), be(values, i * 4, 4))
+        }
+        out
+    }
+
+    // The keysym a name spells: a known name, `U<hex>` (the Latin-1 keysym for
+    // a Latin-1 scalar), or a synthetic id for a name the table does not know.
+    keysym_named: fn(&p: Parser, name: String) -> Int {
+        if p.names.get(name) == .Val(value) -> return value
+        if name.len() >= 5 && name.starts_with("U") {
+            digits: name.remove_prefix("U")
+            scalar: if digits.len() <= 6 -> number_value("0x{digits}".bytes()) else -> Int{-1}
+            if (scalar >= 32 && scalar <= 126) || (scalar >= 160 && scalar <= 255) -> return scalar
+            if scalar >= 256 && scalar <= 1114111 -> return 16777216 + scalar
+        }
+        if p.synthetic.get(name) == .Val(value) -> return value
+        value: SYNTHETIC_KEYSYM + p.synthetic.len()
+        _: p.synthetic.add(name.copy(), value)
+        value
+    }
+
+    // The Unicode scalar a keysym types, or 0.
+    keysym_scalar: fn(sym: Int) -> Int {
+        if (sym >= 32 && sym <= 126) || (sym >= 160 && sym <= 255) -> return sym
+        if sym >= 16777472 && sym <= 17891327 -> return sym - 16777216
+        rows: tables.XKB_KEYSYM_SCALARS
+        lo := 0
+        hi := rows.len() /% 7
+        loop lo < hi {
+            mid: (lo + hi) /% 2
+            value: be(rows, mid * 7, 4)
+            if value == sym -> return be(rows, mid * 7 + 4, 3)
+            if value < sym {
+                lo = mid + 1
+            } else {
+                hi = mid
+            }
+        }
+        0
+    }
+
+    // The keysym for a scalar: Latin-1 keysyms, then the table's legacy
+    // keysyms, then the Unicode keysym.
+    scalar_keysym: fn(scalar: Int) -> Int {
+        if (scalar >= 32 && scalar <= 126) || (scalar >= 160 && scalar <= 255) -> return scalar
+        rows: tables.XKB_KEYSYM_SCALARS
+        loop at in 0..<(rows.len() /% 7) {
+            if be(rows, at * 7 + 4, 3) == scalar -> return be(rows, at * 7, 4)
+        }
+        16777216 + scalar
+    }
+
+    utf8: fn(scalar: Int) -> String {
+        out := [U8]{}
+        if scalar < 128 {
+            out.push(U8{scalar})
+        } else if scalar < 2048 {
+            out.push(U8{192 + (scalar >> 6)})
+            out.push(U8{128 + scalar.bit_and(63)})
+        } else if scalar < 65536 {
+            out.push(U8{224 + (scalar >> 12)})
+            out.push(U8{128 + (scalar >> 6).bit_and(63)})
+            out.push(U8{128 + scalar.bit_and(63)})
+        } else {
+            out.push(U8{240 + (scalar >> 18)})
+            out.push(U8{128 + (scalar >> 12).bit_and(63)})
+            out.push(U8{128 + (scalar >> 6).bit_and(63)})
+            out.push(U8{128 + scalar.bit_and(63)})
+        }
+        String.from_bytes(out) ?? ""
+    }
+
+    // The scalars of `text`.
+    scalars: fn(text: String) -> [Int] {
+        out := [Int]{}
+        bytes: text.bytes()
+        i := 0
+        loop i < bytes.len() {
+            b: Int.from_u8(bytes[i])
+            width: if b < 128 -> 1 else if b < 224 -> 2 else if b < 240 -> 3 else -> 4
+            value := if b < 128 -> b else if b < 224 -> b.bit_and(31) else if b < 240 -> b.bit_and(15) else -> b.bit_and(7)
+            loop k in 1..<width {
+                if i + k < bytes.len() -> value = (value << 6) + Int.from_u8(bytes[i + k]).bit_and(63)
+            }
+            out.push(value)
+            i += width
+        }
+        out
+    }
+
+    // Simple (one-scalar) case mappings, as libxkbcommon's keysym case functions:
+    // a full mapping that yields several scalars leaves the scalar alone, except
+    // ß → ẞ and İ → i.
+    upper_scalar: fn(scalar: Int) -> Int {
+        if scalar == 223 -> return 7838
+        mapped: scalars(utf8(scalar).upper())
+        if mapped.len() == 1 -> return mapped[0]
+        scalar
+    }
+
+    lower_scalar: fn(scalar: Int) -> Int {
+        if scalar == 304 -> return 105
+        mapped: scalars(utf8(scalar).lower())
+        if mapped.len() == 1 -> return mapped[0]
+        scalar
+    }
+
+    keysym_upper: fn(sym: Int) -> Int {
+        scalar: keysym_scalar(sym)
+        if scalar == 0 -> return sym
+        upper: upper_scalar(scalar)
+        if upper == scalar -> return sym
+        scalar_keysym(upper)
+    }
+
+    keysym_is_lower: fn(sym: Int) -> Bool {
+        scalar: keysym_scalar(sym)
+        scalar != 0 && upper_scalar(scalar) != scalar
+    }
+
+    keysym_is_upper: fn(sym: Int) -> Bool {
+        scalar: keysym_scalar(sym)
+        scalar != 0 && lower_scalar(scalar) != scalar
+    }
+
+    keysym_is_keypad: fn(sym: Int) -> Bool { sym >= 65408 && sym <= 65469 }
+
+    // Shift_L…Hyper_R, ISO_Lock…ISO_Level5_Lock, Mode_switch and Num_Lock:
+    // keysyms a Compose sequence lets through.
+    keysym_is_modifier: fn(sym: Int) -> Bool {
+        (sym >= 65505 && sym <= 65518) || (sym >= 65025 && sym <= 65043) || sym == 65406 || sym == 65407
+    }
+
+    // The Compose trie row among `count` sibling rows from `first` whose keysym
+    // is `sym`, or -1.
+    compose_child: fn(first: Int, count: Int, sym: Int) -> Int {
+        rows: tables.XKB_COMPOSE_NODES
+        lo := first
+        hi := first + count
+        loop lo < hi {
+            mid: (lo + hi) /% 2
+            value: be(rows, mid * 9, 4)
+            if value == sym -> return mid
+            if value < sym {
+                lo = mid + 1
+            } else {
+                hi = mid
+            }
+        }
+        Int{-1}
+    }
+
+    // The child of Compose node `node` (-1: the root) for `sym`, or -1.
+    compose_next: fn(node: Int, sym: Int) -> Int {
+        if node < 0 -> return compose_child(0, tables.XKB_COMPOSE_ROOTS, sym)
+        rows: tables.XKB_COMPOSE_NODES
+        count: be(rows, node * 9 + 7, 2)
+        if count >= 32768 -> return -1
+        compose_child(be(rows, node * 9 + 4, 3), count, sym)
+    }
+
+    compose_is_leaf: fn(node: Int) -> Bool {
+        be(tables.XKB_COMPOSE_NODES, node * 9 + 7, 2) >= 32768
+    }
+
+    // The text of Compose leaf `node`.
+    compose_text: fn(node: Int) -> String {
+        rows: tables.XKB_COMPOSE_NODES
+        offset: be(rows, node * 9 + 4, 3)
+        length: be(rows, node * 9 + 7, 2) - 32768
+        String.from_bytes(tables.XKB_COMPOSE_TEXT[offset..<(offset + length)]) ?? ""
+    }
+
+    // The spacing text of dead keysym `dead`: what the sequence (dead, space)
+    // composes, or "".
+    dead_spacing: fn(dead: Int) -> String {
+        first: compose_next(-1, dead)
+        if first < 0 -> return ""
+        leaf: compose_next(first, 32)
+        if leaf < 0 || !compose_is_leaf(leaf) -> return ""
+        compose_text(leaf)
+    }
+
+    keysym_is_dead: fn(sym: Int) -> Bool { sym >= 65104 && sym <= 65171 }
+
+    // Text without C0/C1 control characters and DEL.
+    visible: fn(text: String) -> String {
+        out := ""
+        loop scalar in scalars(text) {
+            if scalar >= 32 && (scalar < 127 || scalar > 159) {
+                piece: utf8(scalar)
+                out = "{out}{piece}"
+            }
+        }
+        out
+    }
+
+    parse_keymap: fn(&p: Parser) UIError! {
+        loop is_word(p) && word_lower(p) != "xkb_keymap" -> advance(p)
+        if word_lower(p) != "xkb_keymap" -> return Err(syntax(line_at(p), "expected xkb_keymap, found {describe(p)}"))
+        advance(p)
+        if kind_at(p) == T_STRING -> advance(p)
+        expect(p, "{{")
+        loop !is_punct(p, "}}") {
+            section := ""
+            loop is_word(p) {
+                word: word_lower(p)
+                advance(p)
+                if word.starts_with("xkb_") {
+                    section = word
+                    break
+                }
+            }
+            if section == "" -> return Err(syntax(line_at(p), "expected a keymap section, found {describe(p)}"))
+            if kind_at(p) == T_STRING -> advance(p)
+            expect(p, "{{")
+            if section == "xkb_keycodes" {
+                keycodes(p)
+            } else if section == "xkb_types" {
+                types(p)
+            } else if section == "xkb_compatibility" || section == "xkb_compatibility_map" || section == "xkb_compat" || section == "xkb_compat_map" {
+                compat(p)
+            } else if section == "xkb_symbols" {
+                symbols(p)
+            } else {
+                loop !is_punct(p, "}}") -> skip_statement(p, false)
+            }
+            expect(p, "}}")
+            expect(p, ";")
+        }
+        expect(p, "}}")
+        _: accept(p, ";")
+        if kind_at(p) != T_END -> return Err(syntax(line_at(p), "unexpected {describe(p)} after the keymap"))
+        Ok()
+    }
+
+    keycodes: fn(&p: Parser) UIError! {
+        loop !is_punct(p, "}}") {
+            if kind_at(p) == T_KEY {
+                name: expect_key(p)
+                expect(p, "=")
+                code: expect_number(p)
+                if code > 65535 -> return Err(syntax(line_at(p), "keycode {code} is out of range"))
+                if p.codes.get(name) == .Val(_) {
+                    p.codes[name] = code
+                } else {
+                    _: p.codes.add(name, code)
+                }
+                expect(p, ";")
+            } else if word_lower(p) == "alias" {
+                advance(p)
+                alias: expect_key(p)
+                expect(p, "=")
+                target: expect_key(p)
+                expect(p, ";")
+                if p.aliases.get(alias) == None -> _: p.aliases.add(alias, target)
+            } else {
+                skip_statement(p, false)
+            }
+        }
+        Ok()
+    }
+
+    types: fn(&p: Parser) UIError! {
+        loop !is_punct(p, "}}") {
+            word: word_lower(p)
+            if word == "virtual_modifiers" {
+                advance(p)
+                virtual_modifiers(p)
+            } else if word == "type" {
+                advance(p)
+                key_type(p)
+            } else {
+                skip_statement(p, false)
+            }
+        }
+        Ok()
+    }
+
+    entry_for: fn(entries: [TypeEntry], mods: Int) -> Int {
+        loop i in 0..<entries.len() {
+            if entries[i].mods == mods -> return i
+        }
+        Int{-1}
+    }
+
+    key_type: fn(&p: Parser) UIError! {
+        name: expect_string(p)
+        expect(p, "{{")
+        mods := 0
+        entries := [TypeEntry]{}
+        levels := 1
+        loop !is_punct(p, "}}") {
+            word: word_lower(p)
+            if word == "modifiers" {
+                advance(p)
+                expect(p, "=")
+                mods = mod_expr(p)
+                expect(p, ";")
+            } else if word == "map" {
+                advance(p)
+                expect(p, "[")
+                entry_mods: mod_expr(p)
+                expect(p, "]")
+                expect(p, "=")
+                level: indexed(p, "level")
+                expect(p, ";")
+                if level < 1 || level > 256 -> return Err(syntax(line_at(p), "level {level} is out of range"))
+                if level > levels -> levels = level
+                at: entry_for(entries, entry_mods)
+                if at >= 0 {
+                    entries[at].level = level - 1
+                } else {
+                    entries.push(TypeEntry{mods: entry_mods, mask: 0, level: level - 1, preserve: 0, preserve_mask: 0})
+                }
+            } else if word == "preserve" {
+                advance(p)
+                expect(p, "[")
+                entry_mods: mod_expr(p)
+                expect(p, "]")
+                expect(p, "=")
+                preserve: mod_expr(p)
+                expect(p, ";")
+                at: entry_for(entries, entry_mods)
+                if at >= 0 {
+                    entries[at].preserve = preserve
+                } else {
+                    entries.push(TypeEntry{mods: entry_mods, mask: 0, level: 0, preserve: preserve, preserve_mask: 0})
+                }
+            } else {
+                skip_statement(p, false)
+            }
+        }
+        expect(p, "}}")
+        expect(p, ";")
+        kept := [TypeEntry]{}
+        loop entry in entries {
+            if entry.mods.bit_and(mods) == entry.mods -> kept.push(entry)
+        }
+        defined: KeyType{name: name.copy(), mods: mods, mask: 0, levels: levels, entries: kept}
+        loop i in 0..<p.types.len() {
+            if p.types[i].name == name {
+                p.types[i] = defined
+                return Ok()
+            }
+        }
+        p.types.push(defined)
+        Ok()
+    }
+
+    no_action: fn() -> Action {
+        Action{kind: ACT_NONE, mods: 0, mask: 0, modmap: false, group: 0, absolute: false, clear_locks: false, latch_to_lock: false, lock: true, unlock: true}
+    }
+
+    action_kind: fn(name: String) -> Int {
+        if name.lower() == {
+            "noaction" -> ACT_NONE
+            "setmods" -> ACT_SET_MODS
+            "latchmods" -> ACT_LATCH_MODS
+            "lockmods" -> ACT_LOCK_MODS
+            "setgroup" -> ACT_SET_GROUP
+            "latchgroup" -> ACT_LATCH_GROUP
+            "lockgroup" -> ACT_LOCK_GROUP
+            "ptrbtn" | "pointerbutton" | "lockptrbtn" | "lockpointerbutton" | "lockptrbutton" | "lockpointerbtn" -> ACT_BREAKS_LATCH
+            "setcontrols" | "lockcontrols" | "switchscreen" | "terminate" | "terminateserver" -> ACT_BREAKS_LATCH
+            else -> ACT_OTHER
+        }
+    }
+
+    // `Name(arg, arg=value, !flag)`.
+    action: fn(&p: Parser) -> Action UIError! {
+        name: expect_word(p)
+        out := no_action()
+        out.kind = action_kind(name)
+        expect(p, "(")
+        loop !is_punct(p, ")") {
+            negated: accept(p, "!") || accept(p, "~")
+            if !is_word(p) {
+                skip_statement(p, true)
+            } else {
+                arg: word_lower(p)
+                advance(p)
+                if is_punct(p, "[") {
+                    skip_statement(p, true)
+                } else if !accept(p, "=") {
+                    if arg == "clearlocks" -> out.clear_locks = !negated
+                    if arg == "latchtolock" -> out.latch_to_lock = !negated
+                } else if arg == "modifiers" || arg == "mods" {
+                    lookup: word_lower(p)
+                    if lookup == "modmapmods" || lookup == "usemodmapmods" {
+                        advance(p)
+                        out.modmap = true
+                    } else {
+                        out.mods = mod_expr(p)
+                    }
+                } else if arg == "group" {
+                    relative: is_punct(p, "+") || is_punct(p, "-")
+                    negative: accept(p, "-")
+                    _: accept(p, "+")
+                    value: indexed(p, "group")
+                    if relative {
+                        out.group = if negative -> 0 - value else -> value
+                    } else {
+                        out.absolute = true
+                        out.group = value - 1
+                    }
+                } else if arg == "affect" {
+                    affect: expect_word(p).lower()
+                    out.lock = affect == "lock" || affect == "both"
+                    out.unlock = affect == "unlock" || affect == "both"
+                } else if arg == "clearlocks" || arg == "latchtolock" {
+                    value: parse_bool(p)
+                    if arg == "clearlocks" -> out.clear_locks = value
+                    if arg == "latchtolock" -> out.latch_to_lock = value
+                } else {
+                    skip_statement(p, true)
+                }
+            }
+            if !accept(p, ",") -> break
+        }
+        expect(p, ")")
+        Ok(out)
+    }
+
+    compat: fn(&p: Parser) UIError! {
+        loop !is_punct(p, "}}") {
+            word: word_lower(p)
+            if word == "virtual_modifiers" {
+                advance(p)
+                virtual_modifiers(p)
+            } else if word == "interpret" {
+                advance(p)
+                interpret(p)
+            } else {
+                skip_statement(p, false)
+            }
+        }
+        Ok()
+    }
+
+    match_kind: fn(name: String) -> Int {
+        if name.lower() == {
+            "noneof" -> MATCH_NONE_OF
+            "anyofornone" -> MATCH_ANY_OR_NONE
+            "anyof" -> MATCH_ANY_OF
+            "allof" -> MATCH_ALL_OF
+            "exactly" -> MATCH_EXACTLY
+            else -> -1
+        }
+    }
+
+    interpret: fn(&p: Parser) UIError! {
+        if accept(p, ".") {
+            field: expect_word(p).lower()
+            expect(p, "=")
+            if field == "usemodmapmods" || field == "usemodmap" {
+                p.default_level_one = level_one(p)
+                expect(p, ";")
+            } else if field == "repeat" {
+                p.default_repeat = parse_bool(p)
+                expect(p, ";")
+            } else {
+                skip_statement(p, false)
+            }
+            return Ok()
+        }
+        any := false
+        sym := 0
+        if kind_at(p) == T_NUMBER {
+            value: expect_number(p)
+            sym = if value <= 9 -> 48 + value else -> value
+        } else {
+            name: expect_word(p)
+            any = name.lower() == "any"
+            sym = if any -> 0 else -> keysym_named(p, name)
+        }
+        match := MATCH_ANY_OR_NONE
+        mods := ALL_MODS
+        if accept(p, "+") {
+            kind: if is_word(p) && p.toks[p.at + 1].kind == T_PUNCT && p.toks[p.at + 1].text == "(" -> match_kind(p.toks[p.at].text) else -> Int{-1}
+            if kind >= 0 {
+                advance(p)
+                expect(p, "(")
+                match = kind
+                mods = mod_expr(p)
+                expect(p, ")")
+            } else {
+                match = MATCH_EXACTLY
+                mods = mod_expr(p)
+            }
+        }
+        rule := Interp{sym: sym, any: any || sym == 0, match: match, mods: mods.bit_and(REAL_MODS), action: no_action(), vmod: -1, level_one: p.default_level_one, repeat: p.default_repeat}
+        expect(p, "{{")
+        loop !is_punct(p, "}}") {
+            field: word_lower(p)
+            if field == "action" {
+                advance(p)
+                expect(p, "=")
+                rule.action = action(p)
+                expect(p, ";")
+            } else if field == "virtualmodifier" || field == "virtualmod" {
+                advance(p)
+                expect(p, "=")
+                name: expect_word(p)
+                rule.vmod = vmod_index(p, name)
+                if rule.vmod < 0 && name.lower() != "none" -> return Err(syntax(line_at(p), "unknown virtual modifier '{name}'"))
+                expect(p, ";")
+            } else if field == "usemodmapmods" || field == "usemodmap" {
+                advance(p)
+                expect(p, "=")
+                rule.level_one = level_one(p)
+                expect(p, ";")
+            } else if field == "repeat" {
+                advance(p)
+                expect(p, "=")
+                rule.repeat = parse_bool(p)
+                expect(p, ";")
+            } else {
+                skip_statement(p, false)
+            }
+        }
+        expect(p, "}}")
+        expect(p, ";")
+        p.interps.push(rule)
+        Ok()
+    }
+
+    level_one: fn(&p: Parser) -> Bool UIError! {
+        word: expect_word(p).lower()
+        if word == "level1" || word == "levelone" -> return Ok(true)
+        if word == "anylevel" || word == "any" -> return Ok(false)
+        Err(syntax(line_at(p), "expected level1 or AnyLevel, found '{word}'"))
+    }
+
+    symbols: fn(&p: Parser) UIError! {
+        loop !is_punct(p, "}}") {
+            word: word_lower(p)
+            if word == "virtual_modifiers" {
+                advance(p)
+                virtual_modifiers(p)
+            } else if word == "key" {
+                advance(p)
+                key_def(p)
+            } else if word == "modifier_map" || word == "modmap" || word == "mod_map" {
+                advance(p)
+                modifier_map(p)
+            } else if word == "name" {
+                // name[GroupN] = "English (US)";
+                advance(p)
+                group: group_index(p)
+                expect(p, "=")
+                name: expect_string(p)
+                _: accept(p, ";")
+                loop p.layouts.len() <= group -> p.layouts.push("")
+                p.layouts[group] = name
+            } else {
+                skip_statement(p, false)
+            }
+        }
+        Ok()
+    }
+
+    // The key a symbols name refers to, through an alias; -1 if no keycode.
+    key_slot: fn(&p: Parser, name: String) -> Int {
+        if p.key_index.get(name) == .Val(index) -> return index
+        real := name.copy()
+        if p.aliases.get(name) == .Val(target) -> real = target.copy()
+        if p.key_index.get(real) == .Val(index) -> return index
+        code: p.codes.get(real) ?? return -1
+        p.keys.push(KeyDef{
+            name: real.copy(), code: code, groups: [Group]{}, explicit_actions: false, repeat: -1, vmods: 0,
+            explicit_vmods: false, modmap: 0, vmodmap: 0, out_of_range: GROUPS_WRAP, redirect: 0, repeats: true,
+        })
+        _: p.key_index.add(real.copy(), p.keys.len() - 1)
+        if real != name -> _: p.key_index.add(name.copy(), p.keys.len() - 1)
+        p.keys.len() - 1
+    }
+
+    empty_group: fn() -> Group {
+        Group{type_name: "", explicit_type: false, type: 0, levels: [[Int]]{}, actions: [Action]{}}
+    }
+
+    ensure_group: fn(&groups: [Group], group: Int) {
+        loop groups.len() <= group -> groups.push(empty_group())
+    }
+
+    keysym_token: fn(&p: Parser) -> Int UIError! {
+        if kind_at(p) == T_NUMBER {
+            value: expect_number(p)
+            return Ok(if value <= 9 -> 48 + value else -> value)
+        }
+        name: expect_word(p)
+        Ok(keysym_named(p, name))
+    }
+
+    // `[ a, A, {b, c}, NoSymbol ]`: each level's keysyms.
+    symbol_list: fn(&p: Parser) -> [[Int]] UIError! {
+        expect(p, "[")
+        levels := [[Int]]{}
+        loop !is_punct(p, "]") {
+            level := [Int]{}
+            if accept(p, "{{") {
+                loop !is_punct(p, "}}") {
+                    sym: keysym_token(p)
+                    if sym != 0 -> level.push(sym)
+                    if !accept(p, ",") -> break
+                }
+                expect(p, "}}")
+            } else {
+                sym: keysym_token(p)
+                if sym != 0 -> level.push(sym)
+            }
+            levels.push(level)
+            if !accept(p, ",") -> break
+        }
+        expect(p, "]")
+        Ok(levels)
+    }
+
+    action_list: fn(&p: Parser) -> [Action] UIError! {
+        expect(p, "[")
+        out := [Action]{}
+        loop !is_punct(p, "]") {
+            if accept(p, "{{") {
+                first := no_action()
+                seen := false
+                loop !is_punct(p, "}}") {
+                    one: action(p)
+                    if !seen {
+                        first = one
+                        seen = true
+                    }
+                    if !accept(p, ",") -> break
+                }
+                expect(p, "}}")
+                out.push(first)
+            } else {
+                out.push(action(p))
+            }
+            if !accept(p, ",") -> break
+        }
+        expect(p, "]")
+        Ok(out)
+    }
+
+    key_def: fn(&p: Parser) UIError! {
+        name: expect_key(p)
+        index: key_slot(p, name)
+        expect(p, "{{")
+        groups := [Group]{}
+        explicit_actions := false
+        repeat := Int{-1}
+        vmods := 0
+        explicit_vmods := false
+        out_of_range := GROUPS_WRAP
+        redirect := 0
+        implicit := 0
+        loop !is_punct(p, "}}") {
+            if is_punct(p, "[") {
+                levels: symbol_list(p)
+                ensure_group(groups, implicit)
+                groups[implicit].levels = levels
+                implicit += 1
+            } else {
+                field: word_lower(p)
+                if field == "symbols" {
+                    advance(p)
+                    group: group_index(p)
+                    expect(p, "=")
+                    levels: symbol_list(p)
+                    ensure_group(groups, group)
+                    groups[group].levels = levels
+                } else if field == "actions" {
+                    advance(p)
+                    group: group_index(p)
+                    expect(p, "=")
+                    actions: action_list(p)
+                    ensure_group(groups, group)
+                    groups[group].actions = actions
+                    explicit_actions = true
+                } else if field == "type" {
+                    advance(p)
+                    group := Int{-1}
+                    if is_punct(p, "[") -> group = group_index(p)
+                    expect(p, "=")
+                    type_name: expect_string(p)
+                    if group < 0 {
+                        ensure_group(groups, 0)
+                        loop g in 0..<groups.len() {
+                            groups[g].type_name = type_name.copy()
+                            groups[g].explicit_type = true
+                        }
+                    } else {
+                        ensure_group(groups, group)
+                        groups[group].type_name = type_name
+                        groups[group].explicit_type = true
+                    }
+                } else if field == "repeat" || field == "repeats" || field == "autorepeat" {
+                    advance(p)
+                    expect(p, "=")
+                    value: expect_word(p).lower()
+                    repeat = if value == "true" || value == "yes" || value == "on" -> 1 else if value == "default" -> -1 else -> 0
+                } else if field == "virtualmods" || field == "vmods" || field == "virtualmodifiers" {
+                    advance(p)
+                    expect(p, "=")
+                    vmods = mod_expr(p) >> 8
+                    explicit_vmods = true
+                } else if field == "groupswrap" || field == "wrapgroups" || field == "groupsclamp" || field == "clampgroups" {
+                    advance(p)
+                    on := true
+                    if accept(p, "=") -> on = parse_bool(p)
+                    if on -> out_of_range = if field == "groupswrap" || field == "wrapgroups" -> GROUPS_WRAP else -> GROUPS_CLAMP
+                } else if field == "groupsredirect" || field == "redirectgroups" {
+                    advance(p)
+                    expect(p, "=")
+                    out_of_range = GROUPS_REDIRECT
+                    redirect = indexed(p, "group") - 1
+                } else {
+                    skip_statement(p, true)
+                }
+            }
+            if !accept(p, ",") -> break
+        }
+        expect(p, "}}")
+        expect(p, ";")
+        if index < 0 -> return Ok()
+        // Trailing empty groups do not count.
+        loop groups.len() > 0 && groups[groups.len() - 1].levels.len() == 0 && groups[groups.len() - 1].actions.len() == 0 {
+            _: groups.pop()
+        }
+        p.keys[index].groups = groups
+        p.keys[index].explicit_actions = explicit_actions
+        p.keys[index].repeat = repeat
+        p.keys[index].vmods = vmods
+        p.keys[index].explicit_vmods = explicit_vmods
+        p.keys[index].out_of_range = out_of_range
+        p.keys[index].redirect = redirect
+        Ok()
+    }
+
+    modifier_map: fn(&p: Parser) UIError! {
+        name: expect_word(p)
+        mod: real_mod_index(name)
+        if mod < 0 && name.lower() != "none" -> return Err(syntax(line_at(p), "modifier_map needs a real modifier, found '{name}'"))
+        expect(p, "{{")
+        loop !is_punct(p, "}}") {
+            if kind_at(p) == T_KEY {
+                key: expect_key(p)
+                p.modmap.push(ModmapEntry{mod: mod, key: key, sym: 0})
+            } else {
+                sym: keysym_token(p)
+                p.modmap.push(ModmapEntry{mod: mod, key: "", sym: sym})
+            }
+            if !accept(p, ",") -> break
+        }
+        expect(p, "}}")
+        expect(p, ";")
+        Ok()
+    }
+
+    type_named: fn(p: Parser, name: String) -> Int {
+        loop i in 0..<p.types.len() {
+            if p.types[i].name == name -> return i
+        }
+        Int{-1}
+    }
+
+    level_sym: fn(group: Group, level: Int) -> Int {
+        if level >= group.levels.len() || group.levels[level].len() != 1 -> return 0
+        group.levels[level][0]
+    }
+
+    // libxkbcommon's automatic type for a group without an explicit one.
+    automatic_type: fn(group: Group) -> String {
+        width: if group.levels.len() > group.actions.len() -> group.levels.len() else -> group.actions.len()
+        if width <= 1 -> return "ONE_LEVEL"
+        sym0: level_sym(group, 0)
+        sym1: level_sym(group, 1)
+        alphabetic: keysym_is_lower(sym0) && keysym_is_upper(sym1)
+        keypad: keysym_is_keypad(sym0) || keysym_is_keypad(sym1)
+        if width == 2 {
+            if alphabetic -> return "ALPHABETIC"
+            if keypad -> return "KEYPAD"
+            return "TWO_LEVEL"
+        }
+        upper_pair: keysym_is_lower(level_sym(group, 2)) && keysym_is_upper(level_sym(group, 3))
+        if width <= 4 {
+            if alphabetic -> return if upper_pair -> "FOUR_LEVEL_ALPHABETIC" else -> "FOUR_LEVEL_SEMIALPHABETIC"
+            if keypad -> return "FOUR_LEVEL_KEYPAD"
+            return "FOUR_LEVEL"
+        }
+        if alphabetic -> return if upper_pair -> "EIGHT_LEVEL_ALPHABETIC" else -> "EIGHT_LEVEL_SEMIALPHABETIC"
+        "EIGHT_LEVEL"
+    }
+
+    matches: fn(rule: Interp, key: KeyDef, group: Int, level: Int) -> Bool {
+        syms: key.groups[group].levels[level]
+        if syms.len() == 0 -> return false
+        if !rule.any && (syms.len() > 1 || rule.sym != syms[0]) -> return false
+        mods: if rule.level_one && level != 0 -> 0 else -> key.modmap
+        if rule.match == MATCH_NONE_OF -> return rule.mods.bit_and(mods) == 0
+        if rule.match == MATCH_ANY_OR_NONE -> return mods == 0 || rule.mods.bit_and(mods) != 0
+        if rule.match == MATCH_ANY_OF -> return rule.mods.bit_and(mods) != 0
+        if rule.match == MATCH_ALL_OF -> return rule.mods.bit_and(mods) == rule.mods
+        rule.mods == mods
+    }
+
+    match_rank: fn(match: Int) -> Int {
+        if match == MATCH_EXACTLY -> return 0
+        if match == MATCH_ALL_OF -> return 1
+        if match == MATCH_NONE_OF -> return 2
+        if match == MATCH_ANY_OF -> return 3
+        4
+    }
+
+    effective: fn(mods: Int, vmod_masks: [Int]) -> Int {
+        mask := mods.bit_and(REAL_MODS)
+        loop i in 0..<vmod_masks.len() {
+            if (mods >> (8 + i)).bit_and(1) == 1 -> mask = mask.bit_or(vmod_masks[i])
+        }
+        mask
+    }
+
+    compile: fn(&p: Parser) -> Keymap UIError! {
+        // Key modifier maps: a key name, or the first key typing the keysym.
+        loop m in 0..<p.modmap.len() {
+            entry: p.modmap[m].copy()
+            if entry.mod < 0 -> next
+            index := Int{-1}
+            if entry.key != "" {
+                index = key_slot(p, entry.key)
+            } else {
+                index = key_for_sym(p, entry.sym)
+            }
+            if index >= 0 -> p.keys[index].modmap = p.keys[index].modmap.bit_or(1 << entry.mod)
+        }
+        // Interprets, most specific first: keysym rules before Any, then by
+        // match kind, then in declaration order.
+        order := [Int]{}
+        loop class in 0..<10 {
+            loop i in 0..<p.interps.len() {
+                if (if p.interps[i].any -> 5 else -> 0) + match_rank(p.interps[i].match) == class -> order.push(i)
+            }
+        }
+        // Types, interprets and the virtual modifier map of every key.
+        loop k in 0..<p.keys.len() {
+            key := p.keys[k].copy()
+            loop g in 0..<key.groups.len() {
+                name: if key.groups[g].explicit_type -> key.groups[g].type_name.copy() else -> automatic_type(key.groups[g])
+                found: type_named(p, name)
+                key.groups[g].type = if found >= 0 -> found else -> fallback_type(p)
+                loop key.groups[g].actions.len() < key.groups[g].levels.len() -> key.groups[g].actions.push(no_action())
+            }
+            vmodmap := 0
+            if !key.explicit_actions {
+                loop g in 0..<key.groups.len() {
+                    loop l in 0..<key.groups[g].levels.len() {
+                        loop i in order {
+                            rule: p.interps[i]
+                            if !matches(rule, key, g, l) -> next
+                            if g == 0 && l == 0 && key.repeat < 0 -> key.repeats = rule.repeat
+                            if (g == 0 && l == 0) || !rule.level_one {
+                                if rule.vmod >= 0 -> vmodmap = vmodmap.bit_or(1 << rule.vmod)
+                            }
+                            if rule.action.kind != ACT_NONE -> key.groups[g].actions[l] = rule.action.copy()
+                            break
+                        }
+                    }
+                }
+            }
+            if key.repeat >= 0 -> key.repeats = key.repeat == 1
+            key.vmodmap = if key.explicit_vmods -> key.vmods else -> vmodmap
+            p.keys[k] = key
+        }
+        // Virtual modifiers map to the real modifiers of the keys that carry them.
+        vmod_masks := [Int]{}
+        loop v in 0..<p.vmods.len() {
+            mask := if p.vmod_fixed[v] >= 0 -> p.vmod_fixed[v] else -> 0
+            if p.vmod_fixed[v] < 0 {
+                loop key in p.keys {
+                    if (key.vmodmap >> v).bit_and(1) == 1 -> mask = mask.bit_or(key.modmap)
+                }
+            }
+            vmod_masks.push(mask)
+        }
+        loop t in 0..<p.types.len() {
+            p.types[t].mask = effective(p.types[t].mods, vmod_masks)
+            loop e in 0..<p.types[t].entries.len() {
+                p.types[t].entries[e].mask = effective(p.types[t].entries[e].mods, vmod_masks)
+                p.types[t].entries[e].preserve_mask = effective(p.types[t].entries[e].preserve, vmod_masks)
+            }
+        }
+        group_count := 1
+        max_code := 0
+        loop k in 0..<p.keys.len() {
+            if p.keys[k].groups.len() > group_count -> group_count = p.keys[k].groups.len()
+            if p.keys[k].code > max_code -> max_code = p.keys[k].code
+            modmap: p.keys[k].modmap
+            loop g in 0..<p.keys[k].groups.len() {
+                loop l in 0..<p.keys[k].groups[g].actions.len() {
+                    act := p.keys[k].groups[g].actions[l].copy()
+                    if act.modmap -> act.mods = modmap
+                    act.mask = effective(act.mods, vmod_masks)
+                    p.keys[k].groups[g].actions[l] = act
+                }
+            }
+        }
+        by_code := [Int]{}
+        loop _ in 0..max_code -> by_code.push(-1)
+        loop k in 0..<p.keys.len() -> by_code[p.keys[k].code] = k
+        counts := [Int]{}
+        loop _ in 0..<32 -> counts.push(0)
+        sym_names := [Int: String]{}
+        values: tables.XKB_KEYSYM_VALUES
+        names: tables.XKB_KEYSYM_NAMES.split("\n").to_list()
+        loop i in 0..<names.len() {
+            value: be(values, i * 4, 4)
+            if sym_names.get(value) == None -> _: sym_names.add(value, names[i].copy())
+        }
+        Ok(Keymap{
+            keys: p.keys.copy(), by_code: by_code, types: p.types.copy(), group_count: group_count,
+            base_mods: 0, latched_mods: 0, locked_mods: 0, base_group: 0, latched_group: 0, locked_group: 0,
+            mods: 0, group: 0, set_mods: 0, clear_mods: 0, mod_counts: counts, filters: [Filter]{}, server: false, compose: -1,
+            layouts: p.layouts.copy(), vmod_names: p.vmods.copy(), vmod_masks: vmod_masks, sym_names: sym_names,
+        })
+    }
+
+    // The ONE_LEVEL type, standing in for a type the keymap does not define.
+    fallback_type: fn(&p: Parser) -> Int {
+        found: type_named(p, "ONE_LEVEL")
+        if found >= 0 -> return found
+        p.types.push(KeyType{name: "ONE_LEVEL", mods: 0, mask: 0, levels: 1, entries: [TypeEntry]{}})
+        p.types.len() - 1
+    }
+
+    // The key whose lowest group and level types `sym`, lowest keycode first.
+    key_for_sym: fn(p: Parser, sym: Int) -> Int {
+        best := Int{-1}
+        best_rank := Int{-1}
+        loop k in 0..<p.keys.len() {
+            groups: p.keys[k].groups
+            loop g in 0..<groups.len() {
+                loop l in 0..<groups[g].levels.len() {
+                    if !groups[g].levels[l].contains(sym) -> next
+                    rank: (g * 256 + l) * 65536 + p.keys[k].code
+                    if best < 0 || rank < best_rank {
+                        best = k
+                        best_rank = rank
+                    }
+                }
+            }
+        }
+        best
+    }
+
+    key_at: fn(km: Keymap, keycode: Int) -> Int {
+        if keycode < 0 || keycode >= km.by_code.len() -> return -1
+        km.by_code[keycode]
+    }
+
+    wrap: fn(value: Int, count: Int) -> Int {
+        if count <= 0 -> return 0
+        ((value %% count) + count) %% count
+    }
+
+    // The group key `index` uses in the current state, or -1 if it has none.
+    key_group: fn(km: Keymap, index: Int) -> Int {
+        key: km.keys[index]
+        count: key.groups.len()
+        if count == 0 -> return -1
+        group: km.group
+        if group >= 0 && group < count -> return group
+        if key.out_of_range == GROUPS_CLAMP -> return if group < 0 -> 0 else -> count - 1
+        if key.out_of_range == GROUPS_REDIRECT -> return if key.redirect >= 0 && key.redirect < count -> key.redirect else -> 0
+        wrap(group, count)
+    }
+
+    // The type entry the current modifiers select for key `index` in `group`,
+    // or -1 for level 1 without an entry.
+    key_entry: fn(km: Keymap, index: Int, group: Int) -> Int {
+        kind: km.types[km.keys[index].groups[group].type]
+        active: km.mods.bit_and(kind.mask)
+        loop e in 0..<kind.entries.len() {
+            entry: kind.entries[e]
+            if (entry.mods == 0 || entry.mask != 0) && entry.mask == active -> return e
+        }
+        Int{-1}
+    }
+
+    key_level: fn(km: Keymap, index: Int, group: Int) -> Int {
+        entry: key_entry(km, index, group)
+        if entry < 0 -> return 0
+        km.types[km.keys[index].groups[group].type].entries[entry].level
+    }
+
+    // The modifiers that chose key `index`'s level, which no transformation reuses.
+    consumed: fn(km: Keymap, index: Int) -> Int {
+        group: key_group(km, index)
+        if group < 0 -> return 0
+        kind: km.types[km.keys[index].groups[group].type]
+        entry: key_entry(km, index, group)
+        preserve: if entry >= 0 -> kind.entries[entry].preserve_mask else -> 0
+        kind.mask - kind.mask.bit_and(preserve)
+    }
+
+    key_syms: fn(km: Keymap, index: Int) -> [Int] {
+        group: key_group(km, index)
+        if group < 0 -> return [Int]{}
+        level: key_level(km, index, group)
+        levels: km.keys[index].groups[group].levels
+        if level >= levels.len() -> return [Int]{}
+        levels[level].copy()
+    }
+
+    key_action: fn(km: Keymap, index: Int) -> Action {
+        group: key_group(km, index)
+        if group < 0 -> return no_action()
+        level: key_level(km, index, group)
+        actions: km.keys[index].groups[group].actions
+        if level >= actions.len() -> return no_action()
+        actions[level].copy()
+    }
+
+    transforms: fn(km: Keymap, index: Int, mod: Int) -> Bool {
+        km.mods.bit_and(mod) != 0 && consumed(km, index).bit_and(mod) == 0
+    }
+
+    // The one keysym for text, as xkb_state_key_get_one_sym with libxkbcommon's
+    // Control fallback to an ASCII keysym of another group, then Lock's capitalization.
+    one_sym: fn(km: Keymap, index: Int) -> Int {
+        syms: key_syms(km, index)
+        if syms.len() != 1 -> return 0
+        sym := syms[0]
+        groups: km.keys[index].groups
+        if groups.len() > 1 && sym > 127 && transforms(km, index, CONTROL) {
+            loop g in 0..<groups.len() {
+                level: key_level(km, index, g)
+                if level < groups[g].levels.len() && groups[g].levels[level].len() == 1 && groups[g].levels[level][0] <= 127 {
+                    sym = groups[g].levels[level][0]
+                    break
+                }
+            }
+        }
+        if transforms(km, index, LOCK) -> sym = keysym_upper(sym)
+        sym
+    }
+
+    to_control: fn(c: Int) -> Int {
+        if (c >= 64 && c < 127) || c == 32 -> return c.bit_and(31)
+        if c == 50 -> return 0
+        if c >= 51 && c <= 55 -> return c - 24
+        if c == 56 -> return 127
+        if c == 47 -> return 31
+        c
+    }
+
+    // xkb_state_key_get_utf8 without control characters.
+    key_text: fn(km: Keymap, index: Int, one: Int) -> String {
+        syms: key_syms(km, index)
+        text := ""
+        if syms.len() == 1 {
+            scalar: keysym_scalar(one)
+            if scalar > 0 -> text = utf8(if scalar < 128 && transforms(km, index, CONTROL) -> to_control(scalar) else -> scalar)
+        } else {
+            loop sym in syms {
+                scalar: keysym_scalar(sym)
+                if scalar > 0 {
+                    piece: utf8(scalar)
+                    text = "{text}{piece}"
+                }
+            }
+        }
+        visible(text)
+    }
+
+    // The text a press types through the Compose state, as
+    // xkb_compose_state_feed: a modifier keysym passes; a keysym continuing the
+    // pending sequence composes ("" until it reaches a result); any other
+    // keysym cancels a pending sequence ("") or types its own text.
+    press_text: fn(&km: Keymap, index: Int) -> String {
+        one: one_sym(km, index)
+        if keysym_is_modifier(one) -> return key_text(km, index, one)
+        pending: km.compose
+        node: compose_next(pending, one)
+        if node < 0 {
+            km.compose = -1
+            if pending >= 0 -> return ""
+            return key_text(km, index, one)
+        }
+        if compose_is_leaf(node) {
+            km.compose = -1
+            return visible(compose_text(node))
+        }
+        km.compose = node
+        ""
+    }
+
+    // The key's level-1 keysym in the active group as a Key.
+    ui_key: fn(km: Keymap, index: Int) -> Key {
+        group: key_group(km, index)
+        if group < 0 -> return Key.Unknown
+        levels: km.keys[index].groups[group].levels
+        if levels.len() == 0 || levels[0].len() != 1 -> return Key.Unknown
+        sym: levels[0][0]
+        if (sym >= 65511 && sym <= 65514) || sym == 65027 -> return Key.Alt
+        if sym >= 65515 && sym <= 65518 -> return Key.Super
+        if sym >= 65470 && sym <= 65504 -> return Key.F(sym - 65469)
+        if named_key(sym) == .Val(named) -> return named
+        text: if keysym_is_dead(sym) -> dead_spacing(sym) else -> visible(utf8(keysym_scalar(sym)))
+        chars: text.chars()
+        if chars.len() != 1 -> return Key.Unknown
+        Key.Char(chars[0])
+    }
+
+    // Named keys by keysym, their keypad twins included.
+    named_key: fn(sym: Int) -> Key? {
+        if sym == {
+            65307 -> Val(Key.Escape)
+            65293 | 65421 | 65076 -> Val(Key.Enter)
+            65289 | 65056 -> Val(Key.Tab)
+            65288 -> Val(Key.Backspace)
+            65535 | 65439 -> Val(Key.Delete)
+            65379 | 65438 -> Val(Key.Insert)
+            32 | 65408 -> Val(Key.Char(' '))
+            65361 | 65430 -> Val(Key.Left)
+            65363 | 65432 -> Val(Key.Right)
+            65362 | 65431 -> Val(Key.Up)
+            65364 | 65433 -> Val(Key.Down)
+            65360 | 65429 -> Val(Key.Home)
+            65367 | 65436 -> Val(Key.End)
+            65365 | 65434 -> Val(Key.PageUp)
+            65366 | 65435 -> Val(Key.PageDown)
+            65505 | 65506 -> Val(Key.Shift)
+            65507 | 65508 -> Val(Key.Control)
+            65509 -> Val(Key.CapsLock)
+            else -> None
+        }
+    }
+
+    refresh: fn(&km: Keymap) {
+        km.locked_group = wrap(km.locked_group, km.group_count)
+        km.group = wrap(km.base_group + km.latched_group + km.locked_group, km.group_count)
+        km.mods = km.base_mods.bit_or(km.latched_mods).bit_or(km.locked_mods)
+    }
+
+    clear_bits: fn(value: Int, mask: Int) -> Int { value - value.bit_and(mask) }
+
+    // xkb_state_update_key: run the held keys' filters, start the pressed key's
+    // action, then recount the base modifiers.
+    update_key: fn(&km: Keymap, index: Int, down: Bool) {
+        code: km.keys[index].code
+        km.set_mods = 0
+        km.clear_mods = 0
+        swallowed := false
+        loop f in 0..<km.filters.len() {
+            if km.filters[f].active && filter_key(km, f, code, index, down) -> swallowed = true
+        }
+        if !swallowed && down {
+            act: key_action(km, index)
+            if act.kind >= ACT_SET_MODS && act.kind <= ACT_LOCK_GROUP {
+                km.filters.push(Filter{code: code, action: act, refcnt: 1, saved: 0, latch: LATCH_NONE, active: true})
+                start_filter(km, km.filters.len() - 1)
+            }
+        }
+        loop bit in 0..<32 {
+            if (km.set_mods >> bit).bit_and(1) == 1 {
+                km.mod_counts[bit] = km.mod_counts[bit] + 1
+                km.base_mods = km.base_mods.bit_or(1 << bit)
+            }
+        }
+        loop bit in 0..<32 {
+            if (km.clear_mods >> bit).bit_and(1) == 1 {
+                km.mod_counts[bit] = km.mod_counts[bit] - 1
+                if km.mod_counts[bit] <= 0 {
+                    km.mod_counts[bit] = 0
+                    km.base_mods = clear_bits(km.base_mods, 1 << bit)
+                }
+            }
+        }
+        kept := [Filter]{}
+        loop filter in km.filters {
+            if filter.active -> kept.push(filter.copy())
+        }
+        km.filters = kept
+        refresh(km)
+    }
+
+    start_filter: fn(&km: Keymap, f: Int) {
+        act: km.filters[f].action.copy()
+        if act.kind == ACT_SET_MODS {
+            km.set_mods = act.mask
+        } else if act.kind == ACT_LATCH_MODS {
+            km.filters[f].latch = LATCH_KEY_DOWN
+            km.set_mods = act.mask
+        } else if act.kind == ACT_LOCK_MODS {
+            km.filters[f].saved = km.locked_mods.bit_and(act.mask)
+            km.set_mods = km.set_mods.bit_or(act.mask)
+            if act.lock -> km.locked_mods = km.locked_mods.bit_or(act.mask)
+        } else if act.kind == ACT_SET_GROUP {
+            km.filters[f].saved = km.base_group
+            km.base_group = if act.absolute -> act.group else -> km.base_group + act.group
+        } else if act.kind == ACT_LATCH_GROUP {
+            km.filters[f].latch = LATCH_KEY_DOWN
+            km.filters[f].saved = km.base_group
+            km.base_group = if act.absolute -> act.group else -> km.base_group + act.group
+        } else if act.kind == ACT_LOCK_GROUP {
+            km.locked_group = if act.absolute -> act.group else -> km.locked_group + act.group
+        }
+    }
+
+    breaks_latch: fn(act: Action) -> Bool { act.kind == ACT_NONE || act.kind == ACT_BREAKS_LATCH }
+
+    // One held key's filter seeing key `index` go down or up; true swallows the
+    // event (no new action starts).
+    filter_key: fn(&km: Keymap, f: Int, code: Int, index: Int, down: Bool) -> Bool {
+        act: km.filters[f].action.copy()
+        mine: km.filters[f].code == code
+        if act.kind == ACT_LATCH_MODS || act.kind == ACT_LATCH_GROUP -> return latch_filter(km, f, code, index, down)
+        if !mine {
+            if act.kind == ACT_SET_MODS || act.kind == ACT_SET_GROUP -> km.filters[f].action.clear_locks = false
+            return false
+        }
+        if down {
+            km.filters[f].refcnt = km.filters[f].refcnt + 1
+            return true
+        }
+        km.filters[f].refcnt = km.filters[f].refcnt - 1
+        if km.filters[f].refcnt > 0 -> return true
+        km.filters[f].active = false
+        if act.kind == ACT_SET_MODS {
+            km.clear_mods = act.mask
+            if act.clear_locks -> km.locked_mods = clear_bits(km.locked_mods, act.mask)
+        } else if act.kind == ACT_LOCK_MODS {
+            km.clear_mods = km.clear_mods.bit_or(act.mask)
+            if act.unlock -> km.locked_mods = clear_bits(km.locked_mods, km.filters[f].saved)
+        } else if act.kind == ACT_SET_GROUP {
+            km.base_group = km.filters[f].saved
+            if act.clear_locks -> km.locked_group = 0
+        }
+        true
+    }
+
+    latch_filter: fn(&km: Keymap, f: Int, code: Int, index: Int, down: Bool) -> Bool {
+        act: km.filters[f].action.copy()
+        group_latch: act.kind == ACT_LATCH_GROUP
+        latch := km.filters[f].latch
+        if down && latch == LATCH_PENDING {
+            next_action: key_action(km, index)
+            if !group_latch && next_action.kind == ACT_LATCH_MODS && next_action.mask == act.mask && next_action.clear_locks == act.clear_locks && next_action.latch_to_lock == act.latch_to_lock {
+                km.filters[f].code = code
+                km.filters[f].refcnt = 1
+                km.filters[f].saved = 0
+                km.latched_mods = clear_bits(km.latched_mods, act.mask)
+                if act.latch_to_lock {
+                    km.filters[f].action.kind = ACT_LOCK_MODS
+                    km.locked_mods = km.locked_mods.bit_or(act.mask)
+                } else {
+                    km.filters[f].action.kind = ACT_SET_MODS
+                    km.set_mods = act.mask
+                }
+                return true
+            }
+            if breaks_latch(next_action) {
+                if group_latch {
+                    km.latched_group -= act.group
+                } else {
+                    km.latched_mods = clear_bits(km.latched_mods, act.mask)
+                }
+                km.filters[f].active = false
+                return false
+            }
+        } else if !down && km.filters[f].code == code {
+            if group_latch {
+                km.base_group = km.filters[f].saved
+                if latch == LATCH_NONE {
+                    km.filters[f].active = false
+                } else {
+                    latch = LATCH_PENDING
+                    km.latched_group += if act.absolute -> act.group - km.base_group else -> act.group
+                }
+            } else if latch == LATCH_NONE || (act.clear_locks && km.locked_mods.bit_and(act.mask) == act.mask) {
+                if latch == LATCH_PENDING {
+                    km.latched_mods = clear_bits(km.latched_mods, act.mask)
+                } else {
+                    km.clear_mods = act.mask
+                }
+                km.locked_mods = clear_bits(km.locked_mods, act.mask)
+                km.filters[f].active = false
+            } else {
+                latch = LATCH_PENDING
+                km.clear_mods = act.mask
+                km.latched_mods = km.latched_mods.bit_or(act.mask)
+            }
+        } else if down && latch == LATCH_KEY_DOWN {
+            latch = LATCH_NONE
+        }
+        km.filters[f].latch = latch
+        false
+    }
+
+    // The US+DE keymap the tests compile.
+    test_keymap_source: fn() -> [U8] {
+        lines: [String]{
+            "xkb_keymap {{",
+            "xkb_keycodes \"test\" {{",
+            "    minimum = 8;",
+            "    maximum = 255;",
+            "    <AE12> = 21;",
+            "    <AD01> = 24;",
+            "    <AD03> = 26;",
+            "    <LFSH> = 50;",
+            "    <LALT> = 64;",
+            "    <CAPS> = 66;",
+            "    <LVL3> = 92;",
+            "    <RALT> = 108;",
+            "    alias <ALGR> = <RALT>;",
+            "}};",
+            "xkb_types \"test\" {{",
+            "    virtual_modifiers NumLock,Alt,LevelThree;",
+            "    type \"ONE_LEVEL\" {{",
+            "        modifiers= none;",
+            "        level_name[1]= \"Any\";",
+            "    }};",
+            "    type \"TWO_LEVEL\" {{",
+            "        modifiers= Shift;",
+            "        map[Shift]= 2;",
+            "    }};",
+            "    type \"ALPHABETIC\" {{",
+            "        modifiers= Shift+Lock;",
+            "        map[Shift]= 2;",
+            "        map[Lock]= 2;",
+            "    }};",
+            "    type \"FOUR_LEVEL_SEMIALPHABETIC\" {{",
+            "        modifiers= Shift+Lock+LevelThree;",
+            "        map[Shift]= Level2;",
+            "        map[Lock]= Level2;",
+            "        map[LevelThree]= Level3;",
+            "        map[Shift+LevelThree]= Level4;",
+            "        map[Lock+LevelThree]= Level3;",
+            "        preserve[Lock+LevelThree]= Lock;",
+            "        map[Shift+Lock+LevelThree]= Level4;",
+            "        preserve[Shift+Lock+LevelThree]= Lock;",
+            "    }};",
+            "}};",
+            "xkb_compatibility \"test\" {{",
+            "    virtual_modifiers NumLock,Alt,LevelThree;",
+            "    interpret.useModMapMods= AnyLevel;",
+            "    interpret.repeat= False;",
+            "    interpret ISO_Level3_Shift+AnyOf(all) {{",
+            "        virtualModifier= LevelThree;",
+            "        useModMapMods=level1;",
+            "        action= SetMods(modifiers=LevelThree,clearLocks);",
+            "    }};",
+            "    interpret ISO_Next_Group {{",
+            "        useModMapMods=level1;",
+            "        action= LockGroup(group=+1);",
+            "    }};",
+            "    interpret Alt_L+AnyOf(all) {{",
+            "        virtualModifier= Alt;",
+            "        action= SetMods(modifiers=modMapMods,clearLocks);",
+            "    }};",
+            "    interpret Any+Exactly(Lock) {{",
+            "        action= LockMods(modifiers=Lock);",
+            "    }};",
+            "    interpret Any+AnyOf(all) {{",
+            "        action= SetMods(modifiers=modMapMods,clearLocks);",
+            "    }};",
+            "}};",
+            "xkb_symbols \"us_de\" {{",
+            "    name[Group1]= \"English (US)\";",
+            "    name[Group2]= \"German\";",
+            "    key <AE12> {{",
+            "        symbols[1]= [ equal, plus ],",
+            "        symbols[2]= [ dead_acute, dead_grave ]",
+            "    }};",
+            "    key <AD01> {{",
+            "        symbols[1]= [ q, Q ],",
+            "        symbols[2]= [ q, Q, at, Greek_OMEGA ]",
+            "    }};",
+            "    key <AD03> {{",
+            "        symbols[1]= [ e, E ],",
+            "        symbols[2]= [ e, E, EuroSign, EuroSign ]",
+            "    }};",
+            "    key <LFSH> {{ [ Shift_L ] }};",
+            "    key <LALT> {{",
+            "        type= \"TWO_LEVEL\",",
+            "        symbols[1]= [ Alt_L, ISO_Next_Group ]",
+            "    }};",
+            "    key <CAPS> {{ [ Caps_Lock ] }};",
+            "    key <LVL3> {{ [ ISO_Level3_Shift ] }};",
+            "    key <RALT> {{",
+            "        type[1]= \"TWO_LEVEL\",",
+            "        type[2]= \"ONE_LEVEL\",",
+            "        symbols[1]= [ Alt_R ],",
+            "        symbols[2]= [ ISO_Level3_Shift ]",
+            "    }};",
+            "    modifier_map Shift {{ <LFSH> }};",
+            "    modifier_map Lock {{ <CAPS> }};",
+            "    modifier_map Mod1 {{ <LALT>, <ALGR> }};",
+            "    modifier_map Mod5 {{ <LVL3> }};",
+            "}};",
+            "}};",
+        }
+        lines.join("\n").bytes()
+    }
+
+    test_keymap: fn() -> Keymap {
+        keymap(test_keymap_source()) ?? panic("the test keymap does not compile: {err:Debug}")
+    }
+
+    // Drives every key of `km` through presses, releases and hostile compositor
+    // modifiers; none of it may stop the program.
+    exercise: fn(&km: Keymap) {
+        loop code in 0..<300 {
+            _: km.press(code, true)
+            _: km.repeats(code)
+        }
+        km.modifiers(depressed: 0 - 1, latched: 9223372036854775807, locked: 0 - 9223372036854775807, group: 0 - 7)
+        loop code in 0..<300 -> _: km.press(code, code % 2 == 0)
+        km.modifiers(depressed: 0, latched: 0, locked: 0, group: 4294967295)
+        loop code in 0..<300 -> _: km.press(code, false)
+    }
+}
+
+// --- tests -------------------------------------------------------------------
+
+#Test("keysym, keysym_name, layout and active report the keyboard state") {
+    km := test_keymap()
+    assert_eq(km.layout(), "English (US)")
+    assert_eq(km.keysym_name(km.keysym(16)), "q")
+    _: km.press(42, true)
+    assert(km.active("Shift"))
+    assert(!km.active("Alt"))
+    assert_eq(km.keysym_name(km.keysym(16)), "Q")
+    _: km.press(56, true)
+    _: km.press(56, false)
+    _: km.press(42, false)
+    assert_eq(km.layout(), "German")
+    _: km.press(56, true)
+    assert(km.active("Alt"))
+    assert(km.active("mod1"))
+    _: km.press(56, false)
+    assert(!km.active("Alt"))
+    assert_eq(km.keysym_name(0x20AC), "EuroSign")
+    assert_eq(km.keysym_name(0x100263A), "U263A")
+    assert_eq(km.keysym_name(0), "NoSymbol")
+    assert_eq(km.keysym_name(0x1000041), "0x01000041")
+    assert_eq(km.keysym_name(-1), "0xffffffff")
+}
+
+#Test("a small US+DE keymap parses and types its levels") {
+    km := test_keymap()
+    plain: km.press(16, true)
+    assert_eq(plain.key, Key.Char('q'))
+    assert_eq(plain.text, "q")
+    assert_eq(km.press(16, false).text, "")
+    _: km.press(42, true)
+    assert_eq(km.press(16, true).text, "Q")
+    _: km.press(16, false)
+    _: km.press(42, false)
+    _: km.press(58, true)
+    _: km.press(58, false)
+    assert_eq(km.press(18, true).text, "E")
+    _: km.press(18, false)
+    _: km.press(42, true)
+    assert_eq(km.press(18, true).text, "e")
+    assert(km.repeats(16))
+    assert(!km.repeats(42))
+}
+
+#Test("Alt+Shift switches to the DE group, where AltGr reaches level 3") {
+    km := test_keymap()
+    _: km.press(42, true)
+    _: km.press(56, true)
+    _: km.press(56, false)
+    _: km.press(42, false)
+    _: km.press(100, true)
+    euro: km.press(18, true)
+    assert_eq(euro.key, Key.Char('e'))
+    assert_eq(euro.text, "€")
+    _: km.press(18, false)
+    assert_eq(km.press(16, true).text, "@")
+    _: km.press(16, false)
+    _: km.press(100, false)
+    assert_eq(km.press(16, true).text, "q")
+}
+
+#Test("the compositor's modifiers pick the group and level; dead keys compose") {
+    km := test_keymap()
+    km.modifiers(depressed: 0, latched: 0, locked: 0, group: 1)
+    dead: km.press(13, true)
+    assert_eq(dead.key, Key.Char("'".chars()[0]))
+    assert_eq(dead.text, "")
+    assert_eq(km.press(18, true).text, "é")
+    km.modifiers(depressed: 128, latched: 0, locked: 0, group: 1)
+    assert_eq(km.press(16, true).text, "@")
+    km.modifiers(depressed: 0, latched: 0, locked: 0, group: 0)
+    assert_eq(km.press(13, true).text, "=")
+}
+
+#Test("repeat timing follows wl_keyboard.repeat_info") {
+    repeat: Repeat{rate: 25, delay: 600}
+    assert_eq(repeat.due(599), 0)
+    assert_eq(repeat.due(600), 1)
+    assert_eq(repeat.due(639), 1)
+    assert_eq(repeat.due(640), 2)
+    assert_eq(repeat.due(1000), 11)
+    assert_eq(repeat.between(630, 690), 2)
+    assert_eq(Repeat{rate: 0, delay: 600}.due(5000), 0)
+}
+
+#Test("a malformed keymap is a protocol error") {
+    if keymap("xkb_keymap {{ xkb_symbols {{ key <AD01> {{ [ q, Q }}; }}; }};".bytes()) == {
+        .Ok(_) -> panic("a malformed keymap compiled")
+        .Err(error) -> assert(error == .Protocol("xkb keymap line 1: expected ']', found '}}'"))
+    }
+}
+
+#Test("a hostile keymap or compositor causes only typed errors") {
+    source: test_keymap_source()
+    loop cut in 0..<source.len() {
+        if cut % 3 != 0 -> next
+        if keymap(source[0..<cut]) == .Ok(km) {
+            hostile := km
+            exercise(hostile)
+        }
+    }
+    swaps: "{{}};9\"<[]=+,-".bytes()
+    loop at in 0..<source.len() {
+        if at % 11 != 0 -> next
+        loop swap in swaps {
+            mutated := source.copy()
+            mutated[at] = swap
+            if keymap(mutated) == .Ok(km) {
+                hostile := km
+                exercise(hostile)
+            }
+        }
+    }
+    huge: "xkb_keymap {{ xkb_keycodes {{ <A> = 4294967296; }}; }};"
+    assert(keymap(huge.bytes()) == .Err(.Protocol("xkb keymap line 1: keycode 4294967296 is out of range")))
+    km := test_keymap()
+    exercise(km)
+}

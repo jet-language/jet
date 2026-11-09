@@ -32,6 +32,7 @@ pkg_fetch: fn(verification: &StoreVerification, project_root: String, manifest: 
         lock.packages.push(resolver.nodes[name].package)
         directories[name] = resolver.nodes[name].directory
     }
+    if existing == .Val(previous) -> pkg_fetch_carry_effect_rows(lock, previous)
     if options.update_dep == .Val(target) && existing == .Val(previous) {
         related := pkg_fetch_closure(previous, target)
         loop name in pkg_fetch_closure(lock, target) {
@@ -51,6 +52,24 @@ pkg_fetch: fn(verification: &StoreVerification, project_root: String, manifest: 
     lock.semantic_text = if semantic.records.len() > 0 || semantic.inputs.len() > 0 || semantic.source_maps.len() > 0 -> trust_write_semantic_lock(semantic) else -> ""
     pkg_lock_write_atomically(root, pkg_lock_write(lock).bytes()) ?? return Err(pkg_fetch_lock_error(err))
     Ok(PackageFetchResult{lock: lock, directories: directories})
+}
+// Each dependency keeps the effect row `previous` recorded for it, by name: a
+// refetch or an update re-resolves its source, and only a build widens the
+// row (pkg_lock_record_effect_rows), so the next build names what the new
+// source gained and `--locked` refuses it (E3513).
+pkg_fetch_carry_effect_rows: fn(lock: &LockFile, previous: LockFile) {
+    loop index in 0..<lock.packages.len() {
+        if lock.packages[index].is_root() -> next
+        record: previous.find_package(lock.packages[index].name) ?? next
+        if record.effect_authority == None -> next
+        package := lock.packages[index]
+        package.effects = record.effects.copy()
+        package.effect_grants = record.effect_grants.copy()
+        package.required_effects = record.required_effects.copy()
+        package.granted_effects = record.granted_effects.copy()
+        package.effect_authority = record.effect_authority.copy()
+        lock.packages[index] = package
+    }
 }
 // The missing-lock headline names the dependencies it leaves unlocked.
 pkg_fetch_missing_lock_what: fn(manifest: Manifest) -> String Never! {

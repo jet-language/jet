@@ -124,12 +124,13 @@ sema_call_facts: fn(signature: Type, type_args: [Type], binding: SemaCallBinding
 }
 
 sema_call_unknown_function: fn(name: String, span: Span) -> Diagnostic {
-    sema_error("E0102", span, "nothing named `{name}` exists here", "only functions that have been defined (or built in, like `print` / `input`) can be called", "define it first (fn {name}() {{ ... }}), or call one that exists")
+    sema_error("E0102", span, "nothing named `{name}` exists here", "only functions that have been defined (or built in, like `print` / `panic`) can be called", "define it first (fn {name}() {{ ... }}), or call one that exists")
 }
 
-// The ambient names the readable prelude (Compiler/Prelude/core/prelude.jet)
-// opens; an unknown call may be a misspelling of one.
-SEMA_CALL_PRELUDE_NAMES: [String]{"print", "input", "panic", "assert", "assert_eq", "debug", "keep", "min", "max", "clamp", "eprint", "Clock", "Instant", "Date", "Duration", "Path", "read_file", "write_file", "file_exists", "channel", "embed_file", "embed_bytes", "find", "fetch"}
+// The ambient functions the readable prelude (Compiler/Prelude/core/prelude.jet)
+// opens; an unknown call may be a misspelling of one. The ambient `input` is
+// a value, not a call.
+SEMA_CALL_PRELUDE_NAMES: [String]{"print", "panic", "assert", "assert_eq", "debug", "keep", "min", "max", "clamp", "eprint", "Clock", "Instant", "Date", "Duration", "Path", "read_file", "write_file", "file_exists", "channel", "embed_file", "embed_bytes", "find", "fetch"}
 
 // E0102 for an unknown direct call, suggesting the one nearest visible
 // function or prelude name within two edits and offering the rename as an edit.
@@ -148,7 +149,7 @@ sema_call_unknown_function_in: fn(name: String, span: Span, scopes: SemaScopeTab
         loop prelude in SEMA_CALL_PRELUDE_NAMES -> candidates.push(prelude.copy())
     }
     near: sema_suggest_field(name, candidates) ?? return sema_call_unknown_function(name, span)
-    diagnostic: sema_error("E0102", span, "nothing named `{name}` exists here", "only functions that have been defined (or built in, like `print` / `input`) can be called", "did you mean `{near}`?")
+    diagnostic: sema_error("E0102", span, "nothing named `{name}` exists here", "only functions that have been defined (or built in, like `print` / `panic`) can be called", "did you mean `{near}`?")
     diagnostic_with_edit(diagnostic, TextEdit{span: span, new_text: near})
 }
 

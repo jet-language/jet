@@ -38,15 +38,6 @@ use {
     __core_db_util.[sql_byte, is_digit, is_quote, dequote, get_int32]
 }
 
-// Table.tabFlags values the table options give (sqliteInt.h).
-TF_WITHOUT_ROWID: 128
-TF_NO_VISIBLE_ROWID: 512
-TF_STRICT: 65536
-
-// Index.idxType (sqliteInt.h SQLITE_IDXTYPE_*).
-IDXTYPE_APPDEF: 0
-IDXTYPE_UNIQUE: 1
-
 // The bit likeop sets on its token's length for NOT LIKE (parse.y).
 LIKE_NOT_BIT: 2147483648
 
@@ -402,17 +393,17 @@ actions_ddl: fn<B: SQLBuilder>(b: &B, a: &ast.AST, s: [SQLStackEntry], m: Int, r
         }
         // cmd ::= SAVEPOINT nm
         10 -> {
-            b.savepoint(a, ast.SAVEPOINT_BEGIN, st(s, m))
+            b.savepoint(a, base.SAVEPOINT_BEGIN, st(s, m))
             keep
         }
         // cmd ::= RELEASE savepoint_opt nm
         11 -> {
-            b.savepoint(a, ast.SAVEPOINT_RELEASE, st(s, m))
+            b.savepoint(a, base.SAVEPOINT_RELEASE, st(s, m))
             keep
         }
         // cmd ::= ROLLBACK trans_opt TO savepoint_opt nm
         12 -> {
-            b.savepoint(a, ast.SAVEPOINT_ROLLBACK, st(s, m))
+            b.savepoint(a, base.SAVEPOINT_ROLLBACK, st(s, m))
             keep
         }
         // create_table ::= createkw temp TABLE ifnotexists nm dbnm
@@ -447,7 +438,7 @@ actions_ddl: fn<B: SQLBuilder>(b: &B, a: &ast.AST, s: [SQLStackEntry], m: Int, r
         // table_option ::= WITHOUT nm
         23 -> {
             t: st(s, m)
-            if ast.tok_is(a, t, "rowid".bytes()) -> return tv(TF_WITHOUT_ROWID.bit_or(TF_NO_VISIBLE_ROWID))
+            if ast.tok_is(a, t, "rowid".bytes()) -> return tv(ast.TF_WITHOUT_ROWID.bit_or(ast.TF_NO_VISIBLE_ROWID))
             txt: span_text(a, t)
             ast.error(a, "unknown table option: {txt}")
             tv(0)
@@ -455,7 +446,7 @@ actions_ddl: fn<B: SQLBuilder>(b: &B, a: &ast.AST, s: [SQLStackEntry], m: Int, r
         // table_option ::= nm
         24 -> {
             t: st(s, m)
-            if ast.tok_is(a, t, "strict".bytes()) -> return tv(TF_STRICT)
+            if ast.tok_is(a, t, "strict".bytes()) -> return tv(ast.TF_STRICT)
             txt: span_text(a, t)
             ast.error(a, "unknown table option: {txt}")
             tv(0)
@@ -538,7 +529,7 @@ actions_ddl: fn<B: SQLBuilder>(b: &B, a: &ast.AST, s: [SQLStackEntry], m: Int, r
         }
         // ccons ::= UNIQUE onconf
         40 -> {
-            b.create_index(a, no_tok(), no_tok(), -1, -1, sv(s, m), no_tok(), -1, 0, 0, IDXTYPE_UNIQUE)
+            b.create_index(a, no_tok(), no_tok(), -1, -1, sv(s, m), no_tok(), -1, 0, 0, ast.IDXTYPE_UNIQUE)
             keep
         }
         // ccons ::= CHECK LP expr RP
@@ -614,7 +605,7 @@ actions_ddl: fn<B: SQLBuilder>(b: &B, a: &ast.AST, s: [SQLStackEntry], m: Int, r
         }
         // tcons ::= UNIQUE LP sortlist RP onconf
         69 -> {
-            b.create_index(a, no_tok(), no_tok(), -1, sv(s, m - 2), sv(s, m), no_tok(), -1, 0, 0, IDXTYPE_UNIQUE)
+            b.create_index(a, no_tok(), no_tok(), -1, sv(s, m - 2), sv(s, m), no_tok(), -1, 0, 0, ast.IDXTYPE_UNIQUE)
             keep
         }
         // tcons ::= CHECK LP expr RP onconf
@@ -1318,7 +1309,7 @@ actions_expr: fn<B: SQLBuilder>(b: &B, a: &ast.AST, s: [SQLStackEntry], m: Int, 
         237 -> {
             tb: opt(a, st(s, m - 4))
             src: ast.src_list_append(a, -1, tb, None)
-            b.create_index(a, st(s, m - 7), st(s, m - 6), src, sv(s, m - 2), sv(s, m - 10), st(s, m - 11), sv(s, m), ast.SO_ASC, sv(s, m - 8), IDXTYPE_APPDEF)
+            b.create_index(a, st(s, m - 7), st(s, m - 6), src, sv(s, m - 2), sv(s, m - 10), st(s, m - 11), sv(s, m), ast.SO_ASC, sv(s, m - 8), ast.IDXTYPE_APPDEF)
             keep
         }
         // uniqueflag ::= UNIQUE
@@ -1972,7 +1963,7 @@ parse_with: fn(a: &ast.AST, r: &SQLRecorder, sql: String) -> Int Never! {
     a := ast.new_ast()
     r := new_recorder()
     assert(parse_with(a, r, "CREATE TABLE IF NOT EXISTS t(a INTEGER PRIMARY KEY DESC, b VARCHAR(10) NOT NULL DEFAULT 'x', c CHECK(c > 0), UNIQUE(b)) WITHOUT ROWID, STRICT") == 0)
-    opts: TF_WITHOUT_ROWID.bit_or(TF_NO_VISIBLE_ROWID).bit_or(TF_STRICT)
+    opts: ast.TF_WITHOUT_ROWID.bit_or(ast.TF_NO_VISIBLE_ROWID).bit_or(ast.TF_STRICT)
     dflt: ast.OE_DEFAULT
     assert(r.log == [String]{"start_table t| temp=0 view=0 virtual=0 noerr=1", "column a INTEGER", "primary_key list=-1 onerr={dflt} autoinc=0 order=1", "column b VARCHAR(10)", "not_null {dflt}", "default 'x'", "column c ", "check (c > 0", "create_index  cols=1 onerr={dflt} type=1", "end_table ) opts={opts} select=-1", "finish"})
     assert(parse_with(a, r, "CREATE TABLE t(a) WITHOUT oid") == 1)

@@ -8,9 +8,10 @@ read-only fact view. The enum names are checked against the AST definitions in
 [`Statements.jet`](../../../Compiler/JetFoundation/Source/AST/Statements.jet) (including `LValue`),
 [`Expressions.jet`](../../../Compiler/JetFoundation/Source/AST/Expressions.jet),
 [`Patterns.jet`](../../../Compiler/JetFoundation/Source/AST/Patterns.jet), and
-[`Types.jet`](../../../Compiler/JetFoundation/Source/Types/Types.jet). The Canvas
-projection and transaction tests live in
-[`Compiler/JetLSP/Tests/Integration`](../../../Compiler/JetLSP/Tests/Integration/) (`Canvas*.jet`); the wire contract is
+[`Types.jet`](../../../Compiler/JetFoundation/Source/Types/Types.jet). No running
+test covers Canvas projection and transactions yet: the Rust-era `Canvas*.jet`
+transliterations under `Compiler/JetLSP/Tests/Integration/` never compiled and
+were removed (#6650). The wire contract is
 [`canvas-protocol.md`](canvas-protocol.md). Terms such as stream follow the
 [Jet vocabulary](../vocabulary.md).
 

@@ -1,4 +1,9 @@
 # Port of tests/lsp.rs:3370-3462; original source bytes/order/assertions.
+# The Rust fixture's `package.jet` is dropped: package files now share one
+# namespace and refuse `use "helper"` (E0623), so the files are loose and the
+# file import stays the edge this case follows. A collection is NDJSON, so each
+# collecting `recv` waits for its response with `ndjson $[?id=N] #>= 1`, and a
+# filter selects frames (`[?params.uri=…]`); `[0]` is the Rust `main_*[0]`.
 # PENDING-SEAM(read_bytes): Main ballot + CoreState2 + kit batch three.
 # PENDING-GRAMMAR: collection, negated JSON filters, capture/write and named-stream equality.
 fixture: fixtures/lsp_sibling_import_edit_never_publishes_stale_verdict
@@ -9,23 +14,23 @@ send lsp: messages/lsp_sibling_import_edit_never_publishes_stale_verdict/1.json
 send lsp: messages/lsp_sibling_import_edit_never_publishes_stale_verdict/2.json
 send lsp: messages/lsp_sibling_import_edit_never_publishes_stale_verdict/3.json
 send lsp: messages/lsp_sibling_import_edit_never_publishes_stale_verdict/4.json
-recv lsp collect until $.id = 2
-json: stdout ndjson $[?method="textDocument/publishDiagnostics"].params[?uri="file://{work}/run.jet"] #= 1 # original predicate
-json: stdout ndjson $[?method="textDocument/publishDiagnostics"].params[?uri="file://{work}/run.jet"].diagnostics[?severity=1] #= 0 # original predicate
+recv lsp collect until ndjson $[?id=2] #>= 1
+json: stdout ndjson $[?method="textDocument/publishDiagnostics"][?params.uri="file://{work}/run.jet"] #= 1 # original predicate
+json: stdout ndjson $[?method="textDocument/publishDiagnostics"][?params.uri="file://{work}/run.jet"][0].params.diagnostics[?severity=1] #= 0 # original predicate
 send lsp: messages/lsp_sibling_import_edit_never_publishes_stale_verdict/5.json
 send lsp: messages/lsp_sibling_import_edit_never_publishes_stale_verdict/6.json
-recv lsp collect until $.id = 3
-json: stdout ndjson $[?method="textDocument/publishDiagnostics"].params[?uri="file://{work}/run.jet"] #= 1 # original predicate
-json: stdout ndjson $[?method="textDocument/publishDiagnostics"].params[?uri="file://{work}/run.jet"].diagnostics[?severity=1] #>= 1 # original predicate
-json: stdout ndjson $[?method="textDocument/publishDiagnostics"].params[?uri="file://{work}/other.jet"] #= 0 # original predicate
+recv lsp collect until ndjson $[?id=3] #>= 1
+json: stdout ndjson $[?method="textDocument/publishDiagnostics"][?params.uri="file://{work}/run.jet"] #= 1 # original predicate
+json: stdout ndjson $[?method="textDocument/publishDiagnostics"][?params.uri="file://{work}/run.jet"][0].params.diagnostics[?severity=1] #>= 1 # original predicate
+json: stdout ndjson $[?method="textDocument/publishDiagnostics"][?params.uri="file://{work}/other.jet"] #= 0 # original predicate
 send lsp: messages/lsp_sibling_import_edit_never_publishes_stale_verdict/7.json
 send lsp: messages/lsp_sibling_import_edit_never_publishes_stale_verdict/8.json
 send lsp: messages/lsp_sibling_import_edit_never_publishes_stale_verdict/9.json
-recv lsp collect until $.id = 4
-json: stdout ndjson $[?method="textDocument/publishDiagnostics"].params[?uri="file://{work}/run.jet"] #= 1 # original predicate
-json: stdout ndjson $[?method="textDocument/publishDiagnostics"].params[?uri="file://{work}/run.jet"].diagnostics[?severity=1] #= 0 # original predicate
-json: stdout ndjson $[?method="textDocument/publishDiagnostics"].params[?uri="file://{work}/helper.jet"][?version!=4] #= 0 # original predicate
-json: stdout ndjson $[?method="textDocument/publishDiagnostics"].params[?uri="file://{work}/other.jet"] #= 0 # original predicate
+recv lsp collect until ndjson $[?id=4] #>= 1
+json: stdout ndjson $[?method="textDocument/publishDiagnostics"][?params.uri="file://{work}/run.jet"] #= 1 # original predicate
+json: stdout ndjson $[?method="textDocument/publishDiagnostics"][?params.uri="file://{work}/run.jet"][0].params.diagnostics[?severity=1] #= 0 # original predicate
+json: stdout ndjson $[?method="textDocument/publishDiagnostics"][?params.uri="file://{work}/helper.jet"][?params.version!=4] #= 0 # original predicate
+json: stdout ndjson $[?method="textDocument/publishDiagnostics"][?params.uri="file://{work}/other.jet"] #= 0 # original predicate
 send lsp: messages/lsp_sibling_import_edit_never_publishes_stale_verdict/10.json
 recv lsp until $.id = 99
 close lsp

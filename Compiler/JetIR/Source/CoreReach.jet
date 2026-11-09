@@ -142,15 +142,15 @@ ir_precise_source_family: fn(name: String, owner: String, prefix: String) -> Boo
     helper == name
 }
 
-// A precise operation (the typed `abs` helpers and the Fraction, Decimal and
-// Complex registry) or a fallible unit conversion lowers to its
-// `Core/Math/Math.jet` helper by name from sites with no keyed call:
-// registered `core.math.fraction`/`decimal` constructors, constants,
-// synthesized operations and checked unit conversions. That closed registry
-// is rooted, not every `__` helper in the file.
+// A precise operation (the typed `abs` helpers, the Float and F32 `pow`
+// powers and the Fraction, Decimal and Complex registry) or a fallible unit
+// conversion lowers to its `Core/Math/Math.jet` helper by name from sites with
+// no keyed call: registered `core.math.fraction`/`decimal` constructors,
+// constants, synthesized operations, Float `pow` and checked unit conversions.
+// That closed registry is rooted, not every `__` helper in the file.
 ir_precise_source_name: fn(name: String) -> Bool Never! {
     loop owner in ["Int", "Float", "F32", "I64"] {
-        if (ir_precise_source_helper(owner, "abs") ?? "") == name -> return true
+        if (ir_precise_source_helper(owner, "abs") ?? "") == name || (ir_precise_source_helper(owner, "pow") ?? "") == name -> return true
     }
     if name == ir_unit_conversion_helper(false) || name == ir_unit_conversion_helper(true) -> return true
     ir_precise_source_family(name, "Fraction", "__fraction_") || ir_precise_source_family(name, "Decimal", "__decimal_") || ir_precise_source_family(name, "Complex", "__complex_")
@@ -379,10 +379,13 @@ ir_core_reach_expr_keys: fn(tree: BodyTree, expression: Int, functions: [FnBody]
         // Core decode helper by name; a helper's own `decode<Item>` reaches
         // the others, so a decode site roots them all. An `ArgsSpec` /
         // `ParsedArgs` method calls its Core/Args/Args.jet helper by name.
-        .HandleMethod(_, operation, _) -> {
+        // The ambient `input` (LinesIter) reads each line with its receiver's
+        // Core `read_line` (__InputLines).
+        .HandleMethod(receiver, operation, _) -> {
             if operation == .DynDecode(_) {
                 loop name in ir_codec_decode_helpers() -> ir_core_reach_add(keys, source_keys.get(name) ?? "")
             }
+            if operation == .LinesIter -> ir_core_reach_add(keys, ir_line_reader_key(functions, body_type(tree, receiver)))
             if ir_args_helper(operation) == .Val(helper) -> ir_core_reach_add(keys, source_keys.get(helper) ?? "")
         }
         .DecodeUnder(_, _) -> ir_core_reach_add(keys, source_keys.get("__decode_under") ?? "")
@@ -462,6 +465,17 @@ ir_precise_helper_names: fn(tree: BodyTree, roots: [Int], body: [Int]) -> [Strin
         body_each_stmt_child(tree, tree.stmts[statement], (child: Int) -> ir_precise_tree_names(tree, child, names))
     }
     names
+}
+
+// The Core power a Float or F32 `value.pow(y)` of type `ty` calls (BuildTypes
+// ir_binary), added once; nothing for an integer power.
+ir_precise_power_name: fn(ty: Type, names: &[String]) Never! {
+    bare: ir_untag(ty)
+    owner := ""
+    if bare == Type.Float -> owner = "Float"
+    if bare == Type.Float32 -> owner = "F32"
+    helper: ir_precise_source_helper(owner, "pow") ?? return
+    if !names.contains(helper) -> names.push(helper)
 }
 
 // The precise helpers one checked expression and every expression below it
@@ -544,7 +558,8 @@ ir_comptime_codec_tree: fn(tree: BodyTree, expression: Int, targets: &[IRComptim
     body_each_expr_child(tree, node, (child: Int) -> ir_comptime_codec_tree(tree, child, targets))
 }
 
-// A Fraction division also tests its divisor (ir_precise_division). A value
+// A Fraction division also tests its divisor (ir_precise_division), and a
+// Float or F32 `value.pow(y)` calls its power (ir_precise_power_name). A value
 // of a precise type may render (an interpolation, `print`, a List's text),
 // and its rendering calls its owner's `to_string` helper by name
 // (ir_render_push).
@@ -559,6 +574,9 @@ ir_precise_tree_names: fn(tree: BodyTree, expression: Int, names: &[String]) Nev
             zero_test: ir_precise_source_helper("Fraction", "is_zero") ?? ""
             if zero_test != "" && !names.contains(zero_test) -> names.push(zero_test)
         }
+    }
+    if node.kind == .Binary(op, _, _, _, _) {
+        if op == .Pow -> ir_precise_power_name(body_type(tree, expression), names)
     }
     if checked_expr_type_id(tree.expr_types, expression) == .Val(type_id) {
         owners := [String]{}

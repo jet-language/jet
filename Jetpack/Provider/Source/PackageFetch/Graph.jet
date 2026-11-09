@@ -141,10 +141,10 @@ pkg_fetch_resolve: fn(verification: &StoreVerification, roots: HangarRoots, cont
         .Path(path) -> {
             absolute: if path.starts_with("/") -> pkg_fetch_normalize_path(path) else -> pkg_fetch_normalize_path(files.join(parent, path))
             if parent != resolver.root {
-                if path.starts_with("/") || !(absolute == parent || absolute.starts_with("{parent}/")) -> return Err(pkg_fetch_error("E1223", "path dependency `{name}` escapes its parent package", "the path `{path}` resolves outside `{parent}`", "use a relative path below the declaring package directory"))
+                if path.starts_with("/") || !foundation_paths.is_relative_to(foundation_paths.of(absolute), foundation_paths.of(parent)) -> return Err(pkg_fetch_error("E1223", "path dependency `{name}` escapes its parent package", "the path `{path}` resolves outside `{parent}`", "use a relative path below the declaring package directory"))
                 resolved: files.canonicalize(absolute) ?? return Err(pkg_fetch_error("E1223", "path dependency `{name}` escapes its parent package", "{err}", "use a relative path below the declaring package directory"))
                 canonical_parent: files.canonicalize(parent) ?? return Err(pkg_fetch_error("E1224", "could not retain parent package", "{err}", "restore the declaring source directory"))
-                if !(resolved == canonical_parent || resolved.starts_with("{canonical_parent}/")) -> return Err(pkg_fetch_error("E1223", "path dependency `{name}` escapes its parent package", "canonical source is outside the declaring package", "use a relative path below the declaring package directory"))
+                if !foundation_paths.is_relative_to(foundation_paths.of(resolved), foundation_paths.of(canonical_parent)) -> return Err(pkg_fetch_error("E1223", "path dependency `{name}` escapes its parent package", "canonical source is outside the declaring package", "use a relative path below the declaring package directory"))
             }
             snapshot: pkg_source_snapshot_tree(absolute) ?? return Err(PackageFetchError{diagnostic: err.diagnostic})
             result: pkg_fetch_source_node(verification, roots, context, resolver, name, LockSource.Path(path), None, snapshot, chain)

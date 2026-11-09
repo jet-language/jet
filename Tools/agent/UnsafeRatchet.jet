@@ -46,7 +46,7 @@ RAW_OPERATIONS: ["pointer dereference", "pointer from address", "volatile access
 POINTER_DEREFERENCE: Regex{"\.\*"}
 POINTER_FROM_ADDRESS: Regex{"\bPtr\s*<[^>]*>\s*\.\s*from_addr\s*\("}
 VOLATILE_ACCESS: Regex{"\bcore\s*\.\s*mem\s*\.\s*volatile_(?:read|write)\b"}
-POSIX_CONTROL: Regex{"\bcore\s*\.\s*sys\s*\.\s*(?:fork|setuid|setgid|setpgid|setpgrp|setsid|initgroups|kill|wait|waitpid|pipe|close_fd|mkfifo|umask|getpriority|setpriority|utime|atexit|stop)\s*\("}
+POSIX_CONTROL: Regex{"\bcore\s*\.\s*sys\s*\.\s*(?:fork|setuid|setgid|set_user_ids|set_group_ids|setpgid|setpgrp|setsid|initgroups|kill|reset_signal|wait|waitpid|pipe|close_fd|mkfifo|mknod|umask|getpriority|setpriority|set_scheduling|set_wall_clock|utime|atexit|stop)\s*\("}
 MANIFEST_NAME: "^name\\s*:\\s*\"([^\"]+)\""
 LETTER: Regex{"\p{{L}}"}
 LETTER_OR_NUMBER: Regex{"[\p{{L}}\p{{N}}]"}
@@ -687,7 +687,7 @@ jet_files: fn(base: String, relative: String, out: &[String]) RatchetError! -[FS
             out.push(child)
         }
     }
-    Ok(())
+    Ok()
 }
 
 // Bytes of the UTF-8 text in `path`; invalid sequences read as U+FFFD.
@@ -1301,7 +1301,7 @@ format_stale: fn(changes: RowChanges) -> String RatchetError! {
 
 write_text: fn(path: String, text: String) RatchetError! -[FS]> {
     files.write(path, text) ?? return Err(ratchet_fail("cannot write {path}: {err}"))
-    Ok(())
+    Ok()
 }
 
 // Compare the scan with the baseline; false when the check failed.

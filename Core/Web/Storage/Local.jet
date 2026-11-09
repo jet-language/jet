@@ -1,4 +1,7 @@
-use core: core
+use {
+    core: core
+    session_storage: core.web.storage.session
+}
 
 // The shipped process-default store survives evaluator runs and reloads. Web is
 // registered-unsupported, not an origin store.
@@ -68,17 +71,17 @@ test_helper_effects: fn() Never! -[Browser]> {
 #Test("local and session storage keep separate identities") {
     key: "Core.web.storage.separation"
     set(key, "local")
-    core.web.storage.session.set(key, "session")
+    session_storage.set(key, "session")
     assert_eq(get(key), Val("local"))
-    assert_eq(core.web.storage.session.get(key), Val("session"))
+    assert_eq(session_storage.get(key), Val("session"))
     remove(key)
-    assert_eq(core.web.storage.session.get(key), Val("session"))
-    core.web.storage.session.remove(key)
+    assert_eq(session_storage.get(key), Val("session"))
+    session_storage.remove(key)
 }
 
 #Test("two tasks do not lose independent local storage writes") {
-    first: task { loop i in 0..<64 -> set("Core.local.first.{i}", "{i}") }
-    second: task { loop i in 0..<64 -> set("Core.local.second.{i}", "{i}") }
+    first: task { loop i in 0..<64 { set("Core.local.first.{i}", "{i}") } }
+    second: task { loop i in 0..<64 { set("Core.local.second.{i}", "{i}") } }
     first.join() ?? panic("first storage writer failed")
     second.join() ?? panic("second storage writer failed")
     loop i in 0..<64 {

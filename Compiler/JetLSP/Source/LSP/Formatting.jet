@@ -1,60 +1,50 @@
-// Pending W38 Server ABI reconciliation: LSPServer and its lex method use the
-// sole W36 documents; this fragment does not declare Server or another cache.
-// Formatter and typed-head registry are canonical port-compiler publications.
+// Formatting: the whole document or its requested lines through the one Jet
+// formatter, and the indentation an editor asks for as `\n` or `}` is typed.
+// A document with an inline package block is not formatted here: `jet fmt`
+// formats its manifest and code apart.
 use {
     core.encoding.[Dyn]
-    jet_foundation.[Span, TextEdit, foundation_json_quote]
+    jet_foundation.[Span, TextEdit, Type, foundation_json_quote, typed_head_kind_of]
     jet_parser.[jet_format_source]
-    jet_lexer.[Token, TOKEN_STRING, TOKEN_RAW_STRING, TOKEN_LINE_COMMENT, TOKEN_BLOCK_COMMENT, TOKEN_LBRACE, TOKEN_RBRACE, TOKEN_IDENT, TOKEN_DOT, TOKEN_HASH]
-    jet_devserver.[close]
+    jet_lexer.[Lexed, Token, TOKEN_STRING, TOKEN_RAW_STRING, TOKEN_LINE_COMMENT, TOKEN_BLOCK_COMMENT, TOKEN_LBRACE, TOKEN_RBRACE, TOKEN_IDENT, TOKEN_DOT, TOKEN_HASH, token_text]
+    jet_pkg_model.[pkg_mask_inline_package_source]
 }
 
-lsp_format_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String? {
-    value: params ?? return None
-    td: value.field("textDocument") ?? return None
-    uri: td.field("uri") ?? return None
-    if uri != .Text(_) -> return None
-    if uri == .Text(text) {
-        doc: server.diagnostic_state.docs.get(text) ?? return None
-        formatted: jet_format_source(doc.text).source ?? return Val(lsp_response(id, "[]"))
-        range: lsp_range_json(lsp_full_document_range(doc.text))
-        return Val(lsp_response(id, "[{{\"range\":{range},\"newText\":{foundation_json_quote(formatted)}}}]"))
-    }
-    None
+lsp_text_edits_json: fn(src: String, edits: [TextEdit]) -> String Never! {
+    rows := [String]{}
+    loop edit in edits -> rows.push("{{\"range\":{lsp_range_json(lsp_byte_span_to_range(src, edit.span))},\"newText\":{foundation_json_quote(edit.new_text)}}}")
+    "[{rows.join(",")}]"
 }
 
-lsp_range_format_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String? {
-    value: params ?? return None
-    td: value.field("textDocument") ?? return None
-    uri: td.field("uri") ?? return None
-    if uri == .Text(text) {
-        doc: server.diagnostic_state.docs.get(text) ?? return None
-        requested: lsp_range_from_json(value.field("range") ?? return None) ?? return None
-        edited: lsp_format_requested_lines(doc.text, requested) ?? return Val(lsp_response(id, "[]"))
-        return Val(lsp_response(id, "[{{\"range\":{lsp_range_json(edited._0)},\"newText\":{foundation_json_quote(edited._1)}}}]"))
+lsp_formattable: fn(text: String) -> Bool Never! {
+    if pkg_mask_inline_package_source(text) == {
+        .Ok(masked) -> masked.block == None
+        .Err(_) -> false
     }
-    None
 }
 
-lsp_on_type_format_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String? {
-    value: params ?? return None
-    td: value.field("textDocument") ?? return None
-    uri: td.field("uri") ?? return None
-    if uri == .Text(text) {
-        doc: server.diagnostic_state.docs.get(text) ?? return None
-        position: lsp_pos_from_json(value.field("position") ?? return None) ?? return None
-        trigger: value.field("ch") ?? return None
-        if trigger == .Text(ch) {
-            token_owner: server.lex(doc)
-            token_permit: token_owner.guard_read()
-            tokens: token_permit.value
-            edits: lsp_on_type_format_edits(doc.text, tokens, position, ch)
-            rows := [String]{}
-            loop edit in edits -> rows.push("{{\"range\":{lsp_range_json(lsp_byte_span_to_range(doc.text, edit.span))},\"newText\":{foundation_json_quote(edit.new_text)}}}")
-            return Val(lsp_response(id, "[{rows.join(",")}]"))
-        }
-    }
-    None
+lsp_format_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String Never! {
+    doc: lsp_open_document(server, params) ?? return lsp_response(id, "null")
+    if !lsp_formattable(doc.text) -> return lsp_response(id, "[]")
+    formatted: jet_format_source(doc.text, false)
+    if !formatted.ok || formatted.text == doc.text -> return lsp_response(id, "[]")
+    lsp_response(id, lsp_text_edits_json(doc.text, [TextEdit]{TextEdit{span: Span{start: 0, end: doc.text.count_bytes()}, new_text: formatted.text}}))
+}
+
+lsp_range_format_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String Never! {
+    doc: lsp_open_document(server, params) ?? return lsp_response(id, "null")
+    requested: lsp_range_from_json(lsp_param(params, "range") ?? return lsp_response(id, "null")) ?? return lsp_response(id, "null")
+    if !lsp_formattable(doc.text) -> return lsp_response(id, "[]")
+    edit: lsp_format_requested_lines(doc.text, requested) ?? return lsp_response(id, "[]")
+    lsp_response(id, lsp_text_edits_json(doc.text, [TextEdit]{edit}))
+}
+
+lsp_on_type_format_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String Never! {
+    doc: lsp_open_document(server, params) ?? return lsp_response(id, "null")
+    position: lsp_params_position(params) ?? return lsp_response(id, "null")
+    trigger: lsp_text_member(params ?? return lsp_response(id, "null"), "ch") ?? return lsp_response(id, "null")
+    lexed: server.lex(doc)
+    lsp_response(id, lsp_text_edits_json(doc.text, lsp_on_type_format_edits(doc.text, lexed, position, trigger)))
 }
 
 LSPTokenBracePair: struct {
@@ -63,16 +53,21 @@ LSPTokenBracePair: struct {
     opaque: Bool
 }
 
-lsp_on_type_format_edits: fn(src: String, tokens: [Token], position: LSPPos, trigger: String) -> [TextEdit] Never! {
+LSPOpenBrace: struct {
+    span: Span
+    opaque: Bool
+}
+
+lsp_on_type_format_edits: fn(src: String, lexed: Lexed, position: LSPPos, trigger: String) -> [TextEdit] Never! {
+    tokens: lexed.tokens
     offset: lsp_pos_to_offset(src, position)
     if offset == 0 -> return [TextEdit]{}
     trigger_start: offset - 1
     bytes: src.bytes()
-    // Rust get() declines an interior scalar boundary, not a decoded fallback.
+    // A trigger inside a character's bytes is no trigger.
     if !lsp_format_char_boundary(bytes, trigger_start) || !lsp_format_char_boundary(bytes, offset) -> return [TextEdit]{}
-    actual: String.from_bytes(bytes[trigger_start..<offset]) ?? return [TextEdit]{}
-    if actual != trigger || lsp_opaque_trigger(tokens, trigger_start, offset) -> return [TextEdit]{}
-    pairs: lsp_token_brace_pairs(tokens)
+    if src.slice(trigger_start, offset) != trigger || lsp_opaque_trigger(tokens, trigger_start, offset) -> return [TextEdit]{}
+    pairs: lsp_token_brace_pairs(lexed)
     loop pair in pairs {
         if pair.opaque && pair.open.end <= offset && offset <= pair.close.start -> return [TextEdit]{}
     }
@@ -103,36 +98,42 @@ lsp_opaque_trigger: fn(tokens: [Token], start: Int, end: Int) -> Bool Never! {
     false
 }
 
-lsp_token_brace_pairs: fn(tokens: [Token]) -> [LSPTokenBracePair] Never! {
-    opens := [(Span, Bool)]{}
+lsp_token_brace_pairs: fn(lexed: Lexed) -> [LSPTokenBracePair] Never! {
+    opens := [LSPOpenBrace]{}
     pairs := [LSPTokenBracePair]{}
-    loop (index, token) in tokens {
-        if token.kind == TOKEN_LBRACE -> opens.push((_0: token.span, _1: lsp_typed_body_open(tokens, index)))
-        else if token.kind == TOKEN_RBRACE && opens.len() > 0 {
-            open: opens.pop() ?? panic("nonempty brace stack")
-            pairs.push(LSPTokenBracePair{open: open._0, close: token.span, opaque: open._1})
+    loop (index, token) in lexed.tokens {
+        if token.kind == TOKEN_LBRACE -> opens.push(LSPOpenBrace{span: token.span, opaque: lsp_typed_body_open(lexed, index)})
+        if token.kind == TOKEN_RBRACE {
+            if opens.pop() == .Val(open) -> pairs.push(LSPTokenBracePair{open: open.span, close: token.span, opaque: open.opaque})
         }
     }
     pairs
 }
 
-lsp_typed_body_open: fn(tokens: [Token], index: Int) -> Bool Never! {
+// Whether the brace at `index` opens a body of foreign text: a typed head's
+// (`SQL { … }`) or a regex's (`Regex.{ … }`). The editor's indentation must
+// not touch it.
+lsp_typed_body_open: fn(lexed: Lexed, index: Int) -> Bool Never! {
+    tokens: lexed.tokens
     cursor := index
-    previous := Int?{None}
-    before := Int?{None}
+    previous := -1
+    before := -1
     loop cursor > 0 {
         cursor -= 1
         if tokens[cursor].kind == TOKEN_LINE_COMMENT || tokens[cursor].kind == TOKEN_BLOCK_COMMENT -> next
-        if previous == None -> previous = Val(cursor)
-        else { before = Val(cursor); break }
+        if previous >= 0 {
+            before = cursor
+            break
+        }
+        previous = cursor
     }
-    token: tokens[previous ?? return false]
-    if token.kind == TOKEN_IDENT && typed_head_kind(token.payload.text) != None {
-        if before == .Val(prior) -> return tokens[prior].kind != TOKEN_HASH
+    if previous < 0 -> return false
+    token: tokens[previous]
+    if token.kind == TOKEN_IDENT && typed_head_kind_of(Type.Named{name: token_text(lexed.tables, token)}) != None {
+        if before >= 0 -> return tokens[before].kind != TOKEN_HASH
         return true
     }
-    if token.kind == TOKEN_DOT && before == .Val(prior) -> return tokens[prior].kind == TOKEN_IDENT && tokens[prior].payload.text == TYPE_REGEX
-    false
+    token.kind == TOKEN_DOT && before >= 0 && tokens[before].kind == TOKEN_IDENT && token_text(lexed.tables, tokens[before]) == "Regex"
 }
 
 lsp_newline_format_edits: fn(src: String, pair: LSPTokenBracePair, position: LSPPos, pairs: [LSPTokenBracePair]) -> [TextEdit] Never! {
@@ -147,15 +148,23 @@ lsp_newline_format_edits: fn(src: String, pair: LSPTokenBracePair, position: LSP
             break
         }
     }
-    first: min(indent_end, line_end)
+    first: indent_end
     bytes: src.bytes()
     expected := "{base_indent}    "
     if first < line_end && bytes[first] == (U8{125}) {
         if pair.close.start != first -> return [TextEdit]{}
+        // Typed inside an empty block: the new line opens the block's body and
+        // the brace moves to a line of its own below it.
+        if lsp_blank_bytes(bytes, pair.open.end, line_start) {
+            opened := [TextEdit]{}
+            if src.slice(line_start, indent_end) != expected -> opened.push(TextEdit{span: Span{start: line_start, end: indent_end}, new_text: expected})
+            opened.push(TextEdit{span: Span{start: indent_end, end: indent_end}, new_text: "{lsp_line_ending_before(src, line_start)}{base_indent}"})
+            return opened
+        }
         expected = base_indent.copy()
     }
     edits := [TextEdit]{}
-    if bytes[line_start..<indent_end] != expected.bytes() -> edits.push(TextEdit{span: (Span{start: line_start, end: indent_end}), new_text: expected.move()})
+    if src.slice(line_start, indent_end) != expected -> edits.push(TextEdit{span: Span{start: line_start, end: indent_end}, new_text: expected})
     if close_on_line == .Val(close) {
         if close.close.start > indent_end {
             gap_start := close.close.start
@@ -166,6 +175,15 @@ lsp_newline_format_edits: fn(src: String, pair: LSPTokenBracePair, position: LSP
     edits
 }
 
+// Whether `bytes[start..<end]` holds only spaces, tabs and line breaks.
+lsp_blank_bytes: fn(bytes: [U8], start: Int, end: Int) -> Bool Never! {
+    loop index in start..<end {
+        byte: bytes[index]
+        if byte != (U8{32}) && byte != (U8{9}) && byte != (U8{13}) && byte != (U8{10}) -> return false
+    }
+    true
+}
+
 lsp_closing_brace_format_edits: fn(src: String, pair: LSPTokenBracePair) -> [TextEdit] Never! {
     line: lsp_byte_offset_to_lsp(src, pair.close.start).line
     start: lsp_line_boundary(src, line) ?? return [TextEdit]{}
@@ -173,14 +191,14 @@ lsp_closing_brace_format_edits: fn(src: String, pair: LSPTokenBracePair) -> [Tex
     indent_end: lsp_leading_indent_end(src, start, end)
     if indent_end != pair.close.start -> return [TextEdit]{}
     expected: lsp_block_indent(src, pair.open.start)
-    if src.bytes()[start..<indent_end] == expected.bytes() -> return [TextEdit]{}
+    if src.slice(start, indent_end) == expected -> return [TextEdit]{}
     [TextEdit]{TextEdit{span: Span{start: start, end: indent_end}, new_text: expected}}
 }
 
 lsp_block_indent: fn(src: String, offset: Int) -> String Never! {
     start: lsp_line_boundary(src, lsp_byte_offset_to_lsp(src, offset).line) ?? return ""
     end: lsp_leading_indent_end(src, start, lsp_line_content_end(src, start))
-    String.from_bytes(src.bytes()[start..<end]) ?? panic("ASCII indentation")
+    src.slice(start, end)
 }
 
 lsp_line_content_end: fn(src: String, line_start: Int) -> Int Never! {
@@ -199,49 +217,42 @@ lsp_leading_indent_end: fn(src: String, line_start: Int, line_end: Int) -> Int N
 
 lsp_line_ending_before: fn(src: String, line_start: Int) -> String Never! {
     bytes: src.bytes()
-    if line_start >= 2 && bytes[line_start - 2] == (U8{13}) && bytes[line_start - 1] == (U8{10}) -> "{Char{13}}\n" else -> "\n"
+    if line_start >= 2 && bytes[line_start - 2] == (U8{13}) && bytes[line_start - 1] == (U8{10}) -> "\r\n" else -> "\n"
 }
 
-lsp_format_requested_lines: fn(src: String, requested: LSPRange) -> (LSPRange, String)? {
+// The requested lines, formatted and indented as the first of them was. The
+// lines must parse on their own: a range inside a body formats nothing.
+lsp_format_requested_lines: fn(src: String, requested: LSPRange) -> TextEdit? Never! {
     _: lsp_apply_edit(src, requested, None, "") ?? return None
     start_line: requested.start.line
-    end_line: min(4294967295, requested.end.line + if requested.end.character > 0 -> 1 else -> 0)
+    end_line: requested.end.line + if requested.end.character > 0 -> 1 else -> 0
     if end_line < start_line -> return None
     start: lsp_line_boundary(src, start_line) ?? return None
-    end: lsp_line_boundary(src, end_line) ?? src.bytes().len()
-    range: lsp_byte_span_to_range(src, Span{start: start, end: end})
-    selected: String.from_bytes(src.bytes()[start..<end]) ?? panic("whole lines are scalar aligned")
-    formatted: jet_format_source(selected).source ?? return None
-    indent := ""
-    loop line in selected.lines() {
-        trimmed := line.trim() // #4303
-        if trimmed.is_empty() -> next
-        head := line.trim_start() // #4303
-        indent = String.from_bytes(line.bytes()[0..<line.bytes().len() - head.bytes().len()]) ?? panic("leading whitespace is valid UTF-8")
-        break
+    end: lsp_line_boundary(src, end_line) ?? src.count_bytes()
+    selected: src.slice(start, end)
+    formatted: jet_format_source(selected, false)
+    if !formatted.ok -> return None
+    first_line := start
+    loop first_line < end {
+        line_end: lsp_line_content_end(src, first_line)
+        if lsp_leading_indent_end(src, first_line, line_end) < line_end -> break
+        first_line = line_end
+        loop first_line < end && (src.bytes()[first_line] == (U8{13}) || src.bytes()[first_line] == (U8{10})) -> first_line += 1
     }
-    replacement: lsp_indent_formatted_fragment(formatted, indent)
+    indent: src.slice(first_line, lsp_leading_indent_end(src, first_line, lsp_line_content_end(src, first_line)))
+    replacement: lsp_indent_formatted_fragment(formatted.text, indent)
     if selected == replacement -> return None
-    Val((_0: range, _1: replacement))
+    Val(TextEdit{span: Span{start: start, end: end}, new_text: replacement})
 }
 
+// Each nonblank line of the formatted fragment gets the fragment's indent.
 lsp_indent_formatted_fragment: fn(formatted: String, indent: String) -> String Never! {
     if indent.is_empty() -> return formatted.copy()
-    bytes: formatted.bytes()
-    prefix: indent.bytes()
-    out := [U8]{}
-    start := 0
-    loop start < bytes.len() {
-        end := start
-        loop end < bytes.len() && bytes[end] != (U8{10}) -> end += 1
-        line: String.from_bytes(bytes[start..<end]) ?? panic("newline split is scalar aligned")
-        trimmed := line.trim() // #4303
-        if !trimmed.is_empty() { loop byte in prefix -> out.push(byte) }
-        if end < bytes.len() -> end += 1
-        loop index in start..<end -> out.push(bytes[index])
-        start = end
+    out := [String]{}
+    loop line in formatted.split("\n") {
+        if line.trim().is_empty() -> out.push(line) else -> out.push("{indent}{line}")
     }
-    String.from_bytes(out) ?? panic("indentation preserves UTF-8")
+    out.join("\n")
 }
 
 lsp_line_boundary: fn(src: String, line: Int) -> Int? Never! {

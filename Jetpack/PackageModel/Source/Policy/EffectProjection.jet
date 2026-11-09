@@ -1,16 +1,12 @@
 // The application-boundary effect projection (jet-pkg-model EffectBudget.rs
-// `EffectProjection`, `project_*`, `application_policy_diagnostic`, and the
-// summary renderers).
+// `EffectProjection` and the summary renderers).
 //
 // Keep the four roles separate: `required_effects` is a sema fact;
 // `granted_effects` and `denied_effects` are policy facts; `authority` names
 // the policy source. Consumers never infer one role from another. Effect sets
 // are sorted, duplicate-free `[String]` (Foundation `authority_holds`).
 use {
-    jet_foundation.[
-        ApplicationAuthority, Diagnostic, Span, TextEdit, authority_holds, authority_inline_package_block,
-        diagnostic_from_registry, diagnostic_with_detail, diagnostic_with_edit, diagnostic_with_rights,
-    ]
+    jet_foundation.[authority_holds]
     jetpack_foundation.[ReportError, StatusEnvelope]
 }
 
@@ -24,97 +20,11 @@ EffectProjection: struct {
     granted_effects: [String]
     denied_effects: [String]
     authority: String
-
-    // The beginner basics with no sema requirement yet (Rust `Default`).
-    default: fn() -> EffectProjection Never! {
-        basics: ApplicationAuthority.ambient_basics()
-        EffectProjection{required_effects: [String]{}, granted_effects: basics.granted_effects, denied_effects: basics.denied_effects, authority: basics.authority}
-    }
-
-    // This checked application decision, carried into the execution bundle.
-    application_authority: fn(self) -> ApplicationAuthority Never! {
-        ApplicationAuthority{
-            required_effects: self.required_effects,
-            granted_effects: self.granted_effects,
-            denied_effects: self.denied_effects,
-            authority: self.authority
-        }
-    }
-
-    // Required effects with no policy verdict at the application boundary.
-    undecided: fn(self) -> [String] Never! {
-        self.application_authority().undecided_effects()
-    }
-
-    is_allowed: fn(self) -> Bool Never! {
-        self.application_authority().is_allowed()
-    }
-}
-
-// The entry file of a program run without any Package manifest: its E1803
-// repair names the exact `--allow` invocation and
-// inserts the leading inline Package carrier.
-ScriptEntry: struct {
-    path: String
-    source: String
-    // The `jet` command that ran the script (`run`, `build`).
-    command: String
-}
-
-// Project the application policy without changing the sema effect fact. A
-// manifest-less program, and a manifest that writes no `authority`
-// (#3718), receive the beginner floor; a written allow row adds to that
-// floor and a written deny row removes from it.
-pkg_project_application_effects: fn(required_effects: [String], manifest: PackageFacts?) -> EffectProjection Never! {
-    facts: manifest ?? return pkg_effect_floor_projection(required_effects, ApplicationAuthority.ambient_basics())
-    if facts.authority.allow == None && facts.authority.deny == None {
-        return pkg_effect_floor_projection(required_effects, ApplicationAuthority.package_default())
-    }
-    pkg_effect_floor_projection(required_effects, ApplicationAuthority.from_policy(facts.authority.allow, facts.authority.deny, EFFECT_AUTHORITY_PACKAGE))
-}
-
-pkg_effect_floor_projection: fn(required_effects: [String], floor: ApplicationAuthority) -> EffectProjection Never! {
-    EffectProjection{required_effects: required_effects, granted_effects: floor.granted_effects, denied_effects: floor.denied_effects, authority: floor.authority}
-}
-
-// The projection of the exact selected entry, not the per-package aggregate.
-pkg_project_program_effects: fn(program: EffectBudgetProgram, summaries: [String: PackageEffectSummary], default_entry: String, manifest: PackageFacts?) -> EffectProjection Never! {
-    pkg_project_application_effects(pkg_program_effects(program, summaries, default_entry), manifest)
-}
-
-// `Sema::show_set`: a set as `Net, FS.Read` in canonical order.
-pkg_effect_show_set: fn(effects: [String]) -> String Never! {
-    effects.join(", ")
 }
 
 pkg_effect_names_or_none: fn(effects: [String]) -> String Never! {
     if effects.len() == 0 -> return "none"
-    pkg_effect_show_set(effects)
-}
-
-// E1803: the structured authority failure for JSON, redirected, and
-// non-interactive invocations. The Why is one plain sentence; the role rows
-// ride in structured detail for `--json`. A manifest-less `script` with
-// undecided effects leads its Fix with the exact `--allow` command and its
-// `-A` form, and also carries the inline Package block as a needs-review edit
-// a denial is never repaired by a grant.
-pkg_application_policy_diagnostic: fn(projection: EffectProjection, denied: [String], script: ScriptEntry?) -> Diagnostic Never! {
-    missing: projection.undecided()
-    authority: projection.application_authority()
-    denied_required: authority.denied_required_effects()
-    what: if denied_required.len() == 0 -> "application authority is undecided for `{pkg_effect_show_set(missing)}`" else -> "application authority denies `{pkg_effect_show_set(denied_required)}`"
-    repair: script ?? {
-        base: diagnostic_from_registry("E1803", None, what, authority.policy_why(), authority.policy_fix(""))
-        return diagnostic_with_rights(diagnostic_with_detail(base, authority.policy_facts()), "authority", [String]{}, [String]{projection.authority}, None)
-    }
-    scripted: denied.len() == 0 && missing.len() > 0 && authority.is_application_default()
-    fix: if scripted -> "run `jet {repair.command} --allow={missing.join(",")} {repair.path}` (or `-A`/`--allow-all` for every effect) to allow it for this run, or {authority.policy_fix(repair.path)}" else -> authority.policy_fix(repair.path)
-    base: diagnostic_from_registry("E1803", None, what, authority.policy_why(), fix)
-    diagnostic: diagnostic_with_rights(diagnostic_with_detail(base, authority.policy_facts()), "authority", [String]{}, [String]{projection.authority}, None)
-    if !scripted -> return diagnostic
-    // E1803's registry row owns a suggested, needs-review source edit.
-    at: pkg_inline_package_insertion_offset(repair.source)
-    diagnostic_with_edit(diagnostic, TextEdit{span: Span{start: at, end: at}, new_text: authority_inline_package_block(repair.path, authority.inline_allow_row())})
+    effects.join(", ")
 }
 
 // Every effect reachable from `entry` through statically known calls.
@@ -163,10 +73,6 @@ pkg_effect_summary_json_for_program: fn(program: EffectBudgetProgram, summaries:
 }
 
 // Human application-boundary summary with explicit policy roles.
-pkg_effect_summary_line_for_program_with_authority: fn(program: EffectBudgetProgram, summaries: [String: PackageEffectSummary], default_entry: String, manifest: PackageFacts?) -> String Never! {
-    pkg_render_effect_projection_line(pkg_project_program_effects(program, summaries, default_entry, manifest))
-}
-
 pkg_render_effect_projection_line: fn(projection: EffectProjection) -> String Never! {
     "required effects: {pkg_effect_names_or_none(projection.required_effects)}; granted effects: {pkg_effect_names_or_none(projection.granted_effects)}; denied effects: {pkg_effect_names_or_none(projection.denied_effects)}; authority: {projection.authority}"
 }
@@ -174,24 +80,16 @@ pkg_render_effect_projection_line: fn(projection: EffectProjection) -> String Ne
 // The JSON object embedded in semantic-index, dossier, and Canvas documents,
 // so the four roles stay one shared projection.
 pkg_render_effect_projection_object: fn(projection: EffectProjection) -> String Never! {
-    required: pkg_render_quoted_list(projection.required_effects)
-    granted: pkg_render_quoted_list(projection.granted_effects)
-    denied: pkg_render_quoted_list(projection.denied_effects)
-    "{{\"required_effects\":[{required}],\"granted_effects\":[{granted}],\"denied_effects\":[{denied}],\"authority\":{pkg_json_quote(projection.authority)}}}"
-}
-
-pkg_render_quoted_list: fn(values: [String]) -> String Never! {
-    quoted := [String]{}
-    loop value in values -> quoted.push(pkg_json_quote(value))
-    quoted.join(",")
+    pkg_json_render(Dyn.Object([
+        "required_effects": pkg_json_texts(projection.required_effects),
+        "granted_effects": pkg_json_texts(projection.granted_effects),
+        "denied_effects": pkg_json_texts(projection.denied_effects),
+        "authority": Dyn.Text(projection.authority.copy()),
+    ]))
 }
 
 // Machine application-boundary summary. The legacy `effects` field stays for
 // existing consumers; the role fields are the canonical view.
-pkg_effect_summary_json_for_program_with_authority: fn(program: EffectBudgetProgram, summaries: [String: PackageEffectSummary], default_entry: String, manifest: PackageFacts?) -> String ReportError! {
-    pkg_render_effect_projection_json(pkg_project_program_effects(program, summaries, default_entry, manifest))
-}
-
 pkg_render_effect_projection_json: fn(projection: EffectProjection) -> String ReportError! {
     required: pkg_effect_texts(projection.required_effects)
     StatusEnvelope.new(EFFECT_STATUS_ACTION, true)

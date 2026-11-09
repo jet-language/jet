@@ -158,7 +158,7 @@ cli_tool_profile_build: fn(verification: &StoreVerification, theme: Theme, parse
     if cli_tool_profile_args(theme, parsed, PROFILE_VERB_BUILD, false) == None -> return EXIT_USAGE
     generation: cli_build_tool_manifest_generation(verification, theme, parsed) ?? return cli_report_tool_profile_error(theme, err)
     if parsed.flags.json {
-        print("{{\"profile\":{cli_json_quote(TOOL_PROFILE_NAME)},\"generation\":{generation}}}")
+        print(cli_json_render(Dyn.Object(["profile": Dyn.Text(TOOL_PROFILE_NAME), "generation": Dyn.Int(generation)])))
     } else {
         theme.ok("user-tools profile built as generation {generation}")
     }
@@ -170,7 +170,7 @@ cli_tool_profile_switch: fn(verification: &StoreVerification, theme: Theme, pars
     generation: cli_build_tool_manifest_generation(verification, theme, parsed) ?? return cli_report_tool_profile_error(theme, err)
     cli_tool_activate_under_lock(verification, generation) ?? return cli_report_tool_profile_error(theme, err)
     if parsed.flags.json {
-        print("{{\"profile\":{cli_json_quote(TOOL_PROFILE_NAME)},\"current\":{generation}}}")
+        print(cli_json_render(Dyn.Object(["profile": Dyn.Text(TOOL_PROFILE_NAME), "current": Dyn.Int(generation)])))
     } else {
         theme.ok("user-tools profile switched to generation {generation}")
     }
@@ -187,7 +187,7 @@ cli_tool_profile_rollback: fn(verification: &StoreVerification, theme: Theme, pa
     target: cli_tool_profile_args(theme, parsed, PROFILE_VERB_ROLLBACK, true) ?? return EXIT_USAGE
     generation: cli_tool_rollback_locked(verification, target.generation) ?? return cli_report_tool_profile_error(theme, err)
     if parsed.flags.json {
-        print("{{\"profile\":{cli_json_quote(TOOL_PROFILE_NAME)},\"current\":{generation}}}")
+        print(cli_json_render(Dyn.Object(["profile": Dyn.Text(TOOL_PROFILE_NAME), "current": Dyn.Int(generation)])))
     } else {
         theme.ok("user-tools profile rolled back to generation {generation}")
     }
@@ -241,9 +241,15 @@ cli_tool_profile_generations: fn(verification: &StoreVerification, theme: Theme,
     loop entry in usage.generations -> generations_bytes += entry.bytes
     profile_bytes: usage.state_bytes + usage.bin_bytes
     if parsed.flags.json {
-        entries := [String]{}
-        loop entry in usage.generations -> entries.push("{{\"generation\":{entry.generation},\"current\":{entry.current},\"bytes\":{entry.bytes}}}")
-        print("{{\"profile\":{cli_json_quote(TOOL_PROFILE_NAME)},\"profile_bytes\":{profile_bytes},\"generations_bytes\":{generations_bytes},\"total_bytes\":{profile_bytes + generations_bytes},\"generations\":[{entries.join(",")}]}}")
+        entries := [Dyn]{}
+        loop entry in usage.generations -> entries.push(Dyn.Object(["generation": Dyn.Int(entry.generation), "current": Dyn.Bool(entry.current), "bytes": Dyn.Int(entry.bytes)]))
+        print(cli_json_render(Dyn.Object([
+            "profile": Dyn.Text(TOOL_PROFILE_NAME),
+            "profile_bytes": Dyn.Int(profile_bytes),
+            "generations_bytes": Dyn.Int(generations_bytes),
+            "total_bytes": Dyn.Int(profile_bytes + generations_bytes),
+            "generations": Dyn.Array(entries),
+        ])))
         return EXIT_OK
     }
     print("PROFILE  BYTES")

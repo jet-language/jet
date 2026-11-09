@@ -10,10 +10,7 @@ use {
 }
 
 // The C functions the host provides, each as the runtime's IR calls it.
-WEB_HOST_C: [String]{
-    "getauxval", "pthread_attr_destroy", "pthread_attr_init", "pthread_attr_setstacksize",
-    "pthread_create", "pthread_detach", "pthread_join",
-}
+WEB_HOST_C: [String]{"getauxval"}
 
 // Each host C function: true when it replaces the runtime's own definition,
 // as each leaf of the UI provider seam (IR_HOST_PROVIDER) does: the host
@@ -262,6 +259,9 @@ class Host {
     this.tls = new WebAssembly.Global({ value: "i64", mutable: true }, 0n);
     this.edx = new WebAssembly.Global({ value: "i32", mutable: true }, 0);
     this.unmapped = [];
+    // The host runs one thread: the first refused thread start (clone) says
+    // why before the runtime stops with E3001.
+    this.threadsRefused = false;
     this.files = new Map();
     this.lines = ["", "", ""];
     this.outcome = null;
@@ -689,9 +689,6 @@ class Host {
 
   cLibrary() {
     const host = this;
-    // The host runs one thread: the first refused thread start says why
-    // before the runtime stops with E3001.
-    let threadsRefused = false;
     // The UI provider seam's leaves forward to the page's browser provider,
     // globalThis.jetUiProvider, and only marshal: Core owns every rule and
     // error. A text answer is staged here until jet_ui_provider_take copies it.
@@ -719,16 +716,6 @@ class Host {
         if (type === 25n) return BigInt(AUX_RANDOM);
         return 0n;
       },
-      pthread_attr_init: () => 0n,
-      pthread_attr_destroy: () => 0n,
-      pthread_attr_setstacksize: () => 0n,
-      pthread_create: () => {
-        if (!threadsRefused) console.error("jet: tasks are not available on the web target yet");
-        threadsRefused = true;
-        return BigInt(E.AGAIN);
-      },
-      pthread_detach: () => BigInt(E.SRCH),
-      pthread_join: () => BigInt(E.SRCH),
     };
   }
 }
@@ -790,6 +777,11 @@ const SYSCALLS = {
   },
   35: (h, request) => h.sleepUntil(request, false, 1),
   39: () => nodeProcess?.pid ?? 1,
+  56: (h) => {
+    if (!h.threadsRefused) console.error("jet: tasks are not available on the web target yet");
+    h.threadsRefused = true;
+    return -E.AGAIN;
+  },
   60: (h, status) => {
     h.flushLines();
     throw new JetHostExit(status & 255);

@@ -712,18 +712,105 @@ row_ids: fn(rows: [SuiteRow]) -> [String] Never! {
     assert_eq(parse_admit_args([String]{"a", "b", "--summary"}).errors, [String]{"one commit, not a and b", "--summary needs a value"})
 }
 
-#Test("the shards split the slot memory cap instead of each claiming the whole room") {
+#Test("the shards of the sides at once split the slot memory cap and the threads instead of each claiming the whole room") {
     plain: parse_admit_args([String]{"abc"})
-    assert_eq(shard_pool(plain, 4, "16G"), [String]{"--memory=4G"})
-    assert_eq(shard_pool(plain, 4, ""), [String]{"--memory=4G"})
-    assert_eq(shard_pool(plain, 1, "24G"), [String]{"--memory=24G"})
-    assert_eq(shard_pool(plain, 16, "8G"), [String]{"--memory=1G"})
-    assert_eq(shard_pool(parse_admit_args([String]{"abc", "--jobs", "3"}), 4, "64G"), [String]{"--memory=16G", "--jobs=3"})
+    assert_eq(shard_pool(plain, 4, 1, "16G", ""), [String]{"--memory=4G"})
+    assert_eq(shard_pool(plain, 4, 1, "", ""), [String]{"--memory=4G"})
+    assert_eq(shard_pool(plain, 1, 1, "24G", ""), [String]{"--memory=24G"})
+    assert_eq(shard_pool(plain, 16, 1, "8G", ""), [String]{"--memory=1G"})
+    assert_eq(shard_pool(plain, 4, 2, "24G", "8-31"), [String]{"--memory=3G", "--jobs=3"})
+    assert_eq(shard_pool(plain, 4, 1, "16G", "4-9,20-25"), [String]{"--memory=4G", "--jobs=3"})
+    assert_eq(shard_pool(plain, 16, 2, "16G", "4-9"), [String]{"--memory=1G", "--jobs=1"})
+    three: parse_admit_args([String]{"abc", "--jobs", "3"})
+    assert_eq(shard_pool(three, 4, 1, "64G", "8-31"), [String]{"--memory=16G", "--jobs=3"})
+    assert_eq(shard_pool(three, 4, 2, "64G", ""), [String]{"--memory=8G", "--jobs=1"})
+}
+
+#Test("a CPU list counts its CPUs") {
+    assert_eq(cpu_count("8-31"), 24)
+    assert_eq(cpu_count("4-9,20-25"), 12)
+    assert_eq(cpu_count("3"), 1)
+    assert_eq(cpu_count(""), 0)
+    assert_eq(cpu_count("9-4"), 0)
 }
 
 #Test("a suite's runner reads the candidate's tree and its rows read their side's tree") {
     vars: suite_vars([Var]{set_var("TMPDIR", "/tmp/x")}, "/work/tree", "/work/release-tree", "jet@0.0.1#aa", "/release/jet")
     assert_eq((loop found in vars -> "{found.name}={found.value}"), [String]{"TMPDIR=/tmp/x", "JET_COMPILER_IDENTITY=jet@0.0.1#aa", "JET_TOOLCHAIN_ROOT=/work/tree", "JET_TEST_TOOLCHAIN_ROOT=/work/release-tree", "JET=/release/jet"})
+}
+
+// A seed `name` in `dir` whose jet holds `jet`, released as itself: its
+// SHA256SUMS and RELEASE.json name that jet. Returns its identity.
+put_seed: fn(dir: String, jet: String, name: String) -[FS]> String Never! {
+    put(files.join(dir, "jet"), jet)
+    sha: sha256_file(files.join(dir, "jet"))
+    identity: "jet@0.0.1#{sha}"
+    put(files.join(dir, "IDENTITY"), "{identity}\n")
+    put(files.join(dir, "jet-runtime/README"), "pack\n")
+    put(files.join(dir, "SOURCE"), "{COMMIT} (dev, {name})\n")
+    put(files.join(dir, "SHA256SUMS"), "{sha}  jet\n")
+    put_json(files.join(dir, "RELEASE.json"), object([String: Dyn]{"name": Dyn.Text(name.copy()), "identity": Dyn.Text(identity), "commit": Dyn.Text(COMMIT)}))
+    identity
+}
+
+// A seeds directory as a boot seed leaves it: `current` is boot-a0_041, a
+// jet built from a later tree that carries a0_041's release files, and
+// a0_041 is the published release.
+boot_seeds: fn(label: String) -[FS, Env]> String Never! {
+    seeds: files.mkdtemp("jet-release-{label}-") ?? panic("scratch: {err}")
+    put_seed(files.join(seeds, "a0_041"), "published jet\n", "a0_041")
+    boot: files.join(seeds, "boot-a0_041")
+    put(files.join(boot, "jet"), "boot jet\n")
+    put(files.join(boot, "IDENTITY"), "jet@0.0.1#{sha256_file(files.join(boot, "jet"))}\n")
+    put(files.join(boot, "jet-runtime/README"), "pack\n")
+    copied: [String]{"SOURCE", "SHA256SUMS", "RELEASE.json"}
+    loop name in copied -> put(files.join(boot, name), files.read(files.join(seeds, "a0_041/{name}")) ?? panic("read {name}: {err}"))
+    files.symlink("boot-a0_041", files.join(seeds, "current")) ?? panic("current: {err}")
+    seeds
+}
+
+#Test("a current release whose jet is the one it was released as is the release column") {
+    seeds: files.mkdtemp("jet-release-genuine-") ?? panic("scratch: {err}")
+    identity: put_seed(files.join(seeds, "a0_041"), "published jet\n", "a0_041")
+    files.symlink("a0_041", files.join(seeds, "current")) ?? panic("current: {err}")
+    current: release_info(seeds)
+    assert_eq(current.error, "")
+    assert_eq(current.genuine, "")
+    column: baseline_info(seeds, current)
+    assert_eq(column.error, "")
+    assert_eq(column.dir, current.dir)
+    assert_eq(column.identity, identity)
+    assert_eq(column.commit, COMMIT)
+}
+
+#Test("a boot seed builds the chain and the release its RELEASE.json names is the release column") {
+    seeds: boot_seeds("boot")
+    current: release_info(seeds)
+    assert_eq(current.error, "")
+    assert_eq(current.name, "boot-a0_041")
+    assert_eq(current.identity, "jet@0.0.1#{sha256_file(files.join(seeds, "boot-a0_041/jet"))}")
+    assert(current.genuine.contains("SHA256SUMS does not list its jet"))
+    assert(current.genuine.contains("RELEASE.json records identity"))
+    column: baseline_info(seeds, current)
+    assert_eq(column.error, "")
+    assert_eq(column.name, "a0_041")
+    assert_eq(column.jet_sha, sha256_file(files.join(seeds, "a0_041/jet")))
+    assert_eq(column.identity, "jet@0.0.1#{column.jet_sha}")
+    assert_eq(column.commit, COMMIT)
+    assert_eq(column_text(column.name, column.identity, column.jet_sha, column.commit), "a0_041 ({column.identity}), jet {column.jet_sha}, tree {COMMIT}")
+}
+
+#Test("a run is refused when neither the current release nor the one it names has its released jet") {
+    missing: boot_seeds("missing")
+    files.rename(files.join(missing, "a0_041"), files.join(missing, "kept")) ?? panic("rename: {err}")
+    gone: baseline_info(missing, release_info(missing))
+    assert(gone.error.starts_with("no baseline: the jet of boot-a0_041 is not the release its files name (SHA256SUMS does not list its jet"))
+    assert(gone.error.ends_with("and {files.join(missing, "a0_041")} does not exist"))
+    tampered: boot_seeds("tampered")
+    put(files.join(tampered, "a0_041/jet"), "rebuilt jet\n")
+    rebuilt: baseline_info(tampered, release_info(tampered))
+    assert(rebuilt.error.contains(", nor is {files.join(tampered, "a0_041")}'s: SHA256SUMS does not list its jet"))
+    assert(rebuilt.error.contains("IDENTITY jet@0.0.1#"))
 }
 
 #Test("a lost row is one the release passes and the candidate fails on both runs") {

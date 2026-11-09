@@ -7,9 +7,10 @@
 // (Core/*/Runtime/**/*.jet), and the canonical effect source
 // (Compiler/Prelude/Effects.jet). The rows carry no body text: a checkout's
 // CLI reads `<toolchain root>/<path>` at run time, and the embedded-sources
-// part (Core/EmbeddedSources.jet) names each row's file, which the compiler
-// embeds when jet is built. A Core edit needs no regeneration unless the row
-// set changes. An Effects.jet edit always needs it.
+// part (Core/EmbeddedSources.jet) names each row's file, and each Core asset
+// (a file a Core source names with `embed_bytes`/`embed_file`), which the
+// compiler embeds when jet is built. A Core edit needs no regeneration unless
+// the row set or the asset set changes. An Effects.jet edit always needs it.
 // The effect roots of Effects.jet are also the one list behind every other
 // effect-root view: Foundation's `Effect` enum (in the vocabulary file), the
 // `Effect` enum of Core/Compiler/Lang.jet and the `Effect:plain(…)` type of
@@ -210,7 +211,7 @@ RUST_INTEGER: Regex{"^([0-9]+)(?:usize)?$"}
 PURE_ROUTE: Regex{"^CoreCallPureRoute::([A-Za-z][A-Za-z0-9_]*)$"}
 COVERAGE_CONSTANT: Regex{"^CoreCallCoverage::([A-Z_]+)$"}
 // The CoreCallPureRoute variants a row may name, spelled as Jet spells them.
-PURE_ROUTES: [String]{"Time", "Math", "Date", "DateTime", "SketchTDigest", "SketchReservoir", "Raylib", "Net", "Crypto"}
+PURE_ROUTES: [String]{"Time", "Math", "Date", "DateTime", "SketchTDigest", "SketchReservoir", "Net", "Crypto"}
 
 // One call `name(args)` in an expression: its path, its top-level arguments
 // and the byte offset after its `)`.
@@ -690,6 +691,7 @@ VAULT_SECRET: [String]{
 // they keep the bare `FS` root.
 FILES_READS: [String]{
     "scope", "read", "read_bytes", "read_at", "read_link", "map", "open", "exists", "is_dir", "is_fifo", "is_socket", "space",
+    "can_read", "can_write", "can_execute",
     "stat", "lstat", "list_dir", "walk", "walk_files", "glob", "canonicalize", "absolute",
     "__read_bytes_os", "__read_at_os", "__read_link_os", "__scope_read_at", "__reader_line_bytes",
     // #3593 provider leaves behind Core/Files/files.jet.
@@ -731,6 +733,7 @@ NET_WAITS: [String]{
     "tcp_write", "tcp_read_bytes", "tcp_read_text", "tcp_write_bytes", "tcp_write_all_bytes", "tcp_write_text",
     "tcp_ready", "sendfile", "tcp_reply", "udp_send_to", "udp_recv_from", "udp_send_bytes_to", "udp_receive",
     "unix_accept", "unix_connect", "unix_read", "unix_write", "unix_read_bytes", "unix_write_all_bytes",
+    "unix_send", "unix_receive", "unix_wait",
     "dns_a", "dns_aaaa", "dns_a_at", "dns_aaaa_at", "dns_txt", "dns_txt_at", "dns_ptr", "dns_srv",
     "dns_srv_at", "getservbyname", "getservbyport", "tls_connect", "tls_read", "tls_write", "tls_close",
     "__dns_a_lookup", "__dns_aaaa_lookup", "__dns_a_at_lookup", "__dns_aaaa_at_lookup",
@@ -800,7 +803,6 @@ call_effect: fn(module_name: String, member: String) -> String? Never! {
         "core.service" -> if member == "state_store" || SERVICE_READS.contains(member) || SERVICE_WRITES.contains(member) -> Val("FS") else -> when_listed(member, SERVICE_SLEEPS, "Time")
         "core.net.tls" | "core.http.client" | "core.http.server" | "core.http.middleware" -> Val("Net")
         "core.http" -> if member == "serve" || member == "get" -> Val("Net") else -> None
-        "core.game.raylib" -> Val("GPU")
         // Key generation draws from the OS generator, like crypto.random.bytes.
         "core.crypto" -> if member == "__x25519_generate" || member == "__signing_generate" -> Val("Rand") else -> None
         "core.perf" -> when_listed(member, PERF_ENV, "Env")
@@ -2378,9 +2380,10 @@ render_owned_row: fn(row: CoreSourceRow, type_exports: [String]) -> String Never
 
 // Core/EmbeddedSources.jet, the compiler-private part `__core_embedded_sources`
 // of core.devtools: one comptime constant per row that embeds the row's file
-// (this one included) from beside it, and the lookup of a row's text by its
+// (this one included) from beside it, one per Core asset (core_assets) that
+// embeds its bytes, and the lookups of a row's text and an asset's bytes by
 // repository path.
-render_embedded_sources: fn(header: String, rows: [CoreSourceRow]) -> String CoreRowsError! {
+render_embedded_sources: fn(header: String, rows: [CoreSourceRow], assets: [String]) -> String CoreRowsError! {
     constants := [String]{}
     lookups := [String]{}
     loop (index, row) in rows {
@@ -2388,7 +2391,66 @@ render_embedded_sources: fn(header: String, rows: [CoreSourceRow]) -> String Cor
         constants.push("CORE_SOURCE_{index}: comptime {{ embed_file({jet_string(byte_tail(row.path, byte_len("Core/")))}) }}")
         lookups.push("    if path == {jet_string(row.path)} -> return Val(CORE_SOURCE_{index})")
     }
-    Ok("{header}// The compiler-private part `__core_embedded_sources` of core.devtools: the\n// text of every CORE_SOURCE_OWNED_ROWS row, this file included, embedded from\n// beside it when jet is built, so a jet with no checkout reads Core from itself\n// (core.devtools.toolchain_core_source, which only the jet_cli package may name).\n\n{constants.join("\n")}\n\n// The embedded text of the row at repository path `path`, or None when no row\n// has that path.\nsource_text: fn(path: String) -> String? Never! {{\n{lookups.join("\n")}\n    None\n}}\n")
+    asset_constants := [String]{}
+    asset_lookups := [String]{}
+    loop (index, asset) in assets {
+        asset_constants.push("CORE_ASSET_{index}: comptime {{ embed_bytes({jet_string(byte_tail(asset, byte_len("Core/")))}) }}\n")
+        asset_lookups.push("    if path == {jet_string(asset)} -> return Val(CORE_ASSET_{index})\n")
+    }
+    Ok("{header}// The compiler-private part `__core_embedded_sources` of core.devtools: the\n// text of every CORE_SOURCE_OWNED_ROWS row, this file included, and the bytes\n// of every file a Core source embeds, embedded from beside it when jet is\n// built, so a jet with no checkout reads Core and its assets from itself\n// (core.devtools.toolchain_core_source and toolchain_core_asset, which only the\n// jet_cli package may name).\n\n{constants.join("\n")}\n{asset_constants.join("")}\n// The embedded text of the row at repository path `path`, or None when no row\n// has that path.\nsource_text: fn(path: String) -> String? Never! {{\n{lookups.join("\n")}\n    None\n}}\n\n// The embedded bytes of the Core asset at repository path `path`, or None\n// when no Core source embeds that path.\nasset_bytes: fn(path: String) -> [U8]? Never! {{\n{asset_lookups.join("")}    None\n}}\n")
+}
+
+// The files `text` names with `embed_bytes("…")` or `embed_file("…")` outside
+// comments, each once in source order, as written (relative to the file's
+// own directory).
+embedded_names: fn(text: String) -> [String] Never! {
+    names := [String]{}
+    loop line in text.split("\n") {
+        if line.trim_start().starts_with("//") -> next
+        loop call in ([String]{"embed_bytes(\"", "embed_file(\""}) {
+            rest := line.copy()
+            loop rest.contains(call) {
+                after: rest.partition(call).tail
+                name: after.partition("\"").head
+                if name != "" && !names.contains(name) -> names.push(name.copy())
+                rest = after.copy()
+            }
+        }
+    }
+    names
+}
+
+// The repository directory of the Core file at `path` (`Core/Ui` for
+// `Core/Ui/Xkb.jet`).
+core_directory: fn(path: String) -> String Never! {
+    parts: path.split("/").to_list()
+    kept := [String]{}
+    loop (index, part) in parts {
+        if index + 1 < parts.len() -> kept.push(part.copy())
+    }
+    kept.join("/")
+}
+
+// Every Core asset: each file a row's source embeds, as a repository path
+// beside that source, once, in row order. The embedded-sources part embeds
+// the rows themselves, and a row file another source embeds is already
+// built in as text, so neither is an asset. A named file that is missing
+// refuses the rows.
+core_assets: fn(rows: [CoreSourceRow]) -[FS]> [String] CoreRowsError! {
+    row_paths: loop row in rows -> row.path
+    assets := [String]{}
+    loop row in rows {
+        if row.path == EMBEDDED_TARGET_PATH -> next
+        text: read_source(row.path) ?? return Err(err)
+        directory: core_directory(row.path)
+        loop name in embedded_names(text) {
+            asset: "{directory}/{name}"
+            if row_paths.contains(asset) || assets.contains(asset) -> next
+            if !files.exists(asset) -> return Err(rows_fail("{row.path} embeds {name}, but {asset} does not exist"))
+            assets.push(asset)
+        }
+    }
+    Ok(assets)
 }
 
 // One CORE_CALL_EXTENSIONS row: a CoreCallRecord literal per line, already in
@@ -2710,7 +2772,8 @@ read_core_source_views: fn() -[FS]> CoreSourceViews CoreRowsError! {
     leaves: string_list(effect_names(declared, true))
     vocabulary: "// Source: {EFFECTS_PATH}\n// Source SHA-256: {crypto.sha256(effects).hex()}\n{GENERATED_BY}\nEffectVocabularyRow: struct {{\n    name: String\n    irreversible: Bool\n}}\n\n// Every declared root and leaf, in source order.\nEFFECT_VOCABULARY_ROWS: comptime {{ [EffectVocabularyRow]{{\n{vocabulary_rows.join("\n")}\n}} }}\n\n// The declared roots, in source order.\nEFFECT_VOCABULARY_ROOTS: comptime {{ {roots} }}\n\n// The declared leaves (`Root.Member`), in source order.\nEFFECT_VOCABULARY_LEAVES: comptime {{ {leaves} }}\n\n// The declared roots as the compiler's closed effect type.\nEffect: enum {{ {root_names.join(" ")} }}\n"
     lang_text: lang_effect_text(lang, root_names) ?? return Err(err)
-    embedded: render_embedded_sources(header, rows) ?? return Err(err)
+    assets: core_assets(rows) ?? return Err(err)
+    embedded: render_embedded_sources(header, rows, assets) ?? return Err(err)
     core_hash: crypto.sha256(core).hex()
     outputs: [GeneratedFile]{
         GeneratedFile{path: CLI_TARGET_PATH, text: cli},
@@ -2809,6 +2872,8 @@ effect_rows_error: fn(source: String) -> String Never! {
     assert_eq(snake_segment("Utf8Bytes"), "utf8_bytes")
     assert_eq(jet_string("a{{b}}\t\"\\"), "\"a{{{{b}}}}\\t\\\"\\\\\"")
     assert_eq(jet_string(String.from_bytes([U8]{U8{0}, U8{106}}) ?? ""), "String.from_bytes([U8]{{U8{{0}}, U8{{106}}}}) ?? \"\"")
+    assert_eq(embedded_names("// embed_bytes(\"note.bin\")\nA: comptime {{ embed_bytes(\"A/a.bin\") }}\nB: comptime {{ embed_file(\"b.txt\") }} // embed_bytes(\"A/a.bin\")\n"), [String]{"A/a.bin", "b.txt"})
+    assert_eq(core_directory("Core/Ui/Xkb.jet"), "Core/Ui")
     assert(effect_rows_error("Net: struct {{\n    impl Effect {{\n        irreversible: fn(self) -> Bool {{ true }}\n    }}\n}}\nFS: enum {{\n    Read\n    Write\n\n    impl Effect {{\n        irreversible: fn(self) -> Bool {{ self == .Write }}\n    }}\n}}\n") == "")
     rows: effect_rows("FS: enum {{\n    Read\n    Write\n    impl Effect {{\n        irreversible: fn(self) -> Bool {{ self == .Write }}\n    }}\n}}\nIO: struct {{\n    impl Effect {{}}\n}}\n") ?? panic("the family was refused: {err.message}")
     assert_eq(rows.len(), 4)

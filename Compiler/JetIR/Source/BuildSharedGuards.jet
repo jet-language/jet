@@ -7,7 +7,7 @@
 // runs the predicate (through lazy.callback, over the cell's slot) under the
 // held permit and parks on `condition` until it holds. The runtime rewrites
 // the guard's token in place (unheld while parked), so the guard crosses by
-// address. Status 0 is Ok(()); status 1 leaves the owned failure text in the
+// address. Status 0 is Ok(); status 1 leaves the owned failure text in the
 // out word; a stop propagates before either is read.
 ir_shared_guard_wait: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, guard: Int, condition: Int, predicate: BodyLambda, span: Span) -> Int Never! {
     editable: ir_shared_guard_editable(ir_ty(p, b, guard)) ?? return ir_fail_slot(b, span, "SharedGuard.wait without its checked read/edit provenance")

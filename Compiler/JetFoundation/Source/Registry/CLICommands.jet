@@ -2,6 +2,12 @@
 // reservation. This file is the one command table.
 JET_CLI_JOB_INVOCATION_HELP: "\nRun a project job: jet [jet flags] <name> [job args...]\nJet flags go before the job name; every word after it belongs to the job.\n"
 
+// `jet help input`: every name a program reads its input through, one example
+// each; `jet help run` ends with JET_CLI_RUN_INPUT_HELP, which points here.
+JET_CLI_INPUT_HELP: "jet help input — What a program reads\n\n`input` is every line of the program's input: the files its arguments name,\nin order, else standard input. The names below read it the same way in a\nscript and in `jet -e CODE [<files>]`.\n\n  input                  Each line, read as it is needed\n                           jet -e 'input.map((l) -> l.upper())' notes.txt\n  input.csv<Row>()       The lines as one CSV table, header first, decoded into [Row];\n                         a field Row lacks is a compile error\n                           input.csv<Sale>().map((s) -> s.amount).sum()\n  input.json<Row>()      Each JSON value, one per line or across lines, decoded into [Row]\n                           input.json<Event>().filter((e) -> e.level == \"error\")\n  input.edit(change)     Each named file rewritten in place, every line through change;\n                         with no file named, standard input printed changed\n                           jet -e 'input.edit((l) -> l.replace(\"http:\", \"https:\"))' *.md\n  line.words()           The words of a line, split on whitespace\n                           jet -e 'input.map((l) -> l.words()[1])' log.txt\n  line.split(sep)        The fields of a line, split on sep\n                           jet -e 'input.map((l) -> l.split(\",\")[0])' data.txt\n  readline(prompt)       One line of standard input after a prompt (core.term)\n                           name: readline(\"name? \")\n"
+
+JET_CLI_RUN_INPUT_HELP: "\nA program reads its input through `input`; `jet help input` lists each way.\n"
+
 // One flag. A `With <cmd>[/<cmd>…]: ` help prefix scopes it to those commands;
 // `--json`, `--quiet`, and `--color` apply to every command.
 JetCLIFlagSpec: struct {
@@ -698,7 +704,7 @@ JET_CLI_FORMS: comptime { [JetCLIFormSpec]{
     {form: "notebook", ported: false, card: 6418, argv: [String]{"notebook"}},
     // Group actions.
     {form: "self update", ported: false, card: 6418, argv: [String]{"self", "update"}},
-    {form: "self lsp", ported: false, card: 6386, argv: [String]{"self", "lsp"}},
+    {form: "self lsp", ported: true, card: 0, argv: [String]{"self", "lsp"}},
     {form: "self exec", ported: false, card: 6418, argv: [String]{"self", "exec"}},
     {form: "self devtools bless", ported: false, card: 5454, argv: [String]{"self", "devtools", "bless"}},
     {form: "os push", ported: false, card: 6604, argv: [String]{"os", "push"}},
@@ -950,6 +956,7 @@ JET_CLI_FIXED_FLAGS: comptime { [JetCLIFlagSpec]{
     {long: "--lib", help: "With build: Emit the native Library and C header"},
     {long: "--output", help: "With build/run/dev/jobs/package: Select a named output, which Canvas uses as the initial selection; with build --lib: Select the native Library"},
     {long: "--locked", help: "With build/fetch/jobs/run/inspect gates: Require locked dependency and provenance facts"},
+    {long: "--sha256", help: "With run: Pin the first fetch of a URL target to this sha256, as --sha256=HEX"},
     {long: "--effect", help: "With find: Require an effect such as FS.Read"},
     {long: "--example", help: "With find: Search by input/output example"},
     // Script locking folds into `fetch`, not a separate verb.
@@ -994,6 +1001,7 @@ JET_CLI_FIXED_FLAGS: comptime { [JetCLIFlagSpec]{
     {long: "--restart", help: "With dev: Always rerun from scratch after a save"},
     {long: "--swap", help: "With dev: Hot-swap compatible edits and restart after type changes"},
     {long: "--reload", help: "With explain: Explain the checked reload decision for a source or project path"},
+    {long: "--caps", help: "With explain effects: List every module cap written under a file or directory"},
     {long: "--watch", help: "With run/dev/test/jobs/build: Re-run on dependency changes (--watch=off runs once); with test: off by default, keys r=failed, a=all, o=output; with jobs: --watch[=<on|off>]"},
     {long: "--graph", help: "With jobs: Show the checked job dependency graph"},
     {long: "--status", help: "With jobs: Show fresh or stale status for declared jobs"},
@@ -1020,7 +1028,7 @@ JET_CLI_FIXED_FLAGS: comptime { [JetCLIFlagSpec]{
     // `jet run` delegates project environment realization
     // to Jetpack unless the caller explicitly opts out.
     {long: "--no-prepare", help: "With run: Refuse Jetpack project environment preparation"},
-    {long: "-e", help: "With run: Run CODE as the body of the program's run function, as jet -e CODE [<args>]; jet run - reads the program from standard input"},
+    {long: "-e", help: "With run: Run CODE as the body of the program's run function and show its last value, as jet -e CODE [<args>]; jet run - reads the program from standard input"},
     {long: "--pure", help: "With eval: Reject code with side effects"},
     {long: "--allow", help: "With run/build/jobs/repl/db/inspect gates: Allow comma-separated effect roots or leaves as --allow=RIGHTS"},
     {long: "--allow-all", help: "With run/build/inspect gates: Allow every effect, as --allow with every right, so a run names none; --deny still wins"},

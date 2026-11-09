@@ -43,8 +43,10 @@ store_platform_setup: fn() {
     files.rename(staging, output) ?? panic("publish native object")
     store_seal_local_output(output) ?? panic("seal published output")
     assert((pkg_try_output_hash_of(output) ?? panic("published digest")) == digest, "published fixture must retain its content-addressed identity")
-    files.write(files.join(fixtures, "nixpkgs-native-jetpack.json"), "[{{\"drvPath\":\"/nix/store/0fixture00000000000000000000-native-jetpack.drv\",\"outputs\":{{\"out\":{platform_json.to_string(Dyn.Text(output))}}}}}]") ?? panic("provider fixture")
-    files.write(files.join(fixtures, "jetpackage-omp.json"), "{{\"tag\":\"v1.0.0\",\"version\":\"1.0.0\",\"sha256\":\"{artifact_digest}\",\"artifact\":{platform_json.to_string(Dyn.Text(artifact_name))}}}") ?? panic("release fixture")
+    provider: Dyn.Array([Dyn]{Dyn.Object(["drvPath": Dyn.Text("/nix/store/0fixture00000000000000000000-native-jetpack.drv"), "outputs": Dyn.Object(["out": Dyn.Text(output)])])})
+    files.write(files.join(fixtures, "nixpkgs-native-jetpack.json"), platform_json.to_string(provider) ?? panic("provider fixture JSON")) ?? panic("provider fixture")
+    release: Dyn.Object(["tag": Dyn.Text("v1.0.0"), "version": Dyn.Text("1.0.0"), "sha256": Dyn.Text(artifact_digest), "artifact": Dyn.Text(artifact_name)])
+    files.write(files.join(fixtures, "jetpackage-omp.json"), platform_json.to_string(release) ?? panic("release fixture JSON")) ?? panic("release fixture")
     if mode == "native" -> return
     object: store_platform_fixture_meta(verification, roots, "platform-hostile-good", None)
     files.write(files.join(work, "fixture-object"), object) ?? panic("publish setup path")

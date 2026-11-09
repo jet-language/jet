@@ -1,0 +1,82 @@
+// Paints three lines of text with core.ui.font onto a premultiplied
+// ARGB8888 canvas (half opaque white, half clear, rows padded), blends one
+// glyph from a cache held to a small budget, and rasterizes every glyph of
+// both built-in faces at four quarter-pixel positions. Then it prints
+// checksums of the bytes and the layout advances. Rasterizing and painting
+// are integer arithmetic, so every tier prints the same lines.
+use {
+    font: core.ui.font
+    ui: core.ui
+}
+
+WIDTH: 200
+HEIGHT: 48
+STRIDE: 816
+
+// A running checksum of `bytes` on top of `h`.
+mix: fn(h: Int, bytes: [U8]) -> Int {
+    out := h
+    loop byte in bytes -> out = (out * 31 + Int.from_u8(byte) + 1) % 2147483647
+    out
+}
+
+canvas: fn() -> [U8] {
+    out := [U8]{}
+    loop _ in 0..<HEIGHT {
+        loop col in 0..<WIDTH {
+            value: if col < WIDTH /% 2 -> U8{255} else -> U8{0}
+            loop _ in 0..<4 -> out.push(value)
+        }
+        loop _ in 0..<(STRIDE - WIDTH * 4) -> out.push(U8{7})
+    }
+    out
+}
+
+masks: fn(name: String, face: font.Face) {
+    h := 0
+    inked := 0
+    loop quarter in 0..<4 {
+        loop id in 0..<face.glyph_count() {
+            mask: face.raster(id, 13.0, Float{quarter} / 4.0)
+            h = mix(h, [U8]{U8{mask.width.bit_and(255)}, U8{mask.height.bit_and(255)}, U8{(mask.left + 128).bit_and(255)}, U8{(mask.top + 128).bit_and(255)}})
+            h = mix(h, mask.coverage)
+            loop c in mask.coverage {
+                if Int.from_u8(c) != 0 -> inked += 1
+            }
+        }
+    }
+    print("{name} masks at 13px: checksum {h}, {inked} inked pixels")
+}
+
+run: fn() {
+    regular: font.regular()
+    bold: font.bold()
+    pixels := canvas()
+    kept := font.cache()
+    whole: ui.UIRect{x: 0, y: 0, width: WIDTH, height: HEIGHT}
+    one: font.draw_text(pixels, WIDTH, HEIGHT, STRIDE, kept, regular, "Hamburgefonstiv AV To 0123", 13.0, 2, 14, 0xFF202020, whole)
+    two: font.draw_text(pixels, WIDTH, HEIGHT, STRIDE, kept, bold, "Wayland & X11 — ÆØÅ café", 17.5, 3, 33, 0xFF1060C0, whole)
+    three: font.draw_text(pixels, WIDTH, HEIGHT, STRIDE, kept, regular, "translucent ΔΩμπ, clipped", 11.25, 1, 45, 0x80FF4000, ui.UIRect{x: 0, y: 36, width: 150, height: 12})
+    print("advances {one} {two} {three}")
+    // A cache held to 64 KiB keeps evicting as every glyph passes through
+    // it, and `blend` paints one of its masks, a 40 px "g", over the seam.
+    small := font.cache_within(65536)
+    loop id in 0..<regular.glyph_count() {
+        _: small.glyph(regular, id, 13.0, 0.5)
+    }
+    g: small.glyph(regular, regular.glyph(103), 40.0, 0.25)
+    font.blend(pixels, WIDTH, HEIGHT, STRIDE, g, 90, 40, 0xC0008000, whole)
+    print("blended g {g.width}x{g.height} at {g.left},{g.top}")
+    first: regular.layout("Hamburgefonstiv AV To 0123", 13.0).advance
+    second: bold.layout("Wayland & X11 — ÆØÅ café", 17.5).advance
+    print("layout advances {first} {second}")
+    padding := 0
+    loop row in 0..<HEIGHT {
+        loop k in (WIDTH * 4)..<STRIDE {
+            if Int.from_u8(pixels[row * STRIDE + k]) != 7 -> padding += 1
+        }
+    }
+    print("canvas checksum {mix(0, pixels)}, {padding} padding bytes changed")
+    masks("regular", regular)
+    masks("bold", bold)
+}

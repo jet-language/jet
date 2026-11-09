@@ -293,6 +293,20 @@ core_bare_source_module: fn(name: String) -> String? Never! {
     None
 }
 
+// `input.<method>(…)`, a method the ambient `input` (Iter<String>) lacks, is
+// the Core function `__input_<method>` (core_input_method_member) of the first
+// of these modules that declares it: core.term, else the encoding module the
+// method names (`input.csv<Row>()` is core.encoding.csv `__input_csv`). The
+// Loader loads the encoding module where the source spells the call; Sema
+// checks the call as that function's, with `input` as its first argument.
+core_input_method_modules: fn(method: String) -> [String] Never! {
+    [String]{"core.term", "core.encoding.{method}"}
+}
+
+core_input_method_member: fn(method: String) -> String Never! {
+    "__input_{method}"
+}
+
 // The Core type a prelude rename spells bare (`Date` -> `LocalDate`), when
 // `name` is one.
 core_bare_source_declared: fn(name: String) -> String? Never! {

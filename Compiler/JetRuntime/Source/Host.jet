@@ -201,6 +201,23 @@ host_is_tty: fn(fd: I64) -> Bool {
     host_unlock()
 }
 
+// A fork's hold on stdout (RouteSys.jet jet_sys_fork_raw): the lock, with
+// pending bytes drained first so the child never re-emits bytes the parent
+// already printed (Rust's line writer holds none). The forking thread
+// blocks on the lock and never parks a fiber, as for the fork gate.
+host_fork_hold: fn() {
+    if (host_root == I64{0}) -> return
+    sync_thread_lock(host_root)
+    _ := host_stdout_flush_locked()
+}
+
+// The parent unlocks. The child, whose only thread is the forking one,
+// stores the lock's initial state.
+host_fork_release: fn(child: Bool) {
+    if (host_root == I64{0}) -> return
+    if child { sync_store(host_root, I64{0}) } else { host_unlock() }
+}
+
 // The fault report's flush (Fault.jet): skipped when the lock is held, since
 // the faulting thread may hold it mid-write and would wait forever.
 host_stdout_flush_fault: fn() {

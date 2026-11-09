@@ -1,0 +1,13 @@
+# The ambient `input` reads standard input with no arguments and the named
+# files otherwise, on the web target under node as on a native one.
+requires: tool:node
+fixture: fixtures/ambient_input_lines_reach_web_js
+step: jet build fixture.jet --target web
+step: node .jet/build/app.js
+stdin: ambient_input_lines_reach_web_js.stdin
+exit: 0
+stdout: = "> piped one\n> piped two\n"
+step: node .jet/build/app.js notes.txt
+stdin: null
+exit: 0
+stdout: = "> from a file\n> second file line\n"

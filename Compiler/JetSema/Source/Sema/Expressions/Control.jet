@@ -355,6 +355,20 @@ sema_result_payload_misplaced: fn(success: Bool, span: Span) -> Diagnostic Never
     sema_error("E0404", span, "`Err(...)` only fits where a fallible result is expected", "`Err` builds the failure side of a `T E!` result", fix)
 }
 
+// A unit success carries nothing, so `Ok` and `.Ok` take no argument where
+// the expected success type is `()`. Reports the written argument and
+// checks it for its own errors; returns whether it reported.
+sema_expression_unit_success_with_argument: fn(value: Expr, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
+    unit_success: if sema_expr_unwrap_tag(expected ?? Type.Named{name: "Never"}) == {
+        .Result(ok, _) -> ok == (Type.Named{name: "Unit"})
+        else -> false
+    }
+    if !unit_success -> return false
+    _ := sema_check_expression(value, None, environment, program, scopes, state, tail_store, context, diagnostics)
+    diagnostics.push(sema_error("E0104", span, "`Ok` takes no argument when the success type is `()`", "a unit success carries no value", "write `Ok()`"))
+    true
+}
+
 sema_expression_result_payload: fn(value: Expr, success: Bool, take_field: Bool, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     expected_ok := Type?{None}
     expected_err := Type?{None}

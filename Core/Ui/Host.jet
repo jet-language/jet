@@ -386,7 +386,7 @@ accessibility: fn(name: String, description: String) -[IO]> UIAccessibility UIHo
 
 
 #Test("UI shortcut policy normalizes Unicode and preserves modifiers") {
-    modifiers: UIShortcutModifiers{}
+    modifiers: UIShortcutModifiers{bits: 0}
     normalized: shortcut(" \tÄBC İ \n", modifiers) ?? panic("valid shortcut rejected")
     assert(normalized.key == "äbc i̇")
     assert(normalized.modifiers == modifiers)
@@ -425,10 +425,10 @@ accessibility: fn(name: String, description: String) -[IO]> UIAccessibility UIHo
 
 #Test("accessibility keeps optional description and whitespace names") {
     named: accessibility(" ", "") ?? panic("whitespace name")
-    assert(named.name == .Val(name) && name == " ")
+    assert_eq(named.name, Val(" "))
     assert(named.description == None && named.states.len() == 0)
     described: accessibility("button", " ") ?? panic("whitespace description")
-    assert(described.description == .Val(description) && description == " ")
+    assert_eq(described.description, Val(" "))
     if accessibility("", "description") == .Err(error) {
         if error == .InvalidRequest(message) -> assert(message == "accessibility name and description must not be empty")
         else -> panic("wrong accessibility error")

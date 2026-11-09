@@ -38,9 +38,7 @@ cli_run_job_with_access_trace: fn(env: &ShellEnv, argv: [String], project_dir: S
 
 // Rust `Path::starts_with`: whole-component prefix.
 cli_path_starts_with: fn(path: String, prefix: String) -> Bool Never! {
-    if path == prefix -> return true
-    if prefix.ends_with("/") -> return path.starts_with(prefix)
-    path.starts_with("{prefix}/")
+    cli_paths.is_relative_to(cli_paths.of(path), cli_paths.of(prefix))
 }
 
 // Every undeclared project path in a finished trace, sorted and unique.

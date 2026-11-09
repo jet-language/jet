@@ -1,0 +1,1165 @@
+// The engine's operating-system interface: a port of the "unix" VFS of
+// SQLite 3.45.0 (os_unix.c, its posix-advisory-lock io methods and the
+// no-op lock methods of temporary files), the sqlite3Os* wrappers of os.c
+// and the ChaCha20 generator of random.c. The system calls are the
+// core.db.__vfs_* host leaves (Compiler/JetRuntime/Source/HostDbVfs.jet);
+// each answers its result or the negated errno, and this file maps the
+// errno to the result code os_unix.c reports.
+//
+// Divergences from os_unix.c, each without an effect on the file format or
+// the locking protocol other processes see:
+// - Locks are open-file-description locks (F_OFD_SETLK / F_OFD_GETLK).
+//   They conflict with the POSIX locks C SQLite takes in other processes,
+//   and they also conflict between two connections of this process, so the
+//   unixInodeInfo registry (its in-process lock counts, the deferred close
+//   of a descriptor that still holds locks, and findReusableFd) is not
+//   needed: closing one connection's descriptor never drops another's
+//   locks.
+// - No memory map: PRAGMA mmap_size stores its limit (SQLITE_FCNTL_MMAP_SIZE)
+//   and every read and write goes through pread64/pwrite64, which is
+//   SQLite's own path when mmap_size is 0, the vendored default. The -shm
+//   file is not mapped either: the wal-index reads and writes it with
+//   pread64/pwrite64 (os_shm_read and os_shm_write), which see the same
+//   kernel pages as C SQLite's MAP_SHARED mapping, and the shared-memory
+//   node is per connection, its locks the same OFD locks (DBShm).
+// - unixTempFileDir has no environment leaf, so it skips SQLITE_TMPDIR and
+//   TMPDIR and searches sqlite3_temp_directory, /var/tmp, /usr/tmp, /tmp
+//   and ".".
+// - fcntlSizeHint (no HAVE_POSIX_FALLOCATE) writes one byte per 4096-byte
+//   block instead of per st_blksize block; the final size is the same.
+// - verifyDbFile only logs through sqlite3_log, which has no consumer here,
+//   so it is omitted; so is the fork check that reseeds the generator.
+use {
+    // The core.db.__vfs_* host leaves and core.mem.__process_shared.
+    core: core
+    base: __core_db_base
+    __core_db_base.[SQLError]
+}
+
+// File open flags (sqlite3.h SQLITE_OPEN_*).
+OPEN_READONLY: 1
+OPEN_READWRITE: 2
+OPEN_CREATE: 4
+OPEN_DELETEONCLOSE: 8
+OPEN_EXCLUSIVE: 16
+OPEN_AUTOPROXY: 32
+OPEN_URI: 64
+OPEN_MEMORY: 128
+OPEN_MAIN_DB: 256
+OPEN_TEMP_DB: 512
+OPEN_TRANSIENT_DB: 1024
+OPEN_MAIN_JOURNAL: 2048
+OPEN_TEMP_JOURNAL: 4096
+OPEN_SUBJOURNAL: 8192
+OPEN_SUPER_JOURNAL: 16384
+OPEN_NOMUTEX: 32768
+OPEN_FULLMUTEX: 65536
+OPEN_SHAREDCACHE: 131072
+OPEN_PRIVATECACHE: 262144
+OPEN_WAL: 524288
+OPEN_NOFOLLOW: 16777216
+OPEN_EXRESCODE: 33554432
+// The file-type bits of the flags (unixOpen's eType mask).
+OPEN_TYPE_MASK: 1048320
+// The flags sqlite3OsOpen passes to xOpen (os.c: flags & 0x1087f7f).
+OPEN_VFS_MASK: 17333119
+
+// File lock levels (sqlite3.h SQLITE_LOCK_*).
+LOCK_NONE: 0
+LOCK_SHARED: 1
+LOCK_RESERVED: 2
+LOCK_PENDING: 3
+LOCK_EXCLUSIVE: 4
+
+// xSync flags (sqlite3.h SQLITE_SYNC_*).
+SYNC_NORMAL: 2
+SYNC_FULL: 3
+SYNC_DATAONLY: 16
+
+// xAccess flags (sqlite3.h SQLITE_ACCESS_*).
+ACCESS_EXISTS: 0
+ACCESS_READWRITE: 1
+ACCESS_READ: 2
+
+// xDeviceCharacteristics bits (sqlite3.h SQLITE_IOCAP_*).
+IOCAP_ATOMIC: 1
+IOCAP_SAFE_APPEND: 512
+IOCAP_SEQUENTIAL: 1024
+IOCAP_UNDELETABLE_WHEN_OPEN: 2048
+IOCAP_POWERSAFE_OVERWRITE: 4096
+IOCAP_IMMUTABLE: 8192
+IOCAP_BATCH_ATOMIC: 16384
+
+// The locking bytes (os.h): one PENDING byte, one RESERVED byte and the
+// 510-byte SHARED range, all inside the page that starts at PENDING_BYTE.
+PENDING_BYTE: 1073741824
+RESERVED_BYTE: 1073741825
+SHARED_FIRST: 1073741826
+SHARED_SIZE: 510
+
+// SQLITE_DEFAULT_SECTOR_SIZE, MAX_PATHNAME (the unix VFS mxPathname),
+// SQLITE_MAX_PATHLEN (FILENAME_MAX) and SQLITE_MAX_SYMLINK.
+DEFAULT_SECTOR_SIZE: 4096
+MAX_PATHNAME: 512
+MAX_PATHLEN: 4096
+MAX_SYMLINK: 100
+// SQLITE_MAX_MMAP_SIZE on Linux: the ceiling of PRAGMA mmap_size.
+MAX_MMAP_SIZE: 2147418112
+// fcntlSizeHint's block when st_blksize is not consulted.
+SIZE_HINT_BLOCK: 4096
+
+// unixFile.ctrlFlags (UNIXFILE_*).
+UNIXFILE_EXCL: 1
+UNIXFILE_RDONLY: 2
+UNIXFILE_PERSIST_WAL: 4
+UNIXFILE_DIRSYNC: 8
+UNIXFILE_PSOW: 16
+UNIXFILE_DELETE: 32
+UNIXFILE_URI: 64
+UNIXFILE_NOLOCK: 128
+
+// open(2) flags, fcntl(2) lock types and commands, and errno values
+// (Linux x86-64).
+OS_O_RDONLY: 0
+OS_O_RDWR: 2
+OS_O_CREAT: 64
+OS_O_EXCL: 128
+OS_O_NOFOLLOW: 131072
+OS_F_RDLCK: 0
+OS_F_WRLCK: 1
+OS_F_UNLCK: 2
+OS_F_OFD_GETLK: 36
+OS_F_OFD_SETLK: 37
+OS_EPERM: 1
+OS_ENOENT: 2
+OS_EINTR: 4
+OS_EIO: 5
+OS_ENXIO: 6
+OS_EAGAIN: 11
+OS_EACCES: 13
+OS_EBUSY: 16
+OS_EISDIR: 21
+OS_ENOSPC: 28
+OS_ERANGE: 34
+OS_ENOLCK: 37
+OS_ETIMEDOUT: 110
+// access(2) modes and the st_mode file-type field.
+OS_F_OK: 0
+OS_W_OK_R_OK: 6
+OS_X_OK_W_OK: 3
+OS_S_IFMT: 61440
+OS_S_IFLNK: 40960
+// The path bytes `-`, `.` and `/`.
+OS_DASH: U8{45}
+OS_DOT: U8{46}
+OS_SLASH: U8{47}
+
+// The low 32 bits of an integer.
+U32_MASK: 4294967295
+
+// An open file of the unix VFS (os_unix.c struct unixFile). A file whose
+// `fd` is negative is not open: sqlite3_file with no pMethods.
+DBFile: struct {
+    // unixFile.h, the descriptor.
+    fd: Int
+    // unixFile.zPath; empty for a temporary file, which is unlinked at open.
+    path: String
+    // unixFile.eFileLock, one of LOCK_*.
+    lock: Int
+    // unixFile.ctrlFlags, UNIXFILE_* bits.
+    ctrl: Int
+    // unixFile.lastErrno, the errno of the last failed system call.
+    last_errno: Int
+    // unixFile.szChunk (SQLITE_FCNTL_CHUNK_SIZE).
+    chunk: Int
+    // unixFile.sectorSize and deviceCharacteristics, filled by the first
+    // xSectorSize or xDeviceCharacteristics call.
+    sector_size: Int
+    device: Int
+    // pInode->fileId.ino of a locking (main database) file, else -1.
+    inode: Int
+    // unixFile.mmapSizeMax (SQLITE_FCNTL_MMAP_SIZE).
+    mmap_size_max: Int
+    // The SQLITE_OPEN_* flags the open settled on (xOpen's *pOutFlags).
+    flags: Int
+    // sqlite3_uri_boolean(zPath, "readonly_shm", 0).
+    readonly_shm: Bool
+    // unixFile.pShm: this connection's shared-memory (-shm) file.
+    shm: DBShm
+}
+
+// A file that is not open (memset to zero, pMethods 0).
+os_closed_file: fn() -> DBFile Never! {
+    DBFile{path: "", fd: -1, lock: LOCK_NONE, ctrl: 0, last_errno: 0, chunk: 0, sector_size: 0, device: 0, inode: -1, mmap_size_max: 0, flags: 0, readonly_shm: false, shm: os_shm_closed()}
+}
+
+// pager.c isOpen(): the file has io methods.
+os_is_open: fn(file: DBFile) -> Bool Never! { file.fd >= 0 }
+
+// The result of xFullPathname: the canonical path, and whether a symbolic
+// link was followed (SQLITE_OK_SYMLINK).
+FullPath: struct {
+    path: String
+    symlink: Bool
+}
+
+// sqliteErrorFromPosixError: the result code of a failed lock call.
+os_lock_error: fn(errno: Int, ioerr: Int) -> Int Never! {
+    if errno == OS_EACCES || errno == OS_EAGAIN || errno == OS_ETIMEDOUT || errno == OS_EBUSY || errno == OS_EINTR || errno == OS_ENOLCK -> return base.BUSY
+    if errno == OS_EPERM -> return base.PERM
+    ioerr
+}
+
+// unixFileLock: one fcntl record-lock call on [start, start+len) of the
+// file; 0, or the negated errno.
+os_file_lock: fn(fd: Int, kind: Int, start: Int, len: Int) -[DB]> Int Never! {
+    core.db.__vfs_lock(fd, OS_F_OFD_SETLK, kind, start, len)
+}
+
+// sqlite3OsOpen (os.c) and unixOpen with fillInUnixFile. `path` None asks
+// for a temporary file. `psow` is sqlite3_uri_boolean(zFilename, "psow", 1),
+// `modeof` the "modeof" URI parameter and `readonly_shm` the
+// "readonly_shm" URI boolean, all of which the caller reads from the URI
+// filename. The temporary-file name uses `temp_dir` (sqlite3_temp_directory)
+// first.
+os_open: fn(path: String?, flags_in: Int, psow: Bool{true}, modeof: String?{None}, readonly_shm: Bool{false}) -[DB]> DBFile SQLError! {
+    flags := flags_in.bit_and(OPEN_VFS_MASK)
+    e_type: flags.bit_and(OPEN_TYPE_MASK)
+    is_exclusive: flags.bit_and(OPEN_EXCLUSIVE) != 0
+    is_delete: flags.bit_and(OPEN_DELETEONCLOSE) != 0
+    is_create: flags.bit_and(OPEN_CREATE) != 0
+    is_readonly := flags.bit_and(OPEN_READONLY) != 0
+    is_readwrite: flags.bit_and(OPEN_READWRITE) != 0
+    // A new super journal, main journal or WAL file syncs its directory on
+    // the first xSync.
+    is_new_jrnl: is_create && (e_type == OPEN_SUPER_JOURNAL || e_type == OPEN_MAIN_JOURNAL || e_type == OPEN_WAL)
+    name := ""
+    if path == {
+        .Val(given) -> name = given
+        .None -> name = os_get_tempname() ?? return Err(err)
+    }
+    open_flags := 0
+    if is_readonly -> open_flags = open_flags.bit_or(OS_O_RDONLY)
+    if is_readwrite -> open_flags = open_flags.bit_or(OS_O_RDWR)
+    if is_create -> open_flags = open_flags.bit_or(OS_O_CREAT)
+    if is_exclusive -> open_flags = open_flags.bit_or(OS_O_EXCL).bit_or(OS_O_NOFOLLOW)
+    open_flags = open_flags.bit_or(OS_O_NOFOLLOW)
+    // findCreateFileMode: a journal or WAL file takes its database's
+    // permissions (and, for root, its owner); a delete-on-close file is 0600.
+    open_mode := 0
+    owner_of := ""
+    if flags.bit_and(OPEN_WAL.bit_or(OPEN_MAIN_JOURNAL)) != 0 {
+        bytes: name.bytes()
+        n := bytes.len() - 1
+        loop n > 0 && bytes[n] != OS_DOT {
+            if bytes[n] == OS_DASH {
+                db: os_bytes_text(bytes, n)
+                mode: core.db.__vfs_mode(db)
+                if mode < 0 -> return Err(base.fail(base.IOERR_FSTAT))
+                open_mode = mode
+                owner_of = db
+                break
+            }
+            n -= 1
+        }
+    } else if is_delete {
+        open_mode = 384
+    } else if flags.bit_and(OPEN_URI) != 0 {
+        if modeof == .Val(source) {
+            mode: core.db.__vfs_mode(source)
+            if mode < 0 -> return Err(base.fail(base.IOERR_FSTAT))
+            open_mode = mode
+        }
+    }
+    fd := core.db.__vfs_open(name, open_flags, open_mode)
+    rc := base.OK
+    if fd < 0 {
+        errno: 0 - fd
+        if is_new_jrnl && errno == OS_EACCES && core.db.__vfs_access(name, OS_F_OK) != 0 {
+            // The journal's directory is not writable.
+            rc = base.READONLY_DIRECTORY
+        } else if errno != OS_EISDIR && is_readwrite {
+            // Failed to open for read/write access: try read-only.
+            flags = flags.bit_and(OPEN_READWRITE.bit_or(OPEN_CREATE).bit_xor(U32_MASK)).bit_or(OPEN_READONLY)
+            open_flags = open_flags.bit_and(OS_O_RDWR.bit_or(OS_O_CREAT).bit_xor(U32_MASK)).bit_or(OS_O_RDONLY)
+            is_readonly = true
+            fd = core.db.__vfs_open(name, open_flags, open_mode)
+        }
+    }
+    if fd < 0 {
+        if rc == base.OK -> rc = base.CANTOPEN
+        return Err(base.fail(rc))
+    }
+    if open_mode != 0 && flags.bit_and(OPEN_WAL.bit_or(OPEN_MAIN_JOURNAL)) != 0 {
+        // robustFchown: a root process gives the journal its database's owner.
+        _: core.db.__vfs_chown_like(fd, owner_of)
+    }
+    if is_delete -> _: core.db.__vfs_unlink(name)
+    ctrl := 0
+    if is_delete -> ctrl = ctrl.bit_or(UNIXFILE_DELETE)
+    if is_readonly -> ctrl = ctrl.bit_or(UNIXFILE_RDONLY)
+    no_lock: e_type != OPEN_MAIN_DB
+    if no_lock -> ctrl = ctrl.bit_or(UNIXFILE_NOLOCK)
+    if is_new_jrnl -> ctrl = ctrl.bit_or(UNIXFILE_DIRSYNC)
+    if flags.bit_and(OPEN_URI) != 0 -> ctrl = ctrl.bit_or(UNIXFILE_URI)
+    // fillInUnixFile.
+    if psow -> ctrl = ctrl.bit_or(UNIXFILE_PSOW)
+    file := os_closed_file()
+    file.fd = fd
+    file.path = path ?? ""
+    file.ctrl = ctrl
+    file.flags = flags
+    file.readonly_shm = readonly_shm
+    if !no_lock {
+        // findInodeInfo: the inode the file was opened on.
+        inode: core.db.__vfs_fd_inode(fd)
+        if inode < 0 {
+            file.last_errno = 0 - inode
+            _: core.db.__vfs_close(fd)
+            return Err(base.fail(base.IOERR))
+        }
+        file.inode = inode
+    }
+    Ok(file)
+}
+
+// The text of bytes[0..<n].
+os_bytes_text: fn(bytes: [U8], n: Int) -> String Never! {
+    out := [U8]{}
+    loop i in 0..<n -> out.push(bytes[i])
+    String.from_bytes(out) ?? ""
+}
+
+// sqlite3OsClose: unixClose (unlock, then closeUnixFile) or nolockClose. A
+// file that is not open is left alone.
+os_close: fn(file: &DBFile) Never! -[DB]> {
+    if file.fd < 0 -> return
+    os_unlock(file, LOCK_NONE) ?? ()
+    _: core.db.__vfs_close(file.fd)
+    file.fd = -1
+    file.lock = LOCK_NONE
+}
+
+// sqlite3OsRead: unixRead (seekAndRead) of `amt` bytes at `offset` into
+// buf[0..<amt]. A short read zero-fills the rest and is IOERR_SHORT_READ.
+os_read: fn(file: &DBFile, buf: &[U8], amt: Int, offset: Int) SQLError! -[DB]> {
+    got: core.db.__vfs_read(file.fd, offset, buf, 0, amt)
+    if got == amt -> return Ok()
+    if got < 0 {
+        file.last_errno = 0 - got
+        if file.last_errno == OS_ERANGE || file.last_errno == OS_EIO || file.last_errno == OS_ENXIO -> return Err(base.fail(base.IOERR_CORRUPTFS))
+        return Err(base.fail(base.IOERR_READ))
+    }
+    file.last_errno = 0
+    loop i in got..<amt -> buf[i] = U8{0}
+    Err(base.fail(base.IOERR_SHORT_READ))
+}
+
+// sqlite3OsWrite: unixWrite of data[0..<amt] at `offset`. A short write
+// or ENOSPC is SQLITE_FULL.
+os_write: fn(file: &DBFile, data: [U8], amt: Int, offset: Int) SQLError! -[DB]> {
+    wrote: core.db.__vfs_write(file.fd, offset, data, 0, amt)
+    if wrote >= amt -> return Ok()
+    if wrote < 0 && 0 - wrote != OS_ENOSPC {
+        file.last_errno = 0 - wrote
+        return Err(base.fail(base.IOERR_WRITE))
+    }
+    file.last_errno = 0
+    Err(base.fail(base.FULL))
+}
+
+// sqlite3OsTruncate: unixTruncate, rounded up to a whole chunk.
+os_truncate: fn(file: &DBFile, size: Int) SQLError! -[DB]> {
+    n := size
+    if file.chunk > 0 -> n = ((n + file.chunk - 1) /% file.chunk) * file.chunk
+    got: core.db.__vfs_truncate(file.fd, n)
+    if got < 0 {
+        file.last_errno = 0 - got
+        return Err(base.fail(base.IOERR_TRUNCATE))
+    }
+    Ok()
+}
+
+// sqlite3OsSync: nothing when `flags` is 0, else unixSync: fsync the file
+// (full_fsync; fdatasync is fsync), then once fsync its directory when
+// UNIXFILE_DIRSYNC is set, ignoring a directory that cannot be opened or
+// synced.
+os_sync: fn(file: &DBFile, flags: Int) SQLError! -[DB]> {
+    if flags == 0 -> return Ok()
+    got: core.db.__vfs_sync(file.fd)
+    if got < 0 {
+        file.last_errno = 0 - got
+        return Err(base.fail(base.IOERR_FSYNC))
+    }
+    if file.ctrl.bit_and(UNIXFILE_DIRSYNC) != 0 {
+        dirfd: os_open_directory(file.path)
+        if dirfd >= 0 {
+            _: core.db.__vfs_sync(dirfd)
+            _: core.db.__vfs_close(dirfd)
+        }
+        file.ctrl = file.ctrl.bit_and(UNIXFILE_DIRSYNC.bit_xor(255))
+    }
+    Ok()
+}
+
+// openDirectory: a read-only descriptor on the directory holding `path`
+// (its text up to the last '/', "/" or "."), or a negative value.
+os_open_directory: fn(path: String) -[DB]> Int Never! {
+    bytes: path.bytes()
+    // sqlite3_snprintf(MAX_PATHNAME, ...) keeps at most MAX_PATHNAME-1 bytes.
+    n := if bytes.len() < MAX_PATHNAME -> bytes.len() else -> MAX_PATHNAME - 1
+    ii := n
+    loop ii > 0 && (ii == n || bytes[ii] != OS_SLASH) -> ii -= 1
+    dir := ""
+    if ii > 0 {
+        dir = os_bytes_text(bytes, ii)
+    } else if n > 0 && bytes[0] == OS_SLASH {
+        dir = "/"
+    } else {
+        dir = "."
+    }
+    fd: core.db.__vfs_open(dir, OS_O_RDONLY, 0)
+    if fd < 0 -> return -1
+    fd
+}
+
+// sqlite3OsFileSize: unixFileSize. A size of 1 reads as 0 (findInodeInfo's
+// msdos workaround, ticket #3260).
+os_file_size: fn(file: &DBFile) -[DB]> Int SQLError! {
+    size: core.db.__vfs_size(file.fd)
+    if size < 0 {
+        file.last_errno = 0 - size
+        return Err(base.fail(base.IOERR_FSTAT))
+    }
+    if size == 1 -> return Ok(0)
+    Ok(size)
+}
+
+// sqlite3OsLock: unixLock (posix advisory locks) to `level`, one of SHARED,
+// RESERVED or EXCLUSIVE; a no-op on a file without locking (nolockLock).
+// A lock held at or above `level` is kept. SHARED read-locks the PENDING
+// byte, read-locks the SHARED range and drops the PENDING byte. RESERVED
+// write-locks the RESERVED byte. EXCLUSIVE from RESERVED write-locks the
+// PENDING byte (the file is then PENDING) and then the SHARED range; if
+// that fails the file stays PENDING.
+os_lock: fn(file: &DBFile, level: Int) SQLError! -[DB]> {
+    if file.ctrl.bit_and(UNIXFILE_NOLOCK) != 0 -> return Ok()
+    if file.lock >= level -> return Ok()
+    if level == LOCK_SHARED || (level == LOCK_EXCLUSIVE && file.lock == LOCK_RESERVED) {
+        kind: if level == LOCK_SHARED -> OS_F_RDLCK else -> OS_F_WRLCK
+        got: os_file_lock(file.fd, kind, PENDING_BYTE, 1)
+        if got < 0 {
+            rc: os_lock_error(0 - got, base.IOERR_LOCK)
+            if rc != base.BUSY -> file.last_errno = 0 - got
+            return Err(base.fail(rc))
+        }
+        if level == LOCK_EXCLUSIVE -> file.lock = LOCK_PENDING
+    }
+    if level == LOCK_SHARED {
+        rc := base.OK
+        errno := 0
+        got: os_file_lock(file.fd, OS_F_RDLCK, SHARED_FIRST, SHARED_SIZE)
+        if got < 0 {
+            errno = 0 - got
+            rc = os_lock_error(errno, base.IOERR_LOCK)
+        }
+        // Drop the temporary PENDING lock.
+        dropped: os_file_lock(file.fd, OS_F_UNLCK, PENDING_BYTE, 1)
+        if dropped < 0 && rc == base.OK {
+            errno = 0 - dropped
+            rc = base.IOERR_UNLOCK
+        }
+        if rc != base.OK {
+            if rc != base.BUSY -> file.last_errno = errno
+            return Err(base.fail(rc))
+        }
+    } else {
+        start: if level == LOCK_RESERVED -> RESERVED_BYTE else -> SHARED_FIRST
+        len: if level == LOCK_RESERVED -> 1 else -> SHARED_SIZE
+        got: os_file_lock(file.fd, OS_F_WRLCK, start, len)
+        if got < 0 {
+            rc: os_lock_error(0 - got, base.IOERR_LOCK)
+            if rc != base.BUSY -> file.last_errno = 0 - got
+            return Err(base.fail(rc))
+        }
+    }
+    file.lock = level
+    Ok()
+}
+
+// sqlite3OsUnlock: posixUnlock down to `level`, SHARED or NONE; a no-op on
+// a file without locking (nolockUnlock). Going to SHARED read-locks the
+// SHARED range again and unlocks the PENDING and RESERVED bytes; going to
+// NONE unlocks the whole file.
+os_unlock: fn(file: &DBFile, level: Int) SQLError! -[DB]> {
+    if file.ctrl.bit_and(UNIXFILE_NOLOCK) != 0 -> return Ok()
+    if file.lock <= level -> return Ok()
+    if file.lock > LOCK_SHARED {
+        if level == LOCK_SHARED {
+            // Another process breaking the protocol is the only way this
+            // fails; BUSY here would confuse the pager.
+            got: os_file_lock(file.fd, OS_F_RDLCK, SHARED_FIRST, SHARED_SIZE)
+            if got < 0 {
+                file.last_errno = 0 - got
+                return Err(base.fail(base.IOERR_RDLOCK))
+            }
+        }
+        got: os_file_lock(file.fd, OS_F_UNLCK, PENDING_BYTE, 2)
+        if got < 0 {
+            file.last_errno = 0 - got
+            return Err(base.fail(base.IOERR_UNLOCK))
+        }
+    }
+    if level == LOCK_NONE {
+        got: os_file_lock(file.fd, OS_F_UNLCK, 0, 0)
+        if got < 0 {
+            file.last_errno = 0 - got
+            file.lock = LOCK_NONE
+            return Err(base.fail(base.IOERR_UNLOCK))
+        }
+    }
+    file.lock = level
+    Ok()
+}
+
+// sqlite3OsCheckReservedLock: unixCheckReservedLock. True when this file
+// holds more than SHARED, or another descriptor holds the RESERVED byte;
+// false on a file without locking (nolockCheckReservedLock).
+os_check_reserved_lock: fn(file: &DBFile) -[DB]> Bool SQLError! {
+    if file.ctrl.bit_and(UNIXFILE_NOLOCK) != 0 -> return Ok(false)
+    if file.lock > LOCK_SHARED -> return Ok(true)
+    got: core.db.__vfs_lock(file.fd, OS_F_OFD_GETLK, OS_F_WRLCK, RESERVED_BYTE, 1)
+    if got < 0 {
+        file.last_errno = 0 - got
+        return Err(base.fail(base.IOERR_CHECKRESERVEDLOCK))
+    }
+    Ok(got != OS_F_UNLCK)
+}
+
+// SQLITE_FCNTL_LOCKSTATE.
+os_lock_state: fn(file: DBFile) -> Int Never! { file.lock }
+
+// SQLITE_FCNTL_LAST_ERRNO.
+os_last_errno: fn(file: DBFile) -> Int Never! { file.last_errno }
+
+// SQLITE_FCNTL_CHUNK_SIZE.
+os_set_chunk_size: fn(file: &DBFile, size: Int) Never! { file.chunk = size }
+
+// SQLITE_FCNTL_SIZE_HINT: fcntlSizeHint. With a chunk size set, grow the
+// file to `size` rounded up to a whole chunk by writing one byte at the end
+// of each new block and at the last byte.
+os_size_hint: fn(file: &DBFile, size: Int) SQLError! -[DB]> {
+    if file.chunk <= 0 -> return Ok()
+    current: core.db.__vfs_size(file.fd)
+    if current < 0 -> return Err(base.fail(base.IOERR_FSTAT))
+    target: ((size + file.chunk - 1) /% file.chunk) * file.chunk
+    if target <= current -> return Ok()
+    zero: [U8]{U8{0}}
+    at := (current /% SIZE_HINT_BLOCK) * SIZE_HINT_BLOCK + SIZE_HINT_BLOCK - 1
+    loop at < target + SIZE_HINT_BLOCK - 1 {
+        if at >= target -> at = target - 1
+        wrote: core.db.__vfs_write(file.fd, at, zero, 0, 1)
+        if wrote != 1 -> return Err(base.fail(base.IOERR_WRITE))
+        at += SIZE_HINT_BLOCK
+    }
+    Ok()
+}
+
+// unixModeBit: `arg` < 0 asks whether `mask` is set (1 or 0); 0 clears it
+// and any other value sets it. The answer, or `arg`.
+os_mode_bit: fn(file: &DBFile, mask: Int, arg: Int) -> Int Never! {
+    if arg < 0 {
+        if file.ctrl.bit_and(mask) != 0 -> return 1
+        return 0
+    }
+    if arg == 0 {
+        file.ctrl = file.ctrl.bit_and(mask.bit_xor(255))
+    } else {
+        file.ctrl = file.ctrl.bit_or(mask)
+    }
+    arg
+}
+
+// SQLITE_FCNTL_PERSIST_WAL.
+os_persist_wal: fn(file: &DBFile, arg: Int) -> Int Never! { os_mode_bit(file, UNIXFILE_PERSIST_WAL, arg) }
+
+// SQLITE_FCNTL_POWERSAFE_OVERWRITE.
+os_powersafe_overwrite: fn(file: &DBFile, arg: Int) -> Int Never! { os_mode_bit(file, UNIXFILE_PSOW, arg) }
+
+// SQLITE_FCNTL_VFSNAME.
+os_vfs_name: fn() -> String Never! { "unix" }
+
+// SQLITE_FCNTL_TEMPFILENAME: a fresh temporary-file name, or empty text.
+os_temp_filename: fn() -[DB]> String Never! { os_get_tempname() ?? "" }
+
+// SQLITE_FCNTL_HAS_MOVED: fileHasMoved. A locking file whose path no longer
+// names the inode it was opened on (renamed or unlinked) has moved.
+os_has_moved: fn(file: DBFile) -[DB]> Bool Never! {
+    if file.inode < 0 -> return false
+    inode: core.db.__vfs_inode(file.path)
+    inode < 0 || inode != file.inode
+}
+
+// SQLITE_FCNTL_MMAP_SIZE: set the mmap limit to `limit` (capped at
+// SQLITE_MAX_MMAP_SIZE; a negative limit only asks) and answer the old one.
+os_mmap_size: fn(file: &DBFile, limit: Int) -> Int Never! {
+    new_limit := limit
+    if new_limit > MAX_MMAP_SIZE -> new_limit = MAX_MMAP_SIZE
+    old: file.mmap_size_max
+    if new_limit >= 0 && new_limit != old -> file.mmap_size_max = new_limit
+    old
+}
+
+// setDeviceCharacteristics: on first use the sector size is
+// SQLITE_DEFAULT_SECTOR_SIZE and the device is power-safe-overwrite when
+// UNIXFILE_PSOW was set.
+os_device_setup: fn(file: &DBFile) Never! {
+    if file.sector_size != 0 -> return
+    if file.ctrl.bit_and(UNIXFILE_PSOW) != 0 -> file.device = file.device.bit_or(IOCAP_POWERSAFE_OVERWRITE)
+    file.sector_size = DEFAULT_SECTOR_SIZE
+}
+
+// sqlite3OsSectorSize: unixSectorSize.
+os_sector_size: fn(file: &DBFile) -> Int Never! {
+    os_device_setup(file)
+    file.sector_size
+}
+
+// sqlite3OsDeviceCharacteristics: unixDeviceCharacteristics.
+os_device_characteristics: fn(file: &DBFile) -> Int Never! {
+    os_device_setup(file)
+    file.device
+}
+
+// sqlite3OsDelete: unixDelete. A missing file is IOERR_DELETE_NOENT; with
+// `dir_sync` the directory is then fsynced (a directory that cannot be
+// opened is ignored, one that cannot be synced is IOERR_DIR_FSYNC).
+os_delete: fn(path: String, dir_sync: Bool) SQLError! -[DB]> {
+    got: core.db.__vfs_unlink(path)
+    if got < 0 {
+        if 0 - got == OS_ENOENT -> return Err(base.fail(base.IOERR_DELETE_NOENT))
+        return Err(base.fail(base.IOERR_DELETE))
+    }
+    if dir_sync {
+        dirfd: os_open_directory(path)
+        if dirfd >= 0 {
+            synced: core.db.__vfs_sync(dirfd)
+            _: core.db.__vfs_close(dirfd)
+            if synced < 0 -> return Err(base.fail(base.IOERR_DIR_FSYNC))
+        }
+    }
+    Ok()
+}
+
+// sqlite3OsAccess: unixAccess. EXISTS is true for a path stat(2) finds that
+// is not an empty regular file; READWRITE is access(R_OK|W_OK).
+os_access: fn(path: String, flags: Int) -[DB]> Bool Never! {
+    if flags == ACCESS_EXISTS -> return core.db.__vfs_exists(path, false)
+    core.db.__vfs_access(path, OS_W_OK_R_OK) == 0
+}
+
+// unixFullPathname's path under construction (struct DBPath). `out` holds
+// the zOut bytes in use.
+DBPath: struct {
+    rc: Int
+    symlinks: Int
+    out: [U8]
+    // nOut: the output buffer's size (mxPathname + 1).
+    capacity: Int
+}
+
+// appendOnePathElement: append name (not "." and not empty) to the path,
+// with ".." removing the last element, and follow it when it is a link.
+os_path_append_one: fn(p: &DBPath, name: [U8]) Never! -[DB]> {
+    n: name.len()
+    if name[0] == OS_DOT {
+        if n == 1 -> return
+        if name[1] == OS_DOT && n == 2 {
+            if p.out.len() > 1 {
+                loop {
+                    last: p.out.pop() ?? break
+                    if last == OS_SLASH -> break
+                }
+            }
+            return
+        }
+    }
+    if p.out.len() + n + 2 >= p.capacity {
+        p.rc = base.ERROR
+        return
+    }
+    p.out.push(OS_SLASH)
+    loop b in name -> p.out.push(b)
+    if p.rc != base.OK -> return
+    at: String.from_bytes(p.out.copy()) ?? ""
+    mode: core.db.__vfs_lstat_mode(at)
+    if mode < 0 {
+        if 0 - mode != OS_ENOENT -> p.rc = base.CANTOPEN
+        return
+    }
+    if mode.bit_and(OS_S_IFMT) != OS_S_IFLNK -> return
+    if p.symlinks > MAX_SYMLINK {
+        p.symlinks += 1
+        p.rc = base.CANTOPEN
+        return
+    }
+    p.symlinks += 1
+    link: core.db.__vfs_readlink(at)
+    got: link.count_bytes()
+    if got <= 0 || got >= MAX_PATHLEN {
+        p.rc = base.CANTOPEN
+        return
+    }
+    target: link.bytes()
+    keep: if target[0] == OS_SLASH -> 0 else -> p.out.len() - (n + 1)
+    loop p.out.len() > keep -> _: p.out.pop()
+    os_path_append_all(p, target)
+}
+
+// appendAllPathElements: append each '/'-separated element of path.
+os_path_append_all: fn(p: &DBPath, path: [U8]) Never! -[DB]> {
+    i := 0
+    j := 0
+    loop {
+        loop i < path.len() && path[i] != OS_SLASH -> i += 1
+        if i > j {
+            name := [U8]{}
+            loop k in j..<i -> name.push(path[k])
+            os_path_append_one(p, name)
+        }
+        j = i + 1
+        if i >= path.len() -> break
+        i += 1
+    }
+}
+
+// sqlite3OsFullPathname: unixFullPathname. A relative path is taken from
+// the working directory; "." and ".." are folded and symbolic links are
+// followed (at most SQLITE_MAX_SYMLINK of them). CANTOPEN when the result
+// is too long, a step fails, or the result is shorter than two bytes.
+os_full_pathname: fn(path: String) -[DB]> FullPath SQLError! {
+    p := DBPath{rc: base.OK, symlinks: 0, out: [U8]{}, capacity: MAX_PATHNAME + 1}
+    bytes: path.bytes()
+    if bytes.len() == 0 || bytes[0] != OS_SLASH {
+        cwd: core.db.__vfs_cwd()
+        if cwd.count_bytes() == 0 -> return Err(base.fail(base.CANTOPEN))
+        os_path_append_all(p, cwd.bytes())
+    }
+    os_path_append_all(p, bytes)
+    if p.rc != base.OK || p.out.len() < 2 -> return Err(base.fail(base.CANTOPEN))
+    full: String.from_bytes(p.out) ?? return Err(base.fail(base.CANTOPEN))
+    Ok(FullPath{path: full, symlink: p.symlinks > 0})
+}
+
+// The shared-memory locks (sqlite3.h SQLITE_SHM_NLOCK and the xShmLock
+// flags) and their bytes in the -shm file (os_unix.c UNIX_SHM_BASE, the
+// first lock byte, and UNIX_SHM_DMS, the dead-man switch).
+SHM_NLOCK: 8
+SHM_UNLOCK: 1
+SHM_LOCK: 2
+SHM_SHARED: 4
+SHM_EXCLUSIVE: 8
+SHM_BASE: 120
+SHM_DMS: 128
+// unixShmMap's page size for growing the -shm file.
+SHM_EXTEND_PAGE: 4096
+
+// The shared memory of one connection (os_unix.c struct unixShm with the
+// unixShmNode it points at). The node is per connection here, not per
+// inode: its locks are open-file-description locks on its own descriptor,
+// which conflict with every other descriptor, in this process or another,
+// so the node's aLock counts and mutex are not needed. The regions are not
+// memory-mapped: the wal-index reads and writes them with os_shm_read and
+// os_shm_write (pread and pwrite on the -shm file, which share the kernel
+// page cache that C SQLite's MAP_SHARED mappings use; each call is a full
+// memory barrier, which is all unixShmBarrier provides).
+DBShm: struct {
+    // pShm != 0.
+    open: Bool
+    // unixShmNode.hShm and zFilename.
+    fd: Int
+    path: String
+    // unixShmNode.isReadonly and isUnlocked.
+    readonly: Bool
+    unlocked: Bool
+    // unixShmNode.nRegion: regions known to lie inside the file.
+    n_region: Int
+    sz_region: Int
+    // unixShm.sharedMask and exclMask.
+    shared_mask: Int
+    excl_mask: Int
+}
+
+// No shared memory (pShm 0).
+os_shm_closed: fn() -> DBShm Never! {
+    DBShm{open: false, fd: -1, path: "", readonly: false, unlocked: false, n_region: 0, sz_region: 0, shared_mask: 0, excl_mask: 0}
+}
+
+// unixShmSystemLock: one record lock (F_UNLCK, F_RDLCK or F_WRLCK) on
+// bytes [ofst, ofst+n) of the -shm file; BUSY when it cannot be taken.
+os_shm_system_lock: fn(file: &DBFile, kind: Int, ofst: Int, n: Int) -[DB]> Int Never! {
+    if file.shm.fd < 0 -> return base.OK
+    if os_file_lock(file.shm.fd, kind, ofst, n) < 0 -> return base.BUSY
+    base.OK
+}
+
+// unixLockSharedMemory: take the dead-man-switch read lock. When no other
+// connection holds it the -shm content is stale: a read-write connection
+// write-locks the DMS byte and truncates the file to 3 bytes first, and a
+// read-only one is left unlocked and answers READONLY_CANTINIT. A DMS
+// write lock held elsewhere (another connection initialising) is BUSY.
+os_shm_lock_dms: fn(file: &DBFile) -[DB]> Int Never! {
+    got: core.db.__vfs_lock(file.shm.fd, OS_F_OFD_GETLK, OS_F_WRLCK, SHM_DMS, 1)
+    rc := base.OK
+    if got < 0 {
+        rc = base.IOERR_LOCK
+    } else if got == OS_F_UNLCK {
+        if file.shm.readonly {
+            file.shm.unlocked = true
+            rc = base.READONLY_CANTINIT
+        } else {
+            rc = os_shm_system_lock(file, OS_F_WRLCK, SHM_DMS, 1)
+            if rc == base.OK && core.db.__vfs_truncate(file.shm.fd, 3) < 0 -> rc = base.IOERR_SHMOPEN
+        }
+    } else if got == OS_F_WRLCK {
+        rc = base.BUSY
+    }
+    if rc == base.OK -> rc = os_shm_system_lock(file, OS_F_RDLCK, SHM_DMS, 1)
+    rc
+}
+
+// unixOpenSharedMemory: open "<database>-shm" with the database's
+// permissions (read-write unless the readonly_shm URI parameter is set,
+// falling back to read-only) and take the DMS lock. READONLY_CANTINIT
+// leaves the shared memory open but unlocked.
+os_shm_open: fn(file: &DBFile) -[DB]> Int Never! {
+    mode: core.db.__vfs_mode(file.path)
+    if mode < 0 -> return base.IOERR_FSTAT
+    name: "{file.path}-shm"
+    fd := -1
+    readonly := false
+    if !file.readonly_shm -> fd = core.db.__vfs_open(name, OS_O_RDWR.bit_or(OS_O_CREAT).bit_or(OS_O_NOFOLLOW), mode)
+    if fd < 0 {
+        fd = core.db.__vfs_open(name, OS_O_RDONLY.bit_or(OS_O_NOFOLLOW), mode)
+        if fd < 0 -> return base.CANTOPEN
+        readonly = true
+    }
+    // robustFchown: a root process gives the -shm file its database's owner.
+    _: core.db.__vfs_chown_like(fd, file.path)
+    file.shm = DBShm{open: true, fd: fd, path: name, readonly: readonly, unlocked: false, n_region: 0, sz_region: 0, shared_mask: 0, excl_mask: 0}
+    rc: os_shm_lock_dms(file)
+    if rc != base.OK && rc != base.READONLY_CANTINIT {
+        // shm_open_err: unixShmPurge.
+        _: core.db.__vfs_close(fd)
+        file.shm = os_shm_closed()
+    }
+    rc
+}
+
+// sqlite3OsShmMap: unixShmMap. Make wal-index region `region` (of
+// `sz_region` bytes) available, opening the shared memory on first use.
+// `mapped` reports whether the region lies inside the -shm file; with
+// `extend` the file grows to hold it, one byte at the end of each 4096-byte
+// page. A read-only -shm file answers READONLY.
+os_shm_map: fn(file: &DBFile, region: Int, sz_region: Int, extend: Bool, mapped: &Bool) -[DB]> Int Never! {
+    mapped = false
+    if !file.shm.open {
+        rc: os_shm_open(file)
+        if rc != base.OK -> return rc
+    }
+    if file.shm.unlocked {
+        rc: os_shm_lock_dms(file)
+        if rc != base.OK -> return rc
+        file.shm.unlocked = false
+    }
+    rc := base.OK
+    n_req: region + 1
+    if file.shm.n_region < n_req {
+        n_byte: n_req * sz_region
+        file.shm.sz_region = sz_region
+        size: core.db.__vfs_size(file.shm.fd)
+        if size < 0 -> return base.IOERR_SHMSIZE
+        if size < n_byte && !extend {
+            if file.shm.readonly -> return base.READONLY
+            return base.OK
+        }
+        if size < n_byte {
+            zero: [U8]{U8{0}}
+            loop pg in (size /% SHM_EXTEND_PAGE)..<(n_byte /% SHM_EXTEND_PAGE) {
+                if core.db.__vfs_write(file.shm.fd, pg * SHM_EXTEND_PAGE + SHM_EXTEND_PAGE - 1, zero, 0, 1) != 1 -> return base.IOERR_SHMSIZE
+            }
+        }
+        file.shm.n_region = n_req
+    }
+    mapped = file.shm.n_region > region
+    if file.shm.readonly && rc == base.OK -> rc = base.READONLY
+    rc
+}
+
+// Read `n` bytes of the shared memory at byte `offset` into buf[at..].
+// What lies past the end of the file reads as zero.
+os_shm_read: fn(file: &DBFile, offset: Int, buf: &[U8], at: Int, n: Int) -[DB]> Int Never! {
+    got: core.db.__vfs_read(file.shm.fd, offset, buf, at, n)
+    if got < 0 -> return base.IOERR_SHMMAP
+    loop i in got..<n -> buf[at + i] = U8{0}
+    base.OK
+}
+
+// Write data[at..<at+n] to the shared memory at byte `offset`.
+os_shm_write: fn(file: &DBFile, offset: Int, data: [U8], at: Int, n: Int) -[DB]> Int Never! {
+    if core.db.__vfs_write(file.shm.fd, offset, data, at, n) != n -> return base.IOERR_SHMMAP
+    base.OK
+}
+
+// sqlite3OsShmLock: unixShmLock of `n` locks from slot `ofst`, `flags` one
+// of LOCK|SHARED, LOCK|EXCLUSIVE, UNLOCK|SHARED and UNLOCK|EXCLUSIVE. A
+// shared lock already held is kept; an exclusive lock is BUSY while this
+// connection holds one of the slots shared (the aLock check).
+os_shm_lock: fn(file: &DBFile, ofst: Int, n: Int, flags: Int) -[DB]> Int Never! {
+    if !file.shm.open -> return base.IOERR_SHMLOCK
+    mask: (1 << (ofst + n)) - (1 << ofst)
+    held: file.shm.excl_mask.bit_or(file.shm.shared_mask)
+    unlock: flags.bit_and(SHM_UNLOCK) != 0
+    work: (unlock && held.bit_and(mask) != 0) || (flags == SHM_SHARED.bit_or(SHM_LOCK) && file.shm.shared_mask.bit_and(mask) == 0) || flags == SHM_EXCLUSIVE.bit_or(SHM_LOCK)
+    if !work -> return base.OK
+    keep: mask.bit_xor(65535)
+    if unlock {
+        rc: os_shm_system_lock(file, OS_F_UNLCK, ofst + SHM_BASE, n)
+        if rc == base.OK {
+            file.shm.shared_mask = file.shm.shared_mask.bit_and(keep)
+            file.shm.excl_mask = file.shm.excl_mask.bit_and(keep)
+        }
+        return rc
+    }
+    if flags.bit_and(SHM_SHARED) != 0 {
+        rc: os_shm_system_lock(file, OS_F_RDLCK, ofst + SHM_BASE, n)
+        if rc == base.OK -> file.shm.shared_mask = file.shm.shared_mask.bit_or(mask)
+        return rc
+    }
+    if file.shm.shared_mask.bit_and(mask) != 0 -> return base.BUSY
+    rc: os_shm_system_lock(file, OS_F_WRLCK, ofst + SHM_BASE, n)
+    if rc == base.OK -> file.shm.excl_mask = file.shm.excl_mask.bit_or(mask)
+    rc
+}
+
+// sqlite3OsShmUnmap: unixShmUnmap. Close this connection's shared memory,
+// which drops its locks, and with `delete` unlink the -shm file.
+os_shm_unmap: fn(file: &DBFile, delete: Bool) Never! -[DB]> {
+    if !file.shm.open -> return
+    if delete && file.shm.fd >= 0 -> _: core.db.__vfs_unlink(file.shm.path)
+    if file.shm.fd >= 0 -> _: core.db.__vfs_close(file.shm.fd)
+    file.shm = os_shm_closed()
+}
+
+// sqlite3OsRandomness: unixRandomness, `n` bytes from the system's random
+// source. If that fails, the first 12 bytes are the time in seconds and a
+// zero process id, the rest zero.
+os_randomness: fn(n: Int) -[DB]> [U8] Never! {
+    buf := [U8]{}
+    loop _i in 0..<n -> buf.push(U8{0})
+    got: core.db.__vfs_random(buf)
+    if got == n -> return buf
+    loop i in 0..<n -> buf[i] = U8{0}
+    t := core.db.__vfs_now_ms() /% 1000
+    loop i in 0..<8 {
+        if i < n -> buf[i] = U8{t.bit_and(255)}
+        t = t >> 8
+    }
+    buf
+}
+
+// sqlite3OsSleep: unixSleep; the microseconds slept.
+os_sleep: fn(micros: Int) -[DB]> Int Never! { core.db.__vfs_sleep(micros) }
+
+// sqlite3OsCurrentTimeInt64: unixCurrentTimeInt64, the Julian day number
+// times 86400000.
+os_current_time: fn() -[DB]> Int Never! {
+    24405875 * 8640000 + core.db.__vfs_now_ms()
+}
+
+// The process-wide sqlite3_temp_directory (PRAGMA temp_store_directory).
+OSTempDirectory: struct {
+    dir: String?
+}
+
+init_os_temp_directory: fn() -> Shared<OSTempDirectory> Never! {
+    shared OSTempDirectory{dir: None}
+}
+
+// sqlite3_temp_directory.
+os_temp_directory: fn() -> String? Never! {
+    guard: core.mem.__process_shared(init_os_temp_directory).guard_read()
+    guard.value.dir
+}
+
+// Set sqlite3_temp_directory (None clears it).
+os_set_temp_directory: fn(dir: String?) Never! {
+    guard := core.mem.__process_shared(init_os_temp_directory).guard_edit()
+    guard.value.dir = dir
+}
+
+// unixTempFileDir: the first of sqlite3_temp_directory, /var/tmp, /usr/tmp,
+// /tmp and "." that is a directory this process can write and search.
+os_temp_file_dir: fn() -[DB]> String? Never! {
+    candidates := [String]{}
+    if os_temp_directory() == .Val(dir) -> candidates.push(dir)
+    candidates.push("/var/tmp")
+    candidates.push("/usr/tmp")
+    candidates.push("/tmp")
+    candidates.push(".")
+    loop dir in candidates {
+        if core.db.__vfs_exists(dir, true) && core.db.__vfs_access(dir, OS_X_OK_W_OK) == 0 -> return Val(dir)
+    }
+    None
+}
+
+// unixGetTempname: "<dir>/etilqs_<hex of 8 random bytes>" that does not
+// exist yet; SQLITE_ERROR when the name would not fit or eleven tries all
+// collided.
+os_get_tempname: fn() -[DB]> String SQLError! {
+    dir: os_temp_file_dir() ?? return Err(base.fail(base.IOERR_GETTEMPPATH))
+    limit := 0
+    loop {
+        r: os_random_bytes(8)
+        // "%llx" of the eight bytes read as a little-endian u64.
+        digits: "0123456789abcdef".bytes()
+        hex := [U8]{}
+        loop i in 0..<8 {
+            b: Int.from_u8(r[7 - i])
+            loop half in 0..<2 {
+                digit: if half == 0 -> b >> 4 else -> b.bit_and(15)
+                if digit != 0 || hex.len() > 0 || (i == 7 && half == 1) -> hex.push(digits[digit])
+            }
+        }
+        tail: String.from_bytes(hex) ?? ""
+        name: "{dir}/etilqs_{tail}"
+        if name.count_bytes() > MAX_PATHNAME - 2 || limit > 10 -> return Err(base.fail(base.ERROR))
+        limit += 1
+        if core.db.__vfs_access(name, OS_F_OK) != 0 -> return Ok(name)
+    }
+}
+
+// random.c: the process-wide ChaCha20 generator behind sqlite3_randomness.
+// `s` is the 16-word state, `out` the current 64-byte block and `n` the
+// bytes of it not yet handed out (taken from its end).
+OSPrng: struct {
+    s: [Int]
+    out: [U8]
+    n: Int
+}
+
+init_os_prng: fn() -> Shared<OSPrng> Never! {
+    s := [Int]{}
+    loop _i in 0..<16 -> s.push(0)
+    out := [U8]{}
+    loop _i in 0..<64 -> out.push(U8{0})
+    shared OSPrng{s: s, out: out, n: 0}
+}
+
+// sqlite3_randomness(N, pBuf): `n` bytes. `n` <= 0 resets the generator,
+// which reseeds from the VFS on its next use.
+os_random_bytes: fn(n: Int) -[DB]> [U8] Never! {
+    result := [U8]{}
+    guard := core.mem.__process_shared(init_os_prng).guard_edit()
+    if n <= 0 {
+        guard.value.s[0] = 0
+        return result
+    }
+    if guard.value.s[0] == 0 {
+        // chacha20_init, then 44 bytes of system randomness as words 4..14;
+        // word 12 becomes the block counter and its seed moves to word 15.
+        seed: os_randomness(44)
+        guard.value.s[0] = 1634760805
+        guard.value.s[1] = 857760878
+        guard.value.s[2] = 2036477234
+        guard.value.s[3] = 1797285236
+        loop w in 0..<11 {
+            at: w * 4
+            guard.value.s[4 + w] = Int.from_u8(seed[at]).bit_or(Int.from_u8(seed[at + 1]) << 8).bit_or(Int.from_u8(seed[at + 2]) << 16).bit_or(Int.from_u8(seed[at + 3]) << 24)
+        }
+        guard.value.s[15] = guard.value.s[12]
+        guard.value.s[12] = 0
+        guard.value.n = 0
+    }
+    need := n
+    loop {
+        if need <= guard.value.n {
+            start: guard.value.n - need
+            loop i in 0..<need -> result.push(guard.value.out[start + i])
+            guard.value.n -= need
+            break
+        }
+        if guard.value.n > 0 {
+            loop i in 0..<guard.value.n -> result.push(guard.value.out[i])
+            need -= guard.value.n
+        }
+        guard.value.s[12] = (guard.value.s[12] + 1).bit_and(U32_MASK)
+        guard.value.out = chacha_block(guard.value.s)
+        guard.value.n = 64
+    }
+    result
+}
+
+// The RFC 7539 ChaCha20 block function (random.c chacha_block): twenty
+// rounds over the 16-word state, added back to the input, as 64
+// little-endian bytes.
+chacha_block: fn(input: [Int]) -> [U8] Never! {
+    x := input.copy()
+    loop _i in 0..<10 {
+        chacha_qr(x, 0, 4, 8, 12)
+        chacha_qr(x, 1, 5, 9, 13)
+        chacha_qr(x, 2, 6, 10, 14)
+        chacha_qr(x, 3, 7, 11, 15)
+        chacha_qr(x, 0, 5, 10, 15)
+        chacha_qr(x, 1, 6, 11, 12)
+        chacha_qr(x, 2, 7, 8, 13)
+        chacha_qr(x, 3, 4, 9, 14)
+    }
+    out := [U8]{}
+    loop i in 0..<16 {
+        w: (x[i] + input[i]).bit_and(U32_MASK)
+        out.push(U8{w.bit_and(255)})
+        out.push(U8{(w >> 8).bit_and(255)})
+        out.push(U8{(w >> 16).bit_and(255)})
+        out.push(U8{(w >> 24).bit_and(255)})
+    }
+    out
+}
+
+// random.c QR(a, b, c, d): one ChaCha quarter round on 32-bit words.
+chacha_qr: fn(x: &[Int], a: Int, b: Int, c: Int, d: Int) Never! {
+    x[a] = (x[a] + x[b]).bit_and(U32_MASK)
+    x[d] = chacha_rotl(x[d].bit_xor(x[a]), 16)
+    x[c] = (x[c] + x[d]).bit_and(U32_MASK)
+    x[b] = chacha_rotl(x[b].bit_xor(x[c]), 12)
+    x[a] = (x[a] + x[b]).bit_and(U32_MASK)
+    x[d] = chacha_rotl(x[d].bit_xor(x[a]), 8)
+    x[c] = (x[c] + x[d]).bit_and(U32_MASK)
+    x[b] = chacha_rotl(x[b].bit_xor(x[c]), 7)
+}
+
+// random.c ROTL on a 32-bit word.
+chacha_rotl: fn(v: Int, n: Int) -> Int Never! {
+    ((v << n).bit_or(v >> (32 - n))).bit_and(U32_MASK)
+}
+
+#Test("chacha_block matches the RFC 7539 2.3.2 test vector") {
+    state := [Int]{1634760805, 857760878, 2036477234, 1797285236}
+    loop w in 0..<8 {
+        k: w * 4
+        state.push(k.bit_or((k + 1) << 8).bit_or((k + 2) << 16).bit_or((k + 3) << 24))
+    }
+    state.push(1)
+    state.push(150994944)
+    state.push(1241513984)
+    state.push(0)
+    want: [U8]{16, 241, 231, 228, 209, 59, 89, 21, 80, 15, 221, 31, 163, 32, 113, 196, 199, 209, 244, 199, 51, 192, 104, 3, 4, 34, 170, 154, 195, 212, 108, 78, 210, 130, 100, 70, 7, 159, 170, 9, 20, 194, 215, 5, 217, 139, 2, 162, 181, 18, 156, 209, 222, 22, 78, 185, 203, 208, 131, 232, 162, 80, 60, 78}
+    assert(chacha_block(state) == want)
+}
+
+#Test("sqliteErrorFromPosixError maps lock failures") {
+    assert(os_lock_error(OS_EAGAIN, base.IOERR_LOCK) == base.BUSY)
+    assert(os_lock_error(OS_EACCES, base.IOERR_LOCK) == base.BUSY)
+    assert(os_lock_error(OS_EPERM, base.IOERR_LOCK) == base.PERM)
+    assert(os_lock_error(OS_EIO, base.IOERR_RDLOCK) == base.IOERR_RDLOCK)
+}

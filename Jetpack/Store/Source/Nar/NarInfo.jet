@@ -291,7 +291,7 @@ NixNarInfo: struct {
     fingerprint: fn(self, store_dir: String) -> [U8] StoreError! {
         store_nar_validate_nix_store_dir(store_dir)
         store_nar_validate_nix_store_path(self.store_path)
-        if !self.store_path.starts_with("{store_dir}/") -> return Err(store_nar_invalid("Nix StorePath is outside the configured StoreDir"))
+        if !store_path_below(self.store_path, store_dir) -> return Err(store_nar_invalid("Nix StorePath is outside the configured StoreDir"))
         nar_hash: store_decode_sha256(self.nar_hash) ?? return Err(store_nar_invalid("Nix NarHash is not a SHA-256 digest"))
         references := [String]{}
         loop reference in self.references {

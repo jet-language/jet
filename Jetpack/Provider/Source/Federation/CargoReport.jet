@@ -191,12 +191,21 @@ CargoDependencyKind: enum {
 }
 
 // Every `key = value` line with the `[section]` or `[[section]]` it sits in.
+// A `Cargo.toml:` or `Cargo.lock:` line frames one file of the import's
+// combined native document and starts that file at its top level, so the
+// lock's leading `version = 4` is not read as a key of the manifest's last
+// table (a `[dev-dependencies]` entry, say).
 provider_toml_assignments: fn(document: String) -> [TOMLAssignment] Never! {
     section := ""
     array_table := false
     assignments := [TOMLAssignment]{}
     loop raw_line in provider_lines(document) {
         line: raw_line.trim()
+        if line == "Cargo.toml:" || line == "Cargo.lock:" {
+            section = ""
+            array_table = false
+            next
+        }
         if line.starts_with("[[") && line.ends_with("]]") {
             section = line.removeprefix("[[").removesuffix("]]").trim()
             array_table = true

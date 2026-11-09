@@ -30,7 +30,7 @@ pkg_fetch_git_transport: fn(root: String, url: String) -[FS, Env, Net, Time.Wait
         if !path.starts_with("/") || path.contains("?") || path.contains("#") || path.contains("\\") -> return Err(pkg_fetch_git_bad("file URLs must name a local absolute path"))
         canonical: files.canonicalize(path) ?? return Err(pkg_fetch_git_bad("could not resolve the local Git path: {err}"))
         project: files.canonicalize(root) ?? return Err(pkg_fetch_git_bad("could not open project root: {err}"))
-        if !(canonical == project || canonical.starts_with("{project}/")) -> return Err(pkg_fetch_git_bad("the local Git path resolves outside the project root"))
+        if !foundation_paths.is_relative_to(foundation_paths.of(canonical), foundation_paths.of(project)) -> return Err(pkg_fetch_git_bad("the local Git path resolves outside the project root"))
         source: foundation_open_directory_authority(canonical) ?? return Err(pkg_fetch_git_bad("could not retain the local Git path authority: {err}"))
         source.tree_hash(true) ?? return Err(pkg_fetch_git_bad("local Git source contains unsafe files: {err}"))
         remote: if sys.is_macos() || sys.name() == "ios" -> "/dev/fd/199" else if sys.name() == "linux" || sys.name() == "android" -> "/proc/self/fd/199" else -> { return Err(pkg_fetch_git_bad("descriptor-relative Git source access is unavailable on this platform")) }

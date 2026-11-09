@@ -1,0 +1,32 @@
+# #6694: C on task threads. A core.net.tls server task and four client tasks
+# run the vendored Mbed TLS handshakes at once, at O0 and O2, under `jet run`
+# and as a built program. The link's C closure makes the musl startup hand
+# musl's thread functions to the runtime (Image/StaticLink.jet
+# LINK_THREAD_LIBC), so every task thread is a musl thread; with raw clones
+# musl's malloc took no lock and all threads shared the main thread's errno,
+# and this program crashed (SIGSEGV in musl's malloc). Mbed TLS is built with
+# its threading layer (Core/Vendor/Mbedtls/VERSION): without it the
+# handshakes raced on PSA's shared key slots, and about one built run in
+# eight failed a handshake with -0x0001 or -0x006E.
+fixture: tls_handshakes_from_concurrent_tasks_run_c_on_musl_threads.fixture
+copy: {root}/tests/fixtures/tls/custom-root.ca.cert.pem ca.pem
+copy: {root}/tests/fixtures/tls/custom-root.server.cert.pem server.cert.pem
+copy: {root}/tests/fixtures/tls/custom-root.server.key.pem server.key.pem
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run --optimize=none main.jet
+exit: 0
+stdout: = "client 0: localhost TLS13 true\nclient 1: localhost TLS13 true\nclient 2: localhost TLS13 true\nclient 3: localhost TLS13 true\n"
+step: jet run --optimize=full main.jet
+exit: 0
+stdout: = "client 0: localhost TLS13 true\nclient 1: localhost TLS13 true\nclient 2: localhost TLS13 true\nclient 3: localhost TLS13 true\n"
+step: jet build --optimize=none main.jet
+exit: 0
+step: built
+exit: 0
+stdout: = "client 0: localhost TLS13 true\nclient 1: localhost TLS13 true\nclient 2: localhost TLS13 true\nclient 3: localhost TLS13 true\n"
+step: jet build --optimize=full main.jet
+exit: 0
+step: built
+exit: 0
+stdout: = "client 0: localhost TLS13 true\nclient 1: localhost TLS13 true\nclient 2: localhost TLS13 true\nclient 3: localhost TLS13 true\n"

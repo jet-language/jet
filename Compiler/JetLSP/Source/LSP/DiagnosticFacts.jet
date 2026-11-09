@@ -1,18 +1,13 @@
-// The sole document and publication facts. The request loop owns
-// queries/transport; this is not another Server, checked bundle, semantic
-// index, or private compiler-query cache.
-use lsp_diag_path: core.files.runtime.kernel_path_components
+// The open documents and what each publication covered. The request loop owns
+// the checker and the transport; this holds no checked result.
 
+// An open editor document: its file path, unsaved text and editor version.
 LSPDocument: struct {
-    path: lsp_diag_path.OsPath
+    path: String
     text: String
     version: Int
 
-    new: fn(path: &&lsp_diag_path.OsPath, text: &&String, version: Int) -> LSPDocument Never! {
-        LSPDocument{path: path, text: text, version: version}
-    }
-
-    replace_text: fn(&self, text: &&String) Never! { self.text = text }
+    replace_text: fn(&self, text: String) Never! { self.text = text }
 
     apply_range_edit: fn(&self, range: LSPRange, range_length: Int?, text: String) -> Bool Never! {
         replacement: lsp_apply_edit(self.text, range, range_length, text) ?? return false
@@ -23,14 +18,14 @@ LSPDocument: struct {
 
 LSPDiagnosticState: struct {
     docs: [String:LSPDocument]
+    // Documents edited since their diagnostics were last published.
     dirty: [String:Bool]
+    // The URIs each root's last publication wrote diagnostics for.
     diagnostic_targets: [String:[String:Bool]]
-    // Only the small paths read by each successful publication are retained.
-    // Native identity comes from Driver's original loaded-module rows, not
-    // registration order, serialized compiler-service values or source text.
-    checked_modules: [String:[lsp_diag_path.OsPath]]
+    // The file paths each root's last check read.
+    checked_modules: [String:[String]]
+}
 
-    new: fn() -> LSPDiagnosticState Never! {
-        LSPDiagnosticState{docs: [String:LSPDocument]{}, dirty: [String:Bool]{}, diagnostic_targets: [String:[String:Bool]]{}, checked_modules: [String:[lsp_diag_path.OsPath]]{}}
-    }
+lsp_diagnostic_state: fn() -> LSPDiagnosticState Never! {
+    LSPDiagnosticState{docs: [String:LSPDocument]{}, dirty: [String:Bool]{}, diagnostic_targets: [String:[String:Bool]]{}, checked_modules: [String:[String]]{}}
 }

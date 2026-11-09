@@ -33,6 +33,7 @@ recipe_sandbox_test_exec: fn(tool: String, args: [String]) -> BuildRecipe {
 // Ported from build_sandbox.rs:209-249. No unavailable-backend success alternative.
 #Test("build hook does not inherit host credentials") {
     if sys.is_windows() -> return
+    if sys.is_linux() { _: kit_require_tool("bwrap") ?? return }
     base: recipe_test_scratch("clean-env")
     ctx: recipe_sandbox_test_ctx(base, "sh", recipe_sandbox_test_tool("sh"))
     secret_name: "JET_TEST_SECRET_DO_NOT_LEAK"
@@ -53,12 +54,16 @@ recipe_sandbox_test_exec: fn(tool: String, args: [String]) -> BuildRecipe {
 // Ported from build_sandbox.rs:252-307. Every original backend receipt predicate retained.
 #Test("native Linux recipe blocks host escape and records backend receipt") {
     if !sys.is_linux() -> return
+    _: kit_require_tool("bwrap") ?? return
     base: recipe_test_scratch("native-linux")
     ctx: recipe_sandbox_test_ctx(base, "sh", recipe_sandbox_test_tool("sh"))
-    host_marker: "{base}-host-escape"
+    // The sandbox's /tmp is a private tmpfs, so the escape target lives in a
+    // host directory the sandbox never binds; a write there must fail.
+    host_dir: recipe_test_scratch("native-linux-host")
+    host_marker: files.join(host_dir, "host-escape")
     files.write(files.join(ctx.source_dir, "input"), "source") ?? panic("input")
     command: "test ! -e /etc/passwd && if printf hostile > '{host_marker}'; then exit 41; fi && if printf hostile > input; then exit 42; fi && printf ok > \"$JET_BUILD_OUTPUT/ok\""
-    report: recipe_run(recipe_sandbox_test_exec("sh", [String]{"-c", command}), ctx, None) ?? panic("native Linux sandbox should run recipe")
+    report: recipe_run(recipe_sandbox_test_exec("sh", [String]{"-c", command}), ctx, None) ?? panic("native Linux sandbox should run recipe: {err.code}: {err.what}: {err.why}")
     assert_eq(report.sandbox_class, "linux-bwrap")
     assert(report.sandbox_policy.contains("filesystem=source-readonly,output-private-copy"))
     assert(report.sandbox_policy.contains("process=private-pid,parent-death"))
@@ -67,6 +72,7 @@ recipe_sandbox_test_exec: fn(tool: String, args: [String]) -> BuildRecipe {
     assert(!files.exists(host_marker))
     assert_eq(files.read(files.join(ctx.source_dir, "input")) ?? panic("source input"), "source")
     files.remove_all(base).drop("test cleanup")
+    files.remove_all(host_dir).drop("test cleanup")
 }
 
 // Ported from build_sandbox.rs:310-365. This is the logged production executor.
@@ -74,7 +80,8 @@ recipe_sandbox_test_exec: fn(tool: String, args: [String]) -> BuildRecipe {
     if !sys.is_linux() -> return
     base: recipe_test_scratch("logged-native-linux")
     ctx: recipe_sandbox_test_ctx(base, "sh", recipe_sandbox_test_tool("sh"))
-    marker: "{base}-logged-host-escape"
+    host_dir: recipe_test_scratch("logged-native-linux-host")
+    marker: files.join(host_dir, "logged-host-escape")
     command: "if printf hostile > '{marker}'; then exit 41; fi && printf ok > \"$JET_BUILD_OUTPUT/ok\""
     attempt := BuildAttempt.new("logged-sandbox", "logged-sandbox", "test", "recipe", "source")
     status: foundation_native_sandbox_status()
@@ -85,12 +92,13 @@ recipe_sandbox_test_exec: fn(tool: String, args: [String]) -> BuildRecipe {
             assert_eq(files.read(files.join(ctx.output_root, "ok")) ?? panic("ok output"), "ok")
         }
         .Err(error) -> {
-            assert(!status.available, "logged recipe sandbox should run")
+            assert(!status.available, "logged recipe sandbox should run: {error.code}: {error.what}: {error.why}")
             assert_eq(error.code, "E1275")
         }
     }
     assert(!files.exists(marker))
     files.remove_all(base).drop("test cleanup")
+    files.remove_all(host_dir).drop("test cleanup")
 }
 
 // Ported from build_sandbox.rs:376-433. Windows availability is not a skip predicate.
@@ -190,6 +198,7 @@ recipe_sandbox_test_unavailable: fn(base: String, ctx: RecipeBuildContext, args:
 // Ported from build_sandbox.rs:904-958. Keep the executor failure, not validation failure.
 #Test("failed recipe preserves previous output and removes partial stage") {
     if sys.is_windows() -> return
+    if sys.is_linux() { _: kit_require_tool("bwrap") ?? return }
     base: recipe_test_scratch("rollback")
     ctx: recipe_sandbox_test_ctx(base, "sh", recipe_sandbox_test_tool("sh"))
     files.create_dir_all(ctx.output_root) ?? panic("output")

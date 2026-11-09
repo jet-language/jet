@@ -246,7 +246,7 @@ ir_executable_return: fn(function: FnBody) -> Type? Never! {
 }
 
 // The end of a body: a Unit success of a Result carrier (or of a kept
-// `Unit Never!` carrier) hands back `Ok(())`, a Unit function returns, and
+// `Unit Never!` carrier) hands back `Ok()`, a Unit function returns, and
 // any other function cannot get here.
 ir_return_fallthrough: fn(m: &IRModule, p: IRProgram, b: &IRBuilder) Never! {
     // A diverging (`-> Never`) body cannot end: its fallthrough is
@@ -469,7 +469,7 @@ ir_stmt_body: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Neve
             if op == None {
                 if ir_self_append(m, p, b, binding, value, span) -> return
                 if ir_clear_string(m, p, b, binding, value) -> return
-                if ir_clear_list(m, p, b, binding, value) -> return
+                if ir_clear_list(m, p, b, binding, value, span) -> return
             }
             right: ir_expr(m, p, b, value)
             if ir_failed(b) -> return
@@ -709,6 +709,11 @@ ir_stmt_body: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Neve
                 if kind == .ChannelReceiver -> return ir_channel_walk(m, p, b, label, variable, variable_two, collection, step, body, span)
             }
             if ir_iter_element(ir_ty(p, b, collection)) != None -> return ir_lazy_walk(m, p, b, label, variable, variable_two, collection, step, body, span)
+            // `loop line in text.lines()` cuts each line in its step
+            // (ir_text_walk) instead of walking the List of every line.
+            if step == None && ir_body_node(p, b, collection).kind == .BuiltinMethod(text, operation, args) {
+                if operation == .Lines && args.len() == 0 && ir_text_walk_receiver(m, p, b, text) && ir_untag(ir_ty(p, b, collection)) == .List(_) -> return ir_text_walk(m, p, b, label, variable, variable_two, text, -1, body, span)
+            }
             ir_list_walk(m, p, b, label, variable, variable_two, collection, step, by_value, body, span)
         }
         // A scope whose marker lowers to nothing: its body runs as a plain
@@ -2225,6 +2230,7 @@ ir_handle_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiv
     if operation == .TaskPause || operation == .TaskResume || operation == .TaskCancel -> return ir_task_control(m, p, b, receiver, operation, args, span)
     if operation == .AllocAlloc || operation == .AllocTryAlloc || operation == .AllocReset -> return ir_allocator_method(m, p, b, ty, receiver, operation, args, span)
     if operation == .MappedFileLines -> return ir_mapped_lines(m, p, b, ty, receiver, span)
+    if operation == .LinesIter -> return ir_lines_iter(m, p, b, receiver, span)
     if operation == .DynLen(site, location) -> return ir_dyn_len(m, p, b, ty, receiver, site, location, span)
     if ir_dyn_method(m, p, b, ty, receiver, operation, args, span) == .Val(result) -> return result
     if ir_channel_method(m, p, b, ty, receiver, operation, args, span) == .Val(result) -> return result
@@ -3016,9 +3022,10 @@ ir_empty_list_literal: fn(p: IRProgram, b: IRBuilder, value: Int) -> Bool Never!
 // `xs = [T]{}` on a List place that always holds its value (a variable that
 // still owns it on every path, or an aggregate write parameter's place): the
 // List is emptied in place (ir_list_clear_in_place), so a sole owner keeps
-// its buffer and refilling it reuses the capacity. False, emitting nothing,
-// for any other assignment.
-ir_clear_list: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, binding: IRBinding, value: Int) -> Bool Never! {
+// its buffer and refilling it reuses the capacity. The old value closes first,
+// as any assignment closes it. False, emitting nothing, for any other
+// assignment.
+ir_clear_list: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, binding: IRBinding, value: Int, span: Span) -> Bool Never! {
     if binding.indirect >= 0 || !ir_empty_list_literal(p, b, value) -> return false
     if ir_kind_of(m, b, binding.slot) != .Aggregate -> return false
     if ir_untag(m.types[b.f.slot_type[binding.slot]].ty) == {
@@ -3028,6 +3035,9 @@ ir_clear_list: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, binding: IRBinding,
     element: ir_list_element(m, p, b, binding.slot) ?? return false
     if !binding.write && (!ir_owned_binding(b, binding.slot) || ir_live_flag(b, binding.slot) >= 0) -> return false
     if binding.write {
+        // The caller's old value is whole (nothing moves out of a write
+        // parameter) and closes here, as a write to it closes it.
+        if !ir_close_fresh(m, p, b, binding.slot, span) -> return true
         ir_list_clear_in_place(m, b, binding.slot, element)
         return true
     }
@@ -3068,10 +3078,12 @@ ir_clear_member: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, member
 }
 
 // Empties the List header at `header` (element type row `element`) in place
-// of assigning it a new empty List: a sole owner of a counted buffer ends its
-// elements and keeps the buffer, capacity and all, at length 0; any other
-// header (a shared or frozen buffer, a write window) ends as an assignment
-// ends it and becomes the empty List.
+// of assigning it a new empty List, once its old value closed: a sole owner of
+// a counted buffer ends its elements as the List's drop would (its move-only
+// handles, which the close ended, it leaves alone: ir_glue_drops) and keeps
+// the buffer, capacity and all, at length 0; any other header (a shared or
+// frozen buffer, a write window) ends as an assignment ends it and becomes
+// the empty List.
 ir_list_clear_in_place: fn(m: &IRModule, b: &IRBuilder, header: Int, element: Int) Never! {
     bool_row: ir_type_row(m, Type.Bool) ?? 0
     zero: ir_word_const(m, b, 0)
@@ -3081,7 +3093,7 @@ ir_list_clear_in_place: fn(m: &IRModule, b: &IRBuilder, header: Int, element: In
     data: ir_load_word(m, b, header, 16)
     sole: ir_runtime(m, b, "jet_rt_block_unique", [Int]{data}, bool_row)
     ir_open_if(b.f, sole, b.line)
-    ir_list_drop_items(m, b, header, element)
+    if ir_glue_drops(m, element) -> ir_list_drop_items(m, b, header, element)
     ir_emit(b.f, IROp.Store, -1, header, 0, zero, b.line)
     ir_else(b.f, b.line)
     ir_list_replace_empty(m, b, header, zero)
@@ -5633,6 +5645,10 @@ ir_or_fallback: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: I
     // dropped once the fallback has run.
     owned_subject: b.fresh[subject] && (ir_box_row(m, b.f.slot_type[subject]) || ir_option_inline(m, b.f.slot_type[subject]))
     test: if is_result -> ir_result_is_ok(m, b, subject) else -> ir_option_is_some(m, b, subject)
+    // Each path starts from the ownership before the `??`: a variable the
+    // fallback moves (`x ?? return keep(owner.move())`) still owns its value
+    // on the present path, where ir_meet_paths reconciles the two.
+    before: ir_own_states(b, b.bindings.len())
     ir_open_if(b.f, test, b.line)
     if view {
         address: ir_view_result_address(m, p, b, subject)
@@ -5653,6 +5669,8 @@ ir_or_fallback: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: I
             ir_release(m, b, payload)
         }
     }
+    then_states: ir_own_states(b, before.len())
+    ir_set_own_states(b, before)
     ir_else(b.f, b.line)
     // A failure handled here ends its journey: drop it before the fallback
     // runs, off the success edge (#6014).
@@ -5685,6 +5703,8 @@ ir_or_fallback: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: I
         ir_release(m, b, subject)
     }
     ir_end(b.f, b.line)
+    fallback_leaves: ir_fallback_leaves(p, b, fallback)
+    ir_meet_paths(m, b, test, then_states, false, fallback_leaves)
     if view && result >= 0 {
         viewed: ir_allocator_view(m, b, result, row)
         if viewed >= 0 -> b.fresh[viewed] = false
@@ -5779,6 +5799,13 @@ ir_optional_wrap: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, result: Int, val
     boxed: ir_box_alloc(m, b, size, option_row)
     ir_store_at(m, p, b, boxed, 0, owned)
     ir_emit(b.f, IROp.Copy, result, boxed, -1, -1, b.line)
+}
+
+// Whether the `??` fallback `fallback` never reaches what follows the `??`:
+// a return, panic, break or next, or a value of type Never.
+ir_fallback_leaves: fn(p: IRProgram, b: IRBuilder, fallback: BodyOrFallback) -> Bool Never! {
+    if fallback == .Value(alternative) -> return ir_never_type(ir_ty(p, b, alternative))
+    true
 }
 
 ir_fallback_route: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, fallback: BodyOrFallback, result: Int, span: Span) Never! {
@@ -6930,7 +6957,7 @@ ir_function_value: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, key: 
             } else if ir_is_result(result_ty) {
                 // A Unit function as a `fn(..) E!` value: the caller of a
                 // fallible function value reads a Result box, so the adapter
-                // returns Ok(()).
+                // returns Ok().
                 result = ir_result_box(m, p, a, result_ty, true, -1)
             } else {
                 ir_fail(a, span, "named function {function.name} returns nothing as a value of {ir_type_name(ty)}")

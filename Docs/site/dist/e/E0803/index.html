@@ -36,14 +36,14 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Call one of the value&#39;s methods, such as `triple.apply(4)`, or write a method that returns a lambda.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0803</code>: <code>tests/ui/call_non_function.stderr</code>.</p>
-<pre class="diag">Error [jet.CalledNonFunction]: This is Int (a whole number), not a function
-  --&gt; tests/ui/call_non_function.jet:4:13
+<p>First UI snapshot mentioning <code>E0803</code>: <code>tests/ui/ambient_input_call_e0803.stderr</code>.</p>
+<pre class="diag">Error [jet.CalledNonFunction]: `input` is Iter&lt;String&gt;, not a function
+  --&gt; tests/ui/ambient_input_call_e0803.jet:2:8
     |
-  4 |     result: get_number().call(1)
-    |             ^^^^^^^^^^^^^^^^^^^
- Why: Only a function value can be called with `.call(…)`
- Fix: Call a defined `fn` by name, or store a lambda in a binding before `.call(…)`
+  2 |     _: input(&quot;name? &quot;)
+    |        ^^^^^
+ Why: `input` is every line of the program&#39;s input (the files its arguments name, else standard input), read lazily by a `loop` or an Iter method
+ Fix: Read one line with a prompt through `readline(prompt)` from core.term (`use core.term.[readline]`), or loop over `input`
 More: jet-lang.dev/e/E0803
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

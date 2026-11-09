@@ -1370,13 +1370,13 @@ close_scope: fn(m: &Machine) -> () {
 tick: fn(m: &Machine) Reject! {
     m.steps += 1
     if m.steps > STEP_LIMIT -> return Err(reject("steps"))
-    Ok(())
+    Ok()
 }
 
 emit: fn(m: &Machine, line: String) Reject! {
     m.out.push(line.copy())
     if m.out.len() > OUTPUT_LIMIT -> return Err(reject("output"))
-    Ok(())
+    Ok()
 }
 
 eval: fn(m: &Machine, g: Gen, at: Int) -> Value Reject! {

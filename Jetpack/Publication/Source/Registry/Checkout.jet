@@ -6,6 +6,7 @@ use {
     jet_foundation.[diagnostic_from_registry]
     jet_pkg_model.[PublicationRegistryConfig]
     files: core.files
+    pkg_paths: core.files.path
 }
 
 // The checkout scratch directory name prefix; cleanup removes only a
@@ -106,7 +107,7 @@ publication_checkout_relative: fn(repo: String, path: String) -> String? Never! 
 
 publication_staged_path_allowed: fn(allowed: [String], staged: String) -> Bool Never! {
     loop path in allowed {
-        if staged == path || staged.starts_with("{path}/") -> return true
+        if pkg_paths.is_relative_to(pkg_paths.of(staged), pkg_paths.of(path)) -> return true
     }
     false
 }

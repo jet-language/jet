@@ -21,11 +21,12 @@
 //    `module.name`; a module named as a value is E0107, like Rust.
 //
 // A generic-module instance arrives here as an ordinary module expanded by
-// `sema_generic_modules_expand`. Module constants are never registered by
-// Rust, so they are dropped. A module that binds a Core module in a member
-// list (`use core.[math]`) keeps its functions in its body; one that binds
-// Core members reads them through a file-level Core alias, and its own module
-// or file imports (`use rules: second`) through generated file-level aliases.
+// `sema_generic_modules_expand`. A module's constants lift beside its
+// functions under their member identities (`geo.START` -> `__jet_geo_dSTART`),
+// and a bare read of one inside its module names the lifted constant. A module
+// that binds Core modules or members in a member list (`use core.[math]`) reads
+// them through a file-level Core alias, and its own module or file imports
+// (`use rules: second`) through generated file-level aliases.
 use {
     unicode: core.text
     jet_foundation.[
@@ -35,6 +36,7 @@ use {
         Call,
         CallArg,
         CodeModule,
+        ConstDef,
         ContextField,
         ContractClause,
         Diagnostic,
@@ -1432,7 +1434,11 @@ sema_inline_hoist_module: fn(code_module: CodeModule, source_path: String, hoist
     }
     loop inner in lifted {
         if inner == {
-            .Struct(definition) -> hoist.declarations.push(Item.Struct{value: sema_inline_rewrite_struct(visible, definition, module_alias)})
+            .Struct(definition) -> {
+                hoisted := sema_inline_rewrite_struct(visible, definition, module_alias)
+                hoisted.inline_module = Val(code_module.span)
+                hoist.declarations.push(Item.Struct{value: hoisted})
+            }
             .Enum(definition) -> hoist.declarations.push(Item.Enum{value: sema_inline_rewrite_enum(visible, definition, module_alias)})
             .Trait(definition) -> hoist.declarations.push(Item.Trait{value: sema_inline_rewrite_trait(visible, definition)})
             .Tag(definition) -> {
@@ -1720,6 +1726,22 @@ sema_inline_scope_surfaces: fn(nested: [SemaInlineModuleSurface], context: Strin
     scope
 }
 
+// A module's own constants, read bare inside it, name their lifted member
+// identities; a local or parameter of the same name shadows one.
+sema_inline_bind_constants: fn(body: [Item], path: String, rewrite: &SemaInlineRewrite) Never! {
+    loop item in body {
+        if item == .Const(constant) -> rewrite.values[constant.name] = Expr.Ident{name: sema_inline_member_name(path, constant.name), span: constant.name_span, id: AST_NODE_GENERATED}
+    }
+}
+
+sema_inline_lift_constant: fn(rewrite: &SemaInlineRewrite, constant: ConstDef, path: String) -> Item Never! {
+    member := constant
+    member.name = sema_inline_member_name(path, constant.name)
+    member.value = sema_inline_rewrite_expr(rewrite, constant.value)
+    member.ty = sema_inline_rewrite_optional_type(rewrite, constant.ty)
+    Item.Const{value: member}
+}
+
 // Lifts the member functions of every module nested in `body` (module
 // `parent`) under their member identities, each body rewritten with the
 // bindings sema_inline_collect_nested made for its module.
@@ -1734,11 +1756,16 @@ sema_inline_lift_nested: fn(body: [Item], parent: String, nested: [SemaInlineMod
             if row < 0 -> next
             rewrite := bindings[row]
             rewrite.modules = sema_inline_scope_surfaces(nested, path)
+            sema_inline_bind_constants(child_body, path, rewrite)
             loop inner in child_body {
-                if inner == .Func(function) {
-                    member := sema_inline_rewrite_func(rewrite, function)
-                    member.name = sema_inline_member_name(path, function.name)
-                    lifted.push(Item.Func{value: member})
+                if inner == {
+                    .Func(function) -> {
+                        member := sema_inline_rewrite_func(rewrite, function)
+                        member.name = sema_inline_member_name(path, function.name)
+                        lifted.push(Item.Func{value: member})
+                    }
+                    .Const(constant) -> lifted.push(sema_inline_lift_constant(rewrite, constant, path))
+                    else -> {}
                 }
             }
             loop diagnostic in rewrite.diagnostics -> diagnostics.push(diagnostic)
@@ -1747,11 +1774,10 @@ sema_inline_lift_nested: fn(body: [Item], parent: String, nested: [SemaInlineMod
     }
 }
 
-// Every module's functions are lifted (top-level ones in
+// Every module's functions and constants are lifted (top-level ones in
 // sema_inline_modules_lower, nested ones by sema_inline_lift_nested), and a
-// module constant or test is never registered (registers an inline body's
-// `Item::Func` members only): functions, constants and tests leave the lowered
-// program.
+// module test is never registered: functions, constants and tests leave the
+// lowered program.
 sema_inline_strip_members: fn(body: [Item]) -> [Item] Never! {
     kept := [Item]{}
     loop item in body {
@@ -1895,11 +1921,16 @@ sema_inline_modules_lower: fn(program: &Program, diagnostics: &[Diagnostic]) -> 
                     surfaces[surface_index] = updated_surface
                 }
                 lifted := [Item]{}
+                sema_inline_bind_constants(body, definition.name, siblings)
                 loop inner in body {
-                    if inner == .Func(function) {
-                        member := sema_inline_rewrite_func(siblings, function)
-                        member.name = sema_inline_member_name(definition.name, function.name)
-                        lifted.push(Item.Func{value: member})
+                    if inner == {
+                        .Func(function) -> {
+                            member := sema_inline_rewrite_func(siblings, function)
+                            member.name = sema_inline_member_name(definition.name, function.name)
+                            lifted.push(Item.Func{value: member})
+                        }
+                        .Const(constant) -> lifted.push(sema_inline_lift_constant(siblings, constant, definition.name))
+                        else -> {}
                     }
                 }
                 loop diagnostic in siblings.diagnostics -> diagnostics.push(diagnostic)

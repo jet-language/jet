@@ -1,0 +1,40 @@
+# Claim (#6614 c8): `jet run` of a target that is not a local path names remote
+# code, and every refusal happens before anything is fetched or run. A local
+# path always wins over a package name; plain http is refused; `--locked`
+# refuses a target this machine never pinned; a malformed `--sha256` is
+# refused; `--sha256` on a local file or a registry package is a usage error;
+# a bare name this machine knows no version of is refused, not fetched.
+fixture: remote_run_refuses_before_any_fetch.fixture
+requires: os:unix
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: XDG_STATE_HOME={work}/state
+step local_wins: jet run main
+exit: 0
+stdout: = "local\n"
+step http: jet run http://example.org/tool.jet
+exit: 1
+stderr: ~ "jet.RemoteSourceRefused" # E1805
+stderr: ~ "is plain http" # the diagnostic says it
+step locked_unpinned: jet run --locked https://example.org/tool.jet
+exit: 1
+stderr: ~ "jet.RemoteSourceRefused" # the registered code
+stderr: ~ "`--locked` refuses to fetch it" # the diagnostic says it
+step bad_sha256: jet run --sha256=xyz https://example.org/tool.jet
+exit: 1
+stderr: ~ "jet.RemoteSourceRefused" # the registered code
+stderr: ~ "isn't a sha256" # the diagnostic says it
+step sha256_on_local_file: jet run --sha256=0000000000000000000000000000000000000000000000000000000000000000 main.jet
+exit: 2
+stderr: ~ "E2104" # the registered code
+stderr: ~ "is a local path" # the diagnostic says it
+step sha256_on_package: jet run --sha256=0000000000000000000000000000000000000000000000000000000000000000 greet#1.0.0
+exit: 2
+stderr: ~ "E2104" # the registered code
+stderr: ~ "is a registry package" # the diagnostic says it
+step unknown_bare_name: jet run nosuchtool
+exit: 1
+stderr: ~ "jet.RemoteSourceRefused" # the registered code
+stderr: ~ "knows no version of it" # the diagnostic says it
+file: state/jet/remote absent

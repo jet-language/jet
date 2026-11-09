@@ -1,0 +1,201 @@
+// What a request reads about one open document: its text and tokens, and the
+// check of it with every open document overlaid. Checked facts answer for the
+// document only when the check read its current text; a request on stale or
+// unchecked text answers from its tokens alone, or not at all.
+use {
+    core.encoding.[Dyn]
+    jet_foundation.[Span, foundation_json_quote]
+    jet_lexer.[Lexed, Token, TOKEN_IDENT, token_text]
+    jet_semindex.[SemDef, SemIndex, SemKind, SemRef, SemSymbol]
+}
+
+LSPView: struct {
+    uri: String
+    doc: LSPDocument
+    lexed: Lexed
+    checked: LSPChecked
+    // The document's module in the checked index, when the check read its
+    // current text.
+    module_path: String?
+}
+
+// A source location in a checked module.
+LSPLocation: struct {
+    uri: String
+    source: String
+    span: Span
+}
+
+lsp_params_uri: fn(params: Dyn?) -> String? Never! {
+    lsp_text_member(lsp_param(params, "textDocument") ?? return None, "uri")
+}
+
+lsp_params_position: fn(params: Dyn?) -> LSPPos? Never! {
+    lsp_pos_from_json(lsp_param(params, "position") ?? return None)
+}
+
+// The open document a request names, lexed but not checked.
+lsp_open_document: fn(server: LSPServer, params: Dyn?) -> LSPDocument? Never! {
+    server.diagnostic_state.docs.get(lsp_params_uri(params) ?? return None)
+}
+
+// The loop republishes every document an edit touched before it answers a
+// request, so the document's last publication read the current texts; a
+// document never published is checked now.
+lsp_view: fn(server: LSPServer, params: Dyn?) -> LSPView? {
+    uri: lsp_params_uri(params) ?? return None
+    doc: server.diagnostic_state.docs.get(uri) ?? return None
+    checked: server.published.get(uri) ?? server.check(doc)
+    module_path := String?{None}
+    if lsp_checked_module_at(checked, doc.path) == .Val(index) {
+        if checked.modules[index].source == doc.text -> module_path = Val(checked.modules[index].path)
+    }
+    Val(LSPView{uri: uri, doc: doc, lexed: server.lex(doc), checked: checked, module_path: module_path})
+}
+
+lsp_module_index: fn(checked: LSPChecked, module_path: String) -> Int? Never! {
+    loop (index, module_ref) in checked.modules {
+        if module_ref.path == module_path -> return Val(index)
+    }
+    None
+}
+
+// A checked span as an editor location. A module with no file (generated
+// code) has no location.
+lsp_location: fn(checked: LSPChecked, module_path: String, span: Span) -> LSPLocation? Never! {
+    module_ref: checked.modules[lsp_module_index(checked, module_path) ?? return None]
+    if module_ref.physical_path == "" -> return None
+    Val(LSPLocation{uri: lsp_path_to_uri(module_ref.physical_path), source: module_ref.source, span: span})
+}
+
+lsp_location_json: fn(location: LSPLocation) -> String Never! {
+    "{{\"uri\":{foundation_json_quote(location.uri)},\"range\":{lsp_range_json(lsp_byte_span_to_range(location.source, lsp_clamped_span(location.source, location.span)))}}}"
+}
+
+lsp_span_holds: fn(span: Span, offset: Int) -> Bool Never! { span.start <= offset && offset <= span.end }
+
+// The identifier token at `offset`, its end included, so a cursor just past a
+// name still names it.
+lsp_ident_token_at: fn(lexed: Lexed, offset: Int) -> Token? Never! {
+    loop token in lexed.tokens {
+        if token.span.start > offset -> break
+        if token.kind == TOKEN_IDENT && lsp_span_holds(token.span, offset) -> return Val(token)
+    }
+    None
+}
+
+// A checked declaration, named by where its name is: the anchor a resolved
+// reference carries.
+LSPTarget: struct {
+    module_path: String
+    span: Span
+}
+
+lsp_same_target: fn(target: LSPTarget, module_path: String, span: Span) -> Bool Never! {
+    target.module_path == module_path && target.span.start == span.start && target.span.end == span.end
+}
+
+lsp_definition_at: fn(index: SemIndex, target: LSPTarget) -> SemDef? Never! {
+    loop definition in index.definitions {
+        if lsp_same_target(target, definition.def.module_path, definition.def.def_span) -> return Val(definition.def)
+    }
+    None
+}
+
+// The symbol built from a source definition.
+lsp_symbol_for: fn(symbols: [SemSymbol], def: SemDef) -> SemSymbol? Never! {
+    loop symbol in symbols {
+        if symbol.module_path != def.module_path || symbol.name != def.name -> next
+        if symbol.span == .Val(span) {
+            if span.start == def.def_span.start && span.end == def.def_span.end -> return Val(symbol)
+        }
+    }
+    None
+}
+
+// The declaration at `offset` in the document: the resolved reference
+// covering it, else the definition whose name covers it. The narrowest span
+// wins.
+lsp_target_at: fn(view: LSPView, offset: Int) -> LSPTarget? Never! {
+    index: view.checked.index ?? return None
+    module_path: view.module_path ?? return None
+    best := LSPTarget?{None}
+    width := -1
+    loop reference in index.references {
+        if reference.module_path != module_path || !lsp_span_holds(reference.span, offset) -> next
+        anchor: reference.target ?? next
+        if width < 0 || reference.span.end - reference.span.start < width {
+            best = Val(LSPTarget{module_path: anchor.module_path, span: anchor.def_span})
+            width = reference.span.end - reference.span.start
+        }
+    }
+    loop definition in index.definitions {
+        def: definition.def
+        if def.module_path != module_path || !lsp_span_holds(def.def_span, offset) -> next
+        if width < 0 || def.def_span.end - def.def_span.start < width {
+            best = Val(LSPTarget{module_path: def.module_path, span: def.def_span})
+            width = def.def_span.end - def.def_span.start
+        }
+    }
+    best
+}
+
+// Every checked occurrence of the declaration: its name when `declaration`,
+// then each reference to it, each once.
+lsp_occurrences: fn(index: SemIndex, target: LSPTarget, declaration: Bool) -> [SemRef] Never! {
+    found := [SemRef]{}
+    seen := [String:Bool]{}
+    if declaration {
+        if lsp_definition_at(index, target) == .Val(def) {
+            seen["{def.module_path}:{def.def_span.start}"] = true
+            found.push(SemRef{name: def.name, span: def.def_span, module_path: def.module_path, scope_identity: None, target: None, fact: None})
+        }
+    }
+    loop reference in index.references {
+        anchor: reference.target ?? next
+        if !lsp_same_target(target, anchor.module_path, anchor.def_span) -> next
+        key: "{reference.module_path}:{reference.span.start}"
+        if seen.has_key(key) -> next
+        seen[key] = true
+        found.push(reference.copy())
+    }
+    found
+}
+
+// The name an occurrence spells: a reference's span may cover a qualified
+// path (`module.name`), whose last segment is the name.
+lsp_name_span: fn(source: String, span: Span, name: String) -> Span Never! {
+    bytes: source.bytes()
+    whole: Span{start: span.start, end: span.end}
+    if span.end > bytes.len() || span.end - span.start < name.count_bytes() -> return whole
+    start: span.end - name.count_bytes()
+    if source.slice(start, span.end) == name -> return Span{start: start, end: span.end}
+    whole
+}
+
+lsp_token_name: fn(lexed: Lexed, token: Token) -> String Never! { token_text(lexed.tables, token) }
+
+// SymbolKind numbers of the protocol.
+lsp_symbol_kind: fn(kind: SemKind) -> Int? Never! {
+    if kind == {
+        .Module -> Val(2)
+        .Function(_) -> Val(12)
+        .Struct(_, _) -> Val(23)
+        .Enum(_, _) -> Val(10)
+        .Trait -> Val(11)
+        .Tag -> Val(26)
+        .Type(_) -> Val(5)
+        .Const -> Val(14)
+        .EnumVariant(_) -> Val(22)
+        .Field(_, _) -> Val(8)
+        .Local(_, _) | .Param(_) -> None
+    }
+}
+
+lsp_definition_parent: fn(kind: SemKind) -> String? Never! {
+    if kind == {
+        .EnumVariant(parent) -> Val(parent)
+        .Field(_, parent) -> Val(parent)
+        else -> None
+    }
+}

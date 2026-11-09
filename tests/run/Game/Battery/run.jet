@@ -1,8 +1,9 @@
 use {
     fs: core.files
     game: core.game
-    rl: core.game.raylib
     rt: core.rt
+    ui: core.ui
+    core.term.[Key]
     games
 }
 
@@ -26,6 +27,32 @@ battery_root: fn() -> String {
         if fs.exists("{candidate}/assets/player.atlas") -> return candidate
     }
     return "."
+}
+
+// One frame: the sprite, text and shape draws and every input query. The
+// script holds no events, so every key and button is up, none was pressed
+// or released, and the pointer has not moved from (0, 0).
+draw_frame: fn(frame: ui.Frame, atlas: ui.TextureAtlas) -> String {
+    frame.clear_background(ui.color(20, 24, 32, 255))
+    frame.draw_sprite(atlas, "hero", 100, 40)
+    frame.draw_rectangle(100, 40, 16, 16, ui.color(245, 245, 245, 255))
+    frame.draw_line(0, 239, 319, 239, ui.color(232, 35, 42, 255))
+    frame.draw_circle(160, 120, 6, ui.color(255, 59, 65, 255))
+    frame.draw_triangle(10, 200, 30, 200, 20, 180, ui.color(11, 11, 13, 255))
+    frame.draw_text("Jet games", 8, 8, 16, ui.color(255, 220, 120, 255))
+    space: Key.Char(' ')
+    down: frame.is_key_down(space)
+    up: frame.is_key_up(space)
+    pressed: frame.is_key_pressed(space)
+    released: frame.is_key_released(space)
+    button_down: frame.is_mouse_button_down(.Left)
+    button_up: frame.is_mouse_button_up(.Left)
+    clicked: frame.is_mouse_button_pressed(.Left)
+    let_go: frame.is_mouse_button_released(.Left)
+    x: frame.get_mouse_x()
+    y: frame.get_mouse_y()
+    at_origin: frame.get_mouse_position() == ui.point(0.0, 0.0)
+    "keyboard:{down}/{up}/{pressed}/{released} mouse:{button_down}/{button_up}/{clicked}/{let_go} at:{x},{y} origin:{at_origin}"
 }
 
 run: fn() {
@@ -70,26 +97,16 @@ run: fn() {
         print("frame={frame} fixed_tick={accumulator.current_tick} render_tick={render_tick}")
     }
 
-    window: rl.window_open(320, 240, "Jet games battery")
-    rl.set_target_fps(60)
-    atlas: rl.load_texture_atlas(atlas_path)
-    sound_effect: rl.load_sound(sound_path)
-    rl.begin_drawing(window)
-    rl.clear_background(rl.color(20, 24, 32, 255))
-    rl.draw_sprite(atlas, "hero", 100, 40)
-    rl.draw_rectangle(100, 40, 16, 16, rl.color(245, 245, 245, 255))
-    rl.draw_text("Jet games", 8, 8, 16, rl.color(255, 220, 120, 255))
-    rl.end_drawing()
-    played: rl.play_sound(sound_effect)
-    rl.window_ready(window)
-    rl.window_should_close(window)
-    key_space: rl.key_down("Space")
-    gamepad_a: rl.gamepad_down(0, "A")
-    gamepad_x: rl.gamepad_axis(0, "LeftX")
-    print("window=opened sound_play={played}")
-    print("input_matrix=keyboard:{key_space} gamepad_a:{gamepad_a} axis_left_x:{gamepad_x}")
-    print("atlas={atlas:Debug}")
-    rl.close_window(window)
+    window: ui.headless(width: 320, height: 240, script: [[ui.UIEvent]]{[ui.UIEvent]{}}) ?? panic("a 320x240 window")
+    atlas: ui.load_texture_atlas(atlas_path)
+    input := ""
+    loop frame in window.frames() {
+        if frame.index > 0 -> break
+        input = draw_frame(frame, atlas)
+    }
+    print("window=headless frames={window.checksums().len()}")
+    print("input_matrix={input}")
+    print("atlas={atlas.name()} loaded:{atlas.loaded()}")
 
     replay: game.Replay.record(replay_path)
     transcript: game.run(scene, replay: replay, frames: 600)

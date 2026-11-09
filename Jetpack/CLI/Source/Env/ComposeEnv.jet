@@ -139,8 +139,7 @@ NativeOutputFact: struct {
 
 CLI_NATIVE_OUTPUT_FACTS: comptime { [NativeOutputFact]{
     {package: "tzdata", relative: "share/zoneinfo", variable: "TZDIR", platform: NativeOutputPlatform.Any},
-    {package: "vulkan-loader", relative: "lib", variable: "LD_LIBRARY_PATH", platform: NativeOutputPlatform.Linux},
-    {package: "raylib", relative: "lib", variable: "LD_LIBRARY_PATH", platform: NativeOutputPlatform.Linux}
+    {package: "vulkan-loader", relative: "lib", variable: "LD_LIBRARY_PATH", platform: NativeOutputPlatform.Linux}
 } }
 
 // The two repo dev tools project the admitted native binaries named by $JET
@@ -592,12 +591,28 @@ cli_reject_unprompted_acquisition: fn(verification: &StoreVerification, theme: T
     }
     live.clear()
     download := planned
-    loop adapter in plan.adapters {
-        download.add_item(PlanItem{package: adapter.name, state: PlanState.New, download_bytes: None, disk_bytes: None})
-    }
+    adapter_probe: cli_provider_ctx(roots, flags, cli_effective_fixtures(flags), cli_scope_project_dir(scope), None, Val(roots))
+    loop adapter in plan.adapters -> download.add_item(cli_adapter_plan_item(roots, adapter_probe, adapter, plan.table))
     if download.items.len() == 0 -> return Ok(download)
     if theme.confirm_download(label, download, flags.explain_plan, flags.assume_yes) -> return Ok(download)
     Err(CLIError.Reported(EXIT_USAGE))
+}
+
+// An adapter's download-plan row. A local-source adapter whose fresh identity
+// matches its recorded Hangar entry is cached. A remote source is never
+// fetched before the confirmation gate, so it stays new.
+cli_adapter_plan_item: fn(roots: HangarRoots, ctx: ProviderCtx, adapter: AdapterPlan, table: SourceTable) -[FS, Env, Exec, Net, Time, Time.Wait, Rand]> PlanItem Never! {
+    new: PlanItem{package: adapter.name, state: PlanState.New, download_bytes: None, disk_bytes: None}
+    source: ProviderRef.classify(adapter.source) ?? return new
+    if source.provider == {
+        .Path -> {}
+        else -> return new
+    }
+    expected: provider_adapter_cache_expectation(adapter, table, ctx) ?? return new
+    reference: RunPlan.adapter_reference(adapter)
+    if !store_cache_candidate_matches(roots, reference, expected) -> return new
+    entry: store_find_by_reference_read_only(roots, reference) ?? return new
+    PlanItem{package: adapter.name, state: PlanState.Cached, download_bytes: Val(0), disk_bytes: Val(store_dir_size(entry.out))}
 }
 
 // Every integration fact must still be executable: disclosed tasks keep their

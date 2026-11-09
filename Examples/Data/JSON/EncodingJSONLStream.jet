@@ -37,14 +37,14 @@ drain: fn(label: String, path: Path, limits: encoding.EncodingLimits) IOError! {
     input: files.open(path) ?? return Err(err)
     reader := jsonl.reader(input, limits) ?? {
         print("{label}: refused {err}")
-        return Ok(())
+        return Ok()
     }
     loop {
         if reader.next() == {
             .Ok(next) -> {
                 row: next ?? {
                     print("{label}: eof")
-                    return Ok(())
+                    return Ok()
                 }
                 print("{label}: record {json.canonical(row) ?? "?"}")
             }
@@ -54,7 +54,7 @@ drain: fn(label: String, path: Path, limits: encoding.EncodingLimits) IOError! {
                     .Ok(_) -> print("{label}: read again succeeded")
                     .Err(again) -> print("{label}: read again {again.kind == error.kind && again.byte_offset == error.byte_offset}")
                 }
-                return Ok(())
+                return Ok()
             }
         }
     }

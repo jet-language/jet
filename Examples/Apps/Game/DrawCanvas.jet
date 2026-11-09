@@ -1,0 +1,35 @@
+package: {
+    name: "draw_canvas"
+    authority: {
+    allow: [Env, FS, IO, Net, Time]
+    }
+}
+use {
+    files: core.files
+    ui: core.ui
+}
+
+// One frame drawn by Jet's software rasterizer on a headless window: a clear,
+// an opaque rectangle clipped at the top-left corner, two translucent
+// rectangles blended src-over and two lines of bitmap-font text. The program
+// saves the screen as a PAM image; the golden pins its SHA-256 on every tier.
+run: fn() {
+    window: ui.headless(width: 64, height: 48, script: [[ui.UIEvent]]{[ui.UIEvent]{}}) ?? panic("a 64x48 window")
+    loop frame in window.frames() {
+        if frame.index > 0 -> break
+        frame.clear_background(ui.color(10, 20, 30, 255))
+        frame.draw_rectangle(-4, -4, 24, 20, ui.color(200, 40, 40, 255))
+        frame.draw_rectangle(12, 8, 30, 24, ui.color(40, 200, 90, 128))
+        frame.draw_rectangle(30, 20, 40, 40, ui.color(255, 255, 255, 64))
+        frame.draw_text("Hi!\nJet", 4, 28, 10, ui.color(255, 220, 120, 255))
+    }
+    save_pam(window.load_image_from_screen(), "frame.pam")
+    print("canvas=64x48 frame=presented")
+}
+
+// An image as a PAM file (P7, RGB_ALPHA).
+save_pam: fn(image: ui.Image, path: String) {
+    bytes := "P7\nWIDTH {image.width()}\nHEIGHT {image.height()}\nDEPTH 4\nMAXVAL 255\nTUPLTYPE RGB_ALPHA\nENDHDR\n".bytes()
+    bytes.extend(image.pixels())
+    files.write_bytes(path, bytes) ?? panic("write {path}: {err}")
+}

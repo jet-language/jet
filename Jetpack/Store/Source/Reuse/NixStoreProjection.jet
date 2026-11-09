@@ -221,16 +221,15 @@ store_reuse_has_nix_store_output: fn(producer: ProducerRecord) -> Bool Never! {
 
 store_reuse_store_fact: fn(value: String?) -> String? Never! {
     fact: value ?? return None
-    if !fact.starts_with("/nix/store/") -> return None
+    if !store_path_below(fact, "/nix/store") -> return None
     Val(fact)
 }
 
 // Rust `add_nix_projection_path`: one plain `/nix/store/<name>` per digest;
 // a logical path may not map to two digests.
 store_reuse_add_nix_projection_path: fn(logical_digests: &[String: String], logical: String, digest: String) StoreError! {
-    if !logical.starts_with("/nix/store/") -> return Err(StoreError.Other("invalid canonical Nix output path `{logical}`"))
-    name: logical.removeprefix("/nix/store/")
-    if name == "" || name.contains("/") || name == "." || name == ".." -> return Err(StoreError.Other("invalid canonical Nix output path `{logical}`"))
+    name: files.basename(logical)
+    if logical != "/nix/store/{name}" || name == "" || name == "." || name == ".." -> return Err(StoreError.Other("invalid canonical Nix output path `{logical}`"))
     if !store_reuse_single_component(digest) -> return Err(StoreError.Other("invalid Hangar digest `{digest}` for `{logical}`"))
     if logical_digests.get(logical) == {
         .Val(existing) -> {

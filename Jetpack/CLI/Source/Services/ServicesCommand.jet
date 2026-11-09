@@ -457,21 +457,21 @@ cli_services_health: fn(verification: &StoreVerification, theme: Theme, parsed: 
     env := cli_compose_env(verification, theme, roots, parsed.flags, plan) ?? return cli_exit_for(theme, err)
     all_healthy := true
     if parsed.flags.json {
-        records := [String]{}
+        records := [Dyn]{}
         loop svc in targets {
             state: cli_service_health_label(services_health_one(project_dir, env, svc), true)
             all_healthy = all_healthy && state.healthy
-            lifecycle: if services_lifecycle_json(project_dir, svc.name) == {
-                .Val(json) -> json
-                .None -> "null"
+            lifecycle: if services_lifecycle_tree(project_dir, svc.name) == {
+                .Val(tree) -> tree
+                .None -> Dyn.Null
                 .Err(error) -> {
                     eprint("services JSON: {error.message}")
                     return EXIT_USAGE
                 }
             }
-            records.push("{{\"service\":{cli_json_quote(svc.name)},\"health\":{cli_json_quote(state.label)},\"lifecycle\":{lifecycle}}}")
+            records.push(Dyn.Object(["service": Dyn.Text(svc.name), "health": Dyn.Text(state.label), "lifecycle": lifecycle]))
         }
-        print("[{records.join(",")}]")
+        print(cli_json_render(Dyn.Array(records)))
         return if all_healthy -> EXIT_OK else -> EXIT_USER_ERROR
     }
     loop svc in targets {

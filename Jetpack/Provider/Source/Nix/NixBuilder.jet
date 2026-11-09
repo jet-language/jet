@@ -189,7 +189,7 @@ provider_nix_build_repository_output: fn(verification: &StoreVerification, roots
     info: files.stat(flake_path) ?? return Err(NativeNixBuildError.Invalid("flake source `{flake_path}`: {err}"))
     if info.is_symlink || !info.is_file -> return Err(NativeNixBuildError.Invalid("flake source `{flake_path}` is not a real file"))
     flake: files.canonicalize(flake_path) ?? return Err(NativeNixBuildError.Invalid("canonicalizing flake source: {err}"))
-    if flake != project && !flake.starts_with("{project}/") {
+    if !foundation_paths.is_relative_to(foundation_paths.of(flake), foundation_paths.of(project)) {
         return Err(NativeNixBuildError.Invalid("flake source `{flake}` escapes project root `{project}`"))
     }
     source: files.read(flake) ?? return Err(NativeNixBuildError.Invalid("reading flake source `{flake}`: {err}"))
@@ -267,7 +267,7 @@ nix_builder_validate_source_dir: fn(path: String) NativeNixBuildError! -[FS]> {
 nix_builder_validate_builder: fn(evaluation: NixNativeDerivation) NativeNixBuildError! {
     builder: evaluation.builder
     if !builder.starts_with("/") -> return Err(NativeNixBuildError.Invalid("builder `{builder}` is not an absolute path"))
-    if builder == NIX_DEFAULT_STORE_DIR || builder.starts_with("{NIX_DEFAULT_STORE_DIR}/") {
+    if foundation_paths.is_relative_to(foundation_paths.of(builder), foundation_paths.of(NIX_DEFAULT_STORE_DIR)) {
         return Err(NativeNixBuildError.Invalid("builders from `/nix/store` require an admitted native tool closure"))
     }
 }

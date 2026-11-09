@@ -296,10 +296,10 @@ Expected files are read-only in ordinary runs.
 ## Latency and runtime-query boundaries
 
 D-DEV3 is a wall-clock promise: a save gives diagnostic feedback in well under
-200ms. `Compiler/JetLSP/Tests/Integration/DevLatencyTests.jet` measures `Examples/Collections/WordCount.jet`
-with `BUDGET_MS: u128 = 200`, uses five timed rounds after warm-up, and keeps
-watch coalescing below 5ms with idle polling at most 10ms. This is the user
-latency contract, not a claim that every machine has one fixed runtime.
+200ms. No running test measures it yet: the Rust-era
+`DevLatencyTests.jet` transliteration never compiled and was removed with the
+other Rust-era JetLSP tests (#6650). This is the user latency contract, not a
+claim that every machine has one fixed runtime.
 
 Layout infeasibility is deliberately different. `tests/layout.rs` records that
 an infeasible constraint is a runtime query followed by a panic, not a static

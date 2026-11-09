@@ -407,33 +407,6 @@ pkg_mask_inline_package_source: fn(source: String) -> MaskedInlineSource InlineP
     Ok(MaskedInlineSource{source: masked, block: block})
 }
 
-// The byte where a new leading `package: { … }` carrier goes: after the
-// byte-zero launch header and leading comments, before any `///` doc lines
-// of the first declaration.
-pkg_inline_package_insertion_offset: fn(source: String) -> Int Never! {
-    bytes: source.bytes()
-    first: pkg_skip_inline_trivia(bytes, 0)
-    at := pkg_line_start(bytes, first)
-    loop index in at..<first {
-        if !pkg_is_ascii_space_code(Int.from_u8(bytes[index])) -> return first
-    }
-    loop at > 0 {
-        previous: pkg_line_start(bytes, at - 1)
-        if !pkg_bytes_text(bytes, previous, at).trim_start().starts_with("///") -> break
-        at = previous
-    }
-    at
-}
-
-pkg_line_start: fn(bytes: [U8], at: Int) -> Int Never! {
-    index := at - 1
-    loop index >= 0 {
-        if Int.from_u8(bytes[index]) == 10 -> return index + 1
-        index -= 1
-    }
-    0
-}
-
 pkg_inline_package_block: fn(keyword: Int, open: Int, end: Int) -> InlinePackageBlock Never! {
     close: if end > 0 -> end - 1 else -> 0
     InlinePackageBlock{

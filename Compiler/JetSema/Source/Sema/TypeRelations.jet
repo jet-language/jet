@@ -458,12 +458,113 @@ sema_never_failing_return_fits: fn(required: Type, offered: Type) -> Bool Never!
     false
 }
 
+// E0638 (#6281 c123): the first function type held inside the slot's type (a
+// list's element, an optional's payload, a tuple field, a parameter or the
+// return of a function type) that differs from the offered value's at the
+// same place in whether it can fail; the answer is whether the slot's can.
+// The fn-value adapter (IR ir_fn_widen) converts a standalone function value
+// between its failing and non-failing forms, and its converting closure
+// passes each argument on through the same adapter: a non-failing function
+// argument widens into the failing form the value's parameter takes
+// (sema_type_parameter_fn_failure_gap). Nothing converts the functions a
+// collection already holds or a function returns, so such a value can't
+// fill the slot. `nested` is false for the slot itself, where the two forms
+// convert.
+sema_type_nested_fn_failure_gap: fn(required: Type, offered: Type, nested: Bool) -> Bool? Never! {
+    if required == {
+        .Fn(required_params, required_ret, _, _, _, _) -> if offered == .Fn(offered_params, offered_ret, _, _, _, _) {
+            required_fails: sema_fn_return_fails(required_ret)
+            if nested && !sema_fn_return_is_never(required_ret) && !sema_fn_return_is_never(offered_ret) && required_fails != sema_fn_return_fails(offered_ret) -> return Val(required_fails)
+            if required_params.len() == offered_params.len() {
+                loop (index, required_param) in required_params {
+                    found: if nested -> sema_type_nested_fn_failure_gap(required_param, offered_params[index], true) else -> sema_type_parameter_fn_failure_gap(required_param, offered_params[index])
+                    if found == .Val(gap) -> return Val(gap)
+                }
+            }
+            if required_ret == .Val(required_value) && offered_ret == .Val(offered_value) -> return sema_type_nested_fn_failure_gap(sema_fn_return_success(required_value), sema_fn_return_success(offered_value), true)
+        }
+        .List(required_inner) -> if offered == .List(offered_inner) -> return sema_type_nested_fn_failure_gap(required_inner, offered_inner, true)
+        .Option(required_inner) -> if offered == .Option(offered_inner) -> return sema_type_nested_fn_failure_gap(required_inner, offered_inner, true)
+        .Shared(required_inner) -> if offered == .Shared(offered_inner) -> return sema_type_nested_fn_failure_gap(required_inner, offered_inner, true)
+        .Map(required_key, _, required_value) -> if offered == .Map(offered_key, _, offered_value) {
+            if sema_type_nested_fn_failure_gap(required_key, offered_key, true) == .Val(found) -> return Val(found)
+            return sema_type_nested_fn_failure_gap(required_value, offered_value, true)
+        }
+        .FixedList(required_element, _) -> if offered == .FixedList(offered_element, _) -> return sema_type_nested_fn_failure_gap(required_element, offered_element, true)
+        .Tuple(required_fields) -> if offered == .Tuple(offered_fields) {
+            if required_fields.len() != offered_fields.len() -> return None
+            loop (index, required_field) in required_fields {
+                if sema_type_nested_fn_failure_gap(required_field.ty, offered_fields[index].ty, true) == .Val(found) -> return Val(found)
+            }
+        }
+        .Union(required_members) -> if offered == .Union(offered_members) {
+            if required_members.len() != offered_members.len() -> return None
+            loop (index, required_member) in required_members {
+                if sema_type_nested_fn_failure_gap(required_member, offered_members[index], true) == .Val(found) -> return Val(found)
+            }
+        }
+        .Result(required_ok, required_err) -> if offered == .Result(offered_ok, offered_err) {
+            if sema_type_nested_fn_failure_gap(required_ok, offered_ok, true) == .Val(found) -> return Val(found)
+            return sema_type_nested_fn_failure_gap(required_err, offered_err, true)
+        }
+        .Apply(required_name, required_args) -> if offered == .Apply(offered_name, offered_args) {
+            if required_name != offered_name || required_args.len() != offered_args.len() -> return None
+            loop (index, required_arg) in required_args {
+                if sema_type_nested_fn_failure_gap(required_arg, offered_args[index], true) == .Val(found) -> return Val(found)
+            }
+        }
+        // A tag keeps its payload's representation; one tag over the slot
+        // keeps the slot's own nesting.
+        .Tagged(_, required_inner) -> return sema_type_nested_fn_failure_gap(required_inner, sema_expr_unwrap_tag(offered), nested)
+        else -> {}
+    }
+    None
+}
+
+// A function parameter of a standalone function value the slot converts: a
+// slot parameter that cannot fail, where the value's can, widens (the
+// argument returns Ok of what it returns), but nothing narrows a failing
+// argument for a value that takes a non-failing one, and the functions
+// inside the parameter keep their form.
+sema_type_parameter_fn_failure_gap: fn(required: Type, offered: Type) -> Bool? Never! {
+    if required == .Fn(required_params, required_ret, _, _, _, _) {
+        if offered == .Fn(offered_params, offered_ret, _, _, _, _) {
+            never: sema_fn_return_is_never(required_ret) || sema_fn_return_is_never(offered_ret)
+            if !never && sema_fn_return_fails(required_ret) && !sema_fn_return_fails(offered_ret) -> return Val(true)
+            if required_params.len() == offered_params.len() {
+                loop (index, required_param) in required_params {
+                    if sema_type_nested_fn_failure_gap(required_param, offered_params[index], true) == .Val(found) -> return Val(found)
+                }
+            }
+            if required_ret == .Val(required_value) && offered_ret == .Val(offered_value) -> return sema_type_nested_fn_failure_gap(sema_fn_return_success(required_value), sema_fn_return_success(offered_value), true)
+            return None
+        }
+    }
+    sema_type_nested_fn_failure_gap(required, offered, true)
+}
+
+// A function type's return is its Result box: the representation a caller
+// of the value reads (IR ir_fn_widens).
+sema_fn_return_fails: fn(ret: Type?) -> Bool Never! {
+    if ret == .Val(value) -> return sema_expr_unwrap_tag(value) == .Result(_, _)
+    false
+}
+
+sema_fn_return_success: fn(value: Type) -> Type Never! {
+    if value == .Result(ok, _) -> return ok.copy()
+    value.copy()
+}
+
 // State-free assignment cases. Nominal aliases, trait implementation, and
 // knowledge-loss gates require the module registries owned by the full checker.
 sema_type_assignable: fn(required: Type, offered: Type) -> Bool Never! {
     // Value-slot comparison is recursive: callable metadata may differ at any
     // container depth, but required labels, effects and view origins still hold.
-    if sema_type_carrier_compatible(required, offered) -> return sema_type_obligations_satisfy(required, offered)
+    if sema_type_carrier_compatible(required, offered) {
+        // A nested function differs in failure, which no adapter converts (E0638).
+        if sema_type_nested_fn_failure_gap(required, offered, false) != None -> return false
+        return sema_type_obligations_satisfy(required, offered)
+    }
     if sema_type_compute_tensor_compatible(required, offered) -> return true
     if required == {
         .List(required_element) -> if offered == .FixedList(offered_element, _) -> return type_identity_equal(required_element, offered_element)
@@ -532,6 +633,11 @@ sema_type_name_is_generic: fn(generic_params: [TGenericParam], name: String) -> 
 // its entry, and never per name.
 sema_type_graph_resolve_named: fn(graph: SemaRegistrationGraph, name: String, caller: Int) -> Type Never! {
     if name == "" || name == "Unit" || name == "Err" || name == "Never" -> return Type.Named{name: name}
+    // A bare `Group` the caller neither declares nor imports is the task
+    // group handle `task.group` binds, never a Core struct spelled `Group`
+    // (core.data's carrier, core.sys's group entry, core.ui.xkb's key group)
+    // that happens to be loaded.
+    if name == "Group" && (caller < 0 || sema_registration_lookup_name_at(graph, caller, graph.modules[caller].module_identity, name) == None) -> return Type.Named{name: name}
     resolved: sema_type_graph_lookup_symbol_at(graph, caller, name) ?? return Type.Named{name: name}
     if sema_resolved_kind(graph, resolved) == {
         .Trait -> Type.TraitObject{bounds: [String]{sema_type_graph_canonical_symbol_name(graph, resolved)}}
@@ -826,7 +932,7 @@ sema_type_graph_declares_name: fn(graph: SemaRegistrationGraph, name: String) ->
 sema_type_unknown_written_names: fn(graph: SemaRegistrationGraph, caller: Int, ty: Type, span: Span, generic_names: [String], diagnostics: &[Diagnostic]) {
     if ty == {
         .Named(name) -> {
-            if sema_type_written_name_unknown(graph, caller, name, generic_names) -> diagnostics.push(sema_unknown_type_name(name, span))
+            if sema_type_written_name_unknown(graph, caller, name, generic_names) -> diagnostics.push(sema_unknown_type_name(name, span, sema_type_declared_names(graph, caller)))
         }
         .Apply(name, args) -> {
             if sema_type_written_name_unknown(graph, caller, name, generic_names) -> sema_unknown_generic_type_name(name, span, diagnostics)
@@ -1201,6 +1307,10 @@ sema_type_graph_unique_type_owner: fn(graph: SemaRegistrationGraph, caller_index
         if caller_is_core && !owner_row.module_identity.starts_with("<corelib>/") -> next
         nominal: owner_row.nominals[owner.row]
         if nominal.symbol.name != name -> next
+        // A bare unapplied `Group` is the task group (sema_type_graph_resolve_named),
+        // so only a generic `Group<K, V>` (core.data's) can own the bare applied
+        // spelling; core.sys's and core.ui.xkb's records never compete for it.
+        if name == "Group" && nominal.generic_params.len() == 0 -> next
         if nominal.kind != SemaRegistrationNominalKind.Struct
             && nominal.kind != SemaRegistrationNominalKind.Enum
             && nominal.kind != SemaRegistrationNominalKind.Distinct

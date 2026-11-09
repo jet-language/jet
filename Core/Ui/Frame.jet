@@ -1,0 +1,1027 @@
+use {
+    math: core.math
+    text: core.text
+    font: core.ui.font
+    core.ui.[UIRect]
+}
+// __core_ui_frame — the window frame Jet draws for itself (client-side
+// decorations), a private part of core.ui.
+//
+// Backend-neutral: it paints the title bar and the soft shadow ring around
+// a window into premultiplied ARGB8888 pixels (bytes B, G, R, A, as wl_shm
+// ARGB8888 is on every little-endian target), says which part of the frame
+// a point is on, and holds the frame's measures. A backend places the
+// pieces; on Wayland they are subsurfaces around the program's content.
+// Shapes are signed-distance coverage painted with core.ui.font's `blend`,
+// in linear light like the title text.
+//
+// The look is the Unified frame of the #6701 mockups in the light theme: a
+// header with the app's icon on the left, the title centred where it fits,
+// three round buttons on the right, rounded corners, and a wide soft
+// shadow over a tight contact one. Its measures stay private until the
+// owner decides the frame's style.
+//
+// Coordinates: logical units have the window's top-left corner (the
+// header's) at 0, 0; pixels are logical units times the scale, given in
+// 120ths as wp_fractional_scale_v1 gives it.
+
+// The measures, in logical units.
+HEADER: 46
+RADIUS: 12
+// Room for the shadow on each side of the window.
+MARGIN: 64
+// How far outside the window's edge the pointer still grips it to resize,
+// and how near a corner an edge grip resizes both ways.
+GRIP: 8
+CORNER_GRIP: 20
+BUTTON_RADIUS: 14
+// The buttons' centres: the close button's this far from the right edge,
+// each next one a step further left.
+BUTTON_INSET: 24
+BUTTON_STEP: 36
+// For a finger (`look.coarse`) the buttons spread out: each hit region is
+// a step wide and the header high, 46 x 46 units, past the 44 x 44 a touch
+// target needs.
+BUTTON_INSET_COARSE: 23
+BUTTON_STEP_COARSE: 46
+ICON_SIZE: 22
+ICON_X: 14
+TITLE_GAP: 10
+// The keyboard focus ring: a solid line this wide, this far outside the
+// focused button's disc.
+FOCUS_GAP: 2
+FOCUS_LINE: 2
+// `button_index` of no button.
+NO_BUTTON: -1
+// The smallest window: the icon and the spread-out buttons across, and the
+// shadow kit's box down.
+MIN_WIDTH: 176
+MIN_HEIGHT: 56
+// Two presses on the title this close together, in milliseconds, toggle
+// maximizing.
+DOUBLE_CLICK_MS: 400
+// The shadow kit's window, in logical units: just big enough that every
+// side has a straight run past its corners (2 * RADIUS + 2 wide, and the
+// longest shadow drop, 12, on each side of that tall).
+KIT_BOX_WIDTH: 26
+KIT_BOX_HEIGHT: 50
+
+// xdg_toplevel's resize edges, which these bits make: top 1, bottom 2,
+// left 4, right 8, and their sums for the corners.
+EDGE_TOP: 1
+EDGE_BOTTOM: 2
+EDGE_LEFT: 4
+EDGE_RIGHT: 8
+
+// The light theme's colours, 0xAARRGGBB with straight alpha.
+HEADER_ACTIVE: 0xFFEDEDF1
+HEADER_INACTIVE: 0xFFF6F6F8
+TEXT_ACTIVE: 0xFF1C1C21
+// An unfocused window is still operable, so its title stays readable
+// (4.5:1 on its header) rather than taking the disabled-text exception.
+TEXT_INACTIVE: 0xFF62626C
+BORDER: 0xFFDCDCE2
+OUTLINE: 0x2E000000
+CLOSE_HOVER: 0xFFE5484D
+CLOSE_PRESS: 0xFFC6383D
+BUTTON_IDLE: 0x0F000000
+BUTTON_HOVER: 0x22000000
+BUTTON_PRESS: 0x36000000
+SHADOW_ACTIVE: 0x59000000
+SHADOW_INACTIVE: 0x2E000000
+SHADOW_NEAR: 0x24000000
+// Jet red, on a light title bar.
+JET_RED: 0xFFE8232A
+WHITE: 0xFFFFFFFF
+
+// A title-bar button.
+FrameButton: enum {
+    Nothing
+    Minimize
+    Maximize
+    Close
+}
+
+// The part of the frame a point is on. `Edge` carries xdg_toplevel's
+// resize edge.
+FrameSpot: enum {
+    Outside
+    Content
+    Title
+    Button(FrameButton)
+    Edge(Int)
+}
+
+// What the header shows. `square` drops the rounded corners and the
+// shadow (a maximized, tiled or fullscreen window); `maximized` picks the
+// restore glyph. `coarse` spreads the buttons for a finger: the latest
+// press on the frame was a touch. `focus` is the button with the keyboard
+// focus, ringed (`Nothing` while the content has it). `icon` is
+// `icon_side` square RGBA rows, empty for Jet's own mark.
+FrameLook: struct {
+    title: String
+    active: Bool
+    square: Bool
+    maximized: Bool
+    coarse: Bool
+    hover: FrameButton
+    pressed: FrameButton
+    focus: FrameButton
+    icon: [U8]
+    icon_side: Int
+}
+
+// The shadow and outline of a small window, `box_width` by `box_height`
+// pixels with `margin` pixels around it, for one scale and activation.
+// Any larger window's ring is this one's corners with its straight middle
+// rows and columns repeated: see `kit_index`.
+Kit: struct {
+    active: Bool
+    scale120: Int
+    margin: Int
+    box_width: Int
+    box_height: Int
+    width: Int
+    height: Int
+    pixels: [U8]
+}
+
+// A row of a window's shadow ring: `left`'s bytes, `fill_count` copies of
+// the pixel `fill` (a little-endian ARGB8888 word), then `right`'s bytes.
+KitRow: struct {
+    left: [U8]
+    fill: Int
+    fill_count: Int
+    right: [U8]
+}
+
+// The title face, its glyphs, and the kits made so far.
+Painter: struct {
+    bold: font.Face
+    cache: font.GlyphCache
+    kits: [Kit]
+}
+
+painter: fn() -> Painter {
+    Painter{bold: font.bold(), cache: font.cache(), kits: [Kit]{}}
+}
+
+// `logical` units in pixels at `scale120`, rounded half away from zero as
+// wp_fractional_scale_v1 asks.
+px: fn(logical: Int, scale120: Int) -> Int {
+    if logical < 0 -> return -((-logical * scale120 + 60) /% 120)
+    (logical * scale120 + 60) /% 120
+}
+
+// ---- hit testing -------------------------------------------------------
+
+// The part of a `width` x `height` logical-unit window (header included)
+// the point (`x`, `y`) is on. A square window (`look.square`) has no
+// resize grip outside.
+spot: fn(x: Float, y: Float, width: Int, height: Int, look: FrameLook) -> FrameSpot {
+    w: Float{width}
+    h: Float{height}
+    if x < 0.0 || y < 0.0 || x >= w || y >= h {
+        grip: Float{GRIP}
+        if look.square || x < -grip || y < -grip || x >= w + grip || y >= h + grip -> return FrameSpot.Outside
+        corner: Float{CORNER_GRIP}
+        edge := 0
+        if x < 0.0 -> edge += EDGE_LEFT else if x >= w -> edge += EDGE_RIGHT
+        if y < 0.0 -> edge += EDGE_TOP else if y >= h -> edge += EDGE_BOTTOM
+        if edge == EDGE_LEFT || edge == EDGE_RIGHT {
+            if y < corner -> edge += EDGE_TOP else if y >= h - corner -> edge += EDGE_BOTTOM
+        }
+        if edge == EDGE_TOP || edge == EDGE_BOTTOM {
+            if x < corner -> edge += EDGE_LEFT else if x >= w - corner -> edge += EDGE_RIGHT
+        }
+        return FrameSpot.Edge(edge)
+    }
+    header: Float{HEADER}
+    if y >= header -> return FrameSpot.Content
+    button: button_at(x, width, look)
+    if button != .Nothing -> return FrameSpot.Button(button)
+    FrameSpot.Title
+}
+
+// The button whose hit region holds column `x` of the header of a
+// `width`-unit window. The regions are rectangles the header's full height
+// and a button step wide (36 x 46 units, past the 24 x 24 minimum; 46 x 46
+// for a finger), side by side without overlap, the close button's running
+// on to the window's right edge; the painted discs are smaller than the
+// regions.
+button_at: fn(x: Float, width: Int, look: FrameLook) -> FrameButton {
+    step: button_step(look)
+    half: Float{step} / 2.0
+    loop k in 0..<3 {
+        cx: Float{width - button_inset(look) - k * step}
+        right: if k == 0 -> Float{width} else -> cx + half
+        if x >= cx - half && x < right -> return button_of(k)
+    }
+    FrameButton.Nothing
+}
+
+// The close button's centre's distance from the right edge, and the step
+// to each next button, in logical units.
+button_inset: fn(look: FrameLook) -> Int { if look.coarse -> BUTTON_INSET_COARSE else -> BUTTON_INSET }
+button_step: fn(look: FrameLook) -> Int { if look.coarse -> BUTTON_STEP_COARSE else -> BUTTON_STEP }
+
+// The buttons from the right: close, maximize, minimize.
+button_of: fn(k: Int) -> FrameButton {
+    if k == 0 -> return FrameButton.Close
+    if k == 1 -> return FrameButton.Maximize
+    FrameButton.Minimize
+}
+
+// Where `which` sits from the right, as `button_of` counts; -1 for none.
+button_index: fn(which: FrameButton) -> Int {
+    if which == {
+        .Close -> 0
+        .Maximize -> 1
+        .Minimize -> 2
+        .Nothing -> NO_BUTTON
+    }
+}
+
+// The centre of `which`'s disc on a `width`-unit window, in logical units
+// from the window's left edge.
+button_centre: fn(which: FrameButton, width: Int, look: FrameLook) -> Int {
+    width - button_inset(look) - max_int(button_index(which), 0) * button_step(look)
+}
+
+// Keyboard focus across the buttons in reading order (minimize, maximize,
+// close): the next one `step` 1 on, or with `step` -1 back, wrapping. From
+// `Nothing` it enters at the first, or going back at the last.
+next_control: fn(current: FrameButton, step: Int) -> FrameButton {
+    if current == .Nothing -> return if step < 0 -> FrameButton.Close else -> FrameButton.Minimize
+    // Reading order is button_of's from the right, reversed.
+    at: 2 - button_index(current)
+    button_of(2 - (at + step + 3) %% 3)
+}
+
+// The title's left edge in a `window`-wide header when the space between
+// `start` and `end` is free for it and it is `advance` wide: centred on the
+// window when it fits there, else shifted only as far as it must to stay
+// inside that space.
+title_left: fn(window: Float, start: Float, end: Float, advance: Float) -> Float {
+    fmax(fmin((window - advance) / 2.0, end - advance), start)
+}
+
+// ---- the shadow kit ----------------------------------------------------
+
+// Which of `p.kits` is the kit for `look.active` at `scale120`, made once
+// and kept: the four latest stay.
+kit: fn(&p: Painter, look: FrameLook, scale120: Int) -> Int {
+    loop at in 0..<p.kits.len() {
+        if p.kits[at].active == look.active && p.kits[at].scale120 == scale120 -> return at
+    }
+    if p.kits.len() >= 4 {
+        _: p.kits.remove(0, .Slot)
+    }
+    p.kits.push(draw_kit(look, scale120))
+    p.kits.len() - 1
+}
+
+draw_kit: fn(look: FrameLook, scale120: Int) -> Kit {
+    s: Float{scale120} / 120.0
+    margin: px(MARGIN, scale120)
+    box_width: px(KIT_BOX_WIDTH, scale120)
+    box_height: px(KIT_BOX_HEIGHT, scale120)
+    width: box_width + 2 * margin
+    height: box_height + 2 * margin
+    pixels := transparent(width * height)
+    x0: Float{margin}
+    y0: Float{margin}
+    x1: Float{margin + box_width}
+    y1: Float{margin + box_height}
+    r: Float{RADIUS} * s
+    // A tight contact shadow under a wide soft one, then the outline just
+    // outside the window's edge.
+    paint(pixels, width, height, shadow_mask(width, height, x0, y0, x1, y1, r, 1.0 * s, 1.5 * s), SHADOW_NEAR)
+    if look.active {
+        paint(pixels, width, height, shadow_mask(width, height, x0, y0, x1, y1, r, 12.0 * s, 22.0 * s), SHADOW_ACTIVE)
+    } else {
+        paint(pixels, width, height, shadow_mask(width, height, x0, y0, x1, y1, r, 5.0 * s, 11.0 * s), SHADOW_INACTIVE)
+    }
+    paint(pixels, width, height, ring_mask(x0, y0, x1, y1, r, fmax(1.0, s)), OUTLINE)
+    Kit{active: look.active, scale120: scale120, margin: margin, box_width: box_width, box_height: box_height, width: width, height: height, pixels: pixels}
+}
+
+// Where pixel `at` of a window side `size` pixels long falls in the kit's
+// box side `box` long: the near corner as it is, the far corner from the
+// far end, and everything between on the box's middle.
+kit_index: fn(at: Int, size: Int, box: Int) -> Int {
+    half: box /% 2
+    if at < half -> return at
+    if at >= size - (box - half) -> return at - (size - box)
+    half
+}
+
+// The byte offset in `kit.pixels` of pixel (`x`, `y`) around a `width` x
+// `height` pixel window; either may be negative, out in the margin.
+kit_offset: fn(kit: Kit, x: Int, y: Int, width: Int, height: Int) -> Int {
+    col: kit.margin + kit_index(x, width, kit.box_width)
+    row: kit.margin + kit_index(y, height, kit.box_height)
+    (row * kit.width + col) * 4
+}
+
+// Row `y` of the ring around a `width` x `height` pixel window, from
+// pixel `x0` to before `x1`.
+kit_row: fn(kit: Kit, y: Int, width: Int, height: Int, x0: Int, x1: Int) -> KitRow {
+    half: kit.box_width /% 2
+    right_from: max_int(width - (kit.box_width - half), half)
+    left_end: min_int(x1, half)
+    right_start: max_int(x0, right_from)
+    left := [U8]{}
+    if left_end > x0 {
+        at: kit_offset(kit, x0, y, width, height)
+        left = kit.pixels[at..<(at + (left_end - x0) * 4)].copy()
+    }
+    right := [U8]{}
+    if x1 > right_start {
+        at: kit_offset(kit, right_start, y, width, height)
+        right = kit.pixels[at..<(at + (x1 - right_start) * 4)].copy()
+    }
+    middle: kit_offset(kit, half, y, width, height)
+    fill: Int.from_u8(kit.pixels[middle]) + (Int.from_u8(kit.pixels[middle + 1]) << 8) + (Int.from_u8(kit.pixels[middle + 2]) << 16) + (Int.from_u8(kit.pixels[middle + 3]) << 24)
+    count: min_int(x1, right_from) - max_int(x0, half)
+    KitRow{left: left, fill: fill, fill_count: max_int(count, 0), right: right}
+}
+
+// The window's coverage in the square at a rounded corner, `side` x `side`
+// pixels (side = corner_side), rows top to bottom, for the bottom-left
+// corner; the other corners mirror it.
+corner_side: fn(scale120: Int) -> Int { math.round(math.ceil(Float{RADIUS * scale120} / 120.0)) }
+
+bottom_left_cover: fn(scale120: Int) -> [U8] {
+    r: Float{RADIUS * scale120} / 120.0
+    side: corner_side(scale120)
+    out := [U8]{}
+    loop row in 0..<side {
+        loop col in 0..<side {
+            // The arc's centre is r in from the left and up from the bottom.
+            dx: r - (Float{col} + 0.5)
+            dy: (Float{row} + 0.5) - (Float{side} - r)
+            d: if dx > 0.0 && dy > 0.0 -> math.sqrt(dx * dx + dy * dy) - r else -> Float{-1.0}
+            out.push(U8{math.round(clamp01(0.5 - d) * 255.0)})
+        }
+    }
+    out
+}
+
+// ---- the header --------------------------------------------------------
+
+// The header of a `width`-pixel-wide window: `width` x px(HEADER) pixels.
+header: fn(&p: Painter, look: FrameLook, width: Int, scale120: Int) -> [U8] {
+    s: Float{scale120} / 120.0
+    height: px(HEADER, scale120)
+    back: if look.active -> HEADER_ACTIVE else -> HEADER_INACTIVE
+    side: if look.square -> 0 else -> min_int(corner_side(scale120), min_int(width /% 2, height))
+    slot: kit(p, look, scale120)
+    // Opaque header, except the rounded corners' squares, which start as
+    // the ring beside them.
+    pixels := [U8]{}
+    loop row in 0..<height {
+        loop col in 0..<width {
+            if row < side && (col < side || col >= width - side) {
+                // Near the top every window height maps alike.
+                at: kit_offset(p.kits[slot], col, row, width, p.kits[slot].box_height)
+                loop k in 0..<4 -> pixels.push(p.kits[slot].pixels[at + k])
+            } else {
+                pixels.push(U8{back.bit_and(255)})
+                pixels.push(U8{(back >> 8).bit_and(255)})
+                pixels.push(U8{(back >> 16).bit_and(255)})
+                pixels.push(U8{255})
+            }
+        }
+    }
+    if side > 0 {
+        r: Float{RADIUS} * s
+        paint(pixels, width, height, corner_mask(0, side, r), back)
+        paint(pixels, width, height, corner_mask(width - side, side, r), back)
+    }
+    // The line between the header and the content.
+    line: max_int(math.round(s), 1)
+    paint(pixels, width, height, rect_mask(0, height - line, width, line), BORDER)
+    logical_width: Float{width} / s
+    ink: if look.active -> TEXT_ACTIVE else -> TEXT_INACTIVE
+    icon_y: Float{HEADER - ICON_SIZE} / 2.0
+    if look.icon_side > 0 && look.icon.len() >= look.icon_side * look.icon_side * 4 {
+        draw_icon(pixels, width, height, look, math.round(Float{ICON_X} * s), math.round(icon_y * s), math.round(Float{ICON_SIZE} * s))
+    } else {
+        jet_mark(p, pixels, width, height, look, Float{ICON_X}, icon_y, Float{ICON_SIZE}, s)
+    }
+    // The title has the space from after the icon to a gap before the
+    // minimize button's hit region, and is clipped there. It is centred on
+    // the window when it fits so, else shifted only as far as that space
+    // needs (adaptive centring).
+    title_x: Float{ICON_X + ICON_SIZE + TITLE_GAP}
+    title_end: logical_width - Float{button_inset(look) + TITLE_GAP} - Float{button_step(look)} * 2.5
+    size: s * 14.5
+    room: fmax(title_end - title_x, 0.0) * s
+    shown: fit_title(p, look.title, size, room)
+    start: math.round(title_x * s)
+    advance: p.bold.layout(shown, size).advance
+    left: math.round(title_left(Float{width}, Float{start}, Float{start} + room, advance))
+    clip: UIRect{x: start, y: 0, width: math.round(room), height: height}
+    baseline: math.round((Float{HEADER} / 2.0 + Float{5.075}) * s)
+    _: font.draw_text(pixels, width, height, width * 4, p.cache, p.bold, shown, size, left, baseline, ink, clip)
+    loop k in 0..<3 {
+        which: button_of(k)
+        lit: look.hover == which
+        held: lit && look.pressed == which
+        cx: (logical_width - Float{button_inset(look) + k * button_step(look)}) * s
+        cy: Float{HEADER} / 2.0 * s
+        fill := if held -> BUTTON_PRESS else if lit -> BUTTON_HOVER else -> BUTTON_IDLE
+        glyph := ink
+        if lit && which == .Close {
+            fill = if held -> CLOSE_PRESS else -> CLOSE_HOVER
+            glyph = WHITE
+        }
+        if !look.active && !lit -> fill = with_alpha(fill, alpha_of(fill) /% 2)
+        paint(pixels, width, height, disc_mask(cx, cy, Float{BUTTON_RADIUS} * s, 0.0), fill)
+        button_glyph(pixels, width, height, look, which, cx, cy, s, glyph)
+        // The focus ring is the title's ink: 3:1 and more on the header.
+        if look.focus == which -> paint(pixels, width, height, disc_mask(cx, cy, Float{BUTTON_RADIUS + FOCUS_GAP + FOCUS_LINE} * s, Float{FOCUS_LINE} * s), ink)
+    }
+    pixels
+}
+
+// `title` to fit `room` pixels at `size` pixels: whole if it fits, else
+// cut at a grapheme boundary, at a word's end when one fits, and ended with
+// an ellipsis; empty when not even the ellipsis fits. Combining sequences
+// stay whole, and the text keeps its logical order.
+fit_title: fn(&p: Painter, title: String, size: Float, room: Float) -> String {
+    if p.bold.layout(title, size).advance <= room -> return title.copy()
+    if p.bold.layout("…", size).advance > room -> return ""
+    parts: text.graphemes(title)
+    // prefixes[k] is the first k graphemes.
+    prefixes := [String]{""}
+    loop part in parts -> prefixes.push("{prefixes[prefixes.len() - 1]}{part}")
+    // The most graphemes that fit before the ellipsis: widths grow with
+    // the prefix, so a binary search finds it.
+    low := 0
+    high := parts.len()
+    loop low < high {
+        mid: (low + high + 1) /% 2
+        if p.bold.layout("{prefixes[mid]}…", size).advance <= room {
+            low = mid
+        } else {
+            high = mid - 1
+        }
+    }
+    // Back to the last word's end inside that, if there is one.
+    cut := low
+    loop at in 1..<(low + 1) {
+        k: low + 1 - at
+        if k < parts.len() && text.is_whitespace(parts[k]) && !text.is_whitespace(parts[k - 1]) {
+            cut = k
+            break
+        }
+    }
+    kept: text.trim_end(prefixes[cut])
+    "{kept}…"
+}
+
+// Jet's mark for an app without an icon: a Jet red rounded square with a
+// white J, at logical (x, y), `size` units square.
+jet_mark: fn(&p: Painter, &pixels: [U8], width: Int, height: Int, look: FrameLook, x: Float, y: Float, size: Float, s: Float) {
+    tint: if look.active -> JET_RED else -> with_alpha(JET_RED, 130)
+    x0: x * s
+    y0: y * s
+    side: size * s
+    paint(pixels, width, height, box_mask(x0, y0, x0 + side, y0 + side, side * 0.28, side * 0.28, 0.0), tint)
+    paint(pixels, width, height, box_mask(x0, y0, x0 + side, y0 + side * 0.5, side * 0.28, side * 0.28, 0.0), 0x22FFFFFF)
+    text_size: side * 0.62
+    advance: p.bold.layout("J", text_size).advance
+    clip: UIRect{x: 0, y: 0, width: width, height: height}
+    _: font.draw_text(pixels, width, height, width * 4, p.cache, p.bold, "J", text_size, math.round(x0 + (side - advance) / 2.0), math.round(y0 + side / 2.0 + text_size * 0.35), WHITE, clip)
+}
+
+// The app's icon (`look.icon`, `look.icon_side` square straight-alpha
+// RGBA rows), scaled to `size` pixels by averaging and laid over the header
+// at pixel (x, y).
+draw_icon: fn(&pixels: [U8], width: Int, height: Int, look: FrameLook, x: Int, y: Int, size: Int) {
+    if size <= 0 -> return
+    icon: look.icon
+    side: look.icon_side
+    dim: if look.active -> 255 else -> 130
+    loop ty in 0..<size {
+        row: y + ty
+        if row < 0 || row >= height -> next
+        sy0: ty * side /% size
+        sy1: max_int(sy0 + 1, (ty + 1) * side /% size)
+        loop tx in 0..<size {
+            col: x + tx
+            if col < 0 || col >= width -> next
+            sx0: tx * side /% size
+            sx1: max_int(sx0 + 1, (tx + 1) * side /% size)
+            // Premultiplied sums over the source pixels this one covers.
+            sum_r := 0
+            sum_g := 0
+            sum_b := 0
+            sum_a := 0
+            loop sy in sy0..<sy1 {
+                loop sx in sx0..<sx1 {
+                    at: (sy * side + sx) * 4
+                    a: Int.from_u8(icon[at + 3])
+                    sum_r += Int.from_u8(icon[at]) * a
+                    sum_g += Int.from_u8(icon[at + 1]) * a
+                    sum_b += Int.from_u8(icon[at + 2]) * a
+                    sum_a += a
+                }
+            }
+            count: (sy1 - sy0) * (sx1 - sx0)
+            // An unfocused window's icon is dimmed with its shadow.
+            a: sum_a * dim /% (count * 255)
+            if a == 0 -> next
+            // Source over, premultiplied: out = src + dst * (1 - a).
+            i: (row * width + col) * 4
+            r: sum_r * dim /% (count * 65025)
+            g: sum_g * dim /% (count * 65025)
+            b: sum_b * dim /% (count * 65025)
+            keep: 255 - a
+            pixels[i] = U8{min_int(255, b + (Int.from_u8(pixels[i]) * keep + 127) /% 255)}
+            pixels[i + 1] = U8{min_int(255, g + (Int.from_u8(pixels[i + 1]) * keep + 127) /% 255)}
+            pixels[i + 2] = U8{min_int(255, r + (Int.from_u8(pixels[i + 2]) * keep + 127) /% 255)}
+            pixels[i + 3] = U8{min_int(255, a + (Int.from_u8(pixels[i + 3]) * keep + 127) /% 255)}
+        }
+    }
+}
+
+// A button's glyph centred at pixel (cx, cy), drawn in logical units
+// times `s` with 1.6-unit strokes.
+button_glyph: fn(&pixels: [U8], width: Int, height: Int, look: FrameLook, which: FrameButton, cx: Float, cy: Float, s: Float, color: Int) {
+    if which == .Minimize -> stroke(pixels, width, height, cx, cy, s, -5.0, 0.0, 5.0, 0.0, color)
+    if which == .Maximize {
+        if look.maximized {
+            // Restore: a square with another behind it.
+            stroke(pixels, width, height, cx, cy, s, -2.0, -2.5, -2.0, -5.0, color)
+            stroke(pixels, width, height, cx, cy, s, -2.0, -5.0, 5.0, -5.0, color)
+            stroke(pixels, width, height, cx, cy, s, 5.0, -5.0, 5.0, 2.0, color)
+            stroke(pixels, width, height, cx, cy, s, 5.0, 2.0, 2.5, 2.0, color)
+            outline(pixels, width, height, cx, cy, s, -5.0, -2.0, 2.5, 5.5, color)
+        } else {
+            outline(pixels, width, height, cx, cy, s, -4.5, -4.5, 4.5, 4.5, color)
+        }
+    }
+    if which == .Close {
+        stroke(pixels, width, height, cx, cy, s, -4.5, -4.5, 4.5, 4.5, color)
+        stroke(pixels, width, height, cx, cy, s, 4.5, -4.5, -4.5, 4.5, color)
+    }
+}
+
+// A glyph stroke from (ax, ay) to (bx, by) units off the centre (cx, cy).
+stroke: fn(&pixels: [U8], width: Int, height: Int, cx: Float, cy: Float, s: Float, ax: Float, ay: Float, bx: Float, by: Float, color: Int) {
+    paint(pixels, width, height, segment_mask(cx + ax * s, cy + ay * s, cx + bx * s, cy + by * s, s * 1.6), color)
+}
+
+// A glyph's rounded square outline, (x0, y0)-(x1, y1) units off the centre.
+outline: fn(&pixels: [U8], width: Int, height: Int, cx: Float, cy: Float, s: Float, x0: Float, y0: Float, x1: Float, y1: Float, color: Int) {
+    paint(pixels, width, height, box_mask(cx + x0 * s, cy + y0 * s, cx + x1 * s, cy + y1 * s, s * 1.5, s * 1.5, s * 1.6), color)
+}
+
+// ---- shapes ------------------------------------------------------------
+
+// `count` transparent pixels.
+transparent: fn(count: Int) -> [U8] {
+    out := [U8]{}
+    loop _ in 0..<(count * 4) -> out.push(U8{0})
+    out
+}
+
+// Paints `mask` in `color` onto the `width` x `height` pixels.
+paint: fn(&pixels: [U8], width: Int, height: Int, mask: font.GlyphMask, color: Int) {
+    font.blend(pixels, width, height, width * 4, mask, 0, 0, color, UIRect{x: 0, y: 0, width: width, height: height})
+}
+
+// A mask whose top-left pixel is (col, row); `blend` places a mask's
+// left edge at x + left and its top row at y - top.
+mask_at: fn(col: Int, row: Int, width: Int, height: Int, coverage: [U8]) -> font.GlyphMask {
+    font.GlyphMask{width: width, height: height, left: col, top: -row, coverage: coverage}
+}
+
+cover_byte: fn(cover: Float) -> U8 { U8{math.round(clamp01(cover) * 255.0)} }
+
+rect_mask: fn(col: Int, row: Int, width: Int, height: Int) -> font.GlyphMask {
+    coverage := [U8]{}
+    loop _ in 0..<(width * height) -> coverage.push(U8{255})
+    mask_at(col, row, width, height, coverage)
+}
+
+// Signed distance in pixels from (x, y) to the box (x0, y0)-(x1, y1),
+// whose top corners have radius `top` and bottom corners `bottom`.
+box_distance: fn(x: Float, y: Float, x0: Float, y0: Float, x1: Float, y1: Float, top: Float, bottom: Float) -> Float {
+    cx: (x0 + x1) / 2.0
+    cy: (y0 + y1) / 2.0
+    r: if y < cy -> top else -> bottom
+    qx: fabs(x - cx) - (x1 - x0) / 2.0 + r
+    qy: fabs(y - cy) - (y1 - y0) / 2.0 + r
+    ox: fmax(qx, 0.0)
+    oy: fmax(qy, 0.0)
+    math.sqrt(ox * ox + oy * oy) + fmin(fmax(qx, qy), 0.0) - r
+}
+
+// The box filled, or with `line` > 0 a border that wide inside it.
+box_mask: fn(x0: Float, y0: Float, x1: Float, y1: Float, top: Float, bottom: Float, line: Float) -> font.GlyphMask {
+    col0: floor_int(x0)
+    row0: floor_int(y0)
+    cols: ceil_int(x1) - col0
+    rows: ceil_int(y1) - row0
+    coverage := [U8]{}
+    loop row in 0..<rows {
+        loop col in 0..<cols {
+            d: box_distance(Float{col0 + col} + 0.5, Float{row0 + row} + 0.5, x0, y0, x1, y1, top, bottom)
+            cover: if line > 0.0 -> clamp01(0.5 - d) - clamp01(0.5 - d - line) else -> clamp01(0.5 - d)
+            coverage.push(cover_byte(cover))
+        }
+    }
+    mask_at(col0, row0, cols, rows, coverage)
+}
+
+// A ring `line` wide just outside the rounded box.
+ring_mask: fn(x0: Float, y0: Float, x1: Float, y1: Float, r: Float, line: Float) -> font.GlyphMask {
+    col0: floor_int(x0 - line) - 1
+    row0: floor_int(y0 - line) - 1
+    cols: ceil_int(x1 + line) + 1 - col0
+    rows: ceil_int(y1 + line) + 1 - row0
+    coverage := [U8]{}
+    loop row in 0..<rows {
+        loop col in 0..<cols {
+            d: box_distance(Float{col0 + col} + 0.5, Float{row0 + row} + 0.5, x0, y0, x1, y1, r, r)
+            coverage.push(cover_byte(clamp01(0.5 + d) - clamp01(0.5 + d - line)))
+        }
+    }
+    mask_at(col0, row0, cols, rows, coverage)
+}
+
+// The square `side` pixels from column `col` at the top of a header,
+// covered where the header's rounded corner is: the top-left corner's at
+// column 0, else the top-right's.
+corner_mask: fn(col: Int, side: Int, r: Float) -> font.GlyphMask {
+    right: col > 0
+    coverage := [U8]{}
+    loop row in 0..<side {
+        loop k in 0..<side {
+            // Distance in from the corner's own edges.
+            inward: if right -> Float{side - k} - 0.5 else -> Float{k} + 0.5
+            dx: r - inward
+            dy: r - (Float{row} + 0.5)
+            d: if dx > 0.0 && dy > 0.0 -> math.sqrt(dx * dx + dy * dy) - r else -> Float{-1.0}
+            coverage.push(cover_byte(0.5 - d))
+        }
+    }
+    mask_at(col, 0, side, side, coverage)
+}
+
+// The soft shadow of the rounded box moved down `drop`, a Gaussian of
+// `sigma` pixels, over the whole `width` x `height` canvas, left out
+// under the box itself.
+shadow_mask: fn(width: Int, height: Int, x0: Float, y0: Float, x1: Float, y1: Float, r: Float, drop: Float, sigma: Float) -> font.GlyphMask {
+    coverage := [U8]{}
+    spread: sigma * 1.41421356
+    loop row in 0..<height {
+        loop col in 0..<width {
+            x: Float{col} + 0.5
+            y: Float{row} + 0.5
+            if box_distance(x, y, x0, y0, x1, y1, r, r) < -1.0 {
+                coverage.push(U8{0})
+                next
+            }
+            d: box_distance(x, y - drop, x0, y0, x1, y1, r, r)
+            coverage.push(cover_byte(math.erfc(d / spread) * 0.5))
+        }
+    }
+    mask_at(0, 0, width, height, coverage)
+}
+
+// A disc of radius `r` centred at (cx, cy), or with `line` > 0 a ring
+// that wide.
+disc_mask: fn(cx: Float, cy: Float, r: Float, line: Float) -> font.GlyphMask {
+    col0: floor_int(cx - r - 1.0)
+    row0: floor_int(cy - r - 1.0)
+    cols: ceil_int(cx + r + 1.0) - col0
+    rows: ceil_int(cy + r + 1.0) - row0
+    coverage := [U8]{}
+    loop row in 0..<rows {
+        loop col in 0..<cols {
+            dx: Float{col0 + col} + 0.5 - cx
+            dy: Float{row0 + row} + 0.5 - cy
+            d: math.sqrt(dx * dx + dy * dy) - r
+            cover: if line > 0.0 -> clamp01(0.5 - d) - clamp01(0.5 - d - line) else -> clamp01(0.5 - d)
+            coverage.push(cover_byte(cover))
+        }
+    }
+    mask_at(col0, row0, cols, rows, coverage)
+}
+
+// A line `width` pixels wide from (ax, ay) to (bx, by) with round caps.
+segment_mask: fn(ax: Float, ay: Float, bx: Float, by: Float, width: Float) -> font.GlyphMask {
+    half: width / 2.0
+    col0: floor_int(fmin(ax, bx) - half - 1.0)
+    row0: floor_int(fmin(ay, by) - half - 1.0)
+    cols: ceil_int(fmax(ax, bx) + half + 1.0) - col0
+    rows: ceil_int(fmax(ay, by) + half + 1.0) - row0
+    bax: bx - ax
+    bay: by - ay
+    len2: fmax(bax * bax + bay * bay, 0.0001)
+    coverage := [U8]{}
+    loop row in 0..<rows {
+        loop col in 0..<cols {
+            pax: Float{col0 + col} + 0.5 - ax
+            pay: Float{row0 + row} + 0.5 - ay
+            t: clamp01((pax * bax + pay * bay) / len2)
+            dx: pax - bax * t
+            dy: pay - bay * t
+            coverage.push(cover_byte(0.5 - (math.sqrt(dx * dx + dy * dy) - half)))
+        }
+    }
+    mask_at(col0, row0, cols, rows, coverage)
+}
+
+// ---- numbers and colours -----------------------------------------------
+
+fmin: fn(a: Float, b: Float) -> Float { if a < b -> a else -> b }
+fmax: fn(a: Float, b: Float) -> Float { if a > b -> a else -> b }
+fabs: fn(a: Float) -> Float { if a < 0.0 -> -a else -> a }
+clamp01: fn(a: Float) -> Float { fmax(0.0, fmin(1.0, a)) }
+floor_int: fn(a: Float) -> Int { math.round(math.floor(a)) }
+ceil_int: fn(a: Float) -> Int { math.round(math.ceil(a)) }
+min_int: fn(a: Int, b: Int) -> Int { if a < b -> a else -> b }
+max_int: fn(a: Int, b: Int) -> Int { if a > b -> a else -> b }
+alpha_of: fn(color: Int) -> Int { (color >> 24).bit_and(255) }
+with_alpha: fn(color: Int, alpha: Int) -> Int { color.bit_and(16777215) + (alpha << 24) }
+
+// `top` (0xAARRGGBB, straight alpha) laid over the opaque `bottom`, in
+// sRGB bytes as the header's buttons are seen.
+over: fn(top: Int, bottom: Int) -> Int {
+    a: alpha_of(top)
+    out := 0xFF000000
+    shifts: [Int]{0, 8, 16}
+    loop shift in shifts {
+        t: (top >> shift).bit_and(255)
+        b: (bottom >> shift).bit_and(255)
+        out += ((t * a + b * (255 - a) + 127) /% 255) << shift
+    }
+    out
+}
+
+// WCAG 2.2's contrast ratio between two opaque colours.
+contrast: fn(a: Int, b: Int) -> Float {
+    la: luminance(a)
+    lb: luminance(b)
+    (fmax(la, lb) + 0.05) / (fmin(la, lb) + 0.05)
+}
+
+luminance: fn(color: Int) -> Float {
+    linear(color >> 16) * 0.2126 + linear(color >> 8) * 0.7152 + linear(color) * 0.0722
+}
+
+// The low byte of `channel`, an sRGB value, in linear light.
+linear: fn(channel: Int) -> Float {
+    c: Float{channel.bit_and(255)} / 255.0
+    if c <= 0.04045 -> return c / 12.92
+    math.exp(math.ln((c + 0.055) / 1.055) * 2.4)
+}
+
+// A look for the tests: active, rounded, nothing hovered, Jet's mark.
+plain_look: fn(title: String) -> FrameLook {
+    FrameLook{title: title, active: true, square: false, maximized: false, coarse: false, hover: FrameButton.Nothing, pressed: FrameButton.Nothing, focus: FrameButton.Nothing, icon: [U8]{}, icon_side: 0}
+}
+
+#Test("frame spots: content, title, button regions, edges and corners") {
+    look: plain_look("")
+    assert_eq(spot(100.0, 100.0, 400, 300, look), FrameSpot.Content)
+    assert_eq(spot(100.0, 20.0, 400, 300, look), FrameSpot.Title)
+    assert_eq(spot(285.0, 2.0, 400, 300, look), FrameSpot.Title)
+    // Rectangular regions the header's height, side by side, the close
+    // button's to the window's edge.
+    assert_eq(spot(286.0, 0.0, 400, 300, look), FrameSpot.Button(FrameButton.Minimize))
+    assert_eq(spot(321.0, 45.0, 400, 300, look), FrameSpot.Button(FrameButton.Minimize))
+    assert_eq(spot(322.0, 1.0, 400, 300, look), FrameSpot.Button(FrameButton.Maximize))
+    assert_eq(spot(357.0, 44.0, 400, 300, look), FrameSpot.Button(FrameButton.Maximize))
+    assert_eq(spot(358.0, 0.0, 400, 300, look), FrameSpot.Button(FrameButton.Close))
+    assert_eq(spot(399.5, 45.5, 400, 300, look), FrameSpot.Button(FrameButton.Close))
+    assert_eq(spot(-3.0, 150.0, 400, 300, look), FrameSpot.Edge(EDGE_LEFT))
+    assert_eq(spot(402.0, 150.0, 400, 300, look), FrameSpot.Edge(EDGE_RIGHT))
+    assert_eq(spot(200.0, -1.0, 400, 300, look), FrameSpot.Edge(EDGE_TOP))
+    assert_eq(spot(200.0, 305.0, 400, 300, look), FrameSpot.Edge(EDGE_BOTTOM))
+    assert_eq(spot(-2.0, 5.0, 400, 300, look), FrameSpot.Edge(EDGE_TOP + EDGE_LEFT))
+    assert_eq(spot(10.0, -2.0, 400, 300, look), FrameSpot.Edge(EDGE_TOP + EDGE_LEFT))
+    assert_eq(spot(399.0, 303.0, 400, 300, look), FrameSpot.Edge(EDGE_BOTTOM + EDGE_RIGHT))
+    assert_eq(spot(-20.0, 150.0, 400, 300, look), FrameSpot.Outside)
+    // A maximized or tiled window has no grips outside it.
+    tiled: FrameLook{title: "", active: true, square: true, maximized: false, coarse: false, hover: FrameButton.Nothing, pressed: FrameButton.Nothing, focus: FrameButton.Nothing, icon: [U8]{}, icon_side: 0}
+    assert_eq(spot(-3.0, 150.0, 400, 300, tiled), FrameSpot.Outside)
+    assert_eq(spot(200.0, -1.0, 400, 300, tiled), FrameSpot.Outside)
+    assert_eq(spot(399.5, 0.5, 400, 300, tiled), FrameSpot.Button(FrameButton.Close))
+    // Every button's region holds a 24 x 24 square, at the smallest window too.
+    widths: [Int]{MIN_WIDTH, 400}
+    offsets: [Float]{-12.0, 11.5}
+    rows: [Float]{11.0, 34.5}
+    loop width in widths {
+        loop k in 0..<3 {
+            cx: Float{width - BUTTON_INSET - k * BUTTON_STEP}
+            loop dx in offsets {
+                loop dy in rows {
+                    assert_eq(spot(cx + dx, dy, width, MIN_HEIGHT, look), FrameSpot.Button(button_of(k)))
+                }
+            }
+        }
+    }
+    // For a finger every region holds a 44 x 44 square, at the smallest
+    // window too, and the minimize region stays clear of the icon.
+    finger: FrameLook{title: "", active: true, square: false, maximized: false, coarse: true, hover: FrameButton.Nothing, pressed: FrameButton.Nothing, focus: FrameButton.Nothing, icon: [U8]{}, icon_side: 0}
+    touch_offsets: [Float]{-22.0, 21.5}
+    touch_rows: [Float]{1.0, 44.5}
+    loop width in widths {
+        loop k in 0..<3 {
+            cx: Float{width - BUTTON_INSET_COARSE - k * BUTTON_STEP_COARSE}
+            loop dx in touch_offsets {
+                loop dy in touch_rows {
+                    assert_eq(spot(cx + dx, dy, width, MIN_HEIGHT, finger), FrameSpot.Button(button_of(k)))
+                }
+            }
+        }
+        assert_eq(spot(Float{ICON_X + ICON_SIZE} - 0.5, 20.0, width, MIN_HEIGHT, finger), FrameSpot.Title)
+    }
+    // A finger's regions are wider than a pointer's: 85 units from the right
+    // edge is minimize's for a pointer, maximize's for a finger.
+    assert_eq(spot(Float{400 - 85}, 20.0, 400, 300, look), FrameSpot.Button(FrameButton.Minimize))
+    assert_eq(spot(Float{400 - 85}, 20.0, 400, 300, finger), FrameSpot.Button(FrameButton.Maximize))
+}
+
+#Test("the shadow kit stretches: corners kept, middles repeated") {
+    assert_eq(kit_index(0, 500, 26), 0)
+    assert_eq(kit_index(12, 500, 26), 12)
+    assert_eq(kit_index(13, 500, 26), 13)
+    assert_eq(kit_index(250, 500, 26), 13)
+    assert_eq(kit_index(487, 500, 26), 13)
+    assert_eq(kit_index(499, 500, 26), 25)
+    assert_eq(kit_index(-5, 500, 26), -5)
+    assert_eq(kit_index(510, 500, 26), 36)
+    p := painter()
+    look: plain_look("")
+    slot: kit(p, look, 120)
+    ring: p.kits[slot]
+    assert_eq([Int]{ring.margin, ring.box_width, ring.box_height, ring.width, ring.height}, [Int]{64, 26, 50, 154, 178})
+    assert_eq(ring.pixels.len(), 154 * 178 * 4)
+    // Under the window's middle there is no shadow; just outside its
+    // bottom edge the shadow is dark, and fades with distance.
+    inside: kit_offset(ring, 200, 150, 400, 300)
+    assert_eq(ring.pixels[inside + 3], U8{0})
+    near: kit_offset(ring, 200, 302, 400, 300)
+    far: kit_offset(ring, 200, 360, 400, 300)
+    assert(Int.from_u8(ring.pixels[near + 3]) > Int.from_u8(ring.pixels[far + 3]), "the shadow fades away from the window")
+    row: kit_row(ring, 302, 400, 300, -64, 464)
+    assert_eq(row.left.len() + row.fill_count * 4 + row.right.len(), 528 * 4)
+    assert_eq(row.fill >> 24, Int.from_u8(ring.pixels[near + 3]))
+    // A side strip's row is all kit bytes, no fill.
+    side: kit_row(ring, 150, 400, 300, -64, 0)
+    assert_eq([Int]{side.left.len(), side.fill_count, side.right.len()}, [Int]{256, 0, 0})
+    assert_eq(kit(p, look, 120), slot)
+    assert_eq(p.kits.len(), 1)
+}
+
+#Test("every fractional scale sizes the frame in whole pixels") {
+    p := painter()
+    look: plain_look("Notes")
+    scales: [Int]{120, 150, 180, 210, 240, 300}
+    loop scale in scales {
+        slot: kit(p, look, scale)
+        margin: px(MARGIN, scale)
+        assert_eq(p.kits[slot].margin, margin)
+        assert_eq(p.kits[slot].width, px(KIT_BOX_WIDTH, scale) + 2 * margin)
+        // The straight middles really are straight: the kit's middle row
+        // and column hold no corner.
+        half: p.kits[slot].box_width /% 2
+        assert(half >= corner_side(scale), "the kit's straight run starts past the corner")
+        width: px(MIN_WIDTH, scale)
+        bar: header(p, look, width, scale)
+        assert_eq(bar.len(), width * px(HEADER, scale) * 4)
+        assert_eq(bottom_left_cover(scale).len(), corner_side(scale) * corner_side(scale))
+    }
+    // The four latest kits stay.
+    assert_eq(p.kits.len(), 4)
+    assert_eq(px(46, 150), 58)
+    assert_eq(px(-64, 150), -80)
+    assert_eq(px(46, 180), 69)
+}
+
+#Test("the header is opaque but for its rounded corners, and draws alike every time") {
+    p := painter()
+    look: FrameLook{title: "A window with a long title", active: true, square: false, maximized: false, coarse: false, hover: FrameButton.Close, pressed: FrameButton.Nothing, focus: FrameButton.Nothing, icon: [U8]{}, icon_side: 0}
+    bar: header(p, look, 300, 120)
+    assert_eq(bar.len(), 300 * 46 * 4)
+    assert(Int.from_u8(bar[3]) < 255, "the top-left corner is rounded")
+    middle: (20 * 300 + 150) * 4
+    assert_eq(bar[middle + 3], U8{255})
+    // The hovered close button is red.
+    close: (23 * 300 + 266) * 4
+    assert(Int.from_u8(bar[close + 2]) > 200 && Int.from_u8(bar[close + 1]) < 120, "the hovered close button is red")
+    // Nothing moves: the same look draws the same bytes.
+    assert_eq(header(p, look, 300, 120), bar)
+    square: header(p, FrameLook{title: "", active: false, square: true, maximized: true, coarse: false, hover: FrameButton.Nothing, pressed: FrameButton.Nothing, focus: FrameButton.Nothing, icon: [U8]{}, icon_side: 0}, 200, 240)
+    assert_eq(square.len(), 200 * 92 * 4)
+    assert_eq(square[3], U8{255})
+    // An app's icon is drawn in place of Jet's mark: a red icon makes the
+    // icon's centre red.
+    red := [U8]{}
+    loop _ in 0..<64 {
+        red.push(U8{220})
+        red.push(U8{30})
+        red.push(U8{30})
+        red.push(U8{255})
+    }
+    iconic: header(p, FrameLook{title: "", active: true, square: false, maximized: false, coarse: false, hover: FrameButton.Nothing, pressed: FrameButton.Nothing, focus: FrameButton.Nothing, icon: red, icon_side: 8}, 300, 120)
+    at: (23 * 300 + 25) * 4
+    assert_eq([U8]{iconic[at], iconic[at + 1], iconic[at + 2], iconic[at + 3]}, [U8]{U8{30}, U8{30}, U8{220}, U8{255}})
+}
+
+#Test("titles are cut at graphemes, at a word end when one fits") {
+    p := painter()
+    size: Float{14.5}
+    width: (s: String) -> p.bold.layout(s, size).advance
+    assert_eq(fit_title(p, "short", size, 1000.0), "short")
+    assert_eq(fit_title(p, "far too long a title", size, 1.0), "")
+    assert_eq(fit_title(p, "alpha beta gamma", size, width("alpha beta ga…")), "alpha beta…")
+    assert_eq(fit_title(p, "Supercalifragilistic", size, width("Supercal…")), "Supercal…")
+    // A combining acute accent (U+0301) stays with its letter.
+    acute: String.from_bytes([U8]{U8{101}, U8{204}, U8{129}}) ?? panic("UTF-8 fixture")
+    accented: "{acute}{acute}{acute}{acute}{acute}{acute}"
+    cut: fit_title(p, accented, size, width("{acute}{acute}…") + width("e") * 0.5)
+    assert_eq(cut, "{acute}{acute}…")
+}
+
+#Test("the frame's colours meet WCAG 2.2 contrast, focused or not") {
+    // Titles are text: 4.5:1 on their header, unfocused windows included.
+    assert(contrast(TEXT_ACTIVE, HEADER_ACTIVE) >= 4.5, "the title is readable")
+    assert(contrast(TEXT_INACTIVE, HEADER_INACTIVE) >= 4.5, "an unfocused window's title is readable")
+    // Button glyphs are graphics: 3:1 on their button in every state.
+    fills: [Int]{BUTTON_IDLE, BUTTON_HOVER, BUTTON_PRESS}
+    loop fill in fills {
+        assert(contrast(TEXT_ACTIVE, over(fill, HEADER_ACTIVE)) >= 3.0, "a button's glyph shows")
+        assert(contrast(TEXT_INACTIVE, over(with_alpha(fill, alpha_of(fill) /% 2), HEADER_INACTIVE)) >= 3.0, "an unfocused button's glyph shows")
+        assert(contrast(TEXT_INACTIVE, over(fill, HEADER_INACTIVE)) >= 3.0, "a hovered or pressed unfocused button's glyph shows")
+    }
+    assert(contrast(WHITE, CLOSE_HOVER) >= 3.0, "the hovered close glyph shows")
+    assert(contrast(WHITE, CLOSE_PRESS) >= 3.0, "the pressed close glyph shows")
+}
+
+#Test("the title is centred on the window, shifted only to clear the icon and buttons") {
+    // A 400-unit window has the space from 46 to 276 for its title.
+    assert_eq(title_left(400.0, 46.0, 276.0, 50.0), Float{175.0})
+    // Too wide to centre: it moves left just enough to clear the buttons.
+    assert_eq(title_left(400.0, 46.0, 276.0, 200.0), Float{76.0})
+    // A narrow window's title starts after the icon.
+    assert_eq(title_left(200.0, 46.0, 76.0, 30.0), Float{46.0})
+    // The header draws it there: its first inked column is the centred
+    // title's.
+    p := painter()
+    bar: header(p, plain_look("Notes"), 400, 120)
+    advance: p.bold.layout("Notes", Float{14.5}).advance
+    first := -1
+    loop col in 46..<276 {
+        loop row in 10..<36 {
+            // Blue byte of B, G, R, A: the header's is 0xF1, the ink's 0x21.
+            if first < 0 && Int.from_u8(bar[(row * 400 + col) * 4]) < 160 -> first = col
+        }
+    }
+    centred: math.round((400.0 - advance) / 2.0)
+    assert(first >= centred - 1 && first <= centred + 3, "the short title is centred, first ink at {first}, centre start {centred}")
+}
+
+#Test("keyboard focus steps through the buttons in reading order and rings the focused one") {
+    assert_eq(next_control(FrameButton.Nothing, 1), FrameButton.Minimize)
+    assert_eq(next_control(FrameButton.Nothing, -1), FrameButton.Close)
+    assert_eq(next_control(FrameButton.Minimize, 1), FrameButton.Maximize)
+    assert_eq(next_control(FrameButton.Maximize, 1), FrameButton.Close)
+    assert_eq(next_control(FrameButton.Close, 1), FrameButton.Minimize)
+    assert_eq(next_control(FrameButton.Minimize, -1), FrameButton.Close)
+    assert_eq(next_control(FrameButton.Close, -1), FrameButton.Maximize)
+    look: plain_look("")
+    assert_eq(button_centre(FrameButton.Close, 300, look), 276)
+    assert_eq(button_centre(FrameButton.Minimize, 300, look), 204)
+    // On a 300-unit window the close disc is centred at (276, 23), radius
+    // 14; the ring runs from 16 to 18 out, so (293, 23) is on it.
+    p := painter()
+    plain: header(p, look, 300, 120)
+    focused := plain_look("")
+    focused.focus = FrameButton.Close
+    ringed: header(p, focused, 300, 120)
+    on_ring: (23 * 300 + 293) * 4
+    assert_eq(plain[on_ring + 2], U8{0xED})
+    assert(Int.from_u8(ringed[on_ring + 2]) < 0x60, "the ring is drawn in the title's ink")
+    // Mid-gap, 14.5 out, the header shows untouched.
+    in_gap: (23 * 300 + 290) * 4
+    assert_eq(ringed[in_gap + 2], plain[in_gap + 2])
+    assert_eq(plain[in_gap + 2], U8{0xED})
+    assert(contrast(TEXT_ACTIVE, HEADER_ACTIVE) >= 3.0 && contrast(TEXT_INACTIVE, HEADER_INACTIVE) >= 3.0, "the ring shows focused or not")
+}
+
+#Test("content corners are covered inside the arc only") {
+    cover: bottom_left_cover(120)
+    assert_eq(cover.len(), 144)
+    // Row 11 (the bottom), column 0: outside the arc. Row 0, column 11: inside.
+    assert_eq(cover[11 * 12], U8{0})
+    assert_eq(cover[11], U8{255})
+}

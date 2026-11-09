@@ -490,8 +490,9 @@ revert: fn(dir: String, applied: [String]) Never! -[Exec, IO, Time.Wait]> {
 // The lane check (Tools/agent/LaneCheck.jet, with $JET, else `jet` on PATH)
 // of the patched tree: the whole compiler, with Jetpack's assembly check,
 // when a patch touches a compiler input, else each touched .jet file. Both
-// run the personal-information guard first. Error rows are shown as the
-// check prints them.
+// run the personal-information guard and the script-pairing guard first; a
+// patch with no Jet source runs the script-pairing guard alone. Error rows
+// are shown as the check prints them.
 check: fn(dir: String, touched: [String]) -[Exec, Env, FS, IO, Time.Wait]> Bool Never! {
     jet: jet_binary()
     compiler := false
@@ -502,8 +503,17 @@ check: fn(dir: String, touched: [String]) -[Exec, Env, FS, IO, Time.Wait]> Bool 
     }
     if compiler -> targets = [String]{""}
     if targets.len() == 0 {
-        print("check: no Jet sources touched; the apply check is the check")
-        return true
+        receipt: process.cmd([String]{jet, "Tools/agent/ScriptPairing.jet", "--check"}).cwd(dir).env("JET_TOOLCHAIN_ROOT", dir).run() ?? {
+            term.eprint("check: cannot run {jet}: {err}")
+            return false
+        }
+        if receipt.code == 0 && receipt.signal == None {
+            print("check: no Jet sources touched; the apply check and the script-pairing guard are the check")
+            return true
+        }
+        term.eprint("check: the script-pairing guard failed (exit {receipt.code})")
+        if receipt.errors.trim() != "" -> term.eprint(receipt.errors.trim())
+        return false
     }
     clean := true
     loop target in targets {
@@ -851,7 +861,7 @@ export_tree: fn(repo: String, commit: String, dir: String, paths: [String]) Land
     unpacked: run_in(dir, [String]{"tar", "-x", "-f", archive, "-C", dir}, "")
     files.remove(archive) ?? ()
     if unpacked.code != 0 -> return Err(LandError{message: "unpacking {commit} failed: {first_line(unpacked)}"})
-    Ok(())
+    Ok()
 }
 
 dev_worktree: fn() -[Exec, Env, FS, Time.Wait]> String Never! { root("JET_DEV_WORKTREE", checkout_top()) }

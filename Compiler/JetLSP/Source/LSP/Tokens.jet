@@ -1,0 +1,147 @@
+// Semantic tokens: the lexer classifies keywords, literals and comments; the
+// checked index classifies each name by what it names and marks the
+// declarations. Types and modifiers index `LSP_SEMANTIC_TOKEN_TYPES` and
+// `LSP_SEMANTIC_TOKEN_MODIFIERS`.
+use {
+    core.encoding.[Dyn]
+    jet_foundation.[Span]
+    jet_lexer.[Token, TOKEN_IDENT, TOKEN_RAW_STRING, TOKEN_STRING, TOKEN_INT, TOKEN_FLOAT, TOKEN_UNIT_NUMBER, TOKEN_CHAR, TOKEN_LINE_COMMENT, TOKEN_BLOCK_COMMENT, TOKEN_TRUE, TOKEN_RETURN, TOKEN_KW_FN, TOKEN_KW_MODULE]
+    jet_semindex.[SemKind]
+}
+
+LSP_TOKEN_KEYWORD: 0
+LSP_TOKEN_TYPE: 1
+LSP_TOKEN_FUNCTION: 2
+LSP_TOKEN_VARIABLE: 3
+LSP_TOKEN_PARAMETER: 4
+LSP_TOKEN_PROPERTY: 5
+LSP_TOKEN_ENUM_MEMBER: 6
+LSP_TOKEN_STRING: 7
+LSP_TOKEN_NUMBER: 8
+LSP_TOKEN_COMMENT: 9
+LSP_TOKEN_NAMESPACE: 11
+
+LSP_MODIFIER_DECLARATION: 1
+LSP_MODIFIER_READONLY: 2
+
+// A name's class: its semantic token type and modifier bits.
+LSPNameClass: struct {
+    kind: Int
+    modifiers: Int
+}
+
+// A reference anchor's kind, as the index spells it.
+lsp_anchor_class: fn(kind: String) -> LSPNameClass? Never! {
+    if kind == {
+        "module" -> Val(LSPNameClass{kind: LSP_TOKEN_NAMESPACE, modifiers: 0})
+        "function" -> Val(LSPNameClass{kind: LSP_TOKEN_FUNCTION, modifiers: 0})
+        "struct" | "enum" | "trait" | "tag" | "type" -> Val(LSPNameClass{kind: LSP_TOKEN_TYPE, modifiers: 0})
+        "const" -> Val(LSPNameClass{kind: LSP_TOKEN_VARIABLE, modifiers: LSP_MODIFIER_READONLY})
+        "variant" -> Val(LSPNameClass{kind: LSP_TOKEN_ENUM_MEMBER, modifiers: 0})
+        "field" -> Val(LSPNameClass{kind: LSP_TOKEN_PROPERTY, modifiers: 0})
+        "local" -> Val(LSPNameClass{kind: LSP_TOKEN_VARIABLE, modifiers: 0})
+        "param" -> Val(LSPNameClass{kind: LSP_TOKEN_PARAMETER, modifiers: 0})
+        else -> None
+    }
+}
+
+lsp_definition_class: fn(kind: SemKind) -> LSPNameClass Never! {
+    if kind == {
+        .Module -> LSPNameClass{kind: LSP_TOKEN_NAMESPACE, modifiers: LSP_MODIFIER_DECLARATION}
+        .Function(_) -> LSPNameClass{kind: LSP_TOKEN_FUNCTION, modifiers: LSP_MODIFIER_DECLARATION}
+        .Struct(_, _) | .Enum(_, _) | .Trait | .Tag | .Type(_) -> LSPNameClass{kind: LSP_TOKEN_TYPE, modifiers: LSP_MODIFIER_DECLARATION}
+        .Const -> LSPNameClass{kind: LSP_TOKEN_VARIABLE, modifiers: LSP_MODIFIER_DECLARATION.bit_or(LSP_MODIFIER_READONLY)}
+        .EnumVariant(_) -> LSPNameClass{kind: LSP_TOKEN_ENUM_MEMBER, modifiers: LSP_MODIFIER_DECLARATION}
+        .Field(_, _) -> LSPNameClass{kind: LSP_TOKEN_PROPERTY, modifiers: LSP_MODIFIER_DECLARATION}
+        .Local(mutable, _) -> LSPNameClass{kind: LSP_TOKEN_VARIABLE, modifiers: if mutable -> LSP_MODIFIER_DECLARATION else -> LSP_MODIFIER_DECLARATION.bit_or(LSP_MODIFIER_READONLY)}
+        .Param(_) -> LSPNameClass{kind: LSP_TOKEN_PARAMETER, modifiers: LSP_MODIFIER_DECLARATION}
+    }
+}
+
+// Each checked name in the document, keyed by the byte offset its name ends
+// at: a reference's span can cover a qualified path whose last segment is the
+// name token.
+lsp_name_classes: fn(view: LSPView) -> [Int:LSPNameClass] Never! {
+    classes := [Int:LSPNameClass]{}
+    index: view.checked.index ?? return classes
+    module_path: view.module_path ?? return classes
+    loop reference in index.references {
+        if reference.module_path != module_path -> next
+        anchor: reference.target ?? next
+        if lsp_anchor_class(anchor.kind) == .Val(class) -> classes[reference.span.end] = class
+    }
+    loop definition in index.definitions {
+        if definition.def.module_path == module_path -> classes[definition.def.def_span.end] = lsp_definition_class(definition.def.kind)
+    }
+    classes
+}
+
+lsp_token_class: fn(token: Token, classes: [Int:LSPNameClass]) -> LSPNameClass? Never! {
+    kind: token.kind
+    if kind == TOKEN_IDENT -> return classes.get(token.span.end)
+    if (kind >= TOKEN_TRUE && kind <= TOKEN_RETURN) || (kind >= TOKEN_KW_FN && kind <= TOKEN_KW_MODULE) -> return Val(LSPNameClass{kind: LSP_TOKEN_KEYWORD, modifiers: 0})
+    if kind == TOKEN_STRING || kind == TOKEN_RAW_STRING || kind == TOKEN_CHAR -> return Val(LSPNameClass{kind: LSP_TOKEN_STRING, modifiers: 0})
+    if kind == TOKEN_INT || kind == TOKEN_FLOAT || kind == TOKEN_UNIT_NUMBER -> return Val(LSPNameClass{kind: LSP_TOKEN_NUMBER, modifiers: 0})
+    if kind == TOKEN_LINE_COMMENT || kind == TOKEN_BLOCK_COMMENT -> return Val(LSPNameClass{kind: LSP_TOKEN_COMMENT, modifiers: 0})
+    None
+}
+
+// The protocol's relative encoding of the classified tokens that overlap
+// `range`. A token spanning lines is one entry per line, as the protocol
+// forbids an entry that crosses a line.
+lsp_semantic_token_data: fn(view: LSPView, range: Span) -> [Int] Never! {
+    bytes: view.doc.text.bytes()
+    table: lsp_line_table_bytes(bytes)
+    classes: lsp_name_classes(view)
+    data := [Int]{}
+    previous_line := 0
+    previous_start := 0
+    loop token in view.lexed.tokens {
+        if token.span.end <= range.start -> next
+        if token.span.start >= range.end -> break
+        class: lsp_token_class(token, classes) ?? next
+        first: lsp_byte_offset_in_table(bytes, table, token.span.start)
+        last: lsp_byte_offset_in_table(bytes, table, token.span.end)
+        line := first.line
+        loop line <= last.line {
+            content: table.lines[line]
+            start: if line == first.line -> token.span.start else -> content.start
+            end: if line == last.line -> token.span.end else -> content.end
+            if end > start {
+                character: if line == first.line -> first.character else -> 0
+                length: lsp_utf16_length(bytes, start, end)
+                delta_start: if line == previous_line -> character - previous_start else -> character
+                data.push(line - previous_line)
+                data.push(delta_start)
+                data.push(length)
+                data.push(class.kind)
+                data.push(class.modifiers)
+                previous_line = line
+                previous_start = character
+            }
+            line += 1
+        }
+    }
+    data
+}
+
+lsp_semantic_tokens_json: fn(data: [Int]) -> String Never! {
+    rows := [String]{}
+    loop value in data -> rows.push("{value}")
+    "{{\"data\":[{rows.join(",")}]}}"
+}
+
+lsp_semantic_tokens_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
+    view: lsp_view(server, params) ?? return lsp_response(id, "null")
+    lsp_response(id, lsp_semantic_tokens_json(lsp_semantic_token_data(view, Span{start: 0, end: view.doc.text.count_bytes()})))
+}
+
+lsp_semantic_tokens_range_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
+    view: lsp_view(server, params) ?? return lsp_response(id, "null")
+    requested: lsp_range_from_json(lsp_param(params, "range") ?? return lsp_response(id, "null")) ?? return lsp_error_response(id, -32602, "range is malformed")
+    bytes: view.doc.text.bytes()
+    table: lsp_line_table_bytes(bytes)
+    start: lsp_checked_offset_bytes(table, bytes, requested.start) ?? return lsp_error_response(id, -32602, "range is outside the document")
+    end: lsp_checked_offset_bytes(table, bytes, requested.end) ?? return lsp_error_response(id, -32602, "range is outside the document")
+    lsp_response(id, lsp_semantic_tokens_json(lsp_semantic_token_data(view, Span{start: start, end: end})))
+}

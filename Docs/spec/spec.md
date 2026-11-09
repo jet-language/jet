@@ -247,7 +247,7 @@ one parameter whose type is a CLI-derived program struct; it returns `()` or a
 unit-fallible result. The checker gives an omitted entry
 contract the default fallible `Result<(), Err>` carrier, so source may use a
 plain `run: fn() { … }`. An explicit unit-fallible contract names its error,
-for example `run: fn() !IOError`; a bare `!` is not a contract. Other output
+for example `run: fn() IOError!`; a bare `!` is not a contract. Other output
 kinds have their own entry contract. Notebook and REPL evaluation may construct
 an explicit entry for the submitted fragment (S12, D-CLIFLAG1,
 D-FAIL-EXIT1=A).
@@ -329,8 +329,11 @@ byte once.
 The explicit `core.term.print` and `core.term.eprint` operations each take one
 `String`; use them for a qualified call rather than relying on ambient aliases.
 `Float` prints a decimal part, so a negative whole-valued float is `-5.0`, not
-`-5`. `input()` or `input(prompt)` reads one line, removes its trailing newline,
-and returns `String !IOError`; use `??` to handle the error. `panic` is the
+`-5`. `input` is every line of the program's input, a lazy `Iter<String>`:
+the lines of the files its arguments name, in order, else of standard input
+(`loop line in input { … }`). `core.term.readline(prompt)` reads one line,
+removes its trailing newline, and returns `String !IOError`; use `??` to
+handle the error. `panic` is the
 bug-stop builtin; `assert` and `assert_eq` are registered assertion builtins.
 Other readable aliases are `Clock`, `Instant`, `Date`, `Duration`, `Path`,
 `read_file`, `write_file`, `file_exists`, and `channel`. The comptime-gated
@@ -349,9 +352,11 @@ prelude aliases for that file, so use the qualified Core call instead
 functions over one ordered type `T: Comparable`: Int and the sized integers,
 Float and F32, Decimal, Duration, Instant, String, Char, or a type that
 implements Comparable. `min` and `max` take two or more arguments and return
-the first least or greatest one. A NaN argument is the result of all three,
-since NaN orders against nothing; `core.math.min_float` and `max_float` are the
-Float pair that skips a NaN operand. `clamp` accepts reversed bounds, so
+the first least or greatest one. All three order by `compare`, so a Float
+follows IEEE 754 totalOrder (-NaN < -inf < ... < -0.0 < +0.0 < ... < +inf <
+NaN): `max(Float.NAN, 1.0)` is NaN and `min(Float.NAN, 1.0)` is `1.0`;
+`core.math.min_float` and `max_float` are the Float pair that skips a NaN
+operand. `clamp` accepts reversed bounds, so
 `clamp(x, 10, 0)` clamps to `0..=10`. They are ordinary Core generics
 (`core.prelude`), so they evaluate at compile time (`LIMIT: max(4, CORES)`).
 
@@ -372,7 +377,10 @@ may be total or return a `Result`, but may not add an implicit conversion
 Functions support multiple arguments, checked arity (E0104), and checked
 argument types (E0112). A function with a non-unit success result must return
 that result on every path (E0114). A parameter may have a default, written on
-its type as `f: fn(x: Int{0})`. A call-site label binds by the public parameter
+its type as `f: fn(x: Int{0})`. The braces hold one value of that type; an
+empty `T{}`, as in `xs: [Int]{}`, is the empty value `T{}` names in an
+expression, for parameter, field and trait constant defaults alike. A call-site
+label binds by the public parameter
 name, so `f(x: 1)` may omit a default and labelled arguments may be supplied in
 any order. `/` closes the positional-only zone; `*` opens the label-only zone;
 `timeout seconds: Int` publishes `timeout` while the body reads `seconds`.
@@ -475,6 +483,11 @@ as a complete statement or `??` fallback. `next()`, `.next()`, and `next: fn`
 remain ordinary identifier uses; a value named `next` after `??` needs
 parentheses: `value ?? (next)`.
 
+In an `if` or `loop` header, `{` opens the body, so a typed literal can't
+follow a comparison or `in` there: `if a > I32{0} ->` reads `{0}` as the body
+and reports **E0637**. Compare with a plain number (`if a > 0 ->`), or group
+the literal: `if a > (I32{0}) ->`.
+
 ## Compile-time names and staged syntax
 
 An immutable `:` binding asks for build-time evaluation as an optimization,
@@ -523,6 +536,12 @@ foreign-syntax teaching remains paused until post-Epoch 6 (D-S14-PAUSE); active
 docs and fixtures use canonical syntax only.
 
 ## Data types and methods
+
+Struct fields, enum cases, and the leaves of an enum variant group share one
+separator rule: a `,` or a line break ends each entry, so `Point: struct { x:
+Int, y: Int }` and `Mode: enum { Fast, Safe }` are the one-line forms of the
+one-per-line bodies `jet fmt` prints. An authored `;` is E0373 there as
+everywhere.
 
 Structs and enums carry data; methods attach behavior. A struct literal is
 `Type{field: value}` or an expected-type-inferred `{field: value}`. Enum values
@@ -582,7 +601,9 @@ on a read parameter E0205, and the error quotes the method's signature line.
 Invoke an instance method as `circle.area()`, not `area(circle)`. Methods may
 live in the type, in `impl Type { … }`, or as a top-level external inherent
 method `Type.method: fn(self, …) { … }`; the type must be defined in the current
-source module. Static methods omit `self`, as in `Circle.unit()`.
+source module. Static methods omit `self`, as in `Circle.unit()`. A function
+outside a type body or `impl`, an inline module's included, can't take `self`
+(E0639): it has no receiver, so `self` would silently be an ordinary parameter.
 
 Multiple construction shapes use distinctly named no-`self` statics such as
 `Point.cartesian` and `Point.polar`. Overloading is rejected; a duplicate name
@@ -611,6 +632,13 @@ package default can deny `auto_derive` through
 trait in or out (`#Debug`, `#!Debug`), while a hand-written implementation wins.
 `#Codable` requests both codec directions; `#Encode` and `#Decode` request one
 (D-AUTODERIVE1=E, D-AUTODERIVE-SYNTAX1=D).
+
+Float and F32 are Comparable by IEEE 754 totalOrder (-NaN < -inf < ... <
+-0.0 < +0.0 < ... < +inf < NaN): `<=>`, `.compare`, sorting, a list's `max` and
+`min`, and a derived `compare` over a Float field all use it. The operators
+`<`, `<=`, `>` and `>=` stay the IEEE comparisons, so `NaN < 1.0` is false. A
+map or a function has no order, so an explicit `#Comparable` over a type that
+holds one is E0905 at the marker.
 
 ### Encoding and validation
 
@@ -895,6 +923,21 @@ aggregate slots: a named function's declaration call metadata does not make
 parameter zones, effects, and returned-view provenance remain directional
 obligations at every container depth; storage never erases those requirements.
 
+Whether a function type's functions can fail is part of its value type wherever
+it appears inside another type. A single function value converts between its
+failing and non-failing forms where it is passed, stored or returned: a
+function-typed parameter `f: fn(Int) -> Int` takes the implicit `Err`
+contract, and a named function of either form fills it. A converted value
+passes each argument on the same way, so a non-failing function argument
+widens into the failing form the value's parameter takes: `read: fn(f: fn(Int)
+-> Int) -> Int` fills a `fn(fn(Int) -> Int) -> Int` field. Nothing narrows a
+failing argument for a parameter that cannot fail. The functions a list, map,
+optional or tuple holds, or a function returns, keep the form they were made
+with, so `[fn(Int) -> Int]` and `[fn(Int) -> Int Err!]` are different value
+types, and passing one where the other is required reports **E0638**. A
+function type nested in a parameter's type keeps its written contract, as the
+same type does on a binding or a typed literal (#6281 c123).
+
 Direct named and method calls keep their ordinary syntax. A function-valued
 expression is invoked with `.call(...)`; a struct field or method actually
 named `call` shadows that built-in projection. Direct calls on names, fields,
@@ -991,8 +1034,9 @@ without writing a return annotation. Pin an entry to an application error with
 (D-FAILURE-FOUNDATION1, D-FAIL-EXIT1)
 
 Construct the two sides with `Ok(value)` and `Err(error)`. These are contextual
-calls: a user declaration named `Ok` or `Err` takes precedence. `Ok()` supplies
-the unit success value when the expected result has unit success. Leading-dot
+calls: a user declaration named `Ok` or `Err` takes precedence. `Ok()` is
+the unit success value when the expected result has unit success, and its only
+spelling: there `Ok` and `.Ok` take no argument (E0104). Leading-dot
 `.Ok(value)` and `.Err(error)` values use the expected result type; in pattern
 tests, they match the corresponding side, for example `result == .Ok(n)`. A value of an
 optional-success type such as `User? DBError!` has exactly three states, and
@@ -1795,6 +1839,11 @@ and denial facts; they do not have to be listed in a positive effect ceiling.
 The same exclusion applies to inferred purity: an explicit empty effect row
 `-[]>` admits allocation, heap copies, and panic facts without requesting a
 positive right. Ambient effects such as `IO` still violate that empty ceiling.
+Writing module state is not an effect, but a `-[]>` function may not do it,
+itself or through any function it calls (E3401): a module `shared` holder's
+value, a module `Cell`, and a `#Persist` or `#Unsafe` module `:=` binding all
+outlive the call, so a later call could see the write. Its own locals stay
+free to change.
 `Mem.Alloc(above: N)` is the parameterized memory-denial spelling. An explicit
 memory, waiting, or panic denial still rejects a reachable operation
 (D-EFFTREE1, D-PANICROOT1, D-AUTHORITY-MEM1, D-AUTH-AMBIENT2).
@@ -1877,11 +1926,12 @@ with E1803 before host state changes.
 
 A written authority row is a ceiling. This holds for an `authority` row in
 `package.jet` or in a script's inline `package: { … }` block, a module's
-`#FX`, a type's row, and a function's `-[…]>` row. Reaching an effect outside
-a function row is E0740. Reaching an effect outside a package row is E0749.
-Both are reported by `jet check`, `jet build` and `jet run` with the call
-chain, before anything runs. The floor stays inside every ceiling, and a floor
-right leaves only through an explicit `deny`. The effects the entry package's
+`#FX`, a type's `#FX`, and a function's `-[…]>` row. Reaching an effect
+outside a function row is E0740. Reaching an effect outside a package row or
+a module's or type's `#FX` is E0749. All are reported by `jet check`, `jet build` and
+`jet run` with the call chain, before anything runs. The floor stays inside
+every ceiling, and a floor right leaves only through an explicit `deny`. The
+effects the entry package's
 rows list are acknowledged and leave the notice, so a program whose package
 row covers what it reaches prints no notice. A `deny`, whether on a package,
 module, type or function, prohibits the denied effects for everything inside
@@ -1890,10 +1940,15 @@ Reaching one is E0749 with the call chain (D-AUTHORITY-DENYROW1). `jet new`
 writes no authority row. A ceiling is something a team chooses to write; it
 is not the price of running.
 
-Jetpack records each dependency's inferred effect row in the lock. An update
-that widens a dependency's row prints which package gained which effect, and
-`--locked` refuses the widening. Code run straight from a URL or the registry
-asks before its first run in a terminal. Without a terminal it stops before
+Jetpack records each dependency's inferred effect row in the lock: the first
+build or run after `jet fetch` records it, and a refetch or update keeps it.
+When an update or an edit widens a dependency's row, the next build or run
+prints which package gained which effect and records the wider row; a row
+only widens. `jet build --locked` refuses the widening (E3513) and writes no
+lock. Code run straight from a URL or the registry
+is pinned by content hash and asks before its first run in a terminal; its
+own `allow` rows acknowledge nothing. A yes is kept with the pinned bytes, and
+changed bytes or new effects ask again. Without a terminal it stops before
 running, and the Fix names the `-A` command.
 
 Command-line authority uses one rights surface: `--allow=<RIGHTS>` and
@@ -1946,6 +2001,38 @@ call, or reports E0712. It is a ceiling, not a grant: the operations still
 happen and contribute to the enclosing function's inferred row. `#FX` is a
 lexical block and disappears in generated code.
 
+Written above a module, a struct or an enum, `#FX(...)` caps every function
+inside it with the same list, including what each function reaches through a
+call:
+
+```jet
+#FX(IO, !FS)
+Report: struct {
+    title: String
+
+    show: fn(self) { print(self.title) }
+}
+```
+
+A type's cap binds the methods in its body, the trait impls written in it, and
+`impl` blocks written apart from it. A module's cap binds every function in
+the module, including the methods of the types declared in it and the default
+bodies of its traits, which keep the cap in every impl that inherits them; a
+generic module's cap binds the functions of every instance. Written above a
+file's `use` lines, `#FX(...)` caps every function in the file. A plain entry
+is a ceiling and a `!` entry is a denial; reaching outside either one is E0749
+at the offending function, with the cap as the secondary label. A row written
+inside a cap may only narrow it: a declared effect outside the ceiling, or one
+the cap denies, is E0749 even when the body never uses it. An
+`#FX: (...)` line in the body is the same cap. A type without `#FX` keeps its
+inferred rows unchanged.
+
+`jet explain effects <file>:<line>` prints every cap in force at a site,
+nearest first: its `#FX` blocks and lambdas, the enclosing function's row, the
+type's and module caps, the package `authority` rows, and `run`, each with the
+`file:line` that writes it, then what the site reaches and the call chain to
+each effect. `--caps` lists every module cap under a path.
+
 ### Higher-order and trait effects
 
 A higher-order function's row includes its own body and the effects of function
@@ -1980,7 +2067,10 @@ impl Square.Shape {
 }
 ```
 
-Every implementation must fit the bound or E0742 is reported. A dynamic call
+Every implementation must fit the bound or E0742 is reported. An impl method
+that writes no row takes the trait's bound as its ceiling, so
+`area: fn(self) -> Int { … }` is pure here; this holds for the Prelude's
+`CheckedText.check` and `encode_hole` too. A dynamic call
 uses the trait's declared bound because its concrete implementation is unknown
 at the call site. An unannotated method is inferred per implementation under
 static dispatch; a dynamic-dispatch call that needs a bound receives the
@@ -2052,26 +2142,24 @@ are E4201, E4202, and E4203. Advanced client configuration belongs in
 rejected so the transport choice is visible at the call site (D-TLS1,
 D-TLSSERVE1).
 
-`core.game.raylib` provides the typed window, drawing, input, sound, and texture
-operations. Its default path is headless; `JET_RAYLIB_DISPLAY=1` enables the
-native display bridge, and a missing raylib library uses the headless path.
-Drawing is rasterized in Jet on every path: `clear_background`, raylib's 2D
-shapes (pixels, rectangles with outlines, gradients and rounded corners,
-lines, circles, ellipses, rings and sectors, triangles and regular polygons)
-and `draw_text` (a built-in 5x7 bitmap font scaled by whole pixels, whose
-width `measure_text` reports without an effect) paint an
-RGBA canvas the size of the window with src-over blending. `load_texture_atlas`
-decodes the atlas's PNG texture in Jet, and `draw_sprite` blits a named region
-of it onto the canvas. raylib's collision checks (`check_collision_*` and
-`get_collision_rec`) are pure `Float` functions that need no effect, as are
-its CPU image functions (`gen_image_*`, `get_image_color` and `image_*`), which
-change a `RaylibImage` in place through `&`.
-`JET_RAYLIB_CAPTURE=PATH` writes each presented frame to PATH as a PAM image.
-`core.game` is scene-first: `game.Scene.new`, `scene.assets.image` and
-`sound`, `scene.input.bind`, `scene.component<T>()`, `scene.query<T...>()`,
+`core.ui` windows draw through the `Frame` of each loop turn, rasterized in Jet
+the same way on every backend.
+`clear_background`, the 2D shapes (pixels, rectangles with outlines, gradients
+and rounded corners, lines, circles, ellipses, rings and sectors, triangles and
+regular polygons) and `draw_text` (a built-in 5x7 bitmap font scaled by whole
+pixels, whose width `measure_text` reports without an effect) paint an RGBA
+canvas the size of the window with src-over blending; the frame presents the
+canvas when the next frame begins unless the program presented its own pixels.
+`load_texture_atlas` decodes the atlas's PNG texture in Jet, and `draw_sprite`
+blits a named region of it onto the canvas. The collision checks
+(`check_collision_*` and `get_collision_rec`) are pure `Float` functions that
+need no effect, as are the CPU image functions (`gen_image_*`,
+`get_image_color` and `image_*`), which change an `Image` in place through `&`;
+`window.load_image_from_screen()` copies the canvas. `core.game` is
+scene-first: `game.Scene.new`, `scene.assets.image` and `sound`,
+`scene.input.bind`, `scene.component<T>()`, `scene.query<T...>()`,
 `game.Replay.record`, `game.Backend.headless`, and `game.run` provide
-deterministic headless replay with a frame hook. Effects and authority still
-apply to the bridge (D-RAYLIB1, D-GAME1-3).
+deterministic headless replay with a frame hook (D-GAME1-3, D-RAY-API1).
 
 ## Expert memory tier
 
@@ -2394,6 +2482,10 @@ a module, such as `m: text` or `show(lib.inner)`, reports **E0629**. A
 function the module offers is a value: `f: text.shout` is the function, as
 `shout` is after `use text.shout`.
 
+A type is not a value either: binding, passing or printing a type, such as
+`t: Rock` or `print(Rock)`, reports **E0636**. Build a value of the type, or
+read a compile-time fact of it such as `Rock.$fields`.
+
 An `impl` head that names a declaration through a module alias binds the alias
 to the segment after it: `impl types.Span { ... }` extends `types.Span`, and
 `impl Local.types.Named { ... }` implements `types.Named` for `Local`
@@ -2705,7 +2797,8 @@ can use. A detached child that captures or returns a `view` borrow reports
 
 Task handles expose `pause()`, `resume()`, and `cancel()`. `tasks.yield_now()`
 cooperatively yields at a wait point, `tasks.current_task()` returns the
-running task's control trace (and an idle value outside a task), and
+running task's opaque `TaskID` (comparable, printable, unique among running
+tasks), `tasks.cpu_ns()` reads the running task's own CPU clock, and
 `sender.close()`/`receiver.close()` close channel ends. Pause holds a task at
 its next wait point until `resume()`; it is scheduler state, not a flag the
 application must poll. Task failure uses `TaskFailure` (D-COROUTINE1).
@@ -3009,9 +3102,14 @@ version, `getppid`, `getuid`, `geteuid`, `getgid`, `getegid`, `getgroups`,
 (D-OSFACTS1).
 POSIX process and session control requires an audited `#Unsafe("...")` region
 and a host-OS target gate. The gated set includes `fork`, `setuid`, `setgid`,
-`setpgid`, `setpgrp`, `setsid`, `initgroups`, `kill`, `wait`, `waitpid`, `pipe`,
-`close_fd`, `mkfifo`, `umask`, `getpriority`, `setpriority`, `utime`, `atexit`,
-and `stop`.
+`set_user_ids`, `set_group_ids`, `setpgid`, `setpgrp`, `setsid`, `initgroups`,
+`kill`, `reset_signal`, `wait`, `waitpid`, `pipe`, `close_fd`, `mkfifo`,
+`mknod`, `umask`, `getpriority`, `setpriority`, `set_scheduling`,
+`set_wall_clock`, `utime`, `atexit`, and `stop`. `scheduling`,
+`round_robin_interval` and `cpu_time` read a process's CPU policy and time
+without the gate, as `user_ids` and `group_ids` read its IDs and `users`,
+`user`, `user_by_id`, `groups`, `group` and `group_by_id` read the user and
+group databases.
 
 These helpers do not emulate POSIX semantics on Windows. Examples are
 `Examples/Systems/Process/OSFacts.jet` and `os_process_control.jet`.
@@ -3715,10 +3813,10 @@ bounds event history and does not include channel values, task locals,
 environment, or credentials. Observation is pay-for-use (D-SIZE-PAYUSE1): a
 program built without tasks, channels, live values or events links no writer,
 so `JET_OBSERVE=1` publishes nothing for it; `jet run --observe` links the
-writer into any program and runs it with `JET_OBSERVE=1`. The executable
-event example is covered by
-[`Compiler/JetLSP/Tests/Integration`](../../Compiler/JetLSP/Tests/Integration/) (`Canvas*.jet`) and the public API by
-[`Core/Event/Event.jet`](../../Core/Event/Event.jet). (D-OBSERVE-LIVE1, D-OBSERVE-TASK1)
+writer into any program and runs it with `JET_OBSERVE=1`. The public API is
+[`Core/Event/Event.jet`](../../Core/Event/Event.jet); the executable event
+example has no running test since the Rust-era `Canvas*.jet` transliterations
+were removed (#6650). (D-OBSERVE-LIVE1, D-OBSERVE-TASK1)
 
 ## Terminal direct input
 
@@ -3947,7 +4045,10 @@ or `rows.skip(id, reason)`. A profile runs the suite in its own child, which
 runs no `#Test`, so a package with no `#Test` still runs its code suites
 (no E0601); a plain `jet test` skips it. The child's environment names
 the `jet` running the profile in `JET` and the package's directory in
-`JET_TEST_SUITE_ROOT`, so the suite drives the compiler under test. The rows
+`JET_TEST_SUITE_ROOT`, so the suite drives the compiler under test. A run's
+`filter` reaches the suite as `rows.selects(id)`, which holds only for an id
+containing the filter. `pass` and `skip` drop every other id, and a suite asks
+`selects` before doing a row's work; a failing row is always kept. The rows
 are compared with the suite's baseline like a run's, a repeated id fails, and
 a suite that panics keeps the rows it reported and adds the failing row
 `stopped`.
@@ -4236,7 +4337,7 @@ quick-fixes use `Diagnostic.edit`. Formatting is available through `jet fmt`
 (I6, S14).
 The server's protocol loop accepts JSON-RPC requests and emits framed
 `Content-Length` responses; clients do not need a second compiler process.
-The LSP integration coverage is in `Compiler/JetLSP/Tests/Integration/` and
+The LSP coverage is in `Compiler/JetLSP/Tests/LSP/` and
 `tests/cases/lsp/`.
 
 The VS Code/Cursor client in `Tools/editors/vscode/` provides the TextMate grammar
@@ -4897,7 +4998,7 @@ A manifest-less `.jet` script may begin with an inline dependency:
 use textkit#1.4
 
 run: fn() {
-    print(textkit.wrap(input(), width: 72))
+    print(textkit.wrap(input.join("\n"), width: 72))
 }
 ```
 

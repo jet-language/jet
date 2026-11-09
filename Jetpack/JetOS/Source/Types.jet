@@ -68,9 +68,16 @@ JetOSBootProfile: struct {
     init: String
     initrd_modules: [String]
 
-    to_json: fn(self) -> String Never! {
-        "{{\"loader\":{foundation_json_quote(self.loader)},\"kernel\":{foundation_json_quote(self.kernel)},\"init\":{foundation_json_quote(self.init)},\"initrd_modules\":[{jetos_strings_json(self.initrd_modules)}]}}"
+    to_dyn: fn(self) -> Dyn Never! {
+        Dyn.Object([
+            "loader": Dyn.Text(self.loader.copy()),
+            "kernel": Dyn.Text(self.kernel.copy()),
+            "init": Dyn.Text(self.init.copy()),
+            "initrd_modules": pkg_json_texts(self.initrd_modules),
+        ])
     }
+
+    to_json: fn(self) -> String Never! { pkg_json_render(self.to_dyn()) }
 }
 
 JetOSOptionContender: struct {
@@ -90,10 +97,22 @@ JetOSResolvedOption: struct {
 
     // Rust options_rendering.rs:52-78: field and contender order are stable.
     to_json: fn(self) -> String Never! {
-        rows := [String]{}
+        rows := [Dyn]{}
         loop contender in self.contenders {
-            rows.push("{{\"value\":{foundation_json_quote(contender.value)},\"tier\":{foundation_json_quote(contender.tier)},\"priority\":{contender.priority},\"source_order\":{contender.source_order},\"winner\":{if contender.winner -> "true" else -> "false"}}}")
+            rows.push(Dyn.Object([
+                "value": Dyn.Text(contender.value.copy()),
+                "tier": Dyn.Text(contender.tier.copy()),
+                "priority": Dyn.Int(contender.priority),
+                "source_order": Dyn.Int(contender.source_order),
+                "winner": Dyn.Bool(contender.winner),
+            ]))
         }
-        "{{\"key\":{foundation_json_quote(self.key)},\"value\":{foundation_json_quote(self.value)},\"tier\":{foundation_json_quote(self.tier)},\"priority\":{self.priority},\"contenders\":[{rows.join(",")}]}}"
+        pkg_json_render(Dyn.Object([
+            "key": Dyn.Text(self.key.copy()),
+            "value": Dyn.Text(self.value.copy()),
+            "tier": Dyn.Text(self.tier.copy()),
+            "priority": Dyn.Int(self.priority),
+            "contenders": Dyn.Array(rows),
+        ]))
     }
 }

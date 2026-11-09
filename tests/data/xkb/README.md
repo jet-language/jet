@@ -15,15 +15,16 @@ en_US.UTF-8 Compose table.
 
 `SHA256SUMS` pins every vendored file. `Tools/agent/XkbTables.jet` checks the
 header and the Compose table against it before it generates
-`Core/Ui/XkbTables.jet`, the keysym names, keysym texts and Compose trie
-behind `core.ui.xkb`:
+`Core/Ui/XkbTables.jet` and its data files in `Core/Ui/XkbTables/`, the
+keysym names, keysym texts and Compose trie behind `core.ui.xkb`, which
+`Core/Ui/XkbTables.jet` embeds at build time:
 
 ```sh
-jet Tools/agent/XkbTables.jet          # rewrite the table
-jet Tools/agent/XkbTables.jet --check  # fail when the table is stale
+jet Tools/agent/XkbTables.jet          # rewrite the tables
+jet Tools/agent/XkbTables.jet --check  # fail when a table is stale
 ```
 
 To move to a new release, replace the files, update `SHA256SUMS` and the
 release numbers in this file and in `Tools/agent/XkbTables.jet`, then
-regenerate. Generated Jet is checked in. Jet programs never read these files
-or use the network at build time or runtime.
+regenerate. The generated tables are checked in. Jet programs never read
+these files or use the network at build time or runtime.

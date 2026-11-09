@@ -1,0 +1,237 @@
+# Key script for core.ui.xkb: each command runs against a fresh or the
+# current keymap; codes are evdev codes.
+#   keymap F        load F (fresh state, local key actions drive modifiers)
+#   mods D L K G    the compositor's modifiers event (state is server-driven)
+#   press/release/type C...   key events (type = press then release)
+#   sweep           type every key with symbols, in code order
+#   repeats         the codes of keys with symbols that do not repeat
+#   repeat R D MS...  wl_keyboard.repeat_info rate R, delay D: the repeats
+#                     due after each hold of MS ms, and between the first
+#                     and last hold
+#   state C...      the layout's name, the modifiers in effect by name and
+#                   each key C's keysym name
+
+# US: letters, digits, named keys, Shift, Caps_Lock, Control, Num_Lock.
+keymap us.xkb
+repeats
+repeat 25 600 0 599 600 639 640 1000 5000
+repeat 0 600 0 5000
+repeat 2147483647 0 0 1 999 1000
+type 16 30 2 57 28 1 14 59 41 15 103 104 110
+state 16 30 2 57 1 29 42 69 79
+press 42
+state 16 30 2 13
+type 16 30 2 13 41
+release 42
+type 58
+state 16 2 13
+type 16 30 2 13
+press 42
+type 16 30 2
+release 42
+type 58
+type 16
+press 29
+state 16 2 57
+type 16 2 3 57
+release 29
+type 79 80 96
+type 69 79 80 96 83
+type 69 79
+state 79 80 83 96
+mods 0 0 0 0
+sweep
+mods 1 0 0 0
+sweep
+mods 0 0 2 0
+sweep
+mods 1 0 2 0
+sweep
+mods 4 0 0 0
+sweep
+mods 0 0 16 0
+state 79 80 83
+sweep
+
+# DE: AltGr level 3, Shift on dead keys, Caps_Lock on ß and umlauts, dead keys.
+keymap de.xkb
+repeats
+type 16 18 21 44 39 40 26 12
+press 100
+state 16 18 12 8 86
+type 16 18 12 8 9 10 11 86 27 44 50
+release 100
+state 12 13 41
+press 42
+type 12 13 41 3
+release 42
+type 58 12 39 30 58
+type 13 18
+type 13 57
+type 13 13
+type 41 18
+type 41 2
+type 41 41
+press 42
+type 13 18 13 30
+release 42
+type 13 42 18
+type 13 16
+type 13 14 18
+press 100
+type 26 30
+release 100
+type 26 30
+mods 0 0 0 0
+sweep
+mods 1 0 0 0
+sweep
+mods 128 0 0 0
+sweep
+mods 129 0 0 0
+sweep
+mods 0 0 2 0
+sweep
+mods 128 0 2 0
+sweep
+
+# FR: AZERTY, AltGr, dead circumflex and diaeresis.
+keymap fr.xkb
+repeats
+type 16 17 18 30 2 3 4 10 11
+press 42
+type 2 3 16
+release 42
+type 26 18
+press 42
+type 26
+release 42
+type 18
+press 100
+state 18 3 4 11
+type 18 3 4 11
+release 100
+mods 0 0 0 0
+sweep
+mods 1 0 0 0
+sweep
+mods 128 0 0 0
+sweep
+mods 0 0 2 0
+sweep
+
+# US+DE with grp:alt_shift_toggle: group switch by keys and by the compositor.
+keymap us_de.xkb
+repeats
+type 16 21 39
+press 42
+state 16 56
+type 56
+release 42
+state 16 21 39 13
+type 16 21 39
+press 100
+type 16 18
+release 100
+type 13 18
+press 56
+state 42 56
+type 42
+release 56
+type 16 21 39
+mods 0 0 0 1
+state 16 21 39
+type 16 21 39 13 18
+mods 0 0 0 1
+sweep
+mods 128 0 0 1
+sweep
+mods 1 0 0 1
+sweep
+mods 0 0 0 0
+sweep
+mods 0 0 0 2
+state 16 21
+type 16 21
+
+# RU: Cyrillic letters and digits, Shift, Caps_Lock on Cyrillic.
+keymap ru.xkb
+repeats
+type 16 17 18 30 39 40 26 27 41 51 52 53 2 3 4 7
+state 16 17 18 30 41 2
+press 42
+type 16 17 2 3 4 7 53
+release 42
+type 58 16 30 39 41 58
+press 100
+state 16 18 2
+type 16 18 2
+release 100
+mods 0 0 0 0
+sweep
+mods 1 0 0 0
+sweep
+mods 0 0 2 0
+sweep
+mods 1 0 2 0
+sweep
+mods 128 0 0 0
+sweep
+
+# US international with compose:rctrl: dead keys, chained dead keys and
+# Multi_key sequences, completed and cancelled.
+keymap us_intl.xkb
+repeats
+type 40 18
+state 40 41 7 100 97
+type 40 40
+type 40 57
+type 40 16
+press 42
+type 40
+release 42
+type 22
+type 40
+press 42
+type 40
+release 42
+type 22
+press 42
+type 41
+release 42
+type 24
+type 41 18
+press 42
+type 7
+release 42
+type 18
+type 40
+press 42
+type 7
+release 42
+type 18
+type 97 24 31
+type 97 24 46
+type 97 13 18
+type 97 2 3
+type 97 97
+type 97 16 18
+type 97 40 18
+type 40 97 51 46
+press 100
+type 18 30 16 40 41 7
+release 100
+press 100
+type 40
+release 100
+type 30
+mods 0 0 0 0
+sweep
+mods 1 0 0 0
+sweep
+mods 128 0 0 0
+sweep
+mods 129 0 0 0
+sweep
+mods 0 0 2 0
+sweep

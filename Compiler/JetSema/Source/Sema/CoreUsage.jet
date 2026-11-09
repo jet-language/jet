@@ -29,6 +29,8 @@ use jet_foundation.[
     Type,
     TypedLitBody,
     core_call,
+    core_input_method_member,
+    core_input_method_modules,
     core_module_has_member,
     core_module_has_type,
     core_type_modules,
@@ -679,12 +681,11 @@ sema_core_collect_func: fn(function: Func, imports: [SemaCoreImport], registered
 }
 
 // I1: a Core source wrapper restating its own compiler row (`pub
-// gtk_backend: fn() -> GtkBackend { core.ui.gtk_backend() }`) is not a use of that
+// tui_backend: fn() -> TUIBackend { core.ui.tui_backend() }`) is not a use of that
 // row. Whoever reaches the wrapper (user code, another module, or a sibling in
 // this module) already notes `owner::name`. Counting the wrapper's own body
 // would select the row's runtime part for every program that imports the
-// module: the GTK `extern "C"` bridge for every `core.ui` program, though only
-// `gtk_backend()` callers need it.
+// module, though only the wrapper's callers need it.
 sema_core_collect_source_wrapper: fn(function: Func, owner: String, imports: [SemaCoreImport], registered: [String:Bool], used: &[String], spans: &[SemaCoreUsageSpan], callbacks: &[String]) {
     own := [String]{}
     own_spans := [SemaCoreUsageSpan]{}
@@ -700,7 +701,7 @@ sema_core_collect_source_wrapper: fn(function: Func, owner: String, imports: [Se
 
 // The top-level functions of a Core source module that no other body of the
 // module calls. Self-recursion is not a sibling call: a wrapper's own
-// `core.ui.gtk_backend()` may resolve to itself.
+// `core.ui.tui_backend()` may resolve to itself.
 sema_core_source_unshared_functions: fn(registration_module: SemaRegistrationModule, call_facts: [SemaCallSiteFact]) -> [String] Never! {
     unshared := [String]{}
     if !registration_module.module_identity.starts_with("<corelib>/") -> return unshared
@@ -878,7 +879,7 @@ sema_core_import_usage: fn(row: SemaCoreImport, fallback: String) -> String Neve
 }
 
 sema_core_helper_import_chain: fn(usage: String, imports: [SemaCoreImport]) -> String Never! {
-    if usage == "core.term::input" -> return "ambient `input()` (helper `{usage}`)"
+    if usage == "core.term::__input_lines" -> return "ambient `input` (helper `{usage}`)"
     parts := usage.split("::").to_list()
     module_name := if parts.len() > 0 -> parts[0] else -> usage
     loop row in imports {
@@ -903,7 +904,6 @@ sema_core_collect_typed_literal_body: fn(body: TypedLitBody, imports: [SemaCoreI
 sema_core_collect_expr: fn(expr: Expr, imports: [SemaCoreImport], registered: [String:Bool], used: &[String], spans: &[SemaCoreUsageSpan], callbacks: &[String]) {
     if expr == {
         .Call(call, _) -> {
-            if call.name == "input" -> sema_core_note_usage(used, spans, "core.term::input", Val(call.name_span))
             if call.name == "Decimal" || call.name == "Fraction" || call.name == "Complex" -> sema_core_note_usage(used, spans, "core.math::__precise__", Val(call.name_span))
             if call.name == "measurement" -> sema_core_note_usage(used, spans, "core.units::__measurement_new", Val(call.name_span))
             sema_core_note_builtin_math_type(call.name, registered, used, spans, Val(call.name_span))
@@ -920,6 +920,8 @@ sema_core_collect_expr: fn(expr: Expr, imports: [SemaCoreImport], registered: [S
                 }
                 if !lone_string -> sema_core_note_usage(used, spans, "core.text.fmt::interpolation", Val(call.name_span))
             }
+            // The value `jet -e` shows prints as `print` prints a value.
+            if call.name == "__jet_eval_show" -> sema_core_note_usage(used, spans, "core.text.fmt::interpolation", Val(call.name_span))
             // A `debug(value)` trace interpolates the value's Debug form
             // and writes it through the shared `core.term.eprint` row, so it
             // reaches that row's Prelude part without a `core.term` import.
@@ -974,6 +976,14 @@ sema_core_collect_expr: fn(expr: Expr, imports: [SemaCoreImport], registered: [S
             if sema_core_is_http_nominal(recv_name) -> sema_core_note_usage(used, spans, "core.http::__nominal__", Val(method_span))
             if recv_name == "Duration" -> sema_core_note_usage(used, spans, "core.time::__duration__", Val(method_span))
             if method == "cmd" && (recv_name == "" || recv_name == "UIShortcut") -> sema_core_note_usage(used, spans, "core.ui.host::shortcut", Val(method_span))
+            // `input.csv<Row>()` and its kin read through `__input_<method>`
+            // (sema_call_try_ambient_input_method).
+            if recv_name == "input" {
+                member: core_input_method_member(method)
+                loop owner in core_input_method_modules(method) {
+                    if sema_core_generated_module_member(owner, member) -> sema_core_note_usage(used, spans, "{owner}::{member}", Val(method_span))
+                }
+            }
             if recv_name != "" {
                 row: sema_core_import_find(imports, "{recv_name}.{method}")
                 if {
@@ -1163,6 +1173,10 @@ sema_core_collect_expr: fn(expr: Expr, imports: [SemaCoreImport], registered: [S
             }
         }
         .Paren(value, _, _) -> sema_core_collect_expr(value, imports, registered, used, spans, callbacks)
+        // The ambient `input` reads through core.term `__input_lines`.
+        .Ident(name, span, _) -> {
+            if name == "input" -> sema_core_note_usage(used, spans, "core.term::__input_lines", Val(span))
+        }
         else -> {}
     }
 }

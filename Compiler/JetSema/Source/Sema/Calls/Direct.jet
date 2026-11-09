@@ -13,6 +13,9 @@ use jet_foundation.[
     Expr,
     ExprField,
     FunctionDefaultRef,
+    Item,
+    Program,
+    Stmt,
     CopyFact,
     Span,
     StrFormat,
@@ -27,7 +30,10 @@ use jet_foundation.[
     diagnostic_registry_row,
     diagnostic_with_edit,
     expr_span,
+    ast_empty_call_arg_flags,
     checked_generated_local,
+    core_input_method_member,
+    core_input_method_modules,
     type_identity_equal,
     type_name,
     Func,
@@ -299,17 +305,19 @@ sema_call_try_knowledge_builtin: fn(call: Call, expected: Type?, environment: Se
 }
 
 // The readable prelude's builtin rows (Rust `CorePrelude` Builtin targets
-// `print`, `input`, `panic`, `assert`, `assert_eq`), checked by one dispatcher
+// `print`, `panic`, `assert`, `assert_eq`), checked by one dispatcher
 // with the Rust checker's arity and argument rules (check_*_call). A user
 // function or local of the same name shadows every row. `#NoPrelude`
-// print/input refusal (E0429) runs before this dispatcher.
+// print/input refusal (E0429) runs before this dispatcher. The ambient
+// `input` is a value (sema_call_check_ambient_input), not a function.
 sema_call_try_ambient_prelude: fn(call: Call, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     if !sema_call_gate_is_unshadowed(call.name, scopes) -> return SemaDirectSpecialCheck{handled: false, value: None}
     if call.name == {
         "channel" -> sema_call_check_channel(call, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         "freeze" -> sema_call_check_freeze(call, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         "print" -> sema_call_check_ambient_print(call, environment, program, scopes, state, tail_store, context, diagnostics)
-        "input" -> sema_call_check_ambient_input(call, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+        "__jet_eval_show" -> sema_call_check_eval_show(call, environment, program, scopes, state, tail_store, context, diagnostics)
+        "input" -> sema_call_check_ambient_input_call(call, environment, program, scopes, state, tail_store, context, diagnostics)
         "panic" -> sema_call_check_ambient_panic(call, environment, program, scopes, state, tail_store, context, diagnostics)
         "assert" -> sema_call_check_ambient_assert(call, environment, program, scopes, state, tail_store, context, diagnostics)
         "assert_eq" -> sema_call_check_ambient_assert_eq(call, environment, program, scopes, state, tail_store, context, diagnostics)
@@ -339,10 +347,14 @@ sema_call_try_ambient_prelude: fn(call: Call, expected: Type?, environment: Sema
             if sema_module_no_prelude(environment, program) -> return SemaDirectSpecialCheck{handled: false, value: None}
             sema_call_ambient_source_alias(call, "core.prelude", call.name, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         }
-        "Decimal" -> sema_call_check_value_constructor(call, "Decimal", [Type]{Type.String}, false, expected, environment, program, scopes, state, tail_store, context, diagnostics)
-        "Complex" -> sema_call_check_value_constructor(call, "Complex", [Type]{Type.Float, Type.Float}, false, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+        "Decimal" | "Complex" -> {
+            if sema_call_value_type_args_refused(call, diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
+            if call.name == "Decimal" -> return sema_call_check_value_constructor(call, "Decimal", [Type]{Type.String}, false, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+            sema_call_check_value_constructor(call, "Complex", [Type]{Type.Float, Type.Float}, false, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+        }
         else -> {
             if !sema_expr_is_math_type_name(call.name) -> return SemaDirectSpecialCheck{handled: false, value: None}
+            if sema_call_value_type_args_refused(call, diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
             // A math type Core's source declares builds through its own `new`.
             if program.registration_graph == .Val(graph) {
                 if sema_type_source_owns_nominal(graph, call.name, sema_scope_caller_row(environment, graph)) {
@@ -356,6 +368,15 @@ sema_call_try_ambient_prelude: fn(call: Call, expected: Type?, environment: Sema
             sema_call_check_value_constructor(call, call.name, components, true, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         }
     }
+}
+
+// `Mat3<Int>(…)`: a built-in value type built by a call has fixed component
+// types and no type parameters, so written type arguments are refused, never
+// ignored.
+sema_call_value_type_args_refused: fn(call: Call, diagnostics: &[Diagnostic]) -> Bool {
+    if call.type_args.len() == 0 -> return false
+    diagnostics.push(sema_error("E0119", call.name_span, "`{call.name}` is not generic", "`{call.name}` is a built-in value type with fixed component types, so it takes no type arguments", "remove the type arguments: write `{call.name}(…)`"))
+    true
 }
 
 // A readable prelude alias whose Core declaration is source-owned is called as
@@ -531,7 +552,8 @@ sema_call_ambient_print_refusal: fn(ty: Type, span: Span) -> Diagnostic Never! {
 }
 
 // Variadic `print`: every argument is checked on its own and prints its own
-// line, one `Print` per argument in order (Rust `print_values`).
+// line, one `Print` per argument in order (Rust `print_values`). It takes
+// values only, so a label (`sep:`) names no parameter: E0764.
 sema_call_check_ambient_print: fn(call: Call, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     if call.args.len() == 0 {
         diagnostics.push(sema_error("E0103", call.name_span, "`print` needs at least one thing to print", "printing nothing isn't meaningful", "e.g. print(\"hello\")"))
@@ -539,6 +561,12 @@ sema_call_check_ambient_print: fn(call: Call, environment: SemaScopeEnvironment,
     }
     values := [TExpr]{}
     complete := true
+    loop argument in call.args {
+        if argument.label == .Val(label) {
+            diagnostics.push(sema_call_diag_unknown_label(call.name, label.name, [SemaCallParam]{}, label.span))
+            complete = false
+        }
+    }
     loop argument_index in 0..<call.args.len() {
         checked: sema_check_expression(call.args[argument_index].expr, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? {
             complete = false
@@ -568,49 +596,180 @@ sema_call_check_ambient_print: fn(call: Call, environment: SemaScopeEnvironment,
     SemaDirectSpecialCheck{handled: true, value: Val(sema_tree_node(unit, TExprKind.InlineBlock{body: body}, call.name_span))}
 }
 
-// `input(prompt?)` reads one line: `Result<String, IOError>`. It calls the
-// source `core.term.input` declaration (I9: one meaning with `term.input`),
-// with the ambient I/O check; the bare name loads core.term
-// (CORE_BARE_SOURCE_MODULES).
-sema_call_check_ambient_input: fn(call: Call, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
-    complete := true
-    if call.args.len() > 1 {
-        diagnostics.push(sema_error("E0104", call.name_span, "`input` expects 1 argument, got {call.args.len()}", "every argument must match a standard library function parameter", "check the call to `input`"))
-        complete = false
+// `jet -e CODE` runs CODE as the body of `run: fn` (JetCli ScriptCache.jet
+// jet_cli_eval_file), and its compile request's `eval_entry` asks for the
+// value its last statement leaves: when that statement is an expression with
+// a value (any expression but an `if` without `else`), the parsed entry's
+// `run` ends in it wrapped in `__jet_eval_show` (Loader.jet). The call exists
+// only in the tree, so the code itself keeps every source rule, E0067's
+// reserved `__` names included.
+sema_eval_entry_show: fn(program: &Program) {
+    loop index in 0..<program.items.len() {
+        if program.items[index] == .Func(function) {
+            if function.name != "run" -> next
+            changed := function.copy()
+            count: changed.body.len()
+            if count == 0 -> return
+            value: if changed.body[count - 1] == {
+                .Expr(expr) -> expr.copy()
+                else -> return
+            }
+            if sema_eval_entry_valueless(value) -> return
+            span: expr_span(value)
+            argument: CallArg{convention: AccessConvention.Read, expr: value, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}
+            changed.body[count - 1] = Stmt.Expr{expr: Expr.Call{call: Call{name: "__jet_eval_show", name_span: span, type_args: [Type]{}, args: [CallArg]{argument}}, id: AST_NODE_GENERATED}}
+            program.items[index] = Item.Func{value: changed}
+            return
+        }
     }
-    values := [TExpr]{}
-    if call.args.len() > 0 {
-        checked: sema_check_expression(call.args[0].expr, Val(Type.String), environment, program, scopes, state, tail_store, context, diagnostics)
-        if checked == .Val(value) -> values.push(value) else -> complete = false
-    }
-    if !complete -> return SemaDirectSpecialCheck{handled: true, value: None}
-    result: Type.Result{ok: Type.String, err: Type.Named{name: "IOError"}}
-    if !sema_call_ambient_record_io("input", result, call.name_span, environment, program, scopes, context, diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
-    unavailable: sema_error("E0906", call.name_span, "the source `core.term.input` declaration for `input` is unavailable", "an ambient `input` reads through the Core terminal source", "restore the `core.term` source module")
-    identity: sema_call_core_module_identity(environment, program, "core.term") ?? {
-        diagnostics.push(unavailable)
-        return SemaDirectSpecialCheck{handled: true, value: None}
-    }
-    target: sema_call_core_source_target(environment, program, identity, "input", [Type]{}, call.name_span, false, diagnostics) ?? {
-        diagnostics.push(unavailable)
-        return SemaDirectSpecialCheck{handled: true, value: None}
-    }
-    callee: sema_call_callee_decl(program, target.symbol.id, call.name_span, diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
-    prompt: if values.len() > 0 -> values[0].copy() else -> sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{}}, call.name_span)
-    argument: TCallArg{value: prompt, template_items: [SymbolID]{}, borrow: false, mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
-    value: sema_tree_node(result, TExprKind.Call{callee: callee, type_args: [Type]{}, args: [TCallArg]{argument}}, call.name_span)
-    SemaDirectSpecialCheck{handled: true, value: sema_expression_call_expected(value, expected, environment, program, context, diagnostics)}
 }
 
-// `("core.term", "eprint")` / `("core.term", "input")`: fixed rows with no typed Source
+// An `if` without `else`: a statement, which leaves no value to show.
+sema_eval_entry_valueless: fn(expr: Expr) -> Bool Never! {
+    if expr == {
+        .If(_, _, _, _, else_value, _, _) -> if else_value == {
+            .NoElse(_, _) -> true
+            else -> false
+        }
+        else -> false
+    }
+}
+
+// The value sema_eval_entry_show wraps: a unit value shows nothing, each
+// item of a List or an Iter prints on a line
+// of its own, as a `loop` over it pulls them, and any other value prints as
+// `print` shows it, under `print`'s display rule (E0112).
+sema_call_check_eval_show: fn(call: Call, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+    if call.args.len() != 1 {
+        diagnostics.push(sema_error("E0104", call.name_span, "`__jet_eval_show` expects 1 argument, got {call.args.len()}", "it shows the one value the code of `jet -e` ends in", "pass the one value to show"))
+        return SemaDirectSpecialCheck{handled: true, value: None}
+    }
+    checked: sema_check_expression(call.args[0].expr, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    unit: Type.Named{name: "Unit"}
+    if checked.ty == unit -> return SemaDirectSpecialCheck{handled: true, value: Val(checked)}
+    span: expr_span(call.args[0].expr)
+    item_type: sema_call_eval_show_item(checked.ty)
+    shown_type: item_type ?? checked.ty
+    if !sema_call_ambient_printable(shown_type, environment, program) {
+        diagnostics.push(sema_call_ambient_print_refusal(shown_type, span))
+        return SemaDirectSpecialCheck{handled: true, value: None}
+    }
+    if !sema_call_ambient_record_io("print", unit, call.name_span, environment, program, scopes, context, diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
+    item: item_type ?? {
+        shown: sema_call_eval_show_text(checked, environment, program) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+        return SemaDirectSpecialCheck{handled: true, value: Val(sema_tree_node(unit, TExprKind.Print{value: shown}, span))}
+    }
+    local: checked_generated_local("__jet_eval_item_{call.name_span.start}", span, item)
+    read: sema_tree_node(item, TExprKind.Local{local: local}, span)
+    shown: sema_call_eval_show_text(read, environment, program) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    line: TStmt.ExprStmt{value: sema_tree_node(unit, TExprKind.Print{value: shown}, span), span: span}
+    by_value: sema_stmt_for_in_consumes_collection(checked.ty, item) && (sema_stmt_for_in_by_value(checked.ty, item) || sema_stmt_for_in_is_list(checked.ty))
+    walk: TStmt.ForIn{label: None, variable: local, variable_two: None, source: checked.copy(), collection: checked, step: None, method_kind: None, columnar: false, by_value: by_value, source_stable: false, body: [TStmt]{line}, span: span}
+    SemaDirectSpecialCheck{handled: true, value: Val(sema_tree_node(unit, TExprKind.InlineBlock{body: [TStmt]{walk}}, span))}
+}
+
+// The item type of a value `jet -e` shows one item per line: a List's element
+// or an Iter's item; None for any other value.
+sema_call_eval_show_item: fn(ty: Type) -> Type? Never! {
+    if ty == {
+        .List(element) -> Val(element)
+        .Apply(name, args) -> if name == "Iter" && args.len() == 1 -> Val(args[0]) else -> None
+        else -> None
+    }
+}
+
+// A shown value as `print` passes it on: a Measurement through its
+// `__measurement_show` text, any other value as it is.
+sema_call_eval_show_text: fn(value: TExpr, environment: SemaScopeEnvironment, program: SemaProgramTables) -> TExpr? Never! {
+    if value.ty == (Type.Apply{name: "Measurement", args: [Type]{Type.Float}}) -> return sema_expression_measurement_source_call("__measurement_show", [TExpr]{value}, Type.String, value.span, environment, program)
+    Val(value)
+}
+
+// The ambient `input`: every line of the program's input, a lazy
+// `Iter<String>` over the files its arguments name, in order, else standard
+// input. It checks as the line source (THandleOp.LinesIter) of
+// `core.term.__input_lines()` (__InputLines), whose `read_line` each pull
+// calls: one meaning on every tier. The names are the arguments (Exec.Args).
+// Reading the files they name needs no FS.Read grant: the person who ran the
+// program designated them on its command line (typed paths are granted), as
+// awk's and perl's `<>` operands are. A user
+// binding named `input` shadows it; the bare name loads core.term
+// (CORE_BARE_SOURCE_MODULES).
+sema_call_check_ambient_input: fn(span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    if sema_marker_rules_no_prelude_input(span, environment, program, diagnostics) -> return None
+    lines: Type.Apply{name: "Iter", args: [Type]{Type.String}}
+    effects: [EffectRowEntry]{EffectRowEntry{name: "IO", span: span}, EffectRowEntry{name: "Exec.Args", span: span}, EffectRowEntry{name: "Time.Wait", span: span}}
+    facts: SemaCallFacts{return_type: lines.copy(), failure_carrier: TFailureCarrier.Infallible, effect_bound: Val(effects), type_args: [Type]{}, default_refs: [FunctionDefaultRef]{}}
+    if !sema_effect_record_intrinsic_fact(environment, program, scopes, context, "input", span, facts, diagnostics) -> return None
+    unavailable: sema_error("E0906", span, "the source `core.term.__input_lines` declaration for `input` is unavailable", "the ambient `input` reads through the Core terminal source", "restore the `core.term` source module")
+    identity: sema_call_core_module_identity(environment, program, "core.term") ?? {
+        diagnostics.push(unavailable)
+        return None
+    }
+    target: sema_call_core_source_target(environment, program, identity, "__input_lines", [Type]{}, span, true, diagnostics) ?? {
+        diagnostics.push(unavailable)
+        return None
+    }
+    callee: sema_call_callee_decl(program, target.symbol.id, span, diagnostics) ?? return None
+    // `__input_lines` cannot fail (`__InputLines Never!`): the call is the reader.
+    returned: sema_call_signature_return(target.signature) ?? return None
+    reader: if returned == .Result(ok, _) -> ok.copy() else -> returned
+    receiver: sema_tree_node(reader, TExprKind.Call{callee: callee, type_args: [Type]{}, args: [TCallArg]{}}, span)
+    value: sema_tree_node(lines, TExprKind.HandleMethod{receiver: receiver, operation: THandleOp.LinesIter, args: [TExpr]{}}, span)
+    sema_expr_expected_owned(value, expected, environment, program, diagnostics)
+}
+
+// `input(…)`: the ambient `input` is the program's lines, not a function
+// (E0803); one line with a prompt is core.term `readline`. The arguments are
+// still checked.
+sema_call_check_ambient_input_call: fn(call: Call, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+    diagnostics.push(sema_error("E0803", call.name_span, "`input` is Iter<String>, not a function", "`input` is every line of the program's input (the files its arguments name, else standard input), read lazily by a `loop` or an Iter method", "read one line with a prompt through `readline(prompt)` from core.term (`use core.term.[readline]`), or loop over `input`"))
+    loop argument in call.args -> _ := sema_check_expression(argument.expr, None, environment, program, scopes, state, tail_store, context, diagnostics)
+    SemaDirectSpecialCheck{handled: true, value: None}
+}
+
+// `input.csv<Row>()`, `input.json<Row>()`, `input.edit(change)`: a method of
+// the ambient `input` that is not an Iter<String> method is the Core function
+// `__input_<method>` of core.term, else of the encoding module the method
+// names (core_input_method_modules), and is checked as a call of it whose
+// first argument is the ambient `input` itself. The call so charges what
+// `input` charges and what the function declares. Unhandled when a binding
+// shadows `input` or no module declares the function: `input` is then the
+// Iter<String> receiver as usual.
+sema_call_try_ambient_input_method: fn(receiver: Expr, method: String, method_span: Span, type_args: [Type], args: [CallArg], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+    unhandled: SemaDirectSpecialCheck{handled: false, value: None}
+    receiver_span := Span{start: 0, end: 0}
+    if receiver == {
+        .Ident(name, span, _) -> {
+            if name != "input" -> return unhandled
+            receiver_span = span
+        }
+        else -> return unhandled
+    }
+    if sema_scope_resolve_index(scopes, "input") != None || sema_module_no_prelude(environment, program) -> return unhandled
+    member: core_input_method_member(method)
+    loop module_name in core_input_method_modules(method) {
+        identity: sema_call_core_module_identity(environment, program, module_name) ?? next
+        target: sema_call_core_source_target(environment, program, identity, member, type_args, method_span, true, diagnostics) ?? next
+        call_args := [CallArg]{CallArg{convention: AccessConvention.Read, expr: receiver.copy(), span: receiver_span, flags: ast_empty_call_arg_flags(), label: None, spread: false}} // copy: the method call keeps its receiver.
+        loop argument in args -> call_args.push(argument.copy()) // copy: the method call keeps its arguments.
+        scopes.ownership_call_depth += 1
+        value := sema_call_core_check_source_owned(target, "input.{method}", type_args, call_args, method_span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+        scopes.ownership_call_depth -= 1
+        return SemaDirectSpecialCheck{handled: true, value: value}
+    }
+    unhandled
+}
+
+// `("core.term", "eprint")` / `("core.term", "readline")`: fixed rows with no typed Source
 // contract. `eprint` is variadic: every printable argument joins, one per line, into the row's
-// single stderr write (the Rust reference lowering's `join_print_args`); `input` takes an
+// single stderr write (the Rust reference lowering's `join_print_args`); `readline` takes an
 // optional String prompt and returns `Result<String, IOError>`.
 sema_call_try_term_core_call: fn(record: CoreCallRecord, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     if record.module_name != "core.term" -> return SemaDirectSpecialCheck{handled: false, value: None}
     if record.member == {
         "eprint" -> sema_call_check_term_eprint(record, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
-        "input" -> sema_call_check_term_input(record, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+        "readline" -> sema_call_check_term_readline(record, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         "progress" -> if args.len() == 1 -> SemaDirectSpecialCheck{handled: false, value: None} else -> sema_call_check_term_progress_iter(args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         else -> SemaDirectSpecialCheck{handled: false, value: None}
     }
@@ -644,16 +803,20 @@ sema_call_check_term_eprint: fn(record: CoreCallRecord, args: [CallArg], span: S
     SemaDirectSpecialCheck{handled: true, value: sema_call_core_tree(record, [TExpr]{joined}, span, [Type]{}, [Bool]{false}, unit, TFailureCarrier.Infallible, expected, environment, program, diagnostics)}
 }
 
-sema_call_check_term_input: fn(record: CoreCallRecord, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+sema_call_check_term_readline: fn(record: CoreCallRecord, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     complete := true
     if args.len() > 1 {
-        diagnostics.push(sema_error("E0104", span, "`input` expects 1 argument, got {args.len()}", "every argument must match a standard library function parameter", "check the call to `input`"))
+        diagnostics.push(sema_error("E0104", span, "`readline` expects 1 argument, got {args.len()}", "every argument must match a standard library function parameter", "check the call to `readline`"))
         complete = false
     }
     values := [TExpr]{}
     if args.len() > 0 {
         checked := sema_check_expression(args[0].expr, Val(Type.String), environment, program, scopes, state, tail_store, context, diagnostics)
         if checked == .Val(value) -> values.push(value) else -> complete = false
+    } else {
+        // The source `readline(prompt: String{""})` takes its default here:
+        // the source-owned call passes every normalized argument.
+        values.push(sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: ""}}}, span))
     }
     if !complete -> return SemaDirectSpecialCheck{handled: true, value: None}
     result: Type.Result{ok: Type.String, err: Type.Named{name: "IOError"}}

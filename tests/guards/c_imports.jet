@@ -1,0 +1,105 @@
+// The C-import census (#6687 c4): every `#Import(c)`, `#Import c.<lib>` and
+// `#FFI(c)` declaration in the compiler, Core, Jetpack and Tools sources, with
+// component tests (a `Tests` folder) left out. A declaration belongs to the
+// C-interop feature, its proofs, or a port still under way; the list below is
+// closed, so a new C import fails here, and a port that drops one fails until
+// its row shrinks or goes.
+use ci_files: core.files
+
+CI_ROOTS: [String]{"Compiler", "Core", "Jetpack", "Tools"}
+
+// Folders the census does not enter: component tests and fixtures, build
+// output, and installed packages.
+CI_SKIPPED: [String]{"Tests", ".jet", "target", "node_modules"}
+
+CImportRow: struct {
+    path: String
+    count: Int
+    // Why the file keeps its C declarations.
+    owner: String
+}
+
+CI_ALLOWED: [CImportRow]{
+    CImportRow{path: "Core/Db/Db.jet", count: 1, owner: "#6695: core.db binds the vendored SQLite until its Jet port"},
+    CImportRow{path: "Core/Net/Tls.jet", count: 1, owner: "#6694: core.net.tls binds the vendored mbedTLS until its Jet port"},
+    CImportRow{path: "Core/Vendor/Sqlite3/Fixture/run.jet", count: 1, owner: "#6695: the vendored SQLite build's proof program"},
+    CImportRow{path: "Jetpack/Integrations/Source/Foreign/Binders/Octave.jet", count: 1, owner: "C-interop feature: the Octave binder's generated-module template"},
+    CImportRow{path: "Tools/agent-eval/domain-foundations/prim-bridges/pkg/cpp_low.jet", count: 1, owner: "C-interop proof: a C++ library through its C bridge"},
+    CImportRow{path: "Tools/agent-eval/domain-foundations/prim-bridges/pkg/zlib_run.jet", count: 1, owner: "C-interop proof: zlib through #Import c"},
+    CImportRow{path: "Tools/agent-eval/domain-foundations/prim-text/shape_ffi_gap/pointer_gap.jet", count: 1, owner: "C-interop proof: the pointer-shape gap"},
+    CImportRow{path: "Tools/agent-eval/ffi-assurance/jet/library.jet", count: 1, owner: "C-interop proof: the FFI assurance library"},
+    CImportRow{path: "Tools/agent-eval/ffi-assurance/jet/run.jet", count: 1, owner: "C-interop proof: the FFI assurance driver"},
+}
+
+// Whether a source line declares a C import: the attribute starts the line.
+ci_declares: fn(line: String) -> Bool Never! {
+    text: line.trim_start()
+    text.starts_with("#Import(c)") || text.starts_with("#Import c.") || text.starts_with("#FFI(c)")
+}
+
+ci_count: fn(source: String) -> Int Never! {
+    count := 0
+    loop line in source.lines() {
+        if ci_declares(line) -> count += 1
+    }
+    count
+}
+
+ci_walk: fn(path: String, out: &[String]) {
+    if !ci_files.is_dir(path) {
+        if path.ends_with(".jet") -> out.push(path.copy())
+        return
+    }
+    loop child in (ci_files.list_dir(path) ?? panic("list {path}: {err}")) {
+        skipped := false
+        loop name in CI_SKIPPED {
+            if child.name == name -> skipped = true
+        }
+        if !skipped -> ci_walk(child.path, out)
+    }
+}
+
+// The census against the closed list: one line per file whose count differs.
+ci_findings: fn(found: [String:Int]) -> [String] Never! {
+    findings := [String]{}
+    allowed := [String:Int]{}
+    loop row in CI_ALLOWED -> allowed[row.path] = row.count
+    loop path in found.keys() {
+        count: found[path]
+        if allowed.get(path) == .Val(expected) {
+            if count != expected -> findings.push("{path}: {count} C declarations, the list allows {expected}; update its CI_ALLOWED row")
+        } else {
+            findings.push("{path}: {count} C declarations, and no CI_ALLOWED row; use Core APIs instead of C")
+        }
+    }
+    loop row in CI_ALLOWED {
+        if found.get(row.path) == None -> findings.push("{row.path}: no C declarations left; delete its CI_ALLOWED row")
+    }
+    findings.sort()
+    findings
+}
+
+#Test("C imports stay on the closed list") {
+    guards_enter_root()
+    sources := [String]{}
+    loop root in CI_ROOTS -> ci_walk(root, sources)
+    assert(sources.len() > 1000, "the census found only {sources.len()} Jet sources")
+    found := [String:Int]{}
+    loop path in sources {
+        count: ci_count(ci_files.read(path) ?? panic("read {path}: {err}"))
+        if count > 0 -> found[path] = count
+    }
+    assert_eq(ci_findings(found).join("\n"), "")
+}
+
+#Test("the census counts declarations, not mentions") {
+    source: "#Import(c) a: fn() = \"a\"\n    #Import c.z: module {{\n// #Import(c) in a comment\ntext: \"#FFI(c) in a string\"\n#FFI(c) b: fn() {{}}\n"
+    assert_eq(ci_count(source), 3)
+    found := [String:Int]{}
+    found["Compiler/New.jet"] = 1
+    found["Core/Db/Db.jet"] = 2
+    findings: ci_findings(found)
+    assert(findings.len() == CI_ALLOWED.len() + 1)
+    assert(findings.contains("Compiler/New.jet: 1 C declarations, and no CI_ALLOWED row; use Core APIs instead of C"))
+    assert(findings.contains("Core/Db/Db.jet: 2 C declarations, the list allows 1; update its CI_ALLOWED row"))
+}

@@ -1,0 +1,44 @@
+package: {
+    name: "files_reserve"
+    authority: { allow: [FS, FS.Read, FS.Write, IO, Mem.Alloc] }
+}
+
+// FileWriter.allocate(size) reserves disk space for a file's first `size`
+// bytes (posix_fallocate), so writes there cannot later fail for lack of
+// room; a shorter file grows to `size` with zero bytes, a longer one keeps
+// its length. FileReader.advise(advice) tells the system how the file will
+// be read (posix_fadvise); it plans caching and never changes what a read
+// returns.
+
+use files: core.files
+
+kind: fn(error: IOError) -> String {
+    if error == {
+        .InvalidInput(_) -> "InvalidInput"
+        .Unsupported(_) -> "Unsupported"
+        else -> "Other"
+    }
+}
+
+run: fn() {
+    scratch: files.temp_dir("reserve")
+    path: files.join(scratch.path, "journal.bin")
+    out: files.create(path)
+    out.write_line("head")
+    out.flush()
+    out.allocate(4096)
+    print("after allocate 4096: {out.stat().size}")
+    out.allocate(16)
+    print("after allocate 16: {out.stat().size}")
+    if out.allocate(-1) == {
+        .Ok(_) -> print("negative size: accepted")
+        .Err(error) -> print("negative size: {kind(error)}")
+    }
+
+    input := files.open(path)
+    input.advise(.Sequential)
+    first: input.read_line()
+    print("first line: {first ?? "none"}")
+    input.advise(.DontNeed)
+    print("next byte is zero: {input.read(1) == [U8]{U8{0}}}")
+}

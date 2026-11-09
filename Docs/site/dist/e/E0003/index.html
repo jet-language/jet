@@ -36,23 +36,14 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Write the complete statement form named by the diagnostic</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0003</code>: <code>tests/ui/cffi_e3206_reserved_segment.stderr</code>.</p>
-<pre class="diag">Error [jet.ReservedBindgenSegment]: Module path `c.demo.__bindgen__` uses the reserved segment `__bindgen__`
-  --&gt; tests/ui/cffi_e3206_reserved_segment.jet:1:9
+<p>First UI snapshot mentioning <code>E0003</code>: <code>tests/ui/bare_error_mark_is_not_a_contract.stderr</code>.</p>
+<pre class="diag">Error [jet.InvalidStatement]: A unit-fallible signature has no `-&gt;`
+  --&gt; tests/ui/bare_error_mark_is_not_a_contract.jet:4:27
     |
-  1 | #Import c.demo.__bindgen__: module {
-    |         ^^^^^^^^^^^^^^^^^^
- Why: Generated bindings live under `c.&lt;lib&gt;.__bindgen__`; user overlays use `#Import c.&lt;lib&gt;: module`
- Fix: Remove `.__bindgen__` and declare the overlay as `#Import c.&lt;lib&gt;: module`
-More: jet-lang.dev/e/E3206
-
-Error [jet.InvalidStatement]: Expected `=` before the C symbol, found `{`
-  --&gt; tests/ui/cffi_e3206_reserved_segment.jet:2:16
-    |
-  2 |     ping: fn() { }
-    |                ^
- Why: The parser needs the expected token to keep the surrounding syntax unambiguous
- Fix: Write the expected token here
+  4 | bare: fn(text: String) -&gt; Int ! {
+    |                           ^^^^^
+ Why: A function that can fail but returns no value has no result payload for an arrow to introduce
+ Fix: Write `save: fn(path: String) IOError!`, or omit the contract for implicit `Err`
 More: jet-lang.dev/e/E0003
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

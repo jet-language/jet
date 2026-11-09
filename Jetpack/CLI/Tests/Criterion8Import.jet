@@ -3,8 +3,9 @@
 // locked package stays on Jetpack after import. It builds, runs, dumps and
 // restores without invoking Nix.
 // Retargeted off the retired `jetpack build`/`jetpack run` (2b160ee885):
-// build -> use --prep, run -> use. The dump and restore byte streams go
-// through a file because the archive is binary.
+// build -> use --prep, run -> `use <ref> -- greet`, the one command run in
+// the package's profile. The dump and restore byte streams go through a file
+// because the archive is binary.
 // The sibling local_nix_fallback_imports_exact_lock_once_then_uses_jetpack
 // (tests/jetpack_criterion8.rs:189-310) is the testkit case
 // tests/cases/jetpack_criterion8/local_nix_fallback_imports_exact_lock_once_then_uses_jetpack.case.
@@ -71,7 +72,7 @@ cli_test_criterion8_executable: fn(path: String, text: String) -[FS]> {
     build: cli_test_criterion8_jetpack([String]{"use", "--prep", "greet@jetpack", "--no-color"}, project, cached, [String]{"JETPACK_FIXTURES"})
     assert(build.success, "cached build stderr: {build.errors}")
 
-    run: cli_test_criterion8_jetpack([String]{"use", "greet@jetpack", "--no-color"}, project, cached, [String]{"JETPACK_FIXTURES"})
+    run: cli_test_criterion8_jetpack([String]{"use", "greet@jetpack", "--no-color", "--", "greet"}, project, cached, [String]{"JETPACK_FIXTURES"})
     assert(run.success, "cached run stderr: {run.errors}")
     assert_eq(run.output.trim(), "hello from imported jetpack")
     assert(!files.exists(marker), "cached Jetpack operations invoked Nix")
@@ -90,7 +91,7 @@ cli_test_criterion8_executable: fn(path: String, text: String) -[FS]> {
     assert_eq(restored_entry.envelope.output_hash, imported_entry.envelope.output_hash)
     assert(!files.exists(marker), "Jetpack restore invoked Nix")
 
-    restored_run: cli_test_criterion8_jetpack([String]{"use", "greet@jetpack", "--no-color"}, project, restored_env, [String]{"JETPACK_FIXTURES"})
+    restored_run: cli_test_criterion8_jetpack([String]{"use", "greet@jetpack", "--no-color", "--", "greet"}, project, restored_env, [String]{"JETPACK_FIXTURES"})
     assert(restored_run.success, "restored run stderr: {restored_run.errors}")
     assert_eq(restored_run.output.trim(), "hello from imported jetpack")
     assert(!files.exists(marker), "restored package execution invoked Nix")

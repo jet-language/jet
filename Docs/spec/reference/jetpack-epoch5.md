@@ -421,6 +421,17 @@ jetpack services logs <name>
 jetpack services wait [name]
 ```
 
+A bare `jet dev` in a role-file project (an `env.jet` and no `package.jet`)
+runs inside the project environment. An entry file with neither `dev: fn()`
+nor `run: fn()` is refused with E1254. The environment then goes through the
+trust gate (E1255; `--trust` bypasses it for one run, and `jetpack config
+trust add <pattern>` pre-authorizes it). Its required secrets are checked
+(E1263) and its `on_enter` hooks run. Every enabled dev service starts and must
+report healthy (E1261) before `jet dev <entry>` runs in the environment.
+Jetpack reads `--trust`, `--offline`, `--yes`, `--env`, `--preset`,
+`--fixtures` and `--local-nix-catalog`. Every other word, such as
+`--watch=off` or the program's `-- <args>`, goes to `jet dev <entry>`.
+
 ## Foreign flakes and bounded projection
 
 `jetpack bridge flake` reads a local `flake.nix` or `devenv.nix`, evaluates the

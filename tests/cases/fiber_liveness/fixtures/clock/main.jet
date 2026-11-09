@@ -5,21 +5,19 @@
 // check holds under load: a burn waits for CPU time, not wall time.
 package: {
     name: "task_clock"
-    authority: { allow: [IO, Mem.Alloc, Time, Time.Wait, FFI] }
+    authority: { allow: [IO, Mem.Alloc, Time, Time.Wait] }
 }
 
+use tasks: core.tasks
 use time: core.time
-
-#Import(c) task_cpu_ns: fn() -> Int = "jet_rt_task_cpu_ns"
-#Import(c) task_identity: fn() -> Int = "jet_rt_task_identity"
 
 // Spins until this task's CPU clock has advanced `ms` milliseconds; false
 // when 30 s of wall time pass first. A preempted thread spins longer rather
 // than counting less.
 burn: fn(ms: Int) -> Bool {
-    before: task_cpu_ns()
+    before: tasks.cpu_ns()
     start: time.instant()
-    loop task_cpu_ns() - before < ms * 1_000_000 {
+    loop tasks.cpu_ns() - before < ms * 1_000_000 {
         if time.instant().difference(start).ns >= 30_000_000_000 -> return false
     }
     true
@@ -28,11 +26,11 @@ burn: fn(ms: Int) -> Bool {
 // The CPU time a task gains across a 200 ms sleep, or -1 when it comes back
 // under another identity.
 parked_spent: fn() -> Int {
-    identity: task_identity()
-    before: task_cpu_ns()
+    identity: tasks.current_task()
+    before: tasks.cpu_ns()
     time.sleep(200ms)
-    spent: task_cpu_ns() - before
-    if task_identity() == identity -> spent else -> -1
+    spent: tasks.cpu_ns() - before
+    if tasks.current_task() == identity -> spent else -> -1
 }
 
 run: fn() {

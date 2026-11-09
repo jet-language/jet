@@ -345,33 +345,50 @@ cli_contender_text: fn(nodes: [PackageOutputNode]) -> String Never! {
     parts.join(", ")
 }
 
-cli_json_optional: fn(value: String?) -> String Never! {
-    if value == {
-        .Val(text) -> cli_json_quote(text)
-        .None -> "null"
-    }
-}
-
 // The generation lock: plan identity, root hash, every collision with more
 // than one contender (or an explicit selection), and each realized package.
 cli_format_package_generation_metadata: fn(generation: Int, plan: PackageProfilePlan, realized: [RealizedProfilePackage], groups: [String: [PackageOutputNode]], roots: HangarRoots, rootfs: String) -[FS, Env]> String CLIError! {
-    packages := [String]{}
+    packages := [Dyn]{}
     loop package in realized {
         fact: package.fact
-        packages.push("{{\"raw\":{cli_json_quote(fact.raw)},\"target\":{cli_json_quote(fact.target)},\"source\":{cli_json_quote(fact.source)},\"upstream\":{cli_json_optional(fact.upstream)},\"provider\":{cli_json_quote(fact.provider)},\"channel\":{cli_json_optional(fact.channel)},\"declared_by\":[{cli_json_quote_list(fact.declared_by)}],\"provider_facts\":{fact.provider_facts.to_json()},\"provider_facts_digest\":{cli_json_quote(fact.provider_facts.digest())},\"output_hash\":{cli_json_quote(package.entry.envelope.output_hash)},\"store_root\":{cli_json_quote(roots.root)}}}")
+        packages.push(Dyn.Object([
+            "raw": Dyn.Text(fact.raw),
+            "target": Dyn.Text(fact.target),
+            "source": Dyn.Text(fact.source),
+            "upstream": cli_json_optional_text(fact.upstream),
+            "provider": Dyn.Text(fact.provider),
+            "channel": cli_json_optional_text(fact.channel),
+            "declared_by": cli_json_texts(fact.declared_by),
+            "provider_facts": fact.provider_facts.to_json_tree(),
+            "provider_facts_digest": Dyn.Text(fact.provider_facts.digest()),
+            "output_hash": Dyn.Text(package.entry.envelope.output_hash),
+            "store_root": Dyn.Text(roots.root.copy()),
+        ]))
     }
-    collisions := [String]{}
+    collisions := [(key: String, value: Dyn)]{}
     paths := groups.keys().to_list()
     paths.sort()
     loop path in paths {
         nodes: groups[path]
         if nodes.len() <= 1 && !plan.collisions.has_key(path) -> next
-        contenders := [String]{}
-        loop node in nodes -> contenders.push("{{\"provider\":{cli_json_quote(node.package)},\"kind\":{cli_json_quote(node.kind.as_str())},\"digest\":{cli_json_quote(node.digest)}}}")
-        collisions.push("{cli_json_quote(path)}:{{\"selected\":{cli_json_optional(plan.collisions.get(path))},\"contenders\":[{contenders.join(",")}]}}")
+        contenders := [Dyn]{}
+        loop node in nodes -> contenders.push(Dyn.Object(["provider": Dyn.Text(node.package), "kind": Dyn.Text(node.kind.as_str()), "digest": Dyn.Text(node.digest)]))
+        collisions.push((key: path, value: Dyn.Object(["selected": cli_json_optional_text(plan.collisions.get(path)), "contenders": Dyn.Array(contenders)])))
     }
     root_hash: pkg_try_output_hash_of(rootfs) ?? return Err(CLIError.Other(err.message()))
-    Ok("{{\"schema\":{cli_json_quote(PACKAGE_PROFILE_SCHEMA)},\"profile\":{cli_json_quote(plan.name)},\"generation\":{generation},\"fingerprint\":{cli_json_quote(plan.fingerprint)},\"root_hash\":{cli_json_quote(root_hash)},\"selected_profiles\":[{cli_json_quote_list(plan.selected_profiles)}],\"applied\":[{cli_json_quote_list(plan.applied)}],\"sources\":[{cli_json_quote_list(plan.sources)}],\"collisions\":{{{collisions.join(",")}}},\"packages\":[{packages.join(",")}]}}\n")
+    metadata: Dyn.Object([
+        "schema": Dyn.Text(PACKAGE_PROFILE_SCHEMA),
+        "profile": Dyn.Text(plan.name.copy()),
+        "generation": Dyn.Int(generation),
+        "fingerprint": Dyn.Text(plan.fingerprint.copy()),
+        "root_hash": Dyn.Text(root_hash),
+        "selected_profiles": cli_json_texts(plan.selected_profiles),
+        "applied": cli_json_texts(plan.applied),
+        "sources": cli_json_texts(plan.sources),
+        "collisions": Dyn.Object(collisions),
+        "packages": Dyn.Array(packages),
+    ])
+    Ok("{cli_json_render(metadata)}\n")
 }
 
 // Every node below a realized output root, depth-first in name order, read
@@ -632,7 +649,7 @@ cli_activate_package_generation: fn(verification: &StoreVerification, project_di
         if record.fingerprint != expected -> return Err(CLIError.Other("profile generation is stale for the current source plan; rebuild before switching"))
     }
     files.create_dir_all(state)
-    pointer: "{{\"schema\":{cli_json_quote(PACKAGE_PROFILE_POINTER_SCHEMA)},\"generation\":{generation},\"witness\":{cli_json_quote(record.witness)}}}\n"
+    pointer: "{cli_json_render(Dyn.Object(["schema": Dyn.Text(PACKAGE_PROFILE_POINTER_SCHEMA), "generation": Dyn.Int(generation), "witness": Dyn.Text(record.witness)]))}\n"
     partial: files.join(state, PACKAGE_PROFILE_CURRENT_PARTIAL)
     if cli_stat_optional(partial) != None -> files.remove(partial)
     cli_write_synced(partial, pointer.bytes())

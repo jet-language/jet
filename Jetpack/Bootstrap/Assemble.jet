@@ -53,6 +53,7 @@ use {
     crypto: core.crypto
     files: core.files
     json: core.encoding.json
+    fspath: core.files.path
     process: core.process
     term: core.term
 }
@@ -753,7 +754,7 @@ render_tests: fn(text: String, path: String, section: String, claims: &[Claim], 
     support: path.ends_with("Support.jet")
     if support && count > 0 -> return Err("{path}: a *Support.jet test helper file must not declare #Test claims")
     if !support && count == 0 -> return Err("{path}: a tests.list entry must declare at least one #Test claim (shared helpers go in a *Support.jet file)")
-    Ok(())
+    Ok()
 }
 
 // --- paths -------------------------------------------------------------------------
@@ -766,7 +767,7 @@ resolve_path: fn(base: String, path: String) -> String {
 
 // Whether `path` (absolute, normalized) is `root` or under it.
 contained: fn(root: String, path: String) -> Bool {
-    path == root || path.starts_with("{root}/") || root == "/"
+    fspath.is_relative_to(fspath.of(path), fspath.of(root))
 }
 
 // `path` relative to `root`, which holds it.

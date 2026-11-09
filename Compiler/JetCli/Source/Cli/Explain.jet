@@ -24,7 +24,7 @@ jet_cli_explanation_output: fn(explanation: DiagnosticExplanation, color: Bool, 
 // through its syntax/policy/build-fact lookup rather than inventing a row.
 jet_cli_explain_diagnostic: fn(args: [String], color: Bool, json: Bool) -> JetCLIPlan? Never! {
     if args.len() < 2 {
-        return Val(jet_cli_done("", "usage: jet explain <CODE|FACT> [file]\n       jet explain marker <file>:<line> <policy-key>\n", JET_DRIVER_EXIT_USAGE))
+        return Val(jet_cli_done("", "usage: jet explain <CODE|FACT> [file]\n       jet explain marker <file>:<line> <policy-key>\n       {JET_CLI_EXPLAIN_EFFECTS_USAGE}\n", JET_DRIVER_EXIT_USAGE))
     }
     explanation: diagnostic_explanation(args[1]) ?? return None
     Val(jet_cli_explanation_output(explanation, color, json))

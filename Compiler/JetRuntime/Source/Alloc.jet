@@ -325,6 +325,38 @@ alloc_unlock: fn(root: I64) {
     }
 }
 
+// A fork's hold on the heap (RouteSys.jet jet_sys_fork_raw): every
+// allocator lock, taken in the order the allocator nests them (the
+// quarantine before the large cache and an arena, an arena before the slab
+// regions; the policy lock nests nothing), so the child's copy of the heap
+// is consistent and none of its locks belongs to a thread the child lacks.
+alloc_fork_hold: fn() {
+    alloc_lock(wrapping(alloc_root + I64{136}))
+    alloc_lock(wrapping(alloc_root + I64{16}))
+    alloc_lock(wrapping(alloc_root + I64{216}))
+    index := I64{0}
+    loop index < (I64{32}) {
+        alloc_lock(alloc_arena_root(index))
+        index = wrapping(index + I64{1})
+    }
+    alloc_lock(wrapping(alloc_root + I64{736}))
+}
+
+// Both sides of the fork release what alloc_fork_hold took: in the child,
+// whose only thread is the forking one, that leaves every lock in its
+// initial state (a waiter's wake finds no thread there).
+alloc_fork_release: fn() {
+    alloc_unlock(wrapping(alloc_root + I64{736}))
+    index := I64{32}
+    loop index > (I64{0}) {
+        index = wrapping(index - I64{1})
+        alloc_unlock(alloc_arena_root(index))
+    }
+    alloc_unlock(wrapping(alloc_root + I64{216}))
+    alloc_unlock(wrapping(alloc_root + I64{16}))
+    alloc_unlock(wrapping(alloc_root + I64{136}))
+}
+
 // Remove a slab from its class's available list. Caller holds the heap lock.
 alloc_unlink: fn(slab: I64) {
     #Unsafe("slab and its linked neighbours are live heap-owned headers protected by the held heap lock") {

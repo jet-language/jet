@@ -52,6 +52,7 @@ use {
         TargetMachine,
         Marker,
         Measure,
+        ModuleCap,
         NamedSpan,
         NamedType,
         NameRows,
@@ -116,7 +117,7 @@ use {
         type_identity,
         type_identity_key,
         type_name,
-        type_with_effective_fn_returns,
+        type_with_effective_parameter_fn_return,
         unit_family_distinct_defs,
         CModule,
         TCompilerBuiltin,
@@ -614,6 +615,10 @@ SemaRegistrationModule: struct {
     program: Program
     inline_bindings: SemaInlinePreparedBindings{SemaInlinePreparedBindings{imports: [String:SemaInlineFunctionBinding]{}, modules: [SemaInlineModuleSurface]{}}}
     source: String{""}
+    // The `#FX(…)` cap of each generic-module template erased from
+    // `program.items` once expanded: the cap's names are still checked
+    // where it is written (E0119, E0750), instantiated or not.
+    template_caps: [ModuleCap]{[ModuleCap]{}}
     declarations: [Item]
     symbols: [Symbol]
     // Row `i` is the `nominals` row that `symbols[i]` registered (-1 for a
@@ -1243,7 +1248,7 @@ sema_registration_function_parameters: fn(func: Func, module_identity: String, o
     defaults: sema_registration_signature_metadata(signature).map((row) -> row.defaults) ?? [FunctionDefaultRef?]{}
     parameters := [SemaRegistrationParameter]{}
     loop (index, parameter) in func.params {
-        ty: type_with_effective_fn_returns(parameter.ty)
+        ty: type_with_effective_parameter_fn_return(parameter.ty)
         parameter_ty: if parameter.variadic -> Type.List{element: ty} else -> ty
         default_ref: if index < defaults.len() -> defaults[index] else -> None
         parameters.push(SemaRegistrationParameter{
@@ -1717,7 +1722,7 @@ sema_registration_trait_method_signature: fn(method: TraitMethodSig, raw_protoco
     contract := [CallContractRow]{}
     has_contract := false
     loop (index, parameter) in method.params {
-        ty: type_with_effective_fn_returns(parameter.ty)
+        ty: type_with_effective_parameter_fn_return(parameter.ty)
         if parameter.variadic -> params.push(Type.List{element: ty}) else -> params.push(ty)
         names.push(parameter.name)
         variadic.push(parameter.variadic)
@@ -1753,7 +1758,7 @@ sema_registration_trait_method: fn(method: TraitMethodSig, module_identity: Stri
     parameters := [SemaRegistrationParameter]{}
     metadata: sema_registration_signature_metadata(signature) ?? FunctionCallMetadata{names: [String]{}, defaults: [FunctionDefaultRef?]{}, variadic: [Bool]{}, conventions: [AccessConvention]{}, policies: CallablePolicyChain{policies: [CallablePolicy]{}}}
     loop (index, parameter) in method.params {
-        ty: type_with_effective_fn_returns(parameter.ty)
+        ty: type_with_effective_parameter_fn_return(parameter.ty)
         parameter_ty: if parameter.variadic -> Type.List{element: ty} else -> ty
         default_ref: if index < metadata.defaults.len() -> metadata.defaults[index] else -> None
         parameters.push(SemaRegistrationParameter{
@@ -3785,14 +3790,15 @@ sema_registration_core_private: fn(module_row: SemaRegistrationModule, name: Str
     !core_module_has_member(owner, leaf) && !core_module_has_type(owner, leaf) && core_module_export("{owner}.{leaf}") == None
 }
 
-// The one unexported Core item code outside Core may name: the compiler's CLI
-// (the jet_cli package) reads the Core sources jet was built with through
-// `core.devtools.toolchain_core_source`. To any other package it is private,
-// like every unexported Core item. A module identity is
+// The two unexported Core items code outside Core may name: the compiler's
+// CLI (the jet_cli package) reads the Core sources and assets jet was built
+// with through `core.devtools.toolchain_core_source` and
+// `core.devtools.toolchain_core_asset`. To any other package they are
+// private, like every unexported Core item. A module identity is
 // `module:<length>:<package identity>:<path>`, and a package identity is
 // `package:<length>:<name>:<version>`.
 sema_registration_core_toolchain_read: fn(owner: String, leaf: String, requester_module: String) -> Bool Never! {
-    if owner != "core.devtools" || leaf != "toolchain_core_source" -> return false
+    if owner != "core.devtools" || (leaf != "toolchain_core_source" && leaf != "toolchain_core_asset") -> return false
     kind: requester_module.split_once(":") ?? return false
     if kind.before != "module" -> return false
     package: kind.after.split_once(":") ?? return false
@@ -4511,6 +4517,8 @@ sema_registration_prepare_graph: fn(inputs: &&[SemaRegistrationModuleInput], edg
         item_index := 0
         loop item_index < graph.modules[erased_index].program.items.len() {
             if sema_registration_item_is_expanded_template(graph.modules[erased_index].program.items[item_index]) {
+                erased_cap: sema_registration_template_cap(graph.modules[erased_index].program.items[item_index])
+                if erased_cap == .Val(cap) -> graph.modules[erased_index].template_caps.push(cap)
                 _ := graph.modules[erased_index].program.items.remove(item_index, .Slot)
             } else {
                 item_index += 1
@@ -4550,6 +4558,12 @@ sema_registration_item_is_expanded_template: fn(item: Item) -> Bool Never! {
         .GenericModule(_) | .ModuleAlias(_) -> true
         else -> false
     }
+}
+
+// The `#FX(…)` cap written above a generic-module template, if any.
+sema_registration_template_cap: fn(item: Item) -> ModuleCap? Never! {
+    if item == .GenericModule(template) -> return template.cap
+    None
 }
 
 // Appends to `words` each identifier-shaped word of `bytes[start..<end]` that

@@ -7,8 +7,11 @@
 // `~/.local/state/jet/effects`), so an interactive rerun names the set again
 // only when it changed. When standard input is not a terminal, or the store
 // can't be written, every run names it. `--json` reports the set as one
-// `run.effects` status instead, on every run that has one.
+// `run.effects` status instead, on every run that has one. A remote run
+// (RemoteRun.jet) asks before it starts instead, and only for effects it was
+// not granted before.
 use {
+    jet_driver.[JetDriverVerbOutput]
     notice_crypto: core.crypto
     notice_files: core.files
     notice_sys: core.sys
@@ -20,14 +23,21 @@ JET_CLI_EFFECT_RECORD: "jet.effects/v1"
 
 // Name the unacknowledged effects of `authority` for a run of `file`, as
 // `json` asks, unless the store shows this entry already named exactly them.
-jet_cli_effect_notice: fn(file: String, authority: JetCLIAuthority, json: Bool) {
+// A remote run (`invocation.remote`, RemoteRun.jet) asks its first-run
+// question instead, about the effects its own `allow` row would hide; the
+// output is the stop when the answer is not yes.
+jet_cli_effect_notice: fn(file: String, source: String, authority: JetCLIAuthority, invocation: JetCLIInvocationAuthority?, color: Bool, json: Bool) -> JetDriverVerbOutput? {
+    if invocation == .Val(rows) {
+        if rows.remote == .Val(origin) -> return jet_cli_remote_run_consent(origin, file, source, jet_cli_remote_run_unacknowledged(authority, rows), color, json)
+    }
     rights: jet_cli_unacknowledged(authority)
     if json {
         if rights.len() > 0 -> notice_term.eprint(jet_cli_run_effects_json(authority, rights))
-        return
+        return None
     }
-    if notice_term.stdin().is_tty() && jet_cli_effect_store_seen(file, rights) -> return
+    if notice_term.stdin().is_tty() && jet_cli_effect_store_seen(file, rights) -> return None
     if rights.len() > 0 -> notice_term.eprint(jet_cli_effect_notice_line(file, rights))
+    None
 }
 
 // `note: tool.jet reads files and uses the network (-A hides this)`. Code
@@ -51,14 +61,15 @@ jet_cli_run_effects_json: fn(authority: JetCLIAuthority, rights: [String]) -> St
     ])
 }
 
-// The directory of the notice's records, or None when there is no user state
-// directory.
-jet_cli_effect_store_dir: fn() -> String? {
+// `<state>/jet/<name>`: a directory of Jet's per-user records under
+// `$XDG_STATE_HOME` (else `~/.local/state`), or None when there is no user
+// state directory.
+jet_cli_state_dir: fn(name: String) -> String? {
     if notice_sys.get("XDG_STATE_HOME") == .Val(state) {
-        if state.starts_with("/") -> return Val("{state}/jet/effects")
+        if state.starts_with("/") -> return Val("{state}/jet/{name}")
     }
     home: notice_sys.home_dir() ?? return None
-    Val("{home}/.local/state/jet/effects")
+    Val("{home}/.local/state/jet/{name}")
 }
 
 // Whether the store already names exactly `rights` for the entry `file`. When
@@ -66,7 +77,7 @@ jet_cli_effect_store_dir: fn() -> String? {
 // silent; an empty set removes the record, so the next nonempty one is named.
 // False when the store can't be read or written, so the run names the set.
 jet_cli_effect_store_seen: fn(file: String, rights: [String]) -> Bool {
-    directory: jet_cli_effect_store_dir() ?? return false
+    directory: jet_cli_state_dir("effects") ?? return false
     canonical: notice_files.realpath(file) ?? file.copy()
     path: "{directory}/{notice_crypto.sha256(canonical.bytes()).hex()}"
     if rights.len() == 0 {

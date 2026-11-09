@@ -182,6 +182,29 @@ The source registry reserves typed item-template generation. `derive T.Trait {
 grammar, and neither form accepts a source string or re-lexes generated text.
 This is the `D-META-CODE1` / `D-META-BODY1` rule in the [syntax decisions](../syntax-decisions.md).
 
+A `$name` in a `b.generate` body that names a local of the build entry splices
+that local's value into the generated items as a Jet literal, so build
+reflection can feed generated code:
+
+```jet
+build: fn(b: Build) {
+    loop function in b.program.functions() {
+        if function.name == "wrapped" {
+            operation: function.arithmetic[0].operation
+            b.generate("reflection_values") {
+                reflected_operation: fn() -> String { $operation }
+            }
+        }
+    }
+}
+```
+
+A spliced local is a `String`, `Int` or `Bool`, or a list of them; any other
+type is E3502. The value goes where an expression goes; a generated
+declaration's name comes only from a compile-time binding, such as a
+`comptime` loop name. A `$name` that names no build local stays a
+compile-time name of the items.
+
 ## Typed reflection
 
 Jet has two related reflection paths:

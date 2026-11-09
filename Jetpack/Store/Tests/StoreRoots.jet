@@ -179,7 +179,7 @@ store_test_register_locked: fn(verification: &StoreVerification, roots: HangarRo
     project: files.join(roots.root, "receipt-closure-project")
     store_test_write_lock(project, store_test_receipt_lock("receipt-consumer", "1", consumer.entry.reference, consumer.entry.receipt))
     graph: store_closure_graph(verification, roots) ?? panic("graph")
-    live: store_live_roots_from_graph(verification, roots, project, graph) ?? panic("live roots")
+    live: store_live_roots_from_graph(roots, project, graph) ?? panic("live roots")
     entries: [StoreEntry]{base.entry, middle.entry, consumer.entry}
     loop entry in entries {
         meta: pkg_parse_meta(entry.meta_json()) ?? panic("meta")
@@ -196,7 +196,7 @@ store_test_register_locked: fn(verification: &StoreVerification, roots: HangarRo
     project: files.join(roots.root, "receipt-mismatch-project")
     store_test_write_lock(project, store_test_receipt_lock("wrong-package", "1", entry.entry.reference, entry.entry.receipt))
     graph: store_closure_graph(verification, roots) ?? panic("graph")
-    if store_live_roots_from_graph(verification, roots, project, graph) == {
+    if store_live_roots_from_graph(roots, project, graph) == {
         .Ok(_) -> panic("mismatched receipt identity must be refused")
         .Err(error) -> assert(error.message().contains("disagrees with Hangar closure record"))
     }

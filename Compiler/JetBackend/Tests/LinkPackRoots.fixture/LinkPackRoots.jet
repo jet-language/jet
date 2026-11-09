@@ -3,7 +3,7 @@
 // (this package's runtime-pack-roots-*.s, assembled) and runtime.a.
 use {
     files: core.files
-    jet_backend.[LINK_BASE, LINK_NOLIBC_SUFFIX, LINK_UNDEF, LinkContext, link_context, link_cstr, link_load_inputs, link_pack_rust_symbol, link_sec_name, link_sym_at, link_sym_shndx, link_u32, link_u8, x64_link_executable, x64_link_runtime_pack]
+    jet_backend.[LINK_BASE, LINK_UNDEF, LinkContext, link_context, link_cstr, link_load_inputs, link_pack_rust_symbol, link_sym_at, link_sym_shndx, link_u32, link_u8, x64_link_executable, x64_link_runtime_pack]
     jet_foundation.[compiler_threads_single]
 }
 
@@ -22,14 +22,6 @@ pack_roots_defined: fn(c: LinkContext, name: String, binding: Int) Never! {
     at: link_sym_at(c, 0, k)
     if link_u8(c.bufs, 0, at + 4) >> 4 != binding -> panic("pack changed binding for {name}")
     if link_sym_shndx(c, 0, k) < 0 -> panic("pack lost definition for {name}")
-}
-
-// Whether the pack section defining `name` is marked as running without
-// libc's startup (RuntimePack.jet link_pack_nolibc).
-pack_roots_nolibc: fn(c: LinkContext, name: String) -> Bool Never! {
-    k: pack_roots_symbol(c, name)
-    if k < 0 -> panic("pack lost symbol {name}")
-    link_cstr(c.bufs, 0, link_sec_name(c, 0, link_sym_shndx(c, 0, k))).ends_with(LINK_NOLIBC_SUFFIX)
 }
 
 run: fn() {
@@ -52,9 +44,6 @@ run: fn() {
         pack_roots_defined(c, name, 1)
     }
     pack_roots_defined(c, "jet_rt_fixture_weak", 2)
-    // The first input is the Jet runtime's object; the archive's code is C.
-    if !pack_roots_nolibc(c, "jet_rt_fixture_export") -> panic("pack did not mark the runtime object's code as needing no libc startup")
-    if pack_roots_nolibc(c, "jet_archive_fixture") -> panic("pack marked archive code as needing no libc startup")
     // GNU as calls the section directly; its unused local FUNC name is optional.
     // The ELF consumer checks the helper's distinct result, not merely its label.
     if pack_roots_symbol(c, "pack_private_helper") >= 0 -> pack_roots_defined(c, "pack_private_helper", 0)

@@ -1,7 +1,7 @@
 // Publish/mod.rs and tests/pkg.rs SBOM cases. Full-byte regressions pin all
 // fixed whitespace; digest expectations reuse the actual Lock writer + SHA.
 use {
-    jet_pkg_model.[ForeignLanguage, LockFile, LockSource, LockedPackage, pkg_lock_write, pkg_sha256_hex]
+    jet_pkg_model.[ForeignLanguage, LockFile, LockSource, LockedPackage, pkg_json_render_pretty, pkg_lock_write, pkg_sha256_hex]
     jetpack_publication.[
         publication_emit_cyclonedx, publication_emit_spdx, publication_lock_digest,
         publication_registry_spdx, publication_spdx_checksum,
@@ -23,17 +23,44 @@ publication_sbom_test_lock: fn(packages: [LockedPackage]) -> LockFile Never! {
 publication_sbom_test_spdx_root: fn(digest: String, name: String, version: String, checksum: String) -> String Never! {
     "SPDXVersion: SPDX-2.3\nDataLicense: CC0-1.0\nSPDXID: SPDXRef-DOCUMENT\nDocumentNamespace: https://jet-lang.dev/spdx/{name}-{version}-{digest}\nDocumentName: {name}-{version}\nCreator: Tool: jet\nCreated: 1970-01-01T00:00:00Z\n\n##### Root package\n\nPackageName: {name}\nSPDXID: SPDXRef-root\nPackageVersion: {version}\nFilesAnalyzed: false\nPackageChecksum: {checksum}\nPackageDownloadLocation: NOASSERTION\n\n"
 }
-publication_sbom_test_cdx: fn(digest: String, root_name_json: String, root_version_json: String, components: String) -> String Never! {
-    "{{\n  \"bomFormat\": \"CycloneDX\",\n  \"specVersion\": \"1.5\",\n  \"serialNumber\": \"urn:uuid:jet-{digest}\",\n  \"version\": 1,\n  \"metadata\": {{\n    \"timestamp\": \"1970-01-01T00:00:00Z\",\n    \"tools\": [{{ \"name\": \"jet\" }}],\n    \"component\": {{\n      \"type\": \"library\",\n      \"name\": {root_name_json},\n      \"version\": {root_version_json}\n    }}\n  }},\n  \"components\": [\n{components}\n  ]\n}}\n"
+// The empty-lock CycloneDX document, byte for byte.
+PUBLICATION_SBOM_TEST_EMPTY_CDX: "{{\n  \"bomFormat\": \"CycloneDX\",\n  \"specVersion\": \"1.5\",\n  \"serialNumber\": \"urn:uuid:jet-sha256-5818e1a4ff61c5588768e1a8635440de1bb62905969dabe6786d37baf1dcf4f5\",\n  \"version\": 1,\n  \"metadata\": {{\n    \"timestamp\": \"1970-01-01T00:00:00Z\",\n    \"tools\": [\n      {{\n        \"name\": \"jet\"\n      }}\n    ],\n    \"component\": {{\n      \"type\": \"library\",\n      \"name\": \"myapp\",\n      \"version\": \"0.1.0\"\n    }}\n  }},\n  \"components\": []\n}}\n"
+
+publication_sbom_test_component: fn(index: Int, name: String, version: String, content: String) -> Dyn Never! {
+    Dyn.Object([
+        "type": Dyn.Text("library"),
+        "bom-ref": Dyn.Text("pkg-{index}"),
+        "name": Dyn.Text(name.copy()),
+        "version": Dyn.Text(version.copy()),
+        "hashes": Dyn.Array([Dyn]{Dyn.Object(["alg": Dyn.Text("SHA-256"), "content": Dyn.Text(content.copy())])}),
+    ])
+}
+// The expected CycloneDX bytes in the empty-lock golden's layout.
+publication_sbom_test_cdx: fn(digest: String, root_name: String, root_version: String, components: [Dyn]) -> String Never! {
+    document: Dyn.Object([
+        "bomFormat": Dyn.Text("CycloneDX"),
+        "specVersion": Dyn.Text("1.5"),
+        "serialNumber": Dyn.Text("urn:uuid:jet-{digest}"),
+        "version": Dyn.Int(1),
+        "metadata": Dyn.Object([
+            "timestamp": Dyn.Text("1970-01-01T00:00:00Z"),
+            "tools": Dyn.Array([Dyn]{Dyn.Object(["name": Dyn.Text("jet")])}),
+            "component": Dyn.Object(["type": Dyn.Text("library"), "name": Dyn.Text(root_name.copy()), "version": Dyn.Text(root_version.copy())]),
+        ]),
+        "components": Dyn.Array(components.copy()),
+    ])
+    "{pkg_json_render_pretty(document)}\n"
 }
 
 #Test("publication SBOM empty lock exact bytes and canonical digest") {
     lock: LockFile.empty()
     assert_eq(pkg_lock_write(lock), "version = 1\n\n[root]\ndependencies = []\n")
     digest: "sha256-{pkg_sha256_hex("version = 1\n\n[root]\ndependencies = []\n".bytes())}"
+    assert_eq(digest, "sha256-5818e1a4ff61c5588768e1a8635440de1bb62905969dabe6786d37baf1dcf4f5")
     assert_eq(publication_lock_digest(lock), digest)
     assert_eq(publication_emit_spdx(lock, "myapp", "0.1.0"), publication_sbom_test_spdx_root(digest, "myapp", "0.1.0", "NOASSERTION"))
-    assert_eq(publication_emit_cyclonedx(lock, "myapp", "0.1.0"), publication_sbom_test_cdx(digest, "\"myapp\"", "\"0.1.0\"", ""))
+    assert_eq(publication_emit_cyclonedx(lock, "myapp", "0.1.0"), PUBLICATION_SBOM_TEST_EMPTY_CDX)
+    assert_eq(publication_sbom_test_cdx(digest, "myapp", "0.1.0", [Dyn]{}), PUBLICATION_SBOM_TEST_EMPTY_CDX)
 }
 
 #Test("publication SBOM spdx_sbom_has_required_fields and nonempty exact bytes") {
@@ -51,8 +78,8 @@ publication_sbom_test_cdx: fn(digest: String, root_name_json: String, root_versi
     assert(cyclonedx.contains("\"bomFormat\": \"CycloneDX\""))
     assert(cyclonedx.contains("\"name\": \"helpers\""))
     assert(cyclonedx.contains("SHA-256"))
-    component: "    {{\n      \"type\": \"library\",\n      \"bom-ref\": \"pkg-0\",\n      \"name\": \"helpers\",\n      \"version\": \"1.0.0\",\n      \"hashes\": [{{ \"alg\": \"SHA-256\", \"content\": \"abcd1234\" }}]\n    }}"
-    assert_eq(cyclonedx, publication_sbom_test_cdx(publication_lock_digest(lock), "\"myapp\"", "\"0.1.0\"", component))
+    component: publication_sbom_test_component(0, "helpers", "1.0.0", "abcd1234")
+    assert_eq(cyclonedx, publication_sbom_test_cdx(publication_lock_digest(lock), "myapp", "0.1.0", [Dyn]{component}))
 }
 
 #Test("publication SBOM sbom_emits_foreign_rust_bridge_packages exact bytes") {
@@ -70,8 +97,8 @@ publication_sbom_test_cdx: fn(digest: String, root_name_json: String, root_versi
     assert(cyclonedx.contains("\"name\": \"base64\""))
     assert(cyclonedx.contains("\"version\": \"0.22.1\""))
     assert(cyclonedx.contains("\"content\": \"{digest}\""))
-    component: "    {{\n      \"type\": \"library\",\n      \"bom-ref\": \"pkg-0\",\n      \"name\": \"base64\",\n      \"version\": \"0.22.1\",\n      \"hashes\": [{{ \"alg\": \"SHA-256\", \"content\": \"{digest}\" }}]\n    }}"
-    assert_eq(cyclonedx, publication_sbom_test_cdx(publication_lock_digest(lock), "\"myapp\"", "\"0.1.0\"", component))
+    component: publication_sbom_test_component(0, "base64", "0.22.1", digest)
+    assert_eq(cyclonedx, publication_sbom_test_cdx(publication_lock_digest(lock), "myapp", "0.1.0", [Dyn]{component}))
 }
 
 #Test("publication SBOM escaped JSON and raw SPDX exact bytes") {
@@ -80,8 +107,11 @@ publication_sbom_test_cdx: fn(digest: String, root_name_json: String, root_versi
     package := publication_sbom_test_package(name, version, "sha256-old")
     package.content_hash = Val("sha256-h\"\\\n\t")
     lock: publication_sbom_test_lock([LockedPackage]{package})
-    component: "    {{\n      \"type\": \"library\",\n      \"bom-ref\": \"pkg-0\",\n      \"name\": \"é\\\"\\\\\\n\\t\",\n      \"version\": \"1\\\"\\\\\\n\",\n      \"hashes\": [{{ \"alg\": \"SHA-256\", \"content\": \"h\\\"\\\\\\n\\t\" }}]\n    }}"
-    assert_eq(publication_emit_cyclonedx(lock, name, version), publication_sbom_test_cdx(publication_lock_digest(lock), "\"é\\\"\\\\\\n\\t\"", "\"1\\\"\\\\\\n\"", component))
+    component: publication_sbom_test_component(0, name, version, "h\"\\\n\t")
+    cyclonedx: publication_emit_cyclonedx(lock, name, version)
+    assert_eq(cyclonedx, publication_sbom_test_cdx(publication_lock_digest(lock), name, version, [Dyn]{component}))
+    assert(cyclonedx.contains("      \"name\": \"é\\\"\\\\\\n\\t\",\n      \"version\": \"1\\\"\\\\\\n\"\n"))
+    assert(cyclonedx.contains("          \"content\": \"h\\\"\\\\\\n\\t\"\n"))
     assert_eq(publication_emit_spdx(lock, name, version), "{publication_sbom_test_spdx_root(publication_lock_digest(lock), name, version, "SHA256: h\"\\\n\t")}##### {name}\n\nPackageName: {name}\nSPDXID: SPDXRef-pkg-0\nPackageVersion: {version}\nFilesAnalyzed: false\nPackageChecksum: SHA256: h\"\\\n\t\nPackageDownloadLocation: NOASSERTION\n\nRelationship: SPDXRef-root DEPENDS_ON SPDXRef-pkg-0\n\n")
 }
 
@@ -122,9 +152,9 @@ publication_sbom_test_cdx: fn(digest: String, root_name_json: String, root_versi
     assert(spdx.starts_with(publication_sbom_test_spdx_root(publication_lock_digest(lock), "root", "version", "NOASSERTION")))
     assert(spdx.contains("SPDXRef-pkg-0\nPackageVersion: first\n"))
     assert(spdx.contains("SPDXRef-pkg-1\nPackageVersion: second\n"))
-    component0: "    {{\n      \"type\": \"library\",\n      \"bom-ref\": \"pkg-0\",\n      \"name\": \"root\",\n      \"version\": \"first\",\n      \"hashes\": [{{ \"alg\": \"SHA-256\", \"content\": \"not-sha\" }}]\n    }}"
-    component1: "    {{\n      \"type\": \"library\",\n      \"bom-ref\": \"pkg-1\",\n      \"name\": \"root\",\n      \"version\": \"second\",\n      \"hashes\": [{{ \"alg\": \"SHA-256\", \"content\": \"second\" }}]\n    }}"
-    assert_eq(publication_emit_cyclonedx(lock, "root", "version"), publication_sbom_test_cdx(publication_lock_digest(lock), "\"root\"", "\"version\"", "{component0},\n{component1}"))
+    component0: publication_sbom_test_component(0, "root", "first", "not-sha")
+    component1: publication_sbom_test_component(1, "root", "second", "second")
+    assert_eq(publication_emit_cyclonedx(lock, "root", "version"), publication_sbom_test_cdx(publication_lock_digest(lock), "root", "version", [Dyn]{component0, component1}))
 }
 
 #Test("publication SBOM lock identity changes and deterministic fixed timestamps") {

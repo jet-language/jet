@@ -752,7 +752,7 @@ web_error_has_disallowed_control: fn(value: String) -> Bool {
     false
 }
 validate_optional_text: fn(value: String?, field: String, limit: Int) WebErrorPageError! {
-    text: value ?? return Ok(())
+    text: value ?? return Ok()
     if text == "" -> return Err(WebErrorPageError.EmptyField(field: field))
     if text.bytes().len() > limit -> return Err(WebErrorPageError.TextTooLarge(field: field))
     if web_error_has_disallowed_control(text) -> return Err(WebErrorPageError.ControlCharacter(field: field))

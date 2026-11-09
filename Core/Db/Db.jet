@@ -1152,10 +1152,10 @@ DBLease: struct { state: Shared<__LeaseState> }
 impl DBLease {
     close: fn(self) DBError! -[DB]> {
         guard := self.state.guard_edit()
-        if guard.value.drivers.len() == 0 -> return Ok(())
-        driver: guard.value.drivers.remove(0, .Slot) ?? return Ok(())
+        if guard.value.drivers.len() == 0 -> return Ok()
+        driver: guard.value.drivers.remove(0, .Slot) ?? return Ok()
         __pool_release(guard.value.pool, driver)
-        Ok(())
+        Ok()
     }
 }
 impl DBLease.Display { display: fn(self) -> String { "db.lease" } }

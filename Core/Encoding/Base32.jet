@@ -134,7 +134,7 @@ decode_error: fn(offset: Int, reason: String) -> Base32Error Never! {
 
 
 #Test("base32 strict decode") {
-    assert_eq(decode("MZXW6==="), Ok("foo".bytes()))
+    assert_eq(decode("MZXW6===") ?? panic("padded base32 decodes"), "foo".bytes())
     assert(decode("mzxw6") == .Err(_))
     assert(decode("MY") == .Err(_))
     assert(decode("MZ======") == .Err(_))

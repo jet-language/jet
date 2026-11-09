@@ -1,9 +1,6 @@
 // Package/Blocks.rs security tests: retired build environment payloads and
 // the contextual inline `package: { … }` carrier.
-use jet_pkg_model.[
-    InlinePackageBlock, PackageFacts, pkg_binder_slice, pkg_binder_tail, pkg_extract_inline_package,
-    pkg_inline_package_insertion_offset, pkg_parse_build,
-]
+use jet_pkg_model.[InlinePackageBlock, PackageFacts, pkg_binder_slice, pkg_extract_inline_package, pkg_parse_build]
 
 #Test("build profile rejects retired environment payload") {
     hostile: "release: Build.{{ optimize: \"full\", env: \"RUSTFLAGS=--cfg=hostile; touch pwned\" }}"
@@ -69,22 +66,6 @@ pkg_test_scan_inline_package: fn(source: String) -> InlinePackageBlock? Never! {
         .Err(error) -> assert(error.message() == "the inline Package declaration is missing its closing `}}`")
         .Ok(_) -> panic("an unclosed carrier is unbalanced")
     }
-}
-
-// Insert a carrier at the computed offset; the result must parse as a
-// leading carrier.
-pkg_test_insert_inline_package: fn(source: String) -> String Never! {
-    at: pkg_inline_package_insertion_offset(source)
-    out: "{pkg_binder_slice(source, 0, at)}package: {{ name: \"demo\" }}\n{pkg_binder_tail(source, at)}"
-    block: pkg_test_scan_inline_package(out) ?? panic("insertion must produce a leading carrier")
-    assert_eq(block.body(out).trim(), "name: \"demo\"")
-    out
-}
-
-#Test("inline package insertion keeps header first and docs attached") {
-    assert_eq(pkg_test_insert_inline_package("#!/usr/bin/env jet\n// tool header\nuse files: core.files\n"), "#!/usr/bin/env jet\n// tool header\npackage: {{ name: \"demo\" }}\nuse files: core.files\n")
-    assert_eq(pkg_test_insert_inline_package("// header\n\n/// Entry.\n/// More.\nrun: fn() {{}}\n"), "// header\n\npackage: {{ name: \"demo\" }}\n/// Entry.\n/// More.\nrun: fn() {{}}\n")
-    assert_eq(pkg_test_insert_inline_package("run: fn() {{}}\n"), "package: {{ name: \"demo\" }}\nrun: fn() {{}}\n")
 }
 
 // Package/mod.rs `source_files_checked`: interpolated suffixes compare values,

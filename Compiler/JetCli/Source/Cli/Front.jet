@@ -110,7 +110,8 @@ JetCLIPlan: enum {
     // decision (BuildCache.jet).
     Build(file: String, source: String, color: Bool, options: BuildOptions, threads: Int?, invocation: JetCLIInvocationAuthority?, notice: String, json: Bool, sbom: Bool, quiet: Bool, verbose: Bool)
     // `jet build --locked`: `check` is the engine's locked-fetch argv; when
-    // it passes, `build` (the raw words without `--locked`) runs as `jet build`.
+    // it passes, `build` (the raw words without `--locked`) runs as `jet build`
+    // does, refusing a dependency effect row the lock doesn't cover (E3513).
     LockedBuild(check: [String], build: [String])
     // A package build its `build: fn(b: Build)` in `file` configures; its
     // option calls join `options` as their `build: fn` layer, and its
@@ -128,6 +129,10 @@ JetCLIPlan: enum {
     // `entry` is the command function the program starts at (`dev: fn` for a
     // `jet dev` that selected one); None starts at the package's own entry.
     Run(file: String, source: String, color: Bool, options: BuildOptions, verbose: Bool, json: Bool, threads: Int?, program_args: [String], invocation: JetCLIInvocationAuthority?, notice: String, watch: Bool, entry: String?)
+    // `jet run <https-url|name#version>`: fetch and pin `target`, then run
+    // the pinned entry as `Run` runs a file (RemoteRun.jet); `jet_argv` and
+    // `args` are the command as written.
+    RunRemote(target: JetCLIRemoteRunTarget, jet_argv: [String], args: [String], passthrough: [String]?, color: Bool, quiet: Bool, verbose: Bool, threads: Int?)
     // `jet run|build <file>` of a C or C++ file (#6686): compile and link it
     // at `-O{level}` with the C toolchain Jet programs compile their own C
     // with (Host.jet jet_cli_native_source); `run` then runs it with
@@ -286,9 +291,11 @@ JetCLIPlan: enum {
     // `jet repl [file.jet] [--project <dir>]` (Repl.jet): the line session;
     // `preload` is its first positional.
     Repl(project: String?, preload: String?, invocation: JetCLIInvocationAuthority?, color: Bool)
-    // `jet __jet_repl_run_stdin --session=<nonce>` (Repl.jet): one REPL turn's
-    // private child; never in help.
-    ReplChild(session: String, invocation: JetCLIInvocationAuthority?)
+    // `jet self lsp` (LSP.jet): the language server over stdin and stdout.
+    LSP
+    // `jet __jet_repl_run_stdin --session=<nonce>` (Repl.jet): the private
+    // child that runs one REPL turn's binary; never in help.
+    ReplChild(invocation: JetCLIInvocationAuthority?)
     // `jet eval <expression>` (Repl.jet): one REPL turn.
     EvalExpression(source: String, color: Bool, json: Bool)
     // `jet prove TARGET [--lens L]... [--capture | --capture-sensitive |
@@ -1666,6 +1673,9 @@ jet_cli_run: fn(jet_argv: [String], args: [String], passthrough: [String]?, shor
 // entry; `--watch=off` runs it once instead of rerunning it on every change.
 jet_cli_run_entry: fn(jet_argv: [String], args: [String], passthrough: [String]?, shorthand: Bool, watch: Bool, color: Bool, quiet: Bool, verbose: Bool, threads: Int?) -[FS, Env, Exec]> JetCLIPlan Never! {
     if jet_cli_option_flags_refusal(jet_argv, color) == .Val(refusal) -> return refusal
+    if !watch && !shorthand && args.len() > 1 {
+        if jet_cli_remote_run_target(args[1]) == .Val(target) -> return jet_cli_remote_run_plan(target, jet_argv, args, passthrough, color, quiet, verbose, threads)
+    }
     keep_watching := watch
     loop argument in jet_argv {
         if !argument.starts_with("-") || argument == "-" -> next
@@ -1677,6 +1687,10 @@ jet_cli_run_entry: fn(jet_argv: [String], args: [String], passthrough: [String]?
         }
         head: argument.split("=").to_list()[0]
         if head == "-e" -> return jet_cli_fail("E2104", "`-e` runs code in place of a program, so it comes before any", jet_cli_why("E2104"), "run the code alone: `jet -e 'print(1 + 2)'` or `jet run -e 'print(1 + 2)'`", color, JET_DRIVER_EXIT_USAGE)
+        if head == "--sha256" && !watch {
+            if argument == "--sha256" -> return jet_cli_fail("E2104", "`--sha256` needs its value", jet_cli_why("E2104"), "write `--sha256=<64 hex digits>` before the URL", color, JET_DRIVER_EXIT_USAGE)
+            return jet_cli_fail("E2104", "`--sha256` pins the first fetch of a URL, and `{if args.len() > 1 -> args[1] else -> "."}` is a local path", jet_cli_why("E2104"), "drop `--sha256`; a local file runs as it is on disk", color, JET_DRIVER_EXIT_USAGE)
+        }
         if JET_CLI_RUN_PORTED_FLAGS.contains(head) || build_option_flag_row(head) != None || !jet_cli_is_known_flag(head) -> next
         command: if watch -> "dev" else -> "run"
         return jet_cli_not_ported("{command} {head}", color)
@@ -1725,6 +1739,30 @@ jet_cli_run_entry: fn(jet_argv: [String], args: [String], passthrough: [String]?
         else -> {}
     }
     entry
+}
+
+// `jet run <url>` and `jet run <package>` (RemoteRun.jet): a local run's
+// flags, plus `--sha256=<hex>` on a URL and `--locked`. The host fetches,
+// pins and runs the target (jet_cli_remote_run_host).
+jet_cli_remote_run_plan: fn(target: JetCLIRemoteRunTarget, jet_argv: [String], args: [String], passthrough: [String]?, color: Bool, quiet: Bool, verbose: Bool, threads: Int?) -> JetCLIPlan Never! {
+    registry: if target == {
+        .URL(_) -> false
+        .Registry(_, _) -> true
+    }
+    loop argument in jet_argv {
+        if !argument.starts_with("-") || argument == "-" -> next
+        head: argument.split("=").to_list()[0]
+        if head == "-e" -> return jet_cli_fail("E2104", "`-e` runs code in place of a program, so it can't run `{args[1]}`", jet_cli_why("E2104"), "run the code alone: `jet -e 'print(1 + 2)'`, or drop `-e` to run `{args[1]}`", color, JET_DRIVER_EXIT_USAGE)
+        if head == "--sha256" {
+            if registry -> return jet_cli_fail("E2104", "`--sha256` pins the first fetch of a URL, and `{args[1]}` is a registry package", jet_cli_why("E2104"), "drop `--sha256`; the registry's signed index pins a package version", color, JET_DRIVER_EXIT_USAGE)
+            if argument == "--sha256" -> return jet_cli_fail("E2104", "`--sha256` needs its value", jet_cli_why("E2104"), "write `--sha256=<64 hex digits>`", color, JET_DRIVER_EXIT_USAGE)
+            next
+        }
+        if head == "--locked" || JET_CLI_RUN_PORTED_FLAGS.contains(head) || build_option_flag_row(head) != None || !jet_cli_is_known_flag(head) -> next
+        return jet_cli_not_ported("run {head}", color)
+    }
+    if jet_cli_authority_flags(jet_argv, color) == .Refused(refusal) -> return refusal
+    JetCLIPlan.RunRemote{target: target, jet_argv: jet_argv, args: args, passthrough: passthrough, color: color, quiet: quiet, verbose: verbose, threads: threads}
 }
 
 // Whether `jet dev` serves the program's web build: a `#Target(Web)`
@@ -1981,7 +2019,9 @@ jet_cli_test_file: fn(jet_argv: [String], file: String, color: Bool, verbose: Bo
 // graph of the checked entry (WebGraph.jet). Any other query names a package:
 // the Jetpack engine explains its Hangar record or last realization attempt.
 // The `--reload` and `--cost` views stay refused. `log [<file|dir>]` lists
-// every source of the core.log level filter (LogExplain.jet).
+// every source of the core.log level filter (LogExplain.jet); `effects
+// [<file>[:<line>]]` lists every effect cap in force at one site, nearest
+// first, and `--caps` every module cap under a path (ExplainEffects.jet).
 jet_cli_explain: fn(jet_argv: [String], args: [String], color: Bool, json: Bool, threads: Int?) -[FS, Env]> JetCLIPlan Never! {
     if jet_cli_has(jet_argv, "--reload") -> return jet_cli_not_ported("explain --reload", color)
     if jet_cli_has(jet_argv, "--cost") -> return jet_cli_not_ported("explain --cost", color)
@@ -1993,6 +2033,7 @@ jet_cli_explain: fn(jet_argv: [String], args: [String], color: Bool, json: Bool,
     if args.len() == 2 && jet_cli_is_diagnostic_code(args[1]) -> return JetCLIPlan.Done{output: jet_driver_explain_code(Val(args[1]), color)}
     query: args[1]
     if query == "log" -> return jet_cli_explain_log(args, color, json)
+    if query == "effects" -> return jet_cli_explain_effects(jet_argv, args, color, json, threads)
     if query == "marker" {
         // `run_explain_marker`: extra words stay ignored.
         if args.len() < 4 -> return jet_cli_done("", "usage: jet explain marker <file>:<line> <policy-key>\n", JET_DRIVER_EXIT_USAGE)
@@ -2382,7 +2423,7 @@ jet_cli_plan: fn(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]>
         break
     }
     args: jet_cli_positionals(jet_argv)
-    if args.len() > 0 && args[0] == "lsp" -> return jet_cli_not_ported("self lsp", color)
+    if args.len() > 0 && args[0] == "lsp" -> return JetCLIPlan.LSP
     if args.len() == 0 {
         if jet_cli_any_help_flag(jet_argv) {
             order: jet_cli_help_order(jet_argv)
@@ -2529,10 +2570,12 @@ jet_cli_plan: fn(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]>
         // `jet dev`: the program rebuilt and rerun on every source change, from
         // the `dev: fn` its command home declares, else the stock `jet run` entry.
         // `--canvas`, `--app` and `--share` are their own dev hosts, not this loop.
+        // A bare `jet dev` in a role-file project runs inside its environment.
         "dev" -> {
             if jet_argv.contains("--canvas") -> return jet_cli_not_ported("dev --canvas", color)
             if jet_cli_has(jet_argv, "--app") -> return jet_cli_not_ported("dev --app", color)
             if jet_cli_has(jet_argv, "--share") -> return jet_cli_not_ported("dev --share", color)
+            if jet_cli_dev_environment_plan(cli_files.cwd() ?? ".", raw) == .Val(plan) -> return plan
             return jet_cli_run(jet_argv, args, passthrough, false, true, color, quiet, verbose, threads)
         }
         "test" -> return jet_cli_test(jet_argv, color, quiet, verbose, threads)

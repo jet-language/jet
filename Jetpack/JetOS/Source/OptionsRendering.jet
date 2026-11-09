@@ -139,16 +139,11 @@ jetos_prefixed_options: fn(system: SystemPlan, prefix: String) -> [(key: String,
     rows
 }
 
-jetos_option_rows_json: fn(rows: [(key: String, value: String)]) -> String Never! {
-    parts := [String]{}
-    loop row in rows -> parts.push("{{\n  \"key\": {foundation_json_quote(row.key)},\n  \"value\": {foundation_json_quote(row.value)}\n}}")
-    parts.join(",")
-}
-
-jetos_strings_json: fn(values: [String]) -> String Never! {
-    parts := [String]{}
-    loop value in values -> parts.push(foundation_json_quote(value))
-    parts.join(",")
+// `{"key": .., "value": ..}` rows in declaration order.
+jetos_option_rows_dyn: fn(rows: [(key: String, value: String)]) -> Dyn Never! {
+    items := [Dyn]{}
+    loop row in rows -> items.push(Dyn.Object(["key": Dyn.Text(row.key.copy()), "value": Dyn.Text(row.value.copy())]))
+    Dyn.Array(items)
 }
 
 jetos_boot_profile: fn(system: SystemPlan) -> JetOSBootProfile Never! {
@@ -204,15 +199,23 @@ jetos_render_user_profile_json: fn(system: SystemPlan, user: String) -> String N
         .Val(value) -> jetos_parse_list_items(value)
         .None -> [String]{}
     }
-    file_rows := [String]{}
-    loop row in jetos_prefixed_options(system, "user.{user}.files.") {
-        file_rows.push("{{\n  \"path\": {foundation_json_quote(row.key)},\n  \"source\": {foundation_json_quote(row.value)}\n}}")
-    }
-    jetos_render_user_profile_json_parts(user, home, shell, jetos_strings_json(packages), jetos_strings_json(services), file_rows.join(","))
+    jetos_render_user_profile_json_parts(user, home, shell, packages, services, jetos_prefixed_options(system, "user.{user}.files."))
 }
 
-jetos_render_user_profile_json_parts: fn(user: String, home: String, shell: String, packages_json: String, services_json: String, files_json: String) -> String Never! {
-    "{{\"kind\":\"jetos.user-generation\",\"user\":{foundation_json_quote(user)},\"home\":{foundation_json_quote(home)},\"shell\":{foundation_json_quote(shell)},\"packages\":[{packages_json}],\"services\":[{services_json}],\"files\":[{files_json}],\"standalone_commands\":[\"plan\",\"build\",\"switch\",\"rollback\",\"prove\"],\"proof\":\"user-generation-ready\"}}"
+jetos_render_user_profile_json_parts: fn(user: String, home: String, shell: String, packages: [String], services: [String], file_rows: [(key: String, value: String)]) -> String Never! {
+    file_items := [Dyn]{}
+    loop row in file_rows -> file_items.push(Dyn.Object(["path": Dyn.Text(row.key.copy()), "source": Dyn.Text(row.value.copy())]))
+    pkg_json_render(Dyn.Object([
+        "kind": Dyn.Text("jetos.user-generation"),
+        "user": Dyn.Text(user.copy()),
+        "home": Dyn.Text(home.copy()),
+        "shell": Dyn.Text(shell.copy()),
+        "packages": pkg_json_texts(packages),
+        "services": pkg_json_texts(services),
+        "files": Dyn.Array(file_items),
+        "standalone_commands": pkg_json_texts([String]{"plan", "build", "switch", "rollback", "prove"}),
+        "proof": Dyn.Text("user-generation-ready"),
+    ]))
 }
 
 // Rust :338-367: quotes toggle literally (even escaped quotes); brackets are

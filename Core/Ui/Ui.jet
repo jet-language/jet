@@ -11,6 +11,10 @@ package: {
 use {
     core: core
     tui_text: core.tui
+    core.term.[Key]
+    draw: __core_ui_draw
+    wayland: __core_ui_wayland
+    internal.[checksum, has_nul, without_key, without_button]
 }
 
 // core.ui — one portable tree consumed by every backend.
@@ -68,6 +72,15 @@ Rect: struct {
     height: Float
 }
 
+// A color: red, green, blue and alpha, each 0..255, alpha straight (not
+// premultiplied).
+Color: struct {
+    r: Int
+    g: Int
+    b: Int
+    a: Int
+}
+
 SizeConstraint: struct {
     min_width: Float
     min_height: Float
@@ -121,6 +134,8 @@ size: fn(width: Float, height: Float) -> Size Never! {
 rect: fn(x: Float, y: Float, width: Float, height: Float) -> Rect Never! {
     Rect{x: x, y: y, width: width, height: height}
 }
+// A color with each channel clamped to 0..255.
+color: fn(r: Int, g: Int, b: Int, a: Int) -> Color Never! { draw.color(r, g, b, a) }
 constraint: fn(min_width: Float, min_height: Float, max_width: Float, max_height: Float) -> SizeConstraint Never! {
     SizeConstraint{min_width: min_width, min_height: min_height, max_width: max_width, max_height: max_height}
 }
@@ -191,12 +206,6 @@ resize_event: fn(width: Float, height: Float) -> InputEvent Never! {
     InputEvent.Resize{size: size(width, height)}
 }
 
-
-gtk_backend: fn() -[Browser]> GtkBackend Never! {
-    #Unsafe("Core creates the real retained GTK renderer through the registered host allocation boundary") {
-        return core.ui.__gtk_backend()
-    }
-}
 tui_backend: fn() -[Browser]> TUIBackend Never! {
     #Unsafe("Core creates the real retained terminal renderer through the registered host allocation boundary") {
         return core.ui.__tui_backend()
@@ -274,6 +283,912 @@ preview_registry: fn(&&entries: [UIPreview]) -> UIPreviewRegistry UIPreviewError
     Ok(UIPreviewRegistry{entries: entries})
 }
 
+// ---- drawing ----------------------------------------------------------
+//
+// Jet's software rasterizer draws 2D shapes, text and sprites into a
+// window's frames (`frame.draw_rectangle(…)`) and into Images in memory
+// (`image_draw_rectangle(image, …)`). It is pure Jet: every tier and
+// target draws the same bytes. A primitive covers the pixels whose
+// centers lie inside it and blends src-over with rounding,
+// (src * a + dst * (255 - a) + 127) / 255 on every channel, alpha
+// included; a clear copies its color. Float geometry (Point, Rect) is in
+// pixels and snaps to a 1/256-pixel grid. Text is the built-in 5x7 bitmap
+// font at a whole-pixel scale. The names and argument orders are the
+// classic immediate-mode 2D ones, so such programs port line for line.
+
+// An image in memory: `width` x `height` RGBA pixels, row-major, alpha
+// straight. An image of width 0 holds no pixels.
+Image: struct {
+    priv canvas: draw.Image
+}
+
+impl Image {
+    width: fn(self) -> Int { self.canvas.width }
+
+    height: fn(self) -> Int { self.canvas.height }
+
+    // `height` rows of `width` RGBA pixels, 4 bytes each, as
+    // `Frame.present` takes them.
+    pixels: fn(self) -> [U8] { self.canvas.pixels.copy() }
+}
+
+// A texture atlas: named regions of one PNG texture.
+TextureAtlas: struct {
+    priv atlas: draw.TextureAtlas
+}
+
+impl TextureAtlas {
+    // The atlas's name: its `atlas:` line, or its file's stem.
+    name: fn(self) -> String { self.atlas.name.copy() }
+
+    // Whether the texture was read and decoded; an atlas without one
+    // draws nothing.
+    loaded: fn(self) -> Bool { self.atlas.texture.width > 0 }
+}
+
+// Reads the atlas text at `path`, a line at a time, each trimmed; blank
+// and unknown lines are skipped:
+//   atlas: NAME             the atlas's name (default: the file's stem)
+//   texture: PATH           the texture (default: `path` with extension
+//                           .png); a relative PATH joins `path`'s folder
+//   region: NAME X Y W H    a region in texture pixels
+// then reads and decodes its PNG texture. An atlas that cannot be read has
+// no regions.
+load_texture_atlas: fn(path: String) -[FS]> TextureAtlas Never! {
+    TextureAtlas{atlas: draw.load_texture_atlas(path)}
+}
+
+// The width in pixels of the widest line `draw_text` draws: each scalar
+// is 5 columns plus 1 of spacing at the text's scale (size / 10 rounded,
+// at least 1), and the last scalar on a line adds no spacing. Lines split
+// at "\n".
+measure_text: fn(text: String, size: Int) -> Int Never! { draw.measure_text(text, size) }
+
+// Collision checks: they draw nothing and need no window.
+check_collision_recs: fn(rec1: Rect, rec2: Rect) -> Bool Never! { draw.check_collision_recs(rec1, rec2) }
+
+check_collision_circles: fn(center1: Point, radius1: Float, center2: Point, radius2: Float) -> Bool Never! {
+    draw.check_collision_circles(center1, radius1, center2, radius2)
+}
+
+check_collision_circle_rec: fn(center: Point, radius: Float, rec: Rect) -> Bool Never! {
+    draw.check_collision_circle_rec(center, radius, rec)
+}
+
+// The nearest point of the segment from `p1` to `p2` lies within
+// `radius` of the center.
+check_collision_circle_line: fn(center: Point, radius: Float, p1: Point, p2: Point) -> Bool Never! {
+    draw.check_collision_circle_line(center, radius, p1, p2)
+}
+
+// Inside means left or top edge included, right or bottom edge excluded.
+check_collision_point_rec: fn(point: Point, rec: Rect) -> Bool Never! { draw.check_collision_point_rec(point, rec) }
+
+check_collision_point_circle: fn(point: Point, center: Point, radius: Float) -> Bool Never! {
+    draw.check_collision_point_circle(point, center, radius)
+}
+
+// A point on an edge or a vertex is outside.
+check_collision_point_triangle: fn(point: Point, p1: Point, p2: Point, p3: Point) -> Bool Never! {
+    draw.check_collision_point_triangle(point, p1, p2, p3)
+}
+
+// The point lies within `threshold` pixels of the line through `p1` and
+// `p2` and between them.
+check_collision_point_line: fn(point: Point, p1: Point, p2: Point, threshold: Int) -> Bool Never! {
+    draw.check_collision_point_line(point, p1, p2, threshold)
+}
+
+// Even-odd crossings; fewer than three points enclose nothing.
+check_collision_point_poly: fn(point: Point, points: [Point]) -> Bool Never! { draw.check_collision_point_poly(point, points) }
+
+// Where the segments start1..end1 and start2..end2 cross, or None when
+// they are parallel or cross outside either segment.
+check_collision_lines: fn(start1: Point, end1: Point, start2: Point, end2: Point) -> Point? Never! {
+    draw.check_collision_lines(start1, end1, start2, end2)
+}
+
+// The overlap of two rectangles, or a zero rectangle when they do not
+// overlap.
+get_collision_rec: fn(rec1: Rect, rec2: Rect) -> Rect Never! { draw.get_collision_rec(rec1, rec2) }
+
+// Images. A side below 1, a side above 16384 or more than 2^24 pixels
+// makes an image of width 0. The functions that change an image take it
+// through `&`, copy their color, alpha included, without blending, and
+// leave an image with no pixels as it is.
+gen_image_color: fn(width: Int, height: Int, color: Color) -> Image Never! {
+    Image{canvas: draw.gen_image_color(width, height, color)}
+}
+
+// Checks of checks_x by checks_y pixels with `first` at the top left; a
+// check side below 1 counts as 1.
+gen_image_checked: fn(width: Int, height: Int, checks_x: Int, checks_y: Int, first: Color, second: Color) -> Image Never! {
+    Image{canvas: draw.gen_image_checked(width, height, checks_x, checks_y, first, second)}
+}
+
+// The pixel at (x, y), or a zero color outside the image.
+get_image_color: fn(image: Image, x: Int, y: Int) -> Color Never! { draw.get_image_color(image.canvas, x, y) }
+
+image_clear_background: fn(image: &Image, color: Color) Never! { draw.image_clear_background(image.canvas, color) }
+
+image_draw_pixel: fn(image: &Image, x: Int, y: Int, color: Color) Never! { draw.image_draw_pixel(image.canvas, x, y, color) }
+
+image_draw_rectangle: fn(image: &Image, x: Int, y: Int, width: Int, height: Int, color: Color) Never! {
+    draw.image_draw_rectangle(image.canvas, x, y, width, height, color)
+}
+
+// The rectangle is clipped to the image and truncated to whole pixels. One
+// left with less than one column still sets its first pixel unless it
+// sits at the left edge, and one with columns but less than one row fills
+// its first row.
+image_draw_rectangle_rec: fn(image: &Image, rec: Rect, color: Color) Never! { draw.image_draw_rectangle_rec(image.canvas, rec, color) }
+
+// Keeps the part of the image inside `crop`, clipped to the image and
+// truncated to whole pixels; one past the right or bottom edge leaves the
+// image as it is. One with no whole column or row leaves no pixels, its
+// truncated sides (not below 0) as the size.
+image_crop: fn(image: &Image, crop: Rect) Never! { draw.image_crop(image.canvas, crop) }
+
+// Nearest neighbour; a new size an image cannot have leaves the image as
+// it is.
+image_resize_nn: fn(image: &Image, new_width: Int, new_height: Int) Never! { draw.image_resize_nn(image.canvas, new_width, new_height) }
+
+image_flip_vertical: fn(image: &Image) Never! { draw.image_flip_vertical(image.canvas) }
+
+image_flip_horizontal: fn(image: &Image) Never! { draw.image_flip_horizontal(image.canvas) }
+
+// A quarter turn clockwise.
+image_rotate_cw: fn(image: &Image) Never! { draw.image_rotate_cw(image.canvas) }
+
+// A quarter turn counterclockwise.
+image_rotate_ccw: fn(image: &Image) Never! { draw.image_rotate_ccw(image.canvas) }
+
+// Each channel becomes channel * tint / 255, rounded down, alpha
+// included.
+image_color_tint: fn(image: &Image, color: Color) Never! { draw.image_color_tint(image.canvas, color) }
+
+// Red, green and blue become 255 minus themselves.
+image_color_invert: fn(image: &Image) Never! { draw.image_color_invert(image.canvas) }
+
+// Adds `brightness`, clamped to -255..255, to red, green and blue; a sum
+// above 255 becomes 255 and one below 0 becomes 1.
+image_color_brightness: fn(image: &Image, brightness: Int) Never! { draw.image_color_brightness(image.canvas, brightness) }
+
+// Pixels equal to `color` in all four channels become `replace`.
+image_color_replace: fn(image: &Image, color: Color, replace: Color) Never! { draw.image_color_replace(image.canvas, color, replace) }
+
+// ---- windows ----------------------------------------------------------
+//
+// `open` shows a native window; `headless` gives the same Window, Frame
+// and event types with no device. A program draws each frame with the
+// rasterizer, which shows it when the next frame begins:
+//
+//     window: ui.open(width: 640, height: 400, title: "demo")
+//     loop frame in window.frames() {
+//         loop event in frame.events() { … }
+//         frame.clear_background(ui.color(11, 11, 13, 255))
+//         frame.draw_text("Jet", 20, 20, 40, ui.color(232, 35, 42, 255))
+//     }
+//
+// or presents RGBA pixels of its own with `frame.present(pixels)`; a
+// frame shows the pixels it presents or else what it drew.
+//
+// The display paces the frames, one per refresh while the program
+// presents; move things as a function of `frame.time`, never per frame.
+//
+// A window's size is asked for in logical units, the desktop's own;
+// frames, pixels and event positions are physical pixels, `frame.scale`
+// of them per unit (1.5 on a display scaled to 150%), so what a program
+// draws stays sharp on every display. The scale changes when the window
+// moves to another display; the frame after carries `.Resize`.
+//
+// Jet draws the window's frame (title bar, buttons, rounded corners,
+// shadow) around the frames unless the display server draws its own;
+// frames are the content below the title bar.
+//
+// The display server comes from the environment: $WAYLAND_DISPLAY.
+
+SIDE_MAX: 16384
+ICON_SIDE_MAX: 1024
+// A headless window's frames are one 60 Hz refresh apart.
+HEADLESS_REFRESH_NS: 16666667
+
+#Error
+UIError: enum {
+    // The environment names no display server.
+    NoDisplay
+    // The display server could not be reached.
+    Connect(String)
+    // The display server broke or refused the protocol.
+    Protocol(String)
+    // The display server lacks something a window needs.
+    Unsupported(String)
+    // A window size or pixel buffer is out of range.
+    Size(String)
+    // An app_id or icon name the program passed is malformed.
+    Invalid(String)
+}
+
+UIPointerButton: enum {
+    Left
+    Right
+    Middle
+    Other(Int)
+}
+
+// How the pointer looks over a window: CSS's cursor keywords, in the
+// order wp_cursor_shape_v1 numbers them, and `Hidden` (CSS `none`).
+UICursor: enum {
+    Default
+    ContextMenu
+    Help
+    Pointer
+    Progress
+    Wait
+    Cell
+    Crosshair
+    Text
+    VerticalText
+    Alias
+    Copy
+    Move
+    NoDrop
+    NotAllowed
+    Grab
+    Grabbing
+    ResizeE
+    ResizeN
+    ResizeNE
+    ResizeNW
+    ResizeS
+    ResizeSE
+    ResizeSW
+    ResizeW
+    ResizeEW
+    ResizeNS
+    ResizeNESW
+    ResizeNWSE
+    ResizeColumn
+    ResizeRow
+    AllScroll
+    ZoomIn
+    ZoomOut
+    Hidden
+}
+
+// A window icon: the name of a desktop theme icon ("" for none), used
+// when the desktop has one by that name, and images of it, one per size,
+// for when it has not.
+UIIcon: struct {
+    name: String
+    images: [UIIconImage]
+}
+
+// A square icon image `side` pixels across: `side` rows of `side` RGBA
+// pixels, 4 bytes each, alpha straight (not premultiplied), as a frame's.
+UIIconImage: struct {
+    side: Int
+    pixels: [U8]
+}
+
+// What happened since the previous frame. Positions are window pixels
+// from the top-left; `Text` is what a key press typed; `Resize` gives
+// the new frame size in pixels; `Close` asks the program to close the
+// window and ends the frames.
+UIEvent: enum {
+    KeyDown(Key)
+    KeyUp(Key)
+    Text(String)
+    PointerMove(x: Int, y: Int)
+    PointerDown(UIPointerButton)
+    PointerUp(UIPointerButton)
+    Scroll(dx: Float, dy: Float)
+    Resize(width: Int, height: Int)
+    Focus(Bool)
+    Close
+}
+
+// A rectangle of window pixels: `x`, `y` from the top-left.
+UIRect: struct {
+    x: Int
+    y: Int
+    width: Int
+    height: Int
+}
+
+WindowState: struct {
+    priv width: Int
+    priv height: Int
+    priv scale: Float
+    priv frames: Int
+    priv closed: Bool
+    priv failure: UIError?
+    priv link: Shared<wayland.Connection>?
+    priv script: [[UIEvent]]
+    priv checksums: [Int]
+    priv cursor: UICursor
+    // What the frames drew, and whether the latest frame drew or presented.
+    priv canvas: draw.Image
+    priv drawn: Bool
+    priv presented: Bool
+    // The keys and pointer buttons held and the pointer's place, as of
+    // the latest frame's events.
+    priv keys: [Key]
+    priv buttons: [UIPointerButton]
+    priv mouse_x: Int
+    priv mouse_y: Int
+}
+
+// A window and its frames. Copies share the one window, which closes when
+// the last copy is dropped.
+Window: struct {
+    priv state: Shared<WindowState>
+}
+
+// Opens a window of `width` x `height` logical units, titled `title`,
+// on the environment's display server.
+open: fn(*, width: Int, height: Int, title: String) -[Env, Net, Time]> Window UIError! {
+    if width < 1 || height < 1 || width > SIDE_MAX || height > SIDE_MAX {
+        return Err(UIError.Size("a window is 1 to {SIDE_MAX} pixels on each side, not {width}x{height}"))
+    }
+    if !wayland.available() -> return Err(UIError.NoDisplay)
+    link: wayland.connect(width, height, title)
+    state: WindowState{
+        width: link.width(), height: link.height(), scale: link.scale(), frames: 0, closed: false, failure: None,
+        link: Val(shared link), script: [[UIEvent]]{}, checksums: [Int]{}, cursor: UICursor.Default,
+        canvas: draw.no_image(), drawn: false, presented: false, keys: [Key]{}, buttons: [UIPointerButton]{}, mouse_x: 0, mouse_y: 0,
+    }
+    Ok(Window{state: shared state})
+}
+
+// A window with no device at scale 1: frame `i` carries `script[i]`, one
+// more frame carries `.Close`, and each frame presented or drawn records a
+// checksum of its pixels.
+headless: fn(*, width: Int, height: Int, script: [[UIEvent]]) -> Window UIError! {
+    if width < 1 || height < 1 || width > SIDE_MAX || height > SIDE_MAX {
+        return Err(UIError.Size("a window is 1 to {SIDE_MAX} pixels on each side, not {width}x{height}"))
+    }
+    state: WindowState{
+        width: width, height: height, scale: 1.0, frames: 0, closed: false, failure: None,
+        link: None, script: script, checksums: [Int]{}, cursor: UICursor.Default,
+        canvas: draw.no_image(), drawn: false, presented: false, keys: [Key]{}, buttons: [UIPointerButton]{}, mouse_x: 0, mouse_y: 0,
+    }
+    Ok(Window{state: shared state})
+}
+
+// How evenly frames reached the screen and how fast input showed.
+// `presented` frames were shown; `missed` counts refreshes frames were
+// late by against the vblank they aimed at; `discarded` frames were never
+// shown (a hidden window). Intervals run present to present; input
+// latency runs from an input event to the frame that showed it reaching
+// the screen (ms resolution: input times are whole ms). All times are
+// nanoseconds.
+FrameStats: struct {
+    presented: Int
+    missed: Int
+    discarded: Int
+    refresh_ns: Int
+    median_ns: Int
+    p99_ns: Int
+    input_samples: Int
+    input_median_ns: Int
+    input_p99_ns: Int
+    // Present-to-present intervals by refreshes spanned: [0] one
+    // refresh (every vblank), [1] two, [2] three, [3] four or more.
+    spans: [Int]
+}
+
+impl Window {
+    // The window's frames, paced by the display alone: one per refresh
+    // while the program presents, none while it is idle until input
+    // arrives.
+    frames: fn(self) -> Frames { Frames{state: self.state.copy()} }
+
+    // The latest frame's size in pixels, and pixels per logical unit.
+    width: fn(self) -> Int {
+        guard: self.state.guard_read()
+        guard.value.width
+    }
+
+    height: fn(self) -> Int {
+        guard: self.state.guard_read()
+        guard.value.height
+    }
+
+    scale: fn(self) -> Float {
+        guard: self.state.guard_read()
+        guard.value.scale
+    }
+
+    // Why the display server ended the frames, if it failed.
+    failure: fn(self) -> UIError? {
+        guard: self.state.guard_read()
+        guard.value.failure
+    }
+
+    // The FNV-1a checksum of each frame a headless window showed.
+    checksums: fn(self) -> [Int] {
+        guard: self.state.guard_read()
+        guard.value.checksums.copy()
+    }
+
+    // What the frames drew, as of the latest drawing call: an Image of
+    // width 0 before the first.
+    load_image_from_screen: fn(self) -> Image {
+        guard: self.state.guard_read()
+        Image{canvas: guard.value.canvas.copy()}
+    }
+
+    // How the pointer looks over the window; `.Default` until set.
+    cursor: fn(self) -> UICursor {
+        guard: self.state.guard_read()
+        guard.value.cursor
+    }
+
+    // Shows the pointer as `cursor` while it is over the window. A
+    // display server without wp_cursor_shape_v1 keeps its own cursor for
+    // every shape but `.Hidden`.
+    set_cursor: fn(self, cursor: UICursor) {
+        guard := self.state.guard_edit()
+        guard.value.cursor = cursor
+        if guard.value.link == .Val(link) {
+            connection := link.guard_edit()
+            wayland.set_cursor(connection.value, cursor)
+        }
+    }
+
+    // Names the application the window belongs to, as a reverse-DNS id
+    // ("org.example.Notes"): the desktop matches it to the application's
+    // desktop entry for its name, icon and grouping. It is
+    // "dev.jet.app" until set; set it before the first present.
+    set_app_id: fn(self, app_id: String) UIError! {
+        if app_id == "" -> return Err(UIError.Invalid("an app_id is not empty"))
+        if has_nul(app_id) -> return Err(UIError.Invalid("an app_id has no NUL byte"))
+        guard := self.state.guard_edit()
+        if guard.value.link == .Val(link) {
+            connection := link.guard_edit()
+            wayland.set_app_id(connection.value, app_id)
+        }
+        Ok()
+    }
+
+    // Shows `icon` as the window's icon; one with no name and no images
+    // unsets it. A display server without xdg_toplevel_icon_v1 shows
+    // the icon of the app_id's desktop entry instead.
+    set_icon: fn(self, icon: UIIcon) UIError! -[Env]> {
+        if has_nul(icon.name) -> return Err(UIError.Invalid("an icon name has no NUL byte"))
+        loop image in icon.images {
+            if image.side < 1 || image.side > ICON_SIDE_MAX {
+                return Err(UIError.Size("an icon image is 1 to {ICON_SIDE_MAX} pixels across, not {image.side}"))
+            }
+            if image.pixels.len() != image.side * image.side * 4 {
+                return Err(UIError.Size("a {image.side}x{image.side} icon image needs {image.side * image.side * 4} bytes of RGBA, got {image.pixels.len()}"))
+            }
+        }
+        guard := self.state.guard_edit()
+        if guard.value.link == .Val(link) {
+            connection := link.guard_edit()
+            return wayland.set_icon(connection.value, icon)
+        }
+        Ok()
+    }
+
+    // Presentation timing so far; zeros for a headless window or a
+    // display server without presentation feedback.
+    frame_stats: fn(self) -> FrameStats {
+        guard: self.state.guard_read()
+        if guard.value.link == .Val(link) {
+            connection: link.guard_read()
+            return connection.value.frame_stats()
+        }
+        FrameStats{presented: 0, missed: 0, discarded: 0, refresh_ns: 0, median_ns: 0, p99_ns: 0, input_samples: 0, input_median_ns: 0, input_p99_ns: 0, spans: [Int]{0, 0, 0, 0}}
+    }
+}
+
+Frames: struct {
+    priv state: Shared<WindowState>
+}
+
+FrameCursor: struct {
+    priv state: Shared<WindowState>
+}
+
+impl Frames.Iterable {
+    Iter: FrameCursor
+    iter: fn(&&self) -> FrameCursor { FrameCursor{state: self.state.copy()} }
+}
+
+impl FrameCursor.Iterator {
+    Item: Frame
+    // The next frame, once it is due; none after the frame that carried
+    // `.Close`. A frame that drew and presented nothing shows what it drew
+    // first; a display server that fails then records the failure and
+    // ends the frames.
+    next: fn(&self) -[Env, Net, Time]> Frame? {
+        guard := self.state.guard_edit()
+        if guard.value.drawn && !guard.value.presented {
+            whole: [UIRect]{UIRect{x: 0, y: 0, width: guard.value.canvas.width, height: guard.value.canvas.height}}
+            if guard.value.link == .Val(link) {
+                connection := link.guard_edit()
+                if wayland.present(connection.value, guard.value.canvas.pixels, whole) == .Err(error) {
+                    guard.value.failure = Val(error)
+                    guard.value.closed = true
+                }
+            } else {
+                guard.value.checksums.push(checksum(guard.value.canvas.pixels))
+            }
+        }
+        guard.value.drawn = false
+        guard.value.presented = false
+        if guard.value.closed -> return None
+        events := [UIEvent]{}
+        index: guard.value.frames
+        time_ns := 0
+        delta_ns := 0
+        if guard.value.link == .Val(link) {
+            connection := link.guard_edit()
+            events = wayland.next_frame(connection.value)
+            guard.value.width = connection.value.width()
+            guard.value.height = connection.value.height()
+            guard.value.scale = connection.value.scale()
+            time_ns = connection.value.time_ns()
+            delta_ns = connection.value.delta_ns()
+            if connection.value.failure() == .Val(failure) -> guard.value.failure = Val(failure)
+        } else {
+            time_ns = index * HEADLESS_REFRESH_NS
+            delta_ns = if index == 0 -> 0 else -> HEADLESS_REFRESH_NS
+            if index < guard.value.script.len() -> events = guard.value.script[index].copy() else -> events.push(UIEvent.Close)
+            loop event in events {
+                if event == .Resize(width, height) {
+                    guard.value.width = width
+                    guard.value.height = height
+                }
+            }
+        }
+        was_keys: guard.value.keys.copy()
+        was_buttons: guard.value.buttons.copy()
+        loop event in events {
+            if event == {
+                .Close -> guard.value.closed = true
+                .KeyDown(key) -> if !guard.value.keys.contains(key) -> guard.value.keys.push(key.copy())
+                .KeyUp(key) -> guard.value.keys = without_key(guard.value.keys, key)
+                .PointerDown(button) -> if !guard.value.buttons.contains(button) -> guard.value.buttons.push(button.copy())
+                .PointerUp(button) -> guard.value.buttons = without_button(guard.value.buttons, button)
+                .PointerMove(x, y) -> {
+                    guard.value.mouse_x = x
+                    guard.value.mouse_y = y
+                }
+                // Keys and buttons held when the window loses the
+                // keyboard are released for it.
+                .Focus(false) -> {
+                    guard.value.keys = [Key]{}
+                    guard.value.buttons = [UIPointerButton]{}
+                }
+                else -> {}
+            }
+        }
+        frame: Frame{
+            state: self.state.copy(), index: index, width: guard.value.width, height: guard.value.height, scale: guard.value.scale,
+            time: Float{time_ns} / 1000000000.0, delta: Float{delta_ns} / 1000000000.0, pending: events,
+            was_keys: was_keys, keys: guard.value.keys.copy(), was_buttons: was_buttons, buttons: guard.value.buttons.copy(),
+            mouse_x: guard.value.mouse_x, mouse_y: guard.value.mouse_y,
+        }
+        guard.value.frames += 1
+        Val(frame)
+    }
+}
+
+// One frame: its number from 0, the size in pixels to draw at and the
+// pixels per logical unit, when it is meant to be seen and the events
+// since the previous frame. `time` is the vblank this frame is
+// predicted to reach the screen at, in seconds since the first frame's,
+// and `delta` the seconds since the previous frame's; both advance in
+// whole refresh intervals, so motion computed from `time` keeps its
+// speed even when a frame is late.
+Frame: struct {
+    priv state: Shared<WindowState>
+    index: Int
+    width: Int
+    height: Int
+    scale: Float
+    time: Float
+    delta: Float
+    priv pending: [UIEvent]
+    priv was_keys: [Key]
+    priv keys: [Key]
+    priv was_buttons: [UIPointerButton]
+    priv buttons: [UIPointerButton]
+    priv mouse_x: Int
+    priv mouse_y: Int
+}
+
+impl Frame {
+    events: fn(self) -> [UIEvent] { self.pending.copy() }
+
+    // Shows `pixels`: `height` rows of `width` RGBA pixels, 4 bytes each.
+    present: fn(self, pixels: [U8]) UIError! -[Env, Net, Time]> {
+        self.present_damage(pixels, [UIRect]{UIRect{x: 0, y: 0, width: self.width, height: self.height}})
+    }
+
+    // Shows `pixels` where only the `damage` rectangles changed since the
+    // previous frame; only they are copied to the display.
+    present_damage: fn(self, pixels: [U8], damage: [UIRect]) UIError! -[Env, Net, Time]> {
+        if pixels.len() != self.width * self.height * 4 {
+            return Err(UIError.Size("frame {self.index} needs {self.width * self.height * 4} bytes for {self.width}x{self.height} RGBA, got {pixels.len()}"))
+        }
+        guard := self.state.guard_edit()
+        guard.value.presented = true
+        if guard.value.link == .Val(link) {
+            connection := link.guard_edit()
+            return wayland.present(connection.value, pixels, damage)
+        }
+        guard.value.checksums.push(checksum(pixels))
+        Ok()
+    }
+
+    // The keyboard and the pointer as this frame's events left them. A
+    // key is pressed in the frame whose events pressed it while it was
+    // up (a key repeat is not a press) and released in the frame whose
+    // events let it go; likewise a pointer button.
+    is_key_down: fn(self, key: Key) -> Bool { self.keys.contains(key) }
+
+    is_key_up: fn(self, key: Key) -> Bool { !self.keys.contains(key) }
+
+    is_key_pressed: fn(self, key: Key) -> Bool { !self.was_keys.contains(key) && self.pending.contains(UIEvent.KeyDown(key)) }
+
+    is_key_released: fn(self, key: Key) -> Bool { self.pending.contains(UIEvent.KeyUp(key)) }
+
+    is_mouse_button_down: fn(self, button: UIPointerButton) -> Bool { self.buttons.contains(button) }
+
+    is_mouse_button_up: fn(self, button: UIPointerButton) -> Bool { !self.buttons.contains(button) }
+
+    is_mouse_button_pressed: fn(self, button: UIPointerButton) -> Bool {
+        !self.was_buttons.contains(button) && self.pending.contains(UIEvent.PointerDown(button))
+    }
+
+    is_mouse_button_released: fn(self, button: UIPointerButton) -> Bool { self.pending.contains(UIEvent.PointerUp(button)) }
+
+    // The pointer's latest place in window pixels; (0, 0) before it moved.
+    get_mouse_x: fn(self) -> Int { self.mouse_x }
+
+    get_mouse_y: fn(self) -> Int { self.mouse_y }
+
+    get_mouse_position: fn(self) -> Point { Point{x: Float{self.mouse_x}, y: Float{self.mouse_y}} }
+
+    // Drawing. Each call paints the frame's pixels, which start as the
+    // previous frame's (all zero after a resize), and the frame shows
+    // them when the next one begins unless it presents pixels of its
+    // own. Shapes outside the frame are clipped.
+
+    // Fills the frame with `color`, alpha included, without blending.
+    clear_background: fn(self, color: Color) {
+        guard := self.state.guard_edit()
+        draw.fit(guard.value.canvas, self.width, self.height)
+        draw.clear_background(guard.value.canvas, color)
+        guard.value.drawn = true
+    }
+
+    draw_pixel: fn(self, x: Int, y: Int, color: Color) {
+        guard := self.state.guard_edit()
+        draw.fit(guard.value.canvas, self.width, self.height)
+        draw.draw_pixel(guard.value.canvas, x, y, color)
+        guard.value.drawn = true
+    }
+
+    // A line; both endpoints are drawn.
+    draw_line: fn(self, start_x: Int, start_y: Int, end_x: Int, end_y: Int, color: Color) {
+        guard := self.state.guard_edit()
+        draw.fit(guard.value.canvas, self.width, self.height)
+        draw.draw_line(guard.value.canvas, start_x, start_y, end_x, end_y, color)
+        guard.value.drawn = true
+    }
+
+    // A filled circle with a whole-pixel radius; a radius below 1 draws
+    // nothing.
+    draw_circle: fn(self, center_x: Int, center_y: Int, radius: Int, color: Color) {
+        guard := self.state.guard_edit()
+        draw.fit(guard.value.canvas, self.width, self.height)
+        draw.draw_circle(guard.value.canvas, center_x, center_y, radius, color)
+        guard.value.drawn = true
+    }
+
+    // The pixels of draw_circle's disc that touch a pixel outside it.
+    draw_circle_lines: fn(self, center_x: Int, center_y: Int, radius: Int, color: Color) {
+        guard := self.state.guard_edit()
+        draw.fit(guard.value.canvas, self.width, self.height)
+        draw.draw_circle_lines(guard.value.canvas, center_x, center_y, radius, color)
+        guard.value.drawn = true
+    }
+
+    // The pixels at whole offsets (dx, dy) from the center with
+    // (dx * radius_v)^2 + (dy * radius_h)^2 <= (radius_h * radius_v)^2.
+    draw_ellipse: fn(self, center_x: Int, center_y: Int, radius_h: Float, radius_v: Float, color: Color) {
+        guard := self.state.guard_edit()
+        draw.fit(guard.value.canvas, self.width, self.height)
+        draw.draw_ellipse(guard.value.canvas, center_x, center_y, radius_h, radius_v, color)
+        guard.value.drawn = true
+    }
+
+    // The pixels of draw_ellipse's area that touch a pixel outside it.
+    draw_ellipse_lines: fn(self, center_x: Int, center_y: Int, radius_h: Float, radius_v: Float, color: Color) {
+        guard := self.state.guard_edit()
+        draw.fit(guard.value.canvas, self.width, self.height)
+        draw.draw_ellipse_lines(guard.value.canvas, center_x, center_y, radius_h, radius_v, color)
+        guard.value.drawn = true
+    }
+
+    // The annulus sector between the radii from `start_angle` to
+    // `end_angle` in degrees (a pie sector when the inner radius is 0 or
+    // less), in `segments` pieces; too few for one per 90 degrees picks a
+    // count from the outer radius.
+    draw_ring: fn(self, center: Point, inner_radius: Float, outer_radius: Float, start_angle: Float, end_angle: Float, segments: Int, color: Color) {
+        guard := self.state.guard_edit()
+        draw.fit(guard.value.canvas, self.width, self.height)
+        draw.draw_ring(guard.value.canvas, center, inner_radius, outer_radius, start_angle, end_angle, segments, color)
+        guard.value.drawn = true
+    }
+
+    // The pixels of draw_ring's area that touch a pixel outside it.
+    draw_ring_lines: fn(self, center: Point, inner_radius: Float, outer_radius: Float, start_angle: Float, end_angle: Float, segments: Int, color: Color) {
+        guard := self.state.guard_edit()
+        draw.fit(guard.value.canvas, self.width, self.height)
+        draw.draw_ring_lines(guard.value.canvas, center, inner_radius, outer_radius, start_angle, end_angle, segments, color)
+        guard.value.drawn = true
+    }
+
+    draw_rectangle: fn(self, x: Int, y: Int, width: Int, height: Int, color: Color) {
+        guard := self.state.guard_edit()
+        draw.fit(guard.value.canvas, self.width, self.height)
+        draw.draw_rectangle(guard.value.canvas, x, y, width, height, color)
+        guard.value.drawn = true
+    }
+
+    draw_rectangle_rec: fn(self, rec: Rect, color: Color) {
+        guard := self.state.guard_edit()
+        draw.fit(guard.value.canvas, self.width, self.height)
+        draw.draw_rectangle_rec(guard.value.canvas, rec, color)
+        guard.value.drawn = true
+    }
+
+    // A one-pixel border inside the rectangle.
+    draw_rectangle_lines: fn(self, x: Int, y: Int, width: Int, height: Int, color: Color) {
+        guard := self.state.guard_edit()
+        draw.fit(guard.value.canvas, self.width, self.height)
+        draw.draw_rectangle_lines(guard.value.canvas, x, y, width, height, color)
+        guard.value.drawn = true
+    }
+
+    // A border `line_thick` wide inside the rectangle.
+    draw_rectangle_lines_ex: fn(self, rec: Rect, line_thick: Float, color: Color) {
+        guard := self.state.guard_edit()
+        draw.fit(guard.value.canvas, self.width, self.height)
+        draw.draw_rectangle_lines_ex(guard.value.canvas, rec, line_thick, color)
+        guard.value.drawn = true
+    }
+
+    // `top` along the top edge, `bottom` along the bottom edge.
+    draw_rectangle_gradient_v: fn(self, x: Int, y: Int, width: Int, height: Int, top: Color, bottom: Color) {
+        guard := self.state.guard_edit()
+        draw.fit(guard.value.canvas, self.width, self.height)
+        draw.draw_rectangle_gradient_v(guard.value.canvas, x, y, width, height, top, bottom)
+        guard.value.drawn = true
+    }
+
+    // `left` along the left edge, `right` along the right edge.
+    draw_rectangle_gradient_h: fn(self, x: Int, y: Int, width: Int, height: Int, left: Color, right: Color) {
+        guard := self.state.guard_edit()
+        draw.fit(guard.value.canvas, self.width, self.height)
+        draw.draw_rectangle_gradient_h(guard.value.canvas, x, y, width, height, left, right)
+        guard.value.drawn = true
+    }
+
+    // The corner colors run counterclockwise from the top left.
+    draw_rectangle_gradient_ex: fn(self, rec: Rect, top_left: Color, bottom_left: Color, bottom_right: Color, top_right: Color) {
+        guard := self.state.guard_edit()
+        draw.fit(guard.value.canvas, self.width, self.height)
+        draw.draw_rectangle_gradient_ex(guard.value.canvas, rec, top_left, bottom_left, bottom_right, top_right)
+        guard.value.drawn = true
+    }
+
+    // Four corner arcs `roundness` (0..1) of the shorter side across; a
+    // segment count below 4 picks one from the radius, and a roundness at
+    // or below 0 draws the plain rectangle.
+    draw_rectangle_rounded: fn(self, rec: Rect, roundness: Float, segments: Int, color: Color) {
+        guard := self.state.guard_edit()
+        draw.fit(guard.value.canvas, self.width, self.height)
+        draw.draw_rectangle_rounded(guard.value.canvas, rec, roundness, segments, color)
+        guard.value.drawn = true
+    }
+
+    // A one-pixel band just outside the rounded rectangle.
+    draw_rectangle_rounded_lines: fn(self, rec: Rect, roundness: Float, segments: Int, color: Color) {
+        guard := self.state.guard_edit()
+        draw.fit(guard.value.canvas, self.width, self.height)
+        draw.draw_rectangle_rounded_lines(guard.value.canvas, rec, roundness, segments, color)
+        guard.value.drawn = true
+    }
+
+    // A filled triangle on integer vertices, in either winding; a
+    // degenerate one draws nothing.
+    draw_triangle: fn(self, x0: Int, y0: Int, x1: Int, y1: Int, x2: Int, y2: Int, color: Color) {
+        guard := self.state.guard_edit()
+        draw.fit(guard.value.canvas, self.width, self.height)
+        draw.draw_triangle(guard.value.canvas, x0, y0, x1, y1, x2, y2, color)
+        guard.value.drawn = true
+    }
+
+    // A regular polygon with its first vertex at `rotation` degrees;
+    // fewer than 3 sides draw 3.
+    draw_poly: fn(self, center: Point, sides: Int, radius: Float, rotation: Float, color: Color) {
+        guard := self.state.guard_edit()
+        draw.fit(guard.value.canvas, self.width, self.height)
+        draw.draw_poly(guard.value.canvas, center, sides, radius, rotation, color)
+        guard.value.drawn = true
+    }
+
+    // The pixels of draw_poly's area that touch a pixel outside it.
+    draw_poly_lines: fn(self, center: Point, sides: Int, radius: Float, rotation: Float, color: Color) {
+        guard := self.state.guard_edit()
+        draw.fit(guard.value.canvas, self.width, self.height)
+        draw.draw_poly_lines(guard.value.canvas, center, sides, radius, rotation, color)
+        guard.value.drawn = true
+    }
+
+    // Text in the built-in 5x7 font at a whole-pixel scale (see
+    // measure_text), its top-left at (x, y); "\n" starts a line.
+    draw_text: fn(self, text: String, x: Int, y: Int, size: Int, color: Color) {
+        guard := self.state.guard_edit()
+        draw.fit(guard.value.canvas, self.width, self.height)
+        draw.draw_text(guard.value.canvas, text, x, y, size, color)
+        guard.value.drawn = true
+    }
+
+    // Blends the first region named `name` onto the frame with its
+    // top-left at (x, y), src-over; an unknown region or an atlas without
+    // a texture draws nothing.
+    draw_sprite: fn(self, atlas: TextureAtlas, name: String, x: Int, y: Int) {
+        guard := self.state.guard_edit()
+        draw.fit(guard.value.canvas, self.width, self.height)
+        draw.draw_sprite(guard.value.canvas, atlas.atlas, name, x, y)
+        guard.value.drawn = true
+    }
+}
+
+// How a headless frame is recorded and input is tracked: not part of the
+// ui surface.
+priv internal: module {
+    // FNV-1a, 32-bit.
+    checksum: fn(bytes: [U8]) -> Int {
+        hash := 2166136261
+        loop b in bytes -> hash = (hash.bit_xor(Int.from_u8(b)) * 16777619).bit_and(4294967295)
+        hash
+    }
+
+    // Whether `text` holds a NUL byte, which a wire string cannot carry.
+    has_nul: fn(text: String) -> Bool {
+        loop b in text.bytes() {
+            if Int.from_u8(b) == 0 -> return true
+        }
+        false
+    }
+
+    without_key: fn(keys: [Key], key: Key) -> [Key] {
+        kept := [Key]{}
+        loop held in keys {
+            if held != key -> kept.push(held.copy())
+        }
+        kept
+    }
+
+    without_button: fn(buttons: [UIPointerButton], button: UIPointerButton) -> [UIPointerButton] {
+        kept := [UIPointerButton]{}
+        loop held in buttons {
+            if held != button -> kept.push(held.copy())
+        }
+        kept
+    }
+}
+
 #Test("UI aria role constructors") {
     assert(aria_role_button() == UIAriaRole.Button)
     assert(aria_role_container() == UIAriaRole.Container)
@@ -287,7 +1202,8 @@ preview_registry: fn(&&entries: [UIPreview]) -> UIPreviewRegistry UIPreviewError
 }
 
 #Test("UI previews keep their viewport and registries reject unusable names") {
-    assert(phone() == UIPreviewViewport{device: .Phone, width: 390, height: 844, scale: 2})
+    viewport: phone()
+    assert(viewport.device == .Phone && viewport.width == 390 && viewport.height == 844 && viewport.scale == 2)
     assert(preview("card", () -> text("card")).viewport == desktop())
     lab: playground("lab", () -> text("lab"), viewport: tablet())
     assert(lab.kind == UIPreviewKind.Playground && lab.viewport == tablet())
@@ -312,4 +1228,66 @@ preview_registry: fn(&&entries: [UIPreview]) -> UIPreviewRegistry UIPreviewError
         }
         .Err(_) -> assert(false)
     }
+}
+
+#Test("frames show what they drew when the next frame begins") {
+    window: headless(width: 4, height: 2, script: [[UIEvent]]{[UIEvent]{}, [UIEvent]{}, [UIEvent]{}}) ?? panic("headless")
+    loop frame in window.frames() {
+        if frame.index == 0 {
+            frame.clear_background(color(255, 0, 0, 255))
+            frame.draw_pixel(1, 0, color(0, 0, 300, 255))
+        }
+        // A frame that presents shows its own pixels, not what it drew.
+        if frame.index == 2 {
+            frame.draw_rectangle(0, 0, 4, 2, color(9, 9, 9, 255))
+            frame.present([U8]{1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 6, 6, 6, 6, 7, 7, 7, 7, 8, 8, 8, 8}) ?? panic("present")
+        }
+    }
+    // Red with the second pixel blue, its blue clamped to 255.
+    first: [U8]{255, 0, 0, 255, 0, 0, 255, 255, 255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255}
+    // Frame 1 drew nothing and presented nothing, so it shows nothing.
+    presented: [U8]{1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 6, 6, 6, 6, 7, 7, 7, 7, 8, 8, 8, 8}
+    assert_eq(window.checksums(), [Int]{checksum(first), checksum(presented)})
+    screen: window.load_image_from_screen()
+    assert(screen.width() == 4 && screen.height() == 2 && screen.pixels().len() == 32)
+    assert(get_image_color(screen, 3, 1) == Color{r: 9, g: 9, b: 9, a: 255})
+}
+
+#Test("frames track held keys, buttons and the pointer") {
+    script: [[UIEvent]]{
+        [UIEvent]{.KeyDown(.Left)},
+        [UIEvent]{.KeyDown(.Left), .PointerMove(x: 3, y: 4), .PointerDown(.Left)},
+        [UIEvent]{.KeyUp(.Left), .PointerUp(.Left)},
+        [UIEvent]{.KeyDown(.Up), .PointerDown(.Right), .Focus(false)},
+    }
+    window: headless(width: 8, height: 8, script: script) ?? panic("headless")
+    seen := [String]{}
+    loop frame in window.frames() {
+        if frame.index > 3 -> break
+        keys: "{frame.is_key_down(.Left)} {frame.is_key_pressed(.Left)} {frame.is_key_released(.Left)} {frame.is_key_up(.Up)}"
+        buttons: "{frame.is_mouse_button_down(.Left)} {frame.is_mouse_button_pressed(.Left)} {frame.is_mouse_button_released(.Left)} {frame.is_mouse_button_up(.Right)}"
+        seen.push("{keys} | {buttons} | {frame.get_mouse_x()},{frame.get_mouse_y()}")
+    }
+    assert_eq(seen, [String]{
+        "true true false true | false false false true | 0,0",
+        // A second press of a held key is a repeat.
+        "true false false true | true true false true | 3,4",
+        "false false true true | false false true true | 3,4",
+        // Losing the keyboard lets everything go.
+        "false false false true | false false false true | 3,4",
+    })
+    assert(window.load_image_from_screen().width() == 0)
+}
+
+#Test("images, collisions and text measure without a window") {
+    image := gen_image_checked(2, 1, 1, 1, color(1, 2, 3, 255), color(4, 5, 6, 255))
+    image_flip_horizontal(image)
+    assert(get_image_color(image, 0, 0) == Color{r: 4, g: 5, b: 6, a: 255})
+    image_crop(image, rect(1.0, 0.0, 1.0, 1.0))
+    assert(image.width() == 1 && image.height() == 1 && image.pixels() == [U8]{1, 2, 3, 255})
+    assert(gen_image_color(0, 1, color(0, 0, 0, 0)).width() == 0)
+    assert(check_collision_recs(rect(0.0, 0.0, 2.0, 2.0), rect(1.0, 1.0, 2.0, 2.0)))
+    assert(get_collision_rec(rect(0.0, 0.0, 2.0, 2.0), rect(1.0, 1.0, 2.0, 2.0)) == rect(1.0, 1.0, 1.0, 1.0))
+    assert(check_collision_lines(point(0.0, 0.0), point(2.0, 2.0), point(0.0, 2.0), point(2.0, 0.0)) == Val(point(1.0, 1.0)))
+    assert_eq(measure_text("Hi", 10), 11)
 }

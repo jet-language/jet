@@ -70,7 +70,9 @@ derive T.Comparable {
                         if rhs == {
                             .$left -> {
                                 comptime loop field in left.$fields {
-                                    comptime if field.$ty == T.$name {
+                                    // A Float payload orders by IEEE totalOrder, as `.compare` does;
+                                    // its plain `<` stays the IEEE comparison.
+                                    comptime if field.$ty == T.$name || field.$ty == "Float" || field.$ty == "F32" {
                                         if self.$field.compare(rhs.$field) == {
                                             .Less -> return .Less
                                             .Greater -> return .Greater
@@ -94,14 +96,26 @@ derive T.Comparable {
         } else {
             comptime if T.$kind == "struct" {
                 comptime loop field in T.$fields {
-                    if self.$field < rhs.$field -> return .Less
-                    if self.$field > rhs.$field -> return .Greater
+                    comptime if field.$ty == "Float" || field.$ty == "F32" {
+                        if self.$field.compare(rhs.$field) == {
+                            .Less -> return .Less
+                            .Greater -> return .Greater
+                            .Equal -> {}
+                        }
+                    } else {
+                        if self.$field < rhs.$field -> return .Less
+                        if self.$field > rhs.$field -> return .Greater
+                    }
                 }
                 return .Equal
             } else {
-                if self.raw() < rhs.raw() -> return .Less
-                if self.raw() > rhs.raw() -> return .Greater
-                return .Equal
+                comptime if T.$base == "Float" || T.$base == "F32" {
+                    return self.raw().compare(rhs.raw())
+                } else {
+                    if self.raw() < rhs.raw() -> return .Less
+                    if self.raw() > rhs.raw() -> return .Greater
+                    return .Equal
+                }
             }
         }
     }

@@ -11,7 +11,9 @@
 // Hazards closed by construction: every descriptor is O_CLOEXEC; shared
 // memory is a memfd sealed against shrinking and growing once sized, so no
 // peer can truncate it under the mapping (SIGBUS); descriptors received from
-// a peer are never mapped, only read with pread; every syscall retries EINTR.
+// a peer are never mapped, only read with pread; pipes are read and written
+// only once ppoll says they are ready, so a stalled peer costs at most the
+// caller's timeout; every syscall retries EINTR.
 
 HOST_DESCRIPTOR_ENTRY: I64{32}
 HOST_DESCRIPTOR_INDEX_BITS: I64{20}
@@ -207,6 +209,141 @@ host_call_restarting: fn(number: I64, a1: I64, a2: I64, a3: I64) -> I64 {
         return compiler_fs_errno(HOST_IO_OP_READ, I64{0}, I64{24}, error)
     }
     rt_text_store(output, jet_int_owned_from_i64(filed))
+    I64{1}
+}
+
+// pipe2(O_CLOEXEC): the read end's token, then the write end's, as eight
+// little-endian bytes each. Both ends block, so a peer handed one sees an
+// ordinary pipe; jet_sys_fd_read_raw and jet_sys_fd_write_raw wait in
+// ppoll first, so neither blocks past its timeout.
+#Export(c) jet_sys_fd_pipe_raw: fn(output: I64, length: I64, error: I64) -> I64 {
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    ends: jet_rt_alloc(I64{8}, I64{8})
+    thread_zero(ends, I64{8})
+    made: host_call_restarting(I64{293}, ends, I64{524288}, I64{0})
+    reader: net_load_uint(ends, I64{4})
+    writer: net_load_uint(wrapping(ends + I64{4}), I64{4})
+    jet_rt_free(ends, I64{8}, I64{8})
+    if (made < I64{0}) -> return compiler_fs_errno(HOST_IO_OP_READ, I64{0}, -made, error)
+    read_token: host_descriptor_insert(reader, I64{0}, I64{0})
+    if (read_token < I64{0}) {
+        _ := host_call(I64{3}, reader, I64{0}, I64{0})
+        _ := host_call(I64{3}, writer, I64{0}, I64{0})
+        return compiler_fs_errno(HOST_IO_OP_READ, I64{0}, I64{24}, error)
+    }
+    write_token: host_descriptor_insert(writer, I64{0}, I64{0})
+    if (write_token < I64{0}) {
+        host_descriptor_release(read_token)
+        _ := host_call(I64{3}, writer, I64{0}, I64{0})
+        return compiler_fs_errno(HOST_IO_OP_READ, I64{0}, I64{24}, error)
+    }
+    bytes: jet_rt_alloc_8(I64{16})
+    net_store_uint(bytes, I64{8}, read_token)
+    net_store_uint(wrapping(bytes + I64{8}), I64{8}, write_token)
+    compiler_fs_bytes_take(bytes, I64{16}, I64{16}, output, length)
+    I64{1}
+}
+
+// Waits on the calling OS thread until `descriptor` has `events` (POLLIN
+// 1, POLLOUT 4), hangs up or fails, or `limit` nanoseconds pass; a
+// negative limit waits without one. 1 when ready (the read or write then
+// says which), 0 when the time ran out, else -errno. EINTR is retried
+// with the time left.
+host_descriptor_wait: fn(descriptor: I64, events: I64, limit: I64) -> I64 {
+    // pollfd at 0, timespec at 8, clock sample at 24.
+    scratch: jet_rt_alloc(I64{40}, I64{8})
+    end := I64{-1}
+    if (limit >= I64{0}) {
+        sync_clock_read(I64{1}, wrapping(scratch + I64{24}))
+        now: net_word(scratch, I64{24}) * I64{1000000000} + net_word(scratch, I64{32})
+        end = if (limit > I64{9223372036854775807} - now) -> I64{9223372036854775807} else -> now + limit
+    }
+    ready := I64{-4}
+    loop ready == (I64{-4}) {
+        left := I64{-1}
+        if (end >= I64{0}) {
+            sync_clock_read(I64{1}, wrapping(scratch + I64{24}))
+            now: net_word(scratch, I64{24}) * I64{1000000000} + net_word(scratch, I64{32})
+            left = if (end > now) -> end - now else -> I64{0}
+            net_put(scratch, I64{8}, left /% I64{1000000000})
+            net_put(scratch, I64{16}, left %% I64{1000000000})
+        }
+        // struct pollfd {fd, events} with revents cleared.
+        net_put(scratch, I64{0}, descriptor.bit_and(I64{4294967295}).bit_or(events << I64{32}))
+        #Unsafe("scratch lends the pollfd and timespec and ppoll retains neither; the caller's Fd keeps the descriptor open") {
+            ready = os_syscall_i64(I64{271}, scratch, I64{1}, if (left < I64{0}) -> I64{0} else -> wrapping(scratch + I64{8}), I64{0}, I64{8}, I64{0})
+        }
+    }
+    jet_rt_free(scratch, I64{40}, I64{8})
+    if (ready > I64{0}) -> I64{1} else -> ready
+}
+
+// One read of at most min(limit, 16 MiB) bytes once the descriptor is
+// readable, waiting at most `timeout` nanoseconds (negative: without
+// limit). An empty list is end of stream; a wait that runs out fails with
+// ETIMEDOUT.
+#Export(c) jet_sys_fd_read_raw: fn(token: I64, limit: I64, timeout: I64, output: I64, length: I64, error: I64) -> I64 {
+    native: host_native_int(token)
+    requested: host_native_int(limit)
+    wait: host_native_int(timeout)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (requested < I64{1}) -> return host_descriptor_range(HOST_IO_OP_READ, error)
+    descriptor: host_descriptor_number(native)
+    if (descriptor < I64{0}) -> return host_descriptor_closed(HOST_IO_OP_READ, error)
+    ready: host_descriptor_wait(descriptor, I64{1}, wait)
+    if (ready < I64{0}) -> return compiler_fs_errno(HOST_IO_OP_READ, I64{0}, -ready, error)
+    if (ready == I64{0}) -> return compiler_fs_errno(HOST_IO_OP_READ, I64{0}, I64{110}, error)
+    cap: if (requested < HOST_READ_MAX) -> requested else -> HOST_READ_MAX
+    bytes: jet_rt_alloc_8(cap)
+    count := I64{-4}
+    loop count == (I64{-4}) {
+        #Unsafe("bytes owns cap writable bytes; read retains no pointer and the caller's Fd keeps the descriptor open") {
+            count = os_syscall_i64(I64{0}, descriptor, bytes, cap, I64{0}, I64{0}, I64{0})
+        }
+    }
+    if (count < I64{0}) {
+        jet_rt_free_8(bytes, cap)
+        return compiler_fs_errno(HOST_IO_OP_READ, I64{0}, -count, error)
+    }
+    compiler_fs_bytes_take(bytes, cap, count, output, length)
+    I64{1}
+}
+
+// One write of at most PIPE_BUF (4096) bytes once the descriptor is
+// writable, waiting at most `timeout` nanoseconds (negative: without
+// limit): a pipe takes that much whole once it polls writable, so the
+// write never blocks. The result is the count written; a wait that runs
+// out fails with ETIMEDOUT, and a reader gone fails with EPIPE.
+#Export(c) jet_sys_fd_write_raw: fn(token: I64, data: I64, length: I64, timeout: I64, output: I64, error: I64) -> I64 {
+    native: host_native_int(token)
+    wait: host_native_int(timeout)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    descriptor: host_descriptor_number(native)
+    if (descriptor < I64{0}) -> return host_descriptor_closed(HOST_IO_OP_WRITE, error)
+    if (length <= I64{0}) {
+        rt_text_store(output, jet_int_owned_from_i64(I64{0}))
+        return I64{1}
+    }
+    ready: host_descriptor_wait(descriptor, I64{4}, wait)
+    if (ready < I64{0}) -> return compiler_fs_errno(HOST_IO_OP_WRITE, I64{0}, -ready, error)
+    if (ready == I64{0}) -> return compiler_fs_errno(HOST_IO_OP_WRITE, I64{0}, I64{110}, error)
+    count: if (length < I64{4096}) -> length else -> I64{4096}
+    packed: if (RT_HOST_U8_STRIDE == I64{1}) -> data else -> jet_rt_alloc(count, I64{8})
+    if (RT_HOST_U8_STRIDE != I64{1}) -> net_copy_packed(data, count, packed)
+    wrote := I64{-4}
+    loop wrote == (I64{-4}) {
+        #Unsafe("packed lends count bytes; write retains no pointer and the caller's Fd keeps the descriptor open") {
+            wrote = os_syscall_i64(I64{1}, descriptor, packed, count, I64{0}, I64{0}, I64{0})
+        }
+    }
+    if (RT_HOST_U8_STRIDE != I64{1}) -> jet_rt_free(packed, count, I64{8})
+    // EAGAIN: another writer filled the pipe since it polled writable.
+    if (wrote == I64{-11}) {
+        rt_text_store(output, jet_int_owned_from_i64(I64{0}))
+        return I64{1}
+    }
+    if (wrote < I64{0}) -> return compiler_fs_errno(HOST_IO_OP_WRITE, I64{0}, -wrote, error)
+    rt_text_store(output, jet_int_owned_from_i64(wrote))
     I64{1}
 }
 

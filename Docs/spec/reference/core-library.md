@@ -190,8 +190,7 @@ and stdin kernels; the Rust seed entry points retain their fault preflight.
 `take` forwards through the registered source target `__take_bytes`, preserving
 the keyword spelling without a parser exception. Jet rejects a negative count
 before the read fault probe; the existing stdin kernel performs the one raw read.
-Raylib's display/input/texture operations keep the existing registered host
-bindings, with source-owned argument policy. Font shaping returns the existing
+Font shaping returns the existing
 host result through a private leaf; the Jet entry owns the exact failure panic
 and never selects an approximate fallback implicitly.
 
@@ -906,6 +905,7 @@ Whole-file and metadata functions. `read`, `read_bytes`, `write`,
 | `write_atomic(path, bytes)` | `!IOError` | Reserve one of 128 same-directory `.jet_tmp_<pid>_<sequence>` names, write and sync it, preserve available target permissions, close, then rename; on Unix, sync the parent after publication. |
 | `fsync(path)` | `!IOError` | Flush a file, or a folder so earlier renames inside it are durable. |
 | `space(path)` | `DiskSpace !IOError` | The room on the file system holding `path` (statvfs), in bytes: `total`, `free`, and `available` (what an unprivileged program may fill). `used()` is `total - free`; `used_percent()` is `df`'s figure, used over used plus available, 0.0 to 100.0. |
+| `can_read(path)` / `can_write(path)` / `can_execute(path)` | `Bool` | May this program read, write or run (search, for a directory) `path` now, judged with its effective user and groups (faccessat, AT_EACCESS). A missing or unreadable path is `false`. The answer can change before the next call, so code that must open the file handles the open's error instead. |
 | `open(path, links:)` / `create(path, if_exists:, mode:, links:)` / `append(path, mode:, links:)` | `FileReader` / `FileWriter !IOError` | Open a close-on-exec stream handle. `if_exists: .Refuse` creates exclusively, `mode` sets a new file's bits before the umask, and `links: .Refuse` refuses a final symbolic link. |
 | `open_directory(path)` | `Directory !IOError` | Hold a directory whose last part is a real directory, not a link. |
 | `samefile(a, b)` | `Bool !IOError` | Compare the two entries' `FileID`s. |
@@ -1109,6 +1109,9 @@ count_lines: fn(path: String) -> Int IOError! {
 | `writer.write_line(text)` / `writer.write_all(bytes)` | `!IOError` | Write text and a newline, or every byte of `bytes` (buffered). |
 | `writer.flush()` / `writer.fsync()` | `!IOError` | Flush pending writer bytes; `fsync` also makes the file's data durable. |
 | `writer.set_mode(mode)` | `!IOError` | Set the open file's permission bits; Windows keeps only read-only. |
+| `writer.allocate(size)` | `!IOError` | Reserve disk space for the first `size` bytes (posix_fallocate); a shorter file grows to `size` with zero bytes. A file system that cannot reserve is `IOError.Unsupported`. |
+| `reader.advise(advice)` | `!IOError` | Tell the system how the file will be read (posix_fadvise): `Advice.Normal`, `Sequential`, `Random`, `WillNeed`, `DontNeed` or `NoReuse`. It plans caching only; a pipe accepts any advice. |
+| `mapped.advise(advice)` | `!IOError` | Tell the system how a `MappedFile`'s bytes will be read (posix_madvise over the whole map), with the same `Advice` values; `NoReuse` marks the pages cold. It plans paging only; the map holds the same contents whatever it says. |
 
 Readers, writers, temporary resources, and locks own their provider resource
 until lexical scope exit or an explicit `close(handle)` consumes the handle.
@@ -1886,7 +1889,7 @@ require `FS` because they access files rather than terminal streams.
 use term: core.term
 
 run: fn() {
-    name: term.input("your name? ") ?? return
+    name: term.readline("your name? ") ?? return
     print("hi, {name}")
     term.eprint("(log) done")
     out := term.stdout()
@@ -1897,8 +1900,7 @@ run: fn() {
 
 | API | Result | Description |
 | --- | --- | --- |
-| `input(prompt)` | `String !IOError` | Read one line, stripping its newline; the prompt defaults to empty. |
-| `readline()` | `String !IOError` | Read one line without a prompt. |
+| `readline(prompt)` | `String !IOError` | Write the prompt (default empty) and flush stdout, then read one line without its newline; a closed stream reads as `""`. |
 | `read_until(delimiter)` | `String !IOError` | Read through a non-empty delimiter, excluding the delimiter. |
 | `read_all_input()` | `String !IOError` | Read stdin to EOF. |
 | `input_secret(prompt)` | `String !IOError` | Read without echo; redirected/non-terminal input is an error rather than an echoed fallback. |
@@ -1916,13 +1918,62 @@ run: fn() {
 
 `style` is a no-op when output is not a TTY unless `style_force` is used.
 `Key` carries `Char(Char)`, `F(Int)`, and `Ctrl(Char)` payloads. Its unit variants
-are `Enter`, `Escape`, `Backspace`, `Tab`, `Delete`, the four arrow keys, and
-`Unknown`. `confirm` treats a bare Enter as no; `choose` returns an input error
+are `Enter`, `Escape`, `Backspace`, `Tab`, `Delete`, `Insert`, the four arrow
+keys, `Home`, `End`, `PageUp`, `PageDown`, the modifier keys `Shift`, `Control`,
+`Alt`, `Super` and `CapsLock`, and `Unknown`. `read_key` reports a control chord
+as `Ctrl(c)` and never reports `Insert`, `Home`, `End`, `PageUp`, `PageDown` or
+a modifier key; those come from a window's `UIEvent.KeyDown`/`KeyUp` (core.ui).
+`confirm` treats a bare Enter as no; `choose` returns an input error
 after its finite retry budget or when stdin closes.
 
 Read a buffered handle with `reader.read_line()`: each call mutably lends
 the reader and returns `String? !IOError`. Ordinary failure propagation
 preserves the optional line, so EOF remains `None` rather than an I/O error.
+
+The ambient `input` is every line of the program's input as a lazy
+`Iter<String>`: the lines of each file the program's arguments
+name, in order, or of standard input when it has no arguments, like awk's
+file operands and Perl's `<>`. Lines lose their line ending, one file is open
+at a time, and nothing is read until the walk pulls a line. A file that can't
+be opened or read stops the program with its `IOError`, as a read error of any
+line source does. Reading `input` needs `IO` and `Exec.Args`; the files the
+arguments name are granted by being typed on the command line, so `input`
+needs no `FS.Read` (D-SCRIPT-DESIGNATE1=A). Use `readline(prompt)` to ask for
+one line.
+
+```jet
+run: fn() {
+    loop line in input {
+        if line.contains("error") -> print(line)
+    }
+}
+```
+
+Three methods read the same input whole. `input.csv<Row>()` reads it as one
+CSV table, header first, and decodes each record into `Row`, so a field `Row`
+lacks is a compile error before any input is read; `input.json<Row>()` decodes
+each JSON value into `Row`, one per line (JSON Lines) or spread across lines.
+Both return `[Row]` and fail with one `Err` that lists every record that did
+not decode, under its CSV row or the line its JSON value starts on. They are
+`core.encoding.csv` and `core.encoding.json` decoding, so they need nothing
+more than `input` does. `input.edit(change)` rewrites each file the arguments
+name in place, every line through `change`, keeping each line's ending (LF or
+CRLF) and a missing final line break; a file `change` leaves as it was is not
+written. With no arguments it prints each standard input line changed. It
+needs `FS.Read` and `FS.Write`, which the run's effect notice names before the
+program starts. `jet help input` lists every name a program reads input
+through.
+
+```jet
+Sale: struct {
+    item: String
+    amount: Float
+}
+
+run: fn() {
+    print(input.csv<Sale>().map((s) -> s.amount).sum())
+}
+```
 
 The executable terminal examples cover binary-file composition, UTF-8
 stderr, CRLF line reads and EOF, plus confirmation with an empty-answer default:
@@ -2099,12 +2150,32 @@ run: fn() {
 | `pid()` / `getpid()` / `getppid()` / `cpu_count()` | `Int -[Env]>` | Return process IDs or a logical CPU count of at least one. |
 | `getuid()` / `geteuid()` / `getgid()` / `getegid()` / `getpgrp()` | `Int -[Env]>` | Return POSIX identity and process-group values where supported. |
 | `getgroups()` | `[Int] -[Env]>` | Return supplementary group IDs. |
+| `user_ids()` / `group_ids()` | `Ids !IOError -[Env]>` | `getresuid` / `getresgid`: the `real`, `effective` and `saved` IDs. |
+| `users()` / `groups()` | `[User] !IOError -[FS.Read]>` / `[Group] !IOError -[FS.Read]>` | Every account of `/etc/passwd` or group of `/etc/group`, in file order. Core reads the file as musl does and asks no other directory service (NSS, LDAP); a line that is not UTF-8, lacks a field, or has an ID outside 0..4294967294 is skipped. A `User` has `name`, `uid`, `gid`, `gecos`, `home` and `shell`; a `Group` has `name`, `gid` and its supplementary `members`. |
+| `user(name)` / `user_by_id(uid)` | `User? !IOError -[FS.Read]>` | The first account with that name or user ID, `None` when there is none. |
+| `group(name)` / `group_by_id(gid)` | `Group? !IOError -[FS.Read]>` | The first group with that name or group ID, `None` when there is none. |
 | `expand(value)` | `String -[Env]>` | Expand `$VAR`, `${VAR}`, and the supported percent form from the environment. |
 | `uptime()` | `Float -[Time, Env, FS]>` | Read system uptime from `/proc/uptime` on Linux. |
 | `loadavg()` / `times()` | `[Float] -[Env]>` | Return load averages or process CPU times. |
 | `exitcode(status)` / `success(status)` | `Int` / `Bool` | Interpret a wait status without an effect. |
 | `sync()` | `Unit -[FS, Env]>` | Flush filesystem buffers. |
 | `getpgid(pid)` / `getsid(pid)` | `Int !IOError -[Env]>` | Inspect POSIX process-group or session state. |
+
+Descriptors and shared memory are owned values: no descriptor number or
+address reaches Jet code, every descriptor is close-on-exec, and each closes
+exactly once when its owner is dropped. Every offset and length is a range
+type, so a literal outside its range is a compile error (E0135) and a
+computed one is converted first, with `Int(0..1073741824).from_int(n)`
+handling its failure; only the end of an access is checked when it runs.
+
+| API | Result | Description |
+| --- | --- | --- |
+| `shared_memory(size: Int(1..1073741824))` | `SharedMemory !IOError -[Env]>` | `size` zeroed bytes (1 B to 1 GiB) of anonymous shared memory (memfd), sealed against shrinking and growing so a peer that maps it can never fault. |
+| `SharedMemory.write(offset: Int(0..1073741824), bytes)` / `.read(offset: Int(0..1073741824), count: Int(0..1073741824))` / `.len()` | `!IOError -[Env]>` / `[U8] !IOError -[Env]>` / `Int` | Copy bytes in or out within bounds. |
+| `SharedMemory.write_pixels(offset: Int(0..1073741824), rgba, stride: Int(4..65536), x, y, width, height: Int(0..16384), format)` | `!IOError -[Env]>` | Copy the `width`×`height` rectangle at `x`, `y` of an RGBA image whose rows are `stride` bytes (a multiple of 4) into the same rectangle of the image at `offset`, converting each pixel to `PixelFormat.XRGB8888` (B, G, R, X in memory) or `.XBGR8888` (R, G, B, X). |
+| `SharedMemory.fill_u32(offset: Int(0..1073741824), count: Int(0..268435456), value: Int(0..4294967295))` | `!IOError -[Env]>` | Store `count` little-endian copies of the 32-bit `value` from `offset`: a solid run of pixels. |
+| `SharedMemory.descriptor()` | `Fd !IOError -[Env]>` | A new descriptor for the memory, to pass to another process. |
+| `Fd.read_at(offset: Int(0..9223372036854775807), max: Int(1..16777216))` / `.size()` / `.duplicate()` | `[U8] !IOError -[Env]>` / `Int !IOError -[Env]>` / `Fd !IOError -[Env]>` | Read at most `max` bytes of a received descriptor's file from `offset` without mapping it (`pread`; fewer at its end), size it, or own a second descriptor for it. |
 
 Resource limits and usage (D-CORE-RLIMIT1, D-CORE-RLIMIT-NAME1, #5072) apply
 to the running program, and the children it starts afterwards inherit them.
@@ -2124,6 +2195,28 @@ need `Env, Exec`, as `fork()` does.
 | `core_file_limit()` / `set_core_file_limit(soft, hard)` | as above | Core-file size (`RLIMIT_CORE`); `set_core_file_limit(0, hard)` turns off core dumps. |
 | `stack_limit()` / `set_stack_limit(soft, hard)` | as above | Stack size (`RLIMIT_STACK`). |
 | `usage(of: UsageOf{.Program})` | `ResourceUsage !IOError -[Env]>` | `getrusage`: `user` and `system` CPU time as `Duration`, `peak_memory` in bytes. `.Children` sums every child the program has waited for. |
+| `lock_memory(future: Bool{false})` | `!IOError -[Env]>` | `mlockall(MCL_CURRENT \| MCL_ONFAULT)`, plus `MCL_FUTURE` when `future`: each page stays in RAM from its first touch until the program ends. Past the locked-memory limit without privilege it is an `IOError`. There is no unlock: `munlockall` would also unlock a `Secret`'s pages. |
+
+CPU scheduling (`sched(7)`) is a `Scheduling`: `.Normal`, `.Batch`, `.Idle`,
+`.Fifo{priority: p}` or `.RoundRobin{priority: p}`, the last two real time at
+priority 1 to 99. `pid` 0 is this program. Children started afterwards
+inherit the policy, so `set_scheduling` needs `Env, Exec` like the limit
+setters, and it is POSIX process control under `#Unsafe` like `setpriority`.
+
+| API | Result | Description |
+| --- | --- | --- |
+| `scheduling(pid: Int{0})` | `Scheduling !IOError -[Env]>` | `sched_getscheduler` and `sched_getparam`. A `SCHED_DEADLINE` process is `IOError.Unsupported`; no such process is `IOError.NotFound`. |
+| `set_scheduling(policy, pid: Int{0})` | `!IOError -[Env, Exec]>` | `sched_setscheduler`. A real-time priority outside 1 to 99 is `IOError.InvalidInput`; real time without `CAP_SYS_NICE` or an `RLIMIT_RTPRIO` allowance is `IOError.PermissionDenied`. |
+| `round_robin_interval(pid: Int{0})` | `Duration !IOError -[Env]>` | `sched_rr_get_interval`: the slice a `.RoundRobin` process runs before the next of its priority; zero under `.Fifo`. |
+
+`cpu_time` reads the CPU time of any process; `set_wall_clock` sets the
+machine's wall clock, so it is POSIX control under `#Unsafe`. Monotonic
+readings (`core.time.instant`, stopwatches) do not jump when it is set.
+
+| API | Result | Description |
+| --- | --- | --- |
+| `cpu_time(pid: Int{0})` | `Duration !IOError -[Env]>` | `clock_getcpuclockid` and `clock_gettime`: the user and system time of every thread of process `pid`, this program when 0. No such process, or a pid naming a thread that is not a process, is `IOError.NotFound`; a negative pid is `IOError.InvalidInput`. |
+| `set_wall_clock(time: DateTime)` | `!IOError -[Env]>` | `clock_settime(CLOCK_REALTIME)`. It needs `CAP_SYS_TIME`, otherwise it is `IOError.PermissionDenied`; a time before 1970 is `IOError.InvalidInput`. |
 
 `usize_max()` is a pure `U64` constant derived at compile time from the
 selected target's pointer layout (#4483), not from the
@@ -2158,9 +2251,12 @@ whether the call goes through the module alias or a direct import:
 | `fork()` / `setsid()` | `Int !IOError -[Env, Exec]>` | Fork or create a process session. Both change the process tree, so callers need `Exec`, like `process.cmd`. |
 | `wait()` / `waitpid(pid, options)` | `Int !IOError -[Env, Time.Wait]>` | Reap a child or selected child. |
 | `kill(pid, signal)` | `!IOError -[Env]>` | Send a signal. |
+| `#Unsafe reset_signal(number)` | `!IOError -[Env]>` | Restore a signal's default action (SIG_DFL), the fault signals included, so the signal raised next takes it; a supervisor re-raising its child's signal uses it before `kill`. |
 | `setuid` / `setgid` / `setpgid` / `setpgrp` / `initgroups` | `!IOError -[Env]>` | Change credentials, groups, or process-group membership. |
+| `set_user_ids(real:, effective:, saved:)` / `set_group_ids(real:, effective:, saved:)` | `!IOError -[Env]>` | `setresuid` / `setresgid` on every thread at once; an omitted ID (`None`) stays. Without `CAP_SETUID` / `CAP_SETGID` each new ID must be one of the current real, effective or saved IDs, else `IOError.PermissionDenied`; an ID outside 0..4294967294 is `IOError.InvalidInput`. `seteuid(id)` is `set_user_ids(effective: id)`. Supplementary groups stay as they are. |
 | `pipe()` / `close_fd(fd)` | `[Int] !IOError -[FS, Env]>` / `Unit -[FS, Env]>` | Create or close raw process descriptors. |
 | `mkfifo(path, mode)` | `!IOError -[FS, Env]>` | Create a named pipe. |
+| `mknod(path, mode, kind, major, minor)` | `!IOError -[FS, Env]>` | Create a `DeviceKind.Character` or `.Block` device file for `major`:`minor` (0..4095 and 0..1048575); only a privileged process may. |
 | `atexit(handler)` | `Unit` | Register a `fn()` handler that runs at the explicit process boundary after scope cleanup (D-FAIL-EXIT1). |
 
 `on_interrupt(handler)` (`Unit -[Env]>`) registers a `fn()` handler for SIGINT.
@@ -2510,10 +2606,11 @@ Numeric arithmetic methods need no import (D-SIGIL-ALGEBRA1=B):
 | `value.bit_or(other)` | Int and each fixed-width integer | Keep bits set in either operand. |
 | `value.bit_xor(other)` | Int and each fixed-width integer | Keep bits set in exactly one operand. |
 | `value.bit_not()` | Int and each fixed-width integer | Flip every bit, keeping the width; exact Int returns `-value - 1`. |
-| `value.pow(exponent)` | Int and Float | Numeric power with the existing exactness and negative-exponent rules. A written negative Int exponent produces Fraction; a dynamic negative Int exponent stops with the existing arithmetic fault. |
+| `value.pow(exponent)` | Int and Float | Numeric power with the existing exactness and negative-exponent rules. A written negative Int exponent produces Fraction; a dynamic negative Int exponent stops with the existing arithmetic fault. On Float and F32 it is C23 `pow`, correctly rounded, so every tier returns the same bits: 1 for `x^0` and `1^y` (even at a quiet NaN), the IEEE 754 zeros and infinities for a zero or infinite operand, a negative `x` to a whole `y` signed by `y`'s parity, and NaN for a negative `x` to a fractional `y`. |
 
 These intrinsic methods lower to the ordinary typed numeric operations, not
-user function calls, and call the same numeric runtime on every tier.
+user function calls, so every tier computes the same bits; Float and F32
+`pow` call Core's correctly rounded power.
 An update writes `value = value.bit_xor(other)`. `!value` is Boolean
 negation only. Shifts retain `<<` and `>>`.
 
@@ -2521,10 +2618,21 @@ Floating classifiers such as `math.is_nan` require Float or F32, not Int.
 Multi-operand floating calls such as `math.hypot`, and floating `pow`
 operands, must use matching Float/F32 widths; convert explicitly before
 calling them. Source-owned Core wrappers preserve these same constraints.
+An all-F32 call of a correctly rounded function below (`sin`, `cos`, `tan`,
+`asin`, `acos`, `atan`, `atan2`, `sinh`, `cosh`, `tanh`, `asinh`, `acosh`,
+`atanh`, `exp`, `exp2`, `exp10`, `exp_m1`, `ln`, `ln_1p`, `log2`, `log10`,
+`cbrt`, `hypot`, `rsqrt`, `sin_pi`, `cos_pi`, `tan_pi`, `asin_pi`,
+`acos_pi`, `atan_pi`, `atan2_pi`, `exp2_m1`, `exp10_m1`, `log2_1p`,
+`log10_1p`, `pow_r`, `pow_n`, `root_n`, `compound_n`), and F32 `pow`,
+returns the correctly rounded `F32` result on every tier, never
+a double rounding of the Float one (C23's `f` forms such as `rsqrtf` and
+`pownf`); the whole exponent of `pow_n`, `root_n` and `compound_n` stays an
+`Int`.
 
 | Function | Returns | Description |
 | --- | --- | --- |
-| `math.acos(x)`, `acosh(x)`, `asin(x)`, `asinh(x)`, `atan(x)`, `atan2(y, x)`, `atanh(x)` | `Float` | Inverse trigonometric and hyperbolic functions, with musl 1.2.5's results bit for bit. One exception: `acosh` of any value below 1 is NaN, where musl returns a finite value for some x at or below -2. The extended float family is part of the shared math surface (D-CORESURFACE1). |
+| `math.acos(x)`, `asin(x)`, `atan(x)`, `atan2(y, x)` | `Float` | Inverse trigonometric functions, correctly rounded, so every tier returns the same bits: `asin` in [-pi/2, pi/2] and `acos` in [0, pi] with NaN for `abs(x) > 1`, `atan` in [-pi/2, pi/2] with ±pi/2 at the infinities, and `atan2` the angle of the point `(x, y)` in [-pi, pi] with the sign of `y` and the C23 values at zeros and infinities; `asin`, `atan` and `atan2` keep the sign of a zero result (C23 `asin`, `acos`, `atan`, `atan2`). |
+| `math.acosh(x)`, `asinh(x)`, `atanh(x)` | `Float` | Inverse hyperbolic functions, correctly rounded, so every tier returns the same bits: `acosh` is 0 at 1 and NaN below 1, `asinh` and `atanh` are odd, and `atanh` is ±inf at ±1 and NaN for `abs(x) > 1` (C23 `acosh`, `asinh`, `atanh`). The extended float family is part of the shared math surface (D-CORESURFACE1). |
 | `math.abs(value)` / `math.abs_float(value: Float)` | the argument type (`Float` for `Complex`) | Absolute value of an `Int`, `Float`, `F32`, `I64` or `Complex`. On `Float` and `F32` it clears the sign bit, so `-0.0` gives `+0.0` and a negative NaN loses its sign; on `I64` it is fixed-width negation, which stops with E3010 at `I64.MIN`. |
 | `math.copy(value: Float)` | `Float` | Return the floating-point value unchanged, including its IEEE representation. |
 | `math.is_even(value)` / `math.is_odd(value)` | `Bool` | Test integer parity. |
@@ -2532,12 +2640,20 @@ calling them. Source-owned Core wrappers preserve these same constraints.
 | `math.isqrt(value)` | `?Int` | Return the integer square root when the input is nonnegative. |
 | `math.gcd(a, b)` / `math.lcm(a, b)` | `Int` | Greatest common divisor or least common multiple. |
 | `math.gcd_many(values)` / `math.lcm_many(values)` | `Int` | Fold integer gcd or lcm over a list. |
-| `math.cos(x)`, `cosh(x)`, `sin(x)`, `sinh(x)`, `tan(x)`, `tanh(x)`, `math.cot(x)` | `Float` | Trigonometric and hyperbolic functions. |
+| `math.sin(x)`, `cos(x)`, `tan(x)` | `Float` | Sine, cosine and tangent of `x` radians, correctly rounded for every finite `x` however large, so every tier returns the same bits: NaN for an infinity, and `sin` and `tan` keep the sign of a zero (C23 `sin`, `cos`, `tan`). |
+| `math.cosh(x)`, `sinh(x)`, `tanh(x)`, `math.cot(x)` | `Float` | Hyperbolic functions, correctly rounded, so every tier returns the same bits: `cosh` is even and at least 1, `sinh` and `tanh` are odd, `cosh` and `sinh` overflow to ±inf from about ±710.48 (C23 `cosh`, `sinh`, `tanh`); and the cotangent `1 / tan(x)`. |
 | `math.sin_pi(x)`, `cos_pi(x)`, `tan_pi(x)` | `Float` | `sin`, `cos` and `tan` of `pi * x`, correctly rounded, so every tier returns the same bits and every exact 0 or ±1 comes out exact: a zero with the sign of `x` for `sin_pi` at whole `x`, `+0` for `cos_pi` at `x = 1/2 mod 1`, an infinity for `tan_pi` there, and NaN for an infinity (C23 `sinpi`, `cospi`, `tanpi`). |
-| `math.exp(x)`, `exp2(x)`, `exp10(x)`, `exp_m1(x)`, `expm1(x)`, `math.erf(x)`, `math.erfc(x)` | `Float` | Exponential and error functions. |
-| `math.ln(x)`, `ln_1p(x)`, `log1p(x)`, `log10(x)`, `log2(x)`, `logb(x)`, `log(x, base)` | `Float` | Natural, base-specific, and compensated logarithms. |
-| `math.sqrt(x)`, `cbrt(x)`, `hypot(x, y)` | `Float` | Roots and hypotenuse. |
+| `math.asin_pi(x)`, `acos_pi(x)`, `atan_pi(x)`, `atan2_pi(y, x)` | `Float` | `asin`, `acos`, `atan` and `atan2` divided by `pi`, correctly rounded, so every tier returns the same bits: `asin_pi` in [-1/2, 1/2] and `acos_pi` in [0, 1] with NaN for `abs(x) > 1`, `atan_pi` in [-1/2, 1/2] with ±1/2 at the infinities, and `atan2_pi` the angle of the point `(x, y)` in half-turns, in [-1, 1] with the sign of `y` and the C23 values at zeros and infinities (C23 `asinpi`, `acospi`, `atanpi`, `atan2pi`). |
+| `math.exp(x)`, `exp2(x)`, `exp10(x)`, `exp_m1(x)`, `expm1(x)` | `Float` | `e^x`, `2^x`, `10^x` and `e^x - 1`, correctly rounded, so every tier returns the same bits: `+inf` on overflow, 0 (-1 for `exp_m1`) at `-inf`, `exp2` and `exp10` exact wherever the power is a Float, and `exp_m1` keeps the sign of a zero (C23 `exp`, `exp2`, `exp10`, `expm1`). |
+| `math.erf(x)`, `math.erfc(x)` | `Float` | Error functions. |
+| `math.exp2_m1(x)`, `exp10_m1(x)` | `Float` | `2^x - 1` and `10^x - 1`, correctly rounded, so every tier returns the same bits and small `x` keeps full precision: -1 at `-inf`, `+inf` on overflow, and a zero keeps its sign (C23 `exp2m1`, `exp10m1`). |
+| `math.ln(x)`, `ln_1p(x)`, `log1p(x)`, `log10(x)`, `log2(x)` | `Float` | `log(x)`, `log(1 + x)`, `log10(x)` and `log2(x)`, correctly rounded, so every tier returns the same bits: NaN below 0 (below -1 for `ln_1p`), `-inf` at ±0 (at -1), `+inf` at `+inf`, `log2` and `log10` exact at every power of 2 or 10 that is a Float, and `ln_1p` keeps the sign of a zero (C23 `log`, `log1p`, `log10`, `log2`). |
+| `math.logb(x)`, `log(x, base)` | `Float` | The binary exponent as a Float, and the logarithm in any base, `ln(x) / ln(base)`. |
+| `math.log2_1p(x)`, `log10_1p(x)` | `Float` | `log2(1 + x)` and `log10(1 + x)`, correctly rounded, so every tier returns the same bits and small `x` keeps full precision: NaN below -1, `-inf` at -1, `+inf` at `+inf`, exact at every `x = 2^k - 1` and `x = 10^k - 1` (`k` in [1, 15]), and a zero keeps its sign (C23 `log2p1`, `log10p1`). |
+| `math.sqrt(x)`, `cbrt(x)`, `hypot(x, y)` | `Float` | Square root, cube root and `sqrt(x^2 + y^2)`, correctly rounded, so every tier returns the same bits: `cbrt` is odd and exact at every exact cube, and `hypot` never overflows or underflows early and is `+inf` when either side is infinite, even beside a quiet NaN (C23 `sqrt`, `cbrt`, `hypot`). |
 | `math.rsqrt(x)` | `Float` | `1 / sqrt(x)` correctly rounded, so every tier returns the same bits: `+inf` for `+0`, `-inf` for `-0`, `+0` for `+inf` and NaN below zero (C23 `rsqrt`). |
+| `math.pow_n(x, n)`, `pow_r(x, y)` | `Float` | `x^n` for every whole `n: Int`, taken exactly however large, and `e^(y ln x)`, both correctly rounded, so every tier returns the same bits (C23 `pown`, `powr`). `pow_n` gives 1 for `n = 0` even at a NaN, and a negative result for a negative `x` and odd `n`; `pow_r` gives NaN for `x < 0`, `0^0`, `inf^0` and `1^inf`, and `+inf` for `0^y` with `y < 0`. Float `value.pow(y)` is C23 `pow`. |
+| `math.root_n(x, n)`, `compound_n(x, n)` | `Float` | The `n`th root of `x` and `(1 + x)^n` for every whole `n: Int`, both correctly rounded, so every tier returns the same bits (C23 `rootn`, `compoundn`). `root_n` gives NaN for `n = 0` and for `x < 0` with `n` even, and a negative root for `x < 0` with `n` odd; `compound_n` gives 1 for `n = 0` (even at a NaN), NaN for `x < -1`, and never rounds `1 + x` first. |
 | `math.floor(x)` / `math.ceil(x)` / `math.trunc(x)` | `Float` | Directed or toward-zero rounding in floating-point form. |
 | `math.fract(x)` | `Float` | Return the fractional part. |
 | `math.gamma(x)` / `math.lgamma(x)` | `Float` | Gamma and log-gamma functions. |
@@ -2567,7 +2683,7 @@ calling them. Source-owned Core wrappers preserve these same constraints.
 | `math.INFINITY` / `math.NAN` | `Float` | The IEEE-754 special values `1.0 / 0.0` and `0.0 / 0.0`, as comptime constants. `NAN` compares unequal to every value, itself included; test it with `math.is_nan`. |
 | `math.round(x)` | `Int` | Round to the nearest integer, with ties away from zero. |
 | `math.to_bits(x)` / `math.from_bits(bits)` | integer bits / `Float` | Convert between a floating value and its bit representation. |
-| `math.sin_cos(x)` | `(cos: Float, sin: Float)` | Compute cosine and sine together. |
+| `math.sin_cos(x)` | `(cos: Float, sin: Float)` | Compute cosine and sine together, each correctly rounded as `cos` and `sin` give it. |
 | `math.modf(x)` | `(fract: Float, whole: Float)` | Split a value into fractional and whole parts, each with the sign of `x`; an infinity has fraction `±0`. |
 | `math.frexp(x)` | `(exp: Int, frac: Float)` | Split a value into `frac * 2^exp` with `abs(frac)` in [0.5, 1) (C `frexp`); a zero, an infinity or a NaN is its own `frac` with `exp` 0. |
 | `math.checked_abs(x)`, `checked_neg(x)`, `checked_add(a,b)`, `checked_sub(a,b)`, `checked_mul(a,b)`, `checked_div(a,b)`, `checked_rem(a,b)`, `checked_pow(a,b)` | `?Int` | Return `None` on integer overflow or invalid division/remainder; checked power also rejects a negative exponent. |
@@ -2881,71 +2997,6 @@ run: fn() {
 | `Scene` | type | Scene state and the frame callback consumed by the runner. |
 | `Replay` | type | Replay destination and transcript policy. |
 | `Backend` | type | Backend name and running state. |
-
-### `core.game.raylib` — display-gated drawing
-
-`core.game.raylib` is a display-gated bridge. It has no host-side fallback: a
-headless or unavailable display returns provider state rather than silently
-pretending to draw. Textures, sounds, windows, and colors are typed handles;
-resource loading requires the corresponding file and GPU authority.
-
-| Function or type | Returns | Description |
-| --- | --- | --- |
-| `core.game.raylib.window_open(width, height, title)` | `RaylibWindow -[GPU]>` | Open a window; dimensions are clamped to `1..2,147,483,647`. |
-| `raylib.window_ready(window)` / `window_should_close(window)` | `Bool -[GPU]>` | Query window readiness or close state. |
-| `raylib.begin_drawing(window)` | `Unit -[GPU]>` | Begin a frame for a window. |
-| `raylib.end_drawing()` | `Unit -[GPU]>` | Finish the active frame; with `JET_RAYLIB_CAPTURE` set, write the canvas to that path as a PAM image. |
-| `raylib.clear_background(color)` | `Unit -[GPU]>` | Set every canvas pixel to the color, alpha included. |
-| `raylib.close_window(window)` | `Unit -[GPU]>` | Close a window and release its display handle, its canvas and every decoded texture; as in raylib, atlases loaded before the close draw nothing afterwards. |
-| `raylib.color(r, g, b, a)` | `RaylibColor` | Clamp each component to `0..255` and construct a color. |
-| `raylib.vector2(x, y)` / `raylib.rectangle(x, y, width, height)` | `RaylibVector2` / `RaylibRectangle` | Construct raylib's `Float` point and rectangle. Shapes that take them fill the pixels whose centers lie inside, with coordinates snapped to 1/256 pixel; a pixel whose center lies on a left or top edge is inside, one on a right or bottom edge is not. |
-| `raylib.draw_rectangle(x, y, width, height, color)` | `Unit -[GPU]>` | Fill a rectangle, clipped to the canvas and blended src-over. |
-| `raylib.draw_line(start_x, start_y, end_x, end_y, color)` | `Unit -[GPU]>` | Draw a one-pixel line including both endpoints; along the longer axis each step draws one pixel at the line value rounded half up. |
-| `raylib.draw_circle(center_x, center_y, radius, color)` | `Unit -[GPU]>` | Fill every pixel within `radius` (an `Int`) of the center; a radius below 1 draws nothing. |
-| `raylib.draw_triangle(x0, y0, x1, y1, x2, y2, color)` | `Unit -[GPU]>` | Fill the pixels whose centers lie inside the triangle, in either winding; triangles sharing an edge never both cover a pixel. |
-| `raylib.draw_pixel(x, y, color)` | `Unit -[GPU]>` | Blend one pixel. |
-| `raylib.draw_rectangle_rec(rec, color)` | `Unit -[GPU]>` | Fill a `RaylibRectangle`; an empty or negative side draws nothing. |
-| `raylib.draw_rectangle_lines(x, y, width, height, color)` | `Unit -[GPU]>` | Draw the rectangle's one-pixel border inside its bounds, each pixel once. |
-| `raylib.draw_rectangle_lines_ex(rec, line_thick, color)` | `Unit -[GPU]>` | Draw a border `line_thick` wide inside `rec` as raylib's four bands: top and bottom full width, the sides between them. A thickness past either side becomes half the shorter side. Bands are blended one after another. |
-| `raylib.draw_rectangle_gradient_v(x, y, width, height, top, bottom)` / `draw_rectangle_gradient_h(x, y, width, height, left, right)` | `Unit -[GPU]>` | Fill a rectangle shaded from the first color to the second, top to bottom or left to right. |
-| `raylib.draw_rectangle_gradient_ex(rec, top_left, bottom_left, bottom_right, top_right)` | `Unit -[GPU]>` | Fill a rectangle shaded between its four corner colors, given counter-clockwise from the top left. Each pixel's color is interpolated at its center across the two triangles split along the top-left to bottom-right diagonal, rounded half up per channel. |
-| `raylib.draw_rectangle_rounded(rec, roundness, segments, color)` | `Unit -[GPU]>` | Fill a rectangle whose corners are arcs of radius `roundness` (clamped to `1`) times half the shorter side, each arc a polygon of `segments` steps, or of raylib's automatic count when `segments` is below 4. A `roundness` of 0 or below, or a side below 1, fills the plain rectangle. |
-| `raylib.draw_rectangle_rounded_lines(rec, roundness, segments, color)` | `Unit -[GPU]>` | Draw the one-pixel band just outside the rounded rectangle, as raylib does. A `roundness` of 0 or below draws the one-pixel band around `rec`. |
-| `raylib.draw_circle_lines(center_x, center_y, radius, color)` | `Unit -[GPU]>` | Draw the pixels of `draw_circle`'s disc that touch a pixel outside it. |
-| `raylib.draw_ellipse(center_x, center_y, radius_h, radius_v, color)` | `Unit -[GPU]>` | Fill the pixels at offset `(dx, dy)` from the center with `(dx * radius_v)^2 + (dy * radius_h)^2 <= (radius_h * radius_v)^2`; a radius of 0 or below draws nothing. |
-| `raylib.draw_ellipse_lines(center_x, center_y, radius_h, radius_v, color)` | `Unit -[GPU]>` | Draw the pixels of `draw_ellipse`'s fill that touch a pixel outside it. |
-| `raylib.draw_ring(center, inner_radius, outer_radius, start_angle, end_angle, segments, color)` | `Unit -[GPU]>` | Fill the ring between the radii from `start_angle` to `end_angle` (degrees), built of raylib's segments; with an inner radius of 0 or below it fills a circle sector. raylib's argument fixes apply: swapped radii and angles are reordered and an outer radius of 0 or below becomes 0.1. Each pixel is blended once. |
-| `raylib.draw_ring_lines(center, inner_radius, outer_radius, start_angle, end_angle, segments, color)` | `Unit -[GPU]>` | Draw the pixels of `draw_ring`'s fill that touch a pixel outside it. |
-| `raylib.draw_poly(center, sides, radius, rotation, color)` | `Unit -[GPU]>` | Fill a regular polygon with vertex `i` at angle `rotation + 360 * i / sides` degrees; fewer than 3 sides draw 3. |
-| `raylib.draw_poly_lines(center, sides, radius, rotation, color)` | `Unit -[GPU]>` | Draw the pixels of `draw_poly`'s fill that touch a pixel outside it. |
-| `raylib.draw_text(text, x, y, size, color)` | `Unit -[GPU]>` | Draw text in the built-in 5x7 font at whole-pixel scale `max(round(size / 10), 1)`; `\n` starts a new line. |
-| `raylib.measure_text(text, size)` | `Int` | The width in pixels that `draw_text` covers for its widest line: `(6 × scalars − 1) × scale`, with the same scale and the same `\n` line breaks. Empty text or empty lines measure 0. Needs no effect. |
-| `raylib.draw_sprite(atlas, source, x, y)` | `Unit -[GPU]>` | Copy the atlas's first region named `source` to `(x, y)`, clipped to the texture and the canvas and blended src-over; an unknown region or an atlas without a decoded texture draws nothing. |
-| `raylib.check_collision_recs(rec1, rec2)` / `check_collision_point_rec(point, rec)` | `Bool` | Whether two rectangles overlap, or a point lies inside a rectangle. A rectangle includes its left and top edges and excludes its right and bottom edges, so rectangles that only touch do not collide. |
-| `raylib.check_collision_circles(center1, radius1, center2, radius2)` / `check_collision_point_circle(point, center, radius)` | `Bool` | Whether two circles overlap or touch, or a point lies within `radius` of the center. |
-| `raylib.check_collision_circle_rec(center, radius, rec)` / `check_collision_circle_line(center, radius, p1, p2)` | `Bool` | Whether a circle reaches a rectangle or the segment from `p1` to `p2`. |
-| `raylib.check_collision_point_triangle(point, p1, p2, p3)` / `check_collision_point_poly(point, points)` | `Bool` | Whether a point lies strictly inside a triangle, or inside a polygon by the even-odd rule; fewer than 3 points enclose nothing. |
-| `raylib.check_collision_point_line(point, p1, p2, threshold)` | `Bool` | Whether a point lies between `p1` and `p2` along the line's longer axis and within `threshold` pixels of the line, using raylib's cross-product test. |
-| `raylib.check_collision_lines(start1, end1, start2, end2)` | `RaylibVector2?` | The point where two segments cross, or `None` when they are parallel or cross outside either segment. |
-| `raylib.get_collision_rec(rec1, rec2)` | `RaylibRectangle` | The overlap of two rectangles, or a zero rectangle when they do not overlap. |
-| `raylib.gen_image_color(width, height, color)` / `gen_image_checked(width, height, checks_x, checks_y, first, second)` | `RaylibImage` | A new RGBA image of one color, or of `checks_x` by `checks_y` pixel checks starting with `first` at the top left. A side below 1 or above 16384, or more than 2^24 pixels, gives an image with no pixels. |
-| `raylib.get_image_color(image, x, y)` | `RaylibColor` | The pixel at `(x, y)`, or a zero color outside the image. |
-| `raylib.image_clear_background(image, color)` / `image_draw_pixel(image, x, y, color)` | `Unit` | Set every pixel, or one pixel inside the image, to `color`, alpha included. |
-| `raylib.image_draw_rectangle(image, x, y, width, height, color)` / `image_draw_rectangle_rec(image, rec, color)` | `Unit` | Set the rectangle's pixels, clipped to the image and truncated to whole pixels. As in raylib, less than one column still sets the first pixel unless the rectangle ends at the left edge, and less than one row still fills the first row. |
-| `raylib.image_crop(image, rec)` | `Unit` | Keep the rectangle's pixels, clipped to the image and truncated to whole pixels. A rectangle starting past the image leaves it unchanged. As in raylib, one with no whole column or row leaves no pixels, and the truncated sides (not below 0) become the image's size. |
-| `raylib.image_resize_nn(image, width, height)` | `Unit` | Nearest-neighbour resize with raylib's 16.16 fixed-point source index. A size outside `gen_image_color`'s limits leaves the image unchanged. |
-| `raylib.image_flip_vertical(image)` / `image_flip_horizontal(image)` / `image_rotate_cw(image)` / `image_rotate_ccw(image)` | `Unit` | Mirror the rows or columns, or turn the image a quarter turn; a turn swaps width and height. |
-| `raylib.image_color_tint(image, color)` / `image_color_invert(image)` | `Unit` | Scale each channel by `color`'s channel / 255, rounded down, alpha included; or replace red, green and blue with 255 minus themselves. |
-| `raylib.image_color_brightness(image, amount)` / `image_color_replace(image, color, replace)` | `Unit` | Add `amount`, clamped to -255..255, to red, green and blue, capped at 255; as in raylib, a sum below 0 becomes 1. Or replace every pixel equal to `color` in all four channels with `replace`. |
-| `raylib.load_texture_atlas(path)` | `RaylibTextureAtlas -[FS, GPU]>` | Load an atlas and decode its PNG texture (every color type, bit depth and Adam7; sixteen-bit samples keep their high byte). A missing or malformed PNG leaves the atlas without a texture. |
-| `raylib.load_sound(path)` | `RaylibSound -[FS, GPU]>` | Load a sound resource. |
-| `raylib.play_sound(sound)` | `Bool -[GPU]>` | Start playback and report whether it was accepted. |
-| `raylib.set_target_fps(fps)` | `Unit -[GPU]>` | Set a target frame rate, clamped to `1..240`. |
-| `raylib.key_down(key)` / `gamepad_down(pad, button)` | `Bool -[GPU]>` | Read keyboard or gamepad button state. |
-| `raylib.gamepad_axis(pad, axis)` | `Float -[GPU]>` | Read a gamepad axis. |
-| `RaylibColor`, `RaylibWindow`, `RaylibTextureAtlas`, `RaylibSound` | types | Typed bridge handles; they are not interchangeable with ordinary strings or integers. |
-| `RaylibVector2`, `RaylibRectangle` | types | raylib's `Vector2` (`x`, `y`) and `Rectangle` (`x`, `y`, `width`, `height`), with `Float` fields. |
-| `RaylibImage` | type | An RGBA8 image held in memory: `width`, `height` and `pixels` (four `U8` per pixel, row by row). A width of 0 means no image. |
 
 ### `core.perf` — fidelity scaling
 
@@ -3879,8 +3930,20 @@ sendability rules. The implementation is in
 | `waitall<T>(receivers: [Receiver<T>]) -[Time.Wait]> [T?]` | values | One `recv` per receiver, in order. |
 | `waitany<T>(receivers: [Receiver<T>]) -[Time.Wait]> (index: Int, value: T?)` | answer | The receiver that answered and its `recv` result; the list must not be empty. |
 | `yield_now() -[Time]>` | — | Yield to another runnable task. |
-| `current_task() -> String` | text | Identify the running task. |
+| `current_task() -> TaskID` | identity | Identify the running task. |
+| `cpu_ns() -[Time]> Int` | nanoseconds | The CPU time the running task has used. |
 | `timeout(delay: Duration) -[Time]>` | — | Wait for a duration before returning. |
+| `quiesce() -[Exec]> Bool` | joined | Join the scheduler's carrier and timer threads before a raw exec or fork that needs a single-threaded process; `false`, with nothing stopped, while a task or a timer is pending. The threads start again on the next use. |
+
+`TaskID` is opaque: it compares with `==`, keys a map and prints, and nothing
+else reads it. Two reads by one task are equal and differ from every other running task's;
+a finished task's identity can be reused, and its printed form changes from run
+to run, so compare identities rather than printing them into golden output.
+Outside a scheduled task it identifies the calling thread. `cpu_ns` counts only
+the time the task ran, on whichever carrier threads ran it, and stands still
+while the task is parked; on a plain thread it is the thread's CPU time. Only
+the difference of two reads by the same task means anything. A deterministic
+world has no CPU clock to control, so it rejects the read.
 
 `TaskState` is the pure integer convenience queue; generic task and channel
 handles are compiler-owned scheduler surfaces. A capacity of zero means that
@@ -3948,8 +4011,8 @@ constant evaluation; they are not alternate syntax for bindings. See
 | `const_int(value: Int, ignored: Int) -> Int` | integer | Select the first integer in a constant-evaluation expression. |
 | `const_bool(value: Bool, ignored: Bool) -> Bool` | Boolean | Select the first Boolean in a constant-evaluation expression. |
 | `not_bool(value: Bool) -> Bool` | Boolean | Negate a Boolean. |
-| `min<T: Comparable>(a: T, b: T, rest: ...T) -> T` / `max<T: Comparable>(a: T, b: T, rest: ...T) -> T` | `T` | The first least or greatest of two or more ordered values; a NaN argument is the result. Prelude names: no import. |
-| `clamp<T: Comparable>(x: T, lo: T, hi: T) -> T` | `T` | Clamp `x` to the bounds; reversed bounds are accepted, and a NaN argument is the result. Prelude name: no import. |
+| `min<T: Comparable>(a: T, b: T, rest: ...T) -> T` / `max<T: Comparable>(a: T, b: T, rest: ...T) -> T` | `T` | The first least or greatest of two or more ordered values, by `compare` (a Float by IEEE 754 totalOrder). Prelude names: no import. |
+| `clamp<T: Comparable>(x: T, lo: T, hi: T) -> T` | `T` | Clamp `x` to the bounds by `compare` (a Float by IEEE 754 totalOrder); reversed bounds are accepted. Prelude name: no import. |
 `keep` is the approved use-site identity sink when measurement must observe a value (`D-BENCH-KEEP1=A`).
 
 `SourceLocation` is the record `$here` and a `$caller` parameter default
@@ -3978,6 +4041,7 @@ or golden file. The public source is
 | `snap(name: String, value: String) -[FS, Env]> Bool` | Boolean | Compare or create `__snapshots__/<sanitized-name>.snap`; `JET_UPDATE_SNAPSHOTS=1` rewrites it. Snapshot names retain ASCII letters, digits, `-`, and `_`, replacing other scalars with `_`; an empty name becomes `case`. A mismatch returns `false` and records `snapshot differs: <name>` with the same bounded unified diff as `golden`, so a failing `assert` shows it. The `expect(value).snapshot()` builtin is `assert(snap("<file>_<line>", "{value}"))`. |
 | `golden(name: String, value: String) -[FS, Env]> Bool` | Boolean | Compare `value` with the file `name`. A missing, unreadable, or differing file returns `false` and records the reason (with a bounded unified diff for a difference). The next failing `assert` or `assert_eq` on that thread reports the recorded reason as its stop message and the path and diff as its locals; a passing helper call clears it. Under `JET_UPDATE_SNAPSHOTS=1` (`jet test -u`) a missing or differing file is written, parent folders included, and the check passes. |
 | `fixture(name: String) -[FS]> String` | text | Load a named fixture. |
+| `skip(reason: String)` | — | Mark the running `#Test` skipped, like Go's `t.Skip`: `skipped: <reason>` joins its output and it reports skipped, as a first `.skip { }` member makes it. The body goes on, so return after it. Outside a running test nothing happens. |
 | `temp_dir(prefix: String) -[FS]> String` | path | Allocate an isolated temporary directory. |
 | `corpus(glob: String) -[FS]> [String]` | contents | Read each readable regular file directly inside the directory `glob` (the parameter keeps its historical name; it is not a pattern), ordered by full path; an absent directory gives `[]`. |
 | `corpus_entries(root: String, suffix: String) -[FS]> [CorpusEntry]` | entries | List the regular files below `root`, at any depth, whose names end in `suffix`, ordered by `id`. `CorpusEntry{id, path}`: `id` is the path below `root` without `suffix` (`basics/hello` for `<root>/basics/hello.jet`). Names starting with `.` are skipped, folders included; an absent root gives `[]`. |
@@ -4131,7 +4195,7 @@ The IME capability is spelled `UI.IME`, alongside `UI.Keyboard` and
 | `key_event(code: String) -> InputEvent` | event | Create `InputEvent.Key{code: code}`. |
 | `resize_event(width: Float, height: Float) -> InputEvent` | event | Create `InputEvent.Resize{size: Size{width: width, height: height}}`. |
 | `reactive_render(body: fn())` | — | Ask the provider to render a reactive body. |
-| `gtk_backend() -> GtkBackend`, `tui_backend() -> TUIBackend`, `null_backend() -> NullBackend` | backend | Select a backend handle. |
+| `tui_backend() -> TUIBackend`, `null_backend() -> NullBackend` | backend | Select a backend handle. |
 | `aria_role_button() -> UIAriaRole`, `aria_role_container() -> UIAriaRole` | role | Construct standard accessibility roles. |
 | `aria_role_label() -> UIAriaRole`, `aria_role_text_input() -> UIAriaRole` | role | Construct label or text-input roles. |
 | `node_accessibility(n: UINode, metadata: UIAccessibility) -> UINode` | node | Attach accessibility metadata. |
@@ -4150,20 +4214,98 @@ Host file-dialog, clipboard, shortcut, accessibility, and IME consumers declare
 their corresponding `UI.*` authority needs and use the current failure carrier;
 IME polling yields an optional event after host failure propagation.
 
+#### Native windows
+
+`open` shows a native window and `headless` gives the same `Window`, `Frame`
+and `UIEvent` types with no device, for tests. The program draws its own RGBA
+pixels; Core speaks the display server's wire protocol itself (Wayland now,
+picked from `$WAYLAND_DISPLAY`; [`Core/Ui/Wayland.jet`](../../../Core/Ui/Wayland.jet)),
+with no C library, so programs need no `#Unsafe` and no native dependency.
+
+```jet
+use ui: core.ui
+
+run: fn() {
+    window: ui.open(width: 640, height: 400, title: "demo") ?? return
+    window.set_app_id("org.example.Demo") ?? return
+    loop frame in window.frames() {
+        loop event in frame.events() {
+            if event == .KeyDown(.Escape) -> return
+        }
+        pixels := [U8]{}
+        loop _ in 0..<(frame.width * frame.height * 4) { pixels.push(U8{255}) }
+        frame.present(pixels) ?? return
+    }
+}
+```
+
+The display paces the frames, exactly one in flight: a frame is due when the
+compositor's frame callback arrives, so a window presents on every vblank
+while the program keeps presenting and sleeps, with no timer, while it does
+not, until input arrives. `frame.time` is the vblank the frame is predicted to
+reach the screen at (from `wp_presentation` feedback), in seconds since the
+first frame; compute motion from it, never per frame, and a late frame shows
+the right position instead of slowing down. A frame starts as late as its
+measured draw time allows, so its input is as fresh as possible. Three pooled
+buffers rotate as the compositor releases them, and `present_damage` copies
+and damages only the rectangles that changed.
+
+A window is asked for in logical units; frames, pixels and event positions are
+physical pixels, `frame.scale` of them per unit, so a 640 x 400 window on a
+display scaled to 150% draws 960 x 600 frames and stays sharp. The scale comes
+from `wp_fractional_scale_v1` with `wp_viewporter` when the compositor has
+them, else from the largest `wl_output` scale the window is on; a change of
+scale or size reaches the program as `.Resize` in pixels on the next frame.
+A resize is acknowledged only by the commit of a frame drawn at the new size,
+so the compositor never shows a stretched or cropped frame.
+
+Jet draws the window's frame itself: a title bar with the icon from
+`set_icon` (Jet's mark until one is set), the title centred on the window
+(shifted only as far as it must to clear the icon and the buttons, and cut
+with an ellipsis when even that space is too narrow), and minimize, maximize
+and close buttons, rounded corners and a soft shadow, on a `wl_subsurface`
+below the program's pixels. Frames stay the content: `open`'s size is the
+content's, while the compositor configures the whole window, so one
+configured 640 x 400 units draws 640 x 354. The title bar moves the
+window, a double press on it maximizes, the secondary button opens the
+compositor's window menu, and its edges and corners resize it; on a touch
+screen the buttons spread to 46-unit targets. From the keyboard, F6 moves
+the focus between the program and the frame's buttons, which show a
+focus ring; Tab and Shift+Tab step across them, Enter or Space works the
+focused one, Shift+F10 opens the window menu under it and Alt+Space under
+the title, and Escape gives the keys back to the program. The keys the
+frame takes never reach the program. A maximized or tiled window
+has square corners and no shadow, and a fullscreen one no frame. When the
+compositor draws frames itself (`zxdg_decoration_manager_v1` answers
+server-side) or offers no `wl_subcompositor`, its frame shows instead and
+frames are the whole window.
+
+| Signature | Result | Description |
+|---|---|---|
+| `open(*, width: Int, height: Int, title: String) -[Env, Net, Time]> Window UIError!` | window | Open a window of 1 to 16384 logical units a side on the environment's display server: `.NoDisplay` when none is named, `.Connect` / `.Protocol` / `.Unsupported` when it fails. |
+| `headless(*, width: Int, height: Int, script: [[UIEvent]]) -> Window UIError!` | window | A window with no device at scale 1: frame `i` carries `script[i]`, one more carries `.Close`, frames are 1/60 s apart, and each present records a checksum. |
+| `Window.frames() -> Frames` | frames | The display-paced frames; the stream ends after the frame that carries `.Close`. |
+| `Window.width()` / `.height()` / `.scale() -> Float` / `.failure() -> UIError?` / `.checksums() -> [Int]` | facts | The latest frame's size in pixels and pixels per logical unit, why the display ended the frames, and a headless window's per-frame FNV-1a checksums. |
+| `Window.cursor() -> UICursor` / `.set_cursor(cursor: UICursor)` | cursor | How the pointer looks over the window, `.Default` until set: the CSS cursor keywords (`Pointer`, `Text`, `Wait`, `Grab`, `ResizeNWSE`, … in `wp_cursor_shape_v1` order) and `Hidden`. Without `wp_cursor_shape_v1` the compositor keeps its cursor for every shape but `Hidden`. |
+| `Window.set_app_id(app_id: String) -> UIError!` | — | Name the application, reverse-DNS (`"org.example.Notes"`), so the desktop matches its desktop entry for name, icon and grouping; `"dev.jet.app"` until set. `.Invalid` for an empty id or one with a NUL byte. |
+| `Window.set_icon(icon: UIIcon) -[Env]> UIError!` | — | Show `UIIcon{name, images}`: a theme icon name (`""` for none) and `UIIconImage{side, pixels}` images, `side` rows of `side` straight-alpha RGBA pixels, 1 to 1024 a side (`.Size` otherwise). An icon with no name and no images unsets it. Without `xdg_toplevel_icon_v1` the desktop entry's icon shows. |
+| `Window.frame_stats() -> FrameStats` | stats | `presented`, `missed` (vblanks skipped between consecutive frames), `discarded`, `refresh_ns`, present-to-present `median_ns` / `p99_ns`, `spans` (intervals by refreshes spanned: 1, 2, 3, 4+) and input-to-photon `input_samples` / `input_median_ns` / `input_p99_ns`. |
+| `Frame.index` / `.width` / `.height` / `.scale` / `.time` / `.delta` | fields | The frame's number, the size in pixels to draw at and the pixels per logical unit, and its predicted presentation time and the step since the previous frame's, in seconds. |
+| `Frame.events() -> [UIEvent]` | events | Input since the previous frame: `KeyDown(Key)` (core.term's `Key`; Space is `Char(' ')`), `KeyUp(Key)`, `Text(String)`, `PointerMove(x:, y:)` in pixels, `PointerDown(UIPointerButton)`, `PointerUp`, `Scroll(dx:, dy:)` in pixels, `Resize(width:, height:)` in pixels, `Focus(Bool)`, `Close`. Keys go through the compositor's XKB keymap (`core.ui.xkb`; a US layout until one arrives), and a held key other than a modifier repeats as further `KeyDown` and `Text` at the compositor's rate after its delay. |
+| `Frame.present(pixels: [U8]) -[Env, Net, Time]> UIError!` | — | Show `height` rows of `width` RGBA pixels. |
+| `Frame.present_damage(pixels: [U8], damage: [UIRect]) -[Env, Net, Time]> UIError!` | — | Show `pixels` where only the `damage` rectangles (in pixels) changed since the previous frame. |
+
 Backends expose their own command or event projection through the backend
 handle. The provider/catalog may add interactive node and mount operations,
 but those operations remain typed provider boundaries. Build a portable tree
 first, then use backend-specific capabilities; do not infer that a node tree
 supplies a platform-native callback API.
-The native GTK `present` call runs its application loop until a window
-close request quits that loop. GTK's default close handler still owns window
-teardown; a signal-owned loop reference keeps its callback data live.
 UI backend allocation and host capability/dialog/clipboard/IME/drag polling
 enter Jet source before reserved Core-only provider leaves. Public UI
 capability admission and the existing per-function Core effect rows remain
 unchanged. Lexical filesystem grants and accessibility metadata construction
 are Jet policy, not host facade calls.
-Terminal/GTK backend allocation, shortcut registration/dispatch, and host
+Terminal backend allocation, shortcut registration/dispatch, and host
 accessibility attach/project also enter their Jet public functions first.
 `attach` returns the provider's canonical node with the metadata attached,
 `UINode UIHostError!`, and propagates the typed host error on failure.
@@ -4205,6 +4347,112 @@ dimension parsing, and defaults are Jet policy. The private environment-byte
 leaf samples the same startup facts; the shared terminal leaf remains the
 canonical stdout `IsTerminal` sample. No environment effect is added to the
 existing public capability row.
+
+#### Drawing
+
+A `Frame` also draws: its `clear_background` and `draw_*` calls paint an RGBA
+canvas of the frame's size in Jet, the same on every backend and tier, blended
+src-over and clipped to the canvas, and the frame presents that canvas when the
+next frame begins unless the program called `present` itself. Shapes that take
+a `Point` or `Rect` fill the pixels whose centers lie inside, with coordinates
+snapped to 1/256 pixel; a pixel whose center lies on a left or top edge is
+inside, one on a right or bottom edge is not. The collision checks and the
+`Image` functions are pure and need no effect; `image_*` functions change an
+`Image` in place through `&`.
+
+| Signature | Result | Description |
+|---|---|---|
+| `Frame.clear_background(color)` | — | Set every canvas pixel to the color, alpha included. |
+| `color(r, g, b, a)` | `Color` | Clamp each component to `0..255` and construct a color. |
+| `Frame.draw_rectangle(x, y, width, height, color)` | — | Fill a rectangle, clipped to the canvas and blended src-over. |
+| `Frame.draw_line(start_x, start_y, end_x, end_y, color)` | — | Draw a one-pixel line including both endpoints; along the longer axis each step draws one pixel at the line value rounded half up. |
+| `Frame.draw_circle(center_x, center_y, radius, color)` | — | Fill every pixel within `radius` (an `Int`) of the center; a radius below 1 draws nothing. |
+| `Frame.draw_triangle(x0, y0, x1, y1, x2, y2, color)` | — | Fill the pixels whose centers lie inside the triangle, in either winding; triangles sharing an edge never both cover a pixel. |
+| `Frame.draw_pixel(x, y, color)` | — | Blend one pixel. |
+| `Frame.draw_rectangle_rec(rec, color)` | — | Fill a `Rect`; an empty or negative side draws nothing. |
+| `Frame.draw_rectangle_lines(x, y, width, height, color)` | — | Draw the rectangle's one-pixel border inside its bounds, each pixel once. |
+| `Frame.draw_rectangle_lines_ex(rec, line_thick, color)` | — | Draw a border `line_thick` wide inside `rec` as four bands: top and bottom full width, the sides between them. A thickness past either side becomes half the shorter side. Bands are blended one after another. |
+| `Frame.draw_rectangle_gradient_v(x, y, width, height, top, bottom)` / `.draw_rectangle_gradient_h(x, y, width, height, left, right)` | — | Fill a rectangle shaded from the first color to the second, top to bottom or left to right. |
+| `Frame.draw_rectangle_gradient_ex(rec, top_left, bottom_left, bottom_right, top_right)` | — | Fill a rectangle shaded between its four corner colors, given counter-clockwise from the top left. Each pixel's color is interpolated at its center across the two triangles split along the top-left to bottom-right diagonal, rounded half up per channel. |
+| `Frame.draw_rectangle_rounded(rec, roundness, segments, color)` | — | Fill a rectangle whose corners are arcs of radius `roundness` (clamped to `1`) times half the shorter side, each arc a polygon of `segments` steps, or of an automatic count when `segments` is below 4. A `roundness` of 0 or below, or a side below 1, fills the plain rectangle. |
+| `Frame.draw_rectangle_rounded_lines(rec, roundness, segments, color)` | — | Draw the one-pixel band just outside the rounded rectangle. A `roundness` of 0 or below draws the one-pixel band around `rec`. |
+| `Frame.draw_circle_lines(center_x, center_y, radius, color)` | — | Draw the pixels of `draw_circle`'s disc that touch a pixel outside it. |
+| `Frame.draw_ellipse(center_x, center_y, radius_h, radius_v, color)` | — | Fill the pixels at offset `(dx, dy)` from the center with `(dx * radius_v)^2 + (dy * radius_h)^2 <= (radius_h * radius_v)^2`; a radius of 0 or below draws nothing. |
+| `Frame.draw_ellipse_lines(center_x, center_y, radius_h, radius_v, color)` | — | Draw the pixels of `draw_ellipse`'s fill that touch a pixel outside it. |
+| `Frame.draw_ring(center, inner_radius, outer_radius, start_angle, end_angle, segments, color)` | — | Fill the ring between the radii from `start_angle` to `end_angle` (degrees), built of segments; with an inner radius of 0 or below it fills a circle sector. Argument fixes apply: swapped radii and angles are reordered and an outer radius of 0 or below becomes 0.1. Each pixel is blended once. |
+| `Frame.draw_ring_lines(center, inner_radius, outer_radius, start_angle, end_angle, segments, color)` | — | Draw the pixels of `draw_ring`'s fill that touch a pixel outside it. |
+| `Frame.draw_poly(center, sides, radius, rotation, color)` | — | Fill a regular polygon with vertex `i` at angle `rotation + 360 * i / sides` degrees; fewer than 3 sides draw 3. |
+| `Frame.draw_poly_lines(center, sides, radius, rotation, color)` | — | Draw the pixels of `draw_poly`'s fill that touch a pixel outside it. |
+| `Frame.draw_text(text, x, y, size, color)` | — | Draw text in the built-in 5x7 font at whole-pixel scale `max(round(size / 10), 1)`; `\n` starts a new line. |
+| `measure_text(text, size)` | `Int` | The width in pixels that `draw_text` covers for its widest line: `(6 × scalars − 1) × scale`, with the same scale and the same `\n` line breaks. Empty text or empty lines measure 0. Needs no effect. |
+| `Frame.draw_sprite(atlas, source, x, y)` | — | Copy the atlas's first region named `source` to `(x, y)`, clipped to the texture and the canvas and blended src-over; an unknown region or an atlas without a decoded texture draws nothing. |
+| `check_collision_recs(rec1, rec2)` / `check_collision_point_rec(point, rec)` | `Bool` | Whether two rectangles overlap, or a point lies inside a rectangle. A rectangle includes its left and top edges and excludes its right and bottom edges, so rectangles that only touch do not collide. |
+| `check_collision_circles(center1, radius1, center2, radius2)` / `check_collision_point_circle(point, center, radius)` | `Bool` | Whether two circles overlap or touch, or a point lies within `radius` of the center. |
+| `check_collision_circle_rec(center, radius, rec)` / `check_collision_circle_line(center, radius, p1, p2)` | `Bool` | Whether a circle reaches a rectangle or the segment from `p1` to `p2`. |
+| `check_collision_point_triangle(point, p1, p2, p3)` / `check_collision_point_poly(point, points)` | `Bool` | Whether a point lies strictly inside a triangle, or inside a polygon by the even-odd rule; fewer than 3 points enclose nothing. |
+| `check_collision_point_line(point, p1, p2, threshold)` | `Bool` | Whether a point lies between `p1` and `p2` along the line's longer axis and within `threshold` pixels of the line, using a cross-product test. |
+| `check_collision_lines(start1, end1, start2, end2)` | `Point?` | The point where two segments cross, or `None` when they are parallel or cross outside either segment. |
+| `get_collision_rec(rec1, rec2)` | `Rect` | The overlap of two rectangles, or a zero rectangle when they do not overlap. |
+| `gen_image_color(width, height, color)` / `gen_image_checked(width, height, checks_x, checks_y, first, second)` | `Image` | A new RGBA image of one color, or of `checks_x` by `checks_y` pixel checks starting with `first` at the top left. A side below 1 or above 16384, or more than 2^24 pixels, gives an image with no pixels. |
+| `get_image_color(image, x, y)` | `Color` | The pixel at `(x, y)`, or a zero color outside the image. |
+| `image_clear_background(image, color)` / `image_draw_pixel(image, x, y, color)` | `Unit` | Set every pixel, or one pixel inside the image, to `color`, alpha included. |
+| `image_draw_rectangle(image, x, y, width, height, color)` / `image_draw_rectangle_rec(image, rec, color)` | `Unit` | Set the rectangle's pixels, clipped to the image and truncated to whole pixels. Less than one column still sets the first pixel unless the rectangle ends at the left edge, and less than one row still fills the first row. |
+| `image_crop(image, rec)` | `Unit` | Keep the rectangle's pixels, clipped to the image and truncated to whole pixels. A rectangle starting past the image leaves it unchanged. One with no whole column or row leaves no pixels, and the truncated sides (not below 0) become the image's size. |
+| `image_resize_nn(image, width, height)` | `Unit` | Nearest-neighbour resize with a 16.16 fixed-point source index. A size outside `gen_image_color`'s limits leaves the image unchanged. |
+| `image_flip_vertical(image)` / `image_flip_horizontal(image)` / `image_rotate_cw(image)` / `image_rotate_ccw(image)` | `Unit` | Mirror the rows or columns, or turn the image a quarter turn; a turn swaps width and height. |
+| `image_color_tint(image, color)` / `image_color_invert(image)` | `Unit` | Scale each channel by `color`'s channel / 255, rounded down, alpha included; or replace red, green and blue with 255 minus themselves. |
+| `image_color_brightness(image, amount)` / `image_color_replace(image, color, replace)` | `Unit` | Add `amount`, clamped to -255..255, to red, green and blue, capped at 255; a sum below 0 becomes 1. Or replace every pixel equal to `color` in all four channels with `replace`. |
+| `load_texture_atlas(path)` | `TextureAtlas -[FS]>` | Load an atlas and decode its PNG texture (every color type, bit depth and Adam7; sixteen-bit samples keep their high byte). A missing or malformed PNG leaves the atlas without a texture. |
+| `Image` | type | An RGBA8 image held in memory: `width()`, `height()` and `pixels()` (four `U8` per pixel, row by row, as `Frame.present` takes them). A width of 0 means no image. |
+| `TextureAtlas` / `.name() -> String` / `.loaded() -> Bool` | type | Named regions of one decoded PNG texture; the atlas text's `atlas:` line or its file's stem, and whether the texture decoded. |
+| `Window.load_image_from_screen() -> Image` | image | A copy of the canvas the frames draw on, as last drawn. |
+| `Frame.is_key_down(key)` / `.is_key_up(key)` / `.is_key_pressed(key)` / `.is_key_released(key)` | `Bool` | Whether `key` is held during the frame, or went down or up since the previous one. |
+| `Frame.is_mouse_button_down(button)` / `.is_mouse_button_up(button)` / `.is_mouse_button_pressed(button)` / `.is_mouse_button_released(button)` | `Bool` | The same for a `UIPointerButton`. |
+| `Frame.get_mouse_x()` / `.get_mouse_y() -> Int` / `.get_mouse_position() -> Point` | position | The pointer's last position in pixels. |
+
+#### Keyboards: `core.ui.xkb`
+
+`core.ui.xkb` is the one XKB keyboard engine behind native windows, in pure
+Jet ([`Core/Ui/Xkb.jet`](../../../Core/Ui/Xkb.jet)). It compiles an XKB
+text-v1 keymap, the include-resolved text a Wayland compositor sends with
+`wl_keyboard.keymap`. It then tracks the keyboard state as libxkbcommon
+1.13.2 does: groups, levels, modifier and group actions, locks and latches,
+and Compose sequences from the en_US.UTF-8 table. Keys are `core.term`'s
+`Key`. A hostile keymap or modifier event gives only a typed
+`UIError.Protocol`.
+
+| Signature | Result | Description |
+|---|---|---|
+| `keymap(bytes: [U8]) -> Keymap UIError!` | keymap | Compile an XKB text-v1 keymap. |
+| `Keymap.modifiers(depressed: Int, latched: Int, locked: Int, group: Int)` | — | Apply a `wl_keyboard.modifiers` event. |
+| `Keymap.press(code: Int, down: Bool) -> (key: Key, text: String)` | key, text | Press or release evdev key `code`: its key and the text it types (`""` for none, for control characters and inside a Compose sequence). |
+| `Keymap.repeats(code: Int) -> Bool` | Boolean | Whether holding the key repeats it; modifier keys do not. |
+| `Keymap.codes() -> [Int]` | codes | The evdev codes of the keys with symbols at level 1 of group 1. |
+| `Keymap.keysym(code: Int) -> Int` / `.keysym_name(sym: Int) -> String` | keysym | The key's keysym, as `xkb_state_key_get_one_sym`, and libxkbcommon's name for a keysym. |
+| `Keymap.layout() -> String` / `.active(name: String) -> Bool` | facts | The active layout's name, and whether a real or virtual modifier (`"Shift"`, `"NumLock"`, `"LevelThree"`) is active. |
+| `Repeat{rate:, delay:}.due(held_ms: Int) -> Int` / `.between(from_ms: Int, to_ms: Int) -> Int` | count | Key repeats from `wl_keyboard.repeat_info` due after a hold, or while it grows. |
+
+#### Text: `core.ui.font`
+
+`core.ui.font` reads TrueType (glyf) fonts and draws text into a window's
+pixels, in pure Jet ([`Core/Ui/Font.jet`](../../../Core/Ui/Font.jet)): no
+`#Unsafe`, no files and no OS calls. Rasterizing and painting are integer
+arithmetic, so the native tiers and the web build paint the same bytes. The
+built-in faces are Atkinson Hyperlegible Next Regular and Bold (SIL Open Font
+License, `license()`). They cover Latin; the only Greek is Δ Ω μ π, and there
+is no Cyrillic. Layout applies GPOS pair kerning or the kern table. There is
+no GSUB, no mark positioning and no hinting, and text runs left to right.
+Every fault in a font file is a typed `FontError{reason}`.
+
+| Signature | Result | Description |
+|---|---|---|
+| `face(bytes: [U8]) -> Face FontError!` / `regular() -> Face` / `bold() -> Face` | face | Read a TrueType font, or take a built-in face. |
+| `Face.glyph(scalar: Int) -> Int` / `.glyph_count()` / `.units_per_em()` / `.metrics(size_px)` / `.advance(id, size_px)` / `.outline(id)` | facts | The glyph for a character (0 when missing), and the face's metrics, advances and outlines. |
+| `Face.layout(text: String, size_px: Float) -> TextRun` / `.wrap(text, size_px, max_width) -> [TextLine]` | layout | Place a line of glyphs with kerning, and break text into lines after spaces and hyphens. |
+| `Face.raster(id: Int, size_px: Float, x_frac: Float) -> GlyphMask` | mask | A glyph's anti-aliased coverage, unhinted, at a sub-pixel position. |
+| `cache() -> GlyphCache` / `cache_within(budget: Int)` / `GlyphCache.glyph(face, id, size_px, x_frac)` | cache | Masks kept per face, glyph, size and quarter pixel, within about `budget` bytes (CACHE_BYTES_MAX, 4 MiB, by default). |
+| `blend(&pixels, width, height, stride_bytes, mask, x, y, argb, clip: UIRect)` | — | Paint a mask source-over, in linear light, onto premultiplied ARGB8888 pixels (bytes B, G, R, A, `stride_bytes` per row). Only pixels inside `clip` and the canvas change. |
+| `draw_text(&pixels, width, height, stride_bytes, &cache, face, text, size_px, x, baseline_y, argb, clip) -> Int` | advance | Lay out and paint a line of text at quarter-pixel positions, and return its advance in whole pixels. |
 
 ### `core.reactive` — explicit signals and dependency tracking
 
@@ -4765,6 +5013,9 @@ empty. `socket_addr` is the first element of `socket_addrs`. Explicit
 | `unix_accept(listener) -[Net, Time.Wait]> UnixStream !NetError` / `unix_read(stream) -[Net, Time.Wait]> String !NetError` | stream/text | Accept or read a Unix stream. |
 | `unix_write(stream, text) -[Net, Time.Wait]> Unit !NetError` / `unix_read_bytes(stream, n) -[Net, Time.Wait]> [U8] !NetError` | unit/bytes | Write text or read bytes through the caller's exclusive stream window. |
 | `unix_write_all_bytes(stream, bytes) -[Net, Time.Wait]> Unit !NetError` / `unix_shutdown(stream, how) -[Net]> Unit !NetError` / `unix_close(stream) -[Net]> Unit !NetError` | — | Write all bytes or close the same Unix stream. |
+| `unix_send(&stream, bytes: [U8], fds: [core.sys.Fd]) -[Net, Time.Wait]> Unit !NetError` | — | Send every byte with `fds` attached (SCM_RIGHTS) to the first byte; at least one byte, at most 253 descriptors. The peer gets its own copies. Partial sends and `EINTR` resume. |
+| `unix_receive(&stream, max: Int) -[Net, Time.Wait]> UnixMessage !NetError` | message | At most `max` bytes (1 B to 16 MiB) of one message and the descriptors that rode with it, each an owned close-on-exec `core.sys.Fd`. A message whose descriptors were cut short (`MSG_CTRUNC`) closes the ones that arrived and fails with `.Protocol`. Empty bytes and no descriptors mean the peer closed. |
+| `unix_wait(&stream, timeout_ns: Int) -[Net, Time.Wait]> Bool !NetError` | ready | Wait on the calling thread until the stream has something to read (true) or `timeout_ns` passes (false); a negative timeout waits without limit. Interrupted waits resume with the time left. |
 | `dns_a(name: String, ms: Int) -[Net, Time.Wait]> [IPAddr] !NetError` / `dns_aaaa(name, ms) -[Net, Time.Wait]> [IPAddr] !NetError` | addresses | Resolve IPv4 or IPv6 records. |
 | `dns_a_at(server: String, name: String, ms: Int) -[Net, Time.Wait]> [IPAddr] !NetError` / `dns_aaaa_at(server, name, ms) -[Net, Time.Wait]> [IPAddr] !NetError` | addresses | Resolve A or AAAA records through an explicit server. |
 | `dns_txt(name: String, ms: Int) -[Net, Time.Wait]> [String] !NetError` / `dns_ptr(addr, ms) -[Net, Time.Wait]> [String] !NetError` | records | Resolve TXT or PTR records. |
@@ -5408,7 +5659,6 @@ The built-module inventory is a source-facing registry, not a missing-domain led
 - `core.files.path`
 - `core.font`
 - `core.game`
-- `core.game.raylib`
 - `core.http`
 - `core.http.client`
 - `core.http.server`
@@ -5458,6 +5708,8 @@ The built-module inventory is a source-facing registry, not a missing-domain led
 - `core.ui.host.drag_drop`
 - `core.ui.host.shortcuts`
 - `core.ui.host.accessibility`
+- `core.ui.xkb`
+- `core.ui.font`
 - `core.units`
 - `core.watcher`
 - `core.web`

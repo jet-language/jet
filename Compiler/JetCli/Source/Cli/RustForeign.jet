@@ -69,7 +69,7 @@ jet_cli_rust_foreign_write: fn(directory: cli_files.Directory, name: String, byt
     writer.write_all(bytes) ?? return Err(jet_cli_rust_foreign_io("couldn't write FFI input `{name}`: {err}"))
     writer.set_mode(mode) ?? return Err(jet_cli_rust_foreign_io("couldn't preserve FFI output permissions: {err}"))
     if durable -> writer.fsync() ?? return Err(jet_cli_rust_foreign_io("couldn't flush FFI input `{name}`: {err}"))
-    Ok(())
+    Ok()
 }
 // Publish one shared file by renaming a staged copy over `name`. Only a
 // `durable` file (the digest manifest, the marker that admits the helper) is
@@ -82,7 +82,7 @@ jet_cli_rust_foreign_publish: fn(directory: cli_files.Directory, name: String, b
     jet_cli_rust_foreign_write(directory, staged, bytes, durable, mode)
     directory.rename(staged, name) ?? return Err(jet_cli_rust_foreign_io("couldn't publish FFI artifact `{name}`: {err}"))
     if durable -> directory.fsync() ?? return Err(jet_cli_rust_foreign_io("couldn't flush FFI artifact directory: {err}"))
-    Ok(())
+    Ok()
 }
 
 jet_cli_rust_foreign_home: fn() -[Env]> String Never! { cli_sys.get("HOME") ?? (cli_sys.get("USERPROFILE") ?? "/tmp") }
@@ -128,7 +128,7 @@ jet_cli_rust_foreign_require_std: fn() JetDriverRustForeignError! -[FS, Env]> {
         executable: cli_files.canonicalize(selected) ?? return Err(jet_cli_rust_foreign_io("couldn't resolve the selected Rust compiler: {err}"))
         cli_files.dirname(cli_files.dirname(executable))
     }
-    if jet_cli_rust_foreign_has_std(root) -> return Ok(())
+    if jet_cli_rust_foreign_has_std(root) -> return Ok()
     Err(jet_cli_rust_foreign_io("the selected Rust compiler has no installed `{JET_DRIVER_RUST_FOREIGN_TARGET}` standard library; set JET_RUST_MUSL_TOOLCHAIN to the provisioned native-helper toolchain"))
 }
 
@@ -243,7 +243,7 @@ jet_cli_rust_foreign_mount: fn(args: &[String], source: String, destination: Str
     if info.is_symlink -> return Err(jet_cli_rust_foreign_sandbox_error("sandbox mount `{source}` is a symlink"))
     if !info.is_dir && !info.is_file -> return Err(jet_cli_rust_foreign_sandbox_error("sandbox mount `{source}` is not a regular file or directory"))
     loop argument in ([String]{"--ro-bind", source, destination}) -> args.push(argument)
-    Ok(())
+    Ok()
 }
 // The host Cargo registry as a private overlay at `destination`. Cargo reads
 // the host's fetched crates; its writes (newly fetched crates, unpacked
@@ -253,7 +253,7 @@ jet_cli_rust_foreign_overlay: fn(args: &[String], registry: String, destination:
     info: cli_files.stat(registry) ?? return Err(jet_cli_rust_foreign_sandbox_error("sandbox overlay `{registry}` is unavailable: {err}"))
     if info.is_symlink || !info.is_dir -> return Err(jet_cli_rust_foreign_sandbox_error("sandbox overlay `{registry}` is not a real directory"))
     loop argument in ([String]{"--overlay-src", registry, "--tmp-overlay", destination}) -> args.push(argument)
-    Ok(())
+    Ok()
 }
 jet_cli_rust_foreign_bwrap: fn(bwrap: String, source: String, output: String, registry: String, share_network: Bool, metadata: Bool) -[FS, Env]> [String] JetDriverRustForeignError! {
     args := [String]{bwrap, "--die-with-parent", "--new-session", "--unshare-all", "--unshare-user", "--disable-userns", "--assert-userns-disabled", "--cap-drop", "ALL", "--ro-bind-try", "/nix/store", "/nix/store", "--proc", "/proc", "--dev", "/dev", "--size", "67108864", "--tmpfs", "/tmp", "--dir", "/homeless-shelter", "--clearenv", "--setenv", "PATH", "/nix/store", "--setenv", "HOME", "/homeless-shelter"}
@@ -373,7 +373,7 @@ jet_cli_rust_foreign_output_rows: fn(directory: cli_files.Directory, counts: &[S
             links[key] = info.links
         }
     }
-    Ok(())
+    Ok()
 }
 jet_cli_rust_foreign_validate_output: fn(directory: cli_files.Directory) JetDriverRustForeignError! -[FS]> {
     counts := [String:Int]{}
@@ -382,7 +382,7 @@ jet_cli_rust_foreign_validate_output: fn(directory: cli_files.Directory) JetDriv
     loop (key, count) in counts {
         if (links.get(key) ?? 0) != count -> return Err(jet_cli_rust_foreign_sandbox_error("Cargo output contains a hardlink outside its private tree"))
     }
-    Ok(())
+    Ok()
 }
 
 // Each key's digest/provenance sidecars are not Cargo output: only that key's
@@ -411,7 +411,7 @@ jet_cli_rust_foreign_copy_tree: fn(source: cli_files.Directory, destination: cli
             jet_cli_rust_foreign_write(destination, entry.name, bytes, false, info.mode)
         }
     }
-    Ok(())
+    Ok()
 }
 // Names in a Cargo output tree that are not the helper's shared products.
 jet_cli_rust_foreign_unpublished: fn(name: String) -> Bool Never! {
@@ -446,7 +446,7 @@ jet_cli_rust_foreign_move_tree: fn(source: cli_files.Directory, destination: cli
             cli_files.rename(from, to) ?? return Err(jet_cli_rust_foreign_io("couldn't publish Cargo output `{entry.name}`: {err}"))
         }
     }
-    Ok(())
+    Ok()
 }
 
 jet_cli_rust_foreign_provenance: fn(plan: JetDriverRustForeignPlan, source: String, toolchain: String, link_closure: String, digest: String, compile_time: Bool) -> String JetDriverRustForeignError! {
@@ -596,7 +596,7 @@ jet_cli_rust_foreign_build: fn(plan: JetDriverRustForeignPlan, cache: String, so
     provenance: jet_cli_rust_foreign_provenance(plan, source, toolchain, link_closure, digest, resolved.compile_time)
     jet_cli_rust_foreign_publish_sidecars(target_dir, release, plan.crate_name, archive, "{JET_CLI_RUST_ARTIFACT_SCHEMA}\n{digest} {archive}\n", provenance)
     if !jet_cli_rust_foreign_verified(plan, source, release, toolchain, link_closure) -> return Err(jet_cli_rust_foreign_io("published FFI artifact failed digest/provenance verification"))
-    Ok(())
+    Ok()
 }
 
 // The shared target's publication lock plays Cargo's own target-dir lock,
@@ -607,12 +607,12 @@ jet_cli_rust_foreign_build: fn(plan: JetDriverRustForeignPlan, cache: String, so
 jet_cli_rust_foreign_snapshot: fn(shared: cli_files.Directory, private_output: cli_files.Directory, target_dir: String) JetDriverRustForeignError! -[FS, Env]> {
     publication: cli_files.lock("{target_dir}/.jet-publication-lock") ?? return Err(jet_cli_rust_foreign_io("couldn't lock shared Cargo output: {err}"))
     jet_cli_rust_foreign_copy_tree(shared, private_output)
-    Ok(())
+    Ok()
 }
 jet_cli_rust_foreign_publish_output: fn(private_output: cli_files.Directory, shared: cli_files.Directory, target_dir: String) JetDriverRustForeignError! -[FS, Env]> {
     publication: cli_files.lock("{target_dir}/.jet-publication-lock") ?? return Err(jet_cli_rust_foreign_io("couldn't lock shared Cargo output: {err}"))
     jet_cli_rust_foreign_move_tree(private_output, shared)
-    Ok(())
+    Ok()
 }
 // The sidecars land in the shared release directory, so they are published
 // under the same lock: another key's snapshot never lists their staging
@@ -626,7 +626,7 @@ jet_cli_rust_foreign_publish_sidecars: fn(target_dir: String, release: String, c
     cli_files.fsync("{release}/{archive}") ?? return Err(jet_cli_rust_foreign_io("couldn't flush FFI artifact `{archive}`: {err}"))
     jet_cli_rust_foreign_publish(released, "{crate_name}.provenance", provenance.bytes(), false)
     jet_cli_rust_foreign_publish(released, "{crate_name}.sha256", manifest.bytes(), true)
-    Ok(())
+    Ok()
 }
 
 // The plan, cache key folder and shared release directory of one helper.
@@ -663,9 +663,9 @@ jet_cli_rust_foreign_realize: fn(facts: JetDriverRustForeignFacts, link: JetDriv
 // `cargo check` type-checks a private copy of the helper, whose workspace is
 // removed afterwards. The shared cache gains nothing.
 jet_cli_rust_foreign_check: fn(facts: JetDriverRustForeignFacts, link: JetDriverForeignLinkFacts) JetDriverRustForeignError! -[FS, Env, Exec, Time.Wait]> {
-    if facts.entries.len() == 0 -> return Ok(())
+    if facts.entries.len() == 0 -> return Ok()
     key: jet_cli_rust_foreign_key(facts, link)
-    if jet_cli_rust_foreign_verified(key.plan, key.source, key.release, key.toolchain, key.link_closure) -> return Ok(())
+    if jet_cli_rust_foreign_verified(key.plan, key.source, key.release, key.toolchain, key.link_closure) -> return Ok()
     cargo: jet_cli_rust_foreign_cargo()
     jet_cli_rust_foreign_require_std()
     registry: jet_cli_rust_foreign_registry(key.plan)
@@ -683,5 +683,5 @@ jet_cli_rust_foreign_check: fn(facts: JetDriverRustForeignFacts, link: JetDriver
     _: jet_cli_rust_foreign_resolve(key.plan, key.cache, bwrap, cargo, registry, private_source, private_output)
     checked: jet_cli_rust_foreign_run(bwrap, cargo, private_source.path, private_output.path, registry, [String]{"check", "--release", "--target", key.plan.target, "--manifest-path", "/work/source/Cargo.toml"})
     if !checked.success -> return Err(jet_cli_rust_foreign_cargo_error(key.plan, checked.errors, key.cache, true))
-    Ok(())
+    Ok()
 }

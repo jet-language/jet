@@ -12,7 +12,14 @@ Type: enum {
     List(element: Type)
     Map(key: Type, key_span: Span?, value: Type)
     Shared(inner: Type)
+    // `T?`: the optional suffix binds to the type it follows, so `[Int?]` and
+    // `[Int]?` differ; a second mark (`T?` again, or `T??`) is E0309. A
+    // written `Option<T>` is the same type.
     Option(inner: Type)
+    // `T E!`: the error contract follows the success type (`Int ParseError!`,
+    // `Entry? (DBError | TimeoutError)!`). A type position holding only the
+    // contract, `E!` or `(A | B)!`, is `Result(Unit, E)`. A written
+    // `Result<T, E>` is the same type.
     Result(ok: Type, err: Type)
     Fn(params: [Type], ret: Type?, effect_bound: [EffectRowEntry]?, param_contract: [CallContractRow]?, call_metadata: FunctionCallMetadata?, return_view_provenance: ViewProvenanceMap?)
     Named(name: String)
@@ -1092,6 +1099,29 @@ type_with_effective_fn_returns: fn(ty: Type) -> Type Never! {
         }
         // copy: `dimension` is a payload of read parameter `ty`, which keeps the original; field `dimension` of the new Type.Quantity owns this one
         .Quantity(base, dimension) -> Type.Quantity{base: type_with_effective_fn_returns(base), dimension: dimension.copy()}
+        else -> ty
+    }
+}
+
+// A parameter's written type as its callee holds it. A function-typed
+// parameter (`f: fn(Int) -> Int`), and each function-typed parameter of that
+// type, carries the inferred failure contract, so a declared function and a
+// written function type agree on how they fail. A function type inside a
+// container (`[fn(Int) -> Int]`, `(fn(Int) -> Int)?`) or returned by one
+// keeps its written return, as the same type does on a binding or a typed
+// literal. The fn-value adapter converts one function value between its
+// failing and non-failing forms; it never converts the functions a
+// collection already holds (#6281 c123).
+type_with_effective_parameter_fn_return: fn(ty: Type) -> Type Never! {
+    if ty == {
+        .Fn(params, ret, effect_bound, param_contract, call_metadata, return_view_provenance) -> {
+            normalized_params := [Type]{}
+            loop param in params -> normalized_params.push(type_with_effective_parameter_fn_return(param))
+            normalized_ret := ret.map(value -> effective_callable_return(value))
+            Type.Fn{params: normalized_params, ret: normalized_ret, effect_bound: effect_bound, param_contract: param_contract, call_metadata: call_metadata, return_view_provenance: return_view_provenance}
+        }
+        // copy: `marker` and `inner` are payloads of read parameter `ty`, which keeps the originals; the new Type.Tagged's fields own `marker` and `inner`
+        .Tagged(marker, inner) -> if marker == (TagMarker.Internal{internal_tag: InternalTag.CppCallbackABI}) -> Type.Tagged{marker: marker.copy(), inner: inner.copy()} else -> Type.Tagged{marker: marker.copy(), inner: type_with_effective_parameter_fn_return(inner)}
         else -> ty
     }
 }

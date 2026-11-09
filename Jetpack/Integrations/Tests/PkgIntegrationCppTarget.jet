@@ -5,11 +5,20 @@ use {
         pkg_cpp_cache_identity_for_test,
     ]
     files: core.files
+    pkg_cpp_target_json: core.encoding.json
     sys: core.sys
 }
 
 pkg_integration_cpp_clang: fn(log: String, canonical: String) -> String {
-    ast: "{{\"kind\":\"TranslationUnitDecl\",\"inner\":[{{\"kind\":\"FunctionDecl\",\"name\":\"probe\",\"loc\":{{\"file\":\"{canonical}\"}},\"type\":{{\"qualType\":\"long (long)\"}},\"inner\":[{{\"kind\":\"ParmVarDecl\",\"name\":\"value\",\"type\":{{\"qualType\":\"long\"}}}}]}}]}}"
+    parameter: Dyn.Object(["kind": Dyn.Text("ParmVarDecl"), "name": Dyn.Text("value"), "type": Dyn.Object(["qualType": Dyn.Text("long")])])
+    probe_decl: Dyn.Object([
+        "kind": Dyn.Text("FunctionDecl"),
+        "name": Dyn.Text("probe"),
+        "loc": Dyn.Object(["file": Dyn.Text(canonical.copy())]),
+        "type": Dyn.Object(["qualType": Dyn.Text("long (long)")]),
+        "inner": Dyn.Array([Dyn]{parameter}),
+    ])
+    ast: pkg_cpp_target_json.to_string(Dyn.Object(["kind": Dyn.Text("TranslationUnitDecl"), "inner": Dyn.Array([Dyn]{probe_decl})])) ?? panic("render fake clang AST")
     "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{log}'\nif [ \"$1\" = \"--version\" ]; then printf '%s\\n' 'fake clang 1'; exit 0; fi\ncase \"$*\" in\n  *-ast-dump=json*) printf '%s\\n' '{ast}'; exit 0 ;;\nesac\nprevious=''\noutput=''\nfor argument in \"$@\"; do\n  if [ \"$previous\" = \"-o\" ]; then output=\"$argument\"; fi\n  previous=\"$argument\"\ndone\n: > \"$output\"\n"
 }
 pkg_integration_cpp_ar: fn(log: String, version: Int) -> String {

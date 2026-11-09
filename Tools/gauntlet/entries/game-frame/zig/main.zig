@@ -2,7 +2,7 @@
 // canvas. Each frame clears, draws a scrolling tile map, 48 translucent
 // sprites, a translucent HUD bar and two lines of 5x7 bitmap-font text. Every
 // rectangle clips to the canvas and blends src-over per channel, alpha
-// included: (s * a + d * (255 - a) + 127) / 255. With JET_RAYLIB_CAPTURE set,
+// included: (s * a + d * (255 - a) + 127) / 255. With JET_FRAME_CAPTURE set,
 // every presented frame is written there as a PAM image.
 const std = @import("std");
 
@@ -108,7 +108,7 @@ fn drawText(text: []const u8, x: i64, y: i64, size: i64, color: u32) void {
 }
 
 fn endDrawing(init: std.process.Init) void {
-    const path = init.environ_map.get("JET_RAYLIB_CAPTURE") orelse return;
+    const path = init.environ_map.get("JET_FRAME_CAPTURE") orelse return;
     if (path.len == 0) return;
     const file = std.Io.Dir.cwd().createFile(init.io, path, .{}) catch return;
     defer file.close(init.io);

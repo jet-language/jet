@@ -12,7 +12,7 @@
     "sprites": "for i in 0..48: rect ((i * 41 + f * (1 + i % 4)) % 344 - 12, (i * 29 + f * (1 + i % 3)) % 224 - 12, 12, 12) in ((i * 53) % 256, (i * 97) % 256, (i * 31 + f) % 256, 180)",
     "text": "\"SCORE {(f * 7) % 100000} FRAME {f}\" at (4, 2) size 10 in white; \"JET RASTER\" at (196, 176) size 20 in (255,220,120,200). Scale is max((size + 5) / 10, 1), advance 6 * scale; each glyph column draws one rectangle per vertical run of set bits of the 95-glyph 5x7 font",
     "blend": "every rectangle clips to the canvas; opaque colors copy; alpha 0 skips; otherwise every channel, alpha included, becomes (s * a + d * (255 - a) + 127) / 255",
-    "capture": "with JET_RAYLIB_CAPTURE set, every presented frame is written to that path as a P7 RGB_ALPHA PAM; all six rails produce the same final-frame bytes",
+    "capture": "with JET_FRAME_CAPTURE set, the frame is written to that path as a P7 RGB_ALPHA PAM (the Jet rail writes the final frame once, the other rails every presented frame); all six rails leave the same final-frame bytes",
     "args": [],
     "fixtureGen": null,
     "expected": "expected.out"
@@ -30,10 +30,10 @@
     }
   },
   "authoring": {
-    "jet": {"author": "NativeRaylib-1", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Draws through the shipped core.game.raylib software rasterizer (window_open, begin_drawing, clear_background, draw_rectangle, draw_text, end_drawing); runs headless, no foreign code."},
+    "jet": {"author": "NativeRaylib-1", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Draws through the core.ui software rasterizer on a headless window (ui.headless, clear_background, draw_rectangle, draw_text on each Frame, load_image_from_screen for the capture); no foreign code. The headless window also records an FNV-1a checksum of every frame, which the hand-written rails do not."},
     "rust": {"author": "NativeRaylib-1", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Std-only rasterizer over a Vec<u8> canvas with the same clip, blend, font and vertical glyph runs; capture via std::env::var_os."},
     "python": {"author": "NativeRaylib-1", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Pure Python over a bytearray canvas: opaque fills use slice assignment, translucent fills use per-(source, alpha) bytes.translate tables over strided channel slices. NumPy is not available in the host toolchain."},
-    "c": {"author": "NativeRaylib-1", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Libc-only rasterizer over a static uint8_t canvas. The closest real peer, C raylib, renders through OpenGL and has no headless software path, so the matched peer is a hand-written C rasterizer with the same algorithm."},
+    "c": {"author": "NativeRaylib-1", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Libc-only rasterizer over a static uint8_t canvas. The matched peer is a hand-written C rasterizer with the same algorithm: GPU-backed C game libraries have no headless software path."},
     "zig": {"author": "NativeRaylib-1", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Std-only rasterizer over a static [256000]u8 canvas; capture via init.environ_map and std.Io.Dir.createFile."},
     "node": {"author": "NativeRaylib-1", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Built-in Node rasterizer over a Uint8Array canvas; capture via fs.writeFileSync."}
   },

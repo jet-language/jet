@@ -1140,7 +1140,7 @@ UnknownFunction: struct {
         no_fix: None
         fix_safety: .BehaviorPreserving
         what: fn(self) -> String { "Nothing named `pirnt` exists here" }
-        why: fn(self) -> String { "Only functions that have been defined (or built in, like `print` / `input`) can be called" }
+        why: fn(self) -> String { "Only functions that have been defined (or built in, like `print` / `panic`) can be called" }
         fix: fn(self) -> String { "Did you mean `print`?" }
     }
 }
@@ -5279,6 +5279,59 @@ SuiteNameNotLiteral: struct {
     }
 }
 
+TypeAsValue: struct {
+    name: String
+
+    impl Diagnostic {
+        code: "E0636"
+        meaning: "A type is used where a value is expected"
+        fix_next: "Build a value of the type, or read a compile-time fact of the type."
+        what: fn(self) -> String { "`{self.name}` is a type, not a value" }
+        why: fn(self) -> String { "A type describes values but is not one; it has no value to bind, pass, return, store or print." }
+        fix: fn(self) -> String { "Build a value such as `{self.name}{{…}}`, or read a compile-time fact of the type, such as `{self.name}.$fields`." }
+    }
+}
+
+TypedLiteralInHeader: struct {
+    impl Diagnostic {
+        code: "E0637"
+        stage: [.Parse]
+        meaning: "A typed literal is written straight after a comparison or `in` in an `if` or `loop` header"
+        fix_next: "Compare with a plain number, or group the literal in parentheses."
+        what: fn(self) -> String { "The `{{` of this typed literal is read as the start of the body" }
+        why: fn(self) -> String { "In an `if` or `loop` header, `{{` opens the body, so `a > I32{{0}}` reads as `a > I32` followed by the body `{{0}}`" }
+        fix: fn(self) -> String { "Compare with a plain number, as in `if a > 0 ->`, or group the literal, as in `if a > (I32{{0}}) ->`" }
+    }
+}
+
+NestedFnFailureMismatch: struct {
+    required: String
+    required_form: String
+    offered_form: String
+
+    impl Diagnostic {
+        code: "E0638"
+        meaning: "A function type inside a collection or a function type differs from the value's in whether it can fail"
+        fix_next: "Write the same failure contract on the function types inside both types."
+        what: fn(self) -> String { "This needs `{self.required}`, whose functions inside {self.required_form}, but the value's {self.offered_form}" }
+        why: fn(self) -> String { "A single function value converts between its failing and non-failing forms where it is passed or stored, and so do the functions it takes as parameters, but the functions a list, map, optional or tuple holds, or a function returns, keep the form they were made with" }
+        fix: fn(self) -> String { "Write the same failure contract on both: `Err!` after each inner function type's return when its functions can fail, as in `[fn(Int) -> Int Err!]`, and none when they cannot" }
+    }
+}
+
+SelfOutsideMethod: struct {
+    name: String
+
+    impl Diagnostic {
+        code: "E0639"
+        meaning: "A function outside a type body or `impl` declares a `self` parameter"
+        fix_next: "Move the function into the type's body or an `impl` block, or rename the parameter."
+        what: fn(self) -> String { "`{self.name}` takes `self`, but it is not a method" }
+        why: fn(self) -> String { "`self` is the value a method is called on; a function outside a type body or `impl` has no such value, so `self` would silently be an ordinary parameter" }
+        fix: fn(self) -> String { "Move `{self.name}` into the type's body or an `impl` block to make it a method, or give the parameter another name" }
+    }
+}
+
 MissingCrateVersion: struct {
     impl Diagnostic {
         code: "E0701"
@@ -5620,9 +5673,9 @@ InvalidViaParameter: struct {
 ProhibitedEffectReached: struct {
     impl Diagnostic {
         code: "E0749"
-        what: fn(self) -> String { "A function reaches an effect it prohibits with `-[!E]>` in its own call graph, including a denied `Panic` stop" }
-        why: fn(self) -> String { "The registered sema rule names the effect or panic site and keeps the three legal exits" }
-        fix: fn(self) -> String { "Remove the offending effect, return a fallible result, add facts or a `#Pre`/refinement proof, or drop the prohibition" }
+        what: fn(self) -> String { "A function reaches an effect outside a ceiling it answers to (a package `authority` `allow` row or a module `#FX(…)` cap), or one a `-[!E]>` row, module cap or package `deny` prohibits, including a denied `Panic` stop" }
+        why: fn(self) -> String { "The registered sema rule names the effect or panic site, the call chain that reaches it and the scope that set the limit" }
+        fix: fn(self) -> String { "Remove the offending effect, return a fallible result, add facts or a `#Pre`/refinement proof, widen the ceiling, or drop the prohibition" }
     }
 }
 
@@ -7010,6 +7063,21 @@ LockedGenerationDrift: struct {
     }
 }
 
+LockedEffectRowWidened: struct {
+    package: String
+    effects: String
+
+    impl Diagnostic {
+        code: "E3513"
+        stage: [.Build]
+        meaning: "`--locked` dependency reaches an effect its recorded row doesn't cover"
+        detail: true
+        what: fn(self) -> String { "Dependency `{self.package}` now reaches {self.effects}, which `.jet/lock` doesn't record for it." }
+        why: fn(self) -> String { "`--locked` requires each dependency's inferred effect row to stay within the row the project lock records." }
+        fix: fn(self) -> String { "Review the change to `{self.package}`, then rerun without `--locked` to record its wider row." }
+    }
+}
+
 ReservedBuildRuleCode: struct {
     code: String
 
@@ -7167,6 +7235,32 @@ ApplicationAuthorityDenied: struct {
         what: fn(self) -> String { "Application authority denies a required effect; the Why line says in one sentence what the program tried to do and which deny row refused it." }
         why: fn(self) -> String { "Execution stops before host state changes. Every effect is allowed unless a `deny` row takes it away: the `authority` block of `package.jet` or of the file's leading `package: {{ … }}` block, or `--deny=<RIGHTS>` on the command. `--json` carries the raw `required_effects`, `granted_effects`, `denied_effects`, and `authority` facts." }
         fix: fn(self) -> String { "Remove the right from the `deny` row that names it, or drop the matching `--deny` from the command; otherwise change the program so it no longer reaches the denied effect." }
+    }
+}
+
+RemoteRunNeedsConsent: struct {
+    impl Diagnostic {
+        code: "E1804"
+        stage: [.Jet]
+        meaning: "Code fetched from a URL or the registry needs a yes before its first run, and no terminal can give one"
+        detail: true
+        no_fix: .Behavior
+        what: fn(self) -> String { "Remote code needs a yes before its first run, and there is no terminal to ask." }
+        why: fn(self) -> String { "`jet run <url>` and `jet run <package>` fetch and pin code this machine has not run with these effects before. In a terminal Jet asks `Run it? [y/N]`; without one (CI, a pipe, `--json`) it stops before the program's first instruction." }
+        fix: fn(self) -> String { "Run it in a terminal and answer `y`, or acknowledge its effects on the command: `jet run -A <target>`, or `--allow=<RIGHTS>` naming each effect." }
+    }
+}
+
+RemoteSourceRefused: struct {
+    impl Diagnostic {
+        code: "E1805"
+        stage: [.Jet]
+        meaning: "A URL or registry target of `jet run` can't be fetched or doesn't match its pin"
+        detail: true
+        no_fix: .Behavior
+        what: fn(self) -> String { "Jet won't run this remote target." }
+        why: fn(self) -> String { "Remote code runs only as the exact bytes Jet pinned: fetched over https or from the signed registry, checked against `--sha256` when given, and never fetched again under `--locked`." }
+        fix: fn(self) -> String { "Use an `https://` address, check the `--sha256` value, or run once without `--locked` to pin the target." }
     }
 }
 

@@ -11,6 +11,7 @@ use {
     process: core.process
     time: core.time
     files: core.files
+    foundation_paths: core.files.path
 }
 
 
@@ -447,21 +448,16 @@ foundation_mounted_executable_path: fn(executable: String, mounts: [NativeSandbo
     best := String?{None}
     best_depth := -1
     loop mount in mounts {
-        relative := ""
-        if executable == mount.source {
-            relative = ""
-        } else {
-            if !executable.starts_with("{mount.source}/") -> next
-            relative = executable.removeprefix("{mount.source}/")
-        }
+        if !foundation_paths.is_relative_to(foundation_paths.of(executable), foundation_paths.of(mount.source)) -> next
+        relative: files.relative(executable, mount.source)
         depth := 0
         segments: relative.split("/").to_list()
         loop segment in segments {
-            if segment != "" -> depth += 1
+            if segment != "" && segment != "." -> depth += 1
         }
         if depth >= best_depth {
             best_depth = depth
-            best = Val(if relative == "" -> mount.destination else -> files.join(mount.destination, relative))
+            best = Val(if depth == 0 -> mount.destination else -> files.join(mount.destination, relative))
         }
     }
     best ?? executable

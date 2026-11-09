@@ -254,6 +254,18 @@ sema_module_used_as_value: fn(name: String, span: Span) -> Diagnostic {
     sema_error("E0629", span, row.what.replace("{{name}}", name), row.why, row.fix.replace("{{name}}", name))
 }
 
+// E0636: a type (`Rock`, a type parameter) read where a value is expected.
+sema_type_used_as_value: fn(name: String, span: Span) -> Diagnostic {
+    row: diagnostic_registry_row("E0636") ?? panic("E0636 has no registry row")
+    sema_error("E0636", span, row.what.replace("{{name}}", name), row.why, row.fix.replace("{{name}}", name))
+}
+
+// E0639: a function outside a type body or `impl` declares `self`.
+sema_self_outside_method: fn(name: String, span: Span) -> Diagnostic {
+    row: diagnostic_registry_row("E0639") ?? panic("E0639 has no registry row")
+    sema_error("E0639", span, row.what.replace("{{name}}", name), row.why, row.fix.replace("{{name}}", name))
+}
+
 sema_defined_twice_optional: fn(name: String, why: String, span: Span?) -> Diagnostic {
     sema_error_optional("E0105", span, "`{name}` is defined twice", why, "rename or remove one of the definitions")
 }
@@ -304,6 +316,7 @@ sema_unknown_name_in: fn(name: String, span: Span, scopes: SemaScopeTable) -> Di
 }
 
 sema_type_mismatch: fn(required: Type, offered: Type, span: Span) -> Diagnostic {
+    if sema_nested_fn_failure_mismatch(required, offered, span) == .Val(nested_fn) -> return nested_fn
     if sema_typed_text_mismatch(required, offered, span) == .Val(typed_text) -> return typed_text
     // A plain value offered to a `T?` slot is a payload mismatch.
     if required == .Option(payload) {
@@ -343,6 +356,7 @@ sema_plain_carrier_mismatch: fn(required: Type, offered: Type, span: Span) -> Di
 // E0108: a write whose value doesn't fit the binding or field it lands in;
 // `holder` is "binding" or "field".
 sema_slot_holds_mismatch: fn(slot: String, holder: String, required: Type, offered: Type, span: Span) -> Diagnostic {
+    if sema_nested_fn_failure_mismatch(required, offered, span) == .Val(nested_fn) -> return nested_fn
     fix: if required == Type.Int && sema_type_nominal_leaf(offered) == "Fraction" -> "use `/%` to divide and round down (`/%=` in place), or make the {holder} a Float" else -> sema_type_fix_hint(required, offered)
     sema_error("E0108", span, "{slot} holds {sema_type_show(required)}, but this value is {sema_type_show(offered)}", "a {holder} keeps one type for its whole life", fix)
 }
@@ -376,6 +390,19 @@ sema_typed_text_mismatch: fn(required: Type, offered: Type, span: Span) -> Diagn
         }
     }
     None
+}
+
+// E0638 (#6281 c123): the value fits the slot but for the functions it holds
+// inside a collection or a function type, which differ from the slot's in
+// whether they can fail (sema_type_nested_fn_failure_gap).
+sema_nested_fn_failure_mismatch: fn(required: Type, offered: Type, span: Span) -> Diagnostic? {
+    if !sema_type_carrier_compatible(required, offered) -> return None
+    required_fails: sema_type_nested_fn_failure_gap(required, offered, false) ?? return None
+    required_form: if required_fails -> "can fail" else -> "cannot fail"
+    offered_form: if required_fails -> "cannot fail" else -> "can fail"
+    row: diagnostic_registry_row("E0638") ?? panic("E0638 has no registry row")
+    what: row.what.replace("{{required}}", type_name(required)).replace("{{required_form}}", required_form).replace("{{offered_form}}", offered_form)
+    Val(sema_error("E0638", span, what, row.why, row.fix))
 }
 
 // A slot whose check reports its own mismatch wording finds the generic
@@ -525,6 +552,7 @@ sema_return_value_mismatch: fn(function: String, want: Type, got: Type, span: Sp
     // `T Never!`. That erased error rail is not part of the value contract,
     // and must not hide the concrete conversion/wrapping advice for T.
     required: if want == .Result(success, error) && sema_expr_unwrap_tag(error) == (Type.Named{name: "Never"}) -> success else -> want
+    if sema_nested_fn_failure_mismatch(required, got, span) == .Val(nested_fn) -> return nested_fn
     want_name: type_name(required)
     sema_error("E0113", span, "this value is {sema_type_show(got)}, but `{function}` returns {want_name}", "`{function}` declares {want_name} as its result, so the value it hands back must be {want_name}", sema_return_value_fix(required, got))
 }

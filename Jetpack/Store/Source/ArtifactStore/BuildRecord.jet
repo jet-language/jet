@@ -3,9 +3,10 @@
 // without a second codec.
 use {
     jet_foundation.[
-        RecordField, RecordSection, RecordValue, record_encode, record_decode, foundation_json_quote,
+        RecordField, RecordSection, RecordValue, record_encode, record_decode,
         foundation_parse_protocol_json,
     ]
+    jet_pkg_model.[pkg_json_render, pkg_json_texts]
     files: core.files
     process: core.process
 }
@@ -32,27 +33,25 @@ BuildRecord: struct {
         BuildRecord{schema: STORE_BUILD_RECORD_SCHEMA, program, nodes}
     }
 
-    // Rust BuildRecord::to_json (lib.rs:411-445): preserve field order and
-    // Foundation JSON quoting; generic object/JCS ordering is not this wire.
-    // Pieces are joined once, never re-copying the growing payload.
+    // Rust BuildRecord::to_json (lib.rs:411-445): compact JSON with the
+    // fields in this fixed order; generic object/JCS ordering is not this wire.
     to_json: fn(self) -> String Never! {
-        parts := [String]{"{{\"schema\":{foundation_json_quote(self.schema)},\"program\":{foundation_json_quote(self.program)},\"nodes\":["}
-        loop index in 0..<self.nodes.len() {
-            if index != 0 -> parts.push(",")
-            node: self.nodes[index]
+        nodes := [Dyn]{}
+        loop node in self.nodes {
             // A negative or non-finite duration is written as the integer `0`
             // (the Rust wire), not as the Float `0.0`.
             finite: node.duration_ms - node.duration_ms == 0.0
-            duration: if finite && node.duration_ms >= 0.0 -> "{node.duration_ms}" else -> "0"
-            parts.push("{{\"kind\":{foundation_json_quote(node.kind)},\"key\":{foundation_json_quote(node.key)},\"subject\":{foundation_json_quote(node.subject)},\"duration_ms\":{duration},\"why_ran\":{foundation_json_quote(node.why_ran)},\"inputs\":[")
-            loop input_index in 0..<node.inputs.len() {
-                if input_index != 0 -> parts.push(",")
-                parts.push(foundation_json_quote(node.inputs[input_index]))
-            }
-            parts.push("]}}")
+            duration: if finite && node.duration_ms >= 0.0 -> Dyn.Float(node.duration_ms) else -> Dyn.Int(0)
+            nodes.push(Dyn.Object([
+                "kind": Dyn.Text(node.kind.copy()),
+                "key": Dyn.Text(node.key.copy()),
+                "subject": Dyn.Text(node.subject.copy()),
+                "duration_ms": duration,
+                "why_ran": Dyn.Text(node.why_ran.copy()),
+                "inputs": pkg_json_texts(node.inputs),
+            ]))
         }
-        parts.push("]}}")
-        parts.join("")
+        pkg_json_render(Dyn.Object(["schema": Dyn.Text(self.schema.copy()), "program": Dyn.Text(self.program.copy()), "nodes": Dyn.Array(nodes)]))
     }
 
     // Parse a record, refusing any schema other than the current one.

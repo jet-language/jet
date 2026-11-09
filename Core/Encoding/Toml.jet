@@ -777,15 +777,15 @@ toml_leaf: fn(value: Dyn) -> String Never! {
     tree: parse("title = \"root\"\nmeta.count = 2\n[[items]]\nname = \"first\"\n[items.detail]\nactive = true\n[[items]]\nname = \"second\"") ?? panic("TOML document")
     assert_eq(tree.keys(), [String]{"title", "meta", "items"})
     meta: tree.get("meta") ?? panic("dotted table")
-    assert_eq(meta.get("count"), Val(stream.typed_number("2")))
+    assert((meta.get("count") ?? panic("dotted count")) == stream.typed_number("2"))
     rows: tree.get("items") ?? panic("array of tables")
     if rows == {
         .Array(items) -> {
             assert_eq(items.len(), 2)
-            assert_eq(items[0].get("name"), Val(Dyn.Text("first")))
+            assert((items[0].get("name") ?? panic("first name")) == Dyn.Text("first"))
             detail: items[0].get("detail") ?? panic("nested array table")
-            assert_eq(detail.get("active"), Val(Dyn.Bool(true)))
-            assert_eq(items[1].get("name"), Val(Dyn.Text("second")))
+            assert((detail.get("active") ?? panic("nested active")) == Dyn.Bool(true))
+            assert((items[1].get("name") ?? panic("second name")) == Dyn.Text("second"))
         }
         else -> panic("expected an array of Dyn tables")
     }

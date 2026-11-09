@@ -1,0 +1,151 @@
+// Document and workspace symbols, folding, selection ranges and import links.
+use {
+    core.encoding.[Dyn]
+    jet_foundation.[ImportDecl, Span, foundation_json_quote]
+    jet_semindex.[SemDef, semindex_symbol_imported_module]
+}
+
+lsp_symbol_information_json: fn(def: SemDef, location: LSPLocation, kind: Int) -> String Never! {
+    container: if lsp_definition_parent(def.kind) == .Val(parent) -> ",\"containerName\":{foundation_json_quote(parent)}" else -> ""
+    "{{\"name\":{foundation_json_quote(def.name)},\"kind\":{kind},\"location\":{lsp_location_json(location)}{container}}}"
+}
+
+// The document's declarations in source order; bindings and parameters are
+// not symbols of the document.
+lsp_document_symbol_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
+    view: lsp_view(server, params) ?? return lsp_response(id, "null")
+    index: view.checked.index ?? return lsp_response(id, "[]")
+    module_path: view.module_path ?? return lsp_response(id, "[]")
+    defs := [SemDef]{}
+    loop definition in index.definitions {
+        if definition.def.module_path == module_path && lsp_symbol_kind(definition.def.kind) != None -> defs.push(definition.def)
+    }
+    defs.sort_by((left: SemDef, right: SemDef) -> left.def_span.start <=> right.def_span.start)
+    rows := [String]{}
+    loop def in defs {
+        kind: lsp_symbol_kind(def.kind) ?? next
+        rows.push(lsp_symbol_information_json(def, LSPLocation{uri: view.uri, source: view.doc.text, span: def.def_span}, kind))
+    }
+    lsp_response(id, "[{rows.join(",")}]")
+}
+
+// The most workspace symbols one answer carries.
+LSP_WORKSPACE_SYMBOL_LIMIT: 500
+
+// A query matches a name holding its characters in order, ignoring ASCII case.
+lsp_fuzzy_match: fn(query: String, name: String) -> Bool Never! {
+    wanted: query.to_lower().bytes()
+    have: name.to_lower().bytes()
+    at := 0
+    loop byte in have {
+        if at < wanted.len() && byte == wanted[at] -> at += 1
+    }
+    at == wanted.len()
+}
+
+// Declarations across every check the open documents' publications read.
+lsp_workspace_symbol_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
+    query: lsp_text_member(params ?? Dyn.Null, "query") ?? ""
+    seen := [String:Bool]{}
+    rows := [String]{}
+    roots := [String]{}
+    loop (uri, _) in server.published -> roots.push(uri.copy())
+    roots.sort()
+    loop uri in roots {
+        checked: server.published[uri]
+        index: checked.index ?? next
+        loop definition in index.definitions {
+            def: definition.def
+            kind: lsp_symbol_kind(def.kind) ?? next
+            if !lsp_fuzzy_match(query, def.name) -> next
+            key: "{def.module_path}:{def.def_span.start}"
+            if seen.has_key(key) -> next
+            location: lsp_location(checked, def.module_path, def.def_span) ?? next
+            seen[key] = true
+            rows.push(lsp_symbol_information_json(def, location, kind))
+            if rows.len() >= LSP_WORKSPACE_SYMBOL_LIMIT -> return lsp_response(id, "[{rows.join(",")}]")
+        }
+    }
+    lsp_response(id, "[{rows.join(",")}]")
+}
+
+lsp_folding_range_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String Never! {
+    doc: lsp_open_document(server, params) ?? return lsp_response(id, "null")
+    rows := [String]{}
+    loop fold in lsp_compute_folding_ranges(doc.text, server.lex(doc)) -> rows.push(lsp_folding_range_json(fold))
+    lsp_response(id, "[{rows.join(",")}]")
+}
+
+// The spans enclosing `offset`, narrowest first, each once: the identifier
+// under the cursor, then each syntax node that holds it, then the document.
+lsp_selection_spans: fn(view: LSPView, offset: Int) -> [Span] Never! {
+    spans := [Span]{}
+    if lsp_ident_token_at(view.lexed, offset) == .Val(token) -> spans.push(token.span)
+    if view.checked.index == .Val(index) {
+        if view.module_path == .Val(module_path) {
+            loop node in index.nodes {
+                if node.module_path == module_path && lsp_span_holds(node.span, offset) -> spans.push(node.span)
+            }
+        }
+    }
+    spans.push(Span{start: 0, end: view.doc.text.count_bytes()})
+    spans.sort_by((left: Span, right: Span) -> (left.end - left.start <=> right.end - right.start).then(right.start <=> left.start))
+    unique := [Span]{}
+    loop span in spans {
+        if unique.len() > 0 {
+            last: unique[unique.len() - 1]
+            if last.start == span.start && last.end == span.end -> next
+            // A parent must hold its child.
+            if span.start > last.start || span.end < last.end -> next
+        }
+        unique.push(span)
+    }
+    unique
+}
+
+lsp_selection_range_json: fn(src: String, spans: [Span]) -> String Never! {
+    json := ""
+    index := spans.len()
+    loop index > 0 {
+        index -= 1
+        parent: if json == "" -> "" else -> ",\"parent\":{json}"
+        json = "{{\"range\":{lsp_range_json(lsp_byte_span_to_range(src, spans[index]))}{parent}}}"
+    }
+    json
+}
+
+lsp_selection_range_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
+    view: lsp_view(server, params) ?? return lsp_response(id, "null")
+    positions: if (lsp_param(params, "positions") ?? return lsp_response(id, "null")) == {
+        .Array(rows) -> rows
+        else -> { return lsp_error_response(id, -32602, "positions is not an array") }
+    }
+    bytes: view.doc.text.bytes()
+    table: lsp_line_table_bytes(bytes)
+    rows := [String]{}
+    loop value in positions {
+        position: lsp_pos_from_json(value) ?? return lsp_error_response(id, -32602, "a position is malformed")
+        offset: lsp_checked_offset_bytes(table, bytes, position) ?? return lsp_error_response(id, -32602, "a position is outside the document")
+        rows.push(lsp_selection_range_json(view.doc.text, lsp_selection_spans(view, offset)))
+    }
+    lsp_response(id, "[{rows.join(",")}]")
+}
+
+// Each file or module import links to the checked module it names.
+lsp_document_link_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
+    view: lsp_view(server, params) ?? return lsp_response(id, "null")
+    module_path: view.module_path ?? return lsp_response(id, "[]")
+    doc_module: view.checked.modules[lsp_module_index(view.checked, module_path) ?? return lsp_response(id, "[]")]
+    rows := [String]{}
+    loop import in doc_module.imports {
+        span: if import.kind == {
+            .File(_, path_span) -> path_span
+            .Module(_, name_span) -> name_span
+            else -> { next }
+        }
+        imported: semindex_symbol_imported_module(view.checked.modules, doc_module, [ImportDecl]{}, import.alias) ?? next
+        location: lsp_location(view.checked, imported, Span{start: 0, end: 0}) ?? next
+        rows.push("{{\"range\":{lsp_range_json(lsp_byte_span_to_range(view.doc.text, span))},\"target\":{foundation_json_quote(location.uri)}}}")
+    }
+    lsp_response(id, "[{rows.join(",")}]")
+}

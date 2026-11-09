@@ -1,0 +1,33 @@
+# `loop x in text.split(sep)` and `loop line in text.lines()` cut each piece
+# in the loop's step instead of walking an Iter or a List of every piece. The
+# pieces match the collected forms and a hand-written expectation (empty
+# separators and pieces, CR before LF, trailing LF, overlapping separators,
+# multibyte text, break, index bindings, a body that reassigns the walked
+# text, nested walks) on every tier. text-walks.out is the output of the
+# Iter and List walks this lowering replaced.
+fixture: text_split_and_lines_walks_match_their_list_forms_on_every_tier.fixture
+env: NO_COLOR=1
+step run: jet run run.jet
+exit: 0
+stdout: = text-walks.out
+step: jet build --optimize=none run.jet
+exit: 0
+step: built
+exit: 0
+stdout: == run
+step: jet build --optimize=basic run.jet
+exit: 0
+step: built
+exit: 0
+stdout: == run
+step: jet build --release run.jet
+exit: 0
+step: built
+exit: 0
+stdout: == run
+step: jet build --target web run.jet
+exit: 0
+step: node app.js
+cwd: .jet/build
+exit: 0
+stdout: == run

@@ -1,0 +1,43 @@
+# Claim (#6614 c8): `jet run <package>` resolves a registry name the way a
+# script's `use name#version` does, pins the version and its tree hash, and
+# asks before the first run like a URL target. A bare name runs the highest
+# version this machine has; `name#1.0` picks the highest 1.0.x. Each target
+# keeps its own pin, so a yes for one is not a yes for another. The registry
+# here is JET_INLINE_DEPS_FIXTURES, the resolver's local source root.
+fixture: remote_run_package_pins_the_version_it_resolves.fixture
+requires: os:unix
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: XDG_STATE_HOME={work}/state
+env: JET_INLINE_DEPS_FIXTURES={work}/deps
+step bare_name: jet run greet
+pty: true
+stdin: yes.stdin
+exit: 0
+stdout: ~ "greet 1.2.0 from the registry (sha256 " # the step prints it
+stdout: ~ "new to this machine" # the step prints it
+stdout: ~ "Run it? [y/N]" # the step prints it
+stdout: ~ "greet 1.2.0" # the step prints it
+step bare_name_again: jet run greet
+pty: true
+exit: 0
+stdout: !~ "Run it?" # the pinned version was accepted
+stdout: ~ "greet 1.2.0" # the step prints it
+step other_target: jet run greet#1.0
+exit: 1
+stderr: ~ "jet.RemoteRunNeedsConsent" # E1804
+stdout: !~ "greet 1.0.0" # this step must not print it
+step allow_all: jet run -A greet#1.0
+exit: 0
+stdout: ~ "greet 1.0.0" # the step prints it
+stderr: !~ "jet.RemoteRunNeedsConsent" # this step must not print it
+step locked: jet run --locked greet
+pty: true
+exit: 0
+stdout: !~ "Run it?" # this step must not print it
+stdout: ~ "greet 1.2.0" # the step prints it
+step locked_unpinned: jet run --locked greet#1.2.0
+exit: 1
+stderr: ~ "jet.RemoteSourceRefused" # E1805
+stderr: ~ "`--locked` refuses to resolve it" # the diagnostic says it

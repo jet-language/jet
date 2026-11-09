@@ -1,7 +1,9 @@
 // `jet -e CODE` runs CODE as the body of `run: fn` (Compiler/JetCli/Source/Cli/Front.jet,
 // ScriptCache.jet jet_cli_eval_file). The code prints and exits 0; a rerun of
 // the same code runs the same entry file in the same slot; a `;` separates
-// statements; code that names an undefined binding is refused with E0107
+// statements; the value of a last statement that is an expression is shown
+// (one line per item of a List or an Iter, nothing for a unit value or a
+// statement); code that names an undefined binding is refused with E0107
 // before anything runs. `jet run -e CODE` runs it the same way; a `-e` after
 // a run's program is refused with E2104, and `jet dev -e` with E2102. Runs
 // with its own XDG cache.
@@ -86,6 +88,23 @@ run: fn() {
 
     via_run: jet_run(jet, repo, work, cache, [String]{"run", "-e", "print(1 + 2)"})
     if via_run.code != 0 || via_run.signal != 0 || via_run.output != "3\n" -> fail("jet run -e: code={via_run.code} signal={via_run.signal} stdout {via_run.output.debug()}\n{via_run.errors}")
+
+    // The value of the last statement is shown, as `node -p` shows it.
+    shows: [[String]]{
+        [String]{"1 + 2", "3\n"},
+        [String]{"name := 2; name * 3", "6\n"},
+        [String]{"[1, 2, 3]", "1\n2\n3\n"},
+        [String]{"\"GET /a 200\".words()", "GET\n/a\n200\n"},
+        [String]{"\"x,y\".split(\",\")", "x\ny\n"},
+        [String]{"\"a b\".words()[1]", "b\n"},
+        [String]{"if 1 > 0 {{ print(4) }}", "4\n"},
+        [String]{"if 1 > 0 -> \"yes\" else -> \"no\"", "yes\n"},
+        [String]{"name := 5", ""},
+    }
+    loop row in shows {
+        shown: eval(jet, repo, work, cache, row[0])
+        if shown.code != 0 || shown.signal != 0 || shown.output != row[1] -> fail("{row[0]}: code={shown.code} signal={shown.signal} stdout {shown.output.debug()}, expected {row[1].debug()}\n{shown.errors}")
+    }
 
     files.write("{work}/hello.jet", "run: fn() {{\n    print(1)\n}}\n") ?? fail("cannot write hello.jet: {err}")
     late: jet_run(jet, repo, work, cache, [String]{"run", "hello.jet", "-e", "print(2)"})

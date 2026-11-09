@@ -4,7 +4,7 @@
 // render returns the exact bytes the Rust host prints for the same request, so
 // both front doors mean one thing (I9).
 use {
-    jet_foundation.[JET_CLI_COMMANDS, JET_CLI_FORMS, JET_CLI_HANDLERS, JET_CLI_FLAGS, JET_CLI_JOB_INVOCATION_HELP, JetCLIActionSpec, JetCLIFlagSpec, JetCLIFormSpec]
+    jet_foundation.[JET_CLI_COMMANDS, JET_CLI_FORMS, JET_CLI_HANDLERS, JET_CLI_FLAGS, JET_CLI_INPUT_HELP, JET_CLI_JOB_INVOCATION_HELP, JET_CLI_RUN_INPUT_HELP, JetCLIActionSpec, JetCLIFlagSpec, JetCLIFormSpec]
     jet_pkg_model.[COMPILER_VERSION, pkg_version_line]
 }
 
@@ -606,7 +606,13 @@ jet_cli_command_help: fn(name: String) -> String Never! {
         loop usage in action.usage.split("\n").to_list() -> lines = "{lines}  {JET_CLI_BINARY} {group.name} {usage}\n"
         return "{JET_CLI_BINARY} {group.name} {name} — {jet_cli_action_help_summary(group.name, action)}\n\n{lines}"
     }
+    // `input` is no command: its page lists the names a program reads through.
+    if name == "input" -> return JET_CLI_INPUT_HELP
     index: jet_cli_command_index(name) ?? return "{JET_CLI_BINARY} {name}\n\nRun `{JET_CLI_BINARY} help` to see every command.\n"
-    job_help: if name == "jobs" -> JET_CLI_JOB_INVOCATION_HELP else -> ""
-    "{JET_CLI_BINARY} {name} — {JET_CLI_COMMANDS[index].summary}\n\n  {jet_cli_command_usage(name)}\n{jet_cli_flag_help_rows(jet_cli_flags_for_command(name))}{job_help}"
+    trailer: if name == {
+        "jobs" -> JET_CLI_JOB_INVOCATION_HELP
+        "run" -> JET_CLI_RUN_INPUT_HELP
+        else -> ""
+    }
+    "{JET_CLI_BINARY} {name} — {JET_CLI_COMMANDS[index].summary}\n\n  {jet_cli_command_usage(name)}\n{jet_cli_flag_help_rows(jet_cli_flags_for_command(name))}{trailer}"
 }

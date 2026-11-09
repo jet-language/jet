@@ -8,6 +8,7 @@ use {
     jetpack_foundation.[PACKAGE_FILE]
     json: core.encoding.json
     files: core.files
+    pkg_paths: core.files.path
     sys: core.sys
     jet_pkg_model.[
         DependencyProvenance, FFIHandleFact, FFILinkClosure, FOREIGN_BOUNDARY_SCHEMA,
@@ -212,7 +213,7 @@ pkg_ffi_shared_target_dir: fn(selected_target: String, native_link_args: [String
 
 // Whether `path` is `root` or lies beneath it (component-wise prefix).
 pkg_ffi_path_within: fn(root: String, path: String) -> Bool Never! {
-    path == root || path.starts_with("{root.removesuffix("/")}/")
+    pkg_paths.is_relative_to(pkg_paths.of(path), pkg_paths.of(root))
 }
 
 pkg_ffi_bridge_cdylib: fn(target: String, crate_name: String) -[FS]> String? Never! {

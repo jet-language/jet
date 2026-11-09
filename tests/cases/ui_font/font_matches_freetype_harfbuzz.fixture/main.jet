@@ -1,0 +1,101 @@
+// Prints what core.ui.font reads from the built-in Atkinson Hyperlegible
+// Next faces, in the form the FreeType/HarfBuzz oracle printed
+// expected.out: face metrics; every mapped code point's glyph and advance;
+// every glyph's outline (contour count, point count, control box, and a hash
+// of its contour ends and points); every kerned pair of printable ASCII and
+// U+00C0..U+00FF; and the placement of four sample lines. All values are
+// font units (the size is one em in pixels, so a pixel is a unit).
+use {
+    font: core.ui.font
+}
+
+SAMPLES: [String]{
+    "AVATAR Tower WAVE",
+    "Yellow typography, \"quoted\" P.Y. T.J. LT.",
+    "Hamburgefonstiv 0123456789 (fly) [jump] {{ok}}",
+    "Æsir Øre Ångström — naïve café, Łódź Ženeva İstanbul",
+}
+
+units: fn(value: Float) -> Int {
+    Int.from_float(value) ?? panic("{value} is not a whole number of units")
+}
+
+// Code point `scalar` (below U+0800, all the pairs need) as text.
+scalar_text: fn(scalar: Int) -> String {
+    bytes: if scalar < 128 -> [U8]{U8{scalar}} else -> [U8]{U8{192 + (scalar >> 6)}, U8{128 + scalar.bit_and(63)}}
+    String.from_bytes(bytes) ?? panic("{scalar} is not a scalar")
+}
+
+dump: fn(name: String, face: font.Face) {
+    em: Float{face.units_per_em()}
+    metrics: face.metrics(em)
+    print("face {name} glyphs {face.glyph_count()} upem {face.units_per_em()} ascent {units(metrics.ascent)} descent {units(metrics.descent)} gap {units(metrics.line_gap)}")
+    mapped := [Int]{}
+    loop scalar in 0..<65536 {
+        id: face.glyph(scalar)
+        if id == 0 -> next
+        mapped.push(scalar)
+        print("cmap {scalar} {id} {units(face.advance(id, em))}")
+    }
+    loop id in 0..<face.glyph_count() {
+        outline: face.outline(id)
+        hash := 7
+        count := 0
+        xmin := 0
+        ymin := 0
+        xmax := 0
+        ymax := 0
+        loop contour in outline.contours {
+            count += contour.len()
+            hash = (hash * 31 + count - 1 + 65536) % 1000000007
+        }
+        first := true
+        loop contour in outline.contours {
+            loop point in contour {
+                hash = (hash * 31 + point.x + 65536) % 1000000007
+                hash = (hash * 31 + point.y + 65536) % 1000000007
+                hash = (hash * 31 + (if point.on -> 1 else -> 0)) % 1000000007
+                if first || point.x < xmin -> xmin = point.x
+                if first || point.y < ymin -> ymin = point.y
+                if first || point.x > xmax -> xmax = point.x
+                if first || point.y > ymax -> ymax = point.y
+                first = false
+            }
+        }
+        print("glyph {id} contours {outline.contours.len()} points {count} bbox {xmin} {ymin} {xmax} {ymax} hash {hash}")
+    }
+    pairs := [Int]{}
+    loop scalar in mapped {
+        if (scalar >= 32 && scalar < 127) || (scalar >= 192 && scalar < 256) -> pairs.push(scalar)
+    }
+    loop a in pairs {
+        loop b in pairs {
+            run: face.layout("{scalar_text(a)}{scalar_text(b)}", em)
+            first: run.glyphs[0]
+            second: run.glyphs[1]
+            plain_a: units(face.advance(first.id, em))
+            plain_b: units(face.advance(second.id, em))
+            advance_a: units(first.advance)
+            values: [Int]{advance_a - plain_a, units(first.x), -units(first.y), units(second.advance) - plain_b, units(second.x) - advance_a, -units(second.y)}
+            if values == ([Int]{0, 0, 0, 0, 0, 0}) -> next
+            print("pair {a} {b} {values[0]} {values[1]} {values[2]} {values[3]} {values[4]} {values[5]}")
+        }
+    }
+    loop sample in SAMPLES {
+        run: face.layout(sample, em)
+        print("shape {sample}")
+        parts := [String]{}
+        pen := 0
+        loop glyph in run.glyphs {
+            advance: units(glyph.advance)
+            parts.push("{glyph.id}:{glyph.cluster}:{advance}:{units(glyph.x) - pen}:{-units(glyph.y)}")
+            pen += advance
+        }
+        print(parts.join(" "))
+    }
+}
+
+run: fn() {
+    dump("regular", font.regular())
+    dump("bold", font.bold())
+}

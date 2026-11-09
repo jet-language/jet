@@ -1,0 +1,77 @@
+# #6067: `input.csv<Row>()` and `input.json<Row>()` decode the program's input,
+# from named files or standard input, into typed records and list every record
+# that fails in one error; a field the record type lacks is refused before any
+# input is read. `input.edit(change)` rewrites each named file in place keeping
+# CRLF and LF endings and a missing final line break, leaves an unchanged file
+# as it was, prints changed standard input when no file is named, and works as
+# a `jet -e` one-liner, whose declarations go above its `run: fn`.
+requires: os:unix
+fixture: input_methods_decode_records_and_edit_files_in_place.fixture
+env: NO_COLOR=1
+step: jet run --quiet sales.jet sales.csv
+cwd: main
+limit: time=120
+exit: 0
+stdout: = input_methods_decode_records_and_edit_files_in_place.sales.out
+stderr: empty
+step: jet run --quiet sales.jet
+cwd: main
+stdin: {work}/main/sales.csv
+limit: time=120
+exit: 0
+stdout: = input_methods_decode_records_and_edit_files_in_place.sales.out # standard input when no file is named
+stderr: empty
+step: jet -e 'S: struct { amount: Float }; input.csv<S>().map((s) -> s.amount).sum()' sales.csv
+cwd: main
+limit: time=120
+exit: 0
+stdout: ~ "3.5" # the declaration is an item; the sum is the shown value
+step: jet run --quiet sales.jet bad.csv
+cwd: main
+limit: time=120
+exit: 1
+stdout: empty
+stderr: ~ "the input is not CSV that decodes as the expected records:" # the diagnostic says it
+stderr: ~ "row 1.amount: expected Float, found text \"x\"" # the diagnostic says it
+stderr: ~ "row 2: CSV row 2 has 1 fields; the header has 2" # the diagnostic says it
+step: jet run --quiet typo.jet sales.csv
+cwd: main
+limit: time=120
+exit: 1
+stdout: empty
+stderr: ~ "amonut" # the misspelled field is a compile error; nothing runs
+step: jet run --quiet events.jet events.jsonl
+cwd: main
+limit: time=120
+exit: 0
+stdout: = input_methods_decode_records_and_edit_files_in_place.events.out # JSON Lines and a value spread over lines
+stderr: empty
+step: jet run --quiet events.jet bad.jsonl
+cwd: main
+limit: time=120
+exit: 1
+stdout: empty
+stderr: ~ "the input is not JSON that decodes as the expected records:" # the diagnostic says it
+stderr: ~ "line 2: expected an object" # the diagnostic says it
+stderr: ~ "line 3.n: expected Int, found text \"x\"" # the diagnostic says it
+stderr: ~ "line 4: the input ends inside this JSON value" # the diagnostic says it
+step: jet run --quiet edit.jet crlf.txt same.txt
+cwd: main
+limit: time=120
+exit: 0
+stdout: empty
+file: main/crlf.txt = input_methods_decode_records_and_edit_files_in_place.crlf.expected # CRLF, LF and no final line break kept
+file: main/same.txt = input_methods_decode_records_and_edit_files_in_place.same.expected
+step: jet run --quiet edit.jet
+cwd: main
+stdin: {work}/main/pets.txt
+limit: time=120
+exit: 0
+stdout: = input_methods_decode_records_and_edit_files_in_place.pets.out # no file named: standard input printed changed
+step: jet -e 'input.edit((l) -> l.replace("cat", "dog"))' oneliner.txt
+cwd: main
+limit: time=120
+exit: 0
+stdout: empty
+stderr: ~ "writes files" # the effect notice names the write before the code runs
+file: main/oneliner.txt = input_methods_decode_records_and_edit_files_in_place.oneliner.expected

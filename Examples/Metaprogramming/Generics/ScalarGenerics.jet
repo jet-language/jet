@@ -5,12 +5,10 @@ Score: struct {
 
 max_of: fn<T: Comparable>(left: T, right: T) -> T { if left > right -> left.copy() else -> right.copy() }
 
-copy_of: fn<T>(value: T) -> T { value.copy() }
-
 run: fn() {
     print(max_of(3, 7))
-    // Float has partial ordering, so it does not implement Comparable.
-    print(copy_of(Float{2.5}))
+    // Float is Comparable by IEEE 754 totalOrder, so it fits the bound too.
+    print(max_of(Float{2.5}, Float{1.5}))
     print(max_of(I64{4}, I64{2}))
     best: max_of(Score{points: 11}, Score{points: 19})
     print(best.points)

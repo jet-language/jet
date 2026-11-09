@@ -47,6 +47,7 @@ Run a lesson from the repository root, for example `jet run Examples/Basics/<Les
 - [Callbacks](Functions/Callbacks.jet)
 - [ClosureCaptureWrites](Functions/ClosureCaptureWrites.jet)
 - [Closures](Functions/Closures.jet)
+- [FunctionValueLabels](Functions/FunctionValueLabels.jet) — A function read as a value keeps its labels and defaults.
 - [Functions](Functions/Functions.jet) — Functions are defined with `fn` and called by name.
 - [LambdaInference](Functions/LambdaInference.jet) — A lambda parameter's type may be omitted where the expected type already fixes it.
 - [LambdaInterface](Functions/LambdaInterface.jet) — Lambdas write parameters and an optional effect row only.

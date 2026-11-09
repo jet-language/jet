@@ -57,11 +57,13 @@ JET_CLI_REPLAY_DECODED_KINDS: [Int]{JET_CLI_REPLAY_KIND_TIME, JET_CLI_REPLAY_KIN
 // reader does not replay needs a newer reader (E3620).
 JET_CLI_REPLAY_KINDS_V1: [Int]{1, 2, 3, 16, 32, 33, 34, 48, 49, 50, 51, 52, 240, 16384}
 // The ambient terminal builtins (Syntax `IMPURE_BUILTINS`): raw IO. Output
-// reaches the terminal live and is never recorded; `input` and
-// `read_all_input` read through the runtime's one stdin buffer, whose raw
-// reads a sensitive capture records.
+// reaches the terminal live and is never recorded; the ambient `input`
+// lines and `read_all_input` read through the runtime's one stdin buffer,
+// whose raw reads a sensitive capture records, as do core.term's `readline`
+// and `read_all_input` (JET_CLI_REPLAY_TERM_READS).
 JET_CLI_REPLAY_IO_BUILTINS: [String]{"print", "eprint", "input", "read_all_input"}
 JET_CLI_REPLAY_STDIN_BUILTINS: [String]{"input", "read_all_input"}
+JET_CLI_REPLAY_TERM_READS: [String]{"readline", "read_all_input"}
 // The most bytes one IOChunk carries: its base64url text stays well under
 // the 1 MiB payload limit.
 JET_CLI_REPLAY_IO_CHUNK_BYTES: 524288
@@ -293,13 +295,21 @@ jet_cli_replay_reaches_http: fn(sites: [JetCLIReplaySite]) -> Bool Never! {
 }
 
 jet_cli_replay_is_terminal_io: fn(site: JetCLIReplaySite) -> Bool Never! {
-    if site.authority == .Val(authority) -> return authority == Effect.IO && JET_CLI_REPLAY_IO_BUILTINS.contains(site.operation)
+    if site.authority == .Val(authority) -> return authority == Effect.IO && (JET_CLI_REPLAY_IO_BUILTINS.contains(site.operation) || jet_cli_replay_is_term_read(site))
     false
 }
 
 jet_cli_replay_is_stdin_read: fn(site: JetCLIReplaySite) -> Bool Never! {
-    if site.authority == .Val(authority) -> return authority == Effect.IO && JET_CLI_REPLAY_STDIN_BUILTINS.contains(site.operation)
+    if site.authority == .Val(authority) -> return authority == Effect.IO && (JET_CLI_REPLAY_STDIN_BUILTINS.contains(site.operation) || jet_cli_replay_is_term_read(site))
     false
+}
+
+// A core.term stdin read, imported (`readline`) or through a module alias
+// (`term.readline`).
+jet_cli_replay_is_term_read: fn(site: JetCLIReplaySite) -> Bool Never! {
+    if site.owner != "core.term" -> return false
+    dot: site.operation.rfind(".")
+    JET_CLI_REPLAY_TERM_READS.contains(site.operation.slice(dot + 1, site.operation.len()))
 }
 
 jet_cli_replay_reaches: fn(sites: [JetCLIReplaySite], authority: Effect) -> Bool Never! {
@@ -2430,7 +2440,10 @@ jet_cli_replay_expr: fn(value: Expr, aliases: [String:String], locals: [String],
             jet_cli_replay_expr(start, aliases, locals, sites)
             jet_cli_replay_expr(end, aliases, locals, sites)
         }
-        .Ident(_, _, _) -> {}
+        // The ambient `input` reads stdin (or the files its arguments name).
+        .Ident(name, _, _) -> {
+            if name == "input" && !locals.contains(name) -> sites.push(JetCLIReplaySite{operation: name, authority: Val(Effect.IO), owner: ""})
+        }
         .Call(call, _) -> {
             jet_cli_replay_call(call.name, aliases, locals, sites)
             loop arg in call.args -> jet_cli_replay_expr(arg.expr, aliases, locals, sites)

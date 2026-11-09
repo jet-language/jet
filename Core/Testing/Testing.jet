@@ -180,6 +180,14 @@ fixture: fn(name: String) -[FS]> String Never! {
     ""
 }
 
+/// Marks the running #Test skipped, like Go's t.Skip: `skipped: <reason>`
+/// joins the test's output and the test reports skipped, as a first
+/// `.skip { }` member makes it. The test body goes on (return after it).
+/// Outside a running test nothing happens.
+skip: fn(reason: String) Never! {
+    core.testing.__skip("skipped: {reason}")
+}
+
 temp_dir: fn(prefix: String) -[FS]> String Never! {
     facts: __temp_facts()
     safe: testing_ascii_name(prefix, false)
@@ -385,13 +393,24 @@ test_suite: fn() -> Test Never! { __suite_snapshot() }
 TestRows: struct {
     suite: String
     path: String
+    /// The run's `--filter`, "" for none. `pass` and `skip` drop a row whose
+    /// id doesn't contain it. A failing row is always recorded, so a filtered
+    /// run never hides a failure.
+    filter: String{""}
 
+    /// Whether this run reports the row `id`: it has no filter, or `id`
+    /// contains it. A suite asks before it does a row's work.
+    selects: fn(self, id: String) -> Bool Never! { self.filter == "" || id.contains(self.filter) }
     /// Record the row `id` as passing.
-    pass: fn(self, id: String) -[FS.Write]> { suite_row_write(self, id, "passed", "") }
+    pass: fn(self, id: String) -[FS.Write]> {
+        if self.selects(id) -> suite_row_write(self, id, "passed", "")
+    }
     /// Record the row `id` as failing, with what went wrong.
     fail: fn(self, id: String, detail: String) -[FS.Write]> { suite_row_write(self, id, "failed", detail) }
     /// Record the row `id` as skipped, with why.
-    skip: fn(self, id: String, reason: String) -[FS.Write]> { suite_row_write(self, id, "skipped", reason) }
+    skip: fn(self, id: String, reason: String) -[FS.Write]> {
+        if self.selects(id) -> suite_row_write(self, id, "skipped", reason)
+    }
 }
 
 // One row line: `id<TAB>state<TAB>detail`, each field kept to one column.
@@ -402,13 +421,27 @@ suite_row_write: fn(rows: TestRows, id: String, state: String, detail: String) -
 
 suite_row_field: fn(text: String) -> String Never! { text.replace("\r", " ").replace("\n", " ").replace("\t", " ") }
 
+#Test("a filtered TestRows drops unselected passes and skips and keeps every failure") {
+    root: temp_dir("suite-rows")
+    rows: TestRows{suite: "sizes", path: "{root}/rows", filter: "hello"}
+    assert(rows.selects("size hello"))
+    assert(!rows.selects("slow"))
+    assert(TestRows{suite: "sizes", path: "{root}/all"}.selects("slow"))
+    rows.pass("size hello")
+    rows.pass("size world")
+    rows.skip("slow", "needs a release build")
+    rows.fail("suite env", "JET unset")
+    assert_eq(files.read("{root}/rows") ?? panic("suite rows: {err}"), "size hello\tpassed\t\nsuite env\tfailed\tJET unset\n")
+}
+
 /// `t.suite(name, body)`: run `body` when this run is the profile child of
 /// the code suite `name` (JET_TEST_SUITE), recording its rows in
-/// JET_TEST_SUITE_ROWS; any other run skips it.
+/// JET_TEST_SUITE_ROWS and selecting them by JET_TEST_SUITE_FILTER; any
+/// other run skips it.
 __suite_run: fn(name: String, body: fn(TestRows)) -[FS, Env]> {
     if (sys.get("JET_TEST_SUITE") ?? "") != name -> return
     path: sys.get("JET_TEST_SUITE_ROWS") ?? panic("the `{name}` suite runs without JET_TEST_SUITE_ROWS")
-    body(TestRows{suite: name, path: path})
+    body(TestRows{suite: name, path: path, filter: sys.get("JET_TEST_SUITE_FILTER") ?? ""})
 }
 
 // The public history records project the Foundation history data, not

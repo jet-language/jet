@@ -91,7 +91,7 @@ realtime_release_ref: fn(stream: I64) {
     scratch: sync_load(wrapping(stream + RT_SCRATCH))
     handle: sync_load(wrapping(scratch + RT_THREAD))
     // A last capture may drop its stream on the worker itself. No handle can
-    // join it then; detach the pthread before its final worker ref is freed.
+    // join it then; detach the thread before its final worker ref is freed.
     if (handle != I64{0} && sync_load(wrapping(scratch + RT_WORKER_TID)) == thread_tid()) -> _ := thread_detach(handle)
     scheduler_control_drop(sync_load(wrapping(stream + RT_CONTROL)))
     sync_park_drop(sync_load(wrapping(stream + RT_COMPLETION_PARK)))

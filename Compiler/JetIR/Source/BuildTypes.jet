@@ -529,7 +529,8 @@ ir_instance_identity: fn(key: String, args: [Type]) -> String Never! {
 // the runtime's JetErr; a Core declaration the handle table does not name by
 // its key is named by its own name, unless the table pins that runtime to
 // another Core declaration's key (a bare `Reader` is core.term's JetReader,
-// not the private __core_crypto_jetc Reader struct).
+// not the private __core_crypto_jetc Reader struct) or the runtime is the
+// task group's, which no Core declaration carries.
 ir_handle_runtime: fn(p: IRProgram, name: String) -> IRRuntimeHandle? Never! {
     runtime := ir_runtime_handle(name)
     if ir_type_def(p, name) == .Val(row) {
@@ -543,8 +544,12 @@ ir_handle_runtime: fn(p: IRProgram, name: String) -> IRRuntimeHandle? Never! {
     runtime
 }
 
+// The task group handle is only ever the bare `Group` sema gives a
+// `task.group` binding; a Core struct spelled `Group` (core.data's carrier,
+// core.ui.xkb's key group) is its own declaration and lays out as itself.
 ir_core_bare_handle: fn(key: String, name: String) -> IRRuntimeHandle? Never! {
     bare: ir_runtime_handle(name) ?? return None
+    if bare.runtime == "JetTaskGroup" -> return None
     loop index in 0..<IR_RUNTIME_HANDLES.len() {
         pinned: IR_RUNTIME_HANDLES[index].jet_name.starts_with("<corelib>/") && IR_RUNTIME_HANDLES[index].jet_name != key
         if pinned && IR_RUNTIME_HANDLES[index].runtime == bare.runtime -> return None
@@ -2202,27 +2207,32 @@ ir_binary: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, op: TBinaryOp, overflow
         return dst
     }
     if kind == .Float || kind == .Float32 {
-        // Float `%`, floor division and `**` call the runtime's libm exports,
-        // never a libm symbol.
-        if kind == .Float && (op == .Rem || op == .FloorDiv || op == .Pow) {
-            row: b.f.slot_type[left]
-            if op == .Rem -> return ir_runtime(m, b, "jet_std_math_fmod", [Int]{left, right}, row)
-            if op == .Pow -> return ir_runtime(m, b, "jet_std_math_pow", [Int]{left, right}, row)
-            quotient: ir_temp_like(m, b, left)
-            ir_emit(b.f, IROp.Div, quotient, left, right, -1, site)
-            return ir_runtime(m, b, "jet_std_math_floor", [Int]{quotient}, row)
-        }
-        // F32 `**` widens both operands to Float exactly, raises through the
-        // same libm export Float uses, and rounds the power back to F32; the
-        // comptime builder lowers it here too, so both tiers agree (#6276).
+        // Float `%` and floor division call the runtime's libm exports, never
+        // a libm symbol. A Float and F32 `value.pow(y)` calls its correctly
+        // rounded `Core/Math/Math.jet` power (ir_precise_source_helper), so
+        // every tier and the comptime builder compute the same bits.
         if op == .Pow {
+            owner: if kind == .Float -> "Float" else -> "F32"
+            helper: ir_precise_source_helper(owner, "pow") ?? ""
+            power_row: ir_function_row(p, "function:<corelib>/core.math::{helper}") ?? return ir_fail_slot(b, span, "{owner} power without core.math {helper}")
+            if kind == .Float -> return ir_call_row_values(m, p, b, power_row, [Int]{left, right}, span)
+            // F32 `pow` widens both operands to Float exactly and narrows the
+            // Float __pow_f32 returns, which rounds to the correctly rounded
+            // binary32 power.
             narrow_row: b.f.slot_type[left]
             wide_row: ir_type_row(m, Type.Float) ?? return ir_fail_slot(b, span, "F32 power without a Float row")
             wide_left: ir_numeric_cast(m, p, b, left, wide_row, span)
             wide_right: ir_numeric_cast(m, p, b, right, wide_row, span)
             if ir_failed(b) -> return -1
-            power: ir_runtime(m, b, "jet_std_math_pow", [Int]{wide_left, wide_right}, wide_row)
+            power: ir_call_row_values(m, p, b, power_row, [Int]{wide_left, wide_right}, span)
             return ir_numeric_cast(m, p, b, power, narrow_row, span)
+        }
+        if kind == .Float && (op == .Rem || op == .FloorDiv) {
+            row: b.f.slot_type[left]
+            if op == .Rem -> return ir_runtime(m, b, "jet_std_math_fmod", [Int]{left, right}, row)
+            quotient: ir_temp_like(m, b, left)
+            ir_emit(b.f, IROp.Div, quotient, left, right, -1, site)
+            return ir_runtime(m, b, "jet_std_math_floor", [Int]{quotient}, row)
         }
         if op != .Add && op != .Sub && op != .Mul && op != .Div -> return ir_fail_slot(b, span, "Float operator {op}")
         dst: ir_temp_like(m, b, left)
@@ -2342,13 +2352,14 @@ ir_time_binary: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, op: TBinaryOp, sit
 }
 
 // `left <=> right`: the Less/Equal/Greater variant of Ordering. Exact Ints
-// and fixed-width words compare as their `<` and `==` do; Strings by the sign
-// of jet_rt_string_compare; any other ordered value (a runtime handle such as
-// Decimal, a tuple, a Comparable record) by the sign ir_order_sign gives.
+// and fixed-width words compare as their `<` and `==` do; Floats by IEEE 754
+// totalOrder; Strings by the sign of jet_rt_string_compare; any other ordered
+// value (a runtime handle such as Decimal, a tuple, a Comparable record) by
+// the sign ir_order_sign gives.
 ir_three_way: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, left: Int, right: Int, span: Span) -> Int Never! {
     kind: ir_kind_of(m, b, left)
     left_ty: m.types[b.f.slot_type[left]].ty
-    if kind == .Float || kind == .Float32 || kind == .Unit -> return ir_fail_slot(b, span, "operator <=> on {ir_type_name(left_ty)}")
+    if kind == .Unit -> return ir_fail_slot(b, span, "operator <=> on {ir_type_name(left_ty)}")
     ordering: ir_type_def(p, "Ordering") ?? return ir_fail_slot(b, span, "`<=>` result Ordering has no definition")
     result_row: ir_value_type(m, p, Type.Named{name: "Ordering"}) ?? return ir_fail_slot(b, span, "layout of Ordering")
     less: ir_variant_index(p, ordering, "Less") ?? return ir_fail_slot(b, span, "Ordering has no Less variant")
@@ -2360,6 +2371,9 @@ ir_three_way: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, left: Int, right: In
         word: ir_word_row(m)
         a = ir_runtime(m, b, "jet_rt_string_compare", [Int]{left, right}, word)
         c = ir_word_const(m, b, 0)
+    } else if kind == .Float || kind == .Float32 {
+        a = ir_float_total_value(m, p, b, left, span)
+        c = ir_float_total_value(m, p, b, right, span)
     } else if kind != .Int && kind != .Word && kind != .Char {
         a = ir_order_sign(m, p, b, left, right, span)
         if ir_failed(b) -> return -1
@@ -2404,8 +2418,14 @@ ir_order_into: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, left: Int
     if kind == .Unit -> return
     ty: ir_untag(m.types[row].ty)
     if left < 0 || right < 0 -> return ir_fail(b, span, "comparison of {ir_type_name(ty)}")
+    // Floats order by IEEE 754 totalOrder (ir_float_total_value).
+    if kind == .Float || kind == .Float32 {
+        low: ir_float_total_value(m, p, b, left, span)
+        high: ir_float_total_value(m, p, b, right, span)
+        return ir_order_step(m, b, low, high, sign, decided)
+    }
     // An inline Option is a Word of its own order (the Option arm).
-    if kind == .Int || (kind == .Word && !ir_option_inline(m, row)) || kind == .Char || kind == .Float || kind == .Float32 || kind == .String {
+    if kind == .Int || (kind == .Word && !ir_option_inline(m, row)) || kind == .Char || kind == .String {
         a := left
         c := right
         if kind == .String {
@@ -4531,4 +4551,16 @@ ir_numeric_op_name: fn(operation: TNumericOp) -> String Never! {
         text = parts[0]
     }
     text
+}
+
+#Test("a Core struct spelled Group is its own declaration, not the task group handle") {
+    assert(ir_core_bare_handle("<corelib>/core.ui.xkb::Group", "Group") == None)
+    assert(ir_core_bare_handle("<corelib>/core.data::Group", "Group") == None)
+    assert(ir_core_bare_handle("<corelib>/core.sys::Group", "Group") == None)
+    group: ir_runtime_handle("Group") ?? panic("the bare task group spelling lost its handle")
+    assert_eq(group.runtime, "JetTaskGroup")
+    // A pin still decides between two Core declarations of one bare name.
+    assert(ir_core_bare_handle("<corelib>/__core_crypto_jetc::Reader", "Reader") == None)
+    reader: ir_core_bare_handle("<corelib>/core.term::Reader", "Reader") ?? panic("core.term's Reader lost its handle")
+    assert_eq(reader.runtime, "JetReader")
 }

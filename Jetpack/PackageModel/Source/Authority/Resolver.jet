@@ -12,6 +12,7 @@
 use {
     jetpack_foundation.[FILE_EXT, PACKAGE_FILE, UNIFIED_LOCK_FILE, WORKSPACE_FILE]
     files: core.files
+    pkg_paths: core.files.path
     crypto: core.crypto
 }
 
@@ -297,8 +298,8 @@ AuthorityResolver: struct {
         hasher := crypto.Hasher.new()
         loop file in found {
             relative: if directory.relative == "" -> file.relative else -> {
-                if !file.relative.starts_with("{directory.relative}/") -> return Err(AuthorityError.Escapes(file.path))
-                file.relative.removeprefix("{directory.relative}/")
+                if !pkg_paths.is_relative_to(pkg_paths.of(file.relative), pkg_paths.of(directory.relative)) -> return Err(AuthorityError.Escapes(file.path))
+                files.relative(file.relative, directory.relative)
             }
             hasher.update(relative.replace("\\", "/").bytes())
             hasher.update([U8]{U8{0}})

@@ -1531,7 +1531,10 @@ __query_test_sales: fn() -> [__QueryTestSale] Never! {
     assert_eq(means[1].value, 65.0)
     joined: __query_collect<DataJoin<__QueryTestSale, __QueryTestSale?>>(__query_left_join<__QueryTestSale, __QueryTestSale>(query<__QueryTestSale>(rows), query<__QueryTestSale>(sorted), sale -> sale.item, sale -> sale.item)) ?? panic("left_join")
     assert_eq(joined.len(), 4)
-    assert(joined[1].right == None)
+    assert_eq((joined[1].right ?? panic("the core row joins its sorted match")).cents, 90)
+    unmatched: __query_collect<DataJoin<__QueryTestSale, __QueryTestSale?>>(__query_left_join<__QueryTestSale, __QueryTestSale>(query<__QueryTestSale>(rows), query<__QueryTestSale>([__QueryTestSale]{}), sale -> sale.item, sale -> sale.item)) ?? panic("unmatched left_join")
+    assert_eq(unmatched.len(), 4)
+    assert(unmatched[1].right == None)
 }
 
 #Test("SQL row queries bind after parsing and keep typed rows") {
@@ -1779,7 +1782,7 @@ data_limits_check: fn(limits: DataLimits) DataError! {
     if limits.max_groups <= 0 || limits.max_sort_rows <= 0 || limits.max_join_rows <= 0 || limits.max_output_rows <= 0 {
         return Err(data_error(DataErrorKind.InvalidArgument, "data limits must be positive", "DataLimits"))
     }
-    Ok(())
+    Ok()
 }
 
 // Typed rows of one top-level JSON array over a consumed file (Rust
@@ -2355,7 +2358,7 @@ status: fn() -[FS, Env]> [DataStatus] Never! {
 require_bridge: fn(provider: String) DataError! -[FS, Env]> {
     step: bridge_provider(provider) ?? return Err(data_error(DataErrorKind.InvalidArgument, "unknown data bridge provider `{provider}`; expected py, r, or gpu", "require_bridge"))
     facts: bridge_status(step)
-    if facts.path == "available" -> return Ok(())
+    if facts.path == "available" -> return Ok()
     return Err(data_error(DataErrorKind.Bridge, "{step} unavailable (clone_value={facts.clone_value}, ownership={facts.ownership}, trust={facts.trust}, fallback={facts.fallback}, replacement={facts.replacement})", "require_bridge"))
 }
 
@@ -2908,8 +2911,8 @@ priv rank_order: module {
         ascending.push(index)
         descending.push(22 - index)
     }
-    cases.push(ascending)
-    cases.push(descending)
+    cases.push(ascending.copy())
+    cases.push(descending.copy())
     cases.push(rank_test_values(41, 3))
     loop values in cases {
         sorted := values.copy()
@@ -3394,7 +3397,7 @@ data_loader_check_payload: fn(limits: DataLimits, bytes: Int, operation: String)
     if limits.encoding.max_total_bytes == .Val(limit) {
         if bytes > limit -> return Err(data_error(.Limit, "payload is {bytes} bytes; max_total_bytes is {limit}", operation))
     }
-    Ok(())
+    Ok()
 }
 
 // Foundation `PreludeDataFlow` loader kernel, ported for `snapshot<T>`.
@@ -3466,7 +3469,7 @@ data_loader_validate: fn<T>(loader: DataLoader<T>) DataError! {
     if !valid_authority(loader.authority.scope) || !valid_authority(loader.authority.revision) {
         return Err(data_loader_error(DataErrorKind.InvalidArgument, "data.loader", "authority identity cannot carry credential material"))
     }
-    Ok(())
+    Ok()
 }
 
 // `payload` plus the local-file read of `jet_data_loader_payload`: bound
@@ -3758,19 +3761,11 @@ DataLoaderPortRecord: struct {
 
 #Test("data CSV and JSON preserve malformed input field-error strings") {
     if csv<Int>("n\n\"7\"x") == {
-        .Err(errors) -> {
-            assert_eq(errors.len(), 1)
-            assert_eq(errors[0].path, "")
-            assert_eq(errors[0].reason, "E2701: CSV row 2, line 2, column 4 — only quote, comma, CRLF, LF, or EOF may follow a closing quote")
-        }
+        .Err(error) -> assert_eq(error.reason, "E2701: CSV row 2, line 2, column 4 — only quote, comma, CRLF, LF, or EOF may follow a closing quote")
         else -> panic("malformed CSV accepted")
     }
     if json<Int>("[1e]") == {
-        .Err(errors) -> {
-            assert_eq(errors.len(), 1)
-            assert_eq(errors[0].path, "")
-            assert_eq(errors[0].reason, "invalid JSON (line 1): bad number")
-        }
+        .Err(error) -> assert_eq(error.reason, "invalid JSON (line 1): exponent must contain a digit")
         else -> panic("malformed JSON accepted")
     }
 }

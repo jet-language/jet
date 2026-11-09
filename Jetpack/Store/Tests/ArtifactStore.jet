@@ -494,14 +494,15 @@ STORE_ARTIFACT_TEST_BUILD_RECORD_V0: comptime { `{"schema":"jet.build-record/v0"
     assert_eq(owner.owner_line("lease"), "jet.store.v1|lease|123|start-token\n")
 }
 
-#Test("artifact store build record wire preserves fixed field order and shared quoting") {
+#Test("artifact store build record wire preserves fixed field order and Core JSON quoting") {
     c1: String.from_bytes([U8]{127, 194, 133}) ?? panic("valid C1 control scalars")
     c0: String.from_bytes([U8]{8, 12}) ?? panic("valid C0 control scalars")
     record: BuildRecord.new("main\".jet", [BuildNodeRecord]{
         BuildNodeRecord{kind: "check", key: "key", subject: "main.jet", duration_ms: Float{1.5}, why_ran: "line\nnext\t", inputs: [String]{"a\\b", c1, c0}},
         BuildNodeRecord{kind: "link", key: "out", subject: "main", duration_ms: Float{-1.0}, why_ran: "first-run", inputs: [String]{}},
     })
-    expected: `{"schema":"jet.build-record/v1","program":"main\".jet","nodes":[{"kind":"check","key":"key","subject":"main.jet","duration_ms":1.5,"why_ran":"line\nnext\t","inputs":["a\\b","\u007f\u0085","\u0008\u000c"]},{"kind":"link","key":"out","subject":"main","duration_ms":0,"why_ran":"first-run","inputs":[]}]}`
+    // Core's writer escapes C0 controls (`\b`, `\f`) and leaves DEL and C1 raw.
+    expected: [String]{`{"schema":"jet.build-record/v1","program":"main\".jet","nodes":[{"kind":"check","key":"key","subject":"main.jet","duration_ms":1.5,"why_ran":"line\nnext\t","inputs":["a\\b","`, c1, `","\b\f"]},{"kind":"link","key":"out","subject":"main","duration_ms":0,"why_ran":"first-run","inputs":[]}]}`}.join("")
     assert_eq(record.to_json(), expected)
     assert_eq(BuildRecord.new("empty", [BuildNodeRecord]{}).to_json(), `{"schema":"jet.build-record/v1","program":"empty","nodes":[]}`)
     assert_eq(record.program, "main\".jet")
@@ -527,13 +528,14 @@ STORE_ARTIFACT_TEST_BUILD_RECORD_V0: comptime { `{"schema":"jet.build-record/v0"
     assert_eq(BuildRecord.new("empty", [BuildNodeRecord]{}).to_json(), `{"schema":"jet.build-record/v1","program":"empty","nodes":[]}`)
 }
 
-#Test("artifact store build record fractional wire preserves Foundation escaping and node order") {
+#Test("artifact store build record fractional wire preserves Core JSON escaping and node order") {
+    c1: String.from_bytes([U8]{127, 194, 133}) ?? panic("valid C1 control scalars")
     controls: String.from_bytes([U8]{8, 12, 127, 194, 133}) ?? panic("valid control scalars")
     record: BuildRecord.new("main\".jet", [BuildNodeRecord]{
         BuildNodeRecord{kind: "check", key: "key", subject: "main.jet", duration_ms: Float{1.5}, why_ran: "line\nnext\t", inputs: [String]{"a\\b", controls}},
         BuildNodeRecord{kind: "compile", key: "out", subject: "main", duration_ms: Float{9030.391929}, why_ran: "first-run", inputs: [String]{}},
     })
-    assert_eq(record.to_json(), `{"schema":"jet.build-record/v1","program":"main\".jet","nodes":[{"kind":"check","key":"key","subject":"main.jet","duration_ms":1.5,"why_ran":"line\nnext\t","inputs":["a\\b","\u0008\u000c\u007f\u0085"]},{"kind":"compile","key":"out","subject":"main","duration_ms":9030.391929,"why_ran":"first-run","inputs":[]}]}`)
+    assert_eq(record.to_json(), [String]{`{"schema":"jet.build-record/v1","program":"main\".jet","nodes":[{"kind":"check","key":"key","subject":"main.jet","duration_ms":1.5,"why_ran":"line\nnext\t","inputs":["a\\b","\b\f`, c1, `"]},{"kind":"compile","key":"out","subject":"main","duration_ms":9030.391929,"why_ran":"first-run","inputs":[]}]}`}.join(""))
 }
 
 #Test("last-run pointer uses the canonical record codec and binds the program") {

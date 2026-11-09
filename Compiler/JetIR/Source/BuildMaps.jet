@@ -3,15 +3,17 @@
 // ordered read see the entries in BTreeMap order. Its operations are helper
 // functions built once per Map type (map.find, map.set, map.get, map.remove,
 // map.insert, and for a hashed Map map.order, map.merge, map.settle,
-// map.rebuild).
+// map.rebuild, map.grow).
 //
 // A Map whose keys hash (exact Int, word and String keys, ir_map_hashed)
 // keeps a hash index behind its counted buffer's `cap` entries: a trailer of
 // the sorted count `s`, the slot mask (slots - 1, the slots a power of two of
 // at least twice the capacity and 8), then the slots. Entries [0, s) are in
 // ascending key order; a new key is appended after them, and the tail is
-// merged in when the buffer grows (map.rebuild) or when a write site settles
-// it. A slot is 0 when empty, else (tag << 32) | (position + 1), the tag the
+// merged in when a write site settles it or a frozen buffer is copied
+// (map.rebuild); growing the buffer (map.grow) keeps the tail where it is,
+// so a Map only ever read by key never sorts. A slot is 0 when empty, else
+// (tag << 32) | (position + 1), the tag the
 // key's 31-bit hash (ir_map_tag), found by linear probing from tag & mask; a
 // removal shifts the later entries down and the probe run back, so no slot
 // ever names a removed entry. A read that needs key order gets the entries
@@ -143,9 +145,9 @@ ir_map_helper: fn(m: &IRModule, p: IRProgram, map_row: Int, name: String) -> Int
     } else if name == "map.merge" {
         target: ir_new_slot(a, ir_word_row(m), IRSlotKind.Param, ir_intern_name(m, "target"))
         ir_map_merge_body(m, p, a, shape, map, target)
-    } else if name == "map.rebuild" {
+    } else if name == "map.rebuild" || name == "map.grow" {
         capacity: ir_new_slot(a, ir_word_row(m), IRSlotKind.Param, ir_intern_name(m, "capacity"))
-        ir_map_rebuild_body(m, p, a, shape, map_row, map, capacity)
+        ir_map_rebuild_body(m, p, a, shape, map_row, map, capacity, name == "map.rebuild")
     } else {
         probe_key: ir_new_slot(a, shape.key.ty, IRSlotKind.Param, ir_intern_name(m, "key"))
         if name == "map.find" {
@@ -179,6 +181,7 @@ ir_map_helper_symbol: fn(name: String) -> String Never! {
         "map.settle" -> "settle"
         "map.merge" -> "merge"
         "map.rebuild" -> "rebuild"
+        "map.grow" -> "grow"
         else -> "insert"
     }
 }
@@ -685,7 +688,9 @@ ir_map_settle_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, map_row: Int, 
 // into a fresh counted buffer of `capacity` (at least its length) entries
 // with a fresh index, every entry sorted; the old buffer's owner is the
 // caller, which made it unique (a counted one is freed, its entries moved).
-ir_map_rebuild_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapShape, map_row: Int, map: Int, capacity: Int) Never! {
+// map.grow (`merge` false) moves them as they lie, the sorted count kept:
+// the appended tail stays unsorted until an ordered read merges it.
+ir_map_rebuild_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapShape, map_row: Int, map: Int, capacity: Int, merge: Bool) Never! {
     word_row: ir_word_row(m)
     zero: ir_word_const(m, a, 0)
     one: ir_word_const(m, a, 1)
@@ -706,9 +711,17 @@ ir_map_rebuild_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapS
     mask: ir_word_op(m, a, IROp.Sub, slots, one)
     bytes: ir_map_block_bytes(m, a, shape, capacity, mask)
     fresh: ir_runtime(m, a, "jet_rt_alloc", [Int]{bytes, eight}, word_row)
-    _: ir_map_call(m, p, a, map_row, "map.merge", [Int]{map, fresh}, -1)
+    sorted := length
+    if merge {
+        _: ir_map_call(m, p, a, map_row, "map.merge", [Int]{map, fresh}, -1)
+    } else {
+        sorted = ir_map_sorted(m, a, shape, map)
+        width: ir_word_const(m, a, shape.stride)
+        moved: ir_word_op(m, a, IROp.Mul, length, width)
+        _: ir_runtime(m, a, "jet_rt_mem_move", [Int]{fresh, old_data, moved}, -1)
+    }
     trailer: ir_map_trailer(m, a, shape, fresh, capacity)
-    ir_emit(a.f, IROp.Store, -1, trailer, 0, length, a.line)
+    ir_emit(a.f, IROp.Store, -1, trailer, 0, sorted, a.line)
     ir_emit(a.f, IROp.Store, -1, trailer, 8, mask, a.line)
     cleared: ir_word_const(m, a, 0)
     emptied: ir_open(a.f, IROp.Block, a.line)
@@ -795,7 +808,7 @@ ir_map_insert_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapSh
         ir_open_if(a.f, small, a.line)
         ir_emit(a.f, IROp.Copy, grown, four, -1, -1, a.line)
         ir_end(a.f, a.line)
-        _: ir_map_call(m, p, a, map_row, "map.rebuild", [Int]{map, grown}, -1)
+        _: ir_map_call(m, p, a, map_row, "map.grow", [Int]{map, grown}, -1)
         ir_end(a.f, a.line)
         hash: ir_map_tag(m, a, shape, key)
         room: ir_load_word(m, a, map, 16)

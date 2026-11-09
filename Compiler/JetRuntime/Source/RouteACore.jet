@@ -131,13 +131,7 @@ byte_cell_replace: fn(root: I64, expected: I64, expected_length: I64, next: I64,
     jet_rt_free(request, I64{32}, I64{8})
 }
 
-// The current host task's flags; no task is None.
-#Export(c) jet_scheduler_task_paused: fn(some: I64) -> I64 {
-    control: scheduler_control_current()
-    if (control == I64{0}) -> return I64{0}
-    rt_text_store(some, if (sync_load(wrapping(control + I64{8})) != I64{0}) -> I64{1} else -> I64{0})
-    I64{1}
-}
+// Whether the current host task is cancelled; no task is None.
 #Export(c) jet_scheduler_task_cancelled_state: fn(some: I64) -> I64 {
     control: scheduler_control_current()
     if (control == I64{0}) -> return I64{0}

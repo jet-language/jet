@@ -1,66 +1,36 @@
-// Pending W38 Server ABI reconciliation. Fix is the sole Check/Fixes owner;
-// RefactorAction and its checked computation belong to Features (0736/0737),
-// never a second action engine here.
+// Code actions: each fix a diagnostic in the requested range offers, then the
+// marker-placement rewrites of the declaration under the cursor.
 use {
     core.encoding.[Dyn]
-    jet_foundation.[Span, TextEdit, foundation_json_quote]
+    jet_foundation.[Diagnostic, TextEdit, DiagnosticFixApplicability, foundation_json_quote]
     jet_parser.[parser_marker_placement_edit_at]
-    lsp_action_path: core.files.runtime.kernel_path_components
-    lsp_action_fs: core.files.host.retained_descriptor
 }
 
-lsp_code_action_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String? {
-    value: params ?? return None
-    td: value.field("textDocument") ?? return None
-    uri_value: td.field("uri") ?? return None
-    if uri_value == .Text(uri) {
-        doc: server.diagnostic_state.docs.get(uri) ?? return None
-        range: lsp_range_from_json(value.field("range") ?? return None) ?? return None
-        requested: Span{start: lsp_pos_to_offset(doc.text, range.start), end: lsp_pos_to_offset(doc.text, range.end)}
-        checked: server.check_with_bundle(doc)
-        permit: checked.checked.guard_read()
-        result: permit.value.result
-        diagnostics := result.diagnostics.copy()
-        lsp_retain_document_diagnostics(diagnostics, doc.path, doc.text)
-        fixes: lsp_collect_fixes_from_diagnostics(diagnostics.copy(), doc.text)
-        db := lsp_build_symbol_db(result)
-        lsp_merge_workspace_defs(server, doc, db)
-        token_owner: server.lex(doc)
-        token_permit: token_owner.guard_read()
-        tokens: token_permit.value
-        root: lsp_workspace_root_for_path(server.workspace_roots, doc.path)
-        excluded := [lsp_action_path.OSPath]{}
-        loop (_, open) in server.diagnostic_state.docs {
-            // Native read must preserve OSPath identity; canonical runtime read
-            // contract is a publication gate, not a lossy text-path conversion.
-            saved: lsp_action_fs.read_text(open.path)
-            if saved == {
-                .Ok(text) -> { if text != open.text -> excluded.push(open.path.copy()) }
-                .Err(_) -> excluded.push(open.path.copy())
-            }
-        }
-        refactors: lsp_compute_refactor_actions(db, tokens, diagnostics, doc.text, doc.path, root, excluded, requested)
-        actions := [String]{}
-        loop fix in fixes -> actions.push(lsp_code_action_json(uri, doc.version, doc.text, fix))
-        loop action in refactors -> actions.push(lsp_refactor_action_json(uri, doc.version, doc.text, action))
-        // A declaration under the cursor offers its marker set in either place.
-        if parser_marker_placement_edit_at(doc.text.bytes(), requested.start, false) == .Val(edit) -> actions.push(lsp_action_json(uri, doc.version, doc.text, "Write the markers above the declaration", "refactor.rewrite", [TextEdit]{edit}))
-        if parser_marker_placement_edit_at(doc.text.bytes(), requested.start, true) == .Val(edit) -> actions.push(lsp_action_json(uri, doc.version, doc.text, "Write the markers inside the declaration's body", "refactor.rewrite", [TextEdit]{edit}))
-        return Val(lsp_response(id, "[{actions.join(",")}]"))
+lsp_code_action_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
+    view: lsp_view(server, params) ?? return lsp_response(id, "null")
+    range: lsp_range_from_json(lsp_param(params, "range") ?? return lsp_response(id, "null")) ?? return lsp_error_response(id, -32602, "range is malformed")
+    bytes: view.doc.text.bytes()
+    table: lsp_line_table_bytes(bytes)
+    start: lsp_checked_offset_bytes(table, bytes, range.start) ?? return lsp_error_response(id, -32602, "range is outside the document")
+    end: lsp_checked_offset_bytes(table, bytes, range.end) ?? return lsp_error_response(id, -32602, "range is outside the document")
+    diagnostics := [Diagnostic]{}
+    loop diagnostic in lsp_retain_document_diagnostics(view.checked.diagnostics, view.doc.path, view.doc.text) {
+        span: diagnostic.span ?? next
+        if span.start <= end && start <= span.end -> diagnostics.push(diagnostic)
     }
-    None
+    actions := [String]{}
+    loop fix in lsp_fixes_from_diagnostics(diagnostics) {
+        preferred: fix.applicability == DiagnosticFixApplicability.Safe
+        actions.push(lsp_action_json(view, fix.title, "quickfix", [TextEdit]{fix.edit}, preferred: preferred))
+    }
+    if parser_marker_placement_edit_at(bytes, start, false) == .Val(edit) -> actions.push(lsp_action_json(view, "Write the markers above the declaration", "refactor.rewrite", [TextEdit]{edit}, preferred: false))
+    if parser_marker_placement_edit_at(bytes, start, true) == .Val(edit) -> actions.push(lsp_action_json(view, "Write the markers inside the declaration's body", "refactor.rewrite", [TextEdit]{edit}, preferred: false))
+    lsp_response(id, "[{actions.join(",")}]")
 }
 
-lsp_code_action_json: fn(uri: String, version: Int, src: String, fix: Fix) -> String Never! {
-    lsp_action_json(uri, version, src, fix.title, "quickfix", [TextEdit]{fix.edit})
-}
-
-lsp_refactor_action_json: fn(uri: String, version: Int, src: String, action: RefactorAction) -> String Never! {
-    lsp_action_json(uri, version, src, action.title, action.kind, action.edits)
-}
-
-lsp_action_json: fn(uri: String, version: Int, src: String, title: String, kind: String, edits: [TextEdit]) -> String Never! {
-    rows := [String]{}
-    loop edit in edits -> rows.push("{{\"range\":{lsp_range_json(lsp_byte_span_to_range(src, edit.span))},\"newText\":{foundation_json_quote(edit.new_text)}}}")
-    "{{\"title\":{foundation_json_quote(title)},\"kind\":\"{kind}\",\"edit\":{{\"documentChanges\":[{{\"textDocument\":{{\"uri\":{foundation_json_quote(uri)},\"version\":{version}}},\"edits\":[{rows.join(",")}]}}]}}}}"
+// The edit names the document version it was computed for, so an editor
+// drops it once the text has moved on.
+lsp_action_json: fn(view: LSPView, title: String, kind: String, edits: [TextEdit], preferred: Bool) -> String Never! {
+    preference: if preferred -> ",\"isPreferred\":true" else -> ""
+    "{{\"title\":{foundation_json_quote(title)},\"kind\":{foundation_json_quote(kind)}{preference},\"edit\":{{\"documentChanges\":[{{\"textDocument\":{{\"uri\":{foundation_json_quote(view.uri)},\"version\":{view.doc.version}}},\"edits\":{lsp_text_edits_json(view.doc.text, edits)}}}]}}}}"
 }

@@ -678,10 +678,10 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
 
 #Test("failure reports: the canonical wire round-trips, a non-canonical spelling is refused") {
     report: build_action_failure_report("cc", 1, "error: \"x\"")
-    wire: build_report_to_json(report)
+    wire: build_report_to_json(report) ?? panic("report wire")
     assert_eq(wire, "{{\"schema\":\"jet.err/v1\",\"message\":\"build action `cc` exited with status 1\",\"code\":\"E3505\",\"cause\":null,\"typed_identity\":\"BuildAction::Failed\",\"details\":{{\"variant\":\"BuildActionFailure\",\"fields\":{{\"action\":\"cc\",\"exit_code\":1,\"stderr\":\"error: \\\"x\\\"\"}},\"source_span\":null}}}}")
     decoded: build_report_from_json(wire) ?? panic("canonical report")
-    assert_eq(build_report_to_json(decoded), wire)
+    assert_eq(build_report_to_json(decoded) ?? panic("decoded report wire"), wire)
     if build_report_from_json(wire.replace(",\"cause\":null", ", \"cause\":null")) == {
         .Err(error) -> assert_eq(error.message, "error report is not canonical")
         .Ok(_) -> panic("a non-canonical report must be refused")

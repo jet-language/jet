@@ -1,0 +1,19 @@
+# core.ui.font against FreeType 2.14.3 and HarfBuzz 13.2.1: main.jet prints
+# what core.ui.font reads from the built-in Atkinson Hyperlegible Next 2.001
+# Regular and Bold (metrics, cmap, advances, outlines, kerned pairs and the
+# placement of four sample lines). expected.out is what FreeType (glyphs
+# loaded unscaled and unhinted) and HarfBuzz (hb_shape, LTR Latin, with the
+# substitution and mark features turned off, so only kerning moves glyphs)
+# report for the same queries; the two must agree exactly.
+fixture: font_matches_freetype_harfbuzz.fixture
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step aot: jet build main.jet
+exit: 0
+step native: built
+exit: 0
+stdout: = expected.out
+step default: jet run main.jet
+exit: == native
+stdout: == native
+stderr: == native

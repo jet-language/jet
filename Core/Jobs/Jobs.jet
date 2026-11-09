@@ -180,7 +180,7 @@ queue_default_path: fn() -> String Never! {
 // endpoint and queue-specific policy checks.
 queue_validate_nonnegative_limit: fn(limit: Int, label: String) ServiceError! {
     if limit < 0 -> return Err(queue_unavailable("queue {label} is outside the supported range"))
-    Ok(())
+    Ok()
 }
 
 #Test("public signed queue limits preserve the bridge error and zero reaches policy validation") {
@@ -230,7 +230,7 @@ queue_now: fn() -[Time]> Int Never! {
 }
 queue_begin: fn(driver: db.__Driver) ServiceError! -[DB]> {
     if !db.__driver_begin(driver) -> return Err(queue_sql_error("begin", queue_unavailable("queue SQLite begin failed")))
-    Ok(())
+    Ok()
 }
 // Operations unwrap inside the guarded transaction and roll back there on
 // failure. Only a successful value reaches commit; failed commits roll back.
@@ -341,7 +341,7 @@ impl JobQueue {
         service.__authority_validate(self.endpoint) ?? return Err(err)
         committed: queue_recover_transaction(self) ?? return Err(err)
         queue_publish_transitions(committed)
-        Ok(())
+        Ok()
     }
     status: fn(self) -[DB, Time]> JobQueueStatus ServiceError! {
         service.__authority_validate(self.endpoint) ?? return Err(err)
@@ -634,23 +634,23 @@ queue_validate_text: fn(value: String, label: String, maximum: Int, allow_empty:
     if (!allow_empty && value.len() == 0) || text.byte_count(value) > maximum || text.has_control(value) {
         return Err(ServiceError.Policy("{label} is empty, too long, or contains control characters"))
     }
-    Ok(())
+    Ok()
 }
 queue_validate_payload: fn(value: JobPayload) ServiceError! {
     queue_validate_text(value.type_id, "job payload type", 256, false) ?? return Err(err)
     if value.bytes.len() > 4194304 -> return Err(ServiceError.Policy("job payload exceeds the bounded queue payload limit"))
-    Ok(())
+    Ok()
 }
 queue_validate_result: fn(value: JobResult) ServiceError! {
     queue_validate_text(value.type_id, "job result type", 256, false) ?? return Err(err)
     if value.bytes.len() > 4194304 -> return Err(ServiceError.Policy("job result exceeds the bounded queue result limit"))
-    Ok(())
+    Ok()
 }
 queue_validate_error: fn(value: JobError) ServiceError! {
     queue_validate_text(value.type_id, "job error type", 256, false) ?? return Err(err)
     queue_validate_text(value.reason, "job error reason", 1024, false) ?? return Err(err)
     if value.detail == .Val(detail) -> queue_validate_text(detail, "job error detail", 16384, true) ?? return Err(err)
-    Ok(())
+    Ok()
 }
 queue_state_text: fn(state: JobQueueState) -> String Never! {
     if state == {
@@ -979,7 +979,7 @@ queue_initialize_on_driver: fn(driver: &db.__Driver, authority: String, name: St
     _: queue_execute(driver,
         "UPDATE jet_job_queue_meta SET capacity = ?, updated_at_ms = ? WHERE authority = ? AND queue = ?",
         [DBValue]{.Int(capacity), .Int(now), .Text(authority), .Text(name)}, "metadata") ?? return Err(err)
-    Ok(())
+    Ok()
 }
 queue_insert_event: fn(driver: &db.__Driver, record: StoredJob, state: JobQueueState, attempts: Int, now: Int, reason: String?, duration: Int?, worker: String?) ServiceError! -[DB]> {
     _: queue_execute(driver,
@@ -990,7 +990,7 @@ queue_insert_event: fn(driver: &db.__Driver, record: StoredJob, state: JobQueueS
             .Int(attempts), .Int(now), queue_text_binding(reason),
             queue_int_binding(duration), queue_text_binding(worker),
         }, "event") ?? return Err(err)
-    Ok(())
+    Ok()
 }
 queue_update_event: fn(driver: &db.__Driver, record: StoredJob, state: JobQueueState, attempts: Int, now: Int, reason: String?, duration: Int?, worker: String?, extra: [(column: String, value: DBValue)]) ServiceError! -[DB]> {
     assignments := "state = ?, attempts = ?, event_sequence = ?, updated_at_ms = ?"
@@ -1043,7 +1043,7 @@ queue_require_claim: fn(record: StoredJob, claim: JobQueueClaim) ServiceError! {
     if record.lease_owner != Val(claim.worker) || record.lease_token != Val(claim.lease_token) {
         return Err(ServiceError.Revoked("queue lease token or worker does not match"))
     }
-    Ok(())
+    Ok()
 }
 
 EnqueueRequest: struct {
@@ -1092,7 +1092,7 @@ queue_validate_enqueue: fn(request: EnqueueRequest) ServiceError! {
     }
     if request.idempotency_key == .Val(key) -> queue_validate_text(key, "job idempotency key", 1024, false) ?? return Err(err)
     if request.request_id == .Val(id) -> queue_validate_text(id, "job request id", 1024, false) ?? return Err(err)
-    Ok(())
+    Ok()
 }
 queue_validate_bulk: fn(requests: [EnqueueRequest]) ServiceError! {
     if requests.len() == 0 -> return Err(ServiceError.Policy("queue bulk enqueue requires at least one job"))
@@ -1103,7 +1103,7 @@ queue_validate_bulk: fn(requests: [EnqueueRequest]) ServiceError! {
             return Err(ServiceError.Policy("job payload type must match the declared job type"))
         }
     }
-    Ok(())
+    Ok()
 }
 // The caller owns the exclusive Shared guard and the SQLite transaction;
 // observations leave that transaction only after its successful commit.
@@ -1466,7 +1466,7 @@ queue_pause_on_driver: fn(driver: &db.__Driver, authority: String, name: String,
         "UPDATE jet_job_queue_meta SET paused = ?, updated_at_ms = ? WHERE authority = ? AND queue = ?",
         [DBValue]{.Int(if paused -> 1 else -> 0), .Int(now), .Text(authority), .Text(name)}, "pause") ?? return Err(err)
     if changed != 1 -> return Err(queue_unavailable("queue metadata is missing"))
-    Ok(())
+    Ok()
 }
 queue_prune_on_driver: fn(driver: &db.__Driver, authority: String, name: String, retention_ms: Int, now: Int) -[DB]> Int ServiceError! {
     cutoff: queue_saturating_sub(now, retention_ms)

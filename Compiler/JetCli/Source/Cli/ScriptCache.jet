@@ -3,8 +3,10 @@
 // of unchanged sources runs it without compiling. Each entry file has one
 // slot, named by the profile and the entry's path. The slot's record names
 // its kept program and what that program was built from:
-// - the toolchain: this compiler, its runtime pack and the Core sources, by
-//   file identity, and the build options (`checked_alloc` among them);
+// - the toolchain: this compiler, its runtime pack and the toolchain tree, and
+//   the build options (`checked_alloc` among them), and each Core file the
+//   compile read, by file identity (Core built into jet is part of this
+//   compiler);
 // - a hash of the schema snapshots its checks read, of every file of its
 //   authorized source snapshot and of the source tree's shape (the
 //   directories its walk enters and its source names; other files a
@@ -36,20 +38,26 @@ use {
         JetDriverAuthorizedSourceSnapshot,
         JetDriverComptimeInputLog,
         JetDriverComptimeInputRecord,
+        JetDriverCoreSource,
         JetDriverVerbOutput,
         schema_cache_dir,
     ]
-    jet_foundation.[BuildOptionLayer, BuildOptions, CORE_SOURCE_OWNED_ROWS, build_options_key]
-    jet_lexer.[TOKEN_SEMI, lex]
+    jet_foundation.[BuildOptionLayer, BuildOptions, build_options_key]
+    jet_lexer.[TOKEN_EOF, TOKEN_LBRACE, TOKEN_LBRACKET, TOKEN_LPAREN, TOKEN_RBRACE, TOKEN_RBRACKET, TOKEN_RPAREN, TOKEN_SEMI, lex]
+    jet_parser.[parse_source]
 }
 
 // Names the kept-program records; a new layout is a new name.
-JET_CLI_SCRIPT_RECORD: "jet.script-run/v4"
+JET_CLI_SCRIPT_RECORD: "jet.script-run/v5"
 
 // The rows of a slot record before its toolchain rows: the record name, the
 // program file, the sources hash, the optimize level and the four authority
-// rows.
+// rows. The toolchain rows end with one row per Core file the compile read.
 JET_CLI_SCRIPT_RECORD_HEAD: 8
+
+// The toolchain rows of a record (jet_cli_script_toolchain), before its Core
+// rows.
+JET_CLI_SCRIPT_TOOLCHAIN_ROWS: 6
 
 // Set in the background `full` build of a reused `none` program to its slot:
 // that `jet run` compiles, keeps and exits without running the program
@@ -70,34 +78,35 @@ JET_CLI_SCRIPT_KEEP_MAX: 64
 JET_CLI_SCRIPT_USED_GRAIN_NS: 600000000000
 
 // A `jet run` compile whose program is kept when it finishes: its slot, the
-// toolchain and sources it started from, and the log of the comptime inputs
-// it reads. `core_files` is whether the toolchain read found every Core row
-// a regular file, so the request need not check them again
-// (jet_cli_core_sources).
+// toolchain and sources it started from, the log of the comptime inputs it
+// reads, the toolchain tree its Core files come from ("" for the Core built
+// into jet), and the Core rows of its request (jet_cli_script_with_core).
 JetCLIScriptKeep: struct {
     slot: String
     toolchain: String
-    core_files: Bool
     sources: String
     input_log: Shared<JetDriverComptimeInputLog>
+    core_root: String
+    core: [JetDriverCoreSource]
 }
 
-// A toolchain's record rows (jet_cli_script_toolchain) and whether each of
-// its Core rows is a regular file.
+// A toolchain's record rows (jet_cli_script_toolchain) and the toolchain tree
+// its Core files come from, "" for the Core built into jet.
 JetCLIScriptToolchain: struct {
     rows: String
-    core_files: Bool
+    core_root: String
 }
 
-// The toolchain a kept program was built with, or None when this compiler
-// has no toolchain root for `entry` (jet_cli_toolchain_root) or its Core sources or runtime can't be read. The
-// Core files and the runtime pack are named by their file identities (size,
-// modification time, device, inode), as `make` names its inputs. They are
-// not hashed: a rerun compares them with the record's.
+// The toolchain a kept program was built with, or None when its runtime can't
+// be read. The executable and the runtime pack are named by their file
+// identities (size, modification time, device, inode), as `make` names its
+// inputs. They are not hashed: a rerun compares them with the record's. The
+// Core files are not named here: a compile reads only the few its imports
+// reach, so the record names those (jet_cli_script_core_rows).
 jet_cli_script_toolchain: fn(identity: String, options: BuildOptions, entry: String) -> JetCLIScriptToolchain? {
-    toolchain: if jet_cli_toolchain_root(entry) == {
+    core_root: if jet_cli_toolchain_root(entry) == {
         .Found(root) -> root
-        .Missing(_, _) -> { return None }
+        .Missing(_, _) -> ""
     }
     runtime_dir: jet_cli_runtime_dir()
     if jet_cli_runtime_key(runtime_dir) == None -> return None
@@ -105,21 +114,35 @@ jet_cli_script_toolchain: fn(identity: String, options: BuildOptions, entry: Str
     pack_stat: cli_files.stat(pack) ?? return None
     executable: cli_sys.executable()
     executable_stat: cli_files.stat(executable) ?? return None
-    rows := [String]{
+    core_row: if core_root == "" -> "core built in" else -> "core {core_root}"
+    rows: [String]{
         identity,
         "{executable} {jet_cli_script_file_identity(executable_stat)}",
         jet_cli_host_triple(cli_sys.arch(), cli_sys.name()),
         build_options_key(options),
         "{pack} {jet_cli_script_file_identity(pack_stat)}",
-        toolchain,
+        core_row,
     }
-    core_files := true
-    loop row in CORE_SOURCE_OWNED_ROWS {
-        stat: cli_files.stat(jet_cli_authority_path(toolchain, row.path)) ?? return None
-        if !stat.is_file -> core_files = false
+    Val(JetCLIScriptToolchain{rows: rows.join("\n"), core_root: core_root})
+}
+
+// The Core files `keep`'s compile read, one row each: its path and file
+// identity. Each identity is taken before the file is read again and found to
+// hold the text the compile read, so a file that changed during the compile
+// keeps nothing (None). Core built into jet has no rows: the executable's row
+// names it.
+jet_cli_script_core_rows: fn(keep: JetCLIScriptKeep) -> [String]? {
+    rows := [String]{}
+    if keep.core_root == "" -> return Val(rows)
+    loop row in keep.core {
+        permit: row.text.guard_read()
+        compiled: permit.value.text ?? next
+        file: jet_cli_authority_path(keep.core_root, row.path)
+        stat: cli_files.stat(file) ?? return None
+        if (cli_files.read(file) ?? return None) != compiled -> return None
         rows.push("{row.path} {jet_cli_script_file_identity(stat)}")
     }
-    Val(JetCLIScriptToolchain{rows: rows.join("\n"), core_files: core_files})
+    Val(rows)
 }
 
 // A file's identity in a toolchain row: size, modification time in
@@ -219,10 +242,64 @@ jet_cli_script_cache_dir: fn() -> String? {
 }
 
 // The entry file `jet -e CODE` runs: CODE as the body of `run: fn`, its
-// statements on lines of their own (jet_cli_eval_lines), kept as the `eval`
-// entry file of its source (jet_cli_entry_file).
+// statements on lines of their own (jet_cli_eval_lines), its declarations
+// above `run: fn` (jet_cli_eval_items), kept as the `eval` entry file of its
+// source (jet_cli_entry_file). The file holds CODE as written: the compile
+// request of an `eval` entry file (Request.jet jet_cli_driver_request) shows
+// the value of its last statement (JetSema Calls/Direct.jet
+// sema_eval_entry_show).
 jet_cli_eval_file: fn(code: String) -> String? {
-    jet_cli_entry_file("eval", "run: fn() {{\n{jet_cli_eval_lines(code)}\n}}\n")
+    split: jet_cli_eval_items(jet_cli_eval_lines(code))
+    jet_cli_entry_file("eval", "{split.items}{JET_CLI_EVAL_HEAD}{split.body}\n}}\n")
+}
+
+// The opening of the `run: fn` an `-e` body goes in.
+JET_CLI_EVAL_HEAD: "run: fn() {{\n"
+
+// `lines` parted as a REPL cell parts its input: each line at bracket depth
+// zero that parses alone as declarations (a type, a function, an impl, a
+// `use`) is an item, in order; every other line, a binding such as `x: 1`
+// included, stays in the body.
+jet_cli_eval_items: fn(lines: String) -> (items: String, body: String) Never! {
+    bytes: lines.bytes()
+    starts := [Int]{0}
+    depth := 0
+    previous := 0
+    loop token in lex(bytes).tokens {
+        if token.kind == TOKEN_EOF -> break
+        if depth == 0 {
+            loop at in previous..<token.span.start {
+                if bytes[at] == (U8{10}) && starts[starts.len() - 1] < at + 1 -> starts.push(at + 1)
+            }
+        }
+        if token.kind == TOKEN_LBRACE || token.kind == TOKEN_LPAREN || token.kind == TOKEN_LBRACKET -> depth += 1
+        if (token.kind == TOKEN_RBRACE || token.kind == TOKEN_RPAREN || token.kind == TOKEN_RBRACKET) && depth > 0 -> depth -= 1
+        previous = token.span.end
+    }
+    items := ""
+    body := [String]{}
+    loop (index, start) in starts {
+        end: if index + 1 < starts.len() -> starts[index + 1] - 1 else -> bytes.len()
+        line: jet_cli_repl_bytes(lines, start, end)
+        if jet_cli_eval_declares(line) {
+            items += "{line}\n"
+            next
+        }
+        body.push(line)
+    }
+    (items: items, body: body.join("\n"))
+}
+
+// Whether `line` alone parses as declarations and nothing else: no
+// constant, which in a body is the binding it spells.
+jet_cli_eval_declares: fn(line: String) -> Bool Never! {
+    parsed: parse_source(line.bytes())
+    if jet_cli_errors(parsed.diagnostics).len() > 0 -> return false
+    if parsed.program.items.len() == 0 && parsed.program.imports.len() == 0 -> return false
+    loop item in parsed.program.items {
+        if item == .Const(_) -> return false
+    }
+    true
 }
 
 // The entry file that holds `source`, a program given on the command line
@@ -286,9 +363,12 @@ jet_cli_eval_lines: fn(code: String) -> String Never! {
 // A slot record: the program file it names, the sources hash, the optimize
 // level the program was built at, the program's authority (its required
 // rights and its package policy, one row each, so a rerun checks this
-// invocation's rows as a compile would), then the toolchain rows.
-jet_cli_script_record_encode: fn(program: String, keep: JetCLIScriptKeep, level: String, authority: JetCLIAuthority) -> String Never! {
-    "{JET_CLI_SCRIPT_RECORD}\n{program}\n{keep.sources}\n{level}\n{authority.required.join(",")}\n{authority.granted.join(",")}\n{authority.denied.join(",")}\n{authority.authority}\n{keep.toolchain}"
+// invocation's rows as a compile would), then the toolchain rows and the rows
+// of the Core files the compile read (jet_cli_script_core_rows).
+jet_cli_script_record_encode: fn(program: String, keep: JetCLIScriptKeep, level: String, authority: JetCLIAuthority, core_rows: [String]) -> String Never! {
+    head: "{JET_CLI_SCRIPT_RECORD}\n{program}\n{keep.sources}\n{level}\n{authority.required.join(",")}\n{authority.granted.join(",")}\n{authority.denied.join(",")}\n{authority.authority}\n{keep.toolchain}"
+    if core_rows.len() == 0 -> return head
+    "{head}\n{core_rows.join("\n")}"
 }
 
 jet_cli_script_rights: fn(row: String) -> [String] Never! {
@@ -323,16 +403,24 @@ jet_cli_script_kept_run: fn(keep: JetCLIScriptKeep, file: String, source: String
     jet_cli_with_invocation(authority, invocation)
     refused: jet_cli_authority_report(file, source, color, json, authority)
     if refused.move() == .Val(report) -> return Val(JetCLIRunStep.Output{output: report})
-    jet_cli_effect_notice(file, authority, json)
+    stopped: jet_cli_effect_notice(file, source, authority, invocation, color, json)
+    if stopped.move() == .Val(output) -> return Val(JetCLIRunStep.Output{output: output})
     jet_cli_script_used(record, text)
     if rows[3] == JET_CLI_SCRIPT_LEVEL_NONE && jet_cli_script_level_stock(options) -> jet_cli_script_promote(directory, keep, file)
     Val(JetCLIRunStep.Launch{executable: executable.move(), file: file, binary: binary, program_args: program_args, options: options, invocation: invocation, verbose: false, color: color})
 }
 
 // Whether the complete slot record `rows` names exactly `keep`'s sources and
-// toolchain.
-jet_cli_script_record_matches: fn(rows: [String], keep: JetCLIScriptKeep) -> Bool Never! {
-    rows[2] == keep.sources && rows[JET_CLI_SCRIPT_RECORD_HEAD..<rows.len()].join("\n") == keep.toolchain
+// toolchain, and each Core file it names still has the identity it records.
+jet_cli_script_record_matches: fn(rows: [String], keep: JetCLIScriptKeep) -> Bool {
+    end: JET_CLI_SCRIPT_RECORD_HEAD + JET_CLI_SCRIPT_TOOLCHAIN_ROWS
+    if rows[2] != keep.sources || rows.len() < end || rows[JET_CLI_SCRIPT_RECORD_HEAD..<end].join("\n") != keep.toolchain -> return false
+    loop row in rows[end..<rows.len()] {
+        named: row.partition(" ")
+        stat: cli_files.stat(jet_cli_authority_path(keep.core_root, named.head)) ?? return false
+        if jet_cli_script_file_identity(stat) != named.tail -> return false
+    }
+    true
 }
 
 // Whether `options` leave the optimize level at its stock value: no profile
@@ -501,10 +589,20 @@ jet_cli_script_keeper: fn(entered: String, options: BuildOptions, snapshot: JetD
     Val(JetCLIScriptKeep{
         slot: jet_cli_script_slot(options, snapshot.entry_path),
         toolchain: toolchain.rows,
-        core_files: toolchain.core_files,
         sources: jet_cli_script_sources(entered, snapshot),
         input_log: shared JetDriverComptimeInputLog{records: [JetDriverComptimeInputRecord]{}},
+        core_root: toolchain.core_root,
+        core: [JetDriverCoreSource]{},
     })
+}
+
+// `keep` with the Core rows `prepared` compiles against. A copied row shares
+// its text cell, so once the compile ends the rows show which Core files it
+// read (jet_cli_script_core_rows).
+jet_cli_script_with_core: fn(keep: JetCLIScriptKeep?, prepared: JetCLIPrepared) -> JetCLIScriptKeep? {
+    kept := (keep ?? return None).copy()
+    if prepared == .Prepared(request, _) -> kept.core = request.core_sources.copy()
+    Val(kept.move())
 }
 
 // The comptime input log a kept compile records into.
@@ -512,12 +610,6 @@ jet_cli_script_input_log: fn(keep: JetCLIScriptKeep?) -> Shared<JetDriverComptim
     kept: keep ?? return None
     // copy: the compile and the keeper share the one log.
     Val(kept.input_log.copy())
-}
-
-// Whether `keep`'s toolchain read found every Core row a regular file.
-jet_cli_script_core_files: fn(keep: JetCLIScriptKeep?) -> Bool Never! {
-    kept: keep ?? return false
-    kept.core_files
 }
 
 jet_cli_script_inputs_read: fn(log: Shared<JetDriverComptimeInputLog>) -> Int Never! {
@@ -530,8 +622,9 @@ jet_cli_script_inputs_read: fn(log: Shared<JetDriverComptimeInputLog>) -> Int Ne
 // slot's previous one, in the kept form (Image/Loader.jet
 // x64_executable_keep: its program part, not a copy of the runtime image).
 // Nothing is kept when the compile read a comptime input. The record names
-// the toolchain the compile started from, so a toolchain that changed while
-// it compiled leaves a record no later run matches. The program goes to a
+// the toolchain the compile started from and the Core files it read, so a
+// toolchain that changed while it compiled leaves a record no later run
+// matches. The program goes to a
 // file of its own, named by the slot, this process and its sources. Each file
 // is written beside its place and renamed into it, and the record last
 // (jet_cli_script_record_put), so a concurrent run never sees a partial one.
@@ -539,6 +632,7 @@ jet_cli_script_inputs_read: fn(log: Shared<JetDriverComptimeInputLog>) -> Int Ne
 // Returns whether the program was kept.
 jet_cli_script_keep: fn(keep: JetCLIScriptKeep, executable: X64Executable, authority: JetCLIAuthority, level: String) -> Bool {
     if jet_cli_script_inputs_read(keep.input_log) > 0 -> return false
+    core_rows: jet_cli_script_core_rows(keep) ?? return false
     directory: jet_cli_script_cache_dir() ?? return false
     cli_files.create_dir_all(directory) ?? return false
     record: "{directory}/{keep.slot}.run"
@@ -554,7 +648,7 @@ jet_cli_script_keep: fn(keep: JetCLIScriptKeep, executable: X64Executable, autho
         return false
     }
     cli_files.rename(staged, "{directory}/{program}") ?? return false
-    if !jet_cli_script_record_put(record, jet_cli_script_record_encode(program, keep, level, authority)) -> return false
+    if !jet_cli_script_record_put(record, jet_cli_script_record_encode(program, keep, level, authority, core_rows)) -> return false
     if previous == .Val(old) {
         if old != program -> cli_files.remove("{directory}/{old}").drop("a stale program only takes space")
     }

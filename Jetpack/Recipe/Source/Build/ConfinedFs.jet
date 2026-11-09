@@ -452,15 +452,16 @@ recipe_confined_source: fn(source_root: String, source: String, directory: Bool)
 }
 
 // Every component from the source root down is a real directory (the last
-// may be any non-link), never a symlink.
+// may be any non-link), never a symlink. A `.` component names the directory
+// it is in, so `.` alone is the source root itself.
 recipe_validate_source_components: fn(source_root: String, relative: String) RecipeError! -[FS]> {
     root_info: files.stat(source_root)
     if root_info.is_symlink -> return Err(RecipeError.PermissionDenied("recipe source root must not be a symlink or reparse point"))
     components := [String]{}
     segments: relative.split("/").to_list()
     loop segment in segments {
-        if segment == "" -> next
-        if segment == "." || segment == ".." -> return Err(RecipeError.InvalidInput("recipe source contains a non-normal path component"))
+        if segment == "" || segment == "." -> next
+        if segment == ".." -> return Err(RecipeError.InvalidInput("recipe source contains a non-normal path component"))
         components.push(segment)
     }
     current := source_root

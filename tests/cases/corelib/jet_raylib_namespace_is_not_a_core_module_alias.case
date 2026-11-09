@@ -1,8 +1,0 @@
-# Port of tests/corelib_parts/system.rs::jet_raylib_namespace_is_not_a_core_module_alias; guest sources preserved verbatim.
-# `jet.raylib` is no alias of `core.game.raylib`: `jet` stays a reserved root, so the import is refused (E1002).
-# The Rust-era E0341 namespace teaching is retired; the import names no module at all.
-fixture: fixtures/jet_raylib_namespace_is_not_a_core_module_alias
-step: jet check fixture.jet --json
-exit: nonzero
-json: stdout doc $.reports[?code="E1002"] #>= 1 # the reserved `jet` root is refused
-json: stdout doc $.reports[?code="E0341"] #= 0 # the retired teaching code is never emitted

@@ -797,10 +797,10 @@ runner_calls: fn(name: String) -> [RunnerCall] Never! {
         }
         "UiWitness" -> [RunnerCall]{
             runner_call("choices", "UiCarriersChoicesWitness", "UI choices: ownership and record-variant stop byte-identical"),
+            runner_call("cursor", "UiCursorWitness", "UI canonical Cursor: real-provider ownership byte-identical"),
             runner_call("events", "UiEventsWitness", "UI events: real-provider ownership byte-identical"),
             runner_call("form-action-error", "UiFormActionErrorWitness", "UI ActionError: real consumed producers and transitive ownership byte-identical"),
             runner_call("key", "UiKeyWitness", "UI Key: exhaustive real-provider oracle and record-variant stop byte-identical"),
-            runner_call("raylib-metadata", "UiRaylibMetadataWitness", "UI raylib metadata and canonical Cursor: real-provider ownership byte-identical"),
             runner_call("view-snapshots", "UiViewSnapshotsWitness", "UI view snapshots: real-provider ownership byte-identical"),
         }
         else -> [RunnerCall]{}
@@ -1228,7 +1228,7 @@ jet_tool: fn(lane: &Lane, script: String, args: [String]) -[Env, Exec, FS, IO, T
 }
 
 exact: fn(ran: Ran, stdout: String, stderr: String) Problem! {
-    if ran.stdout == stdout && ran.stderr == stderr -> return Ok(())
+    if ran.stdout == stdout && ran.stderr == stderr -> return Ok()
     shown: json.dumps(Dyn.Object([String: Dyn]{"stdout": Dyn.Text(ran.stdout.copy()), "stderr": Dyn.Text(ran.stderr.copy()), "expectedStdout": Dyn.Text(stdout.copy()), "expectedStderr": Dyn.Text(stderr.copy())})) ?? ""
     Err(problem("exact native verdict differs: {shown}"))
 }
@@ -1242,7 +1242,7 @@ front: fn(lane: &Lane, args: [String], prefix: String, cwd: String, extra: [Sett
     record: Dyn.Object([String: Dyn]{"command": Dyn.Text(lane.jet.copy()), "args": texts(args), "cwd": Dyn.Text(cwd.copy()), "status": Dyn.Int(ran.code), "signal": Dyn.Null, "error": Dyn.Null, "stdout": Dyn.Text(ran.stdout.copy()), "stderr": Dyn.Text(ran.stderr.copy())})
     text: json.to_string_pretty(record) ?? return Err(problem("the front record cannot be encoded: {err}"))
     files.write("{prefix}.front.run.json", "{text}\n") ?? return Err(problem("`{prefix}.front.run.json` cannot be written: {err}"))
-    Ok(())
+    Ok()
 }
 
 // Lower `file` as a native library through `jet doc`, the runtime-library
@@ -1260,7 +1260,7 @@ library: fn(lane: &Lane, file: String, prefix: String, lifecycle: String, export
     loop suffix in ([String]{".o", ".exports", ".abi.json", ".threads"}) {
         if !files.exists("{prefix}{suffix}") -> return Err(problem("native library hook omitted {suffix}"))
     }
-    Ok(())
+    Ok()
 }
 
 // The runtime imports jet_rt_fault_report, which Jet's linker writes into each
@@ -1274,7 +1274,7 @@ link_with: fn(lane: &Lane, cflags: [String], source: String, object: String, bin
     args := cflags.copy()
     args.extend([String]{source, object, report_object, "-lpthread", "-ldl", "-lm", "-o", binary})
     execute(lane, env_or("CC", "cc"), args, lane.out.copy(), [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
-    Ok(())
+    Ok()
 }
 
 // The object that defines jet_rt_fault_report, assembled into the lane.
@@ -1298,7 +1298,7 @@ pack_roots_inputs: fn(lane: &Lane) Problem! -[Env, Exec, FS, IO, Time, Time.Wait
         execute(lane, "as", [String]{"--64", "-o", "{cwd}/{object}", source}, cwd, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
     }
     execute(lane, "ar", [String]{"rcs", "{cwd}/runtime.a", "{cwd}/archive.o"}, cwd, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
-    Ok(())
+    Ok()
 }
 
 // A committed Jet runner, run from the repository root by the lane's jet:
@@ -1323,7 +1323,7 @@ runner_verdict: fn(lane: &Lane, found: Spec) Problem! -[Env, Exec, FS, IO, Time,
         ran: execute(lane, lane.jet.copy(), args, lane.repo.copy(), [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
         exact(ran, call.expected, "") ?? return Err(problem("{found.name} {label}: {err.message}"))
     }
-    Ok(())
+    Ok()
 }
 
 read_json: fn(path: String) -[FS]> Dyn Problem! {
@@ -1345,7 +1345,7 @@ copy_tree: fn(from: String, to: String) Problem! -[FS]> {
         files.copy(source, "{to}/{entry.name}") ?? return Err(problem("`{source}` cannot be copied: {err}"))
         files.set_mode("{to}/{entry.name}", meta.mode % 4096) ?? return Err(problem("`{to}/{entry.name}` mode: {err}"))
     }
-    Ok(())
+    Ok()
 }
 
 sha256_path: fn(path: String) -[FS]> String Problem! {
@@ -1456,7 +1456,7 @@ drive: fn(lane: &Lane, found: Spec) Problem! -[Env, Exec, FS, IO, Time, Time.Wai
         expected: if found.kind == "indices" -> "link section indexes: pass\n" else -> "runtime pack object roots: pass\n"
         ran: execute(lane, staged, [String]{"run", "{repo}/{found.runner}"}, out, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
         exact(ran, expected, "") ?? return Err(err)
-        if found.kind == "indices" -> return Ok(())
+        if found.kind == "indices" -> return Ok()
     }
     if found.kind == "link" {
         pack_roots_inputs(lane) ?? return Err(err)
@@ -1544,7 +1544,7 @@ world_sentry_verdict: fn(lane: &Lane, binary: String, object: String) Problem! -
     }
     if texts.len() == 2 && texts[0] != texts[1] -> failures.push("the returned and stopped ledgers differ")
     if failures.len() > 0 -> return Err(problem("world/sentry verdict: {failures.join("; ")}"))
-    Ok(())
+    Ok()
 }
 
 // The channel host runs its queue, select, reservation and Shared witnesses
@@ -1576,7 +1576,7 @@ channel_verdict: fn(lane: &Lane, binary: String) Problem! -[Env, Exec, FS, IO, T
         }
     }
     if failures.len() > 0 -> return Err(problem("channel verdict: {failures.join("; ")}"))
-    Ok(())
+    Ok()
 }
 
 // The Shared publication host prints its World and Process race lines; the
@@ -1590,7 +1590,7 @@ publication_verdict: fn(lane: &Lane, binary: String, object: String, expected: S
         .Ok(_) -> failures.extend(step_failures(PUBLICATION_LINKED, execute(lane, host, [String]{}, out, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS), WEAK_EXPECTED, ""))
     }
     if failures.len() > 0 -> return Err(problem("Shared publication verdict: {failures.join("; ")}"))
-    Ok(())
+    Ok()
 }
 
 // Why a world/sentry step failed: its run failed, or its stdout is not
@@ -1636,7 +1636,7 @@ crypto_verdict: fn(lane: &Lane, name: String, binary: String) Problem! -[Env, Ex
         if name == "CryptoOsEntropy" -> failures.extend(world_entropy_failures(lane, binary) ?? return Err(err))
     }
     if failures.len() > 0 -> return Err(problem("crypto verdict: {failures.join("; ")}"))
-    Ok(())
+    Ok()
 }
 
 // The deterministic World refuses every listed count with the frozen stop.
@@ -1761,7 +1761,7 @@ c_verdict: fn(lane: &Lane, found: Spec) Problem! -[Env, Exec, FS, IO, Time, Time
             exact(captured, "", direct.stderr) ?? return Err(err)
             if kind == 0 -> exact(direct, "", simple) ?? return Err(err)
         }
-        return Ok(())
+        return Ok()
     }
     expected: if found.name == {
         "VaultHooks" -> "vault hooks witness OK (TLS ownership, exact stops, 8 root-filtered two-phase barriers)\n"
@@ -1776,7 +1776,7 @@ c_verdict: fn(lane: &Lane, found: Spec) Problem! -[Env, Exec, FS, IO, Time, Time
         ran: execute(lane, binary, args, out, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
         exact(ran, expected, "") ?? return Err(err)
     }
-    Ok(())
+    Ok()
 }
 
 // --- manifest -------------------------------------------------------------------
@@ -2225,7 +2225,7 @@ run_entry: fn(result: &[String: Dyn], entry: Dyn, manifest: Dyn, repo: String, j
         if sorted_texts(ran_names) != sorted_texts(names) -> return Err(problem("executed test names do not match complete registry"))
         result["report"] = report
     }
-    Ok(())
+    Ok()
 }
 
 // --- JSON fields -----------------------------------------------------------------

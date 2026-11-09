@@ -144,9 +144,11 @@ program and preserve the original error when propagation is intended.
 
 These are the common operation names to reach for. Import the shown core module
 with `use <alias>: core.<module>` and call `<alias>.<verb>(...)`. The ordered
-extrema `min`, `max` and `clamp` are prelude names and need no import.
+extrema `min`, `max` and `clamp` are prelude names and need no import, and so is
+`input`: every line of the files the arguments name, else of standard input, as
+a lazy `Iter<String>` (`loop line in input { ... }`).
 
-1. `term.print`  2. `term.eprint`  3. `term.input`  4. `term.readline`
+1. `term.print`  2. `term.eprint`  3. `term.confirm`  4. `term.readline`
 5. `term.read_all_input`  6. `files.read`  7. `files.write`
 8. `files.read_bytes`  9. `files.write_bytes`  10. `files.exists`
 11. `files.list_dir`  12. `files.walk`  13. `process.argv`  14. `process.run`

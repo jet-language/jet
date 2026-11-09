@@ -1,0 +1,37 @@
+package: {
+    name: "files_map_advise"
+    authority: { allow: [FS, FS.Read, FS.Write, IO, Mem.Alloc] }
+}
+
+// MappedFile.advise(advice) tells the system how a mapped file's bytes will
+// be read (posix_madvise), with the same Advice values as FileReader.advise.
+// It plans paging and never changes what the map holds: after DontNeed the
+// bytes read back from the file unchanged.
+
+use files: core.files
+
+run: fn() {
+    scratch: files.temp_dir("map-advise")
+    path: files.join(scratch.path, "table.txt")
+    files.write(path, "alpha\nbeta\ngamma\n")
+
+    mapped: files.map(path)
+    mapped.advise(.Sequential)
+    print("mapped bytes: {mapped.len()}")
+    mapped.advise(.DontNeed)
+    first: mapped.window_len(0, 5) ?? panic("window")
+    print("first word after DontNeed: {String.from_bytes(first) ?? ""}")
+    mapped.advise(.NoReuse)
+    mapped.advise(.Normal)
+    lines := 0
+    loop _ in mapped.lines() -> lines += 1
+    print("lines: {lines}")
+
+    empty_path: files.join(scratch.path, "empty.txt")
+    files.write(empty_path, "")
+    empty: files.map(empty_path)
+    if empty.advise(.WillNeed) == {
+        .Ok(_) -> print("empty map takes advice: true")
+        .Err(_) -> print("empty map takes advice: false")
+    }
+}

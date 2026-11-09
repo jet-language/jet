@@ -928,7 +928,7 @@ store_normalize_legacy_entry: fn(original: StoreEntry) -> StoreEntry StoreError!
     if identity.source_fingerprint == "" || identity.recipe_fingerprint == "" || identity.policy_fingerprint == "" || identity.platform == "" || entry.envelope.output_hash == "" {
         return Err(StoreError.Other("legacy package `{entry.id}` lacks immutable producer facts"))
     }
-    if entry.out.starts_with("/nix/store/") {
+    if store_path_below(entry.out, "/nix/store") {
         return Err(StoreError.Other("legacy Nix package `{entry.id}` lacks exact derivation facts"))
     }
     producer := ProducerRecord.decode(store_canonical_producer("legacy-migration", "cas:{identity.source_fingerprint}", identity.source_fingerprint, identity, [String: String]{"legacy.reference": entry.reference}))

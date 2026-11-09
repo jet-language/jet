@@ -1,0 +1,58 @@
+// Forks under load. Tasks keep other carriers allocating (small blocks and
+// large lists) and resolving localhost for the whole run while the main task
+// forks again and again; each child allocates and resolves the same way,
+// prints nothing and exits 0. A child that inherited a lock some thread it
+// lacks still held at the fork (an allocator lock, the stdout lock, the
+// thread registry's mutex, or a musl lock inside a pthread_create) would
+// block for good and never be reaped, so the run would hang instead of
+// counting every child. The loads never finish: the parent exits once every
+// child is counted.
+package: {
+    name: "fork_under_load"
+    authority: { allow: [IO, Mem.Alloc, Env, Exec, Net, Time] }
+}
+
+use sys: core.sys
+use net: core.net
+use process: core.process
+
+FORKS: 400
+
+// `rounds` rounds of allocation and name resolution: the load the forks race.
+churn: fn(rounds: Int) -> Int {
+    total := 0
+    at := 0
+    loop at < rounds {
+        words := [String]{}
+        loop n in 0..16 -> words.push("word {at} {n}")
+        numbers := [Int]{}
+        loop n in 0..12000 -> numbers.push(n)
+        addresses: net.socket_addrs("localhost", 80) ?? panic("resolve localhost")
+        total += words.len() + numbers.len() + addresses.len()
+        at += 1
+    }
+    total
+}
+
+run: fn() {
+    loop _ in 0..3 {
+        load: task churn(1000000000)
+        load.detach()
+    }
+    completed := 0
+    at := 0
+    loop at < FORKS {
+        #Unsafe("the child only allocates, resolves and exits; the parent reaps it") {
+            child: sys.fork() ?? panic("fork")
+            if child == 0 {
+                _ := churn(20)
+                process.exit(0)
+            }
+            status: sys.wait() ?? panic("wait")
+            if status == 0 -> completed += 1
+        }
+        at += 1
+    }
+    print("children completed: {completed} of {FORKS}")
+    process.exit(0)
+}

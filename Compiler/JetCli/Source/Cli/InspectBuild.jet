@@ -2,7 +2,7 @@
 use {
     jet_driver.[
         JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceSnapshot,
-        JetDriverAuthorityPolicy, JetDriverCompileRequest, JetDriverBuildQueryScope, JetDriverBuildQueryResult,
+        JetDriverAuthorityPolicy, JetDriverCompileRequest, JetDriverCompileResult, JetDriverBuildQueryScope, JetDriverBuildQueryResult,
         JetDriverFailure, JetDriverGeneratedModule, JetDriverVerbOutput, jet_driver_query_build_plan, jet_driver_entry_package_has_build,
         jet_driver_present_diagnostics, jet_driver_build_plan_json, jet_driver_build_explanation,
         jet_driver_report_problems, JET_DRIVER_EXIT_OK,
@@ -20,7 +20,7 @@ use {
     jet_build_session.[BuildPlanExecutable, BuildPlanExecution, BuildPlanSelection, BuildSessionGeneratedModule, BuildSessionOption, BuildSessionPlan, BuildSessionValue, build_plan_contributions, build_plan_execution, build_plan_generated, build_plan_selection]
     jet_pkg_model.[
         ContributionLayer, FactContribution, FactValue, LockError, LockedBuildContribution, PackageFacts, SourceScope,
-        BuildStamp, ComptimeInput, pkg_lock_build_stamp, pkg_lock_load, pkg_lock_locked_build_contribution_set, pkg_lock_record_build_contributions, pkg_lock_record_generated_inputs, pkg_lock_sorted_contributions, pkg_manifest_parse, pkg_sha256_hex,
+        BuildStamp, ComptimeInput, pkg_effect_gain_list, pkg_lock_build_stamp, pkg_lock_e3513, pkg_lock_load, pkg_lock_locked_build_contribution_set, pkg_lock_record_build_contributions, pkg_lock_record_effect_rows, pkg_lock_record_generated_inputs, pkg_lock_sorted_contributions, pkg_manifest_parse, pkg_sha256_hex,
     ]
 }
 
@@ -186,7 +186,10 @@ jet_cli_build_package_as: fn(file: String, color: Bool, options: BuildOptions, b
             resolved_options = Val(resolved.move())
         }
     }
-    selected_options: resolved_options ?? return jet_cli_ice("the build options lost their resolution")
+    selected_options := resolved_options ?? return jet_cli_ice("the build options lost their resolution")
+    // Each target's compile refuses a dependency effect row the lock doesn't
+    // cover under `--locked` (jet_cli_lock_effect_rows).
+    selected_options.locked = locked
     // A web build is one entry's `app.*` files (BuildWeb.jet), so a package's
     // build targets are built native only.
     if build_options_value(selected_options, "os") == "web" {
@@ -558,11 +561,36 @@ jet_cli_build_fact_value: fn(value: BuildSessionValue) -> FactValue? Never! {
 // carried for `--json` (E3512 for a locked build's drift).
 jet_cli_lock_refusal: fn(error: LockError, color: Bool) -> JetDriverVerbOutput Never! {
     // copy: `diagnostic` is a payload view of `error`.
-    if error == .Reported(diagnostic) {
-        reports: [Diagnostic]{diagnostic.copy()}
-        return JetDriverVerbOutput{stdout: "", stderr: diagnostic_render_all("", "", reports, color), exit_code: JET_DRIVER_EXIT_USER_ERROR, failure: Val(JetDriverFailure{reports: reports, notice: ""})}
-    }
+    if error == .Reported(diagnostic) -> return jet_cli_lock_reports([Diagnostic]{diagnostic.copy()}, color)
     jet_cli_ice("the project lock refused the build: {error.message()}")
+}
+
+// The registered diagnostics a locked build stopped on, every one in one
+// report, carried for `--json`.
+jet_cli_lock_reports: fn(reports: [Diagnostic], color: Bool) -> JetDriverVerbOutput Never! {
+    JetDriverVerbOutput{stdout: "", stderr: diagnostic_render_all("", "", reports, color), exit_code: JET_DRIVER_EXIT_USER_ERROR, failure: Val(JetDriverFailure{reports: reports.copy(), notice: ""})}
+}
+
+// After a build's or a run's checks pass: record each dependency's inferred
+// effect row (the compile's `package_effects`) in the lock of `file`'s
+// project (pkg_lock_record_effect_rows). The output's stderr names each
+// dependency whose row widened and the effects it gained; a `locked` build
+// (`jet build --locked`) writes nothing and refuses every widened row instead
+// (E3513). Without dependency rows or a project lock there is nothing to
+// record. `json` leaves the names out, as it does the effect summary.
+jet_cli_lock_effect_rows: fn(file: String, result: JetDriverCompileResult, locked: Bool, color: Bool, json: Bool) -[FS, Env, Time]> JetDriverVerbOutput Never! {
+    recorded := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    if result.package_effects.len() == 0 -> return recorded
+    root: jet_cli_manifest_root(jet_cli_parent(file) ?? ".") ?? return recorded
+    gains: pkg_lock_record_effect_rows(root, result.package_effects, locked) ?? return jet_cli_lock_refusal(err, color)
+    if locked && gains.len() > 0 {
+        reports := [Diagnostic]{}
+        loop gain in gains -> reports.push(pkg_lock_e3513(gain))
+        return jet_cli_lock_reports(reports, color)
+    }
+    if json -> return recorded
+    loop gain in gains -> recorded.stderr = "{recorded.stderr}note: `{gain.name}` now reaches {pkg_effect_gain_list(gain.effects)}; `.jet/lock` records its wider effect row\n"
+    recorded
 }
 
 // fn build's layer of the build options: each option `selected` set, placed

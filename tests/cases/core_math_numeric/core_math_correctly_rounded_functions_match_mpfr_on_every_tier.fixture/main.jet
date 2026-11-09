@@ -7,10 +7,46 @@ use {
     math: core.math
 }
 
+EXP: comptime { embed_file("corpus/exp.txt") }
+EXP2: comptime { embed_file("corpus/exp2.txt") }
+EXP10: comptime { embed_file("corpus/exp10.txt") }
+EXPM1: comptime { embed_file("corpus/expm1.txt") }
+LOG: comptime { embed_file("corpus/log.txt") }
+LOG2: comptime { embed_file("corpus/log2.txt") }
+LOG10: comptime { embed_file("corpus/log10.txt") }
+LOG1P: comptime { embed_file("corpus/log1p.txt") }
 RSQRT: comptime { embed_file("corpus/rsqrt.txt") }
 SIN_PI: comptime { embed_file("corpus/sinpi.txt") }
 COS_PI: comptime { embed_file("corpus/cospi.txt") }
 TAN_PI: comptime { embed_file("corpus/tanpi.txt") }
+ATAN_PI: comptime { embed_file("corpus/atanpi.txt") }
+ASIN_PI: comptime { embed_file("corpus/asinpi.txt") }
+ACOS_PI: comptime { embed_file("corpus/acospi.txt") }
+ATAN2_PI: comptime { embed_file("corpus/atan2pi.txt") }
+EXP2_M1: comptime { embed_file("corpus/exp2m1.txt") }
+EXP10_M1: comptime { embed_file("corpus/exp10m1.txt") }
+LOG2_P1: comptime { embed_file("corpus/log2p1.txt") }
+LOG10_P1: comptime { embed_file("corpus/log10p1.txt") }
+POW_R: comptime { embed_file("corpus/powr.txt") }
+POW_N: comptime { embed_file("corpus/pown.txt") }
+ROOT_N: comptime { embed_file("corpus/rootn.txt") }
+COMPOUND_N: comptime { embed_file("corpus/compoundn.txt") }
+SIN: comptime { embed_file("corpus/sin.txt") }
+COS: comptime { embed_file("corpus/cos.txt") }
+TAN: comptime { embed_file("corpus/tan.txt") }
+ASIN: comptime { embed_file("corpus/asin.txt") }
+ACOS: comptime { embed_file("corpus/acos.txt") }
+ATAN: comptime { embed_file("corpus/atan.txt") }
+ATAN2: comptime { embed_file("corpus/atan2.txt") }
+SINH: comptime { embed_file("corpus/sinh.txt") }
+COSH: comptime { embed_file("corpus/cosh.txt") }
+TANH: comptime { embed_file("corpus/tanh.txt") }
+ASINH: comptime { embed_file("corpus/asinh.txt") }
+ACOSH: comptime { embed_file("corpus/acosh.txt") }
+ATANH: comptime { embed_file("corpus/atanh.txt") }
+CBRT: comptime { embed_file("corpus/cbrt.txt") }
+HYPOT: comptime { embed_file("corpus/hypot.txt") }
+POW: comptime { embed_file("corpus/pow.txt") }
 
 hex_value: fn(b: U8) -> Int {
     n: Int.from_u8(b)
@@ -43,12 +79,49 @@ is_nan_word: fn(word: Int) -> Bool {
     magnitude > 9218868437227405312
 }
 
-// The result of `name` on arguments `a`.
-value: fn(name: String, a: [Float]) -> Float {
+// The result of `name` on arguments `a`, whose words are `w`: pown, rootn
+// and compoundn take their second word as a whole number.
+value: fn(name: String, a: [Float], w: [Int]) -> Float {
+    if name == "exp" -> return math.exp(a[0])
+    if name == "exp2" -> return math.exp2(a[0])
+    if name == "exp10" -> return math.exp10(a[0])
+    if name == "expm1" -> return math.exp_m1(a[0])
+    if name == "log" -> return math.ln(a[0])
+    if name == "log2" -> return math.log2(a[0])
+    if name == "log10" -> return math.log10(a[0])
+    if name == "log1p" -> return math.ln_1p(a[0])
     if name == "rsqrt" -> return math.rsqrt(a[0])
     if name == "sinpi" -> return math.sin_pi(a[0])
     if name == "cospi" -> return math.cos_pi(a[0])
     if name == "tanpi" -> return math.tan_pi(a[0])
+    if name == "atanpi" -> return math.atan_pi(a[0])
+    if name == "asinpi" -> return math.asin_pi(a[0])
+    if name == "acospi" -> return math.acos_pi(a[0])
+    if name == "atan2pi" -> return math.atan2_pi(a[0], a[1])
+    if name == "exp2m1" -> return math.exp2_m1(a[0])
+    if name == "exp10m1" -> return math.exp10_m1(a[0])
+    if name == "log2p1" -> return math.log2_1p(a[0])
+    if name == "log10p1" -> return math.log10_1p(a[0])
+    if name == "powr" -> return math.pow_r(a[0], a[1])
+    if name == "pown" -> return math.pow_n(a[0], w[1])
+    if name == "rootn" -> return math.root_n(a[0], w[1])
+    if name == "compoundn" -> return math.compound_n(a[0], w[1])
+    if name == "sin" -> return math.sin(a[0])
+    if name == "cos" -> return math.cos(a[0])
+    if name == "tan" -> return math.tan(a[0])
+    if name == "asin" -> return math.asin(a[0])
+    if name == "acos" -> return math.acos(a[0])
+    if name == "atan" -> return math.atan(a[0])
+    if name == "atan2" -> return math.atan2(a[0], a[1])
+    if name == "sinh" -> return math.sinh(a[0])
+    if name == "cosh" -> return math.cosh(a[0])
+    if name == "tanh" -> return math.tanh(a[0])
+    if name == "asinh" -> return math.asinh(a[0])
+    if name == "acosh" -> return math.acosh(a[0])
+    if name == "atanh" -> return math.atanh(a[0])
+    if name == "cbrt" -> return math.cbrt(a[0])
+    if name == "hypot" -> return math.hypot(a[0], a[1])
+    if name == "pow" -> return a[0].pow(a[1])
     panic("no corpus function {name}")
 }
 
@@ -77,7 +150,7 @@ check: fn(name: String, corpus: String) {
             arguments.push(math.from_bits(words[i]))
             shown.push(hex_word(words[i]))
         }
-        got: math.to_bits(value(name, arguments))
+        got: math.to_bits(value(name, arguments, words))
         rows = rows + 1
         if got != want && !(is_nan_word(got) && is_nan_word(want)) {
             wrong = wrong + 1
@@ -88,8 +161,44 @@ check: fn(name: String, corpus: String) {
 }
 
 run: fn() {
+    check("exp", EXP)
+    check("exp2", EXP2)
+    check("exp10", EXP10)
+    check("expm1", EXPM1)
+    check("log", LOG)
+    check("log2", LOG2)
+    check("log10", LOG10)
+    check("log1p", LOG1P)
     check("rsqrt", RSQRT)
     check("sinpi", SIN_PI)
     check("cospi", COS_PI)
     check("tanpi", TAN_PI)
+    check("atanpi", ATAN_PI)
+    check("asinpi", ASIN_PI)
+    check("acospi", ACOS_PI)
+    check("atan2pi", ATAN2_PI)
+    check("exp2m1", EXP2_M1)
+    check("exp10m1", EXP10_M1)
+    check("log2p1", LOG2_P1)
+    check("log10p1", LOG10_P1)
+    check("powr", POW_R)
+    check("pown", POW_N)
+    check("rootn", ROOT_N)
+    check("compoundn", COMPOUND_N)
+    check("sin", SIN)
+    check("cos", COS)
+    check("tan", TAN)
+    check("asin", ASIN)
+    check("acos", ACOS)
+    check("atan", ATAN)
+    check("atan2", ATAN2)
+    check("sinh", SINH)
+    check("cosh", COSH)
+    check("tanh", TANH)
+    check("asinh", ASINH)
+    check("acosh", ACOSH)
+    check("atanh", ATANH)
+    check("cbrt", CBRT)
+    check("hypot", HYPOT)
+    check("pow", POW)
 }

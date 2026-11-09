@@ -2,7 +2,7 @@
 // canvas. Each frame clears, draws a scrolling tile map, 48 translucent
 // sprites, a translucent HUD bar and two lines of 5x7 bitmap-font text. Every
 // rectangle clips to the canvas and blends src-over per channel, alpha
-// included: (s * a + d * (255 - a) + 127) / 255. With JET_RAYLIB_CAPTURE set,
+// included: (s * a + d * (255 - a) + 127) / 255. With JET_FRAME_CAPTURE set,
 // every presented frame is written there as a PAM image.
 #include <stdint.h>
 #include <stdio.h>
@@ -101,7 +101,7 @@ static void draw_text(const char *text, int x, int y, int size, uint32_t color) 
 }
 
 static void end_drawing(void) {
-    const char *path = getenv("JET_RAYLIB_CAPTURE");
+    const char *path = getenv("JET_FRAME_CAPTURE");
     if (!path || !*path) return;
     FILE *file = fopen(path, "wb");
     if (!file) return;

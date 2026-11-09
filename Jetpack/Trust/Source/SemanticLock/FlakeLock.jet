@@ -194,9 +194,10 @@ trust_json_canonical_field: fn(object: [String: Dyn], key: String) -> String Tru
     trust_json_canonical(value)
 }
 
-trust_json_quote: fn(text: String) -> String Never! {
-    // Text cannot contain a non-finite Float or a non-text map key.
-    json.to_string(Dyn.Text(text.copy())) ?? panic("Text must be JSON-encodable")
+// A `trust_json_canonical` text as its tree again: the stored lock-node and
+// registry fields are canonical JSON, so the re-render is byte-identical.
+trust_json_value: fn(text: String) -> Dyn Never! {
+    json.parse(text) ?? panic("canonical flake JSON must re-parse: {err.kind:Debug}")
 }
 
 trust_json_texts: fn(values: [String]) -> Dyn Never! {
@@ -205,11 +206,16 @@ trust_json_texts: fn(values: [String]) -> Dyn Never! {
     Dyn.Array(items)
 }
 
-// An object rendered with its fields in the given order.
-trust_json_object_text: fn(fields: [TrustJSONField]) -> String TrustError! {
+// An object of `fields` keyed through a map.
+trust_json_object_tree: fn(fields: [TrustJSONField]) -> Dyn Never! {
     object := [String: Dyn]{}
     loop field in fields -> object[field.key] = field.value
-    trust_json_canonical(Dyn.Object(object))
+    Dyn.Object(object)
+}
+
+// An object rendered with its fields in the given order.
+trust_json_object_text: fn(fields: [TrustJSONField]) -> String TrustError! {
+    trust_json_canonical(trust_json_object_tree(fields))
 }
 
 trust_flake_find_node: fn(nodes: [FlakeLockNode], name: String) -> FlakeLockNode? Never! {
@@ -473,28 +479,37 @@ trust_flake_read_lock_node: fn(name: String, value: Dyn) -> FlakeLockNode TrustE
     Ok(FlakeLockNode{name, original, locked, inputs})
 }
 
-// Rust `flake_lock_node_json`.
+// Rust `flake_lock_node_json`: keys in serde_json's sorted order.
+trust_flake_lock_node_tree: fn(node: FlakeLockNode) -> Dyn Never! {
+    edges := [Dyn]{}
+    loop edge in node.inputs -> edges.push(Dyn.Object(["name": Dyn.Text(edge.name.copy()), "target": trust_json_value(edge.target)]))
+    Dyn.Object(["inputs": Dyn.Array(edges), "locked": trust_json_value(node.locked), "name": Dyn.Text(node.name.copy()), "original": trust_json_value(node.original)])
+}
 trust_flake_lock_node_json: fn(node: FlakeLockNode) -> String Never! {
-    edges := [String]{}
-    loop edge in node.inputs -> edges.push("{{\"name\":{trust_json_quote(edge.name)},\"target\":{edge.target}}}")
-    "{{\"inputs\":[{edges.join(",")}],\"locked\":{node.locked},\"name\":{trust_json_quote(node.name)},\"original\":{node.original}}}"
+    trust_json_canonical(trust_flake_lock_node_tree(node)) ?? panic("typed flake lock node must be JSON-encodable")
 }
 
-// Rust `flake_registry_json`.
+// Rust `flake_registry_json`: keys in serde_json's sorted order.
+trust_flake_registry_tree: fn(entry: FlakeRegistryEntry) -> Dyn Never! {
+    Dyn.Object(["alias": Dyn.Text(entry.alias.copy()), "locked": trust_json_value(entry.locked), "node": Dyn.Text(entry.node.copy()), "original": trust_json_value(entry.original)])
+}
 trust_flake_registry_json: fn(entry: FlakeRegistryEntry) -> String Never! {
-    "{{\"alias\":{trust_json_quote(entry.alias)},\"locked\":{entry.locked},\"node\":{trust_json_quote(entry.node)},\"original\":{entry.original}}}"
+    trust_json_canonical(trust_flake_registry_tree(entry)) ?? panic("typed flake registry entry must be JSON-encodable")
 }
 
 // Rust `composition_json`.
-trust_flake_composition_json: fn(composition: FlakeComposition) -> String Never! {
-    // This closed schema has only Text, Bool, and arrays of Text.
-    trust_json_object_text([TrustJSONField]{
+trust_flake_composition_tree: fn(composition: FlakeComposition) -> Dyn Never! {
+    trust_json_object_tree([TrustJSONField]{
         {key: "framework", value: Dyn.Text(composition.framework.copy())},
         {key: "modules", value: trust_json_texts(composition.modules)},
         {key: "moduleSources", value: trust_json_texts(composition.module_sources)},
         {key: "perSystem", value: Dyn.Bool(composition.per_system)},
         {key: "systems", value: trust_json_texts(composition.systems)}
-    }) ?? panic("typed flake composition must be JSON-encodable")
+    })
+}
+trust_flake_composition_json: fn(composition: FlakeComposition) -> String Never! {
+    // This closed schema has only Text, Bool, and arrays of Text.
+    trust_json_canonical(trust_flake_composition_tree(composition)) ?? panic("typed flake composition must be JSON-encodable")
 }
 
 // Rust `parse_flake_lock_node`: a `flake-lock-node:` record's exact JSON.

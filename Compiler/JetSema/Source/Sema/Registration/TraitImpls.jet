@@ -95,8 +95,11 @@ sema_trait_impl_filled_methods: fn(type_name: String, trait_name: String, method
             if method.name == sig.name -> written = true
         }
         if written -> next
+        // The default body is written in the trait's module, so it keeps that
+        // module's `#FX(…)` caps.
         function := sema_trait_impl_method(sig)
         function.body = body.copy()
+        function.module_caps = sig.module_caps.copy()
         extras.push(function)
     }
     if extras.len() == 0 -> return None

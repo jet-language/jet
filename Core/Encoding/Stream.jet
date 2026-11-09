@@ -89,20 +89,25 @@ __reserve_checked: fn<T>(allocation: &AllocationBudget, values: &[T], additional
     if additional == 0 || requested <= old -> return
     growth: requested - old
     if !allocation.charge(growth) {
-        values = [T]{}
+        // `values = [T]{}` would empty the list in place and keep its buffer;
+        // returning the buffer's heap charge drops the buffer itself.
+        released: [T]{}
+        values = released
         allocation.release(old)
         return Err(.Heap)
     }
     if !mem.__list_reserve_exact<T>(values, additional) {
         allocation.release(growth)
         actual: mem.__list_capacity<T>(values) * mem.__type_size<T>()
-        values = [T]{}
+        released: [T]{}
+        values = released
         allocation.release(actual)
         return Err(.Allocation)
     }
     actual: mem.__list_capacity<T>(values) * mem.__type_size<T>()
     if actual < old || (actual > requested && !allocation.charge(actual - requested)) {
-        values = [T]{}
+        released: [T]{}
+        values = released
         allocation.release(requested)
         return Err(.Heap)
     }
@@ -1661,6 +1666,25 @@ ascii_text: fn(bytes: &&[U8]) -> String Never! {
         out = encoding.__bytes_into_text(bytes)
     }
     out
+}
+
+// The quoted text opening at `open` when every byte before its closing quote
+// is printable ASCII other than a backslash: one copy and no UTF-8 pass.
+// None for any other text, or when `open` is not a quote.
+plain_quoted: fn(bytes: [U8], open: Int) -> String? Never! {
+    if open < 0 || open >= bytes.len() || bytes[open] != (U8{34}) -> return None
+    at := open + 1
+    loop at < bytes.len() {
+        n: Int.from_u8(bytes[at])
+        if n == 34 {
+            #Unsafe("every byte before the closing quote is printable ASCII, so it is whole UTF-8") {
+                return Val(encoding.__bytes_into_text(bytes[open + 1..<at]))
+            }
+        }
+        if n == 92 || n < 32 || n > 126 -> return None
+        at += 1
+    }
+    None
 }
 
 // Rust's shipped stream writer used binary64 Display, not Jet's Debug-style

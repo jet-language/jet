@@ -399,19 +399,18 @@ ir_tx_leave_scopes: fn(m: &IRModule, b: &IRBuilder, frame: IRTxFrame) Never! {
 }
 
 // Whether a frame opened at or above `base` holds state a caught stop
-// cannot leave in place (a handle, an Stm, snapshots, a Shield or a
-// deadline); sentry and terminal frames only need leaving
-// (ir_tx_leave_sentries).
+// cannot leave in place (a handle, an Stm, snapshots or a Shield); deadline,
+// sentry and terminal frames only need leaving (ir_tx_leave_sentries).
 ir_tx_frames_hold_state: fn(frames: [IRTxFrame], base: Int) -> Bool Never! {
     loop index in base..<frames.len() {
         frame: frames[index]
-        if frame.handle >= 0 || frame.stm >= 0 || frame.snapshots.len() > 0 || frame.shield || frame.deadline >= 0 -> return true
+        if frame.handle >= 0 || frame.stm >= 0 || frame.snapshots.len() > 0 || frame.shield -> return true
     }
     false
 }
 
-// A caught stop leaving the sentry and terminal frames opened at or above
-// `base`, innermost first.
+// A caught stop leaving the deadline, sentry and terminal frames opened at
+// or above `base`, innermost first.
 ir_tx_leave_sentries: fn(m: &IRModule, b: &IRBuilder, base: Int) Never! {
     frames: b.transactions
     index := frames.len() - 1

@@ -29,8 +29,10 @@ run: fn() {
     print("empty average: {empty.average()}")
     print("empty min absent: {empty.min() == None} max absent: {empty.max() == None}")
 
-    // Float extrema use the collection sort order: NaN is the greatest item.
-    with_nan: [Float]{1.0, 0.0 / 0.0, 3.0}
+    // Float extrema use the collection sort order, IEEE 754 totalOrder: a
+    // positive NaN is the greatest item (a hardware `0.0 / 0.0` may be -NaN,
+    // the least).
+    with_nan: [Float]{1.0, Float.NAN, 3.0}
     top: with_nan.max() ?? 0.0
     print("float min: {with_nan.min() ?? 0.0} max is NaN: {top != top}")
     print("float max: {[Float]{1.0, 3.0, 2.0}.max() ?? 0.0}")

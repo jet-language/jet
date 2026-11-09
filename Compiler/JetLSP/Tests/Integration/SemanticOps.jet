@@ -1,9 +1,0 @@
-use std.[fs, env, process]
-
-// GATE #4494: native filesystem fixtures.
-fixture: fn(name: String) -> (OSPath, OSPath) {
-    root: env.temp_dir().join("jet_semantic_ops_{name}_{process.id()}")
-    _: fs.remove_dir_all(root)
-    fs.create_dir_all(root).unwrap()
-    (root, root.join("run.jet"))
-}

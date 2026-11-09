@@ -2033,8 +2033,7 @@ sema_derive_builtin_supports: fn(name: String, trait_name: String) -> Bool {
         if name == "Dyn" || name == "JSON" || name == "TOML" || name == "YAML" || name == "CSV" -> return true
         return name == "Decimal" || name == "Date" || name == "LocalDate" || name == "LocalTime" || name == "DateTime" || name == "Duration" || name == "ZonedDateTime"
     }
-    if name == "Int" || name == "Bool" || name == "String" || name == "Char" || name == "U8" || name == "Ordering" -> return true
-    if name == "Float" || name == "Float32" -> return trait_name != "Comparable"
+    if name == "Int" || name == "Bool" || name == "String" || name == "Char" || name == "U8" || name == "Ordering" || name == "Float" || name == "Float32" -> return true
     // The Prelude carriers with registered value
     // equality and order (Rust `register_synthetic_display_debug`).
     if name == "DateTime" || name == "LocalDate" || name == "LocalTime" || name == "Duration" || name == "Instant" || name == "ZonedDateTime" -> return true
@@ -2061,7 +2060,7 @@ sema_derive_implements: fn(readiness: &SemaDeriveReadiness, items: [Item], name:
 
 sema_derive_native_ordering_ready: fn(ty: Type) -> Bool {
     if ty == {
-        .Int | .IntN(_, _) | .Bool | .String | .Char -> true
+        .Int | .IntN(_, _) | .Bool | .String | .Char | .Float | .Float32 -> true
         .List(inner) | .Option(inner) | .FixedList(inner, _) | .Tagged(_, inner) -> sema_derive_native_ordering_ready(inner)
         .Result(ok, err) -> sema_derive_native_ordering_ready(ok) && sema_derive_native_ordering_ready(err)
         .Tuple(fields) -> {
@@ -2235,7 +2234,10 @@ sema_derive_expand_builtin_items: fn(items: &[Item], diagnostics: &[Diagnostic])
     // Each item is read in place; an expanded declaration gains its derived
     // trait impls in place.
     loop index in 0..<items.len() {
-        sema_derive_float_comparable(items[index], diagnostics)
+        // A `#Comparable` over a value with no order at all is one E0905 at
+        // the marker; its derived bodies are not expanded, so no `<` error
+        // follows from inside them.
+        if sema_derive_unordered_comparable(items[index], diagnostics) -> next
         blocks: sema_derive_builtin_blocks(items[index], facts, auto_equatable, auto_comparable, providers, generated, diagnostics)
         if blocks.len() == 0 -> next
         if &items[index] == .Struct(definition) {
@@ -2248,43 +2250,53 @@ sema_derive_expand_builtin_items: fn(items: &[Item], diagnostics: &[Diagnostic])
     loop item in generated -> items.push(item)
 }
 
-// `Float` has no total order (NaN), so it is never `Comparable`: an explicit
-// `#Comparable` over a type that holds a `Float` (a field, a variant payload,
-// or a distinct's base, through lists, options, results, tuples and unions)
-// is E0905 at the marker.
-sema_derive_float_comparable: fn(item: Item, diagnostics: &[Diagnostic]) {
+// A Float orders by IEEE 754 totalOrder, so it is Comparable like the other
+// scalars. A map or a function has no order: an explicit `#Comparable` over a
+// type that holds one (a field, a variant payload, or a distinct's base,
+// through lists, options, results, tuples and unions) is E0905 at the marker.
+sema_derive_unordered_comparable: fn(item: Item, diagnostics: &[Diagnostic]) -> Bool {
     marker: if item == {
-        .Struct(definition) -> sema_derive_comparable_marker(definition.derives) ?? return
-        .Enum(definition) -> sema_derive_comparable_marker(definition.derives) ?? return
-        .Distinct(definition) -> sema_derive_comparable_marker(definition.derives) ?? return
-        else -> { return }
+        .Struct(definition) -> sema_derive_comparable_marker(definition.derives) ?? return false
+        .Enum(definition) -> sema_derive_comparable_marker(definition.derives) ?? return false
+        .Distinct(definition) -> sema_derive_comparable_marker(definition.derives) ?? return false
+        else -> { return false }
     }
-    holds_float: if item == {
+    held: sema_derive_item_unordered_type(item) ?? return false
+    held_name: type_name(held)
+    row: diagnostic_registry_row("E0905") ?? panic("E0905 must have a registry row")
+    diagnostics.push(sema_error("E0905", marker, row.what.replace("{{type}}", held_name).replace("{{bound}}", "Comparable"), row.why.replace("{{why_text}}", "`{held_name}` has no order, so a type that holds it can't be `Comparable`"), row.fix.replace("{{fix_text}}", "remove `#Comparable`, or write the `Comparable` impl by hand over the fields that have an order")))
+    true
+}
+
+// The first unordered type an item holds: in a stored field, a variant
+// payload, or a distinct's base.
+sema_derive_item_unordered_type: fn(item: Item) -> Type? Never! {
+    if item == {
         .Struct(definition) -> {
             loop field in definition.fields {
-                if field.computed == None && sema_derive_holds_float(field.ty) -> break true
-            } ?? false
+                if field.computed != None -> next
+                if sema_derive_unordered_type(field.ty) == .Val(held) -> return Val(held)
+            }
         }
         .Enum(definition) -> {
             loop variant in definition.variants {
-                found: if variant.payload == {
-                    .Unit -> false
-                    .Single(ty, _) -> sema_derive_holds_float(ty)
+                if variant.payload == {
+                    .Unit -> {}
+                    .Single(ty, _) -> {
+                        if sema_derive_unordered_type(ty) == .Val(held) -> return Val(held)
+                    }
                     .Named(named) -> {
                         loop field in named {
-                            if sema_derive_holds_float(field.ty) -> break true
-                        } ?? false
+                            if sema_derive_unordered_type(field.ty) == .Val(held) -> return Val(held)
+                        }
                     }
                 }
-                if found -> break true
-            } ?? false
+            }
         }
-        .Distinct(definition) -> sema_derive_holds_float(definition.base)
-        else -> false
+        .Distinct(definition) -> return sema_derive_unordered_type(definition.base)
+        else -> {}
     }
-    if !holds_float -> return
-    row: diagnostic_registry_row("E0905") ?? panic("E0905 must have a registry row")
-    diagnostics.push(sema_error("E0905", marker, row.what.replace("{{type}}", "Float").replace("{{bound}}", "Comparable"), row.why.replace("{{why_text}}", "`Float` would need to implement `Comparable` before it can be used here"), row.fix.replace("{{fix_text}}", "use explicit Float comparisons or sort by a total key that handles NaN")))
+    None
 }
 
 sema_derive_comparable_marker: fn(derives: [NamedSpan]) -> Span? Never! {
@@ -2294,24 +2306,28 @@ sema_derive_comparable_marker: fn(derives: [NamedSpan]) -> Span? Never! {
     None
 }
 
-sema_derive_holds_float: fn(ty: Type) -> Bool Never! {
+// The first type inside `ty` with no order: a map or a function.
+sema_derive_unordered_type: fn(ty: Type) -> Type? Never! {
     if ty == {
-        .Float | .Float32 -> true
-        .List(inner) | .Option(inner) | .FixedList(inner, _) | .Tagged(_, inner) | .InlineRange(inner, _, _) -> sema_derive_holds_float(inner)
-        .Result(ok, err) -> sema_derive_holds_float(ok) || sema_derive_holds_float(err)
+        .Map(_, _, _) | .Fn(_, _, _, _, _, _) -> Val(ty)
+        .List(inner) | .Option(inner) | .FixedList(inner, _) | .Tagged(_, inner) | .InlineRange(inner, _, _) -> sema_derive_unordered_type(inner)
+        .Result(ok, error) -> {
+            if sema_derive_unordered_type(ok) == .Val(held) -> return Val(held)
+            sema_derive_unordered_type(error)
+        }
         .Tuple(members) -> {
             loop member in members {
-                if sema_derive_holds_float(member.ty) -> return true
+                if sema_derive_unordered_type(member.ty) == .Val(held) -> return Val(held)
             }
-            false
+            None
         }
         .Union(members) -> {
             loop member in members {
-                if sema_derive_holds_float(member) -> return true
+                if sema_derive_unordered_type(member) == .Val(held) -> return Val(held)
             }
-            false
+            None
         }
-        else -> false
+        else -> None
     }
 }
 

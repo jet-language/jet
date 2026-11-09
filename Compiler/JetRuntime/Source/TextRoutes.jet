@@ -121,6 +121,43 @@ rt_text_hash_fold: fn(hash: I64, word: I64) -> I64 {
     count
 }
 
+// jet_string_words: Rust str::split_whitespace, the fields between runs of
+// Unicode White_Space. No field is empty, so blank text has none.
+#Export(c) jet_string_words: fn(value: I64, output: I64) -> I64 {
+    bytes: rt_text_data(value)
+    length: rt_text_len(value)
+    count := I64{0}
+    inside := false
+    at := I64{0}
+    loop at < length {
+        space: unicode_is_white_space(rt_text_decode(wrapping(bytes + at)))
+        if (!space && !inside) { count += I64{1} }
+        inside = !space
+        at += rt_text_width(wrapping(bytes + at))
+    }
+    if (count > I64{1152921504606846975}) {
+        rt_text_capacity_stop()
+        return I64{0}
+    }
+    words: if (count == I64{0}) -> I64{0} else -> jet_rt_alloc(count * I64{8}, I64{8})
+    rt_text_store(output, words)
+    start := I64{-1}
+    index := I64{0}
+    at = I64{0}
+    loop at < length {
+        space: unicode_is_white_space(rt_text_decode(wrapping(bytes + at)))
+        if (space && start >= I64{0}) {
+            rt_text_store(wrapping(words + index * I64{8}), rt_text_slice(value, start, at))
+            index += I64{1}
+            start = I64{-1}
+        }
+        if (!space && start < I64{0}) { start = at }
+        at += rt_text_width(wrapping(bytes + at))
+    }
+    if (start >= I64{0}) { rt_text_store(wrapping(words + index * I64{8}), rt_text_slice(value, start, length)) }
+    count
+}
+
 #Export(c) jet_string_repeat: fn(value: I64, count: I64) -> I64 {
     length: rt_text_len(value)
     native: jet_int_owned_to_i64(count)

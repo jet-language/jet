@@ -1544,23 +1544,6 @@ os_copy_descending_words_i64: fn(target_last: I64, source_last: I64, count: I64)
     """
 }
 
-// String store for the runtime's word fills (RouteAGame.jet canvas spans):
-// writes `count` copies of the 8-byte `value` from `target` upward.
-#[Unsafe("the caller owns count writable 8-byte words at target"), FFI(asm)]
-os_fill_words_i64: fn(target: I64, value: I64, count: I64) {
-    """
-    push {target}
-    push {value}
-    push {count}
-    pop rcx
-    pop rax
-    pop rdi
-    cld
-    rep stosq
-    ; clobbers rax, rcx, rdi
-    """
-}
-
 #[Unsafe("reads one byte from a live readable mapped address supplied by the caller"), FFI(asm)]
 os_load_u8: fn(address: I64) -> I64 {
     """
@@ -1823,12 +1806,36 @@ os_call_address_two_i64: fn(address: I64, first: I64, second: I64) -> I64 {
     """
 }
 
+// A C function of up to four word arguments (a callee taking fewer ignores
+// the rest: System V passes them in registers the caller owns). C may use
+// every caller-saved register, the vector ones included.
+#[Unsafe("calls C code; the caller vouches for the code and its word-argument System V signature"), FFI(asm)]
+os_call_address_four_i64: fn(address: I64, first: I64, second: I64, third: I64, fourth: I64) -> I64 {
+    """
+    push {address}
+    push {first}
+    push {second}
+    push {third}
+    push {fourth}
+    pop rcx
+    pop rdx
+    pop rsi
+    pop rdi
+    pop r11
+    call r11
+    mov rax, rax ; -> return
+    ; clobbers rcx, rdx, rsi, rdi, r8, r9, r10, r11, xmm0, xmm1, xmm2, xmm3, xmm4, xmm5, xmm6, xmm7, xmm8, xmm9, xmm10, xmm11, xmm12, xmm13, xmm14, xmm15
+    """
+}
+
 // Raw clone runs the child at entry(arg) on the supplied stack [entry,arg]
 // and exits 0 if entry returns. It does not construct musl's FS TLS or set
-// __libc.threaded, so a thread made this way stays fixture-only until libc
-// leaves the pack; the spawn child (HostSpawn.jet spawn_vfork) only runs raw
-// syscalls before execve. A thread's stack has a guard page; parent/child TID
-// words live until the kernel's CHILD_CLEARTID and join finish.
+// __libc.threaded, so its child runs no libc code: the runtime threads of a
+// program that links no C (Thread.jet thread_spawn; one that does starts
+// musl threads) run only Jet and system calls, and the spawn child
+// (HostSpawn.jet spawn_vfork) only runs raw syscalls before execve. A
+// thread's stack has a guard page; parent/child TID words live until the
+// kernel's CHILD_CLEARTID and join finish.
 #[Unsafe("raw clone child runs only Jet/syscall code, never Rust or musl; supplied stack contains entry and argument"), FFI(asm)]
 os_clone_i64: fn(flags: I64, stack: I64, parent_tid: I64, child_tid: I64) -> I64 {
     """

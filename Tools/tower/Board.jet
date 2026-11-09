@@ -225,10 +225,9 @@ parse_request: fn(args: [String]) -> Request Failure! {
         name := arg.removeprefix("--")
         value := ""
         has_value := false
-        if name.contains("=") {
-            parts: name.split("=").to_list()
-            value = name.removeprefix("{parts[0]}=")
-            name = parts[0].copy()
+        if name.split_once("=") == .Val(parts) {
+            value = parts.after.copy()
+            name = parts.before.copy()
             has_value = true
         }
         if BOOLEAN_FLAGS.contains(name) {
@@ -1163,7 +1162,7 @@ spec_files: fn(dir: String, out: &[String]) Failure! -[FS]> {
             if SPEC_EXTENSIONS.any(extension -> folded.ends_with(extension)) -> out.push(path)
         }
     }
-    Ok(())
+    Ok()
 }
 
 // `\w` in a JavaScript regular expression without the u flag.

@@ -1,0 +1,58 @@
+// Descriptor passing over a Unix stream (#6701): shared memory rides an
+// SCM_RIGHTS send, arrives as an owned descriptor, and reads back with pread;
+// the wait leaf reports readiness without consuming the message. A duplicate
+// of the received descriptor and the memory itself close explicitly.
+use {
+    files: core.files
+    net: core.net
+    sys: core.sys
+}
+
+run: fn() {
+    root: files.temp_dir("unix_fd_passing") ?? panic("temporary directory")
+    path: files.join(root.path, "s")
+    listener: net.unix_listen(path) ?? panic("listen: {err}")
+    client := net.unix_connect(path) ?? panic("connect: {err}")
+    server := net.unix_accept(listener) ?? panic("accept: {err}")
+    print(net.unix_wait(server, 0) ?? panic("idle wait: {err}"))
+
+    memory := sys.shared_memory(4096) ?? panic("shared memory: {err}")
+    memory.write(8, "jet".bytes()) ?? panic("write: {err}")
+    pixels: [U8]{1, 2, 3, 4, 5, 6, 7, 8}
+    memory.write_pixels(16, pixels, 8, 0, 0, 2, 1, .XRGB8888) ?? panic("pixels: {err}")
+    memory.fill_u32(32, 2, 16909060) ?? panic("fill: {err}")
+    filled: memory.read(32, 8) ?? panic("read: {err}")
+    print(memory.len())
+    print(filled)
+    descriptor: memory.descriptor() ?? panic("descriptor: {err}")
+    net.unix_send(client, [U8]{42}, [sys.Fd]{descriptor}) ?? panic("send: {err}")
+
+    print(net.unix_wait(server, 1000000000) ?? panic("ready wait: {err}"))
+    message := net.unix_receive(server, 16) ?? panic("receive: {err}")
+    print("{message.bytes} {message.fds.len()}")
+    received: message.fds.remove(0, .Slot) ?? panic("no descriptor arrived")
+    inspect(received)
+    if memory.write(4094, "jet".bytes()) == {
+        .Ok(_) -> print("out-of-bounds write accepted")
+        .Err(_) -> print("out-of-bounds write refused")
+    }
+
+    net.unix_close(client) ?? panic("close: {err}")
+    closed: net.unix_receive(server, 16) ?? panic("receive after close: {err}")
+    print("{closed.bytes.len()} {closed.fds.len()}")
+    memory.close()
+}
+
+// The received descriptor, read where it lies: its size, bytes by pread, and
+// a second descriptor for the same file that its owner closes.
+inspect: fn(received: sys.Fd) {
+    print(received.size() ?? panic("size: {err}"))
+    print(String.from_bytes(received.read_at(8, 3) ?? panic("read_at: {err}")) ?? "")
+    print(received.read_at(16, 8) ?? panic("read pixels: {err}"))
+    retire(received.duplicate() ?? panic("duplicate: {err}"))
+}
+
+retire: fn(&&fd: sys.Fd) {
+    print(fd.size() ?? panic("duplicate size: {err}"))
+    fd.close()
+}

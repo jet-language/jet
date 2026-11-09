@@ -16,7 +16,7 @@ Run a lesson from the repository root, for example `jet run Examples/ErrorsAndEf
 - [AuthorityDenied](Effects/AuthorityDenied.jet) — Application authority, a written deny: a deny wins over every grant, including `-A`.
 - [AuthorityDenyFlag](Effects/AuthorityDenyFlag.jet) — Application authority, command-line denial: its golden runs it as `jet run -A --deny=Env authority_deny_flag.jet` (expected/effects/authority_deny_flag.case).
 - [AuthorityPackageGrant](Effects/AuthorityPackageGrant.jet) — Application authority, written grant: a leading package block adds rights under `authority`.
-- [AuthorityPartial](Effects/AuthorityPartial.jet) — Application authority, partial declaration: the written row acknowledges Env, but the program also reads the clock.
+- [AuthorityPartial](Effects/AuthorityPartial.jet) — Application authority, partial declaration: the written row lists Env, but the program also reads the clock.
 - [AuthorityUndeclared](Effects/AuthorityUndeclared.jet) — Application authority, no declaration: a file with no package block may use every effect nothing denies.
 - [CapabilitySigils](Effects/CapabilitySigils.jet) — Access sigils: the access marker rides the type — `&T` write, `&&T` move/take — and the call site mirrors it.
 - [Determinism](Effects/Determinism.jet)
@@ -37,6 +37,7 @@ Run a lesson from the repository root, for example `jet run Examples/ErrorsAndEf
 - [SingleUse](Effects/SingleUse.jet) — Single-use (must-consume) values.
 - [SmartContext](Effects/SmartContext.jet) — Smart Context — `#Context(field: value) { … }`.
 - [Taint](Effects/Taint.jet) — External values carry origin facts until a typed decode or an explicit #Scrub gate clears them.
+- [TypeCap](Effects/TypeCap.jet) — A type cap: `#FX(…)` on a struct or enum bounds every method of the type, in its body or in an `impl` block apart from it.
 
 ## Errors
 

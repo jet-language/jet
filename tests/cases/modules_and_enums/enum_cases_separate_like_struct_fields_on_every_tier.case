@@ -1,0 +1,19 @@
+# Enum cases and variant-group leaves take the struct field separators, a `,`
+# or a line break, on one line or across many, and every tier prints the same.
+fixture: enum_cases_separate_like_struct_fields_on_every_tier.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run --optimize=none main.jet
+exit: 0
+stdout: = "3 fast safe\n4.0 6.0 0.0\n1 2 3\nhot scald cold\nok warn fail\n"
+step: jet run --optimize=basic main.jet
+exit: 0
+stdout: = "3 fast safe\n4.0 6.0 0.0\n1 2 3\nhot scald cold\nok warn fail\n"
+step: jet run --optimize=full main.jet
+exit: 0
+stdout: = "3 fast safe\n4.0 6.0 0.0\n1 2 3\nhot scald cold\nok warn fail\n"
+step: jet build main.jet
+exit: 0
+step: built
+exit: 0
+stdout: = "3 fast safe\n4.0 6.0 0.0\n1 2 3\nhot scald cold\nok warn fail\n"

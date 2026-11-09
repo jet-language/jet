@@ -5,7 +5,8 @@
 // realize path as a manifest ref) and the `--flake` / no-`env.*` fallback to
 // a foreign `flake.nix` / `devenv.nix` through the bounded native
 // projection. The reserved subverbs `hook`, `export`, `test`, `sync`,
-// `info`, and `fetch-toolchain` share this entry.
+// `info`, and `fetch-toolchain` share this entry, and the hidden `__dev`
+// verb runs a bare `jet dev` inside the environment.
 
 // The reserved first-positional subverbs of `jet env`.
 EnvSubverb: enum {
@@ -406,10 +407,54 @@ cli_cmd_env_test: fn(verification: &StoreVerification, cache: &WorkspaceDeclarat
     EXIT_OK
 }
 
+// The hidden engine verb of a bare `jet dev` in a role-file project: the
+// front passes jetpack's own flags, then `--` and the words `jet dev <entry>`
+// takes.
+JETPACK_DEV_VERB: "__dev"
+
+// A bare `jet dev` in a role-file project: the entry's `dev: fn` (else its
+// `run: fn`) runs as `jet dev <entry>` inside the project environment, after
+// the trust gate, the declared-secret check, the `on_enter` hooks and every
+// enabled dev service reporting healthy.
+cli_cmd_dev: fn(verification: &StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+    cache := WorkspaceDeclarationCache.new()
+    roots: pkg_resolve_roots()
+    if roots.dev_mode -> theme.detail(theme.gray("user-owned hangar: using {roots.root}"))
+    project_dir: cli_project_env_root(cache, cli_current_dir())
+    entry: cli_find_project_entry(project_dir)
+    if !cli_has_dev_or_run_entry(entry) {
+        theme.error_coded("E1254", "this project has no `jet dev` entry", "`jet dev` runs the entry file's top-level `dev: fn()` if it defines one, else `run: fn()`; `{entry}` defines neither", "add `dev: fn() {{ … }}` (a custom dev command) or `run: fn() {{ … }}` (the default) to the entry file.")
+        return EXIT_USAGE
+    }
+    plan := cli_load_project_plan_with_selections(cache, theme, parsed.flags.preset, parsed.flags.environment) ?? return cli_exit_for(theme, err)
+    cli_apply_locked_channels(theme, project_dir, plan.table, parsed.flags) ?? return cli_exit_for(theme, err)
+    if trust_gate_with_environment(theme, trust_store_path(), project_dir, plan.refs, plan.table, plan.secrets, plan.environment, parsed.flags.trust) == .Val(code) -> return code
+    cli_validate_declared_secrets(theme, project_dir, plan.secrets, plan.environment.active_environment) ?? return cli_exit_for(theme, err)
+    env := cli_compose_env(verification, theme, roots, parsed.flags, plan) ?? return cli_exit_for(theme, err)
+    cli_run_lifecycle_hooks(verification, cache, theme, parsed, roots, project_dir, entry, env, plan.environment.lifecycle.on_enter, "on_enter") ?? return cli_exit_for(theme, err)
+    if plan.dev_services.len() > 0 {
+        order: cli_services_order_or_report(theme, plan.dev_services, None, SERVICES_ORDER_FIX_DECLARE) ?? return EXIT_USAGE
+        before_start: (svc: DevServicePlan) -> cli_service_before_start(verification, cache, theme, parsed, roots, project_dir, entry, svc)
+        _: services_up_ordered_with(ServiceHost.Platform, project_dir, env, plan.dev_services, order, cli_service_health_timeout(), before_start) ?? {
+            cli_report_service_start_error(theme, "couldn't start dev services", err.message)
+            return EXIT_USAGE
+        }
+    }
+    theme.status("running {theme.bold(entry)}")
+    command := [String]{envmodel_find_jet_binary(), "dev", entry}
+    if parsed.command == .Val(words) {
+        loop word in words -> command.push(word.copy())
+    }
+    env.run_command(command)
+}
+
 // `jet env fetch-toolchain`: put this jet's C toolchain pack in the Hangar
 // now, so a later `jet cc` works offline. A pack already there is
-// re-verified without touching the network. `--json` prints the pack root
-// and its versions; jet's native C link (ForeignLink.jet) reads that root.
+// re-verified without touching the network. The host's musl target is
+// realized too: its sysroot (musl's headers, libc.a and crt objects) is
+// built once per Hangar, content-sealed under the Hangar's objects, and
+// shared by every project. `--json` prints the pack root, the musl sysroot
+// and the versions; jet's native C link (ForeignLink.jet) reads both paths.
 cli_cmd_env_fetch_toolchain: fn(verification: &StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     if parsed.positional.len() > 1 {
         theme.error_coded("E2102", "`jet env fetch-toolchain` takes no arguments", "unexpected `{parsed.positional[1]}`", "run `jet env fetch-toolchain` on its own")
@@ -423,12 +468,24 @@ cli_cmd_env_fetch_toolchain: fn(verification: &StoreVerification, theme: Theme, 
         cli_cc_report_provider_error(err)
         return EXIT_USER_ERROR
     }
+    // The host's architecture with musl: x86_64-unknown-linux-gnu runs
+    // x86_64-unknown-linux-musl programs.
+    musl_target: "{tools.asset.host.partition("-").head}-unknown-linux-musl"
+    spec: RefSpec.classify("cc-toolchain@jetpack#target={musl_target}") ?? {
+        cli_cc_report_provider_error(ProviderError.Unsupported("the pack's musl target `{musl_target}` is not a toolchain reference: {err}"))
+        return EXIT_USER_ERROR
+    }
+    musl: cli_cc_resolve_toolchain(verification, pkg_resolve_roots(), spec, None, parsed.flags.offline, cli_current_dir()) ?? {
+        cli_cc_report_provider_error(err)
+        return EXIT_USER_ERROR
+    }
     if parsed.flags.json {
-        print(cli_json_render(Dyn.Object(["root": Dyn.Text(tools.root), "llvm": Dyn.Text(tools.manifest.llvm), "musl": Dyn.Text(tools.manifest.musl), "glibc": Dyn.Text(tools.manifest.glibc)])))
+        print(cli_json_render(Dyn.Object(["root": Dyn.Text(tools.root), "musl_sysroot": Dyn.Text(musl.sysroot_root), "llvm": Dyn.Text(tools.manifest.llvm), "musl": Dyn.Text(tools.manifest.musl), "glibc": Dyn.Text(tools.manifest.glibc)])))
         return EXIT_OK
     }
     theme.ok("C toolchain pack for jet is ready: clang {tools.manifest.llvm}, musl {tools.manifest.musl}, glibc {tools.manifest.glibc}")
     theme.detail(tools.root)
+    theme.detail("musl sysroot {musl.sysroot_root}")
     EXIT_OK
 }
 

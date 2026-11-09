@@ -55,6 +55,9 @@ Program: struct {
     // Every `.routes(from:)` root this file names, as the driver read it
     // from the authorized snapshot, so sema checks the convention files.
     app_route_roots: [AppRouteRoot]{[AppRouteRoot]{}}
+    // An `#FX(…)` written at the head of the file, above a `use` line: a cap
+    // on every function in the file. Sema names it after the file.
+    file_cap: ModuleCap?{None}
 }
 
 // One `debug(…)` call as written. `name_start` keys it to the call's
@@ -288,11 +291,15 @@ CodeModule: struct {
     markers: [Marker]{[Marker]{}}
 }
 
-// A module's `#FX(…)` cap. Its plain entries are the ceiling and its `!`
-// entries are denials for every function inside the module, nested modules
-// included. Sema checks each function's solved row against it.
+// A module's or a type's `#FX(…)` cap. Its plain entries are the ceiling and
+// its `!` entries are denials: for every function inside the module, nested
+// modules and type bodies included, or for every method of the type, trait
+// impls written apart from its body included. Sema checks each function's
+// solved row against it. `scope` is `module` or `type`; `owner` is the
+// module's or the type's name.
 ModuleCap: struct {
-    module_name: String
+    owner: String
+    scope: String{"module"}
     entries: [EffectRowEntry]
     span: Span
 }
@@ -334,6 +341,10 @@ GenericModuleDef: struct {
     imports: [ImportDecl]
     body: [Item]
     span: Span
+    // The markers written above the template. An `#FX(…)` among them is also
+    // `cap`, carried by every function of the body as for a code module.
+    markers: [Marker]{[Marker]{}}
+    cap: ModuleCap?{None}
 }
 
 ModuleAliasDef: struct {
@@ -686,6 +697,8 @@ DeriveDef: struct {
 TraitMethodSig: struct {
     name: String
     name_span: Span
+    // The method's own type parameters (`encode_hole: fn<T: Printable>(…)`).
+    type_params: [TypeParam]
     params: [Param]
     return_type: Type?
     span: Span
@@ -695,6 +708,9 @@ TraitMethodSig: struct {
     return_view_provenance: ViewProvenanceMap?
     declared_return_view_provenance: ViewProvenanceMap?
     markers: [Marker]
+    // The `#FX(…)` caps of the modules enclosing the trait, outermost first:
+    // an impl that inherits the default body inherits them with it.
+    module_caps: [ModuleCap]{[ModuleCap]{}}
 }
 
 TraitImplBlock: struct {
@@ -1021,6 +1037,12 @@ StructDef: struct {
     marker_span: Span?{None}
     marker_expand_span: Span?{None}
     effect_impl: EffectImpl?{None}
+    // The type's `#FX(…)` cap; the marker stays in `type_markers`.
+    cap: ModuleCap?{None}
+    // The span of the inline `name: module { … }` that declared the struct
+    // (sema_inline_hoist_module sets it). Its `priv` fields belong to that
+    // module and its children; None for a struct declared at file level.
+    inline_module: Span?{None}
 }
 
 CLICommandBinding: struct {
@@ -1195,6 +1217,8 @@ EnumDef: struct {
     type_markers: [Marker]
     groups: [EnumGroup]
     effect_impl: EffectImpl?{None}
+    // The type's `#FX(…)` cap; the marker stays in `type_markers`.
+    cap: ModuleCap?{None}
 }
 
 EnumGroup: struct {

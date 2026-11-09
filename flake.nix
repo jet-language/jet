@@ -117,6 +117,7 @@
 
         # `jet` / `jetpack` in the dev shell: run the admitted native binaries
         # named by $JET / $JETPACK from anywhere, with the runtime tools on PATH.
+        # Without $JET, `jet` runs the installed release that `jet-use` picked.
         mkJetDevBin =
           name: variable:
           pkgs.writeShellScriptBin name ''
@@ -125,8 +126,17 @@
             export PATH="${jetRuntimePath}:$PATH"
             ${jetRustHelperHook}
             ${jetRuntimeLibraryHook}
+            if [ -z "$bin" ] && [ "${name}" = jet ]; then
+              release="$(readlink -f "''${JET_SEEDS:-$HOME/.local/share/jet-seeds}/current" 2>/dev/null || true)"
+              if [ -n "$release" ] && [ -x "$release/jet" ] && [ -f "$release/IDENTITY" ]; then
+                bin="$release/jet"
+                JET_COMPILER_IDENTITY="$(cat "$release/IDENTITY")"
+                export JET_COMPILER_IDENTITY
+                ulimit -s unlimited 2>/dev/null || ulimit -s 1048576 2>/dev/null || true
+              fi
+            fi
             if [ -z "$bin" ] || [ ! -x "$bin" ]; then
-              echo "${name}: ${variable} must name the admitted native ${name} binary" >&2
+              echo "${name}: set ${variable} to the admitted native ${name} binary, or install a release with jet-use" >&2
               exit 1
             fi
             exec "$bin" "$@"
@@ -200,7 +210,7 @@
 
         # Integration shell: full FFI matrix, Canvas, graphics, emulator, and
         # OS-image work. Use `nix develop .#full` / `jet Tools/agent/JetEnv.jet full …` explicitly.
-        devShells.full = pkgs.mkShell (jetShellVariables [ pkgs.raylib ] // {
+        devShells.full = pkgs.mkShell (jetShellVariables [ ] // {
           packages = [
             pkgs.cargo
             pkgs.rustc
@@ -273,7 +283,6 @@
             pkgs.pkg-config
             # `tool:openssl` loopback TLS peer, as in the default shell.
             pkgs.openssl
-            pkgs.raylib
           ]
           ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
             # D-CANVASTEST1=A / #390: Canvas interaction tests drive Chromium
@@ -282,9 +291,6 @@
             pkgs.chromium
             pkgs.firefox
             pkgs.geckodriver
-            # The native GTK backend is Linux-first (D-UIDEVSHELL1=A); keep its
-            # headers off platforms where that backend is not supported.
-            pkgs.gtk4
             # D-BUILDENTRY1 / #95: programmable build actions execute only
             # inside bubblewrap (E3505 fail-closed; no ambient fallback).
             pkgs.bubblewrap

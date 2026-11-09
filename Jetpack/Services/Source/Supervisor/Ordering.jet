@@ -298,7 +298,7 @@ services_logs: fn(project_dir: String, name: String) -[FS]> String Never! {
 
 // Structured lifecycle facts for `services health --json`; the state file
 // stays the source of truth.
-services_lifecycle_json: fn(project_dir: String, name: String) -[FS]> String? ServicesError! {
+services_lifecycle_tree: fn(project_dir: String, name: String) -[FS]> Dyn? ServicesError! {
     found: services_read_lifecycle(services_service_dir(project_dir, name))
     facts: found ?? return Ok(None)
     authority: services_authority_from_lifecycle(facts) ?? return Ok(None)
@@ -314,6 +314,5 @@ services_lifecycle_json: fn(project_dir: String, name: String) -[FS]> String? Se
     document["unit"] = if authority.unit() == .Val(unit) -> Dyn.Text(unit) else -> Dyn.Null
     document["guardian"] = if authority.guardian() == .Val(guardian) -> Dyn.Text(guardian) else -> Dyn.Null
     document["after"] = Dyn.Array(after)
-    text: json.to_string(Dyn.Object(document)) ?? return Err(ServicesError.new(err.reason))
-    Ok(Val(text))
+    Ok(Val(Dyn.Object(document)))
 }

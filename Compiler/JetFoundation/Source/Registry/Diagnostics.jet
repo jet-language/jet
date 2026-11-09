@@ -137,6 +137,9 @@ diagnostic_sentence_case_line: fn(value: String) -> String Never! {
             next
         }
         if diagnostic_is_whitespace_at(bytes, index) || character == 44 || character == 59 || character == 58 || character == 40 || character == 41 || character == 91 || character == 93 || character == 33 {
+            // A call chain (`relay → inc writes …`) opens with a function
+            // name, which keeps its own case.
+            if character == 32 && diagnostic_byte_at(bytes, index + 1) == 226 && diagnostic_byte_at(bytes, index + 2) == 134 && diagnostic_byte_at(bytes, index + 3) == 146 -> preserve = true
             finished = true
             index += width
             next

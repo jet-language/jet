@@ -26,7 +26,7 @@ one exists instead of adding another spelling for the same job.
 | `JETPACK_BIN` | executable path | Names the `jetpack` engine that `jet`'s engine verbs (`fetch`, `add`, `env`, `trust`, …) run. The lookup order is `JETPACK_BIN`, then the `jetpack` beside the running `jet`, then `PATH`; a `JETPACK_BIN` that names no executable file refuses with E1228 instead of falling through. `jet test --jetpack=<path>` (the `jetpack` test setting) sets it for every corpus row it runs, which otherwise get the engine this order finds for the jet under test. The name predates the `JET_<AREA>_<SETTING>` convention; it matches the `JETPACK_BIN` that Jetpack's process claims already use. |
 | `JET_CACHE_DIR` | path | Overrides the compiler build-cache directory. |
 | `JET_CC_PACK_URL` | `https://` or `file://` URL | Names where `jet cc` and `jet env fetch-toolchain` fetch this jet's C toolchain pack when it is neither in the Hangar nor beside jet, instead of the jet release. The pack must still hash to the SHA-256 jet embeds; a `file://` pack is a local copy and works offline. |
-| `JET_CC_PACK_ROOT` | directory | Names an unpacked C toolchain pack (a `jet env fetch-toolchain --json` root) whose clang and llvm-ar compile and archive a program's C dependencies on every tier, instead of the pack jet's `jetpack` fetches. `CC` or `AR` still win. A golden `jet test` run with a jetpack sets it for every row. |
+| `JET_CC_PACK_ROOT` | directory | Names an unpacked C toolchain pack (a `jet env fetch-toolchain --json` root) whose clang and llvm-ar build a C or C++ file with `jet run` and `jet build` on every tier, instead of the pack jet's `jetpack` fetches. A Jet program's C closure still takes the pack and its musl sysroot from the `jetpack` engine. `CC` or `AR` still win. A golden `jet test` run with a jetpack sets it for every row. |
 | `JET_FFI_CACHE_DIR` | path | Overrides the hidden Rust FFI bridge cache directory. |
 | `JET_ENV_DISABLE` | any non-empty value | D-ENVHOOK1 escape for `jet env hook`; suppresses automatic activation in the current shell and drops environment that hook already activated. |
 | `JET_FUZZ_CORPUS` | path | Overrides the fuzz corpus directory. |
@@ -35,8 +35,6 @@ one exists instead of adding another spelling for the same job.
 | `JET_FUZZ_TIME_MS` | non-negative integer | Sets the fuzz time budget in milliseconds. |
 | `JET_KEYS_DIR` | path | Overrides the signing-key directory used by publishing and secrets tooling. |
 | `JET_PROP_SEED` | integer from 0 to 2^63-1 | Replays a property-test run with the seed its failure report printed. `jet test --grade=generated --seed=<n>` sets it on the test harness (the fixed 0 when `--seed` is unset and the caller sets none). `jet prove` runs every property from this seed, else from one derived from the program's inputs, and names it in each property row as `effectiveSeed`. |
-| `JET_RAYLIB_CAPTURE` | path | Writes each frame that `core.game.raylib.end_drawing` presents to the path as a PAM (P7, RGB_ALPHA) image of the canvas. |
-| `JET_RAYLIB_DISPLAY` | `1` | Enables the real raylib display bridge; without it the bridge stays headless. |
 | `JET_REGISTRY_CACHE_DIR` | path | Overrides the local registry-index cache. |
 | `JET_REGISTRY_NAME` | registry name | Selects the named registry used by Jetpack doctor checks. |
 | `JET_REGISTRY_URL` | URL | Overrides the default registry index. |
@@ -50,7 +48,6 @@ one exists instead of adding another spelling for the same job.
 | `JET_TEST_SHUFFLE_SEED` | unsigned integer | Replays a shuffled generated test run. |
 | `JET_TIMING` | `1` | Prints compiler phase timings. |
 | `JET_TZDB_DIR` | path | Overrides the timezone database read by generated programs. |
-| `JET_UI_HEADLESS` | `1` | Suppresses native UI windows for display-less execution. |
 
 ## Maintainer and CI controls
 

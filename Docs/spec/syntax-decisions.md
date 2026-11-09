@@ -183,7 +183,7 @@ card #1495)*: the current tree keeps `core.files`,
 random under `core.math.random`, formatting under `core.text.fmt`, network
 leaves under `core.net`, UUID/vault/raw primitives under `core.crypto`, data
 sketches under `core.data.sketch`, solver under `core.compute.solve`, graphics
-under `core.game.raylib`, browser automation under `core.web.browser`, and
+under `core.ui` (D-RAY-API1), browser automation under `core.web.browser`, and
 gzip/zstd under `core.archive`. `core.time` is the one clock/civil-time door.
 Retired free namespaces have no aliases or re-exports, and there is no
 `core.json` short door.
@@ -2665,7 +2665,8 @@ a monorepo is reached through the ratified `jet split` (D-ECO-SPLITPOLICY1),
 which extracts a shared `policy:` value into a named `Config` when needed;
 `policy:` itself does not compose a `use:` list of named profiles. Effect
 ceilings are not policy fields: a package caps effects with
-`authority: { deny: […] }`, and a module caps them with `#FX(…) name: module`.
+`authority: { deny: […] }`, a module caps them with `#FX(…) name: module`, and
+a struct or enum caps its methods with `#FX(…) Name: struct`.
 
 ```jet
 # package.jet — policy: reads beside bare Package identity
@@ -4129,8 +4130,8 @@ bindings + optional user overlay; by-value first, pointers only inside S58.
 |---|---|
 | Autogen | `#Bindgen c.<lib>.__bindgen__: module { … }` in `.jet/bindings/c/<lib>.jet` |
 | Overlay | `#Extern c.<lib>: module { … }` — merged bindgen ∪ overlay, overlay wins |
-| Script | `use rl: "raylib.h"` — compile-time bind on cache miss |
-| Project | `use rl: c.raylib` or `use c.[raylib, sqlite3]` — one form per lib per file |
+| Script | `use z: "zlib.h"` — compile-time bind on cache miss |
+| Project | `use z: c.zlib` or `use c.[zlib, sqlite3]` — one form per lib per file |
 
 All foreign-language namespaces use the same `.[…]` member-list form as ordinary
 namespaces. Single-library `use alias: <lang>.<lib>` remains valid; there is no
@@ -4418,9 +4419,9 @@ rusqlite-bundled (`core.db`, D-DEP-DB1), ureq/hyper/tungstenite
 (`core.http`, D-NETDEP1/D-HTTPLIB3), Cranelift (`jet-jit`, D-JITDEP1),
 wasmtime (application plugins D-DEP-WASM1 and compiler-extension host
 D-DX5-HOOK1), age-style crypto bridge
-(D-JPK-SECRETCRYPTO1). `jet repl` stays std-only (D-REPL18). Raylib ships as
-first-party `core.raylib` bridge package (D-RAYLIB1); `core.game` is the
-scene-first game engine layered above it (D-GAME1=B, D-GAME2=A, D-GAME3=C).
+(D-JPK-SECRETCRYPTO1). `jet repl` stays std-only (D-REPL18). `core.game` is the
+scene-first game engine (D-GAME1=B, D-GAME2=A, D-GAME3=C); it draws through
+`core.ui` windows (D-RAY-API1=A).
 npm interop = typed first-party stub packages, no `.d.ts` parsing
 (D-NPMTYPE1); Swift interop waits on native-UI/C-ABI work (D-JSWIFTFFI1).
 
@@ -4476,16 +4477,13 @@ batteries engine. The engine name is `core.game` (D-GAME2=A). The beginner
 API is scene-first with a frame hook (D-GAME3=C): a `Scene` owns sprites,
 shapes, sounds, camera, and input bindings as durable editable data, and
 `scene.on_frame((frame) -> { ... })` attaches small game logic to that scene.
-The frame hook is not a second engine model; it is script on the scene. The
-already-ratified `core.raylib` bridge package (D-RAYLIB1=A) remains the
-interim compatibility floor beneath the native-shaped stack.
+The frame hook is not a second engine model; it is script on the scene. It
+draws through `core.ui` windows (D-RAY-API1=A).
 
-**D-FLAGSHIP-RAYLIB1 — Native raylib bridge** *(ratified 2026-07-07,
-card #9)*: the flagship raylib slice uses the already-ratified `core.raylib`
-surface. Generated code is headless by default; with `JET_RAYLIB_DISPLAY=1` it
-dynamically loads native raylib and calls the real C window, draw, keyboard, and
-FPS APIs. Missing raylib degrades to the same headless path so CI and ordinary
-test runs do not link raylib or require a display server.
+**D-FLAGSHIP-RAYLIB1** *(ratified 2026-07-07, card #9; superseded by
+D-RAY-API1=A)*: the foreign graphics bridge, its display switch and its
+dynamic loading are gone; drawing is `core.ui`'s Jet rasterizer on `Frame`
+values, and windows are `core.ui`'s own display-server clients.
 
 **D-GAME-ASSET1 / D-GAME-ECS1 / D-GAME-INPUT1 / D-GAME-REPLAY1 /
 D-GAME-BACKEND1 / D-GAME-BUDGET1 — Stable `core.game` substrate** *(ratified
@@ -5407,28 +5405,14 @@ compiles or fails identically on every platform). A non-`$build.os` subject is
 `$build.os` is meaningful *only* as this dispatch's subject — `build` is not a
 reserved word, so anywhere else it is an ordinary identifier (undefined at
 runtime → E0107), never a magic runtime value.
-**D-UIDEVSHELL1 (=A, ratified 2026-07-03, c2qj06uq)**: Phase 8 native
-backend toolchain deps enter via nixpkgs devShell (`gtk4` + `pkg-config`,
-Linux first) per the standing native-deps stopgap; jetpack core provider
-owns it long-term; non-Nix users get a clear install message. *Shipped*
-(Tower c134 Phase 8): `flake.nix`'s devShell gains `gtk4` + `pkg-config`;
-`core.ui.gtk_backend()` is a real, working `JetBackend` over libgtk-4 — a
-retained-mode widget API: `label`/`button` create real widgets and return a
-handle, `set_text`/`set_size`/`set_color` mutate a live widget, `on_click(id,
-handler)` wires a button, `present(title)` opens the window and runs the GLib
-loop. The flagship example is a live counter — a button click sets a
-`reactive.signal` and the `ui.reactive_render` effect updates the label text
-in place (the shipped reactive core, I8). Selected by the shipped `comptime if
-$build.os` dispatch (D-OSTARGET2=B) and emitted only on a Linux target; all gtk
-C-ABI calls are confined to the vetted `jet_gtk` prelude module (I1 — user
-code writes no low-level tier). The native link (`-lgtk-4 …`) is named by `use
-c.gtk4` through the S59 `pkg-config gtk4` path; a missing gtk4 at build time is
-the existing **E3201** (names the fix — install gtk4 / add the `c@system` dep
-/ enter `nix develop`). `jet run` opens the window; `JET_UI_HEADLESS=1` skips
-it so tests/CI terminate. Example:
-`Examples/Apps/UI/UINativeLinux.jet`; structural + link proof in
-`tests/cross.rs` (`gtk_backend_*`). macOS/Windows native backends stay out of
-scope (their `comptime` arms degrade honestly).
+**D-UIDEVSHELL1 (=A, ratified 2026-07-03, c2qj06uq)** *(retired, owner
+decision, card #6701)*: Phase 8 brought `gtk4` + `pkg-config` into the
+devShell for a `core.ui.gtk_backend()` over libgtk-4. The owner deleted the
+GTK backend: native windows are Jet's own (`core.ui.open` speaks the display
+server's wire protocol with no C library, `Core/Ui/Wayland.jet`), so
+`GtkBackend`, its runtime routes, `JET_UI_HEADLESS`, the `requires: gtk4`
+sidecar and the devShell's `gtk4` are gone. TUI and null stay as the
+node-tree backends.
 **D-STYLEUNIT1 (=A, ratified 2026-07-03, c2qj06uq)**: UI style lengths are
 unit-family literals — `core.ui.style` declares `#UnitFamily(Length) { px }`
 (D-QUAL3), so `width: 320px` is a compile-checked `Px` value via the one
@@ -8476,7 +8460,7 @@ with a machine-applicable fix, never an alias. Effect denials
 narrowing are unchanged, and carriers, layouts, and runtime are identical.
 Parser, formatter, type display, and diagnostics emit only the suffix form.
 An arrowless unit-fallible header normalizes to Unit success with its written
-error domain. Terminal `Ok()`, `Ok(())`, and `Err(error)` use that carrier,
+error domain. Terminal `Ok()` and `Err(error)` use that carrier,
 including in terminal table arms; ordinary Unit statements still fall through.
 
 **2026-09-30 — D-CALLBACK-ERR1=A shipped** *(card #3708; owner ruling that
@@ -8510,7 +8494,7 @@ The carrier layout and runtime are unchanged.
 **2026-08-21 — D-ERRSIGIL1=A** *(card #2127; ratified 2026-08-21; amended by
 D-ERRSUFFIX1=B and superseded by D-FAILURE-FOUNDATION1=A)*: `?` has one
 meaning: `T?` means a value might be absent, while a fallible type uses the
-suffix zone `T E!` (or `T !` for the default `Err`); call-site `?` propagation
+suffix zone `T E!` (`T Err!` pins the default `Err`); call-site `?` propagation
 and `??` keep their current meanings. The infix `T ! E` and `T ? E` spellings
 are retired and teach the suffix form.
 
@@ -8577,7 +8561,8 @@ slate card #2144; superseded by D-FAILURE-FOUNDATION1=A)*: the failure surface
 is a suffix zone: `[Success?] [ErrorUnion!]`, one `!` mark on the error type or
 on an explicit parenthesized union — `Entry? StoreError!`,
 `Int (DbError | TimeoutError)!`. Unit-fallible is the error suffix alone
-(`save: fn(path: String) IOError!`); bare `!` keeps the default-error meaning.
+(`save: fn(path: String) IOError!`); an omitted contract keeps the default `Err`,
+and `Err!` pins it; a bare `!` is not a contract.
 This amends D-ERRSIGIL1=A (the mark moves from infix separator to suffix),
 D-UNIONTYPE1=A (the union takes explicit parens under the suffix), and
 D-FAIL-UNIT1=A's spelling. `?` still means absence only.

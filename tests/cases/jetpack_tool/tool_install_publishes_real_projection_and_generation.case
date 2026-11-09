@@ -73,7 +73,7 @@ cwd: project
 exit: 0
 when os unix: file: home/.jet/bin/greet absent
 when os windows: file: home/.jet/bin/greet.exe absent
-file: home/.jet/tools/generations/2/meta.json ~ "\"tools\": [\n  ]" # original contains predicate
+file: home/.jet/tools/generations/2/meta.json ~ "\"tools\": []" # original contains predicate on the empty generation; meta.json is rendered by core.encoding.json's pretty writer, which writes an empty array as `[]` (the hand-built writer it replaced wrote `[\n  ]`)
 file: home/.jet/tools/generations/2/complete is-file
 file: home/.jet/tools/profile.json ~ "\"current\": 2" # original contains predicate
 capture: after_empty = concat-files root/hangar/lifecycle-db/journal sorted

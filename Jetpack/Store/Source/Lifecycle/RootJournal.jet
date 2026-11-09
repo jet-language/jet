@@ -273,11 +273,15 @@ store_lifecycle_snapshot: fn(verification: &StoreVerification, roots: HangarRoot
 
 // Rust `protected_targets_unlocked`: the caller already owns the Hangar lock.
 // Clean uses this exact set so dropping a short-lived verification lease
-// cannot expose durable roots.
-store_lifecycle_protected_targets_unlocked: fn(verification: &StoreVerification, roots: HangarRoots) -[FS, Env, Time]> [String] StoreError! {
+// cannot expose durable roots. The known objects come from the closure graph
+// the caller loaded and validated, so a record clean is quarantining (a
+// proven missing output) is left out here too, rather than reloading the
+// whole graph and refusing on that record's store proof.
+store_lifecycle_protected_targets_unlocked: fn(roots: HangarRoots, graph: ClosureGraph) -[FS, Env, Time]> [String] StoreError! {
     store_lifecycle_recover_unlocked(roots)
-    inputs: store_lifecycle_inputs_unlocked(verification, roots)
-    state: store_lifecycle_load_state(roots, inputs.known)
+    known := graph.objects.keys().to_list()
+    known.sort()
+    state: store_lifecycle_load_state(roots, known)
     store_lifecycle_validate_state_bounds(state)
     Ok(store_lifecycle_protected_union(state, store_lifecycle_unix_now()))
 }

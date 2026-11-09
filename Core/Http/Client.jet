@@ -1176,7 +1176,7 @@ __client_check_header: fn(name: String, value: String) HTTPError! {
     lower: ascii_lower(name)
     owned: lower == "host" || lower == "content-length" || lower == "transfer-encoding" || lower == "connection" || lower == "proxy-connection" || lower == "keep-alive" || lower == "te" || lower == "trailer" || lower == "upgrade" || lower == "proxy-authenticate" || lower == "proxy-authorization"
     if owned && !(lower == "connection" && __client_close_value(value)) -> return Err(.InvalidFraming)
-    Ok(())
+    Ok()
 }
 
 __client_close_value: fn(value: String) -> Bool Never! {
@@ -1685,7 +1685,7 @@ __client_tunnel: fn(&wire: __BuildWire, url: __ClientURL) HTTPError! -[Net, Time
     head: __client_head(wire) ?? return Err(.Proxy{stage: "transport"})
     reply: __client_parse_head(head) ?? return Err(.Proxy{stage: "transport"})
     if reply.status != 200 -> return Err(.Proxy{stage: "transport"})
-    Ok(())
+    Ok()
 }
 
 __client_exchange: fn(&wire: __BuildWire, method: String, url: __ClientURL, fields: [http.Header], body: [U8]?, phases: __ClientPhases, proxied: Bool) -[Net, Time.Wait]> __ClientReply HTTPError! {

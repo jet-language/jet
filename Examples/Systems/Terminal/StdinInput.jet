@@ -1,9 +1,11 @@
-// `input()` reads one line from standard input. `io.readline` is its
-// qualified twin, and `io.read_all_input` takes everything that is left.
+// The ambient `input` is every line of the program's input, read lazily:
+// the files its arguments name, else standard input. `io.readline` reads one
+// line, and `io.read_all_input` takes everything that is left; all three
+// share the one standard-input buffer.
 use io: core.term
 
 run: fn() {
-    print(input() ?? "")
+    print(input.first() ?? "")
     print(io.readline() ?? "")
     print(io.read_all_input() ?? "")
 }

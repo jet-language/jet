@@ -245,10 +245,10 @@ encode_value: fn(value: Dyn, out: &[U8], canonical: Bool) CBORError! {
 }
 
 #Test("CBOR preferred float widths and integer encoding") {
-    assert_eq(to_bytes(Dyn.Null), Ok([U8]{246}))
-    assert_eq(to_bytes(Dyn.Int(-1)), Ok([U8]{32}))
-    assert_eq(to_bytes(Dyn.Int(256)), Ok([U8]{25, 1, 0}))
-    assert_eq(to_bytes(Dyn.Float(Float{1.5})), Ok([U8]{249, 62, 0}))
+    assert_eq(to_bytes(Dyn.Null) ?? panic("null encodes"), [U8]{246})
+    assert_eq(to_bytes(Dyn.Int(-1)) ?? panic("-1 encodes"), [U8]{32})
+    assert_eq(to_bytes(Dyn.Int(256)) ?? panic("256 encodes"), [U8]{25, 1, 0})
+    assert_eq(to_bytes(Dyn.Float(Float{1.5})) ?? panic("1.5 encodes"), [U8]{249, 62, 0})
     assert_eq(parser.narrow_bits(4607182418800017408, 5, 10), Val(15360))
 }
 
@@ -276,24 +276,24 @@ priv typed_errors: module {
 }
 
 #Test("CBOR whole-value parser preserves limits and indefinite forms") {
-    assert_eq(parse([U8]{24, 24}), Ok(Dyn.Int(24)))
-    assert_eq(parse([U8]{159, 1, 2, 255}), Ok(Dyn.Array([Dyn]{Dyn.Int(1), Dyn.Int(2)})))
-    assert_eq(parse([U8]{249, 62, 0}), Ok(Dyn.Float(Float{1.5})))
-    if parse([U8]{65, 0}) == .Err(error) -> assert(error.kind == .Unsupported) else -> panic("dynamic bytes accepted")
+    assert((parse([U8]{24, 24}) ?? panic("one-byte uint parses")) == Dyn.Int(24))
+    assert((parse([U8]{159, 1, 2, 255}) ?? panic("indefinite array parses")) == Dyn.Array([Dyn]{Dyn.Int(1), Dyn.Int(2)}))
+    assert((parse([U8]{249, 62, 0}) ?? panic("half float parses")) == Dyn.Float(Float{1.5}))
+    assert((parse([U8]{65, 0}) ?? panic("byte string parses")) == Dyn.Bytes([U8]{0}))
     if parse([U8]{1, 2}) == .Err(error) -> assert(error.kind == .TrailingData) else -> panic("trailing root accepted")
 }
 
 #Test("CBOR major types 0 and 1 stay exact Ints out to 2^64-1 and -2^64, and wide Int trees compare equal") {
     // #4362: 2^63 and 2^64-1 decode exactly into the one `Dyn.Int` case.
-    assert_eq(parse([U8]{27, 128, 0, 0, 0, 0, 0, 0, 0}), Ok(Dyn.Int(9223372036854775808)))
-    assert_eq(parse([U8]{27, 255, 255, 255, 255, 255, 255, 255, 255}), Ok(Dyn.Int(18446744073709551615)))
-    assert_eq(parse([U8]{59, 255, 255, 255, 255, 255, 255, 255, 255}), Ok(Dyn.Int(-18446744073709551616)))
-    assert_eq(to_bytes(Dyn.Int(-18446744073709551616)), Ok([U8]{59, 255, 255, 255, 255, 255, 255, 255, 255}))
+    assert((parse([U8]{27, 128, 0, 0, 0, 0, 0, 0, 0}) ?? panic("2^63 parses")) == Dyn.Int(9223372036854775808))
+    assert((parse([U8]{27, 255, 255, 255, 255, 255, 255, 255, 255}) ?? panic("2^64-1 parses")) == Dyn.Int(18446744073709551615))
+    assert((parse([U8]{59, 255, 255, 255, 255, 255, 255, 255, 255}) ?? panic("-2^64 parses")) == Dyn.Int(-18446744073709551616))
+    assert_eq(to_bytes(Dyn.Int(-18446744073709551616)) ?? panic("-2^64 encodes"), [U8]{59, 255, 255, 255, 255, 255, 255, 255, 255})
     // A wider Int is a bignum, tag 2 or tag 3 over its big-endian magnitude.
-    assert_eq(to_bytes(Dyn.Int(18446744073709551616)), Ok([U8]{194, 73, 1, 0, 0, 0, 0, 0, 0, 0, 0}))
-    assert_eq(to_bytes(Dyn.Int(-18446744073709551617)), Ok([U8]{195, 73, 1, 0, 0, 0, 0, 0, 0, 0, 0}))
-    assert_eq(parse([U8]{194, 73, 1, 0, 0, 0, 0, 0, 0, 0, 0}), Ok(Dyn.Int(18446744073709551616)))
-    assert_eq(parse([U8]{195, 73, 1, 0, 0, 0, 0, 0, 0, 0, 0}), Ok(Dyn.Int(-18446744073709551617)))
+    assert_eq(to_bytes(Dyn.Int(18446744073709551616)) ?? panic("2^64 encodes"), [U8]{194, 73, 1, 0, 0, 0, 0, 0, 0, 0, 0})
+    assert_eq(to_bytes(Dyn.Int(-18446744073709551617)) ?? panic("-2^64-1 encodes"), [U8]{195, 73, 1, 0, 0, 0, 0, 0, 0, 0, 0})
+    assert((parse([U8]{194, 73, 1, 0, 0, 0, 0, 0, 0, 0, 0}) ?? panic("tag 2 bignum parses")) == Dyn.Int(18446744073709551616))
+    assert((parse([U8]{195, 73, 1, 0, 0, 0, 0, 0, 0, 0, 0}) ?? panic("tag 3 bignum parses")) == Dyn.Int(-18446744073709551617))
     // Two separately built 2^128+1 trees are equal; a neighbour is not.
     wide: 340282366920938463463374607431768211457
     left: Dyn.Array([Dyn]{Dyn.Int(wide)})
@@ -309,9 +309,11 @@ priv typed_errors: module {
     input: core.files.open(path) ?? panic("open")
     source := reader(input) ?? panic("reader")
     expected: [DataEvent]{.ArrayStart, .ArrayStart, .Int(1), .Int(2), .ArrayEnd, .ObjectStart, .Key("k"), .Text("ab"), .ObjectEnd, .ArrayEnd}
-    loop event in expected -> assert_eq(source.next(), Ok(Val(event)))
-    assert_eq(source.next(), Ok(None))
-    assert_eq(source.next(), Ok(None))
+    loop event in expected {
+        if source.next() == .Ok(read) -> assert_eq(read, Val(event)) else -> panic("event reads")
+    }
+    if source.next() == .Ok(end) -> assert_eq(end, None) else -> panic("end reads")
+    if source.next() == .Ok(after) -> assert_eq(after, None) else -> panic("end stays")
 }
 
 #Test("CBOR stream reads all float widths and sticky item limit") {
@@ -320,12 +322,11 @@ priv typed_errors: module {
     core.files.write_bytes(path, [U8]{131, 249, 62, 0, 250, 71, 195, 80, 0, 251, 63, 241, 153, 153, 153, 153, 153, 154}) ?? panic("fixture")
     input: core.files.open(path) ?? panic("open")
     source := reader(input) ?? panic("reader")
-    assert_eq(source.next(), Ok(Val(DataEvent.ArrayStart)))
-    assert_eq(source.next(), Ok(Val(DataEvent.Float(Float{1.5}))))
-    assert_eq(source.next(), Ok(Val(DataEvent.Float(Float{100000.0}))))
-    assert_eq(source.next(), Ok(Val(DataEvent.Float(Float{1.1}))))
-    assert_eq(source.next(), Ok(Val(DataEvent.ArrayEnd)))
-    assert_eq(source.next(), Ok(None))
+    expected: [DataEvent]{.ArrayStart, .Float(Float{1.5}), .Float(Float{100000.0}), .Float(Float{1.1}), .ArrayEnd}
+    loop event in expected {
+        if source.next() == .Ok(read) -> assert_eq(read, Val(event)) else -> panic("float event reads")
+    }
+    if source.next() == .Ok(end) -> assert_eq(end, None) else -> panic("end reads")
     core.files.write_bytes(path, [U8]{98, 97, 98}) ?? panic("fixture")
     limited_input: core.files.open(path) ?? panic("open")
     limits := EncodingLimits.safe()
@@ -387,7 +388,9 @@ priv typed_errors: module {
     input: core.files.open(path) ?? panic("open")
     source := reader(input) ?? panic("reader")
     expected: [DataEvent]{.ArrayStart, .Int(18446744073709551615), .Int(-18446744073709551616), .ArrayEnd}
-    loop event in expected -> assert_eq(source.next(), Ok(Val(event)))
+    loop event in expected {
+        if source.next() == .Ok(read) -> assert_eq(read, Val(event)) else -> panic("event reads")
+    }
     output: core.files.create("{dir.path}/out.cbor") ?? panic("create")
     sink := writer(output) ?? panic("writer")
     if sink.write(DataEvent.Int(18446744073709551616)) == .Err(failure) -> assert_eq(failure.kind, .Unsupported) else -> panic("2^64 written")

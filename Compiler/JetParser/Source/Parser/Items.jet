@@ -293,11 +293,11 @@ parser_parse_item_or_import: fn(state: &JetParserState) -> ParsedItemOrImport {
             value: parser_parse_template_loop(state)
             return ParsedItemOrImport{item: Val(Item.TemplateLoop{value: value}), handled: true}
         }
-        // An ALL_CAPS `NAME: value` in an inline module body is a module
-        // constant, and so is `Name: path` until sema reads what the path
-        // names (#6176); file scope routes both as module bindings before
-        // reaching here.
-        parser_marked_const_ahead(state, 0) || parser_path_binding_ahead_at(state, 0) -> {
+        // `NAME: value` in an inline module body is a module constant, and so
+        // is `Name: path` until sema reads what the path names; casing checks
+        // the name like any module binding. File scope routes both as module
+        // bindings before reaching here.
+        (token.kind == TOKEN_IDENT && parser_kind_at(state, 1) == TOKEN_COLON) || parser_path_binding_ahead_at(state, 0) -> {
             value: parser_parse_const(state, modifiers)
             return ParsedItemOrImport{item: Val(Item.Const{value: value}), handled: true}
         }
@@ -1015,14 +1015,7 @@ parser_parse_param: fn(state: &JetParserState, zone: ParamZone) -> Param {
         if sources.len() > 0 -> declared_from = Val(sources)
     }
     default := Expr?{None}
-    if {
-        parser_current_kind(state) == TOKEN_LBRACE -> {
-            parser_bump(state)
-            default = Val(parser_parse_expression(state, 1, 0).expr)
-            parser_expect(state, TOKEN_RBRACE, "`}}` after the parameter default")
-        }
-        else -> {}
-    }
+    if parser_current_kind(state) == TOKEN_LBRACE -> default = Val(parser_parse_declared_default(state, ty, ty_span, "`}}` after the parameter default").expr)
     if variadic && default != None {
         param_name: parser_value(state, name)
         parser_add_error_code(state, "E1310", name.span, "variadic parameter `{param_name}` can't have a default value", "a `...` rest parameter collects trailing arguments — it can't also be optional", "remove the `{{…}}` default from the variadic parameter")
@@ -1995,12 +1988,7 @@ parser_parse_struct: fn(state: &JetParserState, modifiers: ParsedItemModifiers) 
                         parsed_value: parser_parse_expression(state, 1, 0)
                         default = Val(parsed_value.expr)
                     }
-                    parser_current_kind(state) == TOKEN_LBRACE -> {
-                        parser_bump(state)
-                        parsed_value: parser_parse_expression(state, 1, 0)
-                        parser_expect(state, TOKEN_RBRACE, "`}}` after a struct field default")
-                        default = Val(parsed_value.expr)
-                    }
+                    parser_current_kind(state) == TOKEN_LBRACE -> default = Val(parser_parse_declared_default(state, field_type.ty, field_type.span, "`}}` after a struct field default").expr)
                 }
                 redact := false
                 marker_index := 0
@@ -2028,6 +2016,7 @@ parser_parse_struct: fn(state: &JetParserState, modifiers: ParsedItemModifiers) 
     value.span = parser_cover(modifiers.start_span, close.span)
     markers: parser_merge_inbody_markers(state, modifiers.markers, inside, modifiers.start_span.start, close.span.start, "struct `{value.name}`")
     parser_apply_struct_markers(state, value, markers, modifiers.grouped_markers)
+    value.cap = parser_type_fx_cap(state, markers, value.name)
     parser_finish_marker_struct(state, value)
     value.effect_impl = parser_finish_effect_type(state, value.name, value.name_span, value.effect_impl, [Variant]{})
     value
@@ -2096,7 +2085,9 @@ parser_parse_enum: fn(state: &JetParserState, modifiers: ParsedItemModifiers) ->
             kind == TOKEN_KW_IMPL -> value.trait_impls.push(parser_parse_trait_impl_block(state, markers))
             else -> parser_parse_variant_entry(state, "", value, markers, inside)
         }
-        if parser_current_kind(state) == TOKEN_SEMI -> parser_bump(state)
+        // Cases are separated as struct fields are: a `,` or a line break.
+        separator_kind := parser_current_kind(state)
+        if separator_kind == TOKEN_COMMA || separator_kind == TOKEN_SEMI -> parser_bump(state)
     }
     close: parser_expect(state, TOKEN_RBRACE, "`}}` after enum variants")
     value.span = parser_cover(modifiers.start_span, close.span)
@@ -2105,6 +2096,7 @@ parser_parse_enum: fn(state: &JetParserState, modifiers: ParsedItemModifiers) ->
     // once the body (and every marker line in it) is read.
     markers: parser_merge_inbody_markers(state, modifiers.markers, inside, modifiers.start_span.start, close.span.start, "enum `{value.name}`")
     parser_apply_enum_type_markers(value, markers)
+    value.cap = parser_type_fx_cap(state, markers, value.name)
     _ := parser_layout_marker_fact(state, markers, modifiers.grouped_markers, true)
     value.effect_impl = parser_finish_effect_type(state, value.name, value.name_span, value.effect_impl, value.variants)
     value
@@ -2183,18 +2175,18 @@ parser_parse_variant_entry: fn(state: &JetParserState, prefix: String, value: &E
     }
     leaves_before: value.variants.len()
     loop parser_current_kind(state) != TOKEN_RBRACE && parser_current_kind(state) != TOKEN_EOF && !parser_aborting(state) {
+        parser_skip_semicolons(state)
+        if parser_current_kind(state) == TOKEN_RBRACE -> break
         kind: parser_current_kind(state)
-        if kind == TOKEN_SEMI || kind == TOKEN_COMMA {
-            parser_bump(state)
-            next
-        }
         if parser_inbody_marker_ahead(state) {
             if parser_parse_inbody_marker(state) == .Val(line) -> inside.push(line)
             next
         }
         entry_markers: if kind == TOKEN_HASH -> parser_parse_variant_markers(state) else -> [Marker]{}
         parser_parse_variant_entry(state, path, value, entry_markers, inside)
-        if parser_current_kind(state) == TOKEN_SEMI || parser_current_kind(state) == TOKEN_COMMA -> parser_bump(state)
+        // Leaves are separated as struct fields are: a `,` or a line break.
+        separator_kind := parser_current_kind(state)
+        if separator_kind == TOKEN_COMMA || separator_kind == TOKEN_SEMI -> parser_bump(state)
     }
     parser_expect(state, TOKEN_RBRACE, "`}}` to close the variant group")
     if parser_aborting(state) -> return
@@ -2573,11 +2565,9 @@ parser_parse_trait: fn(state: &JetParserState, modifiers: ParsedItemModifiers) -
                 default := Expr?{None}
                 end := constant_type.span
                 if parser_current_kind(state) == TOKEN_LBRACE {
-                    parser_bump(state)
-                    parsed_value: parser_parse_expression(state, 1, 0)
-                    close_default: parser_expect(state, TOKEN_RBRACE, "`}}` after a trait constant default")
-                    default = Val(parsed_value.expr)
-                    end = close_default.span
+                    parsed_default: parser_parse_declared_default(state, constant_type.ty, constant_type.span, "`}}` after a trait constant default")
+                    default = Val(parsed_default.expr)
+                    end = parsed_default.span
                 }
                 constants.push(TraitConstDecl{name: parser_value(state, constant_name), name_span: constant_name.span, ty: constant_type.ty, ty_span: constant_type.span, default: default.move(), span: parser_cover(constant_name.span, end)})
                 parser_finish_statement(state)
@@ -2595,7 +2585,7 @@ parser_parse_trait: fn(state: &JetParserState, modifiers: ParsedItemModifiers) -
                 method := parsed.value
                 default_body := [Stmt]?{None}
                 if parsed.has_body -> default_body = Val(method.body)
-                methods.push(TraitMethodSig{name: method.name, name_span: method.name_span, params: method.params, return_type: method.return_type, span: method.span, default_body: default_body.move(), is_pure: method.is_pure, declared_effects: method.declared_effects, return_view_provenance: method.return_view_provenance, declared_return_view_provenance: method.declared_return_view_provenance, markers: method.markers})
+                methods.push(TraitMethodSig{name: method.name, name_span: method.name_span, type_params: method.type_params, params: method.params, return_type: method.return_type, span: method.span, default_body: default_body.move(), is_pure: method.is_pure, declared_effects: method.declared_effects, return_view_provenance: method.return_view_provenance, declared_return_view_provenance: method.declared_return_view_provenance, markers: method.markers})
             }
             else -> {
                 parser_add_error_here(state, "expected a trait method, associated type or trait constant", "trait bodies declare callable requirements, associated types and compile-time constants", "write `name: fn(...)`, `type Name` or `name: Type`")
@@ -2610,7 +2600,8 @@ parser_parse_trait: fn(state: &JetParserState, modifiers: ParsedItemModifiers) -
 }
 
 // The trait bounds after a `:` (Rust `parse_trait_bounds`): a bracketed list
-// `[A, B]`, or bare names joined by `|`. Each context names the place in the
+// `[A, B]`, or bare names joined by `|`. A bound may name a module's trait by
+// its dotted path (`mem.Allocator`). Each context names the place in the
 // expected-name and missing-`]` reports.
 parser_parse_trait_bounds: fn(state: &JetParserState, list_context: String, close_context: String, single_context: String) -> [String] {
     bounds := [String]{}
@@ -2618,8 +2609,7 @@ parser_parse_trait_bounds: fn(state: &JetParserState, list_context: String, clos
         parser_bump(state)
         if parser_current_kind(state) != TOKEN_RBRACKET {
             loop {
-                bound: parser_expect_name(state, list_context)
-                bounds.push(parser_value(state, bound))
+                bounds.push(parser_parse_bound_path(state, list_context))
                 if parser_current_kind(state) == TOKEN_RBRACKET -> break
                 if parser_current_kind(state) != TOKEN_COMMA -> break
                 parser_bump(state)
@@ -2629,8 +2619,7 @@ parser_parse_trait_bounds: fn(state: &JetParserState, list_context: String, clos
         return bounds
     }
     loop {
-        bound: parser_expect_name(state, single_context)
-        bound_name: parser_value(state, bound)
+        bound_name: parser_parse_bound_path(state, single_context)
         if bound_name == "Quantity" && parser_current_kind(state) == TOKEN_LT {
             bounds.push(parser_parse_quantity_bound(state))
         } else {
@@ -2640,6 +2629,18 @@ parser_parse_trait_bounds: fn(state: &JetParserState, list_context: String, clos
         parser_bump(state)
     }
     bounds
+}
+
+// One bound name, with the module path of a dotted bound (`mem.Allocator`).
+parser_parse_bound_path: fn(state: &JetParserState, context: String) -> String {
+    first: parser_expect_name(state, context)
+    path := parser_value(state, first)
+    loop parser_current_kind(state) == TOKEN_DOT && parser_kind_at(state, 1) == TOKEN_IDENT {
+        parser_bump(state)
+        segment: parser_bump(state)
+        path = "{path}.{parser_value(state, segment)}"
+    }
+    path
 }
 
 // `Quantity<Dimension, .Kind>` bounds a parameter to the quantities of one
@@ -2752,7 +2753,9 @@ parser_parse_impl: fn(state: &JetParserState, modifiers: ParsedItemModifiers) ->
             parser_add_error_here(state, "expected `{{` to open the error-conversion body", "an error conversion body is a block: `impl Source -> Target {{ … }}`", "add `{{` after the target type")
             return Item.ErrorConv{value: ErrorConvDef{from_ty: type_name, from_span: type_span, to_ty: to_ty, to_span: target.span, body: [Stmt]{}, body_span: parser_cover(start.span, target.span), markers: modifiers.markers}}
         }
-        body: parser_parse_block(state)
+        // A conversion body is a callable body with a declared result: its
+        // last line may be the bare converted value.
+        body: parser_parse_callable_body(state, true)
         return Item.ErrorConv{value: ErrorConvDef{from_ty: type_name, from_span: type_span, to_ty: to_ty, to_span: target.span, body: body.statements, body_span: body.span, markers: modifiers.markers}}
     }
     operator_rhs: parser_parse_operator_rhs(state, trait_name)

@@ -1,6 +1,6 @@
-// Hosted recipe refusal tests. Core/Build producer/fingerprint admission is
-// owner-gated; refusal must precede validation reads, execution and publication.
-// Independent trust and retained-directory publication tests remain below.
+// jetpack::Recipe unit tests: the recipe safety contract (E1236/E1237/E1238/
+// E1275), locked fetch caching, the trust-gate marker, BuildPlan lowering and
+// graph admission, and atomic stage publication.
 
 recipe_test_scratch: fn(label: String) -[FS, Env, Rand]> String {
     token: random.token_hex(8) ?? panic("draw a recipe test name")
@@ -16,6 +16,13 @@ recipe_test_ctx: fn(src: String, out: String, cache: String, offline: Bool) -> R
 recipe_test_run_error: fn(recipe: BuildRecipe, ctx: RecipeBuildContext) -[FS, Env, Exec, Net, Rand, Time.Wait]> RecipeDiagnostic {
     if recipe_run(recipe, ctx, None) == {
         .Ok(_) -> panic("the recipe run must fail")
+        .Err(error) -> error
+    }
+}
+
+recipe_test_lower_error: fn(recipe: BuildRecipe, package: String) -[FS, Env, Rand]> RecipeDiagnostic {
+    if recipe_lower_to_plan(recipe, package, [String: String]{}) == {
+        .Ok(_) -> panic("the recipe must not lower")
         .Err(error) -> error
     }
 }
@@ -77,6 +84,22 @@ recipe_test_has_stage_leftover: fn(base: String) -[FS]> Bool {
     files.remove_all(base).drop("test cleanup")
 }
 
+#Test("recipe install tree of `.` copies the whole staged source root") {
+    // `Recipe.copy` and `.install_tree(src: ".")` name the source root itself.
+    base: recipe_test_scratch("install-root")
+    src: files.join(base, "src")
+    out: files.join(base, "out")
+    files.create_dir_all(files.join(src, "share")) ?? panic("src")
+    files.write(files.join(src, "share/payload.txt"), "payload") ?? panic("source file")
+    ctx: recipe_test_ctx(src, out, files.join(base, "cache"), false)
+    recipe: BuildRecipe{steps: [BuildStep]{BuildStep.InstallTree{src: ".", dest: "tree"}}}
+    recipe_run(recipe, ctx, None) ?? panic("install the source root")
+    assert_eq(files.read(files.join(out, "tree/share/payload.txt")) ?? panic("installed payload"), "payload")
+    escape: BuildRecipe{steps: [BuildStep]{BuildStep.InstallTree{src: "./..", dest: "tree"}}}
+    assert_eq(recipe_test_run_error(escape, ctx).code, "E1237")
+    files.remove_all(base).drop("test cleanup")
+}
+
 #Test("recipe build tool must be a realized dependency") {
     // Ported from build_sandbox.rs:157-180; validate must reject without executing.
     // An exec naming a tool that is not a realized dep: E1238.
@@ -113,7 +136,9 @@ recipe_test_has_stage_leftover: fn(base: String) -[FS]> Bool {
     out: files.join(base, "out")
     marker: files.join(base, "host-marker")
     files.create_dir_all(src) ?? panic("src")
-    shell: process.which("sh") ?? panic("a shell is required for the native recipe path")
+    // A realized tool is a regular file, never a link, so name the shell's
+    // target the way a realized dependency is named.
+    shell: files.canonicalize(process.which("sh") ?? panic("a shell is required for the native recipe path")) ?? panic("resolve the shell")
     quoted_marker: marker.replace("'", "'\\''")
     ctx: RecipeBuildContext{source_dir: src, output_root: out, tools: [String: String]{"sh": shell}, fetch_cache: files.join(base, "cache"), offline: false}
     recipe: BuildRecipe{steps: [BuildStep]{BuildStep.Exec{tool: "sh", args: [String]{"-c", "printf ok > \"$JET_BUILD_OUTPUT/ok\"; printf escaped > '{quoted_marker}' || :"}}}}
@@ -141,26 +166,31 @@ recipe_test_has_stage_leftover: fn(base: String) -[FS]> Bool {
     src: files.join(base, "src")
     out: files.join(base, "out")
     cache: files.join(base, "cache")
-    files.create_dir_all(out) ?? panic("existing output")
-    files.write(files.join(out, "sentinel"), "keep") ?? panic("sentinel")
-    secret: "do-not-log-this-token"
-    steps: [BuildStep]{
-        BuildStep.Fetch{url: "https://builder:{secret}@example.invalid/source.tar", sha256: ""},
-        BuildStep.Exec{tool: "missing-tool", args: [String]{secret}},
-        BuildStep.Install{src: "missing", dest: "../escape"},
-        BuildStep.InstallTree{src: "missing", dest: "."}
-    }
-    loop step in steps {
-        error: recipe_test_run_error(BuildRecipe{steps: [BuildStep]{step}}, recipe_test_ctx(src, out, cache, false))
-        assert_eq(error.code, "E1238")
-        assert(error.what.contains("not available"))
-        assert(error.why.contains("Core/Build"))
-        assert(!error.what.contains(secret) && !error.why.contains(secret) && !error.fix.contains(secret))
-    }
-    assert_eq(files.read(files.join(out, "sentinel")) ?? panic("unchanged output"), "keep")
-    assert(!files.exists(cache))
-    assert(!files.exists(src))
-    assert(recipe_test_has_stage_leftover(base) == false)
+    files.create_dir_all(src) ?? panic("src")
+    source_file: files.join(base, "upstream.tar")
+    payload: "the source bytes".bytes()
+    files.write_bytes(source_file, payload) ?? panic("upstream")
+    sha: pkg_sha256_hex(payload)
+    recipe: BuildRecipe{steps: [BuildStep]{BuildStep.Fetch{url: "file://{source_file}", sha256: sha}}}
+    report: recipe_run(recipe, recipe_test_ctx(src, out, cache, false), None) ?? panic("first build")
+    assert_eq(report.fetches.len(), 1)
+    assert_eq(report.fetches[0].sha256, sha)
+    assert(report.effects.contains("net.fetch"))
+    assert(report.plan_fingerprint.starts_with("plan-sha256:"))
+    assert(files.is_file(files.join(cache, sha)))
+    files.remove(source_file) ?? panic("remove upstream")
+    second: recipe_run(recipe, recipe_test_ctx(src, out, cache, true), None) ?? panic("offline re-build")
+    assert_eq(second.fetches[0].sha256, sha)
+    assert_eq(second.plan_fingerprint, report.plan_fingerprint)
+    files.remove_all(base).drop("test cleanup")
+}
+
+#Test("recipe offline uncached fetch is ungranted") {
+    base: recipe_test_scratch("offline")
+    src: files.join(base, "src")
+    files.create_dir_all(src) ?? panic("src")
+    recipe: BuildRecipe{steps: [BuildStep]{BuildStep.Fetch{url: "https://example.invalid/x.tar", sha256: "0".repeat(64)}}}
+    assert_eq(recipe_test_run_error(recipe, recipe_test_ctx(src, files.join(base, "out"), files.join(base, "cache"), true)).code, "E1236")
     files.remove_all(base).drop("test cleanup")
 }
 
@@ -176,43 +206,186 @@ recipe_test_has_stage_leftover: fn(base: String) -[FS]> Bool {
     files.remove_all(base).drop("test cleanup")
 }
 
-#Test("hosted recipe validation and logged run refuse before side effects") {
-    base: recipe_test_scratch("validate-refused")
+#Test("recipe validate is a pure read and never executes") {
+    // `jet inspect audit` flags violations without running a step.
+    base: recipe_test_scratch("audit")
+    src: files.join(base, "src")
+    files.create_dir_all(src) ?? panic("src")
+    recipe: BuildRecipe{steps: [BuildStep]{BuildStep.Exec{tool: "definitely-not-a-real-tool", args: [String]{"--boom"}}}}
+    if recipe_validate(recipe, recipe_test_ctx(src, files.join(base, "out"), files.join(base, "cache"), false)) == {
+        .Ok(_) -> panic("an unrealized tool must not validate")
+        .Err(error) -> assert_eq(error.code, "E1238")
+    }
+    files.remove_all(base).drop("test cleanup")
+}
+
+#Test("an unadmitted recipe graph is refused before side effects") {
+    // No step is not a finite staged graph: validation, a plain run and a
+    // logged run all refuse with E1238 before a stage, cache or log exists.
+    base: recipe_test_scratch("unadmitted")
     recipe: BuildRecipe{steps: [BuildStep]{}}
     ctx: recipe_test_ctx(files.join(base, "missing"), files.join(base, "out"), files.join(base, "cache"), false)
     if recipe_validate(recipe, ctx) == {
-        .Ok(_) -> panic("hosted validation must refuse")
-        .Err(error) -> assert_eq(error.code, "E1238")
+        .Ok(_) -> panic("an empty recipe graph must not validate")
+        .Err(error) -> {
+            assert_eq(error.code, "E1238")
+            assert(error.why.contains("at least one finite staged action"))
+        }
     }
+    assert_eq(recipe_test_run_error(recipe, ctx).code, "E1238")
     attempt := BuildAttempt.new("pkg", "path:missing", "adapter", "", "")
     if recipe_run_logged(recipe, ctx, None, attempt) == {
-        .Ok(_) -> panic("hosted logged execution must refuse")
+        .Ok(_) -> panic("an unadmitted logged run must refuse")
         .Err(error) -> assert_eq(error.code, "E1238")
     }
     assert_eq(attempt.steps.len(), 0)
     assert(!files.exists(ctx.output_root))
     assert(!files.exists(ctx.fetch_cache))
+    assert(!recipe_test_has_stage_leftover(base))
     files.remove_all(base).drop("test cleanup")
 }
 
-recipe_test_forbidden_emit: fn(_sandbox: PlanSandbox) -[FS, Env]> BuildPlanFragment StagedPlanActionError! {
-    panic("a refused staged-plan callback must not run")
+#Test("recipe lowers to one build plan with a complete fingerprint") {
+    tools: [String: String]{"cc": sys.executable()}
+    recipe: BuildRecipe{steps: [BuildStep]{
+        BuildStep.Fetch{url: "file:///src.tgz", sha256: "abc123"},
+        BuildStep.Exec{tool: "cc", args: [String]{"-c", "main.c"}},
+        BuildStep.Install{src: "main.o", dest: "lib/main.o"}
+    }}
+    plan: recipe_lower_to_plan(recipe, "demo", tools) ?? panic("lower")
+    assert_eq(plan.actions.len(), 3)
+    assert_eq(plan.targets.len(), 1)
+    assert_eq(plan.targets[0].kind, TargetKind.Package)
+    kinds: loop action in plan.actions -> action.kind
+    assert_eq(kinds, [ActionKind]{ActionKind.Generic, ActionKind.Compile, ActionKind.SourceArchive})
+    fingerprint: recipe_plan_fingerprint(plan) ?? panic("fingerprint")
+    assert(fingerprint.starts_with("plan-sha256:"))
+    assert_eq(fingerprint, build_complete_recipe_fingerprint(plan))
+    other: recipe_lower_to_plan(recipe, "other", tools) ?? panic("lower other")
+    assert(fingerprint != (recipe_plan_fingerprint(other) ?? panic("other fingerprint")))
+    assert_eq(recipe_admitted_step_order(plan, 3) ?? panic("admitted order"), [Int]{0, 1, 2})
 }
 
-#Test("hosted staged plan refuses before callback and artifact publication") {
+#Test("recipe plan binds outputs authority and finite stage facts") {
+    recipe: BuildRecipe{steps: [BuildStep]{BuildStep.Install{src: "bin/tool", dest: "bin/tool"}}}
+    plan: recipe_lower_to_plan(recipe, "demo", [String: String]{}) ?? panic("lower")
+    action: plan.actions[0]
+    assert_eq(action.outputs, [String]{".jet/recipe/demo/step-0.stamp", ".jet/recipe/demo/outputs/bin/tool"})
+    assert(action.caps.contains(BuildEffect.FS))
+    assert_eq(action.labels.get("authority.effect"), Val("fs.write"))
+    assert_eq(action.labels.get("stage.index"), Val("0"))
+    assert_eq(action.labels.get("stage.bound"), Val("1"))
+    assert(action.labels.has_key("platform.os"))
+    assert(action.labels.has_key("platform.arch"))
+}
+
+#Test("recipe finite plan rejects empty and overlapping outputs") {
+    empty: recipe_test_lower_error(BuildRecipe{steps: [BuildStep]{}}, "demo")
+    assert_eq(empty.code, "E1238")
+    overlapping: BuildRecipe{steps: [BuildStep]{
+        BuildStep.InstallTree{src: "share", dest: "share"},
+        BuildStep.Install{src: "tool", dest: "share/tool"}
+    }}
+    error: recipe_test_lower_error(overlapping, "demo")
+    assert_eq(error.code, "E1238")
+    assert(error.why.contains("overlaps output"))
+    unsafe_package: recipe_test_lower_error(BuildRecipe{steps: [BuildStep]{BuildStep.Install{src: "a", dest: "a"}}}, "../demo")
+    assert_eq(unsafe_package.code, "E1238")
+}
+
+recipe_test_staged_action: fn(digest: String) -> StagedPlanAction {
+    host: PlatformKey.host()
+    StagedPlanAction.new("discover", 0, 1, [PlanInput]{PlanInput.new("manifest", digest)}, PlanAuthority{tools: [String]{"planner", "planner-alt"}, effects: [BuildEffect]{BuildEffect.Exec, BuildEffect.FS}, platform: "{host.os}-{host.arch}"})
+}
+
+recipe_test_staged_fragment: fn() -> BuildPlanFragment {
+    host: PlatformKey.host()
+    emitted := PlanFragmentAction.new("compile", "planner")
+    emitted.inputs = [String]{"manifest"}
+    emitted.outputs = [String]{"result.bin"}
+    emitted.effects = [BuildEffect]{BuildEffect.Exec, BuildEffect.FS}
+    emitted.platform = "{host.os}-{host.arch}"
+    BuildPlanFragment{actions: [PlanFragmentAction]{emitted}}
+}
+
+recipe_test_staged_tools: fn() -> [String: String] {
+    [String: String]{"planner": sys.executable(), "planner-alt": sys.executable()}
+}
+
+// Reads its one declared input, then emits the fixed fragment.
+recipe_test_reading_emit: fn(sandbox: PlanSandbox) -[FS, Env]> BuildPlanFragment StagedPlanActionError! {
+    view := sandbox
+    bytes: view.read_input("manifest")
+    if bytes != "planner manifest".bytes() -> return Err(StagedPlanActionError.Failed("unexpected manifest bytes"))
+    Ok(recipe_test_staged_fragment())
+}
+
+// Reaches for an input the action never declared.
+recipe_test_undeclared_emit: fn(sandbox: PlanSandbox) -[FS, Env]> BuildPlanFragment StagedPlanActionError! {
+    view := sandbox
+    view.read_input("secret")
+    Ok(recipe_test_staged_fragment())
+}
+
+#Test("recipe staged plan authority order does not change the plan fingerprint") {
+    action: recipe_test_staged_action("sha256-input")
+    fragment: recipe_test_staged_fragment()
+    tools: recipe_test_staged_tools()
+    first: recipe_lower_staged_plan_action(action, fragment, tools) ?? panic("lower first")
+    reordered := action
+    reordered.authority.tools = [String]{"planner-alt", "planner"}
+    reordered.authority.effects = [BuildEffect]{BuildEffect.FS, BuildEffect.Exec}
+    second: recipe_lower_staged_plan_action(reordered, fragment, tools) ?? panic("lower second")
+    assert_eq(recipe_plan_fingerprint(first) ?? panic("first fingerprint"), recipe_plan_fingerprint(second) ?? panic("second fingerprint"))
+}
+
+#Test("recipe staged plan publishes one artifact and reuses an identical one") {
+    base: recipe_test_scratch("staged-run")
+    src: files.join(base, "src")
+    artifact_root: files.join(base, "artifacts")
+    files.create_dir_all(src) ?? panic("src")
+    manifest: "planner manifest".bytes()
+    files.write_bytes(files.join(src, "manifest"), manifest) ?? panic("manifest")
+    action: recipe_test_staged_action("sha256-{pkg_sha256_hex(manifest)}")
+    ctx: StagedPlanContext{source_dir: src, artifact_root}
+    report: recipe_run_staged_plan_action(action, ctx, recipe_test_staged_tools(), StagedPlanEmitter{emit: recipe_test_reading_emit}) ?? panic("staged plan publishes")
+    assert(report.plan_fingerprint.starts_with("plan-sha256:"))
+    assert_eq(report.lock.action_identity, report.action_identity)
+    assert_eq(files.read(files.join(report.artifact_dir, "plan.fingerprint")) ?? panic("fingerprint file"), report.plan_fingerprint)
+    assert_eq(files.read(files.join(report.artifact_dir, "lock")) ?? panic("lock file"), report.lock.render())
+    assert_eq(files.read_bytes(files.join(report.artifact_dir, "fragment.plan")) ?? panic("fragment file"), recipe_test_staged_fragment().canonical_bytes())
+    again: recipe_run_staged_plan_action(action, ctx, recipe_test_staged_tools(), StagedPlanEmitter{emit: recipe_test_reading_emit}) ?? panic("identical staged plan reuses its artifact")
+    assert_eq(again.artifact_dir, report.artifact_dir)
+    assert_eq((files.list_dir(artifact_root) ?? panic("artifact root")).len(), 1)
+    files.remove_all(base).drop("test cleanup")
+}
+
+#Test("recipe staged plan refuses undeclared reads and digest drift before publication") {
     base: recipe_test_scratch("staged-refused")
-    artifact: files.join(base, "artifacts")
-    action: StagedPlanAction.new("discover", 0, 1, [PlanInput]{PlanInput.new("missing", "sha256-input")}, PlanAuthority{tools: [String]{}, effects: [BuildEffect]{}, platform: "linux-x86_64"})
-    ctx: StagedPlanContext{source_dir: files.join(base, "missing"), artifact_root: artifact}
-    if recipe_run_staged_plan_action(action, ctx, [String: String]{}, StagedPlanEmitter{emit: recipe_test_forbidden_emit}) == {
-        .Ok(_) -> panic("hosted staged-plan execution must refuse")
+    src: files.join(base, "src")
+    artifact_root: files.join(base, "artifacts")
+    files.create_dir_all(src) ?? panic("src")
+    files.write(files.join(src, "manifest"), "planner manifest") ?? panic("manifest")
+    files.write(files.join(src, "secret"), "hidden") ?? panic("secret")
+    ctx: StagedPlanContext{source_dir: src, artifact_root}
+    declared: recipe_test_staged_action("sha256-{pkg_sha256_hex("planner manifest".bytes())}")
+    if recipe_run_staged_plan_action(declared, ctx, recipe_test_staged_tools(), StagedPlanEmitter{emit: recipe_test_undeclared_emit}) == {
+        .Ok(_) -> panic("an undeclared staged-plan read must refuse")
+        .Err(error) -> {
+            assert_eq(error.code, "E1238")
+            assert(error.why.contains("staged plan action denied input `secret`"))
+        }
+    }
+    drifted: recipe_test_staged_action("sha256-{"0".repeat(64)}")
+    if recipe_run_staged_plan_action(drifted, ctx, recipe_test_staged_tools(), StagedPlanEmitter{emit: recipe_test_reading_emit}) == {
+        .Ok(_) -> panic("a drifted staged-plan input digest must refuse")
         .Err(error) -> assert_eq(error.code, "E1238")
     }
-    assert(!files.exists(artifact))
+    assert(!files.exists(artifact_root))
     files.remove_all(base).drop("test cleanup")
 }
 
-#Test("hosted recipe refusal preserves existing output without creating a stage") {
+#Test("recipe failed stage removes partial output and preserves previous output") {
     base: recipe_test_scratch("partial-stage")
     src: files.join(base, "src")
     out: files.join(base, "out")
@@ -224,7 +397,7 @@ recipe_test_forbidden_emit: fn(_sandbox: PlanSandbox) -[FS, Env]> BuildPlanFragm
         BuildStep.Install{src: "tool", dest: "bin/tool"},
         BuildStep.Fetch{url: "https://example.invalid/source.tar", sha256: "0".repeat(64)}
     }}
-    assert_eq(recipe_test_run_error(recipe, recipe_test_ctx(src, out, files.join(base, "cache"), false)).code, "E1238")
+    assert_eq(recipe_test_run_error(recipe, recipe_test_ctx(src, out, files.join(base, "cache"), false)).code, "E1236")
     assert_eq(files.read(files.join(out, "bin/tool")) ?? panic("previous output"), "old")
     assert(!recipe_test_has_stage_leftover(base))
     files.remove_all(base).drop("test cleanup")

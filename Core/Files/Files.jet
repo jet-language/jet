@@ -17,6 +17,7 @@ use {
     process: core.process
     host_path: __core_files_path_components
     core.files.[__host_path_is_absolute, __host_path_join, __temp_path_sample, __temp_directory]
+    access_codes.[access_check, advice_code, map_advice_code]
 }
 // core.files — one filesystem surface.
 //
@@ -142,6 +143,20 @@ RenameIfExists: enum {
     Swap
 }
 
+/// How a program will read an open or mapped file, so the system can plan
+/// its caching (`FileReader.advise`, `MappedFile.advise`). `Sequential`
+/// reads ahead further, `Random` stops reading ahead, `WillNeed` starts
+/// reading the file into memory now, `DontNeed` drops its cached pages,
+/// `NoReuse` marks the data as read once, and `Normal` restores the default.
+Advice: enum {
+    Normal
+    Sequential
+    Random
+    WillNeed
+    DontNeed
+    NoReuse
+}
+
 /// A file's identity, its device plus its file number.
 /// Two paths name the same file exactly when their ids are equal.
 FileID: struct {
@@ -218,6 +233,13 @@ MappedFile: struct {
     path: String
     bytes: [U8]
     priv handle: Int
+
+    /// Tell the system how the mapped bytes will be read (posix_madvise over
+    /// the whole map). Advice only plans paging: the map holds the same file
+    /// contents whatever it says, and an empty map accepts any.
+    advise: fn(self, advice: Advice) IOError! -[FS.Read]> {
+        core.files.__map_advise(self, map_advice_code(advice))
+    }
 }
 
 TempDir: struct {
@@ -298,6 +320,13 @@ FileReader: struct {
     read_line: fn(&self) -[FS.Read]> String? IOError! {
         __reader_read_line(self)
     }
+
+    /// Tell the system how the file will be read (posix_fadvise over the
+    /// whole file). Advice only plans caching: reads return the same bytes
+    /// whatever it says, and a pipe or a system without advice accepts any.
+    advise: fn(self, advice: Advice) IOError! -[FS.Read]> {
+        core.files.__reader_advise(self, advice_code(advice))
+    }
 }
 
 /// An open file for writing. `write_line` and `write_all` are buffered;
@@ -318,6 +347,14 @@ FileWriter: struct {
     /// path again. Windows keeps only the read-only flag.
     set_mode: fn(self, mode: Int) IOError! -[FS.Write]> {
         core.files.__writer_set_mode(self, mode)
+    }
+
+    /// Reserve disk space for the first `size` bytes (posix_fallocate), so
+    /// later writes there cannot fail for lack of space. A shorter file grows
+    /// to `size`, the new bytes zero; a longer one keeps its length.
+    /// `IOError.Unsupported` reports a file system that cannot reserve.
+    allocate: fn(self, size: Int) IOError! -[FS.Write]> {
+        core.files.__writer_allocate(self, size)
     }
 }
 
@@ -605,20 +642,22 @@ __spec_keep_open: fn(spec: ProcessSpec, handle: &&FileReader | FileWriter | File
         source: open_directory(source_path) ?? panic("hold source")
         initial: process.cmd(["sh", "-c", "cat marker.txt; cat /proc/self/fd/199/source.txt"])
             .cwd("/missing-lexical-process-directory")
-        in_destination: compiler_with_process_directory(initial, destination, 198, true) ?? panic("attach destination")
-        with_source: compiler_with_process_directory(in_destination, source, 199, false) ?? panic("attach source")
-        assert(compiler_with_process_directory(compiler_with_process_directory(process.cmd(["sh", "-c", "exit 0"]), destination, 198, true) ?? panic("first slot"), source, 198, false) == .Err(.InvalidInput(_)))
-        close(destination)
-        close(source)
-        rename(destination_path, join(root, "moved-destination")) ?? panic("rename destination")
-        rename(source_path, join(root, "moved-source")) ?? panic("rename source")
-        create_dir_all(destination_path) ?? panic("replacement destination")
-        create_dir_all(source_path) ?? panic("replacement source")
-        write(join(destination_path, "marker.txt"), "wrong destination\n") ?? panic("replacement marker")
-        write(join(source_path, "source.txt"), "wrong source\n") ?? panic("replacement source marker")
-        receipt: with_source.run() ?? panic("run held directories")
-        assert(receipt.success)
-        assert(receipt.output == "held destination\nheld source\n")
+        #Unsafe("this test owns both held directories and child descriptor slots 198 and 199 until the child runs") {
+            in_destination: compiler_with_process_directory(initial, destination, 198, true) ?? panic("attach destination")
+            with_source: compiler_with_process_directory(in_destination, source, 199, false) ?? panic("attach source")
+            assert(compiler_with_process_directory(compiler_with_process_directory(process.cmd(["sh", "-c", "exit 0"]), destination, 198, true) ?? panic("first slot"), source, 198, false) == .Err(.InvalidInput(_)))
+            close(destination)
+            close(source)
+            rename(destination_path, join(root, "moved-destination")) ?? panic("rename destination")
+            rename(source_path, join(root, "moved-source")) ?? panic("rename source")
+            create_dir_all(destination_path) ?? panic("replacement destination")
+            create_dir_all(source_path) ?? panic("replacement source")
+            write(join(destination_path, "marker.txt"), "wrong destination\n") ?? panic("replacement marker")
+            write(join(source_path, "source.txt"), "wrong source\n") ?? panic("replacement source marker")
+            receipt: with_source.run() ?? panic("run held directories")
+            assert(receipt.success)
+            assert(receipt.output == "held destination\nheld source\n")
+        }
         remove_all(root) ?? panic("cleanup")
     }
 }
@@ -626,6 +665,7 @@ __spec_keep_open: fn(spec: ProcessSpec, handle: &&FileReader | FileWriter | File
 #Test("the reader and writer descriptor rows name the open descriptor and flush the writer first") {
     if sys.name() == "linux" {
         root: mktemp("descriptor-rows-test")
+        create_dir_all(root) ?? panic("descriptor rows root")
         input_path: join(root, "input.txt")
         output_path: join(root, "output.txt")
         write(input_path, "input\n") ?? panic("input")
@@ -638,8 +678,8 @@ __spec_keep_open: fn(spec: ProcessSpec, handle: &&FileReader | FileWriter | File
         // The kernel's link is the canonical path, which a symlinked TMPDIR changes.
         assert((read_link("/proc/self/fd/{reader_fd}") ?? panic("reader link")).ends_with("/input.txt"))
         assert((read_link("/proc/self/fd/{writer_fd}") ?? panic("writer link")).ends_with("/output.txt"))
-        assert(read(output_path) == .Ok("buffered\n"))
-        assert(core.files.__reader_fd(reader) == .Ok(reader_fd))
+        assert_eq(read(output_path) ?? panic("read output"), "buffered\n")
+        assert_eq(core.files.__reader_fd(reader) ?? panic("reader descriptor again"), reader_fd)
         close(reader)
         close(writer)
         remove_all(root) ?? panic("cleanup")
@@ -967,6 +1007,51 @@ space: fn(path: String | Path) -[FS.Read]> DiskSpace IOError! {
 }
 
 
+/// Whether this program may read `path` now, judged with its effective user
+/// and groups as `open` judges them (faccessat with AT_EACCESS). A missing
+/// path, or one that cannot be checked, is false, never an error. The answer
+/// can change before the next call, so a program that must read the file
+/// opens it and handles that error instead.
+can_read: fn(path: String | Path) -[FS.Read]> Bool Never! { access_check(path, 4) }
+
+/// Whether this program may write `path` now; `can_read` explains the check.
+can_write: fn(path: String | Path) -[FS.Read]> Bool Never! { access_check(path, 2) }
+
+/// Whether this program may execute `path` now (search it, for a directory);
+/// `can_read` explains the check.
+can_execute: fn(path: String | Path) -[FS.Read]> Bool Never! { access_check(path, 1) }
+
+// The access check and advice numbers behind can_read, advise and
+// map.advise: not part of the files surface.
+priv access_codes: module {
+    // faccessat's mode bits: R_OK 4, W_OK 2, X_OK 1.
+    access_check: fn(path: String | Path, mode: Int) -> Bool Never! {
+        if read_probe_fault() -> return false
+        if core.files.__access_raw(path_text(path), mode) == { .Ok(_) -> true else -> false }
+    }
+
+    // posix_fadvise's advice numbers on Linux.
+    advice_code: fn(advice: Advice) -> Int Never! {
+        if advice == {
+            .Normal -> 0
+            .Random -> 1
+            .Sequential -> 2
+            .WillNeed -> 3
+            .DontNeed -> 4
+            .NoReuse -> 5
+        }
+    }
+
+    // madvise's advice numbers on Linux: the first five match posix_fadvise's;
+    // read-once data is MADV_COLD, which the runtime treats as a no-op on a
+    // kernel without it.
+    map_advice_code: fn(advice: Advice) -> Int Never! {
+        if advice == .NoReuse -> return 20
+        advice_code(advice)
+    }
+}
+
+
 // A final link is followed, so a broken link does not exist; `lexists` sees the link itself.
 exists_impl: fn(path: String) -> Bool Never! {
     row: core.files.__stat_at(-1, path, true) ?? return false
@@ -1046,7 +1131,7 @@ files8_other: fn(operation: IOOperation, resource: String?, cause: String) -> IO
 
 files8_preflight: fn(probe: String, operation: IOOperation, path: String) IOError! {
     if core.files.__fault_should_fail(probe) -> return Err(files8_other(operation, Val(path), "fault injected: {probe}"))
-    Ok(())
+    Ok()
 }
 
 
@@ -1627,7 +1712,7 @@ walk_validate: fn(context: Int, directory: Int, root: String) IOError! -[FS]> {
     }
     if source != directory -> core.files.__walk_release(context, source)
     if failure == .Val(error) -> return Err(error)
-    Ok(())
+    Ok()
 }
 
 // One directory of a walk: its kept entries sorted by path, and its child
@@ -1659,7 +1744,8 @@ __walk_batch: fn(context: Int, directory: Int, depth: Int, root: String, ignore:
             entries.push(WalkEntry{path: entry.path, relative: entry.relative, is_dir: entry.directory, depth: depth})
         }
         if skipped || !entry.directory {
-            core.files.__walk_release(context, entry.child)
+            // Only a directory has a child slot to release.
+            if entry.child != 0 -> core.files.__walk_release(context, entry.child)
             next
         }
         if ignore != None -> core.files.__walk_inherit(context, entry.child, directory)
@@ -1768,7 +1854,7 @@ __walk_open: fn(cursor: &__WalkCursor) IOError! -[FS]> {
     walk_validate(cursor.context, 0, cursor.root)
     if cursor.ignore != None -> core.files.__walk_matcher_new(cursor.context)
     cursor.frames.push(__walk_batch(cursor.context, 0, 0, cursor.root, cursor.ignore, cursor.files_only))
-    Ok(())
+    Ok()
 }
 
 // The walk is over: close its context so no descriptor or slot outlives it.
@@ -2484,11 +2570,15 @@ cd: fn(path: String) IOError! -[FS, Env]> { sys.set_current_dir(path) }
 
 #Test("whole-file policy preserves UTF-8 error text and negative range clamping") {
     root: mktemp("whole-file-source-policy")
+    create_dir_all(root) ?? panic("whole-file policy root")
     path: join(root, "data")
     write_bytes(path, [U8]{255}) ?? panic("write invalid UTF-8")
     if read(path) == {
         .Err(.InvalidInput(context)) -> {
-            assert_eq(context.operation, .Read)
+            if context.operation == {
+                .Read -> {}
+                else -> panic("invalid UTF-8 is a Read failure")
+            }
             assert_eq(context.resource, Val(path))
             assert_eq(context.os_code, None)
             assert_eq(context.cause, Val("stream did not contain valid UTF-8"))
@@ -2637,10 +2727,10 @@ trim_file_line: fn(bytes: &[U8]) Never! {
 #Test("file read_line trims every trailing CR/LF including unterminated final CR") {
     final := [U8]{108, 97, 115, 116, 13}
     trim_file_line(final)
-    assert_eq(String.from_bytes(final), Val("last"))
+    assert_eq(String.from_bytes(final) ?? panic("trimmed UTF-8"), "last")
     repeated := [U8]{120, 13, 13, 10}
     trim_file_line(repeated)
-    assert_eq(String.from_bytes(repeated), Val("x"))
+    assert_eq(String.from_bytes(repeated) ?? panic("trimmed UTF-8"), "x")
 }
 
 #Test("filesystem u32 policy preserves chown and permission boundaries") {
@@ -2654,15 +2744,15 @@ trim_file_line: fn(bytes: &[U8]) Never! {
 }
 
 #Test("walk owns zero-based depth, path sorting and inherited ignore rules") {
-    directory: core.files.temp_dir("walk_source").expect("temporary walk directory")
+    directory: core.files.temp_dir("walk_source") ?? panic("temporary walk directory")
     child: join(directory.path, "nested")
-    create_dir_all(child).expect("nested directory")
-    write(join(directory.path, "visible"), "root").expect("root file")
-    write(join(directory.path, "hidden"), "hidden").expect("ignored file")
-    write(join(directory.path, ".gitignore"), "hidden\n").expect("root rules")
-    write(join(child, "visible"), "nested").expect("nested file")
-    write(join(child, "hidden"), "hidden").expect("inherited ignored file")
-    rows: walk(directory.path, Val(".gitignore")).list().expect("walk")
+    create_dir_all(child) ?? panic("nested directory")
+    write(join(directory.path, "visible"), "root") ?? panic("root file")
+    write(join(directory.path, "hidden"), "hidden") ?? panic("ignored file")
+    write(join(directory.path, ".gitignore"), "hidden\n") ?? panic("root rules")
+    write(join(child, "visible"), "nested") ?? panic("nested file")
+    write(join(child, "hidden"), "hidden") ?? panic("inherited ignored file")
+    rows: walk(directory.path, Val(".gitignore")).list() ?? panic("walk")
     assert_eq(rows.len(), 3)
     assert_eq(rows[0].relative, "nested")
     assert_eq(rows[0].depth, 0)
@@ -2671,7 +2761,7 @@ trim_file_line: fn(bytes: &[U8]) Never! {
     assert_eq(rows[1].depth, 1)
     assert_eq(rows[2].relative, "visible")
     assert_eq(rows[2].depth, 0)
-    files: walk_files(directory.path, Val(".gitignore")).list().expect("walk files")
+    files: walk_files(directory.path, Val(".gitignore")).list() ?? panic("walk files")
     assert_eq(files.len(), 2)
     loop entry in files -> assert(!entry.is_dir)
 }
@@ -2684,7 +2774,7 @@ trim_file_line: fn(bytes: &[U8]) Never! {
 }
 
 #Test("walk rejects regular-file roots with the native cause") {
-    file: temp_file("walk_root").expect("temporary walk root")
+    file: temp_file("walk_root") ?? panic("temporary walk root")
     if walk(file.path, None).list() == {
         .Ok(_) -> assert(false)
         .Err(error) -> {
@@ -2742,28 +2832,33 @@ trim_file_line: fn(bytes: &[U8]) Never! {
 
 #Test("entries error projection retains source operation and top-level resource") {
     context: IOContext{operation: .Write, resource: Val("source"), os_code: Val(17), cause: Val("existing destination")}
-    assert_eq(walk_error(.Write, 6, Val(17), Val("existing destination"), "source"), IOError.AlreadyExists(context))
-    assert_eq(walk_error(.Read, 7, None, Val("unsupported"), "pattern"),
-        IOError.Unsupported(IOContext{operation: .Read, resource: Val("pattern"), os_code: None, cause: Val("unsupported")}))
+    projected: walk_error(.Write, 6, Val(17), Val("existing destination"), "source")
+    expected: IOError.AlreadyExists(context)
+    assert_eq("{projected:Debug}", "{expected:Debug}")
+    unsupported: walk_error(.Read, 7, None, Val("unsupported"), "pattern")
+    unsupported_expected: IOError.Unsupported(IOContext{operation: .Read, resource: Val("pattern"), os_code: None, cause: Val("unsupported")})
+    assert_eq("{unsupported:Debug}", "{unsupported_expected:Debug}")
 }
 
 
 // #4750: every path metadata probe takes the FS.Read checkpoint. Setup uses
 // only FS.Write, so each schedule selects exactly the probe under test; the
-// injected branch prints a marker a captured `jet test` run can find.
-metadata_fault_fixture: fn(prefix: String) -[FS]> (dir: String, file: String, link: String)? Never! {
+// injected branch prints a marker a captured `jet test` run can find. The
+// fixture returns its TempDir so the directory outlives the fixture call.
+metadata_fault_fixture: fn(prefix: String) -[FS]> (root: TempDir, dir: String, file: String, link: String)? Never! {
     root: temp_dir(prefix) ?? return None
     file: join(root.path, "file")
     write(file, "x") ?? return None
     link: join(root.path, "link")
     symlink(file, link) ?? return None
-    Val((dir: root.path.copy(), file: file, link: link))
+    dir: root.path.copy()
+    Val((root: root, dir: dir, file: file, link: link))
 }
 
 metadata_fault_seen: fn(probe: String, error: IOError) {
     if error == {
         .Other(context) -> assert_eq(context.cause, Val("fault injected: FS.Read"))
-        else -> assert(false)
+        else -> panic("{probe} expected the injected FS.Read fault, got {error:Debug}")
     }
     print("files fault observed: {probe}")
 }

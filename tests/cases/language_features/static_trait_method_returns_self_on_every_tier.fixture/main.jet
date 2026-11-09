@@ -1,0 +1,27 @@
+// A static trait method returns `Self`; each impl writes `-> Self` and
+// returns its own type, and the call through the type name is that type.
+Make: trait {
+    make: fn() -> Self
+}
+
+Point: struct {
+    x: Int
+}
+
+Label: struct {
+    text: String
+}
+
+impl Point.Make {
+    make: fn() -> Self { Point{x: 7} }
+}
+
+impl Label.Make {
+    make: fn() -> Self { Label{text: "made"} }
+}
+
+run: fn() {
+    point: Point.make()
+    print("{point.x}")
+    print(Label.make().text)
+}

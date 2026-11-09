@@ -5,16 +5,15 @@
 // Toolchain/LexerKeywordRows.jet); git keeps them, so a stale one is
 // rewritten and a hand edit is refused. The `runtime` step puts jet's runtime
 // pack and IDENTITY beside it (Toolchain/RuntimePack.jet): the jet this build
-// made lowers the runtime, the machine's C compiler builds Core's vendored C,
-// and the pack carries the static musl libc.a a find_folder probe chooses on
-// LIBRARY_PATH.
+// made lowers the runtime, and the machine's C compiler builds Core's vendored
+// C. The pack carries no libc: a program's C closure links the musl sysroot
+// of jet's C toolchain pack (JetCli ForeignLink.jet).
 RUNTIME_DIR: "JetCli/.jet/build/jet-runtime"
 RUNTIME_FILES: [String]{
     "jet_runtime_jet.o", "runtime.abi.json", "runtime.exports", "runtime.threads",
     "jet_runtime.pack.o", "jet_runtime.image", "jet_runtime.wasm", "jet_runtime.wasm.tsv",
     "foreign/sqlite3/libsqlite3.a", "foreign/sqlite3/LICENSE",
     "foreign/mbedtls/libmbedtls.a", "foreign/mbedtls/LICENSE", "foreign/mbedtls/VERSION",
-    "foreign/platform/libc.a", "foreign/platform/libgcc_eh.a", "foreign/platform/libgcc.a",
     "provenance.json", "native.key",
 }
 // The runtime's folder, then the IR builder, optimizer and selector, the
@@ -33,7 +32,7 @@ PRELUDE_COPIES: [String]{
 KEYWORD_SOURCES: [String]{"JetLexer/Data/Lexer/Keywords.jet", "JetLexer/Source/Lexer/Tokens.jet", "JetLexer/Source/Lexer/Terminators.jet"}
 
 build: fn(b: Build) -[Exec, FS]> {
-    #Impure("run the source generators with jet, and compile Core's vendored C and find static musl with the machine's C toolchain") {
+    #Impure("run the source generators with jet, and compile Core's vendored C with the machine's C toolchain") {
         prelude: b.run("prelude-sources", b.jet(), ["Exec", "FS"])
         prelude.arg("run")
         prelude.arg("--allow=FS")
@@ -55,7 +54,6 @@ build: fn(b: Build) -[Exec, FS]> {
         cc: b.probe("cc", "find_program", "cc")
         ar: b.probe("ar", "find_program", "ar")
         nm: b.probe("nm", "find_program", "nm")
-        musl: b.probe("musl", "find_folder", "libc.a")
         runtime: b.run("runtime", b.jet(), ["Exec", "FS"])
         runtime.arg("run")
         runtime.arg("--allow=Env,Exec,FS")
@@ -63,7 +61,6 @@ build: fn(b: Build) -[Exec, FS]> {
         runtime.arg("--")
         runtime.arg("pack")
         runtime.file(b.host(jet), flag: "--jet=")
-        runtime.file(b.found(musl), flag: "--musl=")
         runtime.file(b.found(cc), flag: "--cc=")
         runtime.file(b.found(ar), flag: "--ar=")
         runtime.file(b.found(nm), flag: "--nm=")

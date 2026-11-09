@@ -1,0 +1,13 @@
+// core-conformance: core.sys.scheduling
+use os: core.sys
+
+run: fn() {
+    // A program started from a shell runs under time sharing.
+    timeshare: os.scheduling() ? policy -> (if policy == {
+        .Normal -> true
+        .Batch -> true
+        .Idle -> true
+        else -> false
+    }) ! error -> false
+    print(timeshare)
+}

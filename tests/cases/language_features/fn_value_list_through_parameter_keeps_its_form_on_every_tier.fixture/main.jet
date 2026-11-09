@@ -1,0 +1,19 @@
+peek: fn(x: Int) -> Int { x + 269 }
+
+risky: fn(x: Int) -> Int {
+    if x < 0 -> return Err("negative")
+    x * 10
+}
+
+pick: fn(table: [fn(Int) -> Int]) -> fn(Int) -> Int { table[0] }
+
+call_first: fn(table: [fn(Int) -> Int Err!], x: Int) -> Int { table[0](x) }
+
+run: fn() {
+    table: [fn(Int) -> Int]{peek}
+    f: pick(table)
+    print("v={f(0)}")
+    risky_table: [fn(Int) -> Int Err!]{risky}
+    print("w={call_first(risky_table, 4)}")
+    print("e={call_first(risky_table, -1) ?? -7}")
+}

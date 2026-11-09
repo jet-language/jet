@@ -1,22 +1,18 @@
-// Ported from jet_foundation::Authority: one rights
-// tree, one holds relation, one application policy carrier.
+// Ported from jet_foundation::Authority: one rights tree and one holds
+// relation.
 //
 // A rights set (Rust `Holds`, a `BTreeSet<String>`) is a sorted,
 // duplicate-free `[String]`; `authority_holds` builds one. Host-import facts
-// and the E1803 policy diagnostic need compiler types (checked facts, Diagnostic), so
-// their owners live in the PackageModel area (Authority/SandboxAuthority.jet,
-// Policy/EffectProjection.jet); this file stays compiler-free.
+// need compiler types (checked facts, Diagnostic), so their owner lives in the
+// PackageModel area (Authority/SandboxAuthority.jet); this file stays
+// compiler-free.
 
 // jet_foundation::Syntax::EFFECT_LEAF_EXEC_ARGS: reading the program's own
 // arguments, a leaf of `Exec`. The `Exec` root also covers spawning processes.
 AUTHORITY_EXEC_ARGS_LEAF: "Exec.Args"
-// ApplicationAuthority::AMBIENT_BASIC_EFFECTS print,
-// allocate, and read arguments. Never the `Exec` root.
+// The beginner floor every program holds: print, allocate, and read
+// arguments. Never the `Exec` root.
 AUTHORITY_AMBIENT_BASIC_EFFECTS: comptime { [String]{"IO", "Mem.Alloc", AUTHORITY_EXEC_ARGS_LEAF} }
-// ApplicationAuthority::APPLICATION_DEFAULT: the manifest-less policy source.
-AUTHORITY_APPLICATION_DEFAULT: "application default"
-// ApplicationAuthority::PACKAGE_DEFAULT: a package.jet with no authority.
-AUTHORITY_PACKAGE_DEFAULT: "package.jet default"
 // The deny-only stop root.
 AUTHORITY_PANIC_ROOT: "Panic"
 // jet_foundation::Syntax::EFFECT_LEAF_TIME_WAIT: waiting on the program's own
@@ -216,145 +212,6 @@ CanonicalAuthority: struct {
     }
 }
 
-// The application boundary's one checked policy fact.
-// Sema owns `required_effects`; the package loader owns the policy rows.
-ApplicationAuthority: struct {
-    required_effects: [String]
-    granted_effects: [String]
-    denied_effects: [String]
-    authority: String
-
-    // The manifest-less beginner basics.
-    ambient_basics: fn() -> ApplicationAuthority Never! {
-        ApplicationAuthority.beginner_floor(AUTHORITY_APPLICATION_DEFAULT)
-    }
-
-    // #3718: the same floor for a package.jet that writes no `authority`.
-    package_default: fn() -> ApplicationAuthority Never! {
-        ApplicationAuthority.beginner_floor(AUTHORITY_PACKAGE_DEFAULT)
-    }
-
-    beginner_floor: fn(authority: String) -> ApplicationAuthority Never! {
-        ApplicationAuthority{
-            required_effects: [String]{},
-            granted_effects: authority_holds(AUTHORITY_AMBIENT_BASIC_EFFECTS),
-            denied_effects: [String]{},
-            authority: authority
-        }
-    }
-
-    // Project parsed `authority` rows; unknown spellings are dropped. A
-    // written allow row adds to the beginner floor; a
-    // floor right leaves only through `deny`, which wins over every allow.
-    from_policy: fn(allow: [String]?, deny: [String]?, authority: String) -> ApplicationAuthority Never! {
-        granted := [String]{}
-        loop name in AUTHORITY_AMBIENT_BASIC_EFFECTS -> granted.push(name)
-        loop name in (allow ?? [String]{}) -> granted.push(name)
-        ApplicationAuthority{
-            required_effects: [String]{},
-            granted_effects: authority_parse_rights(granted),
-            denied_effects: authority_parse_rights(deny ?? [String]{}),
-            authority: authority
-        }
-    }
-
-    // The policy source is the manifest-less default, alone or widened by
-    // invocation flags.
-    is_application_default: fn(self) -> Bool Never! {
-        self.authority.starts_with(AUTHORITY_APPLICATION_DEFAULT)
-    }
-
-    // The `allow:` row a program writes: every required right the floor does
-    // not already hold. Deny-only rights never appear in a positive grant.
-    inline_allow_row: fn(self) -> [String] Never! {
-        floor: authority_holds(AUTHORITY_AMBIENT_BASIC_EFFECTS)
-        out := [String]{}
-        loop effect_name in self.required_effects {
-            if authority_is_deny_only(effect_name) -> next
-            if authority_answer(floor, [String]{}, effect_name) == AuthorityVerdict.Allowed -> next
-            out.push(effect_name.copy())
-        }
-        authority_holds(out)
-    }
-
-    // Deny-only rights need no grant; explicit denials still apply.
-    undecided_effects: fn(self) -> [String] Never! {
-        out := [String]{}
-        loop effect_name in self.required_effects {
-            if authority_is_deny_only(effect_name) -> next
-            if authority_answer(self.granted_effects, self.denied_effects, effect_name) == AuthorityVerdict.Missing -> out.push(effect_name.copy())
-        }
-        authority_holds(out)
-    }
-
-    // Required effects the policy explicitly denies.
-    denied_required_effects: fn(self) -> [String] Never! {
-        out := [String]{}
-        loop effect_name in self.required_effects {
-            if authority_answer(self.granted_effects, self.denied_effects, effect_name) == AuthorityVerdict.Denied -> out.push(effect_name.copy())
-        }
-        authority_holds(out)
-    }
-
-    is_allowed: fn(self) -> Bool Never! {
-        self.undecided_effects().len() == 0 && self.denied_required_effects().len() == 0
-    }
-
-    // The one-line policy fix from the complete undecided set. Denied effects
-    // are never turned into an allow suggestion; the floor stays granted
-    // beside a written row, so the row names only the undecided rights.
-    // `entry` is the program's entry file, which names the inline block.
-    policy_fix: fn(self, entry: String) -> String Never! {
-        undecided: self.undecided_effects()
-        if undecided.len() > 0 && self.is_application_default() -> return authority_inline_package_fix(entry, undecided)
-        policy_step: if {
-            undecided.len() == 0 -> "adjust the denial in `authority.deny`"
-            else -> "add `allow: [{undecided.join(", ")}]` under `authority` in `package.jet`"
-        }
-        "{policy_step}; otherwise deny effects deliberately, or approve the exact operation once or for the project in an interactive terminal"
-    }
-
-    // #3718: the human Why of E1803, one plain sentence naming what the
-    // program does and which policy has not allowed it.
-    policy_why: fn(self) -> String Never! {
-        denied: self.denied_required_effects()
-        rights: if denied.len() == 0 -> self.undecided_effects() else -> denied
-        verdict: if denied.len() == 0 -> "has not allowed that yet" else -> "denies that"
-        actions := [String]{}
-        loop right in rights {
-            action: authority_effect_action(right)
-            if !actions.contains(action) -> actions.push(action)
-        }
-        said: if {
-            actions.len() == 0 -> "uses no authority"
-            actions.len() == 1 -> actions[0]
-            else -> "{actions[0..<actions.len() - 1].join(", ")} and {actions[actions.len() - 1]}"
-        }
-        "This program {said}, and {self.policy_owner()} {verdict}."
-    }
-
-    policy_owner: fn(self) -> String Never! {
-        if {
-            self.is_application_default() -> "the default for a file with no package block"
-            self.authority.starts_with(AUTHORITY_PACKAGE_DEFAULT) -> "package.jet (which has no authority block)"
-            self.authority.starts_with("package.jet") -> "package.jet"
-            self.authority.starts_with("inline Package") -> "this file's package block"
-            else -> "`{self.authority}`"
-        }
-    }
-
-    // The machine facts behind E1803: structured detail that `--json`
-    // reports and the human renderer keeps out of the sentence.
-    policy_facts: fn(self) -> String Never! {
-        "authority_facts:required_effects={authority_names_or_none(self.required_effects)}; granted_effects={authority_names_or_none(self.granted_effects)}; denied_effects={authority_names_or_none(self.denied_effects)}; denied_required_effects={authority_names_or_none(self.denied_required_effects())}; undecided_effects={authority_names_or_none(self.undecided_effects())}; authority={self.authority}"
-    }
-}
-
-authority_names_or_none: fn(rights: [String]) -> String Never! {
-    if rights.len() == 0 -> return "none"
-    rights.join(", ")
-}
-
 // Plain words for what a program does when it uses `right`
 // (jet_foundation::Authority::effect_action). Unlisted leaves fall back to
 // their root's words.
@@ -400,42 +257,4 @@ authority_parse_rights: fn(names: [String]) -> [String] Never! {
         out.push(parsed)
     }
     authority_holds(out)
-}
-
-// The name of the inline Package that grants a manifest-less program its
-// rights: the entry file's stem, or `script` when the stem is not a plain
-// name. Every package needs a name (E0003), so the block always carries one.
-authority_inline_package_name: fn(path: String) -> String Never! {
-    raw: path.bytes()
-    start := raw.len()
-    loop start > 0 && raw[start - 1] != (U8{47}) && raw[start - 1] != (U8{92}) -> start -= 1
-    stem_end := raw.len()
-    index := raw.len() - 1
-    loop index > start {
-        if raw[index] == (U8{46}) {
-            stem_end = index
-            break
-        }
-        index -= 1
-    }
-    stem: String.from_bytes(raw[start..<stem_end]) ?? ""
-    if stem == "" -> return "script"
-    loop byte in stem.bytes() {
-        code: Int.from_u8(byte)
-        plain: (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95 || code == 45 || code == 46
-        if !plain -> return "script"
-    }
-    stem
-}
-
-// The leading inline Package `jet fix --all` inserts into the program at
-// `path` to grant it `allow`.
-authority_inline_package_block: fn(path: String, allow: [String]) -> String Never! {
-    "package: {{\n    name: \"{authority_inline_package_name(path)}\"\n    authority: {{ allow: [{allow.join(", ")}] }}\n}}\n\n"
-}
-
-// E1803's Fix for a program with no package block: the complete block that
-// grants the undecided rights, written as one line.
-authority_inline_package_fix: fn(path: String, undecided: [String]) -> String Never! {
-    "declare a leading `package: {{ name: \"{authority_inline_package_name(path)}\", authority: {{ allow: [{undecided.join(", ")}] }} }}` block in this file (`jet fix --all` inserts it); otherwise approve the exact operation once in an interactive terminal"
 }

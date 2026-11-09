@@ -35,10 +35,13 @@ Run a lesson from the repository root, for example `jet run Examples/Systems/<Le
 - [CompressZstdStream](Files/CompressZstdStream.jet)
 - [DirEntry](Files/DirEntry.jet) — fs.list_dir returns [DirEntry] ({name, path, is_dir}).
 - [Files](Files/Files.jet)
+- [FilesAccess](Files/FilesAccess.jet) — `files.can_read`, `can_write` and `can_execute` ask whether this program may use a path now, judged with its effective ids; a missing path is false.
 - [FilesDepth](Files/FilesDepth.jet) — Std-backed filesystem depth beyond read/write/list_dir.
 - [FilesProjection](Files/FilesProjection.jet) — Temporary paths make directory, mode, append, and rename operations explicit.
+- [FilesMapAdvise](Files/FilesMapAdvise.jet) — `mapped.advise(advice)` tells the system how a mapped file's bytes will be read (posix_madvise); the bytes stay the same.
 - [FilesReaderSeek](Files/FilesReaderSeek.jet)
 - [FilesRootedLifecycle](Files/FilesRootedLifecycle.jet) — Rooted file and temporary-resource lifecycle (CORE-F010, SCRIPT-F13).
+- [FilesReserve](Files/FilesReserve.jet) — `writer.allocate(size)` reserves disk space for a file (posix_fallocate) and `reader.advise(advice)` tells the system how the file will be read (posix_fadvise).
 - [FilesSetMode](Files/FilesSetMode.jet) — `files.set_mode` replaces a path's permission bits and `files.stat` reads them back; a missing path is a typed `IOError`.
 - [FilesSpace](Files/FilesSpace.jet) — `files.space` reports a file system's total, free and available bytes (statvfs) and `df`'s used percent; a missing path is a typed `IOError`.
 - [FilesStatLinks](Files/FilesStatLinks.jet)
@@ -53,8 +56,13 @@ Run a lesson from the repository root, for example `jet run Examples/Systems/<Le
 ## Process
 
 - [EnvOverlay](Process/EnvOverlay.jet)
+- [OSCpuTime](Process/OSCpuTime.jet) — `core.sys.cpu_time` reads the CPU time of any process; `set_wall_clock` sets the machine's wall clock under `#Unsafe`, which needs privilege.
 - [OSFacts](Process/OSFacts.jet) — System facts live in core.sys; core.sys stays environment vars.
+- [OSIds](Process/OSIds.jet) — `core.sys.user_ids` reads the real, effective and saved IDs and `set_user_ids` changes them under `#Unsafe`; `users` and `groups` read /etc/passwd and /etc/group as musl does.
+- [OSLockMemory](Process/OSLockMemory.jet) — `core.sys.lock_memory` keeps the program's pages in RAM (mlockall) until it ends; without privilege the locked-memory limit may refuse it.
+- [OSMknod](Process/OSMknod.jet) — `core.sys.mknod` makes a character or block device file under `#Unsafe`; only a privileged process may.
 - [OSProcessControl](Process/OSProcessControl.jet)
+- [OSScheduling](Process/OSScheduling.jet) — `core.sys.scheduling` reads a process's CPU policy and `set_scheduling` changes it under `#Unsafe`; real time needs privilege.
 - [ProcessAffinity](Process/ProcessAffinity.jet) — `.cpu_affinity(cpus)` runs the child only on the listed CPUs.
 - [ProcessBuilder](Process/ProcessBuilder.jet)
 - [ProcessExitCleanup](Process/ProcessExitCleanup.jet) — Explicit process termination runs the one cleanup boundary.
@@ -74,10 +82,11 @@ Run a lesson from the repository root, for example `jet run Examples/Systems/<Le
 ## Terminal
 
 - [GrepScan](Terminal/GrepScan.jet) — Parallel directory queue + regex file scan.
+- [InputLines](Terminal/InputLines.jet) — The ambient `input` reads the files the arguments name, in order, else standard input.
 - [Progress](Terminal/Progress.jet) — io.progress wraps a List/Iter and updates as the loop pulls.
 - [ReadSentinel](Terminal/ReadSentinel.jet) — Pull one stdin line per turn and stop on the blank sentinel.
 - [StdinFilter](Terminal/StdinFilter.jet) — Streaming line-by-line stdin.
-- [StdinInput](Terminal/StdinInput.jet) — `input()` reads one line from standard input.
+- [StdinInput](Terminal/StdinInput.jet) — The ambient `input` is every line of the program's input, read lazily: the files its arguments name, else standard input.
 - [StdinTTY](Terminal/StdinTTY.jet) — Every standard stream answers whether it is a terminal.
 - [StdoutBytes](Terminal/StdoutBytes.jet) — `Stdout.write_bytes` sends raw bytes to standard output.
 - [StdoutFlush](Terminal/StdoutFlush.jet) — Standard output is buffered when it goes to a pipe or a file: bytes leave when the buffer fills or the program ends.

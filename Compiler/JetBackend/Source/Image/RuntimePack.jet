@@ -1,12 +1,13 @@
-// Runtime packs (#4549, #3954): the checked Jet runtime object plus its
-// C platform dependencies, linked once per toolchain into a self-contained
-// x86-64 ELF relocatable object. No Rust object or standard-library archive
-// participates. A program link reads only its objects and this pack.
+// Runtime packs (#4549, #3954, #6693): the checked Jet runtime object,
+// linked once per toolchain into a self-contained x86-64 ELF relocatable
+// object. No C archive, Rust object or standard-library archive participates.
+// A program link reads only its objects and this pack.
 //
 // Public standalone-object definitions and explicit extra roots select the
 // runtime ABI; archives satisfy dependencies, never add exports. The linker
-// includes the platform startup (_start, __jet_link_main). Other definitions
-// become local, leaving only the ABI and program/linker imports global.
+// includes the program's startup (`__jet_start`, StaticLink.jet
+// link_owned_startup). Other definitions become local, leaving only the ABI
+// and program/linker imports global.
 // - Liveness: only the sections reachable from the roots are kept, each as
 //   its own section with its relocations rewritten against the pack's
 //   symbols, so the program link still collects what this program does not
@@ -164,9 +165,7 @@ link_pack_relocs: fn(c: &LinkContext, p: &LinkPack, obj: Int, table: Int, first:
 
 // The name a kept section carries in the pack: what classification and
 // init-array ordering read (Image/StaticLink.jet link_class, link_priority).
-// A section that runs without libc's startup (`nolibc`, link_pack_nolibc)
-// carries LINK_NOLIBC_SUFFIX, which a program link reads (link_owned_fits).
-link_pack_section_name: fn(c: LinkContext, class: Int, s: Int, nolibc: Bool) -> String Never! {
+link_pack_section_name: fn(c: LinkContext, class: Int, s: Int) -> String Never! {
     if class == LINK_PREINIT || class == LINK_INIT || class == LINK_FINI {
         obj: link_obj_of(c, s)
         return link_cstr(c.bufs, c.obj_buffer[obj], link_sec_name(c, obj, s))
@@ -178,29 +177,7 @@ link_pack_section_name: fn(c: LinkContext, class: Int, s: Int, nolibc: Bool) -> 
     if class == LINK_RELRO -> name = ".data.rel.ro"
     if class == LINK_DATA -> name = ".data"
     if class == LINK_BSS -> name = ".bss"
-    if nolibc -> return "{name}{LINK_NOLIBC_SUFFIX}"
     name
-}
-
-// The sections that run without libc's startup: those of the first input
-// when it is an object (the Jet runtime's; Request.jet jet_cli_runtime_pack
-// passes it first, before the C platform archives), and each C section all
-// of whose globals are freestanding memory functions (musl's memcpy.s also
-// defines `__memcpy_fwd`, which its memmove.s jumps to).
-link_pack_nolibc: fn(c: LinkContext) -> [Int:Bool] Never! {
-    out := [Int:Bool]{}
-    if c.obj_name.len() > 0 && c.obj_buffer[0] == 0 && c.obj_base[0] == 0 {
-        loop s in c.obj_first_section[0]..<c.obj_first_section[0] + c.obj_count[0] -> out[s] = true
-    }
-    freestanding: [String]{"memcpy", "memmove", "memset", "memcmp", "__memcpy_fwd"}
-    other := [Int:Bool]{}
-    loop g in 0..<c.g_name.len() {
-        if c.g_kind[g] == LINK_G_FILE && c.g_section[g] >= 0 && !freestanding.contains(c.g_name[g]) -> other[c.g_section[g]] = true
-    }
-    loop g in 0..<c.g_name.len() {
-        if c.g_kind[g] == LINK_G_FILE && c.g_section[g] >= 0 && freestanding.contains(c.g_name[g]) && other.get(c.g_section[g]) == None -> out[c.g_section[g]] = true
-    }
-    out
 }
 
 // Symbol table entry; every real reserved-range section index crosses through
@@ -263,8 +240,8 @@ link_pack_shstr: fn(table: &[U8], seen: &[String:Int], name: String) -> Int Neve
 }
 
 // Write the pack for the collected context `c` whose roots are `exports`
-// (final global ids); `nolibc` holds the sections link_pack_nolibc finds.
-link_pack_write: fn(c: &LinkContext, exports: [Int], nolibc: [Int:Bool]) -> [U8] Never! {
+// (final global ids).
+link_pack_write: fn(c: &LinkContext, exports: [Int]) -> [U8] Never! {
     ord_row: link_rows_in_order(c)
     row_ord := [Int]{}
     loop _ in ord_row -> row_ord.push(0)
@@ -414,7 +391,7 @@ link_pack_write: fn(c: &LinkContext, exports: [Int], nolibc: [Int:Bool]) -> [U8]
             start: link_sec_offset(c, obj, s)
             bytes.extend(c.bufs[c.obj_buffer[obj]][start..<start + size])
         }
-        name_at: link_pack_shstr(shstrtab, shstr_seen, link_pack_section_name(c, c.live_class[row], s, nolibc.get(s) != None))
+        name_at: link_pack_shstr(shstrtab, shstr_seen, link_pack_section_name(c, c.live_class[row], s))
         flags: link_sec_flags(c, obj, s)
         info: if cond_guard.get(s) == .Val(guard) -> link_pack_out(c, p, guard) else -> 0
         // SHF_GROUP: the groups are settled.
@@ -466,9 +443,9 @@ link_pack_write: fn(c: &LinkContext, exports: [Int], nolibc: [Int:Bool]) -> [U8]
     bytes
 }
 
-// Link the Jet runtime objects with their C platform dependencies.
-// Audited Jet exports are defined public globals in standalone objects;
-// private functions and imports are not exports. Archives only satisfy roots.
+// Link the Jet runtime objects into a pack. Audited Jet exports are defined
+// public globals in standalone objects; private functions and imports are
+// not exports. Archives only satisfy roots.
 x64_link_runtime_pack: fn(names: [String], bufs: &&[[U8]], extra_roots: [String]) -> X64ExecutableResult Never! {
     c := link_context(bufs, LINK_BASE)
     c.fault_report = LinkFaultReport.Import
@@ -508,13 +485,14 @@ x64_link_runtime_pack: fn(names: [String], bufs: &&[[U8]], extra_roots: [String]
     entry_section: link_entry_section(c, entry_g)
     if entry_section < 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: c.errors}
     // Exported too: the entry, the startup marker (StaticLink.jet
-    // link_has_startup), `__tls_get_addr`, which a linker checks a TLS
-    // general/local-dynamic call sequence against by name, and libgcc's
-    // `__register_frame_info` when some root pulls in its unwinder, with
-    // which a program bound to the runtime image (Image/MemoryLink.jet)
-    // registers its own unwind tables.
+    // link_has_startup) when the archives started the pack through musl,
+    // `__tls_get_addr`, which a linker checks a TLS general/local-dynamic
+    // call sequence against by name, and libgcc's `__register_frame_info`
+    // when some root pulls in its unwinder, with which a program bound to
+    // the runtime image (Image/MemoryLink.jet) registers its own unwind
+    // tables.
     optional: [String]{"__jet_link_main", "__tls_get_addr", "__register_frame_info"}
-    root_names.push("_start")
+    root_names.push(c.g_name[entry_g].copy())
     loop name in optional -> root_names.push(name)
     exports := [Int]{}
     sections := [Int]{entry_section}
@@ -539,8 +517,7 @@ x64_link_runtime_pack: fn(names: [String], bufs: &&[[U8]], extra_roots: [String]
         if link_pack_rust_symbol(name) -> link_error(c, "runtime pack: Rust symbol `{name}` is not an admissible runtime dependency")
     }
     if c.errors.len() > 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: c.errors}
-    nolibc: link_pack_nolibc(c)
-    bytes: link_pack_write(c, exports, nolibc)
+    bytes: link_pack_write(c, exports)
     if c.errors.len() > 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: c.errors}
     X64ExecutableResult{bytes: bytes, errors: [String]{}}
 }
@@ -551,10 +528,10 @@ x64_link_runtime_pack: fn(names: [String], bufs: &&[[U8]], extra_roots: [String]
 // definition the pack exports, so `jet run` binds a program's object against
 // it (Image/MemoryLink.jet) instead of relinking the runtime. Its bytes are
 // what the static linker writes for the pack at that base. The one
-// program-dependent value in them is `main`, which the startup's
-// `__jet_link_main` jumps to: it is linked at the image's program base (the
-// first page after the image's memory), and every place it is written is
-// listed in the `.jet.bind` section, words of eight bytes:
+// program-dependent value in them is `main`, which the startup calls: it is
+// linked at the image's program base (the first page after the image's
+// memory), and every place it is written is listed in the `.jet.bind`
+// section, words of eight bytes:
 //
 //     LINK_IMAGE_BIND_MAGIC, the program base, the place count, then per
 //     place its address, relocation type (PC32, PLT32 or 64) and addend.

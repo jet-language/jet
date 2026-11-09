@@ -97,8 +97,10 @@ SemaEffectFunctionSource: struct {
     // A top-level `#Kernel(.parallel)` whose declaration obligations hold
     // (sema_kernel_pending): E1102 judges its effect and body obligations.
     kernel: SemaKernelPending?{None}
-    // The `#FX(…)` caps of the modules enclosing this function (E0712/E0749).
+    // The `#FX(…)` caps of the modules enclosing this function (E0749).
     module_caps: [ModuleCap]{[ModuleCap]{}}
+    // The `#FX(…)` cap of the struct or enum this method belongs to (E0749).
+    type_cap: SemaEffectModuleCap?{None}
 }
 
 // One `#FX(…)` region: its parsed caps, the head span E0712 points at, and
@@ -120,10 +122,10 @@ SemaEffectModuleInput: struct {
     // `{trait}::{owner}` implementations this module declares
     // (sema_effect_trait_implementers), for generic dispatch.
     trait_implementers: [String]{[String]{}}
-    // The owned operator trait each `impl Owner.Add`-style hook method
-    // implements, by function key: the trait has no source row, so the
-    // checked body is a plain method (E0742 still bounds it).
-    operator_hooks: [String:String]{[String:String]{}}
+    // The owned trait each method of an `impl Owner.Add` or `impl
+    // Owner.CheckedText` block implements, by function key: the trait has no
+    // source row, so the checked body is a plain method (E0742 still bounds it).
+    owned_trait_hooks: [String:String]{[String:String]{}}
 }
 
 SemaEffectDispatchSite: struct {
@@ -236,6 +238,8 @@ SemaEffectNode: struct {
     dispatches: [TEffectSpan]
     // The functions this body takes as values (TEffectFacts.value_edges).
     value_edges: [String]{[String]{}}
+    // The module state this body writes (TEffectFacts.module_writes).
+    module_writes: [TEffectSpan]{[TEffectSpan]{}}
     // The memory operations this body performs directly
     // and the `-[!Mem.*]>` denials its signature declares (E0921).
     memory_events: [SemaMemoryEvent]{[SemaMemoryEvent]{}}
@@ -261,6 +265,8 @@ SemaEffectNode: struct {
     prohibition_span: Span?{None}
     // The `#FX(…)` caps of the inline modules enclosing this function.
     module_caps: [ModuleCap]{[ModuleCap]{}}
+    // The `#FX(…)` cap of the struct or enum this method belongs to.
+    type_cap: SemaEffectModuleCap?{None}
     // The bounded callback slots this body fills with named functions.
     callback_bounds: [SemaEffectCallbackBound]{[SemaEffectCallbackBound]{}}
 }
@@ -871,17 +877,60 @@ sema_effect_pure_diagnostic: fn(node: SemaEffectNode, reached: [String]) -> Diag
     sema_error("E3401", node.span, "`{node.name}` calls or reaches impure effects `{sema_effect_show(reached)}`", "a pure function must produce the same result without ambient effects", "remove the call that introduces `{sema_effect_show(reached)}`, or drop the `-[]>` bound from `{node.name}` so its effects are inferred")
 }
 
-// A module cap as one checked function meets it. `site` names where a file
-// module's cap is written (`run.jet:1`); an inline cap sits in the
-// function's own file, where the report labels it.
+// A pure function that writes module state (`path` is the function alone) or
+// reaches a function that does (`path` runs from the pure function to it).
+// The report points at the write.
+sema_effect_pure_state_diagnostic: fn(nodes: [SemaEffectNode], path: [Int]) -> Diagnostic {
+    node: nodes[path[0]]
+    writer: nodes[path[path.len() - 1]]
+    write: writer.module_writes[0]
+    chain: loop step in path -> nodes[step].chain_name
+    if path.len() == 1 {
+        diagnostic: sema_error("E3401", write.span, "`{node.name}` writes module state `{write.name}`", "module state outlives the call, so a later call sees the write, but `{node.name}` declares `-[]>`", "pass the state in and return the new value, or drop the `-[]>` bound from `{node.name}` so its effects are inferred")
+        return diagnostic_with_rights(diagnostic, "pure", chain, [String]{}, None)
+    }
+    diagnostic: sema_error("E3401", write.span, "`{node.name}` reaches a write of module state `{write.name}`", "{chain.join(" → ")} writes `{write.name}`, which outlives the call — the whole call chain must be pure inside `{node.name}`", "move the write out of `{writer.chain_name}`, or drop the `-[]>` bound from `{node.name}` so its effects are inferred")
+    diagnostic_with_rights(diagnostic, "pure", chain, [String]{}, None)
+}
+
+// The call path from `index` to the first function reached depth-first that
+// writes module state, `index` first; empty when none does.
+sema_effect_state_writer_path: fn(nodes: [SemaEffectNode], node_by_key: NameRows, index: Int, seen: &[Bool]) -> [Int] Never! {
+    if seen[index] -> return [Int]{}
+    seen[index] = true
+    if nodes[index].module_writes.len() > 0 -> return [Int]{index}
+    calls: nodes[index].call_edges.len()
+    loop position in 0..<(calls + nodes[index].value_edges.len()) {
+        edge: if position < calls -> nodes[index].call_edges[position] else -> nodes[index].value_edges[position - calls]
+        target: sema_effect_node_index(node_by_key, edge) ?? next
+        tail: sema_effect_state_writer_path(nodes, node_by_key, target, seen)
+        if tail.len() == 0 -> next
+        path := [Int]{index}
+        loop step in tail -> path.push(step)
+        return path
+    }
+    [Int]{}
+}
+
+// A module or type cap as one checked function meets it. `site` names where
+// the cap is written (`run.jet:1`) when it isn't in the function's own file;
+// a cap in the function's file is labeled in the report.
 SemaEffectModuleCap: struct {
     cap: ModuleCap
     site: String?
 }
 
-// A module's `#FX(…)` cap over one function: the function-row rule, with
-// plain entries as a ceiling (E0712) and `!` entries as denials (E0749)
-// that hold through every callee it can reach. Names were validated once
+// A struct's or enum's cap and the module that declares the type.
+SemaEffectTypeCap: struct {
+    module_identity: String
+    cap: SemaEffectModuleCap
+}
+
+// A module's or type's `#FX(…)` cap over one function: the function-row rule,
+// with plain entries as a ceiling and `!` entries as denials, both E0749 and
+// both holding through every callee the function can reach. A row the
+// function declares may only narrow the cap, so a declared effect outside it
+// is E0749 too, even when the body doesn't use it. Names were validated once
 // per cap (sema_effect_module_cap_names).
 sema_effect_check_module_cap: fn(nodes: [SemaEffectNode], node_by_key: NameRows, node_index: Int, solved: [String], cap: SemaEffectModuleCap, diagnostics: &[Diagnostic]) {
     node: nodes[node_index]
@@ -900,7 +949,11 @@ sema_effect_check_module_cap: fn(nodes: [SemaEffectNode], node_by_key: NameRows,
             next
         }
         reached: sema_effect_covered(solved, [String]{effect_name})
-        if reached.len() == 0 -> next
+        if reached.len() == 0 {
+            declared: sema_effect_declared_hits(node.declared, effect_name)
+            if declared.len() > 0 -> diagnostics.push(sema_effect_module_row_denied_diagnostic(node, declared, effect_name, cap))
+            next
+        }
         panic_site := "the reachable call graph"
         if sema_effect_root(effect_name) == "Panic" {
             seen := (loop _ in nodes -> false)
@@ -910,7 +963,42 @@ sema_effect_check_module_cap: fn(nodes: [SemaEffectNode], node_by_key: NameRows,
     }
     if ceiling.len() == 0 -> return
     over: sema_effect_uncovered(solved, ceiling)
-    if over.len() > 0 -> diagnostics.push(sema_effect_module_ceiling_diagnostic(node, over, ceiling, cap))
+    if over.len() > 0 {
+        diagnostics.push(sema_effect_module_ceiling_diagnostic(node, over, ceiling, cap))
+        return
+    }
+    wider: sema_effect_uncovered(node.declared, ceiling)
+    if wider.len() > 0 -> diagnostics.push(sema_effect_module_row_ceiling_diagnostic(node, wider, ceiling, cap))
+}
+
+// The declared effects that overlap `denied`: the denied effect itself, a
+// leaf under it, or a root above it (a row granting `FS` grants `FS.Read`).
+sema_effect_declared_hits: fn(declared: [String], denied: String) -> [String] Never! {
+    hits := [String]{}
+    loop effect_name in declared {
+        if sema_effect_covers(denied, effect_name) || sema_effect_covers(effect_name, denied) -> sema_effect_set_add(hits, effect_name)
+    }
+    hits
+}
+
+sema_effect_module_row_denied_diagnostic: fn(node: SemaEffectNode, declared: [String], denied: String, cap: SemaEffectModuleCap) -> Diagnostic {
+    name: sema_inline_member_source_name(node.name)
+    scope: cap.cap.scope
+    owner: cap.cap.owner
+    declared_list: sema_effect_show(declared)
+    diagnostic: sema_error("E0749", node.row_span ?? node.name_span, "`{name}`'s row declares `{declared_list}`, which {scope} `{owner}` denies", "a row written inside a cap may only narrow it; the {scope}'s `#FX(…)` cap denies `{denied}` to {sema_effect_cap_members(cap)}{sema_effect_module_cap_where(cap)}", "drop `{declared_list}` from `{name}`'s row, move `{name}` out of {scope} `{owner}`, or drop `!{denied}` from the {scope}'s `#FX(…)` cap")
+    sema_effect_module_cap_report(diagnostic, [String]{name}, cap)
+}
+
+sema_effect_module_row_ceiling_diagnostic: fn(node: SemaEffectNode, wider: [String], ceiling: [String], cap: SemaEffectModuleCap) -> Diagnostic {
+    name: sema_inline_member_source_name(node.name)
+    scope: cap.cap.scope
+    owner: cap.cap.owner
+    sorted := wider.copy()
+    sorted.sort()
+    wider_list: sema_effect_show(sorted)
+    diagnostic: sema_error("E0749", node.row_span ?? node.name_span, "`{name}`'s row declares `{wider_list}`, which {scope} `{owner}`'s `#FX(…)` cap doesn't allow", "a row written inside a cap may only narrow it; the {scope}'s cap allows only `{sema_effect_show(ceiling)}` in {sema_effect_cap_members(cap)}{sema_effect_module_cap_where(cap)}", "narrow `{name}`'s row to `{sema_effect_show(ceiling)}`, or add `{wider_list}` to the {scope}'s `#FX(…)` cap")
+    sema_effect_module_cap_report(diagnostic, [String]{name}, cap)
 }
 
 sema_effect_module_cap_where: fn(cap: SemaEffectModuleCap) -> String Never! {
@@ -918,59 +1006,118 @@ sema_effect_module_cap_where: fn(cap: SemaEffectModuleCap) -> String Never! {
     ""
 }
 
+// Who the cap binds: a module's functions or a type's methods.
+sema_effect_cap_members: fn(cap: SemaEffectModuleCap) -> String Never! {
+    if cap.cap.scope == "type" -> return "every method of the type"
+    "every function inside it"
+}
+
 sema_effect_module_cap_report: fn(diagnostic: Diagnostic, chain: [String], cap: SemaEffectModuleCap) -> Diagnostic {
     labeled := diagnostic
-    if cap.site == None -> labeled = diagnostic_with_label(labeled, cap.cap.span, "module `{cap.cap.module_name}` is capped here")
-    diagnostic_with_rights(labeled, "invocation", chain, [String]{"module {cap.cap.module_name}"}, None)
+    if cap.site == None -> labeled = diagnostic_with_label(labeled, cap.cap.span, "{cap.cap.scope} `{cap.cap.owner}` is capped here")
+    diagnostic_with_rights(labeled, "invocation", chain, [String]{"{cap.cap.scope} {cap.cap.owner}"}, None)
 }
 
 sema_effect_module_denied_diagnostic: fn(node: SemaEffectNode, reached: [String], denied: String, panic_site: String, cap: SemaEffectModuleCap) -> Diagnostic {
     name: sema_inline_member_source_name(node.name)
-    module_name: cap.cap.module_name
+    scope: cap.cap.scope
+    owner: cap.cap.owner
+    members: sema_effect_cap_members(cap)
     where: sema_effect_module_cap_where(cap)
     if sema_effect_root(denied) == "Panic" {
-        diagnostic: sema_error("E0749", node.name_span, "`{name}` can stop, but module `{module_name}` denies Panic", "`{panic_site}` can stop; the module's `#FX(!Panic)` cap means every function inside it and every callee it can reach must not stop{where}", "return a fallible result for expected failure, add facts or a `#Pre`/refinement proof for a programmer-error stop, or drop `!Panic` from the module's `#FX(…)` cap")
+        diagnostic: sema_error("E0749", node.name_span, "`{name}` can stop, but {scope} `{owner}` denies Panic", "`{panic_site}` can stop; the {scope}'s `#FX(!Panic)` cap means {members} and every callee it can reach must not stop{where}", "return a fallible result for expected failure, add facts or a `#Pre`/refinement proof for a programmer-error stop, or drop `!Panic` from the {scope}'s `#FX(…)` cap")
         return sema_effect_module_cap_report(diagnostic, [String]{name, panic_site}, cap)
     }
     reached_list: sema_effect_show(reached)
-    diagnostic: sema_error("E0749", node.name_span, "`{name}` reaches the `{reached_list}` effect, which module `{module_name}` denies", "the module's `#FX(…)` cap denies `{denied}` to every function inside it and every callee it can reach{where}", "remove the call that introduces `{reached_list}`, move `{name}` out of module `{module_name}`, or drop `!{denied}` from the module's `#FX(…)` cap")
+    diagnostic: sema_error("E0749", node.name_span, "`{name}` reaches the `{reached_list}` effect, which {scope} `{owner}` denies", "the {scope}'s `#FX(…)` cap denies `{denied}` to {members} and every callee it can reach{where}", "remove the call that introduces `{reached_list}`, move `{name}` out of {scope} `{owner}`, or drop `!{denied}` from the {scope}'s `#FX(…)` cap")
     sema_effect_module_cap_report(diagnostic, [String]{name}, cap)
 }
 
 sema_effect_module_ceiling_diagnostic: fn(node: SemaEffectNode, over: [String], ceiling: [String], cap: SemaEffectModuleCap) -> Diagnostic {
     name: sema_inline_member_source_name(node.name)
-    module_name: cap.cap.module_name
+    scope: cap.cap.scope
+    owner: cap.cap.owner
     sorted := over.copy()
     sorted.sort()
     over_list: sema_effect_show(sorted)
-    diagnostic: sema_error("E0712", node.name_span, "`{name}` uses the effect `{over_list}`, which module `{module_name}`'s `#FX(…)` cap doesn't allow", "the module's cap allows only `{sema_effect_show(ceiling)}` in every function inside it, even through a call{sema_effect_module_cap_where(cap)}", "add `{over_list}` to the module's `#FX(…)` cap, or move that work out of module `{module_name}`")
+    diagnostic: sema_error("E0749", node.name_span, "`{name}` uses the effect `{over_list}`, which {scope} `{owner}`'s `#FX(…)` cap doesn't allow", "the {scope}'s cap allows only `{sema_effect_show(ceiling)}` in {sema_effect_cap_members(cap)}, even through a call{sema_effect_module_cap_where(cap)}", "add `{over_list}` to the {scope}'s `#FX(…)` cap, or move that work out of {scope} `{owner}`")
     sema_effect_module_cap_report(diagnostic, [String]{name}, cap)
 }
 
-// Each `#FX(…)` cap on a module declared in `items`, nested modules
-// included, names known effects; a positive `Panic` is rejected as in a
-// row (E0749). Reported once per cap, where it is written.
+// Each `#FX(…)` cap on a module, generic module, struct or enum declared in
+// `items`, nested modules included, names known effects; a positive `Panic` is
+// rejected as in a row (E0749). Reported once per cap, where it is written.
 sema_effect_module_cap_names: fn(items: [Item], diagnostics: &[Diagnostic]) {
     loop item in items {
-        if item == .CodeModule(definition) {
-            if definition.cap == .Val(cap) {
-                loop entry in cap.entries {
-                    raw: if entry.name.starts_with("!") -> entry.name.slice(1, entry.name.len()) else -> entry.name
-                    effect_name: sema_effect_parse_name(raw) ?? {
-                        diagnostics.push(sema_effect_unknown(raw, entry.span))
-                        next
-                    }
-                    if !entry.name.starts_with("!") && sema_effect_root(effect_name) == "Panic" -> diagnostics.push(sema_effect_positive_panic(entry.span))
-                }
+        if item == {
+            .CodeModule(definition) -> {
+                if definition.cap == .Val(cap) -> sema_effect_cap_entry_names(cap, diagnostics)
+                if definition.body == .Val(body) -> sema_effect_module_cap_names(body, diagnostics)
             }
-            if definition.body == .Val(body) -> sema_effect_module_cap_names(body, diagnostics)
+            .GenericModule(definition) -> {
+                if definition.cap == .Val(cap) -> sema_effect_cap_entry_names(cap, diagnostics)
+                sema_effect_module_cap_names(definition.body, diagnostics)
+            }
+            .Struct(definition) -> {
+                if definition.cap == .Val(cap) -> sema_effect_cap_entry_names(cap, diagnostics)
+            }
+            .Enum(definition) -> {
+                if definition.cap == .Val(cap) -> sema_effect_cap_entry_names(cap, diagnostics)
+            }
+            else -> {}
         }
     }
 }
 
+sema_effect_cap_entry_names: fn(cap: ModuleCap, diagnostics: &[Diagnostic]) {
+    loop entry in cap.entries {
+        raw: if entry.name.starts_with("!") -> entry.name.slice(1, entry.name.len()) else -> entry.name
+        effect_name: sema_effect_parse_name(raw) ?? {
+            diagnostics.push(sema_effect_unknown(raw, entry.span))
+            next
+        }
+        if !entry.name.starts_with("!") && sema_effect_root(effect_name) == "Panic" -> diagnostics.push(sema_effect_positive_panic(entry.span))
+    }
+}
+
+// The `#FX(…)` cap of every struct and enum in the graph, by the type's
+// nominal key, each with the `file:line` it is written at.
+sema_effect_type_caps: fn(graph_modules: [SemaRegistrationModule]) -> [String:SemaEffectTypeCap] {
+    caps := [String:SemaEffectTypeCap]{}
+    loop module_row in graph_modules {
+        loop nominal in module_row.nominals {
+            cap: sema_effect_nominal_cap(nominal) ?? next
+            caps[nominal.symbol.id.key] = SemaEffectTypeCap{module_identity: module_row.module_identity, cap: SemaEffectModuleCap{cap: cap, site: Val(sema_effect_cap_site(module_row, cap.span))}}
+        }
+    }
+    caps
+}
+
+sema_effect_nominal_cap: fn(nominal: SemaRegistrationNominal) -> ModuleCap? Never! {
+    if nominal.source == .SourceAST(item) {
+        if item == {
+            .Struct(definition) -> return definition.cap
+            .Enum(definition) -> return definition.cap
+            else -> {}
+        }
+    }
+    None
+}
+
+// Binds the cap of the type `nominal_key` names to a method of it declared
+// in `module_identity`. A cap written in the method's own module is labeled
+// where it is written; one in another module is named by `file:line`.
+sema_effect_bind_type_cap: fn(source: &SemaEffectFunctionSource, caps: [String:SemaEffectTypeCap], nominal_key: String?, module_identity: String) {
+    key: nominal_key ?? return
+    found: caps.get(key) ?? return
+    site: if found.module_identity == module_identity -> None else -> found.cap.site
+    source.type_cap = Val(SemaEffectModuleCap{cap: found.cap.cap, site: site})
+}
+
 // `#FX(…) name: module` over a file module: every function in the file takes
-// the cap, and each file that file declares takes it too. The result is by
-// graph module index, outermost cap first.
+// the cap, and each file that file declares takes it too. So does an `#FX(…)`
+// at the head of a file, named after the file. The result is by graph module
+// index, outermost cap first.
 sema_effect_file_module_caps: fn(graph_modules: [SemaRegistrationModule], edges: [SemaRegistrationImportEdge]) -> [[SemaEffectModuleCap]] {
     rows := [String:Int]{}
     loop (index, module_row) in graph_modules -> rows[module_row.module_identity] = index
@@ -987,13 +1134,31 @@ sema_effect_file_module_caps: fn(graph_modules: [SemaRegistrationModule], edges:
             seen[key] = true
             parents[target].push(source)
             cap: sema_effect_file_module_cap(graph_modules[source].program.items, edge.declaration.alias) ?? next
-            module_row: graph_modules[source]
-            file: sema_effect_source_display(sema_source_file_at(module_row.source_segments, module_row.source_file, module_row.source_origin, cap.span))
-            site: if sema_source_line_at(module_row.source_segments, cap.span) == .Val(line) -> "{file}:{line}" else -> file
-            direct[target].push(SemaEffectModuleCap{cap: cap, site: Val(site)})
+            direct[target].push(SemaEffectModuleCap{cap: cap, site: Val(sema_effect_cap_site(graph_modules[source], cap.span))})
         }
     }
-    (loop index in 0..<graph_modules.len() -> sema_effect_file_caps_of(index, direct, parents, 0))
+    // A head cap comes last in its own file's row, labeled where it is
+    // written; the files it declares name it by `file:line`.
+    heads := (loop _ in graph_modules -> false)
+    loop (index, module_row) in graph_modules {
+        head := module_row.program.file_cap ?? next
+        head.owner = sema_effect_source_display(sema_source_file_at(module_row.source_segments, module_row.source_file, module_row.source_origin, head.span))
+        direct[index].push(SemaEffectModuleCap{cap: head.copy(), site: Val(sema_effect_cap_site(module_row, head.span))})
+        heads[index] = true
+    }
+    (loop index in 0..<graph_modules.len() -> sema_effect_own_file_caps(sema_effect_file_caps_of(index, direct, parents, 0), heads[index]))
+}
+
+sema_effect_cap_site: fn(module_row: SemaRegistrationModule, span: Span) -> String {
+    file: sema_effect_source_display(sema_source_file_at(module_row.source_segments, module_row.source_file, module_row.source_origin, span))
+    if sema_source_line_at(module_row.source_segments, span) == .Val(line) -> return "{file}:{line}"
+    file
+}
+
+sema_effect_own_file_caps: fn(caps: [SemaEffectModuleCap], has_head: Bool) -> [SemaEffectModuleCap] Never! {
+    own := caps
+    if has_head && own.len() > 0 -> own[own.len() - 1].site = None
+    own
 }
 
 sema_effect_declares_file_module: fn(items: [Item], name: String) -> Bool Never! {
@@ -1149,6 +1314,8 @@ sema_effect_node_from_source: fn(function: FnBody, sources: [SemaEffectFunctionS
     }
     loop edge in function.effects.call_edges -> sema_effect_set_add(node.call_edges, edge)
     loop edge in function.effects.value_edges -> sema_effect_set_add(node.value_edges, edge)
+    // copy: the node keeps the writes; the function keeps its effect facts.
+    node.module_writes = function.effects.module_writes.copy()
     if function.effects.maximal {
         node.maximal = true
         node.maximal_span = Val(function.source_span)
@@ -1178,6 +1345,7 @@ sema_effect_node_from_source: fn(function: FnBody, sources: [SemaEffectFunctionS
     node.memo_span = actual.memo_span
     node.kernel = actual.kernel
     node.module_caps = actual.module_caps.copy()
+    if actual.type_cap == .Val(type_cap) -> node.type_cap = Val(type_cap.copy())
     if actual.is_unsafe && !sema_effect_check_unsafe_function(actual, diagnostics) {
         // The diagnostic is already source-backed; retain the node so the graph
         // remains inspectable after a failed gate check.
@@ -2274,7 +2442,7 @@ sema_effect_secret_reach: fn(nodes: [SemaEffectNode], callers: [[Int]]) -> [Bool
 }
 
 sema_effect_tfacts: fn(node: SemaEffectNode, solved: [String]) -> TEffectFacts Never! {
-    TEffectFacts{direct: node.direct, solved: solved, call_edges: node.call_edges, maximal: node.maximal, direct_spans: node.direct_spans, maximal_span: node.maximal_span, value_edges: node.value_edges}
+    TEffectFacts{direct: node.direct, solved: solved, call_edges: node.call_edges, maximal: node.maximal, direct_spans: node.direct_spans, maximal_span: node.maximal_span, value_edges: node.value_edges, module_writes: node.module_writes}
 }
 
 // Rust `e1264`: the span is the first entry of the declared effect row, or
@@ -2349,8 +2517,9 @@ sema_effect_trait_bound_diagnostic: fn(bound: SemaEffectTraitBound, over: [Strin
 sema_effect_check_trait_bounds: fn(module_row: SemaEffectModuleInput, functions: [FnBody], source_index: SemaEffectSourceIndex, nodes: [SemaEffectNode], node_by_key: NameRows, solved: [[String]], diagnostics: &[Diagnostic]) {
     if module_row.trait_bounds.len() == 0 -> return
     loop function in functions {
-        // An owned operator trait (`impl Vec2.Add`) has no source row, so its
-        // hook is checked as a plain method named in `operator_hooks`.
+        // An owned operator or CheckedText trait (`impl Vec2.Add`) has no
+        // source row, so its method is checked as a plain one named in
+        // `owned_trait_hooks`.
         owner_type: if function.kind == {
             .Method(_, owner) -> owner
             .TraitMethod(_, _, owner, _, _) -> owner
@@ -2360,7 +2529,7 @@ sema_effect_check_trait_bounds: fn(module_row: SemaEffectModuleInput, functions:
         }
         trait_name: if function.kind == {
             .TraitMethod(_, _, _, trait_symbol, _) -> sema_effect_symbol_leaf(trait_symbol.key)
-            else -> module_row.operator_hooks.get(function.key) ?? next
+            else -> module_row.owned_trait_hooks.get(function.key) ?? next
         }
         node_index: sema_effect_node_index(node_by_key, function.key) ?? next
         method: sema_effect_method_name(function, module_row.sources, source_index)
@@ -2882,6 +3051,17 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
         sema_effect_check_callback_bounds(nodes, calls.node_by_key, solved, node_index, callback_diagnostics)
         sema_effect_publish_diagnostics(diagnostics, inputs[nodes[node_index].module_index].source_segments, callback_diagnostics)
     }
+    // A pure function may not write module state, itself or through any
+    // function it calls or takes as a value.
+    loop node_index in 0..<nodes.len() {
+        if !nodes[node_index].is_pure -> next
+        seen := (loop _ in nodes -> false)
+        path: sema_effect_state_writer_path(nodes, calls.node_by_key, node_index, seen)
+        if path.len() == 0 -> next
+        state_diagnostics := [Diagnostic]{sema_effect_pure_state_diagnostic(nodes, path)}
+        // The report points at the write, which may be in another module.
+        sema_effect_publish_diagnostics(diagnostics, inputs[nodes[path[path.len() - 1]].module_index].source_segments, state_diagnostics)
+    }
     loop module_index in 0..<inputs.len() {
         module_row: inputs[module_index]
         bound_diagnostics := [Diagnostic]{}
@@ -2929,6 +3109,7 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
     }
     // A module's `#FX(…)` caps bind every function inside it: a file
     // module's from the module graph, an inline module's from the function.
+    // A type's cap binds each of its methods.
     loop node_index in 0..<nodes.len() {
         graph_module: inputs[nodes[node_index].module_index].module_index
         caps := [SemaEffectModuleCap]{}
@@ -2936,6 +3117,7 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
             loop cap in file_caps[graph_module] -> caps.push(cap.copy())
         }
         loop cap in nodes[node_index].module_caps -> caps.push(SemaEffectModuleCap{cap: cap, site: None})
+        if nodes[node_index].type_cap == .Val(type_cap) -> caps.push(type_cap.copy())
         if caps.len() == 0 -> next
         cap_diagnostics := [Diagnostic]{}
         loop cap in caps -> sema_effect_check_module_cap(nodes, calls.node_by_key, node_index, solved[node_index], cap, cap_diagnostics)

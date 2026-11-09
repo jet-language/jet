@@ -1,0 +1,37 @@
+// #6701 hazard: a descriptor from another process is read with pread, never
+// mapped. The peer (peer.py) sends an unsealed memfd of 64 KiB, then
+// truncates it to nothing while this process still holds it: a mapping
+// would fault (SIGBUS) on its next touch, while a read just comes up short.
+// The memfd's name never appears among this process's mappings.
+use {
+    files: core.files
+    net: core.net
+    process: core.process
+    sys: core.sys
+}
+
+run: fn() {
+    root: files.temp_dir("descriptors_read_never_mapped") ?? panic("temporary directory")
+    path: files.join(root.path, "s")
+    listener: net.unix_listen(path) ?? panic("listen: {err}")
+    peer: process.cmd([String]{"python3", "peer.py", path}).stdout(.Capture).stderr(.Capture).spawn() ?? panic("peer: {err}")
+    server := net.unix_accept(listener) ?? panic("accept: {err}")
+
+    message := net.unix_receive(server, 16) ?? panic("receive: {err}")
+    received: message.fds.remove(0, .Slot) ?? panic("no descriptor arrived")
+    print(received.size() ?? panic("size: {err}"))
+    print(received.read_at(65532, 4) ?? panic("read the end: {err}"))
+    net.unix_send(server, [U8]{1}, [sys.Fd]{}) ?? panic("ack: {err}")
+
+    truncated: net.unix_receive(server, 16) ?? panic("receive the truncation: {err}")
+    print(truncated.bytes)
+    after: received.read_at(0, 65536) ?? panic("read after the truncation: {err}")
+    print("{after.len()} bytes after the peer truncated it")
+    print(received.size() ?? panic("size after the truncation: {err}"))
+    maps: files.read("/proc/self/maps") ?? panic("maps: {err}")
+    // [stack] is in every process's maps: the file did read.
+    print("maps read {maps.contains("[stack]")}, peer memfd mapped {maps.contains("jet-hostile-peer")}")
+
+    receipt: peer.wait() ?? panic("peer wait: {err}")
+    if !receipt.success -> panic("the peer failed: {receipt.output}")
+}

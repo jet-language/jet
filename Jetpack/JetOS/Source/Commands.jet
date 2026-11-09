@@ -58,17 +58,30 @@ jetos_cmd_plan: fn(theme: Theme, raw: String, flags: JetOSFlags) -[IO, FS, Env, 
 // Rust generation_files.rs render_plan_json before realization: the closure
 // is empty until a generation build realizes the packages.
 jetos_render_plan_json: fn(system: SystemPlan, graph_identity: String) -> String Never! {
-    packages := [String]{}
+    packages := [Dyn]{}
     loop package in system.packages {
         reference: if package.source == "" -> package.name else -> "{package.name}@{package.source}"
-        packages.push("{{\"name\":{foundation_json_quote(package.name)},\"source\":{foundation_json_quote(package.source)},\"ref\":{foundation_json_quote(reference)}}}")
+        packages.push(Dyn.Object(["name": Dyn.Text(package.name.copy()), "source": Dyn.Text(package.source.copy()), "ref": Dyn.Text(reference)]))
     }
-    services: loop service in system.services -> jetos_service_plan_json(service)
-    options: loop option in system.options -> "{{\"key\":{foundation_json_quote(option.key)},\"value\":{foundation_json_quote(option.value)}}}"
-    "{{\"host\":{foundation_json_quote(system.name)},\"target\":{foundation_json_quote(system.target)},\"graph_identity\":{foundation_json_quote(graph_identity)},\"boot\":{jetos_boot_profile(system).to_json()},\"packages\":[{packages.join(",")}],\"closure\":[],\"services\":[{services.join(",")}],\"options\":[{options.join(",")}]}}"
+    services: loop service in system.services -> jetos_service_plan_dyn(service)
+    options: loop option in system.options -> Dyn.Object(["key": Dyn.Text(option.key.copy()), "value": Dyn.Text(option.value.copy())])
+    pkg_json_render(Dyn.Object([
+        "host": Dyn.Text(system.name.copy()),
+        "target": Dyn.Text(system.target.copy()),
+        "graph_identity": Dyn.Text(graph_identity.copy()),
+        "boot": jetos_boot_profile(system).to_dyn(),
+        "packages": Dyn.Array(packages),
+        "closure": Dyn.Array([Dyn]{}),
+        "services": Dyn.Array(services),
+        "options": Dyn.Array(options),
+    ]))
 }
 
-jetos_service_plan_json: fn(service: ServicePlan) -> String Never! {
-    fields: loop field in service.extra -> "{{\"key\":{foundation_json_quote(field.key)},\"value\":{foundation_json_quote(field.value)}}}"
-    "{{\"name\":{foundation_json_quote(service.name)},\"enable\":{if service.enable -> "true" else -> "false"},\"fields\":[{fields.join(",")}]}}"
+jetos_service_plan_dyn: fn(service: ServicePlan) -> Dyn Never! {
+    fields: loop field in service.extra -> Dyn.Object(["key": Dyn.Text(field.key.copy()), "value": Dyn.Text(field.value.copy())])
+    Dyn.Object([
+        "name": Dyn.Text(service.name.copy()),
+        "enable": Dyn.Bool(service.enable),
+        "fields": Dyn.Array(fields),
+    ])
 }

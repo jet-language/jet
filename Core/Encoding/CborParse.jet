@@ -116,7 +116,9 @@ impl Parser {
         if !mem.__list_reserve_exact<T>(values, count) -> return Err(failure(.Limit, offset, path, "{what} allocation exceeds max_bytes {self.options.max_bytes}"))
         actual: mem.__list_capacity<T>(values)
         if actual > available /% slot {
-            values = [T]{}
+            // `values = [T]{}` would keep the buffer this charge no longer counts.
+            released: [T]{}
+            values = released
             self.live = retained
             return Err(failure(.Limit, offset, path, "{what} allocation exceeds max_bytes {self.options.max_bytes}"))
         }

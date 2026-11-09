@@ -8,6 +8,7 @@ use {
     build_input_crypto: core.crypto
     build_input_url: core.net.url
     jet_eval.[jet_eval_build_failed_value]
+    jet_parser.[jfmt_escape_str_lit]
     jet_build_session.[
         BuildSession, BuildSessionDiagnostic, BuildSessionReply, BuildSessionValue, build_session_call,
         build_session_diag, build_session_graph,
@@ -52,6 +53,9 @@ jet_driver_build_host_call: fn(session: &BuildSession, inputs: JetDriverSharedBu
     method: member.slice("Build.".len(), member.len())
     values := [BuildSessionValue]{}
     generated := String?{None}
+    // `b.generate` sends its formatted items, then one (marker, value) pair
+    // per build local the template splices (sema_build_generate_splices).
+    splices := [BuildSessionValue]{}
     loop index in 1..<args.len() {
         value: jet_eval_build_session_input(args[index]) ?? return Val(jet_driver_build_host_failure(session, span, "build method received a non-data argument"))
         if method == "generate" && index == 2 {
@@ -60,7 +64,22 @@ jet_driver_build_host_call: fn(session: &BuildSession, inputs: JetDriverSharedBu
             // consuming match, so the payload cannot be moved out.
             if value == .Text(source) -> generated = Val(source.copy())
             else { return Val(jet_driver_build_host_failure(session, span, "generated items lost their checked source")) }
+        } else if method == "generate" && index > 2 {
+            splices.push(value)
         } else { values.push(value) }
+    }
+    if splices.len() > 0 {
+        spliced := generated ?? return Val(jet_driver_build_host_failure(session, span, "generated items lost their checked source"))
+        if splices.len() % 2 != 0 -> return Val(jet_driver_build_host_failure(session, span, "a generated splice lost its build value"))
+        loop pair in 0..<splices.len() /% 2 {
+            marker := 0
+            if splices[pair * 2] == .Int(number) {
+                marker = number
+            } else { return Val(jet_driver_build_host_failure(session, span, "a generated splice lost its marker")) }
+            literal: jet_driver_build_splice_literal(splices[pair * 2 + 1]) ?? return Val(jet_driver_build_host_failure(session, span, "`b.generate` can splice only a String, Int or Bool build value, or a list of them"))
+            spliced = spliced.replace("{marker}", literal)
+        }
+        generated = Val(spliced)
     }
     reply := build_session_call(session, method, values, generated, impure, span.start, span.end)
     if reply == .HostRequest(service, request_args) -> reply = jet_driver_build_input_reply(inputs, http_inputs, network_declared, base_dir, service, request_args, span)
@@ -80,6 +99,24 @@ jet_driver_build_host_call: fn(session: &BuildSession, inputs: JetDriverSharedBu
             return Val(JetEvalBuildReply.Failure{diagnostic: jet_eval_build_session_diagnostic(error)})
         }
         .HostRequest(service_method, _) -> return Val(jet_driver_build_host_failure(session, span, "build input service `{service_method}` is unavailable"))
+    }
+}
+
+// One spliced build value as the Jet literal the generated items read.
+jet_driver_build_splice_literal: fn(value: BuildSessionValue) -> String? Never! {
+    if value == {
+        .Text(text) -> Val("\"{jfmt_escape_str_lit(text)}\"")
+        .Int(number) -> Val("{number}")
+        .Bool(flag) -> Val(if flag -> "true" else -> "false")
+        .List(items) -> {
+            parts := [String]{}
+            loop item in items {
+                part: jet_driver_build_splice_literal(item) ?? return None
+                parts.push(part)
+            }
+            Val("[{parts.join(", ")}]")
+        }
+        else -> None
     }
 }
 
@@ -402,9 +439,9 @@ jet_driver_build_http_length: fn(headers: [[U8]]) JetDriverBuildHTTPError! {
         if length < 0 || length > 18446744073709551615 -> return Err(JetDriverBuildHTTPError{message: "invalid Content-Length"})
         if length > JET_DRIVER_BUILD_MAX_FETCH_BYTES -> return Err(JetDriverBuildHTTPError{message: "response exceeds its size bound"})
         // The reference reads the first header of this name.
-        return Ok(())
+        return Ok()
     }
-    Ok(())
+    Ok()
 }
 
 // Keep the reference's TLS diagnostics, but classify the provider's raw text

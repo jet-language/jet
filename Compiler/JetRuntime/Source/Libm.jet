@@ -51,6 +51,37 @@ libm_shl: fn(x: I64, n: I64) -> I64 {
 // C's `!!word`.
 libm_nonzero: fn(word: I64) -> I64 { if (word == I64{0}) -> I64{0} else -> I64{1} }
 
+// C's __builtin_clzll for a nonzero word, 64 for zero: shifts and tests only,
+// with no exact-Int leading_zeros count and its runtime call.
+libm_clz64: fn(word: I64) -> I64 {
+    if (word < I64{0}) -> return I64{0}
+    if (word == I64{0}) -> return I64{64}
+    v := word
+    top := I64{0}
+    if ((v >> I64{32}) != I64{0}) {
+        top += I64{32}
+        v = v >> I64{32}
+    }
+    if ((v >> I64{16}) != I64{0}) {
+        top += I64{16}
+        v = v >> I64{16}
+    }
+    if ((v >> I64{8}) != I64{0}) {
+        top += I64{8}
+        v = v >> I64{8}
+    }
+    if ((v >> I64{4}) != I64{0}) {
+        top += I64{4}
+        v = v >> I64{4}
+    }
+    if ((v >> I64{2}) != I64{0}) {
+        top += I64{2}
+        v = v >> I64{2}
+    }
+    if ((v >> I64{1}) != I64{0}) -> top += I64{1}
+    I64{63} - top
+}
+
 // The biased exponent field of a double's bits.
 libm_exponent: fn(bits: I64) -> I64 { (bits >> I64{52}).bit_and(I64{2047}) }
 
@@ -321,12 +352,12 @@ libm_fma: fn(x: Float, y: Float, z: Float) -> Float {
     // set rhi to top 63bit of the result (last bit is sticky)
     if nonzero {
         e += I64{64}
-        d = I64.from_int(rhi.leading_zeros()) ?? I64{0}
+        d = libm_clz64(rhi)
         d -= I64{1}
         // note: d > 0
         rhi = libm_shl(rhi, d).bit_or(libm_shr(rlo, I64{64} - d)).bit_or(libm_nonzero(libm_shl(rlo, d)))
     } else if (rlo != I64{0}) {
-        d = I64.from_int(rlo.leading_zeros()) ?? I64{0}
+        d = libm_clz64(rlo)
         d -= I64{1}
         if (d < I64{0}) {
             rhi = libm_shr(rlo, I64{1}).bit_or(rlo.bit_and(I64{1}))

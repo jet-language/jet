@@ -704,7 +704,7 @@ append_scalar: fn(out: &[U8], scalar: Int) Never! {
 #Test("ETF COUNT-ETF-131 fixtures, JSON view and typed round trip") {
     binary_key: [U8]{131, 116, 0, 0, 0, 1, 109, 0, 0, 0, 5, 99, 111, 117, 110, 116, 97, 2}
     atom_key: [U8]{131, 116, 0, 0, 0, 1, 119, 5, 99, 111, 117, 110, 116, 97, 2}
-    assert_eq(to_json(binary_key), Ok("{{\"count\":2}}"))
-    assert_eq(to_json(atom_key), Ok("{{\"count\":2}}"))
-    assert_eq(encode(stream.object_from_entries([(key: String, value: Dyn)]{(key: "count", value: Dyn.Int(2))})), Ok(atom_key))
+    assert_eq(to_json(binary_key) ?? panic("binary-key ETF converts"), "{{\"count\":2}}")
+    assert_eq(to_json(atom_key) ?? panic("atom-key ETF converts"), "{{\"count\":2}}")
+    assert_eq(encode(stream.object_from_entries([(key: String, value: Dyn)]{(key: "count", value: Dyn.Int(2))})) ?? panic("object encodes"), atom_key)
 }

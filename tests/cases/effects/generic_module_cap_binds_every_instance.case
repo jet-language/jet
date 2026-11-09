@@ -1,0 +1,22 @@
+# A `#FX(…)` cap above a generic module binds the functions of every
+# instance, as the same cap binds a plain module, and its names are checked
+# like a plain module cap's. `jet fmt` keeps the cap line.
+fixture: generic_module_cap_binds_every_instance/input
+env: NO_COLOR=1
+step: jet check deny.jet
+exit: 1
+stderr: count "[jet.ProhibitedEffectReached]" = 1 # the one instance's `hush` prints
+stderr: ~ "reaches the `IO` effect, which module `quiet` denies" # the diagnostic says it
+stderr: ~ "module `quiet` is capped here" # the diagnostic says it
+step: jet run within.jet
+exit: 0
+stdout: = "bump\n2\n"
+step: jet fmt within.jet
+exit: 0
+file: within.jet ~ "#FX(IO, !FS)" # the formatter keeps a generic module's markers
+step: jet check within.jet
+exit: 0
+step: jet check unknown.jet
+exit: 1
+stderr: ~ "`Nett` isn't a known effect" # the diagnostic says it
+stderr: ~ "`FFI.Klingon` isn't a declared effect" # the diagnostic says it

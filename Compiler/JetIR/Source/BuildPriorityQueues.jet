@@ -406,12 +406,34 @@ ir_list_sort_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, kind: String, l
 }
 
 // The signed word whose order is f64::total_cmp's for the Float at
-// `address`: its bits, with every bit but the sign flipped when the sign is
-// set (negative values and -NaN reverse their magnitude order).
+// `address` (ir_float_total_bits).
 ir_float_total_key: fn(m: &IRModule, a: &IRBuilder, address: Int) -> Int Never! {
     word_row: ir_word_row(m)
-    key: ir_temp(m, a, word_row)
     bits: ir_load_at(m, a, address, 0, word_row)
+    ir_float_total_bits(m, a, bits)
+}
+
+// The Float or Float32 in slot `value` as its total-order word: IEEE 754
+// totalOrder, -NaN < -inf < ... < -0.0 < +0.0 < ... < +inf < NaN. A Float32
+// widens to Float first, which keeps its order.
+ir_float_total_value: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, span: Span) -> Int Never! {
+    floating := value
+    if m.types[b.f.slot_type[value]].kind == .Float32 {
+        float_row: ir_value_type(m, p, Type.Float) ?? return ir_type_fail(b, span, Type.Float)
+        floating = ir_temp(m, b, float_row)
+        ir_emit(b.f, IROp.Convert, floating, value, -1, -1, b.line)
+    }
+    word_row: ir_word_row(m)
+    bits: ir_reinterpret(m, b, floating, word_row)
+    ir_float_total_bits(m, b, bits)
+}
+
+// The Float bits `bits` (a signed word) as the word whose order is
+// f64::total_cmp's: every bit but the sign flips when the sign is set
+// (negative values and -NaN reverse their magnitude order).
+ir_float_total_bits: fn(m: &IRModule, a: &IRBuilder, bits: Int) -> Int Never! {
+    word_row: ir_word_row(m)
+    key: ir_temp(m, a, word_row)
     ir_emit(a.f, IROp.Copy, key, bits, -1, -1, a.line)
     zero: ir_word_const(m, a, 0)
     negative: ir_bool_op(m, a, IROp.Lt, bits, zero)

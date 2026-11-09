@@ -355,7 +355,7 @@ parse_unicode_data: fn(text: String, ucd: &Ucd) TableError! {
         }
     }
     if pending >= 0 -> return Err(fail("unterminated UnicodeData First/Last range"))
-    Ok(())
+    Ok()
 }
 
 gc_tag: fn(gc: String) -> Int {
@@ -377,7 +377,7 @@ parse_special_casing: fn(text: String, ucd: &Ucd) TableError! {
         put(ucd.title, cp, hex_list(f[2]))
         put(ucd.upper, cp, hex_list(f[3]))
     }
-    Ok(())
+    Ok()
 }
 
 // Status C and F define the default full fold; C and S one-scalar rows the
@@ -395,7 +395,7 @@ parse_case_folding: fn(text: String, ucd: &Ucd) TableError! {
         if status == "C" || status == "F" -> put(ucd.fold, cp, mapping.copy())
         if (status == "C" || status == "S") && mapping.len() == 1 -> put(ucd.simple_fold, cp, mapping)
     }
-    Ok(())
+    Ok()
 }
 
 read_ucd: fn() -[FS]> Ucd TableError! {
@@ -704,7 +704,7 @@ runtime_outputs: fn(ucd: Ucd, sums: String) -> [Output] TableError! {
 push_le: fn(out: &[U8], value: Int, width: Int) TableError! {
     if value < 0 || value >= 1 << (8 * width) -> return Err(fail("asset field overflow: {value}/{width}"))
     loop at in 0..<width -> out.push(U8{(value >> (8 * at)).bit_and(Int{255})})
-    Ok(())
+    Ok()
 }
 
 // Flat rows of `widths.len()` fields, each field little-endian at its width.
@@ -770,7 +770,7 @@ asset: fn(assets: &[Asset], symbol: String, kind: Int, rows: [Int], widths: [Int
     unit: lower_ascii(symbol)
     source: "{HEADER}// JUCD schema 1; little-endian; {count} records of {stride} bytes.\n{symbol}: [U8]{{\"{byte_literal(bytes)}\"}}\n"
     assets.push(Asset{symbol: symbol, unit: unit, kind: kind, count: count, stride: stride, bytes: bytes.len(), sha256: crypto.sha256(bytes).hex(), source: source})
-    Ok(())
+    Ok()
 }
 
 // A mapping as a scalar pool and [scalar, start, length] index rows.

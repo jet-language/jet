@@ -1711,8 +1711,16 @@ jfmt_format_program_with_tokens: fn(prog: Program, src: String, source_toks: [To
         jfmt_write(f, "#NoPrelude")
         jfmt_newline(f)
     }
+    // A file-head `#FX(…)` cap stays on the line above the imports it heads.
+    if prog.file_cap == .Val(cap) {
+        if !first -> jfmt_newline(f)
+        first = false
+        entries: (loop entry in cap.entries -> entry.name)
+        jfmt_write(f, "#FX({entries.join(", ")})")
+        jfmt_newline(f)
+    }
     if prog.imports.len() > 0 {
-        if !first -> jfmt_blank_line_between_items(f)
+        if !first && prog.file_cap == None -> jfmt_blank_line_between_items(f)
         first = false
         held: jfmt_hold_item_comments(f, prog.items, prog.imports)
         jfmt_fmt_import_groups(f, prog.imports)

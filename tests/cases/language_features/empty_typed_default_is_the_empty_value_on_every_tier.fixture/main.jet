@@ -1,0 +1,28 @@
+// An empty `T{}` default is the empty value of `T`, the same as `T{}` in an
+// expression: `[Int]{}` is the empty list and `[String: Int]{}` the empty map.
+DBValue: enum {
+    Null
+    Text(String)
+}
+
+Row: struct {
+    name: String
+    cells: [DBValue]{}
+    counts: [String: Int]{}
+}
+
+count_of: fn(xs: [Int]{}) -> Int { xs.len() }
+
+holes: fn(values: [DBValue]{}) -> Int { values.len() }
+
+totals: fn(seen: [String: Int]{}) -> Int { seen.len() }
+
+run: fn() {
+    print("{count_of()} {count_of([1, 2, 3])}")
+    values: [DBValue.Null, DBValue.Text("x")]
+    print("{holes()} {holes(values)}")
+    seen: ["a": 1]
+    print("{totals()} {totals(seen)}")
+    row: Row{name: "r"}
+    print("{row.name} {row.cells.len()} {row.counts.len()}")
+}

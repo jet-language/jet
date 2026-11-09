@@ -1,0 +1,2250 @@
+use {
+    core: core
+    sys: core.sys
+    net: core.net
+    core.term.[Key]
+    core.ui.[FrameStats, UICursor, UIError, UIEvent, UIIcon, UIPointerButton, UIRect]
+    frame: __core_ui_frame
+    xkb: core.ui.xkb
+}
+// __core_ui_wayland — the Wayland wire adapter behind `ui.open`, a private
+// part of core.ui.
+//
+// Speaks the wire protocol itself over $XDG_RUNTIME_DIR/$WAYLAND_DISPLAY: no
+// libwayland. One xdg_toplevel shows the program's RGBA frames from three
+// wl_shm buffers in one sealed shared-memory pool; wl_surface frame callbacks
+// pace the frames; wl_seat keyboard and pointer events become UIEvents.
+// Keys go through core.ui.xkb with the compositor's keymap (its layouts,
+// levels and compose sequences), and held keys repeat at the compositor's
+// rate and delay.
+// Buffers are sized in physical pixels: wp_fractional_scale_v1 and
+// wp_viewporter map them onto the window's logical size, else the integer
+// wl_surface buffer scale does.
+// Jet draws the window's frame itself (__core_ui_frame): the title bar and
+// the shadow ring are one chrome surface, a wl_subsurface below the
+// program's, unless the compositor draws its own (xdg-decoration's
+// server_side) or offers no wl_subcompositor.
+// Requests queue in `out` and leave on `flush`; events are parsed from
+// `inbox`, and the descriptors that ride with them (the keymap) queue in
+// `inbox_fds`, newest first.
+
+// Global ids are fixed by the protocol: wl_display is object 1.
+DISPLAY: 1
+// Wire formats: XRGB8888 is always offered; XBGR8888 is R, G, B, X in
+// memory, the program's RGBA byte order, so it needs no swizzle.
+FORMAT_XRGB8888: 1
+FORMAT_XBGR8888: 875709016
+// Premultiplied ARGB8888 with its alpha: icons, the frame, and the content
+// under the frame's rounded corners. ABGR8888 is R, G, B, A in memory.
+FORMAT_ARGB8888: 0
+FORMAT_ABGR8888: 875708993
+RECEIVE_MAX: 65536
+// The largest keymap read from the compositor, the most one read gives.
+KEYMAP_MAX: 16777216
+// wl_keyboard.keymap's format code for an XKB text-v1 keymap.
+KEYMAP_XKB_V1: 1
+// wl_keyboard.key's state for a press.
+KEY_PRESSED: 1
+// Key repeat until wl_keyboard.repeat_info, which every keyboard of the
+// wl_seat version bound sends: 25 a second after 600 ms.
+REPEAT_RATE: 25
+REPEAT_DELAY: 600
+SIDE_MAX: 16384
+// The xdg_toplevel app_id until the program names its own.
+DEFAULT_APP_ID: "dev.jet.app"
+// Three buffers: one on screen, one queued, one being drawn.
+BUFFER_COUNT: 3
+// The chrome changes seldom: one on screen, one being drawn.
+CHROME_BUFFERS: 2
+// Present-to-present intervals and input latencies kept for frame_stats.
+SAMPLES_KEPT: 1024
+// Recent frames whose draw time sizes the draw-late budget.
+COSTS_KEPT: 32
+// Configures kept unacked; an older one is answered by acking a newer.
+CONFIGURES_KEPT: 32
+
+// A buffer of the pool. `stale_*` bound what changed in the frames since
+// this buffer was last drawn (empty when x1 <= x0); drawing into it again
+// copies only that plus the new damage.
+Buffer: struct {
+    id: Int
+    offset: Int
+    busy: Bool
+    stale_x0: Int
+    stale_y0: Int
+    stale_x1: Int
+    stale_y1: Int
+}
+
+// A buffer of the chrome's pool. `ring` names the shadow ring it holds
+// (scale120 * 2, plus 1 when active; -1 for none): the title bar is drawn
+// every time, the ring only into a buffer without it.
+ChromeBuffer: struct {
+    id: Int
+    offset: Int
+    busy: Bool
+    ring: Int
+}
+
+// A committed frame awaiting presentation feedback: the time it was
+// meant to be seen (local clock) and its oldest input's time (ms on the
+// compositor's clock, -1 for none).
+Pending: struct {
+    id: Int
+    target_ns: Int
+    input_ms: Int
+    // The frame directly follows the previous one, a refresh later.
+    follows: Bool
+}
+
+// An xdg_surface.configure not yet acked and the toplevel size it
+// carries, in logical units; 0 leaves that side to the window.
+Configure: struct {
+    serial: Int
+    width: Int
+    height: Int
+}
+
+// A wl_output and its integer scale (wl_output.scale, 1 until said).
+OutputScale: struct {
+    id: Int
+    scale: Int
+}
+
+Connection: struct {
+    priv stream: net.UnixStream
+    priv out: [U8]
+    priv out_fds: [sys.Fd]
+    priv inbox: [U8]
+    priv inbox_fds: [sys.Fd]
+    priv next_id: Int
+    priv registry: Int
+    priv compositor: Int
+    priv shm: Int
+    priv wm_base: Int
+    priv seat: Int
+    priv decoration_manager: Int
+    priv fractional_manager: Int
+    priv viewporter: Int
+    priv cursor_manager: Int
+    // wl_compositor's bound version: 3 brings set_buffer_scale, 6
+    // preferred_buffer_scale.
+    priv compositor_version: Int
+    priv surface: Int
+    priv xdg_surface: Int
+    priv toplevel: Int
+    priv pointer: Int
+    // The pointer's wp_cursor_shape_device_v1 (0 without one), the
+    // serial of its latest enter (-1 while it is outside the surface)
+    // and the shape the program asked for.
+    priv cursor_device: Int
+    priv pointer_serial: Int
+    priv cursor: UICursor
+    // xdg_toplevel_icon_manager_v1 (0 without one), and the pool and
+    // buffers of the icon set last, kept while it is in use.
+    priv icon_manager: Int
+    priv icon_pool: Int
+    priv icon_buffers: [Int]
+    priv keyboard: Int
+    priv output: Int
+    // Every output, with its integer scale, and those the surface is on.
+    priv outputs: [OutputScale]
+    priv entered: [Int]
+    // The surface's fractional scale and viewport, 0 without them.
+    priv fractional: Int
+    priv viewport: Int
+    priv presentation: Int
+    priv pending: [Pending]
+    priv frame_callback: Int
+    priv frame_due: Bool
+    priv sync_callback: Int
+    priv synced: Bool
+    priv configured: Bool
+    priv mapped: Bool
+    priv format: sys.PixelFormat
+    // The configures not yet acked, oldest first.
+    priv configures: [Configure]
+    // The logical size of the buffer attached last, 0 x 0 before one.
+    priv shown_width: Int
+    priv shown_height: Int
+    // Sizes come in two units. Configures, the viewport and pointer
+    // positions are logical (surface) units; buffers, frames and every
+    // size a program sees are pixels, `scale120` / 120 of them per unit.
+    priv pending_width: Int
+    priv pending_height: Int
+    priv logical_width: Int
+    priv logical_height: Int
+    priv width: Int
+    priv height: Int
+    priv scale120: Int
+    // The preferred scale: wp_fractional_scale_v1's in 120ths, and the
+    // integer wl_surface.preferred_buffer_scale; 0 until said.
+    priv fractional_scale: Int
+    priv buffer_scale: Int
+    // The viewport or buffer scale still has to follow a new size.
+    priv rescaled: Bool
+    priv pool: Int
+    priv memory: sys.SharedMemory
+    priv buffers: [Buffer]
+    // The refresh interval: presentation feedback's, else the output's
+    // current mode's; 0 while unknown.
+    priv refresh_ns: Int
+    priv output_refresh_ns: Int
+    // Local clock minus the presentation clock: the smallest gap seen
+    // between a frame reaching the screen and its feedback arriving.
+    priv clock_offset: Int
+    priv offset_known: Bool
+    // The latest vblank a frame reached the screen at, local clock.
+    priv vblank_ns: Int
+    priv vblank_known: Bool
+    // Refreshes the compositor holds a frame beyond the vblank it was
+    // committed for (its own pipeline depth, learned from feedback), and
+    // the run of frames seen later than that.
+    priv lag: Int
+    priv lag_known: Bool
+    priv late_run: Int
+    priv late_least: Int
+    priv callback_at: Int
+    // When the current frame is meant to be seen, and the first frame's.
+    priv target_ns: Int
+    priv first_target: Int
+    priv follows: Bool
+    priv time_ns: Int
+    priv delta_ns: Int
+    // Draw late: a frame starts the slowest recent draw time plus a
+    // safety margin before its vblank. A missed vblank widens the margin.
+    priv frame_start: Int
+    priv costs: [Int]
+    priv cost_at: Int
+    priv safety_ns: Int
+    // The oldest input since the last frame went out, ms on the
+    // compositor's clock; -1 for none.
+    priv input_ms: Int
+    priv presented: Int
+    priv missed: Int
+    priv discarded: Int
+    priv presented_abs: Int
+    priv intervals: [Int]
+    priv interval_at: Int
+    priv latencies: [Int]
+    priv latency_at: Int
+    // Jet's own frame. The chrome surface is a wl_subsurface below the
+    // content in sync mode: the title bar above the content and the
+    // shadow ring around both, drawn by __core_ui_frame. `framed` says the
+    // compositor leaves the frame to Jet; a fullscreen window has none.
+    priv subcompositor: Int
+    priv decoration: Int
+    priv framed: Bool
+    priv chrome: Int
+    priv chrome_subsurface: Int
+    priv chrome_viewport: Int
+    priv chrome_pool: Int
+    priv chrome_memory: sys.SharedMemory
+    priv chrome_buffers: [ChromeBuffer]
+    // The chrome buffers' size in pixels, and whether one is attached.
+    priv chrome_width: Int
+    priv chrome_height: Int
+    priv chrome_shown: Bool
+    // The chrome must be drawn again before it is next seen.
+    priv chrome_stale: Bool
+    priv painter: frame.Painter
+    // The title, icon, focus, states and pressed buttons the frame shows.
+    priv look: frame.FrameLook
+    priv fullscreen: Bool
+    // The window geometry set last (x, y, width, height); empty before.
+    priv geometry: [Int]
+    // The pointer is on the chrome; it or a finger on the frame is at
+    // (chrome_fx, chrome_fy), in 1/256ths of a unit from the chrome's
+    // top-left corner; the cursor shape shown there, 0 before one.
+    priv on_chrome: Bool
+    priv chrome_fx: Int
+    priv chrome_fy: Int
+    priv chrome_shape: Int
+    // The latest press on the title (ms on the compositor's clock, -1 for
+    // none lately), for a double press.
+    priv title_press_ms: Int
+    // wl_touch, 0 without one, and the touch point on the frame, -1 for none.
+    priv touch: Int
+    priv touch_id: Int
+    // The content's bottom-left corner cover at `corner_scale`.
+    priv corner_cover: [U8]
+    priv corner_scale: Int
+    // wl_shm offers XBGR8888 and ABGR8888.
+    priv xbgr: Bool
+    priv abgr: Bool
+    // The compositor's modifiers (depressed | latched | locked), which the
+    // US fallback reads while no keymap has arrived.
+    priv modifiers: Int
+    // The compositor's XKB keymap and the keyboard state it tracks: layout,
+    // levels and compose. Empty until wl_keyboard.keymap brings one the
+    // engine compiles, and never more than one; the US table stands in
+    // while it is empty.
+    priv keymap: [xkb.Keymap]
+    // Key repeat from wl_keyboard.repeat_info, and the key that repeats:
+    // its evdev code (-1 for none), what each repeat reports, when it went
+    // down and how many repeats it has made.
+    priv repeat: xkb.Repeat
+    priv held: Int
+    priv held_key: Key
+    priv held_text: String
+    priv held_at: Int
+    priv held_repeats: Int
+    // The evdev codes of the keys down whose press the frame took: their
+    // releases are the frame's too.
+    priv frame_keys: [Int]
+    priv events: [UIEvent]
+    priv failure: UIError?
+}
+
+impl Connection {
+    width: fn(self) -> Int { self.width }
+    height: fn(self) -> Int { self.height }
+    // Pixels per logical unit of the display the window is on.
+    scale: fn(self) -> Float { Float{self.scale120} / 120.0 }
+    failure: fn(self) -> UIError? { self.failure }
+    // The current frame's predicted presentation time since the first
+    // frame's, and the step from the frame before, in nanoseconds.
+    time_ns: fn(self) -> Int { self.time_ns }
+    delta_ns: fn(self) -> Int { self.delta_ns }
+
+    // How evenly frames reached the screen and how fast input showed,
+    // from presentation feedback.
+    frame_stats: fn(self) -> FrameStats {
+        FrameStats{
+            presented: self.presented, missed: self.missed, discarded: self.discarded,
+            refresh_ns: refresh_interval(self),
+            median_ns: percentile(self.intervals, 50), p99_ns: percentile(self.intervals, 99),
+            input_samples: self.latencies.len(),
+            input_median_ns: percentile(self.latencies, 50), input_p99_ns: percentile(self.latencies, 99),
+            spans: spans(self.intervals, refresh_interval(self)),
+        }
+    }
+}
+
+spans: fn(intervals: [Int], refresh: Int) -> [Int] {
+    counts := [Int]{0, 0, 0, 0}
+    if refresh <= 0 -> return counts
+    loop interval in intervals {
+        spanned: (interval + refresh /% 2) /% refresh
+        slot: if spanned <= 1 -> 0 else -> min_int(spanned - 1, 3)
+        counts[slot] = counts[slot] + 1
+    }
+    counts
+}
+
+percentile: fn(samples: [Int], percent: Int) -> Int {
+    if samples.len() == 0 -> return 0
+    sorted := samples.copy()
+    sorted.sort()
+    count: sorted.len()
+    sorted[min_int(count - 1, (count - 1) * percent /% 100)]
+}
+
+// True when the environment names a Wayland display.
+available: fn() -[Env]> Bool { sys_get("WAYLAND_DISPLAY") != "" }
+
+sys_get: fn(name: String) -[Env]> String { sys.get(name) ?? "" }
+
+// Connects, opens an xdg_toplevel titled `title` and waits for its first
+// configure. The window is `width` x `height` logical units unless the
+// compositor chooses a size; its frames are that many pixels times the
+// scale of the display it is on.
+connect: fn(width: Int, height: Int, title: String) -[Env, Net, Time]> Connection UIError! {
+    display: sys_get("WAYLAND_DISPLAY")
+    if display == "" -> return Err(UIError.NoDisplay)
+    runtime: sys_get("XDG_RUNTIME_DIR")
+    if !display.starts_with("/") && runtime == "" -> return Err(UIError.Connect("XDG_RUNTIME_DIR is not set"))
+    path: if display.starts_with("/") -> display else -> "{runtime}/{display}"
+    stream: net.unix_connect(path) ?? return Err(UIError.Connect("{path}: {err}"))
+    // Replaced by the first `allocate`; a page until then.
+    memory: sys.shared_memory(4096) ?? return Err(UIError.Protocol("allocating window buffers failed: {err}"))
+    chrome_memory: sys.shared_memory(4096) ?? return Err(UIError.Protocol("allocating window buffers failed: {err}"))
+    look: frame.FrameLook{
+        title: title.copy(), active: true, square: false, maximized: false, coarse: false,
+        hover: frame.FrameButton.Nothing, pressed: frame.FrameButton.Nothing, focus: frame.FrameButton.Nothing, icon: [U8]{}, icon_side: 0,
+    }
+    c := Connection{
+        stream: stream, out: [U8]{}, out_fds: [sys.Fd]{}, inbox: [U8]{}, inbox_fds: [sys.Fd]{},
+        next_id: 2, registry: 0, compositor: 0, shm: 0, wm_base: 0, seat: 0, decoration_manager: 0,
+        fractional_manager: 0, viewporter: 0, cursor_manager: 0, compositor_version: 0,
+        surface: 0, xdg_surface: 0, toplevel: 0, pointer: 0, cursor_device: 0, pointer_serial: -1, cursor: UICursor.Default,
+        icon_manager: 0, icon_pool: 0, icon_buffers: [Int]{}, keyboard: 0, output: 0,
+        outputs: [OutputScale]{}, entered: [Int]{}, fractional: 0, viewport: 0, presentation: 0,
+        pending: [Pending]{}, frame_callback: 0, frame_due: true, sync_callback: 0, synced: false,
+        configured: false, mapped: false, format: sys.PixelFormat.XRGB8888,
+        configures: [Configure]{}, shown_width: 0, shown_height: 0,
+        pending_width: 0, pending_height: 0, logical_width: 0, logical_height: 0, width: 0, height: 0,
+        scale120: 120, fractional_scale: 0, buffer_scale: 0, rescaled: false, pool: 0, memory: memory,
+        buffers: [Buffer]{}, refresh_ns: 0, output_refresh_ns: 0, clock_offset: 0, offset_known: false,
+        vblank_ns: 0, vblank_known: false, lag: 0, lag_known: false, late_run: 0, late_least: 0, callback_at: 0, target_ns: 0, first_target: -1, follows: false,
+        time_ns: 0, delta_ns: 0, frame_start: 0, costs: [Int]{}, cost_at: 0, safety_ns: 0, input_ms: -1,
+        presented: 0, missed: 0, discarded: 0, presented_abs: 0, intervals: [Int]{}, interval_at: 0,
+        latencies: [Int]{}, latency_at: 0,
+        subcompositor: 0, decoration: 0, framed: false, chrome: 0, chrome_subsurface: 0, chrome_viewport: 0,
+        chrome_pool: 0, chrome_memory: chrome_memory, chrome_buffers: [ChromeBuffer]{}, chrome_width: 0, chrome_height: 0,
+        chrome_shown: false, chrome_stale: true, painter: frame.painter(), look: look, fullscreen: false, geometry: [Int]{},
+        on_chrome: false, chrome_fx: 0, chrome_fy: 0, chrome_shape: 0, title_press_ms: -1, touch: 0, touch_id: -1,
+        corner_cover: [U8]{}, corner_scale: 0, xbgr: false, abgr: false,
+        modifiers: 0, keymap: [xkb.Keymap]{}, repeat: xkb.Repeat{rate: REPEAT_RATE, delay: REPEAT_DELAY},
+        held: -1, held_key: Key.Unknown, held_text: "", held_at: 0, held_repeats: 0, frame_keys: [Int]{},
+        events: [UIEvent]{}, failure: None,
+    }
+    c.registry = new_id(c)
+    request(c, DISPLAY, 1, words([Int]{c.registry}))
+    roundtrip(c)
+    // The binds made while the globals arrived reach the compositor here,
+    // and so do the wl_shm formats.
+    roundtrip(c)
+    if c.failure == .Val(failure) -> return Err(failure)
+    if c.compositor == 0 -> return Err(UIError.Unsupported("the compositor offers no wl_compositor"))
+    if c.shm == 0 -> return Err(UIError.Unsupported("the compositor offers no wl_shm"))
+    if c.wm_base == 0 -> return Err(UIError.Unsupported("the compositor offers no xdg_wm_base"))
+    c.surface = new_id(c)
+    request(c, c.compositor, 0, words([Int]{c.surface}))
+    c.xdg_surface = new_id(c)
+    request(c, c.wm_base, 2, words([Int]{c.xdg_surface, c.surface}))
+    c.toplevel = new_id(c)
+    request(c, c.xdg_surface, 1, words([Int]{c.toplevel}))
+    request(c, c.toplevel, 2, text_argument(title))
+    request(c, c.toplevel, 3, text_argument(DEFAULT_APP_ID))
+    // Fractional scaling: the compositor names the scale in 120ths and
+    // the viewport maps the pixel-sized buffer onto the logical size.
+    if c.fractional_manager != 0 && c.viewporter != 0 {
+        c.fractional = new_id(c)
+        request(c, c.fractional_manager, 1, words([Int]{c.fractional, c.surface}))
+        c.viewport = new_id(c)
+        request(c, c.viewporter, 1, words([Int]{c.viewport, c.surface}))
+    }
+    if c.subcompositor != 0 {
+        // Jet's frame: the chrome surface, a subsurface below the content.
+        c.chrome = new_id(c)
+        request(c, c.compositor, 0, words([Int]{c.chrome}))
+        c.chrome_subsurface = new_id(c)
+        request(c, c.subcompositor, 1, words([Int]{c.chrome_subsurface, c.chrome, c.surface}))
+        request(c, c.chrome_subsurface, 3, words([Int]{c.surface}))
+        if c.viewport != 0 {
+            c.chrome_viewport = new_id(c)
+            request(c, c.viewporter, 1, words([Int]{c.chrome_viewport, c.chrome}))
+        }
+        c.framed = true
+        // The smallest window the frame fits, title bar included.
+        request(c, c.toplevel, 8, words([Int]{frame.MIN_WIDTH, frame.MIN_HEIGHT}))
+    }
+    if c.decoration_manager != 0 {
+        c.decoration = new_id(c)
+        request(c, c.decoration_manager, 1, words([Int]{c.decoration, c.toplevel}))
+        // Jet's frame when it can draw one (client_side, 1), else the
+        // compositor's (server_side, 2); its answer is the mode used.
+        mode: if c.framed -> 1 else -> 2
+        request(c, c.decoration, 1, words([Int]{mode}))
+    }
+    request(c, c.surface, 6, [U8]{})
+    flush(c)
+    waited := 0
+    loop !c.configured && c.failure == None && waited < 50 {
+        receive(c, 100000000)
+        waited += 1
+    }
+    if c.failure == .Val(failure) -> return Err(failure)
+    if !c.configured -> return Err(UIError.Protocol("the compositor never configured the window"))
+    chosen_width: if c.pending_width > 0 -> c.pending_width else -> width
+    chosen_height: if c.pending_height > 0 -> max_int(c.pending_height - header_height(c), 1) else -> height
+    allocate(c, chosen_width, chosen_height)
+    if c.failure == .Val(failure) -> return Err(failure)
+    c.events = [UIEvent]{}
+    Ok(c)
+}
+
+// Waits for the next frame and returns the events that arrived meanwhile.
+// The compositor alone paces frames, the way a GTK frame clock or a
+// Chromium BeginFrame does: exactly one frame is in flight, the next is
+// due when its wl_surface.frame callback fires, and nothing ever waits
+// on a frame rate. Input is read the moment it arrives and goes out with
+// the next frame.
+//
+// A frame starts late, its measured draw time plus a safety margin
+// before the vblank it aims for, so its input is as fresh as possible;
+// `time_ns` is that vblank, predicted from presentation feedback, so
+// motion computed from it keeps its speed even when a frame is late.
+//
+// A frame that presents nothing lets the window sleep until input
+// arrives. A failure ends the stream with `.Close`; `failure()` says why.
+next_frame: fn(&c: Connection) -[Env, Net, Time]> [UIEvent] {
+    loop c.failure == None && !c.frame_due && !has_close(c.events) {
+        // Idle (the last frame presented nothing): ask for a frame once
+        // something happens.
+        if c.mapped && c.frame_callback == 0 && (c.events.len() > 0 || wants_reshape(c)) -> request_frame(c)
+        flush(c)
+        receive(c, -1)
+    }
+    if c.frame_due && c.failure == None && !has_close(c.events) {
+        c.frame_due = false
+        // Frames step one refresh at a time; prediction jitter of a
+        // refresh never moves `time`. Only a gap of more than one refresh
+        // (a stall, or a window idle since) resyncs to the prediction.
+        predicted: predict(c)
+        refresh: refresh_interval(c)
+        c.follows = refresh > 0 && c.first_target >= 0 && predicted <= c.target_ns + 2 * refresh
+        c.target_ns = if c.follows -> c.target_ns + refresh else -> predicted
+        // Draw late: wait for the frame's start, reading input meanwhile.
+        start: c.target_ns - draw_budget(c) - safety(c)
+        loop c.failure == None && !has_close(c.events) {
+            now: core.time.__clock_mono_ns()
+            if now >= start -> break
+            receive(c, start - now)
+        }
+    } else {
+        c.target_ns = core.time.__clock_mono_ns()
+        c.follows = false
+    }
+    if c.first_target < 0 -> c.first_target = c.target_ns
+    previous: c.time_ns
+    // The compositor shows a frame `lag` refreshes after the vblank it
+    // was committed for; motion follows when it is actually seen.
+    c.time_ns = c.target_ns + c.lag * refresh_interval(c) - c.first_target
+    c.delta_ns = c.time_ns - previous
+    if c.failure != None && !has_close(c.events) -> c.events.push(UIEvent.Close)
+    // The size and scale the latest configure and scale events asked
+    // for apply to this frame.
+    if c.failure == None && !has_close(c.events) && wants_reshape(c) {
+        width: c.width
+        height: c.height
+        logical_width: wanted_width(c)
+        logical_height: wanted_height(c)
+        allocate(c, logical_width, logical_height)
+        if c.width != width || c.height != height -> c.events.push(UIEvent.Resize{width: c.width, height: c.height})
+        if c.failure != None -> c.events.push(UIEvent.Close)
+    }
+    c.frame_start = core.time.__clock_mono_ns()
+    events: c.events.copy()
+    c.events.clear()
+    events
+}
+
+// The refresh interval in nanoseconds, or 0 while unknown.
+refresh_interval: fn(c: Connection) -> Int { if c.refresh_ns > 0 -> c.refresh_ns else -> c.output_refresh_ns }
+
+// The vblank a frame starting now can still make: the first one at
+// least the draw budget and safety margin away, on the grid of the
+// latest presented vblank (else of the frame callback's arrival).
+predict: fn(c: Connection) -[Time]> Int {
+    now: core.time.__clock_mono_ns()
+    refresh: refresh_interval(c)
+    if refresh <= 0 -> return now
+    base: if c.vblank_known -> c.vblank_ns else -> c.callback_at
+    earliest: now + draw_budget(c) + safety(c)
+    steps: if earliest <= base -> 1 else -> (earliest - base + refresh - 1) /% refresh
+    base + steps * refresh
+}
+
+// The margin a commit needs before its vblank for the compositor to
+// latch it: half a refresh at first, widened by each missed frame.
+safety: fn(c: Connection) -> Int {
+    half: refresh_interval(c) /% 2
+    if c.safety_ns > half -> c.safety_ns else -> half
+}
+
+// The slowest of the recent frames' draw times: frame start to the
+// commit leaving.
+draw_budget: fn(c: Connection) -> Int {
+    most := 0
+    loop cost in c.costs {
+        if cost > most -> most = cost
+    }
+    most
+}
+
+// Asks for a frame callback with a one-pixel damage of the buffer on
+// screen, so a compositor that repaints only damaged surfaces sends it.
+request_frame: fn(&c: Connection) {
+    c.frame_callback = new_id(c)
+    header(c, c.surface, 3, 4)
+    put32(c.out, c.frame_callback)
+    header(c, c.surface, 9, 16)
+    put32(c.out, 0)
+    put32(c.out, 0)
+    put32(c.out, 1)
+    put32(c.out, 1)
+    ack_configure(c)
+    header(c, c.surface, 6, 0)
+}
+
+// Acks the newest configure the buffer about to be committed answers,
+// in that commit: the compositor takes the next commit after an ack as
+// the answer to it, and moves a window resized by its top or left edge
+// by the difference, so an ack riding a buffer of another size makes
+// the window jump. Acking a configure answers every older one too; a
+// newer configure of another size waits for the frame drawn at it.
+ack_configure: fn(&c: Connection) {
+    found := -1
+    loop index in 0..<c.configures.len() {
+        if answers(c, c.configures[index]) -> found = index
+    }
+    if found < 0 -> return
+    serial: c.configures[found].serial
+    request(c, c.xdg_surface, 4, words([Int]{serial}))
+    c.configures = c.configures[(found + 1)..<c.configures.len()].copy()
+}
+
+// The buffer on screen is `configure`'s size: each side it names
+// matches, and a side it leaves to the window is the window's choice.
+answers: fn(c: Connection, configure: Configure) -> Bool {
+    width_ok: configure.width <= 0 || min_int(configure.width, SIDE_MAX) == c.shown_width
+    height_ok: configure.height <= 0 || min_int(configure.height, SIDE_MAX) == c.shown_height
+    width_ok && height_ok
+}
+
+// Says how the buffers map onto the window: the viewport's logical
+// size, else the integer buffer scale.
+apply_scale: fn(&c: Connection) {
+    if !c.rescaled -> return
+    c.rescaled = false
+    if c.viewport != 0 {
+        request(c, c.viewport, 2, words([Int]{c.logical_width, c.logical_height}))
+        return
+    }
+    if c.compositor_version >= 3 -> request(c, c.surface, 8, words([Int]{c.scale120 /% 120}))
+}
+
+has_close: fn(events: [UIEvent]) -> Bool {
+    loop event in events {
+        if event == .Close -> return true
+    }
+    false
+}
+
+// Shows `pixels`, RGBA rows of the window's current size, of which only
+// `damage` changed since the previous frame. Only the damage, plus what
+// changed since the chosen buffer was last drawn, is converted straight
+// into that buffer; it is attached, damaged and committed with a frame
+// callback and presentation feedback. Three buffers and one frame in
+// flight leave one free; if none is, this waits for a release rather
+// than drop the frame.
+present: fn(&c: Connection, pixels: [U8], damage: [UIRect]) UIError! -[Env, Net, Time]> {
+    if c.failure == .Val(failure) -> return Err(failure)
+    frame_bytes: c.width * c.height * 4
+    if pixels.len() != frame_bytes {
+        return Err(UIError.Size("present needs {frame_bytes} bytes for {c.width}x{c.height} RGBA, got {pixels.len()}"))
+    }
+    free := free_buffer(c)
+    if free < 0 {
+        started: core.time.__clock_mono_ns()
+        loop free < 0 && c.failure == None && core.time.__clock_mono_ns() - started < 1000000000 {
+            receive(c, 1000000000 - (core.time.__clock_mono_ns() - started))
+            free = free_buffer(c)
+        }
+        if c.failure == .Val(failure) -> return Err(failure)
+        if free < 0 -> return Err(UIError.Protocol("the compositor released no buffer for a second"))
+    }
+    // The damage's bounds, clipped to the window.
+    x0 := c.width
+    y0 := c.height
+    x1 := 0
+    y1 := 0
+    loop rect in damage {
+        left: max_int(rect.x, 0)
+        top: max_int(rect.y, 0)
+        right: min_int(rect.x + rect.width, c.width)
+        bottom: min_int(rect.y + rect.height, c.height)
+        if right > left && bottom > top {
+            x0 = min_int(x0, left)
+            y0 = min_int(y0, top)
+            x1 = max_int(x1, right)
+            y1 = max_int(y1, bottom)
+        }
+    }
+    target: c.buffers[free]
+    stale: target.stale_x1 > target.stale_x0
+    copy_x0: if stale -> min_int(x0, target.stale_x0) else -> x0
+    copy_y0: if stale -> min_int(y0, target.stale_y0) else -> y0
+    copy_x1: if stale -> max_int(x1, target.stale_x1) else -> x1
+    copy_y1: if stale -> max_int(y1, target.stale_y1) else -> y1
+    if copy_x1 > copy_x0 && copy_y1 > copy_y0 {
+        shm_pixels(c.memory, target.offset, pixels, c.width * 4, copy_x0, copy_y0, copy_x1 - copy_x0, copy_y1 - copy_y0, c.format) ?? return Err(err)
+        if rounded(c) -> cover_corners(c, target.offset, copy_x0, copy_y0, copy_x1, copy_y1)
+    }
+    // The chrome commits first; the content's commit shows both.
+    if c.chrome_stale -> draw_chrome(c)
+    if c.failure == .Val(failure) -> return Err(failure)
+    loop index in 0..<c.buffers.len() {
+        if index == free {
+            c.buffers[index].stale_x0 = 0
+            c.buffers[index].stale_y0 = 0
+            c.buffers[index].stale_x1 = 0
+            c.buffers[index].stale_y1 = 0
+        } else if x1 > x0 && y1 > y0 {
+            other: c.buffers[index]
+            if other.stale_x1 > other.stale_x0 {
+                c.buffers[index].stale_x0 = min_int(other.stale_x0, x0)
+                c.buffers[index].stale_y0 = min_int(other.stale_y0, y0)
+                c.buffers[index].stale_x1 = max_int(other.stale_x1, x1)
+                c.buffers[index].stale_y1 = max_int(other.stale_y1, y1)
+            } else {
+                c.buffers[index].stale_x0 = x0
+                c.buffers[index].stale_y0 = y0
+                c.buffers[index].stale_x1 = x1
+                c.buffers[index].stale_y1 = y1
+            }
+        }
+    }
+    c.buffers[free].busy = true
+    header(c, c.surface, 1, 12)
+    put32(c.out, c.buffers[free].id)
+    put32(c.out, 0)
+    put32(c.out, 0)
+    loop rect in damage {
+        left: max_int(rect.x, 0)
+        top: max_int(rect.y, 0)
+        right: min_int(rect.x + rect.width, c.width)
+        bottom: min_int(rect.y + rect.height, c.height)
+        if right > left && bottom > top {
+            header(c, c.surface, 9, 16)
+            put32(c.out, left)
+            put32(c.out, top)
+            put32(c.out, right - left)
+            put32(c.out, bottom - top)
+        }
+    }
+    if c.frame_callback == 0 {
+        c.frame_callback = new_id(c)
+        header(c, c.surface, 3, 4)
+        put32(c.out, c.frame_callback)
+    }
+    if c.presentation != 0 {
+        feedback: new_id(c)
+        header(c, c.presentation, 1, 8)
+        put32(c.out, c.surface)
+        put32(c.out, feedback)
+        c.pending.push(Pending{id: feedback, target_ns: c.target_ns, input_ms: c.input_ms, follows: c.follows})
+    }
+    c.input_ms = -1
+    apply_scale(c)
+    c.shown_width = c.logical_width
+    c.shown_height = c.logical_height + header_height(c)
+    ack_configure(c)
+    header(c, c.surface, 6, 0)
+    c.mapped = true
+    flush(c)
+    if c.failure == .Val(failure) -> return Err(failure)
+    cost: core.time.__clock_mono_ns() - c.frame_start
+    if c.costs.len() < COSTS_KEPT -> c.costs.push(cost) else -> c.costs[c.cost_at] = cost
+    c.cost_at = (c.cost_at + 1) %% COSTS_KEPT
+    Ok()
+}
+
+free_buffer: fn(c: Connection) -> Int {
+    loop index in 0..<c.buffers.len() {
+        if !c.buffers[index].busy -> return index
+    }
+    -1
+}
+
+fail: fn(&c: Connection, failure: UIError) {
+    if c.failure == None -> c.failure = Val(failure)
+}
+
+// ---- the wire ---------------------------------------------------------
+
+new_id: fn(&c: Connection) -> Int {
+    id: c.next_id
+    c.next_id += 1
+    id
+}
+
+put32: fn(&out: [U8], value: Int) {
+    v: value.bit_and(4294967295)
+    out.push(U8{v.bit_and(255)})
+    out.push(U8{(v >> 8).bit_and(255)})
+    out.push(U8{(v >> 16).bit_and(255)})
+    out.push(U8{(v >> 24).bit_and(255)})
+}
+
+words: fn(values: [Int]) -> [U8] {
+    out := [U8]{}
+    loop value in values -> put32(out, value)
+    out
+}
+
+// A wire string: length with the NUL, the bytes, the NUL, padding to 4.
+text_argument: fn(text: String) -> [U8] {
+    out := [U8]{}
+    bytes: text.bytes()
+    put32(out, bytes.len() + 1)
+    loop b in bytes -> out.push(b)
+    out.push(U8{0})
+    loop out.len() %% 4 != 0 -> out.push(U8{0})
+    out
+}
+
+request: fn(&c: Connection, object: Int, opcode: Int, arguments: [U8]) {
+    header(c, object, opcode, arguments.len())
+    loop b in arguments -> c.out.push(b)
+}
+
+// A request header; `argument_bytes` of arguments must follow.
+header: fn(&c: Connection, object: Int, opcode: Int, argument_bytes: Int) {
+    put32(c.out, object)
+    put32(c.out, ((argument_bytes + 8) << 16) + opcode)
+}
+
+// Sends the queued requests; queued descriptors ride with them and are
+// closed here (the compositor got its own copies).
+flush: fn(&c: Connection) -[Net, Time]> {
+    if c.out.len() == 0 || c.failure != None -> return
+    net.unix_send(c.stream, c.out, c.out_fds) ?? {
+        fail(c, UIError.Protocol("sending to the compositor failed: {err}"))
+        return
+    }
+    c.out.clear()
+    if c.out_fds.len() > 0 -> c.out_fds = [sys.Fd]{}
+}
+
+// Waits up to `timeout_ns` (negative: until something arrives) for the
+// compositor on this OS thread, then reads and handles what arrived. A held
+// key's next repeat ends the wait early.
+receive: fn(&c: Connection, timeout_ns: Int) -[Env, Net, Time]> {
+    if c.failure != None -> return
+    wait_ns: repeat_wait(c, timeout_ns)
+    ready: net.unix_wait(c.stream, wait_ns) ?? {
+        fail(c, UIError.Protocol("waiting for the compositor failed: {err}"))
+        return
+    }
+    if !ready {
+        repeat_key(c)
+        return
+    }
+    message: net.unix_receive(c.stream, RECEIVE_MAX) ?? {
+        fail(c, UIError.Protocol("reading from the compositor failed: {err}"))
+        return
+    }
+    if message.bytes.len() == 0 && message.fds.len() == 0 {
+        fail(c, UIError.Protocol("the compositor closed the connection"))
+        return
+    }
+    loop b in message.bytes -> c.inbox.push(b)
+    // Newest first, so `pop` yields the oldest queued descriptor.
+    loop fd in message.fds.move() { c.inbox_fds.insert(0, fd) }
+    dispatch(c)
+    repeat_key(c)
+    // What only the frame shows (a hover, focus, a pressed button) goes
+    // out now; a new size waits for the frame drawn at it.
+    if c.chrome_stale && c.mapped && !wants_reshape(c) -> refresh_chrome(c)
+    flush(c)
+}
+
+roundtrip: fn(&c: Connection) -[Env, Net, Time]> {
+    c.synced = false
+    c.sync_callback = new_id(c)
+    request(c, DISPLAY, 0, words([Int]{c.sync_callback}))
+    flush(c)
+    waited := 0
+    loop !c.synced && c.failure == None && waited < 50 {
+        receive(c, 100000000)
+        waited += 1
+    }
+    if !c.synced -> fail(c, UIError.Protocol("the compositor did not answer wl_display.sync"))
+}
+
+u32_at: fn(bytes: [U8], at: Int) -> Int {
+    Int.from_u8(bytes[at]) + (Int.from_u8(bytes[at + 1]) << 8) + (Int.from_u8(bytes[at + 2]) << 16) + (Int.from_u8(bytes[at + 3]) << 24)
+}
+
+i32_at: fn(bytes: [U8], at: Int) -> Int {
+    v: u32_at(bytes, at)
+    if v >= 2147483648 -> return v - 4294967296
+    v
+}
+
+string_at: fn(bytes: [U8], at: Int) -> String {
+    length: u32_at(bytes, at)
+    if length <= 1 || at + 4 + length > bytes.len() -> return ""
+    String.from_bytes(bytes[(at + 4)..<(at + 3 + length)]) ?? ""
+}
+
+// Handles every complete event in the inbox.
+dispatch: fn(&c: Connection) -[Env, Time]> {
+    at := 0
+    loop c.inbox.len() - at >= 8 && c.failure == None {
+        object: u32_at(c.inbox, at)
+        word: u32_at(c.inbox, at + 4)
+        size: word >> 16
+        if size < 8 || size %% 4 != 0 {
+            fail(c, UIError.Protocol("malformed event header"))
+            return
+        }
+        if c.inbox.len() - at < size -> break
+        event(c, object, word.bit_and(65535), c.inbox[(at + 8)..<(at + size)].copy())
+        at += size
+    }
+    if at > 0 -> c.inbox = c.inbox[at..<c.inbox.len()].copy()
+}
+
+bind: fn(&c: Connection, name: Int, interface: String, version: Int) -> Int {
+    id: new_id(c)
+    arguments := text_argument(interface)
+    args := words([Int]{name})
+    loop b in arguments -> args.push(b)
+    put32(args, version)
+    put32(args, id)
+    request(c, c.registry, 0, args)
+    id
+}
+
+min_int: fn(a: Int, b: Int) -> Int { if a < b -> a else -> b }
+max_int: fn(a: Int, b: Int) -> Int { if a > b -> a else -> b }
+
+event: fn(&c: Connection, object: Int, opcode: Int, body: [U8]) -[Env, Time]> {
+    if body.len() < required_bytes(c, object, opcode) {
+        fail(c, UIError.Protocol("event {opcode} on object {object} is too short"))
+        return
+    }
+    if object == DISPLAY {
+        if opcode == 0 -> fail(c, UIError.Protocol("protocol error on object {u32_at(body, 0)}, code {u32_at(body, 4)}: {string_at(body, 8)}"))
+        return
+    }
+    if object == c.registry {
+        if opcode == 0 -> global(c, u32_at(body, 0), string_at(body, 4), u32_at(body, 8 + ((u32_at(body, 4) + 3) /% 4) * 4))
+        return
+    }
+    if object == c.sync_callback {
+        c.synced = true
+        return
+    }
+    if object == c.shm {
+        if opcode == 0 && u32_at(body, 0) == FORMAT_XBGR8888 -> c.xbgr = true
+        if opcode == 0 && u32_at(body, 0) == FORMAT_ABGR8888 -> c.abgr = true
+        return
+    }
+    if output_index(c, object) >= 0 {
+        // mode: the current one's refresh, in mHz (the first output's).
+        if object == c.output && opcode == 1 && u32_at(body, 0).bit_and(1) != 0 && i32_at(body, 12) > 0 -> c.output_refresh_ns = 1000000000000 /% i32_at(body, 12)
+        if opcode == 3 -> c.outputs[output_index(c, object)].scale = max_int(i32_at(body, 0), 1)
+        return
+    }
+    if object == c.surface {
+        // enter and leave an output, and the integer scale it prefers.
+        output: u32_at(body, 0)
+        if opcode == 0 && !c.entered.contains(output) -> c.entered.push(output)
+        if opcode == 1 {
+            kept := [Int]{}
+            loop id in c.entered {
+                if id != output -> kept.push(id)
+            }
+            c.entered = kept
+        }
+        if opcode == 2 -> c.buffer_scale = max_int(i32_at(body, 0), 1)
+        return
+    }
+    if object == c.fractional {
+        if opcode == 0 -> c.fractional_scale = u32_at(body, 0)
+        return
+    }
+    if object == c.presentation -> return
+    if pending_index(c, object) >= 0 {
+        // presented and discarded end a feedback object; sync_output does not.
+        if opcode == 1 -> presented(c, object, body)
+        if opcode == 2 -> c.discarded += 1
+        if opcode != 0 {
+            slot: pending_index(c, object)
+            _: c.pending.remove(slot, .Slot)
+        }
+        return
+    }
+    if object == c.wm_base {
+        // ping → pong
+        if opcode == 0 -> request(c, c.wm_base, 3, words([Int]{u32_at(body, 0)}))
+        return
+    }
+    if object == c.seat {
+        if opcode == 0 -> capabilities(c, u32_at(body, 0))
+        return
+    }
+    if object == c.toplevel {
+        if opcode == 0 {
+            c.pending_width = min_int(i32_at(body, 0), SIDE_MAX)
+            c.pending_height = min_int(i32_at(body, 4), SIDE_MAX)
+            toplevel_states(c, body)
+        }
+        if opcode == 1 -> c.events.push(UIEvent.Close)
+        return
+    }
+    if object == c.decoration {
+        // configure: the mode the compositor chose; client_side (1) is Jet's frame.
+        if opcode == 0 {
+            framed: u32_at(body, 0) == 1 && c.chrome != 0
+            if framed != c.framed {
+                c.framed = framed
+                restale(c)
+            }
+        }
+        return
+    }
+    if object == c.xdg_surface {
+        if opcode == 0 {
+            if c.configures.len() >= CONFIGURES_KEPT -> c.configures = c.configures[1..<c.configures.len()].copy()
+            c.configures.push(Configure{serial: u32_at(body, 0), width: c.pending_width, height: c.pending_height})
+            c.configured = true
+        }
+        return
+    }
+    if object == c.frame_callback {
+        c.frame_callback = 0
+        c.frame_due = true
+        c.callback_at = core.time.__clock_mono_ns()
+        return
+    }
+    if object == c.keyboard {
+        keyboard(c, opcode, body)
+        return
+    }
+    if object == c.pointer {
+        pointer(c, opcode, body)
+        return
+    }
+    if object == c.touch {
+        touch(c, opcode, body)
+        return
+    }
+    if object == c.chrome -> return
+    loop index in 0..<c.buffers.len() {
+        if c.buffers[index].id == object && opcode == 0 -> c.buffers[index].busy = false
+    }
+    loop index in 0..<c.chrome_buffers.len() {
+        if c.chrome_buffers[index].id == object && opcode == 0 -> c.chrome_buffers[index].busy = false
+    }
+}
+
+// The fixed argument bytes each handled event carries, so a short event
+// fails instead of reading past its end.
+required_bytes: fn(c: Connection, object: Int, opcode: Int) -> Int {
+    if object == DISPLAY && opcode == 0 -> return 12
+    if object == c.registry && opcode == 0 -> return 12
+    if object == c.shm || object == c.wm_base || object == c.seat || object == c.xdg_surface || object == c.frame_callback -> return 4
+    if object == c.toplevel && opcode == 0 -> return 12
+    if output_index(c, object) >= 0 {
+        if opcode == 1 -> return 16
+        if opcode == 3 -> return 4
+    }
+    if (object == c.surface && opcode <= 2) || object == c.fractional -> return 4
+    if opcode == 1 && pending_index(c, object) >= 0 -> return 28
+    if object == c.keyboard {
+        if opcode == 0 -> return 8
+        if opcode == 3 -> return 16
+        if opcode == 4 -> return 20
+        if opcode == 5 -> return 8
+    }
+    if object == c.pointer {
+        if opcode == 0 -> return 16
+        if opcode == 2 -> return 12
+        if opcode == 3 -> return 16
+        if opcode == 4 -> return 12
+    }
+    if object == c.decoration && opcode == 0 -> return 4
+    if object == c.touch {
+        if opcode == 0 -> return 24
+        if opcode == 1 -> return 12
+        if opcode == 2 -> return 16
+    }
+    0
+}
+
+global: fn(&c: Connection, name: Int, interface: String, version: Int) {
+    if interface == "wl_compositor" && c.compositor == 0 {
+        c.compositor_version = min_int(version, 6)
+        c.compositor = bind(c, name, interface, c.compositor_version)
+    }
+    if interface == "wl_shm" && c.shm == 0 -> c.shm = bind(c, name, interface, 1)
+    // v2 tells the tiled states.
+    if interface == "xdg_wm_base" && c.wm_base == 0 -> c.wm_base = bind(c, name, interface, min_int(version, 2))
+    if interface == "wl_subcompositor" && c.subcompositor == 0 -> c.subcompositor = bind(c, name, interface, 1)
+    if interface == "wl_seat" && c.seat == 0 -> c.seat = bind(c, name, interface, min_int(version, 5))
+    if interface == "zxdg_decoration_manager_v1" && c.decoration_manager == 0 -> c.decoration_manager = bind(c, name, interface, 1)
+    if interface == "wp_fractional_scale_manager_v1" && c.fractional_manager == 0 -> c.fractional_manager = bind(c, name, interface, 1)
+    if interface == "wp_viewporter" && c.viewporter == 0 -> c.viewporter = bind(c, name, interface, 1)
+    if interface == "wp_cursor_shape_manager_v1" && c.cursor_manager == 0 {
+        c.cursor_manager = bind(c, name, interface, 1)
+        cursor_device(c)
+    }
+    if interface == "wl_output" {
+        output: bind(c, name, interface, min_int(version, 2))
+        c.outputs.push(OutputScale{id: output, scale: 1})
+        if c.output == 0 -> c.output = output
+    }
+    if interface == "wp_presentation" && c.presentation == 0 -> c.presentation = bind(c, name, interface, 1)
+    if interface == "xdg_toplevel_icon_manager_v1" && c.icon_manager == 0 -> c.icon_manager = bind(c, name, interface, 1)
+}
+
+output_index: fn(c: Connection, object: Int) -> Int {
+    loop index in 0..<c.outputs.len() {
+        if c.outputs[index].id == object -> return index
+    }
+    -1
+}
+
+// The scale frames should have, in 120ths: the fractional scale when
+// the compositor offers it, else the integer one it prefers, else the
+// largest of the outputs the window is on; 1 until known.
+wanted_scale: fn(c: Connection) -> Int {
+    if c.fractional != 0 -> return if c.fractional_scale > 0 -> c.fractional_scale else -> 120
+    if c.compositor_version < 3 -> return 120
+    if c.buffer_scale > 0 -> return c.buffer_scale * 120
+    largest := 1
+    loop output in c.outputs {
+        if c.entered.contains(output.id) && output.scale > largest -> largest = output.scale
+    }
+    largest * 120
+}
+
+pending_index: fn(c: Connection, object: Int) -> Int {
+    loop index in 0..<c.pending.len() {
+        if c.pending[index].id == object -> return index
+    }
+    -1
+}
+
+// wp_presentation_feedback.presented: when the frame reached the screen
+// (the presentation clock) and the refresh interval. It sets the vblank
+// grid frames aim at and the local clock's offset; a frame seen after
+// the vblank it aimed at is missed and widens the safety margin.
+// Intervals and input-to-photon latencies feed frame_stats.
+presented: fn(&c: Connection, object: Int, body: [U8]) -[Time]> {
+    stamp: ((u32_at(body, 0) << 32) + u32_at(body, 4)) * 1000000000 + u32_at(body, 8)
+    refresh: u32_at(body, 12)
+    if refresh > 0 -> c.refresh_ns = refresh
+    gap: core.time.__clock_mono_ns() - stamp
+    if !c.offset_known || gap < c.clock_offset {
+        c.clock_offset = gap
+        c.offset_known = true
+    }
+    local: stamp + c.clock_offset
+    if !c.vblank_known || local > c.vblank_ns {
+        c.vblank_ns = local
+        c.vblank_known = true
+    }
+    sent: c.pending[pending_index(c, object)]
+    interval: refresh_interval(c)
+    if interval > 0 {
+        // Refreshes this frame came after its target, counting from the
+        // vblank it was committed for.
+        late: (local - sent.target_ns + interval * 64 + interval /% 2) /% interval - 64
+        if !c.lag_known || late < c.lag {
+            c.lag = if late < 0 -> 0 else -> late
+            c.lag_known = true
+            c.late_run = 0
+        } else if late > c.lag {
+            // A compositor whose pipeline grew: adopt its new depth after
+            // a second of frames all later than the old one.
+            c.late_least = if c.late_run == 0 || late < c.late_least -> late else -> c.late_least
+            c.late_run += 1
+            if c.late_run * interval >= 1000000000 {
+                c.lag = c.late_least
+                c.late_run = 0
+            }
+        } else {
+            c.late_run = 0
+        }
+    }
+    if c.presented_abs > 0 {
+        between: stamp - c.presented_abs
+        keep(c.intervals, c.interval_at, between)
+        c.interval_at = (c.interval_at + 1) %% SAMPLES_KEPT
+        // A vblank passed with no new frame: missed, so commit earlier.
+        if sent.follows && interval > 0 && between > interval + interval /% 2 {
+            c.missed += (between + interval /% 2) /% interval - 1
+            c.safety_ns = min_int(safety(c) + interval /% 4, interval * 3 /% 4)
+        }
+    }
+    if sent.input_ms >= 0 {
+        // Input times are ms on the same clock, wrapped to 32 bits.
+        since: ((stamp /% 1000000) - sent.input_ms).bit_and(4294967295)
+        keep(c.latencies, c.latency_at, since * 1000000 + stamp %% 1000000)
+        c.latency_at = (c.latency_at + 1) %% SAMPLES_KEPT
+    }
+    c.presented_abs = stamp
+    c.presented += 1
+}
+
+keep: fn(&samples: [Int], at: Int, value: Int) {
+    if samples.len() < SAMPLES_KEPT -> samples.push(value) else -> samples[at] = value
+}
+
+capabilities: fn(&c: Connection, mask: Int) {
+    if mask.bit_and(1) != 0 && c.pointer == 0 {
+        c.pointer = new_id(c)
+        request(c, c.seat, 0, words([Int]{c.pointer}))
+        cursor_device(c)
+    }
+    if mask.bit_and(2) != 0 && c.keyboard == 0 {
+        c.keyboard = new_id(c)
+        request(c, c.seat, 1, words([Int]{c.keyboard}))
+    }
+    // A finger works the frame.
+    if mask.bit_and(4) != 0 && c.touch == 0 && c.subcompositor != 0 {
+        c.touch = new_id(c)
+        request(c, c.seat, 2, words([Int]{c.touch}))
+    }
+}
+
+keyboard: fn(&c: Connection, opcode: Int, body: [U8]) -[Env, Time]> {
+    if opcode == 0 {
+        // keymap: its descriptor is the oldest one queued.
+        fd: c.inbox_fds.pop() ?? {
+            fail(c, UIError.Protocol("wl_keyboard.keymap arrived without its descriptor"))
+            return
+        }
+        load_keymap(c, fd, u32_at(body, 0), u32_at(body, 4))
+        return
+    }
+    if opcode == 1 -> c.events.push(UIEvent.Focus(true))
+    if opcode == 2 {
+        c.modifiers = 0
+        c.held = -1
+        c.frame_keys = [Int]{}
+        set_focus(c, frame.FrameButton.Nothing)
+        c.events.push(UIEvent.Focus(false))
+    }
+    if opcode == 3 {
+        note_input(c, u32_at(body, 4))
+        key_event(c, u32_at(body, 0), u32_at(body, 8), u32_at(body, 12))
+    }
+    if opcode == 4 {
+        // modifiers: serial, depressed, latched, locked, group.
+        depressed: u32_at(body, 4)
+        latched: u32_at(body, 8)
+        locked: u32_at(body, 12)
+        c.modifiers = depressed.bit_or(latched).bit_or(locked)
+        map := c.keymap.pop() ?? return
+        map.modifiers(depressed, latched, locked, u32_at(body, 16))
+        c.keymap.push(map)
+    }
+    // repeat_info: repeats a second (0: none) and the delay in ms.
+    if opcode == 5 {
+        rate: i32_at(body, 0)
+        delay: i32_at(body, 4)
+        c.repeat = xkb.Repeat{rate: max_int(rate, 0), delay: max_int(delay, 0)}
+    }
+}
+
+// wl_keyboard.keymap: an XKB text-v1 keymap of `size` bytes (its trailing
+// NUL included) behind `fd`. One the engine cannot compile, or another
+// format, leaves the US table in charge; a key held across the change
+// stops repeating.
+load_keymap: fn(&c: Connection, fd: sys.Fd, format: Int, size: Int) -[Env]> {
+    c.held = -1
+    c.keymap = [xkb.Keymap]{}
+    if format != KEYMAP_XKB_V1 || size > KEYMAP_MAX -> return
+    max: Int(1..16777216).from_int(size) ?? return
+    bytes := fd.read_at(0, max) ?? {
+        fail(c, UIError.Protocol("reading the keymap failed: {err}"))
+        return
+    }
+    loop bytes.len() > 0 && Int.from_u8(bytes[bytes.len() - 1]) == 0 {
+        _: bytes.pop()
+    }
+    map: xkb.keymap(bytes) ?? return
+    c.keymap.push(map)
+}
+
+// wl_keyboard.key: a press or release of evdev key `code` (its `state`)
+// with its serial. A press the frame takes, and that key's release, reach
+// no program.
+key_event: fn(&c: Connection, serial: Int, code: Int, state: Int) -[Time]> {
+    pressed: press(c, code, state)
+    if state != KEY_PRESSED {
+        if release_frame_key(c, code) -> return
+        c.events.push(UIEvent.KeyUp(pressed.key))
+        if code == c.held -> c.held = -1
+        return
+    }
+    if frame_key(c, serial, pressed.key) {
+        c.held = -1
+        c.frame_keys.push(code)
+        return
+    }
+    c.events.push(UIEvent.KeyDown(pressed.key))
+    if pressed.text != "" -> c.events.push(UIEvent.Text(pressed.text))
+    hold(c, code, pressed.key, pressed.text)
+}
+
+// A key press or release (wl_keyboard.key's `state`) through the keymap,
+// else the US table: the key and, on a press, the text it types.
+press: fn(&c: Connection, code: Int, state: Int) -> (key: Key, text: String) {
+    down: state == KEY_PRESSED
+    map := c.keymap.pop() ?? {
+        text: if down -> evdev_text(code, c.modifiers) else -> ""
+        return (key: evdev_key(code), text: text)
+    }
+    pressed: map.press(code, down)
+    c.keymap.push(map)
+    pressed
+}
+
+// A press starts the key repeating when the keymap says it repeats (the
+// US table: anything but a modifier), and ends another key's repeat.
+hold: fn(&c: Connection, code: Int, key: Key, text: String) -[Time]> {
+    c.held = -1
+    repeats: if c.keymap.len() > 0 -> c.keymap[0].repeats(code) else -> !modifier(key)
+    if !repeats || c.repeat.rate <= 0 -> return
+    c.held = code
+    c.held_key = key
+    c.held_text = text.copy()
+    c.held_at = core.time.__clock_mono_ns()
+    c.held_repeats = 0
+}
+
+modifier: fn(key: Key) -> Bool {
+    key == .Shift || key == .Control || key == .Alt || key == .Super || key == .CapsLock
+}
+
+// How long a wait of `timeout_ns` (negative: no limit) may last before the
+// held key's next repeat falls due.
+repeat_wait: fn(c: Connection, timeout_ns: Int) -[Time]> Int {
+    if c.held < 0 || c.repeat.rate <= 0 -> return timeout_ns
+    // The first repeat is due at the delay, the nth 1000 * n / rate ms later.
+    n: c.held_repeats
+    due_ms: c.repeat.delay + (n * 1000 + c.repeat.rate - 1) /% c.repeat.rate
+    // Whole milliseconds, rounded up, so a wait never wakes just before.
+    left: (max_int(c.held_at + due_ms * 1000000 - core.time.__clock_mono_ns(), 0) + 999999) /% 1000000 * 1000000
+    if timeout_ns >= 0 && timeout_ns < left -> return timeout_ns
+    left
+}
+
+// The held key repeats once, as a KeyDown and its text, when a repeat has
+// fallen due; repeats missed while the program was busy are dropped, not
+// delivered in a burst.
+repeat_key: fn(&c: Connection) -[Time]> {
+    if c.held < 0 || c.failure != None -> return
+    held_ms: (core.time.__clock_mono_ns() - c.held_at) /% 1000000
+    due: c.repeat.due(held_ms)
+    if due <= c.held_repeats -> return
+    c.held_repeats = due
+    c.events.push(UIEvent.KeyDown(c.held_key))
+    if c.held_text != "" -> c.events.push(UIEvent.Text(c.held_text))
+}
+
+// Positions arrive in 1/256ths of a logical unit; programs see pixels.
+to_pixels: fn(c: Connection, fixed: Int) -> Int { fixed * c.scale120 /% 30720 }
+
+// Events on the chrome work the frame and reach no program.
+pointer: fn(&c: Connection, opcode: Int, body: [U8]) {
+    // enter: the cursor is the client's to set again, at this serial.
+    if opcode == 0 {
+        c.pointer_serial = u32_at(body, 0)
+        c.on_chrome = c.chrome != 0 && u32_at(body, 4) == c.chrome
+        if c.on_chrome {
+            c.chrome_shape = 0
+            chrome_pointer(c, i32_at(body, 8), i32_at(body, 12))
+            return
+        }
+        show_cursor(c)
+        c.events.push(UIEvent.PointerMove{x: to_pixels(c, i32_at(body, 8)), y: to_pixels(c, i32_at(body, 12))})
+    }
+    if opcode == 1 {
+        c.pointer_serial = -1
+        if c.on_chrome {
+            c.on_chrome = false
+            if c.touch_id < 0 -> c.look.pressed = frame.FrameButton.Nothing
+            set_hover(c, frame.FrameButton.Nothing)
+        }
+        return
+    }
+    if c.on_chrome {
+        if opcode == 2 -> chrome_pointer(c, i32_at(body, 4), i32_at(body, 8))
+        if opcode == 3 -> chrome_button(c, u32_at(body, 0), u32_at(body, 4), u32_at(body, 8), u32_at(body, 12))
+        return
+    }
+    if opcode == 2 {
+        note_input(c, u32_at(body, 0))
+        c.events.push(UIEvent.PointerMove{x: to_pixels(c, i32_at(body, 4)), y: to_pixels(c, i32_at(body, 8))})
+    }
+    if opcode == 3 {
+        note_input(c, u32_at(body, 4))
+        button: pointer_button(u32_at(body, 8))
+        if u32_at(body, 12) == 1 -> c.events.push(UIEvent.PointerDown(button)) else -> c.events.push(UIEvent.PointerUp(button))
+    }
+    if opcode == 4 {
+        note_input(c, u32_at(body, 0))
+        amount: Float{i32_at(body, 8)} * Float{c.scale120} / 30720.0
+        if u32_at(body, 4) == 0 -> c.events.push(UIEvent.Scroll{dx: 0.0, dy: amount}) else -> c.events.push(UIEvent.Scroll{dx: amount, dy: 0.0})
+    }
+}
+
+// Notes an input event's time (ms on the compositor's clock) for the
+// input-to-photon latency of the frame that shows it.
+note_input: fn(&c: Connection, ms: Int) {
+    if c.input_ms < 0 -> c.input_ms = ms
+}
+
+// Linux BTN_LEFT, BTN_RIGHT and BTN_MIDDLE; other buttons keep their code.
+pointer_button: fn(code: Int) -> UIPointerButton {
+    if code == 272 -> return UIPointerButton.Left
+    if code == 273 -> return UIPointerButton.Right
+    if code == 274 -> return UIPointerButton.Middle
+    UIPointerButton.Other(code)
+}
+
+// ---- identity ---------------------------------------------------------
+
+// xdg_toplevel.set_app_id: the desktop matches it to the application's
+// desktop entry, for its name, icon and grouping.
+set_app_id: fn(&c: Connection, app_id: String) {
+    request(c, c.toplevel, 3, text_argument(app_id))
+}
+
+// Shows `icon` through xdg_toplevel_icon_v1: its theme name and its
+// images, as square premultiplied ARGB8888 buffers in one new sealed
+// pool kept until the next icon replaces it; an icon with neither
+// unsets the window's. A compositor without the protocol keeps the icon
+// of the app_id's desktop entry.
+set_icon: fn(&c: Connection, icon: UIIcon) UIError! -[Env]> {
+    frame_icon(c, icon)
+    if c.icon_manager == 0 -> return Ok()
+    toplevel: c.toplevel
+    manager: c.icon_manager
+    if icon.name == "" && icon.images.len() == 0 {
+        request(c, manager, 2, words([Int]{toplevel, 0}))
+        release_icon(c)
+        return Ok()
+    }
+    pool := 0
+    buffers := [Int]{}
+    if icon.images.len() > 0 {
+        total := 0
+        loop image in icon.images -> total += image.pixels.len()
+        room: Int(1..1073741824).from_int(total) ?? return Err(UIError.Size("the icon's {total} bytes do not fit one pool of 1 GiB"))
+        memory := sys.shared_memory(room) ?? return Err(UIError.Protocol("allocating the icon failed: {err}"))
+        offset := 0
+        loop image in icon.images {
+            shm_write(memory, offset, premultiplied_argb(image.pixels), "writing the icon") ?? return Err(err)
+            offset += image.pixels.len()
+        }
+        descriptor: memory.descriptor() ?? return Err(UIError.Protocol("sharing the icon failed: {err}"))
+        pool = new_id(c)
+        // wl_shm.create_pool(new_id, fd, size): the descriptor rides along.
+        request(c, c.shm, 0, words([Int]{pool, total}))
+        c.out_fds.push(descriptor)
+        offset = 0
+        loop image in icon.images {
+            id: new_id(c)
+            request(c, pool, 0, words([Int]{id, offset, image.side, image.side, image.side * 4, FORMAT_ARGB8888}))
+            buffers.push(id)
+            offset += image.pixels.len()
+        }
+    }
+    handle: new_id(c)
+    request(c, manager, 1, words([Int]{handle}))
+    if icon.name != "" -> request(c, handle, 1, text_argument(icon.name))
+    loop id in buffers -> request(c, handle, 2, words([Int]{id, 1}))
+    request(c, manager, 2, words([Int]{toplevel, handle}))
+    // The toplevel keeps the icon; the object is no longer needed.
+    request(c, handle, 0, [U8]{})
+    release_icon(c)
+    c.icon_pool = pool
+    c.icon_buffers = buffers
+    Ok()
+}
+
+// Straight-alpha RGBA pixels as premultiplied ARGB8888 words stored
+// little-endian: B, G, R, A, each color scaled by its alpha.
+premultiplied_argb: fn(rgba: [U8]) -> [U8] {
+    out := [U8]{}
+    at := 0
+    loop at + 4 <= rgba.len() {
+        alpha: Int.from_u8(rgba[at + 3])
+        out.push(U8{(Int.from_u8(rgba[at + 2]) * alpha + 127) /% 255})
+        out.push(U8{(Int.from_u8(rgba[at + 1]) * alpha + 127) /% 255})
+        out.push(U8{(Int.from_u8(rgba[at]) * alpha + 127) /% 255})
+        out.push(U8{alpha})
+        at += 4
+    }
+    out
+}
+
+// Destroys the previous icon's buffers and pool.
+release_icon: fn(&c: Connection) {
+    loop id in c.icon_buffers.copy() -> request(c, id, 0, [U8]{})
+    if c.icon_pool != 0 {
+        pool: c.icon_pool
+        request(c, pool, 1, [U8]{})
+    }
+    c.icon_pool = 0
+    c.icon_buffers = [Int]{}
+}
+
+// ---- cursor -----------------------------------------------------------
+
+// Asks for the pointer's wp_cursor_shape_device_v1 once both the
+// manager and the pointer exist.
+cursor_device: fn(&c: Connection) {
+    if c.cursor_manager == 0 || c.pointer == 0 || c.cursor_device != 0 -> return
+    c.cursor_device = new_id(c)
+    request(c, c.cursor_manager, 1, words([Int]{c.cursor_device, c.pointer}))
+}
+
+// The program's cursor; it is shown at once while the pointer is over
+// the window, else at its next enter.
+set_cursor: fn(&c: Connection, cursor: UICursor) {
+    if cursor == c.cursor -> return
+    c.cursor = cursor
+    // Over the frame the frame's shapes show; the program's from the next enter.
+    if !c.on_chrome -> show_cursor(c)
+}
+
+// Shows the program's cursor at the latest enter's serial: `.Hidden` is
+// wl_pointer.set_cursor with no surface, every other shape
+// wp_cursor_shape_device_v1.set_shape.
+show_cursor: fn(&c: Connection) {
+    if c.pointer_serial < 0 -> return
+    if c.cursor == .Hidden {
+        request(c, c.pointer, 0, words([Int]{c.pointer_serial, 0, 0, 0}))
+        return
+    }
+    device: c.cursor_device
+    shape: cursor_shape(c.cursor)
+    serial: c.pointer_serial
+    if device != 0 -> request(c, device, 1, words([Int]{serial, shape}))
+}
+
+// wp_cursor_shape_device_v1.shape: the enum's order, from 1.
+cursor_shape: fn(cursor: UICursor) -> Int {
+    if cursor == {
+        .Default -> 1
+        .ContextMenu -> 2
+        .Help -> 3
+        .Pointer -> 4
+        .Progress -> 5
+        .Wait -> 6
+        .Cell -> 7
+        .Crosshair -> 8
+        .Text -> 9
+        .VerticalText -> 10
+        .Alias -> 11
+        .Copy -> 12
+        .Move -> 13
+        .NoDrop -> 14
+        .NotAllowed -> 15
+        .Grab -> 16
+        .Grabbing -> 17
+        .ResizeE -> 18
+        .ResizeN -> 19
+        .ResizeNE -> 20
+        .ResizeNW -> 21
+        .ResizeS -> 22
+        .ResizeSE -> 23
+        .ResizeSW -> 24
+        .ResizeW -> 25
+        .ResizeEW -> 26
+        .ResizeNS -> 27
+        .ResizeNESW -> 28
+        .ResizeNWSE -> 29
+        .ResizeColumn -> 30
+        .ResizeRow -> 31
+        .AllScroll -> 32
+        .ZoomIn -> 33
+        .ZoomOut -> 34
+        .Hidden -> 1
+    }
+}
+
+// ---- buffers ----------------------------------------------------------
+
+// The size the latest configure asks for, in logical units; the current
+// one while the compositor leaves it to the window. A configure sizes the
+// window, title bar included.
+wanted_width: fn(c: Connection) -> Int { if c.pending_width > 0 -> c.pending_width else -> c.logical_width }
+wanted_height: fn(c: Connection) -> Int { if c.pending_height > 0 -> max_int(c.pending_height - header_height(c), 1) else -> c.logical_height }
+
+// The configured size or the display's scale moved since the buffers
+// were made.
+wants_reshape: fn(c: Connection) -> Bool {
+    wanted_width(c) != c.logical_width || wanted_height(c) != c.logical_height || wanted_scale(c) != c.scale120
+}
+
+// BUFFER_COUNT buffers for a `width` x `height` logical-unit window at
+// the wanted scale, in one new sealed pool, made once per size; the old
+// pool and buffers are destroyed (the compositor keeps what is on
+// screen). A fractional size rounds half away from zero, as
+// wp_fractional_scale_v1 asks.
+allocate: fn(&c: Connection, width: Int, height: Int) -[Env, Net, Time]> {
+    scale: wanted_scale(c)
+    logical_w: if width < 1 -> 1 else -> min_int(width, SIDE_MAX)
+    logical_h: if height < 1 -> 1 else -> min_int(height, SIDE_MAX)
+    w: min_int(max_int((logical_w * scale + 60) /% 120, 1), SIDE_MAX)
+    h: min_int(max_int((logical_h * scale + 60) /% 120, 1), SIDE_MAX)
+    loop buffer in c.buffers -> request(c, buffer.id, 0, [U8]{})
+    c.buffers = [Buffer]{}
+    if c.pool != 0 -> request(c, c.pool, 1, [U8]{})
+    c.pool = 0
+    frame_bytes: w * h * 4
+    pool_bytes: frame_bytes * BUFFER_COUNT
+    room: Int(1..1073741824).from_int(pool_bytes) ?? {
+        fail(c, UIError.Size("a {w}x{h} window needs more than 1 GiB of buffers"))
+        return
+    }
+    memory: sys.shared_memory(room) ?? {
+        fail(c, UIError.Protocol("allocating window buffers failed: {err}"))
+        return
+    }
+    descriptor: memory.descriptor() ?? {
+        fail(c, UIError.Protocol("sharing window buffers failed: {err}"))
+        return
+    }
+    c.logical_width = logical_w
+    c.logical_height = logical_h
+    c.scale120 = scale
+    c.rescaled = true
+    c.chrome_stale = true
+    c.width = w
+    c.height = h
+    c.pool = new_id(c)
+    // wl_shm.create_pool(new_id, fd, size): the descriptor rides along.
+    request(c, c.shm, 0, words([Int]{c.pool, pool_bytes}))
+    c.out_fds.push(descriptor)
+    // With Jet's frame the content's bottom corners are see-through, so
+    // its buffers carry alpha: written opaque, then covered.
+    format := FORMAT_XRGB8888
+    c.format = sys.PixelFormat.XRGB8888
+    if c.chrome != 0 && c.abgr {
+        format = FORMAT_ABGR8888
+        c.format = sys.PixelFormat.XBGR8888
+    } else if c.chrome != 0 {
+        format = FORMAT_ARGB8888
+    } else if c.xbgr {
+        format = FORMAT_XBGR8888
+        c.format = sys.PixelFormat.XBGR8888
+    }
+    loop k in 0..<BUFFER_COUNT {
+        id: new_id(c)
+        request(c, c.pool, 0, words([Int]{id, k * frame_bytes, w, h, w * 4, format}))
+        c.buffers.push(Buffer{id: id, offset: k * frame_bytes, busy: false, stale_x0: 0, stale_y0: 0, stale_x1: w, stale_y1: h})
+    }
+    c.memory = memory
+    flush(c)
+}
+
+// ---- the frame --------------------------------------------------------
+
+// The title bar's height above the content, in logical units: none while
+// the compositor draws the frame or the window is fullscreen.
+header_height: fn(c: Connection) -> Int { if c.framed && !c.fullscreen -> frame.HEADER else -> 0 }
+
+// The shadow's room around the window: none when it is maximized or tiled.
+margin: fn(c: Connection) -> Int { if c.look.square -> 0 else -> frame.MARGIN }
+
+// The content's bottom corners are rounded off over the frame's.
+rounded: fn(c: Connection) -> Bool { c.chrome != 0 && header_height(c) > 0 && !c.look.square }
+
+// xdg_toplevel.configure's states: maximized 1, fullscreen 2, activated
+// 4, and tiled on a side 5 to 8 (xdg_wm_base v2).
+toplevel_states: fn(&c: Connection, body: [U8]) {
+    end: min_int(12 + u32_at(body, 8), body.len())
+    maximized := false
+    fullscreen := false
+    activated := false
+    tiled := false
+    at := 12
+    loop at + 4 <= end {
+        state: u32_at(body, at)
+        if state == 1 -> maximized = true
+        if state == 2 -> fullscreen = true
+        if state == 4 -> activated = true
+        if state >= 5 && state <= 8 -> tiled = true
+        at += 4
+    }
+    square: maximized || tiled
+    if square != c.look.square || fullscreen != c.fullscreen -> restale(c)
+    if activated != c.look.active || maximized != c.look.maximized -> c.chrome_stale = true
+    c.look.square = square
+    c.look.maximized = maximized
+    c.look.active = activated
+    c.fullscreen = fullscreen
+}
+
+// The frame's shape changed: the chrome and every buffer's content
+// corners are drawn again.
+restale: fn(&c: Connection) {
+    loop index in 0..<c.buffers.len() {
+        c.buffers[index].stale_x0 = 0
+        c.buffers[index].stale_y0 = 0
+        c.buffers[index].stale_x1 = c.width
+        c.buffers[index].stale_y1 = c.height
+    }
+    c.chrome_stale = true
+}
+
+// Draws the chrome for the window's size, scale and look into a free
+// chrome buffer and commits it; the content's next commit shows it. The
+// ring goes only into a buffer that does not hold it yet, the title bar
+// every time; with no buffer free the chrome stays stale.
+draw_chrome: fn(&c: Connection) -[Env]> {
+    c.chrome_stale = false
+    if c.chrome == 0 -> return
+    hh: header_height(c)
+    if hh == 0 {
+        // No frame of Jet's: the chrome is empty and the window is the content.
+        if c.chrome_shown {
+            request(c, c.chrome, 1, words([Int]{0, 0, 0}))
+            request(c, c.chrome, 6, [U8]{})
+            c.chrome_shown = false
+        }
+        if c.geometry.len() > 0 -> set_geometry(c, [Int]{0, 0, c.logical_width, c.logical_height})
+        return
+    }
+    m: margin(c)
+    scale: c.scale120
+    width: c.logical_width + 2 * m
+    height: c.logical_height + hh + 2 * m
+    pw: frame.px(width, scale)
+    ph: frame.px(height, scale)
+    if pw != c.chrome_width || ph != c.chrome_height || c.chrome_buffers.len() == 0 {
+        allocate_chrome(c, pw, ph)
+        if c.failure != None -> return
+    }
+    free := -1
+    loop index in 0..<c.chrome_buffers.len() {
+        if free < 0 && !c.chrome_buffers[index].busy -> free = index
+    }
+    if free < 0 {
+        c.chrome_stale = true
+        return
+    }
+    mp: frame.px(m, scale)
+    ww: pw - 2 * mp
+    wh: ph - 2 * mp
+    hp: frame.px(hh, scale)
+    base: c.chrome_buffers[free].offset
+    active: if c.look.active -> 1 else -> 0
+    ring: scale * 2 + active
+    if mp > 0 && c.chrome_buffers[free].ring != ring {
+        slot: frame.kit(c.painter, c.look, scale)
+        // Under the content's rounded bottom corners the ring shows too.
+        side: min_int(frame.corner_side(scale), wh - hp)
+        loop row in 0..<ph {
+            y: row - mp
+            if y < 0 || y >= wh {
+                ring_row(c, slot, base, y, 0 - mp, ww + mp)
+            } else {
+                corner: if y >= wh - side -> side else -> 0
+                ring_row(c, slot, base, y, 0 - mp, corner)
+                ring_row(c, slot, base, y, ww - corner, ww + mp)
+            }
+        }
+        c.chrome_buffers[free].ring = ring
+    }
+    bar: frame.header(c.painter, c.look, ww, scale)
+    if mp == 0 {
+        shm_write(c.chrome_memory, base, bar, "drawing the frame") ?? {
+            fail(c, err)
+            return
+        }
+    } else {
+        row_bytes: ww * 4
+        loop row in 0..<hp {
+            shm_write(c.chrome_memory, base + ((row + mp) * pw + mp) * 4, bar[(row * row_bytes)..<((row + 1) * row_bytes)], "drawing the frame") ?? {
+                fail(c, err)
+                return
+            }
+        }
+    }
+    c.chrome_buffers[free].busy = true
+    request(c, c.chrome, 1, words([Int]{c.chrome_buffers[free].id, 0, 0}))
+    request(c, c.chrome, 2, words([Int]{0, 0, width, height}))
+    if c.chrome_viewport != 0 {
+        request(c, c.chrome_viewport, 2, words([Int]{width, height}))
+    } else if c.compositor_version >= 3 {
+        request(c, c.chrome, 8, words([Int]{scale /% 120}))
+    }
+    // Input: the window and its resize grips, not the shadow beyond.
+    grip: if c.look.square -> 0 else -> frame.GRIP
+    region: new_id(c)
+    request(c, c.compositor, 1, words([Int]{region}))
+    request(c, region, 1, words([Int]{m - grip, m - grip, c.logical_width + 2 * grip, c.logical_height + hh + 2 * grip}))
+    request(c, c.chrome, 5, words([Int]{region}))
+    request(c, region, 0, [U8]{})
+    request(c, c.chrome_subsurface, 1, words([Int]{0 - m, 0 - hh - m}))
+    request(c, c.chrome, 6, [U8]{})
+    c.chrome_shown = true
+    set_geometry(c, [Int]{0, 0 - hh, c.logical_width, c.logical_height + hh})
+}
+
+// Shows a chrome-only change: the chrome is synchronized with the
+// content, so a commit of the content with nothing new of its own shows it.
+refresh_chrome: fn(&c: Connection) -[Env]> {
+    draw_chrome(c)
+    if !c.chrome_stale -> header(c, c.surface, 6, 0)
+}
+
+// Row `y` of the shadow ring, from window pixel `x0` to before `x1`, into
+// the chrome buffer at `base`.
+ring_row: fn(&c: Connection, slot: Int, base: Int, y: Int, x0: Int, x1: Int) -[Env]> {
+    if x1 <= x0 || c.failure != None -> return
+    mp: frame.px(margin(c), c.scale120)
+    row: frame.kit_row(c.painter.kits[slot], y, c.chrome_width - 2 * mp, c.chrome_height - 2 * mp, x0, x1)
+    at: base + ((y + mp) * c.chrome_width + x0 + mp) * 4
+    fill_at: at + row.left.len()
+    right_at: fill_at + row.fill_count * 4
+    if row.left.len() > 0 {
+        shm_write(c.chrome_memory, at, row.left, "drawing the frame") ?? {
+            fail(c, err)
+            return
+        }
+    }
+    if row.fill_count > 0 {
+        shm_fill(c.chrome_memory, fill_at, row.fill_count, row.fill, "drawing the frame") ?? {
+            fail(c, err)
+            return
+        }
+    }
+    if row.right.len() > 0 {
+        shm_write(c.chrome_memory, right_at, row.right, "drawing the frame") ?? {
+            fail(c, err)
+            return
+        }
+    }
+}
+
+// CHROME_BUFFERS `width` x `height` pixel ARGB8888 buffers in one new
+// sealed pool, replacing the old ones.
+allocate_chrome: fn(&c: Connection, width: Int, height: Int) -[Env]> {
+    loop buffer in c.chrome_buffers -> request(c, buffer.id, 0, [U8]{})
+    c.chrome_buffers = [ChromeBuffer]{}
+    if c.chrome_pool != 0 -> request(c, c.chrome_pool, 1, [U8]{})
+    c.chrome_pool = 0
+    c.chrome_width = 0
+    c.chrome_height = 0
+    frame_bytes: width * height * 4
+    pool_bytes: frame_bytes * CHROME_BUFFERS
+    room: Int(1..1073741824).from_int(pool_bytes) ?? {
+        fail(c, UIError.Size("a {width}x{height} window frame needs more than 1 GiB of buffers"))
+        return
+    }
+    memory: sys.shared_memory(room) ?? {
+        fail(c, UIError.Protocol("allocating the window frame failed: {err}"))
+        return
+    }
+    descriptor: memory.descriptor() ?? {
+        fail(c, UIError.Protocol("sharing the window frame failed: {err}"))
+        return
+    }
+    c.chrome_pool = new_id(c)
+    request(c, c.shm, 0, words([Int]{c.chrome_pool, pool_bytes}))
+    c.out_fds.push(descriptor)
+    loop k in 0..<CHROME_BUFFERS {
+        id: new_id(c)
+        request(c, c.chrome_pool, 0, words([Int]{id, k * frame_bytes, width, height, width * 4, FORMAT_ARGB8888}))
+        c.chrome_buffers.push(ChromeBuffer{id: id, offset: k * frame_bytes, busy: false, ring: -1})
+    }
+    c.chrome_memory = memory
+    c.chrome_width = width
+    c.chrome_height = height
+}
+
+// xdg_surface.set_window_geometry: the window's part of the content
+// surface's coordinates, title bar in, shadow out; the content's next
+// commit applies it.
+set_geometry: fn(&c: Connection, geometry: [Int]) {
+    if geometry == c.geometry -> return
+    request(c, c.xdg_surface, 3, words(geometry))
+    c.geometry = geometry
+}
+
+// Fades the content's bottom corners outside the frame's rounded ones,
+// where the rectangle (x0, y0)-(x1, y1) of the buffer at `offset` was just
+// written, so the ring under them shows: each pixel times its cover,
+// premultiplied as ARGB8888 wants.
+cover_corners: fn(&c: Connection, offset: Int, x0: Int, y0: Int, x1: Int, y1: Int) -[Env]> {
+    side: frame.corner_side(c.scale120)
+    if side * 2 > c.width || side > c.height -> return
+    if c.corner_scale != c.scale120 {
+        c.corner_cover = frame.bottom_left_cover(c.scale120)
+        c.corner_scale = c.scale120
+    }
+    width: c.width
+    top: c.height - side
+    loop y in max_int(y0, top)..<y1 {
+        cover_run(c, offset, y, max_int(x0, 0), min_int(x1, side), (y - top) * side, 1)
+        // The bottom-right corner mirrors the bottom-left.
+        cover_run(c, offset, y, max_int(x0, width - side), min_int(x1, width), (y - top) * side + width - 1, -1)
+    }
+}
+
+// Pixels `from` to before `to` of row `y`, pixel x scaled by cover byte
+// `start + step * x`.
+cover_run: fn(&c: Connection, offset: Int, y: Int, from: Int, to: Int, start: Int, step: Int) -[Env]> {
+    if to <= from || c.failure != None -> return
+    at: offset + (y * c.width + from) * 4
+    pixels := shm_read(c.memory, at, (to - from) * 4, "rounding the frame's corners") ?? {
+        fail(c, err)
+        return
+    }
+    loop x in from..<to {
+        cover: Int.from_u8(c.corner_cover[start + step * x])
+        k: (x - from) * 4
+        loop b in k..<(k + 4) -> pixels[b] = U8{(Int.from_u8(pixels[b]) * cover + 127) /% 255}
+    }
+    shm_write(c.memory, at, pixels, "rounding the frame's corners") ?? fail(c, err)
+}
+
+// Shared-memory access at byte positions the buffers' layout computes:
+// core.sys takes range-typed offsets and lengths, so each position is
+// checked into its range here, and one outside it fails the access, said
+// as `what` failing.
+shm_span: fn(n: Int, what: String) -> Int(0..1073741824) UIError! {
+    Ok(Int(0..1073741824).from_int(n) ?? return Err(UIError.Protocol("{what} failed: byte {n} lies outside shared memory")))
+}
+
+shm_write: fn(&memory: sys.SharedMemory, at: Int, bytes: [U8], what: String) UIError! -[Env]> {
+    memory.write(shm_span(at, what), bytes) ?? return Err(UIError.Protocol("{what} failed: {err}"))
+    Ok()
+}
+
+shm_read: fn(memory: sys.SharedMemory, at: Int, count: Int, what: String) -[Env]> [U8] UIError! {
+    Ok(memory.read(shm_span(at, what), shm_span(count, what)) ?? return Err(UIError.Protocol("{what} failed: {err}")))
+}
+
+shm_fill: fn(&memory: sys.SharedMemory, at: Int, count: Int, value: Int, what: String) UIError! -[Env]> {
+    pixels: Int(0..268435456).from_int(count) ?? return Err(UIError.Protocol("{what} failed: {count} pixels do not fit shared memory"))
+    word: Int(0..4294967295).from_int(value) ?? return Err(UIError.Protocol("{what} failed: {value} is not a 32-bit pixel"))
+    memory.fill_u32(shm_span(at, what), pixels, word) ?? return Err(UIError.Protocol("{what} failed: {err}"))
+    Ok()
+}
+
+// The rectangle (`x`, `y`) `width` by `height` of the RGBA `pixels`, rows
+// `stride` bytes, into the image at byte `offset` of `memory` as `format`.
+shm_pixels: fn(&memory: sys.SharedMemory, offset: Int, pixels: [U8], stride: Int, x: Int, y: Int, width: Int, height: Int, format: sys.PixelFormat) UIError! -[Env]> {
+    what: "writing the frame"
+    outside: UIError.Protocol("{what} failed: the {width}x{height} rectangle at {x},{y} of a {stride}-byte row lies outside a window")
+    row: Int(4..65536).from_int(stride) ?? return Err(outside)
+    left: Int(0..16384).from_int(x) ?? return Err(outside)
+    top: Int(0..16384).from_int(y) ?? return Err(outside)
+    across: Int(0..16384).from_int(width) ?? return Err(outside)
+    down: Int(0..16384).from_int(height) ?? return Err(outside)
+    memory.write_pixels(shm_span(offset, what), pixels, row, left, top, across, down, format) ?? return Err(UIError.Protocol("{what} failed: {err}"))
+    Ok()
+}
+
+// The part of the frame the pointer or finger on the chrome is on.
+chrome_spot: fn(c: Connection) -> frame.FrameSpot {
+    m: Float{margin(c)}
+    x: Float{c.chrome_fx} / 256.0 - m
+    y: Float{c.chrome_fy} / 256.0 - m
+    frame.spot(x, y, c.logical_width, c.logical_height + frame.HEADER, c.look)
+}
+
+// The pointer moved on the chrome: its button lights, its cursor shows
+// the edge it would resize, and the buttons gather back from a finger's
+// spacing.
+chrome_pointer: fn(&c: Connection, fx: Int, fy: Int) {
+    c.chrome_fx = fx
+    c.chrome_fy = fy
+    if c.look.coarse && c.touch_id < 0 {
+        c.look.coarse = false
+        c.chrome_stale = true
+    }
+    hover_spot(c)
+    shape: spot_shape(chrome_spot(c))
+    if shape != c.chrome_shape {
+        c.chrome_shape = shape
+        if c.pointer_serial >= 0 && c.cursor_device != 0 -> request(c, c.cursor_device, 1, words([Int]{c.pointer_serial, shape}))
+    }
+}
+
+// A pointer button on the chrome: the primary works the frame, the
+// secondary on the title opens the compositor's window menu at the
+// pointer, in the content surface's coordinates.
+chrome_button: fn(&c: Connection, serial: Int, time: Int, button: Int, state: Int) {
+    note_input(c, time)
+    if button == 272 && state == 1 -> frame_press(c, serial, time)
+    if button == 272 && state == 0 -> frame_release(c)
+    if button == 273 && state == 1 && chrome_spot(c) == .Title {
+        m: margin(c)
+        request(c, c.toplevel, 4, words([Int]{c.seat, serial, (c.chrome_fx >> 8) - m, (c.chrome_fy >> 8) - m - frame.HEADER}))
+    }
+}
+
+// A finger on the frame works it as the primary button does and spreads
+// the buttons to a finger's size until the pointer comes back. Touches on
+// the content reach no program: UIEvent has no touch.
+touch: fn(&c: Connection, opcode: Int, body: [U8]) {
+    // down: serial, time, surface, id, x, y.
+    if opcode == 0 {
+        if c.chrome == 0 || u32_at(body, 8) != c.chrome || c.touch_id >= 0 -> return
+        c.touch_id = i32_at(body, 12)
+        c.chrome_fx = i32_at(body, 16)
+        c.chrome_fy = i32_at(body, 20)
+        if !c.look.coarse {
+            c.look.coarse = true
+            c.chrome_stale = true
+        }
+        note_input(c, u32_at(body, 4))
+        frame_press(c, u32_at(body, 0), u32_at(body, 4))
+        return
+    }
+    if c.touch_id < 0 -> return
+    // up: serial, time, id.
+    if opcode == 1 && i32_at(body, 8) == c.touch_id {
+        c.touch_id = -1
+        frame_release(c)
+        set_hover(c, frame.FrameButton.Nothing)
+    }
+    // motion: time, id, x, y.
+    if opcode == 2 && i32_at(body, 4) == c.touch_id {
+        c.chrome_fx = i32_at(body, 8)
+        c.chrome_fy = i32_at(body, 12)
+        hover_spot(c)
+    }
+    // cancel: the compositor took the touch.
+    if opcode == 4 {
+        c.touch_id = -1
+        c.look.pressed = frame.FrameButton.Nothing
+        set_hover(c, frame.FrameButton.Nothing)
+    }
+}
+
+// A press on the frame: a button holds down; the title moves the window,
+// or toggles maximizing when pressed twice in quick succession; an edge
+// resizes it. The compositor runs moves and resizes.
+frame_press: fn(&c: Connection, serial: Int, time: Int) {
+    place: chrome_spot(c)
+    if place == .Button(button) {
+        c.look.pressed = button
+        set_hover(c, button)
+        c.chrome_stale = true
+        return
+    }
+    if place == .Title {
+        if c.title_press_ms >= 0 && (time - c.title_press_ms).bit_and(4294967295) < frame.DOUBLE_CLICK_MS {
+            c.title_press_ms = -1
+            toggle_maximized(c)
+            return
+        }
+        c.title_press_ms = time
+        request(c, c.toplevel, 5, words([Int]{c.seat, serial}))
+        return
+    }
+    if place == .Edge(edges) -> request(c, c.toplevel, 6, words([Int]{c.seat, serial, edges}))
+}
+
+// The press ends: a button released over itself acts.
+frame_release: fn(&c: Connection) {
+    pressed: c.look.pressed
+    if pressed == .Nothing -> return
+    c.look.pressed = frame.FrameButton.Nothing
+    c.chrome_stale = true
+    place: chrome_spot(c)
+    if place == .Button(button) {
+        if button == pressed -> act(c, button)
+    }
+}
+
+act: fn(&c: Connection, button: frame.FrameButton) {
+    if button == .Close -> c.events.push(UIEvent.Close)
+    if button == .Maximize -> toggle_maximized(c)
+    if button == .Minimize -> request(c, c.toplevel, 13, [U8]{})
+}
+
+toggle_maximized: fn(&c: Connection) {
+    opcode: if c.look.maximized -> 10 else -> 9
+    request(c, c.toplevel, opcode, [U8]{})
+}
+
+// The button under the pointer or finger lights.
+hover_spot: fn(&c: Connection) {
+    lit := frame.FrameButton.Nothing
+    place: chrome_spot(c)
+    if place == .Button(button) -> lit = button
+    set_hover(c, lit)
+}
+
+set_hover: fn(&c: Connection, button: frame.FrameButton) {
+    if c.look.hover == button -> return
+    c.look.hover = button
+    c.chrome_stale = true
+}
+
+// ---- the frame's keys --------------------------------------------------
+
+// A key press the frame takes, given its wl_keyboard.key serial. F6 moves
+// the keyboard focus between the content and the frame's buttons, and
+// Alt+Space opens the window menu. While a button has the focus every key
+// is the frame's: Tab and Shift+Tab step across the buttons, Enter or
+// Space works the focused one, Shift+F10 opens the window menu under it,
+// and Escape or F6 gives the focus back to the content. With Jet's frame
+// not showing, no key is the frame's.
+frame_key: fn(&c: Connection, serial: Int, key: Key) -> Bool {
+    if c.chrome == 0 || header_height(c) == 0 {
+        set_focus(c, frame.FrameButton.Nothing)
+        return false
+    }
+    focus: c.look.focus
+    function: function_key(key)
+    if function == 6 {
+        next: if focus == .Nothing -> frame.next_control(focus, 1) else -> frame.FrameButton.Nothing
+        set_focus(c, next)
+        return true
+    }
+    // Alt is mask 8 in the US table's reading.
+    if space(key) && held_modifier(c, "Alt", 8) {
+        window_menu(c, serial)
+        return true
+    }
+    if focus == .Nothing -> return false
+    // Shift is mask 1.
+    shifted: held_modifier(c, "Shift", 1)
+    step: if shifted -> -1 else -> 1
+    if {
+        key == .Tab -> set_focus(c, frame.next_control(focus, step))
+        key == .Enter || space(key) -> act(c, focus)
+        function == 10 && shifted -> window_menu(c, serial)
+        key == .Escape -> set_focus(c, frame.FrameButton.Nothing)
+        else -> {}
+    }
+    true
+}
+
+// A key went up: true when its press was the frame's, which the release
+// then is too.
+release_frame_key: fn(&c: Connection, code: Int) -> Bool {
+    loop at in 0..<c.frame_keys.len() {
+        if c.frame_keys[at] == code {
+            _: c.frame_keys.remove(at)
+            return true
+        }
+    }
+    false
+}
+
+// The button with the keyboard focus rings; `Nothing` gives the focus to
+// the content.
+set_focus: fn(&c: Connection, button: frame.FrameButton) {
+    if c.look.focus == button -> return
+    c.look.focus = button
+    c.chrome_stale = true
+}
+
+// The compositor's window menu, under the focused button or else the
+// title's start, at the header's foot (content surface coordinates).
+window_menu: fn(&c: Connection, serial: Int) {
+    x: if c.look.focus == .Nothing -> frame.ICON_X else -> frame.button_centre(c.look.focus, c.logical_width, c.look)
+    request(c, c.toplevel, 4, words([Int]{c.seat, serial, x, 0}))
+}
+
+// Whether modifier `name` is held: by the keymap, else by `mask` of the
+// compositor's modifier state.
+held_modifier: fn(c: Connection, name: String, mask: Int) -> Bool {
+    if c.keymap.len() > 0 -> return c.keymap[0].active(name)
+    c.modifiers.bit_and(mask) != 0
+}
+
+// The n of F`n`, else 0.
+function_key: fn(key: Key) -> Int {
+    if key == .F(n) -> return n
+    0
+}
+
+space: fn(key: Key) -> Bool {
+    if key == .Char(ch) -> return ch == ' '
+    false
+}
+
+// The cursor shape over a spot of the frame: an edge's resize arrow, else
+// the default.
+spot_shape: fn(place: frame.FrameSpot) -> Int {
+    if place == .Edge(edges) -> return cursor_shape(edge_cursor(edges))
+    cursor_shape(UICursor.Default)
+}
+
+edge_cursor: fn(edges: Int) -> UICursor {
+    if edges == frame.EDGE_TOP -> return UICursor.ResizeN
+    if edges == frame.EDGE_BOTTOM -> return UICursor.ResizeS
+    if edges == frame.EDGE_LEFT -> return UICursor.ResizeW
+    if edges == frame.EDGE_RIGHT -> return UICursor.ResizeE
+    if edges == frame.EDGE_TOP + frame.EDGE_LEFT -> return UICursor.ResizeNW
+    if edges == frame.EDGE_TOP + frame.EDGE_RIGHT -> return UICursor.ResizeNE
+    if edges == frame.EDGE_BOTTOM + frame.EDGE_LEFT -> return UICursor.ResizeSW
+    UICursor.ResizeSE
+}
+
+// The image of `icon` the title bar shows: the smallest at least the
+// icon's size in pixels, else the largest; none shows Jet's own mark.
+frame_icon: fn(&c: Connection, icon: UIIcon) {
+    want: frame.px(frame.ICON_SIZE, c.scale120)
+    best := -1
+    loop index in 0..<icon.images.len() {
+        side: icon.images[index].side
+        if best < 0 {
+            best = index
+            next
+        }
+        current: icon.images[best].side
+        better: if current < want -> side > current else -> side >= want && side < current
+        if better -> best = index
+    }
+    if best < 0 {
+        c.look.icon = [U8]{}
+        c.look.icon_side = 0
+    } else {
+        c.look.icon = icon.images[best].pixels.copy()
+        c.look.icon_side = icon.images[best].side
+    }
+    c.chrome_stale = true
+}
+
+// ---- keys -------------------------------------------------------------
+
+// Linux evdev key codes on a US layout. The XKB keymap the compositor
+// sends replaces this table.
+evdev_key: fn(code: Int) -> Key {
+    if code == 1 -> return .Escape
+    if code == 14 -> return .Backspace
+    if code == 15 -> return .Tab
+    if code == 28 || code == 96 -> return .Enter
+    if code == 29 || code == 97 -> return .Control
+    if code == 42 || code == 54 -> return .Shift
+    if code == 56 || code == 100 -> return .Alt
+    if code == 57 -> return .Char(' ')
+    if code == 58 -> return .CapsLock
+    if code >= 59 && code <= 68 -> return .F(code - 58)
+    if code == 87 -> return .F(11)
+    if code == 88 -> return .F(12)
+    if code == 102 -> return .Home
+    if code == 103 -> return .Up
+    if code == 104 -> return .PageUp
+    if code == 105 -> return .Left
+    if code == 106 -> return .Right
+    if code == 107 -> return .End
+    if code == 108 -> return .Down
+    if code == 109 -> return .PageDown
+    if code == 110 -> return .Insert
+    if code == 111 -> return .Delete
+    if code == 125 || code == 126 -> return .Super
+    symbol: evdev_symbol(code, false).chars()
+    if symbol.len() == 1 -> return Key.Char(symbol[0])
+    Key.Unknown
+}
+
+// The text a key types: shifted when Shift (mask 1) is held, and letters
+// shifted by the Lock modifier (mask 2); nothing while Control (4) or Alt (8) is held.
+evdev_text: fn(code: Int, modifiers: Int) -> String {
+    if code == 57 -> return " "
+    if modifiers.bit_and(12) != 0 -> return ""
+    plain: evdev_symbol(code, false)
+    shift: modifiers.bit_and(1) != 0
+    letter: plain.len() == 1 && plain >= "a" && plain <= "z"
+    upper: if letter -> shift != (modifiers.bit_and(2) != 0) else -> shift
+    evdev_symbol(code, upper)
+}
+
+US_ROWS: [String]{"1234567890-=", "qwertyuiop[]", "asdfghjkl;'`", "\\zxcvbnm,./"}
+US_SHIFTED_ROWS: [String]{"!@#$%^&*()_+", "QWERTYUIOP{{}}", "ASDFGHJKL:\"~", "|ZXCVBNM<>?"}
+US_ROW_STARTS: [Int]{2, 16, 30, 43}
+
+evdev_symbol: fn(code: Int, shifted: Bool) -> String {
+    loop row in 0..<4 {
+        start: US_ROW_STARTS[row]
+        text: if shifted -> US_SHIFTED_ROWS[row] else -> US_ROWS[row]
+        bytes: text.bytes()
+        if code >= start && code < start + bytes.len() -> return String.from_bytes(bytes[(code - start)..<(code - start + 1)]) ?? ""
+    }
+    ""
+}

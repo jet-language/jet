@@ -336,7 +336,6 @@ ir_handle_ui_route: fn(receiver: Type, method: String) -> IRHandleRoute? {
     backend := if name == {
         "NullBackend" -> "JetNullBackend"
         "TUIBackend" -> "JetTuiBackend"
-        "GtkBackend" -> "JetGtkBackend"
         else -> {
             return None
         }
@@ -355,12 +354,11 @@ ir_handle_ui_route: fn(receiver: Type, method: String) -> IRHandleRoute? {
     }
     if method == "commands" && name == "NullBackend" -> member = "paint_commands"
     if (method == "frame_lines" || method == "render_count") && name == "TUIBackend" -> member = method
-    if method == "present" && name == "GtkBackend" -> member = "present"
     if member == "" -> return None
     // The runtime borrows every input (UiBackends.jet), cloning what it keeps.
     mask := if method == {
         "measure" | "layout" | "mount" -> [Bool]{true, true, true}
-        "paint" | "on_event" | "mount_default" | "set_focus_group" | "present" -> [Bool]{true, true}
+        "paint" | "on_event" | "mount_default" | "set_focus_group" -> [Bool]{true, true}
         else -> [Bool]{true}
     }
     Val(ir_handle_core("core.ui", "{name}.{method}", "{backend}::{member}", mask, None))

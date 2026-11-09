@@ -100,6 +100,64 @@ coll_copy: fn(source: I64, target: I64, size: I64) {
     }
 }
 
+// C's memory functions, under their C names, for the C a program links
+// beside the runtime (vendored and user C, and the code a C compiler writes
+// for struct copies): the runtime pack carries no libc copy of them (#6693).
+// Each returns its target, as C's do; a count of zero or less touches nothing.
+#Export(c) memmove: fn(target: I64, source: I64, count: I64) -> I64 {
+    jet_rt_mem_move(target, source, count)
+    target
+}
+
+// Overlap is undefined for C's memcpy; the move handles it anyway.
+#Export(c) memcpy: fn(target: I64, source: I64, count: I64) -> I64 {
+    jet_rt_mem_move(target, source, count)
+    target
+}
+
+// The low byte of `value` in each of `count` bytes: whole words first, then
+// the tail.
+#Export(c) memset: fn(target: I64, value: I64, count: I64) -> I64 {
+    if (count <= I64{0}) -> return target
+    byte: value.bit_and(I64{255})
+    words: count >> I64{3}
+    #Unsafe("C's caller owns count writable bytes at target") {
+        // The byte in all eight lanes of a word.
+        pattern: wrapping(byte * I64{72340172838076673})
+        word := I64{0}
+        loop word < words {
+            os_store_i64(wrapping(target + (word << I64{3})), pattern)
+            word += I64{1}
+        }
+        at := words << I64{3}
+        loop at < count {
+            os_store_u8(wrapping(target + at), byte)
+            at += I64{1}
+        }
+    }
+    target
+}
+
+// The first differing byte of the two ranges, as unsigned bytes: below zero
+// when `left`'s is lower, above when higher, 0 when the ranges are equal.
+// Equal words are skipped whole.
+#Export(c) memcmp: fn(left: I64, right: I64, count: I64) -> I64 {
+    at := I64{0}
+    last_word: count - I64{8}
+    #Unsafe("C's caller owns count readable bytes at left and at right") {
+        loop at <= last_word && os_load_i64(wrapping(left + at)) == os_load_i64(wrapping(right + at)) {
+            at += I64{8}
+        }
+        loop at < count {
+            a: os_load_u8(wrapping(left + at))
+            b: os_load_u8(wrapping(right + at))
+            if (a != b) -> return a - b
+            at += I64{1}
+        }
+    }
+    I64{0}
+}
+
 coll_meta_copy: fn(source: I64) -> I64 {
     if (source == I64{0}) { return I64{0} }
     target: jet_rt_alloc(I64{72}, I64{8})

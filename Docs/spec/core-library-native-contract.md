@@ -313,12 +313,10 @@ Both cell leaves carry `Env` and use the ambient runtime route, so a source
 read cannot be folded into the default while compiling the program. Prelude
 `Perf.*` calls load the same source module as an explicit `core.perf` import.
 
-`core.game.raylib` sound handles are Jet records retaining the supplied path.
-`play_sound` preserves the existing non-empty-path acceptance contract, not a
-claim of native audio submission; this pair requires no host operation.
-The `color` constructor also runs entirely in Jet: each channel is clamped to
-`0..255` before the existing drawing carrier is constructed. No native or
-compile-time color constructor duplicates that normalization.
+`core.ui` drawing runs entirely in Jet: the `color` constructor clamps each
+channel to `0..255`, and the rasterizer paints straight-alpha RGBA pixels in
+Jet code that is the same on every tier, so no native or compile-time drawing
+route duplicates it.
 
 `core.web.virtual` windows are Jet records. Window construction, measured-size
 estimation, bounded slicing and indices, and `WebVirtualWindow.facts_json` use
@@ -855,6 +853,10 @@ descriptor from `core.net.__tcp_fd` and returns raw Mbed TLS status codes;
 trust selection, hostname checks, version bounds, ALPN, readiness waits,
 deadlines, close_notify, the verified peer identity and every error message are
 Jet. The `TCPStream` stays the descriptor's owner for the stream's lifetime.
+The closure is built with Mbed TLS's threading layer on
+(`MBEDTLS_THREADING_C`, `MBEDTLS_THREADING_PTHREAD` over musl's mutexes), so
+handshakes on different task threads share PSA's key slots and global state
+safely.
 
 `DataSequences.jet` owns the shared native List header constants
 `DATA_SEQUENCE_BYTES`, `DATA_SEQUENCE_LENGTH`, `DATA_SEQUENCE_CAPACITY`, and
@@ -934,7 +936,7 @@ order, not a progress ledger:
    logging and database.
 3. **Data and web:** data loaders and transformations, HTTP, web/router/forms,
    reactive, synchronization, services/jobs, storage, and browser.
-4. **Specialized:** compute/models, UI/TUI/font, games/raylib, plugin/mod,
+4. **Specialized:** compute/models, UI/TUI/font, games, plugin/mod,
    compiler/reflect, testing, and remaining host domains.
 
 Within a category, high-use foundations lead according to the dependency graph.

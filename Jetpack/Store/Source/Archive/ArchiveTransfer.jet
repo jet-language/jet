@@ -550,14 +550,14 @@ store_archive_import_staged: fn(verification: &StoreVerification, roots: HangarR
 // content-addressed object.
 store_archive_portable_entry: fn(roots: HangarRoots, object: HangarArchiveObject, meta: ParsedMeta) -> StoreEntry StoreError! {
     store_archive_validate_id(object.id)
-    source_id: store_entry_id(meta.name, meta.version, meta.reference, meta.out)
+    source_id: store_expected_record_id(meta.name, meta.version, meta.reference, meta.out, meta.producer_record, meta.envelope.output_hash)
     if source_id != object.id {
         return Err(StoreError.InvalidData("archive package record `{object.id}` does not match its metadata identity"))
     }
     out: files.join(files.join(roots.hangar_dir(), "objects"), object.digest)
     bin: store_archive_map_member_path(meta.out, meta.bin, out)
     rlib: store_archive_map_member_path(meta.out, meta.rlib, out)
-    id: store_entry_id(meta.name, meta.version, meta.reference, out)
+    id: store_expected_record_id(meta.name, meta.version, meta.reference, out, meta.producer_record, meta.envelope.output_hash)
     store_archive_validate_id(id)
     now: store_archive_now_secs()
     Ok(StoreEntry{
@@ -646,7 +646,7 @@ store_archive_verify_staged: fn(roots: HangarRoots, archive: HangarArchive, stag
         if meta.envelope.output_hash != object.digest || !outputs.contains(object.digest) {
             return Err(StoreError.InvalidData("archive package metadata has no matching output"))
         }
-        if store_entry_id(meta.name, meta.version, meta.reference, meta.out) != object.id {
+        if store_expected_record_id(meta.name, meta.version, meta.reference, meta.out, meta.producer_record, meta.envelope.output_hash) != object.id {
             return Err(StoreError.InvalidData("archive package metadata does not match its identity"))
         }
         loop reference in meta.references {

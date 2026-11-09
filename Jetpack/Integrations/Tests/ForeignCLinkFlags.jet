@@ -23,9 +23,9 @@ use {
 // tests/cffi.rs:2936: native C deps live in the `deps:` block as `c@<target>`
 // refs, parsed by the package parser.
 #Test("deps_block_parses_c_lib_refs") {
-    manifest: "\nname: \"p\"\nversion: \"0.1.0\"\ndeps: {{\n    raylib: c@system,\n    foo:    c@\"/opt/foo\",\n}}\n"
+    manifest: "\nname: \"p\"\nversion: \"0.1.0\"\ndeps: {{\n    zlib: c@system,\n    foo:    c@\"/opt/foo\",\n}}\n"
     facts: PackageFacts.parse(manifest, "test") ?? panic("manifest parses: {err}")
-    assert(facts.deps.get("raylib") == Val(DepSource.CLib{target: "system"}), "raylib is a c@system ref")
+    assert(facts.deps.get("zlib") == Val(DepSource.CLib{target: "system"}), "zlib is a c@system ref")
     assert(facts.deps.get("foo") == Val(DepSource.CLib{target: "/opt/foo"}), "foo is a c@ path ref")
     assert(facts.deps.get("sqlite3") == None, "an undeclared name is not a dependency")
 }

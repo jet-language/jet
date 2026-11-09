@@ -1,0 +1,1168 @@
+// The code generator's context, a port of SQLite 3.45.0's Parse object
+// (sqliteInt.h) and the routines every code-generating file shares: the
+// register and VDBE helpers of expr.c, select.c, build.c and vdbeaux.c
+// (sqlite3GetTempReg and its kin, sqlite3GetVdbe, sqlite3VdbeExplain,
+// sqlite3CodeVerifySchema, sqlite3BeginWriteOperation, sqlite3HaltConstraint,
+// sqlite3OpenTempDatabase), the authorizer checks of auth.c, and the walker
+// of walker.c over a Parse.
+//
+// The connection is part of the Parse: a statement is prepared with the
+// Conn moved into its Parse (take_conn) and moved back after, so that the
+// code generator reaches the connection, the statement under construction
+// and its own state through one `&Parse`. The parse trees are the
+// connection's arena, `ast.AST`, which travels beside the Parse.
+//
+// The files above this one call each other in cycles (expr.c codes
+// subqueries through select.c, which codes expressions through expr.c).
+// A Core part's imports are acyclic, so the calls that go up the part order
+// go through `Gen`, a trait the topmost part implements and every Parse
+// carries: the analogue of the amalgamation's one namespace. A walker's
+// callbacks are a `WalkCb` value, the analogue of Walker.xExprCallback.
+//
+// A trigger program (sqlite3CodeRowTrigger's sub-Parse) is coded in the same
+// Parse: the toplevel's per-program state moves to `outer` and a fresh
+// ParseFrame takes its place, so `outer[0]` is pToplevel while a sub-program
+// is being coded. The parse-tree state of Parse (nErr, zErrMsg, rc, nVar,
+// pVList, explain, eParseMode, zTail, nested, nSelect, pWith) is ast.AST.ctx,
+// which the sub-program shares with its toplevel exactly as C's
+// transferParseError makes it.
+//
+// Without shared cache, sqlite3TableLock emits nothing (no Btree is
+// sharable). The build has no SQLITE_DEBUG, so sqlite3VdbeReleaseRegisters
+// and the explain breakpoints do nothing, and OP_Explain is coded only for
+// EXPLAIN QUERY PLAN.
+
+use {
+    base: __core_db_base
+    ast: __core_db_ast
+    tk: __core_db_tokenize
+    util: __core_db_util
+    btree: __core_db_btree
+    os: __core_db_os
+    conn: __core_db_conn
+    opc: __core_db_opcodes
+    aux: __core_db_vdbeaux
+    pf: __core_db_printf
+}
+
+// sqlite3.dbOptFlags bits (sqliteInt.h SQLITE_QueryFlattener ..
+// SQLITE_OnePass); SQLITE_WindowFunc is ast.OPT_WINDOW_FUNC.
+OPT_QUERY_FLATTENER: 1
+OPT_GROUP_BY_ORDER: 4
+OPT_FACTOR_OUT_CONST: 8
+OPT_DISTINCT_OPT: 16
+OPT_COVER_IDX_SCAN: 32
+OPT_ORDER_BY_IDX_JOIN: 64
+OPT_TRANSITIVE: 128
+OPT_OMIT_NOOP_JOIN: 256
+OPT_COUNT_OF_VIEW: 512
+OPT_CURSOR_HINTS: 1024
+OPT_STAT4: 2048
+OPT_PUSH_DOWN: 4096
+OPT_SIMPLIFY_JOIN: 8192
+OPT_SKIP_SCAN: 16384
+OPT_PROPAGATE_CONST: 32768
+OPT_MIN_MAX_OPT: 65536
+OPT_SEEK_SCAN: 131072
+OPT_OMIT_ORDER_BY: 262144
+OPT_BLOOM_FILTER: 524288
+OPT_BLOOM_PULLDOWN: 1048576
+OPT_BALANCED_MERGE: 2097152
+OPT_RELEASE_REG: 4194304
+OPT_FLTTN_UNION_ALL: 8388608
+OPT_INDEXED_EXPR: 16777216
+OPT_COROUTINES: 33554432
+OPT_NULL_UNUSED_COLS: 67108864
+OPT_ONE_PASS: 134217728
+
+// SelectDest.eDest (sqliteInt.h SRT_*).
+SRT_UNION: 1
+SRT_EXCEPT: 2
+SRT_EXISTS: 3
+SRT_DISCARD: 4
+SRT_DIST_FIFO: 5
+SRT_DIST_QUEUE: 6
+SRT_QUEUE: 7
+SRT_FIFO: 8
+SRT_OUTPUT: 9
+SRT_MEM: 10
+SRT_SET: 11
+SRT_EPHEM_TAB: 12
+SRT_COROUTINE: 13
+SRT_TABLE: 14
+SRT_UPFROM: 15
+
+// The flags of sqlite3ExprCodeExprList (sqliteInt.h SQLITE_ECEL_*) and the
+// jump flag of the comparison opcodes (SQLITE_JUMPIFNULL).
+ECEL_DUP: 1
+ECEL_FACTOR: 2
+ECEL_REF: 4
+ECEL_OMITREF: 8
+JUMPIFNULL: 16
+
+// OP_Halt's P5 for a constraint failure (vdbe.h P5_Constraint*).
+P5_CONSTRAINT_NOT_NULL: 1
+P5_CONSTRAINT_UNIQUE: 2
+P5_CONSTRAINT_CHECK: 3
+P5_CONSTRAINT_FK: 4
+
+// The sqlite3WhereBegin flags (sqliteInt.h WHERE_ORDERBY_NORMAL ..
+// WHERE_USE_LIMIT) and the WhereInfo.eDistinct answers.
+WHERE_ORDERBY_NORMAL: 0
+WHERE_ORDERBY_MIN: 1
+WHERE_ORDERBY_MAX: 2
+WHERE_ONEPASS_DESIRED: 4
+WHERE_ONEPASS_MULTIROW: 8
+WHERE_DUPLICATES_OK: 16
+WHERE_OR_SUBCLAUSE: 32
+WHERE_GROUPBY: 64
+WHERE_DISTINCTBY: 128
+WHERE_WANT_DISTINCT: 256
+WHERE_SORTBYGROUP: 512
+WHERE_AGG_DISTINCT: 1024
+WHERE_ORDERBY_LIMIT: 2048
+WHERE_RIGHT_JOIN: 4096
+WHERE_USE_LIMIT: 16384
+WHERE_DISTINCT_NOOP: 0
+WHERE_DISTINCT_UNIQUE: 1
+WHERE_DISTINCT_ORDERED: 2
+WHERE_DISTINCT_UNORDERED: 3
+
+// Parse.aTempReg: the temporary registers a Parse keeps for reuse.
+N_TEMP_REG: 8
+
+// ---------------------------------------------------------------------------
+// The objects a Parse owns. C allocates them from the connection's heap and
+// links them by pointer; here each lives in an arena of the Parse and is
+// named by its index, -1 for NULL.
+
+// struct NameContext (sqliteInt.h): `src` is pSrcList; `u` is uNC (pEList,
+// pAggInfo, pUpsert or iBaseReg, as ncFlags NC_UEList, NC_UAggInfo,
+// NC_UUpsert, NC_UBaseReg say); `next` is pNext.
+NameContext: struct {
+    src: Int
+    u: Int
+    next: Int
+    n_ref: Int
+    n_nc_err: Int
+    nc_flags: Int
+    n_nested_select: Int
+    win_select: Int
+}
+
+// struct AggInfo_col.
+AggCol: struct {
+    tab: Int
+    c_expr: Int
+    itable: Int
+    icolumn: Int
+    i_sorter_column: Int
+}
+
+// struct AggInfo_func: `func` is pFunc.
+AggFunc: struct {
+    f_expr: Int
+    func: conn.FuncDef
+    i_distinct: Int
+    i_dist_addr: Int
+    i_ob_tab: Int
+    b_ob_payload: Bool
+    b_ob_unique: Bool
+    b_use_subtype: Bool
+}
+
+// struct AggInfo (sqliteInt.h).
+AggInfo: struct {
+    direct_mode: Bool
+    use_sorting_idx: Bool
+    n_sorting_column: Int
+    sorting_idx: Int
+    sorting_idx_ptab: Int
+    i_first_reg: Int
+    group_by: Int
+    cols: [AggCol]
+    n_accumulator: Int
+    funcs: [AggFunc]
+    sel_id: Int
+}
+
+// struct SelectDest (sqliteInt.h).
+SelectDest: struct {
+    e_dest: Int
+    i_sd_parm: Int
+    i_sd_parm2: Int
+    i_sdst: Int
+    n_sdst: Int
+    aff_sdst: [U8]?
+    order_by: Int
+}
+
+// struct IndexedExpr (sqliteInt.h): `next` is pIENext.
+IndexedExpr: struct {
+    expr: Int
+    i_data_cur: Int
+    i_idx_cur: Int
+    i_idx_col: Int
+    b_maybe_null_row: Bool
+    aff: Int
+    next: Int
+}
+
+// struct AutoincInfo (sqliteInt.h).
+AutoincInfo: struct {
+    next: Int
+    tab: Int
+    i_db: Int
+    reg_ctr: Int
+}
+
+// struct TriggerPrg (sqliteInt.h): `program` is the SubProgram, kept here
+// until the toplevel Vdbe links it (sqlite3VdbeLinkSubProgram).
+TriggerPrg: struct {
+    trigger: Int
+    next: Int
+    program: conn.SubProgram
+    linked: Int
+    orconf: Int
+    colmask: [Int]
+}
+
+// struct Returning (sqliteInt.h): its retTrig and retTStep are a Trigger
+// slot and an ast step the Parse owns.
+Returning: struct {
+    return_el: Int
+    ret_trig: Int
+    ret_tstep: Int
+    i_ret_cur: Int
+    n_ret_col: Int
+    i_ret_reg: Int
+    name: [U8]
+}
+
+// struct RenameToken (alter.c): the parse-tree element `p` names, as the
+// kind of arena it lives in and its index there, and the token it came from.
+RENAME_EXPR: 0
+RENAME_ITEM_NAME: 1
+RENAME_SRC_NAME: 2
+RENAME_TABLE: 3
+RENAME_INDEX: 4
+RENAME_TRIGGER: 5
+RENAME_COLUMN: 6
+RENAME_ID_NAME: 7
+RENAME_FK_COL: 8
+RENAME_CTE: 9
+RENAME_TRIGGER_STEP: 10
+// &Expr.y.pTab of expression `p`: the table part of a qualified column.
+RENAME_EXPR_TAB: 11
+RenameToken: struct {
+    kind: Int
+    p: Int
+    t: ast.SQLTok
+}
+
+// The per-program state of a Parse: the fields of struct Parse a trigger
+// sub-Parse starts afresh (see the file header).
+ParseFrame: struct {
+    // pVdbe, live when has_vdbe.
+    has_vdbe: Bool
+    v: conn.Vdbe
+    col_names_set: Bool
+    check_schema: Bool
+    is_multi_write: Bool
+    may_abort: Bool
+    ok_const_factor: Bool
+    prep_flags: Int
+    within_rj_subrtn: Int
+    n_range_reg: Int
+    i_range_reg: Int
+    n_tab: Int
+    n_mem: Int
+    i_self_tab: Int
+    const_expr: Int
+    idx_epr: Int
+    idx_part_epr: Int
+    write_mask: Int
+    cookie_mask: Int
+    reg_rowid: Int
+    reg_root: Int
+    n_max_arg: Int
+    ainc: Int
+    trigger_tab: Int
+    trigger_prg: Int
+    // u1: addrCrTab, or pReturning while b_returning_set.
+    addr_cr_tab: Int
+    returning: Int
+    oldmask: Int
+    newmask: Int
+    n_query_loop: Int
+    e_trigger_op: Int
+    b_returning: Bool
+    e_orconf: Int
+    disable_triggers: Bool
+    temp_regs: [Int]
+    name_token: ast.SQLTok
+    i_pk_sort_order: Int
+    vtab_lock: [Int]
+    n_height: Int
+    addr_explain: Int
+    new_table: Int
+    new_index: Int
+    new_trigger: Int
+    auth_context: [U8]?
+    s_arg: ast.SQLTok
+    rename: Int
+}
+
+// One walk in progress (struct Walker less its pParse): the callbacks, and
+// the fields the callbacks share (walkerDepth, eCode, mWFlags, the union
+// u as an index or count, and aiCol).
+WalkState: struct {
+    cb: WalkCb
+    depth: Int
+    e_code: Int
+    mw_flags: Int
+    u: Int
+    u2: Int
+    ints: [Int]
+}
+
+// struct Parse (sqliteInt.h).
+Parse: struct {
+    db: conn.Conn
+    up: Gen
+    f: ParseFrame
+    // The toplevel and the outer sub-programs' frames while a trigger
+    // program is coded, outermost first; empty at the toplevel.
+    outer: [ParseFrame]
+    walks: [WalkState]
+    ncs: [NameContext]
+    aggs: [AggInfo]
+    idx_exprs: [IndexedExpr]
+    aincs: [AutoincInfo]
+    trigger_prgs: [TriggerPrg]
+    returnings: [Returning]
+    renames: [RenameToken]
+    // The FuncDefs Window.pWFunc names (SQLWindow.wfunc indexes them).
+    wfuncs: [conn.FuncDef]
+    // pReprepare's bound values (sqlite3VdbeGetBoundValue reads them).
+    reprepare_vars: [base.Mem]
+}
+
+// The calls that go up the part order (see the file header). The topmost
+// part implements them by calling the routine each one names.
+Gen: trait {
+    // sqlite3ReadSchema (prepare.c).
+    read_schema: fn(self, p: &Parse, a: &ast.AST) -[DB]> Int Never!
+    // The authorizer callback, db->xAuth, with the Parse's
+    // p.f.auth_context as its fourth string: SQLITE_OK, AUTH_DENY or
+    // AUTH_IGNORE, or another value for a malfunction.
+    authorize: fn(self, p: &Parse, code: Int, arg1: [U8]?, arg2: [U8]?, arg3: [U8]?) -[DB]> Int Never!
+    // sqlite3NestedParse (build.c).
+    nested_parse: fn(self, p: &Parse, a: &ast.AST, sql: [U8]) Never! -[DB]>
+    // sqlite3Select (select.c).
+    select: fn(self, p: &Parse, a: &ast.AST, s: Int, dest: &SelectDest) -[DB]> Int Never!
+    // sqlite3SelectPrep (select.c).
+    select_prep: fn(self, p: &Parse, a: &ast.AST, s: Int, outer_nc: Int) Never! -[DB]>
+    // sqlite3SelectExpand (select.c).
+    select_expand: fn(self, p: &Parse, a: &ast.AST, s: Int) Never! -[DB]>
+    // sqlite3ResultSetOfSelect (select.c): a Table, in p.db.tables, of the
+    // result columns of SELECT `s` with affinity `aff`; -1 on error.
+    result_set_of_select: fn(self, p: &Parse, a: &ast.AST, s: Int, aff: Int) -[DB]> Int Never!
+    // sqlite3ViewGetColumnNames (build.c): table t's columns computed,
+    // when t is a view or virtual table; nonzero on error.
+    view_get_column_names: fn(self, p: &Parse, a: &ast.AST, t: Int) -[DB]> Int Never!
+    // The eponymous virtual table `name` names (sqlite3LocateTable's
+    // module lookup, sqlite3PragmaVtabRegister for a pragma_ name, and
+    // sqlite3VtabEponymousTableInit): its table, or -1.
+    eponymous_table: fn(self, p: &Parse, a: &ast.AST, name: [U8]) -[DB]> Int Never!
+    // sqlite3VtabOverloadFunction (vtab.c) for argument `e`, a column of
+    // a virtual table: the function its module's xFindFunction overloads
+    // def with, or def.
+    vtab_overload_function: fn(self, p: &Parse, a: &ast.AST, def: conn.FuncDef, n_arg: Int, e: Int) -[DB]> conn.FuncDef Never!
+    // vtabBestIndex's xBestIndex call (where.c) for virtual table t:
+    // info's outputs filled in, with the result code and the module's
+    // error message (zErrMsg), if any.
+    vtab_best_index: fn(self, p: &Parse, a: &ast.AST, t: Int, info: &conn.IndexInfo) -[DB]> (rc: Int, err: [U8]?) Never!
+    // xFindFunction of virtual table t's module for function `name` of
+    // n_arg arguments (isAuxiliaryVtabOperator): its result, 0 when the
+    // module has none.
+    vtab_find_function: fn(self, p: &Parse, a: &ast.AST, t: Int, n_arg: Int, name: [U8]) -[DB]> Int Never!
+}
+
+// A walker's callbacks (struct Walker's xExprCallback, xSelectCallback,
+// xSelectCallback2): each walker is a type that implements them, reading
+// and writing its state in the Parse's innermost WalkState.
+WalkCb: trait {
+    on_expr: fn(self, p: &Parse, a: &ast.AST, e: Int) -[DB]> Int Never!
+    // Whether xSelectCallback is set; sqlite3WalkSelect does nothing for
+    // a walker without one.
+    has_select: fn(self) -[]> Bool Never!
+    on_select: fn(self, p: &Parse, a: &ast.AST, s: Int) -[DB]> Int Never!
+    has_select2: fn(self) -[]> Bool Never!
+    on_select2: fn(self, p: &Parse, a: &ast.AST, s: Int) Never! -[DB]>
+    // Whether sqlite3WalkSelectExpr also walks the WINDOW definitions:
+    // xSelectCallback2 is sqlite3WalkWinDefnDummyCallback or
+    // sqlite3SelectPopWith, or the Parse is renaming.
+    win_defn: fn(self) -[]> Bool Never!
+}
+
+frame_new: fn() -> ParseFrame Never! {
+    ParseFrame{
+        has_vdbe: false
+        v: conn.vdbe_new()
+        col_names_set: false
+        check_schema: false
+        is_multi_write: false
+        may_abort: false
+        ok_const_factor: false
+        prep_flags: 0
+        within_rj_subrtn: 0
+        n_range_reg: 0
+        i_range_reg: 0
+        n_tab: 0
+        n_mem: 0
+        i_self_tab: 0
+        const_expr: -1
+        idx_epr: -1
+        idx_part_epr: -1
+        write_mask: 0
+        cookie_mask: 0
+        reg_rowid: 0
+        reg_root: 0
+        n_max_arg: 0
+        ainc: -1
+        trigger_tab: -1
+        trigger_prg: -1
+        addr_cr_tab: 0
+        returning: -1
+        oldmask: 0
+        newmask: 0
+        n_query_loop: 0
+        e_trigger_op: 0
+        b_returning: false
+        e_orconf: 0
+        disable_triggers: false
+        temp_regs: [Int]{}
+        name_token: ast.SQLTok{z: -1, n: 0}
+        i_pk_sort_order: 0
+        vtab_lock: [Int]{}
+        n_height: 0
+        addr_explain: 0
+        new_table: -1
+        new_index: -1
+        new_trigger: -1
+        auth_context: None
+        s_arg: ast.SQLTok{z: -1, n: 0}
+        rename: -1
+    }
+}
+
+// sqlite3ParseObjectInit: a Parse over `db`, which it now holds.
+parse_new: fn(db: &&conn.Conn, up: &&Gen) -> Parse Never! {
+    Parse{
+        db: db
+        up: up
+        f: frame_new()
+        outer: [ParseFrame]{}
+        walks: [WalkState]{}
+        ncs: [NameContext]{}
+        aggs: [AggInfo]{}
+        idx_exprs: [IndexedExpr]{}
+        aincs: [AutoincInfo]{}
+        trigger_prgs: [TriggerPrg]{}
+        returnings: [Returning]{}
+        renames: [RenameToken]{}
+        wfuncs: [conn.FuncDef]{}
+        reprepare_vars: [base.Mem]{}
+    }
+}
+
+// Move the connection out of `db` for a Parse, leaving an empty Conn.
+take_conn: fn(db: &conn.Conn) -> conn.Conn Never! {
+    out := db
+    db = conn.conn_new()
+    out
+}
+
+// Move the parse-tree arena out of the connection, for a Parse to work on
+// beside it.
+take_ast: fn(db: &conn.Conn) -> ast.AST Never! {
+    out := db.ast
+    db.ast = ast.new_ast()
+    out
+}
+
+// ---------------------------------------------------------------------------
+// The toplevel (sqlite3ParseToplevel).
+
+is_toplevel: fn(p: Parse) -> Bool Never! { p.outer.len() == 0 }
+
+top_set_write_mask: fn(p: &Parse, i_db: Int) Never! {
+    bit: 1 << i_db
+    if p.outer.len() > 0 {
+        p.outer[0].write_mask = p.outer[0].write_mask.bit_or(bit)
+    } else {
+        p.f.write_mask = p.f.write_mask.bit_or(bit)
+    }
+}
+
+top_cookie_mask: fn(p: Parse) -> Int Never! {
+    if p.outer.len() > 0 -> return p.outer[0].cookie_mask
+    p.f.cookie_mask
+}
+
+top_set_cookie_mask: fn(p: &Parse, mask: Int) Never! {
+    if p.outer.len() > 0 {
+        p.outer[0].cookie_mask = mask
+    } else {
+        p.f.cookie_mask = mask
+    }
+}
+
+top_set_multi_write: fn(p: &Parse, on: Bool) Never! {
+    if !on -> return
+    if p.outer.len() > 0 {
+        p.outer[0].is_multi_write = true
+    } else {
+        p.f.is_multi_write = true
+    }
+}
+
+top_ainc: fn(p: Parse) -> Int Never! {
+    if p.outer.len() > 0 -> return p.outer[0].ainc
+    p.f.ainc
+}
+
+top_set_ainc: fn(p: &Parse, x: Int) Never! {
+    if p.outer.len() > 0 {
+        p.outer[0].ainc = x
+    } else {
+        p.f.ainc = x
+    }
+}
+
+// ++pToplevel->nMem.
+top_alloc_mem: fn(p: &Parse) -> Int Never! {
+    if p.outer.len() > 0 {
+        p.outer[0].n_mem += 1
+        return p.outer[0].n_mem
+    }
+    p.f.n_mem += 1
+    p.f.n_mem
+}
+
+top_trigger_prg: fn(p: Parse) -> Int Never! {
+    if p.outer.len() > 0 -> return p.outer[0].trigger_prg
+    p.f.trigger_prg
+}
+
+top_set_trigger_prg: fn(p: &Parse, x: Int) Never! {
+    if p.outer.len() > 0 {
+        p.outer[0].trigger_prg = x
+    } else {
+        p.f.trigger_prg = x
+    }
+}
+
+top_raise_max_arg: fn(p: &Parse, n: Int) Never! {
+    if p.outer.len() > 0 {
+        if n > p.outer[0].n_max_arg -> p.outer[0].n_max_arg = n
+    } else if n > p.f.n_max_arg {
+        p.f.n_max_arg = n
+    }
+}
+
+top_vtab_lock: fn(p: Parse) -> [Int] Never! {
+    if p.outer.len() > 0 -> return p.outer[0].vtab_lock
+    p.f.vtab_lock
+}
+
+top_add_vtab_lock: fn(p: &Parse, tab: Int) Never! {
+    if p.outer.len() > 0 {
+        p.outer[0].vtab_lock.push(tab)
+    } else {
+        p.f.vtab_lock.push(tab)
+    }
+}
+
+// Begin coding a trigger sub-program (codeRowTrigger's sSubParse): the
+// current frame moves to `outer`.
+frame_push: fn(p: &Parse) Never! {
+    p.outer.push(p.f)
+    p.f = frame_new()
+}
+
+// End a sub-program: its frame comes back.
+frame_pop: fn(p: &Parse) -> ParseFrame Never! {
+    sub := p.f
+    p.f = p.outer.pop() ?? frame_new()
+    sub
+}
+
+// ---------------------------------------------------------------------------
+// Errors (sqlite3ErrorMsg is ast.error and ast.error_at).
+
+// pParse->nErr.
+n_err: fn(a: ast.AST) -> Int Never! { a.ctx.nerr }
+
+// The connection's malloc_failed, which a Jet port reaches only through
+// sqlite3OomFault.
+oom: fn(p: Parse) -> Bool Never! { p.db.malloc_failed }
+
+// sqlite3MPrintf: printf.c's rendering of `fmt`, bounded by
+// SQLITE_LIMIT_LENGTH (an over-long result is empty, as C's NULL).
+sql_mprintf: fn(p: Parse, fmt: String, args: [base.Mem]) -> [U8] Never! {
+    pf.mprintf(fmt.bytes(), args, p.db.limits[ast.LIMIT_LENGTH]) ?? [U8]{}
+}
+
+// OptimizationEnabled / OptimizationDisabled.
+opt_enabled: fn(p: Parse, mask: Int) -> Bool Never! { p.db.db_opt_flags.bit_and(mask) == 0 }
+
+opt_disabled: fn(p: Parse, mask: Int) -> Bool Never! { p.db.db_opt_flags.bit_and(mask) != 0 }
+
+// ---------------------------------------------------------------------------
+// The statement under construction: the sqlite3Vdbe* calls on pParse->pVdbe.
+
+// sqlite3GetVdbe (select.c): make sure the Parse has its Vdbe.
+get_vdbe: fn(p: &Parse) Never! {
+    if p.f.has_vdbe -> return
+    if is_toplevel(p) && opt_enabled(p, OPT_FACTOR_OUT_CONST) -> p.f.ok_const_factor = true
+    p.f.v = aux.vdbe_create(p.db)
+    p.f.has_vdbe = true
+}
+
+op0: fn(p: &Parse, opcode: Int) -> Int Never! { aux.add_op0(p.db, p.f.v, opcode) }
+
+op1: fn(p: &Parse, opcode: Int, p1: Int) -> Int Never! { aux.add_op1(p.db, p.f.v, opcode, p1) }
+
+op2: fn(p: &Parse, opcode: Int, p1: Int, p2: Int) -> Int Never! { aux.add_op2(p.db, p.f.v, opcode, p1, p2) }
+
+op3: fn(p: &Parse, opcode: Int, p1: Int, p2: Int, p3: Int) -> Int Never! { aux.add_op3(p.db, p.f.v, opcode, p1, p2, p3) }
+
+op4: fn(p: &Parse, opcode: Int, p1: Int, p2: Int, p3: Int, p4: conn.P4) -> Int Never! { aux.add_op4(p.db, p.f.v, opcode, p1, p2, p3, p4) }
+
+op4_int: fn(p: &Parse, opcode: Int, p1: Int, p2: Int, p3: Int, p4: Int) -> Int Never! { aux.add_op4_int(p.db, p.f.v, opcode, p1, p2, p3, p4) }
+
+// sqlite3VdbeAddOp4 with P4_DYNAMIC/P4_STATIC text.
+op4_text: fn(p: &Parse, opcode: Int, p1: Int, p2: Int, p3: Int, text: [U8]) -> Int Never! { aux.add_op4(p.db, p.f.v, opcode, p1, p2, p3, .Text(text)) }
+
+goto: fn(p: &Parse, dest: Int) -> Int Never! { aux.add_goto(p.db, p.f.v, dest) }
+
+v_op_list: fn(p: &Parse, list: [aux.VdbeOpList]) -> Int Never! { aux.add_op_list(p.db, p.f.v, list) }
+
+v_multi_load: fn(p: &Parse, dest: Int, vals: [base.Mem], result_row: Bool) Never! { aux.multi_load(p.db, p.f.v, dest, vals, result_row) }
+
+v_make_label: fn(p: &Parse) -> Int Never! { aux.make_label(p.f.v) }
+
+v_resolve_label: fn(p: &Parse, x: Int) Never! { _: aux.resolve_label(p.f.v, x) }
+
+v_current_addr: fn(p: Parse) -> Int Never! { aux.current_addr(p.f.v) }
+
+v_jump_here: fn(p: &Parse, addr: Int) Never! { aux.jump_here(p.db, p.f.v, addr) }
+
+v_jump_here_or_pop_inst: fn(p: &Parse, addr: Int) Never! { aux.jump_here_or_pop_inst(p.db, p.f.v, addr) }
+
+// sqlite3VdbeEndCoroutine: the OP_EndCoroutine of the coroutine whose
+// return address is reg_yield; the coroutine's temporary registers are
+// its own.
+v_end_coroutine: fn(p: &Parse, reg_yield: Int) Never! {
+    _: op1(p, opc.OP_END_COROUTINE, reg_yield)
+    clear_temp_reg_cache(p)
+}
+
+v_change_p1: fn(p: &Parse, addr: Int, val: Int) Never! { aux.change_p1(p.db, p.f.v, addr, val) }
+
+v_change_p2: fn(p: &Parse, addr: Int, val: Int) Never! { aux.change_p2(p.db, p.f.v, addr, val) }
+
+v_change_p3: fn(p: &Parse, addr: Int, val: Int) Never! { aux.change_p3(p.db, p.f.v, addr, val) }
+
+v_change_p4: fn(p: &Parse, addr: Int, p4: conn.P4) Never! { aux.change_p4(p.db, p.f.v, addr, p4) }
+
+v_change_p5: fn(p: &Parse, p5: Int) Never! { aux.change_p5(p.f.v, p5) }
+
+v_append_p4: fn(p: &Parse, p4: conn.P4) Never! { aux.append_p4(p.db, p.f.v, p4) }
+
+v_change_opcode: fn(p: &Parse, addr: Int, opcode: Int) Never! { aux.change_opcode(p.db, p.f.v, addr, opcode) }
+
+v_change_to_noop: fn(p: &Parse, addr: Int) -> Bool Never! { aux.change_to_noop(p.db, p.f.v, addr) }
+
+v_delete_prior_opcode: fn(p: &Parse, opcode: Int) -> Bool Never! { aux.delete_prior_opcode(p.db, p.f.v, opcode) }
+
+v_op_at: fn(p: Parse, addr: Int) -> conn.VdbeOp Never! { aux.op_at(p.db, p.f.v, addr) }
+
+// sqlite3VdbeGetLastOp's address (nOp - 1).
+v_last_addr: fn(p: Parse) -> Int Never! { aux.current_addr(p.f.v) - 1 }
+
+// sqlite3VdbeLoadString.
+v_load_string: fn(p: &Parse, dest: Int, z: [U8]) -> Int Never! { aux.load_string(p.db, p.f.v, dest, z) }
+
+// sqlite3VdbeSetNumCols / sqlite3VdbeSetColName.
+v_set_num_cols: fn(p: &Parse, n: Int) Never! { aux.set_num_cols(p.f.v, n) }
+
+v_set_col_name: fn(p: &Parse, idx: Int, var: Int, name: [U8]) Never! { _: aux.set_col_name(p.db, p.f.v, idx, var, name) }
+
+// sqlite3VdbeUsesBtree, sqlite3VdbeRunOnlyOnce, sqlite3VdbeCountChanges.
+v_uses_btree: fn(p: &Parse, i: Int) Never! { aux.uses_btree(p.f.v, i) }
+
+v_run_only_once: fn(p: &Parse) Never! { aux.run_only_once(p.db, p.f.v) }
+
+v_count_changes: fn(p: &Parse) Never! { aux.count_changes(p.f.v) }
+
+// ---------------------------------------------------------------------------
+// Registers (expr.c).
+
+// sqlite3GetTempReg.
+get_temp_reg: fn(p: &Parse) -> Int Never! {
+    if p.f.temp_regs.len() == 0 {
+        p.f.n_mem += 1
+        return p.f.n_mem
+    }
+    p.f.temp_regs.pop() ?? 0
+}
+
+// sqlite3ReleaseTempReg.
+release_temp_reg: fn(p: &Parse, i_reg: Int) Never! {
+    if i_reg != 0 && p.f.temp_regs.len() < N_TEMP_REG -> p.f.temp_regs.push(i_reg)
+}
+
+// sqlite3GetTempRange.
+get_temp_range: fn(p: &Parse, n_reg: Int) -> Int Never! {
+    if n_reg == 1 -> return get_temp_reg(p)
+    i := p.f.i_range_reg
+    if n_reg <= p.f.n_range_reg {
+        p.f.i_range_reg += n_reg
+        p.f.n_range_reg -= n_reg
+    } else {
+        i = p.f.n_mem + 1
+        p.f.n_mem += n_reg
+    }
+    i
+}
+
+// sqlite3ReleaseTempRange.
+release_temp_range: fn(p: &Parse, i_reg: Int, n_reg: Int) Never! {
+    if n_reg == 1 {
+        release_temp_reg(p, i_reg)
+        return
+    }
+    if n_reg > p.f.n_range_reg {
+        p.f.n_range_reg = n_reg
+        p.f.i_range_reg = i_reg
+    }
+}
+
+// sqlite3ClearTempRegCache.
+clear_temp_reg_cache: fn(p: &Parse) Never! {
+    p.f.temp_regs = [Int]{}
+    p.f.n_range_reg = 0
+}
+
+// sqlite3TouchRegister.
+touch_register: fn(p: &Parse, i_reg: Int) Never! {
+    if p.f.n_mem < i_reg -> p.f.n_mem = i_reg
+}
+
+// sqlite3FirstAvailableRegister: the first register at or past i_min that
+// no factored constant uses; the temporary register caches empty.
+first_available_register: fn(p: &Parse, a: ast.AST, i_min: Int) -> Int Never! {
+    m := i_min
+    l: p.f.const_expr
+    if l >= 0 {
+        loop item in a.lists[l].items {
+            if item.const_reg >= m -> m = item.const_reg + 1
+        }
+    }
+    clear_temp_reg_cache(p)
+    m
+}
+
+// ---------------------------------------------------------------------------
+// EXPLAIN QUERY PLAN (vdbeaux.c).
+
+// sqlite3VdbeExplainParent.
+explain_parent: fn(p: Parse) -> Int Never! {
+    if p.f.addr_explain == 0 -> return 0
+    v_op_at(p, p.f.addr_explain).p2
+}
+
+// sqlite3VdbeExplain: an OP_Explain with the text `msg`, coded only for
+// EXPLAIN QUERY PLAN; with `push` it becomes the parent of the next ones.
+explain: fn(p: &Parse, a: ast.AST, push: Bool, msg: String) -> Int Never! {
+    if a.ctx.explain != 2 -> return 0
+    i_this: v_current_addr(p)
+    addr: op4_text(p, opc.OP_EXPLAIN, i_this, p.f.addr_explain, 0, msg.bytes())
+    if push -> p.f.addr_explain = i_this
+    addr
+}
+
+// sqlite3VdbeExplainPop.
+explain_pop: fn(p: &Parse) Never! { p.f.addr_explain = explain_parent(p) }
+
+// ---------------------------------------------------------------------------
+// Transactions and constraints (build.c).
+
+// sqlite3OpenTempDatabase: open the TEMP database's btree if it is not
+// open; true on failure, with the error left in the Parse.
+open_temp_database: fn(p: &Parse, a: &ast.AST) -[DB]> Bool Never! {
+    if p.db.dbs[1].bt >= 0 || a.ctx.explain != 0 -> return false
+    slot: conn.btree_slot_new(p.db)
+    owner: conn.bt_db_of(p.db, 1)
+    vfs_flags: os.OPEN_READWRITE.bit_or(os.OPEN_CREATE).bit_or(os.OPEN_EXCLUSIVE).bit_or(os.OPEN_DELETEONCLOSE).bit_or(os.OPEN_TEMP_DB)
+    rc: btree.btree_open(p.db.btrees[slot], None, owner, 0, vfs_flags, false, false, false, false)
+    if rc != base.OK {
+        conn.btree_slot_free(p.db, slot)
+        ast.error(a, "unable to open a temporary database file for storing temporary tables")
+        a.ctx.rc = rc
+        return true
+    }
+    p.db.dbs[1].bt = slot
+    if btree.btree_set_page_size(p.db.btrees[slot], p.db.next_pagesize, 0, false) == base.NOMEM {
+        aux.oom_fault(p.db)
+        return true
+    }
+    false
+}
+
+// sqlite3CodeVerifySchema: the statement checks database i_db's schema
+// cookie (its OP_Transaction, which sqlite3FinishCoding codes).
+code_verify_schema: fn(p: &Parse, a: &ast.AST, i_db: Int) Never! -[DB]> {
+    mask: top_cookie_mask(p)
+    bit: 1 << i_db
+    if mask.bit_and(bit) != 0 -> return
+    top_set_cookie_mask(p, mask.bit_or(bit))
+    // sqlite3OpenTempDatabase(pToplevel): the toplevel's EXPLAIN is the
+    // shared statement's.
+    if i_db == 1 -> _: open_temp_database(p, a)
+}
+
+// sqlite3CodeVerifyNamedSchema: every attached database named `name` (all
+// of them for None).
+code_verify_named_schema: fn(p: &Parse, a: &ast.AST, name: [U8]?) Never! -[DB]> {
+    loop i in 0..<p.db.dbs.len() {
+        if p.db.dbs[i].bt < 0 -> next
+        if name == .Val(z) && util.str_icmp(z, p.db.dbs[i].name) != 0 -> next
+        code_verify_schema(p, a, i)
+    }
+}
+
+// sqlite3BeginWriteOperation.
+begin_write_operation: fn(p: &Parse, a: &ast.AST, set_statement: Bool, i_db: Int) Never! -[DB]> {
+    code_verify_schema(p, a, i_db)
+    top_set_write_mask(p, i_db)
+    top_set_multi_write(p, set_statement)
+}
+
+// sqlite3MultiWrite.
+multi_write: fn(p: &Parse) Never! { top_set_multi_write(p, true) }
+
+// sqlite3MayAbort.
+may_abort: fn(p: &Parse) Never! {
+    if p.outer.len() > 0 {
+        p.outer[0].may_abort = true
+    } else {
+        p.f.may_abort = true
+    }
+}
+
+// sqlite3HaltConstraint.
+halt_constraint: fn(p: &Parse, err_code: Int, on_error: Int, msg: [U8]?, p5: Int) Never! {
+    get_vdbe(p)
+    if on_error == ast.OE_ABORT -> may_abort(p)
+    p4: if msg == .Val(z) -> conn.P4.Text(z) else -> conn.P4.NotUsed
+    _: op4(p, opc.OP_HALT, err_code, on_error, 0, p4)
+    v_change_p5(p, p5)
+}
+
+// sqlite3UniqueConstraint.
+unique_constraint: fn(p: &Parse, on_error: Int, idx: Int) Never! {
+    ix: p.db.indexes[idx]
+    tab: p.db.tables[ix.table]
+    msg := [U8]{}
+    if ix.col_expr >= 0 {
+        msg = sql_mprintf(p, "index '%q'", [base.Mem]{pf.txt(ix.name)})
+    } else {
+        loop j in 0..<ix.n_key_col {
+            if j > 0 -> aux.append_bytes(msg, ", ".bytes())
+            aux.append_bytes(msg, tab.name)
+            msg.push(U8{46})
+            aux.append_bytes(msg, tab.cols[ix.ai_column[j]].name)
+        }
+    }
+    code: if ix.idx_type == ast.IDXTYPE_PRIMARYKEY -> base.CONSTRAINT_PRIMARYKEY else -> base.CONSTRAINT_UNIQUE
+    halt_constraint(p, code, on_error, Val(msg), P5_CONSTRAINT_UNIQUE)
+}
+
+// sqlite3RowidConstraint.
+rowid_constraint: fn(p: &Parse, on_error: Int, t: Int) Never! {
+    tab: p.db.tables[t]
+    msg := tab.name.copy()
+    rc := base.CONSTRAINT_ROWID
+    if tab.ipkey >= 0 {
+        msg.push(U8{46})
+        aux.append_bytes(msg, tab.cols[tab.ipkey].name)
+        rc = base.CONSTRAINT_PRIMARYKEY
+    } else {
+        aux.append_bytes(msg, ".rowid".bytes())
+    }
+    halt_constraint(p, rc, on_error, Val(msg), P5_CONSTRAINT_UNIQUE)
+}
+
+// ---------------------------------------------------------------------------
+// The authorizer (auth.c).
+
+// IN_SPECIAL_PARSE: declaring a virtual table, or renaming.
+in_special_parse: fn(a: ast.AST) -> Bool Never! { a.ctx.parse_mode != ast.PARSE_MODE_NORMAL }
+
+// sqliteAuthBadReturnCode.
+auth_bad_return_code: fn(a: &ast.AST) Never! {
+    ast.error(a, "authorizer malfunction")
+    a.ctx.rc = base.ERROR
+}
+
+// sqlite3AuthCheck.
+auth_check: fn(p: &Parse, a: &ast.AST, code: Int, arg1: [U8]?, arg2: [U8]?, arg3: [U8]?) -[DB]> Int Never! {
+    if !p.db.has_auth || p.db.init.busy || in_special_parse(a) -> return base.OK
+    g := p.up
+    rc := g.authorize(p, code, arg1, arg2, arg3)
+    if rc == conn.AUTH_DENY {
+        ast.error(a, "not authorized")
+        a.ctx.rc = base.AUTH
+    } else if rc != base.OK && rc != conn.AUTH_IGNORE {
+        rc = conn.AUTH_DENY
+        auth_bad_return_code(a)
+    }
+    rc
+}
+
+// sqlite3AuthReadCol.
+auth_read_col: fn(p: &Parse, a: &ast.AST, tab: [U8], col: [U8], i_db: Int) -[DB]> Int Never! {
+    if p.db.init.busy -> return base.OK
+    z_db: p.db.dbs[i_db].name
+    g := p.up
+    rc: g.authorize(p, conn.AUTH_READ, Val(tab), Val(col), Val(z_db))
+    if rc == conn.AUTH_DENY {
+        z := "{ast.text(tab)}.{ast.text(col)}"
+        if p.db.dbs.len() > 2 || i_db != 0 -> z = "{ast.text(z_db)}.{z}"
+        ast.error(a, "access to {z} is prohibited")
+        a.ctx.rc = base.AUTH
+    } else if rc != conn.AUTH_IGNORE && rc != base.OK {
+        auth_bad_return_code(a)
+    }
+    rc
+}
+
+// sqlite3AuthRead: check a TK_COLUMN or TK_TRIGGER read of `e` from the
+// tables of FROM list `src`; an ignored read becomes NULL.
+auth_read: fn(p: &Parse, a: &ast.AST, e: Int, schema: Int, src: Int) Never! -[DB]> {
+    i_db: conn.schema_to_index(p.db, schema)
+    if i_db < 0 -> return
+    t := -1
+    if a.exprs[e].op == tk.TK_TRIGGER {
+        t = p.f.trigger_tab
+    } else if src >= 0 {
+        loop si in a.srclists[src].items {
+            if a.exprs[e].itable == a.items[si].cursor {
+                t = a.items[si].tab
+                break
+            }
+        }
+    }
+    if t < 0 -> return
+    tab: p.db.tables[t]
+    i_col: a.exprs[e].icolumn
+    col: if i_col >= 0 -> tab.cols[i_col].name else if tab.ipkey >= 0 -> tab.cols[tab.ipkey].name else -> "ROWID".bytes()
+    if auth_read_col(p, a, tab.name, col, i_db) == conn.AUTH_IGNORE -> a.exprs[e].op = tk.TK_NULL
+}
+
+// sqlite3AuthContextPush: the previous context, for auth_context_pop.
+auth_context_push: fn(p: &Parse, context: [U8]?) -> [U8]? Never! {
+    saved: p.f.auth_context
+    p.f.auth_context = context
+    saved
+}
+
+// sqlite3AuthContextPop.
+auth_context_pop: fn(p: &Parse, saved: [U8]?) Never! { p.f.auth_context = saved }
+
+// sqlite3RenameTokenRemap (alter.c): the token mapped to element `from` of
+// kind `from_kind` now names element `to` of kind `to_kind` (`to` -1 for
+// C's NULL, which unmaps it).
+rename_token_remap: fn(p: &Parse, to_kind: Int, to: Int, from_kind: Int, from: Int) Never! {
+    loop i in 0..<p.renames.len() {
+        if p.renames[i].kind == from_kind && p.renames[i].p == from {
+            p.renames[i].kind = to_kind
+            p.renames[i].p = to
+            return
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Walking (walker.c), over a Parse: sqlite3WalkExpr and its kin are
+// pwalk_expr and its kin here (ast.walk_expr walks the parse-tree-only
+// walkers of Ast). A walk pushes its WalkState, walks, and pops it: the
+// callbacks of nested walks see their own state on top.
+
+walk_push: fn(p: &Parse, cb: &&WalkCb, u: Int) Never! {
+    p.walks.push(WalkState{cb: cb, depth: 0, e_code: 0, mw_flags: 0, u: u, u2: 0, ints: [Int]{}})
+}
+
+walk_pop: fn(p: &Parse) -> WalkState Never! {
+    p.walks.pop() ?? panic("walk_pop: no walk in progress")
+}
+
+// The innermost walk's index in p.walks.
+walk_top: fn(p: Parse) -> Int Never! { p.walks.len() - 1 }
+
+// sqlite3WalkExpr: the expression callback on each node, parents first.
+pwalk_expr: fn(p: &Parse, a: &ast.AST, e0: Int) -[DB]> Int Never! {
+    if e0 < 0 -> return ast.WRC_CONTINUE
+    e := e0
+    loop {
+        cb: p.walks[walk_top(p)].cb
+        rc: cb.on_expr(p, a, e)
+        if rc != 0 -> return rc.bit_and(ast.WRC_ABORT)
+        if !ast.has(a, e, ast.EP_TOKEN_ONLY.bit_or(ast.EP_LEAF)) {
+            if a.exprs[e].left >= 0 && pwalk_expr(p, a, a.exprs[e].left) != 0 -> return ast.WRC_ABORT
+            if a.exprs[e].right >= 0 {
+                e = a.exprs[e].right
+                next
+            } else if ast.has(a, e, ast.EP_X_IS_SELECT) {
+                if pwalk_select(p, a, a.exprs[e].x) != 0 -> return ast.WRC_ABORT
+            } else {
+                if a.exprs[e].x >= 0 && pwalk_expr_list(p, a, a.exprs[e].x) != 0 -> return ast.WRC_ABORT
+                if ast.has(a, e, ast.EP_WIN_FUNC) && pwalk_window_list(p, a, a.exprs[e].y, true) != 0 -> return ast.WRC_ABORT
+            }
+        }
+        break
+    }
+    ast.WRC_CONTINUE
+}
+
+// walkWindowList.
+pwalk_window_list: fn(p: &Parse, a: &ast.AST, list: Int, one_only: Bool) -[DB]> Int Never! {
+    win := list
+    loop win >= 0 {
+        if pwalk_expr_list(p, a, a.windows[win].order_by) != 0 -> return ast.WRC_ABORT
+        if pwalk_expr_list(p, a, a.windows[win].partition) != 0 -> return ast.WRC_ABORT
+        if pwalk_expr(p, a, a.windows[win].filter) != 0 -> return ast.WRC_ABORT
+        if pwalk_expr(p, a, a.windows[win].start_expr) != 0 -> return ast.WRC_ABORT
+        if pwalk_expr(p, a, a.windows[win].end_expr) != 0 -> return ast.WRC_ABORT
+        if one_only -> break
+        win = a.windows[win].next_win
+    }
+    ast.WRC_CONTINUE
+}
+
+// sqlite3WalkExprList.
+pwalk_expr_list: fn(p: &Parse, a: &ast.AST, list: Int) -[DB]> Int Never! {
+    loop i in 0..<ast.list_len(a, list) {
+        e: ast.list_expr(a, list, i)
+        if pwalk_expr(p, a, e) != 0 -> return ast.WRC_ABORT
+    }
+    ast.WRC_CONTINUE
+}
+
+// sqlite3WalkSelectExpr.
+pwalk_select_expr: fn(p: &Parse, a: &ast.AST, s: Int) -[DB]> Int Never! {
+    if pwalk_expr_list(p, a, a.selects[s].elist) != 0 -> return ast.WRC_ABORT
+    if pwalk_expr(p, a, a.selects[s].where_expr) != 0 -> return ast.WRC_ABORT
+    if pwalk_expr_list(p, a, a.selects[s].group_by) != 0 -> return ast.WRC_ABORT
+    if pwalk_expr(p, a, a.selects[s].having) != 0 -> return ast.WRC_ABORT
+    if pwalk_expr_list(p, a, a.selects[s].order_by) != 0 -> return ast.WRC_ABORT
+    if pwalk_expr(p, a, a.selects[s].limit) != 0 -> return ast.WRC_ABORT
+    if a.selects[s].win_defn >= 0 {
+        cb: p.walks[walk_top(p)].cb
+        if cb.win_defn() || ast.in_rename(a) -> return pwalk_window_list(p, a, a.selects[s].win_defn, false)
+    }
+    ast.WRC_CONTINUE
+}
+
+// sqlite3WalkSelectFrom.
+pwalk_select_from: fn(p: &Parse, a: &ast.AST, s: Int) -[DB]> Int Never! {
+    src: a.selects[s].src
+    if src < 0 -> return ast.WRC_CONTINUE
+    loop i in 0..<a.srclists[src].items.len() {
+        si: a.srclists[src].items[i]
+        if a.items[si].select >= 0 && pwalk_select(p, a, a.items[si].select) != 0 -> return ast.WRC_ABORT
+        if a.items[si].is_tab_func && pwalk_expr_list(p, a, a.items[si].func_arg) != 0 -> return ast.WRC_ABORT
+    }
+    ast.WRC_CONTINUE
+}
+
+// sqlite3WalkSelect: a SELECT and the compound chain before it.
+pwalk_select: fn(p: &Parse, a: &ast.AST, s0: Int) -[DB]> Int Never! {
+    if s0 < 0 -> return ast.WRC_CONTINUE
+    cb: p.walks[walk_top(p)].cb
+    if !cb.has_select() -> return ast.WRC_CONTINUE
+    s := s0
+    loop s >= 0 {
+        rc: cb.on_select(p, a, s)
+        if rc != 0 -> return rc.bit_and(ast.WRC_ABORT)
+        if pwalk_select_expr(p, a, s) != 0 || pwalk_select_from(p, a, s) != 0 -> return ast.WRC_ABORT
+        if cb.has_select2() -> cb.on_select2(p, a, s)
+        s = a.selects[s].prior
+    }
+    ast.WRC_CONTINUE
+}
+
+// sqlite3WalkerDepthIncrease / sqlite3WalkerDepthDecrease, the SELECT
+// callbacks that count nesting.
+walker_depth_increase: fn(p: &Parse) -> Int Never! {
+    p.walks[walk_top(p)].depth += 1
+    ast.WRC_CONTINUE
+}
+
+walker_depth_decrease: fn(p: &Parse) Never! { p.walks[walk_top(p)].depth -= 1 }
+
+// A Gen for tests that reach nothing above this part.
+CodegenTestGen: struct {
+    calls: Int
+}
+
+impl CodegenTestGen.Gen {
+    read_schema: fn(self, p: &Parse, a: &ast.AST) -[DB]> Int Never! { base.OK }
+    authorize: fn(self, p: &Parse, code: Int, arg1: [U8]?, arg2: [U8]?, arg3: [U8]?) -[DB]> Int Never! { if code == conn.AUTH_READ -> conn.AUTH_IGNORE else -> conn.AUTH_DENY }
+    nested_parse: fn(self, p: &Parse, a: &ast.AST, sql: [U8]) Never! -[DB]> {}
+    select: fn(self, p: &Parse, a: &ast.AST, s: Int, dest: &SelectDest) -[DB]> Int Never! { 0 }
+    select_prep: fn(self, p: &Parse, a: &ast.AST, s: Int, outer_nc: Int) Never! -[DB]> {}
+    select_expand: fn(self, p: &Parse, a: &ast.AST, s: Int) Never! -[DB]> {}
+    result_set_of_select: fn(self, p: &Parse, a: &ast.AST, s: Int, aff: Int) -[DB]> Int Never! { -1 }
+    view_get_column_names: fn(self, p: &Parse, a: &ast.AST, t: Int) -[DB]> Int Never! { 0 }
+    eponymous_table: fn(self, p: &Parse, a: &ast.AST, name: [U8]) -[DB]> Int Never! { -1 }
+    vtab_overload_function: fn(self, p: &Parse, a: &ast.AST, def: conn.FuncDef, n_arg: Int, e: Int) -[DB]> conn.FuncDef Never! { def.copy() }
+    vtab_best_index: fn(self, p: &Parse, a: &ast.AST, t: Int, info: &conn.IndexInfo) -[DB]> (rc: Int, err: [U8]?) Never! { (rc: base.ERROR, err: None) }
+    vtab_find_function: fn(self, p: &Parse, a: &ast.AST, t: Int, n_arg: Int, name: [U8]) -[DB]> Int Never! { 0 }
+}
+
+#Test("temporary registers and ranges are reused as expr.c reuses them") {
+    g := CodegenTestGen{calls: 0}
+    p := parse_new(conn.conn_new(), g)
+    r1: get_temp_reg(p)
+    r2: get_temp_reg(p)
+    assert(r1 == 1 && r2 == 2 && p.f.n_mem == 2)
+    release_temp_reg(p, r1)
+    assert(get_temp_reg(p) == r1)
+    base_reg: get_temp_range(p, 3)
+    assert(base_reg == 3 && p.f.n_mem == 5)
+    release_temp_range(p, base_reg, 3)
+    assert(get_temp_range(p, 2) == 3 && get_temp_range(p, 1) == 6)
+    clear_temp_reg_cache(p)
+    assert(get_temp_range(p, 2) == 7)
+    touch_register(p, 20)
+    assert(get_temp_reg(p) == 21)
+}
+
+#Test("the authorizer's answers become errors and NULL reads") {
+    g := CodegenTestGen{calls: 0}
+    db := conn.conn_new()
+    db.has_auth = true
+    p := parse_new(db, g)
+    a := ast.stmt_ast("")
+    assert(auth_check(p, a, conn.AUTH_INSERT, Val("t".bytes()), None, None) == conn.AUTH_DENY)
+    assert(a.ctx.errmsg == Val("not authorized") && a.ctx.rc == base.AUTH)
+    saved: auth_context_push(p, Val("v".bytes()))
+    assert(p.f.auth_context == Val("v".bytes()))
+    auth_context_pop(p, saved)
+    assert(p.f.auth_context == None)
+}

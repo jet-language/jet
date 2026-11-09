@@ -1,5 +1,5 @@
 // An arrowless unit-fallible signature preserves its typed failure carrier.
-// Both `Ok()` and `Ok(())` return Unit success, including in terminal arms;
+// `Ok()` returns Unit success, including in early returns and terminal arms;
 // terminal `Err(...)` returns the declared error rather than a default error.
 #Error
 StepError: enum {
@@ -18,7 +18,7 @@ guarded: fn(value: Int) StepError! {
         return Ok()
     }
     print("late")
-    Ok(())
+    Ok()
 }
 
 chain: fn(value: Int) StepError! {
@@ -30,7 +30,7 @@ chain: fn(value: Int) StepError! {
 refused: fn() StepError! {
     if true == {
         true -> Err(StepError.Refused)
-        else -> Ok(())
+        else -> Ok()
     }
 }
 

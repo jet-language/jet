@@ -564,8 +564,9 @@ exactly the flags the command takes.
   acknowledges every right on `run` and `build`, so a run names none; `jet inspect gates` records these and the other
   invocation choices as gate rows; `--offline` reuses only cached
   signed toolchain and package data.
-- `--locked` requires locked dependency and provenance facts; `--fixtures`
-  selects an explicit fixture bundle.
+- `--locked` requires locked dependency and provenance facts, and refuses a
+  dependency whose inferred effect row is wider than the one `.jet/lock`
+  records (E3513); `--fixtures` selects an explicit fixture bundle.
 - `--lib` makes `build` emit the native Library and C header; `--output` selects
   a named output; `--small` favors a smaller binary; `--checked-alloc` on
   `build`, `run` and `test` links the checked memory allocator, which stops at
@@ -607,9 +608,14 @@ toolchain source tree, the directory that holds `Core/` and `Compiler/Prelude/`:
 `JET_TOOLCHAIN_ROOT` when set, else the nearest such directory at or above the
 input, so a checkout's own Core wins; with neither, `jet` compiles against the
 Core sources built into it ([`Core/EmbeddedSources.jet`](../../../Core/EmbeddedSources.jet),
-see [Environment variables](environment.md)); the Core row table and the canonical effect source are generated
+see [Environment variables](environment.md)). A Core file's `embed_bytes` and
+`embed_file` read the named file beside it in the toolchain tree, or, with no
+tree, the copy of it built into `jet`: every file a Core source embeds is a
+Core asset that `Core/EmbeddedSources.jet` embeds too. The Core row table and
+the canonical effect source are generated
 into [`CoreSources.jet`](../../../Compiler/JetCli/Source/Cli/CoreSources.jet)
-by `jet Tools/agent/CoreSourceRows.jet`, which
+by `jet Tools/agent/CoreSourceRows.jet` (which also lists the Core assets in
+`Core/EmbeddedSources.jet`), which
 `jet Tools/agent/CoreSurfaceLedger.jet --write` runs and `--check`
 holds current.
 
@@ -684,13 +690,30 @@ kernel runs it with jet.
 
 `jet -e CODE [args...]` runs CODE as the body of `run: fn`: `jet -e 'print(1 + 2)'`
 prints 3. A `;` between statements stands for the line break a file would
-have (`jet -e 'name := 1; print(name)'`). CODE is checked as a file is, so a
+have (`jet -e 'name := 1; print(name)'`). When the last statement is an
+expression, its value is shown, as `node -p` shows it: `jet -e '1 + 2'` prints
+3, a List or an Iter prints one item per line (`jet -e '"a b".words()'` prints
+`a` and `b`), and a unit value (`print(…)`, an `if` without `else`) prints
+nothing more. A value that has no display is refused with E0112, as `print`
+refuses it. CODE is checked as a file is, so a
 misspelled name is refused before anything runs. The file that holds it is
 kept under the kept programs' directory (`eval/`, named by the content hash),
 and the rest runs as `jet <that file> [args...]`, so the same code reruns its
 kept program. Flags that come before `-e` are the run's. `jet run -e CODE`
 runs the same way. A `-e` after the program (`jet run hello.jet -e …`) is
-refused with E2104, and `jet dev -e` with E2102.
+refused with E2104, and `jet dev -e` with E2102. As a REPL cell does, CODE
+may declare: a line of it (between `;`s) that is a declaration alone, such as
+a type, a function, an `impl` or a `use`, goes above `run: fn`, so
+`jet -e 'S: struct { amount: Float }; input.csv<S>().map((s) -> s.amount).sum()' sales.csv`
+prints the column's sum. A binding such as `x: 1` stays in the body.
+
+CODE reads the program's input through plain Core names, which work the same
+in a script: `input` is the lines of the files named after CODE, else of
+standard input (`jet -e 'input.map((l) -> l.words()[1])' log.txt`);
+`input.csv<Row>()` and `input.json<Row>()` decode it into records;
+`input.edit(change)` rewrites each named file in place
+(`jet -e 'input.edit((l) -> l.replace("http:", "https:"))' *.md`). `jet help
+input` lists every such name with an example, and `jet help run` points to it.
 
 `jet run - [args...]` runs the program read from standard input
 (`jet run - < hello.jet`, or a pipe). Its source is kept the same way, under
@@ -707,9 +730,11 @@ script alone, and the source walk of a package leaves every script out.
 (`$XDG_CACHE_HOME/jet/scripts`, else `~/.cache/jet/scripts`;
 [`ScriptCache.jet`](../../../Compiler/JetCli/Source/Cli/ScriptCache.jet)). This
 applies to scripts and to any other file. There is one program per entry file
-and profile. Its record names the toolchain it was built with (the compiler,
-runtime pack and Core source file identities) and a hash of its source
-snapshot: the source files and the directories the source walk enters. Other
+and profile. Its record names the toolchain it was built with (the compiler
+and its runtime pack by file identity, and the toolchain tree), the file identity
+of each Core source file the compile read (Core built into `jet` is part of
+the compiler), and a hash of its source snapshot: the source files and the
+directories the source walk enters. Other
 files in the tree, such as one the program writes beside its source, and
 directories the walk skips, such as the `.jet` directory a stopping program
 writes its fault report into, are not compile inputs and don't change the
@@ -785,9 +810,44 @@ can reach is not bounded by the list. When standard input is a terminal the
 set last named is kept per canonical entry path under
 `$XDG_STATE_HOME/jet/effects` (else `~/.local/state/jet/effects`), and an
 unchanged set is not named again; otherwise every run names it. `--json`
-reports the set as one `run.effects` status on stderr instead. A written
-`allow` row does not bound the run yet (#6614 c5). There is no interactive
-question.
+reports the set as one `run.effects` status on stderr instead. A local run
+asks no question.
+
+`jet run` of a target that is not a local path runs remote code
+([`RemoteRun.jet`](../../../Compiler/JetCli/Source/Cli/RemoteRun.jet)). A
+word that exists as a file or directory, or as `<word>.jet`, is always local.
+An `https://` URL names one Jet file; plain `http://` is refused with E1805.
+A word of a letter, then letters, digits, `-` and `_`, optionally followed by
+`#<version>` (`greet#1.4.2`, `greet#1.4`), names a registry package, resolved
+as a script's `use greet#1.4` resolves (the Hangar's `remote/registry`
+launcher's `.jet/inline-deps`, then `JET_INLINE_DEPS_FIXTURES`, then
+`jet fetch --lock` through the signed index). A bare name takes the highest
+version this machine already has and is refused when it has none. Jet
+fetches the target, stores a URL's file under the Hangar's
+`remote/<sha256>/` folder, pins its sha256 (a package's tree hash), and runs
+the pinned copy as `jet run <path>` would, with the same flags. Nothing is
+written to the working directory. One record per target under
+`$XDG_STATE_HOME/jet/remote` (else `~/.local/state/jet/remote`) keeps the pin
+and the effects the user accepted for it.
+
+Before the program's first instruction, a remote run asks about every effect
+outside the floor, `--allow` and `-A`. The fetched code's own `allow` row
+acknowledges nothing here. On a terminal, stderr shows
+`tool.jet from example.org (sha256 3f9a0c1d2e4b…), new to this machine`, then
+`it reads the clock`, then `Run it? [y/N] `. In place of `new to this
+machine` the first line says `changed since you said yes` when the pinned
+bytes changed, or `now asks for more than you said yes to` for new effects.
+Any answer but `y` or
+`yes` prints `not run` and exits 1. A yes is kept with the pin, and the same
+bytes with no new effects run silently after that. With no terminal, or
+under `--json`, the run stops with E1804 instead. `-A` or `--allow=` rows
+acknowledge the effects on the command.
+
+`--sha256=<hex>` pins a URL's first fetch. Bytes with another sha256 are
+refused with E1805, and so is a `--sha256` that differs from an existing pin.
+On a local path or a package it is a usage error (E2104). `--locked` runs
+only what this machine already pinned and refuses to fetch or re-resolve
+(E1805).
 
 `jet run --allow=FS.Read:<path>` grants `FS.Read` confined to that path: the
 program may read the named file, or the named directory and everything
@@ -908,7 +968,12 @@ its own exit. A code suite, declared in `test.jet` as `t.suite("perf", perf_rows
 function with a `TestRows`; each `pass(id)`, `fail(id, detail)` and
 `skip(id, reason)` is one row, kept even if the suite then panics. The child
 gets `JET`, the path of the `jet` running the profile, and
-`JET_TEST_SUITE_ROOT`, the package directory as the profile named it. The rows
+`JET_TEST_SUITE_ROOT`, the package directory as the profile named it. Under a
+`filter` it also gets `JET_TEST_SUITE_FILTER`. Then `rows.selects(id)` holds
+only for an id containing the filter, and `pass` and `skip` drop every other
+id. A failing row is always kept. A suite asks `selects` before doing a row's
+work: `jet test Compiler --profile packages --filter X` builds and runs only
+the packages, scripts and engine-unit claims holding a row that matches X. The rows
 are compared with `.jet/test/<profile>/<suite>.rows` as a run's are, and each
 failing row's detail is printed. A repeated id fails as `duplicate row id`, and
 a suite that panics or exits non-zero adds the failing row `stopped` with its
@@ -929,8 +994,8 @@ every corpus. The `jobs`, `memory`, `filter`, `cases`, `shard`, `opt_in`,
 `list`, `optimize` and `diagnostic_coverage` settings steer the pool;
 `time_limit` bounds each step; the `baseline:` ledger
 (`ID<TAB>card<TAB>reason` rows) holds the accepted failures. `-u` blesses
-every selected row's snapshots. A sharded run never writes a baseline and
-compares only the baseline rows its shard holds; code suites run in shard 1.
+every selected row's snapshots. A sharded or filtered run never writes a
+baseline and compares only the baseline rows it reported; code suites run in shard 1.
 `jet test Compiler --profile ui` (also `golden`, `cases`, `corpora`, `full`) runs
 the repository's corpora; a bare `jet test Compiler` runs `quick`. A bare
 `--shuffle` and the settings not ported yet (`where`, `coverage`, `grade`,
@@ -1168,6 +1233,28 @@ the shared scoped-policy resolver. Marker locations use UTF-8 byte offsets;
 an out-of-range line selects the end of the source. Their source prerequisite
 is the authorized load-only query, not a full semantic check: an undefined
 function in an otherwise parseable file does not prevent a policy essay.
+
+`jet explain effects [<file>[:<line>]] [--caps] [--json]` checks the program
+and prints every effect cap in force at one site, nearest first. A file
+inside a package is checked under the package's entry, so the caps written
+where its module is declared hold; a `#!` script is checked on its own. The
+first line names the site and its function; then comes one line per rung:
+the `#FX(…)` blocks and lambdas that hold the line (`block`, `function`), the
+enclosing function's `-[…]>` row, a `comptime` rung for the Mem-only rule,
+each module cap (`module`), the package `authority` rows (`package`), and
+`run` (everything else allowed; `--deny` wins). A rung that writes nothing
+prints `(none written)`; each written rung names the `file:line` that writes
+it. The last line, `reaches:`, lists each effect the site reaches with the
+first call that reaches it and where the site makes that call. No site means
+the entry `jet run` picks; a file alone means its `run` function and module.
+A line past the end is a usage error, and `:0` gets the `jet explain marker`
+refusal. `--caps` lists every module cap written under a file, a directory,
+or (with no target) the project root, as `file:line  #FX(…)  module`. A
+program that fails its check still gets its ladder on stdout, under the
+errors on stderr. `--json` prints one `jet.status/v1` line with action
+`explain.effects`: `site`, `rungs` (`rung`, `written`, `text`, `site`) and
+`reaches` (`effect`, `chain`, `site`), or `scope` and `caps` (`file`, `line`,
+`cap`, `module`).
 
 `jet self devtools new-example <area>/<name>` writes `Examples/<area>/<name>.jet`
 and its expected output `Examples/<area>/<name>.out` beside it.

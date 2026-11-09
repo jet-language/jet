@@ -170,6 +170,8 @@ BUILTIN_METHOD_ROWS: comptime { [BuiltinMethodRow]{
     // String: decomposition and parsing.
     {receiver: BuiltinMethodReceiver.String, name: "split", parameters: [Type]{Type.String}, result: Type.Apply{name: "Iter", args: [Type]{Type.String}}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.Split}},
     {receiver: BuiltinMethodReceiver.String, name: "rsplit", parameters: [Type]{Type.String}, result: Type.Apply{name: "Iter", args: [Type]{Type.String}}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.StringMethod{method: "rsplit"}}},
+    // The fields between runs of whitespace: perl's `split ' '`, awk's fields.
+    {receiver: BuiltinMethodReceiver.String, name: "words", parameters: [Type]{}, result: Type.List{element: Type.String}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.StringMethod{method: "words"}}},
     {receiver: BuiltinMethodReceiver.String, name: "lines", parameters: [Type]{}, result: Type.List{element: Type.String}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.Lines}},
     {receiver: BuiltinMethodReceiver.String, name: "splitlines", parameters: [Type]{}, result: Type.List{element: Type.String}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.Lines}},
     {receiver: BuiltinMethodReceiver.String, name: "chars", parameters: [Type]{}, result: Type.List{element: Type.Char}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.Chars}},
@@ -261,6 +263,9 @@ BUILTIN_METHOD_ROWS: comptime { [BuiltinMethodRow]{
     {receiver: BuiltinMethodReceiver.Integer, name: "bit_not", parameters: [Type]{}, result: Type.Named{name: "Self"}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.BitNot},
     {receiver: BuiltinMethodReceiver.Integer, name: "pow", parameters: [Type]{Type.Named{name: "Self"}}, result: Type.Named{name: "Self"}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Arithmetic{operation: TBinaryOp.Pow}},
     {receiver: BuiltinMethodReceiver.Float, name: "pow", parameters: [Type]{Type.Named{name: "Self"}}, result: Type.Named{name: "Self"}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Arithmetic{operation: TBinaryOp.Pow}},
+    // IEEE 754 totalOrder, as `<=>`: -NaN < -inf < ... < -0.0 < +0.0 < ... <
+    // +inf < NaN.
+    {receiver: BuiltinMethodReceiver.Float, name: "compare", parameters: [Type]{Type.Named{name: "Self"}}, result: Type.Named{name: "Ordering"}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Arithmetic{operation: TBinaryOp.Compare}},
     {receiver: BuiltinMethodReceiver.Float, name: "is_nan", parameters: [Type]{}, result: Type.Bool, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Predicate},
     {receiver: BuiltinMethodReceiver.Float, name: "is_infinite", parameters: [Type]{}, result: Type.Bool, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Predicate},
     {receiver: BuiltinMethodReceiver.Float, name: "is_finite", parameters: [Type]{}, result: Type.Bool, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Predicate},

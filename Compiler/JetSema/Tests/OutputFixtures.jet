@@ -6,7 +6,7 @@ use {
         SemaForeignProviderInput, SemaOutputIntent, SemaRegistrationForeignHandleFacts,
         SemaRegistrationGraph, SemaRegistrationHostHooks, SemaRegistrationImportEdge,
         SemaRegistrationModuleInput, SemaRegistrationPackagePolicy, SemaSourceOrigin, SemaSourceSegment,
-        sema_collect_comptime_declarations, sema_comptime_effect_sources, sema_effect_trait_bounds,
+        sema_collect_comptime_declarations, sema_comptime_effect_sources, sema_effect_trait_bounds, sema_effect_type_caps,
         sema_effect_prepare_modules, sema_effects_check_modules, sema_finalize_registration_graph, sema_has_error_since,
         sema_inline_member_name, sema_output_resolve, sema_registration_module_index, sema_registration_prepare_graph,
     ]
@@ -118,6 +118,7 @@ output_fixture_solved_effects: fn(effects_source: String, failures: &[String]) {
     // Effect inputs need not share the checked module order. Re-publish through
     // the production in-place graph path and cover each manifest denial once.
     effect_inputs := [SemaEffectModuleInput]{}
+    type_caps: sema_effect_type_caps(graph.modules)
     loop module_index in 0..<checked.modules.len() {
         source_index: sema_registration_module_index(graph, checked.modules[module_index].module_identity) ?? {
             failures.push("in-place effect publication: checked module has no source")
@@ -125,7 +126,7 @@ output_fixture_solved_effects: fn(effects_source: String, failures: &[String]) {
         }
         effect_inputs.push(SemaEffectModuleInput{
             module_index: module_index,
-            sources: sema_comptime_effect_sources(graph.modules[source_index]),
+            sources: sema_comptime_effect_sources(graph.modules[source_index], type_caps),
             source_segments: graph.modules[source_index].source_segments,
             trait_bounds: sema_effect_trait_bounds(graph.modules[source_index].program.items),
         })

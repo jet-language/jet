@@ -209,7 +209,6 @@ tests/cases/dev_parts_routine/unused_expanding_generic_body_does_not_expand_the_
 tests/cases/dev_parts_routine/wrapped_returned_view_fields_match_aot_and_default_dev.case	#5454	FAIL: `jet build wrapped_returned_view_fields.jet` exits 1 (expected 0): Error [E2417]: Explicit failure domain `String (text)` is not an Error type
 tests/cases/dev_parts_tier_parity/ui_and_web_match_interpreter_default_run_and_aot_web_web_app.case	#5454	`jet run web_app.jet` serves until stopped and hits the case's 30 s limit; Examples/Apps/Web/WebApp.case marks the example `run: none`, and the pinned Examples/Apps/Web/WebApp.out no longer exists
 tests/cases/core_files_opaque_handles/file_handles_have_no_fd_fields_and_cannot_be_written_or_forged.case	#6462	no E0339/E0605: `.path` of TempFile/TempDir/FileLock is readable by spec (core-library.md:635,701) and `priv` is read-private too; refusing the write and the forged literal waits on an owner ballot for a read-only field form
-tests/cases/measurement_tiers/measurement_observations_are_methods_not_public_fields.case	#5454	no ICE now: `jet check field_value.jet` accepts the field read `m.value` on a `measurement(..)` value (exit 0), where the original requires Measurement observations to be methods and the field read to be refused
 tests/cases/build_entry_epoch4/workspace_build_observes_dependency_order_and_execution_chain.case	#5454	`jet build workspace.jet --allow=Exec` exits 1 with E3505 BuildProbeFailed: build actions run only in the bubblewrap sandbox, and none is available to the testkit run, so the member `fn build` entries never execute (#5496)
 tests/cases/gate_ledger/i9_number_grid_repl_keeps_the_inline_range_behavior.case	#5454	`jet repl` is built and exits 0, but piped stdin echoes the numbered `N user>` prompts and prints a "`print` is from `use core.term`" note, so the canonical `ok\nok\n42\n3\n` transcript differs (#4891)
 tests/cases/net_tls/comptime_fetch_rejects_outside_files_and_private_networks.case	#5454	E1004: `core.net` has no item `fetch`, so compile-time `net.fetch` never reaches its E3414 destination check (#5493)
@@ -217,7 +216,6 @@ tests/cases/net_tls/comptime_fetch_rejects_hardlinks_to_outside_files.case	#5454
 tests/cases/power_and_exclusive_or/exclusive_or_needs_matching_integer_widths.case	#5454	U8 bit_xor I8 reports E0108 and Float bit_xor reports E0311 (no bit_xor on Float), not E0109 (#5524)
 tests/cases/power_and_exclusive_or/infix_caret_teaches_pow.case	#5454	`12 ^ 2` reports E0003 Expected `,` between call arguments, not E0398 (#5525)
 tests/cases/sema_burndown/source_qualified_file_scope_read_tiers.case	#6419	`jet run run.jet` is E2104 "`files.scope` is not built yet": the FileScope struct has no backend layout and the runtime exports no jet_files_scope_roots_raw
-tests/cases/generics/generic_module_diagnostics_hide_instance_mangling.case	#5454	E0113 This value is `M5BoxedEntry`, but `wrong` returns String
 tests/cases/numeric_methods/floating_contract_refusals_survive_source_routing.case	#5454	c1-c4 pass; c5 `math.hypot(Float{2.0}, F32 ..)` reports E0112 with the generic "`hypot` wants Float … but this is F32" text, not the "Mixing float widths" refusal that pow (c4) renders
 tests/cases/determinism/system_clock_is_monotonic_and_effectful.case	#5454	`jet check launder/main.jet --json` exits 0 with only an L0530 warning; neither the direct nor the return-type clock laundering reports E3403
 tests/cases/modules_and_enums/enum_group_value_and_bad_child_errors_do_not_turn_leaves_into_constructors.case	#5454	c1 passes; `jet check c2/main.jet` reports E0332 "`Branch` is a group, not a value" where the original requires exactly one E0304 for the bad child
@@ -297,7 +295,7 @@ tests/cases/cffi/cffi_write_capability_round_trips_through_the_native_c_boundary
 tests/cases/cffi/foreign_close_contract_registers_only_a_matching_consuming_function.case	#5454	jet check valid/main.jet: Error [E0905]: `String` isn't `Close` (exit 1, expected 0)
 tests/cases/cffi/foreign_com_import_is_honestly_windows_gated.case	#6366	jet check main.jet: Error [E1002]: `com` is reserved for first-party or foreign packages (exit 1, expected 1; stderr lacks "E3260")
 tests/cases/cffi/foreign_js_import_without_cache_does_not_invent_symbols.case	#6366	jet check main.jet: Error [E1002]: `js` is reserved for first-party or foreign packages (exit 1, expected 1; stderr lacks "scatter")
-tests/cases/cffi/foreign_member_list_rejects_one_invalid_member_without_partial_import.case	#5454	jet check main.jet: exit 0 with only L0103 unused import `missing`; `use c.[raylib.missing, sqlite3]` is accepted (expected exit 1 with E0611 "foreign library namespace")
+tests/cases/cffi/foreign_member_list_rejects_one_invalid_member_without_partial_import.case	#5454	jet check main.jet: exit 0 with only L0103 unused import `missing`; `use c.[zlib.missing, sqlite3]` is accepted (expected exit 1 with E0611 "foreign library namespace")
 tests/cases/cffi/inline_foreign_alias_collision_is_rejected_in_one_scope.case	#5454	`jet check main.jet` exits 1 with the generic DuplicateDefinition "`lib` is defined twice"; the case pins the foreign-alias wording "the import name `lib` is used twice"
 tests/cases/diagnostics_coverage/sentry_metadata_uses_the_returned_fault_exit_code.case	#5454	`jet run --release` now stops with R0801 and `exit: 70`, but the fault names the caller's gate ("calls the audited dependency"), not the dependency's own `#Unsafe("intentionally invalid address")` gate the case pins
 tests/cases/effects/rights_denials_keep_the_semantic_frame.case	#5454	jet check --json main.jet: reports E3401 `load` calls or reaches impure effects `FS.Read` (exit 1, expected 1; stdout lacks "\"denial_kind\":\"pure\"")
@@ -366,9 +364,9 @@ tests/cases/library_outputs/component_build_load_and_foreign_call_are_one_surfac
 tests/cases/library_outputs/guest_embedding_contract_covers_lifecycle_threads_reentry_and_panic.case	#6418	`jet build --lib` is not built yet (E2104)
 tests/cases/library_outputs/guest_import_library_calls_native_c_and_cpp_hosts.case	#6418	`jet build --lib` is not built yet (E2104)
 tests/cases/library_outputs/locked_named_library_build_selects_the_requested_output.case	#6418	`jet build --lib` is not built yet (E2104)
-tests/cases/lsp/lsp_bench_reports_deterministic_cache_and_memory.case	#6418	`jet self lsp` is not built yet (E2104)
-tests/cases/lsp/lsp_semantic_tokens_classify_ownership_markers_and_skip_retired_words.case	#6418	`jet self lsp` is not built yet (E2104)
-tests/cases/lsp/lsp_budget_reports_projects_canonical_report_without_measuring.case	#6386	unbuilt: LSP session (jet lsp) closes on first write (session send: closed during write `…`: process stdin closed)
+tests/cases/lsp/lsp_bench_reports_deterministic_cache_and_memory.case	#6418	`jet self lsp` serves stdio only; its `--bench` report is not ported
+tests/cases/lsp/lsp_semantic_tokens_classify_ownership_markers_and_skip_retired_words.case	#6418	`jet self lsp` semantic tokens have no ownership or decorator modifiers yet
+tests/cases/lsp/lsp_budget_reports_projects_canonical_report_without_measuring.case	#6386	`jet self lsp` answers no `workspace/executeCommand` (`jet.budgetReports`)
 tests/cases/notebook/headless_protocol_interrupt_stdin_debug_perf_and_clients.case	#6418	`jet notebook` is not built yet (E2104)
 tests/cases/notebook/jetnb_cache_merge_ipynb_and_jet_export_never_hide_loss.case	#6418	`jet notebook` is not built yet (E2104)
 tests/cases/notebook/notebook_cli_headless_journey_uses_production_session.case	#6418	`jet notebook` is not built yet (E2104)
@@ -549,13 +547,6 @@ tests/cases/debug/dap_cli_pauses_a_running_target_through_production_wire.case	#
 tests/cases/debug/dap_cli_projects_raw_frames_only_when_requested_through_production_wire.case	#6386	unbuilt: DAP debug wire (jet debug) (stdout ended before recv was satisfied; stdout seen:)
 tests/cases/debug/dap_cli_rejects_a_cross_executable_attach_through_the_production_wire.case	#6386	unbuilt: DAP debug wire (jet debug) (await deadline exceeded)
 tests/cases/effects/erased_authority_delegations_do_not_enter_effect_facts.case	#6419	unbuilt: core API surface missing (E1001/E1004/E0102/E0107/E0302/E0311/E0313/E0304) (E1004)
-tests/cases/env_dev_trust/dev_declared_missing_secret_is_e1263.case	#6418	role-file fixture (env.jet, no package.jet): `jet dev --no-color` finds no project entry (E2104), so the dev environment trust flow never runs
-tests/cases/env_dev_trust/dev_no_entry_is_e1254.case	#6418	role-file fixture (env.jet, no package.jet): `jet dev --no-color` finds no project entry (E2104), so the dev environment trust flow never runs
-tests/cases/env_dev_trust/dev_pattern_trust_preauthorizes.case	#6418	role-file fixture (env.jet, no package.jet): `jet dev --no-color --offline` finds no project entry (E2104), so the dev environment trust flow never runs
-tests/cases/env_dev_trust/dev_secret_env_untrusted_non_interactive_is_e1255.case	#6418	role-file fixture (env.jet, no package.jet): `jet dev --no-color` finds no project entry (E2104), so the dev environment trust flow never runs
-tests/cases/env_dev_trust/dev_trust_flag_bypasses.case	#6418	role-file fixture (env.jet, no package.jet): `jet dev --no-color --offline --trust` finds no project entry (E2104), so the dev environment trust flow never runs
-tests/cases/env_dev_trust/dev_untrusted_non_interactive_is_e1255.case	#6418	role-file fixture (env.jet, no package.jet): `jet dev --no-color` finds no project entry (E2104), so the dev environment trust flow never runs
-tests/cases/env_dev_trust/project_dev_runs_fn_dev_after_service_wait.case	#6418	role-file fixture (env.jet, no package.jet): `jet dev --no-color` finds no project entry (E2104), so the dev environment trust flow never runs
 tests/cases/ffi_python/ffi_capability_report_is_golden_and_cli_backed.case	#6418	unbuilt: E2101/E2102 command or flag not built (E2101)
 tests/cases/fleet/push_fleet_with_bad_host_is_e1242.case	#6604	unbuilt: the Jet-hosted jetpack has no fleet `push` verb (VerbDispatch.jet routes none), so `jetpack push` is refused as not a jetpack command (E1340)
 tests/cases/fleet/push_unknown_fleet_is_friendly.case	#6604	unbuilt: the Jet-hosted jetpack has no fleet `push` verb (VerbDispatch.jet routes none), so `jetpack push` is refused as not a jetpack command (E1340)
@@ -563,75 +554,47 @@ tests/cases/fleet/push_valid_fleet_is_gated_e1243.case	#6604	unbuilt: the Jet-ho
 tests/cases/http_server_lifecycle/live_server_body_starts_before_the_large_slow_upload_finishes.case	#6419	unbuilt: core.http.server buffers the whole request body before the handler runs, so a handler cannot read an upload while it streams
 tests/cases/http_server_lifecycle/shutdown_grace_cancels_straggler_socket_and_returns_bounded_report.case	#6419	unbuilt: core.http.server serves one request at a time, so shutdown(grace) has no in-flight handler to cancel and waits for the straggler
 tests/cases/image/image_push_uses_the_real_oci_distribution_path.case	#6386	unbuilt: DAP debug wire (jet debug) (await deadline exceeded)
-tests/cases/jetpack_build_debug/failed_adapter_preserves_scratch_and_json_logs.case	#3590	unbuilt: adapter recipe graph admission is not available in the Jet-hosted engine (E1270)
-tests/cases/jetpack_build_debug/jet_inspect_logs_dispatches_to_jetpack.case	#3590	unbuilt: adapter recipe graph admission is not available in the Jet-hosted engine (E1270), so no build attempt for `weirdctl` is logged and `jet inspect logs` reports none (E1274)
-tests/cases/jetpack_build_debug/shell_on_fail_uses_preserved_scratch_with_fake_shell.case	#3590	unbuilt: adapter recipe graph admission is not available in the Jet-hosted engine (E1270), so no failed recipe step preserves a scratch for `--shell-on-fail`
-tests/cases/jetpack_build_debug/top_level_explain_dispatches_to_jetpack.case	#3590	unbuilt: adapter recipe graph admission is not available in the Jet-hosted engine (E1270), so no build attempt for `weirdctl` is recorded and `jet explain weirdctl` reports none (E1274)
 tests/cases/jetpack_engine/failed_first_dependency_reports_zero_completed_nodes.case	#3590	unbuilt: `jetpack build` is not a Jet-hosted jetpack verb (E1340)
 tests/cases/jetpack_engine/hangar_migration_round_trips_without_consuming_legacy_state.case	#6418	unbuilt: E2101/E2102 command or flag not built (E2101)
 tests/cases/jetpack_engine/jet_build_publishes_then_falls_back_to_source_when_cache_is_unavailable.case	#3590	unbuilt: `env --prep` publishes no signed narinfo to the bound public cache mirror
 tests/cases/jetpack_engine/jet_build_reports_source_states.case	#3590	unbuilt: `env --prep` prints no per-package source-state summary (`1 built`, `1 cached`) or build sandbox outcome line
-tests/cases/jetpack_engine/typed_env_build_recipe_realizes_local_source.case	#3590	unbuilt: adapter recipe graph admission is not available in the Jet-hosted engine (E1270)
-tests/cases/jetpack_engine/typed_env_copy_adapter_realizes_local_source.case	#3590	unbuilt: adapter recipe graph admission is not available in the Jet-hosted engine (E1270)
-tests/cases/jetpack_engine/typed_env_prebuilt_adapter_runs_from_path.case	#3590	unbuilt: adapter recipe graph admission is not available in the Jet-hosted engine (E1270)
 tests/cases/jetpack_env_use_offline/warm_jet_entry_execs_tool_without_wrapper_process.case	#3594	unbuilt: the warm `jet` entry and the jetpack hop each spawn the tool as a child; both hops must replace the process with `spec.replace_process()` (D-CORE-PROCREPLACE1=A), which #3594 is building
 tests/cases/jetpack_package_outputs/package_fleet_output_reaches_the_immutable_generation_and_retries_cleanly.case	#6604	unbuilt: the Jet-hosted jetpack has no JetOS `os` verb (VerbDispatch.jet routes none), so `jet os plan|build` is refused as not a jetpack command (E1340)
 tests/cases/jetpack_tasks/jet_top_jobs_forward_flags_after_name.case	#6418	unbuilt: a job with parameters is not selectable from argv (the driver's job rows select only parameterless jobs), so `jet web --port 3000` runs the project's `run: fn` and prints nothing
 tests/cases/jetpack_tool/multi_store_root_commit_crash_recovers_before_pointer_switch.case	#3590	unbuilt: after a crash between root commits, `jetpack tool list` recovery republishes the still-current generation 1 instead of rolling forward to the complete generation 2
-tests/cases/lsp/c40_drift_guard_foreign_words_not_blocked_in_rename.case	#6386	unbuilt: DAP debug wire (jet debug) (stdout ended before recv was satisfied; stdout seen:)
-tests/cases/lsp/c40_is_keyword_import_not_a_keyword.case	#6386	unbuilt: DAP debug wire (jet debug) (stdout ended before recv was satisfied; stdout seen:)
-tests/cases/lsp/c40_is_keyword_real_keywords_recognized.case	#6386	unbuilt: DAP debug wire (jet debug) (stdout ended before recv was satisfied; stdout seen:)
-tests/cases/lsp/c40_is_keyword_switch_not_a_keyword.case	#6386	unbuilt: LSP session (jet lsp) closes on first write (session send: closed during write `…`: process stdin closed)
-tests/cases/lsp/lsp_accepts_hidden_generic_constructor_arguments.case	#6386	unbuilt: LSP session (jet lsp) closes on first write (session send: closed during write `…`: process stdin closed)
-tests/cases/lsp/lsp_builtin_member_completion_uses_shared_semantic_symbol_docs.case	#6386	unbuilt: DAP debug wire (jet debug) (stdout ended before recv was satisfied; stdout seen:)
-tests/cases/lsp/lsp_cancelled_costly_request_returns_32800_and_never_publishes.case	#6386	unbuilt: LSP session (jet lsp) closes on first write (session send: closed during write `…`: process stdin closed)
-tests/cases/lsp/lsp_checked_identity_and_versioned_rename.case	#6386	unbuilt: DAP debug wire (jet debug) (stdout ended before recv was satisfied; stdout seen:)
-tests/cases/lsp/lsp_checked_text_contract_survives_editor_navigation.case	#6386	unbuilt: DAP debug wire (jet debug) (stdout ended before recv was satisfied; stdout seen:)
-tests/cases/lsp/lsp_completion_returns_items.case	#6386	unbuilt: LSP session (jet lsp) closes on first write (session send: closed during write `…`: process stdin closed)
-tests/cases/lsp/lsp_completion_returns_snippets_and_auto_imports.case	#6386	unbuilt: DAP debug wire (jet debug) (stdout ended before recv was satisfied; stdout seen:)
-tests/cases/lsp/lsp_completion_uses_local_discovery_index_for_packages_and_options.case	#6386	unbuilt: DAP debug wire (jet debug) (stdout ended before recv was satisfied; stdout seen:)
-tests/cases/lsp/lsp_definition_foreign_declaration_uses_checked_jet_boundary.case	#6386	unbuilt: DAP debug wire (jet debug) (stdout ended before recv was satisfied; stdout seen:)
-tests/cases/lsp/lsp_definition_imported_identity_collisions_are_exact.case	#6386	unbuilt: DAP debug wire (jet debug) (stdout ended before recv was satisfied; stdout seen:)
-tests/cases/lsp/lsp_definition_returns_location.case	#6386	unbuilt: LSP session (jet lsp) closes on first write (session send: closed during write `…`: process stdin closed)
-tests/cases/lsp/lsp_definition_uses_build_graph_generated_source.case	#6386	unbuilt: DAP debug wire (jet debug) (stdout ended before recv was satisfied; stdout seen:)
-tests/cases/lsp/lsp_document_links_and_code_lenses.case	#6386	unbuilt: DAP debug wire (jet debug) (stdout ended before recv was satisfied; stdout seen:)
-tests/cases/lsp/lsp_document_symbol_returns_checked_outline.case	#6386	unbuilt: DAP debug wire (jet debug) (stdout ended before recv was satisfied; stdout seen:)
-tests/cases/lsp/lsp_document_symbol_returns_symbols_for_imported_package_module.case	#6386	unbuilt: DAP debug wire (jet debug) (stdout ended before recv was satisfied; stdout seen:)
-tests/cases/lsp/lsp_execute_command_impact_returns_report.case	#6386	unbuilt: DAP debug wire (jet debug) (stdout ended before recv was satisfied; stdout seen:)
-tests/cases/lsp/lsp_formatting_and_range_formatting_return_edits.case	#6386	unbuilt: DAP debug wire (jet debug) (stdout ended before recv was satisfied; stdout seen:)
-tests/cases/lsp/lsp_generated_definition_uses_selected_buildplan_identity.case	#6386	unbuilt: DAP debug wire (jet debug) (stdout ended before recv was satisfied; stdout seen:)
-tests/cases/lsp/lsp_hover_preserves_via_effect_row.case	#6386	unbuilt: DAP debug wire (jet debug) (stdout ended before recv was satisfied; stdout seen:)
-tests/cases/lsp/lsp_hover_projects_typestate_graph_facts.case	#6386	unbuilt: DAP debug wire (jet debug) (stdout ended before recv was satisfied; stdout seen:)
-tests/cases/lsp/lsp_hover_returns_signature.case	#6386	unbuilt: DAP debug wire (jet debug) (stdout ended before recv was satisfied; stdout seen:)
-tests/cases/lsp/lsp_incremental_sync_range_edit_updates_document.case	#6386	unbuilt: LSP session (jet lsp) closes on first write (session send: closed during write `…`: process stdin closed)
-tests/cases/lsp/lsp_incremental_sync_rejects_stale_and_malformed_edits.case	#6386	unbuilt: DAP debug wire (jet debug) (stdout ended before recv was satisfied; stdout seen:)
-tests/cases/lsp/lsp_initialize_capabilities_have_named_test_coverage.case	#6386	unbuilt: DAP debug wire (jet debug) (stdout ended before recv was satisfied; stdout seen:)
-tests/cases/lsp/lsp_inlay_hints_include_scattered_method_breadcrumbs.case	#6386	unbuilt: DAP debug wire (jet debug) (stdout ended before recv was satisfied; stdout seen:)
-tests/cases/lsp/lsp_inlay_hints_return_call_parameter_names.case	#6386	unbuilt: DAP debug wire (jet debug) (stdout ended before recv was satisfied; stdout seen:)
-tests/cases/lsp/lsp_inlay_hints_returns_type_labels.case	#6386	unbuilt: DAP debug wire (jet debug) (stdout ended before recv was satisfied; stdout seen:)
-tests/cases/lsp/lsp_json_transcripts.case	#6386	unbuilt: LSP session (jet lsp) closes on first write (session send: closed during write `…`: process stdin closed)
-tests/cases/lsp/lsp_late_cancel_does_not_poison_a_reused_request_id.case	#6386	unbuilt: LSP session (jet lsp) closes on first write (session send: closed during write `…`: process stdin closed)
-tests/cases/lsp/lsp_mcp_environment_resources_are_read_only.case	#6386	unbuilt: LSP session (jet lsp) closes on first write (session send: closed during write `…`: process stdin closed)
-tests/cases/lsp/lsp_on_type_formatting_returns_brace_edits.case	#6386	unbuilt: LSP session (jet lsp) closes on first write (session send: closed during write `…`: process stdin closed)
-tests/cases/lsp/lsp_overlapping_edits_latest_checked_revision_wins.case	#6386	unbuilt: DAP debug wire (jet debug) (stdout ended before recv was satisfied; stdout seen:)
-tests/cases/lsp/lsp_prepare_rename_accepts_paused_teaching_words.case	#6386	unbuilt: LSP session (jet lsp) closes on first write (session send: closed during write `…`: process stdin closed)
-tests/cases/lsp/lsp_references_finds_all_uses.case	#6386	unbuilt: DAP debug wire (jet debug) (stdout ended before recv was satisfied; stdout seen:)
-tests/cases/lsp/lsp_rename_produces_workspace_edit.case	#6386	unbuilt: DAP debug wire (jet debug) (stdout ended before recv was satisfied; stdout seen:)
-tests/cases/lsp/lsp_semantic_tokens_delta_returns_full_fallback.case	#6386	unbuilt: LSP session (jet lsp) closes on first write (session send: closed during write `…`: process stdin closed)
-tests/cases/lsp/lsp_semantic_tokens_returns_data.case	#6386	unbuilt: LSP session (jet lsp) closes on first write (session send: closed during write `…`: process stdin closed)
-tests/cases/lsp/lsp_sibling_import_edit_never_publishes_stale_verdict.case	#6386	unbuilt: LSP session (jet lsp) closes on first write (session send: closed during write `…`: process stdin closed)
-tests/cases/lsp/lsp_signature_help_returns_active_parameter.case	#6386	unbuilt: LSP session (jet lsp) closes on first write (session send: closed during write `…`: process stdin closed)
-tests/cases/lsp/lsp_teaching_autocorrect_let_to_val.case	#6386	unbuilt: LSP session (jet lsp) closes on first write (session send: closed during write `…`: process stdin closed)
-tests/cases/lsp/lsp_type_hierarchy_trait_impls.case	#6386	unbuilt: LSP session (jet lsp) closes on first write (session send: closed during write `…`: process stdin closed)
-tests/cases/lsp/lsp_wave2_navigation_features.case	#6386	unbuilt: LSP session (jet lsp) closes on first write (session send: closed during write `…`: process stdin closed)
-tests/cases/lsp/lsp_wave3_prepare_rename_semantic_range_and_call_hierarchy.case	#6386	unbuilt: DAP debug wire (jet debug) (stdout ended before recv was satisfied; stdout seen:)
-tests/cases/lsp/lsp_workspace_symbols_follow_all_roots_and_folder_changes.case	#6386	unbuilt: DAP debug wire (jet debug) (stdout ended before recv was satisfied; stdout seen:)
+tests/cases/lsp/lsp_builtin_member_completion_uses_shared_semantic_symbol_docs.case	#6386	`jet self lsp` completion offers no Core member docs yet
+tests/cases/lsp/lsp_cancelled_costly_request_returns_32800_and_never_publishes.case	#6386	`jet self lsp` answers requests in order and does not honor `$/cancelRequest` (-32800)
+tests/cases/lsp/lsp_checked_identity_and_versioned_rename.case	#6386	`jet self lsp` rename carries no checked identity or version metadata
+tests/cases/lsp/lsp_checked_text_contract_survives_editor_navigation.case	#6386	`jet self lsp` hover and rename carry no `nominal_base` / CheckedText facts
+tests/cases/lsp/lsp_completion_returns_items.case	#6386	`jet self lsp` is ported; this case's completion detail is unconfirmed against the port (rerun with the built compiler)
+tests/cases/lsp/lsp_completion_returns_snippets_and_auto_imports.case	#6386	`jet self lsp` completion offers no snippets or auto-imports
+tests/cases/lsp/lsp_completion_uses_local_discovery_index_for_packages_and_options.case	#6386	`jet self lsp` completion reads no package discovery index
+tests/cases/lsp/lsp_definition_foreign_declaration_uses_checked_jet_boundary.case	#6386	`jet self lsp` is ported; this case's foreign definition is unconfirmed against the port (rerun with the built compiler)
+tests/cases/lsp/lsp_definition_imported_identity_collisions_are_exact.case	#6386	`jet self lsp` is ported; this case's imported definitions are unconfirmed against the port (rerun with the built compiler)
+tests/cases/lsp/lsp_definition_uses_build_graph_generated_source.case	#6386	`jet self lsp` definition does not reach build-graph generated sources
+tests/cases/lsp/lsp_document_links_and_code_lenses.case	#6386	`jet self lsp` answers no `textDocument/codeLens`
+tests/cases/lsp/lsp_document_symbol_returns_symbols_for_imported_package_module.case	#6386	`jet self lsp` is ported; this case's imported module symbols are unconfirmed against the port (rerun with the built compiler)
+tests/cases/lsp/lsp_execute_command_impact_returns_report.case	#6386	`jet self lsp` answers no `workspace/executeCommand` (impact)
+tests/cases/lsp/lsp_generated_definition_uses_selected_buildplan_identity.case	#6386	`jet self lsp` definition carries no generated-source identity
+tests/cases/lsp/lsp_hover_projects_typestate_graph_facts.case	#6386	`jet self lsp` hover carries no typestate graph facts
+tests/cases/lsp/lsp_incremental_sync_rejects_stale_and_malformed_edits.case	#6386	`jet self lsp` is ported; this case's stale-edit replies are unconfirmed against the port (rerun with the built compiler)
+tests/cases/lsp/lsp_initialize_capabilities_have_named_test_coverage.case	#6386	the exact `initialize` snapshot file this case compares against was never written
+tests/cases/lsp/lsp_inlay_hints_include_scattered_method_breadcrumbs.case	#6386	`jet self lsp` answers no `textDocument/inlayHint`
+tests/cases/lsp/lsp_inlay_hints_return_call_parameter_names.case	#6386	`jet self lsp` answers no `textDocument/inlayHint`
+tests/cases/lsp/lsp_inlay_hints_returns_type_labels.case	#6386	`jet self lsp` answers no `textDocument/inlayHint`
+tests/cases/lsp/lsp_json_transcripts.case	#6386	`jet self lsp` answers no `textDocument/inlayHint` and its rename carries no `semantic_ops`
+tests/cases/lsp/lsp_mcp_environment_resources_are_read_only.case	#6386	`jet self lsp` serves no MCP resources
+tests/cases/lsp/lsp_rename_produces_workspace_edit.case	#6386	`jet self lsp` rename carries no `semantic_ops` metadata
+tests/cases/lsp/lsp_semantic_tokens_delta_returns_full_fallback.case	#6386	`jet self lsp` answers no `textDocument/semanticTokens/full/delta`
+tests/cases/lsp/lsp_type_hierarchy_trait_impls.case	#6386	`jet self lsp` answers no `textDocument/prepareTypeHierarchy`
+tests/cases/lsp/lsp_wave2_navigation_features.case	#6386	`jet self lsp` is ported; this case's folding and selection ranges are unconfirmed against the port (rerun with the built compiler)
+tests/cases/lsp/lsp_wave3_prepare_rename_semantic_range_and_call_hierarchy.case	#6386	`jet self lsp` answers no call hierarchy requests
+tests/cases/lsp/lsp_workspace_symbols_follow_all_roots_and_folder_changes.case	#6386	`jet self lsp` does not follow workspace folder changes
 tests/cases/output_callable/invalid_output_selection_stops_in_jet_before_codegen.case	#6418	unbuilt: E2104 command form not built (E2104)
 tests/cases/polyglot_systems/mixed_repo_edit_test_debug_profile_and_recovery_workflows.c.case	#6599	`jet inspect bind counter.h` writes `.jet`, `.metadata` and `.hash` but no `counter.provenance` sidecar with the bridge-provenance schema, identity and linked-archive digest the case reads
 tests/cases/polyglot_systems/mixed_repo_edit_test_debug_profile_and_recovery_workflows.js.case	#6418	`jet inspect bind` is not built yet (E2104)
 tests/cases/polyglot_systems/mixed_repo_edit_test_debug_profile_and_recovery_workflows.jvm.case	#6418	`jet inspect bind` is not built yet (E2104)
 tests/cases/polyglot_systems/mixed_repo_edit_test_debug_profile_and_recovery_workflows.python.case	#6418	`jet inspect bind` is not built yet (E2104)
-tests/cases/reflect/arithmetic_policy_is_visible_in_function_reflection.case	#6419	unbuilt: Build reflection has no `program.functions` (E0302 on `b.program.functions`); the verbatim original source also draws L0530 (redundant_final_return) against the Rust-era `$.reports #= 0` predicate
 tests/cases/reflect/checked_text_contract_is_reflected_on_the_nominal_type.case	#6419	the verbatim original source draws L0530 and two L0102 (unused_parameter) against the Rust-era `$.reports #= 0` predicate; `jet run main.jet` is E0311: `Pattern.reflect()` inside the comptime-called fn `reflection_implements` has no static `reflect` (only a comptime block's own `T.reflect()` resolves)
 tests/cases/repl/repl_history_parent_swap_stays_on_held_directory.case	#6386	unbuilt: DAP debug wire (jet debug) (await deadline exceeded)
 tests/cases/repl/repl_history_two_processes_merge_and_clear_cannot_resurrect.case	#6386	unbuilt: DAP debug wire (jet debug) (await deadline exceeded)
@@ -666,7 +629,6 @@ tests/cases/cli_parts_runtime/jet_fix_edition_2027_rewrites_json_canonical_and_i
 tests/cases/cli_parts_runtime/jet_fix_reports_one_print_family_migration_per_retired_spelling.case	#6068	unbuilt: jet fix reports one migration for all print-family spellings, not one per retired spelling
 tests/cases/cli_runtime/jet_fix_edition_2027_rewrites_json_canonical_and_is_idempotent.case	#6068	unbuilt: jet fix --edition=2027 does not rewrite json.canonical
 tests/cases/cli_runtime/jet_fix_reports_one_print_family_migration_per_retired_spelling.case	#6068	unbuilt: jet fix reports one migration for all print-family spellings, not one per retired spelling
-tests/cases/compiler_api/check_file_api_projects_arithmetic_policy_and_scope.case	#6386	unbuilt: semindex arithmetic policy projection (semantic_index.arithmetic)
 tests/cases/compiler_api/compiler_api_json_mirrors_are_schema_versioned.case	#4260	no doc fixes the schema_version of the semantic_index embedded in `jet inspect compiler check`: Jet emits the semindex schema 20, the Rust-era predicate pins 1
 tests/cases/corelib/core_data_schema_empty_table_and_series_law.case	#5976	bug: core.data schema expands a struct-valued series into its fields instead of one `value: Ticket` column
 tests/cases/corelib/generated_struct_codecs_preserve_option_and_computed_fields.case	#5976	bug: the generated struct codec drops computed fields
@@ -727,7 +689,6 @@ tests/cases/semindex/jet_inspect_semindex_reports_explicit_failure_contract.case
 tests/cases/semindex/semindex_reconstructs_checked_output_callable.case	#4260	no doc decides the output binding name: semindex reports the declared `APP`, the Rust-era predicate reads `app`
 tests/cases/semindex/semindex_effect_provenance_covers_open_and_trait_dispatch.case	#6386	unbuilt: semindex effect provenance for open and trait dispatch
 tests/cases/semindex/semindex_preserves_via_effect_row_in_signatures.case	#4260	no doc decides whether a find signature carries its failure line (the Rust-era signature had none)
-tests/cases/semindex/semindex_projects_arithmetic_policy_and_exact_scope.case	#6386	unbuilt: semindex arithmetic policy projection
 tests/cases/semindex/semindex_state_symbols_keep_their_struct_owner.case	#6386	unbuilt: semindex state symbols keep their struct owner
 tests/cases/semindex/tracked_float_symbol_exposes_its_binding_site.case	#6386	unbuilt: semindex tracked float binding site
 tests/cases/source_import/ada_source_import_preserves_package_and_emits_binder_todo.case	#1346	unbuilt: the stub's `use ada.geodesy` is E1002: the loader treats a foreign root as active only with a binder binding cache (Loader.jet:2080-2086, 2712-2731), and the D-FFI-ADA1 binder writes none
@@ -891,27 +852,6 @@ tests/cases/repl/repl_help_shows_commands.case	#3594	REFUSED: process-merge-stde
 tests/cases/repl/repl_terminal_matrix_cooked_stdio_and_missing_stty_are_truthful.case	#3594	REFUSED: pty-stdio core.process has no PTY stdio for a non-interactive pty mode
 tests/cases/terminal/stdin_lines_emit_before_eof_and_stop_at_blank.case	#3594	REFUSED: process-file-fd core.process cannot give a child a file descriptor as stdout or stderr while the case awaits that file
 tests/cases/ws_law/public_aot_ws_connect_rejects_url_controls_before_connecting.case	#3594	REFUSED: process-file-fd core.process cannot give a child a file descriptor as stdout or stderr while the case awaits that file
-Jetpack/Engine: recipe build denies ambient network	#3590	E1238: recipe graph admission (Core/Build recipe seam) is not ported to the Jet-hosted engine, so the recipe refuses before its sandbox runs
-Jetpack/Engine: recipe build rejects fetch url credentials without echoing them	#3590	E1238: recipe graph admission (Core/Build recipe seam) is not ported to the Jet-hosted engine, so the recipe refuses before its sandbox runs
-Jetpack/Engine: recipe build output is confined	#3590	E1238: recipe graph admission (Core/Build recipe seam) is not ported to the Jet-hosted engine, so the recipe refuses before its sandbox runs
-Jetpack/Engine: recipe native path succeeds or refuses before launch	#3590	E1238: recipe graph admission (Core/Build recipe seam) is not ported to the Jet-hosted engine, so the recipe refuses before its sandbox runs
-Jetpack/Engine: build hook does not inherit host credentials	#3590	E1238: recipe graph admission (Core/Build recipe seam) is not ported to the Jet-hosted engine, so the recipe refuses before its sandbox runs
-Jetpack/Engine: native Linux recipe blocks host escape and records backend receipt	#3590	E1238: recipe graph admission (Core/Build recipe seam) is not ported to the Jet-hosted engine, so the recipe refuses before its sandbox runs
-Jetpack/Engine: logged recipe sandbox blocks host escape	#3590	E1238: recipe graph admission (Core/Build recipe seam) is not ported to the Jet-hosted engine, so the recipe refuses before its sandbox runs
-Jetpack/Engine: unavailable native backend refuses before recipe tool launch	#3590	E1238: recipe graph admission (Core/Build recipe seam) is not ported to the Jet-hosted engine, so the recipe refuses before its sandbox runs
-Jetpack/Engine: shared_hostile_corpus_uses_the_recipe_production_path	#3590	E1238: recipe graph admission (Core/Build recipe seam) is not ported to the Jet-hosted engine, so the recipe refuses before its sandbox runs
-Jetpack/Engine: incomplete generation is not published and stale owner is reclaimed	#6649	recover_stale_leases returns 0 after the owner is released; the claim expects the stale owner reclaimed (1)
-Jetpack/Engine: store lease recovery waits for descendant then reclaims idle container	#6649	store_recover_hangar returns 0 once the descendant exits; the claim expects the idle container reclaimed (1)
-Jetpack/Engine: store cleanup quarantines projection with proven missing output	#6649	store_clean_plan refuses: the missing-output closure record has no dependency references or store-validated closure proof, so nothing is quarantined
-Jetpack/Engine: native runtime split puts runtime and core into one crate	#6649	the split program renders its entry as Jet `main: fn() { runtime_item() }` where the claim expects the Rust `fn main() { runtime_item() }`
-Jetpack/CLI: jetpack env enters default and positional modules	#6649	stdout carries the unexpanded PS1 `$(printf "%s" "$JETPACK_PROMPT_LABEL") \W > `, so the module prompt is missing from it (it shows only on stderr)
-Jetpack/CLI: services wait reports readiness timeout	#6649	the E1261 report reads "Service `fixture` is not ready"; the claim looks for "service `fixture` is not ready"
-Jetpack/CLI: services production catalog services prepare state and pass readiness	#6649	the redis service's pid file never gets its `pid=` line within 5 s
-Jetpack/CLI: services production adminer preset fails closed without php projection	#6649	adminer@jetpack resolution stops at E1272 (no Nix compatibility output) before the owner-gated refusal the claim expects
-Jetpack/CLI: services production minio preset port conflict has terminal state	#6649	the supervisor writes no supervisor.error for the port conflict
-Jetpack/CLI: services production postgres preset initialization failure has terminal state	#6649	the supervisor writes no supervisor.error for the failed initialization
-Jetpack/CLI: image registry missing tool fails before claiming publish	#6649	the E1340 report reads "Couldn't publish image server"; the claim looks for "couldn't publish image"
-Jetpack/CLI: real_cargo_project_import_preserves_lock_facts_and_migration_findings	#6649	the import plan's emitted package.jet lacks a `<name>: <reference>` line for an imported crate
 tests/cases/help_pty/alt_enter_guides_example_without_hooks_instead_of_pasting.case	#6536	the interactive command picker is unbuilt: bare jet prints the static palette and exits 0, so terminal input closes during the write
 tests/cases/help_pty/enter_expands_then_guides_without_hooks_instead_of_pasting.case	#6536	the interactive command picker is unbuilt: bare jet prints the static palette and exits 0, so terminal input closes during the write
 tests/cases/help_pty/explicit_color_law_reaches_interactive_renderer.case	#6536	the interactive command picker is unbuilt: bare jet prints the static palette and exits 0, so terminal input closes during the write
@@ -941,8 +881,9 @@ tests/cases/web_dev/embedded_devserver_rejects_unix_hardlinks_and_special_files.
 tests/cases/comptime_diff/loadable_incompatible_defaults_stop_before_rustc.case	#5454	stale against core.reactive.loadable like comptime_loadable_matches_runtime: `jet check` stops at E0904 (`T` of a loadable constructor is uninferable) before the E0112 default mismatch the case asserts
 tests/cases/web_app/web_app_dev_auto_serves_with_reload_without_dev_function.case	#6386	unbuilt: `jet dev app.jet` serves the page with no live-reload client; nothing emits `EventSource("/__jet/reload")` or serves `/__jet/reload`
 tests/cases/web_dev/jet_dev_web_publishes_from_a_repository_subdirectory.case	#6386	`jet dev --target` is not built yet (E2104; the CLI names #6386), so no "App preview:" line
-Jetpack/CLI: imported_locked_package_runs_builds_and_restores_without_nix	#3590	after the offline fixture import publishes greet@jetpack, a cached `use --prep greet@jetpack` without JETPACK_FIXTURES does not find the imported Hangar entry and reports E1272 (1 package lacks a supported Nix compatibility output)
 tests/cases/lsp/lsp_checked_imported_diagnostics_and_repairs.case	#6386	unbuilt: `jet self lsp` session ends before it answers `initialize` (stdout ended before recv was satisfied; stdout seen:)
+Jetpack/CLI: imported_locked_package_runs_builds_and_restores_without_nix	#3590	after the offline fixture import publishes greet@jetpack, a cached `use --prep greet@jetpack` without JETPACK_FIXTURES does not find the imported Hangar entry and reports E1272 (1 package lacks a supported Nix compatibility output)
+tests/cases/lsp/lsp_checked_imported_diagnostics_and_repairs.case	#6386	`jet self lsp` is ported; this case's imported repairs are unconfirmed against the port (rerun with the built compiler)
 tests/cases/text_unicode/word-sentence-segments.case	#3262	`jet build run.jet`: `core.text` has no item `word_segments` (jet.UnknownCoreItem at run.jet:102); word and sentence segmentation is not in Core
 tests/cases/text_unicode/normalization-casing-graphemes.case	#3262	the NormalizationTest corpus stops at run.jet:112: Core text `nfd` returns `Ḋ` (U+1E0A) where the corpus's c3 column is `D\u{307}`, so NFD output is not fully decomposed
 tests/cases/taskgroup_parameter_tiers/web_keeps_group_parameter_at_the_existing_checked_boundary.case	#5201	`jet check fixture.jet --target web` accepts the task-group parameter and exits 0 with only UnusedParameter warnings; no E-WEB-UNSUPPORTED refusal
@@ -1001,8 +942,6 @@ tests/cases/source_import/javascript_import_does_not_rewrite_foreign_names_insid
 tests/cases/source_import/python_source_import_matches_python_oracle_fixed_corpus.case	#6069	the Python source import of the fixed corpus differs from the corpus.jet.bytes oracle snapshot
 Compiler/JetDevserver	#6650	`jet test Compiler/JetDevserver` fails to compile: the package is Rust transliterated into Jet syntax (std.sync/net/io, `.unwrap()`, `?`); first error: unterminated `"""` string (Source/BrowserWebAdapter.jet:467:10, `PAGE_JS: """`)
 Compiler/JetDevserver/Tests	#6650	`jet test Compiler/JetDevserver/Tests` fails to compile: the tests are Rust transliterated into Jet syntax, and the package they test (Compiler/JetDevserver) doesn't compile; first error: Expected `name:` before this tuple member
-Compiler/JetLSP	#6650	`jet test Compiler/JetLSP` fails to compile: the package is Rust transliterated into Jet syntax and depends on Compiler/JetDevserver, which doesn't compile; first error: `core.files.runtime.kernel_path_components` is private to Core (Source/LSP/Bench.jet:8:21)
-Compiler/JetLSP/Tests	#6650	`jet test Compiler/JetLSP/Tests` fails to compile: the tests are Rust transliterated into Jet syntax, and the packages they test (Compiler/JetLSP, Compiler/JetDevserver) don't compile; first error: Expected `->` after an `if` arm value
 phase P1+P2 read + lex + intern + parse	#6527	the self-compile is over the 225K budget: 9,679 against 1,600 (6.0x)
 phase P3 collect / register / resolve	#6527	the self-compile is over the 225K budget: 5,310 against 1,800 (3.0x)
 phase P4 comptime: one check + evaluation	#6527	the self-compile is over the 225K budget: 4,789 against 1,000 (4.8x)
@@ -1036,102 +975,8 @@ tests/cases/semindex/aggregate_view_provenance_preserves_slots_and_changes_signa
 tests/cases/semindex/returned_view_provenance_is_structured_and_changes_signature_id.case	#6386	unbuilt: semindex returned view provenance: `pick`'s view_provenance is `[]`, where the predicate reads one row with two parameter sources
 tests/run/Ownership/ReleaseDeferClosePanic	#5989	a panic inside a close while the body's Stop is pending aborts the process (SIGABRT, "panic in a destructor during cleanup") instead of giving the process-fatal Stop [E3001] report at exit 70
 tests/cases/task_control_tiers/a_cancel_at_cleanup_entry_waits_out_the_close_on_every_tier.case	#5989	the cancel interrupts the close's channel wait, so "close worker: finished" never prints; the close is not shielded from cancellation
-tests/guards/corpus_ast: corpus policy dogfood gate	#3590	368 pre-existing Jetpack sites (c198): 246 dogfood-json (wire text built by hand instead of the typed JSON seam) and 122 dogfood-path-containment (string-prefix containment instead of Path.is_within)
 tests/guards/corpus_ast: failure surface has no active retired spelling	#6582	278 retired failure `?` lines, all in Compiler/JetDevserver, which is Rust transliterated into Jet syntax and is ported under #6582
 tests/cases/corelib_net/net_http_service_policy_tests_pass.case	#3595	7 passed, 1 failed: a second body().text on server.response's one-shot body is not Err(.BodyConsumed); body() hands out a copy of the Body value, which carries no take state (c15)
-Core/Args/Args.jet [none]	#6530	`Dyn` and `Dyn?` have no `==`, so `assert_eq` on decoded trees is E0312: repeated value options replace their tuple slot without changing order
-Core/Auth/Auth.jet [none]: JWT errors keep their variants and payloads	#3550	runtime: `jwt_outcome` of a fractional `exp` claim is not "MalformedToken(claim `exp` must be an integer)"
-Core/Crypto/Uuid.jet [none]	#3548	Clock's manual-time methods mutate their receiver, but the test binds the Clock with `:` (E0111): UUID v7 keeps the manual Clock timestamp and RFC version and variant
-Core/Data/Data.jet [none]	#3550	test drift: `ascending` pushed then reused (E0209), errors is one `DataError`, not a list (E0102, E0505); hidden runtime: deferred queries `joined[1].right` is not None
-Core/Encoding/Base32.jet [none]	#6530	`assert_eq(x, Ok(…))` is E0404: `Ok(…)` takes no fallible expected type from assert_eq's other argument
-Core/Encoding/Base64.jet [none]	#6530	`assert_eq(x, Ok(…))` is E0404: `Ok(…)` takes no fallible expected type from assert_eq's other argument
-Core/Encoding/Cbor.jet [none]	#6530	`assert_eq(x, Ok(…))` is E0404: `Ok(…)` takes no fallible expected type from assert_eq's other argument (6 tests)
-Core/Encoding/CborParse.jet [none]	#6530	ICE `ir.build unlowered`: a field of UTF8Error in CBOR borrowed UTF-8 validation equals strict String decoding
-Core/Encoding/CborStream.jet [none]: CBOR buffer release resets borrowed storage and returns its heap charge	#3548	runtime: `mem.__list_capacity` of a released borrowed buffer is 8, not 0
-Core/Encoding/Eetf.jet [none]	#6530	`assert_eq(x, Ok(…))` is E0404: `Ok(…)` takes no fallible expected type from assert_eq's other argument
-Core/Encoding/Json.jet [none]	#6530	`Dyn` and `Dyn?` have no `==`, so `assert_eq` on decoded trees is E0312 (2 tests); a closure pushes borrowed `line` without a move (E0201, #3548)
-Core/Encoding/Jsonl.jet [none]	#3548	test drift: `reader` takes a FileReader, the tests pass String text
-Core/Encoding/Toml.jet [none]	#6530	`Dyn` and `Dyn?` have no `==`, so `assert_eq` on decoded trees is E0312
-Core/Encoding/XmlEngine.jet [none]	#3548	test drift: `lexer.next_token()` in the UTF16 lexer test has no `XMLFault` conversion to the test's Err
-Core/Encoding/Xml.jet [none]	#3548	test drift: `attribute(…) ?? panic` is String, compared with `Val(…)`
-Core/Event/Event.jet [none]	#3549	`EventConfigError` has no `==`, so assert_eq on it is E0312
-Core/Files/Files.jet [none]	#3548	test drift (7 tests): `compiler_with_process_directory` is #Unsafe, `read` is `String IOError!` matched as `.Ok`, IOOperation and IOError have no `==`, TempDir/TempFile have no `expect`, `String.from_bytes` compared with `Val`; hidden runtime: files_stat_takes_the_read_fault and files_getmtime_takes_the_read_fault see no read fault
-Core/Http/Server.jet [none]	#3550	test drift: the route text "/a/{id}" interpolates `id`; it needs `{{id}}`
-Core/Math/Math.jet [none]	#3548	test drift: `.to_bits()` is no method of Float, F64 or a Decimal literal (E0311, E0102; Units uses the free `math.to_bits`) in 3 tests, and Float{9007199254740993} is E1003; ICE `ir.build unlowered` (#6530): precise builtins Point2.sub and Delta2.sub in Device and dynamic coordinates retain seed frame policy
-Core/Net/Url.jet [none]	#3549	test drift: the URL pattern hole `{path}` collides with the binding `path`, and URL{"data://example.test/a~/{payload}"} is an invalid literal
-Core/Process/Process.jet [none]	#3549	test drift: `pipe_line(…) ?? panic` is String, compared with `Val("")` and bare `None`
-Core/Sys/Sys.jet [none]	#6530	`assert_eq(x, Ok(…))` is E0404: `Ok(…)` takes no fallible expected type from assert_eq's other argument (2 tests); `EnvError` has no `==` (#3549)
-Core/Term/Term.jet [none]	#3549	test drift: the negative byte take returns `[U8]`, matched as `.Ok`/`.Err`
-Core/Time/Time.jet [none]	#3548	Clock's manual-time methods mutate their receiver, but the test binds the Clock with `:` (E0111) (2 tests); `Dyn` and `Dyn?` have no `==`, so `assert_eq` on decoded trees is E0312 (#6530); ICE `ir.build unlowered` (#6530): display of Shared<__ClockState> in Clock Show and Debug, an `.expect_fail` stop edge out of a #Transact block in Nonpositive sleeps
-Core/Ui/Host.jet [none]	#3551	test drift: UIShortcutModifiers{} lacks `bits`, and `x == .InvalidRequest(message)`/`== .Val(name)` bind no names
-Core/Ui/Host/Shortcuts.jet [none]	#3551	test drift: `core.ui.host.UIShortcutModifiers` is no type by that path, and `error == .InvalidRequest(message)` binds no name
-Core/Ui/Ui.jet [none]	#3551	`UIPreviewDevice` and `ui.UIPreviewDevice` are two types in the preview viewport test
-Core/Units/Units.jet [none]: Measurement Float kernels preserve retained arithmetic bits	#3548	runtime: `math.to_bits` is a signed Int, compared with the U64 13846317054350589952
-Core/Units/Units.jet [none]: Measurement source surface keeps observations and formatting	#3548	runtime: `show` of a tiny Measurement prints "1e-8 ± 0.0", not "0.00000001 ± 0"
-Core/Web/Browser.jet [none]	#6530	`assert_eq(x, Ok(…))` is E0404: `Ok(…)` takes no fallible expected type from assert_eq's other argument; hidden runtime (#3550): browser configuration helpers index 33 of a 32-item list
-Core/Web/Storage/Local.jet [none]	#3550	test drift: `core.web.storage.session.set` by full path is E1004 "not in this position", and the task loops collect no item (E0073)
-Core/Web/Storage/Session.jet [none]	#3550	test drift: `core.web.storage.local.set` by full path is E1004 "not in this position"
-Core/Args/Args.jet [basic]	#6530	`Dyn` and `Dyn?` have no `==`, so `assert_eq` on decoded trees is E0312: repeated value options replace their tuple slot without changing order
-Core/Auth/Auth.jet [basic]: JWT errors keep their variants and payloads	#3550	runtime: `jwt_outcome` of a fractional `exp` claim is not "MalformedToken(claim `exp` must be an integer)"
-Core/Crypto/Uuid.jet [basic]	#3548	Clock's manual-time methods mutate their receiver, but the test binds the Clock with `:` (E0111): UUID v7 keeps the manual Clock timestamp and RFC version and variant
-Core/Data/Data.jet [basic]	#3550	test drift: `ascending` pushed then reused (E0209), errors is one `DataError`, not a list (E0102, E0505); hidden runtime: deferred queries `joined[1].right` is not None
-Core/Encoding/Base32.jet [basic]	#6530	`assert_eq(x, Ok(…))` is E0404: `Ok(…)` takes no fallible expected type from assert_eq's other argument
-Core/Encoding/Base64.jet [basic]	#6530	`assert_eq(x, Ok(…))` is E0404: `Ok(…)` takes no fallible expected type from assert_eq's other argument
-Core/Encoding/Cbor.jet [basic]	#6530	`assert_eq(x, Ok(…))` is E0404: `Ok(…)` takes no fallible expected type from assert_eq's other argument (6 tests)
-Core/Encoding/CborParse.jet [basic]	#6530	ICE `ir.build unlowered`: a field of UTF8Error in CBOR borrowed UTF-8 validation equals strict String decoding
-Core/Encoding/CborStream.jet [basic]: CBOR buffer release resets borrowed storage and returns its heap charge	#3548	runtime: `mem.__list_capacity` of a released borrowed buffer is 8, not 0
-Core/Encoding/Eetf.jet [basic]	#6530	`assert_eq(x, Ok(…))` is E0404: `Ok(…)` takes no fallible expected type from assert_eq's other argument
-Core/Encoding/Json.jet [basic]	#6530	`Dyn` and `Dyn?` have no `==`, so `assert_eq` on decoded trees is E0312 (2 tests); a closure pushes borrowed `line` without a move (E0201, #3548)
-Core/Encoding/Jsonl.jet [basic]	#3548	test drift: `reader` takes a FileReader, the tests pass String text
-Core/Encoding/Toml.jet [basic]	#6530	`Dyn` and `Dyn?` have no `==`, so `assert_eq` on decoded trees is E0312
-Core/Encoding/XmlEngine.jet [basic]	#3548	test drift: `lexer.next_token()` in the UTF16 lexer test has no `XMLFault` conversion to the test's Err
-Core/Encoding/Xml.jet [basic]	#3548	test drift: `attribute(…) ?? panic` is String, compared with `Val(…)`
-Core/Event/Event.jet [basic]	#3549	`EventConfigError` has no `==`, so assert_eq on it is E0312
-Core/Files/Files.jet [basic]	#3548	test drift (7 tests): `compiler_with_process_directory` is #Unsafe, `read` is `String IOError!` matched as `.Ok`, IOOperation and IOError have no `==`, TempDir/TempFile have no `expect`, `String.from_bytes` compared with `Val`; hidden runtime: files_stat_takes_the_read_fault and files_getmtime_takes_the_read_fault see no read fault
-Core/Http/Server.jet [basic]	#3550	test drift: the route text "/a/{id}" interpolates `id`; it needs `{{id}}`
-Core/Math/Math.jet [basic]	#3548	test drift: `.to_bits()` is no method of Float, F64 or a Decimal literal (E0311, E0102; Units uses the free `math.to_bits`) in 3 tests, and Float{9007199254740993} is E1003; ICE `ir.build unlowered` (#6530): precise builtins Point2.sub and Delta2.sub in Device and dynamic coordinates retain seed frame policy
-Core/Net/Url.jet [basic]	#3549	test drift: the URL pattern hole `{path}` collides with the binding `path`, and URL{"data://example.test/a~/{payload}"} is an invalid literal
-Core/Process/Process.jet [basic]	#3549	test drift: `pipe_line(…) ?? panic` is String, compared with `Val("")` and bare `None`
-Core/Sys/Sys.jet [basic]	#6530	`assert_eq(x, Ok(…))` is E0404: `Ok(…)` takes no fallible expected type from assert_eq's other argument (2 tests); `EnvError` has no `==` (#3549)
-Core/Term/Term.jet [basic]	#3549	test drift: the negative byte take returns `[U8]`, matched as `.Ok`/`.Err`
-Core/Time/Time.jet [basic]	#3548	Clock's manual-time methods mutate their receiver, but the test binds the Clock with `:` (E0111) (2 tests); `Dyn` and `Dyn?` have no `==`, so `assert_eq` on decoded trees is E0312 (#6530); ICE `ir.build unlowered` (#6530): display of Shared<__ClockState> in Clock Show and Debug, an `.expect_fail` stop edge out of a #Transact block in Nonpositive sleeps
-Core/Ui/Host.jet [basic]	#3551	test drift: UIShortcutModifiers{} lacks `bits`, and `x == .InvalidRequest(message)`/`== .Val(name)` bind no names
-Core/Ui/Host/Shortcuts.jet [basic]	#3551	test drift: `core.ui.host.UIShortcutModifiers` is no type by that path, and `error == .InvalidRequest(message)` binds no name
-Core/Ui/Ui.jet [basic]	#3551	`UIPreviewDevice` and `ui.UIPreviewDevice` are two types in the preview viewport test
-Core/Units/Units.jet [basic]: Measurement Float kernels preserve retained arithmetic bits	#3548	runtime: `math.to_bits` is a signed Int, compared with the U64 13846317054350589952
-Core/Units/Units.jet [basic]: Measurement source surface keeps observations and formatting	#3548	runtime: `show` of a tiny Measurement prints "1e-8 ± 0.0", not "0.00000001 ± 0"
-Core/Web/Browser.jet [basic]	#6530	`assert_eq(x, Ok(…))` is E0404: `Ok(…)` takes no fallible expected type from assert_eq's other argument; hidden runtime (#3550): browser configuration helpers index 33 of a 32-item list
-Core/Web/Storage/Local.jet [basic]	#3550	test drift: `core.web.storage.session.set` by full path is E1004 "not in this position", and the task loops collect no item (E0073)
-Core/Web/Storage/Session.jet [basic]	#3550	test drift: `core.web.storage.local.set` by full path is E1004 "not in this position"
-Core/Args/Args.jet [full]	#6530	`Dyn` and `Dyn?` have no `==`, so `assert_eq` on decoded trees is E0312: repeated value options replace their tuple slot without changing order
-Core/Auth/Auth.jet [full]: JWT errors keep their variants and payloads	#3550	runtime: `jwt_outcome` of a fractional `exp` claim is not "MalformedToken(claim `exp` must be an integer)"
-Core/Crypto/Uuid.jet [full]	#3548	Clock's manual-time methods mutate their receiver, but the test binds the Clock with `:` (E0111): UUID v7 keeps the manual Clock timestamp and RFC version and variant
-Core/Data/Data.jet [full]	#3550	test drift: `ascending` pushed then reused (E0209), errors is one `DataError`, not a list (E0102, E0505); hidden runtime: deferred queries `joined[1].right` is not None
-Core/Encoding/Base32.jet [full]	#6530	`assert_eq(x, Ok(…))` is E0404: `Ok(…)` takes no fallible expected type from assert_eq's other argument
-Core/Encoding/Base64.jet [full]	#6530	`assert_eq(x, Ok(…))` is E0404: `Ok(…)` takes no fallible expected type from assert_eq's other argument
-Core/Encoding/Cbor.jet [full]	#6530	`assert_eq(x, Ok(…))` is E0404: `Ok(…)` takes no fallible expected type from assert_eq's other argument (6 tests)
-Core/Encoding/CborParse.jet [full]	#6530	ICE `ir.build unlowered`: a field of UTF8Error in CBOR borrowed UTF-8 validation equals strict String decoding
-Core/Encoding/CborStream.jet [full]: CBOR buffer release resets borrowed storage and returns its heap charge	#3548	runtime: `mem.__list_capacity` of a released borrowed buffer is 8, not 0
-Core/Encoding/Eetf.jet [full]	#6530	`assert_eq(x, Ok(…))` is E0404: `Ok(…)` takes no fallible expected type from assert_eq's other argument
-Core/Encoding/Json.jet [full]	#6530	`Dyn` and `Dyn?` have no `==`, so `assert_eq` on decoded trees is E0312 (2 tests); a closure pushes borrowed `line` without a move (E0201, #3548)
-Core/Encoding/Jsonl.jet [full]	#3548	test drift: `reader` takes a FileReader, the tests pass String text
-Core/Encoding/Toml.jet [full]	#6530	`Dyn` and `Dyn?` have no `==`, so `assert_eq` on decoded trees is E0312
-Core/Encoding/XmlEngine.jet [full]	#3548	test drift: `lexer.next_token()` in the UTF16 lexer test has no `XMLFault` conversion to the test's Err
-Core/Encoding/Xml.jet [full]	#3548	test drift: `attribute(…) ?? panic` is String, compared with `Val(…)`
-Core/Event/Event.jet [full]	#3549	`EventConfigError` has no `==`, so assert_eq on it is E0312
-Core/Files/Files.jet [full]	#3548	test drift (7 tests): `compiler_with_process_directory` is #Unsafe, `read` is `String IOError!` matched as `.Ok`, IOOperation and IOError have no `==`, TempDir/TempFile have no `expect`, `String.from_bytes` compared with `Val`; hidden runtime: files_stat_takes_the_read_fault and files_getmtime_takes_the_read_fault see no read fault
-Core/Http/Server.jet [full]	#3550	test drift: the route text "/a/{id}" interpolates `id`; it needs `{{id}}`
-Core/Math/Math.jet [full]	#3548	test drift: `.to_bits()` is no method of Float, F64 or a Decimal literal (E0311, E0102; Units uses the free `math.to_bits`) in 3 tests, and Float{9007199254740993} is E1003; ICE `ir.build unlowered` (#6530): precise builtins Point2.sub and Delta2.sub in Device and dynamic coordinates retain seed frame policy
-Core/Net/Url.jet [full]	#3549	test drift: the URL pattern hole `{path}` collides with the binding `path`, and URL{"data://example.test/a~/{payload}"} is an invalid literal
-Core/Process/Process.jet [full]	#3549	test drift: `pipe_line(…) ?? panic` is String, compared with `Val("")` and bare `None`
-Core/Sys/Sys.jet [full]	#6530	`assert_eq(x, Ok(…))` is E0404: `Ok(…)` takes no fallible expected type from assert_eq's other argument (2 tests); `EnvError` has no `==` (#3549)
-Core/Term/Term.jet [full]	#3549	test drift: the negative byte take returns `[U8]`, matched as `.Ok`/`.Err`
-Core/Time/Time.jet [full]	#3548	Clock's manual-time methods mutate their receiver, but the test binds the Clock with `:` (E0111) (2 tests); `Dyn` and `Dyn?` have no `==`, so `assert_eq` on decoded trees is E0312 (#6530); ICE `ir.build unlowered` (#6530): display of Shared<__ClockState> in Clock Show and Debug, an `.expect_fail` stop edge out of a #Transact block in Nonpositive sleeps
-Core/Ui/Host.jet [full]	#3551	test drift: UIShortcutModifiers{} lacks `bits`, and `x == .InvalidRequest(message)`/`== .Val(name)` bind no names
-Core/Ui/Host/Shortcuts.jet [full]	#3551	test drift: `core.ui.host.UIShortcutModifiers` is no type by that path, and `error == .InvalidRequest(message)` binds no name
-Core/Ui/Ui.jet [full]	#3551	`UIPreviewDevice` and `ui.UIPreviewDevice` are two types in the preview viewport test
-Core/Units/Units.jet [full]: Measurement Float kernels preserve retained arithmetic bits	#3548	runtime: `math.to_bits` is a signed Int, compared with the U64 13846317054350589952
-Core/Units/Units.jet [full]: Measurement source surface keeps observations and formatting	#3548	runtime: `show` of a tiny Measurement prints "1e-8 ± 0.0", not "0.00000001 ± 0"
-Core/Web/Browser.jet [full]	#6530	`assert_eq(x, Ok(…))` is E0404: `Ok(…)` takes no fallible expected type from assert_eq's other argument; hidden runtime (#3550): browser configuration helpers index 33 of a 32-item list
-Core/Web/Storage/Local.jet [full]	#3550	test drift: `core.web.storage.session.set` by full path is E1004 "not in this position", and the task loops collect no item (E0073)
-Core/Web/Storage/Session.jet [full]	#3550	test drift: `core.web.storage.local.set` by full path is E1004 "not in this position"
+Core/Time/Time.jet [none]: Clock ordinary and nested aggregate copies fork the timeline	#3548	runtime: a Clock `.copy()` forks only outside Core source (Sema Expressions.jet skips Core modules), and a `[Clock]` copy shares each element's state in user code too: `copied[0].advance(2)` moves `clocks[0]`
+Core/Time/Time.jet [basic]: Clock ordinary and nested aggregate copies fork the timeline	#3548	runtime: a Clock `.copy()` forks only outside Core source (Sema Expressions.jet skips Core modules), and a `[Clock]` copy shares each element's state in user code too: `copied[0].advance(2)` moves `clocks[0]`
+Core/Time/Time.jet [full]: Clock ordinary and nested aggregate copies fork the timeline	#3548	runtime: a Clock `.copy()` forks only outside Core source (Sema Expressions.jet skips Core modules), and a `[Clock]` copy shares each element's state in user code too: `copied[0].advance(2)` moves `clocks[0]`

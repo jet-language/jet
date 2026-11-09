@@ -69,6 +69,7 @@ Run a lesson from the repository root, for example `jet run Examples/Types/<Less
 - [TraitConstants](Traits/TraitConstants.jet) — Trait constants: a trait declares `name: Type` (with a default as `name: Type{value}`), each implementation gives `name: value`, and code reads `Type.name`…
 - [Traits](Traits/Traits.jet)
 - [TraitValueSlots](Traits/TraitValueSlots.jet)
+- [UserCheckedTextShape](Traits/UserCheckedTextShape.jet) — A user trait with the shape of the Prelude's `CheckedText`: one associated error type, a pure checker that fails with it, and a pure generic encoder.
 - [UserDefined](Traits/UserDefined.jet) — Existing symbols dispatch through ordinary trait hooks.
 - [UserDisplayDebug](Traits/UserDisplayDebug.jet)
 

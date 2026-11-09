@@ -2,40 +2,50 @@
 //
 // These declarations name the ambient surface. Their meaning stays in the
 // embedded Prelude/CoreLib implementations; sema opens this module once per
-// file and resolves each alias through the ordinary Core call path.
-print: fn(value: Any)
-input: fn(prompt: String{""}) -> String IOError!
-panic: fn(message: String)
-assert: fn(cond: Bool)
-assert_eq: fn(a: Any, b: Any)
-// `debug(value)` returns `value` unchanged and, in development
-// builds, writes `[debug] file.jet:LINE expr = <Debug form>` to stderr. It adds
-// no effect; a shipped artifact or release-profile build rejects it (E3405).
-debug: fn<T>(value: T) -> T
-
-// Checked text is an ordinary nominal String-backed type
-// with one ordinary CheckedText implementation. The trait has one associated
-// check error, one pure complete-text checker, and one pure generic hole encoder.
-CheckedText: trait {
-    Error: type
-    check: fn(text: String) Error! -[]>
-    encode_hole: fn<T: Printable>(value: T) String -[]>
-}
-
+// file and resolves each alias through the ordinary Core call path. Every
+// line here is ordinary Jet: `jet check` and `jet fmt --check` accept the file
+// as a user module.
+//
+// The compiler itself provides these ambient functions; none has a Jet
+// declaration yet, so they are listed rather than declared:
+//   print: fn(value: Any)
+//   input: Iter<String>
+//     every line of the program's input, lazily: the files its arguments
+//     name, in order, else standard input (core.term __InputLines).
+//     `core.term.readline(prompt)` reads one line.
+//   panic: fn(message: String)
+//   assert: fn(cond: Bool)
+//   assert_eq: fn(a: Any, b: Any)
+//   debug: fn<T>(value: T) -> T
+//     `debug(value)` returns `value` unchanged and, in development builds,
+//     writes `[debug] file.jet:LINE expr = <Debug form>` to stderr. It adds no
+//     effect; a shipped artifact or release-profile build rejects it (E3405).
+//   channel: fn<T>(capacity: Int{0})
+//   embed_file, embed_bytes, find, fetch: the build-time file and network
+//     reads, ordinary effectful calls in comptime code.
+//
 // Measurement claims use the one always-available identity
 // sink; its AOT implementation is the shared Prelude black-box kernel.
 pub use {
     core.prelude.[keep]
-    // Ordered extrema over one Comparable type, with no import: a NaN argument
-    // is the result, and `clamp` accepts reversed bounds.
+    // Ordered extrema over one Comparable type, with no import: they order by
+    // `compare` (a Float by IEEE 754 totalOrder), and `clamp` accepts reversed bounds.
     core.prelude.[min, max, clamp]
     core.term.[eprint]
     core.time.[Clock, Instant, Duration]
     Date: core.time.LocalDate
-    core.files.[Path]
+    core.files.path.[Path]
     read_file: core.files.read
     write_file: core.files.write
     file_exists: core.files.exists
 }
-channel: fn<T>(capacity: Int{0})
-pub use core.comptime.[embed_file, embed_bytes, find, fetch]
+
+// Checked text is an ordinary nominal String-backed type
+// with one ordinary CheckedText implementation. The trait has one associated
+// check error, one pure complete-text checker, and one pure generic hole encoder.
+// A user trait can declare the same shape (Examples/Types/Traits/UserCheckedTextShape.jet).
+CheckedText: trait {
+    Error: type
+    check: fn(text: String) Error! -[]>
+    encode_hole: fn<T: Printable>(value: T) -[]> String
+}

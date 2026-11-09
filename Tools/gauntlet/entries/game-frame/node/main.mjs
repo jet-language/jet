@@ -2,7 +2,7 @@
 // canvas. Each frame clears, draws a scrolling tile map, 48 translucent
 // sprites, a translucent HUD bar and two lines of 5x7 bitmap-font text. Every
 // rectangle clips to the canvas and blends src-over per channel, alpha
-// included: (s * a + d * (255 - a) + 127) / 255. With JET_RAYLIB_CAPTURE set,
+// included: (s * a + d * (255 - a) + 127) / 255. With JET_FRAME_CAPTURE set,
 // every presented frame is written there as a PAM image.
 import { writeFileSync } from "node:fs";
 
@@ -104,7 +104,7 @@ function drawText(text, x, y, size, color) {
 }
 
 function endDrawing() {
-  const path = process.env.JET_RAYLIB_CAPTURE;
+  const path = process.env.JET_FRAME_CAPTURE;
   if (!path) return;
   try {
     const header = Buffer.from(`P7\nWIDTH ${W}\nHEIGHT ${H}\nDEPTH 4\nMAXVAL 255\nTUPLTYPE RGB_ALPHA\nENDHDR\n`);

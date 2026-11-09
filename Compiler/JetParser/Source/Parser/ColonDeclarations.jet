@@ -217,6 +217,10 @@ parser_colon_head_colon: fn(tokens: [Token], head: Int) -> Int Never! {
     if index >= tokens.len() || tokens[index].kind != TOKEN_COLON -> return -1
     keyword: parser_colon_code_at(tokens, index + 1)
     if keyword >= tokens.len() || !parser_colon_head_keyword(tokens[keyword].kind) -> return -1
+    // A head keyword that spells a name (`loud: tag.upper()`) reads a member
+    // of a value; no declaration head is followed by `.`.
+    after: parser_colon_code_at(tokens, keyword + 1)
+    if after < tokens.len() && tokens[after].kind == TOKEN_DOT -> return -1
     if dashed && tokens[keyword].kind != TOKEN_KW_MODULE -> return -1
     index
 }

@@ -1251,7 +1251,8 @@ slice_bytes: fn(raw: [U8], start: Int, end: Int) -> [U8] Never! {
     assert(typed.username() == user)
     assert(typed.password() == password)
     assert(typed.host() == Val((host)))
-    assert(typed.path() == "/root/{path}")
+    expected_path: "/root/{path}"
+    assert(typed.path() == expected_path)
     assert(typed.path_segments() == [String]{"root", path})
     assert(typed.query_pairs() == [[String]]{[String]{key, value}})
     assert(typed.fragment() == Val((fragment)))
@@ -1271,12 +1272,14 @@ slice_bytes: fn(raw: [U8], start: Int, end: Int) -> [U8] Never! {
 #Test("URL data literal payload and marker collisions") {
     payload: "a/b?x=1#f"
     typed: URL{"data:text/plain,{payload}"}
-    assert(typed.to_string() == "data:text/plain,a%2Fb%3Fx%3D1%23f")
-    authority: URL{"data://example.test/a~/{payload}"}
-    assert(authority.to_string() == "data://example.test/a~/a%2Fb%3Fx%3D1%23f")
+    assert_eq(typed.to_string(), "data:text/plain,a%2Fb%3Fx%3D1%23f")
+    // An authority-form data URL renders its path as a hierarchical path; the
+    // hole still needs the literal's MIME separator.
+    authority: URL{"data://example.test/a~,{payload}"}
+    assert_eq(authority.to_string(), "data://example.test/a~%2Ca%2Fb%3Fx%3D1%23f")
     collision: URL{"https://example.test/jet-hole-opaque-0-/{payload}"}
-    assert(collision.path_segments() == [String]{"jet-hole-opaque-0-", payload})
-    assert(collision.to_string() == "https://example.test/jet-hole-opaque-0-/a%2Fb%3Fx%3D1%23f")
+    assert_eq(collision.path_segments(), [String]{"jet-hole-opaque-0-", payload})
+    assert_eq(collision.to_string(), "https://example.test/jet-hole-opaque-0-/a%2Fb%3Fx%3D1%23f")
     ipv6: URL{"https://[::1]:443/a"}
     assert(ipv6.to_string() == "https://[::1]:443/a")
 }

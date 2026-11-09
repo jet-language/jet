@@ -1,0 +1,723 @@
+package: {
+    name: "wayland_windows_draw_jets_own_frame"
+    authority: { allow: [Env, IO, Net, Time] }
+}
+use {
+    net: core.net
+    sys: core.sys
+    ui: core.ui
+}
+
+// A fake Wayland compositor on $WAYLAND_DISPLAY checks the frame Jet draws
+// for its windows. With a wl_subcompositor the frame is one chrome surface,
+// a subsurface below the content in sync mode: the configure sizes the
+// window with its title bar, the content is that less the bar, the chrome
+// is the window plus the shadow's margin on each side, and the window
+// geometry leaves the shadow out. The content's bottom corners are cut
+// round. A pointer on the title moves the window, the secondary button
+// opens the window menu, an edge resizes; a finger on the maximize button
+// (spread to a finger's size) maximizes, which squares the frame; the close
+// button closes. The compositor can draw the frame itself (server_side),
+// leave the window no subcompositor, or make it fullscreen: then the
+// content is the whole window.
+
+FakeMode: enum {
+    // Jet's frame at scale 1: xdg-decoration answers client_side, and a
+    // seat with a pointer and touch works the title bar.
+    Framed
+    // The compositor draws the frame: server_side.
+    ServerSide
+    // A wl_subcompositor and no decoration manager: Jet's frame.
+    NoDecoration
+    // No wl_subcompositor: the window asks for server_side.
+    NoSubcompositor
+    // Fullscreen first, with no frame; then a plain configure brings it.
+    Fullscreen
+    // Jet's frame at 180/120 through wp_fractional_scale_v1 and wp_viewporter.
+    Fractional
+}
+
+// A wl_buffer: its pool (an index into `pools`), offset, size and format.
+FakeBuffer: struct {
+    id: Int
+    pool: Int
+    offset: Int
+    width: Int
+    height: Int
+    format: Int
+}
+
+// The chrome surface's double-buffered state.
+FakeChrome: struct {
+    buffer: Int
+    dest_w: Int
+    dest_h: Int
+    scale: Int
+    input: String
+}
+
+Fake: struct {
+    stream: net.UnixStream
+    mode: FakeMode
+    inbox: [U8]
+    out: [U8]
+    globals: [String]
+    registry: Int
+    compositor: Int
+    subcompositor: Int
+    shm: Int
+    wm_base: Int
+    decoration_manager: Int
+    decoration: Int
+    fractional_manager: Int
+    viewporter: Int
+    seat: Int
+    pointer: Int
+    touch: Int
+    cursor_manager: Int
+    cursor_device: Int
+    surface: Int
+    chrome: Int
+    subsurface: Int
+    xdg_surface: Int
+    toplevel: Int
+    fractional: Int
+    viewport: Int
+    chrome_viewport: Int
+    region: Int
+    region_text: String
+    // Every pool, and the descriptors the window sent, one per pool in order.
+    pools: [Int]
+    fds: [sys.Fd]
+    buffers: [FakeBuffer]
+    // The content surface: pending, then current at commit.
+    attached: Int
+    current: Int
+    acked: Int
+    callbacks: [Int]
+    destination_w: Int
+    destination_h: Int
+    buffer_scale: Int
+    // The chrome: pending, cached by its commit, shown by the content's.
+    chrome_pending: FakeChrome
+    chrome_cached: FakeChrome
+    chrome_shown: FakeChrome
+    chrome_dirty: Bool
+    position_x: Int
+    position_y: Int
+    shown_x: Int
+    shown_y: Int
+    geometry: String
+    serial: Int
+    // Configure serials not yet acked, oldest first.
+    configures: [Int]
+    scale120: Int
+    phase: Int
+    settled: Int
+    enter_serial: Int
+    commits: Int
+    report: [String]
+    failures: [String]
+    // The close button was pressed: the window may hang up any time now.
+    closing: Bool
+}
+
+fake_put: fn(&out: [U8], value: Int) {
+    v: value.bit_and(4294967295)
+    out.push(U8{v.bit_and(255)})
+    out.push(U8{(v >> 8).bit_and(255)})
+    out.push(U8{(v >> 16).bit_and(255)})
+    out.push(U8{(v >> 24).bit_and(255)})
+}
+
+fake_words: fn(values: [Int]) -> [U8] {
+    out := [U8]{}
+    loop value in values -> fake_put(out, value)
+    out
+}
+
+fake_text: fn(text: String) -> [U8] {
+    out := [U8]{}
+    bytes: text.bytes()
+    fake_put(out, bytes.len() + 1)
+    loop b in bytes -> out.push(b)
+    out.push(U8{0})
+    loop out.len() %% 4 != 0 -> out.push(U8{0})
+    out
+}
+
+fake_u32: fn(bytes: [U8], at: Int) -> Int {
+    if at + 4 > bytes.len() -> return 0
+    Int.from_u8(bytes[at]) + (Int.from_u8(bytes[at + 1]) << 8) + (Int.from_u8(bytes[at + 2]) << 16) + (Int.from_u8(bytes[at + 3]) << 24)
+}
+
+fake_i32: fn(bytes: [U8], at: Int) -> Int {
+    v: fake_u32(bytes, at)
+    if v >= 2147483648 -> v - 4294967296 else -> v
+}
+
+fake_string: fn(bytes: [U8], at: Int) -> String {
+    length: fake_u32(bytes, at)
+    if length <= 1 || at + 4 + length > bytes.len() -> return ""
+    String.from_bytes(bytes[(at + 4)..<(at + 3 + length)]) ?? ""
+}
+
+fake_event: fn(&f: Fake, object: Int, opcode: Int, args: [U8]) {
+    fake_put(f.out, object)
+    fake_put(f.out, ((args.len() + 8) << 16) + opcode)
+    loop b in args -> f.out.push(b)
+}
+
+fake_flush: fn(&f: Fake) -[Net, Time]> {
+    if f.out.len() == 0 -> return
+    net.unix_send(f.stream, f.out, [sys.Fd]{}) ?? {
+        if !f.closing -> f.failures.push("send failed: {err}")
+        return
+    }
+    f.out.clear()
+}
+
+fake_fail: fn(&f: Fake, message: String) {
+    if f.failures.len() < 8 -> f.failures.push("phase {f.phase}: {message}")
+}
+
+// Pixels for `logical` units at `scale120`: rounded half away from zero.
+fake_pixels: fn(logical: Int, scale120: Int) -> Int { (logical * scale120 + 60) /% 120 }
+
+fake_globals: fn(mode: FakeMode) -> [String] {
+    if mode == {
+        .Framed -> [String]{"wl_compositor", "wl_shm", "xdg_wm_base", "wl_subcompositor", "zxdg_decoration_manager_v1", "wl_seat", "wp_cursor_shape_manager_v1"}
+        .NoDecoration -> [String]{"wl_compositor", "wl_shm", "xdg_wm_base", "wl_subcompositor"}
+        .NoSubcompositor -> [String]{"wl_compositor", "wl_shm", "xdg_wm_base", "zxdg_decoration_manager_v1"}
+        .Fractional -> [String]{"wl_compositor", "wl_shm", "xdg_wm_base", "wl_subcompositor", "zxdg_decoration_manager_v1", "wp_fractional_scale_manager_v1", "wp_viewporter"}
+        else -> [String]{"wl_compositor", "wl_shm", "xdg_wm_base", "wl_subcompositor", "zxdg_decoration_manager_v1"}
+    }
+}
+
+fake_version: fn(interface: String) -> Int {
+    if interface == "wl_compositor" -> return 6
+    if interface == "xdg_wm_base" -> return 2
+    1
+}
+
+fake_format: fn(format: Int) -> String {
+    if format == 0 -> return "ARGB8888"
+    if format == 1 -> return "XRGB8888"
+    if format == 875708993 -> return "ABGR8888"
+    "format {format}"
+}
+
+// A configure of 400 x 300 in `states` (xdg_toplevel's: 1 maximized,
+// 2 fullscreen, 4 activated).
+fake_configure: fn(&f: Fake, states: [Int]) {
+    f.serial += 1
+    serial: f.serial
+    f.configures.push(serial)
+    toplevel: f.toplevel
+    xdg_surface: f.xdg_surface
+    args := fake_words([Int]{400, 300, states.len() * 4})
+    loop state in states -> fake_put(args, state)
+    fake_event(f, toplevel, 0, args)
+    fake_event(f, xdg_surface, 0, fake_words([Int]{serial}))
+}
+
+fake_buffer: fn(f: Fake, id: Int) -> FakeBuffer? {
+    loop buffer in f.buffers {
+        if buffer.id == id -> return Val(buffer.copy())
+    }
+    None
+}
+
+fake_pool: fn(f: Fake, object: Int) -> Int {
+    loop index in 0..<f.pools.len() {
+        if f.pools[index] == object -> return index
+    }
+    -1
+}
+
+// The four bytes of pixel (x, y) of `buffer` as stored.
+fake_pixel: fn(&f: Fake, buffer: FakeBuffer, x: Int, y: Int) -> [U8] {
+    if buffer.pool >= f.fds.len() || x < 0 || y < 0 || x >= buffer.width || y >= buffer.height {
+        fake_fail(f, "pixel {x},{y} is outside buffer {buffer.id}")
+        return [U8]{}
+    }
+    at: Int(0..9223372036854775807).from_int(buffer.offset + (y * buffer.width + x) * 4) ?? {
+        fake_fail(f, "pixel {x},{y} lies before the start of its pool")
+        return [U8]{}
+    }
+    f.fds[buffer.pool].read_at(at, 4) ?? {
+        fake_fail(f, "reading a pool failed: {err}")
+        [U8]{}
+    }
+}
+
+// The content's commit: an ack, the content's buffer, and the chrome its
+// own commit cached.
+fake_commit: fn(&f: Fake) {
+    f.commits += 1
+    acked: f.acked
+    f.acked = -1
+    if acked >= 0 {
+        index := -1
+        loop k in 0..<f.configures.len() {
+            if f.configures[k] == acked -> index = k
+        }
+        if index < 0 {
+            fake_fail(f, "acked serial {acked}, which no unacked configure carries")
+        } else {
+            f.configures = f.configures[(index + 1)..<f.configures.len()].copy()
+        }
+    }
+    if f.attached != 0 {
+        previous: f.current
+        f.current = f.attached
+        f.attached = 0
+        if previous != 0 && previous != f.current -> fake_event(f, previous, 0, [U8]{})
+    }
+    if f.chrome_dirty {
+        previous: f.chrome_shown.buffer
+        f.chrome_shown = f.chrome_cached.copy()
+        f.chrome_dirty = false
+        if previous != 0 && previous != f.chrome_shown.buffer -> fake_event(f, previous, 0, [U8]{})
+    }
+    f.shown_x = f.position_x
+    f.shown_y = f.position_y
+    callbacks: f.callbacks.copy()
+    f.callbacks = [Int]{}
+    loop id in callbacks -> fake_event(f, id, 0, fake_words([Int]{f.commits}))
+    if f.configures.len() > 0 || f.current == 0 -> return
+    f.settled += 1
+    if f.settled < 3 -> return
+    f.settled = 0
+    fake_phase(f)
+}
+
+// What the window shows now.
+fake_report: fn(&f: Fake) {
+    buffer: fake_buffer(f, f.current) ?? {
+        fake_fail(f, "no content buffer")
+        return
+    }
+    mapping: if f.viewport != 0 -> "on {f.destination_w}x{f.destination_h}" else -> "at buffer scale {f.buffer_scale}"
+    f.report.push("content {buffer.width}x{buffer.height} {fake_format(buffer.format)} {mapping}, geometry {f.geometry}")
+    centre: fake_pixel(f, buffer, buffer.width /% 2, buffer.height /% 2)
+    corner: fake_pixel(f, buffer, 0, buffer.height - 1)
+    f.report.push("  content centre {centre}, bottom-left {corner}")
+    if f.chrome_shown.buffer == 0 {
+        f.report.push("  chrome none")
+        return
+    }
+    chrome: fake_buffer(f, f.chrome_shown.buffer) ?? {
+        fake_fail(f, "the chrome shows no wl_buffer")
+        return
+    }
+    shown: f.chrome_shown.copy()
+    chrome_mapping: if f.chrome_viewport != 0 -> "on {shown.dest_w}x{shown.dest_h}" else -> "at buffer scale {shown.scale}"
+    f.report.push("  chrome {chrome.width}x{chrome.height} {fake_format(chrome.format)} {chrome_mapping} at {f.shown_x},{f.shown_y}, input {shown.input}")
+    // The chrome's corner is the window's (-m, -m), title bar included.
+    m: 0 - f.shown_x
+    s: f.scale120
+    bar: fake_pixel(f, chrome, fake_pixels(m + 120, s), fake_pixels(m + 40, s))
+    f.report.push("  title bar {bar}")
+    if m > 0 {
+        shadow: fake_pixel(f, chrome, fake_pixels(m /% 2, s), fake_pixels(m + 100, s))
+        alpha: if shadow.len() == 4 -> Int.from_u8(shadow[3]) else -> -1
+        soft: alpha > 0 && alpha < 255
+        f.report.push("  shadow soft {soft}")
+    }
+}
+
+fake_close: fn(&f: Fake) {
+    toplevel: f.toplevel
+    fake_event(f, toplevel, 1, [U8]{})
+}
+
+// The pointer enters the chrome at window (x, y) logical units, title bar
+// included, with serial `serial`.
+fake_enter: fn(&f: Fake, serial: Int, x: Int, y: Int) {
+    f.enter_serial = serial
+    m: 0 - f.shown_x
+    pointer: f.pointer
+    chrome: f.chrome
+    fake_event(f, pointer, 0, fake_words([Int]{serial, chrome, (x + m) * 256, (y + m) * 256}))
+}
+
+fake_motion: fn(&f: Fake, time: Int, x: Int, y: Int) {
+    m: 0 - f.shown_x
+    pointer: f.pointer
+    fake_event(f, pointer, 2, fake_words([Int]{time, (x + m) * 256, (y + m) * 256}))
+}
+
+// A press and release of `button` (272 primary, 273 secondary).
+fake_click: fn(&f: Fake, serial: Int, time: Int, button: Int) {
+    pointer: f.pointer
+    fake_event(f, pointer, 3, fake_words([Int]{serial, time, button, 1}))
+    fake_event(f, pointer, 3, fake_words([Int]{serial + 1, time + 50, button, 0}))
+}
+
+// Each settled state: report it, then the next stimulus.
+fake_phase: fn(&f: Fake) {
+    fake_report(f)
+    phase: f.phase
+    f.phase += 1
+    if f.mode == .Framed {
+        if phase == 0 {
+            // The title: the default cursor, and a press moves the window.
+            fake_enter(f, 201, 100, 20)
+            fake_click(f, 202, 1000, 272)
+        }
+        if phase == 1 {
+            // The secondary button on the title, then the bottom-right grip.
+            fake_click(f, 204, 2000, 273)
+            fake_motion(f, 2100, 403, 303)
+            fake_click(f, 206, 2200, 272)
+        }
+        if phase == 2 {
+            // The pointer leaves; a finger taps where a pointer's minimize
+            // button ends and a finger's maximize button is.
+            pointer: f.pointer
+            chrome: f.chrome
+            touch: f.touch
+            fake_event(f, pointer, 1, fake_words([Int]{208, chrome}))
+            m: 0 - f.shown_x
+            fake_event(f, touch, 0, fake_words([Int]{209, 3000, chrome, 7, (315 + m) * 256, (20 + m) * 256}))
+            fake_event(f, touch, 1, fake_words([Int]{210, 3050, 7}))
+        }
+        if phase == 3 {
+            // Maximized: the close button closes.
+            f.closing = true
+            fake_enter(f, 301, 376, 23)
+            fake_click(f, 302, 5000, 272)
+        }
+        if phase > 3 -> fake_close(f)
+        return
+    }
+    if f.mode == .Fullscreen && phase == 0 {
+        fake_configure(f, [Int]{4})
+        return
+    }
+    fake_close(f)
+}
+
+fake_request: fn(&f: Fake, object: Int, opcode: Int, body: [U8]) -[Env]> {
+    if object == 1 && opcode == 1 {
+        f.registry = fake_u32(body, 0)
+        registry: f.registry
+        names := 0
+        loop interface in f.globals.copy() {
+            names += 1
+            args := fake_words([Int]{names})
+            loop b in fake_text(interface) -> args.push(b)
+            fake_put(args, fake_version(interface))
+            fake_event(f, registry, 0, args)
+        }
+        return
+    }
+    if object == 1 && opcode == 0 {
+        fake_event(f, fake_u32(body, 0), 0, fake_words([Int]{0}))
+        return
+    }
+    if object == f.registry && opcode == 0 {
+        name: fake_u32(body, 0)
+        interface: fake_string(body, 4)
+        length: fake_u32(body, 4)
+        id: fake_u32(body, 8 + ((length + 3) /% 4) * 4 + 4)
+        if name < 1 || name > f.globals.len() || f.globals[name - 1] != interface -> fake_fail(f, "bound global {name} as {interface}")
+        if interface == "wl_compositor" -> f.compositor = id
+        if interface == "wl_subcompositor" -> f.subcompositor = id
+        if interface == "wl_shm" {
+            f.shm = id
+            fake_event(f, id, 0, fake_words([Int]{1}))
+            fake_event(f, id, 0, fake_words([Int]{0}))
+            if f.mode != .Fractional -> fake_event(f, id, 0, fake_words([Int]{875708993}))
+        }
+        if interface == "xdg_wm_base" -> f.wm_base = id
+        if interface == "zxdg_decoration_manager_v1" -> f.decoration_manager = id
+        if interface == "wp_fractional_scale_manager_v1" -> f.fractional_manager = id
+        if interface == "wp_viewporter" -> f.viewporter = id
+        if interface == "wp_cursor_shape_manager_v1" -> f.cursor_manager = id
+        if interface == "wl_seat" {
+            f.seat = id
+            // capabilities: a pointer and touch.
+            fake_event(f, id, 0, fake_words([Int]{5}))
+        }
+        return
+    }
+    if object == f.compositor {
+        if opcode == 0 && f.surface == 0 {
+            f.surface = fake_u32(body, 0)
+        } else if opcode == 0 {
+            f.chrome = fake_u32(body, 0)
+        }
+        if opcode == 1 -> f.region = fake_u32(body, 0)
+        return
+    }
+    if object == f.region {
+        if opcode == 1 -> f.region_text = "{fake_i32(body, 0)},{fake_i32(body, 4)} {fake_i32(body, 8)}x{fake_i32(body, 12)}"
+        return
+    }
+    if object == f.subcompositor && opcode == 1 {
+        f.subsurface = fake_u32(body, 0)
+        if fake_u32(body, 4) != f.chrome || fake_u32(body, 8) != f.surface -> fake_fail(f, "a subsurface of {fake_u32(body, 4)} on {fake_u32(body, 8)}")
+        return
+    }
+    if f.subsurface != 0 && object == f.subsurface {
+        if opcode == 1 {
+            f.position_x = fake_i32(body, 0)
+            f.position_y = fake_i32(body, 4)
+        }
+        if opcode == 3 {
+            f.report.push("chrome placed below {if fake_u32(body, 0) == f.surface -> "the content" else -> "another surface"}")
+        }
+        return
+    }
+    if object == f.decoration_manager && opcode == 1 {
+        f.decoration = fake_u32(body, 0)
+        if fake_u32(body, 4) != f.toplevel -> fake_fail(f, "a decoration for object {fake_u32(body, 4)}")
+        return
+    }
+    if f.decoration != 0 && object == f.decoration && opcode == 1 {
+        asked: fake_u32(body, 0)
+        f.report.push("decoration asked {if asked == 1 -> "client_side" else -> "server_side"}")
+        mode: if f.mode == .ServerSide -> 2 else -> asked
+        decoration: f.decoration
+        fake_event(f, decoration, 0, fake_words([Int]{mode}))
+        return
+    }
+    if object == f.shm && opcode == 0 {
+        f.pools.push(fake_u32(body, 0))
+        return
+    }
+    pool: fake_pool(f, object)
+    if pool >= 0 {
+        if opcode == 0 -> f.buffers.push(FakeBuffer{id: fake_u32(body, 0), pool: pool, offset: fake_u32(body, 4), width: fake_u32(body, 8), height: fake_u32(body, 12), format: fake_u32(body, 20)})
+        return
+    }
+    if object == f.wm_base && opcode == 2 {
+        f.xdg_surface = fake_u32(body, 0)
+        return
+    }
+    if object == f.xdg_surface {
+        if opcode == 1 -> f.toplevel = fake_u32(body, 0)
+        if opcode == 3 -> f.geometry = "{fake_i32(body, 0)},{fake_i32(body, 4)} {fake_i32(body, 8)}x{fake_i32(body, 12)}"
+        if opcode == 4 -> f.acked = fake_u32(body, 0)
+        return
+    }
+    if object == f.toplevel {
+        if opcode == 4 -> f.report.push("window menu at {fake_i32(body, 8)},{fake_i32(body, 12)}, serial {fake_u32(body, 4)}")
+        if opcode == 5 -> f.report.push("move at serial {fake_u32(body, 4)}")
+        if opcode == 6 -> f.report.push("resize edges {fake_u32(body, 8)} at serial {fake_u32(body, 4)}")
+        if opcode == 8 -> f.report.push("min size {fake_u32(body, 0)}x{fake_u32(body, 4)}")
+        if opcode == 9 {
+            f.report.push("maximize")
+            fake_configure(f, [Int]{1, 4})
+        }
+        if opcode == 10 -> f.report.push("unmaximize")
+        if opcode == 13 -> f.report.push("minimize")
+        return
+    }
+    if object == f.fractional_manager && opcode == 1 {
+        f.fractional = fake_u32(body, 0)
+        f.scale120 = 180
+        fractional: f.fractional
+        fake_event(f, fractional, 0, fake_words([Int]{180}))
+        return
+    }
+    if object == f.viewporter && opcode == 1 {
+        if fake_u32(body, 4) == f.surface {
+            f.viewport = fake_u32(body, 0)
+        } else if fake_u32(body, 4) == f.chrome {
+            f.chrome_viewport = fake_u32(body, 0)
+        }
+        return
+    }
+    if f.viewport != 0 && object == f.viewport && opcode == 2 {
+        f.destination_w = fake_u32(body, 0)
+        f.destination_h = fake_u32(body, 4)
+        return
+    }
+    if f.chrome_viewport != 0 && object == f.chrome_viewport && opcode == 2 {
+        f.chrome_pending.dest_w = fake_u32(body, 0)
+        f.chrome_pending.dest_h = fake_u32(body, 4)
+        return
+    }
+    if f.seat != 0 && object == f.seat {
+        if opcode == 0 -> f.pointer = fake_u32(body, 0)
+        if opcode == 2 -> f.touch = fake_u32(body, 0)
+        return
+    }
+    if f.cursor_manager != 0 && object == f.cursor_manager && opcode == 1 {
+        f.cursor_device = fake_u32(body, 0)
+        return
+    }
+    if f.cursor_device != 0 && object == f.cursor_device && opcode == 1 {
+        serial: fake_u32(body, 0)
+        f.report.push("cursor shape {fake_u32(body, 4)}")
+        if serial != f.enter_serial -> fake_fail(f, "cursor set at serial {serial}, the latest enter is {f.enter_serial}")
+        return
+    }
+    if f.chrome != 0 && object == f.chrome {
+        if opcode == 1 -> f.chrome_pending.buffer = fake_u32(body, 0)
+        if opcode == 5 -> f.chrome_pending.input = f.region_text.copy()
+        if opcode == 8 -> f.chrome_pending.scale = fake_u32(body, 0)
+        if opcode == 6 {
+            f.chrome_cached = f.chrome_pending.copy()
+            f.chrome_dirty = true
+        }
+        return
+    }
+    if object == f.surface {
+        if opcode == 1 -> f.attached = fake_u32(body, 0)
+        if opcode == 3 -> f.callbacks.push(fake_u32(body, 0))
+        if opcode == 8 -> f.buffer_scale = fake_u32(body, 0)
+        if opcode == 6 {
+            if f.commits == 0 {
+                // The initial commit: the first configure.
+                f.commits += 1
+                states: if f.mode == .Fullscreen -> [Int]{2, 4} else -> [Int]{4}
+                fake_configure(f, states)
+                return
+            }
+            fake_commit(f)
+        }
+        return
+    }
+}
+
+// Handles every complete request in the inbox.
+fake_dispatch: fn(&f: Fake) -[Env]> {
+    at := 0
+    loop f.inbox.len() - at >= 8 {
+        object: fake_u32(f.inbox, at)
+        word: fake_u32(f.inbox, at + 4)
+        size: word >> 16
+        if size < 8 {
+            fake_fail(f, "malformed request header")
+            f.inbox = [U8]{}
+            return
+        }
+        if f.inbox.len() - at < size -> break
+        body: f.inbox[(at + 8)..<(at + size)].copy()
+        fake_request(f, object, word.bit_and(65535), body)
+        at += size
+    }
+    if at > 0 -> f.inbox = f.inbox[at..<f.inbox.len()].copy()
+}
+
+fake_chrome: fn() -> FakeChrome { FakeChrome{buffer: 0, dest_w: 0, dest_h: 0, scale: 1, input: "none"} }
+
+// Accepts one window and serves it until it disconnects.
+fake_serve: fn(listener: net.UnixListener, mode: FakeMode) -[Env, Net, Time, IO]> Fake {
+    stream: net.unix_accept(listener) ?? panic("accept: {err}")
+    f := Fake{
+        stream: stream, mode: mode, inbox: [U8]{}, out: [U8]{}, globals: fake_globals(mode),
+        registry: 0, compositor: 0, subcompositor: 0, shm: 0, wm_base: 0, decoration_manager: 0, decoration: 0,
+        fractional_manager: 0, viewporter: 0, seat: 0, pointer: 0, touch: 0, cursor_manager: 0, cursor_device: 0,
+        surface: 0, chrome: 0, subsurface: 0, xdg_surface: 0, toplevel: 0, fractional: 0, viewport: 0, chrome_viewport: 0,
+        region: 0, region_text: "none", pools: [Int]{}, fds: [sys.Fd]{}, buffers: [FakeBuffer]{},
+        attached: 0, current: 0, acked: -1, callbacks: [Int]{}, destination_w: 0, destination_h: 0, buffer_scale: 1,
+        chrome_pending: fake_chrome(), chrome_cached: fake_chrome(), chrome_shown: fake_chrome(), chrome_dirty: false,
+        position_x: 0, position_y: 0, shown_x: 0, shown_y: 0, geometry: "unset", serial: 0, configures: [Int]{},
+        scale120: 120, phase: 0, settled: 0, enter_serial: -1, commits: 0, report: [String]{}, failures: [String]{}, closing: false,
+    }
+    idle := 0
+    loop idle < 40 {
+        ready: net.unix_wait(f.stream, 50000000) ?? {
+            f.failures.push("wait failed: {err}")
+            return f
+        }
+        if !ready {
+            idle += 1
+            next
+        }
+        idle = 0
+        message: net.unix_receive(f.stream, 65536) ?? {
+            if !f.closing -> f.failures.push("receive failed: {err}")
+            fake_hung_up(f)
+            return f
+        }
+        if message.bytes.len() == 0 {
+            fake_hung_up(f)
+            return f
+        }
+        loop fd in message.fds.move() -> f.fds.push(fd)
+        loop b in message.bytes -> f.inbox.push(b)
+        fake_dispatch(f)
+        fake_flush(f)
+    }
+    f.failures.push("the window went quiet")
+    f
+}
+
+// The window disconnected: after the close button only in the framed mode.
+fake_hung_up: fn(&f: Fake) {
+    if f.closing -> f.report.push("the window closed by its close button")
+}
+
+// A window that presents a frame of its current size until `.Close`.
+client: fn(label: String) -[Env, IO, Net, Time]> {
+    window: ui.open(width: 400, height: 300, title: "Notes") ?? {
+        print("{label}: open failed: {err}")
+        return
+    }
+    sizes := [String]{}
+    loop frame in window.frames() {
+        closed := false
+        loop event in frame.events() {
+            if event == .Close -> closed = true
+        }
+        if closed -> break
+        size: "{frame.width}x{frame.height}"
+        if sizes.len() == 0 || sizes[sizes.len() - 1] != size -> sizes.push(size)
+        pixels := [U8]{}
+        count := frame.width * frame.height
+        loop count > 0 {
+            // RGBA, straight alpha.
+            pixels.push(U8{40})
+            pixels.push(U8{80})
+            pixels.push(U8{120})
+            pixels.push(U8{255})
+            count -= 1
+        }
+        frame.present(pixels) ?? {
+            print("{label}: present failed: {err}")
+            return
+        }
+    }
+    if window.failure() == .Val(failure) {
+        print("{label}: failed: {failure}")
+        return
+    }
+    print("{label}: closed, frames {sizes}")
+}
+
+mode_name: fn(mode: FakeMode) -> String {
+    if mode == {
+        .Framed -> "framed"
+        .ServerSide -> "server side"
+        .NoDecoration -> "no decoration manager"
+        .NoSubcompositor -> "no subcompositor"
+        .Fullscreen -> "fullscreen"
+        .Fractional -> "fractional"
+    }
+}
+
+run: fn() {
+    path: sys.get("WAYLAND_DISPLAY") ?? ""
+    if !path.starts_with("/") {
+        print("WAYLAND_DISPLAY must be an absolute socket path")
+        return
+    }
+    listener: net.unix_listen(path) ?? {
+        print("listen failed: {err}")
+        return
+    }
+    modes: [FakeMode]{.Framed, .ServerSide, .NoDecoration, .NoSubcompositor, .Fullscreen, .Fractional}
+    loop mode in modes {
+        server: task { fake_serve(listener, mode) }
+        client(mode_name(mode))
+        f: server.join() ?? panic("compositor task failed")
+        loop line in f.report -> print("  {line}")
+        loop failure in f.failures -> print("  FAIL {failure}")
+    }
+}

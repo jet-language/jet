@@ -38,7 +38,10 @@ reserve: fn<T>(allocation: &stream.AllocationBudget, values: &[T], additional: I
 // and reader/writer frame storage without moving an owner out of borrowed self.
 release: fn<T>(allocation: &stream.AllocationBudget, values: &[T]) Never! {
     size: mem.__list_capacity<T>(values) * mem.__type_size<T>()
-    values = [T]{}
+    // `values = [T]{}` would empty the list in place and keep its buffer;
+    // returning the buffer's heap charge drops the buffer itself.
+    released: [T]{}
+    values = released
     allocation.release(size)
 }
 

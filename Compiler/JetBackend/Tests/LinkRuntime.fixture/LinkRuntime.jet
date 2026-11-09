@@ -1,20 +1,19 @@
 // Link relocatable objects with the prebuilt runtime into a static
 // executable with the in-process linker (Image/StaticLink.jet), the way
 // `jet build` does, or build the runtime pack (Image/RuntimePack.jet) from
-// the Jet runtime object and C platform dependencies, or build the runtime
-// image from a pack and bind a program object to it (Image/MemoryLink.jet);
-// report read/link/write times.
+// the Jet runtime object, or build the runtime image from a pack and bind a
+// program object to it (Image/MemoryLink.jet); report read/link/write times.
 // A Jet package beside the backend it links with.
 //
 //     jet run LinkRuntime.jet -- <output> <input>...
-//     jet run LinkRuntime.jet -- --pack <output> <Jet object> <C platform input>...
+//     jet run LinkRuntime.jet -- --pack <output> <Jet object> [<archive>...]
 //     jet run LinkRuntime.jet -- --image <output> <runtime pack>
 //     jet run LinkRuntime.jet -- --bind <output> <runtime image> <program object>
 //     jet run LinkRuntime.jet -- --image-compare <runtime pack> <runtime image>
 //
 // Link inputs are relocatable objects (the program's, a runtime pack) and
 // static archives, told apart by their magic bytes. Pack inputs require a
-// standalone Jet runtime object; archives only satisfy its C dependencies.
+// standalone Jet runtime object; archives only satisfy its dependencies.
 // `--image-compare` checks the image's loaded bytes against the ordinary
 // link of the pack at the same base with every export kept and a stub
 // `main` after the runtime: they may differ only in the ELF and program
@@ -54,11 +53,8 @@ lr_status: fn(args: [String]) -> Int {
     }
     read_ms: read_started.elapsed_millis()
     started: time.instant()
-    // Names program objects may call directly besides the runtime's C ABI:
-    // the memory primitives.
-    extra_roots: [String]{"memcpy", "memmove", "memset", "memcmp"}
     result: if {
-        mode == "--pack" -> x64_link_runtime_pack(names, bufs, extra_roots)
+        mode == "--pack" -> x64_link_runtime_pack(names, bufs, [String]{})
         mode == "--image" -> {
             pack: bufs.pop() ?? return 66
             x64_link_runtime_image(names[0], pack)

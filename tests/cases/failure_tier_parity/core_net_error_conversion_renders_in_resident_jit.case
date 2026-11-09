@@ -5,7 +5,7 @@ step jit: jet run main.jet
 env: NO_COLOR=1
 exit: 1
 stdout: empty
-stderr: ~ "Error:"
+stderr: ~ "Error:" # the diagnostic says it
 stderr.from_or_all("Error:"): ~ "network timeout must be non-negative"
 stderr.from_or_all("Error:"): ~ "(type: NetError)"
 stderr.from_or_all("Error:"): ~ "conversion"
@@ -22,6 +22,6 @@ exit: 0
 step aot: built
 exit: 1
 stdout: == jit
-stderr: ~ "Error:"
+stderr: ~ "Error:" # the diagnostic says it
 stderr.from_or_all("Error:").normalize_failure_journey_paths: = "{cap:jit_runtime}"
 end when

@@ -11,6 +11,7 @@ use {
         FencedStatement,
         ImportDecl,
         Item,
+        MARKER_FX,
         MARKER_HTML,
         MARKER_NO_PRELUDE,
         MARKER_POLICY,
@@ -864,6 +865,7 @@ parser_parse_program: fn(state: &JetParserState) -> Program {
             }
             parser_section_label_ahead(state) -> parser_report_section_label(state)
             parser_file_directive_ahead(state) -> parser_parse_file_directive(state, program)
+            parser_file_cap_ahead(state) -> parser_parse_file_cap(state, program)
             parser_policy_file_decl_ahead(state) -> parser_parse_policy_file_decl(state, program)
             parser_unattached_marker_at_end(state) -> {
                 marker: parser_parse_marker(state)
@@ -1042,6 +1044,31 @@ parser_file_directive_ahead: fn(state: &JetParserState) -> Bool Never! {
     if rule != "Target" -> return false
     if parser_target_selects_file_web_at(state, 1) || !parser_hash_leads_to_item(state) -> return true
     !parser_target_names_os_at(state, 1) && !parser_hash_leads_to_function_or_module(state)
+}
+
+// `#FX(…)` above a `use` line at file scope caps the whole file; nothing
+// else follows a file's head that way, so the cap would otherwise drop.
+parser_file_cap_ahead: fn(state: &JetParserState) -> Bool Never! {
+    if parser_kind_at(state, 1) != TOKEN_IDENT || parser_value_at(state, 1) != MARKER_FX -> return false
+    offset := parser_marker_head_end(state, 0)
+    if offset < 0 -> return false
+    loop parser_kind_at(state, offset) == TOKEN_SEMI -> offset += 1
+    after: parser_kind_at(state, offset)
+    after == TOKEN_KW_USE || (after == TOKEN_KW_PUB && parser_kind_at(state, offset + 1) == TOKEN_KW_USE)
+}
+
+// The file's cap; a second one is E0999. Its owner is filled in by sema,
+// which knows the file's name.
+parser_parse_file_cap: fn(state: &JetParserState, program: &Program) {
+    marker: parser_parse_marker(state)
+    parser_skip_semicolons(state)
+    if program.file_cap != None {
+        parser_report_repeated_file_marker(state, MARKER_FX, marker.span)
+        return
+    }
+    cap := parser_module_fx_cap(state, marker, "") ?? return
+    cap.scope = "file"
+    program.file_cap = Val(cap)
 }
 
 // `#Target(OS.…)`: an OS gate, never a web ceiling. `name_offset` is the

@@ -86,10 +86,10 @@ padded: fn(number: Int) -> String Never! {
 // overwrites what an earlier run left.
 retire: fn(dir: String, name: String, number: Int) Problem! -[FS]> {
     path: files.join(dir, name)
-    if !files.exists(path) -> return Ok(())
+    if !files.exists(path) -> return Ok()
     kept: files.join(files.join(dir, AUDIT_DIR), "{padded(number)}-{name}")
     files.rename(path, kept) ?? return Err(problem(INPUT, "cannot keep {path} as {kept}: {err}"))
-    Ok(())
+    Ok()
 }
 
 problems_dyn: fn(problems: [Problem]) -> Dyn Never! {

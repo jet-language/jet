@@ -23,7 +23,7 @@ use jet_foundation.[
     failure_contract_from_return_type,
     failure_contract_source,
     owned_trait,
-    type_with_effective_fn_returns,
+    type_with_effective_parameter_fn_return,
     ViewProvenanceMap,
 ]
 
@@ -129,7 +129,7 @@ sema_callable_policies: fn(func: Func) -> CallablePolicyChain Never! {
 sema_function_param_types: fn(func: Func) -> [Type] Never! {
     params := [Type]{}
     loop parameter_index in 0..<func.params.len() {
-        ty: type_with_effective_fn_returns(func.params[parameter_index].ty)
+        ty: type_with_effective_parameter_fn_return(func.params[parameter_index].ty)
         if func.params[parameter_index].variadic -> params.push(Type.List{element: ty}) else -> params.push(ty)
     }
     params

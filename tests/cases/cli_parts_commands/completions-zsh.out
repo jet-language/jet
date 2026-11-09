@@ -92,6 +92,7 @@ flags=(
         '--stdin-path[With fmt -\: Path label used in diagnostics when reading from stdin]'
         '--output[With jobs\: Select a named output, which Canvas uses as the initial selection]'
         '--locked[With build/fetch/jobs/inspect gates\: Require locked dependency and provenance facts]'
+        '--sha256[With run\: Pin the first fetch of a URL target to this sha256, as --sha256=HEX]'
         '--effect[With find\: Require an effect such as FS.Read]'
         '--example[With find\: Search by input/output example]'
         '--lock[With fetch/new\: Lock dependency fetching or choose a migration/scaffold lock policy]'
@@ -117,10 +118,11 @@ flags=(
         '--all[With fix\: Apply safety classes beyond formatting and behavior-preserving; with help\: Also list every form this `jet` has not built yet, with the Tower card that owns its port]'
         '--markers[With fix\: Move every marker set above its declaration or into its body --markers <inside|above>]'
         '--try-anyway[With inspect gates\: Evaluate past unsupported features (no guarantees)]'
+        '--caps[With explain effects\: List every module cap written under a file or directory]'
         '--watch[With dev\: Re-run on dependency changes (--watch=off runs once)]'
         '--project[With repl\: Load package settings and imports from this directory]'
         '--no-prepare[With run\: Refuse Jetpack project environment preparation]'
-        '-e[With run\: Run CODE as the body of the program'\''s run function, as jet -e CODE \[<args>\]; jet run - reads the program from standard input]'
+        '-e[With run\: Run CODE as the body of the program'\''s run function and show its last value, as jet -e CODE \[<args>\]; jet run - reads the program from standard input]'
         '--pure[With eval\: Reject code with side effects]'
         '--allow[With run/build/jobs/repl/inspect gates\: Allow comma-separated effect roots or leaves as --allow=RIGHTS]'
         '--allow-all[With run/build/inspect gates\: Allow every effect, as --allow with every right, so a run names none; --deny still wins]'
@@ -245,7 +247,7 @@ case $words[2] in
             registry) _values 'action' 'publish:Publish the current package' 'yank:Stop new installs of a published version' 'keygen:Create a package-signing key' 'key:Manage the package-signing key' 'vendor:Copy dependencies into vendor/' ;;
             inspect) _values 'action' 'types:Show registered type and operator facts' 'rights:Show required and granted rights' 'claims:Show receipt-backed claims' 'shapes:Show semantic shapes and projections' 'decisions:Show compiler decisions and their evidence' 'structure:Show structure and lifecycle facts' 'build:Show build identity, provenance, and coverage' 'gates:Show the complete compile-time gate ledger' 'graph:Show the build graph' 'query:Search code and build information' 'explain-build:Explain why a target, action, or file is rebuilt' 'compiler:Read compiler facts as versioned JSON' 'impact:Show code affected by a symbol' 'provenance:Read dependency provenance' 'digest:Write the one-file LLM surface digest' 'env:List typed environment reads in a config surface' 'semindex:Search the code index' 'output:Inspect one selected Output' 'expand:Show expanded meaning of Jet code (use --json for canonical facts)' 'schema:Inspect saved data schema versions' 'codemod:Preview or apply code changes' 'audit:Inspect implicit copies, exercised memory witnesses, or dependencies' 'bind:Generate Jet bindings from a foreign header' 'logs:Show recent package build logs' 'info:Show package details' 'outdated:List dependencies with available updates' 'reserved:List reserved words and sigils' ;;
             project) _values 'action' 'parts:List loaded and skipped project modules' ;;
-            self) _values 'action' 'toolchain:Show the Jet version selected for this project' 'doctor:Find and fix toolchain problems' 'completions:Print shell completions' 'man:Print the Jet manual' 'devtools:Run Jet maintenance tools' ;;
+            self) _values 'action' 'toolchain:Show the Jet version selected for this project' 'doctor:Find and fix toolchain problems' 'completions:Print shell completions' 'man:Print the Jet manual' 'devtools:Run Jet maintenance tools' 'lsp:Start the language server' ;;
             env) _values 'action' 'test:Run environment checks in a clean environment' 'hook:Print the shell auto-activation hook' 'sync:Apply typed managed environment files' 'info:Show the typed environment plan' 'fetch-toolchain:Download this jet'\''s C toolchain pack for offline C builds' ;;
             cache) _values 'action' 'status:Show machine-wide artifact store usage' 'prune:Prune the artifact store to a target size' 'limit:Set the host-wide artifact store limit' ;;
             os) _values 'action' 'bridge:Convert an existing system configuration to Jet' 'services:Manage development services' 'config:Manage Jet settings and trust' ;;
