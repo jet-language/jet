@@ -214,12 +214,12 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
   "total": 1423,
   "counts": {
     "Compiler": 748,
-    "Core": 191,
+    "Core": 193,
     "Docs": 8,
-    "Examples": 40,
+    "Examples": 41,
     "Jetpack": 9,
     "Tools": 7,
-    "tests": 428
+    "tests": 430
   },
   "regions": [
     {
@@ -6567,7 +6567,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 424,
+      "line": 425,
       "column": 1,
       "reason": "posix umask: the caller owns the process file-creation mask and restores it when other code relies on it"
     },
@@ -7039,6 +7039,13 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
       "line": 34,
       "column": 5,
       "reason": "posix set_wall_clock: a time before 1970 is refused before it reaches the kernel"
+    },
+    {
+      "package": "Examples",
+      "file": "Examples/Systems/Process/OSIds.jet",
+      "line": 17,
+      "column": 5,
+      "reason": "posix set_user_ids: the effective ID is set to the one it already is, and the out-of-range ID never reaches the kernel"
     },
     {
       "package": "Examples",
@@ -9590,10 +9597,24 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     },
     {
       "package": "tests",
+      "file": "tests/conformance/corpus/core/sys/set_group_ids.jet",
+      "line": 5,
+      "column": 5,
+      "reason": "set the effective group ID to the one it already is, which needs no privilege, then refuse an ID out of range"
+    },
+    {
+      "package": "tests",
       "file": "tests/conformance/corpus/core/sys/set_scheduling.jet",
       "line": 5,
       "column": 5,
       "reason": "move this short-lived witness to batch time sharing and back; neither needs privilege"
+    },
+    {
+      "package": "tests",
+      "file": "tests/conformance/corpus/core/sys/set_user_ids.jet",
+      "line": 5,
+      "column": 5,
+      "reason": "set the effective user ID to the one it already is, which needs no privilege, then refuse an ID out of range"
     },
     {
       "package": "tests",
@@ -10248,9 +10269,9 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | crate/package | regions |
 | --- | ---: |
 | Compiler | 748 |
-| Core | 191 |
+| Core | 193 |
 | Docs | 8 |
-| Examples | 40 |
+| Examples | 41 |
 | Jetpack | 9 |
 | Tools | 7 |
 | tests | 424 |
@@ -11234,6 +11255,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Examples | Examples/Memory/Unsafe/UnsafeSentriesProvenance.jet | 6:5 | "external address must be a live allocation" |
 | Examples | Examples/Memory/Unsafe/UnsafeSentriesSourceOff.jet | 7:5 | "the local cell is live for this raw read" |
 | Examples | Examples/Systems/Process/OSCpuTime.jet | 34:5 | "posix set_wall_clock: a time before 1970 is refused before it reaches the kernel" |
+| Examples | Examples/Systems/Process/OSIds.jet | 17:5 | "posix set_user_ids: the effective ID is set to the one it already is, and the out-of-range ID never reaches the kernel" |
 | Examples | Examples/Systems/Process/OSMknod.jet | 29:5 | "make a device file in the temporary directory and remove it" |
 | Examples | Examples/Systems/Process/OSProcessControl.jet | 31:5 | "POSIX process and pipe control for the core.sys surface" |
 | Examples | Examples/Systems/Process/OSScheduling.jet | 26:5 | "posix set_scheduling: the out-of-range priority never reaches the kernel" |
@@ -11598,7 +11620,9 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | tests | tests/conformance/corpus/core/sys/mknod.jet | 5:5 | "probe device-file creation with a major number out of range" |
 | tests | tests/conformance/corpus/core/sys/pipe.jet | 5:5 | "open a pipe and observe its descriptor pair" |
 | tests | tests/conformance/corpus/core/sys/reset_signal.jet | 5:5 | "restore the default disposition of SIGUSR1, which this program never handles, then refuse signal 0" |
+| tests | tests/conformance/corpus/core/sys/set_group_ids.jet | 5:5 | "set the effective group ID to the one it already is, which needs no privilege, then refuse an ID out of range" |
 | tests | tests/conformance/corpus/core/sys/set_scheduling.jet | 5:5 | "move this short-lived witness to batch time sharing and back; neither needs privilege" |
+| tests | tests/conformance/corpus/core/sys/set_user_ids.jet | 5:5 | "set the effective user ID to the one it already is, which needs no privilege, then refuse an ID out of range" |
 | tests | tests/conformance/corpus/core/sys/set_wall_clock.jet | 8:5 | "a time before 1970 is refused before it reaches the kernel, so the clock never changes" |
 | tests | tests/conformance/corpus/core/sys/setgid.jet | 5:5 | "probe setgid with an invalid identifier" |
 | tests | tests/conformance/corpus/core/sys/setpgid.jet | 5:5 | "set the current process into its existing process group" |

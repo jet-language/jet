@@ -1,0 +1,8 @@
+// core-conformance: core.sys.user_ids
+use os: core.sys
+
+run: fn() {
+    // getresuid's real and effective IDs are the ones getuid and geteuid read.
+    ids: os.user_ids() ?? panic("user_ids")
+    print(ids.real == os.getuid() && ids.effective == os.geteuid() && ids.saved >= 0)
+}

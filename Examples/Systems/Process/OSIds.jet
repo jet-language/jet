@@ -1,0 +1,39 @@
+// `core.sys.user_ids` and `group_ids` read a process's real, effective and
+// saved IDs, and `set_user_ids` / `set_group_ids` change them under
+// `#Unsafe` (setresuid, setresgid). Setting an ID to one the process already
+// has needs no privilege; an ID outside 0..4294967294 is refused before any
+// system call. `users`, `user`, `user_by_id`, `groups`, `group` and
+// `group_by_id` read /etc/passwd and /etc/group as musl does.
+package: {
+    name: "os_ids"
+    authority: { allow: [Env, FS.Read, IO, Mem.Alloc] }
+}
+
+use os: core.sys
+
+run: fn() {
+    ids: os.user_ids() ?? panic("user_ids")
+    print("user_ids agrees with getuid and geteuid: {ids.real == os.getuid() && ids.effective == os.geteuid()}")
+    #Unsafe("posix set_user_ids: the effective ID is set to the one it already is, and the out-of-range ID never reaches the kernel") {
+        os.set_user_ids(effective: ids.effective) ?? panic("set_user_ids(effective:)")
+        refused: os.set_user_ids(real: 4294967295) ? ok -> "accepted" ! error -> (if error == {
+            .InvalidInput(_) -> "InvalidInput"
+            else -> "another error"
+        })
+        print("set_user_ids(real: 4294967295): {refused}")
+    }
+    gids: os.group_ids() ?? panic("group_ids")
+    print("group_ids agrees with getgid and getegid: {gids.real == os.getgid() && gids.effective == os.getegid()}")
+
+    root: os.user_by_id(0) ?? panic("user_by_id(0)")
+    print("user 0 is {root.name}")
+    again: os.user(root.name) ?? panic("user(root)")
+    print("found again by name: {again.uid == 0}")
+    accounts: os.users() ?? panic("users")
+    print("accounts listed: {accounts.len() > 0}")
+    wheel: os.group_by_id(0) ?? panic("group_by_id(0)")
+    named: os.group(wheel.name) ?? panic("group(name)")
+    print("group 0 found again by name: {named.gid == 0}")
+    all_groups: os.groups() ?? panic("groups")
+    print("groups listed: {all_groups.len() > 0}")
+}

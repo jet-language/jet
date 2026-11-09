@@ -21,6 +21,7 @@ use {
     __core_files_path_components.[PathPlatform]
     shared_bounds.[shared_range_valid]
     process_errors.[process_error]
+    id_rows.[ids_of, set_ids, database_lines, passwd_entry, group_entry]
 }
 // Reused from Foundation CLISchema/TargetWidth (a736ba79d). This pointer
 // record measures the selected build target, never the compiler host.
@@ -947,6 +948,212 @@ DeviceKind: enum { Character Block }
 
 #Unsafe("posix setgid: the caller drops or changes process credentials deliberately") setgid: fn(gid: Int) IOError! -[Env]> {
     call_unit(core.sys.__setgid(gid), "setgid", .Write, None)
+}
+
+/// A process's real, effective and saved user or group IDs. The kernel
+/// checks access against `effective`; `saved` lets a privileged program give
+/// up an ID and later take it back.
+Ids: struct {
+    real: Int
+    effective: Int
+    saved: Int
+}
+
+/// This program's real, effective and saved user IDs (getresuid).
+user_ids: fn() -[Env]> Ids IOError! { ids_of(0, "user_ids") }
+
+/// This program's real, effective and saved group IDs (getresgid).
+group_ids: fn() -[Env]> Ids IOError! { ids_of(1, "group_ids") }
+
+/// Set this program's real, effective and saved user IDs together
+/// (setresuid); `None` keeps an ID. Every thread changes at once. Without
+/// CAP_SETUID each new ID must be one of the current real, effective or saved
+/// IDs, else `IOError.PermissionDenied`; an ID outside 0..4294967294 is
+/// `IOError.InvalidInput`. `seteuid(id)` is `set_user_ids(effective: id)`, and
+/// `setreuid` names the saved ID that it sets implicitly.
+#Unsafe("posix set_user_ids: the caller drops or changes process credentials deliberately") set_user_ids: fn(real: Int?{None}, effective: Int?{None}, saved: Int?{None}) IOError! -[Env]> {
+    set_ids(0, real, effective, saved, "set_user_ids")
+}
+
+/// Set this program's real, effective and saved group IDs together
+/// (setresgid), as `set_user_ids` does with CAP_SETGID. Supplementary groups
+/// stay as they are; `initgroups` sets them.
+#Unsafe("posix set_group_ids: the caller drops or changes process credentials deliberately") set_group_ids: fn(real: Int?{None}, effective: Int?{None}, saved: Int?{None}) IOError! -[Env]> {
+    set_ids(1, real, effective, saved, "set_group_ids")
+}
+
+/// One account of the user database, a line of /etc/passwd.
+User: struct {
+    name: String
+    uid: Int
+    gid: Int
+    gecos: String
+    home: String
+    shell: String
+}
+
+/// One group of the group database, a line of /etc/group. `members` lists
+/// the users that have it as a supplementary group.
+Group: struct {
+    name: String
+    gid: Int
+    members: [String]
+}
+
+/// Every account in /etc/passwd, in file order. Core reads the file itself,
+/// as musl does, and asks no other directory service (NSS, LDAP, macOS
+/// Directory Services). A line that is not UTF-8, lacks a field, or has an ID
+/// outside 0..4294967294 is skipped.
+users: fn() -[FS.Read]> [User] IOError! {
+    out := [User]{}
+    loop line in database_lines(files.read_bytes("/etc/passwd")) {
+        out.push(passwd_entry(line) ?? next)
+    }
+    Ok(out)
+}
+
+/// The first account in /etc/passwd named `name`, as `users` reads it.
+user: fn(name: String) -[FS.Read]> User? IOError! {
+    loop line in database_lines(files.read_bytes("/etc/passwd")) {
+        entry: passwd_entry(line) ?? next
+        if entry.name == name -> return Ok(Val(entry))
+    }
+    Ok(None)
+}
+
+/// The first account in /etc/passwd with user ID `uid`, as `users` reads it.
+user_by_id: fn(uid: Int) -[FS.Read]> User? IOError! {
+    loop line in database_lines(files.read_bytes("/etc/passwd")) {
+        entry: passwd_entry(line) ?? next
+        if entry.uid == uid -> return Ok(Val(entry))
+    }
+    Ok(None)
+}
+
+/// Every group in /etc/group, in file order, skipping lines as `users` does.
+groups: fn() -[FS.Read]> [Group] IOError! {
+    out := [Group]{}
+    loop line in database_lines(files.read_bytes("/etc/group")) {
+        out.push(group_entry(line) ?? next)
+    }
+    Ok(out)
+}
+
+/// The first group in /etc/group named `name`, as `groups` reads it.
+group: fn(name: String) -[FS.Read]> Group? IOError! {
+    loop line in database_lines(files.read_bytes("/etc/group")) {
+        entry: group_entry(line) ?? next
+        if entry.name == name -> return Ok(Val(entry))
+    }
+    Ok(None)
+}
+
+/// The first group in /etc/group with group ID `gid`, as `groups` reads it.
+group_by_id: fn(gid: Int) -[FS.Read]> Group? IOError! {
+    loop line in database_lines(files.read_bytes("/etc/group")) {
+        entry: group_entry(line) ?? next
+        if entry.gid == gid -> return Ok(Val(entry))
+    }
+    Ok(None)
+}
+
+// The ID calls and the database parser: not part of the sys surface.
+priv id_rows: module {
+    // Group 0 reads the user IDs, 1 the group IDs.
+    ids_of: fn(group: Int, operation: String) -[Env]> Ids IOError! {
+        row: core.sys.__resid(group)
+        if !row.available -> return Err(unsupported(operation))
+        if row.errno != 0 -> return Err(syscall_error(.Read, None, row.errno))
+        Ok(Ids{real: row.real, effective: row.effective, saved: row.saved})
+    }
+
+    // The route keeps an ID given as -1.
+    set_ids: fn(group: Int, real: Int?, effective: Int?, saved: Int?, operation: String) IOError! {
+        id_input(real, operation)
+        id_input(effective, operation)
+        id_input(saved, operation)
+        call_unit(core.sys.__set_resid(group, real ?? -1, effective ?? -1, saved ?? -1), operation, .Write, None)
+    }
+
+    // 4294967295 is (uid_t)-1, which the kernel reads as "keep".
+    id_input: fn(id: Int?, operation: String) IOError! {
+        value: id ?? return Ok()
+        if value < 0 || value > 4294967294 {
+            return Err(IOError.InvalidInput(IOContext{operation: .Write, resource: Val(operation), os_code: None,
+                cause: Val("ID {value} is outside 0..4294967294")}))
+        }
+        Ok()
+    }
+
+    // The UTF-8 lines of a database file; a line that is not UTF-8 is dropped.
+    database_lines: fn(raw: [U8]) -> [String] Never! {
+        out := [String]{}
+        start := 0
+        loop start < raw.len() {
+            end := start
+            loop end < raw.len() && raw[end] != (U8{10}) -> end += 1
+            first: start
+            start = end + 1
+            out.push(String.from_bytes(raw[first..<end]) ?? next)
+        }
+        out
+    }
+
+    // name:password:uid:gid:gecos:home:shell, cut as musl's getpwent_a cuts
+    // it: the shell is the rest of the line.
+    passwd_entry: fn(line: String) -> User? Never! {
+        name: text_parse.split_once(line, ":")
+        password: text_parse.split_once(name.tail, ":")
+        uid: text_parse.split_once(password.tail, ":")
+        gid: text_parse.split_once(uid.tail, ":")
+        gecos: text_parse.split_once(gid.tail, ":")
+        home: text_parse.split_once(gecos.tail, ":")
+        if !name.found || !password.found || !uid.found || !gid.found || !gecos.found || !home.found -> return None
+        Val(User{name: name.head, uid: database_id(uid.head) ?? return None, gid: database_id(gid.head) ?? return None,
+            gecos: gecos.head, home: home.head, shell: home.tail})
+    }
+
+    // name:password:gid:members, members comma-separated; an empty member
+    // (a trailing comma) is dropped.
+    group_entry: fn(line: String) -> Group? Never! {
+        name: text_parse.split_once(line, ":")
+        password: text_parse.split_once(name.tail, ":")
+        gid: text_parse.split_once(password.tail, ":")
+        if !name.found || !password.found || !gid.found -> return None
+        members := [String]{}
+        if gid.tail != "" {
+            loop member in text_parse.split(gid.tail, ",") {
+                if member != "" -> members.push(member)
+            }
+        }
+        Val(Group{name: name.head, gid: database_id(gid.head) ?? return None, members: members})
+    }
+
+    // Decimal digits only, at most 4294967294.
+    database_id: fn(text: String) -> Int? Never! {
+        if text.bytes().len() > 10 || !text_parse.is_digit(text) -> return None
+        value: text_parse.parse_int(text) ?? return None
+        if value > 4294967294 -> return None
+        Val(value)
+    }
+}
+
+#Test("the user and group databases cut lines as musl does") {
+    root: passwd_entry("root:x:0:0:root:/root:/bin/sh") ?? panic("root line")
+    assert_eq(root.name, "root")
+    assert_eq(root.uid, 0)
+    assert_eq(root.home, "/root")
+    assert_eq((passwd_entry("odd:x:7:8::/home/odd:/bin/a:b") ?? panic("shell line")).shell, "/bin/a:b")
+    assert(passwd_entry("short:x:1:1:gecos:/home") == None)
+    assert(passwd_entry("big:x:4294967295:1::/:/bin/sh") == None)
+    assert(passwd_entry("neg:x:-1:1::/:/bin/sh") == None)
+    wheel: group_entry("wheel:x:10:root,nate,") ?? panic("wheel line")
+    assert_eq(wheel.gid, 10)
+    assert_eq(wheel.members, [String]{"root", "nate"})
+    assert_eq((group_entry("empty:x:20:") ?? panic("empty line")).members.len(), 0)
+    assert(group_entry("nogid:x::") == None)
+    lines: database_lines([U8]{97, 10, 255, 10, 98})
+    assert_eq(lines, [String]{"a", "b"})
 }
 
 #Unsafe("posix setpgrp: the caller owns the process group topology it changes") setpgrp: fn() IOError! -[Env]> {

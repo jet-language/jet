@@ -2125,6 +2125,10 @@ run: fn() {
 | `pid()` / `getpid()` / `getppid()` / `cpu_count()` | `Int -[Env]>` | Return process IDs or a logical CPU count of at least one. |
 | `getuid()` / `geteuid()` / `getgid()` / `getegid()` / `getpgrp()` | `Int -[Env]>` | Return POSIX identity and process-group values where supported. |
 | `getgroups()` | `[Int] -[Env]>` | Return supplementary group IDs. |
+| `user_ids()` / `group_ids()` | `Ids !IOError -[Env]>` | `getresuid` / `getresgid`: the `real`, `effective` and `saved` IDs. |
+| `users()` / `groups()` | `[User] !IOError -[FS.Read]>` / `[Group] !IOError -[FS.Read]>` | Every account of `/etc/passwd` or group of `/etc/group`, in file order. Core reads the file as musl does and asks no other directory service (NSS, LDAP); a line that is not UTF-8, lacks a field, or has an ID outside 0..4294967294 is skipped. A `User` has `name`, `uid`, `gid`, `gecos`, `home` and `shell`; a `Group` has `name`, `gid` and its supplementary `members`. |
+| `user(name)` / `user_by_id(uid)` | `User? !IOError -[FS.Read]>` | The first account with that name or user ID, `None` when there is none. |
+| `group(name)` / `group_by_id(gid)` | `Group? !IOError -[FS.Read]>` | The first group with that name or group ID, `None` when there is none. |
 | `expand(value)` | `String -[Env]>` | Expand `$VAR`, `${VAR}`, and the supported percent form from the environment. |
 | `uptime()` | `Float -[Time, Env, FS]>` | Read system uptime from `/proc/uptime` on Linux. |
 | `loadavg()` / `times()` | `[Float] -[Env]>` | Return load averages or process CPU times. |
@@ -2220,6 +2224,7 @@ whether the call goes through the module alias or a direct import:
 | `kill(pid, signal)` | `!IOError -[Env]>` | Send a signal. |
 | `#Unsafe reset_signal(number)` | `!IOError -[Env]>` | Restore a signal's default action (SIG_DFL), the fault signals included, so the signal raised next takes it; a supervisor re-raising its child's signal uses it before `kill`. |
 | `setuid` / `setgid` / `setpgid` / `setpgrp` / `initgroups` | `!IOError -[Env]>` | Change credentials, groups, or process-group membership. |
+| `set_user_ids(real:, effective:, saved:)` / `set_group_ids(real:, effective:, saved:)` | `!IOError -[Env]>` | `setresuid` / `setresgid` on every thread at once; an omitted ID (`None`) stays. Without `CAP_SETUID` / `CAP_SETGID` each new ID must be one of the current real, effective or saved IDs, else `IOError.PermissionDenied`; an ID outside 0..4294967294 is `IOError.InvalidInput`. `seteuid(id)` is `set_user_ids(effective: id)`. Supplementary groups stay as they are. |
 | `pipe()` / `close_fd(fd)` | `[Int] !IOError -[FS, Env]>` / `Unit -[FS, Env]>` | Create or close raw process descriptors. |
 | `mkfifo(path, mode)` | `!IOError -[FS, Env]>` | Create a named pipe. |
 | `mknod(path, mode, kind, major, minor)` | `!IOError -[FS, Env]>` | Create a `DeviceKind.Character` or `.Block` device file for `major`:`minor` (0..4095 and 0..1048575); only a privileged process may. |
