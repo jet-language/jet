@@ -29,6 +29,7 @@ Run a lesson from the repository root, for example `jet run Examples/Math/<Lesso
 - [NumericFloor](NumericFloor.jet) — Numeric floor flagship for Examples/Math/.
 - [NumericMethods](NumericMethods.jet) — One numeric meaning on AOT, run, and compile time.
 - [PowerOperator](PowerOperator.jet) — Power is a numeric method; ^ only hands over ownership.
+- [Powers](Powers.jet) — x^n for a whole n and e^(y ln x), correctly rounded: the same bits on every tier, exact powers exact, and every Int exponent taken exactly.
 - [PreludeMinMaxClamp](PreludeMinMaxClamp.jet) — `min`, `max` and `clamp` are prelude names over one ordered type, with no import.
 - [RandomAudit](RandomAudit.jet)
 - [RandomSeededSequence](RandomSeededSequence.jet)

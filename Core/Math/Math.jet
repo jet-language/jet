@@ -576,6 +576,468 @@ __square_times_below_one: fn(m: Int, e: Int, x: (m: Int, e: Int)) -> Bool Never!
     if shift >= 0 -> return false
     m * m * x.m < (Int{1} << -shift)
 }
+/// base^exponent for a whole exponent, correctly rounded (C23 pown): 1 for
+/// exponent 0 even when base is NaN, and for a zero or infinite base the
+/// zero or infinity pow gives, negative for a negative base and an odd
+/// exponent. Every Int exponent is taken exactly, however large.
+pow_n: fn(base: Float, exponent: Int) -> Float Never! {
+    if exponent == 0 -> return Float{1.0}
+    if is_nan(base) -> return base + base
+    sign: if exponent.bit_and(1) == 1 && to_bits(base) < 0 -> Float{-1.0} else -> Float{1.0}
+    a: fabs(base)
+    if a == 0.0 || is_inf(a) {
+        if (exponent > 0) == (a == 0.0) -> return sign * Float{0.0}
+        return sign * INFINITY
+    }
+    if -0x20_0000_0000_0000 <= exponent && exponent <= 0x20_0000_0000_0000 -> return sign * __pow_cr(a, Float{exponent})
+    sign * __pow_big(a, exponent)
+}
+/// base^exponent as e^(exponent ln base), correctly rounded (C23 powr): NaN
+/// for base < 0 and for 0^0, inf^0 and 1^inf, +inf for 0^y with y < 0, +0
+/// for 0^y with y > 0, and 1 for 1^y with y finite and for x^0 with x finite
+/// and positive. Float.pow keeps musl's bits and pow's rules.
+pow_r: fn(base: Float, exponent: Float) -> Float Never! {
+    if is_nan(base) || is_nan(exponent) -> return base + exponent
+    if (base < Float{0.0}) -> return NAN
+    if exponent == 0.0 {
+        if base == 0.0 || is_inf(base) -> return NAN
+        return Float{1.0}
+    }
+    if base == 0.0 {
+        if (exponent < Float{0.0}) -> return INFINITY
+        return 0.0
+    }
+    if is_inf(base) {
+        if (exponent < Float{0.0}) -> return 0.0
+        return INFINITY
+    }
+    if (base == Float{1.0}) {
+        if is_inf(exponent) -> return NAN
+        return Float{1.0}
+    }
+    if is_inf(exponent) {
+        if ((base < Float{1.0}) == (exponent > Float{0.0})) -> return 0.0
+        return INFINITY
+    }
+    __pow_cr(base, exponent)
+}
+// a^y for finite a > 0 and finite y != 0 (CORE-MATH pow.c cr_pow): phase 1
+// in double-double, then y = 1, 2 and 1/2 directly, then __pow_accurate.
+__pow_cr: fn(a: Float, y: Float) -> Float Never! {
+    l: __pow_log_1(a)
+    ey: (to_bits(y) >> 52).bit_and(0x7FF)
+    // y log(a) could underflow below 2^-969 or overflow from 2^1014
+    if 0x36 <= ey && ey < 0x7F5 {
+        r: __s_mul(y, l.hi, l.lo)
+        e: __pow_exp_1(r.hi, r.lo)
+        // 2^-57.579 when log(a) cancelled, else 2^-63.797
+        bound: if l.cancel -> Float{4.6485168145316e-18} else -> Float{6.246867986000465e-20}
+        low: e.hi + fma(bound, -e.hi, e.lo)
+        if low == e.hi + fma(bound, e.hi, e.lo) -> return low
+    }
+    if (y == Float{1.0}) -> return a
+    if (y == Float{2.0}) -> return a * a
+    if (y == Float{0.5}) -> return sqrt(a)
+    __pow_accurate(a, y)
+}
+// log(x) as hi + lo for a finite x > 0 (CORE-MATH pow.c log_1): x = 2^e t
+// with t in (1/sqrt 2, sqrt 2), z = r t - 1 exact for the 9-bit inverse r,
+// log x = e log 2 - log r + log(1 + z). cancel when e = 0 and lo is not
+// below 2^-24 hi.
+__pow_log_1: fn(x: Float) -> (hi: Float, lo: Float, cancel: Bool) Never! {
+    u: to_bits(x)
+    m := u.bit_and(0xF_FFFF_FFFF_FFFF)
+    e := (u >> 52).bit_and(0x7FF)
+    tb := 0
+    if e != 0 {
+        tb = m.bit_or(0x3FF0_0000_0000_0000)
+        m = m + 0x10_0000_0000_0000
+        e = e - 0x3FF
+    } else {
+        k: __clz64(m) - 11
+        e = -0x3FE - k
+        m = m << k
+        tb = m.bit_or(0x3FF0_0000_0000_0000)
+    }
+    c: m >= 0x16_A09E_667F_3BCD
+    if c -> e = e + 1
+    i: if c -> (m >> 45) - 181 else -> (m >> 44) - 181
+    t: if c -> from_bits(tb) * Float{0.5} else -> from_bits(tb)
+    z: fma(__POW_INVERSE[i], t, Float{-1.0})
+    ee: Float{e}
+    th: fma(ee, Float{0.6931471805598903}, __POW_LOG_INVERSE[2 * i])
+    tl: fma(ee, Float{5.497923018708371e-14}, __POW_LOG_INVERSE[2 * i + 1])
+    s: __fast_sum_ddd(th, tl, z)
+    p: __pow_p_1(z)
+    h: __fast_sum_ddd(s.hi, s.lo + p.lo, p.hi)
+    if e == 0 && (fabs(h.lo) > fabs(h.hi) * Float{5.960464477539063e-8}) {
+        f: __fast_two_sum(h.hi, h.lo)
+        return (hi: f.hi, lo: f.lo, cancel: true)
+    }
+    (hi: h.hi, lo: h.lo, cancel: false)
+}
+// log(1 + z) - z for |z| < 0.00403 as hi + lo (CORE-MATH pow.c p_1): a
+// degree-8 polynomial, -z^2/2 kept in double-double.
+__pow_p_1: fn(z: Float) -> (hi: Float, lo: Float) Never! {
+    wh: z * z
+    wl: fma(z, z, -wh)
+    t: fma(Float{-0.12500370131039634}, z, Float{0.1428610267999632})
+    u := fma(Float{-0.16666666662262275}, z, Float{0.19999999995699516})
+    v := fma(Float{-0.25000000000000017}, z, Float{0.3333333333333335})
+    u = fma(t, wh, u)
+    v = fma(u, wh, v)
+    (hi: Float{-0.5} * wh, lo: fma(v * wh, z, Float{-0.5} * wl))
+}
+// e^(rh + rl) as hi + lo (CORE-MATH pow.c exp_1): rh + rl = k log(2)/4096 + z,
+// then 2^(k/4096) e^z. Sure overflow gives DBL_MAX twice and sure underflow
+// zeros; NaN where the result could overflow or be subnormal, for the slow
+// path to settle.
+__pow_exp_1: fn(rh: Float, rl: Float) -> (hi: Float, lo: Float) Never! {
+    if is_nan(rh) || (rh > Float{709.7826672320183}) {
+        if (rh > Float{709.7827585515907}) -> return (hi: Float{1.7976931348623157e308}, lo: Float{1.7976931348623157e308})
+        return (hi: NAN, lo: NAN)
+    }
+    if (rh < Float{-656.4652340719966}) {
+        if (rh < Float{-745.1332670341407}) -> return (hi: 0.0, lo: 0.0)
+        return (hi: NAN, lo: NAN)
+    }
+    k: round_even(rh * Float{5909.278887481194})
+    zh: fma(Float{0.0001692253858788929}, -k, rh)
+    zl: fma(Float{5.661735385366942e-21}, -k, rl)
+    __exp_dd_tail(k, __pow_q_1(zh + zl))
+}
+// e^z for |z| < 2^-12.905 as hi + lo (CORE-MATH pow.c q_1): degree 4.
+__pow_q_1: fn(z: Float) -> (hi: Float, lo: Float) Never! {
+    q := fma(Float{0.041666666688168076}, z, Float{0.16666666679061554})
+    q = fma(q, z, Float{0.5})
+    h0: fma(q, z, Float{1.0})
+    h1: z * h0
+    __fast_sum_ddd(Float{1.0}, fma(z, h0, -h1), h1)
+}
+// a^y correctly rounded where phase 1 could not tell: an exact power or
+// midpoint exactly, a power far outside the Floats from log2, the rest by
+// __pow_ziv.
+__pow_accurate: fn(a: Float, y: Float) -> Float Never! {
+    exact: __pow_exact(a, y)
+    if !is_nan(exact) -> return exact
+    lg: y * log2(a)
+    if (lg > Float{1100.0}) -> return INFINITY
+    if (lg < Float{-1200.0}) -> return 0.0
+    x: __float_parts(a)
+    p: __float_parts(fabs(y))
+    yn: if (y < Float{0.0}) -> -p.m else -> p.m
+    __pow_ziv(x.m, x.e, yn, p.e, 1)
+}
+// a^n for finite a > 0 and |n| > 2^53: exact for a power of two, from log2
+// far outside the Floats, else by __pow_ziv; no other such a^n is a Float or
+// a midpoint.
+__pow_big: fn(a: Float, n: Int) -> Float Never! {
+    if (a == Float{1.0}) -> return a
+    x: __float_parts(a)
+    if x.m.bit_and(x.m - 1) == 0 -> return __round_scaled(1, (x.e + __bit_len(x.m) - 1) * n)
+    cap: Int{1} << 1000
+    cn := n
+    if cn > cap -> cn = cap
+    if cn < -cap -> cn = -cap
+    lg: approx(cn) * log2(a)
+    if (lg > Float{1100.0}) -> return INFINITY
+    if (lg < Float{-1200.0}) -> return 0.0
+    __pow_ziv(x.m, x.e, n, 0, 1)
+}
+// a^y rounded when it is a Float or the midpoint of two, else NaN (the
+// cases of CORE-MATH pow.c is_exact). With a = m 2^e and y = n 2^f, m and n
+// odd: a power of two gives 2^(e y) when e y is whole; otherwise y > 0, and
+// m^y or, for y = n/2^k, the k-fold square root of m must be whole with an
+// odd power below 2^54.
+__pow_exact: fn(a: Float, y: Float) -> Float Never! {
+    x: __float_parts(a)
+    m := x.m
+    e := x.e
+    loop m.bit_and(1) == 0 {
+        m = m >> 1
+        e = e + 1
+    }
+    p: __float_parts(fabs(y))
+    n := p.m
+    f := p.e
+    loop n.bit_and(1) == 0 {
+        n = n >> 1
+        f = f + 1
+    }
+    if m == 1 {
+        g: if (y < Float{0.0}) -> -e * n else -> e * n
+        if f >= 0 -> return __round_scaled(1, g << f)
+        if (g >> -f) << -f != g -> return NAN
+        return __round_scaled(1, g >> -f)
+    }
+    if (y < Float{0.0}) || f > 5 || f < -5 -> return NAN
+    if f >= 0 {
+        power: n << f
+        if power > 34 -> return NAN
+        v: m.pow(power)
+        if v >= 0x40_0000_0000_0000 -> return NAN
+        return __round_scaled(v, e * power)
+    }
+    r := m
+    k := -f
+    loop k > 0 {
+        if e.bit_and(1) != 0 -> return NAN
+        root: isqrt(r) ?? 0
+        if root * root != r -> return NAN
+        r = root
+        e = e >> 1
+        k = k - 1
+    }
+    if n > 34 -> return NAN
+    v: r.pow(n)
+    if v >= 0x40_0000_0000_0000 -> return NAN
+    __round_scaled(v, e * n)
+}
+// The bit length of v > 0.
+__bit_len: fn(v: Int) -> Int Never! {
+    r := v
+    n := 0
+    loop r > 0xFFFF_FFFF_FFFF_FFFF {
+        r = r >> 64
+        n = n + 64
+    }
+    // approx(r) rounds up to the next power of two at most
+    b := (to_bits(approx(r)) >> 52) - 1022
+    if (Int{1} << (b - 1)) > r -> b = b - 1
+    n + b
+}
+// m 2^e for a whole m >= 0, rounded to nearest, ties to even, with the
+// subnormals and overflow to +inf.
+__round_scaled: fn(m: Int, e: Int) -> Float Never! {
+    if m == 0 -> return 0.0
+    b: __bit_len(m)
+    if b + e > 1025 -> return INFINITY
+    if b + e < -1076 -> return 0.0
+    shift: if b - 53 > -1074 - e -> b - 53 else -> -1074 - e
+    if shift <= 0 -> return ldexp(Float{m}, e)
+    q := m >> shift
+    rest: m - (q << shift)
+    half: Int{1} << (shift - 1)
+    if rest > half || (rest == half && q.bit_and(1) == 1) -> q = q + 1
+    ldexp(Float{q}, e + shift)
+}
+// (xm 2^xe)^(yn 2^ye / yd) correctly rounded, for a power that is no Float
+// and no midpoint of two and lies within 2^±1200: Ziv's strategy on
+// __pow_fixed, doubling the width until both ends of its error interval
+// round alike. CORE-MATH pow.c settles every Float base and exponent at
+// 2^-240.07 relative error, so pow decides by 320; past 1024 bits, the
+// width __LN2_1024 allows, the approximation's own rounding is returned.
+__pow_ziv: fn(xm: Int, xe: Int, yn: Int, ye: Int, yd: Int) -> Float Never! {
+    w := 160
+    loop {
+        f: __pow_fixed(xm, xe, yn, ye, yd, w)
+        if f.err < f.q {
+            low: __round_scaled(f.q - f.err, f.k - w)
+            if low == __round_scaled(f.q + f.err, f.k - w) -> return low
+        }
+        if w == 1024 -> return __round_scaled(f.q, f.k - w)
+        w = if w > 512 -> 1024 else -> 2 * w
+    }
+}
+// e^(y log x) as q 2^(k - w) within err units of 2^(k - w), for x = xm 2^xe
+// > 0 and y = yn 2^ye / yd, in w-bit fixed point: log t = 2 atanh((t - 1) /
+// (t + 1)) for x = 2^E t with t in [1/sqrt 2, sqrt 2), then y log x =
+// k log 2 + r and e^r = (e^(r / 2^8))^(2^8). Every truncation is counted
+// into err.
+__pow_fixed: fn(xm: Int, xe: Int, yn: Int, ye: Int, yd: Int, w: Int) -> (q: Int, err: Int, k: Int) Never! {
+    one: Int{1} << w
+    b: __bit_len(xm)
+    big_e := b + xe
+    t := if b <= w -> xm << (w - b) else -> xm >> (b - w)
+    terr := if b <= w -> 0 else -> 1
+    if 2 * t * t < one * one {
+        t = t << 1
+        terr = 2 * terr
+        big_e = big_e - 1
+    }
+    // atanh(|s|) for s = (t - 1)/(t + 1), |s| < 0.1716; each term within 2
+    // units, s and s^2 within serr and serr + 1, the tail below 1
+    d: if t >= one -> t - one else -> one - t
+    s: (d << w) /% (t + one)
+    serr: terr + 1
+    s2: (s * s) >> w
+    sum := s
+    term := s
+    j := 1
+    loop term != 0 {
+        term = (term * s2) >> w
+        j = j + 2
+        sum = sum + term /% j
+    }
+    ln2: __LN2_1024 >> (1024 - w)
+    logt: if t >= one -> 2 * sum else -> -2 * sum
+    lx: big_e * ln2 + logt
+    lxerr: 2 * (3 * serr + j + 3) + (if big_e < 0 -> -big_e else -> big_e) + 1
+    num := lx * yn
+    nerr := lxerr * (if yn < 0 -> -yn else -> yn)
+    if ye >= 0 {
+        num = num << ye
+        nerr = nerr << ye
+    } else {
+        num = num >> -ye
+        nerr = (nerr >> -ye) + 2
+    }
+    if yd != 1 {
+        num = num /% yd
+        nerr = nerr /% yd + 2
+    }
+    k: ((num << w) /% ln2 + (one >> 1)) >> w
+    r: num - k * ln2
+    rerr: nerr + (if k < 0 -> -k else -> k) + 1
+    // e^(-|r| / 2^8) or e^(|r| / 2^8) by Taylor terms, each within 2 units
+    ra: (if r < 0 -> -r else -> r) >> 8
+    raerr: (rerr >> 8) + 2
+    q := one
+    a := one
+    i := 0
+    loop a != 0 {
+        i = i + 1
+        a = ((a * ra) >> w) /% i
+        if r < 0 && i.bit_and(1) == 1 {
+            q = q - a
+        } else {
+            q = q + a
+        }
+    }
+    err := 2 * raerr + 2 * i + 4
+    loop _ in 0..<8 {
+        err = ((2 * q * err + err * err) >> w) + 2
+        q = (q * q) >> w
+    }
+    (q: q, err: err, k: k)
+}
+// log(2) to 1024 bits, truncated: floor(2^1024 log 2).
+__LN2_1024: 0xb172_17f7_d1cf_79ab_c9e3_b398_03f2_f6af_40f3_4326_7298_b62d_8a0d_175b_8baa_fa2b_e7b8_7620_6deb_ac98_5595_52fb_4afa_1b10_ed2e_ae35_c138_2144_2757_3b29_1169_b825_3e96_ca16_224a_e8c5_1acb_da11_317c_387e_b9ea_9bc3_b136_603b_256f_a0ec_7657_f74b_72ce_87b1_9d65_48ca_f5df_a6bd_3830_3248_655f_a187_2f20_e3a2_da2d_97c5_0f3f_d5c6
+// The 9-bit inverses r of CORE-MATH pow.h _INVERSE: r t - 1 is exact for every t in
+// [i/2^8, (i + 1)/2^8), i in [181, 362], at index i - 181.
+__POW_INVERSE: [Float]{
+    1.41015625, 1.40234375, 1.39453125, 1.38671875, 1.37890625, 1.37109375, 1.3671875,
+    1.359375, 1.3515625, 1.34375, 1.3359375, 1.328125, 1.32421875, 1.31640625,
+    1.30859375, 1.3046875, 1.296875, 1.2890625, 1.28125, 1.27734375, 1.26953125,
+    1.265625, 1.2578125, 1.25, 1.24609375, 1.23828125, 1.234375, 1.2265625,
+    1.22265625, 1.21484375, 1.2109375, 1.203125, 1.19921875, 1.1953125, 1.1875,
+    1.18359375, 1.17578125, 1.171875, 1.16796875, 1.16015625, 1.15625, 1.15234375,
+    1.14453125, 1.140625, 1.13671875, 1.12890625, 1.125, 1.12109375, 1.1171875,
+    1.109375, 1.10546875, 1.1015625, 1.09765625, 1.08984375, 1.0859375, 1.08203125,
+    1.078125, 1.07421875, 1.0703125, 1.0625, 1.05859375, 1.0546875, 1.05078125,
+    1.046875, 1.04296875, 1.0390625, 1.03515625, 1.03125, 1.02734375, 1.0234375,
+    1.01953125, 1.015625, 1.01171875, 1.0078125, 1.0, 1.0, 0.994140625,
+    0.990234375, 0.986328125, 0.982421875, 0.978515625, 0.974609375, 0.970703125, 0.96875,
+    0.96484375, 0.9609375, 0.95703125, 0.953125, 0.94921875, 0.947265625, 0.943359375,
+    0.939453125, 0.935546875, 0.931640625, 0.9296875, 0.92578125, 0.921875, 0.919921875,
+    0.916015625, 0.912109375, 0.91015625, 0.90625, 0.90234375, 0.900390625, 0.896484375,
+    0.892578125, 0.890625, 0.88671875, 0.884765625, 0.880859375, 0.87890625, 0.875,
+    0.873046875, 0.869140625, 0.8671875, 0.86328125, 0.861328125, 0.857421875, 0.85546875,
+    0.8515625, 0.849609375, 0.845703125, 0.84375, 0.83984375, 0.837890625, 0.8359375,
+    0.83203125, 0.830078125, 0.826171875, 0.82421875, 0.822265625, 0.818359375, 0.81640625,
+    0.814453125, 0.810546875, 0.80859375, 0.806640625, 0.8046875, 0.80078125, 0.798828125,
+    0.796875, 0.79296875, 0.791015625, 0.7890625, 0.787109375, 0.783203125, 0.78125,
+    0.779296875, 0.77734375, 0.775390625, 0.771484375, 0.76953125, 0.767578125, 0.765625,
+    0.763671875, 0.76171875, 0.7578125, 0.755859375, 0.75390625, 0.751953125, 0.75,
+    0.748046875, 0.74609375, 0.7421875, 0.740234375, 0.73828125, 0.736328125, 0.734375,
+    0.732421875, 0.73046875, 0.728515625, 0.7265625, 0.724609375, 0.72265625, 0.720703125,
+    0.71875, 0.716796875, 0.71484375, 0.712890625, 0.7109375, 0.708984375, 0.70703125
+}
+// -log(r) for each __POW_INVERSE r as (hi, lo) pairs, hi a multiple of 2^-42
+// (CORE-MATH pow.h _LOG_INV).
+__POW_LOG_INVERSE: [Float]{
+    -0.34370051385326406, -5.438888329899065e-14, -0.3381449440087181, 1.686950122813039e-15,
+    -0.3325583373000427, -3.390686133672229e-14, -0.32694034499581903, -3.428840012666946e-14,
+    -0.3212906124538222, 8.788542769971545e-14, -0.3156087789864159, 1.1259274624680829e-13,
+    -0.31275571000378477, -1.1211800740360982e-13, -0.30702503529482783, -8.403156304792425e-14,
+    -0.3012613305781997, 3.7923164802093147e-14, -0.2954642128938758, 3.993416384387844e-14,
+    -0.28963329258294834, -9.43339818951269e-14, -0.28376817313073843, 9.3834172236637e-14,
+    -0.2808226629008459, -4.188609137863701e-14, -0.27490548587275043, -4.8816703646769986e-14,
+    -0.26895308734560786, 1.0389630784002988e-13, -0.2659635484972114, 7.343591369867797e-14,
+    -0.25995752443691345, -1.2621729398885316e-14, -0.25391520998095984, -3.600176732637335e-15,
+    -0.2478361639045943, 1.3029797173308663e-14, -0.24478272641772492, 3.399981108361833e-14,
+    -0.23864773785021498, 3.997050909530134e-14, -0.23556607131286, 9.30945949519689e-14,
+    -0.22937410106487732, 3.149265065191484e-14, -0.22314355131425145, 4.169796584527195e-14,
+    -0.2200136583053336, 5.149667234141408e-14, -0.21372432939779173, 7.359580186440514e-14,
+    -0.21056476910735, 3.6507188831790577e-16, -0.2042155414287663, 7.540916511956189e-14,
+    -0.20102574606062262, 3.188184937543774e-14, -0.1946154676995775, -9.41653814571825e-14,
+    -0.19139485299956505, -6.440856150696892e-14, -0.18492233849406148, 4.9485167661250996e-14,
+    -0.18167030310769405, 5.937506333384701e-14, -0.17840765747291698, 9.86835038673495e-14,
+    -0.17185025692674571, 8.649239607212071e-14, -0.16855536102980295, -3.714397754170472e-15,
+    -0.16193282026938505, 7.179390019295677e-14, -0.15860503017665906, 2.0472357800461955e-14,
+    -0.15526612891108016, -4.3792508292406054e-14, -0.1485546943231384, 1.24915489807516e-15,
+    -0.14518200984457508, 7.718001336828099e-14, -0.14179791186029433, 3.698459506697097e-14,
+    -0.13499516453748583, -1.8996158041578768e-14, -0.13157635778861732, -1.0195735223708473e-13,
+    -0.12814582269197672, 4.668031403945796e-14, -0.12124924363297396, 1.0427241278273008e-13,
+    -0.11778303565643, 4.654729747598445e-14, -0.11430477128010352, 4.488953352238699e-14,
+    -0.11081436634026431, -2.5799991283069902e-14, -0.10379679368156758, -7.598636597194141e-14,
+    -0.10026945316371894, 4.378637617078398e-14, -0.09672962645845473, -9.638067658552277e-14,
+    -0.0931772248541165, -6.678708517162898e-14, -0.0860343373417436, -5.955922987625643e-14,
+    -0.08244366921098845, -8.614512936087814e-14, -0.07884006170775137, -2.465018906176612e-14,
+    -0.07522342123752424, -6.329065958724544e-14, -0.07159365318693744, -7.137308225343178e-14,
+    -0.06795066190852594, 1.8195060030168815e-14, -0.06062462181648698, 5.213620639136504e-14,
+    -0.056941376400118315, -2.0109399435564958e-14, -0.053244514518837605, 2.532168943117445e-14,
+    -0.04953393512232651, 4.9880309107981426e-14, -0.0458095360313564, 6.219834199475792e-14,
+    -0.04207121392073532, 4.826314000551128e-14, -0.03831886430202758, -1.0902154302203302e-13,
+    -0.034552381506728125, 6.839139742328777e-14, -0.03077165866670839, -4.529814257790929e-14,
+    -0.026976587698300136, 9.806050516843177e-14, -0.023167059281604452, 7.007359704310036e-14,
+    -0.019342962843211353, 8.041853850522586e-14, -0.015504186535963527, -1.7274567499706107e-15,
+    -0.011650617220084314, 1.0903974971735932e-13, -0.0077821404420319595, -2.298941004620351e-14,
+    0.0, 0.0, 0.0, 0.0,
+    0.00587660848896121, 2.3831678683970623e-14, 0.009813621448302001, 2.262002617558127e-14,
+    0.013766195764219447, -7.148730327496492e-14, 0.017734454939727584, 4.0994203403301545e-14,
+    0.021718523954632474, 1.0512339808596024e-14, 0.02571852928804219, -5.307171319656295e-14,
+    0.029734598942923185, -4.4126629622863087e-14, 0.03174869831468641, -1.0610652735224087e-13,
+    0.03578910785154221, 4.3066973476878145e-14, 0.039845908547249564, -4.9893776716773285e-14,
+    0.04391923393473007, 1.0541743854342862e-13, 0.04800921918626955, 9.106054379130929e-14,
+    0.05211600113898385, 3.0171021061886944e-14, 0.05417573410204568, -2.1092591481336484e-14,
+    0.05830797138696653, -3.143092323816711e-14, 0.06245735493371285, 3.375459077303842e-14,
+    0.06662402762867714, -8.45908172817448e-14, 0.07080813415109333, 7.324072905400027e-14,
+    0.07290677080800378, 8.399594274044337e-14, 0.07711730334449385, -6.255850200176405e-14,
+    0.08134563945395712, -4.713370778300984e-15, 0.08346653102307755, 1.2485591229479935e-14,
+    0.08772185659313436, 9.405807834383626e-14, 0.09199536737060043, 1.003943822681932e-14,
+    0.0941389909139616, -9.969653023079706e-14, 0.09844007281321865, 3.3871241029241416e-14,
+    0.10275973395778237, -1.3438406228830954e-14, 0.10492658204293548, -7.621258431924948e-14,
+    0.10927441497892687, 3.575992997726754e-14, 0.1136412341452342, 6.889214192008475e-14,
+    0.11583181552509814, 2.3568822182038756e-14, 0.12022742699809896, 6.083738419972574e-14,
+    0.12243249955645297, 2.0797337102277177e-14, 0.1268572855367438, 8.563445867256504e-14,
+    0.1290770422751848, -4.2451216089619995e-14, 0.13353139262449076, 3.1859736349078334e-14,
+    0.1357660304258843, 5.4642560554597724e-14, 0.14025034287328708, -1.9509765515283165e-14,
+    0.14250006260726877, 1.4256439478199035e-14, 0.14701474296180095, 8.710783796122478e-15,
+    0.14927974959255152, 1.1026677017414112e-13, 0.15382521196443122, -9.478404105196118e-14,
+    0.15610571466299916, 6.249274931606537e-14, 0.16068238169054894, -7.547106028244807e-14,
+    0.16297859395081105, 1.2645632984431417e-14, 0.16758689703692653, 9.140819889491412e-14,
+    0.16989903679541385, -1.6376276414097503e-14, 0.17453941635199044, -9.076231556699796e-14,
+    0.17686770611157954, -8.872356517315185e-14, 0.17920142945763473, 7.626153677429339e-14,
+    0.1838852787700489, 8.84637355812087e-14, 0.18623545611512782, -3.68623071742394e-14,
+    0.19095244599316175, 6.806942496762734e-14, 0.1933193110035063, -1.0320443688698849e-14,
+    0.19569179135714876, -2.239166785505485e-14, 0.20045370511729743, 7.262215167738776e-14,
+    0.20284319251481975, -6.827661787185498e-14, 0.20523840324062803, 7.830497219227196e-14,
+    0.21004610480872543, 8.405546663347035e-14, 0.21245865121409224, 1.0115944196590467e-13,
+    0.21487703207844788, 2.714636557077735e-14, 0.21730127569003344, -5.204008743405884e-14,
+    0.2221674653410446, 1.0970699320566433e-13, 0.22460946899673218, -2.6136541452968644e-14,
+    0.22705745063535687, -1.078736749871691e-14, 0.2319714654377094, 6.573097737831975e-14,
+    0.23443755793300625, -3.76018844589075e-14, 0.2369097470784709, -1.1318526912023687e-13,
+    0.23938806309274696, 7.784172549574863e-14, 0.24436319773303694, -9.834201296269778e-14,
+    0.2468600779316148, -8.899851356560444e-14, 0.2493632081495889, 5.5428558531117086e-14,
+    0.25187261975497677, 9.331234677945918e-14, 0.25438834435226454, 5.28323330087437e-14,
+    0.2594388601382889, 9.704226792067357e-14, 0.26197371574153294, 4.102651071698446e-14,
+    0.2645150131702394, 7.150023153018402e-15, 0.2670627852489815, 6.371947269815667e-14,
+    0.26961706505403527, 1.0674835088128526e-13, 0.2721778859158803, -6.465103064005256e-14,
+    0.27731928541629713, -6.279055732660844e-14, 0.2798999320098119, -8.591298393628546e-14,
+    0.28248725557477883, -1.0190482133505088e-13, 0.2850812907518048, -8.12113117496254e-14,
+    0.28768207245184385, -6.292357389008195e-14, 0.290289635858926, -6.418144637660116e-14,
+    0.29290401643288533, 4.727452940514406e-14, 0.29815337231912054, -4.4204083338755686e-14,
+    0.30078841995714356, -6.212323048084214e-14, 0.3034304294199046, 1.548345993498083e-14,
+    0.3060794375915066, -9.55418156600115e-15, 0.30873548164959175, 2.1522127491642888e-14,
+    0.3113985990692072, -1.1022412161041444e-13, 0.3140688276250785, -1.0263280755261064e-13,
+    0.3167462053957024, -1.0174753377507561e-14, 0.3194307707663029, 5.834357420090924e-14,
+    0.3221225624320141, 5.855316792709415e-14, 0.3248216194012912, -5.351646604259541e-14,
+    0.3275279809990934, -1.1281735060685524e-13, 0.33024168687052224, 5.4612144489920215e-14,
+    0.33296277698491394, 2.3569101751290204e-14, 0.3356912916381134, 2.8136969901227338e-14,
+    0.33842727145702156, -5.280156204729064e-15, 0.3411707574027787, -1.156568624616423e-14,
+    0.3439217907746297, 2.730651892134709e-14, 0.3466804132137895, -5.277820018864269e-14
+}
 /// sin(pi * x), correctly rounded (C23 sinpi; CORE-MATH sinpi.c): a zero
 /// with the sign of x at every whole x and NaN for an infinity.
 sin_pi: fn(n: Float) -> Float Never! {
@@ -6476,6 +6938,38 @@ __payload_bits: fn(payload: Float) -> Int? Never! {
     assert_eq(to_bits(log10_1p(from_bits(-4639263655811884328))), -4644768064034318774)
     assert_eq(to_bits(log10_1p(from_bits(4503599627370496))), 1955888466868548)
     assert_eq(log10_1p(8.795571893350569e229), 229.94426408279878)
+}
+
+#Test("math pow_n and pow_r are correctly rounded") {
+    assert_eq(pow_n(3.0, 5), 243.0)
+    assert_eq(pow_n(-2.0, -3), -0.125)
+    assert_eq(pow_n(NAN, 0), 1.0)
+    assert_eq(to_bits(pow_n(-0.0, 3)), to_bits(-0.0))
+    assert_eq(pow_n(-0.0, -2), INFINITY)
+    assert_eq(pow_n(-INFINITY, -3), -0.0)
+    assert(is_nan(pow_n(NAN, 1)))
+    // A midpoint ties to even; 2^-1075 is the midpoint of 0 and 2^-1074.
+    assert_eq(pow_n(94906267.0, 2), 9007199515875288.0)
+    assert_eq(to_bits(pow_n(-0.03125, 215)), to_bits(-0.0))
+    assert_eq(pow_n(0.25, 537), 5e-324)
+    // Exponents past 2^53 are taken exactly.
+    assert_eq(pow_n(1.0, 4611686018427387905), 1.0)
+    assert_eq(to_bits(pow_n(from_bits(-4616189618054758372), -93702007578077696)), 821658989560790850)
+    assert_eq(to_bits(pow_n(from_bits(4607182418800017407), -3360544418716710911)), 7031019058405545140)
+    assert_eq(pow_r(2.0, 0.5), 1.4142135623730951)
+    assert_eq(pow_r(94906267.0, 2.0), 9007199515875288.0)
+    assert_eq(pow_r(0.0, -1.0), INFINITY)
+    assert_eq(pow_r(INFINITY, -2.0), 0.0)
+    assert_eq(pow_r(1.0, 1e300), 1.0)
+    assert_eq(pow_r(0.5, INFINITY), 0.0)
+    assert(is_nan(pow_r(-8.0, 3.0)))
+    assert(is_nan(pow_r(0.0, 0.0)))
+    assert(is_nan(pow_r(INFINITY, 0.0)))
+    assert(is_nan(pow_r(1.0, INFINITY)))
+    assert(is_nan(pow_r(1.0, NAN)))
+    // CORE-MATH pow.wc worst cases, one subnormal
+    assert_eq(to_bits(pow_r(from_bits(4835813121993211188), 0.3125)), 4678529498034705970)
+    assert_eq(to_bits(pow_r(from_bits(3138866179343064177), from_bits(4614256656552045848))), 958906342421917)
 }
 
 #Test("math special functions match musl") {

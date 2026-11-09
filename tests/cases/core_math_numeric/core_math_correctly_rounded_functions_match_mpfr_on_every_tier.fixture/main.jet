@@ -19,6 +19,8 @@ EXP2_M1: comptime { embed_file("corpus/exp2m1.txt") }
 EXP10_M1: comptime { embed_file("corpus/exp10m1.txt") }
 LOG2_P1: comptime { embed_file("corpus/log2p1.txt") }
 LOG10_P1: comptime { embed_file("corpus/log10p1.txt") }
+POW_R: comptime { embed_file("corpus/powr.txt") }
+POW_N: comptime { embed_file("corpus/pown.txt") }
 
 hex_value: fn(b: U8) -> Int {
     n: Int.from_u8(b)
@@ -51,8 +53,9 @@ is_nan_word: fn(word: Int) -> Bool {
     magnitude > 9218868437227405312
 }
 
-// The result of `name` on arguments `a`.
-value: fn(name: String, a: [Float]) -> Float {
+// The result of `name` on arguments `a`, whose words are `w`: pown takes its
+// exponent word as a whole number.
+value: fn(name: String, a: [Float], w: [Int]) -> Float {
     if name == "rsqrt" -> return math.rsqrt(a[0])
     if name == "sinpi" -> return math.sin_pi(a[0])
     if name == "cospi" -> return math.cos_pi(a[0])
@@ -65,6 +68,8 @@ value: fn(name: String, a: [Float]) -> Float {
     if name == "exp10m1" -> return math.exp10_m1(a[0])
     if name == "log2p1" -> return math.log2_1p(a[0])
     if name == "log10p1" -> return math.log10_1p(a[0])
+    if name == "powr" -> return math.pow_r(a[0], a[1])
+    if name == "pown" -> return math.pow_n(a[0], w[1])
     panic("no corpus function {name}")
 }
 
@@ -93,7 +98,7 @@ check: fn(name: String, corpus: String) {
             arguments.push(math.from_bits(words[i]))
             shown.push(hex_word(words[i]))
         }
-        got: math.to_bits(value(name, arguments))
+        got: math.to_bits(value(name, arguments, words))
         rows = rows + 1
         if got != want && !(is_nan_word(got) && is_nan_word(want)) {
             wrong = wrong + 1
@@ -116,4 +121,6 @@ run: fn() {
     check("exp10m1", EXP10_M1)
     check("log2p1", LOG2_P1)
     check("log10p1", LOG10_P1)
+    check("powr", POW_R)
+    check("pown", POW_N)
 }

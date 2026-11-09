@@ -2575,6 +2575,7 @@ calling them. Source-owned Core wrappers preserve these same constraints.
 | `math.log2_1p(x)`, `log10_1p(x)` | `Float` | `log2(1 + x)` and `log10(1 + x)`, correctly rounded, so every tier returns the same bits and small `x` keeps full precision: NaN below -1, `-inf` at -1, `+inf` at `+inf`, exact at every `x = 2^k - 1` and `x = 10^k - 1` (`k` in [1, 15]), and a zero keeps its sign (C23 `log2p1`, `log10p1`). |
 | `math.sqrt(x)`, `cbrt(x)`, `hypot(x, y)` | `Float` | Roots and hypotenuse. |
 | `math.rsqrt(x)` | `Float` | `1 / sqrt(x)` correctly rounded, so every tier returns the same bits: `+inf` for `+0`, `-inf` for `-0`, `+0` for `+inf` and NaN below zero (C23 `rsqrt`). |
+| `math.pow_n(x, n)`, `pow_r(x, y)` | `Float` | `x^n` for every whole `n: Int`, taken exactly however large, and `e^(y ln x)`, both correctly rounded, so every tier returns the same bits (C23 `pown`, `powr`). `pow_n` gives 1 for `n = 0` even at a NaN, and a negative result for a negative `x` and odd `n`; `pow_r` gives NaN for `x < 0`, `0^0`, `inf^0` and `1^inf`, and `+inf` for `0^y` with `y < 0`. `value.pow` keeps its own rules and bits. |
 | `math.floor(x)` / `math.ceil(x)` / `math.trunc(x)` | `Float` | Directed or toward-zero rounding in floating-point form. |
 | `math.fract(x)` | `Float` | Return the fractional part. |
 | `math.gamma(x)` / `math.lgamma(x)` | `Float` | Gamma and log-gamma functions. |
