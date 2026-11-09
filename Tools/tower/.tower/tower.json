@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 98139,
+    "rev": 98140,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -75420,7 +75420,7 @@
       "parentId": "c0xiig3k",
       "needsAcceptance": false,
       "created": "2026-10-29T12:53:42.058Z",
-      "updated": "2026-11-09T20:06:13.685Z",
+      "updated": "2026-11-09T21:01:51.292Z",
       "updatedBy": "Main",
       "criteriaLastN": 51
     },
@@ -190311,6 +190311,159 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-09T20:29:13.484Z"
+    },
+    {
+      "id": "D-CORE-LOWER1",
+      "cardId": "c0w1wcfc",
+      "group": "build",
+      "title": "Which packages lower only the functions a build reaches",
+      "situation": "",
+      "gist": "Should every package skip lowering functions the build never reaches, as Core does today?",
+      "lesson": "Checking source, lowering bodies and emitting machine code are separate costs. Eligible Core modules skip lowering unreached bodies; ordinary user runtime modules lower bodies before later reach pruning. That later step may drop their machine code.",
+      "explainer": "",
+      "story": "Sam's utility package has greet and an unused function. He wants the unused body checked for errors without lowering work it never needs.",
+      "inWild": "Go's linker computes reachability and treats exports and initializers as roots (https://go.dev/src/cmd/link/internal/ld/deadcode.go). That removes code from the binary; it does not prove an earlier pass skipped the body.",
+      "detail": "Exercised jet build --trace: lz4 reports lower items=3; lz5, without never_called, reports 2. lz1/lz2 report 5/4. All four builds succeed; lz1 does not hit the backend fault its comment predicts. lz4 and lz5 both report ir.build items=3, object bytes=3872 and linked bytes=42975. Lower counts therefore do not prove extra machine code or a whole-build speedup.\n\nPipeline.jet:2881-2889 selects prunable Core-source modules and excludes modules with foreign providers or functions; :4171-4181 adds comptime-only and test exclusions. Not every Core module is pruned today. This ballot settles only lowering (c17); where handle layouts come from (c18) is D-CORE-LAYOUT1, and either choice there combines with any choice here.\n\nThe existing dead_code option (stock remove) decides what the image keeps. remove builds only reached functions; keep also builds every non-generic function of the package's own modules, not all dependency bodies or arbitrary generic instances. A and B extend that policy to early lowering, which is proposed, not measured.\n\nProposed roots: executable and exported entrypoints, initializers, selected tests, scheduled jobs, foreign callbacks and adapters, drop and clone functions, trait and callable targets, and generated references. An unknown indirect target keeps its candidates. Roots are computed after expansion and specialization. Every declaration is still checked, so semantic diagnostics in unused code stay errors.\n\nA applies the rule to every package, the entry package included. B applies it to dependencies only; ordinary non-generic entry-package bodies are always lowered, including unused bodies with backend faults. C keeps today's Core eligibility rule and revises c17. Existing comptime/test exclusions and generic specialization rules remain; no option instantiates arbitrary unused generics.\n\nNo timing claim is made. Before delivery: tests for direct, indirect, export, callback and drop roots, keep versus remove, and generated references.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Every package",
+          "detail": "Early lowering follows dead_code for every package: remove lowers only reached bodies, keep lowers every own non-generic body.",
+          "code": "// Greeter/greeter.jet\ngreet: fn() -> String { \"hello\" }\nnever_called: fn() -> Int { 42 }\n// run.jet\nuse greeter\nrun: fn() { print(greeter.greet()) }\n// Proposed A: the dependency's never_called is checked, not lowered.\n// keep adds the entry package's own non-generic bodies, not every dependency.\n// If never_called belonged to the entry package, keep would lower it."
+        },
+        {
+          "key": "B",
+          "name": "Dependencies only",
+          "detail": "Dependencies lower only reached bodies; ordinary non-generic entry-package bodies are lowered even when unused.",
+          "code": "// Greeter/greeter.jet\ngreet: fn() -> String { \"hello\" }\nnever_called: fn() -> Int { 42 }\n// run.jet\nuse greeter\nrun: fn() { print(greeter.greet()) }\n// Proposed B: never_called (a dependency's) is checked, not lowered.\n// An unused function in run.jet's own package is still lowered."
+        },
+        {
+          "key": "C",
+          "name": "Core only",
+          "detail": "Keep today's eligibility rules: selected Core modules prune, ordinary user runtime modules lower before later pruning. Revise c17.",
+          "code": "// Greeter/greeter.jet\ngreet: fn() -> String { \"hello\" }\nnever_called: fn() -> Int { 42 }\n// run.jet\nuse greeter\nrun: fn() { print(greeter.greet()) }\n// C: never_called is lowered early; a later step may still omit its machine code."
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "One rule for every package, under the dead_code setting that already decides what the image keeps. All checking stays; no speedup is assumed.",
+        "gains": [
+          "Avoids unneeded early lowering, not all work on unused source.",
+          "Core and user packages follow the same rule."
+        ],
+        "losses": [
+          {
+            "loss": "A backend fault in an unreached body surfaces only once something reaches it.",
+            "mitigation": "dead_code=keep lowers every own non-generic body on purpose; selected tests stay roots."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B keeps two rules, so the entry package still pays for bodies nobody reaches."
+          },
+          {
+            "key": "C",
+            "reason": "C keeps the Core privilege the card exists to remove."
+          }
+        ],
+        "tradeoff": "Reach-based lowering for ordinary runtime modules, instead of lowering unused bodies before later pruning."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should every package skip lowering functions the build never reaches, as Core does today?",
+        "lesson": "Lowering a body and emitting its machine code are different steps. Eligible Core modules skip unreached bodies; ordinary user runtime modules lower before later pruning. Checking is unchanged.",
+        "trio": {
+          "current": {
+            "note": "A dependency's unused function is still lowered.",
+            "code": "never_called: fn() -> Int { 42 }\n// jet build --trace: lower 3 items; without it, 2"
+          },
+          "wild": {
+            "lang": "Go",
+            "note": "The linker keeps only reachable functions.",
+            "code": "func greet() string { return \"hello\" }\nfunc neverCalled() int { return 42 } // dropped from the binary"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Every package",
+            "gist": "Apply the existing remove/keep reach policy to early lowering in every package.",
+            "gains": [
+              "One rule; no new setting."
+            ],
+            "losses": [
+              "Backend faults in unreached bodies surface later."
+            ],
+            "proposed": {
+              "code": "never_called: fn() -> Int { 42 } // checked; not lowered under dead_code=remove"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Dependencies only",
+            "gist": "Dependencies prune; ordinary non-generic entry-package bodies still lower.",
+            "gains": [
+              "Backend faults in those entry-package bodies surface now."
+            ],
+            "losses": [
+              "Two rules."
+            ],
+            "proposed": {
+              "code": "never_called: fn() -> Int { 42 } // in a dependency: checked, not lowered"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Core only",
+            "gist": "Keep today's Core-only rule; revise c17.",
+            "gains": [
+              "No change."
+            ],
+            "losses": [
+              "Core stays special."
+            ],
+            "proposed": {
+              "code": "never_called: fn() -> Int { 42 } // lowered early, not necessarily emitted"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "One reach rule for every package under the existing dead_code setting, with all checking kept.",
+          "gains": [
+            "Less needless early lowering; no speedup claimed.",
+            "Same rule as Core."
+          ],
+          "losses": [
+            {
+              "loss": "Backend faults in unreached bodies surface later.",
+              "mitigation": "dead_code=keep lowers every own non-generic body on purpose."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Two rules."
+            },
+            {
+              "key": "C",
+              "reason": "Keeps the privilege."
+            }
+          ],
+          "tradeoff": "Reach-based lowering everywhere."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-09T21:01:51.292Z"
     }
   ],
   "questions": [
@@ -193420,6 +193573,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-09T21:01:51.292Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-CORE-LOWER1",
+      "note": "Which packages lower only the functions a build reaches"
+    },
     {
       "at": "2026-11-09T21:00:57.490Z",
       "by": "Main",
