@@ -211,9 +211,9 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1412,
+  "total": 1417,
   "counts": {
-    "Compiler": 741,
+    "Compiler": 746,
     "Core": 187,
     "Docs": 8,
     "Examples": 36,
@@ -3798,6 +3798,41 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
       "line": 263,
       "column": 5,
       "reason": "an idempotent install: every writer stores the same code address"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Source/ProcessSignal.jet",
+      "line": 336,
+      "column": 9,
+      "reason": "written under the scheduler root mutex, after every word the handler and dispatcher read"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Source/ProcessSignal.jet",
+      "line": 386,
+      "column": 5,
+      "reason": "rt_sigaction writes the signal's four-word action into the hub's preallocated table and sets none"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Source/ProcessSignal.jet",
+      "line": 390,
+      "column": 5,
+      "reason": "rt_sigaction borrows the four-word action on the stack; the handler is this runtime's one-word C-ABI export and the restorer its rt_sigreturn rail"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Source/ProcessSignal.jet",
+      "line": 399,
+      "column": 5,
+      "reason": "rt_sigaction reads the saved four-word action from the hub's table and writes no old action"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Source/ProcessSignal.jet",
+      "line": 630,
+      "column": 9,
+      "reason": "rt_sigaction borrows the four-word SIG_IGN or SIG_DFL action on the stack and writes no old action"
     },
     {
       "package": "Compiler",
@@ -10114,14 +10149,14 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 
 | crate/package | regions |
 | --- | ---: |
-| Compiler | 741 |
+| Compiler | 746 |
 | Core | 187 |
 | Docs | 8 |
 | Examples | 36 |
 | Jetpack | 9 |
 | Tools | 7 |
 | tests | 424 |
-| **total** | **1412** |
+| **total** | **1417** |
 
 ### Regions
 
@@ -10638,6 +10673,11 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 27:5 | "rt_sigaction borrows the four-word action on the stack; handler is this runtime's one-word C-ABI export and the restorer its rt_sigreturn rail" |
 | Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 51:9 | "written under the scheduler root mutex" |
 | Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 263:5 | "an idempotent install: every writer stores the same code address" |
+| Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 336:9 | "written under the scheduler root mutex, after every word the handler and dispatcher read" |
+| Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 386:5 | "rt_sigaction writes the signal's four-word action into the hub's preallocated table and sets none" |
+| Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 390:5 | "rt_sigaction borrows the four-word action on the stack; the handler is this runtime's one-word C-ABI export and the restorer its rt_sigreturn rail" |
+| Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 399:5 | "rt_sigaction reads the saved four-word action from the hub's table and writes no old action" |
+| Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 630:9 | "rt_sigaction borrows the four-word SIG_IGN or SIG_DFL action on the stack and writes no old action" |
 | Compiler | Compiler/JetRuntime/Source/ProveJournal.jet | 97:5 | "the harness main arms the journal before any test, so before any other thread reads it" |
 | Compiler | Compiler/JetRuntime/Source/ProveJournal.jet | 165:5 | "into lends `capacity` writable bytes for a raw Linux read of stdin" |
 | Compiler | Compiler/JetRuntime/Source/ProveJournal.jet | 181:5 | "cell lends 24 writable bytes to TIOCGPGRP and getpgrp takes none" |
