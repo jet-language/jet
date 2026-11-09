@@ -25,9 +25,10 @@ LSPChecked: struct {
     symbols: [SemSymbol]
 }
 
-// A compile reads sources and may run comptime code and build programs.
+// A compile reads sources and may run comptime code and build programs, and
+// comptime code may reach the network and inline assembly.
 LSPChecker: trait {
-    check: fn(self, entry: String, overlays: [LSPOverlay]) -[FS, Env, Exec, IO, Time]> LSPChecked
+    check: fn(self, entry: String, overlays: [LSPOverlay]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> LSPChecked
 }
 
 // A quick fix a diagnostic offers: its primary edit, then each alternative.

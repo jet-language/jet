@@ -1,0 +1,49 @@
+// `jet self lsp`: the language server (Compiler/JetLSP) over standard input
+// and output, checking through the CLI's compile path. Each check is the Doc
+// compile of the document as the entry with every open document's unsaved
+// text in place of its file, kept going past errors so the semantic index
+// still covers a document that does not check (as `jet fix` and codemods
+// read it).
+use {
+    jet_driver.[JetDriverCompileMode, JetDriverDocModule, JetDriverKeepGoing, JetDriverVerbOutput, jet_driver_compile_keep_going, jet_driver_present_diagnostics]
+    jet_foundation.[Diagnostic]
+    jet_lsp.[LSPChecked, LSPChecker, LSPOverlay, lsp_serve, lsp_write_log]
+    jet_semindex.[SemSymbol, semindex_build_symbols]
+}
+
+JetCLILSPChecker: struct {}
+
+impl JetCLILSPChecker.LSPChecker {
+    check: fn(self, entry: String, overlays: [LSPOverlay]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> LSPChecked {
+        given: loop overlay in overlays -> JetCLIOverlay{path: overlay.path.copy(), source: overlay.source.copy()}
+        if jet_cli_prepare_overlays(entry, entry, given, false, None, JetDriverCompileMode.Doc) == {
+            // A refusal (no toolchain, an unreadable manifest) has no span in
+            // the document; the client's log shows it.
+            .Refused(output) -> {
+                lsp_write_log(output.stderr).drop("standard error is the log; a failed log write has nowhere to go")
+                return jet_cli_lsp_unchecked()
+            }
+            .Prepared(request, snapshot) -> {
+                demanded := request.move()
+                demanded.doc_core_on_demand = true
+                result: jet_driver_compile_keep_going(demanded, JetDriverKeepGoing{skip: [String]{}})
+                if result.internal_problem == .Val(problem) -> lsp_write_log("internal compiler error checking `{entry}`: {problem}").drop("standard error is the log; a failed log write has nowhere to go")
+                diagnostics: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
+                if result.doc_modules.len() == 0 -> return LSPChecked{diagnostics: diagnostics, modules: [JetDriverDocModule]{}, index: None, symbols: [SemSymbol]{}}
+                index: jet_cli_checked_semindex(result)
+                symbols: semindex_build_symbols(index, result.doc_modules)
+                return LSPChecked{diagnostics: diagnostics, modules: result.doc_modules.copy(), index: Val(index), symbols: symbols}
+            }
+        }
+    }
+}
+
+jet_cli_lsp_unchecked: fn() -> LSPChecked Never! {
+    LSPChecked{diagnostics: [Diagnostic]{}, modules: [JetDriverDocModule]{}, index: None, symbols: [SemSymbol]{}}
+}
+
+// Serves until the client's `exit` or the end of input; the exit status is the
+// server's (0 after a `shutdown` request, else 1). The server writes stdout.
+jet_cli_lsp: fn() -> JetDriverVerbOutput {
+    JetDriverVerbOutput{stdout: "", stderr: "", exit_code: lsp_serve(JetCLILSPChecker{})}
+}

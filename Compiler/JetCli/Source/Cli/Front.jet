@@ -286,6 +286,8 @@ JetCLIPlan: enum {
     // `jet repl [file.jet] [--project <dir>]` (Repl.jet): the line session;
     // `preload` is its first positional.
     Repl(project: String?, preload: String?, invocation: JetCLIInvocationAuthority?, color: Bool)
+    // `jet self lsp` (LSP.jet): the language server over stdin and stdout.
+    LSP
     // `jet __jet_repl_run_stdin --session=<nonce>` (Repl.jet): one REPL turn's
     // private child; never in help.
     ReplChild(session: String, invocation: JetCLIInvocationAuthority?)
@@ -2382,7 +2384,7 @@ jet_cli_plan: fn(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]>
         break
     }
     args: jet_cli_positionals(jet_argv)
-    if args.len() > 0 && args[0] == "lsp" -> return jet_cli_not_ported("self lsp", color)
+    if args.len() > 0 && args[0] == "lsp" -> return JetCLIPlan.LSP
     if args.len() == 0 {
         if jet_cli_any_help_flag(jet_argv) {
             order: jet_cli_help_order(jet_argv)

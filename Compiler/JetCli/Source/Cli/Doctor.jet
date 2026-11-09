@@ -104,8 +104,7 @@ jet_cli_doctor_check_native_linker: fn() -[FS, Env, Exec, Time.Wait]> JetCLIDoct
 }
 
 // The language server row: start `jet self lsp`, send it `initialize` and read
-// its answer. A server that refuses because it is not built yet is a note
-// naming the card that owns its port.
+// its answer.
 jet_cli_doctor_check_lsp: fn() -[Env, Exec, Time.Wait]> JetCLIDoctorCheck Never! {
     label: "language server"
     command: "`{JET_CLI_BINARY} self lsp`"
@@ -117,9 +116,6 @@ jet_cli_doctor_check_lsp: fn() -[Env, Exec, Time.Wait]> JetCLIDoctorCheck Never!
     child.stdin.close()
     receipt: child.wait() ?? return jet_cli_doctor_problem("lsp", label, "{command} did not finish: {err}", fix, false)
     if receipt.output.contains("\"capabilities\"") -> return jet_cli_doctor_ok("lsp", label, "{command} answered `initialize`")
-    if receipt.errors.contains("E2104") {
-        if jet_cli_form_card("self lsp") == .Val(card) -> return jet_cli_doctor_note("lsp", label, "{command} is not built yet (card #{card})")
-    }
     if receipt.timed_out -> return jet_cli_doctor_problem("lsp", label, "{command} did not answer `initialize` within 10 seconds", fix, false)
     jet_cli_doctor_problem("lsp", label, "{command} did not answer `initialize` (exit {receipt.code})", fix, false)
 }

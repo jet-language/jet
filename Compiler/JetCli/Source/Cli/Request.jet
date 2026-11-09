@@ -1600,9 +1600,10 @@ jet_cli_entry_is_script: fn(entry_path: String, overlays: [JetCLIOverlay]) -[FS,
 // is a standalone program wherever it lives: its snapshot is the script alone,
 // rooted at its own directory, never the package around it. So is an `alone`
 // entry (`jet check --prelude`: the compiler embeds each Prelude source by
-// itself, never with its directory's other files).
+// itself, never with its directory's other files). An anchor no file holds
+// yet is read from its overlay (an editor's unsaved buffer).
 jet_cli_prepare_snapshot: fn(anchor: String, entry: String, overlays: [JetCLIOverlay], color: Bool, alone: Bool{false}) -> JetCLISnapshotted {
-    anchor_path: cli_files.realpath(anchor) ?? return jet_cli_snapshot_refused("can't securely read the file `{anchor}`", "check the spelling, or run jet from the folder that contains it", color)
+    anchor_path: cli_files.realpath(anchor) ?? jet_cli_overlaid_path(anchor, overlays) ?? return jet_cli_snapshot_refused("can't securely read the file `{anchor}`", "check the spelling, or run jet from the folder that contains it", color)
     entry_path: jet_cli_overlay_path(entry)
     script: alone || jet_cli_entry_is_script(entry_path, overlays)
     root: if script -> jet_cli_parent(entry_path) ?? "/" else -> jet_cli_source_root(anchor_path)
@@ -1684,6 +1685,15 @@ jet_cli_prepare_snapshot: fn(anchor: String, entry: String, overlays: [JetCLIOve
         entry_path: entry_path,
         script_dependencies: script_dependencies,
     }}
+}
+
+// The snapshot path of `path` when one of `overlays` holds it.
+jet_cli_overlaid_path: fn(path: String, overlays: [JetCLIOverlay]) -[FS, Env]> String? Never! {
+    held: jet_cli_overlay_path(path)
+    loop overlay in overlays {
+        if jet_cli_overlay_path(overlay.path) == held -> return Val(held)
+    }
+    None
 }
 
 // ---- The compiler's streaming trace: `--trace[=FILE]` and JET_TRACE_FILE ----
