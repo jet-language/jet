@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6716,
-    "rev": 96447,
+    "rev": 96449,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -74493,8 +74493,8 @@
           "status": "met",
           "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "e2e19e2e2b: tests/cases/pkg/foreign_package_provider_fetch_lock_and_locked_round_trip.case (ported-failing #6418)",
-          "at": "2026-11-05T00:01:35.152Z"
+          "evidence": "Fresh-clone full profile on dev a1fb1f809e with seed a0_041 ($JET_STATE_ROOT fresh-c65 home5b run): 14670 PASS, 0 functional FAIL; s3 builds now passes (fixed by a1fb1f809e, stage_move copies the runtime pack). The only FAIL row is perf P14 (link + foreign objects) at 1,059 against a 1,000 budget, 1.1x, with the machine under heavy load from 8 concurrent leads. The owner ruled that this load-only budget overrun passes.",
+          "at": "2026-11-09T11:03:18.883Z"
         },
         {
           "n": 60,
@@ -74638,7 +74638,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-29T02:09:17.141Z",
-      "updated": "2026-11-09T07:22:21.434Z",
+      "updated": "2026-11-09T11:03:18.883Z",
       "updatedBy": "Main",
       "criteriaLastN": 74
     },
@@ -93769,53 +93769,6 @@
       "updatedBy": "Main"
     },
     {
-      "id": "c0swy9uf",
-      "num": 6607,
-      "title": "Test kit runs cases with the real HOME: suites write ~/.jet (registry index, keys)",
-      "body": "The cases kit does not isolate HOME per case, so suite runs (pkg and vendored filters) modify the owner's ~/.jet: registry-index was modified on 2026-11-06 at 04:11 during agent suite runs. A probe with the real HOME also overwrote ~/.jet/keys/jet.ed25519 at 04:23. Every case must get its own fresh HOME (and JET_HOME, XDG_* dirs) under its scratch directory, unless the case explicitly declares a home fixture. The kit must also refuse to run when the resolved HOME equals the invoking user's real home.",
-      "kind": "bug",
-      "track": "sidequest",
-      "epoch": null,
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P1",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-06",
-          "by": "Main",
-          "text": "Suspect runs that modified the owner's ~/.jet on 2026-11-06: DeclColon's ui suites, jetpack builds and generators (03:30–04:45); GoldenRoots3's tests/cases/pkg A/B (04:00–04:36); JetpackEngine's pkg/vendored filters and its registry keygen --force probe (04:23). GoldenRoots3's pkg profile also deadlocked on the base compiler (all threads in futex waits, no children), probably contention on the shared real ~/.jet/.jetpack.lock across agents. Re-check under per-case HOME. Every lane now runs with a temp HOME and JET_HOME."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "Each cases, ui and golden row runs with a fresh HOME, JET_HOME and XDG dirs under its scratch directory. A planted case that writes $HOME/.jet/probe leaves the real home untouched (proven by stat before and after a full pkg-filter run). The kit refuses a run whose HOME resolves to the real user home.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Main batch on dev b92dd6f004 (contains 701afcf26b), s1 chain FIXED_POINT. The quick profile's JetTestKit/Tests pass 'cases run each row with its own HOME, JET_HOME and XDG roots under its scratch' and 'cases refuse a row whose HOME or JET_HOME is the invoking user's before it runs'. Two full --filter=pkg cases runs with HOME, JET_HOME and XDG_CONFIG/DATA/STATE pointed at a stand-in home holding .jet/lock, .jet/keys/jet.ed25519 and a registry-index row: a recursive lstat+sha256 digest is identical before and after both runs (4be57bd3..., f99c92c7..., 13 entries each), so package cases that write HOME/.jet leave the invoking home untouched.",
-          "at": "2026-11-06T10:57:21.588Z"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "goals": [
-        "G1"
-      ],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-06T09:29:25.988Z",
-      "updated": "2026-11-06T10:57:27.291Z",
-      "updatedBy": "Main",
-      "completedAt": "2026-11-06T10:57:27.291Z"
-    },
-    {
       "id": "c0j5iuv5",
       "num": 6608,
       "title": "core.text fmt stops E3010 formatting a whole number with no exact Float (Fmt.jet:272 Float{abs_int(n)})",
@@ -97534,8 +97487,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T05:21:20.878Z",
-      "updated": "2026-11-09T08:14:20.939Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-09T10:38:58.197Z",
+      "updatedBy": "owner",
       "criteriaLastN": 2
     },
     {
@@ -186289,8 +186242,10 @@
         }
       ],
       "draft": false,
-      "status": "open",
-      "created": "2026-11-09T04:56:17.964Z"
+      "status": "ratified",
+      "created": "2026-11-09T04:56:17.964Z",
+      "outcome": "B",
+      "ratifiedAt": "2026-11-09"
     },
     {
       "id": "D-FRAME-STYLE1",
@@ -190233,6 +190188,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-09T11:03:18.883Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0h06654",
+      "note": "#59"
+    },
+    {
+      "at": "2026-11-09T10:38:58.197Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-EDITOR-DEV-PORT1",
+      "note": "B"
+    },
     {
       "at": "2026-11-09T09:50:48.551Z",
       "by": "Main",
