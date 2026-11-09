@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6713,
-    "rev": 96394,
+    "rev": 96395,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -100100,6 +100100,11 @@
         {
           "at": "2026-11-09",
           "by": "Main",
+          "text": "FFIReview (fresh sol-reviewer) on the rewritten D-FFI-CARRIER1 and D-FFI-SERIAL1: ENGINEERED-AWAY=no. CARRIER1 rec A FAILS as a general solution; SERIAL1 holds only within explicit limits. Downsides remaining: dispatch overhead, serialized C, UI stalls, shared TLS, thread-affinity conflicts, callback deadlocks, delayed cancellation and shutdown, and unproved ABI, signal and target behaviour. The review records 28 corrections, peer comparisons (cgo, Tokio spawn_blocking, Loom, Swift, Erlang dirty schedulers, .NET), and the exact repros for web exit 101 (#6712) and the E2104 callback refusal. Repaired drafts and audit: $JET_SCRATCH_ROOT/lanes/FFIReview/ (2026-11-09-ffi-ballots-review.md). Not posted. BallotLead-2 redesigns after D-APP1 v6, then a new fresh review."
+        },
+        {
+          "at": "2026-11-09",
+          "by": "Main",
           "text": "BallotLead-2 rewrote the #6689 thread ballots ($JET_SCRATCH_ROOT/lanes/BallotLead/): D-FFI-CARRIER1.json (rec A = the old E, \"the initial thread is Jet's only C thread\"), D-FFI-SERIAL1.json (rec A = the old C+D) and DESIGN-FFI-CARRIER1.md (nine costs with size, mitigation and probe; review gaps G1-G14 mapped; build plan S0-S7). Both validate. Self-verdict ENGINEERED-AWAY=partial. Remaining costs: a 5.5-9.3 us handoff per task-side C call (against 351-371 ns direct); no parallel C from tasks (64 callers wait 254-367 us p50); a long C call stalls other C callers and the UI; a task's C call waits while run computes; a reported but unbroken gate cycle; shared C thread-locals; no C fault handler on a raw carrier; no task survival across fork; nothing changes until #6694/#6695 land. New receipts in v4/probe/ffi/: rawmusl (mode g silently overwrote errno 2 and 201 times; mode f SIGSEGV 3 of 3), setxid (11 overrides route 11 of 11, so no kernel floor), comptime (E3010 at all levels). The planned extra ballots dissolved. Next: a fresh sol-reviewer pass, as with D-APP1; build only after two clean passes. Defect found: the seed accepts FFI(c, concurrent) and ignores the unknown argument."
         },
         {
@@ -100188,7 +100193,7 @@
       "parentId": "c0lscvc9",
       "needsAcceptance": false,
       "created": "2026-11-08T15:46:55.183Z",
-      "updated": "2026-11-09T05:57:02.594Z",
+      "updated": "2026-11-09T06:53:56.510Z",
       "updatedBy": "Main",
       "criteriaLastN": 4
     },
@@ -189960,6 +189965,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-09T06:53:56.510Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0x92nsv",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-09T06:52:12.158Z",
       "by": "Main",
