@@ -1,0 +1,44 @@
+# Claim: a package.jet with no authority block allows every effect
+# unless a row denies one: a spawn, a socket and a file write each run, and before
+# each runs the notice names on one stderr line what the program does, never a
+# raw effect dump (#3718).
+# Fixture migrated: the three programs sit in spawn/, net/, write/, each its own package with no authority block; spawn imports use core.process.[cmd] (E1004 fix); markers are fixture-relative spawned.txt / written.txt
+fixture: package_without_authority_block_runs_spawn_net_and_file_write_with_a_notice.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run spawn/run.jet
+exit: 0 # default: the spawn runs
+stdout: = "spawned code=0\n" # default: the spawn runs
+stderr: ~ "starts other programs, which this list does not limit (-A hides this)" # default: the notice is one plain line
+stderr: !~ "required_effects=" # default: no raw effect dump
+file: spawned.txt exists # default: the spawn ran
+remove: spawned.txt
+step: jet run --release spawn/run.jet
+exit: 0 # release: the spawn runs
+stdout: = "spawned code=0\n" # release: the spawn runs
+stderr: ~ "starts other programs, which this list does not limit (-A hides this)" # release: the notice is one plain line
+file: spawned.txt exists # release: the spawn ran
+remove: spawned.txt
+step: jet run net/run.jet
+exit: 0 # default: the socket opens
+stdout: = "listening\n" # default: the socket opens
+stderr: ~ "uses the network (-A hides this)" # default: the notice is one plain line
+stderr: !~ "required_effects=" # default: no raw effect dump
+step: jet run --release net/run.jet
+exit: 0 # release: the socket opens
+stdout: = "listening\n" # release: the socket opens
+stderr: ~ "uses the network (-A hides this)" # release: the notice is one plain line
+step: jet run write/run.jet
+exit: 0 # default: the write runs
+stdout: = "wrote\n" # default: the write runs
+stderr: ~ "writes files (-A hides this)" # default: the notice is one plain line
+stderr: !~ "required_effects=" # default: no raw effect dump
+file: written.txt = "written" # default: the write ran
+remove: written.txt
+step: jet run --release write/run.jet
+exit: 0 # release: the write runs
+stdout: = "wrote\n" # release: the write runs
+stderr: ~ "writes files (-A hides this)" # release: the notice is one plain line
+file: written.txt = "written" # release: the write ran
+remove: written.txt

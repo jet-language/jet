@@ -1,0 +1,23 @@
+# PORT tests/repl.rs:2169-2215, migrated to the session's effect notice (#6614 c3): a
+# terminal session never prompts for an effect. The first turn that reads a
+# file names the read once, before it runs; the same read again is not named
+# a second time, and nothing is refused.
+# runtime PENDING-SAME-HEAD.
+fixture: repl_tty_session_names_each_effect_once.fixture
+env: NO_COLOR=1
+env: XDG_STATE_HOME={work}/state
+requires: os:unix
+mkdir: project
+copy: value.txt project/value.txt
+step raw: jet repl --project {work}/project
+pty: true
+limit: time=6
+pty-send: "use fs: core.files\r" after 200ms
+pty-send: "#FX(authority: FS) { fs.read(\"value.txt\") ?? panic(\"read failed\") }\r" after 200ms
+pty-send: "#FX(authority: FS) { fs.read(\"value.txt\") ?? panic(\"read failed\") }\r" after 200ms
+pty-send: ":quit\r" after 200ms
+exit: 0
+stdout: count "note: this session now " = 1 # the read is named once per session
+stdout: ~ "files (-A hides this)" # the file read is what is named
+stdout: !~ "Run it?" # no authority prompt
+stdout: !~ "E1803" # nothing denies the read

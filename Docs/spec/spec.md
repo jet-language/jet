@@ -1845,17 +1845,17 @@ instruction it prints one notice on stderr that names the program's inferred
 effects in plain words:
 
 ```text
-note: tool.jet reads files and connects to the network (-A hides this)
+note: tool.jet reads files and uses the network (-A hides this)
 ```
 
 The list is sema's sound row for the entry: it follows calls and every
 function the program takes as a value, so a function reached only through a
 value still lists its effects. An open-world call (a C binding no descriptor
-owns, an unannotated foreign call) makes the list maximal. The notice then
-says the program can do anything and names that call's file and line. `Exec`
-reads "starts other programs, which this list does not limit", and `FFI` reads
-"calls native code, which can do anything". The floor, `IO`, `Mem.Alloc` and
-`Exec.Args`, is never listed. It covers output, ordinary allocation and
+owns, an unannotated foreign call) lists `FFI`, whose words say the program
+"calls native code, which can do anything". `Exec` reads "starts other
+programs, which this list does not limit". The floor, `IO`, `Mem.Alloc` and
+`Exec.Args`, is never listed, and neither are the deny-only rights (`Panic`,
+`Mem`, `Time.Wait`). The floor covers output, ordinary allocation and
 argument reads, and carries no power the shell has not already given the
 process. It never covers the `Exec` root, which also starts processes.
 
@@ -1864,9 +1864,12 @@ records the last effect set it named for each entry under
 `$XDG_STATE_HOME/jet/effects` (or `$HOME/.local/state/jet/effects`), keyed by
 the canonical entry path. A rerun with the same set prints nothing; a rerun
 whose set changed, from the program's own code or from a dependency, prints the
-notice again. Without a terminal on stderr or a writable state store, the
-notice prints on every run. `--json` carries the same effect list as
-structured detail. `-A` (`--allow-all`) acknowledges every effect and hides
+notice again. When standard input is not a terminal (a pipe, CI) or the state
+store can't be written, the notice prints on every run. `jet run --json`
+carries the same effect list as structured detail: one `run.effects` status
+on stderr whose `effects` field lists the noticed rights, beside
+`required_effects`, on every run with an effect to name.
+`-A` (`--allow-all`) acknowledges every effect and hides
 the notice. `--allow=R` acknowledges `R`, leaving it out of the notice; a
 resource-qualified right still confines the run through the host sandbox.
 `--deny=R` wins over every grant: a run that reaches a denied effect stops

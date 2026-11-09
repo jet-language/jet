@@ -1,0 +1,46 @@
+# Claim (#6614 c4, c9): when standard input is not a
+# terminal, every `jet run` names the program's unacknowledged effects in one
+# stderr line and keeps no record; `--json` reports the same set as one
+# `run.effects` status. `-A` and a matching `--allow` acknowledge the effect,
+# so the run names nothing; `--deny` refuses it with E1803 before the program
+# runs.
+fixture: effect_notice_off_a_terminal_names_every_run_and_flags_decide.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: XDG_STATE_HOME={work}/state
+step first: jet run tool.jet
+exit: 0
+stdout: = "env read: true\n"
+stderr: = "note: tool.jet reads environment variables (-A hides this)\n"
+step again: jet run tool.jet
+exit: 0
+stdout: = "env read: true\n"
+stderr: = "note: tool.jet reads environment variables (-A hides this)\n"
+file: state/jet/effects absent # off a terminal nothing is kept
+step json: jet run --json tool.jet
+exit: 0
+stdout: = "env read: true\n"
+stderr: !~ "note:" # the status replaces the line
+json: stderr ndjson $[?action="run.effects"] #= 1
+json: stderr ndjson $[?action="run.effects"][0].schema = "jet.status/v1"
+json: stderr ndjson $[?action="run.effects"][0].effects #= 1
+json: stderr ndjson $[?action="run.effects"][0].authority = "application default"
+step allow_all: jet run -A tool.jet
+exit: 0
+stdout: = "env read: true\n"
+stderr: = ""
+step allow: jet run --allow=Env tool.jet
+exit: 0
+stdout: = "env read: true\n"
+stderr: = ""
+step json_acknowledged: jet run --json --allow=Env tool.jet
+exit: 0
+stdout: = "env read: true\n"
+stderr: !~ "run.effects" # nothing left to name, so no status
+step deny: jet run --deny=Env tool.jet
+exit: 1
+stdout: empty
+stderr: ~ "Error [jet.ApplicationAuthorityDenied]: Application authority denies `Env" # the deny refuses the run
+stderr: ~ "Drop `--deny=Env` from the command to allow it" # the Fix names the deny to drop
+stderr: !~ "note:" # a refused run names nothing

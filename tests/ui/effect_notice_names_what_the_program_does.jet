@@ -1,0 +1,14 @@
+// @run_cli
+// #6614 c3: every effect is allowed unless a row denies it, and before the program
+// runs `jet run` names on one stderr line, in plain words, the effects nothing
+// acknowledged. Printing is the floor, so it is never named.
+use {
+    files: core.files
+    sys: core.sys
+}
+
+run: fn() {
+    _home: sys.get("HOME")
+    _root: files.is_dir("/")
+    print("done")
+}

@@ -6,9 +6,8 @@
 # Line 2 departs from the oracle literal ("Limit query.group_by.mean"): the rows
 # are collected to [T] before data.query(rows), which takes no limits
 # (core-library.md `query(rows)`, `stream.collect` -> [T], DataLimits.safe()).
-# The build grants FS.Read on the command line: the guest has no package block,
-# and an undecided required effect stops with E1803 outside a terminal
-# (spec.md:1774-1784, D-AUTH-AMBIENT1, D-ECO-INLINEPACKAGE1).
+# The build names FS.Read on the command line; it is allowed without the flag
+# too (every effect is allowed), and the flag only acknowledges it.
 fixture: fixtures/core_data_stream_limits_and_typed_errors
 write: guest.jet fixtures/core_data_stream_limits_and_typed_errors/fixture.template
 step: jet build --allow=FS.Read guest.jet

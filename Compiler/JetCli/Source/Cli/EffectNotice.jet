@@ -1,0 +1,90 @@
+// The effect notice of a run (spec.md "Application authority"). Every effect
+// is allowed unless a row denies it, and before the program's first
+// instruction `jet run` names on stderr the effects nobody acknowledged
+// (jet_cli_unacknowledged): the floor, the entry package's `allow` row,
+// `--allow` and `-A` acknowledge. The last set named is kept per canonical
+// entry path under `$XDG_STATE_HOME/jet/effects` (else
+// `~/.local/state/jet/effects`), so an interactive rerun names the set again
+// only when it changed. When standard input is not a terminal, or the store
+// can't be written, every run names it. `--json` reports the set as one
+// `run.effects` status instead, on every run that has one.
+use {
+    notice_crypto: core.crypto
+    notice_files: core.files
+    notice_sys: core.sys
+    notice_term: core.term
+}
+
+// Names the store's records; a new layout is a new name.
+JET_CLI_EFFECT_RECORD: "jet.effects/v1"
+
+// Name the unacknowledged effects of `authority` for a run of `file`, as
+// `json` asks, unless the store shows this entry already named exactly them.
+jet_cli_effect_notice: fn(file: String, authority: JetCLIAuthority, json: Bool) {
+    rights: jet_cli_unacknowledged(authority)
+    if json {
+        if rights.len() > 0 -> notice_term.eprint(jet_cli_run_effects_json(authority, rights))
+        return
+    }
+    if notice_term.stdin().is_tty() && jet_cli_effect_store_seen(file, rights) -> return
+    if rights.len() > 0 -> notice_term.eprint(jet_cli_effect_notice_line(file, rights))
+}
+
+// `note: tool.jet reads files and uses the network (-A hides this)`. Code
+// given on standard input (`jet run -`) or the command line (`jet -e`) has no
+// file name of its own.
+jet_cli_effect_notice_line: fn(file: String, rights: [String]) -> String Never! {
+    program: if {
+        jet_cli_stdin_entry(file) -> "the program on standard input"
+        jet_cli_kept_entry(file, "eval") -> "this code"
+        else -> file
+    }
+    "note: {program} {jet_cli_effect_words(rights)} (-A hides this)"
+}
+
+// The `run.effects` status: `effects` are the rights the notice names.
+jet_cli_run_effects_json: fn(authority: JetCLIAuthority, rights: [String]) -> String Never! {
+    jet_cli_status_render("run.effects", true, [
+        jet_cli_status_field("effects", jet_cli_status_texts(rights)),
+        jet_cli_status_field("required_effects", jet_cli_status_texts(authority.required)),
+        jet_cli_status_field("authority", jet_cli_status_text(authority.authority)),
+    ])
+}
+
+// The directory of the notice's records, or None when there is no user state
+// directory.
+jet_cli_effect_store_dir: fn() -> String? {
+    if notice_sys.get("XDG_STATE_HOME") == .Val(state) {
+        if state.starts_with("/") -> return Val("{state}/jet/effects")
+    }
+    home: notice_sys.home_dir() ?? return None
+    Val("{home}/.local/state/jet/effects")
+}
+
+// Whether the store already names exactly `rights` for the entry `file`. When
+// it doesn't, the store now does, so the next run with the same set is
+// silent; an empty set removes the record, so the next nonempty one is named.
+// False when the store can't be read or written, so the run names the set.
+jet_cli_effect_store_seen: fn(file: String, rights: [String]) -> Bool {
+    directory: jet_cli_effect_store_dir() ?? return false
+    canonical: notice_files.realpath(file) ?? file.copy()
+    path: "{directory}/{notice_crypto.sha256(canonical.bytes()).hex()}"
+    if rights.len() == 0 {
+        notice_files.remove(path).drop("a missing record names no set")
+        return true
+    }
+    record: "{JET_CLI_EFFECT_RECORD}\n{canonical}\n{rights.join(",")}\n"
+    if notice_files.read(path) == .Ok(kept) {
+        if kept == record -> return true
+    }
+    notice_files.create_dir_all(directory) ?? return false
+    // Written beside its place and renamed into it, so a concurrent run never
+    // reads part of it.
+    staged: "{path}.{notice_sys.pid()}"
+    notice_files.write(staged, record) ?? return false
+    if notice_files.rename(staged, path) == .Err(_) {
+        notice_files.remove(staged).drop("a staged record is never read")
+        return false
+    }
+    false
+}

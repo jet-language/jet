@@ -1,0 +1,13 @@
+// @run_deny Exec
+// #3697: every effect is allowed, so a program with no `package.jet` may start a
+// process, but `--deny=Exec` takes the `Exec` root away, so the run stops with
+// E1803 before the process starts.
+use core.process
+
+run: fn() {
+    receipt: process.cmd([String]{"touch", "e1803-spawned-must-not-exist.txt"}).run() ?? {
+        print("spawn failed")
+        return
+    }
+    print("spawned code={receipt.code}")
+}

@@ -1,0 +1,11 @@
+// #3718: a package.jet with no authority block allows opening a socket, and
+// the run's notice names it first.
+use net: core.net
+
+run: fn() {
+    _listener: net.tcp_listen("127.0.0.1:0") ?? {
+        print("listen failed")
+        return
+    }
+    print("listening")
+}

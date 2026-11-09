@@ -1,7 +1,7 @@
 // `jet repl` and `jet eval <expression>` (crates/jet-repl; The session is
 // source: its imports, items and accepted statements. Each turn is checked here
-// by the compiler against the session so far (types, problems, authority), then
-// built and run as one program by a private child `jet`
+// by the compiler against the session so far (types, problems, denied
+// effects), then built and run as one program by a private child `jet`
 // (`__jet_repl_run_stdin`) that replays the earlier statements and prints the
 // values this turn shows behind a per-session marker.
 use {
@@ -86,6 +86,8 @@ JetCLIReplSession: struct {
     // A turn the authority gate refused: the session then exits nonzero,
     // so a piped session that was denied an effect never reads as success.
     denied: Bool
+    // The effects the session has named in its notice (jet_cli_repl_refusal).
+    noticed: [String]
 }
 
 // One value a turn shows: the binding (or the echo) and its checked type.
@@ -396,25 +398,24 @@ jet_cli_repl_local_type: fn(locals: [JetCLIReplLocal], name: String) -> Type? Ne
     found
 }
 
-// The non-interactive authority gate: a right the session's `--allow` rows
-// don't grant, or its `--deny` rows remove, stops the turn before it runs. IO
-// is the REPL's own console and never refused.
-jet_cli_repl_refusal: fn(session: JetCLIReplSession, required: [String]) -> Diagnostic? {
+// The session's authority gate, as for a run: every effect is allowed unless
+// a row denies it. A right the session's `--deny` rows remove stops the turn
+// before it runs (E1803). A turn that reaches rights nobody acknowledged and
+// the session has not named yet names them first, on stderr, so the
+// session's effects never widen silently. IO is the REPL's own console and
+// never refused.
+jet_cli_repl_refusal: fn(session: &JetCLIReplSession, required: [String]) -> Diagnostic? {
     authority := jet_cli_policy_authority(required, None)
     jet_cli_with_invocation(authority, session.invocation)
-    denied: jet_cli_denied_required(authority)
-    if denied.len() > 0 -> return Val(jet_cli_repl_e1803(session, denied[0], "An explicit `--deny` policy overrides every prompt and allowance."))
-    undecided: jet_cli_undecided(authority)
-    if undecided.len() > 0 -> return Val(jet_cli_repl_e1803(session, undecided[0], "Non-interactive sessions never prompt, and no matching `--allow` right was supplied."))
+    if jet_cli_authority_refusal(authority) == .Val(refusal) -> return Val(refusal)
+    fresh := [String]{}
+    loop right in jet_cli_unacknowledged(authority) {
+        if !jet_cli_covers_any(session.noticed, right) -> fresh.push(right)
+    }
+    if fresh.len() == 0 -> return None
+    loop right in fresh -> session.noticed.push(right.copy())
+    jet_cli_repl_err("{diagnostic_theme_dim(session.color, "note: this session now {jet_cli_effect_words(fresh)} (-A hides this)")}\n")
     None
-}
-
-jet_cli_repl_e1803: fn(session: JetCLIReplSession, right: String, reason: String) -> Diagnostic {
-    rows: session.invocation ?? JetCLIInvocationAuthority{all: false, allow: [String]{}, deny: [String]{}}
-    authority: JetCLIAuthority{required: [String]{right}, granted: jet_cli_sorted_set(rows.allow), denied: jet_cli_sorted_set(rows.deny), authority: "jet repl invocation policy", invocation_denied: [String]{}}
-    diagnostic := diagnostic_from_registry("E1803", None, "{right} was denied", "{jet_cli_policy_why(authority)} {reason}", "approve this exact operation interactively, or restart with `jet repl --allow={right}`")
-    diagnostic.detail = Val(jet_cli_policy_facts(authority))
-    diagnostic
 }
 
 // The invocation rows a turn's child runs under: `--deny=IO` would refuse the
@@ -624,7 +625,7 @@ jet_cli_repl_child_failed: fn(what: String) -> JetDriverVerbOutput Never! {
 jet_cli_repl_child_run: fn(dir: String, file: String, source: String, invocation: JetCLIInvocationAuthority?, options: BuildOptions, result: JetDriverCompileResult, inputs: &&JetDriverLoweringInputs?, snapshot: JetDriverAuthorizedSourceSnapshot) -> JetDriverVerbOutput {
     errors := jet_cli_errors(result.diagnostics)
     if errors.len() == 0 {
-        if jet_cli_authority_refusal(jet_cli_application_authority(result, invocation), file, "run") == .Val(refusal) -> errors.push(refusal)
+        if jet_cli_authority_refusal(jet_cli_application_authority(result, invocation)) == .Val(refusal) -> errors.push(refusal)
     }
     if errors.len() > 0 {
         repl_files.remove_all(dir).drop("the turn directory is private to this child")
@@ -1152,7 +1153,7 @@ jet_cli_repl_session: fn(project: String?, invocation: JetCLIInvocationAuthority
         nonce: jet_cli_repl_nonce(), dir: dir, anchor: anchor, anchor_real: anchor_real, base_dir: base_dir,
         invocation: jet_cli_repl_rows(invocation), color: color, step: 0, imports: [String]{}, items: [String]{},
         statements: [String]{}, bindings: [JetCLIReplBinding]{}, turns: [JetCLIReplTurn]{}, noted_print: false,
-        baseline_imports: [String]{}, baseline_items: [String]{}, denied: false,
+        baseline_imports: [String]{}, baseline_items: [String]{}, denied: false, noticed: [String]{},
     })
 }
 

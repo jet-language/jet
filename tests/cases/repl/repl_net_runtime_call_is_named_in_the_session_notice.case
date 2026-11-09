@@ -1,0 +1,16 @@
+# PORT tests/repl.rs:964-978, migrated to the session's effect notice (#6614 c3): a network
+# call in a session with no flags is allowed, and the session names it on stderr
+# before the turn runs instead of stopping with E1803.
+# PENDING-GRAMMAR(batch-four).
+# CLI banner: crates/jet-repl/src/Render.rs24-37; prompts: Render.rs67-74, lib.rs2528-2535.
+# No assertion needle appears in the fixed banner/prompt; no stripping/projection.
+# lib.rs2469-2470: cooked floor mirrors transcript; EOF does not append :quit.
+fixture: repl_net_runtime_call_is_named_in_the_session_notice.fixture
+step: jet repl
+env: NO_COLOR=1
+env: XDG_STATE_HOME={work}/state
+stdin: repl_net_runtime_call_is_named_in_the_session_notice.fixture/input.txt
+exit: any # the connection to a closed port fails inside the turn
+stdout|stderr: ~ "ok" # original predicate
+stderr: ~ "note: this session now uses the network (-A hides this)" # named, not refused
+stdout|stderr: !~ "E1803" # nothing denies the network

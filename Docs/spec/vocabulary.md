@@ -60,7 +60,7 @@ An effect projection has four separate roles at the application boundary:
 | `authority` | The identity of the policy source, such as `package.jet authority`. |
 
 These roles are facts, not synonyms: a required effect can be granted, denied,
-or undecided, while an authority name identifies the policy source and is not an
+or unacknowledged (allowed, and named in the run's notice), while an authority name identifies the policy source and is not an
 effect. Expert source may use `#FX`; beginner source omits routine effect rows.
 Inspect, hover, JSON, receipts, lock provenance, and Canvas use the same four
 labels so a policy decision cannot be mistaken for a sema requirement.
