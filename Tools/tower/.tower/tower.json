@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 97899,
+    "rev": 97900,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -75433,7 +75433,7 @@
       "parentId": "c0xiig3k",
       "needsAcceptance": false,
       "created": "2026-10-29T12:53:42.058Z",
-      "updated": "2026-11-09T19:51:20.357Z",
+      "updated": "2026-11-09T20:06:13.685Z",
       "updatedBy": "Main",
       "criteriaLastN": 51
     },
@@ -189761,6 +189761,160 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-09T20:01:11.159Z"
+    },
+    {
+      "id": "D-CORE-HELPERS1",
+      "cardId": "c0w1wcfc",
+      "group": "visibility",
+      "title": "Package-private helpers: priv in Core and every package, with __ kept for generated names",
+      "situation": "",
+      "gist": "How should any package, Core included, mark a helper that only its own code may call?",
+      "lesson": "User source cannot spell double-underscore names, while Core currently takes a generated-source lexer route. Explicit visibility should instead follow the same declaration rule in ordinary packages.",
+      "explainer": "",
+      "story": "Ana writes a text library whose public functions share a pad helper. She wants pad hidden from the library's users, the same way Core hides its own helpers.",
+      "inWild": "Rust's pub(crate) makes an item visible inside its crate (https://doc.rust-lang.org/reference/visibility-and-privacy.html). That is explicit visibility, not a compiler-library lexer exemption.",
+      "detail": "Exercised: p1 gives E0067 for __pad; p2 E0413 for item priv; p3 E0067 for __decode_dyn; p4 E0605 for greeter.text.pad. p4 never runs its earlier greet line. A separate BallotReview/helpers-good app prints two spaces then hello using the public dependency function.\n\nLoader citations were stale. Current Loader.jet:3763-3796 selects a Core parse job. User source uses lex_threads at :3699; Core uses lex_generated_threads at :3811 and filters members/tests at :3824-3827. Payload.jet:951-956 implements the reserved-name flag. A prefix rename alone cannot remove every Core parse decision.\n\nVIS-ITEM1=A is ratified, unimplemented in p2. Item priv means enclosing module plus children; package-root priv is package-only. Nested priv(package) widens to the package. A applies that rule uniformly and keeps __ reserved in authored source. Compiler hygiene uses issued identities, never a prefix as permission.\n\nClassify declarations before migration. True private helpers use priv; public FFI/library primitives remain public. Only the five already-ratified CORE-PRIVATE-SEAM1 entrypoints use priv(toolchain) modules. That qualifier is module-only, not a blanket new privilege for every generated call. Migrate source declarations, semantic callers and registry references together; external ABI symbols are not automatically helper source names.\n\nA also unifies authored-source lexing/parsing. Move ownership/member/test selection to ordinary declared mechanisms rather than an is-Core syntax mode. #6151 c35 is not met by a rename alone. c36 replaces its stale __ wording with the chosen visibility and proves inside/outside behavior in ordinary and Core dependencies.\n\nB can avoid duplicate mechanisms: __ becomes the single package-private item spelling, replacing overlapping item priv/priv(package) uses; priv remains for narrower module/field access. Generated names remain hygienic without another reserved text prefix. B's cost is a wider visibility cutover and access meaning carried by names, not loss of hygiene.\n\nC retains a protected toolchain setting and a source-mode exception. Self-written package metadata must not confer installed-toolchain identity. Choosing C amends c35 rather than satisfying uniformity. Its exception must be explicit.\n\nNo unverified helper count or mechanical-rename promise is used. Resolve collisions by declaration identity. Beginners use explicit privacy; experts retain existing module/package visibility and only the ratified toolchain seam scope. A/B/C remain proposals, not behavior proved by p1-p4.",
+      "options": [
+        {
+          "key": "A",
+          "name": "priv everywhere; __ only for generated names",
+          "detail": "Use ratified item priv in Core and user packages; keep __ reserved in authored source. Unify parser decisions too, not just spellings.",
+          "code": "// Greeter/greeter.jet\npriv pad: fn(s: String) -> String { \"  {s}\" }   // package-only\n\ngreet: fn() -> String { pad(\"hello\") }\n\n// run.jet, in another package\nuse greeter\n\nrun: fn() {\n    print(greeter.greet())      //   hello\n    print(greeter.pad(\"hi\"))    // error E0605: `pad` is private to its package\n}"
+        },
+        {
+          "key": "B",
+          "name": "__ means package-private everywhere",
+          "detail": "__ becomes the single package-private item spelling, replacing overlapping forms. priv remains for narrower visibility; generated names use hygienic identities.",
+          "code": "// Proposed B: __ replaces, rather than duplicates, package-private items.\n__pad: fn(s: String) -> String { \"  {s}\" }\ngreet: fn() -> String { __pad(\"hello\") }\n// another package:\nuse greeter\nrun: fn() {\n    print(greeter.greet()) // two spaces then hello\n    print(greeter.__pad(\"hi\")) // E0605: package-private\n}"
+        },
+        {
+          "key": "C",
+          "name": "A toolchain-only package setting",
+          "detail": "The __ prefix stays reserved. Core's exemption becomes a package setting that only toolchain packages may set; users keep priv.",
+          "code": "// Core's package.jet; a user package that sets it is refused\nreserved_names: .Toolchain\n\n// Core/Text/Fmt.jet\n__pad: fn(s: String) -> String { \"  {s}\" }"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "A reuses ratified visibility and removes authored-source grammar privilege without a new naming convention. The Core parse route must also be unified; renaming alone is insufficient.",
+        "gains": [
+          "One spelling and one error for package-only helpers.",
+          "Shared authored-source grammar and visibility, retaining only the existing toolchain seam scope."
+        ],
+        "losses": [
+          {
+            "loss": "A declaration, caller and registry cutover is needed; some names collide.",
+            "mitigation": "Classify helpers, public primitives and protected seams, then rename by semantic identity with all callers."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B can retire duplicate forms, but carries visibility in names and requires a broader visibility cutover."
+          },
+          {
+            "key": "C",
+            "reason": "C keeps two lexer modes and a rule users cannot use, so Core still differs from user packages."
+          }
+        ],
+        "tradeoff": "A one-time Core rename for one visibility spelling everywhere."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": "Run p1-p4 and BallotReview/helpers-good/run.jet, then Validate.jet. Delivery proves ordinary/Core dependency visibility, generated hygiene, exact toolchain-module scope, spoofed metadata refusal and all lexer/parse selectors covered by #6151 c35/c36.",
+      "surface": {
+        "gist": "How should any package, Core included, mark a helper that only its own code may call?",
+        "lesson": "Core currently takes a generated-source lexer route. A uses shared visibility and authored-source grammar instead.",
+        "trio": {
+          "current": {
+            "note": "A user __ helper is refused; only Core may write one.",
+            "code": "__pad: fn(s: String) -> String { \"  {s}\" }\n// error E0067: `__pad` is reserved for Jet"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "pub(crate) hides an item outside its crate.",
+            "code": "pub(crate) fn pad(s: &str) -> String { format!(\"  {s}\") }\npub fn greet() -> String { pad(\"hello\") }"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "priv everywhere",
+            "gist": "Core and users write priv; __ stays for generated names.",
+            "gains": [
+              "One spelling.",
+              "No Core lexer rule."
+            ],
+            "losses": [
+              "Core renames its helpers."
+            ],
+            "proposed": {
+              "code": "priv pad: fn(s: String) -> String { \"  {s}\" }\ngreet: fn() -> String { pad(\"hello\") }\n// outside: greeter.pad(\"hi\") is E0605"
+            }
+          },
+          {
+            "key": "B",
+            "name": "__ means package-private",
+            "gist": "A leading __ hides a name outside its package.",
+            "gains": [
+              "Core keeps its names."
+            ],
+            "losses": [
+              "Must retire overlapping package-private spellings."
+            ],
+            "proposed": {
+              "code": "__pad: fn(s: String) -> String { \"  {s}\" }\ngreet: fn() -> String { __pad(\"hello\") }"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Toolchain setting",
+            "gist": "Only toolchain packages may write __ names.",
+            "gains": [
+              "No rename."
+            ],
+            "losses": [
+              "Core still differs from users."
+            ],
+            "proposed": {
+              "code": "// Core's package.jet\nreserved_names: .Toolchain"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A reuses ratified visibility and unifies grammar. Renaming alone is not enough.",
+          "gains": [
+            "One spelling.",
+            "Same error everywhere."
+          ],
+          "losses": [
+            {
+              "loss": "A one-time Core rename.",
+              "mitigation": "Classify declarations and migrate semantic callers/registries, not a blind prefix replacement."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B must replace overlapping forms and places visibility in names."
+            },
+            {
+              "key": "C",
+              "reason": "Core keeps a rule users cannot use."
+            }
+          ],
+          "tradeoff": "One Core rename for one spelling everywhere."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-09T20:06:13.685Z"
     }
   ],
   "questions": [
@@ -192870,6 +193024,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-09T20:06:13.685Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-CORE-HELPERS1",
+      "note": "Package-private helpers: priv in Core and every package, with __ kept for generated names"
+    },
     {
       "at": "2026-11-09T20:02:12.425Z",
       "by": "Main",
