@@ -1834,36 +1834,64 @@ For example, interpolated `print` in
 `Exec.Args` leaf, while starting a process records the `Exec` root. A Core
 call with a precise leaf under its own root records only that leaf, so
 `files.read` requires `FS.Read` and `files.write` requires `FS.Write`; the root
-still covers both. The manifest-less authority supplies only the beginner
-default and does not alter these sema facts.
+still covers both. Application authority reads these sema facts and never
+alters them.
 
 ### Application authority
 
-Every program holds the beginner floor `IO`, `Mem.Alloc`, and `Exec.Args`,
-whether it is manifest-less, has a `package.jet` that writes no `authority`,
-or writes an `authority` block. This covers output, ordinary allocation, and
-argument reads. It never covers the `Exec` root, which also starts processes.
-A written `allow` row adds rights to the floor; a floor right leaves only
-through `deny`, and a deny wins over every grant (D-AUTH-AMBIENT3). The floor
-never silently grants filesystem, network, process, or other roots. Each
-`deny` entry of a package is also a whole-program prohibition, exactly as if
-every function of the package wrote `-[!E]>`: `jet check`, `jet build`, and
-`jet run` report a function that reaches a denied right with E0749
-(D-AUTHORITY-DENYROW1). An undecided required effect, or one a command-line
-`--deny` removes, stops before host state changes with E1803, whose Why is
-one plain sentence naming what the program does; the required, granted,
-denied, and policy-identity facts stay separate in its structured detail for
-`--json` (D-AUTH-AMBIENT1). In a terminal, a run with undecided authority
-first lists each one in plain words and asks `Run it? [Y/n/always]`: Enter
-runs once, `n` stops with exit code 1, and `always` writes the grant into the
-script's package block or `package.jet` (D-SCRIPT-CONFIRM1). Without a
-terminal the run stops with E1803 and its Fix names the exact `--allow`
-command. A program without `package.jet` has no manifest to edit, so its
-E1803 names the undecided rights and carries the leading inline
-`package: { … }` block (D-ECO-INLINEPACKAGE1) that declares them; the floor
-stays granted beside that row, so the row lists only the rights the floor
-does not hold. Rights widen only by a written word, so the edit is graded
-`needs-review` and `jet fix --all` inserts it (D-RIGHTS-DIAG1).
+Every effect is allowed unless code denies it (D-AUTH-DEFAULT1). With no
+written authority, `jet run` grants every effect. Before the program's first
+instruction it prints one notice on stderr that names the program's inferred
+effects in plain words:
+
+```text
+note: tool.jet reads files and connects to the network (-A hides this)
+```
+
+The list is sema's sound row for the entry: it follows calls and every
+function the program takes as a value, so a function reached only through a
+value still lists its effects. An open-world call (a C binding no descriptor
+owns, an unannotated foreign call) makes the list maximal. The notice then
+says the program can do anything and names that call's file and line. `Exec`
+reads "starts other programs, which this list does not limit", and `FFI` reads
+"calls native code, which can do anything". The floor, `IO`, `Mem.Alloc` and
+`Exec.Args`, is never listed. It covers output, ordinary allocation and
+argument reads, and carries no power the shell has not already given the
+process. It never covers the `Exec` root, which also starts processes.
+
+The notice repeats whenever the effect set changes, and only then. Jet
+records the last effect set it named for each entry under
+`$XDG_STATE_HOME/jet/effects` (or `$HOME/.local/state/jet/effects`), keyed by
+the canonical entry path. A rerun with the same set prints nothing; a rerun
+whose set changed, from the program's own code or from a dependency, prints the
+notice again. Without a terminal on stderr or a writable state store, the
+notice prints on every run. `--json` carries the same effect list as
+structured detail. `-A` (`--allow-all`) acknowledges every effect and hides
+the notice. `--allow=R` acknowledges `R`, leaving it out of the notice; a
+resource-qualified right still confines the run through the host sandbox.
+`--deny=R` wins over every grant: a run that reaches a denied effect stops
+with E1803 before host state changes.
+
+A written authority row is a ceiling. This holds for an `authority` row in
+`package.jet` or in a script's inline `package: { … }` block, a module's
+`#FX`, a type's row, and a function's `-[…]>` row. Reaching an effect outside
+a function row is E0740. Reaching an effect outside a package row is E0749.
+Both are reported by `jet check`, `jet build` and `jet run` with the call
+chain, before anything runs. The floor stays inside every ceiling, and a floor
+right leaves only through an explicit `deny`. The effects the entry package's
+rows list are acknowledged and leave the notice, so a program whose package
+row covers what it reaches prints no notice. A `deny`, whether on a package,
+module, type or function, prohibits the denied effects for everything inside
+it, transitively, exactly as if every function inside wrote `-[!E]>`.
+Reaching one is E0749 with the call chain (D-AUTHORITY-DENYROW1). `jet new`
+writes no authority row. A ceiling is something a team chooses to write; it
+is not the price of running.
+
+Jetpack records each dependency's inferred effect row in the lock. An update
+that widens a dependency's row prints which package gained which effect, and
+`--locked` refuses the widening. Code run straight from a URL or the registry
+asks before its first run in a terminal. Without a terminal it stops before
+running, and the Fix names the `-A` command.
 
 Command-line authority uses one rights surface: `--allow=<RIGHTS>` and
 `--deny=<RIGHTS>`, where the value is a comma-separated list of canonical roots
@@ -1873,9 +1901,8 @@ The CLI has no per-effect flag family: all authority uses this one rights
 surface (D-RIGHTS-CLI1).
 
 A file whose first line is a `#!/...` launch line, such as
-`#!/usr/bin/env jet`, is a script. A script runs as `-A` runs a program, with
-the invoking user's authority as a shell script has it: it needs no package
-block and never stops with E1803 for an undecided right, and it is still
+`#!/usr/bin/env jet`, is a script. A script follows the same rules as any
+program: it runs, prints the same notice when its effect set changes, and is
 fully checked. A script is a standalone program wherever it lives, never a
 member of the package around it. `jet <file> [args...]` runs a file, and every word after the
 file is the program's, so an executable script runs as `./tool.jet args`.
@@ -4236,12 +4263,14 @@ Lists, maps, options, results, structs, enums, and closures remain values rather
 than being rebuilt from display text. Explicit binding annotations remain
 available to `:type`.
 
-Pure Core calls run directly. Ambient calls use the same authority model as a
-program: the call must be inside a matching `#FX` boundary, and the REPL must
-authorize the exact operation and resource before host state changes. A
-TTY prompts for once, session, or deny. A session decision is an exact tuple
-and offers continue or revoke on reuse. Piped and transcript sessions never
-prompt; an unflagged effect is E1803. Filesystem access stays below the project
+Pure Core calls run directly. A REPL session follows the program model of
+"Application authority": every effect is allowed, and `--deny` wins. A turn
+that reaches an effect the session has not used before first prints the
+notice on stderr naming the new effects, so the session's effect set never
+widens silently. A turn that reaches a `--deny`ed effect stops with E1803
+before host state changes, and a piped session that was refused exits
+nonzero. Calls inside a written `#FX` boundary or effect row are checked
+against it as ceilings. Filesystem access stays below the project
 root descriptor opened at session start. Later components open descriptor-
 relative without following symlinks; a platform that cannot enforce this
 confinement fails closed.

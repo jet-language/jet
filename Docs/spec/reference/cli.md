@@ -770,18 +770,19 @@ them for a test harness). The readable stream is written through
 `--trace=FILE`. A trace that cannot be written stops; the compile does not.
 
 Before `jet build` or `jet run` writes anything, the Jet host checks the
-application authority ([`Authority.jet`](../../../Compiler/JetCli/Source/Cli/Authority.jet)):
-the checked entry's solved effect row against the beginner floor (`IO`,
+application authority ([`Authority.jet`](../../../Compiler/JetCli/Source/Cli/Authority.jet)).
+The law is spec.md "Application authority" (D-AUTH-DEFAULT1): every effect is
+allowed, a run names its effects on stderr before the program starts and
+again when they change, written rows are ceilings, and `--deny` wins with
+E1803. The host does not print that notice yet (#6614 c3). Until it does, the
+host compares the checked entry's solved effect row against the floor (`IO`,
 `Mem.Alloc`, `Exec.Args`), the entry package's `authority` (from
 `package.jet` or the entry's leading inline `package: { … }` block, which the
 Jet loader reads with the same field parser and masks before parsing), and the
 `--allow=`/`--deny=` rows of the invocation, where `-A` allows every right and
 a script (a file whose first line is a `#!/...` launch line) answers as `-A`
-does. A denied or undecided right is
-E1803, exit 1; a file with no package manifest leads the Fix with the exact
-`--allow` command and its `-A` form. The interactive confirmation (D-SCRIPT-CONFIRM1), authority
-receipts, and lint-policy enforcement are not ported yet: the Jet host always
-answers as a non-interactive run.
+does. A right outside them is E1803, exit 1, and the Fix names the exact
+`--allow` command and its `-A` form. There is no interactive question.
 
 `jet run --allow=FS.Read:<path>` grants `FS.Read` confined to that path: the
 program may read the named file, or the named directory and everything
