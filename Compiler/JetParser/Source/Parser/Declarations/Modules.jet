@@ -43,6 +43,7 @@ use {
         SystemField,
         SystemFieldValue,
         SystemLit,
+        TraitImplBlock,
         Type,
         UnOp,
         VMTestField,
@@ -376,7 +377,7 @@ parser_module_apply_cap: fn(state: &JetParserState, item: &&Item) -> Item {
     item.move()
 }
 
-parser_module_fx_cap: fn(state: &JetParserState, marker: Marker, module_name: String) -> ModuleCap? {
+parser_module_fx_cap: fn(state: &JetParserState, marker: Marker, owner: String) -> ModuleCap? {
     entries := [EffectRowEntry]{}
     loop argument in marker.args {
         expr: if argument == .Expr(value) -> value else -> {
@@ -399,11 +400,26 @@ parser_module_fx_cap: fn(state: &JetParserState, marker: Marker, module_name: St
         if name.starts_with("Effect.") -> name = name.slice(7, name.len())
         entries.push(EffectRowEntry{name: "{prefix}{name}", span: expr_span(expr)})
     }
-    Val(ModuleCap{module_name: module_name, entries: entries, span: marker.span})
+    Val(ModuleCap{owner: owner, entries: entries, span: marker.span})
 }
 
-// Every function under the module, nested modules and impl methods included,
-// takes `cap` ahead of the caps of the modules nested inside it.
+// `#FX(Log, !Net) Client: struct { … }` (or `enum`), or an `#FX: (…)` line in
+// the type's body, caps every method of the type. The parser reads the cap;
+// sema binds it to the methods, including trait impls written apart from the
+// type body.
+parser_type_fx_cap: fn(state: &JetParserState, markers: [Marker], type_name: String) -> ModuleCap? {
+    loop marker in markers {
+        if marker.name != MARKER_FX -> next
+        cap := parser_module_fx_cap(state, marker, type_name) ?? return None
+        cap.scope = "type"
+        return Val(cap)
+    }
+    None
+}
+
+// Every function under the module takes `cap` ahead of the caps of the
+// modules nested inside it: nested modules, impl methods and the methods in
+// struct and enum bodies included.
 parser_module_body_caps: fn(body: [Item], cap: ModuleCap) -> [Item] Never! {
     capped := [Item]{}
     loop item in body {
@@ -411,10 +427,20 @@ parser_module_body_caps: fn(body: [Item], cap: ModuleCap) -> [Item] Never! {
             .Func(definition) -> capped.push(Item.Func{value: parser_func_with_cap(definition, cap)})
             .Impl(definition) -> {
                 updated := definition
-                methods := [Func]{}
-                loop method in definition.methods -> methods.push(parser_func_with_cap(method, cap))
-                updated.methods = methods
+                updated.methods = parser_methods_with_cap(definition.methods, cap)
                 capped.push(Item.Impl{value: updated})
+            }
+            .Struct(definition) -> {
+                updated := definition
+                updated.methods = parser_methods_with_cap(definition.methods, cap)
+                updated.trait_impls = parser_trait_impls_with_cap(definition.trait_impls, cap)
+                capped.push(Item.Struct{value: updated})
+            }
+            .Enum(definition) -> {
+                updated := definition
+                updated.methods = parser_methods_with_cap(definition.methods, cap)
+                updated.trait_impls = parser_trait_impls_with_cap(definition.trait_impls, cap)
+                capped.push(Item.Enum{value: updated})
             }
             .CodeModule(definition) -> {
                 updated := definition
@@ -423,6 +449,20 @@ parser_module_body_caps: fn(body: [Item], cap: ModuleCap) -> [Item] Never! {
             }
             else -> capped.push(item.copy())
         }
+    }
+    capped
+}
+
+parser_methods_with_cap: fn(methods: [Func], cap: ModuleCap) -> [Func] Never! {
+    (loop method in methods -> parser_func_with_cap(method, cap))
+}
+
+parser_trait_impls_with_cap: fn(blocks: [TraitImplBlock], cap: ModuleCap) -> [TraitImplBlock] Never! {
+    capped := [TraitImplBlock]{}
+    loop block in blocks {
+        updated := block
+        updated.methods = parser_methods_with_cap(block.methods, cap)
+        capped.push(updated)
     }
     capped
 }

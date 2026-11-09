@@ -2665,7 +2665,8 @@ a monorepo is reached through the ratified `jet split` (D-ECO-SPLITPOLICY1),
 which extracts a shared `policy:` value into a named `Config` when needed;
 `policy:` itself does not compose a `use:` list of named profiles. Effect
 ceilings are not policy fields: a package caps effects with
-`authority: { deny: […] }`, and a module caps them with `#FX(…) name: module`.
+`authority: { deny: […] }`, a module caps them with `#FX(…) name: module`, and
+a struct or enum caps its methods with `#FX(…) Name: struct`.
 
 ```jet
 # package.jet — policy: reads beside bare Package identity

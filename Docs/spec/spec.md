@@ -1880,9 +1880,9 @@ with E1803 before host state changes.
 
 A written authority row is a ceiling. This holds for an `authority` row in
 `package.jet` or in a script's inline `package: { … }` block, a module's
-`#FX`, a type's row, and a function's `-[…]>` row. Reaching an effect outside
-a function row is E0740. Reaching an effect outside a package row or a
-module's `#FX` is E0749. All are reported by `jet check`, `jet build` and
+`#FX`, a type's `#FX`, and a function's `-[…]>` row. Reaching an effect
+outside a function row is E0740. Reaching an effect outside a package row or
+a module's or type's `#FX` is E0749. All are reported by `jet check`, `jet build` and
 `jet run` with the call chain, before anything runs. The floor stays inside
 every ceiling, and a floor right leaves only through an explicit `deny`. The
 effects the entry package's
@@ -1955,9 +1955,30 @@ call, or reports E0712. It is a ceiling, not a grant: the operations still
 happen and contribute to the enclosing function's inferred row. `#FX` is a
 lexical block and disappears in generated code.
 
+Written above a module, a struct or an enum, `#FX(...)` caps every function
+inside it with the same list, including what each function reaches through a
+call:
+
+```jet
+#FX(IO, !FS)
+Report: struct {
+    title: String
+
+    show: fn(self) { print(self.title) }
+}
+```
+
+A type's cap binds the methods in its body, the trait impls written in it, and
+`impl` blocks written apart from it. A module's cap binds every function in
+the module, including the methods of the types declared in it. A plain entry
+is a ceiling and a `!` entry is a denial; reaching outside either one is E0749
+at the offending function, with the cap as the secondary label. An
+`#FX: (...)` line in the body is the same cap. A type without `#FX` keeps its
+inferred rows unchanged.
+
 `jet explain effects <file>:<line>` prints every cap in force at a site,
 nearest first: its `#FX` blocks and lambdas, the enclosing function's row, the
-module caps, the package `authority` rows, and `run`, each with the
+type's and module caps, the package `authority` rows, and `run`, each with the
 `file:line` that writes it, then what the site reaches and the call chain to
 each effect. `--caps` lists every module cap under a path.
 

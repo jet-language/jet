@@ -1,0 +1,15 @@
+use fs: core.files
+
+#FX(!Net, !FS)
+Rates: struct {
+    path: String
+
+    load: fn(self) -> String { fs.read(self.path) ?? "" }
+    label: fn(self) -> String { "rates from {self.path}" }
+}
+
+run: fn() {
+    rates: Rates{path: "rates.txt"}
+    print(rates.label())
+    print(rates.load())
+}

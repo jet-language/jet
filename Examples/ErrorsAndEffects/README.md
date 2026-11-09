@@ -37,6 +37,7 @@ Run a lesson from the repository root, for example `jet run Examples/ErrorsAndEf
 - [SingleUse](Effects/SingleUse.jet) — Single-use (must-consume) values.
 - [SmartContext](Effects/SmartContext.jet) — Smart Context — `#Context(field: value) { … }`.
 - [Taint](Effects/Taint.jet) — External values carry origin facts until a typed decode or an explicit #Scrub gate clears them.
+- [TypeCap](Effects/TypeCap.jet) — A type cap: `#FX(…)` on a struct or enum bounds every method of the type, in its body or in an `impl` block apart from it.
 
 ## Errors
 

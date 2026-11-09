@@ -288,11 +288,15 @@ CodeModule: struct {
     markers: [Marker]{[Marker]{}}
 }
 
-// A module's `#FX(…)` cap. Its plain entries are the ceiling and its `!`
-// entries are denials for every function inside the module, nested modules
-// included. Sema checks each function's solved row against it.
+// A module's or a type's `#FX(…)` cap. Its plain entries are the ceiling and
+// its `!` entries are denials: for every function inside the module, nested
+// modules and type bodies included, or for every method of the type, trait
+// impls written apart from its body included. Sema checks each function's
+// solved row against it. `scope` is `module` or `type`; `owner` is the
+// module's or the type's name.
 ModuleCap: struct {
-    module_name: String
+    owner: String
+    scope: String{"module"}
     entries: [EffectRowEntry]
     span: Span
 }
@@ -1021,6 +1025,8 @@ StructDef: struct {
     marker_span: Span?{None}
     marker_expand_span: Span?{None}
     effect_impl: EffectImpl?{None}
+    // The type's `#FX(…)` cap; the marker stays in `type_markers`.
+    cap: ModuleCap?{None}
 }
 
 CLICommandBinding: struct {
@@ -1195,6 +1201,8 @@ EnumDef: struct {
     type_markers: [Marker]
     groups: [EnumGroup]
     effect_impl: EffectImpl?{None}
+    // The type's `#FX(…)` cap; the marker stays in `type_markers`.
+    cap: ModuleCap?{None}
 }
 
 EnumGroup: struct {

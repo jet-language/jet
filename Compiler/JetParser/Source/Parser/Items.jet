@@ -2028,6 +2028,7 @@ parser_parse_struct: fn(state: &JetParserState, modifiers: ParsedItemModifiers) 
     value.span = parser_cover(modifiers.start_span, close.span)
     markers: parser_merge_inbody_markers(state, modifiers.markers, inside, modifiers.start_span.start, close.span.start, "struct `{value.name}`")
     parser_apply_struct_markers(state, value, markers, modifiers.grouped_markers)
+    value.cap = parser_type_fx_cap(state, markers, value.name)
     parser_finish_marker_struct(state, value)
     value.effect_impl = parser_finish_effect_type(state, value.name, value.name_span, value.effect_impl, [Variant]{})
     value
@@ -2105,6 +2106,7 @@ parser_parse_enum: fn(state: &JetParserState, modifiers: ParsedItemModifiers) ->
     // once the body (and every marker line in it) is read.
     markers: parser_merge_inbody_markers(state, modifiers.markers, inside, modifiers.start_span.start, close.span.start, "enum `{value.name}`")
     parser_apply_enum_type_markers(value, markers)
+    value.cap = parser_type_fx_cap(state, markers, value.name)
     _ := parser_layout_marker_fact(state, markers, modifiers.grouped_markers, true)
     value.effect_impl = parser_finish_effect_type(state, value.name, value.name_span, value.effect_impl, value.variants)
     value

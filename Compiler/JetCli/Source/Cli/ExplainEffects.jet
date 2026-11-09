@@ -1,7 +1,8 @@
 // `jet explain effects [<file>[:<line>]] [--caps] [--json]`: every effect cap
 // in force at one site, nearest first, one line per rung (block, function,
-// module, package, run), then what the site reaches with the first call that
-// reaches each effect. A rung that writes nothing prints `(none written)`.
+// type when the method's type writes a cap, module, package, run), then what
+// the site reaches with the first call that reaches each effect. A rung that
+// writes nothing prints `(none written)`.
 // The facts are the checked program's own, read through the walker `jet
 // inspect rights` uses (InspectRights.jet) and the semantic index's
 // witnesses; `--caps` lists every module cap under a file or directory.
@@ -320,24 +321,28 @@ jet_cli_effects_take: fn(found: &JetCLIEffectsSite, key: String, function: Func,
 }
 
 // The innermost function holding `offset`, keyed as `jet inspect rights`
-// keys it (jet_cli_rights_collect), and the inline module caps around it.
+// keys it (jet_cli_rights_collect), and the inline module and type caps
+// around it.
 jet_cli_effects_locate: fn(items: [Item], alias: String, namespace: String, offset: Int, caps: [ModuleCap], found: &JetCLIEffectsSite) Never! {
     loop item in items {
         if item == {
             .Func(function) -> jet_cli_effects_take(found, "{alias}::{namespace}{function.name}", function, caps, offset)
             .Impl(definition) -> {
-                loop method in definition.methods -> jet_cli_effects_take(found, "{alias}::{namespace}{definition.type_name}::{method.name}", method, caps, offset)
+                typed: jet_cli_effects_with_cap(caps, jet_cli_effects_type_cap(items, definition.type_name))
+                loop method in definition.methods -> jet_cli_effects_take(found, "{alias}::{namespace}{definition.type_name}::{method.name}", method, typed, offset)
             }
             .Struct(definition) -> {
-                loop method in definition.methods -> jet_cli_effects_take(found, "{alias}::{namespace}{definition.name}::{method.name}", method, caps, offset)
+                typed: jet_cli_effects_with_cap(caps, definition.cap)
+                loop method in definition.methods -> jet_cli_effects_take(found, "{alias}::{namespace}{definition.name}::{method.name}", method, typed, offset)
                 loop block in definition.trait_impls {
-                    loop method in block.methods -> jet_cli_effects_take(found, "{alias}::{namespace}{definition.name}::{method.name}", method, caps, offset)
+                    loop method in block.methods -> jet_cli_effects_take(found, "{alias}::{namespace}{definition.name}::{method.name}", method, typed, offset)
                 }
             }
             .Enum(definition) -> {
-                loop method in definition.methods -> jet_cli_effects_take(found, "{alias}::{namespace}{definition.name}::{method.name}", method, caps, offset)
+                typed: jet_cli_effects_with_cap(caps, definition.cap)
+                loop method in definition.methods -> jet_cli_effects_take(found, "{alias}::{namespace}{definition.name}::{method.name}", method, typed, offset)
                 loop block in definition.trait_impls {
-                    loop method in block.methods -> jet_cli_effects_take(found, "{alias}::{namespace}{definition.name}::{method.name}", method, caps, offset)
+                    loop method in block.methods -> jet_cli_effects_take(found, "{alias}::{namespace}{definition.name}::{method.name}", method, typed, offset)
                 }
             }
             .CodeModule(nested) -> {
@@ -352,6 +357,29 @@ jet_cli_effects_locate: fn(items: [Item], alias: String, namespace: String, offs
             else -> {}
         }
     }
+}
+
+// `caps` with a type's cap innermost, when the type has one.
+jet_cli_effects_with_cap: fn(caps: [ModuleCap], cap: ModuleCap?) -> [ModuleCap] Never! {
+    typed := caps.copy()
+    if cap == .Val(value) -> typed.push(value.copy())
+    typed
+}
+
+// The cap of the struct or enum `name` declared beside an impl of it.
+jet_cli_effects_type_cap: fn(items: [Item], name: String) -> ModuleCap? Never! {
+    loop item in items {
+        if item == {
+            .Struct(definition) -> {
+                if definition.name == name -> return definition.cap
+            }
+            .Enum(definition) -> {
+                if definition.name == name -> return definition.cap
+            }
+            else -> {}
+        }
+    }
+    None
 }
 
 // Does `name: module` declared beside `directory` name the file `target`?
@@ -588,14 +616,18 @@ jet_cli_explain_effects_report: fn(result: JetDriverCompileResult, job: JetCLIIn
         jet_cli_rights_collect(doc_module.items, alias, "", doc_module.path, views)
         loop view in jet_cli_rights_sorted(views) -> jet_cli_effects_function_reaches(doc_module, view.key, summaries, modules, reaches)
     }
-    module_rungs := [JetCLIEffectsRung]{}
+    cap_rungs := [JetCLIEffectsRung]{}
     loop index in 0..<found.caps.len() {
         cap: found.caps[found.caps.len() - 1 - index]
-        module_rungs.push(JetCLIEffectsRung{rung: "module", text: jet_cli_effects_cap_text(cap.entries), written: true, site: jet_cli_effects_site(doc_module, cap.span.start)})
+        cap_rungs.push(JetCLIEffectsRung{rung: cap.scope, text: jet_cli_effects_cap_text(cap.entries), written: true, site: jet_cli_effects_site(doc_module, cap.span.start)})
     }
-    jet_cli_effects_file_caps(modules, selected, 0, module_rungs)
-    if module_rungs.len() == 0 -> module_rungs.push(JetCLIEffectsRung{rung: "module", text: "(none written)", written: false, site: ""})
-    loop rung in module_rungs -> rungs.push(rung)
+    jet_cli_effects_file_caps(modules, selected, 0, cap_rungs)
+    module_written := false
+    loop rung in cap_rungs {
+        if rung.rung == "module" -> module_written = true
+    }
+    if !module_written -> cap_rungs.push(JetCLIEffectsRung{rung: "module", text: "(none written)", written: false, site: ""})
+    loop rung in cap_rungs -> rungs.push(rung)
     rungs.push(jet_cli_effects_package_rung(result.authority_policy))
     rungs.push(JetCLIEffectsRung{rung: "run", text: JET_CLI_EXPLAIN_EFFECTS_RUN, written: false, site: ""})
     reached: jet_cli_effects_reaches_sorted(reaches)

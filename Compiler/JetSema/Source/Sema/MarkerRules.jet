@@ -1402,11 +1402,21 @@ sema_marker_rules_impl_markers: fn(markers: [Marker], os_target: String?) -> [Ma
     kept
 }
 
+// The parser owns `#FX` on a module, a struct or an enum as its effect cap,
+// so it is no rule application there.
+sema_marker_rules_without_cap: fn(markers: [Marker]) -> [Marker] Never! {
+    kept := [Marker]{}
+    loop marker in markers {
+        if marker.name != MARKER_FX -> kept.push(marker.copy())
+    }
+    kept
+}
+
 sema_marker_rules_item_applications: fn(item: Item, applications: &[AppliedRuleApplication]) Never! {
     if item == {
         .Func(function) -> sema_marker_rules_function_applications(function, RuleSite.Function, applications)
         .Struct(definition) -> {
-            sema_marker_rules_attach(definition.type_markers, definition.name_span, RuleSite.Type, applications)
+            sema_marker_rules_attach(sema_marker_rules_without_cap(definition.type_markers), definition.name_span, RuleSite.Type, applications)
             loop field in definition.fields -> sema_marker_rules_attach(field.serde_markers, field.name_span, RuleSite.Field, applications)
             loop method in definition.methods -> sema_marker_rules_function_applications(method, RuleSite.Method, applications)
             loop implementation in definition.trait_impls {
@@ -1415,7 +1425,7 @@ sema_marker_rules_item_applications: fn(item: Item, applications: &[AppliedRuleA
             }
         }
         .Enum(definition) -> {
-            sema_marker_rules_attach(definition.type_markers, definition.name_span, RuleSite.Type, applications)
+            sema_marker_rules_attach(sema_marker_rules_without_cap(definition.type_markers), definition.name_span, RuleSite.Type, applications)
             loop variant in definition.variants -> sema_marker_rules_attach(variant.serde_markers, variant.name_span, RuleSite.Variant, applications)
             loop method in definition.methods -> sema_marker_rules_function_applications(method, RuleSite.Method, applications)
             loop implementation in definition.trait_impls {
@@ -1434,12 +1444,7 @@ sema_marker_rules_item_applications: fn(item: Item, applications: &[AppliedRuleA
         }
         .Module(declaration) -> sema_marker_rules_attach(declaration.markers, declaration.name_span, RuleSite.Module, applications)
         .CodeModule(code_module) -> {
-            // The parser owns `#FX` on a module as its effect cap.
-            markers := [Marker]{}
-            loop marker in code_module.markers {
-                if marker.name != MARKER_FX -> markers.push(marker.copy())
-            }
-            sema_marker_rules_attach(markers, code_module.name_span, RuleSite.Module, applications)
+            sema_marker_rules_attach(sema_marker_rules_without_cap(code_module.markers), code_module.name_span, RuleSite.Module, applications)
             if code_module.body == .Val(body) {
                 loop nested in body -> sema_marker_rules_item_applications(nested, applications)
             }
