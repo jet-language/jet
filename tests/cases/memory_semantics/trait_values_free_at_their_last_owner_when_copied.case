@@ -1,0 +1,23 @@
+# #6727: copying a trait value is E0211, and a read the box's holder keeps (a
+# list element, a lambda's capture, an Option fallback) is one more owner of
+# the same counted box: the last owner drops the payload, so each payload's
+# `Shared` context is released once on every tier.
+fixture: trait_values_free_at_their_last_owner_when_copied.fixture
+env: NO_COLOR=1
+step: jet check copy.jet
+exit: 1
+stderr: ~ "E0211" # a trait value has no copy
+step: jet run --optimize=none main.jet
+exit: 0
+stdout: = trait_values_free_at_their_last_owner_when_copied.out
+step: jet run --optimize=basic main.jet
+exit: 0
+stdout: = trait_values_free_at_their_last_owner_when_copied.out
+step: jet run --optimize=full main.jet
+exit: 0
+stdout: = trait_values_free_at_their_last_owner_when_copied.out
+step: jet build main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = trait_values_free_at_their_last_owner_when_copied.out

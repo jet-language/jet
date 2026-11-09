@@ -284,9 +284,11 @@ ir_value_type_laid: fn(m: &IRModule, p: IRProgram, ty: Type, laying: [String]) -
     // A counted closure box pointer (BuildCoreClosures.jet ir_closure_row).
     if ty == .Fn(_, _, _, _, _, _) -> return Val(ir_closure_row(m, ty))
     if ty == .TraitObject(_) {
-        // A trait value box pointer: the concrete payload's key word at 0,
-        // the payload from 8.
-        return Val(ir_intern_type(m, type_carrier_identity(ty), ir_layout(IRTypeKind.Pointer, ty, 8, 8, IRClass.Pointer, false, 64, "")))
+        // A counted trait value box pointer: the concrete payload's key word
+        // at 0, the payload from 8. Its last owner drops the payload
+        // (BuildTraits.jet ir_trait_drop_body); a copy shares the box.
+        interned: ir_intern_type(m, type_carrier_identity(ty), ir_layout(IRTypeKind.Pointer, ty, 8, 8, IRClass.Pointer, false, 64, ""))
+        return Val(ir_mark_trait(m, interned))
     }
     if ty == .Tuple(fields) {
         members: ir_tuple_members_in(m, p, fields, laying) ?? return None
