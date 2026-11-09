@@ -4237,6 +4237,50 @@ leaf samples the same startup facts; the shared terminal leaf remains the
 canonical stdout `IsTerminal` sample. No environment effect is added to the
 existing public capability row.
 
+#### Keyboards: `core.ui.xkb`
+
+`core.ui.xkb` is the one XKB keyboard engine behind native windows, in pure
+Jet ([`Core/Ui/Xkb.jet`](../../../Core/Ui/Xkb.jet)). It compiles an XKB
+text-v1 keymap, the include-resolved text a Wayland compositor sends with
+`wl_keyboard.keymap`. It then tracks the keyboard state as libxkbcommon
+1.13.2 does: groups, levels, modifier and group actions, locks and latches,
+and Compose sequences from the en_US.UTF-8 table. Keys are `core.term`'s
+`Key`. A hostile keymap or modifier event gives only a typed
+`UIError.Protocol`.
+
+| Signature | Result | Description |
+|---|---|---|
+| `keymap(bytes: [U8]) -> Keymap UIError!` | keymap | Compile an XKB text-v1 keymap. |
+| `Keymap.modifiers(depressed: Int, latched: Int, locked: Int, group: Int)` | — | Apply a `wl_keyboard.modifiers` event. |
+| `Keymap.press(code: Int, down: Bool) -> (key: Key, text: String)` | key, text | Press or release evdev key `code`: its key and the text it types (`""` for none, for control characters and inside a Compose sequence). |
+| `Keymap.repeats(code: Int) -> Bool` | Boolean | Whether holding the key repeats it; modifier keys do not. |
+| `Keymap.codes() -> [Int]` | codes | The evdev codes of the keys with symbols at level 1 of group 1. |
+| `Keymap.keysym(code: Int) -> Int` / `.keysym_name(sym: Int) -> String` | keysym | The key's keysym, as `xkb_state_key_get_one_sym`, and libxkbcommon's name for a keysym. |
+| `Keymap.layout() -> String` / `.active(name: String) -> Bool` | facts | The active layout's name, and whether a real or virtual modifier (`"Shift"`, `"NumLock"`, `"LevelThree"`) is active. |
+| `Repeat{rate:, delay:}.due(held_ms: Int) -> Int` / `.between(from_ms: Int, to_ms: Int) -> Int` | count | Key repeats from `wl_keyboard.repeat_info` due after a hold, or while it grows. |
+
+#### Text: `core.ui.font`
+
+`core.ui.font` reads TrueType (glyf) fonts and draws text into a window's
+pixels, in pure Jet ([`Core/Ui/Font.jet`](../../../Core/Ui/Font.jet)): no
+`#Unsafe`, no files and no OS calls. Rasterizing and painting are integer
+arithmetic, so the native tiers and the web build paint the same bytes. The
+built-in faces are Atkinson Hyperlegible Next Regular and Bold (SIL Open Font
+License, `license()`). They cover Latin; the only Greek is Δ Ω μ π, and there
+is no Cyrillic. Layout applies GPOS pair kerning or the kern table. There is
+no GSUB, no mark positioning and no hinting, and text runs left to right.
+Every fault in a font file is a typed `FontError{reason}`.
+
+| Signature | Result | Description |
+|---|---|---|
+| `face(bytes: [U8]) -> Face FontError!` / `regular() -> Face` / `bold() -> Face` | face | Read a TrueType font, or take a built-in face. |
+| `Face.glyph(scalar: Int) -> Int` / `.glyph_count()` / `.units_per_em()` / `.metrics(size_px)` / `.advance(id, size_px)` / `.outline(id)` | facts | The glyph for a character (0 when missing), and the face's metrics, advances and outlines. |
+| `Face.layout(text: String, size_px: Float) -> TextRun` / `.wrap(text, size_px, max_width) -> [TextLine]` | layout | Place a line of glyphs with kerning, and break text into lines after spaces and hyphens. |
+| `Face.raster(id: Int, size_px: Float, x_frac: Float) -> GlyphMask` | mask | A glyph's anti-aliased coverage, unhinted, at a sub-pixel position. |
+| `cache() -> GlyphCache` / `cache_within(budget: Int)` / `GlyphCache.glyph(face, id, size_px, x_frac)` | cache | Masks kept per face, glyph, size and quarter pixel, within about `budget` bytes (CACHE_BYTES_MAX, 4 MiB, by default). |
+| `blend(&pixels, width, height, stride_bytes, mask, x, y, argb, clip: UIRect)` | — | Paint a mask source-over, in linear light, onto premultiplied ARGB8888 pixels (bytes B, G, R, A, `stride_bytes` per row). Only pixels inside `clip` and the canvas change. |
+| `draw_text(&pixels, width, height, stride_bytes, &cache, face, text, size_px, x, baseline_y, argb, clip) -> Int` | advance | Lay out and paint a line of text at quarter-pixel positions, and return its advance in whole pixels. |
+
 ### `core.reactive` — explicit signals and dependency tracking
 
 `core.reactive` provides opt-in, dependency-tracked state. A `Signal<T>` holds
@@ -5492,6 +5536,8 @@ The built-module inventory is a source-facing registry, not a missing-domain led
 - `core.ui.host.drag_drop`
 - `core.ui.host.shortcuts`
 - `core.ui.host.accessibility`
+- `core.ui.xkb`
+- `core.ui.font`
 - `core.units`
 - `core.watcher`
 - `core.web`

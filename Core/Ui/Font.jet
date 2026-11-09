@@ -1,6 +1,8 @@
 use {
     data: __core_ui_font_data
-    internal.[font_error, raw16, raw32, directory, table, within, no_ranges, vertical_metrics, advance_units, pick_cmap, map_format4, map_format12, glyph_points, kerning_lookups, glyph_classes, kern_table, decode, positions, wrap_paragraph, tiny_font, survives]
+    math: core.math
+    core.ui.[UIRect]
+    internal.[font_error, raw16, raw32, directory, table, within, no_ranges, vertical_metrics, advance_units, pick_cmap, map_format4, map_format12, glyph_points, kerning_lookups, glyph_classes, kern_table, decode, shape, positions, wrap_paragraph, cached_mask, fingerprint, size_64, units_64, min_int, max_int, raster_glyph, mask_of, encode_srgb, tiny_font, control_square, decode_srgb, filled, survives]
 }
 // core.ui.font — TrueType faces for ui text, in pure Jet.
 //
@@ -11,14 +13,31 @@ use {
 // table when GPOS has none; `wrap` breaks text into lines that fit a width.
 // Every table is checked when the face loads, so a hostile font is a
 // `FontError` and never a fault; after that the face answers every query.
+// `raster` turns a glyph into an anti-aliased coverage mask, `GlyphCache`
+// keeps masks, and `blend` and `draw_text` paint them onto a caller's
+// ARGB8888 pixels. Rasterizing and painting are integer arithmetic only, so
+// every target and optimization level draws the same bytes; layout's Float
+// results are single IEEE binary64 operations, likewise the same everywhere.
 // The default face is Atkinson Hyperlegible Next (SIL Open Font License 1.1),
 // built in: `regular()` and `bold()`.
 
 // Budgets that bound the work a hostile font can cause.
 COMPONENT_DEPTH_MAX: 8
 GLYPH_POINTS_MAX: 65535
+// A mask wider or taller than this many pixels, or holding more pixels than
+// MASK_PIXELS_MAX, draws nothing.
+MASK_SIDE_MAX: 4096
+MASK_PIXELS_MAX: 4194304
+// A glyph cache keeps about this many bytes of masks, each counted as its
+// coverage plus MASK_RECORD_BYTES.
+CACHE_BYTES_MAX: 4194304
+MASK_RECORD_BYTES: 64
 // The 16.16 scale that leaves font units as they are.
 UNSCALED: 65536
+// Rasterizer units per pixel: outlines are drawn in 1/256 pixels.
+SUBPIXEL: 256
+// Linear light 1.0 in TO_LINEAR and SRGB_STEPS.
+LINEAR_ONE: 1048576
 // GDEF glyph classes a lookup flag can skip.
 GLYPH_CLASS_BASE: 1
 GLYPH_CLASS_LIGATURE: 2
@@ -131,6 +150,7 @@ Face: struct {
     priv lookups: [PairLookup]
     priv kern_pairs: [Int: Int]
     priv classes: Ranges
+    priv fingerprint: Int
 }
 
 // A table's place in the font.
@@ -184,6 +204,7 @@ face: fn(bytes: [U8]) -> Face FontError! {
         hmtx: hmtx.offset, hmetrics: hmetrics,
         cmap: picked.offset, cmap_format: picked.format, cmap_count: picked.count,
         lookups: [PairLookup]{}, kern_pairs: [Int: Int]{}, classes: no_ranges(),
+        fingerprint: fingerprint(bytes),
     }
     // Every outline is read once now, so later queries cannot fail.
     loop id in 0..<glyph_count {
@@ -268,24 +289,15 @@ impl Face {
     /// `text` as one line of glyphs at `size_px` pixels per em, kerned. A
     /// character the face lacks draws glyph 0.
     layout: fn(self, text: String, size_px: Float) -> TextRun {
-        bytes: text.bytes()
-        ids := [Int]{}
-        clusters := [Int]{}
-        i := 0
-        loop i < bytes.len() {
-            decoded: decode(bytes, i)
-            ids.push(self.glyph(decoded.scalar))
-            clusters.push(i)
-            i = decoded.next
-        }
-        adjusted: positions(self, ids)
+        shaped: shape(self, text)
+        adjusted: positions(self, shaped.ids)
         scale: size_px / Float{self.units}
         glyphs := [PlacedGlyph]{}
         pen := 0
-        loop k in 0..<ids.len() {
+        loop k in 0..<shaped.ids.len() {
             glyphs.push(PlacedGlyph{
-                id: ids[k],
-                cluster: clusters[k],
+                id: shaped.ids[k],
+                cluster: shaped.clusters[k],
                 x: Float{pen + adjusted.x_offsets[k]} * scale,
                 y: Float{-adjusted.y_offsets[k]} * scale,
                 advance: Float{adjusted.advances[k]} * scale,
@@ -311,6 +323,17 @@ impl Face {
             start = stop + 1
         }
         lines
+    }
+
+    /// Glyph `id` (glyph 0 when the face lacks it) as a coverage mask at
+    /// `size_px` pixels per em, its outline moved `x_frac` of a pixel right
+    /// (0 <= x_frac < 1, else 0; to the nearest 1/64). Unhinted; FreeType's
+    /// smooth renderer draws the same box, each pixel within 2 of 255 of
+    /// this one. A size outside 1/64..16384 pixels, or a mask over the
+    /// MASK_SIDE_MAX and MASK_PIXELS_MAX budgets, is empty.
+    raster: fn(self, id: Int, size_px: Float, x_frac: Float) -> GlyphMask {
+        shift: if x_frac > 0.0 && x_frac < 1.0 -> math.round(x_frac * 64.0) else -> 0
+        raster_glyph(self, id, size_64(size_px), shift)
     }
 }
 
@@ -348,10 +371,221 @@ Decoded: struct {
     next: Int
 }
 
+// A text's glyphs and the byte offset each draws from.
+Shaped: struct {
+    ids: [Int]
+    clusters: [Int]
+}
+
 Positions: struct {
     advances: [Int]
     x_offsets: [Int]
     y_offsets: [Int]
+}
+
+// ---- rasterizing -----------------------------------------------------------
+
+/// A glyph's anti-aliased coverage: `height` rows of `width` bytes from 0
+/// (none) to 255 (all), each the share of its pixel the outline covers
+/// (linear, not gamma-encoded). Its top-left pixel sits `left` pixels right
+/// of the glyph's origin and `top` pixels above the baseline.
+GlyphMask: struct {
+    width: Int
+    height: Int
+    left: Int
+    top: Int
+    coverage: [U8]
+}
+
+/// Glyph masks kept by face, glyph, size and quarter-pixel position, within
+/// a byte budget. Masks live in two generations: a mask is drawn or found
+/// into the recent one, and when that fills half the budget it becomes the
+/// older one and the previous older one is dropped. So the cache holds at
+/// most about its budget, and drops masks unused for longest first.
+GlyphCache: struct {
+    priv faces: [Int]
+    priv recent: [Int: GlyphMask]
+    priv older: [Int: GlyphMask]
+    priv recent_bytes: Int
+    priv budget: Int
+}
+
+/// An empty glyph cache with a budget of CACHE_BYTES_MAX bytes.
+cache: fn() -> GlyphCache {
+    cache_within(CACHE_BYTES_MAX)
+}
+
+/// An empty glyph cache that keeps about `budget` bytes of masks. A mask
+/// costs its coverage bytes plus MASK_RECORD_BYTES. The newest mask is always
+/// kept, so a tiny budget still answers every query, drawing more often.
+cache_within: fn(budget: Int) -> GlyphCache {
+    GlyphCache{faces: [Int]{}, recent: [Int: GlyphMask]{}, older: [Int: GlyphMask]{}, recent_bytes: 0, budget: budget}
+}
+
+impl GlyphCache {
+    /// `face.raster(id, size_px, x_frac)` with `x_frac` rounded to a quarter
+    /// pixel, drawn the first time and kept.
+    glyph: fn(&self, face: Face, id: Int, size_px: Float, x_frac: Float) -> GlyphMask {
+        quarter: if x_frac > 0.0 && x_frac < 1.0 -> math.round(x_frac * 4.0) else -> 0
+        cached_mask(self, face, id, size_64(size_px), quarter)
+    }
+}
+
+// Per-pixel accumulators, `width + 1` cells a row (the last catches what
+// leaves the right edge), row 0 at the bottom: `cover` sums the signed
+// heights of the edges crossing a cell, `area` those heights times twice
+// their mean distance from the cell's left side, in 1/SUBPIXEL pixels.
+Cells: struct {
+    width: Int
+    height: Int
+    cover: [Int]
+    area: [Int]
+}
+
+// ---- painting --------------------------------------------------------------
+
+/// Paints `mask` onto `pixels` with the glyph's origin (the pen, on the
+/// baseline) at pixel (`x`, `y`), in colour `argb` (0xAARRGGBB, straight
+/// alpha, which scales the coverage). `pixels` holds `height` rows of
+/// `width` pixels, `stride_bytes` apart; each pixel is a premultiplied
+/// 0xAARRGGBB word in native byte order, as wl_shm ARGB8888 is. That is the
+/// bytes B, G, R, A: every target Jet builds for is little-endian.
+/// Only pixels inside `clip` and the canvas change. Colour mixes source-over
+/// in linear light, in integers, so every target paints the same bytes.
+blend: fn(&pixels: [U8], width: Int, height: Int, stride_bytes: Int, mask: GlyphMask, x: Int, y: Int, argb: Int, clip: UIRect) {
+    if width <= 0 || height <= 0 || stride_bytes < width * 4 || pixels.len() < width * 4 || mask.width <= 0 || mask.height <= 0 || mask.coverage.len() < mask.width * mask.height -> return
+    rows: min_int(height, (pixels.len() - width * 4) /% stride_bytes + 1)
+    x0: x + mask.left
+    y0: y - mask.top
+    col_lo: max_int(max_int(x0, clip.x), 0)
+    col_hi: min_int(min_int(x0 + mask.width, clip.x + clip.width), width)
+    row_lo: max_int(max_int(y0, clip.y), 0)
+    row_hi: min_int(min_int(y0 + mask.height, clip.y + clip.height), rows)
+    opacity: (argb >> 24).bit_and(255)
+    if col_lo >= col_hi || row_lo >= row_hi || opacity == 0 -> return
+    source: [Int]{argb.bit_and(255), (argb >> 8).bit_and(255), (argb >> 16).bit_and(255)}
+    loop row in row_lo..<row_hi {
+        loop col in col_lo..<col_hi {
+            weight: Int.from_u8(mask.coverage[(row - y0) * mask.width + col - x0]) * opacity
+            if weight == 0 -> next
+            i: row * stride_bytes + col * 4
+            if weight == 65025 {
+                loop k in 0..<3 -> pixels[i + k] = U8{source[k]}
+                pixels[i + 3] = U8{255}
+                next
+            }
+            // Source weight A * 255 and canvas weight alpha * (1 - A), in
+            // 1/65025ths.
+            alpha: Int.from_u8(pixels[i + 3])
+            ws: weight * 255
+            wd: alpha * (65025 - weight)
+            total: ws + wd
+            out_alpha: (total + 32512) /% 65025
+            loop k in 0..<3 {
+                straight: if alpha == 0 -> 0 else -> min_int(255, (Int.from_u8(pixels[i + k]) * 255 + alpha /% 2) /% alpha)
+                linear: (TO_LINEAR[source[k]] * ws + TO_LINEAR[straight] * wd + total /% 2) /% total
+                pixels[i + k] = U8{(encode_srgb(linear) * out_alpha + 127) /% 255}
+            }
+            pixels[i + 3] = U8{out_alpha}
+        }
+    }
+}
+
+/// Lays `text` out with `face` at `size_px` and paints it onto `pixels` as
+/// `blend` does, the line starting at pixel `x` on baseline `baseline_y`,
+/// each glyph at its quarter-pixel position with masks from `cache`.
+/// Positions are integer 1/64 pixels. Returns the line's advance in whole
+/// pixels.
+draw_text: fn(&pixels: [U8], width: Int, height: Int, stride_bytes: Int, &cache: GlyphCache, face: Face, text: String, size_px: Float, x: Int, baseline_y: Int, argb: Int, clip: UIRect) -> Int {
+    size: size_64(size_px)
+    if size == 0 -> return 0
+    shaped: shape(face, text)
+    adjusted: positions(face, shaped.ids)
+    pen := 0
+    loop k in 0..<shaped.ids.len() {
+        at: x * 64 + units_64(pen + adjusted.x_offsets[k], size, face.units)
+        whole: at /% 64
+        mask: cached_mask(cache, face, shaped.ids[k], size, (at - whole * 64 + 8) /% 16)
+        rise: units_64(adjusted.y_offsets[k], size, face.units)
+        blend(pixels, width, height, stride_bytes, mask, whole, baseline_y - (rise + 32) /% 64, argb, clip)
+        pen += adjusted.advances[k]
+    }
+    (units_64(pen, size, face.units) + 32) /% 64
+}
+
+// Byte v of sRGB as linear light, LINEAR_ONE * decode(v / 255) rounded,
+// where decode is the sRGB transfer function. "the sRGB tables follow the
+// sRGB transfer function" recomputes both tables.
+TO_LINEAR: [Int]{
+    0, 318, 637, 955, 1273, 1591, 1910, 2228,
+    2546, 2864, 3183, 3509, 3855, 4220, 4605, 5009,
+    5433, 5878, 6343, 6828, 7335, 7863, 8413, 8984,
+    9578, 10193, 10832, 11492, 12176, 12883, 13614, 14368,
+    15145, 15947, 16773, 17624, 18499, 19399, 20324, 21274,
+    22250, 23251, 24278, 25331, 26410, 27516, 28648, 29807,
+    30993, 32205, 33445, 34713, 36008, 37331, 38681, 40060,
+    41467, 42903, 44367, 45860, 47381, 48932, 50512, 52121,
+    53760, 55428, 57127, 58855, 60613, 62402, 64221, 66071,
+    67951, 69862, 71805, 73778, 75783, 77819, 79886, 81985,
+    84117, 86280, 88475, 90702, 92962, 95254, 97579, 99937,
+    102328, 104751, 107208, 109698, 112222, 114779, 117370, 119994,
+    122653, 125345, 128072, 130833, 133628, 136458, 139323, 142222,
+    145156, 148125, 151130, 154169, 157244, 160355, 163501, 166683,
+    169900, 173154, 176443, 179769, 183131, 186530, 189964, 193436,
+    196944, 200489, 204072, 207691, 211347, 215041, 218772, 222540,
+    226346, 230190, 234071, 237991, 241948, 245944, 249978, 254050,
+    258161, 262310, 266498, 270724, 274990, 279294, 283637, 288020,
+    292442, 296903, 301404, 305944, 310523, 315143, 319802, 324502,
+    329241, 334021, 338840, 343700, 348601, 353542, 358523, 363546,
+    368609, 373713, 378858, 384044, 389271, 394539, 399849, 405201,
+    410594, 416028, 421504, 427022, 432582, 438184, 443828, 449515,
+    455243, 461014, 466827, 472683, 478582, 484523, 490507, 496534,
+    502604, 508717, 514873, 521072, 527315, 533601, 539930, 546303,
+    552720, 559181, 565685, 572234, 578826, 585462, 592143, 598868,
+    605637, 612451, 619309, 626211, 633159, 640151, 647188, 654270,
+    661397, 668569, 675786, 683048, 690356, 697709, 705108, 712552,
+    720042, 727577, 735159, 742786, 750459, 758178, 765944, 773755,
+    781613, 789517, 797468, 805465, 813509, 821599, 829736, 837920,
+    846151, 854429, 862753, 871125, 879545, 888011, 896525, 905086,
+    913695, 922351, 931055, 939807, 948606, 957453, 966349, 975292,
+    984283, 993323, 1002411, 1011547, 1020731, 1029964, 1039246, 1048576,
+}
+
+// SRGB_STEPS[v] is LINEAR_ONE * decode((v + 0.5) / 255) rounded: the linear
+// value where the nearest byte moves from v to v + 1.
+SRGB_STEPS: [Int]{
+    159, 477, 796, 1114, 1432, 1750, 2069, 2387,
+    2705, 3024, 3343, 3680, 4035, 4410, 4804, 5219,
+    5653, 6108, 6583, 7079, 7597, 8135, 8696, 9278,
+    9883, 10510, 11159, 11832, 12527, 13246, 13988, 14754,
+    15543, 16357, 17196, 18058, 18946, 19858, 20796, 21759,
+    22747, 23761, 24801, 25867, 26960, 28079, 29224, 30396,
+    31596, 32822, 34076, 35357, 36666, 38003, 39367, 40760,
+    42181, 43631, 45110, 46617, 48153, 49718, 51313, 52937,
+    54590, 56274, 57987, 59730, 61504, 63308, 65142, 67007,
+    68903, 70830, 72787, 74776, 76797, 78848, 80932, 83047,
+    85194, 87373, 89585, 91828, 94104, 96413, 98754, 101128,
+    103535, 105976, 108449, 110956, 113496, 116070, 118678, 121319,
+    123995, 126704, 129448, 132226, 135039, 137886, 140768, 143685,
+    146636, 149623, 152645, 155702, 158795, 161923, 165087, 168287,
+    171522, 174794, 178102, 181446, 184826, 188242, 191696, 195186,
+    198712, 202276, 205877, 209514, 213189, 216901, 220651, 224438,
+    228263, 232126, 236026, 239965, 243942, 247956, 252009, 256101,
+    260231, 264399, 268606, 272852, 277137, 281461, 285824, 290226,
+    294667, 299148, 303669, 308229, 312828, 317468, 322147, 326866,
+    331626, 336425, 341265, 346145, 351066, 356027, 361029, 366072,
+    371156, 376280, 381446, 386652, 391900, 397189, 402520, 407892,
+    413306, 418761, 424258, 429797, 435378, 441001, 446666, 452374,
+    458123, 463915, 469750, 475627, 481547, 487510, 493515, 499563,
+    505655, 511789, 517967, 524188, 530452, 536760, 543111, 549506,
+    555945, 562428, 568954, 575524, 582139, 588797, 595500, 602247,
+    609038, 615874, 622755, 629680, 636649, 643664, 650723, 657828,
+    664977, 672172, 679411, 686697, 694027, 701403, 708824, 716291,
+    723804, 731362, 738966, 746617, 754313, 762055, 769844, 777678,
+    785559, 793487, 801460, 809481, 817548, 825662, 833822, 842029,
+    850284, 858585, 866933, 875329, 883772, 892262, 900799, 909384,
+    918017, 926697, 935425, 944200, 953024, 961895, 970814, 979782,
+    988797, 997861, 1006973, 1016133, 1025342, 1034599, 1043905,
 }
 
 // The table readers, shaper and rasterizer behind the public items above:
@@ -1038,6 +1272,19 @@ priv internal: module {
         Decoded{scalar: scalar, next: i + width}
     }
 
+    shape: fn(face: Face, text: String) -> Shaped {
+        bytes: text.bytes()
+        out := Shaped{ids: [Int]{}, clusters: [Int]{}}
+        i := 0
+        loop i < bytes.len() {
+            decoded: decode(bytes, i)
+            out.ids.push(face.glyph(decoded.scalar))
+            out.clusters.push(i)
+            i = decoded.next
+        }
+        out
+    }
+
     skips: fn(face: Face, mask: Int, glyph: Int) -> Bool {
         if mask == 0 -> return false
         class: class_of(face.classes, glyph)
@@ -1148,6 +1395,336 @@ priv internal: module {
         }
     }
 
+    // Glyph `id` at `size` 1/64 pixels per em, `quarter` quarter pixels right,
+    // from `cache` or drawn into it. Four quarters is the unmoved mask one pixel
+    // right.
+    cached_mask: fn(&cache: GlyphCache, face: Face, id: Int, size: Int, quarter: Int) -> GlyphMask {
+        if quarter == 4 {
+            moved := cached_mask(cache, face, id, size, 0)
+            moved.left += 1
+            return moved
+        }
+        glyph: if id < 0 || id >= face.glyph_count -> 0 else -> id
+        slot := -1
+        loop k in 0..<cache.faces.len() {
+            if cache.faces[k] == face.fingerprint -> slot = k
+        }
+        if slot < 0 {
+            cache.faces.push(face.fingerprint)
+            slot = cache.faces.len() - 1
+        }
+        key: ((slot * 2097152 + size) * 4 + quarter) * 65536 + glyph
+        if cache.recent.get(key) == .Val(kept) -> return kept
+        mask: cache.older.get(key) ?? raster_glyph(face, glyph, size, quarter * 16)
+        cost: mask.coverage.len() + MASK_RECORD_BYTES
+        if cache.recent_bytes + cost > cache.budget /% 2 {
+            cache.older = cache.recent
+            cache.recent = [Int: GlyphMask]{}
+            cache.recent_bytes = 0
+        }
+        _: cache.recent.add(key, mask.copy())
+        cache.recent_bytes += cost
+        mask
+    }
+
+    // Identifies a font's bytes for the cache.
+    fingerprint: fn(bytes: [U8]) -> Int {
+        h := bytes.len() % 2147483647
+        loop byte in bytes -> h = (h * 31 + Int.from_u8(byte)) % 2147483647
+        h
+    }
+
+    // A size in 1/64 pixels; 0 for a size outside 1/64..16384 pixels.
+    size_64: fn(size_px: Float) -> Int {
+        if !(size_px > 0.0) || !(size_px <= 16384.0) -> return 0
+        math.round(size_px * 64.0)
+    }
+
+    // Font units as 1/64 pixels at `size` 1/64 pixels per em, to the nearest.
+    units_64: fn(units: Int, size: Int, per_em: Int) -> Int {
+        (units * size * 2 + per_em) /% (per_em * 2)
+    }
+
+    min_int: fn(a: Int, b: Int) -> Int { if a < b -> a else -> b }
+
+    max_int: fn(a: Int, b: Int) -> Int { if a > b -> a else -> b }
+
+    abs_int: fn(a: Int) -> Int { if a < 0 -> -a else -> a }
+
+    // `n / d` rounded down, for any sign of `d`.
+    along: fn(n: Int, d: Int) -> Int {
+        if d < 0 -> (-n) /% (-d) else -> n /% d
+    }
+
+    // Glyph `id` at `size` 1/64 pixels per em, moved `shift` 1/64 pixels right.
+    // Points scale as FreeType's unhinted loader scales them (16.16 factor size
+    // / units per em, each point rounded to 1/64 pixel) and the mask covers
+    // their control box rounded out to whole pixels. Edges are drawn exactly in
+    // 1/256 pixels, crossings rounded down, curves split as FreeType's gray
+    // rasterizer splits them; coverage is a pixel's area as 0..255.
+    raster_glyph: fn(face: Face, id: Int, size: Int, shift: Int) -> GlyphMask {
+        empty: GlyphMask{width: 0, height: 0, left: 0, top: 0, coverage: [U8]{}}
+        if size <= 0 -> return empty
+        glyph: if id < 0 || id >= face.glyph_count -> 0 else -> id
+        scale: (size * 65536 + face.units /% 2) /% face.units
+        points := [OutlinePoint]{}
+        ends := [Int]{}
+        // The face checked every glyph when it loaded.
+        glyph_points(face, glyph, 0, scale, points, ends) ?? return empty
+        mask_of(points, ends, shift)
+    }
+
+    // The mask of contours `points` (1/64 pixels, y up, contour k ending at
+    // `ends[k]`) moved `shift` 1/64 pixels right.
+    mask_of: fn(points: [OutlinePoint], ends: [Int], shift: Int) -> GlyphMask {
+        if points.len() == 0 -> return GlyphMask{width: 0, height: 0, left: 0, top: 0, coverage: [U8]{}}
+        xmin := points[0].x
+        xmax := points[0].x
+        ymin := points[0].y
+        ymax := points[0].y
+        loop p in points {
+            xmin = min_int(xmin, p.x)
+            xmax = max_int(xmax, p.x)
+            ymin = min_int(ymin, p.y)
+            ymax = max_int(ymax, p.y)
+        }
+        left: (xmin + shift) /% 64
+        bottom: ymin /% 64
+        width: -((-(xmax + shift)) /% 64) - left
+        top: -((-ymax) /% 64)
+        height: top - bottom
+        if width <= 0 || height <= 0 || width > MASK_SIDE_MAX || height > MASK_SIDE_MAX || width * height > MASK_PIXELS_MAX {
+            return GlyphMask{width: 0, height: 0, left: left, top: top, coverage: [U8]{}}
+        }
+        cells := Cells{width: width, height: height, cover: [Int]{}, area: [Int]{}}
+        loop _ in 0..<((width + 1) * height) {
+            cells.cover.push(0)
+            cells.area.push(0)
+        }
+        first := 0
+        loop end in ends {
+            contour(cells, points, first, end, left * 64 - shift, bottom * 64)
+            first = end + 1
+        }
+        coverage := [U8]{}
+        loop r in 0..<height {
+            row: (height - 1 - r) * (width + 1)
+            cover := 0
+            loop c in 0..<width {
+                cover += cells.cover[row + c]
+                level := (cover * 2 * SUBPIXEL - cells.area[row + c]) /% (2 * SUBPIXEL)
+                if level < 0 -> level = -level - 1
+                coverage.push(U8{min_int(level, 255)})
+            }
+        }
+        GlyphMask{width: width, height: height, left: left, top: top, coverage: coverage}
+    }
+
+    // Contour points `first..=last` (26.6 pixels, y up), drawn relative to
+    // (`ox`, `oy`). It starts at its first on-curve point, or between its last
+    // and first points when all are control points; between two control points
+    // lies an on-curve point at their midpoint, rounded down.
+    contour: fn(&cells: Cells, points: [OutlinePoint], first: Int, last: Int, ox: Int, oy: Int) {
+        n: last - first + 1
+        if n < 2 -> return
+        start := -1
+        loop k in 0..<n {
+            if start < 0 && points[first + k].on -> start = k
+        }
+        // With no on-curve point the contour starts between its last and first
+        // points, and every point, its last included, is a control point.
+        steps: if start < 0 -> n + 1 else -> n
+        sx := 0
+        sy := 0
+        if start < 0 {
+            sx = (points[last].x + points[first].x - 2 * ox) /% 2
+            sy = (points[last].y + points[first].y - 2 * oy) /% 2
+            start = n - 1
+        } else {
+            sx = points[first + start].x - ox
+            sy = points[first + start].y - oy
+        }
+        x := sx
+        y := sy
+        curved := false
+        cx := 0
+        cy := 0
+        loop k in 1..<(steps + 1) {
+            p: points[first + (start + k) % n]
+            closing: k == steps
+            px: if closing -> sx else -> p.x - ox
+            py: if closing -> sy else -> p.y - oy
+            if closing || p.on {
+                if curved {
+                    conic(cells, x * 4, y * 4, cx * 4, cy * 4, px * 4, py * 4)
+                } else {
+                    line(cells, x * 4, y * 4, px * 4, py * 4)
+                }
+                x = px
+                y = py
+                curved = false
+            } else {
+                if curved {
+                    mx: (cx + px) /% 2
+                    my: (cy + py) /% 2
+                    conic(cells, x * 4, y * 4, cx * 4, cy * 4, mx * 4, my * 4)
+                    x = mx
+                    y = my
+                }
+                cx = px
+                cy = py
+                curved = true
+            }
+        }
+    }
+
+    // A quadratic curve as 2^k lines: k grows until each piece's bend is under a
+    // quarter pixel, the points stepped by forward differences in 32.32.
+    conic: fn(&cells: Cells, x0: Int, y0: Int, x1: Int, y1: Int, x2: Int, y2: Int) {
+        ax: x0 + x2 - 2 * x1
+        ay: y0 + y2 - 2 * y1
+        bend := max_int(abs_int(ax), abs_int(ay))
+        if bend <= SUBPIXEL /% 4 {
+            line(cells, x0, y0, x2, y2)
+            return
+        }
+        shift := 16
+        loop {
+            bend /%= 4
+            shift -= 1
+            if bend <= SUBPIXEL /% 4 -> break
+        }
+        count: 65536 >> shift
+        rx := ax * (1 << (2 * shift))
+        ry := ay * (1 << (2 * shift))
+        qx := (x1 - x0) * (1 << (shift + 17)) + rx
+        qy := (y1 - y0) * (1 << (shift + 17)) + ry
+        rx *= 2
+        ry *= 2
+        px := x0 * 4294967296
+        py := y0 * 4294967296
+        x := x0
+        y := y0
+        loop _ in 0..<count {
+            px += qx
+            py += qy
+            qx += rx
+            qy += ry
+            nx: px /% 4294967296
+            ny: py /% 4294967296
+            line(cells, x, y, nx, ny)
+            x = nx
+            y = ny
+        }
+    }
+
+    // A line in 1/SUBPIXEL pixels, split at each row it crosses.
+    line: fn(&cells: Cells, x0: Int, y0: Int, x1: Int, y1: Int) {
+        if y0 == y1 -> return
+        dx: x1 - x0
+        dy: y1 - y0
+        x := x0
+        y := y0
+        if dy > 0 {
+            row := y0 /% SUBPIXEL
+            loop {
+                bound: (row + 1) * SUBPIXEL
+                if bound >= y1 {
+                    row_piece(cells, row, x, y, x1, y1)
+                    return
+                }
+                nx: x0 + along((bound - y0) * dx, dy)
+                row_piece(cells, row, x, y, nx, bound)
+                x = nx
+                y = bound
+                row += 1
+            }
+        } else {
+            row := (y0 - 1) /% SUBPIXEL
+            loop {
+                bound: row * SUBPIXEL
+                if bound <= y1 {
+                    row_piece(cells, row, x, y, x1, y1)
+                    return
+                }
+                nx: x0 + along((bound - y0) * dx, dy)
+                row_piece(cells, row, x, y, nx, bound)
+                x = nx
+                y = bound
+                row -= 1
+            }
+        }
+    }
+
+    // A piece of a line inside pixel row `row`, split at each column it crosses.
+    row_piece: fn(&cells: Cells, row: Int, x0: Int, y0: Int, x1: Int, y1: Int) {
+        if y0 == y1 -> return
+        first: min_int(x0, x1) /% SUBPIXEL
+        if max_int(x0, x1) <= (first + 1) * SUBPIXEL {
+            cell(cells, first, row, x0, y0, x1, y1)
+            return
+        }
+        dx: x1 - x0
+        dy: y1 - y0
+        x := x0
+        y := y0
+        if dx > 0 {
+            col := x0 /% SUBPIXEL
+            loop {
+                bound: (col + 1) * SUBPIXEL
+                if bound >= x1 {
+                    cell(cells, col, row, x, y, x1, y1)
+                    return
+                }
+                ny: y0 + along((bound - x0) * dy, dx)
+                cell(cells, col, row, x, y, bound, ny)
+                x = bound
+                y = ny
+                col += 1
+            }
+        } else {
+            col := (x0 - 1) /% SUBPIXEL
+            loop {
+                bound: col * SUBPIXEL
+                if bound <= x1 {
+                    cell(cells, col, row, x, y, x1, y1)
+                    return
+                }
+                ny: y0 + along((bound - x0) * dy, dx)
+                cell(cells, col, row, x, y, bound, ny)
+                x = bound
+                y = ny
+                col -= 1
+            }
+        }
+    }
+
+    // A piece of a line inside one pixel.
+    cell: fn(&cells: Cells, col: Int, row: Int, x0: Int, y0: Int, x1: Int, y1: Int) {
+        if y0 == y1 || row < 0 || row >= cells.height || col > cells.width -> return
+        at: max_int(col, 0)
+        i: row * (cells.width + 1) + at
+        d: y1 - y0
+        cells.cover[i] = cells.cover[i] + d
+        cells.area[i] = cells.area[i] + d * (x0 + x1 - 2 * at * SUBPIXEL)
+    }
+
+    // The sRGB byte nearest `linear` (LINEAR_ONE is 1.0): the count of
+    // SRGB_STEPS at or below it.
+    encode_srgb: fn(linear: Int) -> Int {
+        lo := 0
+        hi := SRGB_STEPS.len()
+        loop lo < hi {
+            mid: (lo + hi) /% 2
+            if SRGB_STEPS[mid] <= linear {
+                lo = mid + 1
+            } else {
+                hi = mid
+            }
+        }
+        lo
+    }
+
     // A minimal TrueType font: two glyphs (0 empty, 1 a square), a cmap in
     // format 12 mapping U+1F600 to glyph 1, and a kern table pair (1, 1) = -50.
     tiny_font: fn() -> [U8] {
@@ -1224,16 +1801,41 @@ priv internal: module {
         loop k in 0..<width -> out.push(U8{(value >> ((width - 1 - k) * 8)).bit_and(255)})
     }
 
+    // A square's corners, all control points: a TrueType circle.
+    control_square: fn(lo: Int, hi: Int) -> [OutlinePoint] {
+        [OutlinePoint]{
+            OutlinePoint{x: lo, y: lo, on: false}, OutlinePoint{x: lo, y: hi, on: false},
+            OutlinePoint{x: hi, y: hi, on: false}, OutlinePoint{x: hi, y: lo, on: false},
+        }
+    }
+
+    decode_srgb: fn(encoded: Float) -> Float {
+        if encoded <= 0.04045 -> return encoded / 12.92
+        math.exp(2.4 * math.ln((encoded + 0.055) / 1.055))
+    }
+
+    filled: fn(count: Int, pixel: [U8]) -> [U8] {
+        out := [U8]{}
+        loop _ in 0..<count {
+            loop byte in pixel -> out.push(byte)
+        }
+        out
+    }
+
     // Every query a canvas makes of a face; none of it may fail.
     exercise: fn(face: Face) {
         _: face.metrics(13.5)
+        kept := cache()
         loop scalar in ([Int]{0, 32, 65, 193, 0x1F600, -1, 0x110000}) {
             id: face.glyph(scalar)
             _: face.advance(id, 13.5)
             _: face.outline(id)
+            _: face.raster(id, 13.5, 0.25)
         }
         _: face.layout("AV To Á 😀", 13.5)
         _: face.wrap("one two-three", 13.5, 20.0)
+        canvas := filled(32 * 16, [U8]{0, 0, 0, 0})
+        _: draw_text(canvas, 32, 16, 128, kept, face, "AV Á 😀", 13.5, 1, 12, 0xFF336699, UIRect{x: 0, y: 0, width: 32, height: 16})
     }
 
     // Loading `bytes` gives a face that answers every query, or a Font error.
@@ -1313,6 +1915,138 @@ priv internal: module {
     assert_eq(outline.contours[0][2].x, 100)
     assert_eq(outline.contours[0][2].y, 100)
     assert_eq(face.metrics(1024.0).ascent, 800.0)
+}
+
+#Test("raster covers a square exactly, at whole and half pixel positions") {
+    face: face(tiny_font()) ?? panic("the tiny font does not load: {err:Debug}")
+    whole: face.raster(1, 1024.0, 0.0)
+    assert_eq(whole.width, 100)
+    assert_eq(whole.height, 100)
+    assert_eq(whole.left, 0)
+    assert_eq(whole.top, 100)
+    loop c in whole.coverage -> assert_eq(c, U8{255})
+    half: face.raster(1, 1024.0, 0.5)
+    assert_eq(half.width, 101)
+    assert_eq(half.coverage[0], U8{128})
+    assert_eq(half.coverage[1], U8{255})
+    assert_eq(half.coverage[100], U8{128})
+    // A 2.5-pixel square at 25.6 pixels per em: its edge rows and columns
+    // half covered, the corner a quarter.
+    small: face.raster(1, 25.6, 0.0)
+    assert_eq(small.width, 3)
+    assert_eq(small.height, 3)
+    assert_eq(small.coverage, [U8]{128, 128, 64, 255, 255, 128, 255, 255, 128})
+    assert_eq(face.raster(0, 1024.0, 0.0).width, 0)
+    assert_eq(face.raster(1, 0.0, 0.0).width, 0)
+    assert_eq(face.raster(1, -3.0, 0.0).width, 0)
+    assert_eq(face.raster(1, 1000000.0, 0.0).width, 0)
+    assert_eq(face.raster(7, 1024.0, 0.0).width, 0)
+}
+
+// FreeType 2.14.3's smooth renderer draws these bytes for the same contours.
+#Test("a contour of control points only starts between its last and first") {
+    round: mask_of(control_square(0, 250), [Int]{3}, 0)
+    assert_eq([Int]{round.left, round.top, round.width, round.height}, [Int]{0, 4, 4, 4})
+    assert_eq(round.coverage, [U8]{88, 214, 209, 71, 234, 255, 255, 209, 238, 255, 255, 214, 107, 238, 234, 88})
+    inset: mask_of(control_square(10, 250), [Int]{3}, 0)
+    assert_eq(inset.coverage, [U8]{67, 209, 213, 78, 197, 255, 255, 213, 194, 255, 255, 209, 57, 194, 197, 67})
+}
+
+#Test("the cache keeps one mask per face, glyph, size and quarter pixel") {
+    face: regular()
+    kept := cache()
+    first: kept.glyph(face, 1, 16.0, 0.3)
+    again: kept.glyph(face, 1, 16.0, 0.26)
+    assert_eq(first.coverage, again.coverage)
+    assert_eq(first.coverage, face.raster(1, 16.0, 0.25).coverage)
+    moved: kept.glyph(face, 1, 16.0, 0.9)
+    plain: face.raster(1, 16.0, 0.0)
+    assert_eq(moved.left, plain.left + 1)
+    assert_eq(moved.coverage, plain.coverage)
+    assert_eq(kept.glyph(bold(), 1, 16.0, 0.0).coverage, bold().raster(1, 16.0, 0.0).coverage)
+}
+
+#Test("a cache stays within its budget and still gives every glyph's mask") {
+    face: regular()
+    small := cache_within(2000)
+    loop id in 1..<40 {
+        assert_eq(small.glyph(face, id, 16.0, 0.0).coverage, face.raster(id, 16.0, 0.0).coverage)
+        assert(small.recent_bytes <= 1000, "the recent masks hold {small.recent_bytes} bytes")
+    }
+    kept: small.recent.len() + small.older.len()
+    assert(kept < 39, "all {kept} masks are still kept")
+    assert_eq(small.glyph(face, 39, 16.0, 0.5).coverage, face.raster(39, 16.0, 0.5).coverage)
+}
+
+#Test("the sRGB tables follow the sRGB transfer function") {
+    one: Float{LINEAR_ONE}
+    loop v in 0..<256 {
+        gap: TO_LINEAR[v] - math.round(decode_srgb(Float{v} / 255.0) * one)
+        assert(gap >= -1 && gap <= 1, "TO_LINEAR[{v}] is off by {gap}")
+        assert_eq(encode_srgb(TO_LINEAR[v]), v)
+    }
+    loop v in 0..<255 {
+        gap: SRGB_STEPS[v] - math.round(decode_srgb((Float{v} + 0.5) / 255.0) * one)
+        assert(gap >= -1 && gap <= 1, "SRGB_STEPS[{v}] is off by {gap}")
+        assert(TO_LINEAR[v] < SRGB_STEPS[v] && SRGB_STEPS[v] < TO_LINEAR[v + 1], "SRGB_STEPS[{v}] lies between bytes {v} and {v + 1}")
+    }
+}
+
+#Test("blend mixes premultiplied pixels in linear light inside the clip") {
+    mask: GlyphMask{width: 2, height: 1, left: 0, top: 1, coverage: [U8]{255, 128}}
+    all: UIRect{x: 0, y: 0, width: 2, height: 1}
+    white := filled(2, [U8]{255, 255, 255, 255})
+    blend(white, 2, 1, 8, mask, 0, 1, 0xFF000000, all)
+    assert_eq(white, [U8]{0, 0, 0, 255, 187, 187, 187, 255})
+    clipped := filled(2, [U8]{255, 255, 255, 255})
+    blend(clipped, 2, 1, 8, mask, 0, 1, 0xFF000000, UIRect{x: 1, y: 0, width: 5, height: 5})
+    assert_eq(clipped, [U8]{255, 255, 255, 255, 187, 187, 187, 255})
+    clear := filled(2, [U8]{0, 0, 0, 0})
+    blend(clear, 2, 1, 8, mask, 0, 1, 0xFFFFFFFF, all)
+    assert_eq(clear, [U8]{255, 255, 255, 255, 128, 128, 128, 128})
+    // Colour order B, G, R, A; a translucent source; a translucent canvas.
+    blue := filled(1, [U8]{255, 0, 0, 255})
+    blend(blue, 1, 1, 4, GlyphMask{width: 1, height: 1, left: 0, top: 1, coverage: [U8]{255}}, 0, 1, 0x8000FF00, all)
+    assert_eq(blue, [U8]{187, 188, 0, 255})
+    grey := filled(1, [U8]{64, 64, 64, 128})
+    blend(grey, 1, 1, 4, GlyphMask{width: 1, height: 1, left: 0, top: 1, coverage: [U8]{200}}, 0, 1, 0xFF000000, all)
+    assert_eq(grey, [U8]{40, 40, 40, 228})
+    // Rows `stride_bytes` apart: the padding after each row stays.
+    padded := filled(6, [U8]{9, 9, 9, 9})
+    tall: GlyphMask{width: 1, height: 2, left: 0, top: 2, coverage: [U8]{255, 255}}
+    blend(padded, 2, 2, 12, tall, 1, 2, 0xFF102030, UIRect{x: 0, y: 0, width: 2, height: 2})
+    assert_eq(padded, [U8]{9, 9, 9, 9, 48, 32, 16, 255, 9, 9, 9, 9, 9, 9, 9, 9, 48, 32, 16, 255, 9, 9, 9, 9})
+    // Off the canvas, or a canvas shorter than it claims: nothing changes.
+    short := [U8]{0, 0, 0, 0}
+    blend(short, 2, 4, 8, mask, -5, 3, 0xFF000000, UIRect{x: 0, y: 0, width: 9, height: 9})
+    assert_eq(short, [U8]{0, 0, 0, 0})
+    narrow := filled(2, [U8]{0, 0, 0, 0})
+    blend(narrow, 2, 1, 4, mask, 0, 1, 0xFF000000, all)
+    assert_eq(narrow, filled(2, [U8]{0, 0, 0, 0}))
+    // A hand-built mask with less coverage than its size paints nothing.
+    blend(narrow, 2, 1, 8, GlyphMask{width: 2, height: 2, left: 0, top: 1, coverage: [U8]{255, 255}}, 0, 1, 0xFF000000, all)
+    assert_eq(narrow, filled(2, [U8]{0, 0, 0, 0}))
+}
+
+#Test("draw_text paints a line and returns its advance") {
+    face: regular()
+    kept := cache()
+    canvas := filled(64 * 24, [U8]{0, 0, 0, 0})
+    advance: draw_text(canvas, 64, 24, 256, kept, face, "AV", 16.0, 2, 18, 0xFFFFFFFF, UIRect{x: 0, y: 0, width: 64, height: 24})
+    assert_eq(advance, 19)
+    inked := 0
+    loop k in 0..<(64 * 24) {
+        if Int.from_u8(canvas[k * 4 + 3]) != 0 -> inked += 1
+    }
+    assert(inked > 40, "only {inked} pixels inked")
+    // The first glyph sits at whole pixel 2: its bottom row (clear of the
+    // kerned V) is its mask's, painted white.
+    a: face.raster(face.glyph(65), 16.0, 0.0)
+    row: 18 - a.top + a.height - 1
+    loop c in 0..<a.width {
+        assert_eq(canvas[row * 256 + (2 + a.left + c) * 4 + 3], a.coverage[(a.height - 1) * a.width + c])
+    }
+    assert_eq(draw_text(canvas, 64, 24, 256, kept, face, "AV", 0.0, 2, 18, 0xFFFFFFFF, UIRect{x: 0, y: 0, width: 64, height: 24}), 0)
 }
 
 #Test("a hostile font file causes only typed errors") {
