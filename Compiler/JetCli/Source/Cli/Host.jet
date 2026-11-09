@@ -827,15 +827,18 @@ jet_cli_native_executable: fn(result: JetDriverCompileResult, inputs: &&JetDrive
     // The memory term is read now: the link's section pieces are new work.
     link_threads: CompilerThreads{cap: result.compiler_threads.cap, cores: result.compiler_threads.cores, memory_available: jet_cli_memory_available()}
     errors := [String]{}
+    undefined := [String]{}
     executable := x64_executable_whole([U8]{})
     if split_debug {
         split := x64_link_executable_split(names, bytes, base, link_threads)
         errors = split.errors.copy()
+        undefined = split.undefined.copy()
         executable = x64_executable_split(split)
     } else {
         image := x64_link_executable(names, bytes, base, link_threads, debug_info)
         if image.errors.len() > 0 && retry == .Val(inputs_again) -> image = x64_link_executable(names, inputs_again, LINK_RUN_LOW_BASE, link_threads, debug_info)
         errors = image.errors.copy()
+        undefined = image.undefined.copy()
         executable = x64_executable_whole(image.bytes.move())
     }
     if trace_sink == .Val(sink) {
@@ -843,10 +846,35 @@ jet_cli_native_executable: fn(result: JetDriverCompileResult, inputs: &&JetDrive
         sink.progress("counters.native.link.bytes", executable.tail.len(), -1)
     }
     if errors.len() > 0 {
+        if jet_cli_native_unprovided(foreign_link, undefined, errors) == .Val(message) -> return JetCLINativeLinked.Failed{failure: JetCLINativeFailure.Foreign{message: message}}
         loop error in errors -> jet_driver_ice_record(census, "-", "native.link", "link", error)
         return JetCLINativeLinked.Failed{failure: JetCLINativeFailure.Faulted}
     }
     JetCLINativeLinked.Image{executable: jet_cli_native_with_command(executable, result.command_record)}
+}
+
+// The report of a link that stopped only at C functions the program's
+// foreign declarations name (`facts`) and no C input defines: the
+// program's own error, reported as its C dependencies' (E2105), not a
+// compiler fault. `undefined` and `errors` are the link's
+// (X64ExecutableResult): each undefined symbol has its row, in the same
+// order, so equal counts mean nothing else stopped the link. None when
+// another finding did, or when no declaration names a symbol (the runtime
+// or a C input of jet's own left it undefined).
+jet_cli_native_unprovided: fn(facts: JetDriverForeignLinkFacts, undefined: [String], errors: [String]) -> String? Never! {
+    if undefined.len() == 0 || undefined.len() != errors.len() -> return None
+    reports := [String]{}
+    loop (index, symbol) in undefined {
+        declared := false
+        loop declaration in facts.declarations {
+            if !declared && declaration.symbol == symbol {
+                reports.push("{errors[index]}: no C library the program links defines it, and the foreign function `{declaration.name}` names it")
+                declared = true
+            }
+        }
+        if !declared -> return None
+    }
+    Val(reports.join("; "))
 }
 
 // `executable` carrying the program's JetCommandSchema record in its

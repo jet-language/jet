@@ -277,7 +277,8 @@ LinkContext: struct {
     fault_report_caller: Int
     errors: [String]
     // Every global live code strongly references and nothing defines, once
-    // each, in scan order (link_scan_reloc; x64_link_live_undefined).
+    // each, in scan order (link_scan_reloc; x64_link_live_undefined, and a
+    // link stopped at them, X64ExecutableResult.undefined).
     undefined: [String]
 }
 
@@ -3035,13 +3036,15 @@ X64SplitExecutableResult: struct {
     // The 20-byte id both files' notes hold.
     build_id: [U8]
     errors: [String]
+    // As X64ExecutableResult.undefined.
+    undefined: [String]
 }
 
 // x64_link_executable with the DWARF, `.symtab` and section headers in a
 // side debug file instead of the executable's tail.
 x64_link_executable_split: fn(names: [String], bufs: &&[[U8]], base: Int, threads: CompilerThreads) -> X64SplitExecutableResult Never! {
     linked := link_executable_image(names, bufs, base, None, threads, true, true)
-    X64SplitExecutableResult{bytes: linked.image.bytes.move(), debug_file: linked.debug_file.move(), build_id: linked.build_id.move(), errors: linked.image.errors.move()}
+    X64SplitExecutableResult{bytes: linked.image.bytes.move(), debug_file: linked.debug_file.move(), build_id: linked.build_id.move(), errors: linked.image.errors.move(), undefined: linked.image.undefined.move()}
 }
 
 // The single canonical executable engine. No request means no export census,
@@ -3089,7 +3092,11 @@ link_executable_image: fn(names: [String], bufs: &&[[U8]], base: Int, request: &
     linker_names := [String:Bool]{}
     loop name in link_linker_names() -> linker_names.add(name, true).drop("names are unique")
     link_collect(c, entries, linker_names)
-    if c.errors.len() > 0 -> return link_resident_failure(c.errors.move())
+    if c.errors.len() > 0 {
+        failed := link_resident_failure(c.errors.move())
+        failed.image.undefined = c.undefined.move()
+        return failed
+    }
     // A split link moves the unwind tables to the side debug file when
     // nothing reads them at run time. An image that keeps its debug tail
     // keeps `.eh_frame` loaded: there the move would add the whole table to

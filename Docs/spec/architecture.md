@@ -1577,8 +1577,10 @@ over the program object and the pack (`x64_link_live_undefined` in
 references and nothing defines, and only the providers of those declarations
 are realized (`jet_driver_foreign_link_live`). A program with no live foreign
 reference receives no additional link inputs, needs no C tools and keeps the
-pack, starting at `__jet_start`; a C symbol no input defines is the link's
-undefined-symbol report. Platform archives are never runtime-pack exports.
+pack, starting at `__jet_start`; a C symbol no input defines is the program's
+E2105 error naming the symbol and the foreign function that names it
+(`jet_cli_native_unprovided` in `Compiler/JetCli/Source/Cli/Host.jet`), not an
+internal compiler error. Platform archives are never runtime-pack exports.
 
 The private `Core.mem.__string_data` / `__string_byte_len` pair lends the
 existing UTF-8 String home, not a NUL-terminated or copied carrier. The caller
