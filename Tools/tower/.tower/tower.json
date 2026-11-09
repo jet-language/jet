@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 98143,
+    "rev": 98144,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -193583,6 +193583,13 @@
   ],
   "events": [
     {
+      "at": "2026-11-09T21:22:25.971Z",
+      "by": "Main",
+      "action": "briefing.post",
+      "ref": "briefing0hpygkg",
+      "note": "Language review: correction (much of the compile-time proposal is already ratified, not built)"
+    },
+    {
       "at": "2026-11-09T21:22:02.905Z",
       "by": "Main",
       "action": "card.criteria-add",
@@ -198024,6 +198031,14 @@
     }
   ],
   "briefings": [
+    {
+      "id": "briefing0hpygkg",
+      "title": "Language review: correction (much of the compile-time proposal is already ratified, not built)",
+      "body": "# Language review: correction after the first adversarial review\n\nThis corrects the briefing \"Language review: all installments\". The full file, with this note at its top, is in the home directory as jet-language-review.md.\n\nThe adversarial reviewer went through the `#` ballot (D-META-HASH2) against Tower and the compiler and marked it\nNOT CLEAN. Three of its findings correct things I told you, so they change how to read sections 3 and 8 below:\n\n1. **Much of what I proposed for compile time is already ratified, just not built.** I worked from the spec and\n   registry, which still show the old forms. Tower already holds decisions for: no `$` and `#{name}` splices\n   (D-META-HASH1); markers as types with typed arguments, including the wrap power (D-DECL-TYPES1); one\n   reflection entry `reflect(type-or-value)` with its record types (D-TYPEINFO1, D-META-REFLECT2); and who may\n   rewrite code, through a compiler value that only the root package creates (D-META-LADDER1). So `#info(x)` would\n   duplicate the ratified `reflect(x)`, and \"markers take arguments\" needs building, not deciding.\n2. **My one-line rule was too strong.** \"No `#` means it runs in your program\" is false as written: module\n   constants, generic parameters and build functions are build-time with no `#`. The honest rule is narrower:\n   an explicit request to the compiler carries `#`.\n3. **Two parts of my proposal conflict with what you ratified.** Dropping the host gates for build-time effects,\n   and letting a marker's presence authorize a wrap, both go against D-META-LADDER1.\n\nThe reviewer added an option it prefers to mine as drafted: **a spelling-only cutover** (`#run`, `#if`, `#loop`\nreplace the `comptime` word) that keeps every ratified contract as it is. My reading now: the compile-time area\nfeels weak and messy mostly because roughly ten ratified decisions are unbuilt and the spec, registry and guide\nstill show the old language. The fastest real improvement is to build what is ratified and add the spelling\ncutover, not to redesign. The ballot is being repaired to say this plainly, with the same real programs under\nevery option. Section 3 below is kept as written so you can see what I proposed; read it with this note.\n\nThe same caution applies to the rest of this file: I did not check Tower's ratified decisions before writing\nit, so some items in sections 4 to 8 may also be decided already. Each one is checked against Tower before it\nbecomes a ballot.\n\n",
+      "by": "Main",
+      "created": "2026-11-09T21:22:25.971Z",
+      "sections": []
+    },
     {
       "id": "briefing03j2w2s",
       "title": "Language review: all installments, for your answers by item number",
