@@ -22,7 +22,7 @@
 use {
     math: core.math
     jet_foundation.[Span, TComptimeValue, compiler_take_rows, compiler_threads_single, diagnostic_from_registry, diagnostic_registry_row, diagnostic_with_rights, name_rows_set, name_rows_value]
-    jet_ir.[IRFunction, IRModule, IROp, IRProgram, IRSlotKind, IRType, ir_align8, ir_args, ir_emit, ir_function_new, ir_intern_name, ir_intern_text, ir_module_new, ir_pointer_row, ir_slot, ir_string_row, ir_word_row, ir_x64_compile_module, ir_x64_object]
+    jet_ir.[IRFunction, IRModule, IROp, IRProgram, IRSlotKind, IRType, ir_align8, ir_args, ir_emit, ir_function_new, ir_intern_name, ir_intern_text, ir_lint_module, ir_lint_text, ir_module_new, ir_pointer_row, ir_slot, ir_string_row, ir_word_row, ir_x64_compile_module, ir_x64_object]
     jet_backend.[
         X64ComptimeChild,
         X64ComptimeCode,
@@ -224,7 +224,13 @@ jet_eval_native_child_new: fn() -> Shared<JetEvalNativeChild> Never! {
 jet_eval_native_start: fn(c: &JetEvalNativeChild, session: JetEvalNativeSession, stdout: Bool) -> Bool {
     if c.child.pid > 0 -> return true
     if c.stub.len() == 0 {
-        compiled := ir_x64_object(ir_x64_compile_module(jet_eval_native_entry_module(), compiler_threads_single()), true)
+        entry := jet_eval_native_entry_module()
+        found: ir_lint_module(entry, "eval.entry", compiler_threads_single())
+        if found.len() > 0 {
+            c.failure = "the comptime entry program breaks the IR contract (an IR Lint finding, a compiler bug):\n{ir_lint_text(found)}"
+            return false
+        }
+        compiled := ir_x64_object(ir_x64_compile_module(entry, compiler_threads_single()), true)
         if compiled.errors.len() > 0 {
             c.failure = "the comptime entry program doesn't compile: {compiled.errors.join("; ")}"
             return false
@@ -387,6 +393,16 @@ jet_eval_native_load: fn(built: &&JetEvalIRComptime, config: JetEvalConfig) -> J
     functions := compiler_take_rows<IRFunction>(code.functions)
     program.types = shared code.copy()
     code.functions = functions.move()
+    // IR Lint (JetIR Lint.jet) checks the batch x86-64 selection reads, its
+    // wrappers, stubs and entry with it, as jet_cli_native_program checks a
+    // program. A finding is a compiler bug: the batch does not load, and
+    // each run of it reports the findings.
+    found: ir_lint_module(code, "eval.batch", compiler_threads_single())
+    if found.len() > 0 {
+        program.failure = "the batch breaks the IR contract (an IR Lint finding, a compiler bug):\n{ir_lint_text(found)}"
+        program.entries = entries.move()
+        return program
+    }
     compiled := ir_x64_object(ir_x64_compile_module(code, compiler_threads_single()), true)
     if compiled.errors.len() > 0 {
         program.failure = "the batch doesn't compile to x86-64: {compiled.errors.join("; ")}"

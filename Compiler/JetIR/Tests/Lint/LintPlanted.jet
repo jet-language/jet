@@ -1,9 +1,10 @@
 // IR Lint (Source/Lint.jet) against planted bugs: one hand-built module per
-// rule, each valid but for one planted bug, must give that rule's row and
-// no other; the valid module gives none. Also: the operand table has one row
-// per IROp in ir_op_code order, a function a pass broke is reported under
-// that pass's name (the check ir_opt_function runs after each pass), and the
-// Core call registry names only routes the route table has.
+// plant, each valid but for one planted bug, must give that plant's rule
+// (the plant's name up to any `#`) and no other; the valid module gives
+// none. Also: the operand table has one row per IROp in ir_op_code order, a
+// function a pass broke is reported under that pass's name (the check
+// ir_opt_function runs after each pass), and the Core call registry names
+// only routes the route table has.
 //
 //     cd Compiler/JetIR/Tests/Lint && jet run LintPlanted.jet
 //
@@ -11,8 +12,8 @@
 // instead (ir_lint_route_gaps): every R4 gap against that runtime's exports.
 use {
     jet_ir.[
-        IRClass, IRFunction, IRLintFinding, IRModule, IROp, IRSlotKind, IRType, IRTypeKind, IR_LINT_OPS, IR_OVERFLOW_TRAP,
-        ir_args, ir_emit, ir_end, ir_function_new, ir_intern_name, ir_intern_type, ir_lint_context, ir_lint_core_routes, ir_lint_module, ir_lint_route_gaps,
+        IRClass, IRDataReloc, IRFunction, IRLintFinding, IRModule, IROp, IRSlotKind, IRType, IRTypeKind, IR_CODE_TYPE, IR_LINT_OPS, IR_OVERFLOW_TRAP,
+        ir_args, ir_emit, ir_end, ir_function_new, ir_intern_name, ir_intern_text, ir_intern_type, ir_lint_context, ir_lint_core_routes, ir_lint_module, ir_lint_route_gaps,
         ir_lint_text, ir_module_new, ir_op_code, ir_open, ir_open_if, ir_opt_lint, ir_opt_report, ir_slot,
     ]
     jet_foundation.[Type, compiler_threads_single, name_rows_set]
@@ -25,19 +26,33 @@ LPTypes: struct {
     bool: Int
     float: Int
     word: Int
+    narrow: Int
     pointer: Int
     owned: Int
+    string: Int
+    pair: Int
+    code: Int
+    guard: Int
 }
 
 lp_types: fn(m: &IRModule) -> LPTypes {
+    // `twice`'s signature, the type of the function value whose code word
+    // `code` is.
+    twice_ty: Type.Fn{params: [Type]{Type.Int}, ret: Val(Type.Int), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
     LPTypes{
         int: ir_intern_type(m, "Int", IRType{ty: Type.Int, kind: IRTypeKind.Int, size: 8, align: 8, class: IRClass.Integer, signed: true, bits: 64, drop: "jet_rt_int_drop"}),
         bool: ir_intern_type(m, "Bool", IRType{ty: Type.Bool, kind: IRTypeKind.Bool, size: 1, align: 1, class: IRClass.Integer, signed: false, bits: 8, drop: ""}),
         float: ir_intern_type(m, "Float", IRType{ty: Type.Float, kind: IRTypeKind.Float, size: 8, align: 8, class: IRClass.Float, signed: true, bits: 64, drop: ""}),
         word: ir_intern_type(m, "U64", IRType{ty: Type.IntN{signed: false, bits: 64}, kind: IRTypeKind.Word, size: 8, align: 8, class: IRClass.Integer, signed: false, bits: 64, drop: ""}),
+        narrow: ir_intern_type(m, "U32", IRType{ty: Type.IntN{signed: false, bits: 32}, kind: IRTypeKind.Word, size: 4, align: 4, class: IRClass.Integer, signed: false, bits: 32, drop: ""}),
         pointer: ir_intern_type(m, "Pointer", IRType{ty: Type.Named{name: "Pointer"}, kind: IRTypeKind.Pointer, size: 8, align: 8, class: IRClass.Pointer, signed: false, bits: 64, drop: ""}),
         // An owned handle with a drop and no clone: a Copy of it is a second owner.
         owned: ir_intern_type(m, "Handle", IRType{ty: Type.Named{name: "Handle"}, kind: IRTypeKind.Pointer, size: 8, align: 8, class: IRClass.Pointer, signed: false, bits: 64, drop: "jet_handle_drop"}),
+        string: ir_intern_type(m, "String", IRType{ty: Type.String, kind: IRTypeKind.String, size: 8, align: 8, class: IRClass.Pointer, signed: false, bits: 64, drop: "jet_rt_string_drop"}),
+        pair: ir_intern_type(m, "(Int, Int)", IRType{ty: Type.Named{name: "Pair"}, kind: IRTypeKind.Aggregate, size: 16, align: 8, class: IRClass.Pointer, signed: false, bits: 64, drop: ""}),
+        code: ir_intern_type(m, "{IR_CODE_TYPE}:twice", IRType{ty: Type.Apply{name: IR_CODE_TYPE, args: [Type]{twice_ty}}, kind: IRTypeKind.Pointer, size: 8, align: 8, class: IRClass.Pointer, signed: false, bits: 64, drop: ""}),
+        // A handle whose drop is the module's `release` (function 1).
+        guard: ir_intern_type(m, "Guard", IRType{ty: Type.Named{name: "Guard"}, kind: IRTypeKind.Pointer, size: 8, align: 8, class: IRClass.Pointer, signed: false, bits: 64, drop: "test:lint.jet::release"}),
     }
 }
 
@@ -66,9 +81,10 @@ lp_return: fn(f: &IRFunction, slot: Int) {
     _ := ir_emit(f, IROp.Return, -1, slot, -1, -1, 0)
 }
 
-// A module with `twice(n: Int) -> Int` (function 0) and a `run` that is
-// valid but for the bug planted for `rule` ("" for none).
-lp_module: fn(rule: String) -> IRModule {
+// A module with `twice(n: Int) -> Int` (function 0), `release(g: Guard)`
+// (function 1, Guard's drop) and a `run` that is valid but for the bug
+// planted for `plant` ("" for none).
+lp_module: fn(plant: String) -> IRModule {
     m := ir_module_new()
     t: lp_types(m)
     twice := lp_fn("twice")
@@ -79,13 +95,19 @@ lp_module: fn(rule: String) -> IRModule {
     _ := ir_emit(twice, IROp.Add, sum, n, n, IR_OVERFLOW_TRAP, 1)
     lp_return(twice, sum)
     _ := lp_add(m, twice)
+    release := lp_fn("release")
+    _ := ir_slot(release, t.guard, IRSlotKind.Param, ir_intern_name(m, "g"), 1)
+    lp_return(release, -1)
+    _ := lp_add(m, release)
     f := lp_fn("run")
-    lp_plant(rule, m, t, f)
+    lp_plant(plant, m, t, f)
     m.entry = lp_add(m, f)
     m
 }
 
-// The valid run: a loop over a Bool, an If with an Else, a call, a print.
+// The valid run: a loop over a Bool, an If with an Else, a call, a print,
+// text and big Int constants, frame storage stored, loaded, copied and
+// viewed, a call through a function value's code, and drops.
 lp_valid: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
     three: lp_const(f, t.int, 3)
     six: lp_temp(f, t.int)
@@ -101,13 +123,43 @@ lp_valid: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
     f.b[opener] = otherwise
     ir_end(f, 1)
     ir_end(f, 1)
-    text: ir_slot(f, ir_intern_type(m, "String", IRType{ty: Type.String, kind: IRTypeKind.String, size: 8, align: 8, class: IRClass.Pointer, signed: false, bits: 64, drop: "jet_rt_string_drop"}), IRSlotKind.Temp, -1, 0)
+    text: ir_slot(f, t.string, IRSlotKind.Temp, -1, 0)
     show_args: ir_args(f, [Int]{six})
     _ := ir_emit(f, IROp.CallRuntime, text, ir_intern_name(m, "jet_rt_int_to_string"), show_args, 1, 1)
     flush: lp_const(f, t.bool, 1)
     line_args: ir_args(f, [Int]{text, flush})
     _ := ir_emit(f, IROp.CallRuntime, -1, ir_intern_name(m, "jet_term_write_stdout_line"), line_args, 2, 1)
     _ := ir_emit(f, IROp.Drop, -1, text, -1, -1, 1)
+    label: lp_temp(f, t.string)
+    _ := ir_emit(f, IROp.ConstText, label, ir_intern_text(m, "héllo, 世界 🙂"), -1, -1, 1)
+    big: lp_temp(f, t.int)
+    _ := ir_emit(f, IROp.ConstBigInt, big, ir_intern_name(m, "-123456789012345678901234567890"), -1, -1, 1)
+    wide: lp_temp(f, t.bool)
+    _ := ir_emit(f, IROp.IntBig, wide, big, 31, -1, 1)
+    pair: lp_temp(f, t.pair)
+    _ := ir_emit(f, IROp.StackAddress, pair, 16, 8, -1, 1)
+    _ := ir_emit(f, IROp.Store, -1, pair, 8, six, 1)
+    _ := ir_emit(f, IROp.Store, -1, pair, 0, wide, 1)
+    second: lp_temp(f, t.int)
+    _ := ir_emit(f, IROp.Load, second, pair, 8, -1, 1)
+    twin: lp_temp(f, t.pair)
+    _ := ir_emit(f, IROp.StackAddress, twin, 24, 8, -1, 1)
+    _ := ir_emit(f, IROp.CopyBytes, -1, twin, pair, 16, 1)
+    end: lp_temp(f, t.pointer)
+    _ := ir_emit(f, IROp.Offset, end, pair, 16, -1, 1)
+    far: lp_temp(f, t.int)
+    _ := ir_emit(f, IROp.Load, far, end, 4096, -1, 1)
+    box: lp_temp(f, t.pointer)
+    _ := ir_emit(f, IROp.FunctionAddress, box, 0, -1, -1, 1)
+    code: lp_temp(f, t.code)
+    _ := ir_emit(f, IROp.Load, code, box, 8, -1, 1)
+    twelve: lp_temp(f, t.int)
+    indirect_args: ir_args(f, [Int]{box, six})
+    _ := ir_emit(f, IROp.CallIndirect, twelve, code, indirect_args, 2, 1)
+    guard: lp_temp(f, t.guard)
+    _ := ir_emit(f, IROp.Drop, -1, guard, -1, -1, 1)
+    handle: lp_temp(f, t.owned)
+    _ := ir_emit(f, IROp.Close, -1, handle, ir_intern_name(m, "jet_handle_close"), -1, 1)
     lp_return(f, -1)
 }
 
@@ -227,27 +279,178 @@ lp_type_layout: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
     lp_return(f, -1)
 }
 
-// The rules a planted bug breaks, one module each.
+// ConstBigInt's name row must spell a decimal integer.
+lp_big_text: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
+    big: lp_temp(f, t.int)
+    _ := ir_emit(f, IROp.ConstBigInt, big, ir_intern_name(m, "12x"), -1, -1, 1)
+    lp_return(f, -1)
+}
+
+// ConstText's data row is UTF-8 text: an overlong encoding of NUL is not.
+lp_bad_text: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
+    row: m.data.len()
+    m.data.push([U8]{U8{192}, U8{128}})
+    label: lp_temp(f, t.string)
+    _ := ir_emit(f, IROp.ConstText, label, row, -1, -1, 1)
+    lp_return(f, -1)
+}
+
+// ConstText's data row is text, not a static object with relocations.
+lp_object_text: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
+    row: m.data.len()
+    m.data.push([U8]{U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}})
+    m.data_relocs[row] = [IRDataReloc]{}
+    label: lp_temp(f, t.string)
+    _ := ir_emit(f, IROp.ConstText, label, row, -1, -1, 1)
+    lp_return(f, -1)
+}
+
+// A Load past a 16-byte pair's end.
+lp_load_past: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
+    pair: lp_temp(f, t.pair)
+    _ := ir_emit(f, IROp.StackAddress, pair, 16, 8, -1, 1)
+    value: lp_temp(f, t.int)
+    _ := ir_emit(f, IROp.Load, value, pair, 12, -1, 1)
+    lp_return(f, -1)
+}
+
+// A Store whose displacement no x86-64 address encodes.
+lp_store_far: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
+    base: lp_temp(f, t.pointer)
+    value: lp_const(f, t.int, 3)
+    _ := ir_emit(f, IROp.Store, -1, base, 4294967296, value, 1)
+    lp_return(f, -1)
+}
+
+// A CopyBytes of 32 bytes into a 16-byte pair.
+lp_copy_past: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
+    pair: lp_temp(f, t.pair)
+    _ := ir_emit(f, IROp.StackAddress, pair, 16, 8, -1, 1)
+    source: lp_temp(f, t.pointer)
+    _ := ir_emit(f, IROp.CopyBytes, -1, pair, source, 32, 1)
+    lp_return(f, -1)
+}
+
+// Frame storage of 8 bytes for a 16-byte pair.
+lp_frame_short: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
+    pair: lp_temp(f, t.pair)
+    _ := ir_emit(f, IROp.StackAddress, pair, 8, 8, -1, 1)
+    lp_return(f, -1)
+}
+
+// A pair viewed at 8 inside a 16-byte pair: its last 8 bytes are past the end.
+lp_view_past: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
+    pair: lp_temp(f, t.pair)
+    _ := ir_emit(f, IROp.StackAddress, pair, 16, 8, -1, 1)
+    view: lp_temp(f, t.pair)
+    _ := ir_emit(f, IROp.Offset, view, pair, 8, -1, 1)
+    lp_return(f, -1)
+}
+
+// A function's address in a 32-bit word.
+lp_narrow_address: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
+    address: lp_temp(f, t.narrow)
+    _ := ir_emit(f, IROp.FunctionAddress, address, 0, -1, -1, 1)
+    lp_return(f, -1)
+}
+
+// A drop whose routine is `twice`, which takes an Int and has a result.
+lp_drop_routine: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
+    wrong: ir_intern_type(m, "Doubled", IRType{ty: Type.Named{name: "Doubled"}, kind: IRTypeKind.Pointer, size: 8, align: 8, class: IRClass.Pointer, signed: false, bits: 64, drop: "test:lint.jet::twice"})
+    slot: lp_temp(f, wrong)
+    _ := ir_emit(f, IROp.Drop, -1, slot, -1, -1, 1)
+    lp_return(f, -1)
+}
+
+// A Close of a Float, which lives in no general register.
+lp_close_float: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
+    half: lp_temp(f, t.float)
+    _ := ir_emit(f, IROp.Close, -1, half, ir_intern_name(m, "jet_handle_close"), -1, 1)
+    lp_return(f, -1)
+}
+
+// A call through `twice`'s code word with only its box.
+lp_indirect_arity: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
+    box: lp_temp(f, t.pointer)
+    code: lp_temp(f, t.code)
+    _ := ir_emit(f, IROp.Load, code, box, 8, -1, 1)
+    result: lp_temp(f, t.int)
+    indirect_args: ir_args(f, [Int]{box})
+    _ := ir_emit(f, IROp.CallIndirect, result, code, indirect_args, 1, 1)
+    lp_return(f, -1)
+}
+
+// A call through `twice`'s code word with a Float argument.
+lp_indirect_arg: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
+    box: lp_temp(f, t.pointer)
+    code: lp_temp(f, t.code)
+    _ := ir_emit(f, IROp.Load, code, box, 8, -1, 1)
+    half: lp_temp(f, t.float)
+    result: lp_temp(f, t.int)
+    indirect_args: ir_args(f, [Int]{box, half})
+    _ := ir_emit(f, IROp.CallIndirect, result, code, indirect_args, 2, 1)
+    lp_return(f, -1)
+}
+
+// A call through `twice`'s code word into a Bool.
+lp_indirect_result: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
+    box: lp_temp(f, t.pointer)
+    code: lp_temp(f, t.code)
+    _ := ir_emit(f, IROp.Load, code, box, 8, -1, 1)
+    three: lp_const(f, t.int, 3)
+    flag: lp_temp(f, t.bool)
+    indirect_args: ir_args(f, [Int]{box, three})
+    _ := ir_emit(f, IROp.CallIndirect, flag, code, indirect_args, 2, 1)
+    lp_return(f, -1)
+}
+
+// An IntBig guard wider than an inline Int.
+lp_int_big_width: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
+    three: lp_const(f, t.int, 3)
+    wide: lp_temp(f, t.bool)
+    _ := ir_emit(f, IROp.IntBig, wide, three, 64, -1, 1)
+    lp_return(f, -1)
+}
+
+// The plants: each one's name is the rule it breaks, then any `#variant`
+// of another bug for the same rule; one module each.
 LP_RULES: [String]{
-    "arena", "operand.slot", "operand.dst", "operand.ref", "operand.kind", "operand.imm", "typing.layout", "typing.convert",
-    "typing.clone", "call.arity", "call.arg", "call.result", "route.call", "control.nesting", "control.depth", "return",
+    "arena", "operand.slot", "operand.dst", "operand.ref", "operand.kind", "operand.imm", "operand.imm#int_big", "typing.layout", "typing.convert",
+    "typing.clone", "typing.data", "typing.data#text", "typing.data#object", "typing.access", "typing.access#store", "typing.access#copy",
+    "typing.access#frame", "typing.access#view", "typing.access#word", "typing.drop", "typing.drop#close", "call.arity", "call.arg",
+    "call.result", "call.indirect", "call.indirect#arg", "call.indirect#result", "route.call", "control.nesting", "control.depth", "return",
     "type.kind", "type.layout",
 }
 
-lp_plant: fn(rule: String, m: &IRModule, t: LPTypes, f: &IRFunction) {
-    if rule == {
+lp_plant: fn(plant: String, m: &IRModule, t: LPTypes, f: &IRFunction) {
+    if plant == {
         "arena" -> lp_arena(m, t, f)
         "operand.slot" -> lp_slot_range(m, t, f)
         "operand.dst" -> lp_dst_range(m, t, f)
         "operand.ref" -> lp_name_range(m, t, f)
         "operand.kind" -> lp_kind(m, t, f)
         "operand.imm" -> lp_imm(m, t, f)
+        "operand.imm#int_big" -> lp_int_big_width(m, t, f)
         "typing.layout" -> lp_layout(m, t, f)
         "typing.convert" -> lp_convert(m, t, f)
         "typing.clone" -> lp_clone(m, t, f)
+        "typing.data" -> lp_big_text(m, t, f)
+        "typing.data#text" -> lp_bad_text(m, t, f)
+        "typing.data#object" -> lp_object_text(m, t, f)
+        "typing.access" -> lp_load_past(m, t, f)
+        "typing.access#store" -> lp_store_far(m, t, f)
+        "typing.access#copy" -> lp_copy_past(m, t, f)
+        "typing.access#frame" -> lp_frame_short(m, t, f)
+        "typing.access#view" -> lp_view_past(m, t, f)
+        "typing.access#word" -> lp_narrow_address(m, t, f)
+        "typing.drop" -> lp_drop_routine(m, t, f)
+        "typing.drop#close" -> lp_close_float(m, t, f)
         "call.arity" -> lp_arity(m, t, f)
         "call.arg" -> lp_arg(m, t, f)
         "call.result" -> lp_result(m, t, f)
+        "call.indirect" -> lp_indirect_arity(m, t, f)
+        "call.indirect#arg" -> lp_indirect_arg(m, t, f)
+        "call.indirect#result" -> lp_indirect_result(m, t, f)
         "route.call" -> lp_route(m, t, f)
         "control.nesting" -> lp_nesting(m, t, f)
         "control.depth" -> lp_depth(m, t, f)
@@ -256,6 +459,12 @@ lp_plant: fn(rule: String, m: &IRModule, t: LPTypes, f: &IRFunction) {
         "type.layout" -> lp_type_layout(m, t, f)
         else -> lp_valid(m, t, f)
     }
+}
+
+// The rule plant `plant` breaks: its name up to any `#`.
+lp_rule: fn(plant: String) -> String {
+    loop part in plant.split("#") -> return part.copy()
+    plant.copy()
 }
 
 // Whether every finding has rule `rule` (and there is one).
@@ -267,9 +476,9 @@ lp_only: fn(findings: [IRLintFinding], rule: String) -> Bool {
     true
 }
 
-// The rows of the module planted with `rule`, linted as after the build.
-lp_lint: fn(rule: String) -> [IRLintFinding] {
-    m := lp_module(rule)
+// The rows of the module planted with `plant`, linted as after the build.
+lp_lint: fn(plant: String) -> [IRLintFinding] {
+    m := lp_module(plant)
     ir_lint_module(m, "ir.build", compiler_threads_single())
 }
 
@@ -315,12 +524,12 @@ lp_status: fn() -> Int {
     } else {
         print("ok valid")
     }
-    loop rule in LP_RULES {
-        found: lp_lint(rule)
-        if lp_only(found, rule) {
-            print("ok {rule}")
+    loop plant in LP_RULES {
+        found: lp_lint(plant)
+        if lp_only(found, lp_rule(plant)) {
+            print("ok {plant}")
         } else {
-            print("FAIL {rule}:\n{ir_lint_text(found)}")
+            print("FAIL {plant}:\n{ir_lint_text(found)}")
             failures += 1
         }
     }

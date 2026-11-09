@@ -101,6 +101,18 @@ ir_closure_row: fn(m: &IRModule, ty: Type) -> Int Never! {
     ir_intern_type(m, type_carrier_identity(ty), ir_owned_layout(IRTypeKind.Pointer, ty, symbol, ir_closure_share()))
 }
 
+// The row of the code word a function value of type `ty` holds at 8: a
+// Pointer whose checked type is IR_CODE_TYPE over `ty`, so IR Lint checks a
+// CallIndirect through it against the signature. A box of any other type
+// (a scope guard's, a hook's) holds a plain pointer.
+ir_code_row: fn(m: &IRModule, ty: Type) -> Int Never! {
+    if ir_untag(ty) == .Fn(_, _, _, _, _, _) {
+        code_ty: Type.Apply{name: IR_CODE_TYPE, args: [Type]{ir_untag(ty)}}
+        return ir_intern_type(m, "{IR_CODE_TYPE}:{type_carrier_identity(ty)}", ir_layout(IRTypeKind.Pointer, code_ty, 8, 8, IRClass.Pointer, false, 64, ""))
+    }
+    ir_pointer_row(m)
+}
+
 // Whether the value in `slot` is a function value.
 ir_closure_slot: fn(m: IRModule, b: IRBuilder, slot: Int) -> Bool Never! {
     slot >= 0 && m.types[b.f.slot_type[slot]].clone == ir_closure_share()

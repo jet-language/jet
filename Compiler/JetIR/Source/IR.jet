@@ -30,10 +30,10 @@
 //                                              Float32 (correctly rounded)
 //   IntBig       dst(Bool) a=Int slot b=bits   whether the exact Int is a big
 //                                              integer or an inline word outside
-//                                              the signed `b`-bit range (33..=63;
-//                                              IR_INT_INLINE_BITS is every inline
-//                                              word; a pass's guard; Build emits
-//                                              none)
+//                                              the signed `b`-bit range
+//                                              (2..=IR_INT_INLINE_BITS, which is
+//                                              every inline word; a pass's
+//                                              guard; Build emits none)
 //   Convert      dst  a=operand                numeric conversion by the slot
 //                                              types: Float/Float32 to a Word
 //                                              truncates toward zero (signed
@@ -48,6 +48,11 @@
 //   Call         dst? a=function b=args c=count
 //   CallRuntime  dst? a=name (symbol) b=args c=count
 //   CallIndirect dst? a=callee slot b=args c=count
+//                                              a function value's call: its
+//                                              code's row is IR_CODE_TYPE over
+//                                              the function type, the args its
+//                                              box then its parameters; any
+//                                              other callee is a plain pointer
 //   FunctionAddress dst a=function
 //   DataAddress  dst  a=data row
 //   Load         dst  a=base pointer slot b=byte offset
@@ -194,6 +199,13 @@ IRSlotKind: enum { Param Local Temp }
 // IntBig's width for the test that an exact Int is inline at all (its
 // bits 63 and 62 agree).
 IR_INT_INLINE_BITS: 63
+
+// The checked type name of a function value's code word: the row of the
+// word a closure box holds at 8 is a Pointer of type
+// `Apply(IR_CODE_TYPE, [the function type])` (BuildCoreClosures.jet
+// ir_code_row), so IR Lint checks a CallIndirect through it against that
+// signature.
+IR_CODE_TYPE: "#code"
 
 // One function's arena. Slots 0..<param_count are the parameters in order.
 // `slot_name` is an interned name (-1 for a temporary); `slot_line` the

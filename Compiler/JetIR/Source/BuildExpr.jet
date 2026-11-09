@@ -6860,7 +6860,8 @@ ir_build_lambda: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, job: IRLambdaJob)
 ir_indirect_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, callee: Int, args: [BodyCallArg], signature: Type, span: Span) -> Int Never! {
     params := [Type]{}
     returned := Type?{None}
-    if ir_untag(ir_fact(p, b, signature, span)) == .Fn(fn_params, fn_ret, _, _, _, _) {
+    fact: ir_untag(ir_fact(p, b, signature, span))
+    if fact == .Fn(fn_params, fn_ret, _, _, _, _) {
         params = fn_params
         returned = fn_ret
     } else {
@@ -6878,8 +6879,8 @@ ir_indirect_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, callee: Int, arg
         if slot < 0 -> return ir_fail_slot(b, span, "Unit argument of an indirect call")
         slots.push(slot)
     }
-    pointer_row: ir_pointer_row(m)
-    code: ir_temp(m, b, pointer_row)
+    code_row: ir_code_row(m, fact)
+    code: ir_temp(m, b, code_row)
     ir_emit(b.f, IROp.Load, code, boxed, 8, -1, b.line)
     dst := -1
     if returned == .Val(ret) {

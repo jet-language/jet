@@ -404,9 +404,15 @@ An O2 pass may build an SSA form of one function, use it and discard it
 module against the IR's contract. It shares no code with the builder or the
 passes. Per function it checks the arena, each instruction's operands against
 its opcode's row in `IR_LINT_OPS` (roles, slot kinds, typing), every `Call`
-against the callee's parameter and result rows, every `CallRuntime` against
-its route's carriers, the structured-control nesting, and `Return` against
-the result. Per module it checks each type row's kind and layout against its
+against the callee's parameter and result rows, every `CallIndirect` through
+a function value's code word (a row of `#code` over the function type)
+against that signature, every `CallRuntime` against its route's carriers,
+each `Drop`/`Close` against its slot and drop routine, each
+`Load`/`Store`/`Offset`/`CopyBytes`/`StackAddress` against the bounds of an
+Aggregate base and the 32-bit displacement, each `ConstText` and
+`ConstBigInt` against its data or name row, the structured-control nesting,
+and `Return` against the result; only `Nop` and `Unreachable` have nothing
+to type. Per module it checks each type row's kind and layout against its
 checked `Type`. `ir_lint_core_routes` checks each Core call registry row
 with a runtime route against that route's arity. The route lint,
 `ir_lint_route_gaps`, lists in one run every gap a runtime leaves: each Core
@@ -422,9 +428,12 @@ the stop edge. A runtime route's Word carrier takes an `Int` or a word. A
 `ConstText` may yield the raw static-text address the runtime library's
 `rt_static_text` reads as a Word.
 
-It runs after the IR build (`ir.build`) on every native build, and again
-before x86-64 selection (`ir.opt`) when the optimizer ran; the functions
-split across the compiler threads. With `IROptOptions.verify` (tests, CI,
+It runs once per build, over the module x86-64 selection reads: after the IR
+build (`ir.build`) at O0, after the optimizer (`ir.opt`) at O1 and O2. `jet
+emit --ir` lints the module it prints (`ir.build`), and each comptime batch
+and the comptime entry program are linted before they compile (`eval.batch`,
+`eval.entry`; a finding fails the batch). The functions split across the
+compiler threads. With `IROptOptions.verify` (tests, CI,
 `JET_OPT_VERIFY=1`) it also runs after each optimizer pass
 (`ir.opt.<pass>`) and verifies each SSA form (`ssa.form`). A finding is a
 compiler bug, never a user diagnostic (AGENTS.md I2, I3): it becomes an ICE

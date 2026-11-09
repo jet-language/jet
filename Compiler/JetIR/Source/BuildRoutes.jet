@@ -1985,9 +1985,12 @@ ir_atomic_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiv
 // List closure methods (jet_list_map, jet_list_filter, ...), expanded inline
 // over the list with each element passed to the closure box.
 
+// A call through closure box `boxed`: its code with the box as the hidden
+// first argument. The code word's row carries the box's function type
+// (ir_code_row), which IR Lint checks the call against.
 ir_call_closure: fn(m: &IRModule, b: &IRBuilder, boxed: Int, args: [Int], result_row: Int) -> Int Never! {
-    pointer_row: ir_pointer_row(m)
-    code: ir_temp(m, b, pointer_row)
+    code_row: ir_code_row(m, m.types[b.f.slot_type[boxed]].ty.copy())
+    code: ir_temp(m, b, code_row)
     ir_emit(b.f, IROp.Load, code, boxed, 8, -1, b.line)
     operands := [Int]{boxed}
     loop arg in args -> operands.push(arg)
