@@ -956,7 +956,12 @@ its own exit. A code suite, declared in `test.jet` as `t.suite("perf", perf_rows
 function with a `TestRows`; each `pass(id)`, `fail(id, detail)` and
 `skip(id, reason)` is one row, kept even if the suite then panics. The child
 gets `JET`, the path of the `jet` running the profile, and
-`JET_TEST_SUITE_ROOT`, the package directory as the profile named it. The rows
+`JET_TEST_SUITE_ROOT`, the package directory as the profile named it. Under a
+`filter` it also gets `JET_TEST_SUITE_FILTER`. Then `rows.selects(id)` holds
+only for an id containing the filter, and `pass` and `skip` drop every other
+id. A failing row is always kept. A suite asks `selects` before doing a row's
+work: `jet test Compiler --profile packages --filter X` builds and runs only
+the packages, scripts and engine-unit claims holding a row that matches X. The rows
 are compared with `.jet/test/<profile>/<suite>.rows` as a run's are, and each
 failing row's detail is printed. A repeated id fails as `duplicate row id`, and
 a suite that panics or exits non-zero adds the failing row `stopped` with its
@@ -977,8 +982,8 @@ every corpus. The `jobs`, `memory`, `filter`, `cases`, `shard`, `opt_in`,
 `list`, `optimize` and `diagnostic_coverage` settings steer the pool;
 `time_limit` bounds each step; the `baseline:` ledger
 (`ID<TAB>card<TAB>reason` rows) holds the accepted failures. `-u` blesses
-every selected row's snapshots. A sharded run never writes a baseline and
-compares only the baseline rows its shard holds; code suites run in shard 1.
+every selected row's snapshots. A sharded or filtered run never writes a
+baseline and compares only the baseline rows it reported; code suites run in shard 1.
 `jet test Compiler --profile ui` (also `golden`, `cases`, `corpora`, `full`) runs
 the repository's corpora; a bare `jet test Compiler` runs `quick`. A bare
 `--shuffle` and the settings not ported yet (`where`, `coverage`, `grade`,

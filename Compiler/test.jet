@@ -144,7 +144,10 @@ failure_line: fn(text: String) -> String {
 // ASSEMBLED_PACKAGES package is a skipped row. The row `#Test coverage`
 // (test_coverage_rows) proves no tracked #Test under COVERAGE_TREES is left
 // unrun. Claims that drive the jet CLI run the jet under test, named by
-// JET_BIN.
+// JET_BIN. Under a filter (TestRows.selects), only the runs holding a row the
+// filter selects are built and run, by the #Test names their sources
+// declare, and the engine unit only when one of its claims is selected. A
+// filtered run reports no coverage row: it ran part of the #Tests.
 package_suite_rows: fn(rows: TestRows) {
     setup: suite_setup(rows) ?? return
     members: workspace_members(setup) ?? {
@@ -166,16 +169,22 @@ package_suite_rows: fn(rows: TestRows) {
         .Ok(found) -> { sources = found }
         .Err(error) -> { listing = error.message.copy() } // copy: the result is dropped
     }
+    held: test_names_by_run(setup, sources)
     // A script (a `#!` file) is no package's source: `jet test <script>` runs
     // its #Tests, a run of its own beside the packages.
-    runs := packages.copy()
+    candidates := packages.copy()
     loop source in sources {
-        if source.script && test_frozen_tree(source.path) == "" -> runs.push(source.path.copy())
+        if source.script && test_frozen_tree(source.path) == "" -> candidates.push(source.path.copy())
+    }
+    runs := [String]{}
+    loop run in candidates {
+        if run_selected(rows, run, held.get(run) ?? [String]{}) -> runs.push(run.copy())
     }
     // The engine unit is assembled first, so the hosted engine's build runs
     // as the batch's first job: it overlaps the package runs instead of
     // following them, and it starts while the host is still quiet.
-    prep: jetpack_prepare(setup)
+    engine: engine_selected(rows, sources)
+    prep: if engine -> jetpack_prepare(rows, setup) else -> JetpackPrep{assembled: "", map: JetpackMap{claims: [JetpackClaim]{}, files: [String]{}}, engine: "", build: None, error: ""}
     specs := [ProcessSpec]{}
     first := 0
     if prep.build == .Val(build) {
@@ -183,7 +192,12 @@ package_suite_rows: fn(rows: TestRows) {
         first = 1
     }
     loop run in runs {
-        specs.push(jet_command(setup, setup.jet, [String]{"test", run}).env("JET_BIN", setup.jet))
+        args := [String]{"test", run}
+        if run_filter(rows, run, held.get(run) ?? [String]{}) == .Val(filter) {
+            args.push("--filter")
+            args.push(filter)
+        }
+        specs.push(jet_command(setup, setup.jet, args).env("JET_BIN", setup.jet))
     }
     results: process.run_all(specs, package_jobs()) ?? {
         rows.fail("packages", "couldn't start the package runs: {err}")
@@ -219,12 +233,65 @@ package_suite_rows: fn(rows: TestRows) {
             .Err(error) -> { build_failure = "couldn't build the hosted engine: {error}" }
         }
     }
+    if !engine -> return
     unit: jetpack_engine_rows(rows, setup, prep, build_failure)
+    if rows.filter != "" -> return
     if listing != "" {
         rows.fail(COVERAGE_ROW, listing)
         return
     }
     test_coverage_rows(rows, setup, members, sources, TestRuns{ran, broke, unit})
+}
+
+// The #Test names of each run's sources: a script's are its own, any other
+// source's its owner's (test_owner). Frozen trees hold none a run makes.
+test_names_by_run: fn(setup: SuiteSetup, sources: [TestSource]) -> [String: [String]] {
+    held := [String: [String]]{}
+    loop source in sources {
+        if test_frozen_tree(source.path) != "" -> next
+        run: if source.script -> source.path.copy() else -> test_owner(setup.checkout, source.path)
+        if run == "" -> next
+        names := held.get(run) ?? [String]{}
+        loop name in source.names -> names.push(name.copy())
+        held[run] = names.move()
+    }
+    held
+}
+
+// Whether the run `run`, whose sources declare the #Tests `names`, holds a
+// row `rows` selects: its own row `<run>`, or a `<run>: <test>` row.
+run_selected: fn(rows: TestRows, run: String, names: [String]) -> Bool {
+    rows.selects(run) || names.any(name -> rows.selects("{run}: {name}"))
+}
+
+// The `--filter` a selected run's `jet test` gets: the suite's filter when
+// every #Test name it selects holds it, so the child runs only those tests.
+// None for an unfiltered run, one whose own name holds the filter (all its
+// rows are selected), or a filter spanning `<run>: <test>`, which the child
+// can't apply: that child runs all its tests and the rows keep the selected.
+run_filter: fn(rows: TestRows, run: String, names: [String]) -> String? {
+    if rows.filter == "" || rows.selects(run) -> return None
+    loop name in names {
+        if rows.selects("{run}: {name}") && !name.contains(rows.filter) -> return None
+    }
+    Val(rows.filter.copy())
+}
+
+// Whether the engine unit may have a claim `rows` selects, `Jetpack/<section>:
+// <claim>` for a section of JETPACK_ENGINE_SECTIONS and a #Test of a Jetpack
+// source: always without a filter. It holds before anything is assembled;
+// the unit's map then names the exact claims (jetpack_prepare,
+// jetpack_engine_rows).
+engine_selected: fn(rows: TestRows, sources: [TestSource]) -> Bool {
+    if rows.filter == "" -> return true
+    sections: JETPACK_ENGINE_SECTIONS.split(",").to_list()
+    loop source in sources {
+        if !source.path.starts_with("Jetpack/") || test_frozen_tree(source.path) != "" -> next
+        loop name in source.names {
+            if sections.any(section -> rows.selects("Jetpack/{section}: {name}")) -> return true
+        }
+    }
+    false
 }
 
 // The package runs at once (PACKAGE_JOBS).
@@ -251,8 +318,9 @@ JetpackPrep: struct {
 // `jet Jetpack/Bootstrap/Assemble.jet` in `aot` mode and, without
 // JETPACK_BIN, in `hosted` mode: the hosted engine is `jet build` of every
 // implementation file and Jetpack/run.jet, and jet's own build cache makes an
-// unchanged rebuild cheap.
-jetpack_prepare: fn(setup: SuiteSetup) -> JetpackPrep {
+// unchanged rebuild cheap. A unit whose map holds no claim `rows` selects
+// needs no engine.
+jetpack_prepare: fn(rows: TestRows, setup: SuiteSetup) -> JetpackPrep {
     scratch: files.join(setup.checkout, JETPACK_ENGINE_SCRATCH)
     prep := JetpackPrep{assembled: "", map: JetpackMap{claims: [JetpackClaim]{}, files: [String]{}}, engine: sys.get("JETPACK_BIN") ?? "", build: None, error: ""}
     assembled: jetpack_assemble(setup, scratch, "aot") ?? {
@@ -264,7 +332,7 @@ jetpack_prepare: fn(setup: SuiteSetup) -> JetpackPrep {
         prep.error = err.message.copy()
         return prep
     }
-    if prep.engine != "" -> return prep
+    if prep.engine != "" || !prep.map.claims.any(claim -> rows.selects(jetpack_claim_id(claim))) -> return prep
     hosted: jetpack_assemble(setup, scratch, "hosted") ?? {
         prep.error = err.message.copy()
         return prep
@@ -282,8 +350,10 @@ jetpack_prepare: fn(setup: SuiteSetup) -> JetpackPrep {
 // claims run the engine named by JETPACK_BIN, the caller's, else the hosted
 // engine `prep` built; `build_failure` says why that build left no engine.
 // A unit that didn't run to its summary is the failing row `Jetpack engine`.
-// Returns the unit's files and the claims it reported, or a unit that didn't
-// run.
+// Under a filter the unit runs only when `rows` selects one of its claims,
+// with the filter as its `--filter` when every selected claim's name holds
+// it. Returns the unit's files and the claims it reported, or a unit that
+// didn't run.
 jetpack_engine_rows: fn(rows: TestRows, setup: SuiteSetup, prep: JetpackPrep, build_failure: String) -> JetpackUnit {
     unit: "Jetpack engine"
     none: JetpackUnit{ran: false, files: [String]{}, claims: [String]{}}
@@ -292,7 +362,14 @@ jetpack_engine_rows: fn(rows: TestRows, setup: SuiteSetup, prep: JetpackPrep, bu
         return none
     }
     map: prep.map
-    receipt: jet_command(setup, setup.jet, [String]{"test", "src/jetpack.jet", "--serial"}).cwd(files.join(prep.assembled, "project")).env("JET_BIN", setup.jet).env("JETPACK_BIN", prep.engine).run() ?? {
+    selected: map.claims.filter(claim -> rows.selects(jetpack_claim_id(claim)))
+    if selected.len() == 0 -> return none
+    args := [String]{"test", "src/jetpack.jet", "--serial"}
+    if rows.filter != "" && selected.all(claim -> claim.name.contains(rows.filter)) {
+        args.push("--filter")
+        args.push(rows.filter.copy())
+    }
+    receipt: jet_command(setup, setup.jet, args).cwd(files.join(prep.assembled, "project")).env("JET_BIN", setup.jet).env("JETPACK_BIN", prep.engine).run() ?? {
         rows.fail(unit, "couldn't run `jet test` on the engine unit: {err}")
         return none
     }
@@ -310,8 +387,8 @@ jetpack_engine_rows: fn(rows: TestRows, setup: SuiteSetup, prep: JetpackPrep, bu
         return none
     }
     reported := [String]{}
-    loop claim in map.claims {
-        id: "Jetpack/{claim.section}: {claim.name}"
+    loop claim in selected {
+        id: jetpack_claim_id(claim)
         verdict: results.get(claim.name) ?? ""
         if verdict != "" -> reported.push(claim.name.copy())
         if {
@@ -336,6 +413,11 @@ JetpackUnit: struct {
 JetpackClaim: struct {
     name: String
     section: String
+}
+
+// A claim's row id, `Jetpack/<section>: <claim>`.
+jetpack_claim_id: fn(claim: JetpackClaim) -> String {
+    "Jetpack/{claim.section}: {claim.name}"
 }
 
 // `jet Jetpack/Bootstrap/Assemble.jet <mode>` into `scratch`, keeping only

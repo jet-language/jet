@@ -52,11 +52,13 @@ JET_CLI_TEST_ROW_PASSED: "passed"
 JET_CLI_TEST_ROW_FAILED: "failed"
 // Set in a code suite's child to the suite it runs, and to the file its
 // TestRows appends `id<TAB>state<TAB>detail` lines to (core.testing
-// `__suite_run`). The suite's code finds the package root it belongs to in
+// `__suite_run`). Under a `filter`, the filter its TestRows selects row ids
+// by. The suite's code finds the package root it belongs to in
 // JET_TEST_SUITE_ROOT, and the jet under test in JET.
 JET_CLI_TEST_SUITE_ENV: "JET_TEST_SUITE"
 JET_CLI_TEST_SUITE_ROWS_ENV: "JET_TEST_SUITE_ROWS"
 JET_CLI_TEST_SUITE_ROOT_ENV: "JET_TEST_SUITE_ROOT"
+JET_CLI_TEST_SUITE_FILTER_ENV: "JET_TEST_SUITE_FILTER"
 JET_CLI_TEST_SUITE_JET_ENV: "JET"
 
 // One child `jet test` of a profile run.
@@ -318,18 +320,28 @@ jet_cli_test_common_dir: fn(a: String, b: String) -> String Never! {
 
 // Runs a profile's `tests` and code-suite children together
 // (jet_cli_test_members_run), one pool slot each. Each child inherits the
-// profile's settings but those this run keeps (TEST_SETTINGS_ENV). A `tests`
+// profile's settings but those this run keeps (TEST_SETTINGS_ENV), and a
+// code-suite child gets the `filter` its rows are selected by. A `tests`
 // child hands its evidence report to a scratch file, a code-suite child its
 // rows; then each run's rows are compared or recorded, and `results` gains
 // them. A failing row fails the run whatever the baseline holds: the baseline
-// only names what moved, and a lost row fails the run too. The summary goes
-// to stderr after every run's own output.
+// only names what moved, and a lost row fails the run too. A sharded or
+// filtered run holds part of the rows, so it never records a baseline and
+// compares only the rows it holds. The summary goes to stderr after every
+// run's own output.
 jet_cli_test_profile_runs: fn(profile: String, root: String, settings: [TestSetting], runs: [JetCLITestProfileRun], update: Bool, quiet: Bool, known: [String: String], results: &[KitCaseResult]) -> JetDriverVerbOutput {
     scratch: cli_files.temp_dir("jet-test-profile") ?? return JetDriverVerbOutput{stdout: "", stderr: "jet test: profile `{profile}`: couldn't create a scratch directory: {err}\n", exit_code: JET_DRIVER_EXIT_USER_ERROR}
     executable: test_settings_get(settings, "compiler") ?? cli_sys.executable()
     inherited: test_settings_lines(jet_cli_test_child_settings(settings))
     listing: test_settings_on(settings, "list")
     sharded: test_settings_shard_count(settings) > 1
+    filter: test_settings_get(settings, "filter")
+    // What a partial run says instead of recording its rows, "" for a whole run.
+    partial: if {
+        sharded -> "a sharded run"
+        filter != None -> "a filtered run"
+        else -> ""
+    }
     labels := [String]{}
     argvs := [[String]]{}
     envs := [[String]]{}
@@ -339,7 +351,12 @@ jet_cli_test_profile_runs: fn(profile: String, root: String, settings: [TestSett
         loop argument in run.args -> argv.push(argument.copy())
         argvs.push(argv)
         if run.suite != "" {
-            envs.push([String]{JET_CLI_TEST_PROFILE_ENV, profile.copy(), TEST_SETTINGS_ENV, inherited.copy(), JET_CLI_TEST_SUITE_ENV, run.suite.copy(), JET_CLI_TEST_SUITE_ROWS_ENV, jet_cli_rooted_join(scratch.path, "{index}.rows"), JET_CLI_TEST_SUITE_ROOT_ENV, root.copy(), JET_CLI_TEST_SUITE_JET_ENV, executable.copy()})
+            env := [String]{JET_CLI_TEST_PROFILE_ENV, profile.copy(), TEST_SETTINGS_ENV, inherited.copy(), JET_CLI_TEST_SUITE_ENV, run.suite.copy(), JET_CLI_TEST_SUITE_ROWS_ENV, jet_cli_rooted_join(scratch.path, "{index}.rows"), JET_CLI_TEST_SUITE_ROOT_ENV, root.copy(), JET_CLI_TEST_SUITE_JET_ENV, executable.copy()}
+            if filter == .Val(text) {
+                env.push(JET_CLI_TEST_SUITE_FILTER_ENV)
+                env.push(text.copy())
+            }
+            envs.push(env.move())
             next
         }
         envs.push([String]{JET_CLI_TEST_PROFILE_ENV, profile.copy(), TEST_SETTINGS_ENV, inherited.copy(), EVIDENCE_REPORT_ENV, jet_cli_rooted_join(scratch.path, "{index}.bin"), JET_CLI_TEST_SUITE_JET_ENV, executable.copy()})
@@ -404,8 +421,8 @@ jet_cli_test_profile_runs: fn(profile: String, root: String, settings: [TestSett
         shown: ".jet/test/{profile}/{run.rows_file}"
         stored: jet_cli_rooted_join(baselines, run.rows_file)
         if update || !cli_files.exists(stored) {
-            if sharded {
-                if !quiet -> summary = "{summary}{site}: {rows.len()} rows, not recorded: a sharded run never writes the baseline `{shown}`\n"
+            if partial != "" {
+                if !quiet -> summary = "{summary}{site}: {rows.len()} rows, not recorded: {partial} never writes the baseline `{shown}`\n"
                 next
             }
             cli_files.create_dir_all(baselines) ?? {
@@ -427,8 +444,8 @@ jet_cli_test_profile_runs: fn(profile: String, root: String, settings: [TestSett
             next
         }
         baseline := jet_cli_test_rows_parse(text)
-        // A shard compares the rows it holds: the others ran in other shards.
-        if sharded {
+        // A shard or a filter compares the rows it holds: the others weren't run.
+        if partial != "" {
             present: loop row in rows -> jet_cli_test_row_name(row)
             baseline = baseline.filter(before -> present.contains(jet_cli_test_row_name(before)))
         }

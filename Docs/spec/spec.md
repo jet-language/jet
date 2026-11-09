@@ -4019,7 +4019,10 @@ or `rows.skip(id, reason)`. A profile runs the suite in its own child, which
 runs no `#Test`, so a package with no `#Test` still runs its code suites
 (no E0601); a plain `jet test` skips it. The child's environment names
 the `jet` running the profile in `JET` and the package's directory in
-`JET_TEST_SUITE_ROOT`, so the suite drives the compiler under test. The rows
+`JET_TEST_SUITE_ROOT`, so the suite drives the compiler under test. A run's
+`filter` reaches the suite as `rows.selects(id)`, which holds only for an id
+containing the filter. `pass` and `skip` drop every other id, and a suite asks
+`selects` before doing a row's work; a failing row is always kept. The rows
 are compared with the suite's baseline like a run's, a repeated id fails, and
 a suite that panics keeps the rows it reported and adds the failing row
 `stopped`.
