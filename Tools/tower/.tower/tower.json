@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6748,
-    "rev": 96611,
+    "rev": 96613,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -93328,105 +93328,6 @@
       "completedAt": "2026-11-07T03:39:28.500Z"
     },
     {
-      "id": "c0o3di45",
-      "num": 6596,
-      "title": "core.ui host types and services lower on native tiers from Jet source",
-      "body": "Found by CoreOwnership on dev 668a296d5c (#4717 c8, goldens ui/battery and ui/surface, 14 lowering faults on checked code, an I2 and I9 defect). (a) bb9c74e522 made UIHostError, UIClipboardText, UICapabilityFacts, UIShortcut(Binding), UIFileDialogRequest, UIFSGrant and UIAccessibility Jet structs and enums in Core/Ui/Host.jet, but the JetIR RuntimeRoutes rows and the JetRuntime Ui*.jet carriers still treat them as opaque JetUi* handles, so ir_is_handle refuses them (BuildRoutes.jet:4263/4493/4609; 9 faults). (b) The native runtime exports no jet_ui_host_* service (clipboard, drag, IME, shortcuts, capabilities, open/save file) or jet_ui_text_input; only Prelude/Web/Core/Ui.js implements them, while the CoreCall rows mark them aot_direct (4 faults). (c) The UINode handle has field routes only for label, width and height, so .accessibility has none (1 fault). Fix at the root by finishing the Jet-source cutover: remove the handle carriers and Handle route rows for these types, and implement the native host services as source-owned Jet over a headless provider that returns CapabilityUnavailable, with the same meaning on every tier (I9). A native-tier rejection would split meaning by tier and is not the fix. Proof: ui/battery and ui/surface pass on o0/o1/o2 and web, and no lowering fault remains in a core.ui sweep.",
-      "kind": "bug",
-      "track": "sidequest",
-      "epoch": null,
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P1",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-06",
-          "by": "Main",
-          "text": "ac563303ea (CoreOwnership): the Core helper __provider_fields becomes provider_record_fields, since __ names are reserved for registry host leaves. Prepush's Core check had reported 4 ReservedDunderName errors. Views regenerated with check-core-surface-ledger --write. On 89f28e76af+patch, chain check shows 0 rows, ui_host_provider and ui_default_browser PASS."
-        },
-        {
-          "at": "2026-11-06",
-          "by": "Main",
-          "text": "60adfbb42a (CoreOwnership): a default browser provider, with provider records as length-prefixed fields; the clipboard reads from the page's paste, copy and cut mirror with no implicit readText; core-library.md updated. Main's review keeps c2 open: the provider still computes the IME caret, maps DOM event types to phases (including compositionend with an empty string → Cancel), and keeps unbounded queues. The fix: send raw fields, let Core own the mapping and caret, and report overflow as Core's existing QueueFull. Ballot item B3: the browser's dragleave dropEffect 'none' has no UIDragOperation, so today it is a HostFailure; the choice is a None case or an optional operation."
-        },
-        {
-          "at": "2026-11-06",
-          "by": "Main",
-          "text": "Ballot prep (CoreOwnership). B1, browser file dialogs: (a) keep FileDialog absent on web (current); (b) a pending dialog plus a public poll or dialog event, with a UIBrowserFile{name, bytes/handle} carrier; (c) OPFS/File System Access handles in a synthetic grant root, Chromium-only, which changes what a grant means. B2, web shortcuts: (a) keep Core-only register/dispatch, with the app feeding keys itself; (b) a keydown queue plus a public shortcuts.poll(). Main's adversarial notes before this goes on a ballot: B1(b) must not create a second 'chosen file' carrier beside UIGrantedPath (I8), so one selection type has to serve native and web. B2(b) must not need app polling; keys should arrive through the UI event delivery the app already handles. Both need same-program alternatives with these downsides engineered away before the owner sees them."
-        },
-        {
-          "at": "2026-11-06",
-          "by": "Main",
-          "text": "A3 seam landed, ae8271e354 (CoreOwnership). Ui.js (1414 lines of dead JS policy) is deleted. Core/Ui/Host owns every rule over six marshal-only C-ABI provider leaves: headless on native, and on web forwarded to globalThis.jetUiProvider. Proof: tests/cases/web_build/ui_host_provider_answers_are_core_owned. Native reports every capability absent with the same validation answers; the web run with a stubbed provider gets Core-decoded events and errors. Full chain s2==s3 (4633942b); golden ui/ 57/57 on o0/o1/o2. Open before closing: the web runtime installs no default browser provider, so a shipped app reports all capabilities absent. A default marshal-only provider is still needed, including a sync/async bridge for the clipboard."
-        },
-        {
-          "at": "2026-11-06",
-          "by": "Main",
-          "text": "Partial, 9ce77ac519 (CoreOwnership): the node-slot half. UIAccessibility and UIShortcut are runtime records; the .accessibility, .shortcut and .ime field reads and the native jet_ui_text_input lower. Remaining: the A3 primitive provider seam for the host services."
-        },
-        {
-          "at": "2026-11-06",
-          "by": "Main",
-          "text": "Ruling (Main) on the web host services: A3. Core source owns the UI host service logic (validation, queues, the binding registry, UIHostError meaning) over a primitive-only provider seam: capability flag, clipboard get/set text, event pop, dialog request/result. Web implements the seam with the browser; native implements it headless and reports the capability as absent. Rejected: A1, deleting the web JS provider, because it would drop shipped web clipboard, shortcut, IME/drag and file-dialog behaviour, which is a product change for the owner; and A2, keeping the logic in Ui.js with native record carriers, because hosts would re-encode policy, which violates I9. The node-slot half (UIAccessibility and UIShortcut records, field reads, native jet_ui_text_input) lands first and separately."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "Core/Ui/Host owns every host-service rule over a marshal-only provider seam; native reports every capability absent with the same validation answers as web (tests/cases/web_build/ui_host_provider_answers_are_core_owned)",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "ae8271e354 (CoreOwnership): ui_host_provider_answers_are_core_owned, with native and web .out reviewed by Main. Validation lines are identical across tiers, native reports CapabilityUnavailable, and Host.jet's provider leaves only marshal. Chain s2==s3 4633942b; golden ui/ 57/57 on o0/o1/o2.",
-          "at": "2026-11-06T08:17:06.056Z"
-        },
-        {
-          "n": 2,
-          "text": "The web runtime installs a default browser provider that forwards only raw browser primitives (keys, IME composition, drag/drop items, file dialogs, clipboard), with a DOM-stub cases row proving the forwarding",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "60adfbb42a and 0fc5677e4c (CoreOwnership); Main reviewed the Host.jet provider. It forwards only raw DOM event types, data, dropEffect and the text/plain and uri-list strings. Core maps phases (including an empty compositionend → Cancel), places the caret after the text in characters, parses uri-lists and maps effects. A 256-record host buffer holds an overflow marker that Core reports as QueueFull. The clipboard mirror reads paste, copy and cut, and never calls readText implicitly. Row: tests/cases/web_build/ui_default_browser_provider_forwards_raw_events, with a DOM stub, ␟ in the IME and drop data, and the dragleave row citing ballot item B3. Chain s2==s3 876a7e472cd9905a; web_build 24 PASS (2 FAILs that predate this, web_edge and web_two_hop); golden ui/ 57 PASS.",
-          "at": "2026-11-06T08:47:18.690Z"
-        },
-        {
-          "n": 3,
-          "text": "D-UI-DRAG-NONE1=A: a drag event carries operation: UIDragOperation?; a drop whose operation is none is delivered as Cancel; a case proves drop-with-none reports Cancel and a normal drop keeps its operation, on O0, O1 and O2.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "vb3 at dev 490142763c (chain FIXED_POINT s2==s3, jet 28a779f1d474bca1); results $JET_SCRATCH_ROOT/lanes/Main/vb3/kit: tests/cases/web_build/ui_drop_without_operation_is_cancel.case PASS; it builds and runs the page at --optimize=none, basic and full and compares each to the same .out (drop with none -> Cancel, normal drop keeps its operation)",
-          "at": "2026-11-06T16:35:48.396Z"
-        },
-        {
-          "n": 4,
-          "text": "D-UI-WEB-KEYS1=A: the web provider queues key events on provider queue 2 and shortcuts.poll reads them; shortcuts.register claims a key so the page prevents the browser default only for bound keys; a web case proves a bound key reaches poll with modifiers and an unbound key keeps its browser default.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "a5d77ac873; vb3 at dev 490142763c (chain FIXED_POINT s2==s3, jet 28a779f1d474bca1); results $JET_SCRATCH_ROOT/lanes/Main/vb3/kit: tests/cases/web_build/ui_shortcut_claimed_keys_reach_poll.case PASS and tests/ui/ui_shortcut_cmd_dynamic_key.jet PASS",
-          "at": "2026-11-06T16:35:49.289Z"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "goals": [
-        "G3"
-      ],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-06T06:28:56.205Z",
-      "updated": "2026-11-06T16:36:03.830Z",
-      "updatedBy": "Main",
-      "completedAt": "2026-11-06T16:36:03.830Z"
-    },
-    {
       "id": "c0yy2xbx",
       "num": 6599,
       "title": "Port the C binding generator to Jet: jet inspect bind <header.h> and the cache-miss refresh",
@@ -93617,47 +93518,6 @@
       "created": "2026-11-06T09:29:13.427Z",
       "updated": "2026-11-08T18:51:47.482Z",
       "updatedBy": "Main"
-    },
-    {
-      "id": "c0j5iuv5",
-      "num": 6608,
-      "title": "core.text fmt stops E3010 formatting a whole number with no exact Float (Fmt.jet:272 Float{abs_int(n)})",
-      "body": "Found by Builder5 (#6601, edc75a36a3). run-fmt-parity stops at case bytes-integer6: Core/Text/Fmt.jet:272 converts an integer through Float{abs_int(n)}, which hits Stop E3010 when the whole number has no exact Float (|n| > 2^53). Integer formatting must never round-trip through Float. The 34 cases before the stop match FmtParityExpected.out byte for byte; the other 338 can't be checked until this is fixed.",
-      "kind": "bug",
-      "track": "sidequest",
-      "epoch": null,
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P1",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "Integer formatting in core.text fmt never converts through Float: run-fmt-parity passes all 372 cases of FmtParityExpected.out, and a golden row formats ±(2^63−1), 2^53+1 and U64 max on every tier",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "vb3 at dev 490142763c (chain FIXED_POINT s2==s3, jet 28a779f1d474bca1); results $JET_SCRATCH_ROOT/lanes/Main/vb3/kit: golden tests/run/fmt_integer_tiers/integer_formatting_is_exact_beyond_float_on_every_tier.jet PASS at o0, o1 and o2; ddfe57e351 run-fmt-parity prepare 23 kernels / 372 cases, compare failures=0 stdout_equal=true",
-          "at": "2026-11-06T16:35:52.997Z"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "goals": [
-        "G3"
-      ],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-06T09:39:47.958Z",
-      "updated": "2026-11-06T16:35:56.292Z",
-      "updatedBy": "Main",
-      "completedAt": "2026-11-06T16:35:56.292Z"
     },
     {
       "id": "c00ctwqw",
@@ -99719,6 +99579,11 @@
         {
           "at": "2026-11-09",
           "by": "Main",
+          "text": "Owner direction 2026-11-09 on D-FFI-CARRIER1: option E (the initial thread is the only thread that runs C; task-side C calls are handed to it) is the beginner default, and option B (pthread carriers for C-linked programs, with parallel direct C calls) is an explicit expert opt-in. The ballot is to be completed in that shape, with the opt-in spelling as a ballot item, and given an adversarial review before it is built."
+        },
+        {
+          "at": "2026-11-09",
+          "by": "Main",
           "text": "AppReview6: D-FFI-CARRIER1/SERIAL1 v6 are not engineered away (O1-O3, O13, O15: syscall census coverage and wait classification, carrier saturation, safepoint evidence, binding-lock ownership and callback safety). The v7 drafts and audit are under '$JET_SCRATCH_ROOT/lanes/AppReview6/'."
         },
         {
@@ -99799,6 +99664,15 @@
           "verifiedBy": null,
           "evidence": "dev a796b483ee (SchedLead-6): setuid/setgid/setgroups/initgroups through a Jet synccall over the thread registry; integration b5 passes.",
           "at": "2026-11-09T03:05:52.588Z"
+        },
+        {
+          "n": 5,
+          "text": "C-linked programs default to option E: only the initial thread runs C; a task's C call is handed to it, and errno and results come back. A case proves that single-threaded C called from many tasks is safe, and that main-thread affinity holds, at O0/O1/O2 (owner direction on D-FFI-CARRIER1).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T16:45:08.863Z"
         }
       ],
       "refs": [],
@@ -99813,9 +99687,9 @@
       "parentId": "c0lscvc9",
       "needsAcceptance": false,
       "created": "2026-11-08T15:46:55.183Z",
-      "updated": "2026-11-09T15:59:13.494Z",
+      "updated": "2026-11-09T16:45:08.863Z",
       "updatedBy": "Main",
-      "criteriaLastN": 4
+      "criteriaLastN": 5
     },
     {
       "id": "c0wl6r2h",
@@ -181393,316 +181267,6 @@
       "ratifiedAt": "2026-11-06"
     },
     {
-      "id": "D-UI-DRAG-NONE1",
-      "cardId": "c0o3di45",
-      "group": "web-ui",
-      "title": "A drag that leaves with no action",
-      "situation": "",
-      "gist": "When a drag leaves a window without dropping, what action should Jet report?",
-      "lesson": "While you drag something over a window, the browser says what a drop would do: copy, move or link. When the drag leaves, it says none. Jet's drag event always holds one of three actions, so every web leave event is an error today. Whichever option wins, leave events must arrive without an error.",
-      "explainer": "",
-      "story": "Maya builds a web to-do list where people drag notes between columns. When a note leaves a column, she clears the column's highlight. Today her program gets an error on every leave, so highlights stick.",
-      "inWild": "list.addEventListener(\"dragleave\", (e) => {\n  // e.dataTransfer.dropEffect is \"none\" here\n  list.classList.remove(\"over\")\n})\n// https://developer.mozilla.org/en-US/docs/Web/API/DataTransfer/dropEffect",
-      "detail": "",
-      "options": [
-        {
-          "key": "A",
-          "name": "Optional action",
-          "detail": "UIDragEvent.operation becomes UIDragOperation?. Enter and over carry the browser's action, or none when the target refuses the drop. Leave and cancel carry none. A drop always carries an action.",
-          "technical": "Core/Ui/Host/DragDrop.jet: drag_operation maps \"none\" to None. A drop record whose effect is none becomes phase Cancel, so Drop implies Val. The provider record format is unchanged. Native providers send the same five fields.",
-          "code": "if event.operation == .Val(op) -> show_hint(op)\nelse -> clear_highlight()"
-        },
-        {
-          "key": "B",
-          "name": "None case",
-          "detail": "UIDragOperation gains a None case. Every event carries an action value, and None means nothing would happen.",
-          "technical": "Core/Ui/Host/DragDrop.jet: the enum gains None; drag_operation maps \"none\" to .None. Exhaustive matches on UIDragOperation everywhere gain an arm.",
-          "code": "match event.operation {\n    .None -> clear_highlight()\n    .Copy | .Move | .Link -> show_hint(event.operation)\n}"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "JavaScript",
-          "note": "The browser models dropEffect as a string that includes none. MDN: https://developer.mozilla.org/en-US/docs/Web/API/DataTransfer/dropEffect.",
-          "code": "e.dataTransfer.dropEffect // \"none\" | \"copy\" | \"link\" | \"move\""
-        },
-        {
-          "lang": "Rust (winit)",
-          "note": "winit reports a file hover as a separate event, and a cancelled hover as HoveredFileCancelled with no action. See https://docs.rs/winit/latest/winit/event/enum.WindowEvent.html.",
-          "code": "WindowEvent::HoveredFileCancelled => clear_highlight()"
-        }
-      ],
-      "rec": "A",
-      "recommendation": {
-        "why": "Jet already spells \"may be missing\" with optional values. One spelling of nothing keeps the drag type honest, and drops keep a guaranteed action.",
-        "gains": [
-          "Leave events work on the web with no new enum case."
-        ],
-        "losses": [
-          {
-            "loss": "Code that reads the action on hover checks for none first.",
-            "mitigation": "Core guarantees drops carry an action; a browser drop with none becomes a Cancel event."
-          }
-        ],
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "B adds a second way to say nothing and forces a None arm into every drop handler."
-          }
-        ],
-        "tradeoff": "Hover and leave code checks for a missing action; drop code never does."
-      },
-      "hybrid": null,
-      "ballotMode": "short",
-      "shortAuthorizedBy": null,
-      "ballotProcessVersion": 5,
-      "reviewPasses": null,
-      "checkInstructions": null,
-      "surface": {
-        "gist": "When a drag leaves a window without dropping, what action should Jet report?",
-        "lesson": "While you drag something over a window, the browser says what a drop would do: copy, move or link. When the drag leaves, it says none. Jet's drag event always holds one of three actions, so every web leave event is an error today. Whichever option wins, leave events must arrive without an error.",
-        "trio": {
-          "current": {
-            "note": "A web leave event fails with an error instead of arriving.",
-            "code": "event :: drag_drop.poll()?\n// leave on the web:\n// Err(HostFailure: unknown drag/drop operation `none`)"
-          },
-          "wild": {
-            "lang": "JavaScript",
-            "note": "The browser's dropEffect is none, copy, link or move. See https://developer.mozilla.org/en-US/docs/Web/API/DataTransfer/dropEffect.",
-            "code": "list.addEventListener(\"dragleave\", (e) => {\n  // e.dataTransfer.dropEffect is \"none\" here\n  list.classList.remove(\"over\")\n})"
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "Optional action",
-            "gist": "The action becomes optional; leave and cancel events carry no action.",
-            "gains": [
-              "The type says plainly that leaving has no action.",
-              "Copy, Move and Link stay exactly as they are.",
-              "A drop always carries a real action."
-            ],
-            "losses": [
-              "Code that reads the action on hover checks for none first."
-            ],
-            "proposed": {
-              "code": "// Before: operation: UIDragOperation\n// After: operation: UIDragOperation?\nif event.operation == .Val(op) -> show_hint(op)\nelse -> clear_highlight()"
-            }
-          },
-          {
-            "key": "B",
-            "name": "None case",
-            "gist": "Add a None case to the three actions.",
-            "gains": [
-              "Code reads the action without unwrapping it."
-            ],
-            "losses": [
-              "Every match on the action needs a None arm, even on drop.",
-              "A second way to say nothing, beside optional values."
-            ],
-            "proposed": {
-              "code": "// After: enum UIDragOperation { None, Copy, Move, Link }\nmatch event.operation {\n    .None -> clear_highlight()\n    .Copy | .Move | .Link -> show_hint(event.operation)\n}"
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "Jet already spells \"may be missing\" with optional values. One spelling of nothing keeps the drag type honest, and drops keep a guaranteed action.",
-          "gains": [
-            "Leave events work on the web with no new enum case."
-          ],
-          "losses": [
-            {
-              "loss": "Code that reads the action on hover checks for none first.",
-              "mitigation": "Core guarantees drops carry an action; a browser drop with none becomes a Cancel event."
-            }
-          ],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "B adds a second way to say nothing and forces a None arm into every drop handler."
-            }
-          ],
-          "tradeoff": "Hover and leave code checks for a missing action; drop code never does."
-        }
-      },
-      "draft": false,
-      "status": "ratified",
-      "created": "2026-11-06T09:51:49.061Z",
-      "outcome": "A",
-      "ratifiedAt": "2026-11-06"
-    },
-    {
-      "id": "D-UI-WEB-KEYS1",
-      "cardId": "c0o3di45",
-      "group": "web-ui",
-      "title": "Keyboard shortcuts in web pages",
-      "situation": "",
-      "gist": "How should a web page hand key presses to Jet's shortcut table?",
-      "lesson": "Jet keeps a table of shortcuts, such as Ctrl+S for save. A program registers a key and an action, and Core decides which key matches. A Jet web page never forwards key presses, so a registered shortcut never fires. Ctrl+S opens the browser's own save page instead. Whichever option wins, Core keeps deciding matches.",
-      "explainer": "",
-      "story": "Sam writes a small web notes app in Jet and binds Ctrl+S to save. On the desktop it saves. In the browser, Ctrl+S opens the browser's save page, and the app never hears the key.",
-      "inWild": "document.addEventListener(\"keydown\", (e) => {\n  if ((e.ctrlKey || e.metaKey) && e.key === \"s\") {\n    e.preventDefault(); save()\n  }\n})\n// https://developer.mozilla.org/en-US/docs/Web/API/Element/keydown_event",
-      "detail": "",
-      "options": [
-        {
-          "key": "A",
-          "name": "Key queue",
-          "detail": "Registering a shortcut also tells the page which key to claim. The page blocks the browser's default for claimed keys only and queues each press. shortcuts.poll takes the next press, matches it in Core's table, and returns Dispatched or Unhandled.",
-          "technical": "Core/Ui/Host/Shortcuts.jet gains poll() over provider queue 2 (capability 4), the same provider record and overflow mark as ime.poll and drag_drop.poll. register() also calls one new raw host primitive that passes the normalized key and modifier bits to the provider. The default web provider (JetWeb Host.jet) listens for keydown, compares against claimed keys, calls preventDefault, and enqueues target, key and modifier bits. Desktop providers enqueue the same record.",
-          "code": "loop {\n    if shortcuts.poll()? == .Val(.Dispatched(hit)) -> run(hit.action)\n}"
-        },
-        {
-          "key": "B",
-          "name": "UI key events",
-          "detail": "Key presses arrive through core.ui as key events that now carry modifiers. The core.ui event loop asks the shortcut table before the program's own handler.",
-          "technical": "core.ui InputEvent.Key gains a modifiers field; DomRuntime.js forwards keydown into the node tree; the UI loop calls shortcuts.dispatch. Programs that use core.ui.host without core.ui nodes see no key source.",
-          "code": "if event == .Key(key) && shortcuts.dispatch(shortcut_of(key))? == .Dispatched(hit) {\n    run(hit.action)\n}"
-        },
-        {
-          "key": "C",
-          "name": "Desktop only",
-          "detail": "The web provider reports the Shortcuts capability as unavailable, so register and dispatch fail with CapabilityUnavailable on the web.",
-          "technical": "JetWeb Host.jet capability() returns false for code 4.",
-          "code": "shortcuts.register(save)?\n// web: Err(CapabilityUnavailable{capability: \"Shortcuts\"})"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "JavaScript",
-          "note": "Pages own shortcuts by listening for keydown and calling preventDefault. MDN: https://developer.mozilla.org/en-US/docs/Web/API/Element/keydown_event.",
-          "code": "document.addEventListener(\"keydown\", (e) => { if (e.ctrlKey && e.key === \"s\") e.preventDefault() })"
-        },
-        {
-          "lang": "Rust (egui)",
-          "note": "egui reads queued key events each frame and checks shortcuts against them. See https://docs.rs/egui/latest/egui/struct.InputState.html#method.consume_shortcut.",
-          "code": "if ctx.input_mut(|i| i.consume_shortcut(&SAVE)) { save() }"
-        }
-      ],
-      "rec": "A",
-      "recommendation": {
-        "why": "Drag and drop and typing composition already arrive through page queues and poll. Keys joining the same path keeps one mechanism, and Core still owns every match.",
-        "gains": [
-          "Web shortcuts work with the same code as desktop."
-        ],
-        "losses": [
-          {
-            "loss": "A program that stops polling misses presses after the queue fills.",
-            "mitigation": "A full queue reports QueueFull on the next poll, like drag and drop, so nothing is lost silently."
-          }
-        ],
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "B leaves host-only programs without shortcuts and changes a public event type."
-          },
-          {
-            "key": "C",
-            "reason": "C makes the same program behave differently on the web."
-          }
-        ],
-        "tradeoff": "Programs poll shortcuts like other host events; a stalled program learns it missed presses."
-      },
-      "hybrid": null,
-      "ballotMode": "short",
-      "shortAuthorizedBy": null,
-      "ballotProcessVersion": 5,
-      "reviewPasses": null,
-      "checkInstructions": null,
-      "surface": {
-        "gist": "How should a web page hand key presses to Jet's shortcut table?",
-        "lesson": "Jet keeps a table of shortcuts, such as Ctrl+S for save. A program registers a key and an action, and Core decides which key matches. A Jet web page never forwards key presses, so a registered shortcut never fires. Ctrl+S opens the browser's own save page instead. Whichever option wins, Core keeps deciding matches.",
-        "trio": {
-          "current": {
-            "note": "Registering works, but on the web no key ever reaches the table.",
-            "code": "save :: shortcuts.binding(UIShortcut.cmd(\"s\"), \"save\")?\nshortcuts.register(save)?\n// web: Ctrl+S opens the browser's save page"
-          },
-          "wild": {
-            "lang": "JavaScript",
-            "note": "A page listens for keydown and blocks the browser's default for keys it owns. See https://developer.mozilla.org/en-US/docs/Web/API/Element/keydown_event.",
-            "code": "document.addEventListener(\"keydown\", (e) => {\n  if ((e.ctrlKey || e.metaKey) && e.key === \"s\") {\n    e.preventDefault(); save()\n  }\n})"
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "Key queue",
-            "gist": "The page queues presses of registered keys; shortcuts.poll returns the next match.",
-            "gains": [
-              "Same queue-and-poll shape as drag and drop and typing composition.",
-              "The browser default is blocked only for keys the program registered.",
-              "Core still decides every match."
-            ],
-            "losses": [
-              "A program that stops polling misses presses after the queue fills."
-            ],
-            "proposed": {
-              "code": "// After\nloop {\n    if shortcuts.poll()? == .Val(.Dispatched(hit)) -> run(hit.action)\n}"
-            }
-          },
-          {
-            "key": "B",
-            "name": "UI key events",
-            "gist": "Key presses arrive as core.ui key events with modifiers; the UI loop matches them.",
-            "gains": [
-              "Shortcut handling joins the node tree's other events."
-            ],
-            "losses": [
-              "Programs that use the host services without the node tree get no shortcuts.",
-              "The public key event type gains modifier fields."
-            ],
-            "proposed": {
-              "code": "// After: InputEvent.Key{code, modifiers}\nif event == .Key(key) && shortcuts.dispatch(shortcut_of(key))? == .Dispatched(hit) {\n    run(hit.action)\n}"
-            }
-          },
-          {
-            "key": "C",
-            "name": "Desktop only",
-            "gist": "Web pages report shortcuts as unavailable.",
-            "gains": [
-              "No new page code."
-            ],
-            "losses": [
-              "Web programs cannot have keyboard shortcuts.",
-              "The same program behaves differently on desktop and web."
-            ],
-            "proposed": {
-              "code": "// After\nshortcuts.register(save)?\n// web: Err(CapabilityUnavailable{capability: \"Shortcuts\"})"
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "Drag and drop and typing composition already arrive through page queues and poll. Keys joining the same path keeps one mechanism, and Core still owns every match.",
-          "gains": [
-            "Web shortcuts work with the same code as desktop."
-          ],
-          "losses": [
-            {
-              "loss": "A program that stops polling misses presses after the queue fills.",
-              "mitigation": "A full queue reports QueueFull on the next poll, like drag and drop, so nothing is lost silently."
-            }
-          ],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "B leaves host-only programs without shortcuts and changes a public event type."
-            },
-            {
-              "key": "C",
-              "reason": "C makes the same program behave differently on the web."
-            }
-          ],
-          "tradeoff": "Programs poll shortcuts like other host events; a stalled program learns it missed presses."
-        }
-      },
-      "draft": false,
-      "status": "ratified",
-      "created": "2026-11-06T09:52:27.293Z",
-      "outcome": "A",
-      "ratifiedAt": "2026-11-06"
-    },
-    {
       "id": "D-G12-SCOPE1",
       "cardId": "c0max8v8",
       "group": "other",
@@ -191521,6 +191085,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-09T16:45:08.863Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0x92nsv",
+      "note": "#5 C-linked programs default to option E: only the initial thre"
+    },
+    {
+      "at": "2026-11-09T16:45:07.010Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0x92nsv",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-09T16:35:55.828Z",
       "by": "Main",

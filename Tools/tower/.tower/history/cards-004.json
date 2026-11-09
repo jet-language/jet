@@ -85700,6 +85700,150 @@
       "completedAt": "2026-11-06T16:35:54.647Z",
       "questions": [],
       "retiredAt": "2026-11-09T16:35:56.027Z"
+    },
+    {
+      "id": "c0o3di45",
+      "num": 6596,
+      "title": "core.ui host types and services lower on native tiers from Jet source",
+      "body": "Found by CoreOwnership on dev 668a296d5c (#4717 c8, goldens ui/battery and ui/surface, 14 lowering faults on checked code, an I2 and I9 defect). (a) bb9c74e522 made UIHostError, UIClipboardText, UICapabilityFacts, UIShortcut(Binding), UIFileDialogRequest, UIFSGrant and UIAccessibility Jet structs and enums in Core/Ui/Host.jet, but the JetIR RuntimeRoutes rows and the JetRuntime Ui*.jet carriers still treat them as opaque JetUi* handles, so ir_is_handle refuses them (BuildRoutes.jet:4263/4493/4609; 9 faults). (b) The native runtime exports no jet_ui_host_* service (clipboard, drag, IME, shortcuts, capabilities, open/save file) or jet_ui_text_input; only Prelude/Web/Core/Ui.js implements them, while the CoreCall rows mark them aot_direct (4 faults). (c) The UINode handle has field routes only for label, width and height, so .accessibility has none (1 fault). Fix at the root by finishing the Jet-source cutover: remove the handle carriers and Handle route rows for these types, and implement the native host services as source-owned Jet over a headless provider that returns CapabilityUnavailable, with the same meaning on every tier (I9). A native-tier rejection would split meaning by tier and is not the fix. Proof: ui/battery and ui/surface pass on o0/o1/o2 and web, and no lowering fault remains in a core.ui sweep.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "ac563303ea (CoreOwnership): the Core helper __provider_fields becomes provider_record_fields, since __ names are reserved for registry host leaves. Prepush's Core check had reported 4 ReservedDunderName errors. Views regenerated with check-core-surface-ledger --write. On 89f28e76af+patch, chain check shows 0 rows, ui_host_provider and ui_default_browser PASS."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "60adfbb42a (CoreOwnership): a default browser provider, with provider records as length-prefixed fields; the clipboard reads from the page's paste, copy and cut mirror with no implicit readText; core-library.md updated. Main's review keeps c2 open: the provider still computes the IME caret, maps DOM event types to phases (including compositionend with an empty string → Cancel), and keeps unbounded queues. The fix: send raw fields, let Core own the mapping and caret, and report overflow as Core's existing QueueFull. Ballot item B3: the browser's dragleave dropEffect 'none' has no UIDragOperation, so today it is a HostFailure; the choice is a None case or an optional operation."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Ballot prep (CoreOwnership). B1, browser file dialogs: (a) keep FileDialog absent on web (current); (b) a pending dialog plus a public poll or dialog event, with a UIBrowserFile{name, bytes/handle} carrier; (c) OPFS/File System Access handles in a synthetic grant root, Chromium-only, which changes what a grant means. B2, web shortcuts: (a) keep Core-only register/dispatch, with the app feeding keys itself; (b) a keydown queue plus a public shortcuts.poll(). Main's adversarial notes before this goes on a ballot: B1(b) must not create a second 'chosen file' carrier beside UIGrantedPath (I8), so one selection type has to serve native and web. B2(b) must not need app polling; keys should arrive through the UI event delivery the app already handles. Both need same-program alternatives with these downsides engineered away before the owner sees them."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "A3 seam landed, ae8271e354 (CoreOwnership). Ui.js (1414 lines of dead JS policy) is deleted. Core/Ui/Host owns every rule over six marshal-only C-ABI provider leaves: headless on native, and on web forwarded to globalThis.jetUiProvider. Proof: tests/cases/web_build/ui_host_provider_answers_are_core_owned. Native reports every capability absent with the same validation answers; the web run with a stubbed provider gets Core-decoded events and errors. Full chain s2==s3 (4633942b); golden ui/ 57/57 on o0/o1/o2. Open before closing: the web runtime installs no default browser provider, so a shipped app reports all capabilities absent. A default marshal-only provider is still needed, including a sync/async bridge for the clipboard."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Partial, 9ce77ac519 (CoreOwnership): the node-slot half. UIAccessibility and UIShortcut are runtime records; the .accessibility, .shortcut and .ime field reads and the native jet_ui_text_input lower. Remaining: the A3 primitive provider seam for the host services."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Ruling (Main) on the web host services: A3. Core source owns the UI host service logic (validation, queues, the binding registry, UIHostError meaning) over a primitive-only provider seam: capability flag, clipboard get/set text, event pop, dialog request/result. Web implements the seam with the browser; native implements it headless and reports the capability as absent. Rejected: A1, deleting the web JS provider, because it would drop shipped web clipboard, shortcut, IME/drag and file-dialog behaviour, which is a product change for the owner; and A2, keeping the logic in Ui.js with native record carriers, because hosts would re-encode policy, which violates I9. The node-slot half (UIAccessibility and UIShortcut records, field reads, native jet_ui_text_input) lands first and separately."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Core/Ui/Host owns every host-service rule over a marshal-only provider seam; native reports every capability absent with the same validation answers as web (tests/cases/web_build/ui_host_provider_answers_are_core_owned)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "ae8271e354 (CoreOwnership): ui_host_provider_answers_are_core_owned, with native and web .out reviewed by Main. Validation lines are identical across tiers, native reports CapabilityUnavailable, and Host.jet's provider leaves only marshal. Chain s2==s3 4633942b; golden ui/ 57/57 on o0/o1/o2.",
+          "at": "2026-11-06T08:17:06.056Z"
+        },
+        {
+          "n": 2,
+          "text": "The web runtime installs a default browser provider that forwards only raw browser primitives (keys, IME composition, drag/drop items, file dialogs, clipboard), with a DOM-stub cases row proving the forwarding",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "60adfbb42a and 0fc5677e4c (CoreOwnership); Main reviewed the Host.jet provider. It forwards only raw DOM event types, data, dropEffect and the text/plain and uri-list strings. Core maps phases (including an empty compositionend → Cancel), places the caret after the text in characters, parses uri-lists and maps effects. A 256-record host buffer holds an overflow marker that Core reports as QueueFull. The clipboard mirror reads paste, copy and cut, and never calls readText implicitly. Row: tests/cases/web_build/ui_default_browser_provider_forwards_raw_events, with a DOM stub, ␟ in the IME and drop data, and the dragleave row citing ballot item B3. Chain s2==s3 876a7e472cd9905a; web_build 24 PASS (2 FAILs that predate this, web_edge and web_two_hop); golden ui/ 57 PASS.",
+          "at": "2026-11-06T08:47:18.690Z"
+        },
+        {
+          "n": 3,
+          "text": "D-UI-DRAG-NONE1=A: a drag event carries operation: UIDragOperation?; a drop whose operation is none is delivered as Cancel; a case proves drop-with-none reports Cancel and a normal drop keeps its operation, on O0, O1 and O2.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "vb3 at dev 490142763c (chain FIXED_POINT s2==s3, jet 28a779f1d474bca1); results $JET_SCRATCH_ROOT/lanes/Main/vb3/kit: tests/cases/web_build/ui_drop_without_operation_is_cancel.case PASS; it builds and runs the page at --optimize=none, basic and full and compares each to the same .out (drop with none -> Cancel, normal drop keeps its operation)",
+          "at": "2026-11-06T16:35:48.396Z"
+        },
+        {
+          "n": 4,
+          "text": "D-UI-WEB-KEYS1=A: the web provider queues key events on provider queue 2 and shortcuts.poll reads them; shortcuts.register claims a key so the page prevents the browser default only for bound keys; a web case proves a bound key reaches poll with modifiers and an unbound key keeps its browser default.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "a5d77ac873; vb3 at dev 490142763c (chain FIXED_POINT s2==s3, jet 28a779f1d474bca1); results $JET_SCRATCH_ROOT/lanes/Main/vb3/kit: tests/cases/web_build/ui_shortcut_claimed_keys_reach_poll.case PASS and tests/ui/ui_shortcut_cmd_dynamic_key.jet PASS",
+          "at": "2026-11-06T16:35:49.289Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G3"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-06T06:28:56.205Z",
+      "updated": "2026-11-06T16:36:03.830Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-11-06T16:36:03.830Z",
+      "questions": [],
+      "retiredAt": "2026-11-09T16:45:07.199Z"
+    },
+    {
+      "id": "c0j5iuv5",
+      "num": 6608,
+      "title": "core.text fmt stops E3010 formatting a whole number with no exact Float (Fmt.jet:272 Float{abs_int(n)})",
+      "body": "Found by Builder5 (#6601, edc75a36a3). run-fmt-parity stops at case bytes-integer6: Core/Text/Fmt.jet:272 converts an integer through Float{abs_int(n)}, which hits Stop E3010 when the whole number has no exact Float (|n| > 2^53). Integer formatting must never round-trip through Float. The 34 cases before the stop match FmtParityExpected.out byte for byte; the other 338 can't be checked until this is fixed.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Integer formatting in core.text fmt never converts through Float: run-fmt-parity passes all 372 cases of FmtParityExpected.out, and a golden row formats ±(2^63−1), 2^53+1 and U64 max on every tier",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "vb3 at dev 490142763c (chain FIXED_POINT s2==s3, jet 28a779f1d474bca1); results $JET_SCRATCH_ROOT/lanes/Main/vb3/kit: golden tests/run/fmt_integer_tiers/integer_formatting_is_exact_beyond_float_on_every_tier.jet PASS at o0, o1 and o2; ddfe57e351 run-fmt-parity prepare 23 kernels / 372 cases, compare failures=0 stdout_equal=true",
+          "at": "2026-11-06T16:35:52.997Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G3"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-06T09:39:47.958Z",
+      "updated": "2026-11-06T16:35:56.292Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-11-06T16:35:56.292Z",
+      "questions": [],
+      "retiredAt": "2026-11-09T16:45:07.200Z"
     }
   ]
 }

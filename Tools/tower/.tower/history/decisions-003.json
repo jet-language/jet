@@ -14229,6 +14229,318 @@
       "comment": "Owner, in chat with Main, 2026-11-04: each pre-cutover row is re-proved on today's compiler and recorded VERIFIED with a commit, or reopened as a criterion on a live card.",
       "ratifiedAt": "2026-11-04",
       "retiredAt": "2026-11-08T21:10:33.655Z"
+    },
+    {
+      "id": "D-UI-DRAG-NONE1",
+      "cardId": "c0o3di45",
+      "group": "web-ui",
+      "title": "A drag that leaves with no action",
+      "situation": "",
+      "gist": "When a drag leaves a window without dropping, what action should Jet report?",
+      "lesson": "While you drag something over a window, the browser says what a drop would do: copy, move or link. When the drag leaves, it says none. Jet's drag event always holds one of three actions, so every web leave event is an error today. Whichever option wins, leave events must arrive without an error.",
+      "explainer": "",
+      "story": "Maya builds a web to-do list where people drag notes between columns. When a note leaves a column, she clears the column's highlight. Today her program gets an error on every leave, so highlights stick.",
+      "inWild": "list.addEventListener(\"dragleave\", (e) => {\n  // e.dataTransfer.dropEffect is \"none\" here\n  list.classList.remove(\"over\")\n})\n// https://developer.mozilla.org/en-US/docs/Web/API/DataTransfer/dropEffect",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Optional action",
+          "detail": "UIDragEvent.operation becomes UIDragOperation?. Enter and over carry the browser's action, or none when the target refuses the drop. Leave and cancel carry none. A drop always carries an action.",
+          "technical": "Core/Ui/Host/DragDrop.jet: drag_operation maps \"none\" to None. A drop record whose effect is none becomes phase Cancel, so Drop implies Val. The provider record format is unchanged. Native providers send the same five fields.",
+          "code": "if event.operation == .Val(op) -> show_hint(op)\nelse -> clear_highlight()"
+        },
+        {
+          "key": "B",
+          "name": "None case",
+          "detail": "UIDragOperation gains a None case. Every event carries an action value, and None means nothing would happen.",
+          "technical": "Core/Ui/Host/DragDrop.jet: the enum gains None; drag_operation maps \"none\" to .None. Exhaustive matches on UIDragOperation everywhere gain an arm.",
+          "code": "match event.operation {\n    .None -> clear_highlight()\n    .Copy | .Move | .Link -> show_hint(event.operation)\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "JavaScript",
+          "note": "The browser models dropEffect as a string that includes none. MDN: https://developer.mozilla.org/en-US/docs/Web/API/DataTransfer/dropEffect.",
+          "code": "e.dataTransfer.dropEffect // \"none\" | \"copy\" | \"link\" | \"move\""
+        },
+        {
+          "lang": "Rust (winit)",
+          "note": "winit reports a file hover as a separate event, and a cancelled hover as HoveredFileCancelled with no action. See https://docs.rs/winit/latest/winit/event/enum.WindowEvent.html.",
+          "code": "WindowEvent::HoveredFileCancelled => clear_highlight()"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Jet already spells \"may be missing\" with optional values. One spelling of nothing keeps the drag type honest, and drops keep a guaranteed action.",
+        "gains": [
+          "Leave events work on the web with no new enum case."
+        ],
+        "losses": [
+          {
+            "loss": "Code that reads the action on hover checks for none first.",
+            "mitigation": "Core guarantees drops carry an action; a browser drop with none becomes a Cancel event."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B adds a second way to say nothing and forces a None arm into every drop handler."
+          }
+        ],
+        "tradeoff": "Hover and leave code checks for a missing action; drop code never does."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "When a drag leaves a window without dropping, what action should Jet report?",
+        "lesson": "While you drag something over a window, the browser says what a drop would do: copy, move or link. When the drag leaves, it says none. Jet's drag event always holds one of three actions, so every web leave event is an error today. Whichever option wins, leave events must arrive without an error.",
+        "trio": {
+          "current": {
+            "note": "A web leave event fails with an error instead of arriving.",
+            "code": "event :: drag_drop.poll()?\n// leave on the web:\n// Err(HostFailure: unknown drag/drop operation `none`)"
+          },
+          "wild": {
+            "lang": "JavaScript",
+            "note": "The browser's dropEffect is none, copy, link or move. See https://developer.mozilla.org/en-US/docs/Web/API/DataTransfer/dropEffect.",
+            "code": "list.addEventListener(\"dragleave\", (e) => {\n  // e.dataTransfer.dropEffect is \"none\" here\n  list.classList.remove(\"over\")\n})"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Optional action",
+            "gist": "The action becomes optional; leave and cancel events carry no action.",
+            "gains": [
+              "The type says plainly that leaving has no action.",
+              "Copy, Move and Link stay exactly as they are.",
+              "A drop always carries a real action."
+            ],
+            "losses": [
+              "Code that reads the action on hover checks for none first."
+            ],
+            "proposed": {
+              "code": "// Before: operation: UIDragOperation\n// After: operation: UIDragOperation?\nif event.operation == .Val(op) -> show_hint(op)\nelse -> clear_highlight()"
+            }
+          },
+          {
+            "key": "B",
+            "name": "None case",
+            "gist": "Add a None case to the three actions.",
+            "gains": [
+              "Code reads the action without unwrapping it."
+            ],
+            "losses": [
+              "Every match on the action needs a None arm, even on drop.",
+              "A second way to say nothing, beside optional values."
+            ],
+            "proposed": {
+              "code": "// After: enum UIDragOperation { None, Copy, Move, Link }\nmatch event.operation {\n    .None -> clear_highlight()\n    .Copy | .Move | .Link -> show_hint(event.operation)\n}"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Jet already spells \"may be missing\" with optional values. One spelling of nothing keeps the drag type honest, and drops keep a guaranteed action.",
+          "gains": [
+            "Leave events work on the web with no new enum case."
+          ],
+          "losses": [
+            {
+              "loss": "Code that reads the action on hover checks for none first.",
+              "mitigation": "Core guarantees drops carry an action; a browser drop with none becomes a Cancel event."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B adds a second way to say nothing and forces a None arm into every drop handler."
+            }
+          ],
+          "tradeoff": "Hover and leave code checks for a missing action; drop code never does."
+        }
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-11-06T09:51:49.061Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-06",
+      "retiredAt": "2026-11-09T16:45:07.200Z"
+    },
+    {
+      "id": "D-UI-WEB-KEYS1",
+      "cardId": "c0o3di45",
+      "group": "web-ui",
+      "title": "Keyboard shortcuts in web pages",
+      "situation": "",
+      "gist": "How should a web page hand key presses to Jet's shortcut table?",
+      "lesson": "Jet keeps a table of shortcuts, such as Ctrl+S for save. A program registers a key and an action, and Core decides which key matches. A Jet web page never forwards key presses, so a registered shortcut never fires. Ctrl+S opens the browser's own save page instead. Whichever option wins, Core keeps deciding matches.",
+      "explainer": "",
+      "story": "Sam writes a small web notes app in Jet and binds Ctrl+S to save. On the desktop it saves. In the browser, Ctrl+S opens the browser's save page, and the app never hears the key.",
+      "inWild": "document.addEventListener(\"keydown\", (e) => {\n  if ((e.ctrlKey || e.metaKey) && e.key === \"s\") {\n    e.preventDefault(); save()\n  }\n})\n// https://developer.mozilla.org/en-US/docs/Web/API/Element/keydown_event",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Key queue",
+          "detail": "Registering a shortcut also tells the page which key to claim. The page blocks the browser's default for claimed keys only and queues each press. shortcuts.poll takes the next press, matches it in Core's table, and returns Dispatched or Unhandled.",
+          "technical": "Core/Ui/Host/Shortcuts.jet gains poll() over provider queue 2 (capability 4), the same provider record and overflow mark as ime.poll and drag_drop.poll. register() also calls one new raw host primitive that passes the normalized key and modifier bits to the provider. The default web provider (JetWeb Host.jet) listens for keydown, compares against claimed keys, calls preventDefault, and enqueues target, key and modifier bits. Desktop providers enqueue the same record.",
+          "code": "loop {\n    if shortcuts.poll()? == .Val(.Dispatched(hit)) -> run(hit.action)\n}"
+        },
+        {
+          "key": "B",
+          "name": "UI key events",
+          "detail": "Key presses arrive through core.ui as key events that now carry modifiers. The core.ui event loop asks the shortcut table before the program's own handler.",
+          "technical": "core.ui InputEvent.Key gains a modifiers field; DomRuntime.js forwards keydown into the node tree; the UI loop calls shortcuts.dispatch. Programs that use core.ui.host without core.ui nodes see no key source.",
+          "code": "if event == .Key(key) && shortcuts.dispatch(shortcut_of(key))? == .Dispatched(hit) {\n    run(hit.action)\n}"
+        },
+        {
+          "key": "C",
+          "name": "Desktop only",
+          "detail": "The web provider reports the Shortcuts capability as unavailable, so register and dispatch fail with CapabilityUnavailable on the web.",
+          "technical": "JetWeb Host.jet capability() returns false for code 4.",
+          "code": "shortcuts.register(save)?\n// web: Err(CapabilityUnavailable{capability: \"Shortcuts\"})"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "JavaScript",
+          "note": "Pages own shortcuts by listening for keydown and calling preventDefault. MDN: https://developer.mozilla.org/en-US/docs/Web/API/Element/keydown_event.",
+          "code": "document.addEventListener(\"keydown\", (e) => { if (e.ctrlKey && e.key === \"s\") e.preventDefault() })"
+        },
+        {
+          "lang": "Rust (egui)",
+          "note": "egui reads queued key events each frame and checks shortcuts against them. See https://docs.rs/egui/latest/egui/struct.InputState.html#method.consume_shortcut.",
+          "code": "if ctx.input_mut(|i| i.consume_shortcut(&SAVE)) { save() }"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Drag and drop and typing composition already arrive through page queues and poll. Keys joining the same path keeps one mechanism, and Core still owns every match.",
+        "gains": [
+          "Web shortcuts work with the same code as desktop."
+        ],
+        "losses": [
+          {
+            "loss": "A program that stops polling misses presses after the queue fills.",
+            "mitigation": "A full queue reports QueueFull on the next poll, like drag and drop, so nothing is lost silently."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B leaves host-only programs without shortcuts and changes a public event type."
+          },
+          {
+            "key": "C",
+            "reason": "C makes the same program behave differently on the web."
+          }
+        ],
+        "tradeoff": "Programs poll shortcuts like other host events; a stalled program learns it missed presses."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "How should a web page hand key presses to Jet's shortcut table?",
+        "lesson": "Jet keeps a table of shortcuts, such as Ctrl+S for save. A program registers a key and an action, and Core decides which key matches. A Jet web page never forwards key presses, so a registered shortcut never fires. Ctrl+S opens the browser's own save page instead. Whichever option wins, Core keeps deciding matches.",
+        "trio": {
+          "current": {
+            "note": "Registering works, but on the web no key ever reaches the table.",
+            "code": "save :: shortcuts.binding(UIShortcut.cmd(\"s\"), \"save\")?\nshortcuts.register(save)?\n// web: Ctrl+S opens the browser's save page"
+          },
+          "wild": {
+            "lang": "JavaScript",
+            "note": "A page listens for keydown and blocks the browser's default for keys it owns. See https://developer.mozilla.org/en-US/docs/Web/API/Element/keydown_event.",
+            "code": "document.addEventListener(\"keydown\", (e) => {\n  if ((e.ctrlKey || e.metaKey) && e.key === \"s\") {\n    e.preventDefault(); save()\n  }\n})"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Key queue",
+            "gist": "The page queues presses of registered keys; shortcuts.poll returns the next match.",
+            "gains": [
+              "Same queue-and-poll shape as drag and drop and typing composition.",
+              "The browser default is blocked only for keys the program registered.",
+              "Core still decides every match."
+            ],
+            "losses": [
+              "A program that stops polling misses presses after the queue fills."
+            ],
+            "proposed": {
+              "code": "// After\nloop {\n    if shortcuts.poll()? == .Val(.Dispatched(hit)) -> run(hit.action)\n}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "UI key events",
+            "gist": "Key presses arrive as core.ui key events with modifiers; the UI loop matches them.",
+            "gains": [
+              "Shortcut handling joins the node tree's other events."
+            ],
+            "losses": [
+              "Programs that use the host services without the node tree get no shortcuts.",
+              "The public key event type gains modifier fields."
+            ],
+            "proposed": {
+              "code": "// After: InputEvent.Key{code, modifiers}\nif event == .Key(key) && shortcuts.dispatch(shortcut_of(key))? == .Dispatched(hit) {\n    run(hit.action)\n}"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Desktop only",
+            "gist": "Web pages report shortcuts as unavailable.",
+            "gains": [
+              "No new page code."
+            ],
+            "losses": [
+              "Web programs cannot have keyboard shortcuts.",
+              "The same program behaves differently on desktop and web."
+            ],
+            "proposed": {
+              "code": "// After\nshortcuts.register(save)?\n// web: Err(CapabilityUnavailable{capability: \"Shortcuts\"})"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Drag and drop and typing composition already arrive through page queues and poll. Keys joining the same path keeps one mechanism, and Core still owns every match.",
+          "gains": [
+            "Web shortcuts work with the same code as desktop."
+          ],
+          "losses": [
+            {
+              "loss": "A program that stops polling misses presses after the queue fills.",
+              "mitigation": "A full queue reports QueueFull on the next poll, like drag and drop, so nothing is lost silently."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B leaves host-only programs without shortcuts and changes a public event type."
+            },
+            {
+              "key": "C",
+              "reason": "C makes the same program behave differently on the web."
+            }
+          ],
+          "tradeoff": "Programs poll shortcuts like other host events; a stalled program learns it missed presses."
+        }
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-11-06T09:52:27.293Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-06",
+      "retiredAt": "2026-11-09T16:45:07.200Z"
     }
   ]
 }
