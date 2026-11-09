@@ -2992,8 +2992,10 @@ ir_list_length: fn(m: &IRModule, b: &IRBuilder, list: Int) -> Int Never! {
     ir_load_word(m, b, list, 0)
 }
 
-// An open walk over a list: its native index and the element at it.
-IRWalk: struct { index: Int, item: Int }
+// An open walk over a list: its native index and the element at it. A walk
+// over an Iter (ir_pull_open) also has the block its item was pulled into:
+// an Option box, or the runtime's 8-byte block for an inline Option.
+IRWalk: struct { index: Int, item: Int, pulled: Int{-1}, inline: Bool{false} }
 
 // Opens a loop over the elements of the list at `list` in order;
 // ir_walk_close advances and closes it.
@@ -3012,11 +3014,25 @@ ir_walk_open: fn(m: &IRModule, b: &IRBuilder, list: Int, row: Int) -> IRWalk Nev
 }
 
 ir_walk_close: fn(m: &IRModule, b: &IRBuilder, walk: IRWalk) Never! {
+    ir_walk_leave(m, b, walk)
     one: ir_word_const(m, b, 1)
     ir_emit(b.f, IROp.Add, walk.index, walk.index, one, IR_OVERFLOW_WRAP, b.line)
     ir_emit(b.f, IROp.Br, -1, 0, -1, -1, b.line)
     ir_end(b.f, b.line)
     ir_end(b.f, b.line)
+}
+
+// Ends the item an Iter walk pulled: at each step's close, and before a
+// break out of the walk. A List walk lends its elements, so nothing ends.
+ir_walk_leave: fn(m: &IRModule, b: &IRBuilder, walk: IRWalk) Never! {
+    if walk.pulled < 0 -> return
+    if !walk.inline {
+        if ir_has_drop(m, b, walk.pulled) -> ir_emit(b.f, IROp.Drop, -1, walk.pulled, -1, -1, b.line)
+        return
+    }
+    if walk.item >= 0 && ir_has_drop(m, b, walk.item) -> ir_emit(b.f, IROp.Drop, -1, walk.item, -1, -1, b.line)
+    eight: ir_word_const(m, b, 8)
+    ir_free(m, b, walk.pulled, eight)
 }
 
 // Opens a loop over the elements of the list at `list` from the last to the

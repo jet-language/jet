@@ -849,13 +849,8 @@ ir_builtin: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: In
     subject: if mutates -> ir_write_base(m, p, b, receiver, span) else -> ir_expr(m, p, b, receiver)
     if ir_failed(b) -> return -1
     if subject < 0 -> return ir_fail_slot(b, span, "builtin {ir_builtin_name(operation)} on a Unit receiver")
-    // An Iter's items are numbered drained into a List, as
-    // `iter.to_list().indexed()` numbers them (ir_list_indexed).
-    if operation == .Indexed && ir_iter_element(receiver_ty) != None {
-        drained: ir_iter_drain(m, p, b, subject, span)
-        if ir_failed(b) || drained < 0 -> return -1
-        return ir_builtin_on(m, p, b, ty, receiver_ty, operation, drained, mutates, args, span)
-    }
+    // An Iter's items are numbered as they are pulled (ir_lazy_indexed).
+    if operation == .Indexed && ir_iter_element(receiver_ty) != None -> return ir_lazy_indexed(m, p, b, ty, subject, span)
     // An inline `[T#N]` receiver: its length is N; any other operation goes
     // through a List copy of it, whose elements a write puts back.
     if ir_fixed_count(m, b.f.slot_type[subject]) == .Val(count) {
@@ -1950,30 +1945,28 @@ ir_closure_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, recei
     receiver_ty: ir_ty(p, b, receiver)
     if operation == .OptionMap -> return ir_option_map(m, p, b, ty, receiver, args, span)
     if ir_lazy_closure_receiver(receiver_ty, operation) -> return ir_lazy_closure_method(m, p, b, ty, receiver, operation, args, span)
-    // An Iter whose method has no Iter route runs it over its items drained
-    // into a List (ir_iter_drains).
-    drains: ir_iter_drains(receiver_ty, operation)
-    // A drained Iter is drained once: a fold that is not a Float sum goes on
-    // over the List the fold check drained.
-    drained := -1
+    // An Iter whose method has no Iter route runs the List method over its
+    // items as they are pulled (ir_iter_walks).
+    walks: ir_iter_walks(receiver_ty, operation)
     if operation == .EachMap || operation == .MapAny || operation == .MapAll || operation == .MapFilter || operation == .MapMap || operation == .MapFold || operation == .BagAny -> return ir_closure_map_method(m, p, b, ty, receiver, operation, args, span)
     // A Float fold whose step is exactly `(acc, x) -> acc + x` adds in the
     // same fixed lane tree as `sum`, with the seed in lane 0.
     if (operation == .Fold || operation == .ViewFold) && args.len() == 2 && ir_float_add_fold_step(p, b, args[1]) {
-        lent := ir_expr(m, p, b, receiver)
-        if drains -> lent = ir_iter_drain(m, p, b, lent, span)
+        lent: ir_expr(m, p, b, receiver)
         if ir_failed(b) || lent < 0 -> return -1
-        folded: ir_list_operand(m, p, b, lent, span)
-        folded_element: ir_list_element(m, p, b, folded) ?? return ir_fail_slot(b, span, "closure method fold on {ir_type_name(receiver_ty)}")
+        folded: if walks -> lent else -> ir_list_operand(m, p, b, lent, span)
+        folded_element: ir_items_element(m, p, b, folded) ?? return ir_fail_slot(b, span, "closure method fold on {ir_type_name(receiver_ty)}")
         if m.types[folded_element].kind == .Float {
             seed: ir_expr(m, p, b, args[0])
             if ir_failed(b) || seed < 0 -> return -1
-            sum: ir_list_sum_fixed(m, b, folded, folded_element, seed, span)
+            sum: ir_list_sum_fixed(m, p, b, folded, folded_element, seed, span)
             if folded != lent -> ir_release(m, b, folded)
+            // A pulled Iter is spent.
+            if walks -> ir_release(m, b, lent)
             return sum
         }
         if folded != lent -> ir_release(m, b, folded)
-        if drains -> drained = lent
+        if walks -> return ir_closure_walk_method(m, p, b, ty, lent, folded_element, operation, args, span)
     }
     // The in-place methods write the List's own buffer, reached as a write
     // place (ir_builtin's receiver).
@@ -1981,11 +1974,13 @@ ir_closure_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, recei
         .UpdateFirst | .SortBy | .SortByDesc | .TrySortBy | .TrySortByDesc | .SortByCompare | .MapMut | .EditDisjoint | .DedupBy -> true
         else -> false
     }
-    place := drained
-    if place < 0 {
-        place = if in_place && !drains -> ir_write_base(m, p, b, receiver, span) else -> ir_expr(m, p, b, receiver)
-        if drains -> place = ir_iter_drain(m, p, b, place, span)
+    if walks {
+        source: ir_expr(m, p, b, receiver)
+        if ir_failed(b) || source < 0 -> return -1
+        item: ir_items_element(m, p, b, source) ?? return ir_fail_slot(b, span, "closure method {ir_closure_op_name(operation)} on {ir_type_name(receiver_ty)}")
+        return ir_closure_walk_method(m, p, b, ty, source, item, operation, args, span)
     }
+    place: if in_place -> ir_write_base(m, p, b, receiver, span) else -> ir_expr(m, p, b, receiver)
     if ir_failed(b) || place < 0 -> return -1
     // An inline `[T#N]` is lent as a List copy, whose elements an in-place
     // method puts back.
@@ -2011,6 +2006,29 @@ ir_closure_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, recei
         }
     }
     result
+}
+
+// The List closure method `operation` over the items of the Iter `source`
+// (items of row `item`) as they are pulled (ir_pull_open). A fresh Iter is
+// dropped afterwards; a held one stays its owner's.
+ir_closure_walk_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, source: Int, item: Int, operation: TClosureOp, args: [Int], span: Span) -> Int Never! {
+    operands := [Int]{}
+    loop arg in args {
+        slot: ir_expr(m, p, b, arg)
+        if ir_failed(b) -> return -1
+        operands.push(slot)
+    }
+    if operands.len() == 0 -> return ir_fail_slot(b, span, "closure method without a closure")
+    result: ir_closure_list_method(m, p, b, ty, source, item, operation, operands, args, span)
+    loop slot in operands -> ir_release_closure(m, b, slot)
+    ir_release(m, b, source)
+    result
+}
+
+// The row of the items of `source`: a List's elements, or an Iter's items.
+ir_items_element: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, source: Int) -> Int? Never! {
+    if ir_iter_element(ir_lazy_slot_type(m, b, source)) == .Val(item) -> return ir_value_type(m, p, item)
+    ir_list_element(m, p, b, source)
 }
 
 // Whether `callback` is the literal step `(acc, x) -> acc + x`: two
@@ -2128,7 +2146,7 @@ ir_closure_list_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, 
         // each(f) whose step is FnMut (EachMut) walks the same way; only
         // the closure's captures are written.
         .Each | .EachMut -> {
-            walk: ir_walk_open(m, b, list, element)
+            walk: ir_items_open(m, p, b, list, element, span)
             _: ir_call_callback(m, p, b, callback, callback_ty, [Int]{walk.item}, -1, span)
             ir_walk_close(m, b, walk)
             return -1
@@ -2172,7 +2190,7 @@ ir_closure_list_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, 
             true_list: ir_address_at(m, b, result, true_offset)
             ir_para_list_clear(m, b, false_list)
             ir_para_list_clear(m, b, true_list)
-            walk: ir_walk_open(m, b, list, element)
+            walk: ir_items_open(m, p, b, list, element, span)
             keep: ir_call_callback(m, p, b, callback, callback_ty, [Int]{walk.item}, bool_row, span)
             ir_open_if(b.f, keep, b.line)
             ir_list_push(m, p, b, true_list, element, walk.item)
@@ -2241,7 +2259,7 @@ ir_closure_list_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, 
             // moved out of its holder, since each step ends the value before.
             seed: if ir_kind_of(m, b, initial) == .Aggregate && !b.fresh[initial] -> ir_copy_value(m, p, b, initial, span) else -> initial
             ir_store(m, p, b, accumulator, seed)
-            walk: ir_walk_open(m, b, list, element)
+            walk: ir_items_open(m, p, b, list, element, span)
             next_value: ir_call_callback(m, p, b, callback, callback_ty, [Int]{accumulator, walk.item}, result_row, span)
             // The step's value replaces the accumulator's, whose old value
             // ends; an aggregate's bytes move into the accumulator's own
@@ -2292,12 +2310,14 @@ ir_closure_list_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, 
         .Find -> {
             result: ir_fresh_temp(m, b, result_row)
             ir_option_none(m, b, result)
-            walk: ir_walk_open(m, b, list, element)
+            walk: ir_items_open(m, p, b, list, element, span)
             test: ir_call_callback(m, p, b, callback, callback_ty, [Int]{walk.item}, bool_row, span)
             ir_open_if(b.f, test, b.line)
             size: m.types[element].size
             made: ir_option_make(m, p, b, result_row, walk.item, size)
             ir_option_set(m, b, result, made)
+            // A pulled item ends before the break: no later item is pulled.
+            ir_walk_leave(m, b, walk)
             ir_emit(b.f, IROp.Br, -1, 2, -1, -1, b.line)
             ir_end(b.f, b.line)
             ir_walk_close(m, b, walk)
@@ -2370,7 +2390,7 @@ ir_closure_group_by: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, result_row: I
     word_row: ir_word_row(m)
     result: ir_list_empty(m, b, result_row)
     zero: ir_word_const(m, b, 0)
-    walk: ir_walk_open(m, b, list, element)
+    walk: ir_items_open(m, p, b, list, element, span)
     key: ir_call_closure(m, b, callback, [Int]{walk.item}, shape.key.ty)
     found: ir_map_call(m, p, b, result_row, "map.find", [Int]{result, key}, word_row)
     index: ir_temp(m, b, word_row)
@@ -2395,16 +2415,17 @@ ir_closure_group_by: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, result_row: I
     result
 }
 
-// `xs.count_by(key)`: how many elements map to each key, the Map keeping its
+// `xs.count_by(key)`: how many items map to each key, the Map keeping its
 // keys ascending. A count never leaves the inline Int range (it is at most
-// the List's length), so it is bumped as a word in the entry's value cell.
+// the number of items walked), so it is bumped as a word in the entry's value
+// cell.
 ir_closure_count_by: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, result_row: Int, list: Int, element: Int, callback: Int, span: Span) -> Int Never! {
     shape: ir_map_shape(m, p, result_row) ?? return ir_fail_slot(b, span, "count_by into {ir_type_name(m.types[result_row].ty)}")
     if ir_untag(m.types[shape.value.ty].ty) != Type.Int -> return ir_fail_slot(b, span, "count_by into {ir_type_name(m.types[result_row].ty)}")
     word_row: ir_word_row(m)
     result: ir_list_empty(m, b, result_row)
     zero: ir_word_const(m, b, 0)
-    walk: ir_walk_open(m, b, list, element)
+    walk: ir_items_open(m, p, b, list, element, span)
     key: ir_call_closure(m, b, callback, [Int]{walk.item}, shape.key.ty)
     found: ir_map_call(m, p, b, result_row, "map.find", [Int]{result, key}, word_row)
     index: ir_temp(m, b, word_row)
@@ -2683,7 +2704,8 @@ ir_free: fn(m: &IRModule, b: &IRBuilder, address: Int, bytes: Int) Never! {
 // `xs.min_by(key)` / `xs.max_by(key)`: each key computed once, in order; a
 // tie replaces the best so far (max keeps the best only while key < best, min
 // only while best < key). The result is an Option box holding a copy of the
-// chosen element.
+// chosen element. An Iter's pulled item ends at its step, so the copy of each
+// new best is taken at once and the previous one ends.
 ir_closure_extreme_by: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, result_row: Int, list: Int, element: Int, callback: Int, closure_ty: Type, maximum: Bool, span: Span) -> Int Never! {
     key_ty: ir_closure_result(closure_ty) ?? return ir_fail_slot(b, span, "min_by/max_by key closure without a result type")
     key_row: ir_value_type(m, p, key_ty) ?? return ir_type_fail(b, span, key_ty)
@@ -2701,7 +2723,10 @@ ir_closure_extreme_by: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, result_row:
     } else {
         ir_emit(b.f, IROp.Const, best_key, 0, -1, -1, b.line)
     }
-    walk: ir_walk_open(m, b, list, element)
+    pulled: ir_iter_element(ir_lazy_slot_type(m, b, list)) != None
+    result: ir_fresh_temp(m, b, result_row)
+    ir_option_none(m, b, result)
+    walk: ir_items_open(m, p, b, list, element, span)
     key: ir_call_closure(m, b, callback, [Int]{walk.item}, key_row)
     b.fresh[key] = false
     bool_row: ir_type_row(m, Type.Bool) ?? 0
@@ -2719,6 +2744,16 @@ ir_closure_extreme_by: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, result_row:
         ir_emit(b.f, IROp.Drop, -1, best_key, -1, -1, b.line)
         ir_end(b.f, b.line)
     }
+    if pulled {
+        if ir_has_drop(m, b, result) {
+            replaced: ir_bool_op(m, b, IROp.Ge, best_at, zero)
+            ir_open_if(b.f, replaced, b.line)
+            ir_emit(b.f, IROp.Drop, -1, result, -1, -1, b.line)
+            ir_end(b.f, b.line)
+        }
+        best: ir_element_option(m, p, b, walk.pulled, element, result_row, false)
+        ir_option_set(m, b, result, best)
+    }
     ir_emit(b.f, IROp.Copy, best_at, walk.index, -1, -1, b.line)
     if aggregate_key {
         ir_emit(b.f, IROp.CopyBytes, -1, best_key, key, m.types[key_row].size, b.line)
@@ -2731,8 +2766,15 @@ ir_closure_extreme_by: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, result_row:
     }
     ir_end(b.f, b.line)
     ir_walk_close(m, b, walk)
-    result: ir_fresh_temp(m, b, result_row)
-    ir_option_none(m, b, result)
+    if pulled {
+        if key_drops {
+            kept: ir_bool_op(m, b, IROp.Ge, best_at, zero)
+            ir_open_if(b.f, kept, b.line)
+            ir_emit(b.f, IROp.Drop, -1, best_key, -1, -1, b.line)
+            ir_end(b.f, b.line)
+        }
+        return result
+    }
     chosen: ir_bool_op(m, b, IROp.Ge, best_at, zero)
     ir_open_if(b.f, chosen, b.line)
     if key_drops -> ir_emit(b.f, IROp.Drop, -1, best_key, -1, -1, b.line)
@@ -3140,7 +3182,7 @@ ir_closure_try_each: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, lis
     shell_bytes: ir_result_box_bytes(m, p, ret)
     shell: ir_word_const(m, b, shell_bytes)
     zero: ir_word_const(m, b, 0)
-    walk: ir_walk_open(m, b, list, element)
+    walk: ir_items_open(m, p, b, list, element, span)
     called: ir_call_closure(m, b, callback, [Int]{walk.item}, ret_row)
     b.fresh[called] = false
     selector: ir_load_word(m, b, called, 0)
@@ -3151,6 +3193,7 @@ ir_closure_try_each: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, lis
     failure: ir_result_box(m, p, b, ty, false, error)
     ir_emit(b.f, IROp.Copy, result, failure, -1, -1, b.line)
     ir_free(m, b, called, shell)
+    ir_walk_leave(m, b, walk)
     ir_emit(b.f, IROp.Br, -1, 2, -1, -1, b.line)
     ir_end(b.f, b.line)
     // An Ok payload the walk discards ends with its shell.
@@ -3607,7 +3650,7 @@ ir_list_route: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, name: String, input
         ir_walk_close(m, b, walk)
         return total
     }
-    if name == "jet_list_sum_fixed_f64" -> return ir_list_sum_fixed(m, b, list, row, -1, span)
+    if name == "jet_list_sum_fixed_f64" -> return ir_list_sum_fixed(m, p, b, list, row, -1, span)
     if name == "jet_list_equal" {
         other: inputs[1]
         other_ty: m.types[b.f.slot_type[other]].ty
@@ -3806,11 +3849,11 @@ ir_list_random: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, row: In
     found
 }
 
-// A Float `xs.sum()` (and a Float fold with step `acc + x`): the
-// fixed tree. Item i adds into lane i & 7 in source order, a fold's `seed`
-// starts lane 0 (-1 for none), and the lanes combine as
-// ((l0+l1)+(l2+l3))+((l4+l5)+(l6+l7)).
-ir_list_sum_fixed: fn(m: &IRModule, b: &IRBuilder, list: Int, row: Int, seed: Int, span: Span) -> Int Never! {
+// A Float `xs.sum()` (and a Float fold with step `acc + x`, over a List or
+// an Iter's pulled items): the fixed tree. Item i adds into lane i & 7 in
+// source order, a fold's `seed` starts lane 0 (-1 for none), and the lanes
+// combine as ((l0+l1)+(l2+l3))+((l4+l5)+(l6+l7)).
+ir_list_sum_fixed: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, row: Int, seed: Int, span: Span) -> Int Never! {
     if m.types[row].kind != .Float -> return ir_fail_slot(b, span, "fixed Float sum of {ir_type_name(m.types[row].ty)}")
     // The lanes' frame address is a word: each lane's address adds to it.
     word_row: ir_word_row(m)
@@ -3821,7 +3864,7 @@ ir_list_sum_fixed: fn(m: &IRModule, b: &IRBuilder, list: Int, row: Int, seed: In
     loop lane in 0..<8 -> ir_emit(b.f, IROp.Store, -1, lanes, lane * 8, zero, b.line)
     if seed >= 0 -> ir_emit(b.f, IROp.Store, -1, lanes, 0, seed, b.line)
     seven: ir_word_const(m, b, 7)
-    walk: ir_walk_open(m, b, list, row)
+    walk: ir_items_open(m, p, b, list, row, span)
     lane: ir_word_op(m, b, IROp.BitAnd, walk.index, seven)
     slot: ir_element_address(m, b, lanes, lane, 8)
     total: ir_load_at(m, b, slot, 0, row)

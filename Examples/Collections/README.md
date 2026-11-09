@@ -45,5 +45,6 @@ Run a lesson from the repository root, for example `jet run Examples/Collections
 - [IterAdapters](Iterators/IterAdapters.jet) — Concrete collection map/filter are eager and return plain collections.
 - [IterHook](Iterators/IterHook.jet)
 - [IterResume](Iterators/IterResume.jet) — `next` pulls one item from the same source and leaves the exact remainder.
+- [IterStreams](Iterators/IterStreams.jet) — Every Sequence method takes an Iter too, and runs as the items are pulled: nothing is collected first, and `find` stops pulling at its answer.
 - [IterToolsAudit](Iterators/IterToolsAudit.jet) — Collection breadth and iterator adapter audit.
 - [ZipFamily](Iterators/ZipFamily.jet)
