@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 98225,
+    "rev": 98246,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -194328,9 +194328,411 @@
       ],
       "status": "open",
       "created": "2026-11-09T23:07:15.741Z"
+    },
+    {
+      "id": "b0x8qcqe",
+      "text": "Language review 7.2: Domain: Back-end services",
+      "note": "What decides adoption: Safe dependencies; database; deploys.\nJet's asset today: Effects and grants; tasks; HTTP, TLS and SQL written in Jet.\nClose first: Queries checked while building (8.7); tracing from effects with no code (8.5); least-privilege dependencies (8.8).",
+      "level": null,
+      "tags": [
+        "language-review"
+      ],
+      "status": "open",
+      "created": "2026-11-09T23:07:17.811Z"
+    },
+    {
+      "id": "b0ka099v",
+      "text": "Language review 7.3: Domain: Web front end",
+      "note": "What decides adoption: Small downloads; fast edit-and-see loop.\nJet's asset today: Web, Reactive and Ui modules; `jet dev`.\nClose first: CSS and HTML as checked text (3.6).",
+      "level": null,
+      "tags": [
+        "language-review"
+      ],
+      "status": "open",
+      "created": "2026-11-09T23:07:19.204Z"
+    },
+    {
+      "id": "b08au598",
+      "text": "Language review 7.4: Domain: Games",
+      "note": "What decides adoption: Globals; Floats; frame memory; hot reload.\nJet's asset today: Value semantics; `Pool` and `ID`; `#Persist`.\nClose first: Plain module variables (O1); adapting numbers (4.1); arena blocks (approved); layout markers (8.9); `#System` lists from marker queries (3.2).",
+      "level": null,
+      "tags": [
+        "language-review"
+      ],
+      "status": "open",
+      "created": "2026-11-09T23:07:20.656Z"
+    },
+    {
+      "id": "b0yhzzq3",
+      "text": "Language review 7.5: Domain: Data, numeric, machine learning",
+      "note": "What decides adoption: Works from a notebook; arrays; accelerators.\nJet's asset today: Units, Data and Compute modules.\nClose first: Called from Python with no copies (6.2, 6.5); shapes in types and kernels (8.2, 8.11).",
+      "level": null,
+      "tags": [
+        "language-review"
+      ],
+      "status": "open",
+      "created": "2026-11-09T23:07:22.240Z"
+    },
+    {
+      "id": "b0m06sie",
+      "text": "Language review 7.6: Domain: Systems and embedded",
+      "note": "What decides adoption: No runtime surprises; small; auditable.\nJet's asset today: No C underneath; `#Unsafe` with reasons; \"no allocation\" and \"no panic\" promises.\nClose first: Targets declared by libraries (ballot being drafted); the report of remaining run-time checks (8.5).",
+      "level": null,
+      "tags": [
+        "language-review"
+      ],
+      "status": "open",
+      "created": "2026-11-09T23:07:23.662Z"
+    },
+    {
+      "id": "b0h5vk5y",
+      "text": "Language review 7.7: Domain: Desktop and mobile apps",
+      "note": "What decides adoption: One code base; looks right; accessible.\nJet's asset today: The single UI framework direction.\nClose first: Not examined.",
+      "level": null,
+      "tags": [
+        "language-review"
+      ],
+      "status": "open",
+      "created": "2026-11-09T23:07:25.546Z"
+    },
+    {
+      "id": "b04m2ss9",
+      "text": "Language review 7.8: Domain: Operations and infrastructure",
+      "note": "What decides adoption: One static binary; safer than shell.\nJet's asset today: No C; permission-scoped scripts.\nClose first: `jet eval`; process and pipe ergonomics (not examined).",
+      "level": null,
+      "tags": [
+        "language-review"
+      ],
+      "status": "open",
+      "created": "2026-11-09T23:07:26.963Z"
+    },
+    {
+      "id": "b0zq0w7k",
+      "text": "Language review 7.9: Domain: Teaching",
+      "note": "What decides adoption: Install in one step; errors that teach.\nJet's asset today: Diagnostics with a fix on every error.\nClose first: One downloadable binary instead of Nix.",
+      "level": null,
+      "tags": [
+        "language-review"
+      ],
+      "status": "open",
+      "created": "2026-11-09T23:07:28.845Z"
+    },
+    {
+      "id": "b0u3rnj7",
+      "text": "Language review 8.1 [near] (proposal): Breaking changes that fix themselves",
+      "note": "Item 5.4. First, because it pays for everything else.",
+      "level": null,
+      "tags": [
+        "language-review",
+        "near",
+        "proposal"
+      ],
+      "status": "open",
+      "created": "2026-11-09T23:07:30.682Z"
+    },
+    {
+      "id": "b0k7j3wc",
+      "text": "Language review 8.2 [near-then-far] (proposal): \"Where can this run?\" as a fact the compiler infers",
+      "note": "This is the Mojo question, answered\nJet's way. The compiler already knows whether a function is pure, whether it allocates, whether it can panic and\nwhich target facts it reads. A function that is pure, allocation-free and bounded can run on any device: SIMD\nlanes, many cores, a GPU, an accelerator that does not exist yet. So eligibility is inferred, like effects, and\nnever annotated: no shader dialect, no second language for kernels. A target is a library-declared type that\nstates what it can run; `jet explain` says why a function is or is not eligible for it. A new chip becomes a\npackage. Near: the eligibility fact and CPU SIMD and multi-core. Far: GPU and accelerator back ends.",
+      "level": null,
+      "tags": [
+        "language-review",
+        "near-then-far",
+        "proposal"
+      ],
+      "status": "open",
+      "created": "2026-11-09T23:07:32.260Z"
+    },
+    {
+      "id": "b09lqmfg",
+      "text": "Language review 8.3 [near-then-far] (proposal): Record and replay, and simulated worlds, from the effect boundary",
+      "note": "Every touch of the\noutside world goes through thirteen effect roots. So the runtime can record every result that came in (`jet run\n--record`) and replay the run exactly: a bug report ships its recording, and a recording becomes a test. The\nsame boundary can be handed a simulated world: a fake clock, a network that drops packets, a disk that fails on\nthe ninth write. That is the testing method behind the most reliable databases, available to every Jet program\nwith no test doubles written. Near: single-task record and replay. Far: deterministic task scheduling.",
+      "level": null,
+      "tags": [
+        "language-review",
+        "near-then-far",
+        "proposal"
+      ],
+      "status": "open",
+      "created": "2026-11-09T23:07:33.796Z"
+    },
+    {
+      "id": "b0vh67n0",
+      "text": "Language review 8.4 [near] (proposal): A public surface the compiler guards, and versions it computes",
+      "note": "Item 5.2. Others do this for types.\nJet can include effects and errors, so \"this update started using the network\" is a version change the tool\nsees.",
+      "level": null,
+      "tags": [
+        "language-review",
+        "near",
+        "proposal"
+      ],
+      "status": "open",
+      "created": "2026-11-09T23:07:35.118Z"
+    },
+    {
+      "id": "b0ftfj69",
+      "text": "Language review 8.5 [near] (proposal): The glass box",
+      "note": "The compiler knows every run-time check it could not remove (bounds, ranges,\noverflow), every copy, every allocation and every outside-world call. Show them per line through `jet explain`,\nand let a region demand none: \"no check remains here\" joins the existing \"no allocation\" and \"no panic\"\npromises. The same knowledge gives tracing for free: a span around every effect call, with no code written.",
+      "level": null,
+      "tags": [
+        "language-review",
+        "near",
+        "proposal"
+      ],
+      "status": "open",
+      "created": "2026-11-09T23:07:36.348Z"
+    },
+    {
+      "id": "b06vmzor",
+      "text": "Language review 8.6 [far] (proposal): One evolution mechanism for data on disk, on the wire and in memory",
+      "note": "Jet has typed migrations for\nschemas and `#Persist` for hot reload. They are the same idea: a type's history is part of the type. Unified,\none declared migration moves data on disk, messages from an older peer and live state across a code reload;\nlater, a new version of a running service can take over the old one's state with no downtime.",
+      "level": null,
+      "tags": [
+        "language-review",
+        "far",
+        "proposal"
+      ],
+      "status": "open",
+      "created": "2026-11-09T23:07:37.984Z"
+    },
+    {
+      "id": "b001twi9",
+      "text": "Language review 8.7 [near-then-far] (proposal): The database as typed collections",
+      "note": "Jet now has a SQL engine written in Jet. So a table can be\na typed collection, a query an ordinary Jet expression checked against the schema while building, and the\nschema's history the migrations of 8.6. No mapping layer and no query strings.",
+      "level": null,
+      "tags": [
+        "language-review",
+        "near-then-far",
+        "proposal"
+      ],
+      "status": "open",
+      "created": "2026-11-09T23:07:39.748Z"
+    },
+    {
+      "id": "b0vyv648",
+      "text": "Language review 8.8 [near] (proposal): Least privilege for dependencies and for AI-written code",
+      "note": "\"This package may read\n`./templates` and reach `api.example.com`, and nothing else\", checked while building. The same mechanism runs\ncode an AI agent wrote with a hard ceiling and no sandbox process. In an era of generated code, a language whose\npermissions are part of the type system is the safe place to run it.",
+      "level": null,
+      "tags": [
+        "language-review",
+        "near",
+        "proposal"
+      ],
+      "status": "open",
+      "created": "2026-11-09T23:07:41.678Z"
+    },
+    {
+      "id": "b0rdgb4i",
+      "text": "Language review 8.9 [near-then-far] (proposal): Layout as a marker",
+      "note": "`#Layout(.SoA)` on a list of structs: you write ordinary struct code and\nthe storage is columns. Games and data code both want it; other languages bolt it on or drop it. It would also\nbe the proof that library markers (3.2) are powerful enough, because it should be a library.",
+      "level": null,
+      "tags": [
+        "language-review",
+        "near-then-far",
+        "proposal"
+      ],
+      "status": "open",
+      "created": "2026-11-09T23:07:43.577Z"
+    },
+    {
+      "id": "b0e4p7gz",
+      "text": "Language review 8.10 [near] (proposal): The program as a database you can query",
+      "note": "\"Which functions touch this state?\", \"what can fail\nhere, and where does each error come from?\", \"what changed in meaning between these two commits?\". With `#info`\nas one record this is a small step, and it gives merges and code review that work on declarations, not on\nlines.",
+      "level": null,
+      "tags": [
+        "language-review",
+        "near",
+        "proposal"
+      ],
+      "status": "open",
+      "created": "2026-11-09T23:07:44.953Z"
+    },
+    {
+      "id": "b02o4rw4",
+      "text": "Language review 8.11 [far] (proposal): Shapes in types, and derivatives as a library",
+      "note": "Arrays whose dimensions are build-time parameters,\nso a shape mismatch is a compile error; automatic differentiation generated from `#info`, not built into the\ncompiler. Together with 8.2 this is the machine-learning story without a second language.",
+      "level": null,
+      "tags": [
+        "language-review",
+        "far",
+        "proposal"
+      ],
+      "status": "open",
+      "created": "2026-11-09T23:07:46.437Z"
+    },
+    {
+      "id": "b0thyoho",
+      "text": "Language review 8.12 [far] (proposal): Tasks that can move",
+      "note": "A task whose captured values are sendable and encodable could run in another\nprocess or on another machine, and its effects say what that place must allow. The rules that make tasks safe\ntoday are most of what is needed.",
+      "level": null,
+      "tags": [
+        "language-review",
+        "far",
+        "proposal"
+      ],
+      "status": "open",
+      "created": "2026-11-09T23:07:48.059Z"
+    },
+    {
+      "id": "b0oksxpl",
+      "text": "Language review 9: The order I would build in",
+      "note": "1. Migrations in `jet fix` (5.4), because every item below rewrites code.\n2. The `#` rework with markers as types (section 3), then literal hooks (3.6).\n3. Adapting numbers (4.1) and the plain module variable (O1): the two biggest everyday frictions I found.\n4. `jet build --lib` with the Python wheel (6.2): the adoption wedge.\n5. The guarded public surface (5.2) and the Core layering rules (5.1).\n6. Record and replay (8.3) and the glass box (8.5): the two trailblazing items that are near and that nobody\n   else can copy quickly, because they rest on the effect system.",
+      "level": null,
+      "tags": [
+        "language-review"
+      ],
+      "status": "open",
+      "created": "2026-11-09T23:07:49.939Z"
     }
   ],
   "events": [
+    {
+      "at": "2026-11-09T23:07:49.939Z",
+      "by": "Main",
+      "action": "idea.add",
+      "ref": "b0oksxpl",
+      "note": "Language review 9: The order I would build in"
+    },
+    {
+      "at": "2026-11-09T23:07:48.059Z",
+      "by": "Main",
+      "action": "idea.add",
+      "ref": "b0thyoho",
+      "note": "Language review 8.12 [far] (proposal): Tasks that can move"
+    },
+    {
+      "at": "2026-11-09T23:07:46.437Z",
+      "by": "Main",
+      "action": "idea.add",
+      "ref": "b02o4rw4",
+      "note": "Language review 8.11 [far] (proposal): Shapes in types, and "
+    },
+    {
+      "at": "2026-11-09T23:07:44.953Z",
+      "by": "Main",
+      "action": "idea.add",
+      "ref": "b0e4p7gz",
+      "note": "Language review 8.10 [near] (proposal): The program as a dat"
+    },
+    {
+      "at": "2026-11-09T23:07:43.577Z",
+      "by": "Main",
+      "action": "idea.add",
+      "ref": "b0rdgb4i",
+      "note": "Language review 8.9 [near-then-far] (proposal): Layout as a "
+    },
+    {
+      "at": "2026-11-09T23:07:41.678Z",
+      "by": "Main",
+      "action": "idea.add",
+      "ref": "b0vyv648",
+      "note": "Language review 8.8 [near] (proposal): Least privilege for d"
+    },
+    {
+      "at": "2026-11-09T23:07:39.748Z",
+      "by": "Main",
+      "action": "idea.add",
+      "ref": "b001twi9",
+      "note": "Language review 8.7 [near-then-far] (proposal): The database"
+    },
+    {
+      "at": "2026-11-09T23:07:37.984Z",
+      "by": "Main",
+      "action": "idea.add",
+      "ref": "b06vmzor",
+      "note": "Language review 8.6 [far] (proposal): One evolution mechanis"
+    },
+    {
+      "at": "2026-11-09T23:07:36.348Z",
+      "by": "Main",
+      "action": "idea.add",
+      "ref": "b0ftfj69",
+      "note": "Language review 8.5 [near] (proposal): The glass box"
+    },
+    {
+      "at": "2026-11-09T23:07:35.118Z",
+      "by": "Main",
+      "action": "idea.add",
+      "ref": "b0vh67n0",
+      "note": "Language review 8.4 [near] (proposal): A public surface the "
+    },
+    {
+      "at": "2026-11-09T23:07:33.796Z",
+      "by": "Main",
+      "action": "idea.add",
+      "ref": "b09lqmfg",
+      "note": "Language review 8.3 [near-then-far] (proposal): Record and r"
+    },
+    {
+      "at": "2026-11-09T23:07:32.260Z",
+      "by": "Main",
+      "action": "idea.add",
+      "ref": "b0k7j3wc",
+      "note": "Language review 8.2 [near-then-far] (proposal): \"Where can t"
+    },
+    {
+      "at": "2026-11-09T23:07:30.682Z",
+      "by": "Main",
+      "action": "idea.add",
+      "ref": "b0u3rnj7",
+      "note": "Language review 8.1 [near] (proposal): Breaking changes that"
+    },
+    {
+      "at": "2026-11-09T23:07:28.845Z",
+      "by": "Main",
+      "action": "idea.add",
+      "ref": "b0zq0w7k",
+      "note": "Language review 7.9: Domain: Teaching"
+    },
+    {
+      "at": "2026-11-09T23:07:26.964Z",
+      "by": "Main",
+      "action": "idea.add",
+      "ref": "b04m2ss9",
+      "note": "Language review 7.8: Domain: Operations and infrastructure"
+    },
+    {
+      "at": "2026-11-09T23:07:25.546Z",
+      "by": "Main",
+      "action": "idea.add",
+      "ref": "b0h5vk5y",
+      "note": "Language review 7.7: Domain: Desktop and mobile apps"
+    },
+    {
+      "at": "2026-11-09T23:07:23.662Z",
+      "by": "Main",
+      "action": "idea.add",
+      "ref": "b0m06sie",
+      "note": "Language review 7.6: Domain: Systems and embedded"
+    },
+    {
+      "at": "2026-11-09T23:07:22.240Z",
+      "by": "Main",
+      "action": "idea.add",
+      "ref": "b0yhzzq3",
+      "note": "Language review 7.5: Domain: Data, numeric, machine learning"
+    },
+    {
+      "at": "2026-11-09T23:07:20.656Z",
+      "by": "Main",
+      "action": "idea.add",
+      "ref": "b08au598",
+      "note": "Language review 7.4: Domain: Games"
+    },
+    {
+      "at": "2026-11-09T23:07:19.204Z",
+      "by": "Main",
+      "action": "idea.add",
+      "ref": "b0ka099v",
+      "note": "Language review 7.3: Domain: Web front end"
+    },
+    {
+      "at": "2026-11-09T23:07:17.811Z",
+      "by": "Main",
+      "action": "idea.add",
+      "ref": "b0x8qcqe",
+      "note": "Language review 7.2: Domain: Back-end services"
+    },
     {
       "at": "2026-11-09T23:07:15.741Z",
       "by": "Main",
@@ -197795,713 +198197,6 @@
       "action": "card.criteria-remove",
       "ref": "c0o8f1p4",
       "note": "#36: BoardPlanner review 2026-11-09 (dev 6a06b917cb). Moved to #2858 (G11). Owner order 2026-11-09: all speed and size work is G11.; was [open]: (was #6399) The chain is read only when a stop is reported. A benchmark loop of 10^7 calls stays within 1% of today's time; the numbers are logged on this card."
-    },
-    {
-      "at": "2026-11-09T19:41:18.230Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0hs3czc",
-      "note": "#112 Diagnostic chain cost (#3720): (was #6399) The chain is read"
-    },
-    {
-      "at": "2026-11-09T19:41:16.560Z",
-      "by": "Main",
-      "action": "card.criteria-remove",
-      "ref": "c0z3glhp",
-      "note": "#7: BoardPlanner review 2026-11-09 (dev 6a06b917cb). Moved to #5949 (G11). Owner order 2026-11-09: all speed and size work is G11.; was [open]: On a 1M-line input, each of the 10 one-liners runs faster than `perl` and than `gawk` on the second (cached) run: hyperfine -N, Jet/perl < 1.00 and Jet/gawk < 1.00 for every row, numbers logged on thi"
-    },
-    {
-      "at": "2026-11-09T19:41:15.318Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0wi8ere",
-      "note": "#24 Jet one-liners (#6067): On a 1M-line input, each of the 10 o"
-    },
-    {
-      "at": "2026-11-09T19:41:13.417Z",
-      "by": "Main",
-      "action": "card.criteria-remove",
-      "ref": "c03ai7mm",
-      "note": "#13: BoardPlanner review 2026-11-09 (dev 6a06b917cb). Moved to #6681 (G11). Owner order 2026-11-09: all speed and size work is G11.; was [open]: [#3870] SHA-512, BLAKE2b and Argon2id in Core/crypto/expert.jet run on U64 words, with no bigint spill and no per-block list allocation. Hash goldens are unchanged, with a perf receipt for password_ha"
-    },
-    {
-      "at": "2026-11-09T19:41:12.180Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0nsxbj2",
-      "note": "#4 Core crypto expert hashes (#3548): [#3870] SHA-512, BLAKE2b "
-    },
-    {
-      "at": "2026-11-09T19:41:09.785Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0hs3czc",
-      "note": "#111 core.compute SIMD dispatch (#6624): the AVX2 path's measured"
-    },
-    {
-      "at": "2026-11-09T19:41:08.714Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c04pj0wn",
-      "note": "#7: BoardPlanner review 2026-11-09 (dev 6a06b917cb). The speed clause moved to #2858 (G11); the rest stays. Owner order 2026-11-09: all speed and size work is G11.; was: (moved from #4599 c107) (was #1143 c7) Runtime dispatch is proven across AVX2 and SSE2 paths via jet_compute_simd_backend; a measured speedup vs the scalar path is asserted and recorded [precut audit:"
-    },
-    {
-      "at": "2026-11-09T19:41:06.961Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0hs3czc",
-      "note": "#110 State machines (#6326): the implemented state machine surfac"
-    },
-    {
-      "at": "2026-11-09T19:41:05.812Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c06he0ee",
-      "note": "#3: BoardPlanner review 2026-11-09 (dev 6a06b917cb). The speed clause moved to #2858 (G11); the rest stays. Owner order 2026-11-09: all speed and size work is G11.; was: After ratification the state machine surface is implemented with examples and golden output on o0, o1 and o2 and a paired perf cell against a hand-written enum-and-match machine."
-    },
-    {
-      "at": "2026-11-09T19:41:03.958Z",
-      "by": "Main",
-      "action": "card.criteria-remove",
-      "ref": "c0ct4a0i",
-      "note": "#6: BoardPlanner review 2026-11-09 (dev 6a06b917cb). Moved to #6203 (G11). Owner order 2026-11-09: all speed and size work is G11.; was [open]: A paired perf cell set shows Jet SoA (Columns<T> or the ratified form) at parity or better against Zig MultiArrayList on the same workloads (field sweep, append, element-field update through a referen"
-    },
-    {
-      "at": "2026-11-09T19:41:02.617Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0do6acc",
-      "note": "#6 Struct-of-arrays layout (#6314): A paired perf cell set show"
-    },
-    {
-      "at": "2026-11-09T19:41:00.688Z",
-      "by": "Main",
-      "action": "card.criteria-remove",
-      "ref": "c0ct4a0i",
-      "note": "#4: BoardPlanner review 2026-11-09 (dev 6a06b917cb). Moved to #2858 (G11). Owner order 2026-11-09: all speed and size work is G11.; was [open]: Each allocator and SoA surface has a paired two-program perf cell against the plain spelling (default heap, array of structs) recorded in the canonical manifest, and strictly beats it before closing."
-    },
-    {
-      "at": "2026-11-09T19:40:59.394Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0hs3czc",
-      "note": "#109 Custom allocators and struct-of-arrays (#6314): Each allocat"
-    },
-    {
-      "at": "2026-11-09T19:40:56.994Z",
-      "by": "Main",
-      "action": "card.criteria-remove",
-      "ref": "c0iuv3zr",
-      "note": "#71: BoardPlanner review 2026-11-09 (dev 6a06b917cb). Moved to #2858 (G11). Owner order 2026-11-09: all speed and size work is G11.; was [open]: (was #3041 c4) Matched owned-value, borrowed-view and finite owning-Iter cells include candidate keys, payload materialization, View headers, result storage and iterator construction. Same-job semanti"
-    },
-    {
-      "at": "2026-11-09T19:40:55.792Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0hs3czc",
-      "note": "#108 Core owned-value, view and Iter cells (#5976): (was #3041 c4"
-    },
-    {
-      "at": "2026-11-09T19:40:53.709Z",
-      "by": "Main",
-      "action": "card.criteria-remove",
-      "ref": "c0iuv3zr",
-      "note": "#5: BoardPlanner review 2026-11-09 (dev 6a06b917cb). Moved to #2858 (G11). Owner order 2026-11-09: all speed and size work is G11.; was [open]: (was #4682) core.collections Counter/OrderedMap/Chain and heap helpers copy on every operation (quadratic)"
-    },
-    {
-      "at": "2026-11-09T19:40:52.369Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0hs3czc",
-      "note": "#107 core.collections speed (#5976): (was #4682) core.collections"
-    },
-    {
-      "at": "2026-11-09T19:40:50.377Z",
-      "by": "Main",
-      "action": "card.criteria-remove",
-      "ref": "c08u6j84",
-      "note": "#3: BoardPlanner review 2026-11-09 (dev 6a06b917cb). Moved to #2858 (G11). Owner order 2026-11-09: all speed and size work is G11.; was [open]: Any new default turns on only after the #2254 hot-loop kernels show no measurable slowdown under the strict performance gate; until then the wait-point rule stays."
-    },
-    {
-      "at": "2026-11-09T19:40:49.066Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0hs3czc",
-      "note": "#106 Busy-task loop-turn checks (#4637, D-TASK-SLICE1): Any new d"
-    },
-    {
-      "at": "2026-11-09T19:40:47.146Z",
-      "by": "Main",
-      "action": "card.criteria-remove",
-      "ref": "c0w1f3xa",
-      "note": "#4: BoardPlanner review 2026-11-09 (dev 6a06b917cb). Moved to #2858 (G11). Owner order 2026-11-09: all speed and size work is G11.; was [open]: Default-mode cost on the #2254 hot-loop kernels is within noise under the strict performance gate, recorded in the canonical manifest."
-    },
-    {
-      "at": "2026-11-09T19:40:45.526Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0hs3czc",
-      "note": "#105 Strong pause .CheckLoops (#4636): Default-mode cost on the #"
-    },
-    {
-      "at": "2026-11-09T19:40:43.460Z",
-      "by": "Main",
-      "action": "card.criteria-remove",
-      "ref": "c0m83e3n",
-      "note": "#40: BoardPlanner review 2026-11-09 (dev 6a06b917cb). Moved to #2858 (G11). Owner order 2026-11-09: all speed and size work is G11.; was [open]: (was #3320) A matched workload measures allocations, peak memory, and time before any zero-cost or speed claim is published. (was #4284 c59)"
-    },
-    {
-      "at": "2026-11-09T19:40:42.190Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0hs3czc",
-      "note": "#104 Iterator capability facts (#3317): (was #3320) A matched wor"
-    },
-    {
-      "at": "2026-11-09T19:40:40.211Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c04g9zai",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-09T19:40:38.913Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c04g9zai",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-09T19:40:36.843Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0g6fxb9",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-09T19:40:35.467Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0g6fxb9",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-09T19:40:33.074Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0h8jjrp",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-09T19:40:31.660Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0h8jjrp",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-09T19:40:29.593Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0agsbqj",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-09T19:40:28.370Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0agsbqj",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-09T19:40:26.390Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0nqr80d",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-09T19:40:25.398Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0nqr80d",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-09T19:40:23.296Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0cdnofm",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-09T19:40:22.157Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0cdnofm",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-09T19:40:20.365Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0i891tv",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-09T19:40:18.888Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0i891tv",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-09T19:40:16.849Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c08r6ogl",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-09T19:40:15.142Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c08r6ogl",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-09T19:40:12.902Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c031o59x",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-09T19:40:11.642Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c031o59x",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-09T19:40:08.461Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0a0gmpl",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-09T19:40:06.494Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0a0gmpl",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-09T19:40:03.279Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0g93joj",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-09T19:40:01.330Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0g93joj",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-09T19:39:58.298Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0ccjkub",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-09T19:39:56.466Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0ccjkub",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-09T19:39:53.640Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0aqwnas",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-09T19:39:52.464Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0aqwnas",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-09T19:39:50.277Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c08m4yum",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-09T19:39:48.999Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c08m4yum",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-09T19:39:46.885Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c02a1ynr",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-09T19:39:45.783Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c02a1ynr",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-09T19:39:43.547Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0ta538w",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-09T19:39:42.267Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0ta538w",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-09T19:39:40.560Z",
-      "by": "agent",
-      "action": "card.criteria-add",
-      "ref": "c0qe89cl",
-      "note": "#20 Owner scope 2026-11-09: G4 ports every non-Tower tool, runne"
-    },
-    {
-      "at": "2026-11-09T19:39:39.283Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0lkpkuc",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-09T19:39:38.006Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0lkpkuc",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-09T19:39:35.720Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0hsgoa6",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-09T19:39:34.429Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0hsgoa6",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-09T19:39:32.467Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0e7sc5b",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-09T19:39:31.185Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0e7sc5b",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-09T19:39:28.897Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0wi8ere",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-09T19:39:27.007Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0wi8ere",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-09T19:38:41.112Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0l5a4vu",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-09T19:38:39.773Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0l5a4vu",
-      "note": "#3 An archive browser over libarchive (list, extract one entry "
-    },
-    {
-      "at": "2026-11-09T19:38:38.726Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0l5a4vu",
-      "note": "#2 A terminal history viewer over libgit2 (commit walk with cal"
-    },
-    {
-      "at": "2026-11-09T19:38:37.510Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0l5a4vu",
-      "note": "title"
-    },
-    {
-      "at": "2026-11-09T19:38:35.158Z",
-      "by": "Main",
-      "action": "card.criteria-remove",
-      "ref": "c0jm0xjt",
-      "note": "#96: BoardPlanner review 2026-11-09 (dev 6a06b917cb). Same as #6632 c65 (authority and lock identity), c66 (import never executes a build), c67 (transactional merges) and c69 (the Examples golden) (D-G7-4).; was [open]: (was #3521) [#3508] `b.include(pkg)` runs the dependency's fn build under that package's authority, with identity recorded in the lock. Import alone never executes a build. Merges are transactional. A"
-    },
-    {
-      "at": "2026-11-09T19:38:33.732Z",
-      "by": "Main",
-      "action": "card.criteria-remove",
-      "ref": "c0jm0xjt",
-      "note": "#44: BoardPlanner review 2026-11-09 (dev 6a06b917cb). Same as #4276 c10, which carries D-LEDGER1 (three lifetime-separated stores, one typed query contract) (D-G7-3).; was [open]: (was #4291) {\"decisionId\": \"D-LEDGER1\", \"text\": \"Three stores by lifetime: the static schema of fact kinds (the registry, unchanged), the fact instances of one checked program, and the evidence record"
-    },
-    {
-      "at": "2026-11-09T19:38:32.540Z",
-      "by": "Main",
-      "action": "card.criteria-remove",
-      "ref": "c03ai7mm",
-      "note": "#44: BoardPlanner review 2026-11-09 (dev 6a06b917cb). The D-CORE-MODULE-MAP1 contract row moved here from #4275 c30 holds this with a proof (D-G7-2).; was [open]: (was #3997 c1) D-CORE-MODULE-MAP1 and D-CORE-MODULE-ABBREV1 are ratified [precut audit: no dev test, golden, case or snapshot proves this today]"
-    },
-    {
-      "at": "2026-11-09T19:38:31.563Z",
-      "by": "Main",
-      "action": "card.criteria-remove",
-      "ref": "c0jm0xjt",
-      "note": "#141: BoardPlanner review 2026-11-09 (dev 6a06b917cb). Same as #6522 c1 plus the moved D-PACKAGE-MODEL1 row (one typed package model) (D-G7-1).; was [open]: (was #653 c2, #654 c2, #851 c2, #1014 c2, #1017 c2, #1015 c2, #1018 c2, #852 c2) One typed package model remains authoritative. All affected projections reconstruct the same facts and provenance [prec"
-    },
-    {
-      "at": "2026-11-09T19:38:30.533Z",
-      "by": "Main",
-      "action": "card.criteria-remove",
-      "ref": "c0jm0xjt",
-      "note": "#16: BoardPlanner review 2026-11-09 (dev 6a06b917cb). Moved to #6522: D-PACKAGE-MODEL1 is the contract of #6522 c1 (D-G7-1).; was [open]: {\"decisionId\": \"D-PACKAGE-MODEL1\", \"text\": \"Add one immutable typed package model to the existing compile-time-only core.compiler seam.\", \"proof\": {\"kind\": \"required Jet production integration #Test a"
-    },
-    {
-      "at": "2026-11-09T19:38:29.538Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0itgqr6",
-      "note": "#2 {\"decisionId\": \"D-PACKAGE-MODEL1\", \"text\": \"Add one immutabl"
-    },
-    {
-      "at": "2026-11-09T19:38:27.923Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0jm0xjt",
-      "note": "#16: BoardPlanner review 2026-11-09 (dev 6a06b917cb). jet-pkg-model and jet-env-model were Rust crates; crates/ is gone on dev.; was: {\"decisionId\": \"D-PACKAGE-MODEL1\", \"text\": \"Add one immutable typed package model to the existing compile-time-only core.compiler seam. Reuse jet-pkg-model and jet-env-model.\", \"proof\": {\"kind\": \"requ"
-    },
-    {
-      "at": "2026-11-09T19:38:26.091Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0i42rgw",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-09T19:38:25.100Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0i42rgw",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-09T19:38:23.325Z",
-      "by": "Main",
-      "action": "card.criteria-remove",
-      "ref": "c0uwol3w",
-      "note": "#199: BoardPlanner review 2026-11-09 (dev 6a06b917cb). Moved to #5072: porting repository scripts to Jet is #5072's stream (one card per stream).; was [open]: The Jetpack infrastructure scripts are Jet. Owner ruling 11-07 (Docs/spec/philosophy.md priority 6): Jet fills every role; a capability Core lacks is a Core gap to close, never a reason to use sh, nod"
-    },
-    {
-      "at": "2026-11-09T19:38:22.077Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0qe89cl",
-      "note": "#19 The Jetpack infrastructure scripts are Jet. Owner ruling 11-"
-    },
-    {
-      "at": "2026-11-09T19:38:20.501Z",
-      "by": "Main",
-      "action": "card.criteria-remove",
-      "ref": "c00tcdfc",
-      "note": "#1: BoardPlanner review 2026-11-09 (dev 6a06b917cb). Moved to #5949: a loose-script first-run cell belongs with the ScriptBench cells.; was [open]: (moved from #3590 c10) First run of a loose script with one dependency, cold cache, is faster than `uv run` of the PEP 723 equivalent and `deno run` with one `jsr:` import of similar size (median of 5"
-    },
-    {
-      "at": "2026-11-09T19:38:19.440Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0wi8ere",
-      "note": "#23 (moved from #3590 c10) First run of a loose script with one "
-    },
-    {
-      "at": "2026-11-09T19:38:17.878Z",
-      "by": "Main",
-      "action": "card.criteria-remove",
-      "ref": "c0uhfjtt",
-      "note": "#2: BoardPlanner review 2026-11-09 (dev 6a06b917cb). Moved to #5088: native closure linker inputs are the D-LINK-MODEL1 linking model.; was [open]: (was #2785 c3) Declared native package/module closure feeds linker inputs and missing-library diagnostics, including the canonical z package key for -lz, proven by link execution tests on every applic"
-    },
-    {
-      "at": "2026-11-09T19:38:16.536Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0ba141x",
-      "note": "#2 (was #2785 c3) Declared native package/module closure feeds "
-    },
-    {
-      "at": "2026-11-09T19:38:14.460Z",
-      "by": "Main",
-      "action": "card.criteria-remove",
-      "ref": "c0uhfjtt",
-      "note": "#1: BoardPlanner review 2026-11-09 (dev 6a06b917cb). Moved to #6508: generated bindings for other languages are exports of Jet (gallery #6508), not the binder table kit.; was [open]: (was #2377 c1) R, Perl, PHP, Ruby, PowerShell, and Octave generators emit one typed decode_response helper per binding, every generated operation delegates through it, protocol-specific raw extern acc"
-    },
-    {
-      "at": "2026-11-09T19:38:12.914Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c03yyxl3",
-      "note": "#3 (was #2377 c1) R, Perl, PHP, Ruby, PowerShell, and Octave ge"
-    },
-    {
-      "at": "2026-11-09T19:38:11.265Z",
-      "by": "Main",
-      "action": "card.criteria-remove",
-      "ref": "c0810bga",
-      "note": "#8: BoardPlanner review 2026-11-09 (dev 6a06b917cb). Moved to #5950: onboarding is install-to-first-run (#5950); #6068 waits for v1 preparation.; was [open]: (was #679 c3, #1034 c3, #1037 c3) Missing entry, ambiguous project, unsupported host, install failure, invalid code, and offline state offer a tested recovery path [precut audit: failing on 9c7ddf1359"
-    },
-    {
-      "at": "2026-11-09T19:38:10.078Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c050uwwc",
-      "note": "#13 (was #679 c3, #1034 c3, #1037 c3) Missing entry, ambiguous p"
-    },
-    {
-      "at": "2026-11-09T19:38:09.043Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-JAI-GENERIC1",
-      "note": "##Pre: a contract checked for each use while compiling, the marker rule for ##, and Jai's baking controls"
-    },
-    {
-      "at": "2026-11-09T19:38:07.525Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0810bga",
-      "note": "#8: BoardPlanner review 2026-11-09 (dev 6a06b917cb). The greenfield order (2026-11-06): retired layouts get no migration.; was: (was #679 c3, #1034 c3, #1037 c3) Missing entry, ambiguous project, unsupported host, install failure, invalid code, offline state, and migration from old layouts offer a tested recovery path [precut "
-    },
-    {
-      "at": "2026-11-09T19:38:05.812Z",
-      "by": "Main",
-      "action": "card.criteria-remove",
-      "ref": "c0810bga",
-      "note": "#7: BoardPlanner review 2026-11-09 (dev 6a06b917cb). Moved to #5950: onboarding is install-to-first-run (#5950); #6068 waits for v1 preparation.; was [open]: (was #679 c2, #1032 c2, #1034 c2, #1037 c2, #1035 c2, #1036 c2) Install, scaffold, resolve, run, diagnose, test, edit, and learn use consistent commands and source on every supported beginner host [pr"
-    },
-    {
-      "at": "2026-11-09T19:38:04.778Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c050uwwc",
-      "note": "#12 (was #679 c2, #1032 c2, #1034 c2, #1037 c2, #1035 c2, #1036 "
-    },
-    {
-      "at": "2026-11-09T19:38:03.224Z",
-      "by": "Main",
-      "action": "card.criteria-remove",
-      "ref": "c0810bga",
-      "note": "#6: BoardPlanner review 2026-11-09 (dev 6a06b917cb). Moved to #3720 and rewritten: the greenfield order removes migration paths now, not at v1.; was [open]: (was #266) Remove old binding syntax migration paths [precut audit: no dev test, golden, case or snapshot proves this today]"
-    },
-    {
-      "at": "2026-11-09T19:38:02.050Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0o8f1p4",
-      "note": "#82 (was #6068 c6, #266) No parser, formatter, jet fix or diagno"
-    },
-    {
-      "at": "2026-11-09T19:38:00.773Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0jm0xjt",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-09T19:37:59.233Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0ym70o1",
-      "note": "title"
-    },
-    {
-      "at": "2026-11-09T19:37:54.744Z",
-      "by": "Main",
-      "action": "card.criteria-remove",
-      "ref": "c0jm0xjt",
-      "note": "#147: BoardPlanner review 2026-11-09 (dev 6a06b917cb). Moved to #6621: the package-default authority floor is fn build permissions.; was [open]: (was #3947) Parity: Package-default authority floor (#3718) not in JetDriver package facts [precut audit: no dev test, golden, case or snapshot proves this today]"
-    },
-    {
-      "at": "2026-11-09T19:37:53.412Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0jn187l",
-      "note": "#6 (was #3947) Parity: Package-default authority floor (#3718) "
-    },
-    {
-      "at": "2026-11-09T19:37:51.103Z",
-      "by": "Main",
-      "action": "card.criteria-remove",
-      "ref": "c0jm0xjt",
-      "note": "#135: BoardPlanner review 2026-11-09 (dev 6a06b917cb). Moved to #6632: user-tool updates are package-manager behaviors.; was [open]: (was #3033) [#3032] A direct source without authentication needs interactive approval before the first artifact GET; `-y` and `--trust` cannot grant it. A grant binds source, metadata authority, repo,"
-    },
-    {
-      "at": "2026-11-09T19:37:49.805Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c00tcdfc",
-      "note": "#104 (was #3033) [#3032] A direct source without authentication n"
-    },
-    {
-      "at": "2026-11-09T19:37:47.589Z",
-      "by": "Main",
-      "action": "card.criteria-remove",
-      "ref": "c0jm0xjt",
-      "note": "#134: BoardPlanner review 2026-11-09 (dev 6a06b917cb). Moved to #6632: user-tool updates are package-manager behaviors.; was [open]: (was #3033) Proof: `jet test Compiler --profile packages` passes, including Store/Tests/ReleaseActivation.jet failpoint claims (prior generation preserved, no active entry after a failed first install"
-    },
-    {
-      "at": "2026-11-09T19:37:45.507Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c00tcdfc",
-      "note": "#103 (was #3033) Proof: `jet test Compiler --profile packages` pa"
     }
   ],
   "nextNum": 368,
