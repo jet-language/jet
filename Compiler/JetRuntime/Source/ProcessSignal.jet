@@ -291,3 +291,346 @@ process_signal_interrupt_run: fn(closure: I64) -> I64 {
     sync_mutex_unlock(wrapping(state + I64{40}))
     I64{1}
 }
+
+// The signal hub behind core.process.signals and core.process.on_signal: any
+// catchable signal 1..64, fanned out to every subscription that holds it.
+// The mark handler only ORs bit (signal - 1) into the pending word: no
+// allocation, lock or system call, so it is async-signal-safe and leaves
+// errno alone. The dispatcher thread polls every 10 ms, takes the pending
+// bits and, under the hub lock, sends each subscription the ProcessSignal
+// word of every signal it holds (one queued per signal: a signal already
+// waiting in its channel is not queued again, so a channel never holds more
+// than its set) and cancels the root task for an on_signal subscription.
+// Bits no subscription holds are dropped.
+rt_signal_mark_address: fn() -> I64 { loop { jet_rt_unreachable(I64{0}, I64{0}) } }
+rt_signal_dispatcher_address: fn() -> I64 { loop { jet_rt_unreachable(I64{0}, I64{0}) } }
+
+// Hub64: pending0 mutex8 dispatcher16 (0 unstarted, 1 running, else the
+// negative errno of its failed start) subscriptions24 (words list of Sub40)
+// lastId32 holders40 (64 words: subscriptions per signal) saved48 (64
+// four-word kernel actions: each held signal's action before its first
+// subscription) meta56 (the ProcessSignal element descriptor, Collections.jet
+// meta72: stride 8, no drop, kind 0). Allocated once under the scheduler root
+// mutex before any handler can observe it, and never freed.
+signal_hub := I64{0}
+
+signal_hub_ensure: fn() -> I64 {
+    if (signal_hub != I64{0}) -> return signal_hub
+    sync_thread_lock(scheduler_root)
+    if (signal_hub == I64{0}) {
+        hub: jet_rt_alloc(I64{64}, I64{8})
+        thread_zero(hub, I64{64})
+        subscriptions: jet_rt_alloc(I64{24}, I64{8})
+        thread_zero(subscriptions, I64{24})
+        sync_store(wrapping(hub + I64{24}), subscriptions)
+        holders: jet_rt_alloc(I64{512}, I64{8})
+        thread_zero(holders, I64{512})
+        sync_store(wrapping(hub + I64{40}), holders)
+        saved: jet_rt_alloc(I64{2048}, I64{8})
+        thread_zero(saved, I64{2048})
+        sync_store(wrapping(hub + I64{48}), saved)
+        meta: jet_rt_alloc(I64{72}, I64{8})
+        thread_zero(meta, I64{72})
+        sync_store(meta, I64{8})
+        sync_store(wrapping(hub + I64{56}), meta)
+        #Unsafe("written under the scheduler root mutex, after every word the handler and dispatcher read") {
+            signal_hub = hub
+        }
+    }
+    sync_thread_unlock(scheduler_root)
+    signal_hub
+}
+
+#Export(c) jet_rt_signal_mark: fn(signal: I64) -> I64 {
+    hub: signal_hub
+    if (hub == I64{0}) -> return I64{0}
+    number: net_i32(signal)
+    if (number < I64{1} || number > I64{64}) -> return I64{0}
+    bit: I64{1} << (number - I64{1})
+    loop {
+        pending: sync_load(hub)
+        if (sync_cas(hub, pending, pending.bit_or(bit)) == pending) -> break
+    }
+    I64{0}
+}
+
+// A signal a subscription may hold: 1..64 but SIGKILL and SIGSTOP, which
+// cannot be caught, and the fault signals the runtime's own handlers own
+// (Fault.jet: ILL, TRAP, ABRT, BUS, FPE, SEGV, SYS), whose mark handler would
+// return into the faulting instruction.
+signal_catchable: fn(number: I64) -> Bool {
+    if (number < I64{1} || number > I64{64}) -> return false
+    if (number >= I64{4} && number <= I64{9}) -> return false
+    number != I64{11} && number != I64{19} && number != I64{31}
+}
+
+// Sub40: id0 held8 (bit signal - 1) channel16 (the subscription's own sender
+// and receiver endpoints) cancelsRoot24 tags32 (64 words: the ProcessSignal
+// word sent for each held signal). Under the hub lock; 0 when `id` is closed.
+signal_hub_find: fn(hub: I64, id: I64) -> I64 {
+    subscriptions: sync_load(wrapping(hub + I64{24}))
+    at := I64{0}
+    loop at < sync_load(subscriptions) {
+        sub: sync_load(wrapping(sync_load(wrapping(subscriptions + I64{16})) + at * I64{8}))
+        if (sync_load(sub) == id) -> return sub
+        at += I64{1}
+    }
+    I64{0}
+}
+
+// Under the hub lock: save the signal's current action, then install the
+// mark handler. The kernel's negative errno when it refuses either.
+signal_hub_install: fn(hub: I64, number: I64) -> I64 {
+    saved: wrapping(sync_load(wrapping(hub + I64{48})) + (number - I64{1}) * I64{32})
+    status := I64{0}
+    #Unsafe("rt_sigaction writes the signal's four-word action into the hub's preallocated table and sets none") {
+        status = os_syscall_i64(I64{13}, number, I64{0}, saved, I64{8}, I64{0}, I64{0})
+    }
+    if (status < I64{0}) -> return status
+    #Unsafe("rt_sigaction borrows the four-word action on the stack; the handler is this runtime's one-word C-ABI export and the restorer its rt_sigreturn rail") {
+        status = os_syscall_stack4_i64(I64{13}, number, rt_signal_mark_address(), I64{335544320}, rt_process_signal_restore_address(), I64{0}, I64{8})
+    }
+    status
+}
+
+// Under the hub lock: the action saved by signal_hub_install again.
+signal_hub_restore: fn(hub: I64, number: I64) {
+    saved: wrapping(sync_load(wrapping(hub + I64{48})) + (number - I64{1}) * I64{32})
+    #Unsafe("rt_sigaction reads the saved four-word action from the hub's table and writes no old action") {
+        _ := os_syscall_i64(I64{13}, number, saved, I64{0}, I64{8}, I64{0}, I64{0})
+    }
+}
+
+// Started once, by the first subscribed signal; a failed start is kept and
+// answered to every later subscribe.
+signal_hub_dispatcher_start: fn(hub: I64) -> I64 {
+    sync_mutex_lock(wrapping(hub + I64{8}))
+    status := sync_load(wrapping(hub + I64{16}))
+    if (status == I64{0}) {
+        worker: thread_spawn(rt_signal_dispatcher_address(), hub)
+        if (worker < I64{0}) {
+            status = worker
+        } else {
+            _ := thread_detach(worker)
+            status = I64{1}
+        }
+        sync_store(wrapping(hub + I64{16}), status)
+    }
+    sync_mutex_unlock(wrapping(hub + I64{8}))
+    if (status == I64{1}) -> I64{0} else -> status
+}
+
+// Queue `word` on the subscription's channel unless it is already waiting
+// there. The channel is unbounded and the subscription holds a receiver, so
+// the send never blocks or is refused.
+signal_hub_send: fn(channel: I64, word: I64, meta: I64) {
+    sync_mutex_lock(channel)
+    if (sync_load(wrapping(channel + I64{56})) == I64{0}) -> sync_store(wrapping(channel + I64{56}), coll_meta_copy(meta))
+    length: sync_load(wrapping(channel + I64{16}))
+    capacity: sync_load(wrapping(channel + I64{24}))
+    head: sync_load(wrapping(channel + I64{40}))
+    data: sync_load(wrapping(channel + I64{32}))
+    at := I64{0}
+    loop at < length {
+        if (sync_load(wrapping(data + ((head + at) % capacity) * I64{8})) == word) {
+            sync_mutex_unlock(channel)
+            return
+        }
+        at += I64{1}
+    }
+    channel_grow(channel, length + sync_load(wrapping(channel + I64{80})) + I64{1})
+    target: wrapping(sync_load(wrapping(channel + I64{32})) + ((sync_load(wrapping(channel + I64{40})) + length) % sync_load(wrapping(channel + I64{24}))) * I64{8})
+    sync_store(target, word)
+    sync_store(wrapping(channel + I64{16}), length + I64{1})
+    channel_wake_one(channel, false)
+    channel_update(channel)
+    sync_mutex_unlock(channel)
+}
+
+signal_hub_dispatch: fn(hub: I64) {
+    taken := I64{0}
+    loop {
+        taken = sync_load(hub)
+        if (taken == I64{0}) -> return
+        if (sync_cas(hub, taken, I64{0}) == taken) -> break
+    }
+    meta: sync_load(wrapping(hub + I64{56}))
+    sync_mutex_lock(wrapping(hub + I64{8}))
+    subscriptions: sync_load(wrapping(hub + I64{24}))
+    at := I64{0}
+    loop at < sync_load(subscriptions) {
+        sub: sync_load(wrapping(sync_load(wrapping(subscriptions + I64{16})) + at * I64{8}))
+        delivered: taken.bit_and(sync_load(wrapping(sub + I64{8})))
+        if (delivered != I64{0}) {
+            index := I64{0}
+            loop index < (I64{64}) {
+                if (delivered.bit_and(I64{1} << index) != I64{0}) {
+                    signal_hub_send(sync_load(wrapping(sub + I64{16})), sync_load(wrapping(sync_load(wrapping(sub + I64{32})) + index * I64{8})), meta)
+                }
+                index += I64{1}
+            }
+            if (sync_load(wrapping(sub + I64{24})) != I64{0}) -> process_signal_cancel_root()
+        }
+        at += I64{1}
+    }
+    sync_mutex_unlock(wrapping(hub + I64{8}))
+}
+
+// The "jet-signal" thread: sleep 10 ms, dispatch, forever.
+#Export(c) jet_rt_signal_dispatcher: fn(hub: I64) -> I64 {
+    sync_store(wrapping(thread_base() + I64{16}), scheduler_control_new())
+    interval: jet_rt_alloc(I64{16}, I64{8})
+    loop {
+        trap_store(interval, I64{0})
+        trap_store(wrapping(interval + I64{8}), I64{10000000})
+        loop {
+            slept: host_call(I64{35}, interval, interval, I64{0})
+            if (slept != I64{-4}) -> break
+        }
+        signal_hub_dispatch(hub)
+    }
+}
+
+// core.process.__signal_open(cancels_root): a subscription holding no signal
+// yet, with its own unbounded channel; its id. An on_signal subscription
+// (cancels_root) looks up the root task control here, on the subscriber.
+#Export(c) jet_process_signal_open_raw: fn(cancels_root: I64) -> I64 {
+    cancels: cancels_root.bit_and(I64{255}) != I64{0}
+    if cancels -> scheduler_control_drop(scheduler_root_task_control())
+    hub: signal_hub_ensure()
+    channel: channel_new(I64{-1}, I64{0}, I64{0})
+    sync_store(wrapping(channel + I64{120}), I64{1})
+    channel_retain(channel)
+    tags: jet_rt_alloc(I64{512}, I64{8})
+    thread_zero(tags, I64{512})
+    sub: jet_rt_alloc(I64{40}, I64{8})
+    thread_zero(sub, I64{40})
+    sync_store(wrapping(sub + I64{16}), channel)
+    sync_store(wrapping(sub + I64{24}), if cancels -> I64{1} else -> I64{0})
+    sync_store(wrapping(sub + I64{32}), tags)
+    sync_mutex_lock(wrapping(hub + I64{8}))
+    id: sync_load(wrapping(hub + I64{32})) + I64{1}
+    sync_store(wrapping(hub + I64{32}), id)
+    sync_store(sub, id)
+    scheduler_words_push(sync_load(wrapping(hub + I64{24})), sub)
+    sync_mutex_unlock(wrapping(hub + I64{8}))
+    id
+}
+
+// core.process.__signal_add(id, number, signal): subscription `id` also holds
+// signal `number`, sent as the ProcessSignal word `signal`. The signal's
+// first holder saves its action and installs the mark handler.
+#Export(c) jet_process_signal_add_raw: fn(id: I64, number: I64, signal: I64, available: I64, value: I64, errno: I64) {
+    native_id: jet_int_owned_to_i64(id)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    native: jet_int_owned_to_i64(number)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    if !signal_catchable(native) {
+        host_sample_out(I64{-22}, available, value, errno)
+        return
+    }
+    hub: signal_hub_ensure()
+    sync_mutex_lock(wrapping(hub + I64{8}))
+    sub: signal_hub_find(hub, native_id)
+    status := if (sub == I64{0}) -> I64{-22} else -> I64{0}
+    bit: I64{1} << (native - I64{1})
+    if (sub != I64{0} && sync_load(wrapping(sub + I64{8})).bit_and(bit) == I64{0}) {
+        holders: wrapping(sync_load(wrapping(hub + I64{40})) + (native - I64{1}) * I64{8})
+        if (sync_load(holders) == I64{0}) -> status = signal_hub_install(hub, native)
+        if (status >= I64{0}) {
+            sync_store(holders, sync_load(holders) + I64{1})
+            sync_store(wrapping(sync_load(wrapping(sub + I64{32})) + (native - I64{1}) * I64{8}), signal)
+            sync_store(wrapping(sub + I64{8}), sync_load(wrapping(sub + I64{8})).bit_or(bit))
+        }
+    }
+    sync_mutex_unlock(wrapping(hub + I64{8}))
+    if (status >= I64{0}) -> status = signal_hub_dispatcher_start(hub)
+    host_sample_out(status, available, value, errno)
+}
+
+// core.process.__signal_receiver(id): one more receiver of the subscription's
+// channel; of an already closed, empty channel when `id` is closed.
+#Export(c) jet_process_signal_receiver_raw: fn(id: I64) -> I64 {
+    native_id: jet_int_owned_to_i64(id)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    hub: signal_hub_ensure()
+    sync_mutex_lock(wrapping(hub + I64{8}))
+    sub: signal_hub_find(hub, native_id)
+    channel := I64{0}
+    if (sub != I64{0}) -> channel = jet_rt_native_receiver_clone(sync_load(wrapping(sub + I64{16})))
+    sync_mutex_unlock(wrapping(hub + I64{8}))
+    if (channel == I64{0}) {
+        channel = channel_new(I64{-1}, I64{0}, I64{0})
+        sync_store(wrapping(channel + I64{88}), I64{1})
+    }
+    channel
+}
+
+// core.process.__signal_close(id): the subscription holds nothing; each signal
+// it was the last holder of gets its saved action back. Its endpoints drop,
+// so its receivers take what is queued and then end.
+#Export(c) jet_process_signal_close_raw: fn(id: I64) {
+    native_id: jet_int_owned_to_i64(id)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    hub: signal_hub
+    if (hub == I64{0}) -> return
+    sync_mutex_lock(wrapping(hub + I64{8}))
+    subscriptions: sync_load(wrapping(hub + I64{24}))
+    data: sync_load(wrapping(subscriptions + I64{16}))
+    length: sync_load(subscriptions)
+    sub := I64{0}
+    at := I64{0}
+    loop at < length {
+        candidate: sync_load(wrapping(data + at * I64{8}))
+        if (sync_load(candidate) == native_id) {
+            sub = candidate
+            sync_store(wrapping(data + at * I64{8}), sync_load(wrapping(data + (length - I64{1}) * I64{8})))
+            sync_store(subscriptions, length - I64{1})
+            break
+        }
+        at += I64{1}
+    }
+    if (sub != I64{0}) {
+        held: sync_load(wrapping(sub + I64{8}))
+        number := I64{1}
+        loop number <= (I64{64}) {
+            if (held.bit_and(I64{1} << (number - I64{1})) != I64{0}) {
+                holders: wrapping(sync_load(wrapping(hub + I64{40})) + (number - I64{1}) * I64{8})
+                left: sync_load(holders) - I64{1}
+                sync_store(holders, left)
+                if (left == I64{0}) -> signal_hub_restore(hub, number)
+            }
+            number += I64{1}
+        }
+    }
+    sync_mutex_unlock(wrapping(hub + I64{8}))
+    if (sub == I64{0}) -> return
+    channel: sync_load(wrapping(sub + I64{16}))
+    jet_rt_native_sender_drop(channel)
+    jet_rt_native_receiver_drop(channel)
+    jet_rt_free(sync_load(wrapping(sub + I64{32})), I64{512}, I64{8})
+    jet_rt_free(sub, I64{40}, I64{8})
+}
+
+// core.process.__signal_disposition(number, ignore): SIG_IGN or SIG_DFL for
+// a signal no subscription holds; EBUSY while one does, whose last close
+// restores the action saved at its subscribe.
+#Export(c) jet_process_signal_disposition_raw: fn(number: I64, ignore: I64, available: I64, value: I64, errno: I64) {
+    native: jet_int_owned_to_i64(number)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    if !signal_catchable(native) {
+        host_sample_out(I64{-22}, available, value, errno)
+        return
+    }
+    handler: if (ignore.bit_and(I64{255}) != I64{0}) -> I64{1} else -> I64{0}
+    hub: signal_hub_ensure()
+    sync_mutex_lock(wrapping(hub + I64{8}))
+    status := I64{-16}
+    if (sync_load(wrapping(sync_load(wrapping(hub + I64{40})) + (native - I64{1}) * I64{8})) == I64{0}) {
+        #Unsafe("rt_sigaction borrows the four-word SIG_IGN or SIG_DFL action on the stack and writes no old action") {
+            status = os_syscall_stack4_i64(I64{13}, native, handler, I64{0}, I64{0}, I64{0}, I64{8})
+        }
+    }
+    sync_mutex_unlock(wrapping(hub + I64{8}))
+    host_sample_out(status, available, value, errno)
+}

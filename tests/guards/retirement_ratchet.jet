@@ -79,8 +79,10 @@ s6_ratchet_producer: fn(path: String, line: String) -> Bool {
 
 s6_ratchet_unrelated: fn(path: String, line: String) -> Bool {
     if path == "Jetpack/Integrations/Source/CompilerExtension/CompilerExtension.jet" -> return true
-    // Terminal capabilities (terminfo sense) and third-party vendored C.
+    // Terminal capabilities (terminfo sense), third-party vendored C, and the
+    // vendored, SHA-pinned xkbcommon/libX11 keyboard data (the caps-lock key).
     if path == "Compiler/JetDevserver/Source/TerminalStyleReload.jet" || path.starts_with("Core/Vendor/") -> return true
+    if path.starts_with("tests/data/xkb/") -> return true
     if path == "Jetpack/Recipe/Source/Build/StagedPlanRun.jet" -> return line.contains(s6_ratchet_concat("Capabil", "ity-limited"))
     if path.starts_with("Docs/spec/reference/surfaces/") -> return true
     if path == "Compiler/JetCanvas/Source/CanvasAssets/js/inspector-connections.js" -> return line.contains(s6_ratchet_concat("Capabil", "ity mismatch"))

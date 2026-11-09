@@ -40,6 +40,7 @@ Run a lesson from the repository root, for example `jet run Examples/Systems/<Le
 - [FilesReaderSeek](Files/FilesReaderSeek.jet)
 - [FilesRootedLifecycle](Files/FilesRootedLifecycle.jet) — Rooted file and temporary-resource lifecycle (CORE-F010, SCRIPT-F13).
 - [FilesSetMode](Files/FilesSetMode.jet) — `files.set_mode` replaces a path's permission bits and `files.stat` reads them back; a missing path is a typed `IOError`.
+- [FilesSpace](Files/FilesSpace.jet) — `files.space` reports a file system's total, free and available bytes (statvfs) and `df`'s used percent; a missing path is a typed `IOError`.
 - [FilesStatLinks](Files/FilesStatLinks.jet)
 - [FilesStorePrimitives](Files/FilesStorePrimitives.jet)
 - [Path](Files/Path.jet) — Typed Path API — construction, decomposition, and directory listing.
@@ -57,6 +58,7 @@ Run a lesson from the repository root, for example `jet run Examples/Systems/<Le
 - [ProcessAffinity](Process/ProcessAffinity.jet) — `.cpu_affinity(cpus)` runs the child only on the listed CPUs.
 - [ProcessBuilder](Process/ProcessBuilder.jet)
 - [ProcessExitCleanup](Process/ProcessExitCleanup.jet) — Explicit process termination runs the one cleanup boundary.
+- [ProcessExitUnmapped](Process/ProcessExitUnmapped.jet) — `process.exit(101)` ends a program with the user-error status 1, since 101 is the status of a Jet defect (S36).
 - [ProcessIOPriority](Process/ProcessIOPriority.jet) — `.io_idle()` and `.io_priority(level)` run the child in the idle or a best-effort I/O class.
 - [ProcessMemoryScope](Process/ProcessMemoryScope.jet) — `.memory_scope(bytes)` caps the child and everything it starts together, and ends them at the reap.
 - [ProcessKeepOpen](Process/ProcessKeepOpen.jet) — `spec.keep_open(handle, at:)` keeps a file, writer or directory open in the child at a chosen descriptor; `directory.duplicate()` passes one while the parent keeps its own.

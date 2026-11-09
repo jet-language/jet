@@ -12,7 +12,7 @@ the fields that the worker and artifact need:
 
 | Worker or artifact | Add to the brief |
 |---|---|
-| Source implementation | The dev worktree, the last dev commit, the paths the worker owns and commits on `dev`, applicable authority and invariants, complete consumer/caller cutover, and the exact criterion proof command with its expected observable result. |
+| Source implementation | The last dev commit, the worker's own export under `$JET_SCRATCH_ROOT/lanes/<Worker>/`, the paths it owns, the submission contract in [`intake.md`](intake.md), applicable authority and invariants, complete consumer/caller cutover, and the exact criterion proof command with its expected observable result for the submission's `tests`. |
 | `.jet` source writer | The source file's scoped checks: `Tools/agent/JetEnv.jet jet check path/to/file.jet` and `Tools/agent/JetEnv.jet jet fmt --check path/to/file.jet`. These are source checks, not runtime, tier, snapshot, golden, or generated-artifact proof. |
 | Prose or static-data writer | The user-visible audience, source-of-truth paths, link/path consumers, and the expected `DOCS ONLY` receipt. Do not require compiler commands for prose-only work. |
 | Review worker | The exact bounded artifact, acceptance criteria, authority, invariants, and evidence to inspect. A review worker reports findings and does not repair the artifact. |
@@ -48,14 +48,14 @@ blanket worker requirement.
 
 ## Receipt shapes
 
-- **Code:** the first line is the exact final `CHECK OK` line emitted by
-  `Tools/agent/LaneCheck.jet`; then list changed paths, checks actually run,
-  blockers, and the named implementer. A missing or failed receipt is rejected
-  and the same card is rebriefed with the exact error; the orchestrator does not
-  repair the worker's implementation.
-- **`.jet` code:** include the `CHECK OK` line when the code lane ran, plus the
-  exact `Tools/agent/JetEnv.jet jet check …` and `jet fmt --check …` results.
-  These checks do not authorize runtime claims.
+- **Code:** a submission folder in the orchestrator's inbox
+  ([`intake.md`](intake.md)) plus a one-line notice naming it. The folder lists
+  the changed paths in its patch, the checks actually run in `msg`, blockers,
+  and the criteria claimed in `cards`. A submission that fails a batch is
+  returned with every failure; the orchestrator does not repair the worker's
+  implementation.
+- **`.jet` code:** `msg` names the exact `jet check …` and single-file test
+  results. These checks do not authorize runtime claims.
 - **Prose or static data:** the first line is exactly `DOCS ONLY`; then list
   changed paths, source references read, blockers, and the named implementer.
 - **Review:** identify the artifact and return findings, unknowns, and the

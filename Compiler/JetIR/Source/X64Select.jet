@@ -4156,9 +4156,10 @@ ir_x64_test_sha_line: fn(line: String) -> [U8] Never! {
     ir_x64_test_leaf(line, [String]{"state", "data", "table"}, false).code
 }
 
-// The SHA-256 leaf's SSE, SSSE3, SSE4.1 and SHA forms, each against the
-// bytes the Intel SDM gives it, with REX for xmm8 and up.
-#Test("The SSE and SHA template forms assemble to their SDM encodings") {
+// The SHA-256, AES and GHASH leaves' SSE, SSSE3, SSE4.1, SHA, AES-NI and
+// PCLMULQDQ forms, each against the bytes the Intel SDM gives it, with REX
+// for xmm8 and up.
+#Test("The SSE, SHA, AES-NI and PCLMULQDQ template forms assemble to their SDM encodings") {
     assert(ir_x64_test_sha_line("movups xmm1, xmmword ptr [{{state}}]") == [U8]{0x0f, 0x10, 0x0f})
     assert(ir_x64_test_sha_line("movups xmmword ptr [{{state}} + 16], xmm2") == [U8]{0x0f, 0x11, 0x57, 0x10})
     assert(ir_x64_test_sha_line("movups xmm8, xmmword ptr [{{table}}]") == [U8]{0x44, 0x0f, 0x10, 0x02})
@@ -4171,9 +4172,23 @@ ir_x64_test_sha_line: fn(line: String) -> [U8] Never! {
     assert(ir_x64_test_sha_line("sha256rnds2 xmm2, xmm1") == [U8]{0x0f, 0x38, 0xcb, 0xd1})
     assert(ir_x64_test_sha_line("sha256msg1 xmm6, xmm3") == [U8]{0x0f, 0x38, 0xcc, 0xf3})
     assert(ir_x64_test_sha_line("sha256msg2 xmm4, xmm3") == [U8]{0x0f, 0x38, 0xcd, 0xe3})
+    assert(ir_x64_test_sha_line("pxor xmm0, xmm2") == [U8]{0x66, 0x0f, 0xef, 0xc2})
+    assert(ir_x64_test_sha_line("por xmm5, xmm3") == [U8]{0x66, 0x0f, 0xeb, 0xeb})
+    assert(ir_x64_test_sha_line("aesenc xmm0, xmm4") == [U8]{0x66, 0x0f, 0x38, 0xdc, 0xc4})
+    assert(ir_x64_test_sha_line("aesenclast xmm9, xmm4") == [U8]{0x66, 0x44, 0x0f, 0x38, 0xdd, 0xcc})
+    assert(ir_x64_test_sha_line("aesdec xmm1, xmm12") == [U8]{0x66, 0x41, 0x0f, 0x38, 0xde, 0xcc})
+    assert(ir_x64_test_sha_line("aesdeclast xmm3, xmm5") == [U8]{0x66, 0x0f, 0x38, 0xdf, 0xdd})
+    assert(ir_x64_test_sha_line("pclmulqdq xmm2, xmm1, 17") == [U8]{0x66, 0x0f, 0x3a, 0x44, 0xd1, 0x11})
+    assert(ir_x64_test_sha_line("psrlq xmm3, 63") == [U8]{0x66, 0x0f, 0x73, 0xd3, 0x3f})
+    assert(ir_x64_test_sha_line("psllq xmm2, 1") == [U8]{0x66, 0x0f, 0x73, 0xf2, 0x01})
+    assert(ir_x64_test_sha_line("psrldq xmm4, 8") == [U8]{0x66, 0x0f, 0x73, 0xdc, 0x08})
+    assert(ir_x64_test_sha_line("pslldq xmm10, 8") == [U8]{0x66, 0x41, 0x0f, 0x73, 0xfa, 0x08})
     names: [String]{"state", "data", "table"}
     assert(x64_assemble_template("pshufd xmm1, xmm1", names, false, false).error != None)
     assert(x64_assemble_template("pshufd xmm1, xmm1, 256", names, false, false).error != None)
+    assert(x64_assemble_template("psllq xmm2", names, false, false).error != None)
+    assert(x64_assemble_template("psllq xmm2, 256", names, false, false).error != None)
+    assert(x64_assemble_template("psllq rax, 1", names, false, false).error != None)
     assert(x64_assemble_template("pshufd xmm1, xmm1, 177 ; -> return", names, true, false).error != None)
 }
 

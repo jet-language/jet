@@ -1,0 +1,22 @@
+# Claim: a local whose value closes, reassigned from a call that reads it (`x = sub(x, a) ?? ...`, also inside a loop with `?? return Err(err)`, in a helper, in the entry, and through `nx := sub(x, a) ?? ...; x = nx`), closes its old value exactly once before that value drops, on o0, o1, o2 and web.
+# Hand-derived: Close moves its list out and prints its length and sum, so a close after the drop prints a wrong sum or faults; each old value closes at its reassignment, the rest latest first at their scope ends.
+fixture: reassigned_close_local_closes_its_old_value_once_before_its_drop.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run --optimize=none main.jet
+exit: 0 # o0
+stdout: = reassigned_close_local_closes_its_old_value_once_before_its_drop.out # o0
+step: jet run --optimize=basic main.jet
+exit: 0 # o1
+stdout: = reassigned_close_local_closes_its_old_value_once_before_its_drop.out # o1
+step: jet run --optimize=full main.jet
+exit: 0 # o2
+stdout: = reassigned_close_local_closes_its_old_value_once_before_its_drop.out # o2
+when tool node
+step: jet build --target web main.jet
+exit: 0
+step web: node app.js
+cwd: .jet/build
+exit: 0
+stdout: = reassigned_close_local_closes_its_old_value_once_before_its_drop.out # web
+end when

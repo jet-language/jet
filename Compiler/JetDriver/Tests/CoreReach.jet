@@ -11,7 +11,9 @@ use {
     jet_cli.[jet_cli_driver_request]
 }
 
-reach_test_load: fn(source: String) -> JetDriverLoadResult {
+// The load of `source` beside the Core module `core.devtools`, whose text is
+// `owner`, and its cataloged part `__core_devtools_table`.
+reach_test_load_owner: fn(source: String, owner: String) -> JetDriverLoadResult {
     snapshot: JetDriverAuthorizedSourceSnapshot{
         roots: [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{
             canonical_path: "/reach-fixture",
@@ -24,14 +26,18 @@ reach_test_load: fn(source: String) -> JetDriverLoadResult {
         entry_path: "/reach-fixture/main.jet",
     }
     request := jet_cli_driver_request(snapshot, [JetDriverCoreSource]{}, Val(1), JetDriverCompileMode.Check)
-    // `lookup` is the only code that names the table part; a comment naming
-    // it reaches nothing.
-    owner: "use {{\n    table: __core_devtools_table\n}}\n\nplain: fn() -> Int Never! {{ 1 }}\n\n// lookup reads table.value\nlookup: fn() -> Int Never! {{ table.value() }}\n"
     request.core_sources = [JetDriverCoreSource]{
         {module_name: "core.devtools", alias: "core_devtools", path: "Core/devtools-reach.jet", owner: "", owned_members: [String]{}, runtime: false, text: jet_driver_core_text(owner)},
         {module_name: "__core_devtools_table", alias: "__core_devtools_table", path: "Core/devtools-reach-table.jet", owner: "core.devtools", owned_members: [String]{}, runtime: false, text: jet_driver_core_text("value: fn() -> Int Never! {{ 7 }}\n")},
     }
-    load: jet_driver_load(request)
+    jet_driver_load(request)
+}
+
+reach_test_load: fn(source: String) -> JetDriverLoadResult {
+    // `lookup` is the only code that names the table part; a comment naming
+    // it reaches nothing.
+    owner: "use {{\n    table: __core_devtools_table\n}}\n\nplain: fn() -> Int Never! {{ 1 }}\n\n// lookup reads table.value\nlookup: fn() -> Int Never! {{ table.value() }}\n"
+    load: reach_test_load_owner(source, owner)
     assert(load.complete && !jet_driver_has_errors(load.diagnostics))
     load
 }
@@ -66,4 +72,12 @@ reach_test_functions: fn(load: JetDriverLoadResult, module_name: String) -> [Str
     assert(reach_test_has_module(load, "__core_devtools_table"))
     assert_eq(reach_test_functions(load, "core.devtools"), [String]{"plain", "lookup"})
     assert_eq(reach_test_functions(load, "__core_devtools_table"), [String]{"value"})
+}
+
+#Test("a Core module's import of a part the catalog doesn't hold stops the load with E1001") {
+    owner: "use {{\n    table: __core_devtools_table\n    probe: __core_devtools_probe\n}}\n\nplain: fn() -> Int Never! {{ 1 }}\n"
+    load: reach_test_load_owner("use tools: core.devtools\nrun: fn() {{ print(tools.plain()) }}\n", owner)
+    assert(!load.complete)
+    codes: loop diagnostic in load.diagnostics -> "{diagnostic.code}: {diagnostic.what}"
+    assert_eq(codes, [String]{"E1001: There is no core module `__core_devtools_probe`"})
 }

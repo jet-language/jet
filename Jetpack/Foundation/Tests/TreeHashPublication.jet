@@ -815,7 +815,7 @@ foundation_publication_test_staged: fn(root: String, expected: String) Never! -[
     }
 }
 
-#Test("streaming SHA256 emits the same raw bytes through empty updates") {
+#Test("streaming SHA256 emits the same digest through empty updates") {
     hasher := StreamingSHA256.new()
     hasher.update([U8]{})
     hasher.update([U8]{97})
@@ -823,7 +823,7 @@ foundation_publication_test_staged: fn(root: String, expected: String) Never! -[
     hasher.update([U8]{98, 99})
     bytes: "abc".bytes()
     view: bytes[0..<bytes.len()]
-    assert_eq(hasher.finalize(), sha256_bytes(view))
+    assert_eq(hasher.finalize_hex(), sha256_hex_bytes(sha256_bytes(view)))
 }
 
 #Test("canonical SHA256 hashes only the retained input window") {

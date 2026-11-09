@@ -1,6 +1,7 @@
 # HAND-PORT tests/tir_patterns_and_fields.rs:1684-1741 card_2835_generic_trait_authority_tier_parity
 # PENDING-KIT; no runtime/reference proof.
-# Original pure bare-policy and effectful limited-policy3modes; exact5 LF and E1803+empty stdout,full exit/stdout/stderr equality,independent stores.
+# Original pure bare-policy and effectful limited-policy3modes; exact5 LF, full exit/stdout/stderr equality, independent stores.
+# Every effect is allowed unless a row denies it: the effectful program's `Env` read through a generic trait impl is outside its package's `allow` row, so it runs and the notice names it (was E1803 + empty stdout).
 fixture: card_2835_generic_trait_authority_tier_parity.fixture
 env: NO_COLOR=1
 mkdir: p0_release-store
@@ -27,17 +28,17 @@ mkdir: p1_release-jetpack
 step p1_release: jet run --release effectful/main.jet
 env: JET_STORE_DIR={work}/p1_release-store
 env: JETPACK_ROOT={work}/p1_release-jetpack
-exit: nonzero
-stdout: empty
-stderr: ~ "E1803" # original authority failure
+exit: 0
+stdout: = card_2835_generic_trait_authority_tier_parity.stdout.expected
+stderr: ~ "reads environment variables (-A hides this)" # the effect behind the generic trait call is found
 mkdir: p1_default-store
 mkdir: p1_default-jetpack
 step p1_default: jet run effectful/main.jet
 env: JET_STORE_DIR={work}/p1_default-store
 env: JETPACK_ROOT={work}/p1_default-jetpack
-exit: nonzero
-stdout: empty
-stderr: ~ "E1803" # original authority failure
+exit: 0
+stdout: = card_2835_generic_trait_authority_tier_parity.stdout.expected
+stderr: ~ "reads environment variables (-A hides this)" # the effect behind the generic trait call is found
 exit: == p1_release
 stdout: == p1_release
 stderr: == p1_release

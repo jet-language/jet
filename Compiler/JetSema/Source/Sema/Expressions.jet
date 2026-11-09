@@ -2689,6 +2689,7 @@ sema_expr_record_call_fact: fn(environment: SemaScopeEnvironment, program: SemaP
         facts: checked.facts,
         discarded: false,
         foreign_effect_root: foreign_effect_root,
+        foreign_opaque: sema_expr_call_foreign_opaque(program, callee),
         unsafe_foreign_name: sema_expr_call_unsafe_foreign_name(program, callee, foreign_effect_root),
         foreign_capability: sema_expr_call_foreign_capability(program, callee),
         replacement_hidden: sema_expr_call_replacement_hidden(program, scopes, callee, span),
@@ -2713,14 +2714,37 @@ sema_expr_record_call_fact: fn(environment: SemaScopeEnvironment, program: SemaP
 }
 
 // An extern callee (`#FFI(<lang>)` body or foreign row) carries its one foreign
-// effect root; a Jet callee has none.
+// effect root; a written C binding with no descriptor-owned root carries the
+// `FFI.C` leaf; a Jet callee has none.
 sema_expr_call_foreign_effect_root: fn(program: SemaProgramTables, callee: SymbolID?) -> String? {
     symbol: callee ?? return None
     if program.registration_graph == .Val(graph) {
         abi: sema_registration_callable_abi(graph, symbol) ?? return None
-        if abi.is_extern -> return abi.foreign_effect_root
+        if !abi.is_extern -> return None
+        if abi.foreign_effect_root == .Val(root) -> return Val(root)
+        if abi.is_c_abi && !sema_expr_call_core_binding(symbol) -> return Val("FFI.C")
     }
     None
+}
+
+// Whether `callee` is a C binding whose row no descriptor owns (a written
+// `#Import c.<lib>: module` function): nothing bounds what the C code does, so
+// the call is open-world.
+sema_expr_call_foreign_opaque: fn(program: SemaProgramTables, callee: SymbolID?) -> Bool {
+    symbol: callee ?? return false
+    if program.registration_graph == .Val(graph) {
+        abi: sema_registration_callable_abi(graph, symbol) ?? return false
+        return abi.is_extern && abi.is_c_abi && abi.foreign_effect_root == None && !sema_expr_call_core_binding(symbol)
+    }
+    false
+}
+
+// Whether `symbol` is declared in Core: Core's own C bindings (SQLite, TLS) are
+// toolchain code whose public functions declare the rows they hold
+// (`core.db.open` is `-[DB]>`), so their calls are not open-world.
+sema_expr_call_core_binding: fn(symbol: SymbolID) -> Bool Never! {
+    parts: symbol.key.split(":").to_list()
+    parts.len() > 1 && sema_module_is_core_source(parts[1])
 }
 
 // Whether `callee` is an extern body (`#FFI(<lang>)` function or foreign

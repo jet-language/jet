@@ -689,12 +689,12 @@ VAULT_SECRET: [String]{
 // a read and never a write. `copy` and `copy_dir` both read and write, so
 // they keep the bare `FS` root.
 FILES_READS: [String]{
-    "scope", "read", "read_bytes", "read_at", "read_link", "map", "open", "exists", "is_dir", "is_fifo", "is_socket",
+    "scope", "read", "read_bytes", "read_at", "read_link", "map", "open", "exists", "is_dir", "is_fifo", "is_socket", "space",
     "stat", "lstat", "list_dir", "walk", "walk_files", "glob", "canonicalize", "absolute",
     "__read_bytes_os", "__read_at_os", "__read_link_os", "__scope_read_at", "__reader_line_bytes",
     // #3593 provider leaves behind Core/Files/files.jet.
     "__open_reader", "__open_reader_raw", "__open_directory", "__close_directory", "__list_directory", "__stat_at", "__path_kind", "__read_link_at",
-    "__space",
+    "__space", "__access_raw", "__reader_advise", "__map_advise",
     "__xattr_names", "__xattr_get", "__reader_stat", "__writer_stat", "__metadata_directory", "__directory_fd", "__reader_fd", "__writer_fd", "__lock_fd",
     "__map_raw", "__list_dir_raw", "__stat_mode_raw", "__canonicalize_raw", "__walk_parallel_raw",
     "__entries_context", "__entries_close", "__entries_release", "__entries_read_dir",
@@ -709,7 +709,7 @@ FILES_WRITES: [String]{
     "__atomic_reserve", "__atomic_finish", "__atomic_remove", "__atomic_rename", "__atomic_sync_parent", "__atomic_close",
     "jet_files_link_reader_at_raw",
     "set_mode", "mkdtemp", "mktemp", "temp_dir", "temp_file", "lock", "__open_writer", "__create_directory",
-    "__fsync_directory", "__rename_at", "__remove_at", "__xattr_set", "__writer_set_mode", "__flock",
+    "__fsync_directory", "__rename_at", "__remove_at", "__xattr_set", "__writer_set_mode", "__writer_allocate", "__flock",
     "__open_writer_raw", "__remove_at_raw",
     "__remove_raw", "__remove_dir_raw", "__remove_all_raw", "__hard_link_raw", "__fsync_raw", "__syncfs_raw", "__chown_raw",
     "__set_mode_raw", "__symlink_directory_raw", "__symlink_raw", "__mkdtemp_raw", "__temp_dir_raw", "__temp_file_raw",
@@ -725,7 +725,7 @@ NET_WAITS: [String]{
     "__tcp_accept", "__tcp_connect", "__tcp_connect_addr", "__tcp_connect_timeout", "__tcp_connect_happy",
     "__tcp_reply",
     "__udp_send_to", "__udp_recv_from", "__udp_send_bytes_to", "__udp_receive",
-    "__unix_accept", "__unix_read", "__unix_write_all_bytes",
+    "__unix_accept", "__unix_read", "__unix_write_all_bytes", "__unix_send_fds_raw", "__unix_receive_fds_raw", "__unix_wait_raw",
     "__unix_connect_host", "__unix_connect_deadline_host",
     "tcp_accept", "tcp_connect", "tcp_connect_addr", "tcp_connect_timeout", "tcp_connect_happy", "tcp_read",
     "tcp_write", "tcp_read_bytes", "tcp_read_text", "tcp_write_bytes", "tcp_write_all_bytes", "tcp_write_text",
@@ -810,6 +810,9 @@ call_effect: fn(module_name: String, member: String) -> String? Never! {
             "__fork" | "__setsid" -> Val("Exec")
             else -> Val("Env")
         }
+        // Joining the scheduler's threads readies the process for a raw exec
+        // or fork, so it needs the same root as a child launch.
+        "core.tasks" -> if member == "__quiesce" -> Val("Exec") else -> None
         "core.db" | "core.jobs" -> Val("DB")
         "core.auth" -> when_listed(member, AUTH_DB, "DB")
         "core.plugin" -> Val("Exec")

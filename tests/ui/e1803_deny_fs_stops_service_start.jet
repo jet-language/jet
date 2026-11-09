@@ -1,0 +1,14 @@
+// @run_deny FS
+// Starting a service tree recovers its durable state
+// store, so the call reaches the files its Core source reads and writes.
+// `--deny=FS` takes them away, so E1803 names both before anything runs.
+use service: core.service
+
+worker: fn() {}
+
+run: fn() {
+    tree := service.tree("orders")
+    _endpoint: tree.worker("intake", worker, capacity: 1) ?? panic("worker")
+    tree.start() ?? panic("start")
+    print("started")
+}

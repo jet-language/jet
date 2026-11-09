@@ -1861,6 +1861,12 @@ jet_cli_test: fn(jet_argv: [String], color: Bool, quiet: Bool, verbose: Bool, th
         if positionals.len() == 0 && !jet_cli_has_manifest_above(directory) && !jet_cli_workspace_present(jet_cli_workspace_source(directory, color)) {
             return jet_cli_fail("E2104", "no file given and no `package.jet` found in this directory or above", jet_cli_why("E2104"), "run `jet test <file.jet>` or cd into a project", color, JET_DRIVER_EXIT_USAGE)
         }
+        // A directory of the Core library tests each Core source under it
+        // that declares #Tests, as its own child `jet test <file>`
+        // (Host.jet jet_cli_compile_core_test).
+        if positionals.len() > 0 {
+            if jet_cli_core_test_files(directory) == .Val(core) -> return jet_cli_test_workspace_plan(jet_argv, target_at, core.names, core.files, color, quiet)
+        }
         workspace_notices := [String]{}
         if jet_cli_workspace_test_members(directory, !show_default, color, workspace_notices) == {
             // Each child resolves its member, and writes the notices, itself.

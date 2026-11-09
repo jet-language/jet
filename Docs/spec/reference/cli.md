@@ -309,11 +309,7 @@ the human status. `--json` prints one `jet.status/v1` line with action `fix`
 instead: `fix.file`, `fix.dry_run`, `fix.applied` (the count), `fix.skipped`
 (each edit left out, with its `title`, `reason`, `span` and `new_text`) and
 `fix.log` (the replay log, or null when nothing was written); machine mode
-does not create a fake fix receipt. A script with no package block whose
-rights are undecided gets the leading `package` block that grants them as a
-needs-review edit: the E1803 report of `jet run --json` carries it, plain
-`jet fix` skips it, and `jet fix --all` applies it. Granting a right is a
-decision, not a repair. Publication uses the held codemod transaction and its durable undo
+does not create a fake fix receipt. Publication uses the held codemod transaction and its durable undo
 journal. Rename provenance comes from uniquely matched checked before/after
 definition facts; when those checks cannot establish a rename, the receipt
 records the exact changed byte region instead.
@@ -564,8 +560,8 @@ exactly the flags the command takes.
   `--profile` selects `release`, `debug`, or a named bundle (`ci` and
   `hardened` are not built yet).
 - `--allow=RIGHTS` and `--deny=RIGHTS` set effect roots or leaves for
-  `run`, `build`, `jobs`, `repl`, and `db`; `-A` (`--allow-all`) allows every
-  right on `run` and `build`; `jet inspect gates` records these and the other
+  `run`, `build`, `jobs`, `repl`, and `db`; `-A` (`--allow-all`) allows and
+  acknowledges every right on `run` and `build`, so a run names none; `jet inspect gates` records these and the other
   invocation choices as gate rows; `--offline` reuses only cached
   signed toolchain and package data.
 - `--locked` requires locked dependency and provenance facts; `--fixtures`
@@ -659,7 +655,9 @@ file is the program's (a `--` right after it only separates), so a
 or `-v` comes before `--`; a verbose run reports them before the program
 starts, then one line naming the effects the program uses
 (`jet run: effects used: Exec, IO, Time.Wait`), so `jet run --verbose -A`
-shows what the blanket grant let through. `--json` reports the same problems as the standard `diagnostics` JSON
+shows what the blanket grant let through. The list follows every call and
+every function the program takes as a value (a function stored in a list, each
+implementation a trait-value call may run), and a C call lists `FFI.C`. `--json` reports the same problems as the standard `diagnostics` JSON
 status envelope on stderr, leaving stdout to the program; it never changes the
 exit status. Run flags other than `--release`, `--profile`, `--verbose`, `--quiet`,
 `--json`, `--color`, `--threads`, `--trace`, `--allow`, `-A`, and `--deny` are
@@ -768,18 +766,28 @@ them for a test harness). The readable stream is written through
 `--trace=FILE`. A trace that cannot be written stops; the compile does not.
 
 Before `jet build` or `jet run` writes anything, the Jet host checks the
-application authority ([`Authority.jet`](../../../Compiler/JetCli/Source/Cli/Authority.jet)):
-the checked entry's solved effect row against the beginner floor (`IO`,
-`Mem.Alloc`, `Exec.Args`), the entry package's `authority` (from
+application authority ([`Authority.jet`](../../../Compiler/JetCli/Source/Cli/Authority.jet)).
+The law is spec.md "Application authority" (D-AUTH-DEFAULT1): every effect is
+allowed, a run names its effects on stderr before the program starts and
+again when they change, written rows are ceilings, and `--deny` wins with
+E1803. The host compares the checked entry's solved effect row against the
+floor (`IO`, `Mem.Alloc`, `Exec.Args`), the entry package's `authority` (from
 `package.jet` or the entry's leading inline `package: { … }` block, which the
 Jet loader reads with the same field parser and masks before parsing), and the
-`--allow=`/`--deny=` rows of the invocation, where `-A` allows every right and
-a script (a file whose first line is a `#!/...` launch line) answers as `-A`
-does. A denied or undecided right is
-E1803, exit 1; a file with no package manifest leads the Fix with the exact
-`--allow` command and its `-A` form. The interactive confirmation (D-SCRIPT-CONFIRM1), authority
-receipts, and lint-policy enforcement are not ported yet: the Jet host always
-answers as a non-interactive run.
+`--allow=`/`--deny=` rows of the invocation, where `-A` acknowledges every
+right. A right a `deny` row or `--deny` names is E1803, exit 1, before the
+program starts, and the Fix names the row to drop. Every other right the
+floor, the `allow` row, `--allow` or `-A` does not cover is named in one
+stderr line, `note: tool.jet reads files and uses the network (-A hides
+this)` ([`EffectNotice.jet`](../../../Compiler/JetCli/Source/Cli/EffectNotice.jet)):
+`FFI` and every `Exec` right but `Exec.Args` and `Exec.Exit` say what they
+can reach is not bounded by the list. When standard input is a terminal the
+set last named is kept per canonical entry path under
+`$XDG_STATE_HOME/jet/effects` (else `~/.local/state/jet/effects`), and an
+unchanged set is not named again; otherwise every run names it. `--json`
+reports the set as one `run.effects` status on stderr instead. A written
+`allow` row does not bound the run yet (#6614 c5). There is no interactive
+question.
 
 `jet run --allow=FS.Read:<path>` grants `FS.Read` confined to that path: the
 program may read the named file, or the named directory and everything
@@ -818,6 +826,14 @@ traps, each unrun check fails with E3015 rather than running against fresh
 state in the final reporter. Its
 captured output is shown under `--capture=all`, or for a failed run under the
 default `--capture=failed`; the exit is 0 when the harness passed, else 1.
+A source of the toolchain's Core library (`jet test Core/Encoding/Cbor.jet`)
+tests as the Core unit the compiler loads, with Core's privileges: its
+`__core_*` imports and `__` names resolve as in any Core compile, and only its
+own #Tests run; a runtime unit tests as itself. `jet test` of a directory of
+the Core library (`jet test Core/Encoding`) runs `jet test <file>` for each
+Core source under it that declares #Tests, as a workspace runs its members.
+`jet test Compiler --profile core` runs every Core #Test at optimize none,
+basic and full.
 Each test setting (D-TEST-INVOKE1=A, the `JET_TEST_SETTINGS` table in
 `Compiler/JetFoundation/Source/Registry/TestSettings.jet`) has three
 spellings from one row: the flag `--shard=3/8`, the TestProfile field

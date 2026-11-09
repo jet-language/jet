@@ -105,13 +105,16 @@ libm_asinh: fn(x: Float) -> Float {
 }
 
 // acosh.c: log(x + sqrt(x*x-1)); x < 1 is a domain error the called
-// functions handle.
+// functions handle. A negative x of magnitude 2 or more skips the |x| < 2^26
+// branch: musl takes it, and there x + sqrt(x*x-1) cancels to a tiny negative
+// value that turns the log's argument positive, so acosh(-0x1.34e729fd08086p+21)
+// is 8.23 instead of NaN. Its log(x) below is NaN.
 libm_acosh: fn(x: Float) -> Float {
     e: libm_exponent(rt_f64_bits(x))
     // |x| < 2, up to 2ulp error in [1,1.125]
     if (e < I64{0x3ff} + I64{1}) -> return libm_log1p(x - Float{1.0} + libm_sqrt((x - Float{1.0}) * (x - Float{1.0}) + Float{2.0} * (x - Float{1.0})))
-    // |x| < 0x1p26
-    if (e < I64{0x3ff} + I64{26}) -> return libm_log(Float{2.0} * x - Float{1.0} / (x + libm_sqrt(x * x - Float{1.0})))
+    // 2 <= x < 0x1p26
+    if (e < I64{0x3ff} + I64{26} && x > Float{0.0}) -> return libm_log(Float{2.0} * x - Float{1.0} / (x + libm_sqrt(x * x - Float{1.0})))
     // |x| >= 0x1p26 or nan
     libm_log(x) + LIBM_LN2
 }

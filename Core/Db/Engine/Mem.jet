@@ -1,0 +1,599 @@
+// Memory cells of the Jet SQLite engine, a port of SQLite 3.45.0 vdbemem.c:
+// the conversions of a base.Mem between NULL, INTEGER, REAL, TEXT and BLOB
+// and between text encodings, with the affinity routines of vdbe.c
+// (applyNumericAffinity, applyAffinity, numericType) and the
+// sqlite3_value_* readers of vdbeapi.c that read through them.
+//
+// C's Mem manages the storage of Mem.z (MEM_Dyn, MEM_Static, MEM_Ephem,
+// MEM_Term, zMalloc, xDel): a Jet Mem owns its bytes, so the routines that
+// only manage that storage (sqlite3VdbeMemGrow, MakeWriteable,
+// NulTerminate, ShallowCopy, Release) have no counterpart, and no
+// conversion fails for want of memory. A text value's bytes are exactly
+// its n bytes; readers that want C-string semantics stop at a 0x00 byte
+// themselves.
+use {
+    math: core.math
+    base: __core_db_base
+    __core_db_base.[Mem, MEM_NULL, MEM_STR, MEM_INT, MEM_REAL, MEM_BLOB, MEM_INT_REAL, MEM_AFF_MASK, MEM_FROM_BIND, MEM_ZERO, MEM_SUBTYPE, MEM_TYPE_MASK]
+    util: __core_db_util
+    __core_db_util.[clear_bits]
+    printf: __core_db_printf
+    __core_db_printf.[PrintfArgs]
+}
+
+// MemSetTypeFlag: replace the datatype bits (and MEM_Zero) with f.
+set_type_flag: fn(m: &Mem, f: Int) Never! {
+    m.flags = clear_bits(m.flags, MEM_TYPE_MASK.bit_or(MEM_ZERO)).bit_or(f)
+}
+
+// sqlite3VdbeMemTranslate: re-encode a text value as enc (utf.c); the
+// datatype and subtype bits are kept.
+mem_translate: fn(m: &Mem, enc: Int) Never! {
+    m.z = util.translate(m.z, m.enc, enc)
+    if m.enc != base.UTF8 && enc != base.UTF8 {
+        m.enc = enc
+        return
+    }
+    m.flags = MEM_STR.bit_or(m.flags.bit_and(MEM_AFF_MASK.bit_or(MEM_SUBTYPE)))
+    m.enc = enc
+}
+
+// sqlite3VdbeChangeEncoding: give a text value encoding enc; any other
+// value only takes enc as its encoding.
+change_encoding: fn(m: &Mem, enc: Int) Never! {
+    if m.flags.bit_and(MEM_STR) == 0 {
+        m.enc = enc
+        return
+    }
+    if m.enc == enc -> return
+    mem_translate(m, enc)
+}
+
+// sqlite3VdbeMemHandleBom: a UTF-16 text starting with a byte-order mark
+// loses it and takes the encoding it names.
+handle_bom: fn(m: &Mem) Never! {
+    if m.z.len() <= 1 -> return
+    b1: Int.from_u8(m.z[0])
+    b2: Int.from_u8(m.z[1])
+    bom := 0
+    if b1 == 254 && b2 == 255 -> bom = base.UTF16BE
+    if b1 == 255 && b2 == 254 -> bom = base.UTF16LE
+    if bom == 0 -> return
+    m.z = m.z[2..<m.z.len()].copy()
+    m.enc = bom
+}
+
+// sqlite3VdbeMemExpandBlob: a MEM_Zero blob gets its zero bytes appended.
+// A no-change NULL (MEM_Null|MEM_Zero, nothing to expand) is left as is.
+expand_blob: fn(m: &Mem) Never! {
+    if m.flags.bit_and(MEM_ZERO) == 0 -> return
+    if m.z.len() + m.i <= 0 && m.flags.bit_and(MEM_BLOB) == 0 -> return
+    loop _k in 0..<m.i -> m.z.push(U8{0})
+    m.flags = clear_bits(m.flags, MEM_ZERO)
+}
+
+// vdbeMemRenderNum: the text of an INTEGER, REAL or IntReal value. A REAL
+// renders as "%!.15g" into a 32-byte buffer, as sqlite3VdbeMemStringify
+// sizes it.
+render_num: fn(m: Mem) -> [U8] Never! {
+    if m.flags.bit_and(MEM_INT) != 0 -> return "{m.i}".bytes()
+    r: if m.flags.bit_and(MEM_INT_REAL) != 0 -> util.int_to_double(m.i) else -> m.r
+    printf.snprintf(32, "%!.15g".bytes(), [Mem]{base.mem_real(r)})
+}
+
+// sqlite3VdbeMemStringify: add the text of a number in encoding enc; with
+// `force` the numeric datatypes are dropped.
+stringify: fn(m: &Mem, enc: Int, force: Bool) Never! {
+    m.z = render_num(m)
+    m.enc = base.UTF8
+    m.flags = m.flags.bit_or(MEM_STR)
+    if force -> m.flags = clear_bits(m.flags, MEM_INT.bit_or(MEM_REAL).bit_or(MEM_INT_REAL))
+    change_encoding(m, enc)
+}
+
+// sqlite3RealToI64: (i64)r, saturating outside the 64-bit range.
+real_to_i64: fn(r: Float) -> Int Never! {
+    if r < -9223372036854774784.0 -> return base.I64_MIN
+    if r > 9223372036854774784.0 -> return base.I64_MAX
+    Int.from_float(math.trunc(r)) ?? 0
+}
+
+// sqlite3RealSameAsInt: r1 and the integer i taken from it are the same
+// value, within the 2^51 range where every such REAL is exact.
+real_same_as_int: fn(r1: Float, i: Int) -> Bool Never! {
+    if r1 == 0.0 -> return true
+    math.to_bits(r1) == math.to_bits(util.int_to_double(i)) && i >= -2251799813685248 && i < 2251799813685248
+}
+
+// sqlite3VdbeIntValue: the integer a value reads as; a REAL truncates and a
+// text or blob reads its leading integer (sqlite3Atoi64).
+int_value: fn(m: Mem) -> Int Never! {
+    f: m.flags
+    if f.bit_and(MEM_INT.bit_or(MEM_INT_REAL)) != 0 -> return m.i
+    if f.bit_and(MEM_REAL) != 0 -> return real_to_i64(m.r)
+    if f.bit_and(MEM_STR.bit_or(MEM_BLOB)) != 0 -> return util.atoi64(m.z, m.enc).value
+    0
+}
+
+// sqlite3VdbeRealValue: the REAL a value reads as; a text or blob reads
+// its leading number (sqlite3AtoF).
+real_value: fn(m: Mem) -> Float Never! {
+    f: m.flags
+    if f.bit_and(MEM_REAL) != 0 -> return m.r
+    if f.bit_and(MEM_INT.bit_or(MEM_INT_REAL)) != 0 -> return util.int_to_double(m.i)
+    if f.bit_and(MEM_STR.bit_or(MEM_BLOB)) != 0 -> return util.atof(m.z, m.enc).value
+    Float{0}
+}
+
+// sqlite3VdbeBooleanValue: true unless zero; if_null for NULL.
+boolean_value: fn(m: Mem, if_null: Bool) -> Bool Never! {
+    if m.flags.bit_and(MEM_INT.bit_or(MEM_INT_REAL)) != 0 -> return m.i != 0
+    if m.flags.bit_and(MEM_NULL) != 0 -> return if_null
+    real_value(m) != 0.0
+}
+
+// sqlite3VdbeIntegerAffinity: a REAL or IntReal becomes an INTEGER when the
+// round trip is exact and the integer is neither extreme (ticket #3922).
+integer_affinity: fn(m: &Mem) Never! {
+    if m.flags.bit_and(MEM_INT_REAL) != 0 {
+        set_type_flag(m, MEM_INT)
+        return
+    }
+    ix: real_to_i64(m.r)
+    if m.r == util.int_to_double(ix) && ix > base.I64_MIN && ix < base.I64_MAX {
+        m.i = ix
+        set_type_flag(m, MEM_INT)
+    }
+}
+
+// sqlite3VdbeMemIntegerify.
+integerify: fn(m: &Mem) Never! {
+    m.i = int_value(m)
+    set_type_flag(m, MEM_INT)
+}
+
+// sqlite3VdbeMemRealify.
+realify: fn(m: &Mem) Never! {
+    m.r = real_value(m)
+    set_type_flag(m, MEM_REAL)
+}
+
+// sqlite3VdbeMemNumerify: force an INTEGER or REAL, converting as much of
+// a text or blob as reads as a number.
+numerify: fn(m: &Mem) Never! {
+    if m.flags.bit_and(MEM_INT.bit_or(MEM_REAL).bit_or(MEM_INT_REAL).bit_or(MEM_NULL)) == 0 {
+        rc: util.atof(m.z, m.enc)
+        m.r = rc.value
+        as_int := false
+        ix := 0
+        if rc.kind == 0 || rc.kind == 1 {
+            ai: util.atoi64(m.z, m.enc)
+            if ai.rc <= 1 {
+                as_int = true
+                ix = ai.value
+            }
+        }
+        if !as_int {
+            ix = real_to_i64(m.r)
+            as_int = real_same_as_int(m.r, ix)
+        }
+        if as_int {
+            m.i = ix
+            set_type_flag(m, MEM_INT)
+        } else {
+            set_type_flag(m, MEM_REAL)
+        }
+    }
+    m.flags = clear_bits(m.flags, MEM_STR.bit_or(MEM_BLOB).bit_or(MEM_ZERO))
+}
+
+// alsoAnInt (vdbe.c): the integer a REAL from text equals, else the text's
+// own integer when it is wholly one.
+also_an_int: fn(m: Mem, r: Float) -> Int? Never! {
+    ix: real_to_i64(r)
+    if real_same_as_int(r, ix) -> return Val(ix)
+    util.atoi64_ok(m.z, m.enc)
+}
+
+// applyNumericAffinity (vdbe.c): a text that looks like a number becomes
+// one, and loses its text; with try_for_int a whole REAL becomes INTEGER.
+apply_numeric_affinity: fn(m: &Mem, try_for_int: Bool) Never! {
+    rc: util.atof(m.z, m.enc)
+    if rc.kind <= 0 -> return
+    done := false
+    if rc.kind == 1 {
+        if also_an_int(m, rc.value) == .Val(ix) {
+            m.i = ix
+            m.flags = m.flags.bit_or(MEM_INT)
+            done = true
+        }
+    }
+    if !done {
+        m.r = rc.value
+        m.flags = m.flags.bit_or(MEM_REAL)
+        if try_for_int -> integer_affinity(m)
+    }
+    m.flags = clear_bits(m.flags, MEM_STR)
+}
+
+// applyAffinity / sqlite3ValueApplyAffinity (vdbe.c): the numeric
+// affinities turn number-like text into numbers (preferring INTEGER), TEXT
+// renders numbers as text, BLOB and NONE change nothing.
+apply_affinity: fn(m: &Mem, aff: Int, enc: Int) Never! {
+    if aff >= base.AFF_NUMERIC {
+        if m.flags.bit_and(MEM_INT) == 0 {
+            if m.flags.bit_and(MEM_REAL.bit_or(MEM_INT_REAL)) == 0 {
+                if m.flags.bit_and(MEM_STR) != 0 -> apply_numeric_affinity(m, true)
+            } else if aff <= base.AFF_REAL {
+                integer_affinity(m)
+            }
+        }
+    } else if aff == base.AFF_TEXT {
+        if m.flags.bit_and(MEM_STR) == 0 && m.flags.bit_and(MEM_REAL.bit_or(MEM_INT).bit_or(MEM_INT_REAL)) != 0 -> stringify(m, enc, true)
+        m.flags = clear_bits(m.flags, MEM_REAL.bit_or(MEM_INT).bit_or(MEM_INT_REAL))
+    }
+}
+
+// sqlite3VdbeMemCast: CAST(m AS aff), which converts even when data is
+// lost. NULL stays NULL.
+cast: fn(m: &Mem, aff: Int, enc: Int) Never! {
+    if m.flags.bit_and(MEM_NULL) != 0 -> return
+    if aff == base.AFF_BLOB {
+        if m.flags.bit_and(MEM_BLOB) == 0 {
+            apply_affinity(m, base.AFF_TEXT, enc)
+            if m.flags.bit_and(MEM_STR) != 0 -> set_type_flag(m, MEM_BLOB)
+        } else {
+            m.flags = clear_bits(m.flags, clear_bits(MEM_TYPE_MASK, MEM_BLOB))
+        }
+    } else if aff == base.AFF_NUMERIC {
+        numerify(m)
+    } else if aff == base.AFF_INTEGER {
+        integerify(m)
+    } else if aff == base.AFF_REAL {
+        realify(m)
+    } else {
+        // MEM_Str == MEM_Blob >> 3: a blob is reread as text.
+        m.flags = m.flags.bit_or(m.flags.bit_and(MEM_BLOB) >> 3)
+        apply_affinity(m, base.AFF_TEXT, enc)
+        m.flags = clear_bits(m.flags, MEM_INT.bit_or(MEM_REAL).bit_or(MEM_INT_REAL).bit_or(MEM_BLOB).bit_or(MEM_ZERO))
+        if enc != base.UTF8 && m.z.len().bit_and(1) == 1 -> _: m.z.pop()
+        change_encoding(m, enc)
+    }
+}
+
+// computeNumericType (vdbe.c): MEM_Int or MEM_Real for a text or blob,
+// setting i or r; flags are unchanged.
+compute_numeric_type: fn(m: &Mem) -> Int Never! {
+    expand_blob(m)
+    rc: util.atof(m.z, m.enc)
+    m.r = rc.value
+    if rc.kind <= 0 {
+        if rc.kind == 0 {
+            ai: util.atoi64(m.z, m.enc)
+            if ai.rc <= 1 {
+                m.i = ai.value
+                return MEM_INT
+            }
+        }
+        return MEM_REAL
+    }
+    if rc.kind == 1 {
+        ai: util.atoi64(m.z, m.enc)
+        if ai.rc == 0 {
+            m.i = ai.value
+            return MEM_INT
+        }
+    }
+    MEM_REAL
+}
+
+// numericType (vdbe.c): the numeric datatype bits of a value, computing
+// them for a text or blob.
+numeric_type: fn(m: &Mem) -> Int Never! {
+    nums: MEM_INT.bit_or(MEM_REAL).bit_or(MEM_INT_REAL).bit_or(MEM_NULL)
+    if m.flags.bit_and(nums) != 0 -> return m.flags.bit_and(nums)
+    compute_numeric_type(m)
+}
+
+// sqlite3VdbeMemSetNull.
+set_null: fn(m: &Mem) Never! {
+    m.flags = MEM_NULL
+    m.z = [U8]{}
+}
+
+// sqlite3VdbeMemSetZeroBlob: a blob of n zero bytes, kept unexpanded.
+set_zero_blob: fn(m: &Mem, n: Int) Never! {
+    m.flags = MEM_BLOB.bit_or(MEM_ZERO)
+    m.z = [U8]{}
+    m.i = if n < 0 -> 0 else -> n
+    m.enc = base.UTF8
+}
+
+// sqlite3VdbeMemSetInt64.
+set_int64: fn(m: &Mem, v: Int) Never! {
+    m.z = [U8]{}
+    m.i = v
+    m.flags = MEM_INT
+}
+
+// sqlite3VdbeMemSetDouble: a NaN leaves NULL.
+set_double: fn(m: &Mem, r: Float) Never! {
+    set_null(m)
+    if math.is_nan(r) -> return
+    m.r = r
+    m.flags = MEM_REAL
+}
+
+// sqlite3VdbeMemTooBig: a text or blob longer than `limit` bytes
+// (SQLITE_LIMIT_LENGTH), counting a blob's zero tail.
+too_big: fn(m: Mem, limit: Int) -> Bool Never! {
+    if m.flags.bit_and(MEM_STR.bit_or(MEM_BLOB)) == 0 -> return false
+    n := m.z.len()
+    if m.flags.bit_and(MEM_ZERO) != 0 -> n += m.i
+    n > limit
+}
+
+// sqlite3VdbeMemCopy / sqlite3_value_dup: an independent copy.
+mem_copy: fn(m: Mem) -> Mem Never! {
+    Mem{flags: m.flags, i: m.i, r: m.r, z: m.z.copy(), enc: m.enc, subtype: m.subtype}
+}
+
+// The length of z as a C string of encoding enc: up to the first 0x00 byte
+// in UTF-8, the first 0x0000 unit in UTF-16, and never past `limit`.
+c_text_len: fn(z: [U8], enc: Int, limit: Int) -> Int Never! {
+    if enc == base.UTF8 -> return printf.c_len(z)
+    n := 0
+    loop n <= limit && n + 1 < z.len() && (z[n] != (U8{0}) || z[n + 1] != (U8{0})) -> n += 2
+    n
+}
+
+// sqlite3VdbeMemSetStr: m becomes the text z of encoding enc, or a blob
+// when enc is 0. With n >= 0 the value is the first n bytes; with n < 0 it
+// runs to the C string's terminator. Longer than `limit` bytes is
+// SQLITE_TOOBIG and leaves NULL; a UTF-16 byte-order mark is consumed.
+set_str: fn(m: &Mem, z: [U8], n: Int, enc_in: Int, limit: Int) -> Int Never! {
+    enc := enc_in
+    nbyte := n
+    flags := MEM_STR
+    if nbyte < 0 {
+        nbyte = c_text_len(z, enc, limit)
+    } else if enc == 0 {
+        flags = MEM_BLOB
+        enc = base.UTF8
+    }
+    if nbyte > limit {
+        set_null(m)
+        return base.TOOBIG
+    }
+    m.z = z[0..<(if nbyte < z.len() -> nbyte else -> z.len())].copy()
+    m.flags = flags
+    m.enc = enc
+    if enc > base.UTF8 -> handle_bom(m)
+    base.OK
+}
+
+// sqlite3ValueText: the text of a value in encoding enc, made its text
+// representation (a number keeps its numeric datatype, a blob gains
+// MEM_Str); false for NULL.
+value_text: fn(m: &Mem, enc: Int) -> Bool Never! {
+    if m.flags.bit_and(MEM_STR) != 0 && m.enc == enc -> return true
+    if m.flags.bit_and(MEM_NULL) != 0 -> return false
+    if m.flags.bit_and(MEM_BLOB.bit_or(MEM_STR)) != 0 {
+        expand_blob(m)
+        m.flags = m.flags.bit_or(MEM_STR)
+        if m.enc != enc -> change_encoding(m, enc)
+    } else {
+        stringify(m, enc, false)
+    }
+    true
+}
+
+// sqlite3ValueBytes: the byte length of the value as text of encoding enc
+// (as a blob for a blob).
+value_bytes: fn(m: &Mem, enc: Int) -> Int Never! {
+    f: m.flags
+    if f.bit_and(MEM_STR) != 0 && m.enc == enc -> return m.z.len()
+    if f.bit_and(MEM_STR) != 0 && enc != base.UTF8 && m.enc != base.UTF8 -> return m.z.len()
+    if f.bit_and(MEM_BLOB) != 0 {
+        if f.bit_and(MEM_ZERO) != 0 -> return m.z.len() + m.i
+        return m.z.len()
+    }
+    if f.bit_and(MEM_NULL) != 0 -> return 0
+    if value_text(m, enc) -> return m.z.len()
+    0
+}
+
+// sqlite3_value_blob: the bytes of a text or blob, which becomes a blob
+// too (an empty one reads as no pointer, false); other values read as
+// their text.
+value_blob: fn(m: &Mem) -> Bool Never! {
+    if m.flags.bit_and(MEM_BLOB.bit_or(MEM_STR)) != 0 {
+        expand_blob(m)
+        m.flags = m.flags.bit_or(MEM_BLOB)
+        return m.z.len() != 0
+    }
+    value_text(m, base.UTF8)
+}
+
+// sqlite3_value_int: the low 32 bits of sqlite3_value_int64, signed.
+value_int: fn(m: Mem) -> Int Never! { printf.to_c_int(int_value(m)) }
+
+// sqlite3_value_subtype.
+value_subtype: fn(m: Mem) -> Int Never! {
+    if m.flags.bit_and(MEM_SUBTYPE) != 0 -> return m.subtype
+    0
+}
+
+// sqlite3_value_nochange: the unchanged-column NULL of a virtual-table
+// UPDATE.
+value_nochange: fn(m: Mem) -> Bool Never! { m.flags.bit_and(MEM_NULL.bit_or(MEM_ZERO)) == MEM_NULL.bit_or(MEM_ZERO) }
+
+// sqlite3_value_frombind.
+value_frombind: fn(m: Mem) -> Bool Never! { m.flags.bit_and(MEM_FROM_BIND) != 0 }
+
+// sqlite3_value_numeric_type: a TEXT that reads as a number without loss
+// becomes one; the resulting datatype.
+value_numeric_type: fn(m: &Mem) -> Int Never! {
+    t: base.value_type(m)
+    if t != base.SQL_TEXT -> return t
+    apply_numeric_affinity(m, false)
+    base.value_type(m)
+}
+
+// The arguments of SQL printf()/format() (printf.c PrintfArguments):
+// getIntArg, getDoubleArg and getTextArg read them as sqlite3_value_int64,
+// sqlite3_value_double and sqlite3_value_text.
+SQLArgs: struct {
+    args: [Mem]
+    used: Int
+}
+
+new_sql_args: fn(args: [Mem]) -> SQLArgs Never! { SQLArgs{args: args, used: 0} }
+
+impl SQLArgs.PrintfArgs {
+    int_arg: fn(&self) -> Int Never! {
+        if self.used >= self.args.len() -> return 0
+        self.used += 1
+        int_value(self.args[self.used - 1])
+    }
+    double_arg: fn(&self) -> Float Never! {
+        if self.used >= self.args.len() -> return Float{0}
+        self.used += 1
+        real_value(self.args[self.used - 1])
+    }
+    next_text: fn(&self, out: &[U8]) -> Bool Never! {
+        if self.used >= self.args.len() -> return false
+        self.used += 1
+        m := self.args[self.used - 1]
+        if !value_text(m, base.UTF8) {
+            self.args[self.used - 1] = m
+            return false
+        }
+        out.clear()
+        loop b in m.z -> out.push(b)
+        self.args[self.used - 1] = m
+        true
+    }
+}
+
+// SQL printf(fmt, args...) as func.c printfFunc renders it.
+sql_printf: fn(fmt: [U8], args: [Mem], limit: Int) -> [U8]? Never! {
+    acc := printf.str_new(limit)
+    acc.printf_flags = printf.PRINTF_SQLFUNC
+    list := new_sql_args(args)
+    printf.str_vappendf(acc, fmt, list)
+    if acc.acc_error != 0 -> return None
+    acc.text.copy()
+}
+
+// A UTF-8 text value.
+sql_text: fn(s: String) -> Mem Never! { base.mem_text(s.bytes(), base.UTF8) }
+
+#Test("numbers render as SQLite renders them") {
+    m := base.mem_real(0.1)
+    assert(value_text(m, base.UTF8) && m.z == "0.1".bytes() && base.value_type(m) == base.SQL_FLOAT)
+    big := base.mem_real(1.0e20)
+    assert(value_text(big, base.UTF8) && big.z == "1.0e+20".bytes())
+    whole := base.mem_real(3.0)
+    assert(value_text(whole, base.UTF8) && whole.z == "3.0".bytes())
+    third := base.mem_real(Float{1} / Float{3})
+    assert(value_text(third, base.UTF8) && third.z == "0.333333333333333".bytes())
+    i := base.mem_int(-9223372036854775808)
+    assert(value_text(i, base.UTF16LE) && i.z.len() == 40 && i.enc == base.UTF16LE)
+    assert_eq(value_bytes(i, base.UTF8), 20)
+    ir := base.mem_init(MEM_INT_REAL)
+    ir.i = 5
+    stringify(ir, base.UTF8, true)
+    assert(ir.z == "5.0".bytes() && ir.flags == MEM_STR)
+}
+
+#Test("text converts to numbers as sqlite3VdbeIntValue and RealValue do") {
+    assert_eq(int_value(sql_text(" 42abc")), 42)
+    assert_eq(int_value(sql_text("99999999999999999999")), 9223372036854775807)
+    assert_eq(real_value(sql_text("1e3x")), 1000.0)
+    assert_eq(int_value(base.mem_real(-2.9)), -2)
+    assert_eq(int_value(base.mem_real(1.0e30)), 9223372036854775807)
+    assert(!boolean_value(sql_text("0.0"), true) && boolean_value(sql_text("0.5"), false) && boolean_value(base.mem_null(), true))
+    assert_eq(value_int(base.mem_int(4294967297)), 1)
+}
+
+#Test("affinities follow applyAffinity") {
+    a := sql_text(" 12 ")
+    apply_affinity(a, base.AFF_NUMERIC, base.UTF8)
+    assert(a.flags == MEM_INT && a.i == 12)
+    b := sql_text("48.00")
+    apply_affinity(b, base.AFF_INTEGER, base.UTF8)
+    assert(b.flags == MEM_INT && b.i == 48)
+    c := sql_text("1.5")
+    apply_affinity(c, base.AFF_REAL, base.UTF8)
+    assert(c.flags == MEM_REAL && c.r == 1.5)
+    d := sql_text("12abc")
+    apply_affinity(d, base.AFF_NUMERIC, base.UTF8)
+    assert(d.flags == MEM_STR)
+    e := base.mem_int(7)
+    apply_affinity(e, base.AFF_TEXT, base.UTF8)
+    assert(e.flags == MEM_STR && e.z == "7".bytes())
+    f := base.mem_real(2.0)
+    apply_affinity(f, base.AFF_NUMERIC, base.UTF8)
+    assert(f.flags == MEM_INT && f.i == 2)
+    g := sql_text("1e2")
+    assert_eq(value_numeric_type(g), base.SQL_FLOAT)
+    h := sql_text("9223372036854775808")
+    apply_affinity(h, base.AFF_NUMERIC, base.UTF8)
+    assert(h.flags == MEM_REAL && h.r == 9223372036854775808.0)
+}
+
+#Test("CAST follows sqlite3VdbeMemCast") {
+    a := sql_text("3.0abc")
+    cast(a, base.AFF_NUMERIC, base.UTF8)
+    assert(a.flags == MEM_INT && a.i == 3)
+    b := sql_text("3.5")
+    cast(b, base.AFF_NUMERIC, base.UTF8)
+    assert(b.flags == MEM_REAL && b.r == 3.5)
+    c := sql_text("abc")
+    cast(c, base.AFF_INTEGER, base.UTF8)
+    assert(c.flags == MEM_INT && c.i == 0)
+    d := base.mem_real(1.5)
+    cast(d, base.AFF_TEXT, base.UTF8)
+    assert(d.flags == MEM_STR && d.z == "1.5".bytes())
+    e := base.mem_int(12)
+    cast(e, base.AFF_BLOB, base.UTF8)
+    assert(e.flags == MEM_BLOB && e.z == "12".bytes())
+    f := base.mem_blob("hi".bytes())
+    cast(f, base.AFF_TEXT, base.UTF16LE)
+    assert(f.flags == MEM_STR && f.z == [U8]{104, 0, 105, 0})
+    g := base.mem_blob("abc".bytes())
+    g.enc = base.UTF16LE
+    cast(g, base.AFF_TEXT, base.UTF16LE)
+    assert(g.z == "ab".bytes())
+    n := base.mem_null()
+    cast(n, base.AFF_INTEGER, base.UTF8)
+    assert(n.flags == MEM_NULL)
+}
+
+#Test("strings, blobs and encodings follow vdbemem.c") {
+    m := base.mem_null()
+    assert_eq(set_str(m, "abc".bytes(), 10, base.UTF8, 2), base.TOOBIG)
+    assert(m.flags == MEM_NULL)
+    assert_eq(set_str(m, [U8]{97, 0, 98}, -1, base.UTF8, 100), base.OK)
+    assert(m.z == "a".bytes())
+    assert_eq(set_str(m, [U8]{255, 254, 104, 0, 0, 0}, -1, base.UTF16, 100), base.OK)
+    assert(m.enc == base.UTF16LE && m.z == [U8]{104, 0})
+    z := base.mem_null()
+    set_zero_blob(z, 3)
+    assert_eq(value_bytes(z, base.UTF8), 3)
+    assert(value_blob(z) && z.z == [U8]{0, 0, 0} && z.flags == MEM_BLOB)
+    assert(too_big(base.mem_blob([U8]{1, 2, 3}), 2) && !too_big(base.mem_int(1 << 40), 2))
+    s := sql_text("é")
+    change_encoding(s, base.UTF16BE)
+    assert(s.z == [U8]{0, 233} && s.enc == base.UTF16BE)
+    change_encoding(s, base.UTF16LE)
+    assert(s.z == [U8]{233, 0})
+    assert(value_text(s, base.UTF8) && s.z == "é".bytes())
+    assert(real_same_as_int(-0.0, 0) && !real_same_as_int(4503599627370496.0, 4503599627370496))
+}
+
+#Test("SQL printf reads its arguments as sqlite3_value_*") {
+    out: sql_printf("%d|%s|%.1f|%s|%q".bytes(), [Mem]{sql_text("12x"), base.mem_real(2.5), sql_text("3"), base.mem_null(), base.mem_int(7)}, 1000000000) ?? panic("printf")
+    assert_eq(String.from_bytes(out) ?? "", "12|2.5|3.0||7")
+}

@@ -12,12 +12,12 @@ Run a lesson from the repository root, for example `jet run Examples/ErrorsAndEf
 ## Effects
 
 - [AuditedGateLadder](Effects/AuditedGateLadder.jet) — All audited escapes use the same policy ladder.
-- [AuthorityAllowFlag](Effects/AuthorityAllowFlag.jet) — Application authority, command-line grant: this file has no package block, so it holds only the beginner default (IO, Mem.Alloc, Exec.Args).
+- [AuthorityAllowFlag](Effects/AuthorityAllowFlag.jet) — Application authority, command-line acknowledgement: this file has no package block, so a plain run names the environment and clock reads it makes.
 - [AuthorityDenied](Effects/AuthorityDenied.jet) — Application authority, a written deny: a deny wins over every grant, including `-A`.
 - [AuthorityDenyFlag](Effects/AuthorityDenyFlag.jet) — Application authority, command-line denial: its golden runs it as `jet run -A --deny=Env authority_deny_flag.jet` (expected/effects/authority_deny_flag.case).
 - [AuthorityPackageGrant](Effects/AuthorityPackageGrant.jet) — Application authority, written grant: a leading package block adds rights under `authority`.
-- [AuthorityPartial](Effects/AuthorityPartial.jet) — Application authority, partial declaration: the written row adds Env to the beginner floor, but the program also reads the clock.
-- [AuthorityUndeclared](Effects/AuthorityUndeclared.jet) — Application authority, no declaration: without a package block a file holds only the beginner default (IO, Mem.Alloc, Exec.Args).
+- [AuthorityPartial](Effects/AuthorityPartial.jet) — Application authority, partial declaration: the written row acknowledges Env, but the program also reads the clock.
+- [AuthorityUndeclared](Effects/AuthorityUndeclared.jet) — Application authority, no declaration: a file with no package block may use every effect nothing denies.
 - [CapabilitySigils](Effects/CapabilitySigils.jet) — Access sigils: the access marker rides the type — `&T` write, `&&T` move/take — and the call site mirrors it.
 - [Determinism](Effects/Determinism.jet)
 - [EffectAuthority](Effects/EffectAuthority.jet) — `#FX(…) { … }` restricts a block to a fixed authority set: only those listed may be used inside, directly or through any call it reaches.

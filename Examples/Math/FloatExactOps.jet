@@ -1,0 +1,43 @@
+// IEEE 754 exact operations: ties-to-even rounding, rounding into a fixed
+// width, the IEEE remainder, signed-zero min and max, total order and NaN
+// payloads.
+use math: core.math
+
+run: fn() {
+    // Ties go to the even neighbour; a fixed-width result must fit.
+    print(math.round_even(Float{2.5}))
+    print(math.round_even(Float{3.5}))
+    print(math.round_to_signed(Float{127.5}, math.Rounding.TiesToEven, 8) ?? -1)
+    print(math.round_to_signed(Float{127.5}, math.Rounding.TowardZero, 8) ?? -1)
+    print(math.round_to_unsigned(Float{255.4}, math.Rounding.TiesToAway, 8) ?? -1)
+
+    // The remainder nearest zero, and the quotient's low bits.
+    split: math.rem_quo(Float{7.0}, Float{2.0})
+    print(split.rem)
+    print(split.quo)
+    print(math.fdim(Float{3.0}, Float{5.0}))
+
+    // -0 orders below +0; the _mag forms compare magnitudes and the _num
+    // forms pass over a single NaN.
+    print(math.maximum(Float{-0.0}, Float{0.0}))
+    print(math.minimum(Float{-0.0}, Float{0.0}))
+    print(math.is_nan(math.maximum(math.NAN, Float{1.0})))
+    print(math.maximum_num(math.NAN, Float{1.0}))
+    print(math.maximum_mag(Float{-3.0}, Float{2.0}))
+    print(math.minimum_mag(Float{-3.0}, Float{2.0}))
+    print(math.minimum_num(Float{1.0}, math.NAN))
+    print(math.maximum_mag_num(math.NAN, Float{-3.0}))
+    print(math.minimum_mag_num(Float{-3.0}, math.NAN))
+
+    // A NaN carries a payload; total order places it beyond infinity.
+    quiet: math.set_payload(Float{42.0}) ?? Float{0.0}
+    print(math.get_payload(quiet) ?? Float{-1.0})
+    print(math.total_order(math.INFINITY, quiet))
+    print(math.total_order(Float{0.0}, Float{-0.0}))
+    print(math.total_order_mag(Float{-1.0}, Float{2.0}))
+    print(math.total_order_mag(Float{-3.0}, Float{2.0}))
+    signaling: math.set_payload_signaling(Float{42.0}) ?? Float{0.0}
+    print(math.is_signaling(signaling))
+    print(math.is_signaling(math.canonicalize(signaling)))
+    print(math.get_payload(math.canonicalize(signaling)) ?? Float{-1.0})
+}

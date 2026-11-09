@@ -2,8 +2,8 @@
 // Publication uses the canonical held codemod transaction.
 use {
     cli_files: core.files
-    jet_driver.[JetDriverCompileMode, JetDriverVerbOutput, jet_driver_present_diagnostics, jet_driver_inline_package, jet_driver_inline_trivia_end, jet_driver_inline_space, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR]
-    jet_foundation.[Diagnostic, Span, TextEdit, DiagnosticFixApplicability, DiagnosticFixSafety, authority_inline_package_block, diagnostic_with_edit_grade, DIAGNOSTIC_ERROR]
+    jet_driver.[JetDriverCompileMode, JetDriverVerbOutput, jet_driver_present_diagnostics, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR]
+    jet_foundation.[Diagnostic, DiagnosticFixApplicability, DiagnosticFixSafety, DIAGNOSTIC_ERROR]
     jet_parser.[jet_format_unified_diff, parser_marker_placement_edits]
 }
 
@@ -58,9 +58,6 @@ jet_cli_fix_collect: fn(file: String, source: String, all: Bool) -> JetCLIFixQue
                 }
                 diagnostics.push(diagnostic)
             }
-            // A script runs with every right, so it needs no authority block.
-            authority: jet_cli_application_authority(result, jet_cli_source_invocation(source, None))
-            if jet_cli_inline_grant_refusal(authority, file, source, "run") == .Val(report) -> diagnostics.push(report)
         }
     }
     fixes: jet_cli_collect_fixes_from_diagnostics(diagnostics, source)
@@ -74,39 +71,6 @@ jet_cli_fix_collect: fn(file: String, source: String, all: Bool) -> JetCLIFixQue
     }
     repairs: jet_cli_collect_fixes_from_diagnostics(failed, source)
     JetCLIFixQuery.Fixes{fixes: if all -> fixes else -> jet_cli_safe_fixes(fixes), errors: errors.move(), repairs: if all -> repairs else -> jet_cli_safe_fixes(repairs)}
-}
-
-// The E1803 refusal of a script with no package block whose authority is
-// undecided, carrying the leading `package` block that grants the rights as
-// a needs-review edit; None for any other refusal, and for source piped to
-// `jet run -`, which has no file to edit. `jet run` reports the
-// grant and `jet fix` applies it only under `--all`: granting a right is a
-// decision, not a repair.
-jet_cli_inline_grant_refusal: fn(authority: JetCLIAuthority, file: String, source: String, command: String) -> Diagnostic? Never! {
-    if !jet_cli_is_application_default(authority) || jet_driver_inline_package(source).found || jet_cli_undecided(authority).len() == 0 || jet_cli_stdin_entry(file) -> return None
-    report: jet_cli_authority_refusal(authority, file, command) ?? return None
-    at: jet_cli_fix_inline_insertion(source)
-    edit: TextEdit{span: Span{start: at, end: at}, new_text: authority_inline_package_block(file, jet_cli_inline_allow_row(authority))}
-    Val(diagnostic_with_edit_grade(report, edit, DiagnosticFixApplicability.Suggested, DiagnosticFixSafety.NeedsReview))
-}
-
-// Package::inline_package_insertion_offset: share the Driver trivia scanner;
-// /// documentation belongs to the first declaration rather than Package.
-jet_cli_fix_inline_insertion: fn(source: String) -> Int Never! {
-    bytes: source.bytes()
-    first: jet_driver_inline_trivia_end(bytes, 0)
-    at := first
-    loop at > 0 && bytes[at - 1] != (U8{10}) -> at -= 1
-    loop index in at..<first {
-        if !jet_driver_inline_space(Int.from_u8(bytes[index])) -> return first
-    }
-    loop at > 0 {
-        previous := at - 1
-        loop previous > 0 && bytes[previous - 1] != (U8{10}) -> previous -= 1
-        if !source.slice(previous..<at).trim_start().starts_with("///") -> break
-        at = previous
-    }
-    at
 }
 
 // The errors of `file` with `source` as its text (jet_cli_fix_collect); a

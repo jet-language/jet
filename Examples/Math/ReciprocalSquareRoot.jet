@@ -1,0 +1,19 @@
+// 1/sqrt(x) correctly rounded, and powers of ten. Both give the same bits on
+// every tier.
+use math: core.math
+
+run: fn() {
+    // rsqrt rounds once; 1.0 / sqrt(x) rounds twice and can land one bit off.
+    print(math.rsqrt(Float{4.0}))
+    print(math.rsqrt(Float{3.0}))
+    print(Float{1.0} / math.sqrt(Float{3.0}))
+    print(math.rsqrt(Float{0.0}))
+    print(math.rsqrt(Float{-0.0}))
+    print(math.is_nan(math.rsqrt(Float{-1.0})))
+
+    // exp10 is exact at whole powers of ten.
+    print(math.exp10(Float{3.0}))
+    print(math.exp10(Float{-2.0}))
+    print(math.exp10(Float{0.5}))
+    print(math.exp10(Float{400.0}))
+}

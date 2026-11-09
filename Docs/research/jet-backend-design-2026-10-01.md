@@ -877,15 +877,19 @@ shared FD72, matching the Rust Arc lifetime. UDP's eight-byte holder points
 to one shared 32-byte state containing refs, mutex, FD72 and a single timeout
 used for both directions. All timeout projections transfer canonical exact
 Int owners, while the source alone validates durations and chooses deadlines.
-The resolver uses platform `getaddrinfo` with zeroed hints except SOCK_STREAM
-and a null service, then applies the port. All returned chains are released
-with `freeaddrinfo`, including empty results. EAI_SYSTEM preserves errno;
-other failures preserve the platform message prefixed as Rust's lookup does.
-The lookup worker holds its own reference to the input/output job, so a
-deadline or cancellation can abandon a lookup without joining or freeing data
-still borrowed by libc. The musl imports are the ledgered interim platform
-floor, not a hosts-only fallback; hosted CLI cutover requires glibc dynamic
-linking under D-NETDNS2 and D-OS-FLOOR1.
+The resolver is a Jet port of musl 1.2.6's `getaddrinfo` for zeroed hints
+except SOCK_STREAM and a null service (HostNetLookup.jet): an IP literal,
+`/etc/hosts`, then DNS over `/etc/resolv.conf` with musl's search, retry,
+TCP fallback and RFC 6724 ordering; the port is applied afterwards.
+EAI_SYSTEM preserves the errno musl would leave; other failures carry musl's
+`gai_strerror` text prefixed as Rust's lookup does. Every socket wait is a
+poller readiness wait on the calling task, so a lookup starts no thread and
+blocks no carrier, and a cancel or deadline ends it without abandoned state.
+Replies are checked as Go's resolver checks them, not as musl does. A UDP
+packet that does not answer the question asked (by id, QR bit, and the one
+question's name, type and class) is ignored, and the wait goes on. Such a TCP
+answer fails its query. A malformed answer is EAI_FAIL, though the addresses
+read before the fault stand. Query ids come from getrandom.
 
 Native socket waits share one epoll worker and scheduler ParkSlots. Kernel
 events carry monotonically allocated IDs, resolved under the poller mutex;

@@ -137,6 +137,27 @@ sign_extend: fn(n: Int, bits: Int) -> Int Never! {
     v
 }
 
+/// Reverses the byte order of each `width`-byte item: `byteswap(data, 2)` is
+/// C `swab`, and widths 4 and 8 convert arrays of 32- and 64-bit values
+/// between little and big endian. A width other than 2, 4 or 8 is
+/// `BinaryError.Range`; a length that is not a multiple of `width` is
+/// `BinaryError.Buffer`, where `swab` would leave the last byte unspecified.
+byteswap: fn(data: [U8], width: Int) -> [U8] BinaryError! {
+    if width != 2 && width != 4 && width != 8 -> return Err(BinaryError.Range)
+    if data.len() %% width != 0 -> return Err(BinaryError.Buffer)
+    out := [U8]{}
+    item := 0
+    loop item < data.len() {
+        k := width - 1
+        loop k >= 0 {
+            out.push(data[item + k])
+            k -= 1
+        }
+        item += width
+    }
+    out
+}
+
 pack_f64le: fn(n: Float) -> [U8] BinaryError! {
     bits: math.to_bits(n) ?? return Err(BinaryError.Range)
     pack_u64le(bits.bit_and(18446744073709551615))

@@ -1,0 +1,90 @@
+// Credentials change on every thread. inside.sh runs this as root of a user
+// namespace that also maps uids and gids 1..65536, with this fixture's
+// /etc/group and a one-request nscd (nscd/main.jet) on /var/run/nscd/socket.
+// Tasks keep carriers busy while initgroups, setgid and setuid run on one of
+// them; then each thread's /proc/self/task/<tid>/status must show the new
+// credentials. The output ends with each distinct Uid, Gid and Groups line
+// over all threads: one set when every thread changed.
+package: {
+    name: "credentials_change"
+    authority: { allow: [IO, Mem.Alloc, Env, FS, Time] }
+}
+
+use sys: core.sys
+use files: core.files
+use tasks: core.tasks
+
+SOCKET: "/var/run/nscd/socket"
+
+// CPU work that keeps a carrier busy.
+spin: fn(rounds: Int) -> Int {
+    total := 0
+    at := 0
+    loop at < rounds {
+        total = (total * 31 + at) % 1000003
+        at += 1
+    }
+    total
+}
+
+has: fn(list: [String], item: String) -> Bool {
+    loop entry in list {
+        if entry == item -> return true
+    }
+    false
+}
+
+// A status line with its tab-separated fields joined by one space.
+fields: fn(line: String) -> String {
+    text := ""
+    loop part in line.split("\t") {
+        field: part.trim()
+        if field == "" -> next
+        text = if text == "" -> field else -> "{text} {field}"
+    }
+    text
+}
+
+// The Uid, Gid and Groups lines of every thread, each once.
+credentials: fn(threads: [String]) -> [String] {
+    seen := [String]{}
+    loop thread in threads {
+        status: files.read("/proc/self/task/{thread}/status") ?? next
+        loop line in status.split("\n") {
+            if !(line.starts_with("Uid:") || line.starts_with("Gid:") || line.starts_with("Groups:")) -> next
+            text: fields(line)
+            if !has(seen, text) -> seen.push(text)
+        }
+    }
+    seen
+}
+
+run: fn() {
+    waited := 0
+    loop !files.exists(SOCKET) {
+        if waited >= 1000 -> panic("no nscd socket at {SOCKET}")
+        tasks.sleep(10)
+        waited += 1
+    }
+    first: task spin(40000000)
+    second: task spin(40000000)
+    third: task spin(40000000)
+    fourth: task spin(40000000)
+    #Unsafe("the process is root of a disposable user namespace; it drops to a mapped user") {
+        print("setuid to an unmapped uid fails: {sys.setuid(70000) ? _ok -> false ! _error -> true}")
+        sys.initgroups("alice", 4321) ?? panic("initgroups alice 4321")
+        sys.setgid(4321) ?? panic("setgid 4321")
+        sys.setuid(1234) ?? panic("setuid 1234")
+        print("initgroups as uid 1234 fails: {sys.initgroups("alice", 4321) ? _ok -> false ! _error -> true}")
+    }
+    entries: files.list_dir("/proc/self/task") ?? panic("list /proc/self/task")
+    threads := [String]{}
+    loop entry in entries -> threads.push(entry.name.copy())
+    print("several threads: {threads.len() >= 2}")
+    seen: credentials(threads)
+    _: first.join() ?? panic("first spinner")
+    _: second.join() ?? panic("second spinner")
+    _: third.join() ?? panic("third spinner")
+    _: fourth.join() ?? panic("fourth spinner")
+    loop line in seen -> print(line)
+}

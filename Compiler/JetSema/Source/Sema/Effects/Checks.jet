@@ -234,6 +234,8 @@ SemaEffectNode: struct {
     // Calls through a trait value whose trait method declares no effect row
     // (`Trait::method` at the call). A ceiling above them is E0743.
     dispatches: [TEffectSpan]
+    // The functions this body takes as values (TEffectFacts.value_edges).
+    value_edges: [String]{[String]{}}
     // The memory operations this body performs directly
     // and the `-[!Mem.*]>` denials its signature declares (E0921).
     memory_events: [SemaMemoryEvent]{[SemaMemoryEvent]{}}
@@ -1097,6 +1099,13 @@ sema_effect_node_add_edge: fn(nodes: &[SemaEffectNode], node_index: Int, edge: S
     sema_effect_set_add(nodes[node_index].call_edges, edge)
 }
 
+// `callee` is taken as a value here and may run later through it; only a
+// function with a body in this program is an edge.
+sema_effect_node_add_value_edge: fn(nodes: &[SemaEffectNode], node_by_key: NameRows, node_index: Int, callee: String) Never! {
+    if sema_effect_node_index(node_by_key, callee) == None -> return
+    sema_effect_set_add(nodes[node_index].value_edges, callee)
+}
+
 sema_effect_node_index: fn(node_by_key: NameRows, key: String) -> Int? Never! {
     name_rows_get_text(node_by_key, key)
 }
@@ -1139,6 +1148,7 @@ sema_effect_node_from_source: fn(function: FnBody, sources: [SemaEffectFunctionS
         if sema_effect_set_add(node.direct, effect_name) -> node.direct_spans.push(TEffectSpan{name: effect_name, span: function.source_span})
     }
     loop edge in function.effects.call_edges -> sema_effect_set_add(node.call_edges, edge)
+    loop edge in function.effects.value_edges -> sema_effect_set_add(node.value_edges, edge)
     if function.effects.maximal {
         node.maximal = true
         node.maximal_span = Val(function.source_span)
@@ -1264,8 +1274,8 @@ sema_effect_record_intrinsic_effects: fn(environment: SemaScopeEnvironment, prog
 
 sema_effect_record_fact: fn(nodes: &[SemaEffectNode], node_by_key: NameRows, node_index: Int, fact: SemaCallSiteFact, diagnostics: &[Diagnostic]) {
     // A foreign body with a known effect root records that root and an open
-    // memory dispatch; only an extern with no root is an unknown callee that
-    // forces the maximal set.
+    // memory dispatch; only an extern with no root, or a C binding whose row no
+    // descriptor owns, is an unknown callee that forces the maximal set.
     if fact.foreign_effect_root == .Val(root) {
         effect_name: sema_effect_parse_name(root) ?? {
             diagnostics.push(sema_effect_unknown(root, fact.span))
@@ -1273,6 +1283,10 @@ sema_effect_record_fact: fn(nodes: &[SemaEffectNode], node_by_key: NameRows, nod
         }
         sema_effect_node_add_direct(nodes, node_index, effect_name, fact.span)
         sema_effect_record_memory_open(nodes, node_index, fact.span, "foreign function body")
+        if fact.foreign_opaque && !nodes[node_index].maximal {
+            nodes[node_index].maximal = true
+            nodes[node_index].maximal_span = Val(fact.span)
+        }
         return
     }
     callee_key: fact.callee.map((callee) -> callee.key) ?? ""
@@ -1646,6 +1660,38 @@ sema_effect_record_dispatch: fn(nodes: &[SemaEffectNode], node_index: Int, tree:
     }
 }
 
+// The functions `node` takes as values, the value edges of `node_index`: a
+// named function read, a named function value, and every implementation the
+// program holds of a method called through a trait value (the value may be
+// any of them).
+sema_effect_record_value_reads: fn(nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, node_index: Int, tree: BodyTree, expression: Int, node: BodyNode) Never! {
+    if node.kind == {
+        .ConstRef(symbol) -> {
+            if body_type(tree, expression) == .Fn(_, _, _, _, _, _) -> sema_effect_node_add_value_edge(nodes, facts.node_by_key, node_index, symbol.key)
+        }
+        .FnValue(kind) -> {
+            if kind == .NamedFn(function, _) {
+                if function == .Val(decl) {
+                    target: sema_effect_decl_node(facts, decl)
+                    if target >= 0 -> sema_effect_set_add(nodes[node_index].value_edges, facts.node_keys[target])
+                }
+            }
+        }
+        .MethodCall(receiver, method, _, _) -> {
+            trait_owner: method.trait_owner ?? return
+            if body_type(tree, receiver) == .TraitObject(_) {
+                trait_name: sema_effect_symbol_leaf(trait_owner.key)
+                trait_module: sema_effect_symbol_module(trait_owner.key) ?? ""
+                owners: facts.trait_implementers.get("{trait_module}|{trait_name}") ?? [String]{}
+                loop owner in owners {
+                    if facts.trait_impls.get("{trait_module}|{trait_name}::{method.name}#{owner}") == .Val(impl_key) -> sema_effect_node_add_value_edge(nodes, facts.node_by_key, node_index, impl_key)
+                }
+            }
+        }
+        else -> {}
+    }
+}
+
 // Rust `seed_trait_dispatch_effects` / generic dispatch: a call through a
 // generic bound (`producer: P` with `P: Producer`) is statically selected after
 // type inference, so it reaches the trait method's `<static>` node: the
@@ -1796,6 +1842,7 @@ sema_effect_walk_expr_enter: fn(nodes: &[SemaEffectNode], node_index: Int, tree:
             }
         }
     }
+    sema_effect_record_value_reads(nodes, facts, node_index, tree, expression, node)
     if node.kind == {
         .RequireStop(_, _, _) | .Never(_, _) -> sema_effect_node_add_edge(nodes, node_index, "__jet_panic__")
         // Rust `check_panic_call`: `value ?? panic(message)` stops through
@@ -2227,7 +2274,7 @@ sema_effect_secret_reach: fn(nodes: [SemaEffectNode], callers: [[Int]]) -> [Bool
 }
 
 sema_effect_tfacts: fn(node: SemaEffectNode, solved: [String]) -> TEffectFacts Never! {
-    TEffectFacts{direct: node.direct, solved: solved, call_edges: node.call_edges, maximal: node.maximal, direct_spans: node.direct_spans, maximal_span: node.maximal_span}
+    TEffectFacts{direct: node.direct, solved: solved, call_edges: node.call_edges, maximal: node.maximal, direct_spans: node.direct_spans, maximal_span: node.maximal_span, value_edges: node.value_edges}
 }
 
 // Rust `e1264`: the span is the first entry of the declared effect row, or
@@ -3372,7 +3419,12 @@ sema_effect_walk_enter: fn(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts
             sema_prelude_conversion_demands_enter(state, node)
             Val(walk)
         }
-        .IterableLoops(_) -> Val(walk)
+        .IterableLoops(node_index) -> {
+            // A lambda body's value reads are the enclosing node's value
+            // edges, as its calls are the enclosing node's edges.
+            sema_effect_record_value_reads(nodes, facts, node_index, tree, expression, node)
+            Val(walk)
+        }
     }
 }
 

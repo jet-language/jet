@@ -471,6 +471,52 @@ closed_list_duplicate_problems: fn(findings: [ClosedListFinding], copies: [Strin
     assert(!closed_list_mirror_pair("a.jet\tX\th.jet\tHOME", [String]{"c.jet\tCOPY"}))
 }
 
+// The core suite's levels (Compiler/test.jet CORE_LEVELS, a kernel ledger
+// row) copy the `optimize` row's values of the build-option table, which
+// test.jet, a script that imports only Core, can't read.
+CLOSED_LIST_CORE_LEVELS_PATH: "Compiler/test.jet"
+CLOSED_LIST_BUILD_OPTIONS_PATH: "Compiler/JetFoundation/Source/Registry/BuildOptions.jet"
+
+// The values of the build-option row `name` in `text`, the build-option
+// table's source: the strings of its `values: [String]{…}` field, or None
+// when no row has that name.
+closed_list_build_option_values: fn(text: String, name: String) -> [String]? {
+    loop line in text.lines() {
+        if !line.trim().starts_with("{{name: \"{name}\",") -> next
+        rest: policy_slice_bytes(line, closed_list_after(line, "values: [String]{{"), line.bytes().len())
+        values := [String]{}
+        closed_list_string_members(rest.split("}}").to_list()[0], values)
+        return Val(values)
+    }
+    None
+}
+
+// The problem when CORE_LEVELS in `levels_text` (test.jet's source) is not
+// the `optimize` row's values in `options_text`, naming both files; "" when
+// it is.
+closed_list_core_levels_problem: fn(levels_text: String, options_text: String) -> String {
+    found := [ClosedListFinding]{}
+    closed_list_findings_in(CLOSED_LIST_CORE_LEVELS_PATH, levels_text, found)
+    levels := [String]{}
+    loop finding in found {
+        if finding.name == "CORE_LEVELS" -> levels = finding.members.copy()
+    }
+    values: closed_list_build_option_values(options_text, "optimize") ?? return "{CLOSED_LIST_BUILD_OPTIONS_PATH} has no `optimize` row for {CLOSED_LIST_CORE_LEVELS_PATH} CORE_LEVELS to copy"
+    if levels == values -> return ""
+    "{CLOSED_LIST_CORE_LEVELS_PATH} CORE_LEVELS ({levels.join(", ")}) is a copy of the `optimize` row's values in {CLOSED_LIST_BUILD_OPTIONS_PATH} ({values.join(", ")}) and no longer matches them; edit the row, then copy its values"
+}
+
+#Test("the core suite's levels are the optimize build option's values") {
+    guards_enter_root()
+    levels_text: closed_list_files.read(CLOSED_LIST_CORE_LEVELS_PATH) ?? panic("read {CLOSED_LIST_CORE_LEVELS_PATH}")
+    options_text: closed_list_files.read(CLOSED_LIST_BUILD_OPTIONS_PATH) ?? panic("read {CLOSED_LIST_BUILD_OPTIONS_PATH}")
+    assert_eq(closed_list_core_levels_problem(levels_text, options_text), "")
+    options: "    {{name: \"optimize\", kind: BuildOptionKind.Choice, values: [String]{{\"none\", \"basic\", \"full\"}}, stock_build: \"basic\"}},\n"
+    assert_eq(closed_list_core_levels_problem("CORE_LEVELS: [String]{{\"none\", \"basic\", \"full\"}}\n", options), "")
+    drift: closed_list_core_levels_problem("CORE_LEVELS: [String]{{\"none\", \"basic\", \"full\", \"max\"}}\n", options)
+    assert(drift.contains("Compiler/test.jet CORE_LEVELS (none, basic, full, max) is a copy of the `optimize` row's values in Compiler/JetFoundation/Source/Registry/BuildOptions.jet (none, basic, full)"))
+}
+
 #Test("the closed list scanner reads enums, string lists and generated headers") {
     guards_enter_root()
     found := [ClosedListFinding]{}

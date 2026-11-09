@@ -38,14 +38,19 @@
 #Import(c) thread_pthread_attr_destroy: fn(attr: I64) -> I64 = "pthread_attr_destroy"
 
 // Process lifetime root: mutex@0, atomic next-key counter@8, destructor native
-// List header@16, scope native List header@40 (0 thread, 1 attempt), and
-// live-TCB native List<I64> header@64 containing [tid,tcb,...] word pairs.
-// All headers use [len@0,cap@8,data@16]. Root is 88 bytes; closures transfer
+// List header@16, scope native List header@40 (0 thread, 1 attempt),
+// live-TCB native List<I64> header@64 containing [tid,tcb,...] word pairs
+// (a fiber's pair is [tcb,tcb], Fiber.jet), and the atomic count@88 of
+// threads thread_spawn started that have not registered yet.
+// All headers use [len@0,cap@8,data@16]. Root is 96 bytes; closures transfer
 // to the registry for key lifetime. No inherited GS pointer is dereferenced.
 thread_tls_registry := I64{0}
 
 // The TCB word holding its live-registry row (layout above).
 THREAD_TCB_ROW: I64{88}
+
+// The root word counting spawned threads not yet in the live registry.
+THREAD_SPAWNING: I64{88}
 
 // Zero `bytes` bytes at a word-aligned address. A byte list's capacity need
 // not be a word multiple, so whole words go first and the tail goes bytewise:
@@ -193,9 +198,9 @@ thread_unregister_tcb: fn(tcb: I64) {
     // Runtime-object .init_array priority follows allocator and host init.
     if (thread_tls_registry == I64{0}) {
         #Unsafe("runtime-init runs before any other thread exists") {
-            thread_tls_registry = jet_rt_alloc(I64{88}, I64{8})
+            thread_tls_registry = jet_rt_alloc(I64{96}, I64{8})
         }
-        thread_zero(thread_tls_registry, I64{88})
+        thread_zero(thread_tls_registry, I64{96})
     }
     jet_rt_thread_attach()
 }
@@ -376,6 +381,7 @@ rt_thread_entry_address: fn() -> I64 {
 
 #Export(c) jet_rt_thread_entry: fn(start: I64) -> I64 {
     jet_rt_thread_bootstrap()
+    thread_spawn_settled()
     // This thread's alternate signal stack, for the fault report (Fault.jet).
     fault_stack: fault_stack_start()
     entry: sync_load(start)
@@ -453,6 +459,9 @@ thread_spawn: fn(entry: I64, argument: I64) -> I64 {
         start = jet_rt_alloc(I64{16}, I64{8})
         sync_store(start, entry)
         sync_store(wrapping(start + I64{8}), argument)
+        // Counted before the clone, so a synccall (thread_setxid) waits
+        // until the new thread is in the live registry.
+        _ := sync_add(wrapping(thread_tls_registry + THREAD_SPAWNING), I64{1})
         loop {
             status = thread_pthread_create(storage, attr, rt_thread_entry_address(), start)
             if (status != I64{11} || bytes <= THREAD_STACK_FLOOR) -> break
@@ -465,7 +474,10 @@ thread_spawn: fn(entry: I64, argument: I64) -> I64 {
     handle: sync_load(storage)
     jet_rt_free(storage, I64{72}, I64{8})
     if (status != I64{0}) {
-        if (start != I64{0}) { jet_rt_free(start, I64{16}, I64{8}) }
+        if (start != I64{0}) {
+            jet_rt_free(start, I64{16}, I64{8})
+            thread_spawn_settled()
+        }
         return -status
     }
     handle
@@ -474,6 +486,199 @@ thread_spawn: fn(entry: I64, argument: I64) -> I64 {
 thread_join: fn(handle: I64, result: I64) -> I64 { thread_pthread_join(handle, result) }
 
 thread_detach: fn(handle: I64) -> I64 { thread_pthread_detach(handle) }
+
+// A thread thread_spawn counted is in the live registry, or never started.
+thread_spawn_settled: fn() {
+    spawning: wrapping(thread_tls_registry + THREAD_SPAWNING)
+    if (sync_add(spawning, I64{-1}) == I64{1}) -> sync_futex_wake(spawning, I64{2147483647})
+}
+
+// ---------------------------------------------------------------------------
+// Synccall: one credential system call on every thread (musl __synccall with
+// the __setxid and setgroups callbacks, src/thread/synccall.c,
+// src/unistd/setxid.c, src/linux/setgroups.c). Linux keeps credentials per
+// thread and POSIX per process, so the call runs on each thread through a
+// signal. The threads are the live registry's (every thread that runs Jet
+// code is attached there; a fiber's row names no thread), held with its
+// mutex and with no spawned thread still unregistered, so no thread
+// appears that the call misses. A thread that linked C code creates itself
+// and that never attaches is outside the registry and keeps its old
+// credentials. Unlike musl, which runs the call on the other threads before
+// the caller (so a call the caller is refused, such as setgroups after
+// setuid, kills the process), the caller runs it first and a refusal
+// changes no thread.
+//
+// Record64, allocated by the first synccall and never freed: system call
+// number0 and its arguments 8/16/24, target32 (the tid being captured; its
+// handler clears it), phase40 (0 capture, 1 run, 2 skip, 3 release),
+// done48 and left56 (captured threads past the call, and past the release).
+thread_synccall_record := I64{0}
+
+// musl's SIGSYNCCALL: one of the real-time signals musl keeps below the
+// SIGRTMIN (35) it reports, so no program's handler is displaced.
+THREAD_SYNCCALL_SIGNAL: I64{34}
+
+// Checked FunctionAddress intrinsic in the canonical RuntimeLibrary table.
+rt_thread_synccall_address: fn() -> I64 { loop { jet_rt_unreachable(I64{0}, I64{0}) } }
+
+// The record's system call on this thread: 0, or -errno.
+thread_synccall_run: fn(record: I64) -> I64 {
+    #Unsafe("a credential system call takes word arguments; setgroups' list is the synccall caller's, live until every thread has run") {
+        return os_syscall_i64(sync_load(record), sync_load(wrapping(record + I64{8})), sync_load(wrapping(record + I64{16})), sync_load(wrapping(record + I64{24})), I64{0}, I64{0}, I64{0})
+    }
+}
+
+thread_synccall_post: fn(word: I64) {
+    _ := sync_add(word, I64{1})
+    sync_futex_wake(word, I64{1})
+}
+
+// Block this thread until `word` is `value`.
+thread_synccall_until: fn(word: I64, value: I64) {
+    loop {
+        current: sync_load(word)
+        if (current == value) -> return
+        _ := sync_futex_wait(word, current, I64{-1})
+    }
+}
+
+// The handler, on a captured thread. A THREAD_SYNCCALL_SIGNAL that no
+// synccall aimed at this thread (another sender's) is ignored. A thread that
+// fails the call after the caller succeeded would leave the process's
+// threads with different credentials, so, as musl does, it kills the
+// process (SIGKILL cannot be caught).
+#Export(c) jet_rt_thread_synccall_signal: fn(_signal: I64) -> I64 {
+    record: thread_synccall_record
+    if (record == I64{0}) -> return I64{0}
+    tid: thread_tid()
+    target: wrapping(record + I64{32})
+    if (sync_cas(target, tid, I64{0}) != tid) -> return I64{0}
+    sync_futex_wake(target, I64{1})
+    phase: wrapping(record + I64{40})
+    loop sync_load(phase) == (I64{0}) -> _ := sync_futex_wait(phase, I64{0}, I64{-1})
+    if (sync_load(phase) == I64{1} && thread_synccall_run(record) != I64{0}) {
+        #Unsafe("kill(getpid(), SIGKILL) retains no memory") {
+            process: os_syscall_i64(I64{39}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+            _ := os_syscall_i64(I64{62}, process, I64{9}, I64{0}, I64{0}, I64{0}, I64{0})
+        }
+    }
+    thread_synccall_post(wrapping(record + I64{48}))
+    thread_synccall_until(phase, I64{3})
+    thread_synccall_post(wrapping(record + I64{56}))
+    I64{0}
+}
+
+// Captures every other registered thread in the handler: the count, or
+// -EAGAIN when the handler cannot be installed or a thread cannot be
+// signalled (the threads captured so far are counted in `captured`).
+thread_synccall_capture: fn(record: I64, captured: I64) -> I64 {
+    sync_store(captured, I64{0})
+    caller: thread_tid()
+    process := I64{0}
+    #Unsafe("getpid retains no memory") {
+        process = os_syscall_i64(I64{39}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+    }
+    installed := false
+    target: wrapping(record + I64{32})
+    live: wrapping(thread_tls_registry + I64{64})
+    data: sync_load(wrapping(live + I64{16}))
+    count: sync_load(live)
+    at := I64{0}
+    loop at < count {
+        tid: sync_load(wrapping(data + at * I64{8}))
+        tcb: sync_load(wrapping(data + (at + I64{1}) * I64{8}))
+        at += I64{2}
+        if (tid == tcb || tid == caller) -> next
+        // Installed again by every synccall, so a C library's handler for
+        // the same signal cannot take the capture.
+        if !installed {
+            if (process_signal_install(THREAD_SYNCCALL_SIGNAL, rt_thread_synccall_address()) < I64{0}) -> return I64{-11}
+            installed = true
+        }
+        sync_store(target, tid)
+        sent := I64{-11}
+        loop sent == (I64{-11}) {
+            #Unsafe("tgkill names a live registered thread of this process") {
+                sent = os_syscall_i64(I64{234}, process, tid, THREAD_SYNCCALL_SIGNAL, I64{0}, I64{0}, I64{0})
+            }
+        }
+        // ESRCH: a thread that ended without detaching has nothing to change.
+        if (sent < I64{0}) {
+            sync_store(target, I64{0})
+            if (sent == I64{-3}) -> next
+            return I64{-11}
+        }
+        thread_synccall_until(target, I64{0})
+        sync_store(captured, sync_load(captured) + I64{1})
+    }
+    sync_load(captured)
+}
+
+// Releases the captured threads after the call ran (phase 1) or was skipped
+// (phase 2), then waits until every one has left the handler.
+thread_synccall_release: fn(record: I64, captured: I64, phase: I64) {
+    sync_store(wrapping(record + I64{40}), phase)
+    sync_futex_wake(wrapping(record + I64{40}), I64{2147483647})
+    thread_synccall_until(wrapping(record + I64{48}), captured)
+    sync_store(wrapping(record + I64{40}), I64{3})
+    sync_futex_wake(wrapping(record + I64{40}), I64{2147483647})
+    thread_synccall_until(wrapping(record + I64{56}), captured)
+    sync_store(wrapping(record + I64{40}), I64{0})
+    sync_store(wrapping(record + I64{48}), I64{0})
+    sync_store(wrapping(record + I64{56}), I64{0})
+}
+
+// System call `number` with (a, b, c) on every thread, this one first: its
+// result, 0 or -errno. When this thread's call fails, no thread has changed;
+// -EAGAIN (musl's result when the synccall cannot run) when a thread cannot
+// be captured, again with no thread changed.
+thread_setxid: fn(number: I64, a: I64, b: I64, c: I64) -> I64 {
+    root: thread_tls_registry
+    if (root == I64{0}) {
+        // No registry: no thread but this one runs Jet code.
+        #Unsafe("a credential system call takes word arguments and retains no memory") {
+            return os_syscall_i64(number, a, b, c, I64{0}, I64{0}, I64{0})
+        }
+    }
+    captured: jet_rt_alloc(I64{8}, I64{8})
+    status := I64{0}
+    loop {
+        thread_synccall_settle(root)
+        sync_mutex_lock(root)
+        if (thread_synccall_record == I64{0}) {
+            fresh: jet_rt_alloc(I64{64}, I64{8})
+            thread_zero(fresh, I64{64})
+            #Unsafe("written under the registry mutex, before any handler can run") {
+                thread_synccall_record = fresh
+            }
+        }
+        record: thread_synccall_record
+        sync_store(record, number)
+        sync_store(wrapping(record + I64{8}), a)
+        sync_store(wrapping(record + I64{16}), b)
+        sync_store(wrapping(record + I64{24}), c)
+        status = thread_synccall_capture(record, captured)
+        // A thread spawned before the capture that has not registered yet
+        // would keep the old credentials: release, let it register, retry.
+        if (status >= I64{0} && sync_load(wrapping(root + THREAD_SPAWNING)) != I64{0}) {
+            thread_synccall_release(record, sync_load(captured), I64{2})
+            sync_mutex_unlock(root)
+            next
+        }
+        if (status >= I64{0}) -> status = thread_synccall_run(record)
+        thread_synccall_release(record, sync_load(captured), if (status == I64{0}) -> I64{1} else -> I64{2})
+        sync_mutex_unlock(root)
+        break
+    }
+    jet_rt_free(captured, I64{8}, I64{8})
+    status
+}
+
+// Wait until every thread thread_spawn started has registered.
+thread_synccall_settle: fn(root: I64) {
+    spawning: wrapping(root + THREAD_SPAWNING)
+    thread_synccall_until(spawning, I64{0})
+}
 
 // Raw clone control: mapping@0, size@8, CHILD_CLEARTID@16. Join owns the
 // control and stack until the kernel clears the TID and wakes a SHARED futex

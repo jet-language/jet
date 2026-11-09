@@ -905,6 +905,7 @@ Whole-file and metadata functions. `read`, `read_bytes`, `write`,
 | `write_at(path, offset, bytes)` | `!IOError` | Write bytes at an offset; negative offset is clamped to zero. |
 | `write_atomic(path, bytes)` | `!IOError` | Reserve one of 128 same-directory `.jet_tmp_<pid>_<sequence>` names, write and sync it, preserve available target permissions, close, then rename; on Unix, sync the parent after publication. |
 | `fsync(path)` | `!IOError` | Flush a file, or a folder so earlier renames inside it are durable. |
+| `space(path)` | `DiskSpace !IOError` | The room on the file system holding `path` (statvfs), in bytes: `total`, `free`, and `available` (what an unprivileged program may fill). `used()` is `total - free`; `used_percent()` is `df`'s figure, used over used plus available, 0.0 to 100.0. |
 | `open(path, links:)` / `create(path, if_exists:, mode:, links:)` / `append(path, mode:, links:)` | `FileReader` / `FileWriter !IOError` | Open a close-on-exec stream handle. `if_exists: .Refuse` creates exclusively, `mode` sets a new file's bits before the umask, and `links: .Refuse` refuses a final symbolic link. |
 | `open_directory(path)` | `Directory !IOError` | Hold a directory whose last part is a real directory, not a link. |
 | `samefile(a, b)` | `Bool !IOError` | Compare the two entries' `FileID`s. |
@@ -1519,7 +1520,7 @@ run: fn() {
 | `hmac_sha256(key, data)` | `[U8]` | Produce HMAC-SHA256 bytes. |
 | `hkdf_sha256(ikm, salt, info, len)` | `Secret !CryptoError` | Derive a bounded 0–8160-byte nominal secret. |
 | `pbkdf2_hmac(password, salt, iterations, key_len)` | `[U8] !CryptoError` | Derive a bounded PBKDF2-HMAC-SHA256 byte sequence. |
-| `new()` / `update(hasher, bytes)` / `digest(hasher)` | hasher operations | Use the incremental SHA-256 hasher. |
+| `new()` / `update(hasher, bytes)` / `digest(hasher)` | hasher operations | Use the streaming SHA-256 hasher: `update` absorbs each chunk as it arrives and keeps at most one partial 64-byte block, so a large input is never held whole; `digest` returns lowercase hex and leaves the hasher able to absorb more. |
 | `constant_time_equal(a, b)` / `constant_time_equal_bytes(a, b)` | `Bool` | Compare nominal secrets or byte lists without early equality branching. |
 | `wipe(bytes)` | unit | Zero every element of a `[U8]` and its spare capacity with stores the optimizer cannot drop; the length is unchanged. |
 | `generatekey()` | `X25519SecretKey !CryptoError` | Generate an X25519 secret through the random provider. |
@@ -2258,7 +2259,8 @@ run: fn() -[Exec, Time.Wait]> {
 | `process.env_set(spec, key, value)` | `ProcessSpec` | Builder form that sets one child environment variable. |
 | `process.env_truthy(name)` | `Bool -[Env]>` | Test the conventional truthy environment values. |
 | `process.which(name)` | `?String -[FS, Env]>` | Find an executable using filesystem checks and the host search path. A candidate that is a link counts when its target is a file; `files.which` and `Path.which` search the same way. |
-| `process.exit(code)` | `Never -[Exec]>` | Terminate the current process at the explicit process boundary. |
+| `process.exit(code)` | `Never -[Exec]>` | Terminate the current process at the explicit process boundary. Status 101 is reserved for Jet defects, so `exit(101)` ends the process with the user-error status 1 (S36). |
+| `#Unsafe process.exit_unmapped(code)` | `Never -[Exec]>` | Terminate at the same boundary with `code` unchanged, 101 included; for a tool that reports a Jet defect, such as a compiler's internal error. |
 | `process.on_signal(signal)` | `Unit -[Exec]>` | Register the process signal policy for one `ProcessSignal` value. |
 | `process.signal_number(signal)` | `Int` | Convert a `ProcessSignal` value to its platform signal number where one exists. |
 | `process.list2cmdline(argv)` | `String` | Format an argument vector for display using Windows command-line quoting rules. |
@@ -2522,7 +2524,7 @@ calling them. Source-owned Core wrappers preserve these same constraints.
 
 | Function | Returns | Description |
 | --- | --- | --- |
-| `math.acos(x)`, `acosh(x)`, `asin(x)`, `asinh(x)`, `atan(x)`, `atan2(y, x)`, `atanh(x)` | `Float` | Inverse trigonometric and hyperbolic functions. The extended float family is part of the shared math surface (D-CORESURFACE1). |
+| `math.acos(x)`, `acosh(x)`, `asin(x)`, `asinh(x)`, `atan(x)`, `atan2(y, x)`, `atanh(x)` | `Float` | Inverse trigonometric and hyperbolic functions, with musl 1.2.5's results bit for bit. One exception: `acosh` of any value below 1 is NaN, where musl returns a finite value for some x at or below -2. The extended float family is part of the shared math surface (D-CORESURFACE1). |
 | `math.abs(value)` / `math.abs_float(value: Float)` | the argument type (`Float` for `Complex`) | Absolute value of an `Int`, `Float`, `F32`, `I64` or `Complex`. On `Float` and `F32` it clears the sign bit, so `-0.0` gives `+0.0` and a negative NaN loses its sign; on `I64` it is fixed-width negation, which stops with E3010 at `I64.MIN`. |
 | `math.copy(value: Float)` | `Float` | Return the floating-point value unchanged, including its IEEE representation. |
 | `math.is_even(value)` / `math.is_odd(value)` | `Bool` | Test integer parity. |
@@ -2531,31 +2533,43 @@ calling them. Source-owned Core wrappers preserve these same constraints.
 | `math.gcd(a, b)` / `math.lcm(a, b)` | `Int` | Greatest common divisor or least common multiple. |
 | `math.gcd_many(values)` / `math.lcm_many(values)` | `Int` | Fold integer gcd or lcm over a list. |
 | `math.cos(x)`, `cosh(x)`, `sin(x)`, `sinh(x)`, `tan(x)`, `tanh(x)`, `math.cot(x)` | `Float` | Trigonometric and hyperbolic functions. |
-| `math.exp(x)`, `exp2(x)`, `exp_m1(x)`, `expm1(x)`, `math.erf(x)`, `math.erfc(x)` | `Float` | Exponential and error functions. |
+| `math.sin_pi(x)`, `cos_pi(x)`, `tan_pi(x)` | `Float` | `sin`, `cos` and `tan` of `pi * x`, correctly rounded, so every tier returns the same bits and every exact 0 or ±1 comes out exact: a zero with the sign of `x` for `sin_pi` at whole `x`, `+0` for `cos_pi` at `x = 1/2 mod 1`, an infinity for `tan_pi` there, and NaN for an infinity (C23 `sinpi`, `cospi`, `tanpi`). |
+| `math.exp(x)`, `exp2(x)`, `exp10(x)`, `exp_m1(x)`, `expm1(x)`, `math.erf(x)`, `math.erfc(x)` | `Float` | Exponential and error functions. |
 | `math.ln(x)`, `ln_1p(x)`, `log1p(x)`, `log10(x)`, `log2(x)`, `logb(x)`, `log(x, base)` | `Float` | Natural, base-specific, and compensated logarithms. |
 | `math.sqrt(x)`, `cbrt(x)`, `hypot(x, y)` | `Float` | Roots and hypotenuse. |
+| `math.rsqrt(x)` | `Float` | `1 / sqrt(x)` correctly rounded, so every tier returns the same bits: `+inf` for `+0`, `-inf` for `-0`, `+0` for `+inf` and NaN below zero (C23 `rsqrt`). |
 | `math.floor(x)` / `math.ceil(x)` / `math.trunc(x)` | `Float` | Directed or toward-zero rounding in floating-point form. |
 | `math.fract(x)` | `Float` | Return the fractional part. |
 | `math.gamma(x)` / `math.lgamma(x)` | `Float` | Gamma and log-gamma functions. |
 | `math.degrees(x)` / `math.radians(x)` | `Float` | Convert between degrees and radians. |
 | `math.lerp(a, b, t)` | `Float` | Linear interpolation. |
-| `math.copysign(value, sign)` / `math.fma(a, b, c)` | `Float` | Copy a sign or perform fused multiply-add where supported by the numeric backend. |
+| `math.copysign(value, sign)` / `math.fma(a, b, c)` | `Float` | Copy a sign, or `a * b + c` rounded once, the same bits on every tier. A plain `a * b + c` is never fused: it rounds the product and then the sum on every tier. |
 | `math.muladd(a, b, c)` | `Float` | Multiply and add through the math wrapper. |
 | `math.inv(x)` / `math.signum(x)` | `Float` | Reciprocal or floating-point signum. |
 | `math.fabs(x)` / `math.real(x)` / `math.imag(x)` / `math.conj(x)` | `Float` | Absolute floating-point value and scalar component helpers. |
 | `math.is_nan(x)`, `is_inf(x)`, `is_finite(x)` | `Bool` | Test NaN, infinity, or finite status. `is_finite` accepts both `Float` and `F32`. `isnan`, `isinf`, and `isfinite` are aliases. |
 | `math.cmp(a, b)` | `Int` | Accept matching `Float` or `F32` operands and return `-1`, `0`, or `1`; NaN sorts after non-NaN values, two NaNs compare equal, and signed zeros compare equal. |
 | `math.is_normal(x)`, `is_subnormal(x)`, `is_canonical(x)`, `is_signed(x)`, `is_zero(x)`, `is_integer(x)`, `sign_bit(x)` | `Bool` | Inspect floating-point representation properties. |
-| `math.next_up(x)` / `next_down(x)` / `next_after(x, toward)` / `nextafter(x, toward)` | `Float` | Move to an adjacent representable value. |
+| `math.next_up(x)` / `next_down(x)` / `next_after(x, toward)` / `nextafter(x, toward)` | `Float` | Move to an adjacent representable value. `next_after` is C `nextafter` (and `nexttoward`, since `Float` is the widest type): a NaN operand gives a NaN, equal operands give `toward`. |
 | `math.significand(x)` / `math.ulp(x)` | `Float` | Return the significand or unit in the last place. |
-| `math.ilogb(x)` / `math.ldexp(x, exponent)` / `math.scaleb(x, exponent)` / `math.radix(x)` | `?Int` or `Float` | Inspect or scale the floating-point exponent and radix. |
+| `math.ilogb(x)` / `math.ldexp(x, exponent)` / `math.scaleb(x, exponent)` / `math.radix(x)` | `?Int` or `Float` | Inspect or scale the floating-point exponent and radix. `ilogb` counts a subnormal's exponent from its leading bit and is `None` for a zero, an infinity or a NaN; `ldexp` and `scaleb` round once, as C `scalbn`. |
+| `math.logb(x)` | `Float` | The exponent as a `Float`: `-inf` for a zero, `+inf` for an infinity, NaN for a NaN. |
+| `math.round_even(x)` | `Float` | Round to the nearest integral value, ties to even (C23 `roundeven`, and `rint`/`nearbyint` in the default rounding mode). |
+| `math.round_to_signed(x, mode, bits)` / `math.round_to_unsigned(x, mode, bits)` | `?Int` | Round in `mode` (a `math.Rounding`: `TowardNegative`, `TowardPositive`, `TowardZero`, `TiesToAway` or `TiesToEven`) to an integer that fits a two's-complement or unsigned integer of `bits` bits (C23 `fromfp`/`ufromfp`; widths above 64 read as 64). `None` for an infinity, a NaN, `bits` below 1 or a result outside the width. |
+| `math.remainder(a, b)` / `math.rem_quo(a, b)` | `Float` / `(rem: Float, quo: Int)` | IEEE remainder `a - n * b` for the integer `n` nearest `a / b`, ties to even; `rem_quo` also returns the low 31 bits of `n` with the sign of `a / b` (C `remquo`). |
+| `math.fdim(a, b)` | `Float` | `a - b` when `a` is greater, else `+0`; a NaN operand is the result. |
+| `math.min_float(a, b)` / `math.max_float(a, b)` | `Float` | C `fmin`/`fmax`: a NaN operand gives the other, and `-0` orders below `+0`. |
+| `math.minimum(a, b)` / `maximum(a, b)`, `minimum_num(a, b)` / `maximum_num(a, b)`, `minimum_mag(a, b)` / `maximum_mag(a, b)`, `minimum_mag_num(a, b)` / `maximum_mag_num(a, b)` | `Float` | IEEE 754-2019 minimum and maximum (C23 `fminimum` family): `-0` orders below `+0`; the plain and `_mag` forms give a NaN when either operand is one, the `_num` forms give a NaN only when both are; the `_mag` forms compare magnitudes first. |
+| `math.total_order(a, b)` / `math.total_order_mag(a, b)` | `Bool` | IEEE 754 `totalOrder`: whether `a` sorts at or before `b` when `-0` precedes `+0` and NaNs sort beyond the infinities by sign and payload; `total_order_mag` compares magnitudes. |
+| `math.is_signaling(x)` / `math.canonicalize(x)` | `Bool` / `Float` | Test for a signaling NaN, or quiet one while keeping its sign and payload; any other value is itself. |
+| `math.get_payload(x)` / `math.set_payload(p)` / `math.set_payload_signaling(p)` | `?Float` | Read a NaN's payload as an integral `Float`, or build the positive quiet or signaling NaN with payload `p`; `None` for a value that is not a NaN, or a payload that is negative, fractional, at least 2^51, or (signaling) zero. |
 | `math.PI` / `math.E` / `math.TAU` | `Float` | Mathematical constants, declared as comptime values (`PI: Float{…}`); usable in `comptime` contexts. |
 | `math.INFINITY` / `math.NAN` | `Float` | The IEEE-754 special values `1.0 / 0.0` and `0.0 / 0.0`, as comptime constants. `NAN` compares unequal to every value, itself included; test it with `math.is_nan`. |
 | `math.round(x)` | `Int` | Round to the nearest integer, with ties away from zero. |
 | `math.to_bits(x)` / `math.from_bits(bits)` | integer bits / `Float` | Convert between a floating value and its bit representation. |
 | `math.sin_cos(x)` | `(cos: Float, sin: Float)` | Compute cosine and sine together. |
-| `math.modf(x)` | `(fract: Float, whole: Float)` | Split a value into fractional and whole parts. |
-| `math.frexp(x)` | `(exp: Int, frac: Float)` | Split a value into exponent and fraction. |
+| `math.modf(x)` | `(fract: Float, whole: Float)` | Split a value into fractional and whole parts, each with the sign of `x`; an infinity has fraction `±0`. |
+| `math.frexp(x)` | `(exp: Int, frac: Float)` | Split a value into `frac * 2^exp` with `abs(frac)` in [0.5, 1) (C `frexp`); a zero, an infinity or a NaN is its own `frac` with `exp` 0. |
 | `math.checked_abs(x)`, `checked_neg(x)`, `checked_add(a,b)`, `checked_sub(a,b)`, `checked_mul(a,b)`, `checked_div(a,b)`, `checked_rem(a,b)`, `checked_pow(a,b)` | `?Int` | Return `None` on integer overflow or invalid division/remainder; checked power also rejects a negative exponent. |
 | `math.int_pow(base, exponent)` | `Int` | Exact integer exponentiation through `base ^ exponent`; a negative runtime exponent stops with E3010 instead of returning a sentinel. |
 | `math.saturating_add(a,b)`, `saturating_sub(a,b)`, `saturating_mul(a,b)` | `Int` | Perform integer arithmetic while clamping overflow to the representable endpoint. |
@@ -2986,6 +3000,7 @@ comparison as `==`; it does not normalize or clone either string.
 | `text.display_width(value)` | `Int` | Compute terminal display width under the portable text-width policy (D-TEXTWIDTH1=B); ambiguous scalars are narrow. |
 | `text.grapheme_views(value)` / `word_views(value)` / `line_views(value)` / `byte_views(value)` | `[String]` | Produce views or segments for the requested boundaries. |
 | `text.is_alphabetic(value)` / `is_numeric(value)` / `is_whitespace(value)` | `Bool` | Test the corresponding scalar property. |
+| `text.is_blank(value)` / `is_graphic(value)` / `is_punctuation(value)` | `Bool` | Unicode forms of C `iswblank`, `iswgraph` and `iswpunct`: every scalar is a tab or a space separator (Zs); every scalar is visible (not whitespace, a control or a separator); every scalar is graphic and neither a letter, a digit, a combining mark nor a format character, so symbols such as `$` and `€` count. Empty text is false. |
 | `text.has_control(value)` | `Bool Never!` | True iff any scalar is Unicode 17 Cc (`U+0000..U+001F` or `U+007F..U+009F`); empty text is false. One UTF-8 byte scan stops at the first match without creating per-character strings or a decoded-scalar list. |
 | `text.trim(value)` / `trim_start(value)` / `trim_end(value)` | `String` | Remove supported whitespace at both or one end. |
 | `text.pad_start(value, width, fill)` / `pad_end(value, width, fill)` | `String` | Pad to a requested display width. |
@@ -3467,6 +3482,7 @@ rules; the caller's resolved package edition selects the policy.
 | `base64.encode_url(bytes)` / `decode_url(text)` | `String` / `[U8] !Base64Error` | Encode or decode URL-safe unpadded base64. |
 | `base64.b64encode` / `b64decode` / `standard_b64encode` / `standard_b64decode` | varies | Compatibility aliases for standard operations. |
 | `base64.encodebytes` / `decodebytes` / `b2a_base64` / `a2b_base64` | varies | Byte-wrapped or line-wrapped base64 forms. |
+| `base64.l64a(value: Int) -> String !Base64Error` / `a64l(text: String) -> Int !Base64Error` | text / integer | POSIX radix-64 text of a 32-bit value (C `l64a` and `a64l`): at most six characters from `./0-9A-Za-z`, least significant digit first, and 0 is empty text. A value outside 0 through 4294967295, a seventh character or a character outside the alphabet is an error. |
 
 ### `core.encoding.binary` — checked binary packing
 
@@ -3494,6 +3510,7 @@ portable grammar. The source is
 | `unpack(fmt: String, data: [U8]) -> [Int] !BinaryError` | values | Decode one record and reject short or malformed input. |
 | `iter_unpack(fmt: String, data: [U8]) -> [[Int]] !BinaryError` | rows | Decode repeated records. |
 | `sign_extend(n: Int, bits: Int) -> Int` | integer | Sign-extend a fixed-width integer. |
+| `byteswap(data: [U8], width: Int) -> [U8] !BinaryError` | bytes | Reverse the byte order of each `width`-byte item; width 2 is C `swab`. A width other than 2, 4 or 8 is `Range`; a length that is not a multiple of the width is `Buffer`. |
 
 `BinaryError` distinguishes range, format, value, and buffer failures. Use the
 consuming `Reader` for a cursor over an existing byte buffer; use this module
@@ -4525,6 +4542,7 @@ including for empty text. This is a separate operation from the module function
 | `capitalize(text)`, `title(text)`, `capwords(text)`, `swapcase(text)` | text | Apply case transformations. |
 | `lower(text)`, `upper(text)` | text | Apply ASCII case conversion. |
 | `is_digit(text)`, `is_alnum(text)`, `is_space(text)` | Boolean | Test text categories. |
+| `is_blank(text)`, `is_graphic(text)`, `is_punctuation(text)`, `is_hex_digit(text)` | Boolean | ASCII forms of C `isblank`, `isgraph`, `ispunct` and `isxdigit`: space or tab; `!` through `~`; visible and neither a letter nor a digit; `0-9`, `a-f`, `A-F`. Empty text is false. |
 | `is_lower(text)`, `is_upper(text)`, `is_title(text)`, `is_ascii(text)` | Boolean | Test ASCII case or character properties. |
 | `is_identifier(text: String) -> Bool` | Boolean | Test an ASCII identifier spelling. |
 | `find_from(text, needle, start)`, `rfind_from(text, needle, end)` | index | Search from a byte position. |

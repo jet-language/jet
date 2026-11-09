@@ -1,0 +1,414 @@
+// The SQLite record format, as specified by
+// https://sqlite.org/fileformat2.html section 2.1: the record format and
+// serial types. A port of SQLite 3.45.0 vdbeaux.c (sqlite3VdbeSerialType,
+// sqlite3VdbeSerialTypeLen, sqlite3VdbeSerialGet, sqlite3MemCompare,
+// sqlite3BlobCompare, sqlite3IntFloatCompare, sqlite3VdbeRecordCompare) and
+// of the record layout of vdbe.c OP_MakeRecord; values are base.Mem cells
+// and the varints and big-endian fields are util.c's.
+use {
+    math: core.math
+    base: __core_db_base
+    __core_db_base.[Mem, SQLError, MEM_NULL, MEM_STR, MEM_INT, MEM_REAL, MEM_BLOB, MEM_INT_REAL, MEM_ZERO]
+    util: __core_db_util
+    __core_db_util.[get_varint32, varint_len, put_varint, lower_byte]
+}
+
+// sqlite3VdbeSerialTypeLen: the byte length of a value of serial type `t`.
+serial_len: fn(t: Int) -> Int Never! {
+    if t >= 12 -> return (t - 12) >> 1
+    if t <= 4 {
+        if t == 0 -> return 0
+        return t
+    }
+    if t == 5 -> return 6
+    if t == 6 || t == 7 -> return 8
+    0
+}
+
+// A big-endian two's-complement integer of `n` bytes (1..8): ONE_BYTE_INT
+// to FOUR_BYTE_INT and the 6- and 8-byte forms.
+get_signed: fn(buf: [U8], at: Int, n: Int) -> Int Never! {
+    value := Int.from_u8(buf[at])
+    if value >= 128 -> value -= 256
+    loop i in 1..<n -> value = (value << 8).bit_or(Int.from_u8(buf[at + i]))
+    value
+}
+
+// sqlite3VdbeSerialGet: the value of serial type `t` stored at `at`, its
+// text in encoding enc. A stored NaN reads as NULL; type 10 is the
+// internal no-change NULL and 11 is reserved and reads as NULL.
+serial_get: fn(buf: [U8], at: Int, t: Int, enc: Int) -> Mem Never! {
+    if t >= 12 {
+        n: (t - 12) >> 1
+        bytes: buf[at..<at + n].copy()
+        if t.bit_and(1) == 1 -> return base.mem_text(bytes, enc)
+        return base.mem_blob(bytes)
+    }
+    if t == 10 -> return base.mem_init(MEM_NULL.bit_or(MEM_ZERO))
+    if t >= 1 && t <= 6 -> return base.mem_int(get_signed(buf, at, serial_len(t)))
+    if t == 7 -> return base.mem_real(math.from_bits(get_signed(buf, at, 8)))
+    if t == 8 || t == 9 -> return base.mem_int(t - 8)
+    base.mem_null()
+}
+
+// The header of a record: the serial type and body offset of each column.
+// `offsets` has one more entry than `types`: the end of the last value.
+RecordHeader: struct {
+    types: [Int]
+    offsets: [Int]
+}
+
+// Parse a record's header (fileformat2.html 2.1). A header that runs past
+// the record or claims impossible sizes is SQLITE_CORRUPT.
+parse_header: fn(rec: [U8]) -> RecordHeader SQLError! {
+    header := RecordHeader{types: [Int]{}, offsets: [Int]{}}
+    if rec.len() == 0 -> return Ok(header)
+    size: get_varint32(rec, 0)
+    if size.value < size.len || size.value > rec.len() -> return Err(base.corrupt())
+    at := size.len
+    body := size.value
+    loop at < size.value {
+        t: get_varint32(rec, at)
+        if t.value < 0 -> return Err(base.corrupt())
+        header.types.push(t.value)
+        header.offsets.push(body)
+        body += serial_len(t.value)
+        at += t.len
+    }
+    if at != size.value || body > rec.len() -> return Err(base.corrupt())
+    header.offsets.push(body)
+    Ok(header)
+}
+
+// Decode every column of a record, its text in encoding enc.
+decode_record: fn(rec: [U8], enc: Int) -> [Mem] SQLError! {
+    header: parse_header(rec) ?? return Err(err)
+    values := [Mem]{}
+    loop i in 0..<header.types.len() -> values.push(serial_get(rec, header.offsets[i], header.types[i], enc))
+    Ok(values)
+}
+
+// sqlite3VdbeSerialType: the serial type that stores m under schema file
+// format file_format; integers 0 and 1 take types 8 and 9 from format 4 on.
+// An IntReal needing 8 bytes is stored as the REAL it stands for, and m
+// becomes that REAL, as in C.
+serial_type: fn(m: &Mem, file_format: Int) -> Int Never! {
+    f: m.flags
+    if f.bit_and(MEM_NULL) != 0 {
+        if f.bit_and(MEM_ZERO) != 0 -> return 10
+        return 0
+    }
+    if f.bit_and(MEM_INT.bit_or(MEM_INT_REAL)) != 0 {
+        i: m.i
+        u: if i < 0 -> -1 - i else -> i
+        if u <= 127 {
+            if (i == 0 || i == 1) && file_format >= 4 -> return 8 + u
+            return 1
+        }
+        if u <= 32767 -> return 2
+        if u <= 8388607 -> return 3
+        if u <= 2147483647 -> return 4
+        if u <= 140737488355327 -> return 5
+        if f.bit_and(MEM_INT_REAL) != 0 {
+            m.r = util.int_to_double(i)
+            m.flags = f.bit_and(MEM_INT_REAL.bit_xor(65535)).bit_or(MEM_REAL)
+            return 7
+        }
+        return 6
+    }
+    if f.bit_and(MEM_REAL) != 0 -> return 7
+    n := m.z.len()
+    if f.bit_and(MEM_ZERO) != 0 -> n += m.i
+    n * 2 + 12 + (if f.bit_and(MEM_STR) != 0 -> 1 else -> 0)
+}
+
+// Append the `n`-byte big-endian two's-complement form of `value`.
+put_signed: fn(out: &[U8], value: Int, n: Int) Never! {
+    v: if value < 0 -> value + 18446744073709551616 else -> value
+    loop i in 0..<n -> out.push(U8{(v >> (8 * (n - 1 - i))).bit_and(255)})
+}
+
+// sqlite3VdbeSerialPut: append the body bytes of m as serial type `t`; a
+// MEM_Zero blob or text is expanded with its zero bytes.
+serial_put: fn(out: &[U8], m: Mem, t: Int) Never! {
+    if t >= 1 && t <= 6 {
+        put_signed(out, m.i, serial_len(t))
+    } else if t == 7 {
+        put_signed(out, math.to_bits(m.r), 8)
+    } else if t >= 12 {
+        loop b in m.z -> out.push(b)
+        if m.flags.bit_and(MEM_ZERO) != 0 {
+            loop _k in 0..<m.i -> out.push(U8{0})
+        }
+    }
+}
+
+// The record OP_MakeRecord builds from `values` (fileformat2.html 2.1):
+// the header size varint, the serial types, then the bodies.
+make_record: fn(values: &[Mem], file_format: Int) -> [U8] Never! {
+    types := [Int]{}
+    header_body := 0
+    loop k in 0..<values.len() {
+        m := values[k]
+        t: serial_type(m, file_format)
+        values[k] = m
+        types.push(t)
+        header_body += varint_len(t)
+    }
+    // The header size counts its own varint.
+    header_size := header_body + 1
+    if header_body > 126 {
+        own: varint_len(header_body)
+        header_size = header_body + own
+        if own < varint_len(header_size) -> header_size += 1
+    }
+    out := [U8]{}
+    put_varint(out, header_size)
+    loop t in types -> put_varint(out, t)
+    loop i in 0..<values.len() -> serial_put(out, values[i], types[i])
+    out
+}
+
+// Built-in collating sequences (datatype3.html section 7.1; main.c
+// binCollFunc, nocaseCollatingFunc and the RTRIM form of binCollFunc).
+COLL_BINARY: 0
+COLL_NOCASE: 1
+COLL_RTRIM: 2
+
+// The encoding a built-in collation compares in: openDatabase registers
+// BINARY for UTF-8, UTF-16LE and UTF-16BE, and NOCASE and RTRIM for UTF-8
+// only, so under another database encoding their texts convert to UTF-8.
+coll_enc: fn(coll: Int, enc: Int) -> Int Never! {
+    if coll == COLL_BINARY -> return enc
+    base.UTF8
+}
+
+// A collating function over two texts; negative, zero or positive.
+compare_text: fn(a: [U8], b: [U8], coll: Int) -> Int Never! {
+    na := a.len()
+    nb := b.len()
+    if coll == COLL_RTRIM {
+        loop na > 0 && Int.from_u8(a[na - 1]) == 32 -> na -= 1
+        loop nb > 0 && Int.from_u8(b[nb - 1]) == 32 -> nb -= 1
+    }
+    n: if na < nb -> na else -> nb
+    loop i in 0..<n {
+        x := Int.from_u8(a[i])
+        y := Int.from_u8(b[i])
+        if coll == COLL_NOCASE {
+            x = lower_byte(x)
+            y = lower_byte(y)
+        }
+        if x != y -> return x - y
+    }
+    na - nb
+}
+
+// vdbeCompareMemString: two texts under collation coll, translated to the
+// collation's encoding first when the values are in another.
+compare_mem_string: fn(a: Mem, b: Mem, coll: Int) -> Int Never! {
+    ce: coll_enc(coll, a.enc)
+    if a.enc == ce -> return compare_text(a.z, b.z, coll)
+    compare_text(util.translate(a.z, a.enc, ce), util.translate(b.z, b.enc, ce), coll)
+}
+
+// Whether every byte of z is 0x00 (isAllZero).
+all_zero: fn(z: [U8]) -> Bool Never! {
+    loop b in z {
+        if b != (U8{0}) -> return false
+    }
+    true
+}
+
+// sqlite3BlobCompare: memcmp, then the shorter first; a MEM_Zero blob
+// counts its zero bytes.
+blob_compare: fn(a: Mem, b: Mem) -> Int Never! {
+    za: a.flags.bit_and(MEM_ZERO) != 0
+    zb: b.flags.bit_and(MEM_ZERO) != 0
+    if za && zb -> return a.i - b.i
+    if za {
+        if !all_zero(b.z) -> return -1
+        return a.i - b.z.len()
+    }
+    if zb {
+        if !all_zero(a.z) -> return 1
+        return a.z.len() - b.i
+    }
+    n: if a.z.len() < b.z.len() -> a.z.len() else -> b.z.len()
+    loop k in 0..<n {
+        x: Int.from_u8(a.z[k])
+        y: Int.from_u8(b.z[k])
+        if x != y -> return x - y
+    }
+    a.z.len() - b.z.len()
+}
+
+// sqlite3IntFloatCompare: an integer against a REAL. x86-64 C SQLite
+// converts the integer to long double, which holds every i64 exactly, and
+// compares; that is the exact comparison of the two numbers, done here in
+// Int. A NaN is NULL, below every integer.
+int_float_compare: fn(i: Int, r: Float) -> Int Never! {
+    if math.is_nan(r) -> return 1
+    if r == math.INFINITY -> return -1
+    if r == -math.INFINITY -> return 1
+    bits: util.as_u64(math.to_bits(r))
+    e := (bits >> 52).bit_and(2047)
+    m := bits.bit_and(4503599627370495)
+    if e == 0 {
+        e = 1
+    } else {
+        m += 4503599627370496
+    }
+    if bits >= 9223372036854775808 -> m = 0 - m
+    shift: e - 1075
+    lhs := i
+    rhs := m
+    if shift >= 0 {
+        rhs = m * (1 << shift)
+    } else {
+        lhs = i * (1 << (0 - shift))
+    }
+    if lhs < rhs -> return -1
+    if lhs > rhs -> return 1
+    0
+}
+
+// sqlite3MemCompare: NULLs first, then numbers numerically, then texts
+// under collation coll, then blobs by memcmp.
+mem_compare: fn(a: Mem, b: Mem, coll: Int) -> Int Never! {
+    f1: a.flags
+    f2: b.flags
+    combined: f1.bit_or(f2)
+    if combined.bit_and(MEM_NULL) != 0 -> return f2.bit_and(MEM_NULL) - f1.bit_and(MEM_NULL)
+    ints: MEM_INT.bit_or(MEM_INT_REAL)
+    if combined.bit_and(ints.bit_or(MEM_REAL)) != 0 {
+        if f1.bit_and(f2).bit_and(ints) != 0 -> return compare_ints(a.i, b.i)
+        if f1.bit_and(f2).bit_and(MEM_REAL) != 0 {
+            if a.r < b.r -> return -1
+            if a.r > b.r -> return 1
+            return 0
+        }
+        if f1.bit_and(ints) != 0 {
+            if f2.bit_and(MEM_REAL) != 0 -> return int_float_compare(a.i, b.r)
+            if f2.bit_and(ints) != 0 -> return compare_ints(a.i, b.i)
+            return -1
+        }
+        if f1.bit_and(MEM_REAL) != 0 {
+            if f2.bit_and(ints) != 0 -> return 0 - int_float_compare(b.i, a.r)
+            return -1
+        }
+        return 1
+    }
+    if combined.bit_and(MEM_STR) != 0 {
+        if f1.bit_and(MEM_STR) == 0 -> return 1
+        if f2.bit_and(MEM_STR) == 0 -> return -1
+        return compare_mem_string(a, b, coll)
+    }
+    blob_compare(a, b)
+}
+
+compare_ints: fn(x: Int, y: Int) -> Int Never! {
+    if x < y -> return -1
+    if x > y -> return 1
+    0
+}
+
+// The text encoding, collations and sort directions of an index's columns
+// (KeyInfo enc, aColl and aSortFlags).
+KeyInfo: struct {
+    enc: Int
+    colls: [Int]
+    desc: [Bool]
+}
+
+// A search key (UnpackedRecord): the values to compare and the result when
+// every one of them equals the record's prefix (`default_rc`, which seeks
+// use to land before or after a run of equal prefixes).
+SearchKey: struct {
+    values: [Mem]
+    default_rc: Int
+}
+
+// Compare the record `rec` with a search key (sqlite3VdbeRecordCompare):
+// negative when the record sorts first. Only the key's fields are
+// compared.
+compare_record: fn(rec: [U8], key: SearchKey, info: KeyInfo) -> Int SQLError! {
+    size: get_varint32(rec, 0)
+    if size.value < size.len || size.value > rec.len() -> return Err(base.corrupt())
+    at := size.len
+    body := size.value
+    loop i in 0..<key.values.len() {
+        if at >= size.value -> return Ok(key.default_rc)
+        t: get_varint32(rec, at)
+        at += t.len
+        n: serial_len(t.value)
+        if body + n > rec.len() -> return Err(base.corrupt())
+        coll: if i < info.colls.len() -> info.colls[i] else -> COLL_BINARY
+        c := mem_compare(serial_get(rec, body, t.value, info.enc), key.values[i], coll)
+        body += n
+        if c != 0 {
+            if i < info.desc.len() && info.desc[i] -> c = 0 - c
+            return Ok(c)
+        }
+    }
+    Ok(key.default_rc)
+}
+
+#Test("records round-trip every storage class and integer width") {
+    values := [Mem]{base.mem_null(), base.mem_int(0), base.mem_int(1), base.mem_int(-1), base.mem_int(300), base.mem_int(-8388608), base.mem_int(2147483648), base.mem_int(140737488355327), base.mem_int(-9223372036854775808), base.mem_real(2.5), base.mem_real(-0.0), base.mem_text([U8]{104, 105}, base.UTF8), base.mem_blob([U8]{0, 255}), base.mem_text([U8]{}, base.UTF8)}
+    rec: make_record(values, 4)
+    back := decode_record(rec, base.UTF8) ?? panic("decode")
+    assert_eq(back.len(), values.len())
+    loop i in 0..<values.len() {
+        x := back[i]
+        y := values[i]
+        assert_eq(serial_type(x, 4), serial_type(y, 4))
+    }
+    assert_eq(make_record(back, 4), rec)
+    // Schema format 1 stores 0 and 1 in a byte.
+    old := [Mem]{base.mem_int(0), base.mem_int(1)}
+    assert_eq(make_record(old, 1), [U8]{3, 1, 1, 0, 1})
+}
+
+#Test("an IntReal past six bytes is stored as a REAL") {
+    m := base.mem_init(MEM_INT_REAL)
+    m.i = 1 << 50
+    assert_eq(serial_type(m, 4), 7)
+    assert(m.flags == MEM_REAL && m.r == Float{1 << 50})
+    z := base.mem_init(MEM_BLOB.bit_or(MEM_ZERO))
+    z.z = [U8]{7}
+    z.i = 2
+    vals := [Mem]{z}
+    assert_eq(make_record(vals, 4), [U8]{2, 18, 7, 0, 0})
+}
+
+#Test("a record header past the end is corrupt") {
+    bad: [U8]{5, 1, 1}
+    assert(parse_header(bad) == .Err(_))
+}
+
+#Test("sqlite3MemCompare orders NULL, numbers, text, blob") {
+    n: base.mem_null()
+    i: base.mem_int(3)
+    r: base.mem_real(2.5)
+    t: base.mem_text("a".bytes(), base.UTF8)
+    b: base.mem_blob("a".bytes())
+    assert(mem_compare(n, i, COLL_BINARY) < 0 && mem_compare(i, n, COLL_BINARY) > 0 && mem_compare(n, n, COLL_BINARY) == 0)
+    assert(mem_compare(r, i, COLL_BINARY) < 0 && mem_compare(i, r, COLL_BINARY) > 0)
+    assert(mem_compare(i, t, COLL_BINARY) < 0 && mem_compare(t, b, COLL_BINARY) < 0)
+    assert(mem_compare(base.mem_text("ABC".bytes(), base.UTF8), base.mem_text("abc".bytes(), base.UTF8), COLL_NOCASE) == 0)
+    assert(mem_compare(base.mem_text("a  ".bytes(), base.UTF8), t, COLL_RTRIM) == 0)
+    // 2^53 + 1 is above the REAL 2^53 that rounds from it.
+    big: (1 << 53) + 1
+    assert(int_float_compare(big, util.int_to_double(big)) > 0)
+    assert_eq(util.int_to_double(big), 9007199254740992.0)
+    assert_eq(util.int_to_double(0 - 9223372036854775807), -9223372036854775808.0)
+    assert(int_float_compare(9223372036854775807, 9223372036854775808.0) < 0)
+    assert(int_float_compare(-1, -0.5) < 0 && int_float_compare(0, -0.0) == 0)
+    nan: Float{0} / Float{0}
+    assert(int_float_compare(0, nan) > 0)
+    // NOCASE compares UTF-16 texts after converting them to UTF-8.
+    le_a: base.mem_text(util.translate("Ab".bytes(), base.UTF8, base.UTF16LE), base.UTF16LE)
+    le_b: base.mem_text(util.translate("aB".bytes(), base.UTF8, base.UTF16LE), base.UTF16LE)
+    assert(mem_compare(le_a, le_b, COLL_NOCASE) == 0 && mem_compare(le_a, le_b, COLL_BINARY) < 0)
+}

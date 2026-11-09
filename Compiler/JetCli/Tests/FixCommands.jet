@@ -1,10 +1,9 @@
 // Canonical diagnostic edit grades, deferred rounds and edition migrations.
 use {
-    jet_foundation.[DiagnosticFixApplicability, DiagnosticFixSafety, Span, TextEdit, authority_inline_package_block, authority_inline_package_fix]
+    jet_foundation.[DiagnosticFixApplicability, DiagnosticFixSafety, Span, TextEdit]
     jet_cli.[
         JetCLIFix, jet_cli_fix_apply_non_overlapping,
-        jet_cli_fix_inline_insertion, jet_cli_safe_fixes,
-        jet_cli_semantic_rename_ops,
+        jet_cli_safe_fixes, jet_cli_semantic_rename_ops,
     ]
     jet_semindex.[SemDefinitionFact]
 }
@@ -33,13 +32,6 @@ cli_fix_fixture_fact: fn(name: String, signature: String, module_path: String) -
     inserted: jet_cli_fix_apply_non_overlapping("π", [JetCLIFix]{cli_fix_fixture_edit(0, 0, "A", .Safe, .Formatting), cli_fix_fixture_edit(0, 0, "B", .Safe, .Formatting)})
     if inserted.source != "ABπ" || inserted.applied != 2 -> panic("same-point insertions are stable and UTF-8 exact")
     if jet_cli_fix_apply_non_overlapping("abc", [JetCLIFix]{insert_a, insert_b}).source != "aABbc" -> panic("insertion order")
-
-    if jet_cli_fix_inline_insertion("// header\n/// run docs\nrun: fn() {{}}\n") != "// header\n".len() -> panic("docs stay on first declaration")
-    if jet_cli_fix_inline_insertion("/* header */run: fn() {{}}") != "/* header */".len() -> panic("same-line leading block comment")
-    if jet_cli_fix_inline_insertion("#!/usr/bin/env jet\n// tool\n\nrun: fn() {{}}") != "#!/usr/bin/env jet\n// tool\n\n".len() -> panic("launch header and leading trivia")
-    if !authority_inline_package_block("tools/my-tool.jet", [String]{"FS", "IO"}).contains("name: \"my-tool\"") -> panic("script stem")
-    if !authority_inline_package_block("épreuve.jet", [String]{"Net"}).contains("name: \"script\"") -> panic("unportable script stem uses canonical fallback")
-    if !authority_inline_package_fix("main.jet", [String]{"DB"}).contains("`package: {{ name: \"main\", authority: {{ allow: [DB] }} }}`") -> panic("the E1803 Fix names a complete block")
 
     old: cli_fix_fixture_fact("report", "sig1", "run.jet")
     renamed: cli_fix_fixture_fact("summarize", "sig1", "run.jet")

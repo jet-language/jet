@@ -3326,27 +3326,54 @@ grant. `Time` and its other leaves retain their ordinary positive bounds.
 This applies to Rust bootstrap and native Jet effect-bound checks alike.
 
 **D-AUTH-AMBIENT3=A — A written allow list adds to the beginner floor**
-*(ratified 2026-10-24, card c09xsceu)*: the floor (`IO`, `Mem.Alloc`,
-`Exec.Args`) holds for every program, with or without a package block. A
-written `authority.allow` list adds rights to it and never replaces it; a
-written `authority.deny` list alone removes nothing else. A floor right leaves
-only through `deny`, and `deny` still wins over every allow. `jet fix` and the
-E1803 Fix name only the rights beyond the floor. Rationale: the floor carries
-no power a shell has not already given the process, so repeating it in every
-list is noise, and losing printing by writing an unrelated denial is a trap
-(138 of 187 single-line allow rows restated `IO` and `Mem.Alloc`; `deny: [Exec]`
-alone refused `print` with E1803).
+*(ratified 2026-10-24, card c09xsceu; superseded by D-AUTH-DEFAULT1=A)*: the
+floor (`IO`, `Mem.Alloc`, `Exec.Args`) held for every program, and a written
+`authority.allow` list added rights to it, with E1803 and `jet fix` naming
+only the rights beyond the floor. Under D-AUTH-DEFAULT1 every effect is
+allowed and a written row is a ceiling; the floor rule survives as Q25c=A
+(the floor stays inside every ceiling and leaves only through `deny`), and
+so does its rationale for leaving floor effects out of the run notice.
 
 **D-AUTHORITY-DENYROW1=A — A package deny is a compile-time prohibition for
 every effect** *(ratified 2026-10-24, card c0pp8jfr)*: each entry of the entry
 package's `authority.deny` list becomes a whole-program prohibition, exactly
 like writing `-[!E]>` on every function of that package. `jet check`,
 `jet build` and `jet run` report a reachable use with E0749 and the call
-chain, before anything runs. E1803 keeps undecided rights and the
-invocation's `--deny` denials. Rationale: a deny list is a promise about the
+chain, before anything runs. E1803 keeps the invocation's `--deny` denials.
+Rationale: a deny list is a promise about the
 code, not about one run; checking it while compiling gives it one meaning and
 the exact call chain, where a checker that says ok to a program the run
 refuses gives two.
+
+**D-AUTH-DEFAULT1=A — Every effect is allowed by default; code denies, and a
+run warns when its effects change** *(ratified 2026-11-06, card #6614;
+refined by Q25 on 2026-11-08; supersedes D-AUTH-AMBIENT1, D-AUTH-AMBIENT3 and
+D-SCRIPT-CONFIRM1)*: with no written authority a program may use every
+effect. Before the program's first instruction `jet run` prints the inferred
+effects in plain words on stderr, leaving out the floor (`IO`, `Mem.Alloc`,
+`Exec.Args`), and prints them again whenever the set changes. The last set
+named is kept per canonical entry path under `$XDG_STATE_HOME/jet/effects`.
+Without a terminal or a writable store the notice prints on every run, and
+`--json` carries the list as structured detail. `-A` hides the notice;
+`--allow=R` acknowledges `R` (Q25b=A), and a resource-qualified right still
+confines the run through the host sandbox; `--deny=R` wins over every grant
+with E1803. A written authority row (package, inline package block, module,
+type, function) is a ceiling checked at compile time with E0740 or E0749, and
+the floor stays inside it unless denied (Q25c=A). The entry package's rows
+silence the notice for what they list. A `deny` on any of those scopes
+prohibits the effect transitively (D-AUTHORITY-DENYROW1). The list is
+sound: calls through function values count, and a C binding no descriptor
+owns records `FFI.C` and reaches every effect. Jetpack records each
+dependency's effect row in the lock and reports widening; `--locked` refuses
+it. Code run straight from a URL or the registry asks before its first run
+(the command is a separate ballot, Q25a=B). Scripts follow the same rules,
+with no `#!` exception, and `jet new` writes no authority row. Rationale: no
+friction for beginners, and nothing changes silently, because a new effect,
+from your code or a dependency, is always named. Prompts train people to
+answer yes and stop every run without a terminal. The audit
+`Docs/audits/2026-11-08-d-auth-default1-review.md` records the attacks and
+the limits: `Exec` and `FFI` are escape hatches, granularity is the effect
+leaf, and local code runs with the user's authority by design.
 
 **D-EFFTREE1 — Effect tree** *(ratified 2026-07-03, card #181)*: the
 D-EFF4/5 names are tree roots; a signature/`#FX`/`-[!…]>` entry may
@@ -7690,6 +7717,11 @@ superseded by D-VERDICT-732-1; every marker is back on `#`, `@` is reserved
 for locations/sources.
 **D-CTMARKER1 — `$name` splice marker**: retired outright by D-META-STAGE1=B;
 `$` is the one compile-time mark, not a splice-only sigil.
+**D-AUTH-AMBIENT1 — manifest-less beginner default**: superseded by
+D-AUTH-DEFAULT1=A. A program with no `package.jet` held only the floor, and
+any other effect stopped the run with E1803; every effect is now allowed.
+**D-SCRIPT-CONFIRM1 — interactive confirmation of undecided rights**:
+superseded by D-AUTH-DEFAULT1=A (never ported); the run notice replaces it.
 **U1 / U10 filenames, D-JPK3/8/13, D-BIND1/2, D-ATTR1/3, D-CAP1/2-words,
 D-JSONOUT1, D-LITSUFFIX-SCOPE, D-UNIT1-spelling**: all
 superseded by the entries above; law as written in this file is final.

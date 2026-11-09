@@ -1,0 +1,74 @@
+// A local whose value closes, reassigned from a call that reads it, closes
+// its old value once, while that value is still whole, before its drop.
+// Close moves its list out and reads it, so a close after the drop reads
+// freed storage.
+#Error
+E: enum {
+    Bad
+}
+
+Box: struct {
+    name: String
+    p: [U64]
+}
+
+impl Box.Close {
+    close: fn(&&self) {
+        p := self.p.move()
+        sum := U64{0}
+        loop i in 0..<p.len() -> sum = sum.wrapping_add(p[i])
+        print("close {self.name} len {p.len()} sum {sum}")
+        loop i in 0..<p.len() -> p[i] = U64{0}
+    }
+}
+
+make: fn(name: String, n: Int, v: U64) -> Box E! {
+    if n > 100000 -> return Err(.Bad)
+    p := [U64]{}
+    loop _ in 0..<n -> p.push(v)
+    Ok(Box{name: name, p: p})
+}
+
+sub: fn(a: Box, b: Box, name: String) -> Box E! {
+    out := make(name, a.p.len(), U64{0}) ?? return Err(err)
+    loop i in 0..<b.p.len() -> out.p[i] = a.p[i].wrapping_sub(b.p[i])
+    Ok(out)
+}
+
+helper: fn() {
+    a := make("ha", 4, U64{5}) ?? panic("ha")
+    x := make("hx", 4, U64{7}) ?? panic("hx")
+    x = sub(x, a, "hx2") ?? panic("sub")
+    print("helper {x.p[0]}")
+}
+
+named: fn() {
+    a := make("na", 2, U64{1}) ?? panic("na")
+    x := make("nx", 2, U64{4}) ?? panic("nx")
+    nx := sub(x, a, "nx2") ?? panic("sub")
+    x = nx
+    print("named {x.p[0]}")
+}
+
+steps: fn(n: Int) -> Int E! {
+    a := make("la", 3, U64{1}) ?? return Err(err)
+    x := make("l0", 3, U64{9}) ?? return Err(err)
+    loop i in 0..<n {
+        x = sub(x, a, "l{i + 1}") ?? return Err(err)
+    }
+    print("loop {x.p[0]}")
+    Ok(n)
+}
+
+run: fn() {
+    helper()
+    named()
+    if steps(3) == {
+        .Ok(n) -> print("steps {n}")
+        .Err(_) -> print("steps failed")
+    }
+    a := make("ra", 257, U64{2}) ?? panic("ra")
+    x := make("rx", 257, U64{3}) ?? panic("rx")
+    x = sub(x, a, "rx2") ?? panic("sub")
+    print("run {x.p[256]}")
+}

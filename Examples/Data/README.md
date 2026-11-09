@@ -6,6 +6,7 @@ Run a lesson from the repository root, for example `jet run Examples/Data/<Lesso
 
 ## Lessons
 
+- [ByteSwapRadix64](ByteSwapRadix64.jet) — `byteswap` reverses each fixed-width item's byte order (C `swab`); `l64a`/`a64l` write a 32-bit value as POSIX radix-64 text.
 - [CodableAutoRules](CodableAutoRules.jet) — A plain struct or enum is Codable (Encode + Decode) when every stored field has a wire form; no marker is needed.
 - [CodableDefault](CodableDefault.jet)
 - [CodableDemand](CodableDemand.jet) — Derive on demand: every plain struct and enum here is Codable, but a generated codec body exists only for a type an Encode/Decode requirement reaches:…

@@ -1,8 +1,8 @@
-Error [jet.ApplicationAuthorityDenied]: Application authority is undecided for `FS.Write`
- Why: This program writes files, and the default for a file with no package block has not allowed that yet.
- Fix: run `jet run --allow=FS.Write tests/ui/e1803_shared_tasks_names_no_deny_only_right.jet` (or `-A`/`--allow-all` for every effect) to allow it for this run, or declare a leading `package: { name: "e1803_shared_tasks_names_no_deny_only_right", authority: { allow: [FS.Write] } }` block in this file (`jet fix --all` inserts it); otherwise approve the exact operation once in an interactive terminal
+Error [jet.ApplicationAuthorityDenied]: Application authority denies `FS.Write`
+ Why: This program writes files, and this command's `--deny` denies that.
+ Fix: Drop `--deny=FS.Write` from the command to allow it
  Denial: authority
- Scope chain: application default
+ Scope chain: application default + CLI invocation
 More: jet-lang.dev/e/E1803
 
 1 problem found

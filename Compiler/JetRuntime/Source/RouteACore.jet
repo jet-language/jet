@@ -145,6 +145,11 @@ byte_cell_replace: fn(root: I64, expected: I64, expected_length: I64, next: I64,
     I64{1}
 }
 
+// core.tasks.quiesce: join the scheduler's carrier and timer threads
+// (jet_rt_scheduler_shutdown); false, with nothing stopped, while a task or
+// a timer is pending. The threads start again on the next use.
+#Export(c) jet_tasks_quiesce: fn() -> Bool { jet_rt_scheduler_shutdown() >= I64{0} }
+
 // The shared Condition48 protocol.
 #Export(c) jet_condition_notify_one: fn(condition: I64) { jet_rt_native_condition_notify_one(condition) }
 #Export(c) jet_condition_notify_all: fn(condition: I64) { jet_rt_native_condition_notify_all(condition) }

@@ -14,6 +14,7 @@ matches the work:
 | Need | Read |
 |---|---|
 | Brief a worker, dispatch a slice, or harvest a receipt | [`references/dispatch.md`](references/dispatch.md) |
+| Take worker submissions, run a batch, or land on `dev` | [`references/intake.md`](references/intake.md) |
 | Diagnose and batch failures, integrate, or gate `master` | [`references/closeout.md`](references/closeout.md) |
 | Review a new, draft, or changed full ballot | [`references/ballot-review.md`](references/ballot-review.md) |
 | Recover after a crash, timeout, or tangled integration | [`references/recovery.md`](references/recovery.md) |
@@ -31,7 +32,7 @@ matches the work:
   worker never writes Tower, closes a card, claims unrun proof, or spawns a
   worker. The orchestrator owns integration, criteria evidence, Tower state,
   and closeout.
-- `CHECK OK` and `DOCS ONLY` are receipts, not runtime or milestone proof.
+- Submissions and `DOCS ONLY` are receipts, not runtime or milestone proof.
   The exact focused criterion proof, linked-card token, composed sweep, and
   fresh-context review are defined only in `references/closeout.md`.
 
@@ -43,13 +44,14 @@ suspended near a deadline, after a crash, or for a release:
 - **Code first.** Where a spec or criterion exists, the worker writes the code
   before anything else. It takes the card's unmet criteria directly, writes
   the code to the spec, runs only the cheap source checks for the files it
-  touched (`jet check`, `jet fmt --check`, and a generator's `--check` when it
-  changed that generator's source), commits on `dev`, reports the commit and
+  touched (`jet check` and a single-file test), submits the patch to the
+  orchestrator's inbox ([`references/intake.md`](references/intake.md)) with
   the criteria it addresses, and moves on to the next criterion at once. It
   never stops to prove rows, profile, or wait for the orchestrator. Workers
-  never run suites, A/B comparisons, chains, release builds, or censuses.
+  never commit, build the compiler, or run suites, A/B comparisons, chains,
+  release builds, or censuses.
 - **Failures come back; the worker fixes them and moves on.** A batch failure
-  goes to its owner as one fix list; the owner lands the fixes and returns to
+  goes to its owner as one fix list; the owner submits the fixes and returns to
   its next criterion without waiting for a re-run.
 - **The orchestrator never gates a landing on proof.** It does not hunt
   evidence criterion by criterion mid-wave or hold workers for it; it keeps

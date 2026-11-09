@@ -1437,33 +1437,21 @@ jet_cli_build_dir: fn(build_dir: String, color: Bool) -[FS]> JetDriverVerbOutput
     None
 }
 
-// The application authority check of a build or run with no errors: E1803
-// (rendered as the Rust host reports it, exit 1) when the policy denies or
-// leaves undecided a right the program requires (Authority.jet). A script
-// answers with the `-A` rows (`jet_cli_source_invocation`). `json` reports
-// it as `jet run --json` reports its problems (jet_cli_run_problems).
-jet_cli_authority_check: fn(file: String, source: String, color: Bool, json: Bool, command: String, invocation: JetCLIInvocationAuthority?, result: JetDriverCompileResult) -[FS, Env]> JetDriverVerbOutput? Never! {
-    jet_cli_authority_report(file, source, color, json, command, jet_cli_traced_authority(source, invocation, result))
-}
-
 // The application authority of a checked compile (jet_cli_application_authority),
 // traced as `cli.authority`.
-jet_cli_traced_authority: fn(source: String, invocation: JetCLIInvocationAuthority?, result: JetDriverCompileResult) -[FS, Env]> JetCLIAuthority Never! {
+jet_cli_traced_authority: fn(invocation: JetCLIInvocationAuthority?, result: JetDriverCompileResult) -[FS, Env]> JetCLIAuthority Never! {
     if result.trace_sink == .Val(sink) -> sink.begin("cli.authority", "", -1, -1)
-    authority: jet_cli_application_authority(result, jet_cli_source_invocation(source, invocation))
+    authority: jet_cli_application_authority(result, invocation)
     if result.trace_sink == .Val(sink) -> sink.end("cli.authority", authority.required.len())
     authority
 }
 
-// The E1803 report of `authority`, or None when it allows the program. A
-// script with no package block reports its grant as a needs-review edit
-// (jet_cli_inline_grant_refusal), so `--json` names the decision `jet fix`
-// leaves to the author.
-jet_cli_authority_report: fn(file: String, source: String, color: Bool, json: Bool, command: String, authority: JetCLIAuthority) -[FS, Env]> JetDriverVerbOutput? Never! {
-    refusal: if jet_cli_inline_grant_refusal(authority, file, source, command) == {
-        .Val(report) -> report
-        else -> jet_cli_authority_refusal(authority, file, command) ?? return None
-    }
+// The E1803 report of `authority` (rendered as the Rust host reports it, exit
+// 1), or None when it denies nothing the program requires (Authority.jet).
+// `json` reports it as `jet run --json` reports its problems
+// (jet_cli_run_problems).
+jet_cli_authority_report: fn(file: String, source: String, color: Bool, json: Bool, authority: JetCLIAuthority) -[FS, Env]> JetDriverVerbOutput? Never! {
+    refusal: jet_cli_authority_refusal(authority) ?? return None
     Val(JetDriverVerbOutput{stdout: "", stderr: jet_cli_run_problems(file, source, [Diagnostic]{refusal}, color, json), exit_code: JET_DRIVER_EXIT_USER_ERROR})
 }
 
@@ -1498,8 +1486,8 @@ jet_cli_build_result: fn(file: String, name: String, source: String, color: Bool
         if json -> return JetDriverVerbOutput{stdout: "", stderr: jet_cli_reports_status_json("diagnostics", false, jet_cli_report_base(file), file, source, errors), exit_code: JET_DRIVER_EXIT_USER_ERROR}
         return JetDriverVerbOutput{stdout: "", stderr: jet_driver_report_problems(file, source, errors, color, true), exit_code: JET_DRIVER_EXIT_USER_ERROR}
     }
-    authority: jet_cli_traced_authority(source, invocation, result)
-    if jet_cli_authority_report(file, source, color, false, "build", authority) == .Val(refusal) -> return refusal
+    authority: jet_cli_traced_authority(invocation, result)
+    if jet_cli_authority_report(file, source, color, false, authority) == .Val(refusal) -> return refusal
     summary: if json || quiet -> "" else -> "{jet_cli_effect_projection_line(jet_cli_effect_projection(authority))}\n"
     stripped_jobs: if json || quiet -> "" else -> jet_cli_release_job_summary(inputs, options)
     built := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
@@ -1864,11 +1852,12 @@ jet_cli_full_path_origins: fn(diagnostics: &[Diagnostic]) Never! {
 }
 
 // `jet run <file>`'s build, as `jet build` does: problems with an error stop
-// it, and so does the application authority check; `run` hides advisory
-// lints unless `--verbose`, and `json` reports what it shows as JSON
-// (jet_cli_run_problems). A `--verbose` run says on one stderr line which
-// effects the program uses (the checked entry's, `entry_effects`). The image
-// is linked to run from memory.
+// it, and so does a denied effect (E1803); `run` hides advisory lints unless
+// `--verbose`, and `json` reports what it shows as JSON
+// (jet_cli_run_problems). Every other effect is allowed, and the run names
+// the ones nobody acknowledged (EffectNotice.jet). A `--verbose` run says on
+// one stderr line which effects the program uses (the checked entry's,
+// `entry_effects`). The image is linked to run from memory.
 jet_cli_run_build: fn(file: String, source: String, color: Bool, options: BuildOptions, verbose: Bool, json: Bool, invocation: JetCLIInvocationAuthority?, result: JetDriverCompileResult, inputs: &&JetDriverLoweringInputs?, snapshot: JetDriverAuthorizedSourceSnapshot) -> JetCLIBuilt {
     if result.trace_sink == .Val(sink) -> sink.begin("cli.diagnostics", "", -1, -1)
     errors: jet_cli_errors(result.diagnostics)
@@ -1878,7 +1867,9 @@ jet_cli_run_build: fn(file: String, source: String, color: Bool, options: BuildO
         if !json -> jet_cli_full_path_origins(presented)
         return JetCLIBuilt.Failed{output: JetDriverVerbOutput{stdout: "", stderr: jet_cli_run_problems(file, source, presented, color, json), exit_code: JET_DRIVER_EXIT_USER_ERROR}}
     }
-    if jet_cli_authority_check(file, source, color, json, "run", invocation, result) == .Val(refusal) -> return JetCLIBuilt.Failed{output: refusal}
+    authority: jet_cli_traced_authority(invocation, result)
+    if jet_cli_authority_report(file, source, color, json, authority) == .Val(refusal) -> return JetCLIBuilt.Failed{output: refusal}
+    jet_cli_effect_notice(file, authority, json)
     if verbose -> jet_cli_write_verbose_lints(file, source, color, json, jet_cli_present_shown(result, snapshot, true))
     if verbose && !json {
         used: jet_cli_sorted_set(result.entry_effects)
@@ -2323,6 +2314,8 @@ jet_cli_compile_test: fn(file: String, source: String, color: Bool, verbose: Boo
         stderr_handle := cli_term.stderr()
         stderr_handle.write(options.status).drop("jet stderr")
     }
+    // A Core library source tests as the Core unit it is.
+    if jet_cli_core_test_path(file) == .Val(path) -> return jet_cli_compile_core_test(file, source, path, color, verbose, threads, options, trace_sink)
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     if trace_sink == .Val(sink) -> sink.begin("sources", "", -1, -1)
     snapshotted := jet_cli_prepare_snapshot(file, file, [JetCLIOverlay]{}, color)
@@ -2348,6 +2341,32 @@ jet_cli_compile_test: fn(file: String, source: String, color: Bool, verbose: Boo
         .Checked(result, inputs, snapshot) -> jet_cli_finish(jet_cli_test_result(file, tested, doctests, measure, color, verbose, options, result, inputs, snapshot))
     }
     output
+}
+
+// `jet test` of a Core library source (jet_cli_core_test_path): the Core unit
+// at the row path `path` runs its #Tests as the compiler loads it, with
+// Core's privileges (JetDriverCompileRequest.core_tests). The compile's entry
+// imports the module that loads it (jet_cli_core_test_source) from a scratch
+// directory, which holds the test build and goes when the run ends.
+jet_cli_compile_core_test: fn(file: String, source: String, path: String, color: Bool, verbose: Bool, threads: Int?, options: JetCLITestOptions, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
+    scratch: cli_files.temp_dir("jet-test-core") ?? return JetDriverVerbOutput{stdout: "", stderr: "jet test: couldn't create a scratch directory for the Core entry: {err}\n", exit_code: JET_DRIVER_EXIT_USER_ERROR}
+    entry: "{scratch.path}/core_test.jet"
+    cli_files.write(entry, jet_cli_core_test_source(path)) ?? return JetDriverVerbOutput{stdout: "", stderr: "jet test: couldn't write the Core entry `{entry}`: {err}\n", exit_code: JET_DRIVER_EXIT_USER_ERROR}
+    if trace_sink == .Val(sink) -> sink.begin("sources", "", -1, -1)
+    measure := JetCLIMeasurePlan?{None}
+    prepared := if jet_cli_prepare_snapshot(entry, entry, [JetCLIOverlay]{}, color, true) == {
+        .Refused(refusal) -> JetCLIPrepared.Refused{output: refusal}
+        .Held(snapshot) -> {
+            if options.measure -> measure = Val(jet_cli_measure_plan(snapshot, false, options.profile))
+            jet_cli_prepare_request(snapshot, color, threads, JetDriverCompileMode.Test, false, Val(file), path)
+        }
+    }
+    if trace_sink == .Val(sink) -> sink.end("sources", jet_cli_prepared_file_count(prepared))
+    compiled := jet_cli_compile_executable(prepared, None, options.build, None, trace_sink, color)
+    if compiled.move() == {
+        .Refused(refusal) -> refusal
+        .Checked(result, inputs, snapshot) -> jet_cli_test_result(file, source, [JetCLIDoctestFile]{}, measure, color, verbose, options, result, inputs, snapshot)
+    }
 }
 
 // `jet new` starters (`NEW_PRINT_RUN`, `NEW_CLI_RUN`, `NEW_UI_RUN`,

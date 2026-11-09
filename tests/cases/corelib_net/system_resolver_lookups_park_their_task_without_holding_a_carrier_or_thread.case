@@ -1,0 +1,24 @@
+# Resolution runs on the scheduler: 16 lookups at once on one carrier
+# (main.jet PARKED) against the fixture's local server, which answers each
+# name only after the resolver resends it (500 ms, from timeout:1 with
+# attempts:2). The lookups are in flight together, a ticking task keeps
+# running beside them, the server (a task on the same carrier) answers every
+# resend, and the thread count never rises above its count before the
+# lookups: a lookup parks its task on the poller and starts no thread.
+# musl's getaddrinfo blocks the thread that calls it, so the runtime that
+# called it ran each lookup on a thread of its own, and lookups added threads.
+requires: os-name:linux
+requires: tool:sh
+requires: tool:unshare
+requires: tool:ip
+requires: tool:mount
+requires: probe unshare --user --map-root-user --net --mount true # unprivileged user namespaces are enabled
+fixture: system_resolver_follows_go_against_a_local_dns_server.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JET_SCHEDULER_THREADS=1
+step build: jet build main.jet
+exit: 0
+step resolve: unshare --user --map-root-user --net --mount sh inside.sh parked
+exit: 0
+stdout: = "16 lookups, each answered on its resend: true\nlookups in flight at once on one carrier: true\nthe ticking task ran during the lookups: true\nno lookup started a thread: true\nall lookups done within 3 s: true\n"

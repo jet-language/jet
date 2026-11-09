@@ -38,6 +38,8 @@ use {
     collation_table: __core_text_collation_table
     text_normal: core.text.runtime.kernel_text_normal
     text_ccc: core.text.runtime.assets.unicode_ccc
+    text_category: core.text.runtime.assets.unicode_general_category
+    unicode_category.[general_category, is_graphic_cp, punctuation_scalars]
 }
 
 /// Byte-offset cursor into UTF-8 text. Line and column are 1-based.
@@ -170,6 +172,39 @@ is_whitespace: fn(text: String) -> Bool Never! {
         if !is_space_cp(cp) -> return false
     }
     true
+}
+
+/// Every scalar is a tab or a space separator (General_Category Zs), as C
+/// `iswblank`. Line and paragraph separators are not blank. Empty text is false.
+is_blank: fn(text: String) -> Bool Never! {
+    cps: decode_scalars(text)
+    if cps.len() == 0 -> return false
+    loop cp in cps {
+        if cp != 9 && general_category(cp, text_category.UNICODE_GENERAL_CATEGORY) != GC_ZS -> return false
+    }
+    true
+}
+
+/// Every scalar is visible: not whitespace, not a control (Cc) and not a
+/// separator (Zs, Zl, Zp), as C `iswgraph`. Format characters and unassigned
+/// scalars are graphic, as they are printable for `String.isprintable`. Empty
+/// text is false.
+is_graphic: fn(text: String) -> Bool Never! {
+    cps: decode_scalars(text)
+    if cps.len() == 0 -> return false
+    loop cp in cps {
+        if !is_graphic_cp(cp, general_category(cp, text_category.UNICODE_GENERAL_CATEGORY)) -> return false
+    }
+    true
+}
+
+/// Every scalar is graphic and is neither a letter (Alphabetic), a digit
+/// (Numeric), a combining mark (Mn, Mc, Me) nor a format character (Cf), as C
+/// `iswpunct`: symbols such as `$`, `+` and `€` count. Empty text is false.
+is_punctuation: fn(text: String) -> Bool Never! {
+    cps: decode_scalars(text)
+    if cps.len() == 0 -> return false
+    punctuation_scalars(cps, segment_tables.UNICODE_ALPHABETIC, segment_tables.UNICODE_NUMERIC)
 }
 
 /// True iff any scalar is Unicode 17 Cc.
@@ -481,6 +516,39 @@ is_space_cp: fn(cp: Int) -> Bool {
     if cp >= 8192 && cp <= 8202 -> return true
     if cp == 8232 || cp == 8233 -> return true
     false
+}
+
+// General_Category tags of UNICODE_GENERAL_CATEGORY, in the order of GC_TAGS in
+// Tools/agent/UnicodeTables.jet; every other category reads as GC_OTHER.
+GC_CC: 0
+GC_CF: 1
+GC_MC: 4
+GC_ZS: 5
+GC_ZL: 6
+GC_ZP: 7
+GC_OTHER: 8
+
+// General_Category reads behind the character classes: not part of the text
+// surface.
+priv unicode_category: module {
+    general_category: fn(cp: Int, table: [U8]) -> Int Never! { text_asset.asset_tag(table, cp, GC_OTHER) }
+
+    is_graphic_cp: fn(cp: Int, category: Int) -> Bool Never! {
+        !is_space_cp(cp) && category != GC_CC && category != GC_ZS && category != GC_ZL && category != GC_ZP
+    }
+
+    // Cf, Mn, Me and Mc are the tags GC_CF through GC_MC.
+    punctuation_scalars: fn(cps: [Int], alphabetic: [U8], numeric: [U8]) -> Bool Never! {
+        alpha_window: alphabetic[0..<alphabetic.len()]
+        numeric_window: numeric[0..<numeric.len()]
+        loop cp in cps {
+            category: general_category(cp, text_category.UNICODE_GENERAL_CATEGORY)
+            if !is_graphic_cp(cp, category) -> return false
+            if category >= GC_CF && category <= GC_MC -> return false
+            if is_alpha_cp(cp, alpha_window) || is_digit_cp(cp, numeric_window) -> return false
+        }
+        true
+    }
 }
 
 combining_class: fn(cp: Int) -> Int {

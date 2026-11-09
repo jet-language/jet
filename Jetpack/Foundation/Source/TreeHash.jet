@@ -1,16 +1,12 @@
 // Source-tree identity and no-follow file publication (the parts of
-// jet_foundation::SHA256 Jetpack uses). Hashing reuses the compiler's
-// canonical SHA-256 compression (Compiler/JetFoundation/Source/Hash/
-// SHA256.jet) through a streaming hasher, so large files are never held
-// whole. Every read and write refuses links and checks the opened file's
-// identity.
+// jet_foundation::SHA256 Jetpack uses). Hashing streams through Core's
+// SHA-256 Hasher, so large files are never held whole. Every read and write
+// refuses links and checks the opened file's identity.
 //
 // The tree bounds MAX_TREE_FILE_BYTES, MAX_TREE_TOTAL_BYTES,
 // MAX_TREE_FILES, and MAX_TREE_DEPTH live in Syntax.jet.
 use {
-    jet_foundation.[
-        SHA256_H0, SHA256_K, SHA256_LENGTH_MASK, sha256_compress, sha256_hex_bytes,
-    ]
+    crypto: core.crypto
     files: core.files
     time: core.time
     sys: core.sys
@@ -25,65 +21,16 @@ FOUNDATION_READ_CHUNK: 65536
 // Big-endian byte shifts of a 64-bit length prefix.
 FOUNDATION_U64_SHIFTS: [Int]{56, 48, 40, 32, 24, 16, 8, 0}
 
-// Incremental SHA-256 holding at most one partial 64-byte block, so tool
-// identities can hash large artifacts without whole-file reads.
-// REMOVE-AT-FLOORFIX: replace this wrapper with the canonical compiler-owned
-// public streaming hasher when that provider lands; never copy compression.
+// Incremental SHA-256 for tool identities: core.crypto.Hasher, which holds
+// at most one partial 64-byte block, so large artifacts are never read whole.
 StreamingSHA256: struct {
-    state: [U32]
-    priv words: [U32]
-    priv k: [U32]
-    priv block: [U8]
-    priv total: Int
+    priv hasher: crypto.Hasher
 
-    new: fn() -> StreamingSHA256 Never! {
-        state: loop word in SHA256_H0 -> U32{word}
-        words: loop _ in 0..<64 -> U32{0}
-        k: loop word in SHA256_K -> U32{word}
-        StreamingSHA256{state: state, words: words, k: k, block: [U8]{}, total: 0}
-    }
+    new: fn() -> StreamingSHA256 Never! { StreamingSHA256{hasher: crypto.Hasher.new()} }
 
-    update: fn(&self, data: [U8]) Never! {
-        loop byte in data {
-            self.block.push(byte)
-            if self.block.len() == 64 {
-                sha256_compress(self.state, self.words, self.k, self.block[0..<64], 0)
-                self.block.clear()
-            }
-        }
-        self.total += data.len()
-    }
+    update: fn(&self, data: [U8]) Never! { self.hasher.update(data) }
 
-    // The 32-byte digest: `0x80`, zero padding, and the big-endian bit
-    // length close the final block(s).
-    finalize: fn(self) -> [U8] Never! {
-        state := self.state
-        words := self.words
-        block := self.block
-        block.push(U8{128})
-        if block.len() > 56 {
-            loop block.len() < 64 -> block.push(U8{0})
-            sha256_compress(state, words, self.k, block[0..<64], 0)
-            block.clear()
-        }
-        loop block.len() < 56 -> block.push(U8{0})
-        bit_length: ((self.total * 8)).bit_and(SHA256_LENGTH_MASK)
-        loop shift in FOUNDATION_U64_SHIFTS -> block.push(U8{((bit_length >> shift)).bit_and(255)})
-        sha256_compress(state, words, self.k, block[0..<64], 0)
-        digest := [U8]{}
-        loop lane in state {
-            word: Int.from_u32(lane)
-            digest.push(U8{((word >> 24)).bit_and(255)})
-            digest.push(U8{((word >> 16)).bit_and(255)})
-            digest.push(U8{((word >> 8)).bit_and(255)})
-            digest.push(U8{(word).bit_and(255)})
-        }
-        digest
-    }
-
-    finalize_hex: fn(self) -> String Never! {
-        sha256_hex_bytes(self.finalize())
-    }
+    finalize_hex: fn(self) -> String Never! { self.hasher.digest() }
 }
 
 // Failure while proving a source tree's contents.

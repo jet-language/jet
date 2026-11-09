@@ -611,6 +611,869 @@ os_sha256_block_i64: fn(state: I64, data: I64, table: I64) {
     """
 }
 
+// AES (FIPS 197) with AES-NI, the leaves behind core.crypto.__aes_blocks
+// (Compiler/JetRuntime/Source/CryptoAes.jet). The 4-block forms take four
+// independent blocks at `src` through the cipher under the rounds + 1
+// round keys at `keys`, xor each with the block at `mask` and store them at
+// `out`; the decrypting forms run the equivalent inverse cipher (section
+// 5.3.5) under its round keys. Every load precedes every store, so `out`
+// may be `src` or `mask`. The caller has seen CPUID.1:ECX.AES.
+#[Unsafe("reads 176 round-key bytes at keys and 64 bytes at src and at mask, and writes 64 bytes at out; the caller has seen AES-NI"), FFI(asm)]
+os_aes_encrypt4_10_i64: fn(keys: I64, src: I64, mask: I64, out: I64) {
+    """
+    movups xmm4, xmmword ptr [{keys}]
+    movups xmm0, xmmword ptr [{src}]
+    movups xmm1, xmmword ptr [{src} + 16]
+    movups xmm2, xmmword ptr [{src} + 32]
+    movups xmm3, xmmword ptr [{src} + 48]
+    pxor xmm0, xmm4
+    pxor xmm1, xmm4
+    pxor xmm2, xmm4
+    pxor xmm3, xmm4
+    movups xmm5, xmmword ptr [{keys} + 16]
+    aesenc xmm0, xmm5
+    aesenc xmm1, xmm5
+    aesenc xmm2, xmm5
+    aesenc xmm3, xmm5
+    movups xmm4, xmmword ptr [{keys} + 32]
+    aesenc xmm0, xmm4
+    aesenc xmm1, xmm4
+    aesenc xmm2, xmm4
+    aesenc xmm3, xmm4
+    movups xmm5, xmmword ptr [{keys} + 48]
+    aesenc xmm0, xmm5
+    aesenc xmm1, xmm5
+    aesenc xmm2, xmm5
+    aesenc xmm3, xmm5
+    movups xmm4, xmmword ptr [{keys} + 64]
+    aesenc xmm0, xmm4
+    aesenc xmm1, xmm4
+    aesenc xmm2, xmm4
+    aesenc xmm3, xmm4
+    movups xmm5, xmmword ptr [{keys} + 80]
+    aesenc xmm0, xmm5
+    aesenc xmm1, xmm5
+    aesenc xmm2, xmm5
+    aesenc xmm3, xmm5
+    movups xmm4, xmmword ptr [{keys} + 96]
+    aesenc xmm0, xmm4
+    aesenc xmm1, xmm4
+    aesenc xmm2, xmm4
+    aesenc xmm3, xmm4
+    movups xmm5, xmmword ptr [{keys} + 112]
+    aesenc xmm0, xmm5
+    aesenc xmm1, xmm5
+    aesenc xmm2, xmm5
+    aesenc xmm3, xmm5
+    movups xmm4, xmmword ptr [{keys} + 128]
+    aesenc xmm0, xmm4
+    aesenc xmm1, xmm4
+    aesenc xmm2, xmm4
+    aesenc xmm3, xmm4
+    movups xmm5, xmmword ptr [{keys} + 144]
+    aesenc xmm0, xmm5
+    aesenc xmm1, xmm5
+    aesenc xmm2, xmm5
+    aesenc xmm3, xmm5
+    movups xmm4, xmmword ptr [{keys} + 160]
+    aesenclast xmm0, xmm4
+    aesenclast xmm1, xmm4
+    aesenclast xmm2, xmm4
+    aesenclast xmm3, xmm4
+    movups xmm4, xmmword ptr [{mask}]
+    movups xmm5, xmmword ptr [{mask} + 16]
+    pxor xmm0, xmm4
+    pxor xmm1, xmm5
+    movups xmm4, xmmword ptr [{mask} + 32]
+    movups xmm5, xmmword ptr [{mask} + 48]
+    pxor xmm2, xmm4
+    pxor xmm3, xmm5
+    movups xmmword ptr [{out}], xmm0
+    movups xmmword ptr [{out} + 16], xmm1
+    movups xmmword ptr [{out} + 32], xmm2
+    movups xmmword ptr [{out} + 48], xmm3
+    ; clobbers xmm0, xmm1, xmm2, xmm3, xmm4, xmm5
+    """
+}
+
+#[Unsafe("reads 208 round-key bytes at keys and 64 bytes at src and at mask, and writes 64 bytes at out; the caller has seen AES-NI"), FFI(asm)]
+os_aes_encrypt4_12_i64: fn(keys: I64, src: I64, mask: I64, out: I64) {
+    """
+    movups xmm4, xmmword ptr [{keys}]
+    movups xmm0, xmmword ptr [{src}]
+    movups xmm1, xmmword ptr [{src} + 16]
+    movups xmm2, xmmword ptr [{src} + 32]
+    movups xmm3, xmmword ptr [{src} + 48]
+    pxor xmm0, xmm4
+    pxor xmm1, xmm4
+    pxor xmm2, xmm4
+    pxor xmm3, xmm4
+    movups xmm5, xmmword ptr [{keys} + 16]
+    aesenc xmm0, xmm5
+    aesenc xmm1, xmm5
+    aesenc xmm2, xmm5
+    aesenc xmm3, xmm5
+    movups xmm4, xmmword ptr [{keys} + 32]
+    aesenc xmm0, xmm4
+    aesenc xmm1, xmm4
+    aesenc xmm2, xmm4
+    aesenc xmm3, xmm4
+    movups xmm5, xmmword ptr [{keys} + 48]
+    aesenc xmm0, xmm5
+    aesenc xmm1, xmm5
+    aesenc xmm2, xmm5
+    aesenc xmm3, xmm5
+    movups xmm4, xmmword ptr [{keys} + 64]
+    aesenc xmm0, xmm4
+    aesenc xmm1, xmm4
+    aesenc xmm2, xmm4
+    aesenc xmm3, xmm4
+    movups xmm5, xmmword ptr [{keys} + 80]
+    aesenc xmm0, xmm5
+    aesenc xmm1, xmm5
+    aesenc xmm2, xmm5
+    aesenc xmm3, xmm5
+    movups xmm4, xmmword ptr [{keys} + 96]
+    aesenc xmm0, xmm4
+    aesenc xmm1, xmm4
+    aesenc xmm2, xmm4
+    aesenc xmm3, xmm4
+    movups xmm5, xmmword ptr [{keys} + 112]
+    aesenc xmm0, xmm5
+    aesenc xmm1, xmm5
+    aesenc xmm2, xmm5
+    aesenc xmm3, xmm5
+    movups xmm4, xmmword ptr [{keys} + 128]
+    aesenc xmm0, xmm4
+    aesenc xmm1, xmm4
+    aesenc xmm2, xmm4
+    aesenc xmm3, xmm4
+    movups xmm5, xmmword ptr [{keys} + 144]
+    aesenc xmm0, xmm5
+    aesenc xmm1, xmm5
+    aesenc xmm2, xmm5
+    aesenc xmm3, xmm5
+    movups xmm4, xmmword ptr [{keys} + 160]
+    aesenc xmm0, xmm4
+    aesenc xmm1, xmm4
+    aesenc xmm2, xmm4
+    aesenc xmm3, xmm4
+    movups xmm5, xmmword ptr [{keys} + 176]
+    aesenc xmm0, xmm5
+    aesenc xmm1, xmm5
+    aesenc xmm2, xmm5
+    aesenc xmm3, xmm5
+    movups xmm4, xmmword ptr [{keys} + 192]
+    aesenclast xmm0, xmm4
+    aesenclast xmm1, xmm4
+    aesenclast xmm2, xmm4
+    aesenclast xmm3, xmm4
+    movups xmm4, xmmword ptr [{mask}]
+    movups xmm5, xmmword ptr [{mask} + 16]
+    pxor xmm0, xmm4
+    pxor xmm1, xmm5
+    movups xmm4, xmmword ptr [{mask} + 32]
+    movups xmm5, xmmword ptr [{mask} + 48]
+    pxor xmm2, xmm4
+    pxor xmm3, xmm5
+    movups xmmword ptr [{out}], xmm0
+    movups xmmword ptr [{out} + 16], xmm1
+    movups xmmword ptr [{out} + 32], xmm2
+    movups xmmword ptr [{out} + 48], xmm3
+    ; clobbers xmm0, xmm1, xmm2, xmm3, xmm4, xmm5
+    """
+}
+
+#[Unsafe("reads 240 round-key bytes at keys and 64 bytes at src and at mask, and writes 64 bytes at out; the caller has seen AES-NI"), FFI(asm)]
+os_aes_encrypt4_14_i64: fn(keys: I64, src: I64, mask: I64, out: I64) {
+    """
+    movups xmm4, xmmword ptr [{keys}]
+    movups xmm0, xmmword ptr [{src}]
+    movups xmm1, xmmword ptr [{src} + 16]
+    movups xmm2, xmmword ptr [{src} + 32]
+    movups xmm3, xmmword ptr [{src} + 48]
+    pxor xmm0, xmm4
+    pxor xmm1, xmm4
+    pxor xmm2, xmm4
+    pxor xmm3, xmm4
+    movups xmm5, xmmword ptr [{keys} + 16]
+    aesenc xmm0, xmm5
+    aesenc xmm1, xmm5
+    aesenc xmm2, xmm5
+    aesenc xmm3, xmm5
+    movups xmm4, xmmword ptr [{keys} + 32]
+    aesenc xmm0, xmm4
+    aesenc xmm1, xmm4
+    aesenc xmm2, xmm4
+    aesenc xmm3, xmm4
+    movups xmm5, xmmword ptr [{keys} + 48]
+    aesenc xmm0, xmm5
+    aesenc xmm1, xmm5
+    aesenc xmm2, xmm5
+    aesenc xmm3, xmm5
+    movups xmm4, xmmword ptr [{keys} + 64]
+    aesenc xmm0, xmm4
+    aesenc xmm1, xmm4
+    aesenc xmm2, xmm4
+    aesenc xmm3, xmm4
+    movups xmm5, xmmword ptr [{keys} + 80]
+    aesenc xmm0, xmm5
+    aesenc xmm1, xmm5
+    aesenc xmm2, xmm5
+    aesenc xmm3, xmm5
+    movups xmm4, xmmword ptr [{keys} + 96]
+    aesenc xmm0, xmm4
+    aesenc xmm1, xmm4
+    aesenc xmm2, xmm4
+    aesenc xmm3, xmm4
+    movups xmm5, xmmword ptr [{keys} + 112]
+    aesenc xmm0, xmm5
+    aesenc xmm1, xmm5
+    aesenc xmm2, xmm5
+    aesenc xmm3, xmm5
+    movups xmm4, xmmword ptr [{keys} + 128]
+    aesenc xmm0, xmm4
+    aesenc xmm1, xmm4
+    aesenc xmm2, xmm4
+    aesenc xmm3, xmm4
+    movups xmm5, xmmword ptr [{keys} + 144]
+    aesenc xmm0, xmm5
+    aesenc xmm1, xmm5
+    aesenc xmm2, xmm5
+    aesenc xmm3, xmm5
+    movups xmm4, xmmword ptr [{keys} + 160]
+    aesenc xmm0, xmm4
+    aesenc xmm1, xmm4
+    aesenc xmm2, xmm4
+    aesenc xmm3, xmm4
+    movups xmm5, xmmword ptr [{keys} + 176]
+    aesenc xmm0, xmm5
+    aesenc xmm1, xmm5
+    aesenc xmm2, xmm5
+    aesenc xmm3, xmm5
+    movups xmm4, xmmword ptr [{keys} + 192]
+    aesenc xmm0, xmm4
+    aesenc xmm1, xmm4
+    aesenc xmm2, xmm4
+    aesenc xmm3, xmm4
+    movups xmm5, xmmword ptr [{keys} + 208]
+    aesenc xmm0, xmm5
+    aesenc xmm1, xmm5
+    aesenc xmm2, xmm5
+    aesenc xmm3, xmm5
+    movups xmm4, xmmword ptr [{keys} + 224]
+    aesenclast xmm0, xmm4
+    aesenclast xmm1, xmm4
+    aesenclast xmm2, xmm4
+    aesenclast xmm3, xmm4
+    movups xmm4, xmmword ptr [{mask}]
+    movups xmm5, xmmword ptr [{mask} + 16]
+    pxor xmm0, xmm4
+    pxor xmm1, xmm5
+    movups xmm4, xmmword ptr [{mask} + 32]
+    movups xmm5, xmmword ptr [{mask} + 48]
+    pxor xmm2, xmm4
+    pxor xmm3, xmm5
+    movups xmmword ptr [{out}], xmm0
+    movups xmmword ptr [{out} + 16], xmm1
+    movups xmmword ptr [{out} + 32], xmm2
+    movups xmmword ptr [{out} + 48], xmm3
+    ; clobbers xmm0, xmm1, xmm2, xmm3, xmm4, xmm5
+    """
+}
+
+#[Unsafe("reads 176 round-key bytes at keys and 64 bytes at src and at mask, and writes 64 bytes at out; the caller has seen AES-NI"), FFI(asm)]
+os_aes_decrypt4_10_i64: fn(keys: I64, src: I64, mask: I64, out: I64) {
+    """
+    movups xmm4, xmmword ptr [{keys}]
+    movups xmm0, xmmword ptr [{src}]
+    movups xmm1, xmmword ptr [{src} + 16]
+    movups xmm2, xmmword ptr [{src} + 32]
+    movups xmm3, xmmword ptr [{src} + 48]
+    pxor xmm0, xmm4
+    pxor xmm1, xmm4
+    pxor xmm2, xmm4
+    pxor xmm3, xmm4
+    movups xmm5, xmmword ptr [{keys} + 16]
+    aesdec xmm0, xmm5
+    aesdec xmm1, xmm5
+    aesdec xmm2, xmm5
+    aesdec xmm3, xmm5
+    movups xmm4, xmmword ptr [{keys} + 32]
+    aesdec xmm0, xmm4
+    aesdec xmm1, xmm4
+    aesdec xmm2, xmm4
+    aesdec xmm3, xmm4
+    movups xmm5, xmmword ptr [{keys} + 48]
+    aesdec xmm0, xmm5
+    aesdec xmm1, xmm5
+    aesdec xmm2, xmm5
+    aesdec xmm3, xmm5
+    movups xmm4, xmmword ptr [{keys} + 64]
+    aesdec xmm0, xmm4
+    aesdec xmm1, xmm4
+    aesdec xmm2, xmm4
+    aesdec xmm3, xmm4
+    movups xmm5, xmmword ptr [{keys} + 80]
+    aesdec xmm0, xmm5
+    aesdec xmm1, xmm5
+    aesdec xmm2, xmm5
+    aesdec xmm3, xmm5
+    movups xmm4, xmmword ptr [{keys} + 96]
+    aesdec xmm0, xmm4
+    aesdec xmm1, xmm4
+    aesdec xmm2, xmm4
+    aesdec xmm3, xmm4
+    movups xmm5, xmmword ptr [{keys} + 112]
+    aesdec xmm0, xmm5
+    aesdec xmm1, xmm5
+    aesdec xmm2, xmm5
+    aesdec xmm3, xmm5
+    movups xmm4, xmmword ptr [{keys} + 128]
+    aesdec xmm0, xmm4
+    aesdec xmm1, xmm4
+    aesdec xmm2, xmm4
+    aesdec xmm3, xmm4
+    movups xmm5, xmmword ptr [{keys} + 144]
+    aesdec xmm0, xmm5
+    aesdec xmm1, xmm5
+    aesdec xmm2, xmm5
+    aesdec xmm3, xmm5
+    movups xmm4, xmmword ptr [{keys} + 160]
+    aesdeclast xmm0, xmm4
+    aesdeclast xmm1, xmm4
+    aesdeclast xmm2, xmm4
+    aesdeclast xmm3, xmm4
+    movups xmm4, xmmword ptr [{mask}]
+    movups xmm5, xmmword ptr [{mask} + 16]
+    pxor xmm0, xmm4
+    pxor xmm1, xmm5
+    movups xmm4, xmmword ptr [{mask} + 32]
+    movups xmm5, xmmword ptr [{mask} + 48]
+    pxor xmm2, xmm4
+    pxor xmm3, xmm5
+    movups xmmword ptr [{out}], xmm0
+    movups xmmword ptr [{out} + 16], xmm1
+    movups xmmword ptr [{out} + 32], xmm2
+    movups xmmword ptr [{out} + 48], xmm3
+    ; clobbers xmm0, xmm1, xmm2, xmm3, xmm4, xmm5
+    """
+}
+
+#[Unsafe("reads 208 round-key bytes at keys and 64 bytes at src and at mask, and writes 64 bytes at out; the caller has seen AES-NI"), FFI(asm)]
+os_aes_decrypt4_12_i64: fn(keys: I64, src: I64, mask: I64, out: I64) {
+    """
+    movups xmm4, xmmword ptr [{keys}]
+    movups xmm0, xmmword ptr [{src}]
+    movups xmm1, xmmword ptr [{src} + 16]
+    movups xmm2, xmmword ptr [{src} + 32]
+    movups xmm3, xmmword ptr [{src} + 48]
+    pxor xmm0, xmm4
+    pxor xmm1, xmm4
+    pxor xmm2, xmm4
+    pxor xmm3, xmm4
+    movups xmm5, xmmword ptr [{keys} + 16]
+    aesdec xmm0, xmm5
+    aesdec xmm1, xmm5
+    aesdec xmm2, xmm5
+    aesdec xmm3, xmm5
+    movups xmm4, xmmword ptr [{keys} + 32]
+    aesdec xmm0, xmm4
+    aesdec xmm1, xmm4
+    aesdec xmm2, xmm4
+    aesdec xmm3, xmm4
+    movups xmm5, xmmword ptr [{keys} + 48]
+    aesdec xmm0, xmm5
+    aesdec xmm1, xmm5
+    aesdec xmm2, xmm5
+    aesdec xmm3, xmm5
+    movups xmm4, xmmword ptr [{keys} + 64]
+    aesdec xmm0, xmm4
+    aesdec xmm1, xmm4
+    aesdec xmm2, xmm4
+    aesdec xmm3, xmm4
+    movups xmm5, xmmword ptr [{keys} + 80]
+    aesdec xmm0, xmm5
+    aesdec xmm1, xmm5
+    aesdec xmm2, xmm5
+    aesdec xmm3, xmm5
+    movups xmm4, xmmword ptr [{keys} + 96]
+    aesdec xmm0, xmm4
+    aesdec xmm1, xmm4
+    aesdec xmm2, xmm4
+    aesdec xmm3, xmm4
+    movups xmm5, xmmword ptr [{keys} + 112]
+    aesdec xmm0, xmm5
+    aesdec xmm1, xmm5
+    aesdec xmm2, xmm5
+    aesdec xmm3, xmm5
+    movups xmm4, xmmword ptr [{keys} + 128]
+    aesdec xmm0, xmm4
+    aesdec xmm1, xmm4
+    aesdec xmm2, xmm4
+    aesdec xmm3, xmm4
+    movups xmm5, xmmword ptr [{keys} + 144]
+    aesdec xmm0, xmm5
+    aesdec xmm1, xmm5
+    aesdec xmm2, xmm5
+    aesdec xmm3, xmm5
+    movups xmm4, xmmword ptr [{keys} + 160]
+    aesdec xmm0, xmm4
+    aesdec xmm1, xmm4
+    aesdec xmm2, xmm4
+    aesdec xmm3, xmm4
+    movups xmm5, xmmword ptr [{keys} + 176]
+    aesdec xmm0, xmm5
+    aesdec xmm1, xmm5
+    aesdec xmm2, xmm5
+    aesdec xmm3, xmm5
+    movups xmm4, xmmword ptr [{keys} + 192]
+    aesdeclast xmm0, xmm4
+    aesdeclast xmm1, xmm4
+    aesdeclast xmm2, xmm4
+    aesdeclast xmm3, xmm4
+    movups xmm4, xmmword ptr [{mask}]
+    movups xmm5, xmmword ptr [{mask} + 16]
+    pxor xmm0, xmm4
+    pxor xmm1, xmm5
+    movups xmm4, xmmword ptr [{mask} + 32]
+    movups xmm5, xmmword ptr [{mask} + 48]
+    pxor xmm2, xmm4
+    pxor xmm3, xmm5
+    movups xmmword ptr [{out}], xmm0
+    movups xmmword ptr [{out} + 16], xmm1
+    movups xmmword ptr [{out} + 32], xmm2
+    movups xmmword ptr [{out} + 48], xmm3
+    ; clobbers xmm0, xmm1, xmm2, xmm3, xmm4, xmm5
+    """
+}
+
+#[Unsafe("reads 240 round-key bytes at keys and 64 bytes at src and at mask, and writes 64 bytes at out; the caller has seen AES-NI"), FFI(asm)]
+os_aes_decrypt4_14_i64: fn(keys: I64, src: I64, mask: I64, out: I64) {
+    """
+    movups xmm4, xmmword ptr [{keys}]
+    movups xmm0, xmmword ptr [{src}]
+    movups xmm1, xmmword ptr [{src} + 16]
+    movups xmm2, xmmword ptr [{src} + 32]
+    movups xmm3, xmmword ptr [{src} + 48]
+    pxor xmm0, xmm4
+    pxor xmm1, xmm4
+    pxor xmm2, xmm4
+    pxor xmm3, xmm4
+    movups xmm5, xmmword ptr [{keys} + 16]
+    aesdec xmm0, xmm5
+    aesdec xmm1, xmm5
+    aesdec xmm2, xmm5
+    aesdec xmm3, xmm5
+    movups xmm4, xmmword ptr [{keys} + 32]
+    aesdec xmm0, xmm4
+    aesdec xmm1, xmm4
+    aesdec xmm2, xmm4
+    aesdec xmm3, xmm4
+    movups xmm5, xmmword ptr [{keys} + 48]
+    aesdec xmm0, xmm5
+    aesdec xmm1, xmm5
+    aesdec xmm2, xmm5
+    aesdec xmm3, xmm5
+    movups xmm4, xmmword ptr [{keys} + 64]
+    aesdec xmm0, xmm4
+    aesdec xmm1, xmm4
+    aesdec xmm2, xmm4
+    aesdec xmm3, xmm4
+    movups xmm5, xmmword ptr [{keys} + 80]
+    aesdec xmm0, xmm5
+    aesdec xmm1, xmm5
+    aesdec xmm2, xmm5
+    aesdec xmm3, xmm5
+    movups xmm4, xmmword ptr [{keys} + 96]
+    aesdec xmm0, xmm4
+    aesdec xmm1, xmm4
+    aesdec xmm2, xmm4
+    aesdec xmm3, xmm4
+    movups xmm5, xmmword ptr [{keys} + 112]
+    aesdec xmm0, xmm5
+    aesdec xmm1, xmm5
+    aesdec xmm2, xmm5
+    aesdec xmm3, xmm5
+    movups xmm4, xmmword ptr [{keys} + 128]
+    aesdec xmm0, xmm4
+    aesdec xmm1, xmm4
+    aesdec xmm2, xmm4
+    aesdec xmm3, xmm4
+    movups xmm5, xmmword ptr [{keys} + 144]
+    aesdec xmm0, xmm5
+    aesdec xmm1, xmm5
+    aesdec xmm2, xmm5
+    aesdec xmm3, xmm5
+    movups xmm4, xmmword ptr [{keys} + 160]
+    aesdec xmm0, xmm4
+    aesdec xmm1, xmm4
+    aesdec xmm2, xmm4
+    aesdec xmm3, xmm4
+    movups xmm5, xmmword ptr [{keys} + 176]
+    aesdec xmm0, xmm5
+    aesdec xmm1, xmm5
+    aesdec xmm2, xmm5
+    aesdec xmm3, xmm5
+    movups xmm4, xmmword ptr [{keys} + 192]
+    aesdec xmm0, xmm4
+    aesdec xmm1, xmm4
+    aesdec xmm2, xmm4
+    aesdec xmm3, xmm4
+    movups xmm5, xmmword ptr [{keys} + 208]
+    aesdec xmm0, xmm5
+    aesdec xmm1, xmm5
+    aesdec xmm2, xmm5
+    aesdec xmm3, xmm5
+    movups xmm4, xmmword ptr [{keys} + 224]
+    aesdeclast xmm0, xmm4
+    aesdeclast xmm1, xmm4
+    aesdeclast xmm2, xmm4
+    aesdeclast xmm3, xmm4
+    movups xmm4, xmmword ptr [{mask}]
+    movups xmm5, xmmword ptr [{mask} + 16]
+    pxor xmm0, xmm4
+    pxor xmm1, xmm5
+    movups xmm4, xmmword ptr [{mask} + 32]
+    movups xmm5, xmmword ptr [{mask} + 48]
+    pxor xmm2, xmm4
+    pxor xmm3, xmm5
+    movups xmmword ptr [{out}], xmm0
+    movups xmmword ptr [{out} + 16], xmm1
+    movups xmmword ptr [{out} + 32], xmm2
+    movups xmmword ptr [{out} + 48], xmm3
+    ; clobbers xmm0, xmm1, xmm2, xmm3, xmm4, xmm5
+    """
+}
+
+// One chained AES block: x = E(src ^ pre) under the rounds + 1 round keys
+// at `keys`, stored at `chain`, and x ^ post stored at `out`: CBC, CFB and
+// OFB encryption (SP 800-38A sections 6.2-6.4) as CryptoAes.jet calls it.
+// Every load precedes the stores, so `chain` may be `src` or `pre`.
+#[Unsafe("reads 176 round-key bytes at keys and 16 bytes at src, pre and post, and writes 16 bytes at chain and at out; the caller has seen AES-NI"), FFI(asm)]
+os_aes_encrypt1_10_i64: fn(keys: I64, src: I64, pre: I64, post: I64, out: I64, chain: I64) {
+    """
+    movups xmm0, xmmword ptr [{src}]
+    movups xmm1, xmmword ptr [{pre}]
+    movups xmm2, xmmword ptr [{keys}]
+    pxor xmm0, xmm1
+    movups xmm1, xmmword ptr [{post}]
+    pxor xmm0, xmm2
+    movups xmm3, xmmword ptr [{keys} + 16]
+    aesenc xmm0, xmm3
+    movups xmm2, xmmword ptr [{keys} + 32]
+    aesenc xmm0, xmm2
+    movups xmm3, xmmword ptr [{keys} + 48]
+    aesenc xmm0, xmm3
+    movups xmm2, xmmword ptr [{keys} + 64]
+    aesenc xmm0, xmm2
+    movups xmm3, xmmword ptr [{keys} + 80]
+    aesenc xmm0, xmm3
+    movups xmm2, xmmword ptr [{keys} + 96]
+    aesenc xmm0, xmm2
+    movups xmm3, xmmword ptr [{keys} + 112]
+    aesenc xmm0, xmm3
+    movups xmm2, xmmword ptr [{keys} + 128]
+    aesenc xmm0, xmm2
+    movups xmm3, xmmword ptr [{keys} + 144]
+    aesenc xmm0, xmm3
+    movups xmm2, xmmword ptr [{keys} + 160]
+    aesenclast xmm0, xmm2
+    movups xmmword ptr [{chain}], xmm0
+    pxor xmm0, xmm1
+    movups xmmword ptr [{out}], xmm0
+    ; clobbers xmm0, xmm1, xmm2, xmm3
+    """
+}
+
+#[Unsafe("reads 208 round-key bytes at keys and 16 bytes at src, pre and post, and writes 16 bytes at chain and at out; the caller has seen AES-NI"), FFI(asm)]
+os_aes_encrypt1_12_i64: fn(keys: I64, src: I64, pre: I64, post: I64, out: I64, chain: I64) {
+    """
+    movups xmm0, xmmword ptr [{src}]
+    movups xmm1, xmmword ptr [{pre}]
+    movups xmm2, xmmword ptr [{keys}]
+    pxor xmm0, xmm1
+    movups xmm1, xmmword ptr [{post}]
+    pxor xmm0, xmm2
+    movups xmm3, xmmword ptr [{keys} + 16]
+    aesenc xmm0, xmm3
+    movups xmm2, xmmword ptr [{keys} + 32]
+    aesenc xmm0, xmm2
+    movups xmm3, xmmword ptr [{keys} + 48]
+    aesenc xmm0, xmm3
+    movups xmm2, xmmword ptr [{keys} + 64]
+    aesenc xmm0, xmm2
+    movups xmm3, xmmword ptr [{keys} + 80]
+    aesenc xmm0, xmm3
+    movups xmm2, xmmword ptr [{keys} + 96]
+    aesenc xmm0, xmm2
+    movups xmm3, xmmword ptr [{keys} + 112]
+    aesenc xmm0, xmm3
+    movups xmm2, xmmword ptr [{keys} + 128]
+    aesenc xmm0, xmm2
+    movups xmm3, xmmword ptr [{keys} + 144]
+    aesenc xmm0, xmm3
+    movups xmm2, xmmword ptr [{keys} + 160]
+    aesenc xmm0, xmm2
+    movups xmm3, xmmword ptr [{keys} + 176]
+    aesenc xmm0, xmm3
+    movups xmm2, xmmword ptr [{keys} + 192]
+    aesenclast xmm0, xmm2
+    movups xmmword ptr [{chain}], xmm0
+    pxor xmm0, xmm1
+    movups xmmword ptr [{out}], xmm0
+    ; clobbers xmm0, xmm1, xmm2, xmm3
+    """
+}
+
+#[Unsafe("reads 240 round-key bytes at keys and 16 bytes at src, pre and post, and writes 16 bytes at chain and at out; the caller has seen AES-NI"), FFI(asm)]
+os_aes_encrypt1_14_i64: fn(keys: I64, src: I64, pre: I64, post: I64, out: I64, chain: I64) {
+    """
+    movups xmm0, xmmword ptr [{src}]
+    movups xmm1, xmmword ptr [{pre}]
+    movups xmm2, xmmword ptr [{keys}]
+    pxor xmm0, xmm1
+    movups xmm1, xmmword ptr [{post}]
+    pxor xmm0, xmm2
+    movups xmm3, xmmword ptr [{keys} + 16]
+    aesenc xmm0, xmm3
+    movups xmm2, xmmword ptr [{keys} + 32]
+    aesenc xmm0, xmm2
+    movups xmm3, xmmword ptr [{keys} + 48]
+    aesenc xmm0, xmm3
+    movups xmm2, xmmword ptr [{keys} + 64]
+    aesenc xmm0, xmm2
+    movups xmm3, xmmword ptr [{keys} + 80]
+    aesenc xmm0, xmm3
+    movups xmm2, xmmword ptr [{keys} + 96]
+    aesenc xmm0, xmm2
+    movups xmm3, xmmword ptr [{keys} + 112]
+    aesenc xmm0, xmm3
+    movups xmm2, xmmword ptr [{keys} + 128]
+    aesenc xmm0, xmm2
+    movups xmm3, xmmword ptr [{keys} + 144]
+    aesenc xmm0, xmm3
+    movups xmm2, xmmword ptr [{keys} + 160]
+    aesenc xmm0, xmm2
+    movups xmm3, xmmword ptr [{keys} + 176]
+    aesenc xmm0, xmm3
+    movups xmm2, xmmword ptr [{keys} + 192]
+    aesenc xmm0, xmm2
+    movups xmm3, xmmword ptr [{keys} + 208]
+    aesenc xmm0, xmm3
+    movups xmm2, xmmword ptr [{keys} + 224]
+    aesenclast xmm0, xmm2
+    movups xmmword ptr [{chain}], xmm0
+    pxor xmm0, xmm1
+    movups xmmword ptr [{out}], xmm0
+    ; clobbers xmm0, xmm1, xmm2, xmm3
+    """
+}
+
+// GHASH (NIST SP 800-38D section 6.4) with PCLMULQDQ, the leaves behind
+// core.crypto.__ghash_blocks. The blocks are byte-reversed by the shuffle
+// mask at `table` so the bit-reflected field elements multiply as
+// integers; the 256-bit carry-less product (Intel, "Carry-Less
+// Multiplication and Its Usage for Computing the GCM Mode", algorithm 1)
+// is shifted left one bit and reduced modulo x^128 + x^7 + x^2 + x + 1
+// (algorithm 5), as mbedtls aesni.c does. The caller has seen
+// CPUID.1:ECX.PCLMULQDQ and SSSE3.
+// Y = (Y ^ X) * H for the block X at `data` and the subkey H at `h`.
+#[Unsafe("reads and writes 16 bytes at y and reads 16 bytes at data and at h and the 16-byte mask at table; the caller has seen PCLMULQDQ and SSSE3"), FFI(asm)]
+os_ghash1_i64: fn(y: I64, data: I64, h: I64, table: I64) {
+    """
+    movups xmm15, xmmword ptr [{table}]
+    movups xmm0, xmmword ptr [{y}]
+    movups xmm1, xmmword ptr [{data}]
+    pxor xmm0, xmm1
+    pshufb xmm0, xmm15
+    movups xmm1, xmmword ptr [{h}]
+    pshufb xmm1, xmm15
+    movaps xmm2, xmm0
+    pclmulqdq xmm2, xmm1, 0
+    movaps xmm3, xmm0
+    pclmulqdq xmm3, xmm1, 17
+    movaps xmm4, xmm0
+    pclmulqdq xmm4, xmm1, 16
+    pclmulqdq xmm0, xmm1, 1
+    pxor xmm4, xmm0
+    movaps xmm5, xmm4
+    psrldq xmm4, 8
+    pslldq xmm5, 8
+    pxor xmm3, xmm4
+    pxor xmm2, xmm5
+    movaps xmm4, xmm2
+    psllq xmm4, 1
+    movaps xmm5, xmm3
+    psllq xmm5, 1
+    psrlq xmm2, 63
+    psrlq xmm3, 63
+    movaps xmm6, xmm2
+    psrldq xmm6, 8
+    pslldq xmm2, 8
+    pslldq xmm3, 8
+    por xmm4, xmm2
+    por xmm5, xmm3
+    por xmm5, xmm6
+    movaps xmm2, xmm4
+    psllq xmm2, 63
+    movaps xmm3, xmm4
+    psllq xmm3, 62
+    movaps xmm6, xmm4
+    psllq xmm6, 57
+    pxor xmm2, xmm3
+    pxor xmm2, xmm6
+    pslldq xmm2, 8
+    pxor xmm4, xmm2
+    movaps xmm2, xmm4
+    psrlq xmm2, 1
+    movaps xmm3, xmm4
+    psrlq xmm3, 2
+    movaps xmm6, xmm4
+    psrlq xmm6, 7
+    pxor xmm2, xmm3
+    pxor xmm2, xmm6
+    movaps xmm3, xmm4
+    psllq xmm3, 63
+    movaps xmm6, xmm4
+    psllq xmm6, 62
+    movaps xmm7, xmm4
+    psllq xmm7, 57
+    pxor xmm3, xmm6
+    pxor xmm3, xmm7
+    psrldq xmm3, 8
+    pxor xmm2, xmm3
+    pxor xmm2, xmm4
+    pxor xmm2, xmm5
+    pshufb xmm2, xmm15
+    movups xmmword ptr [{y}], xmm2
+    ; clobbers xmm0, xmm1, xmm2, xmm3, xmm4, xmm5, xmm6, xmm7, xmm15
+    """
+}
+
+// Y = (Y ^ X_1) H^4 ^ X_2 H^3 ^ X_3 H^2 ^ X_4 H for the four blocks at
+// `data`, with H, H^2, H^3 and H^4 at `powers`: four GHASH steps with one
+// reduction of the summed products.
+#[Unsafe("reads and writes 16 bytes at y and reads 64 bytes at data and at powers and the 16-byte mask at table; the caller has seen PCLMULQDQ and SSSE3"), FFI(asm)]
+os_ghash4_i64: fn(y: I64, data: I64, powers: I64, table: I64) {
+    """
+    movups xmm15, xmmword ptr [{table}]
+    movups xmm0, xmmword ptr [{y}]
+    movups xmm1, xmmword ptr [{data}]
+    pxor xmm0, xmm1
+    pshufb xmm0, xmm15
+    movups xmm1, xmmword ptr [{powers} + 48]
+    pshufb xmm1, xmm15
+    movaps xmm8, xmm0
+    pclmulqdq xmm8, xmm1, 0
+    movaps xmm9, xmm0
+    pclmulqdq xmm9, xmm1, 17
+    movaps xmm10, xmm0
+    pclmulqdq xmm10, xmm1, 16
+    pclmulqdq xmm0, xmm1, 1
+    pxor xmm10, xmm0
+    movups xmm0, xmmword ptr [{data} + 16]
+    pshufb xmm0, xmm15
+    movups xmm1, xmmword ptr [{powers} + 32]
+    pshufb xmm1, xmm15
+    movaps xmm2, xmm0
+    pclmulqdq xmm2, xmm1, 0
+    pxor xmm8, xmm2
+    movaps xmm3, xmm0
+    pclmulqdq xmm3, xmm1, 17
+    pxor xmm9, xmm3
+    movaps xmm4, xmm0
+    pclmulqdq xmm4, xmm1, 16
+    pxor xmm10, xmm4
+    pclmulqdq xmm0, xmm1, 1
+    pxor xmm10, xmm0
+    movups xmm0, xmmword ptr [{data} + 32]
+    pshufb xmm0, xmm15
+    movups xmm1, xmmword ptr [{powers} + 16]
+    pshufb xmm1, xmm15
+    movaps xmm2, xmm0
+    pclmulqdq xmm2, xmm1, 0
+    pxor xmm8, xmm2
+    movaps xmm3, xmm0
+    pclmulqdq xmm3, xmm1, 17
+    pxor xmm9, xmm3
+    movaps xmm4, xmm0
+    pclmulqdq xmm4, xmm1, 16
+    pxor xmm10, xmm4
+    pclmulqdq xmm0, xmm1, 1
+    pxor xmm10, xmm0
+    movups xmm0, xmmword ptr [{data} + 48]
+    pshufb xmm0, xmm15
+    movups xmm1, xmmword ptr [{powers}]
+    pshufb xmm1, xmm15
+    movaps xmm2, xmm0
+    pclmulqdq xmm2, xmm1, 0
+    pxor xmm8, xmm2
+    movaps xmm3, xmm0
+    pclmulqdq xmm3, xmm1, 17
+    pxor xmm9, xmm3
+    movaps xmm4, xmm0
+    pclmulqdq xmm4, xmm1, 16
+    pxor xmm10, xmm4
+    pclmulqdq xmm0, xmm1, 1
+    pxor xmm10, xmm0
+    movaps xmm2, xmm8
+    movaps xmm3, xmm9
+    movaps xmm4, xmm10
+    movaps xmm5, xmm4
+    psrldq xmm4, 8
+    pslldq xmm5, 8
+    pxor xmm3, xmm4
+    pxor xmm2, xmm5
+    movaps xmm4, xmm2
+    psllq xmm4, 1
+    movaps xmm5, xmm3
+    psllq xmm5, 1
+    psrlq xmm2, 63
+    psrlq xmm3, 63
+    movaps xmm6, xmm2
+    psrldq xmm6, 8
+    pslldq xmm2, 8
+    pslldq xmm3, 8
+    por xmm4, xmm2
+    por xmm5, xmm3
+    por xmm5, xmm6
+    movaps xmm2, xmm4
+    psllq xmm2, 63
+    movaps xmm3, xmm4
+    psllq xmm3, 62
+    movaps xmm6, xmm4
+    psllq xmm6, 57
+    pxor xmm2, xmm3
+    pxor xmm2, xmm6
+    pslldq xmm2, 8
+    pxor xmm4, xmm2
+    movaps xmm2, xmm4
+    psrlq xmm2, 1
+    movaps xmm3, xmm4
+    psrlq xmm3, 2
+    movaps xmm6, xmm4
+    psrlq xmm6, 7
+    pxor xmm2, xmm3
+    pxor xmm2, xmm6
+    movaps xmm3, xmm4
+    psllq xmm3, 63
+    movaps xmm6, xmm4
+    psllq xmm6, 62
+    movaps xmm7, xmm4
+    psllq xmm7, 57
+    pxor xmm3, xmm6
+    pxor xmm3, xmm7
+    psrldq xmm3, 8
+    pxor xmm2, xmm3
+    pxor xmm2, xmm4
+    pxor xmm2, xmm5
+    pshufb xmm2, xmm15
+    movups xmmword ptr [{y}], xmm2
+    ; clobbers xmm0, xmm1, xmm2, xmm3, xmm4, xmm5, xmm6, xmm7, xmm8, xmm9, xmm10, xmm15
+    """
+}
+
 // The calling thread's stack pointer. Thread stacks are disjoint mappings, so
 // its high bits tell threads running at the same time apart (the runtime
 // heap's arena choice, Alloc.jet alloc_arena). An rsp read needs a

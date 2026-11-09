@@ -1,0 +1,36 @@
+package: {
+    name: "files_space"
+    authority: { allow: [FS, FS.Read, FS.Write, IO, Mem.Alloc] }
+}
+
+// files.space(path) reports the room on the file system holding `path`, as
+// statvfs does: total, free and available bytes. `available` leaves out the
+// blocks the system keeps for its superuser, so it is what a program may
+// still write. `used_percent()` is the figure `df` prints.
+
+use files: core.files
+
+// Whether `need` bytes fit on the file system holding `path`.
+fits: fn(path: String, need: Int) -[FS.Read]> Bool IOError! {
+    room: files.space(path)
+    Ok(room.available >= need)
+}
+
+run: fn() {
+    scratch: files.temp_dir("space")
+    room: files.space(scratch.path)
+    print("ordered: {room.total >= room.free && room.free >= room.available}")
+    print("used is total - free: {room.used() == room.total - room.free}")
+    one_byte: fits(scratch.path, 1)
+    print("a byte fits: {one_byte}")
+
+    // A 1000-byte file system with 500 bytes free, 200 of them reserved.
+    sample: files.DiskSpace{total: 1000, free: 500, available: 300}
+    print("sample used: {sample.used()}")
+    print("sample used percent: {sample.used_percent()}")
+
+    if files.space(files.join(scratch.path, "missing/deeper")) == {
+        .Ok(_) -> print("missing path: measured")
+        .Err(error) -> print("missing path: {error == .NotFound(_)}")
+    }
+}

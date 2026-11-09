@@ -112,9 +112,9 @@ x64_asm_xmm: fn(text: String) -> Int Never! {
     Int.parse(text.slice(3, text.len())) ?? -1
 }
 
-// A register-register SSE or SHA instruction: its mandatory prefix (0 for
-// none), opcode map (0 for 0F, else the 0F 38 or 0F 3A escape), opcode, and
-// whether an imm8 follows the operands.
+// A register-register SSE, AES or SHA instruction: its mandatory prefix (0
+// for none), opcode map (0 for 0F, else the 0F 38 or 0F 3A escape), opcode,
+// and whether an imm8 follows the operands.
 X64AsmSse: struct {
     prefix: Int
     escape: Int
@@ -133,7 +133,28 @@ x64_asm_sse: fn(mnemonic: String) -> X64AsmSse? Never! {
         "sha256rnds2" -> Val(X64AsmSse{prefix: 0, escape: 0x38, opcode: 0xcb, immediate: false})
         "sha256msg1" -> Val(X64AsmSse{prefix: 0, escape: 0x38, opcode: 0xcc, immediate: false})
         "sha256msg2" -> Val(X64AsmSse{prefix: 0, escape: 0x38, opcode: 0xcd, immediate: false})
+        "pxor" -> Val(X64AsmSse{prefix: 0x66, escape: 0, opcode: 0xef, immediate: false})
+        "por" -> Val(X64AsmSse{prefix: 0x66, escape: 0, opcode: 0xeb, immediate: false})
+        // AES-NI rounds and PCLMULQDQ (Intel SDM vol. 2A).
+        "aesenc" -> Val(X64AsmSse{prefix: 0x66, escape: 0x38, opcode: 0xdc, immediate: false})
+        "aesenclast" -> Val(X64AsmSse{prefix: 0x66, escape: 0x38, opcode: 0xdd, immediate: false})
+        "aesdec" -> Val(X64AsmSse{prefix: 0x66, escape: 0x38, opcode: 0xde, immediate: false})
+        "aesdeclast" -> Val(X64AsmSse{prefix: 0x66, escape: 0x38, opcode: 0xdf, immediate: false})
+        "pclmulqdq" -> Val(X64AsmSse{prefix: 0x66, escape: 0x3a, opcode: 0x44, immediate: true})
         else -> None
+    }
+}
+
+// The ModRM.reg extension of a 66 0F 73 shift of one xmm register by an
+// imm8: the 64-bit lane shifts psrlq (/2) and psllq (/6), the whole-register
+// byte shifts psrldq (/3) and pslldq (/7); else -1.
+x64_asm_sse_shift: fn(mnemonic: String) -> Int Never! {
+    if mnemonic == {
+        "psrlq" -> 2
+        "psrldq" -> 3
+        "psllq" -> 6
+        "pslldq" -> 7
+        else -> -1
     }
 }
 
@@ -364,6 +385,15 @@ x64_asm_line: fn(s: &X64AsmState, line: String) -> String? Never! {
             if imm < 0 || imm > 255 -> return Val("expected a byte immediate")
             x64_byte(s.code, imm)
         }
+    } else if x64_asm_sse_shift(mnemonic) >= 0 {
+        // 66 0F 73 /ext ib: the xmm register is ModRM.rm.
+        if operands.len() != 2 -> return Val("expected 2 operands")
+        dst: x64_asm_xmm(first)
+        if dst < 0 -> return Val("expected an xmm register operand")
+        imm: Int.parse(operands[1].trim()) ?? return Val("expected a byte immediate")
+        if imm < 0 || imm > 255 -> return Val("expected a byte immediate")
+        x64_sse(s.code, 0x66, false, 0x73, x64_asm_sse_shift(mnemonic), dst)
+        x64_byte(s.code, imm)
     } else { return Val("unsupported mnemonic `{mnemonic}`") }
     if written >= 0 -> s.written[written] = true
     loop comment in parts.slice(1, parts.len()) {

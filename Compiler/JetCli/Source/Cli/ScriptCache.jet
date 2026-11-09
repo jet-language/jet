@@ -249,15 +249,20 @@ jet_cli_entry_file: fn(kind: String, source: String) -> String? {
 }
 
 // Whether `file` is the entry file `jet run -` wrote for its piped source
-// (jet_cli_entry_file's `stdin` kind): a 64-digit content hash under
-// `jet/scripts/stdin`. The command named that program `-`.
+// (jet_cli_entry_file's `stdin` kind). The command named that program `-`.
 jet_cli_stdin_entry: fn(file: String) -> Bool Never! {
+    jet_cli_kept_entry(file, "stdin")
+}
+
+// Whether `file` is an entry file of jet_cli_entry_file's `kind`: a 64-digit
+// content hash under `jet/scripts/<kind>`.
+jet_cli_kept_entry: fn(file: String, kind: String) -> Bool Never! {
     if !file.ends_with(".jet") -> return false
     raw: file.bytes()
     stem: raw.len() - 4 - 64
     if stem < 0 -> return false
     head: String.from_bytes(raw[0..<stem]) ?? return false
-    if !head.ends_with("/jet/scripts/stdin/") -> return false
+    if !head.ends_with("/jet/scripts/{kind}/") -> return false
     loop byte in raw[stem..<(stem + 64)] {
         code: Int.from_u8(byte)
         if !((code >= 48 && code <= 57) || (code >= 97 && code <= 102)) -> return false
@@ -315,9 +320,10 @@ jet_cli_script_kept_run: fn(keep: JetCLIScriptKeep, file: String, source: String
     if !jet_cli_script_record_matches(rows, keep) -> return None
     executable: x64_executable_kept("{directory}/{program}") ?? return None
     authority := JetCLIAuthority{required: jet_cli_script_rights(rows[4]), granted: jet_cli_script_rights(rows[5]), denied: jet_cli_script_rights(rows[6]), authority: rows[7], invocation_denied: [String]{}}
-    jet_cli_with_invocation(authority, jet_cli_source_invocation(source, invocation))
-    refused: jet_cli_authority_report(file, source, color, json, "run", authority)
+    jet_cli_with_invocation(authority, invocation)
+    refused: jet_cli_authority_report(file, source, color, json, authority)
     if refused.move() == .Val(report) -> return Val(JetCLIRunStep.Output{output: report})
+    jet_cli_effect_notice(file, authority, json)
     jet_cli_script_used(record, text)
     if rows[3] == JET_CLI_SCRIPT_LEVEL_NONE && jet_cli_script_level_stock(options) -> jet_cli_script_promote(directory, keep, file)
     Val(JetCLIRunStep.Launch{executable: executable.move(), file: file, binary: binary, program_args: program_args, options: options, invocation: invocation, verbose: false, color: color})

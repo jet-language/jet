@@ -80,6 +80,19 @@ cos: fn(n: Float) -> Float Never! { core.math.cos(n) }
 cosh: fn(n: Float) -> Float Never! { core.math.cosh(n) }
 exp: fn(n: Float) -> Float Never! { core.math.exp(n) }
 exp2: fn(n: Float) -> Float Never! { core.math.exp2(n) }
+/// exp10.c from musl 1.2.5: 10^x. A whole part below 16 in magnitude takes
+/// its power of ten from a table, times exp2(log2(10) * fraction); anything
+/// else is pow(10, x).
+exp10: fn(n: Float) -> Float Never! {
+    parts: modf(n)
+    if (to_bits(parts.whole) >> 52).bit_and(2047) < 1027 {
+        index: (Int.from_float(parts.whole) ?? 0) + 15
+        if parts.fract == 0.0 -> return __EXP10_POWERS[index]
+        return exp2(Float{3.321928094887362} * parts.fract) * __EXP10_POWERS[index]
+    }
+    Float{10.0}.pow(n)
+}
+__EXP10_POWERS: [Float]{1e-15, 1e-14, 1e-13, 1e-12, 1e-11, 1e-10, 1e-9, 1e-8, 1e-7, 1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0, 1e1, 1e2, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8, 1e9, 1e10, 1e11, 1e12, 1e13, 1e14, 1e15}
 exp_m1: fn(n: Float) -> Float Never! { core.math.exp_m1(n) }
 expm1: fn(n: Float) -> Float Never! { exp_m1(n) }
 /// erf.c from musl 1.2.5: erf of |x| below 0.84375 is x + x*R(x^2); from
@@ -191,7 +204,7 @@ gamma: fn(n: Float) -> Float Never! {
     r := __gamma_lanczos(absx) * exp(-y)
     if (n < Float{0.0}) {
         // reflection; sin(pi*x) is not 0, whole arguments returned above
-        r = -PI / (__sin_pi(absx) * absx * r)
+        r = -PI / (__gamma_sin_pi(absx) * absx * r)
         dy = -dy
         z = -z
     }
@@ -223,10 +236,11 @@ __GAMMA_NUMERATOR: [Float]{23531376880.41076, 42919803642.6491, 35711959237.3556
 __GAMMA_DENOMINATOR: [Float]{0.0, 39916800.0, 120543840.0, 150917976.0, 105258076.0, 45995730.0, 13339535.0, 2637558.0, 357423.0, 32670.0, 1925.0, 66.0, 1.0}
 // n! for 1 <= n <= 23, gamma(n + 1).
 __GAMMA_FACTORIALS: [Float]{1.0, 1.0, 2.0, 6.0, 24.0, 120.0, 720.0, 5040.0, 40320.0, 362880.0, 3628800.0, 39916800.0, 479001600.0, 6227020800.0, 87178291200.0, 1307674368000.0, 20922789888000.0, 355687428096000.0, 6402373705728000.0, 121645100408832000.0, 2432902008176640000.0, 51090942171709440000.0, 1.1240007277776077e+21}
-// sin(pi * x) for x > 2^-100 (musl tgamma.c sinpi(), lgamma_r.c sin_pi()):
-// x mod 2 reduced into [-1/4, 1/4] around a multiple of 1/2, then the
-// __sin.c and __cos.c kernels.
-__sin_pi: fn(n: Float) -> Float Never! {
+// musl's sin(pi * x) for x > 2^-100 inside tgamma and lgamma (tgamma.c
+// sinpi(), lgamma_r.c sin_pi()), not the correctly rounded sin_pi: x mod 2
+// reduced into [-1/4, 1/4] around a multiple of 1/2, then the __sin.c and
+// __cos.c kernels.
+__gamma_sin_pi: fn(n: Float) -> Float Never! {
     x := Float{2.0} * (n * Float{0.5} - floor(n * Float{0.5}))
     quadrant := Int.from_float(trunc(Float{4.0} * x)) ?? 0
     quadrant = (quadrant + 1) /% 2
@@ -264,7 +278,7 @@ lgamma: fn(n: Float) -> Float Never! {
     x: if negative -> -n else -> n
     reflection := Float{0.0}
     if negative {
-        t := __sin_pi(x)
+        t := __gamma_sin_pi(x)
         // a negative whole number
         if (t == Float{0.0}) -> return Float{1.0} / (x - x)
         if (!(t > Float{0.0})) -> t = -t
@@ -359,17 +373,782 @@ log1p: fn(n: Float) -> Float Never! { ln_1p(n) }
 log: fn(n: Float, base: Float) -> Float Never! { ln(n) / ln(base) }
 log10: fn(n: Float) -> Float Never! { core.math.log10(n) }
 log2: fn(n: Float) -> Float Never! { core.math.log2(n) }
+/// logb.c from musl 1.2.5: ilogb as a Float, x * x for an infinity or NaN
+/// and -inf for a zero.
 logb: fn(n: Float) -> Float Never! {
-    if ilogb(n) == {
-        .Val(exponent) -> return Float{exponent}
-        .None -> {}
-    }
-    if n == 0.0 -> return -INFINITY
-    INFINITY
+    if !is_finite(n) -> return n * n
+    if n == 0.0 -> return Float{-1.0} / (n * n)
+    Float{ilogb(n) ?? 0}
 }
 sin: fn(n: Float) -> Float Never! { core.math.sin(n) }
 sinh: fn(n: Float) -> Float Never! { core.math.sinh(n) }
 sqrt: fn(n: Float) -> Float Never! { core.math.sqrt(n) }
+/// 1/sqrt(x), correctly rounded (C23 rsqrt; CORE-MATH rsqrt.c): +inf for +0,
+/// -inf for -0, +0 for +inf and NaN below zero. One Newton step on
+/// (1/x) * sqrt(x) lands within a hair of the answer; when that hair could
+/// straddle a rounding boundary the result is settled exactly.
+rsqrt: fn(n: Float) -> Float Never! {
+    bits: to_bits(n)
+    biased: (bits >> 52).bit_and(0x7FF)
+    if bits < 0 {
+        if n == 0.0 -> return -INFINITY
+        if is_nan(n) -> return n + n
+        return from_bits(0x7FF8_0000_0000_0000)
+    }
+    r := Float{0.0}
+    if biased == 0 {
+        if bits == 0 -> return INFINITY
+        r = sqrt(n) / n
+    } else if biased < 0x7FD {
+        r = (Float{1.0} / n) * sqrt(n)
+    } else if biased < 0x7FF {
+        r = (Float{4.0} / n) * (Float{0.25} * sqrt(n))
+    } else {
+        if is_nan(n) -> return n + n
+        return 0.0
+    }
+    // r' = r - r/2 * (r^2 * x - 1), with r * x carried to about 106 bits
+    rx: r * n
+    drx: fma(r, n, -rx)
+    h: fma(r, rx, Float{-1.0}) + r * drx
+    dr: (r * Float{0.5}) * h
+    refined: r - dr
+    dr_bits: to_bits(dr).bit_and(0xFFFF_FFFF_FFFF_FFFF)
+    gap: (to_bits(r) >> 52) - (dr_bits >> 52).bit_and(0x7FF)
+    if (dr_bits + 18).bit_and(0x7_FFFF_FFFF_FFFF) <= 23 || gap > 100 -> return __rsqrt_exact(refined, n)
+    refined
+}
+// The correctly rounded 1/sqrt(x) for a finite x > 0, from a candidate r
+// within an ulp: the midpoints on either side of r are tested exactly, by
+// comparing m * m * x with 1 in integers. No midpoint is ever exact.
+__rsqrt_exact: fn(candidate: Float, n: Float) -> Float Never! {
+    x: __float_parts(n)
+    r := candidate
+    loop {
+        c: __float_parts(r)
+        if __square_times_below_one(2 * c.m + 1, c.e - 1, x) {
+            r = next_up(r)
+            next
+        }
+        power_of_two: c.m == 0x10_0000_0000_0000 && c.e > -1074
+        low_m: if power_of_two -> 4 * c.m - 1 else -> 2 * c.m - 1
+        low_e: if power_of_two -> c.e - 2 else -> c.e - 1
+        if !__square_times_below_one(low_m, low_e, x) {
+            r = next_down(r)
+            next
+        }
+        return r
+    }
+}
+// A finite x >= 0 as m * 2^e with m an Int.
+__float_parts: fn(n: Float) -> (m: Int, e: Int) Never! {
+    bits: to_bits(n).bit_and(0x7FFF_FFFF_FFFF_FFFF)
+    biased: bits >> 52
+    fraction: bits.bit_and(0xF_FFFF_FFFF_FFFF)
+    if biased == 0 -> return (m: fraction, e: -1074)
+    (m: fraction.bit_or(0x10_0000_0000_0000), e: biased - 1075)
+}
+// Whether (m * 2^e)^2 * x < 1, exactly.
+__square_times_below_one: fn(m: Int, e: Int, x: (m: Int, e: Int)) -> Bool Never! {
+    shift: 2 * e + x.e
+    if shift >= 0 -> return false
+    m * m * x.m < (Int{1} << -shift)
+}
+/// sin(pi * x), correctly rounded (C23 sinpi; CORE-MATH sinpi.c): a zero
+/// with the sign of x at every whole x and NaN for an infinity.
+sin_pi: fn(n: Float) -> Float Never! {
+    bits: to_bits(n)
+    ax: bits.bit_and(0x7FFF_FFFF_FFFF_FFFF)
+    if ax == 0 -> return n
+    e: ax >> 52
+    m0: bits.bit_and(0xF_FFFF_FFFF_FFFF).bit_or(0x10_0000_0000_0000)
+    m: if bits < 0 -> -m0 else -> m0
+    s: 1063 - e
+    if s < 0 {
+        // |x| >= 2^41 is a multiple of 2^-11: the table holds the answer
+        if e == 0x7FF -> return __pi_trig_special(n)
+        shift: -s - 1
+        if shift > 10 -> return copysign(0.0, n)
+        iq: m << shift
+        if iq.bit_and(2047) == 0 -> return copysign(0.0, n)
+        t: __sincos_pi_coarse(iq)
+        return t.sh + t.sl
+    }
+    if ax <= 0x3FA2_0000_0000_0000 -> return __sin_pi_small(n)
+    si: e - 1011
+    if (m0 << (si + 1)).bit_and(0xFFFF_FFFF_FFFF_FFFF) == 0 {
+        // a whole x, or a whole x plus one half
+        if (m0 << si).bit_and(0xFFFF_FFFF_FFFF_FFFF) == 0 -> return copysign(0.0, n)
+        if ((m0 << (si - 1)).bit_and(0xFFFF_FFFF_FFFF_FFFF) >> 63) == 0 -> return copysign(1.0, n)
+        return -copysign(1.0, n)
+    }
+    iq: ((m >> s).bit_and(8191) + 1) >> 1
+    __pi_trig_reduced(iq, m << (e - 1000), __SINPI_HARD_IQ, __SINPI_HARD)
+}
+/// cos(pi * x), correctly rounded (C23 cospi; CORE-MATH cospi.c): +0 at
+/// every x = 1/2 mod 1 and NaN for an infinity.
+cos_pi: fn(n: Float) -> Float Never! {
+    ax: to_bits(n).bit_and(0x7FFF_FFFF_FFFF_FFFF)
+    if ax == 0 -> return 1.0
+    e: ax >> 52
+    m: ax.bit_and(0xF_FFFF_FFFF_FFFF).bit_or(0x10_0000_0000_0000)
+    s: 1063 - e
+    if s < 0 {
+        if e == 0x7FF -> return __pi_trig_special(n)
+        shift: -s - 1
+        if shift > 11 -> return 1.0
+        iq: (m << shift) + 1024
+        if iq.bit_and(2047) == 0 -> return 0.0
+        t: __sincos_pi_coarse(iq)
+        return t.sh + t.sl
+    }
+    if ax <= 0x3F30_0000_0000_0000 -> return __cos_pi_small(n, ax)
+    si: e - 1011
+    if (m << (si + 1)).bit_and(0xFFFF_FFFF_FFFF_FFFF) == 0 {
+        if (m << si).bit_and(0xFFFF_FFFF_FFFF_FFFF) != 0 -> return 0.0
+        if ((m << (si - 1)).bit_and(0xFFFF_FFFF_FFFF_FFFF) >> 63) != 0 -> return -1.0
+        return 1.0
+    }
+    iq: (((m >> s) + 2048).bit_and(8191) + 1) >> 1
+    __pi_trig_reduced(iq, m << (e - 1000), __COSPI_HARD_IQ, __COSPI_HARD)
+}
+/// tan(pi * x), correctly rounded (C23 tanpi; CORE-MATH tanpi.c): a signed
+/// zero at whole x, an infinity at x = 1/2 mod 1 and NaN for an infinity.
+tan_pi: fn(n: Float) -> Float Never! {
+    bits: to_bits(n)
+    ax: bits.bit_and(0x7FFF_FFFF_FFFF_FFFF)
+    sgn: if bits < 0 -> -1 else -> 0
+    th := Float{0.0}
+    tl := Float{0.0}
+    res := Float{0.0}
+    if ax >= 0x3F30_0000_0000_0000 {
+        if ax >= 0x42D0_0000_0000_0000 {
+            // |x| >= 2^46 is a multiple of 2^-6: the table holds the answer
+            if ax >= 0x7FF0_0000_0000_0000 -> return __pi_trig_special(n)
+            s: (ax >> 52) - 1069
+            if s > 6 -> return copysign(0.0, n)
+            iq: ((if sgn < 0 -> -ax else -> ax) << s).bit_and(127)
+            if iq.bit_and(31) == 0 -> return __tan_pi_pole_or_zero(iq >> 5, sgn)
+            if iq.bit_and(32) != 0 {
+                k: 32 - iq.bit_and(31)
+                return -__TANPI_T[2 * k + 1] + -__TANPI_T[2 * k]
+            }
+            k: iq.bit_and(31)
+            return __TANPI_T[2 * k + 1] + __TANPI_T[2 * k]
+        }
+        // 2^-12 <= |x| < 2^46
+        e: ax >> 52
+        s: 1068 - e
+        s1: e - 1011
+        m: ax.bit_and(0xF_FFFF_FFFF_FFFF).bit_or(0x10_0000_0000_0000)
+        // the bit of x of weight 1/2, as 0 or -1
+        half: if (m << s1).bit_and(0xFFFF_FFFF_FFFF_FFFF) > 0x7FFF_FFFF_FFFF_FFFF -> -1 else -> 0
+        iq: ((m.bit_xor(half) >> s).bit_and(63) + 1) >> 1
+        ms: half.bit_xor(sgn)
+        sm: if sgn < 0 -> -m else -> m
+        // the bits of x of weight at most 2^-7, as a signed 64-bit word
+        k: __wrap_i64(sm << (e - 1005))
+        z := approx(k)
+        if (k << 1).bit_and(0xFFFF_FFFF_FFFF_FFFF) == 0 {
+            if k == 0 {
+                if iq.bit_and(31) == 0 -> return __tan_pi_pole_or_zero(sm >> (s + 6), sgn)
+                kq: (m << s1).bit_and(0xFFFF_FFFF_FFFF_FFFF) >> 58
+                if kq == 0x10 -> return copysign(1.0, n)
+                if kq == 0x30 -> return -copysign(1.0, n)
+            }
+            z = copysign(1.0, n) * z
+        }
+        z2: z * z
+        z4: z2 * z2
+        z3: z * z2
+        f: z3 * ((Float{6.281006949579927e-63} + z2 * Float{1.779055995675284e-104}) + z4 * (Float{5.099053215602634e-146} + z2 * Float{1.4640479742404237e-187}))
+        eps := z3 * Float{8.636168555094445e-78} + copysign(Float{4.930380657631324e-32}, z)
+        p: __mul_dd_d(Float{2.6610324844426207e-21}, Float{1.0373161876273278e-37}, z)
+        q: __fast_sum_ddd(p.hi, p.lo, f)
+        r: __tan_pi_combine(iq, ms, q.hi, q.lo)
+        eps = eps + eps * (r.hi * r.hi)
+        lb: r.hi + (r.lo - eps)
+        ub: r.hi + (r.lo + eps)
+        if lb == ub -> return lb
+        x: z * Float{1.0842021724855044e-19}
+        x2: x * x
+        dx2: fma(x, x, -x2)
+        t0: __poly_dd(x2, dx2, __TANPI_REFINE_C, 5, x2 * (Float{1.7255646049060546e-20} + x2 * (Float{4.212795514202248e-24} + x2 * Float{1.0295197365311714e-27})))
+        t1: __mul_dd_d(t0.hi, t0.lo, x)
+        r2: __tan_pi_combine(iq, ms, t1.hi, t1.lo)
+        fin: __fast_two_sum(r2.hi, r2.lo)
+        th = fin.hi
+        tl = fin.lo
+        res = fin.hi
+    } else {
+        if ax == 0 -> return n
+        pi0: Float{3.141592653589793}
+        pi1: Float{1.2246467991473532e-16}
+        if ax < 0x3CA0_0000_0000_0000 {
+            if ax < 0x06B0_0000_0000_0000 {
+                // scaled up so a subnormal result rounds once
+                e: ax >> 52
+                sc: from_bits((2045 - e) << 52)
+                isc: from_bits((1 + e) << 52)
+                p: __mul_dd_d(pi0, pi1, n * sc)
+                th = p.hi
+                tl = p.lo
+                res = th * isc
+                if (fabs(res) < Float{2.2250738585072014e-308}) {
+                    o: copysign(Float{2.2250738585072014e-308}, n)
+                    v0b: (o + res) * sc
+                    v0h: res * sc
+                    return (v0b + (tl + (th - v0h))) * isc - o
+                }
+            } else {
+                p: __mul_dd_d(pi0, pi1, n)
+                th = p.hi
+                tl = p.lo
+                res = th
+            }
+        } else {
+            x2: n * n
+            x3: n * x2
+            f: x3 * (Float{10.33542556009994} + x2 * (Float{40.80262463803622} + x2 * Float{163.0000102605464}))
+            px: __mul_dd_d(pi0, pi1, n)
+            q: __fast_sum_ddd(px.hi, px.lo, f)
+            eps: n * (x2 * Float{7.549516567451064e-15} + Float{3.944304526105059e-31})
+            lb: q.hi + (q.lo - eps)
+            ub: q.hi + (q.lo + eps)
+            if lb == ub -> return lb
+            dx2: fma(n, n, -x2)
+            dx3: fma(x2, n, -x3) + dx2 * n
+            t0: __poly_dd(x2, dx2, __TANPI_ZERO_C, 3, x2 * (Float{651.9097561458326} + x2 * Float{2607.6010593946085}))
+            t1: __mul_dd(x3, dx3, t0.hi, t0.lo)
+            u: __fast_two_sum(px.hi, t1.hi)
+            fin: __fast_two_sum(u.hi, (t1.lo + px.lo) + u.lo)
+            th = fin.hi
+            tl = fin.lo
+            res = fin.hi
+        }
+    }
+    // th + tl could round either way: the hard cases are tabulated
+    er: (to_bits(tl) + 6).bit_and(0xF_FFFF_FFFF_FFFF)
+    de: ((to_bits(th) - to_bits(tl)).bit_and(0xFFFF_FFFF_FFFF_FFFF) >> 52).bit_and(0x7FF)
+    if er <= 12 || de > 102 -> return __tan_pi_hard(n, res)
+    res
+}
+// Double-double helpers of the CORE-MATH ports: a value is hi + lo, and every
+// fma recovers the exact rounding error of a product.
+__fast_two_sum: fn(x: Float, y: Float) -> (hi: Float, lo: Float) Never! {
+    s: x + y
+    (hi: s, lo: y - (s - x))
+}
+__fast_two_sub: fn(x: Float, y: Float) -> (hi: Float, lo: Float) Never! {
+    s: x - y
+    (hi: s, lo: (x - s) - y)
+}
+__fast_sum_ddd: fn(xh: Float, xl: Float, c: Float) -> (hi: Float, lo: Float) Never! {
+    t: __fast_two_sum(xh, c)
+    (hi: t.hi, lo: xl + t.lo)
+}
+__add_dd: fn(xh: Float, xl: Float, ch: Float, cl: Float) -> (hi: Float, lo: Float) Never! {
+    s: xh + ch
+    d: s - xh
+    (hi: s, lo: ((ch - d) + (xh + (d - s))) + (xl + cl))
+}
+__mul_dd: fn(xh: Float, xl: Float, ch: Float, cl: Float) -> (hi: Float, lo: Float) Never! {
+    ahlh: ch * xl
+    alhh: cl * xh
+    ahhh: ch * xh
+    __fast_two_sum(ahhh, fma(ch, xh, -ahhh) + (alhh + ahlh))
+}
+__mul_dd_d: fn(xh: Float, xl: Float, c: Float) -> (hi: Float, lo: Float) Never! {
+    ahhh: c * xh
+    ahhl: fma(c, xh, -ahhh) + c * xl
+    h: ahhh + ahhl
+    (hi: h, lo: (ahhh - h) + ahhl)
+}
+// The double-double polynomial c[0] + x * (c[1] + ...) of n pairs (hi, lo)
+// of `c`, with `l` added to the last coefficient.
+__poly_dd: fn(xh: Float, xl: Float, c: [Float], n: Int, l: Float) -> (hi: Float, lo: Float) Never! {
+    i := n - 1
+    ch := c[2 * i] + l
+    cl := ((c[2 * i] - ch) + l) + c[2 * i + 1]
+    loop i > 0 {
+        i = i - 1
+        p: __mul_dd(xh, xl, ch, cl)
+        th: p.hi + c[2 * i]
+        tl: (c[2 * i] - th) + p.hi
+        ch = th
+        cl = p.lo + (tl + c[2 * i + 1])
+    }
+    (hi: ch, lo: cl)
+}
+// y1 with a zero fraction would let y0 + y1 tie: step it one ulp toward y2
+// so the sum rounds as the exact y0 + y1 + y2 does.
+__sticky_step: fn(y1: Float, y2: Float) -> Float Never! {
+    b: to_bits(y1)
+    if b.bit_and(0xF_FFFF_FFFF_FFFF) != 0 -> return y1
+    if (to_bits(y2) < 0) != (b < 0) -> return from_bits(__wrap_i64(b - 1))
+    from_bits(__wrap_i64(b + 1))
+}
+// The 64-bit two's complement word of v, as C's int64_t cast of a uint64_t.
+__wrap_i64: fn(v: Int) -> Int Never! {
+    w: v.bit_and(0xFFFF_FFFF_FFFF_FFFF)
+    if w > 0x7FFF_FFFF_FFFF_FFFF -> return w - 0xFFFF_FFFF_FFFF_FFFF - 1
+    w
+}
+// sin_pi, cos_pi and tan_pi of an infinity are NaN; a NaN stays NaN.
+__pi_trig_special: fn(n: Float) -> Float Never! {
+    if is_nan(n) -> return n + n
+    from_bits(0x7FF8_0000_0000_0000)
+}
+// sin(pi * x) for 0 < |x| <= 0x1.2p-5.
+__sin_pi_small: fn(x: Float) -> Float Never! {
+    ph: Float{3.141592653589793}
+    pl: Float{1.2246467991473532e-16}
+    if (fabs(x) < Float{5.551115123125783e-17}) {
+        if (fabs(x) < Float{1.0261342003245941e-289}) {
+            // scaled up by 2^106 so a subnormal result rounds once
+            t: x * Float{8.112963841460668e31}
+            zh: ph * t
+            zl: fma(ph, t, -zh) + pl * t
+            rs: (zh + zl) * Float{1.232595164407831e-32}
+            rt: rs * Float{8.112963841460668e31}
+            return fma((zh - rt) + zl, Float{1.232595164407831e-32}, rs)
+        }
+        zh: ph * x
+        return zh + (fma(ph, x, -zh) + pl * x)
+    }
+    zh: ph * x
+    x2: x * x
+    x4: x2 * x2
+    eps: x * (x2 * Float{7.105427357601002e-15} + Float{1.9721522630525295e-31})
+    zl: fma(ph, x, -zh) + pl * x + x2 * x * ((Float{-5.1677127800499685} + x2 * Float{2.550164039866476}) + x4 * (Float{-0.5992645046958942} + x2 * Float{0.08212311566377814}))
+    lb: (zl - eps) + zh
+    ub: (zl + eps) + zh
+    if lb == ub -> return lb
+    __sin_pi_zero(x)
+}
+// sin(pi * x) for 0 < |x| <= 0x1.2p-5 in double-double, for the cases the
+// fast path cannot round.
+__sin_pi_zero: fn(x: Float) -> Float Never! {
+    x2: x * x
+    dx2: fma(x, x, -x2)
+    x3: x2 * x
+    dx3: fma(x2, x, -x3) + dx2 * x
+    f: __poly_dd(x2, dx2, __SINPI_ZERO_C, 4, x2 * (Float{-0.007370430945706094} + x2 * (Float{0.0004663027978725982} + x2 * Float{-0.0000219114224108643})))
+    p: __mul_dd(f.hi, f.lo, x3, dx3)
+    // pi = pi0 + pi1 + pi2 with pi0 short, so pi0 * x rounds to y0 + y0l
+    pi0: Float{3.140625}
+    y: pi0 * x
+    b: from_bits(to_bits(y).bit_and(0xF_FFFF_FFFF_FFFF) + (85 << 51))
+    y0: (y + b) - b
+    y0l: fma(pi0, x, -y0)
+    y1: Float{0.0009676535897932385} * x
+    y2: fma(Float{0.0009676535897932385}, x, -y1) + Float{-5.016557612668332e-20} * x
+    s1: __add_dd(y1, y2, y0l, 0.0)
+    s2: __add_dd(s1.hi, s1.lo, p.hi, p.lo)
+    t0: __fast_two_sum(y0, s2.hi)
+    t1: __fast_two_sum(t0.lo, s2.lo)
+    t0.hi + __sticky_step(t1.hi, t1.lo)
+}
+// cos(pi * x) for 0 < |x| <= 2^-12.
+__cos_pi_small: fn(x: Float, ax: Int) -> Float Never! {
+    if ax <= 0x3E2C_CF64_29BE_6621 -> return Float{1.0} - Float{2.7755575615628914e-17}
+    x2: x * x
+    x4: x2 * x2
+    eps: x2 * Float{5.773159728050814e-15}
+    p: x2 * ((Float{-4.934802200544677} + x2 * Float{4.058712126397995}) + x4 * (Float{-1.3352627150260947} + x2 * Float{0.2352676329578543}))
+    lb: (p - eps) + Float{1.0}
+    ub: (p + eps) + Float{1.0}
+    if lb == ub -> return lb
+    __cos_pi_zero(x)
+}
+// cos(pi * x) for 0 < |x| <= 2^-12 in double-double, for the cases the fast
+// path cannot round.
+__cos_pi_zero: fn(x: Float) -> Float Never! {
+    x2: x * x
+    dx2: fma(x, x, -x2)
+    f: __poly_dd(x2, dx2, __COSPI_ZERO_C, 2, x2 * (Float{-1.3352627688545893} + x2 * Float{0.23533062651336675}))
+    p: __mul_dd(x2, dx2, f.hi, f.lo)
+    y: __fast_two_sum(Float{1.0}, p.hi)
+    z: __fast_two_sum(y.lo, p.lo)
+    y.hi + __sticky_step(z.hi, z.lo)
+}
+// The main path of sin_pi and cos_pi: x is iq/2048 of a half turn plus
+// `below`, the bits of x under that grid point as a signed 64-bit word in
+// units of 2^-63 of a 1/2048 step.
+__pi_trig_reduced: fn(iq: Int, below: Int, hard_iq: [Int], hard: [Float]) -> Float Never! {
+    z: approx(__wrap_i64(below))
+    z2: z * z
+    fs: Float{8.31572651388319e-23} + z2 * (Float{-9.584056014373668e-68} + z2 * Float{3.3137499508959674e-113})
+    fc: Float{-3.4575653726849915e-45} + z2 * Float{1.9924596591260817e-90}
+    t: __sincos_pi_coarse(iq)
+    er: fabs(z) * Float{9.4039548065783e-38} + Float{3.308722450212111e-24}
+    r: t.sl + t.sh * (z2 * fc) + t.ch * (z * fs)
+    lb: (r - er) + t.sh
+    ub: (r + er) + t.sh
+    if lb == ub -> return lb
+    __pi_trig_refine(iq, z, hard_iq, hard)
+}
+// The double-double evaluation behind __pi_trig_reduced; the few inputs
+// it cannot round are tabulated as (iq, x, result, correction).
+__pi_trig_refine: fn(iq: Int, z: Float, hard_iq: [Int], hard: [Float]) -> Float Never! {
+    x: z * Float{1.0842021724855044e-19}
+    x2: x * x
+    dx2: fma(x, x, -x2)
+    s0: __poly_dd(x2, dx2, __PI_REFINE_S, 3, Float{-1.268991980402342e-22} * x2)
+    s: __mul_dd_d(s0.hi, s0.lo, x * Float{0.000244140625})
+    c0: __poly_dd(x2, dx2, __PI_REFINE_C, 2, x2 * (Float{-2.827528896154601e-22} + Float{2.9702900969209974e-30} * x2))
+    c: __mul_dd(c0.hi, c0.lo, x2, dx2)
+    b: __sincos_pi_fine(iq)
+    cs: __mul_dd(c.hi, c.lo, b.sh, b.sl)
+    sc: __mul_dd(s.hi, s.lo, b.ch, b.cl)
+    t: __fast_two_sum(sc.hi, cs.hi)
+    u: __fast_two_sum(b.sh, t.hi)
+    low: (b.sl + (t.lo + (cs.lo + sc.lo))) + u.lo
+    tail: to_bits(low).bit_and(0xF_FFFF_FFFF_FFFF)
+    if tail == 0xF_FFFF_FFFF_FFFF || tail == 0 {
+        sign: if iq > 2048 -> Float{-1.0} else -> Float{1.0}
+        q: iq.bit_and(0x7FF)
+        i := 0
+        loop i < hard_iq.len() {
+            hx: hard[3 * i]
+            if (x == hx && q == hard_iq[i]) || (x == -hx && q == 2048 - hard_iq[i]) -> return sign * hard[3 * i + 1] + sign * hard[3 * i + 2]
+            i = i + 1
+        }
+    }
+    u.hi + low
+}
+// sin and cos of iq/2048 of a half turn (iq mod 4096) as double-doubles,
+// from a 32-step table and a 32-step fine table: about 2^-80 relative.
+__sincos_pi_coarse: fn(iq: Int) -> (sh: Float, sl: Float, ch: Float, cl: Float) Never! {
+    q: iq.bit_and(0xFFF)
+    j: if q.bit_and(0x400) != 0 -> 1024 - q.bit_and(0x3FF) else -> q.bit_and(0x3FF)
+    a: 2 * (j >> 5)
+    b: 64 - a
+    c: 2 * j.bit_and(31)
+    sbh: __SINCOS_PI_SN[a]
+    sbl: __SINCOS_PI_SN[a + 1]
+    cbh: __SINCOS_PI_SN[b]
+    cbl: __SINCOS_PI_SN[b + 1]
+    slh: __SINCOS_PI_SM[c]
+    sll: __SINCOS_PI_SM[c + 1]
+    clh: __SINCOS_PI_CM[c]
+    cll: __SINCOS_PI_CM[c + 1]
+    sb: sbh + sbl
+    cb: cbh + cbl
+    ch: cbh * clh - sbh * slh
+    cl: clh * cbl - slh * sbl + cb * cll - sb * sll
+    sh: sbh * clh + cbh * slh
+    sl: slh * cbl + clh * sbl + cb * sll + sb * cll
+    tch: ch + cl
+    tsh: sh + sl
+    __sincos_pi_signed(q, tsh, (sh - tsh) + sl, tch, (ch - tch) + cl)
+}
+// __sincos_pi_coarse to about 2^-106 relative, for the refinement paths.
+__sincos_pi_fine: fn(iq: Int) -> (sh: Float, sl: Float, ch: Float, cl: Float) Never! {
+    q: iq.bit_and(0xFFF)
+    j: if q.bit_and(0x400) != 0 -> 1024 - q.bit_and(0x3FF) else -> q.bit_and(0x3FF)
+    a: 2 * (j >> 5)
+    b: 64 - a
+    c: 2 * j.bit_and(31)
+    sbh: __SINCOS_PI_FINE_SN[a]
+    sbl: __SINCOS_PI_FINE_SN[a + 1]
+    cbh: __SINCOS_PI_FINE_SN[b]
+    cbl: __SINCOS_PI_FINE_SN[b + 1]
+    slh: __SINCOS_PI_FINE_SM[c]
+    sll: __SINCOS_PI_FINE_SM[c + 1]
+    clh: __SINCOS_PI_FINE_CM[c]
+    cll: __SINCOS_PI_FINE_CM[c + 1]
+    cc: __mul_dd(clh, cll, cbh, cbl)
+    ss: __mul_dd(slh, sll, sbh, sbl)
+    cs: __mul_dd(clh, cll, sbh, sbl)
+    sc: __mul_dd(slh, sll, cbh, cbl)
+    tc: __fast_two_sum(ss.hi, cc.hi)
+    tcl: tc.lo + (cc.lo + ss.lo)
+    ts: __fast_two_sum(-sc.hi, cs.hi)
+    tsl: ts.lo + (cs.lo - sc.lo)
+    c2: __fast_two_sum(cbh, -tc.hi)
+    s2: __fast_two_sum(sbh, -ts.hi)
+    __sincos_pi_signed(q, s2.hi, (sbl - tsl) + s2.lo, c2.hi, (cbl - tcl) + c2.lo)
+}
+// The quadrant signs of a first-quadrant sin and cos pair.
+__sincos_pi_signed: fn(q: Int, sh: Float, sl: Float, ch: Float, cl: Float) -> (sh: Float, sl: Float, ch: Float, cl: Float) Never! {
+    ss: if q.bit_and(0x800) != 0 -> Float{-1.0} else -> Float{1.0}
+    cs: if (q + 1024).bit_and(0x800) != 0 -> Float{-1.0} else -> Float{1.0}
+    (sh: ss * sh, sl: ss * sl, ch: cs * ch, cl: cs * cl)
+}
+// tan_pi where x is a multiple of 1/4: jq counts quarter turns.
+__tan_pi_pole_or_zero: fn(jq: Int, sgn: Int) -> Float Never! {
+    if jq.bit_and(1) != 0 {
+        if jq.bit_and(2) != 0 -> return -INFINITY
+        return INFINITY
+    }
+    if jq.bit_xor(sgn).bit_and(2) != 0 -> return Float{-0.0}
+    Float{0.0}
+}
+// (n + t) / (1 - n * t) for the table's tan n of the grid point iq/64 and
+// tan t of the rest, or -1/t at the grid's pole; `ms` < 0 flips n's sign.
+__tan_pi_combine: fn(iq: Int, ms: Int, th: Float, tl: Float) -> (hi: Float, lo: Float) Never! {
+    if iq == 32 {
+        ith: Float{-1.0} / th
+        return (hi: ith, lo: (fma(ith, th, Float{1.0}) + tl * ith) * ith)
+    }
+    sign: if ms < 0 -> Float{-1.0} else -> Float{1.0}
+    nl0: __TANPI_T[2 * iq] * sign
+    nh0: __TANPI_T[2 * iq + 1] * sign
+    m: __mul_dd(th, tl, nh0, nl0)
+    d: __fast_two_sub(Float{1.0}, m.hi)
+    ml: d.lo - m.lo
+    nn: __fast_two_sum(nh0, th)
+    nl: nl0 + (nn.lo + tl)
+    imh: Float{1.0} / d.hi
+    hi: nn.hi * imh
+    (hi: hi, lo: fma(nn.hi, imh, -hi) + (nl + nn.hi * (fma(-d.hi, imh, Float{1.0}) - ml * imh)) * imh)
+}
+// tan_pi's hard cases, keyed by |x| reduced into [0, 1/2]; `f` otherwise.
+__tan_pi_hard: fn(x: Float, f: Float) -> Float Never! {
+    bits: to_bits(x)
+    aix: bits.bit_and(0x7FFF_FFFF_FFFF_FFFF)
+    ax := fabs(x)
+    e: (aix >> 52) - 1022
+    p := 0
+    if e >= 0 {
+        ax = ax - from_bits(aix.bit_and(0xFFFF_FFFF_FFFF_FFFF - (0xFFFF_FFFF_FFFF_FFFF >> (12 + e))))
+        p = (aix.bit_or(0x10_0000_0000_0000) >> (52 - e)).bit_and(1)
+        if p != 0 -> ax = Float{0.5} - ax
+    }
+    sign: if (p != 0) != (bits < 0) -> Float{-1.0} else -> Float{1.0}
+    lo := 0
+    hi := __TANPI_HARD.len() /% 3 - 1
+    loop lo <= hi {
+        mid: (lo + hi) /% 2
+        v: __TANPI_HARD[3 * mid]
+        if v == ax -> return sign * __TANPI_HARD[3 * mid + 1] + sign * __TANPI_HARD[3 * mid + 2]
+        if v < ax {
+            lo = mid + 1
+        } else {
+            hi = mid - 1
+        }
+    }
+    f
+}
+__SINPI_HARD_IQ: [Int]{76, 108, 490, 903}
+__SINPI_HARD: [Float]{
+    -0.28849506280820947, 0.11609885713620693, 7.703719777548943e-34,
+    -0.3005787441008465, 0.16468573164521988, 1.5407439555097887e-33,
+    -0.7697642518336352, 0.6824141018348256, -2.7755575615628914e-17,
+    -0.4353644416455609, 0.9827618721621488, 2.7755575615628914e-17
+}
+__COSPI_HARD_IQ: [Int]{903, 1029, 1078, 1217, 1025, 1026, 1033, 1235}
+__COSPI_HARD: [Float]{
+    -0.4353644416455609, 0.9827618721621488, 2.7755575615628914e-17,
+    -0.2054081486214514, 0.9999717823723789, 2.7755575615628914e-17,
+    0.24797721050681787, 0.9965553908865775, 2.7755575615628914e-17,
+    0.8765634981510289, 0.956297553094254, -2.7755575615628914e-17,
+    0.4269653034352614, 0.9999982674855579, 2.7755575615628914e-17,
+    -0.46540800744392774, 0.9999963252468885, 2.7755575615628914e-17,
+    0.9522633060310959, 0.9998943512484293, -2.7755575615628914e-17,
+    0.48555020455694375, 0.9479560751507496, -2.7755575615628914e-17
+}
+// CORE-MATH's sin and cos tables at k/64 of a half turn (hi, lo pairs, 33 of
+// them) and at k/2048 (32 pairs; cos as is in the coarse table, as 1 - cos
+// in the fine one), shared by sin_pi and cos_pi.
+__SINCOS_PI_SN: [Float]{
+    0.0, 0.0, 0.049067676067352295, -1.73993428066692e-9,
+    0.0980171412229538, -8.933931943925232e-10, 0.1467304676771164, 6.778245357615882e-9,
+    0.19509032368659973, -1.6704714635970276e-9, 0.24298018217086792, -2.267604029973601e-9,
+    0.2902846783399582, -1.0854958232817764e-9, 0.33688984811306, 5.27916005313066e-9,
+    0.3826834261417389, 6.223350880126897e-9, 0.4275550991296768, -5.69939472452669e-9,
+    0.4713967442512512, -7.425253572146738e-9, 0.5141027420759201, 2.117301621613225e-9,
+    0.5555702298879623, 3.1316398834342372e-9, 0.5956993103027344, -5.810301031532963e-9,
+    0.6343932896852493, -5.52160383039811e-9, 0.6715589612722397, -6.425221284433217e-9,
+    0.7071067839860916, -2.799544089368687e-9, 0.7409511208534241, 4.501535018909992e-9,
+    0.7730104476213455, 5.741391440791375e-9, 0.8032075315713882, -9.074333482222974e-11,
+    0.8314696103334427, 1.969102549090507e-9, 0.8577286154031754, -5.402903284101636e-9,
+    0.881921261548996, 2.7993590580330692e-9, 0.9039893001317978, -7.0083544589411436e-9,
+    0.9238795340061188, -1.4948320182858793e-9, 0.9415440708398819, -5.656861118560147e-9,
+    0.9569403380155563, -2.2833474705134207e-9, 0.9700312465429306, 6.651613389576641e-9,
+    0.9807852804660797, -6.284926278788026e-11, 0.9891765117645264, -1.7997453937358263e-9,
+    0.9951847195625305, 7.109666368666712e-9, 0.9987954497337341, 6.471438261855397e-9,
+    1.0, 0.0
+}
+__SINCOS_PI_SM: [Float]{
+    0.0, 0.0, 0.0015339851379394531, -4.951654687512696e-9,
+    0.0030679553747177124, 1.3882482638678016e-9, 0.004601925611495972, 5.089525990852142e-10,
+    0.006135880947113037, 3.7020414382502652e-9, 0.007669821381568909, 7.357962188783592e-9,
+    0.00920376181602478, -7.033964960958335e-9, 0.01073765754699707, 1.6202674211010414e-9,
+    0.012271538376808167, -9.108824042449799e-11, 0.013805389404296875, -8.762364842765772e-10,
+    0.015339210629463196, -4.3444750947566294e-9, 0.016872987151145935, 7.961357789957462e-10,
+    0.018406733870506287, -3.964701465693727e-9, 0.019940435886383057, -7.334868616996781e-9,
+    0.02147407829761505, 1.9778544561488437e-9, 0.023007676005363464, 5.463475908531014e-9,
+    0.024541229009628296, -4.86716007866703e-10, 0.026074722409248352, -4.5801444522177134e-9,
+    0.02760814130306244, 4.475903302647511e-9, 0.029141515493392944, -6.729199220273736e-9,
+    0.030674800276756287, 2.8998803393129272e-9, 0.032208025455474854, -4.71702691492344e-11,
+    0.03374117612838745, -4.277009866338159e-9, 0.035274237394332886, 1.5038810649530408e-9,
+    0.03680722415447235, -1.213113518749886e-9, 0.03834012150764465, -1.1340919575219764e-9,
+    0.03987292945384979, -1.86610998135189e-9, 0.04140564799308777, -7.016011028543694e-9,
+    0.04293826222419739, -5.289256564618188e-9, 0.04447077214717865, -2.9223998327671374e-10,
+    0.046003177762031555, 4.368883073638521e-9, 0.047535479068756104, 5.0882032017770065e-9
+}
+__SINCOS_PI_CM: [Float]{
+    1.0, 0.0, 0.9999988228082657, 6.434362238938694e-10,
+    0.9999952912330627, 2.5765134273709553e-9, 0.9999894052743912, 5.807537199303066e-9,
+    0.9999811798334122, -4.550811027753166e-9, 0.9999705851078033, 1.3231707652613017e-9,
+    0.9999576508998871, -6.3479232186278166e-9, 0.999942347407341, 2.268682899721971e-9,
+    0.9999247044324875, -2.5933429468713223e-9, 0.9999047070741653, -5.991312499669271e-9,
+    0.9998823404312134, 7.0229991467268e-9, 0.999857634305954, 6.699869852087387e-9,
+    0.9998305886983871, -6.902563723980372e-9, 0.9998011738061905, -3.918306258833877e-9,
+    0.9997694045305252, 8.206901141380857e-10, 0.9997352808713913, 7.3891704180503695e-9,
+    0.99969881772995, 9.662542689438906e-10, 0.99966000020504, -3.4610807315799025e-9,
+    0.9996188282966614, -5.801482779836294e-9, 0.9995753020048141, -5.958064891169264e-9,
+    0.9995294213294983, -3.828405127935921e-9, 0.9994811862707138, 6.954531594847833e-10,
+    0.9994306117296219, -7.174160115188023e-9, 0.9993776679039001, 2.484102734197949e-9,
+    0.999322384595871, -7.52147078346649e-12, 0.9992647469043732, 3.8222129069685206e-10,
+    0.9992047548294067, 3.7889571572117e-9, 0.9991424232721329, -4.547315934063858e-9,
+    0.9990777224302292, 5.322416195877063e-9, 0.9990106821060181, 3.748055265759627e-9,
+    0.9989412873983383, 5.788518532762837e-9, 0.9988695532083511, -3.294067547934001e-9
+}
+__SINCOS_PI_FINE_SN: [Float]{
+    0.0, 0.0, 0.049067674327418015, -6.79610372051828e-19,
+    0.0980171403295606, -1.634582362244256e-18, 0.14673047445536175, 3.726947147046568e-18,
+    0.19509032201612828, -7.991079068461731e-18, 0.2429801799032639, -8.751431529719663e-18,
+    0.2902846772544624, -1.892797870777425e-17, 0.33688985339222005, -4.200094003347509e-19,
+    0.3826834323650898, -1.0050772696461588e-17, 0.4275550934302821, 9.411189816295473e-18,
+    0.47139673682599764, 6.516678136069013e-18, 0.5141027441932218, -4.5712707523615624e-17,
+    0.5555702330196022, 4.709410940561677e-17, 0.5956993044924334, -1.3438641936579467e-17,
+    0.6343932841636455, 1.0420901929280035e-17, 0.6715589548470184, -4.048903774929669e-17,
+    0.7071067811865476, -4.833646656726457e-17, 0.7409511253549591, -1.4708616952297345e-17,
+    0.773010453362737, -3.256590703364977e-17, 0.8032075314806449, -3.306060980481491e-17,
+    0.8314696123025452, 1.4073856984728024e-18, 0.8577286100002721, -4.818344793633662e-17,
+    0.881921264348355, -1.9843248405890562e-17, 0.9039892931234433, -6.609754468748431e-18,
+    0.9238795325112867, 1.7645047084336677e-17, 0.9415440651830208, -2.789637954769834e-17,
+    0.9569403357322088, 4.05538698618757e-17, 0.970031253194544, 1.8365300348428844e-17,
+    0.9807852804032304, 1.8546939997825006e-17, 0.989176509964781, -4.098730993704711e-17,
+    0.9951847266721969, -4.248691367830441e-17, 0.9987954562051724, -1.2291693337075465e-17,
+    1.0, 0.0
+}
+__SINCOS_PI_FINE_SM: [Float]{
+    0.0, 0.0, 0.0015339801862847657, -1.0467712971596958e-19,
+    0.003067956762965976, 1.2690279085455925e-19, 0.0046019261204485705, 2.6965454565249836e-19,
+    0.006135884649154475, 9.054525748247493e-20, 0.007669828739531098, -4.0534590657969605e-19,
+    0.00920375478205982, -1.2136591693535934e-19, 0.010737659167264492, -8.662615695318155e-19,
+    0.012271538285719925, 6.919790764028317e-19, 0.01380538852806039, 1.3568556842981468e-19,
+    0.015339206284988102, -8.44625788654017e-19, 0.016872987947281714, 1.6577009703648142e-19,
+    0.01840672990580482, 7.419553381283316e-19, 0.019940428551514438, 1.7334468251694271e-18,
+    0.021474080275469508, -4.540796020768857e-19, 0.023007681468839372, 7.345144017741901e-19,
+    0.024541228522912288, -9.186849012577878e-20, 0.0260747178291039, -1.0126870948230838e-18,
+    0.027608145778965743, -1.593235883138927e-18, 0.029141508764193726, -1.5935319784051423e-18,
+    0.030674803176636626, -1.693605484410792e-20, 0.032208025408304586, -1.4573804486980755e-18,
+    0.03374117185137759, -2.009607429236834e-18, 0.035274238898213954, -3.334652626300493e-18,
+    0.03680722294135883, 6.106008880352984e-19, 0.038340120373552694, 1.7097769871296972e-18,
+    0.03987292758773981, 4.665745348118329e-19, 0.04140564097707674, 5.491894713264798e-19,
+    0.04293825693494082, 2.8351940588660907e-18, 0.04447077185493867, -1.063098034791316e-18,
+    0.04600318213091463, -1.1182813940157788e-18, 0.0475354841569593, 2.721887165220591e-18
+}
+__SINCOS_PI_FINE_CM: [Float]{
+    0.0, 0.0, 0.0000011765482980900709, 8.091357924172706e-23,
+    0.0000047061904238284885, -4.074992266455884e-23, 0.00001058891807162638, 1.1645145435413304e-22,
+    0.00001882471739885734, 1.5062426868464877e-21, 0.000029413569025890014, -1.4718190612302178e-21,
+    0.00004235544803613367, -2.1175619467913633e-21, 0.00005765032397609686, 2.8474126217804934e-21,
+    0.00007529816085545908, 2.440997168574241e-21, 0.00009529891714715543, 8.722613145929865e-22,
+    0.00011765254578747437, -2.701222179595994e-21, 0.00014235899417616843, -6.4133153446543676e-21,
+    0.00016941820417657797, 1.2872229384520728e-20, 0.0001988301121157681, 6.660800553839355e-21,
+    0.00023059464878467833, 9.283509327723616e-21, 0.00026471173943828555, 1.0810201202965375e-20,
+    0.0003011813037957799, -1.8283448175892335e-20, 0.00034000325604075356, -5.318729670019744e-21,
+    0.0003811775048214029, -1.771703302443639e-20, 0.0004247039532507432, -2.5167478892952184e-21,
+    0.00047058249890683695, -2.649676377955706e-20, 0.0005188130338330344, -1.4556028819140056e-20,
+    0.0005693954445382279, 3.730176071166446e-20, 0.0006223296119971193, -2.990822794148106e-20,
+    0.0006776154116504991, 3.255262766825653e-20, 0.0007352527134055403, 5.378879848804083e-20,
+    0.0007952413816361045, 3.6086755088217826e-20, 0.0008575812751830605, -1.2198006178724359e-21,
+    0.0009222722473546171, 4.8195361625956534e-20, 0.000989314145926668, -8.604676512613914e-20,
+    0.0010587068131431494, 1.0800632834055506e-20, 0.0011304500857164128, -9.484105887637368e-20
+}
+__SINPI_ZERO_C: [Float]{
+    -5.16771278004997, 2.266562282579082e-16, 2.5501640398773455, -7.931006368576524e-17,
+    -0.5992645293207921, 2.8451766035406595e-17, 0.08214588661112822, 5.247027059043154e-18
+}
+__COSPI_ZERO_C: [Float]{-4.934802200544679, -3.1326477543698557e-16, 4.0587121264167685, -2.6602001251237696e-16}
+__PI_REFINE_S: [Float]{
+    3.141592653589793, 1.224646799147353e-16, -3.080196845561248e-7, 1.3509764230648207e-23,
+    9.06000266765739e-15, -7.753273336863097e-35
+}
+__PI_REFINE_C: [Float]{-2.9413713220028156e-7, -1.867203566056404e-23, 1.441944208983432e-14, -9.45092937287402e-31}
+// tan of k/64 of a half turn as (lo, hi) pairs, k from 0 to 31.
+__TANPI_T: [Float]{
+    0.0, 0.0, 9.097765655528944e-20, 0.049126849769467254,
+    5.3100671162822435e-18, 0.09849140335716425, 4.079064681800001e-18, 0.14833598753834742,
+    8.391794477636538e-19, 0.198912367379658, 9.389934381474096e-18, 0.25048696019130545,
+    -1.2766990847826405e-17, 0.3033466836073424, 1.0216199149473033e-17, 0.3578057213145241,
+    1.4349369327986523e-17, 0.41421356237309503, 1.741884799204787e-17, 0.4729647758913199,
+    -5.2626469389262167e-17, 0.5345111359507917, -2.9566641441253576e-17, 0.5993769336819238,
+    4.1042270233610004e-17, 0.6681786379192989, -4.623665809492506e-17, 0.7416505462720354,
+    -2.2923147594675738e-17, 0.8206787908286604, 2.1564367263640407e-17, 0.9063471690191471,
+    0.0, 1.0, 8.769565272746272e-17, 1.1033299757334756,
+    -2.1244788699148428e-17, 1.2185035255879764, 3.9251662671937787e-17, 1.3483439134867201,
+    6.974100888958305e-17, 1.496605762665489, -2.3797277757262252e-17, 1.668399205583507,
+    2.945807107795785e-17, 1.8708684117893895, 8.259485526521204e-17, 2.1143223575486405,
+    1.2537167179050217e-16, 2.414213562373095, 2.3237772982434003e-17, 2.7948127724904768,
+    -9.53295779936916e-17, 3.2965582089383205, -4.271622592512587e-17, 3.9922237837700845,
+    2.95379181037367e-17, 5.027339492125848, -1.8658009130558321e-16, 6.7414524054149885,
+    5.362306887894472e-16, 10.15317038760886, -2.3792881581892444e-17, 20.355467624987188
+}
+// tan_pi's hard cases: (|x| reduced into [0, 1/2], tan, correction), sorted.
+__TANPI_HARD: [Float]{
+    4.7300152614670414e-17, 1.4859781196792462e-16, 6.162975822039155e-33,
+    7.053019709321352e-17, 2.215771490442798e-16, -6.162975822039155e-33,
+    9.292017791417242e-17, 2.9191734830542063e-16, 1.232595164407831e-32,
+    9.460030522934083e-17, 2.9719562393584925e-16, 1.232595164407831e-32,
+    3.044756190499533e-16, 9.565383680045377e-16, 4.930380657631324e-32,
+    5.154596998034989e-15, 1.6193644061242723e-14, -7.888609052210118e-31,
+    6.324804587121192e-15, 1.9869959626290963e-14, 7.888609052210118e-31,
+    5.3227224240105025e-14, 1.672182566436905e-13, 6.310887241768095e-30,
+    6.598483836318183e-14, 2.07297483450082e-13, -6.310887241768095e-30,
+    7.230876666481243e-14, 2.2716469014431327e-13, 6.310887241768095e-30,
+    2.152311206172029e-13, 6.761685073549034e-13, -2.524354896707238e-29,
+    3.683189778661054e-13, 1.1571081950418585e-12, 5.048709793414476e-29,
+    5.063144104335874e-13, 1.5906336322248056e-12, -5.048709793414476e-29,
+    3.720782895071451e-12, 1.1689184208759033e-11, 4.0389678347315804e-28,
+    2.6600735696506734e-11, 8.356867584422933e-11, 3.2311742677852644e-27,
+    9.416418299130756e-11, 2.9582550551677683e-10, 1.2924697071141057e-26,
+    2.8415272826066846e-10, 8.926921236012129e-10, 2.5849394142282115e-26,
+    1.2298183289334222e-9, 3.863588227427315e-9, -2.0679515313825692e-25,
+    1.9638891552115813e-7, 6.169739742478152e-7, 2.6469779601696886e-23,
+    2.2980997412817642e-7, 7.219693264428649e-7, 2.6469779601696886e-23,
+    3.2361236028460906e-7, 0.0000010166582136813314, 5.293955920339377e-23,
+    7.924172683468177e-7, 0.000002489452268821197, 1.0587911840678754e-22,
+    0.000005652446997294825, 0.00001775768596337365, 8.470329472543003e-22,
+    0.000024971583686115285, 0.00007845054401774347, 3.3881317890172014e-21,
+    0.00005889727046057379, 0.00018503123430704056, -6.776263578034403e-21,
+    0.00005891887614015306, 0.0001850991105536073, 6.776263578034403e-21,
+    0.00013550697375431335, 0.00042570773897332296, 1.3552527156068805e-20,
+    0.00017833292991614478, 0.0005602494811346317, -2.710505431213761e-20,
+    0.00040192521437566866, 0.0012626859718398071, -5.421010862427522e-20,
+    0.0008034084128252969, 0.002523987327240911, 1.0842021724855044e-19,
+    0.0009068602941416568, 0.0028489933460715097, 1.0842021724855044e-19,
+    0.0013333836111766196, 0.0041889726590195195, -2.168404344971009e-19,
+    0.010396726272931965, 0.03267389881171746, -1.734723475976807e-18,
+    0.0118869508517391, 0.03736132676057837, 1.734723475976807e-18,
+    0.01690579768975447, 0.05316112472139383, 1.734723475976807e-18,
+    0.03718418268553021, 0.11735184921280624, 3.469446951953614e-18,
+    0.05412630294955446, 0.17170087922733931, 6.938893903907228e-18,
+    0.06987851294171177, 0.2231257847757009, -6.938893903907228e-18,
+    0.09966711869753327, 0.3237639054241983, 1.3877787807814457e-17,
+    0.10234483371468589, 0.3330836001897263, 1.3877787807814457e-17,
+    0.1023476186079835, 0.3330933198734586, 1.3877787807814457e-17,
+    0.10973245167988503, 0.35907296645266135, 1.3877787807814457e-17,
+    0.22378711739814902, 0.8475121486047265, 2.7755575615628914e-17,
+    0.23400189847406203, 0.9042144342912691, -2.7755575615628914e-17,
+    0.24478471169419852, 0.9677567749487057, 2.7755575615628914e-17,
+    0.3863368970269599, 2.680416060023711, 1.1102230246251565e-16,
+    0.4280124558427595, 4.34609210855004, -2.220446049250313e-16,
+    0.4664196791119597, 9.443868939328663, 4.440892098500626e-16,
+    0.48292704243799284, 18.62621535668404, 8.881784197001252e-16
+}
+__TANPI_REFINE_C: [Float]{
+    0.02454369260617026, 9.567553118338697e-19, 0.000004928314952897997, -2.1615622354208456e-22,
+    1.1875126696551896e-9, -3.6931646863639206e-26, 2.8954607951315737e-13, 5.3513261844359426e-30,
+    7.068019738778885e-17, 1.2048483746230456e-33
+}
+__TANPI_ZERO_C: [Float]{10.33542556009994, -4.533124565157889e-16, 40.80262463803753, -1.2689610152651054e-15, 162.99995197525544, 2.9213955720341702e-15}
 tan: fn(n: Float) -> Float Never! { core.math.tan(n) }
 tanh: fn(n: Float) -> Float Never! { core.math.tanh(n) }
 trunc: fn(n: Float) -> Float Never! { core.math.trunc(n) }
@@ -439,16 +1218,20 @@ next_down: fn(n: Float) -> Float Never! {
     if is_nan(n) || n == -INFINITY -> return n
     next_after(n, -INFINITY)
 }
+/// nextafter.c from musl 1.2.5: one step of the bit pattern toward `toward`.
 next_after: fn(n: Float, toward: Float) -> Float Never! {
-    if is_nan(n) || is_nan(toward) -> return NAN
-    if n == toward -> return toward
-    if n == 0.0 {
-        if toward > 0.0 -> return from_bits(1)
-        return -from_bits(1)
+    if is_nan(n) || is_nan(toward) -> return __nan_pair(n, toward)
+    ux: to_bits(n)
+    uy: to_bits(toward)
+    if ux == uy -> return toward
+    ax: ux.bit_and(9223372036854775807)
+    ay: uy.bit_and(9223372036854775807)
+    if ax == 0 {
+        if ay == 0 -> return toward
+        return from_bits(uy.bit_and(-9223372036854775807 - 1).bit_or(1))
     }
-    bits := to_bits(n)
-    if (toward > n) == !sign_bit(n) -> bits = bits + 1 else -> bits = bits - 1
-    from_bits(bits)
+    if ax > ay || (ux < 0) != (uy < 0) -> return from_bits(ux - 1)
+    from_bits(ux + 1)
 }
 nextafter: fn(n: Float, toward: Float) -> Float Never! { next_after(n, toward) }
 significand: fn(n: Float) -> Float Never! {
@@ -469,13 +1252,45 @@ ulp: fn(n: Float) -> Float Never! {
     if magnitude == 0.0 -> return from_bits(1)
     from_bits(to_bits(magnitude) + 1) - magnitude
 }
+/// ilogb.c from musl 1.2.5: the unbiased exponent, a subnormal's counted
+/// from its leading bit; None for a zero, an infinity or a NaN.
 ilogb: fn(n: Float) -> Int? Never! {
-    if n == 0.0 || !is_finite(n) -> return None
-    Val(Int.from_float(floor(log2(fabs(n)))) ?? panic("finite logarithm exponent fits Int"))
+    bits: to_bits(n).bit_and(9223372036854775807)
+    exponent: bits >> 52
+    if exponent == 2047 -> return None
+    if exponent != 0 -> return Val(exponent - 1023)
+    if bits == 0 -> return None
+    i := bits << 12
+    found := -1023
+    loop i < 9223372036854775808 {
+        found = found - 1
+        i = i << 1
+    }
+    Val(found)
 }
+/// scalbn.c from musl 1.2.5: `n` times 2^exponent, scaled in at most three
+/// exact steps so only the last can round.
 ldexp: fn(n: Float, exponent: Int) -> Float Never! {
-    if !is_finite(n) || n == 0.0 || exponent == 0 -> return n
-    n * (Float{2.0}).pow(Float{clamp(exponent, -2099, 2099)})
+    y := n
+    k := exponent
+    if k > 1023 {
+        y = y * Float{8.98846567431158e307}
+        k = k - 1023
+        if k > 1023 {
+            y = y * Float{8.98846567431158e307}
+            k = k - 1023
+            if k > 1023 -> k = 1023
+        }
+    } else if k < -1022 {
+        y = y * Float{2.004168360008973e-292}
+        k = k + 969
+        if k < -1022 {
+            y = y * Float{2.004168360008973e-292}
+            k = k + 969
+            if k < -1022 -> k = -1022
+        }
+    }
+    y * from_bits((1023 + k) << 52)
 }
 scaleb: fn(n: Float, exponent: Int) -> Float Never! { ldexp(n, exponent) }
 radix: fn(n: Float) -> Int Never! { 2 }
@@ -519,13 +1334,34 @@ sin_cos: fn(n: Float) -> (cos: Float, sin: Float) Never! {
     pair: core.math.sin_cos(n)
     (cos: pair.cos, sin: pair.sin)
 }
+/// modf.c from musl 1.2.5: the whole part clears the fraction bits, and a
+/// whole `n` has a fraction of zero with its sign.
 modf: fn(n: Float) -> (fract: Float, whole: Float) Never! {
-    (fract: fract(n), whole: trunc(n))
+    bits: to_bits(n)
+    signed_zero: from_bits(bits.bit_and(-9223372036854775807 - 1))
+    e: (bits >> 52).bit_and(2047) - 1023
+    if e >= 52 {
+        if e == 1024 && bits.bit_and(4503599627370495) != 0 -> return (fract: n, whole: n)
+        return (fract: signed_zero, whole: n)
+    }
+    if e < 0 -> return (fract: n, whole: signed_zero)
+    mask: 4503599627370495 >> e
+    if bits.bit_and(mask) == 0 -> return (fract: signed_zero, whole: n)
+    whole: from_bits(bits - bits.bit_and(mask))
+    (fract: n - whole, whole: whole)
 }
+/// frexp.c from musl 1.2.5: `n` is frac * 2^exp with |frac| in [0.5, 1);
+/// a zero, an infinity or a NaN is its own frac with exp 0.
 frexp: fn(n: Float) -> (exp: Int, frac: Float) Never! {
-    exponent: ilogb(n) ?? 0
-    if n == 0.0 || !is_finite(n) -> return (exp: exponent, frac: n)
-    (exp: exponent, frac: ldexp(n, -exponent))
+    bits: to_bits(n)
+    biased: (bits >> 52).bit_and(2047)
+    if biased == 0 {
+        if n == 0.0 -> return (exp: 0, frac: n)
+        scaled: frexp(n * Float{18446744073709551616.0})
+        return (exp: scaled.exp - 64, frac: scaled.frac)
+    }
+    if biased == 2047 -> return (exp: 0, frac: n)
+    (exp: biased - 1022, frac: from_bits(bits.bit_and(-9218868437227405313).bit_or(4602678819172646912)))
 }
 
 checked_abs: fn(n: Int) -> Int? Never! {
@@ -665,9 +1501,9 @@ div_rem: fn(a: Int, b: Int) -> (quot: Int, rem: Int) Never! {
 }
 
 digits: fn(n: Int) -> Int Never! {
-    value := n
+    value := abs(n)
     count := 1
-    loop value <= -10 || value >= 10 {
+    loop value >= 10 {
         value = value /% 10
         count = count + 1
     }
@@ -723,16 +1559,75 @@ prod_int: fn(values: [Int]) -> Int Never! {
 
 prod: fn(values: [Int]) -> Int Never! { prod_int(values) }
 fmod: fn(a: Float, b: Float) -> Float Never! { core.math.fmod(a, b) }
-remainder: fn(a: Float, b: Float) -> Float Never! {
-    if !is_finite(a) || !is_finite(b) || b == 0.0 -> return NAN
-    quotient: a / b
-    lower: floor(quotient)
-    fraction: quotient - lower
-    nearest := lower
-    if fraction > 0.5 || (fraction == 0.5 && fmod(lower, 2.0) != 0.0) {
-        nearest = lower + 1.0
+/// remainder.c from musl 1.2.5: rem_quo's remainder.
+remainder: fn(a: Float, b: Float) -> Float Never! { rem_quo(a, b).rem }
+/// remquo.c from musl 1.2.5: `a - n * b` for the integer n nearest a / b
+/// (ties to even), found by exact long division of the significands, and
+/// n's low 31 bits signed as a / b.
+rem_quo: fn(a: Float, b: Float) -> (rem: Float, quo: Int) Never! {
+    ux: to_bits(a).bit_and(18446744073709551615)
+    uy: to_bits(b).bit_and(18446744073709551615)
+    ex := (ux >> 52).bit_and(2047)
+    ey := (uy >> 52).bit_and(2047)
+    sx: ux >> 63 != 0
+    sy: uy >> 63 != 0
+    if is_nan(a) || is_nan(b) -> return (rem: __nan_pair(a, b), quo: 0)
+    if uy.bit_and(9223372036854775807) == 0 || ex == 2047 -> return (rem: (a * b) / (a * b), quo: 0)
+    if ux.bit_and(9223372036854775807) == 0 -> return (rem: a, quo: 0)
+    uxi := __remquo_significand(ux, ex)
+    uyi: __remquo_significand(uy, ey)
+    if ex == 0 -> ex = __remquo_exponent(ux)
+    if ey == 0 -> ey = __remquo_exponent(uy)
+    q := 0
+    if ex < ey - 1 -> return (rem: a, quo: 0)
+    if ex >= ey {
+        loop ex > ey {
+            if uxi >= uyi {
+                uxi = uxi - uyi
+                q = q + 1
+            }
+            uxi = uxi << 1
+            q = (q << 1).bit_and(4294967295)
+            ex = ex - 1
+        }
+        if uxi >= uyi {
+            uxi = uxi - uyi
+            q = q + 1
+        }
+        if uxi == 0 {
+            ex = -60
+        } else {
+            loop uxi < 4503599627370496 {
+                uxi = uxi << 1
+                ex = ex - 1
+            }
+        }
     }
-    a - nearest * b
+    bits: if ex > 0 -> (uxi - 4503599627370496).bit_or(ex << 52) else -> uxi >> (1 - ex)
+    x := from_bits(bits)
+    y: fabs(b)
+    if ex == ey || (ex + 1 == ey && (Float{2.0} * x > y || (Float{2.0} * x == y && q % 2 != 0))) {
+        x = x - y
+        q = q + 1
+    }
+    q = q.bit_and(2147483647)
+    (rem: if sx -> -x else -> x, quo: if sx != sy -> -q else -> q)
+}
+// remquo.c: the significand of binary64 `bits` with its leading bit at bit
+// 52, a subnormal's shifted up to it.
+__remquo_significand: fn(bits: Int, biased: Int) -> Int Never! {
+    if biased != 0 -> return bits.bit_and(4503599627370495).bit_or(4503599627370496)
+    (bits << (1 - __remquo_exponent(bits))).bit_and(9007199254740991)
+}
+// remquo.c: a subnormal's exponent, counted down from 0 to its leading bit.
+__remquo_exponent: fn(bits: Int) -> Int Never! {
+    i := (bits << 12).bit_and(18446744073709551615)
+    exponent := 0
+    loop i < 9223372036854775808 {
+        exponent = exponent - 1
+        i = i << 1
+    }
+    exponent
 }
 isclose: fn(a: Float, b: Float, rel_tol: Float, abs_tol: Float) -> Bool Never! {
     if rel_tol < 0.0 || abs_tol < 0.0 -> return false
@@ -760,17 +1655,21 @@ clamp_float: fn(value: Float, low: Float, high: Float) -> Float Never! {
     value
 }
 
+/// fmin.c from musl 1.2.5: the lesser, a NaN only when both are, -0 below +0.
 min_float: fn(a: Float, b: Float) -> Float Never! {
     if is_nan(a) -> return b
     if is_nan(b) -> return a
+    if sign_bit(a) != sign_bit(b) -> return if sign_bit(a) -> a else -> b
     if a < b -> return a
     b
 }
+/// fmax.c from musl 1.2.5: the greater, a NaN only when both are, +0 above -0.
 max_float: fn(a: Float, b: Float) -> Float Never! {
     if is_nan(a) -> return b
     if is_nan(b) -> return a
-    if a > b -> return a
-    b
+    if sign_bit(a) != sign_bit(b) -> return if sign_bit(a) -> b else -> a
+    if a < b -> return b
+    a
 }
 midpoint: fn(a: Float, b: Float) -> Float Never! { a + (b - a) * 0.5 }
 
@@ -807,6 +1706,196 @@ decimal: fn(text: String) -> Decimal Never! {
 }
 
 copy: fn(n: Float) -> Float Never! { n }
+
+/// The direction `round_to_signed` and `round_to_unsigned` round in: an
+/// IEEE 754 rounding direction, or ties away from zero or to even.
+Rounding: enum {
+    TowardNegative
+    TowardPositive
+    TowardZero
+    TiesToAway
+    TiesToEven
+}
+
+/// The integral Float nearest `n`, ties to the even one (C23 roundeven); an
+/// infinity, a NaN or a whole `n` is itself, and the sign of zero is kept.
+round_even: fn(n: Float) -> Float Never! {
+    if !(fabs(n) < Float{4503599627370496.0}) -> return n
+    whole: trunc(n)
+    distance: fabs(n - whole)
+    if (distance > Float{0.5} || (distance == Float{0.5} && fmod(whole, Float{2.0}) != Float{0.0})) -> return whole + copysign(Float{1.0}, n)
+    whole
+}
+// The integral Float nearest `n`, ties away from zero (C round).
+__round_away: fn(n: Float) -> Float Never! {
+    if !(fabs(n) < Float{4503599627370496.0}) -> return n
+    whole: trunc(n)
+    if (fabs(n - whole) >= Float{0.5}) -> return whole + copysign(Float{1.0}, n)
+    whole
+}
+// `n` rounded to an integral Float in `mode`.
+__rounded: fn(n: Float, mode: Rounding) -> Float Never! {
+    if mode == {
+        .TowardNegative -> floor(n)
+        .TowardPositive -> ceil(n)
+        .TowardZero -> trunc(n)
+        .TiesToAway -> __round_away(n)
+        .TiesToEven -> round_even(n)
+    }
+}
+/// `n` rounded in `mode` to an integer that fits a two's-complement integer
+/// of `bits` bits (C23 fromfp, with widths above 64 read as 64); None for an
+/// infinity, a NaN, `bits` below 1 or a rounded value outside the width.
+round_to_signed: fn(n: Float, mode: Rounding, bits: Int) -> Int? Never! {
+    if !is_finite(n) || bits < 1 -> return None
+    width: min(bits, 64)
+    whole: __rounded(n, mode)
+    limit: ldexp(Float{1.0}, width - 1)
+    if whole < -limit || whole >= limit -> return None
+    Val(Int.from_float(whole) ?? 0)
+}
+/// `n` rounded in `mode` to an integer that fits an unsigned integer of
+/// `bits` bits (C23 ufromfp, with widths above 64 read as 64); None for an
+/// infinity, a NaN, `bits` below 1 or a rounded value outside the width.
+round_to_unsigned: fn(n: Float, mode: Rounding, bits: Int) -> Int? Never! {
+    if !is_finite(n) || bits < 1 -> return None
+    width: min(bits, 64)
+    whole: __rounded(n, mode)
+    if (whole < Float{0.0} || whole >= ldexp(Float{1.0}, width)) -> return None
+    // An Int conversion of a whole value above 2^63 halves exactly first.
+    if (whole >= Float{9223372036854775808.0}) -> return Val((Int.from_float(whole * Float{0.5}) ?? 0) * 2)
+    Val(Int.from_float(whole) ?? 0)
+}
+
+/// fdim.c from musl 1.2.5: `a - b` when `a` is greater, else +0; a NaN
+/// operand is the result.
+fdim: fn(a: Float, b: Float) -> Float Never! {
+    if is_nan(a) -> return a
+    if is_nan(b) -> return b
+    if a > b -> return a - b
+    Float{0.0}
+}
+
+/// IEEE 754-2019 maximum (C23 fmaximum): the greater, +0 above -0, and a NaN
+/// when either operand is one.
+maximum: fn(a: Float, b: Float) -> Float Never! {
+    if is_nan(a) || is_nan(b) -> return __nan_pair(a, b)
+    if a > b -> return a
+    if b > a -> return b
+    if sign_bit(a) -> return b
+    a
+}
+/// IEEE 754-2019 minimum (C23 fminimum): the lesser, -0 below +0, and a NaN
+/// when either operand is one.
+minimum: fn(a: Float, b: Float) -> Float Never! {
+    if is_nan(a) || is_nan(b) -> return __nan_pair(a, b)
+    if a < b -> return a
+    if b < a -> return b
+    if sign_bit(a) -> return a
+    b
+}
+/// IEEE 754-2019 maximumMagnitude (C23 fmaximum_mag): the operand of greater
+/// magnitude, `maximum` of equal ones, and a NaN when either operand is one.
+maximum_mag: fn(a: Float, b: Float) -> Float Never! {
+    if is_nan(a) || is_nan(b) -> return __nan_pair(a, b)
+    if fabs(a) > fabs(b) -> return a
+    if fabs(b) > fabs(a) -> return b
+    maximum(a, b)
+}
+/// IEEE 754-2019 minimumMagnitude (C23 fminimum_mag): the operand of lesser
+/// magnitude, `minimum` of equal ones, and a NaN when either operand is one.
+minimum_mag: fn(a: Float, b: Float) -> Float Never! {
+    if is_nan(a) || is_nan(b) -> return __nan_pair(a, b)
+    if fabs(a) < fabs(b) -> return a
+    if fabs(b) < fabs(a) -> return b
+    minimum(a, b)
+}
+/// IEEE 754-2019 maximumNumber (C23 fmaximum_num): `maximum` of the numbers
+/// among the operands, a NaN only when both are.
+maximum_num: fn(a: Float, b: Float) -> Float Never! {
+    if is_nan(a) -> return if is_nan(b) -> __nan_pair(a, b) else -> b
+    if is_nan(b) -> return a
+    maximum(a, b)
+}
+/// IEEE 754-2019 minimumNumber (C23 fminimum_num): `minimum` of the numbers
+/// among the operands, a NaN only when both are.
+minimum_num: fn(a: Float, b: Float) -> Float Never! {
+    if is_nan(a) -> return if is_nan(b) -> __nan_pair(a, b) else -> b
+    if is_nan(b) -> return a
+    minimum(a, b)
+}
+/// IEEE 754-2019 maximumMagnitudeNumber (C23 fmaximum_mag_num):
+/// `maximum_mag` of the numbers among the operands, a NaN only when both are.
+maximum_mag_num: fn(a: Float, b: Float) -> Float Never! {
+    if is_nan(a) -> return if is_nan(b) -> __nan_pair(a, b) else -> b
+    if is_nan(b) -> return a
+    maximum_mag(a, b)
+}
+/// IEEE 754-2019 minimumMagnitudeNumber (C23 fminimum_mag_num):
+/// `minimum_mag` of the numbers among the operands, a NaN only when both are.
+minimum_mag_num: fn(a: Float, b: Float) -> Float Never! {
+    if is_nan(a) -> return if is_nan(b) -> __nan_pair(a, b) else -> b
+    if is_nan(b) -> return a
+    minimum_mag(a, b)
+}
+
+// The bits of `n` as a signed Int that orders as IEEE 754 totalOrder: a
+// negative pattern's magnitude bits flip, so -NaN < -inf < ... < -0 < +0.
+__total_order_key: fn(n: Float) -> Int Never! {
+    bits: to_bits(n)
+    if bits < 0 -> return bits.bit_xor(9223372036854775807)
+    bits
+}
+/// IEEE 754 totalOrder (C23 totalorder): whether `a` sorts at or before `b`
+/// when -0 precedes +0 and NaNs sort by sign and payload beyond the
+/// infinities.
+total_order: fn(a: Float, b: Float) -> Bool Never! { __total_order_key(a) <= __total_order_key(b) }
+/// IEEE 754 totalOrderMag (C23 totalordermag): `total_order` of the
+/// magnitudes.
+total_order_mag: fn(a: Float, b: Float) -> Bool Never! {
+    to_bits(a).bit_and(9223372036854775807) <= to_bits(b).bit_and(9223372036854775807)
+}
+
+/// Whether `n` is a signaling NaN: a NaN whose quiet bit is clear.
+is_signaling: fn(n: Float) -> Bool Never! {
+    bits: to_bits(n).bit_and(9223372036854775807)
+    bits > 9218868437227405312 && bits < 9221120237041090560
+}
+/// `n` in canonical form (C23 canonicalize): a signaling NaN becomes the
+/// quiet NaN of the same sign and payload; anything else is itself.
+canonicalize: fn(n: Float) -> Float Never! {
+    if is_signaling(n) -> return from_bits(to_bits(n).bit_or(2251799813685248))
+    n
+}
+// x86-64's result for an arithmetic operation on `a` and `b` when either is
+// a NaN: the first NaN operand, quieted. musl's `x + y` and `x * y` NaN
+// returns are this. Wasm leaves the choice open (V8 may commute the
+// operands), so naming it keeps every tier's bits the same.
+__nan_pair: fn(a: Float, b: Float) -> Float Never! { canonicalize(if is_nan(a) -> a else -> b) }
+/// The payload of NaN `n` as an integral Float (C23 getpayload): its fraction
+/// bits below the quiet bit; None when `n` is not a NaN.
+get_payload: fn(n: Float) -> Float? Never! {
+    if !is_nan(n) -> return None
+    Val(Float{to_bits(n).bit_and(2251799813685247)})
+}
+/// The positive quiet NaN whose payload is `payload` (C23 setpayload); None
+/// unless `payload` is +0 or a whole number below 2^51.
+set_payload: fn(payload: Float) -> Float? Never! {
+    bits: __payload_bits(payload) ?? return None
+    Val(from_bits(bits.bit_or(9221120237041090560)))
+}
+/// The positive signaling NaN whose payload is `payload` (C23
+/// setpayloadsig); None unless `payload` is a whole number in 1..<2^51.
+set_payload_signaling: fn(payload: Float) -> Float? Never! {
+    bits: __payload_bits(payload) ?? return None
+    if bits == 0 -> return None
+    Val(from_bits(bits.bit_or(9218868437227405312)))
+}
+// A payload Float's integer, when it is +0 or whole and below 2^51.
+__payload_bits: fn(payload: Float) -> Int? Never! {
+    if sign_bit(payload) || !(payload < Float{2251799813685248.0}) || trunc(payload) != payload -> return None
+    Val(Int.from_float(payload) ?? 0)
+}
 
 #Test("math scalar composition preserves IEEE boundaries") {
     assert(is_nan(NAN))
@@ -851,8 +1940,90 @@ copy: fn(n: Float) -> Float Never! { n }
     assert(ilogb(0.0) == None)
     assert_eq(ldexp(1.5, 2), 6.0)
     pair: frexp(6.0)
-    assert_eq(pair.exp, 2)
-    assert_eq(pair.frac, 1.5)
+    assert_eq(pair.exp, 3)
+    assert_eq(pair.frac, 0.75)
+    tiny: frexp(from_bits(1))
+    assert_eq(tiny.exp, -1073)
+    assert_eq(tiny.frac, 0.5)
+    assert_eq(frexp(INFINITY).exp, 0)
+    assert_eq(logb(from_bits(1)), -1074.0)
+    assert_eq(logb(0.0), -INFINITY)
+    assert_eq(ldexp(1.5, -1074), from_bits(2))
+    assert_eq(ldexp(from_bits(1), 1074), 1.0)
+    assert_eq(ldexp(1.0, 2000), INFINITY)
+    split: modf(-INFINITY)
+    assert(sign_bit(split.fract) && split.fract == 0.0 && split.whole == -INFINITY)
+    assert_eq(to_bits(next_after(-0.0, 1.0)), 1)
+    assert_eq(to_bits(next_after(0.0, -0.0)), to_bits(-0.0))
+}
+
+#Test("math C23 exact operations follow IEEE 754-2019") {
+    assert_eq(round_even(2.5), 2.0)
+    assert_eq(round_even(3.5), 4.0)
+    assert_eq(round_even(-2.5), -2.0)
+    assert(sign_bit(round_even(-0.25)))
+    assert_eq(round_even(4503599627370497.0), 4503599627370497.0)
+    assert_eq(round_to_signed(2.5, Rounding.TiesToEven, 8), Val(2))
+    assert_eq(round_to_signed(2.5, Rounding.TiesToAway, 8), Val(3))
+    assert_eq(round_to_signed(-2.5, Rounding.TowardNegative, 8), Val(-3))
+    assert_eq(round_to_signed(-2.5, Rounding.TowardPositive, 8), Val(-2))
+    assert_eq(round_to_signed(-2.7, Rounding.TowardZero, 8), Val(-2))
+    assert_eq(round_to_signed(127.4, Rounding.TiesToEven, 8), Val(127))
+    assert(round_to_signed(127.6, Rounding.TiesToEven, 8) == None)
+    assert_eq(round_to_signed(-128.4, Rounding.TiesToEven, 8), Val(-128))
+    assert(round_to_signed(-128.6, Rounding.TiesToEven, 8) == None)
+    assert(round_to_signed(NAN, Rounding.TowardNegative, 8) == None)
+    assert(round_to_signed(1.0, Rounding.TowardNegative, 0) == None)
+    assert_eq(round_to_signed(-9223372036854775808.0, Rounding.TowardNegative, 64), Val(-9223372036854775807 - 1))
+    assert(round_to_signed(9223372036854775808.0, Rounding.TowardNegative, 100) == None)
+    assert_eq(round_to_unsigned(255.4, Rounding.TiesToEven, 8), Val(255))
+    assert(round_to_unsigned(255.6, Rounding.TiesToEven, 8) == None)
+    assert_eq(round_to_unsigned(-0.4, Rounding.TiesToEven, 8), Val(0))
+    assert(round_to_unsigned(-0.6, Rounding.TiesToEven, 8) == None)
+    assert_eq(round_to_unsigned(-0.6, Rounding.TowardPositive, 8), Val(0))
+    assert_eq(round_to_unsigned(18446744073709549568.0, Rounding.TowardZero, 64), Val(18446744073709549568))
+    assert(round_to_unsigned(18446744073709551616.0, Rounding.TowardZero, 64) == None)
+    assert(!sign_bit(maximum(-0.0, 0.0)) && !sign_bit(maximum(0.0, -0.0)))
+    assert(sign_bit(minimum(-0.0, 0.0)) && sign_bit(minimum(0.0, -0.0)))
+    assert(is_nan(maximum(NAN, 1.0)) && is_nan(minimum(1.0, NAN)))
+    assert_eq(maximum_num(NAN, 1.0), 1.0)
+    assert_eq(minimum_num(1.0, NAN), 1.0)
+    assert(is_nan(maximum_num(NAN, NAN)))
+    assert_eq(maximum_mag(-3.0, 2.0), -3.0)
+    assert_eq(minimum_mag(-3.0, 2.0), 2.0)
+    assert_eq(maximum_mag(-2.0, 2.0), 2.0)
+    assert_eq(minimum_mag(-2.0, 2.0), -2.0)
+    assert(is_nan(maximum_mag(NAN, 1.0)))
+    assert_eq(maximum_mag_num(NAN, -3.0), -3.0)
+    assert_eq(minimum_mag_num(-3.0, NAN), -3.0)
+    signaling: from_bits(9218868437227405313)
+    quiet: from_bits(9221120237041090560)
+    negative_quiet: from_bits(-2251799813685248)
+    assert(total_order(-0.0, 0.0) && !total_order(0.0, -0.0))
+    assert(total_order(INFINITY, quiet) && !total_order(quiet, INFINITY))
+    assert(total_order(negative_quiet, -INFINITY) && total_order(signaling, quiet))
+    assert(total_order(1.0, 1.0))
+    assert(total_order_mag(-1.0, 2.0) && !total_order_mag(-3.0, 2.0))
+    assert(total_order_mag(-0.0, 0.0) && total_order_mag(0.0, -0.0))
+    assert(is_signaling(signaling) && !is_signaling(quiet) && !is_signaling(INFINITY) && !is_signaling(1.0))
+    assert_eq(to_bits(canonicalize(signaling)), 9221120237041090561)
+    assert_eq(canonicalize(1.5), 1.5)
+    assert(sign_bit(canonicalize(-0.0)))
+    assert_eq(get_payload(from_bits(9221120237041090565)), Val(5.0))
+    assert_eq(get_payload(signaling), Val(1.0))
+    assert(get_payload(1.0) == None)
+    assert_eq(to_bits(set_payload(5.0) ?? 0.0), 9221120237041090565)
+    assert_eq(to_bits(set_payload(0.0) ?? 0.0), 9221120237041090560)
+    assert(set_payload(-1.0) == None && set_payload(-0.0) == None && set_payload(0.5) == None)
+    assert(set_payload(2251799813685248.0) == None && set_payload(NAN) == None)
+    assert_eq(to_bits(set_payload_signaling(1.0) ?? 0.0), 9218868437227405313)
+    assert(set_payload_signaling(0.0) == None)
+    split: rem_quo(7.0, -2.0)
+    assert_eq(split.rem, -1.0)
+    assert_eq(split.quo, -4)
+    assert_eq(fdim(5.0, 3.0), 2.0)
+    assert_eq(fdim(3.0, 5.0), 0.0)
+    assert(is_nan(fdim(NAN, 1.0)))
 }
 
 #Test("math remainder and distance retain their validation") {
@@ -864,9 +2035,59 @@ copy: fn(n: Float) -> Float Never! { n }
     assert_eq(dist([Float]{0.0, 0.0}, [Float]{3.0, 4.0}), 5.0)
     assert(is_nan(dist([Float]{1.0}, [Float]{})))
     assert_eq(digits(-9223372036854775808), 19)
+    assert_eq(digits(-99), 2)
+    assert_eq(digits(0), 1)
     assert_eq(leading_ones(-1), 64)
     assert_eq(trailing_ones(-1), 64)
     assert_eq((Int{3}).bit_xor(5), 6)
+}
+
+#Test("math rsqrt is correctly rounded and exp10 matches musl") {
+    assert_eq(rsqrt(4.0), 0.5)
+    assert_eq(rsqrt(0.0), INFINITY)
+    assert_eq(rsqrt(-0.0), -INFINITY)
+    assert_eq(to_bits(rsqrt(INFINITY)), 0)
+    assert(is_nan(rsqrt(-1.0)))
+    assert(is_nan(rsqrt(NAN)))
+    assert_eq(to_bits(rsqrt(2.0)), 4604544271217802189)
+    // A CORE-MATH worst case, and the smallest subnormal (2^537).
+    assert_eq(to_bits(rsqrt(from_bits(4610114390058515662))), 4605185130452627605)
+    assert_eq(to_bits(rsqrt(from_bits(1))), 7025615418697973760)
+    assert_eq(exp10(2.0), 100.0)
+    assert_eq(exp10(-3.0), 0.001)
+    assert_eq(exp10(INFINITY), INFINITY)
+    assert_eq(exp10(-INFINITY), 0.0)
+    assert(is_nan(exp10(NAN)))
+    assert_eq(to_bits(exp10(0.5)), 4614303235046005586)
+    // musl's own result at its worst input, 4 ulps from 10^x.
+    assert_eq(to_bits(exp10(from_bits(-4598200772700550838))), 4368491250563624223)
+}
+
+#Test("math sin_pi cos_pi and tan_pi are correctly rounded") {
+    assert_eq(to_bits(sin_pi(-0.0)), to_bits(-0.0))
+    assert_eq(to_bits(sin_pi(1.0)), 0)
+    assert_eq(to_bits(sin_pi(-2.0)), to_bits(-0.0))
+    assert_eq(sin_pi(-0.5), -1.0)
+    assert_eq(to_bits(sin_pi(0.25)), 4604544271217802189)
+    assert(is_nan(sin_pi(INFINITY)))
+    assert_eq(cos_pi(1.0), -1.0)
+    assert_eq(to_bits(cos_pi(-1.5)), 0)
+    assert_eq(cos_pi(1152921504606846976.0), 1.0)
+    assert(is_nan(cos_pi(-INFINITY)))
+    assert_eq(to_bits(tan_pi(1.0)), to_bits(-0.0))
+    assert_eq(to_bits(tan_pi(-1.0)), 0)
+    assert_eq(tan_pi(0.5), INFINITY)
+    assert_eq(tan_pi(-0.5), -INFINITY)
+    assert_eq(tan_pi(1.5), -INFINITY)
+    assert_eq(tan_pi(-0.75), 1.0)
+    assert(is_nan(tan_pi(NAN)))
+    // CORE-MATH hard cases, and a subnormal x.
+    assert_eq(to_bits(sin_pi(from_bits(4395891070298091049))), 4403180974300602922)
+    assert_eq(to_bits(sin_pi(from_bits(4642176498684705821))), 4606812274292659608)
+    assert_eq(to_bits(cos_pi(from_bits(4504997151097359015))), 4607182418800016324)
+    assert_eq(to_bits(tan_pi(from_bits(4407730924795980279))), 4415082666414721775)
+    assert_eq(to_bits(tan_pi(from_bits(4665355407666552457))), 4590372015398588693)
+    assert_eq(to_bits(sin_pi(from_bits(1))), 3)
 }
 
 #Test("math special functions match musl") {
@@ -1134,7 +2355,7 @@ impl Float.Mul(Vec4) {
 #Test("Vec4 dot folds from zero in lane order") {
     large: Vec4.new(10000000000000000.0, 1.0, -10000000000000000.0, 2.0)
     assert_eq(large.dot(Vec4.splat(1.0)), 2.0)
-    assert_eq(Vec4.new(0.0, -0.0, 0.0, -0.0).normalize().to_array()[1].to_bits(), to_bits(-0.0))
+    assert_eq(to_bits(Vec4.new(0.0, -0.0, 0.0, -0.0).normalize().to_array()[1]), to_bits(-0.0))
     assert_eq(Vec4.from_array([Float#4]{1.0, 2.0, 3.0, 4.0}).length(), sqrt(30.0))
     assert_eq((Vec4.splat(2.0) + Vec4.splat(3.0)).lane(3), 5.0)
     assert_eq((Vec4.splat(2.0) - Vec4.splat(3.0)).lane(3), -1.0)
@@ -2048,11 +3269,11 @@ impl F64x4.Div {
     assert_eq(value.reduce(.Avg), F64{2.5})
     cancellation: F64x4.new(F64{10000000000000000.0}, F64{1.0}, F64{-10000000000000000.0}, F64{2.0})
     assert_eq(cancellation.sum(), F64{2.0})
-    assert_eq(F64x4.splat(-F64{0.0}).sum().to_bits(), F64{0.0}.to_bits())
+    assert_eq(to_bits(F64x4.splat(-F64{0.0}).sum()), to_bits(F64{0.0}))
     assert_eq(F64x4.splat(NAN).min(), INFINITY)
     assert_eq(F64x4.splat(NAN).max(), -INFINITY)
     assert_eq(F64x4.new(F64{NAN}, F64{3.0}, F64{2.0}, F64{1.0}).min(), F64{1.0})
-    assert_eq(F64x4.splat(F64{-0.0}).sqrt().lane(0).to_bits(), F64{-0.0}.to_bits())
+    assert_eq(to_bits(F64x4.splat(F64{-0.0}).sqrt().lane(0)), to_bits(F64{-0.0}))
     assert_eq(F64x4.splat(F64{4.0}).sqrt().lane(3), F64{2.0})
     assert_eq((value + value).lane(2), F64{6.0})
     assert_eq((value - value).lane(2), F64{0.0})
@@ -4040,9 +5261,9 @@ impl Transform2 {
     assert_eq((narrow.inverse() ?? panic("F32 inverse")).tx, -2.0)
     assert_eq((narrow.ray(ScreenPoint.new(1.0, 2.0)) ?? panic("F32 ray")).direction.x, 1.0)
     assert_eq((narrow.point_at_depth(ScreenPoint.new(1.0, 2.0), 4.0) ?? panic("F32 depth")).x, 7.0)
-    assert_eq(Float{9007199254740993}, 9007199254740992.0)
-    assert_eq(Float{-9007199254740993}, -9007199254740992.0)
-    assert_eq(Float.from_f32(F32{-0.0}).to_bits(), (-0.0).to_bits())
+    assert_eq(approx(9007199254740993), 9007199254740992.0)
+    assert_eq(approx(-9007199254740993), -9007199254740992.0)
+    assert_eq(to_bits(Float.from_f32(F32{-0.0})), to_bits(-0.0))
 }
 
 __decimal_to_string: fn(value: Decimal) -> String Never! {

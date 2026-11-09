@@ -1,0 +1,28 @@
+# A Float or F32 a * b + c rounds the product and then the sum on O0, O1, O2
+# and the web build: no tier contracts it into a fused multiply-add, which
+# would change the bits. Only math.fma fuses.
+fixture: float_multiply_add_is_never_fused_on_any_tier.fixture
+env: NO_COLOR=1
+step o0: jet run -O0 main.jet
+env: JET_STORE_DIR={work}/cache/o0
+exit: 0
+stdout: = float_multiply_add_is_never_fused_on_any_tier.1.out
+stderr: = ""
+step o1: jet run -O1 main.jet
+env: JET_STORE_DIR={work}/cache/o1
+exit: 0
+stdout: = float_multiply_add_is_never_fused_on_any_tier.1.out
+stderr: = ""
+step o2: jet run -O2 main.jet
+env: JET_STORE_DIR={work}/cache/o2
+exit: 0
+stdout: = float_multiply_add_is_never_fused_on_any_tier.1.out
+stderr: = ""
+step: jet build --target web main.jet
+env: JET_STORE_DIR={work}/cache/web
+exit: 0
+step web: node app.js
+cwd: .jet/build
+exit: 0
+stdout: = float_multiply_add_is_never_fused_on_any_tier.1.out
+stderr: = ""

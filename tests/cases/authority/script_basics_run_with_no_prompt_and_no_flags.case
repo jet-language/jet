@@ -1,21 +1,28 @@
-# Claim (#5949 c5): a script that only prints, reads args and stdin, reads the
-# clock and uses randomness runs with no prompt and no flags, from a terminal
-# and from a pipe.
+# Claim (#5949 c5): a script that only prints, reads args and
+# stdin, reads the clock and uses randomness runs with no prompt and no flags,
+# from a terminal and from a pipe. Printing, input and arguments are the floor;
+# the clock and randomness are named in the run's one-line notice on stderr.
 fixture: script_basics_run_with_no_prompt_and_no_flags.fixture
 requires: os:unix
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
 env: JETPACK_ROOT={work}/jetpack
+env: XDG_STATE_HOME={work}/state
 step piped: jet run basics.jet one two
 stdin: line.stdin
 exit: 0
 stdout: = "args: one two\nstdin: hello\nclock read: true\ndie in 1..6: true\n"
-stderr: = ""
+stderr: ~ "note: basics.jet " # one notice line names the program
+stderr: ~ "reads the clock" # time is named, not refused
+stderr: ~ "draws random numbers" # randomness is named, not refused
+stderr: ~ "(-A hides this)\n" # the notice is one line
+stderr: !~ "args" # the floor is never named
 step piped_release: jet run --release basics.jet one two
 stdin: line.stdin
 exit: 0
 stdout: = "args: one two\nstdin: hello\nclock read: true\ndie in 1..6: true\n"
-stderr: = ""
+stderr: ~ "reads the clock" # time is named, not refused
+stderr: ~ "draws random numbers" # randomness is named, not refused
 step terminal: jet run basics.jet one two
 pty: true
 stdin: line.stdin

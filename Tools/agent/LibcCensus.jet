@@ -6,12 +6,13 @@
 // names that do the same job.
 //
 // A row's `jet` names are checked, never trusted: `core.<module>.<member>` (or
-// a bare module) must be exported by Compiler/Prelude/Core.jet, and
-// `<Type>.<method>` must be a built-in method, static or collection operation
-// row. Every unresolved name is reported. With no argument the script checks
-// the rows, then prints the census as Markdown: the per-area summary, the gap
-// list by area and every family. --check (and this file's #Test) checks the
-// rows only.
+// a bare module) must be exported by Compiler/Prelude/Core.jet,
+// `core.<module>.<Type>.<method>` must name a type that module exports and a
+// method its source declares, and `<Type>.<method>` must be a built-in method,
+// static or collection operation row. Every unresolved name is reported. With
+// no argument the script checks the rows, then prints the census as Markdown:
+// the per-area summary, the gap list by area and every family. --check (and
+// this file's #Test) checks the rows only.
 //
 // Usage (from the repository root): jet Tools/agent/LibcCensus.jet [--check]
 use {
@@ -37,11 +38,13 @@ census_fail: fn(message: String) -> CensusError Never! {
 
 // Covered: the Jet names do the family's job. Partial: they do part of it; the
 // note says what is missing. Language: the language itself does the job, with
-// no library call. Gap: Jet has no counterpart.
+// no library call. NotNeeded: the owner ruled that Jet does not need the
+// family; the note cites the ruling. Gap: Jet has no counterpart.
 Coverage: enum {
     Covered
     Partial
     Language
+    NotNeeded
     Gap
 }
 
@@ -50,6 +53,7 @@ coverage_label: fn(coverage: Coverage) -> String Never! {
         .Covered -> "covered"
         .Partial -> "partial"
         .Language -> "language"
+        .NotNeeded -> "not needed"
         .Gap -> "GAP"
     }
 }
@@ -72,33 +76,40 @@ Family: struct {
 
 C23: "C23"
 POSIX: "POSIX"
+// Every not-needed note cites this ruling (#6696 c2): Jet's text is UTF-8 and
+// locale-independent, message catalogs are a library's concern, and the
+// obsolete or insecure interfaces stay out.
+OWNER_RULING: "owner ruling on #6696"
 
 FAMILIES: [Family]{
     // ---- Math ----
     {area: "Math", header: "math.h", standard: C23, names: "acos asin atan atan2 cos sin tan", variants: "f l", jet: "core.math.acos core.math.asin core.math.atan core.math.atan2 core.math.cos core.math.sin core.math.tan", coverage: .Covered, note: "musl 1.2.5's algorithms, bit for bit"},
-    {area: "Math", header: "math.h", standard: C23, names: "acosh asinh atanh cosh sinh tanh", variants: "f l", jet: "core.math.acosh core.math.asinh core.math.atanh core.math.cosh core.math.sinh core.math.tanh", coverage: .Covered, note: "musl 1.2.5's algorithms, bit for bit"},
+    {area: "Math", header: "math.h", standard: C23, names: "acosh asinh atanh cosh sinh tanh", variants: "f l", jet: "core.math.acosh core.math.asinh core.math.atanh core.math.cosh core.math.sinh core.math.tanh", coverage: .Covered, note: "musl 1.2.5's algorithms, bit for bit, except that acosh is NaN for every x below 1"},
     {area: "Math", header: "math.h", standard: C23, names: "exp exp2 expm1 log log10 log1p log2 logp1", variants: "f l", jet: "core.math.exp core.math.exp2 core.math.exp_m1 core.math.ln core.math.log10 core.math.ln_1p core.math.log2", coverage: .Covered, note: "logp1 is C23's name for log1p"},
     {area: "Math", header: "math.h", standard: C23, names: "pow sqrt cbrt hypot", variants: "f l", jet: "Float.pow core.math.sqrt core.math.cbrt core.math.hypot", coverage: .Covered, note: ""},
     {area: "Math", header: "math.h", standard: C23, names: "erf erfc lgamma tgamma", variants: "f l", jet: "core.math.erf core.math.erfc core.math.lgamma core.math.gamma", coverage: .Covered, note: "musl 1.2.5's algorithms, bit for bit"},
     {area: "Math", header: "math.h", standard: C23, names: "ceil floor trunc round lround llround", variants: "f l", jet: "core.math.ceil core.math.floor core.math.trunc core.math.round", coverage: .Covered, note: "lround and llround are round followed by an Int conversion"},
-    {area: "Math", header: "math.h", standard: C23, names: "rint nearbyint lrint llrint roundeven", variants: "f l", jet: "", coverage: .Gap, note: "no round-half-even; Jet has no dynamic rounding mode for rint to read"},
+    {area: "Math", header: "math.h", standard: C23, names: "rint nearbyint lrint llrint roundeven", variants: "f l", jet: "core.math.round_even", coverage: .Covered, note: "Jet fixes round-to-nearest-even, so rint and nearbyint are round_even; lrint and llrint are round_even followed by an Int conversion"},
     {area: "Math", header: "math.h", standard: C23, names: "frexp ldexp modf scalbn scalbln ilogb llogb logb", variants: "f l", jet: "core.math.frexp core.math.ldexp core.math.modf core.math.scaleb core.math.ilogb core.math.logb", coverage: .Covered, note: ""},
-    {area: "Math", header: "math.h", standard: C23, names: "fmod remainder remquo", variants: "f l", jet: "core.math.fmod core.math.remainder", coverage: .Partial, note: "no remquo (remainder with quotient bits)"},
-    {area: "Math", header: "math.h", standard: C23, names: "fmax fmin fdim", variants: "f l", jet: "core.math.max_float core.math.min_float", coverage: .Partial, note: "no fdim"},
+    {area: "Math", header: "math.h", standard: C23, names: "fmod remainder remquo", variants: "f l", jet: "core.math.fmod core.math.remainder core.math.rem_quo", coverage: .Covered, note: "musl 1.2.5's algorithms, bit for bit"},
+    {area: "Math", header: "math.h", standard: C23, names: "fmax fmin fdim", variants: "f l", jet: "core.math.max_float core.math.min_float core.math.fdim", coverage: .Covered, note: "musl 1.2.5's algorithms, bit for bit"},
     {area: "Math", header: "math.h", standard: C23, names: "fabs", variants: "f l", jet: "core.math.fabs", coverage: .Covered, note: ""},
     {area: "Math", header: "math.h", standard: C23, names: "fma", variants: "f l", jet: "core.math.fma", coverage: .Covered, note: ""},
-    {area: "Math", header: "math.h", standard: C23, names: "copysign nextafter nexttoward nextup nextdown nan", variants: "f l", jet: "core.math.copysign core.math.next_after core.math.next_up core.math.next_down core.math.NAN", coverage: .Partial, note: "nexttoward is nextafter (no wider format); no NaN payload argument for nan"},
+    {area: "Math", header: "math.h", standard: C23, names: "copysign nextafter nexttoward nextup nextdown nan", variants: "f l", jet: "core.math.copysign core.math.next_after core.math.next_up core.math.next_down core.math.NAN core.math.set_payload", coverage: .Covered, note: "nexttoward is next_after (Float is the widest format); nan with a tag is set_payload of the tag's number"},
     {area: "Math", header: "math.h", standard: C23, names: "fpclassify isfinite isinf isnan isnormal signbit issubnormal iszero iscanonical", variants: "", jet: "core.math.is_finite core.math.is_inf core.math.is_nan core.math.is_normal core.math.sign_bit core.math.is_subnormal core.math.is_zero core.math.is_canonical", coverage: .Covered, note: "fpclassify is the is_* predicates"},
-    {area: "Math", header: "math.h", standard: C23, names: "issignaling", variants: "", jet: "", coverage: .Gap, note: "no signaling-NaN test"},
+    {area: "Math", header: "math.h", standard: C23, names: "issignaling", variants: "", jet: "core.math.is_signaling", coverage: .Covered, note: ""},
     {area: "Math", header: "math.h", standard: C23, names: "isgreater isgreaterequal isless islessequal islessgreater isunordered iseqsig", variants: "", jet: "core.math.is_nan", coverage: .Language, note: "Float comparison operators are quiet; isunordered is is_nan of either operand"},
     {area: "Math", header: "math.h", standard: POSIX, names: "j0 j1 jn y0 y1 yn", variants: "", jet: "", coverage: .Gap, note: "no Bessel functions"},
-    {area: "Math", header: "math.h", standard: C23, names: "acospi asinpi atanpi atan2pi cospi sinpi tanpi", variants: "f l", jet: "", coverage: .Gap, note: "no half-revolution trigonometry"},
-    {area: "Math", header: "math.h", standard: C23, names: "exp10 exp10m1 exp2m1 log10p1 log2p1", variants: "f l", jet: "", coverage: .Gap, note: ""},
-    {area: "Math", header: "math.h", standard: C23, names: "compoundn pown powr rootn rsqrt", variants: "f l", jet: "", coverage: .Gap, note: ""},
-    {area: "Math", header: "math.h", standard: C23, names: "fromfp ufromfp fromfpx ufromfpx", variants: "f l", jet: "", coverage: .Gap, note: "no rounding to a bounded integer width"},
-    {area: "Math", header: "math.h", standard: C23, names: "fmaximum fminimum fmaximum_mag fminimum_mag fmaximum_num fminimum_num fmaximum_mag_num fminimum_mag_num", variants: "f l", jet: "", coverage: .Gap, note: "no IEEE 754-2019 maximum and minimum operations"},
+    {area: "Math", header: "math.h", standard: C23, names: "cospi sinpi tanpi", variants: "f l", jet: "core.math.cos_pi core.math.sin_pi core.math.tan_pi", coverage: .Covered, note: "correctly rounded"},
+    {area: "Math", header: "math.h", standard: C23, names: "acospi asinpi atanpi atan2pi", variants: "f l", jet: "", coverage: .Gap, note: "no inverse half-revolution trigonometry"},
+    {area: "Math", header: "math.h", standard: C23, names: "exp10", variants: "f l", jet: "core.math.exp10", coverage: .Covered, note: "musl 1.2.5's algorithm, bit for bit"},
+    {area: "Math", header: "math.h", standard: C23, names: "exp10m1 exp2m1 log10p1 log2p1", variants: "f l", jet: "", coverage: .Gap, note: ""},
+    {area: "Math", header: "math.h", standard: C23, names: "rsqrt", variants: "f l", jet: "core.math.rsqrt", coverage: .Covered, note: "correctly rounded"},
+    {area: "Math", header: "math.h", standard: C23, names: "compoundn pown powr rootn", variants: "f l", jet: "", coverage: .Gap, note: ""},
+    {area: "Math", header: "math.h", standard: C23, names: "fromfp ufromfp fromfpx ufromfpx", variants: "f l", jet: "core.math.round_to_signed core.math.round_to_unsigned core.math.Rounding", coverage: .Covered, note: "the x forms are the same calls: Jet has no inexact flag to raise"},
+    {area: "Math", header: "math.h", standard: C23, names: "fmaximum fminimum fmaximum_mag fminimum_mag fmaximum_num fminimum_num fmaximum_mag_num fminimum_mag_num", variants: "f l", jet: "core.math.maximum core.math.minimum core.math.maximum_mag core.math.minimum_mag core.math.maximum_num core.math.minimum_num core.math.maximum_mag_num core.math.minimum_mag_num", coverage: .Covered, note: ""},
     {area: "Math", header: "math.h", standard: C23, names: "fadd faddl daddl fsub fsubl dsubl fmul fmull dmull fdiv fdivl ddivl ffma ffmal dfmal fsqrt fsqrtl dsqrtl", variants: "", jet: "", coverage: .Gap, note: "no correctly rounded narrowing arithmetic"},
-    {area: "Math", header: "math.h", standard: C23, names: "canonicalize totalorder totalordermag getpayload setpayload setpayloadsig", variants: "f l", jet: "", coverage: .Gap, note: ""},
+    {area: "Math", header: "math.h", standard: C23, names: "canonicalize totalorder totalordermag getpayload setpayload setpayloadsig", variants: "f l", jet: "core.math.canonicalize core.math.total_order core.math.total_order_mag core.math.get_payload core.math.set_payload core.math.set_payload_signaling", coverage: .Covered, note: ""},
     {area: "Math", header: "math.h", standard: C23, names: "*fN *fNx", variants: "", jet: "F32 Float", coverage: .Partial, note: "optional Annex H interchange-format variants of every math.h function; F32 and Float are binary32 and binary64, with no binary16 or binary128"},
     {area: "Math", header: "math.h", standard: C23, names: "*dN quantizedN samequantumdN quantumdN llquantexpdN encodedecdN decodedecdN encodebindN decodebindN", variants: "", jet: "core.math.Decimal", coverage: .Partial, note: "optional decimal floating point; Decimal is exact arbitrary-precision decimal, not IEEE 754 decimal32/64/128"},
     // ---- Floating-point environment ----
@@ -120,32 +131,34 @@ FAMILIES: [Family]{
     {area: "Bit utilities", header: "arpa/inet.h", standard: POSIX, names: "htonl htons ntohl ntohs", variants: "", jet: "core.encoding.binary.pack_u32be core.encoding.binary.unpack_u32be core.encoding.binary.pack_u16be core.encoding.binary.unpack_u16be", coverage: .Covered, note: ""},
     // ---- Characters ----
     {area: "Characters", header: "ctype.h", standard: C23, names: "isalnum isalpha isdigit isspace isupper islower isprint iscntrl tolower toupper", variants: "", jet: "core.text.parse.is_alnum core.text.is_alphabetic core.text.parse.is_digit core.text.parse.is_space core.text.parse.is_upper core.text.parse.is_lower String.isprintable core.text.has_control core.text.lower core.text.upper", coverage: .Covered, note: "Unicode-aware and locale-independent"},
-    {area: "Characters", header: "ctype.h", standard: C23, names: "isblank isgraph ispunct isxdigit", variants: "", jet: "", coverage: .Gap, note: "no blank, graphic, punctuation or hex-digit class test"},
-    {area: "Characters", header: "ctype.h", standard: POSIX, names: "isalnum_l isalpha_l isblank_l iscntrl_l isdigit_l isgraph_l islower_l isprint_l ispunct_l isspace_l isupper_l isxdigit_l tolower_l toupper_l", variants: "", jet: "", coverage: .Gap, note: "Jet has no locale objects; its classification is locale-independent"},
+    {area: "Characters", header: "ctype.h", standard: C23, names: "isblank isgraph ispunct isxdigit", variants: "", jet: "core.text.parse.is_blank core.text.parse.is_graphic core.text.parse.is_punctuation core.text.parse.is_hex_digit", coverage: .Covered, note: "ASCII, as the C locale classifies"},
+    {area: "Characters", header: "ctype.h", standard: POSIX, names: "isalnum_l isalpha_l isblank_l iscntrl_l isdigit_l isgraph_l islower_l isprint_l ispunct_l isspace_l isupper_l isxdigit_l tolower_l toupper_l", variants: "", jet: "", coverage: .NotNeeded, note: "Jet's classification is locale-independent, so it takes no locale object (owner ruling on #6696)"},
     {area: "Characters", header: "wctype.h", standard: C23, names: "iswalnum iswalpha iswdigit iswspace iswupper iswlower iswprint iswcntrl towlower towupper", variants: "", jet: "core.text.parse.is_alnum core.text.is_alphabetic core.text.parse.is_digit core.text.parse.is_space core.text.parse.is_upper core.text.parse.is_lower String.isprintable core.text.has_control core.text.lower core.text.upper", coverage: .Covered, note: "Jet strings are Unicode, so the wide forms are the same calls"},
-    {area: "Characters", header: "wctype.h", standard: C23, names: "iswblank iswgraph iswpunct iswxdigit iswctype wctype towctrans wctrans", variants: "", jet: "", coverage: .Gap, note: "no class lookup by name and no blank, graphic, punctuation or hex-digit test"},
-    {area: "Characters", header: "wctype.h", standard: POSIX, names: "iswalnum_l iswalpha_l iswblank_l iswcntrl_l iswctype_l iswdigit_l iswgraph_l iswlower_l iswprint_l iswpunct_l iswspace_l iswupper_l iswxdigit_l towctrans_l towlower_l towupper_l wctrans_l wctype_l", variants: "", jet: "", coverage: .Gap, note: "Jet has no locale objects"},
+    {area: "Characters", header: "wctype.h", standard: C23, names: "iswblank iswgraph iswpunct iswxdigit", variants: "", jet: "core.text.is_blank core.text.is_graphic core.text.is_punctuation core.text.parse.is_hex_digit", coverage: .Covered, note: "Unicode General_Category; a hexadecimal digit is ASCII in C too"},
+    {area: "Characters", header: "wctype.h", standard: C23, names: "iswctype wctype towctrans wctrans", variants: "", jet: "core.text.is_alphabetic core.text.upper", coverage: .Language, note: "a class or mapping is a function value: pass a closure such as `w -> text.is_alphabetic(w)` where C passes a wctype_t or wctrans_t"},
+    {area: "Characters", header: "wctype.h", standard: POSIX, names: "iswalnum_l iswalpha_l iswblank_l iswcntrl_l iswctype_l iswdigit_l iswgraph_l iswlower_l iswprint_l iswpunct_l iswspace_l iswupper_l iswxdigit_l towctrans_l towlower_l towupper_l wctrans_l wctype_l", variants: "", jet: "", coverage: .NotNeeded, note: "Jet's classification is locale-independent, so it takes no locale object (owner ruling on #6696)"},
     // ---- Strings and memory blocks ----
-    {area: "Strings", header: "string.h", standard: C23, names: "memcpy memmove memcmp memchr memccpy memset", variants: "", jet: "Bytes.copy_to Bytes.compare Bytes.index_of", coverage: .Partial, note: "no fill of a byte range; memccpy is index_of then copy_to"},
+    {area: "Strings", header: "string.h", standard: C23, names: "memcpy memmove memcmp memchr memccpy", variants: "", jet: "Bytes.copy_to Bytes.compare Bytes.index_of", coverage: .Covered, note: "memccpy is index_of then copy_to"},
+    {area: "Strings", header: "string.h", standard: C23, names: "memset", variants: "", jet: "core.crypto.wipe", coverage: .Language, note: "a loop assigns a value over an index range of a list; core.crypto.wipe zeroes a whole [U8]"},
     {area: "Strings", header: "string.h", standard: POSIX, names: "memmem", variants: "", jet: "Bytes.index_of", coverage: .Covered, note: ""},
-    {area: "Strings", header: "string.h", standard: C23, names: "memset_explicit", variants: "", jet: "", coverage: .Gap, note: "no zeroing guaranteed to survive optimization"},
+    {area: "Strings", header: "string.h", standard: C23, names: "memset_explicit", variants: "", jet: "core.crypto.wipe", coverage: .Covered, note: "each byte is an effectful store that no optimization drops; spare capacity is zeroed too"},
     {area: "Strings", header: "string.h", standard: C23, names: "strcpy strncpy strcat strncat strdup strndup", variants: "", jet: "String.slice", coverage: .Language, note: "String values are owned and immutable: `+`, interpolation and slice replace copying into buffers"},
     {area: "Strings", header: "string.h", standard: POSIX, names: "stpcpy stpncpy strlcpy strlcat", variants: "", jet: "String.slice", coverage: .Language, note: "String values are owned; no destination buffers"},
     {area: "Strings", header: "string.h", standard: C23, names: "strcmp strncmp strcoll strxfrm", variants: "", jet: "String.compare core.text.collate core.text.collation_key", coverage: .Covered, note: "collation is Unicode collation, not locale collation"},
-    {area: "Strings", header: "string.h", standard: POSIX, names: "strcoll_l strxfrm_l", variants: "", jet: "core.text.collate core.text.collation_key", coverage: .Partial, note: "no locale argument"},
+    {area: "Strings", header: "string.h", standard: POSIX, names: "strcoll_l strxfrm_l", variants: "", jet: "core.text.collate core.text.collation_key", coverage: .Covered, note: "Unicode collation; a locale argument is not needed (owner ruling on #6696)"},
     {area: "Strings", header: "strings.h", standard: POSIX, names: "strcasecmp strncasecmp strcasecmp_l strncasecmp_l", variants: "", jet: "core.text.caseless_eq core.text.casefold", coverage: .Covered, note: "Unicode case folding"},
     {area: "Strings", header: "string.h", standard: C23, names: "strchr strrchr strstr strlen strtok", variants: "", jet: "String.find String.rfind String.contains String.len String.count_bytes String.split", coverage: .Covered, note: ""},
     {area: "Strings", header: "string.h", standard: POSIX, names: "strnlen strtok_r", variants: "", jet: "String.count_bytes String.split", coverage: .Covered, note: ""},
     {area: "Strings", header: "string.h", standard: C23, names: "strpbrk strspn strcspn", variants: "", jet: "core.regex.find", coverage: .Partial, note: "a character-class regex; no direct span call"},
     {area: "Strings", header: "string.h", standard: C23, names: "strerror", variants: "", jet: "", coverage: .Language, note: "errors are typed values that carry and print their message"},
     {area: "Strings", header: "string.h", standard: POSIX, names: "strerror_l strerror_r", variants: "", jet: "", coverage: .Language, note: "errors are typed values that carry and print their message"},
-    {area: "Strings", header: "unistd.h", standard: POSIX, names: "swab", variants: "", jet: "", coverage: .Gap, note: "no byte-pair swap"},
+    {area: "Strings", header: "unistd.h", standard: POSIX, names: "swab", variants: "", jet: "core.encoding.binary.byteswap", coverage: .Covered, note: "byteswap(data, 2); an odd length is an error"},
     {area: "Strings", header: "stdlib.h", standard: C23, names: "*_s", variants: "", jet: "", coverage: .Language, note: "optional Annex K bounds-checked interfaces; every Jet string and list access is bounds-checked"},
     // ---- Wide and multibyte text ----
-    {area: "Wide and multibyte text", header: "stdlib.h", standard: C23, names: "mblen mbtowc wctomb mbstowcs wcstombs", variants: "", jet: "String.chars String.bytes String.from_bytes", coverage: .Partial, note: "UTF-8 only; no locale multibyte encodings"},
-    {area: "Wide and multibyte text", header: "wchar.h", standard: C23, names: "btowc wctob mbrlen mbrtowc wcrtomb mbsinit mbsrtowcs wcsrtombs", variants: "", jet: "String.chars String.bytes String.from_bytes", coverage: .Partial, note: "UTF-8 only; no restartable conversion state"},
-    {area: "Wide and multibyte text", header: "wchar.h", standard: POSIX, names: "mbsnrtowcs wcsnrtombs", variants: "", jet: "String.chars String.bytes String.from_bytes", coverage: .Partial, note: "UTF-8 only"},
-    {area: "Wide and multibyte text", header: "uchar.h", standard: C23, names: "c16rtomb c32rtomb mbrtoc16 mbrtoc32 mbrtoc8 c8rtomb", variants: "", jet: "String.chars String.encode String.from_bytes", coverage: .Partial, note: "char32 is Char; UTF-16 through encode"},
+    {area: "Wide and multibyte text", header: "stdlib.h", standard: C23, names: "mblen mbtowc wctomb mbstowcs wcstombs", variants: "", jet: "String.chars String.bytes String.from_bytes", coverage: .Covered, note: "UTF-8; locale multibyte encodings are not needed (owner ruling on #6696)"},
+    {area: "Wide and multibyte text", header: "wchar.h", standard: C23, names: "btowc wctob mbrlen mbrtowc wcrtomb mbsinit mbsrtowcs wcsrtombs", variants: "", jet: "String.chars String.bytes String.from_bytes", coverage: .Covered, note: "UTF-8, converted whole; locale multibyte encodings and their restartable state are not needed (owner ruling on #6696)"},
+    {area: "Wide and multibyte text", header: "wchar.h", standard: POSIX, names: "mbsnrtowcs wcsnrtombs", variants: "", jet: "String.chars String.bytes String.from_bytes", coverage: .Covered, note: "UTF-8; locale multibyte encodings are not needed (owner ruling on #6696)"},
+    {area: "Wide and multibyte text", header: "uchar.h", standard: C23, names: "c16rtomb c32rtomb mbrtoc16 mbrtoc32 mbrtoc8 c8rtomb", variants: "", jet: "String.chars String.encode String.from_bytes", coverage: .Covered, note: "char32 is Char; UTF-16 through encode; locale multibyte encodings are not needed (owner ruling on #6696)"},
     {area: "Wide and multibyte text", header: "wchar.h", standard: C23, names: "wcscpy wcsncpy wcscat wcsncat wcscmp wcsncmp wcscoll wcsxfrm wcschr wcsrchr wcsstr wcspbrk wcsspn wcscspn wcstok wcslen wmemcpy wmemmove wmemcmp wmemchr wmemset", variants: "", jet: "String.find String.compare core.text.collate", coverage: .Language, note: "Jet strings are Unicode; the wide functions are the String API"},
     {area: "Wide and multibyte text", header: "wchar.h", standard: POSIX, names: "wcpcpy wcpncpy wcsdup wcsnlen wcslcpy wcslcat wcscasecmp wcsncasecmp wcscasecmp_l wcsncasecmp_l wcscoll_l wcsxfrm_l", variants: "", jet: "String.slice core.text.caseless_eq core.text.collate", coverage: .Language, note: "Jet strings are Unicode; no locale argument"},
     {area: "Wide and multibyte text", header: "wchar.h", standard: C23, names: "fgetwc fgetws fputwc fputws fwide getwc getwchar putwc putwchar ungetwc fwprintf fwscanf swprintf swscanf vfwprintf vfwscanf vswprintf vswscanf vwprintf vwscanf wprintf wscanf", variants: "", jet: "core.term.print core.term.readline", coverage: .Language, note: "streams carry UTF-8 Strings; there is no wide orientation"},
@@ -154,41 +167,41 @@ FAMILIES: [Family]{
     {area: "Wide and multibyte text", header: "wchar.h", standard: C23, names: "wcsftime", variants: "", jet: "core.time.strftime", coverage: .Covered, note: ""},
     {area: "Wide and multibyte text", header: "wchar.h", standard: C23, names: "wcstod wcstof wcstold wcstol wcstoll wcstoul wcstoull", variants: "", jet: "core.text.parse.parse_float core.text.parse.parse_int core.text.parse.parse_int_base", coverage: .Covered, note: ""},
     {area: "Wide and multibyte text", header: "inttypes.h", standard: C23, names: "wcstoimax wcstoumax", variants: "", jet: "core.text.parse.parse_int", coverage: .Covered, note: ""},
-    {area: "Wide and multibyte text", header: "iconv.h", standard: POSIX, names: "iconv iconv_open iconv_close", variants: "", jet: "String.encode String.from_bytes", coverage: .Partial, note: "Unicode encodings only; no legacy character sets"},
+    {area: "Wide and multibyte text", header: "iconv.h", standard: POSIX, names: "iconv iconv_open iconv_close", variants: "", jet: "String.encode String.from_bytes", coverage: .Covered, note: "Unicode encodings; legacy character sets are not needed (owner ruling on #6696)"},
     // ---- Number conversion ----
     {area: "Number conversion", header: "stdlib.h", standard: C23, names: "atof atoi atol atoll strtod strtof strtold strtol strtoll strtoul strtoull", variants: "", jet: "core.text.parse.parse_float core.text.parse.parse_int core.text.parse.parse_int_base Int.parse Float.parse", coverage: .Covered, note: ""},
     {area: "Number conversion", header: "inttypes.h", standard: C23, names: "strtoimax strtoumax", variants: "", jet: "core.text.parse.parse_int core.text.parse.parse_int_base", coverage: .Covered, note: ""},
     {area: "Number conversion", header: "stdlib.h", standard: C23, names: "strfromd strfromf strfroml", variants: "", jet: "Scalar.to_string core.text.fmt.number core.text.fmt.sci", coverage: .Covered, note: ""},
-    {area: "Number conversion", header: "stdlib.h", standard: POSIX, names: "a64l l64a", variants: "", jet: "", coverage: .Gap, note: "no radix-64 long encoding (core.encoding.base64 is RFC 4648)"},
+    {area: "Number conversion", header: "stdlib.h", standard: POSIX, names: "a64l l64a", variants: "", jet: "core.encoding.base64.a64l core.encoding.base64.l64a", coverage: .Covered, note: "values outside 32 bits and invalid characters are errors"},
     // ---- Formatted output and input ----
     {area: "Formatted I/O", header: "stdio.h", standard: C23, names: "printf fprintf sprintf snprintf vprintf vfprintf vsprintf vsnprintf", variants: "", jet: "core.term.print core.term.eprint core.text.fmt.number core.text.fmt.pad", coverage: .Covered, note: "string interpolation plus core.text.fmt"},
     {area: "Formatted I/O", header: "stdio.h", standard: POSIX, names: "dprintf vdprintf asprintf vasprintf", variants: "", jet: "core.term.print core.text.fmt.number", coverage: .Covered, note: "string interpolation plus core.text.fmt"},
     {area: "Formatted I/O", header: "stdio.h", standard: C23, names: "scanf fscanf sscanf vscanf vfscanf vsscanf", variants: "", jet: "core.text.parse.parse core.regex.match", coverage: .Covered, note: ""},
-    {area: "Formatted I/O", header: "monetary.h", standard: POSIX, names: "strfmon strfmon_l", variants: "", jet: "core.text.fmt.grouped", coverage: .Partial, note: "digit grouping only; no locale currency format"},
+    {area: "Formatted I/O", header: "monetary.h", standard: POSIX, names: "strfmon strfmon_l", variants: "", jet: "core.text.fmt.grouped", coverage: .Covered, note: "digit grouping; a locale currency format is not needed (owner ruling on #6696)"},
     // ---- Streams ----
     {area: "Streams", header: "stdio.h", standard: C23, names: "fopen fclose freopen fflush fread fwrite", variants: "", jet: "core.files.open core.files.read core.files.write", coverage: .Covered, note: "handles close when dropped"},
     {area: "Streams", header: "stdio.h", standard: POSIX, names: "fdopen fileno", variants: "", jet: "", coverage: .Gap, note: "no file-descriptor handles"},
     {area: "Streams", header: "stdio.h", standard: POSIX, names: "fmemopen open_memstream", variants: "", jet: "Bytes.read Bytes.write Bytes.seek", coverage: .Covered, note: "a Bytes buffer is the memory stream"},
     {area: "Streams", header: "stdio.h", standard: C23, names: "fgetc fgets fputc fputs getc getchar putc putchar puts", variants: "", jet: "core.term.readline core.term.read_key core.term.print core.files.read_lines", coverage: .Covered, note: ""},
     {area: "Streams", header: "stdio.h", standard: POSIX, names: "getline getdelim", variants: "", jet: "core.term.readline core.term.read_until core.files.read_lines", coverage: .Covered, note: ""},
-    {area: "Streams", header: "stdio.h", standard: C23, names: "ungetc", variants: "", jet: "", coverage: .Gap, note: "no push-back on a stream"},
+    {area: "Streams", header: "stdio.h", standard: C23, names: "ungetc", variants: "", jet: "Bytes.seek", coverage: .Language, note: "a parser keeps the byte it looked at as a value; Bytes.seek steps a memory stream back"},
     {area: "Streams", header: "stdio.h", standard: C23, names: "fseek ftell rewind fgetpos fsetpos", variants: "", jet: "core.files.read_at core.files.write_at Bytes.seek Bytes.rewind Bytes.position", coverage: .Partial, note: "positioned file reads and writes; no seek on a file handle"},
     {area: "Streams", header: "stdio.h", standard: POSIX, names: "fseeko ftello", variants: "", jet: "core.files.read_at core.files.write_at", coverage: .Partial, note: "positioned file reads and writes; no seek on a file handle"},
     {area: "Streams", header: "stdio.h", standard: C23, names: "clearerr feof ferror", variants: "", jet: "Bytes.eof", coverage: .Language, note: "I/O failures are typed errors returned by each call"},
-    {area: "Streams", header: "stdio.h", standard: C23, names: "setbuf setvbuf", variants: "", jet: "", coverage: .Gap, note: "no stream buffering mode"},
+    {area: "Streams", header: "stdio.h", standard: C23, names: "setbuf setvbuf", variants: "", jet: "", coverage: .NotNeeded, note: "no stream buffering mode (owner ruling on #6696)"},
     {area: "Streams", header: "stdio.h", standard: POSIX, names: "flockfile ftrylockfile funlockfile getc_unlocked getchar_unlocked putc_unlocked putchar_unlocked", variants: "", jet: "", coverage: .Language, note: "a handle has one owner, so there is no stream lock to take"},
     {area: "Streams", header: "stdio.h", standard: C23, names: "perror", variants: "", jet: "core.term.eprint", coverage: .Language, note: "errors print their own message"},
     {area: "Streams", header: "stdio.h", standard: C23, names: "remove rename tmpfile tmpnam", variants: "", jet: "core.files.remove core.files.rename core.files.temp_file", coverage: .Covered, note: ""},
-    {area: "Streams", header: "stdio.h", standard: POSIX, names: "renameat", variants: "", jet: "core.files.rename", coverage: .Partial, note: "no directory-relative form"},
-    {area: "Streams", header: "stdio.h", standard: POSIX, names: "ctermid", variants: "", jet: "", coverage: .Gap, note: ""},
+    {area: "Streams", header: "stdio.h", standard: POSIX, names: "renameat", variants: "", jet: "core.files.Directory.rename", coverage: .Covered, note: "relative to held directories"},
+    {area: "Streams", header: "stdio.h", standard: POSIX, names: "ctermid", variants: "", jet: "", coverage: .NotNeeded, note: "obsolete: it names /dev/tty (owner ruling on #6696)"},
     // ---- Files and directories ----
     {area: "Files and directories", header: "fcntl.h", standard: POSIX, names: "open creat", variants: "", jet: "core.files.open core.files.create", coverage: .Covered, note: ""},
-    {area: "Files and directories", header: "fcntl.h", standard: POSIX, names: "openat", variants: "", jet: "core.files.open_directory", coverage: .Partial, note: "directory handles; no general directory-relative open"},
+    {area: "Files and directories", header: "fcntl.h", standard: POSIX, names: "openat", variants: "", jet: "core.files.Directory.open core.files.Directory.create core.files.Directory.open_directory core.files.Directory.create_directory", coverage: .Covered, note: "relative to a held directory"},
     {area: "Files and directories", header: "fcntl.h", standard: POSIX, names: "fcntl", variants: "", jet: "core.files.lock core.files.try_lock", coverage: .Partial, note: "advisory locks only; no descriptor flags"},
     {area: "Files and directories", header: "unistd.h", standard: POSIX, names: "lockf", variants: "", jet: "core.files.lock core.files.try_lock", coverage: .Covered, note: ""},
     {area: "Files and directories", header: "fcntl.h", standard: POSIX, names: "posix_fadvise posix_fallocate", variants: "", jet: "", coverage: .Gap, note: ""},
     {area: "Files and directories", header: "unistd.h", standard: POSIX, names: "read write pread pwrite lseek", variants: "", jet: "core.files.read core.files.write core.files.read_at core.files.write_at", coverage: .Covered, note: ""},
-    {area: "Files and directories", header: "sys/uio.h", standard: POSIX, names: "readv writev", variants: "", jet: "", coverage: .Gap, note: "no vectored I/O"},
+    {area: "Files and directories", header: "sys/uio.h", standard: POSIX, names: "readv writev", variants: "", jet: "", coverage: .Language, note: "a FileWriter buffers, so writing each slice in turn shares its system calls"},
     {area: "Files and directories", header: "sys/stat.h", standard: POSIX, names: "stat fstat lstat fstatat", variants: "", jet: "core.files.stat core.files.lstat", coverage: .Covered, note: ""},
     {area: "Files and directories", header: "sys/stat.h", standard: POSIX, names: "chmod fchmod fchmodat umask", variants: "", jet: "core.files.chmod core.files.set_mode core.sys.umask", coverage: .Covered, note: ""},
     {area: "Files and directories", header: "unistd.h", standard: POSIX, names: "chown fchown lchown fchownat", variants: "", jet: "core.files.chown", coverage: .Covered, note: ""},
@@ -211,8 +224,8 @@ FAMILIES: [Family]{
     {area: "Files and directories", header: "glob.h", standard: POSIX, names: "glob globfree", variants: "", jet: "core.files.glob", coverage: .Covered, note: ""},
     {area: "Files and directories", header: "fnmatch.h", standard: POSIX, names: "fnmatch", variants: "", jet: "core.files.fnmatch", coverage: .Covered, note: ""},
     {area: "Files and directories", header: "wordexp.h", standard: POSIX, names: "wordexp wordfree", variants: "", jet: "core.files.expanduser core.files.expandvars", coverage: .Partial, note: "tilde and variable expansion; no command substitution or field splitting"},
-    {area: "Files and directories", header: "sys/statvfs.h", standard: POSIX, names: "statvfs fstatvfs", variants: "", jet: "", coverage: .Gap, note: "no file-system capacity query"},
-    {area: "Files and directories", header: "unistd.h", standard: POSIX, names: "pathconf fpathconf", variants: "", jet: "", coverage: .Gap, note: ""},
+    {area: "Files and directories", header: "sys/statvfs.h", standard: POSIX, names: "statvfs fstatvfs", variants: "", jet: "core.files.space core.files.DiskSpace.used core.files.DiskSpace.used_percent", coverage: .Covered, note: "for an open file, space(file.path)"},
+    {area: "Files and directories", header: "unistd.h", standard: POSIX, names: "pathconf fpathconf", variants: "", jet: "", coverage: .Language, note: "a name past the file system's limits fails its own call with a typed IOError"},
     // ---- File descriptors ----
     {area: "File descriptors", header: "unistd.h", standard: POSIX, names: "close posix_close", variants: "", jet: "core.sys.close_fd", coverage: .Covered, note: "handles close when dropped"},
     {area: "File descriptors", header: "unistd.h", standard: POSIX, names: "dup dup2 dup3", variants: "", jet: "", coverage: .Gap, note: "no descriptor duplication (child stdio redirection is ProcessSpec's)"},
@@ -220,14 +233,14 @@ FAMILIES: [Family]{
     {area: "File descriptors", header: "unistd.h", standard: POSIX, names: "isatty ttyname ttyname_r", variants: "", jet: "", coverage: .Gap, note: "terminal detection is internal to core.term"},
     {area: "File descriptors", header: "poll.h", standard: POSIX, names: "poll ppoll", variants: "", jet: "core.net.ready_readable core.net.ready_writable core.net.tcp_ready", coverage: .Partial, note: "readiness of sockets; no general descriptor set"},
     {area: "File descriptors", header: "sys/select.h", standard: POSIX, names: "select pselect FD_CLR FD_ISSET FD_SET FD_ZERO", variants: "", jet: "core.net.ready_readable core.net.ready_writable", coverage: .Partial, note: "readiness of sockets; no general descriptor set"},
-    {area: "File descriptors", header: "aio.h", standard: POSIX, names: "aio_read aio_write aio_error aio_return aio_cancel aio_suspend aio_fsync lio_listio", variants: "", jet: "", coverage: .Gap, note: "no POSIX asynchronous I/O; Jet tasks run blocking I/O concurrently"},
-    {area: "File descriptors", header: "devctl.h", standard: POSIX, names: "posix_devctl", variants: "", jet: "", coverage: .Gap, note: "no device control"},
+    {area: "File descriptors", header: "aio.h", standard: POSIX, names: "aio_read aio_write aio_error aio_return aio_cancel aio_suspend aio_fsync lio_listio", variants: "", jet: "", coverage: .NotNeeded, note: "Jet tasks run blocking I/O concurrently (owner ruling on #6696)"},
+    {area: "File descriptors", header: "devctl.h", standard: POSIX, names: "posix_devctl", variants: "", jet: "", coverage: .NotNeeded, note: "no device control (owner ruling on #6696)"},
     // ---- Memory ----
     {area: "Memory", header: "stdlib.h", standard: C23, names: "malloc calloc realloc free aligned_alloc free_sized free_aligned_sized memalignment", variants: "", jet: "core.mem.Arena core.mem.Pool", coverage: .Language, note: "values are owned and freed by the language; arenas and pools for explicit lifetimes"},
     {area: "Memory", header: "stdlib.h", standard: POSIX, names: "reallocarray posix_memalign", variants: "", jet: "core.mem.Arena", coverage: .Language, note: "values are owned and freed by the language"},
     {area: "Memory", header: "sys/mman.h", standard: POSIX, names: "mmap munmap msync mprotect posix_madvise", variants: "", jet: "core.files.map core.files.MappedFile", coverage: .Partial, note: "file mappings; no protection changes or advice"},
     {area: "Memory", header: "sys/mman.h", standard: POSIX, names: "mlock munlock mlockall munlockall", variants: "", jet: "", coverage: .Gap, note: "no page locking"},
-    {area: "Memory", header: "sys/mman.h", standard: POSIX, names: "posix_mem_offset posix_typed_mem_get_info posix_typed_mem_open", variants: "", jet: "", coverage: .Gap, note: "no typed memory objects"},
+    {area: "Memory", header: "sys/mman.h", standard: POSIX, names: "posix_mem_offset posix_typed_mem_get_info posix_typed_mem_open", variants: "", jet: "", coverage: .NotNeeded, note: "no typed memory objects (owner ruling on #6696)"},
     // ---- Processes ----
     {area: "Processes", header: "unistd.h", standard: POSIX, names: "fork _Fork", variants: "", jet: "core.sys.fork", coverage: .Covered, note: ""},
     {area: "Processes", header: "unistd.h", standard: POSIX, names: "execl execle execlp execv execve execvp fexecve", variants: "", jet: "core.process.cmd core.process.run_spec", coverage: .Partial, note: "spawns a child; no in-place image replacement"},
@@ -315,9 +328,9 @@ FAMILIES: [Family]{
     {area: "Users and groups", header: "grp.h", standard: POSIX, names: "getgrnam getgrnam_r getgrgid getgrgid_r getgrent setgrent endgrent", variants: "", jet: "", coverage: .Gap, note: "no group database"},
     {area: "Users and groups", header: "pwd.h", standard: POSIX, names: "getpwnam getpwnam_r getpwuid getpwuid_r getpwent setpwent endpwent", variants: "", jet: "core.sys.username core.sys.home_dir", coverage: .Partial, note: "the current user's name and home; no user database"},
     {area: "Users and groups", header: "unistd.h", standard: POSIX, names: "getlogin getlogin_r", variants: "", jet: "core.sys.username", coverage: .Covered, note: ""},
-    {area: "Users and groups", header: "utmpx.h", standard: POSIX, names: "getutxent getutxid getutxline pututxline setutxent endutxent", variants: "", jet: "", coverage: .Gap, note: "no login records"},
-    {area: "Users and groups", header: "unistd.h", standard: POSIX, names: "crypt encrypt", variants: "", jet: "", coverage: .Gap, note: "no crypt(3) password hashing or DES block encryption"},
-    {area: "Users and groups", header: "stdlib.h", standard: POSIX, names: "setkey", variants: "", jet: "", coverage: .Gap, note: "no DES block encryption"},
+    {area: "Users and groups", header: "utmpx.h", standard: POSIX, names: "getutxent getutxid getutxline pututxline setutxent endutxent", variants: "", jet: "", coverage: .NotNeeded, note: "no login records (owner ruling on #6696)"},
+    {area: "Users and groups", header: "unistd.h", standard: POSIX, names: "crypt encrypt", variants: "", jet: "", coverage: .NotNeeded, note: "insecure: crypt(3) password hashing and DES block encryption (owner ruling on #6696)"},
+    {area: "Users and groups", header: "stdlib.h", standard: POSIX, names: "setkey", variants: "", jet: "", coverage: .NotNeeded, note: "insecure: DES block encryption (owner ruling on #6696)"},
     // ---- Networking ----
     {area: "Networking", header: "sys/socket.h", standard: POSIX, names: "socket bind listen accept accept4 connect shutdown", variants: "", jet: "core.net.tcp_listen core.net.tcp_accept core.net.tcp_connect core.net.udp_bind core.net.unix_listen core.net.unix_connect core.net.tcp_shutdown", coverage: .Covered, note: "TCP, UDP and Unix-domain sockets"},
     {area: "Networking", header: "sys/socket.h", standard: POSIX, names: "send recv sendto recvfrom", variants: "", jet: "core.net.tcp_write core.net.tcp_read core.net.udp_send_to core.net.udp_recv_from", coverage: .Covered, note: ""},
@@ -327,27 +340,27 @@ FAMILIES: [Family]{
     {area: "Networking", header: "sys/socket.h", standard: POSIX, names: "socketpair sockatmark", variants: "", jet: "", coverage: .Gap, note: ""},
     {area: "Networking", header: "netdb.h", standard: POSIX, names: "getaddrinfo freeaddrinfo gai_strerror getnameinfo", variants: "", jet: "core.net.socket_addrs core.net.dns_a core.net.dns_aaaa core.net.dns_ptr", coverage: .Covered, note: ""},
     {area: "Networking", header: "netdb.h", standard: POSIX, names: "getservbyname getservbyport", variants: "", jet: "core.net.getservbyname core.net.getservbyport", coverage: .Covered, note: ""},
-    {area: "Networking", header: "netdb.h", standard: POSIX, names: "gethostent sethostent endhostent getnetbyaddr getnetbyname getnetent setnetent endnetent getprotobyname getprotobynumber getprotoent setprotoent endprotoent getservent setservent endservent", variants: "", jet: "", coverage: .Gap, note: "no host, network, protocol or service database iteration"},
+    {area: "Networking", header: "netdb.h", standard: POSIX, names: "gethostent sethostent endhostent getnetbyaddr getnetbyname getnetent setnetent endnetent getprotobyname getprotobynumber getprotoent setprotoent endprotoent getservent setservent endservent", variants: "", jet: "", coverage: .NotNeeded, note: "no host, network, protocol or service database iteration (owner ruling on #6696)"},
     {area: "Networking", header: "arpa/inet.h", standard: POSIX, names: "inet_addr inet_ntoa inet_pton inet_ntop", variants: "", jet: "core.net.ip.parse_ipv4 core.net.ip.parse_ipv6 core.net.ip.ipv4_to_string core.net.ip.ipv6_to_string", coverage: .Covered, note: ""},
     {area: "Networking", header: "net/if.h", standard: POSIX, names: "if_nameindex if_freenameindex if_nametoindex if_indextoname", variants: "", jet: "", coverage: .Gap, note: "no network interface listing"},
     // ---- Interprocess communication ----
     {area: "Interprocess communication", header: "mqueue.h", standard: POSIX, names: "mq_open mq_close mq_unlink mq_send mq_timedsend mq_receive mq_timedreceive mq_getattr mq_setattr mq_notify", variants: "", jet: "", coverage: .Gap, note: "no POSIX message queues"},
     {area: "Interprocess communication", header: "sys/mman.h", standard: POSIX, names: "shm_open shm_unlink", variants: "", jet: "", coverage: .Gap, note: "no shared memory objects"},
-    {area: "Interprocess communication", header: "sys/msg.h", standard: POSIX, names: "msgget msgsnd msgrcv msgctl", variants: "", jet: "", coverage: .Gap, note: "no System V IPC"},
-    {area: "Interprocess communication", header: "sys/sem.h", standard: POSIX, names: "semget semop semctl", variants: "", jet: "", coverage: .Gap, note: "no System V IPC"},
-    {area: "Interprocess communication", header: "sys/shm.h", standard: POSIX, names: "shmget shmat shmdt shmctl", variants: "", jet: "", coverage: .Gap, note: "no System V IPC"},
-    {area: "Interprocess communication", header: "sys/ipc.h", standard: POSIX, names: "ftok", variants: "", jet: "", coverage: .Gap, note: "no System V IPC"},
+    {area: "Interprocess communication", header: "sys/msg.h", standard: POSIX, names: "msgget msgsnd msgrcv msgctl", variants: "", jet: "", coverage: .NotNeeded, note: "no System V IPC (owner ruling on #6696)"},
+    {area: "Interprocess communication", header: "sys/sem.h", standard: POSIX, names: "semget semop semctl", variants: "", jet: "", coverage: .NotNeeded, note: "no System V IPC (owner ruling on #6696)"},
+    {area: "Interprocess communication", header: "sys/shm.h", standard: POSIX, names: "shmget shmat shmdt shmctl", variants: "", jet: "", coverage: .NotNeeded, note: "no System V IPC (owner ruling on #6696)"},
+    {area: "Interprocess communication", header: "sys/ipc.h", standard: POSIX, names: "ftok", variants: "", jet: "", coverage: .NotNeeded, note: "no System V IPC (owner ruling on #6696)"},
     // ---- Terminals ----
     {area: "Terminals", header: "termios.h", standard: POSIX, names: "tcgetattr tcsetattr cfgetispeed cfgetospeed cfsetispeed cfsetospeed tcdrain tcflow tcflush tcsendbreak tcgetsid", variants: "", jet: "core.term.read_key core.term.input_secret", coverage: .Partial, note: "raw key and no-echo reads; no terminal attribute control"},
     {area: "Terminals", header: "termios.h", standard: POSIX, names: "tcgetwinsize tcsetwinsize", variants: "", jet: "core.term.terminal_width core.term.terminal_height", coverage: .Partial, note: "the size can be read, not set"},
     {area: "Terminals", header: "unistd.h", standard: POSIX, names: "tcgetpgrp tcsetpgrp", variants: "", jet: "", coverage: .Gap, note: "no job control"},
     {area: "Terminals", header: "stdlib.h", standard: POSIX, names: "posix_openpt grantpt unlockpt ptsname ptsname_r", variants: "", jet: "", coverage: .Gap, note: "no pseudoterminals"},
     // ---- Locale and messages ----
-    {area: "Locale and messages", header: "locale.h", standard: C23, names: "setlocale localeconv", variants: "", jet: "", coverage: .Gap, note: "Jet is locale-independent by design"},
-    {area: "Locale and messages", header: "locale.h", standard: POSIX, names: "newlocale duplocale freelocale uselocale getlocalename_l", variants: "", jet: "", coverage: .Gap, note: "Jet is locale-independent by design"},
-    {area: "Locale and messages", header: "langinfo.h", standard: POSIX, names: "nl_langinfo nl_langinfo_l", variants: "", jet: "", coverage: .Gap, note: "Jet is locale-independent by design"},
-    {area: "Locale and messages", header: "libintl.h", standard: POSIX, names: "gettext gettext_l dgettext dgettext_l dcgettext dcgettext_l ngettext ngettext_l dngettext dngettext_l dcngettext dcngettext_l textdomain bindtextdomain bind_textdomain_codeset", variants: "", jet: "", coverage: .Gap, note: "no message catalogs"},
-    {area: "Locale and messages", header: "nl_types.h", standard: POSIX, names: "catopen catgets catclose", variants: "", jet: "", coverage: .Gap, note: "no message catalogs"},
+    {area: "Locale and messages", header: "locale.h", standard: C23, names: "setlocale localeconv", variants: "", jet: "", coverage: .NotNeeded, note: "Jet is locale-independent by design (owner ruling on #6696)"},
+    {area: "Locale and messages", header: "locale.h", standard: POSIX, names: "newlocale duplocale freelocale uselocale getlocalename_l", variants: "", jet: "", coverage: .NotNeeded, note: "Jet is locale-independent by design (owner ruling on #6696)"},
+    {area: "Locale and messages", header: "langinfo.h", standard: POSIX, names: "nl_langinfo nl_langinfo_l", variants: "", jet: "", coverage: .NotNeeded, note: "Jet is locale-independent by design (owner ruling on #6696)"},
+    {area: "Locale and messages", header: "libintl.h", standard: POSIX, names: "gettext gettext_l dgettext dgettext_l dcgettext dcgettext_l ngettext ngettext_l dngettext dngettext_l dcngettext dcngettext_l textdomain bindtextdomain bind_textdomain_codeset", variants: "", jet: "", coverage: .NotNeeded, note: "message catalogs are a library's concern, not Core's (owner ruling on #6696)"},
+    {area: "Locale and messages", header: "nl_types.h", standard: POSIX, names: "catopen catgets catclose", variants: "", jet: "", coverage: .NotNeeded, note: "message catalogs are a library's concern, not Core's (owner ruling on #6696)"},
     {area: "Locale and messages", header: "fmtmsg.h", standard: POSIX, names: "fmtmsg", variants: "", jet: "", coverage: .Gap, note: ""},
     // ---- Logging ----
     {area: "Logging", header: "syslog.h", standard: POSIX, names: "openlog syslog closelog setlogmask", variants: "", jet: "core.log.info core.log.set_level core.log.set_sink", coverage: .Partial, note: "levelled logging to a sink; no syslog transport"},
@@ -406,6 +419,43 @@ core_exports: fn() -[FS]> [String: [String]] CensusError! {
     Ok(out)
 }
 
+// Core.jet's source file of each source module, keyed by module.
+core_sources: fn() -[FS]> [String: String] CensusError! {
+    text: files.read(CORE_PRELUDE_PATH) ?? return Err(census_fail("cannot read {CORE_PRELUDE_PATH}: {err}"))
+    out := [String: String]{}
+    loop line in text.split("\n") {
+        if !line.starts_with("source_module ") -> next
+        at: line.find(" path ")
+        if at < 0 -> next
+        rest: line.slice(at + 6, line.len())
+        end: rest.find(" ")
+        if end < 0 -> next
+        out[line.slice(14, at)] = rest.slice(0, end)
+    }
+    Ok(out)
+}
+
+// Whether `source` declares method `method` of `type_name`: a `method: fn`
+// line (after any markers) inside the type's `Type: struct {` body or one of
+// its `impl Type` blocks.
+declares_method: fn(source: String, type_name: String, method: String) -> Bool Never! {
+    inside := false
+    loop line in source.split("\n") {
+        if line == "}}" {
+            inside = false
+            next
+        }
+        if !line.starts_with(" ") && line != "" {
+            inside = line.starts_with("{type_name}: struct {{") || line.starts_with("impl {type_name} {{") || line.starts_with("impl {type_name}.")
+            next
+        }
+        if !inside -> next
+        item: line.trim()
+        if item.starts_with("{method}: fn") || item.contains(") {method}: fn") -> return true
+    }
+    false
+}
+
 // The receiver families of the built-in tables that a `<Type>.<method>` claim
 // may name.
 METHOD_RECEIVERS: [String: [String]]{
@@ -429,17 +479,18 @@ builtin_resolves: fn(owner: String, method: String, methods: String, statics: St
 }
 
 // Every claimed Jet name that does not resolve.
-unresolved: fn(exports: [String: [String]]) -[FS]> [String] CensusError! {
+unresolved: fn(exports: [String: [String]], sources: [String: String]) -[FS]> [String] CensusError! {
     methods: files.read(BUILTIN_METHODS_PATH) ?? return Err(census_fail("cannot read {BUILTIN_METHODS_PATH}: {err}"))
     statics: files.read(BUILTIN_STATICS_PATH) ?? return Err(census_fail("cannot read {BUILTIN_STATICS_PATH}: {err}"))
     collections: files.read(COLLECTIONS_PATH) ?? return Err(census_fail("cannot read {COLLECTIONS_PATH}: {err}"))
     problems := [String]{}
     loop family in FAMILIES {
+        if family.coverage == .NotNeeded && !family.note.contains(OWNER_RULING) -> problems.push("{family.names}: a not-needed family's note does not cite the {OWNER_RULING}")
         if family.jet == "" {
             if family.coverage == .Covered || family.coverage == .Partial -> problems.push("{family.names}: a {coverage_label(family.coverage)} family names no Jet API")
             next
         }
-        if family.coverage == .Gap -> problems.push("{family.names}: a GAP family names Jet API {family.jet}")
+        if family.coverage == .Gap || family.coverage == .NotNeeded -> problems.push("{family.names}: a {coverage_label(family.coverage)} family names Jet API {family.jet}")
         loop claim in family.jet.split(" ") {
             if claim == "F32" || claim == "Float" -> next
             if claim.starts_with("core.") {
@@ -447,8 +498,25 @@ unresolved: fn(exports: [String: [String]]) -[FS]> [String] CensusError! {
                 dot: claim.rfind(".")
                 owner: claim.slice(0, dot)
                 member: claim.slice(dot + 1, claim.len())
-                members: exports.get(owner) ?? [String]{}
-                if !members.contains(member) -> problems.push("{family.names}: {claim} is not exported by {CORE_PRELUDE_PATH}")
+                if exports.has_key(owner) {
+                    members: exports.get(owner) ?? [String]{}
+                    if !members.contains(member) -> problems.push("{family.names}: {claim} is not exported by {CORE_PRELUDE_PATH}")
+                    next
+                }
+                type_dot: owner.rfind(".")
+                home: owner.slice(0, type_dot)
+                type_name: owner.slice(type_dot + 1, owner.len())
+                if !(exports.get(home) ?? [String]{}).contains(type_name) {
+                    problems.push("{family.names}: {claim}: {owner} is neither a module nor a type exported by {CORE_PRELUDE_PATH}")
+                    next
+                }
+                path: sources.get(home) ?? ""
+                if path == "" {
+                    problems.push("{family.names}: {claim}: {CORE_PRELUDE_PATH} names no source file for {home}")
+                    next
+                }
+                source: files.read(path) ?? return Err(census_fail("cannot read {path}: {err}"))
+                if !declares_method(source, type_name, member) -> problems.push("{family.names}: {claim}: {path} declares no method {member} of {type_name}")
                 next
             }
             dot: claim.find(".")
@@ -512,17 +580,18 @@ report: fn() -> String Never! {
     lines.push("- **covered**: the named Jet API does the family's job.")
     lines.push("- **partial**: the named Jet API does part of it; the note says what is missing.")
     lines.push("- **language**: the Jet language itself does the job, with no library call.")
+    lines.push("- **not needed**: the owner ruled that Jet does not need the family; the note cites the ruling.")
     lines.push("- **GAP**: Jet has no counterpart.")
     lines.push("")
     lines.push("Standard `C23` marks an ISO C function (POSIX.1-2024 carries those C17 already had); `POSIX` marks a POSIX-only one. A name with `*` stands for an optional annex's generated set.")
     lines.push("")
     lines.push("## Summary")
     lines.push("")
-    lines.push("| Area | Families | Functions | Covered | Partial | Language | GAP |")
-    lines.push("| --- | ---: | ---: | ---: | ---: | ---: | ---: |")
-    totals := [Int]{0, 0, 0, 0, 0, 0}
+    lines.push("| Area | Families | Functions | Covered | Partial | Language | Not needed | GAP |")
+    lines.push("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |")
+    totals := [Int]{0, 0, 0, 0, 0, 0, 0}
     loop area in areas() {
-        counts := [Int]{0, 0, 0, 0, 0, 0}
+        counts := [Int]{0, 0, 0, 0, 0, 0, 0}
         loop family in FAMILIES {
             if family.area != area -> next
             counts[0] = counts[0] + 1
@@ -531,14 +600,15 @@ report: fn() -> String Never! {
                 .Covered -> 2
                 .Partial -> 3
                 .Language -> 4
-                .Gap -> 5
+                .NotNeeded -> 5
+                .Gap -> 6
             }
             counts[slot] = counts[slot] + 1
         }
-        loop index in 0..<6 -> totals[index] = totals[index] + counts[index]
-        lines.push("| {area} | {counts[0]} | {counts[1]} | {counts[2]} | {counts[3]} | {counts[4]} | {counts[5]} |")
+        loop index in 0..<7 -> totals[index] = totals[index] + counts[index]
+        lines.push("| {area} | {counts[0]} | {counts[1]} | {counts[2]} | {counts[3]} | {counts[4]} | {counts[5]} | {counts[6]} |")
     }
-    lines.push("| **Total** | {totals[0]} | {totals[1]} | {totals[2]} | {totals[3]} | {totals[4]} | {totals[5]} |")
+    lines.push("| **Total** | {totals[0]} | {totals[1]} | {totals[2]} | {totals[3]} | {totals[4]} | {totals[5]} | {totals[6]} |")
     lines.push("")
     lines.push("## Gaps by area")
     lines.push("")
@@ -579,7 +649,8 @@ census_main: fn(args: [String]) -[FS]> String CensusError! {
     check_only: args.len() == 1 && args[0] == "--check"
     if args.len() > 1 || (args.len() == 1 && !check_only) -> return Err(census_fail(USAGE))
     exports: core_exports()
-    problems: unresolved(exports)
+    sources: core_sources()
+    problems: unresolved(exports, sources)
     if problems.len() > 0 -> return Err(census_fail("libc census: {problems.len()} row problem(s)\n{problems.join("\n")}"))
     if check_only -> return Ok("libc census: every Jet API of {FAMILIES.len()} families resolves")
     Ok(report())
@@ -587,7 +658,7 @@ census_main: fn(args: [String]) -[FS]> String CensusError! {
 
 #Test("every Jet API the census names exists") {
     exports: core_exports() ?? panic(err.message)
-    problems: unresolved(exports) ?? panic(err.message)
+    problems: unresolved(exports, core_sources() ?? panic(err.message)) ?? panic(err.message)
     assert_eq(problems.join("\n"), "")
 }
 

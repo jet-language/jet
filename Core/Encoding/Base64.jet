@@ -7,6 +7,7 @@
 use {
     hex: core.encoding.hex
     base32: core.encoding.base32
+    radix64.[l64a_digit]
 }
 #Error
 Base64Error: struct {
@@ -71,6 +72,37 @@ b85decode: fn(text: String) -> [U8] Base64Error! { base85_decode(text, C_B85_ALP
 z85encode: fn(data: [U8]) -> String Base64Error! { base85_encode(data, C_Z85_ALPHABET, true) }
 z85decode: fn(text: String) -> [U8] Base64Error! { base85_decode(text, C_Z85_ALPHABET, true) }
 
+/// POSIX radix-64 text of a 32-bit value, as C `l64a`: up to six characters
+/// from `./0-9A-Za-z`, least significant digit first; 0 is empty text. A value
+/// outside 0 through 4294967295 is an error, where C keeps the low 32 bits.
+l64a: fn(value: Int) -> String Base64Error! {
+    if value < 0 || value > 4294967295 -> return Err(rewrap("l64a needs a value from 0 through 4294967295, got {value}"))
+    digits: C_L64A_ALPHABET.bytes()
+    out := [U8]{}
+    rest := value
+    loop rest > 0 {
+        out.push(digits[rest.bit_and(63)])
+        rest = rest >> 6
+    }
+    String.from_bytes(out) ?? ""
+}
+
+/// The 32-bit value of POSIX radix-64 text, as C `a64l`: at most six
+/// characters from `./0-9A-Za-z`, least significant digit first; empty text
+/// is 0. A character outside the alphabet, more than six characters, or a
+/// value above 4294967295 is an error, where C stops early or truncates.
+a64l: fn(text: String) -> Int Base64Error! {
+    raw: text.bytes()
+    if raw.len() > 6 -> return Err(rewrap("a64l takes at most six characters, got {raw.len()}"))
+    value := 0
+    loop k in 0..<raw.len() {
+        digit: l64a_digit(raw[k]) ?? return Err(rewrap("invalid a64l character at byte {k}"))
+        value = value.bit_or(digit << (6 * k))
+    }
+    if value > 4294967295 -> return Err(rewrap("a64l value {value} exceeds 32 bits"))
+    Ok(value)
+}
+
 encodebytes: fn(data: [U8]) -> String Never! {
     encoded: encode(data).bytes()
     out := [U8]{}
@@ -133,6 +165,19 @@ is_base64: fn(text: String) -> Bool Never! {
 
 C_B85_ALPHABET: "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz!#$%&()*+-;<=>?@^_`{{|}}~"
 C_Z85_ALPHABET: "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.-:+=^!/*?&<>()[]{{}}@%$#"
+C_L64A_ALPHABET: "./0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+
+// The radix-64 digit of one a64l character: not part of the base64 surface.
+priv radix64: module {
+    l64a_digit: fn(byte: U8) -> Int? Never! {
+        n: Int.from_u8(byte)
+        if n == 46 || n == 47 -> return Val(n - 46)
+        if n >= 48 && n <= 57 -> return Val(n - 48 + 2)
+        if n >= 65 && n <= 90 -> return Val(n - 65 + 12)
+        if n >= 97 && n <= 122 -> return Val(n - 97 + 38)
+        None
+    }
+}
 
 ascii85_encode: fn(data: [U8]) -> String {
     out := [U8]{}
@@ -302,6 +347,22 @@ encode_alphabet: fn(data: [U8], alphabet: String, padded: Bool) -> String Never!
     assert(unpad("Zg===") == "Zg")
 }
 
+#Test("radix-64 l64a and a64l vectors") {
+    assert((l64a(0) ?? "?") == "")
+    assert((l64a(1) ?? "?") == "/")
+    assert((l64a(64) ?? "?") == "./")
+    assert((l64a(12345) ?? "?") == "t.1")
+    assert((l64a(4294967295) ?? "?") == "zzzzz1")
+    assert(l64a(-1) == .Err(_))
+    assert(l64a(4294967296) == .Err(_))
+    assert((a64l("") ?? -1) == 0)
+    assert((a64l("t.1") ?? -1) == 12345)
+    assert((a64l("zzzzz1") ?? -1) == 4294967295)
+    assert(a64l("zzzzzz") == .Err(_))
+    assert(a64l("abcdefg") == .Err(_))
+    assert(a64l("a!") == .Err(_))
+}
+
 alphabet_value: fn(byte: U8, url: Bool) -> Int? Never! {
     n: Int.from_u8(byte)
     if n >= 65 && n <= 90 -> return Val(n - 65)
@@ -384,10 +445,10 @@ decode_strict: fn(text: String, url: Bool, whitespace: Bool, relaxed: Bool) -> [
 }
 
 #Test("base64 strict decode") {
-    assert_eq(decode_strict("Zg==", false, false, false), Ok("f".bytes()))
+    assert_eq(decode_strict("Zg==", false, false, false) ?? panic("{err}"), "f".bytes())
     assert(decode_strict("Zg", false, false, false) == .Err(_))
     assert(decode_strict("Zh==", false, false, false) == .Err(_))
-    assert_eq(decode_strict("-_8", true, false, false), Ok([U8]{251, 255}))
+    assert_eq(decode_strict("-_8", true, false, false) ?? panic("{err}"), [U8]{251, 255})
     assert(decode_strict("-_8=", true, false, false) == .Err(_))
-    assert_eq(decode_strict("Zg==\n", false, true, false), Ok("f".bytes()))
+    assert_eq(decode_strict("Zg==\n", false, true, false) ?? panic("{err}"), "f".bytes())
 }

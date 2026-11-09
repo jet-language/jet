@@ -1,0 +1,1315 @@
+// Private Core source part: the authenticated modes and their pieces.
+//
+// - AES-GCM (NIST SP 800-38D), with the GHASH of BearSSL's constant-time
+//   ghash_ctmul64 (Thomas Pornin): carry-less products from integer
+//   multiplies with holes, so no table index or branch depends on H or the
+//   data. On a host with PCLMULQDQ the same GHASH runs through
+//   core.crypto.__ghash_blocks; both compute SP 800-38D section 6.4.
+// - AES-CCM (NIST SP 800-38C, RFC 3610) and CCM* (IEEE 802.15.4-2011
+//   annex B), as the mbedtls ccm.c state machine.
+// - ChaCha20 (RFC 8439 section 2.4), HChaCha20
+//   (draft-irtf-cfrg-xchacha-03 section 2.2), Poly1305 (RFC 8439 section
+//   2.5, in the 26-bit limbs of Andrew Moon's poly1305-donna) and
+//   ChaCha20-Poly1305 (RFC 8439 section 2.8), as the mbedtls chacha20.c,
+//   poly1305.c and chachapoly.c contexts.
+//
+// Every streaming context follows its mbedtls counterpart call for call,
+// and the one-shot seal and open run on it. Open compares the tag without a
+// branch on its bytes and returns no plaintext when it does not verify.
+use {
+    core
+    cipher: __core_crypto_cipher
+}
+
+ZERO_BLOCK: [U8]{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+
+/// Whole blocks one bulk call covers, so a call's workspace stays bounded.
+BULK_BLOCKS: 256
+
+load_be64: fn(b: [U8], off: Int) -> U64 Never! {
+    x := U64{0}
+    loop i in 0..<8 -> x = (x << 8).bit_or(U64.from_u8(b[off + i]))
+    x
+}
+
+store_be64: fn(b: &[U8], off: Int, x: U64) Never! {
+    loop i in 0..<8 -> b[off + i] = cipher.low_byte(x >> (56 - 8 * i))
+}
+
+/// The constant-time tag check: true when the first `n` bytes of `a` and
+/// `b` agree, from the OR of their differences only.
+tags_equal: fn(a: [U8], b: [U8], n: Int) -> Bool Never! {
+    diff := U8{0}
+    loop i in 0..<n -> diff = diff.bit_or(a[i].bit_xor(b[i]))
+    diff == (U8{0})
+}
+
+min_int: fn(a: Int, b: Int) -> Int Never! { if a < b -> a else -> b }
+
+// ---------------------------------------------------------------------------
+// GHASH (SP 800-38D section 6.4) in BearSSL's ghash_ctmul64 form. A field
+// element is two U64 halves; bmul64 is a 64x64 carry-less product truncated
+// to 64 bits, and the bit-reversed operands give the high halves.
+
+/// The low 64 bits of the carry-less product of x and y. Each operand is
+/// split into four masks with three zero bits between set bits, so the
+/// integer products cannot carry into a kept bit.
+#Arithmetic(.Wrapping)
+bmul64: fn(x: U64, y: U64) -> U64 Never! {
+    m1: U64{0x1111111111111111}
+    m2: U64{0x2222222222222222}
+    m4: U64{0x4444444444444444}
+    m8: U64{0x8888888888888888}
+    x0: x.bit_and(m1)
+    x1: x.bit_and(m2)
+    x2: x.bit_and(m4)
+    x3: x.bit_and(m8)
+    y0: y.bit_and(m1)
+    y1: y.bit_and(m2)
+    y2: y.bit_and(m4)
+    y3: y.bit_and(m8)
+    z0: (x0 * y0).bit_xor(x1 * y3).bit_xor(x2 * y2).bit_xor(x3 * y1).bit_and(m1)
+    z1: (x0 * y1).bit_xor(x1 * y0).bit_xor(x2 * y3).bit_xor(x3 * y2).bit_and(m2)
+    z2: (x0 * y2).bit_xor(x1 * y1).bit_xor(x2 * y0).bit_xor(x3 * y3).bit_and(m4)
+    z3: (x0 * y3).bit_xor(x1 * y2).bit_xor(x2 * y1).bit_xor(x3 * y0).bit_and(m8)
+    z0.bit_or(z1).bit_or(z2).bit_or(z3)
+}
+
+/// The bits of x in reverse order.
+rev64: fn(v: U64) -> U64 Never! {
+    x := v
+    x = (x.bit_and(U64{0x5555555555555555}) << 1).bit_or((x >> 1).bit_and(U64{0x5555555555555555}))
+    x = (x.bit_and(U64{0x3333333333333333}) << 2).bit_or((x >> 2).bit_and(U64{0x3333333333333333}))
+    x = (x.bit_and(U64{0x0f0f0f0f0f0f0f0f}) << 4).bit_or((x >> 4).bit_and(U64{0x0f0f0f0f0f0f0f0f}))
+    x = (x.bit_and(U64{0x00ff00ff00ff00ff}) << 8).bit_or((x >> 8).bit_and(U64{0x00ff00ff00ff00ff}))
+    x = (x.bit_and(U64{0x0000ffff0000ffff}) << 16).bit_or((x >> 16).bit_and(U64{0x0000ffff0000ffff}))
+    (x << 32).bit_or(x >> 32)
+}
+
+/// An AES-GCM key: the AES encryption key and the hash subkey
+/// H = CIPH_K(0^128) (SP 800-38D section 7.1, step 1), as bytes for the
+/// host leaf and, in `hw`, as the words h0, h1, h0 ^ h1 and their bit
+/// reversals for the Jet GHASH.
+GCMKey: struct {
+    aes: cipher.AESKey
+    h: [U8]
+    hw: [U64]
+}
+
+impl GCMKey.Close {
+    close: fn(&&self) {
+        h := self.h.move()
+        core.crypto.wipe(h)
+        hw := self.hw.move()
+        cipher.wipe_words(hw)
+    }
+}
+
+/// The GCM key for a 16-, 24- or 32-byte AES key; None for any other length.
+gcm_key: fn(key: [U8]) -> GCMKey? Never! {
+    aes: cipher.aes_key(key, false) ?? return None
+    h := cipher.zero_bytes(16)
+    cipher.encrypt_in_place(aes, h)
+    h1: load_be64(h, 0)
+    h0: load_be64(h, 8)
+    h0r: rev64(h0)
+    h1r: rev64(h1)
+    hw := cipher.words(6)
+    hw[0] = h0
+    hw[1] = h1
+    hw[2] = h0.bit_xor(h1)
+    hw[3] = h0r
+    hw[4] = h1r
+    hw[5] = h0r.bit_xor(h1r)
+    Val(GCMKey{aes: aes, h: h, hw: hw})
+}
+
+/// y = (y ^ X_i) . H for `count` 16-byte blocks X_i of `data` from `off`
+/// (SP 800-38D algorithm 2, one step per block). The host leaf runs them
+/// when it can; otherwise the Jet carry-less multiply does.
+ghash: fn(k: GCMKey, y: &[U8], data: [U8], off: Int, count: Int) Never! {
+    if count <= 0 -> return
+    if core.crypto.__ghash_blocks(k.h, y, data, off, count) -> return
+    ghash_portable(k, y, data, off, count)
+}
+
+/// `ghash` on the Jet carry-less multiply alone.
+#Arithmetic(.Wrapping)
+ghash_portable: fn(k: GCMKey, y: &[U8], data: [U8], off: Int, count: Int) Never! {
+    if count <= 0 -> return
+    h0: k.hw[0]
+    h1: k.hw[1]
+    h2: k.hw[2]
+    h0r: k.hw[3]
+    h1r: k.hw[4]
+    h2r: k.hw[5]
+    y1 := load_be64(y, 0)
+    y0 := load_be64(y, 8)
+    at := off
+    loop _ in 0..<count {
+        y1 = y1.bit_xor(load_be64(data, at))
+        y0 = y0.bit_xor(load_be64(data, at + 8))
+        y0r: rev64(y0)
+        y1r: rev64(y1)
+        y2: y0.bit_xor(y1)
+        y2r: y0r.bit_xor(y1r)
+        // Karatsuba: the low and high halves of the 128x128 product.
+        z0: bmul64(y0, h0)
+        z1: bmul64(y1, h1)
+        z2: bmul64(y2, h2).bit_xor(z0).bit_xor(z1)
+        a0: bmul64(y0r, h0r)
+        a1: bmul64(y1r, h1r)
+        z0h: rev64(a0) >> 1
+        z1h: rev64(a1) >> 1
+        z2h: rev64(bmul64(y2r, h2r).bit_xor(a0).bit_xor(a1)) >> 1
+        v0 := z0
+        v1 := z0h.bit_xor(z2)
+        v2 := z1.bit_xor(z2h)
+        v3 := z1h
+        // The bit-reflected product, shifted left by one.
+        v3 = (v3 << 1).bit_or(v2 >> 63)
+        v2 = (v2 << 1).bit_or(v1 >> 63)
+        v1 = (v1 << 1).bit_or(v0 >> 63)
+        v0 = v0 << 1
+        // Reduction modulo x^128 + x^7 + x^2 + x + 1.
+        v2 = v2.bit_xor(v0).bit_xor(v0 >> 1).bit_xor(v0 >> 2).bit_xor(v0 >> 7)
+        v1 = v1.bit_xor(v0 << 63).bit_xor(v0 << 62).bit_xor(v0 << 57)
+        v3 = v3.bit_xor(v1).bit_xor(v1 >> 1).bit_xor(v1 >> 2).bit_xor(v1 >> 7)
+        v2 = v2.bit_xor(v1 << 63).bit_xor(v1 << 62).bit_xor(v1 << 57)
+        y0 = v2
+        y1 = v3
+        at += 16
+    }
+    store_be64(y, 0, y1)
+    store_be64(y, 8, y0)
+}
+
+/// The bytes of y = y ^ X for a block X waiting in `acc`, multiplied in.
+ghash_acc: fn(k: GCMKey, acc: &[U8]) Never! { ghash(k, acc, ZERO_BLOCK, 0, 1) }
+
+/// One GCM operation in flight (mbedtls_gcm_context after starts).
+/// - `ctr`: the next counter block; inc32(J0) at the start.
+/// - `base`: CIPH_K(J0), which masks the tag.
+/// - `acc`: the GHASH accumulator, with a partial block XORed in.
+/// - `stream`: the keystream block of a partial last data block.
+/// - `ad_len`, `len`: the AAD and data bytes so far.
+GCM: struct {
+    decrypt: Bool
+    ctr: [U8]
+    base: [U8]
+    acc: [U8]
+    stream: [U8]
+    ad_len: Int
+    len: Int
+}
+
+impl GCM.Close {
+    close: fn(&&self) {
+        ctr := self.ctr.move()
+        core.crypto.wipe(ctr)
+        base := self.base.move()
+        core.crypto.wipe(base)
+        acc := self.acc.move()
+        core.crypto.wipe(acc)
+        stream := self.stream.move()
+        core.crypto.wipe(stream)
+    }
+}
+
+// SP 800-38D section 5.2.1.1: len(P) <= 2^39 - 256 bits, len(A) <= 2^64 - 1
+// bits (mbedtls caps the AAD at 2^61 - 1 bytes).
+GCM_MAX_DATA: 68719476704
+GCM_MAX_AAD: 2305843009213693951
+
+/// Start an operation under `iv` (SP 800-38D section 7.1, steps 2 and 3).
+/// A 12-byte IV gives J0 = IV || 0^31 || 1; any other length GHASHes the
+/// zero-padded IV and its 64-bit bit length. None for an empty IV or one
+/// of 2^61 bytes or more (section 5.2.1.1: len(IV) <= 2^64 - 1 bits).
+gcm_starts: fn(k: GCMKey, decrypt: Bool, iv: [U8]) -> GCM? Never! {
+    if iv.len() == 0 || iv.len() > GCM_MAX_AAD -> return None
+    j0 := cipher.zero_bytes(16)
+    if iv.len() == 12 {
+        loop i in 0..<12 -> j0[i] = iv[i]
+        j0[15] = U8{1}
+    } else {
+        whole: iv.len() /% 16
+        ghash(k, j0, iv, 0, whole)
+        rest: iv.len() - whole * 16
+        if rest > 0 {
+            last := cipher.zero_bytes(16)
+            loop i in 0..<rest -> last[i] = iv[whole * 16 + i]
+            ghash(k, j0, last, 0, 1)
+        }
+        lengths := cipher.zero_bytes(16)
+        store_be64(lengths, 8, U64{iv.len()} << 3)
+        ghash(k, j0, lengths, 0, 1)
+    }
+    base := j0.copy()
+    cipher.encrypt_in_place(k.aes, base)
+    cipher.increment(j0, 4)
+    Val(GCM{decrypt: decrypt, ctr: j0, base: base, acc: cipher.zero_bytes(16), stream: cipher.zero_bytes(16), ad_len: 0, len: 0})
+}
+
+/// Feed additional data (mbedtls_gcm_update_ad). False past the AAD limit
+/// or once data has started.
+gcm_update_ad: fn(k: GCMKey, st: &GCM, aad: [U8]) -> Bool Never! {
+    if st.len > 0 -> return false
+    if aad.len() > GCM_MAX_AAD - st.ad_len -> return false
+    at := 0
+    fill: st.ad_len %% 16
+    if fill != 0 {
+        chunk: min_int(16 - fill, aad.len())
+        loop i in 0..<chunk -> st.acc[fill + i] = st.acc[fill + i].bit_xor(aad[i])
+        if fill + chunk == 16 -> ghash_acc(k, st.acc)
+        at = chunk
+    }
+    whole: (aad.len() - at) /% 16
+    ghash(k, st.acc, aad, at, whole)
+    at += whole * 16
+    loop i in at..<aad.len() -> st.acc[i - at] = st.acc[i - at].bit_xor(aad[i])
+    st.ad_len += aad.len()
+    true
+}
+
+/// Encrypt or decrypt `len` bytes of `src` from `off`, appended to `out`
+/// (mbedtls_gcm_update), GHASHing the ciphertext. False past the
+/// SP 800-38D data limit.
+gcm_update: fn(k: GCMKey, st: &GCM, src: [U8], off: Int, len: Int, out: &[U8]) -> Bool Never! {
+    if len == 0 -> return true
+    if len > GCM_MAX_DATA - st.len -> return false
+    // The first data closes a partial AAD block.
+    if st.len == 0 && st.ad_len %% 16 != 0 -> ghash_acc(k, st.acc)
+    cipher.reserve(out, len)
+    at := off
+    end: off + len
+    n := st.len %% 16
+    if n != 0 {
+        loop at < end && n < 16 {
+            c: src[at]
+            o: c.bit_xor(st.stream[n])
+            st.acc[n] = st.acc[n].bit_xor(if st.decrypt -> c else -> o)
+            out.push(o)
+            n += 1
+            at += 1
+        }
+        if n == 16 -> ghash_acc(k, st.acc)
+    }
+    whole: (end - at) /% 16
+    done := 0
+    loop done < whole {
+        chunk: min_int(whole - done, BULK_BLOCKS)
+        first: out.len()
+        if st.decrypt -> ghash(k, st.acc, src, at, chunk)
+        cipher.blocks(k.aes, cipher.CTR32, st.ctr, src, at, chunk, out)
+        if !st.decrypt -> ghash(k, st.acc, out, first, chunk)
+        at += chunk * 16
+        done += chunk
+    }
+    if at < end {
+        loop i in 0..<16 -> st.stream[i] = st.ctr[i]
+        cipher.encrypt_in_place(k.aes, st.stream)
+        cipher.increment(st.ctr, 4)
+        i := 0
+        loop at < end {
+            c: src[at]
+            o: c.bit_xor(st.stream[i])
+            st.acc[i] = st.acc[i].bit_xor(if st.decrypt -> c else -> o)
+            out.push(o)
+            i += 1
+            at += 1
+        }
+    }
+    st.len += len
+    true
+}
+
+/// The first `tag_len` bytes of the tag (SP 800-38D section 7.1, steps 5
+/// to 7; mbedtls_gcm_finish). None unless 4 <= tag_len <= 16.
+gcm_finish: fn(k: GCMKey, st: &GCM, tag_len: Int) -> [U8]? Never! {
+    if tag_len < 4 || tag_len > 16 -> return None
+    if st.len == 0 && st.ad_len %% 16 != 0 -> ghash_acc(k, st.acc)
+    if st.len %% 16 != 0 -> ghash_acc(k, st.acc)
+    lengths := cipher.zero_bytes(16)
+    store_be64(lengths, 0, U64{st.ad_len} << 3)
+    store_be64(lengths, 8, U64{st.len} << 3)
+    ghash(k, st.acc, lengths, 0, 1)
+    out := cipher.zero_bytes(tag_len)
+    loop i in 0..<tag_len -> out[i] = st.base[i].bit_xor(st.acc[i])
+    Val(out)
+}
+
+/// GCM-AE (SP 800-38D section 7.1): the ciphertext of `plain` followed by
+/// its `tag_len`-byte tag.
+gcm_encrypt: fn(k: GCMKey, iv: [U8], aad: [U8], plain: [U8], tag_len: Int) -> [U8] cipher.CipherError! {
+    st := gcm_starts(k, false, iv) ?? return Err(.Input)
+    if !gcm_update_ad(k, st, aad) -> return Err(.Input)
+    out := [U8]{}
+    cipher.reserve(out, plain.len() + tag_len)
+    if !gcm_update(k, st, plain, 0, plain.len(), out) -> return Err(.Input)
+    mac: gcm_finish(k, st, tag_len) ?? return Err(.Input)
+    loop b in mac -> out.push(b)
+    Ok(out)
+}
+
+/// GCM-AD (SP 800-38D section 7.2) of `sealed`, a ciphertext followed by a
+/// `tag_len`-byte tag: the plaintext, or .Auth when the tag does not verify.
+gcm_decrypt: fn(k: GCMKey, iv: [U8], aad: [U8], sealed: [U8], tag_len: Int) -> [U8] cipher.CipherError! {
+    if tag_len < 4 || tag_len > 16 || sealed.len() < tag_len -> return Err(.Input)
+    len: sealed.len() - tag_len
+    st := gcm_starts(k, true, iv) ?? return Err(.Input)
+    if !gcm_update_ad(k, st, aad) -> return Err(.Input)
+    out := [U8]{}
+    if !gcm_update(k, st, sealed, 0, len, out) -> return Err(.Input)
+    want: gcm_finish(k, st, tag_len) ?? return Err(.Input)
+    expected := cipher.bytes_of(sealed, len, tag_len)
+    if !tags_equal(want, expected, tag_len) {
+        core.crypto.wipe(out)
+        return Err(.Auth)
+    }
+    Ok(out)
+}
+
+// ---------------------------------------------------------------------------
+// CCM and CCM* (SP 800-38C; mbedtls ccm.c). The state bits follow mbedtls:
+// the nonce and the lengths may arrive in either order, and the first
+// CBC-MAC block B0 is enciphered once both are known.
+
+CCM_STARTED: 1
+CCM_LENGTHS_SET: 2
+CCM_AUTH_DATA_STARTED: 4
+CCM_AUTH_DATA_FINISHED: 8
+CCM_ERROR: 16
+
+/// The four mbedtls CCM modes. The CCM* modes admit a zero-length tag,
+/// which encrypts without authentication (IEEE 802.15.4 security levels
+/// 0 and 4).
+CCMMode: enum {
+    Encrypt
+    Decrypt
+    StarEncrypt
+    StarDecrypt
+}
+
+/// One CCM operation (mbedtls_ccm_context).
+/// - `q`: the width of the message length and of the counter, 15 - nonce
+///   length.
+/// - `y`: the CBC-MAC chaining value; `ctr`: the counter block A_i.
+/// - `processed`: AAD bytes, then data bytes, consumed so far.
+CCM: struct {
+    mode: CCMMode
+    state: Int
+    q: Int
+    y: [U8]
+    ctr: [U8]
+    ad_len: Int
+    plain_len: Int
+    tag_len: Int
+    processed: Int
+}
+
+impl CCM.Close {
+    close: fn(&&self) {
+        y := self.y.move()
+        core.crypto.wipe(y)
+        ctr := self.ctr.move()
+        core.crypto.wipe(ctr)
+    }
+}
+
+/// A cleared CCM context (mbedtls_ccm_init).
+ccm_state: fn() -> CCM Never! {
+    CCM{mode: .Encrypt, state: 0, q: 0, y: cipher.zero_bytes(16), ctr: cipher.zero_bytes(16), ad_len: 0, plain_len: 0, tag_len: 0, processed: 0}
+}
+
+ccm_decrypting: fn(st: CCM) -> Bool Never! { st.mode == .Decrypt || st.mode == .StarDecrypt }
+
+has_bit: fn(state: Int, bit: Int) -> Bool Never! { (state /% bit) %% 2 == 1 }
+
+/// state | bit, for the state bits above.
+with_bit: fn(state: Int, bit: Int) -> Int Never! { if has_bit(state, bit) -> state else -> state + bit }
+
+/// Add `n` to the `q`-byte big-endian counter at the end of `ctr`, modulo
+/// 2^(8q) as mbedtls increments it. The counter is public.
+ccm_advance: fn(ctr: &[U8], q: Int, n: Int) Never! {
+    carry := n
+    loop i in 0..<q {
+        v: Int.from_u8(ctr[15 - i]) + carry
+        ctr[15 - i] = U8{v %% 256}
+        carry = v /% 256
+    }
+}
+
+/// B0 (SP 800-38C appendix A.2.1) enciphered into y once the nonce and the
+/// lengths are both set (ccm_calculate_first_block_if_ready).
+ccm_first_block: fn(k: cipher.AESKey, st: &CCM) -> Bool Never! {
+    if !has_bit(st.state, CCM_STARTED) || !has_bit(st.state, CCM_LENGTHS_SET) -> return true
+    if st.tag_len == 0 {
+        if st.mode == .StarEncrypt || st.mode == .StarDecrypt {
+            st.plain_len = 0
+            return true
+        }
+        st.state = with_bit(st.state, CCM_ERROR)
+        return false
+    }
+    flags := (st.tag_len - 2) /% 2 * 8 + st.q - 1
+    if st.ad_len > 0 -> flags += 64
+    st.y[0] = st.y[0].bit_or(U8{flags})
+    left := st.plain_len
+    loop i in 0..<st.q {
+        st.y[15 - i] = U8{left %% 256}
+        left = left /% 256
+    }
+    if left > 0 {
+        st.state = with_bit(st.state, CCM_ERROR)
+        return false
+    }
+    cipher.encrypt_in_place(k, st.y)
+    true
+}
+
+/// Set the mode and the 7- to 13-byte nonce (mbedtls_ccm_starts):
+/// A_1 = (q - 1) || N || 1 and the nonce into B0.
+ccm_starts: fn(k: cipher.AESKey, st: &CCM, mode: CCMMode, iv: [U8]) -> Bool Never! {
+    if iv.len() < 7 || iv.len() > 13 -> return false
+    st.mode = mode
+    st.q = 15 - iv.len()
+    loop i in 0..<16 -> st.ctr[i] = U8{0}
+    st.ctr[0] = U8{st.q - 1}
+    loop i in 0..<iv.len() {
+        st.ctr[1 + i] = iv[i]
+        st.y[1 + i] = iv[i]
+    }
+    st.ctr[15] = U8{1}
+    st.state = with_bit(st.state, CCM_STARTED)
+    ccm_first_block(k, st)
+}
+
+/// Declare the AAD, message and tag lengths (mbedtls_ccm_set_lengths). The
+/// tag is 0 or 4 to 16 bytes and even; the AAD is below 0xff00 bytes, the
+/// two-byte encoding of SP 800-38C appendix A.2.2.
+ccm_set_lengths: fn(k: cipher.AESKey, st: &CCM, ad_len: Int, plain_len: Int, tag_len: Int) -> Bool Never! {
+    if tag_len == 2 || tag_len > 16 || tag_len %% 2 != 0 -> return false
+    if ad_len >= 65280 || ad_len < 0 || plain_len < 0 -> return false
+    st.plain_len = plain_len
+    st.ad_len = ad_len
+    st.tag_len = tag_len
+    st.processed = 0
+    st.state = with_bit(st.state, CCM_LENGTHS_SET)
+    ccm_first_block(k, st)
+}
+
+/// CBC-MAC the next AAD bytes (mbedtls_ccm_update_ad); the first call
+/// prefixes the two-byte AAD length. False past the declared length.
+ccm_update_ad: fn(k: cipher.AESKey, st: &CCM, aad: [U8]) -> Bool Never! {
+    if has_bit(st.state, CCM_ERROR) -> return false
+    if aad.len() == 0 -> return true
+    if has_bit(st.state, CCM_AUTH_DATA_FINISHED) -> return false
+    if !has_bit(st.state, CCM_AUTH_DATA_STARTED) {
+        if aad.len() > st.ad_len -> return false
+        st.y[0] = st.y[0].bit_xor(U8{(st.ad_len /% 256) %% 256})
+        st.y[1] = st.y[1].bit_xor(U8{st.ad_len %% 256})
+        st.state = with_bit(st.state, CCM_AUTH_DATA_STARTED)
+    } else if st.processed + aad.len() > st.ad_len {
+        return false
+    }
+    at := 0
+    loop at < aad.len() {
+        offset: (st.processed + 2) %% 16
+        chunk: min_int(16 - offset, aad.len() - at)
+        loop i in 0..<chunk -> st.y[offset + i] = st.y[offset + i].bit_xor(aad[at + i])
+        st.processed += chunk
+        at += chunk
+        if chunk + offset == 16 || st.processed == st.ad_len -> cipher.encrypt_in_place(k, st.y)
+    }
+    if st.processed == st.ad_len {
+        st.state = with_bit(st.state, CCM_AUTH_DATA_FINISHED)
+        st.processed = 0
+    }
+    true
+}
+
+/// Encrypt or decrypt `len` bytes of `src` from `off`, appended to `out`
+/// (mbedtls_ccm_update). Whole blocks at a block boundary run as one
+/// CBC pass for the MAC and one counter pass for the data; the counter
+/// pass never crosses a carry out of the counter's low two bytes, so the
+/// q-byte counter wraps exactly as mbedtls's does.
+ccm_update: fn(k: cipher.AESKey, st: &CCM, src: [U8], off: Int, len: Int, out: &[U8]) -> Bool Never! {
+    if has_bit(st.state, CCM_ERROR) -> return false
+    if st.tag_len != 0 && st.processed + len > st.plain_len -> return false
+    cipher.reserve(out, len)
+    decrypt: ccm_decrypting(st)
+    at := off
+    end: off + len
+    mac := [U8]{}
+    ks := cipher.zero_bytes(16)
+    loop at < end {
+        offset: st.processed %% 16
+        if offset == 0 && end - at >= 16 {
+            low: Int.from_u8(st.ctr[14]) * 256 + Int.from_u8(st.ctr[15])
+            room: 65536 - low
+            n: min_int(min_int((end - at) /% 16, BULK_BLOCKS), room)
+            counter := st.ctr.copy()
+            mac.clear()
+            if decrypt {
+                first: out.len()
+                cipher.blocks(k, cipher.CTR32, counter, src, at, n, out)
+                cipher.blocks(k, cipher.CBC_ENC, st.y, out, first, n, mac)
+            } else {
+                cipher.blocks(k, cipher.CBC_ENC, st.y, src, at, n, mac)
+                cipher.blocks(k, cipher.CTR32, counter, src, at, n, out)
+            }
+            core.crypto.wipe(counter)
+            ccm_advance(st.ctr, st.q, n)
+            st.processed += n * 16
+            at += n * 16
+        } else {
+            chunk: min_int(16 - offset, end - at)
+            st.processed += chunk
+            loop i in 0..<16 -> ks[i] = st.ctr[i]
+            cipher.encrypt_in_place(k, ks)
+            last: chunk + offset == 16 || st.processed == st.plain_len
+            loop i in 0..<chunk {
+                c: src[at + i]
+                p: c.bit_xor(ks[offset + i])
+                st.y[offset + i] = st.y[offset + i].bit_xor(if decrypt -> p else -> c)
+                out.push(p)
+            }
+            if last {
+                cipher.encrypt_in_place(k, st.y)
+                ccm_advance(st.ctr, st.q, 1)
+            }
+            at += chunk
+        }
+    }
+    core.crypto.wipe(mac)
+    core.crypto.wipe(ks)
+    true
+}
+
+/// The tag T = MSB_Tlen(Y_r) ^ MSB_Tlen(CIPH_K(A_0)) (SP 800-38C section
+/// 6.1; mbedtls_ccm_finish), then the context clears for the next nonce.
+/// None unless every declared byte arrived and `tag_len` is the declared
+/// length.
+ccm_finish: fn(k: cipher.AESKey, st: &CCM, tag_len: Int) -> [U8]? Never! {
+    if has_bit(st.state, CCM_ERROR) -> return None
+    if !has_bit(st.state, CCM_STARTED) || !has_bit(st.state, CCM_LENGTHS_SET) -> return None
+    if st.ad_len > 0 && !has_bit(st.state, CCM_AUTH_DATA_FINISHED) -> return None
+    if st.plain_len > 0 && st.processed != st.plain_len -> return None
+    if tag_len != st.tag_len -> return None
+    loop i in 0..<st.q -> st.ctr[15 - i] = U8{0}
+    s0 := st.ctr.copy()
+    cipher.encrypt_in_place(k, s0)
+    mac := cipher.zero_bytes(tag_len)
+    loop i in 0..<tag_len -> mac[i] = st.y[i].bit_xor(s0[i])
+    core.crypto.wipe(s0)
+    st.state = 0
+    loop i in 0..<16 {
+        st.y[i] = U8{0}
+        st.ctr[i] = U8{0}
+    }
+    Val(mac)
+}
+
+/// One whole CCM pass (ccm_auth_crypt): the output of `src` followed by the
+/// tag.
+ccm_crypt: fn(k: cipher.AESKey, mode: CCMMode, iv: [U8], aad: [U8], src: [U8], len: Int, tag_len: Int) -> [U8]? Never! {
+    st := ccm_state()
+    if !ccm_starts(k, st, mode, iv) -> return None
+    if !ccm_set_lengths(k, st, aad.len(), len, tag_len) -> return None
+    if !ccm_update_ad(k, st, aad) -> return None
+    out := [U8]{}
+    cipher.reserve(out, len + tag_len)
+    if !ccm_update(k, st, src, 0, len, out) -> return None
+    mac: ccm_finish(k, st, tag_len) ?? return None
+    loop b in mac -> out.push(b)
+    Val(out)
+}
+
+/// CCM generation-encryption (SP 800-38C section 6.1), or CCM* when
+/// `star`: the ciphertext of `plain` followed by its tag.
+ccm_encrypt: fn(k: cipher.AESKey, star: Bool, iv: [U8], aad: [U8], plain: [U8], tag_len: Int) -> [U8] cipher.CipherError! {
+    sealed: ccm_crypt(k, if star -> .StarEncrypt else -> .Encrypt, iv, aad, plain, plain.len(), tag_len) ?? return Err(.Input)
+    Ok(sealed)
+}
+
+/// CCM decryption-verification (SP 800-38C section 6.2), or CCM* when
+/// `star`, of a ciphertext followed by a `tag_len`-byte tag.
+ccm_decrypt: fn(k: cipher.AESKey, star: Bool, iv: [U8], aad: [U8], sealed: [U8], tag_len: Int) -> [U8] cipher.CipherError! {
+    if tag_len < 0 || sealed.len() < tag_len -> return Err(.Input)
+    len: sealed.len() - tag_len
+    opened := ccm_crypt(k, if star -> .StarDecrypt else -> .Decrypt, iv, aad, sealed, len, tag_len) ?? return Err(.Input)
+    want := cipher.bytes_of(opened, len, tag_len)
+    expected := cipher.bytes_of(sealed, len, tag_len)
+    if !tags_equal(want, expected, tag_len) {
+        core.crypto.wipe(opened)
+        return Err(.Auth)
+    }
+    Ok(cipher.bytes_of(opened, 0, len))
+}
+
+// ---------------------------------------------------------------------------
+// ChaCha20 (RFC 8439 section 2.3 and 2.4; mbedtls chacha20.c).
+
+word32: fn(b: [U8], off: Int) -> U32 Never! {
+    U32{b[off]}.bit_or(U32{b[off + 1]} << 8).bit_or(U32{b[off + 2]} << 16).bit_or(U32{b[off + 3]} << 24)
+}
+
+put_word32: fn(out: &[U8], at: Int, w: U32) Never! {
+    out[at] = U8{w.bit_and(U32{255})}
+    out[at + 1] = U8{(w >> 8).bit_and(U32{255})}
+    out[at + 2] = U8{(w >> 16).bit_and(U32{255})}
+    out[at + 3] = U8{w >> 24}
+}
+
+/// The 20 rounds (ten column-and-diagonal double rounds) of the ChaCha
+/// state `s` into the 64 bytes of `ks`: the block function of RFC 8439
+/// section 2.3 when `feed` adds the input state back, the HChaCha20 core
+/// when it does not.
+#Arithmetic(.Wrapping)
+chacha20_core: fn(s: [U32], ks: &[U8], feed: Bool) Never! {
+    x0 := s[0]
+    x1 := s[1]
+    x2 := s[2]
+    x3 := s[3]
+    x4 := s[4]
+    x5 := s[5]
+    x6 := s[6]
+    x7 := s[7]
+    x8 := s[8]
+    x9 := s[9]
+    x10 := s[10]
+    x11 := s[11]
+    x12 := s[12]
+    x13 := s[13]
+    x14 := s[14]
+    x15 := s[15]
+    loop _ in 0..<10 {
+        // QUARTERROUND(0, 4, 8, 12)
+        x0 += x4
+        x12 = x12.bit_xor(x0).rotate_left(16)
+        x8 += x12
+        x4 = x4.bit_xor(x8).rotate_left(12)
+        x0 += x4
+        x12 = x12.bit_xor(x0).rotate_left(8)
+        x8 += x12
+        x4 = x4.bit_xor(x8).rotate_left(7)
+        // QUARTERROUND(1, 5, 9, 13)
+        x1 += x5
+        x13 = x13.bit_xor(x1).rotate_left(16)
+        x9 += x13
+        x5 = x5.bit_xor(x9).rotate_left(12)
+        x1 += x5
+        x13 = x13.bit_xor(x1).rotate_left(8)
+        x9 += x13
+        x5 = x5.bit_xor(x9).rotate_left(7)
+        // QUARTERROUND(2, 6, 10, 14)
+        x2 += x6
+        x14 = x14.bit_xor(x2).rotate_left(16)
+        x10 += x14
+        x6 = x6.bit_xor(x10).rotate_left(12)
+        x2 += x6
+        x14 = x14.bit_xor(x2).rotate_left(8)
+        x10 += x14
+        x6 = x6.bit_xor(x10).rotate_left(7)
+        // QUARTERROUND(3, 7, 11, 15)
+        x3 += x7
+        x15 = x15.bit_xor(x3).rotate_left(16)
+        x11 += x15
+        x7 = x7.bit_xor(x11).rotate_left(12)
+        x3 += x7
+        x15 = x15.bit_xor(x3).rotate_left(8)
+        x11 += x15
+        x7 = x7.bit_xor(x11).rotate_left(7)
+        // QUARTERROUND(0, 5, 10, 15)
+        x0 += x5
+        x15 = x15.bit_xor(x0).rotate_left(16)
+        x10 += x15
+        x5 = x5.bit_xor(x10).rotate_left(12)
+        x0 += x5
+        x15 = x15.bit_xor(x0).rotate_left(8)
+        x10 += x15
+        x5 = x5.bit_xor(x10).rotate_left(7)
+        // QUARTERROUND(1, 6, 11, 12)
+        x1 += x6
+        x12 = x12.bit_xor(x1).rotate_left(16)
+        x11 += x12
+        x6 = x6.bit_xor(x11).rotate_left(12)
+        x1 += x6
+        x12 = x12.bit_xor(x1).rotate_left(8)
+        x11 += x12
+        x6 = x6.bit_xor(x11).rotate_left(7)
+        // QUARTERROUND(2, 7, 8, 13)
+        x2 += x7
+        x13 = x13.bit_xor(x2).rotate_left(16)
+        x8 += x13
+        x7 = x7.bit_xor(x8).rotate_left(12)
+        x2 += x7
+        x13 = x13.bit_xor(x2).rotate_left(8)
+        x8 += x13
+        x7 = x7.bit_xor(x8).rotate_left(7)
+        // QUARTERROUND(3, 4, 9, 14)
+        x3 += x4
+        x14 = x14.bit_xor(x3).rotate_left(16)
+        x9 += x14
+        x4 = x4.bit_xor(x9).rotate_left(12)
+        x3 += x4
+        x14 = x14.bit_xor(x3).rotate_left(8)
+        x9 += x14
+        x4 = x4.bit_xor(x9).rotate_left(7)
+    }
+    if feed {
+        x0 += s[0]
+        x1 += s[1]
+        x2 += s[2]
+        x3 += s[3]
+        x4 += s[4]
+        x5 += s[5]
+        x6 += s[6]
+        x7 += s[7]
+        x8 += s[8]
+        x9 += s[9]
+        x10 += s[10]
+        x11 += s[11]
+        x12 += s[12]
+        x13 += s[13]
+        x14 += s[14]
+        x15 += s[15]
+    }
+    put_word32(ks, 0, x0)
+    put_word32(ks, 4, x1)
+    put_word32(ks, 8, x2)
+    put_word32(ks, 12, x3)
+    put_word32(ks, 16, x4)
+    put_word32(ks, 20, x5)
+    put_word32(ks, 24, x6)
+    put_word32(ks, 28, x7)
+    put_word32(ks, 32, x8)
+    put_word32(ks, 36, x9)
+    put_word32(ks, 40, x10)
+    put_word32(ks, 44, x11)
+    put_word32(ks, 48, x12)
+    put_word32(ks, 52, x13)
+    put_word32(ks, 56, x14)
+    put_word32(ks, 60, x15)
+}
+
+/// The constants "expand 32-byte k" and the eight key words: state words
+/// 0 to 11 of RFC 8439 section 2.3.
+chacha20_key_state: fn(key: [U8]) -> [U32] Never! {
+    s := [U32]{U32{0x61707865}, U32{0x3320646e}, U32{0x79622d32}, U32{0x6b206574}}
+    loop i in 0..<8 -> s.push(word32(key, 4 * i))
+    loop _ in 0..<4 -> s.push(U32{0})
+    s
+}
+
+/// A ChaCha20 context (mbedtls_chacha20_context).
+/// - `state`: the 16 input words; word 12 is the next block counter.
+/// - `stream`: the last keystream block; `used` of its bytes are spent.
+/// - `blocks_left`: keystream blocks the 32-bit counter still allows,
+///   2^32 - counter at the start, so the block at counter 2^32 - 1 is the
+///   last and the counter never wraps into a reused keystream.
+ChaCha20: struct {
+    state: [U32]
+    stream: [U8]
+    used: Int
+    blocks_left: Int
+}
+
+impl ChaCha20.Close {
+    close: fn(&&self) {
+        state := self.state.move()
+        loop i in 0..<state.len() -> state[i] = U32{0}
+        stream := self.stream.move()
+        core.crypto.wipe(stream)
+    }
+}
+
+/// A context for a 32-byte key (mbedtls_chacha20_setkey); None for any
+/// other length. It needs chacha20_starts before use.
+chacha20_key: fn(key: [U8]) -> ChaCha20? Never! {
+    if key.len() != 32 -> return None
+    Val(ChaCha20{state: chacha20_key_state(key), stream: cipher.zero_bytes(64), used: 64, blocks_left: 0})
+}
+
+/// Set the 12-byte nonce and the initial block counter, 0 to 2^32 - 1
+/// (mbedtls_chacha20_starts).
+chacha20_starts: fn(c: &ChaCha20, nonce: [U8], counter: Int) -> Bool Never! {
+    if nonce.len() != 12 || counter < 0 || counter > 4294967295 -> return false
+    c.state[12] = U32{counter}
+    c.state[13] = word32(nonce, 0)
+    c.state[14] = word32(nonce, 4)
+    c.state[15] = word32(nonce, 8)
+    core.crypto.wipe(c.stream)
+    c.used = 64
+    c.blocks_left = 4294967296 - counter
+    true
+}
+
+/// Whether `size` more bytes fit before the counter is exhausted
+/// (mbedtls_chacha20_check_counter_wrap).
+chacha20_room: fn(c: ChaCha20, size: Int) -> Bool Never! {
+    left: 64 - c.used
+    if size <= left -> return true
+    need: (size - left + 63) /% 64
+    need <= c.blocks_left
+}
+
+/// The next keystream block into `stream`, then the counter steps.
+#Arithmetic(.Wrapping)
+chacha20_next: fn(c: &ChaCha20) Never! {
+    chacha20_core(c.state, c.stream, true)
+    c.state[12] = c.state[12] + U32{1}
+    c.blocks_left -= 1
+}
+
+/// XOR `len` bytes of `src` from `off` with the keystream, appended to
+/// `out` (mbedtls_chacha20_update). False, appending nothing, when the
+/// counter would run out.
+chacha20_update: fn(c: &ChaCha20, src: [U8], off: Int, len: Int, out: &[U8]) -> Bool Never! {
+    if !chacha20_room(c, len) -> return false
+    cipher.reserve(out, len)
+    at := off
+    end: off + len
+    loop at < end && c.used < 64 {
+        out.push(src[at].bit_xor(c.stream[c.used]))
+        c.used += 1
+        at += 1
+    }
+    loop end - at >= 64 {
+        chacha20_next(c)
+        loop i in 0..<64 -> out.push(src[at + i].bit_xor(c.stream[i]))
+        at += 64
+    }
+    if at < end {
+        chacha20_next(c)
+        c.used = end - at
+        loop i in 0..<end - at -> out.push(src[at + i].bit_xor(c.stream[i]))
+    }
+    true
+}
+
+/// ChaCha20 encryption of `src` (RFC 8439 section 2.4;
+/// mbedtls_chacha20_crypt). None for a bad key, nonce or counter, or data
+/// past the counter's end.
+chacha20_crypt: fn(key: [U8], nonce: [U8], counter: Int, src: [U8]) -> [U8]? Never! {
+    c := chacha20_key(key) ?? return None
+    if !chacha20_starts(c, nonce, counter) -> return None
+    out := [U8]{}
+    if !chacha20_update(c, src, 0, src.len(), out) -> return None
+    Val(out)
+}
+
+/// HChaCha20 (draft-irtf-cfrg-xchacha-03 section 2.2): the 32-byte subkey
+/// of a 32-byte key and a 16-byte nonce, words 0 to 3 and 12 to 15 of the
+/// rounds without the final addition.
+hchacha20: fn(key: [U8], nonce: [U8]) -> [U8]? Never! {
+    if key.len() != 32 || nonce.len() != 16 -> return None
+    s := chacha20_key_state(key)
+    loop i in 0..<4 -> s[12 + i] = word32(nonce, 4 * i)
+    block := cipher.zero_bytes(64)
+    chacha20_core(s, block, false)
+    out := cipher.zero_bytes(32)
+    loop i in 0..<16 {
+        out[i] = block[i]
+        out[16 + i] = block[48 + i]
+    }
+    core.crypto.wipe(block)
+    loop i in 0..<16 -> s[i] = U32{0}
+    Val(out)
+}
+
+// ---------------------------------------------------------------------------
+// Poly1305 (RFC 8439 section 2.5; mbedtls poly1305.c) in five 26-bit limbs,
+// so every product and sum fits a U64 without a carry branch.
+
+/// A Poly1305 context.
+/// - `r`: the clamped r in five limbs, then 5 r_1 to 5 r_4.
+/// - `h`: the accumulator in five limbs; `pad`: s in four 32-bit words.
+/// - `buf`: `fill` bytes of a partial block.
+Poly1305: struct {
+    r: [U64]
+    h: [U64]
+    pad: [U64]
+    buf: [U8]
+    fill: Int
+}
+
+impl Poly1305.Close {
+    close: fn(&&self) {
+        r := self.r.move()
+        cipher.wipe_words(r)
+        h := self.h.move()
+        cipher.wipe_words(h)
+        pad := self.pad.move()
+        cipher.wipe_words(pad)
+        buf := self.buf.move()
+        core.crypto.wipe(buf)
+    }
+}
+
+/// A context for the 32-byte one-time key r || s, with r clamped (RFC 8439
+/// section 2.5.1; mbedtls_poly1305_starts). None for any other length.
+#Arithmetic(.Wrapping)
+poly1305_key: fn(key: [U8]) -> Poly1305? Never! {
+    if key.len() != 32 -> return None
+    r := cipher.words(9)
+    r[0] = cipher.le32(key, 0).bit_and(U64{0x3ffffff})
+    r[1] = (cipher.le32(key, 3) >> 2).bit_and(U64{0x3ffff03})
+    r[2] = (cipher.le32(key, 6) >> 4).bit_and(U64{0x3ffc0ff})
+    r[3] = (cipher.le32(key, 9) >> 6).bit_and(U64{0x3f03fff})
+    r[4] = (cipher.le32(key, 12) >> 8).bit_and(U64{0x00fffff})
+    loop i in 1..<5 -> r[4 + i] = r[i] * U64{5}
+    pad := cipher.words(4)
+    loop i in 0..<4 -> pad[i] = cipher.le32(key, 16 + 4 * i)
+    Val(Poly1305{r: r, h: cipher.words(5), pad: pad, buf: cipher.zero_bytes(16), fill: 0})
+}
+
+/// h = (h + m_i + hibit 2^128) r mod 2^130 - 5 over `count` 16-byte blocks
+/// of `m` from `off`. `hibit` is 2^24 in limb 4 for a whole block, zero for
+/// the padded last one.
+#Arithmetic(.Wrapping)
+poly1305_blocks: fn(r: [U64], h: &[U64], m: [U8], off: Int, count: Int, hibit: U64) Never! {
+    mask: U64{0x3ffffff}
+    five: U64{5}
+    r0: r[0]
+    r1: r[1]
+    r2: r[2]
+    r3: r[3]
+    r4: r[4]
+    s1: r[5]
+    s2: r[6]
+    s3: r[7]
+    s4: r[8]
+    h0 := h[0]
+    h1 := h[1]
+    h2 := h[2]
+    h3 := h[3]
+    h4 := h[4]
+    at := off
+    loop _ in 0..<count {
+        h0 += cipher.le32(m, at).bit_and(mask)
+        h1 += (cipher.le32(m, at + 3) >> 2).bit_and(mask)
+        h2 += (cipher.le32(m, at + 6) >> 4).bit_and(mask)
+        h3 += (cipher.le32(m, at + 9) >> 6).bit_and(mask)
+        h4 += (cipher.le32(m, at + 12) >> 8).bit_or(hibit)
+        d0: h0 * r0 + h1 * s4 + h2 * s3 + h3 * s2 + h4 * s1
+        d1: h0 * r1 + h1 * r0 + h2 * s4 + h3 * s3 + h4 * s2
+        d2: h0 * r2 + h1 * r1 + h2 * r0 + h3 * s4 + h4 * s3
+        d3: h0 * r3 + h1 * r2 + h2 * r1 + h3 * r0 + h4 * s4
+        d4: h0 * r4 + h1 * r3 + h2 * r2 + h3 * r1 + h4 * r0
+        e1: d1 + (d0 >> 26)
+        e2: d2 + (e1 >> 26)
+        e3: d3 + (e2 >> 26)
+        e4: d4 + (e3 >> 26)
+        h0 = d0.bit_and(mask) + (e4 >> 26) * five
+        h1 = e1.bit_and(mask) + (h0 >> 26)
+        h0 = h0.bit_and(mask)
+        h2 = e2.bit_and(mask)
+        h3 = e3.bit_and(mask)
+        h4 = e4.bit_and(mask)
+        at += 16
+    }
+    h[0] = h0
+    h[1] = h1
+    h[2] = h2
+    h[3] = h3
+    h[4] = h4
+}
+
+/// Feed `len` bytes of `m` from `off` (mbedtls_poly1305_update).
+poly1305_update: fn(p: &Poly1305, m: [U8], off: Int, len: Int) Never! {
+    at := off
+    end: off + len
+    if p.fill > 0 {
+        loop at < end && p.fill < 16 {
+            p.buf[p.fill] = m[at]
+            p.fill += 1
+            at += 1
+        }
+        if p.fill < 16 -> return
+        poly1305_blocks(p.r, p.h, p.buf, 0, 1, U64{0x1000000})
+        p.fill = 0
+    }
+    whole: (end - at) /% 16
+    poly1305_blocks(p.r, p.h, m, at, whole, U64{0x1000000})
+    at += whole * 16
+    loop at < end {
+        p.buf[p.fill] = m[at]
+        p.fill += 1
+        at += 1
+    }
+}
+
+/// The 16-byte tag (h + s) mod 2^128, with h fully reduced mod 2^130 - 5
+/// by a masked select (mbedtls_poly1305_finish).
+#Arithmetic(.Wrapping)
+poly1305_finish: fn(p: &Poly1305) -> [U8] Never! {
+    if p.fill > 0 {
+        p.buf[p.fill] = U8{1}
+        loop i in p.fill + 1..<16 -> p.buf[i] = U8{0}
+        poly1305_blocks(p.r, p.h, p.buf, 0, 1, U64{0})
+        p.fill = 0
+    }
+    mask: U64{0x3ffffff}
+    h0 := p.h[0]
+    h1 := p.h[1]
+    h2 := p.h[2]
+    h3 := p.h[3]
+    h4 := p.h[4]
+    c := h1 >> 26
+    h1 = h1.bit_and(mask)
+    h2 += c
+    c = h2 >> 26
+    h2 = h2.bit_and(mask)
+    h3 += c
+    c = h3 >> 26
+    h3 = h3.bit_and(mask)
+    h4 += c
+    c = h4 >> 26
+    h4 = h4.bit_and(mask)
+    h0 += c * U64{5}
+    c = h0 >> 26
+    h0 = h0.bit_and(mask)
+    h1 += c
+    // g = h + 5 - 2^130; h >= p exactly when g does not borrow.
+    g0 := h0 + U64{5}
+    c = g0 >> 26
+    g0 = g0.bit_and(mask)
+    g1 := h1 + c
+    c = g1 >> 26
+    g1 = g1.bit_and(mask)
+    g2 := h2 + c
+    c = g2 >> 26
+    g2 = g2.bit_and(mask)
+    g3 := h3 + c
+    c = g3 >> 26
+    g3 = g3.bit_and(mask)
+    g4: h4 + c - (U64{1} << 26)
+    take_g: (g4 >> 63) - U64{1}
+    keep_h: take_g.bit_not()
+    h0 = h0.bit_and(keep_h).bit_or(g0.bit_and(take_g))
+    h1 = h1.bit_and(keep_h).bit_or(g1.bit_and(take_g))
+    h2 = h2.bit_and(keep_h).bit_or(g2.bit_and(take_g))
+    h3 = h3.bit_and(keep_h).bit_or(g3.bit_and(take_g))
+    h4 = h4.bit_and(keep_h).bit_or(g4.bit_and(take_g))
+    low: U64{0xffffffff}
+    w0: h0.bit_or(h1 << 26).bit_and(low)
+    w1: (h1 >> 6).bit_or(h2 << 20).bit_and(low)
+    w2: (h2 >> 12).bit_or(h3 << 14).bit_and(low)
+    w3: (h3 >> 18).bit_or(h4 << 8).bit_and(low)
+    mac := cipher.zero_bytes(16)
+    f := w0 + p.pad[0]
+    cipher.put_word(mac, 0, f)
+    f = w1 + p.pad[1] + (f >> 32)
+    cipher.put_word(mac, 4, f)
+    f = w2 + p.pad[2] + (f >> 32)
+    cipher.put_word(mac, 8, f)
+    f = w3 + p.pad[3] + (f >> 32)
+    cipher.put_word(mac, 12, f)
+    cipher.wipe_words(p.h)
+    mac
+}
+
+/// The Poly1305 tag of `msg` under a 32-byte one-time key
+/// (mbedtls_poly1305_mac).
+poly1305_mac: fn(key: [U8], msg: [U8]) -> [U8]? Never! {
+    p := poly1305_key(key) ?? return None
+    poly1305_update(p, msg, 0, msg.len())
+    Val(poly1305_finish(p))
+}
+
+// ---------------------------------------------------------------------------
+// ChaCha20-Poly1305 (RFC 8439 section 2.8; mbedtls chachapoly.c).
+
+CHACHAPOLY_INIT: 0
+CHACHAPOLY_AAD: 1
+CHACHAPOLY_CIPHERTEXT: 2
+CHACHAPOLY_FINISHED: 3
+
+/// A ChaCha20-Poly1305 context (mbedtls_chachapoly_context).
+ChaChaPoly: struct {
+    chacha: ChaCha20
+    poly: Poly1305
+    ad_len: Int
+    len: Int
+    stage: Int
+    decrypt: Bool
+}
+
+/// A context for a 32-byte key (mbedtls_chachapoly_setkey); None for any
+/// other length.
+chachapoly_key: fn(key: [U8]) -> ChaChaPoly? Never! {
+    c: chacha20_key(key) ?? return None
+    p: poly1305_key(cipher.zero_bytes(32)) ?? return None
+    Val(ChaChaPoly{chacha: c, poly: p, ad_len: 0, len: 0, stage: CHACHAPOLY_INIT, decrypt: false})
+}
+
+/// Start a message under a 12-byte nonce: the Poly1305 key is the first 32
+/// bytes of keystream block 0 (RFC 8439 section 2.6), and data starts at
+/// block 1 (mbedtls_chachapoly_starts).
+chachapoly_starts: fn(cp: &ChaChaPoly, nonce: [U8], decrypt: Bool) -> Bool Never! {
+    if !chacha20_starts(cp.chacha, nonce, 0) -> return false
+    one_time := [U8]{}
+    if !chacha20_update(cp.chacha, cipher.zero_bytes(64), 0, 64, one_time) -> return false
+    key := cipher.bytes_of(one_time, 0, 32)
+    core.crypto.wipe(one_time)
+    cp.poly = poly1305_key(key) ?? return false
+    core.crypto.wipe(key)
+    cp.ad_len = 0
+    cp.len = 0
+    cp.stage = CHACHAPOLY_AAD
+    cp.decrypt = decrypt
+    true
+}
+
+/// Zero bytes up to the next 16-byte boundary of `len` bytes
+/// (chachapoly_pad_aad and chachapoly_pad_ciphertext).
+chachapoly_pad: fn(p: &Poly1305, len: Int) Never! {
+    rest: len %% 16
+    if rest != 0 -> poly1305_update(p, ZERO_BLOCK, 0, 16 - rest)
+}
+
+/// Feed additional data (mbedtls_chachapoly_update_aad); false once data
+/// has started.
+chachapoly_update_ad: fn(cp: &ChaChaPoly, aad: [U8]) -> Bool Never! {
+    if cp.stage != CHACHAPOLY_AAD -> return false
+    cp.ad_len += aad.len()
+    poly1305_update(cp.poly, aad, 0, aad.len())
+    true
+}
+
+/// Encrypt or decrypt `len` bytes of `src` from `off`, appended to `out`,
+/// MACing the ciphertext (mbedtls_chachapoly_update). False in the wrong
+/// stage or past the counter's end.
+chachapoly_update: fn(cp: &ChaChaPoly, src: [U8], off: Int, len: Int, out: &[U8]) -> Bool Never! {
+    if cp.stage != CHACHAPOLY_AAD && cp.stage != CHACHAPOLY_CIPHERTEXT -> return false
+    if !chacha20_room(cp.chacha, len) -> return false
+    if cp.stage == CHACHAPOLY_AAD {
+        cp.stage = CHACHAPOLY_CIPHERTEXT
+        chachapoly_pad(cp.poly, cp.ad_len)
+    }
+    cp.len += len
+    if cp.decrypt {
+        poly1305_update(cp.poly, src, off, len)
+        return chacha20_update(cp.chacha, src, off, len, out)
+    }
+    first: out.len()
+    if !chacha20_update(cp.chacha, src, off, len, out) -> return false
+    poly1305_update(cp.poly, out, first, len)
+    true
+}
+
+/// The 16-byte tag over the padded AAD and ciphertext and their 64-bit
+/// lengths (mbedtls_chachapoly_finish). None before chachapoly_starts.
+chachapoly_finish: fn(cp: &ChaChaPoly) -> [U8]? Never! {
+    if cp.stage == CHACHAPOLY_INIT -> return None
+    if cp.stage == CHACHAPOLY_AAD -> chachapoly_pad(cp.poly, cp.ad_len)
+    if cp.stage == CHACHAPOLY_CIPHERTEXT -> chachapoly_pad(cp.poly, cp.len)
+    cp.stage = CHACHAPOLY_FINISHED
+    lengths := cipher.zero_bytes(16)
+    cipher.put_word(lengths, 0, U64{cp.ad_len})
+    cipher.put_word(lengths, 4, U64{cp.ad_len} >> 32)
+    cipher.put_word(lengths, 8, U64{cp.len})
+    cipher.put_word(lengths, 12, U64{cp.len} >> 32)
+    poly1305_update(cp.poly, lengths, 0, 16)
+    Val(poly1305_finish(cp.poly))
+}
+
+/// AEAD_CHACHA20_POLY1305 encryption (RFC 8439 section 2.8): the
+/// ciphertext of `plain` followed by its 16-byte tag.
+chachapoly_encrypt: fn(key: [U8], nonce: [U8], aad: [U8], plain: [U8]) -> [U8] cipher.CipherError! {
+    cp := chachapoly_key(key) ?? return Err(.Input)
+    if !chachapoly_starts(cp, nonce, false) -> return Err(.Input)
+    if !chachapoly_update_ad(cp, aad) -> return Err(.Input)
+    out := [U8]{}
+    cipher.reserve(out, plain.len() + 16)
+    if !chachapoly_update(cp, plain, 0, plain.len(), out) -> return Err(.Input)
+    mac: chachapoly_finish(cp) ?? return Err(.Input)
+    loop b in mac -> out.push(b)
+    Ok(out)
+}
+
+/// AEAD_CHACHA20_POLY1305 decryption of a ciphertext followed by its
+/// 16-byte tag: the plaintext, or .Auth when the tag does not verify.
+chachapoly_decrypt: fn(key: [U8], nonce: [U8], aad: [U8], sealed: [U8]) -> [U8] cipher.CipherError! {
+    if sealed.len() < 16 -> return Err(.Input)
+    len: sealed.len() - 16
+    cp := chachapoly_key(key) ?? return Err(.Input)
+    if !chachapoly_starts(cp, nonce, true) -> return Err(.Input)
+    if !chachapoly_update_ad(cp, aad) -> return Err(.Input)
+    out := [U8]{}
+    if !chachapoly_update(cp, sealed, 0, len, out) -> return Err(.Input)
+    want: chachapoly_finish(cp) ?? return Err(.Input)
+    expected := cipher.bytes_of(sealed, len, 16)
+    if !tags_equal(want, expected, 16) {
+        core.crypto.wipe(out)
+        return Err(.Auth)
+    }
+    Ok(out)
+}
+
+// ---------------------------------------------------------------------------
+
+#Test("The GCM specification's test cases 2 and 4 seal and open with AES-128") {
+    zero_key: gcm_key(cipher.zero_bytes(16)) ?? panic("GCM key")
+    sealed := gcm_encrypt(zero_key, cipher.zero_bytes(12), [U8]{}, cipher.zero_bytes(16), 16) ?? panic("seal")
+    assert(sealed == [U8]{0x03, 0x88, 0xda, 0xce, 0x60, 0xb6, 0xa3, 0x92, 0xf3, 0x28, 0xc2, 0xb9, 0x71, 0xb2, 0xfe, 0x78, 0xab, 0x6e, 0x47, 0xd4, 0x2c, 0xec, 0x13, 0xbd, 0xf5, 0x3a, 0x67, 0xb2, 0x12, 0x57, 0xbd, 0xdf})
+    k: gcm_key([U8]{0xfe, 0xff, 0xe9, 0x92, 0x86, 0x65, 0x73, 0x1c, 0x6d, 0x6a, 0x8f, 0x94, 0x67, 0x30, 0x83, 0x08}) ?? panic("GCM key")
+    iv: [U8]{0xca, 0xfe, 0xba, 0xbe, 0xfa, 0xce, 0xdb, 0xad, 0xde, 0xca, 0xf8, 0x88}
+    plain: [U8]{0xd9, 0x31, 0x32, 0x25, 0xf8, 0x84, 0x06, 0xe5, 0xa5, 0x59, 0x09, 0xc5, 0xaf, 0xf5, 0x26, 0x9a, 0x86, 0xa7, 0xa9, 0x53, 0x15, 0x34, 0xf7, 0xda, 0x2e, 0x4c, 0x30, 0x3d, 0x8a, 0x31, 0x8a, 0x72, 0x1c, 0x3c, 0x0c, 0x95, 0x95, 0x68, 0x09, 0x53, 0x2f, 0xcf, 0x0e, 0x24, 0x49, 0xa6, 0xb5, 0x25, 0xb1, 0x6a, 0xed, 0xf5, 0xaa, 0x0d, 0xe6, 0x57, 0xba, 0x63, 0x7b, 0x39}
+    aad: [U8]{0xfe, 0xed, 0xfa, 0xce, 0xde, 0xad, 0xbe, 0xef, 0xfe, 0xed, 0xfa, 0xce, 0xde, 0xad, 0xbe, 0xef, 0xab, 0xad, 0xda, 0xd2}
+    want: [U8]{0x42, 0x83, 0x1e, 0xc2, 0x21, 0x77, 0x74, 0x24, 0x4b, 0x72, 0x21, 0xb7, 0x84, 0xd0, 0xd4, 0x9c, 0xe3, 0xaa, 0x21, 0x2f, 0x2c, 0x02, 0xa4, 0xe0, 0x35, 0xc1, 0x7e, 0x23, 0x29, 0xac, 0xa1, 0x2e, 0x21, 0xd5, 0x14, 0xb2, 0x54, 0x66, 0x93, 0x1c, 0x7d, 0x8f, 0x6a, 0x5a, 0xac, 0x84, 0xaa, 0x05, 0x1b, 0xa3, 0x0b, 0x39, 0x6a, 0x0a, 0xac, 0x97, 0x3d, 0x58, 0xe0, 0x91, 0x5b, 0xc9, 0x4f, 0xbc, 0x32, 0x21, 0xa5, 0xdb, 0x94, 0xfa, 0xe9, 0x5a, 0xe7, 0x12, 0x1a, 0x47}
+    got := gcm_encrypt(k, iv, aad, plain, 16) ?? panic("seal")
+    assert(got == want)
+    assert((gcm_decrypt(k, iv, aad, want, 16) ?? panic("open")) == plain)
+    forged := want.copy()
+    forged[70] = forged[70].bit_xor(U8{1})
+    refused: if gcm_decrypt(k, iv, aad, forged, 16) == {
+        .Ok(_) -> false
+        .Err(e) -> e == .Auth
+    }
+    assert(refused)
+}
+
+#Test("SP 800-38C C.1 CCM and RFC 8439 2.5.2 Poly1305 and 2.8.2 ChaCha20-Poly1305 known answers") {
+    ccm_k: cipher.aes_key([U8]{0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48, 0x49, 0x4a, 0x4b, 0x4c, 0x4d, 0x4e, 0x4f}, false) ?? panic("AES key")
+    nonce: [U8]{0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16}
+    ccm_aad: [U8]{0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07}
+    ccm_sealed := ccm_encrypt(ccm_k, false, nonce, ccm_aad, [U8]{0x20, 0x21, 0x22, 0x23}, 4) ?? panic("seal")
+    assert(ccm_sealed == [U8]{0x71, 0x62, 0x01, 0x5b, 0x4d, 0xac, 0x25, 0x5d})
+    assert((ccm_decrypt(ccm_k, false, nonce, ccm_aad, ccm_sealed, 4) ?? panic("open")) == [U8]{0x20, 0x21, 0x22, 0x23})
+    poly_key: [U8]{0x85, 0xd6, 0xbe, 0x78, 0x57, 0x55, 0x6d, 0x33, 0x7f, 0x44, 0x52, 0xfe, 0x42, 0xd5, 0x06, 0xa8, 0x01, 0x03, 0x80, 0x8a, 0xfb, 0x0d, 0xb2, 0xfd, 0x4a, 0xbf, 0xf6, 0xaf, 0x41, 0x49, 0xf5, 0x1b}
+    mac: poly1305_mac(poly_key, "Cryptographic Forum Research Group".bytes()) ?? panic("Poly1305 key")
+    assert(mac == [U8]{0xa8, 0x06, 0x1d, 0xc1, 0x30, 0x51, 0x36, 0xc6, 0xc2, 0x2b, 0x8b, 0xaf, 0x0c, 0x01, 0x27, 0xa9})
+    key := [U8]{}
+    loop i in 0..<32 -> key.push(U8{0x80 + i})
+    iv: [U8]{0x07, 0x00, 0x00, 0x00, 0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47}
+    aad: [U8]{0x50, 0x51, 0x52, 0x53, 0xc0, 0xc1, 0xc2, 0xc3, 0xc4, 0xc5, 0xc6, 0xc7}
+    plain: "Ladies and Gentlemen of the class of '99: If I could offer you only one tip for the future, sunscreen would be it.".bytes()
+    want: [U8]{0xd3, 0x1a, 0x8d, 0x34, 0x64, 0x8e, 0x60, 0xdb, 0x7b, 0x86, 0xaf, 0xbc, 0x53, 0xef, 0x7e, 0xc2, 0xa4, 0xad, 0xed, 0x51, 0x29, 0x6e, 0x08, 0xfe, 0xa9, 0xe2, 0xb5, 0xa7, 0x36, 0xee, 0x62, 0xd6, 0x3d, 0xbe, 0xa4, 0x5e, 0x8c, 0xa9, 0x67, 0x12, 0x82, 0xfa, 0xfb, 0x69, 0xda, 0x92, 0x72, 0x8b, 0x1a, 0x71, 0xde, 0x0a, 0x9e, 0x06, 0x0b, 0x29, 0x05, 0xd6, 0xa5, 0xb6, 0x7e, 0xcd, 0x3b, 0x36, 0x92, 0xdd, 0xbd, 0x7f, 0x2d, 0x77, 0x8b, 0x8c, 0x98, 0x03, 0xae, 0xe3, 0x28, 0x09, 0x1b, 0x58, 0xfa, 0xb3, 0x24, 0xe4, 0xfa, 0xd6, 0x75, 0x94, 0x55, 0x85, 0x80, 0x8b, 0x48, 0x31, 0xd7, 0xbc, 0x3f, 0xf4, 0xde, 0xf0, 0x8e, 0x4b, 0x7a, 0x9d, 0xe5, 0x76, 0xd2, 0x65, 0x86, 0xce, 0xc6, 0x4b, 0x61, 0x16, 0x1a, 0xe1, 0x0b, 0x59, 0x4f, 0x09, 0xe2, 0x6a, 0x7e, 0x90, 0x2e, 0xcb, 0xd0, 0x60, 0x06, 0x91}
+    sealed := chachapoly_encrypt(key, iv, aad, plain) ?? panic("seal")
+    assert(sealed == want)
+    assert((chachapoly_decrypt(key, iv, aad, want) ?? panic("open")) == plain)
+    forged := want.copy()
+    forged[0] = forged[0].bit_xor(U8{0x80})
+    refused: if chachapoly_decrypt(key, iv, aad, forged) == {
+        .Ok(_) -> false
+        .Err(e) -> e == .Auth
+    }
+    assert(refused)
+}
+
+#Test("The GHASH host leaf agrees with the Jet carry-less multiply on every block count and offset") {
+    data := [U8]{}
+    loop i in 0..<200 -> data.push(U8{(i * 53 + 7) %% 256})
+    k: gcm_key(cipher.bytes_of(data, 160, 16)) ?? panic("GCM key")
+    loop count in 0..<12 {
+        loop off in ([Int]{0, 1, 5}) {
+            fast := cipher.bytes_of(data, 176, 16)
+            slow := cipher.bytes_of(data, 176, 16)
+            ghash(k, fast, data, off, count)
+            ghash_portable(k, slow, data, off, count)
+            assert(fast == slow)
+        }
+    }
+}
