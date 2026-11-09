@@ -365,6 +365,57 @@ sys_group_file: fn(user: I64, gid: I64, list: I64, look: I64, reader: I64, nscd:
     host_sample_out(host_call(I64{151}, native, I64{0}, I64{0}), available, value, errno)
 }
 
+// sched_getscheduler(pid), then sched_getparam(pid, &param): (true, policy,
+// priority, errno). The policy drops SCHED_RESET_ON_FORK (0x40000000); errno
+// is 0 when both calls succeed, else the first failure's.
+#Export(c) jet_sys_sched_get_raw: fn(pid: I64, available: I64, policy: I64, priority: I64, errno: I64) {
+    native: jet_int_owned_to_i64(pid)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    param: jet_rt_alloc(I64{8}, I64{8})
+    thread_zero(param, I64{8})
+    kind: host_call(I64{145}, native, I64{0}, I64{0})
+    result := kind
+    if (result >= I64{0}) -> result = host_call(I64{143}, native, param, I64{0})
+    #Unsafe("param owns an initialized struct sched_param; the caller lends the tuple's Bool byte and three Int words") {
+        os_store_u8(available, I64{1})
+        os_store_i64(policy, jet_int_owned_from_i64(if (kind < I64{0}) -> I64{-1} else -> kind.bit_and(I64{1073741823})))
+        os_store_i64(priority, jet_int_owned_from_i64(net_i32(net_load_uint(param, I64{4}))))
+        os_store_i64(errno, jet_int_owned_from_i64(if (result < I64{0}) -> wrapping(I64{0} - result) else -> I64{0}))
+    }
+    jet_rt_free(param, I64{8}, I64{8})
+}
+
+// sched_setscheduler(pid, policy, &{priority}): Core passes SCHED_OTHER 0,
+// FIFO 1, RR 2, BATCH 3 or IDLE 5, with priority 1..99 for FIFO and RR and 0
+// otherwise.
+#Export(c) jet_sys_sched_set_raw: fn(pid: I64, policy: I64, priority: I64, available: I64, value: I64, errno: I64) {
+    native_pid: jet_int_owned_to_i64(pid)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    native_policy: jet_int_owned_to_i64(policy)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    native_priority: jet_int_owned_to_i64(priority)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    param: jet_rt_alloc(I64{8}, I64{8})
+    thread_zero(param, I64{8})
+    net_store_uint(param, I64{4}, native_priority.bit_and(I64{4294967295}))
+    result: host_call(I64{144}, native_pid, native_policy, param)
+    jet_rt_free(param, I64{8}, I64{8})
+    host_sample_out(result, available, value, errno)
+}
+
+// sched_rr_get_interval(pid, &timespec): (true, nanoseconds, errno), the
+// value -1 on failure.
+#Export(c) jet_sys_sched_rr_interval_raw: fn(pid: I64, available: I64, value: I64, errno: I64) {
+    native: jet_int_owned_to_i64(pid)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    span: jet_rt_alloc(I64{16}, I64{8})
+    thread_zero(span, I64{16})
+    result: host_call(I64{148}, native, span, I64{0})
+    nanos: trap_word(span) * I64{1000000000} + trap_word(wrapping(span + I64{8}))
+    jet_rt_free(span, I64{16}, I64{8})
+    host_sample_out(if (result < I64{0}) -> result else -> nanos, available, value, errno)
+}
+
 // getloadavg(avg, 3): (true, count, avg0, avg1, avg2). musl reads sysinfo's
 // three loads, each a 16-bit binary fraction; the doubles cross as their raw
 // f64 bits in the Float out slots. A host without sysinfo (the web) has no
