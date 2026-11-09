@@ -211,15 +211,15 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1423,
+  "total": 1442,
   "counts": {
     "Compiler": 748,
-    "Core": 193,
+    "Core": 197,
     "Docs": 8,
     "Examples": 41,
     "Jetpack": 9,
     "Tools": 7,
-    "tests": 430
+    "tests": 432
   },
   "regions": [
     {
@@ -1191,14 +1191,14 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetCli/Source/Cli/Host.jet",
-      "line": 1608,
+      "line": 1609,
       "column": 9,
       "reason": "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the unmapped process exit"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetCli/Source/Cli/Host.jet",
-      "line": 2021,
+      "line": 2016,
       "column": 9,
       "reason": "posix setpriority: the build lowers only its own threads, never raising one"
     },
@@ -4138,35 +4138,35 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RouteSys.jet",
-      "line": 379,
+      "line": 401,
       "column": 5,
       "reason": "param owns an initialized struct sched_param; the caller lends the tuple's Bool byte and three Int words"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RouteSys.jet",
-      "line": 464,
+      "line": 486,
       "column": 5,
       "reason": "the caller lends the tuple's Bool byte and four Int words"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RouteSys.jet",
-      "line": 499,
+      "line": 521,
       "column": 5,
       "reason": "info owns the initialized struct sysinfo; the caller lends the tuple's Bool byte, Int word and three Float words"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RouteSys.jet",
-      "line": 531,
+      "line": 553,
       "column": 5,
       "reason": "utimensat borrows the NUL-terminated path and the two owned timespecs for the synchronous call"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RouteSys.jet",
-      "line": 546,
+      "line": 568,
       "column": 5,
       "reason": "buffer owns an initialized struct tms; the caller lends the tuple's Bool byte and six Int words"
     },
@@ -5811,21 +5811,21 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Core",
       "file": "Core/Data/Data.jet",
-      "line": 2416,
+      "line": 2419,
       "column": 9,
       "reason": "native path bytes originate from the host environment and are split at ASCII boundaries"
     },
     {
       "package": "Core",
       "file": "Core/Data/Data.jet",
-      "line": 3345,
+      "line": 3348,
       "column": 5,
       "reason": "inspect existing private Decode carriers only inside checked Core data source"
     },
     {
       "package": "Core",
       "file": "Core/Data/Data.jet",
-      "line": 3679,
+      "line": 3682,
       "column": 5,
       "reason": "inspect existing private Decode carriers only inside checked Core data source"
     },
@@ -5965,14 +5965,14 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Core",
       "file": "Core/Encoding/CborStream.jet",
-      "line": 218,
+      "line": 221,
       "column": 9,
       "reason": "the retained key copies exactly the already validated text bytes"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/CborStream.jet",
-      "line": 320,
+      "line": 323,
       "column": 17,
       "reason": "the exact CBOR text allocation passed strict UTF-8 validation"
     },
@@ -6084,105 +6084,105 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Core",
       "file": "Core/Encoding/Stream.jet",
-      "line": 360,
+      "line": 365,
       "column": 9,
       "reason": "the shared UTF-8 validator just accepted this owned byte allocation"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Stream.jet",
-      "line": 500,
+      "line": 505,
       "column": 9,
       "reason": "the shared UTF-8 validator just accepted this owned ASCII token"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Stream.jet",
-      "line": 505,
+      "line": 510,
       "column": 13,
       "reason": "retain a validated number lexeme in the private event carrier until typed decoding"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Stream.jet",
-      "line": 697,
+      "line": 702,
       "column": 9,
       "reason": "transfer already validated UTF-8 storage to inspect its actual owned capacity"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Stream.jet",
-      "line": 708,
+      "line": 713,
       "column": 9,
       "reason": "the private numeric event is projected only into the matching typed tree carrier"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Stream.jet",
-      "line": 1084,
+      "line": 1089,
       "column": 5,
       "reason": "the shared UTF-8 validator just accepted this owned allocation"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Stream.jet",
-      "line": 1096,
+      "line": 1101,
       "column": 5,
       "reason": "the byte position was checked against this String's storage length"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Stream.jet",
-      "line": 1660,
+      "line": 1665,
       "column": 5,
       "reason": "the shared UTF-8 validator accepted this exact owned formatter buffer"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Stream.jet",
-      "line": 1675,
+      "line": 1680,
       "column": 13,
       "reason": "every byte before the closing quote is printable ASCII, so it is whole UTF-8"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Stream.jet",
-      "line": 1690,
+      "line": 1695,
       "column": 5,
       "reason": "transfer the owned UTF-8 String buffer before re-spelling its shortest digits"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Stream.jet",
-      "line": 1836,
+      "line": 1841,
       "column": 13,
       "reason": "retain a validated number lexeme in the private event carrier"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Stream.jet",
-      "line": 1841,
+      "line": 1846,
       "column": 13,
       "reason": "project the native compiler-private Bytes carrier into its event"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Stream.jet",
-      "line": 1907,
+      "line": 1912,
       "column": 13,
       "reason": "classify the private Bytes carrier without borrowing or exposing its payload"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Stream.jet",
-      "line": 2050,
+      "line": 2055,
       "column": 5,
       "reason": "owned validated UTF-8 allocation transfers in the encoding source seam"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Stream.jet",
-      "line": 2087,
+      "line": 2092,
       "column": 5,
       "reason": "exercise the typed Encode byte carrier at the JSON preflight boundary"
     },
@@ -6227,6 +6227,13 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
       "line": 576,
       "column": 1,
       "reason": "compiler store owns the explicit child descriptor slot and retains the held Directory until the process leaf duplicates its descriptor"
+    },
+    {
+      "package": "Core",
+      "file": "Core/Files/Files.jet",
+      "line": 645,
+      "column": 9,
+      "reason": "this test owns both held directories and child descriptor slots 198 and 199 until the child runs"
     },
     {
       "package": "Core",
@@ -6294,56 +6301,56 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Core",
       "file": "Core/Net/Net.jet",
-      "line": 137,
+      "line": 140,
       "column": 5,
       "reason": "checked IPv4/IPv6 octets transferred into the native address carrier"
     },
     {
       "package": "Core",
       "file": "Core/Net/Net.jet",
-      "line": 143,
+      "line": 146,
       "column": 5,
       "reason": "read native address octets; no parsing or formatting policy in the carrier leaf"
     },
     {
       "package": "Core",
       "file": "Core/Net/Net.jet",
-      "line": 149,
+      "line": 152,
       "column": 5,
       "reason": "read the native IP address discriminant"
     },
     {
       "package": "Core",
       "file": "Core/Net/Net.jet",
-      "line": 206,
+      "line": 209,
       "column": 5,
       "reason": "validated IP octets, port and IPv6 numeric scope transferred into the socket carrier"
     },
     {
       "package": "Core",
       "file": "Core/Net/Net.jet",
-      "line": 213,
+      "line": 216,
       "column": 5,
       "reason": "read socket IP representation; formatting stays in Jet"
     },
     {
       "package": "Core",
       "file": "Core/Net/Net.jet",
-      "line": 216,
+      "line": 219,
       "column": 5,
       "reason": "read native socket port"
     },
     {
       "package": "Core",
       "file": "Core/Net/Net.jet",
-      "line": 228,
+      "line": 231,
       "column": 5,
       "reason": "read native IPv6 socket scope identifier"
     },
     {
       "package": "Core",
       "file": "Core/Net/Net.jet",
-      "line": 430,
+      "line": 433,
       "column": 5,
       "reason": "read the native UDP packet's socket-address carrier"
     },
@@ -6567,154 +6574,196 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 425,
+      "line": 426,
       "column": 1,
       "reason": "posix umask: the caller owns the process file-creation mask and restores it when other code relies on it"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 593,
+      "line": 594,
+      "column": 1,
+      "reason": "posix set_scheduling: the caller owns the CPU share of the process it changes"
+    },
+    {
+      "package": "Core",
+      "file": "Core/Sys/Sys.jet",
+      "line": 644,
+      "column": 1,
+      "reason": "posix set_wall_clock: the caller owns the machine's wall clock, which every process reads"
+    },
+    {
+      "package": "Core",
+      "file": "Core/Sys/Sys.jet",
+      "line": 718,
       "column": 5,
       "reason": "posix getpgid: inspect a process group"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 599,
+      "line": 724,
       "column": 5,
       "reason": "posix getsid: inspect a process session"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 604,
+      "line": 729,
       "column": 1,
       "reason": "posix getpriority: the caller vouches that `which` names this process or one it controls"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 611,
+      "line": 736,
       "column": 1,
       "reason": "posix setpriority: the caller owns the scheduling priority of the process it changes"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 615,
+      "line": 740,
       "column": 1,
       "reason": "posix utime: the caller owns the file whose timestamps it rewrites"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 622,
+      "line": 747,
       "column": 1,
       "reason": "posix stop: the caller accepts that the process ends here after the shared cleanup boundary"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 632,
+      "line": 757,
       "column": 1,
       "reason": "posix pipe: the caller owns both returned descriptors and closes each exactly once"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 638,
+      "line": 763,
       "column": 1,
       "reason": "posix close_fd: the caller owns `fd` and nothing uses it after this call"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 772,
+      "line": 902,
       "column": 1,
       "reason": "posix mkfifo: the caller owns `path` and removes the named pipe it creates"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 777,
+      "line": 916,
+      "column": 1,
+      "reason": "posix mknod: the caller owns `path` and grants every process that may open it access to the device it names"
+    },
+    {
+      "package": "Core",
+      "file": "Core/Sys/Sys.jet",
+      "line": 930,
       "column": 1,
       "reason": "posix fork: the caller handles both the parent and the child return and reaps the child"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 781,
+      "line": 934,
       "column": 1,
       "reason": "posix setsid: the caller owns the process session topology it changes"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 785,
+      "line": 938,
       "column": 1,
       "reason": "posix wait: the caller owns the child processes it reaps"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 791,
+      "line": 944,
       "column": 1,
       "reason": "posix waitpid: the caller owns the child process it reaps"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 797,
+      "line": 950,
       "column": 1,
       "reason": "posix setuid: the caller drops or changes process credentials deliberately"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 801,
+      "line": 954,
       "column": 1,
       "reason": "posix setgid: the caller drops or changes process credentials deliberately"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 805,
+      "line": 979,
+      "column": 1,
+      "reason": "posix set_user_ids: the caller drops or changes process credentials deliberately"
+    },
+    {
+      "package": "Core",
+      "file": "Core/Sys/Sys.jet",
+      "line": 986,
+      "column": 1,
+      "reason": "posix set_group_ids: the caller drops or changes process credentials deliberately"
+    },
+    {
+      "package": "Core",
+      "file": "Core/Sys/Sys.jet",
+      "line": 1164,
       "column": 1,
       "reason": "posix setpgrp: the caller owns the process group topology it changes"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 809,
+      "line": 1168,
       "column": 1,
       "reason": "posix setpgid: the caller owns the process group topology it changes"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 813,
+      "line": 1172,
       "column": 1,
       "reason": "posix kill: the caller owns or is entitled to signal the target process"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 817,
+      "line": 1179,
+      "column": 1,
+      "reason": "posix signal reset: the caller owns the process signal disposition it resets"
+    },
+    {
+      "package": "Core",
+      "file": "Core/Sys/Sys.jet",
+      "line": 1183,
       "column": 1,
       "reason": "posix initgroups: the caller changes supplementary groups deliberately"
     },
     {
       "package": "Core",
       "file": "Core/Testing/Testing.jet",
-      "line": 1363,
+      "line": 1388,
       "column": 5,
       "reason": "the caller bounded this byte position by the String storage length"
     },
     {
       "package": "Core",
       "file": "Core/Testing/Testing.jet",
-      "line": 1384,
+      "line": 1409,
       "column": 5,
       "reason": "all appended bytes came from complete UTF-8 strings or ASCII"
     },
@@ -7176,7 +7225,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Jetpack",
       "file": "Jetpack/Publication/Tests/Index.jet",
-      "line": 291,
+      "line": 293,
       "column": 5,
       "reason": "the test owns the planted lock file it ages"
     },
@@ -7641,6 +7690,13 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
       "line": 2,
       "column": 5,
       "reason": "test unsafe reason"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/language_features/impl_method_inherits_trait_effect_row_on_every_tier.fixture/main.jet",
+      "line": 37,
+      "column": 5,
+      "reason": "the case prints the checked text"
     },
     {
       "package": "tests",
@@ -10269,13 +10325,13 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | crate/package | regions |
 | --- | ---: |
 | Compiler | 748 |
-| Core | 193 |
+| Core | 197 |
 | Docs | 8 |
 | Examples | 41 |
 | Jetpack | 9 |
 | Tools | 7 |
-| tests | 424 |
-| **total** | **1423** |
+| tests | 432 |
+| **total** | **1442** |
 
 ### Regions
 
@@ -10419,8 +10475,8 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2340:5 | "the allocation receipt pairs this owner with its original free address and exact size/alignment" |
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2348:5 | "the admitted runtime signature or pinned clone/drop role was checked before invoking its fixed word ABI" |
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2356:1 | "calls machine code; the caller vouches for its three-word System V signature" |
-| Compiler | Compiler/JetCli/Source/Cli/Host.jet | 1608:9 | "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the runtime's unmapped process exit" |
-| Compiler | Compiler/JetCli/Source/Cli/Host.jet | 2021:9 | "posix setpriority: the build lowers only its own threads, never raising one" |
+| Compiler | Compiler/JetCli/Source/Cli/Host.jet | 1609:9 | "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the unmapped process exit" |
+| Compiler | Compiler/JetCli/Source/Cli/Host.jet | 2016:9 | "posix setpriority: the build lowers only its own threads, never raising one" |
 | Compiler | Compiler/JetCli/Tests/RunKeep.fixture/RunKeep.jet | 155:5 | "the test owns the slot record it ages" |
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 145:5 | "pointer is a fresh payload whose align &gt;= 8 block reserved the word 24 bytes before it" |
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 153:5 | "pointer is an align &gt;= 8 payload being freed with its allocated size; its block reserved the count word 24 bytes before it" |
@@ -10835,16 +10891,16 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/RouteALog.jet | 88:5 | "the entry function configures before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/RouteAMath.jet | 13:9 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 7:5 | "some lends a writable C-ABI Option success word" |
-| Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 66:5 | "close(2) releases a descriptor this route opened" |
-| Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 76:9 | "read(2) fills at most the caller's remaining owned bytes" |
-| Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 98:9 | "socket(AF_UNIX, SOCK_STREAM&#124;SOCK_CLOEXEC) retains no memory" |
-| Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 114:9 | "connect(2) reads the owned 23-byte address" |
-| Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 130:9 | "sendto(2) with MSG_NOSIGNAL reads the owned request" |
-| Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 379:5 | "param owns an initialized struct sched_param; the caller lends the tuple's Bool byte and three Int words" |
-| Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 464:5 | "the caller lends the tuple's Bool byte and four Int words" |
-| Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 499:5 | "info owns the initialized struct sysinfo; the caller lends the tuple's Bool byte, Int word and three Float words" |
-| Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 531:5 | "utimensat borrows the NUL-terminated path and the two owned timespecs for the synchronous call" |
-| Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 546:5 | "buffer owns an initialized struct tms; the caller lends the tuple's Bool byte and six Int words" |
+| Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 88:5 | "close(2) releases a descriptor this route opened" |
+| Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 98:9 | "read(2) fills at most the caller's remaining owned bytes" |
+| Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 120:9 | "socket(AF_UNIX, SOCK_STREAM&#124;SOCK_CLOEXEC) retains no memory" |
+| Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 136:9 | "connect(2) reads the owned 23-byte address" |
+| Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 152:9 | "sendto(2) with MSG_NOSIGNAL reads the owned request" |
+| Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 401:5 | "param owns an initialized struct sched_param; the caller lends the tuple's Bool byte and three Int words" |
+| Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 486:5 | "the caller lends the tuple's Bool byte and four Int words" |
+| Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 521:5 | "info owns the initialized struct sysinfo; the caller lends the tuple's Bool byte, Int word and three Float words" |
+| Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 553:5 | "utimensat borrows the NUL-terminated path and the two owned timespecs for the synchronous call" |
+| Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 568:5 | "buffer owns an initialized struct tms; the caller lends the tuple's Bool byte and six Int words" |
 | Compiler | Compiler/JetRuntime/Source/RouteTerm.jet | 58:5 | "the caller lends the tuple's Bool byte, Text word and Option&lt;Text&gt; tag/payload words" |
 | Compiler | Compiler/JetRuntime/Source/RouteTerm.jet | 229:5 | "the caller lends the tuple's Text word and Option&lt;Text&gt; tag/payload words" |
 | Compiler | Compiler/JetRuntime/Source/RouteTerm.jet | 332:13 | "written under the host lock" |
@@ -11079,9 +11135,9 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Core | Core/Crypto/Vault.jet | 371:5 | "vault typed revocation commit provider boundary" |
 | Core | Core/Crypto/Vault.jet | 377:5 | "vault passphrase export provider boundary" |
 | Core | Core/Crypto/Vault.jet | 384:5 | "vault recipient export provider boundary" |
-| Core | Core/Data/Data.jet | 2416:9 | "native path bytes originate from the host environment and are split at ASCII boundaries" |
-| Core | Core/Data/Data.jet | 3345:5 | "inspect existing private Decode carriers only inside checked Core data source" |
-| Core | Core/Data/Data.jet | 3679:5 | "inspect existing private Decode carriers only inside checked Core data source" |
+| Core | Core/Data/Data.jet | 2419:9 | "native path bytes originate from the host environment and are split at ASCII boundaries" |
+| Core | Core/Data/Data.jet | 3348:5 | "inspect existing private Decode carriers only inside checked Core data source" |
+| Core | Core/Data/Data.jet | 3682:5 | "inspect existing private Decode carriers only inside checked Core data source" |
 | Core | Core/Db/Db.jet | 1468:9 | "this consuming Close owns the sole SQLite database pointer, including open-error handles; close_v2 permits live statements to finalize later" |
 | Core | Core/Db/Db.jet | 1475:9 | "this consuming Close owns the sole statement pointer; SQLite permits finalize(NULL) and rusqlite drops finalize's status" |
 | Core | Core/Db/Db.jet | 1503:1 | "SQLite owns a live NUL-terminated error/name buffer; strlen and unpack finish before any following engine call" |
@@ -11101,8 +11157,8 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Core | Core/Db/Db.jet | 1924:5 | "failed opens, including non-null error handles, have already reached Close" |
 | Core | Core/Encoding/Cbor.jet | 100:5 | "inspect private typed carriers without changing public Dyn variants" |
 | Core | Core/Encoding/Cbor.jet | 166:5 | "validated private carriers retain byte strings for typed Encode" |
-| Core | Core/Encoding/CborStream.jet | 218:9 | "the retained key copies exactly the already validated text bytes" |
-| Core | Core/Encoding/CborStream.jet | 320:17 | "the exact CBOR text allocation passed strict UTF-8 validation" |
+| Core | Core/Encoding/CborStream.jet | 221:9 | "the retained key copies exactly the already validated text bytes" |
+| Core | Core/Encoding/CborStream.jet | 323:17 | "the exact CBOR text allocation passed strict UTF-8 validation" |
 | Core | Core/Encoding/Csv.jet | 141:9 | "input is a String; original complete UTF-8 scalars and ASCII quote escapes entered the field" |
 | Core | Core/Encoding/Csv.jet | 379:5 | "the exact owned query bytes passed the shared strict UTF-8 validator" |
 | Core | Core/Encoding/Csv.jet | 399:5 | "a String's bytes cut at scalar boundaries, plus ASCII quotes, are complete UTF-8" |
@@ -11118,27 +11174,28 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Core | Core/Encoding/Stream.jet | 30:5 | "check the private Bytes variant immediately before borrowing its backing" |
 | Core | Core/Encoding/Stream.jet | 37:5 | "the shared parser validated this exact numeric lexeme" |
 | Core | Core/Encoding/Stream.jet | 43:5 | "retain decoded JSON text until the target Decode contract is known" |
-| Core | Core/Encoding/Stream.jet | 360:9 | "the shared UTF-8 validator just accepted this owned byte allocation" |
-| Core | Core/Encoding/Stream.jet | 500:9 | "the shared UTF-8 validator just accepted this owned ASCII token" |
-| Core | Core/Encoding/Stream.jet | 505:13 | "retain a validated number lexeme in the private event carrier until typed decoding" |
-| Core | Core/Encoding/Stream.jet | 697:9 | "transfer already validated UTF-8 storage to inspect its actual owned capacity" |
-| Core | Core/Encoding/Stream.jet | 708:9 | "the private numeric event is projected only into the matching typed tree carrier" |
-| Core | Core/Encoding/Stream.jet | 1084:5 | "the shared UTF-8 validator just accepted this owned allocation" |
-| Core | Core/Encoding/Stream.jet | 1096:5 | "the byte position was checked against this String's storage length" |
-| Core | Core/Encoding/Stream.jet | 1660:5 | "the shared UTF-8 validator accepted this exact owned formatter buffer" |
-| Core | Core/Encoding/Stream.jet | 1675:13 | "every byte before the closing quote is printable ASCII, so it is whole UTF-8" |
-| Core | Core/Encoding/Stream.jet | 1690:5 | "transfer the owned UTF-8 String buffer before re-spelling its shortest digits" |
-| Core | Core/Encoding/Stream.jet | 1836:13 | "retain a validated number lexeme in the private event carrier" |
-| Core | Core/Encoding/Stream.jet | 1841:13 | "project the native compiler-private Bytes carrier into its event" |
-| Core | Core/Encoding/Stream.jet | 1907:13 | "classify the private Bytes carrier without borrowing or exposing its payload" |
-| Core | Core/Encoding/Stream.jet | 2050:5 | "owned validated UTF-8 allocation transfers in the encoding source seam" |
-| Core | Core/Encoding/Stream.jet | 2087:5 | "exercise the typed Encode byte carrier at the JSON preflight boundary" |
+| Core | Core/Encoding/Stream.jet | 365:9 | "the shared UTF-8 validator just accepted this owned byte allocation" |
+| Core | Core/Encoding/Stream.jet | 505:9 | "the shared UTF-8 validator just accepted this owned ASCII token" |
+| Core | Core/Encoding/Stream.jet | 510:13 | "retain a validated number lexeme in the private event carrier until typed decoding" |
+| Core | Core/Encoding/Stream.jet | 702:9 | "transfer already validated UTF-8 storage to inspect its actual owned capacity" |
+| Core | Core/Encoding/Stream.jet | 713:9 | "the private numeric event is projected only into the matching typed tree carrier" |
+| Core | Core/Encoding/Stream.jet | 1089:5 | "the shared UTF-8 validator just accepted this owned allocation" |
+| Core | Core/Encoding/Stream.jet | 1101:5 | "the byte position was checked against this String's storage length" |
+| Core | Core/Encoding/Stream.jet | 1665:5 | "the shared UTF-8 validator accepted this exact owned formatter buffer" |
+| Core | Core/Encoding/Stream.jet | 1680:13 | "every byte before the closing quote is printable ASCII, so it is whole UTF-8" |
+| Core | Core/Encoding/Stream.jet | 1695:5 | "transfer the owned UTF-8 String buffer before re-spelling its shortest digits" |
+| Core | Core/Encoding/Stream.jet | 1841:13 | "retain a validated number lexeme in the private event carrier" |
+| Core | Core/Encoding/Stream.jet | 1846:13 | "project the native compiler-private Bytes carrier into its event" |
+| Core | Core/Encoding/Stream.jet | 1912:13 | "classify the private Bytes carrier without borrowing or exposing its payload" |
+| Core | Core/Encoding/Stream.jet | 2055:5 | "owned validated UTF-8 allocation transfers in the encoding source seam" |
+| Core | Core/Encoding/Stream.jet | 2092:5 | "exercise the typed Encode byte carrier at the JSON preflight boundary" |
 | Core | Core/Encoding/XmlEngine.jet | 132:5 | "all callers iterate or check the UTF-8 byte bounds before borrowing this byte" |
 | Core | Core/Encoding/XmlEngine.jet | 170:5 | "the caller selected a scalar-aligned window of validated UTF-8 bytes" |
 | Core | Core/Encoding/XmlEngine.jet | 2180:5 | "attribute whitespace compaction preserves the already validated UTF-8 byte sequence" |
 | Core | Core/Encoding/Yaml.jet | 440:5 | "inspect compiler-private Bytes and typed carriers; public Dyn variants are unchanged" |
 | Core | Core/Files/Files.jet | 570:1 | "the compiler store passes a live FileReader and Directory, with one NUL-free plain destination name; no source pathname is reopened" |
 | Core | Core/Files/Files.jet | 576:1 | "compiler store owns the explicit child descriptor slot and retains the held Directory until the process leaf duplicates its descriptor" |
+| Core | Core/Files/Files.jet | 645:9 | "this test owns both held directories and child descriptor slots 198 and 199 until the child runs" |
 | Core | Core/Http/Client.jet | 655:5 | "checked resolver octets and port transferred into the socket carrier" |
 | Core | Core/Jobs/Jobs.jet | 133:5 | "queue preflight reads final-component metadata without following a symlink; metadata failures are ignored exactly as the SQLite provider does" |
 | Core | Core/Jobs/Jobs.jet | 138:5 | "create the lexical parent with the existing raw recursive mkdir kernel before SQLite open" |
@@ -11148,14 +11205,14 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Core | Core/Mem/Mem.jet | 36:1 | "`addr` is the address of a live, aligned `T` that stays valid for every use of the returned pointer" |
 | Core | Core/Mem/Mem.jet | 40:1 | "`pointer` names a live, aligned, readable `T` for the whole access" |
 | Core | Core/Mem/Mem.jet | 44:1 | "`pointer` names a live, aligned, writable `T` for the whole access" |
-| Core | Core/Net/Net.jet | 137:5 | "checked IPv4/IPv6 octets transferred into the native address carrier" |
-| Core | Core/Net/Net.jet | 143:5 | "read native address octets; no parsing or formatting policy in the carrier leaf" |
-| Core | Core/Net/Net.jet | 149:5 | "read the native IP address discriminant" |
-| Core | Core/Net/Net.jet | 206:5 | "validated IP octets, port and IPv6 numeric scope transferred into the socket carrier" |
-| Core | Core/Net/Net.jet | 213:5 | "read socket IP representation; formatting stays in Jet" |
-| Core | Core/Net/Net.jet | 216:5 | "read native socket port" |
-| Core | Core/Net/Net.jet | 228:5 | "read native IPv6 socket scope identifier" |
-| Core | Core/Net/Net.jet | 430:5 | "read the native UDP packet's socket-address carrier" |
+| Core | Core/Net/Net.jet | 140:5 | "checked IPv4/IPv6 octets transferred into the native address carrier" |
+| Core | Core/Net/Net.jet | 146:5 | "read native address octets; no parsing or formatting policy in the carrier leaf" |
+| Core | Core/Net/Net.jet | 152:5 | "read the native IP address discriminant" |
+| Core | Core/Net/Net.jet | 209:5 | "validated IP octets, port and IPv6 numeric scope transferred into the socket carrier" |
+| Core | Core/Net/Net.jet | 216:5 | "read socket IP representation; formatting stays in Jet" |
+| Core | Core/Net/Net.jet | 219:5 | "read native socket port" |
+| Core | Core/Net/Net.jet | 231:5 | "read native IPv6 socket scope identifier" |
+| Core | Core/Net/Net.jet | 433:5 | "read the native UDP packet's socket-address carrier" |
 | Core | Core/Net/Tls.jet | 70:9 | "this consuming Close owns the sole jet_tls context; jet_tls_free accepts 0 and never closes the socket" |
 | Core | Core/Net/Tls.jet | 549:5 | "the output slot belongs to this frame; jet_tls_new stores 0 or a fresh context that __TLSContext owns" |
 | Core | Core/Net/Tls.jet | 942:9 | "the packed copy lives until the matching free below; Mbed TLS only reads it during jet_tls_write" |
@@ -11187,28 +11244,34 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Core | Core/Process/Process.jet | 148:5 | "transfer a fully initialized Jet process plan into the temporary native ProcessSpec carrier; paired environment columns have equal length" |
 | Core | Core/Process/Process.jet | 182:1 | "process exit_unmapped: the caller reports a Jet defect and owns the 101 defect status" |
 | Core | Core/Service/Service.jet | 1427:5 | "read the final path component's OS metadata kind without opening an identity handle" |
-| Core | Core/Sys/Sys.jet | 424:1 | "posix umask: the caller owns the process file-creation mask and restores it when other code relies on it" |
-| Core | Core/Sys/Sys.jet | 593:5 | "posix getpgid: inspect a process group" |
-| Core | Core/Sys/Sys.jet | 599:5 | "posix getsid: inspect a process session" |
-| Core | Core/Sys/Sys.jet | 604:1 | "posix getpriority: the caller vouches that `which` names this process or one it controls" |
-| Core | Core/Sys/Sys.jet | 611:1 | "posix setpriority: the caller owns the scheduling priority of the process it changes" |
-| Core | Core/Sys/Sys.jet | 615:1 | "posix utime: the caller owns the file whose timestamps it rewrites" |
-| Core | Core/Sys/Sys.jet | 622:1 | "posix stop: the caller accepts that the process ends here after the shared cleanup boundary" |
-| Core | Core/Sys/Sys.jet | 632:1 | "posix pipe: the caller owns both returned descriptors and closes each exactly once" |
-| Core | Core/Sys/Sys.jet | 638:1 | "posix close_fd: the caller owns `fd` and nothing uses it after this call" |
-| Core | Core/Sys/Sys.jet | 772:1 | "posix mkfifo: the caller owns `path` and removes the named pipe it creates" |
-| Core | Core/Sys/Sys.jet | 777:1 | "posix fork: the caller handles both the parent and the child return and reaps the child" |
-| Core | Core/Sys/Sys.jet | 781:1 | "posix setsid: the caller owns the process session topology it changes" |
-| Core | Core/Sys/Sys.jet | 785:1 | "posix wait: the caller owns the child processes it reaps" |
-| Core | Core/Sys/Sys.jet | 791:1 | "posix waitpid: the caller owns the child process it reaps" |
-| Core | Core/Sys/Sys.jet | 797:1 | "posix setuid: the caller drops or changes process credentials deliberately" |
-| Core | Core/Sys/Sys.jet | 801:1 | "posix setgid: the caller drops or changes process credentials deliberately" |
-| Core | Core/Sys/Sys.jet | 805:1 | "posix setpgrp: the caller owns the process group topology it changes" |
-| Core | Core/Sys/Sys.jet | 809:1 | "posix setpgid: the caller owns the process group topology it changes" |
-| Core | Core/Sys/Sys.jet | 813:1 | "posix kill: the caller owns or is entitled to signal the target process" |
-| Core | Core/Sys/Sys.jet | 817:1 | "posix initgroups: the caller changes supplementary groups deliberately" |
-| Core | Core/Testing/Testing.jet | 1355:5 | "the caller bounded this byte position by the String storage length" |
-| Core | Core/Testing/Testing.jet | 1376:5 | "all appended bytes came from complete UTF-8 strings or ASCII" |
+| Core | Core/Sys/Sys.jet | 426:1 | "posix umask: the caller owns the process file-creation mask and restores it when other code relies on it" |
+| Core | Core/Sys/Sys.jet | 594:1 | "posix set_scheduling: the caller owns the CPU share of the process it changes" |
+| Core | Core/Sys/Sys.jet | 644:1 | "posix set_wall_clock: the caller owns the machine's wall clock, which every process reads" |
+| Core | Core/Sys/Sys.jet | 718:5 | "posix getpgid: inspect a process group" |
+| Core | Core/Sys/Sys.jet | 724:5 | "posix getsid: inspect a process session" |
+| Core | Core/Sys/Sys.jet | 729:1 | "posix getpriority: the caller vouches that `which` names this process or one it controls" |
+| Core | Core/Sys/Sys.jet | 736:1 | "posix setpriority: the caller owns the scheduling priority of the process it changes" |
+| Core | Core/Sys/Sys.jet | 740:1 | "posix utime: the caller owns the file whose timestamps it rewrites" |
+| Core | Core/Sys/Sys.jet | 747:1 | "posix stop: the caller accepts that the process ends here after the shared cleanup boundary" |
+| Core | Core/Sys/Sys.jet | 757:1 | "posix pipe: the caller owns both returned descriptors and closes each exactly once" |
+| Core | Core/Sys/Sys.jet | 763:1 | "posix close_fd: the caller owns `fd` and nothing uses it after this call" |
+| Core | Core/Sys/Sys.jet | 902:1 | "posix mkfifo: the caller owns `path` and removes the named pipe it creates" |
+| Core | Core/Sys/Sys.jet | 916:1 | "posix mknod: the caller owns `path` and grants every process that may open it access to the device it names" |
+| Core | Core/Sys/Sys.jet | 930:1 | "posix fork: the caller handles both the parent and the child return and reaps the child" |
+| Core | Core/Sys/Sys.jet | 934:1 | "posix setsid: the caller owns the process session topology it changes" |
+| Core | Core/Sys/Sys.jet | 938:1 | "posix wait: the caller owns the child processes it reaps" |
+| Core | Core/Sys/Sys.jet | 944:1 | "posix waitpid: the caller owns the child process it reaps" |
+| Core | Core/Sys/Sys.jet | 950:1 | "posix setuid: the caller drops or changes process credentials deliberately" |
+| Core | Core/Sys/Sys.jet | 954:1 | "posix setgid: the caller drops or changes process credentials deliberately" |
+| Core | Core/Sys/Sys.jet | 979:1 | "posix set_user_ids: the caller drops or changes process credentials deliberately" |
+| Core | Core/Sys/Sys.jet | 986:1 | "posix set_group_ids: the caller drops or changes process credentials deliberately" |
+| Core | Core/Sys/Sys.jet | 1164:1 | "posix setpgrp: the caller owns the process group topology it changes" |
+| Core | Core/Sys/Sys.jet | 1168:1 | "posix setpgid: the caller owns the process group topology it changes" |
+| Core | Core/Sys/Sys.jet | 1172:1 | "posix kill: the caller owns or is entitled to signal the target process" |
+| Core | Core/Sys/Sys.jet | 1179:1 | "posix signal reset: the caller owns the process signal disposition it resets" |
+| Core | Core/Sys/Sys.jet | 1183:1 | "posix initgroups: the caller changes supplementary groups deliberately" |
+| Core | Core/Testing/Testing.jet | 1388:5 | "the caller bounded this byte position by the String storage length" |
+| Core | Core/Testing/Testing.jet | 1409:5 | "all appended bytes came from complete UTF-8 strings or ASCII" |
 | Core | Core/Tui/Tui.jet | 104:5 | "Core TUI reads owned encoded OS environment bytes from the current host; no UTF-8 assumption" |
 | Core | Core/Tui/Tui.jet | 130:5 | "Core TUI samples the same stdout terminal fact consumed by terminal style/progress" |
 | Core | Core/Tui/Tui.jet | 656:5 | "Core TUI test: normalized style words and explicit absent UI slots" |
@@ -11274,7 +11337,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Jetpack | Jetpack/Publication/Source/Sign.jet | 67:5 | "export a fresh Core signing seed only to descriptor-relative owner-only key publication; the Core key owner is wiped on every outcome" |
 | Jetpack | Jetpack/Publication/Source/Sign.jet | 122:5 | "import the protected seed into Core signing without a second raw-secret copy; close the temporary Core Secret on success and failure" |
 | Jetpack | Jetpack/Publication/Source/Sign.jet | 146:5 | "package author signatures require Core's strict Ed25519 verification; no raw verifier or helper process" |
-| Jetpack | Jetpack/Publication/Tests/Index.jet | 291:5 | "the test owns the planted lock file it ages" |
+| Jetpack | Jetpack/Publication/Tests/Index.jet | 293:5 | "the test owns the planted lock file it ages" |
 | Jetpack | Jetpack/Store/Tests/ClosureGraph.jet | 59:13 | "the test owns the journal file it just wrote" |
 | Jetpack | Jetpack/Store/Tests/Seal.jet | 31:5 | "the store test owns the fixture file whose mtime it pins" |
 | Tools | Tools/agent-eval/domain-foundations/area-embedded/pkg/mmio_fixed.jet | 4:5 | "board.sensor_v1 GPIO register 0x40000100 is a volatile MMIO word" |
@@ -11341,6 +11404,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | tests | tests/cases/fmt_round_trip_regressions/raw_c_imports_and_module_binding_mutability_are_byte_exact_and_idempotent/input/run.jet | 7:1 | "audited C boundary" |
 | tests | tests/cases/fmt_round_trip_regressions/raw_c_imports_and_module_binding_mutability_are_byte_exact_and_idempotent/input/run.jet | 10:1 | "audited C boundary" |
 | tests | tests/cases/gate_ledger/fixtures/gates/gates.jet | 2:5 | "test unsafe reason" |
+| tests | tests/cases/language_features/impl_method_inherits_trait_effect_row_on_every_tier.fixture/main.jet | 37:5 | "the case prints the checked text" |
 | tests | tests/cases/liveness_lints/fallback_err_is_never_an_unused_local.fixture/main.jet | 3:1 | "probe" |
 | tests | tests/cases/liveness_lints/fallback_err_is_never_an_unused_local.fixture/main.jet | 8:5 | "probe" |
 | tests | tests/cases/memory_semantics/closure_boxes_free_at_their_last_owner.fixture/main.jet | 318:5 | "the exit callback only reads its captured List" |
