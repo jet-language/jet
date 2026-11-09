@@ -707,9 +707,11 @@ script alone, and the source walk of a package leaves every script out.
 (`$XDG_CACHE_HOME/jet/scripts`, else `~/.cache/jet/scripts`;
 [`ScriptCache.jet`](../../../Compiler/JetCli/Source/Cli/ScriptCache.jet)). This
 applies to scripts and to any other file. There is one program per entry file
-and profile. Its record names the toolchain it was built with (the compiler,
-runtime pack and Core source file identities) and a hash of its source
-snapshot: the source files and the directories the source walk enters. Other
+and profile. Its record names the toolchain it was built with (the compiler
+and its runtime pack by file identity, and the toolchain tree), the file identity
+of each Core source file the compile read (Core built into `jet` is part of
+the compiler), and a hash of its source snapshot: the source files and the
+directories the source walk enters. Other
 files in the tree, such as one the program writes beside its source, and
 directories the walk skips, such as the `.jet` directory a stopping program
 writes its fault report into, are not compile inputs and don't change the

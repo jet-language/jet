@@ -279,7 +279,7 @@ jet_cli_compile_core_check: fn(core: String, color: Bool, quiet: Bool, threads: 
     cli_files.write(entry, source) ?? return JetDriverVerbOutput{stdout: "", stderr: "jet check: couldn't write the Core entry `{entry}`: {err}\n", exit_code: JET_DRIVER_EXIT_USER_ERROR}
     prepared := if jet_cli_prepare_snapshot(entry, entry, [JetCLIOverlay]{}, color, true) == {
         .Refused(refusal) -> JetCLIPrepared.Refused{output: refusal}
-        .Held(snapshot) -> jet_cli_prepare_request(snapshot, color, threads, JetDriverCompileMode.Check, false, Val(core))
+        .Held(snapshot) -> jet_cli_prepare_request(snapshot, color, threads, JetDriverCompileMode.Check, Val(core))
     }
     compiled: jet_cli_compile_prepared(prepared, None, trace_sink, [BuildSettingOverride]{}, "", false, true)
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
@@ -1926,13 +1926,14 @@ jet_cli_compile_kept: fn(file: String, source: String, color: Bool, json: Bool, 
         }
     }
     prepared: if held.move() == {
-        .Held(snapshot) -> jet_cli_prepare_request(snapshot, color, threads, JetDriverCompileMode.Program, jet_cli_script_core_files(keep))
+        .Held(snapshot) -> jet_cli_prepare_request(snapshot, color, threads, JetDriverCompileMode.Program)
         .Refused(refusal) -> JetCLIPrepared.Refused{output: refusal}
     }
-    compiled := jet_cli_compile_executable(prepared, None, options, jet_cli_script_input_log(keep), None, color)
+    kept_core: jet_cli_script_with_core(keep, prepared)
+    compiled := jet_cli_compile_executable(prepared, None, options, jet_cli_script_input_log(kept_core), None, color)
     if compiled.move() == {
         .Refused(refusal) -> step = JetCLIRunStep.Output{output: refusal}
-        .Checked(result, inputs, snapshot) -> step = jet_cli_run_settled(jet_cli_script_build_and_run(file, source, color, json, options, program_args, invocation, result, inputs, snapshot, keep))
+        .Checked(result, inputs, snapshot) -> step = jet_cli_run_settled(jet_cli_script_build_and_run(file, source, color, json, options, program_args, invocation, result, inputs, snapshot, kept_core))
     }
     step
 }
@@ -1970,10 +1971,11 @@ jet_cli_compile_promoted: fn(file: String, source: String, json: Bool, options: 
         lock: jet_cli_script_promotion(kept) ?? return jet_cli_promoted_end()
         full: jet_cli_build_options_set(options, "optimize", JET_CLI_SCRIPT_LEVEL_FULL)
         prepared: if held.move() == {
-            .Held(snapshot) -> jet_cli_prepare_request(snapshot, false, threads, JetDriverCompileMode.Program, kept.core_files)
+            .Held(snapshot) -> jet_cli_prepare_request(snapshot, false, threads, JetDriverCompileMode.Program)
             .Refused(refusal) -> JetCLIPrepared.Refused{output: refusal}
         }
-        compiled := jet_cli_compile_executable(prepared, None, full, jet_cli_script_input_log(keep), None, false)
+        kept_core: jet_cli_script_with_core(keep, prepared) ?? return jet_cli_promoted_end()
+        compiled := jet_cli_compile_executable(prepared, None, full, Val(kept_core.input_log.copy()), None, false)
         stored := false
         if compiled.move() == {
             .Refused(_) -> {}
@@ -1982,7 +1984,7 @@ jet_cli_compile_promoted: fn(file: String, source: String, json: Bool, options: 
                 built := jet_cli_run_build(file, source, false, full, false, json, invocation, result, inputs, snapshot)
                 if built.move() == {
                     .Failed(_) -> {}
-                    .Image(executable, _) -> stored = jet_cli_script_keep(kept, executable, authority, JET_CLI_SCRIPT_LEVEL_FULL)
+                    .Image(executable, _) -> stored = jet_cli_script_keep(kept_core, executable, authority, JET_CLI_SCRIPT_LEVEL_FULL)
                 }
             }
         }
@@ -2331,7 +2333,7 @@ jet_cli_compile_test: fn(file: String, source: String, color: Bool, verbose: Boo
             loop doctest_file in doctests {
                 if doctest_file.path == held.entry_path -> tested = jet_cli_doctest_source(doctest_file)
             }
-            jet_cli_prepare_request(held, color, threads, JetDriverCompileMode.Test, false)
+            jet_cli_prepare_request(held, color, threads, JetDriverCompileMode.Test)
         }
     }
     if trace_sink == .Val(sink) -> sink.end("sources", jet_cli_prepared_file_count(prepared))
@@ -2358,7 +2360,7 @@ jet_cli_compile_core_test: fn(file: String, source: String, path: String, color:
         .Refused(refusal) -> JetCLIPrepared.Refused{output: refusal}
         .Held(snapshot) -> {
             if options.measure -> measure = Val(jet_cli_measure_plan(snapshot, false, options.profile))
-            jet_cli_prepare_request(snapshot, color, threads, JetDriverCompileMode.Test, false, Val(file), path)
+            jet_cli_prepare_request(snapshot, color, threads, JetDriverCompileMode.Test, Val(file), path)
         }
     }
     if trace_sink == .Val(sink) -> sink.end("sources", jet_cli_prepared_file_count(prepared))
