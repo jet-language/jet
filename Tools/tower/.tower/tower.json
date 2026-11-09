@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6748,
-    "rev": 96567,
+    "rev": 96575,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -102348,7 +102348,7 @@
     {
       "id": "c06vkd04",
       "num": 6730,
-      "title": "jet debug shows garbage for a local before its binding runs (a = 4262344 at the breakpoint on 'a: 5')",
+      "title": "jet debug shows wrong, missing or garbage locals, and its readouts and docs are wrong",
       "body": "Release a0_041, jet debug Examples/Tooling/Debugging/Debug.jet: the first stop at Debug.jet:24 ('a: 5 <- here') prints 'locals:  a = 4262344   s = <unavailable>'. The local's stack slot is read before the binding runs, so uninitialized memory is shown as a Jet value. A local whose binding hasn't run must show as not yet bound (or be omitted), at every tier; the DWARF location ranges should start after the store. Also: the comments in Examples/Tooling/Debugging/Debug.jet and DebugNative.jet still talk about 'the generated Rust' and 'raw Rust file:line', which is stale since the native backend.",
       "kind": "bug",
       "track": "epoch",
@@ -102369,15 +102369,82 @@
           "text": "DebuggerProposal probes confirm: every DWARF range starts at function entry, hence the garbage before binding (T2); stale comments also in DebugNative.jet, Debug.jet and PanicReport.jet examples (T5)."
         }
       ],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A bignum Int local shows its value, not its tagged pointer word (was #6738).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T16:03:24.718Z"
+        },
+        {
+          "n": 2,
+          "text": "String, struct, list and Decimal locals render their values: the DWARF types them as what they are, not Opaque, Aggregate or void* (was #6739).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T16:03:25.846Z"
+        },
+        {
+          "n": 3,
+          "text": "E2203's text promises only what jet debug does; it no longer claims record and replay (was #6740).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T16:03:27.084Z"
+        },
+        {
+          "n": 4,
+          "text": "The flake's default dev shell and env.dev agree on whether lldb ships (was #6741).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T16:03:28.463Z"
+        },
+        {
+          "n": 5,
+          "text": "lldb finds an O2 build's split debug file under .jet/symbols through the binary's debug link (was #6742).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T16:03:29.624Z"
+        },
+        {
+          "n": 6,
+          "text": "Bounds stops (E3010) name the faulting function and show its locals, like every other stop report (was #6745).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T16:03:30.742Z"
+        },
+        {
+          "n": 7,
+          "text": "DebugTier.NativeLldb is spelled NativeLLDB under S66 (was #6747).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T16:03:31.892Z"
+        }
+      ],
       "refs": [],
       "tags": [],
-      "goals": [],
+      "goals": [
+        "G5"
+      ],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-09T15:15:33.693Z",
-      "updated": "2026-11-09T16:00:12.061Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-09T16:03:31.892Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 7
     },
     {
       "id": "c0x3vq4p",
@@ -191819,6 +191886,62 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-09T16:03:31.892Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c06vkd04",
+      "note": "#7 DebugTier.NativeLldb is spelled NativeLLDB under S66 (was #6"
+    },
+    {
+      "at": "2026-11-09T16:03:30.742Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c06vkd04",
+      "note": "#6 Bounds stops (E3010) name the faulting function and show its"
+    },
+    {
+      "at": "2026-11-09T16:03:29.624Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c06vkd04",
+      "note": "#5 lldb finds an O2 build's split debug file under .jet/symbols"
+    },
+    {
+      "at": "2026-11-09T16:03:28.463Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c06vkd04",
+      "note": "#4 The flake's default dev shell and env.dev agree on whether l"
+    },
+    {
+      "at": "2026-11-09T16:03:27.084Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c06vkd04",
+      "note": "#3 E2203's text promises only what jet debug does; it no longer"
+    },
+    {
+      "at": "2026-11-09T16:03:25.846Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c06vkd04",
+      "note": "#2 String, struct, list and Decimal locals render their values:"
+    },
+    {
+      "at": "2026-11-09T16:03:24.718Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c06vkd04",
+      "note": "#1 A bignum Int local shows its value, not its tagged pointer w"
+    },
+    {
+      "at": "2026-11-09T16:03:23.681Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c06vkd04",
+      "note": "title,goals"
+    },
     {
       "at": "2026-11-09T16:00:12.061Z",
       "by": "Main",
