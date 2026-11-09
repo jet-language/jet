@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 98125,
+    "rev": 98130,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -56036,7 +56036,7 @@
     {
       "id": "c01sunrb",
       "num": 4935,
-      "title": "Build take/replace out of a borrowed field (D-TAKE-REPLACE1=A)",
+      "title": "Build swap and replace out of a borrowed place (D-TAKE-REPLACE1=A, D-WRITE-TAKE1=A)",
       "body": "Found 2026-10-09 while fixing Core: Core CSV (streaming rows, ~791 self.fields) and crypto (~99 hash.pending.bytes) want to move a value out of a field below a read/write borrow and immediately reinitialize it. The current rules make that E0201 by design (spec.md:1077-1082, 1e1825f4e); there is no general take/replace/swap API (only Cell.replace, spec 1313-1316). Interim: crypto restructured to consume at finish; CSV uses a restructure or an explicit .copy() then reset (an extra allocation per row). Owner decision: add a canonical take/replace (e.g. mem.replace(place, new) -> old) or keep the rule and accept the copies. Needs a ballot with same-program alternatives.",
       "kind": "idea",
       "track": "epoch",
@@ -56079,15 +56079,6 @@
       ],
       "criteria": [
         {
-          "n": 1,
-          "text": "D-TAKE-REPLACE1=A is built: one standard operation installs a new value in a writable place and returns the old one, never leaving the borrowed object incomplete; a golden shows it on O0, O1 and O2.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T03:27:47.293Z"
-        },
-        {
           "n": 2,
           "text": "Core CSV row handoff and crypto pending bytes use it instead of the interim copy-then-reset, with no extra allocation per row.",
           "status": "open",
@@ -56117,7 +56108,7 @@
       "parentId": "c0w9o2sz",
       "needsAcceptance": false,
       "created": "2026-10-09T22:48:33.171Z",
-      "updated": "2026-11-09T20:48:36.922Z",
+      "updated": "2026-11-09T20:48:46.453Z",
       "updatedBy": "Main",
       "goals": [
         "G10"
@@ -57376,15 +57367,6 @@
           "at": "2026-10-28T21:03:20.438Z"
         },
         {
-          "n": 8,
-          "text": "(was #6340) No build setting lets safe code (outside #Unsafe) read or write outside a list: every out-of-range index in safe code is either stopped with its registered runtime error or rejected at compile time, on o0, o1, o2 and --release, proved by the MemDesign bounds probes. The fix follows the D-UB-BOUNDARY1 outcome.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:25:30.957Z"
-        },
-        {
           "n": 10,
           "text": "(was #6310) (a) The repro builds and runs on o0/o1/o2; implicit AllocError propagation from try_alloc prints the coded AllocError stop through a runtime export that exists (no exit 101); a cases row covers it.",
           "status": "open",
@@ -57482,7 +57464,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-16T07:36:29.780Z",
-      "updated": "2026-11-09T20:48:04.817Z",
+      "updated": "2026-11-09T20:48:50.695Z",
       "updatedBy": "Main",
       "goals": [
         "G10"
@@ -71751,15 +71733,6 @@
           "at": "2026-11-07T03:47:43.458Z"
         },
         {
-          "n": 14,
-          "text": "D-WRITE-TAKE1 A (ratified 2026-11-04): core.mem has swap<T> and replace<T> (-[!Panic]>), named by the prelude with no import, while a user swap or replace still wins; List and Map gain swap. Sema tracks each moved-out gap behind E0121: an exit or a call that can stop inside a gap is E0201, and its fix offers swap or replace. IR moves the value back on every stop path inside a gap. An example with goldens on o0, o1 and o2, and UI snapshots for E0201.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T20:05:26.088Z"
-        },
-        {
           "n": 15,
           "text": "Definite initialization accepts a fixed array `[T#N]{ uninit }` that a counted loop fully writes before any read; today it reports E0420. The census covers each fill shape (counted loop, while with index, fill call) and each lands as a case. Found by the 2026-11-05 Doom port investigation (dev 0ccdff27ea).",
           "status": "open",
@@ -71780,11 +71753,12 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T20:19:27.033Z",
-      "updated": "2026-11-07T03:47:43.458Z",
+      "updated": "2026-11-09T20:48:39.547Z",
       "updatedBy": "Main",
       "goals": [
         "G10"
-      ]
+      ],
+      "criteriaLastN": 15
     },
     {
       "id": "c0z3glhp",
@@ -79969,12 +79943,12 @@
         },
         {
           "n": 9,
-          "text": "D-UB-BOUNDARY1=A is built: expert code skips a check only inside a written #Unchecked(<check>) block (bounds first), and the global --bounds flag is removed in the same cutover with every caller migrated. Today #Unchecked(bounds) reports E0927 ('#Unchecked isn't a known applied rule') and jet build --bounds=off still works. A golden shows the block removing the check only in its scope at O0, O1 and O2. Found by the 2026-11-05 Doom port investigation (ratified, not built; compiler 0ccdff27ea).",
+          "text": "D-UB-BOUNDARY1=A is built: expert code skips a check only inside a written #Unchecked(<check>) block (bounds first), and the global --bounds flag is removed in the same cutover with every caller migrated. Today #Unchecked(bounds) reports E0927 ('#Unchecked isn't a known applied rule') and jet build --bounds=off still works. A golden shows the block removing the check only in its scope at O0, O1 and O2. No build setting lets safe code read or write outside a list: every out-of-range index outside #Unchecked is stopped with its registered runtime error or rejected at compile time, on O0, O1, O2 and --release (the MemDesign bounds probes; was #5014 c8). Found by the 2026-11-05 Doom port investigation (ratified, not built; compiler 0ccdff27ea).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-05T14:36:19.384Z"
+          "at": "2026-11-09T20:48:48.935Z"
         }
       ],
       "refs": [],
@@ -79985,7 +79959,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T15:50:47.559Z",
-      "updated": "2026-11-09T20:48:22.876Z",
+      "updated": "2026-11-09T20:48:48.935Z",
       "updatedBy": "Main"
     },
     {
@@ -193402,6 +193376,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-09T20:48:50.695Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0mj3ijb",
+      "note": "#8: BoardPlanner review 2026-11-09 (dev 6a06b917cb). Merged into #6323 c9 (D-G10-4): both build D-UB-BOUNDARY1=A.; was [open]: (was #6340) No build setting lets safe code (outside #Unsafe) read or write outside a list: every out-of-range index in safe code is either stopped with its registered runtime error or rejected at com"
+    },
+    {
+      "at": "2026-11-09T20:48:48.935Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0sg79an",
+      "note": "#9: BoardPlanner review 2026-11-09 (dev 6a06b917cb). Merged #5014 c8 into this row (D-G10-4).; was: D-UB-BOUNDARY1=A is built: expert code skips a check only inside a written #Unchecked(<check>) block (bounds first), and the global --bounds flag is removed in the same cutover with every caller migra"
+    },
+    {
+      "at": "2026-11-09T20:48:46.453Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c01sunrb",
+      "note": "title"
+    },
+    {
+      "at": "2026-11-09T20:48:42.482Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c01sunrb",
+      "note": "#1: BoardPlanner review 2026-11-09 (dev 6a06b917cb). Merged into the D-WRITE-TAKE1 row moved from #6066 c14 (D-G10-3): it extends D-TAKE-REPLACE1 with the prelude names and gap tracking.; was [open]: D-TAKE-REPLACE1=A is built: one standard operation installs a new value in a writable place and returns the old one, never leaving the borrowed object incomplete; a golden shows it on O0, O1 and O2."
+    },
+    {
+      "at": "2026-11-09T20:48:39.547Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0r02x8n",
+      "note": "#14: BoardPlanner review 2026-11-09 (dev 6a06b917cb). Moved to #4935 with corrected text: one build with #4935 c1 (D-G10-3).; was [open]: D-WRITE-TAKE1 A (ratified 2026-11-04): core.mem has swap<T> and replace<T> (-[!Panic]>), named by the prelude with no import, while a user swap or replace still wins; List and Map gain swap. Sema trac"
+    },
     {
       "at": "2026-11-09T20:48:36.922Z",
       "by": "Main",
