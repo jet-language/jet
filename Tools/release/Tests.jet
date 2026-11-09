@@ -712,13 +712,26 @@ row_ids: fn(rows: [SuiteRow]) -> [String] Never! {
     assert_eq(parse_admit_args([String]{"a", "b", "--summary"}).errors, [String]{"one commit, not a and b", "--summary needs a value"})
 }
 
-#Test("the shards split the slot memory cap instead of each claiming the whole room") {
+#Test("the shards of the sides at once split the slot memory cap and the threads instead of each claiming the whole room") {
     plain: parse_admit_args([String]{"abc"})
-    assert_eq(shard_pool(plain, 4, "16G"), [String]{"--memory=4G"})
-    assert_eq(shard_pool(plain, 4, ""), [String]{"--memory=4G"})
-    assert_eq(shard_pool(plain, 1, "24G"), [String]{"--memory=24G"})
-    assert_eq(shard_pool(plain, 16, "8G"), [String]{"--memory=1G"})
-    assert_eq(shard_pool(parse_admit_args([String]{"abc", "--jobs", "3"}), 4, "64G"), [String]{"--memory=16G", "--jobs=3"})
+    assert_eq(shard_pool(plain, 4, 1, "16G", ""), [String]{"--memory=4G"})
+    assert_eq(shard_pool(plain, 4, 1, "", ""), [String]{"--memory=4G"})
+    assert_eq(shard_pool(plain, 1, 1, "24G", ""), [String]{"--memory=24G"})
+    assert_eq(shard_pool(plain, 16, 1, "8G", ""), [String]{"--memory=1G"})
+    assert_eq(shard_pool(plain, 4, 2, "24G", "8-31"), [String]{"--memory=3G", "--jobs=3"})
+    assert_eq(shard_pool(plain, 4, 1, "16G", "4-9,20-25"), [String]{"--memory=4G", "--jobs=3"})
+    assert_eq(shard_pool(plain, 16, 2, "16G", "4-9"), [String]{"--memory=1G", "--jobs=1"})
+    three: parse_admit_args([String]{"abc", "--jobs", "3"})
+    assert_eq(shard_pool(three, 4, 1, "64G", "8-31"), [String]{"--memory=16G", "--jobs=3"})
+    assert_eq(shard_pool(three, 4, 2, "64G", ""), [String]{"--memory=8G", "--jobs=1"})
+}
+
+#Test("a CPU list counts its CPUs") {
+    assert_eq(cpu_count("8-31"), 24)
+    assert_eq(cpu_count("4-9,20-25"), 12)
+    assert_eq(cpu_count("3"), 1)
+    assert_eq(cpu_count(""), 0)
+    assert_eq(cpu_count("9-4"), 0)
 }
 
 #Test("a suite's runner reads the candidate's tree and its rows read their side's tree") {

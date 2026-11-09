@@ -6,7 +6,7 @@
 //   jet Tools/agent/Chain.jet TREE LEVEL|--auto [--out DIR] [--base COMMIT] [--dry-run|--check-gate]
 //   jet Tools/agent/Chain.jet export DIR [COMMIT] [PATCH...]
 //   jet Tools/agent/Chain.jet seed-published INSTALL_DIR
-//   jet Tools/agent/Chain.jet slot [--small] -- CMD...
+//   jet Tools/agent/Chain.jet slot [--small|--release] -- CMD...
 //   jet Tools/agent/Chain.jet diff TREE BASE REPO
 //   jet Tools/agent/Chain.jet plan TREE DIFF.json
 //   jet Tools/agent/Chain.jet inputs TREE
@@ -57,8 +57,11 @@
 // `slot` runs CMD in a machine build slot (A B C D, see take_slot) on its
 // CPUs, at nice 19 in the idle I/O class, in a memory scope of
 // SLOT_MEMORY_MAX (default 16G) plus 2G, with SLOT_CPUS, CHAIN_CPUS and
-// CAP_CPUS set; --small (or SLOT_SMALL=1) queues it in the small class. Every
-// job appends a row to $JET_RUN_ROOT/slot-ledger.tsv.
+// CAP_CPUS set; --small (or SLOT_SMALL=1) queues it in the small class.
+// --release takes the release gate's slot R (CPUs 8-31, SLOT_MEMORY_MAX
+// default 24G): it claims R, so no other job takes a slot while it waits or
+// runs, and holds A, B, C and D once the jobs in them end. Every job appends
+// a row to $JET_RUN_ROOT/slot-ledger.tsv.
 //
 // `diff` prints JSON {base, changed: [{path, status, sha}], digest}: TREE
 // against git commit BASE of the checkout REPO. `plan` prints JSON {level,
@@ -132,7 +135,7 @@ usage: fn() -[Exec, IO]> Never {
     term.eprint("       (LEVEL: check, s1, full, full+threads)")
     term.eprint("       jet Tools/agent/Chain.jet export DIR [COMMIT] [PATCH...]")
     term.eprint("       jet Tools/agent/Chain.jet seed-published INSTALL_DIR")
-    term.eprint("       jet Tools/agent/Chain.jet slot [--small] -- CMD...")
+    term.eprint("       jet Tools/agent/Chain.jet slot [--small|--release] -- CMD...")
     term.eprint("       jet Tools/agent/Chain.jet diff TREE BASE REPO")
     term.eprint("       jet Tools/agent/Chain.jet plan TREE DIFF.json")
     term.eprint("       jet Tools/agent/Chain.jet inputs TREE")
@@ -1774,11 +1777,15 @@ seed_published: fn(c: &Chain, install: String) -[Env, Exec, FS, IO, Time, Time.W
 // MemAvailable > 26 GB), and D = both for short builds only (MemAvailable >
 // 30 GB). A and B never share a physical core, so a measurement in one is not
 // skewed by its neighbour's SMT sibling; cores 0-3 stay free for the desktop.
+// The release slot R (CPUs 8-31, 24 threads; CPUs 0-7 stay free) is the
+// release gate's: it holds A, B, C and D at once (take_release_slot).
 SLOT_NAMES: ["A", "B", "C", "D"]
+RELEASE_SLOT_CPUS: "8-31"
 
 slot_cpus: fn(name: String) -> String Never! {
     if name == "A" -> return "4-9,20-25"
     if name == "B" -> return "10-15,26-31"
+    if name == "R" -> return RELEASE_SLOT_CPUS
     "4-15,20-31"
 }
 
@@ -1845,7 +1852,8 @@ head_ticket: fn(queue: String) -[FS]> String Never! {
 // I/O pressure is below 85% or the NVMe disks were under 50% busy over the
 // last wait (a task parked in iowait holds PSI near 90% while the disks sit
 // idle). A reserved slot ($JET_RUN_ROOT/slot-S-reserved) is taken only with
-// SLOT_RESERVED=1.
+// SLOT_RESERVED=1. No slot opens while the release slot is claimed
+// (release_claimed).
 take_slot: fn(r: Roots, small: Bool, short: Bool) -[Env, Exec, FS, IO, Time, Time.Wait]> SlotTaken Never! {
     queue: files.join(r.run, "slot-queue")
     files.create_dir_all(queue) ?? fail("cannot create `{queue}`: {err}")
@@ -1877,7 +1885,7 @@ take_slot: fn(r: Roots, small: Bool, short: Bool) -[Env, Exec, FS, IO, Time, Tim
         then = now
         if io >= 85 && busy < 50 -> io = 0
         head: head_ticket(queue) == ticket
-        if mem > 20 && io < 85 && (head || short) {
+        if mem > 20 && io < 85 && (head || short) && !release_claimed(r) {
             loop name in SLOT_NAMES {
                 if name == "D" && !(short && mem > 30) -> next
                 if name != "D" && !head -> next
@@ -1894,6 +1902,46 @@ take_slot: fn(r: Roots, small: Bool, short: Bool) -[Env, Exec, FS, IO, Time, Tim
     }
 }
 
+// The release gate's claim on the release slot: $JET_RUN_ROOT/slot-R.pid
+// names the live process that waits for or holds it.
+release_claim: fn(r: Roots) -> String Never! {
+    files.join(r.run, "slot-R.pid")
+}
+
+release_claimed: fn(r: Roots) -[FS]> Bool Never! {
+    pid: first_line(release_claim(r))
+    pid != "" && files.exists("/proc/{pid}")
+}
+
+// Wait for the release slot: claim it first, so no other job takes a slot
+// from then on (their waiters queue behind it), then take A, B, C and D one
+// by one as the jobs in them end. One claim at a time: a second release
+// waits for the first's to end.
+take_release_slot: fn(r: Roots) -[Env, Exec, FS, IO, Time, Time.Wait]> SlotTaken Never! {
+    queued: time.unix_ns()
+    claim: release_claim(r)
+    me: "{sys.pid()}"
+    loop {
+        if !release_claimed(r) {
+            files.write(claim, "{me}\n") ?? fail("cannot write `{claim}`: {err}")
+            if first_line(claim) == me -> break
+        }
+        time.sleep(time.duration_seconds(10))
+    }
+    locks := [files.FileLock]{}
+    held := [String]{}
+    loop {
+        loop name in SLOT_NAMES {
+            if held.contains(name) -> next
+            lock: files.try_lock(files.join(r.run, "build-slot-{name}.lock")) ?? next
+            locks.push(lock)
+            held.push(name.copy())
+        }
+        if held.len() == SLOT_NAMES.len() -> return SlotTaken{name: "R", cpus: RELEASE_SLOT_CPUS, queued: queued, locks: locks}
+        time.sleep(time.duration_seconds(2))
+    }
+}
+
 export_slot: fn(cpus: String) -[Env]> {
     names: [String]{"SLOT_CPUS", "CHAIN_CPUS", "CAP_CPUS"}
     loop name in names -> sys.set(name, cpus)
@@ -1907,36 +1955,46 @@ ledger: fn(r: Roots, slot: String, queued: Int, lane: String, started: Int, code
     files.append_all(files.join(r.run, "slot-ledger.tsv"), row) ?? ()
 }
 
-// `slot [--small] -- CMD...`: CMD in a build slot, on its CPUs, in the idle
-// I/O class at nice 19, in a memory scope of SLOT_MEMORY_MAX (default 16G)
-// plus 2G with no swap, so an overrun job dies alone. Exports SLOT_CPUS,
-// CHAIN_CPUS and CAP_CPUS to it; SLOT_SMALL=1 is --small.
+// `slot [--small|--release] -- CMD...`: CMD in a build slot, on its CPUs, in
+// the idle I/O class at nice 19, in a memory scope of SLOT_MEMORY_MAX
+// (default 16G; 24G in the release slot, exported to CMD) plus 2G with no
+// swap, so an overrun job dies alone. Exports SLOT_CPUS, CHAIN_CPUS and
+// CAP_CPUS to it; SLOT_SMALL=1 is --small. --release takes the release slot
+// (take_release_slot).
 slot_main: fn(args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
     small := env_or("SLOT_SMALL", "0") == "1"
+    release := false
     at := 0
     if args.len() > 0 && args[0] == "--small" {
         small = true
+        at = 1
+    } else if args.len() > 0 && args[0] == "--release" {
+        release = true
         at = 1
     }
     if args.len() <= at + 1 || args[at] != "--" -> usage()
     command := [String]{}
     loop rest in (at + 1)..<args.len() -> command.push(args[rest].copy())
     r: roots()
-    slot: take_slot(r, small, false)
+    slot: if release -> take_release_slot(r) else -> take_slot(r, small, false)
     export_slot(slot.cpus)
+    memory: env_or("SLOT_MEMORY_MAX", if release -> "24G" else -> "16G")
+    if release -> sys.set("SLOT_MEMORY_MAX", memory)
     sys.set_core_file_limit(Val(0), Val(0)) ?? ()
     argv := [String]{"nice", "-n", "19"}
     argv.extend(command.copy())
     shown: command.join(" ")
     lane: lane_of("{files.cwd() ?? ""} {shown}")
     started: time.unix_ns()
-    receipt: process.cmd(argv).cpu_affinity(parse_cpus(slot.cpus)).io_idle().memory_scope(memory_bytes(env_or("SLOT_MEMORY_MAX", "16G")) + 2 * GIB).stdin(.Inherit).stdout(.Inherit).stderr(.Inherit).run() ?? {
+    receipt: process.cmd(argv).cpu_affinity(parse_cpus(slot.cpus)).io_idle().memory_scope(memory_bytes(memory) + 2 * GIB).stdin(.Inherit).stdout(.Inherit).stderr(.Inherit).run() ?? {
+        if release -> files.remove(release_claim(r)) ?? ()
         term.eprint("slot: {command[0]}: {err}")
         ledger(r, slot.name, slot.queued, lane, started, 127, 0, shown)
         return 127
     }
     code := receipt.code
     if receipt.signal == .Val(number) -> code = 128 + number
+    if release -> files.remove(release_claim(r)) ?? ()
     ledger(r, slot.name, slot.queued, lane, started, code, (receipt.peak_memory_bytes ?? 0) /% 1048576, shown)
     code
 }
