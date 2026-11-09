@@ -1,0 +1,177 @@
+// The sorter of the Jet SQLite engine: a port of SQLite 3.45.0 vdbesort.c,
+// the object behind OP_SorterOpen, OP_SorterInsert, OP_SorterSort,
+// OP_SorterNext, OP_SorterData and OP_SorterCompare.
+//
+// Records are kept in memory as C keeps them before its first PMA flush:
+// a list, newest first, sorted on rewind by vdbeSorterSort's bottom-up merge
+// of up to 64 slots with vdbeSorterMerge, ties going to the older record, so
+// rows whose keys compare equal come out in the order C gives them. C's
+// vdbeSorterCompareInt and vdbeSorterCompareText are shortcuts that order
+// keys exactly as sqlite3VdbeRecordCompare does; here every comparison is
+// the record comparison. The sorter does not spill to temporary-file PMAs
+// (SQLite single-threaded with SQLITE_MAX_WORKER_THREADS limit 0 merges
+// them in the same order), so a large sort holds its records in memory.
+use {
+    base: __core_db_base
+    record: __core_db_record
+}
+
+VdbeSorter: struct {
+    // The KeyInfo the records sort by: the cursor's, with n_key_field set
+    // to OP_SorterOpen's P2 when that is not zero (sqlite3VdbeSorterInit).
+    key_info: record.KeyInfo
+    // Every record written, and C's list links: `head` is the newest
+    // record (SorterList.pList), next[i] the one after record i, -1 at the
+    // end.
+    records: [[U8]]
+    next: [Int]
+    head: Int
+    // SortSubtask.pUnpacked: the second key of a merge comparison.
+    unpacked: record.UnpackedRecord
+    // VdbeSorter.pUnpacked: OP_SorterCompare's key, built with the
+    // cursor's KeyInfo on first use (None until then).
+    cmp_unpacked: record.UnpackedRecord?
+}
+
+// sqlite3VdbeSorterInit: a sorter for a cursor whose KeyInfo is `info`.
+sorter_new: fn(info: record.KeyInfo, n_field: Int) -> VdbeSorter Never! {
+    key_info := info.copy()
+    if n_field != 0 -> key_info.n_key_field = n_field
+    unpacked := record.unpacked_record_alloc(key_info)
+    unpacked.n_field = key_info.n_key_field
+    VdbeSorter{key_info: key_info, records: [[U8]]{}, next: [Int]{}, head: -1, unpacked: unpacked, cmp_unpacked: None}
+}
+
+// sqlite3VdbeSorterReset: drop every record (OP_SorterOpen on a reused
+// cursor, OP_ResetSorter).
+sorter_reset: fn(s: &VdbeSorter) Never! {
+    s.records = [[U8]]{}
+    s.next = [Int]{}
+    s.head = -1
+    s.cmp_unpacked = None
+}
+
+// sqlite3VdbeSorterWrite: add a record at the head of the list.
+sorter_write: fn(s: &VdbeSorter, rec: [U8]) Never! {
+    s.records.push(rec.copy())
+    s.next.push(s.head)
+    s.head = s.records.len() - 1
+}
+
+// vdbeSorterMerge: merge the sorted lists from p1 and p2; ties take p1.
+sorter_merge: fn(s: &VdbeSorter, p1_in: Int, p2_in: Int) -> Int Never! {
+    p1 := p1_in
+    p2 := p2_in
+    first := -1
+    last := -1
+    cached := false
+    loop {
+        if !cached {
+            record.record_unpack(s.key_info, s.records[p2].len(), s.records[p2], s.unpacked)
+            cached = true
+        }
+        res: record.record_compare(s.records[p1].len(), s.records[p1], 0, s.unpacked)
+        pick := p2
+        if res <= 0 {
+            pick = p1
+            p1 = s.next[p1]
+        } else {
+            p2 = s.next[p2]
+            cached = false
+        }
+        if last < 0 { first = pick } else { s.next[last] = pick }
+        last = pick
+        if p1 < 0 {
+            s.next[last] = p2
+            break
+        }
+        if p2 < 0 {
+            s.next[last] = p1
+            break
+        }
+    }
+    first
+}
+
+// vdbeSorterSort: sort the list from `head`.
+sorter_sort: fn(s: &VdbeSorter) Never! {
+    slots := [Int]{}
+    loop _ in 0..<64 -> slots.push(-1)
+    p := s.head
+    loop p >= 0 {
+        after: s.next[p]
+        s.next[p] = -1
+        i := 0
+        loop slots[i] >= 0 {
+            p = sorter_merge(s, p, slots[i])
+            slots[i] = -1
+            i += 1
+        }
+        slots[i] = p
+        p = after
+    }
+    p = -1
+    loop i in 0..<64 {
+        if slots[i] < 0 -> next
+        p = if p >= 0 -> sorter_merge(s, p, slots[i]) else -> slots[i]
+    }
+    s.head = p
+}
+
+// sqlite3VdbeSorterRewind: sort the records; true when there are none.
+sorter_rewind: fn(s: &VdbeSorter) -> Bool Never! {
+    if s.head < 0 -> return true
+    sorter_sort(s)
+    false
+}
+
+// sqlite3VdbeSorterNext: step to the next record, base.DONE past the last.
+sorter_next: fn(s: &VdbeSorter) -> Int Never! {
+    s.head = s.next[s.head]
+    if s.head >= 0 -> base.OK else -> base.DONE
+}
+
+// The current record (vdbeSorterRowkey).
+sorter_key: fn(s: &VdbeSorter) -> [U8] Never! { s.records[s.head] }
+
+// sqlite3VdbeSorterCompare: compare the record `val` with the first
+// n_key_col fields of the current record; a current record with a NULL in
+// those fields is below `val`.
+sorter_compare: fn(s: &VdbeSorter, cursor_info: record.KeyInfo, val: [U8], n_key_col: Int) -> Int Never! {
+    r2 := s.cmp_unpacked ?? {
+        fresh := record.unpacked_record_alloc(cursor_info)
+        fresh.n_field = n_key_col
+        fresh
+    }
+    key: s.records[s.head]
+    record.record_unpack(cursor_info, key.len(), key, r2)
+    res := 0
+    null := false
+    loop i in 0..<n_key_col {
+        if r2.mem[i].flags.bit_and(base.MEM_NULL) != 0 {
+            null = true
+            break
+        }
+    }
+    res = if null -> -1 else -> record.record_compare(val.len(), val, 0, r2)
+    s.cmp_unpacked = Val(r2)
+    res
+}
+
+#Test("the sorter orders by the key fields and keeps ties in insertion order") {
+    info: record.KeyInfo{enc: base.UTF8, n_key_field: 1, n_all_field: 2, sort_flags: [Int]{0}, colls: [Int]{record.COLL_BINARY}}
+    s := sorter_new(info, 1)
+    rows: [(k: Int, tag: Int)]{(k: 3, tag: 0), (k: 1, tag: 1), (k: 3, tag: 2), (k: 2, tag: 3), (k: 1, tag: 4), (k: 3, tag: 5)}
+    loop r in rows {
+        vals := [base.Mem]{base.mem_int(r.k), base.mem_int(r.tag)}
+        sorter_write(s, record.make_record(vals, 4))
+    }
+    assert(!sorter_rewind(s))
+    tags := [Int]{}
+    loop {
+        cols: record.decode_record(sorter_key(s), base.UTF8) ?? panic("record")
+        tags.push(cols[1].i)
+        if sorter_next(s) == base.DONE -> break
+    }
+    assert_eq(tags, [Int]{1, 4, 3, 0, 2, 5})
+}

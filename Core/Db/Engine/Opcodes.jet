@@ -1,0 +1,419 @@
+// The VDBE opcodes of SQLite 3.45.0 as the sqlite3.c amalgamation of that
+// release numbers them (opcodes.h, which tool/mkopcodeh.tcl generates from
+// the "case OP_..." lines of src/vdbe.c), their property bits
+// (OPFLG_INITIALIZER) and their EXPLAIN names (opcodes.c,
+// tool/mkopcodec.tcl). Opcodes that share a token's number say so. The
+// build has no SQLITE_ENABLE_EXPLAIN_COMMENTS, so EXPLAIN's comment column
+// is NULL and the synopses beside the opcodes are documentation only.
+
+OP_SAVEPOINT: 0
+OP_AUTO_COMMIT: 1
+OP_TRANSACTION: 2
+OP_CHECKPOINT: 3
+OP_JOURNAL_MODE: 4
+OP_VACUUM: 5
+OP_VFILTER: 6  // jump, synopsis: iplan=r[P3] zplan='P4'
+OP_VUPDATE: 7  // synopsis: data=r[P3@P2]
+OP_INIT: 8  // jump, synopsis: Start at P2
+OP_GOTO: 9  // jump
+OP_GOSUB: 10  // jump
+OP_INIT_COROUTINE: 11  // jump
+OP_YIELD: 12  // jump
+OP_MUST_BE_INT: 13  // jump
+OP_JUMP: 14  // jump
+OP_ONCE: 15  // jump
+OP_IF: 16  // jump
+OP_IF_NOT: 17  // jump
+OP_IS_TYPE: 18  // jump, synopsis: if typeof(P1.P3) in P5 goto P2
+OP_NOT: 19  // same as TK_NOT, synopsis: r[P2]= !r[P1]
+OP_IF_NULL_ROW: 20  // jump, synopsis: if P1.nullRow then r[P3]=NULL, goto P2
+OP_SEEK_LT: 21  // jump, synopsis: key=r[P3@P4]
+OP_SEEK_LE: 22  // jump, synopsis: key=r[P3@P4]
+OP_SEEK_GE: 23  // jump, synopsis: key=r[P3@P4]
+OP_SEEK_GT: 24  // jump, synopsis: key=r[P3@P4]
+OP_IF_NOT_OPEN: 25  // jump, synopsis: if( !csr[P1] ) goto P2
+OP_IF_NO_HOPE: 26  // jump, synopsis: key=r[P3@P4]
+OP_NO_CONFLICT: 27  // jump, synopsis: key=r[P3@P4]
+OP_NOT_FOUND: 28  // jump, synopsis: key=r[P3@P4]
+OP_FOUND: 29  // jump, synopsis: key=r[P3@P4]
+OP_SEEK_ROWID: 30  // jump, synopsis: intkey=r[P3]
+OP_NOT_EXISTS: 31  // jump, synopsis: intkey=r[P3]
+OP_LAST: 32  // jump
+OP_IF_SMALLER: 33  // jump
+OP_SORTER_SORT: 34  // jump
+OP_SORT: 35  // jump
+OP_REWIND: 36  // jump
+OP_SORTER_NEXT: 37  // jump
+OP_PREV: 38  // jump
+OP_NEXT: 39  // jump
+OP_IDX_LE: 40  // jump, synopsis: key=r[P3@P4]
+OP_IDX_GT: 41  // jump, synopsis: key=r[P3@P4]
+OP_IDX_LT: 42  // jump, synopsis: key=r[P3@P4]
+OP_OR: 43  // same as TK_OR, synopsis: r[P3]=(r[P1] || r[P2])
+OP_AND: 44  // same as TK_AND, synopsis: r[P3]=(r[P1] && r[P2])
+OP_IDX_GE: 45  // jump, synopsis: key=r[P3@P4]
+OP_ROW_SET_READ: 46  // jump, synopsis: r[P3]=rowset(P1)
+OP_ROW_SET_TEST: 47  // jump, synopsis: if r[P3] in rowset(P1) goto P2
+OP_PROGRAM: 48  // jump
+OP_FK_IF_ZERO: 49  // jump, synopsis: if fkctr[P1]==0 goto P2
+OP_IS_NULL: 50  // jump, same as TK_ISNULL, synopsis: if r[P1]==NULL goto P2
+OP_NOT_NULL: 51  // jump, same as TK_NOTNULL, synopsis: if r[P1]!=NULL goto P2
+OP_NE: 52  // jump, same as TK_NE, synopsis: IF r[P3]!=r[P1]
+OP_EQ: 53  // jump, same as TK_EQ, synopsis: IF r[P3]==r[P1]
+OP_GT: 54  // jump, same as TK_GT, synopsis: IF r[P3]>r[P1]
+OP_LE: 55  // jump, same as TK_LE, synopsis: IF r[P3]<=r[P1]
+OP_LT: 56  // jump, same as TK_LT, synopsis: IF r[P3]<r[P1]
+OP_GE: 57  // jump, same as TK_GE, synopsis: IF r[P3]>=r[P1]
+OP_ELSE_EQ: 58  // jump, same as TK_ESCAPE
+OP_IF_POS: 59  // jump, synopsis: if r[P1]>0 then r[P1]-=P3, goto P2
+OP_IF_NOT_ZERO: 60  // jump, synopsis: if r[P1]!=0 then r[P1]--, goto P2
+OP_DECR_JUMP_ZERO: 61  // jump, synopsis: if (--r[P1])==0 goto P2
+OP_INCR_VACUUM: 62  // jump
+OP_VNEXT: 63  // jump
+OP_FILTER: 64  // jump, synopsis: if key(P3@P4) not in filter(P1) goto P2
+OP_PURE_FUNC: 65  // synopsis: r[P3]=func(r[P2@NP])
+OP_FUNCTION: 66  // synopsis: r[P3]=func(r[P2@NP])
+OP_RETURN: 67
+OP_END_COROUTINE: 68
+OP_HALT_IF_NULL: 69  // synopsis: if r[P3]=null halt
+OP_HALT: 70
+OP_INTEGER: 71  // synopsis: r[P2]=P1
+OP_INT64: 72  // synopsis: r[P2]=P4
+OP_STRING: 73  // synopsis: r[P2]='P4' (len=P1)
+OP_BEGIN_SUBRTN: 74  // synopsis: r[P2]=NULL
+OP_NULL: 75  // synopsis: r[P2..P3]=NULL
+OP_SOFT_NULL: 76  // synopsis: r[P1]=NULL
+OP_BLOB: 77  // synopsis: r[P2]=P4 (len=P1)
+OP_VARIABLE: 78  // synopsis: r[P2]=parameter(P1,P4)
+OP_MOVE: 79  // synopsis: r[P2@P3]=r[P1@P3]
+OP_COPY: 80  // synopsis: r[P2@P3+1]=r[P1@P3+1]
+OP_SCOPY: 81  // synopsis: r[P2]=r[P1]
+OP_INT_COPY: 82  // synopsis: r[P2]=r[P1]
+OP_FK_CHECK: 83
+OP_RESULT_ROW: 84  // synopsis: output=r[P1@P2]
+OP_COLL_SEQ: 85
+OP_ADD_IMM: 86  // synopsis: r[P1]=r[P1]+P2
+OP_REAL_AFFINITY: 87
+OP_CAST: 88  // synopsis: affinity(r[P1])
+OP_PERMUTATION: 89
+OP_COMPARE: 90  // synopsis: r[P1@P3] <-> r[P2@P3]
+OP_IS_TRUE: 91  // synopsis: r[P2] = coalesce(r[P1]==TRUE,P3) ^ P4
+OP_ZERO_OR_NULL: 92  // synopsis: r[P2] = 0 OR NULL
+OP_OFFSET: 93  // synopsis: r[P3] = sqlite_offset(P1)
+OP_COLUMN: 94  // synopsis: r[P3]=PX cursor P1 column P2
+OP_TYPE_CHECK: 95  // synopsis: typecheck(r[P1@P2])
+OP_AFFINITY: 96  // synopsis: affinity(r[P1@P2])
+OP_MAKE_RECORD: 97  // synopsis: r[P3]=mkrec(r[P1@P2])
+OP_COUNT: 98  // synopsis: r[P2]=count()
+OP_READ_COOKIE: 99
+OP_SET_COOKIE: 100
+OP_REOPEN_IDX: 101  // synopsis: root=P2 iDb=P3
+OP_BIT_AND: 102  // same as TK_BITAND, synopsis: r[P3]=r[P1]&r[P2]
+OP_BIT_OR: 103  // same as TK_BITOR, synopsis: r[P3]=r[P1]|r[P2]
+OP_SHIFT_LEFT: 104  // same as TK_LSHIFT, synopsis: r[P3]=r[P2]<<r[P1]
+OP_SHIFT_RIGHT: 105  // same as TK_RSHIFT, synopsis: r[P3]=r[P2]>>r[P1]
+OP_ADD: 106  // same as TK_PLUS, synopsis: r[P3]=r[P1]+r[P2]
+OP_SUBTRACT: 107  // same as TK_MINUS, synopsis: r[P3]=r[P2]-r[P1]
+OP_MULTIPLY: 108  // same as TK_STAR, synopsis: r[P3]=r[P1]*r[P2]
+OP_DIVIDE: 109  // same as TK_SLASH, synopsis: r[P3]=r[P2]/r[P1]
+OP_REMAINDER: 110  // same as TK_REM, synopsis: r[P3]=r[P2]%r[P1]
+OP_CONCAT: 111  // same as TK_CONCAT, synopsis: r[P3]=r[P2]+r[P1]
+OP_OPEN_READ: 112  // synopsis: root=P2 iDb=P3
+OP_OPEN_WRITE: 113  // synopsis: root=P2 iDb=P3
+OP_BIT_NOT: 114  // same as TK_BITNOT, synopsis: r[P2]= ~r[P1]
+OP_OPEN_DUP: 115
+OP_OPEN_AUTOINDEX: 116  // synopsis: nColumn=P2
+OP_STRING8: 117  // same as TK_STRING, synopsis: r[P2]='P4'
+OP_OPEN_EPHEMERAL: 118  // synopsis: nColumn=P2
+OP_SORTER_OPEN: 119
+OP_SEQUENCE_TEST: 120  // synopsis: if( cursor[P1].ctr++ ) pc = P2
+OP_OPEN_PSEUDO: 121  // synopsis: P3 columns in r[P2]
+OP_CLOSE: 122
+OP_COLUMNS_USED: 123
+OP_SEEK_SCAN: 124  // synopsis: Scan-ahead up to P1 rows
+OP_SEEK_HIT: 125  // synopsis: set P2<=seekHit<=P3
+OP_SEQUENCE: 126  // synopsis: r[P2]=cursor[P1].ctr++
+OP_NEW_ROWID: 127  // synopsis: r[P2]=rowid
+OP_INSERT: 128  // synopsis: intkey=r[P3] data=r[P2]
+OP_ROW_CELL: 129
+OP_DELETE: 130
+OP_RESET_COUNT: 131
+OP_SORTER_COMPARE: 132  // synopsis: if key(P1)!=trim(r[P3],P4) goto P2
+OP_SORTER_DATA: 133  // synopsis: r[P2]=data
+OP_ROW_DATA: 134  // synopsis: r[P2]=data
+OP_ROWID: 135  // synopsis: r[P2]=PX rowid of P1
+OP_NULL_ROW: 136
+OP_SEEK_END: 137
+OP_IDX_INSERT: 138  // synopsis: key=r[P2]
+OP_SORTER_INSERT: 139  // synopsis: key=r[P2]
+OP_IDX_DELETE: 140  // synopsis: key=r[P2@P3]
+OP_DEFERRED_SEEK: 141  // synopsis: Move P3 to P1.rowid if needed
+OP_IDX_ROWID: 142  // synopsis: r[P2]=rowid
+OP_FINISH_SEEK: 143
+OP_DESTROY: 144
+OP_CLEAR: 145
+OP_RESET_SORTER: 146
+OP_CREATE_BTREE: 147  // synopsis: r[P2]=root iDb=P1 flags=P3
+OP_SQL_EXEC: 148
+OP_PARSE_SCHEMA: 149
+OP_LOAD_ANALYSIS: 150
+OP_DROP_TABLE: 151
+OP_DROP_INDEX: 152
+OP_REAL: 153  // same as TK_FLOAT, synopsis: r[P2]=P4
+OP_DROP_TRIGGER: 154
+OP_INTEGRITY_CK: 155
+OP_ROW_SET_ADD: 156  // synopsis: rowset(P1)=r[P2]
+OP_PARAM: 157
+OP_FK_COUNTER: 158  // synopsis: fkctr[P1]+=P2
+OP_MEM_MAX: 159  // synopsis: r[P1]=max(r[P1],r[P2])
+OP_OFFSET_LIMIT: 160  // synopsis: if r[P1]>0 then r[P2]=r[P1]+max(0,r[P3]) else r[P2]=(-1)
+OP_AGG_INVERSE: 161  // synopsis: accum=r[P3] inverse(r[P2@P5])
+OP_AGG_STEP: 162  // synopsis: accum=r[P3] step(r[P2@P5])
+OP_AGG_STEP1: 163  // synopsis: accum=r[P3] step(r[P2@P5])
+OP_AGG_VALUE: 164  // synopsis: r[P3]=value N=P2
+OP_AGG_FINAL: 165  // synopsis: accum=r[P1] N=P2
+OP_EXPIRE: 166
+OP_CURSOR_LOCK: 167
+OP_CURSOR_UNLOCK: 168
+OP_TABLE_LOCK: 169  // synopsis: iDb=P1 root=P2 write=P3
+OP_VBEGIN: 170
+OP_VCREATE: 171
+OP_VDESTROY: 172
+OP_VOPEN: 173
+OP_VCHECK: 174
+OP_VINIT_IN: 175  // synopsis: r[P2]=ValueList(P1,P3)
+OP_VCOLUMN: 176  // synopsis: r[P3]=vcolumn(P2)
+OP_VRENAME: 177
+OP_PAGECOUNT: 178
+OP_MAX_PGCNT: 179
+OP_CLR_SUBTYPE: 180  // synopsis: r[P1].subtype = 0
+OP_GET_SUBTYPE: 181  // synopsis: r[P2] = r[P1].subtype
+OP_SET_SUBTYPE: 182  // synopsis: r[P2].subtype = r[P1]
+OP_FILTER_ADD: 183  // synopsis: filter(P1) += key(P3@P4)
+OP_TRACE: 184
+OP_CURSOR_HINT: 185
+OP_RELEASE_REG: 186  // synopsis: release r[P1@P2] mask P3
+OP_NOOP: 187
+OP_EXPLAIN: 188
+OP_ABORTABLE: 189
+
+// The property bits of each opcode (vdbe.c's "jump", "in1" ... comments).
+OPFLG_JUMP: 1
+OPFLG_IN1: 2
+OPFLG_IN2: 4
+OPFLG_IN3: 8
+OPFLG_OUT2: 16
+OPFLG_OUT3: 32
+OPFLG_NCYCLE: 64
+
+// SQLITE_MX_JUMP_OPCODE: no opcode above this one jumps.
+MX_JUMP_OPCODE: 64
+
+OP_PROPERTIES: [Int]{
+    0, 0, 0, 0, 16, 0, 65, 0, 1, 1, 1, 1, 3, 3, 1, 1,
+    3, 3, 1, 18, 1, 73, 73, 73, 73, 1, 73, 73, 73, 73, 73, 73,
+    65, 1, 65, 65, 65, 1, 65, 65, 65, 65, 65, 38, 38, 65, 35, 11,
+    1, 1, 3, 3, 11, 11, 11, 11, 11, 11, 1, 3, 3, 3, 1, 65,
+    1, 0, 0, 2, 2, 8, 0, 16, 16, 16, 0, 16, 0, 16, 16, 0,
+    0, 16, 16, 0, 0, 0, 2, 2, 2, 0, 0, 18, 30, 32, 64, 0,
+    0, 0, 16, 16, 0, 64, 38, 38, 38, 38, 38, 38, 38, 38, 38, 38,
+    64, 0, 18, 64, 64, 16, 64, 0, 0, 0, 64, 0, 64, 64, 16, 16,
+    0, 0, 0, 0, 0, 64, 0, 80, 0, 64, 4, 4, 0, 64, 80, 64,
+    16, 0, 0, 16, 0, 0, 0, 0, 0, 16, 0, 0, 6, 16, 0, 4,
+    26, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 64, 16, 80,
+    64, 0, 16, 16, 2, 18, 18, 0, 0, 0, 0, 0, 0, 0
+}
+
+// sqlite3OpcodeName: the name EXPLAIN shows for each opcode.
+OP_NAMES: [String]{
+    "Savepoint",
+    "AutoCommit",
+    "Transaction",
+    "Checkpoint",
+    "JournalMode",
+    "Vacuum",
+    "VFilter",
+    "VUpdate",
+    "Init",
+    "Goto",
+    "Gosub",
+    "InitCoroutine",
+    "Yield",
+    "MustBeInt",
+    "Jump",
+    "Once",
+    "If",
+    "IfNot",
+    "IsType",
+    "Not",
+    "IfNullRow",
+    "SeekLT",
+    "SeekLE",
+    "SeekGE",
+    "SeekGT",
+    "IfNotOpen",
+    "IfNoHope",
+    "NoConflict",
+    "NotFound",
+    "Found",
+    "SeekRowid",
+    "NotExists",
+    "Last",
+    "IfSmaller",
+    "SorterSort",
+    "Sort",
+    "Rewind",
+    "SorterNext",
+    "Prev",
+    "Next",
+    "IdxLE",
+    "IdxGT",
+    "IdxLT",
+    "Or",
+    "And",
+    "IdxGE",
+    "RowSetRead",
+    "RowSetTest",
+    "Program",
+    "FkIfZero",
+    "IsNull",
+    "NotNull",
+    "Ne",
+    "Eq",
+    "Gt",
+    "Le",
+    "Lt",
+    "Ge",
+    "ElseEq",
+    "IfPos",
+    "IfNotZero",
+    "DecrJumpZero",
+    "IncrVacuum",
+    "VNext",
+    "Filter",
+    "PureFunc",
+    "Function",
+    "Return",
+    "EndCoroutine",
+    "HaltIfNull",
+    "Halt",
+    "Integer",
+    "Int64",
+    "String",
+    "BeginSubrtn",
+    "Null",
+    "SoftNull",
+    "Blob",
+    "Variable",
+    "Move",
+    "Copy",
+    "SCopy",
+    "IntCopy",
+    "FkCheck",
+    "ResultRow",
+    "CollSeq",
+    "AddImm",
+    "RealAffinity",
+    "Cast",
+    "Permutation",
+    "Compare",
+    "IsTrue",
+    "ZeroOrNull",
+    "Offset",
+    "Column",
+    "TypeCheck",
+    "Affinity",
+    "MakeRecord",
+    "Count",
+    "ReadCookie",
+    "SetCookie",
+    "ReopenIdx",
+    "BitAnd",
+    "BitOr",
+    "ShiftLeft",
+    "ShiftRight",
+    "Add",
+    "Subtract",
+    "Multiply",
+    "Divide",
+    "Remainder",
+    "Concat",
+    "OpenRead",
+    "OpenWrite",
+    "BitNot",
+    "OpenDup",
+    "OpenAutoindex",
+    "String8",
+    "OpenEphemeral",
+    "SorterOpen",
+    "SequenceTest",
+    "OpenPseudo",
+    "Close",
+    "ColumnsUsed",
+    "SeekScan",
+    "SeekHit",
+    "Sequence",
+    "NewRowid",
+    "Insert",
+    "RowCell",
+    "Delete",
+    "ResetCount",
+    "SorterCompare",
+    "SorterData",
+    "RowData",
+    "Rowid",
+    "NullRow",
+    "SeekEnd",
+    "IdxInsert",
+    "SorterInsert",
+    "IdxDelete",
+    "DeferredSeek",
+    "IdxRowid",
+    "FinishSeek",
+    "Destroy",
+    "Clear",
+    "ResetSorter",
+    "CreateBtree",
+    "SqlExec",
+    "ParseSchema",
+    "LoadAnalysis",
+    "DropTable",
+    "DropIndex",
+    "Real",
+    "DropTrigger",
+    "IntegrityCk",
+    "RowSetAdd",
+    "Param",
+    "FkCounter",
+    "MemMax",
+    "OffsetLimit",
+    "AggInverse",
+    "AggStep",
+    "AggStep1",
+    "AggValue",
+    "AggFinal",
+    "Expire",
+    "CursorLock",
+    "CursorUnlock",
+    "TableLock",
+    "VBegin",
+    "VCreate",
+    "VDestroy",
+    "VOpen",
+    "VCheck",
+    "VInitIn",
+    "VColumn",
+    "VRename",
+    "Pagecount",
+    "MaxPgcnt",
+    "ClrSubtype",
+    "GetSubtype",
+    "SetSubtype",
+    "FilterAdd",
+    "Trace",
+    "CursorHint",
+    "ReleaseReg",
+    "Noop",
+    "Explain",
+    "Abortable"
+}

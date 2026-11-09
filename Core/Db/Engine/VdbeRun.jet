@@ -1,0 +1,267 @@
+// The state of one run of the virtual machine (the locals of SQLite
+// 3.45.0 sqlite3VdbeExec in vdbe.c) and the helpers its op handlers share:
+// out2Prerelease, allocateCursor, filterHash and the P4 readers.
+//
+// Each op handler (VdbeData, VdbeCursor, VdbeSchema) runs one opcode on
+// the Run the loop (VdbeExec) gives it and answers with a GO_* code: where
+// the loop goes next, or which of sqlite3VdbeExec's tails (abort_due_to_error,
+// no_mem, too_big, abort_due_to_interrupt, vdbe_return) it takes. A
+// handler that moves the program counter itself (C's `pOp = &aOp[x]`) sets
+// Run.pc to x and answers GO_NEXT, which steps past it as C's loop does.
+//
+// The running program's ops are Vdbe.ops, read where they lie; the loop
+// copies the integer operands of the op at Run.pc into the Run.
+
+use {
+    base: __core_db_base
+    util: __core_db_util
+    mem: __core_db_mem
+    conn: __core_db_conn
+    aux: __core_db_vdbeaux
+    __core_db_vdbeaux.[Host]
+    record: __core_db_record
+}
+
+// The locals of sqlite3VdbeExec. pc is the running op (pOp - aOp), rc the
+// result code, op/p1/p2/p3/p5 that op's operands, enc the database
+// encoding, i_compare the result of the last OP_Compare, n_vm_step the ops
+// run and n_progress_limit the step count at which the progress handler is
+// due. reset_schema_on_fault is 1 + the database whose schema an error
+// must reset, 0 for none.
+Run: struct {
+    pc: Int
+    rc: Int
+    op: Int
+    p1: Int
+    p2: Int
+    p3: Int
+    p5: Int
+    enc: Int
+    i_compare: Int
+    n_vm_step: Int
+    n_progress_limit: Int
+    reset_schema_on_fault: Int
+}
+
+run_new: fn(enc: Int) -> Run Never! {
+    Run{pc: 0, rc: base.OK, op: 0, p1: 0, p2: 0, p3: 0, p5: 0, enc: enc, i_compare: 0, n_vm_step: 0, n_progress_limit: base.I64_MAX, reset_schema_on_fault: 0}
+}
+
+// What a handler asks of the loop: the next op; the op P2 names
+// (jump_to_p2); either of those through check_for_interrupt; or one of
+// the tails, with Run.rc the result code of GO_ERROR and GO_RETURN.
+GO_NEXT: 0
+GO_JUMP: 1
+GO_NEXT_CHECK: 2
+GO_JUMP_CHECK: 3
+GO_ERROR: 4
+GO_NO_MEM: 5
+GO_TOO_BIG: 6
+GO_INTERRUPT: 7
+GO_RETURN: 8
+
+// Registers. Register p of the running program is Vdbe.mem index
+// v.mem_base + p; cursor p is Vdbe.csr index v.csr_base + p.
+
+reg: fn(v: conn.Vdbe, p: Int) -> Int Never! { v.mem_base + p }
+
+csr: fn(v: conn.Vdbe, p: Int) -> Int Never! { v.csr_base + p }
+
+// Free what register i holds beyond its value (VdbeMemDynamic: an
+// aggregate context or a RowSet) before it is overwritten.
+release_dyn: fn(v: &conn.Vdbe, i: Int) Never! {
+    if v.mem[i].flags.bit_and(base.MEM_AGG.bit_or(conn.MEM_DYN)) != 0 -> aux.release_object(v, i)
+}
+
+// out2Prerelease: register i becomes an INTEGER whose value the op
+// writes next; its other bytes are left as they are.
+out2: fn(v: &conn.Vdbe, i: Int) Never! {
+    release_dyn(v, i)
+    v.mem[i].flags = base.MEM_INT
+}
+
+// sqlite3VdbeMemSetNull of register i.
+reg_null: fn(v: &conn.Vdbe, i: Int) Never! {
+    release_dyn(v, i)
+    mem.set_null(v.mem[i])
+}
+
+// sqlite3VdbeMemSetInt64 of register i.
+reg_int: fn(v: &conn.Vdbe, i: Int, x: Int) Never! {
+    release_dyn(v, i)
+    mem.set_int64(v.mem[i], x)
+}
+
+// sqlite3VdbeMemSetDouble of register i.
+reg_real: fn(v: &conn.Vdbe, i: Int, r: Float) Never! {
+    release_dyn(v, i)
+    mem.set_double(v.mem[i], r)
+}
+
+// Register i becomes the value m (sqlite3VdbeMemCopy / MemMove into it).
+reg_set: fn(v: &conn.Vdbe, i: Int, m: base.Mem) Never! {
+    release_dyn(v, i)
+    v.mem[i] = m
+}
+
+// sqlite3VdbeMemShallowCopy(to, from, MEM_Ephem) between registers: the
+// value only (an aggregate context or RowSet stays with `from`).
+reg_copy: fn(v: &conn.Vdbe, to: Int, from: Int) Never! {
+    release_dyn(v, to)
+    m := v.mem[from].copy()
+    if m.flags.bit_and(base.MEM_AGG.bit_or(conn.MEM_DYN)) != 0 -> m.flags = base.MEM_NULL
+    v.mem[to] = m
+}
+
+// allocateCursor: cursor slot p of the running program, opened fresh with
+// n_field columns and type cur_type (closing what the slot held). The
+// Vdbe.csr index.
+alloc_cursor: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, p: Int, n_field: Int, cur_type: Int) -[DB]> Int Never! {
+    ci: v.csr_base + p
+    if v.csr[ci].live -> aux.free_cursor<H>(h, db, v, ci)
+    c := conn.vdbe_cursor_closed()
+    c.live = true
+    c.cur_type = cur_type
+    c.n_field = n_field
+    loop _ in 0..<n_field -> c.types.push(0)
+    loop _ in 0..<n_field + 1 -> c.offsets.push(0)
+    v.csr[ci] = c
+    ci
+}
+
+// P4 readers of op pc of the running program.
+
+// p4.i: an Int32 or Int64 operand, 0 otherwise.
+p4_int: fn(v: conn.Vdbe, pc: Int) -> Int Never! {
+    if v.ops[pc].p4 == {
+        .Int32(i) -> i
+        .Int64(i) -> i
+        else -> 0
+    }
+}
+
+// p4.z: a text operand, None otherwise.
+p4_text: fn(v: conn.Vdbe, pc: Int) -> [U8]? Never! {
+    if v.ops[pc].p4 == .Text(z) -> return Val(z.copy())
+    None
+}
+
+// p4.pColl: a collating sequence operand, BINARY otherwise.
+p4_coll: fn(v: conn.Vdbe, pc: Int) -> Int Never! {
+    if v.ops[pc].p4 == .Coll(c) -> return c
+    record.COLL_BINARY
+}
+
+// Op setters: the ops the loop rewrites as it runs (OP_Once's and
+// OP_Init's P1, OP_String8 becoming OP_String, OP_AggStep becoming
+// OP_AggStep1).
+
+set_opcode: fn(v: &conn.Vdbe, pc: Int, opcode: Int) Never! { v.ops[pc].opcode = opcode }
+
+set_p1: fn(v: &conn.Vdbe, pc: Int, p1: Int) Never! { v.ops[pc].p1 = p1 }
+
+set_p4: fn(v: &conn.Vdbe, pc: Int, p4: conn.P4) Never! { v.ops[pc].p4 = p4 }
+
+// filterHash: the hash of registers p3 .. p3+n-1 for OP_FilterAdd and
+// OP_Filter, as an unsigned 64-bit value. Every text hashes alike and so
+// does every blob.
+filter_hash: fn(v: conn.Vdbe, p3: Int, n: Int) -> Int Never! {
+    h := 0
+    loop i in p3..<p3 + n {
+        f: v.mem[i].flags
+        if f.bit_and(base.MEM_INT.bit_or(base.MEM_INT_REAL)) != 0 {
+            h = util.wrap_i64(h + v.mem[i].i)
+        } else if f.bit_and(base.MEM_REAL) != 0 {
+            h = util.wrap_i64(h + mem.int_value(v.mem[i]))
+        } else if f.bit_and(base.MEM_STR.bit_or(base.MEM_BLOB)) != 0 {
+            h = util.wrap_i64(h + 4093 + f.bit_and(base.MEM_STR.bit_or(base.MEM_BLOB)))
+        }
+    }
+    util.as_u64(h)
+}
+
+// vdbeMemTypeName: the datatype name OP_TypeCheck reports.
+mem_type_name: fn(m: base.Mem) -> [U8] Never! {
+    names: ["INT", "REAL", "TEXT", "BLOB", "NULL"]
+    names[base.value_type(m) - 1].bytes()
+}
+
+// A test's Run on op pc of v with operands p1, p2, p3.
+test_run: fn(v: conn.Vdbe, pc: Int, p1: Int, p2: Int, p3: Int) -> Run Never! {
+    r := run_new(base.UTF8)
+    r.pc = pc
+    r.op = v.ops[pc].opcode
+    r.p1 = p1
+    r.p2 = p2
+    r.p3 = p3
+    r.p5 = v.ops[pc].p5
+    r
+}
+
+// A test's op with zero operands and P4 p4.
+test_op: fn(opcode: Int, p4: conn.P4) -> conn.VdbeOp Never! {
+    conn.VdbeOp{opcode: opcode, p1: 0, p2: 0, p3: 0, p4: p4, p5: 0}
+}
+
+// A test's Host: no functions, virtual tables, hooks or schema loader. Its
+// progress handler counts its calls and interrupts on call interrupt_at
+// (never when 0).
+TestHost: struct {
+    interrupt_at: Int
+    progress_calls: Int
+}
+
+impl TestHost.Host {
+    vtab_has: fn(&self, _db: conn.Conn, _vt: Int, _method: Int) -[]> Bool Never! { false }
+    vtab_version: fn(&self, _db: conn.Conn, _vt: Int) -[]> Int Never! { 0 }
+    vtab_call: fn(&self, _db: &conn.Conn, _vt: Int, _method: Int, _arg: Int) -[DB]> Int Never! { base.OK }
+    vtab_close: fn(&self, _db: &conn.Conn, _vt: Int, _cursor: Int) Never! -[DB]> {}
+    vtab_take_errmsg: fn(&self, _db: conn.Conn, _vt: Int) -[]> [U8]? { None }
+    vtab_open: fn(&self, _db: &conn.Conn, _vt: Int, _cursor: &Int) -[DB]> Int Never! { base.ERROR }
+    vtab_filter: fn(&self, _db: &conn.Conn, _v: &conn.Vdbe, _cursor: Int, _idx_num: Int, _idx_str: [U8]?, _arg: Int, _argc: Int) -[DB]> Int Never! { base.ERROR }
+    vtab_eof: fn(&self, _db: &conn.Conn, _cursor: Int) -[DB]> Bool Never! { true }
+    vtab_next: fn(&self, _db: &conn.Conn, _cursor: Int) -[DB]> Int Never! { base.ERROR }
+    vtab_column: fn(&self, _db: &conn.Conn, _v: &conn.Vdbe, _cursor: Int, _col: Int) -[DB]> Int Never! { base.ERROR }
+    vtab_rowid: fn(&self, _db: &conn.Conn, _cursor: Int, _rowid: &Int) -[DB]> Int Never! { base.ERROR }
+    vtab_update: fn(&self, _db: &conn.Conn, _v: &conn.Vdbe, _vt: Int, _arg: Int, _argc: Int, _rowid: &Int) -[DB]> Int Never! { base.ERROR }
+    vtab_rename: fn(&self, _db: &conn.Conn, _vt: Int, _name: [U8]) -[DB]> Int Never! { base.ERROR }
+    vtab_integrity: fn(&self, _db: &conn.Conn, _vt: Int, _schema: [U8], _table: [U8], _flags: Int, _msg: &[U8]?) -[DB]> Int Never! { base.OK }
+    vtab_call_create: fn(&self, _db: &conn.Conn, _i_db: Int, _name: [U8], _msg: &[U8]?) -[DB]> Int Never! { base.ERROR }
+    vtab_call_destroy: fn(&self, _db: &conn.Conn, _i_db: Int, _name: [U8]) -[DB]> Int Never! { base.ERROR }
+    func_call: fn(&self, _db: &conn.Conn, _v: &conn.Vdbe, _method: Int) Never! -[DB]> {}
+    commit_hook: fn(&self, _db: &conn.Conn) -[DB]> Int Never! { 0 }
+    rollback_hook: fn(&self, _db: &conn.Conn) Never! -[DB]> {}
+    has_update_hook: fn(&self, _db: conn.Conn) -[]> Bool Never! { false }
+    update_hook: fn(&self, _db: &conn.Conn, _op: Int, _db_name: [U8], _table: [U8], _rowid: Int) Never! -[DB]> {}
+    progress: fn(&self, _db: &conn.Conn) -[DB]> Bool Never! {
+        self.progress_calls += 1
+        self.progress_calls == self.interrupt_at
+    }
+    trace: fn(&self, _db: &conn.Conn, _v: conn.Vdbe, _event: Int, _text: [U8]) Never! -[DB]> {}
+    profile: fn(&self, _db: &conn.Conn, _v: conn.Vdbe, _elapsed_ns: Int) Never! -[DB]> {}
+    wal_hook: fn(&self, _db: &conn.Conn, _db_name: [U8], _n_frame: Int) -[DB]> Int Never! { base.OK }
+    sql_exec: fn(&self, _db: &conn.Conn, _sql: [U8], _quiet: Bool, _msg: &[U8]?) -[DB]> Int Never! { base.ERROR }
+    init_one: fn(&self, _db: &conn.Conn, _i_db: Int, _flags: Int, _msg: &[U8]?) -[DB]> Int Never! { base.OK }
+    parse_schema: fn(&self, _db: &conn.Conn, _i_db: Int, _where: [U8], _msg: &[U8]?) -[DB]> Int Never! { base.OK }
+    load_analysis: fn(&self, _db: &conn.Conn, _i_db: Int) -[DB]> Int Never! { base.OK }
+    run_vacuum: fn(&self, _db: &conn.Conn, _i_db: Int, _into: base.Mem?, _msg: &[U8]?) -[DB]> Int Never! { base.ERROR }
+    reprepare: fn(&self, _db: &conn.Conn, _v: &conn.Vdbe) -[DB]> Int Never! { base.ERROR }
+}
+
+#Test("filterHash sums integers and buckets text and blobs") {
+    v := conn.vdbe_new()
+    v.mem.push(base.mem_int(5))
+    v.mem.push(base.mem_text("a".bytes(), base.UTF8))
+    v.mem.push(base.mem_real(2.5))
+    assert_eq(filter_hash(v, 0, 3), 5 + 4093 + 2 + 2)
+    v.mem[0].i = -10
+    assert_eq(filter_hash(v, 0, 1), 18446744073709551606)
+}
+
+#Test("out2 makes the register an integer and frees a RowSet") {
+    v := conn.vdbe_new()
+    v.mem.push(base.mem_text("x".bytes(), base.UTF8))
+    out2(v, 0)
+    assert_eq(v.mem[0].flags, base.MEM_INT)
+    assert_eq(String.from_bytes(mem_type_name(v.mem[0])) ?? "", "INT")
+}

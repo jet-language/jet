@@ -159,9 +159,6 @@ SQLITE_CELL_SIZE_CK: 2097152
 SQLITE_RESET_DATABASE: 33554432
 SQLITE_DEFENSIVE: 268435456
 
-// SQLITE_CONSTRAINT_PINNED.
-CONSTRAINT_PINNED: 2835
-
 // SQLITE_DEFAULT_CACHE_SIZE.
 DEFAULT_CACHE_SIZE: -2000
 // SQLITE_DEFAULT_AUTOVACUUM.
@@ -523,7 +520,7 @@ save_cursor_key: fn(bt: &Btree, c: Int) -[DB]> Int Never! {
 
 // saveCursorPosition.
 save_cursor_position: fn(bt: &Btree, c: Int) -[DB]> Int Never! {
-    if bt.cursors[c].cur_flags.bit_and(BTCF_PINNED) != 0 -> return CONSTRAINT_PINNED
+    if bt.cursors[c].cur_flags.bit_and(BTCF_PINNED) != 0 -> return base.CONSTRAINT_PINNED
     if bt.cursors[c].state == CURSOR_SKIPNEXT {
         bt.cursors[c].state = CURSOR_VALID
     } else {

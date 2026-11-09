@@ -1,0 +1,1775 @@
+// The connection of the Jet SQLite engine and the objects it owns: a port
+// of the SQLite 3.45.0 sqliteInt.h and vdbeInt.h structures (struct sqlite3,
+// Db, Schema, Table, Column, Index, FKey, Trigger, FuncDef, CollSeq,
+// Savepoint, VTable, Vdbe, VdbeOp, VdbeCursor, VdbeFrame, SubProgram,
+// AuxData, sqlite3_context), hash.c, and the schema lookups and unlinks of
+// callback.c and build.c the virtual machine needs.
+//
+// C's pointers are arena indexes here, -1 for NULL: a Table is an index of
+// Conn.tables, an Index of Conn.indexes, a Trigger of Conn.triggers, an FKey
+// of Conn.fkeys, a Schema of Conn.schemas, a VTable of Conn.vtables, a Btree
+// of Conn.btrees and a prepared statement of Conn.vdbes. Freed slots go on
+// the arena's free list and are reused. The expressions, lists and selects
+// the schema objects hold live in the connection's AST arena (ast.AST).
+//
+// Ephemeral btrees (OP_OpenEphemeral) are Conn.btrees slots too, so that
+// every cursor names its btree by one index; the database files are the
+// btrees that Db.bt names. Each Btree keeps a copy of the connection state
+// it reads (btree.BtDB); sync_btrees refreshes them where C would have read
+// the changed sqlite3 fields through its pointer.
+//
+// A collating sequence is its record.COLL_* id; CollSeq names the builtins
+// (BINARY, NOCASE, RTRIM) and any registered later get the next ids.
+
+use {
+    base: __core_db_base
+    util: __core_db_util
+    btree: __core_db_btree
+    record: __core_db_record
+    ast: __core_db_ast
+    rowset: __core_db_rowset
+    sorter: __core_db_sorter
+}
+
+// ---------------------------------------------------------------------------
+// sqlite3.flags (SQLITE_*) beyond the five the btree reads (btree.SQLITE_*:
+// WriteSchema, NoCkptOnClose, CellSizeCk, ResetDatabase, Defensive). The
+// HI() bits are above bit 31.
+
+SQLITE_LEGACY_FILE_FMT: 2
+SQLITE_FULL_COL_NAMES: 4
+SQLITE_FULL_FSYNC: 8
+SQLITE_CKPT_FULL_FSYNC: 16
+SQLITE_CACHE_SPILL: 32
+SQLITE_SHORT_COL_NAMES: 64
+SQLITE_TRUSTED_SCHEMA: 128
+SQLITE_NULL_CALLBACK: 256
+SQLITE_IGNORE_CHECKS: 512
+SQLITE_STMT_SCAN_STATUS: 1024
+SQLITE_REVERSE_ORDER: 4096
+SQLITE_REC_TRIGGERS: 8192
+SQLITE_FOREIGN_KEYS: 16384
+SQLITE_AUTO_INDEX: 32768
+SQLITE_LOAD_EXTENSION: 65536
+SQLITE_LOAD_EXT_FUNC: 131072
+SQLITE_ENABLE_TRIGGER: 262144
+SQLITE_DEFER_FKS: 524288
+SQLITE_QUERY_ONLY: 1048576
+SQLITE_FTS3_TOKENIZER: 4194304
+SQLITE_ENABLE_QPSG: 8388608
+SQLITE_TRIGGER_EQP: 16777216
+SQLITE_LEGACY_ALTER: 67108864
+SQLITE_NO_SCHEMA_ERROR: 134217728
+SQLITE_DQS_DDL: 536870912
+SQLITE_DQS_DML: 1073741824
+SQLITE_ENABLE_VIEW: 2147483648
+SQLITE_COUNT_ROWS: 4294967296
+SQLITE_CORRUPT_RD_ONLY: 8589934592
+SQLITE_READ_UNCOMMIT: 17179869184
+SQLITE_FK_NO_ACTION: 34359738368
+
+// sqlite3.mDbFlags (DBFLAG_*).
+DBFLAG_SCHEMA_CHANGE: 1
+DBFLAG_PREFER_BUILTIN: 2
+DBFLAG_VACUUM: 4
+DBFLAG_VACUUM_INTO: 8
+DBFLAG_SCHEMA_KNOWN_OK: 16
+DBFLAG_INTERNAL_FUNC: 32
+DBFLAG_ENCODING_FIXED: 64
+
+// Schema.schemaFlags (DB_*).
+DB_SCHEMA_LOADED: 1
+DB_UNRESET_VIEWS: 2
+DB_RESET_WANTED: 8
+
+// sqlite3.eOpenState (SQLITE_STATE_*).
+STATE_OPEN: 118
+STATE_CLOSED: 206
+STATE_SICK: 186
+STATE_BUSY: 109
+STATE_ERROR: 213
+STATE_ZOMBIE: 167
+
+// The schema index of the main and temp databases.
+DB_MAIN: 0
+DB_TEMP: 1
+
+// SQLITE_MAX_ATTACHED + 2.
+MAX_DB: 12
+
+// Column.colFlags (COLFLAG_*).
+COLFLAG_PRIMKEY: 1
+COLFLAG_HIDDEN: 2
+COLFLAG_HASTYPE: 4
+COLFLAG_UNIQUE: 8
+COLFLAG_SORTERREF: 16
+COLFLAG_VIRTUAL: 32
+COLFLAG_STORED: 64
+COLFLAG_NOTAVAIL: 128
+COLFLAG_BUSY: 256
+COLFLAG_HASCOLL: 512
+COLFLAG_NOEXPAND: 1024
+COLFLAG_GENERATED: 96
+COLFLAG_NOINSERT: 98
+
+// Column.eCType (COLTYPE_*).
+COLTYPE_CUSTOM: 0
+COLTYPE_ANY: 1
+COLTYPE_BLOB: 2
+COLTYPE_INT: 3
+COLTYPE_INTEGER: 4
+COLTYPE_REAL: 5
+COLTYPE_TEXT: 6
+
+// Table.eTabType (TABTYP_*).
+TABTYP_NORM: 0
+TABTYP_VTAB: 1
+TABTYP_VIEW: 2
+
+// Index.aiColumn specials (XN_*).
+XN_ROWID: -1
+XN_EXPR: -2
+
+// FuncDef.funcFlags (SQLITE_FUNC_*) and the sqlite3.h function flags that
+// share the field.
+FUNC_ENCMASK: 3
+FUNC_LIKE: 4
+FUNC_CASE: 8
+FUNC_EPHEM: 16
+FUNC_NEEDCOLL: 32
+FUNC_LENGTH: 64
+FUNC_TYPEOF: 128
+FUNC_BYTELEN: 192
+FUNC_COUNT: 256
+FUNC_UNLIKELY: 1024
+FUNC_CONSTANT: 2048
+FUNC_MINMAX: 4096
+FUNC_SLOCHNG: 8192
+FUNC_TEST: 16384
+FUNC_RUNONLY: 32768
+FUNC_WINDOW: 65536
+FUNC_INTERNAL: 262144
+FUNC_DIRECT: 524288
+FUNC_SUBTYPE: 1048576
+FUNC_UNSAFE: 2097152
+FUNC_INLINE: 4194304
+FUNC_BUILTIN: 8388608
+FUNC_RESULT_SUBTYPE: 16777216
+FUNC_ANYORDER: 134217728
+FUNC_DETERMINISTIC: 2048
+FUNC_INNOCUOUS: 2097152
+
+// Vdbe.eVdbeState (VDBE_*_STATE).
+VDBE_INIT_STATE: 0
+VDBE_READY_STATE: 1
+VDBE_RUN_STATE: 2
+VDBE_HALT_STATE: 3
+
+// Cursor types (CURTYPE_*).
+CURTYPE_BTREE: 0
+CURTYPE_SORTER: 1
+CURTYPE_VTAB: 2
+CURTYPE_PSEUDO: 3
+
+// VdbeCursor.cacheStatus that matches no Vdbe.cacheCtr.
+CACHE_STALE: 0
+
+// Vdbe.aCounter indexes (SQLITE_STMTSTATUS_*).
+STMTSTATUS_FULLSCAN_STEP: 1
+STMTSTATUS_SORT: 2
+STMTSTATUS_AUTOINDEX: 3
+STMTSTATUS_VM_STEP: 4
+STMTSTATUS_REPREPARE: 5
+STMTSTATUS_RUN: 6
+STMTSTATUS_FILTER_MISS: 7
+STMTSTATUS_FILTER_HIT: 8
+STMTSTATUS_MEMUSED: 99
+
+// sqlite3_prepare_v3 flags (SQLITE_PREPARE_*), with the internal ones.
+PREPARE_PERSISTENT: 1
+PREPARE_NORMALIZE: 2
+PREPARE_NO_VTAB: 4
+PREPARE_SAVESQL: 128
+PREPARE_MASK: 15
+
+// Column name kinds (COLNAME_*).
+COLNAME_NAME: 0
+COLNAME_DECLTYPE: 1
+COLNAME_DATABASE: 2
+COLNAME_TABLE: 3
+COLNAME_COLUMN: 4
+COLNAME_N: 5
+
+// A Mem that holds an engine object rather than a value: MEM_Dyn with the
+// object's kind in subtype and its handle in i (C's xDel names the kind).
+// A RowSet's handle is its Vdbe.rowsets slot. A pointer value
+// (sqlite3VdbeMemSetPointer) is a NULL with MEM_Subtype and C's subtype
+// 'p', z its pointer type; OP_VInitIn's ValueList has the type "ValueList"
+// and, as its handle, the pc of that op, whose P1 and P3 name its cursor and
+// value register in the program running it.
+MEM_DYN: 4096
+DYN_ROWSET: 1
+DYN_POINTER: 112
+
+// MEM_Undefined: a register not yet written.
+MEM_UNDEFINED: 0
+
+// VdbeOp.p5 flags (sqliteInt.h OPFLAG_*); several share a bit.
+OPFLAG_NCHANGE: 1
+OPFLAG_NOCHNG: 1
+OPFLAG_EPHEM: 1
+OPFLAG_BULKCSR: 1
+OPFLAG_PERMUTE: 1
+OPFLAG_SEEKEQ: 2
+OPFLAG_SAVEPOSITION: 2
+OPFLAG_ISUPDATE: 4
+OPFLAG_AUXDELETE: 4
+OPFLAG_APPEND: 8
+OPFLAG_FORDELETE: 8
+OPFLAG_USESEEKRESULT: 16
+OPFLAG_P2ISREG: 16
+OPFLAG_LASTROWID: 32
+OPFLAG_ISNOOP: 64
+OPFLAG_LENGTHARG: 64
+OPFLAG_TYPEOFARG: 128
+OPFLAG_BYTELENARG: 192
+OPFLAG_PREFORMAT: 128
+OPFLAG_NOCHNG_MAGIC: 109
+
+// The P5 of the comparison opcodes (sqliteInt.h): the affinity in the low
+// bits (SQLITE_AFF_MASK) and how NULL operands compare.
+CMP_AFF_MASK: 71
+CMP_KEEPNULL: 8
+CMP_JUMPIFNULL: 16
+CMP_NULLEQ: 128
+CMP_NOTNULL: 144
+
+// sqlite3_trace_v2 event codes (SQLITE_TRACE_*), and TRACE_XPROFILE, the
+// internal bit sqlite3_profile sets.
+TRACE_STMT: 1
+TRACE_PROFILE: 2
+TRACE_ROW: 4
+TRACE_CLOSE: 8
+TRACE_XPROFILE: 128
+
+// The commit callback of the logs (Conn.wal_hook): none, the
+// sqlite3_wal_autocheckpoint default hook (sqlite3WalDefaultHook, which
+// checkpoints once a log holds Conn.wal_arg frames) or the Host's
+// sqlite3_wal_hook callback.
+WAL_HOOK_NONE: 0
+WAL_HOOK_AUTOCHECKPOINT: 1
+WAL_HOOK_USER: 2
+// SQLITE_DEFAULT_WAL_AUTOCHECKPOINT.
+DEFAULT_WAL_AUTOCHECKPOINT: 1000
+
+// SQLITE_TXN_* (sqlite3_txn_state).
+TXN_NONE: 0
+TXN_READ: 1
+TXN_WRITE: 2
+
+// The authorizer action codes the update hook reports (SQLITE_DELETE,
+// SQLITE_INSERT, SQLITE_UPDATE).
+AUTH_DELETE: 9
+AUTH_INSERT: 18
+AUTH_UPDATE: 23
+
+// The Vdbe.expired values (VdbeLink.expired): 1 re-prepares at the next
+// step, 2 lets the running statement finish first.
+EXPIRED_NOW: 1
+EXPIRED_AFTER: 2
+
+// ---------------------------------------------------------------------------
+// hash.c: a case-insensitive string table whose iteration order (newest
+// first within each bucket chain, as insertElement links) is C's.
+
+HashElem: struct {
+    live: Bool
+    key: [U8]
+    data: Int
+    next: Int
+    prev: Int
+}
+
+HashBucket: struct {
+    count: Int
+    chain: Int
+}
+
+Hash: struct {
+    elems: [HashElem]
+    free: [Int]
+    first: Int
+    count: Int
+    ht: [HashBucket]
+}
+
+// sqlite3HashInit.
+hash_new: fn() -> Hash Never! { Hash{elems: [HashElem]{}, free: [Int]{}, first: -1, count: 0, ht: [HashBucket]{}} }
+
+// sqlite3HashClear.
+hash_clear: fn(h: &Hash) Never! { h = hash_new() }
+
+// strHash: Knuth's multiplicative hash of the ASCII-folded bytes, mod 2^32.
+str_hash: fn(z: [U8]) -> Int Never! {
+    h := 0
+    loop b in z {
+        c: Int.from_u8(b)
+        if c == 0 -> break
+        h = (h + util.lower_byte(c)).bit_and(4294967295)
+        h = (h * 2654435761).bit_and(4294967295)
+    }
+    h
+}
+
+// insertElement.
+hash_insert_element: fn(h: &Hash, bucket: Int, e: Int) Never! {
+    head := -1
+    if bucket >= 0 {
+        if h.ht[bucket].count > 0 -> head = h.ht[bucket].chain
+        h.ht[bucket].count += 1
+        h.ht[bucket].chain = e
+    }
+    if head >= 0 {
+        h.elems[e].next = head
+        prev: h.elems[head].prev
+        h.elems[e].prev = prev
+        if prev >= 0 {
+            h.elems[prev].next = e
+        } else {
+            h.first = e
+        }
+        h.elems[head].prev = e
+    } else {
+        h.elems[e].next = h.first
+        if h.first >= 0 -> h.elems[h.first].prev = e
+        h.elems[e].prev = -1
+        h.first = e
+    }
+}
+
+// rehash.
+hash_rehash: fn(h: &Hash, new_size: Int) Never! {
+    h.ht = [HashBucket]{}
+    loop _ in 0..<new_size -> h.ht.push(HashBucket{count: 0, chain: -1})
+    e := h.first
+    h.first = -1
+    loop e >= 0 {
+        next: h.elems[e].next
+        bucket: str_hash(h.elems[e].key) % new_size
+        hash_insert_element(h, bucket, e)
+        e = next
+    }
+}
+
+// findElementWithHash: the element, or -1; bucket gets the key's bucket.
+hash_find_elem: fn(h: Hash, key: [U8], bucket: &Int) -> Int Never! {
+    e := h.first
+    count := h.count
+    bucket = -1
+    if h.ht.len() > 0 {
+        bucket = str_hash(key) % h.ht.len()
+        e = h.ht[bucket].chain
+        count = h.ht[bucket].count
+    }
+    loop count > 0 && e >= 0 {
+        if util.str_icmp(h.elems[e].key, key) == 0 -> return e
+        e = h.elems[e].next
+        count -= 1
+    }
+    -1
+}
+
+// sqlite3HashFind: the data for key, or -1.
+hash_find: fn(h: Hash, key: [U8]) -> Int Never! {
+    bucket := -1
+    e: hash_find_elem(h, key, bucket)
+    if e < 0 -> return -1
+    h.elems[e].data
+}
+
+// removeElementGivenHash.
+hash_remove_elem: fn(h: &Hash, e: Int, bucket: Int) Never! {
+    prev: h.elems[e].prev
+    next: h.elems[e].next
+    if prev >= 0 {
+        h.elems[prev].next = next
+    } else {
+        h.first = next
+    }
+    if next >= 0 -> h.elems[next].prev = prev
+    if bucket >= 0 {
+        if h.ht[bucket].chain == e -> h.ht[bucket].chain = next
+        h.ht[bucket].count -= 1
+    }
+    h.elems[e].live = false
+    h.elems[e].key = [U8]{}
+    h.free.push(e)
+    h.count -= 1
+    if h.count == 0 -> hash_clear(h)
+}
+
+// sqlite3HashInsert: data -1 removes the key. The previous data, or -1.
+hash_insert: fn(h: &Hash, key: [U8], data: Int) -> Int Never! {
+    bucket := -1
+    e: hash_find_elem(h, key, bucket)
+    if e >= 0 {
+        old: h.elems[e].data
+        if data < 0 {
+            hash_remove_elem(h, e, bucket)
+        } else {
+            h.elems[e].data = data
+            h.elems[e].key = key
+        }
+        return old
+    }
+    if data < 0 -> return -1
+    elem: HashElem{live: true, key: key, data: data, next: -1, prev: -1}
+    slot := h.elems.len()
+    if h.free.len() > 0 {
+        slot = h.free.pop() ?? slot
+        h.elems[slot] = elem
+    } else {
+        h.elems.push(elem)
+    }
+    h.count += 1
+    b := bucket
+    if h.count >= 10 && h.count > 2 * h.ht.len() {
+        hash_rehash(h, h.count * 2)
+        b = str_hash(key) % h.ht.len()
+    }
+    if h.ht.len() == 0 -> b = -1
+    hash_insert_element(h, b, slot)
+    return -1
+}
+
+// The data of every element in iteration order (sqliteHashFirst/Next).
+hash_values: fn(h: Hash) -> [Int] Never! {
+    out := [Int]{}
+    e := h.first
+    loop e >= 0 {
+        out.push(h.elems[e].data)
+        e = h.elems[e].next
+    }
+    out
+}
+
+// The keys in iteration order.
+hash_keys: fn(h: Hash) -> [[U8]] Never! {
+    out := [[U8]]{}
+    e := h.first
+    loop e >= 0 {
+        out.push(h.elems[e].key)
+        e = h.elems[e].next
+    }
+    out
+}
+
+// ---------------------------------------------------------------------------
+// Schema objects.
+
+// struct Column. zCnName's three parts are name, typ (COLFLAG_HASTYPE) and
+// coll (COLFLAG_HASCOLL).
+Column: struct {
+    name: [U8]
+    typ: [U8]
+    coll: [U8]
+    not_null: Int
+    ctype: Int
+    affinity: Int
+    sz_est: Int
+    h_name: Int
+    i_dflt: Int
+    col_flags: Int
+}
+
+// struct Table.
+Table: struct {
+    live: Bool
+    name: [U8]
+    cols: [Column]
+    index: Int
+    col_aff: [U8]?
+    check: Int
+    tnum: Int
+    n_tab_ref: Int
+    tab_flags: Int
+    ipkey: Int
+    n_nv_col: Int
+    n_row_log_est: Int
+    sz_tab_row: Int
+    key_conf: Int
+    tab_type: Int
+    // u.tab.
+    add_col_offset: Int
+    fkey: Int
+    dflt_list: Int
+    // u.view.pSelect.
+    select: Int
+    // u.vtab: azArg and the VTable list.
+    vtab_args: [[U8]]
+    vtab: Int
+    trigger: Int
+    schema: Int
+}
+
+// struct IndexSample.
+IndexSample: struct {
+    p: [U8]
+    an_eq: [Int]
+    an_lt: [Int]
+    an_dlt: [Int]
+}
+
+// struct Index.
+Index: struct {
+    live: Bool
+    name: [U8]
+    ai_column: [Int]
+    ai_row_log_est: [Int]
+    table: Int
+    col_aff: [U8]?
+    next: Int
+    schema: Int
+    sort_order: [Int]
+    coll: [[U8]]
+    part_idx_where: Int
+    col_expr: Int
+    tnum: Int
+    sz_idx_row: Int
+    n_key_col: Int
+    n_column: Int
+    on_error: Int
+    idx_type: Int
+    b_unordered: Bool
+    uniq_not_null: Bool
+    is_resized: Bool
+    is_covering: Bool
+    no_skip_scan: Bool
+    has_stat1: Bool
+    b_low_qual: Bool
+    b_no_query: Bool
+    b_asc_key_bug: Bool
+    b_has_vcol: Bool
+    b_has_expr: Bool
+    n_sample_col: Int
+    samples: [IndexSample]
+    avg_eq: [Int]
+    ai_row_est: [Int]
+    n_row_est0: Int
+    col_not_idxed: Int
+}
+
+// struct sColMap.
+FKeyCol: struct {
+    i_from: Int
+    col: [U8]?
+}
+
+// struct FKey.
+FKey: struct {
+    live: Bool
+    from: Int
+    next_from: Int
+    to: [U8]
+    next_to: Int
+    prev_to: Int
+    is_deferred: Bool
+    actions: [Int]
+    triggers: [Int]
+    cols: [FKeyCol]
+}
+
+// struct Trigger.
+Trigger: struct {
+    live: Bool
+    name: [U8]
+    table: [U8]
+    op: Int
+    tr_tm: Int
+    b_returning: Bool
+    when: Int
+    columns: Int
+    schema: Int
+    tab_schema: Int
+    step_list: Int
+    next: Int
+}
+
+// struct Schema.
+Schema: struct {
+    live: Bool
+    schema_cookie: Int
+    generation: Int
+    tbl_hash: Hash
+    idx_hash: Hash
+    trig_hash: Hash
+    fkey_hash: Hash
+    seq_tab: Int
+    file_format: Int
+    enc: Int
+    schema_flags: Int
+    cache_size: Int
+}
+
+schema_new: fn() -> Schema Never! {
+    Schema{live: true, schema_cookie: 0, generation: 0, tbl_hash: hash_new(), idx_hash: hash_new(), trig_hash: hash_new(), fkey_hash: hash_new(), seq_tab: -1, file_format: 0, enc: base.UTF8, schema_flags: 0, cache_size: 0}
+}
+
+// struct Db: one attached database. bt is the Btree (a Conn.btrees index,
+// -1 once detached or never opened).
+DBSlot: struct {
+    name: [U8]
+    bt: Int
+    safety_level: Int
+    b_sync_set: Bool
+    schema: Int
+}
+
+// struct CollSeq: a builtin's name and its record.COLL_* id.
+CollSeq: struct {
+    name: [U8]
+    enc: Int
+    id: Int
+}
+
+// struct FuncDef. impl names the implementation the Host runs (C's
+// xSFunc/xFinalize/xValue/xInverse pointers), user_data is pUserData as a
+// value and the has_* flags say which of the callbacks are non-NULL.
+FuncDef: struct {
+    n_arg: Int
+    flags: Int
+    user_data: Int
+    name: [U8]
+    impl_id: Int
+    has_sfunc: Bool
+    has_step: Bool
+    has_finalize: Bool
+    has_value: Bool
+    has_inverse: Bool
+}
+
+// struct Savepoint.
+Savepoint: struct {
+    name: [U8]
+    n_deferred_cons: Int
+    n_deferred_imm_cons: Int
+}
+
+// struct Module: an extension's virtual table module. impl names it to the
+// Host, epo_tab is the eponymous table (-1 if none).
+Module: struct {
+    name: [U8]
+    impl_id: Int
+    has_create: Bool
+    has_destroy: Bool
+    epo_tab: Int
+}
+
+// struct VTable. md is the Conn.module_list index of its module (pMod),
+// vtab is the Host's handle for the sqlite3_vtab instance (-1 for none)
+// and n_cursor is that instance's nRef, its open cursors (one VTable per
+// instance without shared cache).
+VTable: struct {
+    live: Bool
+    md: Int
+    vtab: Int
+    n_ref: Int
+    n_cursor: Int
+    b_constraint: Bool
+    b_all_schemas: Bool
+    e_vtab_risk: Int
+    i_savepoint: Int
+    next: Int
+}
+
+// A VTable slot for an instance the Host connected (sqlite3VtabCallConnect
+// allocates it with one reference).
+vtable_new: fn(md: Int, vtab: Int) -> VTable Never! {
+    VTable{live: true, md: md, vtab: vtab, n_ref: 1, n_cursor: 0, b_constraint: false, b_all_schemas: false, e_vtab_risk: 0, i_savepoint: 0, next: -1}
+}
+
+// A free VTable slot holding v.
+vtable_alloc: fn(db: &Conn, v: &&VTable) -> Int Never! {
+    if db.vtable_free.len() > 0 {
+        s: db.vtable_free.pop() ?? 0
+        db.vtables[s] = v
+        return s
+    }
+    db.vtables.push(v)
+    db.vtables.len() - 1
+}
+
+// Return VTable slot s, whose instance is disconnected.
+vtable_release: fn(db: &Conn, s: Int) Never! {
+    db.vtables[s] = vtable_new(-1, -1)
+    db.vtables[s].live = false
+    db.vtables[s].n_ref = 0
+    db.vtable_free.push(s)
+}
+
+// ---------------------------------------------------------------------------
+// The virtual machine's objects (vdbeInt.h).
+
+// A VDBE operation's P4 operand (union p4union, with p4type its tag).
+P4: enum {
+    NotUsed
+    // P4_STATIC / P4_DYNAMIC / P4_TRANSIENT text.
+    Text([U8])
+    Coll(Int)
+    Int32(Int)
+    Int64(Int)
+    Real(Float)
+    // A SubProgram: an index of Vdbe.programs.
+    Program(Int)
+    Table(Int)
+    TableRef(Int)
+    FuncDef(FuncDef)
+    // P4_FUNCCTX: the sqlite3_context of an OP_Function or OP_PureFunc.
+    FuncCtx(func: FuncDef, argc: Int)
+    KeyInfo(record.KeyInfo)
+    Mem(base.Mem)
+    Vtab(Int)
+    IntArray([Int])
+    Expr(Int)
+}
+
+// struct VdbeOp.
+VdbeOp: struct {
+    opcode: Int
+    p1: Int
+    p2: Int
+    p3: Int
+    p4: P4
+    p5: Int
+}
+
+// struct SubProgram: a trigger program. token tells recursive invocations
+// of the same trigger apart (C uses the Trigger pointer).
+SubProgram: struct {
+    ops: [VdbeOp]
+    n_mem: Int
+    n_csr: Int
+    token: Int
+}
+
+// A statement slot's place in the pVdbe list and its Vdbe.expired.
+VdbeLink: struct {
+    live: Bool
+    next: Int
+    expired: Int
+}
+
+// struct VdbeCursor. bt is the Conn.btrees slot of a btree cursor and btc
+// its cursor there (an ephemeral cursor's bt is its pBtx, which closes and
+// frees with its last cursor); vtab_cursor is the Host's handle for a
+// virtual table cursor's sqlite3_vtab_cursor and vtab the Conn.vtables slot
+// of its table (pVCur->pVtab), and pseudo_reg is a pseudo cursor's register
+// (C keeps it in seekResult).
+// The current row's record (aRow, szRow bytes) is read where it lies:
+// row_kind says whether in the image of page slot row_page of the cursor's
+// btree from row_off, in the pseudo cursor's register, or in row (a copy,
+// taken when the header runs past the local payload). types and offsets
+// are aType[] and aOffset[].
+VdbeCursor: struct {
+    live: Bool
+    cur_type: Int
+    i_db: Int
+    null_row: Bool
+    deferred_moveto: Bool
+    is_table: Bool
+    is_ephemeral: Bool
+    use_random_rowid: Bool
+    is_ordered: Bool
+    no_reuse: Bool
+    seek_hit: Int
+    bt: Int
+    btc: Int
+    sorter: sorter.VdbeSorter?
+    vtab_cursor: Int
+    vtab: Int
+    pseudo_reg: Int
+    seek_result: Int
+    alt_map: [Int]
+    alt_cursor: Int
+    cache_status: Int
+    moveto_target: Int
+    key_info: record.KeyInfo?
+    pgno_root: Int
+    n_field: Int
+    n_hdr_parsed: Int
+    payload_size: Int
+    sz_row: Int
+    row_kind: Int
+    row_page: Int
+    row_off: Int
+    row: [U8]
+    i_hdr_offset: Int
+    types: [Int]
+    offsets: [Int]
+    seq_count: Int
+}
+
+// Where a VdbeCursor's current record lies (VdbeCursor.row_kind).
+ROW_NONE: 0
+ROW_PAGE: 1
+ROW_REGISTER: 2
+ROW_COPY: 3
+
+// struct VdbeFrame: the parent's state while a SubProgram runs. A frame's
+// registers, cursors and once flags follow its parent's in Vdbe.mem,
+// Vdbe.csr and Vdbe.once; the bases here are the parent's. ops is the
+// parent's program (Vdbe.ops holds the running one: C's aOp).
+VdbeFrame: struct {
+    pc: Int
+    token: Int
+    last_rowid: Int
+    n_change: Int
+    n_db_change: Int
+    program: Int
+    ops: [VdbeOp]
+    mem_base: Int
+    n_mem: Int
+    csr_base: Int
+    n_cursor: Int
+    once_base: Int
+}
+
+// struct AuxData. depth is the frame depth of the program that set it, as
+// each VdbeFrame keeps its own pAuxData list.
+AuxData: struct {
+    depth: Int
+    i_aux_op: Int
+    i_aux_arg: Int
+    value: base.Mem
+}
+
+// The state an aggregate or window function keeps between steps
+// (sqlite3_aggregate_context's bytes as the builtin implementations use
+// them). allocated is false until the first context request.
+AggState: struct {
+    allocated: Bool
+    n: Int
+    i: Int
+    r: Float
+    r_err: Float
+    approx: Bool
+    overflow: Bool
+    m: base.Mem
+    acc: [U8]
+    lens: [Int]
+    ints: [Int]
+    vals: [base.Mem]
+}
+
+agg_state_new: fn() -> AggState Never! {
+    AggState{allocated: false, n: 0, i: 0, r: 0.0, r_err: 0.0, approx: false, overflow: false, m: base.mem_null(), acc: [U8]{}, lens: [Int]{}, ints: [Int]{}, vals: [base.Mem]{}}
+}
+
+// struct sqlite3_context of the call in progress (Vdbe.fctx). The function
+// reads its argc arguments from the registers that start at Vdbe.mem index
+// arg and sets register out (pOut). impl_id, user_data and func_flags are
+// those of the FuncDef the call runs (pFunc: the Host dispatches on
+// impl_id); agg is the Vdbe.mem index of an aggregate's accumulator (pMem,
+// whose MEM_Agg context is a Vdbe.aggs slot), -1 for a scalar call.
+FuncContext: struct {
+    out: Int
+    impl_id: Int
+    user_data: Int
+    func_flags: Int
+    agg: Int
+    is_error: Int
+    skip_flag: Bool
+    arg: Int
+    argc: Int
+    i_op: Int
+    // The function's collating sequence (OP_CollSeq before it).
+    coll: Int
+}
+
+func_context_new: fn() -> FuncContext Never! {
+    FuncContext{out: 0, impl_id: -1, user_data: 0, func_flags: 0, agg: -1, is_error: 0, skip_flag: false, arg: 0, argc: 0, i_op: 0, coll: record.COLL_BINARY}
+}
+
+// struct Vdbe. While a SubProgram runs (OP_Program), its registers,
+// cursors and once flags are pushed after the parent's in mem, csr and
+// once: mem_base, csr_base and once_base locate the running program's,
+// n_mem and n_cursor count them, program is the running Vdbe.programs
+// entry (-1 for the statement's own) and ops holds its ops, the parent's
+// waiting in the VdbeFrame. The builder state of Parse that belongs to the
+// program (aLabel, nLabel) is here.
+Vdbe: struct {
+    live: Bool
+    n_var: Int
+    n_mem: Int
+    n_cursor: Int
+    mem_base: Int
+    csr_base: Int
+    once_base: Int
+    program: Int
+    cache_ctr: Int
+    pc: Int
+    rc: Int
+    n_change: Int
+    i_statement: Int
+    i_current_time: Int
+    n_fk_constraint: Int
+    n_stmt_def_cons: Int
+    n_stmt_def_imm_cons: Int
+    mem: [base.Mem]
+    csr: [VdbeCursor]
+    vars: [base.Mem]
+    ops: [VdbeOp]
+    col_names: [base.Mem]
+    result_row: Int
+    err_msg: [U8]?
+    var_names: [[U8]?]
+    start_time: Int
+    n_res_column: Int
+    n_res_alloc: Int
+    error_action: Int
+    min_write_file_format: Int
+    prep_flags: Int
+    state: Int
+    // The Conn.vdbes slot this statement owns.
+    slot: Int
+    explain: Int
+    change_cnt_on: Bool
+    uses_stmt_journal: Bool
+    read_only: Bool
+    is_reader: Bool
+    have_eqp_ops: Bool
+    btree_mask: Int
+    counters: [Int]
+    sql: [U8]
+    frames: [VdbeFrame]
+    expmask: Int
+    programs: [SubProgram]
+    // The subprograms an EXPLAIN listing has reached (sqlite3VdbeList's
+    // pSub register), as Vdbe.programs indexes.
+    list_subs: [Int]
+    aux: [AuxData]
+    once: [Bool]
+    aggs: [AggState]
+    agg_free: [Int]
+    // The context of the function call in progress.
+    fctx: FuncContext
+    // The RowSets that MEM_Dyn registers name.
+    rowsets: [rowset.RowSet]
+    rowset_free: [Int]
+    labels: [Int]
+    n_label: Int
+    n_label_alloc: Int
+    // nOpAlloc: the op capacity growOpArray would have allocated, which
+    // SQLITE_LIMIT_VDBE_OP bounds.
+    n_op_alloc: Int
+}
+
+vdbe_new: fn() -> Vdbe Never! {
+    Vdbe{live: true, n_var: 0, n_mem: 0, n_cursor: 0, mem_base: 0, csr_base: 0, once_base: 0, program: -1, cache_ctr: 1, pc: -1, rc: base.OK, n_change: 0, i_statement: 0, i_current_time: 0, n_fk_constraint: 0, n_stmt_def_cons: 0, n_stmt_def_imm_cons: 0, mem: [base.Mem]{}, csr: [VdbeCursor]{}, vars: [base.Mem]{}, ops: [VdbeOp]{}, col_names: [base.Mem]{}, result_row: -1, err_msg: None, var_names: [[U8]?]{}, start_time: 0, n_res_column: 0, n_res_alloc: 0, error_action: ast.OE_ABORT, min_write_file_format: 255, prep_flags: 0, state: VDBE_INIT_STATE, slot: -1, explain: 0, change_cnt_on: false, uses_stmt_journal: false, read_only: true, is_reader: false, have_eqp_ops: false, btree_mask: 0, counters: [Int]{0, 0, 0, 0, 0, 0, 0, 0, 0}, sql: [U8]{}, frames: [VdbeFrame]{}, expmask: 0, programs: [SubProgram]{}, list_subs: [Int]{}, aux: [AuxData]{}, once: [Bool]{}, aggs: [AggState]{}, agg_free: [Int]{}, fctx: func_context_new(), rowsets: [rowset.RowSet]{}, rowset_free: [Int]{}, labels: [Int]{}, n_label: 0, n_label_alloc: 0, n_op_alloc: 0}
+}
+
+// A closed VDBE cursor slot.
+vdbe_cursor_closed: fn() -> VdbeCursor Never! {
+    VdbeCursor{live: false, cur_type: CURTYPE_BTREE, i_db: -1, null_row: false, deferred_moveto: false, is_table: false, is_ephemeral: false, use_random_rowid: false, is_ordered: false, no_reuse: false, seek_hit: 0, bt: -1, btc: -1, sorter: None, vtab_cursor: -1, vtab: -1, pseudo_reg: 0, seek_result: 0, alt_map: [Int]{}, alt_cursor: -1, cache_status: CACHE_STALE, moveto_target: 0, key_info: None, pgno_root: 0, n_field: 0, n_hdr_parsed: 0, payload_size: 0, sz_row: 0, row_kind: ROW_NONE, row_page: -1, row_off: 0, row: [U8]{}, i_hdr_offset: 0, types: [Int]{}, offsets: [Int]{}, seq_count: 0}
+}
+
+// ---------------------------------------------------------------------------
+// struct sqlite3.
+
+// sqlite3.init: the schema load in progress.
+InitInfo: struct {
+    new_tnum: Int
+    i_db: Int
+    busy: Bool
+    orphan_trigger: Bool
+    imposter_table: Int
+    reopen_memdb: Bool
+    az_init: [[U8]]
+}
+
+Conn: struct {
+    dbs: [DBSlot]
+    btrees: [btree.Btree]
+    btree_free: [Int]
+    schemas: [Schema]
+    schema_free: [Int]
+    tables: [Table]
+    table_free: [Int]
+    indexes: [Index]
+    index_free: [Int]
+    fkeys: [FKey]
+    fkey_free: [Int]
+    triggers: [Trigger]
+    trigger_free: [Int]
+    vtables: [VTable]
+    vtable_free: [Int]
+    vdbes: [Vdbe]
+    vdbe_free: [Int]
+    // pVdbe: the newest statement, whose VdbeLink.next chain lists the rest.
+    vdbe_head: Int
+    // Per statement slot: its place in the pVdbe list and Vdbe.expired.
+    // They live here, not in the Vdbe, so that they stay current while a
+    // running statement is out of its slot.
+    vdbe_links: [VdbeLink]
+    ast: ast.AST
+    colls: [CollSeq]
+    modules: Hash
+    module_list: [Module]
+    // The connection's functions (sqlite3.aFunc), by name: each entry is
+    // an index of funcs; a name's overloads chain through func_next.
+    func_hash: Hash
+    funcs: [FuncDef]
+    func_next: [Int]
+    flags: Int
+    m_db_flags: Int
+    db_opt_flags: Int
+    last_rowid: Int
+    sz_mmap: Int
+    n_schema_lock: Int
+    open_flags: Int
+    err_code: Int
+    err_byte_offset: Int
+    err_mask: Int
+    i_sys_errno: Int
+    // pErr: has_err_msg once it exists (C allocates it with the first
+    // error message and keeps it), err_msg its text (None for a NULL).
+    err_msg: [U8]?
+    has_err_msg: Bool
+    enc: Int
+    auto_commit: Bool
+    temp_store: Int
+    malloc_failed: Bool
+    dflt_lock_mode: Int
+    next_autovac: Int
+    suppress_err: Int
+    vtab_on_conflict: Int
+    is_transaction_savepoint: Int
+    n_sql_exec: Int
+    open_state: Int
+    next_pagesize: Int
+    n_change: Int
+    n_total_change: Int
+    limits: [Int]
+    n_max_sorter_mmap: Int
+    init: InitInfo
+    n_vdbe_active: Int
+    n_vdbe_read: Int
+    n_vdbe_write: Int
+    n_vdbe_exec: Int
+    n_vdestroy: Int
+    n_extension: Int
+    is_interrupted: Bool
+    // aVTrans: the VTables in the current transaction.
+    v_trans: [Int]
+    // sqlite3VtabInSync: the xSync calls of v_trans are running (C empties
+    // aVTrans while they do).
+    vtab_in_sync: Bool
+    // nProgressOps: the progress handler's period, 0 when none is set.
+    n_progress_ops: Int
+    // mTrace: the SQLITE_TRACE_* events the trace callback takes.
+    m_trace: Int
+    // xWalCallback as a WAL_HOOK_* kind, and pWalArg: the autocheckpoint
+    // frame count of WAL_HOOK_AUTOCHECKPOINT (openDatabase sets
+    // sqlite3_wal_autocheckpoint(DEFAULT_WAL_AUTOCHECKPOINT)).
+    wal_hook: Int
+    wal_arg: Int
+    // pDisconnect.
+    disconnect: Int
+    // The VTables whose last reference went, for the Host to disconnect.
+    vtab_dead: [Int]
+    // pSavepoint: newest last.
+    savepoints: [Savepoint]
+    n_analysis_limit: Int
+    busy_timeout: Int
+    n_savepoint: Int
+    n_statement: Int
+    n_deferred_cons: Int
+    n_deferred_imm_cons: Int
+}
+
+init_info_new: fn() -> InitInfo Never! {
+    InitInfo{new_tnum: 0, i_db: 0, busy: false, orphan_trigger: false, imposter_table: 0, reopen_memdb: false, az_init: [[U8]]{}}
+}
+
+// A connection with no databases (the part of openDatabase before the
+// btrees open). The builtin collations are BINARY, NOCASE and RTRIM.
+conn_new: fn() -> Conn Never! {
+    colls := [CollSeq]{
+        CollSeq{name: "BINARY".bytes(), enc: base.UTF8, id: record.COLL_BINARY},
+        CollSeq{name: "NOCASE".bytes(), enc: base.UTF8, id: record.COLL_NOCASE},
+        CollSeq{name: "RTRIM".bytes(), enc: base.UTF8, id: record.COLL_RTRIM}
+    }
+    Conn{
+        dbs: [DBSlot]{}
+        btrees: [btree.Btree]{}
+        btree_free: [Int]{}
+        schemas: [Schema]{}
+        schema_free: [Int]{}
+        tables: [Table]{}
+        table_free: [Int]{}
+        indexes: [Index]{}
+        index_free: [Int]{}
+        fkeys: [FKey]{}
+        fkey_free: [Int]{}
+        triggers: [Trigger]{}
+        trigger_free: [Int]{}
+        vtables: [VTable]{}
+        vtable_free: [Int]{}
+        vdbes: [Vdbe]{}
+        vdbe_free: [Int]{}
+        vdbe_head: -1
+        vdbe_links: [VdbeLink]{}
+        ast: ast.new_ast()
+        colls: colls
+        modules: hash_new()
+        module_list: [Module]{}
+        func_hash: hash_new()
+        funcs: [FuncDef]{}
+        func_next: [Int]{}
+        flags: 0
+        m_db_flags: 0
+        db_opt_flags: 0
+        last_rowid: 0
+        sz_mmap: 0
+        n_schema_lock: 0
+        open_flags: 0
+        err_code: base.OK
+        err_byte_offset: -1
+        err_mask: 255
+        i_sys_errno: 0
+        err_msg: None
+        has_err_msg: false
+        enc: base.UTF8
+        auto_commit: true
+        temp_store: 0
+        malloc_failed: false
+        dflt_lock_mode: 0
+        next_autovac: -1
+        suppress_err: 0
+        vtab_on_conflict: 0
+        is_transaction_savepoint: 0
+        n_sql_exec: 0
+        open_state: STATE_BUSY
+        next_pagesize: 0
+        n_change: 0
+        n_total_change: 0
+        limits: ast.DEFAULT_LIMITS
+        n_max_sorter_mmap: 0
+        init: init_info_new()
+        n_vdbe_active: 0
+        n_vdbe_read: 0
+        n_vdbe_write: 0
+        n_vdbe_exec: 0
+        n_vdestroy: 0
+        n_extension: 0
+        is_interrupted: false
+        v_trans: [Int]{}
+        vtab_in_sync: false
+        n_progress_ops: 0
+        m_trace: 0
+        wal_hook: WAL_HOOK_AUTOCHECKPOINT
+        wal_arg: DEFAULT_WAL_AUTOCHECKPOINT
+        disconnect: -1
+        vtab_dead: [Int]{}
+        savepoints: [Savepoint]{}
+        n_analysis_limit: 0
+        busy_timeout: 0
+        n_savepoint: 0
+        n_statement: 0
+        n_deferred_cons: 0
+        n_deferred_imm_cons: 0
+    }
+}
+
+// The connection state every open Btree reads (C reads it through
+// Btree.db): refreshed after the fields it copies change.
+sync_btrees: fn(db: &Conn) Never! {
+    loop i in 0..<db.btrees.len() {
+        db.btrees[i].db.flags = db.flags
+        db.btrees[i].db.n_savepoint = db.n_savepoint
+        db.btrees[i].db.n_vdbe_read = db.n_vdbe_read
+        db.btrees[i].db.temp_in_memory = temp_in_memory(db)
+        db.btrees[i].db.is_interrupted = db.is_interrupted
+    }
+}
+
+// sqlite3TempInMemory with SQLITE_TEMP_STORE=1: temp_store=MEMORY only.
+temp_in_memory: fn(db: Conn) -> Bool Never! { db.temp_store == 2 }
+
+// sqlite3Checkpoint: checkpoint database i_db, or each of them for MAX_DB,
+// in mode e_mode (SQLITE_CHECKPOINT_*). The first one checkpointed reports
+// the log and checkpointed frame counts; SQLITE_BUSY when one could not
+// finish.
+checkpoint: fn(db: &Conn, i_db: Int, e_mode: Int, n_log: &Int, n_ckpt: &Int) -[DB]> Int Never! {
+    rc := base.OK
+    busy := false
+    first := true
+    loop i in 0..<db.dbs.len() {
+        if rc != base.OK -> break
+        if i != i_db && i_db != MAX_DB -> next
+        bt: db.dbs[i].bt
+        if bt >= 0 && first {
+            rc = btree.btree_checkpoint(db.btrees[bt], e_mode, n_log, n_ckpt)
+        } else if bt >= 0 {
+            log := -1
+            ckpt := -1
+            rc = btree.btree_checkpoint(db.btrees[bt], e_mode, log, ckpt)
+        }
+        first = false
+        if rc == base.BUSY {
+            busy = true
+            rc = base.OK
+        }
+    }
+    if rc == base.OK && busy -> return base.BUSY
+    rc
+}
+
+// A free Btree slot, closed.
+btree_slot_new: fn(db: &Conn) -> Int Never! {
+    if db.btree_free.len() > 0 {
+        s: db.btree_free.pop() ?? 0
+        db.btrees[s] = btree.btree_closed()
+        return s
+    }
+    db.btrees.push(btree.btree_closed())
+    db.btrees.len() - 1
+}
+
+// Return a closed Btree's slot.
+btree_slot_free: fn(db: &Conn, s: Int) Never! {
+    db.btrees[s] = btree.btree_closed()
+    db.btree_free.push(s)
+}
+
+// The state of a Btree slot to give btree_open (the connection's BtDB).
+bt_db_of: fn(db: Conn, i_db: Int) -> btree.BtDB Never! {
+    b := btree.bt_db_default()
+    b.flags = db.flags
+    b.n_savepoint = db.n_savepoint
+    b.n_vdbe_read = db.n_vdbe_read
+    b.temp_in_memory = temp_in_memory(db)
+    b.is_interrupted = db.is_interrupted
+    if i_db >= 0 && i_db < db.dbs.len() -> b.db_name = String.from_bytes(db.dbs[i_db].name) ?? "main"
+    b
+}
+
+// ---------------------------------------------------------------------------
+// Arena slots.
+
+schema_alloc: fn(db: &Conn) -> Int Never! {
+    if db.schema_free.len() > 0 {
+        s: db.schema_free.pop() ?? 0
+        db.schemas[s] = schema_new()
+        return s
+    }
+    db.schemas.push(schema_new())
+    db.schemas.len() - 1
+}
+
+table_new: fn() -> Table Never! {
+    Table{live: true, name: [U8]{}, cols: [Column]{}, index: -1, col_aff: None, check: -1, tnum: 0, n_tab_ref: 1, tab_flags: 0, ipkey: -1, n_nv_col: 0, n_row_log_est: 200, sz_tab_row: 0, key_conf: 0, tab_type: TABTYP_NORM, add_col_offset: 0, fkey: -1, dflt_list: -1, select: -1, vtab_args: [[U8]]{}, vtab: -1, trigger: -1, schema: -1}
+}
+
+table_alloc: fn(db: &Conn) -> Int Never! {
+    if db.table_free.len() > 0 {
+        s: db.table_free.pop() ?? 0
+        db.tables[s] = table_new()
+        return s
+    }
+    db.tables.push(table_new())
+    db.tables.len() - 1
+}
+
+index_new: fn() -> Index Never! {
+    Index{live: true, name: [U8]{}, ai_column: [Int]{}, ai_row_log_est: [Int]{}, table: -1, col_aff: None, next: -1, schema: -1, sort_order: [Int]{}, coll: [[U8]]{}, part_idx_where: -1, col_expr: -1, tnum: 0, sz_idx_row: 0, n_key_col: 0, n_column: 0, on_error: ast.OE_NONE, idx_type: ast.IDXTYPE_APPDEF, b_unordered: false, uniq_not_null: false, is_resized: false, is_covering: false, no_skip_scan: false, has_stat1: false, b_low_qual: false, b_no_query: false, b_asc_key_bug: false, b_has_vcol: false, b_has_expr: false, n_sample_col: 0, samples: [IndexSample]{}, avg_eq: [Int]{}, ai_row_est: [Int]{}, n_row_est0: 0, col_not_idxed: 0}
+}
+
+index_alloc: fn(db: &Conn) -> Int Never! {
+    if db.index_free.len() > 0 {
+        s: db.index_free.pop() ?? 0
+        db.indexes[s] = index_new()
+        return s
+    }
+    db.indexes.push(index_new())
+    db.indexes.len() - 1
+}
+
+fkey_new: fn() -> FKey Never! {
+    FKey{live: true, from: -1, next_from: -1, to: [U8]{}, next_to: -1, prev_to: -1, is_deferred: false, actions: [Int]{0, 0}, triggers: [Int]{-1, -1}, cols: [FKeyCol]{}}
+}
+
+fkey_alloc: fn(db: &Conn) -> Int Never! {
+    if db.fkey_free.len() > 0 {
+        s: db.fkey_free.pop() ?? 0
+        db.fkeys[s] = fkey_new()
+        return s
+    }
+    db.fkeys.push(fkey_new())
+    db.fkeys.len() - 1
+}
+
+trigger_new: fn() -> Trigger Never! {
+    Trigger{live: true, name: [U8]{}, table: [U8]{}, op: 0, tr_tm: 0, b_returning: false, when: -1, columns: -1, schema: -1, tab_schema: -1, step_list: -1, next: -1}
+}
+
+trigger_alloc: fn(db: &Conn) -> Int Never! {
+    if db.trigger_free.len() > 0 {
+        s: db.trigger_free.pop() ?? 0
+        db.triggers[s] = trigger_new()
+        return s
+    }
+    db.triggers.push(trigger_new())
+    db.triggers.len() - 1
+}
+
+// A new statement slot, linked at the head of the pVdbe list
+// (sqlite3VdbeCreate's list part).
+vdbe_alloc: fn(db: &Conn) -> Int Never! {
+    s := db.vdbes.len()
+    link: VdbeLink{live: true, next: db.vdbe_head, expired: 0}
+    if db.vdbe_free.len() > 0 {
+        s = db.vdbe_free.pop() ?? s
+        db.vdbes[s] = vdbe_new()
+        db.vdbe_links[s] = link
+    } else {
+        db.vdbes.push(vdbe_new())
+        db.vdbe_links.push(link)
+    }
+    db.vdbes[s].slot = s
+    db.vdbe_head = s
+    s
+}
+
+// Unlink statement s from the pVdbe list and free its slot
+// (sqlite3VdbeDelete's list part).
+vdbe_release: fn(db: &Conn, s: Int) Never! {
+    if db.vdbe_head == s {
+        db.vdbe_head = db.vdbe_links[s].next
+    } else {
+        p := db.vdbe_head
+        loop p >= 0 {
+            if db.vdbe_links[p].next == s {
+                db.vdbe_links[p].next = db.vdbe_links[s].next
+                break
+            }
+            p = db.vdbe_links[p].next
+        }
+    }
+    db.vdbes[s] = vdbe_new()
+    db.vdbes[s].live = false
+    db.vdbe_links[s] = VdbeLink{live: false, next: -1, expired: 0}
+    db.vdbe_free.push(s)
+}
+
+// The live statements, newest first.
+vdbe_list: fn(db: Conn) -> [Int] Never! {
+    out := [Int]{}
+    p := db.vdbe_head
+    loop p >= 0 {
+        out.push(p)
+        p = db.vdbe_links[p].next
+    }
+    out
+}
+
+// Move statement s out of its slot, which keeps a placeholder until
+// vdbe_put returns it: the statement runs or is built beside the
+// connection it reads and writes.
+vdbe_take: fn(db: &Conn, s: Int) -> Vdbe Never! {
+    db.vdbes.push(vdbe_new())
+    db.vdbes.__swap(s, db.vdbes.len() - 1)
+    db.vdbes.pop() ?? vdbe_new()
+}
+
+// Return a statement vdbe_take moved out to its slot.
+vdbe_put: fn(db: &Conn, v: &&Vdbe) Never! {
+    s: v.slot
+    db.vdbes.push(v)
+    db.vdbes.__swap(s, db.vdbes.len() - 1)
+    _: db.vdbes.pop()
+}
+
+// ---------------------------------------------------------------------------
+// Schema lookups (build.c, callback.c).
+
+// The table named `name` in database i's tblHash, or -1.
+db_find_table: fn(db: Conn, i: Int, name: [U8]) -> Int Never! {
+    s: db.dbs[i].schema
+    if s < 0 -> return -1
+    hash_find(db.schemas[s].tbl_hash, name)
+}
+
+// sqlite3FindTable: the table named `name` in database `db_name` (any
+// database when None: TEMP, then MAIN, then the attached in order), or -1.
+// sqlite_schema and sqlite_temp_schema name the legacy sqlite_master and
+// sqlite_temp_master.
+find_table: fn(db: Conn, name: [U8], db_name: [U8]?) -> Int Never! {
+    aliased: name.len() >= 7 && util.str_nicmp(name, "sqlite_".bytes(), 7) == 0
+    rest: if aliased -> name[7..<name.len()] else -> name[0..<0]
+    if db_name == .Val(zdb) {
+        i := 0
+        loop i < db.dbs.len() && util.str_icmp(zdb, db.dbs[i].name) != 0 -> i += 1
+        if i >= db.dbs.len() {
+            if util.str_icmp(zdb, "main".bytes()) != 0 -> return -1
+            i = DB_MAIN
+        }
+        p := db_find_table(db, i, name)
+        if p < 0 && aliased {
+            if i == DB_TEMP {
+                if util.str_icmp(rest, "temp_schema".bytes()) == 0 || util.str_icmp(rest, "schema".bytes()) == 0 || util.str_icmp(rest, "master".bytes()) == 0 -> p = db_find_table(db, DB_TEMP, "sqlite_temp_master".bytes())
+            } else if util.str_icmp(rest, "schema".bytes()) == 0 {
+                p = db_find_table(db, i, "sqlite_master".bytes())
+            }
+        }
+        return p
+    }
+    p := db_find_table(db, DB_TEMP, name)
+    if p >= 0 -> return p
+    p = db_find_table(db, DB_MAIN, name)
+    if p >= 0 -> return p
+    loop i in 2..<db.dbs.len() {
+        p = db_find_table(db, i, name)
+        if p >= 0 -> return p
+    }
+    if aliased {
+        if util.str_icmp(rest, "schema".bytes()) == 0 {
+            p = db_find_table(db, DB_MAIN, "sqlite_master".bytes())
+        } else if util.str_icmp(rest, "temp_schema".bytes()) == 0 {
+            p = db_find_table(db, DB_TEMP, "sqlite_temp_master".bytes())
+        }
+    }
+    p
+}
+
+// sqlite3FindIndex.
+find_index: fn(db: Conn, name: [U8], db_name: [U8]?) -> Int Never! {
+    loop k in 0..<db.dbs.len() {
+        j: if k < 2 -> k.bit_xor(1) else -> k
+        if db.dbs[j].schema < 0 -> next
+        if db_name == .Val(zdb) {
+            if util.str_icmp(zdb, db.dbs[j].name) != 0 -> next
+        }
+        p: hash_find(db.schemas[db.dbs[j].schema].idx_hash, name)
+        if p >= 0 -> return p
+    }
+    -1
+}
+
+// sqlite3FindDbName: the index of the database named `name`, or -1.
+find_db_name: fn(db: Conn, name: [U8]) -> Int Never! {
+    i := db.dbs.len() - 1
+    loop i >= 0 {
+        if util.str_icmp(db.dbs[i].name, name) == 0 -> return i
+        if i == 0 && util.str_icmp("main".bytes(), name) == 0 -> return 0
+        i -= 1
+    }
+    -1
+}
+
+// sqlite3SchemaToIndex: the database whose schema is `schema`.
+schema_to_index: fn(db: Conn, schema: Int) -> Int Never! {
+    if schema < 0 -> return -32768
+    loop i in 0..<db.dbs.len() {
+        if db.dbs[i].schema == schema -> return i
+    }
+    0
+}
+
+// sqlite3FindCollSeq by name: the collation id, or -1.
+find_coll: fn(db: Conn, name: [U8]) -> Int Never! {
+    loop c in db.colls {
+        if util.str_icmp(c.name, name) == 0 -> return c.id
+    }
+    -1
+}
+
+// The name of collation id `id`.
+coll_name: fn(db: Conn, id: Int) -> [U8] Never! {
+    loop c in db.colls {
+        if c.id == id -> return c.name
+    }
+    "BINARY".bytes()
+}
+
+// ---------------------------------------------------------------------------
+// Freeing schema objects (build.c sqlite3DeleteTable and friends).
+
+// freeIndex.
+free_index: fn(db: &Conn, idx: Int) Never! {
+    db.indexes[idx] = index_new()
+    db.indexes[idx].live = false
+    db.index_free.push(idx)
+}
+
+// sqlite3FkDelete: unlink and free table tab's foreign keys.
+fkey_delete: fn(db: &Conn, tab: Int) Never! {
+    fk := db.tables[tab].fkey
+    loop fk >= 0 {
+        next: db.fkeys[fk].next_from
+        s: db.tables[tab].schema
+        if s >= 0 && !db.malloc_failed {
+            prev: db.fkeys[fk].prev_to
+            nxt: db.fkeys[fk].next_to
+            if prev >= 0 {
+                db.fkeys[prev].next_to = nxt
+            } else {
+                z: db.fkeys[fk].to
+                data: if nxt >= 0 -> nxt else -> -1
+                _: hash_insert(db.schemas[s].fkey_hash, z, data)
+            }
+            if nxt >= 0 -> db.fkeys[nxt].prev_to = prev
+        }
+        loop t in db.fkeys[fk].triggers {
+            if t >= 0 -> free_trigger(db, t)
+        }
+        db.fkeys[fk] = fkey_new()
+        db.fkeys[fk].live = false
+        db.fkey_free.push(fk)
+        fk = next
+    }
+    db.tables[tab].fkey = -1
+}
+
+// sqlite3FkClearTriggerCache: free the triggers coded for the foreign keys
+// of database i_db's ordinary tables.
+fk_clear_trigger_cache: fn(db: &Conn, i_db: Int) Never! {
+    s: db.dbs[i_db].schema
+    loop tab in hash_values(db.schemas[s].tbl_hash) {
+        if db.tables[tab].tab_type != TABTYP_NORM -> next
+        fk := db.tables[tab].fkey
+        loop fk >= 0 {
+            loop k in 0..<2 {
+                free_trigger(db, db.fkeys[fk].triggers[k])
+                db.fkeys[fk].triggers[k] = -1
+            }
+            fk = db.fkeys[fk].next_from
+        }
+    }
+}
+
+// sqlite3DeleteTrigger.
+free_trigger: fn(db: &Conn, t: Int) Never! {
+    if t < 0 -> return
+    db.triggers[t] = trigger_new()
+    db.triggers[t].live = false
+    db.trigger_free.push(t)
+}
+
+// deleteTable: free table tab and its indexes, unlinking the indexes from
+// their schema's hash.
+delete_table_now: fn(db: &Conn, tab: Int) Never! {
+    idx := db.tables[tab].index
+    loop idx >= 0 {
+        next: db.indexes[idx].next
+        s: db.indexes[idx].schema
+        if s >= 0 && db.tables[tab].tab_type != TABTYP_VTAB -> _: hash_insert(db.schemas[s].idx_hash, db.indexes[idx].name, -1)
+        free_index(db, idx)
+        idx = next
+    }
+    if db.tables[tab].tab_type == TABTYP_NORM {
+        fkey_delete(db, tab)
+    } else if db.tables[tab].tab_type == TABTYP_VTAB {
+        vtab_clear(db, tab)
+    }
+    db.tables[tab] = table_new()
+    db.tables[tab].live = false
+    db.table_free.push(tab)
+}
+
+// sqlite3DeleteTable: drop one reference; the last frees the table.
+delete_table: fn(db: &Conn, tab: Int) Never! {
+    if tab < 0 || !db.tables[tab].live -> return
+    db.tables[tab].n_tab_ref -= 1
+    if db.tables[tab].n_tab_ref > 0 -> return
+    delete_table_now(db, tab)
+}
+
+// sqlite3VtabClear: move the VTables of virtual table tab onto the
+// disconnect list, whose references vtab_unlock_list drops.
+vtab_clear: fn(db: &Conn, tab: Int) Never! {
+    v := db.tables[tab].vtab
+    loop v >= 0 {
+        next: db.vtables[v].next
+        db.vtables[v].next = db.disconnect
+        db.disconnect = v
+        v = next
+    }
+    db.tables[tab].vtab = -1
+}
+
+// sqlite3UnlinkAndDeleteTable.
+unlink_and_delete_table: fn(db: &Conn, i_db: Int, name: [U8]) Never! {
+    s: db.dbs[i_db].schema
+    tab: hash_insert(db.schemas[s].tbl_hash, name, -1)
+    delete_table(db, tab)
+    db.m_db_flags = db.m_db_flags.bit_or(DBFLAG_SCHEMA_CHANGE)
+}
+
+// sqlite3UnlinkAndDeleteIndex.
+unlink_and_delete_index: fn(db: &Conn, i_db: Int, name: [U8]) Never! {
+    s: db.dbs[i_db].schema
+    idx: hash_insert(db.schemas[s].idx_hash, name, -1)
+    if idx >= 0 {
+        tab: db.indexes[idx].table
+        if db.tables[tab].index == idx {
+            db.tables[tab].index = db.indexes[idx].next
+        } else {
+            p := db.tables[tab].index
+            loop p >= 0 && db.indexes[p].next != idx -> p = db.indexes[p].next
+            if p >= 0 -> db.indexes[p].next = db.indexes[idx].next
+        }
+        free_index(db, idx)
+    }
+    db.m_db_flags = db.m_db_flags.bit_or(DBFLAG_SCHEMA_CHANGE)
+}
+
+// tableOfTrigger: the table trigger t fires on, or -1.
+table_of_trigger: fn(db: Conn, t: Int) -> Int Never! {
+    s: db.triggers[t].tab_schema
+    if s < 0 -> return -1
+    hash_find(db.schemas[s].tbl_hash, db.triggers[t].table)
+}
+
+// sqlite3UnlinkAndDeleteTrigger.
+unlink_and_delete_trigger: fn(db: &Conn, i_db: Int, name: [U8]) Never! {
+    s: db.dbs[i_db].schema
+    t: hash_insert(db.schemas[s].trig_hash, name, -1)
+    if t >= 0 {
+        if db.triggers[t].schema == db.triggers[t].tab_schema {
+            tab: table_of_trigger(db, t)
+            if tab >= 0 {
+                if db.tables[tab].trigger == t {
+                    db.tables[tab].trigger = db.triggers[t].next
+                } else {
+                    p := db.tables[tab].trigger
+                    loop p >= 0 && db.triggers[p].next != t -> p = db.triggers[p].next
+                    if p >= 0 -> db.triggers[p].next = db.triggers[t].next
+                }
+            }
+        }
+        free_trigger(db, t)
+        db.m_db_flags = db.m_db_flags.bit_or(DBFLAG_SCHEMA_CHANGE)
+    }
+}
+
+// sqlite3SchemaClear: free every table and trigger of schema s and mark it
+// unloaded.
+schema_clear: fn(db: &Conn, s: Int) Never! {
+    trigs: hash_values(db.schemas[s].trig_hash)
+    db.schemas[s].trig_hash = hash_new()
+    loop t in trigs -> free_trigger(db, t)
+    tabs: hash_values(db.schemas[s].tbl_hash)
+    db.schemas[s].tbl_hash = hash_new()
+    db.schemas[s].idx_hash = hash_new()
+    db.schemas[s].fkey_hash = hash_new()
+    loop tab in tabs -> delete_table(db, tab)
+    db.schemas[s].seq_tab = -1
+    if db.schemas[s].schema_flags.bit_and(DB_SCHEMA_LOADED) != 0 {
+        db.schemas[s].generation += 1
+    }
+    db.schemas[s].schema_flags = util.clear_bits(db.schemas[s].schema_flags, DB_SCHEMA_LOADED.bit_or(DB_RESET_WANTED))
+}
+
+// sqlite3ResetOneSchema: clear database i_db's schema (and TEMP's), or
+// mark it for reset while a schema lock is held.
+reset_one_schema: fn(db: &Conn, i_db: Int) Never! {
+    if i_db >= 0 {
+        s: db.dbs[i_db].schema
+        db.schemas[s].schema_flags = db.schemas[s].schema_flags.bit_or(DB_RESET_WANTED)
+        t: db.dbs[DB_TEMP].schema
+        db.schemas[t].schema_flags = db.schemas[t].schema_flags.bit_or(DB_RESET_WANTED)
+        db.m_db_flags = util.clear_bits(db.m_db_flags, DBFLAG_SCHEMA_KNOWN_OK)
+    }
+    if db.n_schema_lock == 0 {
+        loop i in 0..<db.dbs.len() {
+            s: db.dbs[i].schema
+            if s >= 0 && db.schemas[s].schema_flags.bit_and(DB_RESET_WANTED) != 0 -> schema_clear(db, s)
+        }
+    }
+}
+
+// sqlite3ResetAllSchemasOfConnection.
+reset_all_schemas: fn(db: &Conn) Never! {
+    loop i in 0..<db.dbs.len() {
+        s: db.dbs[i].schema
+        if s < 0 -> next
+        if db.n_schema_lock == 0 {
+            schema_clear(db, s)
+        } else {
+            db.schemas[s].schema_flags = db.schemas[s].schema_flags.bit_or(DB_RESET_WANTED)
+        }
+    }
+    db.m_db_flags = util.clear_bits(db.m_db_flags, DBFLAG_SCHEMA_CHANGE.bit_or(DBFLAG_SCHEMA_KNOWN_OK))
+    vtab_unlock_list(db)
+    if db.n_schema_lock == 0 -> collapse_database_array(db)
+}
+
+// sqlite3VtabUnlockList: drop the references of the VTables vtab_clear put
+// on the disconnect list.
+vtab_unlock_list: fn(db: &Conn) Never! {
+    v := db.disconnect
+    db.disconnect = -1
+    loop v >= 0 {
+        next: db.vtables[v].next
+        vtab_unlock(db, v)
+        v = next
+    }
+}
+
+// sqlite3VtabUnlock: drop one reference to VTable v. The last queues it
+// on vtab_dead, where the Host calls xDisconnect and frees the slot
+// (vdbeaux.vtab_reap); C disconnects at once, through the same pointer.
+vtab_unlock: fn(db: &Conn, v: Int) Never! {
+    db.vtables[v].n_ref -= 1
+    if db.vtables[v].n_ref == 0 -> db.vtab_dead.push(v)
+}
+
+// sqlite3VtabLock.
+vtab_lock: fn(db: &Conn, v: Int) Never! { db.vtables[v].n_ref += 1 }
+
+// sqlite3CollapseDatabaseArray: drop the detached databases.
+collapse_database_array: fn(db: &Conn) Never! {
+    kept := [DBSlot]{}
+    loop i in 0..<db.dbs.len() {
+        if i < 2 || db.dbs[i].bt >= 0 {
+            kept.push(db.dbs[i])
+        } else if db.dbs[i].schema >= 0 {
+            schema_clear(db, db.dbs[i].schema)
+        }
+    }
+    db.dbs = kept
+}
+
+// sqlite3RootPageMoved: after OP_Destroy moved root page i_from to i_to in
+// database i_db, renumber the table or index that had it.
+root_page_moved: fn(db: &Conn, i_db: Int, i_from: Int, i_to: Int) Never! {
+    s: db.dbs[i_db].schema
+    loop tab in hash_values(db.schemas[s].tbl_hash) {
+        if db.tables[tab].tnum == i_from -> db.tables[tab].tnum = i_to
+    }
+    loop idx in hash_values(db.schemas[s].idx_hash) {
+        if db.indexes[idx].tnum == i_from -> db.indexes[idx].tnum = i_to
+    }
+}
+
+// sqlite3ExpirePreparedStatements: code 0 expires every statement now
+// (expired 1), code 1 once the running ones finish (expired 2).
+expire_prepared_statements: fn(db: &Conn, code: Int) Never! {
+    loop p in vdbe_list(db) -> db.vdbe_links[p].expired = code + 1
+}
+
+#Test("hash iteration is newest first and lookups fold case") {
+    h := hash_new()
+    _: hash_insert(h, "alpha".bytes(), 1)
+    _: hash_insert(h, "Beta".bytes(), 2)
+    _: hash_insert(h, "gamma".bytes(), 3)
+    assert_eq(hash_find(h, "BETA".bytes()), 2)
+    assert_eq(hash_values(h), [Int]{3, 2, 1})
+    assert_eq(hash_insert(h, "beta".bytes(), -1), 2)
+    assert_eq(hash_values(h), [Int]{3, 1})
+    loop i in 0..<20 -> _: hash_insert(h, "k{i}".bytes(), 100 + i)
+    assert_eq(hash_find(h, "K7".bytes()), 107)
+    assert_eq(hash_find(h, "alpha".bytes()), 1)
+    assert_eq(h.count, 22)
+}
