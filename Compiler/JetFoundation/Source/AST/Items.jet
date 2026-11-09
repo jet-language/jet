@@ -55,6 +55,9 @@ Program: struct {
     // Every `.routes(from:)` root this file names, as the driver read it
     // from the authorized snapshot, so sema checks the convention files.
     app_route_roots: [AppRouteRoot]{[AppRouteRoot]{}}
+    // An `#FX(…)` written at the head of the file, above a `use` line: a cap
+    // on every function in the file. Sema names it after the file.
+    file_cap: ModuleCap?{None}
 }
 
 // One `debug(…)` call as written. `name_start` keys it to the call's
@@ -705,6 +708,9 @@ TraitMethodSig: struct {
     return_view_provenance: ViewProvenanceMap?
     declared_return_view_provenance: ViewProvenanceMap?
     markers: [Marker]
+    // The `#FX(…)` caps of the modules enclosing the trait, outermost first:
+    // an impl that inherits the default body inherits them with it.
+    module_caps: [ModuleCap]{[ModuleCap]{}}
 }
 
 TraitImplBlock: struct {

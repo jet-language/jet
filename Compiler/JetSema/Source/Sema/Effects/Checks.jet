@@ -891,8 +891,10 @@ SemaEffectTypeCap: struct {
 
 // A module's or type's `#FX(…)` cap over one function: the function-row rule,
 // with plain entries as a ceiling and `!` entries as denials, both E0749 and
-// both holding through every callee the function can reach. Names were
-// validated once per cap (sema_effect_module_cap_names).
+// both holding through every callee the function can reach. A row the
+// function declares may only narrow the cap, so a declared effect outside it
+// is E0749 too, even when the body doesn't use it. Names were validated once
+// per cap (sema_effect_module_cap_names).
 sema_effect_check_module_cap: fn(nodes: [SemaEffectNode], node_by_key: NameRows, node_index: Int, solved: [String], cap: SemaEffectModuleCap, diagnostics: &[Diagnostic]) {
     node: nodes[node_index]
     ceiling := [String]{}
@@ -910,7 +912,11 @@ sema_effect_check_module_cap: fn(nodes: [SemaEffectNode], node_by_key: NameRows,
             next
         }
         reached: sema_effect_covered(solved, [String]{effect_name})
-        if reached.len() == 0 -> next
+        if reached.len() == 0 {
+            declared: sema_effect_declared_hits(node.declared, effect_name)
+            if declared.len() > 0 -> diagnostics.push(sema_effect_module_row_denied_diagnostic(node, declared, effect_name, cap))
+            next
+        }
         panic_site := "the reachable call graph"
         if sema_effect_root(effect_name) == "Panic" {
             seen := (loop _ in nodes -> false)
@@ -920,7 +926,42 @@ sema_effect_check_module_cap: fn(nodes: [SemaEffectNode], node_by_key: NameRows,
     }
     if ceiling.len() == 0 -> return
     over: sema_effect_uncovered(solved, ceiling)
-    if over.len() > 0 -> diagnostics.push(sema_effect_module_ceiling_diagnostic(node, over, ceiling, cap))
+    if over.len() > 0 {
+        diagnostics.push(sema_effect_module_ceiling_diagnostic(node, over, ceiling, cap))
+        return
+    }
+    wider: sema_effect_uncovered(node.declared, ceiling)
+    if wider.len() > 0 -> diagnostics.push(sema_effect_module_row_ceiling_diagnostic(node, wider, ceiling, cap))
+}
+
+// The declared effects that overlap `denied`: the denied effect itself, a
+// leaf under it, or a root above it (a row granting `FS` grants `FS.Read`).
+sema_effect_declared_hits: fn(declared: [String], denied: String) -> [String] Never! {
+    hits := [String]{}
+    loop effect_name in declared {
+        if sema_effect_covers(denied, effect_name) || sema_effect_covers(effect_name, denied) -> sema_effect_set_add(hits, effect_name)
+    }
+    hits
+}
+
+sema_effect_module_row_denied_diagnostic: fn(node: SemaEffectNode, declared: [String], denied: String, cap: SemaEffectModuleCap) -> Diagnostic {
+    name: sema_inline_member_source_name(node.name)
+    scope: cap.cap.scope
+    owner: cap.cap.owner
+    declared_list: sema_effect_show(declared)
+    diagnostic: sema_error("E0749", node.row_span ?? node.name_span, "`{name}`'s row declares `{declared_list}`, which {scope} `{owner}` denies", "a row written inside a cap may only narrow it; the {scope}'s `#FX(…)` cap denies `{denied}` to {sema_effect_cap_members(cap)}{sema_effect_module_cap_where(cap)}", "drop `{declared_list}` from `{name}`'s row, move `{name}` out of {scope} `{owner}`, or drop `!{denied}` from the {scope}'s `#FX(…)` cap")
+    sema_effect_module_cap_report(diagnostic, [String]{name}, cap)
+}
+
+sema_effect_module_row_ceiling_diagnostic: fn(node: SemaEffectNode, wider: [String], ceiling: [String], cap: SemaEffectModuleCap) -> Diagnostic {
+    name: sema_inline_member_source_name(node.name)
+    scope: cap.cap.scope
+    owner: cap.cap.owner
+    sorted := wider.copy()
+    sorted.sort()
+    wider_list: sema_effect_show(sorted)
+    diagnostic: sema_error("E0749", node.row_span ?? node.name_span, "`{name}`'s row declares `{wider_list}`, which {scope} `{owner}`'s `#FX(…)` cap doesn't allow", "a row written inside a cap may only narrow it; the {scope}'s cap allows only `{sema_effect_show(ceiling)}` in {sema_effect_cap_members(cap)}{sema_effect_module_cap_where(cap)}", "narrow `{name}`'s row to `{sema_effect_show(ceiling)}`, or add `{wider_list}` to the {scope}'s `#FX(…)` cap")
+    sema_effect_module_cap_report(diagnostic, [String]{name}, cap)
 }
 
 sema_effect_module_cap_where: fn(cap: SemaEffectModuleCap) -> String Never! {
@@ -1009,9 +1050,7 @@ sema_effect_type_caps: fn(graph_modules: [SemaRegistrationModule]) -> [String:Se
     loop module_row in graph_modules {
         loop nominal in module_row.nominals {
             cap: sema_effect_nominal_cap(nominal) ?? next
-            file: sema_effect_source_display(sema_source_file_at(module_row.source_segments, module_row.source_file, module_row.source_origin, cap.span))
-            site: if sema_source_line_at(module_row.source_segments, cap.span) == .Val(line) -> "{file}:{line}" else -> file
-            caps[nominal.symbol.id.key] = SemaEffectTypeCap{module_identity: module_row.module_identity, cap: SemaEffectModuleCap{cap: cap, site: Val(site)}}
+            caps[nominal.symbol.id.key] = SemaEffectTypeCap{module_identity: module_row.module_identity, cap: SemaEffectModuleCap{cap: cap, site: Val(sema_effect_cap_site(module_row, cap.span))}}
         }
     }
     caps
@@ -1039,8 +1078,9 @@ sema_effect_bind_type_cap: fn(source: &SemaEffectFunctionSource, caps: [String:S
 }
 
 // `#FX(…) name: module` over a file module: every function in the file takes
-// the cap, and each file that file declares takes it too. The result is by
-// graph module index, outermost cap first.
+// the cap, and each file that file declares takes it too. So does an `#FX(…)`
+// at the head of a file, named after the file. The result is by graph module
+// index, outermost cap first.
 sema_effect_file_module_caps: fn(graph_modules: [SemaRegistrationModule], edges: [SemaRegistrationImportEdge]) -> [[SemaEffectModuleCap]] {
     rows := [String:Int]{}
     loop (index, module_row) in graph_modules -> rows[module_row.module_identity] = index
@@ -1057,13 +1097,31 @@ sema_effect_file_module_caps: fn(graph_modules: [SemaRegistrationModule], edges:
             seen[key] = true
             parents[target].push(source)
             cap: sema_effect_file_module_cap(graph_modules[source].program.items, edge.declaration.alias) ?? next
-            module_row: graph_modules[source]
-            file: sema_effect_source_display(sema_source_file_at(module_row.source_segments, module_row.source_file, module_row.source_origin, cap.span))
-            site: if sema_source_line_at(module_row.source_segments, cap.span) == .Val(line) -> "{file}:{line}" else -> file
-            direct[target].push(SemaEffectModuleCap{cap: cap, site: Val(site)})
+            direct[target].push(SemaEffectModuleCap{cap: cap, site: Val(sema_effect_cap_site(graph_modules[source], cap.span))})
         }
     }
-    (loop index in 0..<graph_modules.len() -> sema_effect_file_caps_of(index, direct, parents, 0))
+    // A head cap comes last in its own file's row, labeled where it is
+    // written; the files it declares name it by `file:line`.
+    heads := (loop _ in graph_modules -> false)
+    loop (index, module_row) in graph_modules {
+        head := module_row.program.file_cap ?? next
+        head.owner = sema_effect_source_display(sema_source_file_at(module_row.source_segments, module_row.source_file, module_row.source_origin, head.span))
+        direct[index].push(SemaEffectModuleCap{cap: head.copy(), site: Val(sema_effect_cap_site(module_row, head.span))})
+        heads[index] = true
+    }
+    (loop index in 0..<graph_modules.len() -> sema_effect_own_file_caps(sema_effect_file_caps_of(index, direct, parents, 0), heads[index]))
+}
+
+sema_effect_cap_site: fn(module_row: SemaRegistrationModule, span: Span) -> String {
+    file: sema_effect_source_display(sema_source_file_at(module_row.source_segments, module_row.source_file, module_row.source_origin, span))
+    if sema_source_line_at(module_row.source_segments, span) == .Val(line) -> return "{file}:{line}"
+    file
+}
+
+sema_effect_own_file_caps: fn(caps: [SemaEffectModuleCap], has_head: Bool) -> [SemaEffectModuleCap] Never! {
+    own := caps
+    if has_head && own.len() > 0 -> own[own.len() - 1].site = None
+    own
 }
 
 sema_effect_declares_file_module: fn(items: [Item], name: String) -> Bool Never! {

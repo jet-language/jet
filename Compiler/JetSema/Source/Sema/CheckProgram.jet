@@ -9223,6 +9223,7 @@ sema_finalize_graph: fn(resolved: &&SemaRegistrationGraph, trail: &SemaGraphTrai
     // written; a file module's caps reach its file through the module graph.
     loop graph_module in final_graph.modules {
         cap_diagnostics := [Diagnostic]{}
+        if graph_module.program.file_cap == .Val(head) -> sema_effect_cap_entry_names(head, cap_diagnostics)
         sema_effect_module_cap_names(graph_module.program.items, cap_diagnostics)
         sema_effect_publish_diagnostics(diagnostics, graph_module.source_segments, cap_diagnostics)
     }

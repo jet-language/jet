@@ -1,0 +1,36 @@
+# A module's `#FX(…)` cap binds more than the bodies written in it: a row a
+# function declares may only narrow the cap, a trait default body written in
+# the module keeps the cap in every impl that inherits it, and an `#FX(…)`
+# above a file's `use` lines caps every function in the file instead of being
+# dropped. A head cap's names are checked like a row's, a file inside its head
+# cap runs, and `jet fmt` keeps the head cap above the imports.
+fixture: module_cap_binds_rows_defaults_and_file_heads/input
+env: NO_COLOR=1
+step: jet check rows.jet
+exit: 1
+stderr: count "Error [" = 2 # load's and fetch's rows; show and count stay inside their caps
+stderr: ~ "`load`'s row declares `FS.Read`, which module `report`'s `#FX(…)` cap doesn't allow" # the body never reads a file
+stderr: ~ "`fetch`'s row declares `Net`, which module `quiet` denies" # the body never touches the network
+stderr: ~ "module `report` is capped here"
+step: jet check defaults.jet
+exit: 1
+stderr: count "Error [" = 1 # Dog's inherited speak; Cat's default comes from an uncapped trait
+stderr: ~ "`speak` reaches the `IO` effect, which module `quiet` denies"
+step: jet check head.jet
+exit: 1
+stderr: count "Error [" = 2 # shout and run, which calls it; load reads a file, which the cap doesn't deny
+stderr: ~ "`shout` reaches the `IO` effect, which file `head.jet` denies"
+stderr: ~ "`run` reaches the `IO` effect, which file `head.jet` denies"
+stderr: ~ "file `head.jet` is capped here"
+step: jet check head_unknown.jet
+exit: 1
+stderr: ~ "`Nett` isn't a known effect"
+stderr: ~ "`Panic` can't be granted, only denied"
+step: jet run head_within.jet
+exit: 0
+stdout: = "read: true\n"
+step: jet fmt head_within.jet
+exit: 0
+file: head_within.jet ~ "#FX(IO, FS.Read, !Net)\nuse fs: core.files"
+step: jet fmt --check head_within.jet
+exit: 0

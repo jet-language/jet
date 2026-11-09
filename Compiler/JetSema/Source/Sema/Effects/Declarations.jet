@@ -295,6 +295,7 @@ sema_effect_check_declared_leaves: fn(graph: SemaRegistrationGraph, diagnostics:
     loop source_module_index in 0..<graph.modules.len() {
         if graph.modules[source_module_index].module_identity == graph.canonical_effect_module_identity -> next
         start: diagnostics.len()
+        sema_effect_leaf_check_cap(leaves, graph.modules[source_module_index].program.file_cap, diagnostics)
         sema_effect_leaf_check_items(leaves, graph.modules[source_module_index].program.items, diagnostics)
         if diagnostics.len() > start {
             sema_attach_diagnostic_source_locations(diagnostics, start, graph.modules[source_module_index].source_segments)

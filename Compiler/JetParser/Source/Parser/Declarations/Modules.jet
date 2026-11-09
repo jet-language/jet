@@ -44,6 +44,7 @@ use {
         SystemFieldValue,
         SystemLit,
         TraitImplBlock,
+        TraitMethodSig,
         Type,
         UnOp,
         VMTestField,
@@ -418,8 +419,8 @@ parser_type_fx_cap: fn(state: &JetParserState, markers: [Marker], type_name: Str
 }
 
 // Every function under the module takes `cap` ahead of the caps of the
-// modules nested inside it: nested modules, impl methods and the methods in
-// struct and enum bodies included.
+// modules nested inside it: nested modules, impl methods, the methods in
+// struct and enum bodies and trait default bodies included.
 parser_module_body_caps: fn(body: [Item], cap: ModuleCap) -> [Item] Never! {
     capped := [Item]{}
     loop item in body {
@@ -441,6 +442,11 @@ parser_module_body_caps: fn(body: [Item], cap: ModuleCap) -> [Item] Never! {
                 updated.methods = parser_methods_with_cap(definition.methods, cap)
                 updated.trait_impls = parser_trait_impls_with_cap(definition.trait_impls, cap)
                 capped.push(Item.Enum{value: updated})
+            }
+            .Trait(definition) -> {
+                updated := definition
+                updated.methods = (loop method in definition.methods -> parser_trait_method_with_cap(method, cap))
+                capped.push(Item.Trait{value: updated})
             }
             .CodeModule(definition) -> {
                 updated := definition
@@ -476,6 +482,14 @@ parser_func_with_cap: fn(definition: Func, cap: ModuleCap) -> Func Never! {
     updated := definition
     caps := [ModuleCap]{cap}
     loop inner in definition.module_caps -> caps.push(inner.copy())
+    updated.module_caps = caps
+    updated
+}
+
+parser_trait_method_with_cap: fn(method: TraitMethodSig, cap: ModuleCap) -> TraitMethodSig Never! {
+    updated := method
+    caps := [ModuleCap]{cap}
+    loop inner in method.module_caps -> caps.push(inner.copy())
     updated.module_caps = caps
     updated
 }

@@ -2005,10 +2005,14 @@ Report: struct {
 
 A type's cap binds the methods in its body, the trait impls written in it, and
 `impl` blocks written apart from it. A module's cap binds every function in
-the module, including the methods of the types declared in it; a generic
-module's cap binds the functions of every instance. A plain entry
+the module, including the methods of the types declared in it and the default
+bodies of its traits, which keep the cap in every impl that inherits them; a
+generic module's cap binds the functions of every instance. Written above a
+file's `use` lines, `#FX(...)` caps every function in the file. A plain entry
 is a ceiling and a `!` entry is a denial; reaching outside either one is E0749
-at the offending function, with the cap as the secondary label. An
+at the offending function, with the cap as the secondary label. A row written
+inside a cap may only narrow it: a declared effect outside the ceiling, or one
+the cap denies, is E0749 even when the body never uses it. An
 `#FX: (...)` line in the body is the same cap. A type without `#FX` keeps its
 inferred rows unchanged.
 
