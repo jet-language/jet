@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 98000,
+    "rev": 98025,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -29770,6 +29770,11 @@
         {
           "at": "2026-11-09",
           "by": "Main",
+          "text": "BoardPlanner review 2026-11-09 (dev 6a06b917cb). c35's five decisions now each have a build row: D-STACKBOUND1 #3645, D-PIN1 #4620, D-AUTHORITY-MEM2 #4268, D-MEM-HARDEN1 #6011, D-HOTSTATE1 #6625."
+        },
+        {
+          "at": "2026-11-09",
+          "by": "Main",
           "text": "BoardPlanner review 2026-11-09 (dev 6a06b917cb). Body: the repeated paragraph is gone. c6 names the Examples/ goldens (BrowserLockedProvision to #6552). c11, c61-c63 name their proofs (c61 was cut off). Perf clauses of c25/c26/c29 to G11 #6085. c35 split into one build row per decision: D-STACKBOUND1 to #3645, D-PIN1 to #4620, D-AUTHORITY-MEM2 to #4268, D-MEM-HARDEN1 to #6011, D-HOTSTATE1 to #6625 (G5). c37 removed: D-FANOUT3=C (2026-07-28, tasks.join_all(handles)) was superseded by D-CONC-SPAWN1=D (2026-08-06: one task keyword with task.all, task.race, task.any and task.group, no handles; syntax-decisions.md S53 marks handle-list combinators superseded) and D-CONC-ALLNAMED1=A (2026-08-28) keeps named task.all results; join_all appears nowhere on dev. Moved out (A2 of apply-G10.sh): Core IO, text, paths, argv and failure rows to G3 (#3548, #3593, #3594), DB rows to #5976, coverage to G5 #6060, MMIO to G3 #6518; c49 merged into #6567 c7 (D-G10-1). The task APIs this card proves are G3 builds (#2279, #4637, #6526, #6539)."
         },
         {
@@ -30163,15 +30168,6 @@
           "at": "2026-10-31T01:29:30.828Z"
         },
         {
-          "n": 35,
-          "text": "(was #4266) [#4277] Delivered: D-AUTHORITY-MEM2 (transitive memory bounds), D-HOTSTATE1 (hot-state migration), D-MEM-HARDEN1 (hardened profile sentries), D-PIN1 (address stability) and D-STACKBOUND1 (enforced worst-case stack and heap).",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:29:31.660Z"
-        },
-        {
           "n": 36,
           "text": "(was #4266) [#4495] Exact-atomic CAS uses the same validated raw word as its retained owner (no ABA). The original schedule test stays, plus an ABA witness on the shipping runtime.",
           "status": "open",
@@ -30542,7 +30538,7 @@
       "parentId": "c0j2afiq",
       "needsAcceptance": false,
       "created": "2026-09-12T14:30:16.660Z",
-      "updated": "2026-11-09T20:44:06.822Z",
+      "updated": "2026-11-09T20:44:48.469Z",
       "updatedBy": "Main",
       "workOrder": 94,
       "goals": [
@@ -40453,7 +40449,7 @@
       "id": "c0tgtjtu",
       "num": 3645,
       "title": "Foundations: value and ref memory model, soundness fixes, and compiler-owned stack layers",
-      "body": "One home for the 2026-09-27 foundations review, so these critical items do not scatter across the board. Evidence and design live in Docs/proposals/memory-model-foundations-2026-09-27.md (findings F1-F10 with repro programs, proposals, and the stack-replacement analysis). The owner asked for every owner decision to be balloted here. Implementation waits for the self-hosting transition (#218) unless the owner says otherwise; decisions can be made now.\n\nSoundness defects found (not owner choices, still critical): F1 generic code bypasses the task sendability check (check passes, jet run runs, AOT ICE 101); F2 the JIT tier has no second checker and documents a stale stack-slot hazard in crates/jet-jit/src/Concurrency.rs. Conflicts with ratified text: F3 recursive Shared types rejected by E0221; F4 #Policy(gc) stores copy, contrary to D-OPTGC1=A; F5 storing a Shared handle consumes it; F6 ~ on Cell aliases; F9 misplaced #Unsafe site diagnostic after an earlier error.",
+      "body": "One home for the 2026-09-27 foundations review, so these critical items do not scatter across the board. Evidence and design live in Docs/proposals/memory-model-foundations-2026-09-27.md (findings F1-F10 with repro programs, proposals, and the stack-replacement analysis). The owner asked for every owner decision to be balloted here. Self-hosting is done and every ballot here is ratified (16 of 16), so implementation proceeds.\n\nSoundness defects found (not owner choices, still critical): F1 generic code bypasses the task sendability check (check passes, jet run runs, AOT ICE 101); F2 the JIT tier has no second checker and documents a stale stack-slot hazard in crates/jet-jit/src/Concurrency.rs. Conflicts with ratified text: F3 recursive Shared types rejected by E0221; F4 #Policy(gc) stores copy, contrary to D-OPTGC1=A; F5 storing a Shared handle consumes it; F6 ~ on Cell aliases; F9 misplaced #Unsafe site diagnostic after an earlier error.",
       "kind": "task",
       "track": "epoch",
       "epoch": "e11",
@@ -40467,6 +40463,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-09",
+          "by": "Main",
+          "text": "BoardPlanner review 2026-11-09 (dev 6a06b917cb). All 16 attached ballots are ratified A; c1 now names the card that builds each outcome, and D-AUTOPIN1, D-RAWPTR2 and D-STACKBOUND1 (from #3239 c35) got build rows here because no card built them. D-SYSSCHED1 got a row on G3 #5035 (games). c5 merged into c2 (D-G10-2). Body: the self-hosting wait is over. The F2 note names crates/jet-jit, which is gone; F2 needs a Jet-side check that the JIT tier rechecks sendability, or removal if the Jet run tier has no separate checker."
+        },
         {
           "at": "2026-11-06",
           "by": "Main",
@@ -40530,12 +40531,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Every ballot attached to this card is ratified by the owner, and each ratified outcome has its own linked build card.",
+          "text": "Every ballot attached to this card is ratified (16 of 16, all A), and each outcome has a build row on a named card: D-MEMREF1, D-MEMREF-EXCL1, D-MEMREF-LIFE1 and D-MEMREF-TASK1 on #4500; D-DENY-COST1 on #6295; D-INVALIDATE1 on #3709; D-OPTIMISTIC1 #6555, D-REACT-REF1 #6553, D-RESUME1 #6556, D-SECRETEDGE1 #6557 and D-WIRESKEW1 #6558 (G9); D-HOTSTATE1 on #6625 (G5); D-SYSSCHED1 on #5035 (G3); D-AUTOPIN1, D-RAWPTR2 and D-STACKBOUND1 on this card.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-09-28T00:47:00.152Z"
+          "at": "2026-11-09T20:44:11.557Z"
         },
         {
           "n": 2,
@@ -40572,6 +40573,33 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-05T14:23:20.496Z"
+        },
+        {
+          "n": 7,
+          "text": "D-AUTOPIN1=A is built: every automatic choice (storage form, browser or server placement, collection, copies, inlining, update notifications) is sound by default; `jet inspect choices` and editor hovers show it with its reason; a marker or effect denial locks it; a later change that breaks a lock fails the build naming the fact that changed. Proof: a golden per choice kind and a UI snapshot for a broken lock.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T20:44:13.011Z"
+        },
+        {
+          "n": 8,
+          "text": "D-RAWPTR2=A is built: `?mem.Ptr<T>` (null is None), `p.offset(n)`, `p.byte_offset(n)`, `p.cast<U>()`, `mem.alloc_raw(size:, align:)`, `mem.free_raw(^p)`, `mem.window(p, len)`, `mem.copy` and `mem.fill`, all inside #Unsafe and keeping the pointer's origin; dev-mode and hardened builds still check range, liveness and alignment. Proof: a golden on O0, O1 and O2 and a UI snapshot for a use outside #Unsafe.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T20:44:14.444Z"
+        },
+        {
+          "n": 9,
+          "text": "D-STACKBOUND1=A is built: `jet inspect memory` prints worst-case stack and heap per entry point from backend frame sizes and the call graph; `!Mem.Stack(above: N)` enforces a stack limit and `!Mem.Alloc(above: N)` the total heap any call path may allocate; recursion needs #MaxDepth(n) and dynamic calls a sealed target set. Proof: a golden of the report and a UI snapshot per refusal. (was #3239 c35)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T20:44:15.995Z"
         }
       ],
       "refs": [
@@ -40591,12 +40619,12 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-09-28T00:46:54.243Z",
-      "updated": "2026-11-07T03:07:41.309Z",
+      "updated": "2026-11-09T20:44:17.523Z",
       "updatedBy": "Main",
       "goals": [
         "G10"
       ],
-      "criteriaLastN": 6
+      "criteriaLastN": 9
     },
     {
       "id": "c07xffyh",
@@ -44917,6 +44945,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-09",
+          "by": "Main",
+          "text": "BoardPlanner review 2026-11-09 (dev 6a06b917cb). c20/c23/c24 name Linux proofs (Windows is out of scope). c34/c35 name guard proofs; c35 is not clean on dev (PackageViews.jet:238, architecture.md:1878, syntax-decisions.md:3975). c44 drops the retired capability/plugin words. New row: D-AUTHORITY-MEM2 (from #3239 c35). Moved out (A2): c15, c16, c28 to G3 #6748 (crypto), c37-c40 to G5 #6386 (console attach), c47-c49 to G3 #5976 (netrc). The sandbox guest rows (c5, c41, c42, c44) need a sandbox target that jet build no longer builds (E1258/E1259 retired in d0499f032b) and that D-PORTABLE1=A replaces; owner choice C-G10-2."
+        },
+        {
           "at": "2026-11-06",
           "by": "Main",
           "text": "Owner deconfliction 2026-11-06: the proof cases follow the owner's order that retired syntax gets no teaching diagnostic, snapshot or jet fix (retired CLI flags are not syntax and are unchanged)."
@@ -45093,30 +45126,30 @@
         },
         {
           "n": 20,
-          "text": "(was #891 c2) Declared filesystem, process, network, environment, device, and resource policy is enforced and recorded by the actual platform backend [precut audit: not proven on 9c7ddf1359: C:authority/authority_process_windows_appcontainer_runs_and_denies_host_read SKIP-HOST os:windows]",
+          "text": "(was #891 c2) Declared filesystem, process, network, environment, device, and resource policy is enforced and recorded by the actual platform backend Proof: a Linux tests/cases/authority row runs a child under the native sandbox (Jetpack/Foundation/Source/NativeSandbox.jet, SandboxPolicy.jet) with a declared policy and shows each denied access and the recorded policy. (The old precut case was Windows AppContainer only.)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T23:41:33.754Z"
+          "at": "2026-11-09T20:44:20.974Z"
         },
         {
           "n": 23,
-          "text": "(was #1177 c2, #1178 c2, #1179 c2) Plan, launch transaction, descendants, limits, outputs, and receipt share one policy digest and accurately record the enforced authority [precut audit: not proven on 9c7ddf1359: C:agent_executor/agent_executor_windows_appcontainer_plan_and_receipt_preserve_policy SKIP-HOST os:windows]",
+          "text": "(was #1177 c2, #1178 c2, #1179 c2) Plan, launch transaction, descendants, limits, outputs, and receipt share one policy digest and accurately record the enforced authority Proof: a Linux tests/cases/agent_executor row shows plan, launch, descendants, limits, outputs and receipt carrying one policy digest. (The old precut case was Windows AppContainer only.)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T23:41:36.601Z"
+          "at": "2026-11-09T20:44:23.101Z"
         },
         {
           "n": 24,
-          "text": "(was #1177 c3, #1178 c3) Unsupported enforcement, denied access, escape attempts, limit exhaustion, cancellation, and child-process abuse fail closed without leaked handles, secrets, or processes [precut audit: not proven on 9c7ddf1359: C:agent_executor/agent_executor_windows_appcontainer_plan_and_receipt_preserve_policy SKIP-HOST os:windows]",
+          "text": "(was #1177 c3, #1178 c3) Unsupported enforcement, denied access, escape attempts, limit exhaustion, cancellation, and child-process abuse fail closed without leaked handles, secrets, or processes Proof: a Linux tests/cases/agent_executor row per failure (unsupported enforcement, denied access, escape, limit, cancellation, child abuse) shows a closed failure with no leaked handle, secret or process. (The old precut case was Windows AppContainer only.)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T23:41:37.477Z"
+          "at": "2026-11-09T20:44:25.228Z"
         },
         {
           "n": 25,
@@ -45174,21 +45207,21 @@
         },
         {
           "n": 34,
-          "text": "(was #1731 c2) diagnostics, spec, and examples say sandbox; the wasm note survives as implementation detail [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "(was #1731 c2) diagnostics, spec, and examples say sandbox; the wasm note survives as implementation detail Proof: a tests/guards check that diagnostics, spec pages and examples name the package kind sandbox, with wasm only where it names the browser ISA (precut audit 2026-11: unproven at 9c7ddf1359).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T23:41:46.182Z"
+          "at": "2026-11-09T20:44:28.175Z"
         },
         {
           "n": 35,
-          "text": "(was #1731 c3) adoption ratchet: zero plugin spellings in-repo [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "(was #1731 c3) adoption ratchet: zero plugin spellings in-repo Proof: a tests/guards ratchet that fails on plugin as a package-kind word in Compiler, Jetpack, Docs/spec and Examples (on dev 6a06b917cb PackageViews.jet:238 still maps .Plugin to \"plugin\", and architecture.md:1878 and syntax-decisions.md:3975 still say core.plugin; build-graph plugins are another word and stay) (precut audit 2026-11: unproven at 9c7ddf1359).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T23:41:47.336Z"
+          "at": "2026-11-09T20:44:31.053Z"
         },
         {
           "n": 36,
@@ -45264,12 +45297,12 @@
         },
         {
           "n": 44,
-          "text": "(was #2805 c1) The capability/plugin foundation runs, with a generated guest snapshot, goldens on every applicable tier and a service execution case.",
+          "text": "(was #2805 c1) The sandbox foundation runs, with a generated guest snapshot, goldens on every applicable tier and a service execution case.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T03:07:55.512Z"
+          "at": "2026-11-09T20:44:32.975Z"
         },
         {
           "n": 45,
@@ -45315,6 +45348,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-04T23:41:57.509Z"
+        },
+        {
+          "n": 50,
+          "text": "D-AUTHORITY-MEM2=A is built: a denial takes arguments; `!Mem.Alloc` stays plain and `!Mem.Alloc(above: 65536)` bounds the heap any call path may allocate, through every callee; manifests write `deny: [Mem.Alloc(above: 65536)]`. Proof: a golden passes under the bound and a UI snapshot shows the refusal naming the call path, on O0, O1 and O2. (was #3239 c35)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T20:44:34.305Z"
         }
       ],
       "refs": [],
@@ -45328,12 +45370,12 @@
       "parentId": "c02lvwje",
       "needsAcceptance": false,
       "created": "2026-10-02T18:24:05.406Z",
-      "updated": "2026-11-07T03:47:13.661Z",
+      "updated": "2026-11-09T20:44:35.707Z",
       "updatedBy": "Main",
       "goals": [
         "G10"
       ],
-      "criteriaLastN": 49
+      "criteriaLastN": 50
     },
     {
       "id": "c0jm0xjt",
@@ -50532,6 +50574,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-04T23:44:30.222Z"
+        },
+        {
+          "n": 15,
+          "text": "D-PIN1=A is built: `mem.pin(&place) -> Pin<T>` is a tracked write view that blocks moving and replacing the place, and libraries take or return Pin<T> where address stability matters. Proof: a golden on O0, O1 and O2 and UI snapshots for a move and a replace of a pinned place. (was #3239 c35)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T20:44:37.173Z"
         }
       ],
       "refs": [
@@ -50550,11 +50601,12 @@
       "parentId": "c0tgtjtu",
       "needsAcceptance": false,
       "created": "2026-10-05T19:57:15.407Z",
-      "updated": "2026-11-07T06:26:53.098Z",
+      "updated": "2026-11-09T20:44:37.173Z",
       "updatedBy": "Main",
       "goals": [
         "G10"
-      ]
+      ],
+      "criteriaLastN": 15
     },
     {
       "id": "c0441rvj",
@@ -57328,6 +57380,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-09",
+          "by": "Main",
+          "text": "BoardPlanner review 2026-11-09 (dev 6a06b917cb). New row: D-ZERO-LEAKS1=A (attached here, stated on no row). c5 and c9 are speed rows (G11 #2858). c8 merged into #6323 c9 (D-G10-4: both build D-UB-BOUNDARY1)."
+        },
+        {
           "at": "2026-11-06",
           "by": "Main",
           "text": "Examples concept-area cutover (2c3e68a70b) moved paths this card's criteria cite. Read each cited path as its new home: c16: Examples/ffi/workflows/external-package/app.jet -> Examples/Interop/FFI/Workflows/ExternalPackage/app.jet."
@@ -57607,6 +57664,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-10-31T04:45:07.707Z"
+        },
+        {
+          "n": 19,
+          "text": "D-ZERO-LEAKS1=A (ratified 2026-11-01) is met: the native compiler reports zero leaks, zero double frees and zero use-after-free on the lircheck harness and the full 129-program corpus, and every static leak report is cleared or proven false. Proof: the verify batch runs both and its receipt shows the zero counts.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T20:44:49.981Z"
         }
       ],
       "refs": [],
@@ -57616,12 +57682,12 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-16T07:36:29.780Z",
-      "updated": "2026-11-07T03:07:59.833Z",
+      "updated": "2026-11-09T20:44:51.390Z",
       "updatedBy": "Main",
       "goals": [
         "G10"
       ],
-      "criteriaLastN": 18
+      "criteriaLastN": 19
     },
     {
       "id": "c02y3vkg",
@@ -58674,6 +58740,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-09T19:01:18.434Z"
+        },
+        {
+          "n": 23,
+          "text": "D-SYSSCHED1=A is built: systems run in parallel by default from the conflict graph of each system's parameter access; conflicting systems keep source order; commands, events and logs merge in declaration order at each stage end. `schedule: .Serial` and `schedule: .Manual(stages)` are the expert forms, and a manual stage whose systems conflict is refused. Proof: a game example prints the same output on O0, O1 and O2 under each schedule, and a UI snapshot shows the refusal. (from #3645 c1)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T20:44:18.959Z"
         }
       ],
       "refs": [
@@ -58689,12 +58764,12 @@
       "parentId": "c0u5tm84",
       "needsAcceptance": false,
       "created": "2026-10-16T13:36:57.362Z",
-      "updated": "2026-11-09T19:01:18.434Z",
+      "updated": "2026-11-09T20:44:18.959Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
       ],
-      "criteriaLastN": 22
+      "criteriaLastN": 23
     },
     {
       "id": "c0grmd0j",
@@ -68529,7 +68604,7 @@
     {
       "id": "c0bmxzrb",
       "num": 6011,
-      "title": "Checking run at O0 that stops on every aliasing and undefined-behavior class, like Rust's Miri",
+      "title": "Run-time checks for #Unsafe code and foreign edges: the hardened profile (D-MEM-HARDEN1=A) and every aliasing and undefined-behavior class, like Rust's Miri",
       "body": "Rust has Miri: a slow interpreter that catches memory mistakes the type checker missed, such as reading past a buffer inside unsafe code. Jet should have the same safety net. This card adds an opt-in checking run at O0 that tracks extra state for every value and stops with a named error on any aliasing, bounds, release, race or uninitialised-read mistake, including inside `#Unsafe` blocks and at foreign edges.\n\nSource: FutureAudit 2026-10-28, $JET_SCRATCH_ROOT/lanes/Audit/FUTURE.md T06 (\"new card for the O0 checking mode if #4726 does not cover it\"; #4726 lists results, not a checker).\n\nRelated: #4309 (static IR ownership verifier, a compile-time check; this is its run-time partner), #4620 (memory model), #4726 (defined-behavior ledger), D-MEM-HARDEN1=A (shipping run-time checks for unsafe islands and foreign edges).",
       "kind": "feature",
       "track": "epoch",
@@ -68543,7 +68618,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-09",
+          "by": "Main",
+          "text": "BoardPlanner review 2026-11-09 (dev 6a06b917cb). Retitled: this is the card for run-time checks of #Unsafe code. New row: D-MEM-HARDEN1 (from #3239 c35). Gained #6418 c96 (the hardened-profile catch; its zero-overhead clause is G11 #2858). c2: hosted CI is removed. c1's new opt-in spelling is an owner choice (C-G10-1: reuse --profile=hardened, recommended)."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -68556,12 +68637,12 @@
         },
         {
           "n": 2,
-          "text": "A planted-bug corpus with one program per class, each inside `#Unsafe` or a foreign edge, stops in checking mode with a named runtime code and the source location, and runs without a report in normal mode; the corpus runs in CI.",
+          "text": "A planted-bug corpus with one program per class, each inside `#Unsafe` or a foreign edge, stops in checking mode with a named runtime code and the source location, and runs without a report in normal mode; the corpus runs in the verify batch.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T11:57:15.083Z"
+          "at": "2026-11-09T20:44:44.143Z"
         },
         {
           "n": 3,
@@ -68571,6 +68652,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-09T19:52:09.692Z"
+        },
+        {
+          "n": 4,
+          "text": "D-MEM-HARDEN1=A is built: `jet build` and `jet test` take `--profile=hardened`, which puts a sentry on every #Unsafe operation and fences every foreign dependency; required static obligations still appear and pass, the run records whether each asserted obligation held, and safe Jet gains no checks. Proof: a test shows the report naming gate, operation, obligation and foreign component. (was #3239 c35)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T20:44:42.183Z"
         }
       ],
       "refs": [
@@ -68588,11 +68678,12 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T11:57:15.083Z",
-      "updated": "2026-11-09T19:52:09.692Z",
+      "updated": "2026-11-09T20:44:45.582Z",
       "updatedBy": "Main",
       "goals": [
         "G10"
-      ]
+      ],
+      "criteriaLastN": 4
     },
     {
       "id": "c09f1iks",
@@ -94504,6 +94595,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-09T19:34:39.785Z"
+        },
+        {
+          "n": 13,
+          "text": "D-HOTSTATE1=A is built: on a hot swap, added fields take their declared default, removed fields are dropped, renames and type changes use `migration` blocks, and when no rule applies `jet dev` restarts and names the field that blocked the swap. Proof: a jet dev case per rule. (was #3239 c35)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T20:44:38.579Z"
         }
       ],
       "refs": [],
@@ -94514,9 +94614,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T23:25:24.209Z",
-      "updated": "2026-11-09T19:51:11.769Z",
+      "updated": "2026-11-09T20:44:38.579Z",
       "updatedBy": "Main",
-      "criteriaLastN": 12
+      "criteriaLastN": 13
     },
     {
       "id": "c0ufxh06",
@@ -193272,6 +193372,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-09T20:44:51.390Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0mj3ijb",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-09T20:44:49.981Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0mj3ijb",
+      "note": "#19 D-ZERO-LEAKS1=A (ratified 2026-11-01) is met: the native com"
+    },
+    {
+      "at": "2026-11-09T20:44:48.469Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c06l1r0z",
+      "note": "#35: BoardPlanner review 2026-11-09 (dev 6a06b917cb). Split into one build row per decision on the card that owns it: D-STACKBOUND1 #3645, D-PIN1 #4620, D-AUTHORITY-MEM2 #4268, D-MEM-HARDEN1 #6011, D-HOTSTATE1 #6625 (G5). The row claimed delivery with no proof.; was [open]: (was #4266) [#4277] Delivered: D-AUTHORITY-MEM2 (transitive memory bounds), D-HOTSTATE1 (hot-state migration), D-MEM-HARDEN1 (hardened profile sentries), D-PIN1 (address stability) and D-STACKBOUND1 ("
+    },
+    {
+      "at": "2026-11-09T20:44:47.079Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c06l1r0z",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-09T20:44:45.583Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0bmxzrb",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-09T20:44:44.143Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0bmxzrb",
+      "note": "#2: BoardPlanner review 2026-11-09 (dev 6a06b917cb). Hosted CI is removed; the verify batch runs the corpus.; was: A planted-bug corpus with one program per class, each inside `#Unsafe` or a foreign edge, stops in checking mode with a named runtime code and the source location, and runs without a report in normal "
+    },
+    {
+      "at": "2026-11-09T20:44:42.183Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0bmxzrb",
+      "note": "#4 D-MEM-HARDEN1=A is built: `jet build` and `jet test` take `-"
+    },
+    {
+      "at": "2026-11-09T20:44:40.696Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0bmxzrb",
+      "note": "title"
+    },
+    {
+      "at": "2026-11-09T20:44:38.579Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c066t33h",
+      "note": "#13 D-HOTSTATE1=A is built: on a hot swap, added fields take the"
+    },
+    {
+      "at": "2026-11-09T20:44:37.173Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c00rqc09",
+      "note": "#15 D-PIN1=A is built: `mem.pin(&place) -> Pin<T>` is a tracked "
+    },
+    {
+      "at": "2026-11-09T20:44:35.707Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c052rw8k",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-09T20:44:34.305Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c052rw8k",
+      "note": "#50 D-AUTHORITY-MEM2=A is built: a denial takes arguments; `!Mem"
+    },
+    {
+      "at": "2026-11-09T20:44:32.975Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c052rw8k",
+      "note": "#44: BoardPlanner review 2026-11-09 (dev 6a06b917cb). D-AUTHORITY-WORD1 and D-ONCE-SANDBOX1: the retired words capability and plugin go.; was: (was #2805 c1) The capability/plugin foundation runs, with a generated guest snapshot, goldens on every applicable tier and a service execution case."
+    },
+    {
+      "at": "2026-11-09T20:44:31.054Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c052rw8k",
+      "note": "#35: BoardPlanner review 2026-11-09 (dev 6a06b917cb). The row named no proof; the precut audit status stays in the text.; was: (was #1731 c3) adoption ratchet: zero plugin spellings in-repo [precut audit: no dev test, golden, case or snapshot proves this today]"
+    },
+    {
+      "at": "2026-11-09T20:44:28.175Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c052rw8k",
+      "note": "#34: BoardPlanner review 2026-11-09 (dev 6a06b917cb). The row named no proof; the precut audit status stays in the text.; was: (was #1731 c2) diagnostics, spec, and examples say sandbox; the wasm note survives as implementation detail [precut audit: no dev test, golden, case or snapshot proves this today]"
+    },
+    {
+      "at": "2026-11-09T20:44:25.228Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c052rw8k",
+      "note": "#24: BoardPlanner review 2026-11-09 (dev 6a06b917cb). Windows is out of scope; the proof is the Linux native sandbox.; was: (was #1177 c3, #1178 c3) Unsupported enforcement, denied access, escape attempts, limit exhaustion, cancellation, and child-process abuse fail closed without leaked handles, secrets, or processes [pre"
+    },
+    {
+      "at": "2026-11-09T20:44:23.101Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c052rw8k",
+      "note": "#23: BoardPlanner review 2026-11-09 (dev 6a06b917cb). Windows is out of scope; the proof is the Linux native sandbox.; was: (was #1177 c2, #1178 c2, #1179 c2) Plan, launch transaction, descendants, limits, outputs, and receipt share one policy digest and accurately record the enforced authority [precut audit: not proven on"
+    },
+    {
+      "at": "2026-11-09T20:44:20.974Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c052rw8k",
+      "note": "#20: BoardPlanner review 2026-11-09 (dev 6a06b917cb). Windows is out of scope; the proof is the Linux native sandbox.; was: (was #891 c2) Declared filesystem, process, network, environment, device, and resource policy is enforced and recorded by the actual platform backend [precut audit: not proven on 9c7ddf1359: C:authori"
+    },
+    {
+      "at": "2026-11-09T20:44:18.959Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0776o2m",
+      "note": "#23 D-SYSSCHED1=A is built: systems run in parallel by default f"
+    },
+    {
+      "at": "2026-11-09T20:44:17.523Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0tgtjtu",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-09T20:44:15.995Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0tgtjtu",
+      "note": "#9 D-STACKBOUND1=A is built: `jet inspect memory` prints worst-"
+    },
+    {
+      "at": "2026-11-09T20:44:14.444Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0tgtjtu",
+      "note": "#8 D-RAWPTR2=A is built: `?mem.Ptr<T>` (null is None), `p.offse"
+    },
+    {
+      "at": "2026-11-09T20:44:13.011Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0tgtjtu",
+      "note": "#7 D-AUTOPIN1=A is built: every automatic choice (storage form,"
+    },
+    {
+      "at": "2026-11-09T20:44:11.557Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0tgtjtu",
+      "note": "#1: BoardPlanner review 2026-11-09 (dev 6a06b917cb). All 16 attached ballots are ratified A; the row now names the card that builds each outcome.; was: Every ballot attached to this card is ratified by the owner, and each ratified outcome has its own linked build card."
+    },
+    {
+      "at": "2026-11-09T20:44:09.559Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0tgtjtu",
+      "note": "body"
+    },
     {
       "at": "2026-11-09T20:44:06.822Z",
       "by": "Main",
