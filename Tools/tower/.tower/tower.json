@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6710,
-    "rev": 96376,
+    "rev": 96377,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -92733,47 +92733,6 @@
       "updatedBy": "Main"
     },
     {
-      "id": "c08cndtc",
-      "num": 6583,
-      "title": "core process.run_all runs its specs nearly sequentially under jet script",
-      "body": "Found by GatePort porting core-module-check: 8 jet check probes through process.run_all with jobs 8 take 20 s under jet script, against 2.7 s for the node equivalent. run_all should keep up to jobs children running at once. Fix in Core/runtime and add a case timing N sleeping children under jobs N on o0 and o2.",
-      "kind": "bug",
-      "track": "sidequest",
-      "epoch": null,
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "process.run_all keeps up to jobs children running at once, proven by a timing case, with throughput near xargs -P on the same probes",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev 55b3322ee1 (GoldenRoots3): new case process_sessions/run_all_keeps_jobs_children_running_at_once times 8 sleeps under jobs 8 (<3 s, one wave) and jobs 2 (four waves) on O0 and O2, PASS. 84 jet check probes at jobs 8: 4.3 s via jet run, 3.7 s AOT, vs 3.4 s for xargs -P8; CoreModuleCheck --jobs 8 5.8 s vs 31 s at --jobs 1. run_all was already concurrent on HEAD; the reported 20 s likely included the tool's cold compile.",
-          "at": "2026-11-06T04:37:03.065Z"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "goals": [
-        "G3"
-      ],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-05T23:04:07.901Z",
-      "updated": "2026-11-06T04:37:04.686Z",
-      "updatedBy": "Main",
-      "completedAt": "2026-11-06T04:37:04.686Z"
-    },
-    {
       "id": "c0ofw8u4",
       "num": 6586,
       "title": "Owner reballot: memory marks in signatures only, && for take, name: value declarations",
@@ -100583,6 +100542,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-09",
+          "by": "Main",
+          "text": "CFreeLead-6693a1 submitted (part of c1: musl/--musl and foreign/platform leave build.jet and the runtime pack; a C closure links the pack musl libc.a + libclang_rt.builtins.a). Stack SchedLead-6, SchedLead-9, QuickLead-3; it waits on #6689 and #6691. Gate rc=0. Disclosed open points: (Q1) the pack has no unwinder, so a Rust helper on the pack route uses the host libgcc_eh.a; (Q2) without a shared musl sysroot env var, every golden row with a C closure builds musl (~35 s) in its fresh Hangar. Neither needs an owner ballot yet: Q1 closes with #6694/#6695, and Q2 is an implementation cost to remove (share the sysroot through the existing Hangar cache) before c2 is measured."
+        },
+        {
           "at": "2026-11-08",
           "by": "Main",
           "text": "Assigned 2026-11-08 by Main: SpeedLead, once #6688 to #6692 land (it owns PrebuildRuntime and build.jet)."
@@ -100629,7 +100593,7 @@
       "parentId": "c0lscvc9",
       "needsAcceptance": false,
       "created": "2026-11-08T15:47:10.785Z",
-      "updated": "2026-11-08T15:47:54.207Z",
+      "updated": "2026-11-09T04:38:57.485Z",
       "updatedBy": "Main",
       "criteriaLastN": 3
     },
@@ -189141,6 +189105,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-09T04:38:57.485Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c03a0dhc",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-09T04:36:58.049Z",
       "by": "Main",
