@@ -322,6 +322,15 @@ chains, censuses, or releases. When a spec or criterion exists, the code comes
 first: no worker stops to prove rows or waits for review or a test result.
 While the orchestrator's batches run, every worker keeps coding to spec.
 
+This is a hard owner requirement. The orchestrator never lets a worker idle.
+No worker waits on a landing, a batch, a seed, a review, or a proof: it stacks
+its next submission on its own unlanded ones and keeps writing code to spec.
+Workers deliver large batches of work at once, never one small slice per test
+cycle. When failures come back, the worker fixes the whole list in parallel
+with its new work and resubmits it in one pass. A worker that is waiting is an
+orchestrator failure. Fix it at once by queueing that worker's next task or
+reassigning it.
+
 The orchestrator does every build and test. It keeps every worker's next task
 queued, integrates submissions in batches with one collect-all pass, and lands
 each passing submission on `dev` as its own commit. A failing submission is
