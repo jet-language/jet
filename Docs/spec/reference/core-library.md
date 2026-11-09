@@ -2164,6 +2164,18 @@ need `Env, Exec`, as `fork()` does.
 | `usage(of: UsageOf{.Program})` | `ResourceUsage !IOError -[Env]>` | `getrusage`: `user` and `system` CPU time as `Duration`, `peak_memory` in bytes. `.Children` sums every child the program has waited for. |
 | `lock_memory(future: Bool{false})` | `!IOError -[Env]>` | `mlockall(MCL_CURRENT \| MCL_ONFAULT)`, plus `MCL_FUTURE` when `future`: each page stays in RAM from its first touch until the program ends. Past the locked-memory limit without privilege it is an `IOError`. There is no unlock: `munlockall` would also unlock a `Secret`'s pages. |
 
+CPU scheduling (`sched(7)`) is a `Scheduling`: `.Normal`, `.Batch`, `.Idle`,
+`.Fifo{priority: p}` or `.RoundRobin{priority: p}`, the last two real time at
+priority 1 to 99. `pid` 0 is this program. Children started afterwards
+inherit the policy, so `set_scheduling` needs `Env, Exec` like the limit
+setters, and it is POSIX process control under `#Unsafe` like `setpriority`.
+
+| API | Result | Description |
+| --- | --- | --- |
+| `scheduling(pid: Int{0})` | `Scheduling !IOError -[Env]>` | `sched_getscheduler` and `sched_getparam`. A `SCHED_DEADLINE` process is `IOError.Unsupported`; no such process is `IOError.NotFound`. |
+| `set_scheduling(policy, pid: Int{0})` | `!IOError -[Env, Exec]>` | `sched_setscheduler`. A real-time priority outside 1 to 99 is `IOError.InvalidInput`; real time without `CAP_SYS_NICE` or an `RLIMIT_RTPRIO` allowance is `IOError.PermissionDenied`. |
+| `round_robin_interval(pid: Int{0})` | `Duration !IOError -[Env]>` | `sched_rr_get_interval`: the slice a `.RoundRobin` process runs before the next of its priority; zero under `.Fifo`. |
+
 `usize_max()` is a pure `U64` constant derived at compile time from the
 selected target's pointer layout (#4483), not from the
 compiler process's environment or the inspected executable. Missing layouts

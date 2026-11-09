@@ -20,6 +20,7 @@ use {
     host_path: __core_files_path_components
     __core_files_path_components.[PathPlatform]
     shared_bounds.[shared_range_valid]
+    process_errors.[process_error]
 }
 // Reused from Foundation CLISchema/TargetWidth (a736ba79d). This pointer
 // record measures the selected build target, never the compiler host.
@@ -552,6 +553,82 @@ lock_memory: fn(future: Bool{false}) IOError! -[Env]> {
     // MCL_CURRENT 1 | MCL_ONFAULT 4, plus MCL_FUTURE 2.
     flags: if future -> 7 else -> 5
     call_unit(core.sys.__mlockall(flags), "lock_memory", .Write, None)
+}
+
+/// How the kernel shares the CPU among processes (sched(7)). `Normal` is the
+/// default time sharing, `Batch` is time sharing for work no person waits on,
+/// and `Idle` runs only when the CPU has nothing else to do. `Fifo` and
+/// `RoundRobin` are real time: at `priority` 1 (lowest) to 99 (highest) the
+/// process runs ahead of every time-sharing process. `Fifo` runs until it
+/// waits or yields; `RoundRobin` runs one `round_robin_interval` at a time
+/// among the processes of its priority.
+Scheduling: enum {
+    Normal
+    Batch
+    Idle
+    Fifo(priority: Int)
+    RoundRobin(priority: Int)
+}
+
+/// The scheduling of process `pid`, this program when 0. A process under
+/// SCHED_DEADLINE has no `Scheduling` and reads as `IOError.Unsupported`.
+scheduling: fn(pid: Int{0}) -[Env]> Scheduling IOError! {
+    row: core.sys.__sched_get(pid)
+    if !row.available -> return Err(unsupported("scheduling"))
+    if row.errno != 0 -> return Err(process_error(.Read, "scheduling", row.errno))
+    if row.policy == 0 -> return Ok(Scheduling.Normal)
+    if row.policy == 1 -> return Ok(Scheduling.Fifo{priority: row.priority})
+    if row.policy == 2 -> return Ok(Scheduling.RoundRobin{priority: row.priority})
+    if row.policy == 3 -> return Ok(Scheduling.Batch)
+    if row.policy == 5 -> return Ok(Scheduling.Idle)
+    Err(IOError.Unsupported(IOContext{operation: .Read, resource: Val("scheduling"), os_code: None,
+        cause: Val("kernel scheduling policy {row.policy} has no Scheduling arm")}))
+}
+
+/// Set the scheduling of process `pid`, this program when 0; children it
+/// starts afterwards inherit it. A real-time priority must be 1 to 99. Real
+/// time and raising priority need CAP_SYS_NICE or an RLIMIT_RTPRIO allowance,
+/// else `IOError.PermissionDenied`. A real-time process that never waits can
+/// starve the rest of the machine.
+#Unsafe("posix set_scheduling: the caller owns the CPU share of the process it changes") set_scheduling: fn(policy: Scheduling, pid: Int{0}) IOError! -[Env, Exec]> {
+    // SCHED_OTHER 0, SCHED_FIFO 1, SCHED_RR 2, SCHED_BATCH 3, SCHED_IDLE 5.
+    row: if policy == {
+        .Normal -> (kind: 0, priority: 0)
+        .Batch -> (kind: 3, priority: 0)
+        .Idle -> (kind: 5, priority: 0)
+        .Fifo(priority) -> (kind: 1, priority: priority)
+        .RoundRobin(priority) -> (kind: 2, priority: priority)
+    }
+    if (row.kind == 1 || row.kind == 2) && (row.priority < 1 || row.priority > 99) {
+        return Err(IOError.InvalidInput(IOContext{operation: .Write, resource: Val("set_scheduling"), os_code: None,
+            cause: Val("real-time priority {row.priority} is outside 1 to 99")}))
+    }
+    result: core.sys.__sched_set(pid, row.kind, row.priority)
+    if !result.available -> return Err(unsupported("set_scheduling"))
+    if result.errno != 0 -> return Err(process_error(.Write, "set_scheduling", result.errno))
+    Ok(())
+}
+
+/// The time slice a `RoundRobin` process `pid` (this program when 0) runs
+/// before the next one of its priority. Linux reports the slice for every
+/// policy; it is zero for `Fifo`, which has no slice.
+round_robin_interval: fn(pid: Int{0}) -[Env]> Duration IOError! {
+    row: core.sys.__sched_rr_interval(pid)
+    if !row.available -> return Err(unsupported("round_robin_interval"))
+    if row.errno != 0 -> return Err(process_error(.Read, "round_robin_interval", row.errno))
+    Ok(Duration.nanoseconds(row.value) ?? return Err(syscall_input(.Read, Val("round_robin_interval"), "the slice is outside Duration's range")))
+}
+
+// The IOError of a call that names a process: not part of the sys surface.
+priv process_errors: module {
+    // ESRCH (no such process) is NotFound, and EPERM and EINVAL get their own
+    // IOError kinds.
+    process_error: fn(kind: IOOperation, operation: String, errno: Int) -> IOError {
+        if errno == 3 {
+            return IOError.NotFound(IOContext{operation: kind, resource: Val(operation), os_code: Val(errno), cause: Val(core.sys.__errno_text(errno))})
+        }
+        limit_error(kind, operation, errno)
+    }
 }
 
 limit_read: fn(resource: Int, operation: String) -[Env]> (soft: Int?, hard: Int?) IOError! {

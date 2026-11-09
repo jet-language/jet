@@ -60,6 +60,7 @@ Run a lesson from the repository root, for example `jet run Examples/Systems/<Le
 - [OSLockMemory](Process/OSLockMemory.jet) — `core.sys.lock_memory` keeps the program's pages in RAM (mlockall) until it ends; without privilege the locked-memory limit may refuse it.
 - [OSMknod](Process/OSMknod.jet) — `core.sys.mknod` makes a character or block device file under `#Unsafe`; only a privileged process may.
 - [OSProcessControl](Process/OSProcessControl.jet)
+- [OSScheduling](Process/OSScheduling.jet) — `core.sys.scheduling` reads a process's CPU policy and `set_scheduling` changes it under `#Unsafe`; real time needs privilege.
 - [ProcessAffinity](Process/ProcessAffinity.jet) — `.cpu_affinity(cpus)` runs the child only on the listed CPUs.
 - [ProcessBuilder](Process/ProcessBuilder.jet)
 - [ProcessExitCleanup](Process/ProcessExitCleanup.jet) — Explicit process termination runs the one cleanup boundary.

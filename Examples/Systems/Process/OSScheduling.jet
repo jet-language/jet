@@ -1,0 +1,40 @@
+// `core.sys.scheduling` reads how the kernel shares the CPU with a process,
+// and `set_scheduling` changes it under `#Unsafe`; children started
+// afterwards inherit it. Batch time sharing needs no privilege, while real
+// time (`.Fifo`, `.RoundRobin`) needs CAP_SYS_NICE, so a run may be refused,
+// as it is on a host without scheduling control (the web). A real-time
+// priority outside 1 to 99 is refused before any system call.
+package: {
+    name: "os_scheduling"
+    authority: { allow: [Env, Exec, IO] }
+}
+
+use os: core.sys
+
+describe: fn(policy: os.Scheduling) -> String {
+    if policy == {
+        .Normal -> "normal"
+        .Batch -> "batch"
+        .Idle -> "idle"
+        .Fifo(priority) -> "fifo at {priority}"
+        .RoundRobin(priority) -> "round robin at {priority}"
+    }
+}
+
+run: fn() {
+    print("asked for: {describe(os.Scheduling.RoundRobin{priority: 100})}")
+    #Unsafe("posix set_scheduling: the out-of-range priority never reaches the kernel") {
+        refused: os.set_scheduling(.RoundRobin{priority: 100}) ? ok -> "accepted" ! error -> (if error == {
+            .InvalidInput(_) -> "InvalidInput"
+            else -> "another error"
+        })
+        print("set_scheduling(.RoundRobin{{priority: 100}}): {refused}")
+    }
+    // Whether this host lets a program change its scheduling varies, so a
+    // move that applied and read back, and a refusal, print the same line.
+    #Unsafe("posix set_scheduling: this program moves itself to batch time sharing and back") {
+        batch: os.set_scheduling(.Batch) ? ok -> (os.scheduling() ? now -> describe(now) == "batch" ! error -> false) ! error -> true
+        print("batch applied and read back, or refused: {batch}")
+        os.set_scheduling(.Normal).drop("a refused move leaves the policy as it was")
+    }
+}

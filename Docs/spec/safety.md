@@ -216,10 +216,10 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     "Compiler": 748,
     "Core": 191,
     "Docs": 8,
-    "Examples": 37,
+    "Examples": 39,
     "Jetpack": 9,
     "Tools": 7,
-    "tests": 425
+    "tests": 426
   },
   "regions": [
     {
@@ -7049,6 +7049,20 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     },
     {
       "package": "Examples",
+      "file": "Examples/Systems/Process/OSScheduling.jet",
+      "line": 26,
+      "column": 5,
+      "reason": "posix set_scheduling: the out-of-range priority never reaches the kernel"
+    },
+    {
+      "package": "Examples",
+      "file": "Examples/Systems/Process/OSScheduling.jet",
+      "line": 35,
+      "column": 5,
+      "reason": "posix set_scheduling: this program moves itself to batch time sharing and back"
+    },
+    {
+      "package": "Examples",
       "file": "Examples/Systems/Process/ProcessExitCleanup.jet",
       "line": 23,
       "column": 5,
@@ -9562,6 +9576,13 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     },
     {
       "package": "tests",
+      "file": "tests/conformance/corpus/core/sys/set_scheduling.jet",
+      "line": 5,
+      "column": 5,
+      "reason": "move this short-lived witness to batch time sharing and back; neither needs privilege"
+    },
+    {
+      "package": "tests",
       "file": "tests/conformance/corpus/core/sys/setgid.jet",
       "line": 5,
       "column": 5,
@@ -10208,7 +10229,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | 748 |
 | Core | 191 |
 | Docs | 8 |
-| Examples | 37 |
+| Examples | 39 |
 | Jetpack | 9 |
 | Tools | 7 |
 | tests | 424 |
@@ -11193,6 +11214,8 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Examples | Examples/Memory/Unsafe/UnsafeSentriesSourceOff.jet | 7:5 | "the local cell is live for this raw read" |
 | Examples | Examples/Systems/Process/OSMknod.jet | 29:5 | "make a device file in the temporary directory and remove it" |
 | Examples | Examples/Systems/Process/OSProcessControl.jet | 31:5 | "POSIX process and pipe control for the core.sys surface" |
+| Examples | Examples/Systems/Process/OSScheduling.jet | 26:5 | "posix set_scheduling: the out-of-range priority never reaches the kernel" |
+| Examples | Examples/Systems/Process/OSScheduling.jet | 35:5 | "posix set_scheduling: this program moves itself to batch time sharing and back" |
 | Examples | Examples/Systems/Process/ProcessExitCleanup.jet | 23:5 | "the exit callback has no captured state" |
 | Examples | Examples/Systems/Process/ProcessExitUnmapped.jet | 21:13 | "this child reports a Jet defect status on purpose" |
 | Examples | Examples/Systems/Process/SystemPrivilegedEntry.jet | 10:5 | "run only inside a disposable user namespace with a dedicated test identity" |
@@ -11552,6 +11575,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | tests | tests/conformance/corpus/core/sys/mkfifo.jet | 5:5 | "probe FIFO creation with an empty path" |
 | tests | tests/conformance/corpus/core/sys/mknod.jet | 5:5 | "probe device-file creation with a major number out of range" |
 | tests | tests/conformance/corpus/core/sys/pipe.jet | 5:5 | "open a pipe and observe its descriptor pair" |
+| tests | tests/conformance/corpus/core/sys/set_scheduling.jet | 5:5 | "move this short-lived witness to batch time sharing and back; neither needs privilege" |
 | tests | tests/conformance/corpus/core/sys/setgid.jet | 5:5 | "probe setgid with an invalid identifier" |
 | tests | tests/conformance/corpus/core/sys/setpgid.jet | 5:5 | "set the current process into its existing process group" |
 | tests | tests/conformance/corpus/core/sys/setpgrp.jet | 5:5 | "set the current process group" |

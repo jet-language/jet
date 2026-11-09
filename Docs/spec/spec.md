@@ -3077,8 +3077,9 @@ version, `getppid`, `getuid`, `geteuid`, `getgid`, `getegid`, `getgroups`,
 POSIX process and session control requires an audited `#Unsafe("...")` region
 and a host-OS target gate. The gated set includes `fork`, `setuid`, `setgid`,
 `setpgid`, `setpgrp`, `setsid`, `initgroups`, `kill`, `wait`, `waitpid`, `pipe`,
-`close_fd`, `mkfifo`, `mknod`, `umask`, `getpriority`, `setpriority`, `utime`, `atexit`,
-and `stop`.
+`close_fd`, `mkfifo`, `mknod`, `umask`, `getpriority`, `setpriority`, `set_scheduling`,
+`utime`, `atexit`, and `stop`. `scheduling` and `round_robin_interval` read a
+process's CPU policy without the gate.
 
 These helpers do not emulate POSIX semantics on Windows. Examples are
 `Examples/Systems/Process/OSFacts.jet` and `os_process_control.jet`.
