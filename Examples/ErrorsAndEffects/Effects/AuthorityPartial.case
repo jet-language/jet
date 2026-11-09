@@ -1,6 +1,8 @@
-# `jet run` runs the program and names only the effect the `allow` row leaves
-# out; a built binary carries no notice, so the oracle is the one `jet run`.
+# The `allow` row is a ceiling: reading the clock, which it leaves out, stops
+# the check with E0749 before the program starts, on every tier.
 step: jet run AuthorityPartial.jet
-exit: 0
-stdout: = "HOME set: true\nclock runs: true\n"
-stderr: = "note: AuthorityPartial.jet reads the clock (-A hides this)\n"
+exit: 1
+stdout: empty
+stderr: ~ "E0749"
+stderr: ~ "Time"
+stderr: ~ "authority.allow"

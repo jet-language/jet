@@ -62,15 +62,15 @@ pkg_test_budget_manifest: fn(allow: [String]) -> PackageFacts Never! {
     manifest
 }
 
-pkg_test_package_effects: fn(name: String, effects: [String], sites: [String: String], panic_sites: [String], span: Span?) -> PackageEffects Never! {
-    PackageEffects{name: name, effects: effects, effect_sites: sites, effect_witnesses: [String: EffectBudgetWitness]{}, panic_sites: panic_sites, boundary_span: span}
+pkg_test_package_effects: fn(name: String, effects: [String], chains: [String: [String]], panic_sites: [String], span: Span?) -> PackageEffects Never! {
+    PackageEffects{name: name, effects: effects, effect_chains: chains, effect_witnesses: [String: EffectBudgetWitness]{}, panic_sites: panic_sites, boundary_span: span}
 }
 
 #Test("package budget ignores an unreachable loaded rand helper") {
     entries: pkg_compute_package_effects(pkg_test_effect_program(), pkg_test_effect_solved(), pkg_test_effect_summaries(false))
     email: pkg_test_effect_package(entries, "email")
     assert_eq(email.effects.len(), 0)
-    assert_eq(email.effect_sites.len(), 0)
+    assert_eq(email.effect_chains.len(), 0)
     assert_eq(pkg_effect_enforce(entries, pkg_test_budget_manifest([String]{"IO"})).len(), 0)
 }
 
@@ -78,7 +78,7 @@ pkg_test_package_effects: fn(name: String, effects: [String], sites: [String: St
     entries: pkg_compute_package_effects(pkg_test_effect_program(), pkg_test_effect_solved(), pkg_test_effect_summaries(true))
     email: pkg_test_effect_package(entries, "email")
     assert(email.effects.contains("Rand"))
-    assert_eq(email.effect_sites.get("Rand"), Val("crypto::seal"))
+    assert_eq(email.effect_chains.get("Rand"), Val([String]{"crypto::migrate_v1", "crypto::seal"}))
     diagnostics: pkg_effect_enforce(entries, pkg_test_budget_manifest([String]{"IO"}))
     found := false
     loop diagnostic in diagnostics {
@@ -94,9 +94,18 @@ pkg_test_package_effects: fn(name: String, effects: [String], sites: [String: St
     diagnostics: pkg_effect_enforce(entries, pkg_test_budget_manifest([String]{"IO"}))
     assert_eq(diagnostics.len(), 2)
     loop diagnostic in diagnostics {
-        assert_eq(diagnostic.span, Val(Span{start: 22, end: 26}))
-        assert_eq(diagnostic.source_path, Val("/workspace/deps/email/src/crypto.jet"))
-        assert(diagnostic.what.contains("crypto::seal"))
+        if diagnostic.code == "E0749" {
+            // The root's chain stays in the root: the call into `email`
+            // leaves email's Rand with email.
+            assert_eq(diagnostic.span, Val(Span{start: 3, end: 6}))
+            assert_eq(diagnostic.source_path, Val("/workspace/app/run.jet"))
+            assert_eq(diagnostic.call_chain, [String]{"run::run"})
+        } else {
+            assert_eq(diagnostic.code, "E1220")
+            assert_eq(diagnostic.span, Val(Span{start: 22, end: 26}))
+            assert_eq(diagnostic.source_path, Val("/workspace/deps/email/src/crypto.jet"))
+            assert(diagnostic.what.contains("crypto::seal"))
+        }
     }
 }
 
@@ -105,7 +114,7 @@ pkg_test_package_effects: fn(name: String, effects: [String], sites: [String: St
     // Deliberately disagree with the retired mirror field; the authority
     // block must decide the result.
     manifest.effects_allow = Val([String]{"Net"})
-    entries: [PackageEffects]{pkg_test_package_effects("dep", [String]{"Net"}, [String: String]{}, [String]{}, None)}
+    entries: [PackageEffects]{pkg_test_package_effects("dep", [String]{"Net"}, [String: [String]]{}, [String]{}, None)}
     diagnostics: pkg_effect_enforce(entries, manifest)
     assert_eq(diagnostics.len(), 1)
     assert(diagnostics[0].fix.contains("authority.allow"))
@@ -113,14 +122,18 @@ pkg_test_package_effects: fn(name: String, effects: [String], sites: [String: St
     assert_eq(pkg_effect_enforce(entries, manifest).len(), 0)
 }
 
-#Test("effect budget authority block covers root and names the effect site") {
+#Test("a written allow row is a ceiling over the root package's own code") {
     manifest := pkg_test_budget_manifest([String]{"FS"})
-    entries: [PackageEffects]{pkg_test_package_effects("root", [String]{"Net"}, [String: String]{"Net": "run::fetch"}, [String]{}, None)}
+    entries: [PackageEffects]{pkg_test_package_effects("root", [String]{"Net"}, [String: [String]]{"Net": [String]{"run::run", "run::fetch"}}, [String]{}, None)}
     diagnostics: pkg_effect_enforce(entries, manifest)
     assert_eq(diagnostics.len(), 1)
-    assert_eq(diagnostics[0].code, "E1220")
-    assert(diagnostics[0].what.contains("fetch"))
+    assert_eq(diagnostics[0].code, "E0749")
+    assert(diagnostics[0].what.contains("`run::fetch`"))
     assert(diagnostics[0].what.contains("Net"))
+    assert(diagnostics[0].fix.contains("authority.allow"))
+    assert_eq(diagnostics[0].call_chain, [String]{"run::run", "run::fetch"})
+    // A deny over the root's own code is sema's, not the budget's.
+    manifest.authority.deny = Val([String]{"Net"})
     manifest.authority.allow = Val([String]{"Net"})
     assert_eq(pkg_effect_enforce(entries, manifest).len(), 0)
 }
@@ -128,7 +141,7 @@ pkg_test_package_effects: fn(name: String, effects: [String], sites: [String: St
 #Test("panic budget ignores allow omission but honors denial") {
     manifest := pkg_test_budget_manifest([String]{"IO", "GPU", "Mem.Alloc", "FS", "Rand"})
     span: Span{start: 4, end: 12}
-    entries: [PackageEffects]{pkg_test_package_effects("panicdep", [String]{"Panic"}, [String: String]{}, [String]{"panicdep::parse_port"}, Val(span))}
+    entries: [PackageEffects]{pkg_test_package_effects("panicdep", [String]{"Panic"}, [String: [String]]{}, [String]{"panicdep::parse_port"}, Val(span))}
     assert_eq(pkg_effect_enforce(entries, manifest).len(), 0)
     manifest.authority.deny = Val([String]{"Panic"})
     denied: pkg_effect_enforce(entries, manifest)

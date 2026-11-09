@@ -1881,10 +1881,11 @@ with E1803 before host state changes.
 A written authority row is a ceiling. This holds for an `authority` row in
 `package.jet` or in a script's inline `package: { … }` block, a module's
 `#FX`, a type's row, and a function's `-[…]>` row. Reaching an effect outside
-a function row is E0740. Reaching an effect outside a package row is E0749.
-Both are reported by `jet check`, `jet build` and `jet run` with the call
-chain, before anything runs. The floor stays inside every ceiling, and a floor
-right leaves only through an explicit `deny`. The effects the entry package's
+a function row is E0740. Reaching an effect outside a package row or a
+module's `#FX` is E0749. All are reported by `jet check`, `jet build` and
+`jet run` with the call chain, before anything runs. The floor stays inside
+every ceiling, and a floor right leaves only through an explicit `deny`. The
+effects the entry package's
 rows list are acknowledged and leave the notice, so a program whose package
 row covers what it reaches prints no notice. A `deny`, whether on a package,
 module, type or function, prohibits the denied effects for everything inside

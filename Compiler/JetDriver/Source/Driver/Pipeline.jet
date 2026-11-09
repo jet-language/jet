@@ -170,14 +170,12 @@ use {
     jet_eval.[JetEvalComptimeInputAdapter]
     jet_pkg_model.[
         EFFECT_PANIC_EDGE,
-        EFFECT_ROOT_PACKAGE,
         EffectBudgetImport,
         EffectBudgetModule,
         EffectBudgetOutput,
         EffectBudgetProgram,
         LockedBuildContribution,
         PackageEffectSummary,
-        PackageEffects,
         PackageFacts,
         pkg_compute_package_effects,
         pkg_effect_enforce,
@@ -4410,11 +4408,11 @@ jet_driver_effect_budget_name_spans: fn(load: JetDriverLoadResult, graph: SemaRe
 // The package effect budget (syntax-decisions.md:3362-3366): an `authority`
 // `allow` or `deny` row holds every package of the build, and
 // `authority.grants` widens it for one named dependency. A dependency that
-// reaches an effect outside the budget is E1220. The root package's own code
-// answers to the same row as application authority: a right the row leaves
-// out is allowed and named in the run's notice, and a denied right is E0749
-// (spec.md:1771-1784). So the budget charges the dependencies, and charging
-// the root as well would preempt those.
+// reaches an effect outside the budget is E1220. The root package's written
+// `allow` row is a ceiling over its own code: reaching an effect outside it
+// is E0749 at check time, so a run never names an effect the row leaves out
+// (spec.md "Application authority"). A `deny` over the root's own code is
+// sema's E0749, checked at every function of the package.
 // The checked functions feed the one Jetpack enforcer
 // (pkg_compute_package_effects, pkg_effect_enforce) through its
 // EffectBudgetProgram view.
@@ -4553,26 +4551,24 @@ jet_driver_effect_budget_diagnostics: fn(load: JetDriverLoadResult, functions: [
     }
     manifest.authority.deny = root.authority_deny
     manifest.authority.grants = root.authority_grants
-    dependencies := [PackageEffects]{}
-    loop entry in pkg_compute_package_effects(program, solved, summaries) {
-        if entry.name != EFFECT_ROOT_PACKAGE -> dependencies.push(entry)
-    }
+    entries: pkg_compute_package_effects(program, solved, summaries)
     out := [Diagnostic]{}
-    loop diagnostic in pkg_effect_enforce(dependencies, manifest) -> out.push(jet_driver_effect_budget_located(load, program, module_identities, diagnostic))
+    loop diagnostic in pkg_effect_enforce(entries, manifest) -> out.push(jet_driver_effect_budget_located(load, program, module_identities, diagnostic))
     out
 }
 
 // A failed budget's result. An E1220 at a dependency's function is the root's
 // budget refusing that dependency, not an error of the dependency's own
-// check, so it joins the diagnostics after the dependency summary.
+// check, so it joins the diagnostics after the dependency summary; the
+// root's own E0749 follows the same path.
 jet_driver_effect_budget_failure: fn(load: JetDriverLoadResult, budget: [Diagnostic], trace: JetDriverCompileTrace) -> JetDriverCompileResult Never! {
     result := jet_driver_compile_result(load, load.diagnostics, Val(JetDriverStage.Assemble), false, trace)
     loop diagnostic in budget -> result.diagnostics.push(diagnostic.copy())
     result
 }
 
-// An E1220 at its source: a witness names its module's path, a dependency
-// boundary sits in the entry module.
+// A budget diagnostic (E1220, E0749) at its source: a witness names its
+// module's path, a dependency boundary sits in the entry module.
 jet_driver_effect_budget_located: fn(load: JetDriverLoadResult, program: EffectBudgetProgram, module_identities: [String], diagnostic: Diagnostic) -> Diagnostic Never! {
     // copy: the located diagnostic is a new owned row; unlocated it equals
     // `diagnostic`, a read parameter the enforcer's list keeps.

@@ -4,8 +4,10 @@
 // Zero-config: every `jet build` prints a one-line summary of the effects the
 // dependency graph uses, and per-dependency provenance is recorded in the
 // lockfile. An `authority: { allow: […], deny: […] }` block enforces
-// the whole graph (E1220); `authority.grants` is the audited per-dependency
-// escape, also recorded in the lockfile.
+// the whole graph: a dependency outside it is E1220, and the root package's
+// own code outside its written `allow` row is E0749, the ceiling a written
+// row is (spec.md "Application authority"). `authority.grants` is the audited
+// per-dependency escape, also recorded in the lockfile.
 //
 // Attribution walks sema's solved per-function effect fixpoint from the
 // driver's selected entry, then attributes only reached functions to the
@@ -14,7 +16,7 @@
 use jet_foundation.[
     AUTHORITY_PANIC_ROOT, AuthorityVerdict, Diagnostic, Span, authority_answer,
     authority_covers, authority_covers_any, authority_holds, authority_is_deny_only, authority_parse_rights,
-    authority_root, diagnostic_from_registry, diagnostic_with_source_path,
+    authority_root, diagnostic_from_registry, diagnostic_with_rights, diagnostic_with_source_path,
 ]
 
 EFFECT_ROOT_PACKAGE: "root"
@@ -77,8 +79,10 @@ PackageEffects: struct {
     // `root` for the building package itself, else the dependency name.
     name: String
     effects: [String]
-    // One deterministic function identity reaching each effect (E1220).
-    effect_sites: [String: String]
+    // For each effect, one deterministic static call path from the first
+    // reached function that reaches it down to the function that performs
+    // it; the last entry is the effect's site (E1220, E0749).
+    effect_chains: [String: [String]]
     effect_witnesses: [String: EffectBudgetWitness]
     // Function identities where a deniable Panic stop enters the graph.
     panic_sites: [String]
@@ -131,18 +135,26 @@ pkg_effect_module_owner: fn(program: EffectBudgetProgram, path: String) -> Strin
 // Attribute only functions reachable from the selected entry to the package
 // whose module defines them. Loaded helpers the selected driver never calls
 // must not become application provenance; functions with no solved entry
-// contribute nothing.
+// contribute nothing. An effect's chain stays inside the package it is
+// attributed to: a call into another package leaves that package's effects
+// with it.
 pkg_compute_package_effects: fn(program: EffectBudgetProgram, solved: [String: [String]], summaries: [String: PackageEffectSummary]) -> [PackageEffects] Never! {
     reachable: pkg_effect_entry_reachable_keys(program, summaries, "run")
+    module_owners: loop loaded in program.modules -> pkg_effect_module_owner(program, loaded.path)
+    // Each program function's package, by its key.
+    owners := [String: String]{}
+    loop (index, loaded) in program.modules {
+        loop function_key in loaded.function_keys -> owners["{loaded.alias}::{function_key}"] = module_owners[index]
+    }
     by_package := [String: PackageEffects]{}
-    loop loaded in program.modules {
-        owner: pkg_effect_module_owner(program, loaded.path)
-        aggregate := by_package.get(owner) ?? PackageEffects{name: owner, effects: [String]{}, effect_sites: [String: String]{}, effect_witnesses: [String: EffectBudgetWitness]{}, panic_sites: [String]{}, boundary_span: None}
+    loop (index, loaded) in program.modules {
+        owner: module_owners[index]
+        aggregate := by_package.get(owner) ?? PackageEffects{name: owner.copy(), effects: [String]{}, effect_chains: [String: [String]]{}, effect_witnesses: [String: EffectBudgetWitness]{}, panic_sites: [String]{}, boundary_span: None}
         if aggregate.boundary_span == None && owner != EFFECT_ROOT_PACKAGE {
             aggregate.boundary_span = pkg_dependency_boundary_span(program, owner)
         }
         loop function_key in loaded.function_keys {
-            pkg_collect_effects_for_key("{loaded.alias}::{function_key}", reachable, solved, summaries, aggregate)
+            pkg_collect_effects_for_key("{loaded.alias}::{function_key}", reachable, solved, summaries, owners, aggregate)
         }
         by_package[owner] = aggregate
     }
@@ -153,7 +165,9 @@ pkg_compute_package_effects: fn(program: EffectBudgetProgram, solved: [String: [
         entry := by_package[name]
         entry.effects = authority_holds(entry.effects)
         entry.panic_sites = authority_holds(entry.panic_sites)
-        loop site in entry.effect_sites.values() {
+        loop chain in entry.effect_chains.values() {
+            if chain.len() == 0 -> next
+            site: chain[chain.len() - 1]
             if entry.effect_witnesses.has_key(site) -> next
             witness: pkg_effect_witness(program, site) ?? next
             entry.effect_witnesses[site] = witness
@@ -228,14 +242,16 @@ pkg_effect_key_is_reachable: fn(key: String, reachable: [String: Bool]) -> Bool 
     reachable.has_key(parts[parts.len() - 1])
 }
 
-pkg_collect_effects_for_key: fn(key: String, reachable: [String: Bool], solved: [String: [String]], summaries: [String: PackageEffectSummary], aggregate: &PackageEffects) {
+pkg_collect_effects_for_key: fn(key: String, reachable: [String: Bool], solved: [String: [String]], summaries: [String: PackageEffectSummary], owners: [String: String], aggregate: &PackageEffects) {
     if !pkg_effect_key_is_reachable(key, reachable) -> return
     set: solved.get(key) ?? return
     loop effect_name in set {
         aggregate.effects.push(effect_name.copy())
-        if !aggregate.effect_sites.has_key(effect_name) {
+        if !aggregate.effect_chains.has_key(effect_name) {
             seen := [String: Bool]{}
-            aggregate.effect_sites[effect_name] = pkg_effect_site(key, effect_name, solved, summaries, seen)
+            chain := [String]{}
+            pkg_effect_chain(key, effect_name, solved, summaries, owners, seen, chain)
+            aggregate.effect_chains[effect_name] = chain.move()
         }
     }
     seen := [String: Bool]{}
@@ -243,23 +259,27 @@ pkg_collect_effects_for_key: fn(key: String, reachable: [String: Bool], solved: 
     aggregate.panic_sites.push(site)
 }
 
-// The deepest function on a static path from `key` that directly performs
-// (or maximally may perform) `effect`.
-pkg_effect_site: fn(key: String, effect_name: String, solved: [String: [String]], summaries: [String: PackageEffectSummary], seen: &[String: Bool]) -> String Never! {
-    if seen.has_key(key) -> return key.copy()
+// Append to `chain` the static path from `key` down to the deepest function
+// of `key`'s package that directly performs (or maximally may perform)
+// `effect`.
+pkg_effect_chain: fn(key: String, effect_name: String, solved: [String: [String]], summaries: [String: PackageEffectSummary], owners: [String: String], seen: &[String: Bool], chain: &[String]) {
+    if seen.has_key(key) -> return
     seen[key] = true
-    summary: summaries.get(key) ?? return key.copy()
-    if summary.maximal -> return key.copy()
+    chain.push(key.copy())
+    summary: summaries.get(key) ?? return
+    if summary.maximal -> return
     loop direct in summary.direct {
-        if authority_covers(direct, effect_name) -> return key.copy()
+        if authority_covers(direct, effect_name) -> return
     }
+    owner: owners.get(key)
     loop callee in authority_holds(summary.edges) {
+        if owners.get(callee) != owner -> next
         effects: solved.get(callee) ?? next
         if authority_covers_any(effects, effect_name) || pkg_effect_any_covers(effects, effect_name) {
-            return pkg_effect_site(callee, effect_name, solved, summaries, seen)
+            pkg_effect_chain(callee, effect_name, solved, summaries, owners, seen, chain)
+            return
         }
     }
-    key.copy()
 }
 
 // Whether any candidate effect covers `effect` (`effect_covers(candidate, effect)`).
@@ -317,11 +337,14 @@ pkg_effect_budget_rights: fn(names: [String]) -> [String] Never! {
     authority_parse_rights(names)
 }
 
-// Whole-graph enforcement: with `authority` declared,
-// every package (root or dependency) reaching an effect outside `allow` or
-// inside `deny` fails with E1220, unless `authority.grants` covers it for
-// that dependency. Rows may be ancestor roots; the substrate
-// verdict decides. Panic is deny-only.
+// Whole-graph enforcement: with `authority` declared, a dependency reaching
+// an effect outside `allow` or inside `deny` fails with E1220, unless
+// `authority.grants` covers it for that dependency. The root package's own
+// code reaching an effect outside a written `allow` row is E0749: the row is
+// a ceiling, as a function's `-[…]>` row is. A `deny` over the root's code is
+// sema's E0749, checked at every function of the package, so it is not
+// repeated here. Rows may be ancestor roots; the substrate verdict decides.
+// Panic is deny-only.
 pkg_effect_enforce: fn(entries: [PackageEffects], manifest: PackageFacts) -> [Diagnostic] Never! {
     if !manifest.effects_enabled -> return [Diagnostic]{}
     allow: if manifest.authority.allow == {
@@ -332,6 +355,7 @@ pkg_effect_enforce: fn(entries: [PackageEffects], manifest: PackageFacts) -> [Di
     empty: [String]{}
     diagnostics := [Diagnostic]{}
     loop package in entries {
+        root: package.name == EFFECT_ROOT_PACKAGE
         granted: pkg_effect_grant_for(manifest, package.name)
         loop effect_name in package.effects {
             is_panic: authority_root(effect_name) == AUTHORITY_PANIC_ROOT
@@ -340,28 +364,24 @@ pkg_effect_enforce: fn(entries: [PackageEffects], manifest: PackageFacts) -> [Di
                 .Val(rights) -> !authority_is_deny_only(effect_name) && authority_answer(rights, empty, effect_name) != AuthorityVerdict.Allowed
                 .None -> false
             }
-            inside_deny: authority_answer(empty, deny, effect_name) == AuthorityVerdict.Denied
+            inside_deny: !root && authority_answer(empty, deny, effect_name) == AuthorityVerdict.Denied
             if !outside_allow && !inside_deny -> next
             if is_panic {
                 site: if package.panic_sites.len() > 0 -> package.panic_sites[0] else -> "a reachable dependency function"
                 diagnostics.push(pkg_e1220_panic(package.name, site, package.boundary_span))
-            } else {
-                site: package.effect_sites.get(effect_name)
-                diagnostic := pkg_e1220_at(package.name, effect_name, site)
-                if site == {
-                    .Val(function) -> {
-                        if package.effect_witnesses.get(function) == {
-                            .Val(witness) -> {
-                                diagnostic.span = Val(witness.span)
-                                diagnostic = diagnostic_with_source_path(diagnostic, witness.path, 0)
-                            }
-                            .None -> {}
-                        }
-                    }
-                    .None -> {}
-                }
-                diagnostics.push(diagnostic)
+                next
             }
+            chain: package.effect_chains.get(effect_name) ?? [String]{}
+            site := String?{None}
+            if chain.len() > 0 -> site = Val(chain[chain.len() - 1].copy())
+            diagnostic := if root -> pkg_e0749_outside_allow(effect_name, chain) else -> pkg_e1220_at(package.name, effect_name, site)
+            if site == .Val(function) {
+                if package.effect_witnesses.get(function) == .Val(witness) {
+                    diagnostic.span = Val(witness.span)
+                    diagnostic = diagnostic_with_source_path(diagnostic, witness.path, 0)
+                }
+            }
+            diagnostics.push(diagnostic)
         }
     }
     diagnostics
@@ -411,11 +431,22 @@ pkg_e1220_at: fn(dependency: String, effect_name: String, site: String?) -> Diag
         .Val(function) -> " function `{function}`"
         .None -> ""
     }
-    fix: if dependency == EFFECT_ROOT_PACKAGE -> "add `{effect_name}` to `authority.allow` or remove the code that reaches it" else -> "add `{effect_name}` to `authority.allow`, grant it to `{dependency}` in `authority.grants`, or drop the dependency"
     diagnostic_from_registry("E1220", None,
         "`{dependency}`{location} uses the `{effect_name}` effect, which this package's budget doesn't allow",
         "an `authority` budget fails the build when package code or any dependency reaches an effect you didn't list — supply-chain review as a compile error",
-        fix)
+        "add `{effect_name}` to `authority.allow`, grant it to `{dependency}` in `authority.grants`, or drop the dependency")
+}
+
+// E0749: the root package's own code reaches an effect its written `allow`
+// row leaves out. `chain` runs from the first reached function that reaches
+// it down to the one that performs it, which the report names.
+pkg_e0749_outside_allow: fn(effect_name: String, chain: [String]) -> Diagnostic Never! {
+    site: if chain.len() > 0 -> chain[chain.len() - 1] else -> "the package's code"
+    diagnostic: diagnostic_from_registry("E0749", None,
+        "`{site}` reaches the `{effect_name}` effect, which the package's `authority: {{ allow: […] }}` row doesn't list",
+        "a written `allow` row is a ceiling: the package's code and every call it makes may use only the listed effects and the floor every program holds (`IO`, `Mem.Alloc`, `Exec.Args`)",
+        "add `{effect_name}` to `authority.allow`, or remove the call that reaches it")
+    diagnostic_with_rights(diagnostic, "invocation", chain, [String]{}, None)
 }
 
 // E1220 a package denial keeps the panic provenance visible

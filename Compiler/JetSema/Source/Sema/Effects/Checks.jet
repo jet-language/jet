@@ -97,7 +97,7 @@ SemaEffectFunctionSource: struct {
     // A top-level `#Kernel(.parallel)` whose declaration obligations hold
     // (sema_kernel_pending): E1102 judges its effect and body obligations.
     kernel: SemaKernelPending?{None}
-    // The `#FX(…)` caps of the modules enclosing this function (E0712/E0749).
+    // The `#FX(…)` caps of the modules enclosing this function (E0749).
     module_caps: [ModuleCap]{[ModuleCap]{}}
 }
 
@@ -880,9 +880,9 @@ SemaEffectModuleCap: struct {
 }
 
 // A module's `#FX(…)` cap over one function: the function-row rule, with
-// plain entries as a ceiling (E0712) and `!` entries as denials (E0749)
-// that hold through every callee it can reach. Names were validated once
-// per cap (sema_effect_module_cap_names).
+// plain entries as a ceiling and `!` entries as denials, both E0749 and both
+// holding through every callee the function can reach. Names were validated
+// once per cap (sema_effect_module_cap_names).
 sema_effect_check_module_cap: fn(nodes: [SemaEffectNode], node_by_key: NameRows, node_index: Int, solved: [String], cap: SemaEffectModuleCap, diagnostics: &[Diagnostic]) {
     node: nodes[node_index]
     ceiling := [String]{}
@@ -943,7 +943,7 @@ sema_effect_module_ceiling_diagnostic: fn(node: SemaEffectNode, over: [String], 
     sorted := over.copy()
     sorted.sort()
     over_list: sema_effect_show(sorted)
-    diagnostic: sema_error("E0712", node.name_span, "`{name}` uses the effect `{over_list}`, which module `{module_name}`'s `#FX(…)` cap doesn't allow", "the module's cap allows only `{sema_effect_show(ceiling)}` in every function inside it, even through a call{sema_effect_module_cap_where(cap)}", "add `{over_list}` to the module's `#FX(…)` cap, or move that work out of module `{module_name}`")
+    diagnostic: sema_error("E0749", node.name_span, "`{name}` uses the effect `{over_list}`, which module `{module_name}`'s `#FX(…)` cap doesn't allow", "the module's cap allows only `{sema_effect_show(ceiling)}` in every function inside it, even through a call{sema_effect_module_cap_where(cap)}", "add `{over_list}` to the module's `#FX(…)` cap, or move that work out of module `{module_name}`")
     sema_effect_module_cap_report(diagnostic, [String]{name}, cap)
 }
 
