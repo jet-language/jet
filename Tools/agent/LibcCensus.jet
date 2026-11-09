@@ -240,8 +240,10 @@ FAMILIES: [Family]{
     // ---- Memory ----
     {area: "Memory", header: "stdlib.h", standard: C23, names: "malloc calloc realloc free aligned_alloc free_sized free_aligned_sized memalignment", variants: "", jet: "core.mem.Arena core.mem.Pool", coverage: .Language, note: "values are owned and freed by the language; arenas and pools for explicit lifetimes"},
     {area: "Memory", header: "stdlib.h", standard: POSIX, names: "reallocarray posix_memalign", variants: "", jet: "core.mem.Arena", coverage: .Language, note: "values are owned and freed by the language"},
-    {area: "Memory", header: "sys/mman.h", standard: POSIX, names: "mmap munmap msync mprotect posix_madvise", variants: "", jet: "core.files.map core.files.MappedFile", coverage: .Partial, note: "file mappings; no protection changes or advice"},
-    {area: "Memory", header: "sys/mman.h", standard: POSIX, names: "mlock munlock mlockall munlockall", variants: "", jet: "", coverage: .Gap, note: "no page locking"},
+    {area: "Memory", header: "sys/mman.h", standard: POSIX, names: "mmap munmap posix_madvise", variants: "", jet: "core.files.map core.files.MappedFile core.files.MappedFile.advise", coverage: .Covered, note: "read-only private file mappings"},
+    {area: "Memory", header: "sys/mman.h", standard: POSIX, names: "msync mprotect", variants: "", jet: "", coverage: .Gap, note: "no writable mappings (ballot D-MAP-WRITE1)"},
+    {area: "Memory", header: "sys/mman.h", standard: POSIX, names: "mlock munlock mlockall", variants: "", jet: "core.sys.lock_memory core.crypto.Secret", coverage: .Covered, note: "a Secret's pages are locked; lock_memory locks the whole program until it ends"},
+    {area: "Memory", header: "sys/mman.h", standard: POSIX, names: "munlockall", variants: "", jet: "", coverage: .NotNeeded, note: "it would silently undo a Secret's page locks, and nothing safe needs a process-wide unlock (owner ruling on #6696)"},
     {area: "Memory", header: "sys/mman.h", standard: POSIX, names: "posix_mem_offset posix_typed_mem_get_info posix_typed_mem_open", variants: "", jet: "", coverage: .NotNeeded, note: "no typed memory objects (owner ruling on #6696)"},
     // ---- Processes ----
     {area: "Processes", header: "unistd.h", standard: POSIX, names: "fork _Fork", variants: "", jet: "core.sys.fork", coverage: .Covered, note: ""},

@@ -17,7 +17,7 @@ use {
     process: core.process
     host_path: __core_files_path_components
     core.files.[__host_path_is_absolute, __host_path_join, __temp_path_sample, __temp_directory]
-    access_codes.[access_check, advice_code]
+    access_codes.[access_check, advice_code, map_advice_code]
 }
 // core.files — one filesystem surface.
 //
@@ -143,11 +143,11 @@ RenameIfExists: enum {
     Swap
 }
 
-/// How a program will read an open file, so the system can plan its caching
-/// (`FileReader.advise`). `Sequential` reads ahead further, `Random` stops
-/// reading ahead, `WillNeed` starts reading the file into memory now,
-/// `DontNeed` drops its cached pages, `NoReuse` marks the data as read once,
-/// and `Normal` restores the default.
+/// How a program will read an open or mapped file, so the system can plan
+/// its caching (`FileReader.advise`, `MappedFile.advise`). `Sequential`
+/// reads ahead further, `Random` stops reading ahead, `WillNeed` starts
+/// reading the file into memory now, `DontNeed` drops its cached pages,
+/// `NoReuse` marks the data as read once, and `Normal` restores the default.
 Advice: enum {
     Normal
     Sequential
@@ -233,6 +233,13 @@ MappedFile: struct {
     path: String
     bytes: [U8]
     priv handle: Int
+
+    /// Tell the system how the mapped bytes will be read (posix_madvise over
+    /// the whole map). Advice only plans paging: the map holds the same file
+    /// contents whatever it says, and an empty map accepts any.
+    advise: fn(self, advice: Advice) IOError! -[FS.Read]> {
+        core.files.__map_advise(self, map_advice_code(advice))
+    }
 }
 
 TempDir: struct {
@@ -1014,8 +1021,8 @@ can_write: fn(path: String | Path) -[FS.Read]> Bool Never! { access_check(path, 
 /// `can_read` explains the check.
 can_execute: fn(path: String | Path) -[FS.Read]> Bool Never! { access_check(path, 1) }
 
-// The access check and advice numbers behind can_read and advise: not part
-// of the files surface.
+// The access check and advice numbers behind can_read, advise and
+// map.advise: not part of the files surface.
 priv access_codes: module {
     // faccessat's mode bits: R_OK 4, W_OK 2, X_OK 1.
     access_check: fn(path: String | Path, mode: Int) -> Bool Never! {
@@ -1033,6 +1040,14 @@ priv access_codes: module {
             .DontNeed -> 4
             .NoReuse -> 5
         }
+    }
+
+    // madvise's advice numbers on Linux: the first five match posix_fadvise's;
+    // read-once data is MADV_COLD, which the runtime treats as a no-op on a
+    // kernel without it.
+    map_advice_code: fn(advice: Advice) -> Int Never! {
+        if advice == .NoReuse -> return 20
+        advice_code(advice)
     }
 }
 

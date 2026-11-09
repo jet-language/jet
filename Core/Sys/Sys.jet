@@ -540,6 +540,20 @@ usage: fn(of: UsageOf{.Program}) -[Env]> ResourceUsage IOError! {
     Ok(ResourceUsage{user: user, system: system, peak_memory: row.peak})
 }
 
+/// Keep this program's memory in RAM, never paged out to swap (mlockall):
+/// each page locks when it is first touched. `future: true` also locks
+/// memory mapped later, so the whole program stays resident; a later
+/// mapping past the locked-memory limit then fails as out of memory. A
+/// program without the privilege may lock only up to that limit, and past
+/// it this is an `IOError`. The lock lasts until the program ends: there is
+/// no unlock, since munlockall would also unlock a Secret's pages. A
+/// Secret's pages are locked already, so this is for latency, not secrets.
+lock_memory: fn(future: Bool{false}) IOError! -[Env]> {
+    // MCL_CURRENT 1 | MCL_ONFAULT 4, plus MCL_FUTURE 2.
+    flags: if future -> 7 else -> 5
+    call_unit(core.sys.__mlockall(flags), "lock_memory", .Write, None)
+}
+
 limit_read: fn(resource: Int, operation: String) -[Env]> (soft: Int?, hard: Int?) IOError! {
     row: core.sys.__rlimit(resource)
     if !row.available -> return Err(unsupported(operation))

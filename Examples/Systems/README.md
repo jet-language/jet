@@ -38,6 +38,7 @@ Run a lesson from the repository root, for example `jet run Examples/Systems/<Le
 - [FilesAccess](Files/FilesAccess.jet) — `files.can_read`, `can_write` and `can_execute` ask whether this program may use a path now, judged with its effective ids; a missing path is false.
 - [FilesDepth](Files/FilesDepth.jet) — Std-backed filesystem depth beyond read/write/list_dir.
 - [FilesProjection](Files/FilesProjection.jet) — Temporary paths make directory, mode, append, and rename operations explicit.
+- [FilesMapAdvise](Files/FilesMapAdvise.jet) — `mapped.advise(advice)` tells the system how a mapped file's bytes will be read (posix_madvise); the bytes stay the same.
 - [FilesReaderSeek](Files/FilesReaderSeek.jet)
 - [FilesRootedLifecycle](Files/FilesRootedLifecycle.jet) — Rooted file and temporary-resource lifecycle (CORE-F010, SCRIPT-F13).
 - [FilesReserve](Files/FilesReserve.jet) — `writer.allocate(size)` reserves disk space for a file (posix_fallocate) and `reader.advise(advice)` tells the system how the file will be read (posix_fadvise).
@@ -56,6 +57,7 @@ Run a lesson from the repository root, for example `jet run Examples/Systems/<Le
 
 - [EnvOverlay](Process/EnvOverlay.jet)
 - [OSFacts](Process/OSFacts.jet) — System facts live in core.sys; core.sys stays environment vars.
+- [OSLockMemory](Process/OSLockMemory.jet) — `core.sys.lock_memory` keeps the program's pages in RAM (mlockall) until it ends; without privilege the locked-memory limit may refuse it.
 - [OSMknod](Process/OSMknod.jet) — `core.sys.mknod` makes a character or block device file under `#Unsafe`; only a privileged process may.
 - [OSProcessControl](Process/OSProcessControl.jet)
 - [ProcessAffinity](Process/ProcessAffinity.jet) — `.cpu_affinity(cpus)` runs the child only on the listed CPUs.
