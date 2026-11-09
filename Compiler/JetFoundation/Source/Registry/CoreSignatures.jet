@@ -343,6 +343,9 @@ core_sig_numeric_or_default: fn(module_name: String, member: String) -> CoreType
     if member == "sign" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(integer, read)}, Val(integer)))
     if member == "to_bits" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.Union{members: [Type]{float, Type.Float32}}, read)}, Val(integer)))
     if member == "from_bits" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(integer, read)}, Val(float)))
+    // Core-private binary32 bit copies behind core.math's F32 to_bits/from_bits.
+    if member == "__to_bits_f32" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.Float32, read)}, Val(integer)))
+    if member == "__from_bits_f32" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(integer, read)}, Val(Type.Float32)))
     if member == "cmp" {
         return Val(core_sig_generic(module_name, member, [CoreCallTypedParameter]{core_sig_positional(t, read), core_sig_positional(t, read)}, Val(integer), core_sig_type_parameter("T", CoreCallTypeConstraint.Floating)))
     }
