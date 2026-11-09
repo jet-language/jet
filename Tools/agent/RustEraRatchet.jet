@@ -3,8 +3,8 @@
 //
 // 1. Every harness data table directly under tests/ (`*.tsv`, `*.txt`) and
 //    under Tools/ci/ has a reader: some tracked source file other than the
-//    table itself names it. Docs, Markdown and the script census describe
-//    tables; they do not read them.
+//    table itself names it. Docs and Markdown describe tables; they do not
+//    read them.
 // 2. No line of a tracked text file under Compiler/ or Core/ names a `.rs`
 //    file. The Rust sources are gone, so such a name points nowhere. Two
 //    kinds stay: a path into the pinned upstream Rust library (`library/std/`,
@@ -20,7 +20,6 @@ use {
 
 DATA_ROOTS: [String]{"tests", "Tools/ci"}
 DATA_SUFFIXES: [String]{".tsv", ".txt"}
-NOT_READERS: [String]{"Tools/script-census.tsv"}
 CITATION_ROOTS: [String]{"Compiler", "Core"}
 // Foreign-binding code: the Rust crates it names are real files it writes,
 // builds or reads.
@@ -73,7 +72,7 @@ is_harness_table: fn(path: String) -> Bool Never! {
 
 // Whether `path`, a tracked file that names `table`, reads it.
 is_reader: fn(table: String, path: String) -> Bool Never! {
-    path != table && !path.starts_with("Docs/") && !path.ends_with(".md") && !NOT_READERS.contains(path)
+    path != table && !path.starts_with("Docs/") && !path.ends_with(".md")
 }
 
 unread_tables: fn() -[Exec, IO, Time.Wait]> [String] RatchetError! {
@@ -148,12 +147,11 @@ run: fn() {
     assert(!is_harness_table("tests/guards/corpus_policy.jet"))
 }
 
-#Test("documents and the script census do not count as readers") {
+#Test("documents do not count as readers") {
     assert(is_reader("tests/a.tsv", "tests/guards/a.jet"))
     assert(!is_reader("tests/a.tsv", "tests/a.tsv"))
     assert(!is_reader("tests/a.tsv", "Docs/audits/a.md"))
     assert(!is_reader("tests/a.tsv", "README.md"))
-    assert(!is_reader("tests/a.tsv", "Tools/script-census.tsv"))
 }
 
 #Test("names of deleted Rust sources are stale; upstream library and foreign binding are not") {
