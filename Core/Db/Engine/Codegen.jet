@@ -369,6 +369,10 @@ Gen: trait {
     // module lookup, sqlite3PragmaVtabRegister for a pragma_ name, and
     // sqlite3VtabEponymousTableInit): its table, or -1.
     eponymous_table: fn(self, p: &Parse, a: &ast.AST, name: [U8]) -[DB]> Int Never!
+    // sqlite3VtabOverloadFunction (vtab.c) for argument `e`, a column of
+    // a virtual table: the function its module's xFindFunction overloads
+    // def with, or def.
+    vtab_overload_function: fn(self, p: &Parse, a: &ast.AST, def: conn.FuncDef, n_arg: Int, e: Int) -[DB]> conn.FuncDef Never!
 }
 
 // A walker's callbacks (struct Walker's xExprCallback, xSelectCallback,
@@ -1102,6 +1106,7 @@ impl CodegenTestGen.Gen {
     select_prep: fn(self, p: &Parse, a: &ast.AST, s: Int, outer_nc: Int) Never! -[DB]> {}
     select_expand: fn(self, p: &Parse, a: &ast.AST, s: Int) Never! -[DB]> {}
     eponymous_table: fn(self, p: &Parse, a: &ast.AST, name: [U8]) -[DB]> Int Never! { -1 }
+    vtab_overload_function: fn(self, p: &Parse, a: &ast.AST, def: conn.FuncDef, n_arg: Int, e: Int) -[DB]> conn.FuncDef Never! { def.copy() }
 }
 
 #Test("temporary registers and ranges are reused as expr.c reuses them") {
