@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6710,
-    "rev": 96377,
+    "rev": 96378,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -97740,6 +97740,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-09",
+          "by": "Main",
+          "text": "c59 (#6096) needs these package rows. LangLead estimate: JetDevserver 29.9k lines of Rust-shaped Jet (std.sync/net/io, unwrap, and all 278 retired `?` lines of #6582), 30-40 agent-hours plus the Core socket/thread gaps it will hit; JetLSP 18.7k lines, 12-20 agent-hours once it drops jet_devserver (move the 5 EDITOR_* constants). Plan: ScriptLead2 ports JetLSP after ScriptLead-4; LangLead takes JetDevserver after the core rows, the dogfood gate and #3590. A ballot (port both / port LSP and hold devserver out of the packages suite / hold both out until their commands are built) is being drafted for the owner. Nothing is excluded until the owner rules."
+        },
+        {
           "at": "2026-11-07",
           "by": "Main",
           "text": "Back to G5. CoreCliLead-2 measured it: JetLSP and JetDevserver are about 35k lines of Rust transliterated into Jet that have never compiled. Devserver uses std.sync/std.net/std.io, unwrap, format and tuple patterns. JetLSP depends on JetDevserver: about 480 of its 565 problems are Devserver's and about 85 its own, before sema. Getting either to 0 problems is a port of several days. Until then the full profile keeps running both packages and their Tests, which report KNOWN-FAILING via known-failing.tsv lines naming this card (not excluded). Next steps: (b) port JetLSP against current Core and drop its jet_devserver dependency by moving the 5 EDITOR_* constants into JetLSP; (c) the full Devserver port."
@@ -97778,7 +97783,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T05:21:20.878Z",
-      "updated": "2026-11-07T07:52:18.096Z",
+      "updated": "2026-11-09T04:53:12.736Z",
       "updatedBy": "Main",
       "criteriaLastN": 2
     },
@@ -189105,6 +189110,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-09T04:53:12.736Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0afjv0e",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-09T04:38:57.485Z",
       "by": "Main",
