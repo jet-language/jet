@@ -339,13 +339,15 @@ pkg_effect_budget_rights: fn(names: [String]) -> [String] Never! {
 }
 
 // Whole-graph enforcement: with `authority` declared, a dependency reaching
-// an effect outside `allow` or inside `deny` fails with E1220, unless
-// `authority.grants` covers it for that dependency. The root package's own
-// code reaching an effect outside a written `allow` row is E0749: the row is
-// a ceiling, as a function's `-[…]>` row is. A `deny` over the root's code is
-// sema's E0749, checked at every function of the package, so it is not
-// repeated here. Rows may be ancestor roots; the substrate verdict decides.
-// Panic is deny-only.
+// an effect outside its limit or inside `deny` fails with E1220, naming the
+// call path. A dependency's limit is its `authority.grants` line when it has
+// one, which replaces `allow` for it (a line may pin a dependency below
+// `allow`), and `allow` otherwise; what its line grants also passes `deny`.
+// The root package's own code reaching an effect outside a written `allow`
+// row is E0749: the row is a ceiling, as a function's `-[…]>` row is. A
+// `deny` over the root's code is sema's E0749, checked at every function of
+// the package, so it is not repeated here. Rows may be ancestor roots; the
+// substrate verdict decides. Panic is deny-only, so no line grants it.
 pkg_effect_enforce: fn(entries: [PackageEffects], manifest: PackageFacts) -> [Diagnostic] Never! {
     if !manifest.effects_enabled -> return [Diagnostic]{}
     allow: if manifest.authority.allow == {
@@ -357,16 +359,23 @@ pkg_effect_enforce: fn(entries: [PackageEffects], manifest: PackageFacts) -> [Di
     diagnostics := [Diagnostic]{}
     loop package in entries {
         root: package.name == EFFECT_ROOT_PACKAGE
-        granted: pkg_effect_grant_for(manifest, package.name)
+        granted: if root -> None else -> pkg_effect_grant_for(manifest, package.name)
+        limit: if granted == {
+            .Val(line) -> Val(line)
+            .None -> allow
+        }
         loop effect_name in package.effects {
             is_panic: authority_root(effect_name) == AUTHORITY_PANIC_ROOT
-            if !authority_is_deny_only(effect_name) && granted != None && authority_answer(granted, empty, effect_name) == AuthorityVerdict.Allowed -> next
-            outside_allow: if allow == {
-                .Val(rights) -> !authority_is_deny_only(effect_name) && authority_answer(rights, empty, effect_name) != AuthorityVerdict.Allowed
+            deny_only: authority_is_deny_only(effect_name)
+            if !deny_only && granted != None {
+                if authority_answer(granted, empty, effect_name) == AuthorityVerdict.Allowed -> next
+            }
+            outside_limit: if limit == {
+                .Val(rights) -> !deny_only && authority_answer(rights, empty, effect_name) != AuthorityVerdict.Allowed
                 .None -> false
             }
             inside_deny: !root && authority_answer(empty, deny, effect_name) == AuthorityVerdict.Denied
-            if !outside_allow && !inside_deny -> next
+            if !outside_limit && !inside_deny -> next
             if is_panic {
                 site: if package.panic_sites.len() > 0 -> package.panic_sites[0] else -> "a reachable dependency function"
                 diagnostics.push(pkg_e1220_panic(package.name, site, package.boundary_span))
@@ -375,7 +384,7 @@ pkg_effect_enforce: fn(entries: [PackageEffects], manifest: PackageFacts) -> [Di
             chain: package.effect_chains.get(effect_name) ?? [String]{}
             site := String?{None}
             if chain.len() > 0 -> site = Val(chain[chain.len() - 1].copy())
-            diagnostic := if root -> pkg_e0749_outside_allow(effect_name, chain) else -> pkg_e1220_at(package.name, effect_name, site)
+            diagnostic := if root -> pkg_e0749_outside_allow(effect_name, chain) else if granted != None -> pkg_e1220_grant(package.name, effect_name, site, chain) else -> pkg_e1220_path(package.name, effect_name, site, chain)
             if site == .Val(function) {
                 if package.effect_witnesses.get(function) == .Val(witness) {
                     diagnostic.span = Val(witness.span)
@@ -478,20 +487,31 @@ pkg_effect_gain_list: fn(effects: [String]) -> String Never! {
     "{quoted.join(", ")} and {last}"
 }
 
-// E1220: a package reaches an effect outside this package's budget.
-pkg_e1220: fn(dependency: String, effect_name: String) -> Diagnostic Never! {
-    pkg_e1220_at(dependency, effect_name, None)
-}
-
-pkg_e1220_at: fn(dependency: String, effect_name: String, site: String?) -> Diagnostic Never! {
-    location: if site == {
-        .Val(function) -> " function `{function}`"
-        .None -> ""
-    }
-    diagnostic_from_registry("E1220", None,
-        "`{dependency}`{location} uses the `{effect_name}` effect, which this package's budget doesn't allow",
+// E1220: a dependency reaches an effect outside this package's budget.
+// `chain` is the call path into the dependency, down to the function that
+// performs the effect (`site`).
+pkg_e1220_path: fn(dependency: String, effect_name: String, site: String?, chain: [String]) -> Diagnostic Never! {
+    diagnostic: diagnostic_from_registry("E1220", None,
+        "`{dependency}`{pkg_e1220_location(site)} uses the `{effect_name}` effect, which this package's budget doesn't allow",
         "an `authority` budget fails the build when package code or any dependency reaches an effect you didn't list — supply-chain review as a compile error",
         "add `{effect_name}` to `authority.allow`, grant it to `{dependency}` in `authority.grants`, or drop the dependency")
+    diagnostic_with_rights(diagnostic, "invocation", chain, [String]{}, None)
+}
+
+// E1220 under a grant line: the line is the dependency's whole limit, so an
+// effect it leaves out fails even when `allow` lists it. This is what an
+// update that widens a dependency's reach meets.
+pkg_e1220_grant: fn(dependency: String, effect_name: String, site: String?, chain: [String]) -> Diagnostic Never! {
+    diagnostic: diagnostic_from_registry("E1220", None,
+        "`{dependency}`{pkg_e1220_location(site)} uses the `{effect_name}` effect, which its `authority.grants` line doesn't grant",
+        "a dependency's grant line is its whole limit, in place of `allow`, so a version that reaches further stops the build",
+        "keep the version that fits its line, add `{effect_name}` to `{dependency}`'s line in `authority.grants`, or drop the dependency")
+    diagnostic_with_rights(diagnostic, "invocation", chain, [String]{}, None)
+}
+
+pkg_e1220_location: fn(site: String?) -> String Never! {
+    if site == .Val(function) -> return " function `{function}`"
+    ""
 }
 
 // E0749: the root package's own code reaches an effect its written `allow`

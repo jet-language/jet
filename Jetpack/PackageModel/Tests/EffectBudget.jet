@@ -123,6 +123,30 @@ pkg_test_package_effects: fn(name: String, effects: [String], chains: [String: [
     assert_eq(pkg_effect_enforce(entries, manifest).len(), 0)
 }
 
+#Test("a grant line is the dependency's whole limit and names the call path") {
+    manifest := pkg_test_budget_manifest([String]{"FS", "Net"})
+    chains: [String: [String]]{"Net": [String]{"dep::fetch", "dep::dial"}}
+    entries: [PackageEffects]{pkg_test_package_effects("dep", [String]{"Net"}, chains, [String]{}, None)}
+    // `allow` lists Net, so without a line the dependency may use it.
+    assert_eq(pkg_effect_enforce(entries, manifest).len(), 0)
+    // An empty line pins the dependency below `allow`.
+    manifest.authority.grants = [PackageGrant]{PackageGrant{package: "dep", rights: [String]{}}}
+    pinned: pkg_effect_enforce(entries, manifest)
+    assert_eq(pinned.len(), 1)
+    assert_eq(pinned[0].code, "E1220")
+    assert(pinned[0].what.contains("`dep` function `dep::dial` uses the `Net` effect"))
+    assert(pinned[0].what.contains("authority.grants"))
+    assert_eq(pinned[0].call_chain, [String]{"dep::fetch", "dep::dial"})
+    // A line that covers the effect lets it through even when `allow` doesn't.
+    manifest.authority.allow = Val([String]{"FS"})
+    manifest.authority.grants = [PackageGrant]{PackageGrant{package: "dep", rights: [String]{"Net"}}}
+    assert_eq(pkg_effect_enforce(entries, manifest).len(), 0)
+    // What the line grants passes `deny` too: the line is written for this
+    // one dependency.
+    manifest.authority.deny = Val([String]{"Net"})
+    assert_eq(pkg_effect_enforce(entries, manifest).len(), 0)
+}
+
 #Test("a written allow row is a ceiling over the root package's own code") {
     manifest := pkg_test_budget_manifest([String]{"FS"})
     entries: [PackageEffects]{pkg_test_package_effects("root", [String]{"Net"}, [String: [String]]{"Net": [String]{"run::run", "run::fetch"}}, [String]{}, None)}

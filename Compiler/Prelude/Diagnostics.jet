@@ -9320,13 +9320,13 @@ DependencyAuthorityExceeded: struct {
     impl Diagnostic {
         code: "E1220"
         stage: [.Jet]
-        meaning: "A transitive dependency uses an effect outside the `package.jet` `authority` budget (Panic names the stop site)"
+        meaning: "A transitive dependency uses an effect outside its limit: its `authority.grants` line when it has one, else the `package.jet` `authority` budget (Panic names the stop site)"
         detail: true
         no_fix: .Behavior
         fix_next: "Grant the required effect or change the source to stay within the declared authority."
-        what: fn(self) -> String { "`{self.dep}` uses the `{self.effect_name}` effect, which this package's budget doesn't allow." }
-        why: fn(self) -> String { "An `authority` budget fails the build when any dependency reaches an effect you didn't list; a denied `Panic` row names the stop site." }
-        fix: fn(self) -> String { "For an ordinary effect, add `{self.effect_name}` to `authority.allow` or grant it to `{self.dep}` in `authority.grants`; for deny-only `Panic`, return a fallible result or add facts/`#Pre`/refinement proof." }
+        what: fn(self) -> String { "`{self.dep}` uses the `{self.effect_name}` effect, which its grant line or this package's budget doesn't allow." }
+        why: fn(self) -> String { "An `authority` budget fails the build when any dependency reaches an effect outside its limit; a dependency's grant line is its whole limit, in place of `allow`. The report names the call path, and a denied `Panic` row names the stop site." }
+        fix: fn(self) -> String { "For an ordinary effect, add `{self.effect_name}` to `{self.dep}`'s line in `authority.grants` (or to `authority.allow` when it has no line), or keep a version that stays inside it; for deny-only `Panic`, return a fallible result or add facts/`#Pre`/refinement proof." }
     }
 }
 

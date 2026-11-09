@@ -1948,7 +1948,15 @@ build or run after `jet fetch` records it, and a refetch or update keeps it.
 When an update or an edit widens a dependency's row, the next build or run
 prints which package gained which effect and records the wider row; a row
 only widens. `jet build --locked` refuses the widening (E3513) and writes no
-lock. Code run straight from a URL or the registry
+lock. A dependency's line under `authority: { grants: { … } }` is its whole
+limit, in place of `allow`: `grants: { json: [], dice: [Rand] }` lets `dice`
+use only `Rand` and `json` nothing, even when `allow` lists more, and what a
+line grants passes `deny` for that dependency (`Panic` is deny-only, so no
+line grants it). A dependency that reaches an effect outside its limit fails
+the build with E1220, naming the dependency, the effect and the call path
+(D-EFFTYPE-GRANT1). See
+[`Examples/Modules/Packages/GrantLine`](../../Examples/Modules/Packages/GrantLine/package.jet).
+Code run straight from a URL or the registry
 is pinned by content hash and asks before its first run in a terminal; its
 own `allow` rows acknowledge nothing. A yes is kept with the pinned bytes, and
 changed bytes or new effects ask again. Without a terminal it stops before
