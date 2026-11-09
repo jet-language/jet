@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6711,
-    "rev": 96385,
+    "rev": 96390,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -93018,67 +93018,6 @@
       "criteriaLastN": 2
     },
     {
-      "id": "c0jn1coj",
-      "num": 6590,
-      "title": "Compiler segfaults in codegen on &opt_handle == .Val(x)",
-      "body": "Found by JetpackEngine on dev 12da3c76b5: compiling a comparison of a borrowed optional handle against .Val(x) (&opt_handle == .Val(x)) crashes the compiler with SIGSEGV in codegen. Two #3590 c190 known-failing Store rows hit it. I2: checked code the backend cannot lower must be an internal compiler error (exit 101), never a crash, and this shape should lower. Fix the lowering and add a reduced case that runs on O0/O1/O2.",
-      "kind": "bug",
-      "track": "sidequest",
-      "epoch": null,
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P1",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-06",
-          "by": "Main",
-          "text": "c2 partial (GoldenRoots3): Engine --tests on 137704d910 sources still null-derefs in both named claims. Claim 83 'store profile receipt copy and proof preserve native io errors': SIGSEGV at 0x0 in compiler_fs_error <- store_reuse_executable_lease_members <- store_snapshot_lease. Claim 69: SIGSEGV at 0x0 in jet_rt_mem_move <- jet_string_bytes <- Files.join_impl <- store_lease_member_path_matches <- executable_index_at. Safe code reaching a null pointer is an I1 defect; it stays on this card. Logs under $JET_SCRATCH_ROOT/lanes/GoldenRoots3/state/jetpack-bootstrap/GoldenRoots3-c75109d407/run-from-{81,4}.log. The AOT tier is still running."
-        },
-        {
-          "at": "2026-11-06",
-          "by": "Main",
-          "text": "Repro (JetpackEngine): $JET_SCRATCH_ROOT/lanes/JetpackEngine/repro6590/v2.jet, the match form from CacheLease.copy_profile_executable: if &members[index].file == { .Val(input) -> { input.stat() ... } .None -> ... } over [Member{file: FileReader?}] borrowed as &[...]. jet build --optimize=none of it produces a binary that hangs in a futex (fault-handler deadlock, exit 124 under timeout 10). The statement form if &...file == .Val(input) { and the variants with seek/read and an == None precheck pass. The LeaseSnapshot.jet:314 SIGSEGV is not reduced yet; the in-Engine claim reproduces it. So: wrong code from the match-on-borrowed-optional lowering, plus a fault handler that deadlocks instead of reporting."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "A switch on a borrowed optional no-clone handle in a list element closes it exactly once and exits, proven by a case on O0/O1/O2 (an I1 safety fix: no double close on freed state)",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev 137704d910 (GoldenRoots3): root cause was a double close. Sema hoisted the switch subject into a generated Let that moved the no-clone handle out of its List element, and ir_bind_pin's box alias also armed a close, so the second close locked freed FD state and hung in a futex (no signal, one thread). Fix: a hoisted generated Let over a place whose value has a drop and no clone reads the place in place, and an ir_bind_pin box alias never arms a close. Case core_files_opaque_handles/switch_on_listed_optional_reader_closes_it_once passes on O0/O1/O2 and release and times out on base; 16 repro variants that hung now exit 0; A/B vs 6bee890a10 ui, golden and cases 0 lost.",
-          "at": "2026-11-06T05:30:06.942Z"
-        },
-        {
-          "n": 2,
-          "text": "The Jetpack Engine claim 'store profile receipt copy and proof preserve native io errors' (LeaseSnapshot.jet:314 crash) and the Engine AOT test binary run to completion with the fixed compiler",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev 41ad578550 (GoldenRoots3): root cause was a heap overwrite, not the claims' own code. Stream line leaves handed out align-1 buffers with no count word as owned [U8], so trim_pipe_line's pop uniqueness check decremented the neighbouring String? box; the leaves now allocate with jet_rt_alloc_8. Repro before: 77/300 names intact and corrupted lines ('qeady'); after: 300/300 at none, basic and full. New case process_sessions/streamed_child_lines_leave_neighbouring_values_intact passes on O0/O1/O2 and a built binary; the other process_sessions cases pass. With jetpack rebuilt, Engine claims 69 and 81-92 (including 83) pass; the Engine AOT tier on c75109d407 runs to completion with 530 passed, 30 failed and no hang (its failures include claim 69, fixed by this commit).",
-          "at": "2026-11-06T06:13:41.121Z"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "goals": [
-        "G2"
-      ],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-06T04:52:06.103Z",
-      "updated": "2026-11-06T06:13:42.516Z",
-      "updatedBy": "Main",
-      "completedAt": "2026-11-06T06:13:42.516Z"
-    },
-    {
       "id": "c0g93joj",
       "num": 6592,
       "title": "First jet cc pack install hashes the 450 MB tree about four times with pure-Jet SHA-256",
@@ -101026,6 +100965,11 @@
         {
           "at": "2026-11-09",
           "by": "Main",
+          "text": "Four frame ballots posted (D-FRAME-STYLE1, TITLE1, ACCENT1, THEME1), repaired by a fresh sol review: $JET_SCRATCH_ROOT/lanes/FrameReview/2026-11-09-frame-ballots-review.md. Each originally failed on unsupported claims; each repaired ballot holds only within stated limits, and the reviewer rated ENGINEERED-AWAY=no. They are owner-choice proposals with their costs named, not certified solutions. Repairs: Classic-only and startup-accent options added; logical Start replaces physical Left (RTL); adaptive centering is an alternative; the System frame opt-in spelling is carried in STYLE1 and is not built. Still unproved, and required as build criteria after ratification: live GNOME/KDE/Sway/tiling-WM behaviour, touch, pen and keyboard window controls, screen reader, high contrast, reduced motion, fractional scale, portal absence and portal restart, and RTL title truncation. The pictured palette is not claimed WCAG-compliant. No public spelling is built until the owner rules."
+        },
+        {
+          "at": "2026-11-09",
+          "by": "Main",
           "text": "AppReview5 (fresh sol-reviewer) on D-APP1 v4: ENGINEERED-AWAY=no, 27 downsides. Top five: review/performance gates weakened; an incomplete, unsafe wait-routing specification; fiber TLS, cancellation and cleanup unproved; soft-wrap copy and Find fail; a biased A/F comparison (option G added). Audit: $JET_SCRATCH_ROOT/lanes/AppReview5/2026-11-09-d-app1-v4-review.md. Repaired D-APP1.v5.json (validates) and DESIGN-APP1.v5.md. BallotLead-2 writes v6 from v5. The build still needs two clean fresh reviews in a row."
         },
         {
@@ -101169,7 +101113,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-08T19:44:17.134Z",
-      "updated": "2026-11-09T06:04:04.240Z",
+      "updated": "2026-11-09T06:26:16.219Z",
       "updatedBy": "Main",
       "criteriaLastN": 7
     },
@@ -186224,6 +186168,673 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-09T04:56:17.964Z"
+    },
+    {
+      "id": "D-FRAME-STYLE1",
+      "cardId": "c0l39twq",
+      "group": "ui",
+      "title": "The default shape and system-frame opt-in",
+      "situation": "The owner requires a Jet-drawn window frame by default. The pictures offer a 46-unit Unified header and a 34-unit Classic bar. A compact notes canvas benefits from Classic's extra space; a header with actions may benefit from Unified's height. This ballot chooses the default, the available presets, and one explicit System opt-in. System is a request, not a promise that every compositor draws decorations. The examples remain one Notes program. They do not prove working window controls or header embedding.",
+      "gist": "Which Jet frame should be the default, and should frame: .System request the host frame?",
+      "lesson": "Unified is taller; Classic saves vertical space. Either needs accessible controls and host integration. System requests host decorations, falling back to Jet when unavailable.",
+      "explainer": "",
+      "story": "Ada opens the same Notes canvas with each default. Unified reserves more height above it; Classic reserves less. She can request the host frame explicitly. Neither choice edits her document or recolors her pixels.",
+      "inWild": "GNOME headerbars combine app controls with window controls and respect the system button layout. Their centering policy can be loose or strict. StyleManager exposes accent, dark appearance and high contrast. Jet must supply its own equivalent behavior without restoring GTK.\n\nKDE/Breeze supports user button layouts, fonts, scale changes and configurable title alignment. It extends edge targets for easy pointing. A fixed Jet layout gives up some desktop integration; Breeze is not simply a left-aligned Windows bar.\n\nWindows 11 supports compact captions and taller search headers, RTL, text scaling and high contrast. Mica is an opaque wallpaper-derived material with solid fallbacks, not a generic blur. Snap layouts need native caption integration or correct custom hit testing. Jet's PNGs establish none of those behaviors.\n\nmacOS uses system window controls, including traffic lights at the upper left. Apple advises against copying native frames imperfectly. A Jet-drawn cross-desktop style is an intentional trade, not evidence of matching macOS behavior.\n\nChrome's Linux frame handles leading and trailing controls, tiling, shadows and input margins. Electron can combine custom content with native controls and safe areas. Flutter's Linux runner uses a GTK window; a headerbar is optional in its template. Flutter's input host handles touch and stylus separately. Custom drawing does not make those responsibilities disappear.\n\nThe decoration protocol negotiates who draws the frame, not its shape, title alignment or colors. Settings supplies appearance preferences, not a full desktop palette or button layout. These are different services, not competing ways to set an accent.",
+      "detail": "These are proposals, not implemented public settings. The owner requires a Jet-drawn default, Atkinson Hyperlegible Next, deletion of GTK, and retention of TUI and null. No new spelling is authorized before ratification. No claim about another ballot's ratification is made here.\n\nImages 01–09 under $JET_SCRATCH_ROOT/lanes/WaylandLead/mockups/out were inspected. They are static drawings, not interactive windows. The repaired sample keeps one Notes program and a deliberately white pixel canvas. Appearance settings do not recolor those raw pixels. Accent has no visible effect until an accented role, such as a focused frame control, is shown.\n\nAll four ballots share these proposed release requirements. Normal text must meet 4.5:1; essential control marks, boundaries and focus cues must meet 3:1. Use readable normal title colors even on unfocused windows; unfocused is not the same as disabled. Disabled controls alone may use the WCAG exception. Do not signal selection or danger by hue alone.\n\nUse a solid two-unit focus ring with a two-unit gap for fields and buttons, including window controls. It must remain visible and unobscured in every state. Frame controls have nonoverlapping rectangular hit regions, at least 24 by 24 logical units. Touch and pen get at least 44 by 44, growing the bar when needed. Painted glyph size is not hit-target size.\n\nEvery action needs an accessible name and keyboard route through the window menu. F6 cycles content and frame focus; Tab and Shift+Tab cycle frame controls. Shift+F10 on the focused frame opens its menu. Alt+Space opens it when the host delivers that shortcut. Enter activates; Escape dismisses and restores prior focus. Arrow keys move or resize; Enter commits and Escape cancels.\n\nThe menu exposes move, resize, minimize, maximize, restore and close. Close uses the ordinary close-request event; maximize and minimize remain host requests, not guaranteed state changes. Disable unavailable actions rather than silently doing nothing. Pointer, touch and pen activate on release inside; moving out cancels. Only empty header space drags. Do not emulate a refused compositor move by painting at guessed screen coordinates.\n\nHigher contrast overrides decorative colors, including pinned accents. Proposed light high contrast is white background, black text and boundaries; dark is the reverse. Focus uses the foreground color. Selected controls invert foreground and background and retain a check or position cue. Theme changes are immediate, with no fades or motion, including when reduced motion is requested.\n\nTitle, controls and hit testing use logical coordinates, rasterized at the current device scale. A scale change rebuilds frame assets and input transforms together. Images at 1x and 2x are not fractional-scale evidence. Test 1.25x, 1.5x and mixed-output moves, text enlargement, narrow widths, fullscreen, maximization and partial tiling before claiming parity.\n\nJet controls default to the physical right, ordered minimize, maximize, close. This differs from macOS and some user layouts. Title direction does not silently move controls. System decoration delegates placement and behavior to the host. On Jet frames, text direction determines logical start; controls reserve space first. No common portal key supplies button layout. Desktop-layout customization remains a named integration gap, not a promise from these PNGs.\n\nTiling alone must not imply maximization or a restore glyph. Use restore only while maximized; fullscreen hides the frame. Remove shadows on tiled edges and prevent shadow-only pixels intercepting neighboring windows. A compositor refusing client-side decoration wins negotiation: never draw two frames. Without a decoration manager, clients may self-decorate; this is not a compositor lacking CSD support.\n\nWayland is the pending graphical backend considered here. TUI and null keep their existing non-window meaning and gain no fake title bar. Headless pixel windows have no host frame. Future X11, Windows and macOS hosts are design requirements below, not claims of implemented backends. Web chrome remains outside these ballots.\n\nProposed signature addition: frame: UIFrame?{None}. Proposed enum UIFrame has Unified, Classic and System; one-shape options omit the other Jet value. Omitted or None means this option's default. Existing width and height continue to mean content size, excluding frame and shadow. This is one frame selection mechanism; do not add another native_frame boolean.\n\nBeginner: omit frame. Expert: ui.open(width: 640, height: 400, title: \"Notes\", frame: .System). On Wayland, System requests server_side and draws no Jet frame only after the compositor confirms it. If absent or refused, draw this option's default Jet shape. Both Jet shapes request client_side, but honor an enforced server_side answer. Reconfigure without transient double decoration.\n\nFuture native hosts: System keeps the window manager's X11 decorations, Windows caption controls, or macOS system titlebar and traffic lights. Jet shape settings affect Jet drawings only. System titles, controls and placement remain host-owned; theme and accent do not promise to recolor them. An unsupported graphical host returns UIError.Unsupported(\"display backend unavailable\"), not a fake System frame. Headless, TUI and null draw none.\n\nUnified paints a 46-unit bar, 12-unit corner radii and 28-unit circles. Classic paints 34 units, 8-unit corners and 46-unit-wide full-height buttons. These are baseline visuals, not rigid accessible hit regions. Header embedding is not demonstrated by the sample and no public slot spelling is proposed here. Two presets must share window actions, not duplicate their semantics.\n\nBoth shape-only choices remain real alternatives. Full customization does not by itself require every named preset, and no approved rule proving otherwise was supplied. The missing Classic-only choice is now D. Native-default and frameless-default alternatives are excluded because the owner's Jet-drawn default is binding.\n\nSources checked 2026-11-09.\n\nGNOME header: https://gnome.pages.gitlab.gnome.org/libadwaita/doc/main/class.HeaderBar.html.\n\nGNOME appearance: https://gnome.pages.gitlab.gnome.org/libadwaita/doc/main/class.StyleManager.html.\n\nGNOME centering: https://gnome.pages.gitlab.gnome.org/libadwaita/doc/main/enum.CenteringPolicy.html.\n\nBreeze source: https://github.com/KDE/breeze/blob/master/kdecoration/breezedecoration.cpp.\n\nWindows title bar: https://learn.microsoft.com/en-us/windows/apps/design/basics/titlebar-design.\n\nMica: https://learn.microsoft.com/en-us/windows/apps/design/style/mica.\n\nSnap layouts: https://learn.microsoft.com/en-us/windows/apps/desktop/modernize/ui/apply-snap-layout-menu.\n\nmacOS: https://developer.apple.com/design/human-interface-guidelines/windows.\n\nChrome frame source: https://github.com/chromium/chromium/blob/main/ui/views/window/frame_view_layout_linux.cc.\n\nElectron: https://www.electronjs.org/docs/latest/tutorial/custom-title-bar.\n\nFlutter Linux runner: https://github.com/flutter/flutter/blob/master/packages/flutter_tools/templates/app/linux.tmpl/runner/my_application.cc.tmpl.\n\nFlutter Linux input: https://github.com/flutter/flutter/blob/master/engine/src/flutter/shell/platform/linux/fl_view.cc.\n\nWayland decoration: https://wayland.app/protocols/xdg-decoration-unstable-v1.\n\nPortal settings: https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.Settings.html.\n\nWayland shell: https://wayland.app/protocols/xdg-shell.\n\nD-Bus: https://dbus.freedesktop.org/doc/dbus-specification.html.\n\nWCAG text: https://www.w3.org/WAI/WCAG22/Understanding/contrast-minimum.html.\n\nWCAG controls: https://www.w3.org/WAI/WCAG22/Understanding/non-text-contrast.html.\n\nWCAG targets: https://www.w3.org/WAI/WCAG22/Understanding/target-size-minimum.html.\n\nWCAG focus: https://www.w3.org/WAI/WCAG22/Understanding/focus-appearance.html.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Unified default, Classic available",
+          "detail": "Unified is the default; Classic and System remain explicit choices. Pictures 01, 02 and 05 show Unified; 03, 04 and 06 show Classic.",
+          "technical": "UIFrame { Unified, Classic, System }; None means Unified. Shared state and input behavior are proposed, not measured code savings.",
+          "code": "use ui: core.ui\n// Proposed contract; not a runnable current API.\nrun: fn() {\n    window: ui.open(width: 640, height: 400, title: \"Notes\") ?? return\n    // Unified by default; .Classic and .System are opt-ins.\n    page := [U8]{}\n    loop frame in window.frames() {\n        if page.len() != frame.width * frame.height * 4 {\n            page = [U8]{}\n            loop _ in 0..<(frame.width * frame.height * 4) -> page.push(U8{255})\n        }\n        frame.present(page) ?? return\n    }\n}"
+        },
+        {
+          "key": "B",
+          "name": "Classic default, Unified available",
+          "detail": "Classic is the default; Unified and System remain explicit choices. Compact apps need no extra toolbar merely because they use Classic.",
+          "technical": "UIFrame { Unified, Classic, System }; None means Classic. All shared release requirements remain identical.",
+          "code": "use ui: core.ui\n// Proposed contract; not a runnable current API.\nrun: fn() {\n    window: ui.open(width: 640, height: 400, title: \"Notes\") ?? return\n    // Classic by default; .Unified and .System are opt-ins.\n    page := [U8]{}\n    loop frame in window.frames() {\n        if page.len() != frame.width * frame.height * 4 {\n            page = [U8]{}\n            loop _ in 0..<(frame.width * frame.height * 4) -> page.push(U8{255})\n        }\n        frame.present(page) ?? return\n    }\n}"
+        },
+        {
+          "key": "C",
+          "name": "Unified preset only",
+          "detail": "Only Unified and System are named presets. This cuts preset coverage but removes the compact built-in alternative.",
+          "technical": "UIFrame { Unified, System }; None means Unified. No claim that removing Classic violates a ratified rule.",
+          "code": "use ui: core.ui\n// Proposed contract; not a runnable current API.\nrun: fn() {\n    window: ui.open(width: 640, height: 400, title: \"Notes\") ?? return\n    // Unified only; .System remains available.\n    page := [U8]{}\n    loop frame in window.frames() {\n        if page.len() != frame.width * frame.height * 4 {\n            page = [U8]{}\n            loop _ in 0..<(frame.width * frame.height * 4) -> page.push(U8{255})\n        }\n        frame.present(page) ?? return\n    }\n}"
+        },
+        {
+          "key": "D",
+          "name": "Classic preset only",
+          "detail": "Only Classic and System are named presets. This is the compact counterpart to C, not a native-default alternative.",
+          "technical": "UIFrame { Classic, System }; None means Classic. All shared release requirements still apply.",
+          "code": "use ui: core.ui\n// Proposed contract; not a runnable current API.\nrun: fn() {\n    window: ui.open(width: 640, height: 400, title: \"Notes\") ?? return\n    // Classic only; .System remains available.\n    page := [U8]{}\n    loop frame in window.frames() {\n        if page.len() != frame.width * frame.height * 4 {\n            page = [U8]{}\n            loop _ in 0..<(frame.width * frame.height * 4) -> page.push(U8{255})\n        }\n        frame.present(page) ?? return\n    }\n}"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "why": "Prefer Unified for visual room, while keeping a compact preset. This is a design preference, not proof that most apps need a toolbar.",
+        "tradeoff": "Two shape presets require visual and input coverage. Host layout differences and unproved accessibility remain release limits.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Best for compact canvases; less room for tall header controls."
+          },
+          {
+            "key": "C",
+            "reason": "Less coverage, but no compact preset."
+          },
+          {
+            "key": "D",
+            "reason": "Least compact-preset work, but no tall preset."
+          }
+        ],
+        "losses": [
+          {
+            "loss": "Two presets need coverage.",
+            "mitigation": "Share actions, then exercise both shapes across input, scale and window states."
+          },
+          {
+            "loss": "Jet differs from host frames.",
+            "mitigation": "Offer System; retain a usable Jet fallback when the host declines."
+          }
+        ]
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: GPT. Fresh agent: FrameReview. Checked sources, nine pictures, token contrast and executable probes; repaired unfair comparisons and missing contracts. Holds within limits; limits and posting restrictions are in the dated audit."
+      },
+      "checkInstructions": "Validate this repaired payload without writing Tower. Read the dated FrameReview audit and its probe receipts. Treat proposed syntax and release requirements as unimplemented until exercised with the integrated compiler and real backends.",
+      "surface": {
+        "gist": "Which Jet frame should be the default, and should frame: .System request the host frame?",
+        "lesson": "Unified is taller; Classic saves vertical space. Either needs accessible controls and host integration. System requests host decorations, falling back to Jet when unavailable.",
+        "trio": {
+          "current": {
+            "note": "The installed seed rejects ui.open; pending source is not integrated runtime proof.",
+            "code": "// Exercised seed: core.ui has no item open.\n// See original-isolated.log in FrameReview."
+          },
+          "wild": {
+            "lang": "Established desktop toolkits",
+            "note": "Native and hybrid frames keep host integration; custom drawing must replace that work.",
+            "code": "// GNOME: headerbar with host button layout.\n// Windows/Electron: content plus native caption controls.\n// Flutter Linux: a GTK host window.\n// Sources and limits are in the detail."
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Unified default, Classic available",
+            "gist": "Unified by default; .Classic and .System are opt-ins.",
+            "gains": [
+              "More vertical room for header actions",
+              "Compact alternative remains available"
+            ],
+            "losses": [
+              "Twelve extra units for simple windows",
+              "Two shapes require coverage"
+            ],
+            "proposed": {
+              "code": "use ui: core.ui\n// Proposed contract; not a runnable current API.\nrun: fn() {\n    window: ui.open(width: 640, height: 400, title: \"Notes\") ?? return\n    // Unified by default; .Classic and .System are opt-ins.\n    page := [U8]{}\n    loop frame in window.frames() {\n        if page.len() != frame.width * frame.height * 4 {\n            page = [U8]{}\n            loop _ in 0..<(frame.width * frame.height * 4) -> page.push(U8{255})\n        }\n        frame.present(page) ?? return\n    }\n}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Classic default, Unified available",
+            "gist": "Classic by default; .Unified and .System are opt-ins.",
+            "gains": [
+              "More content space for simple windows",
+              "Wide rectangular button targets"
+            ],
+            "losses": [
+              "Less vertical room for large header actions"
+            ],
+            "proposed": {
+              "code": "use ui: core.ui\n// Proposed contract; not a runnable current API.\nrun: fn() {\n    window: ui.open(width: 640, height: 400, title: \"Notes\") ?? return\n    // Classic by default; .Unified and .System are opt-ins.\n    page := [U8]{}\n    loop frame in window.frames() {\n        if page.len() != frame.width * frame.height * 4 {\n            page = [U8]{}\n            loop _ in 0..<(frame.width * frame.height * 4) -> page.push(U8{255})\n        }\n        frame.present(page) ?? return\n    }\n}"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Unified preset only",
+            "gist": "Unified only; .System remains available.",
+            "gains": [
+              "One built-in shape to maintain"
+            ],
+            "losses": [
+              "No compact built-in shape"
+            ],
+            "proposed": {
+              "code": "use ui: core.ui\n// Proposed contract; not a runnable current API.\nrun: fn() {\n    window: ui.open(width: 640, height: 400, title: \"Notes\") ?? return\n    // Unified only; .System remains available.\n    page := [U8]{}\n    loop frame in window.frames() {\n        if page.len() != frame.width * frame.height * 4 {\n            page = [U8]{}\n            loop _ in 0..<(frame.width * frame.height * 4) -> page.push(U8{255})\n        }\n        frame.present(page) ?? return\n    }\n}"
+            }
+          },
+          {
+            "key": "D",
+            "name": "Classic preset only",
+            "gist": "Classic only; .System remains available.",
+            "gains": [
+              "One compact built-in shape"
+            ],
+            "losses": [
+              "No tall built-in shape"
+            ],
+            "proposed": {
+              "code": "use ui: core.ui\n// Proposed contract; not a runnable current API.\nrun: fn() {\n    window: ui.open(width: 640, height: 400, title: \"Notes\") ?? return\n    // Classic only; .System remains available.\n    page := [U8]{}\n    loop frame in window.frames() {\n        if page.len() != frame.width * frame.height * 4 {\n            page = [U8]{}\n            loop _ in 0..<(frame.width * frame.height * 4) -> page.push(U8{255})\n        }\n        frame.present(page) ?? return\n    }\n}"
+            }
+          }
+        ],
+        "recommendation": {
+          "why": "Prefer Unified for visual room, while keeping a compact preset. This is a design preference, not proof that most apps need a toolbar.",
+          "tradeoff": "Two shape presets require visual and input coverage. Host layout differences and unproved accessibility remain release limits.",
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Best for compact canvases; less room for tall header controls."
+            },
+            {
+              "key": "C",
+              "reason": "Less coverage, but no compact preset."
+            },
+            {
+              "key": "D",
+              "reason": "Least compact-preset work, but no tall preset."
+            }
+          ],
+          "losses": [
+            {
+              "loss": "Two presets need coverage.",
+              "mitigation": "Share actions, then exercise both shapes across input, scale and window states."
+            },
+            {
+              "loss": "Jet differs from host frames.",
+              "mitigation": "Offer System; retain a usable Jet fallback when the host declines."
+            }
+          ],
+          "rec": "A",
+          "gains": [
+            "Useful defaults with explicit app choices"
+          ]
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-09T06:25:51.259Z"
+    },
+    {
+      "id": "D-FRAME-TITLE1",
+      "cardId": "c0l39twq",
+      "group": "ui",
+      "title": "Title alignment in Jet-drawn frames",
+      "situation": "A Jet-drawn frame needs a rule for placing its title. The existing comparison treats physical left as universally readable and centered titles as losing both ends. Image 09 instead shows both keeping the start and trimming the end. Strict centering can leave unused space beside an uneven button group; centering within available space avoids that waste. This ballot compares those layouts on the same Notes canvas. It also defines RTL behavior and leaves system-drawn titles to the host.",
+      "gist": "Should Jet titles follow text start, stay centered, or center when space permits?",
+      "lesson": "Start follows reading direction. Strict centering balances the whole window. Adaptive centering keeps the midpoint when possible, shifting only to avoid occupied regions.",
+      "explainer": "",
+      "story": "Grace opens the same long report title in each layout. All preserve its full accessible name. Only the painted position and available width differ; no option edits the title string.",
+      "inWild": "GNOME headerbars combine app controls with window controls and respect the system button layout. Their centering policy can be loose or strict. StyleManager exposes accent, dark appearance and high contrast. Jet must supply its own equivalent behavior without restoring GTK.\n\nKDE/Breeze supports user button layouts, fonts, scale changes and configurable title alignment. It extends edge targets for easy pointing. A fixed Jet layout gives up some desktop integration; Breeze is not simply a left-aligned Windows bar.\n\nWindows 11 supports compact captions and taller search headers, RTL, text scaling and high contrast. Mica is an opaque wallpaper-derived material with solid fallbacks, not a generic blur. Snap layouts need native caption integration or correct custom hit testing. Jet's PNGs establish none of those behaviors.\n\nmacOS uses system window controls, including traffic lights at the upper left. Apple advises against copying native frames imperfectly. A Jet-drawn cross-desktop style is an intentional trade, not evidence of matching macOS behavior.\n\nChrome's Linux frame handles leading and trailing controls, tiling, shadows and input margins. Electron can combine custom content with native controls and safe areas. Flutter's Linux runner uses a GTK window; a headerbar is optional in its template. Flutter's input host handles touch and stylus separately. Custom drawing does not make those responsibilities disappear.\n\nThe decoration protocol negotiates who draws the frame, not its shape, title alignment or colors. Settings supplies appearance preferences, not a full desktop palette or button layout. These are different services, not competing ways to set an accent.",
+      "detail": "These are proposals, not implemented public settings. The owner requires a Jet-drawn default, Atkinson Hyperlegible Next, deletion of GTK, and retention of TUI and null. No new spelling is authorized before ratification. No claim about another ballot's ratification is made here.\n\nImages 01–09 under $JET_SCRATCH_ROOT/lanes/WaylandLead/mockups/out were inspected. They are static drawings, not interactive windows. The repaired sample keeps one Notes program and a deliberately white pixel canvas. Appearance settings do not recolor those raw pixels. Accent has no visible effect until an accented role, such as a focused frame control, is shown.\n\nAll four ballots share these proposed release requirements. Normal text must meet 4.5:1; essential control marks, boundaries and focus cues must meet 3:1. Use readable normal title colors even on unfocused windows; unfocused is not the same as disabled. Disabled controls alone may use the WCAG exception. Do not signal selection or danger by hue alone.\n\nUse a solid two-unit focus ring with a two-unit gap for fields and buttons, including window controls. It must remain visible and unobscured in every state. Frame controls have nonoverlapping rectangular hit regions, at least 24 by 24 logical units. Touch and pen get at least 44 by 44, growing the bar when needed. Painted glyph size is not hit-target size.\n\nEvery action needs an accessible name and keyboard route through the window menu. F6 cycles content and frame focus; Tab and Shift+Tab cycle frame controls. Shift+F10 on the focused frame opens its menu. Alt+Space opens it when the host delivers that shortcut. Enter activates; Escape dismisses and restores prior focus. Arrow keys move or resize; Enter commits and Escape cancels.\n\nThe menu exposes move, resize, minimize, maximize, restore and close. Close uses the ordinary close-request event; maximize and minimize remain host requests, not guaranteed state changes. Disable unavailable actions rather than silently doing nothing. Pointer, touch and pen activate on release inside; moving out cancels. Only empty header space drags. Do not emulate a refused compositor move by painting at guessed screen coordinates.\n\nHigher contrast overrides decorative colors, including pinned accents. Proposed light high contrast is white background, black text and boundaries; dark is the reverse. Focus uses the foreground color. Selected controls invert foreground and background and retain a check or position cue. Theme changes are immediate, with no fades or motion, including when reduced motion is requested.\n\nTitle, controls and hit testing use logical coordinates, rasterized at the current device scale. A scale change rebuilds frame assets and input transforms together. Images at 1x and 2x are not fractional-scale evidence. Test 1.25x, 1.5x and mixed-output moves, text enlargement, narrow widths, fullscreen, maximization and partial tiling before claiming parity.\n\nJet controls default to the physical right, ordered minimize, maximize, close. This differs from macOS and some user layouts. Title direction does not silently move controls. System decoration delegates placement and behavior to the host. On Jet frames, text direction determines logical start; controls reserve space first. No common portal key supplies button layout. Desktop-layout customization remains a named integration gap, not a promise from these PNGs.\n\nTiling alone must not imply maximization or a restore glyph. Use restore only while maximized; fullscreen hides the frame. Remove shadows on tiled edges and prevent shadow-only pixels intercepting neighboring windows. A compositor refusing client-side decoration wins negotiation: never draw two frames. Without a decoration manager, clients may self-decorate; this is not a compositor lacking CSD support.\n\nWayland is the pending graphical backend considered here. TUI and null keep their existing non-window meaning and gain no fake title bar. Headless pixel windows have no host frame. Future X11, Windows and macOS hosts are design requirements below, not claims of implemented backends. Web chrome remains outside these ballots.\n\nProposed argument title_align: UITitleAlign?{None}, with Start, Centre and AdaptiveCentre. A defaults to Start, B to Centre, C to AdaptiveCentre. None uses that default. Experts pass the desired value through this same argument. System decoration ignores Jet title alignment and retains the host's choice. Frame shape never changes the alignment enum.\n\nStart follows the icon at the text direction's leading edge, not always physical left. Reserve controls, icon and app header slots first. Strict Centre uses the window midpoint with equal margins sized by the larger occupied side. AdaptiveCentre uses the full remaining interval: center on the window if possible, otherwise shift only enough to avoid occupied regions. C replaces the desktop-name guess.\n\nFor AdaptiveCentre, let L and R bound the remaining interval, W be window width, and T be the rendered title width after fitting. Place its left edge at clamp((W-T)/2, L, R-T). Clamp available width to zero before fitting. Start and AdaptiveCentre get the same maximum title width; strict Centre may get less.\n\nClip titles without overlapping controls. Use end ellipsis at grapheme boundaries; prefer a word boundary when one fits. If even an ellipsis does not fit, paint no title. Never cut a combining sequence or reorder mixed-direction text by reversing bytes. Keep the full title available to accessibility and a non-hover keyboard-accessible title action. No native title menu is proved by these PNGs.\n\nImage 09 shows Start in LTR and strict Centre with unequal side reservations. Both retain the start of the long name and trim its end. Strict centering need not lose text when reservations are symmetric. AdaptiveCentre can use the same width as Start. A Start title does not automatically leave the middle free: app controls require an explicit layout allocation.\n\nGNOME offers strict and loose centering. Breeze alignment is configurable, so KDE is not evidence for mandatory left placement. macOS system traffic lights reserve the left side; Windows guidance mirrors icon and title in RTL. Neither xdg-decoration nor the Settings appearance keys supplies title alignment. Following a desktop name would ignore user settings and is not native integration.\n\nSources checked 2026-11-09.\n\nGNOME header: https://gnome.pages.gitlab.gnome.org/libadwaita/doc/main/class.HeaderBar.html.\n\nGNOME appearance: https://gnome.pages.gitlab.gnome.org/libadwaita/doc/main/class.StyleManager.html.\n\nGNOME centering: https://gnome.pages.gitlab.gnome.org/libadwaita/doc/main/enum.CenteringPolicy.html.\n\nBreeze source: https://github.com/KDE/breeze/blob/master/kdecoration/breezedecoration.cpp.\n\nWindows title bar: https://learn.microsoft.com/en-us/windows/apps/design/basics/titlebar-design.\n\nMica: https://learn.microsoft.com/en-us/windows/apps/design/style/mica.\n\nSnap layouts: https://learn.microsoft.com/en-us/windows/apps/desktop/modernize/ui/apply-snap-layout-menu.\n\nmacOS: https://developer.apple.com/design/human-interface-guidelines/windows.\n\nChrome frame source: https://github.com/chromium/chromium/blob/main/ui/views/window/frame_view_layout_linux.cc.\n\nElectron: https://www.electronjs.org/docs/latest/tutorial/custom-title-bar.\n\nFlutter Linux runner: https://github.com/flutter/flutter/blob/master/packages/flutter_tools/templates/app/linux.tmpl/runner/my_application.cc.tmpl.\n\nFlutter Linux input: https://github.com/flutter/flutter/blob/master/engine/src/flutter/shell/platform/linux/fl_view.cc.\n\nWayland decoration: https://wayland.app/protocols/xdg-decoration-unstable-v1.\n\nPortal settings: https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.Settings.html.\n\nWayland shell: https://wayland.app/protocols/xdg-shell.\n\nD-Bus: https://dbus.freedesktop.org/doc/dbus-specification.html.\n\nWCAG text: https://www.w3.org/WAI/WCAG22/Understanding/contrast-minimum.html.\n\nWCAG controls: https://www.w3.org/WAI/WCAG22/Understanding/non-text-contrast.html.\n\nWCAG targets: https://www.w3.org/WAI/WCAG22/Understanding/target-size-minimum.html.\n\nWCAG focus: https://www.w3.org/WAI/WCAG22/Understanding/focus-appearance.html.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Start by default",
+          "detail": "Default Start; Centre and AdaptiveCentre are explicit overrides. LTR resembles image 09 left. RTL starts at the right.",
+          "technical": "UITitleAlign { Start, Centre, AdaptiveCentre }; None means Start.",
+          "code": "use ui: core.ui\n// Proposed contract; not a runnable current API.\nrun: fn() {\n    window: ui.open(width: 640, height: 400, title: \"Notes\") ?? return\n    // Start by default; title_align: .Centre opts in.\n    page := [U8]{}\n    loop frame in window.frames() {\n        if page.len() != frame.width * frame.height * 4 {\n            page = [U8]{}\n            loop _ in 0..<(frame.width * frame.height * 4) -> page.push(U8{255})\n        }\n        frame.present(page) ?? return\n    }\n}"
+        },
+        {
+          "key": "B",
+          "name": "Window center by default",
+          "detail": "Default Centre with equal side reservations. Image 09 right is this policy, not middle ellipsis.",
+          "technical": "Same enum; None means Centre. Start and AdaptiveCentre remain explicit overrides.",
+          "code": "use ui: core.ui\n// Proposed contract; not a runnable current API.\nrun: fn() {\n    window: ui.open(width: 640, height: 400, title: \"Notes\") ?? return\n    // Strict window center; title_align: .Start opts out.\n    page := [U8]{}\n    loop frame in window.frames() {\n        if page.len() != frame.width * frame.height * 4 {\n            page = [U8]{}\n            loop _ in 0..<(frame.width * frame.height * 4) -> page.push(U8{255})\n        }\n        frame.present(page) ?? return\n    }\n}"
+        },
+        {
+          "key": "C",
+          "name": "Adaptive center by default",
+          "detail": "Default AdaptiveCentre. Center on the window when possible, otherwise shift without overlapping occupied regions. This option is not pictured in 09.",
+          "technical": "Same enum; None means AdaptiveCentre. Centre requests strict centering; Start requests leading alignment.",
+          "code": "use ui: core.ui\n// Proposed contract; not a runnable current API.\nrun: fn() {\n    window: ui.open(width: 640, height: 400, title: \"Notes\") ?? return\n    // Adaptive center; title_align: .Start opts out.\n    page := [U8]{}\n    loop frame in window.frames() {\n        if page.len() != frame.width * frame.height * 4 {\n            page = [U8]{}\n            loop _ in 0..<(frame.width * frame.height * 4) -> page.push(U8{255})\n        }\n        frame.present(page) ?? return\n    }\n}"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "why": "Prefer Start for predictable reading direction and title width. Both centering policies remain explicit choices; neither inherently truncates both ends.",
+        "tradeoff": "Start does not match every host style. RTL shaping, truncation and safe allocation are unproved by the English mockups.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Stable center, but unequal reservations can reduce title width."
+          },
+          {
+            "key": "C",
+            "reason": "Uses width well, but its midpoint moves when controls change."
+          }
+        ],
+        "losses": [
+          {
+            "loss": "Different from some native titles.",
+            "mitigation": "Allow either centering policy; System delegates title layout to the host."
+          }
+        ]
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: GPT. Fresh agent: FrameReview. Checked sources, nine pictures, token contrast and executable probes; repaired unfair comparisons and missing contracts. Holds within limits; limits and posting restrictions are in the dated audit."
+      },
+      "checkInstructions": "Validate this repaired payload without writing Tower. Read the dated FrameReview audit and its probe receipts. Treat proposed syntax and release requirements as unimplemented until exercised with the integrated compiler and real backends.",
+      "surface": {
+        "gist": "Should Jet titles follow text start, stay centered, or center when space permits?",
+        "lesson": "Start follows reading direction. Strict centering balances the whole window. Adaptive centering keeps the midpoint when possible, shifting only to avoid occupied regions.",
+        "trio": {
+          "current": {
+            "note": "The installed seed rejects ui.open; pending source is not integrated runtime proof.",
+            "code": "// Exercised seed: core.ui has no item open.\n// See original-isolated.log in FrameReview."
+          },
+          "wild": {
+            "lang": "Established desktop toolkits",
+            "note": "Native and hybrid frames keep host integration; custom drawing must replace that work.",
+            "code": "// GNOME: headerbar with host button layout.\n// Windows/Electron: content plus native caption controls.\n// Flutter Linux: a GTK host window.\n// Sources and limits are in the detail."
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Start by default",
+            "gist": "Start by default; title_align: .Centre opts in.",
+            "gains": [
+              "Uses available title width",
+              "Matches reading direction"
+            ],
+            "losses": [
+              "Not visually centered on the window"
+            ],
+            "proposed": {
+              "code": "use ui: core.ui\n// Proposed contract; not a runnable current API.\nrun: fn() {\n    window: ui.open(width: 640, height: 400, title: \"Notes\") ?? return\n    // Start by default; title_align: .Centre opts in.\n    page := [U8]{}\n    loop frame in window.frames() {\n        if page.len() != frame.width * frame.height * 4 {\n            page = [U8]{}\n            loop _ in 0..<(frame.width * frame.height * 4) -> page.push(U8{255})\n        }\n        frame.present(page) ?? return\n    }\n}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Window center by default",
+            "gist": "Strict window center; title_align: .Start opts out.",
+            "gains": [
+              "Stable whole-window midpoint"
+            ],
+            "losses": [
+              "Unequal side reservations can waste width"
+            ],
+            "proposed": {
+              "code": "use ui: core.ui\n// Proposed contract; not a runnable current API.\nrun: fn() {\n    window: ui.open(width: 640, height: 400, title: \"Notes\") ?? return\n    // Strict window center; title_align: .Start opts out.\n    page := [U8]{}\n    loop frame in window.frames() {\n        if page.len() != frame.width * frame.height * 4 {\n            page = [U8]{}\n            loop _ in 0..<(frame.width * frame.height * 4) -> page.push(U8{255})\n        }\n        frame.present(page) ?? return\n    }\n}"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Adaptive center by default",
+            "gist": "Adaptive center; title_align: .Start opts out.",
+            "gains": [
+              "Uses full available width",
+              "Keeps whole-window midpoint when possible"
+            ],
+            "losses": [
+              "Midpoint can shift as controls change"
+            ],
+            "proposed": {
+              "code": "use ui: core.ui\n// Proposed contract; not a runnable current API.\nrun: fn() {\n    window: ui.open(width: 640, height: 400, title: \"Notes\") ?? return\n    // Adaptive center; title_align: .Start opts out.\n    page := [U8]{}\n    loop frame in window.frames() {\n        if page.len() != frame.width * frame.height * 4 {\n            page = [U8]{}\n            loop _ in 0..<(frame.width * frame.height * 4) -> page.push(U8{255})\n        }\n        frame.present(page) ?? return\n    }\n}"
+            }
+          }
+        ],
+        "recommendation": {
+          "why": "Prefer Start for predictable reading direction and title width. Both centering policies remain explicit choices; neither inherently truncates both ends.",
+          "tradeoff": "Start does not match every host style. RTL shaping, truncation and safe allocation are unproved by the English mockups.",
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Stable center, but unequal reservations can reduce title width."
+            },
+            {
+              "key": "C",
+              "reason": "Uses width well, but its midpoint moves when controls change."
+            }
+          ],
+          "losses": [
+            {
+              "loss": "Different from some native titles.",
+              "mitigation": "Allow either centering policy; System delegates title layout to the host."
+            }
+          ],
+          "rec": "A",
+          "gains": [
+            "Useful defaults with explicit app choices"
+          ]
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-09T06:25:53.648Z"
+    },
+    {
+      "id": "D-FRAME-ACCENT1",
+      "cardId": "c0l39twq",
+      "group": "ui",
+      "title": "Where Jet gets its accent seed",
+      "situation": "An accent marks choices, focus and primary actions. The mockups show blue, teal and violet, but they do not read desktop settings. The Settings portal can publish an accent; some hosts or versions supply none. This ballot chooses whether to follow that preference live, ignore it by default, or sample it once. All choices keep the same accessibility checks and allow an explicit pinned seed. Respecting a desktop accent is useful, but cannot promise an exact toolkit match or unchanged brand pixels.",
+      "gist": "Should Jet follow the desktop accent live, use Jet blue, or sample the desktop once?",
+      "lesson": "One seed supplies accent roles, not every color. Text, marks and focus need separate contrast checks. Apps may pin a seed without disabling accessibility.",
+      "explainer": "",
+      "story": "Ken picks teal for his desktop. The same Notes frame can follow it, keep Jet blue, or retain the opening accent after a later change. The white content canvas stays white in every option.",
+      "inWild": "GNOME headerbars combine app controls with window controls and respect the system button layout. Their centering policy can be loose or strict. StyleManager exposes accent, dark appearance and high contrast. Jet must supply its own equivalent behavior without restoring GTK.\n\nKDE/Breeze supports user button layouts, fonts, scale changes and configurable title alignment. It extends edge targets for easy pointing. A fixed Jet layout gives up some desktop integration; Breeze is not simply a left-aligned Windows bar.\n\nWindows 11 supports compact captions and taller search headers, RTL, text scaling and high contrast. Mica is an opaque wallpaper-derived material with solid fallbacks, not a generic blur. Snap layouts need native caption integration or correct custom hit testing. Jet's PNGs establish none of those behaviors.\n\nmacOS uses system window controls, including traffic lights at the upper left. Apple advises against copying native frames imperfectly. A Jet-drawn cross-desktop style is an intentional trade, not evidence of matching macOS behavior.\n\nChrome's Linux frame handles leading and trailing controls, tiling, shadows and input margins. Electron can combine custom content with native controls and safe areas. Flutter's Linux runner uses a GTK window; a headerbar is optional in its template. Flutter's input host handles touch and stylus separately. Custom drawing does not make those responsibilities disappear.\n\nThe decoration protocol negotiates who draws the frame, not its shape, title alignment or colors. Settings supplies appearance preferences, not a full desktop palette or button layout. These are different services, not competing ways to set an accent.",
+      "detail": "These are proposals, not implemented public settings. The owner requires a Jet-drawn default, Atkinson Hyperlegible Next, deletion of GTK, and retention of TUI and null. No new spelling is authorized before ratification. No claim about another ballot's ratification is made here.\n\nImages 01–09 under $JET_SCRATCH_ROOT/lanes/WaylandLead/mockups/out were inspected. They are static drawings, not interactive windows. The repaired sample keeps one Notes program and a deliberately white pixel canvas. Appearance settings do not recolor those raw pixels. Accent has no visible effect until an accented role, such as a focused frame control, is shown.\n\nAll four ballots share these proposed release requirements. Normal text must meet 4.5:1; essential control marks, boundaries and focus cues must meet 3:1. Use readable normal title colors even on unfocused windows; unfocused is not the same as disabled. Disabled controls alone may use the WCAG exception. Do not signal selection or danger by hue alone.\n\nUse a solid two-unit focus ring with a two-unit gap for fields and buttons, including window controls. It must remain visible and unobscured in every state. Frame controls have nonoverlapping rectangular hit regions, at least 24 by 24 logical units. Touch and pen get at least 44 by 44, growing the bar when needed. Painted glyph size is not hit-target size.\n\nEvery action needs an accessible name and keyboard route through the window menu. F6 cycles content and frame focus; Tab and Shift+Tab cycle frame controls. Shift+F10 on the focused frame opens its menu. Alt+Space opens it when the host delivers that shortcut. Enter activates; Escape dismisses and restores prior focus. Arrow keys move or resize; Enter commits and Escape cancels.\n\nThe menu exposes move, resize, minimize, maximize, restore and close. Close uses the ordinary close-request event; maximize and minimize remain host requests, not guaranteed state changes. Disable unavailable actions rather than silently doing nothing. Pointer, touch and pen activate on release inside; moving out cancels. Only empty header space drags. Do not emulate a refused compositor move by painting at guessed screen coordinates.\n\nHigher contrast overrides decorative colors, including pinned accents. Proposed light high contrast is white background, black text and boundaries; dark is the reverse. Focus uses the foreground color. Selected controls invert foreground and background and retain a check or position cue. Theme changes are immediate, with no fades or motion, including when reduced motion is requested.\n\nTitle, controls and hit testing use logical coordinates, rasterized at the current device scale. A scale change rebuilds frame assets and input transforms together. Images at 1x and 2x are not fractional-scale evidence. Test 1.25x, 1.5x and mixed-output moves, text enlargement, narrow widths, fullscreen, maximization and partial tiling before claiming parity.\n\nJet controls default to the physical right, ordered minimize, maximize, close. This differs from macOS and some user layouts. Title direction does not silently move controls. System decoration delegates placement and behavior to the host. On Jet frames, text direction determines logical start; controls reserve space first. No common portal key supplies button layout. Desktop-layout customization remains a named integration gap, not a promise from these PNGs.\n\nTiling alone must not imply maximization or a restore glyph. Use restore only while maximized; fullscreen hides the frame. Remove shadows on tiled edges and prevent shadow-only pixels intercepting neighboring windows. A compositor refusing client-side decoration wins negotiation: never draw two frames. Without a decoration manager, clients may self-decorate; this is not a compositor lacking CSD support.\n\nWayland is the pending graphical backend considered here. TUI and null keep their existing non-window meaning and gain no fake title bar. Headless pixel windows have no host frame. Future X11, Windows and macOS hosts are design requirements below, not claims of implemented backends. Web chrome remains outside these ballots.\n\nProposed argument accent: UIAccent?{None}. Proposed enum UIAccent has Desktop, JetBlue and Color(U32), with Color storing opaque 0xAARRGGBB. The alpha byte must be FF; otherwise opening returns UIError.Invalid(\"accent requires opaque AARRGGBB\"). There is no untyped color-or-enum overload. A defaults to Desktop, B to JetBlue, C samples Desktop once. Explicit Desktop always follows live; explicit JetBlue or Color pins the seed.\n\nFor a fixed teal seed, pass accent: .Color(U32{0xFF0B8A7A}). Omit accent for the option's default, or pass .Desktop to resume live following. One RGB seed does not contain separate light and dark palettes.\n\nJetBlue seeds are #3D6DF2 in light and #7C9DFF in dark. Desktop uses one portal RGB seed, not an invented light/dark pair. Color uses its one seed in both themes. The raw seed is not a guarantee of pixel-identical branding: every option uses the same accessible role resolver. Pinning must not disable higher contrast.\n\nProposed resolver: decode sRGB, then derive roles in linear light. For accent fills, first require 3:1 against their adjacent base surface. If needed, mix toward black in light mode or white in dark mode. Choose the first passing step among 0 through 255, in increments of 1/255. Quantize to sRGB bytes before measuring. Choose black or white on-accent text by the larger contrast ratio; ties choose black.\n\nDerive hover and pressed from the resolved seed using the pictured mixes, then apply the same contrast checks to each final state. Focus is a separate semantic role from fill, resolved against its own adjacent surface by the same algorithm. A text-on-fill check does not establish a visible focus ring. Marks and switch thumbs use the resolved on-accent color, not unconditional white. Higher contrast uses the shared black/white palette instead.\n\nMeasured from mock.jet: white on light blue is 4.4987:1, below 4.5 without rounding. White on light teal #0B8A7A is 4.2591:1. The dark switch's white thumb on blue is 2.5850:1. The shown pictures therefore do not prove the proposed resolver. Source tokens and exact computations are in contrast.json; regenerate pictures after the resolver is implemented.\n\nAccent does not control danger, every decorative icon, every avatar, or arbitrary app pixels. It controls the accent roles, not every color in the window. A portal accent can differ from a toolkit's restricted accent palette. No universal Windows or macOS app behavior is asserted.\n\nProposed portal contract: org.freedesktop.appearance/color-scheme is uint32: 1 dark, 2 light, 0 or unknown light fallback. accent-color is an sRGB triple of doubles in [0,1]. Missing, malformed, nonfinite or out-of-range accent values mean Jet blue. Neither desktop name nor wallpaper is a substitute for these values.\n\nUse one appearance service for accent, theme, contrast and reduced motion, feeding one resolved style record. ReadAll works with version 1; ReadOne requires version 2. Subscribe to SettingChanged before the initial snapshot, then reconcile queued changes. There is no guarantee of zero-latency delivery or of support for every key. Unknown contrast or reduced-motion values mean no preference.\n\nPortal absence, permission errors or disconnect must not prevent opening a window. Use the stated fallback; on service return, reread preferences for Desktop settings. Apply valid changes together at a frame boundary, retaining focus, text, selection and scroll. Pinned settings ignore their matching preference only; accessibility settings still apply. Connection setup, bus authentication, message routing, signal subscriptions and service restarts cost more than two calls.\n\nSources checked 2026-11-09.\n\nGNOME header: https://gnome.pages.gitlab.gnome.org/libadwaita/doc/main/class.HeaderBar.html.\n\nGNOME appearance: https://gnome.pages.gitlab.gnome.org/libadwaita/doc/main/class.StyleManager.html.\n\nGNOME centering: https://gnome.pages.gitlab.gnome.org/libadwaita/doc/main/enum.CenteringPolicy.html.\n\nBreeze source: https://github.com/KDE/breeze/blob/master/kdecoration/breezedecoration.cpp.\n\nWindows title bar: https://learn.microsoft.com/en-us/windows/apps/design/basics/titlebar-design.\n\nMica: https://learn.microsoft.com/en-us/windows/apps/design/style/mica.\n\nSnap layouts: https://learn.microsoft.com/en-us/windows/apps/desktop/modernize/ui/apply-snap-layout-menu.\n\nmacOS: https://developer.apple.com/design/human-interface-guidelines/windows.\n\nChrome frame source: https://github.com/chromium/chromium/blob/main/ui/views/window/frame_view_layout_linux.cc.\n\nElectron: https://www.electronjs.org/docs/latest/tutorial/custom-title-bar.\n\nFlutter Linux runner: https://github.com/flutter/flutter/blob/master/packages/flutter_tools/templates/app/linux.tmpl/runner/my_application.cc.tmpl.\n\nFlutter Linux input: https://github.com/flutter/flutter/blob/master/engine/src/flutter/shell/platform/linux/fl_view.cc.\n\nWayland decoration: https://wayland.app/protocols/xdg-decoration-unstable-v1.\n\nPortal settings: https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.Settings.html.\n\nWayland shell: https://wayland.app/protocols/xdg-shell.\n\nD-Bus: https://dbus.freedesktop.org/doc/dbus-specification.html.\n\nWCAG text: https://www.w3.org/WAI/WCAG22/Understanding/contrast-minimum.html.\n\nWCAG controls: https://www.w3.org/WAI/WCAG22/Understanding/non-text-contrast.html.\n\nWCAG targets: https://www.w3.org/WAI/WCAG22/Understanding/target-size-minimum.html.\n\nWCAG focus: https://www.w3.org/WAI/WCAG22/Understanding/focus-appearance.html.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Desktop accent live",
+          "detail": "None follows portal changes, with JetBlue fallback. Explicit Desktop follows live; JetBlue and Color pin seeds.",
+          "technical": "UIAccent { Desktop, JetBlue, Color(U32) }; accent: UIAccent?{None}. Shared portal and role-resolution contracts apply.",
+          "code": "use ui: core.ui\n// Proposed contract; not a runnable current API.\nrun: fn() {\n    window: ui.open(width: 640, height: 400, title: \"Notes\") ?? return\n    // Desktop live; accent: .JetBlue pins Jet blue.\n    page := [U8]{}\n    loop frame in window.frames() {\n        if page.len() != frame.width * frame.height * 4 {\n            page = [U8]{}\n            loop _ in 0..<(frame.width * frame.height * 4) -> page.push(U8{255})\n        }\n        frame.present(page) ?? return\n    }\n}"
+        },
+        {
+          "key": "B",
+          "name": "Jet blue by default",
+          "detail": "None uses JetBlue. Explicit Desktop opts into live following; Color pins another seed.",
+          "technical": "Same enum and resolver. No default accent subscription; accessibility or theme may still need the portal.",
+          "code": "use ui: core.ui\n// Proposed contract; not a runnable current API.\nrun: fn() {\n    window: ui.open(width: 640, height: 400, title: \"Notes\") ?? return\n    // Jet blue; accent: .Desktop opts into following.\n    page := [U8]{}\n    loop frame in window.frames() {\n        if page.len() != frame.width * frame.height * 4 {\n            page = [U8]{}\n            loop _ in 0..<(frame.width * frame.height * 4) -> page.push(U8{255})\n        }\n        frame.present(page) ?? return\n    }\n}"
+        },
+        {
+          "key": "C",
+          "name": "Desktop accent at opening",
+          "detail": "None samples the portal once per window. Later changes do not alter that seed; missing accent uses JetBlue.",
+          "technical": "Same enum and resolver. Explicit Desktop remains live; None alone has the sampled default.",
+          "code": "use ui: core.ui\n// Proposed contract; not a runnable current API.\nrun: fn() {\n    window: ui.open(width: 640, height: 400, title: \"Notes\") ?? return\n    // Opening accent; accent: .Desktop requests live following.\n    page := [U8]{}\n    loop frame in window.frames() {\n        if page.len() != frame.width * frame.height * 4 {\n            page = [U8]{}\n            loop _ in 0..<(frame.width * frame.height * 4) -> page.push(U8{255})\n        }\n        frame.present(page) ?? return\n    }\n}"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "why": "Prefer live desktop following when published. Keep a named JetBlue opt-out and pinned colors, with contrast checks in every option.",
+        "tradeoff": "Portal integration and role resolution remain real work. A safe rendered accent may differ from the requested seed or neighboring toolkit.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Predictable branding, but ignores a published user accent by default."
+          },
+          {
+            "key": "C",
+            "reason": "Stable sessions, but changes need a new window unless Desktop is explicit."
+          }
+        ],
+        "losses": [
+          {
+            "loss": "Live preferences add state.",
+            "mitigation": "Share one appearance service and test absent portals, reconnects and frame-boundary updates."
+          },
+          {
+            "loss": "Safe colors may alter branding.",
+            "mitigation": "Preserve the seed as input; document that resolved control colors prioritize contrast."
+          }
+        ]
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: GPT. Fresh agent: FrameReview. Checked sources, nine pictures, token contrast and executable probes; repaired unfair comparisons and missing contracts. Holds within limits; limits and posting restrictions are in the dated audit."
+      },
+      "checkInstructions": "Validate this repaired payload without writing Tower. Read the dated FrameReview audit and its probe receipts. Treat proposed syntax and release requirements as unimplemented until exercised with the integrated compiler and real backends.",
+      "surface": {
+        "gist": "Should Jet follow the desktop accent live, use Jet blue, or sample the desktop once?",
+        "lesson": "One seed supplies accent roles, not every color. Text, marks and focus need separate contrast checks. Apps may pin a seed without disabling accessibility.",
+        "trio": {
+          "current": {
+            "note": "The installed seed rejects ui.open; pending source is not integrated runtime proof.",
+            "code": "// Exercised seed: core.ui has no item open.\n// See original-isolated.log in FrameReview."
+          },
+          "wild": {
+            "lang": "Established desktop toolkits",
+            "note": "Native and hybrid frames keep host integration; custom drawing must replace that work.",
+            "code": "// GNOME: headerbar with host button layout.\n// Windows/Electron: content plus native caption controls.\n// Flutter Linux: a GTK host window.\n// Sources and limits are in the detail."
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Desktop accent live",
+            "gist": "Desktop live; accent: .JetBlue pins Jet blue.",
+            "gains": [
+              "Respects published user preference",
+              "Explicit brand seed remains available"
+            ],
+            "losses": [
+              "Needs live settings integration"
+            ],
+            "proposed": {
+              "code": "use ui: core.ui\n// Proposed contract; not a runnable current API.\nrun: fn() {\n    window: ui.open(width: 640, height: 400, title: \"Notes\") ?? return\n    // Desktop live; accent: .JetBlue pins Jet blue.\n    page := [U8]{}\n    loop frame in window.frames() {\n        if page.len() != frame.width * frame.height * 4 {\n            page = [U8]{}\n            loop _ in 0..<(frame.width * frame.height * 4) -> page.push(U8{255})\n        }\n        frame.present(page) ?? return\n    }\n}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Jet blue by default",
+            "gist": "Jet blue; accent: .Desktop opts into following.",
+            "gains": [
+              "Predictable default accent seed"
+            ],
+            "losses": [
+              "Does not follow user accent by default"
+            ],
+            "proposed": {
+              "code": "use ui: core.ui\n// Proposed contract; not a runnable current API.\nrun: fn() {\n    window: ui.open(width: 640, height: 400, title: \"Notes\") ?? return\n    // Jet blue; accent: .Desktop opts into following.\n    page := [U8]{}\n    loop frame in window.frames() {\n        if page.len() != frame.width * frame.height * 4 {\n            page = [U8]{}\n            loop _ in 0..<(frame.width * frame.height * 4) -> page.push(U8{255})\n        }\n        frame.present(page) ?? return\n    }\n}"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Desktop accent at opening",
+            "gist": "Opening accent; accent: .Desktop requests live following.",
+            "gains": [
+              "Stable color during a session"
+            ],
+            "losses": [
+              "Existing windows miss later user changes"
+            ],
+            "proposed": {
+              "code": "use ui: core.ui\n// Proposed contract; not a runnable current API.\nrun: fn() {\n    window: ui.open(width: 640, height: 400, title: \"Notes\") ?? return\n    // Opening accent; accent: .Desktop requests live following.\n    page := [U8]{}\n    loop frame in window.frames() {\n        if page.len() != frame.width * frame.height * 4 {\n            page = [U8]{}\n            loop _ in 0..<(frame.width * frame.height * 4) -> page.push(U8{255})\n        }\n        frame.present(page) ?? return\n    }\n}"
+            }
+          }
+        ],
+        "recommendation": {
+          "why": "Prefer live desktop following when published. Keep a named JetBlue opt-out and pinned colors, with contrast checks in every option.",
+          "tradeoff": "Portal integration and role resolution remain real work. A safe rendered accent may differ from the requested seed or neighboring toolkit.",
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Predictable branding, but ignores a published user accent by default."
+            },
+            {
+              "key": "C",
+              "reason": "Stable sessions, but changes need a new window unless Desktop is explicit."
+            }
+          ],
+          "losses": [
+            {
+              "loss": "Live preferences add state.",
+              "mitigation": "Share one appearance service and test absent portals, reconnects and frame-boundary updates."
+            },
+            {
+              "loss": "Safe colors may alter branding.",
+              "mitigation": "Preserve the seed as input; document that resolved control colors prioritize contrast."
+            }
+          ],
+          "rec": "A",
+          "gains": [
+            "Useful defaults with explicit app choices"
+          ]
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-09T06:25:55.197Z"
+    },
+    {
+      "id": "D-FRAME-THEME1",
+      "cardId": "c0l39twq",
+      "group": "ui",
+      "title": "How Jet follows light and dark preference",
+      "situation": "The desktop can publish a light or dark preference through Settings. Jet's pictures show two palettes, not a working settings reader or live redraw. This ballot compares live following, a fixed light default with opt-in following, and a snapshot at opening. Each opens the same Notes canvas and permits explicit Light or Dark. Raw pixels remain app-owned, so a white canvas will not turn dark on its own. The choice must also define absent portals, unknown values and changes during input.",
+      "gist": "Should Jet follow light and dark live, default to light, or sample the desktop once?",
+      "lesson": "Following chooses a palette, not the meaning of app pixels. Live changes need one event and coherent redraw. High contrast and reduced motion remain independent.",
+      "explainer": "",
+      "story": "A user changes their desktop to dark while Notes is open. A live-following frame changes at its next update; a pinned or sampled frame does not. The white document pixels stay app-owned, and keyboard focus is preserved.",
+      "inWild": "GNOME headerbars combine app controls with window controls and respect the system button layout. Their centering policy can be loose or strict. StyleManager exposes accent, dark appearance and high contrast. Jet must supply its own equivalent behavior without restoring GTK.\n\nKDE/Breeze supports user button layouts, fonts, scale changes and configurable title alignment. It extends edge targets for easy pointing. A fixed Jet layout gives up some desktop integration; Breeze is not simply a left-aligned Windows bar.\n\nWindows 11 supports compact captions and taller search headers, RTL, text scaling and high contrast. Mica is an opaque wallpaper-derived material with solid fallbacks, not a generic blur. Snap layouts need native caption integration or correct custom hit testing. Jet's PNGs establish none of those behaviors.\n\nmacOS uses system window controls, including traffic lights at the upper left. Apple advises against copying native frames imperfectly. A Jet-drawn cross-desktop style is an intentional trade, not evidence of matching macOS behavior.\n\nChrome's Linux frame handles leading and trailing controls, tiling, shadows and input margins. Electron can combine custom content with native controls and safe areas. Flutter's Linux runner uses a GTK window; a headerbar is optional in its template. Flutter's input host handles touch and stylus separately. Custom drawing does not make those responsibilities disappear.\n\nThe decoration protocol negotiates who draws the frame, not its shape, title alignment or colors. Settings supplies appearance preferences, not a full desktop palette or button layout. These are different services, not competing ways to set an accent.",
+      "detail": "These are proposals, not implemented public settings. The owner requires a Jet-drawn default, Atkinson Hyperlegible Next, deletion of GTK, and retention of TUI and null. No new spelling is authorized before ratification. No claim about another ballot's ratification is made here.\n\nImages 01–09 under $JET_SCRATCH_ROOT/lanes/WaylandLead/mockups/out were inspected. They are static drawings, not interactive windows. The repaired sample keeps one Notes program and a deliberately white pixel canvas. Appearance settings do not recolor those raw pixels. Accent has no visible effect until an accented role, such as a focused frame control, is shown.\n\nAll four ballots share these proposed release requirements. Normal text must meet 4.5:1; essential control marks, boundaries and focus cues must meet 3:1. Use readable normal title colors even on unfocused windows; unfocused is not the same as disabled. Disabled controls alone may use the WCAG exception. Do not signal selection or danger by hue alone.\n\nUse a solid two-unit focus ring with a two-unit gap for fields and buttons, including window controls. It must remain visible and unobscured in every state. Frame controls have nonoverlapping rectangular hit regions, at least 24 by 24 logical units. Touch and pen get at least 44 by 44, growing the bar when needed. Painted glyph size is not hit-target size.\n\nEvery action needs an accessible name and keyboard route through the window menu. F6 cycles content and frame focus; Tab and Shift+Tab cycle frame controls. Shift+F10 on the focused frame opens its menu. Alt+Space opens it when the host delivers that shortcut. Enter activates; Escape dismisses and restores prior focus. Arrow keys move or resize; Enter commits and Escape cancels.\n\nThe menu exposes move, resize, minimize, maximize, restore and close. Close uses the ordinary close-request event; maximize and minimize remain host requests, not guaranteed state changes. Disable unavailable actions rather than silently doing nothing. Pointer, touch and pen activate on release inside; moving out cancels. Only empty header space drags. Do not emulate a refused compositor move by painting at guessed screen coordinates.\n\nHigher contrast overrides decorative colors, including pinned accents. Proposed light high contrast is white background, black text and boundaries; dark is the reverse. Focus uses the foreground color. Selected controls invert foreground and background and retain a check or position cue. Theme changes are immediate, with no fades or motion, including when reduced motion is requested.\n\nTitle, controls and hit testing use logical coordinates, rasterized at the current device scale. A scale change rebuilds frame assets and input transforms together. Images at 1x and 2x are not fractional-scale evidence. Test 1.25x, 1.5x and mixed-output moves, text enlargement, narrow widths, fullscreen, maximization and partial tiling before claiming parity.\n\nJet controls default to the physical right, ordered minimize, maximize, close. This differs from macOS and some user layouts. Title direction does not silently move controls. System decoration delegates placement and behavior to the host. On Jet frames, text direction determines logical start; controls reserve space first. No common portal key supplies button layout. Desktop-layout customization remains a named integration gap, not a promise from these PNGs.\n\nTiling alone must not imply maximization or a restore glyph. Use restore only while maximized; fullscreen hides the frame. Remove shadows on tiled edges and prevent shadow-only pixels intercepting neighboring windows. A compositor refusing client-side decoration wins negotiation: never draw two frames. Without a decoration manager, clients may self-decorate; this is not a compositor lacking CSD support.\n\nWayland is the pending graphical backend considered here. TUI and null keep their existing non-window meaning and gain no fake title bar. Headless pixel windows have no host frame. Future X11, Windows and macOS hosts are design requirements below, not claims of implemented backends. Web chrome remains outside these ballots.\n\nProposed argument theme: UITheme?{None}; enum UITheme { Desktop, Light, Dark }. A defaults to Desktop live. B defaults to Light. C samples Desktop at opening. Explicit Desktop always follows live; Light and Dark pin appearance. No separate follow_theme boolean or second observer API is introduced.\n\nThis ballot proposes adding UIEvent.ThemeChanged(UITheme), carrying only resolved Light or Dark. Deliver it once before the first frame using a newly resolved scheme, not on duplicate portal values. The initial frame uses the initial resolved scheme without a change event. Emit nothing for a pinned scheme. Accent-only changes invalidate styled drawing but do not masquerade as ThemeChanged.\n\nThe appearance service updates the frame and styled widgets together, then queues the event and redraw. A raw-pixel app may inspect that event to redraw its own content, but nothing can infer the meaning of its arbitrary colors. The sample deliberately presents white in both themes. It demonstrates proposed frame behavior only, not a dark widget gallery. Buffer size follows frame dimensions rather than assuming 640x400 physical pixels.\n\nNo portal or no preference means Light. Unknown color-scheme values mean no preference, not Dark. When the portal becomes available, Desktop resumes following; pinned values remain pinned. Shared contrast and reduced-motion preferences apply even when Light or Dark is pinned. No animations are proposed, so a live switch does not require a fade.\n\nMeasured existing tokens include white on danger: 4.4714:1 in light and 3.3746:1 in dark, below 4.5 for the pictured small bold labels. Field borders are only 1.3655:1 and 1.5274:1 against their fields. Body text is strong at 16.2691:1 and 13.7994:1. A dark palette is not automatically accessible; replace failing semantic roles before calling the default style compliant.\n\nThe proposed normal palette retains the pictured base surfaces but uses #62626C boundaries in light and #A3A3AD in dark. Titles retain normal text colors when unfocused. Danger text chooses black or white by greater contrast after every fill-state change. Focus uses the shared solid two-unit ring, not the pictured field's 1.5-unit border and faint halo. These repairs are requirements, not claims about current PNGs.\n\nProposed portal contract: org.freedesktop.appearance/color-scheme is uint32: 1 dark, 2 light, 0 or unknown light fallback. accent-color is an sRGB triple of doubles in [0,1]. Missing, malformed, nonfinite or out-of-range accent values mean Jet blue. Neither desktop name nor wallpaper is a substitute for these values.\n\nUse one appearance service for accent, theme, contrast and reduced motion, feeding one resolved style record. ReadAll works with version 1; ReadOne requires version 2. Subscribe to SettingChanged before the initial snapshot, then reconcile queued changes. There is no guarantee of zero-latency delivery or of support for every key. Unknown contrast or reduced-motion values mean no preference.\n\nPortal absence, permission errors or disconnect must not prevent opening a window. Use the stated fallback; on service return, reread preferences for Desktop settings. Apply valid changes together at a frame boundary, retaining focus, text, selection and scroll. Pinned settings ignore their matching preference only; accessibility settings still apply. Connection setup, bus authentication, message routing, signal subscriptions and service restarts cost more than two calls.\n\nSources checked 2026-11-09.\n\nGNOME header: https://gnome.pages.gitlab.gnome.org/libadwaita/doc/main/class.HeaderBar.html.\n\nGNOME appearance: https://gnome.pages.gitlab.gnome.org/libadwaita/doc/main/class.StyleManager.html.\n\nGNOME centering: https://gnome.pages.gitlab.gnome.org/libadwaita/doc/main/enum.CenteringPolicy.html.\n\nBreeze source: https://github.com/KDE/breeze/blob/master/kdecoration/breezedecoration.cpp.\n\nWindows title bar: https://learn.microsoft.com/en-us/windows/apps/design/basics/titlebar-design.\n\nMica: https://learn.microsoft.com/en-us/windows/apps/design/style/mica.\n\nSnap layouts: https://learn.microsoft.com/en-us/windows/apps/desktop/modernize/ui/apply-snap-layout-menu.\n\nmacOS: https://developer.apple.com/design/human-interface-guidelines/windows.\n\nChrome frame source: https://github.com/chromium/chromium/blob/main/ui/views/window/frame_view_layout_linux.cc.\n\nElectron: https://www.electronjs.org/docs/latest/tutorial/custom-title-bar.\n\nFlutter Linux runner: https://github.com/flutter/flutter/blob/master/packages/flutter_tools/templates/app/linux.tmpl/runner/my_application.cc.tmpl.\n\nFlutter Linux input: https://github.com/flutter/flutter/blob/master/engine/src/flutter/shell/platform/linux/fl_view.cc.\n\nWayland decoration: https://wayland.app/protocols/xdg-decoration-unstable-v1.\n\nPortal settings: https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.Settings.html.\n\nWayland shell: https://wayland.app/protocols/xdg-shell.\n\nD-Bus: https://dbus.freedesktop.org/doc/dbus-specification.html.\n\nWCAG text: https://www.w3.org/WAI/WCAG22/Understanding/contrast-minimum.html.\n\nWCAG controls: https://www.w3.org/WAI/WCAG22/Understanding/non-text-contrast.html.\n\nWCAG targets: https://www.w3.org/WAI/WCAG22/Understanding/target-size-minimum.html.\n\nWCAG focus: https://www.w3.org/WAI/WCAG22/Understanding/focus-appearance.html.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Follow the desktop live",
+          "detail": "None follows live. Missing preference means Light. Light and Dark pin; explicit Desktop restores following.",
+          "technical": "UITheme { Desktop, Light, Dark }; theme: UITheme?{None}. UIEvent.ThemeChanged(UITheme) reports resolved scheme changes.",
+          "code": "use ui: core.ui\n// Proposed contract; not a runnable current API.\nrun: fn() {\n    window: ui.open(width: 640, height: 400, title: \"Notes\") ?? return\n    // Desktop live; theme: .Dark pins the frame.\n    page := [U8]{}\n    loop frame in window.frames() {\n        if page.len() != frame.width * frame.height * 4 {\n            page = [U8]{}\n            loop _ in 0..<(frame.width * frame.height * 4) -> page.push(U8{255})\n        }\n        frame.present(page) ?? return\n    }\n}"
+        },
+        {
+          "key": "B",
+          "name": "Light default, following opt-in",
+          "detail": "None means Light. Explicit Desktop follows live; Dark pins dark. This is not a choice to remove expert following.",
+          "technical": "Same enum and event. Fixed defaults need no scheme subscription; accessibility and accent may still use Settings.",
+          "code": "use ui: core.ui\n// Proposed contract; not a runnable current API.\nrun: fn() {\n    window: ui.open(width: 640, height: 400, title: \"Notes\") ?? return\n    // Light by default; theme: .Desktop follows live.\n    page := [U8]{}\n    loop frame in window.frames() {\n        if page.len() != frame.width * frame.height * 4 {\n            page = [U8]{}\n            loop _ in 0..<(frame.width * frame.height * 4) -> page.push(U8{255})\n        }\n        frame.present(page) ?? return\n    }\n}"
+        },
+        {
+          "key": "C",
+          "name": "Sample the desktop at opening",
+          "detail": "None samples preference once per window, using Light fallback. Explicit Desktop follows live; Light and Dark pin.",
+          "technical": "Same enum and event. Only explicit Desktop reports subsequent scheme changes. Reopening a window resamples.",
+          "code": "use ui: core.ui\n// Proposed contract; not a runnable current API.\nrun: fn() {\n    window: ui.open(width: 640, height: 400, title: \"Notes\") ?? return\n    // Opening scheme; theme: .Desktop follows later changes.\n    page := [U8]{}\n    loop frame in window.frames() {\n        if page.len() != frame.width * frame.height * 4 {\n            page = [U8]{}\n            loop _ in 0..<(frame.width * frame.height * 4) -> page.push(U8{255})\n        }\n        frame.present(page) ?? return\n    }\n}"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "why": "Prefer live following for styled UI and the frame. Keep pinned schemes and an explicit event for raw drawing, without promising instant changes.",
+        "tradeoff": "Settings delivery and app redraw take time. Light fallback may still be unwelcome, and arbitrary content cannot be themed automatically.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Useful for fixed presentation, but misses user preference by default."
+          },
+          {
+            "key": "C",
+            "reason": "Avoids session changes, but needs reopening to follow later preferences."
+          }
+        ],
+        "losses": [
+          {
+            "loss": "Live changes require app redraw.",
+            "mitigation": "Deliver one resolved change event before the affected frame; preserve focus and selection."
+          },
+          {
+            "loss": "Fallback may not match preference.",
+            "mitigation": "Allow explicit Light or Dark and resume following when Settings becomes available."
+          }
+        ]
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: GPT. Fresh agent: FrameReview. Checked sources, nine pictures, token contrast and executable probes; repaired unfair comparisons and missing contracts. Holds within limits; limits and posting restrictions are in the dated audit."
+      },
+      "checkInstructions": "Validate this repaired payload without writing Tower. Read the dated FrameReview audit and its probe receipts. Treat proposed syntax and release requirements as unimplemented until exercised with the integrated compiler and real backends.",
+      "surface": {
+        "gist": "Should Jet follow light and dark live, default to light, or sample the desktop once?",
+        "lesson": "Following chooses a palette, not the meaning of app pixels. Live changes need one event and coherent redraw. High contrast and reduced motion remain independent.",
+        "trio": {
+          "current": {
+            "note": "The installed seed rejects ui.open; pending source is not integrated runtime proof.",
+            "code": "// Exercised seed: core.ui has no item open.\n// See original-isolated.log in FrameReview."
+          },
+          "wild": {
+            "lang": "Established desktop toolkits",
+            "note": "Native and hybrid frames keep host integration; custom drawing must replace that work.",
+            "code": "// GNOME: headerbar with host button layout.\n// Windows/Electron: content plus native caption controls.\n// Flutter Linux: a GTK host window.\n// Sources and limits are in the detail."
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Follow the desktop live",
+            "gist": "Desktop live; theme: .Dark pins the frame.",
+            "gains": [
+              "Follows published preference changes"
+            ],
+            "losses": [
+              "Needs coherent live redraw and an event"
+            ],
+            "proposed": {
+              "code": "use ui: core.ui\n// Proposed contract; not a runnable current API.\nrun: fn() {\n    window: ui.open(width: 640, height: 400, title: \"Notes\") ?? return\n    // Desktop live; theme: .Dark pins the frame.\n    page := [U8]{}\n    loop frame in window.frames() {\n        if page.len() != frame.width * frame.height * 4 {\n            page = [U8]{}\n            loop _ in 0..<(frame.width * frame.height * 4) -> page.push(U8{255})\n        }\n        frame.present(page) ?? return\n    }\n}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Light default, following opt-in",
+            "gist": "Light by default; theme: .Desktop follows live.",
+            "gains": [
+              "Stable scheme unless explicitly changed"
+            ],
+            "losses": [
+              "Dark-preferring users get light by default"
+            ],
+            "proposed": {
+              "code": "use ui: core.ui\n// Proposed contract; not a runnable current API.\nrun: fn() {\n    window: ui.open(width: 640, height: 400, title: \"Notes\") ?? return\n    // Light by default; theme: .Desktop follows live.\n    page := [U8]{}\n    loop frame in window.frames() {\n        if page.len() != frame.width * frame.height * 4 {\n            page = [U8]{}\n            loop _ in 0..<(frame.width * frame.height * 4) -> page.push(U8{255})\n        }\n        frame.present(page) ?? return\n    }\n}"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Sample the desktop at opening",
+            "gist": "Opening scheme; theme: .Desktop follows later changes.",
+            "gains": [
+              "Matches opening preference without live changes"
+            ],
+            "losses": [
+              "Later user changes require reopening"
+            ],
+            "proposed": {
+              "code": "use ui: core.ui\n// Proposed contract; not a runnable current API.\nrun: fn() {\n    window: ui.open(width: 640, height: 400, title: \"Notes\") ?? return\n    // Opening scheme; theme: .Desktop follows later changes.\n    page := [U8]{}\n    loop frame in window.frames() {\n        if page.len() != frame.width * frame.height * 4 {\n            page = [U8]{}\n            loop _ in 0..<(frame.width * frame.height * 4) -> page.push(U8{255})\n        }\n        frame.present(page) ?? return\n    }\n}"
+            }
+          }
+        ],
+        "recommendation": {
+          "why": "Prefer live following for styled UI and the frame. Keep pinned schemes and an explicit event for raw drawing, without promising instant changes.",
+          "tradeoff": "Settings delivery and app redraw take time. Light fallback may still be unwelcome, and arbitrary content cannot be themed automatically.",
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Useful for fixed presentation, but misses user preference by default."
+            },
+            {
+              "key": "C",
+              "reason": "Avoids session changes, but needs reopening to follow later preferences."
+            }
+          ],
+          "losses": [
+            {
+              "loss": "Live changes require app redraw.",
+              "mitigation": "Deliver one resolved change event before the affected frame; preserve focus and selection."
+            },
+            {
+              "loss": "Fallback may not match preference.",
+              "mitigation": "Allow explicit Light or Dark and resume following when Settings becomes available."
+            }
+          ],
+          "rec": "A",
+          "gains": [
+            "Useful defaults with explicit app choices"
+          ]
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-09T06:25:56.836Z"
     }
   ],
   "questions": [
@@ -189283,6 +189894,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-09T06:26:16.219Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0l39twq",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-09T06:25:56.836Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-FRAME-THEME1",
+      "note": "How Jet follows light and dark preference"
+    },
+    {
+      "at": "2026-11-09T06:25:55.197Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-FRAME-ACCENT1",
+      "note": "Where Jet gets its accent seed"
+    },
+    {
+      "at": "2026-11-09T06:25:53.648Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-FRAME-TITLE1",
+      "note": "Title alignment in Jet-drawn frames"
+    },
+    {
+      "at": "2026-11-09T06:25:51.259Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-FRAME-STYLE1",
+      "note": "The default shape and system-frame opt-in"
+    },
     {
       "at": "2026-11-09T06:04:04.240Z",
       "by": "Main",

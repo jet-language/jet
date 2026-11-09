@@ -85170,6 +85170,69 @@
       "completedAt": "2026-11-06T05:14:43.285Z",
       "questions": [],
       "retiredAt": "2026-11-09T05:34:39.400Z"
+    },
+    {
+      "id": "c0jn1coj",
+      "num": 6590,
+      "title": "Compiler segfaults in codegen on &opt_handle == .Val(x)",
+      "body": "Found by JetpackEngine on dev 12da3c76b5: compiling a comparison of a borrowed optional handle against .Val(x) (&opt_handle == .Val(x)) crashes the compiler with SIGSEGV in codegen. Two #3590 c190 known-failing Store rows hit it. I2: checked code the backend cannot lower must be an internal compiler error (exit 101), never a crash, and this shape should lower. Fix the lowering and add a reduced case that runs on O0/O1/O2.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "c2 partial (GoldenRoots3): Engine --tests on 137704d910 sources still null-derefs in both named claims. Claim 83 'store profile receipt copy and proof preserve native io errors': SIGSEGV at 0x0 in compiler_fs_error <- store_reuse_executable_lease_members <- store_snapshot_lease. Claim 69: SIGSEGV at 0x0 in jet_rt_mem_move <- jet_string_bytes <- Files.join_impl <- store_lease_member_path_matches <- executable_index_at. Safe code reaching a null pointer is an I1 defect; it stays on this card. Logs under $JET_SCRATCH_ROOT/lanes/GoldenRoots3/state/jetpack-bootstrap/GoldenRoots3-c75109d407/run-from-{81,4}.log. The AOT tier is still running."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Repro (JetpackEngine): $JET_SCRATCH_ROOT/lanes/JetpackEngine/repro6590/v2.jet, the match form from CacheLease.copy_profile_executable: if &members[index].file == { .Val(input) -> { input.stat() ... } .None -> ... } over [Member{file: FileReader?}] borrowed as &[...]. jet build --optimize=none of it produces a binary that hangs in a futex (fault-handler deadlock, exit 124 under timeout 10). The statement form if &...file == .Val(input) { and the variants with seek/read and an == None precheck pass. The LeaseSnapshot.jet:314 SIGSEGV is not reduced yet; the in-Engine claim reproduces it. So: wrong code from the match-on-borrowed-optional lowering, plus a fault handler that deadlocks instead of reporting."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A switch on a borrowed optional no-clone handle in a list element closes it exactly once and exits, proven by a case on O0/O1/O2 (an I1 safety fix: no double close on freed state)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 137704d910 (GoldenRoots3): root cause was a double close. Sema hoisted the switch subject into a generated Let that moved the no-clone handle out of its List element, and ir_bind_pin's box alias also armed a close, so the second close locked freed FD state and hung in a futex (no signal, one thread). Fix: a hoisted generated Let over a place whose value has a drop and no clone reads the place in place, and an ir_bind_pin box alias never arms a close. Case core_files_opaque_handles/switch_on_listed_optional_reader_closes_it_once passes on O0/O1/O2 and release and times out on base; 16 repro variants that hung now exit 0; A/B vs 6bee890a10 ui, golden and cases 0 lost.",
+          "at": "2026-11-06T05:30:06.942Z"
+        },
+        {
+          "n": 2,
+          "text": "The Jetpack Engine claim 'store profile receipt copy and proof preserve native io errors' (LeaseSnapshot.jet:314 crash) and the Engine AOT test binary run to completion with the fixed compiler",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 41ad578550 (GoldenRoots3): root cause was a heap overwrite, not the claims' own code. Stream line leaves handed out align-1 buffers with no count word as owned [U8], so trim_pipe_line's pop uniqueness check decremented the neighbouring String? box; the leaves now allocate with jet_rt_alloc_8. Repro before: 77/300 names intact and corrupted lines ('qeady'); after: 300/300 at none, basic and full. New case process_sessions/streamed_child_lines_leave_neighbouring_values_intact passes on O0/O1/O2 and a built binary; the other process_sessions cases pass. With jetpack rebuilt, Engine claims 69 and 81-92 (including 83) pass; the Engine AOT tier on c75109d407 runs to completion with 530 passed, 30 failed and no hang (its failures include claim 69, fixed by this commit).",
+          "at": "2026-11-06T06:13:41.121Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G2"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-06T04:52:06.103Z",
+      "updated": "2026-11-06T06:13:42.516Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-11-06T06:13:42.516Z",
+      "questions": [],
+      "retiredAt": "2026-11-09T06:25:51.550Z"
     }
   ]
 }
