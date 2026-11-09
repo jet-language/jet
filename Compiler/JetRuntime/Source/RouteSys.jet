@@ -356,6 +356,15 @@ sys_group_file: fn(user: I64, gid: I64, list: I64, look: I64, reader: I64, nscd:
     host_sample_out(result, available, value, errno)
 }
 
+// mlockall(flags): Core passes MCL_CURRENT 1 | MCL_ONFAULT 4, plus
+// MCL_FUTURE 2. ONFAULT locks each page as it is first touched, so the
+// runtime's reserved fiber stacks and slab regions are never populated.
+#Export(c) jet_sys_mlockall_raw: fn(flags: I64, available: I64, value: I64, errno: I64) {
+    native: jet_int_owned_to_i64(flags)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    host_sample_out(host_call(I64{151}, native, I64{0}, I64{0}), available, value, errno)
+}
+
 // getloadavg(avg, 3): (true, count, avg0, avg1, avg2). musl reads sysinfo's
 // three loads, each a 16-bit binary fraction; the doubles cross as their raw
 // f64 bits in the Float out slots. A host without sysinfo (the web) has no

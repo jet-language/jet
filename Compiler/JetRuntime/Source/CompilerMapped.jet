@@ -155,6 +155,19 @@ compiler_mapped_unregister: fn(key: I64) {
 }
 #Export(c) jet_std_fs_map_len: fn(map: I64) -> I64 { jet_int_owned_from_i64(rt_text_word(wrapping(map + I64{40}))) }
 #Export(c) jet_std_fs_map_is_empty: fn(map: I64) -> Bool { rt_text_word(wrapping(map + I64{40})) == I64{0} }
+// posix_madvise over the whole mapping: madvise(pointer, length, advice).
+// Core passes MADV_NORMAL 0, RANDOM 1, SEQUENTIAL 2, WILLNEED 3, DONTNEED 4
+// or COLD 20. The bytes are read-only and private to a file, so DONTNEED
+// only drops pages a later read faults back in from the file. Advice changes
+// no data: an empty map, and COLD on a kernel before 5.4 (EINVAL), succeed.
+#Export(c) jet_std_fs_map_advise: fn(map: I64, advice: I64, error: I64) -> I64 {
+    length: rt_text_word(wrapping(map + I64{40}))
+    if (length == I64{0}) -> return I64{1}
+    result: host_call(I64{28}, rt_text_word(wrapping(map + I64{32})), length, advice)
+    if (result == I64{-22} && advice == I64{20}) -> return I64{1}
+    if (result < I64{0}) -> return compiler_fs_errno(HOST_IO_OP_READ, rt_text_word(wrapping(map + I64{16})), -result, error)
+    I64{1}
+}
 // Byte windows lend the read-only mapped bytes the Map56 owner holds: the
 // route writes (data, length) and IR builds the View<U8> header over them,
 // which owns nothing. Bounds are the exact Int carriers; a boxed Int lies
