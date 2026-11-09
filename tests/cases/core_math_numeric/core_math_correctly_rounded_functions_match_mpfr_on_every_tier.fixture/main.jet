@@ -17,6 +17,8 @@ ACOS_PI: comptime { embed_file("corpus/acospi.txt") }
 ATAN2_PI: comptime { embed_file("corpus/atan2pi.txt") }
 EXP2_M1: comptime { embed_file("corpus/exp2m1.txt") }
 EXP10_M1: comptime { embed_file("corpus/exp10m1.txt") }
+LOG2_P1: comptime { embed_file("corpus/log2p1.txt") }
+LOG10_P1: comptime { embed_file("corpus/log10p1.txt") }
 
 hex_value: fn(b: U8) -> Int {
     n: Int.from_u8(b)
@@ -61,6 +63,8 @@ value: fn(name: String, a: [Float]) -> Float {
     if name == "atan2pi" -> return math.atan2_pi(a[0], a[1])
     if name == "exp2m1" -> return math.exp2_m1(a[0])
     if name == "exp10m1" -> return math.exp10_m1(a[0])
+    if name == "log2p1" -> return math.log2_1p(a[0])
+    if name == "log10p1" -> return math.log10_1p(a[0])
     panic("no corpus function {name}")
 }
 
@@ -110,4 +114,6 @@ run: fn() {
     check("atan2pi", ATAN2_PI)
     check("exp2m1", EXP2_M1)
     check("exp10m1", EXP10_M1)
+    check("log2p1", LOG2_P1)
+    check("log10p1", LOG10_P1)
 }

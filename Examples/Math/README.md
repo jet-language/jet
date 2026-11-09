@@ -20,6 +20,7 @@ Run a lesson from the repository root, for example `jet run Examples/Math/<Lesso
 - [IntExact](IntExact.jet) — Default Int is exact, with a machine-word fast path and spill.
 - [IntPowNegativeStop](IntPowNegativeStop.jet) — A negative runtime exponent stops; it never returns a sentinel.
 - [InverseHalfTurnTrig](InverseHalfTurnTrig.jet) — asin, acos, atan and atan2 divided by pi, correctly rounded: angles in half-turns, with the same bits on every tier and exact angles exact.
+- [LogOnePlus](LogOnePlus.jet) — log2(1 + x) and log10(1 + x), correctly rounded: the same bits on every tier, and full precision for small x, where 1 + x rounds x away.
 - [MathAudit](MathAudit.jet) — core.math owns libm breadth, integer safety, and the remaining high-witness float/decompose gaps.
 - [MixedTypes](MixedTypes.jet)
 - [Modulo](Modulo.jet) — Two remainders.

@@ -2572,6 +2572,7 @@ calling them. Source-owned Core wrappers preserve these same constraints.
 | `math.exp(x)`, `exp2(x)`, `exp10(x)`, `exp_m1(x)`, `expm1(x)`, `math.erf(x)`, `math.erfc(x)` | `Float` | Exponential and error functions. |
 | `math.exp2_m1(x)`, `exp10_m1(x)` | `Float` | `2^x - 1` and `10^x - 1`, correctly rounded, so every tier returns the same bits and small `x` keeps full precision: -1 at `-inf`, `+inf` on overflow, and a zero keeps its sign (C23 `exp2m1`, `exp10m1`). |
 | `math.ln(x)`, `ln_1p(x)`, `log1p(x)`, `log10(x)`, `log2(x)`, `logb(x)`, `log(x, base)` | `Float` | Natural, base-specific, and compensated logarithms. |
+| `math.log2_1p(x)`, `log10_1p(x)` | `Float` | `log2(1 + x)` and `log10(1 + x)`, correctly rounded, so every tier returns the same bits and small `x` keeps full precision: NaN below -1, `-inf` at -1, `+inf` at `+inf`, exact at every `x = 2^k - 1` and `x = 10^k - 1` (`k` in [1, 15]), and a zero keeps its sign (C23 `log2p1`, `log10p1`). |
 | `math.sqrt(x)`, `cbrt(x)`, `hypot(x, y)` | `Float` | Roots and hypotenuse. |
 | `math.rsqrt(x)` | `Float` | `1 / sqrt(x)` correctly rounded, so every tier returns the same bits: `+inf` for `+0`, `-inf` for `-0`, `+0` for `+inf` and NaN below zero (C23 `rsqrt`). |
 | `math.floor(x)` / `math.ceil(x)` / `math.trunc(x)` | `Float` | Directed or toward-zero rounding in floating-point form. |
