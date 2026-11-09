@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 97896,
+    "rev": 97897,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -86389,8 +86389,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T20:59:59.933Z",
-      "updated": "2026-11-09T19:42:36.844Z",
-      "updatedBy": "agent",
+      "updated": "2026-11-09T20:01:11.159Z",
+      "updatedBy": "Main",
       "criteriaLastN": 3
     },
     {
@@ -189565,6 +189565,201 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-09T19:57:00.621Z"
+    },
+    {
+      "id": "D-FIELD-READONLY1",
+      "cardId": "c08tik7v",
+      "group": "syntax",
+      "title": "Read-only fields: a public computed field over a priv stored field, with writes refused",
+      "situation": "A file lock exposes the path it names, and the library documentation intends callers only to read it. The checker currently accepts a write to that Core field, but running the program fails in the compiler backend before the lock is taken. Ordinary user structs do allow public-field writes. Jet also has computed fields that can read private storage without exposing a writable field. Their literal-write error exists, but assignment checking is incomplete. We recommend finishing that existing rule and using a private stored path behind a public computed path, rather than adding a setter qualifier.",
+      "gist": "How should a field be readable everywhere but writable only inside its own module, such as a lock's path?",
+      "lesson": "Field visibility and write access are different. A public field can be edited only through a mutable owner or write view; priv also restricts which module may access it. A public computed getter can expose a value without exposing storage to write.",
+      "explainer": "Words used here. A module is a file or a name: module { … } block; its code owns the types it declares. priv before a field hides it outside that module. A computed field, name: Type -> formula, is read like a field but holds no value of its own; its formula reads other fields.\n\nForging means building or changing a value so it claims something untrue. A lock whose path was rewritten forges a claim about which file is locked.",
+      "story": "Sam's backup helper tries to overwrite a lock's path. He wants a normal compiler error explaining that the field is read-only, not a backend failure, while print(lock.path) keeps working.",
+      "inWild": "Kotlin separates getter and setter visibility: a public var can have private set (https://kotlinlang.org/docs/properties.html). This preserves stored-field organization. Jet's working private-field/reader-method probe r4 offers a different organization without a new setter qualifier.",
+      "detail": "Exercised admitted jet: r1 gives E0605; r2 gives E0414. r3 prints /tmp/app.lock then /etc/passwd for a user struct. r4 and r5 print /tmp/app.lock through a method and computed getter. r8 prints true then /tmp/next.lock after an internal backing-field edit. r9 gives E0339 for the computed literal field and E0605 for explicitly setting private storage.\n\nr6, r7 and r10 pass jet check but jet run reports an internal backend failure for their field writes. r7 is a real FileLock and was run from BallotReview/field-run, not the repository. Therefore the draft must not say a Core lock currently takes effect and then successfully changes its reported path. This is a checker/backend gap, not proven runtime mutation.\n\nE0339's declaration covers computed fields in literals or direct assignments. Constructors.jet:628 checks the literal case. Finish assignment-place checking under every ballot option, independently of the handle API choice (I2/I3 and #6468 c3). A computed field is not writable even inside its defining module; that module changes the separate stored field.\n\nA uses private storage plus a public computed projection. Reject direct and compound assignment, destructive take and write loans into computed properties before lowering, including nested/indexed projections. Plain reads follow existing ownership, copy and view rules; do not promise zero String copies without IR evidence. Keep constructors private where hidden handles enforce provider ownership.\n\nCurrent Core paths are stored fields on TempDir, TempFile, FileLock, FileReader, FileWriter, Directory and MappedFile. Cutover must cover their constructors, host projections and in-repo readers, not just source declarations. The corpus currently reports E0302, E0205 and E0605: its write owners are immutable. To require E0339 unchanged, check computed-target validity before ordinary mutability; also add mutable-owner tests so E0205 cannot hide the actual gap.\n\nB narrows setter permission on a stored field. That is distinct from computing a value with no stored place, so its benefit is one declaration, ordinary internal writes and unchanged storage metadata. Its cost is another permission qualifier and enforcement across every write/loan path; it is not automatically forbidden by I8. D is an ordinary private field plus reader and remains a working alternative. C retains public mutable path but must still fix computed-field checking, document the changed promise and remove only the explicitly voted forge-by-write expectations.\n\n#6468 c1 is this choice; c2 applies the chosen API to named handles and corresponding tests; c3's sema refusal is unconditional. The corpus is an acceptance target, not an observed pass under unimplemented A. Beginner reads stay .path under A/B/C; D changes them to .path(). Experts retain explicit provider methods and normal ownership checks. No new accessor evaluator or special Core-only protection is authorized.",
+      "options": [
+        {
+          "key": "A",
+          "name": "A computed field over a priv field",
+          "detail": "No new syntax: a public computed getter reads private storage. No code assigns the getter itself, even inside its module; provider code edits the backing field.",
+          "technical": "Finish E0339 computed-place validation independently of this vote. Migrate all named handle storage, constructors and host projections. Test direct/compound/nested writes, write loans and destructive takes from storage. Consuming an ordinary materialized getter result remains legal. Add mutable-owner cases and define diagnostic priority for the existing immutable-owner corpus.",
+          "code": "// Core/Files/Files.jet\nFileLock: struct {\n    priv stored_path: String\n    path: String -> stored_path\n    priv handle: Int\n}\n\n// user code\nuse files: core.files\nrun: fn() {\n    lock := files.lock(\"backup.lock\") ?? panic(\"lock\")\n    print(lock.path)                 // backup.lock\n    lock.path = \"backup\"             // error E0339: path is computed\n}"
+        },
+        {
+          "key": "B",
+          "name": "A priv(set) qualifier",
+          "detail": "priv(set) path: String reads anywhere and writes only in the type's module, like Swift's private(set).",
+          "technical": "The grammar accepts set as a second priv qualifier on fields only. Reads follow the type's visibility. Writes and literal entries outside the type's module are E0605 with a write message. The syntax registry gains a set qualifier row.",
+          "code": "// Core/Files/Files.jet\nFileLock: struct {\n    priv(set) path: String\n    priv handle: Int\n}\n\n// user code\nuse files: core.files\nrun: fn() {\n    lock := files.lock(\"backup.lock\") ?? panic(\"lock\")\n    print(lock.path)                 // backup.lock\n    lock.path = \"backup\"             // error E0605: path is written only in core.files\n}"
+        },
+        {
+          "key": "C",
+          "name": "Keep path writable; drop the write rows",
+          "detail": "path remains publicly writable through a mutable owner. The docs change, and only the specifically voted write expectations leave the corpus. Existing computed-property bugs still must be fixed.",
+          "technical": "Retain public stored paths and implement valid Core-handle lowering without changing checks or allowing forging of the private handle. Fix computed-field assignment checking under #6468 c3 regardless. This option relaxes a path-reporting API promise; it does not authorize descriptor forgery.",
+          "code": "// Core/Files/Files.jet\nFileLock: struct {\n    path: String\n    priv handle: Int\n}\n\n// user code\nuse files: core.files\nrun: fn() {\n    lock := files.lock(\"backup.lock\") ?? panic(\"lock\")\n    print(lock.path)                 // backup.lock\n    lock.path = \"backup\"             // allowed; the lock now names the wrong file\n}"
+        },
+        {
+          "key": "D",
+          "name": "A priv field and a path() method",
+          "detail": "The field is hidden, and a method returns a copy, as in Rust's tempfile crate.",
+          "technical": "Core renames each stored field and adds path: fn(self) -> String. Every caller, doc row and corpus row changes from .path to .path(). r4 shows the form works today.",
+          "code": "// Core/Files/Files.jet\nFileLock: struct {\n    priv stored_path: String\n    priv handle: Int\n    path: fn(self) -> String { self.stored_path.copy() }\n}\n\n// user code\nuse files: core.files\nrun: fn() {\n    lock := files.lock(\"backup.lock\") ?? panic(\"lock\")\n    print(lock.path())               // backup.lock\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Kotlin",
+          "note": "Setter visibility can be narrower than getter visibility (Kotlin Properties, backing fields/getters/setters).",
+          "code": "var path: String = \"backup.lock\"\n    private set"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "A reuses computed getters and private storage, keeping .path reads unchanged. Computed-write validation is already owed; the vote chooses the handle API, not whether backend crashes are acceptable.",
+        "gains": [
+          "No new syntax: computed fields already exist and are taught.",
+          "Existing read call sites remain unchanged; the corpus remains an acceptance target.",
+          "Computed-field writes are refused by sema under every option."
+        ],
+        "losses": [
+          {
+            "loss": "Each read-only field needs two names, the hidden stored one and the public one.",
+            "mitigation": "The pattern is two lines, and E0339's fix text shows it."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B preserves stored-field identity and uses one declaration, but adds a setter-permission qualifier. A reuses existing getters where that extra storage permission surface is unnecessary."
+          },
+          {
+            "key": "C",
+            "reason": "C lets any caller make a lock name a file it does not hold, and the backend still needs new work to lower the writes."
+          },
+          {
+            "key": "D",
+            "reason": "D changes every .path reader to a call, and reading becomes a method where the rest of Core reads fields."
+          }
+        ],
+        "tradeoff": "Two names per read-only field instead of a new qualifier."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: GPT. Fresh agent: BallotReview. The 2026-11-09 review found it clean after three repairs. Every probe and the corpus row were run."
+      },
+      "checkInstructions": "Run the field probes and corpus from the dev tree as in BallotReview/field-probes.sh; r7 runs in the scratch field-run directory. The admitted compiler accepts r6/r7/r10 in check and fails in lowering. After implementation, require mutable-owner direct/compound/nested/write-loan/take tests, exact UI diagnostics and all named handle constructors/readers on every tier.",
+      "surface": {
+        "gist": "How should a field be readable everywhere but writable only inside its own module, such as a lock's path?",
+        "lesson": "Visibility and mutability are separate: public stored fields need a mutable owner to edit; a computed getter exposes no writable stored place.",
+        "trio": {
+          "current": {
+            "note": "The checker accepts the Core path write, but the admitted compiler fails in lowering before execution.",
+            "code": "lock := files.lock(\"backup.lock\") ?? panic(\"lock\")\nlock.path = \"backup\"\n// jet check passes; jet run reports an internal compiler error"
+          },
+          "wild": {
+            "lang": "Kotlin",
+            "note": "The setter is narrowed separately from the getter.",
+            "code": "var path: String = \"backup.lock\"\n    private set"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Computed field over a priv field",
+            "gist": "A public formula reads a hidden field; writing it is an error.",
+            "gains": [
+              "No new syntax.",
+              "Existing .path readers stay unchanged."
+            ],
+            "losses": [
+              "Two names per field."
+            ],
+            "proposed": {
+              "code": "FileLock: struct {\n    priv stored_path: String\n    path: String -> stored_path\n}\nlock.path = \"backup\"   // error E0339"
+            }
+          },
+          {
+            "key": "B",
+            "name": "priv(set)",
+            "gist": "A new qualifier narrows only writing.",
+            "gains": [
+              "One line per field."
+            ],
+            "losses": [
+              "Adds setter-permission syntax and its checking rules."
+            ],
+            "proposed": {
+              "code": "FileLock: struct {\n    priv(set) path: String\n}\nlock.path = \"backup\"   // error E0605"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Keep it writable",
+            "gist": "Drop the write rows and the read-only promise.",
+            "gains": [
+              "Retains a simple public stored path."
+            ],
+            "losses": [
+              "Locks can name the wrong file."
+            ],
+            "proposed": {
+              "code": "FileLock: struct {\n    path: String\n}\nlock.path = \"backup\"   // allowed"
+            }
+          },
+          {
+            "key": "D",
+            "name": "A path() method",
+            "gist": "Hide the field and add a reader method.",
+            "gains": [
+              "Works today."
+            ],
+            "losses": [
+              "Every reader becomes a call."
+            ],
+            "proposed": {
+              "code": "print(lock.path())"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Jet's computed fields already read like fields and refuse literals. Finishing their documented write error gives read-only fields with no new syntax.",
+          "gains": [
+            "No new syntax.",
+            "A real checker gap closes."
+          ],
+          "losses": [
+            {
+              "loss": "Two names per read-only field.",
+              "mitigation": "The pattern is two lines, shown in E0339's fix."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B offers one stored-field declaration but adds a setter-permission surface; A reuses existing computed getters."
+            },
+            {
+              "key": "C",
+              "reason": "Locks could name files they do not hold."
+            },
+            {
+              "key": "D",
+              "reason": "Every .path reader becomes a call."
+            }
+          ],
+          "tradeoff": "Two names per field instead of a new qualifier."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-09T20:01:11.159Z"
     }
   ],
   "questions": [
@@ -192674,6 +192869,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-09T20:01:11.159Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-FIELD-READONLY1",
+      "note": "Read-only fields: a public computed field over a priv stored field, with writes refused"
+    },
     {
       "at": "2026-11-09T19:57:00.622Z",
       "by": "Main",
