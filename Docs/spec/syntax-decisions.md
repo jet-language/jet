@@ -183,7 +183,7 @@ card #1495)*: the current tree keeps `core.files`,
 random under `core.math.random`, formatting under `core.text.fmt`, network
 leaves under `core.net`, UUID/vault/raw primitives under `core.crypto`, data
 sketches under `core.data.sketch`, solver under `core.compute.solve`, graphics
-under `core.game.raylib`, browser automation under `core.web.browser`, and
+under `core.ui` (D-RAY-API1), browser automation under `core.web.browser`, and
 gzip/zstd under `core.archive`. `core.time` is the one clock/civil-time door.
 Retired free namespaces have no aliases or re-exports, and there is no
 `core.json` short door.
@@ -4130,8 +4130,8 @@ bindings + optional user overlay; by-value first, pointers only inside S58.
 |---|---|
 | Autogen | `#Bindgen c.<lib>.__bindgen__: module { … }` in `.jet/bindings/c/<lib>.jet` |
 | Overlay | `#Extern c.<lib>: module { … }` — merged bindgen ∪ overlay, overlay wins |
-| Script | `use rl: "raylib.h"` — compile-time bind on cache miss |
-| Project | `use rl: c.raylib` or `use c.[raylib, sqlite3]` — one form per lib per file |
+| Script | `use z: "zlib.h"` — compile-time bind on cache miss |
+| Project | `use z: c.zlib` or `use c.[zlib, sqlite3]` — one form per lib per file |
 
 All foreign-language namespaces use the same `.[…]` member-list form as ordinary
 namespaces. Single-library `use alias: <lang>.<lib>` remains valid; there is no
@@ -4419,9 +4419,9 @@ rusqlite-bundled (`core.db`, D-DEP-DB1), ureq/hyper/tungstenite
 (`core.http`, D-NETDEP1/D-HTTPLIB3), Cranelift (`jet-jit`, D-JITDEP1),
 wasmtime (application plugins D-DEP-WASM1 and compiler-extension host
 D-DX5-HOOK1), age-style crypto bridge
-(D-JPK-SECRETCRYPTO1). `jet repl` stays std-only (D-REPL18). Raylib ships as
-first-party `core.raylib` bridge package (D-RAYLIB1); `core.game` is the
-scene-first game engine layered above it (D-GAME1=B, D-GAME2=A, D-GAME3=C).
+(D-JPK-SECRETCRYPTO1). `jet repl` stays std-only (D-REPL18). `core.game` is the
+scene-first game engine (D-GAME1=B, D-GAME2=A, D-GAME3=C); it draws through
+`core.ui` windows (D-RAY-API1=A).
 npm interop = typed first-party stub packages, no `.d.ts` parsing
 (D-NPMTYPE1); Swift interop waits on native-UI/C-ABI work (D-JSWIFTFFI1).
 
@@ -4477,16 +4477,13 @@ batteries engine. The engine name is `core.game` (D-GAME2=A). The beginner
 API is scene-first with a frame hook (D-GAME3=C): a `Scene` owns sprites,
 shapes, sounds, camera, and input bindings as durable editable data, and
 `scene.on_frame((frame) -> { ... })` attaches small game logic to that scene.
-The frame hook is not a second engine model; it is script on the scene. The
-already-ratified `core.raylib` bridge package (D-RAYLIB1=A) remains the
-interim compatibility floor beneath the native-shaped stack.
+The frame hook is not a second engine model; it is script on the scene. It
+draws through `core.ui` windows (D-RAY-API1=A).
 
-**D-FLAGSHIP-RAYLIB1 — Native raylib bridge** *(ratified 2026-07-07,
-card #9)*: the flagship raylib slice uses the already-ratified `core.raylib`
-surface. Generated code is headless by default; with `JET_RAYLIB_DISPLAY=1` it
-dynamically loads native raylib and calls the real C window, draw, keyboard, and
-FPS APIs. Missing raylib degrades to the same headless path so CI and ordinary
-test runs do not link raylib or require a display server.
+**D-FLAGSHIP-RAYLIB1** *(ratified 2026-07-07, card #9; superseded by
+D-RAY-API1=A)*: the foreign graphics bridge, its display switch and its
+dynamic loading are gone; drawing is `core.ui`'s Jet rasterizer on `Frame`
+values, and windows are `core.ui`'s own display-server clients.
 
 **D-GAME-ASSET1 / D-GAME-ECS1 / D-GAME-INPUT1 / D-GAME-REPLAY1 /
 D-GAME-BACKEND1 / D-GAME-BUDGET1 — Stable `core.game` substrate** *(ratified

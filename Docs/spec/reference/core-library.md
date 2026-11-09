@@ -190,8 +190,7 @@ and stdin kernels; the Rust seed entry points retain their fault preflight.
 `take` forwards through the registered source target `__take_bytes`, preserving
 the keyword spelling without a parser exception. Jet rejects a negative count
 before the read fault probe; the existing stdin kernel performs the one raw read.
-Raylib's display/input/texture operations keep the existing registered host
-bindings, with source-owned argument policy. Font shaping returns the existing
+Font shaping returns the existing
 host result through a private leaf; the Jet entry owns the exact failure panic
 and never selects an approximate fallback implicitly.
 
@@ -2971,71 +2970,6 @@ run: fn() {
 | `Replay` | type | Replay destination and transcript policy. |
 | `Backend` | type | Backend name and running state. |
 
-### `core.game.raylib` — display-gated drawing
-
-`core.game.raylib` is a display-gated bridge. It has no host-side fallback: a
-headless or unavailable display returns provider state rather than silently
-pretending to draw. Textures, sounds, windows, and colors are typed handles;
-resource loading requires the corresponding file and GPU authority.
-
-| Function or type | Returns | Description |
-| --- | --- | --- |
-| `core.game.raylib.window_open(width, height, title)` | `RaylibWindow -[GPU]>` | Open a window; dimensions are clamped to `1..2,147,483,647`. |
-| `raylib.window_ready(window)` / `window_should_close(window)` | `Bool -[GPU]>` | Query window readiness or close state. |
-| `raylib.begin_drawing(window)` | `Unit -[GPU]>` | Begin a frame for a window. |
-| `raylib.end_drawing()` | `Unit -[GPU]>` | Finish the active frame; with `JET_RAYLIB_CAPTURE` set, write the canvas to that path as a PAM image. |
-| `raylib.clear_background(color)` | `Unit -[GPU]>` | Set every canvas pixel to the color, alpha included. |
-| `raylib.close_window(window)` | `Unit -[GPU]>` | Close a window and release its display handle, its canvas and every decoded texture; as in raylib, atlases loaded before the close draw nothing afterwards. |
-| `raylib.color(r, g, b, a)` | `RaylibColor` | Clamp each component to `0..255` and construct a color. |
-| `raylib.vector2(x, y)` / `raylib.rectangle(x, y, width, height)` | `RaylibVector2` / `RaylibRectangle` | Construct raylib's `Float` point and rectangle. Shapes that take them fill the pixels whose centers lie inside, with coordinates snapped to 1/256 pixel; a pixel whose center lies on a left or top edge is inside, one on a right or bottom edge is not. |
-| `raylib.draw_rectangle(x, y, width, height, color)` | `Unit -[GPU]>` | Fill a rectangle, clipped to the canvas and blended src-over. |
-| `raylib.draw_line(start_x, start_y, end_x, end_y, color)` | `Unit -[GPU]>` | Draw a one-pixel line including both endpoints; along the longer axis each step draws one pixel at the line value rounded half up. |
-| `raylib.draw_circle(center_x, center_y, radius, color)` | `Unit -[GPU]>` | Fill every pixel within `radius` (an `Int`) of the center; a radius below 1 draws nothing. |
-| `raylib.draw_triangle(x0, y0, x1, y1, x2, y2, color)` | `Unit -[GPU]>` | Fill the pixels whose centers lie inside the triangle, in either winding; triangles sharing an edge never both cover a pixel. |
-| `raylib.draw_pixel(x, y, color)` | `Unit -[GPU]>` | Blend one pixel. |
-| `raylib.draw_rectangle_rec(rec, color)` | `Unit -[GPU]>` | Fill a `RaylibRectangle`; an empty or negative side draws nothing. |
-| `raylib.draw_rectangle_lines(x, y, width, height, color)` | `Unit -[GPU]>` | Draw the rectangle's one-pixel border inside its bounds, each pixel once. |
-| `raylib.draw_rectangle_lines_ex(rec, line_thick, color)` | `Unit -[GPU]>` | Draw a border `line_thick` wide inside `rec` as raylib's four bands: top and bottom full width, the sides between them. A thickness past either side becomes half the shorter side. Bands are blended one after another. |
-| `raylib.draw_rectangle_gradient_v(x, y, width, height, top, bottom)` / `draw_rectangle_gradient_h(x, y, width, height, left, right)` | `Unit -[GPU]>` | Fill a rectangle shaded from the first color to the second, top to bottom or left to right. |
-| `raylib.draw_rectangle_gradient_ex(rec, top_left, bottom_left, bottom_right, top_right)` | `Unit -[GPU]>` | Fill a rectangle shaded between its four corner colors, given counter-clockwise from the top left. Each pixel's color is interpolated at its center across the two triangles split along the top-left to bottom-right diagonal, rounded half up per channel. |
-| `raylib.draw_rectangle_rounded(rec, roundness, segments, color)` | `Unit -[GPU]>` | Fill a rectangle whose corners are arcs of radius `roundness` (clamped to `1`) times half the shorter side, each arc a polygon of `segments` steps, or of raylib's automatic count when `segments` is below 4. A `roundness` of 0 or below, or a side below 1, fills the plain rectangle. |
-| `raylib.draw_rectangle_rounded_lines(rec, roundness, segments, color)` | `Unit -[GPU]>` | Draw the one-pixel band just outside the rounded rectangle, as raylib does. A `roundness` of 0 or below draws the one-pixel band around `rec`. |
-| `raylib.draw_circle_lines(center_x, center_y, radius, color)` | `Unit -[GPU]>` | Draw the pixels of `draw_circle`'s disc that touch a pixel outside it. |
-| `raylib.draw_ellipse(center_x, center_y, radius_h, radius_v, color)` | `Unit -[GPU]>` | Fill the pixels at offset `(dx, dy)` from the center with `(dx * radius_v)^2 + (dy * radius_h)^2 <= (radius_h * radius_v)^2`; a radius of 0 or below draws nothing. |
-| `raylib.draw_ellipse_lines(center_x, center_y, radius_h, radius_v, color)` | `Unit -[GPU]>` | Draw the pixels of `draw_ellipse`'s fill that touch a pixel outside it. |
-| `raylib.draw_ring(center, inner_radius, outer_radius, start_angle, end_angle, segments, color)` | `Unit -[GPU]>` | Fill the ring between the radii from `start_angle` to `end_angle` (degrees), built of raylib's segments; with an inner radius of 0 or below it fills a circle sector. raylib's argument fixes apply: swapped radii and angles are reordered and an outer radius of 0 or below becomes 0.1. Each pixel is blended once. |
-| `raylib.draw_ring_lines(center, inner_radius, outer_radius, start_angle, end_angle, segments, color)` | `Unit -[GPU]>` | Draw the pixels of `draw_ring`'s fill that touch a pixel outside it. |
-| `raylib.draw_poly(center, sides, radius, rotation, color)` | `Unit -[GPU]>` | Fill a regular polygon with vertex `i` at angle `rotation + 360 * i / sides` degrees; fewer than 3 sides draw 3. |
-| `raylib.draw_poly_lines(center, sides, radius, rotation, color)` | `Unit -[GPU]>` | Draw the pixels of `draw_poly`'s fill that touch a pixel outside it. |
-| `raylib.draw_text(text, x, y, size, color)` | `Unit -[GPU]>` | Draw text in the built-in 5x7 font at whole-pixel scale `max(round(size / 10), 1)`; `\n` starts a new line. |
-| `raylib.measure_text(text, size)` | `Int` | The width in pixels that `draw_text` covers for its widest line: `(6 × scalars − 1) × scale`, with the same scale and the same `\n` line breaks. Empty text or empty lines measure 0. Needs no effect. |
-| `raylib.draw_sprite(atlas, source, x, y)` | `Unit -[GPU]>` | Copy the atlas's first region named `source` to `(x, y)`, clipped to the texture and the canvas and blended src-over; an unknown region or an atlas without a decoded texture draws nothing. |
-| `raylib.check_collision_recs(rec1, rec2)` / `check_collision_point_rec(point, rec)` | `Bool` | Whether two rectangles overlap, or a point lies inside a rectangle. A rectangle includes its left and top edges and excludes its right and bottom edges, so rectangles that only touch do not collide. |
-| `raylib.check_collision_circles(center1, radius1, center2, radius2)` / `check_collision_point_circle(point, center, radius)` | `Bool` | Whether two circles overlap or touch, or a point lies within `radius` of the center. |
-| `raylib.check_collision_circle_rec(center, radius, rec)` / `check_collision_circle_line(center, radius, p1, p2)` | `Bool` | Whether a circle reaches a rectangle or the segment from `p1` to `p2`. |
-| `raylib.check_collision_point_triangle(point, p1, p2, p3)` / `check_collision_point_poly(point, points)` | `Bool` | Whether a point lies strictly inside a triangle, or inside a polygon by the even-odd rule; fewer than 3 points enclose nothing. |
-| `raylib.check_collision_point_line(point, p1, p2, threshold)` | `Bool` | Whether a point lies between `p1` and `p2` along the line's longer axis and within `threshold` pixels of the line, using raylib's cross-product test. |
-| `raylib.check_collision_lines(start1, end1, start2, end2)` | `RaylibVector2?` | The point where two segments cross, or `None` when they are parallel or cross outside either segment. |
-| `raylib.get_collision_rec(rec1, rec2)` | `RaylibRectangle` | The overlap of two rectangles, or a zero rectangle when they do not overlap. |
-| `raylib.gen_image_color(width, height, color)` / `gen_image_checked(width, height, checks_x, checks_y, first, second)` | `RaylibImage` | A new RGBA image of one color, or of `checks_x` by `checks_y` pixel checks starting with `first` at the top left. A side below 1 or above 16384, or more than 2^24 pixels, gives an image with no pixels. |
-| `raylib.get_image_color(image, x, y)` | `RaylibColor` | The pixel at `(x, y)`, or a zero color outside the image. |
-| `raylib.image_clear_background(image, color)` / `image_draw_pixel(image, x, y, color)` | `Unit` | Set every pixel, or one pixel inside the image, to `color`, alpha included. |
-| `raylib.image_draw_rectangle(image, x, y, width, height, color)` / `image_draw_rectangle_rec(image, rec, color)` | `Unit` | Set the rectangle's pixels, clipped to the image and truncated to whole pixels. As in raylib, less than one column still sets the first pixel unless the rectangle ends at the left edge, and less than one row still fills the first row. |
-| `raylib.image_crop(image, rec)` | `Unit` | Keep the rectangle's pixels, clipped to the image and truncated to whole pixels. A rectangle starting past the image leaves it unchanged. As in raylib, one with no whole column or row leaves no pixels, and the truncated sides (not below 0) become the image's size. |
-| `raylib.image_resize_nn(image, width, height)` | `Unit` | Nearest-neighbour resize with raylib's 16.16 fixed-point source index. A size outside `gen_image_color`'s limits leaves the image unchanged. |
-| `raylib.image_flip_vertical(image)` / `image_flip_horizontal(image)` / `image_rotate_cw(image)` / `image_rotate_ccw(image)` | `Unit` | Mirror the rows or columns, or turn the image a quarter turn; a turn swaps width and height. |
-| `raylib.image_color_tint(image, color)` / `image_color_invert(image)` | `Unit` | Scale each channel by `color`'s channel / 255, rounded down, alpha included; or replace red, green and blue with 255 minus themselves. |
-| `raylib.image_color_brightness(image, amount)` / `image_color_replace(image, color, replace)` | `Unit` | Add `amount`, clamped to -255..255, to red, green and blue, capped at 255; as in raylib, a sum below 0 becomes 1. Or replace every pixel equal to `color` in all four channels with `replace`. |
-| `raylib.load_texture_atlas(path)` | `RaylibTextureAtlas -[FS, GPU]>` | Load an atlas and decode its PNG texture (every color type, bit depth and Adam7; sixteen-bit samples keep their high byte). A missing or malformed PNG leaves the atlas without a texture. |
-| `raylib.load_sound(path)` | `RaylibSound -[FS, GPU]>` | Load a sound resource. |
-| `raylib.play_sound(sound)` | `Bool -[GPU]>` | Start playback and report whether it was accepted. |
-| `raylib.set_target_fps(fps)` | `Unit -[GPU]>` | Set a target frame rate, clamped to `1..240`. |
-| `raylib.key_down(key)` / `gamepad_down(pad, button)` | `Bool -[GPU]>` | Read keyboard or gamepad button state. |
-| `raylib.gamepad_axis(pad, axis)` | `Float -[GPU]>` | Read a gamepad axis. |
-| `RaylibColor`, `RaylibWindow`, `RaylibTextureAtlas`, `RaylibSound` | types | Typed bridge handles; they are not interchangeable with ordinary strings or integers. |
-| `RaylibVector2`, `RaylibRectangle` | types | raylib's `Vector2` (`x`, `y`) and `Rectangle` (`x`, `y`, `width`, `height`), with `Float` fields. |
-| `RaylibImage` | type | An RGBA8 image held in memory: `width`, `height` and `pixels` (four `U8` per pixel, row by row). A width of 0 means no image. |
-
 ### `core.perf` — fidelity scaling
 
 `core.perf` maps a fidelity value to bounded work scaling. `fidelity()` reads
@@ -4375,6 +4309,68 @@ leaf samples the same startup facts; the shared terminal leaf remains the
 canonical stdout `IsTerminal` sample. No environment effect is added to the
 existing public capability row.
 
+#### Drawing
+
+A `Frame` also draws: its `clear_background` and `draw_*` calls paint an RGBA
+canvas of the frame's size in Jet, the same on every backend and tier, blended
+src-over and clipped to the canvas, and the frame presents that canvas when the
+next frame begins unless the program called `present` itself. Shapes that take
+a `Point` or `Rect` fill the pixels whose centers lie inside, with coordinates
+snapped to 1/256 pixel; a pixel whose center lies on a left or top edge is
+inside, one on a right or bottom edge is not. The collision checks and the
+`Image` functions are pure and need no effect; `image_*` functions change an
+`Image` in place through `&`.
+
+| Signature | Result | Description |
+|---|---|---|
+| `Frame.clear_background(color)` | — | Set every canvas pixel to the color, alpha included. |
+| `color(r, g, b, a)` | `Color` | Clamp each component to `0..255` and construct a color. |
+| `Frame.draw_rectangle(x, y, width, height, color)` | — | Fill a rectangle, clipped to the canvas and blended src-over. |
+| `Frame.draw_line(start_x, start_y, end_x, end_y, color)` | — | Draw a one-pixel line including both endpoints; along the longer axis each step draws one pixel at the line value rounded half up. |
+| `Frame.draw_circle(center_x, center_y, radius, color)` | — | Fill every pixel within `radius` (an `Int`) of the center; a radius below 1 draws nothing. |
+| `Frame.draw_triangle(x0, y0, x1, y1, x2, y2, color)` | — | Fill the pixels whose centers lie inside the triangle, in either winding; triangles sharing an edge never both cover a pixel. |
+| `Frame.draw_pixel(x, y, color)` | — | Blend one pixel. |
+| `Frame.draw_rectangle_rec(rec, color)` | — | Fill a `Rect`; an empty or negative side draws nothing. |
+| `Frame.draw_rectangle_lines(x, y, width, height, color)` | — | Draw the rectangle's one-pixel border inside its bounds, each pixel once. |
+| `Frame.draw_rectangle_lines_ex(rec, line_thick, color)` | — | Draw a border `line_thick` wide inside `rec` as four bands: top and bottom full width, the sides between them. A thickness past either side becomes half the shorter side. Bands are blended one after another. |
+| `Frame.draw_rectangle_gradient_v(x, y, width, height, top, bottom)` / `.draw_rectangle_gradient_h(x, y, width, height, left, right)` | — | Fill a rectangle shaded from the first color to the second, top to bottom or left to right. |
+| `Frame.draw_rectangle_gradient_ex(rec, top_left, bottom_left, bottom_right, top_right)` | — | Fill a rectangle shaded between its four corner colors, given counter-clockwise from the top left. Each pixel's color is interpolated at its center across the two triangles split along the top-left to bottom-right diagonal, rounded half up per channel. |
+| `Frame.draw_rectangle_rounded(rec, roundness, segments, color)` | — | Fill a rectangle whose corners are arcs of radius `roundness` (clamped to `1`) times half the shorter side, each arc a polygon of `segments` steps, or of an automatic count when `segments` is below 4. A `roundness` of 0 or below, or a side below 1, fills the plain rectangle. |
+| `Frame.draw_rectangle_rounded_lines(rec, roundness, segments, color)` | — | Draw the one-pixel band just outside the rounded rectangle. A `roundness` of 0 or below draws the one-pixel band around `rec`. |
+| `Frame.draw_circle_lines(center_x, center_y, radius, color)` | — | Draw the pixels of `draw_circle`'s disc that touch a pixel outside it. |
+| `Frame.draw_ellipse(center_x, center_y, radius_h, radius_v, color)` | — | Fill the pixels at offset `(dx, dy)` from the center with `(dx * radius_v)^2 + (dy * radius_h)^2 <= (radius_h * radius_v)^2`; a radius of 0 or below draws nothing. |
+| `Frame.draw_ellipse_lines(center_x, center_y, radius_h, radius_v, color)` | — | Draw the pixels of `draw_ellipse`'s fill that touch a pixel outside it. |
+| `Frame.draw_ring(center, inner_radius, outer_radius, start_angle, end_angle, segments, color)` | — | Fill the ring between the radii from `start_angle` to `end_angle` (degrees), built of segments; with an inner radius of 0 or below it fills a circle sector. Argument fixes apply: swapped radii and angles are reordered and an outer radius of 0 or below becomes 0.1. Each pixel is blended once. |
+| `Frame.draw_ring_lines(center, inner_radius, outer_radius, start_angle, end_angle, segments, color)` | — | Draw the pixels of `draw_ring`'s fill that touch a pixel outside it. |
+| `Frame.draw_poly(center, sides, radius, rotation, color)` | — | Fill a regular polygon with vertex `i` at angle `rotation + 360 * i / sides` degrees; fewer than 3 sides draw 3. |
+| `Frame.draw_poly_lines(center, sides, radius, rotation, color)` | — | Draw the pixels of `draw_poly`'s fill that touch a pixel outside it. |
+| `Frame.draw_text(text, x, y, size, color)` | — | Draw text in the built-in 5x7 font at whole-pixel scale `max(round(size / 10), 1)`; `\n` starts a new line. |
+| `measure_text(text, size)` | `Int` | The width in pixels that `draw_text` covers for its widest line: `(6 × scalars − 1) × scale`, with the same scale and the same `\n` line breaks. Empty text or empty lines measure 0. Needs no effect. |
+| `Frame.draw_sprite(atlas, source, x, y)` | — | Copy the atlas's first region named `source` to `(x, y)`, clipped to the texture and the canvas and blended src-over; an unknown region or an atlas without a decoded texture draws nothing. |
+| `check_collision_recs(rec1, rec2)` / `check_collision_point_rec(point, rec)` | `Bool` | Whether two rectangles overlap, or a point lies inside a rectangle. A rectangle includes its left and top edges and excludes its right and bottom edges, so rectangles that only touch do not collide. |
+| `check_collision_circles(center1, radius1, center2, radius2)` / `check_collision_point_circle(point, center, radius)` | `Bool` | Whether two circles overlap or touch, or a point lies within `radius` of the center. |
+| `check_collision_circle_rec(center, radius, rec)` / `check_collision_circle_line(center, radius, p1, p2)` | `Bool` | Whether a circle reaches a rectangle or the segment from `p1` to `p2`. |
+| `check_collision_point_triangle(point, p1, p2, p3)` / `check_collision_point_poly(point, points)` | `Bool` | Whether a point lies strictly inside a triangle, or inside a polygon by the even-odd rule; fewer than 3 points enclose nothing. |
+| `check_collision_point_line(point, p1, p2, threshold)` | `Bool` | Whether a point lies between `p1` and `p2` along the line's longer axis and within `threshold` pixels of the line, using a cross-product test. |
+| `check_collision_lines(start1, end1, start2, end2)` | `Point?` | The point where two segments cross, or `None` when they are parallel or cross outside either segment. |
+| `get_collision_rec(rec1, rec2)` | `Rect` | The overlap of two rectangles, or a zero rectangle when they do not overlap. |
+| `gen_image_color(width, height, color)` / `gen_image_checked(width, height, checks_x, checks_y, first, second)` | `Image` | A new RGBA image of one color, or of `checks_x` by `checks_y` pixel checks starting with `first` at the top left. A side below 1 or above 16384, or more than 2^24 pixels, gives an image with no pixels. |
+| `get_image_color(image, x, y)` | `Color` | The pixel at `(x, y)`, or a zero color outside the image. |
+| `image_clear_background(image, color)` / `image_draw_pixel(image, x, y, color)` | `Unit` | Set every pixel, or one pixel inside the image, to `color`, alpha included. |
+| `image_draw_rectangle(image, x, y, width, height, color)` / `image_draw_rectangle_rec(image, rec, color)` | `Unit` | Set the rectangle's pixels, clipped to the image and truncated to whole pixels. Less than one column still sets the first pixel unless the rectangle ends at the left edge, and less than one row still fills the first row. |
+| `image_crop(image, rec)` | `Unit` | Keep the rectangle's pixels, clipped to the image and truncated to whole pixels. A rectangle starting past the image leaves it unchanged. One with no whole column or row leaves no pixels, and the truncated sides (not below 0) become the image's size. |
+| `image_resize_nn(image, width, height)` | `Unit` | Nearest-neighbour resize with a 16.16 fixed-point source index. A size outside `gen_image_color`'s limits leaves the image unchanged. |
+| `image_flip_vertical(image)` / `image_flip_horizontal(image)` / `image_rotate_cw(image)` / `image_rotate_ccw(image)` | `Unit` | Mirror the rows or columns, or turn the image a quarter turn; a turn swaps width and height. |
+| `image_color_tint(image, color)` / `image_color_invert(image)` | `Unit` | Scale each channel by `color`'s channel / 255, rounded down, alpha included; or replace red, green and blue with 255 minus themselves. |
+| `image_color_brightness(image, amount)` / `image_color_replace(image, color, replace)` | `Unit` | Add `amount`, clamped to -255..255, to red, green and blue, capped at 255; a sum below 0 becomes 1. Or replace every pixel equal to `color` in all four channels with `replace`. |
+| `load_texture_atlas(path)` | `TextureAtlas -[FS]>` | Load an atlas and decode its PNG texture (every color type, bit depth and Adam7; sixteen-bit samples keep their high byte). A missing or malformed PNG leaves the atlas without a texture. |
+| `Image` | type | An RGBA8 image held in memory: `width()`, `height()` and `pixels()` (four `U8` per pixel, row by row, as `Frame.present` takes them). A width of 0 means no image. |
+| `TextureAtlas` / `.name() -> String` / `.loaded() -> Bool` | type | Named regions of one decoded PNG texture; the atlas text's `atlas:` line or its file's stem, and whether the texture decoded. |
+| `Window.load_image_from_screen() -> Image` | image | A copy of the canvas the frames draw on, as last drawn. |
+| `Frame.is_key_down(key)` / `.is_key_up(key)` / `.is_key_pressed(key)` / `.is_key_released(key)` | `Bool` | Whether `key` is held during the frame, or went down or up since the previous one. |
+| `Frame.is_mouse_button_down(button)` / `.is_mouse_button_up(button)` / `.is_mouse_button_pressed(button)` / `.is_mouse_button_released(button)` | `Bool` | The same for a `UIPointerButton`. |
+| `Frame.get_mouse_x()` / `.get_mouse_y() -> Int` / `.get_mouse_position() -> Point` | position | The pointer's last position in pixels. |
+
 #### Keyboards: `core.ui.xkb`
 
 `core.ui.xkb` is the one XKB keyboard engine behind native windows, in pure
@@ -5624,7 +5620,6 @@ The built-module inventory is a source-facing registry, not a missing-domain led
 - `core.files.path`
 - `core.font`
 - `core.game`
-- `core.game.raylib`
 - `core.http`
 - `core.http.client`
 - `core.http.server`

@@ -200,7 +200,7 @@
 
         # Integration shell: full FFI matrix, Canvas, graphics, emulator, and
         # OS-image work. Use `nix develop .#full` / `jet Tools/agent/JetEnv.jet full …` explicitly.
-        devShells.full = pkgs.mkShell (jetShellVariables [ pkgs.raylib ] // {
+        devShells.full = pkgs.mkShell (jetShellVariables [ ] // {
           packages = [
             pkgs.cargo
             pkgs.rustc
@@ -273,7 +273,6 @@
             pkgs.pkg-config
             # `tool:openssl` loopback TLS peer, as in the default shell.
             pkgs.openssl
-            pkgs.raylib
           ]
           ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
             # D-CANVASTEST1=A / #390: Canvas interaction tests drive Chromium

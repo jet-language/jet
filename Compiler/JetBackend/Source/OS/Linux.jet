@@ -1544,23 +1544,6 @@ os_copy_descending_words_i64: fn(target_last: I64, source_last: I64, count: I64)
     """
 }
 
-// String store for the runtime's word fills (RouteAGame.jet canvas spans):
-// writes `count` copies of the 8-byte `value` from `target` upward.
-#[Unsafe("the caller owns count writable 8-byte words at target"), FFI(asm)]
-os_fill_words_i64: fn(target: I64, value: I64, count: I64) {
-    """
-    push {target}
-    push {value}
-    push {count}
-    pop rcx
-    pop rax
-    pop rdi
-    cld
-    rep stosq
-    ; clobbers rax, rcx, rdi
-    """
-}
-
 #[Unsafe("reads one byte from a live readable mapped address supplied by the caller"), FFI(asm)]
 os_load_u8: fn(address: I64) -> I64 {
     """

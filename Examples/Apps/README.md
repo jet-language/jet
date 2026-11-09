@@ -7,11 +7,10 @@ Run a lesson from the repository root, for example `jet run Examples/Apps/<Lesso
 ## Game
 
 - [CoreGameHeadless](Game/CoreGameHeadless.jet)
-- [RaylibCanvas](Game/RaylibCanvas.jet)
-- [RaylibImages](Game/RaylibImages.jet)
-- [RaylibShapes](Game/RaylibShapes.jet)
-- [RaylibSprites](Game/RaylibSprites/)
-- [RaylibWindow](Game/RaylibWindow.jet)
+- [DrawCanvas](Game/DrawCanvas.jet)
+- [DrawImages](Game/DrawImages.jet)
+- [DrawShapes](Game/DrawShapes.jet)
+- [DrawSprites](Game/DrawSprites/)
 - [ResourceSchedule](Game/ResourceSchedule/)
 
 ## Programs

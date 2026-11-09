@@ -1,4 +1,7 @@
-use core: core
+use {
+    core: core
+    core.ui.[Color, Point, Rect]
+}
 // __core_ui_draw — core.ui's software rasterizer, a private part of
 // core.ui: 2D drawing, images, text, textures and collision checks in Jet.
 //
@@ -13,40 +16,22 @@ use core: core
 //
 // Textures decode here too: `load_texture_atlas` reads an atlas's region
 // list and its PNG, and `draw_sprite` blends a region onto an image.
+//
+// Float geometry (core.ui's Point and Rect, in pixels) snaps to a
+// 1/256-pixel grid and covers the pixels whose centers lie inside it, with
+// one tie rule for centers exactly on an edge.
 
-// A color: each channel 0..255.
-Color: struct {
-    r: Int
-    g: Int
-    b: Int
-    a: Int
-}
-
-// A point and a rectangle in pixels. Float geometry snaps to a 1/256-pixel grid
-// and covers the pixels whose centers lie inside it, with one tie rule for
-// centers exactly on an edge.
-Vector2: struct {
-    x: Float
-    y: Float
-}
-
-Rectangle: struct {
-    x: Float
-    y: Float
-    width: Float
-    height: Float
-}
-
+// A color with each channel clamped to 0..255.
 color: fn(r: Int, g: Int, b: Int, a: Int) -> Color Never! {
     Color{r: clamp8(r), g: clamp8(g), b: clamp8(b), a: clamp8(a)}
 }
 
-vector2: fn(x: Float, y: Float) -> Vector2 Never! {
-    Vector2{x: x, y: y}
+point_at: fn(x: Float, y: Float) -> Point {
+    Point{x: x, y: y}
 }
 
-rectangle: fn(x: Float, y: Float, width: Float, height: Float) -> Rectangle Never! {
-    Rectangle{x: x, y: y, width: width, height: height}
+rect_of: fn(x: Float, y: Float, width: Float, height: Float) -> Rect {
+    Rect{x: x, y: y, width: width, height: height}
 }
 
 // FLT_EPSILON, the tolerance for degenerate lines.
@@ -54,11 +39,11 @@ C_FLT_EPSILON: Float{0.00000011920928955078125}
 
 // Collision checks: the rshapes.c formulas, evaluated in Float where those
 // use 32-bit floats. They draw nothing and need no effect.
-check_collision_recs: fn(rec1: Rectangle, rec2: Rectangle) -> Bool Never! {
+check_collision_recs: fn(rec1: Rect, rec2: Rect) -> Bool Never! {
     rec1.x < rec2.x + rec2.width && rec1.x + rec1.width > rec2.x && rec1.y < rec2.y + rec2.height && rec1.y + rec1.height > rec2.y
 }
 
-check_collision_circles: fn(center1: Vector2, radius1: Float, center2: Vector2, radius2: Float) -> Bool Never! {
+check_collision_circles: fn(center1: Point, radius1: Float, center2: Point, radius2: Float) -> Bool Never! {
     dx: center2.x - center1.x
     dy: center2.y - center1.y
     sum: radius1 + radius2
@@ -67,7 +52,7 @@ check_collision_circles: fn(center1: Vector2, radius1: Float, center2: Vector2, 
 
 // The distance from the circle's center to the rectangle's center decides,
 // with the corner case measured to the nearest corner.
-check_collision_circle_rec: fn(center: Vector2, radius: Float, rec: Rectangle) -> Bool Never! {
+check_collision_circle_rec: fn(center: Point, radius: Float, rec: Rect) -> Bool Never! {
     half_w: rec.width / 2.0
     half_h: rec.height / 2.0
     dx: abs_float(center.x - (rec.x + half_w))
@@ -81,7 +66,7 @@ check_collision_circle_rec: fn(center: Vector2, radius: Float, rec: Rectangle) -
 
 // The segment from `p1` to `p2` against the circle: the nearest point of the
 // segment lies within `radius` of the center.
-check_collision_circle_line: fn(center: Vector2, radius: Float, p1: Vector2, p2: Vector2) -> Bool Never! {
+check_collision_circle_line: fn(center: Point, radius: Float, p1: Point, p2: Point) -> Bool Never! {
     dx: p1.x - p2.x
     dy: p1.y - p2.y
     if abs_float(dx) + abs_float(dy) <= C_FLT_EPSILON -> return check_collision_circles(p1, 0.0, center, radius)
@@ -97,18 +82,18 @@ check_collision_circle_line: fn(center: Vector2, radius: Float, p1: Vector2, p2:
 }
 
 // Inside means left or top edge included, right or bottom edge excluded.
-check_collision_point_rec: fn(point: Vector2, rec: Rectangle) -> Bool Never! {
+check_collision_point_rec: fn(point: Point, rec: Rect) -> Bool Never! {
     point.x >= rec.x && point.x < rec.x + rec.width && point.y >= rec.y && point.y < rec.y + rec.height
 }
 
-check_collision_point_circle: fn(point: Vector2, center: Vector2, radius: Float) -> Bool Never! {
+check_collision_point_circle: fn(point: Point, center: Point, radius: Float) -> Bool Never! {
     dx: point.x - center.x
     dy: point.y - center.y
     dx * dx + dy * dy <= radius * radius
 }
 
 // Barycentric weights; a point on an edge or a vertex is outside.
-check_collision_point_triangle: fn(point: Vector2, p1: Vector2, p2: Vector2, p3: Vector2) -> Bool Never! {
+check_collision_point_triangle: fn(point: Point, p1: Point, p2: Point, p3: Point) -> Bool Never! {
     area: (p2.y - p3.y) * (p1.x - p3.x) + (p3.x - p2.x) * (p1.y - p3.y)
     alpha: ((p2.y - p3.y) * (point.x - p3.x) + (p3.x - p2.x) * (point.y - p3.y)) / area
     beta: ((p3.y - p1.y) * (point.x - p3.x) + (p1.x - p3.x) * (point.y - p3.y)) / area
@@ -119,7 +104,7 @@ check_collision_point_triangle: fn(point: Vector2, p1: Vector2, p2: Vector2, p3:
 // The point lies within `threshold` pixels of the line through `p1` and `p2`,
 // measured by the cross product against the longer axis, and
 // between the two points along that axis.
-check_collision_point_line: fn(point: Vector2, p1: Vector2, p2: Vector2, threshold: Int) -> Bool Never! {
+check_collision_point_line: fn(point: Point, p1: Point, p2: Point, threshold: Int) -> Bool Never! {
     dxl: p2.x - p1.x
     dyl: p2.y - p1.y
     cross: (point.x - p1.x) * dyl - (point.y - p1.y) * dxl
@@ -135,7 +120,7 @@ check_collision_point_line: fn(point: Vector2, p1: Vector2, p2: Vector2, thresho
 
 // Even-odd crossing count over the polygon's edges; fewer than three points
 // enclose nothing.
-check_collision_point_poly: fn(point: Vector2, points: [Vector2]) -> Bool Never! {
+check_collision_point_poly: fn(point: Point, points: [Point]) -> Bool Never! {
     inside := false
     if points.len() < 3 -> return inside
     previous := points.len() - 1
@@ -150,7 +135,7 @@ check_collision_point_poly: fn(point: Vector2, points: [Vector2]) -> Bool Never!
 
 // The crossing point of the segments start1..end1 and start2..end2, or None
 // when they are parallel or cross outside either segment.
-check_collision_lines: fn(start1: Vector2, end1: Vector2, start2: Vector2, end2: Vector2) -> Vector2? Never! {
+check_collision_lines: fn(start1: Point, end1: Point, start2: Point, end2: Point) -> Point? Never! {
     div: (end2.y - start2.y) * (end1.x - start1.x) - (end2.x - start2.x) * (end1.y - start1.y)
     if abs_float(div) < C_FLT_EPSILON -> return None
     cross1: start1.x * end1.y - start1.y * end1.x
@@ -158,7 +143,7 @@ check_collision_lines: fn(start1: Vector2, end1: Vector2, start2: Vector2, end2:
     xi: ((start2.x - end2.x) * cross1 - (start1.x - end1.x) * cross2) / div
     yi: ((start2.y - end2.y) * cross1 - (start1.y - end1.y) * cross2) / div
     if outside_span(xi, start1.x, end1.x) || outside_span(xi, start2.x, end2.x) || outside_span(yi, start1.y, end1.y) || outside_span(yi, start2.y, end2.y) -> return None
-    Val(Vector2{x: xi, y: yi})
+    Val(Point{x: xi, y: yi})
 }
 
 // `value` lies outside [min(a, b), max(a, b)] on an axis the segment spans;
@@ -169,13 +154,13 @@ outside_span: fn(value: Float, a: Float, b: Float) -> Bool {
 }
 
 // The overlap of two rectangles, or a zero rectangle when they do not overlap.
-get_collision_rec: fn(rec1: Rectangle, rec2: Rectangle) -> Rectangle Never! {
+get_collision_rec: fn(rec1: Rect, rec2: Rect) -> Rect Never! {
     left: max_float(rec1.x, rec2.x)
     right: min_float(rec1.x + rec1.width, rec2.x + rec2.width)
     top: max_float(rec1.y, rec2.y)
     bottom: min_float(rec1.y + rec1.height, rec2.y + rec2.height)
-    if left < right && top < bottom -> return Rectangle{x: left, y: top, width: right - left, height: bottom - top}
-    Rectangle{x: 0.0, y: 0.0, width: 0.0, height: 0.0}
+    if left < right && top < bottom -> return Rect{x: left, y: top, width: right - left, height: bottom - top}
+    Rect{x: 0.0, y: 0.0, width: 0.0, height: 0.0}
 }
 
 // CPU image functions on an RGBA8 Image. They need no window and no
@@ -240,7 +225,7 @@ image_draw_rectangle: fn(image: &Image, x: Int, y: Int, width: Int, height: Int,
 // rectangle left with less than
 // one column still sets its first pixel unless it sits at the left edge, and
 // one with columns but less than one row fills its first row.
-image_draw_rectangle_rec: fn(image: &Image, rec: Rectangle, color: Color) Never! {
+image_draw_rectangle_rec: fn(image: &Image, rec: Rect, color: Color) Never! {
     if image.width == 0 || image.height == 0 -> return
     x := rec.x
     y := rec.y
@@ -279,7 +264,7 @@ image_draw_rectangle_rec: fn(image: &Image, rec: Rectangle, color: Color) Never!
 // whole pixels; one past the right or bottom edge leaves the image as it is.
 // One with no whole column or row leaves no pixels, its truncated sides (not
 // below 0) as the size.
-image_crop: fn(image: &Image, crop: Rectangle) Never! {
+image_crop: fn(image: &Image, crop: Rect) Never! {
     if image.width == 0 || image.height == 0 -> return
     x := crop.x
     y := crop.y
@@ -529,7 +514,7 @@ draw_pixel: fn(target: &Image, x: Int, y: Int, color: Color) Never! {
 }
 
 // A rectangle in Float geometry.
-draw_rectangle_rec: fn(target: &Image, rec: Rectangle, color: Color) Never! {
+draw_rectangle_rec: fn(target: &Image, rec: Rect, color: Color) Never! {
     extent: extent_of(target)
     paint(target, rec_runs(extent, rec, pack_rgba(color)))
 }
@@ -542,7 +527,7 @@ draw_rectangle_lines: fn(target: &Image, x: Int, y: Int, width: Int, height: Int
 
 // Four bands `line_thick` wide inside the rectangle, drawn one after
 // another.
-draw_rectangle_lines_ex: fn(target: &Image, rec: Rectangle, line_thick: Float, color: Color) Never! {
+draw_rectangle_lines_ex: fn(target: &Image, rec: Rect, line_thick: Float, color: Color) Never! {
     extent: extent_of(target)
     rgba: pack_rgba(color)
     loop band in lines_ex_bands(rec, line_thick) -> paint(target, rec_runs(extent, band, rgba))
@@ -564,7 +549,7 @@ draw_rectangle_gradient_h: fn(target: &Image, x: Int, y: Int, width: Int, height
 
 // A four-corner gradient: the corner colors run counter-clockwise
 // from the top left.
-draw_rectangle_gradient_ex: fn(target: &Image, rec: Rectangle, top_left: Color, bottom_left: Color, bottom_right: Color, top_right: Color) Never! {
+draw_rectangle_gradient_ex: fn(target: &Image, rec: Rect, top_left: Color, bottom_left: Color, bottom_right: Color, top_right: Color) Never! {
     extent: extent_of(target)
     paint(target, gradient_runs(extent, rec, pack_rgba(top_left), pack_rgba(bottom_left), pack_rgba(bottom_right), pack_rgba(top_right)))
 }
@@ -572,7 +557,7 @@ draw_rectangle_gradient_ex: fn(target: &Image, rec: Rectangle, top_left: Color, 
 // A rounded rectangle: one convex outline of four corner arcs. A segment
 // count below 4 picks one from the radius; a roundness at
 // or below 0, or a side below 1, draws the plain rectangle.
-draw_rectangle_rounded: fn(target: &Image, rec: Rectangle, roundness: Float, segments: Int, color: Color) Never! {
+draw_rectangle_rounded: fn(target: &Image, rec: Rect, roundness: Float, segments: Int, color: Color) Never! {
     extent: extent_of(target)
     rgba: pack_rgba(color)
     if roundness <= 0.0 || rec.width < 1.0 || rec.height < 1.0 {
@@ -584,11 +569,11 @@ draw_rectangle_rounded: fn(target: &Image, rec: Rectangle, roundness: Float, seg
 
 // A one-pixel band just outside the
 // rounded rectangle.
-draw_rectangle_rounded_lines: fn(target: &Image, rec: Rectangle, roundness: Float, segments: Int, color: Color) Never! {
+draw_rectangle_rounded_lines: fn(target: &Image, rec: Rect, roundness: Float, segments: Int, color: Color) Never! {
     extent: extent_of(target)
     rgba: pack_rgba(color)
     if roundness <= 0.0 {
-        around: Rectangle{x: rec.x - 1.0, y: rec.y - 1.0, width: rec.width + 2.0, height: rec.height + 2.0}
+        around: Rect{x: rec.x - 1.0, y: rec.y - 1.0, width: rec.width + 2.0, height: rec.height + 2.0}
         loop band in lines_ex_bands(around, 1.0) -> paint(target, rec_runs(extent, band, rgba))
         return
     }
@@ -621,7 +606,7 @@ draw_ellipse_lines: fn(target: &Image, center_x: Int, center_y: Int, radius_h: F
 // A ring: the annulus sector between the radii from `start_angle` to
 // `end_angle` in degrees, as quads (a sector when the inner
 // radius is 0 or less). Each pixel is drawn once.
-draw_ring: fn(target: &Image, center: Vector2, inner_radius: Float, outer_radius: Float, start_angle: Float, end_angle: Float, segments: Int, color: Color) Never! {
+draw_ring: fn(target: &Image, center: Point, inner_radius: Float, outer_radius: Float, start_angle: Float, end_angle: Float, segments: Int, color: Color) Never! {
     extent: extent_of(target)
     pieces: ring_pieces(center, inner_radius, outer_radius, start_angle, end_angle, segments)
     paint(target, cover_runs(extent, pieces_cover(extent, pieces), pack_rgba(color)))
@@ -629,7 +614,7 @@ draw_ring: fn(target: &Image, center: Vector2, inner_radius: Float, outer_radius
 
 // A ring outline: the pixels of draw_ring's area that touch a pixel
 // outside it.
-draw_ring_lines: fn(target: &Image, center: Vector2, inner_radius: Float, outer_radius: Float, start_angle: Float, end_angle: Float, segments: Int, color: Color) Never! {
+draw_ring_lines: fn(target: &Image, center: Point, inner_radius: Float, outer_radius: Float, start_angle: Float, end_angle: Float, segments: Int, color: Color) Never! {
     extent: extent_of(target)
     pieces: ring_pieces(center, inner_radius, outer_radius, start_angle, end_angle, segments)
     paint(target, outline_runs(extent, pieces_cover(extent, pieces), pack_rgba(color)))
@@ -637,14 +622,14 @@ draw_ring_lines: fn(target: &Image, center: Vector2, inner_radius: Float, outer_
 
 // A regular polygon with its first vertex at `rotation`
 // degrees; fewer than 3 sides draw 3.
-draw_poly: fn(target: &Image, center: Vector2, sides: Int, radius: Float, rotation: Float, color: Color) Never! {
+draw_poly: fn(target: &Image, center: Point, sides: Int, radius: Float, rotation: Float, color: Color) Never! {
     extent: extent_of(target)
     paint(target, cover_runs(extent, pieces_cover(extent, poly_pieces(center, sides, radius, rotation)), pack_rgba(color)))
 }
 
 // A polygon outline: the pixels of draw_poly's area that touch a pixel
 // outside it.
-draw_poly_lines: fn(target: &Image, center: Vector2, sides: Int, radius: Float, rotation: Float, color: Color) Never! {
+draw_poly_lines: fn(target: &Image, center: Point, sides: Int, radius: Float, rotation: Float, color: Color) Never! {
     extent: extent_of(target)
     paint(target, outline_runs(extent, pieces_cover(extent, poly_pieces(center, sides, radius, rotation)), pack_rgba(color)))
 }
@@ -1135,8 +1120,8 @@ triangle_runs: fn(extent: Extent, x0: Int, y0: Int, x1: Int, y1: Int, x2: Int, y
     runs
 }
 
-int_rectangle: fn(x: Int, y: Int, width: Int, height: Int) -> Rectangle {
-    Rectangle{x: Float{x}, y: Float{y}, width: Float{width}, height: Float{height}}
+int_rectangle: fn(x: Int, y: Int, width: Int, height: Int) -> Rect {
+    Rect{x: Float{x}, y: Float{y}, width: Float{width}, height: Float{height}}
 }
 
 // Float geometry snaps to 1/256 of a pixel; coordinates are held within 2^20
@@ -1160,7 +1145,7 @@ center_from: fn(at: Int) -> Int {
 }
 
 // The pixels whose centers lie in the rectangle, left and top edges included.
-rec_runs: fn(extent: Extent, rec: Rectangle, rgba: Int) -> [Run] {
+rec_runs: fn(extent: Extent, rec: Rect, rgba: Int) -> [Run] {
     runs := [Run]{}
     if rec.width <= 0.0 || rec.height <= 0.0 -> return runs
     left: center_from(subpixel(rec.x))
@@ -1186,7 +1171,7 @@ rect_lines_runs: fn(extent: Extent, x: Int, y: Int, width: Int, height: Int, rgb
 
 // draw_rectangle_lines_ex's bands, top, bottom, left, right: a thickness
 // past either side becomes half the shorter side.
-lines_ex_bands: fn(rec: Rectangle, line_thick: Float) -> [Rectangle] {
+lines_ex_bands: fn(rec: Rect, line_thick: Float) -> [Rect] {
     thick := line_thick
     if thick > rec.width || thick > rec.height {
         if rec.width >= rec.height {
@@ -1196,11 +1181,11 @@ lines_ex_bands: fn(rec: Rectangle, line_thick: Float) -> [Rectangle] {
         }
     }
     side: rec.height - thick * 2.0
-    bands := [Rectangle]{}
-    bands.push(Rectangle{x: rec.x, y: rec.y, width: rec.width, height: thick})
-    bands.push(Rectangle{x: rec.x, y: rec.y - thick + rec.height, width: rec.width, height: thick})
-    bands.push(Rectangle{x: rec.x, y: rec.y + thick, width: thick, height: side})
-    bands.push(Rectangle{x: rec.x - thick + rec.width, y: rec.y + thick, width: thick, height: side})
+    bands := [Rect]{}
+    bands.push(Rect{x: rec.x, y: rec.y, width: rec.width, height: thick})
+    bands.push(Rect{x: rec.x, y: rec.y - thick + rec.height, width: rec.width, height: thick})
+    bands.push(Rect{x: rec.x, y: rec.y + thick, width: thick, height: side})
+    bands.push(Rect{x: rec.x - thick + rec.width, y: rec.y + thick, width: thick, height: side})
     bands
 }
 
@@ -1208,7 +1193,7 @@ lines_ex_bands: fn(rec: Rectangle, line_thick: Float) -> [Rectangle] {
 // quad as, split on the top-left to bottom-right diagonal; each pixel takes
 // the blend at its center, rounded to the nearest level. Equal neighbours in
 // a row share a run.
-gradient_runs: fn(extent: Extent, rec: Rectangle, top_left: Int, bottom_left: Int, bottom_right: Int, top_right: Int) -> [Run] {
+gradient_runs: fn(extent: Extent, rec: Rect, top_left: Int, bottom_left: Int, bottom_right: Int, top_right: Int) -> [Run] {
     runs := [Run]{}
     if rec.width <= 0.0 || rec.height <= 0.0 -> return runs
     left: max_int(center_from(subpixel(rec.x)), 0)
@@ -1520,7 +1505,7 @@ arc_step: fn(radius: Float) -> Float {
 // The rounded rectangle: four corner arcs of `segments` steps, at the
 // corner radius plus `grow`. Below 4 segments, a corner takes 1/`divisor` of
 // the segment count for a full circle of the radius.
-rounded_pieces: fn(rec: Rectangle, roundness: Float, segments: Int, grow: Float, divisor: Float) -> [Piece] {
+rounded_pieces: fn(rec: Rect, roundness: Float, segments: Int, grow: Float, divisor: Float) -> [Piece] {
     pieces := [Piece]{}
     share := roundness
     if share >= 1.0 -> share = 1.0
@@ -1563,7 +1548,7 @@ rounded_pieces: fn(rec: Rectangle, roundness: Float, segments: Int, grow: Float,
 
 // draw_ring's quads, or circle-sector triangles when the inner radius is 0
 // or less, with the C original's argument fixes and segment count.
-ring_pieces: fn(center: Vector2, inner_radius: Float, outer_radius: Float, start_angle: Float, end_angle: Float, segments: Int) -> [Piece] {
+ring_pieces: fn(center: Point, inner_radius: Float, outer_radius: Float, start_angle: Float, end_angle: Float, segments: Int) -> [Piece] {
     pieces := [Piece]{}
     if start_angle == end_angle -> return pieces
     inner := inner_radius
@@ -1615,7 +1600,7 @@ ring_pieces: fn(center: Vector2, inner_radius: Float, outer_radius: Float, start
 }
 
 // draw_poly's outline: vertex i at rotation + 360 * i / sides degrees.
-poly_pieces: fn(center: Vector2, sides: Int, radius: Float, rotation: Float) -> [Piece] {
+poly_pieces: fn(center: Point, sides: Int, radius: Float, rotation: Float) -> [Piece] {
     count: max_int(sides, 3)
     xs := [Float]{}
     ys := [Float]{}
@@ -1670,6 +1655,18 @@ C_ADAM7_DY: [Int]{8, 8, 8, 4, 4, 2, 2}
 
 no_image: fn() -> Image {
     Image{width: 0, height: 0, pixels: [U8]{}}
+}
+
+// Makes `image` a `width` x `height` image of zero pixels unless it is one
+// already: a window frame's drawing target follows the frame's size, which
+// no PNG limit bounds.
+fit: fn(image: &Image, width: Int, height: Int) {
+    if image.width == width && image.height == height && image.pixels.len() == width * height * 4 -> return
+    pixels := [U8]{}
+    loop _ in 0..<(width * height * 4) -> pixels.push(U8{0})
+    image.width = width
+    image.height = height
+    image.pixels = pixels
 }
 
 byte_at: fn(data: [U8], at: Int) -> Int {
@@ -2068,11 +2065,11 @@ coverage: fn(runs: [Run], width: Int, height: Int) -> [Int] {
     assert_eq(center_from(384), 1)
     assert_eq(center_from(383), 1)
     assert_eq(center_from(385), 2)
-    assert_eq(run_words(rec_runs(extent, rectangle(1.5, 0.5, 3.0, 2.0), 7)), [Int]{1, 0, 3, 2, 7})
-    assert_eq(rec_runs(extent, rectangle(1.6, 0.0, 0.8, 1.0), 7).len(), 0)
-    assert_eq(rec_runs(extent, rectangle(1.0, 1.0, -2.0, 3.0), 7).len(), 0)
+    assert_eq(run_words(rec_runs(extent, rect_of(1.5, 0.5, 3.0, 2.0), 7)), [Int]{1, 0, 3, 2, 7})
+    assert_eq(rec_runs(extent, rect_of(1.6, 0.0, 0.8, 1.0), 7).len(), 0)
+    assert_eq(rec_runs(extent, rect_of(1.0, 1.0, -2.0, 3.0), 7).len(), 0)
     assert_eq(subpixel(1.0e300), C_SUBPIXEL_LIMIT)
-    assert_eq(run_words(rec_runs(extent, rectangle(-1.0e300, 0.0, 2.0e300, 1.0), 7)), [Int]{0, 0, 10, 1, 7})
+    assert_eq(run_words(rec_runs(extent, rect_of(-1.0e300, 0.0, 2.0e300, 1.0), 7)), [Int]{0, 0, 10, 1, 7})
 }
 
 #Test("raster rectangle outlines draw each border pixel once") {
@@ -2082,9 +2079,9 @@ coverage: fn(runs: [Run], width: Int, height: Int) -> [Int] {
     loop count in coverage(outline, 10, 8) -> assert(count <= 1)
     assert_eq(run_words(rect_lines_runs(extent, 0, 0, 3, 1, 1)), [Int]{0, 0, 3, 1, 1})
     assert_eq(run_words(rect_lines_runs(extent, 0, 0, 1, 3, 1)), [Int]{0, 0, 1, 1, 1, 0, 1, 1, 1, 1, 0, 2, 1, 1, 1})
-    bands: lines_ex_bands(rectangle(0.0, 0.0, 10.0, 6.0), 2.0)
+    bands: lines_ex_bands(rect_of(0.0, 0.0, 10.0, 6.0), 2.0)
     assert(bands[0].height == 2.0 && bands[1].y == 4.0 && bands[2].y == 2.0 && bands[2].height == 2.0 && bands[3].x == 8.0)
-    wide: lines_ex_bands(rectangle(0.0, 0.0, 10.0, 6.0), 7.0)
+    wide: lines_ex_bands(rect_of(0.0, 0.0, 10.0, 6.0), 7.0)
     assert(wide[0].height == 3.0 && wide[1].y == 3.0 && wide[2].height == 0.0 && wide[3].x == 7.0)
 }
 
@@ -2098,7 +2095,7 @@ coverage: fn(runs: [Run], width: Int, height: Int) -> [Int] {
     assert_eq(gradient_rgba(0, 0xFF000000, 0, 0, 0.25, 0.75), 0x80000000)
     assert_eq(gradient_rgba(0, 0xFF000000, 0, 0, 0.75, 0.25), 0)
     assert_eq(gradient_rgba(0x64000000, 0, 0xC8000000, 0, 0.5, 0.5), 0x96000000)
-    assert_eq(gradient_runs(extent, rectangle(0.0, 0.0, 0.0, 2.0), 1, 1, 1, 1).len(), 0)
+    assert_eq(gradient_runs(extent, rect_of(0.0, 0.0, 0.0, 2.0), 1, 1, 1, 1).len(), 0)
 }
 
 triangle_piece: fn(xs: [Float], ys: [Float]) -> [Piece] {
@@ -2123,10 +2120,10 @@ triangle_piece: fn(xs: [Float], ys: [Float]) -> [Piece] {
 
 #Test("raster polygons and outlines keep the boundary pixels") {
     extent: Extent{width: 10, height: 10}
-    square: poly_pieces(vector2(5.0, 5.0), 4, 2.8284271247461903, 45.0)
+    square: poly_pieces(point_at(5.0, 5.0), 4, 2.8284271247461903, 45.0)
     assert_eq(run_words(cover_runs(extent, pieces_cover(extent, square), 1)), [Int]{3, 3, 4, 1, 1, 3, 4, 4, 1, 1, 3, 5, 4, 1, 1, 3, 6, 4, 1, 1})
     assert_eq(run_words(outline_runs(extent, pieces_cover(extent, square), 1)), [Int]{3, 3, 4, 1, 1, 3, 4, 1, 1, 1, 6, 4, 1, 1, 1, 3, 5, 1, 1, 1, 6, 5, 1, 1, 1, 3, 6, 4, 1, 1})
-    assert_eq(poly_pieces(vector2(5.0, 5.0), 1, 3.0, 0.0)[0].xs.len(), 3)
+    assert_eq(poly_pieces(point_at(5.0, 5.0), 1, 3.0, 0.0)[0].xs.len(), 3)
     ring: [Int]{5, 3, 1, 1, 1, 4, 4, 1, 1, 1, 6, 4, 1, 1, 1, 3, 5, 1, 1, 1, 7, 5, 1, 1, 1, 4, 6, 1, 1, 1, 6, 6, 1, 1, 1, 5, 7, 1, 1, 1}
     assert_eq(run_words(outline_runs(extent, disc_cover(extent, 5, 5, 2), 1)), ring)
     assert_eq(outline_runs(extent, disc_cover(extent, 5, 5, 0), 1).len(), 0)
@@ -2157,7 +2154,7 @@ piece_words: fn(pieces: [Piece]) -> [Int] {
 
 #Test("raster rings fix their arguments and count their segments") {
     extent: Extent{width: 6, height: 6}
-    center: vector2(0.0, 0.0)
+    center: point_at(0.0, 0.0)
     sector: ring_pieces(center, 0.0, 4.0, 0.0, 90.0, 1)
     assert_eq(run_words(cover_runs(extent, pieces_cover(extent, sector), 1)), run_words(triangle_runs(extent, 0, 0, 4, 0, 0, 4, 1)))
     assert_eq(piece_words(ring_pieces(center, 3.0, 1.0, 90.0, 0.0, 4)), piece_words(ring_pieces(center, 1.0, 3.0, 0.0, 90.0, 4)))
@@ -2165,7 +2162,7 @@ piece_words: fn(pieces: [Piece]) -> [Int] {
     assert_eq(ring_pieces(center, 1.0, 3.0, 0.0, 90.0, 0).len(), 1)
     assert_eq(ring_pieces(center, 1.0, 3.0, 30.0, 30.0, 4).len(), 0)
     // The pieces of a ring split their shared edges, so each pixel is drawn once.
-    full: ring_pieces(vector2(5.0, 5.0), 2.0, 4.5, 0.0, 360.0, 12)
+    full: ring_pieces(point_at(5.0, 5.0), 2.0, 4.5, 0.0, 360.0, 12)
     square: Extent{width: 10, height: 10}
     runs := [Run]{}
     loop piece in full {
@@ -2183,14 +2180,14 @@ piece_words: fn(pieces: [Piece]) -> [Int] {
 
 #Test("raster rounded rectangles take their corner arcs") {
     extent: Extent{width: 12, height: 8}
-    rec: rectangle(0.0, 0.0, 8.0, 4.0)
+    rec: rect_of(0.0, 0.0, 8.0, 4.0)
     assert_eq(rounded_pieces(rec, 1.0, 4, 0.0, 4.0)[0].xs.len(), 20)
     assert_eq(rounded_pieces(rec, 1.0, 0, 0.0, 4.0)[0].xs.len(), 8)
     assert_eq(rounded_pieces(rec, 1.0, 0, 0.0, 2.0)[0].xs.len(), 12)
     assert_eq(rounded_pieces(rec, 2.0, 4, 0.0, 4.0)[0].xs, rounded_pieces(rec, 1.0, 4, 0.0, 4.0)[0].xs)
     fill: cover_runs(extent, pieces_cover(extent, rounded_pieces(rec, 1.0, 4, 0.0, 4.0)), 1)
     assert_eq(run_words(fill), [Int]{1, 0, 6, 1, 1, 0, 1, 8, 1, 1, 0, 2, 8, 1, 1, 1, 3, 6, 1, 1})
-    placed: rectangle(2.0, 2.0, 8.0, 4.0)
+    placed: rect_of(2.0, 2.0, 8.0, 4.0)
     outer: pieces_cover(extent, rounded_pieces(placed, 1.0, 4, 1.0, 2.0))
     inner: pieces_cover(extent, rounded_pieces(placed, 1.0, 4, 0.0, 2.0))
     band: difference_runs(extent, outer, inner, 1)
@@ -2203,44 +2200,44 @@ piece_words: fn(pieces: [Piece]) -> [Int] {
 }
 
 #Test("collisions keep their edge rules") {
-    box: rectangle(0.0, 0.0, 4.0, 2.0)
-    assert(check_collision_recs(box, rectangle(3.5, 1.5, 1.0, 1.0)))
-    assert(!check_collision_recs(box, rectangle(4.0, 0.0, 1.0, 1.0)))
-    assert(check_collision_point_rec(vector2(0.0, 0.0), box))
-    assert(!check_collision_point_rec(vector2(4.0, 1.0), box))
-    assert(check_collision_circles(vector2(0.0, 0.0), 1.0, vector2(3.0, 4.0), 4.0))
-    assert(!check_collision_circles(vector2(0.0, 0.0), 1.0, vector2(3.0, 4.0), 3.5))
-    assert(check_collision_point_circle(vector2(3.0, 4.0), vector2(0.0, 0.0), 5.0))
-    assert(!check_collision_point_circle(vector2(3.0, 4.1), vector2(0.0, 0.0), 5.0))
+    box: rect_of(0.0, 0.0, 4.0, 2.0)
+    assert(check_collision_recs(box, rect_of(3.5, 1.5, 1.0, 1.0)))
+    assert(!check_collision_recs(box, rect_of(4.0, 0.0, 1.0, 1.0)))
+    assert(check_collision_point_rec(point_at(0.0, 0.0), box))
+    assert(!check_collision_point_rec(point_at(4.0, 1.0), box))
+    assert(check_collision_circles(point_at(0.0, 0.0), 1.0, point_at(3.0, 4.0), 4.0))
+    assert(!check_collision_circles(point_at(0.0, 0.0), 1.0, point_at(3.0, 4.0), 3.5))
+    assert(check_collision_point_circle(point_at(3.0, 4.0), point_at(0.0, 0.0), 5.0))
+    assert(!check_collision_point_circle(point_at(3.0, 4.1), point_at(0.0, 0.0), 5.0))
     // Beside an edge the distance is along one axis; past a corner it is to the corner.
-    assert(check_collision_circle_rec(vector2(5.0, 1.0), 1.0, box))
-    assert(check_collision_circle_rec(vector2(5.0, 3.0), 1.5, box))
-    assert(!check_collision_circle_rec(vector2(5.0, 3.0), 1.4, box))
-    assert(check_collision_circle_line(vector2(2.0, 1.0), 1.0, vector2(0.0, 0.0), vector2(4.0, 0.0)))
-    assert(!check_collision_circle_line(vector2(6.0, 0.0), 1.5, vector2(0.0, 0.0), vector2(4.0, 0.0)))
-    assert(check_collision_circle_line(vector2(0.5, 0.0), 1.0, vector2(0.0, 0.0), vector2(0.0, 0.0)))
+    assert(check_collision_circle_rec(point_at(5.0, 1.0), 1.0, box))
+    assert(check_collision_circle_rec(point_at(5.0, 3.0), 1.5, box))
+    assert(!check_collision_circle_rec(point_at(5.0, 3.0), 1.4, box))
+    assert(check_collision_circle_line(point_at(2.0, 1.0), 1.0, point_at(0.0, 0.0), point_at(4.0, 0.0)))
+    assert(!check_collision_circle_line(point_at(6.0, 0.0), 1.5, point_at(0.0, 0.0), point_at(4.0, 0.0)))
+    assert(check_collision_circle_line(point_at(0.5, 0.0), 1.0, point_at(0.0, 0.0), point_at(0.0, 0.0)))
     // A point on a triangle's edge is outside.
-    assert(check_collision_point_triangle(vector2(1.0, 1.0), vector2(0.0, 0.0), vector2(4.0, 0.0), vector2(0.0, 4.0)))
-    assert(!check_collision_point_triangle(vector2(2.0, 0.0), vector2(0.0, 0.0), vector2(4.0, 0.0), vector2(0.0, 4.0)))
-    assert(check_collision_point_line(vector2(2.0, 0.5), vector2(0.0, 0.0), vector2(4.0, 0.0), 1))
-    assert(!check_collision_point_line(vector2(2.0, 1.0), vector2(0.0, 0.0), vector2(4.0, 0.0), 1))
-    assert(!check_collision_point_line(vector2(5.0, 0.0), vector2(4.0, 0.0), vector2(0.0, 0.0), 1))
-    square: [Vector2]{vector2(0.0, 0.0), vector2(4.0, 0.0), vector2(4.0, 4.0), vector2(0.0, 4.0)}
-    assert(check_collision_point_poly(vector2(2.0, 2.0), square))
-    assert(!check_collision_point_poly(vector2(5.0, 2.0), square))
-    assert(!check_collision_point_poly(vector2(1.0, 0.5), [Vector2]{vector2(0.0, 0.0), vector2(4.0, 0.0)}))
-    crossing: check_collision_lines(vector2(0.0, 0.0), vector2(4.0, 4.0), vector2(0.0, 4.0), vector2(4.0, 0.0)) ?? vector2(-1.0, -1.0)
+    assert(check_collision_point_triangle(point_at(1.0, 1.0), point_at(0.0, 0.0), point_at(4.0, 0.0), point_at(0.0, 4.0)))
+    assert(!check_collision_point_triangle(point_at(2.0, 0.0), point_at(0.0, 0.0), point_at(4.0, 0.0), point_at(0.0, 4.0)))
+    assert(check_collision_point_line(point_at(2.0, 0.5), point_at(0.0, 0.0), point_at(4.0, 0.0), 1))
+    assert(!check_collision_point_line(point_at(2.0, 1.0), point_at(0.0, 0.0), point_at(4.0, 0.0), 1))
+    assert(!check_collision_point_line(point_at(5.0, 0.0), point_at(4.0, 0.0), point_at(0.0, 0.0), 1))
+    square: [Point]{point_at(0.0, 0.0), point_at(4.0, 0.0), point_at(4.0, 4.0), point_at(0.0, 4.0)}
+    assert(check_collision_point_poly(point_at(2.0, 2.0), square))
+    assert(!check_collision_point_poly(point_at(5.0, 2.0), square))
+    assert(!check_collision_point_poly(point_at(1.0, 0.5), [Point]{point_at(0.0, 0.0), point_at(4.0, 0.0)}))
+    crossing: check_collision_lines(point_at(0.0, 0.0), point_at(4.0, 4.0), point_at(0.0, 4.0), point_at(4.0, 0.0)) ?? point_at(-1.0, -1.0)
     assert(crossing.x == 2.0 && crossing.y == 2.0)
-    parallel: check_collision_lines(vector2(0.0, 0.0), vector2(4.0, 0.0), vector2(0.0, 1.0), vector2(4.0, 1.0)) ?? vector2(-1.0, -1.0)
+    parallel: check_collision_lines(point_at(0.0, 0.0), point_at(4.0, 0.0), point_at(0.0, 1.0), point_at(4.0, 1.0)) ?? point_at(-1.0, -1.0)
     assert(parallel.x == -1.0)
-    short: check_collision_lines(vector2(0.0, 0.0), vector2(1.0, 1.0), vector2(0.0, 4.0), vector2(4.0, 0.0)) ?? vector2(-1.0, -1.0)
+    short: check_collision_lines(point_at(0.0, 0.0), point_at(1.0, 1.0), point_at(0.0, 4.0), point_at(4.0, 0.0)) ?? point_at(-1.0, -1.0)
     assert(short.x == -1.0)
     // A vertical segment spans no x range, so only its y range can exclude.
-    upright: check_collision_lines(vector2(2.0, 0.0), vector2(2.0, 4.0), vector2(0.0, 1.0), vector2(4.0, 3.0)) ?? vector2(-1.0, -1.0)
+    upright: check_collision_lines(point_at(2.0, 0.0), point_at(2.0, 4.0), point_at(0.0, 1.0), point_at(4.0, 3.0)) ?? point_at(-1.0, -1.0)
     assert(upright.x == 2.0 && upright.y == 2.0)
-    overlap: get_collision_rec(box, rectangle(3.0, -1.0, 4.0, 2.5))
+    overlap: get_collision_rec(box, rect_of(3.0, -1.0, 4.0, 2.5))
     assert(overlap.x == 3.0 && overlap.y == 0.0 && overlap.width == 1.0 && overlap.height == 1.5)
-    apart: get_collision_rec(box, rectangle(4.0, 0.0, 1.0, 1.0))
+    apart: get_collision_rec(box, rect_of(4.0, 0.0, 1.0, 1.0))
     assert(apart.x == 0.0 && apart.width == 0.0 && apart.height == 0.0)
 }
 
@@ -2270,19 +2267,19 @@ piece_words: fn(pieces: [Piece]) -> [Int] {
     assert(get_image_color(checks, 0, 0).b == 255 && get_image_color(checks, 3, 1).b == 255)
     // A rectangle under one column sets only its first pixel; under one row, its first row.
     canvas := gen_image_color(4, 4, black)
-    image_draw_rectangle_rec(canvas, rectangle(1.0, 1.0, 0.5, 3.0), red)
+    image_draw_rectangle_rec(canvas, rect_of(1.0, 1.0, 0.5, 3.0), red)
     assert(get_image_color(canvas, 1, 1).r == 255 && get_image_color(canvas, 1, 2).r == 0)
-    image_draw_rectangle_rec(canvas, rectangle(0.0, 3.0, 4.0, 0.5), blue)
+    image_draw_rectangle_rec(canvas, rect_of(0.0, 3.0, 4.0, 0.5), blue)
     assert(get_image_color(canvas, 0, 3).b == 255 && get_image_color(canvas, 3, 3).b == 255)
-    image_draw_rectangle_rec(canvas, rectangle(0.0, 0.0, 0.0, 2.0), blue)
+    image_draw_rectangle_rec(canvas, rect_of(0.0, 0.0, 0.0, 2.0), blue)
     assert(get_image_color(canvas, 0, 0).b == 0)
     image_draw_pixel(canvas, 4, 0, red)
     image_draw_pixel(canvas, 3, 0, red)
     assert(get_image_color(canvas, 3, 0).r == 255)
     image_draw_rectangle(canvas, 1, 1, 2, 2, blue)
-    image_crop(canvas, rectangle(1.0, 1.0, 2.0, 2.0))
+    image_crop(canvas, rect_of(1.0, 1.0, 2.0, 2.0))
     assert(canvas.width == 2 && canvas.height == 2 && get_image_color(canvas, 1, 1).b == 255)
-    image_crop(canvas, rectangle(0.0, 0.0, 0.5, 2.0))
+    image_crop(canvas, rect_of(0.0, 0.0, 0.5, 2.0))
     assert(canvas.width == 0 && canvas.height == 2 && canvas.pixels.len() == 0)
     // Columns 0 0 1 1 for a 2 to 4 enlargement.
     pair := gen_image_checked(2, 1, 1, 1, red, blue)
@@ -2484,4 +2481,15 @@ gray: fn(value: Int) -> Int {
     assert(dots.name == "atlas" && dots.texture_path == "x/..")
     assert_eq(parse_atlas(".hidden", "").name, ".hidden")
     assert_eq(parse_atlas(".hidden", "").texture_path, ".hidden.png")
+}
+
+#Test("a drawing target fits its frame and keeps what it drew while it fits") {
+    target := no_image()
+    fit(target, 2, 1)
+    assert_eq(image_words(target), [Int]{2, 1, 0, 0})
+    draw_pixel(target, 1, 0, color(1, 2, 3, 255))
+    fit(target, 2, 1)
+    assert_eq(image_words(target), [Int]{2, 1, 0, png_rgba(1, 2, 3, 255)})
+    fit(target, 1, 1)
+    assert_eq(image_words(target), [Int]{1, 1, 0})
 }

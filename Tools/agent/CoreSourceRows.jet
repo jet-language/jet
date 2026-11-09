@@ -211,7 +211,7 @@ RUST_INTEGER: Regex{"^([0-9]+)(?:usize)?$"}
 PURE_ROUTE: Regex{"^CoreCallPureRoute::([A-Za-z][A-Za-z0-9_]*)$"}
 COVERAGE_CONSTANT: Regex{"^CoreCallCoverage::([A-Z_]+)$"}
 // The CoreCallPureRoute variants a row may name, spelled as Jet spells them.
-PURE_ROUTES: [String]{"Time", "Math", "Date", "DateTime", "SketchTDigest", "SketchReservoir", "Raylib", "Net", "Crypto"}
+PURE_ROUTES: [String]{"Time", "Math", "Date", "DateTime", "SketchTDigest", "SketchReservoir", "Net", "Crypto"}
 
 // One call `name(args)` in an expression: its path, its top-level arguments
 // and the byte offset after its `)`.
@@ -803,7 +803,6 @@ call_effect: fn(module_name: String, member: String) -> String? Never! {
         "core.service" -> if member == "state_store" || SERVICE_READS.contains(member) || SERVICE_WRITES.contains(member) -> Val("FS") else -> when_listed(member, SERVICE_SLEEPS, "Time")
         "core.net.tls" | "core.http.client" | "core.http.server" | "core.http.middleware" -> Val("Net")
         "core.http" -> if member == "serve" || member == "get" -> Val("Net") else -> None
-        "core.game.raylib" -> Val("GPU")
         // Key generation draws from the OS generator, like crypto.random.bytes.
         "core.crypto" -> if member == "__x25519_generate" || member == "__signing_generate" -> Val("Rand") else -> None
         "core.perf" -> when_listed(member, PERF_ENV, "Env")

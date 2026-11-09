@@ -1,0 +1,168 @@
+package: {
+    name: "draw_indexed"
+    authority: {
+    allow: [Env, FS, IO, Net, Time]
+    }
+}
+use {
+    files: core.files
+    ui: core.ui
+    core.term.[Key]
+}
+
+// A 320x200 indexed-colour screen: one entry per pixel names one of 256
+// palette colours, and entries 16-255 cycle one step a frame. A key log names
+// the keys held in each frame; it becomes the headless window's script of key
+// presses and releases, and the held keys steer a cursor that stamps its
+// colour into the indexed buffer, while Space pauses the cycling. Each frame
+// draws every run of one colour. The program saves the last frame's screen as
+// a PAM image; the golden pins its SHA-256.
+C_WIDTH: 320
+
+C_HEIGHT: 200
+
+C_FRAMES: 35
+
+C_CURSOR: 8
+
+C_STEP: 3
+
+// Palette entries below this index never cycle.
+C_FIXED: 16
+
+C_CYCLE: 240
+
+indexed_root: fn() -> String {
+    candidates: [String]{"tests/run/Game/DrawIndexed", "."}
+    loop candidate in candidates {
+        if files.exists("{candidate}/runs/keys.log") -> return candidate
+    }
+    "."
+}
+
+// Sixteen fixed colours, then a 240-entry ramp; each entry is 0xRRGGBB.
+palette: fn() -> [Int] {
+    fixed: [Int]{0x000000, 0x0000AA, 0x00AA00, 0x00AAAA, 0xAA0000, 0xAA00AA, 0xAA5500, 0xAAAAAA, 0x555555, 0x5555FF, 0x55FF55, 0x55FFFF, 0xFF5555, 0xFF55FF, 0xFFFF55, 0xFFFFFF}
+    entries := [Int]{}
+    loop rgb in fixed -> entries.push(rgb)
+    loop step in 0..<C_CYCLE {
+        red: (step * 37) % 256
+        green: (step * 91 + 40) % 256
+        entries.push((red << 16) + (green << 8) + 255 - step)
+    }
+    entries
+}
+
+// The key log: a header line, then "frame<TAB>key,key" for each frame that
+// holds keys. Frames the log does not name hold none.
+key_log: fn(path: String) -> [[String]] {
+    held := [[String]]{}
+    loop _ in 0..<C_FRAMES -> held.push([String]{})
+    text: files.read(path) ?? panic("key log {path}: {err}")
+    loop line in text.lines() {
+        fields: line.split("\t").to_list()
+        if fields.len() != 2 -> next
+        frame: Int.parse(fields[0]) ?? next
+        if frame >= 0 && frame < C_FRAMES -> held[frame] = fields[1].split(",").to_list()
+    }
+    held
+}
+
+key_named: fn(name: String) -> Key? {
+    if name == {
+        "Left" -> Val(Key.Left)
+        "Right" -> Val(Key.Right)
+        "Up" -> Val(Key.Up)
+        "Down" -> Val(Key.Down)
+        "Space" -> Val(Key.Char(' '))
+        else -> None
+    }
+}
+
+// Frame i's events press the keys held in frame i but not in the one before
+// and release the keys held before but not in frame i.
+script: fn(held: [[String]]) -> [[ui.UIEvent]] {
+    frames := [[ui.UIEvent]]{}
+    before := [String]{}
+    loop keys in held {
+        events := [ui.UIEvent]{}
+        loop name in before {
+            if !keys.contains(name) && key_named(name) == .Val(key) -> events.push(ui.UIEvent.KeyUp(key))
+        }
+        loop name in keys {
+            if !before.contains(name) && key_named(name) == .Val(key) -> events.push(ui.UIEvent.KeyDown(key))
+        }
+        frames.push(events)
+        before = keys.copy()
+    }
+    frames
+}
+
+clamp_int: fn(value: Int, low: Int, high: Int) -> Int {
+    if value < low -> return low
+    if value > high -> return high
+    value
+}
+
+// The palette entry an index shows after `shift` cycling steps.
+shown: fn(index: Int, shift: Int) -> Int {
+    if index < C_FIXED -> return index
+    C_FIXED + (index - C_FIXED + shift) % C_CYCLE
+}
+
+present: fn(frame: ui.Frame, pixels: [Int], colors: [Int], shift: Int) {
+    loop y in 0..<C_HEIGHT {
+        row: y * C_WIDTH
+        x := 0
+        loop x < C_WIDTH {
+            rgb: colors[shown(pixels[row + x], shift)]
+            start: x
+            x += 1
+            loop x < C_WIDTH && colors[shown(pixels[row + x], shift)] == rgb -> x += 1
+            frame.draw_rectangle(start, y, x - start, 1, ui.color(rgb >> 16, (rgb >> 8).bit_and(255), rgb.bit_and(255), 255))
+        }
+    }
+}
+
+run: fn() {
+    root: indexed_root()
+    held: key_log("{root}/runs/keys.log")
+    colors: palette()
+    pixels := [Int]{}
+    loop y in 0..<C_HEIGHT {
+        loop x in 0..<C_WIDTH -> pixels.push(C_FIXED + ((x + 2 * y) /% 8) % C_CYCLE)
+    }
+    window: ui.headless(width: C_WIDTH, height: C_HEIGHT, script: script(held)) ?? panic("a {C_WIDTH}x{C_HEIGHT} window")
+    cursor_x := 156
+    cursor_y := 96
+    shift := 0
+    cycling := true
+    presented := 0
+    loop frame in window.frames() {
+        if frame.index >= C_FRAMES -> break
+        if frame.is_key_down(.Left) -> cursor_x -= C_STEP
+        if frame.is_key_down(.Right) -> cursor_x += C_STEP
+        if frame.is_key_down(.Up) -> cursor_y -= C_STEP
+        if frame.is_key_down(.Down) -> cursor_y += C_STEP
+        if frame.is_key_down(.Char(' ')) -> cycling = !cycling
+        cursor_x = clamp_int(cursor_x, 0, C_WIDTH - C_CURSOR)
+        cursor_y = clamp_int(cursor_y, 0, C_HEIGHT - C_CURSOR)
+        stamp: 1 + frame.index % 15
+        loop dy in 0..<C_CURSOR {
+            loop dx in 0..<C_CURSOR -> pixels[(cursor_y + dy) * C_WIDTH + cursor_x + dx] = stamp
+        }
+        if cycling -> shift += 1
+        present(frame, pixels, colors, shift)
+        presented += 1
+    }
+    save_pam(window.load_image_from_screen(), "frame.pam")
+    print("screen={C_WIDTH}x{C_HEIGHT} indexed palette={colors.len()}")
+    print("frames={presented} cursor={cursor_x},{cursor_y} shift={shift}")
+}
+
+// An image as a PAM file (P7, RGB_ALPHA).
+save_pam: fn(image: ui.Image, path: String) {
+    bytes := "P7\nWIDTH {image.width()}\nHEIGHT {image.height()}\nDEPTH 4\nMAXVAL 255\nTUPLTYPE RGB_ALPHA\nENDHDR\n".bytes()
+    bytes.extend(image.pixels())
+    files.write_bytes(path, bytes) ?? panic("write {path}: {err}")
+}

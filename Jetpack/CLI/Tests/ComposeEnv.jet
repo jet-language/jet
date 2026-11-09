@@ -75,7 +75,6 @@ cli_test_provider_paths: fn(file: String, value: String) -> String? {
 #Test("cli native projection derives root timezone and loader paths") {
     projection: cli_native_environment_projection("/workspace/jet", [(name: String, output: LeaseText)]{
         (name: "tzdata", output: LeaseText.plain("/hangar/tzdata-1")),
-        (name: "raylib", output: LeaseText.plain("/hangar/raylib-1")),
         (name: "vulkan-loader", output: LeaseText.plain("/hangar/vulkan-1"))
     }, [(command: String, binary: String)]{
         (command: "jet", binary: "/opt/jet/bin/jet"),
@@ -87,15 +86,14 @@ cli_test_provider_paths: fn(file: String, value: String) -> String? {
     assert_eq(vars.get("JET_ENV_DISABLE"), Val("1"))
     leased: projection.lease_vars()
     assert_eq(cli_test_plain(leased.get("TZDIR")), Val("/hangar/tzdata-1/share/zoneinfo"))
-    if sys.name() == "linux" -> assert_eq(cli_test_plain(leased.get("LD_LIBRARY_PATH")), Val("/hangar/vulkan-1/lib:/hangar/raylib-1/lib:/host/lib"))
+    if sys.name() == "linux" -> assert_eq(cli_test_plain(leased.get("LD_LIBRARY_PATH")), Val("/hangar/vulkan-1/lib:/host/lib"))
     assert_eq(projection.activation, NativeActivation.Disabled)
 }
 
 #Test("cli native output manifest keeps output selection and target condition typed") {
     selections := [String]{}
     loop fact in CLI_NATIVE_OUTPUT_FACTS -> selections.push("{fact.package}|{fact.relative}|{fact.variable}")
-    assert_eq(selections, [String]{"tzdata|share/zoneinfo|TZDIR", "vulkan-loader|lib|LD_LIBRARY_PATH", "raylib|lib|LD_LIBRARY_PATH"})
+    assert_eq(selections, [String]{"tzdata|share/zoneinfo|TZDIR", "vulkan-loader|lib|LD_LIBRARY_PATH"})
     assert_eq(CLI_NATIVE_OUTPUT_FACTS[0].platform, NativeOutputPlatform.Any)
     assert_eq(CLI_NATIVE_OUTPUT_FACTS[1].platform, NativeOutputPlatform.Linux)
-    assert_eq(CLI_NATIVE_OUTPUT_FACTS[2].platform, NativeOutputPlatform.Linux)
 }

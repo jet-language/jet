@@ -2131,26 +2131,24 @@ are E4201, E4202, and E4203. Advanced client configuration belongs in
 rejected so the transport choice is visible at the call site (D-TLS1,
 D-TLSSERVE1).
 
-`core.game.raylib` provides the typed window, drawing, input, sound, and texture
-operations. Its default path is headless; `JET_RAYLIB_DISPLAY=1` enables the
-native display bridge, and a missing raylib library uses the headless path.
-Drawing is rasterized in Jet on every path: `clear_background`, raylib's 2D
-shapes (pixels, rectangles with outlines, gradients and rounded corners,
-lines, circles, ellipses, rings and sectors, triangles and regular polygons)
-and `draw_text` (a built-in 5x7 bitmap font scaled by whole pixels, whose
-width `measure_text` reports without an effect) paint an
-RGBA canvas the size of the window with src-over blending. `load_texture_atlas`
-decodes the atlas's PNG texture in Jet, and `draw_sprite` blits a named region
-of it onto the canvas. raylib's collision checks (`check_collision_*` and
-`get_collision_rec`) are pure `Float` functions that need no effect, as are
-its CPU image functions (`gen_image_*`, `get_image_color` and `image_*`), which
-change a `RaylibImage` in place through `&`.
-`JET_RAYLIB_CAPTURE=PATH` writes each presented frame to PATH as a PAM image.
-`core.game` is scene-first: `game.Scene.new`, `scene.assets.image` and
-`sound`, `scene.input.bind`, `scene.component<T>()`, `scene.query<T...>()`,
+`core.ui` windows draw through the `Frame` of each loop turn, rasterized in Jet
+the same way on every backend.
+`clear_background`, the 2D shapes (pixels, rectangles with outlines, gradients
+and rounded corners, lines, circles, ellipses, rings and sectors, triangles and
+regular polygons) and `draw_text` (a built-in 5x7 bitmap font scaled by whole
+pixels, whose width `measure_text` reports without an effect) paint an RGBA
+canvas the size of the window with src-over blending; the frame presents the
+canvas when the next frame begins unless the program presented its own pixels.
+`load_texture_atlas` decodes the atlas's PNG texture in Jet, and `draw_sprite`
+blits a named region of it onto the canvas. The collision checks
+(`check_collision_*` and `get_collision_rec`) are pure `Float` functions that
+need no effect, as are the CPU image functions (`gen_image_*`,
+`get_image_color` and `image_*`), which change an `Image` in place through `&`;
+`window.load_image_from_screen()` copies the canvas. `core.game` is
+scene-first: `game.Scene.new`, `scene.assets.image` and `sound`,
+`scene.input.bind`, `scene.component<T>()`, `scene.query<T...>()`,
 `game.Replay.record`, `game.Backend.headless`, and `game.run` provide
-deterministic headless replay with a frame hook. Effects and authority still
-apply to the bridge (D-RAYLIB1, D-GAME1-3).
+deterministic headless replay with a frame hook (D-GAME1-3, D-RAY-API1).
 
 ## Expert memory tier
 

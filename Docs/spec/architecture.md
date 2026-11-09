@@ -2098,7 +2098,6 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   | `core.perf` | Host | Runtime performance authority; comptime rejects unavailable calls. |
   | `core.process` | Host | Process authority boundary and REPL host adapter. |
   | `core.math.random` | Mixed | `Core/Math/Random.jet` owns deterministic seeded RNG rules; ambient RNG stays host-bound. |
-  | `core.game.raylib` | Intrinsic | `CtValue` constructor only; runtime graphics work stays host-bound. |
   | `core.reactive.loadable` | Kernel | `Core/Reactive/Loadable.jet` owns tag/presence rules; typed payloads and handles remain adapters. |
   | `core.reflect` | Intrinsic | Compiler-owned type metadata construction. |
   | `core.regex` | Kernel | The generated regex engine exposes one shared matching and validation kernel. |
