@@ -408,8 +408,11 @@ cli_cmd_env_test: fn(verification: &StoreVerification, cache: &WorkspaceDeclarat
 
 // `jet env fetch-toolchain`: put this jet's C toolchain pack in the Hangar
 // now, so a later `jet cc` works offline. A pack already there is
-// re-verified without touching the network. `--json` prints the pack root
-// and its versions; jet's native C link (ForeignLink.jet) reads that root.
+// re-verified without touching the network. The host's musl target is
+// realized too: its sysroot (musl's headers, libc.a and crt objects) is
+// built once per Hangar, content-sealed under the Hangar's objects, and
+// shared by every project. `--json` prints the pack root, the musl sysroot
+// and the versions; jet's native C link (ForeignLink.jet) reads both paths.
 cli_cmd_env_fetch_toolchain: fn(verification: &StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     if parsed.positional.len() > 1 {
         theme.error_coded("E2102", "`jet env fetch-toolchain` takes no arguments", "unexpected `{parsed.positional[1]}`", "run `jet env fetch-toolchain` on its own")
@@ -423,12 +426,24 @@ cli_cmd_env_fetch_toolchain: fn(verification: &StoreVerification, theme: Theme, 
         cli_cc_report_provider_error(err)
         return EXIT_USER_ERROR
     }
+    // The host's architecture with musl: x86_64-unknown-linux-gnu runs
+    // x86_64-unknown-linux-musl programs.
+    musl_target: "{tools.asset.host.partition("-").head}-unknown-linux-musl"
+    spec: RefSpec.classify("cc-toolchain@jetpack#target={musl_target}") ?? {
+        cli_cc_report_provider_error(ProviderError.Unsupported("the pack's musl target `{musl_target}` is not a toolchain reference: {err}"))
+        return EXIT_USER_ERROR
+    }
+    musl: cli_cc_resolve_toolchain(verification, pkg_resolve_roots(), spec, None, parsed.flags.offline, cli_current_dir()) ?? {
+        cli_cc_report_provider_error(err)
+        return EXIT_USER_ERROR
+    }
     if parsed.flags.json {
-        print(cli_json_render(Dyn.Object(["root": Dyn.Text(tools.root), "llvm": Dyn.Text(tools.manifest.llvm), "musl": Dyn.Text(tools.manifest.musl), "glibc": Dyn.Text(tools.manifest.glibc)])))
+        print(cli_json_render(Dyn.Object(["root": Dyn.Text(tools.root), "musl_sysroot": Dyn.Text(musl.sysroot_root), "llvm": Dyn.Text(tools.manifest.llvm), "musl": Dyn.Text(tools.manifest.musl), "glibc": Dyn.Text(tools.manifest.glibc)])))
         return EXIT_OK
     }
     theme.ok("C toolchain pack for jet is ready: clang {tools.manifest.llvm}, musl {tools.manifest.musl}, glibc {tools.manifest.glibc}")
     theme.detail(tools.root)
+    theme.detail("musl sysroot {musl.sysroot_root}")
     EXIT_OK
 }
 

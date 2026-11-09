@@ -2786,7 +2786,8 @@ can use. A detached child that captures or returns a `view` borrow reports
 
 Task handles expose `pause()`, `resume()`, and `cancel()`. `tasks.yield_now()`
 cooperatively yields at a wait point, `tasks.current_task()` returns the
-running task's control trace (and an idle value outside a task), and
+running task's opaque `TaskID` (comparable, printable, unique among running
+tasks), `tasks.cpu_ns()` reads the running task's own CPU clock, and
 `sender.close()`/`receiver.close()` close channel ends. Pause holds a task at
 its next wait point until `resume()`; it is scheduler state, not a flag the
 application must poll. Task failure uses `TaskFailure` (D-COROUTINE1).

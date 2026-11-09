@@ -108,16 +108,17 @@ thread_test_identity: fn() {
 }
 
 #Export(c) jet_rt_thread_fixture_clone_worker: fn(state: I64) -> I64 {
-    // Raw clone inherits GS and FS, but bootstrap must ignore the old base.
-    jet_rt_thread_bootstrap()
+    // A raw clone inherits GS and FS, but its bootstrap ignored the old base.
     _ := jet_rt_thread_fixture_attached_child(sync_load(state + I64{8}))
     key: sync_load(state)
     jet_rt_tls_set(key, state)
     thread_test_require(jet_rt_tls_get(key) == state)
     sync_store(state + I64{8}, thread_base())
     sync_store(state + I64{16}, sync_load(thread_base() + I64{8}))
-    jet_rt_thread_detach()
-    I64{0}
+    #Unsafe("rt_sigprocmask writes this thread's mask to a caller-owned word") {
+        _ := os_syscall_i64(I64{14}, I64{0}, I64{0}, state + I64{24}, I64{8}, I64{0}, I64{0})
+    }
+    I64{41}
 }
 
 thread_test_closure: fn(code: I64, label: I64) -> I64 {
@@ -225,19 +226,26 @@ thread_test_parks: fn(entry: I64, detached: Bool) {
 }
 
 thread_test_clone: fn(entry: I64) {
-    state: jet_rt_alloc(I64{24}, I64{8})
-    thread_zero(state, I64{24})
+    state: jet_rt_alloc(I64{40}, I64{8})
+    thread_zero(state, I64{40})
     key: jet_rt_tls_key_new(I64{0})
     sync_store(state, key)
     parent: thread_base()
     sync_store(state + I64{8}, parent)
-    control: thread_clone_fixture(entry, state)
-    thread_test_require(control > I64{0})
-    thread_clone_join(control)
+    handle: thread_spawn(entry, state)
+    thread_test_require(handle > I64{0})
+    thread_test_require(thread_join(handle, state + I64{32}) == I64{0} && sync_load(state + I64{32}) == I64{41})
     thread_test_require(sync_load(state + I64{8}) != I64{0} && sync_load(state + I64{8}) != parent)
     thread_test_require(sync_load(state + I64{16}) != sync_load(parent + I64{8}))
     thread_test_require(thread_base() == parent && jet_rt_tls_get(key) == I64{0})
-    jet_rt_free(state, I64{24}, I64{8})
+    // The child ran its entry under the spawner's signal mask.
+    own: jet_rt_alloc(I64{8}, I64{8})
+    #Unsafe("rt_sigprocmask writes this thread's mask to a caller-owned word") {
+        _ := os_syscall_i64(I64{14}, I64{0}, I64{0}, own, I64{8}, I64{0}, I64{0})
+    }
+    thread_test_require(sync_load(own) == sync_load(state + I64{24}))
+    jet_rt_free(own, I64{8}, I64{8})
+    jet_rt_free(state, I64{40}, I64{8})
 }
 
 thread_test_rearm: fn(entry: I64, destructor: I64) {

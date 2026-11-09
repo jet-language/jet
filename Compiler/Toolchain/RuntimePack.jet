@@ -2,7 +2,7 @@
 // The Jet runtime pack beside a hosted compiler, made by Compiler/build.jet's
 // `runtime` step, and the runtime's one-namespace unit.
 //
-//   jet Toolchain/RuntimePack.jet pack --jet=JET --musl=DIR --cc=CC --ar=AR --nm=NM
+//   jet Toolchain/RuntimePack.jet pack --jet=JET --cc=CC --ar=AR --nm=NM
 //       --sqlite3=DIR --mbedtls=DIR --tree=DIR... --policy=FILE --out=DIR --identity=FILE
 //   jet Toolchain/RuntimePack.jet [--root DIR] unit OUT [--test NAME]...
 //   jet Toolchain/RuntimePack.jet [--root DIR] unit OUT --check
@@ -15,22 +15,18 @@
 // `pack` lowers Compiler/JetRuntime/sources.list and lifecycle.list as one
 // object with JET, the jet this build made: its native library hook writes
 // the object, the prelinked pack and image, and the web partition. Jet's
-// linker binds only that object and the C platform archives: musl's static
-// libc.a from DIR, and libgcc_eh.a and libgcc.a as CC finds them. No Rust
+// linker binds that object alone; the pack links no C (#6693). No Rust
 // compiler, Rust runtime or system linker runs, and NM checks every object
 // for Rust symbols. The `--tree` folders are the runtime's and its
 // producer's sources: the IR builder, optimizer and selector, the x86-64
 // encoder, object writer and linker, and the WebAssembly selector and
 // encoder of the web partition. Their files make up the pack's identity.
 //
-// Core's vendored C (Core/Vendor/Sqlite3 and Core/Vendor/Mbedtls, read from
-// the `--sqlite3` and `--mbedtls` folders) backs Core modules' `c.sqlite3`
-// and `c.mbedtls` imports. CC compiles it under the one native C policy
-// (FILE, Compiler/JetCli/Source/Cli/native-c-policy.tsv) and AR archives it
-// as foreign/<lib>/lib<lib>.a in the pack, so neither jet's self-compile nor
-// a core.db or core.net.tls program needs a C compiler. User foreign
-// closures link the runtime object with the platform archives shipped in
-// foreign/platform (Compiler/JetCli ForeignLink.jet).
+// The one C the step still builds is the foreign C beside the pack (`--cc`,
+// `--ar`, `--sqlite3`, `--mbedtls`, `--policy`; foreign_c below): Core's
+// vendored sqlite3 and mbedtls. The pack carries no libc or compiler
+// runtime archive; a program's C closure takes them from jet's C toolchain
+// pack (Compiler/JetCli ForeignLink.jet).
 //
 // The pack's files land in OUT, and OUT/native.key holds its content
 // identity. FILE gets JET's identity: the version of the running jet's
@@ -60,7 +56,7 @@ use {
     term: core.term
 }
 
-USAGE: "usage: jet Toolchain/RuntimePack.jet pack --jet=JET --musl=DIR --cc=CC --ar=AR --nm=NM --sqlite3=DIR --mbedtls=DIR --tree=DIR... --policy=FILE --out=DIR --identity=FILE\n       jet Toolchain/RuntimePack.jet [--root DIR] unit OUT [--test NAME]...|--check"
+USAGE: "usage: jet Toolchain/RuntimePack.jet pack --jet=JET --cc=CC --ar=AR --nm=NM --sqlite3=DIR --mbedtls=DIR --tree=DIR... --policy=FILE --out=DIR --identity=FILE\n       jet Toolchain/RuntimePack.jet [--root DIR] unit OUT [--test NAME]...|--check"
 // The checkout folder of the Compiler package, which every recorded path names.
 PACKAGE: "Compiler"
 RUNTIME_SOURCES: "Compiler/JetRuntime/sources.list"
@@ -71,23 +67,6 @@ DRIVER_LOADER: "Compiler/JetDriver/Source/Driver/Loader.jet"
 // The runtime's folder; every other `--tree` folder is its producer's.
 RUNTIME_TREE: "JetRuntime"
 UNIT_SOURCE_MARK: "// [unit source: "
-VENDOR_BASE_FLAGS: [String]{"-std=c11", "-O2", "-fPIC", "-fno-stack-protector", "-fno-asynchronous-unwind-tables", "-fno-unwind-tables", "-D_GNU_SOURCE"}
-// libsqlite3-sys 0.28.0 build.rs120-141,245-249 on Linux.
-SQLITE_FLAGS: [String]{
-    "-DSQLITE_CORE", "-DSQLITE_DEFAULT_FOREIGN_KEYS=1",
-    "-DSQLITE_ENABLE_API_ARMOR", "-DSQLITE_ENABLE_COLUMN_METADATA",
-    "-DSQLITE_ENABLE_DBSTAT_VTAB", "-DSQLITE_ENABLE_FTS3",
-    "-DSQLITE_ENABLE_FTS3_PARENTHESIS", "-DSQLITE_ENABLE_FTS5",
-    "-DSQLITE_ENABLE_JSON1", "-DSQLITE_ENABLE_LOAD_EXTENSION=1",
-    "-DSQLITE_ENABLE_MEMORY_MANAGEMENT", "-DSQLITE_ENABLE_RTREE",
-    "-DSQLITE_ENABLE_STAT2", "-DSQLITE_ENABLE_STAT4", "-DSQLITE_SOUNDEX",
-    "-DSQLITE_THREADSAFE=1", "-DSQLITE_USE_URI", "-DHAVE_USLEEP=1",
-    "-D_POSIX_THREAD_SAFE_FUNCTIONS", "-DHAVE_ISNAN", "-DHAVE_LOCALTIME_R", "-w",
-}
-PLATFORM_ARCHIVES: [String]{"libgcc_eh.a", "libgcc.a"}
-NOTICES: [String]{"LICENSE", "VERSION"}
-// At most this many C compilers run at once, beside the runtime build.
-VENDOR_JOBS: 6
 
 InventoryFile: struct {
     path: String
@@ -99,40 +78,13 @@ Inventory: struct {
     files: [InventoryFile]
 }
 
-// A vendored C library: `source` names its checkout folder, `folder` where
-// the step reads it. The tree keeps its relative layout (mbedtls/ and psa/
-// headers sit under -I).
-Vendored: struct {
-    name: String
-    source: String
-    folder: String
-    flags: [String]
-}
-
-// One vendored library's build: its compile units' objects, in unit order.
-Library: struct {
-    name: String
-    root: String
-    objects: [String]
-    archive: String
-}
-
-Policy: struct {
-    flags: [String]
-}
-
 Toolchain: struct {
     root: String
     jet: String
     // `name@version` of the jet's identity, the running compiler's.
     version: String
     out: String
-    platform: [String]
-    policy: Policy
-    cc: String
-    ar: String
     nm: String
-    vendored: [Vendored]
 }
 
 fail: fn(message: String) -> Never {
@@ -180,32 +132,6 @@ tree_files: fn(directory: String, keep: fn(String) -> Bool) -> [String] {
     found
 }
 
-vendor_file: fn(name: String) -> Bool { name.ends_with(".c") || name.ends_with(".h") || name == "LICENSE" || name == "VERSION" }
-
-read_policy: fn(path: String) -> Policy {
-    text: files.read(path) ?? fail("cannot read `{path}`: {err}")
-    flags := [String]{}
-    lines: text.split("\n").to_list()
-    loop index in 0..<lines.len() {
-        line: lines[index]
-        if line == "" || line.starts_with("#") -> next
-        fields: line.split("\t").to_list()
-        if fields.len() != 2 || fields[1] == "" -> fail("{path}:{index + 1}: expected \"kind<TAB>value\"")
-        if fields[0] == {
-            "flag" -> flags.push(fields[1].copy())
-            // The Nix compiler wrapper's hardening; a step's cleared
-            // environment enables none.
-            "hardening-remove" -> {}
-            else -> fail("{path}:{index + 1}: unknown policy kind `{fields[0]}`")
-        }
-    }
-    Policy{flags: flags}
-}
-
-cc_spec: fn(tool: Toolchain, argv: [String]) -> ProcessSpec {
-    process.cmd([String]{tool.cc.copy()}).args_extend(argv)
-}
-
 // A command that must exit 0; its stdout.
 output_of: fn(spec: ProcessSpec, what: String) -> String {
     receipt: spec.output_limit(268435456).run() ?? fail("{what} could not start: {err}")
@@ -241,29 +167,27 @@ compact: fn(value: Dyn) -> String { json.dumps(value) ?? fail("cannot render JSO
 
 sha256_json: fn(value: Dyn) -> String { crypto.sha256(compact(value).bytes()).hex() }
 
-// The recipe the pack is a function of (format jet-native-runtime-recipe/v1).
-pack_recipe: fn(source: String, backend: String, lifecycle: String, platform: [String], compiler: String, vendor: String) -> String {
+// The recipe the pack is a function of (format jet-native-runtime-recipe/v2).
+pack_recipe: fn(source: String, backend: String, lifecycle: String, compiler: String, vendor: String) -> String {
     sha256_json(Dyn.Object([String: Dyn]{
-        "format": Dyn.Text("jet-native-runtime-recipe/v1"),
+        "format": Dyn.Text("jet-native-runtime-recipe/v2"),
         "source": Dyn.Text(source.copy()),
         "backend": Dyn.Text(backend.copy()),
         "lifecycle": Dyn.Text(lifecycle.copy()),
-        "platform": text_array(platform),
         "compiler": Dyn.Text(compiler.copy()),
         "vendored": Dyn.Text(vendor.copy()),
     }))
 }
 
-// The pack's content identity, native.key (format jet-native-runtime/v2).
-pack_identity: fn(source: String, abi: String, threads: String, backend: String, lifecycle: String, platform: [String], vendor: [String]) -> String {
+// The pack's content identity, native.key (format jet-native-runtime/v3).
+pack_identity: fn(source: String, abi: String, threads: String, backend: String, lifecycle: String, vendor: [String]) -> String {
     sha256_json(Dyn.Object([String: Dyn]{
-        "format": Dyn.Text("jet-native-runtime/v2"),
+        "format": Dyn.Text("jet-native-runtime/v3"),
         "source": Dyn.Text(source.copy()),
         "abi": Dyn.Text(abi.copy()),
         "threads": Dyn.Text(threads.copy()),
         "backend": Dyn.Text(backend.copy()),
         "lifecycle": Dyn.Text(lifecycle.copy()),
-        "platform": text_array(platform),
         "vendored": text_array(vendor),
     }))
 }
@@ -309,57 +233,6 @@ export_names: fn(text: String) -> [String] {
     names
 }
 
-// Each vendored library's compile jobs; objects are written under `work`.
-vendored_jobs: fn(tool: Toolchain, work: String, libraries: &[Library], units: &[String]) -> [ProcessSpec] {
-    jobs := [ProcessSpec]{}
-    loop library in tool.vendored {
-        root: library.folder.copy()
-        objects: files.join(work, "vendored/{library.name}")
-        files.create_dir_all(objects) ?? fail("cannot create `{objects}`: {err}")
-        built := [String]{}
-        loop unit in tree_files(root, vendor_file) {
-            if !unit.ends_with(".c") -> next
-            object: files.join(objects, "{unit.replace("/", "_").removesuffix(".c")}.o")
-            argv := VENDOR_BASE_FLAGS.copy()
-            argv.extend(library.flags.copy())
-            argv.extend([String]{"-ffile-prefix-map={root}=/jet/c", "-ffile-prefix-map={objects}=.", "-I", root.copy(), "-c", files.join(root, unit), "-o", object.copy()})
-            argv.extend(tool.policy.flags.copy())
-            jobs.push(cc_spec(tool, argv))
-            units.push("{library.source}/{unit}")
-            built.push(object)
-        }
-        libraries.push(Library{name: library.name.copy(), root: root, objects: built, archive: files.join(objects, "lib{library.name}.a")})
-    }
-    jobs
-}
-
-// The vendored C recipe: source bytes, flags, policy and the compiler
-// (format jet-vendored-c/v1).
-vendor_recipe: fn(tool: Toolchain) -> String {
-    inputs := [String]{}
-    folders := [String: String]{}
-    loop library in tool.vendored {
-        folders[library.source] = library.folder.copy()
-        loop path in tree_files(library.folder, vendor_file) -> inputs.push("{library.source}/{path}")
-    }
-    where: (path: String) -> {
-        library: path.partition("/Vendor/").tail.partition("/")
-        source: "Core/Vendor/{library.head}"
-        files.join(folders.get(source) ?? fail("`{path}` is in no vendored library"), library.tail)
-    }
-    libraries: loop library in tool.vendored -> Dyn.Object([String: Dyn]{"name": Dyn.Text(library.name.copy()), "flags": text_array(library.flags)})
-    version: output_of(cc_spec(tool, [String]{"--version"}), "{tool.cc} --version")
-    cc1: output_of(cc_spec(tool, [String]{"-print-prog-name=cc1"}), "{tool.cc} -print-prog-name=cc1").trim()
-    sha256_json(Dyn.Object([String: Dyn]{
-        "format": Dyn.Text("jet-vendored-c/v1"),
-        "inputs": Dyn.Text(inventory(inputs, where).sha256),
-        "base": text_array(VENDOR_BASE_FLAGS),
-        "policy": text_array(tool.policy.flags),
-        "libraries": Dyn.Array(libraries),
-        "compiler": text_array([String]{version, cc1}),
-    }))
-}
-
 copy_into: fn(from: String, to: String) {
     files.copy(from, to) ?? fail("cannot copy `{from}` to `{to}`: {err}")
 }
@@ -398,33 +271,20 @@ absolute: fn(path: String) -> String {
 
 pack: fn(args: [String]) {
     flags: parse_flags(args)
-    known: [String]{"jet", "musl", "cc", "ar", "nm", "sqlite3", "mbedtls", "policy", "out", "identity"}
+    known: [String]{"jet", "cc", "ar", "nm", "sqlite3", "mbedtls", "policy", "out", "identity"}
     loop entry in flags.values {
         if !known.contains(entry.key) -> fail("unknown flag --{entry.key}\n{USAGE}")
     }
     if !flags.trees.contains(RUNTIME_TREE) -> fail("the --tree folders must include the runtime's, {RUNTIME_TREE}")
     root: absolute(".")
     identity: flag(flags, "identity")
-    vendored: [Vendored]{
-        Vendored{name: "sqlite3", source: "Core/Vendor/Sqlite3", folder: absolute(flag(flags, "sqlite3")), flags: SQLITE_FLAGS.copy()},
-        Vendored{name: "mbedtls", source: "Core/Vendor/Mbedtls", folder: absolute(flag(flags, "mbedtls")), flags: [String]{}},
-    }
-    musl: files.join(absolute(flag(flags, "musl")), "libc.a")
-    if !files.is_file(musl) -> fail("--musl `{flag(flags, "musl")}` holds no libc.a")
     // The build gives a step that runs jet that jet's identity; the jet it
     // built is the same version, known by its own bytes.
     running: process.env_get("JET_COMPILER_IDENTITY") ?? ""
     version: running.partition("#").head
     if !version.contains("@") -> fail("JET_COMPILER_IDENTITY `{running}` names no `name@version`")
-    tool := Toolchain{root: root, jet: absolute(flag(flags, "jet")), version: version.copy(), out: absolute(flag(flags, "out")), platform: [String]{musl}, policy: read_policy(flag(flags, "policy")),
-        cc: absolute(flag(flags, "cc")), ar: absolute(flag(flags, "ar")), nm: absolute(flag(flags, "nm")), vendored: vendored}
-    loop name in PLATFORM_ARCHIVES {
-        argv := [String]{"-print-file-name={name}"}
-        argv.extend(tool.policy.flags.copy())
-        path: output_of(cc_spec(tool, argv), "{tool.cc} -print-file-name={name}").trim()
-        if !files.is_file(path) -> fail("{tool.cc} did not locate {name}: {path}")
-        tool.platform.push(absolute(path))
-    }
+    tool: Toolchain{root: root, jet: absolute(flag(flags, "jet")), version: version.copy(), out: absolute(flag(flags, "out")), nm: absolute(flag(flags, "nm"))}
+    foreign: foreign_c(flags)
     manifest: files.read(at(root, RUNTIME_SOURCES)) ?? fail("cannot read `{RUNTIME_SOURCES}`: {err}")
     sources: runtime_sources(manifest)
     source_paths := [String]{RUNTIME_SOURCES, RUNTIME_PACKAGE}
@@ -439,18 +299,14 @@ pack: fn(args: [String]) {
     }
     backend: inventory(backend_paths, in_package)
     lifecycle: inventory([String]{RUNTIME_LIFECYCLE}, in_package)
-    platform_rows: loop path in tool.platform -> (path: path.copy(), sha256: sha256_file(path))
-    platform_digests: loop row in platform_rows -> row.sha256.copy()
     compiler_sha256: sha256_file(tool.jet)
-    vendor_sha256: vendor_recipe(tool)
-    recipe: pack_recipe(source.sha256, backend.sha256, lifecycle.sha256, platform_digests, compiler_sha256, vendor_sha256)
-    loop path in tool.platform -> no_rust(tool, path)
+    recipe: pack_recipe(source.sha256, backend.sha256, lifecycle.sha256, compiler_sha256, foreign.recipe)
     // The step's folder, not /tmp: the runtime build's files outgrow a small
     // temporary file system.
     work: files.join(root, ".runtime-pack")
     files.remove_all(work) ?? ()
     files.create_dir_all(work) ?? fail("cannot create `{work}`: {err}")
-    build(tool, work, source, backend, lifecycle, platform_rows, compiler_sha256, vendor_sha256, recipe)
+    build(tool, foreign, work, source, backend, lifecycle, compiler_sha256, recipe)
     files.remove_all(work) ?? ()
     files.write(identity, "{tool.version}#{compiler_sha256}\n") ?? fail("cannot write `{identity}`: {err}")
 }
@@ -465,7 +321,7 @@ keep_issues: fn(work: String, out: String) {
 }
 
 // Builds the pack in `work` and publishes it in `tool.out`.
-build: fn(tool: Toolchain, work: String, source: Inventory, backend: Inventory, lifecycle: Inventory, platform_rows: [(path: String, sha256: String)], compiler_sha256: String, vendor_sha256: String, recipe: String) {
+build: fn(tool: Toolchain, foreign: ForeignC, work: String, source: Inventory, backend: Inventory, lifecycle: Inventory, compiler_sha256: String, recipe: String) {
     library: files.join(work, "library")
     _ := compose_unit(tool.root, library, [String]{})
     prefix: files.join(work, "jet_runtime_jet")
@@ -493,15 +349,14 @@ build: fn(tool: Toolchain, work: String, source: Inventory, backend: Inventory, 
         .env("JET_FRONT_LIBRARY_LIFECYCLE", at(tool.root, RUNTIME_LIFECYCLE))
         .env("JET_FRONT_RUNTIME_PACK_OUTPUT", pack)
         .env("JET_FRONT_RUNTIME_IMAGE_OUTPUT", image)
-        .env("JET_FRONT_RUNTIME_PLATFORM_INPUTS", tool.platform.join("\n"))
         .env("JET_FRONT_RUNTIME_WEB_OUTPUT", web)
-    // The runtime build runs first; the C compilers (sqlite3's single large
-    // unit first) overlap it.
+    // The runtime build runs first; the foreign C compilers (sqlite3's single
+    // large unit first) overlap it.
     libraries := [Library]{}
     units := [String]{}
     specs := [ProcessSpec]{doc}
-    specs.extend(vendored_jobs(tool, work, libraries, units))
-    results: process.run_all(specs, VENDOR_JOBS + 1) ?? fail("the runtime and vendored C builds could not start: {err}")
+    specs.extend(foreign_c_jobs(foreign, work, libraries, units))
+    results: process.run_all(specs, FOREIGN_C_JOBS + 1) ?? fail("the runtime and foreign C builds could not start: {err}")
     problems := [String]{}
     if results[0] == {
         .Ok(receipt) -> {
@@ -526,12 +381,7 @@ build: fn(tool: Toolchain, work: String, source: Inventory, backend: Inventory, 
         keep_issues(work, tool.out)
         fail(problems.join("\n"))
     }
-    loop item in libraries {
-        argv := [String]{tool.ar.copy(), "rcsD", item.archive.copy()}
-        argv.extend(item.objects.copy())
-        _: output_of(process.cmd(argv), "{tool.ar} rcsD {item.archive}")
-        no_rust(tool, item.archive)
-    }
+    archives: foreign_c_archives(tool, foreign, libraries)
     built_objects: [String]{"{prefix}.o", pack, image}
     loop path in built_objects -> no_rust(tool, path)
     abi_text: files.read("{prefix}.abi.json") ?? fail("cannot read the runtime ABI inventory: {err}")
@@ -547,9 +397,7 @@ build: fn(tool: Toolchain, work: String, source: Inventory, backend: Inventory, 
     thread_names: loop name in thread_rows if name != "" -> name.copy()
     if !(thread_names.len() == 1 && thread_names[0] == "*") && thread_names.any(name -> !exports.contains(name)) -> fail("runtime thread receipt names a symbol the checked exports lack")
     threads_sha256: sha256_file("{prefix}.threads")
-    archives: loop item in libraries -> (name: item.name.copy(), path: "foreign/{item.name}/lib{item.name}.a", sha256: sha256_file(item.archive))
-    platform_digests: loop row in platform_rows -> row.sha256.copy()
-    key: pack_identity(source.sha256, abi_sha256, threads_sha256, backend.sha256, lifecycle.sha256, platform_digests, loop row in archives -> row.sha256.copy())
+    key: pack_identity(source.sha256, abi_sha256, threads_sha256, backend.sha256, lifecycle.sha256, loop row in archives -> row.sha256.copy())
     out: tool.out
     files.create_dir_all(out) ?? fail("cannot create `{out}`: {err}")
     copy_into("{prefix}.o", files.join(out, "jet_runtime_jet.o"))
@@ -560,18 +408,8 @@ build: fn(tool: Toolchain, work: String, source: Inventory, backend: Inventory, 
     copy_into(image, files.join(out, "jet_runtime.image"))
     copy_into("{web}.wasm", files.join(out, "jet_runtime.wasm"))
     copy_into("{web}.wasm.tsv", files.join(out, "jet_runtime.wasm.tsv"))
-    loop item in libraries {
-        target: files.join(out, "foreign/{item.name}")
-        files.create_dir_all(target) ?? fail("cannot create `{target}`: {err}")
-        copy_into(item.archive, files.join(target, "lib{item.name}.a"))
-        loop notice in NOTICES {
-            if files.exists(files.join(item.root, notice)) -> copy_into(files.join(item.root, notice), files.join(target, notice))
-        }
-    }
-    platform: files.join(out, "foreign/platform")
-    files.create_dir_all(platform) ?? fail("cannot create `{platform}`: {err}")
-    loop path in tool.platform -> copy_into(path, files.join(platform, files.basename(path)))
-    provenance: Dyn.Object([String: Dyn]{
+    foreign_c_publish(libraries, out)
+    fields := [String: Dyn]{
         "backend": Dyn.Text("jet-native"),
         "runtimeKey": Dyn.Text(key.copy()),
         "objectSha256": Dyn.Text(sha256_file("{prefix}.o")),
@@ -585,17 +423,207 @@ build: fn(tool: Toolchain, work: String, source: Inventory, backend: Inventory, 
         "source": inventory_value(source),
         "backendInputs": inventory_value(backend),
         "lifecycle": inventory_value(lifecycle),
-        "cPlatformArchives": Dyn.Array(loop row in platform_rows -> Dyn.Object([String: Dyn]{"path": Dyn.Text("foreign/platform/{files.basename(row.path)}"), "sha256": Dyn.Text(row.sha256.copy()), "language": Dyn.Text("C"), "role": Dyn.Text("platform")})),
-        "vendoredC": Dyn.Object([String: Dyn]{
-            "recipeSha256": Dyn.Text(vendor_sha256.copy()),
-            "archives": Dyn.Array(loop row in archives -> Dyn.Object([String: Dyn]{"name": Dyn.Text(row.name.copy()), "path": Dyn.Text(row.path.copy()), "sha256": Dyn.Text(row.sha256.copy())})),
-        }),
         "compilerSha256": Dyn.Text(compiler_sha256.copy()),
         "recipeSha256": Dyn.Text(recipe.copy()),
-    })
+    }
+    loop entry in foreign_c_provenance(foreign, archives) -> fields[entry.key.copy()] = entry.value.copy()
+    provenance: Dyn.Object(fields)
     text: "{json.to_string_pretty(provenance) ?? fail("cannot render the provenance: {err}")}\n"
     files.write(files.join(out, "provenance.json"), text) ?? fail("cannot write the provenance: {err}")
     files.write(files.join(out, "native.key"), "{key}\n") ?? fail("cannot write native.key: {err}")
+}
+
+// ---------------------------------------------------------------------------
+// Foreign C: the one C this step still builds, all of it here. It goes, with
+// its flags and the `vendored` rows of the recipe, identity and provenance,
+// when sqlite3 and mbedtls are Jet (#6694, #6695).
+//
+// Core's vendored C (Core/Vendor/Sqlite3 and Core/Vendor/Mbedtls, read from
+// the `--sqlite3` and `--mbedtls` folders) backs Core modules' `c.sqlite3`
+// and `c.mbedtls` imports. `--cc` compiles it under the one native C policy
+// (`--policy`, Compiler/JetCli/Source/Cli/native-c-policy.tsv) and `--ar`
+// archives it as foreign/<lib>/lib<lib>.a, so neither jet's self-compile nor
+// a core.db or core.net.tls program needs a C compiler. A program with C
+// links it, and user foreign closures, with the musl libc and compiler
+// builtins of jet's C toolchain pack (Compiler/JetCli ForeignLink.jet). The
+// runtime pack links none of it.
+
+VENDOR_BASE_FLAGS: [String]{"-std=c11", "-O2", "-fPIC", "-fno-stack-protector", "-fno-asynchronous-unwind-tables", "-fno-unwind-tables", "-D_GNU_SOURCE"}
+// libsqlite3-sys 0.28.0 build.rs120-141,245-249 on Linux.
+SQLITE_FLAGS: [String]{
+    "-DSQLITE_CORE", "-DSQLITE_DEFAULT_FOREIGN_KEYS=1",
+    "-DSQLITE_ENABLE_API_ARMOR", "-DSQLITE_ENABLE_COLUMN_METADATA",
+    "-DSQLITE_ENABLE_DBSTAT_VTAB", "-DSQLITE_ENABLE_FTS3",
+    "-DSQLITE_ENABLE_FTS3_PARENTHESIS", "-DSQLITE_ENABLE_FTS5",
+    "-DSQLITE_ENABLE_JSON1", "-DSQLITE_ENABLE_LOAD_EXTENSION=1",
+    "-DSQLITE_ENABLE_MEMORY_MANAGEMENT", "-DSQLITE_ENABLE_RTREE",
+    "-DSQLITE_ENABLE_STAT2", "-DSQLITE_ENABLE_STAT4", "-DSQLITE_SOUNDEX",
+    "-DSQLITE_THREADSAFE=1", "-DSQLITE_USE_URI", "-DHAVE_USLEEP=1",
+    "-D_POSIX_THREAD_SAFE_FUNCTIONS", "-DHAVE_ISNAN", "-DHAVE_LOCALTIME_R", "-w",
+}
+NOTICES: [String]{"LICENSE", "VERSION"}
+// At most this many C compilers run at once, beside the runtime build.
+FOREIGN_C_JOBS: 6
+
+// A vendored C library: `source` names its checkout folder, `folder` where
+// the step reads it. The tree keeps its relative layout (mbedtls/ and psa/
+// headers sit under -I).
+Vendored: struct {
+    name: String
+    source: String
+    folder: String
+    flags: [String]
+}
+
+// One vendored library's build: its compile units' objects, in unit order.
+Library: struct {
+    name: String
+    root: String
+    objects: [String]
+    archive: String
+}
+
+// One vendored library's archive as the pack publishes it.
+ForeignArchive: struct {
+    name: String
+    path: String
+    sha256: String
+}
+
+Policy: struct {
+    flags: [String]
+}
+
+ForeignC: struct {
+    cc: String
+    ar: String
+    policy: Policy
+    vendored: [Vendored]
+    // The vendored C recipe (vendor_recipe).
+    recipe: String
+}
+
+// The foreign C the step's flags name.
+foreign_c: fn(flags: Flags) -> ForeignC {
+    vendored: [Vendored]{
+        Vendored{name: "sqlite3", source: "Core/Vendor/Sqlite3", folder: absolute(flag(flags, "sqlite3")), flags: SQLITE_FLAGS.copy()},
+        Vendored{name: "mbedtls", source: "Core/Vendor/Mbedtls", folder: absolute(flag(flags, "mbedtls")), flags: [String]{}},
+    }
+    foreign := ForeignC{cc: absolute(flag(flags, "cc")), ar: absolute(flag(flags, "ar")), policy: read_policy(flag(flags, "policy")), vendored: vendored, recipe: ""}
+    foreign.recipe = vendor_recipe(foreign)
+    foreign
+}
+
+vendor_file: fn(name: String) -> Bool { name.ends_with(".c") || name.ends_with(".h") || name == "LICENSE" || name == "VERSION" }
+
+read_policy: fn(path: String) -> Policy {
+    text: files.read(path) ?? fail("cannot read `{path}`: {err}")
+    flags := [String]{}
+    lines: text.split("\n").to_list()
+    loop index in 0..<lines.len() {
+        line: lines[index]
+        if line == "" || line.starts_with("#") -> next
+        fields: line.split("\t").to_list()
+        if fields.len() != 2 || fields[1] == "" -> fail("{path}:{index + 1}: expected \"kind<TAB>value\"")
+        if fields[0] == {
+            "flag" -> flags.push(fields[1].copy())
+            // The Nix compiler wrapper's hardening; a step's cleared
+            // environment enables none.
+            "hardening-remove" -> {}
+            else -> fail("{path}:{index + 1}: unknown policy kind `{fields[0]}`")
+        }
+    }
+    Policy{flags: flags}
+}
+
+cc_spec: fn(foreign: ForeignC, argv: [String]) -> ProcessSpec {
+    process.cmd([String]{foreign.cc.copy()}).args_extend(argv)
+}
+
+// Each vendored library's compile jobs; objects are written under `work`.
+foreign_c_jobs: fn(foreign: ForeignC, work: String, libraries: &[Library], units: &[String]) -> [ProcessSpec] {
+    jobs := [ProcessSpec]{}
+    loop library in foreign.vendored {
+        root: library.folder.copy()
+        objects: files.join(work, "vendored/{library.name}")
+        files.create_dir_all(objects) ?? fail("cannot create `{objects}`: {err}")
+        built := [String]{}
+        loop unit in tree_files(root, vendor_file) {
+            if !unit.ends_with(".c") -> next
+            object: files.join(objects, "{unit.replace("/", "_").removesuffix(".c")}.o")
+            argv := VENDOR_BASE_FLAGS.copy()
+            argv.extend(library.flags.copy())
+            argv.extend([String]{"-ffile-prefix-map={root}=/jet/c", "-ffile-prefix-map={objects}=.", "-I", root.copy(), "-c", files.join(root, unit), "-o", object.copy()})
+            argv.extend(foreign.policy.flags.copy())
+            jobs.push(cc_spec(foreign, argv))
+            units.push("{library.source}/{unit}")
+            built.push(object)
+        }
+        libraries.push(Library{name: library.name.copy(), root: root, objects: built, archive: files.join(objects, "lib{library.name}.a")})
+    }
+    jobs
+}
+
+// The vendored C recipe: source bytes, flags, policy and the compiler
+// (format jet-vendored-c/v1).
+vendor_recipe: fn(foreign: ForeignC) -> String {
+    inputs := [String]{}
+    folders := [String: String]{}
+    loop library in foreign.vendored {
+        folders[library.source] = library.folder.copy()
+        loop path in tree_files(library.folder, vendor_file) -> inputs.push("{library.source}/{path}")
+    }
+    where: (path: String) -> {
+        library: path.partition("/Vendor/").tail.partition("/")
+        source: "Core/Vendor/{library.head}"
+        files.join(folders.get(source) ?? fail("`{path}` is in no vendored library"), library.tail)
+    }
+    libraries: loop library in foreign.vendored -> Dyn.Object([String: Dyn]{"name": Dyn.Text(library.name.copy()), "flags": text_array(library.flags)})
+    version: output_of(cc_spec(foreign, [String]{"--version"}), "{foreign.cc} --version")
+    cc1: output_of(cc_spec(foreign, [String]{"-print-prog-name=cc1"}), "{foreign.cc} -print-prog-name=cc1").trim()
+    sha256_json(Dyn.Object([String: Dyn]{
+        "format": Dyn.Text("jet-vendored-c/v1"),
+        "inputs": Dyn.Text(inventory(inputs, where).sha256),
+        "base": text_array(VENDOR_BASE_FLAGS),
+        "policy": text_array(foreign.policy.flags),
+        "libraries": Dyn.Array(libraries),
+        "compiler": text_array([String]{version, cc1}),
+    }))
+}
+
+// Archive each built library, checked for Rust symbols.
+foreign_c_archives: fn(tool: Toolchain, foreign: ForeignC, libraries: [Library]) -> [ForeignArchive] {
+    archives := [ForeignArchive]{}
+    loop item in libraries {
+        argv := [String]{foreign.ar.copy(), "rcsD", item.archive.copy()}
+        argv.extend(item.objects.copy())
+        _: output_of(process.cmd(argv), "{foreign.ar} rcsD {item.archive}")
+        no_rust(tool, item.archive)
+        archives.push(ForeignArchive{name: item.name.copy(), path: "foreign/{item.name}/lib{item.name}.a", sha256: sha256_file(item.archive)})
+    }
+    archives
+}
+
+// Publish each library's archive and notices in OUT/foreign/<lib>.
+foreign_c_publish: fn(libraries: [Library], out: String) {
+    loop item in libraries {
+        target: files.join(out, "foreign/{item.name}")
+        files.create_dir_all(target) ?? fail("cannot create `{target}`: {err}")
+        copy_into(item.archive, files.join(target, "lib{item.name}.a"))
+        loop notice in NOTICES {
+            if files.exists(files.join(item.root, notice)) -> copy_into(files.join(item.root, notice), files.join(target, notice))
+        }
+    }
+}
+
+// The provenance's foreign C fields.
+foreign_c_provenance: fn(foreign: ForeignC, archives: [ForeignArchive]) -> [String: Dyn] {
+    [String: Dyn]{
+        "vendoredC": Dyn.Object([String: Dyn]{
+            "recipeSha256": Dyn.Text(foreign.recipe.copy()),
+            "archives": Dyn.Array(loop row in archives -> Dyn.Object([String: Dyn]{"name": Dyn.Text(row.name.copy()), "path": Dyn.Text(row.path.copy()), "sha256": Dyn.Text(row.sha256.copy())})),
+        }),
+    }
 }
 
 // The sources sources.list lists, in order.
@@ -789,7 +817,7 @@ run: fn() {
 }
 
 #Test("recipe and identity JSON keep their field order") {
-    assert_eq(compact(Dyn.Object([String: Dyn]{"format": Dyn.Text("f"), "platform": text_array([String]{"a", "b"}), "n": Dyn.Int(0)})), "{{\"format\":\"f\",\"platform\":[\"a\",\"b\"],\"n\":0}}")
+    assert_eq(compact(Dyn.Object([String: Dyn]{"format": Dyn.Text("f"), "vendored": text_array([String]{"a", "b"}), "n": Dyn.Int(0)})), "{{\"format\":\"f\",\"vendored\":[\"a\",\"b\"],\"n\":0}}")
 }
 
 #Test("ABI symbols and export names compare sorted") {

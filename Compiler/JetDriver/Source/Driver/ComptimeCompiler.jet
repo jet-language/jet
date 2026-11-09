@@ -92,7 +92,7 @@ impl JetDriverComptimeCompiler.JetEvalCompilerQueryHost {
         // copy: the evaluator forks the host for each machine; the forks share one context.
         JetDriverComptimeCompiler{context: self.context.copy()}
     }
-    compiler_query: fn(self, query: String, args: [TComptimeValue], span: Span) -[Env, Exec, FFI.Asm, FS, Net, Time.Wait]> JetEvalBuildReply? {
+    compiler_query: fn(self, query: String, args: [TComptimeValue], span: Span) -[Env, Exec, FFI.Asm, FS, Net, Time]> JetEvalBuildReply? {
         if query == "lex" {
             source: jet_driver_compiler_query_text(args) ?? return Val(jet_driver_compiler_query_lost(query, span))
             lexed: jet_eval_compiler_services_lex(jet_driver_compiler_source_input(source)) ?? return Val(jet_driver_compiler_query_lost(query, span))
@@ -131,7 +131,7 @@ jet_driver_compiler_query_lost: fn(query: String, span: Span) -> JetEvalBuildRep
 // `check(syntax)`: the check query over the syntax tree's source. A source
 // whose load stops before checking keeps its syntax and diagnostics, with no
 // effects or semantic index (no-bundle path).
-jet_driver_compiler_query_check: fn(context: Shared<JetDriverComptimeCompilerContext>, args: [TComptimeValue], span: Span) -[Env, Exec, FFI.Asm, FS, Net, Time.Wait]> JetEvalBuildReply Never! {
+jet_driver_compiler_query_check: fn(context: Shared<JetDriverComptimeCompilerContext>, args: [TComptimeValue], span: Span) -[Env, Exec, FFI.Asm, FS, Net, Time]> JetEvalBuildReply Never! {
     source := String?{None}
     if args.len() == 1 && args[0] == .Struct(_, fields) {
         loop field in fields {

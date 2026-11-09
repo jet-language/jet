@@ -33,7 +33,7 @@ JET_CLI_RUNTIME_WEB_RECEIPT_FILE: "jet_runtime.wasm.tsv"
 // (jet_cli_build_result). The IR is the native route's (jet_cli_native_program):
 // every fault, a web selection finding among them, is one ICE row, all
 // reported at once with exit 101.
-jet_cli_build_web: fn(file: String, color: Bool, options: BuildOptions, result: JetDriverCompileResult, inputs: &&JetDriverLoweringInputs?, snapshot: JetDriverAuthorizedSourceSnapshot) -[Env, FS]> JetDriverVerbOutput Never! {
+jet_cli_build_web: fn(file: String, color: Bool, options: BuildOptions, result: JetDriverCompileResult, inputs: &&JetDriverLoweringInputs?, snapshot: JetDriverAuthorizedSourceSnapshot) -[Env, FS, Time]> JetDriverVerbOutput Never! {
     if result.internal_problem == .Val(problem) -> return jet_cli_ice(problem)
     if !result.complete -> return jet_cli_ice("the Jet compiler stopped before finishing `{file}`")
     if jet_cli_build_option_gate_refusal(snapshot.roots[0].canonical_path, options, color) == .Val(refused) -> return refused

@@ -211,7 +211,7 @@ jet_cli_gates_diagnostics: fn(result: JetDriverGateQueryResult, snapshot: JetDri
 
 // Host prepares the authorized load-only request, including canonical package,
 // lock/trust and invocation writers. Preserve raw argv after `inspect gates`.
-jet_cli_gates_host: fn(request: JetDriverCompileRequest, args: [String], file: String, color: Bool, json: Bool) -[FS, Env]> JetDriverVerbOutput {
+jet_cli_gates_host: fn(request: JetDriverCompileRequest, args: [String], file: String, color: Bool, json: Bool) -[FS, Env, Time]> JetDriverVerbOutput {
     result: jet_driver_gate_query(request)
     if !result.source.complete -> return jet_cli_gates_diagnostics(result, request.authorized_sources, file, color, json)
     kind := GateKind?{None}

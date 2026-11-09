@@ -91,8 +91,8 @@
     }
     thread_test_require(sync_load(thread_tls_registry + I64{8}) == thread_key)
     jet_rt_tls_set(thread_key, I64{0})
-    // Thread-scoped Shared survives attempt reset, then its pthread
-    // trampoline detaches and invokes the same real Shared destructor.
+    // Thread-scoped Shared survives attempt reset, then its thread entry
+    // (jet_rt_thread_entry) detaches and invokes the same real Shared destructor.
     thread_site: jet_rt_alloc(I64{8}, I64{8})
     sync_store(thread_site, I64{0})
     scoped_count: jet_rt_alloc(I64{8}, I64{8})

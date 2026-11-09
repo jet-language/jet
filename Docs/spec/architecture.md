@@ -146,13 +146,13 @@ export inventory. Compiler crashes and failed ABI witnesses remain failed
 evidence, never a native-runtime semantic verdict.
 
 The runtime library build also writes `runtime.threads`, the thread receipt:
-the exports whose call can reach a thread start (`pthread_create`), a
+the exports whose call can reach a thread start (the raw clone leaf), a
 returning signal handler (`signal`) or a library load (`dlopen`) through the
 runtime's own calls and function addresses, one per line. A lifecycle hook
 that can reach one runs whenever the program keeps one of its guard
 storages, so the exports that can reach such a storage are listed too; the
 receipt is just `*` when such a hook has no guard. Its digest is part of the pack identity
-(`jet-native-runtime/v2`) and every pack reader verifies it. `jet build`
+(`jet-native-runtime/v3`) and every pack reader verifies it. `jet build`
 selects a program's inline RC updates without the lock prefix only when
 that receipt was read, neither the program nor its `main` calls an export it
 names, every foreign C call is a vetted libc leaf, and the program has no
@@ -172,9 +172,14 @@ with real objects, an archive and a consumer, including an unreferenced export.
 The `runtime` step of `jet build Compiler` (`Compiler/Toolchain/RuntimePack.jet
 pack`) assembles the canonical `Compiler/JetRuntime/sources.list`, checks it
 through the newly built compiler's library entry, and lowers its checked
-exports plus `lifecycle.list` into one native object. Jet's linker resolves its
-permitted musl/libgcc C dependencies; no Rust runtime, standard-library rlibs,
-rustc or system linker participates. The step installs `jet-runtime/` beside
+exports plus `lifecycle.list` into one native object. Jet's linker packs that
+object alone: no C archive, Rust runtime, standard-library rlib, rustc or
+system linker participates. The runtime exports C's `memcpy`, `memmove`,
+`memset` and `memcmp` itself, and the pack carries the program's startup,
+`__jet_start` (`Image/StaticLink.jet` `link_owned_startup`), which runs the
+init arrays, `main` and the fini arrays. A program link that adds C archives
+(foreign C, below) starts through musl's `__libc_start_main` instead. The
+step installs `jet-runtime/` beside
 the compiler: `native.key`, `jet_runtime.pack.o` and `jet_runtime.image`, the pack linked
 once at the run base (`LINK_RUN_BASE`), with its symbol table, a
 `.jet.bind` section naming where it calls `main`, and a `.jet.exports` hash
@@ -184,12 +189,16 @@ runtime and looks up only the program's imports in that index; the bound
 bytes are a complete static executable at the
 run base. `jet run` reads only the image's first page and the bytes after its
 loaded segments for that bind, and maps the segments from the file
-(`Image/Loader.jet`). The key hashes the source inventory, checked ABI, lifecycle, backend
-inputs and C platform archives. The accompanying `provenance.json` records each
-input digest, the pack and image digests and zero Rust or LLVM-generated Jet
-objects, with permitted C platform archives listed separately.
+(`Image/Loader.jet`). The step also builds Core's vendored sqlite3 and
+mbedtls archives (`foreign/<lib>/`) beside the pack; it packages no C
+platform archives, which a program with C takes from jet's C toolchain pack
+(foreign C, below). The key hashes the source inventory, checked ABI,
+lifecycle, backend inputs and the vendored archives. The accompanying
+`provenance.json` records each input digest, the pack and image digests and
+zero Rust or LLVM-generated Jet objects, with the vendored archives listed
+separately.
 Packaging first checks a separate recipe digest of the runtime sources, backend,
-lifecycle, C archive bytes and compiler executable. Neither the consumer program
+lifecycle, vendored C recipe and compiler executable. Neither the consumer program
 nor its build profile enters that recipe. A matching recipe reuses the produced
 pack without checking or compiling the runtime again; changed producer inputs
 rebuild it. Reuse requires held regular-file reads, matching object/pack/image/ABI
@@ -1423,8 +1432,9 @@ identity. C/C++ wrappers and asm lower only after sema proves their boundary
 contracts.
 Inline C bodies remain separate translation units. The native link
 (`jet_cli_native_inline_c` in `Compiler/JetCli/Source/Cli/ForeignLink.jet`)
-compiles every selected body, then proves them together as one shared object
-with undefined symbols refused before archiving them into the link. Shared
+compiles every selected body, then proves them together in one link with
+undefined symbols refused (a static musl executable with jet's C toolchain
+pack, a shared object with a host C compiler) before archiving them into the link. Shared
 globals may resolve from a sibling body; references missing from the full
 closure still fail. The bridge cache identity carries the inline toolchain, so
 a changed compiler, archiver or target invalidates stale bridge artifacts.
@@ -1525,10 +1535,18 @@ C a package declares itself is compiled at link time. User foreign
 dependencies are program link inputs; a runtime pack includes only the foreign
 closure reached by its own declared sources, keeping the shared pack independent
 of user projects.
-User C closures and prepared user-Rust helper archives also link the existing
-toolchain's musl `libc.a` (including math and pthread), the `libgcc_eh.a`
-unwinder and the C compiler builtins as program-only platform inputs. Packaging
-places them in `jet-runtime/foreign/platform`. Such a program links the Jet-only
+User C closures and prepared user-Rust helper archives also link musl's
+`libc.a` (including math and pthread) and the C compiler builtins as
+program-only platform inputs. With jet's C toolchain pack
+(`jet_cli_closure_c_tools` in `Compiler/JetCli/Source/Cli/ForeignLink.jet`)
+the closure compiles for `x86_64-unknown-linux-musl` against the musl
+sysroot the `jetpack` engine builds once per Hangar (`jet env fetch-toolchain
+--json` names it as `musl_sysroot`) and links that sysroot's `libc.a` and the
+pack's `libclang_rt.builtins.a`; the pack ships no unwinder, so a Rust helper
+adds the host C compiler's `libgcc_eh.a`. With `CC`/`AR` named, or no engine,
+the closure links the musl `libc.a` a find_folder search chooses on
+LIBRARY_PATH and the host compiler's `libgcc_eh.a` and `libgcc.a`. The runtime
+pack packages none of them. Such a program links the Jet-only
 runtime object (`jet-runtime/jet_runtime_jet.o`) with them, not the runtime pack: the
 pack holds its own private, initialized libc, and a second copy beside it would
 run uninitialized. A program with no foreign closure receives no additional link

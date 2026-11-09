@@ -1,7 +1,7 @@
 // The compiler's streaming trace, reached only through the host. With
 // `JET_TRACE_FILE` set the host writes one Chrome trace event per call and
 // flushes it, stamping wall time, CPU time and memory itself (on every
-// `end`: resident and peak memory, the span's thread CPU time `cpu_ns`, the
+// `end`: resident and peak memory, the span's task CPU time `cpu_ns`, the
 // whole process's CPU time `proc_cpu_ns` and its major faults `majflt` over
 // the span; the live heap, `heap_kb`, on a phase's `end`), so a running
 // compile can be watched; without it the request carries no sink and every
@@ -24,12 +24,13 @@
 // `native.lower.lir_insts`, `native.object.bytes`, ...) that
 // Tools/perf/budget/Check.jet divides phase time by. `functions` says whether
 // per-function spans were requested (`JET_TRACE_DETAIL=functions`). The host
-// writes the trace file, so each call declares the FS row; an undeclared
-// dynamic dispatch would be the maximal row.
+// writes the trace file, so each call declares the FS row, and a span's open
+// and close read the running task's CPU clock (core.tasks.cpu_ns), so those
+// declare Time too; an undeclared dynamic dispatch would be the maximal row.
 CompilerTraceSink: trait {
-    begin: fn(self, name: String, detail: String, index: Int, total: Int) Never! -[FS]>
-    begin_item: fn(self, name: String, file: String, item: String) Never! -[FS]>
-    end: fn(self, name: String, items: Int) Never! -[FS]>
+    begin: fn(self, name: String, detail: String, index: Int, total: Int) Never! -[FS, Time]>
+    begin_item: fn(self, name: String, file: String, item: String) Never! -[FS, Time]>
+    end: fn(self, name: String, items: Int) Never! -[FS, Time]>
     progress: fn(self, name: String, done: Int, total: Int) Never! -[FS]>
     functions: fn(self) -[]> Bool Never!
 }

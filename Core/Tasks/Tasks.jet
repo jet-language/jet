@@ -2,7 +2,7 @@ package: {
     name: "core.tasks"
     version: "0.0.1"
     edition: "2026"
-    description: "Tasks, timers, and the current trace id."
+    description: "Tasks, timers, the running task's identity and CPU clock."
     license: "MIT"
     outputs: {
         tasks: .Library{ entry: tasks }
@@ -67,7 +67,28 @@ impl Condition {
 
 yield_now: fn() Never! -[Time.Wait]> { host_yield() }
 
-current_task: fn() -> String Never! { host_task_id() }
+/// The running task's identity. Two reads by one task are equal and differ
+/// from every other running task's; a finished task's identity can be reused.
+/// Outside a scheduled task it identifies the calling thread.
+TaskID: struct {
+    priv value: Int
+
+    impl Display {
+        display: fn(self) -> String { "task {self.value}" }
+    }
+}
+
+current_task: fn() -> TaskID Never! { TaskID{value: core.tasks.__task_identity()} }
+
+/// The CPU time the running task has used, in nanoseconds. A task's clock
+/// counts only the time it ran, on whichever carrier threads ran it, and
+/// stands still while it is parked; on a plain thread it is the thread's CPU
+/// time. Only the difference of two reads by the same task means anything.
+/// A deterministic world has no CPU clock to control, so it rejects the read.
+cpu_ns: fn() -[Time]> Int Never! {
+    core.time.__reject_uncontrolled("task CPU clock")
+    core.tasks.__task_cpu_ns()
+}
 
 /// Receive from a scheduler channel: the next value, or None once the
 /// channel is closed and drained.
@@ -108,22 +129,11 @@ host_sleep_ms: fn(ms: Int) -[Time]> {
 
 host_yield: fn() -[Time.Wait]> { core.tasks.__yield_now() }
 
-host_task_id: fn() -> String {
-    paused: core.tasks.__task_paused() ?? false
-    cancel: core.tasks.__task_cancelled() ?? false
-    task_trace(paused, cancel)
-}
-
 /// Joins the scheduler's carrier and timer threads, the safe step before a
 /// raw exec or fork that needs a single-threaded process. False, with nothing
 /// stopped, while a task or a timer is still pending. The threads start again
 /// on the next task or timer.
 quiesce: fn() -[Exec]> Bool Never! { core.tasks.__quiesce() }
-
-task_trace: fn(paused: Bool, cancel: Bool) -> String Never! {
-    "paused={paused},cancel={cancel}"
-}
-
 /// Receiver metadata is owned by the scheduler's typed handle.
 is_timer: fn<T>(rx: Receiver<T>) -> Bool Never! { rx.is_timer() }
 
@@ -231,14 +241,25 @@ spawn_name: fn(name: String) -> String Never! {
 
 
 
-#Test("current task has idle defaults outside a scheduled task") {
-    assert_eq(current_task(), "paused=false,cancel=false")
+#Test("a task's identity is stable and differs from another running task's") {
+    mine: current_task()
+    assert_eq(mine, current_task())
+    other: task current_task()
+    theirs: other.join() ?? panic("identity task failed")
+    assert(mine != theirs)
+    seven: TaskID{value: 7}
+    assert_eq(seven.display(), "task 7")
+    seen := [TaskID: Bool]{}
+    seen[mine] = true
+    assert(seen.get(current_task()) != None && seen.get(theirs) == None)
 }
 
-#Test("task trace preserves the pause and cancellation fields") {
-    assert_eq(task_trace(true, false), "paused=true,cancel=false")
-    assert_eq(task_trace(false, true), "paused=false,cancel=true")
-    assert_eq(task_trace(true, true), "paused=true,cancel=true")
+#Test("the task CPU clock advances while the task computes") {
+    before: cpu_ns()
+    total := 0
+    loop n in 0..<3000000 -> total += n % 7
+    assert(total > 0)
+    assert(cpu_ns() - before > 0)
 }
 
 #Test("interval periods truncate whole milliseconds and never spin at zero") {

@@ -8,6 +8,7 @@
 use {
     cli_files: core.files
     cli_sys: core.sys
+    cli_tasks: core.tasks
     // The Core sources and assets this jet was built with, for a compile with
     // no toolchain tree (jet_cli_core_sources).
     core.devtools.[toolchain_core_asset, toolchain_core_source]
@@ -200,23 +201,12 @@ jet_cli_runtime_lint_issue: fn(finding: IRLintFinding) -> String Never! {
 }
 
 // JET_FRONT_RUNTIME_PACK_OUTPUT: links the runtime library object `object`
-// with the platform inputs into the Rust-free runtime pack, and
+// alone into the runtime pack, with no C archive (#6693), and
 // JET_FRONT_RUNTIME_IMAGE_OUTPUT: the pack prelinked at the run base, which
 // `jet run` binds programs to (Image/RuntimePack.jet x64_link_runtime_image).
 jet_cli_runtime_pack: fn(result: &&JetDriverCompileResult, prefix: String, object: &&[U8]) -> JetDriverCompileResult {
     if cli_sys.get("JET_FRONT_RUNTIME_PACK_OUTPUT") == .Val(pack_path) {
-        names := [String]{"{prefix}.o"}
-        bytes := [[U8]]{object.move()}
-        loop path in (cli_sys.get("JET_FRONT_RUNTIME_PLATFORM_INPUTS") ?? "").split("\n").to_list() {
-            if path.trim() == "" -> next
-            input: cli_files.read_bytes(path) ?? return jet_driver_compile_escaped_failure("cannot read runtime platform input `{path}`: {err}")
-            names.push(path)
-            bytes.push(input)
-        }
-        // Preserve the hosted backend's direct memory imports (the same
-        // explicit C roots as LinkRuntime.jet), never archive-wide roots.
-        roots: [String]{"memcpy", "memmove", "memset", "memcmp"}
-        linked: x64_link_runtime_pack(names, bytes, roots)
+        linked: x64_link_runtime_pack([String]{"{prefix}.o"}, [[U8]]{object.move()}, [String]{})
         if linked.errors.len() > 0 {
             cli_files.write("{prefix}.pack-issues", linked.errors.join("\n")) ?? return jet_driver_compile_escaped_failure("cannot write runtime pack findings: {err}")
             return jet_driver_compile_escaped_failure("runtime pack linking failed; see {prefix}.pack-issues")
@@ -1747,7 +1737,7 @@ JetCLITraceSpan: struct {
     item: Bool
 }
 
-// CPU time in ns of the calling task (jet_rt_task_cpu_ns: the time its fiber
+// CPU time in ns of the calling task (core.tasks.cpu_ns: the time its fiber
 // ran, on whichever carrier threads; a plain thread's own CPU time) and of the
 // whole process (`/proc/self/stat` utime + stime, in 10 ms clock ticks), and
 // the process's major page faults; -1 where unreadable or not read. A span
@@ -1764,8 +1754,11 @@ JetCLITraceState: struct {
     writing: Bool
     // The target, open for appending from the trace's start.
     writer: cli_files.FileWriter
-    // Open spans per task (jet_cli_trace_task), innermost last.
+    // Open spans per trace lane (jet_cli_trace_lane), innermost last.
     stacks: [Int:[JetCLITraceSpan]]
+    // Each task's trace lane, its events' `tid`: 1 for the task that opened
+    // the trace, then numbered in the order tasks first trace.
+    lanes: [cli_tasks.TaskID:Int]
     // When each progress kind was last written (uptime ms).
     progress_at: [String:Int]
     // How many times each progress kind was reported.
@@ -1784,8 +1777,6 @@ JetCLITraceSink: struct {
     // Uptime (ms) when the trace opened: the origin of every timestamp.
     start_ms: Int
     pid: Int
-    // The task that opened the trace; the readable stream marks others.
-    main_task: Int
     functions: Bool
     phase_counters: Bool
     // Shared by every copy of the sink and every compiler thread.
@@ -1842,13 +1833,13 @@ jet_cli_trace_sink: fn(requested: String?) -> JetCLITraceSink? {
         human: human,
         start_ms: start_ms,
         pid: pid,
-        main_task: jet_cli_trace_task(),
         functions: functions,
         phase_counters: (cli_sys.get(JET_CLI_PHASE_COUNTERS_ENV) ?? "") != "",
         state: shared JetCLITraceState{
             writing: true,
             writer: writer,
             stacks: [Int:[JetCLITraceSpan]]{},
+            lanes: jet_cli_trace_opening_lanes(),
             progress_at: [String:Int]{},
             progress_calls: [String:Int]{},
             process: JetCLITraceUsage{cpu_ns: -1, proc_cpu_ns: -1, majflt: -1},
@@ -1874,12 +1865,12 @@ jet_cli_trace_object: fn(sink: &&JetCLITraceSink) -> CompilerTraceSink Never! {
 }
 
 impl JetCLITraceSink.CompilerTraceSink {
-    begin: fn(self, name: String, detail: String, index: Int, total: Int) Never! -[FS]> {
+    begin: fn(self, name: String, detail: String, index: Int, total: Int) Never! -[FS, Time]> {
         args: if index >= 0 -> ",\"args\":{{\"index\":{index},\"total\":{total}}}" else -> ""
         jet_cli_trace_open(self, name, detail, args, jet_cli_trace_place(index, total), index >= 0)
     }
 
-    begin_item: fn(self, name: String, file: String, item: String) Never! -[FS]> {
+    begin_item: fn(self, name: String, file: String, item: String) Never! -[FS, Time]> {
         args: ",\"args\":{{\"file\":{foundation_json_quote(file)},\"item\":{foundation_json_quote(item)}}}"
         jet_cli_trace_open(self, name, item, args, " ({file})", true)
     }
@@ -1887,12 +1878,13 @@ impl JetCLITraceSink.CompilerTraceSink {
     // Closes the innermost open span of kind `name` in this task, and any
     // deeper span an early return left open; no open span of that kind in
     // this task writes nothing.
-    end: fn(self, name: String, items: Int) Never! -[FS]> {
-        cpu_ns: jet_cli_trace_task_cpu_ns()
+    end: fn(self, name: String, items: Int) Never! -[FS, Time]> {
+        cpu_ns: cli_tasks.cpu_ns()
         ts: jet_cli_trace_micros(self.start_ms)
-        task: jet_cli_trace_task()
+        id: cli_tasks.current_task()
         permit := self.state.guard_edit()
         if !permit.value.writing -> return
+        task: jet_cli_trace_lane(permit.value, id)
         stack := permit.value.stacks.get(task) ?? return
         position := stack.len() - 1
         loop position >= 0 && stack[position].kind != name -> position -= 1
@@ -1930,7 +1922,7 @@ impl JetCLITraceSink.CompilerTraceSink {
             if !last_item && now - previous < JET_CLI_TRACE_PROGRESS_MS -> return
         }
         permit.value.progress_at[name] = now
-        task: jet_cli_trace_task()
+        task: jet_cli_trace_lane(permit.value, cli_tasks.current_task())
         ts: if now > self.start_ms -> (now - self.start_ms) * 1000 else -> 0
         line := ""
         if self.human {
@@ -1960,9 +1952,10 @@ impl JetCLITraceSink {
         loop index in 2..<parts.len() -> phase = "{phase}.{parts[index]}"
         counter: "{phase}.{counter_name}"
         ts: jet_cli_trace_micros(self.start_ms)
-        task: jet_cli_trace_task()
+        id: cli_tasks.current_task()
         permit := self.state.guard_edit()
         if permit.value.writing {
+            task: jet_cli_trace_lane(permit.value, id)
             depth: (permit.value.stacks.get(task) ?? [JetCLITraceSpan]{}).len()
             line: if self.human -> "{jet_cli_trace_prefix(self, ts, task, depth)}# {counter} = {value}\n" else -> "{jet_cli_trace_head(counter, None, "C", ts, self.pid, task)},\"args\":{{\"value\":{value}}}}},\n"
             jet_cli_trace_write(self.target, permit.value, line)
@@ -1986,13 +1979,14 @@ jet_cli_trace_progress_due: fn(state: Shared<JetCLITraceState>, name: String, la
 // event carries `args` (`,"args":{...}` or ""), its readable line `place`.
 // An `item` span (one comptime item, or one indexed unit of a phase) reads
 // only its task's CPU clock, so a phase of many items stays cheap to trace.
-jet_cli_trace_open: fn(sink: JetCLITraceSink, name: String, detail: String, args: String, place: String, item: Bool) Never! -[FS]> {
+jet_cli_trace_open: fn(sink: JetCLITraceSink, name: String, detail: String, args: String, place: String, item: Bool) Never! -[FS, Time]> {
     ts: jet_cli_trace_micros(sink.start_ms)
-    task: jet_cli_trace_task()
+    id: cli_tasks.current_task()
     label: if detail == "" -> name else -> detail
-    cpu_ns: jet_cli_trace_task_cpu_ns()
+    cpu_ns: cli_tasks.cpu_ns()
     permit := sink.state.guard_edit()
     if !permit.value.writing -> return
+    task: jet_cli_trace_lane(permit.value, id)
     stack := permit.value.stacks.get(task) ?? [JetCLITraceSpan]{}
     start := JetCLITraceUsage{cpu_ns: cpu_ns, proc_cpu_ns: -1, majflt: -1}
     if !item -> start = jet_cli_trace_process(permit.value, sink.start_ms + ts /% 1000, cpu_ns, stack.len() == 0)
@@ -2056,10 +2050,10 @@ jet_cli_trace_task_name: fn(pid: Int, task: Int) -> String Never! {
     "{{\"name\":\"thread_name\",\"ph\":\"M\",\"pid\":{pid},\"tid\":{task},\"args\":{{\"name\":\"task {task}\"}}}},\n"
 }
 
-// The readable stream's line prefix: elapsed seconds, a non-main task's
-// id, and two spaces per open span.
+// The readable stream's line prefix: elapsed seconds, a non-main lane's
+// number, and two spaces per open span.
 jet_cli_trace_prefix: fn(sink: JetCLITraceSink, ts: Int, task: Int, depth: Int) -> String Never! {
-    lane: if task == sink.main_task -> "" else -> "[t{task}] "
+    lane: if task == JET_CLI_TRACE_MAIN_LANE -> "" else -> "[t{task}] "
     indent := ""
     loop indent.len() < depth * 2 -> indent = "{indent}  "
     "[{jet_cli_trace_clock(ts)}] {lane}{indent}"
@@ -2144,12 +2138,26 @@ jet_cli_trace_number: fn(bytes: [U8], from: Int, to: Int) -> Int Never! {
     value
 }
 
-// The calling task's identity (its fiber's, kept across the carrier threads
-// that run it; a plain thread's kernel id) and its CPU clock in ns: the
-// runtime's scheduler alone knows which task runs where, so a span that parks
-// and resumes on another carrier still closes on its own stack and clock.
-#Import(c) jet_cli_trace_task: fn() -> Int = "jet_rt_task_identity"
-#Import(c) jet_cli_trace_task_cpu_ns: fn() -> Int = "jet_rt_task_cpu_ns"
+// The trace lane of the task that opened the trace.
+JET_CLI_TRACE_MAIN_LANE: 1
+
+jet_cli_trace_opening_lanes: fn() -> [cli_tasks.TaskID:Int] Never! {
+    lanes := [cli_tasks.TaskID:Int]{}
+    lanes[cli_tasks.current_task()] = JET_CLI_TRACE_MAIN_LANE
+    lanes
+}
+
+// The calling task's trace lane, numbering a task the first time it traces.
+// The identity is the running task's (its fiber's, kept across the carrier
+// threads that run it; a plain thread's), and the CPU clock the spans read
+// (core.tasks.cpu_ns) is that task's too, so a span that parks and resumes
+// on another carrier still closes on its own stack and clock.
+jet_cli_trace_lane: fn(state: &JetCLITraceState, task: cli_tasks.TaskID) -> Int Never! {
+    if state.lanes.get(task) == .Val(lane) -> return lane
+    lane: state.lanes.len() + 1
+    state.lanes[task] = lane
+    lane
+}
 
 jet_cli_trace_memory: fn() -> JetCLITraceMemory? Never! {
     text: cli_files.read("/proc/self/status") ?? return None

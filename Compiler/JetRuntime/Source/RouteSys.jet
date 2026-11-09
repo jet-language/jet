@@ -50,8 +50,8 @@ sys_groups: fn(size: I64, list: I64) -> I64 {
 // A raw fork copies every lock as it stands into a child that runs only the
 // forking thread, where a lock another thread held would stay held for
 // good; musl's fork took its own locks for this. The fork gate
-// (Thread.jet thread_fork_gate_share) waits out every runtime musl call
-// that takes a musl lock and keeps new ones out; the thread registry's
+// (Thread.jet thread_fork_gate_share) waits out every thread_spawn clone
+// under way and keeps new ones out; the thread registry's
 // mutex, the stdout lock and every allocator lock are then held across the
 // system call, in the order their holders nest them, and each is released
 // in the parent and left in its initial state in the child. Pending stdout

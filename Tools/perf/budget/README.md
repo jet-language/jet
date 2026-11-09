@@ -36,11 +36,12 @@ full-unit trace must carry.
 
 What the native `jet` writes for the checker (Compiler/JetCli/Source/Cli/Request.jet):
 
-- every span `E` event: `cpu_ns` (the span task's CPU time, the runtime's
-  per-fiber clock `jet_rt_task_cpu_ns`), `proc_cpu_ns` (the whole process's,
+- every span `E` event: `cpu_ns` (the span task's CPU time, the per-fiber
+  clock `core.tasks.cpu_ns`), `proc_cpu_ns` (the whole process's,
   every thread, `/proc/self/stat`, 10 ms ticks) and `majflt`; an event's
-  `tid` is its task, so a task's spans nest on one lane whichever carrier
-  threads ran it;
+  `tid` is its task's lane (1 for the task that opened the trace, then
+  numbered in first-trace order), so a task's spans nest on one lane
+  whichever carrier threads ran it;
 - work counters (`C` events, summed per name), such as `parse.{user_,core_,}lines`,
   `parse.{user_,core_,}tokens` and `lower.functions`;
 - census spans: `load.marker_groups.relex` / `.reparse` and `comptime.build`

@@ -5,9 +5,9 @@ import { constants, openSync, closeSync, fstatSync, lstatSync, readFileSync } fr
 import { join } from 'node:path';
 
 export const nativePackHash = bytes => createHash('sha256').update(bytes).digest('hex');
-export function nativePackRecipe(source, backend, lifecycle, platform, compiler, vendored) {
-  return nativePackHash(JSON.stringify({ format: 'jet-native-runtime-recipe/v1',
-    source, backend, lifecycle, platform, compiler, vendored }));
+export function nativePackRecipe(source, backend, lifecycle, compiler, vendored) {
+  return nativePackHash(JSON.stringify({ format: 'jet-native-runtime-recipe/v2',
+    source, backend, lifecycle, compiler, vendored }));
 }
 function heldFile(path) {
   const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
@@ -57,10 +57,9 @@ export function readNativeRuntimePack(root, recipe = null) {
     if (!/^[a-f0-9]{64}$/.test(row.sha256 ?? '') || nativePackHash(bytes) !== row.sha256) throw Error(`runtime pack digest mismatch: ${row.path}`);
     files.set(row.path, bytes);
   }
-  const identity = { format: 'jet-native-runtime/v2', source: provenance.source.sha256,
+  const identity = { format: 'jet-native-runtime/v3', source: provenance.source.sha256,
     abi: provenance.abiSha256, threads: provenance.threadsSha256, backend: provenance.backendInputs.sha256,
-    lifecycle: provenance.lifecycle.sha256, platform: provenance.cPlatformArchives.map(row => row.sha256),
-    vendored: vendored.map(row => row.sha256) };
+    lifecycle: provenance.lifecycle.sha256, vendored: vendored.map(row => row.sha256) };
   if (nativePackHash(JSON.stringify(identity)) !== key) throw Error('runtime pack identity does not match native.key');
   files.set('runtime.exports', exports);
   return { key, provenance, provenanceBytes, pack: files.get('jet_runtime.pack.o'), files };

@@ -3902,9 +3902,20 @@ sendability rules. The implementation is in
 | `waitall<T>(receivers: [Receiver<T>]) -[Time.Wait]> [T?]` | values | One `recv` per receiver, in order. |
 | `waitany<T>(receivers: [Receiver<T>]) -[Time.Wait]> (index: Int, value: T?)` | answer | The receiver that answered and its `recv` result; the list must not be empty. |
 | `yield_now() -[Time]>` | — | Yield to another runnable task. |
-| `current_task() -> String` | text | Identify the running task. |
+| `current_task() -> TaskID` | identity | Identify the running task. |
+| `cpu_ns() -[Time]> Int` | nanoseconds | The CPU time the running task has used. |
 | `timeout(delay: Duration) -[Time]>` | — | Wait for a duration before returning. |
 | `quiesce() -[Exec]> Bool` | joined | Join the scheduler's carrier and timer threads before a raw exec or fork that needs a single-threaded process; `false`, with nothing stopped, while a task or a timer is pending. The threads start again on the next use. |
+
+`TaskID` is opaque: it compares with `==`, keys a map and prints, and nothing
+else reads it. Two reads by one task are equal and differ from every other running task's;
+a finished task's identity can be reused, and its printed form changes from run
+to run, so compare identities rather than printing them into golden output.
+Outside a scheduled task it identifies the calling thread. `cpu_ns` counts only
+the time the task ran, on whichever carrier threads ran it, and stands still
+while the task is parked; on a plain thread it is the thread's CPU time. Only
+the difference of two reads by the same task means anything. A deterministic
+world has no CPU clock to control, so it rejects the read.
 
 `TaskState` is the pure integer convenience queue; generic task and channel
 handles are compiler-owned scheduler surfaces. A capacity of zero means that

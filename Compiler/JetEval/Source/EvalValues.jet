@@ -69,12 +69,13 @@ JetEvalComptimeInputAdapter: trait {
 // driver installs it for comptime evaluation and fn-build invocations; a
 // check is a whole compile of its source, with that compile's effects, and
 // the profile view evaluates `env.jet`, whose compile-time expressions run
-// through the compiler service (Exec, Time.Wait).
+// through the compiler service (Exec, Time.Wait); a check's trace spans read
+// the task CPU clock (Time).
 JetEvalCompilerQueryHost: trait {
     clone_compiler_host: fn(self) -[]> JetEvalCompilerQueryHost
     // Query `query` on `args`: its typed Result (Present, or a told Failed
     // CompilerError). None: no query of this host.
-    compiler_query: fn(self, query: String, args: [TComptimeValue], span: Span) -[Env, Exec, FFI.Asm, FS, Net, Time.Wait]> JetEvalBuildReply?
+    compiler_query: fn(self, query: String, args: [TComptimeValue], span: Span) -[Env, Exec, FFI.Asm, FS, Net, Time]> JetEvalBuildReply?
 }
 
 JetEvalConfig: struct {

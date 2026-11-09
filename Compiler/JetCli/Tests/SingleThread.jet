@@ -37,7 +37,9 @@ single_thread_test_export: fn(function: Int, symbol: String, init_priority: Int)
 
 #Test("the thread receipt names each export that reaches a thread start, a signal handler or a library load") {
     m := ir_module_new()
-    start: single_thread_test_fn(m, "start", ["pthread_create"], [Int]{}, [Int]{})
+    // The raw clone asm leaf starts a thread; a function calling it reaches one.
+    start := ir_function_new("os_clone_i64", "os.jet::os_clone_i64#asm", "os_clone_i64", "os.jet", 1)
+    start.asm = Val(IRAsmLeaf{code: [U8]{0x0f, 0x05}, regs: [Int]{}, result: 0})
     m.functions.push(start)
     spawn: single_thread_test_fn(m, "spawn", [String]{}, [Int]{0}, [Int]{})
     m.functions.push(spawn)

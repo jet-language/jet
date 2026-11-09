@@ -948,7 +948,7 @@ scheduler_get: fn() -> I64 {
 // Queues a job (scheduler_run_job) for a carrier. The job wakes an idle
 // carrier, else starts one more while fewer than the pool size run. Unsigned
 // pool sizes above i64::MAX are attempted just as Rust does, failing at
-// pthread_create.
+// thread_spawn.
 scheduler_submit: fn(task: I64) {
     root: scheduler_get()
     sync_store(wrapping(task + I64{88}), I64{0})
@@ -1361,25 +1361,6 @@ scheduler_park_duration: fn(wait_kind: I64, duration_ns: I64) -> I64 {
     sync_park_drop(slot)
     jet_rt_string_drop(kind)
 }
-#Export(c) jet_task_current_trace: fn() -> I64 {
-    control: scheduler_control_current()
-    paused: control != I64{0} && sync_load(wrapping(control + I64{8})) != I64{0}
-    cancelled: control != I64{0} && sync_load(wrapping(control + I64{16})) != I64{0}
-    head: scheduler_msg_trace_head()
-    first: if paused -> scheduler_msg_yes() else -> scheduler_msg_no()
-    a: scheduler_text_concat(head, first)
-    jet_rt_string_drop(head)
-    jet_rt_string_drop(first)
-    middle: scheduler_msg_trace_mid()
-    b: scheduler_text_concat(a, middle)
-    jet_rt_string_drop(a)
-    jet_rt_string_drop(middle)
-    last: if cancelled -> scheduler_msg_yes() else -> scheduler_msg_no()
-    result: scheduler_text_concat(b, last)
-    jet_rt_string_drop(b)
-    jet_rt_string_drop(last)
-    result
-}
 
 // Owner-thread deadline nodes24B: next0 deadline8 taskId16. Queue24B uses
 // head0 nextId8 reserved16, lives at TCB@96. Earliest tie is registration order.
@@ -1444,7 +1425,7 @@ scheduler_fatal: fn(message: I64) {
     jet_rt_string_drop(message)
 }
 
-// A runtime thread that could not start (pthread_create EAGAIN: RLIMIT_AS,
+// A runtime thread that could not start (thread_spawn EAGAIN: RLIMIT_AS,
 // pids limit, memory) stops the process with E3001, also inside a task or
 // root. Native code has no stop edge out of a runtime-internal failure: an
 // in-task stop would return into its caller, which would run on with the error

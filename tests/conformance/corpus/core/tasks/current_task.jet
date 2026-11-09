@@ -3,5 +3,8 @@ use tasks: core.tasks
 
 run: fn() {
     current: tasks.current_task()
-    print(current)
+    print(current == tasks.current_task())
+    print(current.display().starts_with("task "))
+    other: task tasks.current_task()
+    print(current != (other.join() ?? panic("task failed")))
 }

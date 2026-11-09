@@ -327,10 +327,12 @@ ir_export_abi_json: fn(rows: [IRExportABI]) -> String Never! {
     "[{encoded.join(",")}]"
 }
 
-// The C symbols whose call can run code beside the calling thread: a new
-// thread, a signal handler that returns into the code it interrupted
-// (ProcessSignal.jet), a loaded library.
-IR_THREAD_START_SYMBOLS: [String]{"pthread_create", "signal", "dlopen"}
+// The symbols whose call can run code beside the calling thread: a new
+// thread (the raw clone `#FFI(asm)` leaf, JetBackend OS/Linux.jet; a process
+// spawn's vfork-style clone counts too), a signal handler that returns into
+// the code it interrupted (ProcessSignal.jet), a loaded library. A C symbol
+// counts where the IR calls it, an asm leaf by its own name.
+IR_THREAD_START_SYMBOLS: [String]{"os_clone_i64", "signal", "dlopen"}
 
 // The thread receipt of a library (`<prefix>.threads`): the exports whose
 // call can reach an IR_THREAD_START_SYMBOLS call through direct calls, the
@@ -352,7 +354,7 @@ ir_thread_exports: fn(m: IRModule, exports: [IRLibraryExport]) -> [String] Never
     reaches := [Bool]{}
     work := [Int]{}
     loop (id, f) in m.functions {
-        starts := false
+        starts := f.asm != None && IR_THREAD_START_SYMBOLS.contains(f.name)
         loop (at, op) in f.op {
             callee := -1
             if op == .Call || op == .FunctionAddress -> callee = f.a[at]

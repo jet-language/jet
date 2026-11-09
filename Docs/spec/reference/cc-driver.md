@@ -92,16 +92,24 @@ acquisition: production uses the toolchain pack.
 `jet run`, `jet build` and `jet build --release` compile a program's `c@path`
 sources and `#FFI(c)` inline bodies with the same tools on every tier
 (`Compiler/JetCli/Source/Cli/ForeignLink.jet`). Unless `CC` or `AR` names a
-host tool, those tools are this pack's `bin/clang` and `bin/llvm-ar`, for the
-`x86_64-unknown-linux-gnu` target with the pack's glibc sysroot and clang
-resource directory, so the machine needs no host `cc` or `ar`.
-`JET_CC_PACK_ROOT` names an unpacked pack to use as is; otherwise jet asks the
-`jetpack` engine of its own version for the pack:
-`jet env fetch-toolchain --json` puts it in the Hangar as above and prints
-`{"root": …, "llvm": …, "musl": …, "glibc": …}`. Only a jet with no such
-engine beside it falls back to `cc` and `ar` on `PATH`. A golden test run
-with a jetpack takes the pack once and names it to every row through
-`JET_CC_PACK_ROOT`, so no tier's fresh Hangar unpacks its own copy.
+host tool, those tools are this pack's `bin/clang` and `bin/llvm-ar`, so the
+machine needs no host `cc` or `ar`. A Jet program's C closure compiles for
+`x86_64-unknown-linux-musl` against the musl sysroot and links statically
+with its `libc.a` and the pack's compiler-rt builtins; `jet run` of a C or C++
+file builds for `x86_64-unknown-linux-gnu` with the pack's glibc sysroot.
+jet asks the `jetpack` engine of its own version for the pack:
+`jet env fetch-toolchain --json` puts it in the Hangar as above, realizes the
+host's musl target (the first time in a Hangar, its sysroot is built from the
+pack's musl sources, about half a minute; later runs reuse it) and prints
+`{"root": …, "musl_sysroot": …, "llvm": …, "musl": …, "glibc": …}`.
+`JET_CC_PACK_ROOT` names an unpacked pack to build C and C++ files with as
+is; a Jet program's C closure still takes the musl sysroot from the engine.
+Only a jet with no such engine beside it falls back to `cc` and `ar` on
+`PATH`, and a C closure then links the musl `libc.a` on LIBRARY_PATH. A golden
+test run with a jetpack takes the pack once and names it to every row through
+`JET_CC_PACK_ROOT`, so no tier's fresh Hangar unpacks its own copy for a C
+file; a row that links a C closure realizes the pack and its musl sysroot in
+its own Hangar.
 
 ## Reproducible acquisition checks
 
