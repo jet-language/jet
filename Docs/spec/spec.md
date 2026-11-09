@@ -247,7 +247,7 @@ one parameter whose type is a CLI-derived program struct; it returns `()` or a
 unit-fallible result. The checker gives an omitted entry
 contract the default fallible `Result<(), Err>` carrier, so source may use a
 plain `run: fn() { … }`. An explicit unit-fallible contract names its error,
-for example `run: fn() !IOError`; a bare `!` is not a contract. Other output
+for example `run: fn() IOError!`; a bare `!` is not a contract. Other output
 kinds have their own entry contract. Notebook and REPL evaluation may construct
 an explicit entry for the submitted fragment (S12, D-CLIFLAG1,
 D-FAIL-EXIT1=A).

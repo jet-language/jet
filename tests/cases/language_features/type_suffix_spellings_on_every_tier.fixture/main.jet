@@ -1,0 +1,40 @@
+// The suffix spellings the `Type.Option` and `Type.Result` doc comments in
+// Compiler/JetFoundation/Source/Types/Types.jet describe (#6281 c121).
+#Error
+Bad: struct { message: String }
+
+// `T E!`: the contract follows the success type.
+parse: fn(text: String) -> Int Bad! {
+    if text == "" -> return Err(Bad{message: "empty"})
+    7
+}
+
+// `E!` alone: the unit-success carrier.
+nothing: fn(ok: Bool) Bad! {
+    if !ok -> return Err(Bad{message: "no"})
+}
+
+// `T? E!`: an optional success with a contract.
+lookup: fn(key: String) -> Int? Bad! {
+    if key == "" -> return Err(Bad{message: "no key"})
+    if key == "a" -> return 1
+    None
+}
+
+// `Err!` pins the default contract.
+pinned: fn(text: String) -> Int Err! { text.len() }
+
+run: fn() {
+    a: [Int?]{1, None}
+    b: [Int]?{None}
+    c: Option<Int>{None}
+    print("{a.len()} {b == None} {c == None}")
+    print(parse("7") ?? 0)
+    print(parse("") ?? 0)
+    nothing(true) ?? print("unexpected")
+    nothing(false) ?? print("refused")
+    print(lookup("a") ?? -1)
+    print(lookup("b") ?? -1)
+    print(lookup("") ?? -2)
+    print(pinned("xy") ?? 0)
+}

@@ -12,7 +12,14 @@ Type: enum {
     List(element: Type)
     Map(key: Type, key_span: Span?, value: Type)
     Shared(inner: Type)
+    // `T?`: the optional suffix binds to the type it follows, so `[Int?]` and
+    // `[Int]?` differ; a second mark (`T?` again, or `T??`) is E0309. A
+    // written `Option<T>` is the same type.
     Option(inner: Type)
+    // `T E!`: the error contract follows the success type (`Int ParseError!`,
+    // `Entry? (DBError | TimeoutError)!`). A type position holding only the
+    // contract, `E!` or `(A | B)!`, is `Result(Unit, E)`. A written
+    // `Result<T, E>` is the same type.
     Result(ok: Type, err: Type)
     Fn(params: [Type], ret: Type?, effect_bound: [EffectRowEntry]?, param_contract: [CallContractRow]?, call_metadata: FunctionCallMetadata?, return_view_provenance: ViewProvenanceMap?)
     Named(name: String)

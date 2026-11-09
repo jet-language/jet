@@ -169,8 +169,18 @@ sema_call_params_from_type: fn(ty: Type) -> [SemaCallParam]? {
     sema_call_params_from_type_range(ty, 0, true)
 }
 
+// A function read as a value keeps its declaration's call surface (S61,
+// D-APILABEL1=A): a signature that carries call metadata came from a
+// declaration, so its parameter names stay labels and its defaults stay
+// bound. A written function type or a lambda carries none and binds by
+// its contract alone.
 sema_call_params_from_value_type: fn(ty: Type) -> [SemaCallParam]? {
-    sema_call_params_from_type_range(ty, 0, false)
+    sema_call_params_from_type_range(ty, 0, sema_call_type_from_declaration(ty))
+}
+
+sema_call_type_from_declaration: fn(ty: Type) -> Bool Never! {
+    if ty == .Fn(_, _, _, _, metadata, _) -> return metadata != None
+    false
 }
 
 sema_call_params_from_type_after: fn(ty: Type, offset: Int) -> [SemaCallParam]? {
@@ -178,7 +188,7 @@ sema_call_params_from_type_after: fn(ty: Type, offset: Int) -> [SemaCallParam]? 
 }
 
 sema_call_params_from_value_type_after: fn(ty: Type, offset: Int) -> [SemaCallParam]? {
-    sema_call_params_from_type_range(ty, offset, false)
+    sema_call_params_from_type_range(ty, offset, sema_call_type_from_declaration(ty))
 }
 
 sema_call_diag_unknown_label: fn(callee: String, label: String, params: [SemaCallParam], span: Span) -> Diagnostic {

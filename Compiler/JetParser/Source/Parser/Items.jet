@@ -2600,7 +2600,8 @@ parser_parse_trait: fn(state: &JetParserState, modifiers: ParsedItemModifiers) -
 }
 
 // The trait bounds after a `:` (Rust `parse_trait_bounds`): a bracketed list
-// `[A, B]`, or bare names joined by `|`. Each context names the place in the
+// `[A, B]`, or bare names joined by `|`. A bound may name a module's trait by
+// its dotted path (`mem.Allocator`). Each context names the place in the
 // expected-name and missing-`]` reports.
 parser_parse_trait_bounds: fn(state: &JetParserState, list_context: String, close_context: String, single_context: String) -> [String] {
     bounds := [String]{}
@@ -2608,8 +2609,7 @@ parser_parse_trait_bounds: fn(state: &JetParserState, list_context: String, clos
         parser_bump(state)
         if parser_current_kind(state) != TOKEN_RBRACKET {
             loop {
-                bound: parser_expect_name(state, list_context)
-                bounds.push(parser_value(state, bound))
+                bounds.push(parser_parse_bound_path(state, list_context))
                 if parser_current_kind(state) == TOKEN_RBRACKET -> break
                 if parser_current_kind(state) != TOKEN_COMMA -> break
                 parser_bump(state)
@@ -2619,8 +2619,7 @@ parser_parse_trait_bounds: fn(state: &JetParserState, list_context: String, clos
         return bounds
     }
     loop {
-        bound: parser_expect_name(state, single_context)
-        bound_name: parser_value(state, bound)
+        bound_name: parser_parse_bound_path(state, single_context)
         if bound_name == "Quantity" && parser_current_kind(state) == TOKEN_LT {
             bounds.push(parser_parse_quantity_bound(state))
         } else {
@@ -2630,6 +2629,18 @@ parser_parse_trait_bounds: fn(state: &JetParserState, list_context: String, clos
         parser_bump(state)
     }
     bounds
+}
+
+// One bound name, with the module path of a dotted bound (`mem.Allocator`).
+parser_parse_bound_path: fn(state: &JetParserState, context: String) -> String {
+    first: parser_expect_name(state, context)
+    path := parser_value(state, first)
+    loop parser_current_kind(state) == TOKEN_DOT && parser_kind_at(state, 1) == TOKEN_IDENT {
+        parser_bump(state)
+        segment: parser_bump(state)
+        path = "{path}.{parser_value(state, segment)}"
+    }
+    path
 }
 
 // `Quantity<Dimension, .Kind>` bounds a parameter to the quantities of one

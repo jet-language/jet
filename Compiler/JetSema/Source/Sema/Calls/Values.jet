@@ -56,8 +56,9 @@ sema_call_value_checked_from_type: fn(state: &SemaOwnershipState, callee: Expr, 
     resolved_signature: sema_call_resolved_type(signature, environment, program)
     // A callee that names a function declaration (directly, parenthesized or
     // as every branch of an `if`) binds like a direct call of that function:
-    // its declaration names are labels. Any other function value is bound by
-    // its type's contract alone.
+    // its declaration names are labels. Any other function value binds by
+    // its type: a declaration's signature read as a value keeps those names,
+    // and a written function type or lambda binds by its contract alone.
     // A named callee value is reported by its name.
     shown_callee: if callee == {
         .Ident(name, _, _) -> name.copy()

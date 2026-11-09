@@ -1,0 +1,12 @@
+use {
+    paths: core.files.path
+    lib
+}
+
+#Test("aliased import as a parameter type") {
+    base: paths.of("/tmp/jet")
+    joined: lib.child(base, "notes.txt") ?? panic("child refused")
+    assert_eq(joined, "/tmp/jet/notes.txt")
+}
+
+run: fn() { print(lib.child(paths.of("/srv"), "a") ?? panic("child refused")) }

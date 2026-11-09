@@ -8497,7 +8497,7 @@ The carrier layout and runtime are unchanged.
 **2026-08-21 — D-ERRSIGIL1=A** *(card #2127; ratified 2026-08-21; amended by
 D-ERRSUFFIX1=B and superseded by D-FAILURE-FOUNDATION1=A)*: `?` has one
 meaning: `T?` means a value might be absent, while a fallible type uses the
-suffix zone `T E!` (or `T !` for the default `Err`); call-site `?` propagation
+suffix zone `T E!` (`T Err!` pins the default `Err`); call-site `?` propagation
 and `??` keep their current meanings. The infix `T ! E` and `T ? E` spellings
 are retired and teach the suffix form.
 
@@ -8564,7 +8564,8 @@ slate card #2144; superseded by D-FAILURE-FOUNDATION1=A)*: the failure surface
 is a suffix zone: `[Success?] [ErrorUnion!]`, one `!` mark on the error type or
 on an explicit parenthesized union — `Entry? StoreError!`,
 `Int (DbError | TimeoutError)!`. Unit-fallible is the error suffix alone
-(`save: fn(path: String) IOError!`); bare `!` keeps the default-error meaning.
+(`save: fn(path: String) IOError!`); an omitted contract keeps the default `Err`,
+and `Err!` pins it; a bare `!` is not a contract.
 This amends D-ERRSIGIL1=A (the mark moves from infix separator to suffix),
 D-UNIONTYPE1=A (the union takes explicit parens under the suffix), and
 D-FAIL-UNIT1=A's spelling. `?` still means absence only.

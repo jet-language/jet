@@ -1,0 +1,34 @@
+labels: module {
+    Tag: struct {
+        name: String
+    }
+
+    inner: module {
+        Mark: struct {
+            level: Int
+        }
+    }
+}
+
+Mine: trait {
+    shout: fn(self) -> String
+}
+
+impl labels.Tag.Mine {
+    shout: fn(self) -> String { "{self.name}!" }
+}
+
+impl labels.inner.Mark.Mine {
+    shout: fn(self) -> String { "level {self.level}!" }
+}
+
+loud: fn<T: Mine>(value: T) -> String { value.shout() }
+
+run: fn() {
+    item: labels.Tag{name: "hi"}
+    mark: labels.inner.Mark{level: 3}
+    print(item.shout())
+    print(mark.shout())
+    print(loud(item))
+    print(loud(mark))
+}
