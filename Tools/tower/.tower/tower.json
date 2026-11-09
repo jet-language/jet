@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 98147,
+    "rev": 98150,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -81953,12 +81953,12 @@
         },
         {
           "n": 4,
-          "text": "A program whose tasks block 10,000 times for 1 ms each never has more than workers + 8 + 1 runtime threads alive at once; the thread high-water mark is read from `jet_scheduler_blocking_wait_stats` and logged.",
+          "text": "A program whose tasks block 10,000 times for 1 ms each never has more than workers + 8 + 1 runtime threads alive at once; the thread high-water mark is read from the process's own thread count (/proc/self/status Threads) and logged.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-30T21:41:18.390Z"
+          "at": "2026-11-09T21:34:55.001Z"
         },
         {
           "n": 5,
@@ -82006,7 +82006,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T21:41:14.674Z",
-      "updated": "2026-11-09T20:12:01.132Z",
+      "updated": "2026-11-09T21:34:55.001Z",
       "updatedBy": "Main",
       "criteriaLastN": 8
     },
@@ -101925,20 +101925,20 @@
         {
           "n": 1,
           "text": "Each repro reports the same E3010 stop at comptime as at runtime, as a user diagnostic naming the comptime site, on every tier; no ICE and no value. A cases row pins the scalar and the [Int]-loop forms.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T14:59:59.148Z"
+          "evidence": "Landed cc9be9ffa5 on dev (train 1, 6a06b917cb..0f193199cc; SUB G1Lead-23). Every test line of the SUB ran with the train-1 compiler and passed (Lander's list of fully proven SUBs, 2026-11-09): each runtime stop kind, the scalar and the [Int]-loop from_bits forms included, stops the fold with its E3010 at the comptime call on O0, O1 and O2; cases row every_runtime_stop_at_compile_time_sto… pins both forms.",
+          "at": "2026-11-09T21:34:50.954Z"
         },
         {
           "n": 2,
           "text": "The comptime path's 'IR evaluation' wording is explained: either it is the native O0 child (and the message is corrected), or an interpreter path exists, which is an I9 defect recorded on its own card.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T14:46:27.040Z"
+          "evidence": "Landed cc9be9ffa5 on dev (train 1; SUB G1Lead-23), tests passed with the train-1 compiler: no interpreter exists; the 'IR evaluation' prefix named the JetEval IR module and is removed, and each caller now names the native run.",
+          "at": "2026-11-09T21:34:53.019Z"
         }
       ],
       "refs": [],
@@ -101947,7 +101947,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-09T14:46:19.481Z",
-      "updated": "2026-11-09T14:59:59.148Z",
+      "updated": "2026-11-09T21:34:53.019Z",
       "updatedBy": "Main",
       "criteriaLastN": 2
     },
@@ -193591,6 +193591,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-09T21:34:55.001Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0ih6z1d",
+      "note": "#4: jet_scheduler_blocking_wait_stats no longer exists in the Jet runtime; the bound and the proof are unchanged (G1Lead-2 disclosed it in the SUB's msg).; was: A program whose tasks block 10,000 times for 1 ms each never has more than workers + 8 + 1 runtime threads alive at once; the thread high-water mark is read from `jet_scheduler_blocking_wait_stats` an"
+    },
+    {
+      "at": "2026-11-09T21:34:53.019Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0bf5kow",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-09T21:34:50.954Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0bf5kow",
+      "note": "#1"
+    },
     {
       "at": "2026-11-09T21:30:24.700Z",
       "by": "Main",
