@@ -40,9 +40,9 @@
 // Process lifetime root: mutex@0, atomic next-key counter@8, destructor native
 // List header@16, scope native List header@40 (0 thread, 1 attempt),
 // live-TCB native List<I64> header@64 containing [tid,tcb,...] word pairs
-// (a fiber's pair is [tcb,tcb], Fiber.jet), and the atomic count@88 of
-// threads thread_spawn started that have not registered yet.
-// All headers use [len@0,cap@8,data@16]. Root is 96 bytes; closures transfer
+// (a fiber's pair is [tcb,tcb], Fiber.jet), the atomic count@88 of threads
+// thread_spawn started that have not registered yet, and the fork gate@96.
+// All headers use [len@0,cap@8,data@16]. Root is 104 bytes; closures transfer
 // to the registry for key lifetime. No inherited GS pointer is dereferenced.
 thread_tls_registry := I64{0}
 
@@ -51,6 +51,13 @@ THREAD_TCB_ROW: I64{88}
 
 // The root word counting spawned threads not yet in the live registry.
 THREAD_SPAWNING: I64{88}
+
+// The root word of the fork gate (thread_fork_gate_hold).
+THREAD_FORK_GATE: I64{96}
+
+// The fork gate's count of a fork that holds it or waits for it: above any
+// count of sharing threads, inside the 32 bits a futex observes.
+THREAD_FORK_GATE_HELD: I64{1073741824}
 
 // Zero `bytes` bytes at a word-aligned address. A byte list's capacity need
 // not be a word multiple, so whole words go first and the tail goes bytewise:
@@ -198,9 +205,9 @@ thread_unregister_tcb: fn(tcb: I64) {
     // Runtime-object .init_array priority follows allocator and host init.
     if (thread_tls_registry == I64{0}) {
         #Unsafe("runtime-init runs before any other thread exists") {
-            thread_tls_registry = jet_rt_alloc(I64{96}, I64{8})
+            thread_tls_registry = jet_rt_alloc(I64{104}, I64{8})
         }
-        thread_zero(thread_tls_registry, I64{96})
+        thread_zero(thread_tls_registry, I64{104})
     }
     jet_rt_thread_attach()
 }
@@ -462,6 +469,7 @@ thread_spawn: fn(entry: I64, argument: I64) -> I64 {
         // Counted before the clone, so a synccall (thread_setxid) waits
         // until the new thread is in the live registry.
         _ := sync_add(wrapping(thread_tls_registry + THREAD_SPAWNING), I64{1})
+        thread_fork_gate_share(thread_tls_registry)
         loop {
             status = thread_pthread_create(storage, attr, rt_thread_entry_address(), start)
             if (status != I64{11} || bytes <= THREAD_STACK_FLOOR) -> break
@@ -469,6 +477,7 @@ thread_spawn: fn(entry: I64, argument: I64) -> I64 {
             status = thread_pthread_attr_setstacksize(attr, bytes)
             if (status != I64{0}) -> break
         }
+        thread_fork_gate_unshare(thread_tls_registry)
     }
     _ := thread_pthread_attr_destroy(attr)
     handle: sync_load(storage)
@@ -491,6 +500,62 @@ thread_detach: fn(handle: I64) -> I64 { thread_pthread_detach(handle) }
 thread_spawn_settled: fn() {
     spawning: wrapping(thread_tls_registry + THREAD_SPAWNING)
     if (sync_add(spawning, I64{-1}) == I64{1}) -> sync_futex_wake(spawning, I64{2147483647})
+}
+
+// The fork gate. A raw fork (RouteSys.jet jet_sys_fork_raw) copies every
+// lock as it stands into a child that runs only the forking thread, so a
+// runtime call into musl that takes a musl lock holds the gate shared, and
+// a fork holds it exclusively: no such call is under way when the child is
+// copied. Of the runtime's musl calls only pthread_create takes one (the
+// thread-list lock, and the open-file list on the first create); join,
+// detach and the attribute calls take none, and a join may wait as long as
+// its thread runs, so they stay outside. The word counts sharing threads,
+// plus THREAD_FORK_GATE_HELD while a fork holds the gate or waits for them
+// to leave. A waiter blocks its OS thread, never parks a fiber: the
+// scheduler's root may be held across a share (scheduler_start_worker).
+thread_fork_gate_share: fn(root: I64) {
+    gate: wrapping(root + THREAD_FORK_GATE)
+    loop {
+        state: sync_load(gate)
+        if (state >= THREAD_FORK_GATE_HELD) {
+            _ := sync_futex_wait(gate, state, I64{-1})
+            next
+        }
+        if (sync_cas(gate, state, state + I64{1}) == state) -> return
+    }
+}
+
+// The last sharing thread to leave wakes the fork waiting for it.
+thread_fork_gate_unshare: fn(root: I64) {
+    gate: wrapping(root + THREAD_FORK_GATE)
+    if (sync_add(gate, I64{-1}) == THREAD_FORK_GATE_HELD + I64{1}) -> sync_futex_wake(gate, I64{2147483647})
+}
+
+// A fork's hold: one fork at a time, once every sharing thread has left.
+thread_fork_gate_hold: fn(root: I64) {
+    gate: wrapping(root + THREAD_FORK_GATE)
+    loop {
+        state: sync_load(gate)
+        if (state >= THREAD_FORK_GATE_HELD) {
+            _ := sync_futex_wait(gate, state, I64{-1})
+            next
+        }
+        if (sync_cas(gate, state, state + THREAD_FORK_GATE_HELD) == state) -> break
+    }
+    loop {
+        state: sync_load(gate)
+        if (state == THREAD_FORK_GATE_HELD) -> return
+        _ := sync_futex_wait(gate, state, I64{-1})
+    }
+}
+
+// Ends a fork's hold. In the parent it wakes the threads waiting to share
+// or fork; in the child, whose only thread is the forking one, the stored 0
+// is the gate's initial state and the wake finds no waiter.
+thread_fork_gate_release: fn(root: I64) {
+    gate: wrapping(root + THREAD_FORK_GATE)
+    sync_store(gate, I64{0})
+    sync_futex_wake(gate, I64{2147483647})
 }
 
 // ---------------------------------------------------------------------------
