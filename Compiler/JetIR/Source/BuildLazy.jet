@@ -925,15 +925,34 @@ ir_lazy_list_callback_route: fn(symbol: String) -> Bool Never! {
 }
 
 // Whether ir_lazy_closure_method builds `operation` on a receiver of
-// `receiver_ty`: any operation on an Iter, and the List operations whose
-// route makes an Iter.
+// `receiver_ty`: an operation on an Iter that is not drained first
+// (ir_iter_drains), and the List operations whose route makes an Iter.
 ir_lazy_closure_receiver: fn(receiver_ty: Type, operation: TClosureOp) -> Bool Never! {
-    if ir_iter_element(receiver_ty) != None -> return true
+    if ir_iter_element(receiver_ty) != None -> return !ir_iter_drains(receiver_ty, operation)
     if ir_untag(receiver_ty) == {
         .List(_) | .FixedList(_, _) -> {}
         else -> return false
     }
     operation == .TakeWhile || operation == .SkipWhile || operation == .FilterMap || operation == .IsSortedBy
+}
+
+// Whether `operation` on an Iter receiver runs over the Iter drained into a
+// List (ir_iter_drain): a method whose route is the List's (max_by, find,
+// fold, group_by, ...), with neither an Iter adapter nor a pull loop
+// (ir_lazy_searches).
+ir_iter_drains: fn(receiver_ty: Type, operation: TClosureOp) -> Bool Never! {
+    if ir_iter_element(receiver_ty) == None || ir_lazy_searches(operation) -> return false
+    symbol: ir_closure_route(operation, receiver_ty).symbol
+    symbol != "jet_iter_scan" && !ir_lazy_callback_route(symbol)
+}
+
+// The Iter `source` drained into a fresh List of its items, as
+// `iter.to_list()` drains it.
+ir_iter_drain: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, source: Int, span: Span) -> Int Never! {
+    if ir_failed(b) || source < 0 -> return -1
+    source_ty: ir_lazy_slot_type(m, b, source)
+    element: ir_iter_element(source_ty) ?? return ir_fail_slot(b, span, "an Iter drain of a {ir_type_name(source_ty)} source")
+    ir_lazy_route(m, p, b, "jet_iter_to_list", Type.List{element: element}, [Int]{source}, span)
 }
 
 // `iter.map(f)`, `list.filter_map(f)`, ...: the runtime adapter over the
@@ -947,7 +966,7 @@ ir_lazy_closure_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, checked_ty
     receiver_type: ir_ty(p, b, receiver)
     receiver_ty: receiver_type
     if ir_iter_element(receiver_ty) != None {
-        if operation == .Any || operation == .All || operation == .Position -> return ir_lazy_search(m, p, b, checked_ty, receiver, operation, args, span)
+        if ir_lazy_searches(operation) -> return ir_lazy_search(m, p, b, checked_ty, receiver, operation, args, span)
     }
     route: ir_closure_route(operation, receiver_ty)
     symbol: route.symbol
@@ -1049,16 +1068,22 @@ ir_lazy_closure_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, checked_ty
     out
 }
 
-// `iter.any(f)` / `iter.all(f)` / `iter.position(f)`: each item is pulled
-// (jet_rt_native_iter_next), lent to the predicate and its Option box
-// dropped; the first decision ends the pulls, so no later item reaches an
-// upstream adapter callback. A fresh Iter is dropped afterwards; a held one
-// stays its owner's.
+// The Iter closure methods ir_lazy_search pulls the items of.
+ir_lazy_searches: fn(operation: TClosureOp) -> Bool Never! {
+    operation == .Any || operation == .All || operation == .Position || operation == .CountWhere
+}
+
+// `iter.any(f)` / `iter.all(f)` / `iter.position(f)` / `iter.count_where(f)`:
+// each item is pulled (jet_rt_native_iter_next), lent to the predicate and
+// its Option box dropped; the first decision ends the pulls, so no later item
+// reaches an upstream adapter callback, and a count pulls every item. A fresh
+// Iter is dropped afterwards; a held one stays its owner's.
 ir_lazy_search: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, result_ty: Type, receiver: Int, operation: TClosureOp, args: [Int], span: Span) -> Int Never! {
     receiver_ty: ir_ty(p, b, receiver)
     element_ty: ir_iter_element(receiver_ty) ?? return ir_fail_slot(b, span, "closure method {ir_closure_op_name(operation)} on {ir_type_name(receiver_ty)}")
     if args.len() != 1 -> return ir_fail_slot(b, span, "Iter {ir_closure_op_name(operation)} has no single checked callback")
     position: operation == .Position
+    counting: operation == .CountWhere
     all: operation == .All
     result_row: ir_value_type(m, p, result_ty) ?? return ir_type_fail(b, span, result_ty)
     row: ir_value_type(m, p, element_ty) ?? return ir_type_fail(b, span, element_ty)
@@ -1073,9 +1098,14 @@ ir_lazy_search: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, result_ty: Type, r
     zero: ir_word_const(m, b, 0)
     one: ir_word_const(m, b, 1)
     index: ir_word_const(m, b, 0)
-    // Position: the matching index, -1 while none; any/all: the decision.
-    decided: if position -> ir_word_const(m, b, -1) else -> ir_temp(m, b, bool_row)
-    if !position -> ir_emit(b.f, IROp.Const, decided, if all -> 1 else -> 0, -1, -1, b.line)
+    // Position: the matching index, -1 while none; a count: the items kept so
+    // far; any/all: the decision.
+    decided: if {
+        position -> ir_word_const(m, b, -1)
+        counting -> ir_word_const(m, b, 0)
+        else -> ir_temp(m, b, bool_row)
+    }
+    if !position && !counting -> ir_emit(b.f, IROp.Const, decided, if all -> 1 else -> 0, -1, -1, b.line)
     exit: ir_open(b.f, IROp.Block, b.line)
     _: ir_open(b.f, IROp.Loop, b.line)
     // An inline Option item's slot is no Option box: the item is dropped and
@@ -1100,12 +1130,13 @@ ir_lazy_search: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, result_ty: Type, r
         stop = ir_bool_op(m, b, IROp.Eq, keep, no)
     }
     ir_open_if(b.f, stop, b.line)
-    if position {
-        ir_emit(b.f, IROp.Copy, decided, index, -1, -1, b.line)
-    } else {
-        ir_emit(b.f, IROp.Const, decided, if all -> 0 else -> 1, -1, -1, b.line)
+    if {
+        counting -> ir_emit(b.f, IROp.Add, decided, decided, one, IR_OVERFLOW_WRAP, b.line)
+        position -> ir_emit(b.f, IROp.Copy, decided, index, -1, -1, b.line)
+        else -> ir_emit(b.f, IROp.Const, decided, if all -> 0 else -> 1, -1, -1, b.line)
     }
-    ir_emit(b.f, IROp.Br, -1, 2, -1, -1, b.line)
+    // A count pulls every item; any other decision ends the pulls.
+    if !counting -> ir_emit(b.f, IROp.Br, -1, 2, -1, -1, b.line)
     ir_end(b.f, b.line)
     ir_emit(b.f, IROp.Add, index, index, one, IR_OVERFLOW_WRAP, b.line)
     ir_emit(b.f, IROp.Br, -1, 0, -1, -1, b.line)
@@ -1113,6 +1144,12 @@ ir_lazy_search: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, result_ty: Type, r
     ir_end(b.f, b.line)
     ir_release(m, b, source)
     ir_release(m, b, callback)
+    if counting {
+        // The count as the checked Int, as the List count_where makes it.
+        count: ir_temp(m, b, result_row)
+        ir_emit(b.f, IROp.Copy, count, decided, -1, -1, b.line)
+        return count
+    }
     if !position -> return decided
     // Some(index) holds the exact Int; None is the Option's none.
     result: ir_fresh_temp(m, b, result_row)

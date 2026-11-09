@@ -849,6 +849,13 @@ ir_builtin: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: In
     subject: if mutates -> ir_write_base(m, p, b, receiver, span) else -> ir_expr(m, p, b, receiver)
     if ir_failed(b) -> return -1
     if subject < 0 -> return ir_fail_slot(b, span, "builtin {ir_builtin_name(operation)} on a Unit receiver")
+    // An Iter's items are numbered drained into a List, as
+    // `iter.to_list().indexed()` numbers them (ir_list_indexed).
+    if operation == .Indexed && ir_iter_element(receiver_ty) != None {
+        drained: ir_iter_drain(m, p, b, subject, span)
+        if ir_failed(b) || drained < 0 -> return -1
+        return ir_builtin_on(m, p, b, ty, receiver_ty, operation, drained, mutates, args, span)
+    }
     // An inline `[T#N]` receiver: its length is N; any other operation goes
     // through a List copy of it, whose elements a write puts back.
     if ir_fixed_count(m, b.f.slot_type[subject]) == .Val(count) {
@@ -1943,11 +1950,18 @@ ir_closure_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, recei
     receiver_ty: ir_ty(p, b, receiver)
     if operation == .OptionMap -> return ir_option_map(m, p, b, ty, receiver, args, span)
     if ir_lazy_closure_receiver(receiver_ty, operation) -> return ir_lazy_closure_method(m, p, b, ty, receiver, operation, args, span)
+    // An Iter whose method has no Iter route runs it over its items drained
+    // into a List (ir_iter_drains).
+    drains: ir_iter_drains(receiver_ty, operation)
+    // A drained Iter is drained once: a fold that is not a Float sum goes on
+    // over the List the fold check drained.
+    drained := -1
     if operation == .EachMap || operation == .MapAny || operation == .MapAll || operation == .MapFilter || operation == .MapMap || operation == .MapFold || operation == .BagAny -> return ir_closure_map_method(m, p, b, ty, receiver, operation, args, span)
     // A Float fold whose step is exactly `(acc, x) -> acc + x` adds in the
     // same fixed lane tree as `sum`, with the seed in lane 0.
     if (operation == .Fold || operation == .ViewFold) && args.len() == 2 && ir_float_add_fold_step(p, b, args[1]) {
-        lent: ir_expr(m, p, b, receiver)
+        lent := ir_expr(m, p, b, receiver)
+        if drains -> lent = ir_iter_drain(m, p, b, lent, span)
         if ir_failed(b) || lent < 0 -> return -1
         folded: ir_list_operand(m, p, b, lent, span)
         folded_element: ir_list_element(m, p, b, folded) ?? return ir_fail_slot(b, span, "closure method fold on {ir_type_name(receiver_ty)}")
@@ -1959,6 +1973,7 @@ ir_closure_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, recei
             return sum
         }
         if folded != lent -> ir_release(m, b, folded)
+        if drains -> drained = lent
     }
     // The in-place methods write the List's own buffer, reached as a write
     // place (ir_builtin's receiver).
@@ -1966,7 +1981,11 @@ ir_closure_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, recei
         .UpdateFirst | .SortBy | .SortByDesc | .TrySortBy | .TrySortByDesc | .SortByCompare | .MapMut | .EditDisjoint | .DedupBy -> true
         else -> false
     }
-    place: if in_place -> ir_write_base(m, p, b, receiver, span) else -> ir_expr(m, p, b, receiver)
+    place := drained
+    if place < 0 {
+        place = if in_place && !drains -> ir_write_base(m, p, b, receiver, span) else -> ir_expr(m, p, b, receiver)
+        if drains -> place = ir_iter_drain(m, p, b, place, span)
+    }
     if ir_failed(b) || place < 0 -> return -1
     // An inline `[T#N]` is lent as a List copy, whose elements an in-place
     // method puts back.
