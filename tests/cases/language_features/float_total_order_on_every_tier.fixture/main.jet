@@ -24,7 +24,7 @@ run: fn() {
     print((xs[1] <=> xs[2]) == .Less)
     print(xs[3] == 1.0 && xs[4] == 3.0)
     print(xs[5].is_nan())
-    print(xs.max().is_nan())
+    print((xs.max() ?? 0.0).is_nan())
     print(xs.min() == -inf)
     print(nan < 1.0)
     print(nan.compare(1.0) == .Greater)
@@ -37,7 +37,7 @@ run: fn() {
     high: Reading{value: nan, label: "high"}
     print((low <=> high) == .Less)
     print(low.compare(high) == .Less)
-    print((Ratio{0.5} <=> Ratio{nan}) == .Less)
+    print((Ratio{0.5} <=> Ratio.from_float(nan)) == .Less)
     readings := [Reading]{high, low}
     readings.sort()
     print(readings[0].label)

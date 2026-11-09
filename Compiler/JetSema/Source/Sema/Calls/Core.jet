@@ -37,6 +37,7 @@ use jet_foundation.[
     SymbolKind,
     TFailureCarrier,
     TGenericParam,
+    TNumericOp,
     TagMarker,
     TextEdit,
     Type,
@@ -839,8 +840,15 @@ sema_call_try_core_math_f32: fn(module_name: String, member: String, type_args: 
     own: sema_call_core_math_f32_own(member)
     source: if own -> "__{member}_f32" else -> member
     wide: sema_call_core_source("core.math", source, values, Type.Float, own, span, environment, program, diagnostics) ?? return failed
-    narrow: sema_expr_numeric_conversion(wide, Type.Float32, span, 0) ?? return failed
-    SemaDirectSpecialCheck{handled: true, value: sema_expr_expected_owned(narrow, expected, environment, program, diagnostics)}
+    SemaDirectSpecialCheck{handled: true, value: sema_expr_expected_owned(sema_call_core_math_round_f32(wide, span), expected, environment, program, diagnostics)}
+}
+
+// A core.math Float result rounded once to F32 (IR Convert): an overflow is
+// the infinity and a NaN stays NaN, as the binary32 function returns. The
+// checked `F32{x}` narrowing (TNumericOp.FloatNarrow) would stop with E3010
+// on both.
+sema_call_core_math_round_f32: fn(wide: TExpr, span: Span) -> TExpr Never! {
+    TExpr{ty: Type.Float32, kind: TExprKind.NumericMethod{receiver: wide, operation: TNumericOp.CastAs{dst_rust: "f32"}}, span: span}
 }
 
 // The core.math functions of Float arguments with a Float result that an
@@ -994,7 +1002,7 @@ sema_call_core_tree_checked: fn(record: CoreCallRecord, args: [TExpr], span: Spa
         if widened == .Val(argument) {
             if sema_call_core_source("core.math", "sqrt", [TExpr]{argument}, Type.Float, false, span, environment, program, diagnostics) == .Val(root) {
                 value := root.copy()
-                if source == Type.Float32 -> value = sema_expr_numeric_conversion(root, Type.Float32, span, 0) ?? return None
+                if source == Type.Float32 -> value = sema_call_core_math_round_f32(root, span)
                 return sema_expr_expected_owned(value, expected, environment, program, diagnostics)
             }
         }
