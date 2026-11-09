@@ -10,9 +10,11 @@
 //    can be satisfied (all archives form one group). COMDAT groups keep the
 //    first copy; weak and common definitions yield to strong ones.
 // 2. Synthesis: when musl's `__libc_start_main` is available the linker adds
-//    the startup object (`_start`, and a `main` thunk that hands the unwind
-//    tables to `__jet_eh_startup` and runs `.init_array` with glibc's (argc,
-//    argv, envp) arguments, which the gnu-target Rust std expects); the Rust
+//    the startup object (`_start`, and a `main` thunk that hands musl's
+//    thread functions to the Jet runtime, so its threads are musl's
+//    (LINK_THREAD_LIBC), hands the unwind tables to `__jet_eh_startup` and
+//    runs `.init_array` with glibc's (argc, argv, envp) arguments, which the
+//    gnu-target Rust std expects); the Rust
 //    allocator shim (`__rust_alloc` -> `__rdl_alloc`, ...) that rustc
 //    otherwise writes at the final link; glibc's LFS64 names (`fstat64` ->
 //    `fstat`, identical on x86-64); `__jet_eh_startup` and `_dl_find_object`,
@@ -1049,12 +1051,13 @@ link_load_synth: fn(c: &LinkContext, s: LinkSynth, name: String) Never! {
 
 // The startup object for musl: `_start` hands `__jet_link_main` to
 // `__libc_start_main`, which initializes libc and calls it with (argc, argv,
-// envp). `__jet_link_main` hands the unwind tables to `__jet_eh_startup`
-// (when `register_frames`; link_eh_shims), runs every `.init_array` entry with
-// those three arguments (glibc's convention; musl's own init loop sees an
-// empty array), and tail-calls the program's `main`. It also defines
-// `__dso_handle`, which crtbegin.o defines in gcc links.
-link_startup: fn(register_frames: Bool) -> LinkSynth Never! {
+// envp). `__jet_link_main` hands musl's thread functions to the Jet runtime
+// (when the link has both: link_thread_libc), the unwind tables to
+// `__jet_eh_startup` (when `register_frames`; link_eh_shims), runs every
+// `.init_array` entry with those three arguments (glibc's convention; musl's
+// own init loop sees an empty array), and tail-calls the program's `main`.
+// It also defines `__dso_handle`, which crtbegin.o defines in gcc links.
+link_startup: fn(c: LinkContext, register_frames: Bool) -> LinkSynth Never! {
     s := link_synth()
     link_synth_function(s, "_start")
     // xor ebp, ebp; mov rsi, [rsp]; lea rdx, [rsp + 8]; and rsp, -16; lea rdi, [rip + __jet_link_main]
@@ -1067,6 +1070,17 @@ link_startup: fn(register_frames: Bool) -> LinkSynth Never! {
     link_synth_function(s, "__jet_link_main")
     // push rbx; push r12; push r13; push r14; sub rsp, 8; mov r12d, edi; mov r13, rsi; mov r14, rdx
     link_synth_code(s, [Int]{0x53, 0x41, 0x54, 0x41, 0x55, 0x41, 0x56, 0x48, 0x83, 0xec, 0x08, 0x41, 0x89, 0xfc, 0x49, 0x89, 0xf5, 0x49, 0x89, 0xd6})
+    if link_thread_libc(c) {
+        // lea rdi, rsi, rdx, rcx, r8, r9 in turn, [rip + each of
+        // LINK_THREAD_LIBC_NAMES]; call jet_rt_thread_libc
+        loads: [[Int]]{[Int]{0x48, 0x8d, 0x3d}, [Int]{0x48, 0x8d, 0x35}, [Int]{0x48, 0x8d, 0x15}, [Int]{0x48, 0x8d, 0x0d}, [Int]{0x4c, 0x8d, 0x05}, [Int]{0x4c, 0x8d, 0x0d}}
+        loop (k, name) in LINK_THREAD_LIBC_NAMES {
+            link_synth_code(s, loads[k])
+            link_synth_rel32(s, name, LINK_R_PC32)
+        }
+        link_synth_code(s, [Int]{0xe8})
+        link_synth_rel32(s, LINK_THREAD_LIBC, LINK_R_PLT32)
+    }
     if register_frames {
         // lea rdi, [rip + __EH_FRAME_BEGIN__]; lea rsi, [rip + __jet_eh_object]; call __jet_eh_startup
         link_synth_code(s, [Int]{0x48, 0x8d, 0x3d})
@@ -1137,6 +1151,27 @@ link_owned_startup: fn() -> LinkSynth Never! {
 }
 
 LINK_OWNED_START: "__jet_start"
+
+// The Jet runtime's export that takes musl's thread functions (JetRuntime
+// Thread.jet jet_rt_thread_libc), and those functions in its parameter
+// order. A program that links C runs that C on the runtime's threads, which
+// must then be musl's own (pthread_create): a raw clone shares the main
+// thread's FS TLS (errno, pthread_self) and leaves musl's malloc and stdio
+// unlocked (libc.need_locks). The musl startup (link_startup) makes the
+// call whenever the link has both the runtime and musl's functions
+// (link_thread_libc); a program without libc starts raw clones.
+LINK_THREAD_LIBC: "jet_rt_thread_libc"
+LINK_THREAD_LIBC_NAMES: [String]{"pthread_create", "pthread_join", "pthread_detach", "pthread_attr_init", "pthread_attr_setstacksize", "pthread_attr_destroy"}
+
+// Whether the link has the runtime's LINK_THREAD_LIBC and every one of
+// musl's functions it takes: a fact of the inputs alone.
+link_thread_libc: fn(c: LinkContext) -> Bool Never! {
+    if !link_resolvable(c, LINK_THREAD_LIBC) -> return false
+    loop name in LINK_THREAD_LIBC_NAMES {
+        if !link_resolvable(c, name) -> return false
+    }
+    true
+}
 
 // Write the shims for every strong reference still undefined: LFS64 names
 // become aliases; the allocator shim, `__res_init` and
@@ -2821,7 +2856,8 @@ link_resolve_program: fn(c: &LinkContext) -> Int Never! {
         link_defined_name(c, "_start") -> {}
         c.lookup.get("__libc_start_main") != None -> {
             frames: c.lookup.get("__register_frame_info") != None
-            link_load_synth(c, link_startup(frames), "<linker startup>")
+            startup: link_startup(c, frames)
+            link_load_synth(c, startup, "<linker startup>")
         }
         else -> {
             entry = LINK_OWNED_START

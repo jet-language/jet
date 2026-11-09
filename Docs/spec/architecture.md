@@ -178,8 +178,11 @@ system linker participates. The runtime exports C's `memcpy`, `memmove`,
 `memset` and `memcmp` itself, and the pack carries the program's startup,
 `__jet_start` (`Image/StaticLink.jet` `link_owned_startup`), which runs the
 init arrays, `main` and the fini arrays. A program link that adds C archives
-(foreign C, below) starts through musl's `__libc_start_main` instead. The
-step installs `jet-runtime/` beside
+(foreign C, below) starts through musl's `__libc_start_main` instead, and
+that startup hands musl's thread functions to the runtime
+(`jet_rt_thread_libc`), so every runtime thread of such a program is a musl
+thread (`pthread_create`) that the linked C can run on; a program without C
+starts its threads as raw clones. The step installs `jet-runtime/` beside
 the compiler: `native.key`, `jet_runtime.pack.o` and `jet_runtime.image`, the pack linked
 once at the run base (`LINK_RUN_BASE`), with its symbol table, a
 `.jet.bind` section naming where it calls `main`, and a `.jet.exports` hash

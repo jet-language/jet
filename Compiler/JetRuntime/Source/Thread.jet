@@ -1,6 +1,9 @@
-// Jet threads and dynamic TLS. GS belongs exclusively to Jet. Threads are raw
-// clones (thread_spawn) that run only Jet and system call code, so the runtime
-// object asks libc for no thread symbol; FS is inherited and never read.
+// Jet threads and dynamic TLS. GS belongs exclusively to Jet. In a program
+// that links no C, threads are raw clones (thread_spawn) that run only Jet
+// and system call code, so the runtime object asks libc for no thread
+// symbol; FS is inherited and never read. A program that links C starts
+// musl threads instead (jet_rt_thread_libc), since its C may run on any of
+// them and reads musl's per-thread state through FS.
 // TCB (context_tcb_bytes(), align64), append-only runtime layout; owner per slot:
 // @0 Thread self; @8 Thread tid; @16 Scheduler current control;
 // @24 Scheduler shield; @32 Scheduler wait boundary; @40 Deadline boundary;
@@ -456,7 +459,9 @@ THREAD_STACK_SPACE_SHARE: I64{100}
 // guard page, then the stack), tid@16 (the kernel stores the tid at clone
 // and clears it, waking a shared futex, once the thread is off its stack),
 // state@24 (THREAD_RUNNING, THREAD_DETACHED, THREAD_FINISHED), the entry's
-// result@32, and the reap list link@40.
+// result@32, and the reap list link@40. A musl thread's handle
+// (thread_libc_spawn) has mapping 0, since musl owns its stack, and its
+// pthread_t@8; tid and the link stay 0.
 THREAD_HANDLE_BYTES: I64{48}
 THREAD_RUNNING: I64{0}
 THREAD_DETACHED: I64{1}
@@ -499,6 +504,7 @@ thread_spawn: fn(entry: I64, argument: I64) -> I64 {
     sync_sole_end()
     thread_reap()
     bytes := (thread_stack_bytes() + I64{4095}).bit_and(I64{-4096})
+    if (thread_libc_create != I64{0}) -> return thread_libc_spawn(entry, argument, bytes)
     mapping := thread_stack_map(bytes)
     loop mapping < (I64{0}) && bytes > THREAD_STACK_FLOOR {
         bytes = bytes >> I64{1}
@@ -546,9 +552,116 @@ thread_spawn: fn(entry: I64, argument: I64) -> I64 {
     handle
 }
 
+// musl's thread functions, which the startup of a program that links C
+// hands over (jet_rt_thread_libc); all 0 in a program that links none.
+thread_libc_create := I64{0}
+thread_libc_join := I64{0}
+thread_libc_detach := I64{0}
+thread_libc_attr_init := I64{0}
+thread_libc_attr_setstacksize := I64{0}
+thread_libc_attr_destroy := I64{0}
+
+// The startup of a program that links C (JetBackend Image/StaticLink.jet
+// link_startup) calls this before the init arrays run, when no thread but
+// the main one exists, with musl's pthread_create, pthread_join,
+// pthread_detach, pthread_attr_init, pthread_attr_setstacksize and
+// pthread_attr_destroy. From then on thread_spawn starts musl threads: the
+// linked C (a vendored library such as mbedTLS or SQLite, a user closure)
+// can run on any Jet thread, and it needs musl's own state for that thread
+// (FS TLS: errno, pthread_self, the recursive mutexes' owner) and musl's
+// libc.need_locks, which pthread_create sets and malloc and stdio lock on.
+// A raw clone gives a thread neither.
+#Export(c) jet_rt_thread_libc: fn(create: I64, join: I64, detach: I64, attr_init: I64, attr_setstacksize: I64, attr_destroy: I64) {
+    #Unsafe("the startup hands these over once, before the init arrays and any other thread") {
+        thread_libc_create = create
+        thread_libc_join = join
+        thread_libc_detach = detach
+        thread_libc_attr_init = attr_init
+        thread_libc_attr_setstacksize = attr_setstacksize
+        thread_libc_attr_destroy = attr_destroy
+    }
+}
+
+// A call of one of the functions jet_rt_thread_libc handed over: its result,
+// 0 or a positive errno.
+thread_libc_call: fn(code: I64, first: I64, second: I64, third: I64, fourth: I64) -> I64 {
+    #Unsafe("musl's pthread functions take words: a pthread_t, a pthread_attr_t the caller owns, the handle's live pthread_t word, jet_rt_thread_entry and its start record") {
+        return os_call_address_four_i64(code, first, second, third, fourth)
+    }
+}
+
+// musl's pthread_attr_t is 56 bytes on x86-64; 64-byte storage is conservative.
+THREAD_LIBC_ATTR_BYTES: I64{64}
+
+// thread_spawn in a program that links C: a musl thread (pthread_create)
+// with a stack of `bytes`, retried at half the size on EAGAIN (musl could
+// not map it) down to THREAD_STACK_FLOOR, as the raw path retries its
+// mapping. Its handle, or -errno. Every signal stays blocked from the
+// create until jet_rt_thread_entry has the thread's block and alternate
+// signal stack: musl starts the thread with the creator's mask, all blocked
+// here, and the entry restores the spawner's own from the start record.
+thread_libc_spawn: fn(entry: I64, argument: I64, bytes: I64) -> I64 {
+    attr: jet_rt_alloc(THREAD_LIBC_ATTR_BYTES, I64{8})
+    thread_zero(attr, THREAD_LIBC_ATTR_BYTES)
+    status := thread_libc_call(thread_libc_attr_init, attr, I64{0}, I64{0}, I64{0})
+    if (status != I64{0}) {
+        jet_rt_free(attr, THREAD_LIBC_ATTR_BYTES, I64{8})
+        return -status
+    }
+    size := bytes
+    status = thread_libc_call(thread_libc_attr_setstacksize, attr, size, I64{0}, I64{0})
+    handle: jet_rt_alloc(THREAD_HANDLE_BYTES, I64{8})
+    thread_zero(handle, THREAD_HANDLE_BYTES)
+    start: jet_rt_alloc(THREAD_START_BYTES, I64{8})
+    sync_store(start, entry)
+    sync_store(wrapping(start + I64{8}), argument)
+    sync_store(wrapping(start + I64{16}), handle)
+    // masks: every signal@0, this thread's mask@8.
+    masks: jet_rt_alloc(I64{16}, I64{8})
+    sync_store(masks, I64{-1})
+    sync_store(wrapping(masks + I64{8}), I64{0})
+    // Counted before the create, so a synccall (thread_setxid) waits
+    // until the new thread is in the live registry.
+    _ := sync_add(wrapping(thread_tls_registry + THREAD_SPAWNING), I64{1})
+    // pthread_create takes musl's thread-list lock (and, on the first
+    // create, every open file's), so a fork waits until no create is in
+    // flight (thread_fork_gate_hold).
+    thread_fork_gate_share(thread_tls_registry)
+    #Unsafe("rt_sigprocmask reads and writes the owned masks record; pthread_create writes the pthread_t into the live handle and hands jet_rt_thread_entry the start record, which the thread frees") {
+        _ := os_syscall_i64(I64{14}, I64{2}, masks, wrapping(masks + I64{8}), I64{8}, I64{0}, I64{0})
+        sync_store(wrapping(start + I64{24}), sync_load(wrapping(masks + I64{8})))
+        loop status == (I64{0}) {
+            status = thread_libc_call(thread_libc_create, wrapping(handle + I64{8}), attr, rt_thread_entry_address(), start)
+            if (status != I64{11} || size <= THREAD_STACK_FLOOR) -> break
+            size = size >> I64{1}
+            status = thread_libc_call(thread_libc_attr_setstacksize, attr, size, I64{0}, I64{0})
+        }
+        _ := os_syscall_i64(I64{14}, I64{2}, wrapping(masks + I64{8}), I64{0}, I64{8}, I64{0}, I64{0})
+    }
+    thread_fork_gate_unshare(thread_tls_registry)
+    jet_rt_free(masks, I64{16}, I64{8})
+    _ := thread_libc_call(thread_libc_attr_destroy, attr, I64{0}, I64{0}, I64{0})
+    jet_rt_free(attr, THREAD_LIBC_ATTR_BYTES, I64{8})
+    if (status != I64{0}) {
+        jet_rt_free(start, THREAD_START_BYTES, I64{8})
+        jet_rt_free(handle, THREAD_HANDLE_BYTES, I64{8})
+        thread_spawn_settled()
+        return -status
+    }
+    handle
+}
+
 // Waits until the handle's thread is off its stack, stores its entry's
-// result at `result` (when nonzero), and releases the stack and the handle.
+// result at `result` (when nonzero), and releases the stack and the handle:
+// 0, or pthread_join's errno for a musl thread.
 thread_join: fn(handle: I64, result: I64) -> I64 {
+    if (sync_load(handle) == I64{0}) {
+        status: thread_libc_call(thread_libc_join, sync_load(wrapping(handle + I64{8})), I64{0}, I64{0}, I64{0})
+        if (status != I64{0}) -> return status
+        if (result != I64{0}) -> sync_store(result, sync_load(wrapping(handle + I64{32})))
+        jet_rt_free(handle, THREAD_HANDLE_BYTES, I64{8})
+        return I64{0}
+    }
     word: wrapping(handle + I64{16})
     loop {
         tid: sync_load(word)
@@ -563,17 +676,30 @@ thread_join: fn(handle: I64, result: I64) -> I64 {
 }
 
 // Gives up the handle: a finished thread's stack is released by the next
-// thread_spawn, once the thread is off it. A thread may detach itself.
+// thread_spawn, once the thread is off it; musl releases a musl thread's
+// itself, and the handle goes with whichever of this and thread_finish is
+// second. A thread may detach itself. 0, or pthread_detach's errno.
 thread_detach: fn(handle: I64) -> I64 {
-    if (sync_cas(wrapping(handle + I64{24}), THREAD_RUNNING, THREAD_DETACHED) == THREAD_FINISHED) -> thread_reap_push(handle)
+    libc: sync_load(handle) == I64{0}
+    if libc {
+        status: thread_libc_call(thread_libc_detach, sync_load(wrapping(handle + I64{8})), I64{0}, I64{0}, I64{0})
+        if (status != I64{0}) -> return status
+    }
+    if (sync_cas(wrapping(handle + I64{24}), THREAD_RUNNING, THREAD_DETACHED) == THREAD_FINISHED) {
+        if libc -> jet_rt_free(handle, THREAD_HANDLE_BYTES, I64{8}) else -> thread_reap_push(handle)
+    }
     I64{0}
 }
 
 // The thread's last step, after its detach: publishes the result, and hands a
-// detached handle to the reap list. Touches no thread block.
+// detached handle to the reap list, or frees a musl thread's. Touches no
+// thread block.
 thread_finish: fn(handle: I64, result: I64) {
     sync_store(wrapping(handle + I64{32}), result)
-    if (sync_cas(wrapping(handle + I64{24}), THREAD_RUNNING, THREAD_FINISHED) == THREAD_DETACHED) -> thread_reap_push(handle)
+    libc: sync_load(handle) == I64{0}
+    if (sync_cas(wrapping(handle + I64{24}), THREAD_RUNNING, THREAD_FINISHED) == THREAD_DETACHED) {
+        if libc -> jet_rt_free(handle, THREAD_HANDLE_BYTES, I64{8}) else -> thread_reap_push(handle)
+    }
 }
 
 thread_release: fn(handle: I64) {
@@ -617,13 +743,14 @@ thread_spawn_settled: fn() {
 // lock as it stands into a child that runs only the forking thread, so a
 // runtime call that takes a lock a fork does not hold itself holds the gate
 // shared, and a fork holds it exclusively: no such call is under way when
-// the child is copied. thread_spawn holds it across its clone; the runtime
-// makes no musl call that takes a musl lock, and join and detach take none
-// and may wait as long as their thread runs, so they stay outside. The
-// word counts sharing threads, plus THREAD_FORK_GATE_HELD while a fork
-// holds the gate or waits for them to leave. A waiter blocks its OS
-// thread, never parks a fiber: the scheduler's root may be held across a
-// share (scheduler_start_worker).
+// the child is copied. thread_spawn holds it across its clone or
+// pthread_create (which takes musl's thread-list lock); the runtime's other
+// musl calls, join, detach and the attribute calls, take no musl lock, and
+// join and detach may wait as long as their thread runs, so they stay
+// outside. The word counts sharing threads, plus THREAD_FORK_GATE_HELD
+// while a fork holds the gate or waits for them to leave. A waiter blocks
+// its OS thread, never parks a fiber: the scheduler's root may be held
+// across a share (scheduler_start_worker).
 thread_fork_gate_share: fn(root: I64) {
     gate: wrapping(root + THREAD_FORK_GATE)
     loop {

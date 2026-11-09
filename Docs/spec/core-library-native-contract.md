@@ -853,6 +853,10 @@ descriptor from `core.net.__tcp_fd` and returns raw Mbed TLS status codes;
 trust selection, hostname checks, version bounds, ALPN, readiness waits,
 deadlines, close_notify, the verified peer identity and every error message are
 Jet. The `TCPStream` stays the descriptor's owner for the stream's lifetime.
+The closure is built with Mbed TLS's threading layer on
+(`MBEDTLS_THREADING_C`, `MBEDTLS_THREADING_PTHREAD` over musl's mutexes), so
+handshakes on different task threads share PSA's key slots and global state
+safely.
 
 `DataSequences.jet` owns the shared native List header constants
 `DATA_SEQUENCE_BYTES`, `DATA_SEQUENCE_LENGTH`, `DATA_SEQUENCE_CAPACITY`, and
