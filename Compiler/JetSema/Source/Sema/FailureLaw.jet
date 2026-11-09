@@ -195,6 +195,12 @@ sema_error_conversion_function: fn(name: String, from_span: Span, to_ty: String,
     function
 }
 
+// Whether `func` is the routine sema_error_conversion_function builds: its
+// one `self` parameter is the conversion's source, not a stray receiver.
+sema_is_error_conversion_function: fn(func: Func) -> Bool {
+    func.name.starts_with("errconv_") && func.params.len() == 1 && func.params[0].name == "self"
+}
+
 // Registration of every declared conversion in one module (the Rust
 // reference's `register_error_conv`): E2406 orphan rule, E2405 duplicate,
 // E2418 cycle and E2419 ambiguity. An accepted conversion becomes its checked

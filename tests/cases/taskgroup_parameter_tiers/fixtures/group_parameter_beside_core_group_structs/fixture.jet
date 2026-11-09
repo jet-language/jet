@@ -1,0 +1,35 @@
+// A bare `Group` parameter is the task group `task.group` binds, even when
+// a loaded Core module declares a struct spelled `Group` (core.sys's group
+// database entry). That struct is still reachable by its qualified name.
+package: {
+    name: "group_parameter_beside_core_group_structs"
+    authority: { allow: [IO, Time.Wait] }
+}
+
+use {
+    sys: core.sys
+}
+
+print_next: fn(group: Group, value: Int) {
+    handle: task value + 1
+    print(handle.join() ?? panic("task failed"))
+}
+
+start_all: fn(group: Group, left: Int) {
+    if left == 0 -> return
+    handle: task left * 10
+    start_all(group, left - 1)
+    print(handle.join() ?? panic("task failed"))
+}
+
+describe: fn(entry: sys.Group) -> String {
+    "{entry.name}:{entry.gid}:{entry.members.join(",")}"
+}
+
+run: fn() {
+    task.group group {
+        print_next(group, 41)
+        start_all(group, 2)
+    }
+    print(describe(sys.Group{name: "wheel", gid: 10, members: [String]{"root", "nate"}}))
+}

@@ -2041,8 +2041,9 @@ sema_function_check_pass: fn(func: Func, owner_id: SymbolID, function_kind: TFun
     if !sema_function_header_supported(func, context) -> complete = false
     // `self` is only a method's receiver; outside a type body or `impl` it
     // would silently be an ordinary parameter. An external `Type.method`
-    // header left a function has an unresolved target, which E0301 reports.
-    if !is_method && !func.compiler_generated && func.external_type == None {
+    // header left a function has an unresolved target, which E0301 reports;
+    // an `impl Source -> Target` conversion routine takes its source as `self`.
+    if !is_method && !func.compiler_generated && func.external_type == None && !sema_is_error_conversion_function(func) {
         loop param in func.params {
             if param.name == "self" {
                 diagnostics.push(sema_self_outside_method(context.function_name, param.name_span))
