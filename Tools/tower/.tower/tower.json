@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 96900,
+    "rev": 96925,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -36032,7 +36032,7 @@
     {
       "id": "c0qus24o",
       "num": 3550,
-      "title": "CoreLib data web: complete Jet ownership",
+      "title": "CoreLib data: complete Jet ownership (browser storage moves with the web package, #6445)",
       "body": "Complete data loaders, transforms, HTTP, router/forms, reactive, sync, services/jobs, storage, and browser semantics. Remove high-level native policy and prove all applicable tiers.",
       "kind": "feature",
       "track": "sidequest",
@@ -36396,30 +36396,21 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Every data and web declaration has a real Jet body or typed provider leaf.",
+          "text": "Every public core.data declaration has a Jet body or a typed runtime leaf, with no native policy shim, and jet Tools/agent/CoreSurfaceLedger.jet --check passes (was c1, c2).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-09-22T00:15:56.173Z"
-        },
-        {
-          "n": 2,
-          "text": "All data/web callers, routes, and generated projections use the canonical contract.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-22T00:15:56.844Z"
+          "at": "2026-11-09T19:01:31.637Z"
         },
         {
           "n": 3,
-          "text": "Data/web APIs pass failure/effect and applicable-tier proof (O0, O1, O2 and web) with no native policy shim.",
+          "text": "core.data APIs have failure and effect cases under tests/cases/corelib that pass on O0, O1, O2 and web.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T02:52:35.290Z"
+          "at": "2026-11-09T19:01:33.674Z"
         },
         {
           "n": 4,
@@ -36522,9 +36513,9 @@
       "parentId": "c0u1wtj7",
       "needsAcceptance": false,
       "created": "2026-09-22T00:15:04.333Z",
-      "updated": "2026-11-09T17:21:03.033Z",
+      "updated": "2026-11-09T19:01:33.674Z",
       "updatedBy": "Main",
-      "claimedAt": "2026-11-06T18:38:43.765Z",
+      "claimedAt": "2026-11-09T19:01:30.675Z",
       "goals": [
         "G3"
       ],
@@ -55544,7 +55535,7 @@
     {
       "id": "c0ayfc4w",
       "num": 4903,
-      "title": "BALLOT D-PRIVATE-NATIVE-CARRIER1: how a Core Source type holds a private native kernel value (blocks the HTTP Body cutover)",
+      "title": "Build D-PRIVATE-NATIVE-CARRIER1: HTTP Body holds a private native stream in a priv field, and the HTTP Body cutover lands on it",
       "body": "Owner decision needed (new mechanism / public API). The ratified HTTP law (D-HTTPDEPTH1=A; Core + runtime joint ruling) wants ONE public source-owned Body capability facade over a PRIVATE opaque lazy native transport (the existing Arc<Mutex<JetHTTPBody>> kernel). NativeLead24-2 confirmed no mechanism for that exists today: opaque_methods only registers Source impl signatures on PUBLIC known native carriers; the old browser facade (BrowserServer { private native: BrowserTestServer? }) used an already-public carrier and the current line removed it; JetForeignHandle is public and needs a real C library / typedef / close metadata. Missing: a PRIVATE checked native identity with scope, default-constructor rejection, ownership / lifecycle and physical mapping on every tier (I9). Stand-ins (empty record, private RawInt, host RuntimeValue, public alias) are rejected. Blocks GoldenPareto1's Body cutover (6 HTTP goldens). Options (same program: req.body.text() on an incoming request): A) Make the transport a PUBLIC documented native carrier type (e.g. core.http.BodyTransport), not user-constructible, used as Body's field. Beginner: one more type name visible in docs / errors, never needed. Expert: can name the type; no new mechanism. B) Add ONE general private native-carrier mechanism: a Core module can declare a native kernel type private to that module (sema rejects naming / constructing it outside; ownership / drop / clone rules from its native metadata; mapped identically on all tiers). Beginner: never sees it. Expert: clean facades. Cost: a new mechanism (I8, needs this ratification), reusable for other facades. C) Drop the facade: Body IS the native carrier directly (public, as today's incoming body), with the outgoing Empty / Text / Bytes constructors as functions returning it. Beginner: one type. Cost: re-opens the Core + runtime ruling. Main recommends B if more Core facades over native kernels are expected (likely: streams, sockets), else A. Related but distinct: #4896 (which modules may IMPORT toolchain-private Core seams).",
       "kind": "task",
       "track": "epoch",
@@ -55607,7 +55598,7 @@
       "parentId": "c0w9o2sz",
       "needsAcceptance": false,
       "created": "2026-10-08T12:42:12.406Z",
-      "updated": "2026-11-07T03:27:44.885Z",
+      "updated": "2026-11-09T19:01:19.991Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
@@ -58599,7 +58590,7 @@
     {
       "id": "c0qrom2s",
       "num": 5028,
-      "title": "Small Jai conveniences: flags enums, fall-through, contextual checked conversion, stable enums, accept-any parameters, stable-address arrays",
+      "title": "Build D-JAI-SMALL1: bit-stored enum sets, #Through, #As and #Specified",
       "body": "## Outcome\n\nDecision D-JAI-SMALL1. Remaining Jai conveniences without a Jet counterpart: `enum_flags`, `#through` fall-through, `xx` autocast, `#as` member conversion, `#specified` enums, `..Any` heterogeneous parameters, bucket arrays, `#no_debug`, custom entry symbols. Audit rows: G01, G19, G21, G23, G28, G36, G39, G42, G43, C09.\n\nThe ballot carries the full design; this card holds the vote and, once ratified, the delivery plan.",
       "kind": "feature",
       "track": "sidequest",
@@ -58623,30 +58614,39 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Syntax registry entry updated (Compiler/JetFoundation/Data/Syntax)",
+          "text": "D-JAI-SMALL1=A part 1: a Set of a small enum is stored as bits and has bits() and from_bits(); a golden shows the round trip and the size on O0, O1 and O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-17T16:00:25.951Z"
+          "at": "2026-11-09T19:01:25.972Z"
         },
         {
           "n": 2,
-          "text": "syntax-decisions.md log entry",
+          "text": "D-JAI-SMALL1=A part 2: #Through ends a match arm and runs the next arm's body; misuse is a registered diagnostic with a UI snapshot, and a golden passes on O0, O1 and O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-17T16:00:25.951Z"
+          "at": "2026-11-09T19:01:27.030Z"
         },
         {
           "n": 3,
-          "text": "jet devtools grammars regenerated",
+          "text": "D-JAI-SMALL1=A part 3: #As on one field lets the struct pass as that field; misuse is a registered diagnostic with a UI snapshot, and a golden passes on O0, O1 and O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-17T16:00:25.951Z"
+          "at": "2026-11-09T19:01:28.026Z"
+        },
+        {
+          "n": 5,
+          "text": "D-JAI-SMALL1=A part 4: #Specified on an enum makes every case state its value; a missing value is a registered diagnostic with a UI snapshot, and a golden passes on O0, O1 and O2. The syntax registry, Docs/spec/syntax-decisions.md and the jet devtools grammars show all four forms.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T19:01:28.946Z"
         }
       ],
       "refs": [
@@ -58664,12 +58664,12 @@
       "parentId": "c02y3vkg",
       "needsAcceptance": false,
       "created": "2026-10-16T10:54:46.152Z",
-      "updated": "2026-11-07T04:01:13.413Z",
+      "updated": "2026-11-09T19:01:28.946Z",
       "updatedBy": "Main",
       "goals": [
-        "G3"
+        "G6"
       ],
-      "criteriaLastN": 4
+      "criteriaLastN": 5
     },
     {
       "id": "c06y0cef",
@@ -59013,12 +59013,12 @@
         },
         {
           "n": 19,
-          "text": "(was #2850 c1) The ray subsystem (D-GAME-PLATFORM1=A) uses one shared input, atlas decode, sprite draw and transcript model for keyboard/gamepad state and deterministic headless rendering on O0, O1, O2, compile-time code and web where applicable, with the native window adapter consuming the same facts.",
+          "text": "(was #2850 c1) The ui subsystem (D-GAME-PLATFORM1=A; the owner renamed ray to ui on 2026-11-08) uses one shared input, atlas decode, sprite draw and transcript model for keyboard/gamepad state and deterministic headless rendering on O0, O1, O2, compile-time code and web where applicable, with the native window adapter consuming the same facts.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T02:53:10.367Z"
+          "at": "2026-11-09T19:01:17.045Z"
         },
         {
           "n": 20,
@@ -59040,12 +59040,12 @@
         },
         {
           "n": 22,
-          "text": "D-GAME-PLATFORM1=A: two independent subsystems shared by games and apps: ray (windows, frames, present(pixels, palette)/present(rgba), raylib-style drawing, per-window events, gamepads) and audio (open(rate), queue(samples), queued(), mixer with voices and buses); several windows and outputs per program; ray.headless and audio.headless record checksums; core.game and gui compose them with no device code; core.game.raylib moves into ray and audio and is deleted",
+          "text": "D-GAME-PLATFORM1=A (the owner renamed ray to ui on 2026-11-08): two independent subsystems shared by games and apps: ui (windows, frames, present(pixels, palette)/present(rgba), immediate-mode drawing, per-window events, gamepads) and audio (open(rate), queue(samples), queued(), mixer with voices and buses); several windows and outputs per program; ui.headless and audio.headless record checksums; core.game and gui compose them with no device code; core.game.raylib moves into ui and audio and is deleted (#6701 c1)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-06T01:32:52.764Z"
+          "at": "2026-11-09T19:01:18.434Z"
         }
       ],
       "refs": [
@@ -59061,7 +59061,7 @@
       "parentId": "c0u5tm84",
       "needsAcceptance": false,
       "created": "2026-10-16T13:36:57.362Z",
-      "updated": "2026-11-08T19:53:58.005Z",
+      "updated": "2026-11-09T19:01:18.434Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
@@ -60505,7 +60505,7 @@
       "track": "sidequest",
       "epoch": "e15",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "frozen",
       "priority": "P1",
       "plan": null,
       "checkSteps": null,
@@ -60514,6 +60514,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-09",
+          "by": "Main",
+          "text": "BoardPlanner review 2026-11-09 (dev 6a06b917cb). Superseded by the owner's 2026-11-08 order (no raylib; ui and app). #6701 owns the cutover; nothing on this card is left to build."
+        },
         {
           "at": "2026-11-08",
           "by": "Main",
@@ -60562,7 +60567,7 @@
       "parentId": "c0u5tm84",
       "needsAcceptance": false,
       "created": "2026-10-21T14:23:04.145Z",
-      "updated": "2026-11-08T19:53:48.319Z",
+      "updated": "2026-11-09T19:01:07.808Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
@@ -71582,7 +71587,7 @@
     {
       "id": "c0mhdm27",
       "num": 6048,
-      "title": "Ladder L-10 (Concurrency): task.group -> core.service cliff: string names and messages vs D-SERVICE1 typed endpoints",
+      "title": "Typed service workers: build D-SERVICE-WORKER1, REPLY1, KEEP1 and BATCH1 (Ladder L-10)",
       "body": "From the ladder audit (Docs/audits/ladder-audit-2026-10-28.md, finding L-10; dev d9bed7c), philosophy pillar 4, \"Ladders, Not Cliffs\", tempered by pillar 2.\n\nFinding: task.group -> core.service cliff: string names and messages vs D-SERVICE1 typed endpoints\n\nEvidence: Core/Service/Service.jet:529,549,1196,1378,1900; D-SERVICE1=D SD:6988\n\nAudit action: ballot. The fix needs an owner choice of spelling or behaviour, so it goes on a ballot before code.",
       "kind": "task",
       "track": "epoch",
@@ -71619,12 +71624,12 @@
         },
         {
           "n": 2,
-          "text": "The chosen spelling or behaviour is the only one in code, examples, tests and Docs/spec, and each rung shows it with a golden or snapshot.",
+          "text": "D-SERVICE-WORKER1, D-SERVICE-REPLY1, D-SERVICE-KEEP1 and D-SERVICE-BATCH1 (all A) are built in core.service: a worker is its function, run once per message in order, and tree.send takes only its message type (anything else is E0112; a missed enum case is E0307); a replying handler gives Endpoint<Q, R> and tree.call returns R ServiceError! (send on a replying endpoint is an error whose fix is call; a worker that fails mid-message gives .Ambiguous); a &S first parameter keeps state from state:; batch: N with wait: passes up to N waiting messages to a [T] handler. The String name and message forms in Core/Service/Service.jet are gone in one cutover, and each rung has a golden or UI snapshot on O0, O1 and O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T18:07:08.034Z"
+          "at": "2026-11-09T19:01:22.487Z"
         }
       ],
       "refs": [],
@@ -71635,7 +71640,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T18:07:08.035Z",
-      "updated": "2026-11-08T08:04:38.352Z",
+      "updated": "2026-11-09T19:01:22.487Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
@@ -79388,12 +79393,12 @@
         },
         {
           "n": 3,
-          "text": "After ratification the chosen spelling is the one canonical form: every caller, example, test and doc is migrated in one cutover, the old spelling is not Jet syntax and gets no diagnostic, UI snapshot or jet fix rule (owner order), and the examples pass on o0/o1/o2.",
+          "text": "D-CONVERT-TRAIT1=A is built: From(S) is a Core trait with one method from(value: S) -> Self; impl Celsius.From(Float) makes Celsius{x} and Celsius.from(x) work; To(T) is only a bound (prep S: To(Float) means Float.From(S) exists), and writing impl X.To(Y) is an error whose fix writes impl Y.From(X). Every caller, example, test and doc is migrated in one cutover, the old spelling is not Jet syntax and gets no diagnostic, UI snapshot or jet fix rule (owner order 2026-11-06), and the examples pass on O0, O1 and O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-30T13:32:19.540Z"
+          "at": "2026-11-09T19:01:23.425Z"
         },
         {
           "n": 4,
@@ -79413,7 +79418,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T13:32:14.611Z",
-      "updated": "2026-11-07T04:01:20.456Z",
+      "updated": "2026-11-09T19:01:23.425Z",
       "updatedBy": "Main"
     },
     {
@@ -85600,7 +85605,7 @@
       "track": "epoch",
       "epoch": "e4",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "frozen",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -85611,6 +85616,11 @@
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-09",
+          "by": "Main",
+          "text": "BoardPlanner review 2026-11-09 (dev 6a06b917cb). Superseded by the owner's 2026-11-08 order (no raylib; ui and app). #6701 owns the cutover; nothing on this card is left to build."
+        },
         {
           "at": "2026-11-08",
           "by": "Main",
@@ -85672,7 +85682,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T05:09:33.326Z",
-      "updated": "2026-11-08T19:53:52.277Z",
+      "updated": "2026-11-09T19:01:10.422Z",
       "updatedBy": "Main"
     },
     {
@@ -85735,7 +85745,7 @@
     {
       "id": "c06wbg4r",
       "num": 6423,
-      "title": "The compiler and runtime rows become package code",
+      "title": "The compiler and runtime font rows become font package code",
       "body": "Move card for #6149 (D-RAYLIB-FONT-HOME1=A, ratified 2026-10-31: \"Moves under A, one card each\").\n\n- Moves: the raylib GPU typing row in Compiler/JetSema/Source/Sema/Taint.jet:278 and\n  the `core.game.raylib.__*` runtime leaves in Compiler/JetRuntime/Source/RouteAGame.jet move\n  into the raylib package, and the `UI.FontShaping` rows move into the font package.\n  D-EXTEND-ARCH1=A says Core gets no private powers.",
       "kind": "task",
       "track": "epoch",
@@ -85753,21 +85763,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "No compiler or runtime source names `core.game.raylib` or `core.font` (a grep proves it).",
+          "text": "No compiler or runtime source names core.font, and the UI.FontShaping rows live in the font package, reached through mechanisms any package can use (a git grep proves it). The core.game.raylib rows are removed by #6701 c1.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-31T05:09:42.202Z"
-        },
-        {
-          "n": 2,
-          "text": "games.frame keeps its final-frame sha, e4ad242c...e277, and stays within noise of its current time.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T05:09:43.343Z"
+          "at": "2026-11-09T19:01:13.020Z"
         }
       ],
       "refs": [],
@@ -85778,13 +85779,14 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T05:09:41.180Z",
-      "updated": "2026-11-07T04:01:31.836Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-09T19:01:13.950Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 2
     },
     {
       "id": "c0tl2yuc",
       "num": 6424,
-      "title": "The old raylib and font Core paths retire: every caller moves to the raylib and font packages in one cutover",
+      "title": "The old core.font path retires: every caller moves to the font package in one cutover",
       "body": "Move card for #6149 (D-RAYLIB-FONT-HOME1=A, ratified 2026-10-31: \"Moves under A, one card each\").\n\n- `use core.game.raylib` and `use core.font` are removed. Every in-repo caller imports the\n  `raylib` / `font` package in the same cutover. The old paths get no teaching error, snapshot\n  or `jet fix` rewrite (owner order 2026-11-06; migration support is set during v1 release\n  preparation, #6068).",
       "kind": "task",
       "track": "epoch",
@@ -85838,7 +85840,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T05:09:44.729Z",
-      "updated": "2026-11-08T19:53:56.769Z",
+      "updated": "2026-11-09T19:01:15.616Z",
       "updatedBy": "Main"
     },
     {
@@ -99391,7 +99393,7 @@
       "track": "epoch",
       "epoch": "e4",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P0",
       "plan": null,
       "checkSteps": null,
@@ -99459,9 +99461,10 @@
       "parentId": "c0lscvc9",
       "needsAcceptance": false,
       "created": "2026-11-08T15:46:49.544Z",
-      "updated": "2026-11-09T17:55:09.531Z",
+      "updated": "2026-11-09T18:56:27.913Z",
       "updatedBy": "Main",
-      "criteriaLastN": 4
+      "criteriaLastN": 4,
+      "completedAt": "2026-11-09T18:56:27.913Z"
     },
     {
       "id": "c0x92nsv",
@@ -191065,6 +191068,181 @@
   ],
   "events": [
     {
+      "at": "2026-11-09T19:01:33.674Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0qus24o",
+      "note": "#3: BoardPlanner review 2026-11-09 (dev 6a06b917cb). Web is no longer Core (D-WEB-HOME1=A); the row now names its proof.; was: Data/web APIs pass failure/effect and applicable-tier proof (O0, O1, O2 and web) with no native policy shim."
+    },
+    {
+      "at": "2026-11-09T19:01:32.703Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0qus24o",
+      "note": "#2: BoardPlanner review 2026-11-09 (dev 6a06b917cb). Folded into c1 (one canonical core.data contract, checked by the surface ledger).; was [open]: All data/web callers, routes, and generated projections use the canonical contract."
+    },
+    {
+      "at": "2026-11-09T19:01:31.637Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0qus24o",
+      "note": "#1: BoardPlanner review 2026-11-09 (dev 6a06b917cb). Web is no longer Core (D-WEB-HOME1=A); the row now names its proof.; was: Every data and web declaration has a real Jet body or typed provider leaf."
+    },
+    {
+      "at": "2026-11-09T19:01:30.676Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0qus24o",
+      "note": "title"
+    },
+    {
+      "at": "2026-11-09T19:01:28.946Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0qrom2s",
+      "note": "#5 D-JAI-SMALL1=A part 4: #Specified on an enum makes every cas"
+    },
+    {
+      "at": "2026-11-09T19:01:28.026Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0qrom2s",
+      "note": "#3: BoardPlanner review 2026-11-09 (dev 6a06b917cb). The boilerplate row (grammars) named no behavior; the ratified outcome has four parts.; was: jet devtools grammars regenerated"
+    },
+    {
+      "at": "2026-11-09T19:01:27.030Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0qrom2s",
+      "note": "#2: BoardPlanner review 2026-11-09 (dev 6a06b917cb). The boilerplate row (syntax-decisions.md log) named no behavior; the ratified outcome has four parts.; was: syntax-decisions.md log entry"
+    },
+    {
+      "at": "2026-11-09T19:01:25.972Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0qrom2s",
+      "note": "#1: BoardPlanner review 2026-11-09 (dev 6a06b917cb). The boilerplate row (syntax registry) named no behavior; the ratified outcome has four parts.; was: Syntax registry entry updated (Compiler/JetFoundation/Data/Syntax)"
+    },
+    {
+      "at": "2026-11-09T19:01:24.975Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0qrom2s",
+      "note": "title,goals"
+    },
+    {
+      "at": "2026-11-09T19:01:23.425Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0vhdiiv",
+      "note": "#3: BoardPlanner review 2026-11-09 (dev 6a06b917cb). The ballot is ratified (D-CONVERT-TRAIT1=A, 2026-10-30); the row now names the ratified form.; was: After ratification the chosen spelling is the one canonical form: every caller, example, test and doc is migrated in one cutover, the old spelling is not Jet syntax and gets no diagnostic, UI snapshot"
+    },
+    {
+      "at": "2026-11-09T19:01:22.487Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0mhdm27",
+      "note": "#2: BoardPlanner review 2026-11-09 (dev 6a06b917cb). The four ballots are ratified A (2026-10-30); the row now names what is built (Main triage 2026-11-08: Service.jet has only the String forms).; was: The chosen spelling or behaviour is the only one in code, examples, tests and Docs/spec, and each rung shows it with a golden or snapshot."
+    },
+    {
+      "at": "2026-11-09T19:01:21.572Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0mhdm27",
+      "note": "title"
+    },
+    {
+      "at": "2026-11-09T19:01:19.991Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ayfc4w",
+      "note": "title"
+    },
+    {
+      "at": "2026-11-09T19:01:18.435Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0776o2m",
+      "note": "#22: BoardPlanner review 2026-11-09 (dev 6a06b917cb). The owner renamed the ray subsystem ui on 2026-11-08 (no raylib or ray naming); #6701 removes core.game.raylib.; was: D-GAME-PLATFORM1=A: two independent subsystems shared by games and apps: ray (windows, frames, present(pixels, palette)/present(rgba), raylib-style drawing, per-window events, gamepads) and audio (ope"
+    },
+    {
+      "at": "2026-11-09T19:01:17.045Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0776o2m",
+      "note": "#19: BoardPlanner review 2026-11-09 (dev 6a06b917cb). The owner renamed the ray subsystem ui on 2026-11-08 (no raylib or ray naming).; was: (was #2850 c1) The ray subsystem (D-GAME-PLATFORM1=A) uses one shared input, atlas decode, sprite draw and transcript model for keyboard/gamepad state and deterministic headless rendering on O0, O1, O"
+    },
+    {
+      "at": "2026-11-09T19:01:15.616Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0tl2yuc",
+      "note": "title"
+    },
+    {
+      "at": "2026-11-09T19:01:13.950Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c06wbg4r",
+      "note": "#2: BoardPlanner review 2026-11-09 (dev 6a06b917cb). games.frame and the raylib GPU rows are superseded by the owner's 2026-11-08 order; #6701 owns that cutover and #6705 measures it.; was [open]: games.frame keeps its final-frame sha, e4ad242c...e277, and stays within noise of its current time."
+    },
+    {
+      "at": "2026-11-09T19:01:13.020Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c06wbg4r",
+      "note": "#1: BoardPlanner review 2026-11-09 (dev 6a06b917cb). The raylib half is superseded by the owner's 2026-11-08 order; #6701 c1 removes it.; was: No compiler or runtime source names `core.game.raylib` or `core.font` (a grep proves it)."
+    },
+    {
+      "at": "2026-11-09T19:01:12.076Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c06wbg4r",
+      "note": "title"
+    },
+    {
+      "at": "2026-11-09T19:01:10.422Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0l09me0",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-09T19:01:08.761Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0l09me0",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-09T19:01:07.808Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0awastn",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-09T19:01:06.158Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0awastn",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-09T19:01:05.175Z",
+      "by": "Main",
+      "action": "goal.update",
+      "ref": "G3",
+      "note": "body"
+    },
+    {
+      "at": "2026-11-09T18:56:27.913Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0bzrof5",
+      "note": "phase"
+    },
+    {
       "at": "2026-11-09T18:55:47.114Z",
       "by": "Main",
       "action": "card.update",
@@ -194388,713 +194566,6 @@
       "action": "card.criteria-meet",
       "ref": "c0wl6r2h",
       "note": "#1"
-    },
-    {
-      "at": "2026-11-09T07:50:05.790Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-JET-EXPLAIN-EFFECTS1",
-      "note": "A"
-    },
-    {
-      "at": "2026-11-09T07:49:29.325Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-FRAME-TITLE1",
-      "note": "C"
-    },
-    {
-      "at": "2026-11-09T07:49:29.325Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-FRAME-STYLE1",
-      "note": "A"
-    },
-    {
-      "at": "2026-11-09T07:49:27.083Z",
-      "by": "owner",
-      "action": "question.add",
-      "ref": "q2s3dggb",
-      "note": ""
-    },
-    {
-      "at": "2026-11-09T07:48:45.352Z",
-      "by": "owner",
-      "action": "question.add",
-      "ref": "q1lxwbma",
-      "note": ""
-    },
-    {
-      "at": "2026-11-09T07:44:22.221Z",
-      "by": "owner",
-      "action": "question.add",
-      "ref": "q0q808b4",
-      "note": ""
-    },
-    {
-      "at": "2026-11-09T07:44:19.525Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-JET-EXPLAIN-EFFECTS1",
-      "note": "The command that lists the effect caps in force at a site, nearest first"
-    },
-    {
-      "at": "2026-11-09T07:42:28.183Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-11-09T07:42:28.183Z"
-    },
-    {
-      "at": "2026-11-09T07:23:18.969Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c028lxdd",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-09T07:23:18.135Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c028lxdd",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-09T07:23:16.669Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c028lxdd",
-      "note": "#3 The musl ports they replace are deleted from Core and the ru"
-    },
-    {
-      "at": "2026-11-09T07:23:15.802Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c028lxdd",
-      "note": "#2 binary64: the same functions in F64 are correctly rounded, p"
-    },
-    {
-      "at": "2026-11-09T07:23:14.880Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c028lxdd",
-      "note": "#1 binary32: every Core F32 elementary function (exp/log/pow/tr"
-    },
-    {
-      "at": "2026-11-09T07:22:48.306Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0esaekb",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-09T07:22:46.792Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0esaekb",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-09T07:22:45.907Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0esaekb",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-09T07:22:21.434Z",
-      "by": "Main",
-      "action": "card.criteria-reopen",
-      "ref": "c0h06654",
-      "note": "#65: Met too early. LangLead-3 (20cf659132) fixed a blocker, but the criterion needs the exercised fresh-clone run (no cargo or rustc, jet test Compiler --profile full) and that has not run yet. It runs on seed a0_041, which is cut after b7 lands."
-    },
-    {
-      "at": "2026-11-09T07:16:12.565Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0x92nsv",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-09T07:16:10.673Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0l39twq",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-09T06:57:38.210Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0iiv9ft",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-09T06:57:37.380Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0bnp1zw",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-09T06:57:36.473Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0hzvj2s",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-09T06:57:35.550Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0cs6xlg",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-09T06:57:34.720Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0bzrof5",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-09T06:57:19.781Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0h06654",
-      "note": "#65"
-    },
-    {
-      "at": "2026-11-09T06:57:18.845Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0esaekb",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-09T06:57:17.924Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0esaekb",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-09T06:57:16.734Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0esaekb",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-09T06:57:15.759Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0ihjl6a",
-      "note": "#9"
-    },
-    {
-      "at": "2026-11-09T06:57:14.807Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0ihjl6a",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-09T06:57:13.954Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0ihjl6a",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-09T06:57:13.066Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0ihjl6a",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-09T06:53:56.510Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0x92nsv",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-09T06:52:12.158Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0l39twq",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-09T06:40:46.216Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0afjv0e",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-09T06:34:39.331Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c04vlsgk",
-      "note": "jet build --os=web of checked FFI.C code exits 101 (web host lacks the inline FFI symbol) instead of a checked refusal"
-    },
-    {
-      "at": "2026-11-09T06:30:13.586Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c01xp5ri",
-      "note": "Generic call to a trait method returning `T? Never!` loses the optional and fails in the backend (ICE)"
-    },
-    {
-      "at": "2026-11-09T06:26:16.219Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0l39twq",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-09T06:25:56.836Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-FRAME-THEME1",
-      "note": "How Jet follows light and dark preference"
-    },
-    {
-      "at": "2026-11-09T06:25:55.197Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-FRAME-ACCENT1",
-      "note": "Where Jet gets its accent seed"
-    },
-    {
-      "at": "2026-11-09T06:25:53.648Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-FRAME-TITLE1",
-      "note": "Title alignment in Jet-drawn frames"
-    },
-    {
-      "at": "2026-11-09T06:25:51.259Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-FRAME-STYLE1",
-      "note": "The default shape and system-frame opt-in"
-    },
-    {
-      "at": "2026-11-09T06:04:04.240Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0l39twq",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-09T05:57:03.965Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c018v880",
-      "note": "FFI attribute accepts and ignores unknown arguments"
-    },
-    {
-      "at": "2026-11-09T05:57:02.594Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0x92nsv",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-09T05:53:01.952Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0z2nw1h",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-09T05:39:22.928Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0l39twq",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-09T05:34:39.107Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0l39twq",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-09T04:56:17.964Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-EDITOR-DEV-PORT1",
-      "note": "Port the editor server now and keep the unbuilt dev server out of the package tests until `jet dev` is rebuilt"
-    },
-    {
-      "at": "2026-11-09T04:53:12.736Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0afjv0e",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-09T04:38:57.485Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c03a0dhc",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-09T04:36:58.049Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0z2nw1h",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-09T04:33:34.202Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0l39twq",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-09T04:09:36.671Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0l39twq",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-09T04:06:06.079Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0x92nsv",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-09T03:21:10.687Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0l39twq",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-09T03:06:17.440Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c09yzxgv",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-09T03:06:15.246Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c09yzxgv",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-09T03:06:12.942Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0gdndep",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-09T03:06:10.735Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0gdndep",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-09T03:05:57.032Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0esaekb",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-09T03:05:55.567Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0bnp1zw",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-09T03:05:54.120Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0ajhpeh",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-09T03:05:52.588Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0x92nsv",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-09T03:05:51.205Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0l39twq",
-      "note": "#6"
-    },
-    {
-      "at": "2026-11-09T03:05:49.726Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0l39twq",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-09T03:05:48.149Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0ihjl6a",
-      "note": "#12"
-    },
-    {
-      "at": "2026-11-09T03:05:46.549Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0ihjl6a",
-      "note": "#11"
-    },
-    {
-      "at": "2026-11-09T03:05:45.038Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c09yzxgv",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-09T03:05:43.476Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c09yzxgv",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-09T03:05:41.283Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0gdndep",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-09T02:39:47.927Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0l39twq",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-09T02:39:47.043Z",
-      "by": "Main",
-      "action": "decision.delete",
-      "ref": "D-APP-RUN1",
-      "note": "One application driver for beginners and expert loop control"
-    },
-    {
-      "at": "2026-11-09T02:39:46.173Z",
-      "by": "Main",
-      "action": "decision.delete",
-      "ref": "D-APP-WEB1",
-      "note": "How one Jet application presents in a browser"
-    },
-    {
-      "at": "2026-11-09T02:31:30.072Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-APP-RUN1",
-      "note": "One application driver for beginners and expert loop control"
-    },
-    {
-      "at": "2026-11-09T02:31:28.789Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-APP-WEB1",
-      "note": "How one Jet application presents in a browser"
-    },
-    {
-      "at": "2026-11-08T22:51:05.368Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0l39twq",
-      "note": "#7 One app experience across targets (owner 2026-11-08): the sa"
-    },
-    {
-      "at": "2026-11-08T22:51:03.771Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0l39twq",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T22:39:37.102Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c0e4cn5v",
-      "note": "ICE: `o := Box?(Val(make(\"o0\")))` crashes sema.body totality (\"has no checked type\")"
-    },
-    {
-      "at": "2026-11-08T22:39:35.331Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c0ku1nvb",
-      "note": "Element and module-storage reassignment drops the old Close value without closing it (xs[i] = v, m[k] = v, module storage)"
-    },
-    {
-      "at": "2026-11-08T22:39:33.628Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c09yzxgv",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T22:32:27.056Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0ajhpeh",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T22:17:23.237Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c09yzxgv",
-      "note": "#2 A reduced regression case lands in tests/ and faults before "
-    },
-    {
-      "at": "2026-11-08T22:17:22.266Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c09yzxgv",
-      "note": "#1 The root cause is named: allocator path, codegen or runtime,"
-    },
-    {
-      "at": "2026-11-08T22:17:15.953Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c09yzxgv",
-      "note": "I1: the seed runtime fast allocator path corrupts the heap in safe Jet ([U64] push loop SIGSEGV at address 0x1, layout-dependent)"
-    },
-    {
-      "at": "2026-11-08T22:09:09.215Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0l39twq",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T22:03:06.764Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0l39twq",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T21:59:54.554Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0l39twq",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T21:38:15.772Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0x92nsv",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T21:18:51.593Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0cs6xlg",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T21:18:50.483Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c0vwlomv",
-      "note": "Safe read-only file maps expose bytes another process can change, and fault with SIGBUS when the file shrinks"
-    },
-    {
-      "at": "2026-11-08T21:10:40.587Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0h06654",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T21:10:33.514Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c0ky4017",
-      "note": "Wayland window and ui stack: measured best against every alternative"
-    },
-    {
-      "at": "2026-11-08T20:44:36.716Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0h06654",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T20:33:38.061Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0x92nsv",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T20:32:14.367Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0nxjs80",
-      "note": "#1 Passing, returning or assigning an Int(lo..hi) value where I"
-    },
-    {
-      "at": "2026-11-08T20:32:10.659Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c0nxjs80",
-      "note": "A range-typed Int(lo..hi) argument is rejected for a plain Int parameter (E0108); no explicit widening exists"
-    },
-    {
-      "at": "2026-11-08T20:13:27.685Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0h114mv",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T20:13:08.692Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0hzvj2s",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T20:13:07.483Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c06l2xid",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-08T20:13:06.293Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c00emhw5",
-      "note": "#1"
     }
   ],
   "nextNum": 368,
@@ -196953,11 +196424,11 @@
     {
       "id": "G3",
       "title": "Core library completeness",
-      "body": "Core data, collections, codecs and the unbuilt APIs are complete and correct, with no wrong-meaning bugs and every Core call routed in the runtime. Owner order 2026-11-08: G1, G4, G8, G6, G3, then G5, G7, G9, G10, G11 and G12 in their earlier order; this goal is fifth.\n\nMerged from G13 (Our own better raylib, natively in Jet): Owner order 2026-10-30: a first-party game and graphics library written natively in Jet that is better than raylib, not a binding to the C library. Window, input, 2D and 3D drawing, textures, fonts, audio and gamepads come from Jet code over a thin platform layer (X11/Wayland, Vulkan/GL, ALSA/PipeWire, evdev; later Windows and macOS), with the same simple immediate-mode feel as raylib and Jet idioms on top. Cards: #5086 (Jet-native raylib API), #5035 (platform layer without SDL or raylib), #3027 (typed shader stages), #6149 and D-RAYLIB-FONT-HOME1 (where it lives).",
+      "body": "Core data, collections, codecs, math, text, files, processes, networking, tasks and the APIs the spec ratifies are complete and correct in Jet, with no wrong-meaning bugs. Owner ruling 2026-11-09: building out full C-equivalent libraries (libc, math.h, SQLite, TLS and crypto) is G3; removing C dependencies is G1; speed and size are G11. Owner order 2026-11-08: G1, G4, G8, G6, G3, then G5, G7, G9, G10, G11 and G12 in their earlier order; this goal is fifth.\n\nMerged from the former first-party graphics goal: window, input, 2D and 3D drawing, textures, fonts, audio and gamepads come from Jet code over a thin platform layer, with an immediate-mode feel. Owner 2026-11-08: no raylib anywhere; graphics, windows, frames, drawing and input are `ui`, and building apps is `app`. Cards: #6701 (ui windows and the raylib removal), #5035 (platform layer and audio), #6422-#6424 (the font package).",
       "status": "active",
       "log": [],
       "created": "2026-11-04T18:09:46.919Z",
-      "updated": "2026-11-08T13:53:28.183Z",
+      "updated": "2026-11-09T19:01:05.175Z",
       "updatedBy": "Main"
     },
     {
