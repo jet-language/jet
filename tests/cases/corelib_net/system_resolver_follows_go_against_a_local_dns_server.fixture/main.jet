@@ -5,13 +5,18 @@
 // addresses in the resolver's order, or its error. A query for STOP over
 // each transport ends that server. With the argument `hostile` it resolves
 // HOSTILE instead: names whose server sends forged or malformed packets.
+// With `parked` it resolves PARKED all at once beside a ticking task: the
+// server ignores each name's first query of each type, so every lookup
+// waits out a resend.
 package: {
     name: "system_resolver"
-    authority: { allow: [IO, Mem.Alloc, Net, Time, Time.Wait, Exec.Args] }
+    authority: { allow: [FS, FS.Read, IO, Mem.Alloc, Net, Time, Time.Wait, Exec.Args] }
 }
 
 use net: core.net
 use process: core.process
+use files: core.files
+use time: core.time
 
 STOP: "stop.server"
 
@@ -33,6 +38,9 @@ HOSTILE: [String]{
     "overrun.evil.", "badsize.evil.", "pastend.evil.", "ptrloop.evil.", "label.evil.", "reservedlabel.evil.", "type257.evil.",
     "tcpwrongid.evil.", "tcpwrongname.evil.", "tcpshort.evil."
 }
+
+// Names whose server answers only the resend: p<N>.park. is 10.4.0.N.
+PARKED: 16
 
 // A resource record: its type (1 A, 28 AAAA, 5 CNAME) and RDATA.
 Record: struct {
@@ -129,6 +137,13 @@ zone: fn(name: String, kind: Int, tcp: Bool, asked: Int) -> Reply {
         if name == "onlyforged.evil" -> return SILENT
         if name.starts_with("tcp") && !tcp -> return Reply{rcode: 0, truncated: true, records: [Record]{}}
         return answer([Record]{v4(10, 3, 0, honest(name))})
+    }
+    if name.ends_with(".park") {
+        if asked == 1 -> return SILENT
+        if kind != 1 -> return answer([Record]{})
+        loop n in 1..<(PARKED + 1) {
+            if name == ("p{n}.park") -> return answer([Record]{v4(10, 4, 0, n)})
+        }
     }
     failure(3)
 }
@@ -329,31 +344,132 @@ query_for: fn(name: String) -> [U8] {
     out
 }
 
-show: fn(name: String) {
+describe: fn(name: String) -> String {
     if net.socket_addrs(name, 80) == {
         .Ok(addresses) -> {
             line := "{name}:"
             loop address in addresses -> line = "{line} {net.socket_host(address)}"
-            print(line)
+            line
         }
-        .Err(error) -> print("{name}: {net.error_message(error)}")
+        .Err(error) -> "{name}: {net.error_message(error)}"
     }
+}
+
+show: fn(name: String) { print(describe(name)) }
+
+// One lookup's monotonic span and its line.
+Lookup: struct {
+    start: Int
+    end: Int
+    line: String
+}
+
+timed_lookup: fn(name: String, origin: Instant) -> Lookup {
+    start: time.instant().difference(origin).ns
+    line: describe(name)
+    Lookup{start: start, end: time.instant().difference(origin).ns, line: line}
+}
+
+// The process's thread count, from /proc.
+threads: fn() -[FS]> Int {
+    text: files.read("/proc/self/status") ?? panic("read status")
+    loop line in text.lines() {
+        if line.starts_with("Threads:") -> return Int.parse(line.remove_prefix("Threads:").trim()) ?? -1
+    }
+    -1
+}
+
+// A ticking task's record: each tick's monotonic time and thread count.
+Ticks: struct {
+    stamps: [Int]
+    threads: [Int]
+}
+
+// 200 ticks 5 ms apart.
+ticks: fn(origin: Instant) -> Ticks {
+    out := Ticks{stamps: [Int]{}, threads: [Int]{}}
+    loop _ in 0..<200 {
+        time.sleep(5ms)
+        out.stamps.push(time.instant().difference(origin).ns)
+        out.threads.push(threads())
+    }
+    out
+}
+
+// The most lookups in flight at one instant: at each one's start, those
+// that began no later and have not ended.
+overlap: fn(lookups: [Lookup]) -> Int {
+    most := 0
+    loop lookup in lookups {
+        open := 0
+        loop other in lookups {
+            if other.start <= lookup.start && lookup.start < other.end -> open += 1
+        }
+        if open > most -> most = open
+    }
+    most
+}
+
+// PARKED lookups at once, beside a task that ticks. Were a lookup to hold
+// its carrier while it waits (the case runs one carrier), the lookups would
+// run one after another, the ticks would stop, and the server, a task on
+// the same carrier, could answer no resend. Were a lookup to wait on a
+// thread of its own, the ticks would count more threads than before the
+// lookups began, once the servers were parked.
+parked: fn() {
+    names := [String]{}
+    loop n in 1..<(PARKED + 1) -> names.push("p{n}.park.")
+    time.sleep(50ms)
+    before: threads()
+    origin: time.instant()
+    ticker: task ticks(origin)
+    lookups: names.para_map((name: String) -> timed_lookup(name, origin), limit: PARKED)
+    record: ticker.join() ?? panic("ticker")
+    answered := true
+    first := lookups[0].start
+    last := lookups[0].end
+    loop at in 0..<lookups.len() {
+        expected: "p{at + 1}.park.: 10.4.0.{at + 1}"
+        if lookups[at].line != expected {
+            answered = false
+            print(lookups[at].line)
+        }
+        if lookups[at].start < first -> first = lookups[at].start
+        if lookups[at].end > last -> last = lookups[at].end
+    }
+    during := 0
+    most := before
+    loop at in 0..<record.stamps.len() {
+        if record.stamps[at] > first && record.stamps[at] < last {
+            during += 1
+            if record.threads[at] > most -> most = record.threads[at]
+        }
+    }
+    print("{PARKED} lookups, each answered on its resend: {answered}")
+    print("lookups in flight at once on one carrier: {overlap(lookups) > 1}")
+    print("the ticking task ran during the lookups: {during > 10}")
+    print("no lookup started a thread: {most == before}")
+    print("all lookups done within 3 s: {last - first < 3_000_000_000}")
 }
 
 run: fn() {
     arguments: process.args()
-    hostile: arguments.len() == 1 && arguments[0] == "hostile"
+    mode: if arguments.len() == 1 -> arguments[0] else -> ""
     udp: net.udp_bind("127.0.0.1:53") ?? panic("bind UDP 127.0.0.1:53")
     listener: net.tcp_listen("127.0.0.1:53") ?? panic("listen on TCP 127.0.0.1:53")
     udp_server: task udp_serve(udp)
     tcp_server: task tcp_serve(listener)
-    if hostile {
-        loop name in HOSTILE -> show(name)
-    } else {
-        loop name in NAMES -> show(name)
-        if net.dns_a("slow.test", 300) == {
-            .Ok(addresses) -> print("slow.test A within 300 ms: {addresses.len()} addresses")
-            .Err(error) -> print("slow.test A within 300 ms: {net.error_message(error)}")
+    if {
+        mode == "hostile" -> {
+            loop name in HOSTILE -> show(name)
+        }
+        mode == "parked" -> parked()
+        else -> {
+            loop name in NAMES -> show(name)
+            if net.dns_a("slow.test", 300) == {
+                .Ok(addresses) -> print("slow.test A within 300 ms: {addresses.len()} addresses")
+                .Err(error) -> print("slow.test A within 300 ms: {net.error_message(error)}")
+            }
         }
     }
     client: net.udp_bind("127.0.0.1:0") ?? panic("bind the stopping client")
