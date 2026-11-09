@@ -1,0 +1,74 @@
+# Claim (#6614 c8): `jet run <https url>` fetches the file once, pins its bytes
+# by sha256, and asks before the first instruction: the question names the
+# file, where it came from, its hash and its effects. A non-yes answer runs
+# nothing; with no terminal the run stops with E1804. A yes is kept with the
+# pin, so the next run is silent, and `--locked` runs the pinned bytes.
+# `-A` acknowledges the effects on the command. Fetched code's own `allow`
+# row acknowledges nothing. `--sha256` checks a first fetch and must match
+# an existing pin. OpenSSL `s_server -WWW` serves the fixture over https
+# with the checked-in test chain; SSL_CERT_FILE pins the trust to its CA.
+requires: os:unix
+requires: tool:openssl
+fixture: remote_run_asks_before_the_first_run.fixture
+copy: {root}/tests/fixtures/tls/custom-root.ca.cert.pem ca.pem
+copy: {root}/tests/fixtures/tls/custom-root.server.cert.pem server.cert.pem
+copy: {root}/tests/fixtures/tls/custom-root.server.key.pem server.key.pem
+copy: tool.jet clock.jet
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: XDG_STATE_HOME={work}/state
+env: SSL_CERT_FILE={work}/ca.pem
+session tls raw: openssl s_server -quiet -WWW -accept {free-port:tls} -cert server.cert.pem -key server.key.pem
+sleep: 250ms
+step no_terminal: jet run https://localhost:{free-port:tls}/tool.jet
+exit: 1
+stderr: ~ "jet.RemoteRunNeedsConsent" # E1804
+stderr: ~ "there is no terminal to ask"
+stdout: !~ "tool ran"
+entries: state/jet/remote >= 1 # the fetch is pinned before the question
+step answer_no: jet run https://localhost:{free-port:tls}/tool.jet
+pty: true
+stdin: no.stdin
+exit: 1
+stdout: ~ "tool.jet from localhost (sha256 "
+stdout: ~ "new to this machine"
+stdout: ~ "it reads the clock"
+stdout: ~ "Run it? [y/N]"
+stdout: ~ "not run"
+stdout: !~ "tool ran"
+step answer_yes: jet run https://localhost:{free-port:tls}/tool.jet
+pty: true
+stdin: yes.stdin
+exit: 0
+stdout: ~ "Run it? [y/N]"
+stdout: ~ "tool ran"
+step accepted: jet run https://localhost:{free-port:tls}/tool.jet
+pty: true
+exit: 0
+stdout: !~ "Run it?" # the pinned bytes were accepted with these effects
+stdout: ~ "tool ran"
+step locked: jet run --locked https://localhost:{free-port:tls}/tool.jet
+exit: 0
+stdout: ~ "tool ran"
+stderr: !~ "jet.RemoteRunNeedsConsent"
+step pin_mismatch: jet run --sha256=0000000000000000000000000000000000000000000000000000000000000000 https://localhost:{free-port:tls}/tool.jet
+exit: 1
+stderr: ~ "jet.RemoteSourceRefused" # E1805
+stderr: ~ "doesn't match the bytes pinned"
+step own_allow_row: jet run https://localhost:{free-port:tls}/self_allowed.jet
+exit: 1
+stderr: ~ "jet.RemoteRunNeedsConsent"
+stdout: !~ "self allowed ran"
+step allow_all: jet run -A https://localhost:{free-port:tls}/self_allowed.jet
+exit: 0
+stdout: ~ "self allowed ran"
+stderr: !~ "jet.RemoteRunNeedsConsent"
+step first_fetch_mismatch: jet run --sha256=0000000000000000000000000000000000000000000000000000000000000000 https://localhost:{free-port:tls}/clock.jet
+exit: 1
+stderr: ~ "jet.RemoteSourceRefused"
+stderr: ~ "don't match `--sha256`"
+stdout: !~ "tool ran"
+signal tls: KILL
+close tls
+exit: any # s_server is killed by the case; its exit status is not part of the contract

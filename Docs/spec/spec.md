@@ -1897,7 +1897,9 @@ is not the price of running.
 Jetpack records each dependency's inferred effect row in the lock. An update
 that widens a dependency's row prints which package gained which effect, and
 `--locked` refuses the widening. Code run straight from a URL or the registry
-asks before its first run in a terminal. Without a terminal it stops before
+is pinned by content hash and asks before its first run in a terminal; its
+own `allow` rows acknowledge nothing. A yes is kept with the pinned bytes, and
+changed bytes or new effects ask again. Without a terminal it stops before
 running, and the Fix names the `-A` command.
 
 Command-line authority uses one rights surface: `--allow=<RIGHTS>` and

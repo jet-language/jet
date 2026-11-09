@@ -46,11 +46,14 @@ JetCLIAuthority: struct {
 
 // The `--allow`, `--deny` and `-A` (`--allow-all`) rows of this invocation,
 // canonical and in argv order. `all` grants every grantable right; a denial
-// still wins over it.
+// still wins over it. `remote` is the pinned origin of a `jet run <url>` or
+// `jet run <package>` target (RemoteRun.jet), whose effect notice is a
+// first-run question.
 JetCLIInvocationAuthority: struct {
     all: Bool
     allow: [String]
     deny: [String]
+    remote: JetCLIRemoteRunOrigin?{None}
 }
 
 // A file whose first line is a `#!/...` launch line (`#!/usr/bin/env jet`)
@@ -167,6 +170,7 @@ jet_cli_policy_authority: fn(required: [String], authority_policy: JetDriverAuth
 // read only those paths (jet_cli_read_scope).
 jet_cli_with_invocation: fn(authority: &JetCLIAuthority, invocation: JetCLIInvocationAuthority?) Never! {
     rows: invocation ?? return
+    if !rows.all && rows.allow.len() == 0 && rows.deny.len() == 0 -> return
     // copy: the policy rows stay in `authority` until the merged rows replace them.
     granted := authority.granted.copy()
     if rows.all {

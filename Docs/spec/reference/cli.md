@@ -797,9 +797,44 @@ can reach is not bounded by the list. When standard input is a terminal the
 set last named is kept per canonical entry path under
 `$XDG_STATE_HOME/jet/effects` (else `~/.local/state/jet/effects`), and an
 unchanged set is not named again; otherwise every run names it. `--json`
-reports the set as one `run.effects` status on stderr instead. A written
-`allow` row does not bound the run yet (#6614 c5). There is no interactive
-question.
+reports the set as one `run.effects` status on stderr instead. A local run
+asks no question.
+
+`jet run` of a target that is not a local path runs remote code
+([`RemoteRun.jet`](../../../Compiler/JetCli/Source/Cli/RemoteRun.jet)). A
+word that exists as a file or directory, or as `<word>.jet`, is always local.
+An `https://` URL names one Jet file; plain `http://` is refused with E1805.
+A word of a letter, then letters, digits, `-` and `_`, optionally followed by
+`#<version>` (`greet#1.4.2`, `greet#1.4`), names a registry package, resolved
+as a script's `use greet#1.4` resolves (the Hangar's `remote/registry`
+launcher's `.jet/inline-deps`, then `JET_INLINE_DEPS_FIXTURES`, then
+`jet fetch --lock` through the signed index). A bare name takes the highest
+version this machine already has and is refused when it has none. Jet
+fetches the target, stores a URL's file under the Hangar's
+`remote/<sha256>/` folder, pins its sha256 (a package's tree hash), and runs
+the pinned copy as `jet run <path>` would, with the same flags. Nothing is
+written to the working directory. One record per target under
+`$XDG_STATE_HOME/jet/remote` (else `~/.local/state/jet/remote`) keeps the pin
+and the effects the user accepted for it.
+
+Before the program's first instruction, a remote run asks about every effect
+outside the floor, `--allow` and `-A`. The fetched code's own `allow` row
+acknowledges nothing here. On a terminal, stderr shows
+`tool.jet from example.org (sha256 3f9a0c1d2e4b…), new to this machine`, then
+`it reads the clock`, then `Run it? [y/N] `. In place of `new to this
+machine` the first line says `changed since you said yes` when the pinned
+bytes changed, or `now asks for more than you said yes to` for new effects.
+Any answer but `y` or
+`yes` prints `not run` and exits 1. A yes is kept with the pin, and the same
+bytes with no new effects run silently after that. With no terminal, or
+under `--json`, the run stops with E1804 instead. `-A` or `--allow=` rows
+acknowledge the effects on the command.
+
+`--sha256=<hex>` pins a URL's first fetch. Bytes with another sha256 are
+refused with E1805, and so is a `--sha256` that differs from an existing pin.
+On a local path or a package it is a usage error (E2104). `--locked` runs
+only what this machine already pinned and refuses to fetch or re-resolve
+(E1805).
 
 `jet run --allow=FS.Read:<path>` grants `FS.Read` confined to that path: the
 program may read the named file, or the named directory and everything

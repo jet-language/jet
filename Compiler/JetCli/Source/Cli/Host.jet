@@ -1869,7 +1869,8 @@ jet_cli_run_build: fn(file: String, source: String, color: Bool, options: BuildO
     }
     authority: jet_cli_traced_authority(invocation, result)
     if jet_cli_authority_report(file, source, color, json, authority) == .Val(refusal) -> return JetCLIBuilt.Failed{output: refusal}
-    jet_cli_effect_notice(file, authority, json)
+    stopped: jet_cli_effect_notice(file, source, authority, invocation, color, json)
+    if stopped.move() == .Val(output) -> return JetCLIBuilt.Failed{output: output}
     if verbose -> jet_cli_write_verbose_lints(file, source, color, json, jet_cli_present_shown(result, snapshot, true))
     if verbose && !json {
         used: jet_cli_sorted_set(result.entry_effects)
@@ -3502,6 +3503,7 @@ jet_cli_execute: fn(plan: &&JetCLIPlan, trace_sink: JetCLITraceSink?{None}, reco
         .ReplChild(session, invocation) -> output = jet_cli_repl_child(session, invocation)
         .EvalExpression(source, color, json) -> output = jet_cli_eval_expression(source, color, json)
         .Prove(target, lenses, capture, replay, color, json) -> output = jet_cli_prove_run(target, lenses, capture, replay, color, json)
+        .RunRemote(target, jet_argv, args, passthrough, color, quiet, verbose, threads) -> output = jet_cli_remote_run_host(target, jet_argv, args, passthrough, color, quiet, verbose, threads)
         .Budget(options, root, entry, color) -> output = jet_cli_budget_run(options, root, entry, color)
     }
     output

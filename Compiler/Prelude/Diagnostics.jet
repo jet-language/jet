@@ -7170,6 +7170,32 @@ ApplicationAuthorityDenied: struct {
     }
 }
 
+RemoteRunNeedsConsent: struct {
+    impl Diagnostic {
+        code: "E1804"
+        stage: [.Jet]
+        meaning: "Code fetched from a URL or the registry needs a yes before its first run, and no terminal can give one"
+        detail: true
+        no_fix: .Behavior
+        what: fn(self) -> String { "Remote code needs a yes before its first run, and there is no terminal to ask." }
+        why: fn(self) -> String { "`jet run <url>` and `jet run <package>` fetch and pin code this machine has not run with these effects before. In a terminal Jet asks `Run it? [y/N]`; without one (CI, a pipe, `--json`) it stops before the program's first instruction." }
+        fix: fn(self) -> String { "Run it in a terminal and answer `y`, or acknowledge its effects on the command: `jet run -A <target>`, or `--allow=<RIGHTS>` naming each effect." }
+    }
+}
+
+RemoteSourceRefused: struct {
+    impl Diagnostic {
+        code: "E1805"
+        stage: [.Jet]
+        meaning: "A URL or registry target of `jet run` can't be fetched or doesn't match its pin"
+        detail: true
+        no_fix: .Behavior
+        what: fn(self) -> String { "Jet won't run this remote target." }
+        why: fn(self) -> String { "Remote code runs only as the exact bytes Jet pinned: fetched over https or from the signed registry, checked against `--sha256` when given, and never fetched again under `--locked`." }
+        fix: fn(self) -> String { "Use an `https://` address, check the `--sha256` value, or run once without `--locked` to pin the target." }
+    }
+}
+
 UnknownLambdaParameterType: struct {
     impl Diagnostic {
         code: "E0801"
