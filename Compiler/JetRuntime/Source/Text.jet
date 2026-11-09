@@ -341,14 +341,30 @@ rt_text_push_scalar: fn(target: I64, scalar: I64) {
     rt_text_store(wrapping(target + I64{8}), used + width)
 }
 
-rt_text_lossy: fn(ptr: I64, len: I64) -> I64 {
-    // Valid static text uses a single buffer allocation and no builder growth.
+// The length of the valid UTF-8 run at the start of ptr[0..len): ASCII goes
+// a word at a time, then a byte at a time, and only a lead byte of 128 or
+// more takes the scalar check.
+rt_text_valid_run: fn(ptr: I64, len: I64) -> I64 {
     at := I64{0}
     loop at < len {
+        if (len - at >= I64{8} && rt_text_word(wrapping(ptr + at)).bit_and(I64{-9187201950435737472}) == I64{0}) {
+            at += I64{8}
+            next
+        }
+        if (rt_text_byte(wrapping(ptr + at)) < I64{128}) {
+            at += I64{1}
+            next
+        }
         width: rt_text_valid_width(wrapping(ptr + at), len - at, I64{1})
         if (width < I64{0}) { break }
         at += width
     }
+    at
+}
+
+rt_text_lossy: fn(ptr: I64, len: I64) -> I64 {
+    // Valid static text uses a single buffer allocation and no builder growth.
+    at := rt_text_valid_run(ptr, len)
     if at == len -> return rt_text_copy(ptr, len)
     result: jet_rt_string_builder_new()
     rt_text_append(result, ptr, at)
@@ -366,11 +382,7 @@ rt_text_lossy: fn(ptr: I64, len: I64) -> I64 {
             else -> {
                 start: at
                 at += width
-                loop at < len {
-                    next_width: rt_text_valid_width(wrapping(ptr + at), len - at, I64{1})
-                    if (next_width < I64{0}) { break }
-                    at += next_width
-                }
+                at += rt_text_valid_run(wrapping(ptr + at), len - at)
                 rt_text_append(result, ptr + start, at - start)
             }
         }

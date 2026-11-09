@@ -816,7 +816,14 @@ from_timestamp: fn(seconds: Int) -> DateTime Never! { civil_timestamp(seconds, 0
 from_unix_seconds: fn(seconds: Int) -> DateTime Never! { civil_unix_parts(seconds, 0) }
 from_unix_ms: fn(value: Int) -> DateTime Never! { civil_unix_parts(civil_floor(value, 1000), civil_mod(value, 1000) * 1000000) }
 from_unix_microseconds: fn(value: Int) -> DateTime Never! { civil_unix_parts(civil_floor(value, 1000000), civil_mod(value, 1000000) * 1000) }
-from_unix_nanoseconds: fn(value: Int) -> DateTime Never! { civil_unix_parts(civil_floor(value, 1000000000), civil_mod(value, 1000000000)) }
+from_unix_nanoseconds: fn(value: Int) -> DateTime Never! {
+    seconds: civil_floor(value, 1000000000)
+    nanos: civil_mod(value, 1000000000)
+    // A second after the last leap second (2017) and well inside Int64 is
+    // its own timestamp: no leap epoch to step back from, nothing to clamp.
+    if seconds > 1483228800 && seconds < 9223372036 -> return DateTime{secs: seconds, nanos: nanos, leap_second: false}
+    civil_unix_parts(seconds, nanos)
+}
 civil_timestamp: fn(seconds: Int, nanos: Int, leap: Bool) -> DateTime Never! {
     DateTime{secs: civil_i64(seconds + civil_floor(nanos, 1000000000)), nanos: civil_mod(nanos, 1000000000), leap_second: leap}
 }

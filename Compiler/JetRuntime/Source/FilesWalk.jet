@@ -235,8 +235,20 @@ walk_component_compare: fn(left: I64, left_parts: I64, index: I64, right: I64, r
 
 // `child.strip_prefix(root).unwrap_or(child).to_string_lossy()`: the rest
 // after the matched components (as_path trims leading and trailing "" and
-// "." parts), or the whole child when root is not a component prefix.
+// "." parts), or the whole child when root is not a component prefix. A
+// child the walk joined below the root is the root's bytes, `/` and a rest
+// that neither starts nor ends with a "" or "." part, so the rest is those
+// bytes as they stand and the components need not be parsed.
 walk_relative: fn(child: I64, child_length: I64, root: I64, root_length: I64) -> I64 {
+    if (root_length > I64{0} && child_length > root_length + I64{1} && rt_text_byte(wrapping(child + root_length)) == I64{47} && rt_text_equal_bytes(child, root, root_length)) {
+        rest: wrapping(wrapping(child + root_length) + I64{1})
+        size: child_length - root_length - I64{1}
+        first: rt_text_byte(rest)
+        last: rt_text_byte(wrapping(wrapping(rest + size) - I64{1}))
+        dot_first: first == I64{46} && (size == I64{1} || rt_text_byte(wrapping(rest + I64{1})) == I64{47})
+        dot_last: last == I64{46} && (size == I64{1} || rt_text_byte(wrapping(wrapping(rest + size) - I64{2})) == I64{47})
+        if (first != I64{47} && last != I64{47} && !dot_first && !dot_last) -> return rt_text_lossy(rest, size)
+    }
     child_parts: walk_components(child, child_length)
     root_parts: walk_components(root, root_length)
     child_count: walk_component_count(child_parts)
@@ -626,7 +638,9 @@ walk_stream_next: fn(stream: I64) -> I64 {
 // ReadDir::next for the slot: (end, child, directory, file, path, relative,
 // ignore_file, kind, code?, cause?). file_type comes from d_type, with
 // std's no-follow metadata fallback for any other d_type value; a fallback
-// failure is neither a directory nor a file.
+// failure is neither a directory nor a file. Only a directory gets a child
+// slot, the one the walk reads it through; any other entry's child is 0,
+// which needs no release.
 #Export(c) jet_walk8_next: fn(key: I64, slot: I64, end: I64, child: I64, directory: I64, file: I64, path: I64, relative: I64, ignore_file: I64, kind: I64, code_tag: I64, code: I64, cause_tag: I64, cause: I64) {
     context: walk_enter(key)
     if (context == I64{0}) -> return
@@ -673,11 +687,17 @@ walk_stream_next: fn(stream: I64) -> I64 {
     rest: walk_relative(child_path, child_length, rt_text_word(wrapping(context + I64{8})), rt_text_word(wrapping(context + I64{16})))
     ignore: rt_text_word(wrapping(context + I64{24}))
     matches_ignore: ignore != I64{0} && rt_text_len(ignore) == name_length && rt_text_equal_bytes(rt_text_data(ignore), name, name_length)
-    index: walk_slot_push(context, child_path, child_length)
+    directory_entry: bits == I64{16384}
+    index := I64{0}
+    if directory_entry {
+        index = walk_slot_push(context, child_path, child_length)
+    } else {
+        jet_rt_free(child_path, child_length + I64{1}, I64{1})
+    }
     walk_leave(context)
     walk_out_flag(end, false)
     rt_text_store(child, jet_int_owned_from_i64(index))
-    walk_out_flag(directory, bits == I64{16384})
+    walk_out_flag(directory, directory_entry)
     walk_out_flag(file, bits == I64{32768})
     rt_text_store(path, shown)
     rt_text_store(relative, rest)

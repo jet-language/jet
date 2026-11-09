@@ -1659,7 +1659,8 @@ __walk_batch: fn(context: Int, directory: Int, depth: Int, root: String, ignore:
             entries.push(WalkEntry{path: entry.path, relative: entry.relative, is_dir: entry.directory, depth: depth})
         }
         if skipped || !entry.directory {
-            core.files.__walk_release(context, entry.child)
+            // Only a directory has a child slot to release.
+            if entry.child != 0 -> core.files.__walk_release(context, entry.child)
             next
         }
         if ignore != None -> core.files.__walk_inherit(context, entry.child, directory)
