@@ -1880,14 +1880,17 @@ ir_payload_take: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int) -> Int
 // the member's bytes move to the new holder, and the variable's copy of them
 // is zeroed in place (ir_zero_drops), which its drop glue, a write of the
 // member and a whole reassignment all skip, so only the new holder ends what
-// the member held (#6584). -2 for any other place, which `.move()` reads as a
-// variable's value (ir_own).
+// the member held (#6584). A member with no clone glue (a FileReader, or a
+// struct holding one) moves the same way: a move copies no payload, and the
+// in-place read it would otherwise be leaves its handles to the owner's scope
+// end, after a `close` or a consuming call already ended the value. -2 for
+// any other place, which `.move()` reads as a variable's value (ir_own).
 ir_move_member: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, place: Int, span: Span) -> Int Never! {
     node: ir_body_node(p, b, place).kind
     if node == .Field(receiver, field) {
         member: ir_owned_member(m, p, b, receiver, field.name) ?? return -2
         row: member.ty
-        if m.types[row].drop == "" || ir_row_lacks_clone(m, p, row) || !ir_zeroable(m, p, row) -> return -2
+        if m.types[row].drop == "" || !ir_zeroable(m, p, row) -> return -2
         base: ir_expr(m, p, b, receiver)
         if ir_failed(b) || base < 0 -> return -1
         read: ir_member_read(m, b, base, member)
@@ -1941,12 +1944,13 @@ ir_owned_member: fn(m: &IRModule, p: IRProgram, b: IRBuilder, receiver: Int, nam
 }
 
 // Whether a value of type row `row` zeroed in place holds nothing its drop
-// ends: a null handle, box or String, an inline Int, a counted buffer of
-// capacity 0, or a tuple or struct of those.
+// ends: a null handle, box, Shared or String, an inline Int, a counted buffer
+// of capacity 0, or a tuple or struct of those. A Shared's drop
+// (jet_rt_native_shared_drop) skips a null cell.
 ir_zeroable: fn(m: &IRModule, p: IRProgram, row: Int) -> Bool Never! {
     kind: m.types[row].kind
     if m.types[row].drop == "" || kind == .Int || kind == .String -> return true
-    if kind == .Pointer -> return ir_box_row(m, row) || ir_is_handle(m, row)
+    if kind == .Pointer -> return ir_box_row(m, row) || ir_is_handle(m, row) || m.types[row].drop == "jet_rt_native_shared_drop"
     if kind != .Aggregate || ir_atomic_scalar(m.types[row].ty) != None -> return false
     if ir_counted_entry(m, p, row) != None -> return true
     members: ir_inline_members(m, p, row) ?? return false
@@ -2114,15 +2118,18 @@ ir_live_set: fn(b: &IRBuilder, live: Int, state: IROwnState) Never! {
 
 // The storage at `address` now holds the bytes of the aggregate `value`
 // and owns them: a fresh value or a variable's own value moves there (the
-// variable stops owning it); any other holder's value is shared, its
-// buffers gaining an owner (ir_copy_fixup).
+// variable stops owning it); so does a variable's aggregate with no clone,
+// which sema reads as a move (ir_own), or the copy would share a box and
+// its handles with the variable, whose scope-end drop alone would end them
+// after the new holder wrote or closed its copy. Any other holder's value is
+// shared, its buffers gaining an owner (ir_copy_fixup).
 ir_aggregate_take: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, address: Int) Never! {
     if b.fresh[value] {
         b.fresh[value] = false
         return
     }
-    if ir_movable_binding(b, value) -> return ir_disown(b, value)
     row: b.f.slot_type[value]
+    if ir_movable_binding(b, value) || (ir_owned_binding(b, value) && ir_row_lacks_clone(m, p, row)) -> return ir_disown(b, value)
     ir_copy_fixup(m, p, b, row, address)
 }
 
