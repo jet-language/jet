@@ -4,11 +4,18 @@
 //        [--shards N] [--jobs N] [--timeout SEC] [--filter SUBSTR] [--reuse DIR] [--seeds DIR] [--work DIR] [--check-gate]
 //
 // COMMIT is a commit on dev. The current release is `SEEDS/current` (default
-// $JET_SEEDS, Tools/agent/roots.sh). The run starts only with COMMIT's
+// $JET_SEEDS, Tools/agent/roots.sh); it is the chain's seed. The release column, the
+// compiler the suites and the Jetpack census compare against, is the current release when
+// its jet is the one it was released as (SHA256SUMS lists its sha256, and RELEASE.json records
+// its IDENTITY and the commit SOURCE names), else SEEDS/<its RELEASE.json name>, which must be;
+// with neither the run does not start. That column's rows read an export of its SOURCE commit.
+// The run starts only with COMMIT's
 // collect-all preflight receipt for the current release (`Tools/agent/Land.jet
 // receipt`, written by `Land.jet census`); --check-gate says whether it would
-// start and stops. The gate runs every check and reports all of them; it does
+// start, names both seeds, and stops. The gate runs every check and reports all of them; it does
 // not stop at the first failure:
+//   baseline  the release column's jet runs a program on its exported tree, whose Core its
+//             rows read.
 //   chain     Tools/agent/Chain.jet builds s1, s2 and s3 of COMMIT from the current release, every stage
 //             without Rust on PATH, and must reach the fixed point (s2 == s3).
 //   pack      the runtime pack, rebuilt by s2 without Rust (`jet build Compiler`), must
@@ -17,12 +24,12 @@
 //             (the only place Nix runs); its SHA-256 and size must equal CC_PACK_ASSETS in
 //             Jetpack/Provider/Source/Toolchain/CcToolchainPack.jet, the hash jet embeds.
 //   jetpack   Jetpack/Bootstrap/Check.jet (keep-going) with s2 on COMMIT must show no failure
-//             row the current release showed (recorded when it was cut, else rerun on its own
+//             row the release column showed (recorded when it was cut, else rerun on its own
 //             tree), and must finish if the release's census did; `Check.jet --hosted` builds
 //             the jetpack engine that ships beside jet.
 //   suites    the golden, ui and cases test profiles (each side runs them in one kit pool,
 //             `jet test Compiler --profile corpora`, run by s2 with `--compiler` naming the
-//             current release, then s2) on COMMIT's fixtures, compared per (suite, case,
+//             release column's jet, then s2) on COMMIT's fixtures, compared per (suite, case,
 //             tier). A row the release passes and s2 fails twice is lost; a lost row needs a
 //             disposition line `suite<TAB>case<TAB>tier|*<TAB>#card<TAB>reason` in
 //             --dispositions. No failing row may be untracked: each one needs a known-failing
@@ -61,7 +68,7 @@
 // release (RELEASE.json scope `filtered`, which jet-use refuses) and is never tagged or
 // published.
 // --reuse DIR takes the suite rows of an earlier run of this gate (its work directory) instead
-// of running every row again. It applies only when that run gated the same seed, built a
+// of running every row again. It applies only when that run gated the same seed and release column, built a
 // candidate with the same identity, and gated an ancestor of COMMIT whose diff to COMMIT
 // modifies files only under tests/ or Examples/ (or under paths no suite reads: Docs/,
 // .agents/, AGENTS.md, Tools/release/). Each changed file must sit at or under a directory that
@@ -517,6 +524,9 @@ cache_key: fn(parts: [String]) -> String Never! {
 
 // --- the release -------------------------------------------------------------
 
+// A seed directory. `genuine` is "" when its jet is the one it was released
+// as, else every way it differs (seed_info); `release_name` is the name its
+// RELEASE.json records.
 SeedRelease: struct {
     dir: String
     name: String
@@ -527,26 +537,27 @@ SeedRelease: struct {
     jetpack: String
     source: String
     commit: String
+    release_name: String
+    genuine: String
     error: String
 }
 
-release_info: fn(seeds: String) -[Env, FS]> SeedRelease Never! {
-    info := SeedRelease{dir: "", name: "", identity: "", version: "", jet: "", jet_sha: "", jetpack: "", source: "", commit: "", error: ""}
-    link: files.join(seeds, "current")
-    if !files.exists(link) {
-        info.error = "{link} does not exist"
-        return info
-    }
-    dir: files.realpath(link) ?? {
-        info.error = "{link} does not resolve: {err}"
-        return info
-    }
+no_seed: fn(error: String) -> SeedRelease Never! {
+    SeedRelease{dir: "", name: "", identity: "", version: "", jet: "", jet_sha: "", jetpack: "", source: "", commit: "", release_name: "", genuine: "", error: error.copy()}
+}
+
+// The seed in `dir`. Its jet is genuine when SHA256SUMS lists its sha256 for
+// `jet`, IDENTITY ends in that sha256, and RELEASE.json records that
+// identity and the commit SOURCE names: only then is the export of that
+// commit the tree this jet reads its Core from.
+seed_info: fn(dir: String) -[FS]> SeedRelease Never! {
+    info := no_seed("")
     missing := [String]{}
     loop name in STAGE_FILES {
         if !files.exists(files.join(dir, name)) -> missing.push(name.copy())
     }
     if missing.len() > 0 {
-        info.error = "current release {dir} lacks {missing.join(", ")}"
+        info.error = "release {dir} lacks {missing.join(", ")}"
         return info
     }
     info.dir = dir.copy()
@@ -561,8 +572,43 @@ release_info: fn(seeds: String) -[Env, FS]> SeedRelease Never! {
     // the commit SOURCE names.
     first: info.source.partition(" ").head.partition("\n").head
     if is_hex(first, 40) -> info.commit = first.copy()
-    if info.commit == "" -> info.error = "current release {dir} names no commit in SOURCE"
+    if info.commit == "" -> info.error = "release {dir} names no commit in SOURCE"
+    recorded: json.parse(read_text(files.join(dir, "RELEASE.json")) ?? "") ?? Dyn.Null
+    info.release_name = text_field(recorded, "name")
+    identity: text_field(recorded, "identity")
+    commit: text_field(recorded, "commit")
+    problems := [String]{}
+    if !has_line(read_text(files.join(dir, "SHA256SUMS")) ?? "", "{info.jet_sha}  jet") -> problems.push("SHA256SUMS does not list its jet ({short(info.jet_sha, 16)})")
+    if identity_sha(info.identity) != info.jet_sha -> problems.push("IDENTITY {info.identity} does not name its jet")
+    if identity != info.identity -> problems.push("RELEASE.json records identity {if identity == "" -> "none" else -> identity}")
+    if commit != info.commit -> problems.push("RELEASE.json records commit {if commit == "" -> "none" else -> short(commit, 10)}, SOURCE {short(info.commit, 10)}")
+    info.genuine = problems.join("; ")
     info
+}
+
+// The current release, `SEEDS/current`: the chain's seed, which builds s1.
+release_info: fn(seeds: String) -[Env, FS]> SeedRelease Never! {
+    link: files.join(seeds, "current")
+    if !files.exists(link) -> return no_seed("{link} does not exist")
+    dir: files.realpath(link) ?? return no_seed("{link} does not resolve: {err}")
+    seed_info(dir)
+}
+
+// The release the suites and the Jetpack census compare against: `current`
+// when its jet is genuine, else (a boot seed, whose jet was built from a
+// later tree than the one its files name) SEEDS/<its RELEASE.json name>,
+// which must be. The baseline's rows read its exported SOURCE commit, so
+// a jet that is not that commit's cannot be one.
+baseline_info: fn(seeds: String, current: SeedRelease) -[Env, FS]> SeedRelease Never! {
+    if current.error != "" || current.genuine == "" -> return current.copy()
+    why: "no baseline: the jet of {current.name} is not the release its files name ({current.genuine})"
+    if current.release_name == "" || current.release_name == current.name -> return no_seed("{why}, and it names no other seed")
+    named: files.join(seeds, current.release_name)
+    if !files.exists(named) -> return no_seed("{why}, and {named} does not exist")
+    dir: files.realpath(named) ?? return no_seed("{why}, and {named} does not resolve: {err}")
+    found := seed_info(dir)
+    if found.error == "" && found.genuine != "" -> found.error = "{why}, nor is {named}'s: {found.genuine}"
+    found
 }
 
 Pre: struct {
@@ -572,6 +618,7 @@ Pre: struct {
     work_root: String
     sha: String
     release: SeedRelease
+    baseline: SeedRelease
     dispositions: [Disposition]
     admission: Admission
 }
@@ -596,6 +643,8 @@ preconditions: fn(options: AdmitOptions, root: String) -[Env, Exec, FS, Time.Wai
     }
     release: release_info(seeds)
     if release.error != "" -> errors.push(release.error.copy())
+    baseline: if release.error == "" -> baseline_info(seeds, release) else -> release.copy()
+    if release.error == "" && baseline.error != "" -> errors.push(baseline.error.copy())
     key: publication_key_paths(RELEASE_KEY).seed_path
     if options.filter == "" && !files.exists(key) -> errors.push("no release signing key at {key}: create it with `jet registry keygen --registry {RELEASE_KEY}`")
     dispositions := [Disposition]{}
@@ -613,7 +662,7 @@ preconditions: fn(options: AdmitOptions, root: String) -[Env, Exec, FS, Time.Wai
     // The preflight gate, once the run could otherwise start: COMMIT's
     // receipt from a census by the current release.
     admission: if errors.len() > 0 -> Admission{admitted: false, text: ""} else -> preflight_gate("release-compiler", root, release.dir, sha)
-    Pre{errors: errors, root: root.copy(), seeds: seeds, work_root: work_root, sha: sha, release: release, dispositions: dispositions, admission: admission}
+    Pre{errors: errors, root: root.copy(), seeds: seeds, work_root: work_root, sha: sha, release: release, baseline: baseline, dispositions: dispositions, admission: admission}
 }
 
 GateRow: struct {
@@ -645,7 +694,11 @@ Ctx: struct {
     work_root: String
     work: String
     sha: String
+    // The chain's seed (`current`), which builds s1.
     release: SeedRelease
+    // The release column: the suites and the Jetpack census compare the
+    // candidate against this seed's jet on its own tree (baseline_info).
+    baseline: SeedRelease
     vars: [Var]
     dispositions: [Disposition]
     next: String
@@ -707,6 +760,43 @@ line_value: fn(text: String, prefix: String) -> String Never! {
         if line.starts_with(prefix) -> return line.slice(prefix.len()..<line.len()).copy()
     }
     ""
+}
+
+// The program the baseline probe runs: compiling it loads Core, which the
+// baseline jet reads from the release tree.
+BASELINE_PROBE: "run: fn() {{\n    print(\"baseline probe\")\n}}\n"
+
+// REPORT.md's name for a column's compiler: seed, identity, jet and tree.
+column_text: fn(name: String, identity: String, jet_sha: String, commit: String) -> String Never! {
+    "{name} ({identity}), jet {jet_sha}, tree {commit}"
+}
+
+// The baseline jet runs a program on the exported release tree, the Core its
+// suite rows read. A jet that names a Core file its tree lacks fails here,
+// once, rather than in every release row as a false gain.
+baseline_stage: fn(ctx: &Ctx) Never! -[Env, Exec, FS, IO, Time, Time.Wait]> {
+    dir: files.join(ctx.work, "baseline")
+    source: files.join(dir, "probe")
+    probe: files.join(source, "probe.jet")
+    home: files.join(dir, "home")
+    log: files.join(ctx.work, "logs/baseline.log")
+    files.create_dir_all(source) ?? ()
+    files.create_dir_all(home) ?? ()
+    files.write(probe, BASELINE_PROBE) ?? ()
+    // Its own JET_HOME and cache: no build of an earlier run answers it.
+    vars: with_vars(ctx.vars, [Var]{set_var("JET_COMPILER_IDENTITY", ctx.baseline.identity), set_var("JET_TOOLCHAIN_ROOT", ctx.release_tree), set_var("JET_HOME", home), set_var("XDG_CACHE_HOME", files.join(home, "cache"))})
+    result: run_logged([String]{ctx.baseline.jet.copy(), "run", probe}, source, vars, log, 600)
+    said: has_line(read_text(log) ?? "", "baseline probe")
+    remove_tree(dir)
+    tree: short(ctx.baseline.commit, 10)
+    if result.rc != 0 || !said {
+        failed: "{ctx.baseline.name}'s jet cannot run a program on its tree {tree} (rc={result.rc}): {tail_of(log, 4)}"
+        row(ctx, "baseline", "FAIL", failed)
+        return
+    }
+    other: if ctx.baseline.dir != ctx.release.dir -> " (chain seed {ctx.release.name} is not that release's jet)" else -> ""
+    passed: "{ctx.baseline.name}'s jet {short(ctx.baseline.jet_sha, 16)} runs on its tree {tree}{other}"
+    row(ctx, "baseline", "PASS", passed)
 }
 
 chain_stage: fn(ctx: &Ctx) Never! -[Env, Exec, FS, IO, Time, Time.Wait]> {
@@ -900,14 +990,14 @@ shown_keys: fn(keys: [String], count: Int) -> String Never! {
 // tree. The candidate must add no row; a census that finishes for the
 // release must finish for the candidate.
 jetpack_stage: fn(ctx: &Ctx) Never! -[Env, Exec, FS, IO, Time, Time.Wait]> {
-    recorded: files.join(ctx.release.dir, "evidence/jetpack-candidate.keys")
-    cache: files.join(files.join(ctx.work_root, "cache"), "jetpack-{cache_key([String]{ctx.release.jet_sha, ctx.release.commit})}.keys")
+    recorded: files.join(ctx.baseline.dir, "evidence/jetpack-candidate.keys")
+    cache: files.join(files.join(ctx.work_root, "cache"), "jetpack-{cache_key([String]{ctx.baseline.jet_sha, ctx.baseline.commit})}.keys")
     before := Census{finished: false, keys: [String]{}, detail: ""}
     if {
-        files.exists(recorded) -> before = Census{finished: true, keys: read_keys(recorded), detail: "recorded in {ctx.release.name}/evidence"}
+        files.exists(recorded) -> before = Census{finished: true, keys: read_keys(recorded), detail: "recorded in {ctx.baseline.name}/evidence"}
         files.exists(cache) -> before = Census{finished: true, keys: read_keys(cache), detail: "cached {files.basename(cache)}"}
         else -> {
-            before = jetpack_census(ctx, "release", ctx.release.jet.copy(), ctx.release.identity.copy(), ctx.release_tree.copy())
+            before = jetpack_census(ctx, "release", ctx.baseline.jet.copy(), ctx.baseline.identity.copy(), ctx.release_tree.copy())
             if before.finished {
                 files.create_dir_all(files.dirname(cache)) ?? ()
                 files.write(cache, keys_text(before.keys)) ?? ()
@@ -918,17 +1008,17 @@ jetpack_stage: fn(ctx: &Ctx) Never! -[Env, Exec, FS, IO, Time, Time.Wait]> {
     if before.finished -> files.write(files.join(ctx.work, "evidence/jetpack-release.keys"), keys_text(before.keys)) ?? ()
     if after.finished -> files.write(files.join(ctx.work, "evidence/jetpack-candidate.keys"), keys_text(after.keys)) ?? ()
     if !before.finished && !after.finished {
-        ctx.jetpack_summary = "Jetpack census finishes on neither {ctx.release.name} nor s2"
+        ctx.jetpack_summary = "Jetpack census finishes on neither {ctx.baseline.name} nor s2"
         row(ctx, "jetpack", "NOTE", "the census finishes on neither side, so nothing regressed (release: {before.detail}; candidate: {after.detail})")
         return
     }
     if !after.finished {
-        row(ctx, "jetpack", "FAIL", "the census finishes for {ctx.release.name} ({before.detail}) but not for the candidate: {after.detail}")
+        row(ctx, "jetpack", "FAIL", "the census finishes for {ctx.baseline.name} ({before.detail}) but not for the candidate: {after.detail}")
         return
     }
     if !before.finished {
-        ctx.jetpack_summary = "Jetpack census restored ({after.keys.len()} rows; {ctx.release.name} could not finish it)"
-        row(ctx, "jetpack", "NOTE", "census restored: {ctx.release.name} could not finish it ({before.detail}); candidate {after.detail}")
+        ctx.jetpack_summary = "Jetpack census restored ({after.keys.len()} rows; {ctx.baseline.name} could not finish it)"
+        row(ctx, "jetpack", "NOTE", "census restored: {ctx.baseline.name} could not finish it ({before.detail}); candidate {after.detail}")
         return
     }
     old := [String: Bool]{}
@@ -984,10 +1074,10 @@ hosted_stage: fn(ctx: &Ctx) Never! -[Env, Exec, FS, IO, Time, Time.Wait]> {
     why: "Check.jet --hosted rc={result.rc}{if result.timed_out -> " (timed out)" else -> ""}: {tail_of(log, 8)}"
     // Losing the engine the current release ships is a regression; a release
     // that never had one only notes it.
-    if ctx.release.jetpack != "" {
-        row(ctx, "jetpack-engine", "FAIL", "{ctx.release.name} ships jetpack and s2 cannot build it: {why}")
+    if ctx.baseline.jetpack != "" {
+        row(ctx, "jetpack-engine", "FAIL", "{ctx.baseline.name} ships jetpack and s2 cannot build it: {why}")
     } else {
-        row(ctx, "jetpack-engine", "NOTE", "no jetpack engine ({ctx.release.name} ships none either): {why}")
+        row(ctx, "jetpack-engine", "NOTE", "no jetpack engine ({ctx.baseline.name} ships none either): {why}")
     }
 }
 
@@ -1035,8 +1125,8 @@ SuiteBatch: struct {
 
 suite_batch: fn(ctx: &Ctx, side: String, profile: String, label_tag: String, extra: [String], sides: Int) -[Env]> SuiteBatch Never! {
     release: side == "release"
-    jet: if release -> ctx.release.jet.copy() else -> ctx.candidate.jet.copy()
-    identity: if release -> ctx.release.identity.copy() else -> ctx.candidate.identity.copy()
+    jet: if release -> ctx.baseline.jet.copy() else -> ctx.candidate.jet.copy()
+    identity: if release -> ctx.baseline.identity.copy() else -> ctx.candidate.identity.copy()
     root: if release -> ctx.release_tree.copy() else -> ctx.tree.copy()
     retry: label_tag != ""
     shards: if retry -> 1 else -> ctx.options.shards
@@ -1171,6 +1261,8 @@ reuse_plan: fn(ctx: &Ctx) -[Exec, FS, Time.Wait]> ReusePlan Never! {
     text: if own -> "" else -> read_text(files.join(dir, "REPORT.md")) ?? ""
     seed: report_field(text, "Seed: ")
     built: report_field(text, "Candidate: ")
+    column: report_field(text, "Release column: ")
+    wanted: column_text(ctx.baseline.name, ctx.baseline.identity, ctx.baseline.jet_sha, ctx.baseline.commit)
     marker: "release gate of dev "
     gated := ""
     loop line in text.split("\n").to_list() {
@@ -1184,6 +1276,7 @@ reuse_plan: fn(ctx: &Ctx) -[Exec, FS, Time.Wait]> ReusePlan Never! {
     if text == "" -> problems.push("{dir} has no REPORT.md")
     if text != "" && seed != "{ctx.release.name} ({ctx.release.identity})" -> problems.push("{dir} gated seed {seed}, not {ctx.release.name} ({ctx.release.identity})")
     if text != "" && built != ctx.candidate.identity -> problems.push("{dir} built candidate {built}, not {ctx.candidate.identity}")
+    if text != "" && column != wanted -> problems.push("{dir} compared against {if column == "" -> "an unnamed release column" else -> column}, not {wanted}")
     parsed: git_in(ctx.root, [String]{"rev-parse", "--verify", "{gated}^{{commit}}"})
     if gated == "" || parsed.rc != 0 {
         problems.push("{dir} names no commit of this repository")
@@ -1238,8 +1331,8 @@ merged_rows: fn(prior: [SuiteRow], fresh: [SuiteRow], ids: [String]) -> [SuiteRo
 // Where an earlier run of this gate keeps the release rows of `suite` for
 // COMMIT under the same release, engine, filter and time limit.
 release_cache: fn(ctx: &Ctx, suite: String) -[FS]> String Never! {
-    engine: if ctx.release.jetpack != "" -> sha256_file(ctx.release.jetpack) else -> ""
-    key: cache_key([String]{ctx.release.jet_sha, ctx.release.identity, engine, ctx.sha, suite, ctx.options.filter, if ctx.options.timeout > 0 -> "{ctx.options.timeout}" else -> "0"})
+    engine: if ctx.baseline.jetpack != "" -> sha256_file(ctx.baseline.jetpack) else -> ""
+    key: cache_key([String]{ctx.baseline.jet_sha, ctx.baseline.identity, ctx.baseline.commit, engine, ctx.sha, suite, ctx.options.filter, if ctx.options.timeout > 0 -> "{ctx.options.timeout}" else -> "0"})
     files.join(files.join(ctx.work_root, "cache"), "kit-{suite}-{key}.json")
 }
 
@@ -1458,7 +1551,11 @@ report: fn(ctx: Ctx, verdict: String, plan: MergePlan) -> String Never! {
     gains: gains_of(ctx)
     filtered: if ctx.options.filter != "" -> " (filtered by \"{ctx.options.filter}\": not a release)" else -> ""
     lines := [String]{"# {ctx.next}: release gate of dev {short(ctx.sha, 10)}", "", "Verdict: {verdict}{filtered}", "Seed: {ctx.release.name} ({ctx.release.identity})"}
-    if ctx.built -> lines.push("Candidate: {ctx.candidate.identity}")
+    lines.push("Release column: {column_text(ctx.baseline.name, ctx.baseline.identity, ctx.baseline.jet_sha, ctx.baseline.commit)}")
+    if ctx.built {
+        lines.push("Candidate: {ctx.candidate.identity}")
+        lines.push("Candidate column: {column_text("s2", ctx.candidate.identity, ctx.candidate.sha, ctx.sha)}")
+    }
     lines.extend([String]{"", "| check | status | detail |", "|---|---|---|"})
     loop found in ctx.rows -> lines.push("| {found.check} | {found.status} | {found.detail.replace("|", "\\|")} |")
     lines.extend([String]{"", "Gains: {gains.total} ({gains.suites} suite rows, {gains.jetpack} Jetpack census rows)"})
@@ -1559,7 +1656,7 @@ assemble: fn(ctx: Ctx, plan: MergePlan) -[Env, Exec, FS, Time, Time.Wait]> Assem
     created: "{time.isoformat(time.now_utc())}Z"
     date: short(created, 10)
     scope: if ctx.options.filter != "" -> "filtered: {ctx.options.filter}" else -> "full"
-    summary: if ctx.options.summary != "" -> ctx.options.summary.copy() else -> "{gains.total} gains over {ctx.release.name}"
+    summary: if ctx.options.summary != "" -> ctx.options.summary.copy() else -> "{gains.total} gains over {ctx.baseline.name}"
     dest: files.join(ctx.seeds, ctx.next)
     temp: files.join(ctx.seeds, ".{ctx.next}.assembling-{sys.pid()}")
     remove_tree(temp)
@@ -1581,7 +1678,7 @@ assemble: fn(ctx: Ctx, plan: MergePlan) -[Env, Exec, FS, Time, Time.Wait]> Assem
     body: "Verified {short(ctx.sha, 10)}: {verified}.\n\nIdentity {ctx.candidate.identity}.\n\nEvidence: RELEASE.md and RELEASE.json in the {ctx.next} seed directory."
     // jet-use installs a release from its current.env, so it waits in the
     // work directory and reaches dest only once the release is published.
-    env_text: "# Newest verified self-hosted compiler (written by Tools/release admit; jet-use installs it).\nLABEL=\"{ctx.next} (dev {short(ctx.sha, 9)}, {date}, verified: s2 == s3 {short(ctx.candidate.sha, 16)}, no Rust; {gains.total} gains, {lost.len()} lost over {ctx.release.name})\"\nJET={dest}/jet\nJET_IDENTITY={ctx.candidate.identity}\n"
+    env_text: "# Newest verified self-hosted compiler (written by Tools/release admit; jet-use installs it).\nLABEL=\"{ctx.next} (dev {short(ctx.sha, 9)}, {date}, verified: s2 == s3 {short(ctx.candidate.sha, 16)}, no Rust; {gains.total} gains, {lost.len()} lost over {ctx.baseline.name})\"\nJET={dest}/jet\nJET_IDENTITY={ctx.candidate.identity}\n"
     failed: write_all([(path: String, text: String)]{
         (path: files.join(temp, "IDENTITY"), text: "{ctx.candidate.identity}\n"),
         (path: files.join(temp, "RELEASE"), text: "{ctx.next}\n"),
@@ -1689,23 +1786,24 @@ run_gate: fn(options: AdmitOptions, pre: Pre) -[Env, Exec, FS, IO, Time, Time.Wa
     loop dir in work_dirs -> files.create_dir_all(files.join(work, dir)) ?? ()
     ctx := Ctx{
         options: options.copy(), root: pre.root.copy(), seeds: pre.seeds.copy(), work_root: pre.work_root.copy(), work: work.copy(),
-        sha: pre.sha.copy(), release: pre.release.copy(),
+        sha: pre.sha.copy(), release: pre.release.copy(), baseline: pre.baseline.copy(),
         vars: [Var]{set_var("TMPDIR", files.join(work, "tmp")), drop_var("JET")},
         dispositions: pre.dispositions.copy(), next: next_release_name(release_names(pre.seeds)),
         tree: files.join(work, "tree"), release_tree: files.join(work, "release-tree"), log: files.join(work, "release.log"),
         built: false, candidate: Built{jet: "", runtime: "", sha: "", identity: "", jetpack: "", s2: "", s3: ""},
         cc_pack_path: "", cc_pack_file: "", jetpack_fixed: [String]{}, jetpack_summary: "", suites: [SuiteResult]{}, rows: [GateRow]{},
     }
-    say("release", ctx.log, "release gate of {short(ctx.sha, 10)} against {ctx.release.name}; next name {ctx.next}; work {work}")
+    say("release", ctx.log, "release gate of {short(ctx.sha, 10)}: chain seed {ctx.release.name}; release column {column_text(ctx.baseline.name, ctx.baseline.identity, ctx.baseline.jet_sha, ctx.baseline.commit)}; next name {ctx.next}; work {work}")
     if export_commit(ctx.root, ctx.sha, ctx.tree) == .Val(why) {
         term.eprint("admit: {why}")
         return 2
     }
     files.write(files.join(ctx.tree, ".chain-base"), "{ctx.sha}\n") ?? ()
-    if export_commit(ctx.root, ctx.release.commit, ctx.release_tree) == .Val(why) {
+    if export_commit(ctx.root, ctx.baseline.commit, ctx.release_tree) == .Val(why) {
         term.eprint("admit: {why}")
         return 2
     }
+    baseline_stage(ctx)
     chain_stage(ctx)
     cc_pack_stage(ctx)
     // A fresh gate starts the release side's rows as soon as the chain and
@@ -1807,12 +1905,13 @@ admit_main: fn(args: [String], root: String) -[Env, Exec, FS, IO, Time, Time.Wai
         loop error in pre.errors -> term.eprint("admit: {error}")
         return 2
     }
+    columns: "chain seed: {pre.release.name} ({pre.release.identity})\nrelease column: {column_text(pre.baseline.name, pre.baseline.identity, pre.baseline.jet_sha, pre.baseline.commit)}"
     if !pre.admission.admitted {
-        term.eprint(pre.admission.text)
+        term.eprint("{columns}\n{pre.admission.text}")
         return 2
     }
     if options.check_gate {
-        print(pre.admission.text)
+        print("{columns}\n{pre.admission.text}")
         return 0
     }
     files.create_dir_all(pre.work_root) ?? ()
