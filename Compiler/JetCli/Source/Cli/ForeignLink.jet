@@ -698,7 +698,7 @@ jet_cli_native_c_closure: fn(closure: JetCLIClosureCTools, facts: JetDriverForei
 // Programs without a foreign closure preserve the original link line exactly
 // and never resolve C tools.
 jet_cli_native_c_inputs: fn(facts: JetDriverForeignLinkFacts, rust_helper: String?, sources: JetCLIForeignSources, runtime_dir: String) -[FS, Env, Exec, Time.Wait]> JetCLIForeignInputs JetCLIForeignLinkError! {
-    linked: facts.libraries.len() > 0 || facts.direct_links.len() > 0 || facts.transitive_links.len() > 0 || facts.c_or_rust_rows
+    linked: jet_cli_native_c_linked(facts)
     if !linked && facts.inline_c.len() == 0 && rust_helper == None && sources.libs.len() == 0 && sources.link_args.len() == 0 {
         return Ok(JetCLIForeignInputs{names: [String]{}, bytes: [[U8]]{}, paths: [String]{}})
     }
@@ -708,6 +708,12 @@ jet_cli_native_c_inputs: fn(facts: JetDriverForeignLinkFacts, rust_helper: Strin
     loop path in closure.platform -> jet_cli_foreign_add(inputs, path) ?? return Err(err)
     inputs.platform = true
     Ok(inputs)
+}
+
+// Whether the checked foreign facts `facts` link C: a C provider library, a
+// link of one, or a C or Rust foreign row (the program's C platform).
+jet_cli_native_c_linked: fn(facts: JetDriverForeignLinkFacts) -> Bool Never! {
+    facts.libraries.len() > 0 || facts.direct_links.len() > 0 || facts.transitive_links.len() > 0 || facts.c_or_rust_rows
 }
 
 // The same declared nixpkgs provisioning as the seed C resolver. A native

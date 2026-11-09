@@ -276,6 +276,9 @@ LinkContext: struct {
     fault_report_section: Int
     fault_report_caller: Int
     errors: [String]
+    // Every global live code strongly references and nothing defines, once
+    // each, in scan order (link_scan_reloc; x64_link_live_undefined).
+    undefined: [String]
 }
 
 link_context: fn(bufs: &&[[U8]], base: Int) -> LinkContext Never! {
@@ -292,7 +295,7 @@ link_context: fn(bufs: &&[[U8]], base: Int) -> LinkContext Never! {
         ep_sec: [Int]{}, ep_obj: [Int]{}, ep_start: [Int]{}, ep_len: [Int]{}, ep_cie: [Int]{}, ep_target: [Int]{},
         ep_first_reloc: [Int]{}, ep_reloc_count: [Int]{}, ep_next: [Int]{}, ep_keep: [Bool]{}, ep_out: [Int]{}, sec_fde: [Int]{},
         got: [Int:Int]{}, got_keys: [Int]{}, rel_base: [Int]{}, rel_slot: [Int]{}, got_start: 0, tls_start: 0, tls_end: 0, tls_align: 1,
-        eh_start: 0, eh_size: 0, eh_debug: false, base: base, fault_report: LinkFaultReport.Full, fault_report_section: -1, fault_report_caller: -1, errors: [String]{},
+        eh_start: 0, eh_size: 0, eh_debug: false, base: base, fault_report: LinkFaultReport.Full, fault_report_section: -1, fault_report_caller: -1, errors: [String]{}, undefined: [String]{},
     }
 }
 
@@ -1570,6 +1573,7 @@ link_scan_reloc: fn(c: &LinkContext, reported: &[Int:Bool], linker_names: [Strin
     g: link_global_of(c, obj, symbol)
     if g >= 0 && !link_defined(c, g) && reported.get(g) == None && (link_u8(c.bufs, b, link_sym_at(c, obj, symbol) + 4) >> 4) != 2 && linker_names.get(c.g_name[g]) == None {
         reported.add(g, true).drop("checked absent above")
+        c.undefined.push(c.g_name[g].copy())
         site: link_section_label(c, s)
         message: "undefined symbol `{c.g_name[g]}`, referenced by {site}"
         link_error(c, message)
@@ -2950,6 +2954,34 @@ link_resident_failure: fn(errors: &&[String]) -> X64ResidentLinkResult Never! {
 x64_link_executable: fn(names: [String], bufs: &&[[U8]], base: Int, threads: CompilerThreads, debug_info: Bool) -> X64ExecutableResult Never! {
     linked := link_executable_image(names, bufs, base, None, threads, debug_info, false)
     linked.image.move()
+}
+
+// What x64_link_live_undefined found, with the inputs it was given.
+X64LiveUndefined: struct {
+    symbols: [String]
+    bufs: [[U8]]
+}
+
+// The symbols live code of the link inputs `bufs` references that no input
+// defines, as x64_link_executable's resolution and garbage collection count
+// them (a reference from collected code does not count), without laying out
+// an image. The inputs come back unchanged. A program's C closure is
+// realized only for the providers of these symbols (JetCli Host.jet
+// jet_cli_native_executable); inputs that don't load or have no entry give
+// none, and their link reports why.
+x64_link_live_undefined: fn(names: [String], bufs: &&[[U8]]) -> X64LiveUndefined Never! {
+    c := link_context(bufs, LINK_BASE)
+    link_load_inputs(c, names)
+    if c.errors.len() == 0 {
+        entry_g: link_resolve_program(c)
+        entry_section: link_entry_section(c, entry_g)
+        if entry_section >= 0 {
+            linker_names := [String:Bool]{}
+            loop name in link_linker_names() -> linker_names.add(name, true).drop("names are unique")
+            link_collect(c, [Int]{entry_section}, linker_names)
+        }
+    }
+    X64LiveUndefined{symbols: c.undefined.move(), bufs: c.bufs.move()}
 }
 
 // A static executable whose debug information is in a side file.

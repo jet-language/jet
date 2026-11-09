@@ -1552,8 +1552,16 @@ LIBRARY_PATH and the host compiler's `libgcc_eh.a` and `libgcc.a`. The runtime
 pack packages none of them. Such a program links the Jet-only
 runtime object (`jet-runtime/jet_runtime_jet.o`) with them, not the runtime pack: the
 pack holds its own private, initialized libc, and a second copy beside it would
-run uninitialized. A program with no foreign closure receives no additional link
-inputs and keeps the pack. Platform archives are never runtime-pack exports.
+run uninitialized. A program links only the C its live code calls: when only
+checked foreign declarations name C (a C provider of an imported module, such
+as `core.data`'s import of `core.db` and SQLite), the linker's own collection
+over the program object and the pack (`x64_link_live_undefined` in
+`Compiler/JetBackend/Source/Image/StaticLink.jet`) names the symbols live code
+references and nothing defines, and only the providers of those declarations
+are realized (`jet_driver_foreign_link_live`). A program with no live foreign
+reference receives no additional link inputs, needs no C tools and keeps the
+pack, starting at `__jet_start`; a C symbol no input defines is the link's
+undefined-symbol report. Platform archives are never runtime-pack exports.
 
 The private `Core.mem.__string_data` / `__string_byte_len` pair lends the
 existing UTF-8 String home, not a NUL-terminated or copied carrier. The caller

@@ -31,6 +31,7 @@ use {
         x64_image_unload,
         x64_link_executable,
         x64_link_executable_split,
+        x64_link_live_undefined,
         x64_process_env,
         x64_process_mirror,
         x64_process_nap,
@@ -51,6 +52,8 @@ use {
         JetDriverForeignLinkFacts,
         JetDriverLoweringInputs,
         jet_driver_checked_declarations,
+        jet_driver_foreign_link_empty,
+        jet_driver_foreign_link_live,
         JetDriverRustForeignError,
         JetDriverVerbOutput,
         JET_DRIVER_EXIT_OK,
@@ -696,11 +699,14 @@ jet_cli_ice_report: fn(summary: String, census: [JetDriverIceRow]) -[FS, Env]> J
 // Jet-only runtime object instead of the pack. At LINK_RUN_BASE a program
 // with no C closure is bound to the pack's prelinked runtime image instead
 // (Image/MemoryLink.jet), without relinking the runtime; one the image
-// can't bind links in full. The C closure reads only the
-// checked foreign facts, so it is realized on a thread of its own (its C
-// compiler children and archive digests, then the read of the runtime it
-// selects) while this thread builds the object; its failures are reported
-// after the object's, as when they came after it.
+// can't bind links in full. A closure the `libs` or `link_args` build
+// options or a Rust helper add reads only the checked foreign facts, so it
+// is realized on a thread of its own (its C compiler children and archive
+// digests, then the read of the runtime it selects) while this thread
+// builds the object; its failures are reported after the object's, as when
+// they came after it. A closure only checked foreign declarations name
+// waits for the object: only the providers its live code references are
+// realized, and with none the program links no C.
 // A fault (a function the builder can't build, a runtime route the runtime
 // does not export, a selection, object or link finding) is one ICE row of
 // `census` (jet_cli_ice_trap); the faulty function becomes one trap, so
@@ -712,7 +718,9 @@ jet_cli_ice_report: fn(summary: String, census: [JetDriverIceRow]) -[FS, Env]> J
 // trace sink: `native.rust_foreign` (a Rust foreign helper's realization),
 // `ir.build`, `ir.opt` (level > 0), `ir.x64` (on the threads the compile
 // admits), `ir.object`, `native.foreign` (the wait for the C closure and the
-// runtime's bytes once the object is built) and `native.link`.
+// runtime's bytes once the object is built, and for a closure only checked
+// foreign declarations name the live symbol collection and the providers'
+// realization) and `native.link`.
 // A span a failure returns from stays open. An image for LINK_RUN_BASE whose
 // C closure can't link there (absolute 32-bit relocations in non-PIC C) is
 // linked at LINK_RUN_LOW_BASE instead, below 2 GiB, where the loader still
@@ -747,8 +755,18 @@ jet_cli_native_executable: fn(result: JetDriverCompileResult, inputs: &&JetDrive
     closures := [JetCLIForeignRealized]{}
     // copy: the closure's thread owns its inputs; this function still reads them.
     foreign_link: result.foreign_link.copy()
+    // A closure only the checked foreign declarations name (a C provider of
+    // an imported module, such as core.db's SQLite) is decided by the
+    // program's live code: the link's own collection over the object and the
+    // pack (x64_link_live_undefined) names the symbols live code references
+    // and nothing defines, and only the providers of those declarations are
+    // realized (jet_driver_foreign_link_live). With none, the program links
+    // no C, needs no C tools and starts at `__jet_start`. Meanwhile the
+    // closure thread reads the pack that collection needs.
+    decided: rust_helper == None && sources.libs.len() == 0 && sources.link_args.len() == 0 && (jet_cli_native_c_linked(foreign_link) || foreign_link.inline_c.len() > 0)
+    first_facts: if decided -> jet_driver_foreign_link_empty() else -> foreign_link.copy()
     task.group native_foreign {
-        realizing: task jet_cli_native_foreign_realize(foreign_link, rust_helper, sources.copy(), runtime_dir.copy(), runtime_key, base == LINK_RUN_BASE)
+        realizing: task jet_cli_native_foreign_realize(first_facts, rust_helper, sources.copy(), runtime_dir.copy(), runtime_key, base == LINK_RUN_BASE && !decided)
         object: jet_cli_native_object(result, checked, harness, options, runtime_exports, census, file, root, hot)
         if object.failure == None && trace_sink == .Val(sink) -> sink.begin("native.foreign", "", -1, -1)
         objects.push(object)
@@ -757,10 +775,27 @@ jet_cli_native_executable: fn(result: JetDriverCompileResult, inputs: &&JetDrive
     built := objects.pop() ?? panic("the native route lost its object")
     if built.failure == .Val(failure) -> return JetCLINativeLinked.Failed{failure: failure}
     realized := closures.pop() ?? panic("the native route lost its C closure")
+    object := built.bytes.move()
+    if decided {
+        pack := realized.runtime.move() ?? return JetCLINativeLinked.Failed{failure: JetCLINativeFailure.Runtime{what: realized.runtime_error}}
+        query := x64_link_live_undefined([String]{"{executable_path} (program object)", realized.runtime_path}, [[U8]]{object.move(), pack.move()})
+        live := [String:Bool]{}
+        loop symbol in query.symbols -> live[symbol.copy()] = true
+        queried := query.bufs.move()
+        pack = queried.pop() ?? panic("the live symbol query lost the runtime pack")
+        object = queried.pop() ?? panic("the live symbol query lost the program object")
+        kept: jet_driver_foreign_link_live(foreign_link, live)
+        if jet_cli_native_c_linked(kept) || kept.inline_c.len() > 0 || base == LINK_RUN_BASE {
+            // A live closure, or a program with none that binds to the
+            // prelinked runtime image.
+            realized = jet_cli_native_foreign_realize(kept, None, sources, runtime_dir, runtime_key, base == LINK_RUN_BASE)
+        } else {
+            realized.runtime = Val(pack.move())
+        }
+    }
     if trace_sink == .Val(sink) -> sink.end("native.foreign", if realized.inputs == .Val(found) -> found.names.len() else -> 0)
     closure: realized.inputs ?? return JetCLINativeLinked.Failed{failure: JetCLINativeFailure.Foreign{message: realized.error}}
     runtime := realized.runtime.move() ?? return JetCLINativeLinked.Failed{failure: JetCLINativeFailure.Runtime{what: realized.runtime_error}}
-    object := built.bytes.move()
     runtime_path := realized.runtime_path
     if realized.bound {
         // A program with no C closure binds to the prelinked runtime image

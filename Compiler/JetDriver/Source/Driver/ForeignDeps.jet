@@ -49,20 +49,32 @@ JetDriverInlineC: struct {
 
 // One checked foreign declaration (`#Import(<lang>)` or `#FFI(<lang>)`): its
 // name, its language head (jet_driver_foreign_language_head), its linked
-// symbol and its source site, a file path and 1-based line.
+// symbol, its source site, a file path and 1-based line, and the identity of
+// the module declaring it, whose C providers link it.
 JetDriverForeignDeclaration: struct {
     name: String
     language: String
     symbol: String
     path: String
     line: Int
+    module_identity: String{""}
+}
+
+// One C provider of a checked module (`#Import c.<lib>`): the module's
+// identity, the provider library and its direct and transitive links.
+JetDriverForeignProvider: struct {
+    module_identity: String
+    library: String
+    direct_links: [String]
+    transitive_links: [String]
 }
 
 // What the native link closure reads of the checked foreign declarations:
 // the C provider libraries (sorted, unique), their direct and transitive
 // links (sorted; transitive without the direct ones), whether a C or Rust
 // foreign row needs the program's C platform, and the inline C bodies. The
-// declarations, in foreign identity order, are every checked foreign row.
+// declarations, in foreign identity order, are every checked foreign row;
+// the providers, in module order, every C provider.
 JetDriverForeignLinkFacts: struct {
     libraries: [String]
     direct_links: [String]
@@ -70,10 +82,47 @@ JetDriverForeignLinkFacts: struct {
     c_or_rust_rows: Bool
     inline_c: [JetDriverInlineC]
     declarations: [JetDriverForeignDeclaration]
+    providers: [JetDriverForeignProvider]{[JetDriverForeignProvider]{}}
 }
 
 jet_driver_foreign_link_empty: fn() -> JetDriverForeignLinkFacts Never! {
-    JetDriverForeignLinkFacts{libraries: [String]{}, direct_links: [String]{}, transitive_links: [String]{}, c_or_rust_rows: false, inline_c: [JetDriverInlineC]{}, declarations: [JetDriverForeignDeclaration]{}}
+    JetDriverForeignLinkFacts{libraries: [String]{}, direct_links: [String]{}, transitive_links: [String]{}, c_or_rust_rows: false, inline_c: [JetDriverInlineC]{}, declarations: [JetDriverForeignDeclaration]{}, providers: [JetDriverForeignProvider]{}}
+}
+
+// The facts of what live code reaches, of `facts`: the declarations whose
+// symbol is in `live` (the link's live undefined symbols,
+// x64_link_live_undefined), the C providers of their modules with those
+// providers' links, and the inline C bodies called. Only a live C or Rust
+// row needs the program's C platform. No live declaration leaves no closure.
+jet_driver_foreign_link_live: fn(facts: JetDriverForeignLinkFacts, live: [String:Bool]) -> JetDriverForeignLinkFacts Never! {
+    kept := jet_driver_foreign_link_empty()
+    modules := [String]{}
+    loop declaration in facts.declarations {
+        if live.get(declaration.symbol) == None -> next
+        if declaration.language == "c" || declaration.language == "rust" -> kept.c_or_rust_rows = true
+        jet_driver_foreign_push_unique(modules, declaration.module_identity)
+        kept.declarations.push(declaration.copy())
+    }
+    direct := [String]{}
+    transitive := [String]{}
+    loop provider in facts.providers {
+        if !modules.contains(provider.module_identity) -> next
+        jet_driver_foreign_push_unique(kept.libraries, provider.library)
+        loop library in provider.direct_links -> jet_driver_foreign_push_unique(direct, library)
+        loop library in provider.transitive_links -> jet_driver_foreign_push_unique(transitive, library)
+        kept.providers.push(provider.copy())
+    }
+    kept.libraries.sort()
+    direct.sort()
+    transitive.sort()
+    loop library in transitive {
+        if !direct.contains(library) -> kept.transitive_links.push(library)
+    }
+    kept.direct_links = direct
+    loop body in facts.inline_c {
+        if live.get(body.symbol) != None -> kept.inline_c.push(body.copy())
+    }
+    kept
 }
 
 // The cache identity every C provider link unit carries.
@@ -151,6 +200,7 @@ jet_driver_foreign_link_facts: fn(modules: [SemaGraphModuleResult], source_files
             jet_driver_foreign_push_unique(facts.libraries, provider.library)
             loop library in provider.direct_links -> jet_driver_foreign_push_unique(direct, library)
             loop library in provider.transitive_links -> jet_driver_foreign_push_unique(transitive, library)
+            facts.providers.push(JetDriverForeignProvider{module_identity: provider.module_identity, library: provider.library, direct_links: provider.direct_links, transitive_links: provider.transitive_links})
         }
         loop (row_index, row) in semantic_module.foreign_functions {
             head: jet_driver_foreign_language_head(row.language)
@@ -179,6 +229,7 @@ jet_driver_foreign_link_facts: fn(modules: [SemaGraphModuleResult], source_files
             symbol: row.symbol,
             path: row.source_file,
             line: jet_driver_foreign_line(source_files, row.source_file, row.span.start),
+            module_identity: row.module_identity,
         })
         if !row.path.starts_with("jet_ffi_") || row.symbol != "jet_inline_{row.path}" -> next
         head: jet_driver_foreign_language_head(row.language)

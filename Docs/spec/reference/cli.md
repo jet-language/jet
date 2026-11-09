@@ -784,7 +784,9 @@ intermediate state drops, and under `JET_KEEP_GOING=1` `keepgoing.final` and
 `cli.authority`) and the native backend's (`native.sources`,
 `native.rust_foreign`, `ir.build`, `ir.opt`, `ir.x64`, `ir.object`,
 `native.foreign` (the wait for the program's C closure and the runtime's
-bytes, which its own thread realizes and reads while the object builds),
+bytes, which its own thread realizes and reads while the object builds; for
+a closure only checked foreign declarations name, also the link's live
+symbol collection and the realization of the providers it reaches),
 `native.link`; one `native.build` around
 them for a test harness). The readable stream is written through
 `/dev/stderr`, so redirect stderr to a file with `2>>`, or use
