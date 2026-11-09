@@ -1,6 +1,6 @@
 // generic-instance/inline-module display paths, reused from
 // origin/port/compiler CheckProgram.jet. Identity paths remain untouched.
-use jet_foundation.[NameFacts, NameDisplayPath, Item, Func, CodeModule]
+use jet_foundation.[NameFacts, NameDisplayPath, Item, Func, CodeModule, Diagnostic, DiagnosticLabel]
 sema_name_strip_prefix: fn(name: String, prefix: String) -> String Never! {
     if !name.starts_with(prefix) -> return name.copy()
     name.slice(prefix.len(), name.len())
@@ -96,5 +96,108 @@ sema_name_add_display_paths: fn(facts: &NameFacts, module_index: Int, module_ali
                 }
             } else if instance.body != None -> sema_name_plain_display_paths(facts, module_index, module_alias, instance, instance.name, instance.name, items)
         }
+    }
+}
+
+// The file-level types `items` holds that a module spelled `display` lifted
+// under `scope`'s compiler-owned prefix, each keyed by its generated name
+// (`M3GeoPoint` -> `geo.Point`). A remainder that starts with a digit
+// belongs to a nested module's longer prefix, which its own row claims.
+sema_name_lifted_type_paths: fn(items: [Item], scope: String, display: String, paths: &[String:String]) Never! {
+    type_prefix: sema_inline_type_prefix(scope)
+    prefix_end: type_prefix.bytes().len()
+    loop item in items {
+        name := ""
+        if item == {
+            .Struct(definition) -> name = definition.name
+            .Enum(definition) -> name = definition.name
+            .Trait(definition) -> name = definition.name
+            .Tag(definition) -> name = definition.name
+            .Distinct(definition) -> name = definition.name
+            .TypeAlias(definition) -> name = definition.name
+            else -> next
+        }
+        if !name.starts_with(type_prefix) || name.bytes().len() == prefix_end -> next
+        first: Int.from_u8(name.bytes()[prefix_end])
+        if first >= 48 && first <= 57 -> next
+        paths[name] = "{display}.{sema_name_strip_prefix(name, type_prefix)}"
+    }
+}
+
+sema_name_plain_type_paths: fn(code_module: CodeModule, source_path: String, items: [Item], paths: &[String:String]) Never! {
+    sema_name_lifted_type_paths(items, sema_inline_type_alias(source_path), source_path, paths)
+    if code_module.body == .Val(body) {
+        loop item in body {
+            if item == .CodeModule(child) -> sema_name_plain_type_paths(child, "{source_path}.{child.name}", items, paths)
+        }
+    }
+}
+
+// Every lifted inline-module and generic-module-instance type of one
+// module's items, keyed by its generated name, the same projection
+// sema_name_add_display_paths records for tooling.
+sema_name_generated_type_paths: fn(items: [Item], paths: &[String:String]) Never! {
+    loop item in items {
+        if item == .CodeModule(instance) {
+            if {
+                instance.instance_identity != None -> sema_name_lifted_type_paths(items, instance.name, instance.name, paths)
+                instance.body != None -> sema_name_plain_type_paths(instance, instance.name, items, paths)
+                else -> {}
+            }
+        }
+    }
+}
+
+// Whether the identifier at `bytes[start..<end]` has the shape of a
+// generated type name: `M` (after an optional `_`) and a digit.
+sema_name_generated_shape: fn(bytes: [U8], start: Int, end: Int) -> Bool Never! {
+    at := start
+    if Int.from_u8(bytes[at]) == 95 -> at += 1
+    if at + 1 >= end || Int.from_u8(bytes[at]) != 77 -> return false
+    digit: Int.from_u8(bytes[at + 1])
+    digit >= 48 && digit <= 57
+}
+
+// `text` with every whole identifier that is a generated type name replaced
+// by its source path.
+sema_name_display_text: fn(text: String, paths: [String:String]) -> String Never! {
+    bytes: text.bytes()
+    out := ""
+    copied := 0
+    index := 0
+    loop index < bytes.len() {
+        code: Int.from_u8(bytes[index])
+        if !sema_inline_is_alphanumeric(code) && code != 95 {
+            index += 1
+            next
+        }
+        start: index
+        loop index < bytes.len() && (sema_inline_is_alphanumeric(Int.from_u8(bytes[index])) || Int.from_u8(bytes[index]) == 95) -> index += 1
+        if !sema_name_generated_shape(bytes, start, index) -> next
+        word: String.from_bytes(bytes[start..<index]) ?? next
+        display: paths.get(word) ?? next
+        out = "{out}{String.from_bytes(bytes[copied..<start]) ?? ""}{display}"
+        copied = index
+    }
+    if copied == 0 -> return text.copy()
+    "{out}{String.from_bytes(bytes[copied..<bytes.len()]) ?? ""}"
+}
+
+// A type lifted from an inline module or a generic-module instance keeps a
+// compiler-owned name (`boxed.Entry` -> `M5BoxedEntry`) that the type checks
+// print; every diagnostic names it by its source path instead.
+sema_name_display_diagnostics: fn(graph: SemaRegistrationGraph, diagnostics: &[Diagnostic]) Never! {
+    if diagnostics.len() == 0 -> return
+    paths := [String:String]{}
+    loop source_module in graph.modules -> sema_name_generated_type_paths(source_module.program.items, paths)
+    if paths.len() == 0 -> return
+    loop index in 0..<diagnostics.len() {
+        diagnostics[index].what = sema_name_display_text(diagnostics[index].what, paths)
+        diagnostics[index].why = sema_name_display_text(diagnostics[index].why, paths)
+        diagnostics[index].fix = sema_name_display_text(diagnostics[index].fix, paths)
+        if diagnostics[index].labels.len() == 0 -> next
+        labels := [DiagnosticLabel]{}
+        loop label in diagnostics[index].labels -> labels.push(DiagnosticLabel{span: label.span, message: sema_name_display_text(label.message, paths)})
+        diagnostics[index].labels = labels
     }
 }
