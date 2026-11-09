@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6748,
-    "rev": 96575,
+    "rev": 96590,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -99732,6 +99732,11 @@
         {
           "at": "2026-11-09",
           "by": "Main",
+          "text": "Correction: #6735 folded into #6700 (G3); the debugger defects fold into #6730 (G5)."
+        },
+        {
+          "at": "2026-11-09",
+          "by": "Main",
           "text": "Owner ruling 2026-11-09: G1's No-C work only moves what Jet depends on from C libraries into native Jet so C leaves the dependencies; speed and size work (while speed is reasonable) belongs to G11 and building out full C-equivalent libraries to G3. New cards: #6735 (G3 math), #6736 (G11 speed), #6737 (G3 DTLS); #6700 moved to G3."
         },
         {
@@ -99805,7 +99810,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-08T15:46:43.606Z",
-      "updated": "2026-11-09T15:59:16.096Z",
+      "updated": "2026-11-09T16:03:52.062Z",
       "updatedBy": "Main",
       "criteriaLastN": 4
     },
@@ -100724,7 +100729,7 @@
     {
       "id": "c028lxdd",
       "num": 6700,
-      "title": "Correctly rounded Core math: replace the musl ports with CORE-MATH-grade results",
+      "title": "Core math completeness: correctly rounded results (CORE-MATH grade) and all of C23 math.h",
       "body": "Owner 2026-11-08: \"it needs to be portable and accurate. we want people to use jet for EVERYTHING including mathematics, simulations\". G1Lead audit (musl 1.2.5 worst cases reproduced against MPFR 4.2.2): under 1 ulp: exp .51, exp2 .51, pow .52, log .52, log2 .55, cbrt .67, log10 .81, sin/cos .83, atan .86, log1p .90, expm1 .91, acos .93, asin .98; over 1 ulp: tan 1.01, erf 1.02, cosh 1.03, hypot 1.03, atan2 1.55, atanh 1.80, sinh 1.87, asinh 1.91, tanh 2.22, acosh 2.24, erfc 3.72, exp10 4.14, tgamma 15.9, lgamma 4.4e15 near its zeros, Bessel j0/j1/y0/y1 1e14-1e15 near zeros. Plan: port CORE-MATH (MIT) binary64 and binary32 per function family into Jet, worst gaps first (lgamma, tgamma, erfc, tanh, acosh, exp10, atan2, then the rest), each replacing its musl port in one cutover; Bessel needs its own accurate design (no correctly rounded binary64 implementation exists). Estimate about 150 agent-hours serial.",
       "kind": "feature",
       "track": "epoch",
@@ -100772,6 +100777,24 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-09T07:23:16.669Z"
+        },
+        {
+          "n": 4,
+          "text": "Each ported function is correctly rounded: it matches MPFR bits on a committed corpus of special values (signed zeros, infinities, NaNs, subnormals), the musl libc-test math vectors, the CORE-MATH hard cases and random inputs, on O0, O1, O2 and web. Every corpus input where musl 1.2.5 differs is listed as a musl rounding error.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T16:03:47.028Z"
+        },
+        {
+          "n": 5,
+          "text": "Full coverage: every C23 math.h function (float and double forms, frexp, ldexp, modf, remquo, nextafter, erf, tgamma, lgamma, rsqrt, exp10m1, exp2m1, log2p1, log10p1, the pi-trig family, pown, powr, rootn, compoundn and the rest) exists in Jet and is correctly rounded, matching MPFR bits on a committed corpus that includes the CORE-MATH hard cases, the musl libc-test vectors and special values. Inputs where musl 1.2.5 differs are listed, with documented musl bugs (such as acosh of large negative inputs returning a number instead of NaN) named. All on O0, O1, O2 and web, with no host libm and no fused operations.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T16:03:48.060Z"
         }
       ],
       "refs": [
@@ -100787,9 +100810,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-08T19:41:56.680Z",
-      "updated": "2026-11-09T15:59:15.142Z",
+      "updated": "2026-11-09T16:03:49.864Z",
       "updatedBy": "Main",
-      "criteriaLastN": 3
+      "criteriaLastN": 5
     },
     {
       "id": "c0l39twq",
@@ -102592,6 +102615,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-09T15:57:02.971Z"
+        },
+        {
+          "n": 3,
+          "text": "jet debug's readouts start with a capital: Locals:, the --> ... in fn line, <Unavailable> and the (Jet) prompt (was #6746).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T16:03:33.470Z"
         }
       ],
       "refs": [],
@@ -102600,59 +102632,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-09T15:56:53.397Z",
-      "updated": "2026-11-09T15:57:02.971Z",
+      "updated": "2026-11-09T16:03:33.470Z",
       "updatedBy": "Main",
-      "criteriaLastN": 2
-    },
-    {
-      "id": "c0x0jl6l",
-      "num": 6735,
-      "title": "Core math completeness: correctly rounded results and all of C23 math.h",
-      "body": "Moved from #6688. Owner ruling 2026-11-09: G1's No-C work only moves what Jet depends on from C libraries into native Jet so C leaves the dependencies; speed and size work (while speed is reasonable) belongs to G11 and building out full C-equivalent libraries to G3.",
-      "kind": "feature",
-      "track": "epoch",
-      "epoch": "e5",
-      "milestoneId": null,
-      "phase": "planning",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "Each ported function is correctly rounded: it matches MPFR bits on a committed corpus of special values (signed zeros, infinities, NaNs, subnormals), the musl libc-test math vectors, the CORE-MATH hard cases and random inputs, on O0, O1, O2 and web. Every corpus input where musl 1.2.5 differs is listed as a musl rounding error.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T15:58:52.525Z"
-        },
-        {
-          "n": 2,
-          "text": "Full coverage: every C23 math.h function (float and double forms, frexp, ldexp, modf, remquo, nextafter, erf, tgamma, lgamma, rsqrt, exp10m1, exp2m1, log2p1, log10p1, the pi-trig family, pown, powr, rootn, compoundn and the rest) exists in Jet and is correctly rounded, matching MPFR bits on a committed corpus that includes the CORE-MATH hard cases, the musl libc-test vectors and special values. Inputs where musl 1.2.5 differs are listed, with documented musl bugs (such as acosh of large negative inputs returning a number instead of NaN) named. All on O0, O1, O2 and web, with no host libm and no fused operations.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T15:58:53.453Z"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "goals": [
-        "G3"
-      ],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-09T15:58:49.998Z",
-      "updated": "2026-11-09T15:58:53.453Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 2
+      "criteriaLastN": 3
     },
     {
       "id": "c03obxd3",
@@ -102773,146 +102755,6 @@
       "criteriaLastN": 1
     },
     {
-      "id": "c00qq7au",
-      "num": 6738,
-      "title": "jet debug shows a bignum Int local as a raw tagged pointer",
-      "body": "jet debug prints an Int that has grown past the small range as its tagged pointer word instead of its value. Found by the 2026-11-09 native-debugger probes (DebuggerProposal).",
-      "kind": "bug",
-      "track": "epoch",
-      "epoch": "e5",
-      "milestoneId": null,
-      "phase": "planning",
-      "priority": "P1",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [],
-      "criteria": [],
-      "refs": [],
-      "tags": [],
-      "goals": [],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-09T15:59:53.350Z",
-      "updated": "2026-11-09T15:59:53.350Z",
-      "updatedBy": "Main"
-    },
-    {
-      "id": "c0ybfzq2",
-      "num": 6739,
-      "title": "jet debug shows String, struct, list and Decimal locals as <unavailable>",
-      "body": "The DWARF the native backend emits types these locals as Opaque, Aggregate or void*, so lldb cannot render them; 3 of 8 probe locals render correctly and 1 renders wrong. Found by the 2026-11-09 native-debugger probes (DebuggerProposal).",
-      "kind": "bug",
-      "track": "epoch",
-      "epoch": "e5",
-      "milestoneId": null,
-      "phase": "planning",
-      "priority": "P1",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [],
-      "criteria": [],
-      "refs": [],
-      "tags": [],
-      "goals": [],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-09T15:59:55.380Z",
-      "updated": "2026-11-09T15:59:55.380Z",
-      "updatedBy": "Main"
-    },
-    {
-      "id": "c0uawlhz",
-      "num": 6740,
-      "title": "E2203 says jet debug records and replays, but neither is ported",
-      "body": "The diagnostic's text promises record and replay features that do not exist. Found by the 2026-11-09 native-debugger probes (DebuggerProposal).",
-      "kind": "bug",
-      "track": "epoch",
-      "epoch": "e5",
-      "milestoneId": null,
-      "phase": "planning",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [],
-      "criteria": [],
-      "refs": [],
-      "tags": [],
-      "goals": [],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-09T15:59:57.314Z",
-      "updated": "2026-11-09T15:59:57.314Z",
-      "updatedBy": "Main"
-    },
-    {
-      "id": "c0qgdzwk",
-      "num": 6741,
-      "title": "The flake default shell and env.dev disagree about shipping lldb",
-      "body": "The flake's default dev shell carries lldb; env.dev does not, so jet debug works in one and fails with E2203 in the other. Found by the 2026-11-09 native-debugger probes (DebuggerProposal).",
-      "kind": "bug",
-      "track": "epoch",
-      "epoch": "e5",
-      "milestoneId": null,
-      "phase": "planning",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [],
-      "criteria": [],
-      "refs": [],
-      "tags": [],
-      "goals": [],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-09T15:59:59.258Z",
-      "updated": "2026-11-09T15:59:59.258Z",
-      "updatedBy": "Main"
-    },
-    {
-      "id": "c0jtwlwl",
-      "num": 6742,
-      "title": "lldb does not find the O2 split debug file under .jet/symbols",
-      "body": "An O2 build writes its split debug file under .jet/symbols, but the binary's debug link does not lead lldb to it, so O2 programs debug without symbols. Found by the 2026-11-09 native-debugger probes (DebuggerProposal).",
-      "kind": "bug",
-      "track": "epoch",
-      "epoch": "e5",
-      "milestoneId": null,
-      "phase": "planning",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [],
-      "criteria": [],
-      "refs": [],
-      "tags": [],
-      "goals": [],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-09T16:00:01.034Z",
-      "updated": "2026-11-09T16:00:01.034Z",
-      "updatedBy": "Main"
-    },
-    {
       "id": "c0hvgx07",
       "num": 6743,
       "title": "Inline asm rdtsc crashes the compiler instead of reporting a diagnostic",
@@ -102961,95 +102803,13 @@
       "criteria": [],
       "refs": [],
       "tags": [],
-      "goals": [],
+      "goals": [
+        "G5"
+      ],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-09T16:00:05.159Z",
-      "updated": "2026-11-09T16:00:05.159Z",
-      "updatedBy": "Main"
-    },
-    {
-      "id": "c0dnudyf",
-      "num": 6745,
-      "title": "Bounds stops (E3010) report no function name and no locals",
-      "body": "Other stop reports name the faulting function; E3010 bounds stops do not. Found by the 2026-11-09 native-debugger probes (DebuggerProposal).",
-      "kind": "bug",
-      "track": "epoch",
-      "epoch": "e5",
-      "milestoneId": null,
-      "phase": "planning",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [],
-      "criteria": [],
-      "refs": [],
-      "tags": [],
-      "goals": [],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-09T16:00:07.192Z",
-      "updated": "2026-11-09T16:00:07.192Z",
-      "updatedBy": "Main"
-    },
-    {
-      "id": "c0a3d2d8",
-      "num": 6746,
-      "title": "jet debug readouts are lowercase, against the owner's text rule",
-      "body": "locals:, the --> ... in fn line, <unavailable> and the (jet) prompt start lowercase; user-visible readouts start with a capital (#6734). Found by the 2026-11-09 native-debugger probes (DebuggerProposal).",
-      "kind": "bug",
-      "track": "epoch",
-      "epoch": "e5",
-      "milestoneId": null,
-      "phase": "planning",
-      "priority": "P1",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [],
-      "criteria": [],
-      "refs": [],
-      "tags": [],
-      "goals": [],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-09T16:00:09.153Z",
-      "updated": "2026-11-09T16:00:09.153Z",
-      "updatedBy": "Main"
-    },
-    {
-      "id": "c02yh21i",
-      "num": 6747,
-      "title": "DebugTier.NativeLldb is spelled against the acronym rule; write NativeLLDB",
-      "body": "S66: acronyms stay in caps in type-like names. Found by the 2026-11-09 native-debugger probes (DebuggerProposal).",
-      "kind": "bug",
-      "track": "epoch",
-      "epoch": "e5",
-      "milestoneId": null,
-      "phase": "planning",
-      "priority": "P1",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [],
-      "criteria": [],
-      "refs": [],
-      "tags": [],
-      "goals": [],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-09T16:00:10.898Z",
-      "updated": "2026-11-09T16:00:10.898Z",
+      "updated": "2026-11-09T16:03:35.697Z",
       "updatedBy": "Main"
     }
   ],
@@ -191886,6 +191646,111 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-09T16:03:52.062Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0lscvc9",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-09T16:03:51.015Z",
+      "by": "Main",
+      "action": "card.delete",
+      "ref": "c0x0jl6l",
+      "note": "Core math completeness: correctly rounded results and all of C23 math.h"
+    },
+    {
+      "at": "2026-11-09T16:03:49.864Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c028lxdd",
+      "note": "title"
+    },
+    {
+      "at": "2026-11-09T16:03:48.060Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c028lxdd",
+      "note": "#5 Full coverage: every C23 math.h function (float and double f"
+    },
+    {
+      "at": "2026-11-09T16:03:47.029Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c028lxdd",
+      "note": "#4 Each ported function is correctly rounded: it matches MPFR b"
+    },
+    {
+      "at": "2026-11-09T16:03:45.204Z",
+      "by": "Main",
+      "action": "card.delete",
+      "ref": "c02yh21i",
+      "note": "DebugTier.NativeLldb is spelled against the acronym rule; write NativeLLDB"
+    },
+    {
+      "at": "2026-11-09T16:03:44.108Z",
+      "by": "Main",
+      "action": "card.delete",
+      "ref": "c0a3d2d8",
+      "note": "jet debug readouts are lowercase, against the owner's text rule"
+    },
+    {
+      "at": "2026-11-09T16:03:42.990Z",
+      "by": "Main",
+      "action": "card.delete",
+      "ref": "c0dnudyf",
+      "note": "Bounds stops (E3010) report no function name and no locals"
+    },
+    {
+      "at": "2026-11-09T16:03:41.736Z",
+      "by": "Main",
+      "action": "card.delete",
+      "ref": "c0jtwlwl",
+      "note": "lldb does not find the O2 split debug file under .jet/symbols"
+    },
+    {
+      "at": "2026-11-09T16:03:40.408Z",
+      "by": "Main",
+      "action": "card.delete",
+      "ref": "c0qgdzwk",
+      "note": "The flake default shell and env.dev disagree about shipping lldb"
+    },
+    {
+      "at": "2026-11-09T16:03:39.229Z",
+      "by": "Main",
+      "action": "card.delete",
+      "ref": "c0uawlhz",
+      "note": "E2203 says jet debug records and replays, but neither is ported"
+    },
+    {
+      "at": "2026-11-09T16:03:38.057Z",
+      "by": "Main",
+      "action": "card.delete",
+      "ref": "c0ybfzq2",
+      "note": "jet debug shows String, struct, list and Decimal locals as <unavailable>"
+    },
+    {
+      "at": "2026-11-09T16:03:36.907Z",
+      "by": "Main",
+      "action": "card.delete",
+      "ref": "c00qq7au",
+      "note": "jet debug shows a bignum Int local as a raw tagged pointer"
+    },
+    {
+      "at": "2026-11-09T16:03:35.697Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0g1f1kd",
+      "note": "goals"
+    },
+    {
+      "at": "2026-11-09T16:03:33.470Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0cnf5w8",
+      "note": "#3 jet debug's readouts start with a capital: Locals:, the --> "
+    },
     {
       "at": "2026-11-09T16:03:31.892Z",
       "by": "Main",
