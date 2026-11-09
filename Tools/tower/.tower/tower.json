@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6719,
-    "rev": 96474,
+    "rev": 96475,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -101733,12 +101733,12 @@
         },
         {
           "n": 2,
-          "text": "The gate keeps its strength, with no caching, reuse or incremental builds (owner 2026-11-09): every golden, ui and cases row compiles and runs from scratch on the candidate, the lost-row comparison against the previous seed is unchanged, and there are no new skips and no dropped tiers. The speed comes from raw compiler, linker, runtime and harness throughput, measured against the machine ceiling.",
+          "text": "The gate keeps its strength. Nothing is cached or reused between runs and nothing is built incrementally (owner 2026-11-09): every run starts from source. Within ONE run, each test worker may parse and check Core once and share that checked Core in memory across the rows it runs (owner 2026-11-09, the vitest model); each row still compiles and runs its own fresh native program on the candidate. A proof run shows the shared-Core verdicts are byte-identical to per-row cold compiles on every row. The lost-row comparison against the previous seed is unchanged, there are no new skips and no dropped tiers, and the compiler front end itself also gets at least 2x faster cold (owner: both).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T12:36:59.368Z"
+          "at": "2026-11-09T13:14:45.772Z"
         },
         {
           "n": 3,
@@ -101756,7 +101756,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-09T12:32:41.154Z",
-      "updated": "2026-11-09T13:13:53.074Z",
+      "updated": "2026-11-09T13:14:45.772Z",
       "updatedBy": "Main",
       "criteriaLastN": 3
     },
@@ -190382,6 +190382,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-09T13:14:45.773Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0qyk2os",
+      "note": "#2: Owner chose 'Both': sharing within a run (vitest model) plus a faster cold front end; was: The gate keeps its strength, with no caching, reuse or incremental builds (owner 2026-11-09): every golden, ui and cases row compiles and runs from scratch on the candidate, the lost-row comparison ag"
+    },
     {
       "at": "2026-11-09T13:13:53.074Z",
       "by": "Main",
