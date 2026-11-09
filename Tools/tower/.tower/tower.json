@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6748,
-    "rev": 96606,
+    "rev": 96610,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -63748,7 +63748,7 @@
     {
       "id": "c0c209zc",
       "num": 5931,
-      "title": "JetDevserver: finish the non-building port or delete it (jet dev --canvas, run --app/--share, self devtools, self lsp)",
+      "title": "JetDevserver: finish the port (jet dev --canvas, run --app/--share, self devtools, self LSP)",
       "body": "Census by O0Image-3, 2026-10-24 ($JET_SCRATCH_ROOT/lanes/O0Image/g3/CENSUS.md). Compiler/JetDevserver is a 15.4k-line port of the deleted crates/jet-devserver; it does not build (1626 check errors) and is outside the build. Every intended caller refuses with E2104 'use the Rust-hosted jet': jet dev --canvas, jet run --app/--share, jet self devtools, and jet self lsp (JetLSP depends on it). Plain jet dev (watch plus rerun) works without it. Core/Web/Devserver.jet declares jet_devserver_* routes that have no runtime implementation. Deleting it would orphan JetCanvas/JetDebug and touch JetLSP. This is an owner decision (product surface); ballot D-DEVSERVER1.",
       "kind": "task",
       "track": "sidequest",
@@ -63763,6 +63763,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-09",
+          "by": "Main",
+          "text": "Owner ruling 2026-11-09: do NOT delete JetDevserver; finish the port. Not next: the goal order is G1, then G4, then G8, then G6."
+        },
         {
           "at": "2026-11-09",
           "by": "Main",
@@ -63829,6 +63834,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-09T16:31:19.335Z"
+        },
+        {
+          "n": 6,
+          "text": "Compiler/JetDevserver parses and checks with 0 problems, is built as part of the jet build, and jet dev --canvas, run --app and run --share work end to end (their cases pass).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T16:35:40.147Z"
         }
       ],
       "refs": [],
@@ -63838,12 +63852,12 @@
       "parentId": "c0bk3yid",
       "needsAcceptance": false,
       "created": "2026-10-24T19:25:14.992Z",
-      "updated": "2026-11-09T16:33:34.031Z",
+      "updated": "2026-11-09T16:35:41.853Z",
       "updatedBy": "Main",
       "goals": [
         "G5"
       ],
-      "criteriaLastN": 5
+      "criteriaLastN": 6
     },
     {
       "id": "c0wi8ere",
@@ -99547,6 +99561,11 @@
         {
           "at": "2026-11-09",
           "by": "Main",
+          "text": "Owner ruling 2026-11-09: goal order. Finish G1 first, then G4 (Best scripting language), then G8 (Effects on types), then G6 (Declarations as types and metaprogramming). The JetDevserver port (#5931, G5) is to be finished, not deleted, but not before these."
+        },
+        {
+          "at": "2026-11-09",
+          "by": "Main",
           "text": "Audit 2026-11-09 (CFreeLead3, dev d4d45ded4b): what still links or calls C = (1) jet and jetpack through mbedtls (#6694); (2) the pack's vendored sqlite3 and mbedtls built with host cc/ar (#6694/#6695); (3) host nm in the pack build; (4) any program whose import graph reaches core.db or core.net.tls links musl, startup and pthreads even when it never calls C (ForeignDeps collects every checked module's providers). 21 of 25 gauntlet cells start at __jet_start with no musl."
         },
         {
@@ -99630,7 +99649,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-08T15:46:43.606Z",
-      "updated": "2026-11-09T16:11:38.876Z",
+      "updated": "2026-11-09T16:35:43.399Z",
       "updatedBy": "Main",
       "criteriaLastN": 4
     },
@@ -191538,6 +191557,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-09T16:35:43.399Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0lscvc9",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-09T16:35:41.853Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0c209zc",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-09T16:35:40.147Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0c209zc",
+      "note": "#6 Compiler/JetDevserver parses and checks with 0 problems, is "
+    },
+    {
+      "at": "2026-11-09T16:35:38.404Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0c209zc",
+      "note": "title"
+    },
     {
       "at": "2026-11-09T16:33:34.031Z",
       "by": "Main",
