@@ -344,7 +344,7 @@ os_close: fn(file: &DBFile) Never! -[DB]> {
 // buf[0..<amt]. A short read zero-fills the rest and is IOERR_SHORT_READ.
 os_read: fn(file: &DBFile, buf: &[U8], amt: Int, offset: Int) SQLError! -[DB]> {
     got: core.db.__vfs_read(file.fd, offset, buf, 0, amt)
-    if got == amt -> return Ok(())
+    if got == amt -> return Ok()
     if got < 0 {
         file.last_errno = 0 - got
         if file.last_errno == OS_ERANGE || file.last_errno == OS_EIO || file.last_errno == OS_ENXIO -> return Err(base.fail(base.IOERR_CORRUPTFS))
@@ -359,7 +359,7 @@ os_read: fn(file: &DBFile, buf: &[U8], amt: Int, offset: Int) SQLError! -[DB]> {
 // or ENOSPC is SQLITE_FULL.
 os_write: fn(file: &DBFile, data: [U8], amt: Int, offset: Int) SQLError! -[DB]> {
     wrote: core.db.__vfs_write(file.fd, offset, data, 0, amt)
-    if wrote >= amt -> return Ok(())
+    if wrote >= amt -> return Ok()
     if wrote < 0 && 0 - wrote != OS_ENOSPC {
         file.last_errno = 0 - wrote
         return Err(base.fail(base.IOERR_WRITE))
@@ -377,7 +377,7 @@ os_truncate: fn(file: &DBFile, size: Int) SQLError! -[DB]> {
         file.last_errno = 0 - got
         return Err(base.fail(base.IOERR_TRUNCATE))
     }
-    Ok(())
+    Ok()
 }
 
 // sqlite3OsSync: nothing when `flags` is 0, else unixSync: fsync the file
@@ -385,7 +385,7 @@ os_truncate: fn(file: &DBFile, size: Int) SQLError! -[DB]> {
 // UNIXFILE_DIRSYNC is set, ignoring a directory that cannot be opened or
 // synced.
 os_sync: fn(file: &DBFile, flags: Int) SQLError! -[DB]> {
-    if flags == 0 -> return Ok(())
+    if flags == 0 -> return Ok()
     got: core.db.__vfs_sync(file.fd)
     if got < 0 {
         file.last_errno = 0 - got
@@ -399,7 +399,7 @@ os_sync: fn(file: &DBFile, flags: Int) SQLError! -[DB]> {
         }
         file.ctrl = file.ctrl.bit_and(UNIXFILE_DIRSYNC.bit_xor(255))
     }
-    Ok(())
+    Ok()
 }
 
 // openDirectory: a read-only descriptor on the directory holding `path`
@@ -443,8 +443,8 @@ os_file_size: fn(file: &DBFile) -[DB]> Int SQLError! {
 // PENDING byte (the file is then PENDING) and then the SHARED range; if
 // that fails the file stays PENDING.
 os_lock: fn(file: &DBFile, level: Int) SQLError! -[DB]> {
-    if file.ctrl.bit_and(UNIXFILE_NOLOCK) != 0 -> return Ok(())
-    if file.lock >= level -> return Ok(())
+    if file.ctrl.bit_and(UNIXFILE_NOLOCK) != 0 -> return Ok()
+    if file.lock >= level -> return Ok()
     if level == LOCK_SHARED || (level == LOCK_EXCLUSIVE && file.lock == LOCK_RESERVED) {
         kind: if level == LOCK_SHARED -> OS_F_RDLCK else -> OS_F_WRLCK
         got: os_file_lock(file.fd, kind, PENDING_BYTE, 1)
@@ -484,7 +484,7 @@ os_lock: fn(file: &DBFile, level: Int) SQLError! -[DB]> {
         }
     }
     file.lock = level
-    Ok(())
+    Ok()
 }
 
 // sqlite3OsUnlock: posixUnlock down to `level`, SHARED or NONE; a no-op on
@@ -492,8 +492,8 @@ os_lock: fn(file: &DBFile, level: Int) SQLError! -[DB]> {
 // SHARED range again and unlocks the PENDING and RESERVED bytes; going to
 // NONE unlocks the whole file.
 os_unlock: fn(file: &DBFile, level: Int) SQLError! -[DB]> {
-    if file.ctrl.bit_and(UNIXFILE_NOLOCK) != 0 -> return Ok(())
-    if file.lock <= level -> return Ok(())
+    if file.ctrl.bit_and(UNIXFILE_NOLOCK) != 0 -> return Ok()
+    if file.lock <= level -> return Ok()
     if file.lock > LOCK_SHARED {
         if level == LOCK_SHARED {
             // Another process breaking the protocol is the only way this
@@ -519,7 +519,7 @@ os_unlock: fn(file: &DBFile, level: Int) SQLError! -[DB]> {
         }
     }
     file.lock = level
-    Ok(())
+    Ok()
 }
 
 // sqlite3OsCheckReservedLock: unixCheckReservedLock. True when this file
@@ -549,11 +549,11 @@ os_set_chunk_size: fn(file: &DBFile, size: Int) Never! { file.chunk = size }
 // file to `size` rounded up to a whole chunk by writing one byte at the end
 // of each new block and at the last byte.
 os_size_hint: fn(file: &DBFile, size: Int) SQLError! -[DB]> {
-    if file.chunk <= 0 -> return Ok(())
+    if file.chunk <= 0 -> return Ok()
     current: core.db.__vfs_size(file.fd)
     if current < 0 -> return Err(base.fail(base.IOERR_FSTAT))
     target: ((size + file.chunk - 1) /% file.chunk) * file.chunk
-    if target <= current -> return Ok(())
+    if target <= current -> return Ok()
     zero: [U8]{U8{0}}
     at := (current /% SIZE_HINT_BLOCK) * SIZE_HINT_BLOCK + SIZE_HINT_BLOCK - 1
     loop at < target + SIZE_HINT_BLOCK - 1 {
@@ -562,7 +562,7 @@ os_size_hint: fn(file: &DBFile, size: Int) SQLError! -[DB]> {
         if wrote != 1 -> return Err(base.fail(base.IOERR_WRITE))
         at += SIZE_HINT_BLOCK
     }
-    Ok(())
+    Ok()
 }
 
 // unixModeBit: `arg` < 0 asks whether `mask` is set (1 or 0); 0 clears it
@@ -648,7 +648,7 @@ os_delete: fn(path: String, dir_sync: Bool) SQLError! -[DB]> {
             if synced < 0 -> return Err(base.fail(base.IOERR_DIR_FSYNC))
         }
     }
-    Ok(())
+    Ok()
 }
 
 // sqlite3OsAccess: unixAccess. EXISTS is true for a path stat(2) finds that
