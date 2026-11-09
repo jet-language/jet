@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6720,
-    "rev": 96480,
+    "nextNum": 6722,
+    "rev": 96490,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -101855,6 +101855,138 @@
       "created": "2026-11-09T13:21:28.909Z",
       "updated": "2026-11-09T13:21:28.909Z",
       "updatedBy": "Main"
+    },
+    {
+      "id": "c0ov5fau",
+      "num": 6720,
+      "title": "Examples: finish the cutover to the new set with TitleCase names and ALL CAPS acronyms",
+      "body": "Owner order (2026-11-09): finish the examples transition to the new category set, with proper TitleCase naming and acronyms in all caps (TLSPeerIdentity, HTTPServer, WebWASMCallback, JSONDecode). Applies to every directory and file name an author chooses under Examples/: categories, example directories and program files, with their .out/.err.out goldens. Names a tool requires (package.jet, README.md, lock files) keep their spelling. One greenfield cutover: every consumer (goldens, corpus manifests, harness lists, tests, docs, site) is migrated in the same change, with no aliases.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e5",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A census lists every Examples/ path that breaks the rule (TitleCase; acronyms all caps; no snake_case, kebab-case or lowercase-first names apart from tool-required names), plus every old-set leftover not yet moved into the new categories.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T13:45:26.458Z"
+        },
+        {
+          "n": 2,
+          "text": "Every listed path is renamed, and every consumer (expected output, golden discovery, corpus manifests, harness lists, tests, docs, site sources) is updated in the same cutover, with no aliases or old paths left; a repository-wide search for each old path finds nothing.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T13:45:27.346Z"
+        },
+        {
+          "n": 3,
+          "text": "A guard fails on any new Examples/ name that breaks the rule, and it carries a UI-snapshot or guard test.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T13:45:28.253Z"
+        },
+        {
+          "n": 4,
+          "text": "The golden profile on the candidate compiler shows the same verdict per example as before the rename (renamed rows are matched old-to-new), on O0 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T13:45:29.177Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-09T13:45:14.592Z",
+      "updated": "2026-11-09T13:45:29.177Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 4
+    },
+    {
+      "id": "c00chl86",
+      "num": 6721,
+      "title": "Games: Jet ships every primitive needed to build a full high-resolution 3D game (no engine)",
+      "body": "Owner order (2026-11-09): Jet is to be the best language for making games, so it must be capable of rendering full high-resolution 3D games. Do not build a 3D rendering engine now, but ship all the tools and primitives needed to make one: GPU device, swapchain and presentation on the native window, buffers, textures, render passes and pipelines, shaders written in Jet (D-GPU-SHADER-SURFACE1), GPU compute, 3D math (vectors, matrices, quaternions, SIMD), image and mesh asset loading, raw and relative input, audio, frame pacing and GPU timing. Related cards: #c0ce571w (shader stages and pipelines), #c0li0kor (GPU kernels), #c084tcrl (device providers), #c0776o2m (game platform layer), #c0ba141x (linking model: GPU drivers need the platform loader). First step: a gap map against code, then ballots for every public API.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e5",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A dated gap map (Docs/research) lists each primitive a high-resolution 3D game needs and, for each, what Jet has today, proven by code, an example or a probe, and what is missing, the dependencies, the owner gates and the related cards.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T13:45:38.609Z"
+        },
+        {
+          "n": 2,
+          "text": "Every missing public API or new syntax has a Tower ballot that has passed adversarial review before it reaches the owner.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T13:45:39.489Z"
+        },
+        {
+          "n": 3,
+          "text": "An executable example draws a lit, textured, depth-tested 3D mesh of at least 100k triangles at 2560x1440 through the GPU in a native window, using only shipped primitives and no engine code in Core, with golden-tested output (headless image hash) on every applicable tier.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T13:45:40.464Z"
+        },
+        {
+          "n": 4,
+          "text": "Gauntlet cells measure the GPU path (frame time and draw submission cost) against C with Vulkan and Rust with wgpu, with an asm-parity ceiling reference, per the performance gate.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T13:45:41.366Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-09T13:45:30.524Z",
+      "updated": "2026-11-09T13:45:41.366Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 4
     }
   ],
   "decisions": [
@@ -190690,6 +190822,76 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-09T13:45:41.366Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c00chl86",
+      "note": "#4 Gauntlet cells measure the GPU path (frame time and draw sub"
+    },
+    {
+      "at": "2026-11-09T13:45:40.464Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c00chl86",
+      "note": "#3 An executable example draws a lit, textured, depth-tested 3D"
+    },
+    {
+      "at": "2026-11-09T13:45:39.489Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c00chl86",
+      "note": "#2 Every missing public API or new syntax has a Tower ballot th"
+    },
+    {
+      "at": "2026-11-09T13:45:38.609Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c00chl86",
+      "note": "#1 A dated gap map (Docs/research) lists each primitive a high-"
+    },
+    {
+      "at": "2026-11-09T13:45:30.524Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c00chl86",
+      "note": "Games: Jet ships every primitive needed to build a full high-resolution 3D game (no engine)"
+    },
+    {
+      "at": "2026-11-09T13:45:29.177Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ov5fau",
+      "note": "#4 The golden profile on the candidate compiler shows the same "
+    },
+    {
+      "at": "2026-11-09T13:45:28.254Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ov5fau",
+      "note": "#3 A guard fails on any new Examples/ name that breaks the rule"
+    },
+    {
+      "at": "2026-11-09T13:45:27.346Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ov5fau",
+      "note": "#2 Every listed path is renamed, and every consumer (expected o"
+    },
+    {
+      "at": "2026-11-09T13:45:26.458Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ov5fau",
+      "note": "#1 A census lists every Examples/ path that breaks the rule (Ti"
+    },
+    {
+      "at": "2026-11-09T13:45:14.592Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0ov5fau",
+      "note": "Examples: finish the cutover to the new set with TitleCase names and ALL CAPS acronyms"
+    },
     {
       "at": "2026-11-09T13:30:57.594Z",
       "by": "Main",
