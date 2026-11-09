@@ -872,6 +872,136 @@ __compound_cr: fn(x: Float, bh: Float, bl: Float, n: Int) -> Float Never! {
     if (lg < Float{-1200.0}) -> return 0.0
     __pow_ziv(bm, be, n, 0, 1)
 }
+// The F32 forms of pow_n, pow_r, root_n and compound_n (an all-F32 call,
+// the exponent of pow_n, root_n and compound_n an Int): the correctly
+// rounded binary32 result as a Float, which then narrows exactly. The Float
+// result narrows correctly unless it is the midpoint of two binary32 values;
+// then the exact power's side of that midpoint decides.
+__pow_n_f32: fn(x: Float, n: Int) -> Float Never! {
+    r: pow_n(x, n)
+    if !__f32_midpoint(r) -> return r
+    p: __float_parts(x)
+    __f32_step(r, __pow_side(p.m, p.e, n, 0, 1, fabs(r)))
+}
+__pow_r_f32: fn(x: Float, y: Float) -> Float Never! {
+    r: pow_r(x, y)
+    if !__f32_midpoint(r) -> return r
+    a: __float_parts(x)
+    b: __float_parts(y)
+    yn: if (y < Float{0.0}) -> -b.m else -> b.m
+    __f32_step(r, __pow_side(a.m, a.e, yn, b.e, 1, r))
+}
+__root_n_f32: fn(x: Float, n: Int) -> Float Never! {
+    r: root_n(x, n)
+    if !__f32_midpoint(r) -> return r
+    p: __float_parts(x)
+    if n < 0 -> return __f32_step(r, __pow_side(p.m, p.e, -1, 0, -n, fabs(r)))
+    __f32_step(r, __pow_side(p.m, p.e, 1, 0, n, fabs(r)))
+}
+__compound_n_f32: fn(x: Float, n: Int) -> Float Never! {
+    r: compound_n(x, n)
+    if !__f32_midpoint(r) -> return r
+    // 1 + x = bm 2^be exactly
+    p: __float_parts(x)
+    sx: if (x < Float{0.0}) -> -p.m else -> p.m
+    bm: if p.e < 0 -> (Int{1} << -p.e) + sx else -> 1 + (sx << p.e)
+    be: if p.e < 0 -> p.e else -> 0
+    __f32_step(r, __pow_side(bm, be, n, 0, 1, r))
+}
+// Whether r is the midpoint of two adjacent binary32 values, or of the
+// largest one and 2^128: r rounded to a binary32 is then a tie.
+__f32_midpoint: fn(r: Float) -> Bool Never! {
+    bits: to_bits(fabs(r))
+    biased: bits >> 52
+    // 2^-150 up to below 2^128
+    if biased < 873 || biased > 1150 -> return false
+    m: bits.bit_and(0xF_FFFF_FFFF_FFFF) + 0x10_0000_0000_0000
+    // r = m 2^(biased - 1075); half the binary32 spacing is 2^(s + biased - 1075)
+    s: (if biased >= 897 -> biased - 1023 else -> -126) - 24 - (biased - 1075)
+    (m >> s).bit_and(1) == 1 && (m >> s) << s == m
+}
+// The binary32 midpoint r moved half a binary32 spacing away from zero for
+// side > 0 and toward it for side < 0; r itself for side = 0, as the exact
+// result is the midpoint and narrowing ties it to even.
+__f32_step: fn(r: Float, side: Int) -> Float Never! {
+    if side == 0 -> return r
+    a: fabs(r)
+    e: (to_bits(a) >> 52) - 1023
+    half: if e >= -126 -> ldexp(Float{1.0}, e - 24) else -> ldexp(Float{1.0}, -150)
+    copysign(if side > 0 -> a + half else -> a - half, r)
+}
+// The F32 form of a unary correctly rounded function: r, its Float result at
+// the widened binary32 x, narrows correctly unless r is a binary32 midpoint
+// the exact result is not. Checking every binary32 input finds those x; each
+// is listed in `sides` with 1.0 when the exact result lies beyond |r| and
+// -1.0 when it lies short of it.
+__f32_listed: fn(x: Float, r: Float, sides: [Float]) -> Float Never! {
+    if !__f32_midpoint(r) -> return r
+    loop i in 0..<(sides.len() /% 2) {
+        if sides[2 * i] == x {
+            side: if (sides[2 * i + 1] > Float{0.0}) -> 1 else -> -1
+            return __f32_step(r, side)
+        }
+    }
+    r
+}
+__atan_pi_f32: fn(x: Float) -> Float Never! { __f32_listed(x, atan_pi(x), __ATANPI_F32) }
+__exp10_m1_f32: fn(x: Float) -> Float Never! { __f32_listed(x, exp10_m1(x), __EXP10M1_F32) }
+__log2_1p_f32: fn(x: Float) -> Float Never! { __f32_listed(x, log2_1p(x), __LOG2P1_F32) }
+__log10_1p_f32: fn(x: Float) -> Float Never! { __f32_listed(x, log10_1p(x), __LOG10P1_F32) }
+__ATANPI_F32: [Float]{-0.9109678864479065, -1.0, 0.9109678864479065, -1.0}
+__EXP10M1_F32: [Float]{15.843597412109375, -1.0}
+__LOG2P1_F32: [Float]{1585770880.0, -1.0, 314725466112.0, -1.0}
+__LOG10P1_F32: [Float]{-7.635413967754801e-10, 1.0, 0.00029465556144714355, -1.0}
+// The sign of (xm 2^xe)^(yn 2^ye / yd) - a for xm, yd > 0, yn != 0 and a
+// binary32 midpoint a > 0: 0 when they are equal, else Ziv's strategy on
+// __pow_fixed until its error interval leaves a (at 1024 bits its
+// approximation's side).
+__pow_side: fn(xm: Int, xe: Int, yn: Int, ye: Int, yd: Int, a: Float) -> Int Never! {
+    t: __float_parts(a)
+    n: if ye > 0 -> yn << ye else -> yn
+    d: if ye < 0 -> yd << -ye else -> yd
+    if __pow_equal(xm, xe, n, d, t.m, t.e) -> return 0
+    w := 160
+    loop {
+        f: __pow_fixed(xm, xe, yn, ye, yd, w)
+        // a and the approximation q 2^(k - w) in one unit
+        s: t.e - (f.k - w)
+        c: if s >= 0 -> t.m << s else -> t.m
+        lift: if s >= 0 -> 0 else -> -s
+        if ((f.q - f.err) << lift) > c -> return 1
+        if ((f.q + f.err) << lift) < c -> return -1
+        if w == 1024 -> return (if (f.q << lift) > c -> 1 else -> -1)
+        w = if w > 512 -> 1024 else -> 2 * w
+    }
+}
+// Whether (xm 2^xe)^(n / d) = am 2^ae exactly, for xm, am, d > 0 and n !=
+// 0: with odd parts xo 2^xs = xm 2^xe and ao 2^ash = am 2^ae, that is
+// xo^n 2^(xs n) = ao^d 2^(ash d). For xo, ao > 1, n > 0 and g = gcd(n, d) it
+// is xo^(n/g) = ao^(d/g), so both are powers of one whole c >= 3: n/g < 16,
+// as ao < 2^25 here, and d/g at most the bit length of xo.
+__pow_equal: fn(xm: Int, xe: Int, n: Int, d: Int, am: Int, ae: Int) -> Bool Never! {
+    xo := xm
+    xs := xe
+    loop xo.bit_and(1) == 0 {
+        xo = xo >> 1
+        xs = xs + 1
+    }
+    ao := am
+    ash := ae
+    loop ao.bit_and(1) == 0 {
+        ao = ao >> 1
+        ash = ash + 1
+    }
+    if xs * n != ash * d -> return false
+    if xo == 1 || ao == 1 -> return xo == ao
+    if n < 0 -> return false
+    g: gcd(n, d)
+    p: n /% g
+    q: d /% g
+    if p >= 16 || q > __bit_len(xo) -> return false
+    xo.pow(p) == ao.pow(q)
+}
 // a^y rounded when it is a Float or the midpoint of two, else NaN (the
 // cases of CORE-MATH pow.c is_exact). With a = m 2^e and y = n 2^f, m and n
 // odd: a power of two gives 2^(e y) when e y is whole; otherwise y > 0, and
@@ -1598,6 +1728,77 @@ atan2_pi: fn(a: Float, b: Float) -> Float Never! {
         if left == f.hi + fma(f.hi, f.err, f.lo) -> return left
     }
     __atan2_pi_accurate(a, b)
+}
+// atan2_pi at binary32 width (an all-F32 math.atan2_pi call; CORE-MATH
+// atan2pif.c) on the widened binary32 y and x: a Float whose binary32
+// rounding is the correctly rounded result. The special values and the exact
+// results at a zero, an infinity or |y| = |x| are atan2_pi's own. Otherwise a
+// rational approximation of atan(z)/pi, z = y/x or x/y, and when it lies
+// within 2^-48 relatively of a binary32 value or midpoint, a degree-63
+// double-double series instead.
+__atan2_pi_f32: fn(y: Float, x: Float) -> Float Never! {
+    ay: fabs(y)
+    ax: fabs(x)
+    if !is_finite(y) || !is_finite(x) || (ay == Float{0.0}) || (ax == Float{0.0}) || ay == ax -> return atan2_pi(y, x)
+    gt: ay > ax
+    i: (if sign_bit(y) -> 4 else -> 0) + (if sign_bit(x) -> 2 else -> 0) + (if gt -> 1 else -> 0)
+    off: __ATAN2PIF_OFF[i]
+    z0: if gt -> x / y else -> y / x
+    z2: z0 * z0
+    z: if gt -> -z0 else -> z0
+    r := __ATAN2PIF_N[0]
+    // the polynomial underflows spuriously only below 2^-54
+    if (z2 > Float{5.551115123125783e-17}) {
+        z4: z2 * z2
+        z8: z4 * z4
+        n0: (r + z2 * __ATAN2PIF_N[1]) + z4 * (__ATAN2PIF_N[2] + z2 * __ATAN2PIF_N[3]) + z8 * ((__ATAN2PIF_N[4] + z2 * __ATAN2PIF_N[5]) + z4 * __ATAN2PIF_N[6])
+        d0: (__ATAN2PIF_D[0] + z2 * __ATAN2PIF_D[1]) + z4 * (__ATAN2PIF_D[2] + z2 * __ATAN2PIF_D[3]) + z8 * ((__ATAN2PIF_D[4] + z2 * __ATAN2PIF_D[5]) + z4 * __ATAN2PIF_D[6])
+        r = n0 / d0
+    }
+    r = z * r + off
+    bits: to_bits(r)
+    // |r| above 2^-149 and its low 28 bits within 8 of a multiple of 2^28
+    if bits.bit_and(0x7FFF_FFFF_FFFF_FFFF) > 0x36A0_0000_0000_0000 && (bits + 8).bit_and(0xFFF_FFFF) <= 16 {
+        zh: if gt -> x / y else -> y / x
+        zl: if gt -> fma(zh, -y, x) / y else -> fma(zh, -x, y) / x
+        q: __mul_dd(zh, zl, zh, zl)
+        p: __poly_dd(q.hi, q.lo, __ATAN2PIF_C, 32, Float{0.0})
+        s: if gt -> __mul_dd(-zh, -zl, p.hi, p.lo) else -> __mul_dd(zh, zl, p.hi, p.lo)
+        sh: s.hi + off
+        sl: ((off - sh) + s.hi) + s.lo
+        th: Float.from_f32(F32{sh})
+        tm: (sh - th) + sl
+        r = th + tm
+        // r on a binary32 midpoint: tm's side of it decides
+        d: r - th
+        if to_bits(d).bit_and(0xF_FFFF_FFFF_FFFF) == 0 {
+            if fabs(d) > fabs(tm) -> r = r - d * Float{0.0009765625}
+            if fabs(d) < fabs(tm) -> r = r + d * Float{0.0009765625}
+        }
+    }
+    r
+}
+__ATAN2PIF_OFF: [Float]{0.0, 0.5, 1.0, 0.5, -0.0, -0.5, -1.0, -0.5}
+__ATAN2PIF_N: [Float]{0.3183098861837907, 0.7979546675063276, 0.7275079475448462, 0.29372174016793834, 0.05082040362397926, 0.0029915422604631704, 0.00002583487828867586}
+__ATAN2PIF_D: [Float]{1.0, 2.840181854668896, 3.03226090832491, 1.5083284691366383, 0.35061013533424623, 0.03311601651598859, 0.0008307046818566012}
+// atan(z)/(pi z) as a series in z^2, 32 double-double coefficients (hi, lo)
+__ATAN2PIF_C: [Float]{
+    0.3183098861837907, -1.9678676678365386e-17, -0.1061032953945969, 6.559565574705387e-18,
+    0.06366197723675814, -1.1625142324443452e-18, -0.04547284088339867, 1.6330933027767818e-19,
+    0.035367765131532274, -9.869723873189076e-19, -0.02893726238034349, -9.662744851500827e-20,
+    0.024485375860256887, -1.149537084009613e-18, -0.02122065907814378, 1.7059737274086658e-18,
+    0.018724110938995286, 8.81510938898954e-19, -0.016753151736008654, -1.3202448604516062e-18,
+    0.015157611897126696, 6.75954372683546e-19, -0.01383954589266639, 8.078526646412535e-19,
+    0.012732297425997631, 1.7919213416430043e-19, -0.011788699545460008, 6.66037210651152e-19,
+    0.010973559311688615, 4.52760332181136e-19, -0.01025740427988246, 5.715852605373118e-19,
+    0.00960910459824051, -3.6666946471079842e-19, -0.008986355259023526, -3.20433976550847e-19,
+    0.008327115997597955, 8.618694896373386e-19, -0.007551468176501432, -8.492307901900414e-20,
+    0.006585343763712261, 2.224514552737167e-19, -0.005405453291432151, -3.141319316546961e-19,
+    0.00407993240560434, 1.6362318030205914e-19, -0.0027652579189205322, 1.658177124739989e-19,
+    0.0016436307978093597, -5.343077563297589e-21, -0.0008361742639658701, -1.949710672957039e-20,
+    0.00035446593346812673, -5.638324403413975e-21, -0.00012121521420485887, 5.168177557928168e-21,
+    0.00003201152607657205, -1.1919997370531597e-21, -0.000006110125403746142, 1.333824885359168e-22,
+    7.485604805690301e-7, -9.591512195984102e-24, -4.4129183432426896e-8, 1.786021469414917e-24
 }
 // Double-double helpers of the CORE-MATH ports: a value is hi + lo, and every
 // fma recovers the exact rounding error of a product.
@@ -7133,6 +7334,27 @@ __payload_bits: fn(payload: Float) -> Int? Never! {
     assert(is_nan(compound_n(NAN, 1)))
     // a CORE-MATH log1p.wc worst case
     assert_eq(to_bits(compound_n(from_bits(-4717333287328040252), 4)), 4607182412178923782)
+}
+
+#Test("math F32 forms of the correctly rounded functions round once") {
+    // exact binary32 midpoints tie to even
+    assert_eq(Float.from_f32(F32{__pow_n_f32(257.0, 3)}), 16974592.0)
+    assert_eq(Float.from_f32(F32{__pow_n_f32(2.6469779601696886e-23, 2)}), 0.0)
+    assert_eq(Float.from_f32(F32{__pow_r_f32(66049.0, 1.5)}), 16974592.0)
+    assert_eq(Float.from_f32(F32{__compound_n_f32(4096.0, 2)}), 16785408.0)
+    // the Float result is a binary32 midpoint the exact result is not
+    assert_eq(Float.from_f32(F32{__pow_n_f32(1.591674566268921, -101)}), 4.099379080532444e-21)
+    assert_eq(Float.from_f32(F32{__compound_n_f32(0.5916745662689209, -101)}), 4.099379080532444e-21)
+    assert_eq(Float.from_f32(F32{__pow_r_f32(1.6949651046854058e-13, 1.00834059715271)}), 1.3263079057333066e-13)
+    assert_eq(Float.from_f32(F32{__atan2_pi_f32(1054548.75, -6951173.0)}), 0.9520753026008606)
+    assert_eq(Float.from_f32(F32{__exp10_m1_f32(15.843597412109375)}), 6975854206779392.0)
+    assert_eq(Float.from_f32(F32{__log2_1p_f32(1585770880.0)}), 30.562536239624023)
+    assert_eq(Float.from_f32(F32{__log10_1p_f32(-7.635413967754801e-10)}), -3.31601829328676e-10)
+    assert_eq(Float.from_f32(F32{__log10_1p_f32(0.00029465556144714355)}), 0.00012794842768926173)
+    assert_eq(Float.from_f32(F32{__atan_pi_f32(0.9109678864479065)}), 0.23518063127994537)
+    assert_eq(Float.from_f32(F32{__atan_pi_f32(-0.9109678864479065)}), -0.23518063127994537)
+    assert_eq(__atan2_pi_f32(-0.0, -2.0), -1.0)
+    assert(is_nan(__pow_r_f32(-2.0, 0.5)))
 }
 
 #Test("math special functions match musl") {

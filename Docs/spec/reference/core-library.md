@@ -2555,6 +2555,13 @@ Floating classifiers such as `math.is_nan` require Float or F32, not Int.
 Multi-operand floating calls such as `math.hypot`, and floating `pow`
 operands, must use matching Float/F32 widths; convert explicitly before
 calling them. Source-owned Core wrappers preserve these same constraints.
+An all-F32 call of a correctly rounded function below (`rsqrt`, `sin_pi`,
+`cos_pi`, `tan_pi`, `asin_pi`, `acos_pi`, `atan_pi`, `atan2_pi`, `exp2_m1`,
+`exp10_m1`, `log2_1p`, `log10_1p`, `pow_r`, `pow_n`, `root_n`,
+`compound_n`) returns the correctly rounded `F32` result on every tier, never
+a double rounding of the Float one (C23's `f` forms such as `rsqrtf` and
+`pownf`); the whole exponent of `pow_n`, `root_n` and `compound_n` stays an
+`Int`.
 
 | Function | Returns | Description |
 | --- | --- | --- |

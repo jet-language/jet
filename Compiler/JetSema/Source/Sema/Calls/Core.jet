@@ -805,33 +805,40 @@ sema_call_try_core_math_float_class: fn(module_name: String, member: String, typ
     SemaDirectSpecialCheck{handled: true, value: None}
 }
 
-// `core.math` is width-generic. A math function whose every
+// `core.math` is width-generic. A math function whose every floating
 // argument is F32 computes at F32 width: its Float source runs on the exactly
 // widened arguments and the Float result rounds once back to F32, and
-// `to_bits` packs the binary32 bits (`__to_bits_f32`). Any other argument
-// list keeps the ordinary source call.
+// `to_bits` packs the binary32 bits (`__to_bits_f32`). A correctly rounded
+// function whose Float result can tie two binary32 values runs its
+// `__<member>_f32` source instead, whose Float result is already the binary32
+// one; its whole-number exponent stays an Int. Any other argument list keeps
+// the ordinary source call.
 sema_call_try_core_math_f32: fn(module_name: String, member: String, type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     unhandled: SemaDirectSpecialCheck{handled: false, value: None}
     if module_name != "core.math" || type_args.len() != 0 || args.len() == 0 -> return unhandled
     to_bits: member == "to_bits"
     if !to_bits && !sema_call_core_math_f32_member(member) -> return unhandled
-    loop argument in args {
+    loop (index, argument) in args {
         if argument.label != None || argument.spread -> return unhandled
         probe_diagnostics := [Diagnostic]{}
         probed: sema_probe_expression(argument.expr, None, environment, program, scopes, state, tail_store, context, probe_diagnostics) ?? return unhandled
-        if probed.ty != Type.Float32 -> return unhandled
+        width: if sema_call_core_math_f32_whole(member, index) -> Type.Int else -> Type.Float32
+        if probed.ty != width -> return unhandled
     }
     failed: SemaDirectSpecialCheck{handled: true, value: None}
     values := [TExpr]{}
-    loop argument in args {
+    loop (index, argument) in args {
         value: sema_check_expression(argument.expr, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? return failed
-        values.push(if to_bits -> value else -> sema_expr_numeric_conversion(value, Type.Float, span, 0) ?? return failed)
+        keep: to_bits || sema_call_core_math_f32_whole(member, index)
+        values.push(if keep -> value else -> sema_expr_numeric_conversion(value, Type.Float, span, 0) ?? return failed)
     }
     if to_bits {
         bits: sema_call_core_source("core.math", "__to_bits_f32", values, Type.Int, true, span, environment, program, diagnostics) ?? return failed
         return SemaDirectSpecialCheck{handled: true, value: sema_expr_expected_owned(bits, expected, environment, program, diagnostics)}
     }
-    wide: sema_call_core_source("core.math", member, values, Type.Float, false, span, environment, program, diagnostics) ?? return failed
+    own: sema_call_core_math_f32_own(member)
+    source: if own -> "__{member}_f32" else -> member
+    wide: sema_call_core_source("core.math", source, values, Type.Float, own, span, environment, program, diagnostics) ?? return failed
     narrow: sema_expr_numeric_conversion(wide, Type.Float32, span, 0) ?? return failed
     SemaDirectSpecialCheck{handled: true, value: sema_expr_expected_owned(narrow, expected, environment, program, diagnostics)}
 }
@@ -840,9 +847,23 @@ sema_call_try_core_math_f32: fn(module_name: String, member: String, type_args: 
 // all-F32 call computes at F32 width (sqrt keeps its own record rule).
 sema_call_core_math_f32_member: fn(member: String) -> Bool Never! {
     if member == {
-        "sin" | "cos" | "tan" | "asin" | "acos" | "atan" | "sinh" | "cosh" | "tanh" | "exp" | "ln" | "log2" | "log10" | "acosh" | "asinh" | "atanh" | "cbrt" | "exp2" | "exp_m1" | "ln_1p" | "degrees" | "radians" | "atan2" | "hypot" | "copysign" | "log" | "floor" | "ceil" | "trunc" | "fract" | "lerp" | "fma" | "muladd" -> true
+        "sin" | "cos" | "tan" | "asin" | "acos" | "atan" | "sinh" | "cosh" | "tanh" | "exp" | "ln" | "log2" | "log10" | "acosh" | "asinh" | "atanh" | "cbrt" | "exp2" | "exp_m1" | "ln_1p" | "degrees" | "radians" | "atan2" | "hypot" | "copysign" | "log" | "floor" | "ceil" | "trunc" | "fract" | "lerp" | "fma" | "muladd" | "rsqrt" | "exp2_m1" | "sin_pi" | "cos_pi" | "tan_pi" | "asin_pi" | "acos_pi" -> true
+        else -> sema_call_core_math_f32_own(member)
+    }
+}
+
+// The F32-width members with their own `__<member>_f32` source.
+sema_call_core_math_f32_own: fn(member: String) -> Bool Never! {
+    if member == {
+        "pow_n" | "pow_r" | "root_n" | "compound_n" | "atan2_pi" | "atan_pi" | "exp10_m1" | "log2_1p" | "log10_1p" -> true
         else -> false
     }
+}
+
+// Whether argument `index` of an F32-width `member` call is its whole-number
+// exponent, an Int at every width.
+sema_call_core_math_f32_whole: fn(member: String, index: Int) -> Bool Never! {
+    index == 1 && (member == "pow_n" || member == "root_n" || member == "compound_n")
 }
 
 // `exact_rational_math_approx`: a core.math function whose result leaves the
