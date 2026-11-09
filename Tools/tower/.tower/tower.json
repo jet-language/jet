@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6725,
-    "rev": 96502,
+    "nextNum": 6726,
+    "rev": 96505,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -102149,6 +102149,54 @@
       "updated": "2026-11-09T14:13:58.001Z",
       "updatedBy": "Main",
       "criteriaLastN": 3
+    },
+    {
+      "id": "c0bf5kow",
+      "num": 6725,
+      "title": "I2: comptime math.from_bits of an Int literal at or above 2^63 is an internal compiler error",
+      "body": "Repro (dev 4169604f62 and later): main.jet = `use math: core.math` + `main: fn() { x: comptime { math.to_bits(math.from_bits(0x8000000000000000)) }; print(x) }`; `jet run main.jet` prints 'internal compiler error: the native comptime run failed internally: IR evaluation: memory access through a null pointer'. The same call at runtime is fine. Any Int literal >= 2^63 passed to from_bits inside comptime fails. Also check why the comptime path reports 'IR evaluation' when I9 says compile-time code runs natively at O0 with no interpreter. Found by G1Lead-2 during G1Lead-22b.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e5",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The repro prints the same bits at comptime as at runtime on every tier (O0, O1, O2), and a cases row pins it for 0x8000000000000000, 0xFFFFFFFFFFFFFFFF and 0x7FF8000000000001.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T14:46:26.028Z"
+        },
+        {
+          "n": 2,
+          "text": "The comptime path's 'IR evaluation' wording is explained: either it is the native O0 child (and the message is corrected), or an interpreter path exists, which is an I9 defect recorded on its own card.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T14:46:27.040Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-09T14:46:19.481Z",
+      "updated": "2026-11-09T14:46:27.040Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 2
     }
   ],
   "decisions": [
@@ -190984,6 +191032,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-09T14:46:27.040Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0bf5kow",
+      "note": "#2 The comptime path's 'IR evaluation' wording is explained: ei"
+    },
+    {
+      "at": "2026-11-09T14:46:26.028Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0bf5kow",
+      "note": "#1 The repro prints the same bits at comptime as at runtime on "
+    },
+    {
+      "at": "2026-11-09T14:46:19.481Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0bf5kow",
+      "note": "I2: comptime math.from_bits of an Int literal at or above 2^63 is an internal compiler error"
+    },
     {
       "at": "2026-11-09T14:13:58.001Z",
       "by": "Main",
