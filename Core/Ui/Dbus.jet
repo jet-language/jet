@@ -1,0 +1,1434 @@
+use {
+    core: core
+    sys: core.sys
+    net: core.net
+    math: core.math
+}
+// __core_ui_dbus — a D-Bus client just big enough for the desktop portal's
+// settings, a private part of core.ui.
+//
+// Speaks the D-Bus wire protocol itself over the session bus's Unix socket:
+// no libdbus. It authenticates with SASL EXTERNAL (the kernel vouches for
+// the process's uid), says Hello, calls methods and waits for their
+// replies, answers calls made to it with UnknownMethod, and queues the
+// signals its match rules ask for. It writes little-endian messages and
+// reads every value type in them within the specification's limits; a
+// malformed message is a typed `.Protocol` error, never a fault. No Unix
+// descriptors are negotiated, so none ride along.
+//
+// The portal half reads org.freedesktop.appearance through
+// org.freedesktop.portal.Settings (the colour scheme, the accent colour and
+// the contrast preference) and follows its SettingChanged signals and the
+// portal's restarts.
+
+// The specification's limits: a whole message, one array, and how deep
+// arrays and structs may each nest in a signature (values, variants
+// included, nest at most twice that).
+MESSAGE_MAX: 134217728
+ARRAY_MAX: 67108864
+NESTING_MAX: 32
+SIGNATURE_MAX: 255
+// One read from the socket.
+RECEIVE_MAX: 65536
+// The longest authentication line the bus may answer with.
+LINE_MAX: 16384
+// Signals kept until `signals` takes them; older ones go first.
+QUEUE_MAX: 256
+// The header flag that asks for no reply.
+NO_REPLY_EXPECTED: 1
+// What `number`, `hex_digit`, `field_code` and `type_end` give for none.
+NO_VALUE: -1
+
+BUS_NAME: "org.freedesktop.DBus"
+BUS_PATH: "/org/freedesktop/DBus"
+UNKNOWN_METHOD: "org.freedesktop.DBus.Error.UnknownMethod"
+PORTAL_NAME: "org.freedesktop.portal.Desktop"
+PORTAL_PATH: "/org/freedesktop/portal/desktop"
+SETTINGS: "org.freedesktop.portal.Settings"
+APPEARANCE: "org.freedesktop.appearance"
+
+#Error
+DbusError: enum {
+    // No session bus is named, or only on a transport this client lacks.
+    NoBus(String)
+    // The bus's socket could not be reached, read or written.
+    Connect(String)
+    // The bus refused the authentication.
+    Auth(String)
+    // The bus or a peer broke the wire protocol.
+    Protocol(String)
+    // The bus closed the connection.
+    Closed
+    // No answer came in time.
+    Timeout(String)
+    // The peer answered a call with an error.
+    Failed(name: String, message: String)
+}
+
+impl DbusError.Display {
+    display: fn(self) -> String {
+        if self == {
+            .NoBus(text) -> "no session bus: {text}"
+            .Connect(text) -> "{text}"
+            .Auth(text) -> "{text}"
+            .Protocol(text) -> "the bus broke the D-Bus protocol: {text}"
+            .Closed -> "the bus closed the connection"
+            .Timeout(text) -> "{text}"
+            .Failed(name, message) -> "{name}: {message}"
+        }
+    }
+}
+
+// A value on the wire, one variant per D-Bus type code but `h`: no Unix
+// descriptors are negotiated, so none can be named. `Uint64` holds the
+// unsigned value. An array carries its element signature, so an empty one
+// still has a type.
+DbusValue: enum {
+    Byte(Int)
+    Bool(Bool)
+    Int16(Int)
+    Uint16(Int)
+    Int32(Int)
+    Uint32(Int)
+    Int64(Int)
+    Uint64(Int)
+    Double(Float)
+    Text(String)
+    Path(String)
+    Signature(String)
+    Variant(DbusValue)
+    Array(signature: String, items: [DbusValue])
+    Struct([DbusValue])
+    Entry(key: DbusValue, value: DbusValue)
+}
+
+// The four message types.
+DbusKind: enum {
+    Call
+    Return
+    Error
+    Signal
+}
+
+// One message. Empty strings and a zero reply serial are header fields
+// left out; `signature` is the body's, filled in when a message is read.
+DbusMessage: struct {
+    kind: DbusKind
+    flags: Int
+    serial: Int
+    reply_serial: Int
+    path: String
+    interface: String
+    member: String
+    error_name: String
+    destination: String
+    sender: String
+    signature: String
+    body: [DbusValue]
+}
+
+// A connection to a bus: the unique name Hello gave, bytes read but not yet
+// a whole message, and the signals that arrived while a call waited.
+DbusConnection: struct {
+    stream: net.UnixStream
+    serial: Int
+    name: String
+    inbox: [U8]
+    queued: [DbusMessage]
+}
+
+// A decoded message and the bytes it took; `used` is 0 while the bytes
+// hold no whole message yet, and `message` is None for a message of a
+// type this client ignores.
+Decoded: struct {
+    used: Int
+    message: DbusMessage?
+}
+
+// Bytes being read: the message so far and where the current value ends.
+Reader: struct {
+    bytes: [U8]
+    at: Int
+    end: Int
+}
+
+// ---- connecting
+
+// Connects to the session bus, authenticates and says Hello, waiting at most
+// `timeout_ns` for the bus.
+session: fn(timeout_ns: Int) -[Env, Net, Time]> DbusConnection DbusError! {
+    address: sys.get("DBUS_SESSION_BUS_ADDRESS") ?? ""
+    runtime: sys.get("XDG_RUNTIME_DIR") ?? ""
+    path: session_path(address, runtime) ?? return Err(err)
+    stream: net.unix_connect(path) ?? return Err(DbusError.Connect("{path}: {err}"))
+    start(stream, sys.getuid(), timeout_ns)
+}
+
+// Where the session bus listens: the first `unix:path=` (or
+// `unix:runtime=yes`) address in `address`, a D-Bus server address list,
+// else $XDG_RUNTIME_DIR/bus when no address is set.
+session_path: fn(address: String, runtime: String) -> String DbusError! {
+    if address == "" {
+        if runtime == "" -> return Err(DbusError.NoBus("neither DBUS_SESSION_BUS_ADDRESS nor XDG_RUNTIME_DIR is set"))
+        return Ok("{runtime}/bus")
+    }
+    loop entry in address.split(";").to_list() {
+        if !entry.starts_with("unix:") -> next
+        loop pair in after(entry, 5).split(",").to_list() {
+            if pair.starts_with("path=") {
+                path: unescape(after(pair, 5)) ?? return Err(DbusError.NoBus("the bus address {address} is malformed"))
+                if path != "" -> return Ok(path)
+            }
+            if pair == "runtime=yes" && runtime != "" -> return Ok("{runtime}/bus")
+        }
+    }
+    Err(DbusError.NoBus("no unix:path= address in {address}"))
+}
+
+// Authenticates as `uid` on a connected `stream` and says Hello.
+start: fn(&&stream: net.UnixStream, uid: Int, timeout_ns: Int) -[Net, Time]> DbusConnection DbusError! {
+    c := DbusConnection{stream: stream.move(), serial: 0, name: "", inbox: [U8]{}, queued: [DbusMessage]{}}
+    deadline: now() + timeout_ns
+    // The credentials byte, then the EXTERNAL mechanism with the uid as
+    // hex-encoded decimal text.
+    uid_hex: hex_text("{uid}")
+    hello := [U8]{U8{0}}
+    loop b in "AUTH EXTERNAL {uid_hex}\r\n".bytes() -> hello.push(b)
+    send_bytes(c, hello) ?? return Err(err)
+    line: read_line(c, deadline) ?? return Err(err)
+    if !line.starts_with("OK ") {
+        if line.starts_with("REJECTED") -> return Err(DbusError.Auth("the bus refused EXTERNAL for uid {uid}: {line}"))
+        return Err(DbusError.Auth("the bus answered AUTH with {line}"))
+    }
+    send_bytes(c, "BEGIN\r\n".bytes()) ?? return Err(err)
+    reply: call_until(c, BUS_NAME, BUS_PATH, BUS_NAME, "Hello", [DbusValue]{}, deadline) ?? return Err(err)
+    if reply.body.len() != 1 -> return Err(DbusError.Protocol("Hello answered {reply.signature}, not a name"))
+    if reply.body[0] == .Text(name) {
+        c.name = name.copy()
+        return Ok(c)
+    }
+    Err(DbusError.Protocol("Hello answered {reply.signature}, not a name"))
+}
+
+// One CRLF-ended line from the bus, before BEGIN.
+read_line: fn(&c: DbusConnection, deadline: Int) -[Net, Time]> String DbusError! {
+    loop {
+        loop i in 1..<c.inbox.len() {
+            if Int.from_u8(c.inbox[i - 1]) == 13 && Int.from_u8(c.inbox[i]) == 10 {
+                line: String.from_bytes(c.inbox[0..<(i - 1)]) ?? return Err(DbusError.Auth("the bus answered with text that is not UTF-8"))
+                c.inbox = c.inbox[(i + 1)..<c.inbox.len()].copy()
+                return Ok(line)
+            }
+        }
+        if c.inbox.len() > LINE_MAX -> return Err(DbusError.Auth("the bus answered with a line over {LINE_MAX} bytes"))
+        receive_some(c, deadline, "authentication") ?? return Err(err)
+    }
+    Err(DbusError.Closed)
+}
+
+// ---- calls and signals
+
+// Calls `member` and waits at most `timeout_ns` for its reply; an error
+// reply is `.Failed`. Signals that arrive meanwhile are queued.
+call: fn(&c: DbusConnection, destination: String, path: String, interface: String, member: String, body: [DbusValue], timeout_ns: Int) -[Net, Time]> DbusMessage DbusError! {
+    call_until(c, destination, path, interface, member, body, now() + timeout_ns)
+}
+
+call_until: fn(&c: DbusConnection, destination: String, path: String, interface: String, member: String, body: [DbusValue], deadline: Int) -[Net, Time]> DbusMessage DbusError! {
+    message := blank(DbusKind.Call)
+    message.path = path
+    message.interface = interface
+    message.member = member
+    message.destination = destination
+    message.body = body
+    serial: send(c, message) ?? return Err(err)
+    loop {
+        got: if next_message(c) == {
+            .Err(err) -> return Err(err)
+            .Ok(found) -> found
+        }
+        if got == .Val(m) {
+            awaited: m.reply_serial == serial && m.kind != .Call && m.kind != .Signal
+            if awaited {
+                if m.kind == .Error -> return Err(failure(m))
+                return Ok(m.copy())
+            }
+            set_aside(c, m.copy()) ?? return Err(err)
+            next
+        }
+        receive_some(c, deadline, member) ?? return Err(err)
+    }
+    Err(DbusError.Closed)
+}
+
+// Sends `message` under the connection's next serial, which it returns.
+send: fn(&c: DbusConnection, message: DbusMessage) -[Net, Time]> Int DbusError! {
+    c.serial = if c.serial >= 4294967295 -> 1 else -> c.serial + 1
+    bytes: encode(message, c.serial) ?? return Err(err)
+    send_bytes(c, bytes) ?? return Err(err)
+    Ok(c.serial)
+}
+
+// Asks the bus for the signals `rule` matches.
+add_match: fn(&c: DbusConnection, rule: String, timeout_ns: Int) DbusError! -[Net, Time]> {
+    _: call(c, BUS_NAME, BUS_PATH, BUS_NAME, "AddMatch", [DbusValue]{DbusValue.Text(rule)}, timeout_ns) ?? return Err(err)
+    Ok()
+}
+
+// The signals queued and those that arrive within `timeout_ns` (0: only
+// what is already here), oldest first.
+signals: fn(&c: DbusConnection, timeout_ns: Int) -[Net, Time]> [DbusMessage] DbusError! {
+    ready: net.unix_wait(c.stream, if c.queued.len() > 0 -> 0 else -> timeout_ns) ?? return Err(DbusError.Connect("waiting for the bus failed: {err}"))
+    if ready -> take_bytes(c) ?? return Err(err)
+    loop {
+        got: if next_message(c) == {
+            .Err(err) -> return Err(err)
+            .Ok(found) -> found
+        }
+        if got == .Val(m) {
+            set_aside(c, m.copy()) ?? return Err(err)
+            next
+        }
+        break
+    }
+    out: c.queued.copy()
+    c.queued.clear()
+    Ok(out)
+}
+
+// A message that is no reply being waited for: a signal is queued, a call
+// that wants a reply hears that no method is here, and the rest go.
+set_aside: fn(&c: DbusConnection, m: DbusMessage) DbusError! -[Net, Time]> {
+    if m.kind == .Signal {
+        if c.queued.len() >= QUEUE_MAX -> c.queued = c.queued[1..<c.queued.len()].copy()
+        c.queued.push(m.copy())
+        return Ok()
+    }
+    if m.kind != .Call || m.flags.bit_and(NO_REPLY_EXPECTED) != 0 -> return Ok()
+    reply := blank(DbusKind.Error)
+    reply.flags = NO_REPLY_EXPECTED
+    reply.reply_serial = m.serial
+    reply.error_name = UNKNOWN_METHOD
+    reply.destination = m.sender.copy()
+    reply.body = [DbusValue]{DbusValue.Text("no method {m.interface}.{m.member} here")}
+    _: send(c, reply) ?? return Err(err)
+    Ok()
+}
+
+failure: fn(m: DbusMessage) -> DbusError {
+    text: if m.body.len() > 0 -> string_of(m.body[0]) else -> ""
+    DbusError.Failed{name: m.error_name.copy(), message: text}
+}
+
+// A message of `kind` with every header field left out and no body.
+blank: fn(kind: DbusKind) -> DbusMessage {
+    DbusMessage{
+        kind: kind, flags: 0, serial: 0, reply_serial: 0, path: "", interface: "", member: "",
+        error_name: "", destination: "", sender: "", signature: "", body: [DbusValue]{},
+    }
+}
+
+// The next whole message read, if one is here.
+next_message: fn(&c: DbusConnection) -> DbusMessage? DbusError! {
+    loop {
+        decoded: decode(c.inbox) ?? return Err(err)
+        if decoded.used == 0 -> return Ok(None)
+        c.inbox = c.inbox[decoded.used..<c.inbox.len()].copy()
+        if decoded.message != None -> return Ok(decoded.message)
+    }
+    Ok(None)
+}
+
+// Waits until `deadline` for bytes from the bus and adds them to the inbox.
+receive_some: fn(&c: DbusConnection, deadline: Int, what: String) DbusError! -[Net, Time]> {
+    left: deadline - now()
+    if left <= 0 -> return Err(DbusError.Timeout("the bus did not answer {what} in time"))
+    ready: net.unix_wait(c.stream, left) ?? return Err(DbusError.Connect("waiting for the bus failed: {err}"))
+    if !ready -> return Err(DbusError.Timeout("the bus did not answer {what} in time"))
+    take_bytes(c)
+}
+
+// Reads what the socket holds into the inbox; descriptors are dropped.
+take_bytes: fn(&c: DbusConnection) DbusError! -[Net, Time]> {
+    got: net.unix_receive(c.stream, RECEIVE_MAX) ?? return Err(DbusError.Connect("reading from the bus failed: {err}"))
+    if got.bytes.len() == 0 -> return Err(DbusError.Closed)
+    loop b in got.bytes -> c.inbox.push(b)
+    Ok()
+}
+
+send_bytes: fn(&c: DbusConnection, bytes: [U8]) DbusError! -[Net, Time]> {
+    net.unix_send(c.stream, bytes, [sys.Fd]{}) ?? return Err(DbusError.Connect("writing to the bus failed: {err}"))
+    Ok()
+}
+
+now: fn() -[Time]> Int { core.time.__clock_mono_ns() }
+
+// ---- writing messages
+
+// The wire bytes of `message` sent as `serial`; its body's signature comes
+// from the values.
+encode: fn(message: DbusMessage, serial: Int) -> [U8] DbusError! {
+    body := [U8]{}
+    signature := ""
+    loop value in message.body {
+        marshal(body, value)
+        signature = "{signature}{signature_of(value)}"
+    }
+    if !valid_signature(signature) -> return Err(DbusError.Protocol("a body of signature {signature} cannot be sent"))
+    fields := [DbusValue]{}
+    if message.path != "" -> fields.push(header_field(1, DbusValue.Path(message.path.copy())))
+    if message.interface != "" -> fields.push(header_field(2, DbusValue.Text(message.interface.copy())))
+    if message.member != "" -> fields.push(header_field(3, DbusValue.Text(message.member.copy())))
+    if message.error_name != "" -> fields.push(header_field(4, DbusValue.Text(message.error_name.copy())))
+    if message.reply_serial != 0 -> fields.push(header_field(5, DbusValue.Uint32(message.reply_serial)))
+    if message.destination != "" -> fields.push(header_field(6, DbusValue.Text(message.destination.copy())))
+    if message.sender != "" -> fields.push(header_field(7, DbusValue.Text(message.sender.copy())))
+    if signature != "" -> fields.push(header_field(8, DbusValue.Signature(signature)))
+    out := [U8]{U8{108}, U8{kind_code(message.kind)}, U8{message.flags.bit_and(255)}, U8{1}}
+    put_word(out, body.len(), 4)
+    put_word(out, serial, 4)
+    marshal(out, DbusValue.Array{signature: "(yv)", items: fields})
+    pad(out, 8)
+    if out.len() + body.len() > MESSAGE_MAX -> return Err(DbusError.Protocol("a message of {out.len() + body.len()} bytes is over the limit"))
+    loop b in body -> out.push(b)
+    Ok(out)
+}
+
+header_field: fn(code: Int, value: DbusValue) -> DbusValue {
+    DbusValue.Struct([DbusValue]{DbusValue.Byte(code), DbusValue.Variant(value)})
+}
+
+kind_code: fn(kind: DbusKind) -> Int {
+    if kind == {
+        .Call -> 1
+        .Return -> 2
+        .Error -> 3
+        .Signal -> 4
+    }
+}
+
+// The signature of one value.
+signature_of: fn(value: DbusValue) -> String {
+    if value == {
+        .Byte(_) -> "y"
+        .Bool(_) -> "b"
+        .Int16(_) -> "n"
+        .Uint16(_) -> "q"
+        .Int32(_) -> "i"
+        .Uint32(_) -> "u"
+        .Int64(_) -> "x"
+        .Uint64(_) -> "t"
+        .Double(_) -> "d"
+        .Text(_) -> "s"
+        .Path(_) -> "o"
+        .Signature(_) -> "g"
+        .Variant(_) -> "v"
+        .Array(signature, _) -> "a{signature}"
+        .Struct(fields) -> {
+            inner := ""
+            loop field in fields -> inner = "{inner}{signature_of(field)}"
+            "({inner})"
+        }
+        .Entry(key, item) -> "{ascii(123)}{signature_of(key)}{signature_of(item)}{ascii(125)}"
+    }
+}
+
+// Appends `value` aligned as the wire wants it; offsets count from the
+// message's first byte, which `out` starts at.
+marshal: fn(&out: [U8], value: DbusValue) {
+    if value == {
+        .Byte(n) -> out.push(U8{n.bit_and(255)})
+        .Bool(flag) -> {
+            pad(out, 4)
+            bit: if flag -> 1 else -> 0
+            put_word(out, bit, 4)
+        }
+        .Int16(n) -> put_aligned(out, n, 2)
+        .Uint16(n) -> put_aligned(out, n, 2)
+        .Int32(n) -> put_aligned(out, n, 4)
+        .Uint32(n) -> put_aligned(out, n, 4)
+        .Int64(n) -> put_aligned(out, n, 8)
+        .Uint64(n) -> put_aligned(out, n, 8)
+        .Double(f) -> put_aligned(out, math.to_bits(f), 8)
+        .Text(text) -> put_text(out, text)
+        .Path(text) -> put_text(out, text)
+        .Signature(text) -> put_signature(out, text)
+        .Variant(inner) -> {
+            put_signature(out, signature_of(inner))
+            marshal(out, inner)
+        }
+        .Array(signature, items) -> {
+            pad(out, 4)
+            length_at: out.len()
+            put_word(out, 0, 4)
+            element: signature.bytes()
+            pad(out, if element.len() == 0 -> 1 else -> alignment_of(Int.from_u8(element[0])))
+            start: out.len()
+            loop item in items -> marshal(out, item)
+            length: out.len() - start
+            loop i in 0..<4 -> out[length_at + i] = U8{(length >> (8 * i)).bit_and(255)}
+        }
+        .Struct(fields) -> {
+            pad(out, 8)
+            loop field in fields -> marshal(out, field)
+        }
+        .Entry(key, item) -> {
+            pad(out, 8)
+            marshal(out, key)
+            marshal(out, item)
+        }
+    }
+}
+
+put_aligned: fn(&out: [U8], value: Int, size: Int) {
+    pad(out, size)
+    put_word(out, value, size)
+}
+
+// `size` little-endian bytes of `value`, two's complement when negative.
+put_word: fn(&out: [U8], value: Int, size: Int) {
+    v: if value < 0 -> value + 18446744073709551616 else -> value
+    loop i in 0..<size -> out.push(U8{(v >> (8 * i)).bit_and(255)})
+}
+
+put_text: fn(&out: [U8], text: String) {
+    bytes: text.bytes()
+    put_aligned(out, bytes.len(), 4)
+    loop b in bytes -> out.push(b)
+    out.push(U8{0})
+}
+
+put_signature: fn(&out: [U8], text: String) {
+    bytes: text.bytes()
+    out.push(U8{bytes.len().bit_and(255)})
+    loop b in bytes -> out.push(b)
+    out.push(U8{0})
+}
+
+pad: fn(&out: [U8], alignment: Int) {
+    loop out.len() %% alignment != 0 -> out.push(U8{0})
+}
+
+// ---- reading messages
+
+// The first message in `bytes`, if they hold a whole one.
+decode: fn(bytes: [U8]) -> Decoded DbusError! {
+    waiting: Decoded{used: 0, message: None}
+    if bytes.len() < 16 -> return Ok(waiting)
+    endian: Int.from_u8(bytes[0])
+    if endian == 66 -> return Err(DbusError.Protocol("a big-endian message arrived; only little-endian ones are read"))
+    if endian != 108 -> return Err(DbusError.Protocol("a message starts with byte {endian}, not an endianness mark"))
+    version: Int.from_u8(bytes[3])
+    if version != 1 -> return Err(DbusError.Protocol("a message has protocol version {version}, not 1"))
+    body_length: word(bytes, 4, 4)
+    serial: word(bytes, 8, 4)
+    fields_length: word(bytes, 12, 4)
+    if fields_length > ARRAY_MAX -> return Err(DbusError.Protocol("a header's fields take {fields_length} bytes, over the limit"))
+    fields_end: 16 + fields_length
+    body_at: fields_end + (8 - fields_end %% 8) %% 8
+    total: body_at + body_length
+    if total > MESSAGE_MAX -> return Err(DbusError.Protocol("a message of {total} bytes is over the limit"))
+    if bytes.len() < total -> return Ok(waiting)
+    if serial == 0 -> return Err(DbusError.Protocol("a message has serial 0"))
+    r := Reader{bytes: bytes[0..<total].copy(), at: 12, end: body_at}
+    header: read_value(r, "a(yv)".bytes(), 0, 0) ?? return Err(err)
+    align(r, 8) ?? return Err(err)
+    m := blank(DbusKind.Call)
+    m.flags = Int.from_u8(bytes[2])
+    m.serial = serial
+    if header == .Array(_, fields) {
+        loop field in fields {
+            header_value(m, field) ?? return Err(err)
+        }
+    }
+    r.end = total
+    sig: m.signature.bytes()
+    at := 0
+    loop at < sig.len() {
+        value: read_value(r, sig, at, 0) ?? return Err(err)
+        m.body.push(value)
+        at = type_end(sig, at, 0, 0)
+    }
+    if r.at != total -> return Err(DbusError.Protocol("a body is {total - r.at} bytes longer than its signature {m.signature}"))
+    code: Int.from_u8(bytes[1])
+    if code < 1 || code > 4 -> return Ok(Decoded{used: total, message: None})
+    m.kind = if code == {
+        1 -> DbusKind.Call
+        2 -> DbusKind.Return
+        3 -> DbusKind.Error
+        else -> DbusKind.Signal
+    }
+    missing: required_field(m)
+    if missing != "" -> return Err(DbusError.Protocol("{kind_name(m.kind)} has no {missing}"))
+    Ok(Decoded{used: total, message: Val(m)})
+}
+
+// Stores one header field in `m`; unknown codes are skipped.
+header_value: fn(&m: DbusMessage, field: DbusValue) DbusError! {
+    code: field_code(field)
+    value: field_value(field) ?? return Err(DbusError.Protocol("a header field is not a code and a variant"))
+    if code == 9 -> return Err(DbusError.Protocol("a message carries Unix descriptors, which were not negotiated"))
+    if code < 1 || code > 8 -> return Ok()
+    want: if code == {
+        1 -> "o"
+        5 -> "u"
+        8 -> "g"
+        else -> "s"
+    }
+    got: signature_of(value)
+    if got != want -> return Err(DbusError.Protocol("header field {code} holds a {got}, not a {want}"))
+    if code == 5 {
+        m.reply_serial = number(value)
+        return Ok()
+    }
+    text: string_of(value)
+    if code == {
+        1 -> m.path = text
+        2 -> m.interface = text
+        3 -> m.member = text
+        4 -> m.error_name = text
+        6 -> m.destination = text
+        7 -> m.sender = text
+        else -> m.signature = text
+    }
+    Ok()
+}
+
+// A header field's code, or -1.
+field_code: fn(field: DbusValue) -> Int {
+    if field == .Struct(parts) {
+        if parts.len() == 2 {
+            if parts[0] == .Byte(code) -> return code
+        }
+    }
+    NO_VALUE
+}
+
+// What a header field's variant holds.
+field_value: fn(field: DbusValue) -> DbusValue? {
+    if field == .Struct(parts) {
+        if parts.len() == 2 {
+            if parts[1] == .Variant(value) -> return Val(value.copy())
+        }
+    }
+    None
+}
+
+// The text of a string, object path or signature, or "".
+string_of: fn(value: DbusValue) -> String {
+    if value == .Text(text) -> return text.copy()
+    if value == .Path(text) -> return text.copy()
+    if value == .Signature(text) -> return text.copy()
+    ""
+}
+
+// The header field a message of its kind lacks, or "".
+required_field: fn(m: DbusMessage) -> String {
+    calls: m.kind == .Call || m.kind == .Signal
+    if {
+        calls && m.path == "" -> "path"
+        m.kind == .Signal && m.interface == "" -> "interface"
+        calls && m.member == "" -> "member"
+        !calls && m.reply_serial == 0 -> "reply serial"
+        m.kind == .Error && m.error_name == "" -> "error name"
+        else -> ""
+    }
+}
+
+kind_name: fn(kind: DbusKind) -> String {
+    if kind == {
+        .Call -> "a method call"
+        .Return -> "a method return"
+        .Error -> "an error"
+        .Signal -> "a signal"
+    }
+}
+
+// Reads the value of the complete type at `sig[at]`; `depth` counts the
+// containers it sits in.
+read_value: fn(&r: Reader, sig: [U8], at: Int, depth: Int) -> DbusValue DbusError! {
+    if depth > NESTING_MAX * 2 -> return Err(DbusError.Protocol("values nest deeper than {NESTING_MAX * 2}"))
+    code: Int.from_u8(sig[at])
+    if code == {
+        121 | 98 | 110 | 113 | 105 | 117 | 120 | 116 | 100 -> read_fixed(r, code)
+        115 | 111 -> read_string(r, code)
+        103 -> read_signature_value(r)
+        118 -> read_variant(r, depth)
+        97 -> read_array(r, sig, at, depth)
+        40 -> read_struct(r, sig, at, depth)
+        104 -> Err(DbusError.Protocol("a message names a Unix descriptor, but none were negotiated"))
+        else -> Err(DbusError.Protocol("type code {code} is not one this client reads"))
+    }
+}
+
+// A byte, boolean, integer or double: as wide as it is aligned.
+read_fixed: fn(&r: Reader, code: Int) -> DbusValue DbusError! {
+    size: if code == 121 -> 1 else -> alignment_of(code)
+    start: field(r, size) ?? return Err(err)
+    n: word(r.bytes, start, size)
+    if code == {
+        121 -> Ok(DbusValue.Byte(n))
+        98 -> if n > 1 -> Err(DbusError.Protocol("a boolean holds {n}")) else -> Ok(DbusValue.Bool(n == 1))
+        110 -> Ok(DbusValue.Int16(signed(n, 16)))
+        113 -> Ok(DbusValue.Uint16(n))
+        105 -> Ok(DbusValue.Int32(signed(n, 32)))
+        117 -> Ok(DbusValue.Uint32(n))
+        120 -> Ok(DbusValue.Int64(signed(n, 64)))
+        116 -> Ok(DbusValue.Uint64(n))
+        else -> Ok(DbusValue.Double(math.from_bits(signed(n, 64))))
+    }
+}
+
+// The two's-complement value of the `bits`-wide word `n`.
+signed: fn(n: Int, bits: Int) -> Int {
+    if n >= 1 << (bits - 1) -> n - (1 << bits) else -> n
+}
+
+read_string: fn(&r: Reader, code: Int) -> DbusValue DbusError! {
+    start: field(r, 4) ?? return Err(err)
+    length: word(r.bytes, start, 4)
+    text: read_text(r, length) ?? return Err(err)
+    if code == 115 -> return Ok(DbusValue.Text(text))
+    if !valid_path(text) -> return Err(DbusError.Protocol("{text} is not an object path"))
+    Ok(DbusValue.Path(text))
+}
+
+read_signature_value: fn(&r: Reader) -> DbusValue DbusError! {
+    text: read_signature(r) ?? return Err(err)
+    Ok(DbusValue.Signature(text))
+}
+
+read_variant: fn(&r: Reader, depth: Int) -> DbusValue DbusError! {
+    text: read_signature(r) ?? return Err(err)
+    inner: text.bytes()
+    if inner.len() == 0 || type_end(inner, 0, 0, 0) != inner.len() -> return Err(DbusError.Protocol("a variant's signature {text} is not one complete type"))
+    value: read_value(r, inner, 0, depth + 1) ?? return Err(err)
+    Ok(DbusValue.Variant(value))
+}
+
+read_array: fn(&r: Reader, sig: [U8], at: Int, depth: Int) -> DbusValue DbusError! {
+    start: field(r, 4) ?? return Err(err)
+    length: word(r.bytes, start, 4)
+    if length > ARRAY_MAX -> return Err(DbusError.Protocol("an array of {length} bytes is over the limit"))
+    element: at + 1
+    align(r, alignment_of(Int.from_u8(sig[element]))) ?? return Err(err)
+    if length > r.end - r.at -> return Err(truncated())
+    stop: r.at + length
+    outer: r.end
+    r.end = stop
+    items := [DbusValue]{}
+    loop r.at < stop {
+        item: read_element(r, sig, element, depth + 1) ?? return Err(err)
+        items.push(item)
+    }
+    r.end = outer
+    element_text: String.from_bytes(sig[element..<type_end(sig, at, 0, 0)]) ?? ""
+    Ok(DbusValue.Array{signature: element_text, items: items})
+}
+
+read_struct: fn(&r: Reader, sig: [U8], at: Int, depth: Int) -> DbusValue DbusError! {
+    align(r, 8) ?? return Err(err)
+    fields := [DbusValue]{}
+    i := at + 1
+    loop Int.from_u8(sig[i]) != 41 {
+        value: read_value(r, sig, i, depth + 1) ?? return Err(err)
+        fields.push(value)
+        i = type_end(sig, i, 0, 0)
+    }
+    Ok(DbusValue.Struct(fields))
+}
+
+// One array element: a dict entry when the element type opens with `{`.
+read_element: fn(&r: Reader, sig: [U8], at: Int, depth: Int) -> DbusValue DbusError! {
+    if Int.from_u8(sig[at]) != 123 -> return read_value(r, sig, at, depth)
+    align(r, 8) ?? return Err(err)
+    key: read_value(r, sig, at + 1, depth + 1) ?? return Err(err)
+    value: read_value(r, sig, at + 2, depth + 1) ?? return Err(err)
+    Ok(DbusValue.Entry{key: key, value: value})
+}
+
+// Moves to the next `alignment` boundary over zero padding.
+align: fn(&r: Reader, alignment: Int) DbusError! {
+    loop r.at %% alignment != 0 {
+        if r.at >= r.end -> return Err(truncated())
+        if Int.from_u8(r.bytes[r.at]) != 0 -> return Err(DbusError.Protocol("padding at byte {r.at} is not zero"))
+        r.at += 1
+    }
+    Ok()
+}
+
+// The offset of an aligned `size`-byte field, which the reader moves past.
+field: fn(&r: Reader, size: Int) -> Int DbusError! {
+    align(r, size) ?? return Err(err)
+    if size > r.end - r.at -> return Err(truncated())
+    start: r.at
+    r.at += size
+    Ok(start)
+}
+
+// `length` bytes of UTF-8 and their NUL.
+read_text: fn(&r: Reader, length: Int) -> String DbusError! {
+    if length >= r.end - r.at -> return Err(truncated())
+    start: r.at
+    r.at += length + 1
+    if Int.from_u8(r.bytes[start + length]) != 0 -> return Err(DbusError.Protocol("a string does not end in NUL"))
+    loop i in start..<(start + length) {
+        if Int.from_u8(r.bytes[i]) == 0 -> return Err(DbusError.Protocol("a string holds a NUL"))
+    }
+    text: String.from_bytes(r.bytes[start..<(start + length)]) ?? return Err(DbusError.Protocol("a string is not UTF-8"))
+    Ok(text)
+}
+
+read_signature: fn(&r: Reader) -> String DbusError! {
+    start: field(r, 1) ?? return Err(err)
+    length: Int.from_u8(r.bytes[start])
+    text: read_text(r, length) ?? return Err(err)
+    if !valid_signature(text) -> return Err(DbusError.Protocol("{text} is not a signature"))
+    Ok(text)
+}
+
+truncated: fn() -> DbusError { DbusError.Protocol("a value runs past the end of its message or array") }
+
+// `size` little-endian bytes at `at`, unsigned.
+word: fn(bytes: [U8], at: Int, size: Int) -> Int {
+    n := 0
+    loop i in 0..<size -> n += Int.from_u8(bytes[at + i]) << (8 * i)
+    n
+}
+
+// ---- signatures
+
+// Whether `text` is a sequence of complete types within the limits.
+valid_signature: fn(text: String) -> Bool {
+    sig: text.bytes()
+    if sig.len() > SIGNATURE_MAX -> return false
+    at := 0
+    loop at < sig.len() {
+        at = type_end(sig, at, 0, 0)
+        if at < 0 -> return false
+    }
+    true
+}
+
+// Where the complete type at `sig[at]` ends, or -1 if none starts there;
+// `arrays` and `structs` count the arrays and structs (dict entries
+// included) around it.
+type_end: fn(sig: [U8], at: Int, arrays: Int, structs: Int) -> Int {
+    if at >= sig.len() -> return -1
+    code: Int.from_u8(sig[at])
+    if basic(code) || code == 118 -> return at + 1
+    if code == 97 {
+        if arrays >= NESTING_MAX -> return -1
+        if at + 1 < sig.len() && Int.from_u8(sig[at + 1]) == 123 {
+            if structs >= NESTING_MAX || at + 2 >= sig.len() || !basic(Int.from_u8(sig[at + 2])) -> return -1
+            value_end: type_end(sig, at + 3, arrays + 1, structs + 1)
+            if value_end < 0 || value_end >= sig.len() || Int.from_u8(sig[value_end]) != 125 -> return -1
+            return value_end + 1
+        }
+        return type_end(sig, at + 1, arrays + 1, structs)
+    }
+    if code == 40 {
+        if structs >= NESTING_MAX -> return -1
+        i := at + 1
+        if i < sig.len() && Int.from_u8(sig[i]) == 41 -> return -1
+        loop i < sig.len() && Int.from_u8(sig[i]) != 41 {
+            i = type_end(sig, i, arrays, structs + 1)
+            if i < 0 -> return -1
+        }
+        if i >= sig.len() -> return -1
+        return i + 1
+    }
+    NO_VALUE
+}
+
+// y b n q i u x t d s o g h.
+basic: fn(code: Int) -> Bool {
+    code == 121 || code == 98 || code == 110 || code == 113 || code == 105 || code == 117 || code == 120 || code == 116 || code == 100 || code == 115 || code == 111 || code == 103 || code == 104
+}
+
+alignment_of: fn(code: Int) -> Int {
+    if code == {
+        110 | 113 -> 2
+        98 | 105 | 117 | 104 | 115 | 111 | 97 -> 4
+        120 | 116 | 100 | 40 | 123 -> 8
+        else -> 1
+    }
+}
+
+// `/`, or `/`-separated non-empty runs of [A-Za-z0-9_].
+valid_path: fn(text: String) -> Bool {
+    bytes: text.bytes()
+    if bytes.len() == 0 || Int.from_u8(bytes[0]) != 47 -> return false
+    if bytes.len() == 1 -> return true
+    if Int.from_u8(bytes[bytes.len() - 1]) == 47 -> return false
+    loop i in 1..<bytes.len() {
+        b: Int.from_u8(bytes[i])
+        if b == 47 {
+            if Int.from_u8(bytes[i - 1]) == 47 -> return false
+            next
+        }
+        word_byte: (b >= 48 && b <= 57) || (b >= 65 && b <= 90) || (b >= 97 && b <= 122) || b == 95
+        if !word_byte -> return false
+    }
+    true
+}
+
+// ---- text
+
+ascii: fn(code: Int) -> String { String.from_bytes([U8]{U8{code}}) ?? "" }
+
+// What follows the first `skip` bytes of `text`.
+after: fn(text: String, skip: Int) -> String {
+    bytes: text.bytes()
+    if skip >= bytes.len() -> return ""
+    String.from_bytes(bytes[skip..<bytes.len()]) ?? ""
+}
+
+// Each byte of `text` as two lower-case hex digits.
+hex_text: fn(text: String) -> String {
+    digits: "0123456789abcdef".bytes()
+    out := [U8]{}
+    loop b in text.bytes() {
+        n: Int.from_u8(b)
+        out.push(digits[n >> 4])
+        out.push(digits[n.bit_and(15)])
+    }
+    String.from_bytes(out) ?? ""
+}
+
+// A D-Bus address value with its `%XX` escapes undone.
+unescape: fn(text: String) -> String? {
+    bytes: text.bytes()
+    out := [U8]{}
+    i := 0
+    loop i < bytes.len() {
+        if Int.from_u8(bytes[i]) != 37 {
+            out.push(bytes[i])
+            i += 1
+            next
+        }
+        if i + 2 >= bytes.len() -> return None
+        high: hex_digit(Int.from_u8(bytes[i + 1]))
+        low: hex_digit(Int.from_u8(bytes[i + 2]))
+        if high < 0 || low < 0 -> return None
+        out.push(U8{high * 16 + low})
+        i += 3
+    }
+    decoded: String.from_bytes(out) ?? return None
+    Val(decoded)
+}
+
+hex_digit: fn(b: Int) -> Int {
+    if {
+        b >= 48 && b <= 57 -> b - 48
+        b >= 97 && b <= 102 -> b - 87
+        b >= 65 && b <= 70 -> b - 55
+        else -> NO_VALUE
+    }
+}
+
+// ---- the portal's appearance settings
+
+// The colour scheme the desktop prefers.
+PortalScheme: enum {
+    NoPreference
+    Dark
+    Light
+}
+
+// The appearance the desktop asks apps for: `accent` is red, green and
+// blue in 0..1, empty when the desktop sets none.
+PortalAppearance: struct {
+    scheme: PortalScheme
+    accent: [Float]
+    high_contrast: Bool
+}
+
+default_appearance: fn() -> PortalAppearance {
+    PortalAppearance{scheme: PortalScheme.NoPreference, accent: [Float]{}, high_contrast: false}
+}
+
+// Reads org.freedesktop.appearance from the portal; a portal that is not
+// running is `.Failed` with org.freedesktop.DBus.Error.ServiceUnknown.
+appearance: fn(&c: DbusConnection, timeout_ns: Int) -[Net, Time]> PortalAppearance DbusError! {
+    namespaces: DbusValue.Array{signature: "s", items: [DbusValue]{DbusValue.Text(APPEARANCE)}}
+    reply: call(c, PORTAL_NAME, PORTAL_PATH, SETTINGS, "ReadAll", [DbusValue]{namespaces}, timeout_ns) ?? return Err(err)
+    if reply.body.len() != 1 -> return Err(DbusError.Protocol("ReadAll answered {reply.signature}"))
+    if reply.signature != "a{ascii(123)}sa{ascii(123)}sv{ascii(125)}{ascii(125)}" -> return Err(DbusError.Protocol("ReadAll answered {reply.signature}"))
+    look := default_appearance()
+    if reply.body[0] == .Array(_, groups) {
+        loop group in groups {
+            if group == .Entry(name, settings) {
+                if name == DbusValue.Text(APPEARANCE) {
+                    if settings == .Array(_, pairs) {
+                        loop pair in pairs {
+                            if pair == .Entry(key, value) {
+                                if key == .Text(text) {
+                                    _: apply_setting(look, text, value.copy())
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Ok(look)
+}
+
+// Asks the bus for the appearance's SettingChanged signals and for the
+// portal's comings and goings.
+watch_appearance: fn(&c: DbusConnection, timeout_ns: Int) DbusError! -[Net, Time]> {
+    q: ascii(39)
+    add_match(c, "type={q}signal{q},interface={q}{SETTINGS}{q},member={q}SettingChanged{q},path={q}{PORTAL_PATH}{q},arg0={q}{APPEARANCE}{q}", timeout_ns) ?? return Err(err)
+    add_match(c, "type={q}signal{q},sender={q}{BUS_NAME}{q},interface={q}{BUS_NAME}{q},member={q}NameOwnerChanged{q},arg0={q}{PORTAL_NAME}{q}", timeout_ns)
+}
+
+// Applies an appearance SettingChanged signal to `look`: whether it changed.
+apply_signal: fn(&look: PortalAppearance, m: DbusMessage) -> Bool {
+    if m.kind != .Signal || m.interface != SETTINGS || m.member != "SettingChanged" || m.body.len() != 3 -> return false
+    if m.body[0] != DbusValue.Text(APPEARANCE) -> return false
+    if m.body[1] == .Text(key) -> return apply_setting(look, key, m.body[2].copy())
+    false
+}
+
+// Whether `m` says the portal has a new owner, so its settings are read anew.
+portal_restarted: fn(m: DbusMessage) -> Bool {
+    if m.kind != .Signal || m.interface != BUS_NAME || m.member != "NameOwnerChanged" || m.body.len() != 3 -> return false
+    if m.body[0] != DbusValue.Text(PORTAL_NAME) -> return false
+    if m.body[2] == .Text(owner) -> return owner != ""
+    false
+}
+
+// Sets one appearance key from its value (a variant, once or twice wrapped
+// as older portals' Read gave it): whether `look` changed. Values out of
+// the portal's range read as unset.
+apply_setting: fn(&look: PortalAppearance, key: String, value: DbusValue) -> Bool {
+    plain := value.copy()
+    loop _ in 0..<2 {
+        unwrapped: if plain == .Variant(inner) -> inner.copy() else -> plain.copy()
+        plain = unwrapped
+    }
+    if key == {
+        "color-scheme" -> set_scheme(look, number(plain))
+        "contrast" -> set_contrast(look, number(plain))
+        "accent-color" -> set_accent(look, accent_of(plain))
+        else -> false
+    }
+}
+
+// color-scheme: 1 dark, 2 light, anything else no preference.
+set_scheme: fn(&look: PortalAppearance, n: Int) -> Bool {
+    scheme: if n == {
+        1 -> PortalScheme.Dark
+        2 -> PortalScheme.Light
+        else -> PortalScheme.NoPreference
+    }
+    if scheme == look.scheme -> return false
+    look.scheme = scheme
+    true
+}
+
+// contrast: 1 high, anything else normal.
+set_contrast: fn(&look: PortalAppearance, n: Int) -> Bool {
+    high: n == 1
+    if high == look.high_contrast -> return false
+    look.high_contrast = high
+    true
+}
+
+set_accent: fn(&look: PortalAppearance, accent: [Float]) -> Bool {
+    if accent == look.accent -> return false
+    look.accent = accent
+    true
+}
+
+// accent-color: three doubles in 0..1, else unset (empty).
+accent_of: fn(value: DbusValue) -> [Float] {
+    accent := [Float]{}
+    if value == .Struct(parts) {
+        loop part in parts {
+            if part == .Double(f) {
+                inside: f >= Float{0.0} && f <= Float{1.0}
+                if inside -> accent.push(f)
+            }
+        }
+        if accent.len() != 3 || parts.len() != 3 -> accent.clear()
+    }
+    accent
+}
+
+// An integer setting's value, or -1.
+number: fn(value: DbusValue) -> Int {
+    if value == .Uint32(n) -> return n
+    if value == .Int32(n) -> return n
+    if value == .Byte(n) -> return n
+    NO_VALUE
+}
+
+// ---- test fixtures
+
+// A connected pair of sockets: the client's end and a fake bus's.
+TestBus: struct {
+    client: net.UnixStream
+    server: net.UnixStream
+}
+
+test_bus: fn(name: String) -[Env, Net, Time]> TestBus {
+    path: "{sys.temp_dir()}/jet-core-dbus-{sys.getpid()}-{name}.sock"
+    listener: net.unix_listen(path) ?? panic("listen on {path}: {err}")
+    client: net.unix_connect(path) ?? panic("connect to {path}: {err}")
+    server: net.unix_accept(listener) ?? panic("accept on {path}: {err}")
+    TestBus{client: client, server: server}
+}
+
+// What the fake bus will answer, written before the client asks.
+bus_says: fn(&server: net.UnixStream, bytes: [U8]) -[Net, Time]> {
+    net.unix_send(server, bytes, [sys.Fd]{}) ?? panic("the fake bus could not write: {err}")
+}
+
+// Everything the client has written to the fake bus.
+bus_heard: fn(&server: net.UnixStream) -[Net, Time]> [U8] {
+    out := [U8]{}
+    loop net.unix_wait(server, 0) ?? panic("the fake bus could not wait: {err}") {
+        got: net.unix_receive(server, RECEIVE_MAX) ?? panic("the fake bus could not read: {err}")
+        if got.bytes.len() == 0 -> break
+        append(out, got.bytes)
+    }
+    out
+}
+
+hello_call: fn() -> DbusMessage {
+    m := blank(DbusKind.Call)
+    m.path = BUS_PATH
+    m.interface = BUS_NAME
+    m.member = "Hello"
+    m.destination = BUS_NAME
+    m
+}
+
+reply_to: fn(serial: Int, body: [DbusValue]) -> DbusMessage {
+    m := blank(DbusKind.Return)
+    m.reply_serial = serial
+    m.sender = BUS_NAME
+    m.body = body
+    m
+}
+
+signal: fn(path: String, interface: String, member: String, body: [DbusValue]) -> DbusMessage {
+    m := blank(DbusKind.Signal)
+    m.path = path
+    m.interface = interface
+    m.member = member
+    m.sender = BUS_NAME
+    m.body = body
+    m
+}
+
+wire: fn(m: DbusMessage, serial: Int) -> [U8] { encode(m, serial) ?? panic("encode: {err}") }
+
+// The bytes `hex` spells.
+hex_bytes: fn(hex: String) -> [U8] {
+    digits: hex.bytes()
+    out := [U8]{}
+    loop i in 0..<(digits.len() /% 2) -> out.push(U8{hex_digit(Int.from_u8(digits[2 * i])) * 16 + hex_digit(Int.from_u8(digits[2 * i + 1]))})
+    out
+}
+
+append: fn(&out: [U8], bytes: [U8]) {
+    loop b in bytes -> out.push(b)
+}
+
+// A message of type `kind` built field by field, for headers `encode`
+// never writes.
+framed: fn(kind: Int, fields: [DbusValue], body: [U8]) -> [U8] {
+    out := [U8]{U8{108}, U8{kind}, U8{0}, U8{1}}
+    put_word(out, body.len(), 4)
+    put_word(out, 7, 4)
+    marshal(out, DbusValue.Array{signature: "(yv)", items: fields})
+    pad(out, 8)
+    append(out, body)
+    out
+}
+
+// The header of a signal whose body has `signature`.
+signal_fields: fn(signature: String) -> [DbusValue] {
+    fields := [DbusValue]{header_field(1, DbusValue.Path("/a")), header_field(2, DbusValue.Text("a.b")), header_field(3, DbusValue.Text("C"))}
+    if signature != "" -> fields.push(header_field(8, DbusValue.Signature(signature)))
+    fields
+}
+
+// The text of the protocol error `bytes` decode to.
+protocol_error: fn(bytes: [U8]) -> String {
+    if decode(bytes) == {
+        .Ok(_) -> panic("a hostile message decoded")
+        .Err(err) -> protocol_text(err)
+    }
+}
+
+protocol_text: fn(problem: DbusError) -> String {
+    if problem == .Protocol(text) -> return text.copy()
+    panic("not a protocol error: {problem}")
+}
+
+error_kind: fn(problem: DbusError) -> String {
+    if problem == {
+        .NoBus(_) -> "NoBus"
+        .Connect(_) -> "Connect"
+        .Auth(_) -> "Auth"
+        .Protocol(_) -> "Protocol"
+        .Closed -> "Closed"
+        .Timeout(_) -> "Timeout"
+        .Failed(_, _) -> "Failed"
+    }
+}
+
+start_error: fn(&&stream: net.UnixStream, timeout_ns: Int) -[Net, Time]> String {
+    if start(stream.move(), 1000, timeout_ns) == {
+        .Ok(_) -> "connected"
+        .Err(err) -> error_kind(err)
+    }
+}
+
+path_error: fn(address: String, runtime: String) -> String {
+    if session_path(address, runtime) == {
+        .Ok(path) -> "found {path}"
+        .Err(err) -> error_kind(err)
+    }
+}
+
+repeat: fn(text: String, times: Int) -> String {
+    out := ""
+    loop _ in 0..<times -> out = "{out}{text}"
+    out
+}
+
+#Test("a Hello call is the bytes every D-Bus client sends") {
+    want := hex_bytes("6c01000100000000010000006d000000")
+    append(want, hex_bytes("01016f0015000000"))
+    append(want, BUS_PATH.bytes())
+    append(want, hex_bytes("000000"))
+    append(want, hex_bytes("0201730014000000"))
+    append(want, BUS_NAME.bytes())
+    append(want, hex_bytes("00000000"))
+    append(want, hex_bytes("0301730005000000"))
+    append(want, "Hello".bytes())
+    append(want, hex_bytes("000000"))
+    append(want, hex_bytes("0601730014000000"))
+    append(want, BUS_NAME.bytes())
+    append(want, hex_bytes("00000000"))
+    assert_eq(want.len(), 128)
+    assert_eq(wire(hello_call(), 1), want)
+}
+
+#Test("every value type survives the wire") {
+    open: ascii(123)
+    close: ascii(125)
+    entry: DbusValue.Entry{key: DbusValue.Text("k"), value: DbusValue.Variant(DbusValue.Bool(false))}
+    inner: DbusValue.Array{signature: "y", items: [DbusValue]{DbusValue.Byte(9)}}
+    body: [DbusValue]{
+        DbusValue.Byte(255), DbusValue.Bool(true), DbusValue.Int16(-2), DbusValue.Uint16(65535),
+        DbusValue.Int32(-5), DbusValue.Uint32(4294967295), DbusValue.Int64(-9223372036854775807), DbusValue.Uint64(18446744073709551615),
+        DbusValue.Double(Float{-1.5}), DbusValue.Text("héllo"), DbusValue.Path("/a/b_1"), DbusValue.Signature("a{open}sv{close}"),
+        DbusValue.Variant(DbusValue.Int32(7)), DbusValue.Array{signature: "x", items: [DbusValue]{}},
+        DbusValue.Array{signature: "{open}sv{close}", items: [DbusValue]{entry}},
+        DbusValue.Struct([DbusValue]{DbusValue.Byte(1), DbusValue.Double(Float{0.25}), inner}),
+    }
+    m := signal("/a", "a.b", "C", body.copy())
+    m.destination = ":1.7"
+    bytes: wire(m, 9)
+    decoded: decode(bytes) ?? panic("decode: {err}")
+    assert_eq(decoded.used, bytes.len())
+    got: decoded.message ?? panic("a signal decoded as nothing")
+    assert_eq(got.kind, DbusKind.Signal)
+    assert_eq(got.serial, 9)
+    assert_eq(got.path, "/a")
+    assert_eq(got.interface, "a.b")
+    assert_eq(got.member, "C")
+    assert_eq(got.sender, BUS_NAME)
+    assert_eq(got.destination, ":1.7")
+    assert_eq(got.signature, "ybnqiuxtdsogvaxa{open}sv{close}(yday)")
+    assert_eq(got.body, body)
+    // An empty array of 8-aligned elements still pads to its first element.
+    empty: wire(signal("/a", "a.b", "C", [DbusValue]{DbusValue.Array{signature: "x", items: [DbusValue]{}}}), 2)
+    assert_eq(word(empty, 4, 4), 8)
+    // Half a message is no message yet.
+    assert_eq((decode(bytes[0..<10].copy()) ?? panic("short: {err}")).used, 0)
+    assert_eq((decode(bytes[0..<(bytes.len() - 1)].copy()) ?? panic("short: {err}")).used, 0)
+}
+
+#Test("hostile messages are protocol errors, never faults") {
+    hello: wire(hello_call(), 1)
+    changed := (at: Int, value: Int) -> {
+        out := hello.copy()
+        out[at] = U8{value}
+        out
+    }
+    assert_eq(protocol_error(changed(0, 66)), "a big-endian message arrived; only little-endian ones are read")
+    assert_eq(protocol_error(changed(0, 120)), "a message starts with byte 120, not an endianness mark")
+    assert_eq(protocol_error(changed(3, 2)), "a message has protocol version 2, not 1")
+    assert_eq(protocol_error(changed(8, 0)), "a message has serial 0")
+    assert_eq(protocol_error(changed(46, 1)), "padding at byte 46 is not zero")
+    assert_eq(protocol_error(changed(20, 200)), "a value runs past the end of its message or array")
+    huge_fields := hello.copy()
+    huge_fields[15] = U8{4}
+    huge_fields[12] = U8{1}
+    assert_eq(protocol_error(huge_fields), "a header's fields take 67108865 bytes, over the limit")
+    huge_body := hello.copy()
+    huge_body[4] = U8{255}
+    huge_body[5] = U8{255}
+    huge_body[6] = U8{255}
+    huge_body[7] = U8{7}
+    assert_eq(protocol_error(huge_body), "a message of 134217855 bytes is over the limit")
+    // Header fields: required ones, their types, and descriptors.
+    assert_eq(protocol_error(framed(1, [DbusValue]{header_field(1, DbusValue.Path("/a"))}, [U8]{})), "a method call has no member")
+    assert_eq(protocol_error(framed(1, [DbusValue]{header_field(1, DbusValue.Text("/a")), header_field(3, DbusValue.Text("m"))}, [U8]{})), "header field 1 holds a s, not a o")
+    assert_eq(protocol_error(framed(3, [DbusValue]{header_field(4, DbusValue.Text("a.B"))}, [U8]{})), "an error has no reply serial")
+    with_fds := signal_fields("")
+    with_fds.push(header_field(9, DbusValue.Uint32(1)))
+    assert_eq(protocol_error(framed(4, with_fds, [U8]{})), "a message carries Unix descriptors, which were not negotiated")
+    // Values.
+    assert_eq(protocol_error(framed(4, signal_fields("b"), [U8]{U8{2}, U8{0}, U8{0}, U8{0}})), "a boolean holds 2")
+    assert_eq(protocol_error(framed(4, signal_fields("s"), [U8]{U8{2}, U8{0}, U8{0}, U8{0}, U8{255}, U8{254}, U8{0}})), "a string is not UTF-8")
+    assert_eq(protocol_error(framed(4, signal_fields("s"), [U8]{U8{2}, U8{0}, U8{0}, U8{0}, U8{97}, U8{0}, U8{0}})), "a string holds a NUL")
+    assert_eq(protocol_error(framed(4, signal_fields("s"), [U8]{U8{1}, U8{0}, U8{0}, U8{0}, U8{97}, U8{98}})), "a string does not end in NUL")
+    assert_eq(protocol_error(framed(4, signal_fields("o"), [U8]{U8{3}, U8{0}, U8{0}, U8{0}, U8{97}, U8{47}, U8{98}, U8{0}})), "a/b is not an object path")
+    assert_eq(protocol_error(framed(4, signal_fields("h"), [U8]{U8{0}, U8{0}, U8{0}, U8{0}})), "a message names a Unix descriptor, but none were negotiated")
+    assert_eq(protocol_error(framed(4, signal_fields("ay"), [U8]{U8{1}, U8{0}, U8{0}, U8{4}})), "an array of 67108865 bytes is over the limit")
+    assert_eq(protocol_error(framed(4, signal_fields("y"), [U8]{U8{1}, U8{2}})), "a body is 1 bytes longer than its signature y")
+    assert_eq(protocol_error(framed(4, signal_fields("v"), [U8]{U8{2}, U8{105}, U8{105}, U8{0}, U8{1}, U8{0}, U8{0}, U8{0}})), "a variant's signature ii is not one complete type")
+    deep := [U8]{}
+    loop _ in 0..<65 -> append(deep, [U8]{U8{1}, U8{118}, U8{0}})
+    append(deep, [U8]{U8{1}, U8{121}, U8{0}, U8{5}})
+    assert_eq(protocol_error(framed(4, signal_fields("v"), deep)), "values nest deeper than 64")
+    nested: "{repeat("a", 33)}y"
+    assert_eq(protocol_error(framed(4, signal_fields(nested), [U8]{})), "{nested} is not a signature")
+    // A message of a type this client does not know is skipped whole.
+    unknown: framed(9, signal_fields("y"), [U8]{U8{1}})
+    skipped: decode(unknown) ?? panic("an unknown type is an error: {err}")
+    assert_eq(skipped.used, unknown.len())
+    assert(skipped.message == None, "an unknown type is skipped")
+}
+
+#Test("signatures are complete types within the nesting limits") {
+    open: ascii(123)
+    close: ascii(125)
+    good: [String]{"", "y", "a{open}sv{close}", "(ii)", "aa{open}s(ii){close}", "{repeat("a", 32)}y", "{repeat("(", 32)}y{repeat(")", 32)}", repeat("y", 255)}
+    loop text in good -> assert(valid_signature(text), "{text} is a signature")
+    bad: [String]{"a", "()", "{open}sv{close}", "a{open}vs{close}", "a{open}sss{close}", "(i", "i)", "z", "{repeat("a", 33)}y", "{repeat("(", 33)}y{repeat(")", 33)}", repeat("y", 256)}
+    loop text in bad -> assert(!valid_signature(text), "{text} is not a signature")
+}
+
+#Test("the session bus is found from its address or the runtime directory") {
+    assert_eq(session_path("unix:path=/run/user/1000/bus", "") ?? panic("{err}"), "/run/user/1000/bus")
+    assert_eq(session_path("unix:path=/tmp/a%20b,guid=1234", "") ?? panic("{err}"), "/tmp/a b")
+    assert_eq(session_path("tcp:host=x,port=1;unix:path=/b", "") ?? panic("{err}"), "/b")
+    assert_eq(session_path("unix:runtime=yes", "/run/user/7") ?? panic("{err}"), "/run/user/7/bus")
+    assert_eq(session_path("", "/run/user/7") ?? panic("{err}"), "/run/user/7/bus")
+    assert_eq(path_error("", ""), "NoBus")
+    assert_eq(path_error("unix:abstract=/tmp/dbus-x", ""), "NoBus")
+    assert_eq(path_error("unix:path=/a%2", ""), "NoBus")
+    assert_eq(path_error("unix:runtime=yes", ""), "NoBus")
+}
+
+#Test("a bus connection authenticates, reads the portal's appearance and hears it change") {
+    open: ascii(123)
+    close: ascii(125)
+    bus := test_bus("appearance")
+    ping := blank(DbusKind.Call)
+    ping.path = "/x"
+    ping.interface = "org.freedesktop.DBus.Peer"
+    ping.member = "Ping"
+    ping.sender = ":1.9"
+    accent: DbusValue.Struct([DbusValue]{DbusValue.Double(Float{0.25}), DbusValue.Double(Float{0.5}), DbusValue.Double(Float{1.0})})
+    settings: [DbusValue]{
+        DbusValue.Entry{key: DbusValue.Text("color-scheme"), value: DbusValue.Variant(DbusValue.Uint32(1))},
+        DbusValue.Entry{key: DbusValue.Text("accent-color"), value: DbusValue.Variant(accent)},
+        DbusValue.Entry{key: DbusValue.Text("contrast"), value: DbusValue.Variant(DbusValue.Uint32(1))},
+        DbusValue.Entry{key: DbusValue.Text("reduced-motion"), value: DbusValue.Variant(DbusValue.Uint32(1))},
+    }
+    group: DbusValue.Entry{key: DbusValue.Text(APPEARANCE), value: DbusValue.Array{signature: "{open}sv{close}", items: settings}}
+    script := [U8]{}
+    append(script, "OK 0123456789abcdef0123456789abcdef\r\n".bytes())
+    append(script, wire(reply_to(1, [DbusValue]{DbusValue.Text(":1.42")}), 1))
+    append(script, wire(signal(BUS_PATH, BUS_NAME, "NameAcquired", [DbusValue]{DbusValue.Text(":1.42")}), 2))
+    append(script, wire(ping, 3))
+    append(script, wire(reply_to(2, [DbusValue]{DbusValue.Array{signature: "{open}sa{open}sv{close}{close}", items: [DbusValue]{group}}}), 4))
+    bus_says(bus.server, script)
+    c := start(bus.client.move(), 1000, 1000000000) ?? panic("start: {err}")
+    assert_eq(c.name, ":1.42")
+    look := appearance(c, 1000000000) ?? panic("appearance: {err}")
+    assert_eq(look.scheme, PortalScheme.Dark)
+    assert_eq(look.accent, [Float]{Float{0.25}, Float{0.5}, Float{1.0}})
+    assert(look.high_contrast, "the desktop asks for high contrast")
+    // What the client said: the credentials byte, EXTERNAL for uid 1000,
+    // BEGIN, Hello, ReadAll, and UnknownMethod for the Ping.
+    heard: bus_heard(bus.server)
+    want := [U8]{U8{0}}
+    append(want, "AUTH EXTERNAL 31303030\r\nBEGIN\r\n".bytes())
+    append(want, wire(hello_call(), 1))
+    assert_eq(heard[0..<want.len()].copy(), want)
+    rest: heard[want.len()..<heard.len()].copy()
+    first: decode(rest) ?? panic("ReadAll: {err}")
+    read_all: first.message ?? panic("ReadAll decoded as nothing")
+    assert_eq(read_all.kind, DbusKind.Call)
+    assert_eq(read_all.serial, 2)
+    assert_eq(read_all.destination, PORTAL_NAME)
+    assert_eq(read_all.path, PORTAL_PATH)
+    assert_eq(read_all.interface, SETTINGS)
+    assert_eq(read_all.member, "ReadAll")
+    assert_eq(read_all.body, [DbusValue]{DbusValue.Array{signature: "s", items: [DbusValue]{DbusValue.Text(APPEARANCE)}}})
+    second: decode(rest[first.used..<rest.len()].copy()) ?? panic("UnknownMethod: {err}")
+    refusal: second.message ?? panic("UnknownMethod decoded as nothing")
+    assert_eq(refusal.kind, DbusKind.Error)
+    assert_eq(refusal.serial, 3)
+    assert_eq(refusal.reply_serial, 3)
+    assert_eq(refusal.error_name, UNKNOWN_METHOD)
+    assert_eq(refusal.destination, ":1.9")
+    assert_eq(first.used + second.used, rest.len())
+    // The signal that came during the calls waited in the queue.
+    queued: signals(c, 0) ?? panic("signals: {err}")
+    assert_eq(queued.len(), 1)
+    assert_eq(queued[0].member, "NameAcquired")
+    // A setting changes, then the portal restarts.
+    later := [U8]{}
+    append(later, wire(signal(PORTAL_PATH, SETTINGS, "SettingChanged", [DbusValue]{DbusValue.Text(APPEARANCE), DbusValue.Text("color-scheme"), DbusValue.Variant(DbusValue.Uint32(2))}), 5))
+    append(later, wire(signal(BUS_PATH, BUS_NAME, "NameOwnerChanged", [DbusValue]{DbusValue.Text(PORTAL_NAME), DbusValue.Text(":1.5"), DbusValue.Text(":1.6")}), 6))
+    bus_says(bus.server, later)
+    got: signals(c, 1000000000) ?? panic("signals: {err}")
+    assert_eq(got.len(), 2)
+    assert(apply_signal(look, got[0].copy()), "the colour scheme changed")
+    assert_eq(look.scheme, PortalScheme.Light)
+    assert(!apply_signal(look, got[0].copy()), "the same scheme again changes nothing")
+    assert(!apply_signal(look, got[1].copy()), "a restart is no setting")
+    assert(portal_restarted(got[1].copy()), "the portal has a new owner")
+    assert(!portal_restarted(got[0].copy()), "a setting is no restart")
+}
+
+#Test("a refused uid, a missing portal, a closed bus and a silent bus are typed errors") {
+    ok: "OK 0123456789abcdef0123456789abcdef\r\n".bytes()
+    refused := test_bus("refused")
+    bus_says(refused.server, "REJECTED EXTERNAL\r\n".bytes())
+    assert_eq(start_error(refused.client.move(), 1000000000), "Auth")
+    closed := test_bus("closed")
+    bus_says(closed.server, ok.copy())
+    net.unix_shutdown(closed.server, NetShutdown.Write) ?? panic("shutdown: {err}")
+    assert_eq(start_error(closed.client.move(), 1000000000), "Closed")
+    silent := test_bus("silent")
+    bus_says(silent.server, ok.copy())
+    assert_eq(start_error(silent.client.move(), 20000000), "Timeout")
+    absent := test_bus("absent")
+    missing := blank(DbusKind.Error)
+    missing.reply_serial = 2
+    missing.error_name = "org.freedesktop.DBus.Error.ServiceUnknown"
+    missing.body = [DbusValue]{DbusValue.Text("The name is not activatable")}
+    script := ok.copy()
+    append(script, wire(reply_to(1, [DbusValue]{DbusValue.Text(":1.43")}), 1))
+    append(script, wire(missing, 2))
+    bus_says(absent.server, script)
+    c := start(absent.client.move(), 1000, 1000000000) ?? panic("start: {err}")
+    if appearance(c, 1000000000) == {
+        .Ok(_) -> panic("an absent portal answered")
+        .Err(err) -> assert_eq(err, DbusError.Failed{name: "org.freedesktop.DBus.Error.ServiceUnknown", message: "The name is not activatable"})
+    }
+}
