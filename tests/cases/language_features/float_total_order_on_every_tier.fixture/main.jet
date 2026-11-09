@@ -28,9 +28,10 @@ run: fn() {
     print(xs.min() == -inf)
     print(nan < 1.0)
     print(nan.compare(1.0) == .Greater)
-    print((1.5 <=> 2.5) == .Less)
-    print((-0.0 <=> 0.0) == .Less)
-    print(-0.0 < 0.0)
+    // A bare `-0.0` is a Decimal, where -0 equals 0; these compare Floats.
+    print((Float{1.5} <=> Float{2.5}) == .Less)
+    print((Float{-0.0} <=> Float{0.0}) == .Less)
+    print(Float{-0.0} < Float{0.0})
     print(big(1.5, 2.5))
     print(big(nan, 1.0).is_nan())
     low: Reading{value: 1.0, label: "low"}
