@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 97650,
+    "rev": 97654,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -57594,7 +57594,7 @@
       "parentId": "c02y3vkg",
       "needsAcceptance": false,
       "created": "2026-10-16T10:54:42.264Z",
-      "updated": "2026-11-07T03:27:51.733Z",
+      "updated": "2026-11-09T19:38:09.043Z",
       "updatedBy": "Main",
       "goals": [
         "G6"
@@ -63474,6 +63474,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-09T19:38:04.778Z"
+        },
+        {
+          "n": 13,
+          "text": "(was #679 c3, #1034 c3, #1037 c3) Missing entry, ambiguous project, unsupported host, install failure, invalid code, and offline state offer a tested recovery path [precut audit: failing on 9c7ddf1359: C:onboarding_recovery/entry_recovery_covers_missing_ambiguous_legacy_and_stale_layouts KNOWN-FAILING #6068 unbuilt: jet run does not migrate retired entry layouts (main.jet to run.jet): wrong file kind: legacy/run.jet (known-failing #6068: unbuilt: jet run does not migrate…] (was #6068 c8)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T19:38:10.078Z"
         }
       ],
       "refs": [],
@@ -63486,12 +63495,12 @@
       "parentId": "c0h4r83r",
       "needsAcceptance": false,
       "created": "2026-10-28T11:02:34.272Z",
-      "updated": "2026-11-09T19:38:04.778Z",
+      "updated": "2026-11-09T19:38:10.078Z",
       "updatedBy": "Main",
       "goals": [
         "G7"
       ],
-      "criteriaLastN": 12
+      "criteriaLastN": 13
     },
     {
       "id": "c084tcrl",
@@ -71799,15 +71808,6 @@
           "at": "2026-10-28T21:05:41.283Z"
         },
         {
-          "n": 8,
-          "text": "(was #679 c3, #1034 c3, #1037 c3) Missing entry, ambiguous project, unsupported host, install failure, invalid code, and offline state offer a tested recovery path [precut audit: failing on 9c7ddf1359: C:onboarding_recovery/entry_recovery_covers_missing_ambiguous_legacy_and_stale_layouts KNOWN-FAILING #6068 unbuilt: jet run does not migrate retired entry layouts (main.jet to run.jet): wrong file kind: legacy/run.jet (known-failing #6068: unbuilt: jet run does not migrate…]",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T19:38:07.525Z"
-        },
-        {
           "n": 10,
           "text": "(was #1727 c1) jet fix produces the same plan value jet codemod does and records an undo log [precut audit: failing on 9c7ddf1359: C:cli_runtime/jet_fix_apply_writes_replay_log_and_undo_restores_source FAIL snapshot mismatch: tests/cases/cli_runtime/printfamily.fixed.out]",
           "status": "met",
@@ -71832,7 +71832,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T21:05:41.283Z",
-      "updated": "2026-11-09T19:38:07.525Z",
+      "updated": "2026-11-09T19:38:11.265Z",
       "updatedBy": "Main",
       "goals": [
         "G7"
@@ -87096,6 +87096,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-07T14:18:33.558Z"
+        },
+        {
+          "n": 3,
+          "text": "(was #2377 c1) R, Perl, PHP, Ruby, PowerShell, and Octave generators emit one typed decode_response helper per binding, every generated operation delegates through it, protocol-specific raw extern access remains available, generated error domains are valid, and focused renderer plus real Octave round-trip tests pass [precut audit: no dev test, golden, case or snapshot proves this today] (was #6517 c1)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T19:38:12.914Z"
         }
       ],
       "refs": [],
@@ -87110,9 +87119,9 @@
       "parentId": "c0rkebo4",
       "needsAcceptance": false,
       "created": "2026-11-01T00:50:33.092Z",
-      "updated": "2026-11-07T14:18:33.558Z",
+      "updated": "2026-11-09T19:38:12.914Z",
       "updatedBy": "Main",
-      "criteriaLastN": 2
+      "criteriaLastN": 3
     },
     {
       "id": "c05aa8kj",
@@ -188362,6 +188371,242 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-09T19:36:16.324Z"
+    },
+    {
+      "id": "D-JAI-GENERIC1",
+      "cardId": "c0ygtwb9",
+      "group": "syntax",
+      "title": "##Pre: a contract checked for each use while compiling, the marker rule for ##, and Jai's baking controls",
+      "situation": "A generic function works for many settings, such as a fast sum that adds 4, 8 or 16 numbers at a time. Jet can already require a type to have certain methods, but it cannot state a rule such as the lane count must be 4, 8 or 16. Today that rule is a contract checked while the program runs, so a bad call stops later. You suggested writing two hashes before a marker to mean it runs while compiling, so the parameters it reads need no separate label. This vote decides that form, which markers may use it, and how Jet answers Jai's baking controls.",
+      "gist": "Should ##Pre mark a rule that is checked while compiling, so a bad call fails at the caller's line?",
+      "lesson": "A generic function is one function written for many settings. A contract is a rule about the arguments, written #Pre(condition, \"message\") above the function. Today Jet checks it while the program runs. Two hashes would mean the rule runs while compiling, once for each use, so a bad call never builds.",
+      "explainer": "Words used here. A generic function takes settings that are fixed for each use, such as a type or a lane count. A bound is a trait the setting must have, as in T: Shape. A contract is #Pre(condition, \"message\") above a function, checked when it is called. Compile-time means known while Jet builds the program. An instance is one compiled copy of a generic function for one set of settings.",
+      "story": "Ola ports a Jai math library. Its simd_sum adds 4, 8 or 16 numbers at a time, chosen by the caller. In Jai the author rejects 6 lanes at the caller's line with a clear message. In Jet the call builds, and the program stops while running with a contract error. Ola wants her users to see the message before the program ever runs.",
+      "inWild": "// Jai: #modify runs for each new instance and may refuse it\nsimd_sum :: (xs: [] float, $lanes: int) -> float #modify {\n    if lanes != 4 && lanes != 8 && lanes != 16  return false, \"lanes must be 4, 8 or 16\";\n    return true;\n} { ... }\n\n// C++20: a requires-clause on the signature; no author message\ntemplate<int Lanes> requires (Lanes == 4 || Lanes == 8 || Lanes == 16)\nfloat simd_sum(std::span<const float> xs);",
+      "detail": "Owner question q8sdri5o suggests ## and inferred static parameters; it is not ratification. HASH1 retires dollar pastes but does not ratify ##Pre. DECL-COLON1 puts kind parameters on fn. The archived TYPEFN1 recipe decision is historical context.\n\nObserved: g1 prints 3 then E3005 at default and full optimization. g2b gives E0390 for static number parameters; g3 gives E0003 for ##Pre; g4 gives E0302 in an unused bounded generic. New g6 gives E0905 at the Bool call under T: Add. g7 gives E0360 at the unbounded definition. These probes do not implement the options.\n\nA uses the existing contract IR and evaluator with required-early disposition. Type-check condition and message at definition. Promote their parameter dependencies to the existing static-parameter mode and instance key. Unknown values, effects and exhausted budget are errors. Keep proof metadata but emit no second runtime evaluation. Preserve static modes in defaults, wrappers and function-value calls; reject erasure. A never selects overloads by a failing predicate.\n\nMarker gains early: Bool, default false. An opting-in kind must have condition: Value, checked as Bool, and message: String. Invalid declarations and ## uses on non-opting kinds are registered errors. Every opted-in kind uses the same contract engine, not an independent expand-time assertion path. Only Pre opts in here. A user marker with that shape may write ##Check(lanes > 0, \"lanes must be positive\"). Post remains unsupported. Mixed static/runtime clauses stay separate.\n\nB keeps required checks but writes static parameter modes explicitly. C determines timing from declared static inputs, not optimizer success. A false static predicate must fail early under C; genuine runtime predicates remain runtime checks. D adds per-instance unbounded-body checking to A. Its sum and Bool example expose that separate choice rather than pretending it follows from ##.\n\nB18, required specialization: one instance per declaration and normalized static argument vector, including type identity where applicable. Equal arguments share the logical instance across modules. Artifact keys also include compiler, target and source identity. Distinct values may grow code; inspect lists instances and emitted sizes. No arbitrary mutable or process-bound value becomes a static identity.\n\nB19, partial application: sum4 is an ordinary wrapper with its own function identity, calling the same lanes=4 instance as a direct call. It does not authorize a second copy of the implementation. Proof checks logical target identity, not assumed optimizer inlining.\n\nB20, optional auto-baking, is an owner choice, not silently refused. E below preserves it through an explicit optional parameter mode. A recommends required static parameters or ordinary runtime parameters instead, but choosing A would decline that optional capability. No Jai-parity claim may hide this loss. WORD1's optional value evaluation alone is not specialization.\n\nE adds comptime? before an ordinary value parameter. At a call, the shared evaluator tries that argument under the normal try budget. A successful storable value selects its value-keyed instance; a runtime input or failed/exhausted try uses the general runtime entry. The body remains definition-checked, so optional mode is not duck typing. The declaration still has one name; a bare function value denotes its general entry, and specialization handles remain explicit.\n\nAn ordinary #Pre over only successfully baked E parameters is checked early; otherwise it checks at runtime. Thus error timing may differ between calls, which E explicitly opts into. ##Pre retains its required guarantee: reading an optional parameter promotes it to required mode and diagnoses that change on hover. Optional specialization must not alter successful values, effects, exits or function-value identity. Code size and compile work grow with successful distinct values; fallback emits no false early success.\n\n#3526 c20: a Compiler holder may request meta.instance(simd_sum, lanes: 8) before a call. It returns the same logical specialization handle and runs all bounds and required contracts. It cannot mark constraints checked. Under E this explicit request requires its named values; it never silently returns the runtime entry. Procedure-of-call identity remains SITE1.\n\nB24/B25 remain explicit open acceptance: type values and factories are not proved by these sums. #3505 keeps static-number parameters on declared types; #3526 c13 keeps advanced factories. Computed/defaulted type arguments remain on this card. B26's per-instance branching is unchanged, not proof of the other rows.\n\nThe Jai snippets are historical reconstructions from The Way to Jai and the audit, not current compiler measurements. Beginners get a call-site message from required contracts. Experts see modes, instance identities, budgets, optional fallbacks and higher-order restrictions. Register each new spelling/error with UI snapshots and cross-tier cases; no proposed mode is claimed working today.",
+      "options": [
+        {
+          "key": "A",
+          "name": "##Pre, a rule checked while compiling",
+          "detail": "##Pre runs while compiling, once for each use of the function. A false rule is a compile error at the caller's line with the author's message. Every parameter it reads becomes compile-time with no label, and the call passes it in its usual place.",
+          "technical": "Use the existing contract IR with a required-early disposition. ## promotes condition and message dependencies to the existing compile-time parameter mode and instance identity; it is not a second evaluator. Type-check declarations first, evaluate per instance, retain proof metadata and emit no runtime recheck. Preserve static modes through defaults, wrappers and function-value calls; reject erasure. Unknown values, effects or budget exhaustion are registered errors. ##Post remains out of scope.\n\nMarker gains early: Bool (default false); only kinds with a Bool condition and a String message may set it, and only Pre does here. Instances are keyed by declaration plus compile-time values; meta.instance requests one ahead of a call and runs every ##Pre and bound.",
+          "code": "// Proposed; not implemented. This example validates a lane setting, not a SIMD optimization.\n// Prelude/Markers.jet: Pre opts in to ##\nPre: struct {\n    condition: Value\n    message: String\n    impl Marker {\n        sites: [.Function, .Method]\n        repeatable: true\n        early: true          // new: may be written ##Pre\n    }\n}\n\n##Pre(lanes == 4 || lanes == 8 || lanes == 16, \"lanes must be 4, 8 or 16\")\nsimd_sum: fn(lanes: Int, xs: [Int]) -> Int {\n    total := 0\n    loop x in xs -> total += x\n    total\n}\nsum4: fn(xs: [Int]) -> Int { simd_sum(4, xs) }   // Jai #bake_arguments\nrun: fn() {\n    print(simd_sum(8, [1, 2, 3, 4])) // 10\n    print(sum4([1, 2]))              // 3, the lanes = 4 instance\n    print(simd_sum(6, [1, 2, 3, 4])) // compile error at this call\n}\n// ##Post(result > 0, \"…\") is an error: Post does not set early"
+        },
+        {
+          "key": "B",
+          "name": "##Pre on kind-word parameters only",
+          "detail": "The same ## rule, but it may read only parameters already declared compile-time on the kind word. Callers pass the number in angle brackets.",
+          "technical": "As A, without the mode change. A ##Pre that reads an ordinary parameter is a registered error whose fix moves it to fn<comptime N: Int>.",
+          "code": "// Proposed; not implemented.\n##Pre(lanes == 4 || lanes == 8 || lanes == 16, \"lanes must be 4, 8 or 16\")\nsimd_sum: fn<comptime lanes: Int>(xs: [Int]) -> Int {\n    total := 0\n    loop x in xs -> total += x\n    total\n}\nrun: fn() {\n    print(simd_sum<8>([1, 2, 3, 4])) // 10\n    print(simd_sum<6>([1, 2, 3, 4])) // compile error at this call\n}"
+        },
+        {
+          "key": "C",
+          "name": "#Pre, timed by what it reads",
+          "detail": "No new sigil. A #Pre whose condition reads only compile-time values is checked while compiling for each use; otherwise it is checked while running. Parameters still need the compile-time label.",
+          "technical": "Classify by declared compile-time inputs, not optimizer success. A false static predicate is a required early error; a genuinely runtime predicate remains a runtime check. This differs from WORD1's optional try-and-fallback rule.",
+          "code": "// Proposed; not implemented.\n#Pre(lanes == 4 || lanes == 8 || lanes == 16, \"lanes must be 4, 8 or 16\")\nsimd_sum: fn<comptime lanes: Int>(xs: [Int]) -> Int {\n    total := 0\n    loop x in xs -> total += x\n    total\n}\nrun: fn() {\n    print(simd_sum<8>([1, 2, 3, 4])) // 10\n    print(simd_sum<6>([1, 2, 3, 4])) // compile error at this call\n}"
+        },
+        {
+          "key": "D",
+          "name": "A, plus open generics",
+          "detail": "Everything in A, unchanged. In addition, a type parameter with no bound has its body checked separately for each use, so the body may use any member the type has, as in Zig and Jai.",
+          "technical": "As A. Bodies whose type parameters have no bound are checked per instance, reversing the checked-at-the-definition rule for them.",
+          "code": "// Proposed; not implemented. A's contract, plus an unbounded T.\n##Pre(lanes == 4 || lanes == 8 || lanes == 16, \"lanes must be 4, 8 or 16\")\nsimd_sum: fn<T>(lanes: Int, xs: [T], zero: T) -> T {\n    total := zero\n    loop x in xs -> total += x     // allowed: checked for each T\n    total\n}\nrun: fn() {\n    print(simd_sum(8, [1, 2, 3, 4], 0))      // 10\n    print(simd_sum(4, [true, false], false)) // error inside simd_sum: Bool has no +\n}\n// under A the same body needs fn<T: Add>, and the Bool call fails at the caller (g6: E0905)"
+        },
+        {
+          "key": "E",
+          "name": "A, plus explicit optional auto-baking",
+          "detail": "Keep required ##Pre. Also let a parameter marked comptime? specialize when its argument can be computed early, and use the ordinary runtime function otherwise. This preserves the optional Jai capability instead of declining it.",
+          "technical": "Proposed ordinary parameter mode comptime? shares required parameters' evaluator and instance identity. Successful static arguments select a value instance; unknown, failed or over-budget tries choose the general entry. Bodies remain definition-checked. Bare function values denote the general entry. Ordinary #Pre checks early only on a baked instance, otherwise at runtime; ##Pre still requires its dependencies. Cache and tooling record fallback, instance and code-size costs.",
+          "code": "// Proposed E, not implemented. Required ##Pre remains available as in A.\n#Pre(lanes == 4 || lanes == 8 || lanes == 16, \"lanes must be 4, 8 or 16\")\nsimd_sum: fn(comptime? lanes: Int, xs: [Int]) -> Int {\n    total := 0\n    loop x in xs -> total += x\n    total\n}\nrun: fn() {\n    print(simd_sum(8, [1, 2, 3, 4])) // 10, baked lanes=8\n    lanes: read_lanes()             // runtime input supplied by the application\n    print(simd_sum(lanes, [1, 2, 3, 4])) // general entry, same value for valid lanes\n    print(simd_sum(6, [1, 2, 3, 4])) // early error when the optional try succeeds\n}\n// With runtime lanes=6, the general entry stops on #Pre instead."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Jai",
+          "note": "#modify runs compile-time code for each new instance and may refuse it with a message, per The Way to Jai, Appendix C, and audit row B15. Not run here: Jai is not public.",
+          "code": "simd_sum :: (xs: [] float, $lanes: int) -> float #modify {\n    if lanes != 4  return false, \"lanes must be 4\";\n    return true;\n} { ... }"
+        },
+        {
+          "lang": "C++20",
+          "note": "A requires-clause states the rule on the signature but carries no author message; static_assert in the body does (cppreference, constraints).",
+          "code": "template<int Lanes> requires (Lanes == 4 || Lanes == 8 || Lanes == 16)\nfloat simd_sum(std::span<const float> xs);"
+        },
+        {
+          "lang": "Zig",
+          "note": "Generic bodies are checked per call; @compileError stops the build from inside the body (ziglang.org/documentation/master, @compileError).",
+          "code": "if (lanes != 4 and lanes != 8 and lanes != 16) @compileError(\"lanes must be 4, 8 or 16\");"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "##Pre puts the rule and its timing on the signature and rejects a bad use at the caller's line. The parameters it reads become compile-time without a label, as you suggested.",
+        "gains": [
+          "Errors on the caller's line, with the author's message.",
+          "Timing of this contract is explicit: ## requires an early answer.",
+          "No compile-time label on the parameters a rule reads."
+        ],
+        "losses": [
+          {
+            "loss": "A parameter read by ##Pre must be known while compiling.",
+            "mitigation": "The rule sits on the signature, and a run-time value gets an error naming the ##Pre line."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B makes the mode explicit at the parameter, which helps higher-order interfaces, but asks for an annotation and angle-bracket arguments."
+          },
+          {
+            "key": "C",
+            "reason": "One marker checked at two times hides when a rule runs, and parameters still need labels."
+          },
+          {
+            "key": "D",
+            "reason": "Open generics is a separate policy choice; g4 only establishes definition checking for a bounded generic, not the whole proposed D policy."
+          },
+          {
+            "key": "E",
+            "reason": "E preserves optional auto-baking, but deliberately permits call-dependent check timing and more specialization work/code. A prefers a fixed static or runtime interface; declining E is an explicit owner tradeoff."
+          }
+        ],
+        "tradeoff": "A adds visible required contracts but declines optional auto-baking; E preserves that capability at explicit compile-time, code-size and diagnostic-timing cost."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: GPT. Fresh agent: BallotReview. The 2026-11-09 re-review found it clean after the reviewer added option E for optional auto-baking, so declining it is now the owner's choice."
+      },
+      "checkInstructions": "Run g1, g2b, g3, g4, g6 and g7 with jet run from the dev tree, and g1 with --optimize=full. Then run Tools/agent/ballots/Validate.jet on the payload. Static-number parameters and ##Pre are not implemented. B24 and B25 stay open with the owners named in the detail.",
+      "surface": {
+        "gist": "Should ##Pre mark a rule that is checked while compiling, so a bad call fails at the caller's line?",
+        "lesson": "A contract is a rule about arguments, written #Pre(condition, \"message\"). Today Jet checks it while the program runs. Two hashes would mean it runs while compiling, once per use, so a bad call never builds.",
+        "trio": {
+          "current": {
+            "note": "The rule is checked only while the program runs.",
+            "code": "#Pre(lanes == 4 || lanes == 8 || lanes == 16, \"lanes must be 4, 8 or 16\")\nsimd_sum: fn(lanes: Int, xs: [Int]) -> Int { … }\nsimd_sum(6, [1, 2])\n// Stop [E3005]: #Pre contract failed: lanes must be 4, 8 or 16"
+          },
+          "wild": {
+            "lang": "Jai",
+            "note": "Per The Way to Jai, #modify may refuse an instance with a message.",
+            "code": "simd_sum :: (xs: [] float, $lanes: int) -> float #modify {\n    if lanes != 4  return false, \"lanes must be 4\";\n    return true;\n} { ... }"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "##Pre, checked while compiling",
+            "gist": "##Pre checks each use while compiling; parameters it reads become compile-time.",
+            "gains": [
+              "Error on the caller's line, with the author's message.",
+              "No compile-time label on the parameters it reads."
+            ],
+            "losses": [
+              "Those parameters must be known while compiling."
+            ],
+            "proposed": {
+              "code": "##Pre(lanes == 4 || lanes == 8 || lanes == 16, \"lanes must be 4, 8 or 16\")\nsimd_sum: fn(lanes: Int, xs: [Int]) -> Int { … }\n\nsimd_sum(6, readings)\n// error: lanes must be 4, 8 or 16 (lanes = 6)\n//   --> game.jet:11:11"
+            }
+          },
+          {
+            "key": "B",
+            "name": "##Pre on labeled parameters",
+            "gist": "The same check, but the parameter keeps its compile-time label.",
+            "gains": [
+              "Parameter modes are explicit in the signature."
+            ],
+            "losses": [
+              "A label and angle brackets at every call."
+            ],
+            "proposed": {
+              "code": "##Pre(lanes == 4 || lanes == 8 || lanes == 16, \"lanes must be 4, 8 or 16\")\nsimd_sum: fn<comptime lanes: Int>(xs: [Int]) -> Int { … }\nsimd_sum<6>(readings)   // the same error"
+            }
+          },
+          {
+            "key": "C",
+            "name": "#Pre, timed by what it reads",
+            "gist": "#Pre is checked while compiling when it reads only compile-time values.",
+            "gains": [
+              "No new sigil."
+            ],
+            "losses": [
+              "One marker checked at two different times."
+            ],
+            "proposed": {
+              "code": "#Pre(lanes == 4 || lanes == 8 || lanes == 16, \"lanes must be 4, 8 or 16\")\nsimd_sum: fn<comptime lanes: Int>(xs: [Int]) -> Int { … }\nsimd_sum<6>(readings)   // the same error"
+            }
+          },
+          {
+            "key": "D",
+            "name": "A, plus open generics",
+            "gist": "As A, and a type parameter with no bound allows any member.",
+            "gains": [
+              "Jai's and Zig's duck typing."
+            ],
+            "losses": [
+              "Errors appear inside library bodies."
+            ],
+            "proposed": {
+              "code": "simd_sum: fn<T>(lanes: Int, xs: [T], zero: T) -> T {\n    total := zero\n    loop x in xs -> total += x\n    total\n}\nsimd_sum(4, [true, false], false)\n// error inside simd_sum: Bool has no +"
+            }
+          },
+          {
+            "key": "E",
+            "name": "Optional auto-baking",
+            "gist": "A constant argument gets a specialization; runtime arguments still work.",
+            "gains": [
+              "Preserves the optional Jai capability",
+              "One declaration serves both call paths"
+            ],
+            "losses": [
+              "More compile work and code",
+              "Some checks move between build time and runtime"
+            ],
+            "proposed": {
+              "code": "// Proposed; not implemented.\n#Pre(lanes == 4 || lanes == 8 || lanes == 16, \"bad lanes\")\nsimd_sum: fn(comptime? lanes: Int, xs: [Int]) -> Int {\n    total := 0\n    loop x in xs -> total += x\n    total\n}\n// simd_sum(8, readings): baked instance\n// simd_sum(runtime_lanes, readings): general runtime entry"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "##Pre puts the rule and its timing on the signature and rejects a bad use at the caller's line. Parameters it reads need no label.",
+          "gains": [
+            "Clear errors at the caller.",
+            "## requires an early answer; it does not redefine all ordinary markers."
+          ],
+          "losses": [
+            {
+              "loss": "Parameters it reads must be known while compiling.",
+              "mitigation": "A run-time value gets an error naming the ##Pre line."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B exposes modes at parameters but adds annotations and angle-bracket arguments."
+            },
+            {
+              "key": "C",
+              "reason": "One marker checked at two times hides when a rule runs."
+            },
+            {
+              "key": "D",
+              "reason": "Open-generic body policy is a separate choice from contract timing."
+            },
+            {
+              "key": "E",
+              "reason": "Preserves optional specialization, at the cost of more compile work, code and call-dependent check timing. Declining it is the owner's choice."
+            }
+          ],
+          "tradeoff": "A declines optional auto-baking; E keeps it with explicit costs."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-09T19:38:09.043Z"
     }
   ],
   "questions": [
@@ -191460,6 +191705,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-09T19:38:12.914Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c03yyxl3",
+      "note": "#3 (was #2377 c1) R, Perl, PHP, Ruby, PowerShell, and Octave ge"
+    },
+    {
+      "at": "2026-11-09T19:38:11.265Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0810bga",
+      "note": "#8: BoardPlanner review 2026-11-09 (dev 6a06b917cb). Moved to #5950: onboarding is install-to-first-run (#5950); #6068 waits for v1 preparation.; was [open]: (was #679 c3, #1034 c3, #1037 c3) Missing entry, ambiguous project, unsupported host, install failure, invalid code, and offline state offer a tested recovery path [precut audit: failing on 9c7ddf1359"
+    },
+    {
+      "at": "2026-11-09T19:38:10.078Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c050uwwc",
+      "note": "#13 (was #679 c3, #1034 c3, #1037 c3) Missing entry, ambiguous p"
+    },
+    {
+      "at": "2026-11-09T19:38:09.043Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-JAI-GENERIC1",
+      "note": "##Pre: a contract checked for each use while compiling, the marker rule for ##, and Jai's baking controls"
+    },
     {
       "at": "2026-11-09T19:38:07.525Z",
       "by": "Main",
