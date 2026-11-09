@@ -1,58 +1,77 @@
-// Original Server4532–4546 envelope oracle. Framing/cancellation thread and
-// unwind/log IO oracles require the canonical Runtime concurrency/stdin ABI.
-#Test("json_rpc_envelope_rejects_malformed_or_ambiguous_requests") {
-    valid: "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{{}}}}"
-    if lsp_parse_rpc_message(valid) == {
-        .Ok(_) -> {}
-        .Err(_) -> assert(false)
-    }
-    invalid: [String]{
-        "{{\"jsonrpc\":\"2.0\",\"method\":\"x\",\"method\":\"y\"}}",
-        "{{\"jsonrpc\":\"1.0\",\"method\":\"x\"}}",
-        "{{\"jsonrpc\":\"2.0\",\"id\":1.5,\"method\":\"x\"}}",
-        "{{\"jsonrpc\":\"2.0\",\"method\":\"x\",\"params\":1}}",
-        "[\"not\",\"a\",\"request\"]",
-    }
-    loop (index, raw) in invalid {
-        if lsp_parse_rpc_message(raw) == {
-            .Ok(_) -> assert(false)
-            .Err(error) -> assert_eq(error.code, if index == 0 -> -32700 else -> -32600)
-        }
+// JSON-RPC framing of one message, responses, and the capabilities
+// `initialize` advertises: each one names a method the server answers.
+use {
+    core.encoding.[Dyn]
+    jet_lsp.[lsp_error_response, lsp_member, lsp_parse_rpc_message, lsp_response]
+}
+
+lsp_test_rpc_error: fn(body: String) -> Int Never! {
+    if lsp_parse_rpc_message(body) == {
+        .Ok(_) -> panic("`{body}` parsed as a message")
+        .Err(problem) -> problem.code
     }
 }
 
-#Test("RPC IDs and error messages preserve JSON escaping and null identity") {
-    value: foundation_parse_protocol_json(lsp_response(Dyn.Text("a\"b\\c\n"), "true")) ?? panic("response JSON")
-    assert(value.field("id") == (Val(Dyn.Text("a\"b\\c\n"))))
-    assert(value.field("result") == (Val(Dyn.Bool(true))))
-    failure: foundation_parse_protocol_json(lsp_error_response(Dyn.Int(7), -32800, "Request cancelled")) ?? panic("error JSON")
-    error: failure.field("error") ?? panic("error field")
-    assert(error.field("code") == (Val(Dyn.Int(-32800))))
-    assert_eq(failure.field("result"), None)
-    assert_eq(lsp_serialize_id(Dyn.Null), "null")
-    assert_eq(lsp_serialize_id(Dyn.Bool(true)), "null")
+#Test("a JSON-RPC message is an object with a method and a valid id") {
+    message: lsp_parse_rpc_message("{{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"shutdown\"}}") ?? panic("a request parses")
+    assert_eq(lsp_test_text(message, "method"), "shutdown")
+    assert_eq(lsp_test_int(message, "id"), 7)
+    notification: lsp_parse_rpc_message("{{\"jsonrpc\":\"2.0\",\"method\":\"exit\",\"params\":[]}}") ?? panic("a notification parses")
+    assert(lsp_member(notification, "id") == None, "a notification has no id")
+    assert_eq(lsp_test_rpc_error("{{"), -32700)
+    assert_eq(lsp_test_rpc_error("[1]"), -32600)
+    assert_eq(lsp_test_rpc_error("{{\"jsonrpc\":\"1.0\",\"method\":\"exit\"}}"), -32600)
+    assert_eq(lsp_test_rpc_error("{{\"jsonrpc\":\"2.0\",\"id\":1}}"), -32600)
+    assert_eq(lsp_test_rpc_error("{{\"jsonrpc\":\"2.0\",\"id\":1.5,\"method\":\"exit\"}}"), -32600)
+    assert_eq(lsp_test_rpc_error("{{\"jsonrpc\":\"2.0\",\"id\":true,\"method\":\"exit\"}}"), -32600)
+    assert_eq(lsp_test_rpc_error("{{\"jsonrpc\":\"2.0\",\"method\":\"exit\",\"params\":3}}"), -32600)
 }
 
-#Test("cancellation keys distinguish numeric from text and retain first-field precedence") {
-    integer: foundation_parse_protocol_json("{{\"id\":7}}") ?? panic("params")
-    text: foundation_parse_protocol_json("{{\"requestId\":\"7\"}}") ?? panic("params")
-    assert_eq(lsp_cancellation_key(Val(integer)), Val("7"))
-    assert_eq(lsp_cancellation_key(Val(text)), Val("\"7\""))
-    null_id: foundation_parse_protocol_json("{{\"id\":null,\"requestId\":7}}") ?? panic("params")
-    assert_eq(lsp_cancellation_key(Val(null_id)), None)
-    assert_eq(lsp_cancellation_key(None), None)
+#Test("responses echo the request id") {
+    assert_eq(lsp_response(Dyn.Int(3), "null"), "{{\"jsonrpc\":\"2.0\",\"id\":3,\"result\":null}}")
+    assert_eq(lsp_response(Dyn.Text("a\"b"), "[]"), "{{\"jsonrpc\":\"2.0\",\"id\":\"a\\\"b\",\"result\":[]}}")
+    assert_eq(lsp_error_response(Dyn.Null, -32700, "Parse error"), "{{\"jsonrpc\":\"2.0\",\"id\":null,\"error\":{{\"code\":-32700,\"message\":\"Parse error\"}}}}")
 }
 
-#Test("RPC envelope accepts null ID and array params without accepting responses or batches") {
-    valid: "{{\"jsonrpc\":\"2.0\",\"id\":null,\"method\":\"ping\",\"params\":[]}}"
-    if lsp_parse_rpc_message(valid) == {
-        .Ok(_) -> {}
-        .Err(_) -> assert(false)
-    }
-    loop raw in ([String]{"{{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":true}}", "[]", "null"}) {
-        if lsp_parse_rpc_message(raw) == {
-            .Ok(_) -> assert(false)
-            .Err(error) -> assert_eq(error.code, -32600)
-        }
-    }
+LSP_TEST_PROVIDERS: [String]{
+    "textDocumentSync",
+    "documentFormattingProvider",
+    "documentRangeFormattingProvider",
+    "documentOnTypeFormattingProvider",
+    "codeActionProvider",
+    "completionProvider",
+    "signatureHelpProvider",
+    "hoverProvider",
+    "definitionProvider",
+    "referencesProvider",
+    "documentHighlightProvider",
+    "renameProvider",
+    "documentSymbolProvider",
+    "workspaceSymbolProvider",
+    "foldingRangeProvider",
+    "selectionRangeProvider",
+    "documentLinkProvider",
+    "semanticTokensProvider",
+}
+
+#Test("initialize advertises exactly the answered capabilities") {
+    server := lsp_test_server()
+    result: lsp_test_result(server, "initialize", "{{}}")
+    capabilities: lsp_test_field(result, "capabilities")
+    loop provider in LSP_TEST_PROVIDERS -> assert(lsp_member(capabilities, provider) != None, "initialize advertises {provider}")
+    assert_eq(lsp_test_member_count(capabilities), LSP_TEST_PROVIDERS.len())
+    sync: lsp_test_field(capabilities, "textDocumentSync")
+    assert_eq(lsp_test_int(sync, "change"), 2)
+    legend: lsp_test_field(lsp_test_field(capabilities, "semanticTokensProvider"), "legend")
+    assert_eq(lsp_test_rows(lsp_test_field(legend, "tokenTypes")).len(), 13)
+    assert_eq(lsp_test_text(lsp_test_field(result, "serverInfo"), "name"), "jet")
+}
+
+#Test("an unknown method is not found and shutdown is acknowledged") {
+    server := lsp_test_server()
+    assert_eq(lsp_test_error_code(server, "textDocument/codeLens", "{{}}"), -32601)
+    assert_eq(lsp_test_error_code(server, "workspace/executeCommand", "{{}}"), -32601)
+    assert(!server.shutdown, "no shutdown yet")
+    assert(lsp_test_result(server, "shutdown", "{{}}") == .Null, "shutdown answers null")
+    assert(server.shutdown, "shutdown is recorded")
 }

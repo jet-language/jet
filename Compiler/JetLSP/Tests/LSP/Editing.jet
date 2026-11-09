@@ -1,0 +1,137 @@
+// Folding ranges and the three formatting requests: whole document, requested
+// lines, and the indentation typed `\n` and `}` ask for.
+use {
+    jet_lsp.[LSPPos, lsp_compute_folding_ranges, lsp_lex_source, lsp_line_ending_before, lsp_on_type_format_edits]
+    jet_parser.[jet_format_source]
+}
+
+LSP_TEST_FOLDS: `// one
+// two
+use a: "./a"
+use b: "./b"
+f: fn() {
+    x: 1 // {
+}
+/* a
+b */
+`
+
+#Test("folds are brace blocks, block comments, and comment and use runs") {
+    folds: lsp_compute_folding_ranges(LSP_TEST_FOLDS, lsp_lex_source(LSP_TEST_FOLDS))
+    rows := [String]{}
+    loop fold in folds -> rows.push("{fold.kind} {fold.start_line}:{fold.start_character}-{fold.end_line}:{fold.end_character}")
+    assert_eq(rows, [String]{"comment 0:0-1:6", "imports 2:0-3:12", "region 4:8-6:0", "comment 7:0-8:4"})
+}
+
+#Test("the foldingRange request answers each fold with its kind") {
+    server := lsp_test_server()
+    lsp_test_open(server, "file:///w/folds.jet", LSP_TEST_FOLDS)
+    rows: lsp_test_rows(lsp_test_result(server, "textDocument/foldingRange", "{{{lsp_test_text_document("file:///w/folds.jet")}}}"))
+    assert_eq(rows.len(), 4)
+    assert_eq(lsp_test_text(rows[2], "kind"), "region")
+    assert_eq(lsp_test_int(rows[2], "startLine"), 4)
+    assert_eq(lsp_test_int(rows[2], "endLine"), 6)
+    assert(lsp_test_result(server, "textDocument/foldingRange", "{{{lsp_test_text_document("file:///w/closed.jet")}}}") == .Null, "a closed document has no folds")
+}
+
+LSP_TEST_UNFORMATTED: `f: fn() -> Int {
+1
+}
+`
+
+#Test("formatting replaces the document with the formatter's text") {
+    server := lsp_test_server()
+    uri: "file:///w/fmt.jet"
+    lsp_test_open(server, uri, LSP_TEST_UNFORMATTED)
+    formatted: jet_format_source(LSP_TEST_UNFORMATTED, false)
+    assert(formatted.ok && formatted.text != LSP_TEST_UNFORMATTED, "the fixture is valid and unformatted")
+    edits: lsp_test_rows(lsp_test_result(server, "textDocument/formatting", "{{{lsp_test_text_document(uri)},\"options\":{{\"tabSize\":4,\"insertSpaces\":true}}}}"))
+    assert_eq(edits.len(), 1)
+    assert_eq(lsp_test_range(lsp_test_field(edits[0], "range")), "0:0-3:0")
+    assert_eq(lsp_test_text(edits[0], "newText"), formatted.text)
+    lsp_test_open(server, uri, formatted.text)
+    assert_eq(lsp_test_rows(lsp_test_result(server, "textDocument/formatting", "{{{lsp_test_text_document(uri)}}}")).len(), 0)
+}
+
+LSP_TEST_RANGE_SOURCE: `a: fn() -> Int {
+    1
+}
+
+b:   fn()   -> Int {
+2
+}
+`
+
+#Test("range formatting formats the requested lines alone") {
+    server := lsp_test_server()
+    uri: "file:///w/range.jet"
+    lsp_test_open(server, uri, LSP_TEST_RANGE_SOURCE)
+    selected: "b:   fn()   -> Int {{\n2\n}}\n"
+    formatted: jet_format_source(selected, false)
+    assert(formatted.ok && formatted.text != selected, "the requested lines are valid and unformatted")
+    params: "{{{lsp_test_text_document(uri)},\"range\":{{\"start\":{{\"line\":4,\"character\":0}},\"end\":{{\"line\":6,\"character\":1}}}}}}"
+    edits: lsp_test_rows(lsp_test_result(server, "textDocument/rangeFormatting", params))
+    assert_eq(edits.len(), 1)
+    assert_eq(lsp_test_range(lsp_test_field(edits[0], "range")), "4:0-7:0")
+    assert_eq(lsp_test_text(edits[0], "newText"), formatted.text)
+    // An unclosed head does not parse on its own and formats nothing.
+    head: "{{{lsp_test_text_document(uri)},\"range\":{{\"start\":{{\"line\":4,\"character\":0}},\"end\":{{\"line\":4,\"character\":5}}}}}}"
+    assert_eq(lsp_test_rows(lsp_test_result(server, "textDocument/rangeFormatting", head)).len(), 0)
+}
+
+lsp_test_typed: fn(src: String, line: Int, character: Int, trigger: String) -> [String] Never! {
+    rows := [String]{}
+    loop edit in lsp_on_type_format_edits(src, lsp_lex_source(src), LSPPos{line: line, character: character}, trigger) -> rows.push("{edit.span.start}-{edit.span.end}:{edit.new_text}")
+    rows
+}
+
+#Test("a typed newline indents the new line one level into its block") {
+    // `f: fn() {\n` is 10 bytes, so the new line starts at byte 10.
+    assert_eq(lsp_test_typed(`f: fn() {
+
+}
+`, 1, 0, "\n"), [String]{"10-10:    "})
+    // The closing brace already on the new line stays at the block's indent.
+    assert_eq(lsp_test_typed(`f: fn() {
+}
+`, 1, 0, "\n"), [String]{})
+    // Typed before the closing brace's line content, the brace moves to its
+    // own line at the block's indent: `x: 1}` holds it at byte 14.
+    assert_eq(lsp_test_typed("f: fn() {{\nx: 1}}\n", 1, 0, "\n"), [String]{"10-10:    ", "14-14:\n"})
+}
+
+#Test("a typed closing brace aligns with its block's opening line") {
+    // `    }` on line 2 starts at byte 19; its indent is bytes 19-23.
+    assert_eq(lsp_test_typed(`f: fn() {
+    x: 1
+    }
+`, 2, 5, "}}"), [String]{"19-23:"})
+    assert_eq(lsp_test_typed(`f: fn() {
+    // }
+}
+`, 1, 8, "}}"), [String]{})
+    assert_eq(lsp_test_typed(`f: fn() {
+    x: 1
+    }
+`, 2, 4, "}}"), [String]{})
+}
+
+#Test("onTypeFormatting answers the edits for the typed character") {
+    server := lsp_test_server()
+    uri: "file:///w/typed.jet"
+    lsp_test_open(server, uri, `f: fn() {
+
+}
+`)
+    params: "{{{lsp_test_text_document(uri)},\"position\":{{\"line\":1,\"character\":0}},\"ch\":\"\\n\",\"options\":{{\"tabSize\":4,\"insertSpaces\":true}}}}"
+    edits: lsp_test_rows(lsp_test_result(server, "textDocument/onTypeFormatting", params))
+    assert_eq(edits.len(), 1)
+    assert_eq(lsp_test_text(edits[0], "newText"), "    ")
+    assert_eq(lsp_test_range(lsp_test_field(edits[0], "range")), "1:0-1:0")
+}
+
+#Test("a line ending matches the line before it") {
+    assert_eq(lsp_line_ending_before("a\r\nb", 3), "\r\n")
+    assert_eq(lsp_line_ending_before("a\nb", 2), "\n")
+    assert_eq(lsp_line_ending_before("b", 0), "\n")
+}

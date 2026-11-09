@@ -2,8 +2,9 @@
 # which read E2702 `raw_nonce` for `seal(..., nonce: [0])`. Today's safe envelope
 # `seal(recipients, bytes, aad)` (Core/Crypto/Crypto.jet) makes its own nonces and
 # has no `nonce` parameter, so a raw nonce can't be written: the call is E0764,
-# and nothing is built. The `raw_nonce` row's omitted bounds are covered by
-# Compiler/JetLSP/Tests/LSP/Diagnostics.jet e2702_lsp_omits_bounds_that_do_not_apply.
+# and nothing is built. No running test covers the `raw_nonce` row's omitted bounds:
+# the Rust-era Compiler/JetLSP/Tests/LSP/Diagnostics.jet that claimed them never compiled
+# and was removed (#6650).
 fixture: fixtures/raw-nonce
 step: jet check main.jet --json
 exit: 1

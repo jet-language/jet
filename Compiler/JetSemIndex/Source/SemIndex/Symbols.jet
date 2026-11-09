@@ -710,12 +710,19 @@ semindex_symbol_imported_module: fn(modules: [JetDriverDocModule], doc_module: J
             .File(path, _) -> {
                 directory: semindex_symbol_files.dirname(doc_module.path)
                 parent: if directory == "" -> "." else -> directory
-                relative: "{parent}/{path}.jet"
-                stem: semindex_symbol_type_leaf(path)
+                // `"./helper"`, `"helper"` and `"helper.jet"` name one file.
+                name := path
+                loop name.starts_with("./") {
+                    name = name.slice(2, name.count_bytes())
+                }
+                if !name.ends_with(".jet") -> name = "{name}.jet"
+                relative: "{parent}/{name}"
+                name_parts: name.split("/").to_list()
+                leaf: name_parts[name_parts.len() - 1]
                 loop other in modules {
                     parts: other.path.split("/").to_list()
                     file: parts[parts.len() - 1]
-                    if other.path == relative || file == ("{stem}.jet") -> return Val(other.path)
+                    if other.path == relative || file == leaf -> return Val(other.path)
                 }
                 return None
             }

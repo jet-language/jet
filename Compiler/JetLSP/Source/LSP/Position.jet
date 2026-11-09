@@ -4,7 +4,6 @@
 use {
     jet_foundation.[Span, diagnostic_utf8_width, foundation_json_integer]
     core.encoding.[Dyn]
-    jet_devserver.[number]
 }
 
 LSPPos: struct {
@@ -95,18 +94,22 @@ lsp_byte_offset_to_lsp: fn(src: String, offset: Int) -> LSPPos Never! {
 }
 
 lsp_byte_offset_in_table: fn(bytes: [U8], table: LineTable, offset: Int) -> LSPPos Never! {
-    bounded: if offset > bytes.len() -> bytes.len() else -> offset
-    loop (line_index, line) in table.lines {
-        next_start: if line_index + 1 < table.lines.len() -> table.lines[line_index + 1].start else -> bytes.len() + 1
-        if bounded < next_start {
-            end: if bounded < line.end -> bounded else -> line.end
-            // Rust source slicing requires a scalar boundary too: do not count
-            // an interior UTF-8 byte as a complete character.
-            if end < bytes.len() && (Int.from_u8(bytes[end]).bit_and(192)) == 128 -> panic("byte offset is not a UTF-8 boundary")
-            return LSPPos{line: line_index, character: lsp_utf16_length(bytes, line.start, end)}
-        }
+    bounded: if {
+        offset > bytes.len() -> bytes.len()
+        offset < 0 -> 0
+        else -> offset
     }
-    panic("line table must contain the final line")
+    // The last line starting at or before the offset holds it.
+    low := 0
+    high := table.lines.len() - 1
+    loop low < high {
+        middle: (low + high + 1) /% 2
+        if table.lines[middle].start <= bounded -> low = middle else -> high = middle - 1
+    }
+    line: table.lines[low]
+    end: if bounded < line.end -> bounded else -> line.end
+    if end < bytes.len() && (Int.from_u8(bytes[end]).bit_and(192)) == 128 -> panic("byte offset is not a UTF-8 boundary")
+    LSPPos{line: low, character: lsp_utf16_length(bytes, line.start, end)}
 }
 
 lsp_pos_to_offset: fn(src: String, pos: LSPPos) -> Int Never! {
@@ -150,13 +153,13 @@ lsp_uinteger: fn(value: Dyn) -> Int? Never! {
 }
 
 lsp_pos_from_json: fn(value: Dyn) -> LSPPos? Never! {
-    line: lsp_uinteger(value.field("line") ?? return None) ?? return None
-    character: lsp_uinteger(value.field("character") ?? return None) ?? return None
+    line: lsp_uinteger(lsp_member(value, "line") ?? return None) ?? return None
+    character: lsp_uinteger(lsp_member(value, "character") ?? return None) ?? return None
     Val(LSPPos{line: line, character: character})
 }
 
 lsp_range_from_json: fn(value: Dyn) -> LSPRange? Never! {
-    start: lsp_pos_from_json(value.field("start") ?? return None) ?? return None
-    end: lsp_pos_from_json(value.field("end") ?? return None) ?? return None
+    start: lsp_pos_from_json(lsp_member(value, "start") ?? return None) ?? return None
+    end: lsp_pos_from_json(lsp_member(value, "end") ?? return None) ?? return None
     Val(LSPRange{start: start, end: end})
 }

@@ -1,914 +1,238 @@
+// Hover, definition, references, highlights, rename and signature help: each
+// answers from the checked index of the document's current text.
 use {
-    jet_semindex.[SymbolDB, SymDef, SymRef, DefinitionAnchor, CallableFactUnavailable]
-    jet_foundation.[
-        Span,
-        Diagnostic,
-        TextEdit,
-        foundation_json_escape,
-    ]
-    Compiler.Comptime.Build.[BuildPlan]
-    Compiler.Lexer.[lex_generated, without_comments]
-    jet_foundation.Diagnostics.[Diagnostic, TextEdit]
-    jet_foundation.Syntax.[JET_KEYWORDS, JET_TYPES]
-    jet_lexer.[Token, lex_generated]
-    jet_devserver.[edit]
+    core.encoding.[Dyn]
+    jet_foundation.[Span, foundation_json_quote, type_name]
+    jet_lexer.[Lexed, Token, TOKEN_IDENT, TOKEN_LPAREN, TOKEN_RPAREN, TOKEN_LBRACKET, TOKEN_RBRACKET, TOKEN_LBRACE, TOKEN_RBRACE, TOKEN_COMMA, TOKEN_COLON, lex, token_text]
+    jet_semindex.[SemDef, SemSymbolKind]
 }
 
-enum_variant_definition_at: fn(db: SymbolDB, tokens: [Token], path: String, index: USize) -> SymDef? {
-    token: tokens.get(index) ?? return None
-    if token.kind != .Ident(_) -> return None
-    variant: if token.kind == {
-        .Ident(name) -> name
-        else -> unreachable()
-    }
-    previous: previous_code_token(tokens, index) ?? return None
-    offset: tokens[index].span.start
-    enum_name := ""
-    if tokens[previous].kind == .Dot {
-        receiver_index: previous_code_token(tokens, previous)
-        receiver_type := None
-        if receiver_index == .Val(i) {
-            receiver_type = checked_subject_type_name(db, tokens, path, i)
-            if receiver_type == None -> receiver_type = dotted_receiver(tokens, i)
-        }
-        if receiver_type == .Val(name) {
-            enum_name = name
-        } else {
-            _: pattern_head_start(tokens, previous) ?? return None
-            subject: active_pattern_subject(tokens, previous) ?? return None
-            enum_name = checked_subject_type_name(db, tokens, path, subject) ?? return None
-        }
-    } else {
-        head: pattern_head_start(tokens, index) ?? return None
-        if active_pattern_subject(tokens, index) == .Val(subject) {
-            enum_name = checked_subject_type_name(db, tokens, path, subject) ?? return None
-        } else if bare_function_head_start(tokens, index) == Val((head)) {
-            enum_name = function_head_type_name(db, tokens, path, head) ?? return None
-        } else { return None }
-    }
-    owner: enum_definition_for_type(db, enum_name, path, offset) ?? return None
-    identity := None
-    loop definition in db.defs {
-        if definition.module_path != owner.module_path || definition.name != variant -> next
-        if definition.kind == .EnumVariant(parent) {
-            if parent != owner.name -> next
-            if identity == .Val(existing) && existing != definition.identity -> return None
-            if identity == None -> identity = Val(definition.identity)
-        }
-    }
-    key: identity ?? return None
-    db.defs.iter().find((definition) -> {
-        definition.identity == key && definition.module_path == owner.module_path
-            && definition.kind.is_enum_variant()
-    })
+// The view and the byte offset a positional request names.
+LSPAt: struct {
+    view: LSPView
+    offset: Int
 }
 
-enum_variant_identity_at: fn(db: SymbolDB, tokens: [Token], path: String, offset: USize) -> String? {
-    index: tokens.iter().position((token) -> {
-        token.kind.is_ident() && token.span.start <= offset && offset <= token.span.end
-    }) ?? return None
-    definition: enum_variant_definition_at(db, tokens, path, index) ?? return None
-    Val(definition.identity.copy())
+lsp_at: fn(server: LSPServer, params: Dyn?) -> LSPAt? {
+    position: lsp_params_position(params) ?? return None
+    view: lsp_view(server, params) ?? return None
+    bytes: view.doc.text.bytes()
+    offset: lsp_checked_offset_bytes(lsp_line_table_bytes(bytes), bytes, position) ?? return None
+    Val(LSPAt{view: view, offset: offset})
 }
 
-enum_variant_spans: fn(db: SymbolDB, tokens: [Token], path: String, identity: String) -> [Span] {
-    spans := [Span]{}
-    loop (index, token) in tokens.iter().enumerate() {
-        if !token.kind.is_ident() -> next
-        if enum_variant_definition_at(db, tokens, path, index) == .Val(definition) {
-            if definition.identity == identity -> spans.push(token.span)
-        }
-    }
-    spans
+lsp_hover_markdown: fn(signature: String, summary: String) -> String Never! {
+    if summary == "" -> return "```jet\n{signature}\n```"
+    "```jet\n{signature}\n```\n\n{summary}"
 }
 
-MAX_ENUM_VARIANT_LEXICAL_TOKENS: comptime { USize{64 * 1024} }
-
-// Only the checked/open snapshot supplies lexical leaves; never reopen siblings.
-enum_variant_spans_across_checked_modules: fn(db: SymbolDB, current_tokens: [Token], current_path: String, identity: String) -> [(String, Span)] {
-    if current_tokens.len() > MAX_ENUM_VARIANT_LEXICAL_TOKENS -> return []
-    spans := enum_variant_spans(db, current_tokens, current_path, identity)
-        .iter().map((span) -> { (_0: current_path.copy(), _1: span) }).collect()
-    spans.sort_by((left, right) -> {
-        left._0.cmp(right._0).then(left._1.start.cmp(right._1.start)).then(left._1.end.cmp(right._1.end))
-    })
-    spans.dedup()
-    spans
-}
-
-is_enum_variant_identity: fn(db: SymbolDB, identity: String) -> Bool {
-    variant: db.defs.iter().find((definition) -> { definition.identity == identity }) ?? return false
-    parent: if variant.kind == {
-        .EnumVariant(parent) -> parent
-        else -> { return false }
-    }
-    db.defs.iter().any((definition) -> {
-        definition.module_path == variant.module_path && definition.name == parent && definition.kind.is_enum()
-    })
-}
-
-enum_variant_leaf_span: fn(db: SymbolDB, reference: SymRef, identity: String) -> Span? {
-    if !is_enum_variant_identity(db, identity) -> return None
-    definition: db.defs.iter().find((definition) -> { definition.identity == identity }) ?? return None
-    leaf_len: definition.def_span.end.saturating_sub(definition.def_span.start)
-    start: reference.span.end.checked_sub(leaf_len) ?? return None
-    if reference.span.start <= start -> Val(Span.new(start, reference.span.end)) else -> None
-}
-
-checked_semantic_identity_at: fn(db: SymbolDB, tokens: [Token], path: String, offset: USize) -> String? {
-    if checked_identity_in_span(db, path, offset, offset) == .Val(identity) -> return Val(identity)
-    if enum_variant_identity_at(db, tokens, path, offset) == .Val(identity) -> return Val(identity)
-    receiver: compiler_fact_receiver_span(tokens, offset) ?? return None
-    checked_identity_in_span(db, path, receiver.start, receiver.end).ok().flatten()
-}
-
-checked_rename_span_at: fn(db: SymbolDB, tokens: [Token], path: String, offset: USize) -> (String, Span)? {
-    identity: checked_semantic_identity_at(db, tokens, path, offset) ?? return None
-    span := None
-    if checked_reference_in_span(db, path, offset, offset) == .Val(reference) {
-        if reference.target == .Val(target) && target.kind == "state" {
-            span = state_leaf_span(reference)
-        } else if is_enum_variant_identity(db, identity) {
-            span = enum_variant_leaf_span(db, reference, identity)
-            if span == None -> span = token_span_at(tokens, offset)
-        } else { span = token_span_at(tokens, offset) }
-    } else { span = token_span_at(tokens, offset) }
-    Val((_0: identity, _1: span ?? return None))
-}
-
-token_span_at: fn(tokens: [Token], offset: USize) -> Span? {
-    token := tokens.iter().find((token) -> { token.span.start == offset })
-    if token == None {
-        token = tokens.iter().find((token) -> { token.span.start <= offset && offset <= token.span.end })
-    }
-    token.map((token) -> { token.span })
-}
-
-// A request-local projection of the canonical BuildPlan, not another symbol DB.
-GeneratedDeclarationFact: struct {
-    identity: String,
-    name: String,
-    module_name: String,
-    module_path: String,
-    source: String,
-    span: Span,
-    plugin: String?,
-}
-
-generated_declarations: fn(plan: BuildPlan) -> [GeneratedDeclarationFact] {
-    modules: plan.selected_generated_modules().ok() ?? return []
-    declarations := [GeneratedDeclarationFact]{}
-    loop module_ref in modules {
-        (tokens, errors): lex_generated(module_ref.source)
-        if !errors.is_empty() -> next
-        code: without_comments(tokens)
-        loop pair in code.windows(2) {
-            name: if pair[1].kind == {
-                .Ident(name) -> name
-                else -> { next }
+lsp_hover_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
+    at: lsp_at(server, params) ?? return lsp_response(id, "null")
+    markdown := String?{None}
+    if at.view.checked.index == .Val(index) {
+        if lsp_target_at(at.view, at.offset) == .Val(target) {
+            if lsp_definition_at(index, target) == .Val(def) {
+                markdown = Val(lsp_hover_markdown(def.qualified_name, ""))
+                if lsp_symbol_for(at.view.checked.symbols, def) == .Val(symbol) -> markdown = Val(lsp_hover_markdown(symbol.signature, symbol.summary))
             }
-            if pair[0].kind != .KwFn -> next
-            plugin := None
-            if module_ref.plugin == .Val(handle) {
-                plugin = plan.plugins().iter().find((plugin) -> { plugin.id == handle.id() })
-                    .map((plugin) -> { plugin.name.copy() })
-            }
-            declarations.push(GeneratedDeclarationFact(
-                identity: "fn:module:{module_ref.name}::{name}", name: name.copy(),
-                module_name: module_ref.name.copy(), module_path: module_ref.path.as_str().to_string(),
-                source: module_ref.source.copy(), span: pair[1].span, plugin: plugin))
         }
     }
-    declarations.sort_by((left, right) -> {
-        left.identity.cmp(right.identity).then(left.module_path.cmp(right.module_path))
-            .then(left.span.start.cmp(right.span.start))
-    })
-    declarations
+    if markdown == None -> markdown = lsp_keyword_hover(at.view, at.offset)
+    text: markdown ?? return lsp_response(id, "null")
+    range := ""
+    if lsp_ident_token_at(at.view.lexed, at.offset) == .Val(name) -> range = ",\"range\":{lsp_range_json(lsp_byte_span_to_range(at.view.doc.text, name.span))}"
+    lsp_response(id, "{{\"contents\":{{\"kind\":\"markdown\",\"value\":{foundation_json_quote(text)}}}{range}}}")
 }
 
-generated_qualifier: fn(tokens: [Token], index: USize) -> String? {
-    previous: tokens.get(index.checked_sub(1) ?? return None) ?? return None
-    if previous.kind != .Dot && previous.kind != .QuestionDot -> return None
-    receiver: tokens.get(index.checked_sub(2) ?? return None) ?? return None
-    if receiver.kind == {
-        .Ident(name) -> Val(name)
-        else -> None
-    }
-}
-
-generated_module_matches: fn(declaration: GeneratedDeclarationFact, qualifier: String) -> Bool {
-    declaration.module_name == qualifier
-}
-
-register_generated_declarations: fn(db: SymbolDB, plan: BuildPlan, source_path: String, tokens: [Token]) -> [GeneratedDeclarationFact] {
-    declarations: generated_declarations(plan)
-    loop declaration in declarations {
-        if db.defs.iter().any((definition) -> {
-            definition.identity == declaration.identity && definition.module_path == declaration.module_path
-                && definition.def_span == declaration.span
-        }) -> next
-        db.defs.push(SymDef(
-            identity: declaration.identity.copy(), name: declaration.name.copy(),
-            def_span: declaration.span, module_path: declaration.module_path.copy(),
-            kind: .Function(params: [], param_sources: [], signature_facts_available: false,
-                param_contract: [], param_variadic: [], return_type: None,
-                failure_contract: .Unavailable(CallableFactUnavailable(
-                    required_stage: .Typed, reason: "generated declaration has no checked failure contract")),
-                foreign_boundary: false, effects: None, effect_via: None, param_access: [],
-                param_defaults: [], policies: [],
-                generic_parameters: .Unavailable(CallableFactUnavailable(
-                    required_stage: .Typed, reason: "generated declaration has no parsed generic parameter facts")))))
-    }
-    code: without_comments(tokens)
-    loop (index, token) in code.iter().enumerate() {
-        name: if token.kind == {
-            .Ident(name) -> name
-            else -> { next }
+// A keyword under the cursor hovers with the language's own description.
+lsp_keyword_hover: fn(view: LSPView, offset: Int) -> String? Never! {
+    loop token in view.lexed.tokens {
+        if token.span.start > offset -> break
+        if !lsp_span_holds(token.span, offset) || token.kind == TOKEN_IDENT -> next
+        text: token_text(view.lexed.tables, token)
+        loop symbol in view.checked.symbols {
+            if symbol.kind == SemSymbolKind.Keyword && symbol.name == text -> return Val(lsp_hover_markdown(symbol.signature, symbol.summary))
         }
-        next_token: code.get(index + 1) ?? next
-        if next_token.kind != .LParen -> next
-        qualifier: generated_qualifier(code, index)
-        matches: declarations.iter().filter((declaration) -> {
-            declaration.name == name && (qualifier == None || generated_module_matches(declaration, qualifier.unwrap()))
-        }).collect()
-        if matches.len() != 1 -> next
-        declaration: matches[0]
-        anchor: DefinitionAnchor(module_path: declaration.module_path.copy(), kind: "function",
-            def_span: declaration.span.into(), semantic_identity: Val(declaration.identity.copy()))
-        existing := [(USize, Bool, Bool)]{}
-        loop (i, reference) in db.refs.iter().enumerate() {
-            if reference.module_path != source_path || reference.span != token.span -> next
-            if reference.target == None {
-                existing.push((_0: i, _1: true, _2: false))
+    }
+    None
+}
+
+lsp_definition_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
+    at: lsp_at(server, params) ?? return lsp_response(id, "null")
+    target: lsp_target_at(at.view, at.offset) ?? return lsp_response(id, "null")
+    location: lsp_location(at.view.checked, target.module_path, target.span) ?? return lsp_response(id, "null")
+    lsp_response(id, lsp_location_json(location))
+}
+
+lsp_references_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
+    at: lsp_at(server, params) ?? return lsp_response(id, "null")
+    index: at.view.checked.index ?? return lsp_response(id, "null")
+    target: lsp_target_at(at.view, at.offset) ?? return lsp_response(id, "[]")
+    declaration: lsp_bool_member(lsp_param(params, "context") ?? Dyn.Null, "includeDeclaration")
+    rows := [String]{}
+    loop occurrence in lsp_occurrences(index, target, declaration: declaration) {
+        if lsp_location(at.view.checked, occurrence.module_path, occurrence.span) == .Val(location) -> rows.push(lsp_location_json(location))
+    }
+    lsp_response(id, "[{rows.join(",")}]")
+}
+
+// Highlights in this document: the declaration writes, each reference reads.
+lsp_document_highlight_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
+    at: lsp_at(server, params) ?? return lsp_response(id, "null")
+    index: at.view.checked.index ?? return lsp_response(id, "null")
+    module_path: at.view.module_path ?? return lsp_response(id, "null")
+    target: lsp_target_at(at.view, at.offset) ?? return lsp_response(id, "[]")
+    rows := [String]{}
+    loop occurrence in lsp_occurrences(index, target, declaration: true) {
+        if occurrence.module_path != module_path -> next
+        kind: if occurrence.target == None -> 3 else -> 2
+        rows.push("{{\"range\":{lsp_range_json(lsp_byte_span_to_range(at.view.doc.text, occurrence.span))},\"kind\":{kind}}}")
+    }
+    lsp_response(id, "[{rows.join(",")}]")
+}
+
+// What a rename may change: a declaration in an open document, so every file
+// the rename edits is one the editor holds.
+LSPRenameTarget: struct {
+    def: SemDef
+    // The name's span under the cursor.
+    span: Span
+}
+
+lsp_rename_target: fn(server: LSPServer, at: LSPAt) -> LSPRenameTarget LSPRPCError! {
+    index: at.view.checked.index ?? return Err(LSPRPCError{code: -32803, message: "the document has not been checked"})
+    target: lsp_target_at(at.view, at.offset) ?? return Err(LSPRPCError{code: -32803, message: "no declaration is under the cursor"})
+    def: lsp_definition_at(index, target) ?? return Err(LSPRPCError{code: -32803, message: "only a declaration in Jet source can be renamed"})
+    module_index: lsp_module_index(at.view.checked, def.module_path) ?? return Err(LSPRPCError{code: -32803, message: "`{def.name}` is declared outside the checked modules"})
+    if !lsp_path_is_open(server, at.view.checked.modules[module_index].physical_path) -> return Err(LSPRPCError{code: -32803, message: "open the file that declares `{def.name}` to rename it"})
+    token: lsp_ident_token_at(at.view.lexed, at.offset) ?? return Err(LSPRPCError{code: -32803, message: "no name is under the cursor"})
+    if token_text(at.view.lexed.tables, token) != def.name -> return Err(LSPRPCError{code: -32803, message: "no name is under the cursor"})
+    Ok(LSPRenameTarget{def: def, span: token.span})
+}
+
+lsp_path_is_open: fn(server: LSPServer, path: String) -> Bool Never! {
+    if path == "" -> return false
+    loop (_, doc) in server.diagnostic_state.docs {
+        if lsp_source_paths_equal(doc.path, path) -> return true
+    }
+    false
+}
+
+lsp_prepare_rename_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
+    at: lsp_at(server, params) ?? return lsp_response(id, "null")
+    if lsp_rename_target(server, at) == {
+        .Ok(target) -> lsp_response(id, "{{\"range\":{lsp_range_json(lsp_byte_span_to_range(at.view.doc.text, target.span))},\"placeholder\":{foundation_json_quote(target.def.name)}}}")
+        .Err(problem) -> lsp_error_response(id, problem.code, problem.message)
+    }
+}
+
+// A new name must lex as exactly one identifier, so no keyword passes.
+lsp_valid_identifier: fn(name: String) -> Bool Never! {
+    lexed: lex(name.bytes())
+    if lexed.diagnostics.len() != 0 || lexed.tokens.len() == 0 -> return false
+    first: lexed.tokens[0]
+    if first.kind != TOKEN_IDENT || first.span.start != 0 || first.span.end != name.count_bytes() -> return false
+    lexed.tokens.len() == 1 || lexed.tokens[1].span.start >= name.count_bytes()
+}
+
+lsp_rename_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
+    at: lsp_at(server, params) ?? return lsp_response(id, "null")
+    new_name: lsp_text_member(params ?? return lsp_response(id, "null"), "newName") ?? return lsp_error_response(id, -32602, "rename needs a string newName")
+    if !lsp_valid_identifier(new_name) -> return lsp_error_response(id, -32602, "`{new_name}` is not an identifier")
+    target: if lsp_rename_target(server, at) == {
+        .Ok(found) -> found
+        .Err(problem) -> { return lsp_error_response(id, problem.code, problem.message) }
+    }
+    index: at.view.checked.index ?? return lsp_response(id, "null")
+    by_uri := [String:[String]]{}
+    order := [String]{}
+    loop occurrence in lsp_occurrences(index, LSPTarget{module_path: target.def.module_path, span: target.def.def_span}, declaration: true) {
+        location: lsp_location(at.view.checked, occurrence.module_path, occurrence.span) ?? next
+        span: lsp_name_span(location.source, occurrence.span, target.def.name)
+        if span.end > location.source.count_bytes() || location.source.slice(span.start, span.end) != target.def.name -> next
+        if !by_uri.has_key(location.uri) {
+            by_uri[location.uri] = [String]{}
+            order.push(location.uri)
+        }
+        by_uri[location.uri].push("{{\"range\":{lsp_range_json(lsp_byte_span_to_range(location.source, span))},\"newText\":{foundation_json_quote(new_name)}}}")
+    }
+    order.sort()
+    files := [String]{}
+    loop uri in order -> files.push("{foundation_json_quote(uri)}:[{by_uri[uri].join(",")}]")
+    lsp_response(id, "{{\"changes\":{{{files.join(",")}}}}}")
+}
+
+// The call whose argument list holds the cursor: the callee's name token and
+// which argument the cursor is in. Brackets nest; strings and comments are
+// single tokens, so their commas never count.
+LSPActiveCall: struct {
+    callee: Token
+    argument: Int
+    // The label the active argument spells (`name: value`), if any.
+    label: String?
+}
+
+lsp_active_call: fn(lexed: Lexed, offset: Int) -> LSPActiveCall? Never! {
+    tokens: lexed.tokens
+    end := 0
+    loop end < tokens.len() && tokens[end].span.end <= offset -> end += 1
+    depth := 0
+    argument := 0
+    argument_start := end
+    cursor := end
+    loop cursor > 0 {
+        cursor -= 1
+        kind: tokens[cursor].kind
+        if kind == TOKEN_RPAREN || kind == TOKEN_RBRACKET || kind == TOKEN_RBRACE {
+            depth += 1
+            next
+        }
+        if kind == TOKEN_LBRACKET || kind == TOKEN_LBRACE || kind == TOKEN_LPAREN {
+            if depth > 0 {
+                depth -= 1
                 next
             }
-            target: reference.target.unwrap()
-            generated_target: declarations.iter().any((candidate) -> {
-                target.module_path == candidate.module_path && target.def_span == candidate.span.into()
-            })
-            known_target: target.kind != "module" && target.kind != "import_alias"
-                && db.defs.iter().any((definition) -> {
-                    definition.module_path == target.module_path && definition.def_span == target.def_span.into()
-                })
-            existing.push((_0: i, _1: generated_target, _2: known_target))
+            if kind != TOKEN_LPAREN || cursor == 0 || tokens[cursor - 1].kind != TOKEN_IDENT -> return None
+            if argument == 0 -> argument_start = cursor + 1
+            label := String?{None}
+            if argument_start + 1 < end && tokens[argument_start].kind == TOKEN_IDENT && tokens[argument_start + 1].kind == TOKEN_COLON {
+                label = Val(token_text(lexed.tables, tokens[argument_start]))
+            }
+            return Val(LSPActiveCall{callee: tokens[cursor - 1], argument: argument, label: label})
         }
-        if existing.iter().any((row) -> { row._2 && !row._1 }) -> next
-        if existing.is_empty() {
-            db.refs.push(SymRef(name: name.copy(), span: token.span, module_path: source_path.copy(),
-                scope_identity: None, target: Val(anchor), fact: None))
-        } else {
-            loop row in existing -> db.refs[row._0].target = Val(anchor.copy())
+        if kind == TOKEN_COMMA && depth == 0 {
+            if argument == 0 -> argument_start = cursor + 1
+            argument += 1
         }
     }
-    declarations
+    None
 }
 
-generated_declaration_at: fn(declarations: [GeneratedDeclarationFact], module_path: String, span: Span) -> GeneratedDeclarationFact? {
-    declarations.iter().find((declaration) -> { declaration.module_path == module_path && declaration.span == span })
-}
-
-generated_definition_for_reference: fn(db: SymbolDB, declarations: [GeneratedDeclarationFact], tokens: [Token], source_path: String, offset: USize) -> (String, Span)? {
-    token: tokens.iter().find((token) -> { token.span.start <= offset && offset <= token.span.end }) ?? return None
-    name: if token.kind == {
-        .Ident(name) -> name
-        else -> { return None }
+lsp_signature_help_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
+    at: lsp_at(server, params) ?? return lsp_response(id, "null")
+    call: lsp_active_call(at.view.lexed, at.offset) ?? return lsp_response(id, "null")
+    index: at.view.checked.index ?? return lsp_response(id, "null")
+    target: lsp_target_at(at.view, call.callee.span.start) ?? return lsp_response(id, "null")
+    def: lsp_definition_at(index, target) ?? return lsp_response(id, "null")
+    callable: if def.kind == {
+        .Function(callable) -> callable
+        else -> { return lsp_response(id, "null") }
     }
-    selected := None
-    saw_reference := false
-    loop reference in db.refs {
-        if reference.module_path != source_path || reference.span != token.span || reference.name != name -> next
-        saw_reference = true
-        target: reference.target ?? return None
-        declaration: declarations.iter().find((declaration) -> {
-            declaration.name == name && declaration.module_path == target.module_path
-                && declaration.span == target.def_span.into()
-                && (target.semantic_identity == None || target.semantic_identity == Val(declaration.identity))
-        }) ?? return None
-        if selected == .Val(existing) && existing.identity != declaration.identity -> return None
-        selected = Val(declaration)
+    label := def.qualified_name
+    documentation := ""
+    if lsp_symbol_for(at.view.checked.symbols, def) == .Val(symbol) {
+        label = symbol.signature
+        documentation = symbol.summary
     }
-    if !saw_reference -> return None
-    selected.map((declaration) -> { (_0: declaration.module_path.copy(), _1: declaration.span) })
-}
-
-compute_definition: fn(db: SymbolDB, tokens: [Token], _src: String, path: String, offset: USize) -> (String, Span)? {
-    identity: checked_semantic_identity_at(db, tokens, path, offset) ?? return None
-    if checked_reference_in_span(db, path, offset, offset) == .Val(reference) {
-        if reference.target == .Val(target) {
-            if checked_anchor_identity(db, target) == Val((identity)) -> return Val((_0: target.module_path.copy(), _1: target.def_span.into()))
+    rows := [String]{}
+    active := call.argument
+    loop (position, param) in callable.params {
+        param_label: "{param.name}: {type_name(param.ty)}"
+        rows.push("{{\"label\":{foundation_json_quote(param_label)}}}")
+        if call.label == .Val(name) {
+            if param.label == name || param.name == name -> active = position
         }
     }
-    definition := None
-    loop candidate in db.defs {
-        if candidate.identity != identity -> next
-        if definition == .Val(existing) {
-            if existing.module_path != candidate.module_path || existing.def_span != candidate.def_span -> return None
-        }
-        definition = Val(candidate)
-    }
-    definition.map((definition) -> { (_0: definition.module_path.copy(), _1: definition.def_span) })
+    docs: if documentation == "" -> "" else -> ",\"documentation\":{{\"kind\":\"markdown\",\"value\":{foundation_json_quote(documentation)}}}"
+    lsp_response(id, "{{\"signatures\":[{{\"label\":{foundation_json_quote(label)}{docs},\"parameters\":[{rows.join(",")}]}}],\"activeSignature\":0,\"activeParameter\":{active}}}")
 }
-
-checked_reference_spans: fn(db: SymbolDB, identity: String, enum_variant: Bool) -> [(String, Span)] {
-    out := [(String, Span)]{}
-    loop reference in db.refs {
-        target: reference.target ?? next
-        if checked_anchor_identity(db, target) != Val(identity) -> next
-        span: if enum_variant -> enum_variant_leaf_span(db, reference, identity) ?? reference.span else -> reference.span
-        out.push((_0: reference.module_path.copy(), _1: span))
-    }
-    out
-}
-
-compute_references: fn(db: SymbolDB, tokens: [Token], path: String, offset: USize, include_declaration: Bool) -> [(String, Span)] {
-    identity: checked_semantic_identity_at(db, tokens, path, offset) ?? return []
-    enum_variant: is_enum_variant_identity(db, identity)
-    result := checked_reference_spans(db, identity, enum_variant)
-    if enum_variant -> result.extend(enum_variant_spans_across_checked_modules(db, tokens, path, identity))
-    if include_declaration {
-        loop definition in db.defs {
-            if definition.identity == identity -> result.push((_0: definition.module_path.copy(), _1: definition.def_span))
-        }
-    }
-    result.sort_by((a, b) -> { a._0.cmp(b._0).then(a._1.start.cmp(b._1.start)).then(a._1.end.cmp(b._1.end)) })
-    result.dedup()
-    result
-}
-
-is_keyword: fn(name: String) -> Bool {
-    JET_KEYWORDS.contains(name) || JET_TYPES.contains(name)
-}
-is_valid_ident: fn(name: String) -> Bool {
-    if name.is_empty() -> return false
-    chars := name.chars()
-    first: chars.next().unwrap()
-    if !first.is_alphabetic() && first != '_' -> return false
-    chars.all((c) -> { c.is_alphanumeric() || c == '_' })
-}
-state_anchor_at: fn(db: SymbolDB, path: String, offset: USize) -> DefinitionAnchor? {
-    reference: if checked_reference_in_span(db, path, offset, offset) == {
-        .Err(_) -> { return None }
-        .Ok(reference) -> reference
-    }
-    target: reference.and_then((reference) -> { reference.target.filter((target) -> { target.kind == "state" }) })
-    if target == .Val(anchor) {
-        result := anchor
-        result.semantic_identity = Val(checked_anchor_identity(db, result) ?? return None)
-        return Val(result)
-    }
-    definition: checked_definition_in_span(db, path, offset, offset).ok().flatten().filter((definition) -> {
-        if definition.kind == {
-            .EnumVariant(parent) -> parent.ends_with(".State")
-            else -> false
-        }
-    }) ?? return None
-    Val(DefinitionAnchor{module_path: definition.module_path, kind: "state", def_span: definition.def_span.into(), semantic_identity: Val(definition.identity)})
-}
-state_leaf_span: fn(reference: SymRef) -> Span? {
-    target: reference.target.filter((target) -> { target.kind == "state" }) ?? return None
-    leaf_len: target.def_span.end.saturating_sub(target.def_span.start)
-    start: reference.span.end.checked_sub(leaf_len) ?? return None
-    if reference.span.start <= start { Val(Span.new(start, reference.span.end)) } else { None }
-}
-compute_rename: fn(db: SymbolDB, tokens: [Token], path: String, offset: USize, new_name: String) -> [(String, Span)] Err! {
-    if !is_valid_ident(new_name) -> return Err("`${new_name}` is not a valid identifier")
-    if Syntax.classify_identifier(new_name) == .Reserved -> return Err("`${new_name}` is reserved for Jet and cannot be used as a name")
-    if is_keyword(new_name) -> return Err("`${new_name}` is a keyword and cannot be used as a name")
-    if compiler_fact_at(tokens, offset) == .Val(fact) -> return Err("compiler-owned ${fact} is fixed; rename the reflected type or field instead")
-    name: find_ident_at(tokens, offset) ?? return Err("no identifier at cursor")
-    if is_keyword(name) -> return Err("`${name}` is a keyword and cannot be renamed")
-    identity: checked_semantic_identity_at(db, tokens, path, offset).ok_or_else(() -> { "identifier has no checked semantic target" })
-    alias_target: if checked_reference_in_span(db, path, offset, offset) == {
-        .Val(reference) -> reference.target.filter((target) -> { target.kind == "import_alias" }).and_then((target) -> {
-            result := target
-            result.semantic_identity = Val(checked_anchor_identity(db, result) ?? return None)
-            Val(result)
-        })
-        .None -> checked_definition_in_span(db, path, offset, offset).ok().flatten().filter((definition) -> { definition.identity.starts_with("import:") }).map((definition) -> {
-            DefinitionAnchor{module_path: definition.module_path, kind: "import_alias", def_span: definition.def_span.into(), semantic_identity: Val(definition.identity)}
-        })
-        .Err(_) -> None
-    }
-    indexed_case: db.defs.iter().find((def) -> { def.identity == identity }).map((def) -> {
-        if def.kind == {
-            .Struct(_) | .Enum(_) | .Trait | .Tag | .Type(_) | .EnumVariant(_) -> (_0: "type-like name", _1: Syntax.NameCase.Pascal)
-            .Module | .Function(_) | .Const | .Field(_) | .Local(_) | .Param(_) -> ("value-like name", Syntax.NameCase.Snake)
-        }
-    })
-    source_case: if {
-        Syntax.name_has_case(name, .Pascal) == true && Syntax.name_has_case(name, .Snake) == false -> Val((_0: "type-like name", _1: Syntax.NameCase.Pascal))
-        Syntax.name_has_case(name, .Pascal) == false && Syntax.name_has_case(name, .Snake) == true -> Val((_0: "value-like name", _1: Syntax.NameCase.Snake))
-        else -> None
-    }
-    if source_case.or(indexed_case) == .Val(tuple_8) {
-        category: tuple_8._0
-        case: tuple_8._1
-        if !Syntax.name_has_case(new_name, case) -> return Err("`${new_name}` is not a valid ${category}; use `${Syntax.canonical_name_case(new_name, case)}`")
-    }
-    if alias_target == .Val(target) {
-        spans := [(_0: target.module_path, _1: Span.new(target.def_span.start, target.def_span.end))]
-        loop reference in db.refs {
-            candidate: reference.target ?? next
-            if candidate.kind == "import_alias" && checked_anchor_identity(db, candidate) == Val((identity)) -> spans.push((_0: reference.module_path, _1: reference.span))
-        }
-        spans.sort_by((left, right) -> { left._0.cmp(right._0).then(left._1.start.cmp(right._1.start)).then(left._1.end.cmp(right._1.end)) })
-        spans.dedup()
-        return Ok(spans)
-    }
-    if state_anchor_at(db, path, offset) == .Val(target) {
-        spans := compute_references(db, tokens, path, offset, true)
-        loop pair in &spans {
-            reference: db.refs.iter().find((reference) -> {
-                reference.module_path == pair._0 && reference.span == pair._1 && reference.target.is_some_and((candidate) -> {
-                    candidate.kind == "state" && checked_anchor_identity(db, candidate) == target.semantic_identity
-                })
-            }) ?? next
-            if state_leaf_span(reference) == .Val(leaf_span) -> pair._1 = leaf_span
-        }
-        spans.sort_by((left, right) -> { left._0.cmp(right._0).then(left._1.start.cmp(right._1.start)).then(left._1.end.cmp(right._1.end)) })
-        spans.dedup()
-        if !spans.is_empty() -> return Ok(spans)
-    }
-    enum_variant: is_enum_variant_identity(db, identity)
-    spans := checked_reference_spans(db, identity, enum_variant)
-    if enum_variant -> spans.extend(enum_variant_spans_across_checked_modules(db, tokens, path, identity))
-    spans.extend(db.defs.iter().filter((definition) -> { definition.identity == identity }).map((definition) -> { (_0: definition.module_path, _1: definition.def_span) }))
-    if spans.is_empty() -> return Err("no checked occurrences of `${name}` found")
-    spans.sort_by((left, right) -> { left._0.cmp(right._0).then(left._1.start.cmp(right._1.start)).then(left._1.end.cmp(right._1.end)) })
-    spans.dedup()
-    Ok(spans)
-}
-RefactorAction: struct { title: String, kind: String, edits: [TextEdit] }
-compute_refactor_actions: fn(db: SymbolDB, tokens: [Token], diagnostics: [Diagnostic], src: String, path: String, workspace_root: String?, excluded_import_paths: Set<String>, requested: Span) -> [RefactorAction] {
-    actions := adjacent_subject_dispatch_actions(diagnostics, requested)
-    actions.extend(import_actions(db, diagnostics, src, path, workspace_root, excluded_import_paths, requested))
-    selected: trim_span(src, requested) ?? {
-        actions.extend(inline_actions(db, tokens, src, path, requested))
-        return actions.move()
-    }
-    extracted := false
-    candidate: extractable_expr(db, src, path, selected).filter((span) -> { !is_trivial_extract(tokens, span) }).filter((span) -> { is_total_pure_expr(db, tokens, path, span) })
-    if candidate == .Val(expression_span) {
-        if extract_insert_point(db, src, path, expression_span) == .Val(insert_at) {
-            if src.get(expression_span.start..<expression_span.end) == .Val(expression) {
-                indent_len: src[insert_at..<src.len()].chars().take_while((c) -> { c == ' ' || c == '\t' }).map((c) -> { c.len_utf8() }).sum()
-                indent: src[insert_at..<insert_at + indent_len]
-                name: fresh_name(db, "extracted_value")
-                actions.push(RefactorAction{title: "Extract binding", kind: "refactor.extract", edits: [
-                    TextEdit{span: Span.new(insert_at, insert_at), new_text: "${indent}${name}: ${expression}\n"},
-                    TextEdit{span: expression_span, new_text: name}
-                ]})
-                if extract_function_action(db, tokens, src, path, expression_span, expression) == .Val(action) -> actions.push(action)
-                extracted = true
-            }
-        }
-    }
-    if !extracted -> actions.extend(inline_actions(db, tokens, src, path, selected))
-    actions.move()
-}
-adjacent_subject_dispatch_actions: fn(diagnostics: [Diagnostic], requested: Span) -> [RefactorAction] {
-    diagnostics.iter().filter((diagnostic) -> { diagnostic.code == "L0514" }).filter((diagnostic) -> {
-        diagnostic.edit.map((edit) -> { spans_touch(edit.span, requested) }).or_else(() -> { diagnostic.span.map((span) -> { spans_touch(span, requested) }) }) ?? false
-    }).filter_map((diagnostic) -> {
-        diagnostic.edit.map((edit) -> { RefactorAction{title: "Rewrite adjacent guards as an ordered subject table", kind: "refactor.rewrite", edits: [edit]} })
-    }).collect()
-}
-import_actions: fn(db: SymbolDB, diagnostics: [Diagnostic], src: String, path: String, workspace_root: String?, excluded_import_paths: Set<String>, requested: Span) -> [RefactorAction] {
-    out := [RefactorAction]{}
-    seen := Set[String]{}
-    loop diagnostic in diagnostics.iter().filter((diagnostic) -> { diagnostic.code == "E0102" || diagnostic.code == "E0107" }) {
-        span: diagnostic.span.filter((span) -> { spans_touch(span, requested) }) ?? next
-        name: src.get(span.start..<span.end) ?? next
-        modules := db.symbols.lookup(name).iter().filter((symbol) -> {
-            source_path: module_file_path(path, workspace_root, symbol.module_path).map((path) -> { path.to_string_lossy() })
-            source_path != Val(path) && !source_path.is_some_and((candidate) -> { excluded_import_paths.contains(candidate) }) &&
-                !excluded_import_paths.contains(symbol.module_path) && symbol.provenance.is_source() &&
-                source_symbol_is_exported(db, symbol) &&
-                !(symbol.kind == .Local || symbol.kind == .Parameter || symbol.kind == .Member)
-        }).filter_map((symbol) -> { use_statement_for_module(path, workspace_root, symbol.module_path) }).collect()
-        modules.sort()
-        modules.dedup()
-        if modules.len() != 1 -> next
-        statement: modules[0]
-        if src.lines().any((line) -> { line.trim() == statement.trim() }) || !seen.insert(statement) -> next
-        trimmed := statement.trim() // #4303
-        module_ref := trimmed.strip_prefix("use ") ?? trimmed // #4303
-        out.push(RefactorAction{title: "Import `${module_ref}`", kind: "quickfix", edits: [TextEdit{span: Span.new(0, 0), new_text: statement}]})
-    }
-    out.move()
-}
-extract_function_action: fn(db: SymbolDB, tokens: [Token], src: String, path: String, selected: Span, expression: String) -> RefactorAction? {
-    if !is_total_pure_expr(db, tokens, path, selected) -> return None
-    return_type: infer_total_pure_return_type(db, tokens, path, selected) ?? return None
-    if !is_scalar_name(return_type) -> return None
-    function: db.index.definition_facts().iter().filter((definition) -> {
-        definition.module_path == path && definition.kind == "function" && definition.span.start <= selected.start && selected.end <= definition.span.end
-    }).min_by_key((definition) -> { definition.span.end - definition.span.start }) ?? return None
-    inputs := [(SymDef, USize)]{}
-    loop reference in db.refs.iter().filter((reference) -> { reference.module_path == path && selected.start <= reference.span.start && reference.span.end <= selected.end }) {
-        target: reference.target ?? return None
-        definition: definition_for_anchor(db, target) ?? return None
-        if selected.start <= definition.def_span.start && definition.def_span.end <= selected.end -> next
-        if definition.kind == {
-            .Param(ty) -> { if !is_scalar_type(ty) -> return None }
-            .Local(mutable, ty) -> { if mutable || !ty.is_some_and(is_scalar_type) -> return None } else -> { next }
-        }
-        existing: inputs.iter().position((pair) -> { pair._0.identity == definition.identity })
-        if existing == .Val(index) {
-            inputs[index]._1 = inputs[index]._1.min(reference.span.start)
-        } else { inputs.push((_0: definition, _1: reference.span.start)) }
-    }
-    inputs.sort_by_key((pair) -> { pair._1 })
-    function_name: fresh_name(db, "extracted_fn")
-    params: inputs.iter().map((pair) -> {
-        ty: if pair._0.kind == {
-            .Param(ty) -> ty
-            .Local(_, .Val(ty)) -> ty
-            else -> unreachable()
-        }
-        "${pair._0.name}: ${ty.name()}"
-    }).collect().join(", ")
-    args: inputs.iter().map((pair) -> { pair._0.name }).collect().join(", ")
-    insert: line_start(src, function.span.start)
-    Val(RefactorAction{title: "Extract function", kind: "refactor.extract", edits: [
-        TextEdit{span: Span.new(insert, insert), new_text: "${function_name}: fn(${params}) -> ${return_type} {{ return ${expression} }}\n\n"},
-        TextEdit{span: selected, new_text: "${function_name}(${args})"}
-    ]})
-}
-inline_actions: fn(db: SymbolDB, tokens: [Token], src: String, path: String, requested: Span) -> [RefactorAction] {
-    reference: db.refs.iter().find((reference) -> { reference.module_path == path && spans_touch(reference.span, requested) }) ?? return []
-    target: reference.target ?? return []
-    binding: definition_for_anchor(db, target) ?? return []
-    if !(if binding.kind == {
-        .Local(lit0, _) && lit0 == false -> true
-        else -> false
-    }) -> return []
-    uses: db.refs.iter().filter((candidate) -> { candidate.module_path == path && candidate.target.is_some_and((anchor) -> { same_anchor(anchor, target) }) }).collect()
-    if uses.is_empty() -> return []
-    initializer: initializer_for_binding(db, src, path, binding) ?? return []
-    initializer_span: Span.new(initializer.span.start, initializer.span.end)
-    if !is_total_pure_expr(db, tokens, path, initializer_span) || !initializer_refs_are_stable(db, path, initializer_span) -> return []
-    start: line_start(src, binding.def_span.start)
-    end: line_end_including_newline(src, initializer_span.end)
-    prefix: src[start..<binding.def_span.start]
-    suffix := (src.get(initializer_span.end..<end) ?? "").trim_end_matches([Char{13}, '\n']).trim() // #4303
-    if !prefix.chars().all((c) -> { c.is_whitespace() }) || !suffix.trim_end_matches(';').trim().is_empty() || uses.iter().any((use_site) -> { end > use_site.span.start }) -> return []
-    expression: src.get(initializer_span.start..<initializer_span.end) ?? return []
-    edits := uses.iter().map((use_site) -> { TextEdit{span: use_site.span, new_text: "(${expression})"} }).collect()
-    edits.push(TextEdit{span: Span.new(start, end), new_text: ""})
-    [RefactorAction{title: "Inline `${binding.name}`", kind: "refactor.inline", edits: edits.move()}]
-}
-initializer_refs_are_stable: fn(db: SymbolDB, path: String, span: Span) -> Bool {
-    db.refs.iter().filter((reference) -> { reference.module_path == path && span.start <= reference.span.start && reference.span.end <= span.end }).all((reference) -> {
-        reference.target.and_then((target) -> { definition_for_anchor(db, target) }).is_some_and((definition) -> {
-            if definition.kind == {
-                .Local(lit0, _) && lit0 == true -> false
-                else -> true
-            }
-        })
-    })
-}
-// #6341: Sema's checked visibility decides, never the declaration's spelling.
-source_symbol_is_exported: fn(db: SymbolDB, symbol: jet_semindex.SemanticSymbol) -> Bool {
-    span: symbol.span ?? return false
-    db.declaration_visibility(symbol.module_path, span) == .Val(.Public)
-}
-exact_expr: fn(db: SymbolDB, path: String, selected: Span) -> jet_semindex.StructuralNode? {
-    db.nodes.iter().find((node) -> { node.module_path == path && node.class == "expr" && node.span.start == selected.start && node.span.end == selected.end })
-}
-extractable_expr: fn(db: SymbolDB, src: String, path: String, selected: Span) -> Span? {
-    if exact_expr(db, path, selected).is_some() -> return Val(selected)
-    text: src.get(selected.start..<selected.end) ?? return None
-    start_ws: text.len() - text.trim_start().len()
-    end_ws: text.len() - text.trim_end().len()
-    core := text.trim() // #4303
-    if core.len() < 2 || !core.starts_with("(") || !core.ends_with(")") -> return None
-    inner: trim_span(src, Span.new(selected.start + start_ws + 1, selected.end - end_ws - 1)) ?? return None
-    exact_expr(db, path, inner).map((node) -> { selected })
-}
-extract_insert_point: fn(db: SymbolDB, src: String, path: String, selected: Span) -> USize? {
-    if db.nodes.iter().find((node) -> { node.module_path == path && node.class == "expr" && node.slot == "initializer" && node.span.start == selected.start && node.span.end == selected.end }) == .Val(initializer) {
-        if binding_for_initializer(db, src, path, initializer) == .Val(binding) -> return Val(line_start(src, binding.def_span.start))
-    }
-    Val(line_start(src, selected.start))
-}
-binding_for_initializer: fn(db: SymbolDB, src: String, path: String, initializer: jet_semindex.StructuralNode) -> SymDef? {
-    start: line_start(src, initializer.span.start)
-    db.defs.iter().filter((definition) -> {
-        definition.module_path == path && definition.kind.is_local() && start <= definition.def_span.start && definition.def_span.end <= initializer.span.start
-    }).max_by_key((definition) -> { definition.def_span.start })
-}
-initializer_for_binding: fn(db: SymbolDB, src: String, path: String, binding: SymDef) -> jet_semindex.StructuralNode? {
-    end: src[binding.def_span.start..<src.len()].find([Char{13}, '\n']).map_or(src.len(), (offset) -> { binding.def_span.start + offset })
-    db.nodes.iter().filter((node) -> {
-        node.module_path == path && node.class == "expr" && node.slot == "initializer" && binding.def_span.end <= node.span.start && node.span.end <= end
-    }).min_by_key((node) -> { node.span.start })
-}
-definition_for_anchor: fn(db: SymbolDB, anchor: DefinitionAnchor) -> SymDef? {
-    db.defs.iter().find((definition) -> {
-        anchor.semantic_identity.is_some_and((identity) -> { identity == definition.identity }) ||
-            (definition.module_path == anchor.module_path && definition.def_span.start == anchor.def_span.start && definition.def_span.end == anchor.def_span.end)
-    })
-}
-same_anchor: fn(left: DefinitionAnchor, right: DefinitionAnchor) -> Bool {
-    if {
-        left.semantic_identity == .Val(left_id) && right.semantic_identity == .Val(right_id) -> left_id == right_id
-        else -> left.module_path == right.module_path && left.def_span.start == right.def_span.start && left.def_span.end == right.def_span.end
-    }
-}
-is_scalar_type: fn(ty: jet_foundation.AST.Type) -> Bool { is_scalar_name(ty.name()) }
-is_scalar_name: fn(name: String) -> Bool { name == "Bool" || name == "Char" || name == "Int" || name == "Float" }
-is_trivial_extract: fn(tokens: [Token], span: Span) -> Bool {
-    significant: tokens.iter().filter((token) -> {
-        span.start <= token.span.start && token.span.end <= span.end && token.span.start < token.span.end &&
-            !(if token.kind == {
-                .Eof | .LParen | .RParen -> true
-                else -> false
-            })
-    }).collect()
-    significant.len() == 1 && (if significant[0].kind == {
-        .Ident(_) | .Int(_, _) | .Float(_) | .Char(_) | .KwTrue | .KwFalse | .Str(_) -> true
-        else -> false
-    })
-}
-is_total_pure_expr: fn(db: SymbolDB, tokens: [Token], path: String, span: Span) -> Bool {
-    enclosed: tokens.iter().filter((token) -> { span.start <= token.span.start && token.span.end <= span.end && token.span.start < token.span.end && token.kind != .Eof }).collect()
-    if enclosed.is_empty() -> return false
-    loop pair in enclosed.windows(2) {
-        if pair[0].kind.is_ident() && pair[1].kind == .LParen -> return false
-    }
-    has_comparison := false
-    loop token in enclosed {
-        safe: if token.kind == {
-            .Ident(_) | .Int(_, _) | .Float(_) | .Char(_) | .KwTrue | .KwFalse | .AndAnd | .OrOr | .Bang | .LParen | .RParen -> true
-            .EqEq | .NotEq -> { has_comparison = true; true }
-            .Str(parts) -> parts.iter().all((part) -> { if part == {
-                .Lit(_) -> true
-                else -> false
-            } })
-            else -> false
-        }
-        if !safe -> return false
-    }
-    if has_comparison { expr_comparison_operands_are_scalar(db, tokens, path, span) } else { true }
-}
-expr_comparison_operands_are_scalar: fn(db: SymbolDB, tokens: [Token], path: String, span: Span) -> Bool {
-    enclosed: tokens.iter().filter((token) -> { span.start <= token.span.start && token.span.end <= span.end && token.span.start < token.span.end }).collect()
-    has_bool_op: enclosed.iter().any((token) -> { if token.kind == {
-        .AndAnd | .OrOr | .Bang -> true
-        else -> false
-    } })
-    leaf := String?{None}
-    loop token in enclosed {
-        if token.kind == {
-            .KwTrue | .KwFalse -> { if !agree_scalar_leaf(leaf, "Bool") -> return false }
-            .Int(_, _) -> { if has_bool_op || !agree_scalar_leaf(leaf, "Int") -> return false }
-            .Float(_) -> { if has_bool_op || !agree_scalar_leaf(leaf, "Float") -> return false }
-            .Char(_) -> { if has_bool_op || !agree_scalar_leaf(leaf, "Char") -> return false }
-            .Ident(_) -> {
-                name: resolved_type_name(db, path, token.span) ?? return false
-                if !is_scalar_name(name) || (has_bool_op && name != "Bool") || !agree_scalar_leaf(leaf, name) -> return false
-            }
-            .AndAnd | .OrOr | .Bang | .EqEq | .NotEq | .LParen | .RParen -> {}
-            else -> { return false }
-        }
-    }
-    leaf.is_some_and(is_scalar_name)
-}
-agree_scalar_leaf: fn(leaf: String?, name: String) -> Bool {
-    if leaf == {
-        .Val(existing) -> existing == name
-        .None -> { leaf = Val(name); true }
-    }
-}
-resolved_type_name: fn(db: SymbolDB, path: String, span: Span) -> String? {
-    reference: db.refs.iter().find((reference) -> { reference.module_path == path && reference.span.start == span.start && reference.span.end == span.end }) ?? return None
-    target: reference.target ?? return None
-    definition: definition_for_anchor(db, target) ?? return None
-    if definition.kind == {
-        .Param(ty) -> Val(ty.name())
-        .Local(_, .Val(ty)) -> Val(ty.name())
-        else -> None
-    }
-}
-infer_total_pure_return_type: fn(db: SymbolDB, tokens: [Token], path: String, span: Span) -> String? {
-    saw_bool_op := false
-    saw_comparison := false
-    literal := String?{None}
-    from_ident := String?{None}
-    loop token in tokens.iter().filter((token) -> { span.start <= token.span.start && token.span.end <= span.end && token.span.start < token.span.end && token.kind != .Eof }) {
-        if token.kind == {
-            .AndAnd | .OrOr | .Bang | .KwTrue | .KwFalse -> { saw_bool_op = true }
-            .EqEq | .NotEq -> { saw_comparison = true }
-            .Int(_, _) -> {
-                if literal.is_some_and((existing) -> { existing != "Int" }) -> return None
-                literal = Val("Int")
-            }
-            .Float(_) -> {
-                if literal.is_some_and((existing) -> { existing != "Float" }) -> return None
-                literal = Val("Float")
-            }
-            .Char(_) -> {
-                if literal.is_some_and((existing) -> { existing != "Char" }) -> return None
-                literal = Val("Char")
-            }
-            .Ident(_) -> {
-                name: resolved_type_name(db, path, token.span) ?? return None
-                if !is_scalar_name(name) -> return None
-                if from_ident == {
-                    .Val(existing) -> { if existing != name && !saw_bool_op && !saw_comparison -> return None }
-                    .None -> { from_ident = Val(name) }
-                }
-            }
-            .LParen | .RParen -> {}
-            else -> { return None }
-        }
-    }
-    if saw_bool_op || saw_comparison -> return Val("Bool")
-    if literal == .Val(name) -> return Val(name)
-    from_ident.filter(is_scalar_name)
-}
-trim_span: fn(src: String, span: Span) -> Span? {
-    text: src.get(span.start..<span.end) ?? return None
-    start: text.len() - text.trim_start().len()
-    end: text.trim_end().len()
-    if start < end { Val(Span.new(span.start + start, span.start + end)) } else { None }
-}
-spans_touch: fn(left: Span, right: Span) -> Bool { left.start <= right.end && right.start <= left.end }
-line_start: fn(src: String, offset: USize) -> USize {
-    src[0..<offset.min(src.len())].rfind('\n').map_or(0, (index) -> { index + 1 })
-}
-line_end_including_newline: fn(src: String, offset: USize) -> USize {
-    src[offset.min(src.len())..<src.len()].find('\n').map_or(src.len(), (index) -> { offset.min(src.len()) + index + 1 })
-}
-fresh_name: fn(db: SymbolDB, base: String) -> String {
-    if !db.defs.iter().any((definition) -> { definition.name == base }) -> return base
-    suffix := 2
-    loop {
-        candidate: "${base}_${suffix}"
-        if !db.defs.iter().any((definition) -> { definition.name == candidate }) -> return candidate
-        suffix += 1
-    }
-}
-st: module {
-    KEYWORD: U32{0}
-    TYPE: U32{1}
-    VARIABLE: U32{3}
-    STRING: U32{7}
-    NUMBER: U32{8}
-    COMMENT: U32{9}
-    OPERATOR: U32{10}
-    OWNERSHIP: U32{12}
-    DECORATOR: U32{13}
-}
-sm: module {
-    READONLY: U32{1 << 1}
-    MOVE: U32{1 << 2}
-    WRITE_BORROW: U32{1 << 3}
-    COPY: U32{1 << 4}
-    RULE: U32{1 << 5}
-    ARITHMETIC_CHECKED: U32{1 << 6}
-    ARITHMETIC_WRAPPING: U32{1 << 7}
-    ARITHMETIC_SATURATING: U32{1 << 8}
-}
-semantic_token_type_for: fn(tokens: [Token], idx: USize, src: String) -> (U32, U32)? {
-    tok: tokens[idx]
-    if marker_modifier(tokens, idx) == .Val(marker_mod) -> return Val((_0: st.DECORATOR, _1: marker_mod))
-    if tok.kind == {
-        .KwFn | .KwPub | .KwIf | .KwElse | .KwBreak | .KwReturn | .KwStruct | .KwEnum |
-        .KwImpl | .KwTrait | .KwTag | .KwDerive | .KwConst | .KwComptime | .KwUse |
-        .KwExtern | .KwLoop | .KwSelf | .KwNull | .KwIt | .KwModule -> Val((_0: st.KEYWORD, _1: 0))
-        .KwTrue | .KwFalse -> Val((st.KEYWORD, sm.READONLY))
-        .KwCopy -> Val((st.OWNERSHIP, sm.COPY))
-        .KwMutate | .KwMove -> None
-        .Ident(name) -> {
-            if name == Syntax.KW_NEXT && is_contextual_next(tokens, idx) -> return Val((st.KEYWORD, 0))
-            if name.chars().next().is_some_and((c) -> { c.is_uppercase() }) { Val((st.TYPE, 0)) } else { Val((st.VARIABLE, 0)) }
-        }
-        .Str(_) -> Val((st.STRING, 0))
-        .Int(_, _) | .Float(_) | .Char(_) -> Val((st.NUMBER, 0))
-        .LineComment(_) | .BlockComment(_) -> Val((st.COMMENT, 0))
-        .Plus | .Minus | .Star | .Slash | .Percent | .Pipe | .Shl | .Shr | .OrOr |
-        .Bang | .EqEq | .NotEq | .Lt | .Gt | .Le | .Ge | .Compare | .UnifiedArrow |
-        .Question | .DotDot | .DotDotLt -> Val((st.OPERATOR, 0))
-        .Amp -> { if token_text(src, tok) == Syntax.SIGIL_WRITE { Val((st.OWNERSHIP, sm.WRITE_BORROW)) } else { None } }
-        // `&&` is the take mark after a parameter's `:`, before `self`, and in
-        // `task &&name`; anywhere else it is logical and.
-        .AndAnd -> {
-            prev: previous_significant(tokens, idx)
-            take: if prev == {
-                .Val(p) -> tokens[p].kind == .Colon || tokens[p].kind == .LParen || tokens[p].kind == .Comma || token_text(src, tokens[p]) == "task"
-                .None -> false
-            }
-            if take { Val((st.OWNERSHIP, sm.MOVE)) } else { Val((st.OPERATOR, 0)) }
-        }
-        else -> None
-    }
-}
-marker_modifier: fn(tokens: [Token], idx: USize) -> U32? {
-    tok: tokens[idx]
-    if tok.kind == .Hash -> return marker_kind_after(tokens, idx).map((kind) -> { kind.modifier() })
-    prev: previous_significant(tokens, idx) ?? return None
-    if tokens[prev].kind == .Hash && marker_name(tokens, idx).is_some() {
-        marker_kind_for(tokens[prev], tokens, idx).map((kind) -> { kind.modifier() })
-    } else { None }
-}
-MarkerKind: enum { Rule }
-MarkerKind.modifier: fn(self: MarkerKind) -> U32 {
-    if self == {
-        .Rule -> sm
-        .RULE
-    }
-}
-marker_kind_after: fn(tokens: [Token], idx: USize) -> MarkerKind? {
-    next: next_significant(tokens, idx) ?? return None
-    marker_kind_for(tokens[idx], tokens, next)
-}
-marker_kind_for: fn(prefix: Token, tokens: [Token], name_idx: USize) -> MarkerKind? {
-    name: marker_name(tokens, name_idx) ?? return None
-    if prefix.kind == .Hash && Syntax.is_applied_rule(name) { Val(.Rule) } else { None }
-}
-marker_name: fn(tokens: [Token], idx: USize) -> String? {
-    if tokens[idx].kind == {
-        .Ident(name) -> Val(name)
-        else -> None
-    }
-}
-previous_significant: fn(tokens: [Token], idx: USize) -> USize? {
-    tokens[0..<idx].iter().enumerate().rev().find_map((pair) -> { if !is_trivia(pair._1) -> Val(pair._0) else -> None })
-}
-next_significant: fn(tokens: [Token], idx: USize) -> USize? {
-    tokens.iter().enumerate().skip(idx + 1).find_map((pair) -> { if !is_trivia(pair._1) -> Val(pair._0) else -> None })
-}
-is_contextual_next: fn(tokens: [Token], idx: USize) -> Bool {
-    previous: previous_significant(tokens, idx).map((idx) -> { tokens[idx].kind })
-    next: next_significant(tokens, idx).map((idx) -> { tokens[idx].kind })
-    if previous == Val(.QuestionQuestion) -> return true
-    if previous != Val(.LBrace) && previous != Val(.Semi) -> return false
-    next == Val(.Semi) || next == Val(.RBrace)
-}
-is_trivia: fn(tok: Token) -> Bool {
-    if tok.kind == {
-        .LineComment(_) | .BlockComment(_) -> true
-        else -> false
-    }
-}
-token_text: fn(src: String, tok: Token) -> String {
-    src.get(tok.span.start..<tok.span.end.min(src.len())) ?? ""
-}
-encode_semantic_tokens_with_arithmetic: fn(tokens: [Token], src: String, arithmetic: [jet_semindex.ArithmeticOperationFact]) -> [U32] {
-    encode_semantic_tokens_where(tokens, src, (tok) -> { true }, arithmetic)
-}
-encode_semantic_tokens_in_span_with_arithmetic: fn(tokens: [Token], src: String, span: Span, arithmetic: [jet_semindex.ArithmeticOperationFact]) -> [U32] {
-    encode_semantic_tokens_where(tokens, src, (tok) -> { tok.span.start >= span.start && tok.span.start < span.end }, arithmetic)
-}
-encode_semantic_tokens_where: fn(tokens: [Token], src: String, include: fn(Token) -> Bool, arithmetic: [jet_semindex.ArithmeticOperationFact]) -> [U32] {
-    data := [U32]{}
-    prev_line := U32{0}
-    prev_start := U32{0}
-    loop (idx, tok) in tokens.iter().enumerate() {
-        if tok.kind == .Eof -> break
-        if !include(tok) -> next
-        (tok_type, base_mods): semantic_token_type_for(tokens, idx, src) ?? next
-        tok_mods: base_mods.bit_or(arithmetic_modifier(tok.span, arithmetic))
-        lsp_start: byte_offset_to_lsp(src, tok.span.start)
-        line: lsp_start.line
-        start: lsp_start.character
-        text: src.get(tok.span.start..<tok.span.end.min(src.len())) ?? ""
-        first_line_text: text.split('\n').next() ?? text
-        length: U32{first_line_text.encode_utf16().count()}
-        if length == 0 -> next
-        delta_line: line - prev_line
-        delta_start: if delta_line == 0 -> start - prev_start else -> start
-        data.push(delta_line)
-        data.push(delta_start)
-        data.push(length)
-        data.push(tok_type)
-        data.push(tok_mods)
-        prev_line = line
-        prev_start = start
-    }
-    data.move()
-}
-arithmetic_modifier: fn(token: Span, arithmetic: [jet_semindex.ArithmeticOperationFact]) -> U32 {
-    arithmetic.iter().filter((fact) -> { token.start < fact.operation_span.end && fact.operation_span.start < token.end }).min_by_key((fact) -> {
-        fact.operation_span.end.saturating_sub(fact.operation_span.start)
-    }).map_or(0, (fact) -> {
-        if fact.policy == {
-            "Checked" -> sm.ARITHMETIC_CHECKED
-            "Wrapping" -> sm.ARITHMETIC_WRAPPING
-            "Saturating" -> sm.ARITHMETIC_SATURATING
-            else -> 0
-        }
-    })
-}
-format_inlay_hints: fn(hints: [jet_semindex.InlayHint], src: String) -> String {
-    items := ""
-    loop (i, h) in hints.iter().enumerate() {
-        if i > 0 -> items.push(',')
-        pos: byte_offset_to_lsp(src, h.span.end)
-        items.push_str("{{\"position\":{{\"line\":${pos.line},\"character\":${pos.character}}},\"label\":\"${foundation_json_escape(h.label)}\",\"kind\":1}}")
-    }
-    "[${items}]"
-}
-

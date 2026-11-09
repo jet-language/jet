@@ -1691,10 +1691,10 @@ under the compiler-speed method below.
 end, not a second checker. `Compiler/JetQueries` is a demand cache
 for file inputs and derived query values. The bounded loader prepares open or
 discovered sources with at most eight workers and consumes them in stable
-order. The server records cancellation concurrently with
-request execution and replaces a cancelled in-flight result with JSON-RPC
-`-32800`. D-LSP2 requires every advertised LSP feature to have named coverage
-in `Compiler/JetLSP/Tests/Integration/` or `tests/cases/lsp/`; the server must
+order. The server answers requests one at a time in arrival order, so a
+`$/cancelRequest` always names a request that has already been answered and
+is ignored. D-LSP2 requires every advertised LSP feature to have named coverage
+in `Compiler/JetLSP/Tests/LSP/` or `tests/cases/lsp/`; the server must
 not advertise speculative features.
 
 ### Compiler-speed evidence boundary (#666)

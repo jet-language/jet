@@ -1,26 +1,26 @@
-// Core owns percent encoding/decoding; do not parse a URL or normalize its path
-// here. normalize_path (5929–5932) is the effectful L24 canonical seam.
+// `file://` URIs and the paths they name. Core owns percent encoding.
 use lsp_url: core.net.url
 
-// `windows` is the host target's cfg!(windows), supplied by the host caller;
-// keeping it explicit lets this byte/URI kernel remain pure on every target.
-lsp_uri_to_path: fn(uri: String, windows: Bool) -> String Never! {
+// A `file://` URI's path, percent-decoded; any other text is returned as is.
+// A drive-letter path (`file:///C:/work`) drops the slash before the drive.
+lsp_uri_to_path: fn(uri: String) -> String Never! {
     if !uri.starts_with("file://") -> return uri.copy()
-    rest: uri.slice(7, uri.len())
+    rest: uri.slice(7, uri.count_bytes())
     decoded: lsp_url.percent_decode(rest) ?? return ""
-    if !windows -> return decoded
-    // trim_start_matches('/'): count leading ASCII slashes over the byte view,
-    // which equals their scalar count, then slice once.
     bytes: decoded.bytes()
-    start := 0
-    loop start < bytes.len() && bytes[start] == (U8{47}) -> start += 1
-    decoded.slice(start, decoded.len()).replace("/", "\\")
+    if bytes.len() >= 3 && bytes[0] == (U8{47}) && bytes[2] == (U8{58}) && lsp_is_ascii_letter(bytes[1]) -> return decoded.slice(1, decoded.count_bytes())
+    decoded
 }
 
+lsp_is_ascii_letter: fn(byte: U8) -> Bool Never! {
+    code: Int.from_u8(byte)
+    (code >= 65 && code <= 90) || (code >= 97 && code <= 122)
+}
+
+// Every byte outside the unreserved set and `/` is percent-encoded, except
+// the `:` a drive letter or a scheme-like segment keeps.
 lsp_path_to_uri: fn(path: String) -> String Never! {
-    // Core quote has exactly the reference's unreserved ASCII set plus `/`.
-    // Restore only encoded colons, not user percent escapes (which quote has
-    // already encoded as %25), matching the reference's additional safe `:`.
     encoded: lsp_url.quote(path).replace("%3A", ":")
-    "file://{encoded}"
+    if path.starts_with("/") -> return "file://{encoded}"
+    "file:///{encoded}"
 }

@@ -1,0 +1,77 @@
+// The server loop: JSON-RPC messages over standard input and output, each
+// framed by a `Content-Length` header. Requests are answered in arrival
+// order; before each one, the documents edited since their last publication
+// are checked and republished, so a request reads current diagnostics.
+use {
+    core.encoding.[Dyn]
+    lsp_loop_term: core.term
+}
+
+// The longest message body the server reads.
+LSP_MAX_MESSAGE_BYTES: 67108864
+
+// The next message body; None at the end of input.
+lsp_read_message: fn() -[IO, Time.Wait]> String? LSPRPCError! {
+    header: lsp_loop_term.read_until("\r\n\r\n") ?? return Err(LSPRPCError{code: -32700, message: "could not read a message header: {err}"})
+    if header == "" -> return Ok(None)
+    length := -1
+    loop line in header.split("\r\n") {
+        colon: line.find(":")
+        if colon < 0 -> next
+        if line.slice(0, colon).trim().to_lower() != "content-length" -> next
+        length = Int.parse(line.slice(colon + 1, line.count_bytes()).trim()) ?? return Err(LSPRPCError{code: -32700, message: "Content-Length is not a number"})
+    }
+    if length < 0 -> return Err(LSPRPCError{code: -32700, message: "a message header has no Content-Length"})
+    if length > LSP_MAX_MESSAGE_BYTES -> return Err(LSPRPCError{code: -32700, message: "a message is longer than {LSP_MAX_MESSAGE_BYTES} bytes"})
+    bytes: lsp_loop_term.take(length) ?? return Err(LSPRPCError{code: -32700, message: "could not read a message body: {err}"})
+    if bytes.len() != length -> return Err(LSPRPCError{code: -32700, message: "input ended inside a message body"})
+    Ok(Val(String.from_bytes(bytes) ?? return Err(LSPRPCError{code: -32700, message: "a message body is not UTF-8"})))
+}
+
+// Serves until `exit` or the end of input. The exit code is 0 when a
+// `shutdown` request came first, else 1.
+lsp_serve: fn(checker: &&LSPChecker) -> Int {
+    server := lsp_server(checker)
+    stdout := lsp_loop_term.stdout()
+    loop {
+        text: if lsp_read_message() == {
+            .Val(body) -> body
+            .None -> { return lsp_exit_code(server) }
+            .Err(problem) -> { return lsp_stop(problem.message) }
+        }
+        lsp_serve_message(server, text, stdout) ?? return lsp_stop("could not write to the client: {err}")
+        if server.exited -> return lsp_exit_code(server)
+    }
+}
+
+lsp_exit_code: fn(server: LSPServer) -> Int Never! { if server.shutdown -> 0 else -> 1 }
+
+lsp_stop: fn(message: String) -> Int {
+    lsp_write_log(message).drop("standard error is the log; a failed log write has nowhere to go")
+    1
+}
+
+lsp_serve_message: fn(server: &LSPServer, text: String, stdout: &lsp_loop_term.Stdout) IOError! {
+    message: if lsp_parse_rpc_message(text) == {
+        .Ok(value) -> value
+        .Err(problem) -> { return lsp_write_message(stdout, lsp_error_response(Dyn.Null, problem.code, problem.message)) }
+    }
+    method: lsp_text_member(message, "method") ?? return
+    params: lsp_member(message, "params")
+    if lsp_member(message, "id") == {
+        .None -> {
+            if !server.initialized && method != "exit" -> return
+            lsp_handle_notification(server, method, params, stdout) ?? return Err(err)
+        }
+        .Val(id) -> {
+            if !server.initialized && method != "initialize" -> return lsp_write_message(stdout, lsp_error_response(id, -32002, "the server is not initialized"))
+            if server.shutdown -> return lsp_write_message(stdout, lsp_error_response(id, -32600, "the server is shutting down"))
+            if method == "initialize" {
+                if server.initialized -> return lsp_write_message(stdout, lsp_error_response(id, -32600, "the server is already initialized"))
+                server.initialized = true
+            }
+            lsp_flush_dirty(server, stdout) ?? return Err(err)
+            lsp_write_message(stdout, lsp_handle_request(server, method, params, id)) ?? return Err(err)
+        }
+    }
+}

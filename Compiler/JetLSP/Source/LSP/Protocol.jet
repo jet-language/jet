@@ -1,10 +1,10 @@
-// Core owns Dyn and Foundation owns the strict bounded protocol parser and JSON
+// JSON-RPC envelopes: validating a message, reading its members, and writing
+// responses and errors. Foundation owns the bounded protocol parser and JSON
 // quoting.
 use {
     core.encoding.[Dyn]
     lsp_protocol_term: core.term
-    jet_foundation.[foundation_parse_protocol_json, foundation_json_integer, foundation_json_quote]
-    jet_devserver.[number]
+    jet_foundation.[foundation_parse_protocol_json_with_limit, foundation_json_integer, foundation_json_quote]
 }
 
 #Error
@@ -13,23 +13,63 @@ LSPRPCError: struct {
     message: String
 }
 
-lsp_parse_rpc_message: fn(body: String) -> Dyn LSPRPCError! {
-    message: foundation_parse_protocol_json(body) ?? return Err(LSPRPCError{code: -32700, message: "Parse error"})
-    if message != .Object(_) -> return Err(LSPRPCError{code: -32600, message: "Invalid Request"})
-    if (message.field("jsonrpc") ?? return Err(LSPRPCError{code: -32600, message: "Invalid Request"})) == {
-        .Text(version) -> {
-            if version != "2.0" -> return Err(LSPRPCError{code: -32600, message: "Invalid Request"})
+// A member of a JSON object; None when absent or when `value` is not an
+// object.
+lsp_member: fn(value: Dyn, key: String) -> Dyn? Never! {
+    if value == {
+        .Object(fields) -> {
+            loop entry in fields {
+                if entry.key == key -> return Val(entry.value.copy())
+            }
         }
-        else -> { return Err(LSPRPCError{code: -32600, message: "Invalid Request"}) }
+        else -> {}
     }
-    if (message.field("method") ?? return Err(LSPRPCError{code: -32600, message: "Invalid Request"})) != .Text(_) -> return Err(LSPRPCError{code: -32600, message: "Invalid Request"})
-    if message.field("id") == .Val(id) {
-        if id != .Null && id != .Text(_) && foundation_json_integer(id) == None -> return Err(LSPRPCError{code: -32600, message: "Invalid Request"})
+    None
+}
+
+lsp_text_member: fn(value: Dyn, key: String) -> String? Never! {
+    if (lsp_member(value, key) ?? return None) == .Text(text) -> return Val(text)
+    None
+}
+
+lsp_bool_member: fn(value: Dyn, key: String) -> Bool Never! {
+    if (lsp_member(value, key) ?? return false) == .Bool(flag) -> return flag
+    false
+}
+
+// The member of a request's params.
+lsp_param: fn(params: Dyn?, key: String) -> Dyn? Never! {
+    lsp_member(params ?? return None, key)
+}
+
+lsp_is_object: fn(value: Dyn) -> Bool Never! {
+    if value == {
+        .Object(_) -> true
+        else -> false
     }
-    if message.field("params") == .Val(params) {
+}
+
+lsp_invalid_request: fn() -> LSPRPCError Never! { LSPRPCError{code: -32600, message: "Invalid Request"} }
+
+// A JSON-RPC 2.0 message: an object whose `method` is a string, whose `id`
+// (when present) is a string, an integer or null, and whose `params` (when
+// present) is an array or object.
+lsp_parse_rpc_message: fn(body: String) -> Dyn LSPRPCError! {
+    message: foundation_parse_protocol_json_with_limit(body, LSP_MAX_MESSAGE_BYTES) ?? return Err(LSPRPCError{code: -32700, message: "Parse error"})
+    if !lsp_is_object(message) -> return Err(lsp_invalid_request())
+    if lsp_text_member(message, "jsonrpc") != Val("2.0") -> return Err(lsp_invalid_request())
+    if lsp_text_member(message, "method") == None -> return Err(lsp_invalid_request())
+    if lsp_member(message, "id") == .Val(id) {
+        valid: if id == {
+            .Null | .Text(_) -> true
+            else -> foundation_json_integer(id) != None
+        }
+        if !valid -> return Err(lsp_invalid_request())
+    }
+    if lsp_member(message, "params") == .Val(params) {
         if params == {
             .Array(_) | .Object(_) -> {}
-            else -> { return Err(LSPRPCError{code: -32600, message: "Invalid Request"}) }
+            else -> { return Err(lsp_invalid_request()) }
         }
     }
     Ok(message)
@@ -49,23 +89,10 @@ lsp_error_response: fn(id: Dyn, code: Int, message: String) -> String Never! {
     "{{\"jsonrpc\":\"2.0\",\"id\":{lsp_serialize_id(id)},\"error\":{{\"code\":{code},\"message\":{foundation_json_quote(message)}}}}}"
 }
 
-lsp_cancellation_key: fn(params: Dyn?) -> String? Never! {
-    value: params ?? return None
-    // Presence takes priority, even if the first field has an invalid ID.
-    // Rust's or_else only reads requestId when id is absent, not invalid/null.
-    id: value.field("id") ?? value.field("requestId") ?? return None
-    if id != .Text(_) && foundation_json_integer(id) == None -> return None
-    Val(lsp_serialize_id(id))
-}
-
-// Rust318–326. The actual fallible Stderr methods are canonical
-// StreamHandles StderrWriteLine/StderrFlush, not the nonfallible eprint rail.
-lsp_write_log_line: fn(stderr: &lsp_protocol_term.Stderr, line: String) IOError! -[IO, Time.Wait]> {
-    stderr.write_line(line) ?? return Err(err)
-}
-
+// The server's log is standard error; standard output carries only protocol
+// messages.
 lsp_write_log: fn(message: String) IOError! -[IO, Time.Wait]> {
     stderr := lsp_protocol_term.stderr()
-    lsp_write_log_line(stderr, "[jet-lsp] {message}") ?? return Err(err)
+    stderr.write_line("[jet-lsp] {message}") ?? return Err(err)
     stderr.flush() ?? return Err(err)
 }
