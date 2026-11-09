@@ -4,6 +4,7 @@ use {
     net: core.net
     core.term.[Key]
     core.ui.[FrameStats, UICursor, UIError, UIEvent, UIIcon, UIPointerButton, UIRect]
+    frame: __core_ui_frame
 }
 // __core_ui_wayland — the Wayland wire adapter behind `ui.open`, a private
 // part of core.ui.
@@ -15,6 +16,10 @@ use {
 // Buffers are sized in physical pixels: wp_fractional_scale_v1 and
 // wp_viewporter map them onto the window's logical size, else the integer
 // wl_surface buffer scale does.
+// Jet draws the window's frame itself (__core_ui_frame): the title bar and
+// the shadow ring are one chrome surface, a wl_subsurface below the
+// program's, unless the compositor draws its own (xdg-decoration's
+// server_side) or offers no wl_subcompositor.
 // Requests queue in `out` and leave on `flush`; events are parsed from
 // `inbox`, and the descriptors that ride with them (the keymap) queue in
 // `inbox_fds`, newest first.
@@ -25,14 +30,18 @@ DISPLAY: 1
 // memory, the program's RGBA byte order, so it needs no swizzle.
 FORMAT_XRGB8888: 1
 FORMAT_XBGR8888: 875709016
-// An icon's wire format: premultiplied ARGB8888 with its alpha.
+// Premultiplied ARGB8888 with its alpha: icons, the frame, and the content
+// under the frame's rounded corners. ABGR8888 is R, G, B, A in memory.
 FORMAT_ARGB8888: 0
+FORMAT_ABGR8888: 875708993
 RECEIVE_MAX: 65536
 SIDE_MAX: 16384
 // The xdg_toplevel app_id until the program names its own.
 DEFAULT_APP_ID: "dev.jet.app"
 // Three buffers: one on screen, one queued, one being drawn.
 BUFFER_COUNT: 3
+// The chrome changes seldom: one on screen, one being drawn.
+CHROME_BUFFERS: 2
 // Present-to-present intervals and input latencies kept for frame_stats.
 SAMPLES_KEPT: 1024
 // Recent frames whose draw time sizes the draw-late budget.
@@ -51,6 +60,16 @@ Buffer: struct {
     stale_y0: Int
     stale_x1: Int
     stale_y1: Int
+}
+
+// A buffer of the chrome's pool. `ring` names the shadow ring it holds
+// (scale120 * 2, plus 1 when active; -1 for none): the title bar is drawn
+// every time, the ring only into a buffer without it.
+ChromeBuffer: struct {
+    id: Int
+    offset: Int
+    busy: Bool
+    ring: Int
 }
 
 // A committed frame awaiting presentation feedback: the time it was
@@ -195,6 +214,50 @@ Connection: struct {
     priv interval_at: Int
     priv latencies: [Int]
     priv latency_at: Int
+    // Jet's own frame. The chrome surface is a wl_subsurface below the
+    // content in sync mode: the title bar above the content and the
+    // shadow ring around both, drawn by __core_ui_frame. `framed` says the
+    // compositor leaves the frame to Jet; a fullscreen window has none.
+    priv subcompositor: Int
+    priv decoration: Int
+    priv framed: Bool
+    priv chrome: Int
+    priv chrome_subsurface: Int
+    priv chrome_viewport: Int
+    priv chrome_pool: Int
+    priv chrome_memory: sys.SharedMemory
+    priv chrome_buffers: [ChromeBuffer]
+    // The chrome buffers' size in pixels, and whether one is attached.
+    priv chrome_width: Int
+    priv chrome_height: Int
+    priv chrome_shown: Bool
+    // The chrome must be drawn again before it is next seen.
+    priv chrome_stale: Bool
+    priv painter: frame.Painter
+    // The title, icon, focus, states and pressed buttons the frame shows.
+    priv look: frame.FrameLook
+    priv fullscreen: Bool
+    // The window geometry set last (x, y, width, height); empty before.
+    priv geometry: [Int]
+    // The pointer is on the chrome; it or a finger on the frame is at
+    // (chrome_fx, chrome_fy), in 1/256ths of a unit from the chrome's
+    // top-left corner; the cursor shape shown there, 0 before one.
+    priv on_chrome: Bool
+    priv chrome_fx: Int
+    priv chrome_fy: Int
+    priv chrome_shape: Int
+    // The latest press on the title (ms on the compositor's clock, -1 for
+    // none lately), for a double press.
+    priv title_press_ms: Int
+    // wl_touch, 0 without one, and the touch point on the frame, -1 for none.
+    priv touch: Int
+    priv touch_id: Int
+    // The content's bottom-left corner cover at `corner_scale`.
+    priv corner_cover: [U8]
+    priv corner_scale: Int
+    // wl_shm offers XBGR8888 and ABGR8888.
+    priv xbgr: Bool
+    priv abgr: Bool
     priv modifiers: Int
     priv events: [UIEvent]
     priv failure: UIError?
@@ -262,6 +325,11 @@ connect: fn(width: Int, height: Int, title: String) -[Env, Net, Time]> Connectio
     stream: net.unix_connect(path) ?? return Err(UIError.Connect("{path}: {err}"))
     // Replaced by the first `allocate`; a page until then.
     memory: sys.shared_memory(4096) ?? return Err(UIError.Protocol("allocating window buffers failed: {err}"))
+    chrome_memory: sys.shared_memory(4096) ?? return Err(UIError.Protocol("allocating window buffers failed: {err}"))
+    look: frame.FrameLook{
+        title: title.copy(), active: true, square: false, maximized: false, coarse: false,
+        hover: frame.FrameButton.Nothing, pressed: frame.FrameButton.Nothing, icon: [U8]{}, icon_side: 0,
+    }
     c := Connection{
         stream: stream, out: [U8]{}, out_fds: [sys.Fd]{}, inbox: [U8]{}, inbox_fds: [sys.Fd]{},
         next_id: 2, registry: 0, compositor: 0, shm: 0, wm_base: 0, seat: 0, decoration_manager: 0,
@@ -278,7 +346,13 @@ connect: fn(width: Int, height: Int, title: String) -[Env, Net, Time]> Connectio
         vblank_ns: 0, vblank_known: false, lag: 0, lag_known: false, late_run: 0, late_least: 0, callback_at: 0, target_ns: 0, first_target: -1, follows: false,
         time_ns: 0, delta_ns: 0, frame_start: 0, costs: [Int]{}, cost_at: 0, safety_ns: 0, input_ms: -1,
         presented: 0, missed: 0, discarded: 0, presented_abs: 0, intervals: [Int]{}, interval_at: 0,
-        latencies: [Int]{}, latency_at: 0, modifiers: 0, events: [UIEvent]{}, failure: None,
+        latencies: [Int]{}, latency_at: 0,
+        subcompositor: 0, decoration: 0, framed: false, chrome: 0, chrome_subsurface: 0, chrome_viewport: 0,
+        chrome_pool: 0, chrome_memory: chrome_memory, chrome_buffers: [ChromeBuffer]{}, chrome_width: 0, chrome_height: 0,
+        chrome_shown: false, chrome_stale: true, painter: frame.painter(), look: look, fullscreen: false, geometry: [Int]{},
+        on_chrome: false, chrome_fx: 0, chrome_fy: 0, chrome_shape: 0, title_press_ms: -1, touch: 0, touch_id: -1,
+        corner_cover: [U8]{}, corner_scale: 0, xbgr: false, abgr: false,
+        modifiers: 0, events: [UIEvent]{}, failure: None,
     }
     c.registry = new_id(c)
     request(c, DISPLAY, 1, words([Int]{c.registry}))
@@ -306,11 +380,28 @@ connect: fn(width: Int, height: Int, title: String) -[Env, Net, Time]> Connectio
         c.viewport = new_id(c)
         request(c, c.viewporter, 1, words([Int]{c.viewport, c.surface}))
     }
+    if c.subcompositor != 0 {
+        // Jet's frame: the chrome surface, a subsurface below the content.
+        c.chrome = new_id(c)
+        request(c, c.compositor, 0, words([Int]{c.chrome}))
+        c.chrome_subsurface = new_id(c)
+        request(c, c.subcompositor, 1, words([Int]{c.chrome_subsurface, c.chrome, c.surface}))
+        request(c, c.chrome_subsurface, 3, words([Int]{c.surface}))
+        if c.viewport != 0 {
+            c.chrome_viewport = new_id(c)
+            request(c, c.viewporter, 1, words([Int]{c.chrome_viewport, c.chrome}))
+        }
+        c.framed = true
+        // The smallest window the frame fits, title bar included.
+        request(c, c.toplevel, 8, words([Int]{frame.MIN_WIDTH, frame.MIN_HEIGHT}))
+    }
     if c.decoration_manager != 0 {
-        decoration: new_id(c)
-        request(c, c.decoration_manager, 1, words([Int]{decoration, c.toplevel}))
-        // Server-side: the compositor draws the title bar and borders.
-        request(c, decoration, 1, words([Int]{2}))
+        c.decoration = new_id(c)
+        request(c, c.decoration_manager, 1, words([Int]{c.decoration, c.toplevel}))
+        // Jet's frame when it can draw one (client_side, 1), else the
+        // compositor's (server_side, 2); its answer is the mode used.
+        mode: if c.framed -> 1 else -> 2
+        request(c, c.decoration, 1, words([Int]{mode}))
     }
     request(c, c.surface, 6, [U8]{})
     flush(c)
@@ -322,7 +413,7 @@ connect: fn(width: Int, height: Int, title: String) -[Env, Net, Time]> Connectio
     if c.failure == .Val(failure) -> return Err(failure)
     if !c.configured -> return Err(UIError.Protocol("the compositor never configured the window"))
     chosen_width: if c.pending_width > 0 -> c.pending_width else -> width
-    chosen_height: if c.pending_height > 0 -> c.pending_height else -> height
+    chosen_height: if c.pending_height > 0 -> max_int(c.pending_height - header_height(c), 1) else -> height
     allocate(c, chosen_width, chosen_height)
     if c.failure == .Val(failure) -> return Err(failure)
     c.events = [UIEvent]{}
@@ -535,7 +626,11 @@ present: fn(&c: Connection, pixels: [U8], damage: [UIRect]) UIError! -[Env, Net,
     copy_y1: if stale -> max_int(y1, target.stale_y1) else -> y1
     if copy_x1 > copy_x0 && copy_y1 > copy_y0 {
         c.memory.write_pixels(target.offset, pixels, c.width * 4, copy_x0, copy_y0, copy_x1 - copy_x0, copy_y1 - copy_y0, c.format) ?? return Err(UIError.Protocol("writing the frame failed: {err}"))
+        if rounded(c) -> cover_corners(c, target.offset, copy_x0, copy_y0, copy_x1, copy_y1)
     }
+    // The chrome commits first; the content's commit shows both.
+    if c.chrome_stale -> draw_chrome(c)
+    if c.failure == .Val(failure) -> return Err(failure)
     loop index in 0..<c.buffers.len() {
         if index == free {
             c.buffers[index].stale_x0 = 0
@@ -590,7 +685,7 @@ present: fn(&c: Connection, pixels: [U8], damage: [UIRect]) UIError! -[Env, Net,
     c.input_ms = -1
     apply_scale(c)
     c.shown_width = c.logical_width
-    c.shown_height = c.logical_height
+    c.shown_height = c.logical_height + header_height(c)
     ack_configure(c)
     header(c, c.surface, 6, 0)
     c.mapped = true
@@ -690,6 +785,9 @@ receive: fn(&c: Connection, timeout_ns: Int) -[Env, Net, Time]> {
     // Newest first, so `pop` yields the oldest queued descriptor.
     loop fd in message.fds.move() { c.inbox_fds.insert(0, fd) }
     dispatch(c)
+    // What only the frame shows (a hover, focus, a pressed button) goes
+    // out now; a new size waits for the frame drawn at it.
+    if c.chrome_stale && c.mapped && !wants_reshape(c) -> refresh_chrome(c)
     flush(c)
 }
 
@@ -772,7 +870,8 @@ event: fn(&c: Connection, object: Int, opcode: Int, body: [U8]) -[Env, Time]> {
         return
     }
     if object == c.shm {
-        if opcode == 0 && u32_at(body, 0) == FORMAT_XBGR8888 -> c.format = sys.PixelFormat.XBGR8888
+        if opcode == 0 && u32_at(body, 0) == FORMAT_XBGR8888 -> c.xbgr = true
+        if opcode == 0 && u32_at(body, 0) == FORMAT_ABGR8888 -> c.abgr = true
         return
     }
     if output_index(c, object) >= 0 {
@@ -823,8 +922,20 @@ event: fn(&c: Connection, object: Int, opcode: Int, body: [U8]) -[Env, Time]> {
         if opcode == 0 {
             c.pending_width = min_int(i32_at(body, 0), SIDE_MAX)
             c.pending_height = min_int(i32_at(body, 4), SIDE_MAX)
+            toplevel_states(c, body)
         }
         if opcode == 1 -> c.events.push(UIEvent.Close)
+        return
+    }
+    if object == c.decoration {
+        // configure: the mode the compositor chose; client_side (1) is Jet's frame.
+        if opcode == 0 {
+            framed: u32_at(body, 0) == 1 && c.chrome != 0
+            if framed != c.framed {
+                c.framed = framed
+                restale(c)
+            }
+        }
         return
     }
     if object == c.xdg_surface {
@@ -849,8 +960,16 @@ event: fn(&c: Connection, object: Int, opcode: Int, body: [U8]) -[Env, Time]> {
         pointer(c, opcode, body)
         return
     }
+    if object == c.touch {
+        touch(c, opcode, body)
+        return
+    }
+    if object == c.chrome -> return
     loop index in 0..<c.buffers.len() {
         if c.buffers[index].id == object && opcode == 0 -> c.buffers[index].busy = false
+    }
+    loop index in 0..<c.chrome_buffers.len() {
+        if c.chrome_buffers[index].id == object && opcode == 0 -> c.chrome_buffers[index].busy = false
     }
 }
 
@@ -878,6 +997,12 @@ required_bytes: fn(c: Connection, object: Int, opcode: Int) -> Int {
         if opcode == 3 -> return 16
         if opcode == 4 -> return 12
     }
+    if object == c.decoration && opcode == 0 -> return 4
+    if object == c.touch {
+        if opcode == 0 -> return 24
+        if opcode == 1 -> return 12
+        if opcode == 2 -> return 16
+    }
     0
 }
 
@@ -887,7 +1012,9 @@ global: fn(&c: Connection, name: Int, interface: String, version: Int) {
         c.compositor = bind(c, name, interface, c.compositor_version)
     }
     if interface == "wl_shm" && c.shm == 0 -> c.shm = bind(c, name, interface, 1)
-    if interface == "xdg_wm_base" && c.wm_base == 0 -> c.wm_base = bind(c, name, interface, 1)
+    // v2 tells the tiled states.
+    if interface == "xdg_wm_base" && c.wm_base == 0 -> c.wm_base = bind(c, name, interface, min_int(version, 2))
+    if interface == "wl_subcompositor" && c.subcompositor == 0 -> c.subcompositor = bind(c, name, interface, 1)
     if interface == "wl_seat" && c.seat == 0 -> c.seat = bind(c, name, interface, min_int(version, 5))
     if interface == "zxdg_decoration_manager_v1" && c.decoration_manager == 0 -> c.decoration_manager = bind(c, name, interface, 1)
     if interface == "wp_fractional_scale_manager_v1" && c.fractional_manager == 0 -> c.fractional_manager = bind(c, name, interface, 1)
@@ -952,12 +1079,12 @@ presented: fn(&c: Connection, object: Int, body: [U8]) -[Time]> {
         c.vblank_ns = local
         c.vblank_known = true
     }
-    frame: c.pending[pending_index(c, object)]
+    sent: c.pending[pending_index(c, object)]
     interval: refresh_interval(c)
     if interval > 0 {
         // Refreshes this frame came after its target, counting from the
         // vblank it was committed for.
-        late: (local - frame.target_ns + interval * 64 + interval /% 2) /% interval - 64
+        late: (local - sent.target_ns + interval * 64 + interval /% 2) /% interval - 64
         if !c.lag_known || late < c.lag {
             c.lag = if late < 0 -> 0 else -> late
             c.lag_known = true
@@ -980,14 +1107,14 @@ presented: fn(&c: Connection, object: Int, body: [U8]) -[Time]> {
         keep(c.intervals, c.interval_at, between)
         c.interval_at = (c.interval_at + 1) %% SAMPLES_KEPT
         // A vblank passed with no new frame: missed, so commit earlier.
-        if frame.follows && interval > 0 && between > interval + interval /% 2 {
+        if sent.follows && interval > 0 && between > interval + interval /% 2 {
             c.missed += (between + interval /% 2) /% interval - 1
             c.safety_ns = min_int(safety(c) + interval /% 4, interval * 3 /% 4)
         }
     }
-    if frame.input_ms >= 0 {
+    if sent.input_ms >= 0 {
         // Input times are ms on the same clock, wrapped to 32 bits.
-        since: ((stamp /% 1000000) - frame.input_ms).bit_and(4294967295)
+        since: ((stamp /% 1000000) - sent.input_ms).bit_and(4294967295)
         keep(c.latencies, c.latency_at, since * 1000000 + stamp %% 1000000)
         c.latency_at = (c.latency_at + 1) %% SAMPLES_KEPT
     }
@@ -1008,6 +1135,11 @@ capabilities: fn(&c: Connection, mask: Int) {
     if mask.bit_and(2) != 0 && c.keyboard == 0 {
         c.keyboard = new_id(c)
         request(c, c.seat, 1, words([Int]{c.keyboard}))
+    }
+    // A finger works the frame.
+    if mask.bit_and(4) != 0 && c.touch == 0 && c.subcompositor != 0 {
+        c.touch = new_id(c)
+        request(c, c.seat, 2, words([Int]{c.touch}))
     }
 }
 
@@ -1045,14 +1177,34 @@ keyboard: fn(&c: Connection, opcode: Int, body: [U8]) -[Env]> {
 // Positions arrive in 1/256ths of a logical unit; programs see pixels.
 to_pixels: fn(c: Connection, fixed: Int) -> Int { fixed * c.scale120 /% 30720 }
 
+// Events on the chrome work the frame and reach no program.
 pointer: fn(&c: Connection, opcode: Int, body: [U8]) {
     // enter: the cursor is the client's to set again, at this serial.
     if opcode == 0 {
         c.pointer_serial = u32_at(body, 0)
+        c.on_chrome = c.chrome != 0 && u32_at(body, 4) == c.chrome
+        if c.on_chrome {
+            c.chrome_shape = 0
+            chrome_pointer(c, i32_at(body, 8), i32_at(body, 12))
+            return
+        }
         show_cursor(c)
         c.events.push(UIEvent.PointerMove{x: to_pixels(c, i32_at(body, 8)), y: to_pixels(c, i32_at(body, 12))})
     }
-    if opcode == 1 -> c.pointer_serial = -1
+    if opcode == 1 {
+        c.pointer_serial = -1
+        if c.on_chrome {
+            c.on_chrome = false
+            if c.touch_id < 0 -> c.look.pressed = frame.FrameButton.Nothing
+            set_hover(c, frame.FrameButton.Nothing)
+        }
+        return
+    }
+    if c.on_chrome {
+        if opcode == 2 -> chrome_pointer(c, i32_at(body, 4), i32_at(body, 8))
+        if opcode == 3 -> chrome_button(c, u32_at(body, 0), u32_at(body, 4), u32_at(body, 8), u32_at(body, 12))
+        return
+    }
     if opcode == 2 {
         note_input(c, u32_at(body, 0))
         c.events.push(UIEvent.PointerMove{x: to_pixels(c, i32_at(body, 4)), y: to_pixels(c, i32_at(body, 8))})
@@ -1097,6 +1249,7 @@ set_app_id: fn(&c: Connection, app_id: String) {
 // unsets the window's. A compositor without the protocol keeps the icon
 // of the app_id's desktop entry.
 set_icon: fn(&c: Connection, icon: UIIcon) UIError! -[Env]> {
+    frame_icon(c, icon)
     if c.icon_manager == 0 -> return Ok()
     toplevel: c.toplevel
     manager: c.icon_manager
@@ -1184,7 +1337,8 @@ cursor_device: fn(&c: Connection) {
 set_cursor: fn(&c: Connection, cursor: UICursor) {
     if cursor == c.cursor -> return
     c.cursor = cursor
-    show_cursor(c)
+    // Over the frame the frame's shapes show; the program's from the next enter.
+    if !c.on_chrome -> show_cursor(c)
 }
 
 // Shows the program's cursor at the latest enter's serial: `.Hidden` is
@@ -1246,9 +1400,10 @@ cursor_shape: fn(cursor: UICursor) -> Int {
 // ---- buffers ----------------------------------------------------------
 
 // The size the latest configure asks for, in logical units; the current
-// one while the compositor leaves it to the window.
+// one while the compositor leaves it to the window. A configure sizes the
+// window, title bar included.
 wanted_width: fn(c: Connection) -> Int { if c.pending_width > 0 -> c.pending_width else -> c.logical_width }
-wanted_height: fn(c: Connection) -> Int { if c.pending_height > 0 -> c.pending_height else -> c.logical_height }
+wanted_height: fn(c: Connection) -> Int { if c.pending_height > 0 -> max_int(c.pending_height - header_height(c), 1) else -> c.logical_height }
 
 // The configured size or the display's scale moved since the buffers
 // were made.
@@ -1289,13 +1444,26 @@ allocate: fn(&c: Connection, width: Int, height: Int) -[Env, Net, Time]> {
     c.logical_height = logical_h
     c.scale120 = scale
     c.rescaled = true
+    c.chrome_stale = true
     c.width = w
     c.height = h
     c.pool = new_id(c)
     // wl_shm.create_pool(new_id, fd, size): the descriptor rides along.
     request(c, c.shm, 0, words([Int]{c.pool, pool_bytes}))
     c.out_fds.push(descriptor)
-    format: if c.format == .XBGR8888 -> FORMAT_XBGR8888 else -> FORMAT_XRGB8888
+    // With Jet's frame the content's bottom corners are see-through, so
+    // its buffers carry alpha: written opaque, then covered.
+    format := FORMAT_XRGB8888
+    c.format = sys.PixelFormat.XRGB8888
+    if c.chrome != 0 && c.abgr {
+        format = FORMAT_ABGR8888
+        c.format = sys.PixelFormat.XBGR8888
+    } else if c.chrome != 0 {
+        format = FORMAT_ARGB8888
+    } else if c.xbgr {
+        format = FORMAT_XBGR8888
+        c.format = sys.PixelFormat.XBGR8888
+    }
     loop k in 0..<BUFFER_COUNT {
         id: new_id(c)
         request(c, c.pool, 0, words([Int]{id, k * frame_bytes, w, h, w * 4, format}))
@@ -1303,6 +1471,451 @@ allocate: fn(&c: Connection, width: Int, height: Int) -[Env, Net, Time]> {
     }
     c.memory = memory
     flush(c)
+}
+
+// ---- the frame --------------------------------------------------------
+
+// The title bar's height above the content, in logical units: none while
+// the compositor draws the frame or the window is fullscreen.
+header_height: fn(c: Connection) -> Int { if c.framed && !c.fullscreen -> frame.HEADER else -> 0 }
+
+// The shadow's room around the window: none when it is maximized or tiled.
+margin: fn(c: Connection) -> Int { if c.look.square -> 0 else -> frame.MARGIN }
+
+// The content's bottom corners are rounded off over the frame's.
+rounded: fn(c: Connection) -> Bool { c.chrome != 0 && header_height(c) > 0 && !c.look.square }
+
+// xdg_toplevel.configure's states: maximized 1, fullscreen 2, activated
+// 4, and tiled on a side 5 to 8 (xdg_wm_base v2).
+toplevel_states: fn(&c: Connection, body: [U8]) {
+    end: min_int(12 + u32_at(body, 8), body.len())
+    maximized := false
+    fullscreen := false
+    activated := false
+    tiled := false
+    at := 12
+    loop at + 4 <= end {
+        state: u32_at(body, at)
+        if state == 1 -> maximized = true
+        if state == 2 -> fullscreen = true
+        if state == 4 -> activated = true
+        if state >= 5 && state <= 8 -> tiled = true
+        at += 4
+    }
+    square: maximized || tiled
+    if square != c.look.square || fullscreen != c.fullscreen -> restale(c)
+    if activated != c.look.active || maximized != c.look.maximized -> c.chrome_stale = true
+    c.look.square = square
+    c.look.maximized = maximized
+    c.look.active = activated
+    c.fullscreen = fullscreen
+}
+
+// The frame's shape changed: the chrome and every buffer's content
+// corners are drawn again.
+restale: fn(&c: Connection) {
+    loop index in 0..<c.buffers.len() {
+        c.buffers[index].stale_x0 = 0
+        c.buffers[index].stale_y0 = 0
+        c.buffers[index].stale_x1 = c.width
+        c.buffers[index].stale_y1 = c.height
+    }
+    c.chrome_stale = true
+}
+
+// Draws the chrome for the window's size, scale and look into a free
+// chrome buffer and commits it; the content's next commit shows it. The
+// ring goes only into a buffer that does not hold it yet, the title bar
+// every time; with no buffer free the chrome stays stale.
+draw_chrome: fn(&c: Connection) -[Env]> {
+    c.chrome_stale = false
+    if c.chrome == 0 -> return
+    hh: header_height(c)
+    if hh == 0 {
+        // No frame of Jet's: the chrome is empty and the window is the content.
+        if c.chrome_shown {
+            request(c, c.chrome, 1, words([Int]{0, 0, 0}))
+            request(c, c.chrome, 6, [U8]{})
+            c.chrome_shown = false
+        }
+        if c.geometry.len() > 0 -> set_geometry(c, [Int]{0, 0, c.logical_width, c.logical_height})
+        return
+    }
+    m: margin(c)
+    scale: c.scale120
+    width: c.logical_width + 2 * m
+    height: c.logical_height + hh + 2 * m
+    pw: frame.px(width, scale)
+    ph: frame.px(height, scale)
+    if pw != c.chrome_width || ph != c.chrome_height || c.chrome_buffers.len() == 0 {
+        allocate_chrome(c, pw, ph)
+        if c.failure != None -> return
+    }
+    free := -1
+    loop index in 0..<c.chrome_buffers.len() {
+        if free < 0 && !c.chrome_buffers[index].busy -> free = index
+    }
+    if free < 0 {
+        c.chrome_stale = true
+        return
+    }
+    mp: frame.px(m, scale)
+    ww: pw - 2 * mp
+    wh: ph - 2 * mp
+    hp: frame.px(hh, scale)
+    base: c.chrome_buffers[free].offset
+    active: if c.look.active -> 1 else -> 0
+    ring: scale * 2 + active
+    if mp > 0 && c.chrome_buffers[free].ring != ring {
+        slot: frame.kit(c.painter, c.look, scale)
+        // Under the content's rounded bottom corners the ring shows too.
+        side: min_int(frame.corner_side(scale), wh - hp)
+        loop row in 0..<ph {
+            y: row - mp
+            if y < 0 || y >= wh {
+                ring_row(c, slot, base, y, 0 - mp, ww + mp)
+            } else {
+                corner: if y >= wh - side -> side else -> 0
+                ring_row(c, slot, base, y, 0 - mp, corner)
+                ring_row(c, slot, base, y, ww - corner, ww + mp)
+            }
+        }
+        c.chrome_buffers[free].ring = ring
+    }
+    bar: frame.header(c.painter, c.look, ww, scale)
+    if mp == 0 {
+        c.chrome_memory.write(base, bar) ?? {
+            fail(c, UIError.Protocol("drawing the frame failed: {err}"))
+            return
+        }
+    } else {
+        row_bytes: ww * 4
+        loop row in 0..<hp {
+            c.chrome_memory.write(base + ((row + mp) * pw + mp) * 4, bar[(row * row_bytes)..<((row + 1) * row_bytes)]) ?? {
+                fail(c, UIError.Protocol("drawing the frame failed: {err}"))
+                return
+            }
+        }
+    }
+    c.chrome_buffers[free].busy = true
+    request(c, c.chrome, 1, words([Int]{c.chrome_buffers[free].id, 0, 0}))
+    request(c, c.chrome, 2, words([Int]{0, 0, width, height}))
+    if c.chrome_viewport != 0 {
+        request(c, c.chrome_viewport, 2, words([Int]{width, height}))
+    } else if c.compositor_version >= 3 {
+        request(c, c.chrome, 8, words([Int]{scale /% 120}))
+    }
+    // Input: the window and its resize grips, not the shadow beyond.
+    grip: if c.look.square -> 0 else -> frame.GRIP
+    region: new_id(c)
+    request(c, c.compositor, 1, words([Int]{region}))
+    request(c, region, 1, words([Int]{m - grip, m - grip, c.logical_width + 2 * grip, c.logical_height + hh + 2 * grip}))
+    request(c, c.chrome, 5, words([Int]{region}))
+    request(c, region, 0, [U8]{})
+    request(c, c.chrome_subsurface, 1, words([Int]{0 - m, 0 - hh - m}))
+    request(c, c.chrome, 6, [U8]{})
+    c.chrome_shown = true
+    set_geometry(c, [Int]{0, 0 - hh, c.logical_width, c.logical_height + hh})
+}
+
+// Shows a chrome-only change: the chrome is synchronized with the
+// content, so a commit of the content with nothing new of its own shows it.
+refresh_chrome: fn(&c: Connection) -[Env]> {
+    draw_chrome(c)
+    if !c.chrome_stale -> header(c, c.surface, 6, 0)
+}
+
+// Row `y` of the shadow ring, from window pixel `x0` to before `x1`, into
+// the chrome buffer at `base`.
+ring_row: fn(&c: Connection, slot: Int, base: Int, y: Int, x0: Int, x1: Int) -[Env]> {
+    if x1 <= x0 || c.failure != None -> return
+    mp: frame.px(margin(c), c.scale120)
+    row: frame.kit_row(c.painter.kits[slot], y, c.chrome_width - 2 * mp, c.chrome_height - 2 * mp, x0, x1)
+    at: base + ((y + mp) * c.chrome_width + x0 + mp) * 4
+    fill_at: at + row.left.len()
+    right_at: fill_at + row.fill_count * 4
+    if row.left.len() > 0 {
+        c.chrome_memory.write(at, row.left) ?? {
+            fail(c, UIError.Protocol("drawing the frame failed: {err}"))
+            return
+        }
+    }
+    if row.fill_count > 0 {
+        c.chrome_memory.fill_u32(fill_at, row.fill_count, row.fill) ?? {
+            fail(c, UIError.Protocol("drawing the frame failed: {err}"))
+            return
+        }
+    }
+    if row.right.len() > 0 {
+        c.chrome_memory.write(right_at, row.right) ?? {
+            fail(c, UIError.Protocol("drawing the frame failed: {err}"))
+            return
+        }
+    }
+}
+
+// CHROME_BUFFERS `width` x `height` pixel ARGB8888 buffers in one new
+// sealed pool, replacing the old ones.
+allocate_chrome: fn(&c: Connection, width: Int, height: Int) -[Env]> {
+    loop buffer in c.chrome_buffers -> request(c, buffer.id, 0, [U8]{})
+    c.chrome_buffers = [ChromeBuffer]{}
+    if c.chrome_pool != 0 -> request(c, c.chrome_pool, 1, [U8]{})
+    c.chrome_pool = 0
+    c.chrome_width = 0
+    c.chrome_height = 0
+    frame_bytes: width * height * 4
+    pool_bytes: frame_bytes * CHROME_BUFFERS
+    if pool_bytes > 1073741824 {
+        fail(c, UIError.Size("a {width}x{height} window frame needs more than 1 GiB of buffers"))
+        return
+    }
+    memory: sys.shared_memory(pool_bytes) ?? {
+        fail(c, UIError.Protocol("allocating the window frame failed: {err}"))
+        return
+    }
+    descriptor: memory.descriptor() ?? {
+        fail(c, UIError.Protocol("sharing the window frame failed: {err}"))
+        return
+    }
+    c.chrome_pool = new_id(c)
+    request(c, c.shm, 0, words([Int]{c.chrome_pool, pool_bytes}))
+    c.out_fds.push(descriptor)
+    loop k in 0..<CHROME_BUFFERS {
+        id: new_id(c)
+        request(c, c.chrome_pool, 0, words([Int]{id, k * frame_bytes, width, height, width * 4, FORMAT_ARGB8888}))
+        c.chrome_buffers.push(ChromeBuffer{id: id, offset: k * frame_bytes, busy: false, ring: -1})
+    }
+    c.chrome_memory = memory
+    c.chrome_width = width
+    c.chrome_height = height
+}
+
+// xdg_surface.set_window_geometry: the window's part of the content
+// surface's coordinates, title bar in, shadow out; the content's next
+// commit applies it.
+set_geometry: fn(&c: Connection, geometry: [Int]) {
+    if geometry == c.geometry -> return
+    request(c, c.xdg_surface, 3, words(geometry))
+    c.geometry = geometry
+}
+
+// Fades the content's bottom corners outside the frame's rounded ones,
+// where the rectangle (x0, y0)-(x1, y1) of the buffer at `offset` was just
+// written, so the ring under them shows: each pixel times its cover,
+// premultiplied as ARGB8888 wants.
+cover_corners: fn(&c: Connection, offset: Int, x0: Int, y0: Int, x1: Int, y1: Int) -[Env]> {
+    side: frame.corner_side(c.scale120)
+    if side * 2 > c.width || side > c.height -> return
+    if c.corner_scale != c.scale120 {
+        c.corner_cover = frame.bottom_left_cover(c.scale120)
+        c.corner_scale = c.scale120
+    }
+    width: c.width
+    top: c.height - side
+    loop y in max_int(y0, top)..<y1 {
+        cover_run(c, offset, y, max_int(x0, 0), min_int(x1, side), (y - top) * side, 1)
+        // The bottom-right corner mirrors the bottom-left.
+        cover_run(c, offset, y, max_int(x0, width - side), min_int(x1, width), (y - top) * side + width - 1, -1)
+    }
+}
+
+// Pixels `from` to before `to` of row `y`, pixel x scaled by cover byte
+// `start + step * x`.
+cover_run: fn(&c: Connection, offset: Int, y: Int, from: Int, to: Int, start: Int, step: Int) -[Env]> {
+    if to <= from || c.failure != None -> return
+    at: offset + (y * c.width + from) * 4
+    pixels := c.memory.read(at, (to - from) * 4) ?? {
+        fail(c, UIError.Protocol("rounding the frame's corners failed: {err}"))
+        return
+    }
+    loop x in from..<to {
+        cover: Int.from_u8(c.corner_cover[start + step * x])
+        k: (x - from) * 4
+        loop b in k..<(k + 4) -> pixels[b] = U8{(Int.from_u8(pixels[b]) * cover + 127) /% 255}
+    }
+    c.memory.write(at, pixels) ?? fail(c, UIError.Protocol("rounding the frame's corners failed: {err}"))
+}
+
+// The part of the frame the pointer or finger on the chrome is on.
+chrome_spot: fn(c: Connection) -> frame.FrameSpot {
+    m: Float{margin(c)}
+    x: Float{c.chrome_fx} / 256.0 - m
+    y: Float{c.chrome_fy} / 256.0 - m
+    frame.spot(x, y, c.logical_width, c.logical_height + frame.HEADER, c.look)
+}
+
+// The pointer moved on the chrome: its button lights, its cursor shows
+// the edge it would resize, and the buttons gather back from a finger's
+// spacing.
+chrome_pointer: fn(&c: Connection, fx: Int, fy: Int) {
+    c.chrome_fx = fx
+    c.chrome_fy = fy
+    if c.look.coarse && c.touch_id < 0 {
+        c.look.coarse = false
+        c.chrome_stale = true
+    }
+    hover_spot(c)
+    shape: spot_shape(chrome_spot(c))
+    if shape != c.chrome_shape {
+        c.chrome_shape = shape
+        if c.pointer_serial >= 0 && c.cursor_device != 0 -> request(c, c.cursor_device, 1, words([Int]{c.pointer_serial, shape}))
+    }
+}
+
+// A pointer button on the chrome: the primary works the frame, the
+// secondary on the title opens the compositor's window menu at the
+// pointer, in the content surface's coordinates.
+chrome_button: fn(&c: Connection, serial: Int, time: Int, button: Int, state: Int) {
+    note_input(c, time)
+    if button == 272 && state == 1 -> frame_press(c, serial, time)
+    if button == 272 && state == 0 -> frame_release(c)
+    if button == 273 && state == 1 && chrome_spot(c) == .Title {
+        m: margin(c)
+        request(c, c.toplevel, 4, words([Int]{c.seat, serial, (c.chrome_fx >> 8) - m, (c.chrome_fy >> 8) - m - frame.HEADER}))
+    }
+}
+
+// A finger on the frame works it as the primary button does and spreads
+// the buttons to a finger's size until the pointer comes back. Touches on
+// the content reach no program: UIEvent has no touch.
+touch: fn(&c: Connection, opcode: Int, body: [U8]) {
+    // down: serial, time, surface, id, x, y.
+    if opcode == 0 {
+        if c.chrome == 0 || u32_at(body, 8) != c.chrome || c.touch_id >= 0 -> return
+        c.touch_id = i32_at(body, 12)
+        c.chrome_fx = i32_at(body, 16)
+        c.chrome_fy = i32_at(body, 20)
+        if !c.look.coarse {
+            c.look.coarse = true
+            c.chrome_stale = true
+        }
+        note_input(c, u32_at(body, 4))
+        frame_press(c, u32_at(body, 0), u32_at(body, 4))
+        return
+    }
+    if c.touch_id < 0 -> return
+    // up: serial, time, id.
+    if opcode == 1 && i32_at(body, 8) == c.touch_id {
+        c.touch_id = -1
+        frame_release(c)
+        set_hover(c, frame.FrameButton.Nothing)
+    }
+    // motion: time, id, x, y.
+    if opcode == 2 && i32_at(body, 4) == c.touch_id {
+        c.chrome_fx = i32_at(body, 8)
+        c.chrome_fy = i32_at(body, 12)
+        hover_spot(c)
+    }
+    // cancel: the compositor took the touch.
+    if opcode == 4 {
+        c.touch_id = -1
+        c.look.pressed = frame.FrameButton.Nothing
+        set_hover(c, frame.FrameButton.Nothing)
+    }
+}
+
+// A press on the frame: a button holds down; the title moves the window,
+// or toggles maximizing when pressed twice in quick succession; an edge
+// resizes it. The compositor runs moves and resizes.
+frame_press: fn(&c: Connection, serial: Int, time: Int) {
+    place: chrome_spot(c)
+    if place == .Button(button) {
+        c.look.pressed = button
+        set_hover(c, button)
+        c.chrome_stale = true
+        return
+    }
+    if place == .Title {
+        if c.title_press_ms >= 0 && (time - c.title_press_ms).bit_and(4294967295) < frame.DOUBLE_CLICK_MS {
+            c.title_press_ms = -1
+            toggle_maximized(c)
+            return
+        }
+        c.title_press_ms = time
+        request(c, c.toplevel, 5, words([Int]{c.seat, serial}))
+        return
+    }
+    if place == .Edge(edges) -> request(c, c.toplevel, 6, words([Int]{c.seat, serial, edges}))
+}
+
+// The press ends: a button released over itself acts.
+frame_release: fn(&c: Connection) {
+    pressed: c.look.pressed
+    if pressed == .Nothing -> return
+    c.look.pressed = frame.FrameButton.Nothing
+    c.chrome_stale = true
+    place: chrome_spot(c)
+    if place == .Button(button) {
+        if button == pressed -> act(c, button)
+    }
+}
+
+act: fn(&c: Connection, button: frame.FrameButton) {
+    if button == .Close -> c.events.push(UIEvent.Close)
+    if button == .Maximize -> toggle_maximized(c)
+    if button == .Minimize -> request(c, c.toplevel, 13, [U8]{})
+}
+
+toggle_maximized: fn(&c: Connection) {
+    opcode: if c.look.maximized -> 10 else -> 9
+    request(c, c.toplevel, opcode, [U8]{})
+}
+
+// The button under the pointer or finger lights.
+hover_spot: fn(&c: Connection) {
+    lit := frame.FrameButton.Nothing
+    place: chrome_spot(c)
+    if place == .Button(button) -> lit = button
+    set_hover(c, lit)
+}
+
+set_hover: fn(&c: Connection, button: frame.FrameButton) {
+    if c.look.hover == button -> return
+    c.look.hover = button
+    c.chrome_stale = true
+}
+
+// The cursor shape over a spot of the frame: an edge's resize arrow, else
+// the default.
+spot_shape: fn(place: frame.FrameSpot) -> Int {
+    if place == .Edge(edges) -> return cursor_shape(edge_cursor(edges))
+    cursor_shape(UICursor.Default)
+}
+
+edge_cursor: fn(edges: Int) -> UICursor {
+    if edges == frame.EDGE_TOP -> return UICursor.ResizeN
+    if edges == frame.EDGE_BOTTOM -> return UICursor.ResizeS
+    if edges == frame.EDGE_LEFT -> return UICursor.ResizeW
+    if edges == frame.EDGE_RIGHT -> return UICursor.ResizeE
+    if edges == frame.EDGE_TOP + frame.EDGE_LEFT -> return UICursor.ResizeNW
+    if edges == frame.EDGE_TOP + frame.EDGE_RIGHT -> return UICursor.ResizeNE
+    if edges == frame.EDGE_BOTTOM + frame.EDGE_LEFT -> return UICursor.ResizeSW
+    UICursor.ResizeSE
+}
+
+// The image of `icon` the title bar shows: the smallest at least the
+// icon's size in pixels, else the largest; none shows Jet's own mark.
+frame_icon: fn(&c: Connection, icon: UIIcon) {
+    want: frame.px(frame.ICON_SIZE, c.scale120)
+    best := -1
+    loop index in 0..<icon.images.len() {
+        side: icon.images[index].side
+        if best < 0 {
+            best = index
+            next
+        }
+        current: icon.images[best].side
+        better: if current < want -> side > current else -> side >= want && side < current
+        if better -> best = index
+    }
+    if best < 0 {
+        c.look.icon = [U8]{}
+        c.look.icon_side = 0
+    } else {
+        c.look.icon = icon.images[best].pixels.copy()
+        c.look.icon_side = icon.images[best].side
+    }
+    c.chrome_stale = true
 }
 
 // ---- keys -------------------------------------------------------------

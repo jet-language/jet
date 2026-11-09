@@ -39,12 +39,17 @@ BUTTON_RADIUS: 14
 // each next one a step further left.
 BUTTON_INSET: 24
 BUTTON_STEP: 36
+// For a finger (`look.coarse`) the buttons spread out: each hit region is
+// a step wide and the header high, 46 x 46 units, past the 44 x 44 a touch
+// target needs.
+BUTTON_INSET_COARSE: 23
+BUTTON_STEP_COARSE: 46
 ICON_SIZE: 22
 ICON_X: 14
 TITLE_GAP: 10
-// The smallest window: the icon, a little title and the buttons across,
-// and the shadow kit's box down.
-MIN_WIDTH: 160
+// The smallest window: the icon and the spread-out buttons across, and the
+// shadow kit's box down.
+MIN_WIDTH: 176
 MIN_HEIGHT: 56
 // Two presses on the title this close together, in milliseconds, toggle
 // maximizing.
@@ -102,13 +107,15 @@ FrameSpot: enum {
 
 // What the header shows. `square` drops the rounded corners and the
 // shadow (a maximized, tiled or fullscreen window); `maximized` picks the
-// restore glyph. `icon` is `icon_side` square RGBA rows, empty for Jet's
-// own mark.
+// restore glyph. `coarse` spreads the buttons for a finger: the latest
+// press on the frame was a touch. `icon` is `icon_side` square RGBA rows,
+// empty for Jet's own mark.
 FrameLook: struct {
     title: String
     active: Bool
     square: Bool
     maximized: Bool
+    coarse: Bool
     hover: FrameButton
     pressed: FrameButton
     icon: [U8]
@@ -182,25 +189,32 @@ spot: fn(x: Float, y: Float, width: Int, height: Int, look: FrameLook) -> FrameS
     }
     header: Float{HEADER}
     if y >= header -> return FrameSpot.Content
-    button: button_at(x, width)
+    button: button_at(x, width, look)
     if button != .Nothing -> return FrameSpot.Button(button)
     FrameSpot.Title
 }
 
 // The button whose hit region holds column `x` of the header of a
 // `width`-unit window. The regions are rectangles the header's full height
-// and a button step wide (46 x 36 units, past the 24 x 24 minimum), side by
-// side without overlap, the close button's running on to the window's
-// right edge; the painted discs are smaller than the regions.
-button_at: fn(x: Float, width: Int) -> FrameButton {
-    half: Float{BUTTON_STEP} / 2.0
+// and a button step wide (36 x 46 units, past the 24 x 24 minimum; 46 x 46
+// for a finger), side by side without overlap, the close button's running
+// on to the window's right edge; the painted discs are smaller than the
+// regions.
+button_at: fn(x: Float, width: Int, look: FrameLook) -> FrameButton {
+    step: button_step(look)
+    half: Float{step} / 2.0
     loop k in 0..<3 {
-        cx: Float{width - BUTTON_INSET - k * BUTTON_STEP}
+        cx: Float{width - button_inset(look) - k * step}
         right: if k == 0 -> Float{width} else -> cx + half
         if x >= cx - half && x < right -> return button_of(k)
     }
     FrameButton.Nothing
 }
+
+// The close button's centre's distance from the right edge, and the step
+// to each next button, in logical units.
+button_inset: fn(look: FrameLook) -> Int { if look.coarse -> BUTTON_INSET_COARSE else -> BUTTON_INSET }
+button_step: fn(look: FrameLook) -> Int { if look.coarse -> BUTTON_STEP_COARSE else -> BUTTON_STEP }
 
 // The buttons from the right: close, maximize, minimize.
 button_of: fn(k: Int) -> FrameButton {
@@ -356,7 +370,7 @@ header: fn(&p: Painter, look: FrameLook, width: Int, scale120: Int) -> [U8] {
     // The title runs from after the icon to a gap before the minimize
     // button's hit region, and is clipped there.
     title_x: Float{ICON_X + ICON_SIZE + TITLE_GAP}
-    title_end: logical_width - Float{BUTTON_INSET + TITLE_GAP} - Float{BUTTON_STEP} * 2.5
+    title_end: logical_width - Float{button_inset(look) + TITLE_GAP} - Float{button_step(look)} * 2.5
     size: s * 14.5
     room: fmax(title_end - title_x, 0.0) * s
     shown: fit_title(p, look.title, size, room)
@@ -368,7 +382,7 @@ header: fn(&p: Painter, look: FrameLook, width: Int, scale120: Int) -> [U8] {
         which: button_of(k)
         lit: look.hover == which
         held: lit && look.pressed == which
-        cx: (logical_width - Float{BUTTON_INSET + k * BUTTON_STEP}) * s
+        cx: (logical_width - Float{button_inset(look) + k * button_step(look)}) * s
         cy: Float{HEADER} / 2.0 * s
         fill := if held -> BUTTON_PRESS else if lit -> BUTTON_HOVER else -> BUTTON_IDLE
         glyph := ink
@@ -722,7 +736,7 @@ linear: fn(channel: Int) -> Float {
 
 // A look for the tests: active, rounded, nothing hovered, Jet's mark.
 plain_look: fn(title: String) -> FrameLook {
-    FrameLook{title: title, active: true, square: false, maximized: false, hover: FrameButton.Nothing, pressed: FrameButton.Nothing, icon: [U8]{}, icon_side: 0}
+    FrameLook{title: title, active: true, square: false, maximized: false, coarse: false, hover: FrameButton.Nothing, pressed: FrameButton.Nothing, icon: [U8]{}, icon_side: 0}
 }
 
 #Test("frame spots: content, title, button regions, edges and corners") {
@@ -747,7 +761,7 @@ plain_look: fn(title: String) -> FrameLook {
     assert_eq(spot(399.0, 303.0, 400, 300, look), FrameSpot.Edge(EDGE_BOTTOM + EDGE_RIGHT))
     assert_eq(spot(-20.0, 150.0, 400, 300, look), FrameSpot.Outside)
     // A maximized or tiled window has no grips outside it.
-    tiled: FrameLook{title: "", active: true, square: true, maximized: false, hover: FrameButton.Nothing, pressed: FrameButton.Nothing, icon: [U8]{}, icon_side: 0}
+    tiled: FrameLook{title: "", active: true, square: true, maximized: false, coarse: false, hover: FrameButton.Nothing, pressed: FrameButton.Nothing, icon: [U8]{}, icon_side: 0}
     assert_eq(spot(-3.0, 150.0, 400, 300, tiled), FrameSpot.Outside)
     assert_eq(spot(200.0, -1.0, 400, 300, tiled), FrameSpot.Outside)
     assert_eq(spot(399.5, 0.5, 400, 300, tiled), FrameSpot.Button(FrameButton.Close))
@@ -765,6 +779,26 @@ plain_look: fn(title: String) -> FrameLook {
             }
         }
     }
+    // For a finger every region holds a 44 x 44 square, at the smallest
+    // window too, and the minimize region stays clear of the icon.
+    finger: FrameLook{title: "", active: true, square: false, maximized: false, coarse: true, hover: FrameButton.Nothing, pressed: FrameButton.Nothing, icon: [U8]{}, icon_side: 0}
+    touch_offsets: [Float]{-22.0, 21.5}
+    touch_rows: [Float]{1.0, 44.5}
+    loop width in widths {
+        loop k in 0..<3 {
+            cx: Float{width - BUTTON_INSET_COARSE - k * BUTTON_STEP_COARSE}
+            loop dx in touch_offsets {
+                loop dy in touch_rows {
+                    assert_eq(spot(cx + dx, dy, width, MIN_HEIGHT, finger), FrameSpot.Button(button_of(k)))
+                }
+            }
+        }
+        assert_eq(spot(Float{ICON_X + ICON_SIZE} - 0.5, 20.0, width, MIN_HEIGHT, finger), FrameSpot.Title)
+    }
+    // A finger's regions are wider than a pointer's: 85 units from the right
+    // edge is minimize's for a pointer, maximize's for a finger.
+    assert_eq(spot(Float{400 - 85}, 20.0, 400, 300, look), FrameSpot.Button(FrameButton.Minimize))
+    assert_eq(spot(Float{400 - 85}, 20.0, 400, 300, finger), FrameSpot.Button(FrameButton.Maximize))
 }
 
 #Test("the shadow kit stretches: corners kept, middles repeated") {
@@ -826,7 +860,7 @@ plain_look: fn(title: String) -> FrameLook {
 
 #Test("the header is opaque but for its rounded corners, and draws alike every time") {
     p := painter()
-    look: FrameLook{title: "A window with a long title", active: true, square: false, maximized: false, hover: FrameButton.Close, pressed: FrameButton.Nothing, icon: [U8]{}, icon_side: 0}
+    look: FrameLook{title: "A window with a long title", active: true, square: false, maximized: false, coarse: false, hover: FrameButton.Close, pressed: FrameButton.Nothing, icon: [U8]{}, icon_side: 0}
     bar: header(p, look, 300, 120)
     assert_eq(bar.len(), 300 * 46 * 4)
     assert(Int.from_u8(bar[3]) < 255, "the top-left corner is rounded")
@@ -837,7 +871,7 @@ plain_look: fn(title: String) -> FrameLook {
     assert(Int.from_u8(bar[close + 2]) > 200 && Int.from_u8(bar[close + 1]) < 120, "the hovered close button is red")
     // Nothing moves: the same look draws the same bytes.
     assert_eq(header(p, look, 300, 120), bar)
-    square: header(p, FrameLook{title: "", active: false, square: true, maximized: true, hover: FrameButton.Nothing, pressed: FrameButton.Nothing, icon: [U8]{}, icon_side: 0}, 200, 240)
+    square: header(p, FrameLook{title: "", active: false, square: true, maximized: true, coarse: false, hover: FrameButton.Nothing, pressed: FrameButton.Nothing, icon: [U8]{}, icon_side: 0}, 200, 240)
     assert_eq(square.len(), 200 * 92 * 4)
     assert_eq(square[3], U8{255})
     // An app's icon is drawn in place of Jet's mark: a red icon makes the
@@ -849,7 +883,7 @@ plain_look: fn(title: String) -> FrameLook {
         red.push(U8{30})
         red.push(U8{255})
     }
-    iconic: header(p, FrameLook{title: "", active: true, square: false, maximized: false, hover: FrameButton.Nothing, pressed: FrameButton.Nothing, icon: red, icon_side: 8}, 300, 120)
+    iconic: header(p, FrameLook{title: "", active: true, square: false, maximized: false, coarse: false, hover: FrameButton.Nothing, pressed: FrameButton.Nothing, icon: red, icon_side: 8}, 300, 120)
     at: (23 * 300 + 25) * 4
     assert_eq([U8]{iconic[at], iconic[at + 1], iconic[at + 2], iconic[at + 3]}, [U8]{U8{30}, U8{30}, U8{220}, U8{255}})
 }

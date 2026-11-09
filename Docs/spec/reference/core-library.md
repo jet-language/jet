@@ -4229,6 +4229,20 @@ scale or size reaches the program as `.Resize` in pixels on the next frame.
 A resize is acknowledged only by the commit of a frame drawn at the new size,
 so the compositor never shows a stretched or cropped frame.
 
+Jet draws the window's frame itself: a title bar with the icon from
+`set_icon` (Jet's mark until one is set), the title, and minimize, maximize
+and close buttons, rounded corners and a soft shadow, on a `wl_subsurface`
+below the program's pixels. Frames stay the content: `open`'s size is the
+content's, while the compositor configures the whole window, so one
+configured 640 x 400 units draws 640 x 354. The title bar moves the
+window, a double press on it maximizes, the secondary button opens the
+compositor's window menu, and its edges and corners resize it; on a touch
+screen the buttons spread to 46-unit targets. A maximized or tiled window
+has square corners and no shadow, and a fullscreen one no frame. When the
+compositor draws frames itself (`zxdg_decoration_manager_v1` answers
+server-side) or offers no `wl_subcompositor`, its frame shows instead and
+frames are the whole window.
+
 | Signature | Result | Description |
 |---|---|---|
 | `open(*, width: Int, height: Int, title: String) -[Env, Net, Time]> Window UIError!` | window | Open a window of 1 to 16384 logical units a side on the environment's display server: `.NoDisplay` when none is named, `.Connect` / `.Protocol` / `.Unsupported` when it fails. |
