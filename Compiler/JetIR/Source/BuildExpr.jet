@@ -517,6 +517,10 @@ ir_stmt_body: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Neve
                 b.fresh[owned] = false
                 return
             }
+            // A variable that closes its value closes the old one first,
+            // while it is still whole, as its scope end does: its drop
+            // follows.
+            if binding.indirect < 0 -> ir_close_now(b, binding.slot)
             // The right side may have moved the old value out (`x = f(x)`,
             // `x = [T]{T{part: x}}`): only a value the variable still owns ends.
             still: ir_owned_binding(b, binding.slot)
@@ -534,8 +538,6 @@ ir_stmt_body: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Neve
                 b.fresh[owned] = false
                 return
             }
-            // A variable that closes its value closes the old one first.
-            ir_close_now(b, binding.slot)
             if ir_kind_of(m, b, binding.slot) == .Aggregate {
                 ir_assign_aggregate(m, b, binding.slot, owned, still)
             } else {
