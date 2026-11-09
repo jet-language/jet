@@ -16,9 +16,12 @@
 //    resolve to the member identity: an unknown member is E0608/E0611, a
 //    private one E0609; a nested `priv module` is usable only inside the
 //    module enclosing it, which names its children relatively (`audit.f()`);
+//    a member function or constant read as a value (`bank.open`, `open` in
+//    its own module) names its member identity, so it passes like any
+//    function and keeps its inferred effect row;
 // 4. a module's own `use` declarations
 //    bind inside that module only, and its `pub use` re-exports a member as
-//    `module.name`; a module named as a value is E0107, like Rust.
+//    `module.name`; a module named as a value is E0107.
 //
 // A generic-module instance arrives here as an ordinary module expanded by
 // `sema_generic_modules_expand`. A module's constants lift beside its
@@ -89,6 +92,7 @@ use {
         measure_kind,
         measure_literal_value,
         ast_func,
+        ast_const,
         core_module_export,
         ast_program,
         ast_struct,
@@ -114,6 +118,8 @@ SemaInlineModuleSurface: struct {
     private_to: String?
     // Member function names reachable by this enclosing file.
     functions: [String:Bool]
+    // Member constant names, read as `module.NAME`.
+    constants: [String:Bool]
     // `pub use` inside the module: re-exported local name -> its owner.
     reexports: [String:SemaInlineTarget]
 }
@@ -803,6 +809,31 @@ sema_inline_rewrite_module_call: fn(rewrite: &SemaInlineRewrite, surface: SemaIn
     Val(Expr.Call{call: call, id: AST_NODE_GENERATED})
 }
 
+// `bank.open` or `math.inner.RATE` read as a value, not called: a member
+// function or constant names its member identity, and a `pub use`
+// re-export names its owner. Any other member is E0608, and the read is
+// left as written. None when `base` names no inline module, or when the
+// member is itself a module (no value).
+sema_inline_rewrite_member_value: fn(rewrite: &SemaInlineRewrite, base: Expr, member: String, span: Span, node: Int) -> Expr? Never! {
+    segments := [NamedSpan]{}
+    if !sema_inline_receiver_path(base, segments) || sema_inline_is_local(rewrite, segments[0].name) -> return None
+    path: (loop segment in segments -> segment.name).join(".")
+    surface: sema_inline_surface(rewrite, path) ?? return None
+    if sema_inline_surface(rewrite, "{path}.{member}") != None -> return None
+    if sema_inline_private_step(rewrite, segments) == .Val(diagnostic) -> rewrite.diagnostics.push(diagnostic)
+    if surface.reexports.get(member) == .Val(target) {
+        if target.qualified -> return Val(Expr.Field{base: Expr.Ident{name: target.module_alias, span: span, id: AST_NODE_GENERATED}, member: target.member, span: span, id: node})
+        return Val(Expr.Ident{name: sema_inline_member_name(target.module_alias, target.member), span: span, id: node})
+    }
+    if surface.functions.get(member) == None && surface.constants.get(member) == None {
+        rewrite.diagnostics.push(sema_error("E0608", segments[segments.len() - 1].span, "`{member}` is not defined in module `{surface.path}`", "check the module body for the function or constant you're reading", "make sure the member name is spelled correctly"))
+        // copy: the rewrite walks the module program by borrowed payload views (Jet has no
+        // consuming match), so the unresolved read is copied into the rebuilt program as written.
+        return Val(Expr.Field{base: base.copy(), member: member, span: span, id: node})
+    }
+    Val(Expr.Ident{name: sema_inline_member_name(surface.path, member), span: span, id: node})
+}
+
 // `a.b.c` as a call receiver: each identifier segment with its span, false
 // for any other receiver.
 sema_inline_receiver_path: fn(receiver: Expr, segments: &[NamedSpan]) -> Bool Never! {
@@ -848,10 +879,9 @@ sema_inline_rewrite_expr: fn(rewrite: &SemaInlineRewrite, expression: Expr) -> E
         .Range(start, end, exclusive, span, node) -> return Expr.Range{start: sema_inline_rewrite_expr(rewrite, start), end: sema_inline_rewrite_expr(rewrite, end), exclusive: exclusive, span: span, id: node}
         .Ident(name, span, node) -> {
             if !sema_inline_is_local(rewrite, name) && rewrite.values.get(name) == .Val(value) -> return sema_inline_value_at(value, span)
-            // Rust `rewrite_inline_calls_expr`: a sibling named as a value
-            // becomes the module name, which name lookup then rejects. A
-            // local or parameter of the same name shadows the sibling.
-            if !sema_inline_is_local(rewrite, name) && rewrite.siblings.get(name) != None -> return Expr.Ident{name: rewrite.sibling_module, span: span, id: node}
+            // A sibling function read as a value names its member identity.
+            // A local or parameter of the same name shadows the sibling.
+            if !sema_inline_is_local(rewrite, name) && rewrite.siblings.get(name) != None -> return Expr.Ident{name: sema_inline_member_name(rewrite.sibling_module, name), span: span, id: node}
             if !sema_inline_is_local(rewrite, name) {
                 if rewrite.qualified.get(name) == .Val(target) -> return Expr.Field{base: Expr.Ident{name: target.module_alias, span: span, id: node}, member: target.member, span: span, id: AST_NODE_GENERATED}
                 if rewrite.aliases.get(name) == .Val(generated) -> return Expr.Ident{name: generated, span: span, id: node}
@@ -898,6 +928,7 @@ sema_inline_rewrite_expr: fn(rewrite: &SemaInlineRewrite, expression: Expr) -> E
         .Place(value, access, span, node) -> return Expr.Place{value: sema_inline_rewrite_expr(rewrite, value), access: access, span: span, id: node}
         .Field(base, member, span, node) -> {
             if sema_inline_type_path(rewrite, base) == .Val(type_name) -> return Expr.Field{base: type_name, member: member, span: span, id: node}
+            if sema_inline_rewrite_member_value(rewrite, base, member, span, node) == .Val(value) -> return value
             return Expr.Field{base: sema_inline_rewrite_expr(rewrite, base), member: member, span: span, id: node}
         }
         .OptField(base, member, member_span, flatten, span, node) -> return Expr.OptField{base: sema_inline_rewrite_expr(rewrite, base), member: member, member_span: member_span, flatten: flatten, span: span, id: node}
@@ -1693,9 +1724,13 @@ sema_inline_collect_nested: fn(body: [Item], parent: String, file_imports: [Impo
             path: "{parent}.{child.name}"
             private_to := String?{None}
             if !child.is_pub && !child.is_package_pub -> private_to = Val(parent.copy())
-            surface := SemaInlineModuleSurface{name: path.copy(), path: path.copy(), private_to: private_to, functions: [String:Bool]{}, reexports: [String:SemaInlineTarget]{}}
+            surface := SemaInlineModuleSurface{name: path.copy(), path: path.copy(), private_to: private_to, functions: [String:Bool]{}, constants: [String:Bool]{}, reexports: [String:SemaInlineTarget]{}}
             loop inner in child_body {
-                if inner == .Func(function) -> surface.functions[function.name] = true
+                if inner == {
+                    .Func(function) -> surface.functions[function.name] = true
+                    .Const(constant) -> surface.constants[constant.name] = true
+                    else -> {}
+                }
             }
             aliases: sema_inline_module_aliases(child, path, file_imports, inherited)
             binding := sema_inline_rewrite_empty()
@@ -1886,9 +1921,13 @@ sema_inline_modules_lower: fn(program: &Program, diagnostics: &[Diagnostic]) -> 
         if item == .CodeModule(definition) {
             if definition.body == .Val(body) {
                 inline_names[definition.name] = true
-                surface := SemaInlineModuleSurface{name: definition.name, path: definition.name, private_to: None, functions: [String:Bool]{}, reexports: [String:SemaInlineTarget]{}}
+                surface := SemaInlineModuleSurface{name: definition.name, path: definition.name, private_to: None, functions: [String:Bool]{}, constants: [String:Bool]{}, reexports: [String:SemaInlineTarget]{}}
                 loop inner in body {
-                    if inner == .Func(function) -> surface.functions[function.name] = true
+                    if inner == {
+                        .Func(function) -> surface.functions[function.name] = true
+                        .Const(constant) -> surface.constants[constant.name] = true
+                        else -> {}
+                    }
                 }
                 surfaces.push(surface)
             }
@@ -2001,4 +2040,49 @@ sema_inline_modules_any_body: fn(items: [Item]) -> Bool Never! {
         }
     }
     assert(resolved && private_type && private_function)
+}
+
+#Test("inline module members read as values name their member identities") {
+    span: Span{start: 0, end: 1}
+    total: ast_func("total", span, span)
+    wrap := ast_func("wrap", span, span)
+    wrap.body = [Stmt]{Stmt.Expr{expr: Expr.Ident{name: "total", span: span, id: AST_NODE_GENERATED}}}
+    rate: ast_const("RATE", span, span, Expr.Int{value: 3, span: span, width: None, raw: None, id: AST_NODE_GENERATED})
+    pricing: CodeModule{name: "pricing", name_span: span, is_pub: false, is_package_pub: false, body: Val([Item]{Item.Func{value: total}, Item.Func{value: wrap}, Item.Const{value: rate}}), imports: [ImportDecl]{}, web_target: None, instance_identity: None, span: span}
+    consumer := ast_func("execute", span, span)
+    consumer.body = [Stmt]{
+        Stmt.Expr{expr: Expr.Field{base: Expr.Ident{name: "pricing", span: span, id: AST_NODE_GENERATED}, member: "total", span: span, id: AST_NODE_GENERATED}},
+        Stmt.Expr{expr: Expr.Field{base: Expr.Ident{name: "pricing", span: span, id: AST_NODE_GENERATED}, member: "RATE", span: span, id: AST_NODE_GENERATED}},
+    }
+    program := ast_program()
+    program.items = [Item]{Item.CodeModule{value: pricing}, Item.Func{value: consumer}}
+    diagnostics := [Diagnostic]{}
+    _: sema_inline_modules_lower(program, diagnostics)
+    assert(diagnostics.is_empty())
+    names := [String]{}
+    loop item in program.items {
+        if item == .Func(function) {
+            if function.name != "execute" && function.name != sema_inline_member_name("pricing", "wrap") -> next
+            loop statement in function.body {
+                if statement == .Expr(value) {
+                    if value == .Ident(name, _, _) -> names.push(name)
+                }
+            }
+        }
+    }
+    total_name: sema_inline_member_name("pricing", "total")
+    assert(names.len() == 3)
+    assert(names.contains(total_name) && names.contains(sema_inline_member_name("pricing", "RATE")))
+}
+
+#Test("an unknown inline module member read as a value is E0608") {
+    span: Span{start: 0, end: 1}
+    pricing: CodeModule{name: "pricing", name_span: span, is_pub: false, is_package_pub: false, body: Val([Item]{Item.Func{value: ast_func("total", span, span)}}), imports: [ImportDecl]{}, web_target: None, instance_identity: None, span: span}
+    consumer := ast_func("execute", span, span)
+    consumer.body = [Stmt]{Stmt.Expr{expr: Expr.Field{base: Expr.Ident{name: "pricing", span: span, id: AST_NODE_GENERATED}, member: "missing", span: span, id: AST_NODE_GENERATED}}}
+    program := ast_program()
+    program.items = [Item]{Item.CodeModule{value: pricing}, Item.Func{value: consumer}}
+    diagnostics := [Diagnostic]{}
+    _: sema_inline_modules_lower(program, diagnostics)
+    assert(diagnostics.len() == 1 && diagnostics[0].code == "E0608")
 }
