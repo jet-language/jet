@@ -4033,70 +4033,70 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RouteSys.jet",
-      "line": 88,
+      "line": 96,
       "column": 5,
       "reason": "close(2) releases a descriptor this route opened"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RouteSys.jet",
-      "line": 98,
+      "line": 106,
       "column": 9,
       "reason": "read(2) fills at most the caller's remaining owned bytes"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RouteSys.jet",
-      "line": 120,
+      "line": 128,
       "column": 9,
       "reason": "socket(AF_UNIX, SOCK_STREAM|SOCK_CLOEXEC) retains no memory"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RouteSys.jet",
-      "line": 136,
+      "line": 144,
       "column": 9,
       "reason": "connect(2) reads the owned 23-byte address"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RouteSys.jet",
-      "line": 152,
+      "line": 160,
       "column": 9,
       "reason": "sendto(2) with MSG_NOSIGNAL reads the owned request"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RouteSys.jet",
-      "line": 401,
+      "line": 409,
       "column": 5,
       "reason": "param owns an initialized struct sched_param; the caller lends the tuple's Bool byte and three Int words"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RouteSys.jet",
-      "line": 486,
+      "line": 494,
       "column": 5,
       "reason": "the caller lends the tuple's Bool byte and four Int words"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RouteSys.jet",
-      "line": 521,
+      "line": 529,
       "column": 5,
       "reason": "info owns the initialized struct sysinfo; the caller lends the tuple's Bool byte, Int word and three Float words"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RouteSys.jet",
-      "line": 553,
+      "line": 561,
       "column": 5,
       "reason": "utimensat borrows the NUL-terminated path and the two owned timespecs for the synchronous call"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RouteSys.jet",
-      "line": 568,
+      "line": 576,
       "column": 5,
       "reason": "buffer owns an initialized struct tms; the caller lends the tuple's Bool byte and six Int words"
     },
@@ -10832,16 +10832,16 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/RouteALog.jet | 88:5 | "the entry function configures before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/RouteAMath.jet | 13:9 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 7:5 | "some lends a writable C-ABI Option success word" |
-| Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 88:5 | "close(2) releases a descriptor this route opened" |
-| Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 98:9 | "read(2) fills at most the caller's remaining owned bytes" |
-| Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 120:9 | "socket(AF_UNIX, SOCK_STREAM&#124;SOCK_CLOEXEC) retains no memory" |
-| Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 136:9 | "connect(2) reads the owned 23-byte address" |
-| Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 152:9 | "sendto(2) with MSG_NOSIGNAL reads the owned request" |
-| Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 401:5 | "param owns an initialized struct sched_param; the caller lends the tuple's Bool byte and three Int words" |
-| Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 486:5 | "the caller lends the tuple's Bool byte and four Int words" |
-| Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 521:5 | "info owns the initialized struct sysinfo; the caller lends the tuple's Bool byte, Int word and three Float words" |
-| Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 553:5 | "utimensat borrows the NUL-terminated path and the two owned timespecs for the synchronous call" |
-| Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 568:5 | "buffer owns an initialized struct tms; the caller lends the tuple's Bool byte and six Int words" |
+| Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 96:5 | "close(2) releases a descriptor this route opened" |
+| Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 106:9 | "read(2) fills at most the caller's remaining owned bytes" |
+| Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 128:9 | "socket(AF_UNIX, SOCK_STREAM&#124;SOCK_CLOEXEC) retains no memory" |
+| Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 144:9 | "connect(2) reads the owned 23-byte address" |
+| Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 160:9 | "sendto(2) with MSG_NOSIGNAL reads the owned request" |
+| Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 409:5 | "param owns an initialized struct sched_param; the caller lends the tuple's Bool byte and three Int words" |
+| Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 494:5 | "the caller lends the tuple's Bool byte and four Int words" |
+| Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 529:5 | "info owns the initialized struct sysinfo; the caller lends the tuple's Bool byte, Int word and three Float words" |
+| Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 561:5 | "utimensat borrows the NUL-terminated path and the two owned timespecs for the synchronous call" |
+| Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 576:5 | "buffer owns an initialized struct tms; the caller lends the tuple's Bool byte and six Int words" |
 | Compiler | Compiler/JetRuntime/Source/RouteTerm.jet | 58:5 | "the caller lends the tuple's Bool byte, Text word and Option&lt;Text&gt; tag/payload words" |
 | Compiler | Compiler/JetRuntime/Source/RouteTerm.jet | 229:5 | "the caller lends the tuple's Text word and Option&lt;Text&gt; tag/payload words" |
 | Compiler | Compiler/JetRuntime/Source/RouteTerm.jet | 332:13 | "written under the host lock" |

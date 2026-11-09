@@ -49,15 +49,20 @@ sys_groups: fn(size: I64, list: I64) -> I64 {
 
 // A raw fork copies every lock as it stands into a child that runs only the
 // forking thread, where a lock another thread held would stay held for
-// good; musl's fork took its own locks for this. The fork gate
-// (Thread.jet thread_fork_gate_share) waits out every thread_spawn clone
-// under way and keeps new ones out; the thread registry's
+// good; musl's fork took its own locks for this. The scheduler's root lock
+// comes first, as scheduler_start_worker holds it across a thread_spawn:
+// the child's root leave (Scheduler.jet jet_rt_root_leave) takes it, and
+// the carriers take it for every submit, wake and fiber resume. The fork
+// gate (Thread.jet thread_fork_gate_share) then waits out every
+// thread_spawn clone under way and keeps new ones out; the thread registry's
 // mutex, the stdout lock and every allocator lock are then held across the
 // system call, in the order their holders nest them, and each is released
 // in the parent and left in its initial state in the child. Pending stdout
 // is drained first so the child never re-emits bytes the parent already
 // printed. The forking thread blocks on each lock and never parks a fiber.
 #Export(c) jet_sys_fork_raw: fn(available: I64, value: I64, errno: I64) {
+    scheduler: scheduler_root
+    if (scheduler != I64{0}) -> sync_thread_lock(scheduler)
     root: thread_tls_registry
     if (root != I64{0}) {
         thread_fork_gate_hold(root)
@@ -72,6 +77,9 @@ sys_groups: fn(size: I64, list: I64) -> I64 {
     if (root != I64{0}) {
         if child { sync_store(root, I64{0}) } else { sync_mutex_unlock(root) }
         thread_fork_gate_release(root)
+    }
+    if (scheduler != I64{0}) {
+        if child { sync_store(scheduler, I64{0}) } else { sync_thread_unlock(scheduler) }
     }
     host_sample_out(result, available, value, errno)
 }
