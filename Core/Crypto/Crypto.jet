@@ -112,16 +112,22 @@ Digest512: struct {
 
 impl Digest512.Display { display: fn(self) -> String { self.hex() } }
 
+/// Streaming SHA-256 (FIPS 180-4): `update` absorbs input as it arrives,
+/// holding at most one partial 64-byte block, so a large input is never held
+/// whole.
 Hasher: struct {
-    data: [U8]
+    priv ctx: hashes.HashCtx
 
-    new: fn() -> Hasher Never! { {data: [U8]{}} }
+    new: fn() -> Hasher Never! { {ctx: hashes.hash_start(.SHA256)} }
 
-    update: fn(&self, bytes: [U8]) Never! {
-        loop b in bytes -> self.data.push(b)
+    update: fn(&self, bytes: [U8]) Never! { hashes.hash_update(self.ctx, bytes) }
+
+    /// The lowercase hex SHA-256 of everything absorbed so far; the hasher
+    /// can keep absorbing afterwards.
+    digest: fn(self) -> String Never! {
+        done := hashes.hash_clone(self.ctx)
+        hex_encode(hashes.hash_finish(done))
     }
-
-    digest: fn(self) -> String Never! { sha256(self.data).hex() }
 }
 
 /// Hashlib-style module constructors for the default SHA-256 hasher.
@@ -2606,6 +2612,46 @@ g: fn(s: &[Int], a: Int, b: Int, c: Int, d: Int, mx: Int, my: Int) {
             }
         }
     }
+}
+
+#Test("Hasher fed in chunks of every size matches the one-shot SHA-256, and digest leaves it absorbing") {
+    chunk_sizes: [Int]{1, 3, 55, 63, 64, 65, 127, 200}
+    loop length in 0..<200 {
+        data := [U8]{}
+        loop index in 0..<length -> data.push(U8{(index * 89 + length) %% 256})
+        want: sha256(data).hex()
+        loop chunk in chunk_sizes {
+            hasher := Hasher.new()
+            offset := 0
+            loop offset < length {
+                end: if offset + chunk < length -> offset + chunk else -> length
+                part := [U8]{}
+                loop index in offset..<end -> part.push(data[index])
+                hasher.update(part)
+                offset = end
+            }
+            assert_eq(hasher.digest(), want)
+        }
+        // A digest in the middle neither ends nor changes the stream.
+        split := Hasher.new()
+        half: length /% 2
+        head := [U8]{}
+        tail := [U8]{}
+        loop index in 0..<half -> head.push(data[index])
+        loop index in half..<length -> tail.push(data[index])
+        split.update(head)
+        assert_eq(split.digest(), sha256(head).hex())
+        split.update(tail)
+        assert_eq(split.digest(), want)
+    }
+}
+
+#Test("Hasher streams FIPS 180-2's one million 'a' bytes in 4000-byte updates") {
+    block := [U8]{}
+    loop _ in 0..<4000 -> block.push(U8{0x61})
+    hasher := new()
+    loop _ in 0..<250 -> update(hasher, block)
+    assert_eq(digest(hasher), "cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0")
 }
 
 #Test("JETC2 never overwrites destinations and removes unauthenticated outputs") {

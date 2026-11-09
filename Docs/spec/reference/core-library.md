@@ -1519,7 +1519,7 @@ run: fn() {
 | `hmac_sha256(key, data)` | `[U8]` | Produce HMAC-SHA256 bytes. |
 | `hkdf_sha256(ikm, salt, info, len)` | `Secret !CryptoError` | Derive a bounded 0–8160-byte nominal secret. |
 | `pbkdf2_hmac(password, salt, iterations, key_len)` | `[U8] !CryptoError` | Derive a bounded PBKDF2-HMAC-SHA256 byte sequence. |
-| `new()` / `update(hasher, bytes)` / `digest(hasher)` | hasher operations | Use the incremental SHA-256 hasher. |
+| `new()` / `update(hasher, bytes)` / `digest(hasher)` | hasher operations | Use the streaming SHA-256 hasher: `update` absorbs each chunk as it arrives and keeps at most one partial 64-byte block, so a large input is never held whole; `digest` returns lowercase hex and leaves the hasher able to absorb more. |
 | `constant_time_equal(a, b)` / `constant_time_equal_bytes(a, b)` | `Bool` | Compare nominal secrets or byte lists without early equality branching. |
 | `wipe(bytes)` | unit | Zero every element of a `[U8]` and its spare capacity with stores the optimizer cannot drop; the length is unchanged. |
 | `generatekey()` | `X25519SecretKey !CryptoError` | Generate an X25519 secret through the random provider. |
