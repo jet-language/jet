@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6720,
-    "rev": 96479,
+    "rev": 96480,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -100854,7 +100854,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-08T19:41:56.680Z",
-      "updated": "2026-11-09T07:23:18.969Z",
+      "updated": "2026-11-09T13:30:57.594Z",
       "updatedBy": "Main",
       "criteriaLastN": 3
     },
@@ -187323,6 +187323,275 @@
       "created": "2026-11-09T07:44:19.525Z",
       "outcome": "A",
       "ratifiedAt": "2026-11-09"
+    },
+    {
+      "id": "D-MATH-BESSEL1",
+      "cardId": "c028lxdd",
+      "group": "numerics",
+      "title": "Should Core add the four basic Bessel functions?",
+      "situation": "Wave calculations use special mathematical functions called Bessel functions. Jet has no public calls for the four basic ones, so a simulation using them cannot yet use Core alone. Beginners need a dependable default, while experts need a clear accuracy promise. Choose Core or a package, correct or faithful rounding, or deferral. We recommend correctly rounded Core functions because of Jet's Core-parity and accuracy direction, not evidence that they are cheap.",
+      "gist": "Should Core add the four basic Bessel functions?",
+      "lesson": "Correct rounding returns the nearest float, with ties going to even. Faithful rounding permits either float beside the exact answer. A fixed faithful algorithm can also be repeatable. Core's ratified elementary-math direction is correct rounding; this vote sets the Bessel contract.",
+      "explainer": "",
+      "story": "A developer ports a wave simulation that calls j0, j1, y0 and y1. The same inputs must give the same bits on every supported machine and execution mode.",
+      "inWild": "// C: these libraries offer this call, but not all-input correct rounding.\n#include <math.h>\n#include <stdio.h>\nint main(void) {\n    volatile double x = 0x1.33d152e971b4p+1;\n    printf(\"%a\\n\", j0(x));\n}",
+      "detail": "D-MATH-BITS1 outcome A says each Core math function is correctly rounded, but its detailed implementation list names elementary functions, not Bessel. A extends that direction explicitly. B scopes a faithful exception for these four F64 calls; no existing Bessel API is weakened. I9 requires one shared meaning at O0, O1, O2, compile time and web where applicable. No option permits host-dependent answers or an accuracy flag.\n\nThe scope is j0, j1, y0 and y1 for Float and F32. Integer-order jn and yn are excluded, so the combined POSIX census row cannot become fully covered. This vote closes neither #6700 nor #6688.\n\nAll shipping options share these proposed edge rules: J0 is even and J1 odd for finite real inputs; J0(+-0)=1 and J1(+-0)=+-0. Y0/Y1(+-0)=-infinity. Negative nonzero Y arguments and all quiet/signaling NaN inputs return fixed positive quiet NaN: binary64 0x7ff8000000000000, binary32 0x7fc00000. This is not math.canonicalize's payload-preserving behavior.\n\nJ0/J1(+-infinity)=+0; Y0/Y1(+infinity)=+0; Y0/Y1(-infinity)=fixed quiet NaN. Gradual underflow applies; any zero from a nonzero finite result has the exact result's sign. Overflow is nearest-even even for B/F's F64 route. Y1 can overflow negatively near zero. No host errno, traps or floating-environment dependence. CR forms evaluate the function of the exact input and round once to the destination type; B/F use bracketing within the finite range.\n\nCORE-MATH has no fixed-format Bessel implementation in the inspected binary32/64 tree, but has a Sollya adapter. Harrison 2009 supplies zero-distance analysis, not a complete CR midpoint proof. MPFR supplies rounded Bessel values. Inspected FLINT/Arb ball-arithmetic source is further certification prior art, not an executed fixed-format CR kernel. Go ships the four calls in math; Julia's Bessels.jl shows specialist packaging.\n\nBeginners and experts use the same calls. Experts can use their own explicitly chosen domain-specific approximation package, not a second Core accuracy mode. D/F require installation and version pinning; C explicitly defers this Core-parity scope and offers no first-party Bessel path.\n\nA/B/D/F would be implemented in Jet without new external runtime dependencies; source reuse still needs license review. The markdown and third review give sources, proof/tests and executed witnesses. Shipping-option Jet snippets are proposals; C shows a verified rejection. No delivery date, coefficient count, speed or proof-cost estimate is established.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Correctly rounded Core functions in Jet",
+          "detail": "Add the four calls to Core and explicitly extend the correct-rounding direction to them. Implement in Jet using certified numerical methods. No new external dependency is authorized.",
+          "technical": "Proposed j0(x: Float) -> Float and same-name F32 -> F32, likewise j1, y0 and y1. Certified adaptive precision is a candidate, not a ready fallback: it may require substantial multiprecision infrastructure. Prove termination, bounds and exact cases. No fixed fallback width or hard-case search is prescribed.",
+          "code": "// Proposed, not implemented.\nuse { math: core.math }\nrun: fn() {\n    print(math.j0(2.0))\n}\n// Nearest Float to the exact J0(2), on every applicable tier."
+        },
+        {
+          "key": "B",
+          "name": "Faithful F64 Core functions",
+          "detail": "Use the same calls, with faithful F64 and correctly rounded F32 results. Explicitly scope an exception to D-MATH-BITS1's general accuracy direction for these four F64 calls. Implement in Jet without a new external dependency. There is no existing Bessel API to downgrade.",
+          "technical": "For representable-range finite results, faithful means either bracketing float, or the exact float when representable. Fix one canonical algorithm. Common edge rules also fix NaNs, zero signs and nearest-even overflow. Faithfulness can avoid resolving rounding midpoints, so may save work, but no Jet cost saving is measured. CR F32 still needs proof: midpoint-gated narrowing can work with faithful F64, but its midpoint cases and corrections must be certified for that kernel. A later CR upgrade can change some bits.",
+          "code": "// Proposed, not implemented.\nuse { math: core.math }\nrun: fn() {\n    print(math.j0(2.0))\n}\n// One fixed faithful Float result, identical across applicable tiers."
+        },
+        {
+          "key": "C",
+          "name": "Defer the four functions",
+          "detail": "Add no Bessel calls in this scope. Keep the POSIX gap visible. Explicitly defer this part of the Core-parity goal; do not treat remaining math work as complete.",
+          "technical": "No implementation campaign is authorized for these calls. Retain the gap and absent-call checks. This frees this scope's implementation effort for other work, but leaves no first-party Bessel path. It neither closes another card nor authorizes a host fallback.",
+          "code": "// Remains unavailable under C.\nuse { math: core.math }\nrun: fn() {\n    print(math.j0(2.0))\n}\n// UnknownCoreItem, as in the executed dev-compiler probe."
+        },
+        {
+          "key": "D",
+          "name": "Correctly rounded battery",
+          "detail": "Put the four calls in one opt-in numerical package, not Core. Specialist grouping and independent releases may help scientific users. It changes the Core boundary and needs explicit approval against the standard-library parity goal.",
+          "technical": "Proposed package import numerics.bessel; same four names and Float/F32 contracts as A. Implement in Jet without a new external dependency. No duplicate Core aliases. Package placement does not remove numerical proof cost. Test installation, discovery, version pinning and every applicable execution tier.",
+          "code": "// Proposed package and API, not implemented.\nuse { math: numerics.bessel }\nrun: fn() {\n    print(math.j0(2.0))\n}\n// Same correct-rounding contract as A; dependency must be installed."
+        },
+        {
+          "key": "E",
+          "name": "MPFR-backed Core functions",
+          "detail": "Use MPFR and GMP for the same correctly rounded calls. This explicitly approves new dependencies and an exception to the no-C order. Distribution obligations and all applicable targets must be resolved before shipping.",
+          "technical": "Same public API as A. Pin MPFR/GMP behind one approved bridge. Establish target exponents, gradual underflow and no double rounding; map MPFR's NaN representation to the chosen Jet contract. Include compile time and web; no native-only or host-libm fallback. Measure scratch memory, allocation, latency and distribution size; no fast-libm performance is assumed.",
+          "code": "// Proposed bridge, not implemented.\nuse { math: core.math }\nrun: fn() {\n    print(math.j0(2.0))\n}\n// Same correct-rounding contract as A, using the pinned dependency."
+        },
+        {
+          "key": "F",
+          "name": "Faithful numerical battery",
+          "detail": "Keep Core unchanged and provide one opt-in numerics.bessel package with faithful F64 and correctly rounded F32 results. This combines specialist releases with B's possible midpoint savings, without weakening an existing Core function.",
+          "technical": "Same proposed import and names as D; exactly B's accuracy, overflow, NaN and signed-zero contract, including one canonical algorithm on every applicable tier. Implement in Jet, with no new external dependency. Approve the Core-boundary exception explicitly. Installation, pinning, proof and performance tests still apply; no duplicate Core alias or accuracy switch.",
+          "code": "// Proposed faithful package, not implemented.\nuse { math: numerics.bessel }\nrun: fn() {\n    print(math.j0(2.0))\n}\n// One fixed faithful Float result; F32 is correctly rounded."
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "why": "A follows Jet's Core-parity and correct-rounding direction. Go's math library supports Core placement; specialist packages support D/F. This is a policy preference, not a measured cost win.",
+        "gains": [
+          "One nearest-even answer.",
+          "No new runtime dependency."
+        ],
+        "losses": [
+          {
+            "loss": "Proof, multiprecision infrastructure and speed costs remain unmeasured.",
+            "mitigation": "Require certified bounds, termination, and measured time, memory and size before shipping; promise no completion date."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "May avoid midpoint work, but its weaker guarantee has no measured Jet saving yet."
+          },
+          {
+            "key": "C",
+            "reason": "Saves this scope's implementation effort, but leaves the first-party capability absent."
+          },
+          {
+            "key": "D",
+            "reason": "Independent releases suit specialists, but depart from Jet's Core-parity goal and add setup."
+          },
+          {
+            "key": "E",
+            "reason": "Existing rounded algorithms reduce numerical invention, but conflict with the no-C order without an explicit exception."
+          },
+          {
+            "key": "F",
+            "reason": "Combines specialist releases and possible midpoint savings, but leaves Core parity unmet and gives a weaker F64 guarantee."
+          }
+        ],
+        "tradeoff": "A funds numerical research rather than claiming a ready fixed-format upstream kernel exists. Existing algorithms may inform a port, with license review. Shipping waits for proof and performance evidence."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: OpenAI. Fresh agent: BesselReview3. Third independent pass checked decisions, sources and compiled witnesses, including F; repaired faithful-F32 framing and option consistency. Current verdicts: BALLOT-BESSEL-REVIEW3-2026-11-09.md; prior passes: BALLOT-BESSEL-REVIEW2-2026-11-09.md and BALLOT-BESSEL-REVIEW-2026-11-09.md."
+      },
+      "checkInstructions": "Run Tools/agent/ballots/Validate.jet on this payload with the dev-built compiler. The accompanying markdown specifies proof, exhaustive F32 scans, F64 corpora, bitwise tier checks and performance gates. None has run for an unimplemented Jet Bessel API.",
+      "surface": {
+        "gist": "Should Core add the four basic Bessel functions?",
+        "lesson": "These functions describe waves. Correct rounding picks the nearest float; faithful rounding permits either neighbour. Both can be repeatable. We recommend extending Core's accuracy direction, but proof cost and speed are unknown.",
+        "trio": {
+          "current": {
+            "note": "The dev compiler rejects all four calls.",
+            "code": "// Executed: UnknownCoreItem.\nuse { math: core.math }\nrun: fn() { print(math.j0(2.0)) }"
+          },
+          "wild": {
+            "lang": "C",
+            "note": "glibc and musl offer them, without all-input correct rounding.",
+            "code": "#include <math.h>\n#include <stdio.h>\nint main(void) {\n    volatile double x = 0x1.33d152e971b4p+1;\n    printf(\"%a\\n\", j0(x));\n}"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Correctly rounded Core",
+            "gist": "Write the functions in Jet.",
+            "gains": [
+              "Extends Core's correct-rounding direction.",
+              "No new external dependency."
+            ],
+            "losses": [
+              "Proof, memory costs and speed are unknown."
+            ],
+            "proposed": {
+              "code": "// Proposed under A.\nuse { math: core.math }\nrun: fn() { print(math.j0(2.0)) }"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Faithful Core",
+            "gist": "Allow either neighbouring F64 result, fixed across machines.",
+            "gains": [
+              "May avoid costly midpoint resolution."
+            ],
+            "losses": [
+              "Weaker accuracy; no measured saving; F32 still needs correct rounding."
+            ],
+            "proposed": {
+              "code": "// Proposed under B: fixed faithful F64 answer.\nuse { math: core.math }\nrun: fn() { print(math.j0(2.0)) }"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Defer",
+            "gist": "Keep these calls absent.",
+            "gains": [
+              "Leaves implementation effort for other work."
+            ],
+            "losses": [
+              "Wave calculations keep this first-party gap."
+            ],
+            "proposed": {
+              "code": "// Still rejected under C.\nuse { math: core.math }\nrun: fn() { print(math.j0(2.0)) }"
+            }
+          },
+          {
+            "key": "D",
+            "name": "Numerical battery",
+            "gist": "Keep accuracy; use an opt-in specialist package.",
+            "gains": [
+              "Specialist grouping and independent releases."
+            ],
+            "losses": [
+              "Installation friction, unchanged proof cost and a Core-boundary exception."
+            ],
+            "proposed": {
+              "code": "// Proposed package, same mathematical program.\nuse { math: numerics.bessel }\nrun: fn() { print(math.j0(2.0)) }"
+            }
+          },
+          {
+            "key": "E",
+            "name": "MPFR-backed Core",
+            "gist": "Approve a dependency-backed implementation.",
+            "gains": [
+              "Uses existing rounded Bessel algorithms."
+            ],
+            "losses": [
+              "Needs dependency, no-C and portable-distribution exceptions."
+            ],
+            "proposed": {
+              "code": "// Proposed MPFR bridge behind the same calls.\nuse { math: core.math }\nrun: fn() { print(math.j0(2.0)) }"
+            }
+          },
+          {
+            "key": "F",
+            "name": "Faithful battery",
+            "gist": "Combine specialist packaging with faithful F64.",
+            "gains": [
+              "Independent releases and possible midpoint savings."
+            ],
+            "losses": [
+              "Weaker F64 accuracy, setup and a Core-boundary exception."
+            ],
+            "proposed": {
+              "code": "// Proposed faithful package; F32 correctly rounded.\nuse { math: numerics.bessel }\nrun: fn() { print(math.j0(2.0)) }"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A follows Jet's Core-parity and accuracy direction. It is not a measured cost win. Do not promise delivery or speed before proof and measurement.",
+          "gains": [
+            "One nearest-even answer.",
+            "No new runtime dependency."
+          ],
+          "losses": [
+            {
+              "loss": "Proof, memory costs and speed remain unknown.",
+              "mitigation": "Require certified bounds, termination, and measured time, memory and size before shipping."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Possible midpoint savings remain unmeasured."
+            },
+            {
+              "key": "C",
+              "reason": "Saves effort but leaves the first-party gap."
+            },
+            {
+              "key": "D",
+              "reason": "Independent releases help specialists, but depart from Core parity."
+            },
+            {
+              "key": "E",
+              "reason": "Existing algorithms help, but reintroduce C dependencies."
+            },
+            {
+              "key": "F",
+              "reason": "Useful specialist compromise, but weaker F64 accuracy and no Core parity."
+            }
+          ],
+          "tradeoff": "Research cost remains real."
+        }
+      },
+      "designAway": [
+        {
+          "loss": "Correct rounding needs a proof, not just samples.",
+          "attempts": [
+            "Use only a fixed wider fallback: rejected without a justified precision bound.",
+            "Use certified enclosures and precision growth: retained as an implementation candidate."
+          ],
+          "result": "No global hard-case search is mandated. Termination and exact cases still need proof."
+        },
+        {
+          "loss": "Special functions increase Core's maintenance load.",
+          "attempts": [
+            "Move them to a battery: D keeps CR, while F allows faithful F64; both make the Core-boundary exception explicit."
+          ],
+          "result": "A retains one spelling, one implementation contract and no accuracy switch; no cost superiority is claimed."
+        },
+        {
+          "loss": "MPFR avoids inventing a reference algorithm but adds dependencies.",
+          "attempts": [
+            "Native-only bridge: rejected because it would leave tier meaning incomplete."
+          ],
+          "result": "E requires explicit dependency approval and every applicable target before shipping."
+        }
+      ],
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-09T13:30:57.594Z"
     }
   ],
   "questions": [
@@ -190421,6 +190690,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-09T13:30:57.594Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-MATH-BESSEL1",
+      "note": "Should Core add the four basic Bessel functions?"
+    },
     {
       "at": "2026-11-09T13:21:29.911Z",
       "by": "Main",
