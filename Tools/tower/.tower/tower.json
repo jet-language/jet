@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6718,
-    "rev": 96467,
+    "nextNum": 6719,
+    "rev": 96472,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -100879,6 +100879,11 @@
         {
           "at": "2026-11-09",
           "by": "Main",
+          "text": "Renderer speed is tracked on child #6718 (owner: fastest renderer)."
+        },
+        {
+          "at": "2026-11-09",
+          "by": "Main",
           "text": "Owner 2026-11-09, after running a dev native-window demo: 'it is extremely choppy and ugly. i dont like the unrasterized text default in the pane, the header bar is way too bulky and should be dark mode by default but adapt to the user theme. those need to be fixed asap. also, I wanted the logo to work for the app that shows up in the taskbar, not in the header bar itself by default.' Measured: a headless 900x600 frame with a full gradient, ~15 shapes and ~7 text lines takes ~140 ms at O0 and ~55 ms at O2, against a 16.7 ms budget. draw_text still uses the 5x7 bitmap font. Dispatched to WaylandLead3 as top priority: rasterizer speed (a few ms per 1080p frame at O0), anti-aliased Atkinson text by default (the 5x7 font deleted), a slim header bar that is dark by default and follows the portal color-scheme and accent, the icon via xdg-toplevel-icon in the taskbar and not in the drawn frame, and a new showcase demo."
         },
         {
@@ -101047,7 +101052,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-08T19:44:17.134Z",
-      "updated": "2026-11-09T12:44:44.784Z",
+      "updated": "2026-11-09T12:48:01.024Z",
       "updatedBy": "Main",
       "criteriaLastN": 7
     },
@@ -101742,6 +101747,63 @@
       "needsAcceptance": false,
       "created": "2026-11-09T12:32:41.154Z",
       "updated": "2026-11-09T12:37:00.394Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 3
+    },
+    {
+      "id": "c0f9brds",
+      "num": 6718,
+      "title": "core.ui renderer is the fastest 2D renderer: gauntlet cells against Blend2D, Skia raster, tiny-skia and cairo/pixman, with an asm-parity ceiling",
+      "body": "Owner 2026-11-09: 'we should be the fastest renderer especially since we have top to bottom full control over the whole language stack.' Today a 900x600 frame (a full gradient, ~15 shapes, ~7 text lines) takes ~140 ms at O0 and ~55 ms at O2. Under the AGENTS.md performance gate, core.ui's rasterizer (Core/Ui/Draw.jet and the font rasterizer) gets required cells in the GUI-applications area. For each workload, Jet/peer must be below 1.00 against every matched CPU 2D renderer (Blend2D, Skia's raster backend, tiny-skia, cairo/pixman), and Jet/ceiling at most 1.00 against a hand-written SIMD reference (asm-parity) doing the same work, on every tier (O0 included, since  is what users run) and in both cycles and bytes. The workloads: solid and gradient fills, anti-aliased paths and shapes (rects, rounded rects, circles, polygons), alpha blending (straight and premultiplied), anti-aliased glyph text, image blits and scaling, and full-frame redraw at 1080p and 4K. Use the whole stack: SIMD in the runtime or Core through vetted internals, compiler codegen (bounds-check elimination, vectorizing span loops) and data layout. Fix compiler-side gaps at their root in the compiler, not by hand-unrolled Jet. Semantics and pixels are identical on every tier.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e5",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P0",
+      "plan": "1. Gauntlet cells plus peer harness: same scenes, same pixels (compared as images), peers built at their best settings. 2. asm-parity ceiling references with the best known technique (AVX2/AVX-512 span fill and blend, analytic coverage rasterization). 3. Profile Jet per workload; split the gap into rasterizer algorithm, codegen and runtime. 4. Close the gap: algorithm first (span and coverage pipelines like Blend2D's), then codegen defects as compiler cards. 5. Gate: every cell passes both stages.",
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The canonical measurement manifest and Tools/perf/asm-parity/cells.json carry renderer cells: fills, gradients, AA shapes, blending, AA text, blits/scaling, and full-frame 1080p and 4K. Each has an image-equality check against every peer (Blend2D, Skia raster, tiny-skia, cairo/pixman) and a hand-written SIMD ceiling reference.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T12:47:57.604Z"
+        },
+        {
+          "n": 2,
+          "text": "Every renderer cell passes both stages on every tier (O0, O1, O2): Jet/peer < 1.00 for every peer and Jet/ceiling <= 1.00, in both cycles and bytes. The gate output is the evidence.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T12:47:58.794Z"
+        },
+        {
+          "n": 3,
+          "text": "A native window redraws a full 1080p frame of the showcase scene well inside one refresh at O0 (jet run), measured by frame_stats with no missed frames over 60 s.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T12:47:59.874Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [],
+      "parentId": "c0l39twq",
+      "needsAcceptance": false,
+      "created": "2026-11-09T12:47:48.165Z",
+      "updated": "2026-11-09T12:47:59.874Z",
       "updatedBy": "Main",
       "criteriaLastN": 3
     }
@@ -190310,6 +190372,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-09T12:48:01.024Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0l39twq",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-09T12:47:59.874Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0f9brds",
+      "note": "#3 A native window redraws a full 1080p frame of the showcase s"
+    },
+    {
+      "at": "2026-11-09T12:47:58.794Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0f9brds",
+      "note": "#2 Every renderer cell passes both stages on every tier (O0, O1"
+    },
+    {
+      "at": "2026-11-09T12:47:57.604Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0f9brds",
+      "note": "#1 The canonical measurement manifest and Tools/perf/asm-parity"
+    },
+    {
+      "at": "2026-11-09T12:47:48.165Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0f9brds",
+      "note": "core.ui renderer is the fastest 2D renderer: gauntlet cells against Blend2D, Skia raster, tiny-skia and cairo/pixman, with an asm-parity ceiling"
+    },
     {
       "at": "2026-11-09T12:44:44.784Z",
       "by": "Main",
