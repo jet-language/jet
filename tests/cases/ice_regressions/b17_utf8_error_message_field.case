@@ -1,0 +1,9 @@
+# #6530: `String.from_bytes` fails with UTF8Error, a declaration-less runtime
+# record like TextError. Reading its `message` field had no record row, so the
+# build was an ICE ("ir.build unlowered: ... field of UTF8Error").
+fixture: fixtures/b17_utf8_error_message_field
+env: NO_COLOR=1
+step: jet run source0.jet
+exit: 0
+stdout: = b17_utf8_error_message_field.out
+stderr: !~ "internal compiler error" # the field read lowers through the record row

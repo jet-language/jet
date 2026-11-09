@@ -10734,13 +10734,17 @@ __payload_bits: fn(payload: Float) -> Int? Never! {
     assert_eq(cmp(1.0, NAN), -1)
     assert_eq(cmp(NAN, NAN), 0)
     assert_eq(__cmp_f32(F32{-0.0}, F32{0.0}), 0)
-    assert_eq(__cmp_f32(F32{NAN}, F32{1.0}), 1)
+    // F32{x} stops on a non-finite Float, so F32 arithmetic makes the NaN and the infinity.
+    f32_zero: F32{0.0}
+    f32_nan: f32_zero / f32_zero
+    f32_inf: F32{3.0e38} * F32{10.0}
+    assert_eq(__cmp_f32(f32_nan, F32{1.0}), 1)
     assert(__is_finite_f32(F32{1.0}))
-    assert(!__is_finite_f32(F32{INFINITY}))
+    assert(!__is_finite_f32(f32_inf))
     assert_eq(__to_bits_f32(F32{16777217.0}), 1266679808)
     assert_eq(__to_bits_f32(F32{-0.0}), 2147483648)
     assert_eq(__to_bits_f32(F32{1.0}), 1065353216)
-    assert_eq(__to_bits_f32(F32{INFINITY}), 2139095040)
+    assert_eq(__to_bits_f32(f32_inf), 2139095040)
     assert_eq(__to_bits_f32(F32{from_bits(1)}), 0)
     assert_eq(__to_bits_f32(F32{Float{1.0e-40}}), 71362)
     // A payload NaN, a signaling NaN of either sign, the smallest and the

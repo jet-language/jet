@@ -1,0 +1,11 @@
+# #6530: `impl Point2.Sub` names no right-hand type, so it takes the owner
+# itself. A canonical operand (`<corelib>/core.math::Point2<Float, Plane>`) never
+# matched the owner's declared spelling, the operator fell through to the
+# geometry builtin, and the build was an ICE ("precise builtin
+# <corelib>/core.math::Point2.sub").
+fixture: fixtures/b16_generic_operator_default_rhs_matches_canonical_operand
+env: NO_COLOR=1
+step: jet run source0.jet
+exit: 0
+stdout: = b16_generic_operator_default_rhs_matches_canonical_operand.out
+stderr: !~ "internal compiler error" # the Sub impl is the operator, not the geometry builtin

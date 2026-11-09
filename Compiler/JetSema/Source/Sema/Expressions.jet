@@ -770,6 +770,11 @@ sema_expr_operator_nominal_candidates: fn(graph: SemaRegistrationGraph, nominal:
     if !owner_inference.complete || !owner_inference.compatible -> return
     owner_type: sema_inference_substitute_type_bindings(nominal.ty, owner_inference.substitutions)
     receiver_owner: sema_inference_substitute_type_bindings(sema_expr_operator_reader_type(graph, nominal.ty, owner_module, nominal.generic_params, [SemaRegistrationGenericParam]{}), owner_inference.substitutions)
+    // An impl with no authored right-hand type takes the owner itself as the
+    // receiver spells it: a canonical receiver (`core.math::Point2<Float,
+    // World>`) meets the owner resolved in its module, like an authored
+    // `Delta2<T, Space>`.
+    self_rhs: sema_inference_substitute_type_bindings(inference_ty, owner_inference.substitutions)
     // Only this module's impls declaring `trait_name` can pass
     // sema_expr_operator_nominal_impl_candidates: with the registration
     // index built they are read from the trait-name rows (module/row order,
@@ -778,25 +783,25 @@ sema_expr_operator_nominal_candidates: fn(graph: SemaRegistrationGraph, nominal:
         if graph.impl_trait_name_slots.get(trait_name) == .Val(found) {
             loop impl_row in graph.impl_trait_name_buckets[found] {
                 if impl_row.module_index != module_index -> next
-                sema_expr_operator_nominal_impl_candidates(graph, graph.modules[module_index].impls[impl_row.row], nominal, module_index, owner_inference.substitutions, owner_type, receiver_owner, rhs_type, trait_name, method, require_commutative, span, caller_module, caller_package, environment, program, diagnostics, candidates)
+                sema_expr_operator_nominal_impl_candidates(graph, graph.modules[module_index].impls[impl_row.row], nominal, module_index, owner_inference.substitutions, owner_type, self_rhs, receiver_owner, rhs_type, trait_name, method, require_commutative, span, caller_module, caller_package, environment, program, diagnostics, candidates)
             }
         }
     } else {
         loop impl_index in 0..<graph.modules[module_index].impls.len() {
-            sema_expr_operator_nominal_impl_candidates(graph, graph.modules[module_index].impls[impl_index], nominal, module_index, owner_inference.substitutions, owner_type, receiver_owner, rhs_type, trait_name, method, require_commutative, span, caller_module, caller_package, environment, program, diagnostics, candidates)
+            sema_expr_operator_nominal_impl_candidates(graph, graph.modules[module_index].impls[impl_index], nominal, module_index, owner_inference.substitutions, owner_type, self_rhs, receiver_owner, rhs_type, trait_name, method, require_commutative, span, caller_module, caller_package, environment, program, diagnostics, candidates)
         }
     }
     if nominal.source == .SourceAST(item) -> sema_expr_operator_source_candidates(graph, nominal, item, module_index, owner_module, owner_inference.substitutions, owner_type, receiver_owner, rhs_type, trait_name, method, require_commutative, span, caller_module, caller_package, environment, program, diagnostics, candidates)
 }
 
-sema_expr_operator_nominal_impl_candidates: fn(graph: SemaRegistrationGraph, implementation: SemaRegistrationImpl, nominal: SemaRegistrationNominal, module_index: Int, substitutions: [SemaInferenceBinding], owner_type: Type, receiver_owner: Type, rhs_type: Type, trait_name: String, method: String, require_commutative: Bool, span: Span, caller_module: String, caller_package: String, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic], candidates: &[SemaExprOperatorResolution]) Never! {
+sema_expr_operator_nominal_impl_candidates: fn(graph: SemaRegistrationGraph, implementation: SemaRegistrationImpl, nominal: SemaRegistrationNominal, module_index: Int, substitutions: [SemaInferenceBinding], owner_type: Type, self_rhs: Type, receiver_owner: Type, rhs_type: Type, trait_name: String, method: String, require_commutative: Bool, span: Span, caller_module: String, caller_package: String, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic], candidates: &[SemaExprOperatorResolution]) Never! {
     if !sema_expr_operator_target_matches(implementation, nominal) -> return
     if implementation.trait_name != (Val(trait_name)) -> return
     if require_commutative && implementation.operator_marker != (Val(OperatorMarker.Commutative)) -> return
     // The authored right-hand type resolves in the impl's module, like the
     // source blocks' (`impl Point2.Add(Delta2<T, Space>)` matched against a
     // canonical `core.math::Delta2<Float, World>` operand).
-    qualified_rhs: if implementation.operator_rhs == .Val(authored) -> sema_inference_substitute_type_bindings(sema_type_resolve_declared(graph, authored, implementation.source_module_identity), substitutions) else -> owner_type
+    qualified_rhs: if implementation.operator_rhs == .Val(authored) -> sema_inference_substitute_type_bindings(sema_type_resolve_declared(graph, authored, implementation.source_module_identity), substitutions) else -> self_rhs
     if !sema_expr_operator_rhs_matches(Val(qualified_rhs), rhs_type) -> return
     trait_symbol := implementation.trait_symbol
     if trait_symbol == None -> trait_symbol = sema_type_graph_trait_symbol(graph, implementation.source_module_identity, trait_name)
