@@ -529,7 +529,8 @@ ir_instance_identity: fn(key: String, args: [Type]) -> String Never! {
 // the runtime's JetErr; a Core declaration the handle table does not name by
 // its key is named by its own name, unless the table pins that runtime to
 // another Core declaration's key (a bare `Reader` is core.term's JetReader,
-// not the private __core_crypto_jetc Reader struct).
+// not the private __core_crypto_jetc Reader struct) or the runtime is the
+// task group's, which no Core declaration carries.
 ir_handle_runtime: fn(p: IRProgram, name: String) -> IRRuntimeHandle? Never! {
     runtime := ir_runtime_handle(name)
     if ir_type_def(p, name) == .Val(row) {
@@ -543,8 +544,12 @@ ir_handle_runtime: fn(p: IRProgram, name: String) -> IRRuntimeHandle? Never! {
     runtime
 }
 
+// The task group handle is only ever the bare `Group` sema gives a
+// `task.group` binding; a Core struct spelled `Group` (core.data's carrier,
+// core.ui.xkb's key group) is its own declaration and lays out as itself.
 ir_core_bare_handle: fn(key: String, name: String) -> IRRuntimeHandle? Never! {
     bare: ir_runtime_handle(name) ?? return None
+    if bare.runtime == "JetTaskGroup" -> return None
     loop index in 0..<IR_RUNTIME_HANDLES.len() {
         pinned: IR_RUNTIME_HANDLES[index].jet_name.starts_with("<corelib>/") && IR_RUNTIME_HANDLES[index].jet_name != key
         if pinned && IR_RUNTIME_HANDLES[index].runtime == bare.runtime -> return None
@@ -4531,4 +4536,15 @@ ir_numeric_op_name: fn(operation: TNumericOp) -> String Never! {
         text = parts[0]
     }
     text
+}
+
+#Test("a Core struct spelled Group is its own declaration, not the task group handle") {
+    assert(ir_core_bare_handle("<corelib>/core.ui.xkb::Group", "Group") == None)
+    assert(ir_core_bare_handle("<corelib>/core.data::Group", "Group") == None)
+    group: ir_runtime_handle("Group") ?? panic("the bare task group spelling lost its handle")
+    assert_eq(group.runtime, "JetTaskGroup")
+    // A pin still decides between two Core declarations of one bare name.
+    assert(ir_core_bare_handle("<corelib>/__core_crypto_jetc::Reader", "Reader") == None)
+    reader: ir_core_bare_handle("<corelib>/core.term::Reader", "Reader") ?? panic("core.term's Reader lost its handle")
+    assert_eq(reader.runtime, "JetReader")
 }

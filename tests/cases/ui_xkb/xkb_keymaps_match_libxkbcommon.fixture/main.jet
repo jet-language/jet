@@ -1,0 +1,153 @@
+// Plays keys.script against the US, DE, FR, RU, US+DE and US international
+// keymaps that `xkbcli compile-keymap` (libxkbcommon 1.13.2) printed, and
+// prints each key's core.term Key and text. expected.out is libxkbcommon's own
+// answer for the same script: xkb_state_key_get_one_sym / get_utf8 fed
+// through xkb_compose_state with the en_US.UTF-8 Compose table, with
+// control characters dropped.
+//
+// Script commands (codes are evdev codes):
+//   keymap F                  load F with a fresh state
+//   mods D L K G              the compositor's modifiers event
+//   press / release / type C  key events; type is press then release
+//   sweep                     type every key with symbols, codes 1 to 255
+//   repeats                   list the keys with symbols that do not repeat
+//   repeat R D MS...          wl_keyboard.repeat_info timing for holds of MS ms
+use {
+    files: core.files
+    xkb: core.ui.xkb
+    core.term.[Key]
+}
+
+render: fn(key: Key) -> String {
+    if key == {
+        .Escape -> "Escape"
+        .Enter -> "Enter"
+        .Tab -> "Tab"
+        .Backspace -> "Backspace"
+        .Delete -> "Delete"
+        .Insert -> "Insert"
+        .Left -> "Left"
+        .Right -> "Right"
+        .Up -> "Up"
+        .Down -> "Down"
+        .Home -> "Home"
+        .End -> "End"
+        .PageUp -> "PageUp"
+        .PageDown -> "PageDown"
+        .Shift -> "Shift"
+        .Control -> "Control"
+        .Alt -> "Alt"
+        .Super -> "Super"
+        .CapsLock -> "CapsLock"
+        .F(n) -> "F({n})"
+        .Char(c) -> "Char(\"{c}\")"
+        .Ctrl(c) -> "Ctrl(\"{c}\")"
+        .Unknown -> "Unknown"
+    }
+}
+
+words: fn(line: String) -> [String] {
+    out := [String]{}
+    loop word in line.split(" ") {
+        if word != "" -> out.push(word)
+    }
+    out
+}
+
+number: fn(word: String) -> Int {
+    value := 0
+    loop b in word.bytes() -> value = value * 10 + Int.from_u8(b) - 48
+    value
+}
+
+// The script's commands without comments and blank lines.
+commands: fn(script: String) -> [String] {
+    out := [String]{}
+    loop raw in script.split("\n") {
+        line: raw.partition("#").head.trim()
+        if line != "" -> out.push(line)
+    }
+    out
+}
+
+// The repeats a rate R, delay D schedule has made after each hold, and
+// between the first and the last hold.
+timing: fn(repeat: xkb.Repeat, line: String, held: [Int]) -> String {
+    due := [String]{}
+    loop ms in held -> due.push("{repeat.due(ms)}")
+    "{line}: {due.join(" ")}, between {repeat.between(held[0], held[held.len() - 1])}"
+}
+
+play: fn(&km: xkb.Keymap, line: String, &out: [String]) {
+    w: words(line)
+    if w[0] == "mods" {
+        km.modifiers(depressed: number(w[1]), latched: number(w[2]), locked: number(w[3]), group: number(w[4]))
+        out.push(line.copy())
+        return
+    }
+    if w[0] == "repeat" {
+        held := [Int]{}
+        loop i in 3..<w.len() -> held.push(number(w[i]))
+        out.push(timing(xkb.Repeat{rate: number(w[1]), delay: number(w[2])}, line, held))
+        return
+    }
+    if w[0] == "repeats" {
+        off := [String]{}
+        loop code in km.codes() {
+            if code <= 255 && !km.repeats(code) -> off.push("{code}")
+        }
+        listed: off.join(" ")
+        out.push("repeats off: {listed}")
+        return
+    }
+    codes := [Int]{}
+    if w[0] == "sweep" {
+        loop code in km.codes() {
+            if code <= 255 -> codes.push(code)
+        }
+    } else {
+        loop i in 1..<w.len() -> codes.push(number(w[i]))
+    }
+    loop code in codes {
+        if w[0] != "release" {
+            down: km.press(code, true)
+            out.push("{code} {render(down.key)} \"{down.text}\"")
+        }
+        if w[0] != "press" {
+            up: km.press(code, false)
+            out.push("{code} up {render(up.key)}")
+        }
+    }
+}
+
+run: fn() {
+    script: files.read("keys.script") ?? {
+        print("cannot read keys.script: {err}")
+        return
+    }
+    lines: commands(script)
+    out := [String]{}
+    at := 0
+    loop at < lines.len() {
+        w: words(lines[at])
+        if w[0] != "keymap" {
+            print("expected a keymap command, found: {lines[at]}")
+            return
+        }
+        out.push(lines[at])
+        bytes: files.read_bytes(w[1]) ?? {
+            print("cannot read {w[1]}: {err}")
+            return
+        }
+        km := xkb.keymap(bytes) ?? {
+            print("{w[1]}: {err:Debug}")
+            return
+        }
+        at += 1
+        loop at < lines.len() && words(lines[at])[0] != "keymap" {
+            play(km, lines[at], out)
+            at += 1
+        }
+    }
+    print(out.join("\n"))
+}
