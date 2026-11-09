@@ -9,10 +9,57 @@ JET_CLI_INPUT_HELP: "jet help input — What a program reads\n\n`input` is every
 JET_CLI_RUN_INPUT_HELP: "\nA program reads its input through `input`; `jet help input` lists each way.\n"
 
 // One flag. A `With <cmd>[/<cmd>…]: ` help prefix scopes it to those commands;
-// `--json`, `--quiet`, and `--color` apply to every command.
+// `--json`, `--quiet`, and `--color` apply to every command. Each flag a
+// command takes is also that command's setting `<command>.<flag>`
+// (Compiler/JetCli/Source/Cli/CommandSettings.jet) unless `typed` names the
+// JET_CLI_FLAG_TYPED_REASONS row that says why it is typed each time instead;
+// `value` is how it and its setting are written.
 JetCLIFlagSpec: struct {
     long: String
     help: String
+    value: JetCLIFlagValue{JetCLIFlagValue.Switch}
+    typed: String{""}
+}
+
+// How a flag is written on the command line, and its setting's value.
+// Switch: the bare flag (`--check`); the setting true adds it, false leaves it
+// out. Bool: the bare flag or `=false` (`--small`, `--small=false`); the
+// setting true or false. Value: one value (`--color=always`, `-p server`);
+// the setting a string. Optional: bare or with one value (`--watch`,
+// `--watch=off`); the setting true, false or a string. Repeated: one value per
+// flag, as often as needed (`--deny=Net --deny=FS`); the setting a list of
+// strings.
+JetCLIFlagValue: enum {
+    Switch
+    Bool
+    Value
+    Optional
+    Repeated
+}
+
+// One reason a flag is typed on each command line that means it, and is never
+// a setting: a flag row's `typed` is its `name`, and E2117 says its `reason`.
+JetCLIFlagTypedReason: struct {
+    name: String
+    reason: String
+}
+
+JET_CLI_FLAG_TYPED_REASONS: comptime { [JetCLIFlagTypedReason]{
+    // It deletes, overwrites or skips a safeguard (`--force`, `--yes`).
+    {name: "destructive", reason: "it deletes, overwrites or skips a safeguard"},
+    // It names what this one run works on (`-e CODE`, `--query SQL`, `-o PATH`).
+    {name: "operand", reason: "it names what one run works on"},
+    // It gives permissions, which are never saved (`--allow`, `-A`, `--gate`,
+    // `--token`, `--allow-unofficial`).
+    {name: "authority", reason: "permissions are given on the command line each run"},
+} }
+
+// The reason row `name` names, if one does.
+jet_cli_flag_typed_reason: fn(name: String) -> JetCLIFlagTypedReason? Never! {
+    loop row in JET_CLI_FLAG_TYPED_REASONS {
+        if row.name == name -> return Val(row.copy()) // copy: the registry keeps its row.
+    }
+    None
 }
 
 // One dispatcher seam a nested action reaches. `key` names the Rust host's
@@ -869,7 +916,7 @@ jet_cli_flag_rows: fn() -> [JetCLIFlagSpec] Never! {
                 flag: build_option_flag(option.name)
                 help := "With build/run/dev/test/inspect: {option.help}"
                 if jet_cli_test_setting_of_flag(flag) == .Val(row) -> help = "{help}; with test: {jet_cli_test_setting_text(row)}"
-                rows.push(JetCLIFlagSpec{long: flag, help: help})
+                rows.push(JetCLIFlagSpec{long: flag, help: help, value: jet_cli_build_option_value(option)})
             }
         }
         if spec.long != "--explain-partition" -> next
@@ -880,10 +927,26 @@ jet_cli_flag_rows: fn() -> [JetCLIFlagSpec] Never! {
             if JET_CLI_FIXED_FLAGS.any(fixed -> fixed.long == fixed_flag) -> next
             option_flag: flag.copy() // copy: the build-option lambda's own name.
             if JET_BUILD_OPTIONS.any(option -> build_option_flag(option.name) == option_flag) -> next
-            rows.push(JetCLIFlagSpec{long: flag, help: jet_cli_test_setting_help(setting)})
+            rows.push(JetCLIFlagSpec{long: flag, help: jet_cli_test_setting_help(setting), value: jet_cli_test_setting_value(setting), typed: setting.typed})
         }
     }
     rows
+}
+
+// How a build option's flag is written: a Bool row with no third value
+// (`--small`, `--small=false`) is Bool, a List row one flag per item, any
+// other row one value (`--optimize=full`, `--debug-info=split`).
+jet_cli_build_option_value: fn(option: BuildOptionRow) -> JetCLIFlagValue Never! {
+    if option.kind == .List -> return JetCLIFlagValue.Repeated
+    if option.kind == .Bool && option.values.len() == 2 -> return JetCLIFlagValue.Bool
+    JetCLIFlagValue.Value
+}
+
+// How a `jet test` setting's flag is written: a Switch row is Bool
+// (`--serial`, `--serial=false`), any other row one value (`--shard=3/8`).
+jet_cli_test_setting_value: fn(setting: TestSettingRow) -> JetCLIFlagValue Never! {
+    if setting.kind == .Switch -> return JetCLIFlagValue.Bool
+    JetCLIFlagValue.Value
 }
 
 // The `jet test` setting whose flag is `flag`, if one is.
@@ -912,255 +975,255 @@ jet_cli_test_setting_text: fn(setting: TestSettingRow) -> String Never! {
 }
 
 JET_CLI_FIXED_FLAGS: comptime { [JetCLIFlagSpec]{
-    {long: "--live", help: "With inspect: Process id for a live plane scope"},
+    {long: "--live", help: "With inspect: Process id for a live plane scope", value: JetCLIFlagValue.Value, typed: "operand"},
     {long: "--observe", help: "With run: Expose bounded live runtime facts for attachment"},
-    {long: "--log", help: "With run/dev: Set the log level filter, such as warn,shop.db=debug; above JET_LOG"},
+    {long: "--log", help: "With run/dev: Set the log level filter, such as warn,shop.db=debug; above JET_LOG", value: JetCLIFlagValue.Value},
     {long: "--raw-frames", help: "With debug: Show generated Rust frames and scopes (expert)"},
     {long: "--dap", help: "With debug: Speak the Debug Adapter Protocol over stdio"},
     {long: "--gc-trace", help: "With run/dev: Record bounded automatic GC-promotion evidence"},
     {long: "--structural", help: "With diff/merge: Compare checked definitions by semantic identity"},
-    {long: "--base-receipt", help: "With review: Proof receipt for the base change-set side"},
-    {long: "--receipt", help: "With review: Proof receipt for the reviewed change-set side"},
-    {long: "--out", help: "With structural merge: Write the checked result to this path"},
-    {long: "--repo", help: "With merge install-driver: Git worktree to configure"},
+    {long: "--base-receipt", help: "With review: Proof receipt for the base change-set side", value: JetCLIFlagValue.Value, typed: "operand"},
+    {long: "--receipt", help: "With review: Proof receipt for the reviewed change-set side", value: JetCLIFlagValue.Value, typed: "operand"},
+    {long: "--out", help: "With structural merge: Write the checked result to this path", value: JetCLIFlagValue.Value, typed: "operand"},
+    {long: "--repo", help: "With merge install-driver: Git worktree to configure", value: JetCLIFlagValue.Value, typed: "operand"},
     {long: "--json", help: "Emit machine-readable facts or diagnostics"},
-    {long: "--topic", help: "With inspect digest: Emit one digest topic"},
-    {long: "--to", help: "With publish/cache/db migrate: Foreign registry, prune target size, or migration target version"},
+    {long: "--topic", help: "With inspect digest: Emit one digest topic", value: JetCLIFlagValue.Value},
+    {long: "--to", help: "With publish/cache/db migrate: Foreign registry, prune target size, or migration target version", value: JetCLIFlagValue.Value, typed: "operand"},
     {long: "--list-topics", help: "With inspect digest: List digest topics"},
-    {long: "--kind", help: "With inspect gates/package: Filter one gate or bundle kind"},
+    {long: "--kind", help: "With inspect gates/package: Filter one gate or bundle kind", value: JetCLIFlagValue.Value},
     // #1659 criterion 3: one spelling, every command. Suppresses non-error
     // status/progress output (watch banners, hot-swap notices,
     // confirmations); never suppresses errors or requested data.
     {long: "--quiet", help: "Suppress non-error status output"},
-    {long: "--color", help: "Color: auto | always | never"},
-    {long: "--version", help: "With package/new: Set bundle or migration version; global flag prints compiler version"},
-    {long: "--endpoint", help: "With self-update: Signed toolchain channel endpoint"},
-    {long: "--channel", help: "With self-update: Toolchain channel name"},
-    {long: "--platform", help: "With self-update: Toolchain target triple"},
-    {long: "--trust-key", help: "With self-update: Public trust-key file"},
-    {long: "--apply", help: "With self-update/generate/new: Apply the verified artifact or planned source writes"},
+    {long: "--color", help: "Color: auto | always | never", value: JetCLIFlagValue.Value},
+    {long: "--version", help: "With package/new: Set bundle or migration version; global flag prints compiler version", value: JetCLIFlagValue.Optional, typed: "operand"},
+    {long: "--endpoint", help: "With self-update: Signed toolchain channel endpoint", value: JetCLIFlagValue.Value},
+    {long: "--channel", help: "With self-update: Toolchain channel name", value: JetCLIFlagValue.Value},
+    {long: "--platform", help: "With self-update: Toolchain target triple", value: JetCLIFlagValue.Value},
+    {long: "--trust-key", help: "With self-update: Public trust-key file", value: JetCLIFlagValue.Value},
+    {long: "--apply", help: "With self-update/generate/new: Apply the verified artifact or planned source writes", typed: "destructive"},
     {long: "--preview", help: "With new/bind --update/build --import: Preview source writes, a binding plan, or an imported build graph without applying them"},
-    {long: "--remove", help: "With new: Remove only unchanged outputs recorded by the scaffold receipt"},
-    {long: "--path", help: "With new: Route or output path, defaulting to `/<name>`"},
-    {long: "--route", help: "With new: Alias for `--path`"},
-    {long: "--model", help: "With new: Model name recorded beside the route source"},
-    {long: "--allow-unofficial", help: "With self-update: Explicitly allow a local keyless channel"},
+    {long: "--remove", help: "With new: Remove only unchanged outputs recorded by the scaffold receipt", typed: "destructive"},
+    {long: "--path", help: "With new: Route or output path, defaulting to `/<name>`", value: JetCLIFlagValue.Value, typed: "operand"},
+    {long: "--route", help: "With new: Alias for `--path`", value: JetCLIFlagValue.Value, typed: "operand"},
+    {long: "--model", help: "With new: Model name recorded beside the route source", value: JetCLIFlagValue.Value, typed: "operand"},
+    {long: "--allow-unofficial", help: "With self-update: Explicitly allow a local keyless channel", typed: "authority"},
     {long: "--check", help: "With fmt/doc/split/fold: Check or preview without changing files (CI gate)"},
-    {long: "--lang", help: "With fmt: Delegate non-Jet files to the environment formatter for this language"},
+    {long: "--lang", help: "With fmt: Delegate non-Jet files to the environment formatter for this language", value: JetCLIFlagValue.Value},
     {long: "--diff", help: "With fmt --check: Also print unified diffs for each changed file"},
     {long: "--simplify", help: "With fmt: Rewrite to the simplest canonical spelling"},
     {long: "--changed", help: "With fmt: Format only VCS-changed .jet files (requires git)"},
     {long: "--explicit-copies", help: "With fmt: Materialize implicit read-view copies as `.copy()`"},
     {long: "--skipped", help: "With project parts: Show modules omitted from automatic discovery"},
-    {long: "--stdin-path", help: "With fmt -: Path label used in diagnostics when reading from stdin"},
+    {long: "--stdin-path", help: "With fmt -: Path label used in diagnostics when reading from stdin", value: JetCLIFlagValue.Value, typed: "operand"},
     {long: "--lib", help: "With build: Emit the native Library and C header"},
-    {long: "--output", help: "With build/run/dev/jobs/package: Select a named output, which Canvas uses as the initial selection; with build --lib: Select the native Library"},
+    {long: "--output", help: "With build/run/dev/jobs/package: Select a named output, which Canvas uses as the initial selection; with build --lib: Select the native Library", value: JetCLIFlagValue.Value},
     {long: "--locked", help: "With build/fetch/jobs/run/inspect gates: Require locked dependency and provenance facts"},
-    {long: "--sha256", help: "With run: Pin the first fetch of a URL target to this sha256, as --sha256=HEX"},
-    {long: "--effect", help: "With find: Require an effect such as FS.Read"},
-    {long: "--example", help: "With find: Search by input/output example"},
+    {long: "--sha256", help: "With run: Pin the first fetch of a URL target to this sha256, as --sha256=HEX", value: JetCLIFlagValue.Value, typed: "operand"},
+    {long: "--effect", help: "With find: Require an effect such as FS.Read", value: JetCLIFlagValue.Value, typed: "operand"},
+    {long: "--example", help: "With find: Search by input/output example", value: JetCLIFlagValue.Value, typed: "operand"},
     // Script locking folds into `fetch`, not a separate verb.
-    {long: "--lock", help: "With fetch/db migrate/new: Lock dependency fetching or choose a migration/scaffold lock policy"},
-    {long: "--host", help: "With cache limit: Host-wide store cap"},
+    {long: "--lock", help: "With fetch/db migrate/new: Lock dependency fetching or choose a migration/scaffold lock policy", value: JetCLIFlagValue.Optional},
+    {long: "--host", help: "With cache limit: Host-wide store cap", value: JetCLIFlagValue.Value},
     // Select one workspace member.
-    {long: "-p", help: "With run/dev/debug/check/build/jobs: Pick a workspace member by name"},
+    {long: "-p", help: "With run/dev/debug/check/build/jobs: Pick a workspace member by name", value: JetCLIFlagValue.Value},
     {long: "--annotated", help: "With new: Include commented example deps"},
-    {long: "--force", help: "With publish/inspect gates: Bypass pre-publish gate (with warning)"},
+    {long: "--force", help: "With publish/inspect gates: Bypass pre-publish gate (with warning)", typed: "destructive"},
     // #1659 criterion 1 (round 2): these 8 flags previously lived only in
     // usage-string prose (`NestedCommandSpec::usage`), invisible to
     // `is_known_flag`/`closest_flag` (E2102 "did you mean"), the man page,
     // and shell completions. Real rows here fix all three renderers at once.
     {long: "--no-sign", help: "With publish: Skip the optional author signature (registry metadata is still signed)"},
-    {long: "--registry", help: "With keygen/key: Registry name to generate or manage a signing key for"},
-    {long: "--pkg", help: "With bind: Library name for the generated binding module"},
-    {long: "--shape", help: "With bind: Binding facade shape: automatic or native"},
+    {long: "--registry", help: "With keygen/key: Registry name to generate or manage a signing key for", value: JetCLIFlagValue.Value},
+    {long: "--pkg", help: "With bind: Library name for the generated binding module", value: JetCLIFlagValue.Value, typed: "operand"},
+    {long: "--shape", help: "With bind: Binding facade shape: automatic or native", value: JetCLIFlagValue.Value},
     {long: "--freeze", help: "With bind: Record the resolved binding plan in the project lock"},
-    {long: "--policy", help: "With bind: Binding policy: automatic or frozen"},
-    {long: "--accept", help: "With bind --update/build --import: Accept exactly this candidate plan digest"},
-    {long: "--import", help: "With build: Import and inspect an existing foreign build graph"},
-    {long: "--clang", help: "With bind cpp: Path to the clang binary used to parse the header"},
-    {long: "--ar", help: "With bind cpp: Path to the ar archiver used to build the static library"},
-    {long: "--before", help: "With schema squash: Re-baseline migrations before this version"},
+    {long: "--policy", help: "With bind: Binding policy: automatic or frozen", value: JetCLIFlagValue.Value},
+    {long: "--accept", help: "With bind --update/build --import: Accept exactly this candidate plan digest", value: JetCLIFlagValue.Value, typed: "operand"},
+    {long: "--import", help: "With build: Import and inspect an existing foreign build graph", value: JetCLIFlagValue.Value, typed: "operand"},
+    {long: "--clang", help: "With bind cpp: Path to the clang binary used to parse the header", value: JetCLIFlagValue.Value},
+    {long: "--ar", help: "With bind cpp: Path to the ar archiver used to build the static library", value: JetCLIFlagValue.Value},
+    {long: "--before", help: "With schema squash: Re-baseline migrations before this version", value: JetCLIFlagValue.Value, typed: "operand"},
     {long: "--spdx", help: "With sbom: Emit SPDX tag-value format (default)"},
     {long: "--cyclonedx", help: "With sbom: Emit CycloneDX JSON format"},
-    {long: "--advisory-db", help: "With audit: Path to advisory database file"},
-    {long: "--vendor-dir", help: "With vendor: Directory to copy dependencies into (default vendor/)"},
+    {long: "--advisory-db", help: "With audit: Path to advisory database file", value: JetCLIFlagValue.Value},
+    {long: "--vendor-dir", help: "With vendor: Directory to copy dependencies into (default vendor/)", value: JetCLIFlagValue.Value},
     {long: "--sbom", help: "With build: Also write an SPDX SBOM next to the binary"},
     {long: "--verbose", help: "With build/jobs: Print the bridge steps; with check: print the status line, proof rows, and receipt notices; with run: name the effects the program uses and show advisory lints; with dev/test: show advisory lints; with explain: show a syntax token's registry name and decision"},
-    {long: "--template", help: "With new: Start from a named template: cli, ui, web, or overrides"},
-    {long: "--sort", help: "With help: Order commands by use (frequency, the default), A to Z (az), or Z to A (za)"},
+    {long: "--template", help: "With new: Start from a named template: cli, ui, web, or overrides", value: JetCLIFlagValue.Value},
+    {long: "--sort", help: "With help: Order commands by use (frequency, the default), A to Z (az), or Z to A (za)", value: JetCLIFlagValue.Value},
     {long: "--online", help: "With doctor/inspect gates: Allow network checks"},
-    {long: "--fix", help: "With doctor: Apply auto-fixable problems"},
+    {long: "--fix", help: "With doctor: Apply auto-fixable problems", typed: "destructive"},
     {long: "--dry-run", help: "With fix/fmt/package/rewrite commands/generate: Preview changes without writing"},
-    {long: "--entry", help: "With generate: Source file containing the generator job"},
-    {long: "--keep", help: "With try: Keep a clean speculative edit"},
-    {long: "--edition", help: "With fix: Apply edition migration rewrites --edition=<year>"},
+    {long: "--entry", help: "With generate: Source file containing the generator job", value: JetCLIFlagValue.Value, typed: "operand"},
+    {long: "--keep", help: "With try: Keep a clean speculative edit", typed: "destructive"},
+    {long: "--edition", help: "With fix: Apply edition migration rewrites --edition=<year>", value: JetCLIFlagValue.Value, typed: "operand"},
     {long: "--all", help: "With fix: Apply safety classes beyond formatting and behavior-preserving; with help: Also list every form this `jet` has not built yet, with the Tower card that owns its port"},
-    {long: "--markers", help: "With fix: Move every marker set above its declaration or into its body --markers <inside|above>"},
-    {long: "--try-anyway", help: "With dev --canvas/inspect gates: Evaluate past unsupported features (no guarantees)"},
+    {long: "--markers", help: "With fix: Move every marker set above its declaration or into its body --markers <inside|above>", value: JetCLIFlagValue.Value},
+    {long: "--try-anyway", help: "With dev --canvas/inspect gates: Evaluate past unsupported features (no guarantees)", typed: "destructive"},
     {long: "--restart", help: "With dev: Always rerun from scratch after a save"},
     {long: "--swap", help: "With dev: Hot-swap compatible edits and restart after type changes"},
-    {long: "--reload", help: "With explain: Explain the checked reload decision for a source or project path"},
+    {long: "--reload", help: "With explain: Explain the checked reload decision for a source or project path", value: JetCLIFlagValue.Value, typed: "operand"},
     {long: "--caps", help: "With explain effects: List every module cap written under a file or directory"},
-    {long: "--watch", help: "With run/dev/test/jobs/build: Re-run on dependency changes (--watch=off runs once); with test: off by default, keys r=failed, a=all, o=output; with jobs: --watch[=<on|off>]"},
+    {long: "--watch", help: "With run/dev/test/jobs/build: Re-run on dependency changes (--watch=off runs once); with test: off by default, keys r=failed, a=all, o=output; with jobs: --watch[=<on|off>]", value: JetCLIFlagValue.Optional},
     {long: "--graph", help: "With jobs: Show the checked job dependency graph"},
     {long: "--status", help: "With jobs: Show fresh or stale status for declared jobs"},
     {long: "--explain", help: "With jobs/package: Explain dependencies, phases, cache identity, and admission facts"},
     {long: "--canvas", help: "With dev: Open the full Canvas IDE over this dev session"},
-    {long: "--app", help: "With dev: Select a checked local-app function"},
-    {long: "--share", help: "With dev: Select local-app sharing authority: loopback or lan"},
-    {long: "--canvas-host", help: "With dev: With --canvas, bind host (loopback by default)"},
-    {long: "--canvas-port", help: "With dev: With --canvas, bind an explicit port"},
-    {long: "--canvas-transport", help: "With dev: With --canvas, select the named transport"},
-    {long: "--canvas-authority", help: "With dev: With --canvas, select loopback or remote authority"},
+    {long: "--app", help: "With dev: Select a checked local-app function", value: JetCLIFlagValue.Value},
+    {long: "--share", help: "With dev: Select local-app sharing authority: loopback or lan", value: JetCLIFlagValue.Value},
+    {long: "--canvas-host", help: "With dev: With --canvas, bind host (loopback by default)", value: JetCLIFlagValue.Value},
+    {long: "--canvas-port", help: "With dev: With --canvas, bind an explicit port", value: JetCLIFlagValue.Value},
+    {long: "--canvas-transport", help: "With dev: With --canvas, select the named transport", value: JetCLIFlagValue.Value},
+    {long: "--canvas-authority", help: "With dev: With --canvas, select loopback or remote authority", value: JetCLIFlagValue.Value},
     {long: "--canvas-audit", help: "With dev: With --canvas, enable request/rebuild audit output"},
     // E2-M18 REPL flags.
-    {long: "--project", help: "With repl: Load package settings and imports from this directory"},
+    {long: "--project", help: "With repl: Load package settings and imports from this directory", value: JetCLIFlagValue.Value},
     {long: "--console", help: "With repl: Open the project-loaded capability-gated console"},
-    {long: "--sandbox", help: "With repl: Use the reversible data sandbox (`--sandbox data`)"},
-    {long: "--console-ttl", help: "With repl: Expire console authority after this many milliseconds"},
+    {long: "--sandbox", help: "With repl: Use the reversible data sandbox (`--sandbox data`)", value: JetCLIFlagValue.Value},
+    {long: "--console-ttl", help: "With repl: Expire console authority after this many milliseconds", value: JetCLIFlagValue.Value},
     // E3 interactive scripting flags.
     {long: "--protocol", help: "With notebook: Use the bounded headless JSONL/script session"},
     {long: "--headless", help: "With notebook: Use the bounded headless session"},
-    {long: "--bind", help: "With notebook: Bind the local HTTP client to this address"},
-    {long: "--token", help: "With notebook/dev: Require a bearer token for the session"},
+    {long: "--bind", help: "With notebook: Bind the local HTTP client to this address", value: JetCLIFlagValue.Value},
+    {long: "--token", help: "With notebook/dev: Require a bearer token for the session", value: JetCLIFlagValue.Value, typed: "authority"},
     // E2-M16 flags.
     // `jet run` delegates project environment realization
     // to Jetpack unless the caller explicitly opts out.
     {long: "--no-prepare", help: "With run: Refuse Jetpack project environment preparation"},
-    {long: "-e", help: "With run: Run CODE as the body of the program's run function and show its last value, as jet -e CODE [<args>]; jet run - reads the program from standard input"},
+    {long: "-e", help: "With run: Run CODE as the body of the program's run function and show its last value, as jet -e CODE [<args>]; jet run - reads the program from standard input", value: JetCLIFlagValue.Value, typed: "operand"},
     {long: "--pure", help: "With eval: Reject code with side effects"},
-    {long: "--allow", help: "With run/build/jobs/repl/db/inspect gates: Allow comma-separated effect roots or leaves as --allow=RIGHTS"},
-    {long: "--allow-all", help: "With run/build/inspect gates: Allow every effect, as --allow with every right, so a run names none; --deny still wins"},
+    {long: "--allow", help: "With run/build/jobs/repl/db/inspect gates: Allow comma-separated effect roots or leaves as --allow=RIGHTS", value: JetCLIFlagValue.Repeated, typed: "authority"},
+    {long: "--allow-all", help: "With run/build/inspect gates: Allow every effect, as --allow with every right, so a run names none; --deny still wins", typed: "authority"},
     {long: "-A", help: "Short form of --allow-all"},
-    {long: "--deny", help: "With run/build/jobs/repl/db/inspect gates: Deny comma-separated effect roots or leaves as --deny=RIGHTS"},
+    {long: "--deny", help: "With run/build/jobs/repl/db/inspect gates: Deny comma-separated effect roots or leaves as --deny=RIGHTS", value: JetCLIFlagValue.Repeated},
     {long: "--offline", help: "With env/build/run/dev/test/cc/c++/inspect gates: Reuse only cached signed toolchain and package data"},
-    {long: "--fixtures", help: "With env/run/dev/test/cc/c++: Use an explicit fixture bundle"},
-    {long: "--project-root", help: "With cc/c++: Scope source paths to a project directory"},
-    {long: "--build-root", help: "With cc/c++: Scope output paths to a build directory"},
-    {long: "-c", help: "With cc/c++: Compile sources without linking"},
-    {long: "-o", help: "With cc/c++: Choose the output path"},
-    {long: "-MMD", help: "With cc/c++: Emit user-header dependency data"},
-    {long: "-MD", help: "With cc/c++: Emit dependency data"},
-    {long: "-MF", help: "With cc/c++: Choose the dependency-file path"},
-    {long: "-MT", help: "With cc/c++: Choose the dependency target"},
-    {long: "--sysroot", help: "With cc/c++: Reserved; target selects the pinned sysroot"},
-    {long: "-I", help: "With cc/c++: Add a project-relative include path"},
-    {long: "-D", help: "With cc/c++: Define a preprocessor symbol"},
-    {long: "-L", help: "With cc/c++: Add a project-relative library path"},
-    {long: "-l", help: "With cc/c++: Link a declared library"},
-    {long: "-std", help: "With cc/c++: Select the language standard"},
-    {long: "-dumpmachine", help: "With cc/c++: Print the pinned target triple"},
-    {long: "-print-sysroot", help: "With cc/c++: Print the pinned virtual sysroot"},
-    {long: "-dumpversion", help: "With cc/c++: Print the pinned compiler version"},
-    {long: "-v", help: "With cc/c++: Print pinned toolchain details or compile verbosely"},
+    {long: "--fixtures", help: "With env/run/dev/test/cc/c++: Use an explicit fixture bundle", value: JetCLIFlagValue.Value},
+    {long: "--project-root", help: "With cc/c++: Scope source paths to a project directory", value: JetCLIFlagValue.Value, typed: "operand"},
+    {long: "--build-root", help: "With cc/c++: Scope output paths to a build directory", value: JetCLIFlagValue.Value, typed: "operand"},
+    {long: "-c", help: "With cc/c++: Compile sources without linking", typed: "operand"},
+    {long: "-o", help: "With cc/c++: Choose the output path", value: JetCLIFlagValue.Value, typed: "operand"},
+    {long: "-MMD", help: "With cc/c++: Emit user-header dependency data", typed: "operand"},
+    {long: "-MD", help: "With cc/c++: Emit dependency data", typed: "operand"},
+    {long: "-MF", help: "With cc/c++: Choose the dependency-file path", value: JetCLIFlagValue.Value, typed: "operand"},
+    {long: "-MT", help: "With cc/c++: Choose the dependency target", value: JetCLIFlagValue.Value, typed: "operand"},
+    {long: "--sysroot", help: "With cc/c++: Reserved; target selects the pinned sysroot", value: JetCLIFlagValue.Value, typed: "operand"},
+    {long: "-I", help: "With cc/c++: Add a project-relative include path", value: JetCLIFlagValue.Repeated, typed: "operand"},
+    {long: "-D", help: "With cc/c++: Define a preprocessor symbol", value: JetCLIFlagValue.Repeated, typed: "operand"},
+    {long: "-L", help: "With cc/c++: Add a project-relative library path", value: JetCLIFlagValue.Repeated, typed: "operand"},
+    {long: "-l", help: "With cc/c++: Link a declared library", value: JetCLIFlagValue.Repeated, typed: "operand"},
+    {long: "-std", help: "With cc/c++: Select the language standard", value: JetCLIFlagValue.Value, typed: "operand"},
+    {long: "-dumpmachine", help: "With cc/c++: Print the pinned target triple", typed: "operand"},
+    {long: "-print-sysroot", help: "With cc/c++: Print the pinned virtual sysroot", typed: "operand"},
+    {long: "-dumpversion", help: "With cc/c++: Print the pinned compiler version", typed: "operand"},
+    {long: "-v", help: "With cc/c++: Print pinned toolchain details or compile verbosely", typed: "operand"},
     // One invocation gate surface covers every audited escape.
-    {long: "--gate", help: "With build/run/dev/jobs/check/inspect gates: Allow one audited gate as --gate name=allow"},
-    {long: "--target", help: "With build/run/dev/jobs/check/doctor/inspect/package/cc/c++/flash: Select a target (triple, board.<name>, or named database target)"},
-    {long: "--up", help: "With db migrate/new: Checked forward SQL"},
-    {long: "--sql", help: "With db migrate/new: Alias for checked forward SQL"},
-    {long: "--down", help: "With db migrate/new: Checked inverse SQL for rollback"},
-    {long: "--database", help: "With db migrate: Project-relative database path (receipt identity is redacted)"},
-    {long: "--risk", help: "With db migrate/new: Data-risk note shown before writes"},
-    {long: "--step", help: "With db migrate: Number of ordered migrations to apply or roll back"},
+    {long: "--gate", help: "With build/run/dev/jobs/check/inspect gates: Allow one audited gate as --gate name=allow", value: JetCLIFlagValue.Repeated, typed: "authority"},
+    {long: "--target", help: "With build/run/dev/jobs/check/doctor/inspect/package/cc/c++/flash: Select a target (triple, board.<name>, or named database target)", value: JetCLIFlagValue.Value},
+    {long: "--up", help: "With db migrate/new: Checked forward SQL", value: JetCLIFlagValue.Value, typed: "operand"},
+    {long: "--sql", help: "With db migrate/new: Alias for checked forward SQL", value: JetCLIFlagValue.Value, typed: "operand"},
+    {long: "--down", help: "With db migrate/new: Checked inverse SQL for rollback", value: JetCLIFlagValue.Value, typed: "operand"},
+    {long: "--database", help: "With db migrate: Project-relative database path (receipt identity is redacted)", value: JetCLIFlagValue.Value},
+    {long: "--risk", help: "With db migrate/new: Data-risk note shown before writes", value: JetCLIFlagValue.Value, typed: "operand"},
+    {long: "--step", help: "With db migrate: Number of ordered migrations to apply or roll back", value: JetCLIFlagValue.Value, typed: "operand"},
     // Bounded SQL console options share the canonical flag
     // registry with migration options and generated help/completions.
-    {long: "--format", help: "With db: Output format: human, text, json, jsonl, or csv"},
+    {long: "--format", help: "With db: Output format: human, text, json, jsonl, or csv", value: JetCLIFlagValue.Value},
     {long: "--csv", help: "With db: Select deterministic CSV output"},
     {long: "--jsonl", help: "With db: Emit one JSON value per row"},
     {long: "--machine", help: "With db: Select machine-readable output"},
     {long: "--human", help: "With db: Select human-readable output"},
     {long: "--no-color", help: "With db/run/test/help: Disable color in console output"},
     {long: "--force-color", help: "With db: Force color in console output"},
-    {long: "--query", help: "With db: Execute one SQL query"},
-    {long: "--script", help: "With db: Execute SQL from a script path"},
-    {long: "--table", help: "With db: Set an explicit table identity as NAME=PATH"},
-    {long: "--max-rows", help: "With db: Bound decoded input rows"},
-    {long: "--max-bytes", help: "With db: Bound source or script bytes"},
-    {long: "--max-output-bytes", help: "With db: Bound one rendered result"},
-    {long: "--image", help: "With flash: Firmware image to program"},
-    {long: "--audit", help: "With flash: Target audit JSON for the image"},
-    {long: "--adapter", help: "With flash: Flash adapter: probe-rs, openocd, or emulator"},
-    {long: "--package", help: "With package: Set the bundle package identifier"},
-    {long: "--name", help: "With package: Set the bundle executable name"},
-    {long: "--executable", help: "With package: Path to the executable to bundle"},
-    {long: "--icon", help: "With package: Path to the bundle icon"},
-    {long: "--icon-format", help: "With package: Icon format: png, icns, ico, or svg"},
-    {long: "--icon-size", help: "With package: Icon size in pixels"},
-    {long: "--publisher", help: "With package: Publisher metadata"},
-    {long: "--description", help: "With package: Application description metadata"},
-    {long: "--update-channel", help: "With package: Updater channel"},
-    {long: "--update-url", help: "With package: Updater URL"},
+    {long: "--query", help: "With db: Execute one SQL query", value: JetCLIFlagValue.Value, typed: "operand"},
+    {long: "--script", help: "With db: Execute SQL from a script path", value: JetCLIFlagValue.Value, typed: "operand"},
+    {long: "--table", help: "With db: Set an explicit table identity as NAME=PATH", value: JetCLIFlagValue.Repeated, typed: "operand"},
+    {long: "--max-rows", help: "With db: Bound decoded input rows", value: JetCLIFlagValue.Value},
+    {long: "--max-bytes", help: "With db: Bound source or script bytes", value: JetCLIFlagValue.Value},
+    {long: "--max-output-bytes", help: "With db: Bound one rendered result", value: JetCLIFlagValue.Value},
+    {long: "--image", help: "With flash: Firmware image to program", value: JetCLIFlagValue.Value, typed: "operand"},
+    {long: "--audit", help: "With flash: Target audit JSON for the image", value: JetCLIFlagValue.Value, typed: "operand"},
+    {long: "--adapter", help: "With flash: Flash adapter: probe-rs, openocd, or emulator", value: JetCLIFlagValue.Value},
+    {long: "--package", help: "With package: Set the bundle package identifier", value: JetCLIFlagValue.Value},
+    {long: "--name", help: "With package: Set the bundle executable name", value: JetCLIFlagValue.Value},
+    {long: "--executable", help: "With package: Path to the executable to bundle", value: JetCLIFlagValue.Value},
+    {long: "--icon", help: "With package: Path to the bundle icon", value: JetCLIFlagValue.Value},
+    {long: "--icon-format", help: "With package: Icon format: png, icns, ico, or svg", value: JetCLIFlagValue.Value},
+    {long: "--icon-size", help: "With package: Icon size in pixels", value: JetCLIFlagValue.Value},
+    {long: "--publisher", help: "With package: Publisher metadata", value: JetCLIFlagValue.Value},
+    {long: "--description", help: "With package: Application description metadata", value: JetCLIFlagValue.Value},
+    {long: "--update-channel", help: "With package: Updater channel", value: JetCLIFlagValue.Value},
+    {long: "--update-url", help: "With package: Updater URL", value: JetCLIFlagValue.Value},
     {long: "--game", help: "With package: Build a game bundle"},
-    {long: "--source", help: "With package: Project source or package root for a game bundle"},
-    {long: "--phase", help: "With package: Comma-separated game phases: build, cook, stage, package, export, deploy, run"},
-    {long: "--backend", help: "With package: Game build backend: aot"},
-    {long: "--renderer", help: "With package: Game renderer authority: headless or raylib"},
-    {long: "--cook", help: "With package: Alias for --cook-mode"},
-    {long: "--cook-mode", help: "With package: Asset cooking mode: fast, reproducible, or scripts-only"},
-    {long: "--export", help: "With package: Export phase or named export preset"},
-    {long: "--export-preset", help: "With package: Named export preset: default, store, or headless"},
+    {long: "--source", help: "With package: Project source or package root for a game bundle", value: JetCLIFlagValue.Value},
+    {long: "--phase", help: "With package: Comma-separated game phases: build, cook, stage, package, export, deploy, run", value: JetCLIFlagValue.Value},
+    {long: "--backend", help: "With package: Game build backend: aot", value: JetCLIFlagValue.Value},
+    {long: "--renderer", help: "With package: Game renderer authority: headless or raylib", value: JetCLIFlagValue.Value},
+    {long: "--cook", help: "With package: Alias for --cook-mode", value: JetCLIFlagValue.Value},
+    {long: "--cook-mode", help: "With package: Asset cooking mode: fast, reproducible, or scripts-only", value: JetCLIFlagValue.Value},
+    {long: "--export", help: "With package: Export phase or named export preset", value: JetCLIFlagValue.Optional},
+    {long: "--export-preset", help: "With package: Named export preset: default, store, or headless", value: JetCLIFlagValue.Value},
     {long: "--deploy", help: "With package: Include the deploy phase"},
-    {long: "--deploy-to", help: "With package: Explicit deployment destination"},
-    {long: "--crash-reporter", help: "With package: Crash reporter policy: off, on, or opt-in"},
-    {long: "--crash-consent", help: "With package: Crash reporter consent: not-requested, granted, or denied"},
-    {long: "--cancel", help: "With package: Cancel owned game staging"},
-    {long: "--resume", help: "With package: Resume an owned game stage"},
-    {long: "--clean", help: "With package: Force-clean owned game cache/staging"},
-    {long: "--force-clean", help: "With package: Alias for --clean"},
+    {long: "--deploy-to", help: "With package: Explicit deployment destination", value: JetCLIFlagValue.Value},
+    {long: "--crash-reporter", help: "With package: Crash reporter policy: off, on, or opt-in", value: JetCLIFlagValue.Value},
+    {long: "--crash-consent", help: "With package: Crash reporter consent: not-requested, granted, or denied", value: JetCLIFlagValue.Value},
+    {long: "--cancel", help: "With package: Cancel owned game staging", typed: "destructive"},
+    {long: "--resume", help: "With package: Resume an owned game stage", typed: "operand"},
+    {long: "--clean", help: "With package: Force-clean owned game cache/staging", typed: "destructive"},
+    {long: "--force-clean", help: "With package: Alias for --clean", typed: "destructive"},
     {long: "--scripts-only", help: "With package: Cook only script assets"},
     {long: "--run-now", help: "With package: Explicitly opt into the run phase"},
     {long: "--run", help: "With package: Include the run phase"},
     // `--env` selects one environment module; it never names a
     // preset and has no retired-spelling alias.
-    {long: "--env", help: "With env/run/dev/test: Select one declared env.<name> module"},
+    {long: "--env", help: "With env/run/dev/test: Select one declared env.<name> module", value: JetCLIFlagValue.Value},
     // `--preset` selects a named environment composition.
-    {long: "--preset", help: "With env/run/dev/test: Select one declared environment preset"},
+    {long: "--preset", help: "With env/run/dev/test: Select one declared environment preset", value: JetCLIFlagValue.Value},
     {long: "--explain-partition", help: "With build --target=web: Show which code becomes JavaScript or WebAssembly"},
     {long: "--no-capture", help: "With dev: Disable automatic replay capture for this session"},
-    {long: "--update", help: "With import: Merge generated Jet into an existing target"},
+    {long: "--update", help: "With import: Merge generated Jet into an existing target", typed: "destructive"},
     {long: "--coverage", help: "With test/inspect build: Show function or diagnostic coverage"},
     {long: "--times", help: "With inspect build: Show how long each step and target of the last build took"},
-    {long: "--verify", help: "With build: Rebuild and compare one indexed receipt artifact"},
+    {long: "--verify", help: "With build: Rebuild and compare one indexed receipt artifact", value: JetCLIFlagValue.Value, typed: "operand"},
     // The emit tiers (owner-directed 2026-10-15).
     {long: "--ast", help: "With emit: Print the parsed syntax tree"},
     {long: "--ir", help: "With emit: Print the slot IR the native backend builds"},
-    {long: "--fn", help: "With emit --ast/--ir: Print only the named function"},
+    {long: "--fn", help: "With emit --ast/--ir: Print only the named function", value: JetCLIFlagValue.Value, typed: "operand"},
     {long: "-u", help: "Short form of --update-snapshots"},
     // (ratified 2026-06-25): named optimization bundles.
     {long: "--release", help: "With build/run/dev/jobs/test/inspect: Optimize for release"},
-    {long: "--profile", help: "With build/run/dev/jobs/package/test/check: How hard to optimize: release, debug, or a named optimization bundle"},
+    {long: "--profile", help: "With build/run/dev/jobs/package/test/check: How hard to optimize: release, debug, or a named optimization bundle", value: JetCLIFlagValue.Value},
     // Command-line contribution to one typed package setting.
-    {long: "--set", help: "With build/run/dev/jobs/test/check: Set one declared package setting as key=value"},
+    {long: "--set", help: "With build/run/dev/jobs/test/check: Set one declared package setting as key=value", value: JetCLIFlagValue.Repeated},
     // The compiler's thread cap; never the program's own threads.
-    {long: "--threads", help: "With build/run/check/test/dev/inspect: Use at most N compiler threads (1 = one thread); without it jet picks a safe number of compiler threads"},
+    {long: "--threads", help: "With build/run/check/test/dev/inspect: Use at most N compiler threads (1 = one thread); without it jet picks a safe number of compiler threads", value: JetCLIFlagValue.Value},
     // The compiler's streaming trace (owner-directed 2026-10-16), the flag
     // form of JET_TRACE_FILE.
-    {long: "--trace", help: "With build/run/check/test/emit: Stream the compiler's phases and progress to stderr, or to FILE with --trace=FILE"},
-    {long: "--builder", help: "With build/jobs: Select a previously bound remote builder"},
+    {long: "--trace", help: "With build/run/check/test/emit: Stream the compiler's phases and progress to stderr, or to FILE with --trace=FILE", value: JetCLIFlagValue.Optional},
+    {long: "--builder", help: "With build/jobs: Select a previously bound remote builder", value: JetCLIFlagValue.Value},
     // (c134 Phase 6): accessibility is an opt-in lint category.
     {long: "--a11y", help: "With lint: Check roles, labels, and other accessibility basics"},
     {long: "--complexity", help: "With lint: Report per-function cognitive complexity"},
     {long: "--cost", help: "With lint/explain: Show typed hidden-copy and fallback costs"},
-    {long: "--max", help: "With lint --complexity: Fail when a function exceeds this score"},
-    {long: "--scope", help: "With inspect: Choose a ledger or trust scope"},
+    {long: "--max", help: "With lint --complexity: Fail when a function exceeds this score", value: JetCLIFlagValue.Value},
+    {long: "--scope", help: "With inspect: Choose a ledger or trust scope", value: JetCLIFlagValue.Value},
     {long: "--core", help: "With inspect structure: Show the canonical core module export facts"},
     {long: "--show-default", help: "With run/build/dev/test: Use and report the stock default"},
     // Native cross-browser test controls.
-    {long: "--browser", help: "With test/db: Select browser engines for tests or serve a loopback database inspector"},
-    {long: "--browser-scaffold", help: "With test: Create an isolated browser-test project as --browser-scaffold=<name>"},
-    {long: "--record", help: "With run/dev/test/debug: Record a named replay as --record=<name>"},
-    {long: "--replay", help: "With inspect/debug: Consume a named replay artifact"},
-    {long: "--lens", help: "With prove: Project the human report by an exact evidence facet"},
+    {long: "--browser", help: "With test/db: Select browser engines for tests or serve a loopback database inspector", value: JetCLIFlagValue.Optional},
+    {long: "--browser-scaffold", help: "With test: Create an isolated browser-test project as --browser-scaffold=<name>", value: JetCLIFlagValue.Value, typed: "operand"},
+    {long: "--record", help: "With run/dev/test/debug: Record a named replay as --record=<name>", value: JetCLIFlagValue.Value, typed: "operand"},
+    {long: "--replay", help: "With inspect/debug: Consume a named replay artifact", value: JetCLIFlagValue.Value, typed: "operand"},
+    {long: "--lens", help: "With prove: Project the human report by an exact evidence facet", value: JetCLIFlagValue.Value},
     // #1659 criterion 1 (round 2): see the block above --message for the
     // other 7 formerly usage-string-only flags.
-    {long: "--facts", help: "With expand: Project inline, memory, web, effects, layout, derive, templates, or callable-signature facts --facts=<lens>"},
-    {long: "--annotations", help: "With budget: CI annotations auto, none, or github"},
-    {long: "--baseline", help: "With budget update: Selected baseline name"},
-    {long: "--bootstrap", help: "With budget update: Create absent or stale baseline history"},
-    {long: "--accept-regression", help: "With budget update: Explicitly accept a regression"},
-    {long: "--reason", help: "With exceptional budget update: Checked-in reason"},
-    {long: "--yes", help: "With budget update: Apply a valid non-interactive plan"},
+    {long: "--facts", help: "With expand: Project inline, memory, web, effects, layout, derive, templates, or callable-signature facts --facts=<lens>", value: JetCLIFlagValue.Value},
+    {long: "--annotations", help: "With budget: CI annotations auto, none, or github", value: JetCLIFlagValue.Value},
+    {long: "--baseline", help: "With budget update: Selected baseline name", value: JetCLIFlagValue.Value},
+    {long: "--bootstrap", help: "With budget update: Create absent or stale baseline history", typed: "destructive"},
+    {long: "--accept-regression", help: "With budget update: Explicitly accept a regression", typed: "destructive"},
+    {long: "--reason", help: "With exceptional budget update: Checked-in reason", value: JetCLIFlagValue.Value, typed: "operand"},
+    {long: "--yes", help: "With budget update: Apply a valid non-interactive plan", typed: "destructive"},
     {long: "-y", help: "Short form of --yes"},
     // A Compiler/Prelude source checked as the compiler embeds it (LaneCheck).
     {long: "--prelude", help: "With check: Check a Compiler/Prelude file as the compiler embeds it"},

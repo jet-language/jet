@@ -10955,6 +10955,23 @@ UnhandledSourceExtension: struct {
     }
 }
 
+FlagNotASetting: struct {
+    key: String
+    flag: String
+    source: String
+    reason: String
+
+    impl Diagnostic {
+        code: "E2117"
+        stage: [.Jet]
+        meaning: "A settings layer names a flag that is typed each time it is meant: one that is destructive, names the operand of one run, or gives permissions (#6606)"
+        detail: true
+        what: fn(self) -> String { "`{self.key}` in {self.source} would remember `{self.flag}`, which you type each time you mean it." }
+        why: fn(self) -> String { "A settings file applies a flag to every run, but `{self.flag}` is typed each time: {self.reason}." }
+        fix: fn(self) -> String { "Remove `{self.key}` from {self.source}, and type `{self.flag}` on the command line of the run that needs it." }
+    }
+}
+
 RetiredDevPrescan: struct {
     impl Diagnostic {
         code: "E2201"
