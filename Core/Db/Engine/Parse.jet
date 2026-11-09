@@ -402,17 +402,17 @@ actions_ddl: fn<B: SQLBuilder>(b: &B, a: &ast.AST, s: [SQLStackEntry], m: Int, r
         }
         // cmd ::= SAVEPOINT nm
         10 -> {
-            b.savepoint(a, ast.SAVEPOINT_BEGIN, st(s, m))
+            b.savepoint(a, base.SAVEPOINT_BEGIN, st(s, m))
             keep
         }
         // cmd ::= RELEASE savepoint_opt nm
         11 -> {
-            b.savepoint(a, ast.SAVEPOINT_RELEASE, st(s, m))
+            b.savepoint(a, base.SAVEPOINT_RELEASE, st(s, m))
             keep
         }
         // cmd ::= ROLLBACK trans_opt TO savepoint_opt nm
         12 -> {
-            b.savepoint(a, ast.SAVEPOINT_ROLLBACK, st(s, m))
+            b.savepoint(a, base.SAVEPOINT_ROLLBACK, st(s, m))
             keep
         }
         // create_table ::= createkw temp TABLE ifnotexists nm dbnm
