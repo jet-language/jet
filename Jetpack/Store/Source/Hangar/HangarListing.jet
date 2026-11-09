@@ -322,12 +322,16 @@ store_short_entry_id: fn(name: String, version: String, fingerprint: String) -> 
 // is content-addressed use the immutable output digest; legacy records retain
 // the existing local output-path identity until they are rewritten.
 store_expected_entry_id: fn(entry: StoreEntry) -> String Never! {
-    content_addressed: if ProducerRecord.decode(entry.producer_record) == {
+    store_expected_record_id(entry.name, entry.version, entry.reference, entry.out, entry.producer_record, entry.envelope.output_hash)
+}
+
+// `store_expected_entry_id` over a record's fields, for records not yet
+// materialized as an entry (an archived package record).
+store_expected_record_id: fn(name: String, version: String, reference: String, out: String, producer_record: String, output_hash: String) -> String Never! {
+    content_addressed: if ProducerRecord.decode(producer_record) == {
         .Ok(producer) -> producer.provider == "nix" || producer.provider == "jetpackage"
         .Err(_) -> false
     }
-    if content_addressed && entry.envelope.output_hash != "" {
-        return store_content_addressed_entry_id(entry.name, entry.version, entry.reference, entry.envelope.output_hash)
-    }
-    store_entry_id(entry.name, entry.version, entry.reference, entry.out)
+    if content_addressed && output_hash != "" -> return store_content_addressed_entry_id(name, version, reference, output_hash)
+    store_entry_id(name, version, reference, out)
 }
