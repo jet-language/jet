@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 98275,
+    "rev": 98300,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -193702,312 +193702,6 @@
       "created": "2026-10-05T01:27:34.180Z"
     },
     {
-      "id": "b0vhuudo",
-      "text": "Language review 3.4 (proposal): One way to generate code",
-      "note": "Typed templates of ordinary items. Never strings, never rewriting code the\nuser wrote. `derive`, marker bodies and the build function's generation become one mechanism.",
-      "level": null,
-      "tags": [
-        "language-review",
-        "proposal"
-      ],
-      "status": "open",
-      "created": "2026-11-09T23:06:38.523Z"
-    },
-    {
-      "id": "b0uq1lpa",
-      "text": "Language review 3.5 (proposal): Build-time code obeys the ordinary effect rules",
-      "note": "Pure by default. Pinned inputs (`embed_file`,\n`fetch(url, sha256:)`) are recorded in the lock. Anything else needs a grant from the package, the same grant\nmechanism run time uses. `#Impure`, the gate flag and the tier table go.\n\nNote: Review correction: dropping the host gates for build-time effects conflicts with the ratified D-META-LADDER1.",
-      "level": null,
-      "tags": [
-        "language-review",
-        "proposal"
-      ],
-      "status": "open",
-      "created": "2026-11-09T23:06:40.653Z"
-    },
-    {
-      "id": "b0sxle4p",
-      "text": "Language review 3.6 [near] (proposal): Literal hooks, one mechanism for every embedded language",
-      "note": "SQL, regex, CSS, HTML, format strings and\npaths all need the same thing: text that is checked while building and becomes a typed value. Jet already has\nchecked text types and a build-time literal hook. I would make that the single way to embed a language: a type\ndeclares a build-time parser for its literal, written in ordinary Jet. Then CSS is a library, not a language\nfeature, and the CSS ballot that failed review today is replaced by something general. (From the spec; not run.)",
-      "level": null,
-      "tags": [
-        "language-review",
-        "near",
-        "proposal"
-      ],
-      "status": "open",
-      "created": "2026-11-09T23:06:42.722Z"
-    },
-    {
-      "id": "b0ojitgr",
-      "text": "Language review 3.7 (proposal): The fence `<: … :>`",
-      "note": "It is the least guessable form in the language. I have not studied it. With\n`#loop` and `#{…}` in place I would check whether it is still needed, and cut it if not.",
-      "level": null,
-      "tags": [
-        "language-review",
-        "proposal"
-      ],
-      "status": "open",
-      "created": "2026-11-09T23:06:44.633Z"
-    },
-    {
-      "id": "b0l60gam",
-      "text": "Language review 3.8 (proposal): What I would not add",
-      "note": "Types as ordinary values (Zig's way: it removes generics but makes signatures hard\nto read); string macros; anything that rewrites existing code. Generics with trait bounds, plus `#info` and\ntemplates, cover the ground with code a reader can follow.\n\nNote: Superseded by the owner's answer on D-PRIM-TYPEKEY1 (q48ue1id): types as values with type switches are wanted; that ballot is being rewritten to recommend them.",
-      "level": null,
-      "tags": [
-        "language-review",
-        "proposal"
-      ],
-      "status": "open",
-      "created": "2026-11-09T23:06:46.606Z"
-    },
-    {
-      "id": "b0beij3k",
-      "text": "Language review 4.1 [near] (proposal): Number literals should adapt, the way Go's constants do",
-      "note": "Checked: Jet's number defaults are right\nfor beginners. `Int` does not overflow (9223372036854775807 + 1 prints 9223372036854775808), `7 / 2` is 3.5,\n`0.1 + 0.2 == 0.3` is true, and `\"héllo\".len()` is 5.\n\nThe friction, also checked: a literal adapts to what it is passed to, but a named one does not.\n\n```jet\nhalf: fn(x: Float) -> Float { x * 0.5 }\n\nprint(half(3.0))    // works: the literal becomes a Float\ny: 2.5\nprint(half(y))      // error E0112: y is a Decimal\n```\n\nNaming a number should not change what it is. Proposal:\n- An immutable binding of a number literal (`y: 2.5`, `GRAVITY: 9.81`) has no fixed type until it is used, and\n  each use adapts, exactly as the literal would.\n- A mutable one (`speed := 2.5`) takes its type from how the function uses it, and falls back to Decimal or Int\n  only when nothing decides.\n\nThis matters most for games and numeric code, where almost every number is a Float. Cost: a little more\ninference, and the error message must say which use fixed the type.",
-      "level": null,
-      "tags": [
-        "language-review",
-        "near",
-        "proposal"
-      ],
-      "status": "open",
-      "created": "2026-11-09T23:06:48.192Z"
-    },
-    {
-      "id": "b0zzascf",
-      "text": "Language review 4.2 (proposal): Ranges are right",
-      "note": "`..` is inclusive and `..<` stops short. Checked: `loop i in 0..xs.len()` is refused\nwith a message that offers three correct forms. Keep.",
-      "level": null,
-      "tags": [
-        "language-review",
-        "proposal"
-      ],
-      "status": "open",
-      "created": "2026-11-09T23:06:49.678Z"
-    },
-    {
-      "id": "b0vwx2z3",
-      "text": "Language review 4.3 (proposal): Two small defects, found by running the spec's examples",
-      "note": "Both are now a criterion on #6281.\n- The spec's three-part loop, `loop i := 0, i < 3, i + 1 -> print(i)`, does not parse.\n- The E0112 fix text says `Float{3.4}` whatever the number was.",
-      "level": null,
-      "tags": [
-        "language-review",
-        "proposal"
-      ],
-      "status": "open",
-      "created": "2026-11-09T23:06:51.609Z"
-    },
-    {
-      "id": "b0rie26v",
-      "text": "Language review 4.4 (proposal): Teach three ways to hold changing state, not seven",
-      "note": "After your `Shared` ruling: a plain value (the\ndefault), `Shared{…}` (across tasks), and `Pool` with `ID` (graphs). `Cell`, `Atomic` and guards stay for\nexperts and leave the beginner path. This is documentation, not a language change.",
-      "level": null,
-      "tags": [
-        "language-review",
-        "proposal"
-      ],
-      "status": "open",
-      "created": "2026-11-09T23:06:53.519Z"
-    },
-    {
-      "id": "b0hlv8jv",
-      "text": "Language review 4.5 (proposal): One question I could not answer by reading",
-      "note": "Is an `Int` field in a struct a machine word or a big\nnumber, and what does a game developer write to get a plain 32-bit or 64-bit field? If the answer is \"write\n`I32`\", that is fine; it just needs to be the first thing the game guide says.",
-      "level": null,
-      "tags": [
-        "language-review",
-        "proposal"
-      ],
-      "status": "open",
-      "created": "2026-11-09T23:06:55.097Z"
-    },
-    {
-      "id": "b080iz83",
-      "text": "Language review 5.1 [near] (proposal): Core is one connected ball",
-      "note": "Evidence from today: `use tasks: core.tasks` loads 64 Core modules\n(2.7 MB of source). The chain: the time module's encode and decode implementations are always live; they load\nencoding; that loads files, math and memory; then system, process, text, testing and crypto follow. Two rules\nfix the cause:\n- A trait implementation is loaded only when the program uses both the type and the trait.\n- Core gets layers, and a lower layer may not import a higher one: Prelude; then data (text, math, collections,\n  time); then system (files, net, process); then services (HTTP, database, UI). A check enforces it.",
-      "level": null,
-      "tags": [
-        "language-review",
-        "near",
-        "proposal"
-      ],
-      "status": "open",
-      "created": "2026-11-09T23:06:56.694Z"
-    },
-    {
-      "id": "b0tvx2ph",
-      "text": "Language review 5.2 [near] (proposal): A public API should not change silently",
-      "note": "Jet infers effects and errors from function bodies. That\nis right inside a package. At a package's public edge it means an edit to a body can change the public\nsignature with no one noticing. Core already has a surface ledger with a check. Proposal: every package gets\none. `jet check` compares the public surface (types, effects, errors, markers) with the committed ledger; a\ndifference is an error until the ledger is updated; and the size of the difference gives the version bump, so\nthe version number is computed, not chosen.",
-      "level": null,
-      "tags": [
-        "language-review",
-        "near",
-        "proposal"
-      ],
-      "status": "open",
-      "created": "2026-11-09T23:06:58.017Z"
-    },
-    {
-      "id": "b0io75jn",
-      "text": "Language review 5.3 [near] (proposal): One strictness dial per package",
-      "note": "Script, app, library, hardened. Each step turns on more: a\nlibrary must write its public types, effects and errors; hardened forbids panics and unchecked operations. Jet\nhas the pieces as separate policies and profiles (I have not checked how many). One named dial is easier to\nteach, and it is the \"ladder, not cliff\" pillar applied to rigor.",
-      "level": null,
-      "tags": [
-        "language-review",
-        "near",
-        "proposal"
-      ],
-      "status": "open",
-      "created": "2026-11-09T23:06:59.515Z"
-    },
-    {
-      "id": "b0ah3hk3",
-      "text": "Language review 5.4 [near] (proposal): The compiler runs its own migrations. Do this first",
-      "note": "Today's rulings mean rewriting thousands of\nsites: 455 signatures, every `shared`, every `comptime` and `$`. The closed-set `else` rule alone touched 4,520\nsites in 783 files, with a tool one agent wrote for that job. Rule: every breaking change to the language\nregisters its rewrite in `jet fix`, so one command updates any code base, the repository's and a user's.\nLibraries get the same power for their own APIs: `#Deprecated(replace: …)` with a typed rewrite, so upgrading a\npackage updates your call sites. Breaking changes that fix themselves are what make it affordable to keep\nimproving the language, before and after v1.",
-      "level": null,
-      "tags": [
-        "language-review",
-        "near",
-        "proposal"
-      ],
-      "status": "open",
-      "created": "2026-11-09T23:07:01.197Z"
-    },
-    {
-      "id": "b060hquy",
-      "text": "Language review 5.5 (proposal): The library test",
-      "note": "For every mechanism, ask: could Core's own use of it be written by a library? Markers,\neffects, targets, literal hooks and allocators should all pass. Where the compiler still knows a Core type by\nname, that is a defect. One ballot on this is held for the rework (D-TYPE-FACTS1).",
-      "level": null,
-      "tags": [
-        "language-review",
-        "proposal"
-      ],
-      "status": "open",
-      "created": "2026-11-09T23:07:03.104Z"
-    },
-    {
-      "id": "b0w13nfx",
-      "text": "Language review 5.6 [near] (proposal): One verb for \"tell me about my program\"",
-      "note": "There are `jet explain`, `jet inspect`, `jet audit` and\n`jet expand`, each showing compiler knowledge. I would fold them into one family, `jet explain <topic>`:\neffects, copies, checks, the expansion of a marker, the layout of a type. (Seen in the spec; I have not counted\nthe flags.)",
-      "level": null,
-      "tags": [
-        "language-review",
-        "near",
-        "proposal"
-      ],
-      "status": "open",
-      "created": "2026-11-09T23:07:04.677Z"
-    },
-    {
-      "id": "b0i3pj8e",
-      "text": "Language review 6.1 (proposal): What exists",
-      "note": "The spec lists foreign interfaces for 22 languages, from C, C++, Rust, Python, JavaScript\nand Go to COBOL, Ada and COM, plus schema binders. I have not tested their depth.",
-      "level": null,
-      "tags": [
-        "language-review",
-        "proposal"
-      ],
-      "status": "open",
-      "created": "2026-11-09T23:07:06.011Z"
-    },
-    {
-      "id": "b03b0er8",
-      "text": "Language review 6.2 [near] (proposal): The missing direction: Jet called from other languages",
-      "note": "I did not find it in the spec's FFI\nsection. It is the adoption wedge: nobody rewrites an application, but many will write one new module in a\nbetter language. Proposal: `jet build --lib` produces a C-callable library and its header, and from the same\npublic surface a Python wheel and an npm package (JVM and .NET later). Types map through the existing binders\nrun in reverse. The library's effects become the permissions its documentation states. Your module-level ruling\nhelps here: with no code running before `run`, loading a Jet library has no hidden start-up step.",
-      "level": null,
-      "tags": [
-        "language-review",
-        "near",
-        "proposal"
-      ],
-      "status": "open",
-      "created": "2026-11-09T23:07:07.293Z"
-    },
-    {
-      "id": "b0p7dwwj",
-      "text": "Language review 6.3 (proposal): The adoption ladder for an existing code base",
-      "note": "1. Use `jet` around it: as the script, build and test tool (`jet run x.c` already works).\n2. Call the existing code from Jet (exists).\n3. Write one new module in Jet and call it from the host (6.2).\n4. Move files over one at a time. **[N to F]** `jet port file.c` writes the Jet version, with `#Unsafe` blocks\n   wherever it could not prove safety, and generates the tests that show the two behave the same. The repository\n   already built this proof for itself: the paired-tool entries with identical-output cases. That mechanism is a\n   product feature, not just a house rule.",
-      "level": null,
-      "tags": [
-        "language-review",
-        "proposal"
-      ],
-      "status": "open",
-      "created": "2026-11-09T23:07:08.618Z"
-    },
-    {
-      "id": "b0er2ueo",
-      "text": "Language review 6.4 (proposal): Foreign code under the effect system",
-      "note": "Today a foreign call is one coarse effect. With arguments (O8) it\ncan name the library: `FFI.C(\"sqlite3\")`. **[F]** Further out: run an untrusted foreign library compiled to\nWebAssembly inside the process, holding only the effects it was granted.",
-      "level": null,
-      "tags": [
-        "language-review",
-        "proposal"
-      ],
-      "status": "open",
-      "created": "2026-11-09T23:07:10.162Z"
-    },
-    {
-      "id": "b083bd30",
-      "text": "Language review 6.5 [near-then-far] (proposal): Zero-copy data exchange",
-      "note": "For data and machine-learning work the entry point is a Jet function\ncalled from a Python notebook. That needs Jet's views to map onto Arrow and the Python buffer protocol without\ncopying.",
-      "level": null,
-      "tags": [
-        "language-review",
-        "near-then-far",
-        "proposal"
-      ],
-      "status": "open",
-      "created": "2026-11-09T23:07:11.936Z"
-    },
-    {
-      "id": "b02rxdyn",
-      "text": "Language review 6.6 (proposal): Out of scope for now",
-      "note": "a stable binary interface between Jet libraries. Source packages are enough\nuntil the language stops changing.",
-      "level": null,
-      "tags": [
-        "language-review",
-        "proposal"
-      ],
-      "status": "open",
-      "created": "2026-11-09T23:07:13.792Z"
-    },
-    {
-      "id": "b0z0pnfk",
-      "text": "Language review 7.1: Domain: Scripts and command-line tools",
-      "note": "What decides adoption: Starts instantly; one file; no setup.\nJet's asset today: `jet run`, effects that announce themselves.\nClose first: A file of statements (decided); adapting numbers (4.1); `jet eval` (O6); start-up time (the gauntlet's job).",
-      "level": null,
-      "tags": [
-        "language-review"
-      ],
-      "status": "open",
-      "created": "2026-11-09T23:07:15.741Z"
-    },
-    {
-      "id": "b0x8qcqe",
-      "text": "Language review 7.2: Domain: Back-end services",
-      "note": "What decides adoption: Safe dependencies; database; deploys.\nJet's asset today: Effects and grants; tasks; HTTP, TLS and SQL written in Jet.\nClose first: Queries checked while building (8.7); tracing from effects with no code (8.5); least-privilege dependencies (8.8).",
-      "level": null,
-      "tags": [
-        "language-review"
-      ],
-      "status": "open",
-      "created": "2026-11-09T23:07:17.811Z"
-    },
-    {
-      "id": "b0ka099v",
-      "text": "Language review 7.3: Domain: Web front end",
-      "note": "What decides adoption: Small downloads; fast edit-and-see loop.\nJet's asset today: Web, Reactive and Ui modules; `jet dev`.\nClose first: CSS and HTML as checked text (3.6).",
-      "level": null,
-      "tags": [
-        "language-review"
-      ],
-      "status": "open",
-      "created": "2026-11-09T23:07:19.204Z"
-    },
-    {
       "id": "b08au598",
       "text": "Language review 7.4: Domain: Games",
       "note": "What decides adoption: Globals; Floats; frame memory; hot reload.\nJet's asset today: Value semantics; `Pool` and `ID`; `#Persist`.\nClose first: Plain module variables (O1); adapting numbers (4.1); arena blocks (approved); layout markers (8.9); `#System` lists from marker queries (3.2).",
@@ -194242,6 +193936,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-09T23:11:26.082Z",
+      "by": "Main",
+      "action": "idea.delete",
+      "ref": "b0ka099v",
+      "note": ""
+    },
+    {
+      "at": "2026-11-09T23:11:24.165Z",
+      "by": "Main",
+      "action": "idea.delete",
+      "ref": "b0x8qcqe",
+      "note": ""
+    },
+    {
+      "at": "2026-11-09T23:11:22.623Z",
+      "by": "Main",
+      "action": "idea.delete",
+      "ref": "b0z0pnfk",
+      "note": ""
+    },
+    {
+      "at": "2026-11-09T23:11:21.148Z",
+      "by": "Main",
+      "action": "idea.delete",
+      "ref": "b02rxdyn",
+      "note": ""
+    },
+    {
+      "at": "2026-11-09T23:11:19.369Z",
+      "by": "Main",
+      "action": "idea.delete",
+      "ref": "b083bd30",
+      "note": ""
+    },
+    {
+      "at": "2026-11-09T23:11:17.917Z",
+      "by": "Main",
+      "action": "idea.delete",
+      "ref": "b0er2ueo",
+      "note": ""
+    },
+    {
+      "at": "2026-11-09T23:11:16.178Z",
+      "by": "Main",
+      "action": "idea.delete",
+      "ref": "b0p7dwwj",
+      "note": ""
+    },
+    {
+      "at": "2026-11-09T23:11:14.324Z",
+      "by": "Main",
+      "action": "idea.delete",
+      "ref": "b03b0er8",
+      "note": ""
+    },
+    {
+      "at": "2026-11-09T23:11:12.452Z",
+      "by": "Main",
+      "action": "idea.delete",
+      "ref": "b0i3pj8e",
+      "note": ""
+    },
+    {
+      "at": "2026-11-09T23:11:10.536Z",
+      "by": "Main",
+      "action": "idea.delete",
+      "ref": "b0w13nfx",
+      "note": ""
+    },
+    {
+      "at": "2026-11-09T23:11:08.905Z",
+      "by": "Main",
+      "action": "idea.delete",
+      "ref": "b060hquy",
+      "note": ""
+    },
+    {
+      "at": "2026-11-09T23:11:07.489Z",
+      "by": "Main",
+      "action": "idea.delete",
+      "ref": "b0ah3hk3",
+      "note": ""
+    },
+    {
+      "at": "2026-11-09T23:11:06.013Z",
+      "by": "Main",
+      "action": "idea.delete",
+      "ref": "b0io75jn",
+      "note": ""
+    },
+    {
+      "at": "2026-11-09T23:11:04.575Z",
+      "by": "Main",
+      "action": "idea.delete",
+      "ref": "b0tvx2ph",
+      "note": ""
+    },
+    {
+      "at": "2026-11-09T23:11:03.074Z",
+      "by": "Main",
+      "action": "idea.delete",
+      "ref": "b080iz83",
+      "note": ""
+    },
+    {
+      "at": "2026-11-09T23:11:01.594Z",
+      "by": "Main",
+      "action": "idea.delete",
+      "ref": "b0hlv8jv",
+      "note": ""
+    },
+    {
+      "at": "2026-11-09T23:11:00.238Z",
+      "by": "Main",
+      "action": "idea.delete",
+      "ref": "b0rie26v",
+      "note": ""
+    },
+    {
+      "at": "2026-11-09T23:10:58.232Z",
+      "by": "Main",
+      "action": "idea.delete",
+      "ref": "b0vwx2z3",
+      "note": ""
+    },
+    {
+      "at": "2026-11-09T23:10:56.169Z",
+      "by": "Main",
+      "action": "idea.delete",
+      "ref": "b0zzascf",
+      "note": ""
+    },
+    {
+      "at": "2026-11-09T23:10:54.324Z",
+      "by": "Main",
+      "action": "idea.delete",
+      "ref": "b0beij3k",
+      "note": ""
+    },
+    {
+      "at": "2026-11-09T23:10:52.440Z",
+      "by": "Main",
+      "action": "idea.delete",
+      "ref": "b0l60gam",
+      "note": ""
+    },
+    {
+      "at": "2026-11-09T23:10:50.886Z",
+      "by": "Main",
+      "action": "idea.delete",
+      "ref": "b0ojitgr",
+      "note": ""
+    },
+    {
+      "at": "2026-11-09T23:10:49.562Z",
+      "by": "Main",
+      "action": "idea.delete",
+      "ref": "b0sxle4p",
+      "note": ""
+    },
+    {
+      "at": "2026-11-09T23:10:48.193Z",
+      "by": "Main",
+      "action": "idea.delete",
+      "ref": "b0uq1lpa",
+      "note": ""
+    },
+    {
+      "at": "2026-11-09T23:10:46.387Z",
+      "by": "Main",
+      "action": "idea.delete",
+      "ref": "b0vhuudo",
+      "note": ""
+    },
     {
       "at": "2026-11-09T23:10:43.892Z",
       "by": "Main",
