@@ -326,8 +326,9 @@ SemaEffectNode: struct {
     instantiations: [SemaEffectInstantiation]{[SemaEffectInstantiation]{}}
     instance_reaches: [SemaEffectInstanceReach]{[SemaEffectInstanceReach]{}}
     // The library effects its declared row names, each with the kernel
-    // effects it lists (E0756).
+    // effects it lists (E0756), and those its row denies (E0749).
     library_rows: [SemaLibraryEffectName]{[SemaLibraryEffectName]{}}
+    library_denials: [SemaLibraryEffectDenial]{[SemaLibraryEffectDenial]{}}
 }
 
 sema_effect_source_from_function: fn(func: Func, module_identity: String) -> SemaEffectFunctionSource Never! {
@@ -1524,17 +1525,18 @@ sema_effect_node_from_source: fn(function: FnBody, sources: [SemaEffectFunctionS
                 if pieces.len() > 1 -> raw = pieces[1]
             }
             effect_name: sema_effect_parse_name(raw) ?? {
-                // A library effect admits the kernel effects it lists.
-                kernel: sema_library_effect_kernel(library, raw) ?? {
+                // A library effect admits the kernel effects it lists; a
+                // denial of it is checked over the library effects reached.
+                library_name: sema_library_effect_find(library, raw) ?? {
                     diagnostics.push(sema_effect_unknown(raw, entry.span))
                     next
                 }
                 if prohibited {
-                    diagnostics.push(sema_library_effect_denied_diagnostic(raw, kernel, entry.span))
+                    node.library_denials.push(SemaLibraryEffectDenial{name: library_name, span: entry.span})
                     next
                 }
-                loop listed in kernel -> sema_effect_set_add(node.declared, listed)
-                node.library_rows.push(SemaLibraryEffectName{written: raw, kernel: kernel})
+                loop listed in library_name.kernel -> sema_effect_set_add(node.declared, listed)
+                node.library_rows.push(library_name)
                 next
             }
             if !prohibited && sema_effect_root(effect_name) == "Panic" {
@@ -3396,6 +3398,7 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
         sema_effect_publish_diagnostics(diagnostics, inputs[module_index].source_segments, site_diagnostics)
     }
     secret_reach: sema_effect_secret_reach(nodes, callers)
+    library_reach: sema_library_effect_reach(nodes, callers)
     dispatch_reach: sema_effect_dispatch_reach(nodes, callers)
     dispatch_seen := (loop _ in nodes -> false)
     pure_nodes := [Int]{}
@@ -3422,6 +3425,7 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
             // Keep all diagnostics; the caller receives one complete graph
             // result instead of a partially updated function list.
         }
+        sema_library_effect_check_denials(nodes[node_index], library_reach[node_index], function_diagnostics)
         if pure_reached.len() > 0 {
             pure_nodes.push(node_index)
             pure_rows.push(pure_reached)

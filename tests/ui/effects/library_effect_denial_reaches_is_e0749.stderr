@@ -1,0 +1,10 @@
+Error [jet.ProhibitedEffectReached]: `show` reaches the library effect `Disk.Read`, which it prohibits with `-[!Disk]>`
+  --> tests/ui/effects/library_effect_denial_reaches_is_e0749.jet:15:27
+    |
+ 15 | show: fn(path: String) -[!Disk]> String {
+    |                           ^^^^
+ Why: A `-[!Disk]>` row means the function and every callee it can reach must not use `Disk`; a function uses a library effect when its row names the effect or one of its cases
+ Fix: Remove the call that introduces `Disk.Read`, or drop the `-[!Disk]>` prohibition
+ Denial: invocation
+ Call chain: show
+More: jet-lang.dev/e/E0749

@@ -2,8 +2,11 @@
 // above it naming the kernel effects it relies on. Its rows check inside its
 // package (bare, cases too) and outside it (qualified by the import); a bare
 // name outside its package is unknown (E0119); a denial of a kernel effect it
-// relies on blocks its work (E0749); a row that names it may use only what it
-// lists (E0756); and neither its list nor a row may deny by name (E0757).
+// relies on blocks its work (E0749); a denial of the library effect blocks
+// every call that reaches a row naming it or a case of it, and a denied case
+// blocks that case and the whole effect but not its other cases (E0749); a
+// row that names it may use only what it lists (E0756); and its
+// list holds no `!` entry (E0757).
 use {
     jet_driver.[JetDriverCompileMode, jet_driver_present_diagnostics]
     jet_cli.[jet_cli_compile_file]
@@ -49,6 +52,9 @@ library_effect_fixture_accept: fn(file: String) {
     library_effect_fixture_reject("{fixture_root}/LibraryEffectKernelDenied.fixture/LibraryEffectKernelDenied.jet", "E0749")
     library_effect_fixture_reject("{ui_root}/library_effect_reach_outside_is_e0756.jet", "E0756")
     library_effect_fixture_reject("{ui_root}/library_effect_list_denial_is_e0757.jet", "E0757")
-    library_effect_fixture_reject("{fixture_root}/LibraryEffectNameDenied.fixture/LibraryEffectNameDenied.jet", "E0757")
+    library_effect_fixture_reject("{ui_root}/library_effect_denial_reaches_is_e0749.jet", "E0749")
+    library_effect_fixture_reject("{ui_root}/library_effect_case_denial_whole_is_e0749.jet", "E0749")
+    library_effect_fixture_reject("{fixture_root}/LibraryEffectNameDenied.fixture/LibraryEffectNameDenied.jet", "E0749")
+    library_effect_fixture_accept("{fixture_root}/LibraryEffectCaseDenied.fixture/LibraryEffectCaseDenied.jet")
     print("library effects: passed")
 }

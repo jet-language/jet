@@ -1856,9 +1856,12 @@ list names and nothing else: a body that reaches another kernel effect is
 E0756. Inside its package the name is bare; elsewhere it is qualified by the
 name the package is imported under (`graph.Query`), and the bare name there
 is E0119. Denials keep checking what a body really reaches (D-PROP1), so
-`-[!Net]>` blocks a call into `Query`'s network work. The list above a
-library effect holds no `!` entries, and a row denies the kernel effects a
-library effect relies on rather than its name; both are E0757.
+`-[!Net]>` blocks a call into `Query`'s network work. A function uses a
+library effect when its row names it or one of its cases, so
+`-[!graph.Query]>` blocks every call that reaches such a function, and
+`-[!graph.Query.Write]>` only those that reach `Query.Write` or `Query`
+itself; either is E0749. The list above a library effect holds no `!`
+entries (E0757).
 
 `Panic` and `Mem` are deny-only rows. `Panic` can be named in a prohibition but
 cannot be granted by an authority, positive effect ceiling, or package budget.
