@@ -1,0 +1,242 @@
+// Shared vocabulary of the Jet SQLite engine (a port of SQLite 3.45.0):
+// result codes, the engine error, and the dynamically typed SQL value.
+// Result codes follow https://sqlite.org/rescode.html; the primary-code
+// texts are sqlite3ErrStr() (main.c) of 3.45.0.
+
+// Primary result codes (rescode.html "Primary Result Code List").
+OK: 0
+ERROR: 1
+INTERNAL: 2
+PERM: 3
+ABORT: 4
+BUSY: 5
+LOCKED: 6
+NOMEM: 7
+READONLY: 8
+INTERRUPT: 9
+IOERR: 10
+CORRUPT: 11
+NOTFOUND: 12
+FULL: 13
+CANTOPEN: 14
+PROTOCOL: 15
+EMPTY: 16
+SCHEMA: 17
+TOOBIG: 18
+CONSTRAINT: 19
+MISMATCH: 20
+MISUSE: 21
+NOLFS: 22
+AUTH: 23
+FORMAT: 24
+RANGE: 25
+NOTADB: 26
+NOTICE: 27
+WARNING: 28
+ROW: 100
+DONE: 101
+
+// Extended result codes used by the engine (rescode.html "Extended Result
+// Code List"): primary | (n << 8).
+IOERR_READ: 266
+IOERR_SHORT_READ: 522
+IOERR_WRITE: 778
+IOERR_FSYNC: 1034
+IOERR_TRUNCATE: 1546
+IOERR_FSTAT: 1802
+IOERR_UNLOCK: 2058
+IOERR_RDLOCK: 2314
+IOERR_DELETE: 2570
+IOERR_LOCK: 3850
+IOERR_CLOSE: 4106
+IOERR_SHMOPEN: 4618
+IOERR_SHMSIZE: 4874
+IOERR_SHMMAP: 5386
+IOERR_SEEK: 5642
+IOERR_DELETE_NOENT: 5898
+CORRUPT_INDEX: 779
+CANTOPEN_ISDIR: 526
+CANTOPEN_FULLPATH: 782
+READONLY_ROLLBACK: 776
+READONLY_DBMOVED: 1032
+BUSY_RECOVERY: 261
+BUSY_SNAPSHOT: 517
+CONSTRAINT_CHECK: 275
+CONSTRAINT_FOREIGNKEY: 787
+CONSTRAINT_NOTNULL: 1299
+CONSTRAINT_PRIMARYKEY: 1555
+CONSTRAINT_TRIGGER: 1811
+CONSTRAINT_UNIQUE: 2067
+CONSTRAINT_ROWID: 2579
+CONSTRAINT_DATATYPE: 3091
+ERROR_MISSING_COLLSEQ: 257
+ERROR_RETRY: 513
+
+// An engine failure: the extended result code and the message
+// sqlite3_errmsg() would report for it.
+#Error
+SQLError: struct {
+    code: Int
+    message: String
+    impl Display {
+        display: fn(self) -> String { self.message }
+    }
+    impl Debug {
+        debug: fn(&&self) -> String { "SQLError({self.code}, {self.message})" }
+    }
+}
+
+// The text sqlite3ErrStr() gives a result code (main.c, 3.45.0).
+error_string: fn(code: Int) -> String Never! {
+    if code == ROW -> return "another row available"
+    if code == DONE -> return "no more rows available"
+    if code == ABORT_ROLLBACK -> return "abort due to ROLLBACK"
+    primary: code.bit_and(255)
+    if primary == OK -> return "not an error"
+    if primary == ERROR -> return "SQL logic error"
+    if primary == PERM -> return "access permission denied"
+    if primary == ABORT -> return "query aborted"
+    if primary == BUSY -> return "database is locked"
+    if primary == LOCKED -> return "database table is locked"
+    if primary == NOMEM -> return "out of memory"
+    if primary == READONLY -> return "attempt to write a readonly database"
+    if primary == INTERRUPT -> return "interrupted"
+    if primary == IOERR -> return "disk I/O error"
+    if primary == CORRUPT -> return "database disk image is malformed"
+    if primary == NOTFOUND -> return "unknown operation"
+    if primary == FULL -> return "database or disk is full"
+    if primary == CANTOPEN -> return "unable to open database file"
+    if primary == PROTOCOL -> return "locking protocol"
+    if primary == SCHEMA -> return "database schema has changed"
+    if primary == TOOBIG -> return "string or blob too big"
+    if primary == CONSTRAINT -> return "constraint failed"
+    if primary == MISMATCH -> return "datatype mismatch"
+    if primary == MISUSE -> return "bad parameter or other API misuse"
+    if primary == NOLFS -> return "large file support is disabled"
+    if primary == AUTH -> return "authorization denied"
+    if primary == RANGE -> return "column index out of range"
+    if primary == NOTADB -> return "file is not a database"
+    if primary == NOTICE -> return "notification message"
+    if primary == WARNING -> return "warning message"
+    "unknown error"
+}
+
+ABORT_ROLLBACK: 516
+
+// An error whose message is the code's standard text.
+fail: fn(code: Int) -> SQLError Never! {
+    SQLError{code: code, message: error_string(code)}
+}
+
+// An error with an explicit message.
+fail_with: fn(code: Int, message: String) -> SQLError Never! {
+    SQLError{code: code, message: message}
+}
+
+// SQLITE_CORRUPT with the standard text; sqlite3CorruptError() also logs the
+// source line, which the engine has no use for.
+corrupt: fn() -> SQLError Never! { fail(CORRUPT) }
+
+// Mem.flags (vdbeInt.h MEM_*). The low six bits are the datatype: one of
+// Null, Str, Int, Real, Blob or IntReal, with Str also set beside Int or
+// Real once a number has been rendered as text. MEM_Dyn, MEM_Static,
+// MEM_Ephem and MEM_Term describe C's ownership of Mem.z and have no
+// counterpart: a Jet Mem owns its bytes.
+MEM_NULL: 1
+MEM_STR: 2
+MEM_INT: 4
+MEM_REAL: 8
+MEM_BLOB: 16
+MEM_INT_REAL: 32
+MEM_AFF_MASK: 63
+MEM_FROM_BIND: 64
+MEM_CLEARED: 256
+MEM_ZERO: 1024
+MEM_SUBTYPE: 2048
+MEM_TYPE_MASK: 3519
+MEM_AGG: 32768
+
+// One SQL value, a sqlite3_value (vdbeInt.h struct sqlite3_value). C's
+// union u holds i (an integer, or nZero, the zero bytes a MEM_Zero blob
+// ends with) and r; here both are fields. z holds the text or blob bytes,
+// so C's Mem.n is z.len(); text is in encoding enc and keeps its bytes as
+// stored, valid UTF-8 or not. subtype is eSubtype.
+Mem: struct {
+    flags: Int
+    i: Int
+    r: Float
+    z: [U8]
+    enc: Int
+    subtype: Int
+}
+
+// sqlite3VdbeMemInit with `flags`.
+mem_init: fn(flags: Int) -> Mem Never! {
+    Mem{flags: flags, i: 0, r: Float{0}, z: [U8]{}, enc: UTF8, subtype: 0}
+}
+
+mem_null: fn() -> Mem Never! { mem_init(MEM_NULL) }
+
+// sqlite3VdbeMemSetInt64.
+mem_int: fn(v: Int) -> Mem Never! {
+    m := mem_init(MEM_INT)
+    m.i = v
+    m
+}
+
+// sqlite3VdbeMemSetDouble; a NaN is NULL.
+mem_real: fn(r: Float) -> Mem Never! {
+    if r != r -> return mem_null()
+    m := mem_init(MEM_REAL)
+    m.r = r
+    m
+}
+
+// A text value in encoding enc.
+mem_text: fn(z: [U8], enc: Int) -> Mem Never! {
+    m := mem_init(MEM_STR)
+    m.z = z
+    m.enc = enc
+    m
+}
+
+mem_blob: fn(z: [U8]) -> Mem Never! {
+    m := mem_init(MEM_BLOB)
+    m.z = z
+    m
+}
+
+I64_MAX: 9223372036854775807
+I64_MIN: -9223372036854775808
+
+// Whether `n` fits SQLite's 64-bit signed integer.
+fits_i64: fn(n: Int) -> Bool Never! { n >= I64_MIN && n <= I64_MAX }
+
+// Text encodings (sqlite3.h SQLITE_UTF8 .. SQLITE_UTF16).
+UTF8: 1
+UTF16LE: 2
+UTF16BE: 3
+UTF16: 4
+
+// sqlite3_value_type: the datatype code of a value, SQLITE_INTEGER 1,
+// SQLITE_FLOAT 2, SQLITE_TEXT 3, SQLITE_BLOB 4 or SQLITE_NULL 5. This is the
+// rule the aType[] table encodes (its SQLITE_DEBUG cross-check).
+value_type: fn(m: Mem) -> Int Never! {
+    if m.flags.bit_and(MEM_NULL) != 0 -> return 5
+    if m.flags.bit_and(MEM_REAL.bit_or(MEM_INT_REAL)) != 0 -> return 2
+    if m.flags.bit_and(MEM_INT) != 0 -> return 1
+    if m.flags.bit_and(MEM_STR) != 0 -> return 3
+    4
+}
+
+#Test("sqlite3_value_type follows the datatype bits") {
+    assert_eq(value_type(mem_null()), 5)
+    assert_eq(value_type(mem_int(7)), 1)
+    assert_eq(value_type(mem_real(2.5)), 2)
+    assert_eq(value_type(mem_text("x".bytes(), UTF8)), 3)
+    assert_eq(value_type(mem_blob([U8]{1})), 4)
+    assert_eq(value_type(mem_init(MEM_INT.bit_or(MEM_STR))), 1)
+    assert_eq(value_type(mem_init(MEM_INT_REAL)), 2)
+    nan: Float{0} / Float{0}
+    assert_eq(value_type(mem_real(nan)), 5)
+}
