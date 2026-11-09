@@ -122,10 +122,10 @@ SemaEffectModuleInput: struct {
     // `{trait}::{owner}` implementations this module declares
     // (sema_effect_trait_implementers), for generic dispatch.
     trait_implementers: [String]{[String]{}}
-    // The owned operator trait each `impl Owner.Add`-style hook method
-    // implements, by function key: the trait has no source row, so the
-    // checked body is a plain method (E0742 still bounds it).
-    operator_hooks: [String:String]{[String:String]{}}
+    // The owned trait each method of an `impl Owner.Add` or `impl
+    // Owner.CheckedText` block implements, by function key: the trait has no
+    // source row, so the checked body is a plain method (E0742 still bounds it).
+    owned_trait_hooks: [String:String]{[String:String]{}}
 }
 
 SemaEffectDispatchSite: struct {
@@ -2517,8 +2517,9 @@ sema_effect_trait_bound_diagnostic: fn(bound: SemaEffectTraitBound, over: [Strin
 sema_effect_check_trait_bounds: fn(module_row: SemaEffectModuleInput, functions: [FnBody], source_index: SemaEffectSourceIndex, nodes: [SemaEffectNode], node_by_key: NameRows, solved: [[String]], diagnostics: &[Diagnostic]) {
     if module_row.trait_bounds.len() == 0 -> return
     loop function in functions {
-        // An owned operator trait (`impl Vec2.Add`) has no source row, so its
-        // hook is checked as a plain method named in `operator_hooks`.
+        // An owned operator or CheckedText trait (`impl Vec2.Add`) has no
+        // source row, so its method is checked as a plain one named in
+        // `owned_trait_hooks`.
         owner_type: if function.kind == {
             .Method(_, owner) -> owner
             .TraitMethod(_, _, owner, _, _) -> owner
@@ -2528,7 +2529,7 @@ sema_effect_check_trait_bounds: fn(module_row: SemaEffectModuleInput, functions:
         }
         trait_name: if function.kind == {
             .TraitMethod(_, _, _, trait_symbol, _) -> sema_effect_symbol_leaf(trait_symbol.key)
-            else -> module_row.operator_hooks.get(function.key) ?? next
+            else -> module_row.owned_trait_hooks.get(function.key) ?? next
         }
         node_index: sema_effect_node_index(node_by_key, function.key) ?? next
         method: sema_effect_method_name(function, module_row.sources, source_index)

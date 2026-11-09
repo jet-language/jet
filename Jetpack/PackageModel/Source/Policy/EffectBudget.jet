@@ -429,6 +429,10 @@ pkg_lock_record_effect_rows: fn(project_root: String, entries: [PackageEffects],
         recorded: package.required_effect_roles()
         gained := [String]{}
         loop effect_name in inferred {
+            // A deny-only right (`Panic`, `Mem`, `Time.Wait`) is never
+            // granted, so the lock records none: a stop is refused by a
+            // budget's `deny` (E1220), not recorded as a widening.
+            if authority_is_deny_only(effect_name) -> next
             if !authority_covers_any(recorded, effect_name) -> gained.push(effect_name.copy())
         }
         first: package.effect_authority == None

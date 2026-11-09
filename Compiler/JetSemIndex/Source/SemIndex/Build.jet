@@ -35,6 +35,7 @@ use {
         Type,
         ViewProvenanceMap,
         access_sigil,
+        authority_covers,
         derivation_identity,
         derivation_record,
         expr_span,
@@ -1454,6 +1455,17 @@ SemSummary: struct {
     solved: [String]
     maximal: Bool
     maximal_span: Span?
+    // Its calls into callees outside the indexed modules, in call order.
+    boundary_calls: [SemBoundaryCall]
+}
+
+// A call from an indexed function into a callee no indexed module defines (a
+// Core function): no summary says what that callee reaches, so the callee's
+// written row (`row`, the call's effect bound) is what the call is seen to
+// reach, at the call's `span`.
+SemBoundaryCall: struct {
+    row: [String]
+    span: Span
 }
 
 semindex_sorted_unique: fn(values: [String]) -> [String] Never! {
@@ -1499,6 +1511,25 @@ semindex_summaries: fn(modules: [JetDriverDocModule]) -> [SemSummary] {
     summaries := [SemSummary]{}
     module_aliases := [String: String]{}
     loop doc_module in modules -> module_aliases[doc_module.module_identity] = semindex_module_alias(doc_module)
+    // Each caller's calls into callees outside the indexed modules, grouped
+    // once by caller key in module order.
+    boundary_by_caller := [String: Int]{}
+    boundary_groups := [[SemBoundaryCall]]{}
+    loop doc_module in modules {
+        loop fact in doc_module.call_facts {
+            target: fact.callee ?? next
+            callee_key: semindex_function_key(target.key) ?? next
+            if module_aliases.get(callee_key.module_identity) != None -> next
+            row: fact.facts.effect_bound ?? next
+            group := boundary_by_caller.get(fact.caller_key) ?? -1
+            if group < 0 {
+                group = boundary_groups.len()
+                _ := boundary_by_caller.add(fact.caller_key, group)
+                boundary_groups.push([SemBoundaryCall]{})
+            }
+            boundary_groups[group].push(SemBoundaryCall{row: loop entry in row -> entry.name.copy(), span: fact.span})
+        }
+    }
     loop doc_module in modules {
         alias: semindex_module_alias(doc_module)
         loop function in doc_module.functions {
@@ -1538,7 +1569,9 @@ semindex_summaries: fn(modules: [JetDriverDocModule]) -> [SemSummary] {
             }
             maximal_span := Span?{None}
             if function.effects.maximal -> maximal_span = Val(function.source_span)
-            summaries.push(SemSummary{key: "{alias}::{local}", local: local, raw_key: function.key, direct: direct, direct_spans: spans, edges: semindex_sorted_unique(edges), raw_edges: function.effects.call_edges, edge_locals: edge_locals, solved: semindex_sorted_unique(function.effects.solved), maximal: function.effects.maximal, maximal_span: maximal_span})
+            boundary_calls := [SemBoundaryCall]{}
+            if boundary_by_caller.get(function.key) == .Val(group) -> boundary_calls = boundary_groups[group].copy()
+            summaries.push(SemSummary{key: "{alias}::{local}", local: local, raw_key: function.key, direct: direct, direct_spans: spans, edges: semindex_sorted_unique(edges), raw_edges: function.effects.call_edges, edge_locals: edge_locals, solved: semindex_sorted_unique(function.effects.solved), maximal: function.effects.maximal, maximal_span: maximal_span, boundary_calls: boundary_calls})
         }
     }
     shorts := [SemSummary]{}
@@ -1622,6 +1655,18 @@ semindex_witness: fn(function: String, effect_name: String, summaries: [SemSumma
         if semindex_call_span(summary, callee, modules) == .Val(span) -> spans.push(span)
         loop span in found.spans -> spans.push(span)
         return Val(SemWitness{path: path, spans: spans})
+    }
+    semindex_boundary_witness(function, summary, effect_name)
+}
+
+// The first call of `summary` into a callee outside the indexed modules whose
+// written row covers `effect_name`: `function` itself reaches the effect at
+// that call (`jet explain effects` names its site).
+semindex_boundary_witness: fn(function: String, summary: SemSummary, effect_name: String) -> SemWitness? Never! {
+    loop call in summary.boundary_calls {
+        loop bound in call.row {
+            if authority_covers(bound, effect_name) -> return Val(SemWitness{path: [String]{function}, spans: [Span]{call.span}})
+        }
     }
     None
 }
@@ -1764,7 +1809,7 @@ semindex_witness_step: fn(function: String, effect_name: String, summaries: [Sem
         loop span in found.spans -> spans.push(span)
         return Val(SemWitness{path: path, spans: spans})
     }
-    None
+    semindex_boundary_witness(function, summary, effect_name)
 }
 
 // `apply_inferred_effect_rows`: a function with no written row shows its solved

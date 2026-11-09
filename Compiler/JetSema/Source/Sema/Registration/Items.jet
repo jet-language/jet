@@ -52,6 +52,7 @@ use {
         TargetMachine,
         Marker,
         Measure,
+        ModuleCap,
         NamedSpan,
         NamedType,
         NameRows,
@@ -614,6 +615,10 @@ SemaRegistrationModule: struct {
     program: Program
     inline_bindings: SemaInlinePreparedBindings{SemaInlinePreparedBindings{imports: [String:SemaInlineFunctionBinding]{}, modules: [SemaInlineModuleSurface]{}}}
     source: String{""}
+    // The `#FX(…)` cap of each generic-module template erased from
+    // `program.items` once expanded: the cap's names are still checked
+    // where it is written (E0119, E0750), instantiated or not.
+    template_caps: [ModuleCap]{[ModuleCap]{}}
     declarations: [Item]
     symbols: [Symbol]
     // Row `i` is the `nominals` row that `symbols[i]` registered (-1 for a
@@ -4512,6 +4517,8 @@ sema_registration_prepare_graph: fn(inputs: &&[SemaRegistrationModuleInput], edg
         item_index := 0
         loop item_index < graph.modules[erased_index].program.items.len() {
             if sema_registration_item_is_expanded_template(graph.modules[erased_index].program.items[item_index]) {
+                erased_cap: sema_registration_template_cap(graph.modules[erased_index].program.items[item_index])
+                if erased_cap == .Val(cap) -> graph.modules[erased_index].template_caps.push(cap)
                 _ := graph.modules[erased_index].program.items.remove(item_index, .Slot)
             } else {
                 item_index += 1
@@ -4551,6 +4558,12 @@ sema_registration_item_is_expanded_template: fn(item: Item) -> Bool Never! {
         .GenericModule(_) | .ModuleAlias(_) -> true
         else -> false
     }
+}
+
+// The `#FX(…)` cap written above a generic-module template, if any.
+sema_registration_template_cap: fn(item: Item) -> ModuleCap? Never! {
+    if item == .GenericModule(template) -> return template.cap
+    None
 }
 
 // Appends to `words` each identifier-shaped word of `bytes[start..<end]` that

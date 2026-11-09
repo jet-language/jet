@@ -99,7 +99,7 @@ use jet_foundation.[
     FactDecl,
     compiler_threads_heaviest_first,
     owned_trait_codec_marker,
-    owned_trait_is_operator,
+    owned_trait_bounds_pure,
 ]
 
 // Exact registered APIs without a browser host provider. The compiler witness
@@ -947,7 +947,7 @@ sema_incremental_module_headers: fn(modules: [SemaRegistrationModule]) -> [SemaR
             module_name: source_module.module_name, core_source_alias: source_module.core_source_alias,
             module_path: source_module.module_path, declared_module: source_module.declared_module, source_file: source_module.source_file,
             source_segments: source_module.source_segments, source_origin: source_module.source_origin,
-            program: sema_incremental_program_header(source_module.program), source: "",
+            program: sema_incremental_program_header(source_module.program), source: "", template_caps: source_module.template_caps,
             declarations: sema_incremental_item_headers(source_module.declarations),
             symbols: source_module.symbols, symbol_nominal_rows: source_module.symbol_nominal_rows, symbol_positions: source_module.symbol_positions,
             declaration_positions: source_module.declaration_positions,
@@ -8073,17 +8073,18 @@ sema_effect_module_input: fn(source: SemaRegistrationModule, module_index: Int, 
         source_segments: source.source_segments.copy(),
         trait_bounds: sema_effect_trait_bounds(source.program.items),
         trait_implementers: sema_effect_trait_implementers(source.program.items),
-        operator_hooks: sema_effect_operator_hooks(source),
+        owned_trait_hooks: sema_effect_owned_trait_hooks(source),
     }
 }
 
-// The owned operator trait each hook method of an `impl Owner.Add` block
-// implements, by function key (E0742 bounds the hook to `-[]>`).
-sema_effect_operator_hooks: fn(source: SemaRegistrationModule) -> [String:String] Never! {
+// The owned trait each method of an `impl Owner.Add` or `impl
+// Owner.CheckedText` block implements, by function key (E0742 bounds those
+// methods to `-[]>`).
+sema_effect_owned_trait_hooks: fn(source: SemaRegistrationModule) -> [String:String] Never! {
     hooks := [String:String]{}
     loop implementation in source.impls {
         trait_name: implementation.trait_name ?? next
-        if implementation.trait_symbol != None || !owned_trait_is_operator(trait_name) -> next
+        if implementation.trait_symbol != None || !owned_trait_bounds_pure(trait_name) -> next
         loop function in implementation.methods -> hooks[function.symbol.id.key] = trait_name
     }
     hooks
@@ -9233,10 +9234,12 @@ sema_finalize_graph: fn(resolved: &&SemaRegistrationGraph, trail: &SemaGraphTrai
     denial_modules := [Bool]{}
     loop graph_module in final_graph.modules -> denial_modules.push(graph_module.package_identity == final_graph.package_identity)
     // Each `#FX(…)` module cap names known effects, checked once where it is
-    // written; a file module's caps reach its file through the module graph.
+    // written; a file module's caps reach its file through the module graph,
+    // and an erased generic-module template leaves its cap behind.
     loop graph_module in final_graph.modules {
         cap_diagnostics := [Diagnostic]{}
         if graph_module.program.file_cap == .Val(head) -> sema_effect_cap_entry_names(head, cap_diagnostics)
+        loop cap in graph_module.template_caps -> sema_effect_cap_entry_names(cap, cap_diagnostics)
         sema_effect_module_cap_names(graph_module.program.items, cap_diagnostics)
         sema_effect_publish_diagnostics(diagnostics, graph_module.source_segments, cap_diagnostics)
     }

@@ -18,7 +18,7 @@ use {
         JET_DRIVER_EXIT_USER_ERROR,
         jet_driver_display_path,
     ]
-    jet_foundation.[EffectRowEntry, Expr, Func, Item, ModuleCap, NamedSpan, Span, Stmt, ast_visit_body, diagnostic_line_at]
+    jet_foundation.[EffectRowEntry, Expr, Func, Item, ModuleCap, NamedSpan, Span, Stmt, ast_visit_body, authority_is_deny_only, diagnostic_line_at]
     jet_semindex.[SemSummary, semindex_module_alias, semindex_summaries, semindex_summary, semindex_witness]
 }
 
@@ -431,7 +431,10 @@ jet_cli_effects_package_rung: fn(policy: JetDriverAuthorityPolicy?) -[FS]> JetCL
     JetCLIEffectsRung{rung: "package", text: rows.join(", "), written: true, site: site}
 }
 
+// A deny-only right (`Panic`, `Mem`, `Time.Wait`) is never granted on any
+// rung, so what a site reaches names only the rights a rung can grant.
 jet_cli_effects_reach_add: fn(reaches: &[JetCLIEffectsReach], name: String, chain: [String], site: String) Never! {
+    if authority_is_deny_only(name) -> return
     loop reach in reaches {
         if reach.name == name -> return
     }

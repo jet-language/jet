@@ -111,6 +111,14 @@ owned_trait_is_operator: fn(trait_name: String) -> Bool Never! {
     owned_trait_operator_hook(trait_name) != None
 }
 
+// An owned trait whose impl methods are held to `-[]>` (E0742): the
+// operator traits and CheckedText.
+owned_trait_bounds_pure: fn(trait_name: String) -> Bool Never! {
+    owned: owned_trait(trait_name) ?? return false
+    if owned.contract == .Operator(_, _) -> return true
+    owned.contract == .CheckedText
+}
+
 // The operator trait whose hook is `method`: `Add` for `add`.
 owned_trait_for_operator_hook: fn(method: String) -> String? Never! {
     loop owned in OWNED_TRAITS {

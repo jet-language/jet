@@ -2388,10 +2388,10 @@ sema_expr_integer_literal: fn(value: Int, width: IntegerWidth?, expected: Type?,
                 tree_width = Val(TIntegerWidth{signed: signed, bits: bits})
             }
             if sema_expr_literal_range(contextual, environment, program) == .Val(range) {
-                if value < range.lo || value > range.hi {
-                    diagnostics.push(sema_inline_range_out_of_bounds(value, range.lo, range.hi, span))
-                    return None
-                }
+                // An out-of-range literal still takes the range type, so the
+                // call it is an argument of keeps its type and every later
+                // statement is still checked.
+                if value < range.lo || value > range.hi -> diagnostics.push(sema_inline_range_out_of_bounds(value, range.lo, range.hi, span))
                 ty = Type.InlineRange{base: Type.Int, lo: range.lo, hi: range.hi}
             }
         }
@@ -2435,10 +2435,7 @@ sema_expr_negative_integer: fn(value: Int, width: IntegerWidth?, expected: Type?
                 tree_width = Val(TIntegerWidth{signed: signed, bits: bits})
             }
             if sema_expr_literal_range(contextual, environment, program) == .Val(range) {
-                if -value < range.lo || -value > range.hi {
-                    diagnostics.push(sema_inline_range_out_of_bounds(-value, range.lo, range.hi, literal_span))
-                    return None
-                }
+                if -value < range.lo || -value > range.hi -> diagnostics.push(sema_inline_range_out_of_bounds(-value, range.lo, range.hi, literal_span))
                 ty = Type.InlineRange{base: Type.Int, lo: range.lo, hi: range.hi}
             }
         }

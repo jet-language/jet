@@ -188,7 +188,8 @@ pkg_test_package_effects: fn(name: String, effects: [String], chains: [String: [
     lock_path: files.join(root, UNIFIED_LOCK_FILE)
     files.write(lock_path, "version = 1\n\n[[package]]\nname = \"app\"\nversion = \"0.1.0\"\nsource = {{ root = \".\" }}\nfingerprint = \"\"\ndependencies = [\"dep\"]\n\n[[package]]\nname = \"dep\"\nversion = \"0.1.0\"\nsource = {{ path = \"./dep\" }}\nfingerprint = \"sha256-00\"\ndependencies = []\n\n[root]\ndependencies = [\"dep\"]\n") ?? panic("seed")
     pure: [PackageEffects]{pkg_test_package_effects("root", [String]{"IO"}, [String: [String]]{}, [String]{}, None), pkg_test_package_effects("dep", [String]{}, [String: [String]]{}, [String]{}, None)}
-    reading: [PackageEffects]{pkg_test_package_effects("dep", [String]{"FS.Read"}, [String: [String]]{}, [String]{}, None)}
+    // A stop is deny-only: never named as a gain nor recorded.
+    reading: [PackageEffects]{pkg_test_package_effects("dep", [String]{"FS.Read", "Panic"}, [String: [String]]{}, [String]{}, None)}
     first: pkg_lock_record_effect_rows(root, pure, false) ?? panic("record first")
     assert_eq(first.len(), 0)
     recorded: files.read(lock_path) ?? panic("read first")
@@ -207,6 +208,7 @@ pkg_test_package_effects: fn(name: String, effects: [String], chains: [String: [
     assert_eq(widened.len(), 1)
     wider: files.read(lock_path) ?? panic("read widened")
     assert(wider.contains("effects = [\"FS.Read\"]"), wider)
+    assert(!wider.contains("Panic"), wider)
     // A row only widens: reaching less later leaves the recorded row.
     narrower: pkg_lock_record_effect_rows(root, pure, false) ?? panic("record narrower")
     assert_eq(narrower.len(), 0)
