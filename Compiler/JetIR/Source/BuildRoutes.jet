@@ -170,6 +170,71 @@ ir_list_swap: fn(m: &IRModule, b: &IRBuilder, list: Int, row: Int, first: Int, s
     ir_list_swap_bytes(m, b, left, right, held, width)
 }
 
+// `xs.__fill(start, end, pattern)`: both bounds clamp into 0..len (as
+// slice does) and element `start + i` becomes a copy of
+// `pattern[i % pattern.len()]`; an empty window or pattern writes nothing.
+// Plain data (ir_copy_needs, no drop) goes as byte moves: the first period,
+// then the filled prefix doubling onto itself, each copy starting at a
+// multiple of the period. Any other element drops the one it replaces and
+// stores a copy of its pattern element.
+ir_list_fill: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, row: Int, start_value: Int, end_value: Int, pattern: Int, span: Span) Never! {
+    start: ir_native_index(m, b, start_value, span)
+    end: ir_native_index(m, b, end_value, span)
+    if ir_failed(b) -> return
+    stride: ir_list_stride(m, row)
+    if stride == 0 -> return
+    length: ir_load_word(m, b, list, 0)
+    zero: ir_word_const(m, b, 0)
+    first: ir_word_clamp(m, b, start, zero, length)
+    last: ir_word_clamp(m, b, end, first, length)
+    count: ir_word_op(m, b, IROp.Sub, last, first)
+    period: ir_load_word(m, b, pattern, 0)
+    source: ir_load_word(m, b, pattern, 16)
+    data: ir_load_word(m, b, list, 16)
+    some: ir_bool_op(m, b, IROp.Lt, zero, period)
+    ir_open_if(b.f, some, b.line)
+    if !ir_copy_needs(m, p, row) && m.types[row].drop == "" {
+        width: ir_word_const(m, b, stride)
+        total: ir_word_op(m, b, IROp.Mul, count, width)
+        period_bytes: ir_word_op(m, b, IROp.Mul, period, width)
+        to: ir_element_address(m, b, data, first, stride)
+        filled: ir_sort_run_size(m, b, period_bytes, total)
+        _: ir_runtime(m, b, "jet_rt_mem_move", [Int]{to, source, filled}, -1)
+        exit: ir_open(b.f, IROp.Block, b.line)
+        _: ir_open(b.f, IROp.Loop, b.line)
+        more: ir_bool_op(m, b, IROp.Lt, filled, total)
+        ir_exit_unless(m, b, more, exit)
+        remaining: ir_word_op(m, b, IROp.Sub, total, filled)
+        moved: ir_sort_run_size(m, b, filled, remaining)
+        onto: ir_word_op(m, b, IROp.Add, to, filled)
+        _: ir_runtime(m, b, "jet_rt_mem_move", [Int]{onto, to, moved}, -1)
+        ir_emit(b.f, IROp.Add, filled, filled, moved, IR_OVERFLOW_WRAP, b.line)
+        ir_emit(b.f, IROp.Br, -1, 0, -1, -1, b.line)
+        ir_end(b.f, b.line)
+        ir_end(b.f, b.line)
+    } else {
+        one: ir_word_const(m, b, 1)
+        next: ir_word_const(m, b, 0)
+        index: ir_count_open(m, b, count)
+        at: ir_word_op(m, b, IROp.Add, first, index)
+        target: ir_element_address(m, b, data, at, stride)
+        if m.types[row].drop != "" {
+            old: ir_load_at(m, b, target, 0, row)
+            ir_emit(b.f, IROp.Drop, -1, old, -1, -1, b.line)
+        }
+        from: ir_element_address(m, b, source, next, stride)
+        item: ir_load_at(m, b, from, 0, row)
+        ir_store_at(m, p, b, target, 0, item)
+        ir_emit(b.f, IROp.Add, next, next, one, IR_OVERFLOW_WRAP, b.line)
+        wrapped: ir_bool_op(m, b, IROp.Eq, next, period)
+        ir_open_if(b.f, wrapped, b.line)
+        ir_emit(b.f, IROp.Copy, next, zero, -1, -1, b.line)
+        ir_end(b.f, b.line)
+        ir_count_close(m, b, index)
+    }
+    ir_end(b.f, b.line)
+}
+
 // The write view of `length` elements of the buffer `data` from `first`
 // (a native word): a View header that borrows the buffer uncounted.
 ir_write_view: fn(m: &IRModule, b: &IRBuilder, row: Int, data: Int, first: Int, length: Int, stride: Int) -> Int Never! {
@@ -937,6 +1002,13 @@ ir_builtin_on: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver_
             .SwapList -> {
                 if operands.len() != 3 || operands[1] < 0 || operands[2] < 0 -> return ir_fail_slot(b, span, "swap without two positions")
                 ir_list_swap(m, b, subject, element, operands[1], operands[2], span)
+                return -1
+            }
+            .ListFill -> {
+                if operands.len() != 4 || operands[1] < 0 || operands[2] < 0 || operands[3] < 0 -> return ir_fail_slot(b, span, "fill without a window and a pattern")
+                if ir_list_element(m, p, b, operands[3]) != Val((element)) -> return ir_fail_slot(b, span, "fill from a List of another element type")
+                ir_list_fill(m, p, b, subject, element, operands[1], operands[2], operands[3], span)
+                ir_release(m, b, operands[3])
                 return -1
             }
             .ExtendList -> {

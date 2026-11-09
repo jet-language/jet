@@ -134,6 +134,23 @@ function jet_list_swap(xs, first, second) {
   return null;
 }
 
+// `xs.__fill(start, end, pattern)`: both bounds clamp into 0..len (as
+// slice does) and xs[start + i] = pattern[i % pattern.length]; an empty
+// window or pattern writes nothing.
+function jet_list_fill(xs, start, end, pattern) {
+  const period = pattern.length;
+  if (period === 0) return null;
+  const length = xs.length;
+  const first = Math.min(Math.max(Number(start), 0), length);
+  const last = Math.min(Math.max(Number(end), first), length);
+  let next = 0;
+  for (let at = first; at < last; at++) {
+    xs[at] = pattern[next];
+    next = next + 1 === period ? 0 : next + 1;
+  }
+  return null;
+}
+
 function jet_list_sort(xs) {
   xs.sort((left, right) => {
     if (left === right) return 0;
