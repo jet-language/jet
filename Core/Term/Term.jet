@@ -247,6 +247,46 @@ __input_lines: fn() -[Exec.Args]> __InputLines Never! {
     __InputLines{paths: core.process.args(), at: 0, open: [FileReader]{}}
 }
 
+// `input.edit(change)` (JetSema sema_call_try_ambient_input_method): each
+// file the program's arguments name has every line replaced by `change(line)`
+// and is rewritten at once (files.write_atomic), as `perl -i -pe` edits
+// in place. Each line ending, CRLF or LF, and a missing final one stay as
+// they were; a file no line of which changes is not rewritten. With no file
+// named, the lines of `lines` (standard input) are printed changed. A file
+// that cannot be read or replaced stops the edit with its IOError; the files
+// before it stay edited.
+__input_edit: fn(&&lines: Iter<String>, change: fn(String) -> String Never!) IOError! -[IO, FS.Read, FS.Write, Exec.Args, Time.Wait]> {
+    paths: core.process.args()
+    if paths.len() == 0 {
+        loop line in lines -> print(change(line))
+        return Ok()
+    }
+    loop path in paths {
+        text: core.files.read(path) ?? return Err(err)
+        edited: __input_edit_text(text, change)
+        if edited != text -> core.files.write_atomic(path, edited.bytes()) ?? return Err(err)
+    }
+    Ok()
+}
+
+// `text` with each line replaced by `change(line)`; the line endings stay.
+__input_edit_text: fn(text: String, change: fn(String) -> String Never!) -> String Never! {
+    edited := ""
+    pieces: text.split("\n").to_list()
+    loop at in 0..<pieces.len() {
+        piece: pieces[at]
+        last: at + 1 == pieces.len()
+        // The text after the final LF is no line when it is empty.
+        if last && piece.is_empty() -> next
+        crlf: piece.ends_with("\r")
+        content: if crlf -> piece.slice(0..<piece.len() - 1) else -> piece.copy()
+        edited += change(content)
+        if crlf -> edited += "\r"
+        if !last -> edited += "\n"
+    }
+    edited
+}
+
 stdout: fn() -> Stdout Never! { Stdout{fd: 1} }
 
 stderr: fn() -> Stderr Never! { Stderr{fd: 2} }
@@ -378,6 +418,13 @@ decode_key: fn(raw: [U8], platform: Int) -> Key Never! {
     assert_eq(decode_key([U8]{195}, 1), Key.Unknown)
     carriage_return: String.from_bytes([U8]{13}) ?? panic("CR is valid UTF-8")
     assert_eq(chomp("a{carriage_return}{carriage_return}\n"), "a")
+}
+
+#Test("input edit keeps each line ending and a missing final line break") {
+    cr: String.from_bytes([U8]{13}) ?? panic("CR is valid UTF-8")
+    assert_eq(__input_edit_text("a cat{cr}\nno\nlast cat", (line) -> line.replace("cat", "dog")), "a dog{cr}\nno\nlast dog")
+    assert_eq(__input_edit_text("cat\n", (line) -> line.upper()), "CAT\n")
+    assert_eq(__input_edit_text("", (line) -> line.upper()), "")
 }
 
 

@@ -27,7 +27,10 @@ use jet_foundation.[
     diagnostic_registry_row,
     diagnostic_with_edit,
     expr_span,
+    ast_empty_call_arg_flags,
     checked_generated_local,
+    core_input_method_member,
+    core_input_method_modules,
     type_identity_equal,
     type_name,
     Func,
@@ -682,6 +685,39 @@ sema_call_check_ambient_input_call: fn(call: Call, environment: SemaScopeEnviron
     diagnostics.push(sema_error("E0803", call.name_span, "`input` is Iter<String>, not a function", "`input` is every line of the program's input (the files its arguments name, else standard input), read lazily by a `loop` or an Iter method", "read one line with a prompt through `readline(prompt)` from core.term (`use core.term.[readline]`), or loop over `input`"))
     loop argument in call.args -> _ := sema_check_expression(argument.expr, None, environment, program, scopes, state, tail_store, context, diagnostics)
     SemaDirectSpecialCheck{handled: true, value: None}
+}
+
+// `input.csv<Row>()`, `input.json<Row>()`, `input.edit(change)`: a method of
+// the ambient `input` that is not an Iter<String> method is the Core function
+// `__input_<method>` of core.term, else of the encoding module the method
+// names (core_input_method_modules), and is checked as a call of it whose
+// first argument is the ambient `input` itself. The call so charges what
+// `input` charges and what the function declares. Unhandled when a binding
+// shadows `input` or no module declares the function: `input` is then the
+// Iter<String> receiver as usual.
+sema_call_try_ambient_input_method: fn(receiver: Expr, method: String, method_span: Span, type_args: [Type], args: [CallArg], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+    unhandled: SemaDirectSpecialCheck{handled: false, value: None}
+    receiver_span := Span{start: 0, end: 0}
+    if receiver == {
+        .Ident(name, span, _) -> {
+            if name != "input" -> return unhandled
+            receiver_span = span
+        }
+        else -> return unhandled
+    }
+    if sema_scope_resolve_index(scopes, "input") != None || sema_module_no_prelude(environment, program) -> return unhandled
+    member: core_input_method_member(method)
+    loop module_name in core_input_method_modules(method) {
+        identity: sema_call_core_module_identity(environment, program, module_name) ?? next
+        target: sema_call_core_source_target(environment, program, identity, member, type_args, method_span, true, diagnostics) ?? next
+        call_args := [CallArg]{CallArg{convention: AccessConvention.Read, expr: receiver.copy(), span: receiver_span, flags: ast_empty_call_arg_flags(), label: None, spread: false}} // copy: the method call keeps its receiver.
+        loop argument in args -> call_args.push(argument.copy()) // copy: the method call keeps its arguments.
+        scopes.ownership_call_depth += 1
+        value := sema_call_core_check_source_owned(target, "input.{method}", type_args, call_args, method_span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+        scopes.ownership_call_depth -= 1
+        return SemaDirectSpecialCheck{handled: true, value: value}
+    }
+    unhandled
 }
 
 // `("core.term", "eprint")` / `("core.term", "readline")`: fixed rows with no typed Source

@@ -106,6 +106,20 @@ decode: fn<T: Decode>(text: String) -> [T] [FieldError]! {
     if errors.len() == 0 -> Ok(values) else -> Err(errors)
 }
 
+// `input.csv<Row>()` (JetSema sema_call_try_ambient_input_method): the lines
+// of the ambient `input` as one table whose first record is the header,
+// decoded as `decode<Row>` decodes text. Every failed row is listed in the
+// one `Err` it fails with (encoding.__input_failure).
+__input_csv: fn<Row: Decode>(&&lines: Iter<String>) -> [Row] Err! {
+    text := ""
+    loop line in lines {
+        text += line
+        text += "\n"
+    }
+    rows: decode<Row>(text) ?? return Err(encoding.__input_failure("CSV", err))
+    Ok(rows)
+}
+
 // A record whose cell count differs from the header's is malformed: no cell is
 // invented for a short record and none is dropped from a long one.
 ragged_reason: fn(record: Int, cells: Int, columns: Int) -> String Never! {

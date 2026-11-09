@@ -701,7 +701,19 @@ kept under the kept programs' directory (`eval/`, named by the content hash),
 and the rest runs as `jet <that file> [args...]`, so the same code reruns its
 kept program. Flags that come before `-e` are the run's. `jet run -e CODE`
 runs the same way. A `-e` after the program (`jet run hello.jet -e …`) is
-refused with E2104, and `jet dev -e` with E2102.
+refused with E2104, and `jet dev -e` with E2102. As a REPL cell does, CODE
+may declare: a line of it (between `;`s) that is a declaration alone, such as
+a type, a function, an `impl` or a `use`, goes above `run: fn`, so
+`jet -e 'S: struct { amount: Float }; input.csv<S>().map((s) -> s.amount).sum()' sales.csv`
+prints the column's sum. A binding such as `x: 1` stays in the body.
+
+CODE reads the program's input through plain Core names, which work the same
+in a script: `input` is the lines of the files named after CODE, else of
+standard input (`jet -e 'input.map((l) -> l.words()[1])' log.txt`);
+`input.csv<Row>()` and `input.json<Row>()` decode it into records;
+`input.edit(change)` rewrites each named file in place
+(`jet -e 'input.edit((l) -> l.replace("http:", "https:"))' *.md`). `jet help
+input` lists every such name with an example, and `jet help run` points to it.
 
 `jet run - [args...]` runs the program read from standard input
 (`jet run - < hello.jet`, or a pipe). Its source is kept the same way, under

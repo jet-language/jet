@@ -5895,35 +5895,35 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Core",
       "file": "Core/Encoding/Csv.jet",
-      "line": 141,
+      "line": 155,
       "column": 9,
       "reason": "input is a String; original complete UTF-8 scalars and ASCII quote escapes entered the field"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Csv.jet",
-      "line": 379,
+      "line": 393,
       "column": 5,
       "reason": "the exact owned query bytes passed the shared strict UTF-8 validator"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Csv.jet",
-      "line": 399,
+      "line": 413,
       "column": 5,
       "reason": "a String's bytes cut at scalar boundaries, plus ASCII quotes, are complete UTF-8"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Csv.jet",
-      "line": 882,
+      "line": 896,
       "column": 9,
       "reason": "each completed UTF-8 scalar was validated before its original bytes entered this field"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Csv.jet",
-      "line": 1040,
+      "line": 1054,
       "column": 25,
       "reason": "every byte of the field is below 128, so it is whole UTF-8"
     },
@@ -5951,14 +5951,14 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Core",
       "file": "Core/Encoding/Json.jet",
-      "line": 1152,
+      "line": 1226,
       "column": 13,
       "reason": "preserve the native compiler-private Dyn carriers in Core JSON event projection"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Json.jet",
-      "line": 1157,
+      "line": 1231,
       "column": 13,
       "reason": "preserve the native compiler-private Dyn carriers in Core JSON event projection"
     },
@@ -11063,16 +11063,16 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Core | Core/Encoding/Cbor.jet | 166:5 | "validated private carriers retain byte strings for typed Encode" |
 | Core | Core/Encoding/CborStream.jet | 221:9 | "the retained key copies exactly the already validated text bytes" |
 | Core | Core/Encoding/CborStream.jet | 323:17 | "the exact CBOR text allocation passed strict UTF-8 validation" |
-| Core | Core/Encoding/Csv.jet | 141:9 | "input is a String; original complete UTF-8 scalars and ASCII quote escapes entered the field" |
-| Core | Core/Encoding/Csv.jet | 379:5 | "the exact owned query bytes passed the shared strict UTF-8 validator" |
-| Core | Core/Encoding/Csv.jet | 399:5 | "a String's bytes cut at scalar boundaries, plus ASCII quotes, are complete UTF-8" |
-| Core | Core/Encoding/Csv.jet | 882:9 | "each completed UTF-8 scalar was validated before its original bytes entered this field" |
-| Core | Core/Encoding/Csv.jet | 1040:25 | "every byte of the field is below 128, so it is whole UTF-8" |
+| Core | Core/Encoding/Csv.jet | 155:9 | "input is a String; original complete UTF-8 scalars and ASCII quote escapes entered the field" |
+| Core | Core/Encoding/Csv.jet | 393:5 | "the exact owned query bytes passed the shared strict UTF-8 validator" |
+| Core | Core/Encoding/Csv.jet | 413:5 | "a String's bytes cut at scalar boundaries, plus ASCII quotes, are complete UTF-8" |
+| Core | Core/Encoding/Csv.jet | 896:9 | "each completed UTF-8 scalar was validated before its original bytes entered this field" |
+| Core | Core/Encoding/Csv.jet | 1054:25 | "every byte of the field is below 128, so it is whole UTF-8" |
 | Core | Core/Encoding/Eetf.jet | 549:9 | "inspect private typed carriers without changing public Dyn variants" |
 | Core | Core/Encoding/Json.jet | 113:5 | "preserve the shipped decoder's hidden stderr effect at its existing host boundary" |
 | Core | Core/Encoding/Json.jet | 121:5 | "preserve the shipped decoder's hidden wall-clock snapshot at its existing host boundary" |
-| Core | Core/Encoding/Json.jet | 1152:13 | "preserve the native compiler-private Dyn carriers in Core JSON event projection" |
-| Core | Core/Encoding/Json.jet | 1157:13 | "preserve the native compiler-private Dyn carriers in Core JSON event projection" |
+| Core | Core/Encoding/Json.jet | 1226:13 | "preserve the native compiler-private Dyn carriers in Core JSON event projection" |
+| Core | Core/Encoding/Json.jet | 1231:13 | "preserve the native compiler-private Dyn carriers in Core JSON event projection" |
 | Core | Core/Encoding/Stream.jet | 16:9 | "the Object variant was checked immediately before borrowing its ordered backing" |
 | Core | Core/Encoding/Stream.jet | 24:5 | "transfer the owned ordered entries allocation into the native Object carrier" |
 | Core | Core/Encoding/Stream.jet | 30:5 | "check the private Bytes variant immediately before borrowing its backing" |

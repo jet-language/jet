@@ -37,6 +37,7 @@ use {
         compiler_threads_partition,
         compiler_threads_single,
         core_bare_source_module,
+        core_input_method_modules,
         core_module_export,
         core_module_has_member,
         owned_trait,
@@ -3356,6 +3357,11 @@ JetDriverCoreIdentifierDemand: struct {
     // segment names a Core module, and the loader loads that module when
     // `<head>` aliases `core`.
     core_paths: [String]
+    // The method of each `input.<method>` call the source spells (`input`
+    // not itself a member): `input.csv<Row>()` is core.encoding.csv
+    // `__input_csv` (core_input_method_modules), so the encoding module the
+    // method names loads when it is one.
+    input_methods: [String]{[String]{}}
 }
 
 // `lines` (newlines) and `tokens` are the unit's parse work, which a traced
@@ -3396,6 +3402,7 @@ JetDriverCoreDemandNames: struct {
     decode_name: Int
     migration_name: Int
     field_error_name: Int
+    input_name: Int
     field_error_under_name: Int
     bare: [Int]
     bare_alias: [Int]
@@ -3439,7 +3446,7 @@ jet_driver_core_demand_names: fn(tables: TokenTables) -> JetDriverCoreDemandName
             if id >= 0 && !core_segments.contains(id) -> core_segments.push(id)
         }
     }
-    JetDriverCoreDemandNames{or_err_name: jet_driver_core_demand_name(tables, "or_err"), abs_name: jet_driver_core_demand_name(tables, "abs"), regex_name: jet_driver_core_demand_name(tables, "Regex"), pattern_matches_name: jet_driver_core_demand_name(tables, "matches"), pattern_match_name: jet_driver_core_demand_name(tables, "match"), test_suite_name: jet_driver_core_demand_name(tables, "suite"), expect_name: jet_driver_core_demand_name(tables, "expect"), event_time_name: jet_driver_core_demand_name(tables, "with_event_time"), unit_family_name: jet_driver_core_demand_name(tables, "UnitFamily"), decode_name: jet_driver_core_demand_name(tables, "decode"), migration_name: jet_driver_core_demand_name(tables, "migration"), field_error_name: jet_driver_core_demand_name(tables, "FieldError"), field_error_under_name: jet_driver_core_demand_name(tables, "under"), bare: bare, bare_alias: bare_alias, bare_rows: bare_rows, core_segments: core_segments}
+    JetDriverCoreDemandNames{or_err_name: jet_driver_core_demand_name(tables, "or_err"), abs_name: jet_driver_core_demand_name(tables, "abs"), regex_name: jet_driver_core_demand_name(tables, "Regex"), pattern_matches_name: jet_driver_core_demand_name(tables, "matches"), pattern_match_name: jet_driver_core_demand_name(tables, "match"), test_suite_name: jet_driver_core_demand_name(tables, "suite"), expect_name: jet_driver_core_demand_name(tables, "expect"), event_time_name: jet_driver_core_demand_name(tables, "with_event_time"), unit_family_name: jet_driver_core_demand_name(tables, "UnitFamily"), decode_name: jet_driver_core_demand_name(tables, "decode"), migration_name: jet_driver_core_demand_name(tables, "migration"), field_error_name: jet_driver_core_demand_name(tables, "FieldError"), field_error_under_name: jet_driver_core_demand_name(tables, "under"), input_name: jet_driver_core_demand_name(tables, "input"), bare: bare, bare_alias: bare_alias, bare_rows: bare_rows, core_segments: core_segments}
 }
 
 jet_driver_core_demand_bare_row: fn(rows: &[Int], id: Int, at: Int) Never! {
@@ -3489,6 +3496,10 @@ jet_driver_collect_core_identifier_demand_ids: fn(tokens: [Token], tables: Token
             if name == names.test_suite_name && index > from && tokens[index - 1].kind == TOKEN_DOT && index + 1 < to && tokens[index + 1].kind == TOKEN_LPAREN -> demand.test_suite = true
             if name == names.expect_name && (index == from || tokens[index - 1].kind != TOKEN_DOT) && index + 1 < to && tokens[index + 1].kind == TOKEN_LPAREN -> demand.test_suite = true
             if name == names.event_time_name && index > from && tokens[index - 1].kind == TOKEN_DOT && index + 1 < to && tokens[index + 1].kind == TOKEN_LPAREN -> demand.stream_event_time = true
+            if name == names.input_name && index + 2 < to && tokens[index + 1].kind == TOKEN_DOT && tokens[index + 2].kind == TOKEN_IDENT && (index == from || tokens[index - 1].kind != TOKEN_DOT) {
+                method: token_decoded(tables, tokens[index + 2])
+                if !demand.input_methods.contains(method) -> demand.input_methods.push(method.copy())
+            }
             if index + 4 < to && tokens[index + 1].kind == TOKEN_DOT && tokens[index + 2].kind == TOKEN_IDENT && tokens[index + 3].kind == TOKEN_DOT && tokens[index + 4].kind == TOKEN_IDENT && (index == from || tokens[index - 1].kind != TOKEN_DOT) && names.core_segments.contains(name_index(tokens[index + 2].decoded)) {
                 path: "{token_decoded(tables, tokens[index])}.{token_decoded(tables, tokens[index + 2])}"
                 if !demand.core_paths.contains(path) -> demand.core_paths.push(path.copy())
@@ -3601,6 +3612,9 @@ jet_driver_collect_core_identifier_demand_threads: fn(input: &&Lexed, runs: [Int
         }
         loop path in output.core_paths {
             if !demand.core_paths.contains(path) -> demand.core_paths.push(path)
+        }
+        loop method in output.input_methods {
+            if !demand.input_methods.contains(method) -> demand.input_methods.push(method)
         }
     }
     JetDriverDemandScan{lexed: jet_driver_demand_shared_take(inputs), demand: demand.move()}
@@ -4812,6 +4826,26 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
                 if !queued[index] {
                     queued[index] = true
                     pending.push(index)
+                }
+            }
+        }
+        // `input.csv<Row>()`: the encoding module an ambient `input` method
+        // names owns its `__input_<method>` (core_input_method_modules).
+        if !is_core {
+            loop method in demand.input_methods {
+                loop module_name in core_input_method_modules(method) {
+                    sourced := false
+                    loop row in request.core_sources {
+                        if row.owner == "" && row.module_name == module_name && !row.runtime -> sourced = true
+                    }
+                    if !sourced -> next
+                    input_index: jet_driver_core_unit(source_units, queued, pending, generated_records, request.core_sources, module_name, false, entry_module, entry_index ?? 0, Span{start: 0, end: 0}, diagnostics)
+                    if input_index == .Val(index) {
+                        if !queued[index] {
+                            queued[index] = true
+                            pending.push(index)
+                        }
+                    }
                 }
             }
         }

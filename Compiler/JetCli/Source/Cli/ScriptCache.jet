@@ -43,7 +43,7 @@ use {
         schema_cache_dir,
     ]
     jet_foundation.[BuildOptionLayer, BuildOptions, Expr, Stmt, build_options_key, expr_span]
-    jet_lexer.[TOKEN_BLOCK_COMMENT, TOKEN_EOF, TOKEN_LINE_COMMENT, TOKEN_SEMI, lex]
+    jet_lexer.[TOKEN_BLOCK_COMMENT, TOKEN_EOF, TOKEN_LBRACE, TOKEN_LBRACKET, TOKEN_LINE_COMMENT, TOKEN_LPAREN, TOKEN_RBRACE, TOKEN_RBRACKET, TOKEN_RPAREN, TOKEN_SEMI, lex]
     jet_parser.[parse_source]
 }
 
@@ -242,24 +242,73 @@ jet_cli_script_cache_dir: fn() -> String? {
 }
 
 // The entry file `jet -e CODE` runs: CODE as the body of `run: fn`, its
-// statements on lines of their own (jet_cli_eval_lines), the value of its
-// last statement shown (jet_cli_eval_source), kept as the `eval` entry file of
-// its source (jet_cli_entry_file).
+// statements on lines of their own (jet_cli_eval_lines), its declarations
+// above `run: fn` (jet_cli_eval_items), the value of its last statement shown
+// (jet_cli_eval_source), kept as the `eval` entry file of its source
+// (jet_cli_entry_file).
 jet_cli_eval_file: fn(code: String) -> String? {
-    jet_cli_entry_file("eval", jet_cli_eval_source(jet_cli_eval_lines(code)))
+    split: jet_cli_eval_items(jet_cli_eval_lines(code))
+    jet_cli_entry_file("eval", jet_cli_eval_source(split.items, split.body))
 }
 
 // The opening of the `run: fn` an `-e` body goes in.
 JET_CLI_EVAL_HEAD: "run: fn() {{\n"
 
-// The `run: fn` whose body is `lines`. When its last statement is an
-// expression with a value (any expression but an `if` without `else`), that
-// expression is wrapped in `__jet_eval_show` (JetSema Calls/Direct.jet
+// `lines` parted as a REPL cell parts its input: each line at bracket depth
+// zero that parses alone as declarations (a type, a function, an impl, a
+// `use`) is an item, in order; every other line, a binding such as `x: 1`
+// included, stays in the body.
+jet_cli_eval_items: fn(lines: String) -> (items: String, body: String) Never! {
+    bytes: lines.bytes()
+    starts := [Int]{0}
+    depth := 0
+    previous := 0
+    loop token in lex(bytes).tokens {
+        if token.kind == TOKEN_EOF -> break
+        if depth == 0 {
+            loop at in previous..<token.span.start {
+                if bytes[at] == (U8{10}) && starts[starts.len() - 1] < at + 1 -> starts.push(at + 1)
+            }
+        }
+        if token.kind == TOKEN_LBRACE || token.kind == TOKEN_LPAREN || token.kind == TOKEN_LBRACKET -> depth += 1
+        if (token.kind == TOKEN_RBRACE || token.kind == TOKEN_RPAREN || token.kind == TOKEN_RBRACKET) && depth > 0 -> depth -= 1
+        previous = token.span.end
+    }
+    items := ""
+    body := [String]{}
+    loop (index, start) in starts {
+        end: if index + 1 < starts.len() -> starts[index + 1] - 1 else -> bytes.len()
+        line: jet_cli_repl_bytes(lines, start, end)
+        if jet_cli_eval_declares(line) {
+            items += "{line}\n"
+            next
+        }
+        body.push(line)
+    }
+    (items: items, body: body.join("\n"))
+}
+
+// Whether `line` alone parses as declarations and nothing else: no
+// constant, which in a body is the binding it spells.
+jet_cli_eval_declares: fn(line: String) -> Bool Never! {
+    parsed: parse_source(line.bytes())
+    if jet_cli_errors(parsed.diagnostics).len() > 0 -> return false
+    if parsed.program.items.len() == 0 && parsed.program.imports.len() == 0 -> return false
+    loop item in parsed.program.items {
+        if item == .Const(_) -> return false
+    }
+    true
+}
+
+// `items`, then the `run: fn` whose body is `lines`. When its last statement
+// is an expression with a value (any expression but an `if` without `else`),
+// that expression is wrapped in `__jet_eval_show` (JetSema Calls/Direct.jet
 // sema_call_check_eval_show), which shows the value: nothing for a unit value,
 // one line per item of a List or an Iter, and as `print` shows it otherwise.
 // Code that does not parse runs as written, so the compile reports it.
-jet_cli_eval_source: fn(lines: String) -> String Never! {
-    plain: "{JET_CLI_EVAL_HEAD}{lines}\n}}\n"
+jet_cli_eval_source: fn(items: String, lines: String) -> String Never! {
+    head: "{items}{JET_CLI_EVAL_HEAD}"
+    plain: "{head}{lines}\n}}\n"
     parsed: parse_source(plain.bytes())
     if jet_cli_errors(parsed.diagnostics).len() > 0 -> return plain
     body := [Stmt]{}
@@ -275,16 +324,16 @@ jet_cli_eval_source: fn(lines: String) -> String Never! {
         else -> return plain
     }
     if jet_cli_eval_valueless(value) -> return plain
-    start: jet_cli_eval_expr_start(value) - JET_CLI_EVAL_HEAD.count_bytes()
+    start: jet_cli_eval_expr_start(value) - head.count_bytes()
     end: jet_cli_eval_code_end(lines)
     bytes: lines.bytes()
     if start < 0 || end <= start || end > bytes.len() -> return plain
-    head: String.from_bytes(bytes[0..<start]) ?? return plain
+    before: String.from_bytes(bytes[0..<start]) ?? return plain
     shown: String.from_bytes(bytes[start..<end]) ?? return plain
     tail: String.from_bytes(bytes[end..<bytes.len()]) ?? return plain
     // The wrapper takes lines of its own, so a problem the value has is
     // reported on the line the code wrote, as it wrote it.
-    "{JET_CLI_EVAL_HEAD}{head}__jet_eval_show(\n{shown}\n){tail}\n}}\n"
+    "{head}{before}__jet_eval_show(\n{shown}\n){tail}\n}}\n"
 }
 
 // An `if` without `else`: a statement, which leaves no value to show.

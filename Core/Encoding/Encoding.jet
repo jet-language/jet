@@ -249,6 +249,19 @@ hex_to_bytes: fn(text: String) -> [U8] HexError! {
     Ok(out)
 }
 
+// The failure text of `input.csv<Row>()` / `input.json<Row>()`
+// (csv.__input_csv, json.__input_json): every FieldError of the input, one
+// per line, under a head naming the `format`. They fail with it as an `Err`,
+// so a script's `run: fn()` passes it up as it is.
+__input_failure: fn(format: String, failures: [FieldError]) -> String Never! {
+    shown := "the input is not {format} that decodes as the expected records:"
+    loop failure in failures {
+        at: if failure.path.is_empty() -> "" else -> "{failure.path}: "
+        shown += "\n  {at}{failure.reason}"
+    }
+    shown
+}
+
 // Typed `tree.decode<T>()` of a container or F32 T with no Decode
 // implementation of its own, and `FieldError.under`. JetIR calls these by name
 // (BuildDyn.jet ir_dyn_decode, ir_decode_under); scalars cross the runtime's

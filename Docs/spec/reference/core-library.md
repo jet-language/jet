@@ -1949,6 +1949,32 @@ run: fn() {
 }
 ```
 
+Three methods read the same input whole. `input.csv<Row>()` reads it as one
+CSV table, header first, and decodes each record into `Row`, so a field `Row`
+lacks is a compile error before any input is read; `input.json<Row>()` decodes
+each JSON value into `Row`, one per line (JSON Lines) or spread across lines.
+Both return `[Row]` and fail with one `Err` that lists every record that did
+not decode, under its CSV row or the line its JSON value starts on. They are
+`core.encoding.csv` and `core.encoding.json` decoding, so they need nothing
+more than `input` does. `input.edit(change)` rewrites each file the arguments
+name in place, every line through `change`, keeping each line's ending (LF or
+CRLF) and a missing final line break; a file `change` leaves as it was is not
+written. With no arguments it prints each standard input line changed. It
+needs `FS.Read` and `FS.Write`, which the run's effect notice names before the
+program starts. `jet help input` lists every name a program reads input
+through.
+
+```jet
+Sale: struct {
+    item: String
+    amount: Float
+}
+
+run: fn() {
+    print(input.csv<Sale>().map((s) -> s.amount).sum())
+}
+```
+
 The executable terminal examples cover binary-file composition, UTF-8
 stderr, CRLF line reads and EOF, plus confirmation with an empty-answer default:
 [`TerminalSource.jet`](../../../tests/run/CoreIO/TerminalSource.jet) and

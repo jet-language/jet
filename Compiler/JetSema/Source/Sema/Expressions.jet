@@ -3894,6 +3894,8 @@ sema_expr_check_method_call: fn(receiver: Expr, method: String, method_span: Spa
     if memo_stats.handled -> return memo_stats.value
     root_call := sema_root_call_try(receiver, method, method_span, type_args, args, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if root_call.handled -> return root_call.value
+    ambient_input := sema_call_try_ambient_input_method(receiver, method, method_span, type_args, args, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    if ambient_input.handled -> return ambient_input.value
     missing := sema_call_static_missing_member(receiver, method, method_span, args, environment, program, scopes, state, tail_store, context, diagnostics)
     if missing.handled -> return missing.value
     outcome_read := sema_value_method_outcome_read(receiver, method, method_span, args, expected, environment, program, scopes, state, tail_store, context, diagnostics)

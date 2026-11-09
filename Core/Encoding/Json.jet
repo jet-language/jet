@@ -1121,6 +1121,12 @@ parse_json: fn(text: String, allow_duplicates: Bool, limits: EncodingLimits) -> 
 // explicit-argument inference binds by name, so a generic caller's
 // `decode<[T]>` would read as `T := [T]`.
 __decode_typed: fn<Target: Decode>(text: String) -> Target [FieldError]! {
+    __decode_typed_from<Target>(text, 1)
+}
+
+// `__decode_typed` of `text` that starts on line `first_line` of its input:
+// a syntax error names the input's line.
+__decode_typed_from: fn<Target: Decode>(text: String, first_line: Int) -> Target [FieldError]! {
     cursor := Parser.new(text.bytes(), false)
     cursor.typed_numbers = true
     decoded := Target?{None}
@@ -1130,14 +1136,82 @@ __decode_typed: fn<Target: Decode>(text: String) -> Target [FieldError]! {
         .Err(errors) -> failures = errors
     }
     cursor.__cursor_finish()
-    if cursor.failure == .Val(error) -> return Err(typed_parse_error(error))
+    if cursor.failure == .Val(error) -> return Err(typed_parse_error(error, first_line))
     value: decoded ?? return Err(failures)
     Ok(value)
 }
 
-typed_parse_error: fn(error: EncodingError) -> [FieldError] Never! {
-    line: error.line ?? 0
+typed_parse_error: fn(error: EncodingError, first_line: Int) -> [FieldError] Never! {
+    line: if error.line == .Val(at) -> at + first_line - 1 else -> 0
     [FieldError]{FieldError{path: "", reason: "invalid JSON (line {line}): {error.reason}"}}
+}
+
+// `input.json<Row>()` (JetSema sema_call_try_ambient_input_method): every
+// JSON value of the ambient `input`, each decoded as `decode<Row>` decodes
+// one. A value ends at the end of a line where every bracket it opened is
+// closed, so one value per line (JSON Lines) and values printed across lines
+// both read; blank lines between values are skipped. Every failed value is
+// listed, under the line it starts on, in the one `Err` it fails with
+// (core.encoding.__input_failure).
+__input_json: fn<Row: Decode>(&&lines: Iter<String>) -> [Row] Err! {
+    values := [Row]{}
+    failures := [FieldError]{}
+    pending := ""
+    depth := 0
+    start := 0
+    number := 0
+    loop line in lines {
+        number += 1
+        if pending.is_empty() {
+            if line.trim().is_empty() -> next
+            start = number
+        }
+        pending += line
+        pending += "\n"
+        depth += __input_json_depth(line)
+        if depth > 0 -> next
+        if __decode_typed_from<Row>(pending, start) == {
+            .Ok(value) -> values.push(value)
+            .Err(errors) -> {
+                loop failure in errors {
+                    at: if failure.path.is_empty() -> "" else if failure.path.starts_with("[") -> failure.path.copy() else -> ".{failure.path}"
+                    failures.push(FieldError{path: "line {start}{at}", reason: failure.reason})
+                }
+            }
+        }
+        pending = ""
+        depth = 0
+    }
+    if !pending.is_empty() -> failures.push(FieldError{path: "line {start}", reason: "the input ends inside this JSON value"})
+    if failures.len() > 0 -> return Err(core.encoding.__input_failure("JSON", failures))
+    Ok(values)
+}
+
+// How deep `line` leaves the brackets: each `{` or `[` outside a string
+// opens one and each `}` or `]` closes one. A JSON string holds no line break,
+// so every line starts outside one.
+__input_json_depth: fn(line: String) -> Int Never! {
+    depth := 0
+    quoted := false
+    escaped := false
+    loop byte in line.bytes() {
+        if escaped {
+            escaped = false
+        } else if quoted {
+            if byte == (U8{92}) {
+                escaped = true
+            } else if byte == (U8{34}) {
+                quoted = false
+            }
+        } else if byte == (U8{34}) {
+            quoted = true
+        } else if byte == (U8{123}) || byte == (U8{91}) {
+            depth += 1
+        } else if byte == (U8{125}) || byte == (U8{93}) {
+            depth -= 1
+        }
+    }
+    depth
 }
 
 
@@ -1884,6 +1958,15 @@ patch_step: fn(doc: Dyn, op: PatchOp) -> Dyn EncodingError! {
     assert_eq(rows, [Int]{9007199254740993, 100})
     tree: __decode_typed<[Dyn]>("[1e2]") ?? panic("typed JSON capture")
     assert_eq(tree[0].decode<Int>() ?? panic("typed JSON carrier"), 100)
+}
+
+#Test("input JSON values end at bracket depth zero and keep their input lines") {
+    assert_eq(__input_json_depth("{{\"a\": [1,"), 2)
+    assert_eq(__input_json_depth("\"}}]\\\"{{\" ]}}"), -2)
+    assert_eq(__decode_typed_from<Int>("7", 3) ?? panic("typed JSON from a later line"), 7)
+    failures: if __decode_typed_from<Int>("x", 4) == .Err(errors) -> errors else -> [FieldError]{}
+    assert(failures.len() == 1)
+    assert(failures[0].reason.contains("(line 4)"))
 }
 
 #Test("JSON text serializers reject non-finite Float on the EncodingError rail") {

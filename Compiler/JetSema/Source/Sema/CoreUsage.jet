@@ -29,6 +29,8 @@ use jet_foundation.[
     Type,
     TypedLitBody,
     core_call,
+    core_input_method_member,
+    core_input_method_modules,
     core_module_has_member,
     core_module_has_type,
     core_type_modules,
@@ -974,6 +976,14 @@ sema_core_collect_expr: fn(expr: Expr, imports: [SemaCoreImport], registered: [S
             if sema_core_is_http_nominal(recv_name) -> sema_core_note_usage(used, spans, "core.http::__nominal__", Val(method_span))
             if recv_name == "Duration" -> sema_core_note_usage(used, spans, "core.time::__duration__", Val(method_span))
             if method == "cmd" && (recv_name == "" || recv_name == "UIShortcut") -> sema_core_note_usage(used, spans, "core.ui.host::shortcut", Val(method_span))
+            // `input.csv<Row>()` and its kin read through `__input_<method>`
+            // (sema_call_try_ambient_input_method).
+            if recv_name == "input" {
+                member: core_input_method_member(method)
+                loop owner in core_input_method_modules(method) {
+                    if sema_core_generated_module_member(owner, member) -> sema_core_note_usage(used, spans, "{owner}::{member}", Val(method_span))
+                }
+            }
             if recv_name != "" {
                 row: sema_core_import_find(imports, "{recv_name}.{method}")
                 if {
