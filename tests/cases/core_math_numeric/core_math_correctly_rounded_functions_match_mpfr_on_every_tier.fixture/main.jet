@@ -11,6 +11,10 @@ RSQRT: comptime { embed_file("corpus/rsqrt.txt") }
 SIN_PI: comptime { embed_file("corpus/sinpi.txt") }
 COS_PI: comptime { embed_file("corpus/cospi.txt") }
 TAN_PI: comptime { embed_file("corpus/tanpi.txt") }
+ATAN_PI: comptime { embed_file("corpus/atanpi.txt") }
+ASIN_PI: comptime { embed_file("corpus/asinpi.txt") }
+ACOS_PI: comptime { embed_file("corpus/acospi.txt") }
+ATAN2_PI: comptime { embed_file("corpus/atan2pi.txt") }
 
 hex_value: fn(b: U8) -> Int {
     n: Int.from_u8(b)
@@ -49,6 +53,10 @@ value: fn(name: String, a: [Float]) -> Float {
     if name == "sinpi" -> return math.sin_pi(a[0])
     if name == "cospi" -> return math.cos_pi(a[0])
     if name == "tanpi" -> return math.tan_pi(a[0])
+    if name == "atanpi" -> return math.atan_pi(a[0])
+    if name == "asinpi" -> return math.asin_pi(a[0])
+    if name == "acospi" -> return math.acos_pi(a[0])
+    if name == "atan2pi" -> return math.atan2_pi(a[0], a[1])
     panic("no corpus function {name}")
 }
 
@@ -92,4 +100,8 @@ run: fn() {
     check("sinpi", SIN_PI)
     check("cospi", COS_PI)
     check("tanpi", TAN_PI)
+    check("atanpi", ATAN_PI)
+    check("asinpi", ASIN_PI)
+    check("acospi", ACOS_PI)
+    check("atan2pi", ATAN2_PI)
 }
