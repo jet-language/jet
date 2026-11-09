@@ -1,0 +1,25 @@
+// `return` inside a braced callback leaves the callback, never the
+// enclosing function: the first returned value gives a generic `map` its
+// element type, and the last line hands back the same type.
+pick: fn(xs: [Int]) -> [Int] {
+    xs.map((x) -> {
+        if x == 2 -> return 20
+        x
+    })
+}
+
+run: fn() {
+    xs: [1, 2, 3]
+    ys: xs.map((x) -> {
+        if x == 2 -> return 20
+        x
+    })
+    print("{ys[0]} {ys[1]} {ys[2]}")
+    labels: xs.map((x) -> {
+        if x > 1 -> return "big"
+        return "small"
+    })
+    print(labels.join(","))
+    print(pick([2, 5])[0])
+    print("after")
+}

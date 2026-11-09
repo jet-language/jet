@@ -64,7 +64,7 @@ strict_reader: fn(path: Path) (EncodingError | IOError)! {
             .Ok(next) -> {
                 event: next ?? {
                     print("reader: unexpectedly reached the end")
-                    return Ok(())
+                    return Ok()
                 }
                 print("reader: {event_name(event)}")
             }
@@ -72,7 +72,7 @@ strict_reader: fn(path: Path) (EncodingError | IOError)! {
                 line: err.line ?? 0
                 column: err.column ?? 0
                 print("reader: {kind_name(err.kind)} at `{err.path}` line {line} column {column}: {err.reason}")
-                return Ok(())
+                return Ok()
             }
         }
     }
@@ -101,7 +101,7 @@ wide_reader: fn(label: String, path: Path, allow: Bool, limits: encoding.Encodin
             }
             .Err(err) -> {
                 print("{label}: {encoding_kind(err.kind)} after {count} events: {err.reason}")
-                return Ok(())
+                return Ok()
             }
         }
     }

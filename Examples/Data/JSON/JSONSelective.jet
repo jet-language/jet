@@ -80,13 +80,13 @@ projected: fn(label: String, text: String, full_line: Int?) {
 first_key: fn(label: String, path: Path) (EncodingError | IOError)! {
     input: files.open(path) ?? return Err(err)
     events := json.reader(input) ?? return Err(err)
-    _start: events.next() ?? return Ok(())
-    key: events.next() ?? return Ok(())
+    _start: events.next() ?? return Ok()
+    key: events.next() ?? return Ok()
     if key == {
         .Key(name) -> print("{label} reader: stopped after first key `{name}`; the rest is unread")
         else -> print("{label} reader: the first event after the root is not a key")
     }
-    Ok(())
+    Ok()
 }
 
 drained: fn(label: String, path: Path) (EncodingError | IOError)! {
@@ -102,7 +102,7 @@ drained: fn(label: String, path: Path) (EncodingError | IOError)! {
             .Err(error) -> {
                 line: error.line ?? 0
                 print("{label} reader: {kind_name(error.kind)} after {count} events at line {line} byte {error.byte_offset}: {error.reason}")
-                return Ok(())
+                return Ok()
             }
         }
     }

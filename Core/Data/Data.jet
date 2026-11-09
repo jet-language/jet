@@ -1782,7 +1782,7 @@ data_limits_check: fn(limits: DataLimits) DataError! {
     if limits.max_groups <= 0 || limits.max_sort_rows <= 0 || limits.max_join_rows <= 0 || limits.max_output_rows <= 0 {
         return Err(data_error(DataErrorKind.InvalidArgument, "data limits must be positive", "DataLimits"))
     }
-    Ok(())
+    Ok()
 }
 
 // Typed rows of one top-level JSON array over a consumed file (Rust
@@ -2358,7 +2358,7 @@ status: fn() -[FS, Env]> [DataStatus] Never! {
 require_bridge: fn(provider: String) DataError! -[FS, Env]> {
     step: bridge_provider(provider) ?? return Err(data_error(DataErrorKind.InvalidArgument, "unknown data bridge provider `{provider}`; expected py, r, or gpu", "require_bridge"))
     facts: bridge_status(step)
-    if facts.path == "available" -> return Ok(())
+    if facts.path == "available" -> return Ok()
     return Err(data_error(DataErrorKind.Bridge, "{step} unavailable (clone_value={facts.clone_value}, ownership={facts.ownership}, trust={facts.trust}, fallback={facts.fallback}, replacement={facts.replacement})", "require_bridge"))
 }
 
@@ -3397,7 +3397,7 @@ data_loader_check_payload: fn(limits: DataLimits, bytes: Int, operation: String)
     if limits.encoding.max_total_bytes == .Val(limit) {
         if bytes > limit -> return Err(data_error(.Limit, "payload is {bytes} bytes; max_total_bytes is {limit}", operation))
     }
-    Ok(())
+    Ok()
 }
 
 // Foundation `PreludeDataFlow` loader kernel, ported for `snapshot<T>`.
@@ -3469,7 +3469,7 @@ data_loader_validate: fn<T>(loader: DataLoader<T>) DataError! {
     if !valid_authority(loader.authority.scope) || !valid_authority(loader.authority.revision) {
         return Err(data_loader_error(DataErrorKind.InvalidArgument, "data.loader", "authority identity cannot carry credential material"))
     }
-    Ok(())
+    Ok()
 }
 
 // `payload` plus the local-file read of `jet_data_loader_payload`: bound

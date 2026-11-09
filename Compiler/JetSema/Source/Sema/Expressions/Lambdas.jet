@@ -1998,6 +1998,12 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
                     checked_tail_value := sema_check_expression(tail, sema_expression_lambda_value_expected(tail, body_expected, expected_ret, environment, lambda_scopes), environment, program, lambda_scopes, lambda_state, tail_store, lambda_context, diagnostics)
                     sema_ownership_keep_share_found(state, lambda_state)
                     checked_tail: checked_tail_value ?? return None
+                    // An earlier `return` gave an open callback its type; the
+                    // last line hands back the same type.
+                    if !inline_loop && lambda_context.callback_return_row == .Val(row) && !(row == .Result(_, _)) && !sema_type_assignable(row, checked_tail.ty) {
+                        diagnostics.push(sema_callback_return_mismatch(row, checked_tail.ty, expr_span(tail)))
+                        return None
+                    }
                     body_result_ty = checked_tail.ty
                     checked_body.push(TStmt.Return{value: Val(checked_tail), span: expr_span(tail)})
                 }

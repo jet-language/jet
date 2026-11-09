@@ -823,7 +823,7 @@ impl Parser {
         if b == (U8{91}) -> return self.__cursor_skip_array()
         if b == (U8{123}) -> return self.__cursor_skip_object()
         _ := self.parse_value() ?? return Err(err)
-        Ok(())
+        Ok()
     }
 
     // parse_array, keeping no item.
@@ -834,7 +834,7 @@ impl Parser {
         if (self.peek() ?? (U8{0})) == (U8{93}) {
             _: self.bump()
             self.depth -= 1
-            return Ok(())
+            return Ok()
         }
         index := 0
         loop {
@@ -846,7 +846,7 @@ impl Parser {
             if b == (U8{93}) {
                 _: self.bump()
                 self.depth -= 1
-                return Ok(())
+                return Ok()
             }
             if b != (U8{44}) -> return Err(self.err("expected ',' or ']' after an array element"))
             _: self.bump()
@@ -865,7 +865,7 @@ impl Parser {
         if (self.peek() ?? (U8{0})) == (U8{125}) {
             _: self.bump()
             self.depth -= 1
-            return Ok(())
+            return Ok()
         }
         loop {
             self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
@@ -887,7 +887,7 @@ impl Parser {
             if b == (U8{125}) {
                 _: self.bump()
                 self.depth -= 1
-                return Ok(())
+                return Ok()
             }
             if b != (U8{44}) -> return Err(self.err("expected ',' or '}}' after an object member"))
             _: self.bump()
@@ -1337,7 +1337,7 @@ write_json: fn(out: &[U8], value: Dyn, pretty: Bool, indent: Int) EncodingError!
             out.push(U8{91})
             if items.len() == 0 {
                 out.push(U8{93})
-                return Ok(())
+                return Ok()
             }
             loop i in 0..<items.len() {
                 if pretty {
@@ -1358,7 +1358,7 @@ write_json: fn(out: &[U8], value: Dyn, pretty: Bool, indent: Int) EncodingError!
             out.push(U8{123})
             if value.len() == 0 {
                 out.push(U8{125})
-                return Ok(())
+                return Ok()
             }
             i := 0
             loop pair in entries {
@@ -1380,12 +1380,12 @@ write_json: fn(out: &[U8], value: Dyn, pretty: Bool, indent: Int) EncodingError!
             out.push(U8{125})
         }
     }
-    Ok(())
+    Ok()
 }
 write_json_float: fn(out: &[U8], n: Float) EncodingError! {
     if !math.is_finite(n) -> return Err(value_error(EncodingErrorKind.Unsupported, "$", "JSON cannot encode a non-finite Float"))
     write_ascii(out, "{n}")
-    Ok(())
+    Ok()
 }
 // Bytes render as their byte values, `[1,255]`, the same text every tier writes.
 write_json_bytes: fn(out: &[U8], bytes: [U8]) Never! {

@@ -246,7 +246,7 @@ ir_executable_return: fn(function: FnBody) -> Type? Never! {
 }
 
 // The end of a body: a Unit success of a Result carrier (or of a kept
-// `Unit Never!` carrier) hands back `Ok(())`, a Unit function returns, and
+// `Unit Never!` carrier) hands back `Ok()`, a Unit function returns, and
 // any other function cannot get here.
 ir_return_fallthrough: fn(m: &IRModule, p: IRProgram, b: &IRBuilder) Never! {
     // A diverging (`-> Never`) body cannot end: its fallthrough is
@@ -6936,7 +6936,7 @@ ir_function_value: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, key: 
             } else if ir_is_result(result_ty) {
                 // A Unit function as a `fn(..) E!` value: the caller of a
                 // fallible function value reads a Result box, so the adapter
-                // returns Ok(()).
+                // returns Ok().
                 result = ir_result_box(m, p, a, result_ty, true, -1)
             } else {
                 ir_fail(a, span, "named function {function.name} returns nothing as a value of {ir_type_name(ty)}")

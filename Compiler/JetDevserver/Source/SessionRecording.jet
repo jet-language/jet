@@ -433,7 +433,7 @@ recording_required_int: fn(fields: [(key: String, value: Dyn)], key: String) -> 
 recording_validate_envelope_identity: fn(fields: [(key: String, value: Dyn)], expected: SessionRecordingIdentity) RecordingError! {
     source: recording_lookup(fields, "source_id")
     build: recording_lookup(fields, "build_id")
-    if source == None && build == None -> return Ok(())
+    if source == None && build == None -> return Ok()
     source_value: source ?? return Err(RecordingError.InvalidEnvelope(message: "envelope `source_id` must be a string"))
     source_text: recording_text(source_value) ?? return Err(RecordingError.InvalidEnvelope(message: "envelope `source_id` must be a string"))
     build_value: build ?? return Err(RecordingError.InvalidEnvelope(message: "envelope `build_id` must be a string"))

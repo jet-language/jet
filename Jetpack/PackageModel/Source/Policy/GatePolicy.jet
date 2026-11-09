@@ -92,7 +92,7 @@ pkg_check_invocation_flags: fn(root: String, args: [String]) PackageGateError! -
     loop argument in args {
         if pkg_invocation_gate_key(argument) != None -> gated = true
     }
-    if !gated -> return Ok(())
+    if !gated -> return Ok()
     cache := WorkspaceDeclarationCache.new()
     declarations: pkg_project_gate_declarations(cache, root)
     diagnostics := [Diagnostic]{}
@@ -127,7 +127,7 @@ pkg_check_workspace_overlay_gates: fn(cache: &WorkspaceDeclarationCache, root: S
     loop grant in policy.build_grants {
         if grant.effects.len() > 0 -> gated = true
     }
-    if !gated -> return Ok(())
+    if !gated -> return Ok()
     declarations: pkg_project_gate_declarations(cache, root)
     diagnostics := [Diagnostic]{}
     loop overlay in policy.overlays {

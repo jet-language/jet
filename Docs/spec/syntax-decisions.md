@@ -8463,7 +8463,7 @@ with a machine-applicable fix, never an alias. Effect denials
 narrowing are unchanged, and carriers, layouts, and runtime are identical.
 Parser, formatter, type display, and diagnostics emit only the suffix form.
 An arrowless unit-fallible header normalizes to Unit success with its written
-error domain. Terminal `Ok()`, `Ok(())`, and `Err(error)` use that carrier,
+error domain. Terminal `Ok()` and `Err(error)` use that carrier,
 including in terminal table arms; ordinary Unit statements still fall through.
 
 **2026-09-30 — D-CALLBACK-ERR1=A shipped** *(card #3708; owner ruling that

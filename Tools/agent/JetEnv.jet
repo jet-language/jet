@@ -192,7 +192,7 @@ build_profile: fn(repo: String, cache: String, key: String, shell: String, profi
     snapshot: files.join(cache, "src-{key}")
     // Held until this returns: one builder per key machine-wide.
     _held: files.lock("{snapshot}.lock") ?? return Err("cannot lock {snapshot}.lock: {err}")
-    if files.exists(profile) -> return Ok(())
+    if files.exists(profile) -> return Ok()
     if !files.exists(snapshot) {
         staging: "{snapshot}.{sys.pid()}"
         files.remove_all(staging) ?? ()
@@ -204,7 +204,7 @@ build_profile: fn(repo: String, cache: String, key: String, shell: String, profi
     }
     built: process.cmd([String]{"nix", "print-dev-env", "--profile", profile, "path:{snapshot}#{shell}"}).cwd(repo).stdout(.Capture).stderr(.Inherit).run() ?? return Err("nix could not start: {err}")
     if !built.success -> return Err("`nix print-dev-env --profile {profile} path:{snapshot}#{shell}` failed (exit {built.code})")
-    Ok(())
+    Ok()
 }
 
 // The `exported` variables of a Nix shell environment

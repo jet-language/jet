@@ -861,7 +861,7 @@ export_tree: fn(repo: String, commit: String, dir: String, paths: [String]) Land
     unpacked: run_in(dir, [String]{"tar", "-x", "-f", archive, "-C", dir}, "")
     files.remove(archive) ?? ()
     if unpacked.code != 0 -> return Err(LandError{message: "unpacking {commit} failed: {first_line(unpacked)}"})
-    Ok(())
+    Ok()
 }
 
 dev_worktree: fn() -[Exec, Env, FS, Time.Wait]> String Never! { root("JET_DEV_WORKTREE", checkout_top()) }

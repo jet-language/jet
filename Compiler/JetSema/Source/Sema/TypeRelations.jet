@@ -826,7 +826,7 @@ sema_type_graph_declares_name: fn(graph: SemaRegistrationGraph, name: String) ->
 sema_type_unknown_written_names: fn(graph: SemaRegistrationGraph, caller: Int, ty: Type, span: Span, generic_names: [String], diagnostics: &[Diagnostic]) {
     if ty == {
         .Named(name) -> {
-            if sema_type_written_name_unknown(graph, caller, name, generic_names) -> diagnostics.push(sema_unknown_type_name(name, span))
+            if sema_type_written_name_unknown(graph, caller, name, generic_names) -> diagnostics.push(sema_unknown_type_name(name, span, sema_type_declared_names(graph, caller)))
         }
         .Apply(name, args) -> {
             if sema_type_written_name_unknown(graph, caller, name, generic_names) -> sema_unknown_generic_type_name(name, span, diagnostics)

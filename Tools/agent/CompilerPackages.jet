@@ -173,7 +173,7 @@ command: fn(root: String, name: String, args: [String]) PackagesError! -[Env, Ex
         }
         else -> usage()
     }
-    Ok(())
+    Ok()
 }
 
 // The texts of `input`, each followed by a NUL byte.
@@ -232,7 +232,7 @@ walk_tree: fn(repo: String, directory: String, found: &[String]) PackagesError! 
         }
         if files.is_file(path) -> found.push(child)
     }
-    Ok(())
+    Ok()
 }
 
 // The value of the first `KEY: "VALUE"` line of `text`, "" when there is none.
@@ -342,7 +342,7 @@ visit_package: fn(repo: String, directory: String, packages: &[Package], visitin
     name: quoted_line(manifest, "name")
     if name == "" -> return Err(PackagesError{message: "{directory}/package.jet names no package"})
     loop known in packages {
-        if known.name == name -> return Ok(())
+        if known.name == name -> return Ok()
     }
     if visiting.contains(name) -> return Err(PackagesError{message: "package dependency cycle through {name}"})
     visiting.push(name.copy()) // copy: the package row below keeps the name too
@@ -352,7 +352,7 @@ visit_package: fn(repo: String, directory: String, packages: &[Package], visitin
         visit_package(repo, target, packages, visiting)
     }
     packages.push(Package{name: name, directory: directory})
-    Ok(())
+    Ok()
 }
 
 // The member `.jet` files of each package, repo-relative, in package

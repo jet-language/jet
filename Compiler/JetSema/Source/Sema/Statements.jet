@@ -6346,8 +6346,9 @@ sema_stmt_check_scope_member: fn(name: String, args: [Expr], args_span: Span?, b
         // resolves to no type is E0119 at the header.
         if dsl_args_valid && name == "SQL" && args.len() == 1 && args[0] == .Ident(row_name, row_span, _) && program.registration_graph == .Val(graph) {
             generic_names: loop parameter in environment.generic_params -> parameter.name
-            if sema_type_written_name_unknown(graph, sema_scope_caller_row(environment, graph), row_name, generic_names) {
-                diagnostics.push(sema_unknown_type_name(row_name, row_span))
+            caller: sema_scope_caller_row(environment, graph)
+            if sema_type_written_name_unknown(graph, caller, row_name, generic_names) {
+                diagnostics.push(sema_unknown_type_name(row_name, row_span, sema_type_declared_names(graph, caller)))
                 dsl_args_valid = false
             }
         }
@@ -7418,21 +7419,32 @@ sema_stmt_report_ownerless_view_return: fn(value: Expr, return_type: Type?, at: 
     diagnostics.insert(at, sema_ownership_diag_view_return_boundary(expr_span(value)))
 }
 
-// `return value` in a callback expected with no return row (the Rust
-// reference's callback `ret`): until a propagated fallible call gives the
-// callback that call's carrier, the value has no slot (E0113, naming the
-// enclosing function); after it, the value must fit that carrier. Either way
-// the value stays the callback's result, so its caller still judges it.
+// `return value` in a callback expected with no return row (a generic
+// `map`'s `fn(T) -> U`): `return` leaves the callback, never the enclosing
+// function. The first returned value gives the callback its row, and every
+// later one must fit it; a row a propagated fallible call gave first is that
+// call's carrier, and a value fits its success. The value stays the
+// callback's result, so its caller still judges it.
 sema_stmt_check_open_callback_return: fn(value: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     checked: sema_check_expression(value, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
-    value_span: expr_span(value)
     if context.callback_return_row == .Val(row) {
-        fits: if row == .Result(success, _) -> sema_type_assignable(success, checked.ty) else -> sema_type_assignable(row, checked.ty)
-        if !fits -> diagnostics.push(sema_return_value_mismatch(context.function_name, row, checked.ty, value_span))
+        // A Result row is a propagated call's carrier; a plain row is the
+        // value an earlier `return` handed back.
+        if row == .Result(success, _) {
+            if !sema_type_assignable(success, checked.ty) -> diagnostics.push(sema_return_value_mismatch(context.function_name, row, checked.ty, expr_span(value)))
+        } else if !sema_type_assignable(row, checked.ty) {
+            diagnostics.push(sema_callback_return_mismatch(row, checked.ty, expr_span(value)))
+        }
         return Val(checked)
     }
-    diagnostics.push(sema_error("E0113", value_span, "`{context.function_name}` doesn't return a value", "a function hands back a value only when it declares a return type", "remove the value (a bare `return`), or write `-> {type_name(checked.ty)}` after the parameter list"))
+    context.callback_return_row = Val(checked.ty.copy())
     Val(checked)
+}
+
+// E0113: a callback's value disagrees with the type its first `return`
+// handed back.
+sema_callback_return_mismatch: fn(row: Type, got: Type, span: Span) -> Diagnostic {
+    sema_error("E0113", span, "this callback returns {sema_type_show(row)} elsewhere, but this value is {sema_type_show(got)}", "every `return` and the last line of a callback hand back one type", sema_return_value_fix(row, got))
 }
 
 // The declared return type is a `T !E` carrier.

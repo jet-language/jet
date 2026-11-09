@@ -216,10 +216,10 @@ impl TLSStream {
     close: fn(self) IOError! -[Net, Time.Wait]> {
         state: __state(self) ?? return Err(__io_error(.Close, "TLS stream is closed"))
         guard := state.guard_edit()
-        if guard.value.closed -> return Ok(())
+        if guard.value.closed -> return Ok()
         _: __close_write(guard.value, C_NO_DEADLINE, "tls close") ?? return Err(err)
         guard.value.closed = true
-        Ok(())
+        Ok()
     }
 
     // Sends close_notify and shuts down the write side; reads stay open.
@@ -581,7 +581,7 @@ __add_alpn: fn(raw: U64, protocols: [String]) __TLSFailure! {
         status: __c_alpn_add(raw, protocol)
         if status != 0 -> return Err(__fail("TLS could not offer ALPN protocol `{protocol}`: {__mbedtls_text(status)}"))
     }
-    Ok(())
+    Ok()
 }
 
 __load_trust: fn(raw: U64, trust: TLSClientTrust) __TLSFailure! {
@@ -593,7 +593,7 @@ __load_trust: fn(raw: U64, trust: TLSClientTrust) __TLSFailure! {
         }
         .CustomOnly(roots) -> { _: __load_custom_roots(raw, roots) ?? return Err(err) }
     }
-    Ok(())
+    Ok()
 }
 
 __load_custom_roots: fn(raw: U64, roots: RootCertificates) __TLSFailure! {
@@ -611,7 +611,7 @@ __load_custom_roots: fn(raw: U64, roots: RootCertificates) __TLSFailure! {
         }
     }
     if __c_ca_count(raw) == before -> return Err(__fail("TLS custom CA PEM did not contain a certificate"))
-    Ok(())
+    Ok()
 }
 
 __ca_status_text: fn(status: Int) -> String Never! {
@@ -643,7 +643,7 @@ __load_system_roots: fn(raw: U64, required: Bool) __TLSFailure! {
         }
     }
     if required && __c_ca_count(raw) == 0 -> return Err(__fail("TLS could not find system certificate roots"))
-    Ok(())
+    Ok()
 }
 
 __system_root_files: fn() -> [String] Never! {
@@ -737,7 +737,7 @@ __private_key_check: fn(raw: [U8]) __TLSFailure! {
         end: "-----END {label}-----".bytes()
         if last - first >= begin.len() + end.len() && __find(raw, begin, first) == first && __find(raw, end, last - end.len()) == last - end.len() {
             _: __pem_base64(raw, first + begin.len(), last - end.len()) ?? return Err(err)
-            return Ok(())
+            return Ok()
         }
     }
     Err(__fail("TLS private key PEM must contain exactly one PKCS#8, PKCS#1, or SEC1 key"))
@@ -838,7 +838,7 @@ __valid_server_name: fn(name: String) -> Bool Never! {
 __handshake: fn(context: __TLSContext, tcp: TCPStream, server_name: String, end_ns: Int) NetError! -[Net, Time.Wait]> {
     loop {
         status: __c_handshake(context.raw)
-        if status == 0 -> return Ok(())
+        if status == 0 -> return Ok()
         if status == C_NEW_SESSION_TICKET -> next
         if status == C_WANT_READ || status == C_WANT_WRITE {
             _: __wait(tcp, __want(status), end_ns, "tls handshake") ?? return Err(err)
@@ -957,7 +957,7 @@ __write_all: fn(&tls: __TLSState, bytes: [U8], end_ns: Int) IOError! -[Net, Time
         if count == 0 -> return Err(IOError.Other(__io_context(.Write, "tls write all failed: zero bytes written")))
         offset += count
     }
-    Ok(())
+    Ok()
 }
 
 // Mbed TLS requires a WANT_* write to be repeated with the same buffer.
@@ -975,7 +975,7 @@ __write_packed: fn(&tls: __TLSState, address: U64, length: Int, end_ns: Int) -[N
 }
 
 __close_write: fn(&tls: __TLSState, end_ns: Int, operation: String) IOError! -[Net, Time.Wait]> {
-    if tls.write_closed -> return Ok(())
+    if tls.write_closed -> return Ok()
     loop {
         status: __c_close_notify(tls.context.raw)
         if status == 0 -> break
@@ -991,7 +991,7 @@ __close_write: fn(&tls: __TLSState, end_ns: Int, operation: String) IOError! -[N
     }
     if shutdown_failure != "" -> return Err(__io_error(.Close, "TLS socket write shutdown failed: {shutdown_failure}"))
     tls.write_closed = true
-    Ok(())
+    Ok()
 }
 
 __not_connected: fn(err: NetError) -> Bool Never! {

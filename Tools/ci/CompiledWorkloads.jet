@@ -362,13 +362,13 @@ collect_files: fn(root: String, relative: String, out: &[String]) Problem! -[FS]
     path: "{root}/{relative}"
     meta: files.stat(path) ?? return Err(problem("`{relative}` cannot be read: {err}"))
     if meta.is_dir {
-        if files.basename(path) == ".jet" -> return Ok(())
+        if files.basename(path) == ".jet" -> return Ok()
         listed: files.list_dir(path) ?? return Err(problem("`{relative}` cannot be listed: {err}"))
         loop entry in listed -> collect_files(root, "{relative}/{entry.name}", out) ?? return Err(err)
-        return Ok(())
+        return Ok()
     }
     if meta.is_file -> out.push(relative.copy())
-    Ok(())
+    Ok()
 }
 
 // SHA-256 over `path NUL bytes NUL` of every file under the named roots, by path.
@@ -419,7 +419,7 @@ walk_tree: fn(relative: String, path: String, out: &[TreeEntry]) Problem! -[FS]>
             walk_tree(child, "{path}/{entry.name}", out) ?? return Err(err)
         }
     }
-    Ok(())
+    Ok()
 }
 
 hash_input_method: fn(path: String) -[FS]> String Never! {
@@ -577,11 +577,11 @@ require_live_loss_owner: fn(contract: Contract, owners: &Owners, owner: String, 
             owners.live[owner.copy()] = live
         }
         if !live -> return Err(problem("loss owner is not a live Tower card: {context} ({owner})"))
-        return Ok(())
+        return Ok()
     }
     if owner.starts_with("non-goal:") {
         if !ratified_non_goal(contract.root, owners.board, owner) -> return Err(problem("loss owner is not a ratified non-goal: {context} ({owner})"))
-        return Ok(())
+        return Ok()
     }
     Err(problem("loss owner is not a card or ratified non-goal: {context}"))
 }
@@ -1654,7 +1654,7 @@ check_report: fn(contract: Contract, given: String, candidate: String, board: St
         loop id in tier_loss_tasks -> parts.push("{id}:tiers={at(tier_loss_rows, id).removesuffix(",")}:owner={at(outcome_loss_owner, id)}")
         return Err(problem("compiled workload superiority failed: measured Jet loss ({parts.join(";")}); blocking product card remains open"))
     }
-    Ok(())
+    Ok()
 }
 
 contract_paths: fn() -> [String] Never! {
@@ -1721,7 +1721,7 @@ read_ledger: fn(root: String, name: String, label: String) -[FS]> Table Problem!
 
 require_sha: fn(value: String, label: String) Problem! {
     if !is_sha256(value) || full("0+", value) -> return Err(problem("{label} is not a nonzero SHA-256"))
-    Ok(())
+    Ok()
 }
 
 split_targets: fn(targets: String) -> [String] Never! {
@@ -2080,7 +2080,7 @@ write_fixture_board: fn(state: SelfCheck) Problem! -[FS]> {
     board: Dyn.Object([String: Dyn]{"cards": Dyn.Array(cards), "decisions": Dyn.Array([Dyn]{})})
     text: json.to_string(board) ?? return Err(problem("the fixture board cannot be encoded: {err}"))
     files.write(state.board, text) ?? return Err(problem("`{state.board}` cannot be written: {err}"))
-    Ok(())
+    Ok()
 }
 
 self_check_in: fn(state: SelfCheck) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Problem! {
@@ -2220,7 +2220,7 @@ apply_edit: fn(dir: String, edit: Edit) Problem! -[FS]> {
     path: "{dir}/{edit.file}"
     if edit.action == "remove" {
         files.remove(path) ?? return Err(problem("`{path}` cannot be removed: {err}"))
-        return Ok(())
+        return Ok()
     }
     text: files.read(path) ?? return Err(problem("`{path}` cannot be read: {err}"))
     rows: records(text)
@@ -2245,7 +2245,7 @@ apply_edit: fn(dir: String, edit: Edit) Problem! -[FS]> {
         out.push(fields.join("\t"))
     }
     files.write(path, "{out.join("\n")}\n") ?? return Err(problem("`{path}` cannot be written: {err}"))
-    Ok(())
+    Ok()
 }
 
 candidate_replaced: fn(text: String, replacement: String) -> String Never! {
@@ -2278,7 +2278,7 @@ refresh_review_digest: fn(dir: String) Problem! -[FS]> {
 
 write_lines: fn(path: String, lines: [String]) Problem! -[FS]> {
     files.write(path, "{lines.join("\n")}\n") ?? return Err(problem("`{path}` cannot be written: {err}"))
-    Ok(())
+    Ok()
 }
 
 toolchain_path: fn(root: String, command: String) -[Env, FS]> String Never! {
@@ -2461,7 +2461,7 @@ write_synthetic_report: fn(state: SelfCheck) Problem! -[Env, Exec, FS, IO, Time,
     }
     write_lines("{report}/peer_coverage.tsv", coverage) ?? return Err(err)
     write_lines("{report}/peer_measurements.tsv", peer_measurements) ?? return Err(err)
-    Ok(())
+    Ok()
 }
 
 not_run: fn(scope: String, availability: String, reason: String, rationale: String) -> String Never! {
@@ -2833,13 +2833,13 @@ resolve_executable: fn(candidate: String) -[Env, FS]> String Never! {
 
 require_file: fn(file: String, label: String) Problem! -[FS]> {
     if !files.is_file(file) -> return Err(problem("missing {label}: {file}"))
-    Ok(())
+    Ok()
 }
 
 require_input_path: fn(file: String, label: String) Problem! -[FS]> {
     meta: files.stat(file) ?? return Err(problem("missing {label}: {file}"))
     if !meta.is_file && !meta.is_dir -> return Err(problem("missing {label}: {file}"))
-    Ok(())
+    Ok()
 }
 
 file_size: fn(file: String) -[FS]> Int Never! {
@@ -3054,7 +3054,7 @@ checked: fn(result: Measured, expected: String, label: String) Problem! -[FS]> {
     if result.status != 0 -> return Err(problem("{label} exited {result.status}: {clean_text(result.stderr)}"))
     bytes: files.read_bytes(expected) ?? return Err(problem("{label} output differs from {expected}"))
     if result.stdout.bytes() != bytes -> return Err(problem("{label} output differs from {expected}"))
-    Ok(())
+    Ok()
 }
 
 // --- the peer isolation launcher
@@ -3063,13 +3063,13 @@ launcher_kind: fn(launcher: String) Problem! -[Env, FS]> {
     lower: launcher.lower()
     if sys.family() == "windows" {
         if !lower.ends_with(".exe") -> return Err(problem("Windows peer isolation launcher must be an executable: {launcher}"))
-        return Ok(())
+        return Ok()
     }
     if lower.ends_with(".exe") -> return Err(problem("non-Windows peer isolation launcher must not be a Windows executable: {launcher}"))
     real: files.canonicalize(launcher) ?? return Err(problem("peer isolation launcher cannot be inspected: {err}"))
     meta: files.stat(real) ?? return Err(problem("peer isolation launcher cannot be inspected: {err}"))
     if !execute_bits(meta.mode) -> return Err(problem("peer isolation launcher is not executable: {launcher}"))
-    Ok(())
+    Ok()
 }
 
 // JET_COMPILED_WORKLOAD_PEER_LAUNCHER, else `.jet/compiled-workload-peer-launcher`
@@ -3178,30 +3178,30 @@ assert_frozen_peer_command: fn(task_id: String, language: String, phase: String,
             if !token.starts_with("-") && token != "build" && token != "build-exe" -> next
             if !frozen_flag_kept(token, args) -> return Err(problem("peer {phase} flag drifted from ledger: {task_id}/{language}/{token}"))
         }
-        return Ok(())
+        return Ok()
     }
     if !tokens[1..<tokens.len()].contains("INPUT") || args.len() == 0 {
         return Err(problem("peer run input boundary drifted from ledger: {task_id}/{language}"))
     }
-    Ok(())
+    Ok()
 }
 
 // --- staging
 
 remove_tree: fn(path: String) Problem! -[FS]> {
-    if !path_exists(path) -> return Ok(())
+    if !path_exists(path) -> return Ok()
     if files.is_symlink(path) || !files.is_dir(path) {
         files.remove(path) ?? return Err(problem("`{path}` cannot be removed: {err}"))
-        return Ok(())
+        return Ok()
     }
     files.remove_all(path) ?? return Err(problem("`{path}` cannot be removed: {err}"))
-    Ok(())
+    Ok()
 }
 
 preserve_mode: fn(source: String, destination: String, mode: Int) Problem! -[Env, FS]> {
-    if sys.family() == "windows" -> return Ok(())
+    if sys.family() == "windows" -> return Ok()
     files.set_mode(destination, mode) ?? return Err(problem("could not preserve mode for {source}: {err}"))
-    Ok(())
+    Ok()
 }
 
 // Copies files, directories (without `.jet`) and links as links, keeping modes.
@@ -3213,7 +3213,7 @@ copy_path: fn(source: String, destination: String, exclude_control: Bool) Proble
         remove_tree(destination) ?? return Err(err)
         link: files.read_link(source) ?? return Err(problem("`{source}` cannot be read: {err}"))
         files.symlink(link, destination) ?? return Err(problem("`{destination}` cannot be linked: {err}"))
-        return Ok(())
+        return Ok()
     }
     if meta.is_dir {
         files.create_dir_all(destination) ?? return Err(problem("`{destination}` cannot be created: {err}"))
@@ -3255,7 +3255,7 @@ stage_path: fn(source: String, destination: String) Problem! -[Env, FS]> {
         }
         depth -= 1
     }
-    Ok(())
+    Ok()
 }
 
 source_candidates: fn(language: String) -> [String] Never! {
@@ -3294,14 +3294,14 @@ source_entry: fn(source: String, language: String) -[FS]> String Problem! {
 closure_walk: fn(file: String, out: &[String]) Problem! -[FS]> {
     meta: files.stat(file) ?? return Err(problem("`{file}` cannot be read: {err}"))
     if meta.is_dir {
-        if files.basename(file) == ".jet" -> return Ok(())
+        if files.basename(file) == ".jet" -> return Ok()
         listed: files.list_dir(file) ?? return Err(problem("`{file}` cannot be listed: {err}"))
         loop entry in listed -> closure_walk("{file}/{entry.name}", out) ?? return Err(err)
-        return Ok(())
+        return Ok()
     }
     if !meta.is_file && !meta.is_symlink -> return Err(problem("unsupported source closure entry: {file}"))
     out.push(file.copy())
-    Ok(())
+    Ok()
 }
 
 // A source file, or every file and link under a source directory, by path.
@@ -3461,7 +3461,7 @@ write_workload_package: fn(project: String, task: [String: String], source: Stri
     allow: jet_authority(task, source) ?? return Err(err)
     path: "{project}/package.jet"
     files.write(path, "name: \"compiled-workload\"\nversion: \"0.1.0\"\nauthority: {{ allow: [{allow}] }}\n") ?? return Err(problem("`{path}` cannot be written: {err}"))
-    Ok(())
+    Ok()
 }
 
 // --- builds
@@ -4027,7 +4027,7 @@ add_samples: fn(state: Producer, rows: &Rows, task: String, language: String, me
     loop index in 0..<values.len() {
         rows.samples.push([String]{"1", task.copy(), language.copy(), metric.copy(), "{index + 1}", "{values[index]}", unit.copy(), method.copy(), state.platform.copy(), "native", "aot"})
     }
-    Ok(())
+    Ok()
 }
 
 new_side: fn(state: Producer, name: String, language: String, source: String, hostile: String, jet: Bool) -[FS]> Side Problem! {
@@ -4113,7 +4113,7 @@ measure_sample: fn(state: Producer, task: [String: String], peer: [String: Strin
     side.diagnostic_methods.push("{diagnostic.method};debugging-steps={diagnostic.steps};debugging-nanoseconds={diagnostic.result.duration}")
     deployment: deploy_closure(state, task, side.language, side.closure, paths.input, paths.expected, "{paths.work}/deploy-{side.name}-{sample}") ?? return Err(err)
     side.deployment_values.push(deployment)
-    Ok(())
+    Ok()
 }
 
 // cross-platform-notes embeds its input at build time, so its hostile Jet run
@@ -4140,7 +4140,7 @@ side_samples: fn(state: Producer, rows: &Rows, task_id: String, side: Side, orde
     add_samples(state, rows, task_id, language, "debugging", side.debugging_values, "nanoseconds-and-steps", "{order};debugging-replay={methods}") ?? return Err(err)
     add_samples(state, rows, task_id, language, "deployment", side.deployment_values, "count-and-time", "{order};copy-count=1;closure-rehash=1;rerun-count=1") ?? return Err(err)
     add_samples(state, rows, task_id, language, "unsafe_burden", repeated(side.unsafe_sites.count, count), "count-and-review", "{order};{side.unsafe_sites.method}") ?? return Err(err)
-    Ok(())
+    Ok()
 }
 
 task_environment: fn(platform: String, task: [String: String]) -> String Never! {
@@ -4358,7 +4358,7 @@ measure_task: fn(state: Producer, rows: &Rows, task: [String: String], adapter: 
     })
     evidence: tier_evidence(state, task, peer, adapter, paths) ?? return Err(err)
     tier_rows_for(state, rows, task, peer, tiers, evidence, jet_side, peer_side)
-    Ok(())
+    Ok()
 }
 
 // --- all-peer coverage
@@ -4399,7 +4399,7 @@ run_peer_coverage: fn(state: Producer, rows: &Rows, peer: [String: String], task
     head: "1\t{key}\t{task_id}\t{at(peer, "selection")}\t{language}\t{at(peer, "program")}\t{at(adapter, "peer_source")}\t{at(peer, "source_revision")}\t{source_hash}\t{input_hash}\t{expected_hash}"
     if !peer_supports_platform(at(peer, "applicable_targets"), state.platform) {
         rows.peer_coverage.push("{head}\t-\t{hostile_input_hash}\t-\tnot-applicable\t{state.platform}\t-\tnative\tnot-run:host-platform\tpeer-targets={at(peer, "applicable_targets")};reason=host-platform")
-        return Ok(())
+        return Ok()
     }
     command: at(state.toolchain_command, language)
     if command == "" -> return Err(problem("peer coverage toolchain missing: {language}"))
@@ -4469,7 +4469,7 @@ run_peer_coverage: fn(state: Producer, rows: &Rows, peer: [String: String], task
         if values.len() != count -> return Err(problem("peer coverage metric missing: {key}/{name}"))
         rows.peer_measurements.push("1\t{key}\t{task_id}\t{at(peer, "selection")}\t{language}\t{name}\t{count}\t{coverage_numbers(values)}\t{at(metric, "unit")}\tmeasured\t{command_line};evidence={evidence}\t{state.platform}\t-\tnative")
     }
-    Ok(())
+    Ok()
 }
 
 peer_supports_platform: fn(targets: String, platform: String) -> Bool Never! {

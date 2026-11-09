@@ -341,10 +341,14 @@ sema_call_try_ambient_prelude: fn(call: Call, expected: Type?, environment: Sema
             if sema_module_no_prelude(environment, program) -> return SemaDirectSpecialCheck{handled: false, value: None}
             sema_call_ambient_source_alias(call, "core.prelude", call.name, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         }
-        "Decimal" -> sema_call_check_value_constructor(call, "Decimal", [Type]{Type.String}, false, expected, environment, program, scopes, state, tail_store, context, diagnostics)
-        "Complex" -> sema_call_check_value_constructor(call, "Complex", [Type]{Type.Float, Type.Float}, false, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+        "Decimal" | "Complex" -> {
+            if sema_call_value_type_args_refused(call, diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
+            if call.name == "Decimal" -> return sema_call_check_value_constructor(call, "Decimal", [Type]{Type.String}, false, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+            sema_call_check_value_constructor(call, "Complex", [Type]{Type.Float, Type.Float}, false, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+        }
         else -> {
             if !sema_expr_is_math_type_name(call.name) -> return SemaDirectSpecialCheck{handled: false, value: None}
+            if sema_call_value_type_args_refused(call, diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
             // A math type Core's source declares builds through its own `new`.
             if program.registration_graph == .Val(graph) {
                 if sema_type_source_owns_nominal(graph, call.name, sema_scope_caller_row(environment, graph)) {
@@ -358,6 +362,15 @@ sema_call_try_ambient_prelude: fn(call: Call, expected: Type?, environment: Sema
             sema_call_check_value_constructor(call, call.name, components, true, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         }
     }
+}
+
+// `Mat3<Int>(…)`: a built-in value type built by a call has fixed component
+// types and no type parameters, so written type arguments are refused, never
+// ignored.
+sema_call_value_type_args_refused: fn(call: Call, diagnostics: &[Diagnostic]) -> Bool {
+    if call.type_args.len() == 0 -> return false
+    diagnostics.push(sema_error("E0119", call.name_span, "`{call.name}` is not generic", "`{call.name}` is a built-in value type with fixed component types, so it takes no type arguments", "remove the type arguments: write `{call.name}(…)`"))
+    true
 }
 
 // A readable prelude alias whose Core declaration is source-owned is called as
@@ -533,7 +546,8 @@ sema_call_ambient_print_refusal: fn(ty: Type, span: Span) -> Diagnostic Never! {
 }
 
 // Variadic `print`: every argument is checked on its own and prints its own
-// line, one `Print` per argument in order (Rust `print_values`).
+// line, one `Print` per argument in order (Rust `print_values`). It takes
+// values only, so a label (`sep:`) names no parameter: E0764.
 sema_call_check_ambient_print: fn(call: Call, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     if call.args.len() == 0 {
         diagnostics.push(sema_error("E0103", call.name_span, "`print` needs at least one thing to print", "printing nothing isn't meaningful", "e.g. print(\"hello\")"))
@@ -541,6 +555,12 @@ sema_call_check_ambient_print: fn(call: Call, environment: SemaScopeEnvironment,
     }
     values := [TExpr]{}
     complete := true
+    loop argument in call.args {
+        if argument.label == .Val(label) {
+            diagnostics.push(sema_call_diag_unknown_label(call.name, label.name, [SemaCallParam]{}, label.span))
+            complete = false
+        }
+    }
     loop argument_index in 0..<call.args.len() {
         checked: sema_check_expression(call.args[argument_index].expr, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? {
             complete = false

@@ -293,11 +293,11 @@ parser_parse_item_or_import: fn(state: &JetParserState) -> ParsedItemOrImport {
             value: parser_parse_template_loop(state)
             return ParsedItemOrImport{item: Val(Item.TemplateLoop{value: value}), handled: true}
         }
-        // An ALL_CAPS `NAME: value` in an inline module body is a module
-        // constant, and so is `Name: path` until sema reads what the path
-        // names (#6176); file scope routes both as module bindings before
-        // reaching here.
-        parser_marked_const_ahead(state, 0) || parser_path_binding_ahead_at(state, 0) -> {
+        // `NAME: value` in an inline module body is a module constant, and so
+        // is `Name: path` until sema reads what the path names; casing checks
+        // the name like any module binding. File scope routes both as module
+        // bindings before reaching here.
+        (token.kind == TOKEN_IDENT && parser_kind_at(state, 1) == TOKEN_COLON) || parser_path_binding_ahead_at(state, 0) -> {
             value: parser_parse_const(state, modifiers)
             return ParsedItemOrImport{item: Val(Item.Const{value: value}), handled: true}
         }
@@ -1015,14 +1015,7 @@ parser_parse_param: fn(state: &JetParserState, zone: ParamZone) -> Param {
         if sources.len() > 0 -> declared_from = Val(sources)
     }
     default := Expr?{None}
-    if {
-        parser_current_kind(state) == TOKEN_LBRACE -> {
-            parser_bump(state)
-            default = Val(parser_parse_expression(state, 1, 0).expr)
-            parser_expect(state, TOKEN_RBRACE, "`}}` after the parameter default")
-        }
-        else -> {}
-    }
+    if parser_current_kind(state) == TOKEN_LBRACE -> default = Val(parser_parse_declared_default(state, ty, ty_span, "`}}` after the parameter default").expr)
     if variadic && default != None {
         param_name: parser_value(state, name)
         parser_add_error_code(state, "E1310", name.span, "variadic parameter `{param_name}` can't have a default value", "a `...` rest parameter collects trailing arguments — it can't also be optional", "remove the `{{…}}` default from the variadic parameter")
@@ -1995,12 +1988,7 @@ parser_parse_struct: fn(state: &JetParserState, modifiers: ParsedItemModifiers) 
                         parsed_value: parser_parse_expression(state, 1, 0)
                         default = Val(parsed_value.expr)
                     }
-                    parser_current_kind(state) == TOKEN_LBRACE -> {
-                        parser_bump(state)
-                        parsed_value: parser_parse_expression(state, 1, 0)
-                        parser_expect(state, TOKEN_RBRACE, "`}}` after a struct field default")
-                        default = Val(parsed_value.expr)
-                    }
+                    parser_current_kind(state) == TOKEN_LBRACE -> default = Val(parser_parse_declared_default(state, field_type.ty, field_type.span, "`}}` after a struct field default").expr)
                 }
                 redact := false
                 marker_index := 0
@@ -2097,7 +2085,9 @@ parser_parse_enum: fn(state: &JetParserState, modifiers: ParsedItemModifiers) ->
             kind == TOKEN_KW_IMPL -> value.trait_impls.push(parser_parse_trait_impl_block(state, markers))
             else -> parser_parse_variant_entry(state, "", value, markers, inside)
         }
-        if parser_current_kind(state) == TOKEN_SEMI -> parser_bump(state)
+        // Cases are separated as struct fields are: a `,` or a line break.
+        separator_kind := parser_current_kind(state)
+        if separator_kind == TOKEN_COMMA || separator_kind == TOKEN_SEMI -> parser_bump(state)
     }
     close: parser_expect(state, TOKEN_RBRACE, "`}}` after enum variants")
     value.span = parser_cover(modifiers.start_span, close.span)
@@ -2185,18 +2175,18 @@ parser_parse_variant_entry: fn(state: &JetParserState, prefix: String, value: &E
     }
     leaves_before: value.variants.len()
     loop parser_current_kind(state) != TOKEN_RBRACE && parser_current_kind(state) != TOKEN_EOF && !parser_aborting(state) {
+        parser_skip_semicolons(state)
+        if parser_current_kind(state) == TOKEN_RBRACE -> break
         kind: parser_current_kind(state)
-        if kind == TOKEN_SEMI || kind == TOKEN_COMMA {
-            parser_bump(state)
-            next
-        }
         if parser_inbody_marker_ahead(state) {
             if parser_parse_inbody_marker(state) == .Val(line) -> inside.push(line)
             next
         }
         entry_markers: if kind == TOKEN_HASH -> parser_parse_variant_markers(state) else -> [Marker]{}
         parser_parse_variant_entry(state, path, value, entry_markers, inside)
-        if parser_current_kind(state) == TOKEN_SEMI || parser_current_kind(state) == TOKEN_COMMA -> parser_bump(state)
+        // Leaves are separated as struct fields are: a `,` or a line break.
+        separator_kind := parser_current_kind(state)
+        if separator_kind == TOKEN_COMMA || separator_kind == TOKEN_SEMI -> parser_bump(state)
     }
     parser_expect(state, TOKEN_RBRACE, "`}}` to close the variant group")
     if parser_aborting(state) -> return
@@ -2575,11 +2565,9 @@ parser_parse_trait: fn(state: &JetParserState, modifiers: ParsedItemModifiers) -
                 default := Expr?{None}
                 end := constant_type.span
                 if parser_current_kind(state) == TOKEN_LBRACE {
-                    parser_bump(state)
-                    parsed_value: parser_parse_expression(state, 1, 0)
-                    close_default: parser_expect(state, TOKEN_RBRACE, "`}}` after a trait constant default")
-                    default = Val(parsed_value.expr)
-                    end = close_default.span
+                    parsed_default: parser_parse_declared_default(state, constant_type.ty, constant_type.span, "`}}` after a trait constant default")
+                    default = Val(parsed_default.expr)
+                    end = parsed_default.span
                 }
                 constants.push(TraitConstDecl{name: parser_value(state, constant_name), name_span: constant_name.span, ty: constant_type.ty, ty_span: constant_type.span, default: default.move(), span: parser_cover(constant_name.span, end)})
                 parser_finish_statement(state)
@@ -2754,7 +2742,9 @@ parser_parse_impl: fn(state: &JetParserState, modifiers: ParsedItemModifiers) ->
             parser_add_error_here(state, "expected `{{` to open the error-conversion body", "an error conversion body is a block: `impl Source -> Target {{ … }}`", "add `{{` after the target type")
             return Item.ErrorConv{value: ErrorConvDef{from_ty: type_name, from_span: type_span, to_ty: to_ty, to_span: target.span, body: [Stmt]{}, body_span: parser_cover(start.span, target.span), markers: modifiers.markers}}
         }
-        body: parser_parse_block(state)
+        // A conversion body is a callable body with a declared result: its
+        // last line may be the bare converted value.
+        body: parser_parse_callable_body(state, true)
         return Item.ErrorConv{value: ErrorConvDef{from_ty: type_name, from_span: type_span, to_ty: to_ty, to_span: target.span, body: body.statements, body_span: body.span, markers: modifiers.markers}}
     }
     operator_rhs: parser_parse_operator_rhs(state, trait_name)

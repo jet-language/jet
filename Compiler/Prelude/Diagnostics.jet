@@ -5279,6 +5279,31 @@ SuiteNameNotLiteral: struct {
     }
 }
 
+TypeAsValue: struct {
+    name: String
+
+    impl Diagnostic {
+        code: "E0636"
+        meaning: "A type is used where a value is expected"
+        fix_next: "Build a value of the type, or read a compile-time fact of the type."
+        what: fn(self) -> String { "`{self.name}` is a type, not a value" }
+        why: fn(self) -> String { "A type describes values but is not one; it has no value to bind, pass, return, store or print." }
+        fix: fn(self) -> String { "Build a value such as `{self.name}{{…}}`, or read a compile-time fact of the type, such as `{self.name}.$fields`." }
+    }
+}
+
+TypedLiteralInHeader: struct {
+    impl Diagnostic {
+        code: "E0637"
+        stage: [.Parse]
+        meaning: "A typed literal is written straight after a comparison or `in` in an `if` or `loop` header"
+        fix_next: "Compare with a plain number, or group the literal in parentheses."
+        what: fn(self) -> String { "The `{{` of this typed literal is read as the start of the body" }
+        why: fn(self) -> String { "In an `if` or `loop` header, `{{` opens the body, so `a > I32{{0}}` reads as `a > I32` followed by the body `{{0}}`" }
+        fix: fn(self) -> String { "Compare with a plain number, as in `if a > 0 ->`, or group the literal, as in `if a > (I32{{0}}) ->`" }
+    }
+}
+
 MissingCrateVersion: struct {
     impl Diagnostic {
         code: "E0701"

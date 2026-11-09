@@ -17,6 +17,7 @@ use {
         Func,
         Item,
         JET_CORE_OWNER_ANNOTATION_SUFFIXES,
+        JET_TYPE_NAMES,
         MARKER_ERROR,
         Marker,
         Param,
@@ -591,9 +592,9 @@ sema_check_failure_contract_type: fn(ty: Type, span: Span, in_return: Bool, gene
                 if environment.registration_graph == .Val(graph) {
                     declared = sema_type_resolve_nominal_row_at(graph, ty, sema_scope_caller_row(environment, graph)) != None
                 }
-                if !declared -> diagnostics.push(sema_unknown_type_name(name, span))
+                if !declared -> diagnostics.push(sema_unknown_type_name(name, span, sema_failure_declared_type_names(environment)))
             }
-            if !unresolved && sema_failure_written_name_unknown(name, generic_names, environment, program) -> diagnostics.push(sema_unknown_type_name(name, span))
+            if !unresolved && sema_failure_written_name_unknown(name, generic_names, environment, program) -> diagnostics.push(sema_unknown_type_name(name, span, sema_failure_declared_type_names(environment)))
         }
         // An alias can hide a second optional layer: `Maybe<Int>?` where
         // `Maybe<T>: T?` is `Int??`, which has no meaning.
@@ -684,10 +685,34 @@ sema_type_hole: fn(span: Span) -> Diagnostic {
 
 // E0119: a written type name that names nothing. A name that writes a
 // lexicon acronym word-cased (`HttpRequest`) gets E0358 with its spelling.
-// The common guess `Text` points at `String`.
-sema_unknown_type_name: fn(name: String, span: Span) -> Diagnostic {
+// The common guess `Text` points at `String`; any other near miss of a Jet
+// type or of a `declared` type (`Strng`) is suggested by name.
+sema_unknown_type_name: fn(name: String, span: Span, declared: [String]) -> Diagnostic {
     if name == "Text" -> return sema_error("E0119", span, "there's no type called `Text`", "Jet's text type is `String`", "write `String` instead of `Text`")
-    sema_casing_acronym_diagnostic(name, span) ?? sema_error("E0119", span, "there's no type called `{name}`", "the types are `Int`, `Float`, `Bool`, and `String` (plus types you define)", "check the spelling, or define the struct or enum first")
+    if sema_casing_acronym_diagnostic(name, span) == .Val(acronym) -> return acronym
+    candidates := [String]{}
+    loop known in JET_TYPE_NAMES {
+        if known != "()" && !known.contains(".") -> candidates.push(known.copy())
+    }
+    loop own in declared -> candidates.push(own.copy())
+    // A short name needs a closer match: one edit per three letters.
+    limit: if name.count_bytes() /% 3 > 1 -> name.count_bytes() /% 3 else -> 1
+    fix := "check the spelling, or define the struct or enum first"
+    if sema_suggest_field(name, candidates) == .Val(near) {
+        if sema_taint_edit_distance(name, near) <= limit -> fix = "did you mean `{near}`?"
+    }
+    sema_error("E0119", span, "there's no type called `{name}`", "the types are `Int`, `Float`, `Bool`, and `String` (plus types you define)", fix)
+}
+
+// The types module row `caller` declares, the near misses E0119 suggests.
+sema_type_declared_names: fn(graph: SemaRegistrationGraph, caller: Int) -> [String] Never! {
+    if caller < 0 -> return [String]{}
+    loop nominal in graph.modules[caller].nominals -> nominal.symbol.name.copy()
+}
+
+sema_failure_declared_type_names: fn(environment: SemaScopeEnvironment) -> [String] {
+    if environment.registration_graph == .Val(graph) -> return sema_type_declared_names(graph, sema_scope_caller_row(environment, graph))
+    [String]{}
 }
 
 // E0119 twice for `Name<…>` where `Name` names nothing: the missing type,

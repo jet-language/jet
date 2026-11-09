@@ -1049,7 +1049,7 @@ files8_other: fn(operation: IOOperation, resource: String?, cause: String) -> IO
 
 files8_preflight: fn(probe: String, operation: IOOperation, path: String) IOError! {
     if core.files.__fault_should_fail(probe) -> return Err(files8_other(operation, Val(path), "fault injected: {probe}"))
-    Ok(())
+    Ok()
 }
 
 
@@ -1630,7 +1630,7 @@ walk_validate: fn(context: Int, directory: Int, root: String) IOError! -[FS]> {
     }
     if source != directory -> core.files.__walk_release(context, source)
     if failure == .Val(error) -> return Err(error)
-    Ok(())
+    Ok()
 }
 
 // One directory of a walk: its kept entries sorted by path, and its child
@@ -1772,7 +1772,7 @@ __walk_open: fn(cursor: &__WalkCursor) IOError! -[FS]> {
     walk_validate(cursor.context, 0, cursor.root)
     if cursor.ignore != None -> core.files.__walk_matcher_new(cursor.context)
     cursor.frames.push(__walk_batch(cursor.context, 0, 0, cursor.root, cursor.ignore, cursor.files_only))
-    Ok(())
+    Ok()
 }
 
 // The walk is over: close its context so no descriptor or slot outlives it.

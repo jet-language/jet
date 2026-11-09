@@ -247,7 +247,7 @@ mux :: fn() -[Net]> HTTPMux Never! {
 serve_once :: fn(addr: String, mux: HTTPMux) HTTPError! -[Net, FS.Read, Time]> {
     listener :: core.net.tcp_listen(addr) ?? return Err(.IO{operation: "bind on `{addr}` failed: {err}"})
     serve_once_listener(listener, mux) ?? return Err(err)
-    Ok(())
+    Ok()
 }
 
 serve_once_listener :: fn(listener: TCPListener, mux: HTTPMux) HTTPError! -[Net, FS.Read, Time]> {
@@ -256,13 +256,13 @@ serve_once_listener :: fn(listener: TCPListener, mux: HTTPMux) HTTPError! -[Net,
         return Err(.IO{operation: "accept: {err}"})
     }
     _ :: __serve_connection(stream, mux, None)
-    Ok(())
+    Ok()
 }
 
 __serve_entry :: fn(addr: String, mux: HTTPMux, tls: HTTPServerTLS?, deadline: Duration?) HTTPError! -[Net, FS.Read, Time]> {
     server :: __bind_entry(addr, mux, tls, deadline) ?? return Err(err)
     _ :: server.serve() ?? return Err(err)
-    Ok(())
+    Ok()
 }
 
 __bind_entry :: fn(addr: String, mux: HTTPMux, tls: HTTPServerTLS?, deadline: Duration?) -[Net]> HTTPServer HTTPError! {
@@ -870,7 +870,7 @@ __wire_need :: fn(stream: TCPStream, &wire: __HTTPWire, need: Int) __HTTPFault! 
         more :: __wire_fill(stream, &wire) ?? return Err(err)
         if !more -> return Err(.Reply(400))
     }
-    Ok(())
+    Ok()
 }
 
 // The index of the CRLF ending the line at `from`, filling as needed.

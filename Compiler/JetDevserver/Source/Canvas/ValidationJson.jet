@@ -49,26 +49,26 @@ is_jet_ident: fn(name: String) -> Bool Never! {
 validate_ident: fn(name: String) String! {
     if name == "" -> return Err(edit_error("bad_request", "empty identifier"))
     if !is_jet_ident(name) -> return Err(edit_error("bad_request", "identifier is not a Jet name"))
-    Ok(())
+    Ok()
 }
 
 validate_query_ident: fn(name: String) String! {
     if name == "" -> return Err(query_error("bad_request", "empty identifier"))
     if !is_jet_ident(name) -> return Err(query_error("bad_request", "identifier is not a Jet name"))
-    Ok(())
+    Ok()
 }
 
 validate_ident_for_project: fn(name: String) String! {
     if name == "" -> return Err(project_edit_error("bad_request", "empty identifier"))
     if !is_jet_ident(name) -> return Err(project_edit_error("bad_request", "identifier is not a Jet package name"))
-    Ok(())
+    Ok()
 }
 
 validate_qualified_name: fn(name: String) String! {
     loop part in name.split(".") {
         _: validate_ident(part) ?? return Err(err)
     }
-    Ok(())
+    Ok()
 }
 
 has_body_text: fn(fragment: String) -> Bool Never! {
@@ -77,26 +77,26 @@ has_body_text: fn(fragment: String) -> Bool Never! {
 
 validate_signature_fragment: fn(fragment: String) String! {
     if has_body_text(fragment) -> return Err(edit_error("bad_request", "function parameter text must stay inside the signature"))
-    Ok(())
+    Ok()
 }
 
 validate_type_fragment: fn(fragment: String) String! {
     if fragment.trim() == "" || has_body_text(fragment) -> return Err(edit_error("bad_request", "return type is not a Jet type"))
-    Ok(())
+    Ok()
 }
 
 validate_function_signature: fn(signature: String) String! {
     if has_body_text(signature) -> return Err(edit_error("bad_request", "function signature must not include a body"))
     loop part in signature.split(" ") {
         word: part.trim()
-        if word == "fn" || word.starts_with("fn(") || word.starts_with("fn<") || word.ends_with(":fn") || word.contains(":fn(") -> return Ok(())
+        if word == "fn" || word.starts_with("fn(") || word.starts_with("fn<") || word.ends_with(":fn") || word.contains(":fn(") -> return Ok()
     }
     Err(edit_error("bad_request", "function signature must include fn"))
 }
 
 validate_single_line_fragment: fn(fragment: String, label: String) String! {
     if fragment.trim() == "" || fragment.contains("\n") || fragment.contains("\r") -> return Err(edit_error("bad_request", label))
-    Ok(())
+    Ok()
 }
 
 validate_comment_color: fn(color: String) String! {
@@ -109,13 +109,13 @@ validate_comment_color: fn(color: String) String! {
         }
     }
     if !ok -> return Err(edit_error("bad_request", "Canvas comment color must be #RRGGBB"))
-    Ok(())
+    Ok()
 }
 
 validate_comment_alpha: fn(alpha: String) String! {
     value: alpha.trim().to_float() ?? return Err(edit_error("bad_request", "Canvas comment alpha must be a number"))
     if value < 0.0 || value > 1.0 -> return Err(edit_error("bad_request", "Canvas comment alpha must be between 0 and 1"))
-    Ok(())
+    Ok()
 }
 
 // `x,y,w,h` (optionally parenthesized) as four integers, or None.

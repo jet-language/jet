@@ -27,12 +27,12 @@ JetCLIForeignInputs: struct {
 }
 
 jet_cli_foreign_add: fn(inputs: &JetCLIForeignInputs, path: String) JetCLIForeignLinkError! -[FS]> {
-    if inputs.paths.contains(path) -> return Ok(())
+    if inputs.paths.contains(path) -> return Ok()
     bytes: cli_files.read_bytes(path) ?? return Err(jet_cli_foreign_link_error("couldn't read C link input `{path}`: {err}"))
     inputs.paths.push(path.copy())
     inputs.names.push(path.copy())
     inputs.bytes.push(bytes)
-    Ok(())
+    Ok()
 }
 
 // The one native C policy (native-c-policy.tsv beside this file), as
@@ -187,7 +187,7 @@ jet_cli_native_c_identity: fn(identity: &[U8], schema: String, tools: JetCLINati
     loop name in ([String]{"NIX_CFLAGS_COMPILE", "NIX_CFLAGS_COMPILE_BEFORE", "NIX_HARDENING_ENABLE"}) {
         jet_cli_foreign_hash_field(identity, "env-{name}", (cli_sys.get(name) ?? "").bytes())
     }
-    Ok(())
+    Ok()
 }
 
 // A cached archive is reused only when its digest sidecar matches its bytes.
@@ -211,7 +211,7 @@ jet_cli_native_c_publish: fn(tools: JetCLINativeCTools, lib: String, temporary: 
     cli_files.write("{temporary}/digest", digest) ?? return Err(jet_cli_foreign_link_error("couldn't write C archive digest: {err}"))
     cli_files.rename("{temporary}/digest", "{archive}.sha256") ?? return Err(jet_cli_foreign_link_error("couldn't publish C archive digest: {err}"))
     cli_files.remove_all(temporary) ?? return Err(jet_cli_foreign_link_error("couldn't remove C build objects: {err}"))
-    Ok(())
+    Ok()
 }
 
 // A length-delimited identity avoids concatenation aliases.

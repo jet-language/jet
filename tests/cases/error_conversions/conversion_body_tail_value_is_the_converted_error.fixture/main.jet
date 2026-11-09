@@ -1,0 +1,34 @@
+// An error conversion's last line is the converted value, as a function's is.
+#Error
+ReadErr: struct {
+    code: Int
+}
+
+#Error
+AppErr: struct {
+    code: Int
+    origin: String
+}
+
+impl ReadErr -> AppErr {
+    AppErr{code: self.code + 100, origin: "read"}
+}
+
+read: fn(n: Int) -> Int ReadErr! {
+    if n < 0 -> return Err(ReadErr{code: 7})
+    return Ok(n * 2)
+}
+
+load: fn(n: Int) -> Int AppErr! {
+    value: read(n)
+    return Ok(value + 1)
+}
+
+show: fn(n: Int) {
+    load(n) ? ok -> print("ok {ok}") ! failure -> print("failed {failure.code} {failure.origin}")
+}
+
+run: fn() {
+    show(4)
+    show(-1)
+}

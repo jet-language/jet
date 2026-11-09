@@ -76,6 +76,7 @@ use {
         TOKEN_IDENT,
         TOKEN_INT,
         TOKEN_KW_IF,
+        TOKEN_KW_IN,
         TOKEN_KW_IT,
         TOKEN_KW_LOOP,
         TOKEN_KW_TAG,
@@ -111,6 +112,7 @@ use {
         TOKEN_TRUE,
         TOKEN_LT_GT,
         TOKEN_PIPE_GT,
+        TOKEN_UNIFIED_ARROW,
         TOKEN_UNIT_NUMBER,
         StringPart,
         Token,
@@ -573,10 +575,52 @@ parser_typed_literal_head_ahead: fn(state: &JetParserState) -> Bool Never! {
     false
 }
 
+// A typed literal head right after a comparison or `in`, whose `{` touches
+// the head and whose closing `}` is followed by a body (`->` or `{`): the
+// header form `if a > I32{0} -> …` that a header can't read.
+parser_header_typed_literal_ahead: fn(state: &JetParserState) -> Bool Never! {
+    before: parser_kind_at(state, -1)
+    if !parser_expression_comparison_token(before) && before != TOKEN_KW_IN -> return false
+    if !parser_typed_literal_head_ahead(state) -> return false
+    // The literal's `{`: the first one outside the head's `[…]` and `<…>`.
+    open := -1
+    nested := 0
+    index := state.position
+    loop index < state.tokens.len() {
+        kind: state.tokens[index].kind
+        if kind == TOKEN_LBRACKET || kind == TOKEN_LT -> nested += 1
+        if kind == TOKEN_RBRACKET || kind == TOKEN_GT -> nested -= 1
+        if kind == TOKEN_SHR -> nested -= 2
+        if kind == TOKEN_LBRACE && nested <= 0 {
+            open = index
+            break
+        }
+        index += 1
+    }
+    if open <= 0 || state.tokens[open - 1].span.end != state.tokens[open].span.start -> return false
+    depth := 0
+    index = open
+    loop index < state.tokens.len() {
+        kind: state.tokens[index].kind
+        if kind == TOKEN_EOF -> return false
+        if kind == TOKEN_LBRACE -> depth += 1
+        if kind == TOKEN_RBRACE {
+            depth -= 1
+            if depth == 0 {
+                after: parser_lookahead_kind_forward(state, index + 1, 0)
+                return after == TOKEN_UNIFIED_ARROW || after == TOKEN_LBRACE
+            }
+        }
+        index += 1
+    }
+    false
+}
+
 parser_literal_fields_ahead: fn(state: &JetParserState) -> Bool Never! {
     first := parser_kind_at(state, 1)
     if first == TOKEN_RBRACE -> return true
-    if first != TOKEN_IDENT -> return false
+    // `tag` names a field like any other word (`Label{tag: "ok"}`).
+    if first != TOKEN_IDENT && first != TOKEN_KW_TAG -> return false
     second := parser_kind_at(state, 2)
     second == TOKEN_COLON || second == TOKEN_COMMA || second == TOKEN_SEMI || second == TOKEN_RBRACE
 }
@@ -691,6 +735,23 @@ parser_parse_typed_literal_body: fn(state: &JetParserState, head: Type?, start: 
     ParsedExpr{expr: Expr.TypedLit{head: head, body: body.move(), span: span, id: parser_node_id(state)}, span: span}
 }
 
+// The `{value}` default after a parameter, field or constant type. The body
+// is one value of that type; an empty `T{}` is the typed literal `T{}`, the
+// same empty value it is in an expression (`xs: [Int]{}` defaults to `[]`).
+// The span runs from the type through the closing `}`.
+parser_parse_declared_default: fn(state: &JetParserState, ty: Type, ty_span: Span, closer: String) -> ParsedExpr {
+    if parser_kind_at(state, 1) == TOKEN_RBRACE {
+        parser_bump(state)
+        close := parser_bump(state)
+        span := parser_cover(ty_span, close.span)
+        return ParsedExpr{expr: Expr.TypedLit{head: Val(ty), body: TypedLitBody.Empty, span: span, id: parser_node_id(state)}, span: span}
+    }
+    parser_bump(state)
+    parsed := parser_parse_expression(state, 1, 0)
+    close := parser_expect(state, TOKEN_RBRACE, closer)
+    ParsedExpr{expr: parsed.expr.move(), span: parser_cover(ty_span, close.span)}
+}
+
 parser_try_parse_typed_literal: fn(state: &JetParserState, depth: Int) -> ParsedExpr? {
     saved_position := state.position
     saved_diagnostics := state.diagnostics.len()
@@ -748,6 +809,17 @@ parser_parse_prefix: fn(state: &JetParserState, depth: Int, allow_struct_lit: Bo
     if allow_struct_lit && parser_typed_literal_head_ahead(state) {
         typed: parser_try_parse_typed_literal(state, depth + 1)
         if typed == .Val(parsed) -> return parsed
+    }
+    // In an `if` or `loop` header `{` opens the body, so a typed literal
+    // straight after a comparison or `in` can't be read there. When its
+    // closing `}` is followed by the body, one diagnostic names the cause and
+    // the literal is still parsed, so the body after it checks.
+    if !allow_struct_lit && parser_header_typed_literal_ahead(state) {
+        typed: parser_try_parse_typed_literal(state, depth + 1)
+        if typed == .Val(parsed) {
+            parser_add_error_code(state, "E0637", parsed.span, "the `{{` of this typed literal is read as the start of the body", "in an `if` or `loop` header, `{{` opens the body, so `a > I32{{0}}` reads as `a > I32` followed by the body `{{0}}`", "compare with a plain number, as in `if a > 0 ->`, or group the literal, as in `if a > (I32{{0}}) ->`")
+            return parsed
+        }
     }
     if kind == TOKEN_LT_GT -> return parser_parse_pipe_value(state, token)
     // Rust has no unary `+`: `+1` falls through to "expected a value".
@@ -845,6 +917,12 @@ parser_parse_prefix: fn(state: &JetParserState, depth: Int, allow_struct_lit: Bo
     if kind == TOKEN_IDENT || kind == TOKEN_SELF || kind == TOKEN_KW_IT {
         parser_bump(state)
         return ParsedExpr{expr: Expr.Ident{name: if kind == TOKEN_IDENT -> word else -> parser_value(state, token), span: token.span, id: parser_node_id(state)}, span: token.span}
+    }
+    // The `tag` keyword also spells an ordinary name (a field, a variant
+    // field, a parameter), so a value reads it back as that name.
+    if kind == TOKEN_KW_TAG {
+        parser_bump(state)
+        return ParsedExpr{expr: Expr.Ident{name: "tag", span: token.span, id: parser_node_id(state)}, span: token.span}
     }
     if kind == TOKEN_TRUE || kind == TOKEN_FALSE {
         parser_bump(state)

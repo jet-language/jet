@@ -375,7 +375,10 @@ may be total or return a `Result`, but may not add an implicit conversion
 Functions support multiple arguments, checked arity (E0104), and checked
 argument types (E0112). A function with a non-unit success result must return
 that result on every path (E0114). A parameter may have a default, written on
-its type as `f: fn(x: Int{0})`. A call-site label binds by the public parameter
+its type as `f: fn(x: Int{0})`. The braces hold one value of that type; an
+empty `T{}`, as in `xs: [Int]{}`, is the empty value `T{}` names in an
+expression, for parameter, field and trait constant defaults alike. A call-site
+label binds by the public parameter
 name, so `f(x: 1)` may omit a default and labelled arguments may be supplied in
 any order. `/` closes the positional-only zone; `*` opens the label-only zone;
 `timeout seconds: Int` publishes `timeout` while the body reads `seconds`.
@@ -478,6 +481,11 @@ as a complete statement or `??` fallback. `next()`, `.next()`, and `next: fn`
 remain ordinary identifier uses; a value named `next` after `??` needs
 parentheses: `value ?? (next)`.
 
+In an `if` or `loop` header, `{` opens the body, so a typed literal can't
+follow a comparison or `in` there: `if a > I32{0} ->` reads `{0}` as the body
+and reports **E0637**. Compare with a plain number (`if a > 0 ->`), or group
+the literal: `if a > (I32{0}) ->`.
+
 ## Compile-time names and staged syntax
 
 An immutable `:` binding asks for build-time evaluation as an optimization,
@@ -526,6 +534,12 @@ foreign-syntax teaching remains paused until post-Epoch 6 (D-S14-PAUSE); active
 docs and fixtures use canonical syntax only.
 
 ## Data types and methods
+
+Struct fields, enum cases, and the leaves of an enum variant group share one
+separator rule: a `,` or a line break ends each entry, so `Point: struct { x:
+Int, y: Int }` and `Mode: enum { Fast, Safe }` are the one-line forms of the
+one-per-line bodies `jet fmt` prints. An authored `;` is E0373 there as
+everywhere.
 
 Structs and enums carry data; methods attach behavior. A struct literal is
 `Type{field: value}` or an expected-type-inferred `{field: value}`. Enum values
@@ -994,8 +1008,9 @@ without writing a return annotation. Pin an entry to an application error with
 (D-FAILURE-FOUNDATION1, D-FAIL-EXIT1)
 
 Construct the two sides with `Ok(value)` and `Err(error)`. These are contextual
-calls: a user declaration named `Ok` or `Err` takes precedence. `Ok()` supplies
-the unit success value when the expected result has unit success. Leading-dot
+calls: a user declaration named `Ok` or `Err` takes precedence. `Ok()` is
+the unit success value when the expected result has unit success, and its only
+spelling: there `Ok` and `.Ok` take no argument (E0104). Leading-dot
 `.Ok(value)` and `.Err(error)` values use the expected result type; in pattern
 tests, they match the corresponding side, for example `result == .Ok(n)`. A value of an
 optional-success type such as `User? DBError!` has exactly three states, and
@@ -2429,6 +2444,10 @@ A module is not a value. Binding, passing, returning, storing or interpolating
 a module, such as `m: text` or `show(lib.inner)`, reports **E0629**. A
 function the module offers is a value: `f: text.shout` is the function, as
 `shout` is after `use text.shout`.
+
+A type is not a value either: binding, passing or printing a type, such as
+`t: Rock` or `print(Rock)`, reports **E0636**. Build a value of the type, or
+read a compile-time fact of it such as `Rock.$fields`.
 
 An `impl` head that names a declaration through a module alias binds the alias
 to the segment after it: `impl types.Span { ... }` extends `types.Span`, and

@@ -4191,7 +4191,11 @@ sema_expr_check_identifier: fn(name: String, span: Span, expected: Type?, enviro
     if unresolved_index == None && name == "input" -> return sema_call_check_ambient_input(span, expected, environment, program, scopes, context, diagnostics)
     value: sema_expr_check_ident(name, span, expected, environment, program, scopes, context, diagnostics) ?? {
         if !sema_has_error_since(diagnostics, diagnostics_before) {
-            if sema_expr_core_module_alias_visible(name, scopes) -> diagnostics.push(sema_module_used_as_value(name, span)) else -> sema_check_unsupported(context, "`{name}` (read at offset {span.start}) has no checked type")
+            if {
+                sema_expr_core_module_alias_visible(name, scopes) -> diagnostics.push(sema_module_used_as_value(name, span))
+                sema_expression_type_symbol(scopes, environment, program, name) != None -> diagnostics.push(sema_type_used_as_value(name, span))
+                else -> sema_check_unsupported(context, "`{name}` (read at offset {span.start}) has no checked type")
+            }
         }
         return None
     }
@@ -5615,6 +5619,7 @@ sema_check_expression_cold: fn(expr: Expr, expected: Type?, environment: SemaSco
                 payload: sema_expression_result_call_payload(call, state, scopes)
                 span: Span{start: call.name_span.start, end: expr_span(payload).end}
                 if !success -> context.failure_edges.push("")
+                if success && call.args.len() == 1 && sema_expression_unit_success_with_argument(payload, expr_span(payload), expected, environment, program, scopes, state, tail_store, context, diagnostics) -> return None
                 return sema_expression_result_payload(payload, success, sema_expression_result_call_takes_field(call, state, scopes), span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
             }
             sema_expr_check_direct_call(call, expected, environment, program, scopes, state, tail_store, context, diagnostics)
@@ -5729,6 +5734,7 @@ sema_expr_check_call_expr: fn(call: Call, expected: Type?, environment: SemaScop
         payload: sema_expression_result_call_payload(call, state, scopes)
         span: Span{start: call.name_span.start, end: expr_span(payload).end}
         if !success -> context.failure_edges.push("")
+        if success && call.args.len() == 1 && sema_expression_unit_success_with_argument(payload, expr_span(payload), expected, environment, program, scopes, state, tail_store, context, diagnostics) -> return None
         return sema_expression_result_payload(payload, success, sema_expression_result_call_takes_field(call, state, scopes), span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     }
     sema_expr_check_direct_call(call, expected, environment, program, scopes, state, tail_store, context, diagnostics)
