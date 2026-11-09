@@ -85449,6 +85449,214 @@
       "completedAt": "2026-11-06T10:57:27.291Z",
       "questions": [],
       "retiredAt": "2026-11-09T11:03:19.035Z"
+    },
+    {
+      "id": "c0qeoxfp",
+      "num": 6595,
+      "title": "Witness harnesses that count frees through --wrap=jet_rt_free never see runtime frees",
+      "body": "Found by GoldenRoots3 on dev e8bf2c763d: the runtime object binds its internal calls section-relative (objdump shows R_X86_64_PC32 .text-4), so -Wl,--wrap=jet_rt_free never intercepts frees made inside the runtime. About 50 *Witness.c harnesses count frees that way, so their leak and double-free assertions prove nothing; TerminalProcessWitness fails its free-count assert because of it. Give the witnesses a counting route that sees every runtime free (for example a runtime test hook or symbol-relative calls in the test build), keep one mechanism, prove it with a negative control that leaks one buffer and fails, and rerun every witness.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Witness harnesses count runtime-internal frees through the observer route, and the --wrap=jet_rt_free runner flags are gone",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "a2e2317180 routes witness free counting through the runtime observer; no --wrap=jet_rt_free runner flag remains outside comments and historical Docs/research",
+          "at": "2026-11-06T16:05:00.638Z"
+        },
+        {
+          "n": 2,
+          "text": "A negative control (AllocObserverWitness leak mode) reports the live blocks and aborts",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "run-alloc-observer-witness.mjs proof/observer with the s1 jet_runtime_jet.o: 'alloc observer: 6 runtime allocations and frees balanced; leak control fails (SIGABRT)'; leak mode reports 1 of 7 blocks still live and aborts (a2e2317180)",
+          "at": "2026-11-06T16:05:01.809Z"
+        },
+        {
+          "n": 3,
+          "text": "All 75 witnesses are converted to the route, with a per-witness before/after report; the ABI rot (#6601) is out of scope",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Per-witness before/after report at $JET_SCRATCH_ROOT/lanes/TestRot/census/census.md (+census.json), same s1 runtime both sides: before 0/75 pass (45 fail, 30 no build); after 59 pass, 16 deleted in af2db41544; TDigest and NativeLayout pass with their vectors, UiKey and VaultProvider through their own runners",
+          "at": "2026-11-06T16:05:02.712Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G1"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-06T06:18:27.254Z",
+      "updated": "2026-11-06T16:05:09.696Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-11-06T16:05:09.696Z",
+      "questions": [],
+      "retiredAt": "2026-11-09T16:11:34.487Z"
+    },
+    {
+      "id": "c0w4gi4s",
+      "num": 6597,
+      "title": "Native-era collect-all launch gate: check in the preflight that AGENTS.md requires",
+      "body": "AGENTS.md (Find every issue at once) says expensive launches start only through tooling that refuses to launch without a collect-all preflight receipt for that exact commit, naming $JET_STATE_ROOT/scratch/Main/preflight.mjs enforced by prepare-sharded-chain.mjs. Neither is usable: prepare-sharded-chain.mjs does not exist in the repo or scratch, and preflight.mjs depends on the retired Rust-era jetc0 factory, hostJet and proof-source.mjs. In practice the gate today is chain full reaching FIXED_POINT plus the keep-going census, but nothing enforces it, and a fresh clone can't follow the contract. Fix: check in Tools/agent/preflight (Jet or the existing tooling convention). For a commit it runs, in collect-all mode: parse, imports, sema (JET_KEEP_GOING=1), the lowering sweep (JET_DEBUG_LOWER_ALL=1), the generator checks and the comptime-host count against the last admitted compiler. It writes a receipt keyed to the commit in which every row is clean or carries a written disposition. The seed-cut and release launchers refuse to start without a matching receipt. Then point AGENTS.md at the checked-in path in the same cutover.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "AGENTS.md names the checked-in path, and the Rust-era preflight.mjs and prepare-sharded-chain.mjs references are gone",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "7d6426a7d4: AGENTS.md names Tools/agent/land/census-snap.sh and chain.sh --dry-run; no preflight.mjs or prepare-sharded-chain reference remains outside the dated Docs/audits inventory",
+          "at": "2026-11-06T16:05:04.581Z"
+        },
+        {
+          "n": 2,
+          "text": "The seed-cut, release and self-hosting launchers refuse to start without a matching receipt, shown by one refused and one admitted launch",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "13163a9366: preflight-receipt.mjs keys receipts on compiler source identity; chain.sh full, release-compiler.mjs and publish-release.mjs build refuse without one. proof-gate.sh (a0_029 seed): without a receipt all three rc=2 'refused: no preflight receipt for source identity jet@0.1.0#060c8cb9...' naming the census-snap command; census-snap.sh all rows rc=0 wrote the receipt; then all three rc=0 'admitted by preflight receipt'. node --test 17/17; LaneCheck CHECK OK (jet-lane-check.1375245254246). Evidence $JET_SCRATCH_ROOT/lanes/TestRot/gate/state",
+          "at": "2026-11-06T16:05:06.400Z"
+        },
+        {
+          "n": 3,
+          "text": "AGENTS.md names the checked-in path, and the Rust-era preflight.mjs and prepare-sharded-chain.mjs references are gone",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "7d6426a7d4: same as c1; AGENTS.md names the checked-in census-snap.sh path and no Rust-era preflight reference remains in live files",
+          "at": "2026-11-06T16:05:05.456Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G1"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-06T06:38:13.946Z",
+      "updated": "2026-11-06T16:05:12.991Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-11-06T16:05:12.990Z",
+      "questions": [],
+      "retiredAt": "2026-11-09T16:11:34.488Z"
+    },
+    {
+      "id": "c0423zxm",
+      "num": 6598,
+      "title": "Test kit unit tests: 6 failures on dev (integer capture, 2 free-port, terminal, UI comparison, UI directive)",
+      "body": "CoreOwnership measured the test kit's own unit tests at s1 on base 59ffda6c23: 222 passed, 6 failed. On 668a296d5c, which adds the build-entry test, the result is 223 passed with the same 6 failed. So the failures predate that change and are unowned: integer capture, two free-port tests, terminal, UI comparison and UI directive. Each needs its root found and either a fix to the kit or a corrected test that matches today's ratified behaviour. Do not file them as known-failing without a root.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The test kit's unit tests pass 229/229 at s1 on a dev commit, with each of the 6 failures fixed at its root or its test corrected to the ratified behaviour",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Roots fixed on dev in cfa3165e83 and e6d3cc3cb0. Testkit unit run with s1 from b4e29635ce: rc=0, 231 passed, 0 failed, 0 skipped; the same run at 668a296d5c reproduces 223 passed, 6 failed. Log: $JET_SCRATCH_ROOT/lanes/TestRot/tks1.log",
+          "at": "2026-11-06T16:04:58.893Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G1"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-06T06:38:47.078Z",
+      "updated": "2026-11-06T16:05:07.918Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-11-06T16:05:07.918Z",
+      "questions": [],
+      "retiredAt": "2026-11-09T16:11:34.488Z"
+    },
+    {
+      "id": "c05s2kt4",
+      "num": 6609,
+      "title": "Runtime test rot: journey-tls fixtures undefined, NormalizationTest.txt row count off the s5 pin, missing RtCrypto1 inputs, UiKeyWitness 24-byte Text typedef",
+      "body": "Leftovers from #6601 (edc75a36a3), all found by Builder5. (1) journey-tls.c compiles but can't link: nothing in the repo defines fixture_journey_auto_color_raw or fixture_journey_columns_raw. (2) tests/data/unicode/NormalizationTest.txt has 17091 rows, but s5 pins 20034, so the data is truncated or the pin is stale; check it against the pinned UCD version. (3) stage-frozen-inputs still needs the missing RtCrypto1 inputs. (4) UiKeyWitness.c keeps a 24-byte Text typedef (pointer-only use). (5) run-fmt-parity prints a 'parked … Tower #4923' line that cites a card which no longer exists. For each: fix it, or delete the dead harness when nothing reaches it.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Each of the five rot items is fixed or its dead harness deleted, with the harness that consumes it passing (or proven unreachable) and NormalizationTest.txt matching its pinned UCD source",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "caa9005302: journey-tls and err-report restored in run-host-fixtures (dup2 assert, env baseline, strtoull musl link, pty resize race); every step exits 0, 'host fixtures run: ok'. ddfe57e351: NormalizationTest row filter, run-native-text-normalize --native 'NFC2 Unicode17 20034 rows / both routes / ownership OK', sha matches UCD 17.0.0; stage-frozen-inputs derives RtCrypto1 inputs from AgeV1Fixtures.json, 'frozen-inputs PASS 12 files'; UiKeyWitness links the fault-report object, run-ui-key-witness byte-identical; dead #4923 citation removed, fmt-parity compare failures=0. LaneCheck CHECK OK (jet-lane-check.1163774306289)",
+          "at": "2026-11-06T16:05:03.626Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G1"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-06T09:39:49.326Z",
+      "updated": "2026-11-06T16:05:11.476Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-11-06T16:05:11.476Z",
+      "questions": [],
+      "retiredAt": "2026-11-09T16:11:34.488Z"
     }
   ]
 }
