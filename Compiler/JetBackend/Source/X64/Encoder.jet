@@ -196,6 +196,27 @@ x64_alu_ri: fn(code: &[U8], op: X64Alu, dst: Int, value: Int) Never! {
     }
 }
 
+// add/sub/cmp/and/or/xor qword [base + disp], imm (REX.W 83 /n ib, or REX.W
+// 81 /n id). The immediate must fit i32.
+x64_alu_mi: fn(code: &[U8], op: X64Alu, base: Int, disp: Int, value: Int) Never! {
+    small: x64_fits_i8(value)
+    x64_rex(code, true, 0, base)
+    x64_byte(code, if small -> 0x83 else -> 0x81)
+    x64_modrm_mem(code, x64_alu_extension(op), base, disp)
+    if small -> x64_byte(code, value)
+    if !small -> x64_u32(code, value)
+}
+
+#Test("An ALU op on a memory qword encodes cmp [rcx - 24], 1 and [r12 + 8], 300") {
+    code := [U8]{}
+    x64_alu_mi(code, X64Alu.Cmp, X64_RCX, -24, 1)
+    assert_eq(code, [U8]{0x48, 0x83, 0x79, 0xe8, 0x01})
+    wide := [U8]{}
+    r12: 12
+    x64_alu_mi(wide, X64Alu.Cmp, r12, 8, 300)
+    assert_eq(wide, [U8]{0x49, 0x81, 0x7c, 0x24, 0x08, 0x2c, 0x01, 0x00, 0x00})
+}
+
 // imul dst, src (REX.W 0F AF /r)
 x64_imul_rr: fn(code: &[U8], dst: Int, src: Int) Never! {
     x64_rex(code, true, dst, src)

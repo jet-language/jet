@@ -1,7 +1,8 @@
-// Integer ranges (O1, O2, pass "range"), on a function's SSA form before it
-// leaves SSA: the range [lo, hi] of every Int and word value (a 64-bit word
-// by its signed bits), and from it the reads that can never meet a big
-// integer and the comparisons the ranges decide.
+// Integer ranges (pass "range"; at O0 the one pass, Opt.jet
+// ir_opt_module_facts), on a function's SSA form before it leaves SSA: the
+// range [lo, hi] of every Int and word value (a 64-bit word by its signed
+// bits), and from it the reads that can never meet a big integer and the
+// comparisons the ranges decide.
 //
 // A constant is itself; Copy and Move keep their operand's range; Add, Sub,
 // Mul and Neg are interval arithmetic; FloorDiv, Div, Mod and Rem by a
@@ -671,6 +672,14 @@ ir_range_write: fn(f: IRFunction, s: IRSsa, r: IRRanges, value: Int) -> IRRange 
             if op == .Mul && r.exact[value] && !(ir_range_bounded(a) && ir_range_bounded(b)) && ir_range_has_lo(a) && ir_range_has_lo(b) && a.lo >= 0 && b.lo >= 0 -> got = ir_range_make(ir_range_mul(a.lo, b.lo), IR_RANGE_HIGH)
             IRRange{known: got.known, lo: got.lo, hi: got.hi, inline: got.known && ((division && mark && b.lo > 0) || ir_range_sum_inline(op, a, b))}
         }
+        .BitOr | .BitXor | .Shl | .Shr -> {
+            if !ir_range_has(s, r, s.use_a[at]) || !ir_range_has(s, r, s.use_b[at]) -> return ir_range_top()
+            a: ir_range_at(f, s, r, s.use_a[at], block)
+            b: ir_range_at(f, s, r, s.use_b[at], block)
+            if !a.known || !b.known -> return ir_range_none()
+            if op == .BitOr || op == .BitXor -> return ir_range_bits(op, a, b)
+            ir_range_shift(op, a, b)
+        }
         else -> ir_range_top()
     }
 }
@@ -697,6 +706,59 @@ ir_range_cleared: fn(a: IRRange, c: Int) -> IRRange Never! {
     hi := IR_RANGE_HIGH
     if ir_range_has_hi(a) -> hi = if rounds -> a.hi.bit_and(c) else -> a.hi
     ir_range_make(lo, hi)
+}
+
+// `a | b` and `a ^ b` of nonnegative sides with high bounds: within
+// [0, 2^k - 1] for the least k whose 2^k exceeds both highs; an `|` is no
+// smaller than either side.
+ir_range_bits: fn(op: IROp, a: IRRange, b: IRRange) -> IRRange Never! {
+    if !ir_range_has_lo(a) || !ir_range_has_lo(b) || a.lo < 0 || b.lo < 0 || !ir_range_has_hi(a) || !ir_range_has_hi(b) -> return ir_range_top()
+    high: if a.hi > b.hi -> a.hi else -> b.hi
+    ones := 0
+    loop ones < high {
+        ones = ones * 2 + 1
+    }
+    low: if {
+        op != .BitOr -> 0
+        a.lo > b.lo -> a.lo
+        else -> b.lo
+    }
+    ir_range_make(low, ones)
+}
+
+// `a << n` and `a >> n` of a nonnegative `a` by counts within [0, 62]: its
+// ends shifted. To the left the high end stays below the sentinels, so no
+// bit leaves even a wrapping word's 64 and the shift is exact; to the right
+// a nonnegative word shifts alike signed or not.
+ir_range_shift: fn(op: IROp, a: IRRange, n: IRRange) -> IRRange Never! {
+    if !ir_range_has_lo(a) || a.lo < 0 || !ir_range_bounded(n) || n.lo < 0 || n.hi > 62 -> return ir_range_top()
+    if op == .Shr -> return ir_range_make(a.lo >> n.hi, if ir_range_has_hi(a) -> a.hi >> n.lo else -> IR_RANGE_HIGH)
+    if !ir_range_has_hi(a) || a.hi > (IR_RANGE_HIGH >> n.hi) -> return ir_range_top()
+    ir_range_make(a.lo << n.lo, a.hi << n.hi)
+}
+
+// A pixel's lanes: a byte or'd with a byte shifted into the second, a
+// 16-bit word shifted back down, and the cases no range survives (a side
+// that may be negative, a count past 62, a high end the shift would push
+// past the sentinels).
+#Test("Ranges of or, xor and shifts of nonnegative words") {
+    byte: ir_range_make(0, 255)
+    eight: ir_range_make(8, 8)
+    high: ir_range_shift(IROp.Shl, ir_range_make(1, 255), eight)
+    assert_eq(high.lo, 256)
+    assert_eq(high.hi, 65280)
+    both: ir_range_bits(IROp.BitOr, byte, high)
+    assert_eq(both.lo, 256)
+    assert_eq(both.hi, 65535)
+    flipped: ir_range_bits(IROp.BitXor, byte, high)
+    assert_eq(flipped.lo, 0)
+    assert_eq(flipped.hi, 65535)
+    down: ir_range_shift(IROp.Shr, both, eight)
+    assert_eq(down.lo, 1)
+    assert_eq(down.hi, 255)
+    assert(!ir_range_has_lo(ir_range_bits(IROp.BitOr, ir_range_make(-1, 3), byte)))
+    assert(!ir_range_has_hi(ir_range_shift(IROp.Shl, byte, ir_range_make(0, 63))))
+    assert(!ir_range_has_hi(ir_range_shift(IROp.Shl, ir_range_make(0, IR_RANGE_HIGH - 1), eight)))
 }
 
 ir_range_binary: fn(op: IROp, a: IRRange, b: IRRange) -> IRRange Never! {

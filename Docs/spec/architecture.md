@@ -432,7 +432,7 @@ checks, and each finding is one of its issue rows.
 |---|---|
 | IR builder (`JetIR/Source/Build*.jet`) | the checked program and its sema facts |
 | IR Lint (`JetIR/Source/Lint.jet`) | IR |
-| O1/O2 passes (`JetIR/Source/Opt*.jet`) | IR |
+| O1/O2 passes, and at O0 their inline Int facts alone (`JetIR/Source/Opt*.jet`) | IR |
 | x86-64 selection with linear scan over slot live ranges (`JetIR/Source/X64*.jet`) | IR |
 | Comptime (`JetEval/Source/IR`): O0 machine code from the same selector | IR |
 | Phase trace: `ir.build`, `ir.lint`, `ir.opt`, `ir.x64`, `ir.object` | IR |

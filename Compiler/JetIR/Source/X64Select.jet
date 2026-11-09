@@ -65,6 +65,7 @@ use {
         dwarf_cfa_offset,
         dwarf_cfa_remember_state,
         dwarf_cfa_restore_state,
+        x64_alu_mi,
         x64_alu_ri,
         x64_alu_rr,
         x64_assemble_template,
@@ -155,6 +156,10 @@ IRX64ColdKind: enum {
     ShiftStop
     // The runtime call of CallRuntime instruction `left`, as written, then back.
     Call
+    // The call of the `#unique` helper of Call instruction `left`, as
+    // written, then back (ir_x64_unique_call); with `right` the header, a
+    // header with no positive capacity's tests first.
+    Unique
     // jet_rt_block_release(left): its Bool compared with 1, so a fused
     // branch reads E as true, and into `dst`, then back.
     Release
@@ -982,6 +987,30 @@ ir_x64_emit_colds: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64All
                 ir_x64_call(e, m, f, al, X64RelocTarget.Runtime{symbol: cold.symbol}, -1, f.args, f.b[at], f.c[at], f.dst[at], al.stack[at])
                 ir_x64_jump_to(e, cold.resume)
             }
+            .Unique -> {
+                at: cold.left
+                // In place, no call: edx 0, as the helper's return leaves it
+                // with no stop (ir_x64_unique_call).
+                quiet := [Int]{}
+                if cold.right >= 0 {
+                    // Entered with the flags of the capacity's test (`right`
+                    // the header): a write window, and an empty frozen
+                    // header, are written in place.
+                    quiet.push(x64_jcc_rel32(e.code, X64Cond.S))
+                    reg: ir_x64_use(e, m, f, al, cold.right, X64_RAX)
+                    x64_load(e.code, X64_RCX, reg, 0)
+                    x64_test_rr(e.code, X64_RCX, X64_RCX)
+                    quiet.push(x64_jcc_rel32(e.code, X64Cond.E))
+                }
+                ir_x64_call(e, m, f, al, X64RelocTarget.Function{id: X64FunctionID{value: f.a[at]}}, -1, f.args, f.b[at], f.c[at], -1, al.stack[at])
+                ir_x64_jump_to(e, cold.resume)
+                if quiet.len() > 0 {
+                    written: e.code.len()
+                    loop site in quiet -> ir_x64_patch(e, site, written)
+                    ir_x64_no_stop(e)
+                    ir_x64_jump_to(e, cold.resume)
+                }
+            }
         }
     }
 }
@@ -1065,15 +1094,17 @@ ir_x64_exact_arithmetic: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IR
 }
 
 // Whether comparison `at`'s Bool is read only by the If or BrIf right after
-// it (past the drops it covers): the comparison then leaves its result in
-// the flags for that branch.
+// it (past the drops it covers), or only by a `not` that is itself read only
+// by that branch (ir_x64_not flips the condition): the comparison then
+// leaves its result in the flags for that branch.
 ir_x64_fusable: fn(e: IRX64Emitter, f: IRFunction, al: IRX64Allocation, at: Int) -> Bool Never! {
     next := at + 1
     loop next < f.op.len() && e.absorbed[next] -> next += 1
     if next >= f.op.len() -> return false
     dst: f.dst[at]
     if dst < f.param_count || f.slot_kind[dst] != .Temp || al.ends[dst] != next || f.a[next] != dst -> return false
-    f.op[next] == .If || f.op[next] == .BrIf
+    if f.op[next] == .If || f.op[next] == .BrIf -> return true
+    f.op[next] == .Not && ir_x64_fusable(e, f, al, next)
 }
 
 // The flags of a comparison: fused into the next branch, else its Bool into `dst`.
@@ -1168,9 +1199,9 @@ ir_x64_exact_bitwise: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64
 // a big one takes the runtime call in a slow path.
 ir_x64_inline_route: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, symbol: String, value: Int, dst: Int) Never! {
     sites := [Int]{}
-    ir_x64_load(e, m, f, al, value, X64_RAX)
-    ir_x64_operand_test(e, al, value, X64_RAX, sites)
-    ir_x64_store(e, m, f, al, dst, X64_RAX)
+    reg: ir_x64_use(e, m, f, al, value, X64_RAX)
+    ir_x64_operand_test(e, al, value, reg, sites)
+    ir_x64_store(e, m, f, al, dst, reg)
     if sites.is_empty() -> return
     cold := ir_x64_cold(IRX64ColdKind.Route, sites)
     cold.resume = e.code.len()
@@ -1302,6 +1333,43 @@ ir_x64_block_unique: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64A
     x64_alu_ri(e.code, X64Alu.Cmp, X64_RCX, 4)
     ir_x64_land(e, immortal)
     ir_x64_compare_result(e, m, f, al, at, X64Cond.E)
+}
+
+// A Call of a `#unique<T>` helper (BuildOwn.jet ir_unique_helper) with the
+// helper's own tests inline: a counted buffer whose count word is exactly 1
+// (one owner, not immortal, no zero-at-free mark) is written in place on the
+// hot path after one compare; a header with no positive capacity takes a
+// slow path that writes in place too for a write window (capacity below 0)
+// or an empty frozen header (capacity and length 0); every other header,
+// a marked sole owner among them, calls the helper there. The helper is a
+// selected body, so a stop point right after the Call reads edx as its stop
+// (ir_x64_stop_point): each path that writes in place without the call
+// leaves edx 0. False when the call is not of that shape.
+ir_x64_unique_call: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, at: Int) -> Bool Never! {
+    if f.c[at] != 1 || f.dst[at] >= 0 || !m.functions[f.a[at]].key.starts_with("#unique<") -> return false
+    header: f.args[f.b[at]]
+    if header < 0 || ir_x64_slot_class(m, f, header) != .General -> return false
+    sites := [Int]{}
+    reg: ir_x64_use(e, m, f, al, header, X64_RAX)
+    x64_load(e.code, X64_RCX, reg, 8)
+    x64_test_rr(e.code, X64_RCX, X64_RCX)
+    unbuffered: x64_jcc_rel32(e.code, X64Cond.LE)
+    x64_load(e.code, X64_RCX, reg, 16)
+    // A count word of exactly 1 is one owner, not immortal and unmarked; a
+    // marked one (bit 62) takes the helper, whose own test passes it.
+    x64_alu_mi(e.code, X64Alu.Cmp, X64_RCX, -24, 1)
+    sites.push(x64_jcc_rel32(e.code, X64Cond.NE))
+    ir_x64_no_stop(e)
+    shared := ir_x64_cold(IRX64ColdKind.Unique, sites)
+    shared.resume = e.code.len()
+    shared.left = at
+    e.colds.push(shared)
+    rare := ir_x64_cold(IRX64ColdKind.Unique, [Int]{unbuffered})
+    rare.resume = e.code.len()
+    rare.left = at
+    rare.right = header
+    e.colds.push(rare)
+    true
 }
 
 // jet_rt_block_retain(block) inline (Refcount.jet): one `lock inc` of the
@@ -2171,9 +2239,16 @@ ir_x64_neg: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation
     }
 }
 
+// `not v`. The `not` of a comparison fused into the flags (ir_x64_fusable)
+// stays in them, under the inverted condition.
 ir_x64_not: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, at: Int) Never! {
-    ty: ir_x64_type(m, f, f.a[at])
     dst: f.dst[at]
+    if e.fused == f.a[at] && f.a[at] >= 0 {
+        e.fused = dst
+        e.fused_cond = x64_cond_invert(e.fused_cond)
+        return
+    }
+    ty: ir_x64_type(m, f, f.a[at])
     ir_x64_load(e, m, f, al, f.a[at], X64_RAX)
     if ty.kind == {
         .Bool -> x64_alu_ri(e.code, X64Alu.Xor, X64_RAX, 1)
@@ -2894,6 +2969,7 @@ ir_x64_select: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocat
             if m.functions[f.a[at]].asm == .Val(leaf) && key != IR_STOP_POLL_KEY && key != IR_STOP_TRAP_KEY {
                 if ir_x64_asm_inline(e, m, f, al, leaf, f.args, f.b[at], f.c[at], dst) -> return
             }
+            if ir_x64_unique_call(e, m, f, al, at) -> return
             ir_x64_call(e, m, f, al, X64RelocTarget.Function{id: X64FunctionID{value: f.a[at]}}, -1, f.args, f.b[at], f.c[at], dst, al.stack[at])
         }
         .CallRuntime -> {
@@ -3052,6 +3128,13 @@ ir_x64_reports_stop: fn(m: IRModule, id: Int) -> Bool Never! {
     if id < 0 || id >= m.functions.len() || m.functions[id].asm != None -> return false
     key: m.functions[id].key
     key != IR_STOP_POLL_KEY && key != IR_STOP_TRAP_KEY
+}
+
+// `xor edx, edx`: no stop, as a selected body's return reports it, for a
+// Call of one selected without the call (ir_x64_unique_call).
+ir_x64_no_stop: fn(e: &IRX64Emitter) Never! {
+    e.code.push(0x31)
+    e.code.push(0xd2)
 }
 
 // Whether instruction e.at sits in a Loop.
@@ -3449,7 +3532,8 @@ ir_x64_same_key: fn(a: [Int], b: [Int]) -> Bool Never! {
 // One function.
 
 // Debug variables and their locations: a register slot over its live range,
-// a frame slot over the whole body.
+// a frame slot over the whole body, and a frame address (IRX64Allocation
+// .frames) as the rbp-relative address it is over the whole body.
 ir_x64_variables: fn(m: IRModule, f: IRFunction, al: IRX64Allocation, tables: IRX64Tables, positions: [Int], body: Int, end: Int, variables: &[X64DebugVariable], ranges: &[X64VariableRange]) Never! {
     loop slot in 0..<f.slot_type.len() {
         name: f.slot_name[slot]
@@ -3457,7 +3541,11 @@ ir_x64_variables: fn(m: IRModule, f: IRFunction, al: IRX64Allocation, tables: IR
         ty: ir_x64_type(m, f, slot)
         variable: variables.len()
         variables.push(X64DebugVariable{name: m.names[name], ty: tables.type_debug[f.slot_type[slot]], line: f.slot_line[slot], parameter: f.slot_kind[slot] == .Param, indirect: false})
-        if al.starts[slot] > al.ends[slot] || ir_x64_class(ty) == .Empty || al.consts[slot] || al.frames[slot] != 0 -> next
+        if al.starts[slot] > al.ends[slot] || ir_x64_class(ty) == .Empty || al.consts[slot] -> next
+        if al.frames[slot] != 0 {
+            if end > body -> ranges.push(X64VariableRange{variable: variable, start: body, end: end, location: X64DebugLocation.FrameAddress{offset: al.frames[slot]}})
+            next
+        }
         if al.regs[slot] >= 0 || al.xmms[slot] >= 0 {
             // From the body on: the frame-free prefix keeps its values in
             // registers of its own (ir_x64_wrap).
@@ -3659,8 +3747,8 @@ ir_x64_wrap: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocatio
     }
     // Per register: the slot holding it, -1 for none, -2 for one it keeps
     // to the end (a parameter's, which its import still reads, or one a
-    // body slot lives in, a leaf's r8 or r9, so the prefix's values reach
-    // their places in any order).
+    // body slot lives in, which may be r8 or r9, so the prefix's values
+    // reach their places in any order).
     owner := [Int]{}
     loop _ in 0..<16 -> owner.push(-1)
     loop slot in 0..<count {
@@ -3696,7 +3784,7 @@ ir_x64_wrap: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocatio
         written: ir_x64_write(f, at)
         if written >= 0 && regs[written] < 0 && !al.consts[written] {
             if al.frames[written] != 0 || ir_x64_slot_class(m, f, written) != .General -> break
-            if (ir_x64_is_compare(op) || ir_x64_inline_unique(m, f, at)) && ir_x64_fusable(e, f, al, at) {
+            if (ir_x64_is_compare(op) || ir_x64_inline_unique(m, f, at) || (op == .Not && fused[f.a[at]])) && ir_x64_fusable(e, f, al, at) {
                 // Its flags go straight into the branch after it.
                 fused[written] = true
             } else {
