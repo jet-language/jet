@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6710,
-    "rev": 96379,
+    "rev": 96380,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -93074,53 +93074,6 @@
       "completedAt": "2026-11-06T06:13:42.516Z"
     },
     {
-      "id": "c0fz569a",
-      "num": 6591,
-      "title": "A child's stdout line reaches the parent only after the child exits",
-      "body": "Found by CoreOwnership on dev d1e6c214e1: in golden foundations/storage, crash_recovery waits for a child to print 'ready' while it keeps running, but the parent receives the line only after the child exits, so the program panics. Streaming a running child's stdout must deliver each line as it is written (no buffering until exit), on O0/O1/O2. Add a case where the parent reads 'ready' from a child that then waits for the parent.",
-      "kind": "bug",
-      "track": "sidequest",
-      "epoch": null,
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-06",
-          "by": "Main",
-          "text": "Restated (CoreOwnership, Main): the runtime follows ratified D-STDOUT-BUFFER1=A (spec.md:321-325: pipe stdout is written when its buffer fills, or before a stderr write, stdin read, child start or stop; Host.jet host_stdout_write). The foundations/storage child printed 'ready' into a pipe and slept without flushing, so the example is wrong, not the runtime. Fix: the example flushes stdout after 'ready', plus a case where the child prints ready, flushes and waits, and the parent streams the line on O0/O1/O2. Line-buffered pipes would need an owner re-ballot of D-STDOUT-BUFFER1."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "Under D-STDOUT-BUFFER1=A, the foundations/storage example flushes its ready line and passes on O0/O1/O2, and a case proves a flushed child line reaches the parent while the child waits",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev bd4d5bb844 (CoreOwnership): the storage crash writer flushes its ready line; golden foundations/storage added, o0/o1/o2 PASS; new case process_sessions/flushed_child_line_reaches_the_parent_while_the_child_waits PASS on O0/O1/O2 and the built binary.",
-          "at": "2026-11-06T05:14:42.262Z"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "goals": [
-        "G3"
-      ],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-06T05:07:07.070Z",
-      "updated": "2026-11-06T05:14:43.285Z",
-      "updatedBy": "Main",
-      "completedAt": "2026-11-06T05:14:43.285Z"
-    },
-    {
       "id": "c0g93joj",
       "num": 6592,
       "title": "First jet cc pack install hashes the 450 MB tree about four times with pure-Jet SHA-256",
@@ -101063,6 +101016,11 @@
         {
           "at": "2026-11-09",
           "by": "Main",
+          "text": "Frame and default-style mockups READY for the owner (WaylandLead): $JET_SCRATCH_ROOT/lanes/WaylandLead/mockups/README.md and out/01-08.png. They show the Unified and Classic Jet-drawn frames in light and dark, every title-bar state (active, inactive, maximized/tiled), a widget gallery, three accents and a 2x render. Everything, including the text (core.ui.font, Atkinson Hyperlegible Next), was drawn by Jet on the seed. Four owner choices: default frame (Unified recommended), title placement (left, recommended; or centred), accent (Jet blue #3D6DF2 / #7C9DFF), and theme following the desktop color-scheme (an app may pin it). The ballot D-FRAME-STYLE1 is being drafted; it is independent of D-APP1."
+        },
+        {
+          "at": "2026-11-09",
+          "by": "Main",
           "text": "D-APP1.v2 fresh sol review (AppReview4): ENGINEERED-AWAY=no, 13 remaining downsides (wait routing/fairness, fiber ownership contexts, lost activation, stale busy-turn events, composition ranges, hidden accessible rows, unproved Find/selection/print, divergent dynamic fonts, avoidable lost edits, window/embedding gaps, missing integration/perf evidence, authority/framing gaps, unfair browser-floor comparison: new option F canonical continuation lowering). Audit $JET_SCRATCH_ROOT/lanes/AppReview4/2026-11-09-d-app1-v2-review.md; repaired drafts D-APP1.v3.json and DESIGN-APP1.v3.md (validator ok). BallotLead-2 is redesigning as v4; the two-clean-reviews count restarts."
         },
         {
@@ -101191,7 +101149,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-08T19:44:17.134Z",
-      "updated": "2026-11-09T04:33:34.202Z",
+      "updated": "2026-11-09T05:34:39.107Z",
       "updatedBy": "Main",
       "criteriaLastN": 7
     },
@@ -189277,6 +189235,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-09T05:34:39.107Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0l39twq",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-09T04:56:17.964Z",
       "by": "Main",

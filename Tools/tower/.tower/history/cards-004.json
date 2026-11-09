@@ -85121,6 +85121,55 @@
       "completedAt": "2026-11-06T04:37:04.686Z",
       "questions": [],
       "retiredAt": "2026-11-09T04:38:57.624Z"
+    },
+    {
+      "id": "c0fz569a",
+      "num": 6591,
+      "title": "A child's stdout line reaches the parent only after the child exits",
+      "body": "Found by CoreOwnership on dev d1e6c214e1: in golden foundations/storage, crash_recovery waits for a child to print 'ready' while it keeps running, but the parent receives the line only after the child exits, so the program panics. Streaming a running child's stdout must deliver each line as it is written (no buffering until exit), on O0/O1/O2. Add a case where the parent reads 'ready' from a child that then waits for the parent.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Restated (CoreOwnership, Main): the runtime follows ratified D-STDOUT-BUFFER1=A (spec.md:321-325: pipe stdout is written when its buffer fills, or before a stderr write, stdin read, child start or stop; Host.jet host_stdout_write). The foundations/storage child printed 'ready' into a pipe and slept without flushing, so the example is wrong, not the runtime. Fix: the example flushes stdout after 'ready', plus a case where the child prints ready, flushes and waits, and the parent streams the line on O0/O1/O2. Line-buffered pipes would need an owner re-ballot of D-STDOUT-BUFFER1."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Under D-STDOUT-BUFFER1=A, the foundations/storage example flushes its ready line and passes on O0/O1/O2, and a case proves a flushed child line reaches the parent while the child waits",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev bd4d5bb844 (CoreOwnership): the storage crash writer flushes its ready line; golden foundations/storage added, o0/o1/o2 PASS; new case process_sessions/flushed_child_line_reaches_the_parent_while_the_child_waits PASS on O0/O1/O2 and the built binary.",
+          "at": "2026-11-06T05:14:42.262Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G3"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-06T05:07:07.070Z",
+      "updated": "2026-11-06T05:14:43.285Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-11-06T05:14:43.285Z",
+      "questions": [],
+      "retiredAt": "2026-11-09T05:34:39.400Z"
     }
   ]
 }
