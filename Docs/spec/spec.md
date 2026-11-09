@@ -3083,9 +3083,13 @@ special functions, checked/saturating/wrapping integer families, and exact
 ratios. Exact ratio values expose numerator, denominator, string, float, zero,
 and arithmetic operations.
 
-The runtime computes the base libm family in Jet, ported from musl 1.2.5's
-algorithms: each result has musl's x86_64 bits on every build level and on the
-web, and the runtime imports no C math symbol.
+The base libm family's transcendental functions (trigonometric, inverse
+trigonometric, hyperbolic, inverse hyperbolic, exponential and logarithmic
+functions, `cbrt`, `hypot` and Float `pow`) are correctly rounded Jet source in
+Core, so each result has the same bits on every build level and on the web.
+The runtime computes only the exactly rounded `floor`, `ceil`, `trunc`,
+`round`, `fmod`, `fma` and `sqrt`, in Jet ported from musl 1.2.5, and imports
+no C math symbol.
 
 `round` returns the nearest integer with an exact half away from zero
 (`-2.5` becomes `-3`, and `2.5` becomes `3`). For `min` and `max`, one NaN

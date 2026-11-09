@@ -284,9 +284,10 @@ the source nominal identity while checking that crossing.
 
 `core.math` keeps IEEE classification, adjacent-value and exponent composition,
 rounding/conversion policy, remainder validation, distance accumulation, and
-special-function approximations in Jet. Its libm operations are Jet runtime
-code ported from musl 1.2.5, so its numeric host boundary is primitive bit
-casts alone. A classification or composite operation is
+special-function approximations in Jet. Its transcendental functions and
+Float power are correctly rounded Core source, and the runtime's exactly
+rounded operations are Jet code ported from musl 1.2.5, so its numeric host
+boundary is primitive bit casts alone. A classification or composite operation is
 not a native leaf merely because Rust exposes it as a scalar method.
 
 The caller-owned RNG stream uses SplitMix64, distinct from the ambient

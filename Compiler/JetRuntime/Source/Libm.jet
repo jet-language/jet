@@ -1,8 +1,7 @@
-// The C library math the runtime computes itself, ported statement for
-// statement from musl 1.2.5 src/math (MIT; FreeBSD msun and ARM
-// optimized-routines lineage), so every tier returns musl's bits. Each port
-// names its musl file. This file holds the shared helpers and the exactly
-// rounded functions; LibmTrig.jet, LibmExpLog.jet and LibmPow.jet hold the rest.
+// The exactly rounded C library math the runtime computes itself (floor,
+// ceil, trunc, round, fmod, fma and sqrt), ported statement for statement
+// from musl 1.2.5 src/math (MIT; FreeBSD msun lineage), so every tier
+// returns the same bits. Each port names its musl file.
 //
 // musl's floating-point exception side effects (FORCE_EVAL, fp_barrier) and
 // errno are not ported: Jet exposes neither, and they never change a result.
@@ -15,7 +14,6 @@ use libm_core: core.math
 
 LIBM_SIGN: I64{-9223372036854775807 - 1}
 LIBM_ABS: I64{9223372036854775807}
-LIBM_EXP_INF: I64{9218868437227405312}
 LIBM_MANTISSA: I64{4503599627370495}
 LIBM_IMPLICIT: I64{4503599627370496}
 // 1/DBL_EPSILON, 0x1p52: adding then subtracting it rounds to an integer.
@@ -26,8 +24,6 @@ LIBM_P1023: Float{8.98846567431158e+307}
 LIBM_PM969: Float{2.004168360008973e-292}
 // DBL_MIN, 0x1p-1022
 LIBM_DBL_MIN: Float{2.2250738585072014e-308}
-// asuint64(0x1.8p52)
-LIBM_TOINT_HALF_BITS: I64{4843621399236968448}
 // A NaN's quiet bit, 0x8000000000000.
 LIBM_QUIET: I64{2251799813685248}
 
@@ -84,10 +80,6 @@ libm_clz64: fn(word: I64) -> I64 {
 
 // The biased exponent field of a double's bits.
 libm_exponent: fn(bits: I64) -> I64 { (bits >> I64{52}).bit_and(I64{2047}) }
-
-// C's (double)k for |k| < 2^51. Float{k} also proves k exact, at a division
-// per call; 0x1.8p52 + k is exact, so its bits are 0x1.8p52's plus k.
-libm_small_float: fn(k: I64) -> Float { rt_f64_from_bits(wrapping(LIBM_TOINT_HALF_BITS + k)) - LIBM_TOINT_HALF }
 
 // x86_64 musl computes sqrt with sqrtsd (src/math/x86_64/sqrt.c); Core's
 // sqrt is that IEEE operation on every tier.
