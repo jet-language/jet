@@ -68,6 +68,42 @@
     rt_f64_from_bits(raw)
 }
 #Export(c) jet_std_math_to_bits: fn(x: Float) -> I64 { jet_int_owned_from_i64(rt_f64_bits(x)) }
+// The F32 bit routes' reference: Lower builds both as one bit-preserving
+// frame-word copy (BuildRoutes.jet ir_f32_bits), so no route call reaches
+// these. A route F32 crosses widened to Float, which quiets a signaling NaN;
+// the binary64 fields repack exactly otherwise.
+#Export(c) jet_std_math_to_bits_f32: fn(x: Float) -> I64 {
+    bits: rt_f64_bits(x)
+    sign: if (bits < I64{0}) -> I64{2147483648} else -> I64{0}
+    exponent: (bits >> I64{52}).bit_and(I64{2047})
+    fraction: bits.bit_and(I64{4503599627370495})
+    if (exponent == I64{2047}) -> return sign.bit_or(I64{2139095040}).bit_or(fraction >> I64{29})
+    if (exponent == I64{0}) -> return sign
+    power: exponent - I64{1023}
+    if (power < I64{-126}) -> return sign.bit_or(fraction.bit_or(I64{4503599627370496}) >> (I64{-97} - power))
+    sign.bit_or((power + I64{127}) << I64{23}).bit_or(fraction >> I64{29})
+}
+// The Float holding the F32 of binary32 `bits` (an exact Int carrier whose
+// low 32 bits are read), a NaN payload in the top fraction bits.
+#Export(c) jet_std_math_from_bits_f32: fn(bits: I64) -> Float {
+    raw: (if int_inline(bits) -> bits else -> int_word(bits)).bit_and(I64{4294967295})
+    sign: if (raw.bit_and(I64{2147483648}) != I64{0}) -> I64{-9223372036854775807} - I64{1} else -> I64{0}
+    exponent := (raw >> I64{23}).bit_and(I64{255})
+    fraction := raw.bit_and(I64{8388607})
+    if (exponent == I64{255}) -> return rt_f64_from_bits(sign.bit_or(I64{9218868437227405312}).bit_or(fraction << I64{29}))
+    if (exponent == I64{0}) {
+        if (fraction == I64{0}) -> return rt_f64_from_bits(sign)
+        // A subnormal is a binary64 normal: shift its leading bit into place.
+        exponent = I64{1}
+        loop {
+            if (fraction.bit_and(I64{8388608}) != I64{0}) -> break
+            fraction = fraction << I64{1}
+            exponent = exponent - I64{1}
+        }
+        fraction = fraction.bit_and(I64{8388607})
+    }
+    rt_f64_from_bits(sign.bit_or((exponent + I64{896}) << I64{52}).bit_or(fraction << I64{29}))
+}
 // Rust f64::sin_cos evaluates the separate sin/cos calls, in that tuple order.
 #Export(c) jet_std_math_sin_cos: fn(x: Float, sine: I64, cosine: I64) {
     s: libm_sin(x)

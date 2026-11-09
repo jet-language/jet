@@ -3366,7 +3366,8 @@ ir_float_word: fn(m: &IRModule, b: &IRBuilder, floating: Int, row: Int, unsigned
 // operation it is: `math.sqrt(x)` the IEEE square root, `math.fabs(x)` the
 // sign-bit clear, `math.is_finite(x)` and the other Float predicates the
 // operation their receiver form `x.is_finite()` lowers to (BuildTypes.jet
-// ir_float_predicate). None for any other route.
+// ir_float_predicate), and Core's F32 bit pair one frame-word copy
+// (ir_f32_bits). None for any other route.
 ir_leaf_route: fn(name: String) -> String? Never! {
     if name == {
         "jet_std_math_sqrt" -> Val("sqrt")
@@ -3374,6 +3375,8 @@ ir_leaf_route: fn(name: String) -> String? Never! {
         "jet_std_math_is_finite" -> Val("is_finite")
         "jet_std_math_is_infinite" -> Val("is_infinite")
         "jet_std_math_is_nan" -> Val("is_nan")
+        "jet_std_math_to_bits_f32" -> Val("to_bits_f32")
+        "jet_std_math_from_bits_f32" -> Val("from_bits_f32")
         else -> None
     }
 }
@@ -3482,6 +3485,7 @@ ir_route_inline: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, name: String, inp
     if ir_leaf_route(name) == .Val(leaf) {
         if inputs.len() != 1 || inputs[0] < 0 -> return Val(ir_fail_slot(b, span, "{leaf} with {inputs.len()} arguments"))
         row: b.f.slot_type[inputs[0]]
+        if leaf == "to_bits_f32" || leaf == "from_bits_f32" -> return Val(ir_f32_bits(m, p, b, inputs[0], leaf, result, span))
         if leaf != "sqrt" && leaf != "fabs" -> return Val(ir_float_predicate(m, b, inputs[0], leaf, m.types[row].ty.copy(), span))
         if m.types[row].kind != .Float -> return Val(ir_fail_slot(b, span, "{leaf} of {ir_type_name(m.types[row].ty)}"))
         if leaf == "fabs" {
@@ -3515,6 +3519,33 @@ ir_route_inline: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, name: String, inp
     if ir_failed(b) -> return Val(-1)
     loop slot in inputs -> ir_release(m, b, slot)
     Val(value)
+}
+
+// Core's `__to_bits_f32(x)` (leaf "to_bits_f32"): F32 `value`'s binary32
+// bits as an Int in 0..<2^32, stored over a zeroed frame word and read back
+// whole; `__from_bits_f32(bits)` ("from_bits_f32"): the F32 whose bits are
+// the low 32 of Int `value`, which Core keeps in 0..<2^32 so the Int is its
+// own word. No conversion runs, so a payload and a signaling NaN cross
+// unchanged.
+ir_f32_bits: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, leaf: String, result: Type, span: Span) -> Int Never! {
+    to_bits: leaf == "to_bits_f32"
+    input: m.types[b.f.slot_type[value]].kind
+    row: ir_value_type(m, p, result) ?? return ir_type_fail(b, span, result)
+    output: m.types[row].kind
+    if to_bits && (input != .Float32 || output != .Int) -> return ir_fail_slot(b, span, "F32 bits of {ir_type_name(m.types[b.f.slot_type[value]].ty)}")
+    if !to_bits && (input != .Int || output != .Float32) -> return ir_fail_slot(b, span, "F32 from bits of {ir_type_name(m.types[b.f.slot_type[value]].ty)}")
+    pointer: ir_pointer_row(m)
+    area: ir_temp(m, b, pointer)
+    ir_emit(b.f, IROp.StackAddress, area, 8, 8, -1, b.line)
+    if to_bits {
+        zero: ir_word_const(m, b, 0)
+        ir_emit(b.f, IROp.Store, -1, area, 0, zero, b.line)
+    }
+    ir_emit(b.f, IROp.Store, -1, area, 0, value, b.line)
+    out: ir_temp(m, b, row)
+    ir_emit(b.f, IROp.Load, out, area, 0, -1, b.line)
+    if !to_bits -> ir_release(m, b, value)
+    out
 }
 
 // `xs.get(i)`: a copy of the element at a native position in 0..<len, else
