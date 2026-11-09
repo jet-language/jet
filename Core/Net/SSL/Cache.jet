@@ -1,0 +1,200 @@
+// Private Core source part: the server's session cache.
+//
+// A port of mbedtls 3.6.7's ssl_cache.c under the default
+// mbedtls_config.h (HAVE_TIME on): sessions serialized under their session
+// ID in a list kept in insertion order, each with the time it was stored.
+// An entry older than the timeout is never returned and is the first one a
+// new session overwrites; a full cache with no expired entry overwrites its
+// oldest one.
+//
+// C chains its entries through `next` pointers; here they are a list, so a
+// removed entry is taken out of it and a new one appended. The cache is
+// shared by every connection of a configuration: ssl_cache_get_cb and
+// ssl_cache_set_cb give the configuration callbacks over a Shared handle,
+// which hold its lock for the call as C's THREADING_C mutex does.
+use {
+    core
+    ssldefs: __core_net_ssl_defs
+    sslser: __core_net_ssl_ser
+}
+
+/// MBEDTLS_SSL_CACHE_DEFAULT_TIMEOUT: a day, in seconds.
+SSL_CACHE_DEFAULT_TIMEOUT: 86400
+/// MBEDTLS_SSL_CACHE_DEFAULT_MAX_ENTRIES.
+SSL_CACHE_DEFAULT_MAX_ENTRIES: 50
+// The room C's entry has for a session ID (sizeof(cur->session_id)).
+SSL_CACHE_SESSION_ID_LEN: 32
+
+/// One cached session (mbedtls_ssl_cache_entry): when it was stored in
+/// seconds since the epoch, its session ID, and the session serialized,
+/// empty for an entry not yet written.
+SSLCacheEntry: struct {
+    timestamp: Int
+    session_id: [U8]
+    session: [U8]
+}
+
+/// The cache (mbedtls_ssl_cache_context): its entries, the seconds an entry
+/// lives (0 for no limit) and the most entries it holds.
+SSLCacheContext: struct {
+    chain: [SSLCacheEntry]
+    timeout: Int
+    max_entries: Int
+}
+
+/// An empty cache with the default timeout and size
+/// (mbedtls_ssl_cache_init).
+ssl_cache_init: fn() -> SSLCacheContext Never! {
+    SSLCacheContext{chain: [SSLCacheEntry]{}, timeout: SSL_CACHE_DEFAULT_TIMEOUT, max_entries: SSL_CACHE_DEFAULT_MAX_ENTRIES}
+}
+
+// Whether the entry has outlived the cache's timeout.
+ssl_cache_expired: fn(cache: SSLCacheContext, entry: SSLCacheEntry, t: Int) -> Bool Never! {
+    cache.timeout != 0 && t - entry.timestamp > cache.timeout
+}
+
+// The index of the live entry stored under `session_id`, or
+// CacheEntryNotFound (ssl_cache_find_entry).
+ssl_cache_find_entry: fn(cache: SSLCacheContext, session_id: [U8]) -[Time]> Int ssldefs.SSLError! {
+    t: ssldefs.ssl_time()
+    loop i in 0..<cache.chain.len() {
+        cur: cache.chain[i]
+        if ssl_cache_expired(cache, cur, t) -> next
+        if session_id.len() != cur.session_id.len() || !ssldefs.ssl_range_eq(session_id, 0, cur.session_id, 0, cur.session_id.len()) -> next
+        return Ok(i)
+    }
+    Err(.CacheEntryNotFound)
+}
+
+/// The session stored under `session_id` (mbedtls_ssl_cache_get):
+/// CacheEntryNotFound when there is none or it has expired.
+ssl_cache_get: fn(cache: &SSLCacheContext, session_id: [U8]) -[Time]> ssldefs.SSLSession ssldefs.SSLError! {
+    i: ssl_cache_find_entry(cache, session_id) ?? return Err(err)
+    session := ssldefs.SSLSession{}
+    sslser.ssl_session_load(session, cache.chain[i].session) ?? return Err(err)
+    Ok(session)
+}
+
+// Wipe an entry's session and ID (ssl_cache_entry_zeroize).
+ssl_cache_entry_zeroize: fn(entry: &SSLCacheEntry) Never! {
+    ssldefs.ssl_wipe(entry.session)
+    ssldefs.ssl_wipe(entry.session_id)
+    entry.session = [U8]{}
+    entry.session_id = [U8]{}
+    entry.timestamp = 0
+}
+
+// The index of the entry a session under `session_id` is written to
+// (ssl_cache_pick_writing_slot): the entry already under that ID, else the
+// first expired one, else a new one appended while the cache has room,
+// else the oldest. The entry is wiped and stamped with the current time.
+ssl_cache_pick_writing_slot: fn(cache: &SSLCacheContext, session_id: [U8]) -[Time]> Int ssldefs.SSLError! {
+    t: ssldefs.ssl_time()
+    found := -1
+    // Check 1: an entry with the given session ID is overwritten.
+    loop i in 0..<cache.chain.len() {
+        cur: cache.chain[i]
+        if session_id.len() == cur.session_id.len() && ssldefs.ssl_range_eq(session_id, 0, cur.session_id, 0, cur.session_id.len()) {
+            found = i
+            break
+        }
+    }
+    // Check 2: an outdated entry is overwritten; else the oldest is kept.
+    old := -1
+    if found < 0 {
+        oldest := 0
+        loop i in 0..<cache.chain.len() {
+            cur: cache.chain[i]
+            if ssl_cache_expired(cache, cur, t) {
+                found = i
+                break
+            }
+            if oldest == 0 || cur.timestamp < oldest {
+                oldest = cur.timestamp
+                old = i
+            }
+        }
+    }
+    // Check 3: a new entry while the cache has room.
+    if found < 0 && cache.chain.len() < cache.max_entries {
+        cache.chain.push(SSLCacheEntry{timestamp: 0, session_id: [U8]{}, session: [U8]{}})
+        found = cache.chain.len() - 1
+    }
+    // Last resort: the full cache with no outdated entry evicts its oldest.
+    if found < 0 {
+        // Only a cache with max_entries 0 has none.
+        if old < 0 -> return Err(.InternalError)
+        found = old
+    }
+    ssl_cache_entry_zeroize(cache.chain[found])
+    cache.chain[found].timestamp = t
+    Ok(found)
+}
+
+/// Store `session` under `session_id` (mbedtls_ssl_cache_set):
+/// BadInputData for an ID past 32 bytes, which leaves its entry empty as
+/// C does.
+ssl_cache_set: fn(cache: &SSLCacheContext, session_id: [U8], session: ssldefs.SSLSession) ssldefs.SSLError! -[Time]> {
+    i: ssl_cache_pick_writing_slot(cache, session_id) ?? return Err(err)
+    serialized := sslser.ssl_session_save(session) ?? return Err(err)
+    if session_id.len() > SSL_CACHE_SESSION_ID_LEN {
+        ssldefs.ssl_wipe(serialized)
+        return Err(.BadInputData)
+    }
+    cache.chain[i].session_id = session_id.copy()
+    cache.chain[i].session = serialized
+}
+
+/// Drop the live entry under `session_id`, if any
+/// (mbedtls_ssl_cache_remove).
+ssl_cache_remove: fn(cache: &SSLCacheContext, session_id: [U8]) ssldefs.SSLError! -[Time]> {
+    if ssl_cache_find_entry(cache, session_id) == {
+        .Ok(i) -> {
+            ssl_cache_entry_zeroize(cache.chain[i])
+            cache.chain.remove(i, .Slot).drop("the entry is wiped")
+        }
+        // No valid entry: nothing to remove.
+        .Err(_) -> {}
+    }
+}
+
+/// Set the seconds an entry lives, a negative one as 0, no limit
+/// (mbedtls_ssl_cache_set_timeout).
+ssl_cache_set_timeout: fn(cache: &SSLCacheContext, timeout: Int) Never! {
+    cache.timeout = if timeout < 0 -> 0 else -> timeout
+}
+
+/// Set the most entries the cache holds, a negative one as 0
+/// (mbedtls_ssl_cache_set_max_entries).
+ssl_cache_set_max_entries: fn(cache: &SSLCacheContext, max: Int) Never! {
+    cache.max_entries = if max < 0 -> 0 else -> max
+}
+
+/// Wipe and drop every entry (mbedtls_ssl_cache_free).
+ssl_cache_free: fn(cache: &SSLCacheContext) Never! {
+    loop i in 0..<cache.chain.len() -> ssl_cache_entry_zeroize(cache.chain[i])
+    cache.chain = [SSLCacheEntry]{}
+}
+
+ssl_cache_get_locked: fn(cache: Shared<SSLCacheContext>, session_id: [U8]) -[Time]> ssldefs.SSLSession ssldefs.SSLError! {
+    guard := cache.guard_edit()
+    ssl_cache_get(guard.value, session_id)
+}
+
+ssl_cache_set_locked: fn(cache: Shared<SSLCacheContext>, session_id: [U8], session: ssldefs.SSLSession) -[Time]> Bool ssldefs.SSLError! {
+    guard := cache.guard_edit()
+    ssl_cache_set(guard.value, session_id, session) ?? return Err(err)
+    Ok(true)
+}
+
+/// The configuration's cache lookup over a shared cache: C's
+/// mbedtls_ssl_cache_get with the cache as p_cache.
+ssl_cache_get_cb: fn(cache: Shared<SSLCacheContext>) -> ssldefs.SSLCacheGet Never! {
+    ssldefs.SSLCacheGet{call: (session_id: [U8]) -> ssl_cache_get_locked(cache, session_id)}
+}
+
+/// The configuration's cache store over a shared cache: C's
+/// mbedtls_ssl_cache_set with the cache as p_cache; true once stored.
+ssl_cache_set_cb: fn(cache: Shared<SSLCacheContext>) -> ssldefs.SSLCacheSet Never! {
+    ssldefs.SSLCacheSet{call: (session_id: [U8], session: ssldefs.SSLSession) -> ssl_cache_set_locked(cache, session_id, session)}
+}

@@ -1,0 +1,287 @@
+// Private Core source part: X.509 certificate signing requests.
+//
+// A port of mbedtls 3.6.7's x509_csr.c: CertificationRequest (RFC 2986)
+// with the PKCS #9 extensionRequest attribute and the extensions mbedtls
+// reads in it (key usage, subject alternative names and Netscape
+// certificate type), PEM input, and mbedtls_x509_csr_info.
+//
+// A request keeps its own copy of the DER (`raw`); every ASN1Buf in it is
+// an offset into `raw`.
+use {
+    core
+    hashes: __core_crypto_md
+    asn1: __core_crypto_asn1
+    oids: __core_crypto_oid
+    pk: __core_crypto_pk
+    pkparse: __core_crypto_pkparse
+    pem: __core_crypto_pem
+    x509: __core_crypto_x509
+}
+
+/// One parsed request (mbedtls_x509_csr).
+/// - `raw`: the request's DER, which every buffer below indexes.
+/// - `cri`: the CertificationRequestInfo.
+/// - `version`: 1.
+/// - `key_usage`, `ns_cert_type`, `subject_alt_names`: the requested
+///   extensions, each set in `ext_types` (oids.X509_EXT_*) when present.
+/// - `sig_md`, `sig_pk`, `sig_opts`: the signature algorithm, with the
+///   RSASSA-PSS options when it is RSASSA-PSS.
+X509CSR: struct {
+    raw: [U8]
+    cri: asn1.ASN1Buf
+    version: Int
+    subject_raw: asn1.ASN1Buf
+    subject: [asn1.NamedData]
+    pk: pk.PKContext
+    key_usage: Int
+    ns_cert_type: Int
+    subject_alt_names: [asn1.ASN1Buf]
+    ext_types: Int
+    sig_oid: asn1.ASN1Buf
+    sig: asn1.ASN1Buf
+    sig_md: hashes.Md?
+    sig_pk: oids.PKType?
+    sig_opts: pk.PSSOptions?
+}
+
+/// A handler for the requested extensions mbedtls does not know
+/// (mbedtls_x509_csr_ext_cb_t): the request so far, its DER, the
+/// extension's OID, whether it is critical, and the extension value at
+/// data[p..<end]. An error fails the parse when the extension is critical.
+/// The handler is pure, as X509ExtCallback is.
+X509CSRExtCallback: struct {
+    call: fn(X509CSR, [U8], asn1.ASN1Buf, Bool, Int, Int) x509.X509Error! -[]>
+}
+
+// The SEQUENCE and SET tags, constructed, and the [0] attributes tag.
+X509CSR_SEQUENCE: 0x30
+X509CSR_SET: 0x31
+X509CSR_ATTRIBUTES: 0xA0
+
+// The widest key size label csr_info prints, its NUL included
+// (MBEDTLS_BEFORE_COLON).
+X509CSR_BEFORE_COLON: 14
+
+// The PEM armors of a request, the second the older one.
+X509CSR_PEM_BEGIN: "-----BEGIN CERTIFICATE REQUEST-----"
+X509CSR_PEM_END: "-----END CERTIFICATE REQUEST-----"
+X509CSR_PEM_NEW_BEGIN: "-----BEGIN NEW CERTIFICATE REQUEST-----"
+X509CSR_PEM_NEW_END: "-----END NEW CERTIFICATE REQUEST-----"
+
+/// An empty request (mbedtls_x509_csr_init).
+x509_csr_new: fn() -> X509CSR Never! {
+    X509CSR{
+        raw: [U8]{}
+        cri: asn1.asn1_none()
+        version: 0
+        subject_raw: asn1.asn1_none()
+        subject: [asn1.NamedData]{}
+        pk: pk.pk_new()
+        key_usage: 0
+        ns_cert_type: 0
+        subject_alt_names: [asn1.ASN1Buf]{}
+        ext_types: 0
+        sig_oid: asn1.asn1_none()
+        sig: asn1.asn1_none()
+        sig_md: None
+        sig_pk: None
+        sig_opts: None
+    }
+}
+
+// x509_csr_get_version: an INTEGER, v1 (0) when absent.
+x509_csr_get_version: fn(data: [U8], p: &Int, end: Int) -> Int x509.X509Error! {
+    if asn1.get_int(data, p, end) == {
+        .Ok(ver) -> Ok(ver)
+        .Err(e) -> {
+            if e == .UnexpectedTag -> return Ok(0)
+            Err(.InvalidVersion(Val(e)))
+        }
+    }
+}
+
+// x509_csr_parse_extensions: the Extensions of an extensionRequest. The
+// extensions mbedtls knows may each appear once; an unknown one goes to
+// the callback, or fails the parse when it is critical.
+x509_csr_parse_extensions: fn(csr: &X509CSR, data: [U8], p: &Int, end: Int, cb: X509CSRExtCallback?) x509.X509Error! {
+    loop p < end {
+        len := asn1.get_tag(data, p, end, X509CSR_SEQUENCE) ?? return Err(.InvalidExtensions(Val(err)))
+        end_ext_data: p + len
+        len = asn1.get_tag(data, p, end_ext_data, asn1.ASN1_OID) ?? return Err(.InvalidExtensions(Val(err)))
+        extn_oid: asn1.ASN1Buf{tag_id: asn1.ASN1_OID, p: p, len: len}
+        p += len
+        is_critical := false
+        if asn1.get_bool(data, p, end_ext_data) == {
+            .Ok(value) -> is_critical = value
+            .Err(e) -> {
+                if e != .UnexpectedTag -> return Err(.InvalidExtensions(Val(e)))
+            }
+        }
+        len = asn1.get_tag(data, p, end_ext_data, asn1.ASN1_OCTET_STRING) ?? return Err(.InvalidExtensions(Val(err)))
+        end_ext_octet: p + len
+        if end_ext_octet != end_ext_data -> return Err(.InvalidExtensions(Val(.LengthMismatch)))
+        ext_type: oids.x509_ext_type(data, extn_oid) ?? 0
+        if ext_type == 0 {
+            given := cb
+            if given == {
+                .Val(handler) -> {
+                    call: handler.call
+                    if call(csr, data, extn_oid, is_critical, p, end_ext_octet) == {
+                        .Err(e) -> {
+                            if is_critical -> return Err(e)
+                        }
+                        .Ok(_) -> {}
+                    }
+                }
+                .None -> {
+                    if is_critical -> return Err(.InvalidExtensions(Val(.UnexpectedTag)))
+                }
+            }
+            p = end_ext_octet
+            next
+        }
+        if csr.ext_types.bit_and(ext_type) != 0 -> return Err(.InvalidExtensions(Val(.InvalidData)))
+        csr.ext_types = csr.ext_types.bit_or(ext_type)
+        if {
+            ext_type == oids.X509_EXT_KEY_USAGE -> csr.key_usage = x509.x509_get_key_usage(data, p, end_ext_data)
+            ext_type == oids.X509_EXT_SUBJECT_ALT_NAME -> csr.subject_alt_names = x509.x509_get_subject_alt_name(data, p, end_ext_data)
+            ext_type == oids.X509_EXT_NS_CERT_TYPE -> csr.ns_cert_type = x509.x509_get_ns_cert_type(data, p, end_ext_data)
+            else -> {
+                // Known to the OID table but not parsed here.
+                if is_critical -> return Err(.FeatureUnavailable(None))
+                p = end_ext_octet
+            }
+        }
+    }
+    if p != end -> return Err(.InvalidExtensions(Val(.LengthMismatch)))
+}
+
+// x509_csr_parse_attributes: the [0] Attributes, of which only an
+// extensionRequest is read.
+x509_csr_parse_attributes: fn(csr: &X509CSR, data: [U8], start: Int, end: Int, cb: X509CSRExtCallback?) x509.X509Error! {
+    p := start
+    loop p < end {
+        len := asn1.get_tag(data, p, end, X509CSR_SEQUENCE) ?? return Err(.InvalidExtensions(Val(err)))
+        end_attr_data: p + len
+        len = asn1.get_tag(data, p, end_attr_data, asn1.ASN1_OID) ?? return Err(.InvalidExtensions(Val(err)))
+        attr_oid: asn1.ASN1Buf{tag_id: asn1.ASN1_OID, p: p, len: len}
+        p += len
+        if oids.is(oids.OID_PKCS9_CSR_EXT_REQ, data, attr_oid) {
+            len = asn1.get_tag(data, p, end_attr_data, X509CSR_SET) ?? return Err(.InvalidExtensions(Val(err)))
+            end_set: p + len
+            if end_set != end_attr_data -> return Err(.InvalidExtensions(Val(.LengthMismatch)))
+            len = asn1.get_tag(data, p, end_set, X509CSR_SEQUENCE) ?? return Err(.InvalidExtensions(Val(err)))
+            end_exts: p + len
+            if end_exts != end_set -> return Err(.InvalidExtensions(Val(.LengthMismatch)))
+            x509_csr_parse_extensions(csr, data, p, end_exts, cb)
+        }
+        p = end_attr_data
+    }
+    if p != end -> return Err(.InvalidExtensions(Val(.LengthMismatch)))
+}
+
+// mbedtls_x509_csr_parse_der_internal: one request filling all of buf.
+x509_csr_parse_der_core: fn(buf: [U8], cb: X509CSRExtCallback?) -> X509CSR x509.X509Error! {
+    if buf.len() == 0 -> return Err(.BadInput)
+    csr := x509_csr_new()
+    data: buf.copy()
+    p := 0
+    raw_end: data.len()
+    len := asn1.get_tag(data, p, raw_end, X509CSR_SEQUENCE) ?? return Err(.InvalidFormat(None))
+    if len != raw_end - p -> return Err(.InvalidFormat(Val(.LengthMismatch)))
+    csr.cri.p = p
+    len = asn1.get_tag(data, p, raw_end, X509CSR_SEQUENCE) ?? return Err(.InvalidFormat(Val(err)))
+    end: p + len
+    csr.cri.len = end - csr.cri.p
+    csr.version = x509_csr_get_version(data, p, end)
+    if csr.version != 0 -> return Err(.UnknownVersion)
+    csr.version += 1
+    // subject
+    csr.subject_raw.p = p
+    len = asn1.get_tag(data, p, end, X509CSR_SEQUENCE) ?? return Err(.InvalidFormat(Val(err)))
+    csr.subject = x509.x509_get_name(data, p, p + len)
+    csr.subject_raw.len = p - csr.subject_raw.p
+    // subjectPKInfo
+    csr.pk = pkparse.pk_parse_subpubkey(data, p, end) ?? return Err(.PK(err))
+    // attributes
+    len = asn1.get_tag(data, p, end, X509CSR_ATTRIBUTES) ?? return Err(.InvalidFormat(Val(err)))
+    x509_csr_parse_attributes(csr, data, p, p + len, cb)
+    p += len
+    // signatureAlgorithm and signature
+    alg: x509.x509_get_alg(data, p, raw_end)
+    csr.sig_oid = alg.alg
+    sig_alg: x509.x509_get_sig_alg(data, csr.sig_oid, alg.params) ?? return Err(.UnknownSigAlg(None))
+    csr.sig_md = sig_alg.md
+    csr.sig_pk = Val(sig_alg.pk)
+    csr.sig_opts = sig_alg.pss
+    csr.sig = x509.x509_get_sig(data, p, raw_end)
+    if p != raw_end -> return Err(.InvalidFormat(Val(.LengthMismatch)))
+    csr.raw = data
+    Ok(csr)
+}
+
+/// One DER request filling buf (mbedtls_x509_csr_parse_der).
+x509_csr_parse_der: fn(buf: [U8]) -> X509CSR x509.X509Error! { x509_csr_parse_der_core(buf, None) }
+
+/// x509_csr_parse_der with a handler for unknown extensions
+/// (mbedtls_x509_csr_parse_der_with_ext_cb).
+x509_csr_parse_der_with_ext_cb: fn(buf: [U8], cb: X509CSRExtCallback) -> X509CSR x509.X509Error! { x509_csr_parse_der_core(buf, Val(cb)) }
+
+// The request's PEM block, under either armor.
+x509_csr_read_pem: fn(buf: [U8]) -> pem.PEMBlock pem.PEMError! {
+    if pem.pem_read_buffer(X509CSR_PEM_BEGIN, X509CSR_PEM_END, buf, None) == {
+        .Ok(block) -> Ok(block)
+        .Err(e) -> {
+            if e != .NoHeaderFooterPresent -> return Err(e)
+            pem.pem_read_buffer(X509CSR_PEM_NEW_BEGIN, X509CSR_PEM_NEW_END, buf, None)
+        }
+    }
+}
+
+/// One DER or PEM request (mbedtls_x509_csr_parse). The input is PEM when
+/// its text up to the first NUL byte holds a CERTIFICATE REQUEST or NEW
+/// CERTIFICATE REQUEST block; otherwise all of it is DER.
+x509_csr_parse: fn(buf: [U8]) -> X509CSR x509.X509Error! {
+    if buf.len() == 0 -> return Err(.BadInput)
+    if x509_csr_read_pem(buf) == {
+        .Ok(block) -> return x509_csr_parse_der(block.der)
+        .Err(e) -> {
+            if e != .NoHeaderFooterPresent -> return Err(.PEM(e))
+        }
+    }
+    x509_csr_parse_der(buf)
+}
+
+/// The text mbedtls prints for a request, each line after `prefix`
+/// (mbedtls_x509_csr_info). BufferTooSmall when the key's size label does
+/// not fit its column, as for an ECDSA or EC_DH key.
+x509_csr_info: fn(prefix: String, csr: X509CSR) -> [U8] x509.X509Error! {
+    data: csr.raw
+    out := [U8]{}
+    out.extend("{prefix}CSR version   : {csr.version}".bytes())
+    out.extend("\n{prefix}subject name  : ".bytes())
+    out.extend(x509.x509_dn_gets(csr.subject))
+    out.extend("\n{prefix}signed using  : ".bytes())
+    if csr.sig_pk == {
+        .Val(kind) -> out.extend(x509.x509_sig_alg_gets(data, csr.sig_oid, x509.X509SigAlg{md: csr.sig_md, pk: kind, pss: csr.sig_opts}))
+        .None -> out.extend("???".bytes())
+    }
+    key_size := x509.x509_key_size_helper(pk.pk_get_name(csr.pk))
+    if key_size.len() >= X509CSR_BEFORE_COLON -> return Err(.BufferTooSmall)
+    loop key_size.len() < X509CSR_BEFORE_COLON -> key_size = "{key_size} "
+    out.extend("\n{prefix}{key_size}: {pk.pk_get_bitlen(csr.pk)} bits\n".bytes())
+    if csr.ext_types.bit_and(oids.X509_EXT_SUBJECT_ALT_NAME) != 0 {
+        out.extend("\n{prefix}subject alt name  :".bytes())
+        x509.x509_info_subject_alt_name(out, data, csr.subject_alt_names, prefix)
+    }
+    if csr.ext_types.bit_and(oids.X509_EXT_NS_CERT_TYPE) != 0 {
+        out.extend("\n{prefix}cert. type        : ".bytes())
+        x509.x509_info_cert_type(out, csr.ns_cert_type)
+    }
+    if csr.ext_types.bit_and(oids.X509_EXT_KEY_USAGE) != 0 {
+        out.extend("\n{prefix}key usage         : ".bytes())
+        x509.x509_info_key_usage(out, csr.key_usage)
+    }
+    if csr.ext_types != 0 -> out.extend("\n".bytes())
+    Ok(out)
+}

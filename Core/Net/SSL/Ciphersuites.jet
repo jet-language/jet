@@ -1,0 +1,778 @@
+// Private Core source part: the TLS ciphersuites.
+//
+// mbedtls's ssl_ciphersuites.c and ssl_ciphersuites_internal.h: every
+// ciphersuite the default configuration builds, its cipher, MAC digest, key
+// exchange and version range, and the preference order the engine offers
+// them in. The tables are generated from ssl_ciphersuites.c; the NULL-cipher
+// and EC J-PAKE suites are left out, as the default configuration leaves
+// MBEDTLS_CIPHER_NULL_CIPHER and MBEDTLS_KEY_EXCHANGE_ECJPAKE_ENABLED off.
+use {
+    core
+    layer: __core_crypto_cipher_layer
+    hashes: __core_crypto_md
+    oids: __core_crypto_oid
+    ssldefs: __core_net_ssl_defs
+}
+
+/// How a TLS 1.2 ciphersuite agrees on the premaster secret
+/// (mbedtls_key_exchange_type_t). TLS 1.3 suites name NoExchange
+/// (MBEDTLS_KEY_EXCHANGE_NONE): the key exchange is not part of a TLS 1.3
+/// ciphersuite.
+SSLKeyExchange: enum {
+    NoExchange
+    RSA
+    DHERSA
+    ECDHERSA
+    ECDHEECDSA
+    PSK
+    DHEPSK
+    RSAPSK
+    ECDHEPSK
+    ECDHRSA
+    ECDHECDSA
+}
+
+/// A weak ciphersuite (MBEDTLS_CIPHERSUITE_WEAK).
+CIPHERSUITE_WEAK: 1
+/// A short authentication tag, as CCM_8 has (MBEDTLS_CIPHERSUITE_SHORT_TAG).
+CIPHERSUITE_SHORT_TAG: 2
+/// A ciphersuite DTLS cannot use (MBEDTLS_CIPHERSUITE_NODTLS).
+CIPHERSUITE_NODTLS: 4
+
+/// One ciphersuite (mbedtls_ssl_ciphersuite_t). `cipher` names the
+/// cipher's CipherInfo; `flags` holds CIPHERSUITE_* bits.
+SSLCiphersuite: struct {
+    id: Int
+    name: String
+    cipher: String
+    mac: hashes.Md
+    key_exchange: SSLKeyExchange
+    flags: Int
+    min_tls_version: Int
+    max_tls_version: Int
+}
+
+/// The supported ciphersuite IDs in preference order
+/// (mbedtls_ssl_list_ciphersuites): the preference list less the suites
+/// this build does not define.
+ssl_list_ciphersuites: fn() -> [Int] Never! {
+    out := [Int]{}
+    loop id in CIPHERSUITE_PREFERENCE {
+        if ssl_ciphersuite_defined(id) -> out.push(id)
+    }
+    out
+}
+
+// Whether the table defines the ciphersuite with this ID.
+ssl_ciphersuite_defined: fn(id: Int) -> Bool Never! {
+    loop cs in CIPHERSUITE_DEFINITIONS {
+        if cs.id == id -> return true
+    }
+    false
+}
+
+/// The ciphersuite named `name` (mbedtls_ssl_ciphersuite_from_string).
+ssl_ciphersuite_from_string: fn(name: String) -> SSLCiphersuite? Never! {
+    loop cs in CIPHERSUITE_DEFINITIONS {
+        if cs.name == name -> return Val(cs)
+    }
+    None
+}
+
+/// The ciphersuite with this IANA ID (mbedtls_ssl_ciphersuite_from_id).
+ssl_ciphersuite_from_id: fn(id: Int) -> SSLCiphersuite? Never! {
+    loop cs in CIPHERSUITE_DEFINITIONS {
+        if cs.id == id -> return Val(cs)
+    }
+    None
+}
+
+/// The name of the ciphersuite with this ID, or "unknown"
+/// (mbedtls_ssl_get_ciphersuite_name).
+ssl_get_ciphersuite_name: fn(id: Int) -> String Never! {
+    cs: ssl_ciphersuite_from_id(id) ?? return "unknown"
+    cs.name
+}
+
+/// The ID of the ciphersuite named `name`, or 0
+/// (mbedtls_ssl_get_ciphersuite_id).
+ssl_get_ciphersuite_id: fn(name: String) -> Int Never! {
+    cs: ssl_ciphersuite_from_string(name) ?? return 0
+    cs.id
+}
+
+/// The cipher a ciphersuite runs (mbedtls_cipher_info_from_type on
+/// `info->cipher`). Every table entry names a cipher CIPHER_INFO holds.
+ssl_ciphersuite_cipher_info: fn(cs: SSLCiphersuite) -> layer.CipherInfo? Never! {
+    layer.cipher_info_from_string(cs.cipher)
+}
+
+/// The key length in bits of a ciphersuite's cipher
+/// (mbedtls_ssl_ciphersuite_get_cipher_key_bitlen), 0 when unknown.
+ssl_ciphersuite_get_cipher_key_bitlen: fn(cs: SSLCiphersuite) -> Int Never! {
+    info: ssl_ciphersuite_cipher_info(cs) ?? return 0
+    info.key_bits
+}
+
+/// The public-key algorithm of the certificate the server presents
+/// (mbedtls_ssl_get_ciphersuite_sig_pk_alg); None for MBEDTLS_PK_NONE.
+ssl_get_ciphersuite_sig_pk_alg: fn(cs: SSLCiphersuite) -> oids.PKType? Never! {
+    if cs.key_exchange == {
+        .RSA | .DHERSA | .ECDHERSA | .RSAPSK -> Val(oids.PKType.RSA)
+        .ECDHEECDSA -> Val(oids.PKType.ECDSA)
+        .ECDHRSA | .ECDHECDSA -> Val(oids.PKType.ECKey)
+        else -> None
+    }
+}
+
+/// The algorithm of the server's key-exchange signature
+/// (mbedtls_ssl_get_ciphersuite_sig_alg); None for MBEDTLS_PK_NONE.
+ssl_get_ciphersuite_sig_alg: fn(cs: SSLCiphersuite) -> oids.PKType? Never! {
+    if cs.key_exchange == {
+        .DHERSA | .ECDHERSA -> Val(oids.PKType.RSA)
+        .ECDHEECDSA -> Val(oids.PKType.ECDSA)
+        else -> None
+    }
+}
+
+/// Whether the key exchange uses elliptic curves
+/// (mbedtls_ssl_ciphersuite_uses_ec).
+ssl_ciphersuite_uses_ec: fn(cs: SSLCiphersuite) -> Bool Never! {
+    if cs.key_exchange == {
+        .ECDHERSA | .ECDHEECDSA | .ECDHEPSK | .ECDHRSA | .ECDHECDSA -> true
+        else -> false
+    }
+}
+
+/// Whether the key exchange uses a pre-shared key
+/// (mbedtls_ssl_ciphersuite_uses_psk).
+ssl_ciphersuite_uses_psk: fn(cs: SSLCiphersuite) -> Bool Never! {
+    if cs.key_exchange == {
+        .PSK | .RSAPSK | .DHEPSK | .ECDHEPSK -> true
+        else -> false
+    }
+}
+
+/// Whether the key exchange is forward-secure
+/// (mbedtls_ssl_ciphersuite_has_pfs).
+ssl_ciphersuite_has_pfs: fn(cs: SSLCiphersuite) -> Bool Never! {
+    if cs.key_exchange == {
+        .DHERSA | .DHEPSK | .ECDHERSA | .ECDHEPSK | .ECDHEECDSA -> true
+        else -> false
+    }
+}
+
+/// Whether the key exchange is not forward-secure
+/// (mbedtls_ssl_ciphersuite_no_pfs).
+ssl_ciphersuite_no_pfs: fn(cs: SSLCiphersuite) -> Bool Never! {
+    if cs.key_exchange == {
+        .ECDHRSA | .ECDHECDSA | .RSA | .PSK | .RSAPSK -> true
+        else -> false
+    }
+}
+
+/// Whether the key exchange is static ECDH
+/// (mbedtls_ssl_ciphersuite_uses_ecdh).
+ssl_ciphersuite_uses_ecdh: fn(cs: SSLCiphersuite) -> Bool Never! {
+    cs.key_exchange == .ECDHRSA || cs.key_exchange == .ECDHECDSA
+}
+
+/// Whether the server may ask for a client certificate
+/// (mbedtls_ssl_ciphersuite_cert_req_allowed).
+ssl_ciphersuite_cert_req_allowed: fn(cs: SSLCiphersuite) -> Bool Never! {
+    if cs.key_exchange == {
+        .RSA | .DHERSA | .ECDHRSA | .ECDHERSA | .ECDHECDSA | .ECDHEECDSA -> true
+        else -> false
+    }
+}
+
+/// Whether the server presents a certificate
+/// (mbedtls_ssl_ciphersuite_uses_srv_cert).
+ssl_ciphersuite_uses_srv_cert: fn(cs: SSLCiphersuite) -> Bool Never! {
+    if cs.key_exchange == {
+        .RSA | .RSAPSK | .DHERSA | .ECDHRSA | .ECDHERSA | .ECDHECDSA | .ECDHEECDSA -> true
+        else -> false
+    }
+}
+
+/// Whether the key exchange is finite-field ephemeral Diffie-Hellman
+/// (mbedtls_ssl_ciphersuite_uses_dhe).
+ssl_ciphersuite_uses_dhe: fn(cs: SSLCiphersuite) -> Bool Never! {
+    cs.key_exchange == .DHERSA || cs.key_exchange == .DHEPSK
+}
+
+/// Whether the key exchange is elliptic-curve ephemeral Diffie-Hellman
+/// (mbedtls_ssl_ciphersuite_uses_ecdhe).
+ssl_ciphersuite_uses_ecdhe: fn(cs: SSLCiphersuite) -> Bool Never! {
+    if cs.key_exchange == {
+        .ECDHEECDSA | .ECDHERSA | .ECDHEPSK -> true
+        else -> false
+    }
+}
+
+/// Whether the server signs its key exchange
+/// (mbedtls_ssl_ciphersuite_uses_server_signature).
+ssl_ciphersuite_uses_server_signature: fn(cs: SSLCiphersuite) -> Bool Never! {
+    if cs.key_exchange == {
+        .DHERSA | .ECDHERSA | .ECDHEECDSA -> true
+        else -> false
+    }
+}
+
+// The ciphersuite IDs (ssl_ciphersuites.h).
+TLS_RSA_WITH_NULL_MD5: 0x01
+TLS_RSA_WITH_NULL_SHA: 0x02
+TLS_PSK_WITH_NULL_SHA: 0x2C
+TLS_DHE_PSK_WITH_NULL_SHA: 0x2D
+TLS_RSA_PSK_WITH_NULL_SHA: 0x2E
+TLS_RSA_WITH_AES_128_CBC_SHA: 0x2F
+TLS_DHE_RSA_WITH_AES_128_CBC_SHA: 0x33
+TLS_RSA_WITH_AES_256_CBC_SHA: 0x35
+TLS_DHE_RSA_WITH_AES_256_CBC_SHA: 0x39
+TLS_RSA_WITH_NULL_SHA256: 0x3B
+TLS_RSA_WITH_AES_128_CBC_SHA256: 0x3C
+TLS_RSA_WITH_AES_256_CBC_SHA256: 0x3D
+TLS_RSA_WITH_CAMELLIA_128_CBC_SHA: 0x41
+TLS_DHE_RSA_WITH_CAMELLIA_128_CBC_SHA: 0x45
+TLS_DHE_RSA_WITH_AES_128_CBC_SHA256: 0x67
+TLS_DHE_RSA_WITH_AES_256_CBC_SHA256: 0x6B
+TLS_RSA_WITH_CAMELLIA_256_CBC_SHA: 0x84
+TLS_DHE_RSA_WITH_CAMELLIA_256_CBC_SHA: 0x88
+TLS_PSK_WITH_AES_128_CBC_SHA: 0x8C
+TLS_PSK_WITH_AES_256_CBC_SHA: 0x8D
+TLS_DHE_PSK_WITH_AES_128_CBC_SHA: 0x90
+TLS_DHE_PSK_WITH_AES_256_CBC_SHA: 0x91
+TLS_RSA_PSK_WITH_AES_128_CBC_SHA: 0x94
+TLS_RSA_PSK_WITH_AES_256_CBC_SHA: 0x95
+TLS_RSA_WITH_AES_128_GCM_SHA256: 0x9C
+TLS_RSA_WITH_AES_256_GCM_SHA384: 0x9D
+TLS_DHE_RSA_WITH_AES_128_GCM_SHA256: 0x9E
+TLS_DHE_RSA_WITH_AES_256_GCM_SHA384: 0x9F
+TLS_PSK_WITH_AES_128_GCM_SHA256: 0xA8
+TLS_PSK_WITH_AES_256_GCM_SHA384: 0xA9
+TLS_DHE_PSK_WITH_AES_128_GCM_SHA256: 0xAA
+TLS_DHE_PSK_WITH_AES_256_GCM_SHA384: 0xAB
+TLS_RSA_PSK_WITH_AES_128_GCM_SHA256: 0xAC
+TLS_RSA_PSK_WITH_AES_256_GCM_SHA384: 0xAD
+TLS_PSK_WITH_AES_128_CBC_SHA256: 0xAE
+TLS_PSK_WITH_AES_256_CBC_SHA384: 0xAF
+TLS_PSK_WITH_NULL_SHA256: 0xB0
+TLS_PSK_WITH_NULL_SHA384: 0xB1
+TLS_DHE_PSK_WITH_AES_128_CBC_SHA256: 0xB2
+TLS_DHE_PSK_WITH_AES_256_CBC_SHA384: 0xB3
+TLS_DHE_PSK_WITH_NULL_SHA256: 0xB4
+TLS_DHE_PSK_WITH_NULL_SHA384: 0xB5
+TLS_RSA_PSK_WITH_AES_128_CBC_SHA256: 0xB6
+TLS_RSA_PSK_WITH_AES_256_CBC_SHA384: 0xB7
+TLS_RSA_PSK_WITH_NULL_SHA256: 0xB8
+TLS_RSA_PSK_WITH_NULL_SHA384: 0xB9
+TLS_RSA_WITH_CAMELLIA_128_CBC_SHA256: 0xBA
+TLS_DHE_RSA_WITH_CAMELLIA_128_CBC_SHA256: 0xBE
+TLS_RSA_WITH_CAMELLIA_256_CBC_SHA256: 0xC0
+TLS_DHE_RSA_WITH_CAMELLIA_256_CBC_SHA256: 0xC4
+TLS_ECDH_ECDSA_WITH_NULL_SHA: 0xC001
+TLS_ECDH_ECDSA_WITH_AES_128_CBC_SHA: 0xC004
+TLS_ECDH_ECDSA_WITH_AES_256_CBC_SHA: 0xC005
+TLS_ECDHE_ECDSA_WITH_NULL_SHA: 0xC006
+TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA: 0xC009
+TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA: 0xC00A
+TLS_ECDH_RSA_WITH_NULL_SHA: 0xC00B
+TLS_ECDH_RSA_WITH_AES_128_CBC_SHA: 0xC00E
+TLS_ECDH_RSA_WITH_AES_256_CBC_SHA: 0xC00F
+TLS_ECDHE_RSA_WITH_NULL_SHA: 0xC010
+TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA: 0xC013
+TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA: 0xC014
+TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256: 0xC023
+TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA384: 0xC024
+TLS_ECDH_ECDSA_WITH_AES_128_CBC_SHA256: 0xC025
+TLS_ECDH_ECDSA_WITH_AES_256_CBC_SHA384: 0xC026
+TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256: 0xC027
+TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA384: 0xC028
+TLS_ECDH_RSA_WITH_AES_128_CBC_SHA256: 0xC029
+TLS_ECDH_RSA_WITH_AES_256_CBC_SHA384: 0xC02A
+TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256: 0xC02B
+TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384: 0xC02C
+TLS_ECDH_ECDSA_WITH_AES_128_GCM_SHA256: 0xC02D
+TLS_ECDH_ECDSA_WITH_AES_256_GCM_SHA384: 0xC02E
+TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256: 0xC02F
+TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384: 0xC030
+TLS_ECDH_RSA_WITH_AES_128_GCM_SHA256: 0xC031
+TLS_ECDH_RSA_WITH_AES_256_GCM_SHA384: 0xC032
+TLS_ECDHE_PSK_WITH_AES_128_CBC_SHA: 0xC035
+TLS_ECDHE_PSK_WITH_AES_256_CBC_SHA: 0xC036
+TLS_ECDHE_PSK_WITH_AES_128_CBC_SHA256: 0xC037
+TLS_ECDHE_PSK_WITH_AES_256_CBC_SHA384: 0xC038
+TLS_ECDHE_PSK_WITH_NULL_SHA: 0xC039
+TLS_ECDHE_PSK_WITH_NULL_SHA256: 0xC03A
+TLS_ECDHE_PSK_WITH_NULL_SHA384: 0xC03B
+TLS_RSA_WITH_ARIA_128_CBC_SHA256: 0xC03C
+TLS_RSA_WITH_ARIA_256_CBC_SHA384: 0xC03D
+TLS_DHE_RSA_WITH_ARIA_128_CBC_SHA256: 0xC044
+TLS_DHE_RSA_WITH_ARIA_256_CBC_SHA384: 0xC045
+TLS_ECDHE_ECDSA_WITH_ARIA_128_CBC_SHA256: 0xC048
+TLS_ECDHE_ECDSA_WITH_ARIA_256_CBC_SHA384: 0xC049
+TLS_ECDH_ECDSA_WITH_ARIA_128_CBC_SHA256: 0xC04A
+TLS_ECDH_ECDSA_WITH_ARIA_256_CBC_SHA384: 0xC04B
+TLS_ECDHE_RSA_WITH_ARIA_128_CBC_SHA256: 0xC04C
+TLS_ECDHE_RSA_WITH_ARIA_256_CBC_SHA384: 0xC04D
+TLS_ECDH_RSA_WITH_ARIA_128_CBC_SHA256: 0xC04E
+TLS_ECDH_RSA_WITH_ARIA_256_CBC_SHA384: 0xC04F
+TLS_RSA_WITH_ARIA_128_GCM_SHA256: 0xC050
+TLS_RSA_WITH_ARIA_256_GCM_SHA384: 0xC051
+TLS_DHE_RSA_WITH_ARIA_128_GCM_SHA256: 0xC052
+TLS_DHE_RSA_WITH_ARIA_256_GCM_SHA384: 0xC053
+TLS_ECDHE_ECDSA_WITH_ARIA_128_GCM_SHA256: 0xC05C
+TLS_ECDHE_ECDSA_WITH_ARIA_256_GCM_SHA384: 0xC05D
+TLS_ECDH_ECDSA_WITH_ARIA_128_GCM_SHA256: 0xC05E
+TLS_ECDH_ECDSA_WITH_ARIA_256_GCM_SHA384: 0xC05F
+TLS_ECDHE_RSA_WITH_ARIA_128_GCM_SHA256: 0xC060
+TLS_ECDHE_RSA_WITH_ARIA_256_GCM_SHA384: 0xC061
+TLS_ECDH_RSA_WITH_ARIA_128_GCM_SHA256: 0xC062
+TLS_ECDH_RSA_WITH_ARIA_256_GCM_SHA384: 0xC063
+TLS_PSK_WITH_ARIA_128_CBC_SHA256: 0xC064
+TLS_PSK_WITH_ARIA_256_CBC_SHA384: 0xC065
+TLS_DHE_PSK_WITH_ARIA_128_CBC_SHA256: 0xC066
+TLS_DHE_PSK_WITH_ARIA_256_CBC_SHA384: 0xC067
+TLS_RSA_PSK_WITH_ARIA_128_CBC_SHA256: 0xC068
+TLS_RSA_PSK_WITH_ARIA_256_CBC_SHA384: 0xC069
+TLS_PSK_WITH_ARIA_128_GCM_SHA256: 0xC06A
+TLS_PSK_WITH_ARIA_256_GCM_SHA384: 0xC06B
+TLS_DHE_PSK_WITH_ARIA_128_GCM_SHA256: 0xC06C
+TLS_DHE_PSK_WITH_ARIA_256_GCM_SHA384: 0xC06D
+TLS_RSA_PSK_WITH_ARIA_128_GCM_SHA256: 0xC06E
+TLS_RSA_PSK_WITH_ARIA_256_GCM_SHA384: 0xC06F
+TLS_ECDHE_PSK_WITH_ARIA_128_CBC_SHA256: 0xC070
+TLS_ECDHE_PSK_WITH_ARIA_256_CBC_SHA384: 0xC071
+TLS_ECDHE_ECDSA_WITH_CAMELLIA_128_CBC_SHA256: 0xC072
+TLS_ECDHE_ECDSA_WITH_CAMELLIA_256_CBC_SHA384: 0xC073
+TLS_ECDH_ECDSA_WITH_CAMELLIA_128_CBC_SHA256: 0xC074
+TLS_ECDH_ECDSA_WITH_CAMELLIA_256_CBC_SHA384: 0xC075
+TLS_ECDHE_RSA_WITH_CAMELLIA_128_CBC_SHA256: 0xC076
+TLS_ECDHE_RSA_WITH_CAMELLIA_256_CBC_SHA384: 0xC077
+TLS_ECDH_RSA_WITH_CAMELLIA_128_CBC_SHA256: 0xC078
+TLS_ECDH_RSA_WITH_CAMELLIA_256_CBC_SHA384: 0xC079
+TLS_RSA_WITH_CAMELLIA_128_GCM_SHA256: 0xC07A
+TLS_RSA_WITH_CAMELLIA_256_GCM_SHA384: 0xC07B
+TLS_DHE_RSA_WITH_CAMELLIA_128_GCM_SHA256: 0xC07C
+TLS_DHE_RSA_WITH_CAMELLIA_256_GCM_SHA384: 0xC07D
+TLS_ECDHE_ECDSA_WITH_CAMELLIA_128_GCM_SHA256: 0xC086
+TLS_ECDHE_ECDSA_WITH_CAMELLIA_256_GCM_SHA384: 0xC087
+TLS_ECDH_ECDSA_WITH_CAMELLIA_128_GCM_SHA256: 0xC088
+TLS_ECDH_ECDSA_WITH_CAMELLIA_256_GCM_SHA384: 0xC089
+TLS_ECDHE_RSA_WITH_CAMELLIA_128_GCM_SHA256: 0xC08A
+TLS_ECDHE_RSA_WITH_CAMELLIA_256_GCM_SHA384: 0xC08B
+TLS_ECDH_RSA_WITH_CAMELLIA_128_GCM_SHA256: 0xC08C
+TLS_ECDH_RSA_WITH_CAMELLIA_256_GCM_SHA384: 0xC08D
+TLS_PSK_WITH_CAMELLIA_128_GCM_SHA256: 0xC08E
+TLS_PSK_WITH_CAMELLIA_256_GCM_SHA384: 0xC08F
+TLS_DHE_PSK_WITH_CAMELLIA_128_GCM_SHA256: 0xC090
+TLS_DHE_PSK_WITH_CAMELLIA_256_GCM_SHA384: 0xC091
+TLS_RSA_PSK_WITH_CAMELLIA_128_GCM_SHA256: 0xC092
+TLS_RSA_PSK_WITH_CAMELLIA_256_GCM_SHA384: 0xC093
+TLS_PSK_WITH_CAMELLIA_128_CBC_SHA256: 0xC094
+TLS_PSK_WITH_CAMELLIA_256_CBC_SHA384: 0xC095
+TLS_DHE_PSK_WITH_CAMELLIA_128_CBC_SHA256: 0xC096
+TLS_DHE_PSK_WITH_CAMELLIA_256_CBC_SHA384: 0xC097
+TLS_RSA_PSK_WITH_CAMELLIA_128_CBC_SHA256: 0xC098
+TLS_RSA_PSK_WITH_CAMELLIA_256_CBC_SHA384: 0xC099
+TLS_ECDHE_PSK_WITH_CAMELLIA_128_CBC_SHA256: 0xC09A
+TLS_ECDHE_PSK_WITH_CAMELLIA_256_CBC_SHA384: 0xC09B
+TLS_RSA_WITH_AES_128_CCM: 0xC09C
+TLS_RSA_WITH_AES_256_CCM: 0xC09D
+TLS_DHE_RSA_WITH_AES_128_CCM: 0xC09E
+TLS_DHE_RSA_WITH_AES_256_CCM: 0xC09F
+TLS_RSA_WITH_AES_128_CCM_8: 0xC0A0
+TLS_RSA_WITH_AES_256_CCM_8: 0xC0A1
+TLS_DHE_RSA_WITH_AES_128_CCM_8: 0xC0A2
+TLS_DHE_RSA_WITH_AES_256_CCM_8: 0xC0A3
+TLS_PSK_WITH_AES_128_CCM: 0xC0A4
+TLS_PSK_WITH_AES_256_CCM: 0xC0A5
+TLS_DHE_PSK_WITH_AES_128_CCM: 0xC0A6
+TLS_DHE_PSK_WITH_AES_256_CCM: 0xC0A7
+TLS_PSK_WITH_AES_128_CCM_8: 0xC0A8
+TLS_PSK_WITH_AES_256_CCM_8: 0xC0A9
+TLS_DHE_PSK_WITH_AES_128_CCM_8: 0xC0AA
+TLS_DHE_PSK_WITH_AES_256_CCM_8: 0xC0AB
+TLS_ECDHE_ECDSA_WITH_AES_128_CCM: 0xC0AC
+TLS_ECDHE_ECDSA_WITH_AES_256_CCM: 0xC0AD
+TLS_ECDHE_ECDSA_WITH_AES_128_CCM_8: 0xC0AE
+TLS_ECDHE_ECDSA_WITH_AES_256_CCM_8: 0xC0AF
+TLS_ECJPAKE_WITH_AES_128_CCM_8: 0xC0FF
+TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256: 0xCCA8
+TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256: 0xCCA9
+TLS_DHE_RSA_WITH_CHACHA20_POLY1305_SHA256: 0xCCAA
+TLS_PSK_WITH_CHACHA20_POLY1305_SHA256: 0xCCAB
+TLS_ECDHE_PSK_WITH_CHACHA20_POLY1305_SHA256: 0xCCAC
+TLS_DHE_PSK_WITH_CHACHA20_POLY1305_SHA256: 0xCCAD
+TLS_RSA_PSK_WITH_CHACHA20_POLY1305_SHA256: 0xCCAE
+TLS1_3_AES_128_GCM_SHA256: 0x1301
+TLS1_3_AES_256_GCM_SHA384: 0x1302
+TLS1_3_CHACHA20_POLY1305_SHA256: 0x1303
+TLS1_3_AES_128_CCM_SHA256: 0x1304
+TLS1_3_AES_128_CCM_8_SHA256: 0x1305
+
+CIPHERSUITE_PREFERENCE: [Int]{
+    TLS1_3_CHACHA20_POLY1305_SHA256,
+    TLS1_3_AES_256_GCM_SHA384,
+    TLS1_3_AES_128_GCM_SHA256,
+    TLS1_3_AES_128_CCM_SHA256,
+    TLS1_3_AES_128_CCM_8_SHA256,
+    TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256,
+    TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256,
+    TLS_DHE_RSA_WITH_CHACHA20_POLY1305_SHA256,
+    TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+    TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+    TLS_DHE_RSA_WITH_AES_256_GCM_SHA384,
+    TLS_ECDHE_ECDSA_WITH_AES_256_CCM,
+    TLS_DHE_RSA_WITH_AES_256_CCM,
+    TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA384,
+    TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA384,
+    TLS_DHE_RSA_WITH_AES_256_CBC_SHA256,
+    TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA,
+    TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,
+    TLS_DHE_RSA_WITH_AES_256_CBC_SHA,
+    TLS_ECDHE_ECDSA_WITH_AES_256_CCM_8,
+    TLS_DHE_RSA_WITH_AES_256_CCM_8,
+    TLS_ECDHE_ECDSA_WITH_CAMELLIA_256_GCM_SHA384,
+    TLS_ECDHE_RSA_WITH_CAMELLIA_256_GCM_SHA384,
+    TLS_DHE_RSA_WITH_CAMELLIA_256_GCM_SHA384,
+    TLS_ECDHE_ECDSA_WITH_CAMELLIA_256_CBC_SHA384,
+    TLS_ECDHE_RSA_WITH_CAMELLIA_256_CBC_SHA384,
+    TLS_DHE_RSA_WITH_CAMELLIA_256_CBC_SHA256,
+    TLS_DHE_RSA_WITH_CAMELLIA_256_CBC_SHA,
+    TLS_ECDHE_ECDSA_WITH_ARIA_256_GCM_SHA384,
+    TLS_ECDHE_RSA_WITH_ARIA_256_GCM_SHA384,
+    TLS_DHE_RSA_WITH_ARIA_256_GCM_SHA384,
+    TLS_ECDHE_ECDSA_WITH_ARIA_256_CBC_SHA384,
+    TLS_ECDHE_RSA_WITH_ARIA_256_CBC_SHA384,
+    TLS_DHE_RSA_WITH_ARIA_256_CBC_SHA384,
+    TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+    TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+    TLS_DHE_RSA_WITH_AES_128_GCM_SHA256,
+    TLS_ECDHE_ECDSA_WITH_AES_128_CCM,
+    TLS_DHE_RSA_WITH_AES_128_CCM,
+    TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256,
+    TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256,
+    TLS_DHE_RSA_WITH_AES_128_CBC_SHA256,
+    TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA,
+    TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA,
+    TLS_DHE_RSA_WITH_AES_128_CBC_SHA,
+    TLS_ECDHE_ECDSA_WITH_AES_128_CCM_8,
+    TLS_DHE_RSA_WITH_AES_128_CCM_8,
+    TLS_ECDHE_ECDSA_WITH_CAMELLIA_128_GCM_SHA256,
+    TLS_ECDHE_RSA_WITH_CAMELLIA_128_GCM_SHA256,
+    TLS_DHE_RSA_WITH_CAMELLIA_128_GCM_SHA256,
+    TLS_ECDHE_ECDSA_WITH_CAMELLIA_128_CBC_SHA256,
+    TLS_ECDHE_RSA_WITH_CAMELLIA_128_CBC_SHA256,
+    TLS_DHE_RSA_WITH_CAMELLIA_128_CBC_SHA256,
+    TLS_DHE_RSA_WITH_CAMELLIA_128_CBC_SHA,
+    TLS_ECDHE_ECDSA_WITH_ARIA_128_GCM_SHA256,
+    TLS_ECDHE_RSA_WITH_ARIA_128_GCM_SHA256,
+    TLS_DHE_RSA_WITH_ARIA_128_GCM_SHA256,
+    TLS_ECDHE_ECDSA_WITH_ARIA_128_CBC_SHA256,
+    TLS_ECDHE_RSA_WITH_ARIA_128_CBC_SHA256,
+    TLS_DHE_RSA_WITH_ARIA_128_CBC_SHA256,
+    TLS_ECDHE_PSK_WITH_CHACHA20_POLY1305_SHA256,
+    TLS_DHE_PSK_WITH_CHACHA20_POLY1305_SHA256,
+    TLS_DHE_PSK_WITH_AES_256_GCM_SHA384,
+    TLS_DHE_PSK_WITH_AES_256_CCM,
+    TLS_ECDHE_PSK_WITH_AES_256_CBC_SHA384,
+    TLS_DHE_PSK_WITH_AES_256_CBC_SHA384,
+    TLS_ECDHE_PSK_WITH_AES_256_CBC_SHA,
+    TLS_DHE_PSK_WITH_AES_256_CBC_SHA,
+    TLS_DHE_PSK_WITH_CAMELLIA_256_GCM_SHA384,
+    TLS_ECDHE_PSK_WITH_CAMELLIA_256_CBC_SHA384,
+    TLS_DHE_PSK_WITH_CAMELLIA_256_CBC_SHA384,
+    TLS_DHE_PSK_WITH_AES_256_CCM_8,
+    TLS_DHE_PSK_WITH_ARIA_256_GCM_SHA384,
+    TLS_ECDHE_PSK_WITH_ARIA_256_CBC_SHA384,
+    TLS_DHE_PSK_WITH_ARIA_256_CBC_SHA384,
+    TLS_DHE_PSK_WITH_AES_128_GCM_SHA256,
+    TLS_DHE_PSK_WITH_AES_128_CCM,
+    TLS_ECDHE_PSK_WITH_AES_128_CBC_SHA256,
+    TLS_DHE_PSK_WITH_AES_128_CBC_SHA256,
+    TLS_ECDHE_PSK_WITH_AES_128_CBC_SHA,
+    TLS_DHE_PSK_WITH_AES_128_CBC_SHA,
+    TLS_DHE_PSK_WITH_CAMELLIA_128_GCM_SHA256,
+    TLS_DHE_PSK_WITH_CAMELLIA_128_CBC_SHA256,
+    TLS_ECDHE_PSK_WITH_CAMELLIA_128_CBC_SHA256,
+    TLS_DHE_PSK_WITH_AES_128_CCM_8,
+    TLS_DHE_PSK_WITH_ARIA_128_GCM_SHA256,
+    TLS_ECDHE_PSK_WITH_ARIA_128_CBC_SHA256,
+    TLS_DHE_PSK_WITH_ARIA_128_CBC_SHA256,
+    TLS_ECJPAKE_WITH_AES_128_CCM_8,
+    TLS_RSA_WITH_AES_256_GCM_SHA384,
+    TLS_RSA_WITH_AES_256_CCM,
+    TLS_RSA_WITH_AES_256_CBC_SHA256,
+    TLS_RSA_WITH_AES_256_CBC_SHA,
+    TLS_ECDH_RSA_WITH_AES_256_GCM_SHA384,
+    TLS_ECDH_RSA_WITH_AES_256_CBC_SHA384,
+    TLS_ECDH_RSA_WITH_AES_256_CBC_SHA,
+    TLS_ECDH_ECDSA_WITH_AES_256_GCM_SHA384,
+    TLS_ECDH_ECDSA_WITH_AES_256_CBC_SHA384,
+    TLS_ECDH_ECDSA_WITH_AES_256_CBC_SHA,
+    TLS_RSA_WITH_AES_256_CCM_8,
+    TLS_RSA_WITH_CAMELLIA_256_GCM_SHA384,
+    TLS_RSA_WITH_CAMELLIA_256_CBC_SHA256,
+    TLS_RSA_WITH_CAMELLIA_256_CBC_SHA,
+    TLS_ECDH_RSA_WITH_CAMELLIA_256_GCM_SHA384,
+    TLS_ECDH_RSA_WITH_CAMELLIA_256_CBC_SHA384,
+    TLS_ECDH_ECDSA_WITH_CAMELLIA_256_GCM_SHA384,
+    TLS_ECDH_ECDSA_WITH_CAMELLIA_256_CBC_SHA384,
+    TLS_ECDH_ECDSA_WITH_ARIA_256_GCM_SHA384,
+    TLS_ECDH_RSA_WITH_ARIA_256_GCM_SHA384,
+    TLS_RSA_WITH_ARIA_256_GCM_SHA384,
+    TLS_ECDH_ECDSA_WITH_ARIA_256_CBC_SHA384,
+    TLS_ECDH_RSA_WITH_ARIA_256_CBC_SHA384,
+    TLS_RSA_WITH_ARIA_256_CBC_SHA384,
+    TLS_RSA_WITH_AES_128_GCM_SHA256,
+    TLS_RSA_WITH_AES_128_CCM,
+    TLS_RSA_WITH_AES_128_CBC_SHA256,
+    TLS_RSA_WITH_AES_128_CBC_SHA,
+    TLS_ECDH_RSA_WITH_AES_128_GCM_SHA256,
+    TLS_ECDH_RSA_WITH_AES_128_CBC_SHA256,
+    TLS_ECDH_RSA_WITH_AES_128_CBC_SHA,
+    TLS_ECDH_ECDSA_WITH_AES_128_GCM_SHA256,
+    TLS_ECDH_ECDSA_WITH_AES_128_CBC_SHA256,
+    TLS_ECDH_ECDSA_WITH_AES_128_CBC_SHA,
+    TLS_RSA_WITH_AES_128_CCM_8,
+    TLS_RSA_WITH_CAMELLIA_128_GCM_SHA256,
+    TLS_RSA_WITH_CAMELLIA_128_CBC_SHA256,
+    TLS_RSA_WITH_CAMELLIA_128_CBC_SHA,
+    TLS_ECDH_RSA_WITH_CAMELLIA_128_GCM_SHA256,
+    TLS_ECDH_RSA_WITH_CAMELLIA_128_CBC_SHA256,
+    TLS_ECDH_ECDSA_WITH_CAMELLIA_128_GCM_SHA256,
+    TLS_ECDH_ECDSA_WITH_CAMELLIA_128_CBC_SHA256,
+    TLS_ECDH_ECDSA_WITH_ARIA_128_GCM_SHA256,
+    TLS_ECDH_RSA_WITH_ARIA_128_GCM_SHA256,
+    TLS_RSA_WITH_ARIA_128_GCM_SHA256,
+    TLS_ECDH_ECDSA_WITH_ARIA_128_CBC_SHA256,
+    TLS_ECDH_RSA_WITH_ARIA_128_CBC_SHA256,
+    TLS_RSA_WITH_ARIA_128_CBC_SHA256,
+    TLS_RSA_PSK_WITH_CHACHA20_POLY1305_SHA256,
+    TLS_RSA_PSK_WITH_AES_256_GCM_SHA384,
+    TLS_RSA_PSK_WITH_AES_256_CBC_SHA384,
+    TLS_RSA_PSK_WITH_AES_256_CBC_SHA,
+    TLS_RSA_PSK_WITH_CAMELLIA_256_GCM_SHA384,
+    TLS_RSA_PSK_WITH_CAMELLIA_256_CBC_SHA384,
+    TLS_RSA_PSK_WITH_ARIA_256_GCM_SHA384,
+    TLS_RSA_PSK_WITH_ARIA_256_CBC_SHA384,
+    TLS_RSA_PSK_WITH_AES_128_GCM_SHA256,
+    TLS_RSA_PSK_WITH_AES_128_CBC_SHA256,
+    TLS_RSA_PSK_WITH_AES_128_CBC_SHA,
+    TLS_RSA_PSK_WITH_CAMELLIA_128_GCM_SHA256,
+    TLS_RSA_PSK_WITH_CAMELLIA_128_CBC_SHA256,
+    TLS_RSA_PSK_WITH_ARIA_128_GCM_SHA256,
+    TLS_RSA_PSK_WITH_ARIA_128_CBC_SHA256,
+    TLS_PSK_WITH_CHACHA20_POLY1305_SHA256,
+    TLS_PSK_WITH_AES_256_GCM_SHA384,
+    TLS_PSK_WITH_AES_256_CCM,
+    TLS_PSK_WITH_AES_256_CBC_SHA384,
+    TLS_PSK_WITH_AES_256_CBC_SHA,
+    TLS_PSK_WITH_CAMELLIA_256_GCM_SHA384,
+    TLS_PSK_WITH_CAMELLIA_256_CBC_SHA384,
+    TLS_PSK_WITH_AES_256_CCM_8,
+    TLS_PSK_WITH_ARIA_256_GCM_SHA384,
+    TLS_PSK_WITH_ARIA_256_CBC_SHA384,
+    TLS_PSK_WITH_AES_128_GCM_SHA256,
+    TLS_PSK_WITH_AES_128_CCM,
+    TLS_PSK_WITH_AES_128_CBC_SHA256,
+    TLS_PSK_WITH_AES_128_CBC_SHA,
+    TLS_PSK_WITH_CAMELLIA_128_GCM_SHA256,
+    TLS_PSK_WITH_CAMELLIA_128_CBC_SHA256,
+    TLS_PSK_WITH_AES_128_CCM_8,
+    TLS_PSK_WITH_ARIA_128_GCM_SHA256,
+    TLS_PSK_WITH_ARIA_128_CBC_SHA256,
+    TLS_ECDHE_ECDSA_WITH_NULL_SHA,
+    TLS_ECDHE_RSA_WITH_NULL_SHA,
+    TLS_ECDHE_PSK_WITH_NULL_SHA384,
+    TLS_ECDHE_PSK_WITH_NULL_SHA256,
+    TLS_ECDHE_PSK_WITH_NULL_SHA,
+    TLS_DHE_PSK_WITH_NULL_SHA384,
+    TLS_DHE_PSK_WITH_NULL_SHA256,
+    TLS_DHE_PSK_WITH_NULL_SHA,
+    TLS_RSA_WITH_NULL_SHA256,
+    TLS_RSA_WITH_NULL_SHA,
+    TLS_RSA_WITH_NULL_MD5,
+    TLS_ECDH_RSA_WITH_NULL_SHA,
+    TLS_ECDH_ECDSA_WITH_NULL_SHA,
+    TLS_RSA_PSK_WITH_NULL_SHA384,
+    TLS_RSA_PSK_WITH_NULL_SHA256,
+    TLS_RSA_PSK_WITH_NULL_SHA,
+    TLS_PSK_WITH_NULL_SHA384,
+    TLS_PSK_WITH_NULL_SHA256,
+    TLS_PSK_WITH_NULL_SHA,
+}
+
+CIPHERSUITE_DEFINITIONS: [SSLCiphersuite]{
+    SSLCiphersuite{id: TLS1_3_AES_256_GCM_SHA384, name: "TLS1-3-AES-256-GCM-SHA384", cipher: "AES-256-GCM", mac: hashes.Md.SHA384, key_exchange: SSLKeyExchange.NoExchange, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_3, max_tls_version: ssldefs.SSL_VERSION_TLS1_3},
+    SSLCiphersuite{id: TLS1_3_AES_128_GCM_SHA256, name: "TLS1-3-AES-128-GCM-SHA256", cipher: "AES-128-GCM", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.NoExchange, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_3, max_tls_version: ssldefs.SSL_VERSION_TLS1_3},
+    SSLCiphersuite{id: TLS1_3_AES_128_CCM_SHA256, name: "TLS1-3-AES-128-CCM-SHA256", cipher: "AES-128-CCM", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.NoExchange, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_3, max_tls_version: ssldefs.SSL_VERSION_TLS1_3},
+    SSLCiphersuite{id: TLS1_3_AES_128_CCM_8_SHA256, name: "TLS1-3-AES-128-CCM-8-SHA256", cipher: "AES-128-CCM", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.NoExchange, flags: CIPHERSUITE_SHORT_TAG, min_tls_version: ssldefs.SSL_VERSION_TLS1_3, max_tls_version: ssldefs.SSL_VERSION_TLS1_3},
+    SSLCiphersuite{id: TLS1_3_CHACHA20_POLY1305_SHA256, name: "TLS1-3-CHACHA20-POLY1305-SHA256", cipher: "CHACHA20-POLY1305", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.NoExchange, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_3, max_tls_version: ssldefs.SSL_VERSION_TLS1_3},
+    SSLCiphersuite{id: TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256, name: "TLS-ECDHE-RSA-WITH-CHACHA20-POLY1305-SHA256", cipher: "CHACHA20-POLY1305", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.ECDHERSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256, name: "TLS-ECDHE-ECDSA-WITH-CHACHA20-POLY1305-SHA256", cipher: "CHACHA20-POLY1305", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.ECDHEECDSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_DHE_RSA_WITH_CHACHA20_POLY1305_SHA256, name: "TLS-DHE-RSA-WITH-CHACHA20-POLY1305-SHA256", cipher: "CHACHA20-POLY1305", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.DHERSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_PSK_WITH_CHACHA20_POLY1305_SHA256, name: "TLS-PSK-WITH-CHACHA20-POLY1305-SHA256", cipher: "CHACHA20-POLY1305", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.PSK, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_ECDHE_PSK_WITH_CHACHA20_POLY1305_SHA256, name: "TLS-ECDHE-PSK-WITH-CHACHA20-POLY1305-SHA256", cipher: "CHACHA20-POLY1305", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.ECDHEPSK, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_DHE_PSK_WITH_CHACHA20_POLY1305_SHA256, name: "TLS-DHE-PSK-WITH-CHACHA20-POLY1305-SHA256", cipher: "CHACHA20-POLY1305", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.DHEPSK, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_RSA_PSK_WITH_CHACHA20_POLY1305_SHA256, name: "TLS-RSA-PSK-WITH-CHACHA20-POLY1305-SHA256", cipher: "CHACHA20-POLY1305", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.RSAPSK, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA, name: "TLS-ECDHE-ECDSA-WITH-AES-128-CBC-SHA", cipher: "AES-128-CBC", mac: hashes.Md.SHA1, key_exchange: SSLKeyExchange.ECDHEECDSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA, name: "TLS-ECDHE-ECDSA-WITH-AES-256-CBC-SHA", cipher: "AES-256-CBC", mac: hashes.Md.SHA1, key_exchange: SSLKeyExchange.ECDHEECDSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256, name: "TLS-ECDHE-ECDSA-WITH-AES-128-CBC-SHA256", cipher: "AES-128-CBC", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.ECDHEECDSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256, name: "TLS-ECDHE-ECDSA-WITH-AES-128-GCM-SHA256", cipher: "AES-128-GCM", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.ECDHEECDSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA384, name: "TLS-ECDHE-ECDSA-WITH-AES-256-CBC-SHA384", cipher: "AES-256-CBC", mac: hashes.Md.SHA384, key_exchange: SSLKeyExchange.ECDHEECDSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384, name: "TLS-ECDHE-ECDSA-WITH-AES-256-GCM-SHA384", cipher: "AES-256-GCM", mac: hashes.Md.SHA384, key_exchange: SSLKeyExchange.ECDHEECDSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_ECDHE_ECDSA_WITH_AES_256_CCM, name: "TLS-ECDHE-ECDSA-WITH-AES-256-CCM", cipher: "AES-256-CCM", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.ECDHEECDSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_ECDHE_ECDSA_WITH_AES_256_CCM_8, name: "TLS-ECDHE-ECDSA-WITH-AES-256-CCM-8", cipher: "AES-256-CCM", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.ECDHEECDSA, flags: CIPHERSUITE_SHORT_TAG, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_ECDHE_ECDSA_WITH_AES_128_CCM, name: "TLS-ECDHE-ECDSA-WITH-AES-128-CCM", cipher: "AES-128-CCM", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.ECDHEECDSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_ECDHE_ECDSA_WITH_AES_128_CCM_8, name: "TLS-ECDHE-ECDSA-WITH-AES-128-CCM-8", cipher: "AES-128-CCM", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.ECDHEECDSA, flags: CIPHERSUITE_SHORT_TAG, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_ECDHE_ECDSA_WITH_CAMELLIA_128_CBC_SHA256, name: "TLS-ECDHE-ECDSA-WITH-CAMELLIA-128-CBC-SHA256", cipher: "CAMELLIA-128-CBC", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.ECDHEECDSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_ECDHE_ECDSA_WITH_CAMELLIA_256_CBC_SHA384, name: "TLS-ECDHE-ECDSA-WITH-CAMELLIA-256-CBC-SHA384", cipher: "CAMELLIA-256-CBC", mac: hashes.Md.SHA384, key_exchange: SSLKeyExchange.ECDHEECDSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_ECDHE_ECDSA_WITH_CAMELLIA_128_GCM_SHA256, name: "TLS-ECDHE-ECDSA-WITH-CAMELLIA-128-GCM-SHA256", cipher: "CAMELLIA-128-GCM", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.ECDHEECDSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_ECDHE_ECDSA_WITH_CAMELLIA_256_GCM_SHA384, name: "TLS-ECDHE-ECDSA-WITH-CAMELLIA-256-GCM-SHA384", cipher: "CAMELLIA-256-GCM", mac: hashes.Md.SHA384, key_exchange: SSLKeyExchange.ECDHEECDSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA, name: "TLS-ECDHE-RSA-WITH-AES-128-CBC-SHA", cipher: "AES-128-CBC", mac: hashes.Md.SHA1, key_exchange: SSLKeyExchange.ECDHERSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA, name: "TLS-ECDHE-RSA-WITH-AES-256-CBC-SHA", cipher: "AES-256-CBC", mac: hashes.Md.SHA1, key_exchange: SSLKeyExchange.ECDHERSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256, name: "TLS-ECDHE-RSA-WITH-AES-128-CBC-SHA256", cipher: "AES-128-CBC", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.ECDHERSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256, name: "TLS-ECDHE-RSA-WITH-AES-128-GCM-SHA256", cipher: "AES-128-GCM", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.ECDHERSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA384, name: "TLS-ECDHE-RSA-WITH-AES-256-CBC-SHA384", cipher: "AES-256-CBC", mac: hashes.Md.SHA384, key_exchange: SSLKeyExchange.ECDHERSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384, name: "TLS-ECDHE-RSA-WITH-AES-256-GCM-SHA384", cipher: "AES-256-GCM", mac: hashes.Md.SHA384, key_exchange: SSLKeyExchange.ECDHERSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_ECDHE_RSA_WITH_CAMELLIA_128_CBC_SHA256, name: "TLS-ECDHE-RSA-WITH-CAMELLIA-128-CBC-SHA256", cipher: "CAMELLIA-128-CBC", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.ECDHERSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_ECDHE_RSA_WITH_CAMELLIA_256_CBC_SHA384, name: "TLS-ECDHE-RSA-WITH-CAMELLIA-256-CBC-SHA384", cipher: "CAMELLIA-256-CBC", mac: hashes.Md.SHA384, key_exchange: SSLKeyExchange.ECDHERSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_ECDHE_RSA_WITH_CAMELLIA_128_GCM_SHA256, name: "TLS-ECDHE-RSA-WITH-CAMELLIA-128-GCM-SHA256", cipher: "CAMELLIA-128-GCM", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.ECDHERSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_ECDHE_RSA_WITH_CAMELLIA_256_GCM_SHA384, name: "TLS-ECDHE-RSA-WITH-CAMELLIA-256-GCM-SHA384", cipher: "CAMELLIA-256-GCM", mac: hashes.Md.SHA384, key_exchange: SSLKeyExchange.ECDHERSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_DHE_RSA_WITH_AES_256_GCM_SHA384, name: "TLS-DHE-RSA-WITH-AES-256-GCM-SHA384", cipher: "AES-256-GCM", mac: hashes.Md.SHA384, key_exchange: SSLKeyExchange.DHERSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_DHE_RSA_WITH_AES_128_GCM_SHA256, name: "TLS-DHE-RSA-WITH-AES-128-GCM-SHA256", cipher: "AES-128-GCM", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.DHERSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_DHE_RSA_WITH_AES_128_CBC_SHA256, name: "TLS-DHE-RSA-WITH-AES-128-CBC-SHA256", cipher: "AES-128-CBC", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.DHERSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_DHE_RSA_WITH_AES_256_CBC_SHA256, name: "TLS-DHE-RSA-WITH-AES-256-CBC-SHA256", cipher: "AES-256-CBC", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.DHERSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_DHE_RSA_WITH_AES_128_CBC_SHA, name: "TLS-DHE-RSA-WITH-AES-128-CBC-SHA", cipher: "AES-128-CBC", mac: hashes.Md.SHA1, key_exchange: SSLKeyExchange.DHERSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_DHE_RSA_WITH_AES_256_CBC_SHA, name: "TLS-DHE-RSA-WITH-AES-256-CBC-SHA", cipher: "AES-256-CBC", mac: hashes.Md.SHA1, key_exchange: SSLKeyExchange.DHERSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_DHE_RSA_WITH_AES_256_CCM, name: "TLS-DHE-RSA-WITH-AES-256-CCM", cipher: "AES-256-CCM", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.DHERSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_DHE_RSA_WITH_AES_256_CCM_8, name: "TLS-DHE-RSA-WITH-AES-256-CCM-8", cipher: "AES-256-CCM", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.DHERSA, flags: CIPHERSUITE_SHORT_TAG, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_DHE_RSA_WITH_AES_128_CCM, name: "TLS-DHE-RSA-WITH-AES-128-CCM", cipher: "AES-128-CCM", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.DHERSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_DHE_RSA_WITH_AES_128_CCM_8, name: "TLS-DHE-RSA-WITH-AES-128-CCM-8", cipher: "AES-128-CCM", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.DHERSA, flags: CIPHERSUITE_SHORT_TAG, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_DHE_RSA_WITH_CAMELLIA_128_CBC_SHA256, name: "TLS-DHE-RSA-WITH-CAMELLIA-128-CBC-SHA256", cipher: "CAMELLIA-128-CBC", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.DHERSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_DHE_RSA_WITH_CAMELLIA_256_CBC_SHA256, name: "TLS-DHE-RSA-WITH-CAMELLIA-256-CBC-SHA256", cipher: "CAMELLIA-256-CBC", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.DHERSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_DHE_RSA_WITH_CAMELLIA_128_CBC_SHA, name: "TLS-DHE-RSA-WITH-CAMELLIA-128-CBC-SHA", cipher: "CAMELLIA-128-CBC", mac: hashes.Md.SHA1, key_exchange: SSLKeyExchange.DHERSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_DHE_RSA_WITH_CAMELLIA_256_CBC_SHA, name: "TLS-DHE-RSA-WITH-CAMELLIA-256-CBC-SHA", cipher: "CAMELLIA-256-CBC", mac: hashes.Md.SHA1, key_exchange: SSLKeyExchange.DHERSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_DHE_RSA_WITH_CAMELLIA_128_GCM_SHA256, name: "TLS-DHE-RSA-WITH-CAMELLIA-128-GCM-SHA256", cipher: "CAMELLIA-128-GCM", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.DHERSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_DHE_RSA_WITH_CAMELLIA_256_GCM_SHA384, name: "TLS-DHE-RSA-WITH-CAMELLIA-256-GCM-SHA384", cipher: "CAMELLIA-256-GCM", mac: hashes.Md.SHA384, key_exchange: SSLKeyExchange.DHERSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_RSA_WITH_AES_256_GCM_SHA384, name: "TLS-RSA-WITH-AES-256-GCM-SHA384", cipher: "AES-256-GCM", mac: hashes.Md.SHA384, key_exchange: SSLKeyExchange.RSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_RSA_WITH_AES_128_GCM_SHA256, name: "TLS-RSA-WITH-AES-128-GCM-SHA256", cipher: "AES-128-GCM", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.RSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_RSA_WITH_AES_128_CBC_SHA256, name: "TLS-RSA-WITH-AES-128-CBC-SHA256", cipher: "AES-128-CBC", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.RSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_RSA_WITH_AES_256_CBC_SHA256, name: "TLS-RSA-WITH-AES-256-CBC-SHA256", cipher: "AES-256-CBC", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.RSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_RSA_WITH_AES_128_CBC_SHA, name: "TLS-RSA-WITH-AES-128-CBC-SHA", cipher: "AES-128-CBC", mac: hashes.Md.SHA1, key_exchange: SSLKeyExchange.RSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_RSA_WITH_AES_256_CBC_SHA, name: "TLS-RSA-WITH-AES-256-CBC-SHA", cipher: "AES-256-CBC", mac: hashes.Md.SHA1, key_exchange: SSLKeyExchange.RSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_RSA_WITH_AES_256_CCM, name: "TLS-RSA-WITH-AES-256-CCM", cipher: "AES-256-CCM", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.RSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_RSA_WITH_AES_256_CCM_8, name: "TLS-RSA-WITH-AES-256-CCM-8", cipher: "AES-256-CCM", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.RSA, flags: CIPHERSUITE_SHORT_TAG, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_RSA_WITH_AES_128_CCM, name: "TLS-RSA-WITH-AES-128-CCM", cipher: "AES-128-CCM", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.RSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_RSA_WITH_AES_128_CCM_8, name: "TLS-RSA-WITH-AES-128-CCM-8", cipher: "AES-128-CCM", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.RSA, flags: CIPHERSUITE_SHORT_TAG, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_RSA_WITH_CAMELLIA_128_CBC_SHA256, name: "TLS-RSA-WITH-CAMELLIA-128-CBC-SHA256", cipher: "CAMELLIA-128-CBC", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.RSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_RSA_WITH_CAMELLIA_256_CBC_SHA256, name: "TLS-RSA-WITH-CAMELLIA-256-CBC-SHA256", cipher: "CAMELLIA-256-CBC", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.RSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_RSA_WITH_CAMELLIA_128_CBC_SHA, name: "TLS-RSA-WITH-CAMELLIA-128-CBC-SHA", cipher: "CAMELLIA-128-CBC", mac: hashes.Md.SHA1, key_exchange: SSLKeyExchange.RSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_RSA_WITH_CAMELLIA_256_CBC_SHA, name: "TLS-RSA-WITH-CAMELLIA-256-CBC-SHA", cipher: "CAMELLIA-256-CBC", mac: hashes.Md.SHA1, key_exchange: SSLKeyExchange.RSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_RSA_WITH_CAMELLIA_128_GCM_SHA256, name: "TLS-RSA-WITH-CAMELLIA-128-GCM-SHA256", cipher: "CAMELLIA-128-GCM", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.RSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_RSA_WITH_CAMELLIA_256_GCM_SHA384, name: "TLS-RSA-WITH-CAMELLIA-256-GCM-SHA384", cipher: "CAMELLIA-256-GCM", mac: hashes.Md.SHA384, key_exchange: SSLKeyExchange.RSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_ECDH_RSA_WITH_AES_128_CBC_SHA, name: "TLS-ECDH-RSA-WITH-AES-128-CBC-SHA", cipher: "AES-128-CBC", mac: hashes.Md.SHA1, key_exchange: SSLKeyExchange.ECDHRSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_ECDH_RSA_WITH_AES_256_CBC_SHA, name: "TLS-ECDH-RSA-WITH-AES-256-CBC-SHA", cipher: "AES-256-CBC", mac: hashes.Md.SHA1, key_exchange: SSLKeyExchange.ECDHRSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_ECDH_RSA_WITH_AES_128_CBC_SHA256, name: "TLS-ECDH-RSA-WITH-AES-128-CBC-SHA256", cipher: "AES-128-CBC", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.ECDHRSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_ECDH_RSA_WITH_AES_128_GCM_SHA256, name: "TLS-ECDH-RSA-WITH-AES-128-GCM-SHA256", cipher: "AES-128-GCM", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.ECDHRSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_ECDH_RSA_WITH_AES_256_CBC_SHA384, name: "TLS-ECDH-RSA-WITH-AES-256-CBC-SHA384", cipher: "AES-256-CBC", mac: hashes.Md.SHA384, key_exchange: SSLKeyExchange.ECDHRSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_ECDH_RSA_WITH_AES_256_GCM_SHA384, name: "TLS-ECDH-RSA-WITH-AES-256-GCM-SHA384", cipher: "AES-256-GCM", mac: hashes.Md.SHA384, key_exchange: SSLKeyExchange.ECDHRSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_ECDH_RSA_WITH_CAMELLIA_128_CBC_SHA256, name: "TLS-ECDH-RSA-WITH-CAMELLIA-128-CBC-SHA256", cipher: "CAMELLIA-128-CBC", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.ECDHRSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_ECDH_RSA_WITH_CAMELLIA_256_CBC_SHA384, name: "TLS-ECDH-RSA-WITH-CAMELLIA-256-CBC-SHA384", cipher: "CAMELLIA-256-CBC", mac: hashes.Md.SHA384, key_exchange: SSLKeyExchange.ECDHRSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_ECDH_RSA_WITH_CAMELLIA_128_GCM_SHA256, name: "TLS-ECDH-RSA-WITH-CAMELLIA-128-GCM-SHA256", cipher: "CAMELLIA-128-GCM", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.ECDHRSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_ECDH_RSA_WITH_CAMELLIA_256_GCM_SHA384, name: "TLS-ECDH-RSA-WITH-CAMELLIA-256-GCM-SHA384", cipher: "CAMELLIA-256-GCM", mac: hashes.Md.SHA384, key_exchange: SSLKeyExchange.ECDHRSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_ECDH_ECDSA_WITH_AES_128_CBC_SHA, name: "TLS-ECDH-ECDSA-WITH-AES-128-CBC-SHA", cipher: "AES-128-CBC", mac: hashes.Md.SHA1, key_exchange: SSLKeyExchange.ECDHECDSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_ECDH_ECDSA_WITH_AES_256_CBC_SHA, name: "TLS-ECDH-ECDSA-WITH-AES-256-CBC-SHA", cipher: "AES-256-CBC", mac: hashes.Md.SHA1, key_exchange: SSLKeyExchange.ECDHECDSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_ECDH_ECDSA_WITH_AES_128_CBC_SHA256, name: "TLS-ECDH-ECDSA-WITH-AES-128-CBC-SHA256", cipher: "AES-128-CBC", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.ECDHECDSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_ECDH_ECDSA_WITH_AES_128_GCM_SHA256, name: "TLS-ECDH-ECDSA-WITH-AES-128-GCM-SHA256", cipher: "AES-128-GCM", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.ECDHECDSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_ECDH_ECDSA_WITH_AES_256_CBC_SHA384, name: "TLS-ECDH-ECDSA-WITH-AES-256-CBC-SHA384", cipher: "AES-256-CBC", mac: hashes.Md.SHA384, key_exchange: SSLKeyExchange.ECDHECDSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_ECDH_ECDSA_WITH_AES_256_GCM_SHA384, name: "TLS-ECDH-ECDSA-WITH-AES-256-GCM-SHA384", cipher: "AES-256-GCM", mac: hashes.Md.SHA384, key_exchange: SSLKeyExchange.ECDHECDSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_ECDH_ECDSA_WITH_CAMELLIA_128_CBC_SHA256, name: "TLS-ECDH-ECDSA-WITH-CAMELLIA-128-CBC-SHA256", cipher: "CAMELLIA-128-CBC", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.ECDHECDSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_ECDH_ECDSA_WITH_CAMELLIA_256_CBC_SHA384, name: "TLS-ECDH-ECDSA-WITH-CAMELLIA-256-CBC-SHA384", cipher: "CAMELLIA-256-CBC", mac: hashes.Md.SHA384, key_exchange: SSLKeyExchange.ECDHECDSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_ECDH_ECDSA_WITH_CAMELLIA_128_GCM_SHA256, name: "TLS-ECDH-ECDSA-WITH-CAMELLIA-128-GCM-SHA256", cipher: "CAMELLIA-128-GCM", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.ECDHECDSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_ECDH_ECDSA_WITH_CAMELLIA_256_GCM_SHA384, name: "TLS-ECDH-ECDSA-WITH-CAMELLIA-256-GCM-SHA384", cipher: "CAMELLIA-256-GCM", mac: hashes.Md.SHA384, key_exchange: SSLKeyExchange.ECDHECDSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_PSK_WITH_AES_128_GCM_SHA256, name: "TLS-PSK-WITH-AES-128-GCM-SHA256", cipher: "AES-128-GCM", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.PSK, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_PSK_WITH_AES_256_GCM_SHA384, name: "TLS-PSK-WITH-AES-256-GCM-SHA384", cipher: "AES-256-GCM", mac: hashes.Md.SHA384, key_exchange: SSLKeyExchange.PSK, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_PSK_WITH_AES_128_CBC_SHA256, name: "TLS-PSK-WITH-AES-128-CBC-SHA256", cipher: "AES-128-CBC", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.PSK, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_PSK_WITH_AES_256_CBC_SHA384, name: "TLS-PSK-WITH-AES-256-CBC-SHA384", cipher: "AES-256-CBC", mac: hashes.Md.SHA384, key_exchange: SSLKeyExchange.PSK, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_PSK_WITH_AES_128_CBC_SHA, name: "TLS-PSK-WITH-AES-128-CBC-SHA", cipher: "AES-128-CBC", mac: hashes.Md.SHA1, key_exchange: SSLKeyExchange.PSK, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_PSK_WITH_AES_256_CBC_SHA, name: "TLS-PSK-WITH-AES-256-CBC-SHA", cipher: "AES-256-CBC", mac: hashes.Md.SHA1, key_exchange: SSLKeyExchange.PSK, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_PSK_WITH_AES_256_CCM, name: "TLS-PSK-WITH-AES-256-CCM", cipher: "AES-256-CCM", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.PSK, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_PSK_WITH_AES_256_CCM_8, name: "TLS-PSK-WITH-AES-256-CCM-8", cipher: "AES-256-CCM", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.PSK, flags: CIPHERSUITE_SHORT_TAG, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_PSK_WITH_AES_128_CCM, name: "TLS-PSK-WITH-AES-128-CCM", cipher: "AES-128-CCM", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.PSK, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_PSK_WITH_AES_128_CCM_8, name: "TLS-PSK-WITH-AES-128-CCM-8", cipher: "AES-128-CCM", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.PSK, flags: CIPHERSUITE_SHORT_TAG, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_PSK_WITH_CAMELLIA_128_CBC_SHA256, name: "TLS-PSK-WITH-CAMELLIA-128-CBC-SHA256", cipher: "CAMELLIA-128-CBC", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.PSK, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_PSK_WITH_CAMELLIA_256_CBC_SHA384, name: "TLS-PSK-WITH-CAMELLIA-256-CBC-SHA384", cipher: "CAMELLIA-256-CBC", mac: hashes.Md.SHA384, key_exchange: SSLKeyExchange.PSK, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_PSK_WITH_CAMELLIA_128_GCM_SHA256, name: "TLS-PSK-WITH-CAMELLIA-128-GCM-SHA256", cipher: "CAMELLIA-128-GCM", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.PSK, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_PSK_WITH_CAMELLIA_256_GCM_SHA384, name: "TLS-PSK-WITH-CAMELLIA-256-GCM-SHA384", cipher: "CAMELLIA-256-GCM", mac: hashes.Md.SHA384, key_exchange: SSLKeyExchange.PSK, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_DHE_PSK_WITH_AES_128_GCM_SHA256, name: "TLS-DHE-PSK-WITH-AES-128-GCM-SHA256", cipher: "AES-128-GCM", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.DHEPSK, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_DHE_PSK_WITH_AES_256_GCM_SHA384, name: "TLS-DHE-PSK-WITH-AES-256-GCM-SHA384", cipher: "AES-256-GCM", mac: hashes.Md.SHA384, key_exchange: SSLKeyExchange.DHEPSK, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_DHE_PSK_WITH_AES_128_CBC_SHA256, name: "TLS-DHE-PSK-WITH-AES-128-CBC-SHA256", cipher: "AES-128-CBC", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.DHEPSK, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_DHE_PSK_WITH_AES_256_CBC_SHA384, name: "TLS-DHE-PSK-WITH-AES-256-CBC-SHA384", cipher: "AES-256-CBC", mac: hashes.Md.SHA384, key_exchange: SSLKeyExchange.DHEPSK, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_DHE_PSK_WITH_AES_128_CBC_SHA, name: "TLS-DHE-PSK-WITH-AES-128-CBC-SHA", cipher: "AES-128-CBC", mac: hashes.Md.SHA1, key_exchange: SSLKeyExchange.DHEPSK, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_DHE_PSK_WITH_AES_256_CBC_SHA, name: "TLS-DHE-PSK-WITH-AES-256-CBC-SHA", cipher: "AES-256-CBC", mac: hashes.Md.SHA1, key_exchange: SSLKeyExchange.DHEPSK, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_DHE_PSK_WITH_AES_256_CCM, name: "TLS-DHE-PSK-WITH-AES-256-CCM", cipher: "AES-256-CCM", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.DHEPSK, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_DHE_PSK_WITH_AES_256_CCM_8, name: "TLS-DHE-PSK-WITH-AES-256-CCM-8", cipher: "AES-256-CCM", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.DHEPSK, flags: CIPHERSUITE_SHORT_TAG, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_DHE_PSK_WITH_AES_128_CCM, name: "TLS-DHE-PSK-WITH-AES-128-CCM", cipher: "AES-128-CCM", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.DHEPSK, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_DHE_PSK_WITH_AES_128_CCM_8, name: "TLS-DHE-PSK-WITH-AES-128-CCM-8", cipher: "AES-128-CCM", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.DHEPSK, flags: CIPHERSUITE_SHORT_TAG, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_DHE_PSK_WITH_CAMELLIA_128_CBC_SHA256, name: "TLS-DHE-PSK-WITH-CAMELLIA-128-CBC-SHA256", cipher: "CAMELLIA-128-CBC", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.DHEPSK, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_DHE_PSK_WITH_CAMELLIA_256_CBC_SHA384, name: "TLS-DHE-PSK-WITH-CAMELLIA-256-CBC-SHA384", cipher: "CAMELLIA-256-CBC", mac: hashes.Md.SHA384, key_exchange: SSLKeyExchange.DHEPSK, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_DHE_PSK_WITH_CAMELLIA_128_GCM_SHA256, name: "TLS-DHE-PSK-WITH-CAMELLIA-128-GCM-SHA256", cipher: "CAMELLIA-128-GCM", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.DHEPSK, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_DHE_PSK_WITH_CAMELLIA_256_GCM_SHA384, name: "TLS-DHE-PSK-WITH-CAMELLIA-256-GCM-SHA384", cipher: "CAMELLIA-256-GCM", mac: hashes.Md.SHA384, key_exchange: SSLKeyExchange.DHEPSK, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_ECDHE_PSK_WITH_AES_128_CBC_SHA256, name: "TLS-ECDHE-PSK-WITH-AES-128-CBC-SHA256", cipher: "AES-128-CBC", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.ECDHEPSK, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_ECDHE_PSK_WITH_AES_256_CBC_SHA384, name: "TLS-ECDHE-PSK-WITH-AES-256-CBC-SHA384", cipher: "AES-256-CBC", mac: hashes.Md.SHA384, key_exchange: SSLKeyExchange.ECDHEPSK, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_ECDHE_PSK_WITH_AES_128_CBC_SHA, name: "TLS-ECDHE-PSK-WITH-AES-128-CBC-SHA", cipher: "AES-128-CBC", mac: hashes.Md.SHA1, key_exchange: SSLKeyExchange.ECDHEPSK, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_ECDHE_PSK_WITH_AES_256_CBC_SHA, name: "TLS-ECDHE-PSK-WITH-AES-256-CBC-SHA", cipher: "AES-256-CBC", mac: hashes.Md.SHA1, key_exchange: SSLKeyExchange.ECDHEPSK, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_ECDHE_PSK_WITH_CAMELLIA_128_CBC_SHA256, name: "TLS-ECDHE-PSK-WITH-CAMELLIA-128-CBC-SHA256", cipher: "CAMELLIA-128-CBC", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.ECDHEPSK, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_ECDHE_PSK_WITH_CAMELLIA_256_CBC_SHA384, name: "TLS-ECDHE-PSK-WITH-CAMELLIA-256-CBC-SHA384", cipher: "CAMELLIA-256-CBC", mac: hashes.Md.SHA384, key_exchange: SSLKeyExchange.ECDHEPSK, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_RSA_PSK_WITH_AES_128_GCM_SHA256, name: "TLS-RSA-PSK-WITH-AES-128-GCM-SHA256", cipher: "AES-128-GCM", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.RSAPSK, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_RSA_PSK_WITH_AES_256_GCM_SHA384, name: "TLS-RSA-PSK-WITH-AES-256-GCM-SHA384", cipher: "AES-256-GCM", mac: hashes.Md.SHA384, key_exchange: SSLKeyExchange.RSAPSK, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_RSA_PSK_WITH_AES_128_CBC_SHA256, name: "TLS-RSA-PSK-WITH-AES-128-CBC-SHA256", cipher: "AES-128-CBC", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.RSAPSK, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_RSA_PSK_WITH_AES_256_CBC_SHA384, name: "TLS-RSA-PSK-WITH-AES-256-CBC-SHA384", cipher: "AES-256-CBC", mac: hashes.Md.SHA384, key_exchange: SSLKeyExchange.RSAPSK, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_RSA_PSK_WITH_AES_128_CBC_SHA, name: "TLS-RSA-PSK-WITH-AES-128-CBC-SHA", cipher: "AES-128-CBC", mac: hashes.Md.SHA1, key_exchange: SSLKeyExchange.RSAPSK, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_RSA_PSK_WITH_AES_256_CBC_SHA, name: "TLS-RSA-PSK-WITH-AES-256-CBC-SHA", cipher: "AES-256-CBC", mac: hashes.Md.SHA1, key_exchange: SSLKeyExchange.RSAPSK, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_RSA_PSK_WITH_CAMELLIA_128_CBC_SHA256, name: "TLS-RSA-PSK-WITH-CAMELLIA-128-CBC-SHA256", cipher: "CAMELLIA-128-CBC", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.RSAPSK, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_RSA_PSK_WITH_CAMELLIA_256_CBC_SHA384, name: "TLS-RSA-PSK-WITH-CAMELLIA-256-CBC-SHA384", cipher: "CAMELLIA-256-CBC", mac: hashes.Md.SHA384, key_exchange: SSLKeyExchange.RSAPSK, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_RSA_PSK_WITH_CAMELLIA_128_GCM_SHA256, name: "TLS-RSA-PSK-WITH-CAMELLIA-128-GCM-SHA256", cipher: "CAMELLIA-128-GCM", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.RSAPSK, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_RSA_PSK_WITH_CAMELLIA_256_GCM_SHA384, name: "TLS-RSA-PSK-WITH-CAMELLIA-256-GCM-SHA384", cipher: "CAMELLIA-256-GCM", mac: hashes.Md.SHA384, key_exchange: SSLKeyExchange.RSAPSK, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_RSA_WITH_ARIA_256_GCM_SHA384, name: "TLS-RSA-WITH-ARIA-256-GCM-SHA384", cipher: "ARIA-256-GCM", mac: hashes.Md.SHA384, key_exchange: SSLKeyExchange.RSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_RSA_WITH_ARIA_256_CBC_SHA384, name: "TLS-RSA-WITH-ARIA-256-CBC-SHA384", cipher: "ARIA-256-CBC", mac: hashes.Md.SHA384, key_exchange: SSLKeyExchange.RSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_RSA_WITH_ARIA_128_GCM_SHA256, name: "TLS-RSA-WITH-ARIA-128-GCM-SHA256", cipher: "ARIA-128-GCM", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.RSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_RSA_WITH_ARIA_128_CBC_SHA256, name: "TLS-RSA-WITH-ARIA-128-CBC-SHA256", cipher: "ARIA-128-CBC", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.RSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_RSA_PSK_WITH_ARIA_256_GCM_SHA384, name: "TLS-RSA-PSK-WITH-ARIA-256-GCM-SHA384", cipher: "ARIA-256-GCM", mac: hashes.Md.SHA384, key_exchange: SSLKeyExchange.RSAPSK, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_RSA_PSK_WITH_ARIA_256_CBC_SHA384, name: "TLS-RSA-PSK-WITH-ARIA-256-CBC-SHA384", cipher: "ARIA-256-CBC", mac: hashes.Md.SHA384, key_exchange: SSLKeyExchange.RSAPSK, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_RSA_PSK_WITH_ARIA_128_GCM_SHA256, name: "TLS-RSA-PSK-WITH-ARIA-128-GCM-SHA256", cipher: "ARIA-128-GCM", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.RSAPSK, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_RSA_PSK_WITH_ARIA_128_CBC_SHA256, name: "TLS-RSA-PSK-WITH-ARIA-128-CBC-SHA256", cipher: "ARIA-128-CBC", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.RSAPSK, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_PSK_WITH_ARIA_256_GCM_SHA384, name: "TLS-PSK-WITH-ARIA-256-GCM-SHA384", cipher: "ARIA-256-GCM", mac: hashes.Md.SHA384, key_exchange: SSLKeyExchange.PSK, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_PSK_WITH_ARIA_256_CBC_SHA384, name: "TLS-PSK-WITH-ARIA-256-CBC-SHA384", cipher: "ARIA-256-CBC", mac: hashes.Md.SHA384, key_exchange: SSLKeyExchange.PSK, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_PSK_WITH_ARIA_128_GCM_SHA256, name: "TLS-PSK-WITH-ARIA-128-GCM-SHA256", cipher: "ARIA-128-GCM", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.PSK, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_PSK_WITH_ARIA_128_CBC_SHA256, name: "TLS-PSK-WITH-ARIA-128-CBC-SHA256", cipher: "ARIA-128-CBC", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.PSK, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_ECDH_RSA_WITH_ARIA_256_GCM_SHA384, name: "TLS-ECDH-RSA-WITH-ARIA-256-GCM-SHA384", cipher: "ARIA-256-GCM", mac: hashes.Md.SHA384, key_exchange: SSLKeyExchange.ECDHRSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_ECDH_RSA_WITH_ARIA_256_CBC_SHA384, name: "TLS-ECDH-RSA-WITH-ARIA-256-CBC-SHA384", cipher: "ARIA-256-CBC", mac: hashes.Md.SHA384, key_exchange: SSLKeyExchange.ECDHRSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_ECDH_RSA_WITH_ARIA_128_GCM_SHA256, name: "TLS-ECDH-RSA-WITH-ARIA-128-GCM-SHA256", cipher: "ARIA-128-GCM", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.ECDHRSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_ECDH_RSA_WITH_ARIA_128_CBC_SHA256, name: "TLS-ECDH-RSA-WITH-ARIA-128-CBC-SHA256", cipher: "ARIA-128-CBC", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.ECDHRSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_ECDHE_RSA_WITH_ARIA_256_GCM_SHA384, name: "TLS-ECDHE-RSA-WITH-ARIA-256-GCM-SHA384", cipher: "ARIA-256-GCM", mac: hashes.Md.SHA384, key_exchange: SSLKeyExchange.ECDHERSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_ECDHE_RSA_WITH_ARIA_256_CBC_SHA384, name: "TLS-ECDHE-RSA-WITH-ARIA-256-CBC-SHA384", cipher: "ARIA-256-CBC", mac: hashes.Md.SHA384, key_exchange: SSLKeyExchange.ECDHERSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_ECDHE_RSA_WITH_ARIA_128_GCM_SHA256, name: "TLS-ECDHE-RSA-WITH-ARIA-128-GCM-SHA256", cipher: "ARIA-128-GCM", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.ECDHERSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_ECDHE_RSA_WITH_ARIA_128_CBC_SHA256, name: "TLS-ECDHE-RSA-WITH-ARIA-128-CBC-SHA256", cipher: "ARIA-128-CBC", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.ECDHERSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_ECDHE_PSK_WITH_ARIA_256_CBC_SHA384, name: "TLS-ECDHE-PSK-WITH-ARIA-256-CBC-SHA384", cipher: "ARIA-256-CBC", mac: hashes.Md.SHA384, key_exchange: SSLKeyExchange.ECDHEPSK, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_ECDHE_PSK_WITH_ARIA_128_CBC_SHA256, name: "TLS-ECDHE-PSK-WITH-ARIA-128-CBC-SHA256", cipher: "ARIA-128-CBC", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.ECDHEPSK, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_ECDHE_ECDSA_WITH_ARIA_256_GCM_SHA384, name: "TLS-ECDHE-ECDSA-WITH-ARIA-256-GCM-SHA384", cipher: "ARIA-256-GCM", mac: hashes.Md.SHA384, key_exchange: SSLKeyExchange.ECDHEECDSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_ECDHE_ECDSA_WITH_ARIA_256_CBC_SHA384, name: "TLS-ECDHE-ECDSA-WITH-ARIA-256-CBC-SHA384", cipher: "ARIA-256-CBC", mac: hashes.Md.SHA384, key_exchange: SSLKeyExchange.ECDHEECDSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_ECDHE_ECDSA_WITH_ARIA_128_GCM_SHA256, name: "TLS-ECDHE-ECDSA-WITH-ARIA-128-GCM-SHA256", cipher: "ARIA-128-GCM", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.ECDHEECDSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_ECDHE_ECDSA_WITH_ARIA_128_CBC_SHA256, name: "TLS-ECDHE-ECDSA-WITH-ARIA-128-CBC-SHA256", cipher: "ARIA-128-CBC", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.ECDHEECDSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_ECDH_ECDSA_WITH_ARIA_256_GCM_SHA384, name: "TLS-ECDH-ECDSA-WITH-ARIA-256-GCM-SHA384", cipher: "ARIA-256-GCM", mac: hashes.Md.SHA384, key_exchange: SSLKeyExchange.ECDHECDSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_ECDH_ECDSA_WITH_ARIA_256_CBC_SHA384, name: "TLS-ECDH-ECDSA-WITH-ARIA-256-CBC-SHA384", cipher: "ARIA-256-CBC", mac: hashes.Md.SHA384, key_exchange: SSLKeyExchange.ECDHECDSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_ECDH_ECDSA_WITH_ARIA_128_GCM_SHA256, name: "TLS-ECDH-ECDSA-WITH-ARIA-128-GCM-SHA256", cipher: "ARIA-128-GCM", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.ECDHECDSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_ECDH_ECDSA_WITH_ARIA_128_CBC_SHA256, name: "TLS-ECDH-ECDSA-WITH-ARIA-128-CBC-SHA256", cipher: "ARIA-128-CBC", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.ECDHECDSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_DHE_RSA_WITH_ARIA_256_GCM_SHA384, name: "TLS-DHE-RSA-WITH-ARIA-256-GCM-SHA384", cipher: "ARIA-256-GCM", mac: hashes.Md.SHA384, key_exchange: SSLKeyExchange.DHERSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_DHE_RSA_WITH_ARIA_256_CBC_SHA384, name: "TLS-DHE-RSA-WITH-ARIA-256-CBC-SHA384", cipher: "ARIA-256-CBC", mac: hashes.Md.SHA384, key_exchange: SSLKeyExchange.DHERSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_DHE_RSA_WITH_ARIA_128_GCM_SHA256, name: "TLS-DHE-RSA-WITH-ARIA-128-GCM-SHA256", cipher: "ARIA-128-GCM", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.DHERSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_DHE_RSA_WITH_ARIA_128_CBC_SHA256, name: "TLS-DHE-RSA-WITH-ARIA-128-CBC-SHA256", cipher: "ARIA-128-CBC", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.DHERSA, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_DHE_PSK_WITH_ARIA_256_GCM_SHA384, name: "TLS-DHE-PSK-WITH-ARIA-256-GCM-SHA384", cipher: "ARIA-256-GCM", mac: hashes.Md.SHA384, key_exchange: SSLKeyExchange.DHEPSK, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_DHE_PSK_WITH_ARIA_256_CBC_SHA384, name: "TLS-DHE-PSK-WITH-ARIA-256-CBC-SHA384", cipher: "ARIA-256-CBC", mac: hashes.Md.SHA384, key_exchange: SSLKeyExchange.DHEPSK, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_DHE_PSK_WITH_ARIA_128_GCM_SHA256, name: "TLS-DHE-PSK-WITH-ARIA-128-GCM-SHA256", cipher: "ARIA-128-GCM", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.DHEPSK, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+    SSLCiphersuite{id: TLS_DHE_PSK_WITH_ARIA_128_CBC_SHA256, name: "TLS-DHE-PSK-WITH-ARIA-128-CBC-SHA256", cipher: "ARIA-128-CBC", mac: hashes.Md.SHA256, key_exchange: SSLKeyExchange.DHEPSK, flags: 0, min_tls_version: ssldefs.SSL_VERSION_TLS1_2, max_tls_version: ssldefs.SSL_VERSION_TLS1_2},
+}

@@ -1,0 +1,1249 @@
+// Private Core source part: the SSL/TLS engine's constants, error and state.
+//
+// A port of the declarations mbedtls 3.6.7's TLS stack shares (ssl.h and
+// ssl_misc.h) under the default mbedtls_config.h: (D)TLS 1.2 and TLS 1.3,
+// client and server, DTLS connection IDs, encrypt-then-MAC, extended
+// master secret, renegotiation, max fragment length, context
+// serialization, session tickets, SNI, ALPN and the session cache, cookie
+// and ticket helpers. Early data, EC J-PAKE, record size limit, variable
+// buffer lengths, DTLS-SRTP, asynchronous private keys and the NULL cipher
+// are off in that configuration and are not ported.
+//
+// Where C keeps pointers between the context's sessions and transforms
+// (session_in, transform_out, alt_transform_out, ...), the context owns
+// pools `spool` and `tpool` and every such pointer is an index into its
+// pool, -1 for NULL; assigning a pointer assigns the index, so the C state
+// machine carries over unchanged.
+//
+// The engine does no I/O of its own: `bio` holds the bytes (TLS) or
+// datagrams (DTLS) received and to be sent, which the caller moves between
+// the context and the network (mbedtls_ssl_set_bio's role).
+use {
+    core
+    bn: __core_crypto_bignum
+    layer: __core_crypto_cipher_layer
+    hashes: __core_crypto_md
+    ecp: __core_crypto_ecp
+    ecdh: __core_crypto_ecdh
+    dhm: __core_crypto_dhm
+    pk: __core_crypto_pk
+    x509: __core_crypto_x509
+    x509crt: __core_crypto_x509crt
+    x509crl: __core_crypto_x509crl
+    suites: __core_net_ssl_ciphersuites
+}
+
+// ---------------------------------------------------------------------------
+// Protocol constants (ssl.h).
+
+SSL_VERSION_UNKNOWN: 0
+SSL_VERSION_TLS1_2: 0x0303
+SSL_VERSION_TLS1_3: 0x0304
+
+SSL_MAJOR_VERSION_3: 3
+SSL_MINOR_VERSION_3: 3
+SSL_MINOR_VERSION_4: 4
+
+SSL_TRANSPORT_STREAM: 0
+SSL_TRANSPORT_DATAGRAM: 1
+
+SSL_MAX_HOST_NAME_LEN: 255
+SSL_MAX_ALPN_NAME_LEN: 255
+SSL_MAX_ALPN_LIST_LEN: 65535
+
+SSL_MAX_FRAG_LEN_NONE: 0
+SSL_MAX_FRAG_LEN_512: 1
+SSL_MAX_FRAG_LEN_1024: 2
+SSL_MAX_FRAG_LEN_2048: 3
+SSL_MAX_FRAG_LEN_4096: 4
+SSL_MAX_FRAG_LEN_INVALID: 5
+
+SSL_IS_CLIENT: 0
+SSL_IS_SERVER: 1
+
+SSL_EXTENDED_MS_DISABLED: 0
+SSL_EXTENDED_MS_ENABLED: 1
+SSL_CID_DISABLED: 0
+SSL_CID_ENABLED: 1
+SSL_ETM_DISABLED: 0
+SSL_ETM_ENABLED: 1
+SSL_COMPRESS_NULL: 0
+
+SSL_VERIFY_NONE: 0
+SSL_VERIFY_OPTIONAL: 1
+SSL_VERIFY_REQUIRED: 2
+SSL_VERIFY_UNSET: 3
+
+SSL_LEGACY_RENEGOTIATION: 0
+SSL_SECURE_RENEGOTIATION: 1
+SSL_RENEGOTIATION_DISABLED: 0
+SSL_RENEGOTIATION_ENABLED: 1
+SSL_ANTI_REPLAY_DISABLED: 0
+SSL_ANTI_REPLAY_ENABLED: 1
+SSL_RENEGOTIATION_NOT_ENFORCED: -1
+SSL_RENEGO_MAX_RECORDS_DEFAULT: 16
+SSL_LEGACY_NO_RENEGOTIATION: 0
+SSL_LEGACY_ALLOW_RENEGOTIATION: 1
+SSL_LEGACY_BREAK_HANDSHAKE: 2
+
+SSL_SESSION_TICKETS_DISABLED: 0
+SSL_SESSION_TICKETS_ENABLED: 1
+SSL_TLS1_3_SIGNAL_NEW_SESSION_TICKETS_DISABLED: 0
+SSL_TLS1_3_SIGNAL_NEW_SESSION_TICKETS_ENABLED: 1
+
+SSL_PRESET_DEFAULT: 0
+SSL_PRESET_SUITEB: 2
+
+SSL_CERT_REQ_CA_LIST_ENABLED: 1
+SSL_CERT_REQ_CA_LIST_DISABLED: 0
+SSL_SRV_CIPHERSUITE_ORDER_CLIENT: 1
+SSL_SRV_CIPHERSUITE_ORDER_SERVER: 0
+
+SSL_UNEXPECTED_CID_IGNORE: 0
+SSL_UNEXPECTED_CID_FAIL: 1
+
+SSL_TLS1_3_PSK_MODE_PURE: 0
+SSL_TLS1_3_PSK_MODE_ECDHE: 1
+SSL_TLS1_3_KEY_EXCHANGE_MODE_NONE: 0
+SSL_TLS1_3_KEY_EXCHANGE_MODE_PSK: 1
+SSL_TLS1_3_KEY_EXCHANGE_MODE_EPHEMERAL: 2
+SSL_TLS1_3_KEY_EXCHANGE_MODE_PSK_EPHEMERAL: 4
+SSL_TLS1_3_KEY_EXCHANGE_MODE_PSK_ALL: 5
+SSL_TLS1_3_KEY_EXCHANGE_MODE_EPHEMERAL_ALL: 6
+SSL_TLS1_3_KEY_EXCHANGE_MODE_ALL: 7
+SSL_TLS1_3_PSK_EXTERNAL: 0
+SSL_TLS1_3_PSK_RESUMPTION: 1
+
+SSL_TLS1_3_TICKET_ALLOW_PSK_RESUMPTION: 1
+SSL_TLS1_3_TICKET_ALLOW_PSK_EPHEMERAL_RESUMPTION: 4
+SSL_TLS1_3_TICKET_ALLOW_EARLY_DATA: 8
+SSL_TLS1_3_TICKET_FLAGS_MASK: 13
+
+SSL_TLS1_3_TICKET_RESUMPTION_KEY_LEN: 48
+SSL_TLS1_3_TICKET_AGE_TOLERANCE: 6000
+SSL_TLS1_3_TICKET_NONCE_LENGTH: 32
+// The longest ticket lifetime, 7 days in seconds (RFC 8446 4.6.1).
+SSL_TLS1_3_MAX_ALLOWED_TICKET_LIFETIME: 604800
+SSL_TLS1_3_DEFAULT_NEW_SESSION_TICKETS: 1
+SSL_TLS1_3_MD_MAX_SIZE: 64
+
+SSL_DTLS_TIMEOUT_DFL_MIN: 1000
+SSL_DTLS_TIMEOUT_DFL_MAX: 60000
+
+SSL_IN_CONTENT_LEN: 16384
+SSL_OUT_CONTENT_LEN: 16384
+SSL_DTLS_MAX_BUFFERING: 32768
+SSL_CID_IN_LEN_MAX: 32
+SSL_CID_OUT_LEN_MAX: 32
+SSL_CID_LEN_MAX: 32
+SSL_CID_TLS1_3_PADDING_GRANULARITY: 16
+SSL_VERIFY_DATA_MAX_LEN: 12
+SSL_EMPTY_RENEGOTIATION_INFO: 0xFF
+SSL_SEQUENCE_NUMBER_LEN: 8
+SSL_EXPORT_MAX_KEY_LEN: 8160
+
+SSL_HASH_NONE: 0
+SSL_HASH_MD5: 1
+SSL_HASH_SHA1: 2
+SSL_HASH_SHA224: 3
+SSL_HASH_SHA256: 4
+SSL_HASH_SHA384: 5
+SSL_HASH_SHA512: 6
+
+SSL_SIG_ANON: 0
+SSL_SIG_RSA: 1
+SSL_SIG_ECDSA: 3
+
+SSL_CERT_TYPE_RSA_SIGN: 1
+SSL_CERT_TYPE_ECDSA_SIGN: 64
+
+SSL_MSG_CHANGE_CIPHER_SPEC: 20
+SSL_MSG_ALERT: 21
+SSL_MSG_HANDSHAKE: 22
+SSL_MSG_APPLICATION_DATA: 23
+SSL_MSG_CID: 25
+
+SSL_ALERT_LEVEL_WARNING: 1
+SSL_ALERT_LEVEL_FATAL: 2
+
+SSL_ALERT_MSG_CLOSE_NOTIFY: 0
+SSL_ALERT_MSG_UNEXPECTED_MESSAGE: 10
+SSL_ALERT_MSG_BAD_RECORD_MAC: 20
+SSL_ALERT_MSG_DECRYPTION_FAILED: 21
+SSL_ALERT_MSG_RECORD_OVERFLOW: 22
+SSL_ALERT_MSG_DECOMPRESSION_FAILURE: 30
+SSL_ALERT_MSG_HANDSHAKE_FAILURE: 40
+SSL_ALERT_MSG_NO_CERT: 41
+SSL_ALERT_MSG_BAD_CERT: 42
+SSL_ALERT_MSG_UNSUPPORTED_CERT: 43
+SSL_ALERT_MSG_CERT_REVOKED: 44
+SSL_ALERT_MSG_CERT_EXPIRED: 45
+SSL_ALERT_MSG_CERT_UNKNOWN: 46
+SSL_ALERT_MSG_ILLEGAL_PARAMETER: 47
+SSL_ALERT_MSG_UNKNOWN_CA: 48
+SSL_ALERT_MSG_ACCESS_DENIED: 49
+SSL_ALERT_MSG_DECODE_ERROR: 50
+SSL_ALERT_MSG_DECRYPT_ERROR: 51
+SSL_ALERT_MSG_EXPORT_RESTRICTION: 60
+SSL_ALERT_MSG_PROTOCOL_VERSION: 70
+SSL_ALERT_MSG_INSUFFICIENT_SECURITY: 71
+SSL_ALERT_MSG_INTERNAL_ERROR: 80
+SSL_ALERT_MSG_INAPROPRIATE_FALLBACK: 86
+SSL_ALERT_MSG_USER_CANCELED: 90
+SSL_ALERT_MSG_NO_RENEGOTIATION: 100
+SSL_ALERT_MSG_MISSING_EXTENSION: 109
+SSL_ALERT_MSG_UNSUPPORTED_EXT: 110
+SSL_ALERT_MSG_UNRECOGNIZED_NAME: 112
+SSL_ALERT_MSG_UNKNOWN_PSK_IDENTITY: 115
+SSL_ALERT_MSG_CERT_REQUIRED: 116
+SSL_ALERT_MSG_NO_APPLICATION_PROTOCOL: 120
+
+SSL_HS_HELLO_REQUEST: 0
+SSL_HS_CLIENT_HELLO: 1
+SSL_HS_SERVER_HELLO: 2
+SSL_HS_HELLO_VERIFY_REQUEST: 3
+SSL_HS_NEW_SESSION_TICKET: 4
+SSL_HS_END_OF_EARLY_DATA: 5
+SSL_HS_ENCRYPTED_EXTENSIONS: 8
+SSL_HS_CERTIFICATE: 11
+SSL_HS_SERVER_KEY_EXCHANGE: 12
+SSL_HS_CERTIFICATE_REQUEST: 13
+SSL_HS_SERVER_HELLO_DONE: 14
+SSL_HS_CERTIFICATE_VERIFY: 15
+SSL_HS_CLIENT_KEY_EXCHANGE: 16
+SSL_HS_FINISHED: 20
+SSL_HS_MESSAGE_HASH: 254
+
+TLS_EXT_SERVERNAME: 0
+TLS_EXT_SERVERNAME_HOSTNAME: 0
+TLS_EXT_MAX_FRAGMENT_LENGTH: 1
+TLS_EXT_TRUNCATED_HMAC: 4
+TLS_EXT_STATUS_REQUEST: 5
+TLS_EXT_SUPPORTED_GROUPS: 10
+TLS_EXT_SUPPORTED_POINT_FORMATS: 11
+TLS_EXT_SIG_ALG: 13
+TLS_EXT_USE_SRTP: 14
+TLS_EXT_HEARTBEAT: 15
+TLS_EXT_ALPN: 16
+TLS_EXT_SCT: 18
+TLS_EXT_CLI_CERT_TYPE: 19
+TLS_EXT_SERV_CERT_TYPE: 20
+TLS_EXT_PADDING: 21
+TLS_EXT_ENCRYPT_THEN_MAC: 22
+TLS_EXT_EXTENDED_MASTER_SECRET: 23
+TLS_EXT_RECORD_SIZE_LIMIT: 28
+TLS_EXT_SESSION_TICKET: 35
+TLS_EXT_PRE_SHARED_KEY: 41
+TLS_EXT_EARLY_DATA: 42
+TLS_EXT_SUPPORTED_VERSIONS: 43
+TLS_EXT_COOKIE: 44
+TLS_EXT_PSK_KEY_EXCHANGE_MODES: 45
+TLS_EXT_CERT_AUTH: 47
+TLS_EXT_OID_FILTERS: 48
+TLS_EXT_POST_HANDSHAKE_AUTH: 49
+TLS_EXT_SIG_ALG_CERT: 50
+TLS_EXT_KEY_SHARE: 51
+TLS_EXT_CID: 54
+TLS_EXT_ECJPAKE_KKPP: 256
+TLS_EXT_RENEGOTIATION_INFO: 0xFF01
+
+SSL_IANA_TLS_GROUP_NONE: 0
+SSL_IANA_TLS_GROUP_SECP192K1: 0x0012
+SSL_IANA_TLS_GROUP_SECP192R1: 0x0013
+SSL_IANA_TLS_GROUP_SECP224K1: 0x0014
+SSL_IANA_TLS_GROUP_SECP224R1: 0x0015
+SSL_IANA_TLS_GROUP_SECP256K1: 0x0016
+SSL_IANA_TLS_GROUP_SECP256R1: 0x0017
+SSL_IANA_TLS_GROUP_SECP384R1: 0x0018
+SSL_IANA_TLS_GROUP_SECP521R1: 0x0019
+SSL_IANA_TLS_GROUP_BP256R1: 0x001A
+SSL_IANA_TLS_GROUP_BP384R1: 0x001B
+SSL_IANA_TLS_GROUP_BP512R1: 0x001C
+SSL_IANA_TLS_GROUP_X25519: 0x001D
+SSL_IANA_TLS_GROUP_X448: 0x001E
+SSL_IANA_TLS_GROUP_FFDHE2048: 0x0100
+SSL_IANA_TLS_GROUP_FFDHE3072: 0x0101
+SSL_IANA_TLS_GROUP_FFDHE4096: 0x0102
+SSL_IANA_TLS_GROUP_FFDHE6144: 0x0103
+SSL_IANA_TLS_GROUP_FFDHE8192: 0x0104
+
+TLS1_3_SIG_NONE: 0
+TLS1_3_SIG_RSA_PKCS1_SHA256: 0x0401
+TLS1_3_SIG_RSA_PKCS1_SHA384: 0x0501
+TLS1_3_SIG_RSA_PKCS1_SHA512: 0x0601
+TLS1_3_SIG_ECDSA_SECP256R1_SHA256: 0x0403
+TLS1_3_SIG_ECDSA_SECP384R1_SHA384: 0x0503
+TLS1_3_SIG_ECDSA_SECP521R1_SHA512: 0x0603
+TLS1_3_SIG_RSA_PSS_RSAE_SHA256: 0x0804
+TLS1_3_SIG_RSA_PSS_RSAE_SHA384: 0x0805
+TLS1_3_SIG_RSA_PSS_RSAE_SHA512: 0x0806
+TLS1_3_SIG_ED25519: 0x0807
+TLS1_3_SIG_ED448: 0x0808
+TLS1_3_SIG_RSA_PSS_PSS_SHA256: 0x0809
+TLS1_3_SIG_RSA_PSS_PSS_SHA384: 0x080A
+TLS1_3_SIG_RSA_PSS_PSS_SHA512: 0x080B
+TLS1_3_SIG_RSA_PKCS1_SHA1: 0x0201
+TLS1_3_SIG_ECDSA_SHA1: 0x0203
+
+// Handshake states (mbedtls_ssl_states).
+SSL_HELLO_REQUEST: 0
+SSL_CLIENT_HELLO: 1
+SSL_SERVER_HELLO: 2
+SSL_SERVER_CERTIFICATE: 3
+SSL_SERVER_KEY_EXCHANGE: 4
+SSL_CERTIFICATE_REQUEST: 5
+SSL_SERVER_HELLO_DONE: 6
+SSL_CLIENT_CERTIFICATE: 7
+SSL_CLIENT_KEY_EXCHANGE: 8
+SSL_CERTIFICATE_VERIFY: 9
+SSL_CLIENT_CHANGE_CIPHER_SPEC: 10
+SSL_CLIENT_FINISHED: 11
+SSL_SERVER_CHANGE_CIPHER_SPEC: 12
+SSL_SERVER_FINISHED: 13
+SSL_FLUSH_BUFFERS: 14
+SSL_HANDSHAKE_WRAPUP: 15
+SSL_NEW_SESSION_TICKET: 16
+SSL_SERVER_HELLO_VERIFY_REQUEST_SENT: 17
+SSL_HELLO_RETRY_REQUEST: 18
+SSL_ENCRYPTED_EXTENSIONS: 19
+SSL_END_OF_EARLY_DATA: 20
+SSL_CLIENT_CERTIFICATE_VERIFY: 21
+SSL_CLIENT_CCS_AFTER_SERVER_FINISHED: 22
+SSL_CLIENT_CCS_BEFORE_2ND_CLIENT_HELLO: 23
+SSL_SERVER_CCS_AFTER_SERVER_HELLO: 24
+SSL_CLIENT_CCS_AFTER_CLIENT_HELLO: 25
+SSL_SERVER_CCS_AFTER_HELLO_RETRY_REQUEST: 26
+SSL_HANDSHAKE_OVER: 27
+SSL_TLS1_3_NEW_SESSION_TICKET: 28
+SSL_TLS1_3_NEW_SESSION_TICKET_FLUSH: 29
+
+// The TLS PRF a secret was derived with (mbedtls_tls_prf_types).
+SSL_TLS_PRF_NONE: 0
+SSL_TLS_PRF_SHA384: 1
+SSL_TLS_PRF_SHA256: 2
+SSL_HKDF_EXPAND_SHA384: 3
+SSL_HKDF_EXPAND_SHA256: 4
+
+// Exported secrets (mbedtls_ssl_key_export_type).
+SSL_KEY_EXPORT_TLS12_MASTER_SECRET: 0
+SSL_KEY_EXPORT_TLS1_3_CLIENT_EARLY_SECRET: 1
+SSL_KEY_EXPORT_TLS1_3_EARLY_EXPORTER_SECRET: 2
+SSL_KEY_EXPORT_TLS1_3_CLIENT_HANDSHAKE_TRAFFIC_SECRET: 3
+SSL_KEY_EXPORT_TLS1_3_SERVER_HANDSHAKE_TRAFFIC_SECRET: 4
+SSL_KEY_EXPORT_TLS1_3_CLIENT_APPLICATION_TRAFFIC_SECRET: 5
+SSL_KEY_EXPORT_TLS1_3_SERVER_APPLICATION_TRAFFIC_SECRET: 6
+
+// ---------------------------------------------------------------------------
+// Internal constants (ssl_misc.h).
+
+SSL_INITIAL_HANDSHAKE: 0
+SSL_RENEGOTIATION_IN_PROGRESS: 1
+SSL_RENEGOTIATION_DONE: 2
+SSL_RENEGOTIATION_PENDING: 3
+
+SSL_RETRANS_PREPARING: 0
+SSL_RETRANS_SENDING: 1
+SSL_RETRANS_WAITING: 2
+SSL_RETRANS_FINISHED: 3
+
+SSL_TLS1_3_HS_HELLO_RETRY_REQUEST: -2
+
+SSL_EXT_ID_UNRECOGNIZED: 0
+SSL_EXT_ID_SERVERNAME: 1
+SSL_EXT_ID_MAX_FRAGMENT_LENGTH: 2
+SSL_EXT_ID_STATUS_REQUEST: 3
+SSL_EXT_ID_SUPPORTED_GROUPS: 4
+SSL_EXT_ID_SIG_ALG: 5
+SSL_EXT_ID_USE_SRTP: 6
+SSL_EXT_ID_HEARTBEAT: 7
+SSL_EXT_ID_ALPN: 8
+SSL_EXT_ID_SCT: 9
+SSL_EXT_ID_CLI_CERT_TYPE: 10
+SSL_EXT_ID_SERV_CERT_TYPE: 11
+SSL_EXT_ID_PADDING: 12
+SSL_EXT_ID_PRE_SHARED_KEY: 13
+SSL_EXT_ID_EARLY_DATA: 14
+SSL_EXT_ID_SUPPORTED_VERSIONS: 15
+SSL_EXT_ID_COOKIE: 16
+SSL_EXT_ID_PSK_KEY_EXCHANGE_MODES: 17
+SSL_EXT_ID_CERT_AUTH: 18
+SSL_EXT_ID_OID_FILTERS: 19
+SSL_EXT_ID_POST_HANDSHAKE_AUTH: 20
+SSL_EXT_ID_SIG_ALG_CERT: 21
+SSL_EXT_ID_KEY_SHARE: 22
+SSL_EXT_ID_TRUNCATED_HMAC: 23
+SSL_EXT_ID_SUPPORTED_POINT_FORMATS: 24
+SSL_EXT_ID_ENCRYPT_THEN_MAC: 25
+SSL_EXT_ID_EXTENDED_MASTER_SECRET: 26
+SSL_EXT_ID_SESSION_TICKET: 27
+SSL_EXT_ID_RECORD_SIZE_LIMIT: 28
+
+// The extensions each TLS 1.3 handshake message may carry, one bit
+// (1 << SSL_EXT_ID_*) per extension (MBEDTLS_SSL_TLS1_3_ALLOWED_EXTS_OF_*).
+// The extensions TLS 1.3 does not define, point formats,
+// encrypt-then-MAC, extended master secret, session ticket, truncated HMAC
+// and unrecognized ones (MBEDTLS_SSL_TLS1_3_EXT_MASK_UNRECOGNIZED), are
+// allowed where a message may carry extensions it does not know.
+SSL_EXT_MASK_NONE: 0
+SSL_TLS1_3_EXT_MASK_UNRECOGNIZED: 0x0F800001
+// Every extension but oid_filters, and the unrecognized ones.
+SSL_TLS1_3_ALLOWED_EXTS_OF_CH: 0x1FF7FFFF
+// server_name, max_fragment_length, supported_groups, use_srtp, heartbeat,
+// ALPN, client and server certificate type, early_data and
+// record_size_limit.
+SSL_TLS1_3_ALLOWED_EXTS_OF_EE: 0x10004DD6
+// status_request, signature_algorithms, SCT, certificate_authorities,
+// oid_filters, signature_algorithms_cert and the unrecognized ones.
+SSL_TLS1_3_ALLOWED_EXTS_OF_CR: 0x0FAC0229
+// status_request and SCT.
+SSL_TLS1_3_ALLOWED_EXTS_OF_CT: 0x208
+// key_share, pre_shared_key and supported_versions.
+SSL_TLS1_3_ALLOWED_EXTS_OF_SH: 0x40A000
+// key_share, cookie and supported_versions.
+SSL_TLS1_3_ALLOWED_EXTS_OF_HRR: 0x418000
+// early_data and the unrecognized ones.
+SSL_TLS1_3_ALLOWED_EXTS_OF_NST: 0x0F804001
+
+TLS_EXT_SUPPORTED_POINT_FORMATS_PRESENT: 1
+TLS_EXT_ECJPAKE_KKPP_OK: 2
+
+SSL_MAX_BLOCK_LENGTH: 16
+SSL_MAX_IV_LENGTH: 16
+SSL_MAX_KEY_LENGTH: 32
+SSL_MAC_ADD: 48
+SSL_PADDING_ADD: 256
+SSL_MAX_CID_EXPANSION: 16
+// MBEDTLS_MAX_IV_LENGTH + MAC_ADD + PADDING_ADD + MAX_CID_EXPANSION.
+SSL_PAYLOAD_OVERHEAD: 336
+SSL_IN_PAYLOAD_LEN: 16720
+SSL_OUT_PAYLOAD_LEN: 16720
+SSL_MAX_BUFFERED_HS: 4
+TLS_EXT_ADV_CONTENT_LEN: 16384
+SSL_MAX_SIG_ALG_LIST_LEN: 65534
+SSL_MIN_SIG_ALG_LIST_LEN: 2
+SSL_MAX_CURVE_LIST_LEN: 65535
+RECEIVED_SIG_ALGS_SIZE: 20
+SSL_HEADER_LEN: 13
+// HEADER_LEN + PAYLOAD_LEN + CID_LEN_MAX.
+SSL_IN_BUFFER_LEN: 16765
+SSL_OUT_BUFFER_LEN: 16765
+CLIENT_HELLO_RANDOM_LEN: 32
+SERVER_HELLO_RANDOM_LEN: 32
+// The largest premaster secret, the 512-byte DHM modulus of
+// MBEDTLS_PREMASTER_SIZE's union, plus the PSK framing.
+SSL_PREMASTER_SIZE: 1060
+// The longest pre-shared key (MBEDTLS_PSK_MAX_LEN with SHA-384 on).
+SSL_PSK_MAX_LEN: 48
+SSL_COOKIE_MAX_LEN: 65535
+
+SSL_DONT_FORCE_FLUSH: false
+SSL_FORCE_FLUSH: true
+
+// ---------------------------------------------------------------------------
+// The error.
+
+/// Why an SSL/TLS operation stopped (MBEDTLS_ERR_SSL_*). WantRead and
+/// WantWrite are not failures: the operation needs more input or room
+/// to write and should be called again. A variant with a payload carries
+/// the failure of the layer underneath, as mbedtls returns that layer's
+/// code unchanged.
+#Error
+SSLError: enum {
+    /// An asynchronous operation is not completed yet (CRYPTO_IN_PROGRESS).
+    CryptoInProgress
+    /// The requested feature is not available (FEATURE_UNAVAILABLE).
+    FeatureUnavailable
+    /// Bad input parameters to the function (BAD_INPUT_DATA).
+    BadInputData
+    /// Verification of the message MAC failed (INVALID_MAC).
+    InvalidMac
+    /// An invalid SSL record was received (INVALID_RECORD).
+    InvalidRecord
+    /// The connection indicated an EOF (CONN_EOF).
+    ConnEOF
+    /// A message could not be parsed due to a syntactic error
+    /// (DECODE_ERROR).
+    DecodeError
+    /// No RNG was provided to the SSL module (NO_RNG).
+    NoRNG
+    /// No client certification received from the client, but required
+    /// by the authentication mode (NO_CLIENT_CERTIFICATE).
+    NoClientCertificate
+    /// An unsupported extension was negotiated or offered
+    /// (UNSUPPORTED_EXTENSION).
+    UnsupportedExtension
+    /// No common application protocol (NO_APPLICATION_PROTOCOL).
+    NoApplicationProtocol
+    /// The own private key or pre-shared key is not set, but needed
+    /// (PRIVATE_KEY_REQUIRED).
+    PrivateKeyRequired
+    /// No CA Chain is set, but required to operate (CA_CHAIN_REQUIRED).
+    CAChainRequired
+    /// An unexpected message was received from our peer
+    /// (UNEXPECTED_MESSAGE).
+    UnexpectedMessage
+    /// A fatal alert message was received from our peer
+    /// (FATAL_ALERT_MESSAGE).
+    FatalAlertMessage
+    /// No server could be identified matching the client's SNI
+    /// (UNRECOGNIZED_NAME).
+    UnrecognizedName
+    /// The peer notified us that the connection is going to be closed
+    /// (PEER_CLOSE_NOTIFY).
+    PeerCloseNotify
+    /// Processing of the Certificate handshake message failed
+    /// (BAD_CERTIFICATE).
+    BadCertificate
+    /// A TLS 1.3 NewSessionTicket message has been received
+    /// (RECEIVED_NEW_SESSION_TICKET).
+    ReceivedNewSessionTicket
+    /// Not possible to read early data (CANNOT_READ_EARLY_DATA).
+    CannotReadEarlyData
+    /// Early data has been received as part of an on-going handshake
+    /// (RECEIVED_EARLY_DATA).
+    ReceivedEarlyData
+    /// Not possible to write early data (CANNOT_WRITE_EARLY_DATA).
+    CannotWriteEarlyData
+    /// Cache entry not found (CACHE_ENTRY_NOT_FOUND).
+    CacheEntryNotFound
+    /// Memory allocation failed (ALLOC_FAILED).
+    AllocFailed
+    /// Hardware acceleration function returned with error
+    /// (HW_ACCEL_FAILED).
+    HwAccelFailed
+    /// Hardware acceleration function skipped / left alone data
+    /// (HW_ACCEL_FALLTHROUGH).
+    HwAccelFallthrough
+    /// Handshake protocol not within min/max boundaries
+    /// (BAD_PROTOCOL_VERSION).
+    BadProtocolVersion
+    /// The handshake negotiation failed (HANDSHAKE_FAILURE).
+    HandshakeFailure
+    /// Session ticket has expired (SESSION_TICKET_EXPIRED).
+    SessionTicketExpired
+    /// Public key type mismatch (PK_TYPE_MISMATCH).
+    PKTypeMismatch
+    /// Unknown identity received, e.g. PSK identity (UNKNOWN_IDENTITY).
+    UnknownIdentity
+    /// Internal error, e.g. an unexpected failure in a lower-level module
+    /// (INTERNAL_ERROR).
+    InternalError
+    /// A counter would wrap, e.g. the record sequence number
+    /// (COUNTER_WRAPPING).
+    CounterWrapping
+    /// Unexpected message at ServerHello in renegotiation
+    /// (WAITING_SERVER_HELLO_RENEGO).
+    WaitingServerHelloRenego
+    /// DTLS client must retry for hello verification
+    /// (HELLO_VERIFY_REQUIRED).
+    HelloVerifyRequired
+    /// A buffer is too small to receive or write a message
+    /// (BUFFER_TOO_SMALL).
+    BufferTooSmall
+    /// No data of requested type currently available on underlying
+    /// transport (WANT_READ).
+    WantRead
+    /// Connection requires a write call (WANT_WRITE).
+    WantWrite
+    /// The operation timed out (TIMEOUT).
+    Timeout
+    /// The client initiated a reconnect from the same port
+    /// (CLIENT_RECONNECT).
+    ClientReconnect
+    /// Record header looks valid but is not expected (UNEXPECTED_RECORD).
+    UnexpectedRecord
+    /// The alert message received indicates a non-fatal error
+    /// (NON_FATAL).
+    NonFatal
+    /// A field in a message was incorrect or inconsistent with other
+    /// fields (ILLEGAL_PARAMETER).
+    IllegalParameter
+    /// Internal-only message signaling that further message-processing
+    /// should be done (CONTINUE_PROCESSING).
+    ContinueProcessing
+    /// The asynchronous operation is not completed yet
+    /// (ASYNC_IN_PROGRESS).
+    AsyncInProgress
+    /// Internal-only message signaling that a message arrived early
+    /// (EARLY_MESSAGE).
+    EarlyMessage
+    /// An encrypted DTLS-frame with an unexpected CID was received
+    /// (UNEXPECTED_CID).
+    UnexpectedCID
+    /// An operation failed due to an unexpected version or configuration
+    /// (VERSION_MISMATCH).
+    VersionMismatch
+    /// Invalid value in SSL config (BAD_CONFIG).
+    BadConfig
+    /// Attempt to verify a certificate without an expected hostname
+    /// (CERTIFICATE_VERIFICATION_WITHOUT_HOSTNAME).
+    CertificateVerificationWithoutHostname
+    /// An internal invariant does not hold
+    /// (MBEDTLS_ERR_ERROR_CORRUPTION_DETECTED).
+    CorruptionDetected
+    /// A failure with no more specific code
+    /// (MBEDTLS_ERR_ERROR_GENERIC_ERROR).
+    GenericError
+    /// The random generator failed (mbedtls returns f_rng's own code).
+    RandomFailed
+    /// The cipher layer failed (an MBEDTLS_ERR_CIPHER_* code).
+    Cipher(layer.CipherLayerError)
+    /// A public-key operation failed (an MBEDTLS_ERR_PK_* code).
+    PK(pk.PKError)
+    /// A certificate could not be read or verified (an MBEDTLS_ERR_X509_*
+    /// code).
+    X509(x509.X509Error)
+    /// An elliptic-curve operation failed (an MBEDTLS_ERR_ECP_* code).
+    ECP(ecp.EcpError)
+    /// A Diffie-Hellman operation failed (an MBEDTLS_ERR_DHM_* code).
+    DHM(dhm.DHMError)
+    /// A big-number operation failed (an MBEDTLS_ERR_MPI_* code).
+    Mpi(bn.MpiError)
+    /// A callback failed with this code of its own, which mbedtls returns
+    /// unchanged.
+    Callback(Int)
+}
+
+// ---------------------------------------------------------------------------
+// Records, transforms and sessions.
+
+/// A record being protected or unprotected (mbedtls_record). C's `buf`
+/// points into a larger buffer; here the record layer takes that whole
+/// buffer beside the record, and `buf_start` is the offset C's pointer has
+/// in it, so it works in the context's input and output buffers without
+/// copying them. `data_offset` is relative to `buf_start`, as in C.
+SSLRecord: struct {
+    ctr: [U8]{[]}
+    rtype: Int{0}
+    ver: [U8]{[]}
+    buf_start: Int{0}
+    buf_len: Int{0}
+    data_offset: Int{0}
+    data_len: Int{0}
+    cid_len: Int{0}
+    cid: [U8]{[]}
+}
+
+/// The keys and state that protect records in one direction pair
+/// (mbedtls_ssl_transform). The MAC contexts are the HMAC keys of
+/// non-AEAD suites; AEAD suites have none. `valid` marks a pool slot in use.
+SSLTransform: struct {
+    valid: Bool{false}
+    minlen: Int{0}
+    ivlen: Int{0}
+    fixed_ivlen: Int{0}
+    maclen: Int{0}
+    taglen: Int{0}
+    iv_enc: [U8]{[]}
+    iv_dec: [U8]{[]}
+    md_enc: hashes.HMACKey?{None}
+    md_dec: hashes.HMACKey?{None}
+    encrypt_then_mac: Int{0}
+    tls_version: Int{0}
+    cipher_enc: layer.CipherContext?{None}
+    cipher_dec: layer.CipherContext?{None}
+    in_cid: [U8]{[]}
+    out_cid: [U8]{[]}
+    randbytes: [U8]{[]}
+}
+
+/// The TLS 1.3 secrets kept after the handshake
+/// (mbedtls_ssl_tls13_application_secrets).
+SSLTLS13AppSecrets: struct {
+    client_application_traffic_secret_n: [U8]{[]}
+    server_application_traffic_secret_n: [U8]{[]}
+    exporter_master_secret: [U8]{[]}
+    resumption_master_secret: [U8]{[]}
+}
+
+/// A negotiated or resumable session (mbedtls_ssl_session). `id` is the
+/// session ID (id_len is its length); `ticket` is None when no ticket is
+/// held; `peer_cert` is None when no peer chain was received.
+SSLSession: struct {
+    valid: Bool{false}
+    mfl_code: Int{0}
+    exported: Int{0}
+    endpoint: Int{0}
+    tls_version: Int{0}
+    start: Int{0}
+    ciphersuite: Int{0}
+    id: [U8]{[]}
+    master: [U8]{[]}
+    peer_cert: [x509crt.X509Crt]?{None}
+    verify_result: Int{0xFFFFFFFF}
+    ticket: [U8]?{None}
+    ticket_lifetime: Int{0}
+    ticket_creation_time: Int{0}
+    ticket_age_add: Int{0}
+    ticket_flags: Int{0}
+    resumption_key: [U8]{[]}
+    hostname: String?{None}
+    ticket_reception_time: Int{0}
+    encrypt_then_mac: Int{0}
+    app_secrets: SSLTLS13AppSecrets{SSLTLS13AppSecrets{}}
+}
+
+/// One own certificate chain and its private key (mbedtls_ssl_key_cert).
+SSLKeyCert: struct {
+    cert: [x509crt.X509Crt]
+    key: pk.PKContext
+}
+
+/// One outgoing DTLS handshake or CCS message kept for retransmission
+/// (mbedtls_ssl_flight_item); `p` includes the handshake header.
+SSLFlightItem: struct {
+    p: [U8]
+    mtype: Int
+}
+
+/// A buffered future handshake message (mbedtls_ssl_hs_buffer).
+SSLHsBuffer: struct {
+    is_valid: Bool{false}
+    is_fragmented: Bool{false}
+    is_complete: Bool{false}
+    data: [U8]{[]}
+}
+
+/// What an SNI callback selects for the handshake: the certificates and
+/// key, CA chain and CRLs, and authmode to use instead of the
+/// configuration's (mbedtls_ssl_set_hs_own_cert, set_hs_ca_chain,
+/// set_hs_authmode, set_hs_dn_hints). None and an empty key_cert keep the
+/// configuration's.
+SSLHsOverride: struct {
+    key_cert: [SSLKeyCert]{[]}
+    ca_chain: [x509crt.X509Crt]?{None}
+    ca_crl: [x509crl.X509Crl]{[]}
+    authmode: Int{SSL_VERIFY_UNSET}
+    dn_hints: [x509crt.X509Crt]?{None}
+}
+
+/// What a server PSK callback selects for an identity
+/// (mbedtls_ssl_set_hs_psk). None refuses the identity.
+SSLPskResult: struct {
+    psk: [U8]?{None}
+}
+
+// ---------------------------------------------------------------------------
+// Callbacks. C passes each a `void *` context; a Jet callback is a closure,
+// which captures its context. C callbacks that change the SSL context (SNI,
+// PSK, certificate selection) return what to change, which the engine
+// applies.
+
+/// Look up a cached session by ID (mbedtls_ssl_cache_get_t).
+SSLCacheGet: struct {
+    call: fn([U8]) -[Time]> SSLSession SSLError!
+}
+
+/// Store a session under its ID (mbedtls_ssl_cache_set_t).
+SSLCacheSet: struct {
+    call: fn([U8], SSLSession) -[Time]> Bool SSLError!
+}
+
+/// The server's SNI callback: what to use for this server name
+/// (f_sni).
+SSLSniCallback: struct {
+    call: fn([U8]) -[Time]> SSLHsOverride SSLError!
+}
+
+/// The server's PSK callback: the key for this identity (f_psk).
+SSLPskCallback: struct {
+    call: fn([U8]) -[Time]> SSLPskResult SSLError!
+}
+
+/// The server's certificate selection callback, run after the
+/// ClientHello is parsed: what to use for this handshake (f_cert_cb).
+SSLCertCallback: struct {
+    call: fn(SSLClientHelloInfo) -[Time]> SSLHsOverride SSLError!
+}
+
+/// What a certificate callback learns of the ClientHello: the SNI name
+/// and the signature algorithms the client offered.
+SSLClientHelloInfo: struct {
+    sni: [U8]?
+    sig_algs: [Int]
+}
+
+/// Write a DTLS HelloVerifyRequest cookie for a client's transport ID
+/// (f_cookie_write).
+SSLCookieWrite: struct {
+    call: fn([U8]) -[Time]> [U8] SSLError!
+}
+
+/// Check a returned cookie against the client's transport ID
+/// (f_cookie_check).
+SSLCookieCheck: struct {
+    call: fn([U8], [U8]) -[Time]> Bool SSLError!
+}
+
+/// A written session ticket: the ticket and its lifetime hint in seconds.
+SSLTicketWritten: struct {
+    ticket: [U8]
+    lifetime: Int
+}
+
+/// Seal a session into a ticket (mbedtls_ssl_ticket_write_t).
+SSLTicketWrite: struct {
+    call: fn(SSLSession) -[Time]> SSLTicketWritten SSLError!
+}
+
+/// Open a ticket back into its session (mbedtls_ssl_ticket_parse_t).
+SSLTicketParse: struct {
+    call: fn([U8]) -[Time]> SSLSession SSLError!
+}
+
+/// One exported secret (mbedtls_ssl_export_keys_t's arguments).
+SSLExportedKey: struct {
+    ktype: Int
+    secret: [U8]
+    client_random: [U8]
+    server_random: [U8]
+    tls_prf_type: Int
+}
+
+/// Receive each secret the handshake derives (f_export_keys).
+SSLExportKeys: struct {
+    call: fn(SSLExportedKey) -[Time]> Bool Never!
+}
+
+// ---------------------------------------------------------------------------
+// Configuration.
+
+/// The settings shared by the contexts that use them (mbedtls_ssl_config).
+/// A context takes its own copy at ssl_setup. The random generator is not
+/// part of it: the calls that need randomness take one.
+SSLConfig: struct {
+    max_tls_version: Int{SSL_VERSION_UNKNOWN}
+    min_tls_version: Int{SSL_VERSION_UNKNOWN}
+    endpoint: Int{SSL_IS_CLIENT}
+    transport: Int{SSL_TRANSPORT_STREAM}
+    authmode: Int{SSL_VERIFY_NONE}
+    allow_legacy_renegotiation: Int{0}
+    mfl_code: Int{0}
+    encrypt_then_mac: Int{0}
+    extended_ms: Int{0}
+    anti_replay: Int{0}
+    disable_renegotiation: Int{0}
+    session_tickets: Int{0}
+    new_session_tickets_count: Int{0}
+    tls13_signal_new_session_tickets: Int{0}
+    cert_req_ca_list: Int{0}
+    respect_cli_pref: Int{0}
+    ignore_unexpected_cid: Int{0}
+    ciphersuite_list: [Int]{[]}
+    tls13_kex_modes: Int{0}
+    f_get_cache: SSLCacheGet?{None}
+    f_set_cache: SSLCacheSet?{None}
+    f_sni: SSLSniCallback?{None}
+    f_vrfy: x509crt.X509VerifyCallback?{None}
+    f_psk: SSLPskCallback?{None}
+    f_cookie_write: SSLCookieWrite?{None}
+    f_cookie_check: SSLCookieCheck?{None}
+    f_ticket_write: SSLTicketWrite?{None}
+    f_ticket_parse: SSLTicketParse?{None}
+    cid_len: Int{0}
+    cert_profile: x509crt.X509CrtProfile{x509crt.x509_crt_profile_default()}
+    key_cert: [SSLKeyCert]{[]}
+    ca_chain: [x509crt.X509Crt]?{None}
+    ca_crl: [x509crl.X509Crl]{[]}
+    sig_algs: [Int]{[]}
+    group_list: [Int]{[]}
+    dhm_p: bn.Mpi?{None}
+    dhm_g: bn.Mpi?{None}
+    psk: [U8]?{None}
+    psk_identity: [U8]?{None}
+    alpn_list: [String]?{None}
+    read_timeout: Int{0}
+    hs_timeout_min: Int{0}
+    hs_timeout_max: Int{0}
+    renego_max_records: Int{0}
+    renego_period: [U8]{[]}
+    badmac_limit: Int{0}
+    dhm_min_bitlen: Int{0}
+    f_cert_cb: SSLCertCallback?{None}
+    dn_hints: [x509crt.X509Crt]?{None}
+}
+
+// ---------------------------------------------------------------------------
+// Handshake state.
+
+/// The state only a handshake needs (mbedtls_ssl_handshake_params). C's
+/// tls_prf and calc_finished function pointers are the digest
+/// `tls_prf_md` names and its calc_verify pointer the digest
+/// `calc_verify_md` names (None before the ciphersuite sets them), which
+/// the engine dispatches on; its update_checksum pointer is `checksum_md`:
+/// 0 feeds both transcript hashes (ssl_update_checksum_start), 1 SHA-256
+/// and 2 SHA-384 alone. `premaster` holds `pmslen` bytes of premaster.
+SSLHandshake: struct {
+    resume: Int{0}
+    cli_exts: Int{0}
+    sni_authmode: Int{SSL_VERIFY_UNSET}
+    certificate_request_sent: Int{0}
+    new_session_ticket: Int{0}
+    min_tls_version: Int{0}
+    extended_ms: Int{0}
+    retransmit_state: Int{0}
+    ciphersuite_info: suites.SSLCiphersuite?{None}
+    tls_prf_md: hashes.Md?{None}
+    calc_verify_md: hashes.Md?{None}
+    pmslen: Int{0}
+    checksum_md: Int{0}
+    // TLS 1.3.
+    key_exchange_mode: Int{0}
+    hello_retry_request_flag: Int{0}
+    ccs_sent: Int{0}
+    tls13_kex_modes: Int{0}
+    hrr_selected_group: Int{0}
+    new_session_tickets_count: Int{0}
+    received_sig_algs: [Int]{[]}
+    // Key exchange.
+    dhm_ctx: dhm.DHMContext?{None}
+    ecdh_ctx: ecdh.ECDHContext?{None}
+    // The groups the client's supported_groups offered that we know; None
+    // without the extension (C's NULL).
+    curves_tls_id: [Int]?{None}
+    // The peer's TLS 1.3 key share (xxdh_psa_peerkey); our own key share
+    // is in ecdh_ctx or dhm_ctx, by group.
+    xxdh_peerkey: [U8]{[]}
+    psk: [U8]?{None}
+    selected_identity: Int{0}
+    // The own key and certificate picked: an index into the SNI or
+    // certificate callback's list when it set one, else the
+    // configuration's; -1 for the configuration's first.
+    key_cert: Int{-1}
+    // The callback's own keys and certificates; empty for none (C's NULL).
+    sni_key_cert: [SSLKeyCert]{[]}
+    sni_ca_chain: [x509crt.X509Crt]?{None}
+    sni_ca_crl: [x509crl.X509Crl]{[]}
+    // DTLS reassembly and buffering.
+    total_bytes_buffered: Int{0}
+    seen_ccs: Int{0}
+    hs: [SSLHsBuffer]{[]}
+    future_record: [U8]{[]}
+    future_record_epoch: Int{0}
+    cookie: [U8]?{None}
+    cookie_verify_result: Int{0}
+    out_msg_seq: Int{0}
+    in_msg_seq: Int{0}
+    retransmit_timeout: Int{0}
+    flight: [SSLFlightItem]{[]}
+    cur_msg: Int{-1}
+    cur_msg_p: Int{0}
+    in_flight_start_seq: Int{0}
+    alt_transform_out: Int{-1}
+    alt_out_ctr: [U8]{[]}
+    cid_in_use: Int{0}
+    peer_cid: [U8]{[]}
+    mtu: Int{0}
+    // The running handshake transcript hashes, started at handshake
+    // set-up (ssl_handshake_params_init).
+    fin_sha256: hashes.HashCtx?{None}
+    fin_sha384: hashes.HashCtx?{None}
+    offered_group_id: Int{0}
+    client_auth: Int{0}
+    // TLS 1.3 Finished preparation (state_local).
+    finished_preparation_done: Int{0}
+    finished_digest: [U8]{[]}
+    randbytes: [U8]{[]}
+    premaster: [U8]{[]}
+    sent_extensions: Int{0}
+    received_extensions: Int{0}
+    certificate_request_context: [U8]{[]}
+    transform_handshake: Int{-1}
+    // The TLS 1.3 key schedule (tls13_master_secrets, tls13_hs_secrets).
+    tls13_early_secret: [U8]{[]}
+    tls13_handshake_secret: [U8]{[]}
+    tls13_app_secret: [U8]{[]}
+    client_handshake_traffic_secret: [U8]{[]}
+    server_handshake_traffic_secret: [U8]{[]}
+    sni_name: [U8]?{None}
+    dn_hints: [x509crt.X509Crt]?{None}
+}
+
+// ---------------------------------------------------------------------------
+// The context.
+
+/// The bytes the context exchanges with the network in place of C's
+/// f_send and f_recv callbacks. Received bytes (TLS) or datagrams (DTLS)
+/// are queued by the caller; written ones are taken by the caller.
+/// `rx_eof` makes a read with nothing queued report end of file;
+/// `tx_room`, when not -1, is how many more bytes a write may queue
+/// before reporting WantWrite.
+SSLBio: struct {
+    rx: [U8]{[]}
+    rx_off: Int{0}
+    rx_dgrams: [[U8]]{[]}
+    rx_eof: Bool{false}
+    tx: [U8]{[]}
+    tx_dgrams: [[U8]]{[]}
+    tx_room: Int{-1}
+}
+
+/// The retransmission timer (mbedtls_ssl_set_timer_cb with mbedtls's
+/// timing delay): an intermediate and a final delay in milliseconds from
+/// when it was set; `fin_ms` 0 is canceled.
+SSLTimer: struct {
+    enabled: Bool{false}
+    int_ms: Int{0}
+    fin_ms: Int{0}
+    start_ns: Int{0}
+}
+
+/// One SSL/TLS connection (mbedtls_ssl_context).
+SSLContext: struct {
+    conf: SSLConfig{SSLConfig{}}
+    has_conf: Bool{false}
+    state: Int{0}
+    renego_status: Int{0}
+    renego_records_seen: Int{0}
+    tls_version: Int{0}
+    badmac_seen_or_in_hsfraglen: Int{0}
+    f_vrfy: x509crt.X509VerifyCallback?{None}
+    bio: SSLBio{SSLBio{}}
+    spool: [SSLSession]{[]}
+    session_in: Int{-1}
+    session_out: Int{-1}
+    session: Int{-1}
+    session_negotiate: Int{-1}
+    handshake: SSLHandshake{SSLHandshake{}}
+    has_handshake: Bool{false}
+    tpool: [SSLTransform]{[]}
+    transform_in: Int{-1}
+    transform_out: Int{-1}
+    transform: Int{-1}
+    transform_negotiate: Int{-1}
+    transform_application: Int{-1}
+    timer: SSLTimer{SSLTimer{}}
+    // The input buffer and the offsets C's in_* pointers have in it.
+    in_buf: [U8]{[]}
+    in_ctr: Int{0}
+    in_hdr: Int{0}
+    in_cid: Int{0}
+    in_len: Int{0}
+    in_iv: Int{0}
+    in_msg: Int{0}
+    in_offt: Int{-1}
+    in_msgtype: Int{0}
+    in_msglen: Int{0}
+    in_left: Int{0}
+    in_epoch: Int{0}
+    next_record_offset: Int{0}
+    in_window_top: U64{U64{0}}
+    in_window: U64{U64{0}}
+    in_hslen: Int{0}
+    nb_zero: Int{0}
+    keep_current_message: Int{0}
+    send_alert: Int{0}
+    alert_type: Int{0}
+    alert_reason: SSLError?{None}
+    disable_datagram_packing: Int{0}
+    // The output buffer and the offsets C's out_* pointers have in it.
+    out_buf: [U8]{[]}
+    out_ctr: Int{0}
+    out_hdr: Int{0}
+    out_cid: Int{0}
+    out_len: Int{0}
+    out_iv: Int{0}
+    out_msg: Int{0}
+    out_msgtype: Int{0}
+    out_msglen: Int{0}
+    out_left: Int{0}
+    cur_out_ctr: [U8]{[]}
+    mtu: Int{0}
+    hostname: String?{None}
+    hostname_skip_cn: Bool{false}
+    alpn_chosen: String?{None}
+    cli_id: [U8]?{None}
+    secure_renegotiation: Int{0}
+    verify_data_len: Int{0}
+    own_verify_data: [U8]{[]}
+    peer_verify_data: [U8]{[]}
+    own_cid: [U8]{[]}
+    negotiate_cid: Int{0}
+    f_export_keys: SSLExportKeys?{None}
+}
+
+// ---------------------------------------------------------------------------
+// Byte helpers.
+
+ssl_zeros: fn(n: Int) -> [U8] Never! {
+    out := [U8]{}
+    loop _ in 0..<n -> out.push(U8{0})
+    out
+}
+
+ssl_bytes_of: fn(src: [U8], off: Int, len: Int) -> [U8] Never! {
+    out := [U8]{}
+    loop i in 0..<len -> out.push(src[off + i])
+    out
+}
+
+ssl_copy_into: fn(dst: &[U8], doff: Int, src: [U8], soff: Int, len: Int) Never! {
+    loop i in 0..<len -> dst[doff + i] = src[soff + i]
+}
+
+ssl_move_within: fn(buf: &[U8], doff: Int, soff: Int, len: Int) Never! {
+    if len <= 0 || doff == soff -> return
+    if doff < soff {
+        loop i in 0..<len -> buf[doff + i] = buf[soff + i]
+        return
+    }
+    i := len - 1
+    loop i >= 0 {
+        buf[doff + i] = buf[soff + i]
+        i -= 1
+    }
+}
+
+ssl_fill: fn(buf: &[U8], off: Int, len: Int, value: U8) Never! {
+    loop i in 0..<len -> buf[off + i] = value
+}
+
+ssl_push_all: fn(out: &[U8], bytes: [U8]) Never! {
+    loop b in bytes -> out.push(b)
+}
+
+ssl_u8: fn(buf: [U8], off: Int) -> Int Never! { Int.from_u8(buf[off]) }
+
+ssl_get_u16: fn(buf: [U8], off: Int) -> Int Never! {
+    (Int.from_u8(buf[off]) << 8).bit_or(Int.from_u8(buf[off + 1]))
+}
+
+ssl_get_u24: fn(buf: [U8], off: Int) -> Int Never! {
+    (Int.from_u8(buf[off]) << 16).bit_or(Int.from_u8(buf[off + 1]) << 8).bit_or(Int.from_u8(buf[off + 2]))
+}
+
+ssl_get_u32: fn(buf: [U8], off: Int) -> Int Never! {
+    (ssl_get_u16(buf, off) << 16).bit_or(ssl_get_u16(buf, off + 2))
+}
+
+ssl_byte: fn(v: Int) -> U8 Never! { U8{v.bit_and(0xFF)} }
+
+ssl_put_u16: fn(buf: &[U8], off: Int, v: Int) Never! {
+    buf[off] = ssl_byte(v >> 8)
+    buf[off + 1] = ssl_byte(v)
+}
+
+ssl_put_u24: fn(buf: &[U8], off: Int, v: Int) Never! {
+    buf[off] = ssl_byte(v >> 16)
+    buf[off + 1] = ssl_byte(v >> 8)
+    buf[off + 2] = ssl_byte(v)
+}
+
+ssl_put_u32: fn(buf: &[U8], off: Int, v: Int) Never! {
+    buf[off] = ssl_byte(v >> 24)
+    buf[off + 1] = ssl_byte(v >> 16)
+    buf[off + 2] = ssl_byte(v >> 8)
+    buf[off + 3] = ssl_byte(v)
+}
+
+ssl_push_u16: fn(out: &[U8], v: Int) Never! {
+    out.push(ssl_byte(v >> 8))
+    out.push(ssl_byte(v))
+}
+
+ssl_push_u24: fn(out: &[U8], v: Int) Never! {
+    out.push(ssl_byte(v >> 16))
+    out.push(ssl_byte(v >> 8))
+    out.push(ssl_byte(v))
+}
+
+ssl_push_u32: fn(out: &[U8], v: Int) Never! {
+    out.push(ssl_byte(v >> 24))
+    out.push(ssl_byte(v >> 16))
+    out.push(ssl_byte(v >> 8))
+    out.push(ssl_byte(v))
+}
+
+ssl_push_u64: fn(out: &[U8], v: Int) Never! {
+    ssl_push_u32(out, v >> 32)
+    ssl_push_u32(out, v)
+}
+
+ssl_get_u64: fn(buf: [U8], off: Int) -> Int Never! {
+    (ssl_get_u32(buf, off) << 32).bit_or(ssl_get_u32(buf, off + 4))
+}
+
+ssl_range_eq: fn(a: [U8], aoff: Int, b: [U8], boff: Int, len: Int) -> Bool Never! {
+    loop i in 0..<len {
+        if a[aoff + i] != b[boff + i] -> return false
+    }
+    true
+}
+
+ssl_wipe: fn(buf: &[U8]) Never! {
+    loop i in 0..<buf.len() -> buf[i] = U8{0}
+}
+
+// ---------------------------------------------------------------------------
+// Clocks.
+
+/// Seconds since the epoch (mbedtls_time).
+ssl_time: fn() -[Time]> Int Never! { core.time.now_utc().to_timestamp() }
+
+/// Milliseconds of the monotonic clock (mbedtls_ms_time, which reads
+/// CLOCK_BOOTTIME or CLOCK_MONOTONIC).
+ssl_ms_time: fn() -[Time]> Int Never! { core.time.instant().start_ns /% 1000000 }
+
+// ---------------------------------------------------------------------------
+// Pools: C's session and transform pointers.
+
+/// A fresh transform slot (mbedtls_calloc + mbedtls_ssl_transform_init).
+ssl_transform_alloc: fn(ssl: &SSLContext) -> Int Never! {
+    loop i in 0..<ssl.tpool.len() {
+        if !ssl.tpool[i].valid {
+            ssl.tpool[i] = SSLTransform{valid: true}
+            return i
+        }
+    }
+    ssl.tpool.push(SSLTransform{valid: true})
+    ssl.tpool.len() - 1
+}
+
+/// mbedtls_ssl_transform_free + mbedtls_free: wipes the keys and frees the
+/// slot. -1 is NULL and does nothing.
+ssl_transform_release: fn(ssl: &SSLContext, t: Int) Never! {
+    if t < 0 -> return
+    ssl_transform_wipe(ssl.tpool[t])
+    ssl.tpool[t] = SSLTransform{}
+}
+
+/// mbedtls_ssl_transform_free on a transform: its secrets are wiped.
+ssl_transform_wipe: fn(t: &SSLTransform) Never! {
+    ssl_wipe(t.iv_enc)
+    ssl_wipe(t.iv_dec)
+    t.md_enc = None
+    t.md_dec = None
+    t.cipher_enc = None
+    t.cipher_dec = None
+}
+
+ssl_session_alloc: fn(ssl: &SSLContext) -> Int Never! {
+    loop i in 0..<ssl.spool.len() {
+        if !ssl.spool[i].valid {
+            ssl.spool[i] = SSLSession{valid: true}
+            return i
+        }
+    }
+    ssl.spool.push(SSLSession{valid: true})
+    ssl.spool.len() - 1
+}
+
+/// mbedtls_ssl_session_free + mbedtls_free on a pool slot.
+ssl_session_release: fn(ssl: &SSLContext, s: Int) Never! {
+    if s < 0 -> return
+    ssl_session_wipe(ssl.spool[s])
+    ssl.spool[s] = SSLSession{}
+}
+
+/// mbedtls_ssl_session_free: the session's secrets are wiped and it is
+/// reset.
+ssl_session_wipe: fn(s: &SSLSession) Never! {
+    ssl_wipe(s.master)
+    ssl_wipe(s.resumption_key)
+    ssl_wipe(s.app_secrets.client_application_traffic_secret_n)
+    ssl_wipe(s.app_secrets.server_application_traffic_secret_n)
+    ssl_wipe(s.app_secrets.exporter_master_secret)
+    ssl_wipe(s.app_secrets.resumption_master_secret)
+    valid: s.valid
+    s = SSLSession{valid: valid}
+}

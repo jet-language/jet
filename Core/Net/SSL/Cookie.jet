@@ -1,0 +1,132 @@
+// Private Core source part: the DTLS HelloVerifyRequest cookies.
+//
+// A port of mbedtls 3.6.7's ssl_cookie.c under the default
+// mbedtls_config.h (no USE_PSA_CRYPTO, HAVE_TIME on, SHA-256 present): a
+// cookie is the 4-byte time it was made, big-endian seconds since the epoch,
+// and the first 28 bytes of HMAC-SHA-256 over that time and the client's
+// transport ID, under a key drawn at setup. A cookie checks when its HMAC
+// matches, compared in constant time, and it is no older than the timeout.
+//
+// C's callbacks write into the caller's buffer up to `end`; here the writer
+// returns the cookie and the record layer checks it fits. The context is
+// shared by every connection of a configuration: ssl_cookie_write_cb and
+// ssl_cookie_check_cb give the configuration callbacks over a Shared
+// handle, which hold its lock for the call as C's THREADING_C mutex does.
+use {
+    core
+    __core_crypto_bignum.[RNG]
+    hashes: __core_crypto_md
+    ctime: __core_crypto_ctime
+    ssldefs: __core_net_ssl_defs
+}
+
+/// MBEDTLS_SSL_COOKIE_TIMEOUT: a minute, in seconds.
+SSL_COOKIE_TIMEOUT: 60
+// COOKIE_MD_OUTLEN: the SHA-256 key and digest length.
+SSL_COOKIE_MD_OUTLEN: 32
+// COOKIE_HMAC_LEN: the HMAC bytes a cookie keeps.
+SSL_COOKIE_HMAC_LEN: 28
+// COOKIE_LEN: the time and the HMAC.
+SSL_COOKIE_LEN: 32
+
+/// The cookie key (mbedtls_ssl_cookie_ctx): the HMAC-SHA-256 key, None
+/// before setup, and the seconds a cookie lives (0 for no limit).
+SSLCookieContext: struct {
+    hmac_key: hashes.HMACKey?
+    timeout: Int
+}
+
+/// A context with no key and the default timeout (mbedtls_ssl_cookie_init).
+ssl_cookie_init: fn() -> SSLCookieContext Never! {
+    SSLCookieContext{hmac_key: None, timeout: SSL_COOKIE_TIMEOUT}
+}
+
+/// Set the seconds a cookie lives (mbedtls_ssl_cookie_set_timeout).
+ssl_cookie_set_timeout: fn(ctx: &SSLCookieContext, delay: Int) Never! {
+    ctx.timeout = delay
+}
+
+/// Draw the HMAC key from `rng` (mbedtls_ssl_cookie_setup).
+ssl_cookie_setup: fn<R: RNG>(ctx: &SSLCookieContext, rng: &R) ssldefs.SSLError! {
+    key := ssldefs.ssl_zeros(SSL_COOKIE_MD_OUTLEN)
+    if !rng.fill(key) -> return Err(.RandomFailed)
+    ctx.hmac_key = Val(hashes.hmac_key(.SHA256, key))
+    ssldefs.ssl_wipe(key)
+}
+
+/// Drop the key (mbedtls_ssl_cookie_free).
+ssl_cookie_free: fn(ctx: &SSLCookieContext) Never! {
+    ctx.hmac_key = None
+    ctx.timeout = 0
+}
+
+// The 28 HMAC bytes of a cookie made at time[off..<off + 4] for `cli_id`
+// (ssl_cookie_hmac); InternalError before setup, as C's HMAC over an unset
+// context fails.
+ssl_cookie_hmac: fn(ctx: SSLCookieContext, time: [U8], off: Int, cli_id: [U8]) -> [U8] ssldefs.SSLError! {
+    if ctx.hmac_key == {
+        .Val(key) -> {
+            inner := hashes.hash_clone(key.inner)
+            hashes.hash_update_range(inner, time, off, 4)
+            hashes.hash_update(inner, cli_id)
+            hmac_out := hashes.hmac_finish(key, inner)
+            out: ssldefs.ssl_bytes_of(hmac_out, 0, SSL_COOKIE_HMAC_LEN)
+            ssldefs.ssl_wipe(hmac_out)
+            Ok(out)
+        }
+        None -> Err(.InternalError)
+    }
+}
+
+/// A cookie for the client with transport ID `cli_id`
+/// (mbedtls_ssl_cookie_write).
+ssl_cookie_write: fn(ctx: SSLCookieContext, cli_id: [U8]) -[Time]> [U8] ssldefs.SSLError! {
+    cookie := ssldefs.ssl_zeros(4)
+    // C keeps the low 32 bits of the time.
+    ssldefs.ssl_put_u32(cookie, 0, ssldefs.ssl_time())
+    hmac: ssl_cookie_hmac(ctx, cookie, 0, cli_id) ?? return Err(err)
+    ssldefs.ssl_push_all(cookie, hmac)
+    Ok(cookie)
+}
+
+/// Whether `cookie` is one this context made for `cli_id` within the
+/// timeout (mbedtls_ssl_cookie_check, true where C returns 0 and false
+/// where it returns -1).
+ssl_cookie_check: fn(ctx: SSLCookieContext, cookie: [U8], cli_id: [U8]) -[Time]> Bool ssldefs.SSLError! {
+    if cookie.len() != SSL_COOKIE_LEN -> return Ok(false)
+    ref_hmac := if ssl_cookie_hmac(ctx, cookie, 0, cli_id) == {
+        .Ok(h) -> h
+        .Err(_) -> return Ok(false)
+    }
+    differs: ctime.memcmp(cookie, 4, ref_hmac, 0, SSL_COOKIE_HMAC_LEN) != 0
+    ssldefs.ssl_wipe(ref_hmac)
+    if differs -> return Ok(false)
+    cur_time: ssldefs.ssl_time()
+    cookie_time: ssldefs.ssl_get_u32(cookie, 0)
+    // C subtracts unsigned: a cookie from the future is past any timeout.
+    age: cur_time - cookie_time
+    if ctx.timeout != 0 && (age < 0 || age > ctx.timeout) -> return Ok(false)
+    Ok(true)
+}
+
+ssl_cookie_write_locked: fn(ctx: Shared<SSLCookieContext>, cli_id: [U8]) -[Time]> [U8] ssldefs.SSLError! {
+    guard := ctx.guard_edit()
+    ssl_cookie_write(guard.value, cli_id)
+}
+
+ssl_cookie_check_locked: fn(ctx: Shared<SSLCookieContext>, cookie: [U8], cli_id: [U8]) -[Time]> Bool ssldefs.SSLError! {
+    guard := ctx.guard_edit()
+    ssl_cookie_check(guard.value, cookie, cli_id)
+}
+
+/// The configuration's cookie writer over a shared context: C's
+/// mbedtls_ssl_cookie_write with the context as p_cookie.
+ssl_cookie_write_cb: fn(ctx: Shared<SSLCookieContext>) -> ssldefs.SSLCookieWrite Never! {
+    ssldefs.SSLCookieWrite{call: (cli_id: [U8]) -> ssl_cookie_write_locked(ctx, cli_id)}
+}
+
+/// The configuration's cookie check over a shared context: C's
+/// mbedtls_ssl_cookie_check with the context as p_cookie.
+ssl_cookie_check_cb: fn(ctx: Shared<SSLCookieContext>) -> ssldefs.SSLCookieCheck Never! {
+    ssldefs.SSLCookieCheck{call: (cookie: [U8], cli_id: [U8]) -> ssl_cookie_check_locked(ctx, cookie, cli_id)}
+}

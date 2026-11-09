@@ -1,0 +1,534 @@
+// Private Core source part: object identifiers.
+//
+// A port of mbedtls 3.6.7's oid.c and the OID values of oid.h. An OID is the
+// DER content of an OBJECT IDENTIFIER, without tag and length. The lookups
+// take the parsed buffer and the item's ASN1Buf, as the parsers hold them, and
+// answer with the algorithm or attribute the OID names; the reverse lookups
+// give the OID for an algorithm. The PBES2 and PKCS#12 cipher tables live with
+// the cipher layer they name, in the pkcs5 and pkcs12 parts.
+use {
+    core
+    asn1: __core_crypto_asn1
+    hashes: __core_crypto_md
+    ecp: __core_crypto_ecp
+}
+
+/// Why an OID lookup failed (MBEDTLS_ERR_OID_*).
+#Error
+OIDError: enum {
+    /// No table row has this OID or this algorithm (NOT_FOUND).
+    NotFound
+}
+
+/// The public-key algorithm an OID names (mbedtls_pk_type_t, without NONE).
+PKType: enum {
+    RSA
+    ECKey
+    ECKeyDH
+    ECDSA
+    RSAAlt
+    RSASSAPSS
+    Opaque
+}
+
+/// One bit per X.509 v3 extension (MBEDTLS_OID_X509_EXT_*), the set a
+/// certificate records in its extension mask.
+X509_EXT_AUTHORITY_KEY_IDENTIFIER: 0x1
+X509_EXT_SUBJECT_KEY_IDENTIFIER: 0x2
+X509_EXT_KEY_USAGE: 0x4
+X509_EXT_CERTIFICATE_POLICIES: 0x8
+X509_EXT_POLICY_MAPPINGS: 0x10
+X509_EXT_SUBJECT_ALT_NAME: 0x20
+X509_EXT_ISSUER_ALT_NAME: 0x40
+X509_EXT_SUBJECT_DIRECTORY_ATTRS: 0x80
+X509_EXT_BASIC_CONSTRAINTS: 0x100
+X509_EXT_NAME_CONSTRAINTS: 0x200
+X509_EXT_POLICY_CONSTRAINTS: 0x400
+X509_EXT_EXTENDED_KEY_USAGE: 0x800
+X509_EXT_CRL_DISTRIBUTION_POINTS: 0x1000
+X509_EXT_INIHIBIT_ANYPOLICY: 0x2000
+X509_EXT_FRESHEST_CRL: 0x4000
+X509_EXT_NS_CERT_TYPE: 0x10000
+
+/// The largest number of components an OID string may have
+/// (MBEDTLS_OID_MAX_COMPONENTS).
+OID_MAX_COMPONENTS: 128
+
+/// The OIDs of oid.h that the library uses, expanded to their DER content.
+OID_AT_CN: [U8]{0x55, 0x04, 0x03}
+OID_AT_SUR_NAME: [U8]{0x55, 0x04, 0x04}
+OID_AT_SERIAL_NUMBER: [U8]{0x55, 0x04, 0x05}
+OID_AT_COUNTRY: [U8]{0x55, 0x04, 0x06}
+OID_AT_LOCALITY: [U8]{0x55, 0x04, 0x07}
+OID_AT_STATE: [U8]{0x55, 0x04, 0x08}
+OID_AT_ORGANIZATION: [U8]{0x55, 0x04, 0x0a}
+OID_AT_ORG_UNIT: [U8]{0x55, 0x04, 0x0b}
+OID_AT_TITLE: [U8]{0x55, 0x04, 0x0c}
+OID_AT_POSTAL_ADDRESS: [U8]{0x55, 0x04, 0x10}
+OID_AT_POSTAL_CODE: [U8]{0x55, 0x04, 0x11}
+OID_AT_GIVEN_NAME: [U8]{0x55, 0x04, 0x2a}
+OID_AT_INITIALS: [U8]{0x55, 0x04, 0x2b}
+OID_AT_GENERATION_QUALIFIER: [U8]{0x55, 0x04, 0x2c}
+OID_AT_UNIQUE_IDENTIFIER: [U8]{0x55, 0x04, 0x2d}
+OID_AT_DN_QUALIFIER: [U8]{0x55, 0x04, 0x2e}
+OID_AT_PSEUDONYM: [U8]{0x55, 0x04, 0x41}
+OID_UID: [U8]{0x09, 0x92, 0x26, 0x89, 0x93, 0xf2, 0x2c, 0x64, 0x01, 0x01}
+OID_DOMAIN_COMPONENT: [U8]{0x09, 0x92, 0x26, 0x89, 0x93, 0xf2, 0x2c, 0x64, 0x01, 0x19}
+OID_AUTHORITY_KEY_IDENTIFIER: [U8]{0x55, 0x1d, 0x23}
+OID_SUBJECT_KEY_IDENTIFIER: [U8]{0x55, 0x1d, 0x0e}
+OID_KEY_USAGE: [U8]{0x55, 0x1d, 0x0f}
+OID_CERTIFICATE_POLICIES: [U8]{0x55, 0x1d, 0x20}
+OID_SUBJECT_ALT_NAME: [U8]{0x55, 0x1d, 0x11}
+OID_BASIC_CONSTRAINTS: [U8]{0x55, 0x1d, 0x13}
+OID_EXTENDED_KEY_USAGE: [U8]{0x55, 0x1d, 0x25}
+OID_ANY_POLICY: [U8]{0x55, 0x1d, 0x20, 0x00}
+OID_NS_CERT_TYPE: [U8]{0x60, 0x86, 0x48, 0x01, 0x86, 0xf8, 0x42, 0x01, 0x01}
+OID_ANY_EXTENDED_KEY_USAGE: [U8]{0x55, 0x1d, 0x25, 0x00}
+OID_SERVER_AUTH: [U8]{0x2b, 0x06, 0x01, 0x05, 0x05, 0x07, 0x03, 0x01}
+OID_CLIENT_AUTH: [U8]{0x2b, 0x06, 0x01, 0x05, 0x05, 0x07, 0x03, 0x02}
+OID_CODE_SIGNING: [U8]{0x2b, 0x06, 0x01, 0x05, 0x05, 0x07, 0x03, 0x03}
+OID_EMAIL_PROTECTION: [U8]{0x2b, 0x06, 0x01, 0x05, 0x05, 0x07, 0x03, 0x04}
+OID_TIME_STAMPING: [U8]{0x2b, 0x06, 0x01, 0x05, 0x05, 0x07, 0x03, 0x08}
+OID_OCSP_SIGNING: [U8]{0x2b, 0x06, 0x01, 0x05, 0x05, 0x07, 0x03, 0x09}
+OID_WISUN_FAN: [U8]{0x2b, 0x06, 0x01, 0x04, 0x01, 0x82, 0xe4, 0x25, 0x01}
+OID_ON_HW_MODULE_NAME: [U8]{0x2b, 0x06, 0x01, 0x05, 0x05, 0x07, 0x08, 0x04}
+OID_PKCS1_RSA: [U8]{0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01}
+OID_PKCS1_MD5: [U8]{0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x04}
+OID_PKCS1_SHA1: [U8]{0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x05}
+OID_PKCS1_SHA224: [U8]{0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x0e}
+OID_PKCS1_SHA256: [U8]{0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x0b}
+OID_PKCS1_SHA384: [U8]{0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x0c}
+OID_PKCS1_SHA512: [U8]{0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x0d}
+OID_RSA_SHA_OBS: [U8]{0x2b, 0x0e, 0x03, 0x02, 0x1d}
+OID_PKCS9_EMAIL: [U8]{0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x09, 0x01}
+OID_RSASSA_PSS: [U8]{0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x0a}
+OID_MGF1: [U8]{0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x08}
+OID_DIGEST_ALG_MD5: [U8]{0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x02, 0x05}
+OID_DIGEST_ALG_SHA1: [U8]{0x2b, 0x0e, 0x03, 0x02, 0x1a}
+OID_DIGEST_ALG_SHA224: [U8]{0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x04}
+OID_DIGEST_ALG_SHA256: [U8]{0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01}
+OID_DIGEST_ALG_SHA384: [U8]{0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x02}
+OID_DIGEST_ALG_SHA512: [U8]{0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x03}
+OID_DIGEST_ALG_RIPEMD160: [U8]{0x2b, 0x24, 0x03, 0x02, 0x01}
+OID_DIGEST_ALG_SHA3_224: [U8]{0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x07}
+OID_DIGEST_ALG_SHA3_256: [U8]{0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x08}
+OID_DIGEST_ALG_SHA3_384: [U8]{0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x09}
+OID_DIGEST_ALG_SHA3_512: [U8]{0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x0a}
+OID_HMAC_SHA1: [U8]{0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x02, 0x07}
+OID_HMAC_SHA224: [U8]{0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x02, 0x08}
+OID_HMAC_SHA256: [U8]{0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x02, 0x09}
+OID_HMAC_SHA384: [U8]{0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x02, 0x0a}
+OID_HMAC_SHA512: [U8]{0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x02, 0x0b}
+OID_HMAC_SHA3_224: [U8]{0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x0d}
+OID_HMAC_SHA3_256: [U8]{0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x0e}
+OID_HMAC_SHA3_384: [U8]{0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x0f}
+OID_HMAC_SHA3_512: [U8]{0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x10}
+OID_HMAC_RIPEMD160: [U8]{0x2b, 0x06, 0x01, 0x05, 0x05, 0x08, 0x01, 0x04}
+OID_DES_CBC: [U8]{0x2b, 0x0e, 0x03, 0x02, 0x07}
+OID_DES_EDE3_CBC: [U8]{0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x03, 0x07}
+OID_AES_128_CBC: [U8]{0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x01, 0x02}
+OID_AES_192_CBC: [U8]{0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x01, 0x16}
+OID_AES_256_CBC: [U8]{0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x01, 0x2a}
+OID_PKCS5_PBKDF2: [U8]{0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x05, 0x0c}
+OID_PKCS5_PBES2: [U8]{0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x05, 0x0d}
+OID_PKCS7_DATA: [U8]{0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x07, 0x01}
+OID_PKCS7_SIGNED_DATA: [U8]{0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x07, 0x02}
+OID_PKCS7_ENVELOPED_DATA: [U8]{0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x07, 0x03}
+OID_PKCS7_SIGNED_AND_ENVELOPED_DATA: [U8]{0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x07, 0x04}
+OID_PKCS7_DIGESTED_DATA: [U8]{0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x07, 0x05}
+OID_PKCS7_ENCRYPTED_DATA: [U8]{0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x07, 0x06}
+OID_PKCS9_CSR_EXT_REQ: [U8]{0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x09, 0x0e}
+OID_PKCS12_PBE_SHA1_DES3_EDE_CBC: [U8]{0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x0c, 0x01, 0x03}
+OID_PKCS12_PBE_SHA1_DES2_EDE_CBC: [U8]{0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x0c, 0x01, 0x04}
+OID_EC_ALG_UNRESTRICTED: [U8]{0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01}
+OID_EC_ALG_ECDH: [U8]{0x2b, 0x81, 0x04, 0x01, 0x0c}
+OID_EC_GRP_SECP192R1: [U8]{0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x01}
+OID_EC_GRP_SECP224R1: [U8]{0x2b, 0x81, 0x04, 0x00, 0x21}
+OID_EC_GRP_SECP256R1: [U8]{0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07}
+OID_EC_GRP_SECP384R1: [U8]{0x2b, 0x81, 0x04, 0x00, 0x22}
+OID_EC_GRP_SECP521R1: [U8]{0x2b, 0x81, 0x04, 0x00, 0x23}
+OID_EC_GRP_SECP192K1: [U8]{0x2b, 0x81, 0x04, 0x00, 0x1f}
+OID_EC_GRP_SECP224K1: [U8]{0x2b, 0x81, 0x04, 0x00, 0x20}
+OID_EC_GRP_SECP256K1: [U8]{0x2b, 0x81, 0x04, 0x00, 0x0a}
+OID_EC_GRP_BP256R1: [U8]{0x2b, 0x24, 0x03, 0x03, 0x02, 0x08, 0x01, 0x01, 0x07}
+OID_EC_GRP_BP384R1: [U8]{0x2b, 0x24, 0x03, 0x03, 0x02, 0x08, 0x01, 0x01, 0x0b}
+OID_EC_GRP_BP512R1: [U8]{0x2b, 0x24, 0x03, 0x03, 0x02, 0x08, 0x01, 0x01, 0x0d}
+OID_ANSI_X9_62_PRIME_FIELD: [U8]{0x2a, 0x86, 0x48, 0xce, 0x3d, 0x01, 0x01}
+OID_ECDSA_SHA1: [U8]{0x2a, 0x86, 0x48, 0xce, 0x3d, 0x04, 0x01}
+OID_ECDSA_SHA224: [U8]{0x2a, 0x86, 0x48, 0xce, 0x3d, 0x04, 0x03, 0x01}
+OID_ECDSA_SHA256: [U8]{0x2a, 0x86, 0x48, 0xce, 0x3d, 0x04, 0x03, 0x02}
+OID_ECDSA_SHA384: [U8]{0x2a, 0x86, 0x48, 0xce, 0x3d, 0x04, 0x03, 0x03}
+OID_ECDSA_SHA512: [U8]{0x2a, 0x86, 0x48, 0xce, 0x3d, 0x04, 0x03, 0x04}
+OID_X25519: [U8]{0x2b, 0x65, 0x6e}
+OID_X448: [U8]{0x2b, 0x65, 0x6f}
+
+// ---------------------------------------------------------------------------
+// Lookups by OID. Each walks its table in mbedtls's row order.
+
+/// Whether the content of `buf` in `data` is `oid`.
+is: fn(oid: [U8], data: [U8], buf: asn1.ASN1Buf) -> Bool Never! { asn1.oid_is(oid, data, buf) }
+
+/// The short name of an X.520 attribute type, "CN" for commonName
+/// (mbedtls_oid_get_attr_short_name).
+attr_short_name: fn(data: [U8], buf: asn1.ASN1Buf) -> String OIDError! {
+    if is(OID_AT_CN, data, buf) -> return Ok("CN")
+    if is(OID_AT_COUNTRY, data, buf) -> return Ok("C")
+    if is(OID_AT_LOCALITY, data, buf) -> return Ok("L")
+    if is(OID_AT_STATE, data, buf) -> return Ok("ST")
+    if is(OID_AT_ORGANIZATION, data, buf) -> return Ok("O")
+    if is(OID_AT_ORG_UNIT, data, buf) -> return Ok("OU")
+    if is(OID_PKCS9_EMAIL, data, buf) -> return Ok("emailAddress")
+    if is(OID_AT_SERIAL_NUMBER, data, buf) -> return Ok("serialNumber")
+    if is(OID_AT_POSTAL_ADDRESS, data, buf) -> return Ok("postalAddress")
+    if is(OID_AT_POSTAL_CODE, data, buf) -> return Ok("postalCode")
+    if is(OID_AT_SUR_NAME, data, buf) -> return Ok("SN")
+    if is(OID_AT_GIVEN_NAME, data, buf) -> return Ok("GN")
+    if is(OID_AT_INITIALS, data, buf) -> return Ok("initials")
+    if is(OID_AT_GENERATION_QUALIFIER, data, buf) -> return Ok("generationQualifier")
+    if is(OID_AT_TITLE, data, buf) -> return Ok("title")
+    if is(OID_AT_DN_QUALIFIER, data, buf) -> return Ok("dnQualifier")
+    if is(OID_AT_PSEUDONYM, data, buf) -> return Ok("pseudonym")
+    if is(OID_UID, data, buf) -> return Ok("uid")
+    if is(OID_DOMAIN_COMPONENT, data, buf) -> return Ok("DC")
+    if is(OID_AT_UNIQUE_IDENTIFIER, data, buf) -> return Ok("uniqueIdentifier")
+    Err(.NotFound)
+}
+
+/// The X509_EXT_* bit of a supported extension (mbedtls_oid_get_x509_ext_type).
+x509_ext_type: fn(data: [U8], buf: asn1.ASN1Buf) -> Int OIDError! {
+    if is(OID_BASIC_CONSTRAINTS, data, buf) -> return Ok(X509_EXT_BASIC_CONSTRAINTS)
+    if is(OID_KEY_USAGE, data, buf) -> return Ok(X509_EXT_KEY_USAGE)
+    if is(OID_EXTENDED_KEY_USAGE, data, buf) -> return Ok(X509_EXT_EXTENDED_KEY_USAGE)
+    if is(OID_SUBJECT_ALT_NAME, data, buf) -> return Ok(X509_EXT_SUBJECT_ALT_NAME)
+    if is(OID_NS_CERT_TYPE, data, buf) -> return Ok(X509_EXT_NS_CERT_TYPE)
+    if is(OID_CERTIFICATE_POLICIES, data, buf) -> return Ok(X509_EXT_CERTIFICATE_POLICIES)
+    if is(OID_SUBJECT_KEY_IDENTIFIER, data, buf) -> return Ok(X509_EXT_SUBJECT_KEY_IDENTIFIER)
+    if is(OID_AUTHORITY_KEY_IDENTIFIER, data, buf) -> return Ok(X509_EXT_AUTHORITY_KEY_IDENTIFIER)
+    Err(.NotFound)
+}
+
+/// The description of an extended key usage purpose
+/// (mbedtls_oid_get_extended_key_usage).
+extended_key_usage: fn(data: [U8], buf: asn1.ASN1Buf) -> String OIDError! {
+    if is(OID_SERVER_AUTH, data, buf) -> return Ok("TLS Web Server Authentication")
+    if is(OID_CLIENT_AUTH, data, buf) -> return Ok("TLS Web Client Authentication")
+    if is(OID_CODE_SIGNING, data, buf) -> return Ok("Code Signing")
+    if is(OID_EMAIL_PROTECTION, data, buf) -> return Ok("E-mail Protection")
+    if is(OID_TIME_STAMPING, data, buf) -> return Ok("Time Stamping")
+    if is(OID_OCSP_SIGNING, data, buf) -> return Ok("OCSP Signing")
+    if is(OID_WISUN_FAN, data, buf) -> return Ok("Wi-SUN Alliance Field Area Network (FAN)")
+    Err(.NotFound)
+}
+
+/// The description of a certificate policy (mbedtls_oid_get_certificate_policies).
+certificate_policies: fn(data: [U8], buf: asn1.ASN1Buf) -> String OIDError! {
+    if is(OID_ANY_POLICY, data, buf) -> return Ok("Any Policy")
+    Err(.NotFound)
+}
+
+/// A signature algorithm: its digest (None for RSASSA-PSS, whose digest is
+/// in the parameters), its key type and its description.
+SigAlg: struct {
+    md: hashes.Md?
+    pk: PKType
+    description: String
+}
+
+/// The signature algorithm an OID names (mbedtls_oid_get_sig_alg and
+/// mbedtls_oid_get_sig_alg_desc).
+sig_alg: fn(data: [U8], buf: asn1.ASN1Buf) -> SigAlg OIDError! {
+    if is(OID_PKCS1_MD5, data, buf) -> return Ok(SigAlg{md: Val(.MD5), pk: .RSA, description: "RSA with MD5"})
+    if is(OID_PKCS1_SHA1, data, buf) -> return Ok(SigAlg{md: Val(.SHA1), pk: .RSA, description: "RSA with SHA1"})
+    if is(OID_PKCS1_SHA224, data, buf) -> return Ok(SigAlg{md: Val(.SHA224), pk: .RSA, description: "RSA with SHA-224"})
+    if is(OID_PKCS1_SHA256, data, buf) -> return Ok(SigAlg{md: Val(.SHA256), pk: .RSA, description: "RSA with SHA-256"})
+    if is(OID_PKCS1_SHA384, data, buf) -> return Ok(SigAlg{md: Val(.SHA384), pk: .RSA, description: "RSA with SHA-384"})
+    if is(OID_PKCS1_SHA512, data, buf) -> return Ok(SigAlg{md: Val(.SHA512), pk: .RSA, description: "RSA with SHA-512"})
+    if is(OID_RSA_SHA_OBS, data, buf) -> return Ok(SigAlg{md: Val(.SHA1), pk: .RSA, description: "RSA with SHA1"})
+    if is(OID_ECDSA_SHA1, data, buf) -> return Ok(SigAlg{md: Val(.SHA1), pk: .ECDSA, description: "ECDSA with SHA1"})
+    if is(OID_ECDSA_SHA224, data, buf) -> return Ok(SigAlg{md: Val(.SHA224), pk: .ECDSA, description: "ECDSA with SHA224"})
+    if is(OID_ECDSA_SHA256, data, buf) -> return Ok(SigAlg{md: Val(.SHA256), pk: .ECDSA, description: "ECDSA with SHA256"})
+    if is(OID_ECDSA_SHA384, data, buf) -> return Ok(SigAlg{md: Val(.SHA384), pk: .ECDSA, description: "ECDSA with SHA384"})
+    if is(OID_ECDSA_SHA512, data, buf) -> return Ok(SigAlg{md: Val(.SHA512), pk: .ECDSA, description: "ECDSA with SHA512"})
+    if is(OID_RSASSA_PSS, data, buf) -> return Ok(SigAlg{md: None, pk: .RSASSAPSS, description: "RSASSA-PSS"})
+    Err(.NotFound)
+}
+
+/// The public-key algorithm of a SubjectPublicKeyInfo (mbedtls_oid_get_pk_alg).
+pk_alg: fn(data: [U8], buf: asn1.ASN1Buf) -> PKType OIDError! {
+    if is(OID_PKCS1_RSA, data, buf) -> return Ok(.RSA)
+    if is(OID_EC_ALG_UNRESTRICTED, data, buf) -> return Ok(.ECKey)
+    if is(OID_EC_ALG_ECDH, data, buf) -> return Ok(.ECKeyDH)
+    Err(.NotFound)
+}
+
+/// The curve of an ECParameters namedCurve (mbedtls_oid_get_ec_grp).
+ec_grp: fn(data: [U8], buf: asn1.ASN1Buf) -> ecp.GroupID OIDError! {
+    if is(OID_EC_GRP_SECP192R1, data, buf) -> return Ok(.Secp192r1)
+    if is(OID_EC_GRP_SECP224R1, data, buf) -> return Ok(.Secp224r1)
+    if is(OID_EC_GRP_SECP256R1, data, buf) -> return Ok(.Secp256r1)
+    if is(OID_EC_GRP_SECP384R1, data, buf) -> return Ok(.Secp384r1)
+    if is(OID_EC_GRP_SECP521R1, data, buf) -> return Ok(.Secp521r1)
+    if is(OID_EC_GRP_SECP192K1, data, buf) -> return Ok(.Secp192k1)
+    if is(OID_EC_GRP_SECP224K1, data, buf) -> return Ok(.Secp224k1)
+    if is(OID_EC_GRP_SECP256K1, data, buf) -> return Ok(.Secp256k1)
+    if is(OID_EC_GRP_BP256R1, data, buf) -> return Ok(.Bp256r1)
+    if is(OID_EC_GRP_BP384R1, data, buf) -> return Ok(.Bp384r1)
+    if is(OID_EC_GRP_BP512R1, data, buf) -> return Ok(.Bp512r1)
+    Err(.NotFound)
+}
+
+/// The curve an RFC 8410 AlgorithmIdentifier names directly
+/// (mbedtls_oid_get_ec_grp_algid).
+ec_grp_algid: fn(data: [U8], buf: asn1.ASN1Buf) -> ecp.GroupID OIDError! {
+    if is(OID_X25519, data, buf) -> return Ok(.Curve25519)
+    if is(OID_X448, data, buf) -> return Ok(.Curve448)
+    Err(.NotFound)
+}
+
+/// The digest of a digestAlgorithm (mbedtls_oid_get_md_alg).
+md_alg: fn(data: [U8], buf: asn1.ASN1Buf) -> hashes.Md OIDError! {
+    if is(OID_DIGEST_ALG_MD5, data, buf) -> return Ok(.MD5)
+    if is(OID_DIGEST_ALG_SHA1, data, buf) -> return Ok(.SHA1)
+    if is(OID_DIGEST_ALG_SHA224, data, buf) -> return Ok(.SHA224)
+    if is(OID_DIGEST_ALG_SHA256, data, buf) -> return Ok(.SHA256)
+    if is(OID_DIGEST_ALG_SHA384, data, buf) -> return Ok(.SHA384)
+    if is(OID_DIGEST_ALG_SHA512, data, buf) -> return Ok(.SHA512)
+    if is(OID_DIGEST_ALG_RIPEMD160, data, buf) -> return Ok(.RIPEMD160)
+    if is(OID_DIGEST_ALG_SHA3_224, data, buf) -> return Ok(.SHA3x224)
+    if is(OID_DIGEST_ALG_SHA3_256, data, buf) -> return Ok(.SHA3x256)
+    if is(OID_DIGEST_ALG_SHA3_384, data, buf) -> return Ok(.SHA3x384)
+    if is(OID_DIGEST_ALG_SHA3_512, data, buf) -> return Ok(.SHA3x512)
+    Err(.NotFound)
+}
+
+/// The digest of an HMAC algorithm (mbedtls_oid_get_md_hmac).
+md_hmac: fn(data: [U8], buf: asn1.ASN1Buf) -> hashes.Md OIDError! {
+    if is(OID_HMAC_SHA1, data, buf) -> return Ok(.SHA1)
+    if is(OID_HMAC_SHA224, data, buf) -> return Ok(.SHA224)
+    if is(OID_HMAC_SHA256, data, buf) -> return Ok(.SHA256)
+    if is(OID_HMAC_SHA384, data, buf) -> return Ok(.SHA384)
+    if is(OID_HMAC_SHA512, data, buf) -> return Ok(.SHA512)
+    if is(OID_HMAC_SHA3_224, data, buf) -> return Ok(.SHA3x224)
+    if is(OID_HMAC_SHA3_256, data, buf) -> return Ok(.SHA3x256)
+    if is(OID_HMAC_SHA3_384, data, buf) -> return Ok(.SHA3x384)
+    if is(OID_HMAC_SHA3_512, data, buf) -> return Ok(.SHA3x512)
+    if is(OID_HMAC_RIPEMD160, data, buf) -> return Ok(.RIPEMD160)
+    Err(.NotFound)
+}
+
+// ---------------------------------------------------------------------------
+// Lookups by algorithm: the first table row that matches.
+
+/// The OID of a signature algorithm (mbedtls_oid_get_oid_by_sig_alg).
+/// RSASSA-PSS takes no digest here.
+oid_by_sig_alg: fn(pk: PKType, md: hashes.Md?) -> [U8] OIDError! {
+    if pk == .RSASSAPSS {
+        if md == None -> return Ok(OID_RSASSA_PSS.copy())
+        return Err(.NotFound)
+    }
+    h: md ?? return Err(.NotFound)
+    if pk == .RSA {
+        return if h == {
+            .MD5 -> Ok(OID_PKCS1_MD5.copy())
+            .SHA1 -> Ok(OID_PKCS1_SHA1.copy())
+            .SHA224 -> Ok(OID_PKCS1_SHA224.copy())
+            .SHA256 -> Ok(OID_PKCS1_SHA256.copy())
+            .SHA384 -> Ok(OID_PKCS1_SHA384.copy())
+            .SHA512 -> Ok(OID_PKCS1_SHA512.copy())
+            else -> Err(.NotFound)
+        }
+    }
+    if pk == .ECDSA {
+        return if h == {
+            .SHA1 -> Ok(OID_ECDSA_SHA1.copy())
+            .SHA224 -> Ok(OID_ECDSA_SHA224.copy())
+            .SHA256 -> Ok(OID_ECDSA_SHA256.copy())
+            .SHA384 -> Ok(OID_ECDSA_SHA384.copy())
+            .SHA512 -> Ok(OID_ECDSA_SHA512.copy())
+            else -> Err(.NotFound)
+        }
+    }
+    Err(.NotFound)
+}
+
+/// The OID of a public-key algorithm (mbedtls_oid_get_oid_by_pk_alg).
+oid_by_pk_alg: fn(pk: PKType) -> [U8] OIDError! {
+    if pk == {
+        .RSA -> Ok(OID_PKCS1_RSA.copy())
+        .ECKey -> Ok(OID_EC_ALG_UNRESTRICTED.copy())
+        .ECKeyDH -> Ok(OID_EC_ALG_ECDH.copy())
+        else -> Err(.NotFound)
+    }
+}
+
+/// The namedCurve OID of a curve (mbedtls_oid_get_oid_by_ec_grp).
+oid_by_ec_grp: fn(id: ecp.GroupID) -> [U8] OIDError! {
+    if id == {
+        .Secp192r1 -> Ok(OID_EC_GRP_SECP192R1.copy())
+        .Secp224r1 -> Ok(OID_EC_GRP_SECP224R1.copy())
+        .Secp256r1 -> Ok(OID_EC_GRP_SECP256R1.copy())
+        .Secp384r1 -> Ok(OID_EC_GRP_SECP384R1.copy())
+        .Secp521r1 -> Ok(OID_EC_GRP_SECP521R1.copy())
+        .Secp192k1 -> Ok(OID_EC_GRP_SECP192K1.copy())
+        .Secp224k1 -> Ok(OID_EC_GRP_SECP224K1.copy())
+        .Secp256k1 -> Ok(OID_EC_GRP_SECP256K1.copy())
+        .Bp256r1 -> Ok(OID_EC_GRP_BP256R1.copy())
+        .Bp384r1 -> Ok(OID_EC_GRP_BP384R1.copy())
+        .Bp512r1 -> Ok(OID_EC_GRP_BP512R1.copy())
+        else -> Err(.NotFound)
+    }
+}
+
+/// The RFC 8410 algorithm OID of a curve (mbedtls_oid_get_oid_by_ec_grp_algid).
+oid_by_ec_grp_algid: fn(id: ecp.GroupID) -> [U8] OIDError! {
+    if id == {
+        .Curve25519 -> Ok(OID_X25519.copy())
+        .Curve448 -> Ok(OID_X448.copy())
+        else -> Err(.NotFound)
+    }
+}
+
+/// The digestAlgorithm OID of a digest (mbedtls_oid_get_oid_by_md).
+oid_by_md: fn(md: hashes.Md) -> [U8] Never! {
+    if md == {
+        .MD5 -> OID_DIGEST_ALG_MD5.copy()
+        .SHA1 -> OID_DIGEST_ALG_SHA1.copy()
+        .SHA224 -> OID_DIGEST_ALG_SHA224.copy()
+        .SHA256 -> OID_DIGEST_ALG_SHA256.copy()
+        .SHA384 -> OID_DIGEST_ALG_SHA384.copy()
+        .SHA512 -> OID_DIGEST_ALG_SHA512.copy()
+        .RIPEMD160 -> OID_DIGEST_ALG_RIPEMD160.copy()
+        .SHA3x224 -> OID_DIGEST_ALG_SHA3_224.copy()
+        .SHA3x256 -> OID_DIGEST_ALG_SHA3_256.copy()
+        .SHA3x384 -> OID_DIGEST_ALG_SHA3_384.copy()
+        .SHA3x512 -> OID_DIGEST_ALG_SHA3_512.copy()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Dotted-decimal text.
+
+/// The largest subidentifier, an unsigned 32-bit value as in the C code.
+SUBID_MAX: 0xFFFFFFFF
+
+/// The dotted-decimal text of an OID, "1.2.840.113549"
+/// (mbedtls_oid_get_numeric_string). The text is unbounded here, so there
+/// is no BUF_TOO_SMALL.
+numeric_string: fn(data: [U8], buf: asn1.ASN1Buf) -> String asn1.ASN1Error! {
+    if buf.len <= 0 -> return Err(.OutOfData)
+    out := [U8]{}
+    value := 0
+    loop i in 0..<buf.len {
+        b: Int.from_u8(data[buf.p + i])
+        if value > (SUBID_MAX >> 7) -> return Err(.InvalidData)
+        if value == 0 && b == 0x80 -> return Err(.InvalidData)
+        value = (value << 7).bit_or(b.bit_and(0x7F))
+        if b.bit_and(0x80) == 0 {
+            if out.len() == 0 {
+                first := 0
+                second := value
+                if value >= 80 {
+                    first = 2
+                    second = value - 80
+                } else if value >= 40 {
+                    first = 1
+                    second = value - 40
+                }
+                out.extend("{first}.{second}".bytes())
+            } else {
+                out.extend(".{value}".bytes())
+            }
+            value = 0
+        }
+    }
+    if value != 0 -> return Err(.OutOfData)
+    Ok(String.from_bytes(out) ?? "")
+}
+
+/// One decimal component at `text[p]`, moving `p` past it
+/// (oid_parse_number). At least one digit is required.
+parse_number: fn(text: [U8], p: &Int) -> Int asn1.ASN1Error! {
+    num := 0
+    digits := 0
+    loop p < text.len() && text[p] >= (U8{48}) && text[p] <= (U8{57}) {
+        if num > SUBID_MAX /% 10 -> return Err(.InvalidData)
+        num = num * 10 + Int.from_u8(text[p]) - 48
+        p += 1
+        digits += 1
+    }
+    if digits == 0 -> return Err(.InvalidData)
+    // A component above 2^32 - 1 is rejected. The C code's unsigned sum
+    // wraps for 4294967296 to 4294967299 and accepts the wrapped value.
+    if num > SUBID_MAX -> return Err(.InvalidData)
+    Ok(num)
+}
+
+/// Appends a subidentifier in base 128, high groups first, each but the
+/// last with the continuation bit (oid_subidentifier_encode_into).
+push_subidentifier: fn(out: &[U8], value: Int) {
+    count := 1
+    rest := value >> 7
+    loop rest != 0 {
+        count += 1
+        rest >>= 7
+    }
+    loop k in 0..<count {
+        shift: (count - 1 - k) * 7
+        group := (value >> shift).bit_and(0x7F)
+        if k < count - 1 -> group = group.bit_or(0x80)
+        out.push(U8{group})
+    }
+}
+
+/// The DER content of the OID a dotted-decimal string names
+/// (mbedtls_oid_from_numeric_string).
+from_numeric_string: fn(text: String) -> [U8] asn1.ASN1Error! {
+    s: text.bytes()
+    dots := 0
+    loop c in s {
+        if c == (U8{46}) -> dots += 1
+    }
+    if dots == 0 || dots > OID_MAX_COMPONENTS - 1 -> return Err(.InvalidData)
+    p := 0
+    first: parse_number(s, p)
+    if first > 2 -> return Err(.InvalidData)
+    if p >= s.len() || s[p] != (U8{46}) -> return Err(.InvalidData)
+    p += 1
+    second: parse_number(s, p)
+    if first < 2 && second > 39 -> return Err(.InvalidData)
+    if p < s.len() {
+        if s[p] != (U8{46}) -> return Err(.InvalidData)
+        p += 1
+    }
+    if second > SUBID_MAX - first * 40 -> return Err(.InvalidData)
+    out := [U8]{}
+    push_subidentifier(out, first * 40 + second)
+    loop p < s.len() {
+        value: parse_number(s, p)
+        if p < s.len() {
+            if s[p] != (U8{46}) -> return Err(.InvalidData)
+            p += 1
+        }
+        push_subidentifier(out, value)
+    }
+    Ok(out)
+}
+
+#Test("OIDs convert to and from dotted-decimal text and name their algorithms") {
+    rsa_encryption: from_numeric_string("1.2.840.113549.1.1.1") ?? panic("rsaEncryption")
+    assert(rsa_encryption == OID_PKCS1_RSA)
+    whole: asn1.ASN1Buf{tag_id: asn1.ASN1_OID, p: 0, len: rsa_encryption.len()}
+    assert((numeric_string(rsa_encryption, whole) ?? panic("text")) == "1.2.840.113549.1.1.1")
+    assert((pk_alg(rsa_encryption, whole) ?? panic("pk")) == PKType.RSA)
+    sha256: oid_by_md(.SHA256)
+    assert((md_alg(sha256, asn1.ASN1Buf{tag_id: asn1.ASN1_OID, p: 0, len: sha256.len()}) ?? panic("md")) == hashes.Md.SHA256)
+    // The first two components share one subidentifier: 2.999 is 0x88 0x37.
+    assert((from_numeric_string("2.999.3") ?? panic("2.999.3")) == [U8]{0x88, 0x37, 0x03})
+    assert(from_numeric_string("3.1") == .Err(.InvalidData))
+    assert(from_numeric_string("1.40") == .Err(.InvalidData))
+    assert(from_numeric_string("1") == .Err(.InvalidData))
+    assert(from_numeric_string("1.2.4294967296") == .Err(.InvalidData))
+    // A leading 0x80 is a padded subidentifier, which DER forbids.
+    padded: [U8]{0x2a, 0x80, 0x01}
+    assert(numeric_string(padded, asn1.ASN1Buf{tag_id: asn1.ASN1_OID, p: 0, len: 3}) == .Err(.InvalidData))
+}

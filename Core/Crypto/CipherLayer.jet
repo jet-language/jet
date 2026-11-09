@@ -1,0 +1,945 @@
+// Private Core source part: the generic cipher layer.
+//
+// A port of mbedtls 3.6.7's cipher.c and cipher_wrap.c: one context type
+// that runs any of the 83 ciphers of mbedtls's definitions table (AES,
+// ARIA, Camellia, DES and Triple-DES in their block modes, AES-XTS, GCM and
+// CCM over the 128-bit ciphers, ChaCha20, ChaCha20-Poly1305, the NIST key
+// wraps and the NULL cipher) through setkey, set_iv, update_ad, update,
+// finish and the tag calls, with mbedtls's partial-block caching, CBC
+// padding and error codes, plus the one-shot crypt and auth_*_ext.
+//
+// Where the C contract cannot be expressed it is enforced by the types: a
+// context always has a cipher (no NULL info), the operation and the padding
+// mode are enums (no out-of-range values), and output buffers grow to fit
+// (no output-size arguments). The padding checks read every byte of the
+// block and decide from masks, as mbedtls's constant-time get_*_padding.
+use {
+    core
+    cipher: __core_crypto_cipher
+    __core_crypto_cipher.[ForwardBlock]
+    aead: __core_crypto_aead
+    des: __core_crypto_des
+    block128: __core_crypto_block
+}
+
+/// Why a cipher-layer call refused. The first five are the cipher layer's
+/// own codes; the rest are the module codes mbedtls passes through.
+#Error
+CipherLayerError: enum {
+    /// MBEDTLS_ERR_CIPHER_FEATURE_UNAVAILABLE (-0x6080): the call does not
+    /// apply to the cipher's mode, or an IV longer than 16 bytes.
+    FeatureUnavailable
+    /// MBEDTLS_ERR_CIPHER_BAD_INPUT_DATA (-0x6100): a wrong key length, a
+    /// short IV, a call in the wrong direction or before setkey.
+    BadInputData
+    /// MBEDTLS_ERR_CIPHER_INVALID_PADDING (-0x6200).
+    InvalidPadding
+    /// MBEDTLS_ERR_CIPHER_FULL_BLOCK_EXPECTED (-0x6280): ECB input that is
+    /// not one block, or CBC data that does not end on a block without
+    /// padding.
+    FullBlockExpected
+    /// MBEDTLS_ERR_CIPHER_AUTH_FAILED (-0x6300): a tag or key-wrap
+    /// integrity check did not verify.
+    AuthFailed
+    /// MBEDTLS_ERR_AES_INVALID_INPUT_LENGTH (-0x0022): an XTS data unit
+    /// outside 16 bytes to 2^24 bytes.
+    AESInvalidInputLength
+    /// MBEDTLS_ERR_GCM_BAD_INPUT (-0x0014): an empty IV, a tag length
+    /// outside 4..16, or data past the GCM limits or after the AAD closed.
+    GCMBadInput
+    /// MBEDTLS_ERR_CCM_BAD_INPUT (-0x000D): a nonce, length or call order
+    /// the CCM state machine refuses.
+    CCMBadInput
+    /// MBEDTLS_ERR_CHACHAPOLY_BAD_STATE (-0x0054): AAD after data, or data
+    /// or a tag before the AAD started.
+    ChaChaPolyBadState
+    /// MBEDTLS_ERR_CHACHA20_BAD_INPUT_DATA (-0x0051): a ChaCha20-Poly1305
+    /// nonce that is not 12 bytes, or data past the block counter's end.
+    ChaCha20BadInput
+}
+
+// The DES, ARIA and Camellia modes fail only on lengths this layer always
+// passes whole, and on stream offsets it keeps in range.
+impl des.DESError -> CipherLayerError { CipherLayerError.BadInputData }
+
+impl block128.BlockError -> CipherLayerError { CipherLayerError.BadInputData }
+
+/// The block cipher or stream cipher family (mbedtls_cipher_id_t).
+CipherID: enum {
+    Null
+    AES
+    DES
+    DES3
+    Camellia
+    ARIA
+    ChaCha20
+}
+
+/// How the cipher is run (mbedtls_cipher_mode_t). `Stream` is ChaCha20 and
+/// the NULL cipher.
+CipherMode: enum {
+    ECB
+    CBC
+    CFB
+    OFB
+    CTR
+    GCM
+    Stream
+    CCM
+    CCMStarNoTag
+    XTS
+    ChaChaPoly
+    KW
+    KWP
+}
+
+/// The direction setkey fixes (mbedtls_operation_t).
+CipherOperation: enum {
+    Encrypt
+    Decrypt
+}
+
+/// One row of the cipher table (mbedtls_cipher_info_t). `iv_size` is the
+/// default IV length; `variable_iv` lets set_iv take another.
+CipherInfo: struct {
+    name: String
+    id: CipherID
+    mode: CipherMode
+    key_bits: Int
+    iv_size: Int
+    block_size: Int
+    variable_iv: Bool
+}
+
+/// The ciphers in the order of mbedtls's mbedtls_cipher_definitions.
+CIPHER_INFO: [CipherInfo]{
+    CipherInfo{name: "AES-128-ECB", id: CipherID.AES, mode: CipherMode.ECB, key_bits: 128, iv_size: 0, block_size: 16, variable_iv: false},
+    CipherInfo{name: "AES-192-ECB", id: CipherID.AES, mode: CipherMode.ECB, key_bits: 192, iv_size: 0, block_size: 16, variable_iv: false},
+    CipherInfo{name: "AES-256-ECB", id: CipherID.AES, mode: CipherMode.ECB, key_bits: 256, iv_size: 0, block_size: 16, variable_iv: false},
+    CipherInfo{name: "AES-128-CBC", id: CipherID.AES, mode: CipherMode.CBC, key_bits: 128, iv_size: 16, block_size: 16, variable_iv: false},
+    CipherInfo{name: "AES-192-CBC", id: CipherID.AES, mode: CipherMode.CBC, key_bits: 192, iv_size: 16, block_size: 16, variable_iv: false},
+    CipherInfo{name: "AES-256-CBC", id: CipherID.AES, mode: CipherMode.CBC, key_bits: 256, iv_size: 16, block_size: 16, variable_iv: false},
+    CipherInfo{name: "AES-128-CFB128", id: CipherID.AES, mode: CipherMode.CFB, key_bits: 128, iv_size: 16, block_size: 16, variable_iv: false},
+    CipherInfo{name: "AES-192-CFB128", id: CipherID.AES, mode: CipherMode.CFB, key_bits: 192, iv_size: 16, block_size: 16, variable_iv: false},
+    CipherInfo{name: "AES-256-CFB128", id: CipherID.AES, mode: CipherMode.CFB, key_bits: 256, iv_size: 16, block_size: 16, variable_iv: false},
+    CipherInfo{name: "AES-128-OFB", id: CipherID.AES, mode: CipherMode.OFB, key_bits: 128, iv_size: 16, block_size: 16, variable_iv: false},
+    CipherInfo{name: "AES-192-OFB", id: CipherID.AES, mode: CipherMode.OFB, key_bits: 192, iv_size: 16, block_size: 16, variable_iv: false},
+    CipherInfo{name: "AES-256-OFB", id: CipherID.AES, mode: CipherMode.OFB, key_bits: 256, iv_size: 16, block_size: 16, variable_iv: false},
+    CipherInfo{name: "AES-128-CTR", id: CipherID.AES, mode: CipherMode.CTR, key_bits: 128, iv_size: 16, block_size: 16, variable_iv: false},
+    CipherInfo{name: "AES-192-CTR", id: CipherID.AES, mode: CipherMode.CTR, key_bits: 192, iv_size: 16, block_size: 16, variable_iv: false},
+    CipherInfo{name: "AES-256-CTR", id: CipherID.AES, mode: CipherMode.CTR, key_bits: 256, iv_size: 16, block_size: 16, variable_iv: false},
+    CipherInfo{name: "AES-128-XTS", id: CipherID.AES, mode: CipherMode.XTS, key_bits: 256, iv_size: 16, block_size: 16, variable_iv: false},
+    CipherInfo{name: "AES-256-XTS", id: CipherID.AES, mode: CipherMode.XTS, key_bits: 512, iv_size: 16, block_size: 16, variable_iv: false},
+    CipherInfo{name: "AES-128-GCM", id: CipherID.AES, mode: CipherMode.GCM, key_bits: 128, iv_size: 12, block_size: 16, variable_iv: true},
+    CipherInfo{name: "AES-192-GCM", id: CipherID.AES, mode: CipherMode.GCM, key_bits: 192, iv_size: 12, block_size: 16, variable_iv: true},
+    CipherInfo{name: "AES-256-GCM", id: CipherID.AES, mode: CipherMode.GCM, key_bits: 256, iv_size: 12, block_size: 16, variable_iv: true},
+    CipherInfo{name: "AES-128-CCM", id: CipherID.AES, mode: CipherMode.CCM, key_bits: 128, iv_size: 12, block_size: 16, variable_iv: true},
+    CipherInfo{name: "AES-192-CCM", id: CipherID.AES, mode: CipherMode.CCM, key_bits: 192, iv_size: 12, block_size: 16, variable_iv: true},
+    CipherInfo{name: "AES-256-CCM", id: CipherID.AES, mode: CipherMode.CCM, key_bits: 256, iv_size: 12, block_size: 16, variable_iv: true},
+    CipherInfo{name: "AES-128-CCM*-NO-TAG", id: CipherID.AES, mode: CipherMode.CCMStarNoTag, key_bits: 128, iv_size: 12, block_size: 16, variable_iv: true},
+    CipherInfo{name: "AES-192-CCM*-NO-TAG", id: CipherID.AES, mode: CipherMode.CCMStarNoTag, key_bits: 192, iv_size: 12, block_size: 16, variable_iv: true},
+    CipherInfo{name: "AES-256-CCM*-NO-TAG", id: CipherID.AES, mode: CipherMode.CCMStarNoTag, key_bits: 256, iv_size: 12, block_size: 16, variable_iv: true},
+    CipherInfo{name: "CAMELLIA-128-ECB", id: CipherID.Camellia, mode: CipherMode.ECB, key_bits: 128, iv_size: 0, block_size: 16, variable_iv: false},
+    CipherInfo{name: "CAMELLIA-192-ECB", id: CipherID.Camellia, mode: CipherMode.ECB, key_bits: 192, iv_size: 0, block_size: 16, variable_iv: false},
+    CipherInfo{name: "CAMELLIA-256-ECB", id: CipherID.Camellia, mode: CipherMode.ECB, key_bits: 256, iv_size: 0, block_size: 16, variable_iv: false},
+    CipherInfo{name: "CAMELLIA-128-CBC", id: CipherID.Camellia, mode: CipherMode.CBC, key_bits: 128, iv_size: 16, block_size: 16, variable_iv: false},
+    CipherInfo{name: "CAMELLIA-192-CBC", id: CipherID.Camellia, mode: CipherMode.CBC, key_bits: 192, iv_size: 16, block_size: 16, variable_iv: false},
+    CipherInfo{name: "CAMELLIA-256-CBC", id: CipherID.Camellia, mode: CipherMode.CBC, key_bits: 256, iv_size: 16, block_size: 16, variable_iv: false},
+    CipherInfo{name: "CAMELLIA-128-CFB128", id: CipherID.Camellia, mode: CipherMode.CFB, key_bits: 128, iv_size: 16, block_size: 16, variable_iv: false},
+    CipherInfo{name: "CAMELLIA-192-CFB128", id: CipherID.Camellia, mode: CipherMode.CFB, key_bits: 192, iv_size: 16, block_size: 16, variable_iv: false},
+    CipherInfo{name: "CAMELLIA-256-CFB128", id: CipherID.Camellia, mode: CipherMode.CFB, key_bits: 256, iv_size: 16, block_size: 16, variable_iv: false},
+    CipherInfo{name: "CAMELLIA-128-CTR", id: CipherID.Camellia, mode: CipherMode.CTR, key_bits: 128, iv_size: 16, block_size: 16, variable_iv: false},
+    CipherInfo{name: "CAMELLIA-192-CTR", id: CipherID.Camellia, mode: CipherMode.CTR, key_bits: 192, iv_size: 16, block_size: 16, variable_iv: false},
+    CipherInfo{name: "CAMELLIA-256-CTR", id: CipherID.Camellia, mode: CipherMode.CTR, key_bits: 256, iv_size: 16, block_size: 16, variable_iv: false},
+    CipherInfo{name: "CAMELLIA-128-GCM", id: CipherID.Camellia, mode: CipherMode.GCM, key_bits: 128, iv_size: 12, block_size: 16, variable_iv: true},
+    CipherInfo{name: "CAMELLIA-192-GCM", id: CipherID.Camellia, mode: CipherMode.GCM, key_bits: 192, iv_size: 12, block_size: 16, variable_iv: true},
+    CipherInfo{name: "CAMELLIA-256-GCM", id: CipherID.Camellia, mode: CipherMode.GCM, key_bits: 256, iv_size: 12, block_size: 16, variable_iv: true},
+    CipherInfo{name: "CAMELLIA-128-CCM", id: CipherID.Camellia, mode: CipherMode.CCM, key_bits: 128, iv_size: 12, block_size: 16, variable_iv: true},
+    CipherInfo{name: "CAMELLIA-192-CCM", id: CipherID.Camellia, mode: CipherMode.CCM, key_bits: 192, iv_size: 12, block_size: 16, variable_iv: true},
+    CipherInfo{name: "CAMELLIA-256-CCM", id: CipherID.Camellia, mode: CipherMode.CCM, key_bits: 256, iv_size: 12, block_size: 16, variable_iv: true},
+    CipherInfo{name: "CAMELLIA-128-CCM*-NO-TAG", id: CipherID.Camellia, mode: CipherMode.CCMStarNoTag, key_bits: 128, iv_size: 12, block_size: 16, variable_iv: true},
+    CipherInfo{name: "CAMELLIA-192-CCM*-NO-TAG", id: CipherID.Camellia, mode: CipherMode.CCMStarNoTag, key_bits: 192, iv_size: 12, block_size: 16, variable_iv: true},
+    CipherInfo{name: "CAMELLIA-256-CCM*-NO-TAG", id: CipherID.Camellia, mode: CipherMode.CCMStarNoTag, key_bits: 256, iv_size: 12, block_size: 16, variable_iv: true},
+    CipherInfo{name: "ARIA-128-ECB", id: CipherID.ARIA, mode: CipherMode.ECB, key_bits: 128, iv_size: 0, block_size: 16, variable_iv: false},
+    CipherInfo{name: "ARIA-192-ECB", id: CipherID.ARIA, mode: CipherMode.ECB, key_bits: 192, iv_size: 0, block_size: 16, variable_iv: false},
+    CipherInfo{name: "ARIA-256-ECB", id: CipherID.ARIA, mode: CipherMode.ECB, key_bits: 256, iv_size: 0, block_size: 16, variable_iv: false},
+    CipherInfo{name: "ARIA-128-CBC", id: CipherID.ARIA, mode: CipherMode.CBC, key_bits: 128, iv_size: 16, block_size: 16, variable_iv: false},
+    CipherInfo{name: "ARIA-192-CBC", id: CipherID.ARIA, mode: CipherMode.CBC, key_bits: 192, iv_size: 16, block_size: 16, variable_iv: false},
+    CipherInfo{name: "ARIA-256-CBC", id: CipherID.ARIA, mode: CipherMode.CBC, key_bits: 256, iv_size: 16, block_size: 16, variable_iv: false},
+    CipherInfo{name: "ARIA-128-CFB128", id: CipherID.ARIA, mode: CipherMode.CFB, key_bits: 128, iv_size: 16, block_size: 16, variable_iv: false},
+    CipherInfo{name: "ARIA-192-CFB128", id: CipherID.ARIA, mode: CipherMode.CFB, key_bits: 192, iv_size: 16, block_size: 16, variable_iv: false},
+    CipherInfo{name: "ARIA-256-CFB128", id: CipherID.ARIA, mode: CipherMode.CFB, key_bits: 256, iv_size: 16, block_size: 16, variable_iv: false},
+    CipherInfo{name: "ARIA-128-CTR", id: CipherID.ARIA, mode: CipherMode.CTR, key_bits: 128, iv_size: 16, block_size: 16, variable_iv: false},
+    CipherInfo{name: "ARIA-192-CTR", id: CipherID.ARIA, mode: CipherMode.CTR, key_bits: 192, iv_size: 16, block_size: 16, variable_iv: false},
+    CipherInfo{name: "ARIA-256-CTR", id: CipherID.ARIA, mode: CipherMode.CTR, key_bits: 256, iv_size: 16, block_size: 16, variable_iv: false},
+    CipherInfo{name: "ARIA-128-GCM", id: CipherID.ARIA, mode: CipherMode.GCM, key_bits: 128, iv_size: 12, block_size: 16, variable_iv: true},
+    CipherInfo{name: "ARIA-192-GCM", id: CipherID.ARIA, mode: CipherMode.GCM, key_bits: 192, iv_size: 12, block_size: 16, variable_iv: true},
+    CipherInfo{name: "ARIA-256-GCM", id: CipherID.ARIA, mode: CipherMode.GCM, key_bits: 256, iv_size: 12, block_size: 16, variable_iv: true},
+    CipherInfo{name: "ARIA-128-CCM", id: CipherID.ARIA, mode: CipherMode.CCM, key_bits: 128, iv_size: 12, block_size: 16, variable_iv: true},
+    CipherInfo{name: "ARIA-192-CCM", id: CipherID.ARIA, mode: CipherMode.CCM, key_bits: 192, iv_size: 12, block_size: 16, variable_iv: true},
+    CipherInfo{name: "ARIA-256-CCM", id: CipherID.ARIA, mode: CipherMode.CCM, key_bits: 256, iv_size: 12, block_size: 16, variable_iv: true},
+    CipherInfo{name: "ARIA-128-CCM*-NO-TAG", id: CipherID.ARIA, mode: CipherMode.CCMStarNoTag, key_bits: 128, iv_size: 12, block_size: 16, variable_iv: true},
+    CipherInfo{name: "ARIA-192-CCM*-NO-TAG", id: CipherID.ARIA, mode: CipherMode.CCMStarNoTag, key_bits: 192, iv_size: 12, block_size: 16, variable_iv: true},
+    CipherInfo{name: "ARIA-256-CCM*-NO-TAG", id: CipherID.ARIA, mode: CipherMode.CCMStarNoTag, key_bits: 256, iv_size: 12, block_size: 16, variable_iv: true},
+    CipherInfo{name: "DES-ECB", id: CipherID.DES, mode: CipherMode.ECB, key_bits: 64, iv_size: 0, block_size: 8, variable_iv: false},
+    CipherInfo{name: "DES-EDE-ECB", id: CipherID.DES3, mode: CipherMode.ECB, key_bits: 128, iv_size: 0, block_size: 8, variable_iv: false},
+    CipherInfo{name: "DES-EDE3-ECB", id: CipherID.DES3, mode: CipherMode.ECB, key_bits: 192, iv_size: 0, block_size: 8, variable_iv: false},
+    CipherInfo{name: "DES-CBC", id: CipherID.DES, mode: CipherMode.CBC, key_bits: 64, iv_size: 8, block_size: 8, variable_iv: false},
+    CipherInfo{name: "DES-EDE-CBC", id: CipherID.DES3, mode: CipherMode.CBC, key_bits: 128, iv_size: 8, block_size: 8, variable_iv: false},
+    CipherInfo{name: "DES-EDE3-CBC", id: CipherID.DES3, mode: CipherMode.CBC, key_bits: 192, iv_size: 8, block_size: 8, variable_iv: false},
+    CipherInfo{name: "CHACHA20", id: CipherID.ChaCha20, mode: CipherMode.Stream, key_bits: 256, iv_size: 12, block_size: 1, variable_iv: false},
+    CipherInfo{name: "CHACHA20-POLY1305", id: CipherID.ChaCha20, mode: CipherMode.ChaChaPoly, key_bits: 256, iv_size: 12, block_size: 1, variable_iv: false},
+    CipherInfo{name: "AES-128-KW", id: CipherID.AES, mode: CipherMode.KW, key_bits: 128, iv_size: 0, block_size: 16, variable_iv: false},
+    CipherInfo{name: "AES-192-KW", id: CipherID.AES, mode: CipherMode.KW, key_bits: 192, iv_size: 0, block_size: 16, variable_iv: false},
+    CipherInfo{name: "AES-256-KW", id: CipherID.AES, mode: CipherMode.KW, key_bits: 256, iv_size: 0, block_size: 16, variable_iv: false},
+    CipherInfo{name: "AES-128-KWP", id: CipherID.AES, mode: CipherMode.KWP, key_bits: 128, iv_size: 0, block_size: 16, variable_iv: false},
+    CipherInfo{name: "AES-192-KWP", id: CipherID.AES, mode: CipherMode.KWP, key_bits: 192, iv_size: 0, block_size: 16, variable_iv: false},
+    CipherInfo{name: "AES-256-KWP", id: CipherID.AES, mode: CipherMode.KWP, key_bits: 256, iv_size: 0, block_size: 16, variable_iv: false},
+    CipherInfo{name: "NULL", id: CipherID.Null, mode: CipherMode.Stream, key_bits: 0, iv_size: 0, block_size: 1, variable_iv: false},
+}
+
+/// The cipher named `name` (mbedtls_cipher_info_from_string).
+cipher_info_from_string: fn(name: String) -> CipherInfo? Never! {
+    loop info in CIPHER_INFO {
+        if info.name == name -> return Val(info)
+    }
+    None
+}
+
+/// The first cipher of family `id` in `mode` with `key_bits`-bit keys
+/// (mbedtls_cipher_info_from_values).
+cipher_info_from_values: fn(id: CipherID, key_bits: Int, mode: CipherMode) -> CipherInfo? Never! {
+    loop info in CIPHER_INFO {
+        if info.id == id && info.key_bits == key_bits && info.mode == mode -> return Val(info)
+    }
+    None
+}
+
+/// GCM's key and its operation in flight over a 128-bit cipher.
+GCMContext: struct<K> {
+    key: aead.GCMKey<K>
+    st: aead.GCM
+}
+
+/// CCM's encryption key and its state machine over a 128-bit cipher.
+CCMContext: struct<K> {
+    key: K
+    st: aead.CCM
+}
+
+/// The keyed state a context runs on, one variant per cipher_wrap.c base
+/// (mbedtls_cipher_base_t). `Unset` until setkey; the NULL cipher keeps
+/// it, having no key.
+CipherBase: enum {
+    Unset
+    AES(cipher.AESKey)
+    XTS(cipher.XTSKey)
+    DES(des.DESKey)
+    Camellia(block128.CamelliaKey)
+    ARIA(block128.ARIAKey)
+    GCMAES(GCMContext<cipher.AESKey>)
+    GCMCamellia(GCMContext<block128.CamelliaKey>)
+    GCMARIA(GCMContext<block128.ARIAKey>)
+    CCMAES(CCMContext<cipher.AESKey>)
+    CCMCamellia(CCMContext<block128.CamelliaKey>)
+    CCMARIA(CCMContext<block128.ARIAKey>)
+    ChaCha20(aead.ChaCha20)
+    ChaChaPoly(aead.ChaChaPoly)
+    KW(cipher.AESKey)
+}
+
+/// A cipher in use (mbedtls_cipher_context_t).
+/// - `operation`: None until setkey.
+/// - `padding`: None until set_padding_mode; CBC cannot finish without it.
+/// - `iv`: the IV, or the CBC chaining value, CFB/OFB feedback or CTR
+///   counter; `iv_size` is 0 until set_iv stores one.
+/// - `unprocessed`: a cached partial CBC block, or CTR's keystream block;
+///   `unprocessed_len` is its length, or the CFB, OFB and CTR offset.
+CipherContext: struct {
+    info: CipherInfo
+    base: CipherBase
+    operation: CipherOperation?
+    padding: cipher.CBCPadding?
+    iv: [U8]
+    iv_size: Int
+    unprocessed: [U8]
+    unprocessed_len: Int
+}
+
+/// A context for `info` with no key (mbedtls_cipher_setup). As in 3.6.7,
+/// no padding mode is set.
+cipher_setup: fn(info: CipherInfo) -> CipherContext Never! {
+    iv: cipher.zero_bytes(info.iv_size)
+    CipherContext{info: info, base: CipherBase.Unset, operation: None, padding: None, iv: iv, iv_size: 0, unprocessed: cipher.zero_bytes(16), unprocessed_len: 0}
+}
+
+/// The IV length the context uses (mbedtls_cipher_get_iv_size).
+cipher_iv_size: fn(ctx: CipherContext) -> Int Never! {
+    if ctx.iv_size != 0 -> return ctx.iv_size
+    ctx.info.iv_size
+}
+
+decrypting: fn(ctx: CipherContext) -> Bool Never! { ctx.operation == Val(.Decrypt) }
+
+/// Whether CBC finish pads (mbedtls's add_padding is set): a padding mode
+/// other than none was chosen.
+adds_padding: fn(ctx: CipherContext) -> Bool Never! {
+    if ctx.padding == {
+        .Val(p) -> p != .Unpadded
+        None -> false
+    }
+}
+
+block_mode: fn(decrypt: Bool) -> block128.BlockMode Never! {
+    if decrypt -> return block128.BlockMode.Decrypt
+    block128.BlockMode.Encrypt
+}
+
+push_all: fn(out: &[U8], bytes: [U8]) Never! {
+    cipher.reserve(out, bytes.len())
+    loop b in bytes -> out.push(b)
+}
+
+aes_schedule: fn(key: [U8], decrypt: Bool) -> cipher.AESKey CipherLayerError! {
+    k: cipher.aes_key(key, decrypt) ?? return Err(.BadInputData)
+    Ok(k)
+}
+
+/// The base for `info` keyed with `key`; `decrypt` picks the decryption
+/// schedule (cipher_wrap.c's setkey_dec_func).
+keyed_base: fn(info: CipherInfo, key: [U8], decrypt: Bool) -> CipherBase CipherLayerError! {
+    mode: info.mode
+    if info.id == {
+        .Null -> Ok(CipherBase.Unset)
+        .AES -> {
+            if mode == {
+                .XTS -> {
+                    xk: cipher.xts_key(key, decrypt) ?? return Err(.BadInputData)
+                    Ok(CipherBase.XTS(xk))
+                }
+                .GCM -> Ok(CipherBase.GCMAES(GCMContext<cipher.AESKey>{key: aead.gcm_key(aes_schedule(key, false)), st: aead.gcm_state()}))
+                .CCM | .CCMStarNoTag -> Ok(CipherBase.CCMAES(CCMContext<cipher.AESKey>{key: aes_schedule(key, false), st: aead.ccm_state()}))
+                .KW | .KWP -> Ok(CipherBase.KW(aes_schedule(key, decrypt)))
+                else -> Ok(CipherBase.AES(aes_schedule(key, decrypt)))
+            }
+        }
+        .Camellia -> {
+            if mode == {
+                .GCM -> Ok(CipherBase.GCMCamellia(GCMContext<block128.CamelliaKey>{key: aead.gcm_key(block128.camellia_setkey_enc(key)), st: aead.gcm_state()}))
+                .CCM | .CCMStarNoTag -> Ok(CipherBase.CCMCamellia(CCMContext<block128.CamelliaKey>{key: block128.camellia_setkey_enc(key), st: aead.ccm_state()}))
+                else -> {
+                    if decrypt -> return Ok(CipherBase.Camellia(block128.camellia_setkey_dec(key)))
+                    Ok(CipherBase.Camellia(block128.camellia_setkey_enc(key)))
+                }
+            }
+        }
+        .ARIA -> {
+            if mode == {
+                .GCM -> Ok(CipherBase.GCMARIA(GCMContext<block128.ARIAKey>{key: aead.gcm_key(block128.aria_setkey_enc(key)), st: aead.gcm_state()}))
+                .CCM | .CCMStarNoTag -> Ok(CipherBase.CCMARIA(CCMContext<block128.ARIAKey>{key: block128.aria_setkey_enc(key), st: aead.ccm_state()}))
+                else -> {
+                    if decrypt -> return Ok(CipherBase.ARIA(block128.aria_setkey_dec(key)))
+                    Ok(CipherBase.ARIA(block128.aria_setkey_enc(key)))
+                }
+            }
+        }
+        .DES -> {
+            if decrypt -> return Ok(CipherBase.DES(des.des_setkey_dec(key)))
+            Ok(CipherBase.DES(des.des_setkey_enc(key)))
+        }
+        .DES3 -> {
+            if key.len() == 16 {
+                if decrypt -> return Ok(CipherBase.DES(des.des3_set2key_dec(key)))
+                return Ok(CipherBase.DES(des.des3_set2key_enc(key)))
+            }
+            if decrypt -> return Ok(CipherBase.DES(des.des3_set3key_dec(key)))
+            Ok(CipherBase.DES(des.des3_set3key_enc(key)))
+        }
+        .ChaCha20 -> {
+            if mode == .ChaChaPoly {
+                cp: aead.chachapoly_key(key) ?? return Err(.BadInputData)
+                return Ok(CipherBase.ChaChaPoly(cp))
+            }
+            c: aead.chacha20_key(key) ?? return Err(.BadInputData)
+            Ok(CipherBase.ChaCha20(c))
+        }
+    }
+}
+
+/// Key the context for `operation` (mbedtls_cipher_setkey). The key must
+/// be the cipher's length. CFB, OFB and CTR always use the encryption
+/// schedule, as do GCM and CCM; KW uses the decryption one to unwrap.
+cipher_setkey: fn(ctx: &CipherContext, key: [U8], operation: CipherOperation) CipherLayerError! {
+    if 8 * key.len() != ctx.info.key_bits -> return Err(.BadInputData)
+    mode: ctx.info.mode
+    decrypt: operation == .Decrypt && mode != .CFB && mode != .OFB && mode != .CTR
+    ctx.base = keyed_base(ctx.info, key, decrypt)
+    ctx.operation = Val(operation)
+}
+
+/// Choose how CBC finish pads and unpads (mbedtls_cipher_set_padding_mode);
+/// BadInputData for any other mode.
+cipher_set_padding_mode: fn(ctx: &CipherContext, mode: cipher.CBCPadding) CipherLayerError! {
+    if ctx.info.mode != .CBC -> return Err(.BadInputData)
+    ctx.padding = Val(mode)
+}
+
+gcm_restart: fn<K: ForwardBlock>(g: &GCMContext<K>, decrypt: Bool, iv: [U8]) CipherLayerError! {
+    g.st = aead.gcm_starts(g.key, decrypt, iv) ?? return Err(.GCMBadInput)
+}
+
+ccm_star_restart: fn<K: ForwardBlock>(c: &CCMContext<K>, decrypt: Bool, iv: [U8]) CipherLayerError! {
+    if !aead.ccm_set_lengths(c.key, c.st, 0, 0, 0) -> return Err(.CCMBadInput)
+    mode: if decrypt -> aead.CCMMode.StarDecrypt else -> aead.CCMMode.StarEncrypt
+    if !aead.ccm_starts(c.key, c.st, mode, iv) -> return Err(.CCMBadInput)
+}
+
+/// Set the IV or nonce (mbedtls_cipher_set_iv). Longer than 16 bytes is
+/// FeatureUnavailable; a fixed-size IV takes its first iv_size bytes and
+/// refuses fewer. GCM and CCM*-no-tag start their operation here and
+/// ChaCha20 its keystream at block 0.
+cipher_set_iv: fn(ctx: &CipherContext, iv: [U8]) CipherLayerError! {
+    if iv.len() > 16 -> return Err(.FeatureUnavailable)
+    actual: if ctx.info.variable_iv -> iv.len() else -> ctx.info.iv_size
+    if actual > iv.len() -> return Err(.BadInputData)
+    mode: ctx.info.mode
+    if mode == .Stream && ctx.info.id == .ChaCha20 {
+        if iv.len() != 12 -> return Err(.BadInputData)
+        if &ctx.base == {
+            .ChaCha20(c) -> { if !aead.chacha20_starts(c, iv, 0) -> return Err(.BadInputData) }
+            else -> {}
+        }
+    }
+    if mode == .ChaChaPoly && iv.len() != 12 -> return Err(.BadInputData)
+    decrypt: decrypting(ctx)
+    if {
+        mode == .GCM -> {
+            if &ctx.base == {
+                .GCMAES(g) -> gcm_restart(g, decrypt, iv)
+                .GCMCamellia(g) -> gcm_restart(g, decrypt, iv)
+                .GCMARIA(g) -> gcm_restart(g, decrypt, iv)
+                else -> return Err(.BadInputData)
+            }
+        }
+        mode == .CCMStarNoTag -> {
+            if ctx.operation == None -> return Err(.BadInputData)
+            if &ctx.base == {
+                .CCMAES(c) -> ccm_star_restart(c, decrypt, iv)
+                .CCMCamellia(c) -> ccm_star_restart(c, decrypt, iv)
+                .CCMARIA(c) -> ccm_star_restart(c, decrypt, iv)
+                else -> return Err(.BadInputData)
+            }
+        }
+        actual != 0 -> {
+            if {
+                ctx.iv.len() == actual -> { loop i in 0..<actual -> ctx.iv[i] = iv[i] }
+                else -> ctx.iv = cipher.bytes_of(iv, 0, actual)
+            }
+            ctx.iv_size = actual
+        }
+        else -> {}
+    }
+}
+
+/// Drop any cached partial block and stream offset (mbedtls_cipher_reset).
+cipher_reset: fn(ctx: &CipherContext) Never! { ctx.unprocessed_len = 0 }
+
+gcm_ad: fn<K: ForwardBlock>(g: &GCMContext<K>, ad: [U8]) CipherLayerError! {
+    if !aead.gcm_update_ad(g.key, g.st, ad) -> return Err(.GCMBadInput)
+}
+
+/// Feed additional data (mbedtls_cipher_update_ad): GCM, and
+/// ChaCha20-Poly1305, which starts its message here under the stored
+/// nonce; FeatureUnavailable for every other mode.
+cipher_update_ad: fn(ctx: &CipherContext, ad: [U8]) CipherLayerError! {
+    if ctx.info.mode == {
+        .GCM -> {
+            if &ctx.base == {
+                .GCMAES(g) -> gcm_ad(g, ad)
+                .GCMCamellia(g) -> gcm_ad(g, ad)
+                .GCMARIA(g) -> gcm_ad(g, ad)
+                else -> return Err(.BadInputData)
+            }
+        }
+        .ChaChaPoly -> {
+            decrypt: decrypting(ctx)
+            if &ctx.base == {
+                .ChaChaPoly(cp) -> {
+                    if !aead.chachapoly_starts(cp, ctx.iv, decrypt) -> return Err(.ChaCha20BadInput)
+                    if !aead.chachapoly_update_ad(cp, ad) -> return Err(.ChaChaPolyBadState)
+                }
+                else -> return Err(.BadInputData)
+            }
+        }
+        else -> return Err(.FeatureUnavailable)
+    }
+}
+
+ecb_block: fn(ctx: CipherContext, src: [U8], off: Int, out: &[U8]) CipherLayerError! {
+    bs: ctx.info.block_size
+    if ctx.base == {
+        .AES(k) -> cipher.ecb(k, decrypting(ctx), src, off, 1, out)
+        .DES(k) -> push_all(out, des.des_crypt_ecb(k, cipher.bytes_of(src, off, bs)))
+        .Camellia(k) -> push_all(out, block128.block_crypt_ecb(k, cipher.bytes_of(src, off, bs)))
+        .ARIA(k) -> push_all(out, block128.block_crypt_ecb(k, cipher.bytes_of(src, off, bs)))
+        else -> return Err(.BadInputData)
+    }
+}
+
+/// CBC over `len` bytes, whole blocks, chaining through ctx.iv.
+cbc_run: fn(ctx: &CipherContext, src: [U8], off: Int, len: Int, out: &[U8]) CipherLayerError! {
+    decrypt: decrypting(ctx)
+    if ctx.base == {
+        .AES(k) -> { if !cipher.cbc(k, decrypt, ctx.iv, src, off, len, out) -> return Err(.FullBlockExpected) }
+        .DES(k) -> {
+            mode: if decrypt -> des.DESMode.Decrypt else -> des.DESMode.Encrypt
+            push_all(out, des.des_crypt_cbc(k, mode, ctx.iv, cipher.bytes_of(src, off, len)))
+        }
+        .Camellia(k) -> push_all(out, block128.block_crypt_cbc(k, block_mode(decrypt), ctx.iv, cipher.bytes_of(src, off, len)))
+        .ARIA(k) -> push_all(out, block128.block_crypt_cbc(k, block_mode(decrypt), ctx.iv, cipher.bytes_of(src, off, len)))
+        else -> return Err(.BadInputData)
+    }
+}
+
+/// mbedtls's CBC caching: a partial block waits in `unprocessed`, and a
+/// padded decryption always keeps the last whole block back for finish.
+update_cbc: fn(ctx: &CipherContext, src: [U8], off: Int, len: Int, out: &[U8]) CipherLayerError! {
+    bs: ctx.info.block_size
+    keep_block: decrypting(ctx) && adds_padding(ctx)
+    room: bs - ctx.unprocessed_len
+    if (keep_block && len <= room) || (!keep_block && len < room) {
+        loop i in 0..<len -> ctx.unprocessed[ctx.unprocessed_len + i] = src[off + i]
+        ctx.unprocessed_len += len
+        return
+    }
+    at := off
+    n := len
+    if ctx.unprocessed_len != 0 {
+        loop i in 0..<room -> ctx.unprocessed[ctx.unprocessed_len + i] = src[at + i]
+        blk: cipher.bytes_of(ctx.unprocessed, 0, bs)
+        cbc_run(ctx, blk, 0, bs, out)
+        ctx.unprocessed_len = 0
+        at += room
+        n -= room
+    }
+    if n != 0 {
+        tail := n %% bs
+        if tail == 0 && keep_block -> tail = bs
+        loop i in 0..<tail -> ctx.unprocessed[i] = src[at + n - tail + i]
+        ctx.unprocessed_len += tail
+        n -= tail
+    }
+    if n != 0 -> cbc_run(ctx, src, at, n, out)
+}
+
+update_cfb: fn(ctx: &CipherContext, src: [U8], off: Int, len: Int, out: &[U8]) CipherLayerError! {
+    decrypt: decrypting(ctx)
+    if ctx.base == {
+        .AES(k) -> ctx.unprocessed_len = cipher.cfb128(k, decrypt, ctx.unprocessed_len, ctx.iv, src, off, len, out)
+        .Camellia(k) -> push_all(out, block128.block_crypt_cfb128(k, block_mode(decrypt), ctx.unprocessed_len, ctx.iv, cipher.bytes_of(src, off, len)))
+        .ARIA(k) -> push_all(out, block128.block_crypt_cfb128(k, block_mode(decrypt), ctx.unprocessed_len, ctx.iv, cipher.bytes_of(src, off, len)))
+        else -> return Err(.BadInputData)
+    }
+}
+
+update_ctr: fn(ctx: &CipherContext, src: [U8], off: Int, len: Int, out: &[U8]) CipherLayerError! {
+    if ctx.base == {
+        .AES(k) -> ctx.unprocessed_len = cipher.ctr(k, ctx.unprocessed_len, ctx.iv, ctx.unprocessed, src, off, len, out)
+        .Camellia(k) -> push_all(out, block128.block_crypt_ctr(k, ctx.unprocessed_len, ctx.iv, ctx.unprocessed, cipher.bytes_of(src, off, len)))
+        .ARIA(k) -> push_all(out, block128.block_crypt_ctr(k, ctx.unprocessed_len, ctx.iv, ctx.unprocessed, cipher.bytes_of(src, off, len)))
+        else -> return Err(.BadInputData)
+    }
+}
+
+gcm_data: fn<K: ForwardBlock>(g: &GCMContext<K>, src: [U8], off: Int, len: Int, out: &[U8]) CipherLayerError! {
+    if !aead.gcm_update(g.key, g.st, src, off, len, out) -> return Err(.GCMBadInput)
+}
+
+ccm_data: fn<K: ForwardBlock>(c: &CCMContext<K>, src: [U8], off: Int, len: Int, out: &[U8]) CipherLayerError! {
+    if !aead.ccm_update(c.key, c.st, src, off, len, out) -> return Err(.CCMBadInput)
+}
+
+/// Run `len` bytes of `src` from `off`, appending what is ready to `out`
+/// (mbedtls_cipher_update). ECB takes exactly one block; CBC caches
+/// partial blocks; XTS takes one whole data unit.
+cipher_update: fn(ctx: &CipherContext, src: [U8], off: Int, len: Int, out: &[U8]) CipherLayerError! {
+    if ctx.info.mode == {
+        .ECB -> {
+            if len != ctx.info.block_size -> return Err(.FullBlockExpected)
+            ecb_block(ctx, src, off, out)
+        }
+        .GCM -> {
+            if &ctx.base == {
+                .GCMAES(g) -> gcm_data(g, src, off, len, out)
+                .GCMCamellia(g) -> gcm_data(g, src, off, len, out)
+                .GCMARIA(g) -> gcm_data(g, src, off, len, out)
+                else -> return Err(.BadInputData)
+            }
+        }
+        .CCMStarNoTag -> {
+            if &ctx.base == {
+                .CCMAES(c) -> ccm_data(c, src, off, len, out)
+                .CCMCamellia(c) -> ccm_data(c, src, off, len, out)
+                .CCMARIA(c) -> ccm_data(c, src, off, len, out)
+                else -> return Err(.BadInputData)
+            }
+        }
+        .ChaChaPoly -> {
+            if &ctx.base == {
+                .ChaChaPoly(cp) -> {
+                    if cp.stage != aead.CHACHAPOLY_AAD && cp.stage != aead.CHACHAPOLY_CIPHERTEXT -> return Err(.ChaChaPolyBadState)
+                    if !aead.chachapoly_update(cp, src, off, len, out) -> return Err(.ChaCha20BadInput)
+                }
+                else -> return Err(.BadInputData)
+            }
+        }
+        .CBC -> update_cbc(ctx, src, off, len, out)
+        .CFB -> update_cfb(ctx, src, off, len, out)
+        .OFB -> {
+            if ctx.base == {
+                .AES(k) -> ctx.unprocessed_len = cipher.ofb(k, ctx.unprocessed_len, ctx.iv, src, off, len, out)
+                else -> return Err(.BadInputData)
+            }
+        }
+        .CTR -> update_ctr(ctx, src, off, len, out)
+        .XTS -> {
+            if ctx.unprocessed_len > 0 -> return Err(.FeatureUnavailable)
+            decrypt: decrypting(ctx)
+            if ctx.base == {
+                .XTS(xk) -> { if !cipher.xts(xk, decrypt, ctx.iv, src, off, len, out) -> return Err(.AESInvalidInputLength) }
+                else -> return Err(.BadInputData)
+            }
+        }
+        .Stream -> {
+            if {
+                ctx.info.id == .Null -> push_all(out, cipher.bytes_of(src, off, len))
+                else -> {
+                    if &ctx.base == {
+                        .ChaCha20(c) -> { if !aead.chacha20_update(c, src, off, len, out) -> return Err(.BadInputData) }
+                        else -> return Err(.BadInputData)
+                    }
+                }
+            }
+        }
+        else -> return Err(.FeatureUnavailable)
+    }
+}
+
+finish_cbc: fn(ctx: &CipherContext, out: &[U8]) -> Bool CipherLayerError! {
+    bs: ctx.info.block_size
+    pad: ctx.padding ?? cipher.CBCPadding.Unpadded
+    decrypt: decrypting(ctx)
+    if {
+        !decrypt -> {
+            if pad == .Unpadded {
+                if ctx.unprocessed_len != 0 -> return Err(.FullBlockExpected)
+                return Ok(true)
+            }
+            out_len: cipher_iv_size(ctx)
+            used: ctx.unprocessed_len
+            cipher.cbc_add_padding(pad, ctx.unprocessed, out_len, used)
+        }
+        ctx.unprocessed_len != bs -> {
+            if pad == .Unpadded && ctx.unprocessed_len == 0 -> return Ok(true)
+            return Err(.FullBlockExpected)
+        }
+        else -> {}
+    }
+    blk := cipher.bytes_of(ctx.unprocessed, 0, bs)
+    if !decrypt {
+        cbc_run(ctx, blk, 0, bs, out)
+        return Ok(true)
+    }
+    plain := [U8]{}
+    cbc_run(ctx, blk, 0, bs, plain)
+    core.crypto.wipe(blk)
+    check: cipher.cbc_get_padding(pad, plain, 0, bs)
+    cipher.reserve(out, check.data_len)
+    loop i in 0..<check.data_len -> out.push(plain[i])
+    core.crypto.wipe(plain)
+    Ok(!check.invalid)
+}
+
+/// Flush the last block, appending it to `out`, and report whether its
+/// padding verified (mbedtls_cipher_finish_padded: true where mbedtls
+/// leaves invalid_padding 0). Only CBC and ECB have anything left; CBC
+/// needs a padding mode, and when the padding is malformed nothing is
+/// appended.
+cipher_finish_padded: fn(ctx: &CipherContext, out: &[U8]) -> Bool CipherLayerError! {
+    if ctx.info.mode == {
+        .CFB | .OFB | .CTR | .GCM | .CCMStarNoTag | .XTS | .Stream | .ChaChaPoly -> Ok(true)
+        .ECB -> {
+            if ctx.unprocessed_len != 0 -> return Err(.FullBlockExpected)
+            Ok(true)
+        }
+        .CBC -> {
+            if ctx.padding == None -> return Err(.BadInputData)
+            finish_cbc(ctx, out)
+        }
+        else -> Err(.FeatureUnavailable)
+    }
+}
+
+/// cipher_finish_padded with malformed padding refused as InvalidPadding
+/// (mbedtls_cipher_finish).
+cipher_finish: fn(ctx: &CipherContext, out: &[U8]) CipherLayerError! {
+    if !cipher_finish_padded(ctx, out) -> return Err(.InvalidPadding)
+}
+
+gcm_tag: fn<K: ForwardBlock>(g: &GCMContext<K>, tag_len: Int) -> [U8] CipherLayerError! {
+    mac: aead.gcm_finish(g.key, g.st, tag_len) ?? return Err(.GCMBadInput)
+    Ok(mac)
+}
+
+/// The tag of the message just encrypted (mbedtls_cipher_write_tag): GCM
+/// with 4 to 16 bytes, ChaCha20-Poly1305 with 16.
+cipher_write_tag: fn(ctx: &CipherContext, tag_len: Int) -> [U8] CipherLayerError! {
+    if ctx.operation != Val(.Encrypt) -> return Err(.BadInputData)
+    mac: finish_tag(ctx, tag_len)
+    Ok(mac)
+}
+
+/// The first `tag_len` bytes of the running GCM or ChaCha20-Poly1305 tag.
+finish_tag: fn(ctx: &CipherContext, tag_len: Int) -> [U8] CipherLayerError! {
+    if ctx.info.mode == {
+        .GCM -> {
+            if &ctx.base == {
+                .GCMAES(g) -> gcm_tag(g, tag_len)
+                .GCMCamellia(g) -> gcm_tag(g, tag_len)
+                .GCMARIA(g) -> gcm_tag(g, tag_len)
+                else -> Err(.BadInputData)
+            }
+        }
+        .ChaChaPoly -> {
+            if tag_len != 16 -> return Err(.BadInputData)
+            if &ctx.base == {
+                .ChaChaPoly(cp) -> {
+                    mac: aead.chachapoly_finish(cp) ?? return Err(.ChaChaPolyBadState)
+                    Ok(mac)
+                }
+                else -> Err(.BadInputData)
+            }
+        }
+        else -> Err(.FeatureUnavailable)
+    }
+}
+
+/// Check the tag of the message just decrypted (mbedtls_cipher_check_tag),
+/// comparing without a branch on its bytes; AuthFailed when it differs.
+cipher_check_tag: fn(ctx: &CipherContext, expected: [U8]) CipherLayerError! {
+    if ctx.operation != Val(.Decrypt) -> return Err(.BadInputData)
+    if ctx.info.mode == .GCM && expected.len() > 16 -> return Err(.BadInputData)
+    want := finish_tag(ctx, expected.len())
+    same: aead.tags_equal(expected, want, expected.len())
+    core.crypto.wipe(want)
+    if !same -> return Err(.AuthFailed)
+}
+
+/// set_iv, reset, update and finish in one call (mbedtls_cipher_crypt):
+/// the whole output, or InvalidPadding, returning nothing.
+cipher_crypt: fn(ctx: &CipherContext, iv: [U8], input: [U8]) -> [U8] CipherLayerError! {
+    cipher_set_iv(ctx, iv)
+    cipher_reset(ctx)
+    out := [U8]{}
+    cipher_update(ctx, input, 0, input.len(), out)
+    if !cipher_finish_padded(ctx, out) {
+        core.crypto.wipe(out)
+        return Err(.InvalidPadding)
+    }
+    Ok(out)
+}
+
+gcm_fault: fn(e: cipher.CipherError) -> CipherLayerError Never! {
+    if e == .Auth -> return CipherLayerError.AuthFailed
+    CipherLayerError.GCMBadInput
+}
+
+ccm_fault: fn(e: cipher.CipherError) -> CipherLayerError Never! {
+    if e == .Auth -> return CipherLayerError.AuthFailed
+    CipherLayerError.CCMBadInput
+}
+
+kw_fault: fn(e: cipher.CipherError) -> CipherLayerError Never! {
+    if e == .Auth -> return CipherLayerError.AuthFailed
+    CipherLayerError.BadInputData
+}
+
+gcm_seal: fn<K: ForwardBlock>(g: GCMContext<K>, iv: [U8], ad: [U8], input: [U8], tag_len: Int) -> [U8] CipherLayerError! {
+    if aead.gcm_encrypt(g.key, iv, ad, input, tag_len) == {
+        .Ok(sealed) -> Ok(sealed)
+        .Err(e) -> Err(gcm_fault(e))
+    }
+}
+
+gcm_open: fn<K: ForwardBlock>(g: GCMContext<K>, iv: [U8], ad: [U8], input: [U8], tag_len: Int) -> [U8] CipherLayerError! {
+    if aead.gcm_decrypt(g.key, iv, ad, input, tag_len) == {
+        .Ok(plain) -> Ok(plain)
+        .Err(e) -> Err(gcm_fault(e))
+    }
+}
+
+ccm_seal: fn<K: ForwardBlock>(c: CCMContext<K>, iv: [U8], ad: [U8], input: [U8], tag_len: Int) -> [U8] CipherLayerError! {
+    if aead.ccm_encrypt(c.key, false, iv, ad, input, tag_len) == {
+        .Ok(sealed) -> Ok(sealed)
+        .Err(e) -> Err(ccm_fault(e))
+    }
+}
+
+ccm_open: fn<K: ForwardBlock>(c: CCMContext<K>, iv: [U8], ad: [U8], input: [U8], tag_len: Int) -> [U8] CipherLayerError! {
+    if aead.ccm_decrypt(c.key, false, iv, ad, input, tag_len) == {
+        .Ok(plain) -> Ok(plain)
+        .Err(e) -> Err(ccm_fault(e))
+    }
+}
+
+/// ChaCha20-Poly1305 over the context (mbedtls_chachapoly_encrypt_and_tag).
+chachapoly_seal: fn(cp: &aead.ChaChaPoly, iv: [U8], ad: [U8], input: [U8]) -> [U8] CipherLayerError! {
+    if !aead.chachapoly_starts(cp, iv, false) -> return Err(.ChaCha20BadInput)
+    if !aead.chachapoly_update_ad(cp, ad) -> return Err(.ChaChaPolyBadState)
+    out := [U8]{}
+    if !aead.chachapoly_update(cp, input, 0, input.len(), out) -> return Err(.ChaCha20BadInput)
+    mac: aead.chachapoly_finish(cp) ?? return Err(.ChaChaPolyBadState)
+    push_all(out, mac)
+    Ok(out)
+}
+
+/// mbedtls_chachapoly_auth_decrypt over the context: the plaintext of
+/// input[0..<len], or AuthFailed against the tag that follows it.
+chachapoly_open: fn(cp: &aead.ChaChaPoly, iv: [U8], ad: [U8], input: [U8], len: Int) -> [U8] CipherLayerError! {
+    if !aead.chachapoly_starts(cp, iv, true) -> return Err(.ChaCha20BadInput)
+    if !aead.chachapoly_update_ad(cp, ad) -> return Err(.ChaChaPolyBadState)
+    out := [U8]{}
+    if !aead.chachapoly_update(cp, input, 0, len, out) -> return Err(.ChaCha20BadInput)
+    want := aead.chachapoly_finish(cp) ?? return Err(.ChaChaPolyBadState)
+    mac := cipher.bytes_of(input, len, 16)
+    same: aead.tags_equal(mac, want, 16)
+    core.crypto.wipe(want)
+    if !same {
+        core.crypto.wipe(out)
+        return Err(.AuthFailed)
+    }
+    Ok(out)
+}
+
+/// Encrypt and authenticate in one call (mbedtls_cipher_auth_encrypt_ext):
+/// the ciphertext followed by its `tag_len`-byte tag, for GCM, CCM and
+/// ChaCha20-Poly1305 (a 12-byte nonce and a 16-byte tag); or the key
+/// wrap of `input` for KW and KWP, which take no IV, AAD or tag.
+cipher_auth_encrypt_ext: fn(ctx: &CipherContext, iv: [U8], ad: [U8], input: [U8], tag_len: Int) -> [U8] CipherLayerError! {
+    mode: ctx.info.mode
+    if mode == .KW || mode == .KWP {
+        if iv.len() != 0 || tag_len != 0 || ad.len() != 0 -> return Err(.BadInputData)
+        if ctx.base == {
+            .KW(k) -> {
+                if cipher.kw_wrap(k, mode == .KWP, input) == {
+                    .Ok(wrapped) -> return Ok(wrapped)
+                    .Err(e) -> return Err(kw_fault(e))
+                }
+            }
+            else -> return Err(.BadInputData)
+        }
+    }
+    if mode == {
+        .GCM -> {
+            if ctx.base == {
+                .GCMAES(g) -> gcm_seal(g, iv, ad, input, tag_len)
+                .GCMCamellia(g) -> gcm_seal(g, iv, ad, input, tag_len)
+                .GCMARIA(g) -> gcm_seal(g, iv, ad, input, tag_len)
+                else -> Err(.BadInputData)
+            }
+        }
+        .CCM -> {
+            if ctx.base == {
+                .CCMAES(c) -> ccm_seal(c, iv, ad, input, tag_len)
+                .CCMCamellia(c) -> ccm_seal(c, iv, ad, input, tag_len)
+                .CCMARIA(c) -> ccm_seal(c, iv, ad, input, tag_len)
+                else -> Err(.BadInputData)
+            }
+        }
+        .ChaChaPoly -> {
+            if iv.len() != ctx.info.iv_size || tag_len != 16 -> return Err(.BadInputData)
+            if &ctx.base == {
+                .ChaChaPoly(cp) -> chachapoly_seal(cp, iv, ad, input)
+                else -> Err(.BadInputData)
+            }
+        }
+        else -> Err(.FeatureUnavailable)
+    }
+}
+
+/// Check and decrypt in one call (mbedtls_cipher_auth_decrypt_ext): the
+/// plaintext of `input`, whose last `tag_len` bytes are the tag, or
+/// AuthFailed with no plaintext; or the key unwrap of `input` for KW and
+/// KWP.
+cipher_auth_decrypt_ext: fn(ctx: &CipherContext, iv: [U8], ad: [U8], input: [U8], tag_len: Int) -> [U8] CipherLayerError! {
+    mode: ctx.info.mode
+    if mode == .KW || mode == .KWP {
+        if iv.len() != 0 || tag_len != 0 || ad.len() != 0 -> return Err(.BadInputData)
+        if ctx.base == {
+            .KW(k) -> {
+                if cipher.kw_unwrap(k, mode == .KWP, input) == {
+                    .Ok(plain) -> return Ok(plain)
+                    .Err(e) -> return Err(kw_fault(e))
+                }
+            }
+            else -> return Err(.BadInputData)
+        }
+    }
+    if tag_len < 0 || input.len() < tag_len -> return Err(.BadInputData)
+    if mode == {
+        .GCM -> {
+            if ctx.base == {
+                .GCMAES(g) -> gcm_open(g, iv, ad, input, tag_len)
+                .GCMCamellia(g) -> gcm_open(g, iv, ad, input, tag_len)
+                .GCMARIA(g) -> gcm_open(g, iv, ad, input, tag_len)
+                else -> Err(.BadInputData)
+            }
+        }
+        .CCM -> {
+            if ctx.base == {
+                .CCMAES(c) -> ccm_open(c, iv, ad, input, tag_len)
+                .CCMCamellia(c) -> ccm_open(c, iv, ad, input, tag_len)
+                .CCMARIA(c) -> ccm_open(c, iv, ad, input, tag_len)
+                else -> Err(.BadInputData)
+            }
+        }
+        .ChaChaPoly -> {
+            if iv.len() != ctx.info.iv_size || tag_len != 16 -> return Err(.BadInputData)
+            if &ctx.base == {
+                .ChaChaPoly(cp) -> chachapoly_open(cp, iv, ad, input, input.len() - 16)
+                else -> Err(.BadInputData)
+            }
+        }
+        else -> Err(.FeatureUnavailable)
+    }
+}
+
+#Test("The cipher layer runs SP 800-38A CBC-AES128 and GCM test case 2, pads and refuses bad padding") {
+    info: cipher_info_from_string("AES-128-CBC") ?? panic("AES-128-CBC")
+    assert((cipher_info_from_values(.AES, 128, .CBC) ?? panic("values")).name == "AES-128-CBC")
+    key: [U8]{0x2b, 0x7e, 0x15, 0x16, 0x28, 0xae, 0xd2, 0xa6, 0xab, 0xf7, 0x15, 0x88, 0x09, 0xcf, 0x4f, 0x3c}
+    iv: [U8]{0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f}
+    plain: [U8]{0x6b, 0xc1, 0xbe, 0xe2, 0x2e, 0x40, 0x9f, 0x96, 0xe9, 0x3d, 0x7e, 0x11, 0x73, 0x93, 0x17, 0x2a}
+    sealed: [U8]{0x76, 0x49, 0xab, 0xac, 0x81, 0x19, 0xb2, 0x46, 0xce, 0xe9, 0x8e, 0x9b, 0x12, 0xe9, 0x19, 0x7d}
+    enc := cipher_setup(info)
+    cipher_setkey(enc, key, .Encrypt) ?? panic("setkey")
+    cipher_set_padding_mode(enc, .Unpadded) ?? panic("padding")
+    assert((cipher_crypt(enc, iv, plain) ?? panic("crypt")) == sealed)
+    cipher_set_padding_mode(enc, .PKCS7) ?? panic("padding")
+    padded: cipher_crypt(enc, iv, plain) ?? panic("crypt")
+    assert(padded.len() == 32)
+    dec := cipher_setup(info)
+    cipher_setkey(dec, key, .Decrypt) ?? panic("setkey")
+    cipher_set_padding_mode(dec, .PKCS7) ?? panic("padding")
+    assert((cipher_crypt(dec, iv, padded) ?? panic("crypt")) == plain)
+    refused: if cipher_crypt(dec, iv, sealed) == {
+        .Ok(_) -> false
+        .Err(e) -> e == .InvalidPadding
+    }
+    assert(refused)
+    gcm := cipher_setup(cipher_info_from_string("AES-128-GCM") ?? panic("AES-128-GCM"))
+    cipher_setkey(gcm, cipher.zero_bytes(16), .Encrypt) ?? panic("setkey")
+    out: cipher_auth_encrypt_ext(gcm, cipher.zero_bytes(12), [U8]{}, cipher.zero_bytes(16), 16) ?? panic("seal")
+    assert(out == [U8]{0x03, 0x88, 0xda, 0xce, 0x60, 0xb6, 0xa3, 0x92, 0xf3, 0x28, 0xc2, 0xb9, 0x71, 0xb2, 0xfe, 0x78,
+        0xab, 0x6e, 0x47, 0xd4, 0x2c, 0xec, 0x13, 0xbd, 0xf5, 0x3a, 0x67, 0xb2, 0x12, 0x57, 0xbd, 0xdf})
+}

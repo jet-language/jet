@@ -1,0 +1,504 @@
+// Private Core source part: DES and Triple-DES (FIPS 46-3, NIST SP 800-67).
+//
+// A port of mbedtls 3.6.7's des.c: the single-DES and two- and three-key
+// Triple-DES (EDE) key schedules, ECB and CBC, the key parity helpers and
+// the weak-key table. As in mbedtls, the rounds index the expanded S-box
+// tables with key-dependent data: DES has no constant-time form here, and
+// is kept for legacy interoperability (PKCS #12, PKCS #5 PBES2, old
+// cipher suites).
+use {
+    core
+    cipher: __core_crypto_cipher
+}
+
+/// Why a DES operation failed.
+#Error
+DESError: enum {
+    /// The data, or an IV, is not whole 8-byte blocks
+    /// (MBEDTLS_ERR_DES_INVALID_INPUT_LENGTH, -0x0032).
+    InvalidInputLength
+    /// The key is not the 8, 16 or 24 bytes its schedule takes; C takes
+    /// fixed-size arrays.
+    InvalidKeyLength
+}
+
+/// The direction of a CBC operation (MBEDTLS_DES_ENCRYPT, MBEDTLS_DES_DECRYPT).
+DESMode: enum {
+    Encrypt
+    Decrypt
+}
+
+/// The bytes of a single DES key, parity bits included.
+DES_KEY_SIZE: 8
+/// The bytes of a DES block.
+DES_BLOCK_SIZE: 8
+
+/// An expanded DES or Triple-DES key: 32 subkey words per DES pass, in the
+/// order the key's direction runs them; one pass for DES, three for
+/// Triple-DES (mbedtls_des_context, mbedtls_des3_context).
+DESKey: struct {
+    sk: [U32]
+}
+
+impl DESKey.Close {
+    close: fn(&&self) {
+        sk := self.sk.move()
+        loop i in 0..<sk.len() -> sk[i] = U32{0}
+    }
+}
+
+// The expanded S-boxes: SB1..SB8 fold each S-box with the P permutation.
+SB1: [U32]{
+    0x01010400, 0x00000000, 0x00010000, 0x01010404, 0x01010004, 0x00010404, 0x00000004, 0x00010000,
+    0x00000400, 0x01010400, 0x01010404, 0x00000400, 0x01000404, 0x01010004, 0x01000000, 0x00000004,
+    0x00000404, 0x01000400, 0x01000400, 0x00010400, 0x00010400, 0x01010000, 0x01010000, 0x01000404,
+    0x00010004, 0x01000004, 0x01000004, 0x00010004, 0x00000000, 0x00000404, 0x00010404, 0x01000000,
+    0x00010000, 0x01010404, 0x00000004, 0x01010000, 0x01010400, 0x01000000, 0x01000000, 0x00000400,
+    0x01010004, 0x00010000, 0x00010400, 0x01000004, 0x00000400, 0x00000004, 0x01000404, 0x00010404,
+    0x01010404, 0x00010004, 0x01010000, 0x01000404, 0x01000004, 0x00000404, 0x00010404, 0x01010400,
+    0x00000404, 0x01000400, 0x01000400, 0x00000000, 0x00010004, 0x00010400, 0x00000000, 0x01010004,
+}
+
+SB2: [U32]{
+    0x80108020, 0x80008000, 0x00008000, 0x00108020, 0x00100000, 0x00000020, 0x80100020, 0x80008020,
+    0x80000020, 0x80108020, 0x80108000, 0x80000000, 0x80008000, 0x00100000, 0x00000020, 0x80100020,
+    0x00108000, 0x00100020, 0x80008020, 0x00000000, 0x80000000, 0x00008000, 0x00108020, 0x80100000,
+    0x00100020, 0x80000020, 0x00000000, 0x00108000, 0x00008020, 0x80108000, 0x80100000, 0x00008020,
+    0x00000000, 0x00108020, 0x80100020, 0x00100000, 0x80008020, 0x80100000, 0x80108000, 0x00008000,
+    0x80100000, 0x80008000, 0x00000020, 0x80108020, 0x00108020, 0x00000020, 0x00008000, 0x80000000,
+    0x00008020, 0x80108000, 0x00100000, 0x80000020, 0x00100020, 0x80008020, 0x80000020, 0x00100020,
+    0x00108000, 0x00000000, 0x80008000, 0x00008020, 0x80000000, 0x80100020, 0x80108020, 0x00108000,
+}
+
+SB3: [U32]{
+    0x00000208, 0x08020200, 0x00000000, 0x08020008, 0x08000200, 0x00000000, 0x00020208, 0x08000200,
+    0x00020008, 0x08000008, 0x08000008, 0x00020000, 0x08020208, 0x00020008, 0x08020000, 0x00000208,
+    0x08000000, 0x00000008, 0x08020200, 0x00000200, 0x00020200, 0x08020000, 0x08020008, 0x00020208,
+    0x08000208, 0x00020200, 0x00020000, 0x08000208, 0x00000008, 0x08020208, 0x00000200, 0x08000000,
+    0x08020200, 0x08000000, 0x00020008, 0x00000208, 0x00020000, 0x08020200, 0x08000200, 0x00000000,
+    0x00000200, 0x00020008, 0x08020208, 0x08000200, 0x08000008, 0x00000200, 0x00000000, 0x08020008,
+    0x08000208, 0x00020000, 0x08000000, 0x08020208, 0x00000008, 0x00020208, 0x00020200, 0x08000008,
+    0x08020000, 0x08000208, 0x00000208, 0x08020000, 0x00020208, 0x00000008, 0x08020008, 0x00020200,
+}
+
+SB4: [U32]{
+    0x00802001, 0x00002081, 0x00002081, 0x00000080, 0x00802080, 0x00800081, 0x00800001, 0x00002001,
+    0x00000000, 0x00802000, 0x00802000, 0x00802081, 0x00000081, 0x00000000, 0x00800080, 0x00800001,
+    0x00000001, 0x00002000, 0x00800000, 0x00802001, 0x00000080, 0x00800000, 0x00002001, 0x00002080,
+    0x00800081, 0x00000001, 0x00002080, 0x00800080, 0x00002000, 0x00802080, 0x00802081, 0x00000081,
+    0x00800080, 0x00800001, 0x00802000, 0x00802081, 0x00000081, 0x00000000, 0x00000000, 0x00802000,
+    0x00002080, 0x00800080, 0x00800081, 0x00000001, 0x00802001, 0x00002081, 0x00002081, 0x00000080,
+    0x00802081, 0x00000081, 0x00000001, 0x00002000, 0x00800001, 0x00002001, 0x00802080, 0x00800081,
+    0x00002001, 0x00002080, 0x00800000, 0x00802001, 0x00000080, 0x00800000, 0x00002000, 0x00802080,
+}
+
+SB5: [U32]{
+    0x00000100, 0x02080100, 0x02080000, 0x42000100, 0x00080000, 0x00000100, 0x40000000, 0x02080000,
+    0x40080100, 0x00080000, 0x02000100, 0x40080100, 0x42000100, 0x42080000, 0x00080100, 0x40000000,
+    0x02000000, 0x40080000, 0x40080000, 0x00000000, 0x40000100, 0x42080100, 0x42080100, 0x02000100,
+    0x42080000, 0x40000100, 0x00000000, 0x42000000, 0x02080100, 0x02000000, 0x42000000, 0x00080100,
+    0x00080000, 0x42000100, 0x00000100, 0x02000000, 0x40000000, 0x02080000, 0x42000100, 0x40080100,
+    0x02000100, 0x40000000, 0x42080000, 0x02080100, 0x40080100, 0x00000100, 0x02000000, 0x42080000,
+    0x42080100, 0x00080100, 0x42000000, 0x42080100, 0x02080000, 0x00000000, 0x40080000, 0x42000000,
+    0x00080100, 0x02000100, 0x40000100, 0x00080000, 0x00000000, 0x40080000, 0x02080100, 0x40000100,
+}
+
+SB6: [U32]{
+    0x20000010, 0x20400000, 0x00004000, 0x20404010, 0x20400000, 0x00000010, 0x20404010, 0x00400000,
+    0x20004000, 0x00404010, 0x00400000, 0x20000010, 0x00400010, 0x20004000, 0x20000000, 0x00004010,
+    0x00000000, 0x00400010, 0x20004010, 0x00004000, 0x00404000, 0x20004010, 0x00000010, 0x20400010,
+    0x20400010, 0x00000000, 0x00404010, 0x20404000, 0x00004010, 0x00404000, 0x20404000, 0x20000000,
+    0x20004000, 0x00000010, 0x20400010, 0x00404000, 0x20404010, 0x00400000, 0x00004010, 0x20000010,
+    0x00400000, 0x20004000, 0x20000000, 0x00004010, 0x20000010, 0x20404010, 0x00404000, 0x20400000,
+    0x00404010, 0x20404000, 0x00000000, 0x20400010, 0x00000010, 0x00004000, 0x20400000, 0x00404010,
+    0x00004000, 0x00400010, 0x20004010, 0x00000000, 0x20404000, 0x20000000, 0x00400010, 0x20004010,
+}
+
+SB7: [U32]{
+    0x00200000, 0x04200002, 0x04000802, 0x00000000, 0x00000800, 0x04000802, 0x00200802, 0x04200800,
+    0x04200802, 0x00200000, 0x00000000, 0x04000002, 0x00000002, 0x04000000, 0x04200002, 0x00000802,
+    0x04000800, 0x00200802, 0x00200002, 0x04000800, 0x04000002, 0x04200000, 0x04200800, 0x00200002,
+    0x04200000, 0x00000800, 0x00000802, 0x04200802, 0x00200800, 0x00000002, 0x04000000, 0x00200800,
+    0x04000000, 0x00200800, 0x00200000, 0x04000802, 0x04000802, 0x04200002, 0x04200002, 0x00000002,
+    0x00200002, 0x04000000, 0x04000800, 0x00200000, 0x04200800, 0x00000802, 0x00200802, 0x04200800,
+    0x00000802, 0x04000002, 0x04200802, 0x04200000, 0x00200800, 0x00000000, 0x00000002, 0x04200802,
+    0x00000000, 0x00200802, 0x04200000, 0x00000800, 0x04000002, 0x04000800, 0x00000800, 0x00200002,
+}
+
+SB8: [U32]{
+    0x10001040, 0x00001000, 0x00040000, 0x10041040, 0x10000000, 0x10001040, 0x00000040, 0x10000000,
+    0x00040040, 0x10040000, 0x10041040, 0x00041000, 0x10041000, 0x00041040, 0x00001000, 0x00000040,
+    0x10040000, 0x10000040, 0x10001000, 0x00001040, 0x00041000, 0x00040040, 0x10040040, 0x10041000,
+    0x00001040, 0x00000000, 0x00000000, 0x10040040, 0x10000040, 0x10001000, 0x00041040, 0x00040000,
+    0x00041040, 0x00040000, 0x10041000, 0x00001000, 0x00000040, 0x10040040, 0x00001000, 0x00041040,
+    0x10001000, 0x00000040, 0x10000040, 0x10040000, 0x10040040, 0x10000000, 0x00040000, 0x10001040,
+    0x00000000, 0x10041040, 0x00040040, 0x10000040, 0x10040000, 0x10001000, 0x10001040, 0x00000000,
+    0x10041040, 0x00041000, 0x00041000, 0x00001040, 0x00001040, 0x00040040, 0x10000000, 0x10041000,
+}
+
+// PC1: the left and right halves' bit swaps.
+LHS: [U32]{
+    0x00000000, 0x00000001, 0x00000100, 0x00000101, 0x00010000, 0x00010001, 0x00010100, 0x00010101,
+    0x01000000, 0x01000001, 0x01000100, 0x01000101, 0x01010000, 0x01010001, 0x01010100, 0x01010101,
+}
+
+RHS: [U32]{
+    0x00000000, 0x01000000, 0x00010000, 0x01010000, 0x00000100, 0x01000100, 0x00010100, 0x01010100,
+    0x00000001, 0x01000001, 0x00010001, 0x01010001, 0x00000101, 0x01000101, 0x00010101, 0x01010101,
+}
+
+// odd_parity_table[b / 2]: the byte with b's top seven bits and odd parity.
+ODD_PARITY: [U8]{
+    1, 2, 4, 7, 8, 11, 13, 14, 16, 19, 21, 22, 25, 26, 28, 31, 32, 35, 37, 38, 41, 42, 44, 47, 49, 50,
+    52, 55, 56, 59, 61, 62, 64, 67, 69, 70, 73, 74, 76, 79, 81, 82, 84, 87, 88, 91, 93, 94, 97, 98, 100,
+    103, 104, 107, 109, 110, 112, 115, 117, 118, 121, 122, 124, 127, 128, 131, 133, 134, 137, 138, 140,
+    143, 145, 146, 148, 151, 152, 155, 157, 158, 161, 162, 164, 167, 168, 171, 173, 174, 176, 179, 181,
+    182, 185, 186, 188, 191, 193, 194, 196, 199, 200, 203, 205, 206, 208, 211, 213, 214, 217, 218, 220,
+    223, 224, 227, 229, 230, 233, 234, 236, 239, 241, 242, 244, 247, 248, 251, 253, 254,
+}
+
+// The key schedule's left rotation per round (FIPS 46-3 table of shifts).
+KEY_ROTATIONS: [Int]{1, 1, 2, 2, 2, 2, 2, 2, 1, 2, 2, 2, 2, 2, 2, 1}
+
+// The four weak and twelve semi-weak keys, eight bytes each.
+WEAK_KEYS: [U8]{
+    0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+    0xFE, 0xFE, 0xFE, 0xFE, 0xFE, 0xFE, 0xFE, 0xFE,
+    0x1F, 0x1F, 0x1F, 0x1F, 0x0E, 0x0E, 0x0E, 0x0E,
+    0xE0, 0xE0, 0xE0, 0xE0, 0xF1, 0xF1, 0xF1, 0xF1,
+    0x01, 0x1F, 0x01, 0x1F, 0x01, 0x0E, 0x01, 0x0E,
+    0x1F, 0x01, 0x1F, 0x01, 0x0E, 0x01, 0x0E, 0x01,
+    0x01, 0xE0, 0x01, 0xE0, 0x01, 0xF1, 0x01, 0xF1,
+    0xE0, 0x01, 0xE0, 0x01, 0xF1, 0x01, 0xF1, 0x01,
+    0x01, 0xFE, 0x01, 0xFE, 0x01, 0xFE, 0x01, 0xFE,
+    0xFE, 0x01, 0xFE, 0x01, 0xFE, 0x01, 0xFE, 0x01,
+    0x1F, 0xE0, 0x1F, 0xE0, 0x0E, 0xF1, 0x0E, 0xF1,
+    0xE0, 0x1F, 0xE0, 0x1F, 0xF1, 0x0E, 0xF1, 0x0E,
+    0x1F, 0xFE, 0x1F, 0xFE, 0x0E, 0xFE, 0x0E, 0xFE,
+    0xFE, 0x1F, 0xFE, 0x1F, 0xFE, 0x0E, 0xFE, 0x0E,
+    0xE0, 0xFE, 0xE0, 0xFE, 0xF1, 0xFE, 0xF1, 0xFE,
+    0xFE, 0xE0, 0xFE, 0xE0, 0xFE, 0xF1, 0xFE, 0xF1,
+}
+
+/// Set every byte of an 8-byte key to odd parity, keeping its top seven
+/// bits (mbedtls_des_key_set_parity).
+des_key_set_parity: fn(key: &[U8]) Never! {
+    loop i in 0..<key.len() -> key[i] = ODD_PARITY[Int{key[i]} >> 1]
+}
+
+/// Whether every byte of the key has odd parity
+/// (mbedtls_des_key_check_key_parity returns 0 for true).
+des_key_check_key_parity: fn(key: [U8]) -> Bool Never! {
+    loop b in key {
+        if b != ODD_PARITY[Int{b} >> 1] -> return false
+    }
+    true
+}
+
+/// Whether the key is one of DES's four weak or twelve semi-weak keys
+/// (mbedtls_des_key_check_weak).
+des_key_check_weak: fn(key: [U8]) -> Bool Never! {
+    if key.len() != DES_KEY_SIZE -> return false
+    loop w in 0..<16 {
+        same := true
+        loop i in 0..<DES_KEY_SIZE {
+            if WEAK_KEYS[8 * w + i] != key[i] -> same = false
+        }
+        if same -> return true
+    }
+    false
+}
+
+get_be32: fn(b: [U8], off: Int) -> U32 Never! {
+    (U32{b[off]} << 24).bit_or(U32{b[off + 1]} << 16).bit_or(U32{b[off + 2]} << 8).bit_or(U32{b[off + 3]})
+}
+
+put_be32: fn(out: &[U8], at: Int, w: U32) Never! {
+    out[at] = U8{w >> 24}
+    out[at + 1] = U8{(w >> 16).bit_and(U32{255})}
+    out[at + 2] = U8{(w >> 8).bit_and(U32{255})}
+    out[at + 3] = U8{w.bit_and(U32{255})}
+}
+
+nibble: fn(x: U32, shift: Int) -> Int Never! { Int{(x >> shift).bit_and(U32{0xF})} }
+
+// The 32 subkey words of one 8-byte key at key[off..], into sk[at..]
+// (mbedtls_des_setkey).
+setkey: fn(sk: &[U32], at: Int, key: [U8], off: Int) Never! {
+    x := get_be32(key, off)
+    y := get_be32(key, off + 4)
+    // Permuted Choice 1.
+    t := ((y >> 4).bit_xor(x)).bit_and(U32{0x0F0F0F0F})
+    x = x.bit_xor(t)
+    y = y.bit_xor(t << 4)
+    t = y.bit_xor(x).bit_and(U32{0x10101010})
+    x = x.bit_xor(t)
+    y = y.bit_xor(t)
+    x = (LHS[nibble(x, 0)] << 3).bit_or(LHS[nibble(x, 8)] << 2).bit_or(LHS[nibble(x, 16)] << 1).bit_or(LHS[nibble(x, 24)])
+        .bit_or(LHS[nibble(x, 5)] << 7).bit_or(LHS[nibble(x, 13)] << 6).bit_or(LHS[nibble(x, 21)] << 5).bit_or(LHS[nibble(x, 29)] << 4)
+    y = (RHS[nibble(y, 1)] << 3).bit_or(RHS[nibble(y, 9)] << 2).bit_or(RHS[nibble(y, 17)] << 1).bit_or(RHS[nibble(y, 25)])
+        .bit_or(RHS[nibble(y, 4)] << 7).bit_or(RHS[nibble(y, 12)] << 6).bit_or(RHS[nibble(y, 20)] << 5).bit_or(RHS[nibble(y, 28)] << 4)
+    m28: U32{0x0FFFFFFF}
+    x = x.bit_and(m28)
+    y = y.bit_and(m28)
+    loop i in 0..<16 {
+        // The left rotations of the 28-bit halves: one bit in rounds 1, 2,
+        // 9 and 16, two in the others.
+        s: KEY_ROTATIONS[i]
+        x = ((x << s).bit_or(x >> (28 - s))).bit_and(m28)
+        y = ((y << s).bit_or(y >> (28 - s))).bit_and(m28)
+        sk[at + 2 * i] = (x << 4).bit_and(U32{0x24000000}).bit_or((x << 28).bit_and(U32{0x10000000}))
+            .bit_or((x << 14).bit_and(U32{0x08000000})).bit_or((x << 18).bit_and(U32{0x02080000}))
+            .bit_or((x << 6).bit_and(U32{0x01000000})).bit_or((x << 9).bit_and(U32{0x00200000}))
+            .bit_or((x >> 1).bit_and(U32{0x00100000})).bit_or((x << 10).bit_and(U32{0x00040000}))
+            .bit_or((x << 2).bit_and(U32{0x00020000})).bit_or((x >> 10).bit_and(U32{0x00010000}))
+            .bit_or((y >> 13).bit_and(U32{0x00002000})).bit_or((y >> 4).bit_and(U32{0x00001000}))
+            .bit_or((y << 6).bit_and(U32{0x00000800})).bit_or((y >> 1).bit_and(U32{0x00000400}))
+            .bit_or((y >> 14).bit_and(U32{0x00000200})).bit_or(y.bit_and(U32{0x00000100}))
+            .bit_or((y >> 5).bit_and(U32{0x00000020})).bit_or((y >> 10).bit_and(U32{0x00000010}))
+            .bit_or((y >> 3).bit_and(U32{0x00000008})).bit_or((y >> 18).bit_and(U32{0x00000004}))
+            .bit_or((y >> 26).bit_and(U32{0x00000002})).bit_or((y >> 24).bit_and(U32{0x00000001}))
+        sk[at + 2 * i + 1] = (x << 15).bit_and(U32{0x20000000}).bit_or((x << 17).bit_and(U32{0x10000000}))
+            .bit_or((x << 10).bit_and(U32{0x08000000})).bit_or((x << 22).bit_and(U32{0x04000000}))
+            .bit_or((x >> 2).bit_and(U32{0x02000000})).bit_or((x << 1).bit_and(U32{0x01000000}))
+            .bit_or((x << 16).bit_and(U32{0x00200000})).bit_or((x << 11).bit_and(U32{0x00100000}))
+            .bit_or((x << 3).bit_and(U32{0x00080000})).bit_or((x >> 6).bit_and(U32{0x00040000}))
+            .bit_or((x << 15).bit_and(U32{0x00020000})).bit_or((x >> 4).bit_and(U32{0x00010000}))
+            .bit_or((y >> 2).bit_and(U32{0x00002000})).bit_or((y << 8).bit_and(U32{0x00001000}))
+            .bit_or((y >> 14).bit_and(U32{0x00000808})).bit_or((y >> 9).bit_and(U32{0x00000400}))
+            .bit_or(y.bit_and(U32{0x00000200})).bit_or((y << 7).bit_and(U32{0x00000100}))
+            .bit_or((y >> 7).bit_and(U32{0x00000020})).bit_or((y >> 3).bit_and(U32{0x00000011}))
+            .bit_or((y << 2).bit_and(U32{0x00000004})).bit_or((y >> 21).bit_and(U32{0x00000002}))
+    }
+}
+
+subkeys: fn(count: Int) -> [U32] Never! {
+    sk := [U32]{}
+    loop _ in 0..<count -> sk.push(U32{0})
+    sk
+}
+
+check_key: fn(key: [U8], size: Int) DESError! {
+    if key.len() != size -> return Err(.InvalidKeyLength)
+}
+
+/// A DES key schedule for encryption (mbedtls_des_setkey_enc).
+des_setkey_enc: fn(key: [U8]) -> DESKey DESError! {
+    check_key(key, DES_KEY_SIZE)
+    sk := subkeys(32)
+    setkey(sk, 0, key, 0)
+    Ok(DESKey{sk: sk})
+}
+
+/// A DES key schedule for decryption: the encryption subkeys in reverse
+/// round order (mbedtls_des_setkey_dec).
+des_setkey_dec: fn(key: [U8]) -> DESKey DESError! {
+    check_key(key, DES_KEY_SIZE)
+    sk := subkeys(32)
+    setkey(sk, 0, key, 0)
+    loop i in 0..<8 {
+        j: 2 * i
+        a: sk[j]
+        sk[j] = sk[30 - j]
+        sk[30 - j] = a
+        b: sk[j + 1]
+        sk[j + 1] = sk[31 - j]
+        sk[31 - j] = b
+    }
+    Ok(DESKey{sk: sk})
+}
+
+// The encryption and decryption schedules of a two-key (K1 K2 K1) Triple-DES
+// key (des3_set2key).
+set2key: fn(esk: &[U32], dsk: &[U32], key: [U8]) Never! {
+    setkey(esk, 0, key, 0)
+    setkey(dsk, 32, key, 8)
+    loop i in 0..<16 {
+        j: 2 * i
+        dsk[j] = esk[30 - j]
+        dsk[j + 1] = esk[31 - j]
+        esk[j + 32] = dsk[62 - j]
+        esk[j + 33] = dsk[63 - j]
+        esk[j + 64] = esk[j]
+        esk[j + 65] = esk[j + 1]
+        dsk[j + 64] = dsk[j]
+        dsk[j + 65] = dsk[j + 1]
+    }
+}
+
+// The encryption and decryption schedules of a three-key Triple-DES key
+// (des3_set3key).
+set3key: fn(esk: &[U32], dsk: &[U32], key: [U8]) Never! {
+    setkey(esk, 0, key, 0)
+    setkey(dsk, 32, key, 8)
+    setkey(esk, 64, key, 16)
+    loop i in 0..<16 {
+        j: 2 * i
+        dsk[j] = esk[94 - j]
+        dsk[j + 1] = esk[95 - j]
+        esk[j + 32] = dsk[62 - j]
+        esk[j + 33] = dsk[63 - j]
+        dsk[j + 64] = esk[30 - j]
+        dsk[j + 65] = esk[31 - j]
+    }
+}
+
+// One Triple-DES schedule: `size` key bytes, the half `mode` runs; the
+// other half is wiped.
+des3_key: fn(key: [U8], size: Int, mode: DESMode) -> DESKey DESError! {
+    check_key(key, size)
+    esk := subkeys(96)
+    dsk := subkeys(96)
+    if size == 16 -> set2key(esk, dsk, key) else -> set3key(esk, dsk, key)
+    if mode == .Decrypt {
+        loop i in 0..<96 -> esk[i] = U32{0}
+        return Ok(DESKey{sk: dsk})
+    }
+    loop i in 0..<96 -> dsk[i] = U32{0}
+    Ok(DESKey{sk: esk})
+}
+
+/// A two-key (112-bit) Triple-DES schedule for encryption
+/// (mbedtls_des3_set2key_enc).
+des3_set2key_enc: fn(key: [U8]) -> DESKey DESError! { des3_key(key, 16, .Encrypt) }
+
+/// A two-key Triple-DES schedule for decryption (mbedtls_des3_set2key_dec).
+des3_set2key_dec: fn(key: [U8]) -> DESKey DESError! { des3_key(key, 16, .Decrypt) }
+
+/// A three-key (168-bit) Triple-DES schedule for encryption
+/// (mbedtls_des3_set3key_enc).
+des3_set3key_enc: fn(key: [U8]) -> DESKey DESError! { des3_key(key, 24, .Encrypt) }
+
+/// A three-key Triple-DES schedule for decryption (mbedtls_des3_set3key_dec).
+des3_set3key_dec: fn(key: [U8]) -> DESKey DESError! { des3_key(key, 24, .Decrypt) }
+
+expanded_sbox: fn(table: [U32], t: U32, shift: Int) -> U32 Never! { table[Int{(t >> shift).bit_and(U32{0x3F})}] }
+
+// DES_ROUND(X, Y) with subkeys sk[at], sk[at + 1]: the new Y.
+des_round: fn(sk: [U32], at: Int, x: U32, y: U32) -> U32 Never! {
+    t := sk[at].bit_xor(x)
+    r := y.bit_xor(expanded_sbox(SB8, t, 0)).bit_xor(expanded_sbox(SB6, t, 8)).bit_xor(expanded_sbox(SB4, t, 16)).bit_xor(expanded_sbox(SB2, t, 24))
+    t = sk[at + 1].bit_xor((x << 28).bit_or(x >> 4))
+    r.bit_xor(expanded_sbox(SB7, t, 0)).bit_xor(expanded_sbox(SB5, t, 8)).bit_xor(expanded_sbox(SB3, t, 16)).bit_xor(expanded_sbox(SB1, t, 24))
+}
+
+// The 8-byte block src[off..] through every pass of the key into out[at..]
+// (mbedtls_des_crypt_ecb, mbedtls_des3_crypt_ecb).
+crypt_block: fn(k: DESKey, src: [U8], off: Int, out: &[U8], at: Int) Never! {
+    x := get_be32(src, off)
+    y := get_be32(src, off + 4)
+    // The initial permutation (DES_IP).
+    t := ((x >> 4).bit_xor(y)).bit_and(U32{0x0F0F0F0F})
+    y = y.bit_xor(t)
+    x = x.bit_xor(t << 4)
+    t = ((x >> 16).bit_xor(y)).bit_and(U32{0x0000FFFF})
+    y = y.bit_xor(t)
+    x = x.bit_xor(t << 16)
+    t = ((y >> 2).bit_xor(x)).bit_and(U32{0x33333333})
+    x = x.bit_xor(t)
+    y = y.bit_xor(t << 2)
+    t = ((y >> 8).bit_xor(x)).bit_and(U32{0x00FF00FF})
+    x = x.bit_xor(t)
+    y = y.bit_xor(t << 8)
+    y = (y << 1).bit_or(y >> 31)
+    t = x.bit_xor(y).bit_and(U32{0xAAAAAAAA})
+    y = y.bit_xor(t)
+    x = x.bit_xor(t)
+    x = (x << 1).bit_or(x >> 31)
+    // A DES pass runs DES_ROUND(Y, X), DES_ROUND(X, Y) eight times; the
+    // middle pass of Triple-DES runs them swapped.
+    passes: k.sk.len() /% 32
+    loop p in 0..<passes {
+        loop i in 0..<8 {
+            at_key: 32 * p + 4 * i
+            if p == 1 {
+                y = des_round(k.sk, at_key, x, y)
+                x = des_round(k.sk, at_key + 2, y, x)
+            } else {
+                x = des_round(k.sk, at_key, y, x)
+                y = des_round(k.sk, at_key + 2, x, y)
+            }
+        }
+    }
+    // The final permutation DES_FP(Y, X).
+    y = (y << 31).bit_or(y >> 1)
+    t = y.bit_xor(x).bit_and(U32{0xAAAAAAAA})
+    y = y.bit_xor(t)
+    x = x.bit_xor(t)
+    x = (x << 31).bit_or(x >> 1)
+    t = ((x >> 8).bit_xor(y)).bit_and(U32{0x00FF00FF})
+    y = y.bit_xor(t)
+    x = x.bit_xor(t << 8)
+    t = ((x >> 2).bit_xor(y)).bit_and(U32{0x33333333})
+    y = y.bit_xor(t)
+    x = x.bit_xor(t << 2)
+    t = ((y >> 16).bit_xor(x)).bit_and(U32{0x0000FFFF})
+    x = x.bit_xor(t)
+    y = y.bit_xor(t << 16)
+    t = ((y >> 4).bit_xor(x)).bit_and(U32{0x0F0F0F0F})
+    x = x.bit_xor(t)
+    y = y.bit_xor(t << 4)
+    put_be32(out, at, y)
+    put_be32(out, at + 4, x)
+}
+
+/// One 8-byte block through a DES or Triple-DES key in the key's direction
+/// (mbedtls_des_crypt_ecb, mbedtls_des3_crypt_ecb).
+des_crypt_ecb: fn(k: DESKey, block: [U8]) -> [U8] DESError! {
+    if block.len() != DES_BLOCK_SIZE -> return Err(.InvalidInputLength)
+    out := cipher.zero_bytes(DES_BLOCK_SIZE)
+    crypt_block(k, block, 0, out, 0)
+    Ok(out)
+}
+
+/// CBC over whole 8-byte blocks with a DES or Triple-DES key; `iv` carries
+/// the chaining value to the next call (mbedtls_des_crypt_cbc,
+/// mbedtls_des3_crypt_cbc). The key's schedule must match `mode`.
+des_crypt_cbc: fn(k: DESKey, mode: DESMode, iv: &[U8], input: [U8]) -> [U8] DESError! {
+    if input.len() %% DES_BLOCK_SIZE != 0 || iv.len() != DES_BLOCK_SIZE -> return Err(.InvalidInputLength)
+    out := cipher.zero_bytes(input.len())
+    block := cipher.zero_bytes(DES_BLOCK_SIZE)
+    loop b in 0..<(input.len() /% DES_BLOCK_SIZE) {
+        at: DES_BLOCK_SIZE * b
+        if mode == .Encrypt {
+            loop i in 0..<DES_BLOCK_SIZE -> block[i] = input[at + i].bit_xor(iv[i])
+            crypt_block(k, block, 0, out, at)
+            loop i in 0..<DES_BLOCK_SIZE -> iv[i] = out[at + i]
+        } else {
+            crypt_block(k, input, at, out, at)
+            loop i in 0..<DES_BLOCK_SIZE {
+                out[at + i] = out[at + i].bit_xor(iv[i])
+                iv[i] = input[at + i]
+            }
+        }
+    }
+    Ok(out)
+}
+
+#Test("DES and Triple-DES match the FIPS 46-3 and NIST known answers and undo themselves") {
+    key: [U8]{0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF, 0x01,
+        0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF, 0x01, 0x23}
+    single: [U8]{0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF}
+    plain: [U8]{0x4E, 0x6F, 0x77, 0x20, 0x69, 0x73, 0x20, 0x74}
+    // "Now is the time for all " under 0123456789ABCDEF (FIPS 81 appendix B).
+    enc: des_setkey_enc(single) ?? panic("key")
+    assert((des_crypt_ecb(enc, plain) ?? panic("ecb")) == [U8]{0x3F, 0xA4, 0x0E, 0x8A, 0x98, 0x4D, 0x48, 0x15})
+    dec: des_setkey_dec(single) ?? panic("key")
+    assert((des_crypt_ecb(dec, des_crypt_ecb(enc, plain) ?? panic("ecb")) ?? panic("ecb")) == plain)
+    e3: des3_set3key_enc(key) ?? panic("key")
+    d3: des3_set3key_dec(key) ?? panic("key")
+    iv := [U8]{0x12, 0x34, 0x56, 0x78, 0x90, 0xAB, 0xCD, 0xEF}
+    two := plain.copy()
+    loop b in plain -> two.push(b)
+    sealed: des_crypt_cbc(e3, .Encrypt, iv, two) ?? panic("cbc")
+    iv2 := [U8]{0x12, 0x34, 0x56, 0x78, 0x90, 0xAB, 0xCD, 0xEF}
+    assert((des_crypt_cbc(d3, .Decrypt, iv2, sealed) ?? panic("cbc")) == two)
+    assert(iv == iv2)
+    assert(des_crypt_cbc(e3, .Encrypt, iv, [U8]{1, 2, 3}) == .Err(.InvalidInputLength))
+    assert(des3_set2key_enc(single) == .Err(.InvalidKeyLength))
+    assert(des_key_check_weak([U8]{0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01}))
+    assert(!des_key_check_weak(single))
+    odd := [U8]{0, 2, 4, 6, 8, 10, 12, 14}
+    des_key_set_parity(odd)
+    assert(des_key_check_key_parity(odd))
+}

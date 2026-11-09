@@ -1,0 +1,208 @@
+// Private Core source part: ECDSA (SEC1 4.1.3 and 4.1.4).
+//
+// A port of mbedtls 3.6.7's ecdsa.c with MBEDTLS_ECDSA_DETERMINISTIC:
+// signing with a random or an RFC 6979 nonce, verification, and the DER
+// signature encoding. The ephemeral point k G goes through the blinded
+// constant-time comb; verification works on public values only.
+use {
+    core
+    cipher: __core_crypto_cipher
+    bn: __core_crypto_bignum
+    __core_crypto_bignum.[RNG]
+    hashes: __core_crypto_md
+    drbg: __core_crypto_drbg
+    asn1: __core_crypto_asn1
+    ecp: __core_crypto_ecp
+}
+
+/// The longest DER signature, for the widest curve
+/// (MBEDTLS_ECDSA_MAX_LEN = MBEDTLS_ECDSA_MAX_SIG_LEN(MBEDTLS_ECP_MAX_BITS)).
+ECDSA_MAX_LEN: 139
+
+/// Why reading or writing an encoded signature failed.
+#Error
+ECDSAError: enum {
+    /// The curve arithmetic or the verification failed.
+    Ecp(ecp.EcpError)
+    /// The signature is not one DER SEQUENCE of two INTEGERs
+    /// (MBEDTLS_ERR_ECP_BAD_INPUT_DATA plus the ASN.1 error).
+    BadEncoding(asn1.ASN1Error)
+}
+
+impl ecp.EcpError -> ECDSAError { ECDSAError.Ecp(self) }
+
+/// A signature (r, s).
+ECDSASignature: struct {
+    r: bn.Mpi
+    s: bn.Mpi
+}
+
+/// Whether ECDSA works on curve `id`: every short Weierstrass curve, not
+/// Curve25519 or Curve448 (mbedtls_ecdsa_can_do).
+ecdsa_can_do: fn(id: ecp.GroupID) -> Bool Never! {
+    if id == {
+        .Curve25519 -> false
+        .Curve448 -> false
+        else -> true
+    }
+}
+
+/// The integer of a message hash for grp: its leftmost nbits bits, reduced
+/// once mod N (SEC1 4.1.3 step 5, 4.1.4 step 3).
+derive_mpi: fn(grp: ecp.EcpGroup, hash: [U8]) -> bn.Mpi ecp.EcpError! {
+    n_size: (grp.nbits + 7) /% 8
+    use_size: if hash.len() > n_size -> n_size else -> hash.len()
+    x := bn.read_binary(cipher.bytes_of(hash, 0, use_size)) ?? return Err(.Mpi(err))
+    if use_size * 8 > grp.nbits -> bn.shift_r(x, use_size * 8 - grp.nbits)
+    if bn.cmp_mpi(x, grp.n) >= 0 {
+        t: bn.sub_mpi(x, grp.n) ?? return Err(.Mpi(err))
+        x = t
+    }
+    Ok(x)
+}
+
+/// Whether grp is set up for ECDSA.
+usable_group: fn(grp: ecp.EcpGroup) -> Bool Never! { ecdsa_can_do(grp.id) && grp.n.p.len() != 0 }
+
+/// The signing loop (mbedtls_ecdsa_sign_restartable without a restart
+/// context): the nonce k from rng, the blinding of k G from blind, or from
+/// rng itself with `shared_rng`, as mbedtls_ecdsa_sign passes one generator
+/// for both.
+sign_core: fn<R: RNG, B: RNG>(grp: ecp.EcpGroup, d: bn.Mpi, hash: [U8], rng: &R, blind: &B, shared_rng: Bool{false}) -> ECDSASignature ecp.EcpError! {
+    if !usable_group(grp) -> return Err(.BadInput)
+    if bn.cmp_int(d, 1) < 0 || bn.cmp_mpi(d, grp.n) >= 0 -> return Err(.InvalidKey)
+    sign_tries := 0
+    loop {
+        if sign_tries > 10 -> return Err(.RandomFailed)
+        sign_tries += 1
+        // Steps 1-3: an ephemeral key pair (k, k G) and r = x(k G) mod N.
+        key_tries := 0
+        k := bn.mpi()
+        r := bn.mpi()
+        loop {
+            if key_tries > 10 -> return Err(.RandomFailed)
+            key_tries += 1
+            k = ecp.gen_privkey(grp, rng)
+            pt: if shared_rng -> ecp.ecp_mul(grp, k, grp.g, rng) else -> ecp.ecp_mul(grp, k, grp.g, blind)
+            r = bn.mod_mpi(pt.x, grp.n) ?? return Err(.Mpi(err))
+            if bn.cmp_int(r, 0) != 0 -> break
+        }
+        // Step 5: e from the hash. Step 6: s = (e + r d) / k mod N.
+        e: derive_mpi(grp, hash)
+        rd: bn.mul_mpi(r, d) ?? return Err(.Mpi(err))
+        sum: bn.add_mpi(e, rd) ?? return Err(.Mpi(err))
+        inv: bn.gcd_modinv_odd(k, grp.n, inverse: true) ?? return Err(.Mpi(err))
+        prod: bn.mul_mpi(inv.i, sum) ?? return Err(.Mpi(err))
+        s: bn.mod_mpi(prod, grp.n) ?? return Err(.Mpi(err))
+        if bn.cmp_int(s, 0) != 0 -> return Ok(ECDSASignature{r: r, s: s})
+    }
+}
+
+/// Sign hash with private key d, drawing the nonce and the blinding from
+/// rng (mbedtls_ecdsa_sign).
+ecdsa_sign: fn<R: RNG>(grp: ecp.EcpGroup, d: bn.Mpi, hash: [U8], rng: &R) -> ECDSASignature ecp.EcpError! {
+    unused := ecp.NoRNG{}
+    sig: sign_core(grp, d, hash, rng, unused, shared_rng: true)
+    Ok(sig)
+}
+
+/// Sign hash with the nonce from rng and the blinding from blind
+/// (mbedtls_ecdsa_sign_restartable with no restart context).
+ecdsa_sign_blinded: fn<R: RNG, B: RNG>(grp: ecp.EcpGroup, d: bn.Mpi, hash: [U8], rng: &R, blind: &B) -> ECDSASignature ecp.EcpError! {
+    sig: sign_core(grp, d, hash, rng, blind)
+    Ok(sig)
+}
+
+/// Sign hash with the deterministic nonce of RFC 6979 over md, the blinding
+/// from blind (mbedtls_ecdsa_sign_det_ext).
+ecdsa_sign_det: fn<B: RNG>(grp: ecp.EcpGroup, d: bn.Mpi, hash: [U8], md: hashes.Md, blind: &B) -> ECDSASignature ecp.EcpError! {
+    grp_len: (grp.nbits + 7) /% 8
+    // HMAC_DRBG seeded with the private key and the reduced hash.
+    data := bn.write_binary(d, grp_len) ?? return Err(.Mpi(err))
+    h: derive_mpi(grp, hash)
+    hb := bn.write_binary(h, grp_len) ?? return Err(.Mpi(err))
+    loop b in hb -> data.push(b)
+    nonces := drbg.hmac_drbg_new(md)
+    drbg.hmac_drbg_seed_buf(nonces, data)
+    core.crypto.wipe(data)
+    core.crypto.wipe(hb)
+    sig: sign_core(grp, d, hash, nonces, blind)
+    Ok(sig)
+}
+
+/// Check signature (r, s) of hash against public key q
+/// (mbedtls_ecdsa_verify): VerifyFailed when it does not hold.
+ecdsa_verify: fn(grp: ecp.EcpGroup, hash: [U8], q: ecp.Point, r: bn.Mpi, s: bn.Mpi) ecp.EcpError! {
+    if !usable_group(grp) -> return Err(.BadInput)
+    // Step 1: r and s in [1, N).
+    if bn.cmp_int(r, 1) < 0 || bn.cmp_mpi(r, grp.n) >= 0 || bn.cmp_int(s, 1) < 0 || bn.cmp_mpi(s, grp.n) >= 0 {
+        return Err(.VerifyFailed)
+    }
+    // Step 3: e. Step 4: u1 = e / s, u2 = r / s mod N.
+    e: derive_mpi(grp, hash)
+    inv: bn.gcd_modinv_odd(s, grp.n, inverse: true) ?? return Err(.Mpi(err))
+    t1: bn.mul_mpi(e, inv.i) ?? return Err(.Mpi(err))
+    u1: bn.mod_mpi(t1, grp.n) ?? return Err(.Mpi(err))
+    t2: bn.mul_mpi(r, inv.i) ?? return Err(.Mpi(err))
+    u2: bn.mod_mpi(t2, grp.n) ?? return Err(.Mpi(err))
+    // Step 5: R = u1 G + u2 Q.
+    pt: ecp.ecp_muladd(grp, u1, grp.g, u2, q)
+    if ecp.is_zero(pt) -> return Err(.VerifyFailed)
+    // Steps 6-8: v = x(R) mod N must be r.
+    v: bn.mod_mpi(pt.x, grp.n) ?? return Err(.Mpi(err))
+    if bn.cmp_mpi(v, r) != 0 -> return Err(.VerifyFailed)
+}
+
+/// The DER encoding SEQUENCE { r INTEGER, s INTEGER } of a signature;
+/// BufferTooSmall past sig_size bytes (ecdsa_signature_to_asn1).
+ecdsa_signature_to_asn1: fn(sig: ECDSASignature, sig_size: Int) -> [U8] ECDSAError! {
+    der: der_signature(sig) ?? return Err(.BadEncoding(err))
+    if der.len() > sig_size -> return Err(.Ecp(.BufferTooSmall))
+    Ok(der)
+}
+
+der_signature: fn(sig: ECDSASignature) -> [U8] asn1.ASN1Error! {
+    buf := cipher.zero_bytes(ECDSA_MAX_LEN)
+    p := ECDSA_MAX_LEN
+    len := asn1.write_mpi(buf, p, 0, sig.s)
+    len += asn1.write_mpi(buf, p, 0, sig.r)
+    total: asn1.write_len_and_tag(buf, p, 0, len, asn1.ASN1_CONSTRUCTED.bit_or(asn1.ASN1_SEQUENCE))
+    Ok(cipher.bytes_of(buf, p, total))
+}
+
+/// Sign hash with key's private part and the RFC 6979 nonce over md, the
+/// blinding from rng, and encode the signature
+/// (mbedtls_ecdsa_write_signature).
+ecdsa_write_signature: fn<R: RNG>(key: ecp.Keypair, md: hashes.Md, hash: [U8], sig_size: Int, rng: &R) -> [U8] ECDSAError! {
+    sig: ecdsa_sign_det(key.grp, key.d, hash, md, rng)
+    out: ecdsa_signature_to_asn1(sig, sig_size)
+    Ok(out)
+}
+
+/// Decode sig and check it against hash and key's public point
+/// (mbedtls_ecdsa_read_signature). SigLenMismatch when a valid signature is
+/// followed by more bytes.
+ecdsa_read_signature: fn(key: ecp.Keypair, hash: [U8], sig: [U8]) ECDSAError! {
+    p := 0
+    end: sig.len()
+    len: asn1.get_tag(sig, p, end, asn1.ASN1_CONSTRUCTED.bit_or(asn1.ASN1_SEQUENCE)) ?? return Err(.BadEncoding(err))
+    if p + len != end -> return Err(.BadEncoding(.LengthMismatch))
+    r: asn1.get_mpi(sig, p, end) ?? return Err(.BadEncoding(err))
+    s: asn1.get_mpi(sig, p, end) ?? return Err(.BadEncoding(err))
+    ecdsa_verify(key.grp, hash, key.q, r, s)
+    if p != end -> return Err(.Ecp(.SigLenMismatch))
+}
+
+#Test("RFC 6979 A.2.5 P-256 with SHA-256 signs \"sample\" to the published (r, s), which verifies") {
+    grp: ecp.group_load(.Secp256r1) ?? panic("load")
+    d: bn.read_string(16, "C9AFA9D845BA75166B5C215767B1D6934E50C3DB36E89B127B8A622B120F6721") ?? panic("d")
+    hash: hashes.hash(.SHA256, "sample".bytes())
+    blind := drbg.hmac_drbg_new(.SHA256)
+    drbg.hmac_drbg_seed_buf(blind, "blinding".bytes())
+    sig: ecdsa_sign_det(grp, d, hash, .SHA256, blind) ?? panic("sign")
+    r: bn.read_string(16, "EFD48B2AACB6A8FD1140DD9CD45E81D69D2C877B56AAF991C34D0EA84EAF3716") ?? panic("r")
+    s: bn.read_string(16, "F7CB1C942D657C41D436C7A1B6E29F65F3E900DBB9AFF4064DC4AB2F843ACDA8") ?? panic("s")
+    assert(bn.cmp_mpi(sig.r, r) == 0 && bn.cmp_mpi(sig.s, s) == 0)
+    q: ecp.ecp_mul(grp, d, grp.g, blind) ?? panic("q")
+    ecdsa_verify(grp, hash, q, sig.r, sig.s) ?? panic("verify")
+}

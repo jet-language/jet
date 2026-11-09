@@ -1,0 +1,866 @@
+// Private Core source part: the X.509 structures that certificates, CRLs
+// and certificate requests share.
+//
+// A port of mbedtls 3.6.7's x509.c with MBEDTLS_X509_RSASSA_PSS_SUPPORT and
+// MBEDTLS_HAVE_TIME_DATE: serial numbers, algorithm identifiers and their
+// RSASSA-PSS parameters, distinguished names, times, signatures,
+// extensions, subject alternative names, key usage and Netscape certificate
+// types, and the text forms mbedtls prints for them.
+//
+// A reader walks `data` from the cursor `p` up to `end`, as Asn1.jet's do,
+// and parsed items refer to their bytes by offset into `data`; a name holds
+// copies of its attribute types and values. The text writers append to a
+// byte list that grows to fit, so the only BUFFER_TOO_SMALL left is
+// mbedtls's limit on one name value (MBEDTLS_X509_MAX_DN_NAME_SIZE).
+use {
+    core
+    cipher: __core_crypto_cipher
+    hashes: __core_crypto_md
+    asn1: __core_crypto_asn1
+    oids: __core_crypto_oid
+    pk: __core_crypto_pk
+    pem: __core_crypto_pem
+}
+
+/// The most intermediate CAs a chain may hold
+/// (MBEDTLS_X509_MAX_INTERMEDIATE_CA).
+X509_MAX_INTERMEDIATE_CA: 8
+
+/// The longest text one name value may take, its NUL included
+/// (MBEDTLS_X509_MAX_DN_NAME_SIZE).
+X509_MAX_DN_NAME_SIZE: 256
+
+/// Verification failure flags (MBEDTLS_X509_BADCERT_* and
+/// MBEDTLS_X509_BADCRL_*).
+X509_BADCERT_EXPIRED: 0x01
+X509_BADCERT_REVOKED: 0x02
+X509_BADCERT_CN_MISMATCH: 0x04
+X509_BADCERT_NOT_TRUSTED: 0x08
+X509_BADCRL_NOT_TRUSTED: 0x10
+X509_BADCRL_EXPIRED: 0x20
+X509_BADCERT_MISSING: 0x40
+X509_BADCERT_SKIP_VERIFY: 0x80
+X509_BADCERT_OTHER: 0x0100
+X509_BADCERT_FUTURE: 0x0200
+X509_BADCRL_FUTURE: 0x0400
+X509_BADCERT_KEY_USAGE: 0x0800
+X509_BADCERT_EXT_KEY_USAGE: 0x1000
+X509_BADCERT_NS_CERT_TYPE: 0x2000
+X509_BADCERT_BAD_MD: 0x4000
+X509_BADCERT_BAD_PK: 0x8000
+X509_BADCERT_BAD_KEY: 0x010000
+X509_BADCRL_BAD_MD: 0x020000
+X509_BADCRL_BAD_PK: 0x040000
+X509_BADCRL_BAD_KEY: 0x080000
+
+/// The GeneralName tag numbers (MBEDTLS_X509_SAN_*).
+X509_SAN_OTHER_NAME: 0
+X509_SAN_RFC822_NAME: 1
+X509_SAN_DNS_NAME: 2
+X509_SAN_X400_ADDRESS_NAME: 3
+X509_SAN_DIRECTORY_NAME: 4
+X509_SAN_EDI_PARTY_NAME: 5
+X509_SAN_UNIFORM_RESOURCE_IDENTIFIER: 6
+X509_SAN_IP_ADDRESS: 7
+X509_SAN_REGISTERED_ID: 8
+
+/// keyUsage bits as mbedtls numbers them (MBEDTLS_X509_KU_*): the first
+/// content byte low, the second above it.
+X509_KU_DIGITAL_SIGNATURE: 0x80
+X509_KU_NON_REPUDIATION: 0x40
+X509_KU_KEY_ENCIPHERMENT: 0x20
+X509_KU_DATA_ENCIPHERMENT: 0x10
+X509_KU_KEY_AGREEMENT: 0x08
+X509_KU_KEY_CERT_SIGN: 0x04
+X509_KU_CRL_SIGN: 0x02
+X509_KU_ENCIPHER_ONLY: 0x01
+X509_KU_DECIPHER_ONLY: 0x8000
+
+/// Netscape certificate type bits (MBEDTLS_X509_NS_CERT_TYPE_*).
+X509_NS_CERT_TYPE_SSL_CLIENT: 0x80
+X509_NS_CERT_TYPE_SSL_SERVER: 0x40
+X509_NS_CERT_TYPE_EMAIL: 0x20
+X509_NS_CERT_TYPE_OBJECT_SIGNING: 0x10
+X509_NS_CERT_TYPE_RESERVED: 0x08
+X509_NS_CERT_TYPE_SSL_CA: 0x04
+X509_NS_CERT_TYPE_EMAIL_CA: 0x02
+X509_NS_CERT_TYPE_OBJECT_SIGNING_CA: 0x01
+
+// The SEQUENCE and SET tags, constructed.
+X509_SEQUENCE: 0x30
+X509_SET: 0x31
+
+/// Why parsing, printing or verifying an X.509 structure failed
+/// (MBEDTLS_ERR_X509_*), with the ASN.1 or OID failure mbedtls adds to the
+/// code, or the error of the layer below that mbedtls passes on unchanged.
+#Error
+X509Error: enum {
+    /// An unsupported feature (FEATURE_UNAVAILABLE, -0x2080): a critical
+    /// extension or GeneralName mbedtls cannot read, or, with OID
+    /// NOT_FOUND, an RSASSA-PSS mask that is not MGF1.
+    FeatureUnavailable(oids.OIDError?)
+    /// The OID is unknown (UNKNOWN_OID, -0x2100).
+    UnknownOid
+    /// The structure is malformed (INVALID_FORMAT, -0x2180).
+    InvalidFormat(asn1.ASN1Error?)
+    /// The version field is malformed (INVALID_VERSION, -0x2200).
+    InvalidVersion(asn1.ASN1Error?)
+    /// The serial number is malformed (INVALID_SERIAL, -0x2280).
+    InvalidSerial(asn1.ASN1Error?)
+    /// An AlgorithmIdentifier is malformed (INVALID_ALG, -0x2300).
+    InvalidAlg(asn1.ASN1Error?)
+    /// An AlgorithmIdentifier names a digest mbedtls lacks (INVALID_ALG plus
+    /// OID NOT_FOUND).
+    InvalidAlgOid(oids.OIDError)
+    /// A name is malformed (INVALID_NAME, -0x2380).
+    InvalidName(asn1.ASN1Error?)
+    /// A time is malformed or not a calendar date (INVALID_DATE, -0x2400).
+    InvalidDate(asn1.ASN1Error?)
+    /// The signature is malformed (INVALID_SIGNATURE, -0x2480).
+    InvalidSignature(asn1.ASN1Error?)
+    /// An extension is malformed, repeated or critical and unknown
+    /// (INVALID_EXTENSIONS, -0x2500).
+    InvalidExtensions(asn1.ASN1Error?)
+    /// The version is not one mbedtls reads (UNKNOWN_VERSION, -0x2580).
+    UnknownVersion
+    /// The signature algorithm is unknown (UNKNOWN_SIG_ALG, -0x2600), with
+    /// OID NOT_FOUND when its OID has no table row.
+    UnknownSigAlg(oids.OIDError?)
+    /// The inner and outer signature algorithms differ
+    /// (SIG_MISMATCH, -0x2680).
+    SigMismatch
+    /// Verification failed, with the flags that say why
+    /// (CERT_VERIFY_FAILED, -0x2700).
+    CertVerifyFailed(Int)
+    /// The input is neither DER nor PEM (CERT_UNKNOWN_FORMAT, -0x2780).
+    CertUnknownFormat
+    /// Bad input parameters (BAD_INPUT_DATA, -0x2800).
+    BadInput
+    /// A name value is too long to print, or a CSR's key size label too
+    /// wide for its column (BUFFER_TOO_SMALL, -0x2980).
+    BufferTooSmall
+    /// The chain is too long, or a verification callback returned
+    /// CertVerifyFailed (FATAL_ERROR, -0x3000).
+    FatalError
+    /// A verification callback failed with this code of its own, which
+    /// mbedtls returns unchanged as the result.
+    Callback(Int)
+    /// A bare ASN.1 failure (MBEDTLS_ERR_ASN1_*): a malformed directoryName
+    /// or CRL revokedCertificates.
+    Asn1(asn1.ASN1Error)
+    /// A public-key failure (MBEDTLS_ERR_PK_* and below): the subject's key
+    /// or a signature check.
+    PK(pk.PKError)
+    /// A malformed PEM block (MBEDTLS_ERR_PEM_*).
+    PEM(pem.PEMError)
+    /// An OID failure mbedtls passes on unchanged: a certificate or request
+    /// writer's key and digest name no signature algorithm (OID NOT_FOUND).
+    OID(oids.OIDError)
+}
+
+/// A date and time to the second (mbedtls_x509_time).
+X509Time: struct {
+    year: Int
+    mon: Int
+    day: Int
+    hour: Int
+    min: Int
+    sec: Int
+}
+
+/// The hardwareModuleName of an otherName (RFC 4108): its type-id, the
+/// hwType OID and the hwSerialNum (mbedtls_x509_san_other_name).
+SanOtherName: struct {
+    type_id: asn1.ASN1Buf
+    hw_type: asn1.ASN1Buf
+    hw_serial: asn1.ASN1Buf
+}
+
+/// One subject alternative name of a type mbedtls reads
+/// (mbedtls_x509_subject_alternative_name); the buffers hold the name's
+/// content.
+SubjectAltName: enum {
+    OtherName(SanOtherName)
+    Rfc822Name(asn1.ASN1Buf)
+    DNSName(asn1.ASN1Buf)
+    DirectoryName([asn1.NamedData])
+    UniformResourceIdentifier(asn1.ASN1Buf)
+    IPAddress(asn1.ASN1Buf)
+}
+
+/// RSASSA-PSS-params: the message digest, the MGF1 digest and the salt
+/// length, SHA-1, SHA-1 and 20 when absent.
+X509PssParams: struct {
+    md: hashes.Md
+    mgf1_md: hashes.Md
+    salt_len: Int
+}
+
+/// A signature algorithm: its digest (None for RSASSA-PSS's OID row), its
+/// key type and, for RSASSA-PSS, the options its parameters give.
+X509SigAlg: struct {
+    md: hashes.Md?
+    pk: oids.PKType
+    pss: pk.PSSOptions?
+}
+
+/// A CertificateSerialNumber: an INTEGER, or the [2] form some CRLs carry
+/// (mbedtls_x509_get_serial).
+x509_get_serial: fn(data: [U8], p: &Int, end: Int) -> asn1.ASN1Buf X509Error! {
+    if end - p < 1 -> return Err(.InvalidSerial(Val(.OutOfData)))
+    tag_id: Int.from_u8(data[p])
+    if tag_id != asn1.ASN1_CONTEXT_SPECIFIC.bit_or(2) && tag_id != asn1.ASN1_INTEGER -> return Err(.InvalidSerial(Val(.UnexpectedTag)))
+    p += 1
+    len: asn1.get_len(data, p, end) ?? return Err(.InvalidSerial(Val(err)))
+    serial: asn1.ASN1Buf{tag_id: tag_id, p: p, len: len}
+    p += len
+    Ok(serial)
+}
+
+/// An AlgorithmIdentifier whose parameters are absent or NULL
+/// (mbedtls_x509_get_alg_null).
+x509_get_alg_null: fn(data: [U8], p: &Int, end: Int) -> asn1.ASN1Buf X509Error! {
+    alg: asn1.get_alg_null(data, p, end) ?? return Err(.InvalidAlg(Val(err)))
+    Ok(alg)
+}
+
+/// An AlgorithmIdentifier and its parameters (mbedtls_x509_get_alg).
+x509_get_alg: fn(data: [U8], p: &Int, end: Int) -> (alg: asn1.ASN1Buf, params: asn1.ASN1Buf) X509Error! {
+    got: asn1.get_alg(data, p, end) ?? return Err(.InvalidAlg(Val(err)))
+    Ok(got)
+}
+
+// x509_get_hash_alg: a HashAlgorithm, a SEQUENCE holding a digest OID and
+// absent or NULL parameters.
+x509_get_hash_alg: fn(data: [U8], alg: asn1.ASN1Buf) -> hashes.Md X509Error! {
+    if alg.tag_id != X509_SEQUENCE -> return Err(.InvalidAlg(Val(.UnexpectedTag)))
+    p := alg.p
+    end: alg.p + alg.len
+    if p >= end -> return Err(.InvalidAlg(Val(.OutOfData)))
+    len: asn1.get_tag(data, p, end, asn1.ASN1_OID) ?? return Err(.InvalidAlg(Val(err)))
+    md_oid: asn1.ASN1Buf{tag_id: asn1.ASN1_OID, p: p, len: len}
+    p += len
+    md: oids.md_alg(data, md_oid) ?? return Err(.InvalidAlgOid(err))
+    if p == end -> return Ok(md)
+    null_len: asn1.get_tag(data, p, end, asn1.ASN1_NULL) ?? return Err(.InvalidAlg(Val(err)))
+    if null_len != 0 -> return Err(.InvalidAlg(None))
+    if p != end -> return Err(.InvalidAlg(Val(.LengthMismatch)))
+    Ok(md)
+}
+
+// The tag of an explicit [n] field.
+x509_explicit: fn(n: Int) -> Int Never! { asn1.ASN1_CONTEXT_SPECIFIC.bit_or(asn1.ASN1_CONSTRUCTED).bit_or(n) }
+
+/// RSASSA-PSS-params (RFC 4055), each field defaulted when absent; the
+/// trailerField, when present, must be 1 (mbedtls_x509_get_rsassa_pss_params).
+x509_get_rsassa_pss_params: fn(data: [U8], params: asn1.ASN1Buf) -> X509PssParams X509Error! {
+    out := X509PssParams{md: .SHA1, mgf1_md: .SHA1, salt_len: 20}
+    if params.tag_id != X509_SEQUENCE -> return Err(.InvalidAlg(Val(.UnexpectedTag)))
+    p := params.p
+    end: params.p + params.len
+    if p == end -> return Ok(out)
+    // hashAlgorithm [0]: an AlgorithmIdentifier without parameters.
+    if asn1.get_tag(data, p, end, x509_explicit(0)) == {
+        .Ok(len) -> {
+            end2: p + len
+            alg_id: x509_get_alg_null(data, p, end2)
+            out.md = oids.md_alg(data, alg_id) ?? return Err(.InvalidAlgOid(err))
+            if p != end2 -> return Err(.InvalidAlg(Val(.LengthMismatch)))
+        }
+        .Err(e) -> {
+            if e != .UnexpectedTag -> return Err(.InvalidAlg(Val(e)))
+        }
+    }
+    if p == end -> return Ok(out)
+    // maskGenAlgorithm [1]: MGF1 with a HashAlgorithm.
+    if asn1.get_tag(data, p, end, x509_explicit(1)) == {
+        .Ok(len) -> {
+            end2: p + len
+            mask: x509_get_alg(data, p, end2)
+            if !oids.is(oids.OID_MGF1, data, mask.alg) -> return Err(.FeatureUnavailable(Val(.NotFound)))
+            out.mgf1_md = x509_get_hash_alg(data, mask.params)
+            if p != end2 -> return Err(.InvalidAlg(Val(.LengthMismatch)))
+        }
+        .Err(e) -> {
+            if e != .UnexpectedTag -> return Err(.InvalidAlg(Val(e)))
+        }
+    }
+    if p == end -> return Ok(out)
+    // saltLength [2].
+    if asn1.get_tag(data, p, end, x509_explicit(2)) == {
+        .Ok(len) -> {
+            end2: p + len
+            out.salt_len = asn1.get_int(data, p, end2) ?? return Err(.InvalidAlg(Val(err)))
+            if p != end2 -> return Err(.InvalidAlg(Val(.LengthMismatch)))
+        }
+        .Err(e) -> {
+            if e != .UnexpectedTag -> return Err(.InvalidAlg(Val(e)))
+        }
+    }
+    if p == end -> return Ok(out)
+    // trailerField [3].
+    if asn1.get_tag(data, p, end, x509_explicit(3)) == {
+        .Ok(len) -> {
+            end2: p + len
+            trailer: asn1.get_int(data, p, end2) ?? return Err(.InvalidAlg(Val(err)))
+            if p != end2 -> return Err(.InvalidAlg(Val(.LengthMismatch)))
+            if trailer != 1 -> return Err(.InvalidAlg(None))
+        }
+        .Err(e) -> {
+            if e != .UnexpectedTag -> return Err(.InvalidAlg(Val(e)))
+        }
+    }
+    if p != end -> return Err(.InvalidAlg(Val(.LengthMismatch)))
+    Ok(out)
+}
+
+// x509_get_attr_type_value: one AttributeTypeAndValue, its value a string
+// type or a BIT STRING.
+x509_get_attr_type_value: fn(data: [U8], p: &Int, end: Int) -> asn1.NamedData X509Error! {
+    len: asn1.get_tag(data, p, end, X509_SEQUENCE) ?? return Err(.InvalidName(Val(err)))
+    item_end: p + len
+    if item_end - p < 1 -> return Err(.InvalidName(Val(.OutOfData)))
+    oid_len: asn1.get_tag(data, p, item_end, asn1.ASN1_OID) ?? return Err(.InvalidName(Val(err)))
+    oid: cipher.bytes_of(data, p, oid_len)
+    p += oid_len
+    if item_end - p < 1 -> return Err(.InvalidName(Val(.OutOfData)))
+    val_tag: Int.from_u8(data[p])
+    if !asn1.is_string_tag(val_tag) && val_tag != asn1.ASN1_BIT_STRING -> return Err(.InvalidName(Val(.UnexpectedTag)))
+    p += 1
+    val_len: asn1.get_len(data, p, item_end) ?? return Err(.InvalidName(Val(err)))
+    val: cipher.bytes_of(data, p, val_len)
+    p += val_len
+    if p != item_end -> return Err(.InvalidName(Val(.LengthMismatch)))
+    Ok(asn1.NamedData{oid: oid, val_tag: val_tag, val: val, next_merged: false})
+}
+
+/// A Name: its RDNSequence flattened, each attribute of a multi-valued RDN
+/// but the last marked next_merged (mbedtls_x509_get_name). The name must
+/// end at `end`.
+x509_get_name: fn(data: [U8], p: &Int, end: Int) -> [asn1.NamedData] X509Error! {
+    names := [asn1.NamedData]{}
+    loop {
+        set_len: asn1.get_tag(data, p, end, X509_SET) ?? return Err(.InvalidName(Val(err)))
+        end_set: p + set_len
+        loop {
+            entry := x509_get_attr_type_value(data, p, end_set)
+            last: p == end_set
+            entry.next_merged = !last
+            names.push(entry)
+            if last -> break
+        }
+        if p == end -> return Ok(names)
+    }
+}
+
+// x509_date_is_valid: a calendar date from year 0 to 9999 and a time of
+// day without leap seconds.
+x509_date_is_valid: fn(t: X509Time) -> Bool Never! {
+    if t.mon < 1 || t.mon > 12 -> return false
+    leap: t.year.bit_and(3) == 0 && (t.year %% 100 != 0 || t.year %% 400 == 0)
+    month_days: if {
+        t.mon == 2 && leap -> 29
+        t.mon == 2 -> 28
+        t.mon == 4 || t.mon == 6 || t.mon == 9 || t.mon == 11 -> 30
+        else -> 31
+    }
+    if t.day < 1 || t.day > month_days -> return false
+    if t.year < 0 || t.year > 9999 -> return false
+    t.hour >= 0 && t.hour <= 23 && t.min >= 0 && t.min <= 59 && t.sec >= 0 && t.sec <= 59
+}
+
+// x509_parse2_int: two decimal digits, or -1.
+x509_parse2_int: fn(data: [U8], at: Int) -> Int Never! {
+    d1: Int.from_u8(data[at]) - 48
+    d2: Int.from_u8(data[at + 1]) - 48
+    if d1 < 0 || d1 > 9 || d2 < 0 || d2 > 9 -> return -1
+    d1 * 10 + d2
+}
+
+// x509_parse_time: a UTCTime (two-digit year, 1950 to 2049) or a
+// GeneralizedTime (four-digit year) from data[at].
+x509_parse_time: fn(data: [U8], at: Int, year_len: Int) -> X509Time X509Error! {
+    first: x509_parse2_int(data, at)
+    if first < 0 -> return Err(.InvalidDate(None))
+    second: if year_len == 4 -> x509_parse2_int(data, at + 2) else -> 0
+    if second < 0 -> return Err(.InvalidDate(None))
+    year: if {
+        year_len == 4 -> first * 100 + second
+        first < 50 -> 2000 + first
+        else -> 1900 + first
+    }
+    q: at + year_len - 2
+    t: X509Time{
+        year: year
+        mon: x509_parse2_int(data, q + 2)
+        day: x509_parse2_int(data, q + 4)
+        hour: x509_parse2_int(data, q + 6)
+        min: x509_parse2_int(data, q + 8)
+        sec: x509_parse2_int(data, q + 10)
+    }
+    if !x509_date_is_valid(t) -> return Err(.InvalidDate(None))
+    Ok(t)
+}
+
+// The 'Z' that may end a time.
+X509_ZULU: U8{90}
+
+/// A Time: UTCTime or GeneralizedTime, to the second, with an optional
+/// trailing Z (mbedtls_x509_get_time).
+x509_get_time: fn(data: [U8], p: &Int, end: Int) -> X509Time X509Error! {
+    if end - p < 1 -> return Err(.InvalidDate(Val(.OutOfData)))
+    tag_id: Int.from_u8(data[p])
+    year_len: if {
+        tag_id == asn1.ASN1_UTC_TIME -> 2
+        tag_id == asn1.ASN1_GENERALIZED_TIME -> 4
+        else -> return Err(.InvalidDate(Val(.UnexpectedTag)))
+    }
+    p += 1
+    len: asn1.get_len(data, p, end) ?? return Err(.InvalidDate(Val(err)))
+    if len != year_len + 10 && !(len == year_len + 11 && data[p + len - 1] == X509_ZULU) -> return Err(.InvalidDate(None))
+    p += len
+    x509_parse_time(data, p - len, year_len)
+}
+
+/// The signature BIT STRING's content after its unused-bits byte, which
+/// must be zero (mbedtls_x509_get_sig).
+x509_get_sig: fn(data: [U8], p: &Int, end: Int) -> asn1.ASN1Buf X509Error! {
+    if end - p < 1 -> return Err(.InvalidSignature(Val(.OutOfData)))
+    tag_id: Int.from_u8(data[p])
+    len: asn1.get_bitstring_null(data, p, end) ?? return Err(.InvalidSignature(Val(err)))
+    sig: asn1.ASN1Buf{tag_id: tag_id, p: p, len: len}
+    p += len
+    Ok(sig)
+}
+
+/// The digest, key type and RSASSA-PSS options of a signature algorithm;
+/// any other algorithm's parameters must be absent or NULL
+/// (mbedtls_x509_get_sig_alg).
+x509_get_sig_alg: fn(data: [U8], sig_oid: asn1.ASN1Buf, sig_params: asn1.ASN1Buf) -> X509SigAlg X509Error! {
+    got: oids.sig_alg(data, sig_oid) ?? return Err(.UnknownSigAlg(Val(err)))
+    if got.pk == .RSASSAPSS {
+        params: x509_get_rsassa_pss_params(data, sig_params)
+        options: pk.PSSOptions{mgf1_hash_id: Val(params.mgf1_md), expected_salt_len: params.salt_len}
+        return Ok(X509SigAlg{md: Val(params.md), pk: .RSASSAPSS, pss: Val(options)})
+    }
+    if (sig_params.tag_id != asn1.ASN1_NULL && sig_params.tag_id != 0) || sig_params.len != 0 -> return Err(.InvalidAlg(None))
+    Ok(X509SigAlg{md: got.md, pk: got.pk, pss: None})
+}
+
+/// The explicit [tag] wrapper of an Extensions SEQUENCE, which must fill it;
+/// the cursor stops at the first Extension (mbedtls_x509_get_ext).
+x509_get_ext: fn(data: [U8], p: &Int, end: Int, tag_num: Int) -> asn1.ASN1Buf X509Error! {
+    ext_tag: x509_explicit(tag_num)
+    len: asn1.get_tag(data, p, end, ext_tag) ?? return Err(.InvalidExtensions(Val(err)))
+    ext: asn1.ASN1Buf{tag_id: ext_tag, p: p, len: len}
+    ext_end: p + len
+    seq_len: asn1.get_tag(data, p, ext_end, X509_SEQUENCE) ?? return Err(.InvalidExtensions(Val(err)))
+    if ext_end != p + seq_len -> return Err(.InvalidExtensions(Val(.LengthMismatch)))
+    Ok(ext)
+}
+
+// Text helpers: an upper-case hex digit, a byte as two, and a value with at
+// least `width` digits.
+x509_hex_digit: fn(n: Int) -> U8 Never! {
+    if n < 10 -> return U8{48 + n}
+    U8{55 + n}
+}
+
+x509_push_hex2: fn(out: &[U8], b: Int) {
+    out.push(x509_hex_digit(b >> 4))
+    out.push(x509_hex_digit(b.bit_and(15)))
+}
+
+x509_hex_text: fn(value: Int, width: Int) -> [U8] Never! {
+    digits := [U8]{}
+    v := value
+    loop v > 0 || digits.len() < width {
+        digits.push(x509_hex_digit(v.bit_and(15)))
+        v = v >> 4
+    }
+    out := [U8]{}
+    loop i in 0..<digits.len() -> out.push(digits[digits.len() - 1 - i])
+    out
+}
+
+// The bytes a name value escapes with a backslash (RFC 4514 section 2.4).
+X509_DN_SPECIALS: [U8]{44, 61, 43, 60, 62, 59, 34, 92}
+X509_BACKSLASH: U8{92}
+X509_HASH_SIGN: U8{35}
+X509_SPACE: U8{32}
+
+// The OID of a name attribute as an item of its own bytes.
+x509_oid_item: fn(oid: [U8]) -> asn1.ASN1Buf Never! { asn1.ASN1Buf{tag_id: asn1.ASN1_OID, p: 0, len: oid.len()} }
+
+// The value of one hexadecimal digit, -1 for any other byte.
+x509_hex_value: fn(c: Int) -> Int Never! {
+    if c >= 48 && c <= 57 -> return c - 48
+    upper: c.bit_and(0xDF)
+    if upper >= 65 && upper <= 70 -> return upper - 55
+    return -1
+}
+
+// One name value as mbedtls prints it: a UTF8String, PrintableString or
+// IA5String as text with RFC 4514 escapes, anything else (or an attribute
+// without a short name) as # and the hex of its DER encoding. Either form
+// must fit MBEDTLS_X509_MAX_DN_NAME_SIZE with its NUL.
+x509_dn_value: fn(entry: asn1.NamedData, print_hex: Bool) -> [U8] X509Error! {
+    limit: X509_MAX_DN_NAME_SIZE - 1
+    s := [U8]{}
+    if print_hex {
+        s.push(X509_HASH_SIGN)
+        head := cipher.zero_bytes(6)
+        at := head.len()
+        n := asn1.write_len(head, at, 0, entry.val.len()) ?? return Err(.FatalError)
+        n += asn1.write_tag(head, at, 0, entry.val_tag) ?? return Err(.FatalError)
+        encoded := cipher.bytes_of(head, at, n)
+        encoded.extend(entry.val)
+        loop c in encoded {
+            if s.len() + 1 >= limit -> return Err(.BufferTooSmall)
+            x509_push_hex2(s, Int.from_u8(c))
+        }
+        return Ok(s)
+    }
+    n: entry.val.len()
+    loop i in 0..<n {
+        if s.len() >= limit -> return Err(.BufferTooSmall)
+        c: entry.val[i]
+        if c == (U8{0}) -> return Err(.InvalidName(None))
+        escaped: X509_DN_SPECIALS.contains(c) || (i == 0 && (c == X509_HASH_SIGN || c == X509_SPACE)) || (i == n - 1 && c == X509_SPACE)
+        if escaped {
+            if s.len() + 1 >= limit -> return Err(.BufferTooSmall)
+            s.push(X509_BACKSLASH)
+        }
+        code: Int.from_u8(c)
+        if {
+            code < 32 || code >= 127 -> {
+                if s.len() + 3 >= limit -> return Err(.BufferTooSmall)
+                s.push(X509_BACKSLASH)
+                x509_push_hex2(s, code)
+            }
+            else -> s.push(c)
+        }
+    }
+    Ok(s)
+}
+
+/// A name as RFC 4514-style text, "C=NL, O=PolarSSL, CN=PolarSSL Test CA",
+/// the attributes of one multi-valued RDN joined by " + "
+/// (mbedtls_x509_dn_gets).
+x509_dn_gets: fn(dn: [asn1.NamedData]) -> [U8] X509Error! {
+    out := [U8]{}
+    merge := false
+    loop i in 0..<dn.len() {
+        entry: dn[i]
+        if i > 0 -> out.extend((if merge -> " + " else -> ", ").bytes())
+        print_hex := entry.val_tag != asn1.ASN1_UTF8_STRING && entry.val_tag != asn1.ASN1_PRINTABLE_STRING && entry.val_tag != asn1.ASN1_IA5_STRING
+        if oids.attr_short_name(entry.oid, x509_oid_item(entry.oid)) == {
+            .Ok(short_name) -> out.extend("{short_name}=".bytes())
+            .Err(_) -> {
+                if oids.numeric_string(entry.oid, x509_oid_item(entry.oid)) == {
+                    .Ok(text) -> {
+                        out.extend("{text}=".bytes())
+                        print_hex = true
+                    }
+                    .Err(_) -> out.extend("??=".bytes())
+                }
+            }
+        }
+        out.extend(x509_dn_value(entry, print_hex))
+        merge = entry.next_merged
+    }
+    Ok(out)
+}
+
+/// The index of the RDN after the one `dn[at]` starts, past the entries
+/// `next_merged` joins to it; dn.len() after the last
+/// (mbedtls_x509_dn_get_next).
+x509_dn_get_next: fn(dn: [asn1.NamedData], at: Int) -> Int Never! {
+    i := at
+    loop dn[i].next_merged && i + 1 < dn.len() -> i += 1
+    i + 1
+}
+
+// Two decimal digits, or four for a year.
+x509_pad: fn(n: Int, width: Int) -> String Never! {
+    text := "{n}"
+    loop text.len() < width -> text = "0{text}"
+    text
+}
+
+/// A time as the info texts print it, %04d-%02d-%02d %02d:%02d:%02d.
+x509_time_text: fn(t: X509Time) -> String Never! {
+    "{x509_pad(t.year, 4)}-{x509_pad(t.mon, 2)}-{x509_pad(t.day, 2)} {x509_pad(t.hour, 2)}:{x509_pad(t.min, 2)}:{x509_pad(t.sec, 2)}"
+}
+
+/// A serial number as colon-separated hex, a leading zero byte dropped and
+/// anything past 32 bytes cut to 28 and "...." (mbedtls_x509_serial_gets).
+x509_serial_gets: fn(data: [U8], serial: asn1.ASN1Buf) -> [U8] Never! {
+    out := [U8]{}
+    nr: if serial.len <= 32 -> serial.len else -> 28
+    loop i in 0..<nr {
+        b: Int.from_u8(data[serial.p + i])
+        if i == 0 && nr > 1 && b == 0 -> next
+        x509_push_hex2(out, b)
+        if i < nr - 1 -> out.extend(":".bytes())
+    }
+    if nr != serial.len -> out.extend("....".bytes())
+    out
+}
+
+// md_type_to_string: the digest names RSASSA-PSS parameters print.
+x509_md_name: fn(md: hashes.Md?) -> String Never! {
+    given: md ?? return "???"
+    if given == {
+        .MD5 -> "MD5"
+        .SHA1 -> "SHA1"
+        .SHA224 -> "SHA224"
+        .SHA256 -> "SHA256"
+        .SHA384 -> "SHA384"
+        .SHA512 -> "SHA512"
+        .RIPEMD160 -> "RIPEMD160"
+        else -> "???"
+    }
+}
+
+/// A signature algorithm's description, "RSA with SHA-256", with
+/// " (SHA256, MGF1-SHA256, 0x20)" after an RSASSA-PSS one
+/// (mbedtls_x509_sig_alg_gets).
+x509_sig_alg_gets: fn(data: [U8], sig_oid: asn1.ASN1Buf, alg: X509SigAlg) -> [U8] Never! {
+    out := [U8]{}
+    if oids.sig_alg(data, sig_oid) == {
+        .Ok(got) -> out.extend(got.description.bytes())
+        .Err(_) -> out.extend("???".bytes())
+    }
+    if alg.pk == .RSASSAPSS {
+        options: alg.pss ?? pk.PSSOptions{mgf1_hash_id: None, expected_salt_len: 0}
+        out.extend(" ({x509_md_name(alg.md)}, MGF1-{x509_md_name(options.mgf1_hash_id)}, 0x".bytes())
+        out.extend(x509_hex_text(options.expected_salt_len, 2))
+        out.extend(")".bytes())
+    }
+    out
+}
+
+/// "<name> key size" (mbedtls_x509_key_size_helper).
+x509_key_size_helper: fn(name: String) -> String Never! { "{name} key size" }
+
+/// Negative, zero or positive as t1 is before, at or after t2
+/// (mbedtls_x509_time_cmp).
+x509_time_cmp: fn(t1: X509Time, t2: X509Time) -> Int Never! {
+    x: ((t1.year << 9).bit_or(t1.mon << 5).bit_or(t1.day)) - ((t2.year << 9).bit_or(t2.mon << 5).bit_or(t2.day))
+    if x != 0 -> return x
+    ((t1.hour << 12).bit_or(t1.min << 6).bit_or(t1.sec)) - ((t2.hour << 12).bit_or(t2.min << 6).bit_or(t2.sec))
+}
+
+/// The UTC date and time of a Unix time in seconds
+/// (mbedtls_x509_time_gmtime).
+x509_time_gmtime: fn(seconds: Int) -> X509Time Never! {
+    at: core.time.from_timestamp(seconds)
+    X509Time{year: at.year(), mon: at.month(), day: at.day(), hour: at.hour(), min: at.minute(), sec: at.second()}
+}
+
+// x509_get_current_time.
+x509_now: fn() -[Time]> X509Time Never! { x509_time_gmtime(core.time.now_utc().to_timestamp()) }
+
+/// Whether `to` has passed (mbedtls_x509_time_is_past).
+x509_time_is_past: fn(to: X509Time) -[Time]> Bool Never! { x509_time_cmp(to, x509_now()) < 0 }
+
+/// Whether `from` is still to come (mbedtls_x509_time_is_future).
+x509_time_is_future: fn(from: X509Time) -[Time]> Bool Never! { x509_time_cmp(from, x509_now()) > 0 }
+
+// x509_get_other_name: an otherName holding a hardwareModuleName, the only
+// type mbedtls reads.
+x509_get_other_name: fn(data: [U8], san: asn1.ASN1Buf) -> SanOtherName X509Error! {
+    if san.tag_id.bit_and(asn1.ASN1_TAG_CLASS_MASK.bit_or(asn1.ASN1_TAG_VALUE_MASK)) != asn1.ASN1_CONTEXT_SPECIFIC.bit_or(X509_SAN_OTHER_NAME) -> return Err(.BadInput)
+    p := san.p
+    end: san.p + san.len
+    len := asn1.get_tag(data, p, end, asn1.ASN1_OID) ?? return Err(.InvalidExtensions(Val(err)))
+    type_id: asn1.ASN1Buf{tag_id: asn1.ASN1_OID, p: p, len: len}
+    if !oids.is(oids.OID_ON_HW_MODULE_NAME, data, type_id) -> return Err(.FeatureUnavailable(None))
+    p += len
+    len = asn1.get_tag(data, p, end, asn1.ASN1_CONSTRUCTED.bit_or(asn1.ASN1_CONTEXT_SPECIFIC)) ?? return Err(.InvalidExtensions(Val(err)))
+    if end != p + len -> return Err(.InvalidExtensions(Val(.LengthMismatch)))
+    len = asn1.get_tag(data, p, end, X509_SEQUENCE) ?? return Err(.InvalidExtensions(Val(err)))
+    if end != p + len -> return Err(.InvalidExtensions(Val(.LengthMismatch)))
+    len = asn1.get_tag(data, p, end, asn1.ASN1_OID) ?? return Err(.InvalidExtensions(Val(err)))
+    hw_type: asn1.ASN1Buf{tag_id: asn1.ASN1_OID, p: p, len: len}
+    p += len
+    len = asn1.get_tag(data, p, end, asn1.ASN1_OCTET_STRING) ?? return Err(.InvalidExtensions(Val(err)))
+    hw_serial: asn1.ASN1Buf{tag_id: asn1.ASN1_OCTET_STRING, p: p, len: len}
+    p += len
+    if p != end -> return Err(.InvalidExtensions(Val(.LengthMismatch)))
+    Ok(SanOtherName{type_id: type_id, hw_type: hw_type, hw_serial: hw_serial})
+}
+
+/// One GeneralName read as mbedtls reads it: otherName (hardwareModuleName),
+/// rfc822Name, dNSName, directoryName, uniformResourceIdentifier, or an IPv4
+/// or IPv6 iPAddress; FeatureUnavailable for the other types
+/// (mbedtls_x509_parse_subject_alt_name).
+x509_parse_subject_alt_name: fn(data: [U8], san: asn1.ASN1Buf) -> SubjectAltName X509Error! {
+    kind: san.tag_id.bit_and(asn1.ASN1_TAG_CLASS_MASK.bit_or(asn1.ASN1_TAG_VALUE_MASK))
+    if kind.bit_and(asn1.ASN1_TAG_CLASS_MASK) != asn1.ASN1_CONTEXT_SPECIFIC -> return Err(.FeatureUnavailable(None))
+    if kind.bit_and(asn1.ASN1_TAG_VALUE_MASK) == {
+        X509_SAN_OTHER_NAME -> {
+            other: x509_get_other_name(data, san)
+            Ok(.OtherName(other))
+        }
+        X509_SAN_UNIFORM_RESOURCE_IDENTIFIER -> Ok(.UniformResourceIdentifier(san))
+        X509_SAN_DNS_NAME -> Ok(.DNSName(san))
+        X509_SAN_IP_ADDRESS -> {
+            if san.len != 4 && san.len != 16 -> return Err(.BadInput)
+            Ok(.IPAddress(san))
+        }
+        X509_SAN_RFC822_NAME -> Ok(.Rfc822Name(san))
+        X509_SAN_DIRECTORY_NAME -> {
+            p := san.p
+            name_len: asn1.get_tag(data, p, san.p + san.len, X509_SEQUENCE) ?? return Err(.Asn1(err))
+            names: x509_get_name(data, p, p + name_len)
+            Ok(.DirectoryName(names))
+        }
+        else -> Err(.FeatureUnavailable(None))
+    }
+}
+
+/// The GeneralNames from the cursor to `end`, each context-specific and
+/// readable or of a type mbedtls skips (mbedtls_x509_get_subject_alt_name_ext).
+x509_get_subject_alt_name_ext: fn(data: [U8], p: &Int, end: Int) -> [asn1.ASN1Buf] X509Error! {
+    names := [asn1.ASN1Buf]{}
+    loop p < end {
+        tag_id: Int.from_u8(data[p])
+        p += 1
+        len: asn1.get_len(data, p, end) ?? return Err(.InvalidExtensions(Val(err)))
+        item: asn1.ASN1Buf{tag_id: tag_id, p: p, len: len}
+        if tag_id.bit_and(asn1.ASN1_TAG_CLASS_MASK) != asn1.ASN1_CONTEXT_SPECIFIC -> return Err(.InvalidExtensions(Val(.UnexpectedTag)))
+        if x509_parse_subject_alt_name(data, item) == {
+            .Ok(_) -> {}
+            .Err(e) -> {
+                if e != X509Error.FeatureUnavailable(None) -> return Err(e)
+            }
+        }
+        names.push(item)
+        p += len
+    }
+    if p != end -> return Err(.InvalidExtensions(Val(.LengthMismatch)))
+    Ok(names)
+}
+
+/// A SubjectAltName extension's GeneralNames, a SEQUENCE that must fill
+/// the extension (mbedtls_x509_get_subject_alt_name).
+x509_get_subject_alt_name: fn(data: [U8], p: &Int, end: Int) -> [asn1.ASN1Buf] X509Error! {
+    len: asn1.get_tag(data, p, end, X509_SEQUENCE) ?? return Err(.InvalidExtensions(Val(err)))
+    if p + len != end -> return Err(.InvalidExtensions(Val(.LengthMismatch)))
+    x509_get_subject_alt_name_ext(data, p, end)
+}
+
+/// A Netscape certificate type, one byte of flags, zero when the BIT
+/// STRING is empty (mbedtls_x509_get_ns_cert_type).
+x509_get_ns_cert_type: fn(data: [U8], p: &Int, end: Int) -> Int X509Error! {
+    bs: asn1.get_bitstring(data, p, end) ?? return Err(.InvalidExtensions(Val(err)))
+    if bs.len == 0 -> return Ok(0)
+    if bs.len != 1 -> return Err(.InvalidExtensions(Val(.InvalidLength)))
+    Ok(Int.from_u8(data[bs.p]))
+}
+
+/// The keyUsage flags, the first content byte lowest and at most four bytes
+/// read (mbedtls_x509_get_key_usage).
+x509_get_key_usage: fn(data: [U8], p: &Int, end: Int) -> Int X509Error! {
+    bs: asn1.get_bitstring(data, p, end) ?? return Err(.InvalidExtensions(Val(err)))
+    usage := 0
+    loop i in 0..<bs.len {
+        if i >= 4 -> break
+        usage = usage.bit_or(Int.from_u8(data[bs.p + i]) << (8 * i))
+    }
+    Ok(usage)
+}
+
+/// The subject alternative names as mbedtls's certificate information
+/// lists them, each on a line after `prefix` (mbedtls_x509_info_subject_alt_name).
+x509_info_subject_alt_name: fn(out: &[U8], data: [U8], names: [asn1.ASN1Buf], prefix: String) X509Error! {
+    loop item in names {
+        if x509_parse_subject_alt_name(data, item) == {
+            .Err(e) -> {
+                out.extend((if e == X509Error.FeatureUnavailable(None) -> "\n{prefix}    <unsupported>" else -> "\n{prefix}    <malformed>").bytes())
+            }
+            .Ok(san) -> x509_info_one_san(out, data, san, prefix)
+        }
+    }
+}
+
+// One readable subject alternative name.
+x509_info_one_san: fn(out: &[U8], data: [U8], san: SubjectAltName, prefix: String) X509Error! {
+    if san == {
+        .OtherName(other) -> {
+            out.extend("\n{prefix}    otherName :".bytes())
+            if oids.is(oids.OID_ON_HW_MODULE_NAME, data, other.type_id) {
+                out.extend("\n{prefix}        hardware module name :".bytes())
+                out.extend("\n{prefix}            hardware type          : ".bytes())
+                hw_type: oids.numeric_string(data, other.hw_type) ?? return Err(.BufferTooSmall)
+                out.extend(hw_type.bytes())
+                out.extend("\n{prefix}            hardware serial number : ".bytes())
+                loop i in 0..<other.hw_serial.len -> x509_push_hex2(out, Int.from_u8(data[other.hw_serial.p + i]))
+            }
+        }
+        .UniformResourceIdentifier(item) -> {
+            out.extend("\n{prefix}    uniformResourceIdentifier : ".bytes())
+            out.extend(cipher.bytes_of(data, item.p, item.len))
+        }
+        .DNSName(item) -> {
+            out.extend("\n{prefix}    dNSName : ".bytes())
+            out.extend(cipher.bytes_of(data, item.p, item.len))
+        }
+        .Rfc822Name(item) -> {
+            out.extend("\n{prefix}    rfc822Name : ".bytes())
+            out.extend(cipher.bytes_of(data, item.p, item.len))
+        }
+        .IPAddress(item) -> {
+            out.extend("\n{prefix}    iPAddress : ".bytes())
+            ip: cipher.bytes_of(data, item.p, item.len)
+            if item.len == 4 {
+                out.extend("{Int.from_u8(ip[0])}.{Int.from_u8(ip[1])}.{Int.from_u8(ip[2])}.{Int.from_u8(ip[3])}".bytes())
+                return
+            }
+            loop i in 0..<16 {
+                if i > 0 && i %% 2 == 0 -> out.extend(":".bytes())
+                out.extend(x509_hex_text(Int.from_u8(ip[i]), 1))
+            }
+        }
+        .DirectoryName(names) -> {
+            out.extend("\n{prefix}    directoryName : ".bytes())
+            out.extend(x509_dn_gets(names))
+        }
+    }
+}
+
+// The comma-separated names of the flags set in `bits`.
+x509_info_flags: fn(out: &[U8], bits: Int, flags: [Int], names: [String]) {
+    sep := ""
+    loop i in 0..<flags.len() {
+        if bits.bit_and(flags[i]) != 0 {
+            out.extend("{sep}{names[i]}".bytes())
+            sep = ", "
+        }
+    }
+}
+
+/// The Netscape certificate types set (mbedtls_x509_info_cert_type).
+x509_info_cert_type: fn(out: &[U8], ns_cert_type: Int) {
+    flags: [Int]{
+        X509_NS_CERT_TYPE_SSL_CLIENT, X509_NS_CERT_TYPE_SSL_SERVER, X509_NS_CERT_TYPE_EMAIL, X509_NS_CERT_TYPE_OBJECT_SIGNING,
+        X509_NS_CERT_TYPE_RESERVED, X509_NS_CERT_TYPE_SSL_CA, X509_NS_CERT_TYPE_EMAIL_CA, X509_NS_CERT_TYPE_OBJECT_SIGNING_CA,
+    }
+    names: [String]{"SSL Client", "SSL Server", "Email", "Object Signing", "Reserved", "SSL CA", "Email CA", "Object Signing CA"}
+    x509_info_flags(out, ns_cert_type, flags, names)
+}
+
+/// The key usages set (mbedtls_x509_info_key_usage).
+x509_info_key_usage: fn(out: &[U8], key_usage: Int) {
+    flags: [Int]{
+        X509_KU_DIGITAL_SIGNATURE, X509_KU_NON_REPUDIATION, X509_KU_KEY_ENCIPHERMENT, X509_KU_DATA_ENCIPHERMENT,
+        X509_KU_KEY_AGREEMENT, X509_KU_KEY_CERT_SIGN, X509_KU_CRL_SIGN, X509_KU_ENCIPHER_ONLY, X509_KU_DECIPHER_ONLY,
+    }
+    names: [String]{
+        "Digital Signature", "Non Repudiation", "Key Encipherment", "Data Encipherment", "Key Agreement",
+        "Key Cert Sign", "CRL Sign", "Encipher Only", "Decipher Only",
+    }
+    x509_info_flags(out, key_usage, flags, names)
+}

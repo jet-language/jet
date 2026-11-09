@@ -1,0 +1,208 @@
+// Private Core source part: PKCS #12 password-based encryption.
+//
+// A port of mbedtls 3.6.7's pkcs12.c: the PKCS #12 key derivation (RFC 7292
+// appendix B.2) and the pbeWithSHAAnd*-CBC encryption of appendix C, which
+// derives the key and IV from a BMPString password and the pkcs-12PbeParams
+// and runs the cipher layer's one-shot crypt with PKCS #7 padding.
+//
+// Where the C contract cannot be expressed it is enforced by the types: the
+// cipher and digest are always the library's (no unknown cipher_type or
+// md_type), a password or salt is a byte list (no NULL with a length), and
+// the output grows to fit (no output-size argument, so no
+// ASN1_BUF_TOO_SMALL).
+use {
+    core
+    cipher: __core_crypto_cipher
+    asn1: __core_crypto_asn1
+    hashes: __core_crypto_md
+    oids: __core_crypto_oid
+    layer: __core_crypto_cipher_layer
+    pkcs5: __core_crypto_pkcs5
+}
+
+// Every call refuses with PKCS #5's pkcs5.PBEError: PKCS #12's failures
+// are the same four (MBEDTLS_ERR_PKCS12_*), told apart by the scheme called.
+
+/// The purposes of a derivation, its diversifier ID (RFC 7292 appendix B.3).
+PKCS12_DERIVE_KEY: 1
+PKCS12_DERIVE_IV: 2
+PKCS12_DERIVE_MAC_KEY: 3
+
+/// The digest and cipher a PKCS #12 PBE algorithm names.
+PBEAlg: struct {
+    md: hashes.Md
+    info: layer.CipherInfo
+}
+
+/// The digest and cipher of a PKCS #12 PBE OID, as mbedtls 3.6.7's
+/// oid_pkcs12_pbe_alg table maps it (mbedtls_oid_get_pkcs12_pbe_alg); None
+/// for any other OID.
+pbe_alg: fn(data: [U8], buf: asn1.ASN1Buf) -> PBEAlg? Never! {
+    if oids.is(oids.OID_PKCS12_PBE_SHA1_DES3_EDE_CBC, data, buf) -> return sha1_pbe("DES-EDE3-CBC")
+    if oids.is(oids.OID_PKCS12_PBE_SHA1_DES2_EDE_CBC, data, buf) -> return sha1_pbe("DES-EDE-CBC")
+    None
+}
+
+sha1_pbe: fn(name: String) -> PBEAlg? Never! {
+    info: layer.cipher_info_from_string(name) ?? return None
+    Val(PBEAlg{md: .SHA1, info: info})
+}
+
+/// `filler` repeated to `v` bytes (pkcs12_fill_buffer); `filler` is not
+/// empty.
+fill_block: fn(filler: [U8], v: Int) -> [U8] Never! {
+    out := [U8]{}
+    cipher.reserve(out, v)
+    loop i in 0..<v -> out.push(filler[i %% filler.len()])
+    out
+}
+
+/// block += addend, as `v`-byte big-endian numbers modulo 2^(8v).
+add_block: fn(block: &[U8], addend: [U8], v: Int) Never! {
+    carry := 0
+    loop k in 0..<v {
+        i: v - 1 - k
+        sum: Int.from_u8(block[i]) + Int.from_u8(addend[i]) + carry
+        block[i] = wrapping(U8{sum %% 256})
+        carry = sum >> 8
+    }
+}
+
+/// `len` bytes of the PKCS #12 derivation (mbedtls_pkcs12_derivation,
+/// RFC 7292 appendix B.2) for diversifier `id` from `password`, which the
+/// caller has already made a BMPString, and `salt`. An empty password or
+/// salt takes no block in the hash input, as a NULL one does in C.
+pkcs12_derivation: fn(md: hashes.Md, password: [U8], salt: [U8], id: Int, iterations: Int, len: Int) -> [U8] pkcs5.PBEError! {
+    // At most 64 bytes of password or salt.
+    if len < 0 || len > 128 || password.len() > 64 || salt.len() > 64 -> return Err(.BadInput)
+    use_password: password.len() != 0
+    use_salt: salt.len() != 0
+    hlen: hashes.md_size(md)
+    v := 128
+    if hlen <= 32 -> v = 64
+    diversifier: fill_block([U8]{wrapping(U8{id %% 256})}, v)
+    salt_block := [U8]{}
+    if use_salt -> salt_block = fill_block(salt, v)
+    pwd_block := [U8]{}
+    if use_password -> pwd_block = fill_block(password, v)
+    rounds := iterations
+    if rounds < 1 -> rounds = 1
+    out := [U8]{}
+    cipher.reserve(out, len)
+    loop out.len() < len {
+        // A = H^c(D || S || P).
+        ctx := hashes.hash_start(md)
+        hashes.hash_update(ctx, diversifier)
+        if use_salt -> hashes.hash_update(ctx, salt_block)
+        if use_password -> hashes.hash_update(ctx, pwd_block)
+        a := hashes.hash_finish(ctx)
+        loop _ in 1..<rounds {
+            next := hashes.hash(md, a)
+            core.crypto.wipe(a)
+            a = next.move()
+        }
+        use_len := len - out.len()
+        if use_len > hlen -> use_len = hlen
+        loop i in 0..<use_len -> out.push(a[i])
+        if out.len() < len {
+            // B = A repeated to v bytes, plus one; then I_j += B.
+            b := fill_block(a, v)
+            one := cipher.zero_bytes(v)
+            one[v - 1] = U8{1}
+            add_block(b, one, v)
+            if use_salt -> add_block(salt_block, b, v)
+            if use_password -> add_block(pwd_block, b, v)
+            core.crypto.wipe(b)
+        }
+        core.crypto.wipe(a)
+    }
+    core.crypto.wipe(salt_block)
+    core.crypto.wipe(pwd_block)
+    Ok(out)
+}
+
+/// The salt and iteration count of a pkcs-12PbeParams
+/// (pkcs12_parse_pbe_params).
+PBEParams: struct {
+    salt: [U8]
+    iterations: Int
+}
+
+parse_pbe_params: fn(data: [U8], params: asn1.ASN1Buf) -> PBEParams pkcs5.PBEError! {
+    if params.tag_id != asn1.ASN1_CONSTRUCTED.bit_or(asn1.ASN1_SEQUENCE) -> return Err(.InvalidFormat(Val(.UnexpectedTag)))
+    p := params.p
+    end: params.p + params.len
+    salt_len: asn1.get_tag(data, p, end, asn1.ASN1_OCTET_STRING) ?? return Err(.InvalidFormat(Val(err)))
+    salt: cipher.bytes_of(data, p, salt_len)
+    p += salt_len
+    iterations: asn1.get_int(data, p, end) ?? return Err(.InvalidFormat(Val(err)))
+    if p != end -> return Err(.InvalidFormat(Val(.LengthMismatch)))
+    Ok(PBEParams{salt: salt, iterations: iterations})
+}
+
+/// Wipe `secret` and pass `e` on.
+refuse: fn(secret: &[U8], e: pkcs5.PBEError) -> [U8] pkcs5.PBEError! {
+    core.crypto.wipe(secret)
+    Err(e)
+}
+
+/// PKCS #12 PBE (mbedtls_pkcs12_pbe_ext): encrypt or decrypt `input` under
+/// `password` with `info`'s cipher, its key and IV derived with `md` from
+/// the pkcs-12PbeParams `params` in `data`. Bad padding on decryption is
+/// PasswordMismatch; other cipher failures pass through.
+pkcs12_pbe: fn(data: [U8], params: asn1.ASN1Buf, operation: layer.CipherOperation, info: layer.CipherInfo, md: hashes.Md, password: [U8], input: [U8]) -> [U8] pkcs5.PBEError! {
+    if password.len() > 128 -> return Err(.BadInput)
+    pbe: parse_pbe_params(data, params)
+    // The password as a BMPString with its terminating NUL: each byte a
+    // big-endian UTF-16 unit.
+    unipwd := cipher.zero_bytes(2 * password.len() + 2)
+    loop i in 0..<password.len() -> unipwd[2 * i + 1] = password[i]
+    key := pkcs12_derivation(md, unipwd, pbe.salt, PKCS12_DERIVE_KEY, pbe.iterations, info.key_bits /% 8) ?? return refuse(unipwd, err)
+    iv := [U8]{}
+    if info.iv_size != 0 {
+        if pkcs12_derivation(md, unipwd, pbe.salt, PKCS12_DERIVE_IV, pbe.iterations, info.iv_size) == {
+            .Ok(derived) -> iv = derived
+            .Err(e) -> {
+                core.crypto.wipe(key)
+                return refuse(unipwd, e)
+            }
+        }
+    }
+    core.crypto.wipe(unipwd)
+    ctx := layer.cipher_setup(info)
+    if layer.cipher_setkey(ctx, key, operation) == {
+        .Ok(_) -> core.crypto.wipe(key)
+        .Err(e) -> {
+            core.crypto.wipe(key)
+            return refuse(iv, .Cipher(e))
+        }
+    }
+    layer.cipher_set_padding_mode(ctx, .PKCS7) ?? return refuse(iv, .Cipher(err))
+    crypted: layer.cipher_crypt(ctx, iv, input) ?? return refuse(iv, if err == .InvalidPadding -> pkcs5.PBEError.PasswordMismatch else -> pkcs5.PBEError.Cipher(err))
+    core.crypto.wipe(iv)
+    Ok(crypted)
+}
+
+#Test("The PKCS #12 derivation gives RFC 7292's MD5 vector, and PBE round-trips 3-key Triple-DES") {
+    // test_suite_pkcs12's "derive key: MD5: Valid password and salt".
+    secret: [U8]{0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef}
+    derived: pkcs12_derivation(.MD5, secret, secret, PKCS12_DERIVE_KEY, 3, 48) ?? panic("derivation")
+    assert(derived == [U8]{
+        0x46, 0x55, 0x9d, 0xee, 0xee, 0x03, 0x68, 0x36, 0xab, 0x1b, 0x63, 0x3e, 0xc6, 0x20, 0x17, 0x8d,
+        0x4c, 0x70, 0xea, 0xcf, 0x42, 0xf7, 0x2a, 0x2a, 0xd7, 0x36, 0x0c, 0x81, 0x2e, 0xfa, 0x09, 0xca,
+        0x3d, 0x75, 0x67, 0xb4, 0x89, 0xa1, 0x09, 0x05, 0x03, 0x45, 0xc2, 0xdc, 0x6a, 0x26, 0x29, 0x95,
+    })
+    assert(pkcs12_derivation(.MD5, secret, secret, PKCS12_DERIVE_KEY, 3, 129) == .Err(.BadInput))
+    // "PBE Encrypt, pad = 7 (OK)": SEQUENCE { salt 9 bytes of 0xCC, 10 } without its tag.
+    der: [U8]{0x04, 0x09, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0x02, 0x01, 0x0A}
+    params: asn1.ASN1Buf{tag_id: asn1.ASN1_CONSTRUCTED.bit_or(asn1.ASN1_SEQUENCE), p: 0, len: der.len()}
+    alg_der: oids.OID_PKCS12_PBE_SHA1_DES3_EDE_CBC
+    alg: pbe_alg(alg_der, asn1.ASN1Buf{tag_id: asn1.ASN1_OID, p: 0, len: alg_der.len()}) ?? panic("PBE OID")
+    password: [U8]{0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB}
+    message: [U8]{0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA}
+    sealed: pkcs12_pbe(der, params, .Encrypt, alg.info, alg.md, password, message) ?? panic("PBE encrypt")
+    assert(sealed == [U8]{0x5F, 0x2C, 0x15, 0x05, 0x6A, 0x36, 0xF3, 0xA7, 0x88, 0x56, 0xE9, 0xE6, 0x62, 0xDD, 0x27, 0xCB})
+    opened: pkcs12_pbe(der, params, .Decrypt, alg.info, alg.md, password, sealed) ?? panic("PBE decrypt")
+    assert(opened == message)
+    assert(pkcs12_pbe(der, asn1.ASN1Buf{tag_id: asn1.ASN1_SEQUENCE, p: 0, len: der.len()}, .Decrypt, alg.info, alg.md, password, sealed) == .Err(.InvalidFormat(Val(.UnexpectedTag))))
+}
