@@ -2555,18 +2555,20 @@ Floating classifiers such as `math.is_nan` require Float or F32, not Int.
 Multi-operand floating calls such as `math.hypot`, and floating `pow`
 operands, must use matching Float/F32 widths; convert explicitly before
 calling them. Source-owned Core wrappers preserve these same constraints.
-An all-F32 call of a correctly rounded function below (`exp`, `exp2`,
-`exp10`, `exp_m1`, `ln`, `ln_1p`, `log2`, `log10`, `rsqrt`, `sin_pi`,
-`cos_pi`, `tan_pi`, `asin_pi`, `acos_pi`, `atan_pi`, `atan2_pi`, `exp2_m1`,
-`exp10_m1`, `log2_1p`, `log10_1p`, `pow_r`, `pow_n`, `root_n`,
-`compound_n`) returns the correctly rounded `F32` result on every tier, never
+An all-F32 call of a correctly rounded function below (`sin`, `cos`, `tan`,
+`asin`, `acos`, `atan`, `atan2`, `exp`, `exp2`, `exp10`, `exp_m1`, `ln`,
+`ln_1p`, `log2`, `log10`, `rsqrt`, `sin_pi`, `cos_pi`, `tan_pi`, `asin_pi`,
+`acos_pi`, `atan_pi`, `atan2_pi`, `exp2_m1`, `exp10_m1`, `log2_1p`,
+`log10_1p`, `pow_r`, `pow_n`, `root_n`, `compound_n`) returns the correctly
+rounded `F32` result on every tier, never
 a double rounding of the Float one (C23's `f` forms such as `rsqrtf` and
 `pownf`); the whole exponent of `pow_n`, `root_n` and `compound_n` stays an
 `Int`.
 
 | Function | Returns | Description |
 | --- | --- | --- |
-| `math.acos(x)`, `acosh(x)`, `asin(x)`, `asinh(x)`, `atan(x)`, `atan2(y, x)`, `atanh(x)` | `Float` | Inverse trigonometric and hyperbolic functions, with musl 1.2.5's results bit for bit. One exception: `acosh` of any value below 1 is NaN, where musl returns a finite value for some x at or below -2. The extended float family is part of the shared math surface (D-CORESURFACE1). |
+| `math.acos(x)`, `asin(x)`, `atan(x)`, `atan2(y, x)` | `Float` | Inverse trigonometric functions, correctly rounded, so every tier returns the same bits: `asin` in [-pi/2, pi/2] and `acos` in [0, pi] with NaN for `abs(x) > 1`, `atan` in [-pi/2, pi/2] with ±pi/2 at the infinities, and `atan2` the angle of the point `(x, y)` in [-pi, pi] with the sign of `y` and the C23 values at zeros and infinities; `asin`, `atan` and `atan2` keep the sign of a zero result (C23 `asin`, `acos`, `atan`, `atan2`). |
+| `math.acosh(x)`, `asinh(x)`, `atanh(x)` | `Float` | Inverse hyperbolic functions, with musl 1.2.5's results bit for bit. One exception: `acosh` of any value below 1 is NaN, where musl returns a finite value for some x at or below -2. The extended float family is part of the shared math surface (D-CORESURFACE1). |
 | `math.abs(value)` / `math.abs_float(value: Float)` | the argument type (`Float` for `Complex`) | Absolute value of an `Int`, `Float`, `F32`, `I64` or `Complex`. On `Float` and `F32` it clears the sign bit, so `-0.0` gives `+0.0` and a negative NaN loses its sign; on `I64` it is fixed-width negation, which stops with E3010 at `I64.MIN`. |
 | `math.copy(value: Float)` | `Float` | Return the floating-point value unchanged, including its IEEE representation. |
 | `math.is_even(value)` / `math.is_odd(value)` | `Bool` | Test integer parity. |
@@ -2574,7 +2576,8 @@ a double rounding of the Float one (C23's `f` forms such as `rsqrtf` and
 | `math.isqrt(value)` | `?Int` | Return the integer square root when the input is nonnegative. |
 | `math.gcd(a, b)` / `math.lcm(a, b)` | `Int` | Greatest common divisor or least common multiple. |
 | `math.gcd_many(values)` / `math.lcm_many(values)` | `Int` | Fold integer gcd or lcm over a list. |
-| `math.cos(x)`, `cosh(x)`, `sin(x)`, `sinh(x)`, `tan(x)`, `tanh(x)`, `math.cot(x)` | `Float` | Trigonometric and hyperbolic functions. |
+| `math.sin(x)`, `cos(x)`, `tan(x)` | `Float` | Sine, cosine and tangent of `x` radians, correctly rounded for every finite `x` however large, so every tier returns the same bits: NaN for an infinity, and `sin` and `tan` keep the sign of a zero (C23 `sin`, `cos`, `tan`). |
+| `math.cosh(x)`, `sinh(x)`, `tanh(x)`, `math.cot(x)` | `Float` | Hyperbolic functions, and the cotangent `1 / tan(x)`. |
 | `math.sin_pi(x)`, `cos_pi(x)`, `tan_pi(x)` | `Float` | `sin`, `cos` and `tan` of `pi * x`, correctly rounded, so every tier returns the same bits and every exact 0 or ±1 comes out exact: a zero with the sign of `x` for `sin_pi` at whole `x`, `+0` for `cos_pi` at `x = 1/2 mod 1`, an infinity for `tan_pi` there, and NaN for an infinity (C23 `sinpi`, `cospi`, `tanpi`). |
 | `math.asin_pi(x)`, `acos_pi(x)`, `atan_pi(x)`, `atan2_pi(y, x)` | `Float` | `asin`, `acos`, `atan` and `atan2` divided by `pi`, correctly rounded, so every tier returns the same bits: `asin_pi` in [-1/2, 1/2] and `acos_pi` in [0, 1] with NaN for `abs(x) > 1`, `atan_pi` in [-1/2, 1/2] with ±1/2 at the infinities, and `atan2_pi` the angle of the point `(x, y)` in half-turns, in [-1, 1] with the sign of `y` and the C23 values at zeros and infinities (C23 `asinpi`, `acospi`, `atanpi`, `atan2pi`). |
 | `math.exp(x)`, `exp2(x)`, `exp10(x)`, `exp_m1(x)`, `expm1(x)` | `Float` | `e^x`, `2^x`, `10^x` and `e^x - 1`, correctly rounded, so every tier returns the same bits: `+inf` on overflow, 0 (-1 for `exp_m1`) at `-inf`, `exp2` and `exp10` exact wherever the power is a Float, and `exp_m1` keeps the sign of a zero (C23 `exp`, `exp2`, `exp10`, `expm1`). |
@@ -2616,7 +2619,7 @@ a double rounding of the Float one (C23's `f` forms such as `rsqrtf` and
 | `math.INFINITY` / `math.NAN` | `Float` | The IEEE-754 special values `1.0 / 0.0` and `0.0 / 0.0`, as comptime constants. `NAN` compares unequal to every value, itself included; test it with `math.is_nan`. |
 | `math.round(x)` | `Int` | Round to the nearest integer, with ties away from zero. |
 | `math.to_bits(x)` / `math.from_bits(bits)` | integer bits / `Float` | Convert between a floating value and its bit representation. |
-| `math.sin_cos(x)` | `(cos: Float, sin: Float)` | Compute cosine and sine together. |
+| `math.sin_cos(x)` | `(cos: Float, sin: Float)` | Compute cosine and sine together, each correctly rounded as `cos` and `sin` give it. |
 | `math.modf(x)` | `(fract: Float, whole: Float)` | Split a value into fractional and whole parts, each with the sign of `x`; an infinity has fraction `±0`. |
 | `math.frexp(x)` | `(exp: Int, frac: Float)` | Split a value into `frac * 2^exp` with `abs(frac)` in [0.5, 1) (C `frexp`); a zero, an infinity or a NaN is its own `frac` with `exp` 0. |
 | `math.checked_abs(x)`, `checked_neg(x)`, `checked_add(a,b)`, `checked_sub(a,b)`, `checked_mul(a,b)`, `checked_div(a,b)`, `checked_rem(a,b)`, `checked_pow(a,b)` | `?Int` | Return `None` on integer overflow or invalid division/remainder; checked power also rejects a negative exponent. |

@@ -68,15 +68,187 @@ lcm: fn(a: Int, b: Int) -> Int Never! {
 // deterministic Core primitives.  Keeping the call qualified is deliberate:
 // inside this source package it selects the primitive Core route rather than
 // recursively calling the source implementation being defined.
-acos: fn(n: Float) -> Float Never! { core.math.acos(n) }
+/// acos x, correctly rounded (CORE-MATH acos.c): in [0, pi], and NaN for
+/// |x| > 1.
+acos: fn(n: Float) -> Float Never! {
+    u: to_bits(n)
+    ax: (u << 1).bit_and(0xFFFF_FFFF_FFFF_FFFF)
+    if ax > 0x7FC0_0000_0000_0000 {
+        // |x| > 1/2: acos(x) = 2 asin(sqrt((1 - x)/2)), or pi minus that of -x
+        f0h: if u < 0 -> Float{3.141592653589793} else -> Float{0.0}
+        f0l: if u < 0 -> Float{1.2246467991473532e-16} else -> Float{0.0}
+        if ax >= 0x7FE0_0000_0000_0000 {
+            if ax == 0x7FE0_0000_0000_0000 -> return f0h + f0l
+            if ax > 0xFFE0_0000_0000_0000 -> return n + n
+            return NAN
+        }
+        t: Float{2.0} - Float{2.0} * fabs(n)
+        jd: round_even(t * Float{32.0})
+        z: copysign(sqrt(t), n)
+        zl: fma(z, z, -t) * ((Float{-0.5} / t) * z)
+        tj: Float{0.25} * t - jd * Float{0.0078125}
+        eps: fabs(z * tj) * Float{3.434752482434078e-16} + Float{2.465190328815662e-32}
+        r: __asin_core(jd, tj, z, zl, f0h, f0l, eps)
+        if r.lb != r.ub -> return __acos_refine(n, r.lb)
+        return r.lb
+    }
+    f0h: Float{1.5707963267948966}
+    f0l: Float{6.123233995736766e-17}
+    if ax <= 0x7E00_0000_0000_0000 {
+        // |x| <= 2^-15: pi/2 - x - x^3/6, the cube dropped below 4.98e-17
+        v: if ax <= 0x7919_6767_0D2E_8FE8 -> Float{0.0} else -> (n * n) * (Float{-0.16666666666666666} * n)
+        h: __fast_two_sum(f0h, -n)
+        l: v + (h.lo + f0l)
+        lb: h.hi + (l - Float{1.990403348955723e-24})
+        ub: h.hi + (l + Float{1.990403348955723e-24})
+        if lb != ub -> return __acos_refine(n, lb)
+        return lb
+    }
+    // pi/2 - asin(x)
+    jd: round_even(n * n * Float{128.0})
+    t: fma(n, n, Float{-0.0078125} * jd)
+    r: __asin_core(jd, t, -n, Float{0.0}, f0h, f0l, (-n * t) * Float{3.3393426912553537e-16})
+    if r.lb != r.ub -> return __acos_refine(n, r.lb)
+    r.lb
+}
 acosh: fn(n: Float) -> Float Never! { core.math.acosh(n) }
-asin: fn(n: Float) -> Float Never! { core.math.asin(n) }
+/// asin x, correctly rounded (CORE-MATH asin.c): in [-pi/2, pi/2] with the
+/// sign of x, and NaN for |x| > 1.
+asin: fn(n: Float) -> Float Never! {
+    u: to_bits(n)
+    ax: (u << 1).bit_and(0xFFFF_FFFF_FFFF_FFFF)
+    if ax > 0x7FC0_0000_0000_0000 {
+        // |x| > 1/2: asin(x) = pi/2 - 2 asin(sqrt((1 - x)/2)), odd in x
+        f0h: if u < 0 -> Float{-1.5707963267948966} else -> Float{1.5707963267948966}
+        f0l: if u < 0 -> Float{-6.123233995736766e-17} else -> Float{6.123233995736766e-17}
+        if ax >= 0x7FE0_0000_0000_0000 {
+            if ax == 0x7FE0_0000_0000_0000 -> return f0h + f0l
+            if ax > 0xFFE0_0000_0000_0000 -> return n + n
+            return NAN
+        }
+        t: Float{2.0} - Float{2.0} * fabs(n)
+        jd: round_even(t * Float{32.0})
+        z: copysign(sqrt(t), -n)
+        zl: fma(z, z, -t) * ((Float{-0.5} / t) * z)
+        tj: Float{0.25} * t - jd * Float{0.0078125}
+        r: __asin_core(jd, tj, z, zl, f0h, f0l, fabs(z * tj) * Float{3.5475095083725705e-16})
+        if r.lb != r.ub -> return __asin_refine(n, r.lb)
+        return r.lb
+    }
+    // |x| < 2.149119332890821e-8: x rounds as asin(x) does
+    if ax < 0x7CAE_26E8_9224_7DEC -> return fma(Float{2.7755575615628914e-17}, n, n)
+    jd: round_even(n * n * Float{128.0})
+    t: fma(n, n, Float{-0.0078125} * jd)
+    r: __asin_core(jd, t, n, Float{0.0}, Float{0.0}, Float{0.0}, fabs(n * t) * Float{3.2526065174565133e-16})
+    if r.lb != r.ub -> return __asin_refine(n, r.lb)
+    r.lb
+}
 asinh: fn(n: Float) -> Float Never! { core.math.asinh(n) }
-atan: fn(n: Float) -> Float Never! { core.math.atan(n) }
-atan2: fn(a: Float, b: Float) -> Float Never! { core.math.atan2(a, b) }
+/// atan x, correctly rounded (CORE-MATH atan.c): in [-pi/2, pi/2] with the
+/// sign of x, and +-pi/2 rounded for an infinity.
+atan: fn(n: Float) -> Float Never! {
+    at: to_bits(n).bit_and(0x7FFF_FFFF_FFFF_FFFF)
+    if at < 0x3F7B_21C4_75E6_362A {
+        // |x| < 0.006624
+        if at == 0 -> return n
+        // |x| < 2^-27: x - x 2^-54 rounds as x - x^3/3 does
+        if at < 0x3E40_0000_0000_0000 -> return fma(Float{-5.551115123125783e-17}, n, n)
+        x2: n * n
+        x3: n * x2
+        x4: x2 * x2
+        f: x3 * ((Float{-0.3333333333333333} + x2 * Float{0.199999999999994}) + x4 * (Float{-0.1428571424743179} + x2 * Float{0.11110113960028833}))
+        ub: (f + f * Float{1.2212453270876722e-15}) + n
+        lb: (f - f * Float{6.106226635438361e-16}) + n
+        if ub == lb -> return ub
+        return __atan_refine(n, ub)
+    }
+    h := Float{0.0}
+    ah := Float{0.0}
+    al := Float{0.0}
+    if at > 0x4062_DED8_E34A_9035 {
+        // |x| > 150.9639755684199
+        ah = copysign(Float{1.5707963267948966}, n)
+        al = copysign(Float{6.123233995736766e-17}, n)
+        if at >= 0x434D_0296_7C31_CDB5 {
+            if at > 0x7FF0_0000_0000_0000 -> return n + n
+            return ah + al
+        }
+        h = Float{-1.0} / n
+    } else {
+        // the table point nearest x, as in atan_pi
+        ci: (at >> 51) - 2030
+        ut: at.bit_and(0x7_FFFF_FFFF_FFFF) >> 35
+        ut2: (ut * ut) >> 16
+        i: ((__ATANPI_C[3 * ci] << 16) + ut * __ATANPI_C[3 * ci + 1] - ut2 * __ATANPI_C[3 * ci + 2]) >> 25
+        sx: copysign(1.0, n)
+        id: sx * approx(i)
+        ta: sx * __ATANPI_A[2 * i]
+        al = sx * __ATANPI_A[2 * i + 1] + Float{4.2111741079360304e-17} * id
+        h = (n - ta) / (Float{1.0} + n * ta)
+        ah = Float{0.012271846303085088} * id
+    }
+    h2: h * h
+    h4: h2 * h2
+    f: (Float{1.0} + h2 * Float{-0.333333333333331}) + h4 * (Float{0.1999999997326265} + h2 * Float{-0.1428473928322857})
+    al = fma(h, f, al)
+    e: h * Float{8.743006318923108e-16}
+    ub: (al + e) + ah
+    lb: (al - e) + ah
+    if ub == lb -> return ub
+    __atan_refine(n, ub)
+}
+/// atan2(a, b), the angle of the point (b, a), correctly rounded (CORE-MATH
+/// atan2.c): in [-pi, pi] with the sign of a; the C23 values at zeros and
+/// infinities, and NaN when a or b is NaN.
+atan2: fn(a: Float, b: Float) -> Float Never! {
+    uy: to_bits(a)
+    ux: to_bits(b)
+    aiy: uy.bit_and(0x7FFF_FFFF_FFFF_FFFF)
+    aix: ux.bit_and(0x7FFF_FFFF_FFFF_FFFF)
+    if aiy == 0 || aiy >= 0x7FF0_0000_0000_0000 || aix == 0 || aix >= 0x7FF0_0000_0000_0000 -> return __atan2_special(a, b)
+    // |a| and |b| more than 52 binades apart
+    if aix - aiy >= 0x0350_0000_0000_0000 || aiy - aix > 0x0350_0000_0000_0000 -> return __atan2_accurate(a, b)
+    gt: aix < aiy
+    sg: if (gt != (ux < 0)) != (uy < 0) -> Float{-1.0} else -> Float{1.0}
+    kw: (if ux < 0 -> 4 else -> 0) + (if uy < 0 -> 2 else -> 0) + (if gt -> 1 else -> 0)
+    // x / y in [0, 1], and jt / 64 the table point nearest it
+    x := if gt -> fabs(a) else -> fabs(b)
+    y := if gt -> fabs(b) else -> fabs(a)
+    jt: (to_bits(y / x + Float{2.0078125}) >> 45).bit_and(127)
+    fh: __ATAN2_F[2 * jt + 1] * sg + __ATAN2_O[2 * kw]
+    fl: __ATAN2_F[2 * jt] * sg + __ATAN2_O[2 * kw + 1]
+    if (x < Float{1.1282464849155185e-277}) {
+        x = x * Float{8.863311460481781e276}
+        y = y * Float{8.863311460481781e276}
+    }
+    if (x > Float{4.49423283715579e307}) && jt != 0 {
+        x = x * Float{0.5}
+        y = y * Float{0.5}
+    }
+    t0: Float{jt} * Float{0.015625}
+    z: fma(-t0, x, y) / fma(t0, y, x)
+    z2: z * z
+    zs: z * sg
+    dz: (zs * z2) * (Float{-0.33333333333332604} + z2 * (Float{0.19999999943116925} + z2 * Float{-0.14284292170535642}))
+    e: fabs(zs) * Float{4.528712474471952e-16} + Float{8.077935669463161e-28}
+    r: __fast_two_sum(fh, zs)
+    rl: (fl + dz) + r.lo
+    ub: r.hi + (rl + e)
+    if r.hi + (rl - e) == ub -> return ub
+    __atan2_refine(a, b, x, y, t0, fh, fl, sg)
+}
 atanh: fn(n: Float) -> Float Never! { core.math.atanh(n) }
 cbrt: fn(n: Float) -> Float Never! { core.math.cbrt(n) }
-cos: fn(n: Float) -> Float Never! { core.math.cos(n) }
+/// cos x, correctly rounded (CORE-MATH cos.c): 1 for |x| < 2^-27, and NaN
+/// for an infinity.
+cos: fn(n: Float) -> Float Never! {
+    z: fabs(n)
+    e: to_bits(z) >> 52
+    if e < 0x3E4 -> return fma(n, -n, Float{1.0})
+    if e < 0x41E -> return __cos_moderate(z)
+    if e == 0x7FF -> return __pi_trig_special(n)
+    __cos_large(z)
+}
 cosh: fn(n: Float) -> Float Never! { core.math.cosh(n) }
 /// e^x, correctly rounded (CORE-MATH exp.c): 1 + x for |x| <= 2^-54, +inf
 /// from about 709.78 up, +0 from about -745.13 down, and NaN for NaN.
@@ -996,7 +1168,20 @@ logb: fn(n: Float) -> Float Never! {
     if n == 0.0 -> return Float{-1.0} / (n * n)
     Float{ilogb(n) ?? 0}
 }
-sin: fn(n: Float) -> Float Never! { core.math.sin(n) }
+/// sin x, correctly rounded (CORE-MATH sin.c): a zero keeps its sign, and NaN
+/// for an infinity.
+sin: fn(n: Float) -> Float Never! {
+    bits: to_bits(n)
+    e: (bits >> 52).bit_and(0x7FF)
+    if e < 0x3E5 {
+        // |x| < 2^-26: x - x^3/6 is within half an ulp of x
+        if bits.bit_and(0x7FFF_FFFF_FFFF_FFFF) == 0 -> return n
+        return fma(n, Float{-5.551115123125783e-17}, n)
+    }
+    if e < 0x41E -> return __sin_moderate(n)
+    if e == 0x7FF -> return __pi_trig_special(n)
+    __sin_large(n)
+}
 sinh: fn(n: Float) -> Float Never! { core.math.sinh(n) }
 sqrt: fn(n: Float) -> Float Never! { core.math.sqrt(n) }
 /// 1/sqrt(x), correctly rounded (C23 rsqrt; CORE-MATH rsqrt.c): +inf for +0,
@@ -1447,6 +1632,10 @@ __atan_pi_f32: fn(x: Float) -> Float Never! { __f32_listed(x, atan_pi(x), __ATAN
 __exp10_m1_f32: fn(x: Float) -> Float Never! { __f32_listed(x, exp10_m1(x), __EXP10M1_F32) }
 __log2_1p_f32: fn(x: Float) -> Float Never! { __f32_listed(x, log2_1p(x), __LOG2P1_F32) }
 __log10_1p_f32: fn(x: Float) -> Float Never! { __f32_listed(x, log10_1p(x), __LOG10P1_F32) }
+__sin_f32: fn(x: Float) -> Float Never! { __f32_listed(x, sin(x), __SIN_F32) }
+__cos_f32: fn(x: Float) -> Float Never! { __f32_listed(x, cos(x), __COS_F32) }
+__acos_f32: fn(x: Float) -> Float Never! { __f32_listed(x, acos(x), __ACOS_F32) }
+__atan_f32: fn(x: Float) -> Float Never! { __f32_listed(x, atan(x), __ATAN_F32) }
 __EXP2_F32: [Float]{0.0029695758130401373, 1.0, -0.029743773862719536, 1.0}
 __LN_F32: [Float]{0.011794382706284523, -1.0, 9.472636222839355, -1.0, 58037908.0, 1.0, 1.2783783694984994e23, 1.0, 5.498306075456329e28, 1.0}
 __LOG10_F32: [Float]{6.2845478928294454e-30, 1.0}
@@ -1459,6 +1648,10 @@ __ATANPI_F32: [Float]{-0.9109678864479065, -1.0, 0.9109678864479065, -1.0}
 __EXP10M1_F32: [Float]{15.843597412109375, -1.0}
 __LOG2P1_F32: [Float]{1585770880.0, -1.0, 314725466112.0, -1.0}
 __LOG10P1_F32: [Float]{-7.635413967754801e-10, 1.0, 0.00029465556144714355, -1.0}
+__SIN_F32: [Float]{9830.3984375, -1.0, -9830.3984375, -1.0}
+__COS_F32: [Float]{1.100467763087514e19, -1.0, -1.100467763087514e19, -1.0, 1.7269983397793917e20, 1.0, -1.7269983397793917e20, 1.0}
+__ACOS_F32: [Float]{1.5893254712295857e-8, 1.0, 0.00024868646869435906, 1.0}
+__ATAN_F32: [Float]{0.06905200332403183, 1.0, -0.06905200332403183, 1.0}
 // The sign of (xm 2^xe)^(yn 2^ye / yd) - a for xm, yd > 0, yn != 0 and a
 // binary32 midpoint a > 0: 0 when they are equal, else Ziv's strategy on
 // __pow_fixed until its error interval leaves a (at 1024 bits its
@@ -2306,6 +2499,87 @@ __ATAN2PIF_C: [Float]{
     0.00003201152607657205, -1.1919997370531597e-21, -0.000006110125403746142, 1.333824885359168e-22,
     7.485604805690301e-7, -9.591512195984102e-24, -4.4129183432426896e-8, 1.786021469414917e-24
 }
+// atan2 at binary32 width (an all-F32 math.atan2 call; CORE-MATH atan2f.c)
+// on the widened binary32 y and x: a Float whose binary32 rounding is the
+// correctly rounded result. The special values and a zero x or y are atan2's
+// own. Otherwise a rational approximation of atan(z), z = y/x or x/y, and
+// when it lies within 2^-48 relatively of a binary32 value or midpoint,
+// z - z^3/3 for a tiny |y/x| or a degree-63 double-double series.
+__atan2_f32: fn(y: Float, x: Float) -> Float Never! {
+    if !is_finite(y) || !is_finite(x) || (y == Float{0.0}) || (x == Float{0.0}) -> return atan2(y, x)
+    ay: __to_bits_f32(F32{y}).bit_and(0x7FFF_FFFF)
+    ax: __to_bits_f32(F32{x}).bit_and(0x7FFF_FFFF)
+    gt: ay > ax
+    i: (if sign_bit(y) -> 4 else -> 0) + (if sign_bit(x) -> 2 else -> 0) + (if gt -> 1 else -> 0)
+    off: __ATAN2F_OFF[i]
+    z0: if gt -> x / y else -> y / x
+    d: ax - ay
+    r := Float{1.0}
+    if d < 27 << 23 && d > -(27 << 23) {
+        z2: z0 * z0
+        z4: z2 * z2
+        z8: z4 * z4
+        n0: (__ATAN2F_N[0] + z2 * __ATAN2F_N[1]) + z4 * (__ATAN2F_N[2] + z2 * __ATAN2F_N[3]) + z8 * ((__ATAN2F_N[4] + z2 * __ATAN2F_N[5]) + z4 * __ATAN2F_N[6])
+        d0: (__ATAN2PIF_D[0] + z2 * __ATAN2PIF_D[1]) + z4 * (__ATAN2PIF_D[2] + z2 * __ATAN2PIF_D[3]) + z8 * ((__ATAN2PIF_D[4] + z2 * __ATAN2PIF_D[5]) + z4 * __ATAN2PIF_D[6])
+        r = n0 / d0
+    }
+    z: if gt -> -z0 else -> z0
+    r = z * r + off
+    // the low 28 bits of r within 8 of a multiple of 2^28
+    if (to_bits(r) + 8).bit_and(0xFFF_FFFF) <= 16 {
+        if ay < ax && (ax - ay) >> 23 >= 25 -> return __atan2_f32_tiny(y, x)
+        zh: if gt -> x / y else -> y / x
+        zl: if gt -> fma(zh, -y, x) / y else -> fma(zh, -x, y) / x
+        q: __mul_dd(zh, zl, zh, zl)
+        p: __poly_dd(q.hi, q.lo, __ATAN2F_C, 32, Float{0.0})
+        s: if gt -> __mul_dd(-zh, -zl, p.hi, p.lo) else -> __mul_dd(zh, zl, p.hi, p.lo)
+        sh: s.hi + off
+        sl: (((off - sh) + s.hi) + s.lo) + __ATAN2F_OFFL[i]
+        th: Float.from_f32(F32{sh})
+        tm := (sh - th) + sl
+        // th + tm on a binary32 midpoint: move tm off it to its own side
+        if (th + th * Float{8.673617379884035e-19} == th - th * Float{8.673617379884035e-19}) {
+            half: from_bits(to_bits(th).bit_and(0x7FF0_0000_0000_0000) - (24 << 52))
+            tm = if fabs(tm) > half -> tm * Float{1.25} else -> tm * Float{0.75}
+        }
+        r = th + tm
+    }
+    r
+}
+// atan2 at binary32 width for |y/x| below 2^-24: z - z^3/3 with z = y/x, and
+// z moved by one bit toward the remainder's side when it lies within 2^-28
+// ulps of a binary32 value or midpoint.
+__atan2_f32_tiny: fn(y: Float, x: Float) -> Float Never! {
+    z: y / x
+    e0: fma(-z, x, y)
+    e: e0 / x + (Float{-0.3333333333333333} * z) * (z * z)
+    b: to_bits(z)
+    if b.bit_and(0xFFF_FFFF) != 0 -> return z
+    if (z * e > Float{0.0}) -> return from_bits(b + 1)
+    from_bits(b - 1)
+}
+__ATAN2F_OFF: [Float]{0.0, 1.5707963267948966, 3.141592653589793, 1.5707963267948966, -0.0, -1.5707963267948966, -3.141592653589793, -1.5707963267948966}
+__ATAN2F_OFFL: [Float]{0.0, 6.123233995736766e-17, 1.2246467991473532e-16, 6.123233995736766e-17, -0.0, -6.123233995736766e-17, -1.2246467991473532e-16, -6.123233995736766e-17}
+__ATAN2F_N: [Float]{1.0, 2.506848521335565, 2.2855336234350774, 0.9227540611112051, 0.15965700667756133, 0.0093982071883745, 0.00008116266383809054}
+// atan(z)/z as a series in z^2, 32 double-double coefficients (hi, lo)
+__ATAN2F_C: [Float]{
+    1.0, -9.999371390980276e-27, -0.3333333333333333, -1.8503696081891694e-17,
+    0.2, -1.1109570448589454e-17, -0.14285714285714285, -6.906377603268134e-18,
+    0.11111111111111104, -6.04986207547041e-19, -0.0909090909090874, -4.813186107306423e-18,
+    0.07692307692296789, 6.0635784048294865e-18, -0.06666666666423005, 5.357368392422845e-19,
+    0.05882352937094788, -3.0234229312063074e-18, -0.052631578418319884, 7.121906314230013e-19,
+    0.047619042181978474, 3.2606056478649954e-18, -0.04347821570541953, 2.1474249882470664e-18,
+    0.039999692056834395, -1.4496021955960109e-18, -0.037035291887394496, 8.394614713005368e-19,
+    0.03447445331733282, 3.57321674047701e-19, -0.03222458593057924, -6.05919930630252e-19,
+    0.030187892413408284, 8.550359777848272e-19, -0.028231467664296316, 8.645756239029875e-19,
+    0.026160406443643782, -1.1013132206776929e-18, -0.02372363694711401, 5.82053126354201e-19,
+    0.0206884675894418, 8.78953163493978e-19, -0.016981732349686016, 9.51948710384928e-19,
+    0.012817485672589527, -7.742239346647683e-19, -0.008687313963361743, -5.63071564570556e-19,
+    0.005163618439611815, 3.2806307955849715e-19, -0.00262691892479603, -1.373777510443008e-19,
+    0.0011135875725313154, -6.618746076431752e-20, -0.0003808088264492978, 1.5620808802045265e-20,
+    0.00010056717515235685, -5.194627331100907e-21, -0.00001919552508092125, 8.202890655529531e-22,
+    0.00000235167210652331, -1.3883775330103416e-22, -1.3863591848022874e-7, -1.0947593470915086e-23
+}
 // Double-double helpers of the CORE-MATH ports: a value is hi + lo, and every
 // fma recovers the exact rounding error of a product.
 __fast_two_sum: fn(x: Float, y: Float) -> (hi: Float, lo: Float) Never! {
@@ -2420,10 +2694,1549 @@ __wrap_i64: fn(v: Int) -> Int Never! {
     if w > 0x7FFF_FFFF_FFFF_FFFF -> return w - 0xFFFF_FFFF_FFFF_FFFF - 1
     w
 }
-// sin_pi, cos_pi and tan_pi of an infinity are NaN; a NaN stays NaN.
+// sin, cos, tan, sin_pi, cos_pi and tan_pi of an infinity are NaN; a NaN
+// stays NaN.
 __pi_trig_special: fn(n: Float) -> Float Never! {
     if is_nan(n) -> return n + n
     from_bits(0x7FF8_0000_0000_0000)
+}
+// sin and cos (CORE-MATH sin.c, cos.c). The fast paths reduce x by k pi/2^14
+// (|x| < 2^31) or by k 2pi/2^15 (__sincos_reduce), read sin and cos of the grid
+// point from two double-double tables and add a short polynomial in the rest;
+// when the error bound cannot decide the rounding, the accurate path reduces
+// x/(2pi) in 128-bit fixed point and evaluates there.
+__sin_moderate: fn(x: Float) -> Float Never! {
+    ax: fabs(x)
+    k: round_even(Float{5215.189175235227} * ax)
+    r: fma(k, Float{-0.00019174759848570515}, ax) + k * Float{-7.474650873702107e-21}
+    r2: r * r
+    j: Int.from_float(k) ?? 0
+    neg: if (x < Float{0.0}) -> 1 else -> 0
+    g: __sin_grid((j >> 7).bit_and(0x7F), j.bit_and(0x7F))
+    sh: r * (Float{1.0} - Float{0.16666666659950335} * r2)
+    ch: r2 * (Float{-0.5} + Float{0.041666666655141404} * r2)
+    f: __sincos_round(g.hi, g.lo + g.hi * ch + g.other * sh, neg.bit_xor((j >> 14).bit_and(1)), Float{1.0122043719688889e-19})
+    if !is_nan(f) -> return f
+    if (ax < Float{1.52587890625e-5}) -> return __sin_small_accurate(x)
+    __sin_accurate(x)
+}
+__sin_large: fn(x: Float) -> Float Never! {
+    red: __sincos_reduce(fabs(x))
+    r: red.r
+    r2: r * r
+    neg: if (x > Float{0.0}) -> 0 else -> 1
+    g: __sin_grid((red.j >> 7).bit_and(0x7F), red.j.bit_and(0x7F))
+    sh: r * (Float{6.283185307179586} - Float{41.341700961418276} * r2)
+    ch: r2 * (Float{-19.739208802178716} + Float{64.93938786554104} * r2)
+    f: __sincos_round(g.hi, g.lo + g.hi * ch + g.other * sh, neg.bit_xor(red.j >> 14), Float{1.088437337221776e-19})
+    if !is_nan(f) -> return f
+    __sin_accurate(x)
+}
+__cos_moderate: fn(x: Float) -> Float Never! {
+    k: round_even(Float{5215.189175235227} * x)
+    r: fma(k, Float{-0.00019174759848570515}, x) + k * Float{-7.474650873702107e-21}
+    r2: r * r
+    j: Int.from_float(k) ?? 0
+    g: __cos_grid((j >> 7).bit_and(0x7F), j.bit_and(0x7F))
+    sh: r * (Float{1.0} - Float{0.16666666659950335} * r2)
+    ch: r2 * (Float{-0.5} + Float{0.041666666655141404} * r2)
+    f: __sincos_round(g.hi, g.lo + g.hi * ch - g.other * sh, (j >> 14).bit_and(1), Float{1.0122043719688889e-19})
+    if !is_nan(f) -> return f
+    __cos_accurate(x)
+}
+__cos_large: fn(x: Float) -> Float Never! {
+    red: __sincos_reduce(x)
+    r: red.r
+    r2: r * r
+    g: __cos_grid((red.j >> 7).bit_and(0x7F), red.j.bit_and(0x7F))
+    sh: r * (Float{6.283185307179586} - Float{41.341700961418276} * r2)
+    ch: r2 * (Float{-19.739208802178716} + Float{64.93938786554104} * r2)
+    f: __sincos_round(g.hi, g.lo + g.hi * ch - g.other * sh, red.j >> 14, Float{1.088437337221776e-19})
+    if !is_nan(f) -> return f
+    __cos_accurate(x)
+}
+// sin(t1 + t2) as hi + lo and cos(t1 + t2) as other, for t1 = i1 pi/2^7 and
+// t2 = i2 pi/2^14.
+__sin_grid: fn(i1: Int, i2: Int) -> (hi: Float, lo: Float, other: Float) Never! {
+    a: 4 * i1
+    b: 4 * i2
+    s1: __exp_cr_muldd(__SINCOS_U1[a], __SINCOS_U1[a + 1], __SINCOS_U2[b + 2], __SINCOS_U2[b + 3])
+    s2: __exp_cr_muldd(__SINCOS_U2[b], __SINCOS_U2[b + 1], __SINCOS_U1[a + 2], __SINCOS_U1[a + 3])
+    s: __fast_sum_dd(s1.hi, s1.lo, s2.hi, s2.lo)
+    (hi: s.hi, lo: s.lo, other: __SINCOS_U1[a + 2] * __SINCOS_U2[b + 2] - __SINCOS_U1[a] * __SINCOS_U2[b])
+}
+// cos(t1 + t2) as hi + lo and sin(t1 + t2) as other, as __sin_grid.
+__cos_grid: fn(i1: Int, i2: Int) -> (hi: Float, lo: Float, other: Float) Never! {
+    a: 4 * i1
+    b: 4 * i2
+    c1: __exp_cr_muldd(__SINCOS_U1[a + 2], __SINCOS_U1[a + 3], __SINCOS_U2[b + 2], __SINCOS_U2[b + 3])
+    c2: __exp_cr_muldd(__SINCOS_U2[b], __SINCOS_U2[b + 1], __SINCOS_U1[a], __SINCOS_U1[a + 1])
+    c: __fast_sum_dd(c1.hi, c1.lo, -c2.hi, -c2.lo)
+    (hi: c.hi, lo: c.lo, other: __SINCOS_U1[a] * __SINCOS_U2[b + 2] + __SINCOS_U1[a + 2] * __SINCOS_U2[b])
+}
+// (-1)^s (fh + fl) when fl - eps and fl + eps round alike with fh; NaN when
+// the fast path cannot decide.
+__sincos_round: fn(fh: Float, fl: Float, s: Int, eps: Float) -> Float Never! {
+    sg: if s == 1 -> Float{-1.0} else -> Float{1.0}
+    h: sg * fh
+    l: sg * fl
+    lb: h + (l - eps)
+    if lb == h + (l + eps) -> return lb
+    NAN
+}
+// For x >= 2^31: x/(2pi) mod 1 = j/2^15 + r + s with 0 <= r < 2^-15 and
+// 0 <= s < 2^-67.988.
+__sincos_reduce: fn(x: Float) -> (j: Int, r: Float) Never! {
+    b: to_bits(x)
+    e: b >> 52
+    m: b.bit_and(0xF_FFFF_FFFF_FFFF).bit_or(0x10_0000_0000_0000)
+    i: (e - 1011) >> 6
+    w: (__SINCOS_T[i] << 128) + (__SINCOS_T[i + 1] << 64) + __SINCOS_T[i + 2]
+    v: ((w << (e - 1011).bit_and(0x3F)) >> 64).bit_and(0xFFFF_FFFF_FFFF_FFFF_FFFF_FFFF_FFFF_FFFF)
+    // rounded to nearest by 2^59 + 2^52 below the 15 + 53 bits kept
+    u: __u128(m * v + 0x1_0000_0000_0000_0000_0000_0000_0000 + 0x810_0000_0000_0000)
+    (j: u >> 113, r: Float{(u >> 60).bit_and(0x1F_FFFF_FFFF_FFFF)} * Float{3.3881317890172014e-21} - Float{1.52587890625e-5})
+}
+// For |x| >= 2^-27: x/(2pi) mod 1 = k/2^13 + (-1)^neg r/2^128 + eps with
+// |r/2^128| <= 2^-14 and 0 <= eps < 2^-127.999.
+__sincos_reduce_acc: fn(x: Float) -> (k: Int, r: Int, neg: Bool) Never! {
+    b: to_bits(x).bit_and(0x7FFF_FFFF_FFFF_FFFF)
+    e: b >> 52
+    m: b.bit_and(0xF_FFFF_FFFF_FFFF).bit_or(0x10_0000_0000_0000)
+    i: ((e - 947) /% 64) - 1
+    t0: if i >= 0 -> __SINCOS_T[i] else -> 0
+    w: (t0 << 192) + (__SINCOS_T[i + 1] << 128) + (__SINCOS_T[i + 2] << 64) + __SINCOS_T[i + 3]
+    v: ((w << ((e - 1011) % 64)) >> 64).bit_and(0xFFFF_FFFF_FFFF_FFFF_FFFF_FFFF_FFFF_FFFF_FFFF_FFFF_FFFF_FFFF)
+    u0: __u128(m * (v >> 64) + ((m * v.bit_and(0xFFFF_FFFF_FFFF_FFFF)) >> 64))
+    k: u0 >> 115
+    u: u0.bit_and(0x7_FFFF_FFFF_FFFF_FFFF_FFFF_FFFF_FFFF)
+    // k rounded to nearest, so that |r/2^128| < 2^-14
+    if (u >> 114) == 1 -> return (k: (k + 1).bit_and(0x1FFF), r: 0x8_0000_0000_0000_0000_0000_0000_0000 - u, neg: true)
+    (k: k, r: u, neg: false)
+}
+// sin(2 pi r)/2^128 for 0 <= r < 2^-14, given u = 8 r, u2 = u^2, u2h = its
+// top word and u4 = u^4, all in 2^-128 fixed point.
+__sincos_ps: fn(u: Int, u2: Int, u2h: Int, u4: Int) -> Int Never! {
+    sh: __mul_hi128(__SINCOS_PS[2] - __SINCOS_PS[3] * u2h, u4)
+    s: __u128(__SINCOS_PS[0] - __mul_hi128(__SINCOS_PS[1], u2) + sh)
+    __mul_hi128(s, u)
+}
+// cos(2 pi r)/2^128, as __sincos_ps.
+__sincos_pc: fn(u2: Int, u2h: Int, u4: Int) -> Int Never! {
+    sh: __SINCOS_PC[2] - __mul_hi128(__SINCOS_PC[3] - u2h * __SINCOS_PC[4], u2)
+    __u128(__SINCOS_PC[0] - __mul_hi128(__SINCOS_PC[1], u2) + __mul_hi128(sh, u4))
+}
+// sin(pi i/2^6) in 2^-128 units for 0 <= i <= 32, the last capped to 2^128 - 1.
+__sincos_s1u: fn(i: Int) -> Int Never! {
+    if i == 0 -> return 0
+    if i == 32 -> return 0xFFFF_FFFF_FFFF_FFFF_FFFF_FFFF_FFFF_FFFF
+    __asin_pi_acc_s(2 * i - 1)
+}
+// (|sin z|, |cos z|) for z = k pi/2^12 mod pi, i1 = k/2^6 mod 2^6 and
+// i2 = k mod 2^6, in 2^-128 units.
+__sincos_acc_grid: fn(i1: Int, i2: Int) -> (s: Int, c: Int) Never! {
+    s1: if i1 <= 32 -> __sincos_s1u(i1) else -> __sincos_s1u(64 - i1)
+    c1: if i1 <= 32 -> __sincos_s1u(32 - i1) else -> __sincos_s1u(i1 - 32)
+    sa: __mul_hi128(s1, __SINCOS_C2U[i2])
+    sb: __mul_hi128(c1, __SINCOS_S2U[i2])
+    ca: __mul_hi128(c1, __SINCOS_C2U[i2])
+    cb: __mul_hi128(s1, __SINCOS_S2U[i2])
+    if i1 < 32 -> return (s: __u128(sa + sb), c: __u128(ca - cb))
+    (s: __u128(sa - sb), c: __u128(ca + cb))
+}
+// (-1)^s r/2^128 rounded to nearest, for r/2^128 above 2^-64 (the closest a
+// binary64 comes to a multiple of pi/2 is 2^-60.888).
+__sincos_u128_to_float: fn(r: Int, s: Int) -> Float Never! {
+    sh: __clz64(r >> 64)
+    v0: from_bits((970 - sh) << 52)
+    v: if s == 1 -> -v0 else -> v0
+    low: if (r >> (74 - sh)).bit_and(1) == 1 -> Float{0.75} else -> Float{0.375}
+    Float{r >> (75 - sh)} * v + low * v
+}
+// sin's accurate path for |x| >= 2^-16.
+__sin_accurate: fn(x: Float) -> Float Never! {
+    red: __sincos_reduce_acc(x)
+    r: red.r << 3
+    u2: __mul_hi128(r, r)
+    u4: __mul_hi128(u2, u2)
+    i1: (red.k >> 6).bit_and(0x3F)
+    g: __sincos_acc_grid(i1, red.k.bit_and(0x3F))
+    p: __mul_hi128(g.s, __sincos_pc(u2, u2 >> 64, u4))
+    q: __mul_hi128(g.c, __sincos_ps(r, u2, u2 >> 64, u4))
+    sbit: (if (x > Float{0.0}) -> 0 else -> 1).bit_xor(red.k >> 12)
+    // p = sin(z) cos(r) >= 0; q = |cos(z) sin(r)|, positive when i1 < 32 and r >= 0
+    if (i1 < 32) != red.neg -> return __sincos_u128_to_float(__u128(p + q), sbit)
+    if p < q -> return __sincos_u128_to_float(q - p, 1 - sbit)
+    __sincos_u128_to_float(p - q, sbit)
+}
+// sin's accurate path for |x| < 2^-16: x + c3 x^3 + c5 x^5, c3 a double-double.
+__sin_small_accurate: fn(x: Float) -> Float Never! {
+    x2h: x * x
+    x2l: fma(x, x, -x2h)
+    h: Float{0.00833333333327091} * x2h + Float{-9.251854266180608e-18}
+    a: __fast_two_sum(Float{-0.16666666666666666}, h)
+    b: __exp_cr_muldd(a.hi, a.lo, x2h, x2l)
+    c: __exp_cr_muldd(b.hi, b.lo, x, Float{0.0})
+    d: __fast_two_sum(x, c.hi)
+    d.hi + (c.lo + d.lo)
+}
+// cos's accurate path for x >= 2^-27, x positive.
+__cos_accurate: fn(x: Float) -> Float Never! {
+    red: __sincos_reduce_acc(x)
+    r: red.r << 3
+    u2: __mul_hi128(r, r)
+    u4: __mul_hi128(u2, u2)
+    i1: (red.k >> 6).bit_and(0x3F)
+    g: __sincos_acc_grid(i1, red.k.bit_and(0x3F))
+    p: __mul_hi128(g.c, __sincos_pc(u2, u2 >> 64, u4))
+    q: __mul_hi128(g.s, __sincos_ps(r, u2, u2 >> 64, u4))
+    sbit: (red.k >> 12).bit_and(1)
+    flip: if i1 >= 32 -> 1 else -> 0
+    // p = |cos(z)| cos(r), cos(z) <= 0 when i1 >= 32; q = sin(z) sin(r), r's sign
+    if (i1 >= 32) != red.neg -> return __cos_listed(x, __u128(p + q), sbit.bit_xor(flip))
+    if p <= q -> return __cos_listed(x, q - p, (1 - sbit).bit_xor(flip))
+    __cos_listed(x, p - q, sbit.bit_xor(flip))
+}
+// cos's four hard cases near 0, which the 128-bit result cannot round: their
+// results agree with the result's top 72 to 88 bits beyond the round bit.
+__cos_listed: fn(x: Float, c: Int, s: Int) -> Float Never! {
+    ret: __sincos_u128_to_float(c, s)
+    if (c + 5).bit_and(0xFFFF_FFFF_FFFF_FFFF) > 3 -> return ret
+    if (x == Float{1.788139343261721e-7}) -> return 0.999999999999984
+    if (x == Float{3.5762786865234566e-7}) -> return 0.999999999999936
+    if (x == Float{7.152557373047027e-7}) -> return 0.9999999999997442
+    if (x == Float{1.0728836059570827e-6}) -> return 0.9999999999994245
+    ret
+}
+// 1/(2pi) rounded down, in 64-bit words from 2^0: sum of T[i]/2^(64 i).
+__SINCOS_T: [Int]{
+    0x0, 0x28BE_60DB_9391_054A, 0x7F09_D5F4_7D4D_3770, 0x36D8_A566_4F10_E410,
+    0x7F94_58EA_F7AE_F158, 0x6DC9_1B8E_9093_74B8, 0x192_4BBA_8274_6487, 0x3F87_7AC7_2C4A_69CF,
+    0xBA20_8D7D_4BAE_D121, 0x3A67_1C09_AD17_DF90, 0x4E64_758E_60D4_CE7D, 0x2721_17E2_EF7E_4A0E,
+    0xC7FE_25FF_F781_6603, 0xFBCB_C462_D682_9B47, 0xDB4D_9FB3_C9F2_C26D, 0xD3D1_8FD9_A797_FA8B,
+    0x5D49_EEB1_FAF9_7C5E, 0xCF41_CE7D_E294_A4BA, 0x9AFE_D7EC_47E3_5742, 0x1580_CC11_BF1E_DAEA,
+    0xFC33_EF08_26BD_0D87
+}
+// sin(2pi x/8) for 0 <= x < 2^-11 to 2^-128.605: odd coefficients from
+// degree 1 in 2^-128 units, the last in 2^-64 units; degrees 3 and 7 negated.
+__SINCOS_PS: [Int]{
+    0xC90F_DAA2_2168_C234_C4C6_628B_80DB_ED80, 0x14AB_BCE6_25BE_52BE_ABB8_E550_6CA4_5B03,
+    0xA3_35E3_3BAD_570E_044C_5499_5BB9_7635, 0x2_65A5_999D_06C4
+}
+// cos(2pi x/8) for 0 <= x < 2^-11 to 2^-128: even coefficients from degree 0
+// in 2^-128 units, the last in 2^-64 units; degrees 2 and 6 negated.
+__SINCOS_PC: [Int]{
+    0xFFFF_FFFF_FFFF_FFFF_FFFF_FFFF_FFFF_FFFF, 0x4EF4_F326_F917_7969_2B71_366C_BCF0_B096,
+    0x40F_07C2_06D6_B0EC_D4C9_076E_3DB7_8FED, 0x15_5D3C_7E3C_BEF9_EEC6_9623_68FB_7C41,
+    0x3C3E_845B_5510
+}
+// sin(pi i/2^12) for 0 <= i < 64, in 2^-128 units, to nearest.
+__SINCOS_S2U: [Int]{
+    0x0, 0x32_43F6_55D9_66C0_C3B0_ABF2_B35A_62F8,
+    0x64_87EA_BB99_1CB6_11AD_1D7B_5620_834A, 0x96_CBDB_4125_8434_C4A3_2C45_60D0_1E70,
+    0xC9_0FC5_F665_25D2_5748_0F79_56B6_4707, 0xFB_53A8_EB3E_C385_3284_21CF_8014_D698,
+    0x12D_9782_2F99_6BC4_F968_57B5_AA8F_6208, 0x15F_DB4F_D35C_8CAA_D230_A305_92F2_5049,
+    0x192_1F0F_E670_0711_AB96_7FE6_B7A9_B037, 0x1C4_62C0_78BC_41B6_7DB6_E69A_B68F_0D10,
+    0x1F6_A65F_9A2A_3C58_85CE_DE1F_0314_607B, 0x228_E9EB_5AA3_A2D9_7C11_EBC1_B33C_AFB5,
+    0x25B_2D61_CA12_E05D_C2DD_9C01_5A46_E767, 0x28D_70C0_F863_326C_8E8D_6151_676A_E94D,
+    0x2BF_B406_F580_BC10_0532_05A5_4588_F0AB, 0x2F1_F731_D158_98F5_556F_EBF4_862D_A970,
+    0x324_3A3F_9BD8_F08C_C3C7_5F41_B6CE_7AA8, 0x356_7D2E_64F1_0929_AD8A_2D0C_1A9E_3A8C,
+    0x388_BFFC_3C91_5B22_80C1_C97A_65CF_2291, 0x3BB_02A7_32AB_A3F0_A849_3BF9_C07F_7765,
+    0x3ED_452D_5732_F950_6B5E_1380_C7E6_BDDB, 0x41F_878C_BA1B_DC60_BFEB_A221_FB9D_05BE,
+    0x451_C9C3_6B5C_4CC3_0ED3_C01C_0300_08BB, 0x484_0BCF_7AEB_DBBA_E978_5720_7BC5_89DA,
+    0x4B6_4DAE_F8C3_BF4D_AFC8_F71B_8EB2_33EE, 0x4E8_8F5F_F4DE_E562_2617_B65F_5A2A_8F5A,
+    0x51A_D0E0_7F3A_06DF_F9F8_9FB6_5BE2_A455, 0x54D_122E_A7D3_BACF_356E_F187_634A_531D,
+    0x57F_5348_7EAC_8977_9FAB_71E4_3D71_E2B7, 0x5B1_942C_13C6_FF80_0A9F_1C12_38FD_05D5,
+    0x5E3_D4D7_7727_C10D_8CA5_6CD8_D54B_97F0, 0x616_1548_B8D5_9CE2_A589_93A7_6B3F_4FFE,
+    0x648_557D_E8D9_9F7E_4E29_CF6E_5FED_0679, 0x67A_9575_173F_263A_F1FC_3EDB_7A0F_1757,
+    0x6AC_D52C_5413_F26D_51B8_6C83_422C_BAB4, 0x6DF_14A1_AF68_3C83_4E68_E062_EB17_7E2D,
+    0x711_53D3_394E_C722_9C28_010F_1C93_A252, 0x743_92BF_01DC_F247_5BCB_8FD4_1CB1_096F,
+    0x775_D163_192A_CE62_9AC2_0C03_3D7F_5CC3, 0x7A8_0FBD_8F53_2F78_B865_4AA8_2457_8975,
+    0x7DA_4DCC_7473_C03F_B005_90E6_75E4_E556, 0x80C_8B8D_D8AD_153D_46F0_804D_AE5F_13BA,
+    0x83E_C8FF_CC22_BFE5_1DB7_2585_6FF8_C284, 0x871_0620_5EFB_61B6_A3F6_7AD0_5A5B_E69E,
+    0x8A3_42ED_A160_BF5A_EDE5_B106_8D17_4BEA, 0x8D5_7F65_A37F_D3C2_6AED_92D3_4C17_DF54,
+    0x907_BB86_7588_E342_7C8C_5732_D89E_910B, 0x939_F74E_27AF_8EB2_ECC9_3966_728E_412D,
+    0x96C_32BA_CA2A_E68B_437B_2DD4_9D5F_CA3C, 0x99E_6DCA_6D35_7DFF_F9A6_0C93_3178_92C4,
+    0x9D0_A87B_210D_7E1F_8A31_8BA7_75FD_7B04, 0xA02_E2CA_F5F4_B8EF_5F3D_645E_787B_94F2,
+    0xA35_1CB7_FC30_BC88_9B56_007D_16D4_AD5A, 0xA67_5640_440A_E634_BDCD_0D6B_B4B9_CD3E,
+    0xA99_8F61_DDD0_758A_2179_54ED_6093_C44C, 0xACB_C81A_D9D2_9F88_5521_3C65_3BFB_79B7,
+    0xAFE_0069_4866_A1B4_4CD3_4D27_51C2_E1DA, 0xB30_384B_39E5_D534_6B70_29D3_9EFD_7682,
+    0xB62_6FBE_BEAD_C1EC_63A9_5642_F565_102F, 0xB94_A6C1_E720_3198_EFB8_391D_83D6_DA18,
+    0xBC6_DD52_C3A3_42EB_5F10_BFCA_3D64_6401, 0xBF9_136F_64A1_7CA4_F953_0F05_0886_D756,
+    0xC2B_4915_DA89_E0B2_35BF_AC0F_9656_12E2, 0xC5D_7E44_35CF_FF45_C671_8C1D_FD2A_A612
+}
+// cos(pi i/2^12) for 0 <= i < 64, in 2^-128 units, to nearest; the first
+// capped to 2^128 - 1.
+__SINCOS_C2U: [Int]{
+    0xFFFF_FFFF_FFFF_FFFF_FFFF_FFFF_FFFF_FFFF, 0xFFFF_FB10_B0D1_9F76_491A_7032_31E0_A12E,
+    0xFFFF_EC42_C377_3235_EC9E_2E75_CB52_5F2C, 0xFFFF_D396_3882_D553_6276_B75B_91DE_105E,
+    0xFFFF_B10B_10E8_0E95_3031_437D_7ECC_B9DF, 0xFFFF_84A1_4DFB_CC6A_8584_25D8_B397_DEE6,
+    0xFFFF_4E58_F174_65DE_1773_3805_3FD9_3920, 0xFFFF_0E31_FD69_9A85_3A11_D605_88D8_B96E,
+    0xFFFE_C42C_7454_926B_38E3_1077_9EDF_EC68, 0xFFFE_7048_590F_DDF8_EDD8_E103_4213_F22B,
+    0xFFFE_1285_AED7_75D8_96F3_51EF_C655_56CF, 0xFFFD_AAE4_7948_BAD5_EA80_AEDD_6A19_710F,
+    0xFFFD_3964_BC62_75BA_69FF_F9AE_0DED_B047, 0xFFFC_BE06_7C84_D725_F3A7_03B9_87EC_A44A,
+    0xFFFC_38C9_BE71_7763_928D_B07A_0E70_BA36, 0xFFFB_A9AE_874B_563A_8D80_0BED_6653_DCBA,
+    0xFFFB_10B4_DC96_DABB_B479_03F7_A19F_8EE2, 0xFFFA_6DDC_C439_D30A_ECC7_B924_4A48_EB19,
+    0xFFF9_C126_447B_7424_FBE1_8032_D001_6082, 0xFFF9_0A91_6404_59A1_90E2_D2EA_F6DA_4D1E,
+    0xFFF8_4A1E_29DE_8571_8CC1_93C5_D508_E13F, 0xFFF7_7FCC_9D75_5F99_8933_2D07_A713_477E,
+    0xFFF6_AB9C_C695_B5E8_9E49_38F6_61AA_140C, 0xFFF5_CD8E_AD6D_BBAB_66C7_85E8_6DFB_B75F,
+    0xFFF4_E5A2_5A8D_095B_4336_6DF6_66FD_54FF, 0xFFF3_F3D7_D6E4_9C49_DBB4_9F29_FA87_2A83,
+    0xFFF2_F82F_2BC6_D648_E08B_9613_3ECC_E0BD, 0xFFF1_F2A8_62E7_7D4E_098A_31BC_DA3D_EF20,
+    0xFFF0_E343_865B_BB13_5428_ED06_47C9_E5D1, 0xFFEF_CA00_A09A_1CB3_807B_6E7A_4A72_3DAE,
+    0xFFEE_A6DF_BC7A_9242_CCF3_44C6_4791_7821, 0xFFED_79E0_E536_6E63_F0F7_CB05_BDE0_24F1,
+    0xFFEC_4304_2668_65D9_5657_5523_6696_1732, 0xFFEB_0249_8C0C_8F12_9195_E99F_BCA2_F10A,
+    0xFFE9_B7B1_2280_61B6_191D_F31A_AA6F_7F45, 0xFFE8_633A_F682_B627_3B57_790B_F77B_6B2D,
+    0xFFE7_04E7_1533_C508_53AA_9423_BB0A_DC21, 0xFFE5_9CB5_8C15_26B9_3E71_F7D9_9688_082A,
+    0xFFE4_2AA6_6909_D2D2_0BE2_8FBE_C7CF_B8A6, 0xFFE2_AEB9_BA56_1F99_F1ED_5434_3FE7_BE24,
+    0xFFE1_28EF_8E9F_C17A_7D20_9F32_D42D_864E, 0xFFDF_9947_F4ED_CA6F_008E_6EE0_5573_D420,
+    0xFFDD_FFC2_FCA8_A970_44BD_28B8_D85B_530A, 0xFFDC_5C60_B59A_29DC_75A8_951F_C304_B914,
+    0xFFDA_AF21_2FED_72DB_4FD8_F038_449E_C436, 0xFFD8_F804_7C2F_06BE_8C96_11F0_B1D8_F023,
+    0xFFD7_370A_AB4C_C25E_8D3C_D437_DC7F_A9D2, 0xFFD5_6C33_CE95_DC73_45BD_035E_DB0A_65F5,
+    0xFFD3_977F_F7BA_E4E9_6646_49B4_D541_B9C5, 0xFFD1_B8EF_38CD_C433_C42A_AC75_4BED_CFDE,
+    0xFFCF_D081_A441_BA99_01FD_552B_F146_B4A6, 0xFFCD_DE37_4CEB_5F7D_76F4_87BB_853A_6989,
+    0xFFCB_E210_4600_A0A9_5595_CA3F_421A_E09C, 0xFFC9_DC0C_A318_C18B_11B3_6908_3A7A_62E5,
+    0xFFC7_CC2C_782C_5A76_05C2_A601_9679_E41F, 0xFFC5_B26F_D995_57DD_5792_07CF_E424_DCB7,
+    0xFFC3_8ED6_DC0E_F98B_1C67_6208_AA3B_E545, 0xFFC1_6161_94B5_D1D3_BC8D_54E8_1D94_F831,
+    0xFFBF_2A10_1907_C4C5_9658_27F3_3D90_6C7C, 0xFFBC_E8E2_7EE4_0754_E0AA_07FC_B29E_EF39,
+    0xFFBA_9DD8_DC8B_1E83_CCFE_D60A_9109_7C48, 0xFFB8_48F3_489E_DE86_E907_D9A2_98AB_1FEB,
+    0xFFB5_EA31_DA22_69E5_BFDF_CE09_AEA7_AC02, 0xFFB3_8194_A87A_3097_BADF_E70A_1EF5_1116
+}
+// sin and cos of j pi/2^7 for 0 <= j < 128, as double-doubles (sh, sl, ch, cl).
+__SINCOS_U1: [Float]{
+    0.0, 0.0, 1.0, 0.0,
+    0.024541228522912288, -9.186849012577878e-20, 0.9996988186962042, -2.985148640379975e-17,
+    0.049067674327418015, -6.79610372051828e-19, 0.9987954562051724, -1.2291693337075465e-17,
+    0.07356456359966743, -2.7784941506273593e-18, 0.9972904566786902, 9.164769537110173e-18,
+    0.0980171403295606, -1.634582362244256e-18, 0.9951847266721969, -4.248691367830441e-17,
+    0.1224106751992162, 2.8354501489965335e-18, 0.99247953459871, 3.1093055095428906e-17,
+    0.14673047445536175, 3.726947147046568e-18, 0.989176509964781, -4.098730993704711e-17,
+    0.17096188876030122, 9.19199801817591e-18, 0.9852776423889412, 2.3155637027900207e-17,
+    0.19509032201612828, -7.991079068461731e-18, 0.9807852804032304, 1.8546939997825006e-17,
+    0.2191012401568698, -3.6513812299150776e-19, 0.9757021300385286, -2.5572556081259686e-17,
+    0.2429801799032639, -8.751431529719663e-18, 0.970031253194544, 1.8365300348428844e-17,
+    0.26671275747489837, 2.0941222578826688e-17, 0.9637760657954398, 2.646395056122003e-17,
+    0.2902846772544624, -1.892797870777425e-17, 0.9569403357322088, 4.05538698618757e-17,
+    0.31368174039889146, 1.4560447299968912e-17, 0.9495281805930367, -7.55441519280433e-18,
+    0.33688985339222005, -4.200094003347509e-19, 0.9415440651830208, -2.789637954769834e-17,
+    0.35989503653498817, -1.7601687123839282e-17, 0.9329927988347388, 4.2041415555384355e-17,
+    0.3826834323650898, -1.0050772696461588e-17, 0.9238795325112867, 1.7645047084336677e-17,
+    0.40524131400498986, 9.911140194289988e-18, 0.9142097557035307, -3.631618252781442e-17,
+    0.4275550934302821, 9.411189816295473e-18, 0.9039892931234433, -6.609754468748431e-18,
+    0.4496113296546066, 4.883192423203524e-18, 0.8932243011955153, -4.116123915190891e-18,
+    0.47139673682599764, 6.516678136069013e-18, 0.881921264348355, -1.9843248405890562e-17,
+    0.49289819222978404, -1.0257831676562186e-18, 0.8700869911087115, -4.188851086854997e-17,
+    0.5141027441932218, -4.5712707523615624e-17, 0.8577286100002721, -4.818344793633662e-17,
+    0.5349976198870973, -5.3683132708358134e-17, 0.8448535652497071, -4.363136029687964e-17,
+    0.5555702330196022, 4.709410940561677e-17, 0.8314696123025452, 1.4073856984728024e-18,
+    0.5758081914178453, -3.7909495458942734e-17, 0.8175848131515837, -1.4883149812426772e-17,
+    0.5956993044924334, -1.3438641936579467e-17, 0.8032075314806449, -3.306060980481491e-17,
+    0.6152315905806268, 2.623141776726695e-17, 0.7883464276266062, 3.439699315405971e-17,
+    0.6343932841636455, 1.0420901929280035e-17, 0.773010453362737, -3.256590703364977e-17,
+    0.6531728429537768, 8.569564206002624e-18, 0.7572088465064846, -1.9909098777335502e-17,
+    0.6715589548470184, -4.048903774929669e-17, 0.7409511253549591, -1.4708616952297345e-17,
+    0.6895405447370669, -1.588932329480679e-17, 0.7242470829514669, 2.9198471334403004e-17,
+    0.7071067811865476, -4.833646656726457e-17, 0.7071067811865476, -4.833646656726457e-17,
+    0.7242470829514669, 2.9198471334403004e-17, 0.6895405447370669, -1.588932329480679e-17,
+    0.7409511253549591, -1.4708616952297345e-17, 0.6715589548470184, -4.048903774929669e-17,
+    0.7572088465064846, -1.9909098777335502e-17, 0.6531728429537768, 8.569564206002624e-18,
+    0.773010453362737, -3.256590703364977e-17, 0.6343932841636455, 1.0420901929280035e-17,
+    0.7883464276266062, 3.439699315405971e-17, 0.6152315905806268, 2.623141776726695e-17,
+    0.8032075314806449, -3.306060980481491e-17, 0.5956993044924334, -1.3438641936579467e-17,
+    0.8175848131515837, -1.4883149812426772e-17, 0.5758081914178453, -3.7909495458942734e-17,
+    0.8314696123025452, 1.4073856984728024e-18, 0.5555702330196022, 4.709410940561677e-17,
+    0.8448535652497071, -4.363136029687964e-17, 0.5349976198870973, -5.3683132708358134e-17,
+    0.8577286100002721, -4.818344793633662e-17, 0.5141027441932218, -4.5712707523615624e-17,
+    0.8700869911087115, -4.188851086854997e-17, 0.49289819222978404, -1.0257831676562186e-18,
+    0.881921264348355, -1.9843248405890562e-17, 0.47139673682599764, 6.516678136069013e-18,
+    0.8932243011955153, -4.116123915190891e-18, 0.4496113296546066, 4.883192423203524e-18,
+    0.9039892931234433, -6.609754468748431e-18, 0.4275550934302821, 9.411189816295473e-18,
+    0.9142097557035307, -3.631618252781442e-17, 0.40524131400498986, 9.911140194289988e-18,
+    0.9238795325112867, 1.7645047084336677e-17, 0.3826834323650898, -1.0050772696461588e-17,
+    0.9329927988347388, 4.2041415555384355e-17, 0.35989503653498817, -1.7601687123839282e-17,
+    0.9415440651830208, -2.789637954769834e-17, 0.33688985339222005, -4.200094003347509e-19,
+    0.9495281805930367, -7.55441519280433e-18, 0.31368174039889146, 1.4560447299968912e-17,
+    0.9569403357322088, 4.05538698618757e-17, 0.2902846772544624, -1.892797870777425e-17,
+    0.9637760657954398, 2.646395056122003e-17, 0.26671275747489837, 2.0941222578826688e-17,
+    0.970031253194544, 1.8365300348428844e-17, 0.2429801799032639, -8.751431529719663e-18,
+    0.9757021300385286, -2.5572556081259686e-17, 0.2191012401568698, -3.6513812299150776e-19,
+    0.9807852804032304, 1.8546939997825006e-17, 0.19509032201612828, -7.991079068461731e-18,
+    0.9852776423889412, 2.3155637027900207e-17, 0.17096188876030122, 9.19199801817591e-18,
+    0.989176509964781, -4.098730993704711e-17, 0.14673047445536175, 3.726947147046568e-18,
+    0.99247953459871, 3.1093055095428906e-17, 0.1224106751992162, 2.8354501489965335e-18,
+    0.9951847266721969, -4.248691367830441e-17, 0.0980171403295606, -1.634582362244256e-18,
+    0.9972904566786902, 9.164769537110173e-18, 0.07356456359966743, -2.7784941506273593e-18,
+    0.9987954562051724, -1.2291693337075465e-17, 0.049067674327418015, -6.79610372051828e-19,
+    0.9996988186962042, -2.985148640379975e-17, 0.024541228522912288, -9.186849012577878e-20,
+    1.0, 0.0, 0.0, 0.0,
+    0.9996988186962042, -2.985148640379975e-17, -0.024541228522912288, 9.186849012577878e-20,
+    0.9987954562051724, -1.2291693337075465e-17, -0.049067674327418015, 6.79610372051828e-19,
+    0.9972904566786902, 9.164769537110173e-18, -0.07356456359966743, 2.7784941506273593e-18,
+    0.9951847266721969, -4.248691367830441e-17, -0.0980171403295606, 1.634582362244256e-18,
+    0.99247953459871, 3.1093055095428906e-17, -0.1224106751992162, -2.8354501489965335e-18,
+    0.989176509964781, -4.098730993704711e-17, -0.14673047445536175, -3.726947147046568e-18,
+    0.9852776423889412, 2.3155637027900207e-17, -0.17096188876030122, -9.19199801817591e-18,
+    0.9807852804032304, 1.8546939997825006e-17, -0.19509032201612828, 7.991079068461731e-18,
+    0.9757021300385286, -2.5572556081259686e-17, -0.2191012401568698, 3.6513812299150776e-19,
+    0.970031253194544, 1.8365300348428844e-17, -0.2429801799032639, 8.751431529719663e-18,
+    0.9637760657954398, 2.646395056122003e-17, -0.26671275747489837, -2.0941222578826688e-17,
+    0.9569403357322088, 4.05538698618757e-17, -0.2902846772544624, 1.892797870777425e-17,
+    0.9495281805930367, -7.55441519280433e-18, -0.31368174039889146, -1.4560447299968912e-17,
+    0.9415440651830208, -2.789637954769834e-17, -0.33688985339222005, 4.200094003347509e-19,
+    0.9329927988347388, 4.2041415555384355e-17, -0.35989503653498817, 1.7601687123839282e-17,
+    0.9238795325112867, 1.7645047084336677e-17, -0.3826834323650898, 1.0050772696461588e-17,
+    0.9142097557035307, -3.631618252781442e-17, -0.40524131400498986, -9.911140194289988e-18,
+    0.9039892931234433, -6.609754468748431e-18, -0.4275550934302821, -9.411189816295473e-18,
+    0.8932243011955153, -4.116123915190891e-18, -0.4496113296546066, -4.883192423203524e-18,
+    0.881921264348355, -1.9843248405890562e-17, -0.47139673682599764, -6.516678136069013e-18,
+    0.8700869911087115, -4.188851086854997e-17, -0.49289819222978404, 1.0257831676562186e-18,
+    0.8577286100002721, -4.818344793633662e-17, -0.5141027441932218, 4.5712707523615624e-17,
+    0.8448535652497071, -4.363136029687964e-17, -0.5349976198870973, 5.3683132708358134e-17,
+    0.8314696123025452, 1.4073856984728024e-18, -0.5555702330196022, -4.709410940561677e-17,
+    0.8175848131515837, -1.4883149812426772e-17, -0.5758081914178453, 3.7909495458942734e-17,
+    0.8032075314806449, -3.306060980481491e-17, -0.5956993044924334, 1.3438641936579467e-17,
+    0.7883464276266062, 3.439699315405971e-17, -0.6152315905806268, -2.623141776726695e-17,
+    0.773010453362737, -3.256590703364977e-17, -0.6343932841636455, -1.0420901929280035e-17,
+    0.7572088465064846, -1.9909098777335502e-17, -0.6531728429537768, -8.569564206002624e-18,
+    0.7409511253549591, -1.4708616952297345e-17, -0.6715589548470184, 4.048903774929669e-17,
+    0.7242470829514669, 2.9198471334403004e-17, -0.6895405447370669, 1.588932329480679e-17,
+    0.7071067811865476, -4.833646656726457e-17, -0.7071067811865476, 4.833646656726457e-17,
+    0.6895405447370669, -1.588932329480679e-17, -0.7242470829514669, -2.9198471334403004e-17,
+    0.6715589548470184, -4.048903774929669e-17, -0.7409511253549591, 1.4708616952297345e-17,
+    0.6531728429537768, 8.569564206002624e-18, -0.7572088465064846, 1.9909098777335502e-17,
+    0.6343932841636455, 1.0420901929280035e-17, -0.773010453362737, 3.256590703364977e-17,
+    0.6152315905806268, 2.623141776726695e-17, -0.7883464276266062, -3.439699315405971e-17,
+    0.5956993044924334, -1.3438641936579467e-17, -0.8032075314806449, 3.306060980481491e-17,
+    0.5758081914178453, -3.7909495458942734e-17, -0.8175848131515837, 1.4883149812426772e-17,
+    0.5555702330196022, 4.709410940561677e-17, -0.8314696123025452, -1.4073856984728024e-18,
+    0.5349976198870973, -5.3683132708358134e-17, -0.8448535652497071, 4.363136029687964e-17,
+    0.5141027441932218, -4.5712707523615624e-17, -0.8577286100002721, 4.818344793633662e-17,
+    0.49289819222978404, -1.0257831676562186e-18, -0.8700869911087115, 4.188851086854997e-17,
+    0.47139673682599764, 6.516678136069013e-18, -0.881921264348355, 1.9843248405890562e-17,
+    0.4496113296546066, 4.883192423203524e-18, -0.8932243011955153, 4.116123915190891e-18,
+    0.4275550934302821, 9.411189816295473e-18, -0.9039892931234433, 6.609754468748431e-18,
+    0.40524131400498986, 9.911140194289988e-18, -0.9142097557035307, 3.631618252781442e-17,
+    0.3826834323650898, -1.0050772696461588e-17, -0.9238795325112867, -1.7645047084336677e-17,
+    0.35989503653498817, -1.7601687123839282e-17, -0.9329927988347388, -4.2041415555384355e-17,
+    0.33688985339222005, -4.200094003347509e-19, -0.9415440651830208, 2.789637954769834e-17,
+    0.31368174039889146, 1.4560447299968912e-17, -0.9495281805930367, 7.55441519280433e-18,
+    0.2902846772544624, -1.892797870777425e-17, -0.9569403357322088, -4.05538698618757e-17,
+    0.26671275747489837, 2.0941222578826688e-17, -0.9637760657954398, -2.646395056122003e-17,
+    0.2429801799032639, -8.751431529719663e-18, -0.970031253194544, -1.8365300348428844e-17,
+    0.2191012401568698, -3.6513812299150776e-19, -0.9757021300385286, 2.5572556081259686e-17,
+    0.19509032201612828, -7.991079068461731e-18, -0.9807852804032304, -1.8546939997825006e-17,
+    0.17096188876030122, 9.19199801817591e-18, -0.9852776423889412, -2.3155637027900207e-17,
+    0.14673047445536175, 3.726947147046568e-18, -0.989176509964781, 4.098730993704711e-17,
+    0.1224106751992162, 2.8354501489965335e-18, -0.99247953459871, -3.1093055095428906e-17,
+    0.0980171403295606, -1.634582362244256e-18, -0.9951847266721969, 4.248691367830441e-17,
+    0.07356456359966743, -2.7784941506273593e-18, -0.9972904566786902, -9.164769537110173e-18,
+    0.049067674327418015, -6.79610372051828e-19, -0.9987954562051724, 1.2291693337075465e-17,
+    0.024541228522912288, -9.186849012577878e-20, -0.9996988186962042, 2.985148640379975e-17
+}
+// sin and cos of j pi/2^14 for 0 <= j < 128, as __SINCOS_U1.
+__SINCOS_U2: [Float]{
+    0.0, 0.0, 1.0, 0.0,
+    0.00019174759731070332, -1.119359730219912e-20, 0.9999999816164293, -4.044406916806987e-17,
+    0.00038349518757139556, 2.5865284466133177e-20, 0.9999999264657179, -4.0976445165762006e-17,
+    0.0005752427637320661, -1.5042992273952864e-20, 0.9999998345478677, 2.773543428760111e-17,
+    0.0007669903187427045, 4.143899556056848e-20, 0.9999997058628822, -7.465514769641597e-18,
+    0.0009587378455533015, -4.43274997686292e-20, 0.9999995404107661, 3.288536551445325e-17,
+    0.0011504853371138485, -1.7247398167388522e-20, 0.9999993381915255, 1.4740486071056625e-17,
+    0.0013422327863743383, 4.7514692846504566e-20, 0.9999990992051678, 4.565129956122113e-17,
+    0.0015339801862847657, -1.0467712971596958e-19, 0.9999988234517019, 3.067881716126108e-17,
+    0.0017257275297951264, 1.79979138332162e-21, 0.9999985109311378, 5.460192883119103e-18,
+    0.001917474809855419, 9.73116831274047e-20, 0.999998161643487, 2.518604834205904e-17,
+    0.0021092220194156444, -1.4014237950993854e-19, 0.9999977755887623, 5.3577747821761324e-17,
+    0.0023009691514258054, -1.7520084659445056e-19, 0.9999973527669782, -3.711307390064785e-17,
+    0.002492716198835908, -9.065494103337795e-20, 0.9999968931781499, -2.201582358206929e-17,
+    0.0026844631545959617, 1.0544033375962113e-19, 0.9999963968222944, 1.0224664131394512e-17,
+    0.0028762100116559793, -1.283875351473137e-19, 0.9999958636994299, -9.48558719061876e-18,
+    0.003067956762965976, 1.2690279085455925e-19, 0.9999952938095762, -1.966806428532219e-17,
+    0.003259703401475973, 4.0627301618018584e-20, 0.9999946871527541, -5.0317089809394365e-17,
+    0.0034514499201359944, -1.0633053909313758e-19, 0.9999940437289858, -8.559878039818628e-19,
+    0.003643196311896068, 3.664505562947611e-20, 0.9999933635382952, 2.6795188825298042e-17,
+    0.003834942569706228, -1.5193311694351685e-19, 0.9999926465807072, -4.9736606561458984e-17,
+    0.004026688686516512, 1.6195621844578252e-19, 0.999991892856248, 3.978857355189512e-17,
+    0.004218434655276964, -3.7607806432777145e-19, 0.9999911023649456, 3.0044281937901997e-17,
+    0.0044101804689376314, 1.5453768612871683e-19, 0.9999902751068289, 8.31507742379806e-18,
+    0.0046019261204485705, 2.6965454565249836e-19, 0.9999894110819284, -2.95937535626251e-17,
+    0.004793671602759841, 1.1009691462753513e-19, 0.9999885102902757, 4.2687289625719894e-17,
+    0.0049854169088215106, -3.385483602385284e-20, 0.9999875727319041, 3.8001543996690333e-17,
+    0.005177162031583651, -3.3062020958888796e-19, 0.999986598406848, 1.0776477520898826e-17,
+    0.005368906963996343, -2.807511905936385e-19, 0.9999855873151432, 3.497781679400427e-17,
+    0.005560651699009674, -1.924503135859936e-19, 0.999984539456827, -1.793637500303546e-17,
+    0.005752396229573737, -5.500377527213146e-20, 0.9999834548319377, -3.492785507060668e-17,
+    0.005944140548638634, -1.4693828947872935e-19, 0.9999823334405153, 5.553475103367759e-18,
+    0.006135884649154475, 9.054525748247493e-20, 0.9999811752826011, 3.3568103522895585e-17,
+    0.006327628524071378, -2.8930908641286304e-19, 0.9999799803582377, -1.2923057759356727e-18,
+    0.006519372166339468, -1.0161361649987945e-20, 0.9999787486674688, -1.8884175886587334e-17,
+    0.006711115568908879, 3.4981933321126623e-19, 0.9999774802103399, -3.055823728296546e-17,
+    0.006902858724729756, 3.5188172334166856e-19, 0.9999761749868976, -2.813889038443065e-17,
+    0.00709460162675225, -4.410456055913498e-20, 0.9999748329971898, 1.6074079715076766e-17,
+    0.007286344267926522, -2.204462340246159e-19, 0.9999734542412659, 3.8281436353859365e-17,
+    0.007478086641202745, -3.771474296505765e-19, 0.9999720387191767, -5.795020367155283e-18,
+    0.007669828739531098, -4.0534590657969605e-19, 0.9999705864309741, -2.9892014955437535e-17,
+    0.007861570555861773, -4.954730981135466e-19, 0.9999690973767116, -3.925131498676209e-17,
+    0.008053312083144972, -1.0691055028568329e-20, 0.9999675715564438, -1.9599391878833586e-17,
+    0.008245053314330907, -6.971384600449217e-19, 0.9999660089702269, -4.8171736291137565e-17,
+    0.0084367942423698, -3.5319791516383735e-19, 0.9999644096181183, 3.9351986624151286e-17,
+    0.008628534860211886, 4.908103008979821e-19, 0.9999627735001769, -1.728798989242421e-17,
+    0.008820275160807411, 5.665514453569473e-19, 0.9999611006164628, -1.4755276547944313e-17,
+    0.009012015137106633, -1.3840089531991405e-19, 0.9999593909670375, 4.7746645486440834e-17,
+    0.00920375478205982, -1.2136591693535934e-19, 0.9999576445519639, -3.152783686664729e-17,
+    0.009395494088617251, 4.25195900572951e-19, 0.9999558613713061, 9.265035041397317e-18,
+    0.009587233049729225, -1.2711920470013776e-19, 0.9999540414251298, 7.377611041521339e-18,
+    0.009778971658346043, 6.20709696019498e-19, 0.9999521847135018, 4.1602236378036795e-17,
+    0.009970709907418029, 6.807079200365669e-19, 0.9999502912364905, -1.1820418385973025e-17,
+    0.010162447789895515, -8.587277976588204e-19, 0.9999483609941654, -3.511465746349404e-17,
+    0.010354185298728844, -1.0418623725400424e-19, 0.9999463939865975, -2.0392268763107976e-18,
+    0.010545922426868378, -2.411104063386565e-19, 0.9999443902138591, 2.2110076199625822e-17,
+    0.010737659167264492, -8.662615695318155e-19, 0.9999423496760239, -8.479953148742818e-18,
+    0.010929395512867571, 5.367518754229206e-19, 0.999940272373167, -9.120333854516053e-18,
+    0.011121131456628021, 1.8305109349461893e-19, 0.9999381583053646, 1.3332737758794198e-17,
+    0.011312866991496258, 3.887446862337419e-19, 0.9999360074726946, -3.952492016786769e-17,
+    0.011504602110422715, -5.782191652775988e-19, 0.999933819875236, -2.4581425486372508e-17,
+    0.011696336806357838, 4.347571255197199e-19, 0.9999315955130692, -1.3009494358694794e-18,
+    0.011888071072252093, -4.189518973940274e-19, 0.9999293343862761, -9.682068961630918e-18,
+    0.012079804901055957, 1.517843871695532e-19, 0.9999270364949396, 4.0761528804220867e-17,
+    0.012271538285719925, 6.919790764028317e-19, 0.9999247018391445, 3.793108251266801e-17,
+    0.012463271219194511, 4.638883111973758e-19, 0.9999223304189765, 2.0655764370180044e-19,
+    0.012655003694430242, -2.9379918448963504e-19, 0.9999199222345228, -3.4578811996864666e-17,
+    0.012846735704377662, -1.0677317419704059e-19, 0.9999174772858718, -9.141730016981581e-18,
+    0.013038467241987333, 5.246394490673735e-19, 0.9999149955731135, 4.222560466074131e-17,
+    0.013230198300209836, -6.153376561797304e-19, 0.9999124770963392, -6.3478073380217856e-18,
+    0.013421928871995767, -2.5984933351350486e-19, 0.9999099218556415, -3.924821328737653e-17,
+    0.01361365895029574, 1.9143660996829865e-19, 0.9999073298511143, -3.2447420282797203e-17,
+    0.01380538852806039, 1.3568556842981468e-19, 0.9999047010828529, -5.350624947347424e-17,
+    0.013997117598240369, 2.6081207045615827e-20, 0.9999020355509539, -3.953343506780932e-17,
+    0.014188846153786345, -1.0371362086254954e-19, 0.9998993332555154, -1.9233782887023024e-17,
+    0.014380574187649008, -3.8037316687668803e-19, 0.9998965941966367, -1.8894712291347778e-18,
+    0.014572301692779066, -8.31725776227412e-19, 0.9998938183744185, 2.2636296106754623e-17,
+    0.014764028662127246, 6.071518942146785e-19, 0.999891005788963, -2.7126715363987616e-17,
+    0.014955755088644298, -3.2050091266595937e-19, 0.9998881564403733, 8.807384156569313e-18,
+    0.015147480965280987, -5.616037941837151e-20, 0.9998852703287545, -2.3234705680488246e-17,
+    0.015339206284988102, -8.44625788654017e-19, 0.9998823474542126, -3.547781487240854e-17,
+    0.015530931040716449, -6.649927734112778e-20, 0.9998793878168549, -3.176911196348676e-17,
+    0.015722655225416857, 1.347375420286018e-18, 0.9998763914167904, 3.4402472093316454e-18,
+    0.01591437883204018, 9.098143232793742e-19, 0.9998733582541293, -5.9311838509919055e-18,
+    0.016106101853537287, -1.6940827414223089e-18, 0.999870288328983, -5.554587978146216e-18,
+    0.016297824282859065, 8.564146101261611e-19, 0.9998671816414644, -3.2739589565602276e-17,
+    0.016489546112956437, -5.092858145965481e-19, 0.9998640381916877, 5.6062003639559056e-18,
+    0.016681267336780332, 2.31098512690526e-19, 0.9998608579797685, -9.392291958669977e-20,
+    0.016872987947281714, 1.6577009703648142e-19, 0.9998576410058239, -2.902309985295473e-17,
+    0.01706470793741156, 1.5858123281399114e-18, 0.9998543872699719, -4.0997508124621864e-17,
+    0.01725642730012088, -1.63342605650194e-18, 0.9998510967723322, 2.3529288546825147e-17,
+    0.017448146028360693, 5.129691244134192e-19, 0.9998477695130259, 2.1417337013710923e-17,
+    0.017639864115082057, -2.758214393724215e-19, 0.9998444054921752, 5.092505637997117e-17,
+    0.01783158155323604, 8.778417443834747e-19, 0.999841004709904, 7.615530286472155e-18,
+    0.018023298335773742, 1.4725441179642308e-18, 0.9998375671663371, 2.844116920136577e-17,
+    0.01821501445564629, -1.1741210398871885e-18, 0.999834092861601, 4.7649903315396874e-17,
+    0.01840672990580482, 7.419553381283316e-19, 0.9998305817958234, 1.882514051755112e-17,
+    0.01859844467920051, 1.4844356446204249e-18, 0.9998270339691334, 2.5903372213604593e-17,
+    0.018790158768784558, -6.170643476276119e-19, 0.9998234493816616, -4.989748039979909e-17,
+    0.018981872167508178, 5.61635846526506e-19, 0.9998198280335394, 2.5028649944818147e-17,
+    0.019173584868322623, -1.6182368312980211e-18, 0.9998161699249004, -5.150728884102675e-17,
+    0.019365296864179156, 1.4563291545426533e-18, 0.9998124750558788, -7.271338997172686e-18,
+    0.019557008148029086, -7.851780073497625e-19, 0.9998087434266105, 5.1877998082925415e-18,
+    0.01974871871282373, 3.2628362156532133e-19, 0.9998049750372329, -3.635471201616073e-17,
+    0.019940428551514438, 1.7334468251694271e-18, 0.9998011698878843, -2.380489848661066e-17,
+    0.020132137657052594, -6.797652205048171e-19, 0.9997973279787047, -5.182196962548756e-17,
+    0.020323846022389597, -1.420740382027274e-18, 0.9997934493098353, 2.6265744501269525e-17,
+    0.020515553640476875, 9.931913419085461e-19, 0.9997895338814188, 4.3344087891641635e-17,
+    0.020707260504265895, 8.244665862044622e-19, 0.9997855816935992, -3.7402954814982855e-17,
+    0.02089896660670814, -7.477688653044579e-19, 0.9997815927465217, -1.1476248840257783e-17,
+    0.02109067194075512, 1.1620466560424503e-18, 0.9997775670403329, 1.1821635763382099e-17,
+    0.021282376499358387, 1.5272555545571069e-18, 0.999773504575181, 5.347024161362458e-17,
+    0.021474080275469508, -4.540796020768857e-19, 0.9997694053512153, 4.268117703228901e-17,
+    0.02166578326204008, -1.1000255111606816e-18, 0.9997652693685865, 3.893722923779755e-17,
+    0.021857485452021735, 1.0754774749655017e-18, 0.9997610966274466, 9.942217996185247e-18,
+    0.022049186838366135, -1.3171301084507434e-18, 0.9997568871279491, 5.366000943097804e-17,
+    0.02224088741402496, 2.2491947884128646e-21, 0.9997526408702488, -4.578033463301238e-17,
+    0.022432587171949934, 1.4869404295141763e-18, 0.9997483578545018, -4.0934129929003316e-17,
+    0.022624286105092806, -1.569017727539126e-18, 0.9997440380808654, 1.7970728266525288e-18,
+    0.02281598420640535, -8.939410779418586e-19, 0.9997396815494987, 3.522660544415558e-17,
+    0.023007681468839372, 7.345144017741901e-19, 0.9997352882605617, 3.137684269225239e-17,
+    0.02319937788534672, 1.5683525850811149e-19, 0.999730858214216, -1.852668695970532e-17,
+    0.02339107344887926, 1.0296851750135518e-18, 0.9997263914106245, 6.961062173096628e-18,
+    0.023582768152388894, 2.0725672705782766e-19, 0.9997218878499513, 2.6431756966230512e-17,
+    0.023774461988827558, -1.5912493488143557e-18, 0.9997173475323622, -2.233774791537826e-17,
+    0.023966154951147213, 4.775130940234958e-19, 0.9997127704580239, 3.965310689208705e-17,
+    0.024157847032299864, -1.7070630703102177e-18, 0.9997081566271049, -3.3511367028085517e-17,
+    0.024349538225237534, -1.2148277290519903e-18, 0.9997035060397746, -2.4490873565944873e-17
+}
+// 2^k for -1022 <= k <= 1023.
+__tan_p2: fn(k: Int) -> Float Never! { from_bits((k + 1023) << 52) }
+// v 2^-128 truncated to 53 bits, for 0 <= v < 2^128.
+__tan_trunc53: fn(v: Int) -> Float Never! {
+    if v == 0 -> return Float{0.0}
+    hi: v >> 64
+    n: if hi != 0 -> 128 - __clz64(hi) else -> 64 - __clz64(v)
+    if n <= 53 -> return Float{v} * __tan_p2(-128)
+    Float{v >> (n - 53)} * __tan_p2(n - 181)
+}
+// x/(2pi) mod 1 as i/2^11 + h + l within 2^-104.815, 0 <= h < 2^-11, for x >
+// 1.3538603431225862e-8: beyond 2pi from 128 bits of the fraction, h and l
+// truncated from them as tan.c's set_dd does.
+__tan_reduce_fast: fn(x: Float) -> (i: Int, h: Float, l: Float) Never! {
+    h := Float{0.0}
+    l := Float{0.0}
+    if (x <= Float{6.283185307179585}) {
+        h = Float{0.15915494309189535} * x
+        l = fma(Float{-9.839338337591243e-18}, x, fma(Float{0.15915494309189535}, x, -h))
+    } else {
+        b: to_bits(x)
+        e: b >> 52
+        m: b.bit_and(0xF_FFFF_FFFF_FFFF).bit_or(0x10_0000_0000_0000)
+        c := 0
+        sh := 0
+        if e <= 1074 {
+            c = ((m * __SINCOS_T[1]) << 64) + m * __SINCOS_T[2] + ((m * __SINCOS_T[3]) >> 64)
+            sh = 1075 - e
+        } else {
+            i: (e - 1075) >> 6
+            c = (((m * __SINCOS_T[i + 1]) << 128) + ((m * __SINCOS_T[i + 2]) << 64) + m * __SINCOS_T[i + 3] + ((m * __SINCOS_T[i + 4]) >> 64)).bit_and((1 << 192) - 1)
+            sh = 1139 + 64 * i - e
+        }
+        r: (c >> sh).bit_and((1 << 128) - 1)
+        if r != 0 {
+            rh: r >> 64
+            n: if rh != 0 -> 128 - __clz64(rh) else -> 64 - __clz64(r)
+            if n <= 53 {
+                h = Float{r} * __tan_p2(-128)
+            } else {
+                top: r >> (n - 53)
+                h = Float{top} * __tan_p2(n - 181)
+                // only the 64 bits after h's 53 reach l
+                cut: if n > 117 -> n - 117 else -> 0
+                l = __tan_trunc53(((r - (top << (n - 53))) >> cut) << cut)
+            }
+        }
+    }
+    k: floor(h * Float{2048.0})
+    (i: Int.from_float(k) ?? 0, h: fma(k, Float{-0.00048828125}, h), l: l)
+}
+// tan x as hi + lo within |err| (CORE-MATH tan_fast): sin2pi and cos2pi of
+// the reduced argument from __TAN_SC's points and short polynomials, then
+// their ratio; err 1 where the reduced argument is too small.
+__tan_fast: fn(x: Float) -> (hi: Float, lo: Float, err: Float) Never! {
+    red: __tan_reduce_fast(fabs(x))
+    // pi <= x mod 2pi: tan(x - pi); pi/2 <= x mod pi: -cot(x - pi/2)
+    flip: red.i.bit_and(0x200) != 0
+    is_tan := !flip
+    neg: (x < Float{0.0}) != flip
+    i := red.i.bit_and(0x1FF)
+    h := red.h
+    l := red.l
+    if i.bit_and(0x100) != 0 {
+        // pi/4 <= x mod pi/2: cot(pi/2 - x)
+        is_tan = !is_tan
+        i = 0x1FF - i
+        h = Float{0.00048828125} - h
+        l = -l
+    }
+    if i == 0 && (h < Float{7.275957614183426e-12}) -> return (hi: Float{0.0}, lo: Float{0.0}, err: Float{1.0})
+    t: __fast_two_sum(h - __TAN_SC[3 * i], l)
+    uh: t.hi * t.hi
+    ul: fma(t.hi + t.hi, t.lo, fma(t.hi, t.hi, -uh))
+    // sin2pi(t) within 2^-71.61 and cos2pi(t) within 2^-69.96, relatively
+    ps0: fma(fma(Float{-76.77083125858339}, uh, Float{81.60524929831949}), uh, Float{-41.34170224039976})
+    ps1: __s_mul(ps0, uh, ul)
+    ps2: __fast_two_sum(Float{6.283185307179586}, ps1.hi)
+    pl: ps1.lo + (Float{2.4492937487389357e-16} + ps2.lo)
+    psm: ps2.hi * t.hi
+    sh: psm
+    sl: fma(ps2.hi, t.lo, fma(pl, t.hi, fma(ps2.hi, t.hi, -psm)))
+    pc0: fma(fma(Float{-85.41188646817469}, uh, Float{64.93939400729349}), uh, Float{-19.739208802178716})
+    pc1: __s_mul(pc0, uh, ul)
+    pc2: __fast_two_sum(Float{1.0}, pc1.hi)
+    ch: pc2.hi
+    cl: pc1.lo + (Float{-1.0396311785461432e-23} + pc2.lo)
+    si: __TAN_SC[3 * i + 1]
+    ci: __TAN_SC[3 * i + 2]
+    // sin2pi and cos2pi of the whole reduced argument
+    s0: __s_mul(ci, sh, sl)
+    c0: __s_mul(si, ch, cl)
+    p1: __fast_two_sum(c0.hi, s0.hi)
+    l1: p1.lo + (s0.lo + c0.lo)
+    c1: __s_mul(ci, ch, cl)
+    s1: __s_mul(si, sh, sl)
+    p2: __fast_two_sum(c1.hi, -s1.hi)
+    l2: p2.lo + (c1.lo - s1.lo)
+    bh: if is_tan -> p1.hi else -> p2.hi
+    bl: if is_tan -> l1 else -> l2
+    ah: if is_tan -> p2.hi else -> p1.hi
+    al: if is_tan -> l2 else -> l1
+    // (bh + bl) / (ah + al) within 2^-96.99 (Karp-Markstein)
+    y: Float{1.0} / ah
+    qh: bh * y
+    ql: y * (fma(ah, -qh, bh) + fma(al, -qh, bl))
+    sg: if neg -> Float{-1.0} else -> Float{1.0}
+    rh: qh * sg
+    (hi: rh, lo: ql * sg, err: rh * Float{1.4928955695357043e-20})
+}
+// The 192-bit float of a __TAN_S, __TAN_C, __TAN_PS or __TAN_PC entry.
+__tan_coef: fn(t: [Int], i: Int) -> (sig: Int, ex: Int, sgn: Int) Never! {
+    (sig: t[3 * i] << 64, ex: t[3 * i + 1], sgn: t[3 * i + 2])
+}
+// tan x when the fast path cannot round (CORE-MATH tan_accurate): x/(2pi)
+// mod 1 to 192 bits as i/2^11 + X, then sin2pi and cos2pi of X by
+// polynomials and of i/2^11 from tables, and their ratio, in 192-bit floats
+// (tan.c's 128-bit ones, more precise).
+__tan_accurate: fn(x: Float) -> Float Never! {
+    // the two arguments whose tan lies closest to a rounding boundary
+    ax: fabs(x)
+    if (ax == Float{4.470348358154178e-7}) -> return copysign(Float{4.4703483581544753e-7} + Float{2.6469779601696883e-23}, x)
+    if (ax == Float{8.940696716307641e-7}) -> return copysign(Float{8.940696716310023e-7} + Float{-7.828575563803332e-45}, x)
+    b: to_bits(ax)
+    e: b >> 52
+    m: b.bit_and(0xF_FFFF_FFFF_FFFF).bit_or(0x10_0000_0000_0000)
+    // 1/(2pi)'s words before k0 only add whole numbers; five words keep the
+    // fraction's error below 2^-204
+    q: (e - 1075) >> 6
+    k0: if q > 0 -> q else -> 0
+    w: (__SINCOS_T[k0 + 1] << 256) + (__SINCOS_T[k0 + 2] << 192) + (__SINCOS_T[k0 + 3] << 128) + (__SINCOS_T[k0 + 4] << 64) + __SINCOS_T[k0 + 5]
+    sh: 1075 + 64 * (k0 + 5) - e
+    f: (m * w).bit_and((1 << sh) - 1) >> (sh - 192)
+    is_tan := true
+    neg := x < Float{0.0}
+    i := (f >> 181).bit_and(0x3FF)
+    xr := f.bit_and((1 << 181) - 1)
+    if i.bit_and(0x200) != 0 {
+        // pi/2 <= x mod pi: -1/tan(x - pi/2)
+        is_tan = false
+        neg = !neg
+        i = i.bit_and(0x1FF)
+    }
+    if i.bit_and(0x100) != 0 {
+        // pi/4 <= x mod pi/2: 1/tan(pi/2 - x)
+        is_tan = !is_tan
+        xr = (1 << 181) - xr
+        i = 0x1FF - i
+    }
+    xn: exact_bit_length(xr)
+    xt: if xr == 0 -> (sig: 0, ex: -1076, sgn: 0) else -> (sig: xr << (192 - xn), ex: xn - 192, sgn: 0)
+    x2: __tint_mul(xt, xt)
+    u := __tint_mul(x2, __tan_coef(__TAN_PC, 5))
+    v := __tint_mul(x2, __tan_coef(__TAN_PS, 5))
+    j := 4
+    loop j >= 0 {
+        u = __tint_add(u, __tan_coef(__TAN_PC, j))
+        v = __tint_add(v, __tan_coef(__TAN_PS, j))
+        if j > 0 {
+            u = __tint_mul(u, x2)
+            v = __tint_mul(v, x2)
+        }
+        j = j - 1
+    }
+    // cos2pi(X) and sin2pi(X)
+    v = __tint_mul(v, xt)
+    si: __tan_coef(__TAN_S, i)
+    ci: __tan_coef(__TAN_C, i)
+    s: __tint_add(__tint_mul(si, u), __tint_mul(ci, v))
+    sv: __tint_mul(si, v)
+    c: __tint_add(__tint_mul(ci, u), (sig: sv.sig, ex: sv.ex, sgn: 1 - sv.sgn))
+    r: if is_tan -> __tint_div(s, c) else -> __tint_div(c, s)
+    // within 86 units of tan.c's 128-bit last place
+    rs: if neg -> 1 - r.sgn else -> r.sgn
+    __tint_to_float((sig: r.sig, ex: r.ex, sgn: rs), 86)
+}
+// sin2pi(i/2^11) for 0 <= i < 256 to nearest, as __tan_coef triples: the
+// top 128 bits of the significand, the exponent and the sign.
+__TAN_S: [Int]{
+    0x0, -1076, 0,
+    0xC90F_C5F6_6525_D257_480F_7956_B647_0765, -8, 0,
+    0xC90F_87F3_3803_88D5_CB3F_F35B_D4D8_1BAA, -7, 0,
+    0x96CB_5872_84B8_1770_B767_0056_91B9_D9D1, -6, 0,
+    0xC90E_8FE6_F63C_2330_F1D7_D06D_B39E_A9FC, -6, 0,
+    0xFB51_4B55_CCBE_541A_D784_E031_F9AF_76D6, -6, 0,
+    0x96C9_B5DF_1877_E9B5_F91E_E371_D646_7DCA, -5, 0,
+    0xAFEA_690F_D591_2EF3_F56E_3C87_AE3C_56DF, -5, 0,
+    0xC90A_AFBD_1B33_EFC9_C539_EDCB_FDA0_CF2C, -5, 0,
+    0xE22A_7A67_29D8_E453_8500_21E3_9274_4A4F, -5, 0,
+    0xFB49_B98E_8E78_07F6_00B2_1CCE_BC9C_AAC3, -5, 0,
+    0x8A34_2EDA_160B_F5AE_DE5B_1068_D174_BE9C, -4, 0,
+    0x96C3_2BAC_A2AE_68B4_37B2_DD49_D5FC_A3C0, -4, 0,
+    0xA351_CB7F_C30B_C889_B560_07D1_6D4A_D5A3, -4, 0,
+    0xAFE0_0694_866A_1B44_CD34_D275_1C2E_1DA7, -4, 0,
+    0xBC6D_D52C_3A34_2EB5_F10B_FCA3_D646_4012, -4, 0,
+    0xC8FB_2F88_6EC0_9F37_6A17_954B_2B7C_5171, -4, 0,
+    0xD588_0DEA_FC18_B534_73D1_4724_72F4_A390, -4, 0,
+    0xE214_6896_06BF_1676_438B_4A73_AECD_2541, -4, 0,
+    0xEEA0_37CC_0476_4844_C4E9_2D01_A2F4_2935, -4, 0,
+    0xFB2B_73CF_C106_FF68_F0A0_E36A_000C_7350, -4, 0,
+    0x83DB_0A72_3183_1D8F_60E7_8231_3F61_61AF, -3, 0,
+    0x8A20_09A6_B84D_9402_7772_4A2B_2A66_9BC4, -3, 0,
+    0x9064_B3A7_6A22_640C_56E0_A8B0_D177_B55D, -3, 0,
+    0x96A9_0496_70CF_AE65_F775_7409_4D3C_35C4, -3, 0,
+    0x9CEC_F896_2D14_C822_50FF_E4F5_CAA7_F1FA, -3, 0,
+    0xA330_8BC9_3904_AD69_DEC1_B7F2_768B_DAFA, -3, 0,
+    0xA973_BA52_6A68_50D9_76F8_C639_8659_8C79, -3, 0,
+    0xAFB6_8054_D520_C60B_FDD2_FC09_3659_4C2D, -3, 0,
+    0xB5F8_D9F3_CD89_45D6_924B_EF13_600F_9852, -3, 0,
+    0xBC3A_C352_EAD9_0ABE_EB13_E106_7326_87F1, -3, 0,
+    0xC27C_3896_0985_0433_B228_A039_1637_1F6F, -3, 0,
+    0xC8BD_35E1_4DA1_5F0E_C739_6C89_4BBF_7389, -3, 0,
+    0xCEFD_B759_2542_E1E9_6B47_B8C4_4E5B_037E, -3, 0,
+    0xD53D_B922_4AE0_1BCA_7337_412C_F707_16CB, -3, 0,
+    0xDB7D_3761_C7B2_63B6_BB28_6D23_E11C_8337, -3, 0,
+    0xE1BC_2E3C_F616_A7AC_3188_3B30_137C_6E62, -3, 0,
+    0xE7FA_99D9_83EE_098F_EEB8_F9C3_3340_A2F2, -3, 0,
+    0xEE38_765D_74FE_4897_ED16_B994_AF6C_18AE, -3, 0,
+    0xF475_BFEF_2551_F5B9_14E1_A548_8EAE_AB96, -3, 0,
+    0xFAB2_72B5_4B98_71A2_7047_29AE_56D7_8A37, -3, 0,
+    0x8077_456B_7DC2_D967_3EAC_8308_F111_3E5E, -2, 0,
+    0x8395_023D_D418_E919_DB1F_7011_8C9C_2198, -2, 0,
+    0x86B2_6DE5_933C_2E8E_C5A9_DECD_FAAD_4DB5, -2, 0,
+    0x89CF_8676_D7AB_B55B_9796_5C98_60C3_4E44, -2, 0,
+    0x8CEC_4A05_F127_39E8_DCDC_A90C_C73B_116A, -2, 0,
+    0x9008_B6A7_63DE_75B7_A6E3_DF59_75CC_A9DA, -2, 0,
+    0x9324_CA6F_E9A0_4B4E_899C_4DE7_37FE_EC22, -2, 0,
+    0x9640_8374_7309_D113_000A_89A1_1E07_C1FE, -2, 0,
+    0x995B_DFCA_28B5_3A54_49C4_863D_E522_B217, -2, 0,
+    0x9C76_DD86_6C68_9DCC_E7BC_0811_1D0B_FCA4, -2, 0,
+    0x9F91_7ABE_DA44_98DF_F3FF_913A_4AAD_B85E, -2, 0,
+    0xA2AB_B589_49F2_CED7_A5DB_EE60_84EE_1260, -2, 0,
+    0xA5C5_8BFB_CFD4_436A_69FC_B11E_19F5_8619, -2, 0,
+    0xA8DE_FC2C_BE2F_8FCC_0CD1_2A1F_6AB6_B095, -2, 0,
+    0xABF8_0432_A65E_F190_8C95_C4C9_1179_176B, -2, 0,
+    0xAF10_A224_59FE_32A6_3FEE_F3BB_58B1_F10D, -2, 0,
+    0xB228_D418_EC18_69AD_1603_1A34_D4FC_855D, -2, 0,
+    0xB540_9827_B255_91F0_CD73_FB5D_8D45_D302, -2, 0,
+    0xB857_EC68_4627_FA4C_187E_26D2_9071_4D70, -2, 0,
+    0xBB6E_CEF2_85F9_8A3A_BDDD_8A03_65D6_B1D3, -2, 0,
+    0xBE85_3DDE_9658_DC60_DFE1_B074_E22F_C666, -2, 0,
+    0xC19B_3744_E326_2DCD_AD5A_41DE_48F6_B26F, -2, 0,
+    0xC4B0_B93E_20C0_213F_DAB4_E426_409B_23A0, -2, 0,
+    0xC7C5_C1E3_4D30_55B2_5CC8_C00E_4FCC_D850, -2, 0,
+    0xCADA_4F4D_B157_CF77_FA61_7120_0AB2_EFC3, -2, 0,
+    0xCDEE_5F96_E21B_332C_65A3_132A_DFB7_DFD5, -2, 0,
+    0xD101_F0D8_C18E_D1C1_AADB_580A_1EBA_209F, -2, 0,
+    0xD415_012D_8022_84F0_DF40_05EF_6A64_AA02, -2, 0,
+    0xD727_8EAF_9DCD_5B55_1779_DF36_D1CC_8912, -2, 0,
+    0xDA39_9779_EB39_1377_CBAB_AEB9_7AF8_E8AA, -2, 0,
+    0xDD4B_19A7_8AED_6515_ECE7_F445_CECF_1E28, -2, 0,
+    0xE05C_1353_F27B_17E5_0EBC_61AD_E6CA_83CD, -2, 0,
+    0xE36C_829A_EBA6_E720_26A0_EECD_B4F1_6266, -2, 0,
+    0xE67C_6598_9594_3123_82B0_AECA_DF80_8123, -2, 0,
+    0xE98B_BA69_65EF_725F_B91C_AF23_416E_7E80, -2, 0,
+    0xEC9A_7F2A_2A18_8AEB_7244_EE20_F591_983B, -2, 0,
+    0xEFA8_B1F8_084C_CDFC_1050_CDF2_2F34_182F, -2, 0,
+    0xF2B6_50F0_80D0_DA8D_587F_3FA0_44E2_D27D, -2, 0,
+    0xF5C3_5A31_6F1A_3C80_6437_20DE_93BA_81BD, -2, 0,
+    0xF8CF_CBD9_0AF8_D57A_4221_DC4B_A772_598D, -2, 0,
+    0xFBDB_A405_E9C0_0CCA_D24D_3023_DA49_1920, -2, 0,
+    0xFEE6_E0D6_FF6F_C5A4_8B74_FE25_08AB_8FC2, -2, 0,
+    0x80F8_C035_CFEE_8D76_FD95_8D68_E8B4_9E6B, -1, 0,
+    0x827D_C071_BFED_6FFA_FB4C_9236_9F0C_F008, -1, 0,
+    0x8402_702F_5B30_F2A9_CB07_B25A_7B03_72A7, -1, 0,
+    0x8586_CE7E_DEDC_809D_9D3D_C689_0068_96F4, -1, 0,
+    0x870A_DA70_BA4E_6D49_009D_5275_5ECE_3F70, -1, 0,
+    0x888E_9315_8FB3_BB04_9841_56F5_5334_4306, -1, 0,
+    0x8A11_F77E_349B_C245_A66D_1D93_6C38_C329, -1, 0,
+    0x8B95_06BB_B28B_B922_575F_3336_6BE0_AFEF, -1, 0,
+    0x8D17_BFDF_4792_1AC8_CB59_0D74_F64E_77C9, -1, 0,
+    0x8E9A_21FA_66D9_EE8D_F2BE_3ECA_E627_89D4, -1, 0,
+    0x901C_2C1E_B93D_EE39_632B_9CFF_5CFE_E724, -1, 0,
+    0x919D_DD5E_1DDB_8B33_609C_464B_3DD6_76EC, -1, 0,
+    0x931F_34CA_AAA5_D23A_6A1F_F8BF_E639_6E28, -1, 0,
+    0x94A0_3176_ACF8_2D45_AE4B_A773_DA6B_F754, -1, 0,
+    0x9620_D274_AA29_0339_E06A_955A_5B8E_301D, -1, 0,
+    0x97A1_16D7_601C_3515_FC8B_7184_B21F_2D50, -1, 0,
+    0x9920_FDB1_C5D5_783D_9DD1_EEDF_18A2_E4DF, -1, 0,
+    0x9AA0_8617_0C0A_8D86_9FFA_0D23_F3C2_6C62, -1, 0,
+    0x9C1F_AF1A_9DB5_54AF_DAB6_B478_577E_7BE5, -1, 0,
+    0x9D9E_77D0_20A5_BBE6_DB89_5384_528D_0D60, -1, 0,
+    0x9F1C_DF4B_7613_8B02_98DB_D355_5EBC_DEFE, -1, 0,
+    0xA09A_E4A0_BB30_0A19_2F89_5F44_A303_CC0B, -1, 0,
+    0xA218_86E4_49B7_8316_D29D_23A6_24AC_D00C, -1, 0,
+    0xA395_C52A_B882_9DFC_2BE0_3640_1BA8_7CC2, -1, 0,
+    0xA512_9E88_DC17_976A_82D9_495E_AD5B_E348, -1, 0,
+    0xA68F_1213_C73B_5124_1721_8792_857F_4C5A, -1, 0,
+    0xA80B_1EE0_CB82_3C27_3269_F470_2B88_324A, -1, 0,
+    0xA986_C405_79E1_1C0A_8E3B_DF80_8532_1556, -1, 0,
+    0xAB02_0097_A33D_A341_C165_4B64_A008_1B46, -1, 0,
+    0xAC7C_D3AD_58FE_E7F0_811F_9539_84EF_F83E, -1, 0,
+    0xADF7_3C5C_ED9D_B0F3_9A53_18AC_6FE9_4E4D, -1, 0,
+    0xAF71_39BC_F534_9AC6_9FE5_F4EA_4896_5E2C, -1, 0,
+    0xB0EA_CAE4_4610_13ED_63C6_6682_BAE7_4898, -1, 0,
+    0xB263_EEE9_F93E_3088_695A_5332_090B_B09B, -1, 0,
+    0xB3DC_A4E5_6B1E_54BB_992D_96E5_021E_3C37, -1, 0,
+    0xB554_EBEE_3BF0_B58E_971F_4DA7_09AD_4378, -1, 0,
+    0xB6CC_C31C_5065_AFEE_35EB_ACD7_9F20_9137, -1, 0,
+    0xB844_2987_D22C_F576_9CC3_EF36_746D_E3B8, -1, 0,
+    0xB9BB_1E49_3084_8EAD_CDB0_531C_4E58_484B, -1, 0,
+    0xBB31_A079_20C7_B256_55B9_2083_658B_B897, -1, 0,
+    0xBCA7_AF30_9EFD_7182_0A4B_0D21_FC50_36A5, -1, 0,
+    0xBE1D_4988_EE67_380C_D1F9_0F79_F46C_7E01, -1, 0,
+    0xBF92_6E9B_9A0F_2127_91A1_B5EB_7965_8C67, -1, 0,
+    0xC107_1D82_7556_1F9B_7218_53F8_E528_A934, -1, 0,
+    0xC27B_5557_9C81_F96D_CDC2_BD47_0675_104D, -1, 0,
+    0xC3EF_1535_754B_168D_3122_C2A5_9EFD_DC37, -1, 0,
+    0xC562_5C36_AF6A_222F_F4FF_2895_AB6E_BE89, -1, 0,
+    0xC6D5_2976_4525_7E8D_14D2_4739_DE27_E2E9, -1, 0,
+    0xC847_7C0F_7BDE_8A98_004C_E024_6AD4_FA74, -1, 0,
+    0xC9B9_531D_E49E_B968_4319_E5AD_5B0D_CB84, -1, 0,
+    0xCB2A_ADBD_5CA4_7AF5_FAA3_DFE6_75A6_5EE2, -1, 0,
+    0xCC9B_8B0A_0DEF_F5D4_2E66_3B3C_7555_A6C3, -1, 0,
+    0xCE0B_EA20_6FCF_9192_3C54_0A9E_EC47_AF38, -1, 0,
+    0xCF7B_CA1D_476C_516D_A812_90BD_BAAD_62E4, -1, 0,
+    0xD0EB_2A1D_A855_FEFD_B930_2788_604E_88F1, -1, 0,
+    0xD25A_093E_F50F_2482_721F_C87B_A1D4_2456, -1, 0,
+    0xD3C8_669E_DF98_D680_8796_7926_FDCE_CEC4, -1, 0,
+    0xD536_415B_69FE_4C54_1DF2_2346_611C_6B4B, -1, 0,
+    0xD6A3_9892_E6E0_4764_3090_D44D_B12C_418C, -1, 0,
+    0xD810_6B63_FA00_48A0_A573_F2AA_9043_4BA5, -1, 0,
+    0xD97C_B8ED_98CB_93F5_2E34_9483_E3FB_2A6A, -1, 0,
+    0xDAE8_804F_0AE6_015B_362C_B974_182E_3030, -1, 0,
+    0xDC53_C0A7_EAB4_9B35_3CCC_A398_2328_ED8B, -1, 0,
+    0xDDBE_7918_25E8_099E_1A5B_D926_9D40_8D7E, -1, 0,
+    0xDF28_A8BF_FE06_CA56_CCE2_634B_E2BF_54DF, -1, 0,
+    0xE092_4EC0_08F7_34FD_8AA8_95D5_BF3E_84EA, -1, 0,
+    0xE1FB_6A39_3189_4B38_F7A1_F9BD_9BA1_3B6B, -1, 0,
+    0xE363_FA4C_B800_5482_7B32_C72E_3182_4E51, -1, 0,
+    0xE4CB_FE1C_329C_453A_D40E_9E6B_989F_89E5, -1, 0,
+    0xE633_74C9_8E22_F0B4_2872_CE1B_FC7A_D1CD, -1, 0,
+    0xE79A_5D77_0E69_05DC_F1B6_5CC5_FD78_0262, -1, 0,
+    0xE900_B747_4EDA_D637_4316_26C1_0485_BDDA, -1, 0,
+    0xEA66_815D_4304_E6C8_0CC3_9CFC_C299_60B1, -1, 0,
+    0xEBCB_BADC_371C_4AAA_1D90_F780_AE95_1140, -1, 0,
+    0xED30_62E7_D086_C6F0_C71D_EBC3_72B6_F9D4, -1, 0,
+    0xEE94_78A4_0E62_BF86_2A24_164D_AEC8_5CCB, -1, 0,
+    0xEFF7_FB35_4A0E_ECB1_5272_33B4_0D34_32BB, -1, 0,
+    0xF15A_E9C0_37B1_D8F0_6C48_E9E3_420B_0F1E, -1, 0,
+    0xF2BD_4369_E6C1_26D3_7F23_2AEE_178C_6323, -1, 0,
+    0xF41F_0757_C288_9E84_3C7F_10DB_458C_337C, -1, 0,
+    0xF580_34AF_92B1_02A7_93FA_6107_C432_7527, -1, 0,
+    0xF6E0_CA97_7BC6_AC45_E107_9824_233F_EF46, -1, 0,
+    0xF840_C835_FFBF_ED66_A9A5_6012_067C_570C, -1, 0,
+    0xF9A0_2CB1_FE83_3A0D_08DA_8944_71DE_1A18, -1, 0,
+    0xFAFE_F732_B66D_1742_0343_FBF4_A7D4_2AF3, -1, 0,
+    0xFC5D_26DF_C4D5_CFDA_27C0_7C91_1290_B8D1, -1, 0,
+    0xFDBA_BAE1_2696_EEA4_0237_7C37_99C0_52FA, -1, 0,
+    0xFF17_B25F_3890_7DAD_0A9C_6BA5_0490_539F, -1, 0,
+    0x803A_0641_5C17_0525_6F53_873E_2F14_77FF, 0, 0,
+    0x80E7_E43A_61F5_B6CB_5CA1_83DC_973A_BC22, 0, 0,
+    0x8195_72AF_6DEC_AC84_9FBA_97FD_F0C4_D24C, 0, 0,
+    0x8242_B135_7110_D372_6FB2_123F_EDFA_6E22, 0, 0,
+    0x82EF_9F61_8DC5_B70E_91A9_6593_1F1A_200A, 0, 0,
+    0x839C_3CC9_17FF_6CB4_BFD7_9717_F288_0ABF, 0, 0,
+    0x8448_8901_9584_6099_246E_FCFF_30CB_064A, 0, 0,
+    0x84F4_83A0_BE2F_0403_5191_7CAC_857F_D5F5, 0, 0,
+    0x85A0_2C3C_7C2F_5CA5_3278_88FE_4B62_687B, 0, 0,
+    0x864B_826A_EC4C_74E5_8504_3222_C9BD_D18D, 0, 0,
+    0x86F6_85C2_5E25_ACF5_7E0B_9B07_5484_71A2, 0, 0,
+    0x87A1_35D9_5473_EC89_4E09_1160_E243_0712, 0, 0,
+    0x884B_9246_854A_B50B_4F14_C8AF_E456_0291, 0, 0,
+    0x88F5_9AA0_DA59_1421_B892_CA83_61D8_C84C, 0, 0,
+    0x899F_4E7F_712A_765E_C883_02A3_1AFC_E54A, 0, 0,
+    0x8A48_AD79_9B67_59F3_6605_58A0_2136_130A, 0, 0,
+    0x8AF1_B726_DF15_E13C_545F_7D79_EAD8_FA19, 0, 0,
+    0x8B9A_6B1E_F6DA_4502_21A6_675F_5158_0BC4, 0, 0,
+    0x8C42_C8F9_D237_2644_101A_5ADB_CB9F_FB43, 0, 0,
+    0x8CEA_D04F_95CD_BF66_4D49_CBAF_15AE_CD80, 0, 0,
+    0x8D92_80B8_9B9D_F49B_DE2D_43C6_B67A_7CBE, 0, 0,
+    0x8E39_D9CD_7346_4364_BBA4_CFEC_BFF5_4867, 0, 0,
+    0x8EE0_DB26_E243_90F8_AF0E_2345_F3BD_24B4, 0, 0,
+    0x8F87_845D_E430_D777_9311_A824_59AA_0F72, 0, 0,
+    0x902D_D50B_AB06_B1B7_B144_016C_7A30_B39A, 0, 0,
+    0x90D3_CCC9_9F5A_C58B_09D1_072E_09B7_2292, 0, 0,
+    0x9179_6B31_609F_0C54_6714_FE69_25B7_8CC4, 0, 0,
+    0x921E_AFDC_C560_F9C5_33D0_A284_A8C9_54AD, 0, 0,
+    0x92C3_9A65_DB88_809D_1F84_81E7_04E4_A767, 0, 0,
+    0x9368_2A66_E896_F544_B178_2191_1E71_C16E, 0, 0,
+    0x940C_5F7A_69E5_CE1C_0001_489A_9767_1A42, 0, 0,
+    0x94B0_393B_14E5_4156_D6C7_AF02_D5C1_6FD9, 0, 0,
+    0x9553_B743_D75A_C03F_AC01_0665_0F4E_F023, 0, 0,
+    0x95F6_D92F_D79F_4FBA_D9F8_E1A4_46E9_73B9, 0, 0,
+    0x9699_9E9A_74DD_BDE3_A7A7_556C_3B33_ABC1, 0, 0,
+    0x973C_071F_4750_B49C_C0A0_3934_F0CC_E19B, 0, 0,
+    0x97DE_125A_2080_A8ED_D243_AA08_43A2_C144, 0, 0,
+    0x987F_BFE7_0B81_A708_19CE_C845_AC87_A5C6, 0, 0,
+    0x9921_0F62_4D30_FACB_C4B9_92A3_7FB9_B9BD, 0, 0,
+    0x99C2_0068_6472_B4A8_1AB4_2D43_2357_57B6, 0, 0,
+    0x9A62_9296_0A6F_0AB0_7E92_C655_656E_6B85, 0, 0,
+    0x9B02_C588_32CF_95C0_698B_94F5_0326_A043, 0, 0,
+    0x9BA2_98DC_0BFC_6A88_9A56_14E8_FFBE_AC6F, 0, 0,
+    0x9C42_0C2E_FF59_0E5F_C7FD_9541_94E6_D8AA, 0, 0,
+    0x9CE1_1F1E_B181_47B1_3E93_627D_E8FD_5779, 0, 0,
+    0x9D7F_D149_0285_C9E3_E25E_3954_9638_AE68, 0, 0,
+    0x9E1E_224C_0E28_BC94_2CAD_377D_5C9C_35D8, 0, 0,
+    0x9EBC_11C6_2C1A_1DFB_CC14_1E10_C646_0C8B, 0, 0,
+    0x9F59_9F55_F034_0061_A88D_5F46_834B_BF8D, 0, 0,
+    0x9FF6_CA9A_2AB6_A26D_22CC_118A_0C11_8AA0, 0, 0,
+    0xA093_9331_E884_6237_7CEC_6DF5_BEA1_67CF, 0, 0,
+    0xA12F_F8BC_735D_8AF6_71AC_EA28_1936_0C35, 0, 0,
+    0xA1CB_FAD9_521B_FD1B_166C_36E7_BB3C_402F, 0, 0,
+    0xA267_9928_48EE_B0C0_3B51_67EE_359A_234E, 0, 0,
+    0xA302_D349_5995_1243_9443_372E_20D4_377C, 0, 0,
+    0xA39D_A8DC_C39A_38E5_0CA9_A8A7_20D4_C69C, 0, 0,
+    0xA438_1983_048F_F747_BF62_3CF5_301A_2DDE, 0, 0,
+    0xA4D2_24DC_D849_C5B0_23D2_51CC_8D79_75CC, 0, 0,
+    0xA56B_CA8B_3917_85DB_189D_39FF_E11A_AA2B, 0, 0,
+    0xA605_0A2F_6000_2049_8C33_EBF3_AA85_01FB, 0, 0,
+    0xA69D_E36A_C4FB_FADC_9B3A_D6E4_0221_83D9, 0, 0,
+    0xA736_55DF_1F2F_489E_149F_6E75_9934_68A3, 0, 0,
+    0xA7CE_612E_6524_3291_6B2A_39F8_56A6_9781, 0, 0,
+    0xA866_04FA_CD04_D969_3463_A2C2_E6E9_CC55, 0, 0,
+    0xA8FD_40E6_CCD5_2FFD_6CC1_4C4F_53E2_E82D, 0, 0,
+    0xA994_1495_1AAC_AE5E_D147_625F_DA92_9AF8, 0, 0,
+    0xAA2A_7FA8_ACEF_DD63_B714_EE81_B53B_4B9D, 0, 0,
+    0xAAC0_81C4_BA89_BA8A_E1B3_DFC4_DBDA_9BFD, 0, 0,
+    0xAB56_1A8C_BB24_F410_F17C_EE69_B0D2_ECDE, 0, 0,
+    0xABEB_49A4_6764_FD15_1BEC_DA80_89C1_A94C, 0, 0,
+    0xAC80_0EAF_B91E_F9A9_F86B_A0DD_E982_FB59, 0, 0,
+    0xAD14_6952_EB92_82AF_44BF_1626_8608_DB96, 0, 0,
+    0xADA8_5932_7BA2_4151_9D30_D4CF_EB04_F1FB, 0, 0,
+    0xAE3B_DDF3_280C_620D_3D53_8178_6542_2565, 0, 0,
+    0xAECE_F739_F1A2_DF10_F74D_0990_42E8_F326, 0, 0,
+    0xAF61_A4AC_1B83_A1DE_A89A_9B8F_726B_95BF, 0, 0,
+    0xAFF3_E5EF_2B50_7C06_8C67_9E67_FC46_2D51, 0, 0,
+    0xB085_BAA8_E966_F6DA_E4CA_D00D_5C94_BCD2, 0, 0,
+    0xB117_227F_6117_F9F9_8D8B_E132_D576_E614, 0, 0,
+    0xB1A8_1D18_E0DF_4889_2478_4F32_C3E3_E5BD, 0, 0,
+    0xB238_AA1B_FA9A_D507_8CC7_D4BD_05FF_D5AE, 0, 0,
+    0xB2C8_C92F_83C1_EB87_AC9F_7EBB_C469_EF59, 0, 0,
+    0xB358_79FA_959C_323C_5D66_3510_9164_F740, 0, 0,
+    0xB3E7_BC24_8D78_802E_A156_468E_F6C1_8C60, 0, 0,
+    0xB476_8F55_0CE3_89FD_4A85_350F_6901_8C55, 0, 0
+}
+// cos2pi(i/2^11) for 0 <= i < 256, as __TAN_S.
+__TAN_C: [Int]{
+    0x8000_0000_0000_0000_0000_0000_0000_0000, 1, 0,
+    0xFFFF_B10B_10E8_0E95_3031_437D_7ECC_B9DF, 0, 0,
+    0xFFFE_C42C_7454_926B_38E3_1077_9EDF_EC68, 0, 0,
+    0xFFFD_3964_BC62_75BA_69FF_F9AE_0DED_B047, 0, 0,
+    0xFFFB_10B4_DC96_DABB_B479_03F7_A19F_8EE2, 0, 0,
+    0xFFF8_4A1E_29DE_8571_8CC1_93C5_D508_E13F, 0, 0,
+    0xFFF4_E5A2_5A8D_095B_4336_6DF6_66FD_54FF, 0, 0,
+    0xFFF0_E343_865B_BB13_5428_ED06_47C9_E5D1, 0, 0,
+    0xFFEC_4304_2668_65D9_5657_5523_6696_1732, 0, 0,
+    0xFFE7_04E7_1533_C508_53AA_9423_BB0A_DC21, 0, 0,
+    0xFFE1_28EF_8E9F_C17A_7D20_9F32_D42D_864E, 0, 0,
+    0xFFDA_AF21_2FED_72DB_4FD8_F038_449E_C436, 0, 0,
+    0xFFD3_977F_F7BA_E4E9_6646_49B4_D541_B9C5, 0, 0,
+    0xFFCB_E210_4600_A0A9_5595_CA3F_421A_E09C, 0, 0,
+    0xFFC3_8ED6_DC0E_F98B_1C67_6208_AA3B_E545, 0, 0,
+    0xFFBA_9DD8_DC8B_1E83_CCFE_D60A_9109_7C48, 0, 0,
+    0xFFB1_0F1B_CB6B_EF1D_421E_8EDA_AF59_453E, 0, 0,
+    0xFFA6_E2A5_8DF6_947D_D2C6_65C2_DA3E_7844, 0, 0,
+    0xFF9C_187C_6ABA_DE6A_1E18_62CC_A089_938B, 0, 0,
+    0xFF90_B0A7_098F_6443_2DAB_D319_5A05_710F, 0, 0,
+    0xFF84_AB2C_738D_6A03_519C_3149_73CC_AE6B, 0, 0,
+    0xFF78_0814_130C_893C_3EA4_F30A_DDA3_016F, 0, 0,
+    0xFF6A_C765_B39E_1E19_1B9D_5851_979F_28FB, 0, 0,
+    0xFF5C_E929_8208_7867_50A7_BB6A_6EE3_B0F1, 0, 0,
+    0xFF4E_6D68_0C41_D0A9_0F66_8633_F1AB_858A, 0, 0,
+    0xFF3F_542A_416B_0134_B085_C182_8F69_296A, 0, 0,
+    0xFF2F_9D79_71CA_0364_27E3_1939_E2EE_C09C, 0, 0,
+    0xFF1F_495F_4EC4_30D7_F597_1326_A354_0EA9, 0, 0,
+    0xFF0E_57E5_EAD8_48D1_1F19_0154_4271_C3F8, 0, 0,
+    0xFEFC_C917_B998_39A5_E0AB_D3A9_B64D_F725, 0, 0,
+    0xFEEA_9CFF_8FA2_AE54_EC34_413E_87EF_2740, 0, 0,
+    0xFED7_D3A8_A29C_603B_2F88_B949_A72F_F96C, 0, 0,
+    0xFEC4_6D1E_8929_2CF0_4139_0EFD_C726_E9EF, 0, 0,
+    0xFEB0_696D_3AE4_F04D_B7B6_CC53_C3AB_C817, 0, 0,
+    0xFE9B_C8A1_105C_22A5_D3AF_6EE4_F210_1C20, 0, 0,
+    0xFE86_8AC6_C304_3B2E_0B4F_70C9_1050_5E10, 0, 0,
+    0xFE70_AFEB_6D33_D6A2_2907_CF2B_3F6F_EAC2, 0, 0,
+    0xFE5A_381C_8A1A_A224_D54F_AA36_4B7D_A8F6, 0, 0,
+    0xFE43_2367_F5B9_0A62_87B8_8753_73A8_18A4, 0, 0,
+    0xFE2B_71DB_ECD7_AEFC_0085_98C2_C429_CAF7, 0, 0,
+    0xFE13_2387_0CFE_9A3D_90CD_1D95_9DB6_74EF, 0, 0,
+    0xFDFA_3878_546C_3D28_9BFE_5C51_E91C_BDCD, 0, 0,
+    0xFDE0_B0BF_220C_2FD4_E276_D247_626A_23FD, 0, 0,
+    0xFDC6_8C6B_356D_B62F_499D_DB33_1D19_539D, 0, 0,
+    0xFDAB_CB8C_AEBA_091B_FAC7_397C_C07A_6470, 0, 0,
+    0xFD90_6E34_0EAA_6401_D6E2_7074_0A18_6977, 0, 0,
+    0xFD74_7472_367D_D6C5_61BE_B8CD_2696_FC78, 0, 0,
+    0xFD57_DE58_67EE_DC39_6C69_6582_F346_FD91, 0, 0,
+    0xFD3A_ABF8_4528_B50B_EAE6_BD95_1C1D_ABBE, 0, 0,
+    0xFD1C_DD63_D0BC_8735_863B_8725_8F11_AD7E, 0, 0,
+    0xFCFE_72AD_6D96_41F2_A06F_AB9F_9D10_6709, 0, 0,
+    0xFCDF_6BE7_DEF1_464C_A4E0_6430_8F49_99F4, 0, 0,
+    0xFCBF_C926_484C_D43A_A3E2_2B4D_3891_7E73, 0, 0,
+    0xFC9F_8A7C_2D60_3C60_5D58_2CAC_7CB4_391C, 0, 0,
+    0xFC7E_AFFD_720E_D673_0288_0268_F2E6_2955, 0, 0,
+    0xFC5D_39BE_5A5B_BC4B_1C0D_254B_6C8D_A4BD, 0, 0,
+    0xFC3B_27D3_8A5D_49AB_2567_78FF_CB5C_1769, 0, 0,
+    0xFC18_7A52_0630_60C2_9433_B492_8941_7EA2, 0, 0,
+    0xFBF5_314F_31EB_7375_25AA_FD7F_DBA1_2C5F, 0, 0,
+    0xFBD1_4CE0_D191_516E_7190_C948_99DF_F1B8, 0, 0,
+    0xFBAC_CD1D_0903_BB09_E63A_E863_2B84_473C, 0, 0,
+    0xFB87_B21A_5BF5_B917_75DF_66F0_EC3D_D459, 0, 0,
+    0xFB61_FBEF_ADDD_B985_61CE_9D5E_F5A8_1487, 0, 0,
+    0xFB3B_AAB4_41E7_70F7_B4B5_4683_879C_9C17, 0, 0,
+    0xFB14_BE7F_BAE5_8156_2172_A361_FD2A_722F, 0, 0,
+    0xFAED_376A_1B42_E559_2079_880C_4503_48AC, 0, 0,
+    0xFAC5_158B_C4F4_211F_4A18_8AA3_67F9_0AB1, 0, 0,
+    0xFA9C_58FD_7968_37D4_1065_5ECD_5CC7_71D8, 0, 0,
+    0xFA73_01D8_5979_6671_1FE1_96A5_3FB5_B237, 0, 0,
+    0xFA49_1035_E55D_A3A3_D243_77C7_7A59_1E24, 0, 0,
+    0xFA1E_842F_FC96_E4E0_431C_393C_7F62_DA65, 0, 0,
+    0xF9F3_5DE0_DDE3_28AB_BA5D_BF45_10ED_DC8F, 0, 0,
+    0xF9C7_9D63_272C_4628_4504_AE08_D19B_2980, 0, 0,
+    0xF99B_42D1_D577_81EB_7868_5D85_0F80_ECDC, 0, 0,
+    0xF96E_4E48_44D4_E82A_80E8_C17B_F80E_8F02, 0, 0,
+    0xF940_BFE2_304E_6C45_C0E2_A135_2ED7_F292, 0, 0,
+    0xF912_97BB_B1D6_CDBE_68FC_6E4D_6A92_0BD2, 0, 0,
+    0xF8E3_D5F1_4238_42A0_9701_914C_7F8F_BCD7, 0, 0,
+    0xF8B4_7A9F_B902_E76C_AC9F_07F5_4FF5_BC14, 0, 0,
+    0xF884_85E4_4C7A_F48A_B36A_9DFA_ADAF_C1E1, 0, 0,
+    0xF853_F7DC_9186_B952_C7AD_C6B4_9888_91BB, 0, 0,
+    0xF822_D0A6_7B9C_5CB5_A776_175B_D284_FE05, 0, 0,
+    0xF7F1_1060_5CAF_6390_A76F_7EFC_19AE_D41C, 0, 0,
+    0xF7BE_B728_E51D_FCB8_7307_8581_3F78_AA1E, 0, 0,
+    0xF78B_C51F_239E_12C6_214C_FFCE_E9DD_33CA, 0, 0,
+    0xF758_3A62_852A_23B2_4BEC_AD88_7680_C197, 0, 0,
+    0xF724_1712_D4ED_DE49_F991_07E5_0D63_1330, 0, 0,
+    0xF6EF_5B50_3C32_8589_50CA_117E_B18B_EED7, 0, 0,
+    0xF6BA_073B_424B_19E8_2C79_1F59_CC1F_FC23, 0, 0,
+    0xF684_1AF4_CC80_48A4_CE8C_4551_97CD_F8A7, 0, 0,
+    0xF64D_969E_1DFC_2119_119D_358D_E049_3956, 0, 0,
+    0xF616_7A58_D7B5_9026_9DC7_E595_4C5A_8F24, 0, 0,
+    0xF5DE_C646_F85B_A1C6_C8C6_15E7_2768_D6B5, 0, 0,
+    0xF5A6_7A8A_DC40_88CA_ED0D_D4BF_62ED_D13F, 0, 0,
+    0xF56D_9747_3D44_6CDA_275A_2BBB_2BAB_6C8A, 0, 0,
+    0xF534_1C9F_32BF_FEB9_8DA6_4484_AAA0_FEBC, 0, 0,
+    0xF4FA_0AB6_316E_D2EC_163C_5C7F_03B7_18C5, 0, 0,
+    0xF4BF_61B0_0B59_82B7_890A_C4AA_FA6A_37BF, 0, 0,
+    0xF484_21B0_EFBF_939B_F8F9_D3B8_7D11_FD52, 0, 0,
+    0xF448_4ADD_6B01_254B_667E_0686_6C07_C369, 0, 0,
+    0xF40B_DD5A_6688_662F_5019_794A_1F58_96E5, 0, 0,
+    0xF3CE_D94D_28B2_CE8A_18EF_535A_7FFA_7A3D, 0, 0,
+    0xF391_3EDB_54BA_2242_50F2_9B4B_49F3_1C37, 0, 0,
+    0xF353_0E2A_EA9D_3966_0D98_1ACD_CF6B_C3E4, 0, 0,
+    0xF314_4762_4708_8F74_A548_6BDC_455D_56A2, 0, 0,
+    0xF2D4_EAA8_233E_997D_431B_E53F_92EC_E9E6, 0, 0,
+    0xF294_F823_94FF_E320_EBAD_CDBF_915E_8F6C, 0, 0,
+    0xF254_6FFC_0E72_F286_AF0E_ED81_E8C5_1E55, 0, 0,
+    0xF213_5259_5E0B_F350_E711_2E89_103C_C0C7, 0, 0,
+    0xF1D1_9F63_AE74_28A2_844E_6A35_DDC2_B713, 0, 0,
+    0xF18F_5743_8671_2643_8F6B_AC72_9880_88B0, 0, 0,
+    0xF14C_7A21_C8CB_D0F4_2730_081C_758F_B42B, 0, 0,
+    0xF109_0827_B437_25FD_6712_7DB3_5B28_7316, 0, 0,
+    0xF0C5_017E_E336_CA0F_C4E5_57B1_19EF_3185, 0, 0,
+    0xF080_6651_4C05_5F7E_973E_A990_3ED5_125F, 0, 0,
+    0xF03B_36C9_407A_A3E8_992D_39EC_5C56_1D28, 0, 0,
+    0xEFF5_7311_6DF1_555D_62AE_F7B5_5319_D1D4, 0, 0,
+    0xEFAF_1B54_DD2C_DF0F_F03A_18A5_E16A_B641, 0, 0,
+    0xEF68_2FBE_F23E_CDA6_767C_0E8A_D33B_C085, 0, 0,
+    0xEF20_B07B_6C6C_0B37_E239_8BF0_EEB2_8CDE, 0, 0,
+    0xEED8_9DB6_6611_E307_86F8_C20F_B664_B01B, 0, 0,
+    0xEE8F_F79C_548A_CD0F_A1D2_C3D0_18A9_279F, 0, 0,
+    0xEE46_BE5A_0813_016B_7872_7738_30D3_68BE, 0, 0,
+    0xEDFC_F21C_ABAC_D3B1_FEE6_A1EE_BFA1_3B4A, 0, 0,
+    0xEDB2_9311_C504_D652_1181_5196_B9FB_F5DF, 0, 0,
+    0xED67_A167_3455_C601_7289_1020_76A1_25E5, 0, 0,
+    0xED1C_1D4B_344C_3D4F_DDFF_E98C_4F8A_A031, 0, 0,
+    0xECD0_06EC_59EA_306F_A839_2EB2_3857_8AB0, 0, 0,
+    0xEC83_5E79_946A_3145_7E61_0231_AC1D_6181, 0, 0,
+    0xEC36_2422_2D22_7BD1_0278_047A_E3DD_0889, 0, 0,
+    0xEBE8_5815_C767_CB00_1E99_CCB9_ADC6_2CA6, 0, 0,
+    0xEB99_FA84_606F_F5FF_0DAE_311E_656E_0661, 0, 0,
+    0xEB4B_0B9E_4F34_5617_39E3_9C6C_2AB3_655D, 0, 0,
+    0xEAFB_8B94_4453_F52F_3383_BBB5_156B_F1D7, 0, 0,
+    0xEAAB_7A97_49F5_84FE_24DB_98AD_3A06_47A1, 0, 0,
+    0xEA5A_D8D8_C3A9_1F05_4A0C_A5EA_449B_1C83, 0, 0,
+    0xEA09_A68A_6E49_CD62_15AD_45B4_A1B5_E823, 0, 0,
+    0xE9B7_E3DE_5FDE_DC8B_CD24_D4BD_1056_C826, 0, 0,
+    0xE965_9107_077C_F60F_89A9_2B19_9ADF_BAFA, 0, 0,
+    0xE912_AE37_2D27_045D_ACB1_C26A_06E5_AE02, 0, 0,
+    0xE8BF_3BA1_F1AE_DFBB_F897_2AFF_B3D9_8E1F, 0, 0,
+    0xE86B_397A_CE95_C46F_9FEC_1E78_C437_6186, 0, 0,
+    0xE816_A7F5_95EC_9232_BFE8_378A_BFB8_7B6F, 0, 0,
+    0xE7C1_8746_7233_D508_DBFB_0FE5_6C6F_80FE, 0, 0,
+    0xE76B_D7A1_E63B_9786_1251_2952_9D48_A92F, 0, 0,
+    0xE715_993C_CD02_FE9C_E2BA_81B9_CE96_E02E, 0, 0,
+    0xE6BE_CC4C_5997_AF06_82FC_EDB4_C643_4D76, 0, 0,
+    0xE667_7106_16F4_FC59_DD2A_3E32_C385_9960, 0, 0,
+    0xE60F_879F_E7E2_E1E5_7613_B68F_6AB0_3130, 0, 0,
+    0xE5B7_1050_06D4_C560_9B69_5CD6_7C93_BD79, 0, 0,
+    0xE55E_0B4D_05C8_0388_5A7C_210A_3A15_E7EA, 0, 0,
+    0xE504_78CD_CE22_46BC_E1F5_A58C_8029_2554, 0, 0,
+    0xE4AA_5909_A08F_A7B4_1227_85AE_67F5_515D, 0, 0,
+    0xE44F_AC38_14E0_9856_20D6_3B5B_9E3C_D6AC, 0, 0,
+    0xE3F4_7291_19E7_98D9_5699_2551_AE07_4E99, 0, 0,
+    0xE398_AC4C_F556_B732_0D11_97DC_12C6_3176, 0, 0,
+    0xE33C_59A4_439C_D8EC_3656_3E2F_FAD8_351A, 0, 0,
+    0xE2DF_7ACF_F7C2_CF83_D6FE_4DD2_2E60_A4A2, 0, 0,
+    0xE282_1009_5B48_3751_FD39_138A_A2D5_08ED, 0, 0,
+    0xE224_198A_0E00_2123_E052_1DF0_1A1B_E6F5, 0, 0,
+    0xE1C5_978C_05ED_8691_F4E8_A837_2F8C_5810, 0, 0,
+    0xE166_8A49_8F1F_892C_E2F9_D460_0F4D_0325, 0, 0,
+    0xE106_F1FD_4B8D_7C96_6BA8_A9D9_BA87_7899, 0, 0,
+    0xE0A6_CEE2_32F2_BB9C_6D6C_98FE_7981_7946, 0, 0,
+    0xE046_2133_92AA_486C_55FF_6038_A519_7367, 0, 0,
+    0xDFE4_E92D_0D8A_37F5_7205_88FF_6547_D884, 0, 0,
+    0xDF83_270A_9BBE_E890_AB01_350F_013D_78DD, 0, 0,
+    0xDF20_DB08_8AA6_0404_64A5_8B2F_1034_85DD, 0, 0,
+    0xDEBE_0563_7CA9_4CFB_4B19_AA71_FEC3_AE6D, 0, 0,
+    0xDE5A_A658_6919_3805_0424_8F15_548F_69CA, 0, 0,
+    0xDDF6_BE24_9C07_5037_D597_B10A_0167_6659, 0, 0,
+    0xDD92_4D05_B620_678A_739C_45B9_8219_3B5E, 0, 0,
+    0xDD2D_5339_AC86_92FD_49C6_E0EA_76CB_CAAC, 0, 0,
+    0xDCC7_D0FE_C8AA_F2AA_B206_9FD0_B482_B4E8, 0, 0,
+    0xDC61_C693_A827_45D5_ACA8_017E_375B_64E5, 0, 0,
+    0xDBFB_3437_3C97_4B0E_CCB7_FD40_D543_F4A1, 0, 0,
+    0xDB94_1A28_CB71_EC87_2C19_B632_53DA_43FC, 0, 0,
+    0xDB2C_78A7_EDE2_38A9_5A98_479C_BEF2_ECBC, 0, 0,
+    0xDAC4_4FF4_90A0_2710_5B26_7C1B_CFF0_AB62, 0, 0,
+    0xDA5B_A04E_F3C9_29F4_E257_BDE7_3D83_DC1A, 0, 0,
+    0xD9F2_69F7_AAB8_8C29_28E8_1DCB_6DAB_91AC, 0, 0,
+    0xD988_AD2F_9BDF_9BBB_C4E4_DC69_FC2F_FF6F, 0, 0,
+    0xD91E_6A38_009D_A15A_1BB3_5AD6_D2E7_4B67, 0, 0,
+    0xD8B3_A152_6517_A48B_1ED1_A8FF_78F1_B632, 0, 0,
+    0xD848_52C0_A80F_FCDB_24B9_FE00_6635_74A4, 0, 0,
+    0xD7DC_7EC4_FABD_B011_CED1_2D28_99B8_03DB, 0, 0,
+    0xD770_25A1_E0A3_9D8B_0CB7_8E80_E67B_A1B8, 0, 0,
+    0xD703_479A_2F67_76CC_6CB3_BFD6_5B38_562B, 0, 0,
+    0xD695_E4F1_0EA8_8570_083F_082B_5706_11D7, 0, 0,
+    0xD627_FDE9_F7D6_3E7E_7AFB_EFC0_5E9F_7D99, 0, 0,
+    0xD5B9_92C8_B606_A351_7190_B755_535D_4F18, 0, 0,
+    0xD54A_A3D1_65CC_7018_7D00_AE97_ABAA_4096, 0, 0,
+    0xD4DB_3148_750D_1819_F630_E8B6_DAC8_3E69, 0, 0,
+    0xD46B_3B72_A2D6_8FC9_DC46_63A3_1686_98D2, 0, 0,
+    0xD3FA_C294_FF34_E4D0_B77D_4F6B_D0EE_8591, 0, 0,
+    0xD389_C6F4_EB07_A41C_A8FA_AC74_1A63_94DC, 0, 0,
+    0xD318_48D8_17D7_0E16_EEEA_DDB7_2F00_E0DD, 0, 0,
+    0xD2A6_4884_87A9_1918_4300_FD1C_1CE5_07E5, 0, 0,
+    0xD233_C640_8CD6_4236_981B_A7E4_2537_275F, 0, 0,
+    0xD1C0_C252_C9DE_2C86_DA74_85A5_AEFF_EB4C, 0, 0,
+    0xD14D_3D02_313C_0EED_744F_EA20_E8AB_EF92, 0, 0,
+    0xD0D9_3696_053A_F098_77A1_8EB1_3D2E_CDE5, 0, 0,
+    0xD064_AF55_D7C9_B43E_6B8A_685F_6CB6_1C21, 0, 0,
+    0xCFEF_A789_8A4E_F23C_DAF2_00DD_8121_2D10, 0, 0,
+    0xCF7A_1F79_4D7C_A1B1_DFCB_6044_5C1B_F973, 0, 0,
+    0xCF04_176D_A123_90AC_04D2_7090_F10C_454E, 0, 0,
+    0xCE8D_8FAF_5406_AB8B_F5BA_BFF6_6DEF_7892, 0, 0,
+    0xCE16_8887_83AE_13B3_93E3_9186_1A03_4684, 0, 0,
+    0xCD9F_023F_9C3A_059E_23AF_31DB_7179_A4AA, 0, 0,
+    0xCD26_FD21_5835_8E7D_6494_74E3_6B8D_B9D3, 0, 0,
+    0xCCAE_7976_C069_1177_83E9_07FB_D7AA_F0B0, 0, 0,
+    0xCC35_778A_2BAC_9CA1_F839_CE18_E08B_FB50, 0, 0,
+    0xCBBB_F7A6_3EBA_0DD5_70CB_B7F3_3434_51BE, 0, 0,
+    0xCB41_FA15_EBFF_0777_2293_661B_E511_40AB, 0, 0,
+    0xCAC7_7F24_736E_B553_D994_4BE1_6318_46D8, 0, 0,
+    0xCA4C_871D_6253_61A9_5328_EDEB_3E67_84DE, 0, 0,
+    0xC9D1_124C_931F_DA7A_8335_241B_E169_3225, 0, 0,
+    0xC955_20FE_2D40_A74B_83B0_E96E_1249_C2B0, 0, 0,
+    0xC8D8_B37E_A4ED_0F62_0B56_2C00_B34E_E771, 0, 0,
+    0xC85B_CA1A_BAF7_F0A7_6586_2939_B833_82E0, 0, 0,
+    0xC7DE_651F_7CA0_6749_02B3_1BC8_6877_FD2C, 0, 0,
+    0xC760_84DA_4362_4634_D5C1_4950_9E90_59F1, 0, 0,
+    0xC6E2_2998_B4C6_608E_CFE6_C1B1_A6B4_E2A4, 0, 0,
+    0xC663_53A8_C232_A43C_E993_503B_AF5A_FB41, 0, 0,
+    0xC5E4_0358_A8BA_05A7_43DA_25D9_9267_326B, 0, 0,
+    0xC564_38F6_F0EC_3CCA_0AB4_9060_7550_7E74, 0, 0,
+    0xC4E3_F4D2_6EA5_53B6_DD40_950C_F1ED_92FA, 0, 0,
+    0xC463_373A_40DD_06A3_9DD7_68F3_0CA8_E85C, 0, 0,
+    0xC3E2_007D_D175_F5A4_A87E_7813_6665_CDB2, 0, 0,
+    0xC360_50EC_D50C_A830_8AC9_E138_6E4C_BABB, 0, 0,
+    0xC2DE_28D7_4AC6_628B_74C8_F010_D986_A9E0, 0, 0,
+    0xC25B_888D_7C1F_CD38_B704_1E9B_C8C1_8B0D, 0, 0,
+    0xC1D8_705F_FCBB_6E90_BDF0_715C_B8B2_0BD7, 0, 0,
+    0xC154_E09F_AA2F_F69A_1785_8573_216E_0A22, 0, 0,
+    0xC0D0_D99D_ABD6_5D44_2BDA_5328_933C_854A, 0, 0,
+    0xC04C_5BAB_7297_D322_6DD0_6968_E0ED_1957, 0, 0,
+    0xBFC7_671A_B8BB_84C6_E4E6_2D86_DD13_6E78, 0, 0,
+    0xBF41_FC3D_81B4_30DB_0D46_655D_6B01_2455, 0, 0,
+    0xBEBC_1B66_19ED_9116_2715_EF03_F854_3355, 0, 0,
+    0xBE35_C4E7_1699_9630_29D7_F7B6_7D43_B177, 0, 0,
+    0xBDAE_F913_557D_76F0_AC85_320F_528D_6D5D, 0, 0,
+    0xBD27_B83D_FCBE_9279_2EA3_6923_D5D8_E213, 0, 0,
+    0xBCA0_02BA_7AAF_25EA_4A48_4967_34BE_336D, 0, 0,
+    0xBC17_D8DC_859A_D583_727C_405F_FC73_AF56, 0, 0,
+    0xBB8F_3AF8_1B93_095C_FCE8_D840_68E8_25B6, 0, 0,
+    0xBB06_2961_823B_1DDC_5120_E35E_1C1A_250C, 0, 0,
+    0xBA7C_A46D_4694_6802_3320_1477_3474_47D8, 0, 0,
+    0xB9F2_AC70_3CCA_0DB3_39DB_32D0_1444_0024, 0, 0,
+    0xB968_41BF_7FFC_B21A_9DE1_E3B2_2B8B_F4DB, 0, 0,
+    0xB8DD_64B0_720D_F647_A726_F4F0_8285_85C9, 0, 0,
+    0xB852_1598_BB6B_CE26_1C04_1D1E_A5FB_3FDB, 0, 0,
+    0xB7C6_54CE_4ADB_A9F2_2E7A_3572_3F3E_D035, 0, 0,
+    0xB73A_22A7_5545_7448_7F86_F63B_B23F_496A, 0, 0,
+    0xB6AD_7F7A_557E_64F2_EB2D_28EF_943D_C88C, 0, 0,
+    0xB620_6B9E_0C13_A892_EA7C_015F_12B9_87F7, 0, 0,
+    0xB592_E769_7F14_DD4A_737D_D282_4B60_8D13, 0, 0
+}
+// sin2pi(x) for 0 <= x < 2^-11 within 2^-127.75 relatively: the odd
+// coefficients from degree 1, as __TAN_S.
+__TAN_PS: [Int]{
+    0xC90F_DAA2_2168_C234_C4C6_628B_80DC_1CD1, 3, 0,
+    0xA55D_E731_2DF2_95F5_5DC7_2F71_2AA5_7DB4, 6, 1,
+    0xA335_E33B_AD57_0E92_3F33_BE00_21AA_54D2, 7, 0,
+    0x9969_6673_15EC_2D9D_E59D_6AB8_509A_2025, 7, 1,
+    0xA83C_1A43_BF1C_6485_7D5F_8F76_FA7D_74ED, 6, 0,
+    0xF16A_B289_8EAE_62F9_A7F0_3391_13B8_B3C5, 4, 1
+}
+// cos2pi(x) for 0 <= x < 2^-11 within 2^-137.246 relatively: the even
+// coefficients from degree 0, as __TAN_S.
+__TAN_PC: [Int]{
+    0x8000_0000_0000_0000_0000_0000_0000_0000, 1, 0,
+    0x9DE9_E64D_F22E_F2D2_56E2_6CD9_808C_1949, 5, 1,
+    0x81E0_F840_DAD6_1D9A_9980_F006_30CB_655E, 7, 0,
+    0xAAE9_E3F1_E5FF_CFE2_A508_5095_3400_6249, 7, 1,
+    0xF0FA_8344_8DD1_E094_0E06_03CE_7044_EEBA, 6, 0,
+    0xD368_F6F4_207C_FE49_0EC6_3157_807E_BFFA, 5, 1
+}
+// The points of __tan_fast for 0 <= i < 256: (d, sin2pi(xi), cos2pi(xi))
+// with xi = i/2^11 + d, sin and cos to 53 + 15 bits.
+__TAN_SC: [Float]{
+    0.0, 0.0, 1.0,
+    -5.1041282311814484e-11, 0.0030679564422656505, 0.9999952938105601,
+    -4.689280539392493e-11, 0.006135884354523836, 0.999981175284409,
+    -1.0579724162712578e-10, 0.0092037541173443, 0.999957644558082,
+    -2.1630513114163918e-10, 0.01227153692673704, 0.9999247018558226,
+    3.844597687083229e-10, 0.015339208700335866, 0.9998823474171586,
+    1.9853647068371338e-10, 0.018406731153034917, 0.9998305817728621,
+    -3.5646790640803117e-11, 0.021474080051545764, 0.999769405356025,
+    -8.911460675289917e-10, 0.024541222925362795, 0.9996988188336163,
+    -2.809495518174554e-10, 0.027608144014380522, 0.9996188225439141,
+    -3.7162287483405443e-10, 0.030674800842760037, 0.9995294175727181,
+    9.482864250787149e-10, 0.03374117780624431, 0.9994306043544231,
+    -1.9473419404780756e-11, 0.03680722281908664, 0.999322384592853,
+    -5.130494380028994e-11, 0.039872927265637695, 0.9992047586312173,
+    3.769867352315659e-10, 0.04293825930143377, 0.9990777276509385,
+    7.254804829798234e-11, 0.04600318258626487, 0.9989412931658871,
+    2.038292815781384e-10, 0.049067675606572506, 0.9987954561423316,
+    3.864018827126614e-11, 0.05213170492273665, 0.9986402181676085,
+    1.9884507998502166e-9, 0.055195256824448986, 0.9984755798836961,
+    7.820583972084627e-10, 0.05825826940590769, 0.9983015446476223,
+    -1.6957436062975395e-9, 0.06132072566758815, 0.9981181135535014,
+    -1.219928548804039e-9, 0.06438262328072308, 0.9979252866920912,
+    -1.0440826883617582e-9, 0.06744391301843611, 0.9977230670866348,
+    3.3476149109701314e-9, 0.07050459437095542, 0.9975114546573323,
+    1.24653608615799e-10, 0.07356456438076697, 0.9972904566210729,
+    -9.431689110273034e-11, 0.07662386080116322, 0.9970600703848911,
+    -4.746276947853456e-10, 0.07968243499873878, 0.9968202995287926,
+    -5.095572505608992e-10, 0.08274026135871103, 0.9965711460554596,
+    8.402341704349947e-10, 0.08579731760431988, 0.9963126117298242,
+    -8.984450076271466e-10, 0.08885354695975617, 0.9960447014028389,
+    -5.432299540752972e-10, 0.09190895309836498, 0.9957674147813648,
+    4.2598937051441244e-10, 0.09496349799411308, 0.9954807552377505,
+    3.6146684707916155e-9, 0.09801716293182969, 0.9951847244460674,
+    -1.2521791936670468e-9, 0.10106985492744167, 0.9948793315899903,
+    -1.1005134165076313e-9, 0.10412162699490937, 0.9945645714542284,
+    -4.010193975501064e-9, 0.10717239990513915, 0.9942404521535889,
+    1.3425500676456092e-9, 0.11022221567797622, 0.9939069690725776,
+    -4.10472079936941e-10, 0.11327094961509077, 0.9935641358127293,
+    8.827801739608176e-9, 0.1163186860021079, 0.9932119427829808,
+    -1.958183441785888e-10, 0.119365213589425, 0.9928504146067276,
+    1.8354532962949754e-9, 0.12241068664497966, 0.9924795331870097,
+    -3.146667589687402e-9, 0.12545496379665588, 0.992099315622574,
+    1.6729396340453562e-9, 0.12849812121804088, 0.9917097523184057,
+    4.536884874728475e-9, 0.13154005696127805, 0.9913108560964233,
+    -3.820524292763583e-9, 0.13458068472044685, 0.990902638658398,
+    -2.9005606909382475e-9, 0.13762010353513277, 0.9904850867645506,
+    5.158245101888337e-9, 0.1406582714208435, 0.9900582057035335,
+    -1.9312542953731082e-9, 0.14369502114179672, 0.9896220192068579,
+    2.9914760599214496e-9, 0.14673049304792185, 0.989176507206835,
+    6.579208705614903e-11, 0.14976453508604312, 0.9887216918984135,
+    -1.472863223744847e-9, 0.15279717611283852, 0.9882575691447762,
+    2.7296200542925586e-9, 0.1558284145954632, 0.9877841389720046,
+    -1.9550494799458473e-9, 0.15885813120591186, 0.9873014201092619,
+    -7.283991292073022e-10, 0.1618863892638141, 0.9868094025550855,
+    2.5789892964256378e-9, 0.1649131364723703, 0.9863080945723022,
+    7.346979257610853e-9, 0.1679383404815416, 0.9857975014151262,
+    -6.815294058271082e-10, 0.1709618845411694, 0.9852776431210301,
+    -9.679219439839848e-10, 0.1739838673985849, 0.9847485028600103,
+    6.665790083099088e-9, 0.17700426163322378, 0.9842100849735677,
+    -1.8840811306930494e-9, 0.18002288976107342, 0.9836624213428469,
+    3.1672526268344825e-9, 0.18303990751936794, 0.9831054837886427,
+    2.5295304739714197e-10, 0.18605515322504634, 0.9825393019917343,
+    -8.232884166070598e-10, 0.18906865907023115, 0.9819638700875836,
+    2.1089624560599596e-9, 0.19208041005415, 0.9813791907684968,
+    1.5584749948893695e-9, 0.19509033162016132, 0.9807852784928695,
+    8.61283338399188e-9, 0.19809846376151738, 0.9801821252478168,
+    1.566280827258737e-9, 0.2011046444822659, 0.979569763706323,
+    3.574563742225756e-9, 0.20410898807964667, 0.9789481707348467,
+    -3.258336149503105e-9, 0.2071113561633913, 0.9783173749597627,
+    2.7707582339608905e-9, 0.21011185390103795, 0.9776773541666335,
+    -4.252215794753322e-9, 0.21311029381238117, 0.9770281483515204,
+    9.407016693385728e-10, 0.21610680284715328, 0.9763697300526997,
+    -2.762646236775801e-9, 0.21910122322041925, 0.9757021338417355,
+    2.151265360295085e-9, 0.22209363415242503, 0.9750253420649992,
+    -8.794336509021505e-9, 0.22508385752126106, 0.9743393952229114,
+    -1.3352382949305408e-9, 0.22807207500244897, 0.973644251564234,
+    2.376363966716255e-9, 0.23105812280776902, 0.9729399487556002,
+    3.049711802538546e-10, 0.23404196044651454, 0.9722264966304673,
+    2.742248830789329e-9, 0.23702362273343514, 0.9715038869023213,
+    2.9988943966996473e-10, 0.2400030242779295, 0.970772140276722,
+    -5.234729108516412e-9, 0.24298014799818599, 0.9700312611863494,
+    3.2653907702795415e-9, 0.24595507022259128, 0.9692812303102749,
+    -1.0894593630017546e-9, 0.24892759911592002, 0.9685220959783952,
+    -2.1866383009827572e-10, 0.25189781682461476, 0.9677538374395592,
+    -3.585845592679604e-9, 0.25486563781801985, 0.9669764767871109,
+    3.573543051749173e-9, 0.2578311238562484, 0.9661899976562704,
+    1.2024867906967884e-9, 0.2607941252092624, 0.9653944397272731,
+    1.1183973400163971e-9, 0.26375468575309813, 0.9645897914363828,
+    -5.69932351313085e-10, 0.2667127540236254, 0.9637760667505357,
+    9.243476331577405e-10, 0.2696683311656008, 0.9629532653074914,
+    3.089065385430967e-9, 0.27262137412392706, 0.9621213989776871,
+    -1.1543851909101566e-8, 0.27557174958720676, 0.9612805057991376,
+    7.487451658683142e-9, 0.278519734568551, 0.9604305063125931,
+    -6.227768689637259e-9, 0.2814649003775088, 0.9595715240957701,
+    5.082959241009544e-9, 0.2844075678295522, 0.9587034658126978,
+    -3.039098472878976e-9, 0.2873474412548245, 0.9578264185144953,
+    -2.734192733333529e-9, 0.2902846608147636, 0.9569403407191368,
+    1.4600410255805052e-9, 0.2932191714647389, 0.9560452486600893,
+    -6.224061641080247e-9, 0.29615085089098225, 0.9551411798873228,
+    -6.416392160646378e-9, 0.29907978783797107, 0.954228107166622,
+    -4.144714828291374e-9, 0.3020059244932213, 0.9533060482190359,
+    -4.384570345683514e-10, 0.304929227111698, 0.9523750135598175,
+    -5.323937679602153e-10, 0.3078496368588623, 0.951435021998805,
+    -7.750482408641624e-10, 0.3107671481209613, 0.9504860754628468,
+    -1.6505960834245492e-9, 0.3136817305513337, 0.9495281838462303,
+    2.654892902742567e-10, 0.3165933771384785, 0.948561349387615,
+    -2.176348837257258e-9, 0.31950201785834836, 0.9475855953867406,
+    -8.63410357099248e-10, 0.3224076736657909, 0.9466009148323347,
+    -4.455577025386237e-9, 0.3253102656897814, 0.9456073344876529,
+    2.593582071330758e-9, 0.32820985897233207, 0.9446048319129867,
+    3.991339363185187e-9, 0.33110632942361956, 0.9435934498583686,
+    -1.0599716125658798e-8, 0.33399958866665197, 0.9425732198458151,
+    3.108883810110097e-9, 0.3368898717840528, 0.9415440586023176,
+    -2.668236374903099e-9, 0.33977686863922035, 0.9405060762896357,
+    -4.232337813547815e-10, 0.34266071481373156, 0.9394592245134126,
+    -9.553805663253812e-11, 0.3455413244006811, 0.9384035342705308,
+    -1.1780352249246562e-9, 0.3484186733114259, 0.937339014491505,
+    -1.1539197791732292e-8, 0.3512926882035733, 0.9362656926400257,
+    1.033394557425904e-9, 0.3541635314926458, 0.9351835076393604,
+    6.936202723295537e-10, 0.35703096530434053, 0.9340925488482663,
+    5.854304464814053e-9, 0.35989507085389627, 0.9329927855964745,
+    -1.3559395758977466e-9, 0.36275571642809773, 0.9318842686722089,
+    -1.3724797409686573e-9, 0.3656129897782635, 0.9307669642318637,
+    2.7493280152501853e-9, 0.3684668460124887, 0.9296408894780871,
+    1.3802285495079225e-9, 0.37131720200405743, 0.9285060772530668,
+    -4.364344642626694e-9, 0.37416403754133554, 0.9273625359107225,
+    1.3505429136140279e-9, 0.37700741807597105, 0.9262102389391352,
+    -1.4282816963862022e-8, 0.37984712590866393, 0.9250492748707647,
+    1.2475021557434296e-8, 0.3826835047814199, 0.9238795025154574,
+    -1.4590044172813066e-9, 0.38551604538533757, 0.9227011318679794,
+    -5.597621810515818e-10, 0.3883450434577789, 0.9215140407078862,
+    -1.0532098054794048e-8, 0.3911703234000772, 0.9203183025948571,
+    1.3503587151242336e-8, 0.3939921180437581, 0.9191138182615869,
+    -2.2710503644329805e-8, 0.39680985643749506, 0.9179008322439056,
+    1.168928065453656e-9, 0.3996242065782802, 0.9166790569859661,
+    -1.2957533199187132e-8, 0.40243457632854235, 0.9154487488523138,
+    2.701855666975561e-8, 0.40524146920360754, 0.9142096869086991,
+    -9.907307613188365e-10, 0.4080441571818393, 0.9129621929684506,
+    -7.498060020094677e-9, 0.4108431281058819, 0.9117060513609493,
+    2.3056466458282188e-9, 0.4136383254278201, 0.9104412862657695,
+    -4.190093549905072e-10, 0.41642955770405843, 0.9091679841868621,
+    2.5444446549727218e-9, 0.4192169028777965, 0.9078861097855546,
+    2.233453297306731e-9, 0.42200028352223934, 0.9065956985929007,
+    2.69824853432743e-8, 0.4247798346894538, 0.9052966873026767,
+    1.4302902751062163e-9, 0.42755510155423393, 0.9039892892811002,
+    -4.626385510797526e-9, 0.43032645510077955, 0.9026733307461768,
+    -4.2888544660169e-9, 0.4330937945639029, 0.9013488587168899,
+    2.1229143859491373e-9, 0.43585709192726546, 0.9000158862024088,
+    -3.6358097643685028e-9, 0.4386162180087888, 0.8986744757139076,
+    -3.994878303159588e-9, 0.4413712462083665, 0.8973245917840843,
+    2.590754819009611e-9, 0.44412215915514036, 0.8959662425266792,
+    7.824665609890147e-9, 0.4468688841443053, 0.8945994636616006,
+    -4.967186786886124e-9, 0.44961130177729475, 0.8932243152277743,
+    4.967586814119684e-9, 0.4523496150701423, 0.8918406952734855,
+    -4.8611474984250336e-9, 0.45508355992893146, 0.8904487371445987,
+    2.360526205058555e-9, 0.4578133167849077, 0.8890483490645499,
+    1.980799801959421e-9, 0.460538722005565, 0.8876396146711124,
+    5.007043224480867e-9, 0.46325981143258066, 0.8862225155746438,
+    -2.547583685674759e-9, 0.4659764816050717, 0.8847971058897957,
+    -3.0439082226996206e-9, 0.4686888051411158, 0.8833633476296111,
+    -6.096516624864989e-10, 0.4713967334477503, 0.8819212661540659,
+    -2.7190485973882517e-11, 0.47410021450012785, 0.8804708891331574,
+    3.498621975461802e-9, 0.47679924938619966, 0.8790122159473989,
+    -3.996794201155396e-9, 0.47949373562271025, 0.8775453022485953,
+    1.1935213789504573e-8, 0.48218383777663393, 0.8760700580358838,
+    2.6250401158334213e-9, 0.48486926242588524, 0.87458664428093,
+    2.421243150418917e-9, 0.48755017343093404, 0.8730949710011312,
+    -1.4811098791867039e-8, 0.49022640217688473, 0.8715951322768544,
+    -3.1396157895713372e-9, 0.4928981750657625, 0.8700870008320093,
+    1.6654035095431396e-10, 0.4955652627346483, 0.8685707054527795,
+    4.437944539636973e-9, 0.4982276911498702, 0.8670462316228988,
+    6.447030131973008e-10, 0.5008853861172534, 0.8655136220615883,
+    1.268844751489695e-9, 0.5035383906136432, 0.863972852107184,
+    -3.2156996510046554e-10, 0.5061866436026418, 0.8624239571337824,
+    -6.604389535258548e-10, 0.5088301389708016, 0.8608669407492395,
+    -1.993491996477026e-9, 0.5114688396748029, 0.859301824763401,
+    -7.881055363867517e-9, 0.5141027017201032, 0.8577286354576782,
+    -4.4756114578325956e-8, 0.516731558259616, 0.8561474736858067,
+    -1.2043419955753976e-8, 0.519355925500297, 0.8545580276656056,
+    -1.9129692274688637e-9, 0.5219752826849601, 0.8529606112042666,
+    -1.1301724417434045e-9, 0.5245896766329251, 0.8513551968304199,
+    1.2944660343627845e-9, 0.5271991416931655, 0.8497417637129469,
+    2.9051107366950824e-8, 0.5298037794966531, 0.848120248096378,
+    -3.6264315439460404e-9, 0.5324031085894435, 0.8464909509051454,
+    8.309696056252314e-9, 0.5349976639980503, 0.8448535373167525,
+    -7.709559393664911e-9, 0.53758703545014, 0.8432082656828798,
+    1.3435870499511893e-8, 0.5401715437740161, 0.841554931835585,
+    -1.8160276060719127e-9, 0.5427507752809598, 0.8398938003890236,
+    4.009085244338628e-9, 0.5453250095367803, 0.8382246918181965,
+    2.114215454096513e-8, 0.547894170300158, 0.8365476544412168,
+    -7.235012505768523e-9, 0.550457934984636, 0.8348629000096065,
+    -4.322481400587108e-9, 0.5530166829519991, 0.8331701797212668,
+    -5.4763648671407594e-8, 0.5555699469190635, 0.8314698034687423,
+    8.880153667956137e-9, 0.5581185775176235, 0.8297612026539349,
+    -5.852610479584186e-10, 0.560661573152363, 0.8280450473194786,
+    -2.6666227281868515e-8, 0.5631992055646845, 0.8263211572090529,
+    -5.83605151704969e-9, 0.5657317805467533, 0.8245893235298406,
+    3.4922258737579703e-8, 0.5682591332223044, 0.8228496566867093,
+    -1.0218628901381699e-8, 0.5707806931676366, 0.8211025516383884,
+    -1.728305998316415e-9, 0.5732971578005288, 0.8193475263023838,
+    -1.3793890474289583e-9, 0.5758081843318729, 0.8175848181420885,
+    -3.1713452142145826e-9, 0.5783137801556154, 0.8158144223303009,
+    3.5002601095346364e-9, 0.5808139759986887, 0.8140363169322329,
+    -4.924542190698489e-9, 0.5833086278051938, 0.8122506046338297,
+    -3.86304989385966e-9, 0.5857978377848122, 0.8104572124712315,
+    6.259160731381108e-9, 0.5882815800250439, 0.8086561584525513,
+    -9.050246260744466e-9, 0.590759655977992, 0.8068475871369788,
+    -4.249032833913979e-9, 0.5932322735475073, 0.8050313469807592,
+    2.0205713491261434e-10, 0.5956993055121554, 0.8032075307243675,
+    -6.74782128784468e-9, 0.5981606730197458, 0.8013761970838444,
+    1.9877954324232228e-8, 0.600616579243567, 0.7995371940927801,
+    5.1287326052751325e-9, 0.6030666242457576, 0.7976908215097038,
+    -1.6732839835942315e-9, 0.6055110330372517, 0.7958369109749561,
+    1.165264645885955e-8, 0.6079498430992718, 0.7939754330428435,
+    -1.3810321719542884e-8, 0.6103827375429932, 0.792106630264841,
+    2.931547365969678e-9, 0.6128100969850199, 0.790230210149682,
+    -3.2593405335790138e-9, 0.6152315744360483, 0.7883464402259588,
+    1.888758593970863e-11, 0.6176473080311359, 0.786455213525787,
+    -7.04865467382465e-9, 0.6200571770168433, 0.7845566246166704,
+    9.84792150604541e-10, 0.6224612842169035, 0.7826505923150147,
+    -2.566023407646334e-9, 0.6248594755547157, 0.7807372386465793,
+    1.05160997410092e-8, 0.6272518669551349, 0.7788164709360593,
+    3.0372553500024324e-9, 0.6296382537407853, 0.776888453657444,
+    -8.60710133721021e-9, 0.6320186940303343, 0.774953140774454,
+    -5.134889236035889e-9, 0.6343932592236529, 0.7730104738304593,
+    -2.3897712572718e-8, 0.6367617454586428, 0.7710606198739905,
+    8.919356697667524e-9, 0.6391244879658416, 0.7691033018277849,
+    -1.6070920316746395e-8, 0.6414809353455235, 0.7671389767103691,
+    -7.433386101096673e-9, 0.6438315071523917, 0.7651672956928307,
+    1.135280203179434e-8, 0.6461760674228869, 0.7631883711705078,
+    1.290397094733109e-10, 0.6485144016392804, 0.761202384958459,
+    -7.293987608347763e-9, 0.6508466502022211, 0.7592092188063496,
+    -1.0988975285286529e-9, 0.6531728377255701, 0.7572088510163666,
+    -3.6841576595003644e-9, 0.6554928355180285, 0.7552013920700457,
+    2.0158295865879694e-10, 0.6578066942510523, 0.7531867982104457,
+    6.069356794924374e-9, 0.6601143707130223, 0.7511651067362958,
+    1.242851385696575e-8, 0.662415836090722, 0.7491363427949747,
+    -6.688439024848947e-9, 0.6647109468066641, 0.7471006339144601,
+    -1.9633781545014273e-9, 0.6669999131124044, 0.7450577936697562,
+    -7.1254454697688985e-9, 0.6692825550818021, 0.7430079820992332,
+    2.112650790420112e-9, 0.6715589646825343, 0.740951116440567,
+    -1.1260275378788265e-8, 0.673828948102183, 0.7388873721342825,
+    1.9653870822478048e-8, 0.6760927945639875, 0.7368164853874116,
+    1.6040188954846712e-8, 0.6783501171793987, 0.734738809729482,
+    1.1975920671813967e-9, 0.6806010033084514, 0.7326542665510993,
+    1.0653107146429974e-9, 0.6828455512753026, 0.7305627646571704,
+    -1.515662922946248e-8, 0.685083598399642, 0.7284644556900481,
+    -2.3228977075184787e-9, 0.6873153302904043, 0.7263591651158485,
+    -1.535098589910966e-9, 0.68954053775148, 0.7242470896022984,
+    4.103366091356975e-9, 0.691759276982218, 0.7221281760941329,
+    -4.988735355371254e-9, 0.693971438321068, 0.7200025297140199,
+    -4.59962293253291e-9, 0.696177110744815, 0.7178700651754477,
+    -3.625198738421709e-9, 0.6983762331062023, 0.7157308411912898,
+    1.0415403817187752e-9, 0.7005687986130842, 0.7135848641961374,
+    -9.12368529337737e-9, 0.7027547036738006, 0.711432236031197,
+    -4.19364640236175e-9, 0.7049340616869505, 0.709272845013496
 }
 // sin(pi * x) for 0 < |x| <= 0x1.2p-5.
 __sin_pi_small: fn(x: Float) -> Float Never! {
@@ -2986,6 +4799,312 @@ __atan_pi_refine: fn(x: Float, a: Float) -> Float Never! {
     w: __fast_two_sum(v.lo, at)
     p: __mul_dd(v.hi, w.hi, Float{0.3183098861837907}, Float{-1.9678676675182486e-17})
     p.lo + p.hi
+}
+// atan to about 2^-107 relative for the inputs atan's fast paths cannot
+// round, |x| >= 2^-27; `a` approximates atan(x). An exact midpoint is nudged
+// by the tail's sign; the hardest inputs are tabulated.
+__atan_refine: fn(x: Float, a: Float) -> Float Never! {
+    i: (to_bits(fabs(a) * Float{81.48733086305042} + Float{256.5}) >> 44).bit_and(0xFF)
+    h := Float{0.0}
+    hl := Float{0.0}
+    if i == 128 {
+        h = Float{-1.0} / x
+        hl = fma(h, x, Float{1.0}) * h
+    } else {
+        // (x - t) / (1 + x t) for the table's t = tan(i pi / 256)
+        ta: copysign(__ATANPI_A[2 * i], x)
+        zta: x * ta
+        ztal: fma(x, ta, -zta)
+        zmta: x - ta
+        v: Float{1.0} + zta
+        d: Float{1.0} - v
+        ev: ((d + zta) - ((d + v) - Float{1.0})) + ztal
+        r: Float{1.0} / v
+        rl: (fma(r, -v, Float{1.0}) - ev * r) * r
+        h = r * zmta
+        hl = fma(r, zmta, -h) + rl * zmta
+    }
+    h2: __mul_dd(h, hl, h, hl)
+    h4: h2.hi * h2.hi
+    h3: __mul_dd(h, hl, h2.hi, h2.lo)
+    fl: h2.hi * ((Float{0.1111111111111111} + h2.hi * Float{-0.09090909090907358}) + h4 * (Float{0.07692307637971313} + h2.hi * Float{-0.06665779689246536}))
+    f0: __poly_dd(h2.hi, h2.lo, __ATANPI_REFINE_C, 3, fl)
+    f: __mul_dd(h3.hi, h3.lo, f0.hi, f0.lo)
+    sx: copysign(Float{1.0}, x)
+    ah := h
+    al := f.hi
+    at := f.lo
+    if i != 0 {
+        id: copysign(approx(i), x)
+        df: if i < 128 -> sx * __ATANPI_A[2 * i + 1] else -> Float{0.0}
+        ah = Float{0.012271846303085088} * id
+        s1: __add_dd(Float{4.21117410793604e-17} * id, Float{-9.794523599166037e-32} * id, df, Float{0.0})
+        s2: __add_dd(s1.hi, s1.lo, h, hl)
+        s3: __add_dd(s2.hi, s2.lo, f.hi, f.lo)
+        al = s3.hi
+        at = s3.lo
+    }
+    v: __fast_two_sum(ah, al)
+    w: __fast_two_sum(v.lo, at)
+    b1 := to_bits(w.hi)
+    de: (to_bits(v.hi) >> 52).bit_and(0x7FF) - (b1 >> 52).bit_and(0x7FF)
+    if (b1 + 1).bit_and(0xF_FFFF_FFFF_FFFF) <= 2 || de < 0 || de > 103 {
+        ax: fabs(x)
+        k := 0
+        loop k < __ATAN_HARD.len() {
+            if ax == __ATAN_HARD[k] -> return sx * __ATAN_HARD[k + 1] + sx * __ATAN_HARD[k + 2]
+            k = k + 3
+        }
+        if b1.bit_and(0xF_FFFF_FFFF_FFFF) == 0 {
+            b1 = if (to_bits(w.lo) < 0) != (b1 < 0) -> b1 - 1 else -> b1 + 1
+        }
+    }
+    from_bits(b1) + v.hi
+}
+// atan's hard cases: (|x|, result, correction).
+__ATAN_HARD: [Float]{
+    0.008233142193297766, 0.008232956174029788, 4.336808689942018e-19,
+    0.007384971208758445, 0.007384836959791079, 2.168404344971009e-19,
+    0.7414903477293427, 0.6380326489758434, 1.5407439555097887e-33,
+    0.2076186991593222, 0.20471038425931956, -1.925929944387236e-34,
+    0.006759920994341059, 0.006759818028849137, -2.407412430484045e-35,
+    0.007037202196066859, 0.007037086033572287, -1.925929944387236e-34,
+    0.015267686677464106, 0.015266500532616923, -1.925929944387236e-34,
+    0.0077692739126573535, 0.00776911759633952, -1.925929944387236e-34,
+    0.021734483175341882, 0.021731061777092855, 4.81482486096809e-35,
+    0.23017978867661545, 0.22623913698634193, -7.703719777548943e-34
+}
+// asin's and acos's fast path: f0 + asin(z + zl), asin(z)/z being piece j's
+// polynomial at t = z^2 - j/128; the bounds (lb, ub) are eps apart.
+__asin_core: fn(jd: Float, t: Float, z: Float, zl: Float, f0h: Float, f0l: Float, eps: Float) -> (lb: Float, ub: Float) Never! {
+    c: __ASIN_CC
+    b: 8 * (Int.from_float(jd) ?? 0)
+    t2: t * t
+    d: t * ((c[b + 2] + t * c[b + 3]) + t2 * ((c[b + 4] + t * c[b + 5]) + t2 * (c[b + 6] + t * c[b + 7])))
+    f: __exp_cr_muldd(z, zl, c[b], c[b + 1] + d)
+    s: __fast_sum_dd(f0h, f0l, f.hi, f.lo)
+    (lb: s.hi + (s.lo - eps), ub: s.hi + (s.lo + eps))
+}
+// For |x| = sin(phi), |x| cos(j pi/64) - sqrt(1 - x^2) sin(j pi/64) =
+// sin(phi - j pi/64) as a double-double: the rotation both refinements share.
+__asin_rotate: fn(x: Float, j: Int) -> (hi: Float, lo: Float) Never! {
+    s2: x * x
+    dx2: fma(x, x, -s2)
+    c2a: __fast_two_sum(Float{1.0}, -s2)
+    c2: __fast_two_sum(c2a.hi, c2a.lo - dx2)
+    ch: sqrt(c2.hi)
+    cl: (c2.lo - fma(ch, ch, -c2.hi)) * (Float{0.5} / ch)
+    s: __ASIN_S
+    bc: 2 * (32 - j)
+    sh: s[2 * j + 1]
+    sl: s[2 * j]
+    dsh: fabs(x) - sh
+    dch: ch - s[bc + 1]
+    dcl: cl - s[bc]
+    // both products rounded to multiples of 2^-56, so their difference is exact
+    magic: Float{0.09375}
+    sc: fma(sh, dch, magic) - magic
+    dsc: fma(sh, dch, -sc)
+    cs: fma(s[bc + 1], dsh, magic) - magic
+    dcs: fma(s[bc + 1], dsh, -cs)
+    dv: ((s[bc + 1] * -sl + s[bc] * dsh) - (sh * dcl + sl * dch)) - (dsc - dcs)
+    __fast_two_sum(cs - sc, dv)
+}
+// asin(sg (v + dv)) as a double-double for the small rotated v.
+__asin_series: fn(v: Float, dv: Float, sg: Float) -> (hi: Float, lo: Float) Never! {
+    v2: __exp_cr_muldd(v, dv, v, dv)
+    fl: v2.hi * (Float{0.022372159104814857} + v2.hi * (Float{0.017352737142070387} + v2.hi * Float{0.013992707164303743}))
+    f: __exp_m1_cr_opolydd(v2.hi, v2.lo, __ASIN_RC, 5, fl)
+    __exp_cr_muldd(v * sg, dv * sg, f.hi, f.lo)
+}
+// (ph + pl + ps) renormalized by two rounds of fast two-sums.
+__asin_renorm: fn(ph: Float, pl: Float, ps: Float) -> (hi: Float, mid: Float, lo: Float) Never! {
+    a: __fast_two_sum(ph, pl)
+    b: __fast_two_sum(a.lo, ps)
+    c: __fast_two_sum(a.hi, b.hi)
+    d: __fast_two_sum(c.lo, b.lo)
+    (hi: c.hi, mid: d.hi, lo: d.lo)
+}
+// asin to about 2^-149 for the inputs the fast path cannot round: phi
+// approximates asin(x), x = sin(j pi/64 + delta); the hardest are tabulated.
+__asin_refine: fn(x: Float, phi: Float) -> Float Never! {
+    jf: round_even(fabs(phi) * Float{20.371832715762604})
+    r: __asin_rotate(x, Int.from_float(jf) ?? 0)
+    sg: copysign(Float{1.0}, x)
+    f: __asin_series(r.hi, r.lo, sg)
+    jt: jf * sg
+    // pi/64 as h + l + s within 2^-155; jt h and jt l are exact
+    s: __fast_sum_dd(f.hi, f.lo, Float{1.684469643174416e-16} * jt, Float{-3.917809439666406e-31} * jt)
+    p: __asin_renorm(jt * Float{0.04908738521234035}, s.hi, s.lo)
+    tn: (to_bits(p.hi).bit_and(0x7FF0_0000_0000_0000) - (53 << 52)).bit_and(0xFFFF_FFFF_FFFF_FFFF)
+    gap: (tn - to_bits(p.mid).bit_and(0x7FFF_FFFF_FFFF_FFFF)).bit_and(0xFFFF_FFFF_FFFF_FFFF)
+    res: p.hi + p.mid
+    if gap > 2 && (gap >> 52) <= 47 -> return res
+    ax: fabs(x)
+    k := 0
+    loop k < __ASIN_HARD.len() {
+        if ax == __ASIN_HARD[k] -> return sg * __ASIN_HARD[k + 1] + sg * __ASIN_HARD[k + 2]
+        k = k + 3
+    }
+    res
+}
+// acos to about 2^-149 for the inputs the fast path cannot round: phi
+// approximates acos(x), x = cos(pi/2 -+ j pi/64 - delta). A tail on a
+// rounding boundary is nudged by the next term's sign; five inputs are listed.
+__acos_refine: fn(x: Float, phi: Float) -> Float Never! {
+    jf: round_even(fabs(phi - Float{1.5707963267948966}) * Float{20.371832715762604})
+    r: __asin_rotate(x, Int.from_float(jf) ?? 0)
+    sg: copysign(Float{1.0}, x)
+    f: __asin_series(r.hi, r.lo, -sg)
+    jt: Float{32.0} - jf * sg
+    // f + (jt l + jt s) with a two-sum, as f may be the larger
+    pl0: Float{1.684469643174416e-16} * jt
+    sh: f.hi + pl0
+    ap: sh - pl0
+    bp: sh - ap
+    tail: (f.hi - ap) + (pl0 - bp)
+    p: __asin_renorm(jt * Float{0.04908738521234035}, sh, (f.lo + Float{-3.917809439666406e-31} * jt) + tail)
+    tb := to_bits(p.mid)
+    e0: (tb >> 52).bit_and(0x7FF) - 1023
+    e1: 52 - (107 + e0)
+    e: if e1 < 0 -> 0 else -> if e1 > 52 -> 52 else -> e1
+    m: (1 << 52) - (1 << e)
+    half: if e == 0 -> 1 << 63 else -> 1 << (e - 1)
+    if (tb + half).bit_and(m) != 0 -> return p.hi + p.mid
+    if (x == Float{0.999999999999936}) -> return Float{3.5762786865234566e-7} + Float{1.3234889800848443e-23}
+    if (x == Float{0.08298723566019295}) -> return Float{1.4877135408445967} + Float{5.551115123125783e-17}
+    if (x == Float{0.0009717008771394217}) -> return Float{1.5698246257648432} + Float{1.6653345369377348e-16}
+    if (x == Float{0.999999999999984}) -> return Float{1.788139343261721e-7} + Float{6.617444900424222e-24}
+    if (x == Float{0.038214879531014476}) -> return Float{1.5325721397906955} - Float{1.5407439555097887e-33}
+    tb = if (to_bits(p.lo) < 0) != (tb < 0) -> tb - 1 else -> tb + 1
+    p.hi + from_bits(tb)
+}
+// asin(x)/x = c0 + c1 + t P(t) at t = x^2 - j/128 for 0 <= j <= 32: rows of
+// eight (c0, c1, then P's six coefficients).
+__ASIN_CC: [Float]{
+    1.0, 0.0, 0.16666666666666666, 0.07500000000000245,
+    0.04464285713908024, 0.030381947204790895, 0.022371123953315995, 0.017545030634765875,
+    1.001306682371262, -1.0272312753221834e-16, 0.16784677438667686, 0.07605755082168193,
+    0.04560611511468846, 0.03127197994665597, 0.023204175080719345, 0.01813702727720864,
+    1.0026226493445232, 1.0324808391048493e-17, 0.16904358442931514, 0.07713800795263458,
+    0.04659770185494099, 0.032195230967127425, 0.02407353478002872, 0.018962819849856524,
+    1.0039480328184027, -4.880658832674078e-17, 0.17025745995687916, 0.07824204769439795,
+    0.04761867877111798, 0.033153209921377505, 0.02498263659298405, 0.019833136635432416,
+    1.0052829675705146, -5.363981194877168e-17, 0.1714887748961512, 0.07937037178898688,
+    0.04867015579810387, 0.03414751078016791, 0.025933632038683794, 0.02075075895904277,
+    1.0066275913431422, 2.5043560802184795e-18, 0.1727379143449484, 0.08052370858666096,
+    0.049753294022480216, 0.03517981415984476, 0.026928807591782303, 0.02171866611847143,
+    1.0079820449321606, -5.1752227787916015e-17, 0.17400527499741067, 0.08170281427717771,
+    0.050869308474490754, 0.03625189277972148, 0.02797059432865489, 0.02274005123199257,
+    1.009346472279358, -7.629540267778587e-17, 0.17529126558904862, 0.08290847418852791,
+    0.05201947109659118, 0.03736561731116814, 0.02906157834900464, 0.02381833849793686,
+    1.0107210205683146, 2.633607878967623e-17, 0.17659630736263912, 0.08414150415743897,
+    0.053205113901311565, 0.03852296265002882, 0.030204512042283655, 0.024957202004750934,
+    1.012105840324008, -7.582727232984953e-17, 0.1779208345561254, 0.08540275197624252,
+    0.054427632332191146, 0.03972601464683018, 0.031402326275148516, 0.02616058624522311,
+    1.0135010855163171, -8.705804407322068e-17, 0.17926529491375298, 0.08669309892103778,
+    0.05568848884267018, 0.04097697733236641, 0.032658143583756905, 0.027432728505230583,
+    1.0149069136676179, -5.584635415072094e-17, 0.18063015022175238, 0.08801346136644568,
+    0.05698921670905097, 0.04227818067968124, 0.03397529246312682, 0.028778183316017197,
+    1.016323485964662, -4.943036930497581e-17, 0.18201587686996573, 0.08936479249264101,
+    0.05833142409498014, 0.043632088947248356, 0.03535732285511971, 0.030201849179888156,
+    1.01775096737495, 7.704611664224385e-17, 0.1834229664409061, 0.0907480840907769,
+    0.05971679838636836, 0.04504130965231789, 0.03680802294698516, 0.03170899780259637,
+    1.0191895267678206, -1.0613869097246791e-16, 0.18485192632783798, 0.09216436847337668,
+    0.06114711081726455, 0.04650860322798978, 0.03833143740394233, 0.03330530609192075,
+    1.020639337040483, 5.046596408196905e-17, 0.18630328038357294, 0.09361472049676994,
+    0.06262422140895323, 0.04803689342264397, 0.0399318871721141, 0.034996891211373504,
+    1.0221005752492498, -2.632985627554085e-17, 0.18777756960179107, 0.09510025970319369,
+    0.06415008424646194, 0.04962927850595579, 0.041613991002434146, 0.03679034901104606,
+    1.023573422746221, 4.986625487259925e-17, 0.1892753528328202, 0.09662215259076998,
+    0.06572675311876787, 0.05128904335191378, 0.04338268886209552, 0.03869279619479937,
+    1.0250580653217043, -7.113659424223031e-17, 0.19079720753593998, 0.098181615020215,
+    0.06735638755129844, 0.05301967247610405, 0.045243267417909905, 0.040711916624879975,
+    1.0265546933526606, -4.741503323356409e-17, 0.19234373057042067, 0.09977991476783336,
+    0.06904125926185173, 0.05482486411210767, 0.047201387795830774, 0.04285601221223663,
+    1.0280635019574904, -6.544150189403774e-17, 0.19391553902766198, 0.10141837423511331,
+    0.07078375907384295, 0.05670854542026126, 0.04926311584312992, 0.04513405889405559,
+    1.0295846911574884, -1.8862205210991434e-17, 0.19551327110696476, 0.10309837332606804,
+    0.07258640432384057, 0.058674888931353975, 0.051434955144605846, 0.047555768260165374,
+    1.03111846604532, 1.0973504492523829e-16, 0.19713758703764944, 0.10482135250437417,
+    0.07445184680371966, 0.060728330338186684, 0.05372388307209112, 0.0501316554579512,
+    1.032665036960893, 5.777325521136841e-17, 0.19878917005043129, 0.1065888160433455,
+    0.07638288128146625, 0.06287358775942568, 0.05613739017780643, 0.05287311408237694,
+    1.034224619675018, 2.3661883234451118e-17, 0.20046872740117394, 0.10840233548285985,
+    0.07838245464875056, 0.06511568261298507, 0.05868352327723228, 0.05579249884492122,
+    1.0357974355812862, -6.5788579651732e-17, 0.20217699145037338, 0.11026355330853643,
+    0.08045367574789515, 0.06745996225042895, 0.061370932606649074, 0.058903216914174855,
+    1.0373837118966067, -6.207970775472474e-18, 0.20391472080197204, 0.11217418686975172,
+    0.08259982593584134, 0.06991212451977759, 0.06420892348492202, 0.06221982893322902,
+    1.038983681870887, 2.310007649575221e-17, 0.20568270150537454, 0.11413603255449556,
+    0.08482437044822028, 0.07247824444183808, 0.06720751295915377, 0.06575816084678915,
+    1.0405975850063638, 4.0405187993459635e-17, 0.20748174832482794, 0.11615097024061834,
+    0.08713097063272394, 0.07516480320499243, 0.07037749197027102, 0.06953542781647264,
+    1.042225667287128, 1.0289845986206202e-16, 0.20931270608064942, 0.11822096804471938,
+    0.08952349712771514, 0.07797871970553213, 0.07373049363834269, 0.07357037166865335,
+    1.0438681814194257, 2.7122202983822705e-17, 0.21117645106712987, 0.12034808739179302,
+    0.09200604406949214, 0.08092738488543313, 0.07727906833947219, 0.0778834135085991,
+    1.0455253870833516, -7.452575137576243e-17, 0.21307389255231884, 0.1225344884307988,
+    0.09458294441992197, 0.08401869914726391, 0.08103676632764859, 0.08249682335111362,
+    1.0471975511965979, -1.072081766451091e-16, 0.2150059743653076, 0.12478243582357847,
+    0.09725878651537391, 0.08726111315711081, 0.08501822874734656, 0.08743490886564396
+}
+// sin(j pi/64) for 0 <= j <= 32 as double-doubles, the low part first.
+__ASIN_S: [Float]{
+    0.0, 0.0, -6.79610372051828e-19, 0.049067674327418015,
+    -1.634582362244256e-18, 0.0980171403295606, 3.726947147046568e-18, 0.14673047445536175,
+    -7.991079068461731e-18, 0.19509032201612828, -8.751431529719663e-18, 0.2429801799032639,
+    -1.892797870777425e-17, 0.2902846772544624, -4.200094003347509e-19, 0.33688985339222005,
+    -1.0050772696461588e-17, 0.3826834323650898, 9.411189816295473e-18, 0.4275550934302821,
+    6.516678136069013e-18, 0.47139673682599764, -4.5712707523615624e-17, 0.5141027441932218,
+    4.709410940561677e-17, 0.5555702330196022, -1.3438641936579467e-17, 0.5956993044924334,
+    1.0420901929280035e-17, 0.6343932841636455, -4.048903774929669e-17, 0.6715589548470184,
+    -4.833646656726457e-17, 0.7071067811865476, -1.4708616952297345e-17, 0.7409511253549591,
+    -3.256590703364977e-17, 0.773010453362737, -3.306060980481491e-17, 0.8032075314806449,
+    1.4073856984728024e-18, 0.8314696123025452, -4.818344793633662e-17, 0.8577286100002721,
+    -1.9843248405890562e-17, 0.881921264348355, -6.609754468748431e-18, 0.9039892931234433,
+    1.7645047084336677e-17, 0.9238795325112867, -2.789637954769834e-17, 0.9415440651830208,
+    4.05538698618757e-17, 0.9569403357322088, 1.8365300348428844e-17, 0.970031253194544,
+    1.8546939997825006e-17, 0.9807852804032304, -4.098730993704711e-17, 0.989176509964781,
+    -4.248691367830441e-17, 0.9951847266721969, -1.2291693337075465e-17, 0.9987954562051724,
+    0.0, 1.0
+}
+// The double-double coefficients of asin(x) = x + x^3/6 + ... through x^9.
+__ASIN_RC: [Float]{
+    1.0, -6.116918166452386e-33, 0.16666666666666666, 9.251858539842912e-18, 0.075, 2.7755122382264164e-18,
+    0.044642857142857144, -3.892844186564838e-19, 0.030381944444440517, 1.4675605165000499e-18
+}
+// asin's hard cases: (|x|, result, correction).
+__ASIN_HARD: [Float]{
+    2.149119332890821e-8, 2.1491193328908213e-8, -1.6543612251060552e-24,
+    2.7077206862451724e-8, 2.7077206862451727e-8, -6.374746099410145e-41,
+    1.5728569292736223e-7, 1.5728569292736287e-7, 1.3234889800848441e-23,
+    2.952153011168167e-7, 2.95215301116821e-7, -4.109769340539622e-40,
+    4.280976477120543e-7, 4.2809764771206737e-7, 4.272035621321839e-39,
+    0.0000015975474262748178, 0.0000015975474262754973, 1.9876285236124217e-38,
+    0.000017881393431759567, 0.00001788139343271248, -2.087620150684472e-37,
+    0.00003046150971890029, 0.00003046150972361118, -1.6940658945086003e-21,
+    0.00007297794305487601, 0.00007297794311965344, -6.776263578034402e-21,
+    0.00010763481001671434, 0.00010763481022454375, -6.776263578034402e-21,
+    0.0033260143335575236, 0.003326020465855661, -1.3907958395387223e-35,
+    0.014693647353325203, 0.014694176139126642, -2.088670860122526e-34,
+    0.019643316477075002, 0.019644579957771267, -9.012863259990004e-35,
+    0.02454281786240139, 0.02454528242451394, -3.7663990512802885e-33,
+    0.02515936880750056, 0.025162023851425852, 8.632495344096942e-34,
+    0.02869829488520104, 0.02870223562751182, -2.596947303706955e-33,
+    0.02993389623219942, 0.029938368354472628, -3.005337275887711e-33,
+    0.03604596164296301, 0.03605377203166768, 9.920636807864318e-34,
+    0.04412391368975044, 0.04413824386807564, -1.0409160373485304e-34,
+    0.05133124278218131, 0.051353811637605475, 3.4694469519536138e-18,
+    0.05755380074796938, 0.05758562212214113, 8.030697779203957e-35,
+    0.06206990721934187, 0.06210983232298361, -2.864891108246544e-33,
+    0.07371552337036429, 0.07378244857821148, -4.281228767365796e-33,
+    0.0824731502462773, 0.08256693217450291, -5.800545266499361e-33,
+    0.22701926203464254, 0.22901593474400364, -2.3395611233825316e-33,
+    0.32280770822479904, 0.32869451468275884, -5.320031207286819e-33,
+    0.45208132390987693, 0.46909734667874736, 6.584030156802473e-33,
+    0.4631883863152047, 0.48158940553834506, -2.37057545857783e-33,
+    0.47810755953933304, 0.49849878588087543, 8.176045348519162e-37
 }
 // tan(i pi / 256) as double-doubles (hi, lo), i = 0 to 129.
 __ATANPI_A: [Float]{
@@ -4152,6 +6271,153 @@ __atan2_pi_accurate: fn(y: Float, x: Float) -> Float Never! {
     }
     __tint_to_float(w, err)
 }
+// atan2(y0, x0) when the fast path cannot round: (y - t0 x) / (x + t0 y) as
+// a double-double, through degree 9 of atan's series.
+__atan2_refine: fn(y0: Float, x0: Float, x: Float, y: Float, t0: Float, fh: Float, fl: Float, sg: Float) -> Float Never! {
+    dh: y * t0
+    d: __fast_two_sum(x, dh)
+    rdh: Float{1.0} / d.hi
+    dl: fma(y, t0, -dh) + d.lo
+    nh: x * t0
+    nl: fma(x, t0, -nh)
+    dt: y - nh
+    y1: dt + nh
+    tail: if y1 == y -> -nl else -> (y - y1) - nl
+    n: __fast_two_sum(dt, tail)
+    zh: n.hi * rdh
+    z2: zh * zh
+    zl: rdh * (fma(d.hi, -zh, n.hi) + (n.lo - (n.hi * rdh) * dl)) + zh * z2 * ((Float{-0.3333333333333333} + z2 * Float{0.19999999999974255}) + (z2 * z2) * (Float{-0.14285713816496304} + z2 * Float{0.11107620301764512}))
+    e: Float{1.1102230246251565e-15} * (fabs(zh) * z2 + Float{4.440892098500626e-16})
+    f: __fast_sum_dd(fh, fl, zh * sg, zl * sg)
+    ub: f.hi + (f.lo + e)
+    if f.hi + (f.lo - e) == ub -> return ub
+    __atan2_accurate(y0, x0)
+}
+// atan2 at zeros, infinities and NaNs.
+__atan2_special: fn(y: Float, x: Float) -> Float Never! {
+    inf: 0x7FF0_0000_0000_0000
+    ay: to_bits(y).bit_and(0x7FFF_FFFF_FFFF_FFFF)
+    ax: to_bits(x).bit_and(0x7FFF_FFFF_FFFF_FFFF)
+    if ay >= inf || ax >= inf {
+        if ay > inf || ax > inf -> return y + x
+        if ay == inf && ax == inf {
+            if (x < Float{0.0}) -> return copysign(Float{2.356194490192345}, y) + copysign(Float{5.551115123125783e-17}, y)
+            return copysign(Float{0.7853981633974483}, y) + copysign(Float{2.7755575615628914e-17}, y)
+        }
+        if ax == inf {
+            if (x < Float{0.0}) -> return copysign(Float{3.141592653589793}, y) + copysign(Float{1.2246467991473532e-16}, y)
+            return copysign(Float{0.0}, y)
+        }
+        return copysign(Float{1.5707963267948966}, y) + copysign(Float{6.123233995736766e-17}, y)
+    }
+    if ay == 0 {
+        // +-0 for x = +0 or x > 0, else +-pi
+        if to_bits(x) >= 0 -> return y
+        if to_bits(y) >= 0 -> return Float{3.141592653589793} + Float{1.2246467991473532e-16}
+        return Float{-3.141592653589793} - Float{1.2246467991473532e-16}
+    }
+    if (y > Float{0.0}) -> return Float{1.5707963267948966} + Float{6.123233995736766e-17}
+    Float{-1.5707963267948966} - Float{6.123233995736766e-17}
+}
+// atan2(y, x) when the double-double path cannot round: z P(z) / Q(z) for
+// z = y/x or x/y in [0, 1] in 192-bit floats, then the quadrant.
+__atan2_accurate: fn(y: Float, x: Float) -> Float Never! {
+    t: y / x
+    if (t == Float{0.0}) {
+        // |y/x| <= 2^-1075
+        if (x > Float{0.0}) -> return t
+        if (y > Float{0.0}) -> return Float{3.141592653589793} + Float{1.2246467991473532e-16}
+        return Float{-3.141592653589793} - Float{1.2246467991473532e-16}
+    }
+    if (x > Float{0.0}) && (fabs(t) <= Float{1.3538603431225864e-8}) && (fma(t, x, -y) == Float{0.0}) {
+        // t = y/x exactly (rescaled by 2^105 when t x - y may underflow):
+        // atan(t) rounds as t - t 2^-54 does
+        if (fabs(y) >= Float{3.610388751729659e-276}) || (fma(t * Float{4.056481920730334e31}, x, -y * Float{4.056481920730334e31}) == Float{0.0}) -> return fma(t, Float{-5.551115123125783e-17}, t)
+    }
+    inv: fabs(y) > fabs(x)
+    q: if inv -> __tint_div(__tint_from_float(x), __tint_from_float(y)) else -> __tint_div(__tint_from_float(y), __tint_from_float(x))
+    // |y/x| < 2^-96 and x > 0: atan(y/x) rounds as y/x nudged toward 0 does
+    if !inv && (x > Float{0.0}) && q.ex <= -96 -> return __tint_to_float((sig: q.sig - 2, ex: q.ex, sgn: q.sgn), 1)
+    z: (sig: q.sig, ex: q.ex, sgn: 0)
+    p := __tint_coef(__ATAN2PI_P, 29)
+    d := __tint_coef(__ATAN2PI_Q, 29)
+    i := 28
+    loop i >= 0 {
+        p = __tint_add(__tint_mul(p, z), __tint_coef(__ATAN2PI_P, i))
+        d = __tint_add(__tint_mul(d, z), __tint_coef(__ATAN2PI_Q, i))
+        i = i - 1
+    }
+    // atan(|z|) within 662 units of the last place
+    r: __tint_div(__tint_mul(p, z), d)
+    w := (sig: r.sig, ex: r.ex, sgn: q.sgn)
+    err := 662
+    pis: 0xc90f_daa2_2168_c234_c4c6_628b_80dc_1cd1_2902_4e08_8a67_cc74
+    if inv {
+        // +-pi/2 - atan(x/y)
+        pi2: (sig: pis, ex: 1, sgn: 0)
+        if q.sgn == 0 {
+            w = __tint_add(pi2, (sig: w.sig, ex: w.ex, sgn: 1))
+        } else {
+            v: __tint_add(pi2, w)
+            w = (sig: v.sig, ex: v.ex, sgn: 1)
+        }
+        err = 524
+    }
+    if (x < Float{0.0}) {
+        // the opposite quadrant: plus or minus pi
+        pi: (sig: pis, ex: 2, sgn: 0)
+        if w.sgn == 0 {
+            v: __tint_add(pi, (sig: w.sig, ex: w.ex, sgn: 1))
+            w = (sig: v.sig, ex: v.ex, sgn: 1)
+        } else {
+            w = __tint_add(pi, w)
+        }
+        err = 266
+    }
+    __tint_to_float(w, err)
+}
+// atan(j/64) for 0 <= j <= 64 as double-doubles, the low part first.
+__ATAN2_F: [Float]{
+    0.0, 0.0, -1.7569843108731414e-16, 0.015623728620477007,
+    1.2718109451069599e-16, 0.03123983343026815, -1.5282123363018451e-16, 0.04684071291596981,
+    -1.5420474151678852e-16, 0.0624188099959575, -3.582881155030001e-17, 0.07796663383154234,
+    2.0188234451767475e-16, 0.09347678115858926, 4.846007563068433e-17, 0.10894195698986575,
+    1.9116370516694847e-16, 0.12435499454676124, 1.9133104288467082e-16, 0.13970887428916345,
+    -1.0143688686840133e-16, 0.15499674192394108, -1.700746177735756e-16, 0.17021192528547457,
+    5.969184350010091e-17, 0.1853479499956947, 1.6967340798095792e-16, 0.20039855382587834,
+    5.59849672442657e-17, 0.215357699697738, 1.7884685822291619e-16, 0.23021958727684355,
+    -7.256797122815228e-17, 0.24497866312686423, 1.3026105738713097e-16, 0.2596296294082574,
+    8.261353575163773e-18, 0.2741674511196588, -1.2530600203628822e-16, 0.2885873618940775,
+    2.1103377702202993e-16, 0.3028848683749712, 9.208301321958923e-17, 0.3170557532091469,
+    1.0306969208672186e-16, 0.331096076704132, 8.808349770693735e-17, 0.345002177207105,
+    3.088733564861919e-17, 0.3587706702705722, -3.5898839726412174e-17, 0.37239844667675426,
+    -1.4274522636885407e-16, 0.3858826693980739, 2.246598105617042e-17, 0.39922076957525254,
+    -1.8240997597148038e-16, 0.4124104415973875, -1.9872907418313842e-16, 0.4254496373700425,
+    -2.494277030626541e-17, 0.43833655985795783, 3.2807356001837356e-17, 0.45106965598852344,
+    -3.281237377829614e-17, 0.46364760900080615, -2.0739011759277459e-16, 0.47606933032276144,
+    -1.1373236189329585e-17, 0.48833395105640554, -4.7181675085518756e-17, 0.5004408131472942,
+    -2.5462781472855804e-17, 0.5123894603107377, -2.1652451080538965e-16, 0.5241796287829135,
+    1.069585067790331e-16, 0.5358112379604636, -6.17852057485531e-17, 0.547284380987437,
+    -5.4556305485916264e-18, 0.5585993153435624, -2.0978954283997712e-16, 0.5697564534829787,
+    9.660765868058498e-17, 0.5807563535676703, -1.728396503881636e-16, 0.5915997103351116,
+    -8.151799509023163e-17, 0.6022873461349643, 1.904925430764451e-16, 0.6128202021652411,
+    2.672403885140095e-17, 0.6231993299340659, 1.9475383748901603e-16, 0.6334258829691444,
+    1.2685708751395994e-16, 0.6435011087932843, 3.5800634857340095e-17, 0.6534263411807619,
+    -1.4178285110681214e-16, 0.6632029927060934, -1.300154525596627e-16, 0.6728325475937633,
+    6.943223671560008e-18, 0.6823165548747481, 2.1392745373274551e-16, 0.6916566218531996,
+    -1.308985648058738e-16, 0.7008544078844503, 6.505063795666678e-17, 0.7099116184635248,
+    -2.1478388444456983e-17, 0.7188299996216245, -1.0845297676512382e-16, 0.7276113326265108,
+    -1.8730522844203674e-16, 0.7362574289814283, -7.393914397116018e-17, 0.7447701257160753,
+    8.676536780333358e-17, 0.7531512809621943, 1.2087233279526847e-16, 0.7614027698055783,
+    -3.704991905602721e-17, 0.7695264804056583, 1.953681139730868e-16, 0.7775243103733476,
+    3.061616997868383e-17, 0.7853981633974483
+}
+// atan2's quadrant offsets by kw = 4 [x < 0] + 2 [y < 0] + [|y| > |x|], as
+// double-doubles, the high part first.
+__ATAN2_O: [Float]{
+    0.0, 0.0, 1.5707963267948966, 6.123233995736766e-17, 0.0, 0.0, -1.5707963267948966, -6.123233995736766e-17,
+    3.141592653589793, 1.2246467991473532e-16, 1.5707963267948966, 6.123233995736766e-17, -3.141592653589793, -1.2246467991473532e-16, -1.5707963267948966, -6.123233995736766e-17
+}
 // The 192-bit floats of CORE-MATH's tint.h, for atan2_pi's accurate path:
 // (-1)^sgn sig 2^(ex - 192), with sig 0 or in [2^191, 2^192). Each operation
 // truncates as tint.h does, so its error bounds hold.
@@ -4239,7 +6505,10 @@ __tint_to_float: fn(a: (sig: Int, ex: Int, sgn: Int), err: Int) -> Float Never! 
     sig := a.sig
     ex := a.ex
     if ex <= -1022 {
-        sig = sig >> (-1021 - ex)
+        // keep the shifted-out bits as a sticky bit, as tint.h does
+        k: -1021 - ex
+        sticky: if sig.bit_and((1 << k) - 1) != 0 -> 1 else -> 0
+        sig = (sig >> k).bit_or(sticky)
         ex = -1021
     }
     low: (sig >> 128).bit_and(0x7FF)
@@ -7699,7 +9968,24 @@ __LOG10P1_HARD: [Float]{
     0.011017271015218658, 0.00475857462417554, -2.641539556078343e-19,
     0.026973008468742246, 0.011559029354699834, 6.4165502659529105e-19
 }
-tan: fn(n: Float) -> Float Never! { core.math.tan(n) }
+/// tan x, correctly rounded (CORE-MATH tan.c): x itself for |x| <= 2^-26
+/// rounded up, and NaN at infinities and NaN.
+tan: fn(n: Float) -> Float Never! {
+    ux: to_bits(n).bit_and(0x7FFF_FFFF_FFFF_FFFF)
+    if ux >= 0x7FF0_0000_0000_0000 {
+        if ux == 0x7FF0_0000_0000_0000 -> return n - n
+        return n + n
+    }
+    if ux <= 0x3E4D_12ED_0AF1_A27E {
+        // |x| <= 1.3538603431225862e-8: tan x rounds as x + x^3/3 does
+        if (n == Float{0.0}) -> return n
+        return fma(n, Float{5.551115123125783e-17}, n)
+    }
+    f: __tan_fast(n)
+    left: f.hi + (f.lo - f.err)
+    if left == f.hi + (f.lo + f.err) -> return left
+    __tan_accurate(n)
+}
 tanh: fn(n: Float) -> Float Never! { core.math.tanh(n) }
 trunc: fn(n: Float) -> Float Never! { core.math.trunc(n) }
 truncate: fn(n: Float) -> Float Never! { trunc(n) }
@@ -7870,10 +10156,8 @@ to_bits: fn(n: Float) -> Int Never! { core.math.to_bits(n) }
 __to_bits_f32: fn(n: F32) -> Int Never! { core.math.__to_bits_f32(n) }
 __from_bits_f32: fn(bits: Int) -> F32 Never! { core.math.__from_bits_f32(bits) }
 from_bits: fn(bits: Int) -> Float Never! { core.math.from_bits(bits) }
-sin_cos: fn(n: Float) -> (cos: Float, sin: Float) Never! {
-    pair: core.math.sin_cos(n)
-    (cos: pair.cos, sin: pair.sin)
-}
+// Both of n's correctly rounded cos and sin.
+sin_cos: fn(n: Float) -> (cos: Float, sin: Float) Never! { (cos: cos(n), sin: sin(n)) }
 /// modf.c from musl 1.2.5: the whole part clears the fraction bits, and a
 /// whole `n` has a fraction of zero with its sign.
 modf: fn(n: Float) -> (fract: Float, whole: Float) Never! {
@@ -8832,7 +11116,31 @@ __payload_bits: fn(payload: Float) -> Int? Never! {
     assert_eq(Float.from_f32(F32{__log10_f32(6.2845478928294454e-30)}), -29.20172691345215)
     assert_eq(Float.from_f32(F32{__ln_1p_f32(0.4951299726963043)}), 0.40221312642097473)
     assert_eq(__atan2_pi_f32(-0.0, -2.0), -1.0)
+    assert_eq(Float.from_f32(F32{__sin_f32(9830.3984375)}), -0.34761324524879456)
+    assert_eq(Float.from_f32(F32{__cos_f32(1.7269983397793917e20)}), 0.9690579771995544)
+    assert_eq(Float.from_f32(F32{__acos_f32(0.00024868646869435906)}), 1.5705476999282837)
+    assert_eq(Float.from_f32(F32{__atan_f32(0.06905200332403183)}), 0.06894256919622421)
+    assert_eq(Float.from_f32(F32{__atan2_f32(1.0, 1.0)}), 0.7853981852531433)
+    assert_eq(__atan2_f32(-0.0, -2.0), -3.141592653589793)
     assert(is_nan(__pow_r_f32(-2.0, 0.5)))
+}
+
+#Test("math trigonometric functions are correctly rounded") {
+    // a huge argument: the reduction mod 2 pi keeps every bit
+    assert_eq(sin(1.0e22), -0.8522008497671888)
+    assert_eq(cos(1.0e22), 0.523214785395139)
+    assert_eq(tan(1.0e22), -1.6287782256068988)
+    assert_eq(sin_cos(0.5).sin, 0.479425538604203)
+    assert_eq(sin_cos(0.5).cos, 0.8775825618903728)
+    assert_eq(to_bits(sin(-0.0)), to_bits(-0.0))
+    assert(is_nan(cos(INFINITY)))
+    assert_eq(asin(0.5), 0.5235987755982989)
+    assert_eq(acos(0.5), 1.0471975511965979)
+    assert(is_nan(acos(1.5)))
+    assert_eq(atan(INFINITY), 1.5707963267948966)
+    // musl 1.2.5 returns 0.09966865249116204, one ulp above
+    assert_eq(atan2(1.0, 10.0), 0.09966865249116202)
+    assert_eq(atan2(-0.0, -1.0), -3.141592653589793)
 }
 
 #Test("math special functions match musl") {

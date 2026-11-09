@@ -7,16 +7,11 @@ use {
     math: core.math
 }
 
-ACOS: comptime { embed_file("corpus/acos.txt") }
 ACOSH: comptime { embed_file("corpus/acosh.txt") }
-ASIN: comptime { embed_file("corpus/asin.txt") }
 ASINH: comptime { embed_file("corpus/asinh.txt") }
-ATAN: comptime { embed_file("corpus/atan.txt") }
-ATAN2: comptime { embed_file("corpus/atan2.txt") }
 ATANH: comptime { embed_file("corpus/atanh.txt") }
 CBRT: comptime { embed_file("corpus/cbrt.txt") }
 CEIL: comptime { embed_file("corpus/ceil.txt") }
-COS: comptime { embed_file("corpus/cos.txt") }
 COSH: comptime { embed_file("corpus/cosh.txt") }
 ERF: comptime { embed_file("corpus/erf.txt") }
 ERFC: comptime { embed_file("corpus/erfc.txt") }
@@ -38,10 +33,8 @@ REMAINDER: comptime { embed_file("corpus/remainder.txt") }
 REMQUO: comptime { embed_file("corpus/remquo.txt") }
 ROUNDEVEN: comptime { embed_file("corpus/roundeven.txt") }
 SCALBN: comptime { embed_file("corpus/scalbn.txt") }
-SIN: comptime { embed_file("corpus/sin.txt") }
 SINH: comptime { embed_file("corpus/sinh.txt") }
 SQRT: comptime { embed_file("corpus/sqrt.txt") }
-TAN: comptime { embed_file("corpus/tan.txt") }
 TANH: comptime { embed_file("corpus/tanh.txt") }
 TGAMMA: comptime { embed_file("corpus/tgamma.txt") }
 TRUNC: comptime { embed_file("corpus/trunc.txt") }
@@ -80,23 +73,18 @@ is_nan_word: fn(word: Int) -> Bool {
 // How many of a row's words are arguments; the rest are results.
 arity: fn(name: String) -> Int {
     if name == "fma" -> return 3
-    if name == "atan2" || name == "fdim" || name == "fmax" || name == "fmin" || name == "fmod" || name == "hypot" -> return 2
+    if name == "fdim" || name == "fmax" || name == "fmin" || name == "fmod" || name == "hypot" -> return 2
     if name == "nextafter" || name == "pow" || name == "remainder" || name == "remquo" || name == "scalbn" -> return 2
     1
 }
 
 // The one Float result of `name` on Float arguments `a`.
 value: fn(name: String, a: [Float]) -> Float {
-    if name == "acos" -> return math.acos(a[0])
     if name == "acosh" -> return math.acosh(a[0])
-    if name == "asin" -> return math.asin(a[0])
     if name == "asinh" -> return math.asinh(a[0])
-    if name == "atan" -> return math.atan(a[0])
-    if name == "atan2" -> return math.atan2(a[0], a[1])
     if name == "atanh" -> return math.atanh(a[0])
     if name == "cbrt" -> return math.cbrt(a[0])
     if name == "ceil" -> return math.ceil(a[0])
-    if name == "cos" -> return math.cos(a[0])
     if name == "cosh" -> return math.cosh(a[0])
     if name == "erf" -> return math.erf(a[0])
     if name == "erfc" -> return math.erfc(a[0])
@@ -113,10 +101,8 @@ value: fn(name: String, a: [Float]) -> Float {
     if name == "pow" -> return a[0].pow(a[1])
     if name == "remainder" -> return math.remainder(a[0], a[1])
     if name == "roundeven" -> return math.round_even(a[0])
-    if name == "sin" -> return math.sin(a[0])
     if name == "sinh" -> return math.sinh(a[0])
     if name == "sqrt" -> return math.sqrt(a[0])
-    if name == "tan" -> return math.tan(a[0])
     if name == "tanh" -> return math.tanh(a[0])
     if name == "tgamma" -> return math.gamma(a[0])
     math.trunc(a[0])
@@ -199,16 +185,11 @@ check: fn(name: String, corpus: String, exact_nan: Bool) {
 
 run: fn() {
     exact_nan: nan_bits_are_exact()
-    check("acos", ACOS, exact_nan)
     check("acosh", ACOSH, exact_nan)
-    check("asin", ASIN, exact_nan)
     check("asinh", ASINH, exact_nan)
-    check("atan", ATAN, exact_nan)
-    check("atan2", ATAN2, exact_nan)
     check("atanh", ATANH, exact_nan)
     check("cbrt", CBRT, exact_nan)
     check("ceil", CEIL, exact_nan)
-    check("cos", COS, exact_nan)
     check("cosh", COSH, exact_nan)
     check("erf", ERF, exact_nan)
     check("erfc", ERFC, exact_nan)
@@ -230,10 +211,8 @@ run: fn() {
     check("remquo", REMQUO, exact_nan)
     check("roundeven", ROUNDEVEN, exact_nan)
     check("scalbn", SCALBN, exact_nan)
-    check("sin", SIN, exact_nan)
     check("sinh", SINH, exact_nan)
     check("sqrt", SQRT, exact_nan)
-    check("tan", TAN, exact_nan)
     check("tanh", TANH, exact_nan)
     check("tgamma", TGAMMA, exact_nan)
     check("trunc", TRUNC, exact_nan)

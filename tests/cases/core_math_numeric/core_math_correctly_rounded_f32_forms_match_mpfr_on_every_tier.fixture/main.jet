@@ -33,6 +33,13 @@ POW_R: comptime { embed_file("corpus/powr.txt") }
 POW_N: comptime { embed_file("corpus/pown.txt") }
 ROOT_N: comptime { embed_file("corpus/rootn.txt") }
 COMPOUND_N: comptime { embed_file("corpus/compoundn.txt") }
+SIN: comptime { embed_file("corpus/sin.txt") }
+COS: comptime { embed_file("corpus/cos.txt") }
+TAN: comptime { embed_file("corpus/tan.txt") }
+ASIN: comptime { embed_file("corpus/asin.txt") }
+ACOS: comptime { embed_file("corpus/acos.txt") }
+ATAN: comptime { embed_file("corpus/atan.txt") }
+ATAN2: comptime { embed_file("corpus/atan2.txt") }
 
 hex_value: fn(b: U8) -> Int {
     n: Int.from_u8(b)
@@ -96,6 +103,13 @@ value: fn(name: String, a: [F32], w: [Int]) -> F32 {
     if name == "exp10m1" -> return math.exp10_m1(a[0])
     if name == "log2p1" -> return math.log2_1p(a[0])
     if name == "log10p1" -> return math.log10_1p(a[0])
+    if name == "sin" -> return math.sin(a[0])
+    if name == "cos" -> return math.cos(a[0])
+    if name == "tan" -> return math.tan(a[0])
+    if name == "asin" -> return math.asin(a[0])
+    if name == "acos" -> return math.acos(a[0])
+    if name == "atan" -> return math.atan(a[0])
+    if name == "atan2" -> return math.atan2(a[0], a[1])
     if name == "powr" -> return math.pow_r(a[0], a[1])
     if name == "pown" -> return math.pow_n(a[0], w[1])
     if name == "rootn" -> return math.root_n(a[0], w[1])
@@ -163,4 +177,11 @@ run: fn() {
     check("pown", POW_N)
     check("rootn", ROOT_N)
     check("compoundn", COMPOUND_N)
+    check("sin", SIN)
+    check("cos", COS)
+    check("tan", TAN)
+    check("asin", ASIN)
+    check("acos", ACOS)
+    check("atan", ATAN)
+    check("atan2", ATAN2)
 }
