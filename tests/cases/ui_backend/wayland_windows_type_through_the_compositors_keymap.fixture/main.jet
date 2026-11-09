@@ -135,7 +135,11 @@ fake_keymap: fn(&f: Fake) -[Env, Net, Time]> {
     fake_flush(f)
     bytes := KEYMAP.bytes().copy()
     bytes.push(U8{0})
-    memory := sys.shared_memory(bytes.len()) ?? {
+    size: Int(1..1073741824).from_int(bytes.len()) ?? {
+        fake_fail(f, "keymap of {bytes.len()} bytes")
+        return
+    }
+    memory := sys.shared_memory(size) ?? {
         fake_fail(f, "keymap memory: {err}")
         return
     }

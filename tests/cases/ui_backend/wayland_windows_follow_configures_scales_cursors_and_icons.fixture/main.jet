@@ -522,7 +522,11 @@ fake_request: fn(&f: Fake, object: Int, opcode: Int, body: [U8]) -[Env]> {
                 fake_fail(f, "icon pool {buffer.pool} came without its descriptor")
                 return
             }
-            first: f.fds[buffer.pool].read_at(buffer.offset, 4) ?? {
+            at: Int(0..9223372036854775807).from_int(buffer.offset) ?? {
+                fake_fail(f, "icon buffer {buffer.id} starts before its pool")
+                return
+            }
+            first: f.fds[buffer.pool].read_at(at, 4) ?? {
                 fake_fail(f, "reading the icon pool failed: {err}")
                 return
             }

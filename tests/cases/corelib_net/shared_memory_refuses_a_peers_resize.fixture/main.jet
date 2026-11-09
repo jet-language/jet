@@ -1,0 +1,44 @@
+// #6701 hazard: a sealed memfd. The peer (peer.py) gets this process's
+// shared memory over SCM_RIGHTS and tries to shrink and to grow it through
+// its own descriptor; the seals refuse both, so the mapping here can never
+// lose pages under it. The peer's write through its own mapping shows here.
+use {
+    files: core.files
+    net: core.net
+    process: core.process
+    sys: core.sys
+}
+
+run: fn() {
+    root: files.temp_dir("shared_memory_seals") ?? panic("temporary directory")
+    path: files.join(root.path, "s")
+    listener: net.unix_listen(path) ?? panic("listen: {err}")
+    peer: process.cmd([String]{"python3", "peer.py", path}).stdout(.Capture).stderr(.Capture).spawn() ?? panic("peer: {err}")
+    server := net.unix_accept(listener) ?? panic("accept: {err}")
+
+    memory := sys.shared_memory(4096) ?? panic("shared memory: {err}")
+    memory.write(0, "jet".bytes()) ?? panic("write: {err}")
+    descriptor: memory.descriptor() ?? panic("descriptor: {err}")
+    net.unix_send(server, [U8]{1}, [sys.Fd]{descriptor}) ?? panic("send: {err}")
+    print("peer: {receive_line(server)}")
+    print(memory.len())
+    print(String.from_bytes(memory.read(0, 3) ?? panic("read: {err}")) ?? "")
+    print(memory.read(4092, 4) ?? panic("read the last word: {err}"))
+
+    receipt: peer.wait() ?? panic("peer wait: {err}")
+    if !receipt.success -> panic("the peer failed: {receipt.output}")
+    memory.close()
+}
+
+// One newline-ended line from the peer, without its newline.
+receive_line: fn(&stream: net.UnixStream) -> String {
+    line := [U8]{}
+    loop {
+        message: net.unix_receive(stream, 256) ?? panic("receive: {err}")
+        if message.bytes.len() == 0 -> panic("the peer hung up mid-line")
+        loop byte in message.bytes {
+            if Int.from_u8(byte) == 10 -> return String.from_bytes(line) ?? ""
+            line.push(byte)
+        }
+    }
+}

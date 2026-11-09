@@ -660,7 +660,7 @@ present: fn(&c: Connection, pixels: [U8], damage: [UIRect]) UIError! -[Env, Net,
     copy_x1: if stale -> max_int(x1, target.stale_x1) else -> x1
     copy_y1: if stale -> max_int(y1, target.stale_y1) else -> y1
     if copy_x1 > copy_x0 && copy_y1 > copy_y0 {
-        c.memory.write_pixels(target.offset, pixels, c.width * 4, copy_x0, copy_y0, copy_x1 - copy_x0, copy_y1 - copy_y0, c.format) ?? return Err(UIError.Protocol("writing the frame failed: {err}"))
+        shm_pixels(c.memory, target.offset, pixels, c.width * 4, copy_x0, copy_y0, copy_x1 - copy_x0, copy_y1 - copy_y0, c.format) ?? return Err(err)
         if rounded(c) -> cover_corners(c, target.offset, copy_x0, copy_y0, copy_x1, copy_y1)
     }
     // The chrome commits first; the content's commit shows both.
@@ -1232,8 +1232,9 @@ keyboard: fn(&c: Connection, opcode: Int, body: [U8]) -[Env, Time]> {
 load_keymap: fn(&c: Connection, fd: sys.Fd, format: Int, size: Int) -[Env]> {
     c.held = -1
     c.keymap = [xkb.Keymap]{}
-    if format != KEYMAP_XKB_V1 || size < 1 || size > KEYMAP_MAX -> return
-    bytes := fd.read_at(0, size) ?? {
+    if format != KEYMAP_XKB_V1 || size > KEYMAP_MAX -> return
+    max: Int(1..16777216).from_int(size) ?? return
+    bytes := fd.read_at(0, max) ?? {
         fail(c, UIError.Protocol("reading the keymap failed: {err}"))
         return
     }
@@ -1410,10 +1411,11 @@ set_icon: fn(&c: Connection, icon: UIIcon) UIError! -[Env]> {
     if icon.images.len() > 0 {
         total := 0
         loop image in icon.images -> total += image.pixels.len()
-        memory := sys.shared_memory(total) ?? return Err(UIError.Protocol("allocating the icon failed: {err}"))
+        room: Int(1..1073741824).from_int(total) ?? return Err(UIError.Size("the icon's {total} bytes do not fit one pool of 1 GiB"))
+        memory := sys.shared_memory(room) ?? return Err(UIError.Protocol("allocating the icon failed: {err}"))
         offset := 0
         loop image in icon.images {
-            memory.write(offset, premultiplied_argb(image.pixels)) ?? return Err(UIError.Protocol("writing the icon failed: {err}"))
+            shm_write(memory, offset, premultiplied_argb(image.pixels), "writing the icon") ?? return Err(err)
             offset += image.pixels.len()
         }
         descriptor: memory.descriptor() ?? return Err(UIError.Protocol("sharing the icon failed: {err}"))
@@ -1575,11 +1577,11 @@ allocate: fn(&c: Connection, width: Int, height: Int) -[Env, Net, Time]> {
     c.pool = 0
     frame_bytes: w * h * 4
     pool_bytes: frame_bytes * BUFFER_COUNT
-    if pool_bytes > 1073741824 {
+    room: Int(1..1073741824).from_int(pool_bytes) ?? {
         fail(c, UIError.Size("a {w}x{h} window needs more than 1 GiB of buffers"))
         return
     }
-    memory: sys.shared_memory(pool_bytes) ?? {
+    memory: sys.shared_memory(room) ?? {
         fail(c, UIError.Protocol("allocating window buffers failed: {err}"))
         return
     }
@@ -1731,15 +1733,15 @@ draw_chrome: fn(&c: Connection) -[Env]> {
     }
     bar: frame.header(c.painter, c.look, ww, scale)
     if mp == 0 {
-        c.chrome_memory.write(base, bar) ?? {
-            fail(c, UIError.Protocol("drawing the frame failed: {err}"))
+        shm_write(c.chrome_memory, base, bar, "drawing the frame") ?? {
+            fail(c, err)
             return
         }
     } else {
         row_bytes: ww * 4
         loop row in 0..<hp {
-            c.chrome_memory.write(base + ((row + mp) * pw + mp) * 4, bar[(row * row_bytes)..<((row + 1) * row_bytes)]) ?? {
-                fail(c, UIError.Protocol("drawing the frame failed: {err}"))
+            shm_write(c.chrome_memory, base + ((row + mp) * pw + mp) * 4, bar[(row * row_bytes)..<((row + 1) * row_bytes)], "drawing the frame") ?? {
+                fail(c, err)
                 return
             }
         }
@@ -1782,20 +1784,20 @@ ring_row: fn(&c: Connection, slot: Int, base: Int, y: Int, x0: Int, x1: Int) -[E
     fill_at: at + row.left.len()
     right_at: fill_at + row.fill_count * 4
     if row.left.len() > 0 {
-        c.chrome_memory.write(at, row.left) ?? {
-            fail(c, UIError.Protocol("drawing the frame failed: {err}"))
+        shm_write(c.chrome_memory, at, row.left, "drawing the frame") ?? {
+            fail(c, err)
             return
         }
     }
     if row.fill_count > 0 {
-        c.chrome_memory.fill_u32(fill_at, row.fill_count, row.fill) ?? {
-            fail(c, UIError.Protocol("drawing the frame failed: {err}"))
+        shm_fill(c.chrome_memory, fill_at, row.fill_count, row.fill, "drawing the frame") ?? {
+            fail(c, err)
             return
         }
     }
     if row.right.len() > 0 {
-        c.chrome_memory.write(right_at, row.right) ?? {
-            fail(c, UIError.Protocol("drawing the frame failed: {err}"))
+        shm_write(c.chrome_memory, right_at, row.right, "drawing the frame") ?? {
+            fail(c, err)
             return
         }
     }
@@ -1812,11 +1814,11 @@ allocate_chrome: fn(&c: Connection, width: Int, height: Int) -[Env]> {
     c.chrome_height = 0
     frame_bytes: width * height * 4
     pool_bytes: frame_bytes * CHROME_BUFFERS
-    if pool_bytes > 1073741824 {
+    room: Int(1..1073741824).from_int(pool_bytes) ?? {
         fail(c, UIError.Size("a {width}x{height} window frame needs more than 1 GiB of buffers"))
         return
     }
-    memory: sys.shared_memory(pool_bytes) ?? {
+    memory: sys.shared_memory(room) ?? {
         fail(c, UIError.Protocol("allocating the window frame failed: {err}"))
         return
     }
@@ -1871,8 +1873,8 @@ cover_corners: fn(&c: Connection, offset: Int, x0: Int, y0: Int, x1: Int, y1: In
 cover_run: fn(&c: Connection, offset: Int, y: Int, from: Int, to: Int, start: Int, step: Int) -[Env]> {
     if to <= from || c.failure != None -> return
     at: offset + (y * c.width + from) * 4
-    pixels := c.memory.read(at, (to - from) * 4) ?? {
-        fail(c, UIError.Protocol("rounding the frame's corners failed: {err}"))
+    pixels := shm_read(c.memory, at, (to - from) * 4, "rounding the frame's corners") ?? {
+        fail(c, err)
         return
     }
     loop x in from..<to {
@@ -1880,7 +1882,45 @@ cover_run: fn(&c: Connection, offset: Int, y: Int, from: Int, to: Int, start: In
         k: (x - from) * 4
         loop b in k..<(k + 4) -> pixels[b] = U8{(Int.from_u8(pixels[b]) * cover + 127) /% 255}
     }
-    c.memory.write(at, pixels) ?? fail(c, UIError.Protocol("rounding the frame's corners failed: {err}"))
+    shm_write(c.memory, at, pixels, "rounding the frame's corners") ?? fail(c, err)
+}
+
+// Shared-memory access at byte positions the buffers' layout computes:
+// core.sys takes range-typed offsets and lengths, so each position is
+// checked into its range here, and one outside it fails the access, said
+// as `what` failing.
+shm_span: fn(n: Int, what: String) -> Int(0..1073741824) UIError! {
+    Ok(Int(0..1073741824).from_int(n) ?? return Err(UIError.Protocol("{what} failed: byte {n} lies outside shared memory")))
+}
+
+shm_write: fn(&memory: sys.SharedMemory, at: Int, bytes: [U8], what: String) UIError! -[Env]> {
+    memory.write(shm_span(at, what), bytes) ?? return Err(UIError.Protocol("{what} failed: {err}"))
+    Ok()
+}
+
+shm_read: fn(memory: sys.SharedMemory, at: Int, count: Int, what: String) -[Env]> [U8] UIError! {
+    Ok(memory.read(shm_span(at, what), shm_span(count, what)) ?? return Err(UIError.Protocol("{what} failed: {err}")))
+}
+
+shm_fill: fn(&memory: sys.SharedMemory, at: Int, count: Int, value: Int, what: String) UIError! -[Env]> {
+    pixels: Int(0..268435456).from_int(count) ?? return Err(UIError.Protocol("{what} failed: {count} pixels do not fit shared memory"))
+    word: Int(0..4294967295).from_int(value) ?? return Err(UIError.Protocol("{what} failed: {value} is not a 32-bit pixel"))
+    memory.fill_u32(shm_span(at, what), pixels, word) ?? return Err(UIError.Protocol("{what} failed: {err}"))
+    Ok()
+}
+
+// The rectangle (`x`, `y`) `width` by `height` of the RGBA `pixels`, rows
+// `stride` bytes, into the image at byte `offset` of `memory` as `format`.
+shm_pixels: fn(&memory: sys.SharedMemory, offset: Int, pixels: [U8], stride: Int, x: Int, y: Int, width: Int, height: Int, format: sys.PixelFormat) UIError! -[Env]> {
+    what: "writing the frame"
+    outside: UIError.Protocol("{what} failed: the {width}x{height} rectangle at {x},{y} of a {stride}-byte row lies outside a window")
+    row: Int(4..65536).from_int(stride) ?? return Err(outside)
+    left: Int(0..16384).from_int(x) ?? return Err(outside)
+    top: Int(0..16384).from_int(y) ?? return Err(outside)
+    across: Int(0..16384).from_int(width) ?? return Err(outside)
+    down: Int(0..16384).from_int(height) ?? return Err(outside)
+    memory.write_pixels(shm_span(offset, what), pixels, row, left, top, across, down, format) ?? return Err(UIError.Protocol("{what} failed: {err}"))
+    Ok()
 }
 
 // The part of the frame the pointer or finger on the chrome is on.

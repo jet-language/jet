@@ -2138,15 +2138,19 @@ run: fn() {
 
 Descriptors and shared memory are owned values: no descriptor number or
 address reaches Jet code, every descriptor is close-on-exec, and each closes
-exactly once when its owner is dropped.
+exactly once when its owner is dropped. Every offset and length is a range
+type, so a literal outside its range is a compile error (E0135) and a
+computed one is converted first, with `Int(0..1073741824).from_int(n)`
+handling its failure; only the end of an access is checked when it runs.
 
 | API | Result | Description |
 | --- | --- | --- |
-| `shared_memory(size)` | `SharedMemory !IOError -[Env]>` | `size` zeroed bytes (1 B to 1 GiB) of anonymous shared memory (memfd), sealed against shrinking and growing so a peer that maps it can never fault. |
-| `SharedMemory.write(offset, bytes)` / `.read(offset, count)` / `.len()` | `!IOError -[Env]>` / `[U8] !IOError -[Env]>` / `Int` | Copy bytes in or out within bounds. |
-| `SharedMemory.write_pixels(offset, rgba, stride, x, y, width, height, format)` | `!IOError -[Env]>` | Copy the `width`×`height` rectangle at `x`, `y` of an RGBA image whose rows are `stride` bytes into the same rectangle of the image at `offset`, converting each pixel to `PixelFormat.XRGB8888` (B, G, R, X in memory) or `.XBGR8888` (R, G, B, X). |
+| `shared_memory(size: Int(1..1073741824))` | `SharedMemory !IOError -[Env]>` | `size` zeroed bytes (1 B to 1 GiB) of anonymous shared memory (memfd), sealed against shrinking and growing so a peer that maps it can never fault. |
+| `SharedMemory.write(offset: Int(0..1073741824), bytes)` / `.read(offset: Int(0..1073741824), count: Int(0..1073741824))` / `.len()` | `!IOError -[Env]>` / `[U8] !IOError -[Env]>` / `Int` | Copy bytes in or out within bounds. |
+| `SharedMemory.write_pixels(offset: Int(0..1073741824), rgba, stride: Int(4..65536), x, y, width, height: Int(0..16384), format)` | `!IOError -[Env]>` | Copy the `width`×`height` rectangle at `x`, `y` of an RGBA image whose rows are `stride` bytes (a multiple of 4) into the same rectangle of the image at `offset`, converting each pixel to `PixelFormat.XRGB8888` (B, G, R, X in memory) or `.XBGR8888` (R, G, B, X). |
+| `SharedMemory.fill_u32(offset: Int(0..1073741824), count: Int(0..268435456), value: Int(0..4294967295))` | `!IOError -[Env]>` | Store `count` little-endian copies of the 32-bit `value` from `offset`: a solid run of pixels. |
 | `SharedMemory.descriptor()` | `Fd !IOError -[Env]>` | A new descriptor for the memory, to pass to another process. |
-| `Fd.read_at(offset, max)` / `.size()` / `.duplicate()` | `[U8] !IOError -[Env]>` / `Int !IOError -[Env]>` / `Fd !IOError -[Env]>` | Read a received descriptor's file without mapping it (`pread`), size it, or own a second descriptor for it. |
+| `Fd.read_at(offset: Int(0..9223372036854775807), max: Int(1..16777216))` / `.size()` / `.duplicate()` | `[U8] !IOError -[Env]>` / `Int !IOError -[Env]>` / `Fd !IOError -[Env]>` | Read at most `max` bytes of a received descriptor's file from `offset` without mapping it (`pread`; fewer at its end), size it, or own a second descriptor for it. |
 
 Resource limits and usage (D-CORE-RLIMIT1, D-CORE-RLIMIT-NAME1, #5072) apply
 to the running program, and the children it starts afterwards inherit them.

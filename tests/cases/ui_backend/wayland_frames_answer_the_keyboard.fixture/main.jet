@@ -186,7 +186,11 @@ fake_pixel: fn(&f: Fake, buffer: FakeBuffer, x: Int, y: Int) -> [U8] {
         fake_fail(f, "pixel {x},{y} is outside buffer {buffer.id}")
         return [U8]{}
     }
-    f.fds[buffer.pool].read_at(buffer.offset + (y * buffer.width + x) * 4, 4) ?? {
+    at: Int(0..9223372036854775807).from_int(buffer.offset + (y * buffer.width + x) * 4) ?? {
+        fake_fail(f, "pixel {x},{y} lies before the start of its pool")
+        return [U8]{}
+    }
+    f.fds[buffer.pool].read_at(at, 4) ?? {
         fake_fail(f, "reading a pool failed: {err}")
         [U8]{}
     }
@@ -276,7 +280,11 @@ fake_keymap: fn(&f: Fake) -[Env, Net, Time]> {
     fake_flush(f)
     bytes := KEYMAP.bytes().copy()
     bytes.push(U8{0})
-    memory := sys.shared_memory(bytes.len()) ?? {
+    size: Int(1..1073741824).from_int(bytes.len()) ?? {
+        fake_fail(f, "keymap of {bytes.len()} bytes")
+        return
+    }
+    memory := sys.shared_memory(size) ?? {
         fake_fail(f, "keymap memory: {err}")
         return
     }

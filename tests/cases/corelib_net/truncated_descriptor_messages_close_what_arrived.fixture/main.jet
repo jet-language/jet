@@ -1,0 +1,42 @@
+// #6701 hazard: MSG_CTRUNC. The peer (peer.py) lowers this process's open
+// file limit (prlimit) to two above its highest descriptor and sends one
+// byte with eight descriptors: the kernel installs the ones that fit, drops
+// the rest and marks the message truncated. The receive fails with
+// `.Protocol` and closes every descriptor that did arrive, so none is left
+// behind; the stream carries on, and the next message arrives whole.
+use {
+    files: core.files
+    net: core.net
+    process: core.process
+    sys: core.sys
+}
+
+run: fn() {
+    root: files.temp_dir("truncated_descriptor_messages") ?? panic("temporary directory")
+    path: files.join(root.path, "s")
+    listener: net.unix_listen(path) ?? panic("listen: {err}")
+    peer: process.cmd([String]{"python3", "peer.py", path}).stdout(.Capture).stderr(.Capture).spawn() ?? panic("peer: {err}")
+    server := net.unix_accept(listener) ?? panic("accept: {err}")
+
+    before: open_descriptors()
+    net.unix_send(server, [U8]{1}, [sys.Fd]{}) ?? panic("go: {err}")
+    print(net.unix_wait(server, 10000000000) ?? panic("wait: {err}"))
+    if net.unix_receive(server, 16) == {
+        .Ok(message) -> print("accepted {message.bytes} with {message.fds.len()} descriptors")
+        .Err(.Protocol(detail)) -> print("Protocol: {detail.message}")
+        .Err(other) -> print("failed otherwise: {other}")
+    }
+    print("descriptors left behind: {open_descriptors() - before}")
+    net.unix_send(server, [U8]{2}, [sys.Fd]{}) ?? panic("done: {err}")
+
+    next: net.unix_receive(server, 16) ?? panic("receive the next message: {err}")
+    print("next message {next.bytes} with {next.fds.len()} descriptor")
+    receipt: peer.wait() ?? panic("peer wait: {err}")
+    if !receipt.success -> panic("the peer failed: {receipt.output}")
+}
+
+// How many descriptors this process holds (the listing's own included, the
+// same each time).
+open_descriptors: fn() -> Int {
+    (files.listdir("/proc/self/fd") ?? panic("listing descriptors: {err}")).len()
+}

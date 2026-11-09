@@ -83,7 +83,7 @@ s6_ratchet_unrelated: fn(path: String, line: String) -> Bool {
     // vendored, SHA-pinned xkbcommon/libX11 keyboard data and the keymaps
     // xkbcomp compiled from xkeyboard-config (the caps-lock key and level).
     if path == "Compiler/JetDevserver/Source/TerminalStyleReload.jet" || path.starts_with("Core/Vendor/") -> return true
-    if path.starts_with("tests/data/xkb/") || (path.starts_with("tests/cases/ui_xkb/") && path.ends_with(".xkb")) -> return true
+    if path.starts_with("tests/data/xkb/") || ((path.starts_with("tests/cases/ui_xkb/") || path.starts_with("tests/cases/ui_backend/")) && path.ends_with(".xkb")) -> return true
     if path == "Jetpack/Recipe/Source/Build/StagedPlanRun.jet" -> return line.contains(s6_ratchet_concat("Capabil", "ity-limited"))
     if path.starts_with("Docs/spec/reference/surfaces/") -> return true
     if path == "Compiler/JetCanvas/Source/CanvasAssets/js/inspector-connections.js" -> return line.contains(s6_ratchet_concat("Capabil", "ity mismatch"))
