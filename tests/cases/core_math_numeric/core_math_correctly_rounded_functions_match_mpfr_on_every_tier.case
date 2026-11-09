@@ -1,7 +1,8 @@
-# The core.math functions musl lacks are correctly rounded in Jet: every
-# corpus row (special values, CORE-MATH's worst cases for rounding and seeded
-# random inputs) returns the result bits MPFR rounds to, on O0, O1, O2 and the
-# web build.
+# The correctly rounded core.math functions return MPFR's bits: every corpus
+# row (special values, musl's libc-test vectors, CORE-MATH's worst cases for
+# rounding and seeded random inputs) returns the result bits MPFR rounds to, on
+# O0, O1, O2 and the web build. Where musl 1.2.5 differs, the corpus header
+# counts the rows as findings, not targets.
 fixture: core_math_correctly_rounded_functions_match_mpfr_on_every_tier.fixture
 env: NO_COLOR=1
 step o0: jet run -O0 main.jet
