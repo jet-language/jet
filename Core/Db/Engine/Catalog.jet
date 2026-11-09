@@ -1,0 +1,790 @@
+// The connection's catalog as the code generator reads it: a port of
+// SQLite 3.45.0's callback.c (collating sequences and function lookup, the
+// built-in function table of sqlite3RegisterBuiltinFunctions) and of the
+// small schema accessors of build.c, select.c and insert.c that expr.c,
+// resolve.c and where.c call before build.c itself is reached
+// (sqlite3LocateTable, sqlite3ColumnColl, sqlite3TableColumnToStorage,
+// sqlite3AffinityType, sqlite3KeyInfoOfIndex, sqlite3TableAffinity and their
+// kin).
+//
+// A collating sequence is its id in Conn.colls; an id whose entry has
+// encoding 0 was named by a schema loaded before any definition existed
+// (C's CollSeq with a NULL xCmp), and sqlite3CheckCollSeq refuses it.
+//
+// The built-in functions are a process-wide table, as C's
+// sqlite3BuiltinFunctions is: a FuncDef's implementation is its impl_id, a
+// FI_* constant below, which the function-call host dispatches on when the
+// FuncDef has FUNC_BUILTIN (the functions themselves are func.c, date.c,
+// json.c, window.c and alter.c above this part). The table is the build's
+// configuration: SQLITE_SOUNDEX and the load_extension() function are in,
+// SQLITE_ENABLE_MATH_FUNCTIONS, SQLITE_ENABLE_OFFSET_SQL_FUNC and
+// SQLITE_CASE_SENSITIVE_LIKE are not.
+
+use {
+    core: core
+    base: __core_db_base
+    ast: __core_db_ast
+    util: __core_db_util
+    record: __core_db_record
+    btree: __core_db_btree
+    conn: __core_db_conn
+    aux: __core_db_vdbeaux
+    cg: __core_db_codegen
+}
+
+// The in-line functions' FuncDef.pUserData (sqliteInt.h INLINEFUNC_*).
+INLINEFUNC_COALESCE: 0
+INLINEFUNC_IMPLIES_NONNULL_ROW: 1
+INLINEFUNC_EXPR_IMPLIES_EXPR: 2
+INLINEFUNC_EXPR_COMPARE: 3
+INLINEFUNC_AFFINITY: 4
+INLINEFUNC_IIF: 5
+INLINEFUNC_SQLITE_OFFSET: 6
+INLINEFUNC_UNLIKELY: 99
+
+// LIKEFUNC's pUserData: the compareInfo of func.c (globInfo, likeInfoNorm,
+// likeInfoAlt).
+LIKE_INFO_GLOB: 0
+LIKE_INFO_NORM: 1
+LIKE_INFO_ALT: 2
+
+// The JSON functions' pUserData bits (json.c JSON_JSON .. JSON_BLOB).
+JSON_JSON: 1
+JSON_SQL: 2
+JSON_ABPATH: 3
+JSON_ISSET: 4
+JSON_BLOB: 8
+
+// The implementations of the built-in functions (FuncDef.impl_id under
+// FUNC_BUILTIN). One id names one C function family; the method a call
+// runs (xSFunc, xStep, xFinal, xValue, xInverse) is the host's argument.
+FI_NOOP: 0
+FI_SOUNDEX: 1
+FI_LOAD_EXTENSION: 2
+FI_COMPILEOPTION_USED: 3
+FI_COMPILEOPTION_GET: 4
+FI_TRIM: 5
+FI_MINMAX: 6
+FI_MINMAX_AGG: 7
+FI_TYPEOF: 8
+FI_SUBTYPE: 9
+FI_LENGTH: 10
+FI_OCTET_LENGTH: 11
+FI_INSTR: 12
+FI_PRINTF: 13
+FI_UNICODE: 14
+FI_CHAR: 15
+FI_ABS: 16
+FI_ROUND: 17
+FI_UPPER: 18
+FI_LOWER: 19
+FI_HEX: 20
+FI_UNHEX: 21
+FI_CONCAT: 22
+FI_CONCAT_WS: 23
+FI_RANDOM: 24
+FI_RANDOMBLOB: 25
+FI_NULLIF: 26
+FI_SQLITE_VERSION: 27
+FI_SQLITE_SOURCE_ID: 28
+FI_SQLITE_LOG: 29
+FI_QUOTE: 30
+FI_LAST_INSERT_ROWID: 31
+FI_CHANGES: 32
+FI_TOTAL_CHANGES: 33
+FI_REPLACE: 34
+FI_ZEROBLOB: 35
+FI_SUBSTR: 36
+FI_SUM: 37
+FI_TOTAL: 38
+FI_AVG: 39
+FI_COUNT: 40
+FI_GROUP_CONCAT: 41
+FI_LIKE: 42
+FI_SIGN: 43
+// sqlite3InvalidFunction: the stand-in sqlite3_overload_function installs.
+FI_INVALID: 44
+FI_JULIANDAY: 50
+FI_UNIXEPOCH: 51
+FI_DATE: 52
+FI_TIME: 53
+FI_DATETIME: 54
+FI_STRFTIME: 55
+FI_TIMEDIFF: 56
+FI_CURRENT_TIME: 57
+FI_CURRENT_TIMESTAMP: 58
+FI_CURRENT_DATE: 59
+FI_JSON_REMOVE: 70
+FI_JSON_ARRAY: 71
+FI_JSON_ARRAY_LENGTH: 72
+FI_JSON_ERROR_POSITION: 73
+FI_JSON_EXTRACT: 74
+FI_JSON_SET: 75
+FI_JSON_OBJECT: 76
+FI_JSON_PATCH: 77
+FI_JSON_QUOTE: 78
+FI_JSON_REPLACE: 79
+FI_JSON_TYPE: 80
+FI_JSON_VALID: 81
+FI_JSON_GROUP_ARRAY: 82
+FI_JSON_GROUP_OBJECT: 83
+FI_ROW_NUMBER: 90
+FI_DENSE_RANK: 91
+FI_RANK: 92
+FI_PERCENT_RANK: 93
+FI_CUME_DIST: 94
+FI_NTILE: 95
+FI_LAST_VALUE: 96
+FI_NTH_VALUE: 97
+FI_FIRST_VALUE: 98
+FI_LEAD: 99
+FI_LAG: 100
+FI_RENAME_COLUMN: 110
+FI_RENAME_TABLE: 111
+FI_RENAME_TEST: 112
+FI_DROP_COLUMN: 113
+FI_RENAME_QUOTEFIX: 114
+// analyze.c's statInitFuncdef, statPushFuncdef and statGetFuncdef, which
+// are coded directly rather than found by name.
+FI_STAT_INIT: 120
+FI_STAT_PUSH: 121
+FI_STAT_GET: 122
+
+// sqlite3LocateTable's flags (sqliteInt.h LOCATE_VIEW, LOCATE_NOERR).
+LOCATE_VIEW: 1
+LOCATE_NOERR: 2
+
+// The methods a FuncDef defines, for bf: xSFunc, xStep, xFinalize, xValue
+// and xInverse.
+M_SFUNC: 1
+M_STEP: 2
+M_FINAL: 4
+M_VALUE: 8
+M_INVERSE: 16
+
+// The score of a perfect match (callback.c FUNC_PERFECT_MATCH).
+FUNC_PERFECT_MATCH: 6
+
+// sqlite3BuiltinFunctions: the built-in FuncDefs by name (a Hash of the
+// first of each name's overloads, which chain through `next`, C's pNext).
+BuiltinFuncs: struct {
+    hash: conn.Hash
+    defs: [conn.FuncDef]
+    next: [Int]
+}
+
+// sqlite3InsertBuiltinFuncs for one FuncDef: a name seen before joins its
+// chain second, after the first of the name, as C links it.
+insert_builtin: fn(b: &BuiltinFuncs, def: &&conn.FuncDef) Never! {
+    i: b.defs.len()
+    other: conn.hash_find(b.hash, def.name)
+    b.defs.push(def)
+    if other >= 0 {
+        b.next.push(b.next[other])
+        b.next[other] = i
+    } else {
+        b.next.push(-1)
+        _: conn.hash_insert(b.hash, b.defs[i].name, i)
+    }
+}
+
+// One entry of the tables: `methods` is a set of M_* bits.
+bf: fn(b: &BuiltinFuncs, name: String, n_arg: Int, flags: Int, user_data: Int, impl_id: Int, methods: Int) Never! {
+    def := conn.FuncDef{
+        n_arg: n_arg
+        flags: flags.bit_or(conn.FUNC_BUILTIN).bit_or(base.UTF8)
+        user_data: user_data
+        name: name.bytes()
+        impl_id: impl_id
+        has_sfunc: methods.bit_and(M_SFUNC) != 0
+        has_step: methods.bit_and(M_STEP) != 0
+        has_finalize: methods.bit_and(M_FINAL) != 0
+        has_value: methods.bit_and(M_VALUE) != 0
+        has_inverse: methods.bit_and(M_INVERSE) != 0
+    }
+    insert_builtin(b, def)
+}
+
+// FUNCTION, FUNCTION2 (with `extra` flags) and VFUNCTION (not CONSTANT).
+bf_scalar: fn(b: &BuiltinFuncs, name: String, n_arg: Int, i_arg: Int, need_coll: Bool, impl_id: Int, extra: Int) Never! {
+    nc: if need_coll -> conn.FUNC_NEEDCOLL else -> 0
+    bf(b, name, n_arg, conn.FUNC_CONSTANT.bit_or(nc).bit_or(extra), i_arg, impl_id, M_SFUNC)
+}
+
+// INLINE_FUNC and TEST_FUNC.
+bf_inline: fn(b: &BuiltinFuncs, name: String, n_arg: Int, i_arg: Int, flags: Int) Never! {
+    bf(b, name, n_arg, conn.FUNC_INLINE.bit_or(conn.FUNC_CONSTANT).bit_or(flags), i_arg, FI_NOOP, M_SFUNC)
+}
+
+// WAGGREGATE: xValue and xInverse as `methods` has them.
+bf_agg: fn(b: &BuiltinFuncs, name: String, n_arg: Int, arg: Int, need_coll: Bool, impl_id: Int, methods: Int, flags: Int) Never! {
+    nc: if need_coll -> conn.FUNC_NEEDCOLL else -> 0
+    bf(b, name, n_arg, nc.bit_or(flags), arg, impl_id, M_STEP.bit_or(M_FINAL).bit_or(methods))
+}
+
+// JFUNCTION.
+bf_json: fn(b: &BuiltinFuncs, name: String, n_arg: Int, use_cache: Bool, b_ws: Bool, b_rs: Bool, b_jsonb: Bool, i_arg: Int, impl_id: Int) Never! {
+    flags := conn.FUNC_DETERMINISTIC.bit_or(conn.FUNC_CONSTANT)
+    if use_cache -> flags = flags.bit_or(conn.FUNC_RUNONLY)
+    if b_rs -> flags = flags.bit_or(conn.FUNC_SUBTYPE)
+    if b_ws -> flags = flags.bit_or(conn.FUNC_RESULT_SUBTYPE)
+    arg: if b_jsonb -> i_arg.bit_or(JSON_BLOB) else -> i_arg
+    bf(b, name, n_arg, flags, arg, impl_id, M_SFUNC)
+}
+
+// WINDOWFUNCX, WINDOWFUNCALL and WINDOWFUNCNOOP: all four methods.
+bf_window: fn(b: &BuiltinFuncs, name: String, n_arg: Int, impl_id: Int) Never! {
+    bf(b, name, n_arg, conn.FUNC_WINDOW, 0, impl_id, M_STEP.bit_or(M_FINAL).bit_or(M_VALUE).bit_or(M_INVERSE))
+}
+
+// sqlite3RegisterBuiltinFunctions, in its order: alter.c, window.c,
+// date.c, json.c, then func.c's aBuiltinFunc.
+init_builtin_funcs: fn() -> Shared<BuiltinFuncs> Never! {
+    b := BuiltinFuncs{hash: conn.hash_new(), defs: [conn.FuncDef]{}, next: [Int]{}}
+    internal: conn.FUNC_INTERNAL.bit_or(conn.FUNC_CONSTANT)
+    // sqlite3AlterFunctions.
+    bf(b, "sqlite_rename_column", 9, internal, 0, FI_RENAME_COLUMN, M_SFUNC)
+    bf(b, "sqlite_rename_table", 7, internal, 0, FI_RENAME_TABLE, M_SFUNC)
+    bf(b, "sqlite_rename_test", 7, internal, 0, FI_RENAME_TEST, M_SFUNC)
+    bf(b, "sqlite_drop_column", 3, internal, 0, FI_DROP_COLUMN, M_SFUNC)
+    bf(b, "sqlite_rename_quotefix", 2, internal, 0, FI_RENAME_QUOTEFIX, M_SFUNC)
+    // sqlite3WindowFunctions.
+    bf_window(b, "row_number", 0, FI_ROW_NUMBER)
+    bf_window(b, "dense_rank", 0, FI_DENSE_RANK)
+    bf_window(b, "rank", 0, FI_RANK)
+    bf_window(b, "percent_rank", 0, FI_PERCENT_RANK)
+    bf_window(b, "cume_dist", 0, FI_CUME_DIST)
+    bf_window(b, "ntile", 1, FI_NTILE)
+    bf_window(b, "last_value", 1, FI_LAST_VALUE)
+    bf_window(b, "nth_value", 2, FI_NTH_VALUE)
+    bf_window(b, "first_value", 1, FI_FIRST_VALUE)
+    bf_window(b, "lead", 1, FI_LEAD)
+    bf_window(b, "lead", 2, FI_LEAD)
+    bf_window(b, "lead", 3, FI_LEAD)
+    bf_window(b, "lag", 1, FI_LAG)
+    bf_window(b, "lag", 2, FI_LAG)
+    bf_window(b, "lag", 3, FI_LAG)
+    // sqlite3RegisterDateTimeFunctions: PURE_DATE and DFUNCTION.
+    pure_date: conn.FUNC_SLOCHNG.bit_or(conn.FUNC_CONSTANT)
+    bf(b, "julianday", -1, pure_date, 0, FI_JULIANDAY, M_SFUNC)
+    bf(b, "unixepoch", -1, pure_date, 0, FI_UNIXEPOCH, M_SFUNC)
+    bf(b, "date", -1, pure_date, 0, FI_DATE, M_SFUNC)
+    bf(b, "time", -1, pure_date, 0, FI_TIME, M_SFUNC)
+    bf(b, "datetime", -1, pure_date, 0, FI_DATETIME, M_SFUNC)
+    bf(b, "strftime", -1, pure_date, 0, FI_STRFTIME, M_SFUNC)
+    bf(b, "timediff", 2, pure_date, 0, FI_TIMEDIFF, M_SFUNC)
+    bf(b, "current_time", 0, conn.FUNC_SLOCHNG, 0, FI_CURRENT_TIME, M_SFUNC)
+    bf(b, "current_timestamp", 0, conn.FUNC_SLOCHNG, 0, FI_CURRENT_TIMESTAMP, M_SFUNC)
+    bf(b, "current_date", 0, conn.FUNC_SLOCHNG, 0, FI_CURRENT_DATE, M_SFUNC)
+    // sqlite3RegisterJsonFunctions.
+    bf_json(b, "json", 1, true, true, false, false, 0, FI_JSON_REMOVE)
+    bf_json(b, "jsonb", 1, true, false, false, true, 0, FI_JSON_REMOVE)
+    bf_json(b, "json_array", -1, false, true, true, false, 0, FI_JSON_ARRAY)
+    bf_json(b, "jsonb_array", -1, false, true, true, true, 0, FI_JSON_ARRAY)
+    bf_json(b, "json_array_length", 1, true, false, false, false, 0, FI_JSON_ARRAY_LENGTH)
+    bf_json(b, "json_array_length", 2, true, false, false, false, 0, FI_JSON_ARRAY_LENGTH)
+    bf_json(b, "json_error_position", 1, true, false, false, false, 0, FI_JSON_ERROR_POSITION)
+    bf_json(b, "json_extract", -1, true, true, false, false, 0, FI_JSON_EXTRACT)
+    bf_json(b, "jsonb_extract", -1, true, false, false, true, 0, FI_JSON_EXTRACT)
+    bf_json(b, "->", 2, true, true, false, false, JSON_JSON, FI_JSON_EXTRACT)
+    bf_json(b, "->>", 2, true, false, false, false, JSON_SQL, FI_JSON_EXTRACT)
+    bf_json(b, "json_insert", -1, true, true, true, false, 0, FI_JSON_SET)
+    bf_json(b, "jsonb_insert", -1, true, false, true, true, 0, FI_JSON_SET)
+    bf_json(b, "json_object", -1, false, true, true, false, 0, FI_JSON_OBJECT)
+    bf_json(b, "jsonb_object", -1, false, true, true, true, 0, FI_JSON_OBJECT)
+    bf_json(b, "json_patch", 2, true, true, false, false, 0, FI_JSON_PATCH)
+    bf_json(b, "jsonb_patch", 2, true, false, false, true, 0, FI_JSON_PATCH)
+    bf_json(b, "json_quote", 1, false, true, true, false, 0, FI_JSON_QUOTE)
+    bf_json(b, "json_remove", -1, true, true, false, false, 0, FI_JSON_REMOVE)
+    bf_json(b, "jsonb_remove", -1, true, false, false, true, 0, FI_JSON_REMOVE)
+    bf_json(b, "json_replace", -1, true, true, true, false, 0, FI_JSON_REPLACE)
+    bf_json(b, "jsonb_replace", -1, true, false, true, true, 0, FI_JSON_REPLACE)
+    bf_json(b, "json_set", -1, true, true, true, false, JSON_ISSET, FI_JSON_SET)
+    bf_json(b, "jsonb_set", -1, true, false, true, true, JSON_ISSET, FI_JSON_SET)
+    bf_json(b, "json_type", 1, true, false, false, false, 0, FI_JSON_TYPE)
+    bf_json(b, "json_type", 2, true, false, false, false, 0, FI_JSON_TYPE)
+    bf_json(b, "json_valid", 1, true, false, false, false, 0, FI_JSON_VALID)
+    bf_json(b, "json_valid", 2, true, false, false, false, 0, FI_JSON_VALID)
+    json_agg: conn.FUNC_SUBTYPE.bit_or(conn.FUNC_RESULT_SUBTYPE).bit_or(conn.FUNC_DETERMINISTIC)
+    all_window: M_VALUE.bit_or(M_INVERSE)
+    bf_agg(b, "json_group_array", 1, 0, false, FI_JSON_GROUP_ARRAY, all_window, json_agg)
+    bf_agg(b, "jsonb_group_array", 1, JSON_BLOB, false, FI_JSON_GROUP_ARRAY, all_window, json_agg)
+    bf_agg(b, "json_group_object", 2, 0, false, FI_JSON_GROUP_OBJECT, all_window, json_agg)
+    bf_agg(b, "jsonb_group_object", 2, JSON_BLOB, false, FI_JSON_GROUP_OBJECT, all_window, json_agg)
+    // aBuiltinFunc.
+    test_flags: conn.FUNC_INTERNAL.bit_or(conn.FUNC_TEST)
+    bf_inline(b, "implies_nonnull_row", 2, INLINEFUNC_IMPLIES_NONNULL_ROW, test_flags)
+    bf_inline(b, "expr_compare", 2, INLINEFUNC_EXPR_COMPARE, test_flags)
+    bf_inline(b, "expr_implies_expr", 2, INLINEFUNC_EXPR_IMPLIES_EXPR, test_flags)
+    bf_inline(b, "affinity", 1, INLINEFUNC_AFFINITY, test_flags)
+    bf_scalar(b, "soundex", 1, 0, false, FI_SOUNDEX, 0)
+    sfunction: conn.FUNC_DIRECT.bit_or(conn.FUNC_UNSAFE)
+    bf(b, "load_extension", 1, sfunction, 0, FI_LOAD_EXTENSION, M_SFUNC)
+    bf(b, "load_extension", 2, sfunction, 0, FI_LOAD_EXTENSION, M_SFUNC)
+    bf(b, "sqlite_compileoption_used", 1, conn.FUNC_SLOCHNG, 0, FI_COMPILEOPTION_USED, M_SFUNC)
+    bf(b, "sqlite_compileoption_get", 1, conn.FUNC_SLOCHNG, 0, FI_COMPILEOPTION_GET, M_SFUNC)
+    bf_inline(b, "unlikely", 1, INLINEFUNC_UNLIKELY, conn.FUNC_UNLIKELY)
+    bf_inline(b, "likelihood", 2, INLINEFUNC_UNLIKELY, conn.FUNC_UNLIKELY)
+    bf_inline(b, "likely", 1, INLINEFUNC_UNLIKELY, conn.FUNC_UNLIKELY)
+    bf_scalar(b, "ltrim", 1, 1, false, FI_TRIM, 0)
+    bf_scalar(b, "ltrim", 2, 1, false, FI_TRIM, 0)
+    bf_scalar(b, "rtrim", 1, 2, false, FI_TRIM, 0)
+    bf_scalar(b, "rtrim", 2, 2, false, FI_TRIM, 0)
+    bf_scalar(b, "trim", 1, 3, false, FI_TRIM, 0)
+    bf_scalar(b, "trim", 2, 3, false, FI_TRIM, 0)
+    minmax_agg: conn.FUNC_MINMAX.bit_or(conn.FUNC_ANYORDER)
+    bf_scalar(b, "min", -1, 0, true, FI_MINMAX, 0)
+    bf(b, "min", 0, conn.FUNC_CONSTANT.bit_or(conn.FUNC_NEEDCOLL), 0, FI_MINMAX, 0)
+    bf_agg(b, "min", 1, 0, true, FI_MINMAX_AGG, M_VALUE, minmax_agg)
+    bf_scalar(b, "max", -1, 1, true, FI_MINMAX, 0)
+    bf(b, "max", 0, conn.FUNC_CONSTANT.bit_or(conn.FUNC_NEEDCOLL), 1, FI_MINMAX, 0)
+    bf_agg(b, "max", 1, 1, true, FI_MINMAX_AGG, M_VALUE, minmax_agg)
+    bf_scalar(b, "typeof", 1, 0, false, FI_TYPEOF, conn.FUNC_TYPEOF)
+    bf_scalar(b, "subtype", 1, 0, false, FI_SUBTYPE, conn.FUNC_TYPEOF)
+    bf_scalar(b, "length", 1, 0, false, FI_LENGTH, conn.FUNC_LENGTH)
+    bf_scalar(b, "octet_length", 1, 0, false, FI_OCTET_LENGTH, conn.FUNC_BYTELEN)
+    bf_scalar(b, "instr", 2, 0, false, FI_INSTR, 0)
+    bf_scalar(b, "printf", -1, 0, false, FI_PRINTF, 0)
+    bf_scalar(b, "format", -1, 0, false, FI_PRINTF, 0)
+    bf_scalar(b, "unicode", 1, 0, false, FI_UNICODE, 0)
+    bf_scalar(b, "char", -1, 0, false, FI_CHAR, 0)
+    bf_scalar(b, "abs", 1, 0, false, FI_ABS, 0)
+    bf_scalar(b, "round", 1, 0, false, FI_ROUND, 0)
+    bf_scalar(b, "round", 2, 0, false, FI_ROUND, 0)
+    bf_scalar(b, "upper", 1, 0, false, FI_UPPER, 0)
+    bf_scalar(b, "lower", 1, 0, false, FI_LOWER, 0)
+    bf_scalar(b, "hex", 1, 0, false, FI_HEX, 0)
+    bf_scalar(b, "unhex", 1, 0, false, FI_UNHEX, 0)
+    bf_scalar(b, "unhex", 2, 0, false, FI_UNHEX, 0)
+    bf_scalar(b, "concat", -1, 0, false, FI_CONCAT, 0)
+    bf(b, "concat", 0, conn.FUNC_CONSTANT, 0, FI_CONCAT, 0)
+    bf_scalar(b, "concat_ws", -1, 0, false, FI_CONCAT_WS, 0)
+    bf(b, "concat_ws", 0, conn.FUNC_CONSTANT, 0, FI_CONCAT_WS, 0)
+    bf(b, "concat_ws", 1, conn.FUNC_CONSTANT, 0, FI_CONCAT_WS, 0)
+    bf_inline(b, "ifnull", 2, INLINEFUNC_COALESCE, 0)
+    bf(b, "random", 0, 0, 0, FI_RANDOM, M_SFUNC)
+    bf(b, "randomblob", 1, 0, 0, FI_RANDOMBLOB, M_SFUNC)
+    bf_scalar(b, "nullif", 2, 0, true, FI_NULLIF, 0)
+    bf(b, "sqlite_version", 0, conn.FUNC_SLOCHNG, 0, FI_SQLITE_VERSION, M_SFUNC)
+    bf(b, "sqlite_source_id", 0, conn.FUNC_SLOCHNG, 0, FI_SQLITE_SOURCE_ID, M_SFUNC)
+    bf_scalar(b, "sqlite_log", 2, 0, false, FI_SQLITE_LOG, 0)
+    bf_scalar(b, "quote", 1, 0, false, FI_QUOTE, 0)
+    bf(b, "last_insert_rowid", 0, 0, 0, FI_LAST_INSERT_ROWID, M_SFUNC)
+    bf(b, "changes", 0, 0, 0, FI_CHANGES, M_SFUNC)
+    bf(b, "total_changes", 0, 0, 0, FI_TOTAL_CHANGES, M_SFUNC)
+    bf_scalar(b, "replace", 3, 0, false, FI_REPLACE, 0)
+    bf_scalar(b, "zeroblob", 1, 0, false, FI_ZEROBLOB, 0)
+    bf_scalar(b, "substr", 2, 0, false, FI_SUBSTR, 0)
+    bf_scalar(b, "substr", 3, 0, false, FI_SUBSTR, 0)
+    bf_scalar(b, "substring", 2, 0, false, FI_SUBSTR, 0)
+    bf_scalar(b, "substring", 3, 0, false, FI_SUBSTR, 0)
+    bf_agg(b, "sum", 1, 0, false, FI_SUM, all_window, 0)
+    bf_agg(b, "total", 1, 0, false, FI_TOTAL, all_window, 0)
+    bf_agg(b, "avg", 1, 0, false, FI_AVG, all_window, 0)
+    bf_agg(b, "count", 0, 0, false, FI_COUNT, all_window, conn.FUNC_COUNT.bit_or(conn.FUNC_ANYORDER))
+    bf_agg(b, "count", 1, 0, false, FI_COUNT, all_window, conn.FUNC_ANYORDER)
+    bf_agg(b, "group_concat", 1, 0, false, FI_GROUP_CONCAT, all_window, 0)
+    bf_agg(b, "group_concat", 2, 0, false, FI_GROUP_CONCAT, all_window, 0)
+    bf_agg(b, "string_agg", 2, 0, false, FI_GROUP_CONCAT, all_window, 0)
+    like_flags: conn.FUNC_CONSTANT.bit_or(conn.FUNC_LIKE)
+    bf(b, "glob", 2, like_flags.bit_or(conn.FUNC_CASE), LIKE_INFO_GLOB, FI_LIKE, M_SFUNC)
+    bf(b, "like", 2, like_flags, LIKE_INFO_NORM, FI_LIKE, M_SFUNC)
+    bf(b, "like", 3, like_flags, LIKE_INFO_NORM, FI_LIKE, M_SFUNC)
+    bf(b, "coalesce", 1, conn.FUNC_CONSTANT, 0, FI_NOOP, 0)
+    bf(b, "coalesce", 0, conn.FUNC_CONSTANT, 0, FI_NOOP, 0)
+    bf_scalar(b, "sign", 1, 0, false, FI_SIGN, 0)
+    bf_inline(b, "coalesce", -1, INLINEFUNC_COALESCE, 0)
+    bf_inline(b, "iif", 3, INLINEFUNC_IIF, 0)
+    shared b
+}
+
+// matchQuality: how well FuncDef `p` serves a call of n_arg arguments in
+// encoding enc, 0 (no match) to FUNC_PERFECT_MATCH.
+match_quality: fn(p: conn.FuncDef, n_arg: Int, enc: Int) -> Int Never! {
+    if p.n_arg != n_arg {
+        if n_arg == -2 -> return if p.has_sfunc || p.has_step -> FUNC_PERFECT_MATCH else -> 0
+        if p.n_arg >= 0 -> return 0
+    }
+    score := if p.n_arg == n_arg -> 4 else -> 1
+    p_enc: p.flags.bit_and(conn.FUNC_ENCMASK)
+    if enc == p_enc {
+        score += 2
+    } else if enc.bit_and(p_enc).bit_and(2) != 0 {
+        score += 1
+    }
+    score
+}
+
+// sqlite3FindFunction without createFlag: the FuncDef serving a call of
+// `name` with n_arg arguments (-1 for a variable count, -2 for any count)
+// in encoding enc, or None. The connection's functions come first; the
+// built-ins are searched when none matched, or first under
+// DBFLAG_PREFER_BUILTIN.
+find_function: fn(db: conn.Conn, name: [U8], n_arg: Int, enc: Int) -> conn.FuncDef? Never! {
+    best := -1
+    best_score := 0
+    i := conn.hash_find(db.func_hash, name)
+    loop i >= 0 {
+        score: match_quality(db.funcs[i], n_arg, enc)
+        if score > best_score {
+            best = i
+            best_score = score
+        }
+        i = db.func_next[i]
+    }
+    if best >= 0 && db.m_db_flags.bit_and(conn.DBFLAG_PREFER_BUILTIN) == 0 {
+        def: db.funcs[best]
+        return if def.has_sfunc || def.has_step -> Val(def) else -> None
+    }
+    guard: core.mem.__process_shared(init_builtin_funcs).guard_read()
+    b_best := -1
+    b_score := 0
+    j := conn.hash_find(guard.value.hash, name)
+    loop j >= 0 {
+        score: match_quality(guard.value.defs[j], n_arg, enc)
+        if score > b_score {
+            b_best = j
+            b_score = score
+        }
+        j = guard.value.next[j]
+    }
+    if b_best >= 0 {
+        def: guard.value.defs[b_best]
+        return if def.has_sfunc || def.has_step -> Val(def) else -> None
+    }
+    if best < 0 -> return None
+    def: db.funcs[best]
+    if def.has_sfunc || def.has_step -> Val(def) else -> None
+}
+
+// sqlite3FindFunction with createFlag: the index in db.funcs of the
+// connection's function `name` taking n_arg arguments in encoding enc,
+// added blank (its name lowered) when no perfect match exists.
+find_or_create_function: fn(db: &conn.Conn, name: [U8], n_arg: Int, enc: Int) -> Int Never! {
+    first: conn.hash_find(db.func_hash, name)
+    i := first
+    loop i >= 0 {
+        if match_quality(db.funcs[i], n_arg, enc) == FUNC_PERFECT_MATCH -> return i
+        i = db.func_next[i]
+    }
+    lower := [U8]{}
+    loop c in name -> lower.push(U8{util.lower_byte(Int.from_u8(c))})
+    slot: db.funcs.len()
+    db.funcs.push(conn.FuncDef{n_arg: n_arg, flags: enc, user_data: 0, name: lower, impl_id: 0, has_sfunc: false, has_step: false, has_finalize: false, has_value: false, has_inverse: false})
+    db.func_next.push(first)
+    _: conn.hash_insert(db.func_hash, db.funcs[slot].name, slot)
+    slot
+}
+
+// ---------------------------------------------------------------------------
+// Collating sequences (callback.c).
+
+// sqlite3FindCollSeq by name: the id of collation `name`, -1 when there is
+// none; `create` adds an undefined entry for it (encoding 0).
+find_coll_seq: fn(db: &conn.Conn, name: [U8], create: Bool) -> Int Never! {
+    id: conn.find_coll(db, name)
+    if id >= 0 || !create -> return id
+    new_id: db.colls.len()
+    db.colls.push(conn.CollSeq{name: name, enc: 0, id: new_id})
+    new_id
+}
+
+// Whether collation id `id` has a definition (C's non-NULL xCmp).
+coll_defined: fn(db: conn.Conn, id: Int) -> Bool Never! {
+    loop c in db.colls {
+        if c.id == id -> return c.enc != 0
+    }
+    false
+}
+
+// sqlite3GetCollSeq: `id` if it names a defined collation, else -1 with
+// "no such collation sequence" left in the Parse. No collation-needed
+// callback exists, and every defined collation serves every encoding.
+get_coll_seq: fn(p: &cg.Parse, a: &ast.AST, id: Int, name: [U8]) -> Int Never! {
+    if id >= 0 && coll_defined(p.db, id) -> return id
+    ast.error(a, "no such collation sequence: {ast.text(name)}")
+    a.ctx.rc = base.ERROR_MISSING_COLLSEQ
+    return -1
+}
+
+// sqlite3LocateCollSeq: while the schema loads, an unknown name gets an
+// undefined entry and no error.
+locate_coll_seq: fn(p: &cg.Parse, a: &ast.AST, name: [U8]) -> Int Never! {
+    busy: p.db.init.busy
+    id: find_coll_seq(p.db, name, busy)
+    if !busy && (id < 0 || !coll_defined(p.db, id)) -> return get_coll_seq(p, a, id, name)
+    id
+}
+
+// sqlite3CheckCollSeq: SQLITE_OK when `id` (or no collation, -1) may be
+// used.
+check_coll_seq: fn(p: &cg.Parse, a: &ast.AST, id: Int) -> Int Never! {
+    if id < 0 || coll_defined(p.db, id) -> return base.OK
+    name: conn.coll_name(p.db, id)
+    if get_coll_seq(p, a, id, name) < 0 -> return base.ERROR
+    base.OK
+}
+
+// sqlite3SetTextEncoding (the default collation is BINARY in every
+// encoding).
+set_text_encoding: fn(db: &conn.Conn, enc: Int) Never! {
+    db.enc = enc
+    conn.expire_prepared_statements(db, 1)
+}
+
+// ---------------------------------------------------------------------------
+// Tables and columns (build.c, select.c, insert.c).
+
+// sqlite3LocateTable: table `name` of database `db_name` (any database for
+// None), reading the schema first; an eponymous virtual table serves a
+// name no CREATE made. -1 with the error left in the Parse, unless
+// LOCATE_NOERR.
+locate_table: fn(p: &cg.Parse, a: &ast.AST, flags: Int, name: [U8], db_name: [U8]?) -[DB]> Int Never! {
+    g := p.up
+    if p.db.m_db_flags.bit_and(conn.DBFLAG_SCHEMA_KNOWN_OK) == 0 && g.read_schema(p, a) != base.OK -> return -1
+    t := conn.find_table(p.db, name, db_name)
+    if t < 0 {
+        if p.f.prep_flags.bit_and(conn.PREPARE_NO_VTAB) == 0 && !p.db.init.busy {
+            epo: g.eponymous_table(p, a, name)
+            if epo >= 0 -> return epo
+        }
+        if flags.bit_and(LOCATE_NOERR) != 0 -> return -1
+        p.f.check_schema = true
+    } else if p.db.tables[t].tab_type == conn.TABTYP_VTAB && p.f.prep_flags.bit_and(conn.PREPARE_NO_VTAB) != 0 {
+        t = -1
+    }
+    if t < 0 {
+        msg: if flags.bit_and(LOCATE_VIEW) != 0 -> "no such view" else -> "no such table"
+        if db_name == .Val(z) {
+            ast.error(a, "{msg}: {ast.text(z)}.{ast.text(name)}")
+        } else {
+            ast.error(a, "{msg}: {ast.text(name)}")
+        }
+    }
+    t
+}
+
+// sqlite3LocateTableItem: FROM item `si`, within its schema when it has one.
+locate_table_item: fn(p: &cg.Parse, a: &ast.AST, flags: Int, si: Int) -[DB]> Int Never! {
+    item: a.items[si]
+    db_name := item.database
+    if item.schema >= 0 {
+        i_db: conn.schema_to_index(p.db, item.schema)
+        db_name = Val(p.db.dbs[i_db].name)
+    }
+    locate_table(p, a, flags, item.name ?? [U8]{}, db_name)
+}
+
+// sqlite3ColumnIndex: the column of table t named `name`, or -1.
+column_index: fn(db: conn.Conn, t: Int, name: [U8]) -> Int Never! {
+    h: util.str_ihash(name)
+    cols: db.tables[t].cols
+    loop i in 0..<cols.len() {
+        if cols[i].h_name == h && util.str_icmp(cols[i].name, name) == 0 -> return i
+    }
+    -1
+}
+
+// sqlite3WritableSchema (build.c) for the connection.
+conn_writable_schema: fn(db: conn.Conn) -> Bool Never! {
+    db.flags.bit_and(btree.SQLITE_WRITE_SCHEMA.bit_or(btree.SQLITE_DEFENSIVE)) == btree.SQLITE_WRITE_SCHEMA
+}
+
+// VisibleRowid (sqliteInt.h): whether table t's rowid is reachable by name.
+visible_rowid: fn(db: conn.Conn, t: Int) -> Bool Never! { db.tables[t].tab_flags.bit_and(ast.TF_NO_VISIBLE_ROWID) == 0 }
+
+// sqlite3ColumnSetExpr: make `e` the DEFAULT (or generated) expression of
+// column `col` of table t.
+column_set_expr: fn(p: &cg.Parse, a: &ast.AST, t: Int, col: Int, e: Int) Never! {
+    list: p.db.tables[t].dflt_list
+    i_dflt: p.db.tables[t].cols[col].i_dflt
+    if i_dflt == 0 || list < 0 || ast.list_len(a, list) < i_dflt {
+        p.db.tables[t].cols[col].i_dflt = if list < 0 -> 1 else -> ast.list_len(a, list) + 1
+        p.db.tables[t].dflt_list = ast.expr_list_append(a, list, e)
+    } else {
+        ast.expr_delete(a, a.lists[list].items[i_dflt - 1].expr)
+        a.lists[list].items[i_dflt - 1].expr = e
+    }
+}
+
+// sqlite3ColumnExpr: column `col`'s DEFAULT or AS expression, or -1.
+column_expr: fn(db: conn.Conn, a: ast.AST, t: Int, col: Int) -> Int Never! {
+    tab: db.tables[t]
+    i_dflt: tab.cols[col].i_dflt
+    if i_dflt == 0 || tab.tab_type != conn.TABTYP_NORM || tab.dflt_list < 0 -> return -1
+    if ast.list_len(a, tab.dflt_list) < i_dflt -> return -1
+    ast.list_expr(a, tab.dflt_list, i_dflt - 1)
+}
+
+// sqlite3ColumnSetColl.
+column_set_coll: fn(db: &conn.Conn, t: Int, col: Int, coll: [U8]) Never! {
+    db.tables[t].cols[col].coll = coll
+    db.tables[t].cols[col].col_flags = db.tables[t].cols[col].col_flags.bit_or(conn.COLFLAG_HASCOLL)
+}
+
+// sqlite3ColumnColl: the collation name of a column, or None.
+column_coll: fn(col: conn.Column) -> [U8]? Never! {
+    if col.col_flags.bit_and(conn.COLFLAG_HASCOLL) == 0 -> return None
+    Val(col.coll)
+}
+
+// sqlite3ColumnType: the declared type of a column, or `dflt`.
+column_decl_type: fn(col: conn.Column, dflt: [U8]) -> [U8] Never! {
+    if col.col_flags.bit_and(conn.COLFLAG_HASTYPE) != 0 -> col.typ else -> dflt
+}
+
+// sqlite3PrimaryKeyIndex: the PRIMARY KEY index of table t, or -1.
+primary_key_index: fn(db: conn.Conn, t: Int) -> Int Never! {
+    i := db.tables[t].index
+    loop i >= 0 && db.indexes[i].idx_type != ast.IDXTYPE_PRIMARYKEY -> i = db.indexes[i].next
+    i
+}
+
+// sqlite3TableColumnToIndex: the first place of table column i_col in
+// index ix, or -1.
+table_column_to_index: fn(db: conn.Conn, ix: Int, i_col: Int) -> Int Never! {
+    idx: db.indexes[ix]
+    loop i in 0..<idx.n_column {
+        if idx.ai_column[i] == i_col -> return i
+    }
+    -1
+}
+
+// sqlite3StorageColumnToTable.
+storage_column_to_table: fn(db: conn.Conn, t: Int, i_col: Int) -> Int Never! {
+    tab: db.tables[t]
+    if tab.tab_flags.bit_and(ast.TF_HAS_VIRTUAL) == 0 -> return i_col
+    out := i_col
+    i := 0
+    loop i <= out {
+        if tab.cols[i].col_flags.bit_and(conn.COLFLAG_VIRTUAL) != 0 -> out += 1
+        i += 1
+    }
+    out
+}
+
+// sqlite3TableColumnToStorage: VIRTUAL columns move after the rest.
+table_column_to_storage: fn(db: conn.Conn, t: Int, i_col: Int) -> Int Never! {
+    tab: db.tables[t]
+    if tab.tab_flags.bit_and(ast.TF_HAS_VIRTUAL) == 0 || i_col < 0 -> return i_col
+    n := 0
+    loop i in 0..<i_col {
+        if tab.cols[i].col_flags.bit_and(conn.COLFLAG_VIRTUAL) == 0 -> n += 1
+    }
+    if tab.cols[i_col].col_flags.bit_and(conn.COLFLAG_VIRTUAL) != 0 -> return tab.n_nv_col + i_col - n
+    n
+}
+
+// sqlite3AffinityType: the affinity of declared type `z`, and the
+// column-size estimate C stores in Column.szEst.
+affinity_type: fn(z: [U8]) -> (aff: Int, sz_est: Int) Never! {
+    h := 0
+    aff := base.AFF_NUMERIC
+    z_char := -1
+    i := 0
+    loop i < z.len() {
+        c: Int.from_u8(z[i])
+        if c == 0 -> break
+        h = (h * 256 + util.lower_byte(c)).bit_and(4294967295)
+        i += 1
+        if h == 1667785074 {
+            // CHAR
+            aff = base.AFF_TEXT
+            z_char = i
+        } else if h == 1668050786 || h == 1952807028 {
+            // CLOB, TEXT
+            aff = base.AFF_TEXT
+        } else if h == 1651273570 && (aff == base.AFF_NUMERIC || aff == base.AFF_REAL) {
+            // BLOB
+            aff = base.AFF_BLOB
+            if i < z.len() && Int.from_u8(z[i]) == 40 -> z_char = i
+        } else if (h == 1919246700 || h == 1718382433 || h == 1685026146) && aff == base.AFF_NUMERIC {
+            // REAL, FLOA, DOUB
+            aff = base.AFF_REAL
+        } else if h.bit_and(16777215) == 6909556 {
+            // INT
+            aff = base.AFF_INTEGER
+            break
+        }
+    }
+    v := 0
+    if aff < base.AFF_NUMERIC {
+        if z_char >= 0 {
+            k := z_char
+            loop k < z.len() && Int.from_u8(z[k]) != 0 {
+                if util.is_digit(Int.from_u8(z[k])) {
+                    v = util.get_int32(z.slice(k, z.len())) ?? 0
+                    break
+                }
+                k += 1
+            }
+        } else {
+            v = 16
+        }
+    }
+    v = v /% 4 + 1
+    if v > 255 -> v = 255
+    (aff: aff, sz_est: v)
+}
+
+// sqlite3KeyInfoAlloc: n key fields and x more, every collation unset.
+key_info_alloc: fn(db: conn.Conn, n: Int, x: Int) -> record.KeyInfo Never! {
+    colls := [Int]{}
+    flags := [Int]{}
+    loop _ in 0..<(n + x) {
+        colls.push(record.COLL_NONE)
+        flags.push(0)
+    }
+    record.KeyInfo{enc: db.enc, n_key_field: n, n_all_field: n + x, sort_flags: flags, colls: colls}
+}
+
+// sqlite3KeyInfoOfIndex: the KeyInfo of index ix, or None after an error.
+// An index naming a missing collation is withdrawn from the planner.
+key_info_of_index: fn(p: &cg.Parse, a: &ast.AST, ix: Int) -> record.KeyInfo? Never! {
+    if cg.n_err(a) > 0 -> return None
+    idx: p.db.indexes[ix]
+    key := if idx.uniq_not_null -> key_info_alloc(p.db, idx.n_key_col, idx.n_column - idx.n_key_col) else -> key_info_alloc(p.db, idx.n_column, 0)
+    loop i in 0..<idx.n_column {
+        coll: idx.coll[i]
+        key.colls[i] = if util.str_icmp(coll, "BINARY".bytes()) == 0 -> record.COLL_NONE else -> locate_coll_seq(p, a, coll)
+        key.sort_flags[i] = idx.sort_order[i]
+    }
+    if cg.n_err(a) > 0 {
+        if !p.db.indexes[ix].b_no_query {
+            p.db.indexes[ix].b_no_query = true
+            a.ctx.rc = base.ERROR_RETRY
+        }
+        return None
+    }
+    Val(key)
+}
+
+#Test("declared types take the affinity sqlite3AffinityType gives them") {
+    assert(affinity_type("VARCHAR(10)".bytes()).aff == base.AFF_TEXT)
+    assert(affinity_type("BIGINT".bytes()).aff == base.AFF_INTEGER)
+    assert(affinity_type("FLOATING POINT".bytes()).aff == base.AFF_INTEGER)
+    assert(affinity_type("DOUBLE PRECISION".bytes()).aff == base.AFF_REAL)
+    assert(affinity_type("BLOB".bytes()).aff == base.AFF_BLOB)
+    assert(affinity_type("DECIMAL(10,5)".bytes()).aff == base.AFF_NUMERIC)
+    assert(affinity_type("".bytes()).aff == base.AFF_NUMERIC)
+}
+
+#Test("built-in functions are found by name, arity and encoding") {
+    db := conn.conn_new()
+    len1: find_function(db, "LENGTH".bytes(), 1, base.UTF8)
+    assert(len1 != None)
+    if len1 == .Val(d) -> assert(d.impl_id == FI_LENGTH && d.n_arg == 1 && d.has_sfunc)
+    assert(find_function(db, "length".bytes(), 2, base.UTF8) == None)
+    assert(find_function(db, "length".bytes(), -2, base.UTF8) != None)
+    cnt0: find_function(db, "count".bytes(), 0, base.UTF8)
+    if cnt0 == .Val(d) {
+        assert(d.impl_id == FI_COUNT && d.has_step && d.has_finalize && d.flags.bit_and(conn.FUNC_COUNT) != 0)
+    } else {
+        assert(false)
+    }
+    assert(find_function(db, "no_such_function".bytes(), 1, base.UTF8) == None)
+    slot: find_or_create_function(db, "MyFunc".bytes(), 2, base.UTF8)
+    assert(db.funcs[slot].name == "myfunc".bytes())
+    assert(find_or_create_function(db, "myfunc".bytes(), 2, base.UTF8) == slot)
+    assert(find_function(db, "myfunc".bytes(), 2, base.UTF8) == None)
+}

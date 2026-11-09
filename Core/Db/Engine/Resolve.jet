@@ -1,0 +1,1667 @@
+// Name resolution: a port of SQLite 3.45.0 resolve.c (lookupName,
+// resolveExprStep, resolveSelectStep, the ORDER BY and GROUP BY resolvers,
+// sqlite3ResolveExprNames and its kin) and of the analysis helpers it calls
+// from expr.c (sqlite3ExprCanBeNull, sqlite3IsRowid,
+// sqlite3ExprFunctionUsable, sqlite3ReferencesSrcList), window.c
+// (sqlite3WindowUpdate) and select.c (sqlite3SrcItemColumnUsed,
+// sqlite3SelectWrongNumTermsError).
+//
+// A NameContext lives on the Parse's stack p.ncs and is named by its index;
+// a routine that sets one up truncates the stack back on every way out, as
+// C's stack frame does. A walk's NameContext is its WalkState.u.
+//
+// An alias substitution (resolveAlias) swaps the result-set copy into the
+// referring node; sqlite3ExprDeferredDelete of the old contents is the
+// arena keeping them, since its side effects come after code generation.
+// The double-quoted-string notice of sqlite3_log has no consumer here and is
+// not logged.
+use {
+    math: core.math
+    base: __core_db_base
+    ast: __core_db_ast
+    __core_db_ast.[SQLWalker]
+    tk: __core_db_tokenize
+    util: __core_db_util
+    conn: __core_db_conn
+    cg: __core_db_codegen
+    __core_db_codegen.[WalkCb, Gen]
+    cat: __core_db_catalog
+}
+
+// The Expr.iTable of an excluded.* reference in an upsert.
+EXCLUDED_TABLE_NUMBER: 2
+
+// Bitmask (sqliteInt.h): BMS bits, ALLBITS all of them set.
+BMS: 64
+ALLBITS: 18446744073709551615
+
+// ---------------------------------------------------------------------------
+// Name contexts.
+
+// A NameContext over FROM list `src` with ncFlags `flags`, the rest zeroed.
+nc_new: fn(src: Int, flags: Int) -> cg.NameContext Never! {
+    cg.NameContext{src: src, u: -1, next: -1, n_ref: 0, n_nc_err: 0, nc_flags: flags, n_nested_select: 0, win_select: -1}
+}
+
+// Push a NameContext on the Parse's stack; its index.
+nc_push: fn(p: &cg.Parse, nc: cg.NameContext) -> Int Never! {
+    p.ncs.push(nc.copy())
+    p.ncs.len() - 1
+}
+
+// Pop the NameContexts pushed since the stack was `mark` long.
+nc_release: fn(p: &cg.Parse, mark: Int) Never! {
+    loop p.ncs.len() > mark -> _: p.ncs.pop()
+}
+
+nc_has: fn(p: cg.Parse, nc: Int, f: Int) -> Bool Never! { p.ncs[nc].nc_flags.bit_and(f) != 0 }
+
+nc_set: fn(p: &cg.Parse, nc: Int, f: Int) Never! { p.ncs[nc].nc_flags = p.ncs[nc].nc_flags.bit_or(f) }
+
+nc_clear: fn(p: &cg.Parse, nc: Int, f: Int) Never! { p.ncs[nc].nc_flags = util.clear_bits(p.ncs[nc].nc_flags, f) }
+
+// ---------------------------------------------------------------------------
+// Helpers from expr.c, select.c and window.c.
+
+// sqlite3ExprCanBeNull: false only when expression `e0` cannot be NULL.
+expr_can_be_null: fn(db: conn.Conn, a: ast.AST, e0: Int) -> Bool Never! {
+    e := e0
+    loop a.exprs[e].op == tk.TK_UPLUS || a.exprs[e].op == tk.TK_UMINUS -> e = a.exprs[e].left
+    op := a.exprs[e].op
+    if op == tk.TK_REGISTER -> op = a.exprs[e].op2
+    if op == tk.TK_INTEGER || op == tk.TK_STRING || op == tk.TK_FLOAT || op == tk.TK_BLOB -> return false
+    if op == tk.TK_COLUMN {
+        t: a.exprs[e].y
+        if ast.has(a, e, ast.EP_CAN_BE_NULL) || t < 0 -> return true
+        col: a.exprs[e].icolumn
+        return col >= 0 && col < db.tables[t].cols.len() && db.tables[t].cols[col].not_null == 0
+    }
+    true
+}
+
+// sqlite3IsRowid: whether `z` is one of the rowid's names.
+is_rowid: fn(z: [U8]) -> Bool Never! {
+    util.str_icmp(z, "_ROWID_".bytes()) == 0 || util.str_icmp(z, "ROWID".bytes()) == 0 || util.str_icmp(z, "OID".bytes()) == 0
+}
+
+// sqlite3ExprFunctionUsable: a function with SQLITE_FUNC_DIRECT, or any
+// function outside a trusted schema, may not be called from the schema.
+expr_function_usable: fn(p: cg.Parse, a: &ast.AST, e: Int, d: conn.FuncDef) Never! {
+    if !ast.has(a, e, ast.EP_FROM_DDL) -> return
+    if d.flags.bit_and(conn.FUNC_DIRECT) != 0 || p.db.flags.bit_and(conn.SQLITE_TRUSTED_SCHEMA) == 0 {
+        t: ast.expr_text(a, e)
+        off: ast.expr_offset(a, e)
+        ast.error_at(a, "unsafe use of {t}()", off)
+    }
+}
+
+// sqlite3SrcItemColumnUsed: mark column `col` of a nested-FROM item used.
+src_item_column_used: fn(a: &ast.AST, si: Int, col: Int) Never! {
+    if !a.items[si].is_nested_from -> return
+    el: a.selects[a.items[si].select].elist
+    a.lists[el].items[col].used = true
+}
+
+// sqlite3SelectWrongNumTermsError.
+select_wrong_num_terms_error: fn(a: &ast.AST, s: Int) Never! {
+    if a.selects[s].sel_flags.bit_and(ast.SF_VALUES) != 0 {
+        ast.error(a, "all VALUES must have the same number of terms")
+    } else {
+        op: ast.select_op_name(a.selects[s].op)
+        ast.error(a, "SELECTs to the left and right of {op} do not have the same number of result columns")
+    }
+}
+
+// The exclude list of sqlite3ReferencesSrcList's walk (struct RefSrcList):
+// `refs` the cursors of pRef, `exclude` those of the subqueries entered,
+// `code` the walker's eCode.
+RefSrcWalker: struct {
+    refs: [Int]
+    exclude: [Int]
+    code: Int
+}
+
+impl RefSrcWalker.SQLWalker {
+    // exprRefToSrcList.
+    walk_expr_cb: fn(&self, a: &ast.AST, e: Int) -> Int Never! {
+        op: a.exprs[e].op
+        if op != tk.TK_COLUMN && op != tk.TK_AGG_COLUMN -> return ast.WRC_CONTINUE
+        cur: a.exprs[e].itable
+        loop c in self.refs {
+            if c == cur {
+                self.code = self.code.bit_or(1)
+                return ast.WRC_CONTINUE
+            }
+        }
+        loop c in self.exclude {
+            if c == cur -> return ast.WRC_CONTINUE
+        }
+        self.code = self.code.bit_or(2)
+        ast.WRC_CONTINUE
+    }
+    walk_has_select_cb: fn(&self) -> Bool Never! { true }
+    // selectRefEnter.
+    walk_select_cb: fn(&self, a: &ast.AST, s: Int) -> Int Never! {
+        src: a.selects[s].src
+        loop i in 0..<ast.src_len(a, src) -> self.exclude.push(a.items[ast.src_item(a, src, i)].cursor)
+        ast.WRC_CONTINUE
+    }
+    walk_has_select_cb2: fn(&self) -> Bool Never! { true }
+    // selectRefLeave.
+    walk_select_cb2: fn(&self, a: &ast.AST, s: Int) Never! {
+        n := ast.src_len(a, a.selects[s].src)
+        loop n > 0 && self.exclude.len() > 0 {
+            _: self.exclude.pop()
+            n -= 1
+        }
+    }
+    walk_win_defn: fn(&self, a: &ast.AST) -> Bool Never! { false }
+}
+
+// sqlite3ReferencesSrcList: 1 when aggregate `e` refers to a table of FROM
+// list `src`, 0 when it refers to a table neither there nor in its own
+// subqueries, -1 when it refers to no table outside its subqueries.
+references_src_list: fn(a: &ast.AST, e: Int, src: Int) -> Int Never! {
+    refs := [Int]{}
+    loop i in 0..<ast.src_len(a, src) -> refs.push(a.items[ast.src_item(a, src, i)].cursor)
+    w := RefSrcWalker{refs: refs, exclude: [Int]{}, code: 0}
+    _: ast.walk_expr_list<RefSrcWalker>(w, a, a.exprs[e].x)
+    left: a.exprs[e].left
+    if left >= 0 -> _: ast.walk_expr_list<RefSrcWalker>(w, a, a.exprs[left].x)
+    if ast.has(a, e, ast.EP_WIN_FUNC) -> _: ast.walk_expr<RefSrcWalker>(w, a, a.windows[a.exprs[e].y].filter)
+    if w.code.bit_and(1) != 0 -> return 1
+    if w.code != 0 -> 0 else -> -1
+}
+
+// sqlite3WindowUpdate: window `win` of function `d` takes the definition
+// of the named window it refers to from WINDOW list `list` (or chains to
+// its base), is checked, and the built-in window functions that fix their
+// own frame get it. pWFunc becomes `d`, kept in p.wfuncs.
+window_update: fn(p: &cg.Parse, a: &ast.AST, list: Int, win: Int, d: conn.FuncDef) Never! {
+    if a.windows[win].name != None && a.windows[win].frm_type == 0 {
+        nm: a.windows[win].name ?? [U8]{}
+        w2: ast.window_find(a, list, nm)
+        if w2 < 0 -> return
+        a.windows[win].partition = ast.expr_list_dup(a, a.windows[w2].partition, 0)
+        a.windows[win].order_by = ast.expr_list_dup(a, a.windows[w2].order_by, 0)
+        a.windows[win].start_expr = ast.expr_dup(a, a.windows[w2].start_expr, 0)
+        a.windows[win].end_expr = ast.expr_dup(a, a.windows[w2].end_expr, 0)
+        a.windows[win].start_type = a.windows[w2].start_type
+        a.windows[win].end_type = a.windows[w2].end_type
+        a.windows[win].frm_type = a.windows[w2].frm_type
+        a.windows[win].exclude = a.windows[w2].exclude
+    } else {
+        ast.window_chain(a, win, list)
+    }
+    w: a.windows[win].copy()
+    if w.frm_type == tk.TK_RANGE && (w.start_expr >= 0 || w.end_expr >= 0) && ast.list_len(a, w.order_by) != 1 {
+        ast.error(a, "RANGE with offset PRECEDING/FOLLOWING requires one ORDER BY expression")
+    } else if d.flags.bit_and(conn.FUNC_WINDOW) != 0 {
+        if w.filter >= 0 {
+            ast.error(a, "FILTER clause may only be used with aggregate window functions")
+        } else {
+            // The aUp table, matched by function identity.
+            f := -1
+            st := 0
+            et := 0
+            id: d.impl_id
+            if id == cat.FI_ROW_NUMBER {
+                f = tk.TK_ROWS
+                st = tk.TK_UNBOUNDED
+                et = tk.TK_CURRENT
+            } else if id == cat.FI_DENSE_RANK || id == cat.FI_RANK {
+                f = tk.TK_RANGE
+                st = tk.TK_UNBOUNDED
+                et = tk.TK_CURRENT
+            } else if id == cat.FI_PERCENT_RANK {
+                f = tk.TK_GROUPS
+                st = tk.TK_CURRENT
+                et = tk.TK_UNBOUNDED
+            } else if id == cat.FI_CUME_DIST {
+                f = tk.TK_GROUPS
+                st = tk.TK_FOLLOWING
+                et = tk.TK_UNBOUNDED
+            } else if id == cat.FI_NTILE {
+                f = tk.TK_ROWS
+                st = tk.TK_CURRENT
+                et = tk.TK_UNBOUNDED
+            } else if id == cat.FI_LEAD {
+                f = tk.TK_ROWS
+                st = tk.TK_UNBOUNDED
+                et = tk.TK_UNBOUNDED
+            } else if id == cat.FI_LAG {
+                f = tk.TK_ROWS
+                st = tk.TK_UNBOUNDED
+                et = tk.TK_CURRENT
+            }
+            if f >= 0 && d.flags.bit_and(conn.FUNC_BUILTIN) != 0 {
+                ast.expr_delete(a, w.start_expr)
+                ast.expr_delete(a, w.end_expr)
+                a.windows[win].start_expr = -1
+                a.windows[win].end_expr = -1
+                a.windows[win].frm_type = f
+                a.windows[win].start_type = st
+                a.windows[win].end_type = et
+                a.windows[win].exclude = 0
+                if st == tk.TK_FOLLOWING -> a.windows[win].start_expr = ast.expr(a, tk.TK_INTEGER, "1".bytes())
+            }
+        }
+    }
+    p.wfuncs.push(d.copy())
+    a.windows[win].wfunc = p.wfuncs.len() - 1
+}
+
+// ---------------------------------------------------------------------------
+// resolve.c.
+
+// incrAggFunctionDepth's walker: TK_AGG_FUNCTION nodes move `n` levels out.
+IncrAggDepthWalker: struct {
+    n: Int
+}
+
+impl IncrAggDepthWalker.SQLWalker {
+    walk_expr_cb: fn(&self, a: &ast.AST, e: Int) -> Int Never! {
+        if a.exprs[e].op == tk.TK_AGG_FUNCTION -> a.exprs[e].op2 = a.exprs[e].op2 + self.n
+        ast.WRC_CONTINUE
+    }
+    walk_has_select_cb: fn(&self) -> Bool Never! { false }
+    walk_select_cb: fn(&self, a: &ast.AST, s: Int) -> Int Never! { ast.WRC_CONTINUE }
+    walk_has_select_cb2: fn(&self) -> Bool Never! { false }
+    walk_select_cb2: fn(&self, a: &ast.AST, s: Int) Never! {}
+    walk_win_defn: fn(&self, a: &ast.AST) -> Bool Never! { false }
+}
+
+// incrAggFunctionDepth.
+incr_agg_function_depth: fn(a: &ast.AST, e: Int, n: Int) Never! {
+    if n <= 0 -> return
+    w := IncrAggDepthWalker{n: n}
+    _: ast.walk_expr<IncrAggDepthWalker>(w, a, e)
+}
+
+// resolveAlias: expression `e` becomes a copy of result-set term `i_col`
+// of list `elist`, keeping its COLLATE, its aggregates moved
+// `n_subquery` levels out.
+resolve_alias: fn(a: &ast.AST, elist: Int, i_col: Int, e: Int, n_subquery: Int) Never! {
+    orig: ast.list_expr(a, elist, i_col)
+    dup := ast.expr_dup(a, orig, 0)
+    incr_agg_function_depth(a, dup, n_subquery)
+    if a.exprs[e].op == tk.TK_COLLATE {
+        coll: a.exprs[e].token ?? [U8]{}
+        dup = ast.expr_add_collate_string(a, dup, coll)
+    }
+    temp: a.exprs[dup].copy()
+    a.exprs[dup] = a.exprs[e].copy()
+    a.exprs[e] = temp
+    if ast.has(a, e, ast.EP_WIN_FUNC) && a.exprs[e].y >= 0 -> a.windows[a.exprs[e].y].owner = e
+}
+
+// Whether the `n` bytes of `span` from `at` are NUL-terminated `z`,
+// folding case (sqlite3StrNICmp(zSpan, z, n)==0 && z[n]==0).
+span_matches: fn(span: [U8], at: Int, n: Int, z: [U8]) -> Bool Never! {
+    loop i in 0..<n {
+        if util.lower_byte(util.sql_byte(span, at + i)) != util.lower_byte(util.sql_byte(z, i)) -> return false
+    }
+    util.sql_byte(z, n) == 0
+}
+
+// Whether NUL-terminated `z` from byte `at` on is `w`, folding ASCII case
+// when `fold` (sqlite3StrICmp(z+at, w)==0, else strcmp).
+tail_eq: fn(z: [U8], at: Int, w: [U8], fold: Bool) -> Bool Never! {
+    i := 0
+    loop {
+        c := util.sql_byte(z, at + i)
+        d := util.sql_byte(w, i)
+        if fold {
+            c = util.lower_byte(c)
+            d = util.lower_byte(d)
+        }
+        if c != d -> return false
+        if c == 0 -> return true
+        i += 1
+    }
+    true
+}
+
+// The end of the span segment starting at `at`: its '.' or its end.
+span_seg_end: fn(span: [U8], at: Int) -> Int Never! {
+    n := at
+    loop n < span.len() && span[n] != (U8{46}) -> n += 1
+    n
+}
+
+// sqlite3MatchEName: 0 when result-set item `item` (an ENAME_TAB span
+// "DATABASE.TABLE.COLUMN", or an ENAME_ROWID one when `want_rowid`) does
+// not match the names given; 1 when it does, 2 when it matches as the rowid.
+match_ename: fn(item: ast.SQLExprItem, z_col: [U8]?, z_tab: [U8]?, z_db: [U8]?, want_rowid: Bool) -> Int Never! {
+    kind: item.eename
+    if kind != ast.ENAME_TAB && (kind != ast.ENAME_ROWID || !want_rowid) -> return 0
+    span: item.ename ?? [U8]{}
+    n1: span_seg_end(span, 0)
+    if z_db == .Val(zdb) && !span_matches(span, 0, n1, zdb) -> return 0
+    at2: n1 + 1
+    n2: span_seg_end(span, at2)
+    if z_tab == .Val(ztab) && !span_matches(span, at2, n2 - at2, ztab) -> return 0
+    at3: n2 + 1
+    if z_col == .Val(zc) {
+        if kind == ast.ENAME_TAB && !tail_eq(span, at3, zc, true) -> return 0
+        if kind == ast.ENAME_ROWID && !is_rowid(zc) -> return 0
+    }
+    if kind == ast.ENAME_ROWID -> return 2
+    1
+}
+
+// areDoubleQuotedStringsEnabled.
+dqs_enabled: fn(db: conn.Conn, top_flags: Int) -> Bool Never! {
+    if db.init.busy -> return true
+    if top_flags.bit_and(ast.NC_IS_DDL) != 0 {
+        if cat.conn_writable_schema(db) && db.flags.bit_and(conn.SQLITE_DQS_DML) != 0 -> return true
+        return db.flags.bit_and(conn.SQLITE_DQS_DDL) != 0
+    }
+    db.flags.bit_and(conn.SQLITE_DQS_DML) != 0
+}
+
+// sqlite3ExprColUsed: the colUsed bits TK_COLUMN `e` sets.
+expr_col_used: fn(db: conn.Conn, a: ast.AST, e: Int) -> Int Never! {
+    n := a.exprs[e].icolumn
+    t: a.exprs[e].y
+    ncol: db.tables[t].cols.len()
+    if db.tables[t].tab_flags.bit_and(ast.TF_HAS_GENERATED) != 0 && db.tables[t].cols[n].col_flags.bit_and(conn.COLFLAG_GENERATED) != 0 {
+        return if ncol >= BMS -> ALLBITS else -> (1 << ncol) - 1
+    }
+    if n >= BMS -> n = BMS - 1
+    1 << n
+}
+
+// extendFJMatch: append FULL JOIN match column `i_column` of FROM item
+// `si` to list `list`; the list.
+extend_fj_match: fn(a: &ast.AST, list: Int, si: Int, i_column: Int) -> Int Never! {
+    e: ast.expr_alloc(a, tk.TK_COLUMN, None, false)
+    a.exprs[e].itable = a.items[si].cursor
+    a.exprs[e].icolumn = i_column
+    a.exprs[e].y = a.items[si].tab
+    ast.set_flags(a, e, ast.EP_CAN_BE_NULL)
+    ast.expr_list_append(a, list, e)
+}
+
+// isValidSchemaTableName: whether `z_tab` names schema table `tab` (whose
+// tnum is 1); `schema` is the qualifier's schema, -1 for none.
+is_valid_schema_table_name: fn(z_tab: [U8], tab: conn.Table, schema: Int) -> Bool Never! {
+    if util.str_nicmp(z_tab, "sqlite_".bytes(), 7) != 0 -> return false
+    if tail_eq(tab.name, 7, "temp_master".bytes(), false) {
+        if tail_eq(z_tab, 7, "temp_schema".bytes(), true) -> return true
+        if schema < 0 -> return false
+        if tail_eq(z_tab, 7, "master".bytes(), true) -> return true
+        if tail_eq(z_tab, 7, "schema".bytes(), true) -> return true
+    } else {
+        if tail_eq(z_tab, 7, "schema".bytes(), true) -> return true
+    }
+    false
+}
+
+// The bit of column `i_col` in a 32-bit old/new mask.
+mask32: fn(i_col: Int) -> Int Never! { if i_col >= 32 -> 4294967295 else -> 1 << i_col }
+
+// lookupName: resolve the name [db.][tab.]col of TK_ID or TK_DOT `e`
+// against name context `nc0` and the contexts outside it, turning `e` into
+// a TK_COLUMN, TK_TRIGGER, TK_REGISTER, a copy of a result-set alias, or
+// (with an error) TK_NULL. WRC_PRUNE on success, WRC_ABORT on failure.
+lookup_name: fn(p: &cg.Parse, a: &ast.AST, db_name0: [U8]?, z_tab: [U8]?, z_col: [U8], nc0: Int, e: Int) -[DB]> Int Never! {
+    z_db := db_name0
+    cnt := 0
+    cnt_tab := 0
+    n_subquery := 0
+    match_si := -1
+    top_nc: nc0
+    nc := nc0
+    schema := -1
+    new_op := tk.TK_COLUMN
+    fj := -1
+    a.exprs[e].itable = -1
+
+    if z_db == .Val(zdb) {
+        if nc_has(p, nc, ast.NC_PART_IDX.bit_or(ast.NC_IS_CHECK)) {
+            z_db = None
+        } else {
+            found := false
+            loop i in 0..<p.db.dbs.len() {
+                if util.str_icmp(p.db.dbs[i].name, zdb) == 0 {
+                    schema = p.db.dbs[i].schema
+                    found = true
+                    break
+                }
+            }
+            if !found && util.str_icmp("main".bytes(), zdb) == 0 {
+                schema = p.db.dbs[0].schema
+                z_db = Val(p.db.dbs[0].name.copy())
+            }
+        }
+    }
+
+    loop {
+        src: p.ncs[nc].src
+        if src >= 0 {
+            loop i in 0..<ast.src_len(a, src) {
+                si: ast.src_item(a, src, i)
+                t: a.items[si].tab
+                if a.items[si].is_nested_from {
+                    hit := false
+                    el: a.selects[a.items[si].select].elist
+                    loop j in 0..<ast.list_len(a, el) {
+                        m: match_ename(a.lists[el].items[j], Val(z_col), z_tab, z_db, true)
+                        if m == 0 -> next
+                        if m == 1 {
+                            if cnt > 0 {
+                                if !a.items[si].is_using || ast.id_list_index(a, a.items[si].u3, z_col) < 0 {
+                                    ast.expr_list_delete(a, fj)
+                                    fj = -1
+                                } else if a.items[si].jointype.bit_and(ast.JT_RIGHT) == 0 {
+                                    next
+                                } else if a.items[si].jointype.bit_and(ast.JT_LEFT) == 0 {
+                                    cnt = 0
+                                    ast.expr_list_delete(a, fj)
+                                    fj = -1
+                                } else {
+                                    fj = extend_fj_match(a, fj, match_si, a.exprs[e].icolumn)
+                                }
+                            }
+                            cnt += 1
+                            hit = true
+                        } else if cnt > 0 {
+                            next
+                        }
+                        cnt_tab += 1
+                        match_si = si
+                        a.exprs[e].icolumn = j
+                        a.lists[el].items[j].used = true
+                        if a.lists[el].items[j].using_term -> break
+                    }
+                    if hit || z_tab == None -> next
+                }
+                if z_tab == .Val(ztab) {
+                    if z_db == .Val(zdb) {
+                        if p.db.tables[t].schema != schema -> next
+                        if schema < 0 && zdb != "*".bytes() -> next
+                    }
+                    if a.items[si].alias == .Val(alias) {
+                        if util.str_icmp(ztab, alias) != 0 -> next
+                    } else if util.str_icmp(ztab, p.db.tables[t].name) != 0 {
+                        if p.db.tables[t].tnum != 1 -> next
+                        if !is_valid_schema_table_name(ztab, p.db.tables[t], schema) -> next
+                    }
+                    if ast.in_rename(a) && a.items[si].alias != None -> cg.rename_token_remap(p, cg.RENAME_EXPR_TAB, -1, cg.RENAME_EXPR_TAB, e)
+                }
+                h_col: util.str_ihash(z_col)
+                loop j in 0..<p.db.tables[t].cols.len() {
+                    if p.db.tables[t].cols[j].h_name == h_col && util.str_icmp(p.db.tables[t].cols[j].name, z_col) == 0 {
+                        if cnt > 0 {
+                            if !a.items[si].is_using || ast.id_list_index(a, a.items[si].u3, z_col) < 0 {
+                                ast.expr_list_delete(a, fj)
+                                fj = -1
+                            } else if a.items[si].jointype.bit_and(ast.JT_RIGHT) == 0 {
+                                next
+                            } else if a.items[si].jointype.bit_and(ast.JT_LEFT) == 0 {
+                                cnt = 0
+                                ast.expr_list_delete(a, fj)
+                                fj = -1
+                            } else {
+                                fj = extend_fj_match(a, fj, match_si, a.exprs[e].icolumn)
+                            }
+                        }
+                        cnt += 1
+                        match_si = si
+                        a.exprs[e].icolumn = if j == p.db.tables[t].ipkey -> -1 else -> j
+                        src_item_column_used(a, si, j)
+                        break
+                    }
+                }
+                if cnt == 0 && cat.visible_rowid(p.db, t) {
+                    cnt_tab += 1
+                    match_si = si
+                }
+            }
+            if match_si >= 0 {
+                a.exprs[e].itable = a.items[match_si].cursor
+                a.exprs[e].y = a.items[match_si].tab
+                if a.items[match_si].jointype.bit_and(ast.JT_LEFT.bit_or(ast.JT_LTORJ)) != 0 -> ast.set_flags(a, e, ast.EP_CAN_BE_NULL)
+                schema = p.db.tables[a.exprs[e].y].schema
+            }
+        }
+
+        // new.* and old.* in a trigger, excluded.* in an upsert, or a
+        // RETURNING reference to the table being changed.
+        if cnt == 0 && z_db == None {
+            t := -1
+            has_tab: z_tab != None
+            tab_name: z_tab ?? [U8]{}
+            if p.f.trigger_tab >= 0 {
+                op: p.f.e_trigger_op
+                if p.f.b_returning {
+                    if nc_has(p, nc, ast.NC_UBASE_REG) && (!has_tab || util.str_icmp(tab_name, p.db.tables[p.f.trigger_tab].name) == 0) {
+                        a.exprs[e].itable = if op != tk.TK_DELETE -> 1 else -> 0
+                        t = p.f.trigger_tab
+                    }
+                } else if op != tk.TK_DELETE && has_tab && util.str_icmp("new".bytes(), tab_name) == 0 {
+                    a.exprs[e].itable = 1
+                    t = p.f.trigger_tab
+                } else if op != tk.TK_INSERT && has_tab && util.str_icmp("old".bytes(), tab_name) == 0 {
+                    a.exprs[e].itable = 0
+                    t = p.f.trigger_tab
+                }
+            }
+            if nc_has(p, nc, ast.NC_UUPSERT) && has_tab {
+                up: p.ncs[nc].u
+                if up >= 0 && util.str_icmp("excluded".bytes(), tab_name) == 0 {
+                    t = a.items[ast.src_item(a, a.upserts[up].src, 0)].tab
+                    a.exprs[e].itable = EXCLUDED_TABLE_NUMBER
+                }
+            }
+            if t >= 0 {
+                h_col: util.str_ihash(z_col)
+                schema = p.db.tables[t].schema
+                cnt_tab += 1
+                ncol: p.db.tables[t].cols.len()
+                i_col := 0
+                loop i_col < ncol {
+                    if p.db.tables[t].cols[i_col].h_name == h_col && util.str_icmp(p.db.tables[t].cols[i_col].name, z_col) == 0 {
+                        if i_col == p.db.tables[t].ipkey -> i_col = -1
+                        break
+                    }
+                    i_col += 1
+                }
+                if i_col >= ncol && is_rowid(z_col) && cat.visible_rowid(p.db, t) -> i_col = -1
+                if i_col < ncol {
+                    cnt += 1
+                    match_si = -1
+                    if a.exprs[e].itable == EXCLUDED_TABLE_NUMBER {
+                        if ast.in_rename(a) {
+                            a.exprs[e].icolumn = i_col
+                            a.exprs[e].y = t
+                            new_op = tk.TK_COLUMN
+                        } else {
+                            reg: a.upserts[p.ncs[nc].u].reg_data
+                            a.exprs[e].itable = reg + cat.table_column_to_storage(p.db, t, i_col)
+                            new_op = tk.TK_REGISTER
+                        }
+                    } else {
+                        a.exprs[e].y = t
+                        if p.f.b_returning {
+                            new_op = tk.TK_REGISTER
+                            a.exprs[e].op2 = tk.TK_COLUMN
+                            a.exprs[e].icolumn = i_col
+                            base_reg: p.ncs[nc].u
+                            a.exprs[e].itable = base_reg + (ncol + 1) * a.exprs[e].itable + cat.table_column_to_storage(p.db, t, i_col) + 1
+                        } else {
+                            a.exprs[e].icolumn = i_col
+                            new_op = tk.TK_TRIGGER
+                            if i_col < 0 {
+                                a.exprs[e].aff = base.AFF_INTEGER
+                            } else if a.exprs[e].itable == 0 {
+                                p.f.oldmask = p.f.oldmask.bit_or(mask32(i_col))
+                            } else {
+                                p.f.newmask = p.f.newmask.bit_or(mask32(i_col))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Perhaps the name is the rowid.
+        if cnt == 0 && cnt_tab == 1 && match_si >= 0 && !nc_has(p, nc, ast.NC_IDX_EXPR.bit_or(ast.NC_GEN_COL)) && is_rowid(z_col) && (cat.visible_rowid(p.db, a.items[match_si].tab) || a.items[match_si].is_nested_from) {
+            cnt = 1
+            if !a.items[match_si].is_nested_from -> a.exprs[e].icolumn = -1
+            a.exprs[e].aff = base.AFF_INTEGER
+        }
+
+        // A bare name may be a result-set alias.
+        if cnt == 0 && nc_has(p, nc, ast.NC_UELIST) && z_tab == None {
+            el: p.ncs[nc].u
+            loop j in 0..<ast.list_len(a, el) {
+                if a.lists[el].items[j].eename == ast.ENAME_NAME && util.str_icmp_opt(a.lists[el].items[j].ename, Val(z_col)) == 0 {
+                    z_as: ast.text(a.lists[el].items[j].ename ?? [U8]{})
+                    orig: a.lists[el].items[j].expr
+                    if !nc_has(p, nc, ast.NC_ALLOW_AGG) && ast.has(a, orig, ast.EP_AGG) {
+                        ast.error(a, "misuse of aliased aggregate {z_as}")
+                        return ast.WRC_ABORT
+                    }
+                    if ast.has(a, orig, ast.EP_WIN) && (!nc_has(p, nc, ast.NC_ALLOW_WIN) || nc != top_nc) {
+                        ast.error(a, "misuse of aliased window function {z_as}")
+                        return ast.WRC_ABORT
+                    }
+                    if ast.vector_size(a, orig) != 1 {
+                        ast.error(a, "row value misused")
+                        return ast.WRC_ABORT
+                    }
+                    resolve_alias(a, el, j, e, n_subquery)
+                    if ast.in_rename(a) -> cg.rename_token_remap(p, cg.RENAME_EXPR, -1, cg.RENAME_EXPR, e)
+                    return lookup_name_end(p, a, e, schema, nc, top_nc)
+                }
+            }
+        }
+
+        if cnt != 0 -> break
+        nc = p.ncs[nc].next
+        n_subquery += 1
+        if nc < 0 -> break
+    }
+
+    // An unmatched bare double-quoted name is a string; an unmatched
+    // TRUE or FALSE is the constant.
+    if cnt == 0 && z_tab == None {
+        if ast.has(a, e, ast.EP_DBL_QUOTED) && dqs_enabled(p.db, p.ncs[top_nc].nc_flags) {
+            a.exprs[e].op = tk.TK_STRING
+            a.exprs[e].y = -1
+            a.exprs[e].y_reg = 0
+            return ast.WRC_PRUNE
+        }
+        if ast.expr_id_to_true_false(a, e) -> return ast.WRC_PRUNE
+    }
+
+    if cnt != 1 {
+        if fj >= 0 {
+            if ast.list_len(a, fj) == cnt - 1 {
+                if ast.has(a, e, ast.EP_LEAF) {
+                    ast.clear_flags(a, e, ast.EP_LEAF)
+                } else {
+                    ast.expr_delete(a, a.exprs[e].left)
+                    a.exprs[e].left = -1
+                    ast.expr_delete(a, a.exprs[e].right)
+                    a.exprs[e].right = -1
+                }
+                fj = extend_fj_match(a, fj, match_si, a.exprs[e].icolumn)
+                a.exprs[e].op = tk.TK_FUNCTION
+                a.exprs[e].token = Val("coalesce".bytes())
+                a.exprs[e].x = fj
+                return lookup_name_end(p, a, e, schema, nc, top_nc)
+            }
+            ast.expr_list_delete(a, fj)
+            fj = -1
+        }
+        z_err: if cnt == 0 -> "no such column" else -> "ambiguous column name"
+        col_text: ast.text(z_col)
+        msg: if z_db == .Val(zdb) -> "{z_err}: {ast.text(zdb)}.{ast.text(z_tab ?? [U8]{})}.{col_text}" else if z_tab == .Val(zt) -> "{z_err}: {ast.text(zt)}.{col_text}" else -> "{z_err}: {col_text}"
+        off: ast.expr_offset(a, e)
+        ast.error_at(a, msg, off)
+        p.f.check_schema = true
+        p.ncs[top_nc].n_nc_err += 1
+        new_op = tk.TK_NULL
+    }
+
+    // Remove all substructure from the node.
+    if !ast.has(a, e, ast.EP_TOKEN_ONLY.bit_or(ast.EP_LEAF)) {
+        ast.expr_delete(a, a.exprs[e].left)
+        a.exprs[e].left = -1
+        ast.expr_delete(a, a.exprs[e].right)
+        a.exprs[e].right = -1
+        ast.set_flags(a, e, ast.EP_LEAF)
+    }
+    if a.exprs[e].icolumn >= 0 && cnt == 1 && match_si >= 0 {
+        used: expr_col_used(p.db, a, e)
+        a.items[match_si].col_used = a.items[match_si].col_used.bit_or(used)
+    }
+    a.exprs[e].op = new_op
+    if cnt != 1 -> return ast.WRC_ABORT
+    lookup_name_end(p, a, e, schema, nc, top_nc)
+}
+
+// lookupName's lookupname_end on a match: the authorizer's read check, and
+// a reference counted in every context from `top_nc` out to `nc`.
+lookup_name_end: fn(p: &cg.Parse, a: &ast.AST, e: Int, schema: Int, nc: Int, top_nc: Int) -[DB]> Int Never! {
+    op: a.exprs[e].op
+    if p.db.has_auth && (op == tk.TK_COLUMN || op == tk.TK_TRIGGER) {
+        src: p.ncs[nc].src
+        cg.auth_read(p, a, e, schema, src)
+    }
+    q := top_nc
+    loop {
+        p.ncs[q].n_ref += 1
+        if q == nc -> break
+        q = p.ncs[q].next
+    }
+    ast.WRC_PRUNE
+}
+
+// sqlite3CreateColumnExpr: a TK_COLUMN for column `i_col` of FROM item
+// `i_src` of list `src`, its use recorded in the item's colUsed.
+create_column_expr: fn(db: conn.Conn, a: &ast.AST, src: Int, i_src: Int, i_col: Int) -> Int Never! {
+    e: ast.expr_alloc(a, tk.TK_COLUMN, None, false)
+    si: ast.src_item(a, src, i_src)
+    t: a.items[si].tab
+    a.exprs[e].y = t
+    a.exprs[e].itable = a.items[si].cursor
+    if db.tables[t].ipkey == i_col {
+        a.exprs[e].icolumn = -1
+    } else {
+        a.exprs[e].icolumn = i_col
+        if db.tables[t].tab_flags.bit_and(ast.TF_HAS_GENERATED) != 0 && db.tables[t].cols[i_col].col_flags.bit_and(conn.COLFLAG_GENERATED) != 0 {
+            ncol: db.tables[t].cols.len()
+            a.items[si].col_used = if ncol >= BMS -> ALLBITS else -> (1 << ncol) - 1
+        } else {
+            bit: if i_col >= BMS -> BMS - 1 else -> i_col
+            a.items[si].col_used = a.items[si].col_used.bit_or(1 << bit)
+        }
+    }
+    e
+}
+
+// notValidImpl: `msg` is not allowed in the context's kind of expression;
+// `e`, when given, becomes NULL; expression `at` locates the error.
+not_valid_impl: fn(p: cg.Parse, a: &ast.AST, nc: Int, msg: String, e: Int, at: Int) Never! {
+    f: p.ncs[nc].nc_flags
+    z_in := "partial index WHERE clauses"
+    if f.bit_and(ast.NC_IDX_EXPR) != 0 {
+        z_in = "index expressions"
+    } else if f.bit_and(ast.NC_IS_CHECK) != 0 {
+        z_in = "CHECK constraints"
+    } else if f.bit_and(ast.NC_GEN_COL) != 0 {
+        z_in = "generated columns"
+    }
+    off: ast.expr_offset(a, at)
+    ast.error_at(a, "{msg} prohibited in {z_in}", off)
+    if e >= 0 -> a.exprs[e].op = tk.TK_NULL
+}
+
+// sqlite3ResolveNotValid: notValidImpl when the context has a flag of `mask`.
+resolve_not_valid: fn(p: cg.Parse, a: &ast.AST, nc: Int, msg: String, mask: Int, e: Int, at: Int) Never! {
+    if p.ncs[nc].nc_flags.bit_and(mask) != 0 -> not_valid_impl(p, a, nc, msg, e, at)
+}
+
+// exprProbability: a TK_FLOAT in [0.0, 1.0] scaled to 0..134217728, or -1.
+expr_probability: fn(a: ast.AST, e: Int) -> Int Never! {
+    if a.exprs[e].op != tk.TK_FLOAT -> return -1
+    r: util.atof(a.exprs[e].token ?? [U8]{}, base.UTF8).value
+    if r > 1.0 -> return -1
+    Int.from_float(math.trunc(r * 134217728.0)) ?? -1
+}
+
+// The row-value size check of resolveExprStep's comparison operators.
+check_row_value: fn(a: &ast.AST, e: Int) Never! {
+    n_left: ast.vector_size(a, a.exprs[e].left)
+    n_right := 0
+    if a.exprs[e].op == tk.TK_BETWEEN {
+        x: a.exprs[e].x
+        n_right = ast.vector_size(a, ast.list_expr(a, x, 0))
+        if n_right == n_left -> n_right = ast.vector_size(a, ast.list_expr(a, x, 1))
+    } else {
+        n_right = ast.vector_size(a, a.exprs[e].right)
+    }
+    if n_left != n_right {
+        off: ast.expr_offset(a, e)
+        ast.error_at(a, "row value misused", off)
+    }
+}
+
+// resolveExprStep: the walk's expression callback, in the name context of
+// the innermost walk.
+resolve_expr_step: fn(p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> Int Never! {
+    nc: p.walks[cg.walk_top(p)].u
+    op: a.exprs[e].op
+    if op == tk.TK_ROW {
+        si: ast.src_item(a, p.ncs[nc].src, 0)
+        a.exprs[e].op = tk.TK_COLUMN
+        a.exprs[e].y = a.items[si].tab
+        a.exprs[e].itable = a.items[si].cursor
+        a.exprs[e].icolumn -= 1
+        a.exprs[e].aff = base.AFF_INTEGER
+    } else if op == tk.TK_NOTNULL || op == tk.TK_ISNULL {
+        // The NOT NULL strength reduction: x IS NULL is FALSE when x can
+        // never be NULL, and the references it made are forgotten.
+        saved := [Int]{}
+        q := nc
+        loop q >= 0 && saved.len() < 8 {
+            saved.push(p.ncs[q].n_ref)
+            q = p.ncs[q].next
+        }
+        _: cg.pwalk_expr(p, a, a.exprs[e].left)
+        if !expr_can_be_null(p.db, a, a.exprs[e].left) && !ast.in_rename(a) {
+            a.exprs[e].ivalue = if op == tk.TK_NOTNULL -> 1 else -> 0
+            ast.set_flags(a, e, ast.EP_INT_VALUE)
+            a.exprs[e].op = tk.TK_INTEGER
+            q = nc
+            i := 0
+            loop q >= 0 && i < saved.len() {
+                p.ncs[q].n_ref = saved[i]
+                q = p.ncs[q].next
+                i += 1
+            }
+            ast.expr_delete(a, a.exprs[e].left)
+            a.exprs[e].left = -1
+        }
+        return ast.WRC_PRUNE
+    } else if op == tk.TK_ID {
+        return lookup_name(p, a, None, None, a.exprs[e].token ?? [U8]{}, nc, e)
+    } else if op == tk.TK_DOT {
+        left := a.exprs[e].left
+        resolve_not_valid(p, a, nc, "the \".\" operator", ast.NC_IDX_EXPR.bit_or(ast.NC_GEN_COL), -1, e)
+        right := a.exprs[e].right
+        z_db: if a.exprs[right].op != tk.TK_ID -> a.exprs[left].token else -> None
+        if a.exprs[right].op != tk.TK_ID {
+            left = a.exprs[right].left
+            right = a.exprs[right].right
+        }
+        if ast.in_rename(a) {
+            cg.rename_token_remap(p, cg.RENAME_EXPR, e, cg.RENAME_EXPR, right)
+            cg.rename_token_remap(p, cg.RENAME_EXPR_TAB, e, cg.RENAME_EXPR, left)
+        }
+        z_tab: a.exprs[left].token.copy()
+        z_col: a.exprs[right].token ?? [U8]{}
+        return lookup_name(p, a, z_db, z_tab, z_col, nc, e)
+    } else if op == tk.TK_FUNCTION {
+        return resolve_function(p, a, nc, e)
+    } else if op == tk.TK_SELECT || op == tk.TK_EXISTS || op == tk.TK_IN {
+        if ast.has(a, e, ast.EP_X_IS_SELECT) {
+            n_ref: p.ncs[nc].n_ref
+            if nc_has(p, nc, ast.NC_SELF_REF) {
+                not_valid_impl(p, a, nc, "subqueries", e, e)
+            } else {
+                _: cg.pwalk_select(p, a, a.exprs[e].x)
+            }
+            if n_ref != p.ncs[nc].n_ref -> ast.set_flags(a, e, ast.EP_VAR_SELECT)
+            nc_set(p, nc, ast.NC_SUBQUERY)
+        }
+    } else if op == tk.TK_VARIABLE {
+        resolve_not_valid(p, a, nc, "parameters", ast.NC_IS_CHECK.bit_or(ast.NC_PART_IDX).bit_or(ast.NC_IDX_EXPR).bit_or(ast.NC_GEN_COL), e, e)
+    } else if op == tk.TK_IS || op == tk.TK_ISNOT {
+        // x IS TRUE, x IS FALSE, x IS NOT TRUE and x IS NOT FALSE.
+        r: ast.skip_collate_and_likely(a, a.exprs[e].right)
+        if r >= 0 && (a.exprs[r].op == tk.TK_ID || a.exprs[r].op == tk.TK_TRUEFALSE) {
+            rc: resolve_expr_step(p, a, r)
+            if rc == ast.WRC_ABORT -> return ast.WRC_ABORT
+            if a.exprs[r].op == tk.TK_TRUEFALSE {
+                a.exprs[e].op2 = op
+                a.exprs[e].op = tk.TK_TRUTH
+                return ast.WRC_CONTINUE
+            }
+        }
+        check_row_value(a, e)
+    } else if op == tk.TK_BETWEEN || op == tk.TK_EQ || op == tk.TK_NE || op == tk.TK_LT || op == tk.TK_LE || op == tk.TK_GT || op == tk.TK_GE {
+        check_row_value(a, e)
+    }
+    if cg.n_err(a) > 0 -> ast.WRC_ABORT else -> ast.WRC_CONTINUE
+}
+
+// resolveExprStep's TK_FUNCTION case: find the function, check where it
+// may be used, and resolve its arguments, ORDER BY, window and FILTER.
+resolve_function: fn(p: &cg.Parse, a: &ast.AST, nc: Int, e: Int) -[DB]> Int Never! {
+    list: a.exprs[e].x
+    n: ast.list_len(a, list)
+    no_such_func := false
+    wrong_num_args := false
+    is_agg := false
+    enc: p.db.enc
+    saved_allow: p.ncs[nc].nc_flags.bit_and(ast.NC_ALLOW_AGG.bit_or(ast.NC_ALLOW_WIN))
+    win: if ast.is_window_func(a, e) -> a.exprs[e].y else -> -1
+    z_id: a.exprs[e].token ?? [U8]{}
+    def := cat.find_function(p.db, z_id, n, enc)
+    if def == None {
+        def = cat.find_function(p.db, z_id, -2, enc)
+        if def == None {
+            no_such_func = true
+        } else {
+            wrong_num_args = true
+        }
+    } else if def == .Val(d) {
+        is_agg = d.has_finalize
+        if d.flags.bit_and(conn.FUNC_UNLIKELY) != 0 {
+            ast.set_flags(a, e, ast.EP_UNLIKELY)
+            if n == 2 {
+                a.exprs[e].itable = expr_probability(a, ast.list_expr(a, list, 1))
+                if a.exprs[e].itable < 0 {
+                    t: ast.expr_text(a, e)
+                    off: ast.expr_offset(a, e)
+                    ast.error_at(a, "second argument to {t}() must be a constant between 0.0 and 1.0", off)
+                    p.ncs[nc].n_nc_err += 1
+                }
+            } else {
+                // TUNING: unlikely() is likelihood(X, 0.0625), likely() is
+                // likelihood(X, 0.9375).
+                a.exprs[e].itable = if d.name.len() > 0 && d.name[0] == (U8{117}) -> 8388608 else -> 125829120
+            }
+        }
+        auth: cg.auth_check(p, a, conn.AUTH_FUNCTION, None, Val(d.name.copy()), None)
+        if auth != base.OK {
+            if auth == conn.AUTH_DENY {
+                t: ast.expr_text(a, e)
+                off: ast.expr_offset(a, e)
+                ast.error_at(a, "not authorized to use function: {t}", off)
+                p.ncs[nc].n_nc_err += 1
+            }
+            a.exprs[e].op = tk.TK_NULL
+            return ast.WRC_PRUNE
+        }
+        if d.flags.bit_and(conn.FUNC_CONSTANT.bit_or(conn.FUNC_SLOCHNG)) != 0 -> ast.set_flags(a, e, ast.EP_CONST_FUNC)
+        if d.flags.bit_and(conn.FUNC_CONSTANT) == 0 {
+            resolve_not_valid(p, a, nc, "non-deterministic functions", ast.NC_IDX_EXPR.bit_or(ast.NC_PART_IDX).bit_or(ast.NC_GEN_COL), -1, e)
+        } else {
+            a.exprs[e].op2 = p.ncs[nc].nc_flags.bit_and(ast.NC_SELF_REF)
+            if nc_has(p, nc, ast.NC_FROM_DDL) -> ast.set_flags(a, e, ast.EP_FROM_DDL)
+        }
+        if d.flags.bit_and(conn.FUNC_INTERNAL) != 0 && a.ctx.nested == 0 && p.db.m_db_flags.bit_and(conn.DBFLAG_INTERNAL_FUNC) == 0 {
+            // Internal functions serve sqlite3NestedParse only.
+            no_such_func = true
+            def = None
+        } else if d.flags.bit_and(conn.FUNC_DIRECT.bit_or(conn.FUNC_UNSAFE)) != 0 && !ast.in_rename(a) {
+            expr_function_usable(p, a, e, d)
+        }
+    }
+
+    if !ast.in_rename(a) {
+        dflags: if def == .Val(d) -> d.flags else -> 0
+        no_value: if def == .Val(d) -> !d.has_value else -> false
+        t: ast.expr_text(a, e)
+        off: ast.expr_offset(a, e)
+        if no_value && win >= 0 {
+            ast.error_at(a, "{t}() may not be used as a window function", off)
+            p.ncs[nc].n_nc_err += 1
+        } else if (is_agg && !nc_has(p, nc, ast.NC_ALLOW_AGG)) || (is_agg && dflags.bit_and(conn.FUNC_WINDOW) != 0 && win < 0) || (is_agg && win >= 0 && !nc_has(p, nc, ast.NC_ALLOW_WIN)) {
+            z_type: if dflags.bit_and(conn.FUNC_WINDOW) != 0 || win >= 0 -> "window" else -> "aggregate"
+            ast.error_at(a, "misuse of {z_type} function {t}()", off)
+            p.ncs[nc].n_nc_err += 1
+            is_agg = false
+        } else if no_such_func && !p.db.init.busy {
+            ast.error_at(a, "no such function: {t}", off)
+            p.ncs[nc].n_nc_err += 1
+        } else if wrong_num_args {
+            ast.error_at(a, "wrong number of arguments to function {t}()", off)
+            p.ncs[nc].n_nc_err += 1
+        } else if !is_agg && ast.has(a, e, ast.EP_WIN_FUNC) {
+            ast.error_at(a, "FILTER may not be used with non-aggregate {t}()", off)
+            p.ncs[nc].n_nc_err += 1
+        } else if !is_agg && a.exprs[e].left >= 0 {
+            ast.order_by_aggregate_error(a, e)
+            p.ncs[nc].n_nc_err += 1
+        }
+        // Window functions may not be arguments of aggregate or window
+        // functions; aggregates may be arguments of window functions.
+        if is_agg -> nc_clear(p, nc, ast.NC_ALLOW_WIN.bit_or(if win < 0 -> ast.NC_ALLOW_AGG else -> 0))
+    } else if ast.has(a, e, ast.EP_WIN_FUNC) {
+        is_agg = true
+    }
+    _: cg.pwalk_expr_list(p, a, list)
+    if is_agg {
+        left: a.exprs[e].left
+        if left >= 0 -> _: cg.pwalk_expr_list(p, a, a.exprs[left].x)
+        if win >= 0 {
+            sel: p.ncs[nc].win_select
+            if !ast.in_rename(a) && def == .Val(d) {
+                defn: if sel >= 0 -> a.selects[sel].win_defn else -> -1
+                window_update(p, a, defn, win, d)
+            }
+            _: cg.pwalk_expr_list(p, a, a.windows[win].partition)
+            _: cg.pwalk_expr_list(p, a, a.windows[win].order_by)
+            _: cg.pwalk_expr(p, a, a.windows[win].filter)
+            ast.window_link(a, sel, win)
+            nc_set(p, nc, ast.NC_HAS_WIN)
+        } else {
+            a.exprs[e].op = tk.TK_AGG_FUNCTION
+            a.exprs[e].op2 = 0
+            if ast.has(a, e, ast.EP_WIN_FUNC) -> _: cg.pwalk_expr(p, a, a.windows[a.exprs[e].y].filter)
+            nc2 := nc
+            loop nc2 >= 0 && references_src_list(a, e, p.ncs[nc2].src) == 0 {
+                a.exprs[e].op2 = a.exprs[e].op2 + 1 + p.ncs[nc2].n_nested_select
+                nc2 = p.ncs[nc2].next
+            }
+            if nc2 >= 0 && def == .Val(d) {
+                a.exprs[e].op2 = a.exprs[e].op2 + p.ncs[nc2].n_nested_select
+                agg_bits: d.flags.bit_xor(conn.FUNC_ANYORDER).bit_and(conn.FUNC_MINMAX.bit_or(conn.FUNC_ANYORDER))
+                nc_set(p, nc2, ast.NC_HAS_AGG.bit_or(agg_bits))
+            }
+        }
+        nc_set(p, nc, saved_allow)
+    }
+    ast.WRC_PRUNE
+}
+
+// resolveAsName: the 1-based result-set term whose AS name bare identifier
+// `e` is, else 0.
+resolve_as_name: fn(a: ast.AST, elist: Int, e: Int) -> Int Never! {
+    if a.exprs[e].op != tk.TK_ID -> return 0
+    z_col: a.exprs[e].token
+    loop i in 0..<ast.list_len(a, elist) {
+        if a.lists[elist].items[i].eename == ast.ENAME_NAME && util.str_icmp_opt(a.lists[elist].items[i].ename, z_col) == 0 -> return i + 1
+    }
+    0
+}
+
+// resolveOrderByTermToExprList: the 1-based term of the result set of
+// SELECT `sel` that compound ORDER BY term `e` matches once resolved
+// (silently) against it, else 0.
+resolve_order_by_term_to_expr_list: fn(p: &cg.Parse, a: &ast.AST, sel: Int, e: Int) -[DB]> Int Never! {
+    elist: a.selects[sel].elist
+    mark: p.ncs.len()
+    ctx := nc_new(a.selects[sel].src, ast.NC_ALLOW_AGG.bit_or(ast.NC_UELIST).bit_or(ast.NC_NO_SELECT))
+    ctx.u = elist
+    nc: nc_push(p, ctx)
+    saved_a: a.suppress_err
+    saved_db: p.db.suppress_err
+    a.suppress_err = true
+    p.db.suppress_err = 1
+    rc: resolve_expr_names(p, a, nc, e)
+    a.suppress_err = saved_a
+    p.db.suppress_err = saved_db
+    nc_release(p, mark)
+    if rc != 0 -> return 0
+    loop i in 0..<ast.list_len(a, elist) {
+        ei: ast.list_expr(a, elist, i)
+        if ast.expr_compare(a, ei, e, -1) < 2 -> return i + 1
+    }
+    0
+}
+
+// printf's %r: the English ordinal of `v`.
+ordinal: fn(v: Int) -> String Never! {
+    x := v % 10
+    if x >= 4 || (v /% 10) % 10 == 1 -> x = 0
+    suffix: if x == 1 -> "st" else if x == 2 -> "nd" else if x == 3 -> "rd" else -> "th"
+    "{v}{suffix}"
+}
+
+// resolveOutOfRangeError.
+resolve_out_of_range_error: fn(a: &ast.AST, z_type: String, i: Int, mx: Int, at: Int) Never! {
+    off: ast.expr_offset(a, at)
+    ast.error_at(a, "{ordinal(i)} {z_type} BY term out of range - should be between 1 and {mx}", off)
+}
+
+// resolveCompoundOrderBy: turn each ORDER BY term of compound SELECT `s0`
+// into the number of the result column it names, matching terms against
+// the leftmost SELECT first. Nonzero on error.
+resolve_compound_order_by: fn(p: &cg.Parse, a: &ast.AST, s0: Int) -[DB]> Int Never! {
+    ob: a.selects[s0].order_by
+    if ob < 0 -> return 0
+    if ast.list_len(a, ob) > p.db.limits[ast.LIMIT_COLUMN] {
+        ast.error(a, "too many terms in ORDER BY clause")
+        return 1
+    }
+    loop i in 0..<ast.list_len(a, ob) -> a.lists[ob].items[i].done = false
+    s := s0
+    a.selects[s].next_sel = -1
+    loop a.selects[s].prior >= 0 {
+        pr: a.selects[s].prior
+        a.selects[pr].next_sel = s
+        s = pr
+    }
+    more_to_do := true
+    loop s >= 0 && more_to_do {
+        more_to_do = false
+        elist: a.selects[s].elist
+        loop i in 0..<ast.list_len(a, ob) {
+            if a.lists[ob].items[i].done -> next
+            item_e: a.lists[ob].items[i].expr
+            pe: ast.skip_collate_and_likely(a, item_e)
+            if pe < 0 -> next
+            i_col := -1
+            if ast.expr_is_integer(a, pe) == .Val(iv) {
+                i_col = iv
+                if i_col <= 0 || i_col > ast.list_len(a, elist) {
+                    n_elist: ast.list_len(a, elist)
+                    resolve_out_of_range_error(a, "ORDER", i + 1, n_elist, pe)
+                    return 1
+                }
+            } else {
+                i_col = resolve_as_name(a, elist, pe)
+                if i_col == 0 {
+                    // Match a resolved copy against the result set; when
+                    // renaming, resolve the term itself too.
+                    dup: ast.expr_dup(a, pe, 0)
+                    i_col = resolve_order_by_term_to_expr_list(p, a, s, dup)
+                    if ast.in_rename(a) && i_col > 0 -> _: resolve_order_by_term_to_expr_list(p, a, s, pe)
+                    ast.expr_delete(a, dup)
+                }
+            }
+            if i_col > 0 {
+                // The term becomes column number i_col, keeping its COLLATE.
+                if !ast.in_rename(a) {
+                    nw: ast.expr(a, tk.TK_INTEGER, [U8]{})
+                    ast.set_flags(a, nw, ast.EP_INT_VALUE)
+                    a.exprs[nw].ivalue = i_col
+                    if item_e == pe {
+                        a.lists[ob].items[i].expr = nw
+                    } else {
+                        parent := item_e
+                        loop a.exprs[a.exprs[parent].left].op == tk.TK_COLLATE -> parent = a.exprs[parent].left
+                        a.exprs[parent].left = nw
+                    }
+                    ast.expr_delete(a, pe)
+                    a.lists[ob].items[i].order_by_col = i_col
+                }
+                a.lists[ob].items[i].done = true
+            } else {
+                more_to_do = true
+            }
+        }
+        s = a.selects[s].next_sel
+    }
+    loop i in 0..<ast.list_len(a, ob) {
+        if !a.lists[ob].items[i].done {
+            ast.error(a, "{ordinal(i + 1)} ORDER BY term does not match any column in the result set")
+            return 1
+        }
+    }
+    0
+}
+
+// sqlite3ResolveOrderGroupBy: each ORDER BY or GROUP BY term of `ob` that
+// names a result column (iOrderByCol) becomes a copy of that column's
+// expression. Nonzero on error.
+resolve_order_group_by: fn(p: &cg.Parse, a: &ast.AST, sel: Int, ob: Int, z_type: String) -> Int Never! {
+    if ob < 0 || p.db.malloc_failed || ast.in_rename(a) -> return 0
+    if ast.list_len(a, ob) > p.db.limits[ast.LIMIT_COLUMN] {
+        ast.error(a, "too many terms in {z_type} BY clause")
+        return 1
+    }
+    elist: a.selects[sel].elist
+    loop i in 0..<ast.list_len(a, ob) {
+        obc: a.lists[ob].items[i].order_by_col
+        if obc != 0 {
+            if obc > ast.list_len(a, elist) {
+                n_elist: ast.list_len(a, elist)
+                resolve_out_of_range_error(a, z_type, i + 1, n_elist, -1)
+                return 1
+            }
+            ei: ast.list_expr(a, ob, i)
+            resolve_alias(a, elist, obc - 1, ei, 0)
+        }
+    }
+    0
+}
+
+// resolveRemoveWindowsCb's walker.
+RemoveWindowsWalker: struct {
+    sel: Int
+}
+
+impl RemoveWindowsWalker.SQLWalker {
+    walk_expr_cb: fn(&self, a: &ast.AST, e: Int) -> Int Never! {
+        if ast.has(a, e, ast.EP_WIN_FUNC) -> ast.window_unlink_from_select(a, a.exprs[e].y)
+        ast.WRC_CONTINUE
+    }
+    walk_has_select_cb: fn(&self) -> Bool Never! { false }
+    walk_select_cb: fn(&self, a: &ast.AST, s: Int) -> Int Never! { ast.WRC_CONTINUE }
+    walk_has_select_cb2: fn(&self) -> Bool Never! { false }
+    walk_select_cb2: fn(&self, a: &ast.AST, s: Int) Never! {}
+    walk_win_defn: fn(&self, a: &ast.AST) -> Bool Never! { false }
+}
+
+// windowRemoveExprFromSelect: the windows of `e` leave SELECT `sel`'s list.
+window_remove_expr_from_select: fn(a: &ast.AST, sel: Int, e: Int) Never! {
+    if a.selects[sel].win < 0 -> return
+    w := RemoveWindowsWalker{sel: sel}
+    _: ast.walk_expr<RemoveWindowsWalker>(w, a, e)
+}
+
+// resolveOrderGroupBy: resolve ORDER BY or GROUP BY list `ob` of SELECT
+// `sel` in context `nc`: AS names and integers name result columns, other
+// terms resolve normally and name the result column they equal. Nonzero
+// on error.
+resolve_order_group_by_nc: fn(p: &cg.Parse, a: &ast.AST, nc: Int, sel: Int, ob: Int, z_type: String) -[DB]> Int Never! {
+    n_result: ast.list_len(a, a.selects[sel].elist)
+    loop i in 0..<ast.list_len(a, ob) {
+        pe: ast.list_expr(a, ob, i)
+        pe2: ast.skip_collate_and_likely(a, pe)
+        if pe2 < 0 -> next
+        if z_type != "GROUP" {
+            i_col: resolve_as_name(a, a.selects[sel].elist, pe2)
+            if i_col > 0 {
+                a.lists[ob].items[i].order_by_col = i_col
+                next
+            }
+        }
+        if ast.expr_is_integer(a, pe2) == .Val(iv) {
+            if iv < 1 || iv > 65535 {
+                resolve_out_of_range_error(a, z_type, i + 1, n_result, pe2)
+                return 1
+            }
+            a.lists[ob].items[i].order_by_col = iv
+            next
+        }
+        a.lists[ob].items[i].order_by_col = 0
+        if resolve_expr_names(p, a, nc, pe) != 0 -> return 1
+        elist: a.selects[sel].elist
+        loop j in 0..<ast.list_len(a, elist) {
+            ej: ast.list_expr(a, elist, j)
+            if ast.expr_compare(a, pe, ej, -1) == 0 {
+                window_remove_expr_from_select(a, sel, pe)
+                a.lists[ob].items[i].order_by_col = j + 1
+            }
+        }
+    }
+    resolve_order_group_by(p, a, sel, ob, z_type)
+}
+
+// resolveSelectStep: the walk's SELECT callback.
+resolve_select_step: fn(p: &cg.Parse, a: &ast.AST, s0: Int) -[DB]> Int Never! {
+    if a.selects[s0].sel_flags.bit_and(ast.SF_RESOLVED) != 0 -> return ast.WRC_PRUNE
+    outer: p.walks[cg.walk_top(p)].u
+    if a.selects[s0].sel_flags.bit_and(ast.SF_EXPANDED) == 0 {
+        // A subquery of an expression: sqlite3SelectPrep expands it and
+        // comes back here.
+        g := p.up
+        g.select_prep(p, a, s0, outer)
+        return if cg.n_err(a) > 0 -> ast.WRC_ABORT else -> ast.WRC_PRUNE
+    }
+    mark: p.ncs.len()
+    nc: nc_push(p, nc_new(-1, 0))
+    rc: resolve_select_body(p, a, s0, outer, nc)
+    nc_release(p, mark)
+    rc
+}
+
+// resolveSelectStep's loop over the compound's terms, with sNC context `nc`.
+resolve_select_body: fn(p: &cg.Parse, a: &ast.AST, s0: Int, outer: Int, nc: Int) -[DB]> Int Never! {
+    is_compound: if a.selects[s0].prior >= 0 -> 1 else -> 0
+    n_compound := 0
+    s := s0
+    loop s >= 0 {
+        a.selects[s].sel_flags = a.selects[s].sel_flags.bit_or(ast.SF_RESOLVED)
+
+        // LIMIT and OFFSET may refer to no names.
+        p.ncs[nc] = nc_new(-1, 0)
+        p.ncs[nc].win_select = s
+        if resolve_expr_names(p, a, nc, a.selects[s].limit) != 0 -> return ast.WRC_ABORT
+
+        // A SELECT made by convertCompoundSelectToSubquery resolves its
+        // ORDER BY in the subquery.
+        converted: a.selects[s].sel_flags.bit_and(ast.SF_CONVERTED) != 0
+        if converted {
+            sub: a.items[ast.src_item(a, a.selects[s].src, 0)].select
+            a.selects[sub].order_by = a.selects[s].order_by
+            a.selects[s].order_by = -1
+        }
+
+        // The subqueries of the FROM clause.
+        if outer >= 0 -> p.ncs[outer].n_nested_select += 1
+        src: a.selects[s].src
+        loop i in 0..<ast.src_len(a, src) {
+            si: ast.src_item(a, src, i)
+            sub: a.items[si].select
+            if sub >= 0 && a.selects[sub].sel_flags.bit_and(ast.SF_RESOLVED) == 0 {
+                n_ref: if outer >= 0 -> p.ncs[outer].n_ref else -> 0
+                saved_ctx: p.f.auth_context
+                if a.items[si].name != None -> p.f.auth_context = a.items[si].name
+                resolve_select_names(p, a, sub, outer)
+                p.f.auth_context = saved_ctx
+                if cg.n_err(a) > 0 -> return ast.WRC_ABORT
+                if outer >= 0 -> a.items[si].is_correlated = p.ncs[outer].n_ref > n_ref
+            }
+        }
+        if outer >= 0 && p.ncs[outer].n_nested_select > 0 -> p.ncs[outer].n_nested_select -= 1
+
+        // The result set.
+        p.ncs[nc].nc_flags = ast.NC_ALLOW_AGG.bit_or(ast.NC_ALLOW_WIN)
+        p.ncs[nc].src = src
+        p.ncs[nc].next = outer
+        if resolve_expr_list_names(p, a, nc, a.selects[s].elist) != 0 -> return ast.WRC_ABORT
+        nc_clear(p, nc, ast.NC_ALLOW_WIN)
+
+        // Without aggregates in the result set or a GROUP BY, no other
+        // clause may have aggregates.
+        group_by: a.selects[s].group_by
+        if group_by >= 0 || nc_has(p, nc, ast.NC_HAS_AGG) {
+            bits: ast.SF_AGGREGATE.bit_or(p.ncs[nc].nc_flags.bit_and(ast.NC_MIN_MAX_AGG.bit_or(ast.NC_ORDER_AGG)))
+            a.selects[s].sel_flags = a.selects[s].sel_flags.bit_or(bits)
+        } else {
+            nc_clear(p, nc, ast.NC_ALLOW_AGG)
+        }
+
+        // The other clauses may refer to result-set aliases.
+        p.ncs[nc].u = a.selects[s].elist
+        nc_set(p, nc, ast.NC_UELIST)
+        if a.selects[s].having >= 0 {
+            if a.selects[s].sel_flags.bit_and(ast.SF_AGGREGATE) == 0 {
+                ast.error(a, "HAVING clause on a non-aggregate query")
+                return ast.WRC_ABORT
+            }
+            if resolve_expr_names(p, a, nc, a.selects[s].having) != 0 -> return ast.WRC_ABORT
+        }
+        if resolve_expr_names(p, a, nc, a.selects[s].where_expr) != 0 -> return ast.WRC_ABORT
+
+        // Table-valued function arguments.
+        loop i in 0..<ast.src_len(a, src) {
+            si: ast.src_item(a, src, i)
+            if a.items[si].is_tab_func && resolve_expr_list_names(p, a, nc, a.items[si].func_arg) != 0 -> return ast.WRC_ABORT
+        }
+
+        if ast.in_rename(a) {
+            w := a.selects[s].win_defn
+            loop w >= 0 {
+                if resolve_expr_list_names(p, a, nc, a.windows[w].order_by) != 0 || resolve_expr_list_names(p, a, nc, a.windows[w].partition) != 0 -> return ast.WRC_ABORT
+                w = a.windows[w].next_win
+            }
+        }
+
+        // ORDER BY and GROUP BY may not refer to outer queries.
+        p.ncs[nc].next = -1
+        nc_set(p, nc, ast.NC_ALLOW_AGG.bit_or(ast.NC_ALLOW_WIN))
+
+        if converted {
+            sub: a.items[ast.src_item(a, src, 0)].select
+            a.selects[s].order_by = a.selects[sub].order_by
+            a.selects[sub].order_by = -1
+        }
+
+        // A compound's rightmost ORDER BY waits for every term.
+        ob: a.selects[s].order_by
+        if ob >= 0 && is_compound <= n_compound && resolve_order_group_by_nc(p, a, nc, s, ob, "ORDER") != 0 -> return ast.WRC_ABORT
+        if p.db.malloc_failed -> return ast.WRC_ABORT
+        nc_clear(p, nc, ast.NC_ALLOW_WIN)
+
+        if group_by >= 0 {
+            if resolve_order_group_by_nc(p, a, nc, s, group_by, "GROUP") != 0 || p.db.malloc_failed -> return ast.WRC_ABORT
+            loop i in 0..<ast.list_len(a, group_by) {
+                if ast.has(a, ast.list_expr(a, group_by, i), ast.EP_AGG) {
+                    ast.error(a, "aggregate functions are not allowed in the GROUP BY clause")
+                    return ast.WRC_ABORT
+                }
+            }
+        }
+
+        nxt: a.selects[s].next_sel
+        if nxt >= 0 && ast.list_len(a, a.selects[s].elist) != ast.list_len(a, a.selects[nxt].elist) {
+            select_wrong_num_terms_error(a, nxt)
+            return ast.WRC_ABORT
+        }
+        s = a.selects[s].prior
+        n_compound += 1
+    }
+    if is_compound == 1 && resolve_compound_order_by(p, a, s0) != 0 -> return ast.WRC_ABORT
+    ast.WRC_PRUNE
+}
+
+// The resolver's walker (resolveExprStep and, unless the context has
+// NC_NoSelect, resolveSelectStep).
+ResolveWalker: struct {
+    select: Bool
+}
+
+impl ResolveWalker.WalkCb {
+    on_expr: fn(self, p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> Int Never! { resolve_expr_step(p, a, e) }
+    has_select: fn(self) -[]> Bool Never! { self.select }
+    on_select: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! { resolve_select_step(p, a, s) }
+    has_select2: fn(self) -[]> Bool Never! { false }
+    on_select2: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) Never! -[DB]> {}
+    win_defn: fn(self) -[]> Bool Never! { false }
+}
+
+// The aggregate and window flags each expression reports: NC_HasAgg,
+// NC_MinMaxAgg, NC_HasWin and NC_OrderAgg.
+NC_AGG_FLAGS: 134254608
+
+// sqlite3ResolveExprNames: resolve the names of expression `e` in context
+// `nc`; nonzero on error.
+resolve_expr_names: fn(p: &cg.Parse, a: &ast.AST, nc: Int, e: Int) -[DB]> Int Never! {
+    if e < 0 -> return base.OK
+    saved: p.ncs[nc].nc_flags.bit_and(NC_AGG_FLAGS)
+    nc_clear(p, nc, NC_AGG_FLAGS)
+    height: a.exprs[e].height
+    p.f.n_height += height
+    if ast.check_height(a, p.f.n_height) != base.OK -> return base.ERROR
+    w := ResolveWalker{select: !nc_has(p, nc, ast.NC_NO_SELECT)}
+    cg.walk_push(p, w, nc)
+    _: cg.pwalk_expr(p, a, e)
+    _: cg.walk_pop(p)
+    p.f.n_height -= height
+    ast.set_flags(a, e, p.ncs[nc].nc_flags.bit_and(ast.NC_HAS_AGG.bit_or(ast.NC_HAS_WIN)))
+    nc_set(p, nc, saved)
+    if p.ncs[nc].n_nc_err > 0 || cg.n_err(a) > 0 -> 1 else -> 0
+}
+
+// sqlite3ResolveExprListNames: resolve every expression of `list`.
+resolve_expr_list_names: fn(p: &cg.Parse, a: &ast.AST, nc: Int, list: Int) -[DB]> Int Never! {
+    if list < 0 -> return ast.WRC_CONTINUE
+    saved := 0
+    nc_clear(p, nc, NC_AGG_FLAGS)
+    loop i in 0..<ast.list_len(a, list) {
+        e: ast.list_expr(a, list, i)
+        if e < 0 -> next
+        height: a.exprs[e].height
+        p.f.n_height += height
+        if ast.check_height(a, p.f.n_height) != base.OK -> return ast.WRC_ABORT
+        w := ResolveWalker{select: true}
+        cg.walk_push(p, w, nc)
+        _: cg.pwalk_expr(p, a, e)
+        _: cg.walk_pop(p)
+        p.f.n_height -= height
+        if nc_has(p, nc, NC_AGG_FLAGS) {
+            ast.set_flags(a, e, p.ncs[nc].nc_flags.bit_and(ast.NC_HAS_AGG.bit_or(ast.NC_HAS_WIN)))
+            saved = saved.bit_or(p.ncs[nc].nc_flags.bit_and(NC_AGG_FLAGS))
+            nc_clear(p, nc, NC_AGG_FLAGS)
+        }
+        if cg.n_err(a) > 0 -> return ast.WRC_ABORT
+    }
+    nc_set(p, nc, saved)
+    ast.WRC_CONTINUE
+}
+
+// sqlite3ResolveSelectNames: resolve SELECT `s`, its compound terms and
+// its subqueries, inside context `outer_nc` (-1 for none).
+resolve_select_names: fn(p: &cg.Parse, a: &ast.AST, s: Int, outer_nc: Int) Never! -[DB]> {
+    w := ResolveWalker{select: true}
+    cg.walk_push(p, w, outer_nc)
+    _: cg.pwalk_select(p, a, s)
+    _: cg.walk_pop(p)
+}
+
+// sqlite3ResolveSelfReference: resolve `e` and `list` against table t
+// alone (-1 for no table): a CHECK constraint, partial index WHERE, index
+// expression or generated column as `typ` says (NC_IsCheck, NC_PartIdx,
+// NC_IdxExpr, NC_GenCol), or a VACUUM INTO argument (0).
+resolve_self_reference: fn(p: &cg.Parse, a: &ast.AST, t: Int, typ: Int, e: Int, list: Int) -[DB]> Int Never! {
+    flags := typ
+    // The fake one-item SrcList over the table (an empty one without).
+    src: ast.new_src_list(a)
+    if t >= 0 {
+        item := ast.new_src_item()
+        item.name = Val(p.db.tables[t].name.copy())
+        item.tab = t
+        item.cursor = -1
+        a.items.push(item)
+        a.srclists[src].items.push(a.items.len() - 1)
+        if p.db.tables[t].schema != p.db.dbs[conn.DB_TEMP].schema -> flags = flags.bit_or(ast.NC_FROM_DDL)
+    }
+    mark: p.ncs.len()
+    nc: nc_push(p, nc_new(src, flags.bit_or(ast.NC_IS_DDL)))
+    rc := resolve_expr_names(p, a, nc, e)
+    if rc == base.OK && list >= 0 -> rc = resolve_expr_list_names(p, a, nc, list)
+    nc_release(p, mark)
+    rc
+}
+
+// ---------------------------------------------------------------------------
+// Tests.
+
+// A Gen with no schema, authorizer or SELECT machinery.
+ResolveTestGen: struct {
+    calls: Int
+}
+
+impl ResolveTestGen.Gen {
+    read_schema: fn(self, p: &cg.Parse, a: &ast.AST) -[DB]> Int Never! { base.OK }
+    authorize: fn(self, p: &cg.Parse, code: Int, arg1: [U8]?, arg2: [U8]?, arg3: [U8]?) -[DB]> Int Never! { base.OK }
+    nested_parse: fn(self, p: &cg.Parse, a: &ast.AST, sql: [U8]) Never! -[DB]> {}
+    select: fn(self, p: &cg.Parse, a: &ast.AST, s: Int, dest: &cg.SelectDest) -[DB]> Int Never! { 0 }
+    select_prep: fn(self, p: &cg.Parse, a: &ast.AST, s: Int, outer_nc: Int) Never! -[DB]> {}
+    select_expand: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) Never! -[DB]> {}
+    eponymous_table: fn(self, p: &cg.Parse, a: &ast.AST, name: [U8]) -[DB]> Int Never! { -1 }
+}
+
+resolve_test_col: fn(name: String, not_null: Int) -> conn.Column Never! {
+    conn.Column{name: name.bytes(), typ: [U8]{}, coll: [U8]{}, not_null: not_null, ctype: 0, affinity: base.AFF_BLOB, sz_est: 1, h_name: util.str_ihash(name.bytes()), i_dflt: 0, col_flags: 0}
+}
+
+// A Parse over a connection with table t(a, b NOT NULL) and u(b).
+resolve_test_parse: fn() -> cg.Parse Never! {
+    db := conn.conn_new()
+    t := conn.table_new()
+    t.name = "t".bytes()
+    t.cols.push(resolve_test_col("a", 0))
+    t.cols.push(resolve_test_col("b", 1))
+    db.tables.push(t)
+    u := conn.table_new()
+    u.name = "u".bytes()
+    u.cols.push(resolve_test_col("b", 0))
+    db.tables.push(u)
+    g := ResolveTestGen{calls: 0}
+    cg.parse_new(db, g)
+}
+
+// The FROM list "t, u" over resolve_test_parse's tables (cursors 0 and 1).
+resolve_test_src: fn(a: &ast.AST) -> Int Never! {
+    src := ast.src_list_append(a, -1, Val("t".bytes()), None)
+    src = ast.src_list_append(a, src, Val("u".bytes()), None)
+    loop i in 0..<2 {
+        si: ast.src_item(a, src, i)
+        a.items[si].tab = i
+        a.items[si].cursor = i
+    }
+    src
+}
+
+#Test("names resolve to columns, the rowid and their cursors") {
+    a := ast.stmt_ast("")
+    p := resolve_test_parse()
+    src: resolve_test_src(a)
+    nc: nc_push(p, nc_new(src, 0))
+    e1: ast.expr(a, tk.TK_ID, "a".bytes())
+    assert(resolve_expr_names(p, a, nc, e1) == 0)
+    assert(a.exprs[e1].op == tk.TK_COLUMN && a.exprs[e1].itable == 0 && a.exprs[e1].icolumn == 0)
+    assert(a.items[ast.src_item(a, src, 0)].col_used == 1)
+    tq: ast.expr(a, tk.TK_ID, "u".bytes())
+    cq: ast.expr(a, tk.TK_ID, "b".bytes())
+    e2: ast.expr(a, tk.TK_DOT, [U8]{})
+    a.exprs[e2].left = tq
+    a.exprs[e2].right = cq
+    assert(resolve_expr_names(p, a, nc, e2) == 0)
+    assert(a.exprs[e2].op == tk.TK_COLUMN && a.exprs[e2].itable == 1 && a.exprs[e2].icolumn == 0)
+    assert(p.ncs[nc].n_ref == 2)
+    e3: ast.expr(a, tk.TK_ID, "_rowid_".bytes())
+    assert(resolve_expr_names(p, a, nc, e3) != 0)
+    assert(a.ctx.errmsg == Val("no such column: _rowid_"))
+    one: ast.src_list_append(a, -1, Val("t".bytes()), None)
+    a.items[ast.src_item(a, one, 0)].tab = 0
+    a.items[ast.src_item(a, one, 0)].cursor = 5
+    nc1: nc_push(p, nc_new(one, 0))
+    e4: ast.expr(a, tk.TK_ID, "ROWID".bytes())
+    assert(resolve_expr_names(p, a, nc1, e4) != 0)
+    assert(a.exprs[e4].op == tk.TK_COLUMN && a.exprs[e4].itable == 5 && a.exprs[e4].icolumn == -1 && a.exprs[e4].aff == base.AFF_INTEGER)
+}
+
+#Test("unknown and ambiguous names are errors") {
+    a := ast.stmt_ast("")
+    p := resolve_test_parse()
+    src: resolve_test_src(a)
+    nc: nc_push(p, nc_new(src, 0))
+    e1: ast.expr(a, tk.TK_ID, "b".bytes())
+    assert(resolve_expr_names(p, a, nc, e1) != 0)
+    assert(a.ctx.errmsg == Val("ambiguous column name: b"))
+    assert(a.exprs[e1].op == tk.TK_NULL && p.f.check_schema)
+    a2 := ast.stmt_ast("")
+    p2 := resolve_test_parse()
+    src2: resolve_test_src(a2)
+    nc2: nc_push(p2, nc_new(src2, 0))
+    e2: ast.expr(a2, tk.TK_ID, "zz".bytes())
+    assert(resolve_expr_names(p2, a2, nc2, e2) != 0)
+    assert(a2.ctx.errmsg == Val("no such column: zz"))
+}
+
+#Test("IS NULL on a NOT NULL column folds to FALSE, and aliases substitute") {
+    a := ast.stmt_ast("")
+    p := resolve_test_parse()
+    src: resolve_test_src(a)
+    nc: nc_push(p, nc_new(src, 0))
+    tq: ast.expr(a, tk.TK_ID, "t".bytes())
+    cq: ast.expr(a, tk.TK_ID, "b".bytes())
+    dot: ast.expr(a, tk.TK_DOT, [U8]{})
+    a.exprs[dot].left = tq
+    a.exprs[dot].right = cq
+    isnull: ast.expr(a, tk.TK_ISNULL, [U8]{})
+    a.exprs[isnull].left = dot
+    assert(resolve_expr_names(p, a, nc, isnull) == 0)
+    assert(a.exprs[isnull].op == tk.TK_INTEGER && a.exprs[isnull].ivalue == 0 && p.ncs[nc].n_ref == 0)
+    five: ast.expr(a, tk.TK_INTEGER, "5".bytes())
+    el: ast.expr_list_append(a, -1, five)
+    a.lists[el].items[0].ename = Val("x".bytes())
+    a.lists[el].items[0].eename = ast.ENAME_NAME
+    ctx := nc_new(src, ast.NC_UELIST)
+    ctx.u = el
+    nc2: nc_push(p, ctx)
+    ref: ast.expr(a, tk.TK_ID, "x".bytes())
+    assert(resolve_expr_names(p, a, nc2, ref) == 0)
+    assert(a.exprs[ref].op == tk.TK_INTEGER && a.exprs[ref].ivalue == 5)
+}
+
+// A call of function `name` with `n_args` arguments, each column a of
+// resolve_test_src's tables.
+resolve_test_call: fn(a: &ast.AST, name: String, n_args: Int) -> Int Never! {
+    list := -1
+    loop _ in 0..<n_args {
+        col: ast.expr(a, tk.TK_ID, "a".bytes())
+        list = ast.expr_list_append(a, list, col)
+    }
+    e: ast.expr(a, tk.TK_FUNCTION, name.bytes())
+    a.exprs[e].x = list
+    e
+}
+
+#Test("functions resolve by name and arity, and aggregates where they may be") {
+    a := ast.stmt_ast("")
+    p := resolve_test_parse()
+    src: resolve_test_src(a)
+    nc: nc_push(p, nc_new(src, ast.NC_ALLOW_AGG))
+    e1: resolve_test_call(a, "length", 1)
+    assert(resolve_expr_names(p, a, nc, e1) == 0)
+    arg: ast.list_expr(a, a.exprs[e1].x, 0)
+    assert(a.exprs[e1].op == tk.TK_FUNCTION && a.exprs[arg].op == tk.TK_COLUMN && !ast.has(a, e1, ast.EP_AGG))
+    e2: resolve_test_call(a, "COUNT", 1)
+    assert(resolve_expr_names(p, a, nc, e2) == 0)
+    assert(a.exprs[e2].op == tk.TK_AGG_FUNCTION && a.exprs[e2].op2 == 0 && ast.has(a, e2, ast.EP_AGG))
+    assert(cg.n_err(a) == 0)
+    nc0: nc_push(p, nc_new(src, 0))
+    e3: resolve_test_call(a, "count", 1)
+    assert(resolve_expr_names(p, a, nc0, e3) != 0)
+    assert(a.ctx.errmsg == Val("misuse of aggregate function count()"))
+    a2 := ast.stmt_ast("")
+    p2 := resolve_test_parse()
+    src2: resolve_test_src(a2)
+    nc2: nc_push(p2, nc_new(src2, 0))
+    e4: resolve_test_call(a2, "length", 2)
+    assert(resolve_expr_names(p2, a2, nc2, e4) != 0)
+    assert(a2.ctx.errmsg == Val("wrong number of arguments to function length()"))
+    a3 := ast.stmt_ast("")
+    p3 := resolve_test_parse()
+    src3: resolve_test_src(a3)
+    nc3: nc_push(p3, nc_new(src3, 0))
+    e5: resolve_test_call(a3, "nosuch", 1)
+    assert(resolve_expr_names(p3, a3, nc3, e5) != 0)
+    assert(a3.ctx.errmsg == Val("no such function: nosuch"))
+}
+
+#Test("a CHECK constraint resolves against its own table and refuses parameters") {
+    a := ast.stmt_ast("")
+    p := resolve_test_parse()
+    p.db.dbs.push(conn.DBSlot{name: "main".bytes(), bt: -1, safety_level: 0, b_sync_set: false, schema: 0})
+    p.db.dbs.push(conn.DBSlot{name: "temp".bytes(), bt: -1, safety_level: 0, b_sync_set: false, schema: 1})
+    e1: ast.expr(a, tk.TK_ID, "b".bytes())
+    assert(resolve_self_reference(p, a, 0, ast.NC_IS_CHECK, e1, -1) == 0)
+    assert(a.exprs[e1].op == tk.TK_COLUMN && a.exprs[e1].itable == -1 && a.exprs[e1].icolumn == 1)
+    e2: ast.expr(a, tk.TK_VARIABLE, "?".bytes())
+    assert(resolve_self_reference(p, a, 0, ast.NC_IS_CHECK, e2, -1) != 0)
+    assert(a.ctx.errmsg == Val("parameters prohibited in CHECK constraints"))
+}
+
+#Test("ordinals read as printf's %r writes them") {
+    assert(ordinal(1) == "1st" && ordinal(2) == "2nd" && ordinal(3) == "3rd" && ordinal(4) == "4th")
+    assert(ordinal(11) == "11th" && ordinal(12) == "12th" && ordinal(13) == "13th")
+    assert(ordinal(21) == "21st" && ordinal(102) == "102nd" && ordinal(111) == "111th")
+}
+
+#Test("result-set spans match database, table and column") {
+    item := ast.zero_item(-1)
+    item.ename = Val("main.t1.x".bytes())
+    item.eename = ast.ENAME_TAB
+    assert(match_ename(item, Val("X".bytes()), Val("T1".bytes()), Val("main".bytes()), false) == 1)
+    assert(match_ename(item, Val("x".bytes()), Val("t".bytes()), None, false) == 0)
+    assert(match_ename(item, Val("y".bytes()), None, None, false) == 0)
+    item.eename = ast.ENAME_ROWID
+    assert(match_ename(item, Val("rowid".bytes()), None, None, false) == 0)
+    assert(match_ename(item, Val("rowid".bytes()), None, None, true) == 2)
+}

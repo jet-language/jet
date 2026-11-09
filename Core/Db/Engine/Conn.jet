@@ -267,11 +267,45 @@ TXN_NONE: 0
 TXN_READ: 1
 TXN_WRITE: 2
 
-// The authorizer action codes the update hook reports (SQLITE_DELETE,
-// SQLITE_INSERT, SQLITE_UPDATE).
+// The authorizer's action codes (sqlite3.h SQLITE_CREATE_INDEX ..
+// SQLITE_RECURSIVE), which the update hook also reports (SQLITE_DELETE,
+// SQLITE_INSERT, SQLITE_UPDATE), and its answers (SQLITE_DENY,
+// SQLITE_IGNORE).
+AUTH_CREATE_INDEX: 1
+AUTH_CREATE_TABLE: 2
+AUTH_CREATE_TEMP_INDEX: 3
+AUTH_CREATE_TEMP_TABLE: 4
+AUTH_CREATE_TEMP_TRIGGER: 5
+AUTH_CREATE_TEMP_VIEW: 6
+AUTH_CREATE_TRIGGER: 7
+AUTH_CREATE_VIEW: 8
 AUTH_DELETE: 9
+AUTH_DROP_INDEX: 10
+AUTH_DROP_TABLE: 11
+AUTH_DROP_TEMP_INDEX: 12
+AUTH_DROP_TEMP_TABLE: 13
+AUTH_DROP_TEMP_TRIGGER: 14
+AUTH_DROP_TEMP_VIEW: 15
+AUTH_DROP_TRIGGER: 16
+AUTH_DROP_VIEW: 17
 AUTH_INSERT: 18
+AUTH_PRAGMA: 19
+AUTH_READ: 20
+AUTH_SELECT: 21
+AUTH_TRANSACTION: 22
 AUTH_UPDATE: 23
+AUTH_ATTACH: 24
+AUTH_DETACH: 25
+AUTH_ALTER_TABLE: 26
+AUTH_REINDEX: 27
+AUTH_ANALYZE: 28
+AUTH_CREATE_VTABLE: 29
+AUTH_DROP_VTABLE: 30
+AUTH_FUNCTION: 31
+AUTH_SAVEPOINT: 32
+AUTH_RECURSIVE: 33
+AUTH_DENY: 1
+AUTH_IGNORE: 2
 
 // The Vdbe.expired values (VdbeLink.expired): 1 re-prepares at the next
 // step, 2 lets the running statement finish first.
@@ -1085,6 +1119,8 @@ Conn: struct {
     n_statement: Int
     n_deferred_cons: Int
     n_deferred_imm_cons: Int
+    // xAuth is set (the Host holds the callback).
+    has_auth: Bool
 }
 
 init_info_new: fn() -> InitInfo Never! {
@@ -1178,6 +1214,7 @@ conn_new: fn() -> Conn Never! {
         n_statement: 0
         n_deferred_cons: 0
         n_deferred_imm_cons: 0
+        has_auth: false
     }
 }
 
