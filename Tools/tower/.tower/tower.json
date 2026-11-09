@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6710,
-    "rev": 96371,
+    "rev": 96373,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -92485,83 +92485,6 @@
       "completedAt": "2026-11-07T20:44:41.218Z"
     },
     {
-      "id": "c0ca4l7i",
-      "num": 6576,
-      "title": "Debug tier still generates Rust and runs rustc (JetDebug, JetLSP debug, Canvas native debug)",
-      "body": "Found reviewing #4717 c107 at dev 68624b3bb4. The native debug path is Rust-era: Compiler/JetDevserver/Source/Canvas/DebugSourceGit.jet:370 writes canvas_debug.rs and builds it; Compiler/JetLSP/Tests/Integration/Debug.jet:60-63 and DebugTests.jet:628-631 compile generated Rust with rustc; JetDebug's LineMap/RawFrame model is keyed by rust_file/rust_line (Compiler/JetDebug Tests Dap03.jet, Inferior.jet, LineMap.jet). Under G2 (no Rust anywhere) and D-EXEC2=A, debugging must map the native O0 image's own DWARF/line table to Jet source, with no generated Rust and no rustc. Pair with #6573 (the record-replay debug tier has no implementation). Fix: one cutover of JetDebug, the JetLSP debug engine and Canvas debug onto the native image; delete the Rust generation and rust_* fields.",
-      "kind": "bug",
-      "track": "sidequest",
-      "epoch": null,
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "JetDebug drives LLDB on the native O0 image's DWARF (frames, stops, locals); the Rust-era Dap, Inferior and LineMap/.jetmap/rust_* code is deleted; jet check Compiler/JetDebug reports 0 errors and its tests pass, including a live session",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev c013db1f26 (SemaParity): Dap/Dap02/Dap03/Inferior/LineMap deleted; Source/Native.jet drives the O0 native image under LLDB; jet check Compiler/JetDebug 0 errors (was 91); Compiler/JetDebug/Tests jet test 37 passed 0 failed, including the live session a_session_pauses_steps_and_reads_the_native_image (jet build --optimize=none + lldb 21.1.8: break prog.jet:2, local x:Int=0, backtrace, continue, exit 0), published base jet",
-          "at": "2026-11-05T23:08:29.575Z"
-        },
-        {
-          "n": 2,
-          "text": "Canvas debugging (DebugSourceGit.jet and the other JetDevserver debug files) builds the program natively with jet build --optimize=none and LLDB, never rustc; those files report 0 jet check problems (the rest of JetDevserver is #6582)",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev e5875c8c41 (CoreOwnership): debug closure has 0 jet check problems on all 4 sources in a scratch package; jet test 11/0 incl. a real build --optimize=none + LLDB pause/resume/stop; run_session_recorded/run_session_replay call sites removed. Core gap noted: no Mutex/AtomicU64 in core.sync, so DebugSessions is &self state on the single Canvas request task",
-          "at": "2026-11-06T02:03:37.746Z"
-        },
-        {
-          "n": 3,
-          "text": "JetLSP's debug tests build their fixtures natively, never with rustc",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev 30a20432b1 (CoreOwnership): Rust-era JetLSP/Tests/Integration/Debug.jet and DebugTests.jet deleted (they built fixtures with rustc against a removed DebugEngine API; jet check gave 210 errors). Their journeys run natively as tests/cases/debug rows (21 existing + loop_next_edges_are_line_mapped, structured_session_status_ignores_program_output). RustEraRatchet DEBUG_TIER drops both. cases --filter debug/ on s1 of HEAD: 13 PASS incl. both new rows and the 9 native CLI rows; 7 DAP rows KF #6386; 4 canvas FAIL + 1 REFUSED unchanged (c2)",
-          "at": "2026-11-06T01:37:03.784Z"
-        },
-        {
-          "n": 4,
-          "text": "A tests/cases row sets a breakpoint in a Jet source line and reads a Jet local through jet debug on the default tier",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev 48c09c37bc (SemaParity): tests/cases/debug/native_breakpoint_reads_a_jet_local.case PASS (break 2 hits prog.jet:2 in double(), print x = 0, bt #0 double() #1 run(), runs to program finished); chain full 2db7b4d68c+patch FIXED_POINT s2==s3 (jet 4981caa044), lldb 21.1.8",
-          "at": "2026-11-06T00:00:28.848Z"
-        },
-        {
-          "n": 5,
-          "text": "A missing LLDB is a registered diagnostic with what/why/fix text and a UI snapshot",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev 48c09c37bc (SemaParity): E2203 jet.DebuggerUnavailable row with What/Why/Fix registered; UI snapshot tests/cli/debug_lldb_missing_e2203.txt added and asserted by the same case (no lldb on PATH: exit 1, stderr = snapshot)",
-          "at": "2026-11-06T00:00:29.728Z"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "goals": [
-        "G2"
-      ],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-05T21:56:11.026Z",
-      "updated": "2026-11-06T03:38:34.151Z",
-      "updatedBy": "Main",
-      "completedAt": "2026-11-06T03:38:34.151Z"
-    },
-    {
       "id": "c0zyuv5p",
       "num": 6577,
       "title": "jet test AOT batch: claims that set env or cwd ICE the batch with no failing-claim attribution",
@@ -100304,6 +100227,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-09",
+          "by": "Main",
+          "text": "SchedLead-9 (raw clone threads, c1) conflicts with CFreeLead-fork1 (#6690 c3, queued for b7). Both grow the Thread.jet registry root from 96 to 104 bytes: fork1 for its gate word @96, SchedLead-9 for its reap list @96. fork1 lands first; SchedLead-9 must be rebased to put the reap list @104 (root 112) before it is integrated."
+        },
+        {
           "at": "2026-11-08",
           "by": "Main",
           "text": "D-FFI-CARRIER1 and D-FFI-SERIAL1 adversarial review done (Docs/audits/2026-11-08-D-FFI-CARRIER1-review.md, dev 4c315cc06c). Neither A holds unconditionally. Carrier A is a second carrier kind (I8; this card's log says no second carrier mechanism is built), and its migration cost, C TLS, fork/exit/signal and callback claims are unproved. Channel round trips measured 5.4-6.2 us, which is not an FFI cost. Compile-time C stops with E3010 (an I9 gap). A per-library gate does not make unsafe C safe: recursive entry still corrupted scratch state in a deterministic witness. Facts confirmed: C calls run on the task fiber stack (O0/O1/O2), and a C-linking image starts through __libc_start_main. The review added carrier G (one C-compatible worker kind for native programs) and serialization D (audited wrappers over Shared.guard_edit). Both ballots validate but are not postable until a redesign closes the 14 gap lines and passes a second review."
@@ -100384,7 +100312,7 @@
       "parentId": "c0lscvc9",
       "needsAcceptance": false,
       "created": "2026-11-08T15:46:55.183Z",
-      "updated": "2026-11-09T03:05:52.588Z",
+      "updated": "2026-11-09T04:06:06.079Z",
       "updatedBy": "Main",
       "criteriaLastN": 4
     },
@@ -101161,6 +101089,11 @@
         {
           "at": "2026-11-09",
           "by": "Main",
+          "text": "D-APP1 adversarial review 1 (AppReview3, GPT Sol): ENGINEERED-AWAY=no. The remaining downsides are restricted hosting, isolation, worker/task continuations, stale replicas/deadlocks, native adapter/FFI authority, a11y/IME/Find, permissions/files, host rendering differences, font coverage, latency/resources, resize/lifecycle, resumability, uncompiled APIs, and no all-platform evidence. It adds option E. Repaired drafts plus the audit are in BallotLead scratch (the audit moves to Docs/audits with the ballot). BallotLead-2 is redesigning; a fresh review follows. No build until a review finds nothing left."
+        },
+        {
+          "at": "2026-11-09",
+          "by": "Main",
           "text": "Owner 2026-11-08 ~19:55 rejected D-APP-WEB1 and D-APP-RUN1: \"the two open ballots are not consistent between eachother and the downsides are not engineered away. the goal is to have one unified framework that will work seamlessly between ALL platforms with consistent look and behavior so an app can be built once and used everywhere, with easy usability and functionality for the programmer, beginner magic and full expert control\". Both drafts deleted. BallotLead redesigns them as one coherent ballot, D-APP1, covering every platform, with no conditional recommendation and every downside engineered away. Two fresh sol reviews follow before it is posted. Evidence: Docs/audits/2026-11-08-unified-app-framework-review{,-2}.md."
         },
         {
@@ -101274,7 +101207,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-08T19:44:17.134Z",
-      "updated": "2026-11-09T03:05:51.205Z",
+      "updated": "2026-11-09T03:21:10.687Z",
       "updatedBy": "Main",
       "criteriaLastN": 7
     },
@@ -189193,6 +189126,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-09T04:06:06.079Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0x92nsv",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-09T03:21:10.687Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0l39twq",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-09T03:06:17.440Z",
       "by": "Main",

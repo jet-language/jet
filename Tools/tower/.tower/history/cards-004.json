@@ -84999,6 +84999,85 @@
       "completedAt": "2026-11-06T02:47:36.194Z",
       "questions": [],
       "retiredAt": "2026-11-09T03:05:41.589Z"
+    },
+    {
+      "id": "c0ca4l7i",
+      "num": 6576,
+      "title": "Debug tier still generates Rust and runs rustc (JetDebug, JetLSP debug, Canvas native debug)",
+      "body": "Found reviewing #4717 c107 at dev 68624b3bb4. The native debug path is Rust-era: Compiler/JetDevserver/Source/Canvas/DebugSourceGit.jet:370 writes canvas_debug.rs and builds it; Compiler/JetLSP/Tests/Integration/Debug.jet:60-63 and DebugTests.jet:628-631 compile generated Rust with rustc; JetDebug's LineMap/RawFrame model is keyed by rust_file/rust_line (Compiler/JetDebug Tests Dap03.jet, Inferior.jet, LineMap.jet). Under G2 (no Rust anywhere) and D-EXEC2=A, debugging must map the native O0 image's own DWARF/line table to Jet source, with no generated Rust and no rustc. Pair with #6573 (the record-replay debug tier has no implementation). Fix: one cutover of JetDebug, the JetLSP debug engine and Canvas debug onto the native image; delete the Rust generation and rust_* fields.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "JetDebug drives LLDB on the native O0 image's DWARF (frames, stops, locals); the Rust-era Dap, Inferior and LineMap/.jetmap/rust_* code is deleted; jet check Compiler/JetDebug reports 0 errors and its tests pass, including a live session",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev c013db1f26 (SemaParity): Dap/Dap02/Dap03/Inferior/LineMap deleted; Source/Native.jet drives the O0 native image under LLDB; jet check Compiler/JetDebug 0 errors (was 91); Compiler/JetDebug/Tests jet test 37 passed 0 failed, including the live session a_session_pauses_steps_and_reads_the_native_image (jet build --optimize=none + lldb 21.1.8: break prog.jet:2, local x:Int=0, backtrace, continue, exit 0), published base jet",
+          "at": "2026-11-05T23:08:29.575Z"
+        },
+        {
+          "n": 2,
+          "text": "Canvas debugging (DebugSourceGit.jet and the other JetDevserver debug files) builds the program natively with jet build --optimize=none and LLDB, never rustc; those files report 0 jet check problems (the rest of JetDevserver is #6582)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev e5875c8c41 (CoreOwnership): debug closure has 0 jet check problems on all 4 sources in a scratch package; jet test 11/0 incl. a real build --optimize=none + LLDB pause/resume/stop; run_session_recorded/run_session_replay call sites removed. Core gap noted: no Mutex/AtomicU64 in core.sync, so DebugSessions is &self state on the single Canvas request task",
+          "at": "2026-11-06T02:03:37.746Z"
+        },
+        {
+          "n": 3,
+          "text": "JetLSP's debug tests build their fixtures natively, never with rustc",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 30a20432b1 (CoreOwnership): Rust-era JetLSP/Tests/Integration/Debug.jet and DebugTests.jet deleted (they built fixtures with rustc against a removed DebugEngine API; jet check gave 210 errors). Their journeys run natively as tests/cases/debug rows (21 existing + loop_next_edges_are_line_mapped, structured_session_status_ignores_program_output). RustEraRatchet DEBUG_TIER drops both. cases --filter debug/ on s1 of HEAD: 13 PASS incl. both new rows and the 9 native CLI rows; 7 DAP rows KF #6386; 4 canvas FAIL + 1 REFUSED unchanged (c2)",
+          "at": "2026-11-06T01:37:03.784Z"
+        },
+        {
+          "n": 4,
+          "text": "A tests/cases row sets a breakpoint in a Jet source line and reads a Jet local through jet debug on the default tier",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 48c09c37bc (SemaParity): tests/cases/debug/native_breakpoint_reads_a_jet_local.case PASS (break 2 hits prog.jet:2 in double(), print x = 0, bt #0 double() #1 run(), runs to program finished); chain full 2db7b4d68c+patch FIXED_POINT s2==s3 (jet 4981caa044), lldb 21.1.8",
+          "at": "2026-11-06T00:00:28.848Z"
+        },
+        {
+          "n": 5,
+          "text": "A missing LLDB is a registered diagnostic with what/why/fix text and a UI snapshot",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 48c09c37bc (SemaParity): E2203 jet.DebuggerUnavailable row with What/Why/Fix registered; UI snapshot tests/cli/debug_lldb_missing_e2203.txt added and asserted by the same case (no lldb on PATH: exit 1, stderr = snapshot)",
+          "at": "2026-11-06T00:00:29.728Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G2"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-05T21:56:11.026Z",
+      "updated": "2026-11-06T03:38:34.151Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-11-06T03:38:34.151Z",
+      "questions": [],
+      "retiredAt": "2026-11-09T04:06:06.261Z"
     }
   ]
 }
