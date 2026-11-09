@@ -2965,10 +2965,12 @@ X64LiveUndefined: struct {
 // The symbols live code of the link inputs `bufs` references that no input
 // defines, as x64_link_executable's resolution and garbage collection count
 // them (a reference from collected code does not count), without laying out
-// an image. The inputs come back unchanged. A program's C closure is
-// realized only for the providers of these symbols (JetCli Host.jet
-// jet_cli_native_executable); inputs that don't load or have no entry give
-// none, and their link reports why.
+// an image. The inputs come back unchanged and alone: the objects the link
+// synthesizes after them (link_load_synth: the startup object, the linker
+// shims) are dropped, so bufs[i] is still the input names[i] names. A
+// program's C closure is realized only for the providers of these symbols
+// (JetCli Host.jet jet_cli_native_executable); inputs that don't load or
+// have no entry give none, and their link reports why.
 x64_link_live_undefined: fn(names: [String], bufs: &&[[U8]]) -> X64LiveUndefined Never! {
     c := link_context(bufs, LINK_BASE)
     link_load_inputs(c, names)
@@ -2981,7 +2983,9 @@ x64_link_live_undefined: fn(names: [String], bufs: &&[[U8]]) -> X64LiveUndefined
             link_collect(c, [Int]{entry_section}, linker_names)
         }
     }
-    X64LiveUndefined{symbols: c.undefined.move(), bufs: c.bufs.move()}
+    inputs := c.bufs.move()
+    loop inputs.len() > names.len() { _: inputs.pop() }
+    X64LiveUndefined{symbols: c.undefined.move(), bufs: inputs}
 }
 
 // A static executable whose debug information is in a side file.
