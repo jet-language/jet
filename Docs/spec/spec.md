@@ -2068,6 +2068,14 @@ is E0755 at the field, and each method that calls it is E0749. An
 `#FX: (...)` line in the body is the same cap. A type without `#FX` keeps its
 inferred rows unchanged.
 
+A type's inferred row is everything a value of it can reach: its methods'
+solved rows, the rows written on its function-typed fields, and the inferred
+rows of the types its fields and enum payloads hold, through lists, maps,
+optionals, results, tuples and type arguments. A trait's row is the union of
+its implementing types' rows. The rows are solved to a fixed point, so a
+recursive type, or a cycle of types that hold each other, settles on the
+union of every member's own effects.
+
 `jet explain effects <file>:<line>` prints every cap in force at a site,
 nearest first: its `#FX` blocks and lambdas, the enclosing function's row, the
 cap of the trait the method implements, the type rung, the module rungs (the
