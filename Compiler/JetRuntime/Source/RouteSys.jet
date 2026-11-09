@@ -343,6 +343,19 @@ sys_group_file: fn(user: I64, gid: I64, list: I64, look: I64, reader: I64, nscd:
     host_sample_out(result, available, value, errno)
 }
 
+// mknod(path, mode as u32, dev): Core.sys.mknod passes the file-type bits
+// (S_IFCHR or S_IFBLK) in `mode` and the Linux dev_t of makedev(major, minor).
+#Export(c) jet_sys_mknod_raw: fn(path: I64, mode: I64, dev: I64, available: I64, value: I64, errno: I64) {
+    native_mode: jet_int_owned_to_i64(mode)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    native_dev: jet_int_owned_to_i64(dev)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    name: fd_c_path(path)
+    result: host_call(I64{133}, name, native_mode.bit_and(I64{4294967295}), native_dev)
+    fd_c_path_drop(name, path)
+    host_sample_out(result, available, value, errno)
+}
+
 // getloadavg(avg, 3): (true, count, avg0, avg1, avg2). musl reads sysinfo's
 // three loads, each a 16-bit binary fraction; the doubles cross as their raw
 // f64 bits in the Float out slots. A host without sysinfo (the web) has no
