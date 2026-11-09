@@ -1,0 +1,19 @@
+# `c?.claim(l.move())` runs the call only on a present receiver: where the
+# receiver is absent the argument's owner still ends its lock at its scope
+# end, so every lock descriptor closes once and none leaks.
+fixture: optional_call_moves_keep_the_absent_receiver_owner.fixture
+env: NO_COLOR=1
+step: jet run --optimize=none main.jet
+exit: 0
+stdout: = optional_call_moves_keep_the_absent_receiver_owner.out
+step: jet run --optimize=basic main.jet
+exit: 0
+stdout: = optional_call_moves_keep_the_absent_receiver_owner.out
+step: jet run --optimize=full main.jet
+exit: 0
+stdout: = optional_call_moves_keep_the_absent_receiver_owner.out
+step: jet build main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = optional_call_moves_keep_the_absent_receiver_owner.out

@@ -1410,11 +1410,15 @@ ir_condition: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, condition: BodyIfCon
             if ir_failed(b) -> return -1
             result: ir_temp_like(m, b, first)
             ir_emit(b.f, IROp.Copy, result, first, -1, -1, b.line)
+            // The second test runs where the first held only: a variable it
+            // moves still owns its value where the first failed.
+            before: ir_own_states(b, b.bindings.len())
             ir_open_condition(m, p, b, first)
             bound: b.bindings.len()
             second: ir_condition(m, p, b, right, span)
             if ir_failed(b) -> return -1
             ir_emit(b.f, IROp.Copy, result, second, -1, -1, b.line)
+            then_states: ir_own_states(b, before.len())
             // A box the second test holds (ir_hold) is null where the first
             // test failed, so its drop does nothing there.
             hidden := [Int]{}
@@ -1427,6 +1431,8 @@ ir_condition: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, condition: BodyIfCon
                 loop slot in hidden -> ir_option_none(m, b, slot)
             }
             ir_end(b.f, b.line)
+            ir_set_own_states(b, before)
+            ir_meet_paths(m, b, first, then_states, false, false)
             return result
         }
         .IfLet(pattern, subject) -> return ir_option_test(m, p, b, pattern.shape, subject, span)
@@ -2823,11 +2829,18 @@ ir_short_circuit: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, is_and: Bool, lh
         test = ir_temp_like(m, b, left)
         ir_emit(b.f, IROp.Not, test, left, -1, -1, b.line)
     }
+    // `b` runs on one path only: a variable it moves still owns its value
+    // where `a` decided, and the paths meet after (ir_meet_paths).
+    before: ir_own_states(b, b.bindings.len())
     ir_open_if(b.f, test, b.line)
     right: ir_expr(m, p, b, rhs)
     if ir_failed(b) -> return -1
     ir_emit(b.f, IROp.Copy, result, right, -1, -1, b.line)
+    then_states: ir_own_states(b, before.len())
     ir_end(b.f, b.line)
+    ir_set_own_states(b, before)
+    rhs_stops: ir_never_type(ir_ty(p, b, rhs))
+    ir_meet_paths(m, b, test, then_states, rhs_stops, false)
     result
 }
 
@@ -3957,17 +3970,26 @@ ir_range_switch: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int, arm
     if ir_failed(b) -> return
     kind: ir_kind_of(m, b, value)
     if kind != .Int && kind != .Word && kind != .Char -> return ir_fail(b, span, "range switch on {ir_type_name(subject_ty)}")
-    opened := 0
+    // Each arm starts from the ownership before the switch; the arms' paths
+    // meet innermost first as their Ifs close (ir_close_arms).
+    before: ir_own_states(b, b.bindings.len())
+    tests := [Int]{}
+    arm_states := [[IROwnState]]{}
+    arm_leaves := [Bool]{}
     loop arm in arms {
         test: ir_in_range(m, b, value, arm.lo, arm.hi)
         ir_open_if(b.f, test, b.line)
         ir_stmts(m, p, b, arm.body)
+        tests.push(test)
+        arm_states.push(ir_own_states(b, before.len()))
+        arm_leaves.push(ir_stmts_leave(p, b, arm.body))
         ir_else(b.f, b.line)
-        opened += 1
+        ir_set_own_states(b, before)
         if ir_failed(b) -> return
     }
     ir_stmts(m, p, b, else_body)
-    loop _ in 0..<opened -> ir_end(b.f, b.line)
+    rest_leaves: ir_stmts_leave(p, b, else_body)
+    ir_close_arms(m, b, tests, arm_states, arm_leaves, rest_leaves)
     ir_release(m, b, value)
 }
 
@@ -3975,20 +3997,46 @@ ir_mixed_switch: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int, arm
     value: ir_expr(m, p, b, subject)
     if ir_failed(b) -> return
     b.subjects.push(value)
-    opened := 0
+    tests := [Int]{}
+    arm_states := [[IROwnState]]{}
+    arm_leaves := [Bool]{}
     loop arm in arms {
         test: ir_expr(m, p, b, arm.condition)
         if ir_failed(b) -> return
+        // An arm starts from the ownership after its test, which every
+        // later arm's path ran too.
+        before: ir_own_states(b, b.bindings.len())
         ir_open_if(b.f, test, b.line)
         ir_stmts(m, p, b, arm.body)
+        tests.push(test)
+        arm_states.push(ir_own_states(b, before.len()))
+        arm_leaves.push(ir_stmts_leave(p, b, arm.body))
         ir_else(b.f, b.line)
-        opened += 1
+        ir_set_own_states(b, before)
         if ir_failed(b) -> return
     }
-    if else_body == .Val(body) -> ir_stmts(m, p, b, body)
-    loop _ in 0..<opened -> ir_end(b.f, b.line)
+    rest_leaves := false
+    if else_body == .Val(body) {
+        ir_stmts(m, p, b, body)
+        rest_leaves = ir_stmts_leave(p, b, body)
+    }
+    ir_close_arms(m, b, tests, arm_states, arm_leaves, rest_leaves)
     _: b.subjects.pop()
     ir_release(m, b, value)
+}
+
+// Closes the Ifs of a chain of arms (each arm's else holds the next),
+// innermost first: each arm's path meets the rest's (ir_meet_paths), and the
+// rest leaves only when it and every arm inside it leave.
+ir_close_arms: fn(m: &IRModule, b: &IRBuilder, tests: [Int], arm_states: [[IROwnState]], arm_leaves: [Bool], rest_leaves: Bool) Never! {
+    rest := rest_leaves
+    index := tests.len() - 1
+    loop index >= 0 {
+        ir_end(b.f, b.line)
+        ir_meet_paths(m, b, tests[index], arm_states[index], arm_leaves[index], rest)
+        rest = rest && arm_leaves[index]
+        index -= 1
+    }
 }
 
 // Whether the instance being built binds type parameter
@@ -4720,7 +4768,7 @@ ir_match: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int, arms: [Bod
     if ir_failed(b) -> return
     b.subjects.push(value)
     // Each arm starts from the ownership before the match; the arms' paths
-    // meet innermost first as their Ifs close (ir_meet_paths).
+    // meet innermost first as their Ifs close (ir_close_arms).
     before: ir_own_states(b, b.bindings.len())
     tests := [Int]{}
     arm_states := [[IROwnState]]{}
@@ -4745,13 +4793,7 @@ ir_match: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int, arms: [Bod
         ir_stmts(m, p, b, body)
         rest_leaves = ir_stmts_leave(p, b, body)
     }
-    index := tests.len() - 1
-    loop index >= 0 {
-        ir_end(b.f, b.line)
-        ir_meet_paths(m, b, tests[index], arm_states[index], arm_leaves[index], rest_leaves)
-        rest_leaves = rest_leaves && arm_leaves[index]
-        index -= 1
-    }
+    ir_close_arms(m, b, tests, arm_states, arm_leaves, rest_leaves)
     _: b.subjects.pop()
     ir_release(m, b, value)
 }
@@ -5766,6 +5808,9 @@ ir_optional_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, base: 
     result: if row >= 0 -> ir_temp(m, b, row) else -> -1
     if result >= 0 -> ir_option_none(m, b, result)
     present: ir_option_is_some(m, b, subject)
+    // The call runs where `base` is present only: a variable its arguments
+    // move still owns its value where `base` is None.
+    before: ir_own_states(b, b.bindings.len())
     ir_open_if(b.f, present, b.line)
     mark: b.bindings.len()
     unwrapped: ir_option_payload(m, b, subject, inner_row)
@@ -5781,7 +5826,10 @@ ir_optional_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, base: 
         ir_release(m, b, called)
     }
     ir_truncate_bindings(b, mark)
+    then_states: ir_own_states(b, before.len())
     ir_end(b.f, b.line)
+    ir_set_own_states(b, before)
+    ir_meet_paths(m, b, present, then_states, false, false)
     ir_release(m, b, subject)
     if result >= 0 -> b.fresh[result] = ir_has_drop(m, b, result)
     result
@@ -7380,6 +7428,9 @@ ir_require_stop: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, kind: BodyRequire
         .Require(test, message) -> {
             condition: ir_expr(m, p, b, test)
             if ir_failed(b) || condition < 0 -> return -1
+            // The message runs on the stopping path only: a variable it
+            // moves still owns its value where the condition holds.
+            before: ir_own_states(b, b.bindings.len())
             if !always_stops {
                 bool_row: ir_type_row(m, Type.Bool) ?? 0
                 failed: ir_temp(m, b, bool_row)
@@ -7400,7 +7451,10 @@ ir_require_stop: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, kind: BodyRequire
             if ir_failed(b) -> return -1
             null: ir_word_const(m, b, 0)
             ir_stop(m, p, b, 0, text, null, null, report)
-            if !always_stops -> ir_end(b.f, b.line)
+            if !always_stops {
+                ir_end(b.f, b.line)
+                ir_set_own_states(b, before)
+            }
         }
         .RequireEq(left, right, hook) -> {
             left_slot: ir_expr(m, p, b, left)

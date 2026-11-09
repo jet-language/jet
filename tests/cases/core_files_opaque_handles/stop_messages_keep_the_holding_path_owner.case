@@ -1,0 +1,19 @@
+# The message of an `assert`, a `#Pre` or a `#Post` runs only where its check
+# fails and the program stops: where the check holds, an owner the message
+# moves still ends its lock at its scope end, so none leaks.
+fixture: stop_messages_keep_the_holding_path_owner.fixture
+env: NO_COLOR=1
+step: jet run --optimize=none main.jet
+exit: 0
+stdout: = stop_messages_keep_the_holding_path_owner.out
+step: jet run --optimize=basic main.jet
+exit: 0
+stdout: = stop_messages_keep_the_holding_path_owner.out
+step: jet run --optimize=full main.jet
+exit: 0
+stdout: = stop_messages_keep_the_holding_path_owner.out
+step: jet build main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = stop_messages_keep_the_holding_path_owner.out

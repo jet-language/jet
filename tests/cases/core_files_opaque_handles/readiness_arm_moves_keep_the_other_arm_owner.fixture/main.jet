@@ -1,0 +1,62 @@
+use files: core.files
+
+// Lock descriptors this process holds open (fds whose target ends `.lk`).
+held: fn() -[FS]> Int {
+    count := 0
+    names: files.list_dir("/proc/self/fd") ?? panic("list /proc/self/fd")
+    loop entry in names {
+        target: files.read_link(entry.path) ?? ""
+        if target.ends_with(".lk") -> count += 1
+    }
+    count
+}
+
+lock: fn(name: String) -[FS, Env]> FileLock {
+    files.lock(name) ?? panic("lock {name}")
+}
+
+consume_lock: fn(&&l: FileLock) -[FS]> Int {
+    held()
+}
+
+// Only the selected arm of a readiness table runs: the 0ms timer wins, so
+// the arm that moves the lock does not run and the parameter still owns it.
+moving_arm_last: fn(&&l: FileLock) -[FS]> Int {
+    result := 0
+    if {
+        after 0ms -> result = 2
+        after 10s -> result = consume_lock(l.move())
+    }
+    result
+}
+
+moving_arm_first: fn(&&l: FileLock) -[FS]> Int {
+    result := 0
+    if {
+        after 10s -> result = consume_lock(l.move())
+        after 0ms -> result = 3
+    }
+    result
+}
+
+// The moving arm is the one selected.
+moving_arm_selected: fn(&&l: FileLock) -[FS]> Int {
+    result := 0
+    if {
+        after 0ms -> result = consume_lock(l.move())
+        after 10s -> result = 4
+    }
+    result
+}
+
+run: fn() -[IO, FS, Env]> {
+    loop name in ["a", "b", "c"] {
+        files.write("{name}.lk", "") ?? panic("write {name}")
+    }
+    last: moving_arm_last(lock("a.lk"))
+    print("moving arm last {last} {held()}")
+    first: moving_arm_first(lock("b.lk"))
+    print("moving arm first {first} {held()}")
+    selected: moving_arm_selected(lock("c.lk"))
+    print("moving arm selected {selected} {held()}")
+}

@@ -1,0 +1,50 @@
+use files: core.files
+
+// Lock descriptors this process holds open (fds whose target ends `.lk`).
+held: fn() -[FS]> Int {
+    count := 0
+    names: files.list_dir("/proc/self/fd") ?? panic("list /proc/self/fd")
+    loop entry in names {
+        target: files.read_link(entry.path) ?? ""
+        if target.ends_with(".lk") -> count += 1
+    }
+    count
+}
+
+lock: fn(name: String) -[FS, Env]> FileLock {
+    files.lock(name) ?? panic("lock {name}")
+}
+
+consume_lock: fn(&&l: FileLock) -[FS]> Int {
+    held()
+}
+
+// The test after `&&` runs only where the pattern matched: where `n` is
+// absent the parameter still owns the lock, which closes as this returns.
+pattern_and: fn(&&l: FileLock, n: Int?) -[FS]> Int {
+    result := 0
+    if n == .Val(v) && consume_lock(l.move()) > v {
+        result = 1
+    }
+    result
+}
+
+// The same with a body that leaves.
+pattern_and_return: fn(&&l: FileLock, n: Int?) -[FS]> Int {
+    if n == .Val(v) && consume_lock(l.move()) > v -> return 1
+    0
+}
+
+run: fn() -[IO, FS, Env]> {
+    loop name in ["a", "b", "c", "d"] {
+        files.write("{name}.lk", "") ?? panic("write {name}")
+    }
+    present: pattern_and(lock("a.lk"), Val(0))
+    print("pattern and, present {present} {held()}")
+    absent: pattern_and(lock("b.lk"), None)
+    print("pattern and, absent {absent} {held()}")
+    present_return: pattern_and_return(lock("c.lk"), Val(0))
+    print("pattern and return, present {present_return} {held()}")
+    absent_return: pattern_and_return(lock("d.lk"), None)
+    print("pattern and return, absent {absent_return} {held()}")
+}
