@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6727,
-    "rev": 96506,
+    "nextNum": 6728,
+    "rev": 96511,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -102225,6 +102225,72 @@
       "created": "2026-11-09T14:50:17.686Z",
       "updated": "2026-11-09T14:50:17.686Z",
       "updatedBy": "Main"
+    },
+    {
+      "id": "c0j3st66",
+      "num": 6727,
+      "title": "I1: boxed trait values are never dropped, so every trait value leaks its payload",
+      "body": "ReplMem (2026-11-09): a trait-value row (Compiler/JetIR BuildTypes.jet:286) is a Pointer row with no drop and no clone, so a boxed trait value has no drop glue and its payload leaks. A strong_count probe leaks one per binding. In the compiler, Pipeline.jet's compiler_queries (a JetEvalCompilerQueryHost trait value) holds a Shared context whose eval_config.native keeps the whole JetEvalNativeSession (about 3.25 MB image plus the child) alive on every compile: the REPL residual of about 12 MB per turn. The fix gives trait values drop glue that dispatches on the payload's implementer, keeping today's observable copy and alias semantics as the spec states them, and handles move-receiver dynamic calls.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e5",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A trait value's payload is dropped exactly once on every path (scope end, reassignment, move, copy, early exit, panic unwind), proved by strong_count and lock-count cases at O0, O1, O2 and AOT that fail on the base compiler.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T14:54:50.367Z"
+        },
+        {
+          "n": 2,
+          "text": "The observable copy and alias semantics of trait values match the spec, unchanged, with a cases row per form (copy, move, pass, return, store in a collection, a dynamic call with a move receiver).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T14:54:51.613Z"
+        },
+        {
+          "n": 3,
+          "text": "A paired perf cell (dynamic dispatch in a hot loop) shows the drop glue's cost against the base, within the performance gate's rules.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T14:54:52.832Z"
+        },
+        {
+          "n": 4,
+          "text": "The REPL peak grows by less than 1 MB per turn over 30 turns.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T14:54:54.140Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-09T14:54:36.252Z",
+      "updated": "2026-11-09T14:54:54.140Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 4
     }
   ],
   "decisions": [
@@ -191060,6 +191126,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-09T14:54:54.140Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0j3st66",
+      "note": "#4 The REPL peak grows by less than 1 MB per turn over 30 turns"
+    },
+    {
+      "at": "2026-11-09T14:54:52.832Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0j3st66",
+      "note": "#3 A paired perf cell (dynamic dispatch in a hot loop) shows th"
+    },
+    {
+      "at": "2026-11-09T14:54:51.613Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0j3st66",
+      "note": "#2 The observable copy and alias semantics of trait values matc"
+    },
+    {
+      "at": "2026-11-09T14:54:50.368Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0j3st66",
+      "note": "#1 A trait value's payload is dropped exactly once on every pat"
+    },
+    {
+      "at": "2026-11-09T14:54:36.252Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0j3st66",
+      "note": "I1: boxed trait values are never dropped, so every trait value leaks its payload"
+    },
     {
       "at": "2026-11-09T14:50:17.686Z",
       "by": "Main",
