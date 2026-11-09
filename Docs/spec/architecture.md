@@ -192,8 +192,10 @@ runtime and looks up only the program's imports in that index; the bound
 bytes are a complete static executable at the
 run base. `jet run` reads only the image's first page and the bytes after its
 loaded segments for that bind, and maps the segments from the file
-(`Image/Loader.jet`). The step also builds Core's vendored sqlite3 and
-mbedtls archives (`foreign/<lib>/`) beside the pack; it packages no C
+(`Image/Loader.jet`). The step runs no C compiler or archiver: Core's
+vendored sqlite3 and mbedtls archives (`foreign/<lib>/`) beside the pack are
+the `vendored-c` step's (`Compiler/Toolchain/VendoredC.jet`), which the
+`runtime` step checks for Rust symbols and records; the pack packages no C
 platform archives, which a program with C takes from jet's C toolchain pack
 (foreign C, below). The key hashes the source inventory, checked ABI,
 lifecycle, backend inputs and the vendored archives. The accompanying
@@ -1527,12 +1529,14 @@ SQLite uses the sanctioned 3.45.0 amalgamation from `libsqlite3-sys` 0.28.0 in
 never a system SQLite. The upstream `sqlite3.c` SHA-256 is
 `7956a38f236a6be6c0bb30c96ba4f85f19e5a69f6beb6d2c62c9d246972a6775`.
 Core's vendored C (`Core/Vendor/Sqlite3`, `Core/Vendor/Mbedtls`) is compiled
-once when the toolchain is built: the `runtime` step of `jet build Compiler`
-builds each library under the native C policy and installs
-`jet-runtime/foreign/<lib>/lib<lib>.a`
-(with its LICENSE and VERSION) beside the pack. The archive digests are part of
-the runtime key and the vendored sources, flags and C compiler identity part of
-the pack recipe. A Core `c.<lib>` import links that archive, so neither jet's
+once when the toolchain is built: the `vendored-c` step of `jet build Compiler`
+(`Compiler/Toolchain/VendoredC.jet`), the one C the build still compiles,
+builds each library with the host C compiler under the native C policy and
+installs `jet-runtime/foreign/<lib>/lib<lib>.a` (with its LICENSE and VERSION)
+beside the pack. The `runtime` step runs no C compiler: it checks those
+archives, and their digests are part of the runtime key and the vendored
+sources, flags and C compiler identity part of the pack recipe. The step goes
+when SQLite and Mbed TLS are Jet. A Core `c.<lib>` import links that archive, so neither jet's
 self-compile nor a `core.db` or `core.net.tls` program needs a C compiler; only
 C a package declares itself is compiled at link time. User foreign
 dependencies are program link inputs; a runtime pack includes only the foreign
@@ -1550,9 +1554,10 @@ adds the host C compiler's `libgcc_eh.a`. With `CC`/`AR` named, or no engine,
 the closure links the musl `libc.a` a find_folder search chooses on
 LIBRARY_PATH and the host compiler's `libgcc_eh.a` and `libgcc.a`. The runtime
 pack packages none of them. Such a program links the Jet-only
-runtime object (`jet-runtime/jet_runtime_jet.o`) with them, not the runtime pack: the
-pack holds its own private, initialized libc, and a second copy beside it would
-run uninitialized. A program links only the C its live code calls: when only
+runtime object (`jet-runtime/jet_runtime_jet.o`) with them, not the runtime pack:
+the pack carries the startup of a program with no libc (`__jet_start`), while
+the linker starts this one through musl's `__libc_start_main`, which
+initializes the libc it links. A program links only the C its live code calls: when only
 checked foreign declarations name C (a C provider of an imported module, such
 as `core.data`'s import of `core.db` and SQLite), the linker's own collection
 over the program object and the pack (`x64_link_live_undefined` in

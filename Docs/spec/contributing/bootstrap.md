@@ -25,10 +25,10 @@ Its stage-2 compiler becomes the seed of the next release.
 
 A clone, the latest published release and a C toolchain are enough: no
 `Tools/agent/JetEnv.jet`, nothing in `HOME` and no Jet environment variables,
-only `git`, `curl`, `jq`, OpenSSL 3, a C compiler (`cc`, `ar` and `nm` on
-`PATH`) and static musl (its `libc.a` and `crt1.o` in a `LIBRARY_PATH`
-folder or a usual library folder such as `/usr/lib/musl/lib`); `nix develop`
-supplies all of them. This fetches the latest release, checks its signed
+only `git`, `curl`, `jq`, OpenSSL 3 and a C compiler and archiver (`cc` and
+`ar` on `PATH`), which compile Core's vendored SQLite and Mbed TLS; `nix
+develop` supplies all of them. A release tag whose own copy of this page also
+names `nm` and static musl needs those too. This fetches the latest release, checks its signed
 record, clones the release's tag, builds that compiler and its runtime pack
 with the release's seed, runs one row
 of the UI suite with it, runs an example, lands a patch on a scratch copy of
@@ -74,8 +74,9 @@ a checkout, from the Core sources built into it), and its identity from the
 `JET_COMPILER_IDENTITY` override both ([Environment
 variables](../reference/environment.md)). `jet build Compiler` builds the
 compiler and then, with it, the runtime pack it lowers (`jet-runtime/`) and
-its `IDENTITY`; the pack step compiles the runtime's vendored C with the
-host C compiler and links static musl's `libc.a`. A missing compiler or musl
+its `IDENTITY`. The pack holds no C and its step runs no C compiler; the
+`vendored-c` step compiles Core's vendored C beside it with the host C
+compiler and archiver. A missing `cc` or `ar`
 stops the build before any step runs and names what it searched. The testkit
 keeps its scratch in `$JET_SCRATCH_ROOT/testkit`, else `~/.cache/jet/testkit`.
 
@@ -97,8 +98,7 @@ payload, with the rules Tower applies when a ballot is posted
 Run it from a checkout of the commit you want to build, in the Nix
 development environment (`Tools/agent/JetEnv.jet` or `nix develop`): each
 `jet build Compiler` also makes the runtime pack the new compiler lowers, and
-that step compiles the runtime's vendored C with the host C toolchain and
-links the static musl `libc.a` it finds on `LIBRARY_PATH`, both of which the
+its `vendored-c` step compiles Core's vendored C with the host C toolchain the
 development environment supplies. `SEED` is the seed directory and `WORK` a
 scratch directory outside the checkout.
 

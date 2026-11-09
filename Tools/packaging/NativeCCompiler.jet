@@ -187,7 +187,7 @@ forbidden: fn(name: String) -> Bool { re.is_match(Regex{"_chk(?:_|$)"}, name) ||
     root: test_root()
     folders: process.env_get_or("LIBRARY_PATH", "").split(":").to_list()
     musl: loop folder in folders if folder != "" && files.is_file("{folder}/libc.a") && files.is_file("{folder}/crt1.o") -> folder.copy()
-    if musl.len() == 0 -> panic("LIBRARY_PATH must name the static musl `libc.a` folder the runtime pack links")
+    if musl.len() == 0 -> panic("LIBRARY_PATH must name the static musl `libc.a` folder a C program with Jet links")
     archives := [String]{"{musl[0]}/libc.a"}
     scratch: process.env_get_or("JET_TEST_SCRATCH_DIR", sys.temp_dir())
     files.create_dir_all(scratch) ?? panic("cannot create {scratch}")

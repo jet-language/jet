@@ -693,8 +693,9 @@ jet_cli_native_c_closure: fn(closure: JetCLIClosureCTools, facts: JetDriverForei
 // A user C closure or prepared Rust helper archive (static musl code with C
 // ABI exports) links the closure tools' platform archives (musl libc, the
 // compiler builtins and, for a Rust helper, the unwinder) once, with the
-// Jet-only runtime object. The runtime pack already holds a private,
-// initialized libc; a second libc beside it would be uninitialized.
+// Jet-only runtime object, not the runtime pack: the pack carries the startup
+// of a program with no libc (`__jet_start`), and the linker starts this one
+// through musl's `__libc_start_main`, which initializes the libc it links.
 // Programs without a foreign closure preserve the original link line exactly
 // and never resolve C tools.
 jet_cli_native_c_inputs: fn(facts: JetDriverForeignLinkFacts, rust_helper: String?, sources: JetCLIForeignSources, runtime_dir: String) -[FS, Env, Exec, Time.Wait]> JetCLIForeignInputs JetCLIForeignLinkError! {

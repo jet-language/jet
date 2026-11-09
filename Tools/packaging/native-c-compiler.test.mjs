@@ -50,7 +50,7 @@ test('native fixture and packaging drivers have no independent C compiler policy
 test('real native C witnesses have no glibc fortified imports and resolve against the admitted platform archives', t => {
   const musl = (process.env.LIBRARY_PATH ?? '').split(':').find(folder =>
     folder !== '' && existsSync(join(folder, 'libc.a')) && existsSync(join(folder, 'crt1.o')));
-  assert.ok(musl, 'LIBRARY_PATH must name the static musl libc.a folder the runtime pack links');
+  assert.ok(musl, 'LIBRARY_PATH must name the static musl libc.a folder a C program with Jet links');
   const scratch = process.env.JET_TEST_SCRATCH_DIR ?? tmpdir();
   mkdirSync(scratch, { recursive: true });
   const out = mkdtempSync(join(scratch, 'native-c-platform-census-'));
