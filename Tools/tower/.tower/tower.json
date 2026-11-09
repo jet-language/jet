@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6713,
-    "rev": 96419,
+    "rev": 96421,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -34,7 +34,7 @@
         "radar:e17"
       ]
     },
-    "completionCursor": "2026-11-08T10:52:31.050Z"
+    "completionCursor": "2026-11-09T07:42:28.183Z"
   },
   "epochs": [
     {
@@ -94533,7 +94533,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T21:37:13.788Z",
-      "updated": "2026-11-09T06:57:15.759Z",
+      "updated": "2026-11-09T07:44:19.525Z",
       "updatedBy": "Main",
       "criteriaLastN": 12
     },
@@ -186982,6 +186982,177 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-09T06:25:56.836Z"
+    },
+    {
+      "id": "D-JET-EXPLAIN-EFFECTS1",
+      "cardId": "c0ihjl6a",
+      "group": "cli",
+      "title": "The command that lists the effect caps in force at a site, nearest first",
+      "situation": "The effect-rung and type-rung rulings promise `jet explain effects` (every cap in force, nearest first) and `jet explain effects --caps` (each module cap with its file and line), card #6551. They do not fix the site it explains or its JSON shape, and today the command is E2104 (not built). The ratified CLI has `jet explain marker <file>:<line>` for one site and `jet explain log [<file|dir>]` for a listing with file and line. `jet explain <ref> --json` uses the `jet.report/v1` envelope. `jet inspect rights [TARGET]` lists every callable's declared and inferred rows against the application authority. The owner answered Q27 with option A on 2026-11-08; this ballot records that form with its alternatives and costs.",
+      "gist": "How do you ask Jet which effect limits apply to a line of code?",
+      "lesson": "`jet explain effects` prints every limit in force at a site, nearest first: the `#FX` block, the function row, the module cap, the package row and the run. Each line names the file and line that wrote it, and the last line names the effects the site reaches.",
+      "explainer": "A site is `<file>:<line>`, the innermost scope at that line. A bare `<file>` is that file's module, plus its `run` if it has one. No site means the entry `jet run` would pick, with the same selection rules and the same errors when it is ambiguous.\n\nThe output has one line per rung, nearest first. The rungs are `block` (an `#FX` region), `function` (the `-[…]>` row or `-[!E]>` denials) and `module` (`#FX` on the module). Then come `package` (the `authority` row or `deny`) and `run` (everything allowed unless denied; `--deny` wins). A rung that writes nothing prints `(none written)`, so the ladder is always the same shape. The last line names the effects the site reaches, each with the first call that reaches it, which is the same chain E0749 prints.\n\n`--caps` lists every module cap in the project, or under a given file or directory, as `file:line  #FX(…)  module`, sorted by path then line. `--json` uses the `jet.report/v1` envelope. The command shares one walker with `jet inspect rights`; it is the explain view of the same facts.",
+      "story": "Ana's `jet check` stops with E0749 in `push`. She runs `jet explain effects Source/sync.jet:14`. Jet lists the block cap, the function row, the module cap and the package deny, each with its file and line. It shows that the line reaches `Net.HTTP.Get` through `http.get`. She sees the module cap is the one that leaves it out and widens it.",
+      "inWild": "Rust's `cargo tree -e features` prints which features are on and why, but only for features. Deno's `deno info` lists a module's permissions requests only at run time. AWS IAM's policy simulator shows, for one action, every policy that allows or denies it, nearest first, with the deciding statement.",
+      "detail": "Option A is `jet explain effects [<file>[:<line>]] [--caps] [--json]`, the form ruled in Q27. A line outside any function starts at the module rung. A line inside a lambda gets its own `function` rung, then the enclosing function. A line inside `comptime` adds a `comptime` rung for the `#Impure` gate. A file with no `package.jet` shows `package (none written)`.\n\nA line past the end of the file, or `:0`, gets the existing `jet explain marker` refusal and its code. Generated code maps to the user site that produced it, as diagnostics do. A line holding more than one function explains the first one that starts on it; no column form is proposed. `--caps` with `:line` is a usage error.\n\nOption B folds the ladder into `jet inspect rights [TARGET]`, with `file:line` targets and a `--caps` filter.\n\nOption C names a function instead of a line: `jet explain effects <module>.<function>`.",
+      "options": [
+        {
+          "key": "A",
+          "name": "`jet explain effects [<file>[:<line>]]`",
+          "detail": "A site is a line, a file or the entry `jet run` would pick. One line per rung, nearest first, then what the site reaches. `--caps` lists every module cap; `--json` uses `jet.report/v1`.",
+          "code": "$ jet explain effects Source/sync.jet:14\neffects at Source/sync.jet:14, in `push`, nearest first\n  block     #FX(Net.HTTP)            Source/sync.jet:12\n  function  -[Net, Log]>             Source/sync.jet:9\n  module    #FX(Net, Log, FS.Read)   Source/sync.jet:1\n  package   deny: [Exec]             package.jet:4\n  run       everything else allowed; --deny wins\nreaches: Net.HTTP.Get via http.get (Source/sync.jet:14)"
+        },
+        {
+          "key": "B",
+          "name": "Fold it into `jet inspect rights`",
+          "detail": "`jet inspect rights` takes a `file:line` target and prints the same ladder; `--caps` becomes its filter. No `jet explain effects` command.",
+          "code": "$ jet inspect rights Source/sync.jet:14\nrights at Source/sync.jet:14, in `push`, nearest first\n  block     #FX(Net.HTTP)            Source/sync.jet:12\n  function  -[Net, Log]>             Source/sync.jet:9\n  module    #FX(Net, Log, FS.Read)   Source/sync.jet:1\n  package   deny: [Exec]             package.jet:4\n  run       everything else allowed; --deny wins"
+        },
+        {
+          "key": "C",
+          "name": "Name a function, not a line",
+          "detail": "`jet explain effects <module>.<function>` explains that function's rungs. No line form.",
+          "code": "$ jet explain effects sync.push\neffects in `sync.push`, nearest first\n  function  -[Net, Log]>             Source/sync.jet:9\n  module    #FX(Net, Log, FS.Read)   Source/sync.jet:1\n  package   deny: [Exec]             package.jet:4\n  run       everything else allowed; --deny wins"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "AWS IAM",
+          "note": "The policy simulator lists, for one action on one resource, each policy that applies and the statement that decides it.",
+          "code": "$ aws iam simulate-principal-policy --action-names s3:GetObject ...\nEvalDecision: explicitDeny\nMatchedStatements: [deny-prod-reads (policy prod-guard)]"
+        },
+        {
+          "lang": "Rust",
+          "note": "`cargo tree -e features` shows each enabled feature and the dependency edge that turned it on.",
+          "code": "$ cargo tree -e features -i serde\nserde v1.0.200\n└── serde feature \"derive\"\n    └── app (feature \"default\")"
+        },
+        {
+          "lang": "Deno",
+          "note": "Deno names the permission only when the program asks for it at run time; there is no static listing.",
+          "code": "$ deno run tool.ts\n⚠ Deno requests net access to \"example.org\". Allow? [y/n/A]"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "It keeps the spelling both rulings already name and reuses the ratified `file:line` grammar of `jet explain marker` and the `jet.report/v1` envelope. Every rung's data already exists: `#FX` regions, function rows, module caps, package authority and run rights. `explain` is where a beginner looks after a diagnostic.",
+        "tradeoff": "`jet explain` gains a site-taking subcommand next to `jet inspect rights`, so the two must share one walker to stay in step.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It amends two rulings that name `jet explain effects`, and puts a beginner's question under the whole-program `inspect` plane."
+          },
+          {
+            "key": "C",
+            "reason": "It cannot name a block or lambda rung, needs a second site grammar next to `file:line`, and overloaded or generic names need disambiguation."
+          }
+        ],
+        "losses": [
+          {
+            "loss": "Two commands print overlapping rights facts.",
+            "mitigation": "One walker serves both; `explain effects` is the nearest-first view of one site, `inspect rights` the whole-program table."
+          },
+          {
+            "loss": "A line with two one-line functions is ambiguous.",
+            "mitigation": "The first function that starts on the line is explained, and the output names it."
+          }
+        ]
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": "Run each option on the same line inside a `#FX` block in a function under a module cap in a package with a deny row. Check that every rung is listed nearest first with its file and line, that empty rungs print `(none written)`, and that the reaches line matches the chain E0749 prints.",
+      "surface": {
+        "gist": "How do you ask Jet which effect limits apply to a line of code?",
+        "lesson": "`jet explain effects` lists every limit in force at a site, nearest first, with where each is written and what the site reaches.",
+        "trio": {
+          "current": {
+            "note": "Today the command is not built.",
+            "code": "$ jet explain effects Source/sync.jet:14\nError [E2104]: `jet explain effects` is not built yet"
+          },
+          "wild": {
+            "lang": "AWS IAM",
+            "note": "The policy simulator names each policy that applies to one action and the one that decides.",
+            "code": "$ aws iam simulate-principal-policy --action-names s3:GetObject ...\nEvalDecision: explicitDeny"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "`jet explain effects <file>:<line>`",
+            "gist": "The ladder at a line, a file or the entry.",
+            "gains": [
+              "Ruled spelling",
+              "Same site grammar as `jet explain marker`"
+            ],
+            "losses": [
+              "Overlaps `jet inspect rights`"
+            ],
+            "proposed": {
+              "code": "$ jet explain effects Source/sync.jet:14\n  block     #FX(Net.HTTP)   Source/sync.jet:12\n  function  -[Net, Log]>    Source/sync.jet:9\n  ..."
+            }
+          },
+          {
+            "key": "B",
+            "name": "`jet inspect rights <file>:<line>`",
+            "gist": "The same ladder under the inspect plane.",
+            "gains": [
+              "One command for rights facts"
+            ],
+            "losses": [
+              "Amends two rulings",
+              "Hard for beginners to find"
+            ],
+            "proposed": {
+              "code": "$ jet inspect rights Source/sync.jet:14\n  block     #FX(Net.HTTP)   Source/sync.jet:12\n  ..."
+            }
+          },
+          {
+            "key": "C",
+            "name": "`jet explain effects sync.push`",
+            "gist": "Name a function instead of a line.",
+            "gains": [
+              "Stable across edits"
+            ],
+            "losses": [
+              "No block or lambda rung",
+              "Second site grammar"
+            ],
+            "proposed": {
+              "code": "$ jet explain effects sync.push\n  function  -[Net, Log]>    Source/sync.jet:9\n  ..."
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "The ruled spelling with the ratified line grammar, and every rung's facts already exist.",
+          "gains": [
+            "Beginner finds it after a diagnostic",
+            "Same walker as `jet inspect rights`"
+          ],
+          "losses": [
+            {
+              "loss": "Two commands overlap.",
+              "mitigation": "One walker serves both."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Amends two rulings and hides the ladder under inspect."
+            },
+            {
+              "key": "C",
+              "reason": "Cannot name a block or lambda rung."
+            }
+          ],
+          "tradeoff": "`jet explain` gains a site-taking subcommand beside `jet inspect rights`."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-09T07:44:19.525Z"
     }
   ],
   "questions": [
@@ -190041,6 +190212,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-09T07:44:19.525Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-JET-EXPLAIN-EFFECTS1",
+      "note": "The command that lists the effect caps in force at a site, nearest first"
+    },
+    {
+      "at": "2026-11-09T07:42:28.183Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-11-09T07:42:28.183Z"
+    },
     {
       "at": "2026-11-09T07:23:18.969Z",
       "by": "Main",
