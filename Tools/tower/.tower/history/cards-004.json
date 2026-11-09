@@ -85844,6 +85844,134 @@
       "completedAt": "2026-11-06T16:35:56.292Z",
       "questions": [],
       "retiredAt": "2026-11-09T16:45:07.200Z"
+    },
+    {
+      "id": "c04j9ahx",
+      "num": 4735,
+      "title": "Keep keyword-first named definitions; constrain unnamed aggregate type bodies",
+      "body": "D-DECL-FORM2=A keeps named struct/enum/trait/fn/module keyword-first. This supersedes D-DECL-FORM1 wording and reverses its A/B letter mapping: do NOT perform name-first declaration codemod. Name-first bindings still name values and distinct types; aliases follow D-ALIAS-BIND2=B and reexports D-VIS-REEXPORT1=A. Unnamed aggregate bodies belong only to recipe results.\n\nCurrent application amendment (2026-10-07, #27 clarified by #29/#31; Sol writes / Opus reviews #28):\nD-DECL-FORM2=A\nKeep named struct/enum/trait/fn/module keyword-first; refuse named RHS aggregate at module/file with machine-applicable keyword-first rewrite; constrain unnamed aggregates to recipe results, refusing field anonymous type with exact guidance; examples print 42/16.0/2 and feature headers/output unchanged; alias keyword retained for expression/recipe result under ALIAS=B, while VIS bare-path reexports omit it; register chosen law/docs/UI/editor witnesses.\nPaths: Compiler/JetParser/Source/Parser/{Items,Declarations/ItemHeads}.jet keep named keyword-first items and teach RHS named aggregate refusal; unnamed body eligibility only recipe result; formatter/fix/editor grammar/doc tooling\nRegistry/spec/UI/goldens: Legacy Syntax.rs named declaration rows remain keyword-first; Jet rows cite D-DECL-FORM2=A, keep struct/enum/trait/fn/module/alias; no mass keyword/header retirement; general value/distinct/recipe results still name-first, type-expression aliases require alias under B; Docs/spec/spec.md scoped named-definition versus RHS placement rule; syntax-decisions D-DECL-FORM2 supersedes D-DECL-FORM1 option mapping; declaration guide examples follow ALIAS=B; Point :: struct at module/file gets machine-applicable struct Point fix; field unnamed struct refuses name type at module or own recipe; recipe result valid; no broad header codemod snapshots; ok prints 42,16.0,2 with alias Rows :: [[String]]; feature examples unchanged headers/output; prep fn Pair -> unnamed struct and alias IntPair :: Pair(Int) after recipes land; nominal distinction unchanged\nTiming: DOCS/registry current-law annotation NOW; keyword-first status quo needs no declaration migration. Extra RHS refusal/recipe eligibility implementation is Jet-only at feature resumption unless required as a minimal existing-source port seam under #29 with ledger. CURRENT #29/#31: a MINIMAL seam necessary to port an existing Core row/runtime layer/test harness may also change the Rust half, registered as dies at cutover; all actual layer policy/carriers must still be ported to Jet. This exception does not permit duplicating new features. #28 Sol authors, Opus reviews. Features outside required port work resume after port/Rust exit; contract/docs/tests planning may be prepared now.\nOpen prerequisite/conflict: #4735 body still documents DECL-FORM1 A=name-first; NEW DECL-FORM2 A=keyword-first (letters reversed). No in-flight name-first declaration cutover found in STREAMS, OrphanAudit, branch-name census or RatifySyntax handoff; this is a bounded negative finding, not proof across every uncommitted worktree. ALIAS=B invalidates vote's unconditional IntPair :: recipe example: use alias.",
+      "kind": "idea",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06 (owner approved closing): D-DECL-FORM2=A and D-DECL-BINDING1=B are superseded by D-DECL-COLON1=A; every declaration is name: value. Unnamed records continue as D-RECORD-BRACE1=A and aliases as D-ALIAS-GENERIC1 on #6251; the declaration form is built under #6586 c11."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Owner deconfliction 2026-11-06: superseded. D-DECL-COLON1=A (ratified 2026-11-06) writes every declaration name: value (Point: struct { … }, area: fn(…) { … }), which replaces this card's keyword-first rule (D-DECL-FORM2=A) and the name :: fn form (D-DECL-BINDING1=B). The cutover is #6586; unnamed record types are D-RECORD-BRACE1=A on #6251."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Superseded: D-DECL-BINDING1=B (2026-11-01) and D-DECL-COLON1=A replaced D-DECL-FORM2=A's keyword-first rule. Named declarations are now name-first (Point: struct { … }, area: fn(…) { … }), landed in 6b9210090e. Do not follow this card's 'keep keyword-first, no name-first codemod' plan."
+        },
+        {
+          "at": "2026-10-07",
+          "by": "Pip",
+          "text": "D-DECL-FORM2=A ratified; application contract updated. No implementation/build/test or closure receipt claimed. Owners: unowned (DeclStyle1 research only; no live declaration implementation owner in STREAMS/branch census). Latest owner #29 permits only minimal port seams both halves, dies at cutover; #31 requires actual Jet ports."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Syntax.rs entry updated",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Superseded by D-DECL-COLON1=A (owner approved closing 2026-11-06); surviving parts are #6251 (D-RECORD-BRACE1, D-ALIAS-GENERIC1) and #6586 c11.",
+          "at": "2026-11-06T18:08:54.554Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 2,
+          "text": "syntax-decisions.md log entry",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Superseded by D-DECL-COLON1=A (owner approved closing 2026-11-06); surviving parts are #6251 (D-RECORD-BRACE1, D-ALIAS-GENERIC1) and #6586 c11.",
+          "at": "2026-11-06T18:08:55.473Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 3,
+          "text": "jet devtools grammars regenerated",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Superseded by D-DECL-COLON1=A (owner approved closing 2026-11-06); surviving parts are #6251 (D-RECORD-BRACE1, D-ALIAS-GENERIC1) and #6586 c11.",
+          "at": "2026-11-06T18:08:56.750Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 4,
+          "text": "snapshots re-blessed",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Superseded by D-DECL-COLON1=A (owner approved closing 2026-11-06); surviving parts are #6251 (D-RECORD-BRACE1, D-ALIAS-GENERIC1) and #6586 c11.",
+          "at": "2026-11-06T18:08:57.667Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 5,
+          "text": "D-DECL-FORM2=A: Keep named struct/enum/trait/fn/module keyword-first; refuse named RHS aggregate at module/file with machine-applicable keyword-first rewrite; constrain unnamed aggregates to recipe results, refusing field anonymous type with exact guidance; examples print 42/16.0/2 and feature headers/output unchanged; alias keyword retained for expression/recipe result under ALIAS=B, while VIS bare-path reexports omit it; register chosen law/docs/UI/editor witnesses.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Superseded by D-DECL-COLON1=A (owner approved closing 2026-11-06); surviving parts are #6251 (D-RECORD-BRACE1, D-ALIAS-GENERIC1) and #6586 c11.",
+          "at": "2026-11-06T18:08:58.599Z",
+          "closure": "obsolete"
+        }
+      ],
+      "refs": [
+        "D-DECL-FORM1",
+        "D-ALIAS-BIND2",
+        "D-GENERIC-TYPEFN1",
+        "D-SIG-AFTER1",
+        "$JET_STATE_ROOT/scratch/DeclStyle1/REPORT.md"
+      ],
+      "tags": [
+        "syntax",
+        "owner-notes-2026-10-07",
+        "wayfinder:research",
+        "superseded"
+      ],
+      "parentId": "c0w9o2sz",
+      "needsAcceptance": false,
+      "created": "2026-10-07T14:24:51.467Z",
+      "updated": "2026-11-06T18:09:00.235Z",
+      "updatedBy": "Main",
+      "goals": [],
+      "completedAt": "2026-11-06T18:09:00.235Z",
+      "questions": [
+        {
+          "id": "qnu3bbvb",
+          "cardId": "c04j9ahx",
+          "decisionId": "D-DECL-BINDING1",
+          "by": "owner",
+          "kind": "question",
+          "text": "for now I think we should include the fn, so it would be \"my_func :: fn(n: int) {n*2}\". it would be much easier to cut out the fn than it would be to try adding it back in.",
+          "status": "answered",
+          "answer": "Done: B (my_func :: fn(n: Int) { n * 2 }) is now the recommendation, with your reason recorded. Dropping fn later is a mechanical jet fix; adding it back would not be. The fn word also removes A's tuple-or-function parsing rule.",
+          "created": "2026-11-01T00:13:58.297Z",
+          "answeredAt": "2026-11-01",
+          "answeredBy": "Main"
+        }
+      ],
+      "retiredAt": "2026-11-09T18:18:24.781Z"
     }
   ]
 }

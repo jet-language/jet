@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 96704,
+    "rev": 96725,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -54743,118 +54743,6 @@
       "goals": []
     },
     {
-      "id": "c04j9ahx",
-      "num": 4735,
-      "title": "Keep keyword-first named definitions; constrain unnamed aggregate type bodies",
-      "body": "D-DECL-FORM2=A keeps named struct/enum/trait/fn/module keyword-first. This supersedes D-DECL-FORM1 wording and reverses its A/B letter mapping: do NOT perform name-first declaration codemod. Name-first bindings still name values and distinct types; aliases follow D-ALIAS-BIND2=B and reexports D-VIS-REEXPORT1=A. Unnamed aggregate bodies belong only to recipe results.\n\nCurrent application amendment (2026-10-07, #27 clarified by #29/#31; Sol writes / Opus reviews #28):\nD-DECL-FORM2=A\nKeep named struct/enum/trait/fn/module keyword-first; refuse named RHS aggregate at module/file with machine-applicable keyword-first rewrite; constrain unnamed aggregates to recipe results, refusing field anonymous type with exact guidance; examples print 42/16.0/2 and feature headers/output unchanged; alias keyword retained for expression/recipe result under ALIAS=B, while VIS bare-path reexports omit it; register chosen law/docs/UI/editor witnesses.\nPaths: Compiler/JetParser/Source/Parser/{Items,Declarations/ItemHeads}.jet keep named keyword-first items and teach RHS named aggregate refusal; unnamed body eligibility only recipe result; formatter/fix/editor grammar/doc tooling\nRegistry/spec/UI/goldens: Legacy Syntax.rs named declaration rows remain keyword-first; Jet rows cite D-DECL-FORM2=A, keep struct/enum/trait/fn/module/alias; no mass keyword/header retirement; general value/distinct/recipe results still name-first, type-expression aliases require alias under B; Docs/spec/spec.md scoped named-definition versus RHS placement rule; syntax-decisions D-DECL-FORM2 supersedes D-DECL-FORM1 option mapping; declaration guide examples follow ALIAS=B; Point :: struct at module/file gets machine-applicable struct Point fix; field unnamed struct refuses name type at module or own recipe; recipe result valid; no broad header codemod snapshots; ok prints 42,16.0,2 with alias Rows :: [[String]]; feature examples unchanged headers/output; prep fn Pair -> unnamed struct and alias IntPair :: Pair(Int) after recipes land; nominal distinction unchanged\nTiming: DOCS/registry current-law annotation NOW; keyword-first status quo needs no declaration migration. Extra RHS refusal/recipe eligibility implementation is Jet-only at feature resumption unless required as a minimal existing-source port seam under #29 with ledger. CURRENT #29/#31: a MINIMAL seam necessary to port an existing Core row/runtime layer/test harness may also change the Rust half, registered as dies at cutover; all actual layer policy/carriers must still be ported to Jet. This exception does not permit duplicating new features. #28 Sol authors, Opus reviews. Features outside required port work resume after port/Rust exit; contract/docs/tests planning may be prepared now.\nOpen prerequisite/conflict: #4735 body still documents DECL-FORM1 A=name-first; NEW DECL-FORM2 A=keyword-first (letters reversed). No in-flight name-first declaration cutover found in STREAMS, OrphanAudit, branch-name census or RatifySyntax handoff; this is a bounded negative finding, not proof across every uncommitted worktree. ALIAS=B invalidates vote's unconditional IntPair :: recipe example: use alias.",
-      "kind": "idea",
-      "track": "sidequest",
-      "epoch": "e3",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-06",
-          "by": "Main",
-          "text": "Deconfliction 2026-11-06 (owner approved closing): D-DECL-FORM2=A and D-DECL-BINDING1=B are superseded by D-DECL-COLON1=A; every declaration is name: value. Unnamed records continue as D-RECORD-BRACE1=A and aliases as D-ALIAS-GENERIC1 on #6251; the declaration form is built under #6586 c11."
-        },
-        {
-          "at": "2026-11-06",
-          "by": "Main",
-          "text": "Owner deconfliction 2026-11-06: superseded. D-DECL-COLON1=A (ratified 2026-11-06) writes every declaration name: value (Point: struct { … }, area: fn(…) { … }), which replaces this card's keyword-first rule (D-DECL-FORM2=A) and the name :: fn form (D-DECL-BINDING1=B). The cutover is #6586; unnamed record types are D-RECORD-BRACE1=A on #6251."
-        },
-        {
-          "at": "2026-11-06",
-          "by": "Main",
-          "text": "Superseded: D-DECL-BINDING1=B (2026-11-01) and D-DECL-COLON1=A replaced D-DECL-FORM2=A's keyword-first rule. Named declarations are now name-first (Point: struct { … }, area: fn(…) { … }), landed in 6b9210090e. Do not follow this card's 'keep keyword-first, no name-first codemod' plan."
-        },
-        {
-          "at": "2026-10-07",
-          "by": "Pip",
-          "text": "D-DECL-FORM2=A ratified; application contract updated. No implementation/build/test or closure receipt claimed. Owners: unowned (DeclStyle1 research only; no live declaration implementation owner in STREAMS/branch census). Latest owner #29 permits only minimal port seams both halves, dies at cutover; #31 requires actual Jet ports."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "Syntax.rs entry updated",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Superseded by D-DECL-COLON1=A (owner approved closing 2026-11-06); surviving parts are #6251 (D-RECORD-BRACE1, D-ALIAS-GENERIC1) and #6586 c11.",
-          "at": "2026-11-06T18:08:54.554Z",
-          "closure": "obsolete"
-        },
-        {
-          "n": 2,
-          "text": "syntax-decisions.md log entry",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Superseded by D-DECL-COLON1=A (owner approved closing 2026-11-06); surviving parts are #6251 (D-RECORD-BRACE1, D-ALIAS-GENERIC1) and #6586 c11.",
-          "at": "2026-11-06T18:08:55.473Z",
-          "closure": "obsolete"
-        },
-        {
-          "n": 3,
-          "text": "jet devtools grammars regenerated",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Superseded by D-DECL-COLON1=A (owner approved closing 2026-11-06); surviving parts are #6251 (D-RECORD-BRACE1, D-ALIAS-GENERIC1) and #6586 c11.",
-          "at": "2026-11-06T18:08:56.750Z",
-          "closure": "obsolete"
-        },
-        {
-          "n": 4,
-          "text": "snapshots re-blessed",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Superseded by D-DECL-COLON1=A (owner approved closing 2026-11-06); surviving parts are #6251 (D-RECORD-BRACE1, D-ALIAS-GENERIC1) and #6586 c11.",
-          "at": "2026-11-06T18:08:57.667Z",
-          "closure": "obsolete"
-        },
-        {
-          "n": 5,
-          "text": "D-DECL-FORM2=A: Keep named struct/enum/trait/fn/module keyword-first; refuse named RHS aggregate at module/file with machine-applicable keyword-first rewrite; constrain unnamed aggregates to recipe results, refusing field anonymous type with exact guidance; examples print 42/16.0/2 and feature headers/output unchanged; alias keyword retained for expression/recipe result under ALIAS=B, while VIS bare-path reexports omit it; register chosen law/docs/UI/editor witnesses.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Superseded by D-DECL-COLON1=A (owner approved closing 2026-11-06); surviving parts are #6251 (D-RECORD-BRACE1, D-ALIAS-GENERIC1) and #6586 c11.",
-          "at": "2026-11-06T18:08:58.599Z",
-          "closure": "obsolete"
-        }
-      ],
-      "refs": [
-        "D-DECL-FORM1",
-        "D-ALIAS-BIND2",
-        "D-GENERIC-TYPEFN1",
-        "D-SIG-AFTER1",
-        "$JET_STATE_ROOT/scratch/DeclStyle1/REPORT.md"
-      ],
-      "tags": [
-        "syntax",
-        "owner-notes-2026-10-07",
-        "wayfinder:research",
-        "superseded"
-      ],
-      "parentId": "c0w9o2sz",
-      "needsAcceptance": false,
-      "created": "2026-10-07T14:24:51.467Z",
-      "updated": "2026-11-06T18:09:00.235Z",
-      "updatedBy": "Main",
-      "goals": [],
-      "completedAt": "2026-11-06T18:09:00.235Z"
-    },
-    {
       "id": "c0vsqf8a",
       "num": 4741,
       "title": "Execution architecture: shared meaning, portability boundaries and reported quick-run waits",
@@ -60052,12 +59940,21 @@
         },
         {
           "n": 17,
-          "text": "Every existing gauntlet entry where Jet uses more source tokens than Python (wordfreq 4.1x, tensor-map-4k 1.8x, csvtransform 1.5x, bulkrename 1.5x, regex-find-all-4mb 1.4x, tzreport 1.3x, taskfile-cli 1.3x, fft-4096 1.2x, logreport 1.2x at 2026-11-06) has its missing conveniences named, each as a Core API gap card, so that composing library calls rather than hand-written helpers closes the gap.",
+          "text": "Every existing gauntlet entry where Jet uses more source tokens than Python (wordfreq 4.1x, tensor-map-4k 1.8x, csvtransform 1.5x, bulkrename 1.5x, regex-find-all-4mb 1.4x, tzreport 1.3x, taskfile-cli 1.3x, fft-4096 1.2x, logreport 1.2x at 2026-11-06) has its missing conveniences named on this card, so that composing library calls rather than hand-written helpers closes the gap.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-06T18:49:56.217Z"
+          "at": "2026-11-09T18:18:40.256Z"
+        },
+        {
+          "n": 18,
+          "text": "The nine Core conveniences named for c17 ($JET_SCRATCH_ROOT/lanes/PortsLead/c17-gaps.md, 2026-11-08) are built, each under a ratified API ballot (one ballot may cover several): (1) a tally (Counter) over an iterator; (2) a bounded split into a checked tuple; (3) regex full-match with typed captures; (4) width and zero-pad format specs in interpolation; (5) several aggregates per group in one pass and a grouped .to_map(); (6) whole-unit Duration accessors with no error path; (7) find-and-update of the first matching element; (8) whole-tensor reductions and negative indices in core.compute; (9) infallible forms where the type proves success. The two rewrites that need no new API (counts.top_n in wordfreq, text.count in regex-find-all-4mb) are applied, and each of the nine entries then uses no more source tokens than its Python twin (c14 bar 3).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T18:18:41.218Z"
         }
       ],
       "refs": [],
@@ -60070,12 +59967,12 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-20T14:41:14.806Z",
-      "updated": "2026-11-09T17:55:24.832Z",
+      "updated": "2026-11-09T18:18:41.218Z",
       "updatedBy": "Main",
       "goals": [
         "G4"
       ],
-      "criteriaLastN": 17
+      "criteriaLastN": 18
     },
     {
       "id": "c022g7qw",
@@ -63864,7 +63761,7 @@
     {
       "id": "c0wi8ere",
       "num": 5949,
-      "title": "Scripts ask once for permissions; -A skips the ask; basics are free",
+      "title": "Scripting measured against every peer: the ScriptBench gate, the run phases and the peer audit",
       "body": "Owner ruling, 2026-10-28. This replaces the old rule where a `#!` first line silently granted every permission.\n\nIn plain words: a Jet script gets no extra powers just by having a `#!` line. The first time it needs one (reading files, the network, and so on), Jet asks you in the terminal, once. Your answer is remembered for that exact script. If you already wrote `-A` (allow all), Jet does not ask. Printing, arguments, stdin, time, randomness and exit are always free.\n\nBehavior:\n1. A `#!` launch line no longer grants anything implicitly (today `jet_cli_source_invocation` in Compiler/JetCli/Source/Cli/Authority.jet sets `all = true` for any `#!/` file).\n2. `-A` (or `--allow=...`) written on the launch line, e.g. `#!/usr/bin/env -S jet -A`, applies as if typed. `./script` and `jet run script.jet` behave the same. `-A` on the command line works as today.\n3. Ask once: when the run needs a permission it was not given and stdin/stderr are a terminal, Jet asks before the program starts. Sema already knows the required effects, so one prompt lists every missing permission and its resource, for example \"read files under ./data\" or \"connect to the network\". It offers allow once, always allow this script, and no. \"Always\" is remembered against the script's content hash in the project's single top-level `.jet/` (or the user cache for loose scripts). If the content changes, Jet asks again.\n4. With -A present, Jet never asks. Outside a terminal (CI, pipes), Jet never asks either: it fails with the exact-grant error (5).\n5. Exact-grant errors name the smallest grant (e.g. `--allow=FS.Read:./data`) and also say that `-A` grants every effect. `jet fix` writes the chosen grant onto the launch line (scripts) or into package.jet (packages).\n6. Free basics: stdout/stderr printing, args, stdin, env-free time reads, randomness and exit never need a grant.\n7. `--verbose` under -A prints one line listing the effects the run actually used, so users learn what to narrow.\n\nOne meaning on every tier (I9): the prompt and grants live in the shared CLI authority path, not per backend.",
       "kind": "feature",
       "track": "sidequest",
@@ -63879,6 +63776,16 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-09",
+          "by": "Main",
+          "text": "D-SCRIPT-REAPPROVE1 now applies only to the remote-code prompt (logged on #6614)."
+        },
+        {
+          "at": "2026-11-09",
+          "by": "Main",
+          "text": "BoardPlanner review 2026-11-09 (dev 6a06b917cb). Retitled: the permission criteria are met or removed (owner Q13 2026-11-08; D-AUTH-DEFAULT1=A on #6614 replaces the prompt model). The open criteria are the ScriptBench measurement work folded in from #5981; the workloads now live in Tools/perf/scriptbench, and the scratch path c15 names is gone."
+        },
         {
           "at": "2026-11-08",
           "by": "Main",
@@ -64014,21 +63921,21 @@
         },
         {
           "n": 13,
-          "text": "(was #5981) (was #3104) Measure the whole scripting loop before claiming speed: Cold/warm/edit phases and prepare/first-call/repeated-call/release phases are separated.",
+          "text": "(was #5981) (was #3104) ScriptBench (Tools/perf/scriptbench) reports each workload's jet-run tier as three separate cells in cells.tsv: the first run with nothing kept, the warm run, and the run after a one-line edit; no card cites a jet-run number without naming its phase (receipt: a full run's cells.tsv).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-31T04:41:37.361Z"
+          "at": "2026-11-09T18:18:28.988Z"
         },
         {
           "n": 14,
-          "text": "(was #5981) (was #5905) Scripting comparison: Jet against Lua, JavaScript, TypeScript, Bash and Python on speed and on tokens and readability: the audit exists, every cell is measured, not estimated, and each",
+          "text": "(was #5981) (was #5905) Scripting comparison: an audit checked in under Docs/audits/ compares Jet with Lua, JavaScript, TypeScript, Bash and Python on speed, source tokens and readability (the #5072 c14 checklist); every cell is measured, not estimated, and each cell Jet loses names the card that owns it.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-31T04:41:38.526Z"
+          "at": "2026-11-09T18:18:30.029Z"
         },
         {
           "n": 15,
@@ -64094,6 +64001,15 @@
           "verifiedBy": null,
           "evidence": "aaa6331fc0 release candidate kit (chain s2 98d89707fb97975a): tests/ui/env_config_secret_redacted.jet, tests/ui/e1803_script_inline_authority.jet PASS. This row is the proof the precut audit named for this criterion.",
           "at": "2026-11-07T03:47:33.180Z"
+        },
+        {
+          "n": 22,
+          "text": "Every gated ScriptBench cell has a machine-ceiling reference in Tools/perf/asm-parity (a cells.json row naming the ScriptBench cell) that does the same work with the best known technique, and Jet/ceiling is at most 1.00 in cycles and bytes for each (AGENTS.md performance gate); w11's reference is #6085 c6. The root-cause cards #6081-#6089 close on their root and the peer floor (owner ruling 2026-11-09).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T18:18:48.924Z"
         }
       ],
       "refs": [
@@ -64110,12 +64026,12 @@
       "parentId": "c0svnelx",
       "needsAcceptance": false,
       "created": "2026-10-28T10:49:58.414Z",
-      "updated": "2026-11-08T18:43:21.838Z",
+      "updated": "2026-11-09T18:18:48.924Z",
       "updatedBy": "Main",
       "goals": [
         "G4"
       ],
-      "criteriaLastN": 21
+      "criteriaLastN": 22
     },
     {
       "id": "c050uwwc",
@@ -72356,7 +72272,7 @@
       "track": "epoch",
       "epoch": "e17",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "building",
       "priority": "P1",
       "plan": null,
       "checkSteps": null,
@@ -72429,12 +72345,12 @@
         },
         {
           "n": 5,
-          "text": "Total command characters of the 10 Jet one-liners are at most the total of the 10 Perl versions, counted by a checked-in script.",
+          "text": "A side-by-side table of the 10 one-liners in Jet, Perl and awk (text and character counts) is presented to the owner. The character total is a soft target: Jet at most Perl is the aim, and the owner reviews the side-by-sides and may override the count.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T21:05:38.566Z"
+          "at": "2026-11-09T18:18:45.867Z"
         },
         {
           "n": 6,
@@ -72487,7 +72403,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T21:05:38.566Z",
-      "updated": "2026-11-09T18:03:45.150Z",
+      "updated": "2026-11-09T18:18:45.867Z",
       "updatedBy": "Main",
       "goals": [
         "G4"
@@ -73296,7 +73212,9 @@
       "checkSteps": null,
       "probe": null,
       "visualMedia": [],
-      "blockedBy": [],
+      "blockedBy": [
+        "c0ih6z1d"
+      ],
       "assignee": null,
       "log": [
         {
@@ -73452,7 +73370,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T22:33:20.042Z",
-      "updated": "2026-11-08T18:43:25.105Z",
+      "updated": "2026-11-09T18:18:33.733Z",
       "updatedBy": "Main",
       "goals": [
         "G4"
@@ -73569,6 +73487,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-09",
+          "by": "Main",
+          "text": "Owner ruling 2026-11-09 (BoardPlanner C-G4-2): jet run always builds the program at full optimization (the Go model), superseding D-RUN-TIER1=B and the O0 rule for jet run in AGENTS.md I9; compile-time code is unchanged. ScriptLead writes the replacing ballot D-RUN-TIER2 (exact behavior: first-run cost, what is kept, jet dev), which gets an adversarial review and is posted before it is built."
+        },
+        {
           "at": "2026-11-08",
           "by": "Main",
           "text": "Main 2026-11-08 04:05 regression (blocks the a0_037 release): a kept program reused by plain jet run runs as a child of a waiting jet run that does not forward SIGINT, so `kill -INT <jet run pid>` leaves the program running. A fresh compile runs the program in-process, and SIGINT ends it. Lost cases: corelib/core_os_interrupt_delivery_matches_aot_jit_and_interpreter and core_os_interrupt_callback_forms_match_dev_tiers. Repro: $JET_SCRATCH_ROOT/lanes/Main/intr/probe2.py. G1Lead is fixing it by making the kept launch take the same in-process path, one mechanism."
@@ -73621,12 +73544,12 @@
         },
         {
           "n": 2,
-          "text": "ScriptBench workload w03, w05, w06, w14 (jet run), measured with the BENCH.md method (hyperfine -N, interleaved, same machine), beats every measured peer on warm wall, CPU and peak RSS (Jet/peer below 1.00), on the built binary and on `jet run`; same output on O0, O1 and O2.",
+          "text": "ScriptBench workloads w03 and w14 (Tools/perf/scriptbench), measured with the manifest method (hyperfine -N, interleaved, same machine), beat every measured peer on warm wall, CPU and peak RSS (Jet/peer below 1.00), on the built binary and on `jet run`; same output on O0, O1 and O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T22:33:24.863Z"
+          "at": "2026-11-09T18:18:43.148Z"
         },
         {
           "n": 5,
@@ -73681,6 +73604,15 @@
           "verifiedBy": null,
           "evidence": "7a7466e8c8 (TestSystemLead-2): ScriptCache frames only the directories the source walk enters, so a stopping run's .jet/reports/ no longer changes the tree-shape hash. Registry run a3 with the fixed compiler: JetCli/Tests/RunKeep.fixture/RunKeep PASS (before the fix, on s1, both run-keep.mjs and RunKeep.jet failed 'stopping program rerun: the kept program was replaced, not reused').",
           "at": "2026-11-07T19:08:45.750Z"
+        },
+        {
+          "n": 11,
+          "text": "jet run builds every program at full optimization (owner ruling 2026-11-09, C-G4-2) under the ratified D-RUN-TIER2 ballot that replaces D-RUN-TIER1; AGENTS.md I9 names the new rule; the first-run and warm-run cost is measured on ScriptBench and shown next to the release-binary cells.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T18:18:44.967Z"
         }
       ],
       "refs": [
@@ -73693,12 +73625,12 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T22:33:24.863Z",
-      "updated": "2026-11-08T08:55:34.876Z",
+      "updated": "2026-11-09T18:18:44.967Z",
       "updatedBy": "Main",
       "goals": [
         "G4"
       ],
-      "criteriaLastN": 10
+      "criteriaLastN": 11
     },
     {
       "id": "c0aqwnas",
@@ -73747,15 +73679,6 @@
           "verifiedBy": null,
           "evidence": "2d77541df1 (G1Lead): `group := M.get(K) ?? F; S; M[K] = group` lowers to the canonical &M[K] write window when S cannot observe the difference (no read of the map root in S, no early exit or ?, an immutable key root, group unnamed after the store, no closure cell). L0534 is narrowed to the shapes where the copy is semantically required. Probe receipt (--release, best of 3, taskset one core), times in s: N=25k/50k/100k/200k/400k: old 0.005/0.009/0.017/0.035/0.071, header 0.005/0.010/0.018/0.036/0.072, call 0.006/0.012/0.023/0.045/0.090, hand-written in-place 0.005/0.010/0.018/0.038/0.073, so linear and equal to the in-place form (the a0_036 seed was 0.149/0.595 at 25k/50k, quadratic). Front insert is quadratic only through its own memmove and equals the hand-written in-place insert (1.905 vs 1.914 at 400k). Checks: verify-tree OK; ui_lint map_group_round_trip PASS; golden MapGroupGrowsInPlace o0/o1/o2 PASS; a new case (an update left half way shows the same map on every tier) agrees on run/none/basic/release.",
           "at": "2026-11-08T10:39:17.107Z"
-        },
-        {
-          "n": 3,
-          "text": "ScriptBench workload w10, measured with the BENCH.md method (hyperfine -N, interleaved, same machine), beats every measured peer on warm wall, CPU and peak RSS (Jet/peer below 1.00), on the built binary and on `jet run`; same output on O0, O1 and O2.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-28T22:33:27.084Z"
         }
       ],
       "refs": [
@@ -73769,11 +73692,12 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T22:33:27.084Z",
-      "updated": "2026-11-08T10:39:17.107Z",
+      "updated": "2026-11-09T18:18:42.202Z",
       "updatedBy": "Main",
       "goals": [
         "G4"
-      ]
+      ],
+      "criteriaLastN": 3
     },
     {
       "id": "c0ccjkub",
@@ -83033,11 +82957,14 @@
       ],
       "refs": [],
       "tags": [],
-      "goals": [],
+      "goals": [
+        "G4",
+        "G11"
+      ],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T21:41:14.674Z",
-      "updated": "2026-11-06T18:41:51.583Z",
+      "updated": "2026-11-09T18:18:35.645Z",
       "updatedBy": "Main"
     },
     {
@@ -93496,7 +93423,7 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -93530,6 +93457,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-06T09:29:18.344Z"
+        },
+        {
+          "n": 2,
+          "text": "Authority flags (--allow, -A, --gate, --token, --allow-unofficial) have no setting: the census marks them never persisted, and a package.jet or user settings key for one is refused with a registered diagnostic (owner 2026-11-09); a cases row proves the refusal.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T18:18:36.645Z"
         }
       ],
       "refs": [],
@@ -93540,8 +93476,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T09:29:13.427Z",
-      "updated": "2026-11-09T17:44:57.570Z",
-      "updatedBy": "owner"
+      "updated": "2026-11-09T18:18:38.325Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 2
     },
     {
       "id": "c00ctwqw",
@@ -93882,6 +93819,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-09",
+          "by": "Main",
+          "text": "Owner ruling 2026-11-09: D-AUTH-DEFAULT1=A replaces the prompt model for local scripts. D-SCRIPT-REAPPROVE1=A (ratified 2026-10-28 on #5949) now applies only to the prompt D-AUTH-DEFAULT1 keeps, remote code: a comment or format edit keeps its approval, and a code edit asks again."
+        },
+        {
           "at": "2026-11-08",
           "by": "Main",
           "text": "Owner ruling 2026-11-08 (Q33 a): D-AUTH-DEFAULT1 covers the REPL. The REPL follows the program model: every effect allowed, a notice when the session effect set widens, --deny wins. Its separate TTY prompt (once/session/deny) and the piped E1803 are removed in the same cutover. EffectsLead builds it with the c2 docs."
@@ -94023,7 +93965,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T21:37:13.788Z",
-      "updated": "2026-11-09T17:18:07.248Z",
+      "updated": "2026-11-09T18:18:46.741Z",
       "updatedBy": "Main",
       "criteriaLastN": 12
     },
@@ -99350,12 +99292,12 @@
         },
         {
           "n": 3,
-          "text": "`jet cc hello.c` and `jet run hello.c` work on this development host: the E1275 sandbox refusal seen on 2026-11-08 is root-caused and fixed, and a fresh C compile finishes in seconds, not 75 s (receipt with times).",
+          "text": "`jet cc hello.c` and `jet run hello.c` work on this development host: the E1275 sandbox refusal seen on 2026-11-08 (Bubblewrap not on PATH) is fixed by shipping bwrap in the C toolchain pack (owner Q8 2026-11-08; #6697 replaces it with a Jet sandbox later), and a fresh C compile finishes in seconds, not 75 s (receipt with times).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-08T15:40:44.957Z"
+          "at": "2026-11-09T18:18:39.284Z"
         },
         {
           "n": 4,
@@ -99379,7 +99321,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-08T15:40:30.554Z",
-      "updated": "2026-11-08T18:43:24.039Z",
+      "updated": "2026-11-09T18:18:39.284Z",
       "updatedBy": "Main",
       "criteriaLastN": 4
     },
@@ -140401,232 +140343,6 @@
       "ratifiedAt": "2026-10-07"
     },
     {
-      "id": "D-DECL-FORM2",
-      "cardId": "c04j9ahx",
-      "group": "syntax",
-      "title": "Declaration form: keep struct Point, or name types first",
-      "situation": "A declaration gives something a name, such as a type called Point or a function called double. Today a named struct, enum, trait or function starts with a word, as in struct Point { … } and fn double. A value or type written on the right is named first, as in LIMIT :: 10. You asked whether Jet should put the name first everywhere, as Odin and Jai do. Searching works about equally well either way, so we recommend, as a reading judgment, keeping the leading word that nearly every popular language uses.",
-      "gist": "Should named types keep their leading word, struct Point, or be written name-first, Point :: struct, maybe functions too?",
-      "lesson": "A struct is a type with named fields. Today named structs and functions start with their word: struct Point { … }, fn double(…). A value or type written on the right is named first with ::, as in LIMIT :: 10. B and C would also write every alias Rows :: [[String]].",
-      "explainer": "Words used here. A type describes a kind of value. A struct is a type with named fields, such as Point with a field x. An enum is a type whose value is one of several named cases, such as Circle or Square. A trait lists methods that several types promise to provide. A function is named code, such as double; a method is a function inside a type, called with a dot. A constant is a name for one fixed value.\n\nName order. Name-first means the name comes before the kind word, as in Point :: struct { … }. Keyword-first means the kind word comes first, as in struct Point { … }. The two colons :: read as 'is'. Only the declaration line changes; what a struct, enum or function does stays the same under every option.\n\nThree kinds of type name. Point :: struct { x: Int } makes a brand-new type; no other type is a Point. Rows :: [[String]] makes Rows another name for a list of lists of strings, so a plain [[\"a\"]] is accepted where Rows is expected. UserID :: distinct Int makes a separate type, so a plain Int is refused where a UserID is expected.\n\nHow the example prints 42. Running a file calls its run function. Point{x: 21} builds a Point whose x is 21. Then .double() calls the method double, where self is that Point. The body self.x * 2 gives 42, because a body's last expression is its result. print shows 42. This trace is the same under A, B and C.\n\nHow it prints 16.0 and 2. area(.Square(4.0)) passes a Shape whose case is Square, with side 4.0. The table if s == { … } runs the arm whose case matches s, here .Square(side), which names that 4.0 side. side * side is 16.0, and return hands it back. [[\"a\"], [\"b\"]] is a list holding two inner lists, and .len() counts the outer list's items: 2.\n\nA type recipe is a prep fn that builds a type before the program runs. prep fn Pair(T: Type) -> Type { struct { first: T, second: T } } takes a type T and returns a struct whose two fields have that type. Pair(Int) is a pair of Ints, and IntPair :: Pair(Int) gives it a short name. The recipe itself is code, so it keeps prep fn under A and B.\n\nHow the search numbers read. Precision is the share of search hits that are real definitions. Recall is the share of definitions the search finds. Both come from rewriting Jet's own 7,468 files into each option's form with a text scanner, not the compiler, so read them to two digits. No study of people was run.\n\nReading a search pattern. In (struct|enum|trait) NAME, the bar | means 'or', the parentheses group the choices, and NAME stands for the name you look for. A ^ at the start of a pattern means 'at the start of a line'. Go-to-definition is an editor command: put the cursor on a name and jump to where it is defined. It ignores spelling style.\n\nBeginner path under A. Every named struct, enum, trait and function starts with a word saying what it makes: struct Point { x: Int }, enum Shape { … }, fn double(…). A value or type written on the right is named first with ::: LIMIT :: 10, Usd :: distinct Decimal, IntPair :: Pair(Int), ROW :: prep { … }. Writing Point :: struct { … } gives an error showing struct Point { … }.\n\nThe rule is about named definitions. A recipe's result, struct { … } with no name, and a prep { … } block are bodies written on the right, so they never start a line with a kind word.\n\nExpert path under A. Named items keep their kind word, and the same struct body appears unnamed only as a recipe result. Making Point generic moves the body into prep fn Point(T: Type) and drops the struct Point header. A plain-text search for a type of unknown kind lists the kind words: (struct|enum|trait|alias) NAME, or NAME ::, or prep fn NAME for recipes. The alias arm drops out if the alias vote drops the keyword.\n\nBeginner path under B. You write LIMIT :: 10 for a constant, and a struct uses the same move: Point :: struct { x: Int }. A function still starts with fn, and a recipe with prep fn. If you write struct Point { … } out of habit, the error shows the new line and jet fix rewrites it.\n\nExpert path under B. At file or module level, a struct, enum or trait on the right of :: makes a new type named by the binding. Any other type there is an alias, and distinct makes a separate type. Making a type generic moves its struct { … } body into a recipe, where only the fields that become generic change. Self-references and impl heads still change to Pair(T).\n\nBeginner path under C. Nearly every named thing reads name :: kind, as in Point :: struct { … }, double :: fn(p: Point) -> Int { … } and arith :: module { … }. A field uses one colon, scale: fn(Int) -> Int, and a method uses two, double :: fn(self) -> Int { … }. Lowercase names are code; capitalized names are types.\n\nC's exceptions. impl, use, #Test, derive, extern block headers, #UnitFamily and migration keep their word, and a trait's associated-type slot stays type Elem. Local helpers stay lambdas, so a helper moved from inside a function to module level changes spelling.\n\nExpert path under C. A signature without a body is a trait slot when lowercase inside a trait, and a function type when capitalized. Inside a binding module it is a foreign function ending with its link string. Module instances resolve like aliases. Search by name works best as name :: fn, because locals also use ::.\n\nExpert kinds. Markers, facts, effects, protocols, typestates and migrations are advanced declaration kinds. This ballot changes only where their name sits under C, never what they do; a beginner can skip them.",
-      "story": "Maya joins a team whose Jet service has forty files. She reads each file top to bottom and wants every line to say what it makes. Later she must find where Order is defined without knowing whether it is a struct, an enum or an alias.",
-      "inWild": "// TypeScript: a named class, and an unnamed class used as a value\nclass Point { x = 0 }\nconst Pair = class { a = 0; b = 0 };\n// Go, Rust, Swift, Kotlin, Python: the kind word comes first\ntype Point struct { X int }        // Go\nstruct Point { x: i64 }            // Rust\n// Zig: types by binding, functions by keyword (ziglang.org/documentation/0.15.2/#Struct-Naming)\nconst Point = struct { x: i64 };\nfn double(p: Point) i64 { return p.x * 2; }\n\n// Odin: everything by binding (odin-lang.org/docs/overview)\n// A foreign procedure without a body uses ---; #type optionally marks a procedure type for readers.\nPoint :: struct { x: int }\ndouble :: proc(p: Point) -> int { return p.x * 2 }\nCallback :: #type proc(x: int)\n\n// Jai: f :: (i: int) -> float { … } at every scope (github.com/BSVino/JaiPrimer)",
-      "detail": "Suite revision by BallotSuite1, 2026-10-07, repaired by SuiteRepair1 after the suite reader passes. This ballot replaces D-DECL-FORM1 on the same card. Every letter in this ballot, including the research record below, is a current letter: A keeps the leading word, B names types first, C names everything first. D-DECL-FORM1 used the opposite letters for A and B; its numbers are restated here under current letters.\n\nWhy the recommendation changed. D-DECL-FORM1 recommended name-first types, now B, for consistency with recipes. Its own re-measurement found both type searches about 99% precise: 0.995 for B's NAME :: and 0.987 for today's alternation, with recall about 1.0 for both. These are scanner estimates, so they show a near tie, not that B gains nothing. No study measures learnability either way, and migration size does not rank options.\n\nThe judgment that decides. With search a near tie, the choice rests on reading. A keeps the kind word at the start of each named definition, where a reader scanning a file looks first. TypeScript and JavaScript, Python, Java, C#, Go, Rust, Swift and Kotlin share that shape; this is transfer from other languages, not evidence about beginners.\n\nB's gains are real and are not answered by familiarity. Structs, enums, aliases and separate types share one naming shape, the one LIMIT :: 10 already has. One short query, NAME ::, finds a non-recipe type of any kind. The same struct { … } body serves a named type and a recipe result, and fn stays. Zig, Odin and Jai are the name-first family.\n\nThe owner's first reaction leaned against name-first types. The author's judgment agrees that a line starting with its kind word is worth more than one naming shape, and states that as a judgment, not a measurement. JavaScript already pairs class Point { } with class { } as a value, the same split option A uses for recipe results.\n\nOrder and interplay with the other declaration votes. Vote D-VIS-REEXPORT1 first, D-ALIAS-BIND2 second and this ballot third. D-VIS-REEXPORT1=A makes clamp :: core.math.clamp a re-export under A, B and C alike. D-ALIAS-BIND2=A, with no alias keyword, fits all three options here. D-ALIAS-BIND2=B, keeping alias, fits only A here. B and C would reverse it, because they name every type with ::.\n\nSo under A the alias vote alone decides alias spelling, and under B or C every alias is Name :: R. The visibility cutover on card #4723 is independent under A and B: priv sits on modules and fields only. C moves it to priv helpers :: module, an explicit spelling amendment with the same reach.\n\nPlacement of unnamed bodies, shared by every option. Jet has no unnamed struct, enum or trait types today; D-GENERIC-TYPEFN1 lets a recipe return one and keeps types from reaching run time. All three options keep that. An unnamed body is an error as a field or parameter type, an argument, inside a prep { } block, or in a runtime function body, because none of those exist today.\n\nB and C add one place, the whole right side of a module-level binding. This rule is written into this ballot, not inherited from a ratified text, so ratifying any option adopts it. Whether a recipe body may bind a helper aggregate before returning it is not decided here. It stays D-GENERIC-TYPEFN1's cutover question and reads the same under A, B and C.\n\nForeign bindings. #Bindgen and #Extern binding modules keep their casing exemption under every option. extern rust blocks appear in today's corpus, but directive 19 removes Rust, so no option converts them and no acceptance check depends on them.\n\nThe research record from D-DECL-FORM1 follows, restated in current letters.\n\nSource. The owner asked whether Jet should adopt the Jai and Odin declaration style everywhere, with trade-offs measured rather than argued from elegance. The research report is $JET_STATE_ROOT/scratch/DeclStyle1/REPORT.md (agent DeclStyle1, 2026-10-07, Jet 277033b7c), with measure.mjs beside it. After the two reader reviews, DeclBallotRepair re-ran the Jet measurements with $JET_STATE_ROOT/scratch/DeclBallotRepair/measure2.mjs; results are in metrics2.json beside it.\n\nRe-measurement. The corpus is pinned: the 7,468 tracked .jet files of 277033b7c, extracted with git archive. On it, the original method reproduces its inventory and its count-based 0.986 and 0.561 exactly. The new run scores a hit only when it lands on a definition line of the searched name. It rewrites only each option's own forms, and it rewrites commented-out headers too.\n\nJet today, name-first. Constants LIMIT :: 10 and NAME :: prep { … } (S2, D-PREP-SURFACE2=A). Distinct types Usd :: distinct Decimal (D-DIST1). Module instances module cache64 :: cache(String, 64) (D-GENMOD1/2). Locals and local lambdas.\n\nJet today, keyword-first. fn (S1, D-SIG-AFTER1=A), struct (S29), enum (S30), trait (S28), alias (D-TYPEALIAS1, D-ALIAS-OP1=B; generic-only, E0324) and module (U3). Also marker (D-MARKER-DECL1=A), fact (D-FACTDECL1=A), effect (D-EFFECT-DECL1=A), protocol, migration, derive, state, extern, #Test, impl and use. Associated types read type Elem in a trait and type Elem = Int in an impl (D-LIB2).\n\nParser homes. Item dispatch is crates/jet-parser/src/Parser/Modules.rs:1086-1228 and Parser/Items/visibility_items.rs:3-90. The AST is crates/jet-foundation/src/AST/items.rs:9-85. Recovery syncs on a handful of reserved tokens at crates/jet-parser/src/Parser/mod.rs:909-925.\n\nRatified law, read precisely. D-SIG-AFTER1=A (2026-09-18) kept fn name(…) -> T { } and rejected named functions as const binds. It excluded fn(…) { … } expressions and kept local helpers as lambda binds. D-GENERIC-TYPEFN1=A (2026-10-02) made types build-time values that prep fn recipes return. It amended D-META-GATE1's refusal of type factories and kept recipe identity, bound checks and source-file recipes.\n\nWhat each option amends. Generic functions can still be passed as values with an expected function type, and prep fn still runs build-time code. What stays refused is treating named functions as compile-time meta-objects. A amends no ratified header law. B keeps D-SIG-AFTER1, D-LIB2 and D-GENERIC-TYPEFN1 and amends only the S28, S29 and S30 header spellings, plus the alias keyword through D-ALIAS-BIND2=A. C reverses D-SIG-AFTER1's named-function order and amends about a dozen more spellings, listed in its technical notes.\n\nCorpus counts. The scanner found 29,522 functions, 3,249 methods, 99 trait slots, 23 extern functions and 11 external methods. It found 4,073 structs, 1,276 enums, 76 traits, 47 distinct types, 7 aliases (5 generic) and 2,235 module constants. It found 474 impl blocks, 25 associated-type fills, 1,988 tests, 4,946 use lines and 14,132 fields. Locals: 49,756 written name :: expr and 27,621 written name := expr.\n\nScanner limits. The reference is a comment- and string-aware, brace-scope-aware scanner, not the Jet parser. It misreads some one-line nested bodies and Jet code inside text blocks, and it does not parse string interpolation. The rewrites leave headers inside string literals unchanged. No stratified sample was checked against the parser, so read the numbers to two digits, not four.\n\nFinding a type by name. Today the kind-unknown search is an alternation, (struct|enum|trait|alias) NAME or NAME ::, with precision 0.987 and recall 1.0 over 5,479 type definitions. A keeps that pattern and adds prep fn NAME for recipes after the recipe cutover; that added arm was not separately measured. Under B, NAME :: alone scores precision 0.995 and recall 0.999.\n\nB's five misses are generic aliases, which become recipes found by prep fn NAME. For struct, enum and trait only, B scores 0.993 against today's 0.990. So B's gain is a simpler query at similar, high precision: about 99% for both at two-digit accuracy.\n\nFinding a function by name. fn NAME scores 0.985 under today, A and B, with recall 1.0. Under C, name :: fn scores 0.999; that name-plus-kind query is the fair counterpart of fn NAME. Under C, bare name :: scores 0.559, because 49,756 locals also use ::. Still, 95.4% of function names have no stray hits; the noise sits on common names such as value, result and root.\n\nAnchoring ^name :: lifts precision to 0.991 but finds only 70% of functions, since methods are indented.\n\nAny kind, name unknown. Every option is weak here because locals share ::. Today's alternation scores 0.594, B's 0.599 and C's name :: 0.611, each with recall 0.994. Repeated names also matter: 289 type names are defined more than once, such as Point (74 times) and Shape (46). A hit on any of them counts as correct, yet the reader still has several places to look.\n\nCensuses. No line in a function body starts with a PascalCase name and :: or :=. Three start with an ALL_CAPS name, all in invalid-input or text-block fixtures. No struct, enum or trait is declared inside a type body. Five scanner hits inside function bodies were Jet code in text blocks or a brace miscount. The literal search :: struct on B's rewrite finds every named struct, with 6 stray hits in 4,079.\n\nRecovery is an expectation, not a measurement. Under A, recovery is today's. Under B, the parser can resync on fn and on a line-start capitalized name followed by ::, which no valid function body contains. Under C, about 41,300 declaration lines and 49,756 local lines begin name ::, so recovery must look further, at the kind word after ::. Neither new strategy was tested on malformed files; the acceptance probes check diagnostics instead.\n\nOther corpora, scoped. Odin core, 1,288 files: NAME :: finds a procedure at 0.976. The plain pattern for procedures finds only 31%, because about 29,000 headers put a directive such as #force_inline between :: and proc. Zig std, 550 files: const NAME = scores 0.598 against a truth set of container aggregates only. Aliases, recipes and local Self bindings all count as noise there, so it is not comparable with B's figure. fn NAME scores 0.955.\n\nGo: 33% of functions are methods, whose receiver sits between func and the name. Rust: doc-comment examples drop raw struct X precision to 0.847. GitHub code navigation covers Go, Rust, Swift and TypeScript but not Zig or Odin. Plain-text search matters while a language lacks hosted semantic navigation.\n\nZig's reversal, in context. Proposal #1717 would have made every function an anonymous expression bound by const. It was accepted in 2019 and rejected by Andrew Kelley on 2023-07-09. He cited symbol names in stack traces, profilers and debuggers, stack analysis, and a dislike of pervasive lambda style. A Jet name :: fn form could still derive the symbol from its binding, so C is feasible; Zig is a precedent, not proof.\n\nOdin. Its designer tried keyword-first syntax twice for two weeks (gingerbill.org, 2018). He needed --- because 'a procedure without a body cannot be distinguished from a procedure type'. Odin's #type is a reader annotation that its compiler does not need. Jet's case rule removes most of that ambiguity, so C uses case and context instead of a mark.\n\nJai and others. Jai's payoff is moving code from lambda to global function with few edits. That needs one syntax for both, which Jet's ratified x -> … lambdas do not share. Google's TypeScript style guide prefers function declarations for named functions; that is a style preference, not a study. No controlled study compares name-first with keyword-first declarations, so learnability claims here are transfer arguments.\n\nMigration is shared work and does not rank options, per the owner. On the pinned corpus, A rewrites no header. B rewrites 5,427 .jet header lines (5,425 aggregates and 2 plain aliases) in 1,698 files, adding 16 KB, plus 19 comment lines. The five generic aliases move in the recipe cutover instead. C rewrites 38,988 headers in 7,095 files, adding 117 KB, plus 489 comment lines and 25 associated-type fills.\n\nOutside .jet files, migration.mjs counted on the live tree, for every header kind including fn. It found 500 Markdown fence lines in 47 files, 582 Markdown inline mentions, about 2,559 Rust string-literal lines in 309 files, and 446 snapshot lines in 284 files. B's share is a subset that was not counted separately. Tooling adds the tree-sitter grammar with its generated parser and tests, the TextMate grammar, Zed queries, the formatter and doc generators.\n\nCorrections from review. The first draft said Point :: finds any type 98.6% of the time. That figure covered struct, enum and trait only, compared counts rather than locations, and came from a rewrite of every keyword. The draft also counted about 5,437 B headers by including five protocols that stay unchanged.\n\nSuite pass repairs (SuiteBeginner and SuiteAdversary, 2026-10-07). The research record now uses current letters, and all acceptance is in this ballot. A's rule is scoped to named definitions, with recipe results and prep blocks shown beside it. B is credited with its one naming shape, short query and shared body, and the search figures read as a near tie.\n\nC is compared on name plus kind, with its exceptions and its kept fn keyword stated. The unnamed-body placement rule is marked as new, and helper aggregates inside recipes are left to D-GENERIC-TYPEFN1. B's local-type move has stated limits, and Rust bindings are out of scope under directive 19. The examples trace 16.0 and 2, and search patterns are explained.",
-      "options": [
-        {
-          "key": "A",
-          "name": "Keep the leading word",
-          "detail": "struct, enum, trait and fn keep their leading words. The rule has two parts. A named struct, enum, trait or function starts with the word for what it makes. A value or type written on the right is named first with ::. So constants (LIMIT :: 10), build-time constants (ROW :: prep { … }) and separate types (Usd :: distinct Decimal) use ::. So do aliases (Rows :: [[String]], if the alias vote drops its keyword), re-exports (clamp :: core.math.clamp) and recipe results (IntPair :: Pair(Int)).\n\nThe unnamed body struct { … } appears only as a type recipe's result, the way JavaScript writes class Point { } for a named class and class { } as a value. A body written on the right, such as that result or a prep { … } block, has no name of its own, so the rule does not apply to it. Point :: struct { … } at module level is refused with a fix to struct Point { … }.",
-          "technical": "Status-quo item grammar plus the shared placement rule in the detail, and one refusal. Point :: struct { … } at file or module level is an error whose jet fix writes struct Point { … }. That refusal mirrors B's retirement of struct Point: each option keeps one named form.\n\nThe rule, scoped. A named struct, enum, trait, function or module starts with its kind word. A binding that names a value or type written on the right starts with the name: LIMIT :: 10, ROW :: prep { … }, Usd :: distinct Decimal, IntPair :: Pair(Int). A body on the right, such as a recipe's struct { … } result or a prep { … } block, has no name of its own. A does not claim that every body starts with a word.\n\nAlias spelling is coupled to D-ALIAS-BIND2, which stays open under A. If it picks A, aliases read Rows :: [[String]] and IntPair :: Pair(Int); if B, alias Rows :: [[String]]. Re-exports follow D-VIS-REEXPORT1. Associated types, privacy, markers, docs, casing and binding modules are unchanged. A amends no ratified law; the shared placement rule restates today's absence of unnamed aggregate types outside recipe results.\n\nA's strongest case. Each named definition line starts with its kind, which helps a reader scanning a file and transfers from Rust, Swift, Kotlin and Go. The struct header and the recipe body are two contexts of one body grammar, not two semantic mechanisms. Its cost is naming: structs, enums and traits read struct Point, while aliases, separate types and recipe results read Name ::.\n\nFinding a type of unknown kind. Editor go-to-definition and the language server's symbol search find any definition by name. The plain-text pattern is (struct|enum|trait|alias) NAME, or NAME ::, or prep fn NAME for recipes; drop alias if the alias vote drops the keyword. Without the prep fn arm, it scored precision 0.987 and recall 1.0 on today's corpus. The prep fn arm was not separately measured.",
-          "code": "// ok.jet: the whole file runs; predicted output 42, 16.0, 2\nRows :: [[String]]                    // if D-ALIAS-BIND2 picks A\n// alias Rows :: [[String]]           // if D-ALIAS-BIND2 picks B\nstruct Point {\n    x: Int\n    fn double(self) -> Int { self.x * 2 }\n}\nenum Shape {\n    Circle(Float)\n    Square(Float)\n}\n\nfn area(s: Shape) -> Float {\n    return if s == {\n        .Circle(r) -> r * r\n        .Square(side) -> side * side\n    }\n}\n\nfn count(r: Rows) -> Int { r.len() }\n\nfn run() {\n    print(Point{x: 21}.double())      // 42: 21 * 2\n    print(area(.Square(4.0)))         // 16.0: the Square arm runs, 4.0 * 4.0\n    print(count([[\"a\"], [\"b\"]]))      // 2: the outer list holds two lists\n}\n\n// rule.jet: the rule's scope; every line is valid under A once recipes land\nstruct Point { x: Int }                // a named struct: its word first\nfn double(p: Point) -> Int { p.x * 2 } // a named function: its word first\nprep fn Pair(T: Type) -> Type { struct { first: T, second: T } }  // the result has no name\nIntPair :: Pair(Int)                   // a type written on the right: name first (alias vote A)\nROW :: prep { [1, 2, 3] }              // a build-time value written on the right: name first\n\n// probe-binding.jet: its own check; fails to compile\nPair :: struct { x: Int }\n// error: a struct type is declared as `struct Pair { … }`\n// fix (jet fix): struct Pair { x: Int }\n\n// probe-field.jet: its own check; fails to compile, as today\nstruct Holder { inner: struct { x: Int } }\n// error: name this type at module level, or make it its own recipe"
-        },
-        {
-          "key": "B",
-          "name": "Types by name, code by keyword",
-          "detail": "At file or module level, every named non-recipe type and every fixed value is a binding. Examples: Point :: struct { … }, Shape :: enum { … }, Named :: trait { … }, Usd :: distinct Decimal, Rows :: [[String]], IntPair :: Pair(Int) and LIMIT :: 10. Recipes keep prep fn, so a generic type is still found by prep fn Pair. B changes only struct, enum and trait headers, plus alias spelling. Every other declaration keeps its word: fn, prep fn recipes, methods, trait slots, impl, module, marker, fact, effect, protocol, migration, derive, state, extern, #Test and use.\n\nB's strongest case. Structs, enums, aliases and separate types share one naming shape, the shape LIMIT :: 10 already has. One short query, Point ::, finds a non-recipe type of any kind at about 99% precision. The same struct { … } body serves a named type and a recipe's result, so making a type generic moves the body unchanged. Functions keep fn. Its cost is that a type line starts with its name, not its kind word.\n\nTrait and impl bodies do not change: a slot stays type Elem and an impl fill stays type Elem = Int. struct Name { }, enum Name { } and trait Name { } are retired with a jet fix edit. Ratifying B also settles D-ALIAS-BIND2 as its option A; if D-ALIAS-BIND2 already kept the alias keyword, B reverses that.",
-          "technical": "1. Scope. The binding form applies at file and module level only. Type, trait and impl bodies keep today's members and today's errors: fields, methods, impl blocks, slots type Elem and fills type Elem = Int. Nothing in the corpus declares a type inside a type body, and B adds no such form.\n\n2. Resolution of a module-level Name :: R, in order. (a) R is struct { … }, enum { … } or trait { … }: a new nominal type named Name. (b) R is distinct T: a separate type. (c) R is a bare path to a declaration: an alias of it, by D-VIS-REEXPORT1 if that picks A, else for types only. (d) R's value is a type, including a recipe call: a transparent alias. (e) R names nothing: E0107. (f) Otherwise a constant, under E0357 and E0622.\n\nArm (a) is new and syntactic, so it is decided before name resolution. Arms (b) to (f) are D-ALIAS-BIND2=A's ordered rule unchanged. After the arm, the name-case check runs. Type arms need a leading capital, so IO and U8 are fine (S66); constants need ALL_CAPS; an alias of a function or module follows the target's case.\n\nImmutable is not the same as build time. LIMIT :: 10 is an immutable module constant whose initializer must be a literal. ROW :: prep { … } is computed at build time, and IntPair :: Pair(Int) is a type the build fixes. LIMIT :: compute() stays E0622, and a prep { } right side stays a constant as D-ALIAS-BIND2 orders it; choosing a type belongs in a recipe.\n\n3. Identity. Arm (a) mints exactly one type, with the constructors, patterns, methods, impl blocks and home module that struct Point has today. An alias is the same type: with Shape2 :: Shape, Shape2.Circle(3.0) builds a Shape and matches .Circle(r). IntPair :: Pair(Int) names the recipe's identity and never mints, so Again :: IntPair is still Pair(Int). Enum payloads, discriminants, groups and variant markers are unchanged.\n\n4. Cycles. A :: B beside B :: A is the alias-cycle error. Recursion through an aggregate body stays legal, as today: Expr :: enum { Num(Int) Wrap(Expr) }. Recursive recipes keep D-GENERIC-TYPEFN1's reserved identity, so Tree(T) inside Tree's enum body means the type being built.\n\n5. Where an aggregate expression may appear. Jet has no unnamed struct, enum or trait types today; D-GENERIC-TYPEFN1 lets a recipe return one and keeps types from reaching run time. B admits the unnamed body in two places: as the whole right side of arm (a), and wherever that ballot lets a recipe produce its result, including branch results and return.\n\nIt is an error as a field or parameter type, an argument, inside a prep { } block, or in a runtime function body. The error says: name this type at module level, or make it its own recipe. Those places have no unnamed aggregate today, so the rule keeps today's behavior there. It is written into this ballot, not inherited from a ratified text. A has the same rule without arm (a), and C the same as B.\n\nNot decided here: whether a recipe body may bind a helper aggregate before returning it. That stays D-GENERIC-TYPEFN1's cutover question, with type-valued local aliases inside recipes and markers on a recipe's result, and reads the same under A, B and C. If refused there, the workaround is a second recipe, prep fn Inner(T: Type) -> Type { struct { x: T } }, used as Inner(T), with that ballot's identity rule.\n\n6. Inside a runtime fn body, Name :: <type> is an error (D-ALIAS-BIND2). A machine-applicable move above the function is offered only when three things hold. The right side uses no local name or prep parameter. The name is free at module level and in every enclosing module. No other function in the package declares a local type of that name.\n\nThe move is offered, never applied silently, and its message says the type becomes public like any declaration. The manual alternative it lists keeps the type hidden: move it into a priv module. Point := struct { … } gets 'a type is fixed; use ::'.\n\nOtherwise the error gives manual steps only. For fn g(prep T: Type) { Items :: [T] }, the type uses T, so the message says to write prep fn Items(T: Type) -> Type { [T] } at module level and use Items(T). If two functions each declare Local, neither gets a move, and the message asks for two distinct names. D-ALIAS-BIND2's local-type fix should carry the same limits.\n\n7. Names and foreign code. Type names start with a capital, as today. point :: struct { … } gets the name-case error naming the kind, with fix Point. Binding modules (#Bindgen, #Extern) stay exempt from casing (D-SHAPE-CASE2). Their foreign names and link strings are untouched; only a record header outside them changes, as in #Layout(c) HbFeature :: struct { … }. extern rust blocks exist today but are being removed under directive 19, so B does not convert them.\n\n8. Markers, docs and privacy. /// doc comments and markers, including #[A, B] stacks and #Layout(c), sit where they sit above struct Point today and attach to the same type. Field and variant markers inside the body are unchanged. Generated docs list the type under its name, and diagnostic spans point at the name. A priv field still works: Secret :: struct { priv key: Bytes }. priv module and priv(package) module are unchanged; declaration-level priv or pub stays an error.\n\n9. Layout and search. The formatter prints Name :: struct { on one line, with the kind word right after ::. A line break between :: and the kind word parses and is joined. So ':: struct' finds formatted named structs; it does not find recipe results. Search a recipe with prep fn Pair, not Pair ::.\n\n10. Retirement and typos. struct Name { }, enum Name { } and trait Name { } at file or module level are errors with a machine-applicable jet fix; the parser keeps them only for recovery. Name :: strcut { … } parses as a typed construction, so B adds a did-you-mean. An unknown name within two edits of struct, enum or trait, followed by {, suggests the kind word.\n\n11. Recipes are unchanged: prep fn Pair(T: Type) -> Type { struct { first: T, second: T } }. Making Pair generic moves its struct { … } body into the recipe, and only the fields that become generic change. Self-references become Pair(T), impl heads become impl Pair(T: Type), and callers write Pair(Int), all under D-GENERIC-TYPEFN1. generic.jet in B's code shows one conversion.",
-          "code": "// ok.jet: the whole file runs; predicted output 42, 16.0, 2\nRows :: [[String]]                    // another name for [[String]]\nPoint :: struct {                     // a new type named Point\n    x: Int\n    fn double(self) -> Int { self.x * 2 }\n}\nShape :: enum {                       // a new type: a Circle or a Square\n    Circle(Float)\n    Square(Float)\n}\n\nfn area(s: Shape) -> Float {\n    return if s == {\n        .Circle(r) -> r * r\n        .Square(side) -> side * side\n    }\n}\n\nfn count(r: Rows) -> Int { r.len() }\n\nfn run() {\n    print(Point{x: 21}.double())      // 42: 21 * 2\n    print(area(.Square(4.0)))         // 16.0: the Square arm runs, 4.0 * 4.0\n    print(count([[\"a\"], [\"b\"]]))      // 2: a plain [[String]] is a Rows; two inner lists\n}\n\n// generic.jet: making a type generic, once generic recipes land\n// before:  Pair :: struct { first: Int, second: Int }\n//          impl Pair { fn swap(self) -> Pair { Pair{first: self.second, second: self.first} } }\nprep fn Pair(T: Type) -> Type { struct { first: T, second: T } }   // same struct { … } body; Int becomes T\nimpl Pair(T: Type) {                                              // impl head gains T\n    fn swap(self) -> Pair(T) { Pair(T){first: self.second, second: self.first} }\n}\nIntPair :: Pair(Int)                  // a name for one result; Pair(Int) is one type everywhere\n\n// Each probe below is its own one-file check and fails to compile.\n\n// probe-retired.jet\nstruct Old { x: Int }\n// error: a struct is named with ::\n// fix (jet fix): Old :: struct { x: Int }\n\n// probe-case.jet\npoint :: struct { x: Int }\n// error: type `point` must start with a capital\n// fix: Point\n\n// probe-local.jet\nfn f() { Local :: struct { x: Int } }\n// error: name this type outside the function\n// fix (jet fix, offered): move the line above `fn f`; `Local` becomes public\n// or keep it hidden: move it into a `priv module`\n\n// probe-local-twice.jet\nfn f() { Local :: struct { x: Int } }\nfn g() { Local :: struct { y: Int } }\n// error: two functions declare a type `Local`; give each its own module-level name.\n//        No automatic fix.\n\n// probe-local-prep.jet\nfn g(prep T: Type) { Items :: [T] }\n// error: this type uses `T`; write `prep fn Items(T: Type) -> Type { [T] }`\n//        at module level and use `Items(T)`. No automatic fix.\n\n// probe-field.jet\nHolder :: struct { inner: struct { x: Int } }\n// error: name this type at module level, or make it its own recipe\n\n// probe-distinct.jet\nUserID :: distinct Int\nfn greet(id: UserID) { print(id.raw()) }\nfn run() {\n    n :: 42\n    greet(n)\n}\n// error: expected `UserID`, found `Int`: a separate type refuses a plain Int"
-        },
-        {
-          "key": "C",
-          "name": "Name first everywhere",
-          "detail": "Nearly every named declaration is name :: kind …: functions, methods, external methods, trait slots, build-time functions, recipes, modules, markers, facts, effects, protocols and typestates as well as types. The exceptions, stated up front, are few. impl, use, #Test, derive, extern block headers and #UnitFamily stay as they are because they bind no new name. migration stays a keyword, a trait's associated-type slot stays type Elem, and local helpers stay lambdas.\n\nC keeps the fn keyword and changes its order: fn double(…) becomes double :: fn(…). Private modules read priv helpers :: module, an explicit spelling amendment to card #4723 with the same reach. Amends D-SIG-AFTER1=A.\n\nC's strongest case. Every named thing lines up at the left edge, and name :: fn finds a function at 0.999 precision, slightly above fn name at 0.985. Symbol names in stack traces come from the binding, so Zig's reason for rejecting #1717 does not apply. Bodiless signatures are told apart by case and context, without Odin's --- mark. Its costs fall on readers: a field and a method differ by one colon, a bare name :: search also hits locals, and a newcomer learns the case-and-context rules.",
-          "technical": "C's spellings, complete. Functions: double :: fn(p: Point) -> Int { … }. Methods in a type or impl body: double :: fn(self) -> Int { … }. External methods: Point.triple :: fn(self) -> Int { … }. Build-time functions: from_text :: prep fn(text: String) -> Int { … }. Recipes: Pair :: prep fn(T: Type) -> Type { struct { … } }. Types and constants read as under B.\n\nModules: arith :: module { … }, and a file module starts with math :: module. Private modules put priv before the name, where markers sit: priv helpers :: module { … } and priv(package) shared :: module { … }. This amends card #4723's spelling; the reach of priv and priv(package) is unchanged. Generic modules read cache :: module(prep K: Hash, capacity: Int) { … }. An instance reads cache64 :: cache(String, 64), recognised because cache resolves to a module template.\n\nMarkers and the rest: CardNumber :: marker { deny: [Log] }, Audit :: marker(topic: String) { … }, Exactness :: fact($holds: …), FS.Read :: effect, Chat :: protocol { … } and a typestate Open :: state { … }. Associated types: the slot stays type Elem, and an impl fills it with Elem :: Int. A fill naming no slot of the trait is an error.\n\nKept as keywords: impl, use, #Test, derive, extern block headers and #UnitFamily bind no new name. migration stays a keyword because User :: migration { … } would read as a second definition of the type User. Local helpers stay lambdas, as in helper :: n -> n * 2. fn(…) { … } is legal only as the whole right side of a file, module or type-body binding; inside a function it is an error suggesting a lambda.\n\nBodiless signatures are decided by case and context instead of a mark. Inside a trait, a lowercase name :: fn(…) -> T with no body is a slot. Anywhere, a capitalized Name :: fn(…) -> T is a function type. Inside binding modules, where casing is exempt, a foreign function ends with its link string: gzopen :: fn(path: String, mode: String) GzFile = \"gzopen\". A lowercase bodiless signature elsewhere is an error.\n\nBinding modules keep their marker and take the same order: #Bindgen c.z.__bindgen__ :: module { … }. Foreign names, link strings and casing exemptions are unchanged. extern rust blocks exist today but are being removed under directive 19, so C does not convert them and no acceptance check depends on them. priv fields are unchanged.\n\nFields and methods. In a type body, scale: fn(Int) -> Int is a field holding a function, and double :: fn(self) -> Int { … } is a method. The tokens differ, so the parser is not confused; the risk is a reader's misread, which no study measured. Two diagnostics cover the slips: a bodiless :: member asks for a body or one colon, and a one-colon member with a body asks for ::. Novice slips and malformed-file recovery are hypotheses for C's acceptance probes, not observed failures.\n\nLaws C amends beyond B's: D-SIG-AFTER1=A and D-CALLABLE-ONE1, for the named function spelling and a binding-only fn form. Also D-PREP-FN1, D-EXTMETH1, U3 and D-MOD2 for modules, D-GENMOD1/2 for instances, and D-MARKER-DECL1, D-FACTDECL1 and D-EFFECT-DECL1. Also D-PROTO1/2, D-STATE-DECL, S50 and S59 for binding-zone functions, D-LIB2 for impl fills, and card #4723's priv module spelling. This breadth is disclosure and acceptance work; it does not rank C.\n\nC's strengths, credited. name :: fn finds a function at 0.999 precision, slightly above fn name at 0.985; name plus kind is the fair comparison on both sides. Every named thing lines up at the left edge. Its weaknesses are the kind-unknown query, bare name ::, at 0.559, the one-colon field versus two-colon method distinction, and the larger set of rules a newcomer must learn.",
-          "code": "// ok.jet: the whole file runs; predicted output 42, 16.0, 2\nRows :: [[String]]\nPoint :: struct {\n    x: Int\n    double :: fn(self) -> Int { self.x * 2 }   // a method: two colons and a body\n}\nShape :: enum {\n    Circle(Float)\n    Square(Float)\n}\n\narea :: fn(s: Shape) -> Float {\n    return if s == {\n        .Circle(r) -> r * r\n        .Square(side) -> side * side\n    }\n}\n\ncount :: fn(r: Rows) -> Int { r.len() }\n\nrun :: fn() {\n    print(Point{x: 21}.double())      // 42: 21 * 2\n    print(area(.Square(4.0)))         // 16.0: the Square arm runs, 4.0 * 4.0\n    print(count([[\"a\"], [\"b\"]]))      // 2: the outer list holds two lists\n}\n\n// forms.jet: C's other forms, a library checked after the cutover\nNamed :: trait {\n    label :: fn(self) -> String       // a slot: lowercase, inside a trait, no body\n}\nHandler :: fn(Int) -> Int             // a function type: capitalized, no body\nGauge :: struct {\n    reading: Int                      // a field: one colon\n    scale: fn(Int) -> Int             // a field holding a function\n    priv calibration: Int             // a private field, as today\n}\nGauge.doubled :: fn(self) -> Int { self.reading * 2 }   // an external method\narith :: module { twice :: fn(n: Int) -> Int { n * 2 } }\npriv helpers :: module { floor0 :: fn(n: Int) -> Int { if n < 0 -> 0 else -> n } }   // priv moves before the name\npriv(package) shared :: module { ZERO :: 0 }\ncache :: module(prep K: Hash, capacity: Int) { size :: fn() -> Int { capacity } }\ncache64 :: cache(String, 64)          // a module instance: cache is a module\nPair :: prep fn(T: Type) -> Type { struct { first: T, second: T } }\n// still keywords: impl, use, #Test, derive, migration, extern block headers\n// local helpers stay lambdas: helper :: n -> n * 2\n\n// probe-slot.jet: its own check; fails to compile\nlabel :: fn(self) -> String\n// error: a function needs a body; a function type needs a capital letter\n\n// probe-member.jet: its own check; fails to compile\nBox :: struct { size :: fn(self) -> Int }\n// error: a method needs a body; a field uses one colon, as in size: fn(Box) -> Int"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "Zig",
-          "note": "Types by const binding, functions by fn. Proposal #1717 to make every function an anonymous const-bound expression was accepted in 2019 and rejected in 2023. github.com/ziglang/zig/issues/1717",
-          "code": "const Point = struct { x: i64 };\nfn double(p: Point) i64 { return p.x * 2; }"
-        },
-        {
-          "lang": "Odin",
-          "note": "Everything by ::. A foreign procedure without a body needs ---; #type is an optional reader annotation for a procedure type (odin-lang.org/docs/overview).",
-          "code": "Point :: struct { x: int }\ndouble :: proc(p: Point) -> int { return p.x * 2 }\nCallback :: #type proc(x: int)"
-        },
-        {
-          "lang": "Jai",
-          "note": "One function syntax at every scope, so code moves from lambda to global function with few edits (JaiPrimer).",
-          "code": "double :: (p: Point) -> int { return p.x * 2; }"
-        },
-        {
-          "lang": "Go",
-          "note": "Keyword, name, then kind; methods put the receiver between func and the name.",
-          "code": "type Point struct { X int }\nfunc (p Point) Double() int { return p.X * 2 }"
-        },
-        {
-          "lang": "Rust",
-          "note": "Keyword-first items; aliases use type.",
-          "code": "struct Point { x: i64 }\ntype Rows = Vec<Vec<String>>;\nfn double(p: &Point) -> i64 { p.x * 2 }"
-        },
-        {
-          "lang": "TypeScript",
-          "note": "Both forms exist for functions; Google's style guide prefers function declarations for named functions, as a style preference. Type aliases are binding-shaped.",
-          "code": "type Point = { x: number };\nfunction double(p: Point): number { return p.x * 2; }"
-        }
-      ],
-      "rec": "A",
-      "recommendation": {
-        "why": "Search is a near tie, about 99% for both type queries, so this is a reading judgment. A keeps the kind word first on every named definition, as most popular languages do, and needs one scoped rule for Jet's two shapes.",
-        "gains": [
-          "Readers see what a named definition makes before its name.",
-          "Learners from TypeScript, Python, Go, Rust and Swift meet familiar headers; this is transfer, not a study.",
-          "Named structs, enums, traits, functions and modules all start with their word."
-        ],
-        "losses": [
-          {
-            "loss": "Types use two shapes: struct Point, and Rows :: [[String]] for an alias.",
-            "mitigation": "One scoped rule: named structs, enums, traits and functions start with their word; :: names a value or type on the right."
-          },
-          {
-            "loss": "An unknown-kind type search lists kind words, or NAME ::.",
-            "mitigation": "Go-to-definition finds any kind; the pattern found every definition, with about 99% of hits precise."
-          }
-        ],
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "B's gains are real: one naming shape for every non-recipe type, a one-term type search at about 99%, and one struct body for declarations and recipes, with fn kept. It loses on judgment, not data: type lines no longer start with their kind word, which the author, like the owner's first reaction, values more."
-          },
-          {
-            "key": "C",
-            "reason": "C's double :: fn search is as precise as fn double, and every name lines up. But a bare double :: search also hits locals (56% definitions), a field and a method differ by one colon, and named functions change order against ratified law."
-          }
-        ],
-        "tradeoff": "Two shapes joined by one scoped rule, in exchange for familiar definitions that start with what they make."
-      },
-      "hybrid": null,
-      "ballotMode": "full",
-      "shortAuthorizedBy": null,
-      "ballotProcessVersion": 4,
-      "reviewPasses": {
-        "beginner": "Fresh agent: SuiteBeginner. Skill: rli5. The beginner pass tested the complete ballot. Repaired: one set of letters throughout, traces for 16.0 and 2, a scoped rule for A, explained search patterns, and every option's acceptance inside this ballot.",
-        "adversarial": "Author model family: claude-opus. Adversarial model family: gpt. Fresh agent: SuiteAdversary. The adversarial review attacked the recommendation. Repaired: B and C are credited fairly, search reads as a near tie, the placement rule is marked new, and the local-type move has stated limits."
-      },
-      "checkInstructions": "Drafted by BallotSuite1 from D-DECL-FORM1 and its repair record ($JET_STATE_ROOT/scratch/ballots/review/D-DECL-FORM1-repairs.md). Repaired by SuiteRepair1 after the SuiteBeginner and SuiteAdversary passes. Validated offline with OwnerNotes1/validate.mjs; no Tower write. Full profile, because B and C change the parser. When posted, close D-DECL-FORM1 as superseded by this ballot. All acceptance below uses this ballot's letters.\n\nShared acceptance, every option. Each option's ok.jet prints 42, 16.0 and 2. A field typed struct { x: Int } is refused with \"name this type at module level, or make it its own recipe\". After generic recipes land, prep fn Pair(T: Type) -> Type { struct { first: T, second: T } } is accepted. IntPair :: Pair(Int) then accepts IntPair{first: 1, second: 2} where Pair(Int) is expected.\n\nAcceptance for A. struct Point { x: Int } and enum Shape { … } compile unchanged, and every Examples/features program passes Tools/agent/run-feature-examples.mjs with unchanged output. Point :: struct { x: Int } at module level is refused with a machine-applicable fix to struct Point { x: Int }.\n\nAcceptance for B, each run after the cutover. Every Examples/features program, rewritten by jet fix, passes Tools/agent/run-feature-examples.mjs with unchanged output. The tests/fuzz/sema/differential .out files stay byte-identical. Each probe in B's code gives its named error. probe-retired and probe-local offer machine-applicable fixes; probe-local-prep and probe-local-twice offer none.\n\nB identity probes. With Shape2 :: Shape, area(Shape2.Circle(3.0)) prints 9.0. Passing a value of First :: struct { x: Int } where Second :: struct { x: Int } is expected is a type error. Expr :: enum { Num(Int) Wrap(Expr) } with print(Expr.Wrap(Expr.Num(1))) prints what Examples/features/types/recursive_enum.jet prints today. A :: B beside B :: A gives the alias-cycle error.\n\nB attachment and tool probes. A /// doc line and #Error above TextError :: enum { Empty } still document and mark TextError. A #Layout(c) record keeps C layout. Secret :: struct { priv key: Int } refuses s.key from another module. Examples/features/types/associated_types.jet, with only its trait and struct headers rewritten, prints 10, 30 and 3. IO :: struct { } and U8 :: distinct Int are accepted.\n\nPoint ::, a line break, then struct { x: Int } formats to one line, and jet fmt stays stable. Point :: strcut { x: Int } suggests struct. On the rewritten repo, rg ':: struct' lists every named struct.\n\nAcceptance for C, each run after the cutover. The same feature-example and differential checks as B pass. probe-slot and probe-member give their named errors, and forms.jet compiles. A panic inside double :: fn names double in the stack trace. A file missing the closing brace before area :: fn gets one diagnostic at that brace, not a cascade. priv helpers :: module stays hidden exactly as priv module helpers is today.",
-      "surface": {
-        "gist": "Should named types keep their leading word, struct Point, or be written name-first, Point :: struct, maybe functions too?",
-        "lesson": "A struct is a type with named fields. Today named structs and functions start with their word: struct Point { … }, fn double(…). A value or type written on the right is named first with ::, as in LIMIT :: 10. B and C would also write every alias Rows :: [[String]].",
-        "trio": {
-          "current": {
-            "note": "Values and separate types are named first; named structs and functions start with a word.",
-            "code": "LIMIT :: 10                     // a constant: name first\nUsd :: distinct Decimal         // a separate type: name first\nstruct Point {                  // a struct: keyword first\n    x: Int\n}\nfn double(p: Point) -> Int { p.x * 2 }   // a function: keyword first"
-          },
-          "wild": {
-            "lang": "TypeScript and Zig",
-            "note": "TypeScript starts a class with its word and also allows an unnamed class as a value; Zig names types like values.",
-            "code": "class Point { x = 0 }              // TypeScript: named\nconst Pair = class { a = 0 }       // TypeScript: as a value\nconst Point = struct { x: i64 };   // Zig: a type is a value"
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "Keep the leading word",
-            "gist": "Named structs, enums, traits and functions start with their word; :: names values and types on the right.",
-            "gains": [
-              "Each named definition says what it makes first.",
-              "Same shape as TypeScript, Python, Go, Rust, Swift and Kotlin."
-            ],
-            "losses": [
-              "Structs read struct Point; aliases read Rows :: [[String]].",
-              "An unknown-kind type search lists kind words, or NAME ::."
-            ],
-            "proposed": {
-              "code": "LIMIT :: 10\nRows :: [[String]]        // if the alias vote drops `alias`\nstruct Point {\n    x: Int\n}\nfn double(p: Point) -> Int { p.x * 2 }"
-            }
-          },
-          {
-            "key": "B",
-            "name": "Types by name, code by keyword",
-            "gist": "Named types and fixed values read Name :: …; functions and recipes keep their word.",
-            "gains": [
-              "Structs, enums, aliases and separate types share one naming shape.",
-              "Functions keep fn, the form Jet already settled on.",
-              "One short search, Point ::, finds a type of any kind."
-            ],
-            "losses": [
-              "A type line no longer starts with its kind word.",
-              "Types and functions use two shapes."
-            ],
-            "proposed": {
-              "code": "LIMIT :: 10\nUsd :: distinct Decimal\nPoint :: struct {\n    x: Int\n}\nfn double(p: Point) -> Int { p.x * 2 }"
-            }
-          },
-          {
-            "key": "C",
-            "name": "Name first everywhere",
-            "gist": "Nearly every named thing reads name :: kind, functions and modules included.",
-            "gains": [
-              "One visual rule for nearly every named thing.",
-              "double :: fn finds functions as precisely as fn double."
-            ],
-            "losses": [
-              "A bare double :: search also hits locals: 56% are definitions.",
-              "A field and a method differ by one colon.",
-              "Reorders the settled fn double and a dozen other spellings."
-            ],
-            "proposed": {
-              "code": "LIMIT :: 10\nUsd :: distinct Decimal\nPoint :: struct {\n    x: Int\n}\ndouble :: fn(p: Point) -> Int { p.x * 2 }"
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "Search is a near tie, so this is a reading judgment. A keeps each named definition's kind word first, as most languages do.",
-          "gains": [
-            "Lines say what they make first.",
-            "Familiar to most learners."
-          ],
-          "losses": [
-            {
-              "loss": "Types use two shapes: struct Point, and Rows :: [[String]] for an alias.",
-              "mitigation": "One scoped rule: named structs, enums, traits and functions start with their word; :: names a value or type on the right."
-            },
-            {
-              "loss": "An unknown-kind type search lists kind words, or NAME ::.",
-              "mitigation": "Go-to-definition finds any kind; the pattern found every definition, with about 99% of hits precise."
-            }
-          ],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "B's one shape and short search are real, but type lines lose their kind word."
-            },
-            {
-              "key": "C",
-              "reason": "Its double :: fn search is as precise, but bare names hit locals and fields differ from methods by one colon."
-            }
-          ],
-          "tradeoff": "Two shapes joined by one scoped rule, in exchange for familiar definitions that start with what they make."
-        }
-      },
-      "designAway": [
-        {
-          "loss": "Types use two shapes.",
-          "attempts": [
-            "Name every type with :: (option B); kept as the alternative.",
-            "State one rule for both shapes, shown in the error for Point :: struct; kept for A."
-          ],
-          "result": "Retained with mitigation."
-        },
-        {
-          "loss": "A kind-unknown type search needs an alternation.",
-          "attempts": [
-            "Rely on go-to-definition and symbol search, which ignore spelling; kept.",
-            "Measure the plain-text pattern on today's corpus: recall 1.0, precision 0.987; the added prep fn arm is unmeasured."
-          ],
-          "result": "Negligible with mitigation."
-        }
-      ],
-      "draft": false,
-      "status": "ratified",
-      "created": "2026-10-07T18:07:37.145Z",
-      "outcome": "A",
-      "ratifiedAt": "2026-10-07"
-    },
-    {
       "id": "D-CASE-LAW3",
       "cardId": "c0itvqcw",
       "group": "tooling",
@@ -170408,209 +170124,6 @@
       "ratifiedAt": "2026-10-31"
     },
     {
-      "id": "D-DECL-BINDING1",
-      "cardId": "c04j9ahx",
-      "group": "declarations",
-      "title": "Every named thing is a binding: `square :: (n: Int) -> Int { n * n }`, `Point :: struct { … }`, and a lambda is the same value without a name",
-      "situation": "A declaration gives a name to a function, a type or a value. Today a function or type starts with a word, as in `fn square` and `struct Point`. A value is bound with `::`, as in `LIMIT :: 10`.\n\nD-DECL-FORM2=A kept that split on 2026-10-07. You now ask for the Jai form, where every named thing is a binding and a lambda is the bound value without its name. This vote decides the declaration form. We recommend the Jai form without a leading word.",
-      "gist": "Should functions and types be declared as bindings, `square :: (n: Int) -> Int { … }` and `Point :: struct { … }`, with a lambda written as the same value?",
-      "lesson": "A binding gives a name to a value with `::`. Under this rule a function is a value too: after the `::` you write its inputs, its result and its body. A lambda is that same value passed without a name, such as `(n) { n * n }`. Types work the same way: `Point :: struct { x: Int }`.",
-      "explainer": "Jet already binds most named things with `::`: constants, separate types, aliases and re-exports. Functions, structs, enums, traits and inline modules are the exceptions, and each starts with its own word.\n\nUnder the recommended form those exceptions go. The name always comes first, `::` always means a fixed binding, and the right side says what the thing is. A function value is the head of today's `fn` without the word and the name.",
-      "story": "Dev writes `square :: (n: Int) -> Int { n * n }` at the top of a file, as he would in Jai. Today it fails with E0357, \"Constant `square` must be ALL_CAPS\". Inside `run` the same line runs, but only because `Int { n * n }` reads as a typed value.",
-      "inWild": "// Jai: functions, constants and types are all bindings.\nsquare :: (x: float) -> float { return x * x; }\nPI     :: 3.14159\nVec2   :: struct { x, y: float; }",
-      "detail": "Provenance. Card c04j9ahx (D-DECL-FORM2) and card c0rqt0kq (D-LAMBDA-SHAPE1, D-LAMBDA-STORED1). The owner asked that the lambda shape align with \"the planned conversion to the Jai-style bindings\". No Tower decision or card ratifies that conversion, so this vote asks for it.\n\nHistory. The September Jai review aimed at `f :: fn(x: Int) -> Int { … }` and set the bare Jai form aside \"for now\" (Docs/research/jai-vs-jet-fable-brief-2026-09-16.md:106). It also said \"Unify these. Do not ship both.\" D-DECL-FORM2=A then kept the leading words.\n\nToday. Probes are in $JET_SCRATCH_ROOT/lanes/SurfaceDesign/probes/m-decl, run at o0, o1 and o2. In d3_bind_fn.jet a module-level `square :: (n: Int) -> Int { … }` is E0357. In d4_point_struct_bind.jet `Point :: struct { … }` is E0003. In d6_local_recur.jet a local lambda calling itself is E0804.\n\nMore probes. In d2_tuple.jet `p :: (x: 1, y: 2)` is a tuple and prints 3. In d5_fn_value.jet a `:=` lambda can be reassigned and prints 3. The ballot program in today's spelling, minus the generic parts, is d8_program_today.jet. It prints 7, 4.0, [1, 4, 9], [1, 4, 9], 2, 120 and 7 on every tier.\n\nSize, from b2/census-decl.mjs over a dev export of 17,636 .jet files. There are 62,347 `fn name(` heads, of which 49,924 are indented methods or members. There are 7,168 struct, 1,889 enum and 183 trait heads, and 576 inline modules. Main's lambda census (q/b4/lam/census.mjs), rerun on the same export, counts 4,812 lambdas in 1,197 files.\n\nUnchanged sites. The 773 `fn(` function types keep their spelling under A. The 1,612 `impl` blocks keep their head. The 4,808 markers before a function stay where they are. Jet code has no `if (name) {` or `loop (name) {` head, so the condition rule in A rewrites nothing.\n\nReads with D-LAMBDA-SHAPE1, which decides whether a lambda also keeps a short arrow form. That vote is written in this vote's A spelling.\n\nSpelling check. Every form here uses today's ratified words. Generic parameters use `<T: Bound>` as functions, types and generic aliases do now, and `comptime` replaces the retired `prep` (D-PREP-SURFACE2=A). Effect rows `-[…]>` and failure rails `E!` are unchanged.",
-      "options": [
-        {
-          "key": "A",
-          "name": "Name first; a function value has no leading word",
-          "detail": "Every named thing is `name :: value`. A function value is `(params) arrow result failure { body }`, today's head without `fn` and the name. A type is `struct { … }`, `enum { … }`, `trait { … }` or a type written on the right. An inline module is `math :: module { … }`.\n\nA lambda is the same value without a name. Types the call gives may be left out, as in `nums.map((n) { n * n })`. With no expected type, parameter and result types are written, as D-LAMBDA-STORED1 requires.\n\nTelling a function from a tuple. A parenthesized list is a function only when `{`, `->`, `-[` or a failure rail follows it. `origin :: (x: 0, y: 0)` has none, so it stays a tuple. `Pt :: (x: Int, y: Int)` stays a tuple type. `(x: 1) { … }` is an error: a parameter needs a type.\n\nIn an `if` or `loop` head, `(ok) {` is a grouped condition and its block, never a function. A function there needs its own parentheses. After the result type, `{` always opens the body, so `-> Int { n * n }` no longer reads as a typed value.\n\nMembers. Inside a type body, `x: Int` is a field and `norm1 :: (self) -> Int { … }` is a method. `Shape.area :: (self) -> Float { … }` adds a method outside the type. Trait bodies list required methods without a body. `impl Type { … }` stays, holding bindings, because it names nothing new.\n\nGenerics, effects, failures and markers. Type parameters stay on the name, as generic aliases already write them (`RecordView<T> :: Box<T>`). So a generic function is `larger<T: Comparable> :: (a: T, b: T) -> T { … }` and a generic type is `Pair<T> :: struct { first: T, second: T }`. Effect arrows and failure rails stay where they are today. Markers stay on the line above the binding.\n\nFixed and changeable. `::` binds a fixed function: it may call itself, and a module-level one may be used before its line. `:=` binds a changeable function value: it can be reassigned and cannot call itself (E0804).\n\nBehavior changes. A local `::` function may call itself; today that is E0804. Lambdas lose the arrow body `n -> n * n`; D-LAMBDA-SHAPE1 decides whether a short form stays. `fn` remains only in function types such as `fn(Int) -> Int`. A module-level function binding is snake_case, not ALL_CAPS.",
-          "technical": "Grammar. An item is `[markers] [priv] name :: value`. In value position `(` starts a parameter list when the matching `)` is followed by `{`, `->`, `-[` or a failure rail; otherwise it is a tuple or a grouping. Inside `if` and `loop` heads that test is off, as Rust does for struct literals.\n\nAmends D-DECL-FORM2=A, which it reverses, and D-SIG-AFTER1=A, whose head shape stays while the name moves. It amends D-CASE-LAW1=A: a fixed binding of a function is snake_case and of a type PascalCase. It amends D-LAMBDA-IFACE2=A, since a lambda may write its result. D-LAMBDA-STORED1 keeps its rule in the new spelling.\n\nMigration is one paired change. `jet fix` rewrites `fn name(` to `name :: (` and `fn Type.name(` to `Type.name :: (`. It rewrites `struct Name {` to `Name :: struct {`, and the same for enum, trait and inline module heads. Type parameters move with the name: `fn larger<T>(` becomes `larger<T> :: (`, and `struct Pair<T> {` becomes `Pair<T> :: struct {`. File modules keep `module math;`, since that line loads a file and binds no value.\n\nOld heads are ordinary parse errors after the change; the error's fix line shows the new spelling, and nothing parses both. Each head grows by one character, from `fn ` to ` :: `, and each type head by four. Definition search becomes one pattern, `name ::`, for every kind.",
-          "code": "// Simple: one function and a lambda\nsquare :: (n: Int) -> Int { n * n }\n\nrun :: () {\n    print(square(4))                          // 16\n    print([1, 2].map((n) { n + 1 }))          // [2, 3]\n}\n\n// Complex: types, methods, generics, markers, local recursion\n// Every named thing is a binding: name :: value.\nPoint :: struct {\n    x: Int\n    y: Int\n    norm1 :: (self) -> Int { self.x.abs() + self.y.abs() }    // a method\n}\n\nShape :: enum {\n    Circle(Float)\n    Square(Float)\n}\n\n#Error\nMathError :: enum { Zero }\n\nShape.area :: (self) -> Float {                             // a method added outside\n    if self == {\n        .Circle(r) -> 3.14159 * r * r\n        .Square(side) -> side * side\n    }\n}\n\nPair<T> :: struct { first: T, second: T }                 // a generic type\n\nlarger<T: Comparable> :: (a: T, b: T) -> T { if a > b -> a else -> b }\n\nsquare :: (n: Int) -[]> Int { n * n }\n\n#Inline(Always)\npred :: (n: Int) -> Int MathError! {\n    if n <= 0 -> return Err(MathError.Zero)\n    n - 1\n}\n\nrun :: () {\n    origin :: (x: 0, y: 0)                    // a tuple: no body follows\n    p :: Point{x: 3, y: -4}\n    print(p.norm1())                          // 7\n    print(Shape.Square(2.0).area())           // 4.0\n    print(larger(3, 9))                       // 9\n    print([1, 2, 3].map((n) { n * n }))       // [1, 4, 9]: the call gives the types\n    print([1, 2, 3].map(square))              // [1, 4, 9]\n    step := (n: Int) -> Int { n + 1 }         // a changeable function value\n    step = (n: Int) -> Int { n + 2 }\n    print(step(origin.x))                     // 2\n    fact :: (n: Int) -> Int { if n <= 1 -> 1 else -> n * fact(n - 1) }\n    print(fact(5))                            // 120\n    print(pred(8) ?? 0)                       // 7\n}"
-        },
-        {
-          "key": "B",
-          "name": "Name first; a function value starts with `fn`",
-          "detail": "Every named thing is a binding, as in A, but a function value keeps `fn` in front: `square :: fn(n: Int) -> Int { … }`. A lambda is `fn(n) { n * n }`. This is Odin's form, and the September review's working target.\n\nNothing needs a rule to tell a function from a tuple, because `fn` marks every function. The type of a function value is the value without names and body, `fn(Int) -> Int`. Methods, generics, markers, `::` and `:=` read as in A.\n\nBehavior changes match A's, except that lambdas start with `fn(`. Each function head keeps its length, and each lambda grows by about 2.6 characters.",
-          "technical": "Same migration and amendments as A, with `fn` kept in the value: `fn name(` becomes `name :: fn(`. The parser reads `fn (` in value position as a function, which is E0003 today. No tuple or condition-head rule is needed.",
-          "code": "// Simple: one function and a lambda\nsquare :: fn(n: Int) -> Int { n * n }\n\nrun :: fn() {\n    print(square(4))                          // 16\n    print([1, 2].map(fn(n) { n + 1 }))        // [2, 3]\n}\n\n// Complex: types, methods, generics, markers, local recursion\n// Every named thing is a binding, and a function value starts with fn.\nPoint :: struct {\n    x: Int\n    y: Int\n    norm1 :: fn(self) -> Int { self.x.abs() + self.y.abs() }\n}\n\nShape :: enum {\n    Circle(Float)\n    Square(Float)\n}\n\n#Error\nMathError :: enum { Zero }\n\nShape.area :: fn(self) -> Float {\n    if self == {\n        .Circle(r) -> 3.14159 * r * r\n        .Square(side) -> side * side\n    }\n}\n\nPair<T> :: struct { first: T, second: T }\n\nlarger<T: Comparable> :: fn(a: T, b: T) -> T { if a > b -> a else -> b }\n\nsquare :: fn(n: Int) -[]> Int { n * n }\n\n#Inline(Always)\npred :: fn(n: Int) -> Int MathError! {\n    if n <= 0 -> return Err(MathError.Zero)\n    n - 1\n}\n\nrun :: fn() {\n    origin :: (x: 0, y: 0)\n    p :: Point{x: 3, y: -4}\n    print(p.norm1())\n    print(Shape.Square(2.0).area())\n    print(larger(3, 9))\n    print([1, 2, 3].map(fn(n) { n * n }))\n    print([1, 2, 3].map(square))\n    step := fn(n: Int) -> Int { n + 1 }\n    step = fn(n: Int) -> Int { n + 2 }\n    print(step(origin.x))\n    fact :: fn(n: Int) -> Int { if n <= 1 -> 1 else -> n * fact(n - 1) }\n    print(fact(5))\n    print(pred(8) ?? 0)\n}"
-        },
-        {
-          "key": "C",
-          "name": "Keep the leading words",
-          "detail": "D-DECL-FORM2=A stands. Functions, structs, enums, traits and inline modules keep their words, and values keep `name :: value`. A lambda follows D-LAMBDA-SHAPE1's first draft, `fn(n) { n * n }`.\n\nA local function is still a stored lambda, so it cannot call itself; a recursive helper moves to the top level. `Point :: struct { … }` stays refused, with a fix to `struct Point { … }`.",
-          "technical": "No declaration migration. The lambda migration of D-LAMBDA-SHAPE1's first draft still applies: 4,812 lambdas move to `fn(…) { … }`. D-SIG-AFTER1, D-CASE-LAW1 and D-LAMBDA-IFACE2 stay as they are.",
-          "code": "// Simple: one function and a lambda\nfn square(n: Int) -> Int { n * n }\n\nfn run() {\n    print(square(4))                          // 16\n    print([1, 2].map(fn(n) { n + 1 }))        // [2, 3]\n}\n\n// Complex: types, methods, generics, markers, local recursion\n// Named definitions keep their leading word (D-DECL-FORM2=A).\nstruct Point {\n    x: Int\n    y: Int\n    fn norm1(self) -> Int { self.x.abs() + self.y.abs() }\n}\n\nenum Shape {\n    Circle(Float)\n    Square(Float)\n}\n\n#Error\nenum MathError { Zero }\n\nfn Shape.area(self) -> Float {\n    if self == {\n        .Circle(r) -> 3.14159 * r * r\n        .Square(side) -> side * side\n    }\n}\n\nstruct Pair<T> { first: T, second: T }\n\nfn larger<T: Comparable>(a: T, b: T) -> T { if a > b -> a else -> b }\n\nfn square(n: Int) -[]> Int { n * n }\n\n#Inline(Always)\nfn pred(n: Int) -> Int MathError! {\n    if n <= 0 -> return Err(MathError.Zero)\n    n - 1\n}\n\nfn run() {\n    origin :: (x: 0, y: 0)\n    p :: Point{x: 3, y: -4}\n    print(p.norm1())\n    print(Shape.Square(2.0).area())\n    print(larger(3, 9))\n    print([1, 2, 3].map(fn(n) { n * n }))     // D-LAMBDA-SHAPE1 v1\n    print([1, 2, 3].map(square))\n    step := fn(n: Int) -> Int { n + 1 }\n    step = fn(n: Int) -> Int { n + 2 }\n    print(step(origin.x))\n    print(fact(5))                            // fact must be a top-level fn\n    print(pred(8) ?? 0)\n}\n\nfn fact(n: Int) -> Int { if n <= 1 -> 1 else -> n * fact(n - 1) }"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "Jai",
-          "note": "Procedures, constants and types are constant bindings; a procedure value has no leading word. Source: Docs/research/jai-vs-jet-syntax-briefing-2026-09-16.html:234-238 and https://github.com/Ivo-Balbaert/The_Way_to_Jai",
-          "code": "square :: (x: float) -> float { return x * x; }\nVec2   :: struct { x, y: float; }"
-        },
-        {
-          "lang": "Odin",
-          "note": "The same binding form, with `proc` in front of every procedure value, passed inline unchanged. Source: https://odin-lang.org/docs/overview/#procedures",
-          "code": "square :: proc(x: f32) -> f32 { return x * x }\nVec2 :: struct { x, y: f32 }"
-        },
-        {
-          "lang": "Zig",
-          "note": "Types are bound as values, but functions keep `fn name`; RFC #1717 to bind them with `const` has not shipped. Source: https://github.com/ziglang/zig/issues/1717",
-          "code": "const Vec2 = struct { x: f32, y: f32 };\nfn square(x: f32) f32 { return x * x; }"
-        },
-        {
-          "lang": "JavaScript",
-          "note": "An arrow function is one value, bound with `const` or passed unchanged. Source: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Functions/Arrow_functions",
-          "code": "const square = (n) => n * n;\n[1, 2, 3].map((n) => n * n);"
-        },
-        {
-          "lang": "Kotlin",
-          "note": "Named functions and lambdas have two different shapes. Source: https://kotlinlang.org/docs/lambdas.html",
-          "code": "fun square(n: Int): Int = n * n\nlistOf(1, 2, 3).map { n -> n * n }"
-        }
-      ],
-      "rec": "B",
-      "recommendation": {
-        "why": "B gives one declaration rule, name `::` value, and every function value starts with `fn`. A reader and the parser see a function at once, with no rule to tell a function from a tuple. It is the reversible choice the owner asked for.",
-        "gains": [
-          "One form for functions, types, modules and values.",
-          "A lambda is the same `fn` value without a name.",
-          "A local function may call itself.",
-          "No tuple-or-function rule: `fn` marks every function."
-        ],
-        "losses": [],
-        "whyNot": [
-          {
-            "key": "A",
-            "reason": "A needs a rule to tell `(…)` functions from tuples and groupings, and dropping `fn` is easy to do later, while adding it back is not."
-          },
-          {
-            "key": "C",
-            "reason": "C keeps two declaration forms, and local functions stay stored lambdas that cannot call themselves."
-          }
-        ],
-        "tradeoff": "Every function, struct, enum and module head is rewritten once by `jet fix`."
-      },
-      "hybrid": null,
-      "ballotMode": "full",
-      "shortAuthorizedBy": null,
-      "ballotProcessVersion": 5,
-      "reviewPasses": {
-        "adversarial": "Author model family: Claude. Adversarial model family: Claude. Fresh agent: Main. It rechecked every option against owner question qnu3bbvb and designed away each cost of the fn option."
-      },
-      "checkInstructions": "Use the dev jet from $JET_SCRATCH_ROOT/discovery/base/latest with JET_TOOLCHAIN_ROOT set to a dev export. In $JET_SCRATCH_ROOT/lanes/SurfaceDesign/probes/m-decl run d2, d3, d4, d5, d6 and d8 at --optimize=none, basic and full. Run node b2/census-decl.mjs on the export for the site counts.",
-      "surface": {
-        "gist": "Should every function and type be a binding, `square :: (n: Int) -> Int { … }`, with a lambda as the same value?",
-        "lesson": "A binding names a value with `::`. A function is a value too: inputs, result and body after the `::`. A lambda is that value without a name.",
-        "trio": {
-          "current": {
-            "note": "Today functions and types start with a word; only values are bindings.",
-            "code": "fn square(n: Int) -> Int { n * n }\nstruct Point { x: Int }\nLIMIT :: 10\nsquare2 :: (n: Int) -> Int { n * n }    // E0357 at module level"
-          },
-          "wild": {
-            "lang": "Jai",
-            "note": "Everything named is a constant binding.",
-            "code": "square :: (x: float) -> float { return x * x; }\nVec2   :: struct { x, y: float; }"
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "Name first, no word",
-            "gist": "`square :: (n: Int) -> Int { … }`; a lambda is `(n) { n * n }`.",
-            "gains": [
-              "One declaration form.",
-              "A lambda is a function without its name."
-            ],
-            "losses": [
-              "A tuple-or-function rule for `(…)`."
-            ],
-            "proposed": {
-              "code": "square :: (n: Int) -> Int { n * n }\nPoint :: struct { x: Int }\nLIMIT :: 10\nnums.map((n) { n * n })"
-            }
-          },
-          {
-            "key": "B",
-            "name": "Name first, with `fn`",
-            "gist": "`square :: fn(n: Int) -> Int { … }`; a lambda is `fn(n) { n * n }`.",
-            "gains": [
-              "One declaration form.",
-              "Every function visibly starts with `fn`."
-            ],
-            "losses": [],
-            "proposed": {
-              "code": "square :: fn(n: Int) -> Int { n * n }\nPoint :: struct { x: Int }\nLIMIT :: 10\nnums.map(fn(n) { n * n })"
-            }
-          },
-          {
-            "key": "C",
-            "name": "Keep the words",
-            "gist": "`fn square(…)` and `struct Point` stay; values stay bindings.",
-            "gains": [
-              "No declaration rewrite."
-            ],
-            "losses": [
-              "Two declaration forms.",
-              "Local functions cannot call themselves."
-            ],
-            "proposed": {
-              "code": "fn square(n: Int) -> Int { n * n }\nstruct Point { x: Int }\nLIMIT :: 10\nnums.map(fn(n) { n * n })"
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "B",
-          "why": "One rule for every name, and `fn` marks every function value. Dropping it later is easy.",
-          "gains": [
-            "One declaration form.",
-            "Local functions may call themselves."
-          ],
-          "losses": [],
-          "whyNot": [
-            {
-              "key": "A",
-              "reason": "Needs a tuple-or-function rule; hard to add `fn` back later."
-            },
-            {
-              "key": "C",
-              "reason": "Two forms, and local functions cannot recurse."
-            }
-          ],
-          "tradeoff": "Every head is rewritten once, mechanically, by `jet fix`."
-        }
-      },
-      "designAway": [
-        {
-          "loss": "62,347 function heads, 9,240 type heads and 576 inline modules are rewritten.",
-          "attempts": [
-            "Keep `fn name` beside `name ::`: rejected, two forms for one thing.",
-            "Convert functions only, as a hybrid: rejected, types would then keep a second form."
-          ],
-          "result": "`jet fix` does the rewrite mechanically in one paired change. An old head is then a parse error whose fix line shows the new spelling."
-        },
-        {
-          "loss": "A generic definition might need a second place for its type parameters.",
-          "attempts": [
-            "Keep prep parameters inside the value, `(prep T: Comparable, a: T)`: rejected, `prep` is retired and it mixes types into the value list.",
-            "Put them on the value, `:: <T>(a: T)`: rejected, generic aliases already put them on the name."
-          ],
-          "result": "Type parameters stay on the name for every kind, `larger<T> ::` and `Pair<T> ::`, exactly as `RecordView<T> :: Box<T>` is written today."
-        },
-        {
-          "loss": "B: a word on every function and lambda.",
-          "attempts": [
-            "Drop it now, as A does: rejected by the owner, since removing a word later is easy and adding one back is not."
-          ],
-          "result": "B is the reversible choice: if fn proves redundant, `jet fix` deletes it mechanically, while adding a word back later would need every head rewritten by hand-checked rules. The word also removes A's tuple-or-function parsing rule."
-        }
-      ],
-      "draft": false,
-      "status": "ratified",
-      "created": "2026-10-30T18:41:53.991Z",
-      "outcome": "B",
-      "ratifiedAt": "2026-11-01"
-    },
-    {
       "id": "D-CORE-RLIMIT-NAME1",
       "cardId": "c0qe89cl",
       "group": "stdlib",
@@ -190085,19 +189598,6 @@
       "answeredBy": "Main"
     },
     {
-      "id": "qnu3bbvb",
-      "cardId": "c04j9ahx",
-      "decisionId": "D-DECL-BINDING1",
-      "by": "owner",
-      "kind": "question",
-      "text": "for now I think we should include the fn, so it would be \"my_func :: fn(n: int) {n*2}\". it would be much easier to cut out the fn than it would be to try adding it back in.",
-      "status": "answered",
-      "answer": "Done: B (my_func :: fn(n: Int) { n * 2 }) is now the recommendation, with your reason recorded. Dropping fn later is a mechanical jet fix; adding it back would not be. The fn word also removes A's tuple-or-function parsing rule.",
-      "created": "2026-11-01T00:13:58.297Z",
-      "answeredAt": "2026-11-01",
-      "answeredBy": "Main"
-    },
-    {
       "id": "q1qyjuz4",
       "cardId": "c06he0ee",
       "decisionId": "D-MACHINE1",
@@ -191615,6 +191115,153 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-09T18:18:48.924Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0wi8ere",
+      "note": "#22 Every gated ScriptBench cell has a machine-ceiling reference"
+    },
+    {
+      "at": "2026-11-09T18:18:47.999Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0wi8ere",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-09T18:18:46.742Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ihjl6a",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-09T18:18:45.867Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0z3glhp",
+      "note": "#5: Owner ruling 2026-11-09 (BoardPlanner C-G4-3): characters are a soft requirement; the owner reviews the side-by-sides.; was: Total command characters of the 10 Jet one-liners are at most the total of the 10 Perl versions, counted by a checked-in script."
+    },
+    {
+      "at": "2026-11-09T18:18:44.967Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0a0gmpl",
+      "note": "#11 jet run builds every program at full optimization (owner rul"
+    },
+    {
+      "at": "2026-11-09T18:18:44.068Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0a0gmpl",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-09T18:18:43.148Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0a0gmpl",
+      "note": "#2: BoardPlanner review 2026-11-09 (dev 6a06b917cb). w05 and w06 are #6083 c2 and #6082 c2 on both tiers (manifest.json:47-49 lists both cards); the method moved from the scratch BENCH.md into the checked-in manifest.; was: ScriptBench workload w03, w05, w06, w14 (jet run), measured with the BENCH.md method (hyperfine -N, interleaved, same machine), beats every measured peer on warm wall, CPU and peak RSS (Jet/peer below"
+    },
+    {
+      "at": "2026-11-09T18:18:42.202Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0aqwnas",
+      "note": "#3: BoardPlanner review 2026-11-09 (dev 6a06b917cb). Duplicate of #6089 c2 (ScriptBench w10, same text). #6088's own root is fixed (c1, c2 met).; was [open]: ScriptBench workload w10, measured with the BENCH.md method (hyperfine -N, interleaved, same machine), beats every measured peer on warm wall, CPU and peak RSS (Jet/peer below 1.00), on the built bina"
+    },
+    {
+      "at": "2026-11-09T18:18:41.218Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0qe89cl",
+      "note": "#18 The nine Core conveniences named for c17 ($JET_SCRATCH_ROOT/"
+    },
+    {
+      "at": "2026-11-09T18:18:40.256Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0qe89cl",
+      "note": "#17: BoardPlanner review 2026-11-09 (dev 6a06b917cb). Owner 2026-11-09: add criteria to existing cards before making new ones. The named gaps become the next criterion.; was: Every existing gauntlet entry where Jet uses more source tokens than Python (wordfreq 4.1x, tensor-map-4k 1.8x, csvtransform 1.5x, bulkrename 1.5x, regex-find-all-4mb 1.4x, tzreport 1.3x, taskfile-cli"
+    },
+    {
+      "at": "2026-11-09T18:18:39.284Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c086wraw",
+      "note": "#3: BoardPlanner review 2026-11-09 (dev 6a06b917cb). Names the owner's chosen fix (Q8) and the root 775f3b07ae reported.; was: `jet cc hello.c` and `jet run hello.c` work on this development host: the E1275 sandbox refusal seen on 2026-11-08 is root-caused and fixed, and a fresh C compile finishes in seconds, not 75 s (receip"
+    },
+    {
+      "at": "2026-11-09T18:18:38.325Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c015yc5v",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-09T18:18:36.646Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c015yc5v",
+      "note": "#2 Authority flags (--allow, -A, --gate, --token, --allow-unoff"
+    },
+    {
+      "at": "2026-11-09T18:18:35.645Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ih6z1d",
+      "note": "goals"
+    },
+    {
+      "at": "2026-11-09T18:18:33.734Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c02a1ynr",
+      "note": "blockedBy"
+    },
+    {
+      "at": "2026-11-09T18:18:31.826Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0z3glhp",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-09T18:18:30.029Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0wi8ere",
+      "note": "#14: BoardPlanner review 2026-11-09 (dev 6a06b917cb). The stored text stops mid-sentence ('and each'); the ending follows c15's pattern (each failing cell names its card). The 2026-10-28 audit was never checked in (no git history for Docs/audits/scripting-peers-2026-10-28.md).; was: (was #5981) (was #5905) Scripting comparison: Jet against Lua, JavaScript, TypeScript, Bash and Python on speed and on tokens and readability: the audit exists, every cell is measured, not estimated, "
+    },
+    {
+      "at": "2026-11-09T18:18:28.988Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0wi8ere",
+      "note": "#13: BoardPlanner review 2026-11-09 (dev 6a06b917cb). The old text named no proof; the phases now have a home in the checked-in runner.; was: (was #5981) (was #3104) Measure the whole scripting loop before claiming speed: Cold/warm/edit phases and prepare/first-call/repeated-call/release phases are separated."
+    },
+    {
+      "at": "2026-11-09T18:18:27.992Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0wi8ere",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-09T18:18:26.938Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0wi8ere",
+      "note": "title"
+    },
+    {
+      "at": "2026-11-09T18:18:24.631Z",
+      "by": "Main",
+      "action": "goal.update",
+      "ref": "G4",
+      "note": "body"
+    },
     {
       "at": "2026-11-09T18:03:45.150Z",
       "by": "Main",
@@ -194981,713 +194628,6 @@
       "action": "goal.log",
       "ref": "G4",
       "note": "ScriptLead assigned 2026-11-08: triage of every open G4 card"
-    },
-    {
-      "at": "2026-11-08T18:36:26.099Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0ihjl6a",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T18:36:24.682Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0cs6xlg",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T18:36:23.347Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0hzvj2s",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T18:29:01.686Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0cs6xlg",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T18:29:00.540Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0bzrof5",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T18:28:59.007Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0i891tv",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T18:22:28.863Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0bzrof5",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T18:22:27.793Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0i891tv",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T18:12:23.576Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0crz3ra",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T18:12:22.444Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0crz3ra",
-      "note": "#8 The step-output-in-read-folder rule (Graph.jet and Jetpack V"
-    },
-    {
-      "at": "2026-11-08T18:08:19.160Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0crz3ra",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T18:07:01.919Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0cs6xlg",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T18:07:00.952Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0h06654",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T18:02:13.672Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0crz3ra",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T17:57:16.718Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c02a1ynr",
-      "note": "#7 a0_039 regression (QuickLead 2026-11-08): under LaneCheck de"
-    },
-    {
-      "at": "2026-11-08T17:53:36.228Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0h06654",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T17:52:13.830Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0bzrof5",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T17:52:12.855Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0cs6xlg",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T17:52:11.877Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0cs6xlg",
-      "note": "#1: A committed generated census file breaks AGENTS.md (never commit generated status); the script is the census.; was: A committed census lists every libc function family (C23 and POSIX.1-2024) with the Jet Core or runtime API that covers it, or names it as a gap; produced by a script, not by hand."
-    },
-    {
-      "at": "2026-11-08T17:42:51.186Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0h06654",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T17:37:46.832Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0h06654",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T17:34:46.227Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0i891tv",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T17:34:45.191Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0bnp1zw",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T17:25:41.355Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0h06654",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T17:23:07.644Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0h114mv",
-      "note": "#5 A Core module that imports an unknown __core_* part gets one"
-    },
-    {
-      "at": "2026-11-08T17:21:15.338Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0h06654",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T17:14:48.220Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0crz3ra",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T16:58:29.655Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0cs6xlg",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T16:58:28.434Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0bzrof5",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T16:54:29.459Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0h06654",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T16:51:22.275Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c086wraw",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T16:49:26.619Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0wl6r2h",
-      "note": "#3 core.sys.fork() is as safe as it was under musl fork: a runt"
-    },
-    {
-      "at": "2026-11-08T16:49:25.671Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0wl6r2h",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T16:45:24.466Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0wl6r2h",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T16:37:43.856Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0esaekb",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T16:09:18.282Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0h114mv",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T16:05:39.059Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0hsgoa6",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T16:01:01.865Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0wi8ere",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T16:00:21.571Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0ajhpeh",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T16:00:03.194Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0bnp1zw",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T15:56:29.867Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0wl6r2h",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T15:56:28.862Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0x92nsv",
-      "note": "#4 setuid, setgid and setgroups (and initgroups, ported to Jet "
-    },
-    {
-      "at": "2026-11-08T15:56:09.223Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0ajhpeh",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T15:56:08.096Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0bnp1zw",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T15:55:07.845Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0lscvc9",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T15:55:06.766Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0cs6xlg",
-      "note": "#2 Every gap is either filled with Jet surface (each new public"
-    },
-    {
-      "at": "2026-11-08T15:55:05.521Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0cs6xlg",
-      "note": "#1 A committed census lists every libc function family (C23 and"
-    },
-    {
-      "at": "2026-11-08T15:54:55.014Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c0cs6xlg",
-      "note": "No C: full libc coverage in Jet (census libc against Core and the runtime, then fill every gap)"
-    },
-    {
-      "at": "2026-11-08T15:51:04.510Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0h06654",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T15:49:46.098Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0h06654",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T15:49:44.501Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0crz3ra",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T15:49:13.633Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0lscvc9",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T15:48:42.713Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0x92nsv",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T15:47:56.350Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0ajhpeh",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T15:47:55.240Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0bnp1zw",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T15:47:54.208Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c03a0dhc",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T15:47:53.128Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0hzvj2s",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T15:47:51.961Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0esaekb",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T15:47:50.882Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0wl6r2h",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T15:47:49.833Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0x92nsv",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T15:47:48.661Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0bzrof5",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-08T15:47:26.212Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0ajhpeh",
-      "note": "#4 Speedtest1 and the db perf cells are measured against C SQLi"
-    },
-    {
-      "at": "2026-11-08T15:47:25.076Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0ajhpeh",
-      "note": "#3 File-format round trips: databases written by C SQLite open "
-    },
-    {
-      "at": "2026-11-08T15:47:24.016Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0ajhpeh",
-      "note": "#2 The public sqllogictest corpus passes, along with every Core"
-    },
-    {
-      "at": "2026-11-08T15:47:23.045Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0ajhpeh",
-      "note": "#1 Core/Db/Db.jet uses the Jet implementation, and Core/Vendor/"
-    },
-    {
-      "at": "2026-11-08T15:47:22.108Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c0ajhpeh",
-      "note": "No C: port SQLite to Jet in full (core.db)"
-    },
-    {
-      "at": "2026-11-08T15:47:20.743Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0bnp1zw",
-      "note": "#5 Handshake and bulk throughput are measured against mbedtls, "
-    },
-    {
-      "at": "2026-11-08T15:47:19.685Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0bnp1zw",
-      "note": "#4 A constant-time check (dudect-style timing test or equivalen"
-    },
-    {
-      "at": "2026-11-08T15:47:18.645Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0bnp1zw",
-      "note": "#3 Handshakes interoperate with OpenSSL and with the old mbedtl"
-    },
-    {
-      "at": "2026-11-08T15:47:17.604Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0bnp1zw",
-      "note": "#2 Every algorithm passes the mbedtls test-suite vectors and th"
-    },
-    {
-      "at": "2026-11-08T15:47:16.638Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0bnp1zw",
-      "note": "#1 Core/Net/Tls.jet and every Core caller use the Jet implement"
-    },
-    {
-      "at": "2026-11-08T15:47:15.645Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c0bnp1zw",
-      "note": "No C: port mbedtls to Jet in full (TLS 1.2 and 1.3, X.509, PSA crypto)"
-    },
-    {
-      "at": "2026-11-08T15:47:14.291Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c03a0dhc",
-      "note": "#3 The full case suite passes on the pack built without musl."
-    },
-    {
-      "at": "2026-11-08T15:47:13.270Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c03a0dhc",
-      "note": "#2 A pure-Jet hello and the w-cells link with no C archive, sta"
-    },
-    {
-      "at": "2026-11-08T15:47:12.237Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c03a0dhc",
-      "note": "#1 PrebuildRuntime.jet and build.jet's runtime step use no CC, "
-    },
-    {
-      "at": "2026-11-08T15:47:10.785Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c03a0dhc",
-      "note": "No C: the runtime pack and program links drop musl, libgcc and libgcc_eh"
-    },
-    {
-      "at": "2026-11-08T15:47:09.431Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0hzvj2s",
-      "note": "#2 jet dev's file watching and web host, the CLI paths, the tes"
-    },
-    {
-      "at": "2026-11-08T15:47:08.394Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0hzvj2s",
-      "note": "#1 None of these files declares or imports a C function (census"
-    },
-    {
-      "at": "2026-11-08T15:47:07.321Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c0hzvj2s",
-      "note": "No C: the compiler's and tools' own C imports (JetDevserver, JetCli, JetTestKit, Tools/ci)"
-    },
-    {
-      "at": "2026-11-08T15:47:05.799Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0esaekb",
-      "note": "#3 Resolution runs on the scheduler without blocking a carrier."
-    },
-    {
-      "at": "2026-11-08T15:47:04.749Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0esaekb",
-      "note": "#2 For localhost, names in /etc/hosts, numeric hosts, a local t"
-    },
-    {
-      "at": "2026-11-08T15:47:03.728Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0esaekb",
-      "note": "#1 HostNetResolver.jet imports nothing from C, and the runtime "
-    },
-    {
-      "at": "2026-11-08T15:47:02.774Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c0esaekb",
-      "note": "No C: a Jet DNS resolver replaces getaddrinfo"
-    },
-    {
-      "at": "2026-11-08T15:47:01.468Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0wl6r2h",
-      "note": "#2 Every Core API built on them keeps its behavior and error ki"
-    },
-    {
-      "at": "2026-11-08T15:47:00.501Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0wl6r2h",
-      "note": "#1 None of these runtime files imports anything from C, and the"
-    },
-    {
-      "at": "2026-11-08T15:46:59.496Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c0wl6r2h",
-      "note": "No C: direct syscalls for the runtime's process, terminal and filesystem calls"
-    },
-    {
-      "at": "2026-11-08T15:46:58.114Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0x92nsv",
-      "note": "#3 Spawn and join cost is measured against the pthread build, a"
-    },
-    {
-      "at": "2026-11-08T15:46:57.113Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0x92nsv",
-      "note": "#2 Thread spawn, join, detach, stack size, thread-locals, panic"
-    },
-    {
-      "at": "2026-11-08T15:46:56.135Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0x92nsv",
-      "note": "#1 Thread.jet and Sync.jet import nothing from C, and the runti"
-    },
-    {
-      "at": "2026-11-08T15:46:55.183Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c0x92nsv",
-      "note": "No C: threads without pthread (Thread.jet, Sync.jet)"
-    },
-    {
-      "at": "2026-11-08T15:46:53.807Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0bzrof5",
-      "note": "#4 A paired perf cell compares each hot function (sin, cos, exp"
-    },
-    {
-      "at": "2026-11-08T15:46:52.767Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0bzrof5",
-      "note": "#3 Full coverage: every C23 math.h function (float and double f"
-    },
-    {
-      "at": "2026-11-08T15:46:51.734Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0bzrof5",
-      "note": "#2 Each ported function matches musl bit for bit on a committed"
-    },
-    {
-      "at": "2026-11-08T15:46:50.677Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0bzrof5",
-      "note": "#1 The 33 functions are Jet, CompilerNeededMath.jet imports not"
-    },
-    {
-      "at": "2026-11-08T15:46:49.544Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c0bzrof5",
-      "note": "No C: port the runtime's 33 libm functions to Jet, then all of math.h"
-    },
-    {
-      "at": "2026-11-08T15:46:47.959Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0lscvc9",
-      "note": "#4 No #Import(c) or #FFI(c) remains in Compiler, Core, Jetpack "
-    },
-    {
-      "at": "2026-11-08T15:46:46.892Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0lscvc9",
-      "note": "#3 jet, jetpack and every runtime pack file contain no object c"
-    },
-    {
-      "at": "2026-11-08T15:46:45.700Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0lscvc9",
-      "note": "#2 `jet build Compiler` on a fresh clone with no C compiler, no"
-    },
-    {
-      "at": "2026-11-08T15:46:44.629Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0lscvc9",
-      "note": "#1 Every child card is done."
-    },
-    {
-      "at": "2026-11-08T15:46:43.606Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c0lscvc9",
-      "note": "Jet depends on no other language: port every C dependency (musl, libgcc, SQLite, mbedtls) to Jet"
-    },
-    {
-      "at": "2026-11-08T15:40:46.190Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c086wraw",
-      "note": "#4 An Examples/ entry runs a C file with plain `jet run`, golde"
     }
   ],
   "nextNum": 368,
@@ -197556,7 +196496,7 @@
     {
       "id": "G4",
       "title": "Best scripting language",
-      "body": "Jet beats every peer for scripts: permissions asked once, basics free, and every repo script is Jet (see G7 and G8). Owner order 2026-11-08: G1, G4, G8, G6, G3, then G5, G7, G9, G10, G11 and G12 in their earlier order; this goal is second.\n\nMerged from G8 (Scripting beats every peer): Script mode (#!) gives the tersest readable code. It beats Python, Bash, Node and others on every ScriptBench cell, both as a binary and with jet run.",
+      "body": "Jet beats every peer for scripts: the tersest readable script code, every effect allowed by default with the run's effect notice (D-AUTH-DEFAULT1=A, #6614), and every repository script is Jet (#5072). It beats Python, Bash, Node and the other peers on every ScriptBench cell (Tools/perf/scriptbench), both as a binary and with jet run. Owner order 2026-11-09: G1, then G4 and G8 (maybe G6) in parallel, then the rest in goal order.",
       "status": "active",
       "log": [
         {
@@ -197571,7 +196511,7 @@
         }
       ],
       "created": "2026-11-04T18:09:52.919Z",
-      "updated": "2026-11-08T18:36:27.888Z",
+      "updated": "2026-11-09T18:18:24.631Z",
       "updatedBy": "Main"
     },
     {
