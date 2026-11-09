@@ -3,7 +3,7 @@
 // rendering (Display/Show/Debug) and numeric conversions.
 
 use {
-    jet_foundation.[CORE_ENUM_ROWS, IRRuntimeHandle, IR_RUNTIME_HANDLES, Span, SymbolID, Type, TypeTupleField, TBinaryOp, TCLIBinding, TCompilerBuiltin, TComptimeValue, TDeclarationOwnership, TField, FnBody, TGenericParam, TNarrowOutcome, TNumericOp, TSerdeAttribute, TShapeFieldNames, TTextPatternPart, TTryConvert, TTypeDef, TTypeDefKind, TVariant, TVariantPayload, core_source_owns_type, jet_target_layout_member_order, measure_literal_value, name_rows_set, name_rows_value, type_carrier_identity, type_name, type_table_intern, type_union_member_tag]
+    jet_foundation.[CORE_ENUM_ROWS, IRRuntimeHandle, IR_RUNTIME_HANDLES, Span, SymbolID, Type, TypeTupleField, TBinaryOp, TCLIBinding, TCompilerBuiltin, TComptimeValue, TDeclarationOwnership, TField, FnBody, TGenericParam, TNarrowOutcome, TNumericOp, TSerdeAttribute, TShapeFieldNames, TTextPatternPart, TTryConvert, TTypeDef, TTypeDefKind, TVariant, TVariantPayload, core_source_owns_type, core_source_part_owns_type, jet_target_layout_member_order, measure_literal_value, name_rows_set, name_rows_value, type_carrier_identity, type_name, type_table_intern, type_union_member_tag]
     jet_sema.[sema_type_def_instance_type]
 }
 
@@ -388,10 +388,10 @@ ir_value_type_laid: fn(m: &IRModule, p: IRProgram, ty: Type, laying: [String]) -
     // A generic declaration lays out per instance, its parameters bound to the
     // instance's arguments; an instance of a Core or runtime-carried generic is one
     // of the builder's own carriers, not its declared fields, unless Core source
-    // owns the declaration (DataStream<T>, DataLoader<T>: its Jet fields on every
-    // tier).
+    // owns the declaration (DataStream<T>, DataLoader<T>, or a private part's
+    // GCMKey<K>: its Jet fields on every tier).
     if definition.generic_params.len() != args.len() -> return None
-    if args.len() > 0 && !core_source_owns_type(definition.key) && (definition.key.starts_with("<corelib>/") || ir_runtime_handle(name) != None) -> return None
+    if args.len() > 0 && !core_source_owns_type(definition.key) && !core_source_part_owns_type(definition.key) && (definition.key.starts_with("<corelib>/") || ir_runtime_handle(name) != None) -> return None
     identity: ir_instance_identity(definition.key, args)
     if definition.kind == {
         .Enum(variants, _) -> {

@@ -145,6 +145,19 @@ core_source_owns_type_in: fn(rows: [CoreSourceOwnedType], name: String) -> Bool 
     false
 }
 
+// Whether a checked Core identity names a nominal of a private Core source part
+// (a `CoreSourceParts.tsv` row, which names its owner module). A part has no
+// runtime carrier and no types column, so every nominal it declares, generic
+// ones included, is its Jet declaration.
+core_source_part_owns_type: fn(name: String) -> Bool Never! {
+    if !name.contains("::") -> return false
+    module_name: core_identity_module(name) ?? return false
+    loop row in CORE_SOURCE_OWNED_ROWS {
+        if row.module_name == module_name -> return row.owner != "" && !row.runtime
+    }
+    false
+}
+
 // The existing public bool(p) arity targets one reserved source
 // method. This is not an overload mechanism or a native receiver route.
 CORE_SOURCE_BOOL_P_OWNER: [CoreSourceOwnedType]{
