@@ -1597,6 +1597,21 @@ fl_is_generated_projection: fn(path: String, src: String) -> Bool {
     print("formatter corpus: {example_programs} example programs, {example_configs} configs, {ui_parse_valid} parse-valid UI fixtures, {ui_parse_invalid} parse-invalid UI fixtures, {ui_configs} UI manifest configs")
 }
 
+// The readable prelude spells only what user code can write (#6281 c1): it
+// parses under the ordinary user rules, and fmt keeps every token of it,
+// a trait method's own `<T: Printable>` included. Run from the repository root.
+#Test("readable_prelude_parses_as_user_source") {
+    path: "Compiler/Prelude/core/prelude.jet"
+    src: fl_files.read(path) ?? panic("cannot read {path}: {err}")
+    assert(!fl_parse_invalid(src), "{path} does not parse as user source")
+    assert(fl_teaching_codes(src).len() == 0, "{path} spells a retired or bodyless form: {fl_teaching_codes(src).join(" ")}")
+    formatted: fl_format(src)
+    assert(formatted.ok, "{path} failed formatter parse:{formatted.codes}")
+    problem: fl_check_preserves(path, src, formatted.text)
+    assert(problem == "", problem)
+    assert(formatted.text == src, "{path} is not in fmt canonical form")
+}
+
 #Test("canonical_rewrite_rules_are_explicit_and_narrow") {
     allowed: [[String]]{
         {"top-level ordering", "#Target(Web)\nuse core.ui as ui\nrun: fn() {{}}\n", "use core.ui as ui\n#Target(Web)\nrun: fn() {{}}\n"},

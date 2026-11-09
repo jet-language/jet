@@ -1,0 +1,38 @@
+// A user trait with the shape of the Prelude's `CheckedText`: one associated
+// error type, a pure checker that fails with it, and a pure generic encoder.
+// Nothing in the Prelude's declaration is a form a package cannot write.
+Vetted: trait {
+    Error: type
+    vet: fn(text: String) Error! -[]>
+    render: fn<T: Printable>(value: T) -[]> String
+}
+
+#Error
+CodeError: enum {
+    Empty
+}
+
+Code: distinct String
+
+impl Code.Vetted {
+    Error: CodeError
+
+    vet: fn(text: String) CodeError! -[]> {
+        if text == "" -> return Err(CodeError.Empty)
+        return Ok()
+    }
+
+    render: fn<T: Printable>(value: T) -[]> String { return "<{value}>" }
+}
+
+passes: fn(text: String) -> Bool {
+    Code.vet(text) ?? return false
+    true
+}
+
+run: fn() {
+    print(Code.render(7))
+    print(Code.render("x"))
+    print(passes("abc"))
+    print(passes(""))
+}
