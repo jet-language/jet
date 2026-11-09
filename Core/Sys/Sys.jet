@@ -607,7 +607,7 @@ scheduling: fn(pid: Int{0}) -[Env]> Scheduling IOError! {
     result: core.sys.__sched_set(pid, row.kind, row.priority)
     if !result.available -> return Err(unsupported("set_scheduling"))
     if result.errno != 0 -> return Err(process_error(.Write, "set_scheduling", result.errno))
-    Ok(())
+    Ok()
 }
 
 /// The time slice a `RoundRobin` process `pid` (this program when 0) runs
@@ -650,7 +650,7 @@ cpu_time: fn(pid: Int{0}) -[Env]> Duration IOError! {
     row: core.sys.__clock_set(ns)
     if !row.available -> return Err(unsupported("set_wall_clock"))
     if row.errno != 0 -> return Err(limit_error(.Write, "set_wall_clock", row.errno))
-    Ok(())
+    Ok()
 }
 
 // The IOError of a call that names a process: not part of the sys surface.
