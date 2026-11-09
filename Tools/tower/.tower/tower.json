@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6715,
-    "rev": 96445,
+    "nextNum": 6716,
+    "rev": 96447,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -93633,167 +93633,6 @@
       "completedAt": "2026-11-06T16:35:54.647Z"
     },
     {
-      "id": "c0n8obf9",
-      "num": 6601,
-      "title": "Runtime witness harnesses rotted against the current runtime ABI: text header, shared clones, renamed exports, missing fixture doors",
-      "body": "Found by Builder5 under #6595 after the free-observer route landed. Of the 75 *Witness.c harnesses, 26 still FAIL and 30 fail to compile or link, both before and after the route. Causes: (a) Text is refcounted with a 40-byte header at t-8 and clone shares the pointer, but the witnesses assert a 32-byte header and distinct clone pointers (Authority, EventResult, IpAddrShow, MathGlue, ScalarReflect, TextDebug, HTTP*, Plugin*, ServiceValues, UiEvents/Metadata/Raylib, XMLGlue, …). (b) Exports were renamed (jet_rt_handle_clone_vec2 is now Vec2, and others), fixture doors (ui_*_witness_*) are missing, and jet_rt_string_new is gone. Bring every witness to the current runtime ABI. Never weaken an assertion to pass: each witness keeps proving its ownership claim (no leak, no double free) against the real layout.",
-      "kind": "bug",
-      "track": "sidequest",
-      "epoch": null,
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P1",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-06",
-          "by": "Main",
-          "text": "edc75a36a3 also applies Main's ruling (c): an unhandled entry Err now goes jet_rt_entry_error_exit → the shared renderer as a full report. Under the root, cleanup runs before the report (scheduler_root_publish_owned); jet_journey_report is deleted. Re-recorded: serde/decode_error_exit.err.out and the field_error_entry_golden corpora case (debug, release and default all PASS); a scan finds 0 bare-message trails. Also: exports.list rot fixed in run-crypto-fixtures and run-testsuite-fixtures; 19 dead JetDataPlot dispatcher rows deleted; the Core views regenerated; check-core-surface-ledger clean."
-        },
-        {
-          "at": "2026-11-06",
-          "by": "Main",
-          "text": "c2 partial in af2db41544: the 60 witnesses assert the 8-byte owner word and shared clones, still proving no leak and no double free. Still open on c2: the HostFiles/Host tests, ProcessExecution, RootStdio and VaultHooks still assume a 24-byte Text; DateZoneGlue.jet:132 and DataMetadata.jet:80 have stale lent-header comments; NativeTextNormalizeWitness uses the old jet_rt_string_new door. Also found: run-crypto-fixtures.mjs:45 reads Compiler/JetRuntime/exports.list, which doesn't exist; Prelude/Core.jet dispatcher rows name jet_data_plot_* exports that no source defines; the UnsafeRatchet baseline in Docs/spec/safety.md is far out of date (safety.md was hand-edited 1127→1126 for HyperLogLog)."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "All 75 runtime witness harnesses compile and link against the current runtime and pass through the free-observer route, with a per-witness report",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "af2db41544 (Builder5). 16 of the 76 witnesses were for orphan runtime sources that no Core, Prelude, route or host code calls. They are deleted along with 29 sources, their doors, their runners and 104 route rows (I8 one mechanism). All remaining 60 compile, link and pass through the checked-heap observer on dev 0fc5677e4c plus the change (s1 528a4ed0ffa410cb), with stdout matching the goldens; the per-witness list is in the handoff. VaultProvider passed 5/5 reruns. The checked heap exposed real runtime defects, which are fixed: thread_zero overran the tail word, and multiply-add was unwrapped in VaultLinux, Scheduler and JourneyTLS. A guard now fails RuntimeGenerators --check (run by LaneCheck) on any orphan or dangling sources.list entry, proven by a planted orphan and a planted dangling line. CHECK OK.",
-          "at": "2026-11-06T09:04:23.902Z"
-        },
-        {
-          "n": 2,
-          "text": "Every witness that asserted the old Text header or distinct clone pointers asserts the current refcounted layout and still proves no leak and no double free",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "edc75a36a3 (Builder5), on s1 91a504b088153be2 with a temp HOME. HostFilesTests, HostTests, ProcessExecutionWitness, RootStdioWitness (modes 0–4, the --established skip removed), NativeTextNormalizeWitness, VaultHooksWitness and err-report.c all assert the 32-byte {data,len,cap,cache} Text with _Static_assert. The shared-owner checks became exact (same pointer, exact owner counts); no assertion is weakened, and no leak or double free is still proven. Lent-header comments fixed in 7 runtime sources. CHECK OK.",
-          "at": "2026-11-06T09:39:36.644Z"
-        },
-        {
-          "n": 3,
-          "text": "Every pinned witness input (char-debug-goldens.bin, RtL6b3/fmt-expected.out, and any other) lives in the repository or comes from a tracked generator; no witness reads a scratch or cache path",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "edc75a36a3: the pinned inputs now live in the repository under Compiler/JetRuntime/Tests. CharDebugPlain.ranges (907 ranges) feeds run-ui-key-witness.mjs, which rebuilds char-debug-goldens.bin byte-identical to the pin 72a49808…. FmtParityExpected.out (372 cases, f7c9a211…) is regenerated from the formatter source. s5-fixtures and stage-frozen-inputs no longer stage scratch copies, and the scratch copy is deleted. UiKeyWitness PASS.",
-          "at": "2026-11-06T09:39:37.522Z"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "goals": [
-        "G1"
-      ],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-06T07:34:10.008Z",
-      "updated": "2026-11-06T09:40:04.676Z",
-      "updatedBy": "Main",
-      "completedAt": "2026-11-06T09:40:04.676Z"
-    },
-    {
-      "id": "c07hutuq",
-      "num": 6602,
-      "title": "A user struct's nested impl Debug is E0112 for {x:Debug}; the top-level impl T.Debug form works",
-      "body": "Found by Recover3 while fixing the a0_026 lost rows (48b6bce25e). A user struct whose impl Debug { fn debug(^self) -> String … } is nested in the struct body gets E0112 ('can't be shown with :Debug yet') for {x:Debug}. The same impl written top-level as impl T.Debug works, and Core types with the nested form work since 48b6bce25e rooted Core debug methods. a0_025 gives the same E0112, so this is not a regression. The nested and top-level spellings of an impl must mean the same thing.",
-      "kind": "bug",
-      "track": "sidequest",
-      "epoch": null,
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P1",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "A user struct's nested impl Debug renders {x:Debug} with the user's debug() on every tier, matching the top-level impl T.Debug; a ui or cases row proves both spellings",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "9067cd33e4 (CoreOwnership). Golden Examples/features/traits/nested_debug_impl (Main reviewed it) covers nested and top-level impl Debug on a struct, an enum, a generic type and a list; {x:Debug} renders the authored debug(), identically on o0/o1/o2 and web. ui/: 2200 PASS, 0 FAIL.",
-          "at": "2026-11-06T08:59:45.999Z"
-        },
-        {
-          "n": 2,
-          "text": "A generic bound reaches the same Debug rule: fn f<T: Debug>(v: T) { \"{v:Debug}\" } checks and renders the authored debug() on every tier (today E0112: Debug is not a bare bound and the generic path finds no trait symbol), with a golden row",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "93b459c08e (CoreOwnership). T: Debug and T: Display bounds now work for {v:Debug}, {v:Pretty} and {v}, including through list elements. New ui row generic_display_debug_bound_unmet. golden traits/ 30/0 and text/ 162/0; nested_debug_impl identical on O0/O1/O2/web; full ui 2201 PASS, 0 FAIL. On a clean export of HEAD, OwnedTraitRows.jet --check passes (2 copies match).",
-          "at": "2026-11-06T09:26:46.033Z"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "goals": [
-        "G2"
-      ],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-06T07:46:26.985Z",
-      "updated": "2026-11-06T09:40:08.648Z",
-      "updatedBy": "Main",
-      "completedAt": "2026-11-06T09:40:08.648Z"
-    },
-    {
-      "id": "c0lm9h4f",
-      "num": 6603,
-      "title": "jet front accepts any registered flag on any command: jet init --check silently writes",
-      "body": "Found by JetpackEngine (#6418 c9). The CLI registry scopes --check to fmt (\"With fmt:\"), but the JetCli front accepts any registered flag on any command. So jet init --check ignores the flag and writes package.jet. A flag outside a command's registry scope must be a usage error that names the commands which do take it. Silently ignoring a flag that promises no writes is a safety bug.",
-      "kind": "bug",
-      "track": "sidequest",
-      "epoch": null,
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P1",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "Every jet command refuses a registered flag outside its registry scope with a usage error naming the commands that take it; jet init --check writes nothing; a cases row covers init --check and one other mis-scoped flag",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "89f28e76af and 0c07bee511 (JetpackEngine). A registered flag outside a command's registry scope is E2102 naming the commands that take it, from one scope rule that also drives jet help. jet init --check exits 2 and writes nothing. Row cli_commands/misplaced_flag_is_e2102_naming_the_commands_that_take_it PASSES. A one-pass census of every jet <cmd> --flag in tests, Docs/spec, the site and harness argv against the scope finds only the intended refusals. Fixed per spec: the stale gate_law check --allow/--force case now runs through jet inspect gates and PASSES; the --preview/--accept scopes are widened for build --import and bind --update (D-FFI-BUILD1, cli.md); help, man and completion snapshots re-blessed for those lines only.",
-          "at": "2026-11-06T09:28:01.031Z"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "goals": [
-        "G2"
-      ],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-06T08:28:11.139Z",
-      "updated": "2026-11-06T09:40:13.463Z",
-      "updatedBy": "Main",
-      "completedAt": "2026-11-06T09:40:13.463Z"
-    },
-    {
       "id": "c018jg16",
       "num": 6604,
       "title": "jet os engine verbs (plan and the rest of the jetos dispatcher) are not built in the Jet engine",
@@ -101789,6 +101628,45 @@
       "needsAcceptance": false,
       "created": "2026-11-09T09:36:12.216Z",
       "updated": "2026-11-09T09:36:20.211Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1
+    },
+    {
+      "id": "c01gm989",
+      "num": 6715,
+      "title": "jet test --profile packages --filter does not narrow the package rows",
+      "body": "In integ b7d, `jet test Compiler --profile packages --filter \"store cleanup quarantines projection with proven missing output\"` built and ran all 3235 package rows (~40 min) and reported unrelated FAILs. The filter should select the matching rows (and the packages that hold them) before anything builds, just as it does for the cases profile. Batch test lines rely on it.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "jet test Compiler --profile packages --filter X builds only the packages holding rows that match X and reports only those rows; a test pins it",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T09:50:48.551Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-09T09:50:46.810Z",
+      "updated": "2026-11-09T09:50:48.551Z",
       "updatedBy": "Main",
       "criteriaLastN": 1
     }
@@ -190355,6 +190233,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-09T09:50:48.551Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c01gm989",
+      "note": "#1 jet test Compiler --profile packages --filter X builds only "
+    },
+    {
+      "at": "2026-11-09T09:50:46.810Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c01gm989",
+      "note": "jet test --profile packages --filter does not narrow the package rows"
+    },
     {
       "at": "2026-11-09T09:36:20.211Z",
       "by": "Main",
