@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 97979,
+    "rev": 97980,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -46441,7 +46441,7 @@
       "parentId": "c0yfcz0w",
       "needsAcceptance": false,
       "created": "2026-10-02T18:25:10.781Z",
-      "updated": "2026-11-09T19:36:06.082Z",
+      "updated": "2026-11-09T20:29:13.484Z",
       "updatedBy": "Main",
       "goals": [
         "G6"
@@ -189884,6 +189884,226 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-09T20:06:13.685Z"
+    },
+    {
+      "id": "D-COMPTIME-BLOCK1",
+      "cardId": "c0699zei",
+      "group": "comptime",
+      "title": "One comptime block that makes everything inside it run while building",
+      "situation": "You asked to write comptime once around a group. Today a required value uses name: comptime { value }. Function-scope statement blocks run while building but do not export names. A top-level block gets E0621; a later CELLS read gets E0107.\n\nPlain constants can already fold as an optimization. Ratified D-COMPTIME-WORD1 extends tries and requires early file constants; it does not require one word for every local value. This ballot concerns grouping required evaluation and build-only declarations, not a promise of smaller binaries.",
+      "gist": "Should one comptime block make everything inside it run while building, with its names readable after it?",
+      "lesson": "Required build-time results use explicit comptime; opportunistic folding is different. The choices group named results, restrict grouping to declarations, add a namespace, retain separate bindings, or return one record from a scoped block.",
+      "explainer": "",
+      "story": "Ada computes cells, rows and a label, then checks a limit. A would group required computation and export named results. Existing dead-code removal can already omit her helper; an explicit build-only region instead prevents accidental runtime use. Another choice returns one record from a scoped value block without exporting its internal names.",
+      "inWild": "Nim separates a grouped const section from static statements that require compile-time execution (https://nim-lang.org/docs/manual.html#statements-and-expressions-const-section).\n\nRacket's begin-for-syntax raises forms' phase rather than exporting ordinary runtime values (https://docs.racket-lang.org/reference/begin.html). Its phase separation is useful, but is not the same contract as A's exported stored values.",
+      "detail": "Exercised current behavior. Option D prints 144, grid-144 and 4 columns. Its final emitted IR contains run and stop-poll calls, not square: the claim that square necessarily ships is false. A file-scope block gets E0621/E0107; a local post-block read gets E0107; comptime module gets E0003. A multi-statement record-valued comptime block gets E0391 today, so E is a real extension, not a current workaround.\n\nA proposes a standing region at file, module or function scope. Direct immutable bindings are required compile-time values exposed in the enclosing scope after the region. Nested if/loop/block bindings stay nested. Mutable scratch bindings remain local. Ordinary casing and visibility apply; the region grants no new export or shadowing privilege. Local regions cannot read runtime inputs; generic-local regions evaluate per specialization, never per runtime call.\n\nAt file/module scope, functions and types declared in the region are build-only declarations, not executed function bodies. Required evaluation invokes their bodies normally. E0944 rejects runtime references, callable/closure escape and stored values whose representation depends on a build-only type. Ordinary shared types live outside. Inner mutable state must be serialized into independent storable results; live loans/handles cannot escape.\n\nTop-level regions run once per compilation instance, including checks when their containing module is loaded even if their result is unused. Regions' imperative statements run in source order. Bindings may depend on ordinary file constants through the existing dependency graph; a cycle through a region is an error, never partial execution. Local regions do not mutate runtime variables or return/break out of runtime control flow.\n\nNo evaluation engine, effect rule or limit changes. D-COMPTIME-WORD1's per-binding budgets remain per binding, not a new shared-block allowance. Standalone region statements use one required-evaluation budget. Existing #StepLimit rules apply. Runtime barriers, required-input classification, #Impure grants and dependency-consent checks cannot be bypassed by an outer block. Diagnostics point at the failing binding or statement. The same recorded facts feed every tier.\n\nPlain use is not added inside the region. Import with existing comptime use in the enclosing declaration scope. A nested comptime is redundant but retains the same meaning; any new warning needs a registered code, removal edit and snapshot before delivery. A region used as a value retains lexical scope and returns only its final value.\n\nB exposes file/module bindings but preserves local statement-block scope. Its best case is phase grouping without changing existing local lexical behavior. C adds a qualified compile-time module; checks run when first used, so an unused module does not promise its checks ran. It trades unqualified access for namespace isolation. D retains current spelling plus ratified WORD1 and USE1; helpers need not ship. None needs a second evaluation mechanism.\n\nE instead completes multi-statement value blocks. One external record type carries the stored results; internal names and scratch state remain lexical. A final record exports several results with one comptime word. It cannot replace a standalone file check without a containing binding, but avoids changing the owner's scope law. Its example includes the same size check and runtime output.\n\nA/B amend the 2026-09-30 scope rule only for their stated positions. C adds a declaration position. E lifts the current E0391 limitation without changing name scope. All use existing comptime vocabulary, so no keyword is added. Diagnostic and grammar-position counts must reflect the chosen option; no measured binary-size or timing gain is claimed.\n\nBeginner path: one region for named results under A, or one stored record under E. Expert path: explicit build-only helpers with USE1 or region phase checks, while ordinary helpers remain dual-use. Acceptance requires collisions, captures, generics, cycles, effect failures, budgets, host/target layout and callable/type escape witnesses.",
+      "options": [
+        {
+          "key": "A",
+          "name": "A standing comptime block shares its names, everywhere",
+          "detail": "Write comptime once in a file, module or function. Direct immutable results become enclosing-scope bindings; scratch state stays local. Functions/types declared in a file/module region are build-only.",
+          "technical": "Add standing regions in declaration positions; retain statement positions. Only direct immutable result bindings enter the enclosing scope; nested names and mutable scratch remain lexical. File/module helper declarations are build-only. Extend E0944 to direct and indirect phase escapes and non-storable result types.\n\nReject plain use with a fix to an enclosing comptime use. Register any redundant-keyword warning with an exact removal edit and snapshot. Migration preserves every old binding's references: rename collisions with their scoped uses, or rewrite the old block as explicit result bindings. Never silently change which declaration a name resolves to.",
+          "code": "// Proposed (A), not built.\ncomptime {\n    square: fn(n: Int) -> Int { n * n }    // exists only while building\n    CELLS: square(12)\n    ROWS: CELLS /% 4\n    LIMIT: ROWS + CELLS\n    NAME: \"grid-{CELLS}\"\n    if LIMIT > 1000 -> panic(\"grid too large\")    // stops the build, not the program\n}\n\nrun: fn() {\n    print(CELLS)    // 144\n    print(NAME)     // grid-144\n    comptime {\n        cols: CELLS /% ROWS\n        label: \"{cols} columns\"\n    }\n    print(label)    // 4 columns\n    // print(square(3))\n    // error[E0944]: `square` is defined in a comptime block, but this code runs in the shipped program\n}"
+        },
+        {
+          "key": "B",
+          "name": "Standing blocks in files and modules only",
+          "detail": "The same block, but only among file and module declarations. Inside a function, names bound in a comptime statement still stay inside it, so each local value keeps its own word.",
+          "technical": "As A at file/module scope; local statement blocks keep lexical scope. This preserves existing local behavior and avoids exporting local names. Only new declaration positions expose direct immutable bindings.",
+          "code": "// Proposed (B), not built.\ncomptime {\n    square: fn(n: Int) -> Int { n * n }    // exists only while building\n    CELLS: square(12)\n    ROWS: CELLS /% 4\n    LIMIT: ROWS + CELLS\n    NAME: \"grid-{CELLS}\"\n    if LIMIT > 1000 -> panic(\"grid too large\")\n}\n\nrun: fn() {\n    print(CELLS)    // 144\n    print(NAME)     // grid-144\n    cols: comptime { CELLS /% ROWS }\n    label: comptime { \"{cols} columns\" }\n    print(label)    // 4 columns\n}"
+        },
+        {
+          "key": "C",
+          "name": "A compile-time module",
+          "detail": "Group build-time code in a named module marked comptime. Every member is computed while building, and code reads them as grid.CELLS. Function bodies are unchanged.",
+          "technical": "Parser: comptime before module in a module declaration; today that is E0003. Sema: every immutable member is a required compile-time binding; functions and types are build-only, with E0944 at runtime references. Names are always qualified, so nothing leaks into the file scope. Checks run when the module is first used.",
+          "code": "// Proposed (C), not built.\ngrid: comptime module {\n    square: fn(n: Int) -> Int { n * n }\n    CELLS: square(12)\n    ROWS: CELLS /% 4\n    LIMIT: ROWS + CELLS\n    NAME: \"grid-{CELLS}\"\n    if LIMIT > 1000 -> panic(\"grid too large\")\n}\nrun: fn() {\n    print(grid.CELLS)\n    print(grid.NAME)\n    label: comptime { \"{grid.CELLS /% grid.ROWS} columns\" }\n    print(label)\n}\n// 144, grid-144, 4 columns; check runs when grid is used."
+        },
+        {
+          "key": "D",
+          "name": "One word per value",
+          "detail": "Keep today's rule. Plain file constants are computed early once D-COMPTIME-WORD1 is built, and every other build-time value, check or helper keeps its own comptime word.",
+          "technical": "No new grouping form beyond ratified WORD1 and USE1. Dead-code removal may already omit build-only callees, as this example's emitted IR does. Separate required values and statement checks retain their existing scope.",
+          "code": "// Exercised current spelling: 144, grid-144, 4 columns.\nsquare: fn(n: Int) -> Int { n * n } // omitted from final IR in this probe\nCELLS: comptime { square(12) }\nROWS: comptime { CELLS /% 4 }\nLIMIT: comptime { ROWS + CELLS }\nNAME: comptime { \"grid-{CELLS}\" }\nrun: fn() {\n    comptime { if LIMIT > 1000 -> panic(\"grid too large\") }\n    print(CELLS)\n    print(NAME)\n    cols: comptime { CELLS /% ROWS }\n    label: comptime { \"{cols} columns\" }\n    print(label)\n}"
+        },
+        {
+          "key": "E",
+          "name": "One scoped value block returning a record",
+          "detail": "Complete multi-statement comptime value blocks. Bind one record outside; internal names remain inside. One word computes several outputs and runs the same check without changing scope.",
+          "technical": "Lift E0391 for multi-statement values, using the existing required evaluator, final-value rule and WORD1 storable-value/budget checks. No new name-export or module mechanism. Helpers can remain ordinary or use existing build-only imports.",
+          "code": "// Proposed extension; current compiler reports E0391.\nGrid: struct { cells: Int, rows: Int, name: String }\nsquare: fn(n: Int) -> Int { n * n }\nGRID: comptime {\n    cells: square(12)\n    rows: cells /% 4\n    if cells + rows > 1000 -> panic(\"grid too large\")\n    Grid{cells: cells, rows: rows, name: \"grid-{cells}\"}\n}\nrun: fn() {\n    print(GRID.cells)\n    print(GRID.name)\n    label: comptime { \"{GRID.cells /% GRID.rows} columns\" }\n    print(label)\n}\n// 144, grid-144, 4 columns."
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "why": "A directly groups named required results in every scope and forbids accidental runtime helper use. E is a strong simpler alternative when one record result suffices; binary size is not a demonstrated advantage of A.",
+        "tradeoff": "A standing block now leaks its names, so it reads differently from a block used as a value, which keeps them inside.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B preserves local lexical scope but does not group multiple externally readable local results without separate value bindings."
+          },
+          {
+            "key": "C",
+            "reason": "C provides namespace isolation and build-only members, at the cost of qualification and lazy checks for unused modules."
+          },
+          {
+            "key": "D",
+            "reason": "D keeps separate required bindings. WORD1 already removes unnecessary words where opportunistic early evaluation is enough; helpers need not ship."
+          },
+          {
+            "key": "E",
+            "reason": "E preserves lexical scope and groups results with one word, but readers use record fields and it does not add a bare file-level check region."
+          }
+        ],
+        "losses": [
+          {
+            "loss": "It amends your 2026-09-30 rule that names stay inside a block.",
+            "mitigation": "Only standing blocks change; a block used as a value keeps its names, and the cutover renames every collision."
+          },
+          {
+            "loss": "Functions and types in a block cannot be used at run time.",
+            "mitigation": "E0944 names the item and offers moving it outside the block, where both sides can use it."
+          }
+        ]
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: GPT. Fresh agent: BallotReview2. The 2026-11-09 review found it clean after repairs to budgets, scope, phase escape and order. It added a scoped-record option E."
+      },
+      "checkInstructions": "Run BallotReview2/comptime-probes.sh and grouped-value.jet from dev. Option D prints 144, grid-144 and 4 columns; emitted IR does not include square. File block: E0621/E0107; local post-block read: E0107; comptime module: E0003; grouped record value: E0391. Validate the ballot. Delivery must cover phase escapes, runtime captures, specialization, cycles, collisions, storable results, per-binding budgets, effects and applicable-tier parity.",
+      "surface": {
+        "gist": "Should one comptime block make everything inside it run while building, with its names readable after it?",
+        "lesson": "Required computation is explicit; opportunistic folding is separate. Group named results, add a namespace, preserve separate bindings, or return one scoped record.",
+        "trio": {
+          "current": {
+            "note": "Required values use separate bindings; unused helper code may already disappear.",
+            "code": "square: fn(n: Int) -> Int { n * n }\nCELLS: comptime { square(12) }\nROWS: comptime { CELLS /% 4 }\nNAME: comptime { \"grid-{CELLS}\" }"
+          },
+          "wild": {
+            "lang": "Nim",
+            "note": "One const section holds many compile-time constants.",
+            "code": "const\n  cells = square(12)\n  rows = cells div 4\n  name = \"grid-\" & $cells"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Shared block, everywhere",
+            "gist": "Write comptime once; its names work after it.",
+            "gains": [
+              "One word for any amount of build code",
+              "Build-only helpers never ship"
+            ],
+            "losses": [
+              "Amends the names-stay-inside rule"
+            ],
+            "proposed": {
+              "code": "// Proposed notation, not implemented.\ncomptime {\n    square: fn(n: Int) -> Int { n * n }\n    CELLS: square(12)\n    ROWS: CELLS /% 4\n    if CELLS > 1000 -> panic(\"grid too large\")\n}\nrun: fn() {\n    comptime { label: \"{CELLS /% ROWS} columns\" }\n    print(label)    // 4 columns\n}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Files and modules only",
+            "gist": "The shared block outside functions only.",
+            "gains": [
+              "No existing function block changes"
+            ],
+            "losses": [
+              "Two scoping rules for one word",
+              "Locals keep one word each"
+            ],
+            "proposed": {
+              "code": "// Proposed notation, not implemented.\ncomptime {\n    square: fn(n: Int) -> Int { n * n }\n    CELLS: square(12)\n}\nrun: fn() {\n    label: comptime { \"{CELLS} cells\" }\n    print(label)\n}"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Compile-time module",
+            "gist": "A named module whose members all run while building.",
+            "gains": [
+              "Names never leak into the file"
+            ],
+            "losses": [
+              "Every read needs the module name",
+              "Unused modules skip their checks"
+            ],
+            "proposed": {
+              "code": "// Proposed notation, not implemented.\ngrid: comptime module {\n    square: fn(n: Int) -> Int { n * n }\n    CELLS: square(12)\n}\nrun: fn() { print(grid.CELLS) }"
+            }
+          },
+          {
+            "key": "D",
+            "name": "One word per value",
+            "gist": "Keep today's rule.",
+            "gains": [
+              "No change to learn"
+            ],
+            "losses": [
+              "Keeps the repetition",
+              "No grouped exported result bindings"
+            ],
+            "proposed": {
+              "code": "// Today's spelling.\nCELLS: comptime { square(12) }\nROWS: comptime { CELLS /% 4 }\nNAME: comptime { \"grid-{CELLS}\" }"
+            }
+          },
+          {
+            "key": "E",
+            "name": "Return one record",
+            "gist": "One scoped value block; several stored results.",
+            "gains": [
+              "Keeps lexical scope",
+              "One word per group"
+            ],
+            "losses": [
+              "Reads use record fields"
+            ],
+            "proposed": {
+              "code": "// Proposed: lift current E0391 limitation.\nGRID: comptime {\n    cells: square(12)\n    rows: cells /% 4\n    if cells + rows > 1000 -> panic(\"grid too large\")\n    Grid{cells: cells, rows: rows, name: \"grid-{cells}\"}\n}\nrun: fn() { print(GRID.name) }"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A groups named required results in every scope. E offers one scoped value block without changing lexical scope; helper size does not distinguish them.",
+          "gains": [
+            "Write comptime once",
+            "File-level checks need no run function"
+          ],
+          "losses": [
+            {
+              "loss": "Standing blocks now share their names.",
+              "mitigation": "Blocks used as values keep names inside; the cutover renames collisions."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "One word would scope names two ways."
+            },
+            {
+              "key": "C",
+              "reason": "Every read needs a module name."
+            },
+            {
+              "key": "D",
+              "reason": "It keeps the repetition."
+            },
+            {
+              "key": "E",
+              "reason": "Results need field reads; no bare file-level checks."
+            }
+          ],
+          "tradeoff": "Standing blocks share names; blocks used as values do not."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-09T20:29:13.484Z"
     }
   ],
   "questions": [
@@ -192993,6 +193213,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-09T20:29:13.484Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-COMPTIME-BLOCK1",
+      "note": "One comptime block that makes everything inside it run while building"
+    },
     {
       "at": "2026-11-09T20:22:40.135Z",
       "by": "Main",
