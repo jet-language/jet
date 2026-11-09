@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6735,
-    "rev": 96532,
+    "nextNum": 6738,
+    "rev": 96550,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -99867,33 +99867,6 @@
           "verifiedBy": null,
           "evidence": "71ec4588bb. Main 2026-11-08 on 5987d18926 (integration b1 build): ELF undefined-global census of the built runtime object Compiler/JetCli/.jet/build/jet-runtime/jet_runtime_jet.o: undefined 12, C math 0 (a0_039 object: 55 undefined, 30 libm). Compiler/JetRuntime/imports.list carries no libm name.",
           "at": "2026-11-08T19:02:09.510Z"
-        },
-        {
-          "n": 2,
-          "text": "Each ported function is correctly rounded: it matches MPFR bits on a committed corpus of special values (signed zeros, infinities, NaNs, subnormals), the musl libc-test math vectors, the CORE-MATH hard cases and random inputs, on O0, O1, O2 and web. Every corpus input where musl 1.2.5 differs is listed as a musl rounding error.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T08:34:26.075Z"
-        },
-        {
-          "n": 3,
-          "text": "Full coverage: every C23 math.h function (float and double forms, frexp, ldexp, modf, remquo, nextafter, erf, tgamma, lgamma, rsqrt, exp10m1, exp2m1, log2p1, log10p1, the pi-trig family, pown, powr, rootn, compoundn and the rest) exists in Jet and is correctly rounded, matching MPFR bits on a committed corpus that includes the CORE-MATH hard cases, the musl libc-test vectors and special values. Inputs where musl 1.2.5 differs are listed, with documented musl bugs (such as acosh of large negative inputs returning a number instead of NaN) named. All on O0, O1, O2 and web, with no host libm and no fused operations.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T08:34:27.087Z"
-        },
-        {
-          "n": 4,
-          "text": "A paired perf cell compares each hot function (sin, cos, exp, log, pow) with musl's; Jet is not slower.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-08T15:46:53.807Z"
         }
       ],
       "refs": [],
@@ -99908,7 +99881,7 @@
       "parentId": "c0lscvc9",
       "needsAcceptance": false,
       "created": "2026-11-08T15:46:49.544Z",
-      "updated": "2026-11-09T08:34:27.087Z",
+      "updated": "2026-11-09T15:59:08.208Z",
       "updatedBy": "Main",
       "criteriaLastN": 4
     },
@@ -100476,15 +100449,6 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-08T18:50:03.431Z"
-        },
-        {
-          "n": 7,
-          "text": "core.net.dtls exposes DTLS 1.2 client and server over UDP on the ported engine, idiomatic Jet in the core.net.tls shape (typed config, Result errors, Close), with interop cases against the vendored mbedtls DTLS peers and an example plus golden (owner ruling 2026-11-08, Q11 B).",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-08T18:50:04.424Z"
         }
       ],
       "refs": [],
@@ -100499,7 +100463,7 @@
       "parentId": "c0lscvc9",
       "needsAcceptance": false,
       "created": "2026-11-08T15:47:15.645Z",
-      "updated": "2026-11-09T06:57:37.379Z",
+      "updated": "2026-11-09T15:59:09.197Z",
       "updatedBy": "Main",
       "criteriaLastN": 7
     },
@@ -102597,6 +102561,174 @@
       "updated": "2026-11-09T15:57:02.971Z",
       "updatedBy": "Main",
       "criteriaLastN": 2
+    },
+    {
+      "id": "c0x0jl6l",
+      "num": 6735,
+      "title": "Core math completeness: correctly rounded results and all of C23 math.h",
+      "body": "Moved from #6688. Owner ruling 2026-11-09: G1's No-C work only moves what Jet depends on from C libraries into native Jet so C leaves the dependencies; speed and size work (while speed is reasonable) belongs to G11 and building out full C-equivalent libraries to G3.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e5",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Each ported function is correctly rounded: it matches MPFR bits on a committed corpus of special values (signed zeros, infinities, NaNs, subnormals), the musl libc-test math vectors, the CORE-MATH hard cases and random inputs, on O0, O1, O2 and web. Every corpus input where musl 1.2.5 differs is listed as a musl rounding error.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T15:58:52.525Z"
+        },
+        {
+          "n": 2,
+          "text": "Full coverage: every C23 math.h function (float and double forms, frexp, ldexp, modf, remquo, nextafter, erf, tgamma, lgamma, rsqrt, exp10m1, exp2m1, log2p1, log10p1, the pi-trig family, pown, powr, rootn, compoundn and the rest) exists in Jet and is correctly rounded, matching MPFR bits on a committed corpus that includes the CORE-MATH hard cases, the musl libc-test vectors and special values. Inputs where musl 1.2.5 differs are listed, with documented musl bugs (such as acosh of large negative inputs returning a number instead of NaN) named. All on O0, O1, O2 and web, with no host libm and no fused operations.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T15:58:53.453Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G3"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-09T15:58:49.998Z",
+      "updated": "2026-11-09T15:58:53.453Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 2
+    },
+    {
+      "id": "c03obxd3",
+      "num": 6736,
+      "title": "No-C ports at C speed: math, TLS, SQLite and threads measured against the C they replaced",
+      "body": "Moved from #6688, #6694, #6695 and #6689. Owner ruling 2026-11-09: G1's No-C work only moves what Jet depends on from C libraries into native Jet so C leaves the dependencies; speed and size work (while speed is reasonable) belongs to G11 and building out full C-equivalent libraries to G3.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e5",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A paired perf cell compares each hot function (sin, cos, exp, log, pow) with musl's; Jet is not slower.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T15:58:57.411Z"
+        },
+        {
+          "n": 2,
+          "text": "Handshake and bulk throughput are measured against mbedtls, and Jet is not slower.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T15:58:58.365Z"
+        },
+        {
+          "n": 3,
+          "text": "U64.mul_wide(other) -> (U64, U64) returns the high and low words of the full 128-bit product, lowered to one widening multiply instruction on O0, O1 and O2 and with the same meaning on web; registered in the Prelude with #Tests, an example plus golden, and the bignum leaves use it (owner ruling 2026-11-08, Q10 A).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T15:58:59.336Z"
+        },
+        {
+          "n": 4,
+          "text": "Speedtest1 and the db perf cells are measured against C SQLite, and Jet is not slower.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T15:59:00.284Z"
+        },
+        {
+          "n": 5,
+          "text": "Spawn and join cost is measured against the pthread build, and the Jet build is not slower.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T15:59:01.259Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G11"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-09T15:58:54.754Z",
+      "updated": "2026-11-09T15:59:01.259Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 5
+    },
+    {
+      "id": "c0qnrbr0",
+      "num": 6737,
+      "title": "core.net.dtls: DTLS 1.2 client and server on the Jet TLS engine",
+      "body": "Moved from #6694 c7 (owner ruling 2026-11-08, Q11 B). Owner ruling 2026-11-09: G1's No-C work only moves what Jet depends on from C libraries into native Jet so C leaves the dependencies; speed and size work (while speed is reasonable) belongs to G11 and building out full C-equivalent libraries to G3.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e5",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "core.net.dtls exposes DTLS 1.2 client and server over UDP on the ported engine, idiomatic Jet in the core.net.tls shape (typed config, Result errors, Close), with interop cases against the vendored mbedtls DTLS peers and an example plus golden (owner ruling 2026-11-08, Q11 B).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-09T15:59:05.339Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G3"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-09T15:59:02.674Z",
+      "updated": "2026-11-09T15:59:05.339Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1
     }
   ],
   "decisions": [
@@ -191432,6 +191564,132 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-09T15:59:09.197Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0bnp1zw",
+      "note": "#7: Moved to #6737 / #6736: Owner ruling 2026-11-09: G1's No-C work only moves what Jet depends on from C libraries into native Jet so C leaves the dependencies; speed and size work (while speed is reasonable) belongs to G11 and building out full C-equivalent libraries to G3.; was [open]: core.net.dtls exposes DTLS 1.2 client and server over UDP on the ported engine, idiomatic Jet in the core.net.tls shape (typed config, Result errors, Close), with interop cases against the vendored mb"
+    },
+    {
+      "at": "2026-11-09T15:59:08.208Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0bzrof5",
+      "note": "#2: Moved to #6735 / #6736: Owner ruling 2026-11-09: G1's No-C work only moves what Jet depends on from C libraries into native Jet so C leaves the dependencies; speed and size work (while speed is reasonable) belongs to G11 and building out full C-equivalent libraries to G3.; was [open]: Each ported function is correctly rounded: it matches MPFR bits on a committed corpus of special values (signed zeros, infinities, NaNs, subnormals), the musl libc-test math vectors, the CORE-MATH har"
+    },
+    {
+      "at": "2026-11-09T15:59:07.233Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0bzrof5",
+      "note": "#3: Moved to #6735 / #6736: Owner ruling 2026-11-09: G1's No-C work only moves what Jet depends on from C libraries into native Jet so C leaves the dependencies; speed and size work (while speed is reasonable) belongs to G11 and building out full C-equivalent libraries to G3.; was [open]: Full coverage: every C23 math.h function (float and double forms, frexp, ldexp, modf, remquo, nextafter, erf, tgamma, lgamma, rsqrt, exp10m1, exp2m1, log2p1, log10p1, the pi-trig family, pown, powr, r"
+    },
+    {
+      "at": "2026-11-09T15:59:06.291Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0bzrof5",
+      "note": "#4: Moved to #6735 / #6736: Owner ruling 2026-11-09: G1's No-C work only moves what Jet depends on from C libraries into native Jet so C leaves the dependencies; speed and size work (while speed is reasonable) belongs to G11 and building out full C-equivalent libraries to G3.; was [open]: A paired perf cell compares each hot function (sin, cos, exp, log, pow) with musl's; Jet is not slower."
+    },
+    {
+      "at": "2026-11-09T15:59:05.339Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0qnrbr0",
+      "note": "#1 core.net.dtls exposes DTLS 1.2 client and server over UDP on"
+    },
+    {
+      "at": "2026-11-09T15:59:04.347Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0qnrbr0",
+      "note": "goals"
+    },
+    {
+      "at": "2026-11-09T15:59:02.674Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0qnrbr0",
+      "note": "core.net.dtls: DTLS 1.2 client and server on the Jet TLS engine"
+    },
+    {
+      "at": "2026-11-09T15:59:01.259Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c03obxd3",
+      "note": "#5 Spawn and join cost is measured against the pthread build, a"
+    },
+    {
+      "at": "2026-11-09T15:59:00.284Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c03obxd3",
+      "note": "#4 Speedtest1 and the db perf cells are measured against C SQLi"
+    },
+    {
+      "at": "2026-11-09T15:58:59.336Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c03obxd3",
+      "note": "#3 U64.mul_wide(other) -> (U64, U64) returns the high and low w"
+    },
+    {
+      "at": "2026-11-09T15:58:58.365Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c03obxd3",
+      "note": "#2 Handshake and bulk throughput are measured against mbedtls, "
+    },
+    {
+      "at": "2026-11-09T15:58:57.412Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c03obxd3",
+      "note": "#1 A paired perf cell compares each hot function (sin, cos, exp"
+    },
+    {
+      "at": "2026-11-09T15:58:56.457Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c03obxd3",
+      "note": "goals"
+    },
+    {
+      "at": "2026-11-09T15:58:54.754Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c03obxd3",
+      "note": "No-C ports at C speed: math, TLS, SQLite and threads measured against the C they replaced"
+    },
+    {
+      "at": "2026-11-09T15:58:53.453Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0x0jl6l",
+      "note": "#2 Full coverage: every C23 math.h function (float and double f"
+    },
+    {
+      "at": "2026-11-09T15:58:52.525Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0x0jl6l",
+      "note": "#1 Each ported function is correctly rounded: it matches MPFR b"
+    },
+    {
+      "at": "2026-11-09T15:58:51.599Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0x0jl6l",
+      "note": "goals"
+    },
+    {
+      "at": "2026-11-09T15:58:49.998Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0x0jl6l",
+      "note": "Core math completeness: correctly rounded results and all of C23 math.h"
+    },
     {
       "at": "2026-11-09T15:57:04.477Z",
       "by": "Main",
