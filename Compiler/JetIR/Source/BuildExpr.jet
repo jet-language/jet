@@ -709,6 +709,11 @@ ir_stmt_body: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Neve
                 if kind == .ChannelReceiver -> return ir_channel_walk(m, p, b, label, variable, variable_two, collection, step, body, span)
             }
             if ir_iter_element(ir_ty(p, b, collection)) != None -> return ir_lazy_walk(m, p, b, label, variable, variable_two, collection, step, body, span)
+            // `loop line in text.lines()` cuts each line in its step
+            // (ir_text_walk) instead of walking the List of every line.
+            if step == None && ir_body_node(p, b, collection).kind == .BuiltinMethod(text, operation, args) {
+                if operation == .Lines && args.len() == 0 && ir_text_walk_receiver(m, p, b, text) && ir_untag(ir_ty(p, b, collection)) == .List(_) -> return ir_text_walk(m, p, b, label, variable, variable_two, text, -1, body, span)
+            }
             ir_list_walk(m, p, b, label, variable, variable_two, collection, step, by_value, body, span)
         }
         // A scope whose marker lowers to nothing: its body runs as a plain

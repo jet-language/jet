@@ -1057,9 +1057,9 @@ rt_text_slice_range: fn(value: I64, start: I64, end: I64, exclusive: U8, file: I
     rt_text_slice(value, first, at)
 }
 
-// Split state: owned text, owned separator, next byte offset, empty-separator
-// phase, done flag. Empty separators yield leading/trailing empty strings and
-// one piece per Unicode scalar, exactly like Rust str::split.
+// Split state: owned text, owned separator, then the split cursor
+// (text_split_piece). Empty separators yield leading/trailing empty strings
+// and one piece per Unicode scalar, exactly like Rust str::split.
 text_iter_state: fn(text: I64, separator: I64) -> I64 {
     state: jet_rt_alloc(I64{40}, I64{8})
     rt_text_store(state, jet_rt_string_clone(text))
@@ -1070,27 +1070,24 @@ text_iter_state: fn(text: I64, separator: I64) -> I64 {
     state
 }
 
-// Stores the next piece, an owned String, in output and returns true, or
-// returns false once the text is exhausted. The iterator's items are these
-// Strings, so output is a String word slot (iter_pull_kernel kind 25).
-text_iter_pull: fn(state: I64, output: I64) -> Bool {
-    if (rt_text_word(wrapping(state + I64{32})) != I64{0}) { return false }
-    text: rt_text_word(state)
-    sep: rt_text_word(wrapping(state + I64{8}))
+// The next piece of `text` split on `sep`, an owned String, from the split
+// cursor [next byte offset, empty-separator phase, done flag] at `cursor`,
+// which it advances. The cursor is not done.
+text_split_piece: fn(text: I64, sep: I64, cursor: I64) -> I64 {
     len: rt_text_len(text)
     n: rt_text_len(sep)
-    start: rt_text_word(wrapping(state + I64{16}))
+    start: rt_text_word(cursor)
     end := start
     if {
         (n == I64{0}) -> {
-            phase: rt_text_word(wrapping(state + I64{24}))
+            phase: rt_text_word(wrapping(cursor + I64{8}))
             if {
-                (phase == I64{0}) -> rt_text_store(wrapping(state + I64{24}), I64{1})
+                (phase == I64{0}) -> rt_text_store(wrapping(cursor + I64{8}), I64{1})
                 start < len -> {
                     end = start + rt_text_width(wrapping(rt_text_data(text) + start))
-                    rt_text_store(wrapping(state + I64{16}), end)
+                    rt_text_store(cursor, end)
                 }
-                else -> rt_text_store(wrapping(state + I64{32}), I64{1})
+                else -> rt_text_store(wrapping(cursor + I64{16}), I64{1})
             }
         }
         else -> {
@@ -1098,17 +1095,64 @@ text_iter_pull: fn(state: I64, output: I64) -> Bool {
             if {
                 (found < I64{0}) -> {
                     end = len
-                    rt_text_store(wrapping(state + I64{32}), I64{1})
+                    rt_text_store(wrapping(cursor + I64{16}), I64{1})
                 }
                 else -> {
                     end = found
-                    rt_text_store(wrapping(state + I64{16}), found + n)
+                    rt_text_store(cursor, found + n)
                 }
             }
         }
     }
-    rt_text_store(output, rt_text_slice(text, start, end))
+    rt_text_slice(text, start, end)
+}
+
+// Stores the next piece, an owned String, in output and returns true, or
+// returns false once the text is exhausted. The iterator's items are these
+// Strings, so output is a String word slot (iter_pull_kernel kind 25).
+text_iter_pull: fn(state: I64, output: I64) -> Bool {
+    if (rt_text_word(wrapping(state + I64{32})) != I64{0}) { return false }
+    rt_text_store(output, text_split_piece(rt_text_word(state), rt_text_word(wrapping(state + I64{8})), wrapping(state + I64{16})))
     true
+}
+
+// One step of `loop piece in text.split(sep)` without an Iter (JetIR
+// ir_split_walk): `cell` is the walk's frame cell, the split cursor
+// (text_split_piece, zeroed before the first step) and then the piece word.
+// 1 stores the next piece, owned, at cell + 24; 0 is the end, or a piece
+// that could not be allocated (its stop is pending in the session).
+#Export(c) jet_rt_text_split_step: fn(text: I64, sep: I64, cell: I64) -> I64 {
+    if (rt_text_word(wrapping(cell + I64{16})) != I64{0}) -> return I64{0}
+    piece: text_split_piece(text, sep, cell)
+    if (piece == I64{0}) -> return I64{0}
+    rt_text_store(wrapping(cell + I64{24}), piece)
+    I64{1}
+}
+
+// One step of `loop line in text.lines()` without a List (JetIR
+// ir_lines_text_walk), with jet_string_lines' lines: LF ends a line, one CR
+// before it is removed, and a trailing LF has no empty line after it. `cell`
+// is the walk's frame cell, the next byte offset (zeroed before the first
+// step) and then the line word. 1 stores the next line, owned, at cell + 8;
+// 0 is the end, or a line that could not be allocated (its stop is pending
+// in the session).
+#Export(c) jet_rt_text_line_step: fn(text: I64, cell: I64) -> I64 {
+    start: rt_text_word(cell)
+    length: rt_text_len(text)
+    if (start >= length) -> return I64{0}
+    data: rt_text_data(text)
+    found: rt_text_find_byte(data, length, I64{10}, start, false)
+    end := length
+    next := length
+    if (found >= I64{0}) {
+        end = if (found > start && rt_text_byte(wrapping(wrapping(data + found) - I64{1})) == I64{13}) -> found - I64{1} else -> found
+        next = found + I64{1}
+    }
+    rt_text_store(cell, next)
+    line: rt_text_slice(text, start, end)
+    if (line == I64{0}) -> return I64{0}
+    rt_text_store(wrapping(cell + I64{8}), line)
+    I64{1}
 }
 
 text_iter_drop: fn(state: I64) {

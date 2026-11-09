@@ -98,8 +98,8 @@ ir_set_key_point: fn(m: &IRModule, a: &IRBuilder, shape: IRMapShape, set: Int, k
 }
 
 // The new `key` into the hashed Rank `set` under the key order `order`,
-// returning true from set.insert: room made as for an append (map.rebuild
-// keeps entries that are all in order in place), the key moved in at its key
+// returning true from set.insert: room made as for an append (map.grow
+// keeps the entries, all in order, in place), the key moved in at its key
 // position, then the index rebuilt over the shifted positions with every
 // entry counted sorted.
 ir_set_keyed_place: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapShape, set_row: Int, set: Int, key: Int, order: Int) Never! {
@@ -141,7 +141,7 @@ ir_set_keyed_place: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapSh
     ir_emit(a.f, IROp.Return, -1, added, -1, -1, a.line)
 }
 
-// Grows the hashed Set `set` of `length` entries when it is full: map.rebuild
+// Grows the hashed Set `set` of `length` entries when it is full: map.grow
 // at twice its length, at least 4.
 ir_set_hashed_room: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, set_row: Int, set: Int, length: Int) Never! {
     capacity: ir_load_word(m, a, set, 8)
@@ -153,7 +153,7 @@ ir_set_hashed_room: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, set_row: Int, 
     ir_open_if(a.f, small, a.line)
     ir_emit(a.f, IROp.Copy, grown, four, -1, -1, a.line)
     ir_end(a.f, a.line)
-    _: ir_map_call(m, p, a, set_row, "map.rebuild", [Int]{set, grown}, -1)
+    _: ir_map_call(m, p, a, set_row, "map.grow", [Int]{set, grown}, -1)
     ir_end(a.f, a.line)
 }
 
