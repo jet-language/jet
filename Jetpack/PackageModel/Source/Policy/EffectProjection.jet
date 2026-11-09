@@ -7,10 +7,7 @@
 // the policy source. Consumers never infer one role from another. Effect sets
 // are sorted, duplicate-free `[String]` (Foundation `authority_holds`).
 use {
-    jet_foundation.[
-        ApplicationAuthority, Diagnostic, Span, TextEdit, authority_holds, authority_inline_package_block,
-        diagnostic_from_registry, diagnostic_with_detail, diagnostic_with_edit, diagnostic_with_rights,
-    ]
+    jet_foundation.[ApplicationAuthority, Diagnostic, authority_holds, diagnostic_from_registry, diagnostic_with_detail, diagnostic_with_rights]
     jetpack_foundation.[ReportError, StatusEnvelope]
 }
 
@@ -52,8 +49,7 @@ EffectProjection: struct {
 }
 
 // The entry file of a program run without any Package manifest: its E1803
-// repair names the exact `--allow` invocation and
-// inserts the leading inline Package carrier.
+// Fix names the exact `--allow` invocation.
 ScriptEntry: struct {
     path: String
     source: String
@@ -96,8 +92,8 @@ pkg_effect_names_or_none: fn(effects: [String]) -> String Never! {
 // non-interactive invocations. The Why is one plain sentence; the role rows
 // ride in structured detail for `--json`. A manifest-less `script` with
 // undecided effects leads its Fix with the exact `--allow` command and its
-// `-A` form, and also carries the inline Package block as a needs-review edit
-// a denial is never repaired by a grant.
+// `-A` form. E1803 carries no edit: its registry row names no fix channel,
+// and a denial is never repaired by a grant.
 pkg_application_policy_diagnostic: fn(projection: EffectProjection, denied: [String], script: ScriptEntry?) -> Diagnostic Never! {
     missing: projection.undecided()
     authority: projection.application_authority()
@@ -110,11 +106,7 @@ pkg_application_policy_diagnostic: fn(projection: EffectProjection, denied: [Str
     scripted: denied.len() == 0 && missing.len() > 0 && authority.is_application_default()
     fix: if scripted -> "run `jet {repair.command} --allow={missing.join(",")} {repair.path}` (or `-A`/`--allow-all` for every effect) to allow it for this run, or {authority.policy_fix(repair.path)}" else -> authority.policy_fix(repair.path)
     base: diagnostic_from_registry("E1803", None, what, authority.policy_why(), fix)
-    diagnostic: diagnostic_with_rights(diagnostic_with_detail(base, authority.policy_facts()), "authority", [String]{}, [String]{projection.authority}, None)
-    if !scripted -> return diagnostic
-    // E1803's registry row owns a suggested, needs-review source edit.
-    at: pkg_inline_package_insertion_offset(repair.source)
-    diagnostic_with_edit(diagnostic, TextEdit{span: Span{start: at, end: at}, new_text: authority_inline_package_block(repair.path, authority.inline_allow_row())})
+    diagnostic_with_rights(diagnostic_with_detail(base, authority.policy_facts()), "authority", [String]{}, [String]{projection.authority}, None)
 }
 
 // Every effect reachable from `entry` through statically known calls.

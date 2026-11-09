@@ -264,19 +264,6 @@ ApplicationAuthority: struct {
         self.authority.starts_with(AUTHORITY_APPLICATION_DEFAULT)
     }
 
-    // The `allow:` row a program writes: every required right the floor does
-    // not already hold. Deny-only rights never appear in a positive grant.
-    inline_allow_row: fn(self) -> [String] Never! {
-        floor: authority_holds(AUTHORITY_AMBIENT_BASIC_EFFECTS)
-        out := [String]{}
-        loop effect_name in self.required_effects {
-            if authority_is_deny_only(effect_name) -> next
-            if authority_answer(floor, [String]{}, effect_name) == AuthorityVerdict.Allowed -> next
-            out.push(effect_name.copy())
-        }
-        authority_holds(out)
-    }
-
     // Deny-only rights need no grant; explicit denials still apply.
     undecided_effects: fn(self) -> [String] Never! {
         out := [String]{}
@@ -428,14 +415,8 @@ authority_inline_package_name: fn(path: String) -> String Never! {
     stem
 }
 
-// The leading inline Package `jet fix --all` inserts into the program at
-// `path` to grant it `allow`.
-authority_inline_package_block: fn(path: String, allow: [String]) -> String Never! {
-    "package: {{\n    name: \"{authority_inline_package_name(path)}\"\n    authority: {{ allow: [{allow.join(", ")}] }}\n}}\n\n"
-}
-
 // E1803's Fix for a program with no package block: the complete block that
 // grants the undecided rights, written as one line.
 authority_inline_package_fix: fn(path: String, undecided: [String]) -> String Never! {
-    "declare a leading `package: {{ name: \"{authority_inline_package_name(path)}\", authority: {{ allow: [{undecided.join(", ")}] }} }}` block in this file (`jet fix --all` inserts it); otherwise approve the exact operation once in an interactive terminal"
+    "declare a leading `package: {{ name: \"{authority_inline_package_name(path)}\", authority: {{ allow: [{undecided.join(", ")}] }} }}` block in this file; otherwise approve the exact operation once in an interactive terminal"
 }

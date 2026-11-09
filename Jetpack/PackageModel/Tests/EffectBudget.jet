@@ -6,11 +6,11 @@ use {
     jet_pkg_model.[
         EffectBudgetImport, EffectBudgetModule, EffectBudgetProgram, EffectBudgetWitness,
         EffectProjection, PackageEffectSummary, PackageEffects, PackageFacts, PackageGrant, ScriptEntry,
-        pkg_application_policy_diagnostic, pkg_ascii_lower, pkg_bytes_text, pkg_compute_package_effects,
+        pkg_application_policy_diagnostic, pkg_ascii_lower, pkg_compute_package_effects,
         pkg_effect_enforce, pkg_effect_summary_json_for_entry, pkg_effect_summary_line_for_entry,
         pkg_project_application_effects, pkg_render_effect_projection_json,
     ]
-    jet_foundation.[DiagnosticFixSafety, Span, authority_holds]
+    jet_foundation.[Span, authority_holds]
 }
 
 pkg_test_effect_summary: fn(direct: [String], edges: [String], maximal: Bool) -> PackageEffectSummary Never! {
@@ -250,21 +250,19 @@ pkg_test_package_effects: fn(name: String, effects: [String], sites: [String: St
     assert_eq(spawn.undecided(), [String]{"Exec"})
 }
 
-#Test("manifestless script edit inserts a sufficient inline package") {
+// E1803's registry row names no fix channel, so a manifest-less script's
+// diagnostic carries no edit; its Fix leads with the exact `--allow` run.
+#Test("manifestless script E1803 names the run and carries no edit") {
     source: "// tool header\nuse files: core.files\n\nrun: fn() {{}}\n"
     required: authority_holds([String]{"FS", "IO", "Panic"})
     projection: pkg_project_application_effects(required, None)
     diagnostic: pkg_application_policy_diagnostic(projection, [String]{}, Val(ScriptEntry{path: "tools/gradient.jet", source: source, command: "run"}))
-    assert(diagnostic.fix.starts_with("Run `jet run --allow=FS tools/gradient.jet`"))
-    edit: diagnostic.edit ?? panic("a manifest-less E1803 carries an edit")
-    assert_eq(diagnostic.safety, Val(DiagnosticFixSafety.NeedsReview))
-    raw: source.bytes()
-    fixed: "{pkg_bytes_text(raw, 0, edit.span.start)}{edit.new_text}{pkg_bytes_text(raw, edit.span.end, raw.len())}"
-    assert(fixed.starts_with("// tool header\npackage: {{\n    name: \"gradient\"\n"))
-    parsed: PackageFacts.parse_inline(fixed, "gradient.jet") ? found -> found ! error -> panic("the inserted carrier parses")
-    inline: parsed ?? panic("the inserted carrier is leading")
-    assert(pkg_project_application_effects(required, Val(inline.facts)).is_allowed())
+    assert_eq(diagnostic.code, "E1803")
+    assert(diagnostic.fix.starts_with("Run `jet run --allow=FS tools/gradient.jet`"), diagnostic.fix)
+    assert(diagnostic.edit == None)
+    assert(diagnostic.no_fix_reason != None)
     denied: pkg_application_policy_diagnostic(projection, [String]{"FS"}, Val(ScriptEntry{path: "gradient.jet", source: source, command: "run"}))
     // A denial is never repaired by a grant.
     assert(denied.edit == None)
+    assert(denied.no_fix_reason != None)
 }
