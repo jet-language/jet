@@ -1744,19 +1744,27 @@ ir_policy_arg: fn(value: Int, borrow: Bool) -> BodyCallArg Never! {
 }
 
 // Whether a function value of type row `have` stands where row `row` is
-// expected and the two differ only in fallibility: the same parameter count,
-// and exactly one returns a Result. Sema lets an infallible function value
+// expected through a converting closure (ir_fn_widen).
+ir_fn_widens: fn(m: IRModule, have: Int, row: Int) -> Bool Never! { ir_fn_type_widens(m.types[have].ty, m.types[row].ty) }
+
+// The two function types have the same parameter count and differ in
+// fallibility: exactly one returns a Result, or a function parameter, which
+// the closure passes on through the same conversion, does (Sema
+// sema_type_nested_fn_failure_gap). Sema lets an infallible function value
 // fill a fallible function type (a `fn(Int) -> Int` parameter with the
 // inferred failure contract), and a named function whose inferred contract
 // is empty fill an infallible one (`[fn(String) -> String]{quote}`), but the
 // closures return differently: a fallible one returns its Result box.
-ir_fn_widens: fn(m: IRModule, have: Int, row: Int) -> Bool Never! {
-    if ir_untag(m.types[have].ty) == .Fn(from_params, from_ret, _, _, _, _) {
-        if ir_untag(m.types[row].ty) == .Fn(to_params, to_ret, _, _, _, _) {
+ir_fn_type_widens: fn(from_ty: Type, to_ty: Type) -> Bool Never! {
+    if ir_untag(from_ty) == .Fn(from_params, from_ret, _, _, _, _) {
+        if ir_untag(to_ty) == .Fn(to_params, to_ret, _, _, _, _) {
             if from_params.len() != to_params.len() -> return false
             from_fallible: if from_ret == .Val(from) -> ir_is_result(from) else -> false
             to_fallible: if to_ret == .Val(to) -> ir_is_result(to) else -> false
-            return from_fallible != to_fallible
+            if from_fallible != to_fallible -> return true
+            loop (index, to_param) in to_params {
+                if ir_fn_type_widens(to_param, from_params[index]) -> return true
+            }
         }
     }
     false
@@ -1765,8 +1773,11 @@ ir_fn_widens: fn(m: IRModule, have: Int, row: Int) -> Bool Never! {
 // The function value in `slot` as `row`, its fallible or infallible form: a
 // closure that owns it and calls it with its own arguments. Widening returns
 // Ok of what the value returns; narrowing unwraps the value's Result, whose
-// Err Sema has ruled out (`?` with the Never conversion). Built as its own
-// function like a source lambda (ir_lambda).
+// Err Sema has ruled out (`?` with the Never conversion). The call adapts
+// each argument to the value's parameter (ir_indirect_call), so a function
+// argument converts the same way; when only those differ, the closure
+// returns what the value returns. Built as its own function like a source
+// lambda (ir_lambda).
 ir_fn_widen: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, row: Int, span: Span) -> Int Never! {
     have: b.f.slot_type[slot]
     from_ty: m.types[have].ty.copy()
@@ -1797,11 +1808,9 @@ ir_fn_widen: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, row: Int, 
     body := call.copy()
     if ir_untag(to_result) == .Result(ok, err) {
         carrier = TFailureCarrier.Result{success: ok, error: err}
-        body = ir_node(b, to_result, NodeKind.Ok{value: call}, span)
+        if !ir_is_result(from_result) -> body = ir_node(b, to_result, NodeKind.Ok{value: call}, span)
     } else if ir_untag(from_result) == .Result(ok, err) {
         body = ir_node(b, ok, NodeKind.Try{value: call, conversion: TTryConvert.Never, failure: TFailureCarrier.Result{success: ok, error: err}}, span)
-    } else {
-        return ir_fail_slot(b, span, "function value of {ir_type_name(from_ty)} as {ir_type_name(to_ty)}")
     }
     lambda: BodyLambda{
         executable: BodyLambdaBody.Expr{value: body},

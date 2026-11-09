@@ -927,11 +927,15 @@ Whether a function type's functions can fail is part of its value type wherever
 it appears inside another type. A single function value converts between its
 failing and non-failing forms where it is passed, stored or returned: a
 function-typed parameter `f: fn(Int) -> Int` takes the implicit `Err`
-contract, and a named function of either form fills it. The functions a list,
-map, optional, tuple or function type already holds keep the form they were
-made with, so `[fn(Int) -> Int]` and `[fn(Int) -> Int Err!]` are different
-value types, and passing one where the other is required reports **E0638**.
-A function type nested in a parameter's type keeps its written contract, as the
+contract, and a named function of either form fills it. A converted value
+passes each argument on the same way, so a non-failing function argument
+widens into the failing form the value's parameter takes: `read: fn(f: fn(Int)
+-> Int) -> Int` fills a `fn(fn(Int) -> Int) -> Int` field. Nothing narrows a
+failing argument for a parameter that cannot fail. The functions a list, map,
+optional or tuple holds, or a function returns, keep the form they were made
+with, so `[fn(Int) -> Int]` and `[fn(Int) -> Int Err!]` are different value
+types, and passing one where the other is required reports **E0638**. A
+function type nested in a parameter's type keeps its written contract, as the
 same type does on a binding or a typed literal (#6281 c123).
 
 Direct named and method calls keep their ordinary syntax. A function-valued

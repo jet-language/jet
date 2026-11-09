@@ -5314,7 +5314,7 @@ NestedFnFailureMismatch: struct {
         meaning: "A function type inside a collection or a function type differs from the value's in whether it can fail"
         fix_next: "Write the same failure contract on the function types inside both types."
         what: fn(self) -> String { "This needs `{self.required}`, whose functions inside {self.required_form}, but the value's {self.offered_form}" }
-        why: fn(self) -> String { "A single function value converts between its failing and non-failing forms where it is passed or stored, but the functions a list, map, optional, tuple or function type already holds keep the form they were made with" }
+        why: fn(self) -> String { "A single function value converts between its failing and non-failing forms where it is passed or stored, and so do the functions it takes as parameters, but the functions a list, map, optional or tuple holds, or a function returns, keep the form they were made with" }
         fix: fn(self) -> String { "Write the same failure contract on both: `Err!` after each inner function type's return when its functions can fail, as in `[fn(Int) -> Int Err!]`, and none when they cannot" }
     }
 }

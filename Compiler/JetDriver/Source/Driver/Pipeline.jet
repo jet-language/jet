@@ -4500,10 +4500,23 @@ jet_driver_package_effect_rows: fn(load: JetDriverLoadResult, functions: [FnBody
             pending.push(callee)
         }
     }
+    // The generated typed-CLI entry `__jet_cli_run…` and the parser it calls
+    // read argv, print help and exit through Core as the toolchain's parse
+    // (jet_driver_required_effects): those Core calls are not the package's
+    // own code, so only the user functions they dispatch to are charged.
+    cli := (loop _ in functions -> false)
+    if functions[entry_row].name.starts_with("__jet_cli_run") {
+        cli[entry_row] = true
+        parse_name: functions[entry_row].name.replace("__jet_cli_run", "__jet_cli_parse")
+        loop (index, function) in functions {
+            if function.module_identity == functions[entry_row].module_identity && function.name == parse_name -> cli[index] = true
+        }
+    }
     // Each reached function's own-package effects, to a fixpoint over the
     // same-package and Core call and value edges.
     local := (loop _ in functions -> [String]{})
     loop index in order {
+        if cli[index] -> next
         loop effect_name in functions[index].effects.direct {
             if !local[index].contains(effect_name) -> local[index].push(effect_name.copy())
         }
@@ -4516,6 +4529,7 @@ jet_driver_package_effect_rows: fn(load: JetDriverLoadResult, functions: [FnBody
             owner: if rows[index] < 0 -> "" else -> owners[rows[index]]
             loop callee in callees[index] {
                 if rows[callee] >= 0 && owners[rows[callee]] != owner -> next
+                if cli[index] && functions[callee].module_name.starts_with("core.") -> next
                 reached_effects: local[callee].copy()
                 loop effect_name in reached_effects {
                     if local[index].contains(effect_name) -> next

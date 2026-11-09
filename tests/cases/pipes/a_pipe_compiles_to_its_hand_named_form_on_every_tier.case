@@ -6,7 +6,9 @@
 # O0 compiles the `jet emit --ir` slots unchanged. They match through the final
 # `return`. After it, the hand-named body drops `text` and `number` again
 # where no path reaches (its function scope ends after the tail value),
-# while the pipe's frame closed before the return.
+# while the pipe's frame closed before the return. The pinned slot and
+# instruction numbers count `String.from_bytes`'s failure reading into its
+# UTF8Error record layout (record.in) and dropping the handle.
 # O1 (default) and O2 (--release) are the function after the passes, as
 # `jet inspect decisions` prints it: identical.
 fixture: a_pipe_compiles_to_its_hand_named_form_on_every_tier.fixture
@@ -16,12 +18,12 @@ exit: 0
 stdout: ~ "local __jet_pipe_112: String" # the first step's value, bound under its hidden name
 stdout: ~ "local __jet_pipe_163: Int" # the second step's value
 stdout: !~ "local raw" # the head is a name, so the first step reads it in place
-stdout: ~ "  132: unreachable" # the pipe's frame dropped its values before the return
-capture: piped_o0 = text stdout.cut("  132: ")
+stdout: ~ "  134: unreachable" # the pipe's frame dropped its values before the return
+capture: piped_o0 = text stdout.cut("  134: ")
 step: jet emit --ir named/main.jet --fn port
 exit: 0
-stdout: ~ "  132: drop 57" # the unreachable second drop of `number`
-capture: named_o0 = text stdout.cut("  132: ").replace("local text:", "local __jet_pipe_112:").replace("local number:", "local __jet_pipe_163:")
+stdout: ~ "  134: drop 58" # the unreachable second drop of `number`
+capture: named_o0 = text stdout.cut("  134: ").replace("local text:", "local __jet_pipe_112:").replace("local number:", "local __jet_pipe_163:")
 cap:named_o0: = "{cap:piped_o0}"
 step: jet inspect decisions piped/main.jet
 env: JET_OPT_DUMP=port

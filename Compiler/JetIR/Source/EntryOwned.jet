@@ -36,14 +36,16 @@ use jet_foundation.[name_rows_value]
 // arguments (HostStartup.jet: the owned main captures them first, as
 // jet_rt_main's startup does), the Int parse, the fixed-width check (its
 // stop is int_stop's), the overflow stop (Trap.jet: the panic message's
-// path), the UTF-8 decode and its error's drop, the terminal probes, the
-// raw stdio write (Core term's stdio_write and eprint: the same buffered
-// stdout and stdout-then-fd-2 writes with or without a root), the journey
-// origin and the test-fault probe (Jet TLS, a fault schedule only a test
-// arms), the session status (0 with no stop pending, and with no root none
-// ever is) and process.exit (with no root, HostProcess.jet runs the exit
-// handlers, flushes and exits at once; under the root the same steps run
-// after the stop edges, which an owned main's do nothing observable on).
+// path), the UTF-8 decode, its error's message read (TextGlue.jet: a clone
+// of the stored message, as jet_rt_string_clone) and its error's drop, the
+// terminal probes, the raw stdio write (Core term's stdio_write and eprint:
+// the same buffered stdout and stdout-then-fd-2 writes with or without a
+// root), the journey origin and the test-fault probe (Jet TLS, a fault
+// schedule only a test arms), the session status (0 with no stop pending,
+// and with no root none ever is) and process.exit (with no root,
+// HostProcess.jet runs the exit handlers, flushes and exits at once; under
+// the root the same steps run after the stop edges, which an owned main's do
+// nothing observable on).
 IR_ROOT_FREE_ROUTES: comptime { [String]{
     "jet_char_len",
     "jet_fault_should_fail",
@@ -94,6 +96,7 @@ IR_ROOT_FREE_ROUTES: comptime { [String]{
     "jet_rt_panic_message",
     "jet_rt_panic_overflow",
     "jet_rt_process_entry_return",
+    "jet_rt_record_get_utf8_error_message",
     "jet_rt_require_stop",
     "jet_rt_session_propagate",
     "jet_rt_string_append",

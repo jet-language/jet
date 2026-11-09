@@ -463,10 +463,13 @@ sema_never_failing_return_fits: fn(required: Type, offered: Type) -> Bool Never!
 // return of a function type) that differs from the offered value's at the
 // same place in whether it can fail; the answer is whether the slot's can.
 // The fn-value adapter (IR ir_fn_widen) converts a standalone function value
-// between its failing and non-failing forms, but nothing converts the
-// functions a collection or another function already holds, so such a value
-// can't fill the slot. `nested` is false for the slot itself, where the two
-// forms convert.
+// between its failing and non-failing forms, and its converting closure
+// passes each argument on through the same adapter: a non-failing function
+// argument widens into the failing form the value's parameter takes
+// (sema_type_parameter_fn_failure_gap). Nothing converts the functions a
+// collection already holds or a function returns, so such a value can't
+// fill the slot. `nested` is false for the slot itself, where the two forms
+// convert.
 sema_type_nested_fn_failure_gap: fn(required: Type, offered: Type, nested: Bool) -> Bool? Never! {
     if required == {
         .Fn(required_params, required_ret, _, _, _, _) -> if offered == .Fn(offered_params, offered_ret, _, _, _, _) {
@@ -474,7 +477,8 @@ sema_type_nested_fn_failure_gap: fn(required: Type, offered: Type, nested: Bool)
             if nested && !sema_fn_return_is_never(required_ret) && !sema_fn_return_is_never(offered_ret) && required_fails != sema_fn_return_fails(offered_ret) -> return Val(required_fails)
             if required_params.len() == offered_params.len() {
                 loop (index, required_param) in required_params {
-                    if sema_type_nested_fn_failure_gap(required_param, offered_params[index], true) == .Val(found) -> return Val(found)
+                    found: if nested -> sema_type_nested_fn_failure_gap(required_param, offered_params[index], true) else -> sema_type_parameter_fn_failure_gap(required_param, offered_params[index])
+                    if found == .Val(gap) -> return Val(gap)
                 }
             }
             if required_ret == .Val(required_value) && offered_ret == .Val(offered_value) -> return sema_type_nested_fn_failure_gap(sema_fn_return_success(required_value), sema_fn_return_success(offered_value), true)
@@ -515,6 +519,28 @@ sema_type_nested_fn_failure_gap: fn(required: Type, offered: Type, nested: Bool)
         else -> {}
     }
     None
+}
+
+// A function parameter of a standalone function value the slot converts: a
+// slot parameter that cannot fail, where the value's can, widens (the
+// argument returns Ok of what it returns), but nothing narrows a failing
+// argument for a value that takes a non-failing one, and the functions
+// inside the parameter keep their form.
+sema_type_parameter_fn_failure_gap: fn(required: Type, offered: Type) -> Bool? Never! {
+    if required == .Fn(required_params, required_ret, _, _, _, _) {
+        if offered == .Fn(offered_params, offered_ret, _, _, _, _) {
+            never: sema_fn_return_is_never(required_ret) || sema_fn_return_is_never(offered_ret)
+            if !never && sema_fn_return_fails(required_ret) && !sema_fn_return_fails(offered_ret) -> return Val(true)
+            if required_params.len() == offered_params.len() {
+                loop (index, required_param) in required_params {
+                    if sema_type_nested_fn_failure_gap(required_param, offered_params[index], true) == .Val(found) -> return Val(found)
+                }
+            }
+            if required_ret == .Val(required_value) && offered_ret == .Val(offered_value) -> return sema_type_nested_fn_failure_gap(sema_fn_return_success(required_value), sema_fn_return_success(offered_value), true)
+            return None
+        }
+    }
+    sema_type_nested_fn_failure_gap(required, offered, true)
 }
 
 // A function type's return is its Result box: the representation a caller
@@ -1281,6 +1307,10 @@ sema_type_graph_unique_type_owner: fn(graph: SemaRegistrationGraph, caller_index
         if caller_is_core && !owner_row.module_identity.starts_with("<corelib>/") -> next
         nominal: owner_row.nominals[owner.row]
         if nominal.symbol.name != name -> next
+        // A bare unapplied `Group` is the task group (sema_type_graph_resolve_named),
+        // so only a generic `Group<K, V>` (core.data's) can own the bare applied
+        // spelling; core.sys's and core.ui.xkb's records never compete for it.
+        if name == "Group" && nominal.generic_params.len() == 0 -> next
         if nominal.kind != SemaRegistrationNominalKind.Struct
             && nominal.kind != SemaRegistrationNominalKind.Enum
             && nominal.kind != SemaRegistrationNominalKind.Distinct
