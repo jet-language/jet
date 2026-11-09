@@ -1,9 +1,9 @@
 // `jet explain effects [<file>[:<line>]] [--caps] [--json]`: every effect cap
 // in force at one site, nearest first, one line per rung (block, function,
-// trait when the method implements a capped trait, type when the method's
-// type writes a cap, the inline modules around it, the file head, the
-// module caps where the file is declared, package, run), then what the site
-// reaches with the first call that reaches each effect. A rung that writes
+// trait when the method implements a capped trait, type, module for the
+// inline modules around it, the file head and the caps where the file's
+// module is declared, package, run), then what the site reaches with the
+// first call that reaches each effect. A type or module rung that writes
 // nothing prints `(none written)`.
 // The facts are the checked program's own, read through the walker `jet
 // inspect rights` uses (InspectRights.jet) and the semantic index's
@@ -638,18 +638,24 @@ jet_cli_explain_effects_report: fn(result: JetDriverCompileResult, job: JetCLIIn
         jet_cli_rights_collect(doc_module.items, alias, "", doc_module.path, views)
         loop view in jet_cli_rights_sorted(views) -> jet_cli_effects_function_reaches(doc_module, view.key, summaries, modules, reaches)
     }
+    // The trait and type rungs come before the module rungs; the file-head
+    // cap is a module rung, written at the head of the file.
+    type_rungs := [JetCLIEffectsRung]{}
     cap_rungs := [JetCLIEffectsRung]{}
     loop index in 0..<found.caps.len() {
         cap: found.caps[found.caps.len() - 1 - index]
-        cap_rungs.push(JetCLIEffectsRung{rung: cap.scope, text: jet_cli_effects_cap_text(cap.entries), written: true, site: jet_cli_effects_site(doc_module, cap.span.start)})
+        rung: JetCLIEffectsRung{rung: cap.scope, text: jet_cli_effects_cap_text(cap.entries), written: true, site: jet_cli_effects_site(doc_module, cap.span.start)}
+        if cap.scope == "module" -> cap_rungs.push(rung) else -> type_rungs.push(rung)
     }
-    if doc_module.file_cap == .Val(head) -> cap_rungs.push(JetCLIEffectsRung{rung: "file", text: jet_cli_effects_cap_text(head.entries), written: true, site: jet_cli_effects_site(doc_module, head.span.start)})
+    if doc_module.file_cap == .Val(head) -> cap_rungs.push(JetCLIEffectsRung{rung: "module", text: jet_cli_effects_cap_text(head.entries), written: true, site: jet_cli_effects_site(doc_module, head.span.start)})
     jet_cli_effects_file_caps(modules, selected, 0, cap_rungs)
-    module_written := false
-    loop rung in cap_rungs {
-        if rung.rung == "module" -> module_written = true
+    type_written := false
+    loop rung in type_rungs {
+        if rung.rung == "type" -> type_written = true
     }
-    if !module_written -> cap_rungs.push(JetCLIEffectsRung{rung: "module", text: "(none written)", written: false, site: ""})
+    if !type_written -> type_rungs.push(JetCLIEffectsRung{rung: "type", text: "(none written)", written: false, site: ""})
+    if cap_rungs.len() == 0 -> cap_rungs.push(JetCLIEffectsRung{rung: "module", text: "(none written)", written: false, site: ""})
+    loop rung in type_rungs -> rungs.push(rung)
     loop rung in cap_rungs -> rungs.push(rung)
     rungs.push(jet_cli_effects_package_rung(result.authority_policy))
     rungs.push(JetCLIEffectsRung{rung: "run", text: JET_CLI_EXPLAIN_EFFECTS_RUN, written: false, site: ""})

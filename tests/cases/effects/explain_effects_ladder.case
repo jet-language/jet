@@ -1,6 +1,6 @@
 # `jet explain effects <file>:<line>` prints every cap in force at a site,
-# nearest first (block, function, trait, type, module, file head, package,
-# run), each written rung with the line that writes it, then what the site
+# nearest first (block, function, trait, type, module with the file head,
+# package, run), each written rung with the line that writes it, then what the site
 # reaches and the first call that reaches it. A module file is explained
 # under the package's entry, so the cap written where `pricing: module` is
 # declared holds; `--caps` lists every file-head, module, type and trait cap
@@ -13,8 +13,7 @@ step block: jet explain effects main.jet:6
 exit: 0
 stdout: ~ "effects at main.jet:6, in `show`, nearest first" # the site and its function
 stdout: ~ "  block     #FX(FS.Read, IO)  main.jet:5" # the `#FX` block holding line 6 comes first, at the line that opens it
-stdout: ~ "  function  -[FS, IO]>        main.jet:4" # then the enclosing function's written row
-stdout: ~ "  module    (none written)" # main.jet itself is under no module cap
+stdout: ~ "  function  -[FS, IO]>        main.jet:4\n  type      (none written)\n  module    (none written)\n" # the type rung sits between function and module; neither is written here
 stdout: ~ "  package   allow: [FS]       package.jet:3" # the package row as written
 stdout: ~ "  run       everything else allowed; --deny wins" # the run rung
 stdout: ~ "reaches: FS.Read via pricing::rates (main.jet:6)" # the block reaches the read through the call
@@ -22,17 +21,14 @@ stdout: ~ ", IO (main.jet:6)" # and prints directly
 step module: jet explain effects pricing.jet:3
 exit: 0
 stdout: ~ "effects at pricing.jet:3, in `rates`, nearest first" # a module file of the package
-stdout: ~ "  function  (none written)  pricing.jet:3" # no row is written on `rates`
+stdout: ~ "  function  (none written)  pricing.jet:3\n  type      (none written)\n" # no row is written on `rates`, and it is no method
 stdout: ~ "  module    #FX(!Net)       main.jet:1" # the cap written where pricing is declared
 stdout: ~ "reaches: FS.Read (pricing.jet:3)" # `rates` reads the file itself
 step method: jet explain effects receipt.jet:15
 exit: 0
 stdout: ~ "effects at receipt.jet:15, in `render`, nearest first" # a trait method of a capped type
-stdout: ~ "  function  (none written)    receipt.jet:15" # no row is written on `render`
-stdout: ~ "  trait     #FX(FS.Read, IO)  receipt.jet:4" # the cap of the trait it implements
-stdout: ~ "  type      #FX(FS.Read)      receipt.jet:9" # then its type's cap
-stdout: ~ "  file      #FX(!Exec)        receipt.jet:1" # then the file-head cap
-stdout: ~ "  module    (none written)" # `receipt: module` is declared with no cap
+stdout: ~ "  function  (none written)    receipt.jet:15\n  trait     #FX(FS.Read, IO)  receipt.jet:4\n  type      #FX(FS.Read)      receipt.jet:9\n" # no row on `render`, then the cap of the trait it implements, then its type's cap
+stdout: ~ "  module    #FX(!Exec)        receipt.jet:1\n  package" # the file-head cap is the module rung; `receipt: module` is declared with no cap
 stdout: ~ "reaches: FS.Read (receipt.jet:15)" # `render` reads the file itself
 step caps: jet explain effects --caps
 exit: 0

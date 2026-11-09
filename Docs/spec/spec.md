@@ -1954,7 +1954,8 @@ use only `Rand` and `json` nothing, even when `allow` lists more, and what a
 line grants passes `deny` for that dependency (`Panic` is deny-only, so no
 line grants it). A dependency that reaches an effect outside its limit fails
 the build with E1220, naming the dependency, the effect and the call path
-(D-EFFTYPE-GRANT1). See
+(D-AUTH-DEFAULT1). A grant line is one the user writes; `jet add` writes
+none. See
 [`Examples/Modules/Packages/GrantLine`](../../Examples/Modules/Packages/GrantLine/package.jet).
 Code run straight from a URL or the registry
 is pinned by content hash and asks before its first run in a terminal; its
@@ -2044,8 +2045,9 @@ inferred rows unchanged.
 
 `jet explain effects <file>:<line>` prints every cap in force at a site,
 nearest first: its `#FX` blocks and lambdas, the enclosing function's row, the
-caps of the trait the method implements and of its type, the inline module
-caps, the file-head cap, the caps where the file's module is declared, the
+cap of the trait the method implements, the type rung, the module rungs (the
+inline module caps, the file-head cap and the caps where the file's module is
+declared), the
 package `authority` rows, and `run`, each with the `file:line` that writes
 it, then what the site reaches and the call chain to each effect. `--caps`
 lists every file-head, module, type and trait cap under a path.

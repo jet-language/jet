@@ -1243,11 +1243,11 @@ where its module is declared hold; a `#!` script is checked on its own. The
 first line names the site and its function; then comes one line per rung:
 the `#FX(…)` blocks and lambdas that hold the line (`block`, `function`), the
 enclosing function's `-[…]>` row, a `comptime` rung for the Mem-only rule,
-the cap of the trait a method implements (`trait`) and of its type (`type`),
-each inline module cap (`module`), the file-head cap (`file`), the caps where
-the file's module is declared (`module`), the package `authority` rows
-(`package`), and `run` (everything else allowed; `--deny` wins). A rung that
-writes nothing prints `(none written)`; each written rung names the
+the cap of the trait a method implements (`trait`), the type rung (`type`),
+the module rungs (`module`: each inline module cap, the file-head cap, and
+the caps where the file's module is declared), the package `authority` rows
+(`package`), and `run` (everything else allowed; `--deny` wins). A type or
+module rung that writes nothing prints `(none written)`; each written rung names the
 `file:line` that writes it. The last line, `reaches:`, lists each effect the
 site reaches with the first call that reaches it and where the site makes
 that call. No site means the entry `jet run` picks; a file alone means its
