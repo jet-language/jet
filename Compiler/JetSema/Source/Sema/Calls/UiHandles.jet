@@ -286,7 +286,7 @@ sema_ui_handle_mount: fn(args: [CallArg], span: Span, expected: Type?, environme
     backend_name: sema_expr_type_base_name(backend.ty) ?? type_name(backend.ty)
     valid := true
     if !sema_ui_backend_owner(backend_name) {
-        diagnostics.push(sema_error("E0108", args[0].span, "`ui.mount` needs a UI backend, but the first argument is {sema_type_show(backend.ty)}", "pass `ui.null_backend()`, `ui.tui_backend()`, or `ui.gtk_backend()`", "backend: ui.tui_backend()\nui.mount(backend, tree)"))
+        diagnostics.push(sema_error("E0108", args[0].span, "`ui.mount` needs a UI backend, but the first argument is {sema_type_show(backend.ty)}", "pass `ui.null_backend()` or `ui.tui_backend()`", "backend: ui.tui_backend()\nui.mount(backend, tree)"))
         valid = false
     }
     tree_name: sema_expr_type_base_name(typed_args[1].ty) ?? type_name(typed_args[1].ty)
@@ -326,19 +326,18 @@ sema_call_try_ui_core_call: fn(module_name: String, member: String, alias: Strin
 }
 
 sema_ui_backend_owner: fn(owner: String) -> Bool Never! {
-    owner == "NullBackend" || owner == "TUIBackend" || owner == "GtkBackend"
+    owner == "NullBackend" || owner == "TUIBackend"
 }
 
 sema_ui_backend_known_method: fn(owner: String, method: String) -> Bool Never! {
-    if (owner == "NullBackend" || owner == "TUIBackend" || owner == "GtkBackend") && (method == "measure" || method == "layout" || method == "paint" || method == "mount" || method == "on_event" || method == "set_focus_group" || method == "focused_label") -> return true
+    if (owner == "NullBackend" || owner == "TUIBackend") && (method == "measure" || method == "layout" || method == "paint" || method == "mount" || method == "on_event" || method == "set_focus_group" || method == "focused_label") -> return true
     if owner == "NullBackend" && method == "commands" -> return true
     if owner == "TUIBackend" && (method == "frame_lines" || method == "render_count") -> return true
-    if owner == "GtkBackend" && (method == "label" || method == "button" || method == "set_text" || method == "set_size" || method == "set_color" || method == "on_click" || method == "present") -> return true
     false
 }
 
 sema_ui_backend_result: fn(owner: String, method: String, argc: Int) -> Type? {
-    if owner == "NullBackend" || owner == "TUIBackend" || owner == "GtkBackend" {
+    if owner == "NullBackend" || owner == "TUIBackend" {
         if method == "measure" && argc == 2 -> return Val(Type.Named{name: "Size"})
         if method == "layout" && argc == 2 -> return Val(sema_ui_handle_unit())
         if method == "paint" && argc == 1 -> return Val(sema_ui_handle_unit())
@@ -350,12 +349,6 @@ sema_ui_backend_result: fn(owner: String, method: String, argc: Int) -> Type? {
     if owner == "NullBackend" && method == "commands" && argc == 0 -> return Val(Type.List{element: Type.String})
     if owner == "TUIBackend" && method == "frame_lines" && argc == 0 -> return Val(Type.List{element: Type.String})
     if owner == "TUIBackend" && method == "render_count" && argc == 0 -> return Val(Type.Int)
-    if owner == "GtkBackend" {
-        if (method == "label" || method == "button") && argc == 1 -> return Val(Type.Int)
-        if (method == "set_text" || method == "set_color" || method == "on_click") && argc == 2 -> return Val(sema_ui_handle_unit())
-        if method == "set_size" && argc == 3 -> return Val(sema_ui_handle_unit())
-        if method == "present" && argc == 1 -> return Val(sema_ui_handle_unit())
-    }
     None
 }
 

@@ -50,7 +50,6 @@ one exists instead of adding another spelling for the same job.
 | `JET_TEST_SHUFFLE_SEED` | unsigned integer | Replays a shuffled generated test run. |
 | `JET_TIMING` | `1` | Prints compiler phase timings. |
 | `JET_TZDB_DIR` | path | Overrides the timezone database read by generated programs. |
-| `JET_UI_HEADLESS` | `1` | Suppresses native UI windows for display-less execution. |
 
 ## Maintainer and CI controls
 

@@ -4859,28 +4859,28 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/UiBackends.jet",
-      "line": 468,
+      "line": 445,
       "column": 5,
       "reason": "a web page's module runs on one thread"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/UiBackends.jet",
-      "line": 514,
+      "line": 491,
       "column": 5,
       "reason": "only an attached web build records, on its one thread"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/UiBackends.jet",
-      "line": 524,
+      "line": 501,
       "column": 5,
       "reason": "a web page's module runs on one thread"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/UiBackends.jet",
-      "line": 905,
+      "line": 710,
       "column": 9,
       "reason": "written under the host lock"
     },
@@ -6749,42 +6749,35 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Core",
       "file": "Core/Ui/Ui.jet",
-      "line": 199,
-      "column": 5,
-      "reason": "Core creates the real retained GTK renderer through the registered host allocation boundary"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Ui/Ui.jet",
-      "line": 204,
+      "line": 198,
       "column": 5,
       "reason": "Core creates the real retained terminal renderer through the registered host allocation boundary"
     },
     {
       "package": "Core",
       "file": "Core/Ui/Ui.jet",
-      "line": 209,
+      "line": 203,
       "column": 5,
       "reason": "Core creates the real retained null renderer through the registered host allocation boundary"
     },
     {
       "package": "Core",
       "file": "Core/Ui/Ui.jet",
-      "line": 220,
+      "line": 214,
       "column": 5,
       "reason": "Core UI accessibility slot transfer: explicitly present validated metadata"
     },
     {
       "package": "Core",
       "file": "Core/Ui/Ui.jet",
-      "line": 237,
+      "line": 231,
       "column": 5,
       "reason": "Core UI shortcut slot transfer: explicitly present validated shortcut"
     },
     {
       "package": "Core",
       "file": "Core/Ui/Ui.jet",
-      "line": 264,
+      "line": 258,
       "column": 5,
       "reason": "Core UI host slot transfer: audited kind, role, explicit absent slots, and normalized style words"
     },
@@ -10873,10 +10866,10 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/Trap.jet | 26:5 | "address is one writable byte in the allocated debug-text buffer; value is a byte" |
 | Compiler | Compiler/JetRuntime/Source/Trap.jet | 32:5 | "audited runtime syscall: write borrows live text, mmap creates scratch, munmap releases it, exit_group ends the process; getcwd, mkdir, open and close name caller-owned scratch or a descriptor" |
 | Compiler | Compiler/JetRuntime/Source/Trap.jet | 89:9 | "the OS leaf borrows a stack word; generated calls have 1..8 valid bytes" |
-| Compiler | Compiler/JetRuntime/Source/UiBackends.jet | 468:5 | "a web page's module runs on one thread" |
-| Compiler | Compiler/JetRuntime/Source/UiBackends.jet | 514:5 | "only an attached web build records, on its one thread" |
-| Compiler | Compiler/JetRuntime/Source/UiBackends.jet | 524:5 | "a web page's module runs on one thread" |
-| Compiler | Compiler/JetRuntime/Source/UiBackends.jet | 905:9 | "written under the host lock" |
+| Compiler | Compiler/JetRuntime/Source/UiBackends.jet | 445:5 | "a web page's module runs on one thread" |
+| Compiler | Compiler/JetRuntime/Source/UiBackends.jet | 491:5 | "only an attached web build records, on its one thread" |
+| Compiler | Compiler/JetRuntime/Source/UiBackends.jet | 501:5 | "a web page's module runs on one thread" |
+| Compiler | Compiler/JetRuntime/Source/UiBackends.jet | 710:9 | "written under the host lock" |
 | Compiler | Compiler/JetRuntime/Source/UiCarriersEnums.jet | 5:5 | "address borrows an initialized native UI carrier or E4 header word" |
 | Compiler | Compiler/JetRuntime/Source/UiCarriersEnums.jet | 10:5 | "address exclusively owns one writable native UI carrier word" |
 | Compiler | Compiler/JetRuntime/Source/Unicode.jet | 145:5 | "some is the caller's writable aligned Option&lt;Int&gt; payload slot, written only on success" |
@@ -11143,12 +11136,11 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Core | Core/Tui/Tui.jet | 130:5 | "Core TUI samples the same stdout terminal fact consumed by terminal style/progress" |
 | Core | Core/Tui/Tui.jet | 656:5 | "Core TUI test: normalized style words and explicit absent UI slots" |
 | Core | Core/Ui/Ui.jet | 162:5 | "Core UI text input: the provider sets the explicitly requested IME slot" |
-| Core | Core/Ui/Ui.jet | 199:5 | "Core creates the real retained GTK renderer through the registered host allocation boundary" |
-| Core | Core/Ui/Ui.jet | 204:5 | "Core creates the real retained terminal renderer through the registered host allocation boundary" |
-| Core | Core/Ui/Ui.jet | 209:5 | "Core creates the real retained null renderer through the registered host allocation boundary" |
-| Core | Core/Ui/Ui.jet | 220:5 | "Core UI accessibility slot transfer: explicitly present validated metadata" |
-| Core | Core/Ui/Ui.jet | 237:5 | "Core UI shortcut slot transfer: explicitly present validated shortcut" |
-| Core | Core/Ui/Ui.jet | 264:5 | "Core UI host slot transfer: audited kind, role, explicit absent slots, and normalized style words" |
+| Core | Core/Ui/Ui.jet | 198:5 | "Core creates the real retained terminal renderer through the registered host allocation boundary" |
+| Core | Core/Ui/Ui.jet | 203:5 | "Core creates the real retained null renderer through the registered host allocation boundary" |
+| Core | Core/Ui/Ui.jet | 214:5 | "Core UI accessibility slot transfer: explicitly present validated metadata" |
+| Core | Core/Ui/Ui.jet | 231:5 | "Core UI shortcut slot transfer: explicitly present validated shortcut" |
+| Core | Core/Ui/Ui.jet | 258:5 | "Core UI host slot transfer: audited kind, role, explicit absent slots, and normalized style words" |
 | Core | Core/Vendor/Sqlite3/Fixture/run.jet | 19:5 | "exclusive out-slots hold SQLite pointers; zero words mean null, SQL is NUL-terminated for each borrowed call, and each live pointer is finalized/closed once" |
 | Docs | Docs/audits/g15-2026-11/probes/c4599_28_comptime_asm.jet | 10:1 | "the operands are scalar registers and the early-written r10 clobber does not overlap live inputs" |
 | Docs | Docs/audits/g15-2026-11/probes/c4599_28_comptime_asm.jet | 25:5 | "call the audited register-only assembly contract" |
@@ -11808,7 +11800,6 @@ the function body; they do not exempt a wrapper from the proof requirement.
   {"file":"Core/Encoding/XmlEngine.jet","function":"normalize_attribute_text","proof":"xml_engine.jet:2204 starts with bytes of a valid String. The in-place loop(:2207-2215) replaces only ASCII CR/LF/tab with ASCII space and removes the ASCII LF following CR; all non-ASCII bytes keep their order and membership. write never exceeds read, and :2217 truncates only the finished compacted sequence. Thus __bytes_into_text(:2219) copies valid complete UTF-8 for every caller text, not an assumed-valid wire allocation."},
   {"file":"Core/Encoding/Yaml.jet","function":"yaml_leaf","proof":"yaml.jet:320 grants private carrier matching. Number/TypedText explicitly panic(:326); Bytes are read only after their matching discriminant over 0..<bytes.len()(:328-333). Object payload views are obtained only in the Object branch(:344-347), retaining the owner; arrays recurse on typed values. The caller receives an owned String and cannot request a mismatched payload or retain native storage references."},
   {"file":"Core/Service/Service.jet","function":"state_path_kind","proof":"__path_kind at service.jet:1365 accepts a borrowed valid String path and returns copied metadata kind or owned IOError. It performs a final-component pathname query, not a descriptor/identity ownership transfer; no caller pointer or reference into OS metadata is returned. A path race can alter the metadata result but cannot invalidate a caller memory borrow."},
-  {"file":"Core/Ui/Ui.jet","function":"gtk_backend","proof":"ui.jet:126-127 invoke __gtk_backend without caller-supplied memory or callbacks. Its provider UiGtk.rs:2069-2070 calls JetGtkBackend::new(:1346-1371), allocating an owning Arc<Mutex<GtkState>> with every field initialized, empty queues and null not-yet-initialized GTK handles. Construction neither dereferences those handles nor installs/borrows the current host. The caller receives the owned backend carrier, not a pointer into a scoped provider."},
   {"file":"Core/Ui/Ui.jet","function":"tui_backend","proof":"__tui_backend at ui.jet:132 has no arguments and allocates JetTuiBackend through Ui.rs:1860-1861,1572-1591. The provider owns a fresh Arc<Mutex<State>> with initialized capability facts, absent frames/focus, zero counters and an empty grid. It performs no current-host scope dereference and exports no borrow of constructor-local storage; arbitrary safe callers cannot supply a forged native backing pointer."},
   {"file":"Core/Ui/Ui.jet","function":"null_backend","proof":"__null_backend at ui.jet:137 has no caller-selected fields and calls JetNullBackend::new (Ui.rs:1856-1857,1346-1356). That constructor owns a new Arc<Mutex<State>> containing initialized absent frame/event/focus slots and an empty command list; it neither accesses scoped host pointers nor returns references into temporary storage. The returned carrier keeps its allocation alive independently of the caller frame."},
   {"file":"Core/Ui/Ui.jet","function":"node_accessibility","proof":"ui.jet:148 calls __accessibility_transfer with typed UINode/UIAccessibility and the explicit present=true flag. Ui.rs:302-308 only assign Some(metadata) to the owning node then return that node; no discriminant reinterpretation, unchecked index, callback invocation or current-host access occurs. Caller metadata remains an initialized typed record and the result owns its Strings/lists rather than borrowing source storage."},

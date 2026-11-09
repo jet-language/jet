@@ -5407,28 +5407,14 @@ compiles or fails identically on every platform). A non-`$build.os` subject is
 `$build.os` is meaningful *only* as this dispatch's subject — `build` is not a
 reserved word, so anywhere else it is an ordinary identifier (undefined at
 runtime → E0107), never a magic runtime value.
-**D-UIDEVSHELL1 (=A, ratified 2026-07-03, c2qj06uq)**: Phase 8 native
-backend toolchain deps enter via nixpkgs devShell (`gtk4` + `pkg-config`,
-Linux first) per the standing native-deps stopgap; jetpack core provider
-owns it long-term; non-Nix users get a clear install message. *Shipped*
-(Tower c134 Phase 8): `flake.nix`'s devShell gains `gtk4` + `pkg-config`;
-`core.ui.gtk_backend()` is a real, working `JetBackend` over libgtk-4 — a
-retained-mode widget API: `label`/`button` create real widgets and return a
-handle, `set_text`/`set_size`/`set_color` mutate a live widget, `on_click(id,
-handler)` wires a button, `present(title)` opens the window and runs the GLib
-loop. The flagship example is a live counter — a button click sets a
-`reactive.signal` and the `ui.reactive_render` effect updates the label text
-in place (the shipped reactive core, I8). Selected by the shipped `comptime if
-$build.os` dispatch (D-OSTARGET2=B) and emitted only on a Linux target; all gtk
-C-ABI calls are confined to the vetted `jet_gtk` prelude module (I1 — user
-code writes no low-level tier). The native link (`-lgtk-4 …`) is named by `use
-c.gtk4` through the S59 `pkg-config gtk4` path; a missing gtk4 at build time is
-the existing **E3201** (names the fix — install gtk4 / add the `c@system` dep
-/ enter `nix develop`). `jet run` opens the window; `JET_UI_HEADLESS=1` skips
-it so tests/CI terminate. Example:
-`Examples/Apps/UI/UINativeLinux.jet`; structural + link proof in
-`tests/cross.rs` (`gtk_backend_*`). macOS/Windows native backends stay out of
-scope (their `comptime` arms degrade honestly).
+**D-UIDEVSHELL1 (=A, ratified 2026-07-03, c2qj06uq)** *(retired, owner
+decision, card #6701)*: Phase 8 brought `gtk4` + `pkg-config` into the
+devShell for a `core.ui.gtk_backend()` over libgtk-4. The owner deleted the
+GTK backend: native windows are Jet's own (`core.ui.open` speaks the display
+server's wire protocol with no C library, `Core/Ui/Wayland.jet`), so
+`GtkBackend`, its runtime routes, `JET_UI_HEADLESS`, the `requires: gtk4`
+sidecar and the devShell's `gtk4` are gone. TUI and null stay as the
+node-tree backends.
 **D-STYLEUNIT1 (=A, ratified 2026-07-03, c2qj06uq)**: UI style lengths are
 unit-family literals — `core.ui.style` declares `#UnitFamily(Length) { px }`
 (D-QUAL3), so `width: 320px` is a compile-checked `Px` value via the one

@@ -4165,7 +4165,7 @@ The IME capability is spelled `UI.IME`, alongside `UI.Keyboard` and
 | `key_event(code: String) -> InputEvent` | event | Create `InputEvent.Key{code: code}`. |
 | `resize_event(width: Float, height: Float) -> InputEvent` | event | Create `InputEvent.Resize{size: Size{width: width, height: height}}`. |
 | `reactive_render(body: fn())` | — | Ask the provider to render a reactive body. |
-| `gtk_backend() -> GtkBackend`, `tui_backend() -> TUIBackend`, `null_backend() -> NullBackend` | backend | Select a backend handle. |
+| `tui_backend() -> TUIBackend`, `null_backend() -> NullBackend` | backend | Select a backend handle. |
 | `aria_role_button() -> UIAriaRole`, `aria_role_container() -> UIAriaRole` | role | Construct standard accessibility roles. |
 | `aria_role_label() -> UIAriaRole`, `aria_role_text_input() -> UIAriaRole` | role | Construct label or text-input roles. |
 | `node_accessibility(n: UINode, metadata: UIAccessibility) -> UINode` | node | Attach accessibility metadata. |
@@ -4249,15 +4249,12 @@ handle. The provider/catalog may add interactive node and mount operations,
 but those operations remain typed provider boundaries. Build a portable tree
 first, then use backend-specific capabilities; do not infer that a node tree
 supplies a platform-native callback API.
-The native GTK `present` call runs its application loop until a window
-close request quits that loop. GTK's default close handler still owns window
-teardown; a signal-owned loop reference keeps its callback data live.
 UI backend allocation and host capability/dialog/clipboard/IME/drag polling
 enter Jet source before reserved Core-only provider leaves. Public UI
 capability admission and the existing per-function Core effect rows remain
 unchanged. Lexical filesystem grants and accessibility metadata construction
 are Jet policy, not host facade calls.
-Terminal/GTK backend allocation, shortcut registration/dispatch, and host
+Terminal backend allocation, shortcut registration/dispatch, and host
 accessibility attach/project also enter their Jet public functions first.
 `attach` returns the provider's canonical node with the metadata attached,
 `UINode UIHostError!`, and propagates the typed host error on failure.

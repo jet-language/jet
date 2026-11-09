@@ -679,12 +679,11 @@ sema_core_collect_func: fn(function: Func, imports: [SemaCoreImport], registered
 }
 
 // I1: a Core source wrapper restating its own compiler row (`pub
-// gtk_backend: fn() -> GtkBackend { core.ui.gtk_backend() }`) is not a use of that
+// tui_backend: fn() -> TUIBackend { core.ui.tui_backend() }`) is not a use of that
 // row. Whoever reaches the wrapper (user code, another module, or a sibling in
 // this module) already notes `owner::name`. Counting the wrapper's own body
 // would select the row's runtime part for every program that imports the
-// module: the GTK `extern "C"` bridge for every `core.ui` program, though only
-// `gtk_backend()` callers need it.
+// module, though only the wrapper's callers need it.
 sema_core_collect_source_wrapper: fn(function: Func, owner: String, imports: [SemaCoreImport], registered: [String:Bool], used: &[String], spans: &[SemaCoreUsageSpan], callbacks: &[String]) {
     own := [String]{}
     own_spans := [SemaCoreUsageSpan]{}
@@ -700,7 +699,7 @@ sema_core_collect_source_wrapper: fn(function: Func, owner: String, imports: [Se
 
 // The top-level functions of a Core source module that no other body of the
 // module calls. Self-recursion is not a sibling call: a wrapper's own
-// `core.ui.gtk_backend()` may resolve to itself.
+// `core.ui.tui_backend()` may resolve to itself.
 sema_core_source_unshared_functions: fn(registration_module: SemaRegistrationModule, call_facts: [SemaCallSiteFact]) -> [String] Never! {
     unshared := [String]{}
     if !registration_module.module_identity.starts_with("<corelib>/") -> return unshared

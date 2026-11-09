@@ -40,7 +40,6 @@ Run a lesson from the repository root, for example `jet run Examples/Apps/<Lesso
 - [UIA11y](UI/UIA11y.jet)
 - [UIComponentKit](UI/UIComponentKit.jet)
 - [UIMotion](UI/UIMotion.jet)
-- [UINativeLinux](UI/UINativeLinux.jet)
 - [UINullBackend](UI/UINullBackend.jet)
 - [UITUIReactive](UI/UITUIReactive.jet)
 - [UITypedStyle](UI/UITypedStyle.jet)

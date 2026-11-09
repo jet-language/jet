@@ -282,9 +282,6 @@
             pkgs.chromium
             pkgs.firefox
             pkgs.geckodriver
-            # The native GTK backend is Linux-first (D-UIDEVSHELL1=A); keep its
-            # headers off platforms where that backend is not supported.
-            pkgs.gtk4
             # D-BUILDENTRY1 / #95: programmable build actions execute only
             # inside bubblewrap (E3505 fail-closed; no ambient fallback).
             pkgs.bubblewrap

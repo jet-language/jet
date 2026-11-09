@@ -728,19 +728,10 @@ kit_exec_requires: fn(requirement: String, env: KitEnv, work: String, scratch: S
         body: requirement.slice(if probes -> 11 else -> 10, requirement.len())
         matched: kit_steps_capability_any(body, probes, env, work, scratch)
         if !matched -> return Val(kit_expect_verdict("FAIL", requirement))
+    } else if requirement.starts_with("tool:") {
+        if kit_steps_tool(requirement.slice(5, requirement.len())) == None -> return Val(kit_expect_verdict("SKIP-HOST", requirement))
     } else {
-        argv := [String]{}
-        if {
-            requirement == "gtk4" -> argv = ["pkg-config", "--exists", "gtk4"]
-            requirement.starts_with("tool:") -> {
-                name: requirement.slice(5, requirement.len())
-                if kit_steps_tool(name) == None -> return Val(kit_expect_verdict("SKIP-HOST", requirement))
-                return None
-            }
-            else -> return Val(kit_expect_verdict("REFUSED", "unknown host requirement: {requirement}"))
-        }
-        run: kit_exec_invoke(env, argv, work, scratch, "")
-        if run.code != 0 || run.error != "" -> return Val(kit_expect_verdict("SKIP-HOST", requirement))
+        return Val(kit_expect_verdict("REFUSED", "unknown host requirement: {requirement}"))
     }
     None
 }

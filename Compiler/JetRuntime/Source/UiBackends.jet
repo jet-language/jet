@@ -1,20 +1,14 @@
-// The null, TUI and GTK renderer backends, their Rect/Size/InputEvent records,
+// The null and TUI renderer backends, their Rect/Size/InputEvent records,
 // buttons and the click slots.
 //
-// A backend handle is one refcounted State216 its clones share (Rust's
-// Arc<Mutex<State>>): refs0 kind8 (0 null, 1 TUI, 2 GTK), layout frame
+// A backend handle is one refcounted State160 its clones share (Rust's
+// Arc<Mutex<State>>): refs0 kind8 (0 null, 1 TUI), layout frame
 // present16 x24 y32 w40 h48 (f64 bits), paint commands56 (owned texts),
 // focus nodes80 (owned UINodes), focused104 (-1 None), TUI grid data112
-// (one scalar word per cell) cols120 rows128, render count136, last node144,
-// unicode152, GTK availability160, GTK widget records168 (Record24: owned
-// path0, owned label8, widget kind16) and focus paths192 (owned texts).
+// (one scalar word per cell) cols120 rows128, render count136, last node144
+// and unicode152.
 // Word vectors are len0 cap8 data16 (Events.jet event_words_*).
-//
-// A static runtime cannot dlopen libgtk-4 (RouteAGame.jet precedent), so
-// the GTK backend always takes the reference's no-display path: its widget
-// records keep the reconcile's paths and focus order, and `present` reports
-// the unavailable runtime unless JET_UI_HEADLESS opts into a headless run.
-UI_BACKEND_BYTES: I64{216}
+UI_BACKEND_BYTES: I64{160}
 UI_BACKEND_REFS: I64{0}
 UI_BACKEND_KIND: I64{8}
 UI_BACKEND_FRAME_PRESENT: I64{16}
@@ -28,23 +22,14 @@ UI_BACKEND_ROWS: I64{128}
 UI_BACKEND_RENDERS: I64{136}
 UI_BACKEND_LAST_NODE: I64{144}
 UI_BACKEND_UNICODE: I64{152}
-UI_BACKEND_AVAILABILITY: I64{160}
-UI_BACKEND_RECORDS: I64{168}
-UI_BACKEND_FOCUS_PATHS: I64{192}
 UI_BACKEND_NULL: I64{0}
 UI_BACKEND_TUI: I64{1}
-UI_BACKEND_GTK: I64{2}
-UI_GTK_UNINITIALIZED: I64{0}
-UI_GTK_HEADLESS: I64{1}
-UI_GTK_UNAVAILABLE: I64{2}
-UI_GTK_RECORD_BYTES: I64{24}
 UI_KIND_TEXT: I64{1}
 UI_KIND_BOX: I64{2}
 UI_KIND_BUTTON: I64{3}
 UI_KIND_TEXT_INPUT: I64{4}
 UI_ROLE_BUTTON: I64{0}
 UI_ROLE_TEXT_INPUT: I64{1}
-UI_ROLE_CONTAINER: I64{3}
 UI_RECT_BYTES: I64{32}
 UI_SIZE_BYTES: I64{16}
 UI_EVENT_RESULT_HANDLED: I64{0}
@@ -259,10 +244,10 @@ ui_words_clear: fn(base: I64, drop_kind: I64) {
     index := I64{0}
     loop index < length {
         word: event_words_get(base, index)
-        if {
-            (drop_kind == I64{0}) -> jet_rt_string_drop(word)
-            (drop_kind == I64{1}) -> jet_rt_handle_drop_jet_ui_node(word)
-            else -> ui_gtk_record_drop(word)
+        if (drop_kind == I64{0}) {
+            jet_rt_string_drop(word)
+        } else {
+            jet_rt_handle_drop_jet_ui_node(word)
         }
         index += I64{1}
     }
@@ -298,8 +283,6 @@ ui_backend_release: fn(state: I64) {
     if (refs != I64{0}) -> return
     ui_words_free(wrapping(state + UI_BACKEND_COMMANDS), I64{0})
     ui_words_free(wrapping(state + UI_BACKEND_FOCUS), I64{1})
-    ui_words_free(wrapping(state + UI_BACKEND_RECORDS), I64{2})
-    ui_words_free(wrapping(state + UI_BACKEND_FOCUS_PATHS), I64{0})
     ui_tui_grid_free(state)
     last: ui_carrier_word(wrapping(state + UI_BACKEND_LAST_NODE))
     if (last != I64{0}) -> jet_rt_handle_drop_jet_ui_node(last)
@@ -307,13 +290,10 @@ ui_backend_release: fn(state: I64) {
 }
 #Export(c) jet_ui_null: fn() -> I64 { ui_backend_new(UI_BACKEND_NULL) }
 #Export(c) jet_ui_tui: fn() -> I64 { ui_backend_new(UI_BACKEND_TUI) }
-#Export(c) jet_ui_gtk: fn() -> I64 { ui_backend_new(UI_BACKEND_GTK) }
 #Export(c) jet_rt_handle_clone_jet_null_backend: fn(state: I64) -> I64 { ui_backend_retain(state) }
 #Export(c) jet_rt_handle_drop_jet_null_backend: fn(state: I64) { ui_backend_release(state) }
 #Export(c) jet_rt_handle_clone_jet_tui_backend: fn(state: I64) -> I64 { ui_backend_retain(state) }
 #Export(c) jet_rt_handle_drop_jet_tui_backend: fn(state: I64) { ui_backend_release(state) }
-#Export(c) jet_rt_handle_clone_jet_gtk_backend: fn(state: I64) -> I64 { ui_backend_retain(state) }
-#Export(c) jet_rt_handle_drop_jet_gtk_backend: fn(state: I64) { ui_backend_release(state) }
 
 // The paint frame: the layout frame, else the node's own size at the origin.
 ui_backend_paint_frame: fn(state: I64, node: I64) -> I64 {
@@ -440,10 +420,7 @@ ui_paint: fn(state: I64, node: I64) {
     ui_visit(state, node, ui_float_at(frame), ui_float_at(wrapping(frame + I64{8})), ui_float_at(wrapping(frame + I64{16})), ui_float_at(wrapping(frame + I64{24})))
     if (ui_web_attached != I64{0}) -> ui_web_record_scene(node, frame)
     geometry_drop(frame, UI_RECT_BYTES)
-    if {
-        (kind == UI_BACKEND_GTK) -> ui_gtk_reconcile(state, node)
-        else -> ui_paint_focus(state, node)
-    }
+    ui_paint_focus(state, node)
 }
 
 // ---- web scene ----------------------------------------------------------------
@@ -595,146 +572,6 @@ ui_tui_write_label: fn(state: I64, frame: I64, label: I64) {
     jet_rt_string_drop(text)
 }
 
-// ---- GTK reconcile ----------------------------------------------------------
-
-// GtkState::widget_kind: 0 Box, 1 Label, 2 Button, 3 Entry.
-ui_gtk_widget_kind: fn(node: I64) -> I64 {
-    kind: ui_node_kind(node)
-    if (kind == UI_KIND_BOX) -> return I64{0}
-    if (kind == UI_KIND_BUTTON) -> return I64{2}
-    if (kind == UI_KIND_TEXT_INPUT) -> return I64{3}
-    role: ui_node_role(node)
-    if (role == UI_ROLE_BUTTON) -> return I64{2}
-    if (role == UI_ROLE_TEXT_INPUT) -> return I64{3}
-    if (role == UI_ROLE_CONTAINER) -> return I64{0}
-    I64{1}
-}
-ui_gtk_record_drop: fn(record: I64) {
-    jet_rt_string_drop(ui_carrier_word(record))
-    jet_rt_string_drop(ui_carrier_word(wrapping(record + I64{8})))
-    jet_rt_free(record, UI_GTK_RECORD_BYTES, I64{8})
-}
-ui_gtk_record_find: fn(state: I64, path: I64) -> I64 {
-    base: wrapping(state + UI_BACKEND_RECORDS)
-    length: ui_carrier_word(base)
-    index := I64{0}
-    loop index < length {
-        if jet_rt_string_eq(ui_carrier_word(event_words_get(base, index)), path) -> return index
-        index += I64{1}
-    }
-    I64{-1}
-}
-// Whether `path` is `root` or a path under it.
-ui_gtk_path_under: fn(path: I64, root: I64) -> Bool {
-    if jet_rt_string_eq(path, root) -> return true
-    length: rt_text_len(root)
-    if (rt_text_len(path) <= length) -> return false
-    if !rt_text_equal_bytes(rt_text_data(path), rt_text_data(root), length) -> return false
-    rt_text_byte(wrapping(rt_text_data(path) + length)) == I64{47}
-}
-ui_gtk_remove_records: fn(state: I64, root: I64, live: I64, keep_live: Bool) {
-    base: wrapping(state + UI_BACKEND_RECORDS)
-    index := ui_carrier_word(base)
-    zero: I64{0}
-    loop index > zero {
-        index -= I64{1}
-        record: event_words_get(base, index)
-        path: ui_carrier_word(record)
-        doomed: if keep_live -> !ui_gtk_live(live, path) else -> ui_gtk_path_under(path, root)
-        if doomed {
-            ui_gtk_record_drop(record)
-            event_words_remove(base, index)
-        }
-    }
-}
-ui_gtk_live: fn(live: I64, path: I64) -> Bool {
-    length: ui_carrier_word(live)
-    index := I64{0}
-    loop index < length {
-        if jet_rt_string_eq(event_words_get(live, index), path) -> return true
-        index += I64{1}
-    }
-    false
-}
-// GtkState::reconcile_node without a display: a widget record per path
-// (recreated when its kind changes), and the interactive nodes in order.
-ui_gtk_reconcile_node: fn(state: I64, node: I64, path: I64, live: I64, focus_nodes: I64, focus_paths: I64) {
-    kind: ui_gtk_widget_kind(node)
-    found := ui_gtk_record_find(state, path)
-    if (found >= I64{0} && ui_carrier_word(wrapping(event_words_get(wrapping(state + UI_BACKEND_RECORDS), found) + I64{16})) != kind) {
-        ui_gtk_remove_records(state, path, I64{0}, false)
-        found = I64{-1}
-    }
-    record := I64{0}
-    if {
-        (found >= I64{0}) -> { record = event_words_get(wrapping(state + UI_BACKEND_RECORDS), found) }
-        else -> {
-            record = jet_rt_alloc(UI_GTK_RECORD_BYTES, I64{8})
-            ui_carrier_store(record, jet_rt_string_clone(path))
-            ui_carrier_store(wrapping(record + I64{8}), jet_rt_string_builder_new())
-            ui_carrier_store(wrapping(record + I64{16}), kind)
-            event_words_push(wrapping(state + UI_BACKEND_RECORDS), record)
-        }
-    }
-    event_words_push(live, jet_rt_string_clone(path))
-    jet_rt_string_drop(ui_carrier_word(wrapping(record + I64{8})))
-    ui_carrier_store(wrapping(record + I64{8}), jet_rt_string_clone(ui_carrier_word(wrapping(node + UI_NODE_LABEL))))
-    if ui_node_interactive(node) {
-        event_words_push(focus_nodes, jet_rt_handle_clone_jet_ui_node(node))
-        event_words_push(focus_paths, jet_rt_string_clone(path))
-    }
-    if (kind != I64{0}) -> return
-    count: ui_node_child_count(node)
-    index := I64{0}
-    loop index < count {
-        child_path: jet_rt_string_builder_new()
-        ui_text_push_static(child_path, path)
-        ui_text_push_static(child_path, rt_static_text("/"))
-        rt_text_push_number(child_path, index)
-        ui_gtk_reconcile_node(state, ui_node_child(node, index), child_path, live, focus_nodes, focus_paths)
-        jet_rt_string_drop(child_path)
-        index += I64{1}
-    }
-}
-ui_gtk_ensure_init: fn(state: I64) {
-    if (ui_carrier_word(wrapping(state + UI_BACKEND_AVAILABILITY)) != UI_GTK_UNINITIALIZED) -> return
-    headless: host_environment_value(rt_static_text("JET_UI_HEADLESS")) != I64{0}
-    ui_carrier_store(wrapping(state + UI_BACKEND_AVAILABILITY), if headless -> UI_GTK_HEADLESS else -> UI_GTK_UNAVAILABLE)
-}
-// GtkState::paint after its commands: reconcile, prune the dead records and
-// keep focus on the previously focused path when it survives.
-ui_gtk_reconcile: fn(state: I64, node: I64) {
-    ui_gtk_ensure_init(state)
-    focused: ui_carrier_word(wrapping(state + UI_BACKEND_FOCUSED))
-    paths: wrapping(state + UI_BACKEND_FOCUS_PATHS)
-    previous: if (focused >= I64{0} && focused < ui_carrier_word(paths)) -> jet_rt_string_clone(event_words_get(paths, focused)) else -> I64{0}
-    live: ui_words_scratch(I64{3})
-    focus_nodes: wrapping(live + I64{24})
-    focus_paths: wrapping(live + I64{48})
-    ui_gtk_reconcile_node(state, node, rt_static_text("root"), live, focus_nodes, focus_paths)
-    ui_gtk_remove_records(state, I64{0}, live, true)
-    ui_words_free(live, I64{0})
-    next_focus := I64{-1}
-    if (previous != I64{0}) {
-        index := I64{0}
-        loop index < ui_carrier_word(focus_paths) {
-            if jet_rt_string_eq(event_words_get(focus_paths, index), previous) {
-                next_focus = index
-                break
-            }
-            index += I64{1}
-        }
-        jet_rt_string_drop(previous)
-    }
-    if (next_focus < I64{0} && ui_carrier_word(focus_paths) != I64{0}) -> next_focus = I64{0}
-    ui_carrier_store(wrapping(state + UI_BACKEND_FOCUSED), next_focus)
-    ui_words_free(wrapping(state + UI_BACKEND_FOCUS), I64{1})
-    ui_words_free(paths, I64{0})
-    ui_words_move(focus_nodes, wrapping(state + UI_BACKEND_FOCUS))
-    ui_words_move(focus_paths, paths)
-    jet_rt_free(live, I64{72}, I64{8})
-}
-
 // ---- events -----------------------------------------------------------------
 
 ui_event_result: fn(variant: I64) -> I64 {
@@ -767,28 +604,13 @@ ui_on_event: fn(state: I64, event: I64) -> I64 {
     ui_event_result(UI_EVENT_RESULT_HANDLED)
 }
 // set_focus_group: the nodes (borrowed, each cloned) become the focus ring,
-// focused at its first node. GTK also maps each to the first widget record
-// with its label.
+// focused at its first node.
 ui_set_focus_group: fn(state: I64, data: I64, length: I64) {
     ui_words_clear(wrapping(state + UI_BACKEND_FOCUS), I64{1})
-    gtk: ui_carrier_word(wrapping(state + UI_BACKEND_KIND)) == UI_BACKEND_GTK
-    if gtk -> ui_words_clear(wrapping(state + UI_BACKEND_FOCUS_PATHS), I64{0})
     index := I64{0}
     loop index < length {
         node: ui_carrier_word(wrapping(data + index * I64{8}))
         event_words_push(wrapping(state + UI_BACKEND_FOCUS), jet_rt_handle_clone_jet_ui_node(node))
-        if gtk {
-            records: wrapping(state + UI_BACKEND_RECORDS)
-            at := I64{0}
-            loop at < ui_carrier_word(records) {
-                record: event_words_get(records, at)
-                if jet_rt_string_eq(ui_carrier_word(wrapping(record + I64{8})), ui_carrier_word(wrapping(node + UI_NODE_LABEL))) {
-                    event_words_push(wrapping(state + UI_BACKEND_FOCUS_PATHS), jet_rt_string_clone(ui_carrier_word(record)))
-                    break
-                }
-                at += I64{1}
-            }
-        }
         index += I64{1}
     }
     ui_carrier_store(wrapping(state + UI_BACKEND_FOCUSED), if (length == I64{0}) -> I64{-1} else -> I64{0})
@@ -798,8 +620,8 @@ ui_focused_label: fn(state: I64) -> I64 {
     if (focused < I64{0} || focused >= ui_carrier_word(wrapping(state + UI_BACKEND_FOCUS))) -> return jet_rt_string_builder_new()
     jet_rt_string_clone(ui_carrier_word(wrapping(event_words_get(wrapping(state + UI_BACKEND_FOCUS), focused) + UI_NODE_LABEL)))
 }
-// mount_node: measure, lay out at the origin and paint; the null and GTK
-// backends first clear their commands.
+// mount_node: measure, lay out at the origin and paint; the null backend
+// first clears its commands.
 ui_mount: fn(state: I64, node: I64, min_width: Float, min_height: Float, max_width: Float, max_height: Float) {
     if (ui_carrier_word(wrapping(state + UI_BACKEND_KIND)) != UI_BACKEND_TUI) -> ui_words_clear(wrapping(state + UI_BACKEND_COMMANDS), I64{0})
     constraint: jet_rt_record_new_jet_size_constraint(min_width, min_height, max_width, max_height)
@@ -814,10 +636,9 @@ ui_mount: fn(state: I64, node: I64, min_width: Float, min_height: Float, max_wid
 ui_mount_constraint: fn(state: I64, node: I64, constraint: I64) {
     ui_mount(state, node, ui_float_at(wrapping(constraint + MATH_SIZE_MIN_WIDTH)), ui_float_at(wrapping(constraint + MATH_SIZE_MIN_HEIGHT)), ui_float_at(wrapping(constraint + MATH_SIZE_MAX_WIDTH)), ui_float_at(wrapping(constraint + MATH_SIZE_MAX_HEIGHT)))
 }
-// DEFAULT_MOUNT_COLS × DEFAULT_MOUNT_ROWS; GTK's default viewport is 320×240.
+// DEFAULT_MOUNT_COLS × DEFAULT_MOUNT_ROWS.
 ui_mount_default: fn(state: I64, node: I64) {
-    gtk: ui_carrier_word(wrapping(state + UI_BACKEND_KIND)) == UI_BACKEND_GTK
-    ui_mount(state, node, Float{0.0}, Float{0.0}, if gtk -> Float{320.0} else -> Float{80.0}, if gtk -> Float{240.0} else -> Float{24.0})
+    ui_mount(state, node, Float{0.0}, Float{0.0}, Float{80.0}, Float{24.0})
 }
 // A List<String> result: fresh clones of the vector's texts.
 ui_text_words_output: fn(base: I64, out_data: I64) -> I64 {
@@ -875,22 +696,6 @@ ui_text_words_output: fn(base: I64, out_data: I64) -> I64 {
         row += I64{1}
     }
     rows
-}
-#Export(c) jet_ui_gtk_measure_node: fn(state: I64, node: I64, constraint: I64) -> I64 { ui_measure(node, constraint) }
-#Export(c) jet_ui_gtk_layout_node: fn(state: I64, node: I64, frame: I64) { ui_layout(state, frame) }
-#Export(c) jet_ui_gtk_paint_node: fn(state: I64, node: I64) { ui_paint(state, node) }
-#Export(c) jet_ui_gtk_mount_node: fn(state: I64, node: I64, constraint: I64) { ui_mount_constraint(state, node, constraint) }
-#Export(c) jet_ui_gtk_mount_node_default: fn(state: I64, node: I64) { ui_mount_default(state, node) }
-#Export(c) jet_ui_gtk_dispatch_event: fn(state: I64, event: I64) -> I64 { ui_on_event(state, event) }
-#Export(c) jet_ui_gtk_set_focus_group: fn(state: I64, data: I64, length: I64) { ui_set_focus_group(state, data, length) }
-#Export(c) jet_ui_gtk_focused_label: fn(state: I64) -> I64 { ui_focused_label(state) }
-// JetGtkBackend::present without a display: report why no window opened
-// unless the run opted into headless, then return.
-#Export(c) jet_ui_gtk_present: fn(state: I64, title: I64) {
-    ui_gtk_ensure_init(state)
-    if (ui_carrier_word(wrapping(state + UI_BACKEND_AVAILABILITY)) != UI_GTK_UNAVAILABLE) -> return
-    message: rt_static_text("UI_UNSUPPORTED[gtk.runtime]: GTK4 runtime is unavailable; install GTK4 or set JET_UI_HEADLESS=1 only for an explicit headless run")
-    _ := host_stderr_line(rt_text_data(message), rt_text_len(message))
 }
 
 // ---- buttons and click slots ------------------------------------------------
