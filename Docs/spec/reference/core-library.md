@@ -2606,10 +2606,11 @@ Numeric arithmetic methods need no import (D-SIGIL-ALGEBRA1=B):
 | `value.bit_or(other)` | Int and each fixed-width integer | Keep bits set in either operand. |
 | `value.bit_xor(other)` | Int and each fixed-width integer | Keep bits set in exactly one operand. |
 | `value.bit_not()` | Int and each fixed-width integer | Flip every bit, keeping the width; exact Int returns `-value - 1`. |
-| `value.pow(exponent)` | Int and Float | Numeric power with the existing exactness and negative-exponent rules. A written negative Int exponent produces Fraction; a dynamic negative Int exponent stops with the existing arithmetic fault. |
+| `value.pow(exponent)` | Int and Float | Numeric power with the existing exactness and negative-exponent rules. A written negative Int exponent produces Fraction; a dynamic negative Int exponent stops with the existing arithmetic fault. On Float and F32 it is C23 `pow`, correctly rounded, so every tier returns the same bits: 1 for `x^0` and `1^y` (even at a quiet NaN), the IEEE 754 zeros and infinities for a zero or infinite operand, a negative `x` to a whole `y` signed by `y`'s parity, and NaN for a negative `x` to a fractional `y`. |
 
 These intrinsic methods lower to the ordinary typed numeric operations, not
-user function calls, and call the same numeric runtime on every tier.
+user function calls, so every tier computes the same bits; Float and F32
+`pow` call Core's correctly rounded power.
 An update writes `value = value.bit_xor(other)`. `!value` is Boolean
 negation only. Shifts retain `<<` and `>>`.
 
@@ -2618,11 +2619,12 @@ Multi-operand floating calls such as `math.hypot`, and floating `pow`
 operands, must use matching Float/F32 widths; convert explicitly before
 calling them. Source-owned Core wrappers preserve these same constraints.
 An all-F32 call of a correctly rounded function below (`sin`, `cos`, `tan`,
-`asin`, `acos`, `atan`, `atan2`, `exp`, `exp2`, `exp10`, `exp_m1`, `ln`,
-`ln_1p`, `log2`, `log10`, `rsqrt`, `sin_pi`, `cos_pi`, `tan_pi`, `asin_pi`,
+`asin`, `acos`, `atan`, `atan2`, `sinh`, `cosh`, `tanh`, `asinh`, `acosh`,
+`atanh`, `exp`, `exp2`, `exp10`, `exp_m1`, `ln`, `ln_1p`, `log2`, `log10`,
+`cbrt`, `hypot`, `rsqrt`, `sin_pi`, `cos_pi`, `tan_pi`, `asin_pi`,
 `acos_pi`, `atan_pi`, `atan2_pi`, `exp2_m1`, `exp10_m1`, `log2_1p`,
-`log10_1p`, `pow_r`, `pow_n`, `root_n`, `compound_n`) returns the correctly
-rounded `F32` result on every tier, never
+`log10_1p`, `pow_r`, `pow_n`, `root_n`, `compound_n`), and F32 `pow`,
+returns the correctly rounded `F32` result on every tier, never
 a double rounding of the Float one (C23's `f` forms such as `rsqrtf` and
 `pownf`); the whole exponent of `pow_n`, `root_n` and `compound_n` stays an
 `Int`.
@@ -2630,7 +2632,7 @@ a double rounding of the Float one (C23's `f` forms such as `rsqrtf` and
 | Function | Returns | Description |
 | --- | --- | --- |
 | `math.acos(x)`, `asin(x)`, `atan(x)`, `atan2(y, x)` | `Float` | Inverse trigonometric functions, correctly rounded, so every tier returns the same bits: `asin` in [-pi/2, pi/2] and `acos` in [0, pi] with NaN for `abs(x) > 1`, `atan` in [-pi/2, pi/2] with ±pi/2 at the infinities, and `atan2` the angle of the point `(x, y)` in [-pi, pi] with the sign of `y` and the C23 values at zeros and infinities; `asin`, `atan` and `atan2` keep the sign of a zero result (C23 `asin`, `acos`, `atan`, `atan2`). |
-| `math.acosh(x)`, `asinh(x)`, `atanh(x)` | `Float` | Inverse hyperbolic functions, with musl 1.2.5's results bit for bit. One exception: `acosh` of any value below 1 is NaN, where musl returns a finite value for some x at or below -2. The extended float family is part of the shared math surface (D-CORESURFACE1). |
+| `math.acosh(x)`, `asinh(x)`, `atanh(x)` | `Float` | Inverse hyperbolic functions, correctly rounded, so every tier returns the same bits: `acosh` is 0 at 1 and NaN below 1, `asinh` and `atanh` are odd, and `atanh` is ±inf at ±1 and NaN for `abs(x) > 1` (C23 `acosh`, `asinh`, `atanh`). The extended float family is part of the shared math surface (D-CORESURFACE1). |
 | `math.abs(value)` / `math.abs_float(value: Float)` | the argument type (`Float` for `Complex`) | Absolute value of an `Int`, `Float`, `F32`, `I64` or `Complex`. On `Float` and `F32` it clears the sign bit, so `-0.0` gives `+0.0` and a negative NaN loses its sign; on `I64` it is fixed-width negation, which stops with E3010 at `I64.MIN`. |
 | `math.copy(value: Float)` | `Float` | Return the floating-point value unchanged, including its IEEE representation. |
 | `math.is_even(value)` / `math.is_odd(value)` | `Bool` | Test integer parity. |
@@ -2639,7 +2641,7 @@ a double rounding of the Float one (C23's `f` forms such as `rsqrtf` and
 | `math.gcd(a, b)` / `math.lcm(a, b)` | `Int` | Greatest common divisor or least common multiple. |
 | `math.gcd_many(values)` / `math.lcm_many(values)` | `Int` | Fold integer gcd or lcm over a list. |
 | `math.sin(x)`, `cos(x)`, `tan(x)` | `Float` | Sine, cosine and tangent of `x` radians, correctly rounded for every finite `x` however large, so every tier returns the same bits: NaN for an infinity, and `sin` and `tan` keep the sign of a zero (C23 `sin`, `cos`, `tan`). |
-| `math.cosh(x)`, `sinh(x)`, `tanh(x)`, `math.cot(x)` | `Float` | Hyperbolic functions, and the cotangent `1 / tan(x)`. |
+| `math.cosh(x)`, `sinh(x)`, `tanh(x)`, `math.cot(x)` | `Float` | Hyperbolic functions, correctly rounded, so every tier returns the same bits: `cosh` is even and at least 1, `sinh` and `tanh` are odd, `cosh` and `sinh` overflow to ±inf from about ±710.48 (C23 `cosh`, `sinh`, `tanh`); and the cotangent `1 / tan(x)`. |
 | `math.sin_pi(x)`, `cos_pi(x)`, `tan_pi(x)` | `Float` | `sin`, `cos` and `tan` of `pi * x`, correctly rounded, so every tier returns the same bits and every exact 0 or ±1 comes out exact: a zero with the sign of `x` for `sin_pi` at whole `x`, `+0` for `cos_pi` at `x = 1/2 mod 1`, an infinity for `tan_pi` there, and NaN for an infinity (C23 `sinpi`, `cospi`, `tanpi`). |
 | `math.asin_pi(x)`, `acos_pi(x)`, `atan_pi(x)`, `atan2_pi(y, x)` | `Float` | `asin`, `acos`, `atan` and `atan2` divided by `pi`, correctly rounded, so every tier returns the same bits: `asin_pi` in [-1/2, 1/2] and `acos_pi` in [0, 1] with NaN for `abs(x) > 1`, `atan_pi` in [-1/2, 1/2] with ±1/2 at the infinities, and `atan2_pi` the angle of the point `(x, y)` in half-turns, in [-1, 1] with the sign of `y` and the C23 values at zeros and infinities (C23 `asinpi`, `acospi`, `atanpi`, `atan2pi`). |
 | `math.exp(x)`, `exp2(x)`, `exp10(x)`, `exp_m1(x)`, `expm1(x)` | `Float` | `e^x`, `2^x`, `10^x` and `e^x - 1`, correctly rounded, so every tier returns the same bits: `+inf` on overflow, 0 (-1 for `exp_m1`) at `-inf`, `exp2` and `exp10` exact wherever the power is a Float, and `exp_m1` keeps the sign of a zero (C23 `exp`, `exp2`, `exp10`, `expm1`). |
@@ -2648,9 +2650,9 @@ a double rounding of the Float one (C23's `f` forms such as `rsqrtf` and
 | `math.ln(x)`, `ln_1p(x)`, `log1p(x)`, `log10(x)`, `log2(x)` | `Float` | `log(x)`, `log(1 + x)`, `log10(x)` and `log2(x)`, correctly rounded, so every tier returns the same bits: NaN below 0 (below -1 for `ln_1p`), `-inf` at ±0 (at -1), `+inf` at `+inf`, `log2` and `log10` exact at every power of 2 or 10 that is a Float, and `ln_1p` keeps the sign of a zero (C23 `log`, `log1p`, `log10`, `log2`). |
 | `math.logb(x)`, `log(x, base)` | `Float` | The binary exponent as a Float, and the logarithm in any base, `ln(x) / ln(base)`. |
 | `math.log2_1p(x)`, `log10_1p(x)` | `Float` | `log2(1 + x)` and `log10(1 + x)`, correctly rounded, so every tier returns the same bits and small `x` keeps full precision: NaN below -1, `-inf` at -1, `+inf` at `+inf`, exact at every `x = 2^k - 1` and `x = 10^k - 1` (`k` in [1, 15]), and a zero keeps its sign (C23 `log2p1`, `log10p1`). |
-| `math.sqrt(x)`, `cbrt(x)`, `hypot(x, y)` | `Float` | Roots and hypotenuse. |
+| `math.sqrt(x)`, `cbrt(x)`, `hypot(x, y)` | `Float` | Square root, cube root and `sqrt(x^2 + y^2)`, correctly rounded, so every tier returns the same bits: `cbrt` is odd and exact at every exact cube, and `hypot` never overflows or underflows early and is `+inf` when either side is infinite, even beside a quiet NaN (C23 `sqrt`, `cbrt`, `hypot`). |
 | `math.rsqrt(x)` | `Float` | `1 / sqrt(x)` correctly rounded, so every tier returns the same bits: `+inf` for `+0`, `-inf` for `-0`, `+0` for `+inf` and NaN below zero (C23 `rsqrt`). |
-| `math.pow_n(x, n)`, `pow_r(x, y)` | `Float` | `x^n` for every whole `n: Int`, taken exactly however large, and `e^(y ln x)`, both correctly rounded, so every tier returns the same bits (C23 `pown`, `powr`). `pow_n` gives 1 for `n = 0` even at a NaN, and a negative result for a negative `x` and odd `n`; `pow_r` gives NaN for `x < 0`, `0^0`, `inf^0` and `1^inf`, and `+inf` for `0^y` with `y < 0`. `value.pow` keeps its own rules and bits. |
+| `math.pow_n(x, n)`, `pow_r(x, y)` | `Float` | `x^n` for every whole `n: Int`, taken exactly however large, and `e^(y ln x)`, both correctly rounded, so every tier returns the same bits (C23 `pown`, `powr`). `pow_n` gives 1 for `n = 0` even at a NaN, and a negative result for a negative `x` and odd `n`; `pow_r` gives NaN for `x < 0`, `0^0`, `inf^0` and `1^inf`, and `+inf` for `0^y` with `y < 0`. Float `value.pow(y)` is C23 `pow`. |
 | `math.root_n(x, n)`, `compound_n(x, n)` | `Float` | The `n`th root of `x` and `(1 + x)^n` for every whole `n: Int`, both correctly rounded, so every tier returns the same bits (C23 `rootn`, `compoundn`). `root_n` gives NaN for `n = 0` and for `x < 0` with `n` even, and a negative root for `x < 0` with `n` odd; `compound_n` gives 1 for `n = 0` (even at a NaN), NaN for `x < -1`, and never rounds `1 + x` first. |
 | `math.floor(x)` / `math.ceil(x)` / `math.trunc(x)` | `Float` | Directed or toward-zero rounding in floating-point form. |
 | `math.fract(x)` | `Float` | Return the fractional part. |

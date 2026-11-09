@@ -38,6 +38,15 @@ ASIN: comptime { embed_file("corpus/asin.txt") }
 ACOS: comptime { embed_file("corpus/acos.txt") }
 ATAN: comptime { embed_file("corpus/atan.txt") }
 ATAN2: comptime { embed_file("corpus/atan2.txt") }
+SINH: comptime { embed_file("corpus/sinh.txt") }
+COSH: comptime { embed_file("corpus/cosh.txt") }
+TANH: comptime { embed_file("corpus/tanh.txt") }
+ASINH: comptime { embed_file("corpus/asinh.txt") }
+ACOSH: comptime { embed_file("corpus/acosh.txt") }
+ATANH: comptime { embed_file("corpus/atanh.txt") }
+CBRT: comptime { embed_file("corpus/cbrt.txt") }
+HYPOT: comptime { embed_file("corpus/hypot.txt") }
+POW: comptime { embed_file("corpus/pow.txt") }
 
 hex_value: fn(b: U8) -> Int {
     n: Int.from_u8(b)
@@ -104,6 +113,15 @@ value: fn(name: String, a: [Float], w: [Int]) -> Float {
     if name == "acos" -> return math.acos(a[0])
     if name == "atan" -> return math.atan(a[0])
     if name == "atan2" -> return math.atan2(a[0], a[1])
+    if name == "sinh" -> return math.sinh(a[0])
+    if name == "cosh" -> return math.cosh(a[0])
+    if name == "tanh" -> return math.tanh(a[0])
+    if name == "asinh" -> return math.asinh(a[0])
+    if name == "acosh" -> return math.acosh(a[0])
+    if name == "atanh" -> return math.atanh(a[0])
+    if name == "cbrt" -> return math.cbrt(a[0])
+    if name == "hypot" -> return math.hypot(a[0], a[1])
+    if name == "pow" -> return a[0].pow(a[1])
     panic("no corpus function {name}")
 }
 
@@ -174,4 +192,13 @@ run: fn() {
     check("acos", ACOS)
     check("atan", ATAN)
     check("atan2", ATAN2)
+    check("sinh", SINH)
+    check("cosh", COSH)
+    check("tanh", TANH)
+    check("asinh", ASINH)
+    check("acosh", ACOSH)
+    check("atanh", ATANH)
+    check("cbrt", CBRT)
+    check("hypot", HYPOT)
+    check("pow", POW)
 }

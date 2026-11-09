@@ -2207,27 +2207,32 @@ ir_binary: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, op: TBinaryOp, overflow
         return dst
     }
     if kind == .Float || kind == .Float32 {
-        // Float `%`, floor division and `**` call the runtime's libm exports,
-        // never a libm symbol.
-        if kind == .Float && (op == .Rem || op == .FloorDiv || op == .Pow) {
-            row: b.f.slot_type[left]
-            if op == .Rem -> return ir_runtime(m, b, "jet_std_math_fmod", [Int]{left, right}, row)
-            if op == .Pow -> return ir_runtime(m, b, "jet_std_math_pow", [Int]{left, right}, row)
-            quotient: ir_temp_like(m, b, left)
-            ir_emit(b.f, IROp.Div, quotient, left, right, -1, site)
-            return ir_runtime(m, b, "jet_std_math_floor", [Int]{quotient}, row)
-        }
-        // F32 `**` widens both operands to Float exactly, raises through the
-        // same libm export Float uses, and rounds the power back to F32; the
-        // comptime builder lowers it here too, so both tiers agree (#6276).
+        // Float `%` and floor division call the runtime's libm exports, never
+        // a libm symbol. A Float and F32 `value.pow(y)` calls its correctly
+        // rounded `Core/Math/Math.jet` power (ir_precise_source_helper), so
+        // every tier and the comptime builder compute the same bits.
         if op == .Pow {
+            owner: if kind == .Float -> "Float" else -> "F32"
+            helper: ir_precise_source_helper(owner, "pow") ?? ""
+            power_row: ir_function_row(p, "function:<corelib>/core.math::{helper}") ?? return ir_fail_slot(b, span, "{owner} power without core.math {helper}")
+            if kind == .Float -> return ir_call_row_values(m, p, b, power_row, [Int]{left, right}, span)
+            // F32 `pow` widens both operands to Float exactly and narrows the
+            // Float __pow_f32 returns, which rounds to the correctly rounded
+            // binary32 power.
             narrow_row: b.f.slot_type[left]
             wide_row: ir_type_row(m, Type.Float) ?? return ir_fail_slot(b, span, "F32 power without a Float row")
             wide_left: ir_numeric_cast(m, p, b, left, wide_row, span)
             wide_right: ir_numeric_cast(m, p, b, right, wide_row, span)
             if ir_failed(b) -> return -1
-            power: ir_runtime(m, b, "jet_std_math_pow", [Int]{wide_left, wide_right}, wide_row)
+            power: ir_call_row_values(m, p, b, power_row, [Int]{wide_left, wide_right}, span)
             return ir_numeric_cast(m, p, b, power, narrow_row, span)
+        }
+        if kind == .Float && (op == .Rem || op == .FloorDiv) {
+            row: b.f.slot_type[left]
+            if op == .Rem -> return ir_runtime(m, b, "jet_std_math_fmod", [Int]{left, right}, row)
+            quotient: ir_temp_like(m, b, left)
+            ir_emit(b.f, IROp.Div, quotient, left, right, -1, site)
+            return ir_runtime(m, b, "jet_std_math_floor", [Int]{quotient}, row)
         }
         if op != .Add && op != .Sub && op != .Mul && op != .Div -> return ir_fail_slot(b, span, "Float operator {op}")
         dst: ir_temp_like(m, b, left)

@@ -36,6 +36,10 @@ ir_precise_source_helper: fn(owner: String, operation: String) -> String? Never!
         if owner == "F32" -> return Val("__abs_f32")
         if owner == "I64" -> return Val("__abs_i64")
     }
+    if operation == "pow" {
+        if owner == "Float" -> return Val("__pow_float")
+        if owner == "F32" -> return Val("__pow_f32")
+    }
     if owner == "Fraction" {
         return if operation == {
             "new" -> Val("__fraction_new")
@@ -221,4 +225,10 @@ ir_numeric_bound_constant: fn(ty: Type, member: String) -> IRNumericBound? {
 #Test("Int.abs extends the existing source helper gate by one exact key") {
     assert_eq(ir_precise_source_helper("Int", "abs"), Val("abs"))
     assert_eq(ir_precise_source_helper("Int", "add"), None)
+}
+
+#Test("Float and F32 pow lower to their correctly rounded Core power") {
+    assert_eq(ir_precise_source_helper("Float", "pow"), Val("__pow_float"))
+    assert_eq(ir_precise_source_helper("F32", "pow"), Val("__pow_f32"))
+    assert_eq(ir_precise_source_helper("Int", "pow"), None)
 }
